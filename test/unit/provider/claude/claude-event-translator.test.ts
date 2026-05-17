@@ -229,6 +229,96 @@ describe("ClaudeEventTranslator", () => {
 		expect(data["metadata"]).not.toHaveProperty("subagent_type");
 	});
 
+	it("starts each live Agent tool before task_started metadata updates it", async () => {
+		await translator.translate(
+			ctx,
+			makeStreamEvent({
+				type: "message_start",
+				message: { id: "assistant-live-agents" },
+			}),
+		);
+		await translator.translate(
+			ctx,
+			makeStreamEvent({
+				type: "content_block_start",
+				index: 0,
+				content_block: {
+					type: "tool_use",
+					id: "toolu-agent-1",
+					name: "Agent",
+					input: {},
+				},
+			}),
+		);
+		await translator.translate(
+			ctx,
+			makeStreamEvent({
+				type: "content_block_start",
+				index: 1,
+				content_block: {
+					type: "tool_use",
+					id: "toolu-agent-2",
+					name: "Agent",
+					input: {},
+				},
+			}),
+		);
+
+		await translator.translate(ctx, {
+			type: "system",
+			subtype: "task_started",
+			task_id: "sdk-agent-1",
+			tool_use_id: "toolu-agent-1",
+			description: "Audit Effect services",
+			task_type: "explore",
+			prompt: "Inspect service ownership",
+			uuid: "00000000-0000-0000-0000-000000000201",
+			session_id: "sdk-sess",
+		} as unknown as SDKMessage);
+		await translator.translate(ctx, {
+			type: "system",
+			subtype: "task_started",
+			task_id: "sdk-agent-2",
+			tool_use_id: "toolu-agent-2",
+			description: "Audit frontend rendering",
+			task_type: "explore",
+			prompt: "Inspect subagent cards",
+			uuid: "00000000-0000-0000-0000-000000000202",
+			session_id: "sdk-sess",
+		} as unknown as SDKMessage);
+
+		const toolStarts = sink.events.filter(
+			(event) => event.type === "tool.started",
+		);
+		expect(toolStarts.map((event) => dataOf(event)["partId"])).toEqual([
+			"toolu-agent-1",
+			"toolu-agent-2",
+		]);
+		expect(toolStarts.map((event) => dataOf(event)["toolName"])).toEqual([
+			"Task",
+			"Task",
+		]);
+		expect(dataOf(toolStarts[0])["input"]).toMatchObject({
+			tool: "Task",
+			description: "Audit Effect services",
+			prompt: "Inspect service ownership",
+			subagentType: "explore",
+		});
+
+		const runningEvents = sink.events.filter(
+			(event) => event.type === "tool.running",
+		);
+		expect(runningEvents.map((event) => dataOf(event)["partId"])).toEqual([
+			"toolu-agent-1",
+			"toolu-agent-2",
+		]);
+		expect(dataOf(runningEvents[1])["metadata"]).toMatchObject({
+			providerTaskId: "sdk-agent-2",
+			description: "Audit frontend rendering",
+			subagentType: "explore",
+		});
+	});
+
 	it("maps system/task_progress to canonical task metadata names", async () => {
 		const taskProgress = {
 			type: "system",
@@ -256,6 +346,58 @@ describe("ClaudeEventTranslator", () => {
 			subagentType: "explore",
 		});
 		expect(metadata).not.toHaveProperty("subagent_type");
+	});
+
+	it("completes the live Agent tool when Claude reports task completion", async () => {
+		await translator.translate(
+			ctx,
+			makeStreamEvent({
+				type: "message_start",
+				message: { id: "assistant-completes-agent" },
+			}),
+		);
+		await translator.translate(
+			ctx,
+			makeStreamEvent({
+				type: "content_block_start",
+				index: 0,
+				content_block: {
+					type: "tool_use",
+					id: "toolu-agent-complete",
+					name: "Agent",
+					input: {},
+				},
+			}),
+		);
+		await translator.translate(ctx, {
+			type: "system",
+			subtype: "task_started",
+			task_id: "sdk-agent-complete",
+			tool_use_id: "toolu-agent-complete",
+			description: "Audit the architecture",
+			task_type: "explore",
+			prompt: "Report findings",
+			uuid: "00000000-0000-0000-0000-000000000203",
+			session_id: "sdk-sess",
+		} as unknown as SDKMessage);
+
+		await translator.translate(ctx, {
+			type: "system",
+			subtype: "task_notification",
+			task_id: "sdk-agent-complete",
+			tool_use_id: "toolu-agent-complete",
+			status: "completed",
+			summary: "Found architecture issues",
+			uuid: "00000000-0000-0000-0000-000000000204",
+			session_id: "sdk-sess",
+		} as unknown as SDKMessage);
+
+		const completed = sink.events.find(
+			(event) => event.type === "tool.completed",
+		);
+		expect(completed).toBeDefined();
+		expect(dataOf(completed)["partId"]).toBe("toolu-agent-complete");
+		expect(dataOf(completed)["result"]).toBe("Found architecture issues");
 	});
 
 	it("maps Claude Task input from SDK events through relay, history, and frontend ToolMessage", async () => {

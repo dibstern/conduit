@@ -24,6 +24,7 @@ import type { Effect } from "effect";
 import type {
 	CanonicalEvent,
 	CanonicalEventType,
+	CanonicalToolInput,
 	EventMetadata,
 	EventPayloadMap,
 } from "../../persistence/events.js";
@@ -147,6 +148,60 @@ function serializeToolResultContent(content: unknown): string {
 	}
 	if (content == null) return "";
 	return JSON.stringify(content);
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+	return value != null && typeof value === "object" && !Array.isArray(value);
+}
+
+function canonicalToolName(
+	toolName: string,
+	input: CanonicalToolInput | unknown,
+): string {
+	return isRecord(input) && input["tool"] === "Task" ? "Task" : toolName;
+}
+
+function enrichTaskInput(
+	rawInput: unknown,
+	metadata?: Record<string, unknown>,
+): Record<string, unknown> {
+	const input = isRecord(rawInput) ? { ...rawInput } : {};
+	if (!metadata) return input;
+	if (
+		typeof metadata["description"] === "string" &&
+		typeof input["description"] !== "string"
+	) {
+		input["description"] = metadata["description"];
+	}
+	if (
+		typeof metadata["prompt"] === "string" &&
+		typeof input["prompt"] !== "string"
+	) {
+		input["prompt"] = metadata["prompt"];
+	}
+	if (
+		typeof metadata["subagentType"] === "string" &&
+		typeof input["subagentType"] !== "string" &&
+		typeof input["subagent_type"] !== "string"
+	) {
+		input["subagentType"] = metadata["subagentType"];
+	}
+	return input;
+}
+
+function taskCompletionResult(
+	metadata: Record<string, unknown>,
+): string | null {
+	if (
+		typeof metadata["summary"] === "string" &&
+		metadata["summary"].length > 0
+	) {
+		return metadata["summary"];
+	}
+	if (typeof metadata["status"] === "string" && metadata["status"].length > 0) {
+		return `Task ${metadata["status"]}`;
+	}
+	return null;
 }
 
 // ─── Translator ────────────────────────────────────────────────────────────
@@ -377,7 +432,7 @@ export class ClaudeEventTranslator {
 		if (!message.tool_use_id) return;
 		const usage = message.usage as Record<string, unknown> | undefined;
 		const extras = message as unknown as Record<string, unknown>;
-		await this.pushTaskMetadata(ctx, message.tool_use_id, {
+		const metadata = {
 			providerTaskId: message.task_id,
 			status: message.status,
 			outputFile: message.output_file,
@@ -395,7 +450,15 @@ export class ClaudeEventTranslator {
 			...(message.skip_transcript !== undefined
 				? { skipTranscript: message.skip_transcript }
 				: {}),
-		});
+		};
+		await this.pushTaskMetadata(ctx, message.tool_use_id, metadata);
+		if (message.status === "completed") {
+			await this.completeTaskTool(
+				ctx,
+				message.tool_use_id,
+				taskCompletionResult(metadata),
+			);
+		}
 	}
 
 	private async translateToolProgress(
@@ -424,6 +487,11 @@ export class ClaudeEventTranslator {
 			typeof providerTaskId === "string" && subagentTasks
 				? subagentTasks.get(providerTaskId)
 				: undefined;
+		const parentMessageId =
+			this.currentAssistantMessageId ||
+			ctx.lastAssistantUuid ||
+			task?.parentMessageId ||
+			"";
 		const mergedMetadata = {
 			...(task?.description != null ? { description: task.description } : {}),
 			...(task?.subagentType != null
@@ -435,10 +503,6 @@ export class ClaudeEventTranslator {
 			...metadata,
 		};
 		if (typeof providerTaskId === "string" && subagentTasks) {
-			const parentMessageId =
-				this.currentAssistantMessageId ||
-				ctx.lastAssistantUuid ||
-				task?.parentMessageId;
 			subagentTasks.set(providerTaskId, {
 				toolUseId: parentToolUseId,
 				...(typeof mergedMetadata["childSessionId"] === "string"
@@ -453,15 +517,114 @@ export class ClaudeEventTranslator {
 					: {}),
 			});
 		}
+		await this.ensureTaskToolStarted(
+			ctx,
+			parentToolUseId,
+			mergedMetadata,
+			parentMessageId,
+		);
 		await this.push(
 			ctx,
 			makeCanonicalEvent("tool.running", ctx.sessionId, {
-				messageId:
-					this.currentAssistantMessageId || ctx.lastAssistantUuid || "",
+				messageId: parentMessageId,
 				partId: parentToolUseId,
 				metadata: mergedMetadata,
 			}),
 		);
+	}
+
+	private async ensureTaskToolStarted(
+		ctx: ClaudeSessionContext,
+		parentToolUseId: string,
+		metadata: Record<string, unknown>,
+		messageId: string,
+	): Promise<void> {
+		const tool = this.findInFlightTool(parentToolUseId, ctx);
+		if (!tool || !tool.pendingStart) return;
+		if (tool.toolName !== "Agent" && tool.toolName !== "Task") return;
+
+		tool.pendingStart = false;
+		const rawInput = enrichTaskInput(
+			tool.bufferedInput ?? tool.input,
+			metadata,
+		);
+		tool.input = rawInput;
+		tool.bufferedInput = rawInput;
+		const input = normalizeToolInput(tool.toolName, rawInput);
+		await this.push(
+			ctx,
+			makeCanonicalEvent(
+				"tool.started",
+				ctx.sessionId,
+				{
+					messageId,
+					partId: tool.itemId,
+					toolName: canonicalToolName(tool.toolName, input),
+					callId: tool.itemId,
+					input,
+				},
+				{ schemaVersion: 2 },
+			),
+		);
+	}
+
+	private async completeTaskTool(
+		ctx: ClaudeSessionContext,
+		parentToolUseId: string,
+		result: string | null,
+	): Promise<void> {
+		const messageId =
+			this.currentAssistantMessageId || ctx.lastAssistantUuid || "";
+		await this.push(
+			ctx,
+			makeCanonicalEvent("tool.completed", ctx.sessionId, {
+				messageId,
+				partId: parentToolUseId,
+				result,
+				duration: 0,
+			}),
+		);
+		this.deleteInFlightTool(parentToolUseId, ctx);
+	}
+
+	private taskMetadataForToolUseId(
+		ctx: ClaudeSessionContext,
+		parentToolUseId: string,
+	): Record<string, unknown> | undefined {
+		const tasks = ctx.subagentTasks;
+		if (!tasks) return undefined;
+		for (const [providerTaskId, task] of tasks) {
+			if (task.toolUseId !== parentToolUseId) continue;
+			return {
+				providerTaskId,
+				...(task.description ? { description: task.description } : {}),
+				...(task.subagentType ? { subagentType: task.subagentType } : {}),
+				...(task.childSessionId ? { childSessionId: task.childSessionId } : {}),
+			};
+		}
+		return undefined;
+	}
+
+	private findInFlightTool(
+		parentToolUseId: string,
+		ctx: ClaudeSessionContext,
+	): ToolInFlight | undefined {
+		for (const tool of ctx.inFlightTools.values()) {
+			if (tool.itemId === parentToolUseId) return tool;
+		}
+		return undefined;
+	}
+
+	private deleteInFlightTool(
+		parentToolUseId: string,
+		ctx: ClaudeSessionContext,
+	): void {
+		for (const [index, tool] of ctx.inFlightTools) {
+			if (tool.itemId === parentToolUseId) {
+				ctx.inFlightTools.delete(index);
+				return;
+			}
+		}
 	}
 
 	// ─── Stream Events ───────────────────────────────────────────────────
@@ -564,7 +727,12 @@ export class ClaudeEventTranslator {
 		// tool_use blocks: emit buffered tool.started now with complete input
 		if (tool.pendingStart) {
 			tool.pendingStart = false;
-			const finalInput = tool.bufferedInput ?? tool.input;
+			const taskMetadata = this.taskMetadataForToolUseId(ctx, tool.itemId);
+			const finalInput =
+				tool.toolName === "Agent" || tool.toolName === "Task"
+					? enrichTaskInput(tool.bufferedInput ?? tool.input, taskMetadata)
+					: (tool.bufferedInput ?? tool.input);
+			const normalizedInput = normalizeToolInput(tool.toolName, finalInput);
 			await this.push(
 				ctx,
 				makeCanonicalEvent(
@@ -573,9 +741,9 @@ export class ClaudeEventTranslator {
 					{
 						messageId: this.currentAssistantMessageId,
 						partId: tool.itemId,
-						toolName: tool.toolName,
+						toolName: canonicalToolName(tool.toolName, normalizedInput),
 						callId: tool.itemId,
-						input: normalizeToolInput(tool.toolName, finalInput),
+						input: normalizedInput,
 					},
 					{ schemaVersion: 2 },
 				),
@@ -908,7 +1076,12 @@ export class ClaudeEventTranslator {
 		for (const [index, tool] of ctx.inFlightTools) {
 			if (!tool.pendingStart) continue;
 			tool.pendingStart = false;
-			const finalInput = tool.bufferedInput ?? tool.input;
+			const taskMetadata = this.taskMetadataForToolUseId(ctx, tool.itemId);
+			const finalInput =
+				tool.toolName === "Agent" || tool.toolName === "Task"
+					? enrichTaskInput(tool.bufferedInput ?? tool.input, taskMetadata)
+					: (tool.bufferedInput ?? tool.input);
+			const normalizedInput = normalizeToolInput(tool.toolName, finalInput);
 			await this.push(
 				ctx,
 				makeCanonicalEvent(
@@ -917,9 +1090,9 @@ export class ClaudeEventTranslator {
 					{
 						messageId: this.currentAssistantMessageId,
 						partId: tool.itemId,
-						toolName: tool.toolName,
+						toolName: canonicalToolName(tool.toolName, normalizedInput),
 						callId: tool.itemId,
-						input: normalizeToolInput(tool.toolName, finalInput),
+						input: normalizedInput,
 					},
 					{ schemaVersion: 2 },
 				),

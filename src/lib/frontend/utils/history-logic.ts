@@ -131,8 +131,10 @@ const LIVE_STATUS_TOOLS = new Set([
 function mapToolStatus(
 	apiStatus: string | undefined,
 	toolName?: string,
+	metadata?: Record<string, unknown>,
 ): ToolMessage["status"] {
 	if (apiStatus === "error") return "error";
+	if (metadata?.["status"] === "completed") return "completed";
 	// Question tools preserve their live status so the UI can render them interactively
 	if (toolName && LIVE_STATUS_TOOLS.has(toolName)) {
 		if (apiStatus === "pending") return "pending";
@@ -225,7 +227,7 @@ function convertAssistantParts(
 						uuid: generateUuid(),
 						id: part.callID ?? part.id,
 						name: mapToolName(rawToolName),
-						status: mapToolStatus(state?.status, rawToolName),
+						status: mapToolStatus(state?.status, rawToolName, toolMetadata),
 						...(toolResult != null && { result: toolResult }),
 						isError,
 						...(toolInput !== undefined && { input: toolInput }),

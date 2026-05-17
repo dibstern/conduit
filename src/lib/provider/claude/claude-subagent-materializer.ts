@@ -356,6 +356,7 @@ function appendContentBlockEvents(input: {
 				: `${input.messageId}-${input.index}`;
 		const toolName =
 			typeof input.block["name"] === "string" ? input.block["name"] : "unknown";
+		const normalizedInput = normalizeToolInput(toolName, input.block["input"]);
 		input.toolMessageIds.set(partId, input.messageId);
 		if (input.cursor.toolStarts.has(partId)) return;
 		input.cursor.toolStarts.add(partId);
@@ -366,9 +367,15 @@ function appendContentBlockEvents(input: {
 				{
 					messageId: input.messageId,
 					partId,
-					toolName,
+					toolName:
+						normalizedInput &&
+						typeof normalizedInput === "object" &&
+						"tool" in normalizedInput &&
+						normalizedInput.tool === "Task"
+							? "Task"
+							: toolName,
 					callId: partId,
-					input: normalizeToolInput(toolName, input.block["input"]),
+					input: normalizedInput,
 				},
 				input.eventOptions(),
 			),
