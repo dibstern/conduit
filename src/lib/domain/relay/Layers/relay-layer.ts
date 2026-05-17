@@ -21,6 +21,7 @@ import {
 	makePollerPubSubLive,
 	makePollerStateLive,
 } from "../Services/session-status-poller.js";
+import { SessionTitleServiceLive } from "../Services/session-title-service.js";
 import { makeWsHandlerStateLive } from "../Services/ws-handler-service.js";
 import { RateLimiterLive } from "./rate-limiter-layer.js";
 
@@ -33,6 +34,11 @@ const sessionManagerDepsLive = Layer.mergeAll(
 const SessionManagerStateAndServiceLive = Layer.provideMerge(
 	SessionManagerServiceLive,
 	sessionManagerDepsLive,
+);
+
+const SessionManagerStateServiceAndTitleLive = Layer.provideMerge(
+	SessionTitleServiceLive,
+	SessionManagerStateAndServiceLive,
 );
 
 /**
@@ -49,7 +55,7 @@ export const RelayStateLive = Layer.mergeAll(
 	// Session state
 	makeSessionRegistryStateLive(),
 	makeOverridesStateLive(),
-	SessionManagerStateAndServiceLive,
+	SessionManagerStateServiceAndTitleLive,
 	// Poller state
 	makePollerManagerStateLive(),
 	makePollerStateLive(),

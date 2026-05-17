@@ -24,6 +24,10 @@ export interface ReadQueryEffect {
 		sessionId: string,
 	) => Effect.Effect<string | undefined, ReadQueryEffectError | SqlError>;
 
+	readonly getSession: (
+		sessionId: string,
+	) => Effect.Effect<SessionRow | undefined, ReadQueryEffectError | SqlError>;
+
 	readonly getAllSessionStatuses: () => Effect.Effect<
 		Record<string, string>,
 		ReadQueryEffectError | SqlError
@@ -77,6 +81,24 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 					? e
 					: new ReadQueryEffectError({
 							operation: "getSessionStatus",
+							cause: e,
+						}),
+			),
+		);
+
+	const getSession = (
+		sessionId: string,
+	): Effect.Effect<SessionRow | undefined, ReadQueryEffectError | SqlError> =>
+		Effect.gen(function* () {
+			const rows = yield* sql<SessionRow>`
+				SELECT * FROM sessions WHERE id = ${sessionId}`;
+			return rows[0];
+		}).pipe(
+			Effect.mapError((e) =>
+				e instanceof ReadQueryEffectError
+					? e
+					: new ReadQueryEffectError({
+							operation: "getSession",
 							cause: e,
 						}),
 			),
@@ -174,6 +196,7 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 	return {
 		getToolContent,
 		getSessionStatus,
+		getSession,
 		getAllSessionStatuses,
 		listSessions,
 		getSessionMessagesWithParts,

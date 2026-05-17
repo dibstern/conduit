@@ -7,6 +7,7 @@ import { historyToChatMessages } from "../../../src/lib/frontend/utils/history-l
 import type { StoredEvent } from "../../../src/lib/persistence/events.js";
 import { MessageProjector } from "../../../src/lib/persistence/projectors/message-projector.js";
 import type { ProjectionContext } from "../../../src/lib/persistence/projectors/projector.js";
+import { SessionProjector } from "../../../src/lib/persistence/projectors/session-projector.js";
 import { ReadQueryService } from "../../../src/lib/persistence/read-query-service.js";
 import { messageRowsToHistory } from "../../../src/lib/persistence/session-history-adapter.js";
 import {
@@ -23,11 +24,13 @@ const NOW = 1_000_000_000_000;
 describe("MessageProjector resilience", () => {
 	let harness: TestHarness;
 	let projector: MessageProjector;
+	let sessionProjector: SessionProjector;
 	let seq: number;
 
 	beforeEach(() => {
 		harness = createTestHarness();
 		projector = new MessageProjector();
+		sessionProjector = new SessionProjector();
 		seq = 0;
 		harness.seedSession(SESSION_A);
 		harness.seedSession(SESSION_B);
@@ -56,6 +59,54 @@ describe("MessageProjector resilience", () => {
 	// ─── Session lifecycle ───────────────────────────────────────────────
 
 	describe("session lifecycle", () => {
+		it("duplicate session.created does not overwrite a renamed title", () => {
+			const sessionId = "ses-title-owner";
+			sessionProjector.project(
+				makeStored(
+					"session.created",
+					sessionId,
+					{
+						sessionId,
+						title: "Claude Session",
+						provider: "claude",
+					},
+					{ sequence: nextSeq(), createdAt: NOW },
+				),
+				harness.db,
+			);
+			sessionProjector.project(
+				makeStored(
+					"session.renamed",
+					sessionId,
+					{
+						sessionId,
+						title: "Useful title",
+					},
+					{ sequence: nextSeq(), createdAt: NOW + 1000 },
+				),
+				harness.db,
+			);
+			sessionProjector.project(
+				makeStored(
+					"session.created",
+					sessionId,
+					{
+						sessionId,
+						title: "Claude Session",
+						provider: "claude",
+					},
+					{ sequence: nextSeq(), createdAt: NOW + 2000 },
+				),
+				harness.db,
+			);
+
+			const row = harness.db.queryOne<{ title: string }>(
+				"SELECT title FROM sessions WHERE id = ?",
+				[sessionId],
+			);
+			expect(row?.title).toBe("Useful title");
+		});
+
 		it("deleting session with dependent messages throws FK error at DELETE", () => {
 			project(
 				makeStored(

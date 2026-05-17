@@ -15,11 +15,15 @@ const SESSION_HANDLES = [
 	"message.created",
 ] as const;
 
+function isAutoTitleRename(event: StoredEvent): boolean {
+	return event.metadata.source === "auto-title";
+}
+
 /**
  * Projects session lifecycle events into the `sessions` read-model table.
  *
  * Handled events:
- * - `session.created`         -> INSERT with ON CONFLICT DO UPDATE (preserving nullable columns)
+ * - `session.created`         -> INSERT with ON CONFLICT DO UPDATE (only replacing default placeholder titles)
  * - `session.renamed`         -> UPDATE title
  * - `session.status`          -> UPDATE status
  * - `session.provider_changed`-> UPDATE provider
@@ -35,14 +39,22 @@ export class SessionProjector implements Projector {
 	project(event: StoredEvent, db: SqliteClient): void {
 		if (isEventType(event, "session.created")) {
 			// Use INSERT ... ON CONFLICT DO UPDATE instead of INSERT OR REPLACE
-			// to preserve nullable columns (provider_sid, parent_id,
-			// fork_point_event) that may have been set by other code paths.
+			// to preserve user/auto-renamed titles plus nullable columns
+			// (provider_sid, parent_id, fork_point_event) that may have been set by
+			// other code paths.
 			db.execute(
 				`INSERT INTO sessions (id, provider, title, status, created_at, updated_at)
 				 VALUES (?, ?, ?, 'idle', ?, ?)
 				 ON CONFLICT (id) DO UPDATE SET
 				     provider = excluded.provider,
-				     title = excluded.title,
+				     title = CASE
+				       WHEN sessions.title IS NULL
+				         OR sessions.title = ''
+				         OR sessions.title IN ('Untitled', 'Claude Session', 'Test Session')
+				         OR sessions.title LIKE 'New session%'
+				       THEN excluded.title
+				       ELSE sessions.title
+				     END,
 				     updated_at = excluded.updated_at`,
 				[
 					event.data.sessionId,
@@ -56,6 +68,35 @@ export class SessionProjector implements Projector {
 		}
 
 		if (isEventType(event, "session.renamed")) {
+			if (isAutoTitleRename(event)) {
+				db.execute(
+					`UPDATE sessions SET title = ?, updated_at = ?
+					 WHERE id = ?
+					   AND provider IN ('claude', 'claude-sdk')
+					   AND NOT EXISTS (
+					     SELECT 1
+					     FROM events prior
+					     WHERE prior.session_id = ?
+					       AND prior.type = 'session.renamed'
+					       AND prior.sequence < ?
+					       AND COALESCE(json_extract(prior.metadata, '$.source'), '') <> 'auto-title'
+					   )
+					   AND (
+					     title IS NULL
+					     OR TRIM(title) = ''
+					     OR LOWER(TRIM(title)) IN ('claude session', 'untitled', 'new session')
+					     OR LOWER(TRIM(title)) LIKE 'new session %'
+					   )`,
+					[
+						event.data.title,
+						event.createdAt,
+						event.data.sessionId,
+						event.data.sessionId,
+						event.sequence,
+					],
+				);
+				return;
+			}
 			db.execute("UPDATE sessions SET title = ?, updated_at = ? WHERE id = ?", [
 				event.data.title,
 				event.createdAt,

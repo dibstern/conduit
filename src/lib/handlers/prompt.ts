@@ -26,6 +26,7 @@ import {
 	resetProcessingTimeout,
 	startProcessingTimeout,
 } from "../domain/relay/Services/session-overrides-state.js";
+import { SessionTitleServiceTag } from "../domain/relay/Services/session-title-service.js";
 import { formatErrorDetail, RelayError } from "../errors.js";
 import { ClaudeEventPersistEffectTag } from "../persistence/effect/claude-event-persist-effect.js";
 import { ProviderStateEffectTag } from "../persistence/effect/provider-state-effect.js";
@@ -221,6 +222,9 @@ export const sendMessageToSession = (input: SendMessageToSessionInput) =>
 		);
 		const readQueryEffectOption =
 			yield* Effect.serviceOption(ReadQueryEffectTag);
+		const titleServiceOption = yield* Effect.serviceOption(
+			SessionTitleServiceTag,
+		);
 
 		if (engineOption._tag === "Some") {
 			const orchestrationEngine = engineOption.value;
@@ -230,7 +234,7 @@ export const sendMessageToSession = (input: SendMessageToSessionInput) =>
 				providerId =
 					model && isClaudeProvider(model.providerID) ? "claude" : "opencode";
 			}
-			const priorHistory =
+			const priorHistoryResult =
 				providerId === "claude"
 					? yield* Effect.gen(function* () {
 							const historyReaders: PriorHistoryReaders = {
@@ -245,13 +249,20 @@ export const sendMessageToSession = (input: SendMessageToSessionInput) =>
 									historyReaders,
 								),
 							);
-							if (result._tag === "Right") return result.right;
+							if (result._tag === "Right") {
+								return { history: result.right, loaded: true };
+							}
 							log.warn(
 								`Failed to load prior Claude history for ${activeId}: ${result.left instanceof Error ? result.left.message : result.left}`,
 							);
-							return [];
+							return { history: [], loaded: false };
 						})
-					: [];
+					: { history: [], loaded: false };
+			const priorHistory = priorHistoryResult.history;
+			const isFirstClaudeMessage =
+				providerId === "claude" &&
+				priorHistoryResult.loaded &&
+				priorHistory.length === 0;
 
 			// Persist user message for Claude sessions (non-fatal)
 			if (
@@ -264,6 +275,16 @@ export const sendMessageToSession = (input: SendMessageToSessionInput) =>
 						text,
 					),
 				);
+				if (
+					isFirstClaudeMessage &&
+					titleServiceOption._tag === "Some" &&
+					persistResult._tag === "Right"
+				) {
+					yield* titleServiceOption.value.startForFirstClaudeMessage({
+						sessionId: activeId,
+						firstMessage: text,
+					});
+				}
 				if (persistResult._tag === "Left") {
 					log.warn(
 						`Non-fatal persistence error for Claude user message: ${formatErrorDetail(persistResult.left)}`,
@@ -402,38 +423,6 @@ export const sendMessageToSession = (input: SendMessageToSessionInput) =>
 							if (saveResult._tag === "Left") {
 								log.warn(
 									`Non-fatal provider state persistence error for ${activeId}: ${formatErrorDetail(saveResult.left)}`,
-								);
-							}
-						}
-					}
-
-					// Auto-rename Claude sessions after first successful turn
-					if (result.status !== "error" && providerId === "claude") {
-						const turnCount = result.providerStateUpdates?.find(
-							(u) => u.key === "turnCount",
-						)?.value;
-						if (Number(turnCount) === 1) {
-							const title = text.length > 60 ? `${text.slice(0, 57)}...` : text;
-							const renameResult = yield* Effect.either(
-								Effect.gen(function* () {
-									const sessions = yield* sessionManagerService.listSessions();
-									const session = sessions.find((s) => s.id === activeId);
-									const currentTitle = session?.title ?? "";
-									const isDefault =
-										!currentTitle ||
-										currentTitle === "Claude Session" ||
-										currentTitle.startsWith("New session");
-									if (!isDefault) return;
-
-									yield* sessionManagerService.renameSession(activeId, title);
-									yield* sessionManagerService.sendDualSessionLists((msg) =>
-										wsHandler.broadcast(msg),
-									);
-								}),
-							);
-							if (renameResult._tag === "Left") {
-								log.warn(
-									`Auto-rename failed for ${activeId}: ${formatErrorDetail(renameResult.left)}`,
 								);
 							}
 						}
