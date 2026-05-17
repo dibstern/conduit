@@ -52,6 +52,7 @@ _Avoid_: Conduit-invented permission scope
 - A **Provider Envelope** should be runtime-decoded before adapter translation.
 - A **Provider-Owned Payload** may remain opaque when Conduit does not read its internal fields.
 - A **Provider Runtime Event** may be translated into a stored canonical event, but must not itself become the event store contract.
+- A **Provider Runtime Event** carries **Provider-Owned Payload** under event data, not as a whole SDK message tunneled through raw-source metadata.
 - An **Automatic Session Title** is derived from the first user message after Conduit accepts it, not from provider turn completion.
 - An **Automatic Session Title** is generated only when the first accepted user message is sent while the session is bound to Claude.
 - Existing sessions are not backfilled with an **Automatic Session Title**.

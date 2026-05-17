@@ -11,7 +11,7 @@ const FRONTEND_RPC_ENTRY = join(
 const SERVER_RPC_ENTRY = join(REPO_ROOT, "src/lib/server/ws-rpc.ts");
 
 const forbiddenContractImport =
-	/from\s+["'](?:\.\.\/)+(?:daemon|relay|provider|frontend\/(?:stores|components)|persistence|domain\/[^"']*\/(?:Services|Layers))[/"']/;
+	/from\s+["'](?:\.\.\/)+(?:daemon|relay|provider|handlers|server|frontend|persistence|domain\/[^"']*\/(?:Services|Layers))[/"']/;
 
 function tsFiles(dir: string): string[] {
 	if (!existsSync(dir)) return [];

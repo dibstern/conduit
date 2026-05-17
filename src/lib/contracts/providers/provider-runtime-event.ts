@@ -4,345 +4,138 @@ const NonBlankString = Schema.String.pipe(
 	Schema.filter((value) => value.trim().length > 0 && value === value.trim()),
 );
 
-export const ProviderRuntimeEventId = NonBlankString;
-export type ProviderRuntimeEventId = Schema.Schema.Type<
-	typeof ProviderRuntimeEventId
->;
-
-export const ProviderRuntimeThreadId = NonBlankString;
-export type ProviderRuntimeThreadId = Schema.Schema.Type<
-	typeof ProviderRuntimeThreadId
->;
-
-export const ProviderRuntimeTurnId = NonBlankString;
-export type ProviderRuntimeTurnId = Schema.Schema.Type<
-	typeof ProviderRuntimeTurnId
->;
-
-export const ProviderRuntimeItemId = NonBlankString;
-export type ProviderRuntimeItemId = Schema.Schema.Type<
-	typeof ProviderRuntimeItemId
->;
-
-export const ProviderRuntimeRequestId = NonBlankString;
-export type ProviderRuntimeRequestId = Schema.Schema.Type<
-	typeof ProviderRuntimeRequestId
->;
-
-export const ProviderRuntimeProviderId = NonBlankString;
-export type ProviderRuntimeProviderId = Schema.Schema.Type<
-	typeof ProviderRuntimeProviderId
->;
-
-export const ProviderRuntimeProviderInstanceId = NonBlankString;
-export type ProviderRuntimeProviderInstanceId = Schema.Schema.Type<
-	typeof ProviderRuntimeProviderInstanceId
->;
-
-export const ProviderRuntimeRawSource = Schema.Literal(
-	"claude.sdk.message",
-	"claude.sdk.result",
-	"claude.sdk.permission",
-	"opencode.sdk.event",
-	"opencode.sdk.response",
-	"opencode.gap.response",
-	"conduit.provider.request",
-	"conduit.provider.translator",
-	"conduit.provider.runtime",
+export const ProviderRuntimeEventTypeSchema = Schema.Literal(
+	"message.created",
+	"text.delta",
+	"thinking.start",
+	"thinking.delta",
+	"thinking.end",
+	"tool.started",
+	"tool.running",
+	"tool.completed",
+	"tool.input_updated", // Historical compatibility only; new provider runtimes should not emit it.
+	"turn.completed",
+	"turn.error",
+	"turn.interrupted",
+	"session.created",
+	"session.renamed",
+	"session.status",
+	"session.provider_changed",
+	"permission.asked",
+	"permission.resolved",
+	"question.asked",
+	"question.resolved",
 );
-export type ProviderRuntimeRawSource = Schema.Schema.Type<
-	typeof ProviderRuntimeRawSource
+export type ProviderRuntimeEventType = Schema.Schema.Type<
+	typeof ProviderRuntimeEventTypeSchema
 >;
 
-export const ProviderRuntimeRaw = Schema.Struct({
-	source: ProviderRuntimeRawSource,
-	method: Schema.optional(Schema.String),
-	messageType: Schema.optional(Schema.String),
-	payload: Schema.Unknown,
-});
-export type ProviderRuntimeRaw = Schema.Schema.Type<typeof ProviderRuntimeRaw>;
-
-export const ProviderRuntimeProviderRefs = Schema.Struct({
-	providerTurnId: Schema.optional(Schema.String),
-	providerItemId: Schema.optional(Schema.String),
-	providerRequestId: Schema.optional(Schema.String),
-	providerSessionId: Schema.optional(Schema.String),
-});
+export const ProviderRuntimeProviderRefsSchema = Schema.Struct({
+	providerSessionId: Schema.optionalWith(NonBlankString, { exact: true }),
+	providerMessageId: Schema.optionalWith(NonBlankString, { exact: true }),
+	providerTurnId: Schema.optionalWith(NonBlankString, { exact: true }),
+	providerToolUseId: Schema.optionalWith(NonBlankString, { exact: true }),
+	providerRequestId: Schema.optionalWith(NonBlankString, { exact: true }),
+	providerTaskId: Schema.optionalWith(NonBlankString, { exact: true }),
+	parentProviderTaskId: Schema.optionalWith(NonBlankString, { exact: true }),
+}).annotations({ parseOptions: { onExcessProperty: "error" } });
 export type ProviderRuntimeProviderRefs = Schema.Schema.Type<
-	typeof ProviderRuntimeProviderRefs
+	typeof ProviderRuntimeProviderRefsSchema
 >;
 
-const ProviderRuntimeTimestamp = Schema.Union(Schema.String, Schema.Number);
+export const ProviderRuntimeRawSourceSchema = Schema.Struct({
+	kind: NonBlankString,
+	providerMessageType: Schema.optionalWith(NonBlankString, { exact: true }),
+	providerMessageSubtype: Schema.optionalWith(NonBlankString, { exact: true }),
+	sdkVariant: Schema.optionalWith(NonBlankString, { exact: true }),
+	streamEventType: Schema.optionalWith(NonBlankString, { exact: true }),
+	endpoint: Schema.optionalWith(NonBlankString, { exact: true }),
+	sourceSchema: Schema.optionalWith(NonBlankString, { exact: true }),
+}).annotations({ parseOptions: { onExcessProperty: "error" } });
+export type ProviderRuntimeRawSource = Schema.Schema.Type<
+	typeof ProviderRuntimeRawSourceSchema
+>;
+
+const ProviderRuntimeDataSchema = Schema.Unknown.pipe(
+	Schema.filter((value) => value !== undefined),
+);
+
+const ProviderRuntimeMetadataSchema = Schema.Record({
+	key: Schema.String,
+	value: Schema.Unknown,
+});
 
 const ProviderRuntimeEventBaseFields = {
-	eventId: ProviderRuntimeEventId,
-	provider: ProviderRuntimeProviderId,
-	providerInstanceId: Schema.optional(ProviderRuntimeProviderInstanceId),
-	threadId: ProviderRuntimeThreadId,
-	createdAt: ProviderRuntimeTimestamp,
-	turnId: Schema.optional(ProviderRuntimeTurnId),
-	itemId: Schema.optional(ProviderRuntimeItemId),
-	requestId: Schema.optional(ProviderRuntimeRequestId),
-	providerRefs: Schema.optional(ProviderRuntimeProviderRefs),
-	raw: Schema.optional(ProviderRuntimeRaw),
+	eventId: NonBlankString,
+	providerId: NonBlankString,
+	sessionId: NonBlankString,
+	turnId: Schema.optionalWith(NonBlankString, { exact: true }),
+	providerRefs: ProviderRuntimeProviderRefsSchema,
+	rawSource: ProviderRuntimeRawSourceSchema,
+	createdAt: Schema.Number,
+	data: ProviderRuntimeDataSchema,
+	metadata: Schema.optionalWith(ProviderRuntimeMetadataSchema, { exact: true }),
 };
 
-export const ProviderRuntimeEventBase = Schema.Struct(
-	ProviderRuntimeEventBaseFields,
+function providerRuntimeEvent<T extends ProviderRuntimeEventType>(type: T) {
+	return Schema.Struct({
+		...ProviderRuntimeEventBaseFields,
+		type: Schema.Literal(type),
+	}).annotations({ parseOptions: { onExcessProperty: "error" } });
+}
+
+const MessageCreatedEvent = providerRuntimeEvent("message.created");
+const TextDeltaEvent = providerRuntimeEvent("text.delta");
+const ThinkingStartEvent = providerRuntimeEvent("thinking.start");
+const ThinkingDeltaEvent = providerRuntimeEvent("thinking.delta");
+const ThinkingEndEvent = providerRuntimeEvent("thinking.end");
+const ToolStartedEvent = providerRuntimeEvent("tool.started");
+const ToolRunningEvent = providerRuntimeEvent("tool.running");
+const ToolCompletedEvent = providerRuntimeEvent("tool.completed");
+const ToolInputUpdatedEvent = providerRuntimeEvent("tool.input_updated");
+const TurnCompletedEvent = providerRuntimeEvent("turn.completed");
+const TurnErrorEvent = providerRuntimeEvent("turn.error");
+const TurnInterruptedEvent = providerRuntimeEvent("turn.interrupted");
+const SessionCreatedEvent = providerRuntimeEvent("session.created");
+const SessionRenamedEvent = providerRuntimeEvent("session.renamed");
+const SessionStatusEvent = providerRuntimeEvent("session.status");
+const SessionProviderChangedEvent = providerRuntimeEvent(
+	"session.provider_changed",
 );
-export type ProviderRuntimeEventBase = Schema.Schema.Type<
-	typeof ProviderRuntimeEventBase
->;
+const PermissionAskedEvent = providerRuntimeEvent("permission.asked");
+const PermissionResolvedEvent = providerRuntimeEvent("permission.resolved");
+const QuestionAskedEvent = providerRuntimeEvent("question.asked");
+const QuestionResolvedEvent = providerRuntimeEvent("question.resolved");
 
-const ProviderRuntimeSessionState = Schema.Literal(
-	"starting",
-	"ready",
-	"running",
-	"waiting",
-	"stopped",
-	"error",
-);
-
-const ProviderRuntimeThreadState = Schema.Literal(
-	"active",
-	"idle",
-	"archived",
-	"closed",
-	"compacted",
-	"error",
-);
-
-const ProviderRuntimeTurnTerminalState = Schema.Literal(
-	"completed",
-	"failed",
-	"interrupted",
-	"cancelled",
-);
-
-const ProviderRuntimeItemType = Schema.Literal(
-	"user_message",
-	"assistant_message",
-	"reasoning",
-	"tool_call",
-	"permission_request",
-	"question_request",
-	"error",
-	"unknown",
-);
-
-const ProviderRuntimeItemStatus = Schema.Literal(
-	"inProgress",
-	"completed",
-	"failed",
-	"declined",
-);
-
-const ProviderRuntimeContentStreamKind = Schema.Literal(
-	"assistant_text",
-	"reasoning_text",
-	"tool_output",
-	"command_output",
-	"unknown",
-);
-
-const ProviderRuntimeRequestType = Schema.Literal(
-	"tool_permission",
-	"file_permission",
-	"command_permission",
-	"provider_permission",
-	"unknown",
-);
-
-const ProviderRuntimeIssueClass = Schema.Literal(
-	"provider",
-	"transport",
-	"permission",
-	"validation",
-	"unknown",
-);
-
-const SessionStartedEvent = Schema.Struct({
-	...ProviderRuntimeEventBaseFields,
-	type: Schema.Literal("session.started"),
-});
-
-const SessionStateChangedEvent = Schema.Struct({
-	...ProviderRuntimeEventBaseFields,
-	type: Schema.Literal("session.state.changed"),
-	payload: Schema.Struct({ state: ProviderRuntimeSessionState }),
-});
-
-const SessionMetadataUpdatedEvent = Schema.Struct({
-	...ProviderRuntimeEventBaseFields,
-	type: Schema.Literal("session.metadata.updated"),
-	payload: Schema.Record({ key: Schema.String, value: Schema.Unknown }),
-});
-
-const ThreadStartedEvent = Schema.Struct({
-	...ProviderRuntimeEventBaseFields,
-	type: Schema.Literal("thread.started"),
-});
-
-const ThreadStateChangedEvent = Schema.Struct({
-	...ProviderRuntimeEventBaseFields,
-	type: Schema.Literal("thread.state.changed"),
-	payload: Schema.Struct({ state: ProviderRuntimeThreadState }),
-});
-
-const TurnStartedEvent = Schema.Struct({
-	...ProviderRuntimeEventBaseFields,
-	type: Schema.Literal("turn.started"),
-});
-
-const TurnCompletedEvent = Schema.Struct({
-	...ProviderRuntimeEventBaseFields,
-	type: Schema.Literal("turn.completed"),
-	payload: Schema.Struct({
-		state: ProviderRuntimeTurnTerminalState,
-		durationMs: Schema.optional(Schema.Number),
-		cost: Schema.optional(Schema.Unknown),
-		tokens: Schema.optional(Schema.Unknown),
-	}),
-});
-
-const TurnAbortedEvent = Schema.Struct({
-	...ProviderRuntimeEventBaseFields,
-	type: Schema.Literal("turn.aborted"),
-	payload: Schema.optional(
-		Schema.Struct({
-			state: Schema.optional(ProviderRuntimeTurnTerminalState),
-			reason: Schema.optional(Schema.String),
-		}),
-	),
-});
-
-const RuntimeItemPayload = Schema.Struct({
-	itemType: ProviderRuntimeItemType,
-	status: Schema.optional(ProviderRuntimeItemStatus),
-	title: Schema.optional(Schema.String),
-	input: Schema.optional(Schema.Unknown),
-	output: Schema.optional(Schema.Unknown),
-});
-
-const ItemStartedEvent = Schema.Struct({
-	...ProviderRuntimeEventBaseFields,
-	type: Schema.Literal("item.started"),
-	payload: RuntimeItemPayload,
-});
-
-const ItemUpdatedEvent = Schema.Struct({
-	...ProviderRuntimeEventBaseFields,
-	type: Schema.Literal("item.updated"),
-	payload: RuntimeItemPayload,
-});
-
-const ItemCompletedEvent = Schema.Struct({
-	...ProviderRuntimeEventBaseFields,
-	type: Schema.Literal("item.completed"),
-	payload: RuntimeItemPayload,
-});
-
-const ContentDeltaEvent = Schema.Struct({
-	...ProviderRuntimeEventBaseFields,
-	type: Schema.Literal("content.delta"),
-	payload: Schema.Struct({
-		streamKind: ProviderRuntimeContentStreamKind,
-		text: Schema.String,
-	}),
-});
-
-const RequestOpenedEvent = Schema.Struct({
-	...ProviderRuntimeEventBaseFields,
-	type: Schema.Literal("request.opened"),
-	payload: Schema.Struct({
-		requestType: ProviderRuntimeRequestType,
-		title: Schema.optional(Schema.String),
-		description: Schema.optional(Schema.String),
-		toolName: Schema.optional(Schema.String),
-		input: Schema.optional(Schema.Unknown),
-	}),
-});
-
-const RequestResolvedEvent = Schema.Struct({
-	...ProviderRuntimeEventBaseFields,
-	type: Schema.Literal("request.resolved"),
-	payload: Schema.Struct({
-		requestType: ProviderRuntimeRequestType,
-		decision: Schema.String,
-		reason: Schema.optional(Schema.String),
-		output: Schema.optional(Schema.Unknown),
-	}),
-});
-
-const UserInputQuestion = Schema.Struct({
-	id: Schema.optional(Schema.String),
-	header: Schema.optional(Schema.String),
-	question: Schema.String,
-	options: Schema.optional(Schema.Array(Schema.String)),
-	multiSelect: Schema.optional(Schema.Boolean),
-});
-
-const UserInputRequestedEvent = Schema.Struct({
-	...ProviderRuntimeEventBaseFields,
-	type: Schema.Literal("user-input.requested"),
-	payload: Schema.Struct({
-		questions: Schema.Array(UserInputQuestion),
-	}),
-});
-
-const UserInputResolvedEvent = Schema.Struct({
-	...ProviderRuntimeEventBaseFields,
-	type: Schema.Literal("user-input.resolved"),
-	payload: Schema.Struct({
-		answers: Schema.Record({ key: Schema.String, value: Schema.Unknown }),
-	}),
-});
-
-const RuntimeIssuePayload = Schema.Struct({
-	errorClass: ProviderRuntimeIssueClass,
-	message: Schema.String,
-	code: Schema.optional(Schema.String),
-	retryable: Schema.optional(Schema.Boolean),
-});
-
-const RuntimeWarningEvent = Schema.Struct({
-	...ProviderRuntimeEventBaseFields,
-	type: Schema.Literal("runtime.warning"),
-	payload: RuntimeIssuePayload,
-});
-
-const RuntimeErrorEvent = Schema.Struct({
-	...ProviderRuntimeEventBaseFields,
-	type: Schema.Literal("runtime.error"),
-	payload: RuntimeIssuePayload,
-});
-
-export const ProviderRuntimeEvent = Schema.Union(
-	SessionStartedEvent,
-	SessionStateChangedEvent,
-	SessionMetadataUpdatedEvent,
-	ThreadStartedEvent,
-	ThreadStateChangedEvent,
-	TurnStartedEvent,
+export const ProviderRuntimeEventSchema = Schema.Union(
+	MessageCreatedEvent,
+	TextDeltaEvent,
+	ThinkingStartEvent,
+	ThinkingDeltaEvent,
+	ThinkingEndEvent,
+	ToolStartedEvent,
+	ToolRunningEvent,
+	ToolCompletedEvent,
+	ToolInputUpdatedEvent,
 	TurnCompletedEvent,
-	TurnAbortedEvent,
-	ItemStartedEvent,
-	ItemUpdatedEvent,
-	ItemCompletedEvent,
-	ContentDeltaEvent,
-	RequestOpenedEvent,
-	RequestResolvedEvent,
-	UserInputRequestedEvent,
-	UserInputResolvedEvent,
-	RuntimeWarningEvent,
-	RuntimeErrorEvent,
+	TurnErrorEvent,
+	TurnInterruptedEvent,
+	SessionCreatedEvent,
+	SessionRenamedEvent,
+	SessionStatusEvent,
+	SessionProviderChangedEvent,
+	PermissionAskedEvent,
+	PermissionResolvedEvent,
+	QuestionAskedEvent,
+	QuestionResolvedEvent,
 );
 export type ProviderRuntimeEvent = Schema.Schema.Type<
-	typeof ProviderRuntimeEvent
+	typeof ProviderRuntimeEventSchema
 >;
 
-export const ProviderRuntimeEventSchema = ProviderRuntimeEvent;
-export const ProviderRuntimeEventsSchema = Schema.Array(ProviderRuntimeEvent);
+export const ProviderRuntimeEventsSchema = Schema.Array(
+	ProviderRuntimeEventSchema,
+);
 
 const decodeProviderRuntimeEventEnvelope = Schema.decodeUnknownSync(
 	ProviderRuntimeEventSchema,
@@ -352,18 +145,20 @@ const decodeProviderRuntimeEventsEnvelope = Schema.decodeUnknownSync(
 );
 const isProviderRuntimeEventEnvelope = Schema.is(ProviderRuntimeEventSchema);
 
-export function decodeProviderRuntimeEvent(raw: unknown): ProviderRuntimeEvent {
-	return decodeProviderRuntimeEventEnvelope(raw);
+export function decodeProviderRuntimeEvent(
+	value: unknown,
+): ProviderRuntimeEvent {
+	return decodeProviderRuntimeEventEnvelope(value);
 }
 
 export function decodeProviderRuntimeEvents(
-	raw: unknown,
+	value: unknown,
 ): ReadonlyArray<ProviderRuntimeEvent> {
-	return decodeProviderRuntimeEventsEnvelope(raw);
+	return decodeProviderRuntimeEventsEnvelope(value);
 }
 
 export function isProviderRuntimeEvent(
-	raw: unknown,
-): raw is ProviderRuntimeEvent {
-	return isProviderRuntimeEventEnvelope(raw);
+	value: unknown,
+): value is ProviderRuntimeEvent {
+	return isProviderRuntimeEventEnvelope(value);
 }
