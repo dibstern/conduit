@@ -90,4 +90,32 @@ describe("scanInFlight state management", () => {
 		// scanInFlight must be cleared so the UI doesn't hang on "Scanning..."
 		expect(isScanInFlight()).toBe(false);
 	});
+
+	it("logs system_error messages to the browser console", () => {
+		const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+		const details = {
+			sessionId: "ses_1",
+			fallbackTitle: "Claude Session 2026-05-17 14:32",
+		};
+		const errorMsg: RelayMessage = {
+			type: "system_error",
+			code: "SESSION_TITLE_GENERATION_FAILED",
+			message: "Claude session title generation failed; using fallback title.",
+			details,
+		};
+
+		try {
+			handleMessage(errorMsg);
+
+			expect(warnSpy).toHaveBeenCalledWith(
+				"[ws]",
+				"System error:",
+				"SESSION_TITLE_GENERATION_FAILED",
+				"Claude session title generation failed; using fallback title.",
+				details,
+			);
+		} finally {
+			warnSpy.mockRestore();
+		}
+	});
 });

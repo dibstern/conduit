@@ -961,6 +961,7 @@ export function handleMessage(msg: RelayMessage): void {
 			handleScanResult(msg);
 			break;
 		case "system_error":
+			log.warn("System error:", msg.code, msg.message, msg.details ?? {});
 			if (msg.code === "INSTANCE_ERROR") clearScanInFlight();
 			break;
 
