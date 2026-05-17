@@ -21,6 +21,73 @@ import {
 	makeSuccessResult,
 } from "../../helpers/mock-sdk.js";
 
+function systemInitMessage(sessionId: string, workspace: string): SDKMessage {
+	return {
+		type: "system",
+		subtype: "init",
+		uuid: `${sessionId}-init`,
+		session_id: sessionId,
+		apiKeySource: "none",
+		claude_code_version: "test",
+		cwd: workspace,
+		tools: [],
+		mcp_servers: [],
+		model: "claude-sonnet-4",
+		permissionMode: "default",
+		slash_commands: [],
+		output_style: "default",
+		skills: [],
+		plugins: [],
+	} as unknown as SDKMessage;
+}
+
+function assistantMessage(sessionId: string, uuid: string): SDKMessage {
+	return {
+		type: "assistant",
+		uuid,
+		session_id: sessionId,
+		parent_tool_use_id: null,
+		message: { role: "assistant", content: [] },
+	} as unknown as SDKMessage;
+}
+
+function streamEventMessage(
+	sessionId: string,
+	uuid: string,
+	event: Record<string, unknown>,
+): SDKMessage {
+	return {
+		type: "stream_event",
+		uuid,
+		session_id: sessionId,
+		parent_tool_use_id: null,
+		event,
+	} as unknown as SDKMessage;
+}
+
+function userToolResultMessage(
+	sessionId: string,
+	toolUseId: string,
+	content: string,
+): SDKMessage {
+	return {
+		type: "user",
+		uuid: `${sessionId}-tool-result-${toolUseId}`,
+		session_id: sessionId,
+		parent_tool_use_id: null,
+		message: {
+			role: "user",
+			content: [
+				{
+					type: "tool_result",
+					tool_use_id: toolUseId,
+					content,
+				},
+			],
+		},
+	} as unknown as SDKMessage;
+}
+
 describe("Integration: ClaudeProviderInstance full lifecycle", () => {
 	let workspace: string;
 
@@ -44,104 +111,70 @@ describe("Integration: ClaudeProviderInstance full lifecycle", () => {
 
 		const messages: SDKMessage[] = [
 			// 1. System init
-			{
-				type: "system",
-				subtype: "init",
-				session_id: "sdk-sess-integ-1",
-				model: "claude-sonnet-4",
-			} as unknown as SDKMessage,
+			systemInitMessage("sdk-sess-integ-1", workspace),
 
 			// 2. Assistant snapshot (sets the current message UUID)
-			{
-				type: "assistant",
-				uuid: "asst-uuid-integ-1",
-				message: { role: "assistant", content: [] },
-				session_id: "sdk-sess-integ-1",
-			} as unknown as SDKMessage,
+			assistantMessage("sdk-sess-integ-1", "asst-uuid-integ-1"),
 
 			// 3. Content block start: text
-			{
-				type: "stream_event",
-				event: {
-					type: "content_block_start",
-					index: 0,
-					content_block: { type: "text", text: "" },
-				},
-			} as unknown as SDKMessage,
+			streamEventMessage("sdk-sess-integ-1", "stream-integ-1", {
+				type: "content_block_start",
+				index: 0,
+				content_block: { type: "text", text: "" },
+			}),
 
 			// 4. Text deltas
-			{
-				type: "stream_event",
-				event: {
-					type: "content_block_delta",
-					index: 0,
-					delta: { type: "text_delta", text: "Let me " },
-				},
-			} as unknown as SDKMessage,
-			{
-				type: "stream_event",
-				event: {
-					type: "content_block_delta",
-					index: 0,
-					delta: { type: "text_delta", text: "help you." },
-				},
-			} as unknown as SDKMessage,
+			streamEventMessage("sdk-sess-integ-1", "stream-integ-2", {
+				type: "content_block_delta",
+				index: 0,
+				delta: { type: "text_delta", text: "Let me " },
+			}),
+			streamEventMessage("sdk-sess-integ-1", "stream-integ-3", {
+				type: "content_block_delta",
+				index: 0,
+				delta: { type: "text_delta", text: "help you." },
+			}),
 
 			// 5. Content block stop: text
-			{
-				type: "stream_event",
-				event: { type: "content_block_stop", index: 0 },
-			} as unknown as SDKMessage,
+			streamEventMessage("sdk-sess-integ-1", "stream-integ-4", {
+				type: "content_block_stop",
+				index: 0,
+			}),
 
 			// 6. Content block start: tool_use
-			{
-				type: "stream_event",
-				event: {
-					type: "content_block_start",
-					index: 1,
-					content_block: {
-						type: "tool_use",
-						id: toolUseId,
-						name: "Read",
-						input: {},
-					},
+			streamEventMessage("sdk-sess-integ-1", "stream-integ-5", {
+				type: "content_block_start",
+				index: 1,
+				content_block: {
+					type: "tool_use",
+					id: toolUseId,
+					name: "Read",
+					input: {},
 				},
-			} as unknown as SDKMessage,
+			}),
 
 			// 7. Input JSON delta for tool_use
-			{
-				type: "stream_event",
-				event: {
-					type: "content_block_delta",
-					index: 1,
-					delta: {
-						type: "input_json_delta",
-						partial_json: '{"file_path":"/tmp/test.ts"}',
-					},
+			streamEventMessage("sdk-sess-integ-1", "stream-integ-6", {
+				type: "content_block_delta",
+				index: 1,
+				delta: {
+					type: "input_json_delta",
+					partial_json: '{"file_path":"/tmp/test.ts"}',
 				},
-			} as unknown as SDKMessage,
+			}),
 
 			// 8. Content block stop: tool_use
-			{
-				type: "stream_event",
-				event: { type: "content_block_stop", index: 1 },
-			} as unknown as SDKMessage,
+			streamEventMessage("sdk-sess-integ-1", "stream-integ-7", {
+				type: "content_block_stop",
+				index: 1,
+			}),
 
 			// 9. User message with tool_result
-			{
-				type: "user",
-				message: {
-					role: "user",
-					content: [
-						{
-							type: "tool_result",
-							tool_use_id: toolUseId,
-							content: "file contents here",
-						},
-					],
-				},
-				session_id: "sdk-sess-integ-1",
-			} as unknown as SDKMessage,
+			userToolResultMessage(
+				"sdk-sess-integ-1",
+				toolUseId,
+				"file contents here",
+			),
 
 			// 10. Result
 			makeSuccessResult({
@@ -287,54 +320,38 @@ describe("Integration: ClaudeProviderInstance full lifecycle", () => {
 
 		const gen = (async function* () {
 			// System init
-			yield {
-				type: "system",
-				subtype: "init",
-				session_id: "sdk-sess-perm-1",
-				model: "claude-sonnet-4",
-			} as unknown as SDKMessage;
+			yield systemInitMessage("sdk-sess-perm-1", workspace);
 
 			// Assistant snapshot
-			yield {
-				type: "assistant",
-				uuid: "asst-uuid-perm-1",
-				message: { role: "assistant", content: [] },
-				session_id: "sdk-sess-perm-1",
-			} as unknown as SDKMessage;
+			yield assistantMessage("sdk-sess-perm-1", "asst-uuid-perm-1");
 
 			// Tool_use content block start
-			yield {
-				type: "stream_event",
-				event: {
-					type: "content_block_start",
-					index: 0,
-					content_block: {
-						type: "tool_use",
-						id: toolUseId,
-						name: "Bash",
-						input: {},
-					},
+			yield streamEventMessage("sdk-sess-perm-1", "stream-perm-1", {
+				type: "content_block_start",
+				index: 0,
+				content_block: {
+					type: "tool_use",
+					id: toolUseId,
+					name: "Bash",
+					input: {},
 				},
-			} as unknown as SDKMessage;
+			});
 
 			// Tool input
-			yield {
-				type: "stream_event",
-				event: {
-					type: "content_block_delta",
-					index: 0,
-					delta: {
-						type: "input_json_delta",
-						partial_json: '{"command":"rm -rf /"}',
-					},
+			yield streamEventMessage("sdk-sess-perm-1", "stream-perm-2", {
+				type: "content_block_delta",
+				index: 0,
+				delta: {
+					type: "input_json_delta",
+					partial_json: '{"command":"rm -rf /"}',
 				},
-			} as unknown as SDKMessage;
+			});
 
 			// Content block stop
-			yield {
-				type: "stream_event",
-				event: { type: "content_block_stop", index: 0 },
-			} as unknown as SDKMessage;
+			yield streamEventMessage("sdk-sess-perm-1", "stream-perm-3", {
+				type: "content_block_stop",
+				index: 0,
+			});
 
 			// Signal that the permission phase is ready for canUseTool invocation
 			resolvePermissionPhase?.();
@@ -343,20 +360,11 @@ describe("Integration: ClaudeProviderInstance full lifecycle", () => {
 			await postPermissionReady;
 
 			// Tool result (after permission was granted)
-			yield {
-				type: "user",
-				message: {
-					role: "user",
-					content: [
-						{
-							type: "tool_result",
-							tool_use_id: toolUseId,
-							content: "command output",
-						},
-					],
-				},
-				session_id: "sdk-sess-perm-1",
-			} as unknown as SDKMessage;
+			yield userToolResultMessage(
+				"sdk-sess-perm-1",
+				toolUseId,
+				"command output",
+			);
 
 			// Result
 			yield makeSuccessResult({

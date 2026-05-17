@@ -774,7 +774,7 @@ describe("OpenCodeAPI", () => {
 		});
 	});
 
-	it("file.list() rejects entries missing SDK-required path fields", async () => {
+	it("file.list() accepts the name/type envelope Conduit reads", async () => {
 		const sdk = makeStubSdk();
 		const gaps = makeStubGaps();
 		sdk.file.list.mockResolvedValue({
@@ -789,11 +789,9 @@ describe("OpenCodeAPI", () => {
 			authHeaders: {},
 		});
 
-		await expect(api.file.list("src")).rejects.toMatchObject({
-			_tag: "OpenCodeApiError",
-			endpoint: "/file",
-			context: expect.objectContaining({ label: "file.list" }),
-		});
+		await expect(api.file.list("src")).resolves.toEqual([
+			{ name: "app.ts", type: "file" },
+		]);
 	});
 
 	it("file.read() rejects legacy content-only responses", async () => {
@@ -882,11 +880,18 @@ describe("OpenCodeAPI", () => {
 		]);
 	});
 
-	it("app.agents() rejects agents missing SDK-required permission data", async () => {
+	it("app.agents() accepts provider-owned permission shapes", async () => {
 		const sdk = makeStubSdk();
 		const gaps = makeStubGaps();
 		sdk.app.agents.mockResolvedValue({
-			data: [makeAgent({ permission: undefined })],
+			data: [
+				makeAgent({
+					builtIn: undefined,
+					native: true,
+					permission: [{ permission: "*", action: "allow", pattern: "*" }],
+					tools: undefined,
+				}),
+			],
 			error: undefined,
 			response: { status: 200, url: "/app/agents" },
 		});
@@ -897,11 +902,14 @@ describe("OpenCodeAPI", () => {
 			authHeaders: {},
 		});
 
-		await expect(api.app.agents()).rejects.toMatchObject({
-			_tag: "OpenCodeApiError",
-			endpoint: "/app/agents",
-			context: expect.objectContaining({ label: "app.agents" }),
-		});
+		await expect(api.app.agents()).resolves.toEqual([
+			{
+				id: "build",
+				name: "build",
+				description: "Build agent",
+				mode: "primary",
+			},
+		]);
 	});
 
 	it("app.commands() decodes SDK commands with required templates", async () => {

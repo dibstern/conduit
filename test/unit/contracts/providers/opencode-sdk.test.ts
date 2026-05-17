@@ -6,6 +6,7 @@ import {
 	OpenCodeAgentSchema,
 	OpenCodeCommandSchema,
 	OpenCodeEventSchema,
+	OpenCodeFileNodeSchema,
 	OpenCodeFileStatusEntrySchema,
 	OpenCodeMessageWithPartsSchema,
 	OpenCodePartSchema,
@@ -22,6 +23,7 @@ import {
 	OpenCodeSessionSchema,
 	OpenCodeSessionStatusSchema,
 	OpenCodeSessionUpdateRequestSchema,
+	OpenCodeUndefinedResponseSchema,
 } from "../../../../src/lib/contracts/providers/opencode-sdk.js";
 
 describe("OpenCode provider contract schemas", () => {
@@ -160,7 +162,36 @@ describe("OpenCode provider contract schemas", () => {
 		).toBe(true);
 	});
 
-	it("decodes SDK agents without requiring local public ids", () => {
+	it("decodes file-list envelopes from SDK and legacy mock responses", () => {
+		expect(
+			Either.isRight(
+				Schema.decodeUnknownEither(OpenCodeFileNodeSchema)({
+					name: "app.ts",
+					type: "file",
+					path: "src/app.ts",
+					absolute: "/repo/src/app.ts",
+					ignored: false,
+				}),
+			),
+		).toBe(true);
+		expect(
+			Either.isRight(
+				Schema.decodeUnknownEither(OpenCodeFileNodeSchema)({
+					name: "package.json",
+					type: "file",
+				}),
+			),
+		).toBe(true);
+		expect(
+			Either.isLeft(
+				Schema.decodeUnknownEither(OpenCodeFileNodeSchema)({
+					name: "package.json",
+				}),
+			),
+		).toBe(true);
+	});
+
+	it("decodes SDK agents without requiring local public ids or provider-owned permission shape", () => {
 		expect(
 			Either.isRight(
 				Schema.decodeUnknownEither(OpenCodeAgentSchema)({
@@ -175,13 +206,44 @@ describe("OpenCode provider contract schemas", () => {
 			),
 		).toBe(true);
 		expect(
-			Either.isLeft(
+			Either.isRight(
 				Schema.decodeUnknownEither(OpenCodeAgentSchema)({
 					name: "build",
 					mode: "primary",
-					builtIn: true,
-					tools: {},
+					native: true,
+					permission: [
+						{ permission: "*", action: "allow", pattern: "*" },
+						{ permission: "question", action: "deny", pattern: "*" },
+					],
 					options: {},
+				}),
+			),
+		).toBe(true);
+		expect(
+			Either.isLeft(
+				Schema.decodeUnknownEither(OpenCodeAgentSchema)({
+					description: "missing name",
+					mode: "primary",
+				}),
+			),
+		).toBe(true);
+	});
+
+	it("decodes SDK void responses from 204 calls and rejects non-empty bodies", () => {
+		expect(
+			Either.isRight(
+				Schema.decodeUnknownEither(OpenCodeUndefinedResponseSchema)(undefined),
+			),
+		).toBe(true);
+		expect(
+			Either.isRight(
+				Schema.decodeUnknownEither(OpenCodeUndefinedResponseSchema)({}),
+			),
+		).toBe(true);
+		expect(
+			Either.isLeft(
+				Schema.decodeUnknownEither(OpenCodeUndefinedResponseSchema)({
+					accepted: true,
 				}),
 			),
 		).toBe(true);

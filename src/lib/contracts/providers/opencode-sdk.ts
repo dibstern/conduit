@@ -196,10 +196,10 @@ type _OpenCodePtyCoversSdkPty = AssertExtends<
 
 export const OpenCodeFileNodeSchema = Schema.Struct({
 	name: Schema.String,
-	path: Schema.String,
-	absolute: Schema.String,
+	path: Schema.optional(Schema.String),
+	absolute: Schema.optional(Schema.String),
 	type: Schema.Literal("file", "directory"),
-	ignored: Schema.Boolean,
+	ignored: Schema.optional(Schema.Boolean),
 });
 
 export type OpenCodeFileNode = Schema.Schema.Type<
@@ -209,10 +209,6 @@ export type OpenCodeFileNode = Schema.Schema.Type<
 type _OpenCodeSdkFileNodeCoversSchema = AssertExtends<
 	SdkFileNode,
 	OpenCodeFileNode
->;
-type _OpenCodeFileNodeCoversSdkFileNode = AssertExtends<
-	NormalizeSchemaType<OpenCodeFileNode>,
-	SdkFileNode
 >;
 
 const OpenCodeFileContentPatchHunkSchema = Schema.Struct({
@@ -363,21 +359,13 @@ type _OpenCodeSdkConfigIsRecordResponse = AssertExtends<
 export const OpenCodeAgentSchema = Schema.Struct({
 	name: Schema.String,
 	description: Schema.optional(Schema.String),
-	mode: Schema.Literal("subagent", "primary", "all"),
-	builtIn: Schema.Boolean,
+	mode: Schema.optional(Schema.Literal("subagent", "primary", "all")),
+	builtIn: Schema.optional(Schema.Boolean),
+	native: Schema.optional(Schema.Boolean),
 	topP: Schema.optional(Schema.Number),
 	temperature: Schema.optional(Schema.Number),
 	color: Schema.optional(Schema.String),
-	permission: Schema.Struct({
-		edit: Schema.Literal("ask", "allow", "deny"),
-		bash: Schema.Record({
-			key: Schema.String,
-			value: Schema.Literal("ask", "allow", "deny"),
-		}),
-		webfetch: Schema.optional(Schema.Literal("ask", "allow", "deny")),
-		doom_loop: Schema.optional(Schema.Literal("ask", "allow", "deny")),
-		external_directory: Schema.optional(Schema.Literal("ask", "allow", "deny")),
-	}),
+	permission: Schema.optional(Schema.Unknown),
 	model: Schema.optional(
 		Schema.Struct({
 			modelID: Schema.String,
@@ -385,18 +373,18 @@ export const OpenCodeAgentSchema = Schema.Struct({
 		}),
 	),
 	prompt: Schema.optional(Schema.String),
-	tools: Schema.Record({ key: Schema.String, value: Schema.Boolean }),
-	options: Schema.Record({ key: Schema.String, value: Schema.Unknown }),
+	tools: Schema.optional(
+		Schema.Record({ key: Schema.String, value: Schema.Boolean }),
+	),
+	options: Schema.optional(
+		Schema.Record({ key: Schema.String, value: Schema.Unknown }),
+	),
 	maxSteps: Schema.optional(Schema.Number),
 });
 
 export type OpenCodeAgent = Schema.Schema.Type<typeof OpenCodeAgentSchema>;
 
 type _OpenCodeSdkAgentCoversSchema = AssertExtends<SdkAgent, OpenCodeAgent>;
-type _OpenCodeAgentCoversSdkAgent = AssertExtends<
-	NormalizeSchemaType<OpenCodeAgent>,
-	SdkAgent
->;
 
 export const OpenCodeCommandSchema = Schema.Struct({
 	name: Schema.String,
@@ -1021,7 +1009,18 @@ export type OpenCodeQuestionRejectRequest = Schema.Schema.Type<
 >;
 
 export const OpenCodeBooleanResponseSchema = Schema.Boolean;
-export const OpenCodeUndefinedResponseSchema = Schema.Undefined;
+const OpenCodeEmptyObjectResponseSchema = Schema.Struct({}).pipe(
+	Schema.filter((value) =>
+		Object.keys(value).length === 0
+			? undefined
+			: "expected empty object for void OpenCode response",
+	),
+);
+
+export const OpenCodeUndefinedResponseSchema = Schema.Union(
+	Schema.Undefined,
+	OpenCodeEmptyObjectResponseSchema,
+);
 
 export const OpenCodeShareResponseSchema = Schema.Struct({
 	url: Schema.String,
@@ -1043,10 +1042,10 @@ export const OpenCodeFileEntryListResponseSchema = Schema.Array(
 ) as unknown as Schema.Schema<
 	Array<{
 		name: string;
-		path: string;
-		absolute: string;
+		path?: string;
+		absolute?: string;
 		type: "file" | "directory";
-		ignored: boolean;
+		ignored?: boolean;
 	}>
 >;
 
