@@ -52,6 +52,27 @@ export interface ClaudeSubagentPersist {
 	readonly persistClaudeSubagent: ClaudeEventPersistEffect["persistClaudeSubagent"];
 }
 
+export interface ClaudeSubagentTranscriptCursor {
+	readonly messageRoles: Map<string, "user" | "assistant">;
+	readonly textOffsets: Map<string, number>;
+	readonly thinkingOffsets?: Map<string, number>;
+	readonly toolStarts: Set<string>;
+	readonly toolCompletions: Set<string>;
+}
+
+export interface ClaudeSubagentTranscriptStage {
+	readonly events: CanonicalEvent[];
+	readonly cursor: ClaudeSubagentTranscriptCursor;
+}
+
+type MutableClaudeSubagentTranscriptCursor = {
+	messageRoles: Map<string, "user" | "assistant">;
+	textOffsets: Map<string, number>;
+	thinkingOffsets?: Map<string, number>;
+	toolStarts: Set<string>;
+	toolCompletions: Set<string>;
+};
+
 export const defaultClaudeSubagentSdk: ClaudeSubagentSdk = {
 	listSubagents: (parentClaudeSessionId, options) =>
 		listSubagents(parentClaudeSessionId, options),
@@ -138,7 +159,68 @@ function sessionMessagesToEvents(
 	sessionId: string,
 	messages: readonly SessionMessage[],
 ): CanonicalEvent[] {
+	return diffSessionMessagesToEvents({
+		childSessionId: sessionId,
+		messages,
+		cursor: createClaudeSubagentTranscriptCursor(),
+	});
+}
+
+function createClaudeSubagentTranscriptCursor(): ClaudeSubagentTranscriptCursor {
+	return {
+		messageRoles: new Map(),
+		textOffsets: new Map(),
+		thinkingOffsets: new Map(),
+		toolStarts: new Set(),
+		toolCompletions: new Set(),
+	};
+}
+
+export function cloneClaudeSubagentTranscriptCursor(
+	cursor: ClaudeSubagentTranscriptCursor,
+): ClaudeSubagentTranscriptCursor {
+	return {
+		messageRoles: new Map(cursor.messageRoles),
+		textOffsets: new Map(cursor.textOffsets),
+		thinkingOffsets: new Map(cursor.thinkingOffsets ?? []),
+		toolStarts: new Set(cursor.toolStarts),
+		toolCompletions: new Set(cursor.toolCompletions),
+	};
+}
+
+/**
+ * Live pollers should use stageSessionMessagesToEvents(), persist the emitted
+ * events, then commit the staged cursor only after persistence succeeds.
+ */
+export function commitClaudeSubagentTranscriptCursor(
+	target: ClaudeSubagentTranscriptCursor,
+	source: ClaudeSubagentTranscriptCursor,
+): void {
+	if (target === source) return;
+	replaceMap(target.messageRoles, source.messageRoles);
+	replaceMap(target.textOffsets, source.textOffsets);
+	replaceMap(getThinkingOffsets(target), getThinkingOffsets(source));
+	replaceSet(target.toolStarts, source.toolStarts);
+	replaceSet(target.toolCompletions, source.toolCompletions);
+}
+
+export function diffSessionMessagesToEvents(input: {
+	readonly childSessionId: string;
+	readonly messages: readonly SessionMessage[];
+	readonly cursor: ClaudeSubagentTranscriptCursor;
+}): CanonicalEvent[] {
+	const stage = stageSessionMessagesToEvents(input);
+	commitClaudeSubagentTranscriptCursor(input.cursor, stage.cursor);
+	return stage.events;
+}
+
+export function stageSessionMessagesToEvents(input: {
+	readonly childSessionId: string;
+	readonly messages: readonly SessionMessage[];
+	readonly cursor: ClaudeSubagentTranscriptCursor;
+}): ClaudeSubagentTranscriptStage {
 	const events: CanonicalEvent[] = [];
+	const cursor = cloneClaudeSubagentTranscriptCursor(input.cursor);
 	const toolMessageIds = new Map<string, string>();
 	const baseCreatedAt = Date.now();
 	let eventIndex = 0;
@@ -147,34 +229,38 @@ function sessionMessagesToEvents(
 		createdAt: baseCreatedAt + eventIndex++,
 	});
 
-	for (const message of messages) {
+	for (const message of input.messages) {
 		if (message.type !== "user" && message.type !== "assistant") continue;
 		const role: MessageRole = message.type;
 		const messageId = message.uuid;
-		events.push(
-			canonicalEvent(
-				"message.created",
-				sessionId,
-				{ messageId, role, sessionId },
-				eventOptions(),
-			),
-		);
+		if (!cursor.messageRoles.has(messageId)) {
+			cursor.messageRoles.set(messageId, role);
+			events.push(
+				canonicalEvent(
+					"message.created",
+					input.childSessionId,
+					{ messageId, role, sessionId: input.childSessionId },
+					eventOptions(),
+				),
+			);
+		}
 
 		const content = readContent(message.message);
 		for (const [index, block] of content.entries()) {
 			appendContentBlockEvents({
 				events,
-				sessionId,
+				sessionId: input.childSessionId,
 				messageId,
 				block,
 				index,
+				cursor,
 				toolMessageIds,
 				eventOptions,
 			});
 		}
 	}
 
-	return events;
+	return { events, cursor };
 }
 
 function readContent(message: unknown): readonly unknown[] {
@@ -191,6 +277,7 @@ function appendContentBlockEvents(input: {
 	readonly messageId: string;
 	readonly block: unknown;
 	readonly index: number;
+	readonly cursor: ClaudeSubagentTranscriptCursor;
 	readonly toolMessageIds: Map<string, string>;
 	readonly eventOptions: () => { provider: typeof PROVIDER; createdAt: number };
 }): void {
@@ -198,43 +285,63 @@ function appendContentBlockEvents(input: {
 	const type = input.block["type"];
 
 	if (type === "text" && typeof input.block["text"] === "string") {
-		input.events.push(
-			canonicalEvent(
-				"text.delta",
-				input.sessionId,
-				{
-					messageId: input.messageId,
-					partId: `${input.messageId}-${input.index}`,
-					text: input.block["text"],
-				},
-				input.eventOptions(),
-			),
+		const offsetKey = `${input.messageId}:${input.index}`;
+		const previousOffset = input.cursor.textOffsets.get(offsetKey);
+		const text = input.block["text"];
+		if (previousOffset === undefined || text.length > previousOffset) {
+			input.events.push(
+				canonicalEvent(
+					"text.delta",
+					input.sessionId,
+					{
+						messageId: input.messageId,
+						partId: `${input.messageId}-${input.index}`,
+						text: text.slice(previousOffset ?? 0),
+					},
+					input.eventOptions(),
+				),
+			);
+		}
+		input.cursor.textOffsets.set(
+			offsetKey,
+			Math.max(previousOffset ?? 0, text.length),
 		);
 		return;
 	}
 
 	if (type === "thinking" && typeof input.block["thinking"] === "string") {
 		const partId = `${input.messageId}-${input.index}`;
-		input.events.push(
-			canonicalEvent(
-				"thinking.start",
-				input.sessionId,
-				{ messageId: input.messageId, partId },
-				input.eventOptions(),
-			),
-			canonicalEvent(
-				"thinking.delta",
-				input.sessionId,
-				{ messageId: input.messageId, partId, text: input.block["thinking"] },
-				input.eventOptions(),
-			),
-			canonicalEvent(
-				"thinking.end",
-				input.sessionId,
-				{ messageId: input.messageId, partId },
-				input.eventOptions(),
-			),
-		);
+		const offsetKey = `${input.messageId}:${input.index}`;
+		const thinkingOffsets = getThinkingOffsets(input.cursor);
+		const previousOffset = thinkingOffsets.get(offsetKey);
+		const text = input.block["thinking"];
+		if (previousOffset === undefined) {
+			input.events.push(
+				canonicalEvent(
+					"thinking.start",
+					input.sessionId,
+					{ messageId: input.messageId, partId },
+					input.eventOptions(),
+				),
+			);
+			input.events.push(
+				canonicalEvent(
+					"thinking.delta",
+					input.sessionId,
+					{ messageId: input.messageId, partId, text },
+					input.eventOptions(),
+				),
+			);
+			input.events.push(
+				canonicalEvent(
+					"thinking.end",
+					input.sessionId,
+					{ messageId: input.messageId, partId },
+					input.eventOptions(),
+				),
+			);
+		}
+		thinkingOffsets.set(offsetKey, Math.max(previousOffset ?? 0, text.length));
 		return;
 	}
 
@@ -250,6 +357,8 @@ function appendContentBlockEvents(input: {
 		const toolName =
 			typeof input.block["name"] === "string" ? input.block["name"] : "unknown";
 		input.toolMessageIds.set(partId, input.messageId);
+		if (input.cursor.toolStarts.has(partId)) return;
+		input.cursor.toolStarts.add(partId);
 		input.events.push(
 			canonicalEvent(
 				"tool.started",
@@ -272,6 +381,8 @@ function appendContentBlockEvents(input: {
 		typeof input.block["tool_use_id"] === "string"
 	) {
 		const partId = input.block["tool_use_id"];
+		if (input.cursor.toolCompletions.has(partId)) return;
+		input.cursor.toolCompletions.add(partId);
 		input.events.push(
 			canonicalEvent(
 				"tool.completed",
@@ -299,6 +410,30 @@ function readToolResultContent(value: unknown): unknown {
 			.join("\n");
 	}
 	return value ?? null;
+}
+
+function getThinkingOffsets(
+	cursor: ClaudeSubagentTranscriptCursor,
+): Map<string, number> {
+	const mutable = cursor as MutableClaudeSubagentTranscriptCursor;
+	mutable.thinkingOffsets ??= new Map();
+	return mutable.thinkingOffsets;
+}
+
+function replaceMap<K, V>(target: Map<K, V>, source: Map<K, V>): void {
+	if (target === source) return;
+	target.clear();
+	for (const [key, value] of source) {
+		target.set(key, value);
+	}
+}
+
+function replaceSet<T>(target: Set<T>, source: Set<T>): void {
+	if (target === source) return;
+	target.clear();
+	for (const value of source) {
+		target.add(value);
+	}
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

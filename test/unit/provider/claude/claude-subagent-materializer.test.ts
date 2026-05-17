@@ -26,15 +26,28 @@ import {
 import { createAllEffectProjectors } from "../../../../src/lib/persistence/effect/projectors-effect.js";
 import {
 	type ClaudeSubagentSdk,
+	type ClaudeSubagentTranscriptCursor,
 	claudeSubagentSessionId,
+	commitClaudeSubagentTranscriptCursor,
+	diffSessionMessagesToEvents,
 	makeClaudeSubagentMaterializer,
+	stageSessionMessagesToEvents,
 } from "../../../../src/lib/provider/claude/claude-subagent-materializer.js";
 import type { SessionMessage } from "../../../../src/lib/provider/claude/types.js";
 
-function sessionMessage(
+function newCursor(): ClaudeSubagentTranscriptCursor {
+	return {
+		messageRoles: new Map(),
+		textOffsets: new Map(),
+		toolStarts: new Set(),
+		toolCompletions: new Set(),
+	};
+}
+
+function contentMessage(
 	type: "user" | "assistant",
 	uuid: string,
-	text: string,
+	content: readonly unknown[],
 ): SessionMessage {
 	return {
 		type,
@@ -43,9 +56,17 @@ function sessionMessage(
 		parent_tool_use_id: null,
 		message: {
 			role: type,
-			content: [{ type: "text", text }],
+			content,
 		},
 	};
+}
+
+function sessionMessage(
+	type: "user" | "assistant",
+	uuid: string,
+	text: string,
+): SessionMessage {
+	return contentMessage(type, uuid, [{ type: "text", text }]);
 }
 
 function makePersistenceLayer(filename: string) {
@@ -202,38 +223,8 @@ describe("Claude subagent materializer", () => {
 		});
 	});
 
-	it("diffs repeated subagent snapshots by text cursor", async () => {
-		type DiffCursor = {
-			readonly messageRoles: Map<string, "user" | "assistant">;
-			readonly textOffsets: Map<string, number>;
-			readonly toolStarts: Set<string>;
-			readonly toolCompletions: Set<string>;
-		};
-		type DiffEvent = {
-			readonly type: string;
-			readonly data: { readonly text?: string };
-		};
-		const materializerModule = await import(
-			"../../../../src/lib/provider/claude/claude-subagent-materializer.js"
-		);
-		const diffSessionMessagesToEvents = (
-			materializerModule as typeof materializerModule & {
-				readonly diffSessionMessagesToEvents?: (input: {
-					readonly childSessionId: string;
-					readonly messages: readonly SessionMessage[];
-					readonly cursor: DiffCursor;
-				}) => readonly DiffEvent[];
-			}
-		).diffSessionMessagesToEvents;
-		expect(diffSessionMessagesToEvents).toEqual(expect.any(Function));
-		if (!diffSessionMessagesToEvents) return;
-
-		const cursor: DiffCursor = {
-			messageRoles: new Map(),
-			textOffsets: new Map(),
-			toolStarts: new Set(),
-			toolCompletions: new Set(),
-		};
+	it("diffs repeated subagent snapshots by text cursor", () => {
+		const cursor = newCursor();
 		const firstEvents = diffSessionMessagesToEvents({
 			childSessionId: "child-session",
 			messages: [sessionMessage("assistant", "sub-assistant-1", "Auth")],
@@ -244,6 +235,8 @@ describe("Claude subagent materializer", () => {
 				.filter((event) => event.type === "text.delta")
 				.map((event) => event.data.text),
 		).toEqual(["Auth"]);
+		expect(cursor.messageRoles.get("sub-assistant-1")).toBe("assistant");
+		expect(cursor.textOffsets.get("sub-assistant-1:0")).toBe("Auth".length);
 
 		const secondEvents = diffSessionMessagesToEvents({
 			childSessionId: "child-session",
@@ -257,6 +250,214 @@ describe("Claude subagent materializer", () => {
 				.filter((event) => event.type === "text.delta")
 				.map((event) => event.data.text),
 		).toEqual([" is fine"]);
+
+		const retryEvents = diffSessionMessagesToEvents({
+			childSessionId: "child-session",
+			messages: [
+				sessionMessage("assistant", "sub-assistant-1", "Auth is fine"),
+			],
+			cursor,
+		});
+		expect(retryEvents).toEqual([]);
+	});
+
+	it("stages repeated subagent snapshots by text cursor", async () => {
+		const cursor = newCursor();
+		const firstStage = stageSessionMessagesToEvents({
+			childSessionId: "child-session",
+			messages: [sessionMessage("assistant", "sub-assistant-1", "Auth")],
+			cursor,
+		});
+		expect(
+			firstStage.events
+				.filter((event) => event.type === "text.delta")
+				.map((event) => event.data.text),
+		).toEqual(["Auth"]);
+		commitClaudeSubagentTranscriptCursor(cursor, firstStage.cursor);
+
+		const secondStage = stageSessionMessagesToEvents({
+			childSessionId: "child-session",
+			messages: [
+				sessionMessage("assistant", "sub-assistant-1", "Auth is fine"),
+			],
+			cursor,
+		});
+		expect(
+			secondStage.events
+				.filter((event) => event.type === "text.delta")
+				.map((event) => event.data.text),
+		).toEqual([" is fine"]);
+		commitClaudeSubagentTranscriptCursor(cursor, secondStage.cursor);
+
+		const repeatedStage = stageSessionMessagesToEvents({
+			childSessionId: "child-session",
+			messages: [
+				sessionMessage("assistant", "sub-assistant-1", "Auth is fine"),
+			],
+			cursor,
+		});
+		expect(repeatedStage.events).toEqual([]);
+	});
+
+	it("does not rewind text offsets when a snapshot shrinks", () => {
+		const cursor = newCursor();
+		const firstStage = stageSessionMessagesToEvents({
+			childSessionId: "child-session",
+			messages: [
+				sessionMessage("assistant", "sub-assistant-1", "Auth is fine"),
+			],
+			cursor,
+		});
+		commitClaudeSubagentTranscriptCursor(cursor, firstStage.cursor);
+
+		const shrinkStage = stageSessionMessagesToEvents({
+			childSessionId: "child-session",
+			messages: [sessionMessage("assistant", "sub-assistant-1", "Auth")],
+			cursor,
+		});
+		expect(shrinkStage.events).toEqual([]);
+		commitClaudeSubagentTranscriptCursor(cursor, shrinkStage.cursor);
+		expect(cursor.textOffsets.get("sub-assistant-1:0")).toBe(
+			"Auth is fine".length,
+		);
+
+		const growStage = stageSessionMessagesToEvents({
+			childSessionId: "child-session",
+			messages: [
+				sessionMessage("assistant", "sub-assistant-1", "Auth is fine today"),
+			],
+			cursor,
+		});
+		expect(
+			growStage.events
+				.filter((event) => event.type === "text.delta")
+				.map((event) => event.data.text),
+		).toEqual([" today"]);
+	});
+
+	it("diffs repeated thinking snapshots by thinking cursor", () => {
+		const cursor = newCursor();
+		const firstStage = stageSessionMessagesToEvents({
+			childSessionId: "child-session",
+			messages: [
+				contentMessage("assistant", "sub-assistant-1", [
+					{ type: "thinking", thinking: "Checking" },
+				]),
+			],
+			cursor,
+		});
+		expect(firstStage.events.map((event) => event.type)).toEqual([
+			"message.created",
+			"thinking.start",
+			"thinking.delta",
+			"thinking.end",
+		]);
+		expect(
+			firstStage.events
+				.filter((event) => event.type === "thinking.delta")
+				.map((event) => event.data.text),
+		).toEqual(["Checking"]);
+		commitClaudeSubagentTranscriptCursor(cursor, firstStage.cursor);
+
+		const repeatedStage = stageSessionMessagesToEvents({
+			childSessionId: "child-session",
+			messages: [
+				contentMessage("assistant", "sub-assistant-1", [
+					{ type: "thinking", thinking: "Checking" },
+				]),
+			],
+			cursor,
+		});
+		expect(repeatedStage.events).toEqual([]);
+
+		const growStage = stageSessionMessagesToEvents({
+			childSessionId: "child-session",
+			messages: [
+				contentMessage("assistant", "sub-assistant-1", [
+					{ type: "thinking", thinking: "Checking auth" },
+				]),
+			],
+			cursor,
+		});
+		expect(growStage.events).toEqual([]);
+	});
+
+	it("dedupes repeated tool start and completion snapshots", () => {
+		const cursor = newCursor();
+		const messages = [
+			contentMessage("assistant", "sub-assistant-1", [
+				{
+					type: "tool_use",
+					id: "toolu-1",
+					name: "Bash",
+					input: { command: "pnpm test" },
+				},
+			]),
+			contentMessage("user", "sub-user-1", [
+				{
+					type: "tool_result",
+					tool_use_id: "toolu-1",
+					content: "ok",
+				},
+			]),
+		];
+
+		const firstStage = stageSessionMessagesToEvents({
+			childSessionId: "child-session",
+			messages,
+			cursor,
+		});
+		expect(
+			firstStage.events
+				.filter(
+					(event) =>
+						event.type === "tool.started" || event.type === "tool.completed",
+				)
+				.map((event) => event.type),
+		).toEqual(["tool.started", "tool.completed"]);
+		commitClaudeSubagentTranscriptCursor(cursor, firstStage.cursor);
+
+		const repeatedStage = stageSessionMessagesToEvents({
+			childSessionId: "child-session",
+			messages,
+			cursor,
+		});
+		expect(repeatedStage.events).toEqual([]);
+	});
+
+	it("lets callers stage cursor advances before committing them", () => {
+		const cursor = newCursor();
+		const firstStage = stageSessionMessagesToEvents({
+			childSessionId: "child-session",
+			messages: [sessionMessage("assistant", "sub-assistant-1", "Auth")],
+			cursor,
+		});
+		expect(
+			firstStage.events
+				.filter((event) => event.type === "text.delta")
+				.map((event) => event.data.text),
+		).toEqual(["Auth"]);
+		expect(cursor.messageRoles.has("sub-assistant-1")).toBe(false);
+		expect(cursor.textOffsets.get("sub-assistant-1:0")).toBeUndefined();
+
+		const retryStage = stageSessionMessagesToEvents({
+			childSessionId: "child-session",
+			messages: [sessionMessage("assistant", "sub-assistant-1", "Auth")],
+			cursor,
+		});
+		expect(
+			retryStage.events
+				.filter((event) => event.type === "text.delta")
+				.map((event) => event.data.text),
+		).toEqual(["Auth"]);
+
+		commitClaudeSubagentTranscriptCursor(cursor, firstStage.cursor);
+		const committedStage = stageSessionMessagesToEvents({
+			childSessionId: "child-session",
+			messages: [sessionMessage("assistant", "sub-assistant-1", "Auth")],
+			cursor,
+		});
+		expect(committedStage.events).toEqual([]);
 	});
 
 	it("materializes unmatched SDK subagents without linking a parent tool", async () => {
