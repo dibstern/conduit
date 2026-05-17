@@ -422,6 +422,7 @@ export const sendMessageToSession = (input: SendMessageToSessionInput) =>
 									const isDefault =
 										!currentTitle ||
 										currentTitle === "Claude Session" ||
+										currentTitle === "Untitled" ||
 										currentTitle.startsWith("New session");
 									if (!isDefault) return;
 

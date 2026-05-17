@@ -19,7 +19,7 @@ const SESSION_HANDLES = [
  * Projects session lifecycle events into the `sessions` read-model table.
  *
  * Handled events:
- * - `session.created`         -> INSERT with ON CONFLICT DO UPDATE (preserving nullable columns)
+ * - `session.created`         -> INSERT with ON CONFLICT DO UPDATE (only replacing default placeholder titles)
  * - `session.renamed`         -> UPDATE title
  * - `session.status`          -> UPDATE status
  * - `session.provider_changed`-> UPDATE provider
@@ -35,14 +35,22 @@ export class SessionProjector implements Projector {
 	project(event: StoredEvent, db: SqliteClient): void {
 		if (isEventType(event, "session.created")) {
 			// Use INSERT ... ON CONFLICT DO UPDATE instead of INSERT OR REPLACE
-			// to preserve nullable columns (provider_sid, parent_id,
-			// fork_point_event) that may have been set by other code paths.
+			// to preserve user/auto-renamed titles plus nullable columns
+			// (provider_sid, parent_id, fork_point_event) that may have been set by
+			// other code paths.
 			db.execute(
 				`INSERT INTO sessions (id, provider, title, status, created_at, updated_at)
 				 VALUES (?, ?, ?, 'idle', ?, ?)
 				 ON CONFLICT (id) DO UPDATE SET
 				     provider = excluded.provider,
-				     title = excluded.title,
+				     title = CASE
+				       WHEN sessions.title IS NULL
+				         OR sessions.title = ''
+				         OR sessions.title IN ('Untitled', 'Claude Session', 'Test Session')
+				         OR sessions.title LIKE 'New session%'
+				       THEN excluded.title
+				       ELSE sessions.title
+				     END,
 				     updated_at = excluded.updated_at`,
 				[
 					event.data.sessionId,

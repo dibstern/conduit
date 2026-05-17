@@ -1252,6 +1252,7 @@ describe("handleGetToolContent", () => {
 			const readQuery = {
 				getToolContent: vi.fn(() => Effect.succeed("full tool output text")),
 				getSessionStatus: vi.fn(() => Effect.succeed(undefined)),
+				getSession: vi.fn(() => Effect.succeed(undefined)),
 				getAllSessionStatuses: vi.fn(() => Effect.succeed({})),
 				listSessions: vi.fn(() => Effect.succeed([])),
 				getSessionMessagesWithParts: vi.fn(() => Effect.succeed([])),
@@ -2976,6 +2977,7 @@ describe("handleMessage", () => {
 			const readQuery = {
 				getToolContent: vi.fn(() => Effect.succeed(undefined)),
 				getSessionStatus: vi.fn(() => Effect.succeed(undefined)),
+				getSession: vi.fn(() => Effect.succeed(undefined)),
 				getAllSessionStatuses: vi.fn(() => Effect.succeed({})),
 				listSessions: vi.fn(() => Effect.succeed([])),
 				getSessionMessagesWithParts: vi.fn(() =>
@@ -3146,7 +3148,7 @@ describe("handleMessage", () => {
 	);
 
 	it.effect(
-		"auto-renames first Claude turn through SessionManagerService",
+		"auto-renames first Claude turn when the current title is Untitled",
 		() => {
 			const ws = mockWsHandler({
 				getClientSession: vi.fn(() => "session-1"),
@@ -3167,7 +3169,7 @@ describe("handleMessage", () => {
 				Effect.succeed([
 					{
 						id: "session-1",
-						title: "Claude Session",
+						title: "Untitled",
 						updatedAt: 100,
 						messageCount: 0,
 					},

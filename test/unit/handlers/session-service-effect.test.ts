@@ -188,6 +188,7 @@ describe("session handlers with Effect-native model service", () => {
 			const readQueryEffect = {
 				getToolContent: vi.fn(() => Effect.succeed(undefined)),
 				getSessionStatus: vi.fn(() => Effect.succeed(undefined)),
+				getSession: vi.fn(() => Effect.succeed(undefined)),
 				getAllSessionStatuses: vi.fn(() => Effect.succeed({})),
 				listSessions: vi.fn(() => Effect.succeed([])),
 				getSessionMessagesWithParts: vi.fn(() =>

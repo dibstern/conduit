@@ -86,6 +86,9 @@ function makeReadQueryEffect(rows: readonly SessionRow[]): ReadQueryEffect {
 	return {
 		getToolContent: vi.fn(() => Effect.succeed(undefined)),
 		getSessionStatus: vi.fn(() => Effect.succeed(undefined)),
+		getSession: vi.fn((sessionId: string) =>
+			Effect.succeed(rows.find((row) => row.id === sessionId)),
+		),
 		getAllSessionStatuses: vi.fn(() => Effect.succeed({})),
 		listSessions: vi.fn(() => Effect.succeed(rows)),
 		getSessionMessagesWithParts: vi.fn(() => Effect.succeed([])),

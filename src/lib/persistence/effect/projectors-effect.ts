@@ -71,7 +71,14 @@ export const makeSessionProjector = (): EffectProjector => ({
 					VALUES (${event.data.sessionId}, ${event.data.provider}, ${event.data.title}, 'idle', ${event.createdAt}, ${event.createdAt})
 					ON CONFLICT (id) DO UPDATE SET
 						provider = excluded.provider,
-						title = excluded.title,
+						title = CASE
+							WHEN sessions.title IS NULL
+								OR sessions.title = ''
+								OR sessions.title IN ('Untitled', 'Claude Session', 'Test Session')
+								OR sessions.title LIKE 'New session%'
+							THEN excluded.title
+							ELSE sessions.title
+						END,
 						updated_at = excluded.updated_at`;
 				return;
 			}

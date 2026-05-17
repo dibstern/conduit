@@ -326,6 +326,9 @@ const normalizeSessionTitle = (title?: string): string => {
 	return trimmed ? trimmed : "Untitled";
 };
 
+const isClaudeSessionRow = (row: SessionRow): boolean =>
+	row.provider === "claude" || row.provider === "claude-sdk";
+
 const createLocalSessionId = (): string =>
 	`ses_${randomUUID().replaceAll("-", "")}`;
 
@@ -502,11 +505,111 @@ export const deleteSession = (sessionId: string) =>
 		Effect.withSpan("session.deleteSession", { attributes: { sessionId } }),
 	);
 
+const renameSQLiteBackedClaudeSession = (sessionId: string, title: string) =>
+	Effect.gen(function* () {
+		const readQueryOption = yield* Effect.serviceOption(ReadQueryEffectTag);
+		const eventStoreOption = yield* Effect.serviceOption(EventStoreEffectTag);
+		const projectionRunnerOption = yield* Effect.serviceOption(
+			ProjectionRunnerEffectTag,
+		);
+		const sqlOption = yield* Effect.serviceOption(SqlClient.SqlClient);
+
+		if (
+			readQueryOption._tag === "None" ||
+			eventStoreOption._tag === "None" ||
+			projectionRunnerOption._tag === "None" ||
+			sqlOption._tag === "None"
+		) {
+			return false;
+		}
+
+		const eventStore = eventStoreOption.value;
+		const projectionRunner = projectionRunnerOption.value;
+		const sql = sqlOption.value;
+
+		const withSql = <A, E>(
+			effect: Effect.Effect<A, E, SqlClient.SqlClient>,
+		): Effect.Effect<A, E> =>
+			effect.pipe(Effect.provideService(SqlClient.SqlClient, sql));
+
+		const recovered = yield* projectionRunner.isRecovered();
+		if (!recovered) {
+			yield* withSql(projectionRunner.recover()).pipe(
+				Effect.mapError(
+					(cause) =>
+						new SessionManagerError({
+							operation: "renameSession.recover",
+							cause,
+						}),
+				),
+				Effect.asVoid,
+			);
+		}
+
+		const readQuery = readQueryOption.value;
+		const row = yield* readQuery.getSession(sessionId).pipe(
+			Effect.mapError(
+				(cause) =>
+					new SessionManagerError({
+						operation: "renameSession.getSession",
+						cause,
+					}),
+			),
+		);
+		if (!row || !isClaudeSessionRow(row)) return false;
+
+		const now = Date.now();
+
+		const stored = yield* eventStore
+			.append(
+				canonicalEvent(
+					"session.renamed",
+					sessionId,
+					{
+						sessionId,
+						title,
+					},
+					{
+						provider: row.provider,
+						createdAt: now,
+						metadata: { source: "relay" },
+					},
+				),
+			)
+			.pipe(
+				Effect.mapError(
+					(cause) =>
+						new SessionManagerError({
+							operation: "renameSession.append",
+							cause,
+						}),
+				),
+			);
+
+		yield* withSql(projectionRunner.projectEvent(stored)).pipe(
+			Effect.mapError(
+				(cause) =>
+					new SessionManagerError({
+						operation: "renameSession.project",
+						cause,
+					}),
+			),
+		);
+
+		return true;
+	});
+
 /**
- * Rename a session via the API.
+ * Rename a session through Conduit's event store for Claude rows, otherwise via the API.
  */
 export const renameSession = (sessionId: string, title: string) =>
 	Effect.gen(function* () {
+		const renamedLocally = yield* renameSQLiteBackedClaudeSession(
+			sessionId,
+			title,
+		);
+		if (renamedLocally) return;
+
 		const api = yield* OpenCodeAPITag;
 		yield* Effect.tryPromise(() =>
 			api.session.update(sessionId, { title }),
@@ -963,6 +1066,12 @@ export const SessionManagerServiceLive: Layer.Layer<
 		const engineOption = yield* Effect.serviceOption(OrchestrationEngineTag);
 		const readQueryEffectOption =
 			yield* Effect.serviceOption(ReadQueryEffectTag);
+		const eventStoreEffectOption =
+			yield* Effect.serviceOption(EventStoreEffectTag);
+		const projectionRunnerEffectOption = yield* Effect.serviceOption(
+			ProjectionRunnerEffectTag,
+		);
+		const sqlOption = yield* Effect.serviceOption(SqlClient.SqlClient);
 		const statusPollerOption = yield* Effect.serviceOption(StatusPollerTag);
 		if (configOption._tag === "Some") {
 			const forkMeta = loadForkMetadata(configDir);
@@ -1136,9 +1245,43 @@ export const SessionManagerServiceLive: Layer.Layer<
 					);
 				}),
 			renameSession: (sessionId, title) =>
-				renameSession(sessionId, title).pipe(
-					Effect.provideService(OpenCodeAPITag, api),
-				),
+				(() => {
+					const base = renameSession(sessionId, title).pipe(
+						Effect.provideService(OpenCodeAPITag, api),
+					);
+					const withReadQuery =
+						readQueryEffectOption._tag === "Some"
+							? base.pipe(
+									Effect.provideService(
+										ReadQueryEffectTag,
+										readQueryEffectOption.value,
+									),
+								)
+							: base;
+					const withEventStore =
+						eventStoreEffectOption._tag === "Some"
+							? withReadQuery.pipe(
+									Effect.provideService(
+										EventStoreEffectTag,
+										eventStoreEffectOption.value,
+									),
+								)
+							: withReadQuery;
+					const withProjectionRunner =
+						projectionRunnerEffectOption._tag === "Some"
+							? withEventStore.pipe(
+									Effect.provideService(
+										ProjectionRunnerEffectTag,
+										projectionRunnerEffectOption.value,
+									),
+								)
+							: withEventStore;
+					return sqlOption._tag === "Some"
+						? withProjectionRunner.pipe(
+								Effect.provideService(SqlClient.SqlClient, sqlOption.value),
+							)
+						: withProjectionRunner;
+				})(),
 			clearPaginationCursor: (sessionId) =>
 				clearPaginationCursor(sessionId).pipe(
 					Effect.provideService(SessionManagerStateTag, stateRef),
