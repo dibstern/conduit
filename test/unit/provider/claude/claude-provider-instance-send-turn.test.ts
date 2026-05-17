@@ -678,6 +678,32 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 		);
 	});
 
+	it("fails invalid JSON-shaped SDK options before calling query", async () => {
+		queryFactorySpy = vi.fn(() => createMockQuery([makeSuccessResult()]));
+
+		const instance = new ClaudeProviderInstance({
+			workspaceRoot: workspace,
+			queryFactory: queryFactorySpy,
+		});
+
+		const result = await Effect.runPromise(
+			instance
+				.sendTurnEffect(
+					makeBaseSendTurnInput({
+						sessionId: "session-invalid-options",
+						variant: "turbo",
+					}),
+				)
+				.pipe(Effect.either),
+		);
+
+		expect(result._tag).toBe("Left");
+		if (result._tag === "Left") {
+			expect(result.left.message).toContain("Claude SDK options decode failed");
+		}
+		expect(queryFactorySpy).not.toHaveBeenCalled();
+	});
+
 	it("omits SDK options.effort when no variant is supplied", async () => {
 		const resultMsg = makeSuccessResult();
 		const mockQuery = createMockQuery([resultMsg]);
@@ -974,7 +1000,18 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 		const systemMsg = {
 			type: "system" as const,
 			subtype: "init" as const,
+			uuid: "00000000-0000-0000-0000-000000000101",
 			model: "claude-sonnet-4",
+			apiKeySource: "none",
+			claude_code_version: "1.0.0",
+			cwd: workspace,
+			tools: [],
+			mcp_servers: [],
+			permissionMode: "default",
+			slash_commands: [],
+			output_style: "default",
+			skills: [],
+			plugins: [],
 			session_id: "sdk-session-1",
 		} as unknown as SDKMessage;
 
@@ -982,6 +1019,7 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 			type: "assistant" as const,
 			uuid: "asst-uuid-1",
 			message: { role: "assistant", content: [] },
+			parent_tool_use_id: null,
 			session_id: "sdk-session-1",
 		} as unknown as SDKMessage;
 
@@ -1071,6 +1109,87 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 			(call) => call[0].type === "turn.error",
 		);
 		expect(errorEvents.length).toBeGreaterThanOrEqual(1);
+	});
+
+	it("fails malformed SDK stream data before translation", async () => {
+		const hugeProviderPayload = "x".repeat(20_000);
+		const malformedMessage = {
+			type: "system",
+			subtype: "init",
+			session_id: "sdk-session-1",
+			hugeProviderPayload,
+		} as unknown as SDKMessage;
+		const mockQuery = createMockQuery([malformedMessage]);
+		queryFactorySpy = vi.fn(() => mockQuery);
+
+		const instance = new ClaudeProviderInstance({
+			workspaceRoot: workspace,
+			queryFactory: queryFactorySpy,
+		});
+
+		const sink = createMockEventSink();
+		const result = await Effect.runPromise(
+			instance.sendTurnEffect(
+				makeBaseSendTurnInput({
+					sessionId: "session-malformed-provider-data",
+					eventSink: sink,
+				}),
+			),
+		);
+
+		expect(result.status).toBe("error");
+		expect(result.error?.code).toBe("provider_error");
+		expect(result.error?.message).toContain("Claude SDK message decode failed");
+		expect(result.error?.message).not.toContain("x".repeat(500));
+
+		const pushCalls = (sink.push as ReturnType<typeof vi.fn>).mock
+			.calls as Array<[CanonicalEvent]>;
+		expect(pushCalls.map((call) => call[0].type)).not.toContain(
+			"session.status",
+		);
+		const errorEvents = pushCalls.filter(
+			(call) => call[0].type === "turn.error",
+		);
+		expect(errorEvents).toHaveLength(1);
+		const errorPayload = errorEvents[0]?.[0].data as { error?: string };
+		expect(errorPayload.error).toContain("Claude SDK message decode failed");
+		expect(errorPayload.error).not.toContain("x".repeat(500));
+	});
+
+	it("fails an invalid constructed SDK user message before calling query", async () => {
+		queryFactorySpy = vi.fn(() => createMockQuery([makeSuccessResult()]));
+		const instance = new ClaudeProviderInstance({
+			workspaceRoot: workspace,
+			queryFactory: queryFactorySpy,
+		});
+		(
+			instance as unknown as {
+				buildUserMessage(input: unknown): SDKUserMessage;
+			}
+		).buildUserMessage = () =>
+			({
+				type: "user",
+				message: { role: "assistant", content: [] },
+				parent_tool_use_id: null,
+			}) as unknown as SDKUserMessage;
+
+		const result = await Effect.runPromise(
+			instance
+				.sendTurnEffect(
+					makeBaseSendTurnInput({
+						sessionId: "session-invalid-user-message",
+					}),
+				)
+				.pipe(Effect.either),
+		);
+
+		expect(result._tag).toBe("Left");
+		if (result._tag === "Left") {
+			expect(result.left.message).toContain(
+				"Claude SDK user message decode failed",
+			);
+		}
+		expect(queryFactorySpy).not.toHaveBeenCalled();
 	});
 
 	// ── Test 6b: SDK error result yields TurnResult with error details ───────
@@ -1262,7 +1381,18 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 		const systemMsg = {
 			type: "system" as const,
 			subtype: "init" as const,
+			uuid: "00000000-0000-0000-0000-000000000102",
 			model: "claude-sonnet-4",
+			apiKeySource: "none",
+			claude_code_version: "1.0.0",
+			cwd: workspace,
+			tools: [],
+			mcp_servers: [],
+			permissionMode: "default",
+			slash_commands: [],
+			output_style: "default",
+			skills: [],
+			plugins: [],
 			session_id: "sdk-session-1",
 		} as unknown as SDKMessage;
 
@@ -1723,6 +1853,8 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 				index: 0,
 				content_block: { type: "text", text: "" },
 			},
+			parent_tool_use_id: null,
+			uuid: "00000000-0000-0000-0000-000000000103",
 			session_id: "sdk-session-1",
 		} as unknown as SDKMessage;
 
@@ -1733,6 +1865,8 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 				index: 0,
 				delta: { type: "text_delta", text: "Hello partial" },
 			},
+			parent_tool_use_id: null,
+			uuid: "00000000-0000-0000-0000-000000000104",
 			session_id: "sdk-session-1",
 		} as unknown as SDKMessage;
 

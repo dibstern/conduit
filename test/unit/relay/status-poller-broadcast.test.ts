@@ -45,17 +45,34 @@ async function createMockOpenCode(): Promise<MockOpenCode> {
 
 	const sessions: Record<
 		string,
-		{ id: string; title: string; modelID: string; providerID: string }
+		{
+			id: string;
+			projectID: string;
+			directory: string;
+			title: string;
+			version: string;
+			time: { created: number; updated: number };
+			modelID: string;
+			providerID: string;
+		}
 	> = {
 		"sess-A": {
 			id: "sess-A",
+			projectID: "project-1",
+			directory: "/test",
 			title: "Session A",
+			version: "1.0.0",
+			time: { created: 1, updated: 1 },
 			modelID: "gpt-4",
 			providerID: "openai",
 		},
 		"sess-B": {
 			id: "sess-B",
+			projectID: "project-1",
+			directory: "/test",
 			title: "Session B",
+			version: "1.0.0",
+			time: { created: 2, updated: 2 },
 			modelID: "gpt-4",
 			providerID: "openai",
 		},
@@ -79,7 +96,14 @@ async function createMockOpenCode(): Promise<MockOpenCode> {
 		res.setHeader("Content-Type", "application/json");
 
 		if (url.pathname === "/path") {
-			res.end(JSON.stringify("/test"));
+			res.end(
+				JSON.stringify({
+					state: "/test/state",
+					config: "/test/config",
+					worktree: "/test",
+					directory: "/test",
+				}),
+			);
 			return;
 		}
 
@@ -92,7 +116,11 @@ async function createMockOpenCode(): Promise<MockOpenCode> {
 			res.end(
 				JSON.stringify({
 					id: "sess-new",
+					projectID: "project-1",
+					directory: "/test",
 					title: "New",
+					version: "1.0.0",
+					time: { created: 3, updated: 3 },
 					modelID: "gpt-4",
 					providerID: "openai",
 				}),
@@ -113,7 +141,11 @@ async function createMockOpenCode(): Promise<MockOpenCode> {
 			const id = sessionMatch[1]!;
 			const session = sessions[id] ?? {
 				id,
+				projectID: "project-1",
+				directory: "/test",
 				title: "Unknown",
+				version: "1.0.0",
+				time: { created: 1, updated: 1 },
 				modelID: "gpt-4",
 				providerID: "openai",
 			};
@@ -130,13 +162,23 @@ async function createMockOpenCode(): Promise<MockOpenCode> {
 
 		if (url.pathname === "/agent") {
 			res.end(
-				JSON.stringify([{ id: "coder", name: "coder", description: "Main" }]),
+				JSON.stringify([
+					{
+						name: "coder",
+						description: "Main",
+						mode: "primary",
+						builtIn: true,
+						permission: { edit: "ask", bash: {} },
+						tools: {},
+						options: {},
+					},
+				]),
 			);
 			return;
 		}
 
 		if (url.pathname === "/provider") {
-			res.end(JSON.stringify({ providers: [], defaults: {}, connected: [] }));
+			res.end(JSON.stringify({ all: [], default: {}, connected: [] }));
 			return;
 		}
 

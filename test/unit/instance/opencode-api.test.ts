@@ -1,22 +1,93 @@
 import { describe, expect, it, vi } from "vitest";
+import { OpenCodeApiError } from "../../../src/lib/errors.js";
 import { OpenCodeAPI } from "../../../src/lib/instance/opencode-api.js";
+
+function makeSession(overrides: Record<string, unknown> = {}) {
+	return {
+		id: "s1",
+		projectID: "proj1",
+		directory: "/test",
+		title: "test",
+		version: "1.0.0",
+		time: { created: 1, updated: 1 },
+		...overrides,
+	};
+}
+
+function makeAgent(overrides: Record<string, unknown> = {}) {
+	return {
+		name: "build",
+		description: "Build agent",
+		mode: "primary",
+		builtIn: true,
+		permission: { edit: "ask", bash: {} },
+		tools: {},
+		options: {},
+		...overrides,
+	};
+}
+
+function makeProject(overrides: Record<string, unknown> = {}) {
+	return {
+		id: "proj1",
+		worktree: "/test",
+		time: { created: 1 },
+		...overrides,
+	};
+}
+
+function makePty(overrides: Record<string, unknown> = {}) {
+	return {
+		id: "pty1",
+		title: "Terminal",
+		command: "zsh",
+		args: [],
+		cwd: "/test",
+		status: "running",
+		pid: 1234,
+		...overrides,
+	};
+}
+
+function makeProvider(overrides: Record<string, unknown> = {}) {
+	return {
+		id: "anthropic",
+		name: "Anthropic",
+		env: ["ANTHROPIC_API_KEY"],
+		models: {
+			"claude-sonnet-4": {
+				id: "claude-sonnet-4",
+				name: "Claude Sonnet 4",
+				release_date: "2026-01-01",
+				attachment: true,
+				reasoning: true,
+				temperature: true,
+				tool_call: true,
+				limit: { context: 200000, output: 64000 },
+				options: {},
+				variants: { "1m": { limit: { context: 1000000 } } },
+			},
+		},
+		...overrides,
+	};
+}
 
 // Stub SDK client — test that methods delegate correctly
 function makeStubSdk() {
 	return {
 		session: {
 			list: vi.fn(async () => ({
-				data: [{ id: "s1", title: "test" }],
+				data: [makeSession()],
 				error: undefined,
 				response: { status: 200 },
 			})),
 			get: vi.fn(async () => ({
-				data: { id: "s1", title: "test" },
+				data: makeSession(),
 				error: undefined,
 				response: { status: 200 },
 			})),
 			create: vi.fn(async () => ({
-				data: { id: "s2", title: "new" },
+				data: makeSession({ id: "s2", title: "new" }),
 				error: undefined,
 				response: { status: 200 },
 			})),
@@ -26,7 +97,7 @@ function makeStubSdk() {
 				response: { status: 200 },
 			})),
 			update: vi.fn(async () => ({
-				data: { id: "s1", title: "updated" },
+				data: makeSession({ title: "updated" }),
 				error: undefined,
 				response: { status: 200 },
 			})),
@@ -51,22 +122,22 @@ function makeStubSdk() {
 				response: { status: 200 },
 			})),
 			fork: vi.fn(async () => ({
-				data: { id: "s3" },
+				data: makeSession({ id: "s3" }),
 				error: undefined,
 				response: { status: 200 },
 			})),
 			revert: vi.fn(async () => ({
-				data: { id: "s1" },
+				data: makeSession({ revert: { messageID: "m1" } }),
 				error: undefined,
 				response: { status: 200 },
 			})),
 			unrevert: vi.fn(async () => ({
-				data: { id: "s1" },
+				data: makeSession(),
 				error: undefined,
 				response: { status: 200 },
 			})),
 			share: vi.fn(async () => ({
-				data: { id: "s1", share: { url: "https://share.test" } },
+				data: { url: "https://share.test" },
 				error: undefined,
 				response: { status: 200 },
 			})),
@@ -76,7 +147,7 @@ function makeStubSdk() {
 				response: { status: 200 },
 			})),
 			diff: vi.fn(async () => ({
-				data: [],
+				data: { diffs: [] },
 				error: undefined,
 				response: { status: 200 },
 			})),
@@ -122,12 +193,12 @@ function makeStubSdk() {
 		},
 		pty: {
 			list: vi.fn(async () => ({
-				data: [],
+				data: [makePty()],
 				error: undefined,
 				response: { status: 200 },
 			})),
 			create: vi.fn(async () => ({
-				data: { id: "pty1" },
+				data: makePty(),
 				error: undefined,
 				response: { status: 200 },
 			})),
@@ -137,48 +208,88 @@ function makeStubSdk() {
 				response: { status: 200 },
 			})),
 			update: vi.fn(async () => ({
-				data: { id: "pty1" },
+				data: makePty(),
 				error: undefined,
 				response: { status: 200 },
 			})),
 		},
 		file: {
 			list: vi.fn(async () => ({
-				data: [],
+				data: [
+					{
+						name: "app.ts",
+						path: "src/app.ts",
+						absolute: "/test/src/app.ts",
+						type: "file",
+						ignored: false,
+					},
+				],
 				error: undefined,
 				response: { status: 200 },
 			})),
 			read: vi.fn(async () => ({
-				data: { content: "hello" },
+				data: { type: "text", content: "hello" },
 				error: undefined,
 				response: { status: 200 },
 			})),
 			status: vi.fn(async () => ({
-				data: [],
+				data: [
+					{
+						path: "src/app.ts",
+						added: 2,
+						removed: 1,
+						status: "modified",
+					},
+				],
 				error: undefined,
 				response: { status: 200 },
 			})),
 		},
 		find: {
 			text: vi.fn(async () => ({
-				data: [],
+				data: [
+					{
+						path: { text: "src/app.ts" },
+						lines: { text: "const app = true;" },
+						line_number: 1,
+						absolute_offset: 0,
+						submatches: [{ match: { text: "app" }, start: 6, end: 9 }],
+					},
+				],
 				error: undefined,
 				response: { status: 200 },
 			})),
 			files: vi.fn(async () => ({
-				data: [],
+				data: ["src/app.ts"],
 				error: undefined,
 				response: { status: 200 },
 			})),
 			symbols: vi.fn(async () => ({
-				data: [],
+				data: [
+					{
+						name: "main",
+						kind: 12,
+						location: {
+							uri: "file:///test/src/app.ts",
+							range: {
+								start: { line: 1, character: 0 },
+								end: { line: 1, character: 4 },
+							},
+						},
+					},
+				],
 				error: undefined,
 				response: { status: 200 },
 			})),
 		},
 		path: {
 			get: vi.fn(async () => ({
-				data: { cwd: "/test" },
+				data: {
+					state: "/state",
+					config: "/config",
+					worktree: "/test",
+					directory: "/test",
+				},
 				error: undefined,
 				response: { status: 200 },
 			})),
@@ -192,26 +303,32 @@ function makeStubSdk() {
 		},
 		app: {
 			agents: vi.fn(async () => ({
-				data: [],
+				data: [makeAgent()],
 				error: undefined,
 				response: { status: 200 },
 			})),
 		},
 		command: {
 			list: vi.fn(async () => ({
-				data: [],
+				data: [
+					{
+						name: "fix",
+						description: "Fix issue",
+						template: "Fix {{args}}",
+					},
+				],
 				error: undefined,
 				response: { status: 200 },
 			})),
 		},
 		project: {
 			list: vi.fn(async () => ({
-				data: [],
+				data: [makeProject()],
 				error: undefined,
 				response: { status: 200 },
 			})),
 			current: vi.fn(async () => ({
-				data: { id: "proj1", worktree: "/test" },
+				data: makeProject(),
 				error: undefined,
 				response: { status: 200 },
 			})),
@@ -254,7 +371,9 @@ describe("OpenCodeAPI", () => {
 		});
 		const result = await api.session.list();
 		expect(sdk.session.list).toHaveBeenCalled();
-		expect(result).toEqual([{ id: "s1", title: "test" }]);
+		expect(result).toEqual([
+			expect.objectContaining({ id: "s1", title: "test" }),
+		]);
 	});
 
 	it("session.get() delegates to sdk.session.get()", async () => {
@@ -272,7 +391,9 @@ describe("OpenCodeAPI", () => {
 				path: { id: "s1" },
 			}),
 		);
-		expect(result).toEqual({ id: "s1", title: "test" });
+		expect(result).toEqual(
+			expect.objectContaining({ id: "s1", title: "test" }),
+		);
 	});
 
 	it("session.create() delegates to sdk.session.create()", async () => {
@@ -290,7 +411,7 @@ describe("OpenCodeAPI", () => {
 				body: { title: "new session" },
 			}),
 		);
-		expect(result).toEqual({ id: "s2", title: "new" });
+		expect(result).toEqual(expect.objectContaining({ id: "s2", title: "new" }));
 	});
 
 	it("session.messages() flattens SDK shape and delegates to sdk.session.messages()", async () => {
@@ -379,6 +500,15 @@ describe("OpenCodeAPI", () => {
 	it("provider.list() delegates to sdk.provider.list()", async () => {
 		const sdk = makeStubSdk();
 		const gaps = makeStubGaps();
+		sdk.provider.list.mockResolvedValue({
+			data: {
+				all: [makeProvider()],
+				default: { anthropic: "claude-sonnet-4" },
+				connected: ["anthropic"],
+			},
+			error: undefined,
+			response: { status: 200 },
+		});
 		const api = new OpenCodeAPI({
 			sdk,
 			gapEndpoints: gaps,
@@ -388,7 +518,365 @@ describe("OpenCodeAPI", () => {
 		const result = await api.provider.list();
 		expect(sdk.provider.list).toHaveBeenCalled();
 		// SDK returns { all, default, connected }; adapter normalizes to { providers, defaults, connected }
-		expect(result).toEqual({ providers: [], defaults: {}, connected: [] });
+		expect(result).toEqual({
+			providers: [
+				expect.objectContaining({
+					id: "anthropic",
+					name: "Anthropic",
+					models: [
+						expect.objectContaining({
+							id: "claude-sonnet-4",
+							name: "Claude Sonnet 4",
+							variants: { "1m": { limit: { context: 1000000 } } },
+						}),
+					],
+				}),
+			],
+			defaults: { anthropic: "claude-sonnet-4" },
+			connected: ["anthropic"],
+		});
+	});
+
+	it("provider.list() rejects provider entries missing SDK-required fields", async () => {
+		const sdk = makeStubSdk();
+		const gaps = makeStubGaps();
+		sdk.provider.list.mockResolvedValue({
+			data: {
+				all: [{ name: "Anthropic", models: {} }],
+				default: {},
+				connected: [],
+			},
+			error: undefined,
+			response: { status: 200, url: "/provider" },
+		});
+		const api = new OpenCodeAPI({
+			sdk,
+			gapEndpoints: gaps,
+			baseUrl: "http://localhost:4096",
+			authHeaders: {},
+		});
+
+		await expect(api.provider.list()).rejects.toMatchObject({
+			_tag: "OpenCodeApiError",
+			endpoint: "/provider",
+			context: expect.objectContaining({ label: "provider.list" }),
+		});
+	});
+
+	it("file.status() decodes SDK file status arrays", async () => {
+		const sdk = makeStubSdk();
+		const gaps = makeStubGaps();
+		const api = new OpenCodeAPI({
+			sdk,
+			gapEndpoints: gaps,
+			baseUrl: "http://localhost:4096",
+			authHeaders: {},
+		});
+
+		await expect(api.file.status()).resolves.toEqual([
+			{
+				path: "src/app.ts",
+				added: 2,
+				removed: 1,
+				status: "modified",
+			},
+		]);
+	});
+
+	it("file.status() rejects non-array status responses", async () => {
+		const sdk = makeStubSdk();
+		const gaps = makeStubGaps();
+		sdk.file.status.mockResolvedValue({
+			data: {},
+			error: undefined,
+			response: { status: 200, url: "/file/status" },
+		});
+		const api = new OpenCodeAPI({
+			sdk,
+			gapEndpoints: gaps,
+			baseUrl: "http://localhost:4096",
+			authHeaders: {},
+		});
+
+		await expect(api.file.status()).rejects.toMatchObject({
+			_tag: "OpenCodeApiError",
+			endpoint: "/file/status",
+			context: expect.objectContaining({ label: "file.status" }),
+		});
+	});
+
+	it("session.prompt() rejects malformed non-void promptAsync responses", async () => {
+		const sdk = makeStubSdk();
+		const gaps = makeStubGaps();
+		sdk.session.promptAsync.mockResolvedValue({
+			data: { accepted: true },
+			error: undefined,
+			response: { status: 204, url: "/session/s1/prompt" },
+		});
+		const api = new OpenCodeAPI({
+			sdk,
+			gapEndpoints: gaps,
+			baseUrl: "http://localhost:4096",
+			authHeaders: {},
+		});
+
+		await expect(
+			api.session.prompt("s1", { text: "hello" }),
+		).rejects.toMatchObject({
+			_tag: "OpenCodeApiError",
+			endpoint: "/session/s1/prompt",
+			context: expect.objectContaining({ label: "session.prompt" }),
+		});
+	});
+
+	it("session.delete() rejects malformed non-boolean responses", async () => {
+		const sdk = makeStubSdk();
+		const gaps = makeStubGaps();
+		sdk.session.delete.mockResolvedValue({
+			data: { deleted: true },
+			error: undefined,
+			response: { status: 200, url: "/session/s1" },
+		});
+		const api = new OpenCodeAPI({
+			sdk,
+			gapEndpoints: gaps,
+			baseUrl: "http://localhost:4096",
+			authHeaders: {},
+		});
+
+		await expect(api.session.delete("s1")).rejects.toMatchObject({
+			_tag: "OpenCodeApiError",
+			endpoint: "/session/s1",
+			context: expect.objectContaining({ label: "session.delete" }),
+		});
+	});
+
+	it("pty.delete() rejects malformed non-boolean responses", async () => {
+		const sdk = makeStubSdk();
+		const gaps = makeStubGaps();
+		sdk.pty.remove.mockResolvedValue({
+			data: { deleted: true },
+			error: undefined,
+			response: { status: 200, url: "/pty/pty1" },
+		});
+		const api = new OpenCodeAPI({
+			sdk,
+			gapEndpoints: gaps,
+			baseUrl: "http://localhost:4096",
+			authHeaders: {},
+		});
+
+		await expect(api.pty.delete("pty1")).rejects.toMatchObject({
+			_tag: "OpenCodeApiError",
+			endpoint: "/pty/pty1",
+			context: expect.objectContaining({ label: "pty.delete" }),
+		});
+	});
+
+	it("file.list() rejects entries missing SDK-required path fields", async () => {
+		const sdk = makeStubSdk();
+		const gaps = makeStubGaps();
+		sdk.file.list.mockResolvedValue({
+			data: [{ name: "app.ts", type: "file" }],
+			error: undefined,
+			response: { status: 200, url: "/file" },
+		});
+		const api = new OpenCodeAPI({
+			sdk,
+			gapEndpoints: gaps,
+			baseUrl: "http://localhost:4096",
+			authHeaders: {},
+		});
+
+		await expect(api.file.list("src")).rejects.toMatchObject({
+			_tag: "OpenCodeApiError",
+			endpoint: "/file",
+			context: expect.objectContaining({ label: "file.list" }),
+		});
+	});
+
+	it("file.read() rejects legacy content-only responses", async () => {
+		const sdk = makeStubSdk();
+		const gaps = makeStubGaps();
+		sdk.file.read.mockResolvedValue({
+			data: { content: "hello" },
+			error: undefined,
+			response: { status: 200, url: "/file/content" },
+		});
+		const api = new OpenCodeAPI({
+			sdk,
+			gapEndpoints: gaps,
+			baseUrl: "http://localhost:4096",
+			authHeaders: {},
+		});
+
+		await expect(api.file.read("src/app.ts")).rejects.toMatchObject({
+			_tag: "OpenCodeApiError",
+			endpoint: "/file/content",
+			context: expect.objectContaining({ label: "file.read" }),
+		});
+	});
+
+	it("find.text() rejects malformed match entries", async () => {
+		const sdk = makeStubSdk();
+		const gaps = makeStubGaps();
+		sdk.find.text.mockResolvedValue({
+			data: [{ path: "src/app.ts" }],
+			error: undefined,
+			response: { status: 200, url: "/find" },
+		});
+		const api = new OpenCodeAPI({
+			sdk,
+			gapEndpoints: gaps,
+			baseUrl: "http://localhost:4096",
+			authHeaders: {},
+		});
+
+		await expect(api.find.text("app")).rejects.toMatchObject({
+			_tag: "OpenCodeApiError",
+			endpoint: "/find",
+			context: expect.objectContaining({ label: "find.text" }),
+		});
+	});
+
+	it("find.files() rejects non-string file entries", async () => {
+		const sdk = makeStubSdk();
+		const gaps = makeStubGaps();
+		sdk.find.files.mockResolvedValue({
+			data: [123],
+			error: undefined,
+			response: { status: 200, url: "/find/file" },
+		});
+		const api = new OpenCodeAPI({
+			sdk,
+			gapEndpoints: gaps,
+			baseUrl: "http://localhost:4096",
+			authHeaders: {},
+		});
+
+		await expect(api.find.files("app")).rejects.toMatchObject({
+			_tag: "OpenCodeApiError",
+			endpoint: "/find/file",
+			context: expect.objectContaining({ label: "find.files" }),
+		});
+	});
+
+	it("app.agents() decodes SDK agents without id and normalizes public agent ids from names", async () => {
+		const sdk = makeStubSdk();
+		const gaps = makeStubGaps();
+		const api = new OpenCodeAPI({
+			sdk,
+			gapEndpoints: gaps,
+			baseUrl: "http://localhost:4096",
+			authHeaders: {},
+		});
+
+		await expect(api.app.agents()).resolves.toEqual([
+			{
+				id: "build",
+				name: "build",
+				description: "Build agent",
+				mode: "primary",
+			},
+		]);
+	});
+
+	it("app.agents() rejects agents missing SDK-required permission data", async () => {
+		const sdk = makeStubSdk();
+		const gaps = makeStubGaps();
+		sdk.app.agents.mockResolvedValue({
+			data: [makeAgent({ permission: undefined })],
+			error: undefined,
+			response: { status: 200, url: "/app/agents" },
+		});
+		const api = new OpenCodeAPI({
+			sdk,
+			gapEndpoints: gaps,
+			baseUrl: "http://localhost:4096",
+			authHeaders: {},
+		});
+
+		await expect(api.app.agents()).rejects.toMatchObject({
+			_tag: "OpenCodeApiError",
+			endpoint: "/app/agents",
+			context: expect.objectContaining({ label: "app.agents" }),
+		});
+	});
+
+	it("app.commands() decodes SDK commands with required templates", async () => {
+		const sdk = makeStubSdk();
+		const gaps = makeStubGaps();
+		const api = new OpenCodeAPI({
+			sdk,
+			gapEndpoints: gaps,
+			baseUrl: "http://localhost:4096",
+			authHeaders: {},
+		});
+
+		await expect(api.app.commands()).resolves.toEqual([
+			{
+				name: "fix",
+				description: "Fix issue",
+				template: "Fix {{args}}",
+			},
+		]);
+	});
+
+	it("app.commands() rejects commands missing SDK-required templates", async () => {
+		const sdk = makeStubSdk();
+		const gaps = makeStubGaps();
+		sdk.command.list.mockResolvedValue({
+			data: [{ name: "fix" }],
+			error: undefined,
+			response: { status: 200, url: "/command" },
+		});
+		const api = new OpenCodeAPI({
+			sdk,
+			gapEndpoints: gaps,
+			baseUrl: "http://localhost:4096",
+			authHeaders: {},
+		});
+
+		await expect(api.app.commands()).rejects.toMatchObject({
+			_tag: "OpenCodeApiError",
+			endpoint: "/command",
+			context: expect.objectContaining({ label: "app.commands" }),
+		});
+	});
+
+	it("app.path() decodes SDK path responses and normalizes to cwd", async () => {
+		const sdk = makeStubSdk();
+		const gaps = makeStubGaps();
+		const api = new OpenCodeAPI({
+			sdk,
+			gapEndpoints: gaps,
+			baseUrl: "http://localhost:4096",
+			authHeaders: {},
+		});
+
+		await expect(api.app.path()).resolves.toEqual({ cwd: "/test" });
+	});
+
+	it("app.path() rejects legacy cwd-only responses before normalization", async () => {
+		const sdk = makeStubSdk();
+		const gaps = makeStubGaps();
+		sdk.path.get.mockResolvedValue({
+			data: { cwd: "/test" },
+			error: undefined,
+			response: { status: 200, url: "/path" },
+		});
+		const api = new OpenCodeAPI({
+			sdk,
+			gapEndpoints: gaps,
+			baseUrl: "http://localhost:4096",
+			authHeaders: {},
+		});
+
+		await expect(api.app.path()).rejects.toMatchObject({
+			_tag: "OpenCodeApiError",
+			endpoint: "/path",
+			context: expect.objectContaining({ label: "app.path" }),
+		});
 	});
 
 	it("pty.resize() delegates to sdk.pty.update() with size", async () => {
@@ -480,10 +968,59 @@ describe("OpenCodeAPI", () => {
 		await expect(api.session.list()).rejects.toThrow(/fetch failed/);
 	});
 
+	it("session.get() rejects malformed SDK data as an OpenCode API error", async () => {
+		const sdk = makeStubSdk();
+		const gaps = makeStubGaps();
+		sdk.session.get.mockResolvedValue({
+			data: { id: "s1", title: "missing required fields" },
+			error: undefined,
+			response: { status: 200, url: "/session/s1" },
+		});
+		const api = new OpenCodeAPI({
+			sdk,
+			gapEndpoints: gaps,
+			baseUrl: "http://localhost:4096",
+			authHeaders: {},
+		});
+		const rejected = api.session.get("s1");
+
+		await expect(rejected).rejects.toMatchObject({
+			_tag: "OpenCodeApiError",
+			endpoint: "/session/s1",
+			responseStatus: 200,
+			context: expect.objectContaining({
+				label: "session.get",
+			}),
+		});
+		await expect(rejected).rejects.toBeInstanceOf(OpenCodeApiError);
+	});
+
 	it("session.messagesPage() delegates to gapEndpoints", async () => {
 		const sdk = makeStubSdk();
 		const gaps = makeStubGaps();
-		gaps.getMessagesPage.mockResolvedValue([{ id: "m1" }]);
+		gaps.getMessagesPage.mockResolvedValue([
+			{
+				info: {
+					id: "m1",
+					sessionID: "s1",
+					role: "assistant",
+					time: { created: 1, completed: 2 },
+					parentID: "m0",
+					modelID: "claude-sonnet-4",
+					providerID: "anthropic",
+					mode: "build",
+					path: { cwd: "/test", root: "/test" },
+					cost: 0,
+					tokens: {
+						input: 1,
+						output: 2,
+						reasoning: 0,
+						cache: { read: 0, write: 0 },
+					},
+				},
+				parts: [{ id: "part-1", type: "text", text: "hello" }],
+			},
+		]);
 		const api = new OpenCodeAPI({
 			sdk,
 			gapEndpoints: gaps,
@@ -498,7 +1035,13 @@ describe("OpenCodeAPI", () => {
 			limit: 10,
 			before: "m5",
 		});
-		expect(result).toEqual([{ id: "m1" }]);
+		expect(result).toEqual([
+			expect.objectContaining({
+				id: "m1",
+				role: "assistant",
+				parts: [{ id: "part-1", type: "text", text: "hello" }],
+			}),
+		]);
 	});
 
 	it("app.projects() delegates to sdk.project.list()", async () => {
@@ -512,7 +1055,7 @@ describe("OpenCodeAPI", () => {
 		});
 		const result = await api.app.projects();
 		expect(sdk.project.list).toHaveBeenCalled();
-		expect(result).toEqual([]);
+		expect(result).toEqual([makeProject()]);
 	});
 
 	it("app.currentProject() delegates to sdk.project.current()", async () => {
@@ -526,6 +1069,6 @@ describe("OpenCodeAPI", () => {
 		});
 		const result = await api.app.currentProject();
 		expect(sdk.project.current).toHaveBeenCalled();
-		expect(result).toEqual({ id: "proj1", worktree: "/test" });
+		expect(result).toEqual(makeProject());
 	});
 });
