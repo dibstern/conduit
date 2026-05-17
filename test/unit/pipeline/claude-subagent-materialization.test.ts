@@ -5,7 +5,7 @@ import type { SDKTaskStartedMessage } from "@anthropic-ai/claude-agent-sdk";
 import { Reactivity } from "@effect/experimental";
 import { SqlClient } from "@effect/sql";
 import * as SqliteNode from "@effect/sql-sqlite-node/SqliteClient";
-import { Effect, Layer } from "effect";
+import { Effect, Fiber, Layer } from "effect";
 import { describe, expect, it, vi } from "vitest";
 import type { ChatMessage } from "../../../src/lib/frontend/types.js";
 import { historyToChatMessages } from "../../../src/lib/frontend/utils/history-logic.js";
@@ -41,6 +41,7 @@ import {
 	makeClaudeSubagentMaterializer,
 } from "../../../src/lib/provider/claude/claude-subagent-materializer.js";
 import type {
+	Query,
 	SDKMessage,
 	SDKPartialAssistantMessage,
 	SessionMessage,
@@ -349,6 +350,306 @@ describe("Claude subagent materialization pipeline", () => {
 				expect.objectContaining({ type: "assistant", rawText: "Auth is fine" }),
 			]);
 		} finally {
+			rmSync(dir, { recursive: true, force: true });
+		}
+	});
+
+	it("creates and streams a child session while the parent Task is still running", async () => {
+		const dir = mkdtempSync(join(tmpdir(), "conduit-claude-live-pipeline-"));
+		const filename = join(dir, "events.db");
+		let releaseResult: (() => void) | undefined;
+		try {
+			const result = await Effect.runPromise(
+				Effect.gen(function* () {
+					const eventStore = yield* EventStoreEffectTag;
+					const projectionRunner = yield* ProjectionRunnerEffectTag;
+					const persist = yield* ClaudeEventPersistEffectTag;
+					const sql = yield* SqlClient.SqlClient;
+
+					const appendProject = (event: CanonicalEvent) =>
+						eventStore.append(event).pipe(
+							Effect.mapError(
+								(cause) =>
+									new Error(
+										`append ${event.type} failed: ${JSON.stringify(event.data)} (${describeCause(cause)})`,
+									),
+							),
+							Effect.flatMap((stored) =>
+								projectionRunner
+									.projectEvent(stored)
+									.pipe(Effect.provideService(SqlClient.SqlClient, sql)),
+							),
+						);
+					const readProjectedState = () =>
+						Effect.gen(function* () {
+							const parentMessages = yield* sql<MessageRow>`
+								SELECT * FROM messages WHERE session_id = ${parentSessionId} ORDER BY created_at ASC, id ASC`;
+							const parentParts = yield* sql<MessagePartRow>`
+								SELECT * FROM message_parts WHERE message_id IN (SELECT id FROM messages WHERE session_id = ${parentSessionId}) ORDER BY message_id, sort_order`;
+							const childMessages = yield* sql<MessageRow>`
+								SELECT * FROM messages WHERE session_id = ${childSessionId} ORDER BY created_at ASC, id ASC`;
+							const childParts = yield* sql<MessagePartRow>`
+								SELECT * FROM message_parts WHERE message_id IN (SELECT id FROM messages WHERE session_id = ${childSessionId}) ORDER BY message_id, sort_order`;
+							const childRows = yield* sql<{
+								parent_id: string | null;
+								provider_sid: string | null;
+							}>`SELECT parent_id, provider_sid FROM sessions WHERE id = ${childSessionId}`;
+							return {
+								parentChat: historyToChatMessages(
+									messageRowsToHistory(
+										messageRowsWithParts(parentMessages, parentParts),
+										{ pageSize: 50 },
+									).messages,
+								),
+								childChat: historyToChatMessages(
+									messageRowsToHistory(
+										messageRowsWithParts(childMessages, childParts),
+										{ pageSize: 50 },
+									).messages,
+								),
+								child: childRows[0],
+							};
+						});
+					const hasProjectedChildTranscript = (state: {
+						readonly child:
+							| { parent_id: string | null; provider_sid: string | null }
+							| undefined;
+						readonly childChat: readonly ChatMessage[];
+					}) =>
+						state.child?.parent_id === parentSessionId &&
+						state.child.provider_sid === sdkSubagentId &&
+						state.childChat.some(
+							(message) =>
+								message.type === "user" && message.text === "Inspect auth",
+						) &&
+						state.childChat.some(
+							(message) =>
+								message.type === "assistant" &&
+								message.rawText === "Auth is fine",
+						);
+					const waitForProjectedChildTranscript = () =>
+						Effect.gen(function* () {
+							const timeoutMs = 2_000;
+							const pollIntervalMs = 25;
+							const deadline = Date.now() + timeoutMs;
+							let state = yield* readProjectedState();
+							while (!hasProjectedChildTranscript(state) && Date.now() < deadline) {
+								yield* Effect.promise(
+									() =>
+										new Promise<void>((resolve) =>
+											setTimeout(resolve, pollIntervalMs),
+										),
+								);
+								state = yield* readProjectedState();
+							}
+							return state;
+						});
+
+					const parentSessionId = "parent-live-session";
+					const parentClaudeSessionId = "sdk-parent-live";
+					const sdkSubagentId = "task-live-1";
+					const childSessionId = claudeSubagentSessionId({
+						parentConduitSessionId: parentSessionId,
+						parentClaudeSessionId,
+						sdkSubagentId,
+					});
+					yield* sql`
+						INSERT INTO sessions (id, provider, title, status, created_at, updated_at)
+						VALUES (${parentSessionId}, 'claude', 'Parent', 'idle', 1, 1)`;
+
+					let getSubagentMessagesCalls = 0;
+					const transcript = [
+						sessionMessage("user", "sub-user-live-1", "Inspect auth"),
+						sessionMessage("assistant", "sub-assistant-live-1", "Auth is fine"),
+					];
+					const sdk: ClaudeSubagentSdk = {
+						listSubagents: vi.fn(async () => [sdkSubagentId]),
+						getSubagentMessages: vi.fn(async () => {
+							getSubagentMessagesCalls += 1;
+							if (getSubagentMessagesCalls === 1) return [];
+							return transcript;
+						}),
+					};
+					const materializeSubagents = makeClaudeSubagentMaterializer({
+						sdk,
+						persist,
+					});
+					const relaySink = createRelayEventSink({
+						sessionId: parentSessionId,
+						send: vi.fn(),
+						persist: { persistEvent: appendProject },
+					});
+
+					const messageStart: SDKPartialAssistantMessage = {
+						type: "stream_event",
+						event: {
+							type: "message_start",
+							message: {
+								id: "msg-parent-live",
+								type: "message",
+								role: "assistant",
+								content: [],
+								container: null,
+								context_management: null,
+								model: "claude-sonnet-4-5",
+								stop_reason: null,
+								stop_sequence: null,
+								usage: {
+									cache_creation: null,
+									cache_creation_input_tokens: null,
+									cache_read_input_tokens: null,
+									inference_geo: null,
+									input_tokens: 0,
+									iterations: null,
+									output_tokens: 0,
+									server_tool_use: null,
+									service_tier: null,
+									speed: null,
+								},
+							},
+						},
+						parent_tool_use_id: null,
+						uuid: "00000000-0000-0000-0000-000000000201",
+						session_id: parentClaudeSessionId,
+					};
+					const taskToolUse: SDKPartialAssistantMessage = {
+						type: "stream_event",
+						event: {
+							type: "content_block_start",
+							index: 0,
+							content_block: {
+								type: "tool_use",
+								id: "task-tool-live-1",
+								name: "Task",
+								input: {
+									description: "Audit auth",
+									prompt: "Inspect auth",
+									subagent_type: "explore",
+								},
+							},
+						},
+						parent_tool_use_id: null,
+						uuid: "00000000-0000-0000-0000-000000000202",
+						session_id: parentClaudeSessionId,
+					};
+					const taskToolStop: SDKPartialAssistantMessage = {
+						type: "stream_event",
+						event: { type: "content_block_stop", index: 0 },
+						parent_tool_use_id: null,
+						uuid: "00000000-0000-0000-0000-000000000203",
+						session_id: parentClaudeSessionId,
+					};
+					const taskStarted: SDKTaskStartedMessage = {
+						type: "system",
+						subtype: "task_started",
+						task_id: sdkSubagentId,
+						tool_use_id: "task-tool-live-1",
+						description: "Audit auth",
+						task_type: "explore",
+						prompt: "Inspect auth",
+						uuid: "00000000-0000-0000-0000-000000000204",
+						session_id: parentClaudeSessionId,
+					};
+					let taskStartedTranslated: (() => void) | undefined;
+					const afterTaskStarted = new Promise<void>((resolve) => {
+						taskStartedTranslated = resolve;
+					});
+					const resultReady = new Promise<void>((resolve) => {
+						releaseResult = resolve;
+					});
+					const gen = (async function* () {
+						yield messageStart as SDKMessage;
+						yield taskToolUse as SDKMessage;
+						yield taskToolStop as SDKMessage;
+						yield taskStarted as SDKMessage;
+						taskStartedTranslated?.();
+						await resultReady;
+						yield makeSuccessResult({
+							uuid: "00000000-0000-0000-0000-000000000205",
+							session_id: parentClaudeSessionId,
+						}) as SDKMessage;
+					})();
+					const query = Object.assign(gen, {
+						interrupt: vi.fn(async () => {}),
+						close: vi.fn(),
+						setModel: vi.fn(async () => {}),
+						setPermissionMode: vi.fn(async () => {}),
+						streamInput: vi.fn(async () => {}),
+						setMaxThinkingTokens: vi.fn(async () => {}),
+						applyFlagSettings: vi.fn(async () => {}),
+						initializationResult: vi.fn(async () => ({})),
+						supportedCommands: vi.fn(async () => []),
+						supportedModels: vi.fn(async () => []),
+						supportedAgents: vi.fn(async () => []),
+						mcpServerStatus: vi.fn(async () => []),
+						getContextUsage: vi.fn(async () => ({})),
+						reloadPlugins: vi.fn(async () => ({})),
+						accountInfo: vi.fn(async () => ({})),
+						rewindFiles: vi.fn(async () => ({ canRewind: false })),
+						seedReadState: vi.fn(async () => {}),
+						reconnectMcpServer: vi.fn(async () => {}),
+						toggleMcpServer: vi.fn(async () => {}),
+						setMcpServers: vi.fn(async () => ({})),
+						stopTask: vi.fn(async () => {}),
+						next: gen.next.bind(gen),
+						return: gen.return.bind(gen),
+						throw: gen.throw.bind(gen),
+						[Symbol.asyncIterator]: () => gen,
+					}) as unknown as Query;
+					const instance = new ClaudeProviderInstance({
+						workspaceRoot: dir,
+						queryFactory: () => query,
+						subagentSdk: sdk,
+						materializeSubagents,
+					});
+					const turnFiber = yield* Effect.fork(
+						instance.sendTurnEffect(
+							makeBaseSendTurnInput({
+								sessionId: parentSessionId,
+								workspaceRoot: dir,
+								providerState: { resumeSessionId: parentClaudeSessionId },
+								eventSink: relaySink,
+							}),
+						),
+					);
+
+					yield* Effect.promise(() => afterTaskStarted);
+					const immediate = yield* readProjectedState();
+					const beforeResult = yield* waitForProjectedChildTranscript();
+					const getSubagentMessagesCallsBeforeResult = getSubagentMessagesCalls;
+					releaseResult?.();
+					yield* Fiber.join(turnFiber);
+					yield* instance.shutdownEffect();
+
+					return {
+						childSessionId,
+						immediate,
+						beforeResult,
+						getSubagentMessagesCallsBeforeResult,
+					};
+				}).pipe(Effect.provide(makePersistenceLayer(filename))),
+			);
+
+			const immediateTaskMessage = result.immediate.parentChat.find(
+				(message): message is Extract<ChatMessage, { type: "tool" }> =>
+					message.type === "tool" && message.name === "Task",
+			);
+			expect(result.immediate.child).toEqual({
+				parent_id: "parent-live-session",
+				provider_sid: "task-live-1",
+			});
+			expect(immediateTaskMessage?.metadata?.["childSessionId"]).toBe(
+				result.childSessionId,
+			);
+			expect(
+				result.getSubagentMessagesCallsBeforeResult,
+			).toBeGreaterThanOrEqual(2);
+			expect(result.beforeResult.childChat).toEqual([
+				expect.objectContaining({ type: "user", text: "Inspect auth" }),
+				expect.objectContaining({ type: "assistant", rawText: "Auth is fine" }),
+			]);
+		} finally {
+			releaseResult?.();
 			rmSync(dir, { recursive: true, force: true });
 		}
 	});

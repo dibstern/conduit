@@ -6,7 +6,10 @@ import { Effect } from "effect";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { CanonicalEvent } from "../../../../src/lib/persistence/events.js";
 import { ClaudeProviderInstance } from "../../../../src/lib/provider/claude/claude-provider-instance.js";
-import type { MaterializeClaudeSubagentsInput } from "../../../../src/lib/provider/claude/claude-subagent-materializer.js";
+import {
+	claudeSubagentSessionId,
+	type MaterializeClaudeSubagentsInput,
+} from "../../../../src/lib/provider/claude/claude-subagent-materializer.js";
 import type {
 	Query,
 	SDKMessage,
@@ -477,6 +480,159 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 		).toBe(true);
 
 		await Effect.runPromise(instance.shutdownEffect());
+	});
+
+	it("links Task metadata to a child session before the parent result", async () => {
+		const parentSessionId = "parent-session-live";
+		const parentClaudeSessionId = "sdk-parent-live";
+		const sdkSubagentId = "task-live-1";
+		const taskToolUseId = "task-tool-live-1";
+		const childSessionId = claudeSubagentSessionId({
+			parentConduitSessionId: parentSessionId,
+			parentClaudeSessionId,
+			sdkSubagentId,
+		});
+		const messageStart = {
+			type: "stream_event",
+			event: {
+				type: "message_start",
+				message: { id: "msg-parent-live" },
+			},
+			parent_tool_use_id: null,
+			uuid: "00000000-0000-0000-0000-000000000601",
+			session_id: parentClaudeSessionId,
+		} as unknown as SDKPartialAssistantMessage;
+		const taskToolUse = {
+			type: "stream_event",
+			event: {
+				type: "content_block_start",
+				index: 0,
+				content_block: {
+					type: "tool_use",
+					id: taskToolUseId,
+					name: "Task",
+					input: {
+						description: "Audit auth",
+						prompt: "Inspect auth",
+						subagent_type: "explore",
+					},
+				},
+			},
+			parent_tool_use_id: null,
+			uuid: "00000000-0000-0000-0000-000000000602",
+			session_id: parentClaudeSessionId,
+		} as unknown as SDKPartialAssistantMessage;
+		const taskToolStop = {
+			type: "stream_event",
+			event: { type: "content_block_stop", index: 0 },
+			parent_tool_use_id: null,
+			uuid: "00000000-0000-0000-0000-000000000603",
+			session_id: parentClaudeSessionId,
+		} as unknown as SDKPartialAssistantMessage;
+		const taskStarted = {
+			type: "system",
+			subtype: "task_started",
+			task_id: sdkSubagentId,
+			tool_use_id: taskToolUseId,
+			description: "Audit auth",
+			task_type: "explore",
+			prompt: "Inspect auth",
+			uuid: "00000000-0000-0000-0000-000000000604",
+			session_id: parentClaudeSessionId,
+		} as unknown as SDKMessage;
+		let releaseResult: (() => void) | undefined;
+		const resultReady = new Promise<void>((resolve) => {
+			releaseResult = resolve;
+		});
+		let taskStartedTranslated: (() => void) | undefined;
+		const afterTaskStarted = new Promise<void>((resolve) => {
+			taskStartedTranslated = resolve;
+		});
+		const gen = (async function* () {
+			yield messageStart as unknown as SDKMessage;
+			yield taskToolUse as unknown as SDKMessage;
+			yield taskToolStop as unknown as SDKMessage;
+			yield taskStarted;
+			taskStartedTranslated?.();
+			await resultReady;
+			yield makeSuccessResult({
+				session_id: parentClaudeSessionId,
+				uuid: "00000000-0000-0000-0000-000000000605" as `${string}-${string}-${string}-${string}-${string}`,
+			}) as SDKMessage;
+		})();
+		const mockQuery = Object.assign(gen, {
+			interrupt: vi.fn(async () => {}),
+			close: vi.fn(),
+			setModel: vi.fn(async () => {}),
+			setPermissionMode: vi.fn(async () => {}),
+			streamInput: vi.fn(async () => {}),
+			setMaxThinkingTokens: vi.fn(async () => {}),
+			applyFlagSettings: vi.fn(async () => {}),
+			initializationResult: vi.fn(async () => ({})),
+			supportedCommands: vi.fn(async () => []),
+			supportedModels: vi.fn(async () => []),
+			supportedAgents: vi.fn(async () => []),
+			mcpServerStatus: vi.fn(async () => []),
+			getContextUsage: vi.fn(async () => ({})),
+			reloadPlugins: vi.fn(async () => ({})),
+			accountInfo: vi.fn(async () => ({})),
+			rewindFiles: vi.fn(async () => ({ canRewind: false })),
+			seedReadState: vi.fn(async () => {}),
+			reconnectMcpServer: vi.fn(async () => {}),
+			toggleMcpServer: vi.fn(async () => {}),
+			setMcpServers: vi.fn(async () => ({})),
+			stopTask: vi.fn(async () => {}),
+			next: gen.next.bind(gen),
+			return: gen.return.bind(gen),
+			throw: gen.throw.bind(gen),
+			[Symbol.asyncIterator]: () => gen,
+		}) as unknown as Query;
+		queryFactorySpy = vi.fn(() => mockQuery);
+		const instance = new ClaudeProviderInstance({
+			workspaceRoot: workspace,
+			queryFactory: queryFactorySpy,
+		});
+		const sink = createMockEventSink();
+		const turnPromise = Effect.runPromise(
+			instance.sendTurnEffect(
+				makeBaseSendTurnInput({
+					sessionId: parentSessionId,
+					turnId: "turn-live",
+					workspaceRoot: workspace,
+					eventSink: sink,
+				}),
+			),
+		);
+
+		await afterTaskStarted;
+
+		try {
+			const taskMetadataEvent = (
+				sink.push as ReturnType<typeof vi.fn>
+			).mock.calls
+				.map(([event]) => event as CanonicalEvent)
+				.find(
+					(event) =>
+						event.type === "tool.running" &&
+						(event.data as { partId?: string }).partId === taskToolUseId &&
+						(
+							event.data as {
+								metadata?: Record<string, unknown>;
+							}
+						).metadata?.["providerTaskId"] === sdkSubagentId,
+				);
+			expect(
+				(
+					taskMetadataEvent?.data as {
+						metadata?: Record<string, unknown>;
+					}
+				)?.metadata?.["childSessionId"],
+			).toBe(childSessionId);
+		} finally {
+			releaseResult?.();
+			await turnPromise.catch(() => undefined);
+			await Effect.runPromise(instance.shutdownEffect());
+		}
 	});
 
 	it("restarts the SDK query when the Claude agent changes between turns", async () => {

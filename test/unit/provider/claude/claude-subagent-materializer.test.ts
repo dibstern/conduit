@@ -202,6 +202,63 @@ describe("Claude subagent materializer", () => {
 		});
 	});
 
+	it("diffs repeated subagent snapshots by text cursor", async () => {
+		type DiffCursor = {
+			readonly messageRoles: Map<string, "user" | "assistant">;
+			readonly textOffsets: Map<string, number>;
+			readonly toolStarts: Set<string>;
+			readonly toolCompletions: Set<string>;
+		};
+		type DiffEvent = {
+			readonly type: string;
+			readonly data: { readonly text?: string };
+		};
+		const materializerModule = await import(
+			"../../../../src/lib/provider/claude/claude-subagent-materializer.js"
+		);
+		const diffSessionMessagesToEvents = (
+			materializerModule as typeof materializerModule & {
+				readonly diffSessionMessagesToEvents?: (input: {
+					readonly childSessionId: string;
+					readonly messages: readonly SessionMessage[];
+					readonly cursor: DiffCursor;
+				}) => readonly DiffEvent[];
+			}
+		).diffSessionMessagesToEvents;
+		expect(diffSessionMessagesToEvents).toEqual(expect.any(Function));
+		if (!diffSessionMessagesToEvents) return;
+
+		const cursor: DiffCursor = {
+			messageRoles: new Map(),
+			textOffsets: new Map(),
+			toolStarts: new Set(),
+			toolCompletions: new Set(),
+		};
+		const firstEvents = diffSessionMessagesToEvents({
+			childSessionId: "child-session",
+			messages: [sessionMessage("assistant", "sub-assistant-1", "Auth")],
+			cursor,
+		});
+		expect(
+			firstEvents
+				.filter((event) => event.type === "text.delta")
+				.map((event) => event.data.text),
+		).toEqual(["Auth"]);
+
+		const secondEvents = diffSessionMessagesToEvents({
+			childSessionId: "child-session",
+			messages: [
+				sessionMessage("assistant", "sub-assistant-1", "Auth is fine"),
+			],
+			cursor,
+		});
+		expect(
+			secondEvents
+				.filter((event) => event.type === "text.delta")
+				.map((event) => event.data.text),
+		).toEqual([" is fine"]);
+	});
+
 	it("materializes unmatched SDK subagents without linking a parent tool", async () => {
 		const sdk: ClaudeSubagentSdk = {
 			listSubagents: vi.fn(async () => ["agent-unmatched"]),
