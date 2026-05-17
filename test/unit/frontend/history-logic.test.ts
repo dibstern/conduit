@@ -326,6 +326,34 @@ describe("historyToChatMessages — tool status mapping", () => {
 		expect(toolMsg?.type === "tool" && toolMsg.status).toBe("running");
 	});
 
+	test("Claude Agent subagent tools preserve running status from REST API", () => {
+		const history: HistoryMessage[] = [
+			{
+				id: "msg_asst",
+				role: "assistant",
+				parts: [
+					{
+						id: "p1",
+						type: "tool",
+						callID: "toolu_agent",
+						tool: "Agent",
+						state: {
+							status: "running",
+							input: {
+								description: "do stuff",
+								subagent_type: "general",
+							},
+						},
+					},
+				],
+			},
+		];
+		const chatMsgs = historyToChatMessages(history);
+		const toolMsg = chatMsgs.find((m) => m.type === "tool");
+		expect(toolMsg).toBeDefined();
+		expect(toolMsg?.type === "tool" && toolMsg.status).toBe("running");
+	});
+
 	test("Task tools preserve pending status from REST API", () => {
 		const history: HistoryMessage[] = [
 			{

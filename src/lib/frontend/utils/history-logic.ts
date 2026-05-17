@@ -118,6 +118,7 @@ const LIVE_STATUS_TOOLS = new Set([
 	"AskUserQuestion",
 	"task",
 	"Task",
+	"Agent",
 ]);
 
 /**

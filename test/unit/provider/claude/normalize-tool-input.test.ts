@@ -126,6 +126,20 @@ describe("Claude normalizeToolInput", () => {
 		});
 	});
 
+	it("normalizes Claude Agent as a Task subagent", () => {
+		const result = normalizeToolInput("Agent", {
+			description: "find bugs",
+			prompt: "look for bugs in main.ts",
+			subagent_type: "code-review",
+		});
+		expect(result).toEqual({
+			tool: "Task",
+			description: "find bugs",
+			prompt: "look for bugs in main.ts",
+			subagentType: "code-review",
+		});
+	});
+
 	it("normalizes LSP with snake_case file_path", () => {
 		const result = normalizeToolInput("LSP", {
 			operation: "hover",

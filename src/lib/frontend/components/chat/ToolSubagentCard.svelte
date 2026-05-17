@@ -20,7 +20,16 @@
 		taskId?: string;
 	} | null {
 		if (!input || typeof input !== "object") return null;
-		const record = input as Record<string, unknown>;
+		let record = input as Record<string, unknown>;
+		if (
+			record["tool"] === "Unknown" &&
+			record["name"] === "Agent" &&
+			record["raw"] &&
+			typeof record["raw"] === "object" &&
+			!Array.isArray(record["raw"])
+		) {
+			record = record["raw"] as Record<string, unknown>;
+		}
 		return {
 			description:
 				typeof record["description"] === "string"

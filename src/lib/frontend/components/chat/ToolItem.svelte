@@ -17,7 +17,9 @@
 	} = $props();
 
 	const isQuestion = $derived(message.name === "AskUserQuestion");
-	const isSubagent = $derived(message.name === "Task" || message.name === "task");
+	const isSubagent = $derived(
+		message.name === "Task" || message.name === "task" || message.name === "Agent",
+	);
 
 	const groupRadius = $derived.by(() => {
 		if (isFirstInGroup && isLastInGroup) return "rounded-[10px]";
