@@ -20,7 +20,7 @@ import { OpenCodeAPITag } from "./opencode-api-service.js";
 //
 // API endpoints verified against:
 //   - src/lib/instance/opencode-api.ts (the actual SDK wrapper)
-//   - src/lib/domain/provider/Services/opencode-response-schemas.ts (Schema definitions)
+//   - src/lib/contracts/providers/opencode-sdk.ts (provider boundary schemas)
 //   - src/lib/instance/sdk-types.ts (type definitions)
 
 import { Data, Effect, Request, RequestResolver } from "effect";
@@ -29,7 +29,7 @@ import type { NonEmptyArray } from "effect/Array";
 import type {
 	SessionDetail as SchemaSessionDetail,
 	SessionStatus,
-} from "./opencode-response-schemas.js";
+} from "../../../contracts/providers/opencode-sdk.js";
 
 // ─── Error Type ────────────────────────────────────────────────────────────
 

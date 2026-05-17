@@ -55,7 +55,14 @@ async function createMockOpenCode(): Promise<MockOpenCode> {
 
 		res.setHeader("Content-Type", "application/json");
 		if (url.pathname === "/path") {
-			res.end(JSON.stringify("/test"));
+			res.end(
+				JSON.stringify({
+					state: "/test/state",
+					config: "/test/config",
+					worktree: "/test",
+					directory: "/test",
+				}),
+			);
 			return;
 		}
 		if (url.pathname === "/session" && req.method === "GET") {
@@ -63,7 +70,10 @@ async function createMockOpenCode(): Promise<MockOpenCode> {
 				JSON.stringify([
 					{
 						id: "sess-1",
+						projectID: "project-1",
+						directory: "/test",
 						title: "Session 1",
+						version: "1.0.0",
 						time: { created: 1, updated: 1 },
 						modelID: "gpt-4",
 						providerID: "openai",
@@ -80,7 +90,11 @@ async function createMockOpenCode(): Promise<MockOpenCode> {
 			res.end(
 				JSON.stringify({
 					id: "sess-1",
+					projectID: "project-1",
+					directory: "/test",
 					title: "Session 1",
+					version: "1.0.0",
+					time: { created: 1, updated: 1 },
 					modelID: "gpt-4",
 					providerID: "openai",
 				}),
@@ -95,11 +109,22 @@ async function createMockOpenCode(): Promise<MockOpenCode> {
 			return;
 		}
 		if (url.pathname === "/agent") {
-			res.end(JSON.stringify([{ id: "coder", name: "coder" }]));
+			res.end(
+				JSON.stringify([
+					{
+						name: "coder",
+						mode: "primary",
+						builtIn: true,
+						permission: { edit: "ask", bash: {} },
+						tools: {},
+						options: {},
+					},
+				]),
+			);
 			return;
 		}
 		if (url.pathname === "/provider") {
-			res.end(JSON.stringify({ providers: [], defaults: {}, connected: [] }));
+			res.end(JSON.stringify({ all: [], default: {}, connected: [] }));
 			return;
 		}
 		if (url.pathname === "/question" || url.pathname === "/permission") {

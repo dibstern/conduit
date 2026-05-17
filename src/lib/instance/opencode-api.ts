@@ -5,7 +5,8 @@
 // Error strategy (Audit v3): SDK uses default throwOnError: false.
 // Errors return `{ error, response }` — the private `sdk()` wrapper checks
 // result.error and translates to OpenCodeApiError (with response.status)
-// or OpenCodeConnectionError (for network failures).
+// or OpenCodeConnectionError (for network failures), then decodes result.data
+// against the callsite's response schema.
 //
 // Message shape: session.messages() normalizes SDK's nested `{ info, parts }`
 // shape into flat `{ ...info, parts }` messages for relay callers.
@@ -14,11 +15,32 @@ import type {
 	Event as OpenCodeEvent,
 	OpencodeClient,
 } from "@opencode-ai/sdk/client";
+import { Schema } from "effect";
+import {
+	OpenCodeAgentSchema,
+	OpenCodeCommandSchema,
+	OpenCodeConfigResponseSchema,
+	OpenCodeFileContentSchema,
+	OpenCodeFileNodeSchema,
+	OpenCodeFileStatusEntrySchema,
+	OpenCodeFindFilesResponseSchema,
+	OpenCodeFindSymbolSchema,
+	OpenCodeFindTextMatchSchema,
+	OpenCodeMessageWithPartsSchema,
+	OpenCodePathSchema,
+	OpenCodeProjectSchema,
+	OpenCodeProviderListResponseSchema,
+	OpenCodePtySchema,
+	OpenCodeSessionDetailSchema,
+	OpenCodeSessionSchema,
+	OpenCodeSessionStatusSchema,
+} from "../contracts/providers/opencode-sdk.js";
 import { OpenCodeApiError, OpenCodeConnectionError } from "../errors.js";
 import type { GapEndpoints } from "./gap-endpoints.js";
 import type {
 	Agent,
 	Message,
+	Provider,
 	ProviderListResult,
 	SessionDetail,
 	SessionStatus,
@@ -38,6 +60,101 @@ type SdkResult<T> = Promise<
 		response: Response;
 	}
 >;
+
+const OpenCodeSessionDetailResponseSchema =
+	OpenCodeSessionDetailSchema as unknown as Schema.Schema<SessionDetail>;
+const OpenCodeSessionDetailArraySchema = Schema.Array(
+	OpenCodeSessionDetailSchema,
+) as unknown as Schema.Schema<SessionDetail[]>;
+const OpenCodeSessionStatusMapSchema = Schema.Record({
+	key: Schema.String,
+	value: OpenCodeSessionStatusSchema,
+}) as unknown as Schema.Schema<Record<string, SessionStatus>>;
+const OpenCodeMessageWithPartsArraySchema = Schema.Array(
+	OpenCodeMessageWithPartsSchema,
+);
+const OpenCodeShareResponseSchema = Schema.Struct({
+	url: Schema.String,
+});
+const OpenCodeDiffResponseSchema = Schema.Struct({
+	diffs: Schema.Array(
+		Schema.Struct({
+			path: Schema.String,
+			diff: Schema.String,
+		}),
+	),
+}) as unknown as Schema.Schema<{
+	diffs: Array<{ path: string; diff: string }>;
+}>;
+const OpenCodeFileEntryArraySchema = Schema.Array(
+	OpenCodeFileNodeSchema,
+) as unknown as Schema.Schema<
+	Array<{
+		name: string;
+		path: string;
+		absolute: string;
+		type: "file" | "directory";
+		ignored: boolean;
+	}>
+>;
+const OpenCodeFileReadSchema =
+	OpenCodeFileContentSchema as unknown as Schema.Schema<{
+		type: "text" | "binary";
+		content: string;
+		diff?: string;
+		encoding?: "base64";
+		mimeType?: string;
+	}>;
+const OpenCodeAgentArraySchema = Schema.Array(OpenCodeAgentSchema);
+const OpenCodeCommandArraySchema = Schema.Array(
+	OpenCodeCommandSchema,
+) as unknown as Schema.Schema<Array<{ name: string; description?: string }>>;
+const OpenCodeFileStatusArraySchema = Schema.Array(
+	OpenCodeFileStatusEntrySchema,
+) as unknown as Schema.Schema<
+	Array<{
+		path: string;
+		added: number;
+		removed: number;
+		status: "added" | "deleted" | "modified";
+	}>
+>;
+const OpenCodeVcsSchema = Schema.Struct({
+	branch: Schema.optional(Schema.String),
+	dirty: Schema.optional(Schema.Boolean),
+}) as unknown as Schema.Schema<{ branch?: string; dirty?: boolean }>;
+const OpenCodeProjectArraySchema = Schema.Array(
+	OpenCodeProjectSchema,
+) as unknown as Schema.Schema<
+	Array<{ id: string; worktree: string; time: { created: number } }>
+>;
+const OpenCodeCurrentProjectSchema =
+	OpenCodeProjectSchema as unknown as Schema.Schema<{
+		id: string;
+		worktree: string;
+		time: { created: number };
+	}>;
+const OpenCodePtyArraySchema = Schema.Array(
+	OpenCodePtySchema,
+) as unknown as Schema.Schema<
+	Array<{
+		id: string;
+		title: string;
+		command: string;
+		args: string[];
+		cwd: string;
+		status: "running" | "exited";
+		pid: number;
+	}>
+>;
+const OpenCodeFindTextResponseSchema = Schema.Array(
+	OpenCodeFindTextMatchSchema,
+) as unknown as Schema.Schema<unknown[]>;
+const OpenCodeFindFilesArraySchema =
+	OpenCodeFindFilesResponseSchema as unknown as Schema.Schema<unknown[]>;
+const OpenCodeFindSymbolsResponseSchema = Schema.Array(
+	OpenCodeFindSymbolSchema,
+) as unknown as Schema.Schema<unknown[]>;
 
 export interface OpenCodeAPIOptions {
 	sdk: OpencodeClient;
@@ -108,18 +225,19 @@ export class OpenCodeAPI {
 	 * This helper:
 	 * 1. Catches thrown errors → OpenCodeConnectionError
 	 * 2. Checks result.error → OpenCodeApiError
-	 * 3. Returns result.data on success
+	 * 3. Decodes result.data against the callsite schema before returning
 	 */
 	async sdk<T>(
+		label: string,
+		responseSchema: Schema.Schema<T>,
 		fn: () => Promise<{
-			data: T | undefined;
+			data: unknown;
 			error: unknown;
 			response: { status: number; url?: string } | Response;
 		}>,
-		label: string,
 	): Promise<T> {
 		let result: {
-			data: T | undefined;
+			data: unknown;
 			error: unknown;
 			response: { status: number; url?: string } | Response;
 		};
@@ -152,7 +270,28 @@ export class OpenCodeAPI {
 			});
 		}
 
-		return result.data as T;
+		try {
+			return Schema.decodeUnknownSync(responseSchema)(result.data);
+		} catch (err) {
+			const cause = err instanceof Error ? err : new Error(String(err));
+			const status =
+				result.response && "status" in result.response
+					? result.response.status
+					: 500;
+			const url =
+				result.response && "url" in result.response
+					? String(result.response.url)
+					: label;
+			const parseDetails = cause.message.slice(0, 2000);
+			throw new OpenCodeApiError({
+				message: `Malformed OpenCode response during ${label}`,
+				endpoint: url,
+				responseStatus: status,
+				responseBody: { parseDetails },
+				cause,
+				context: { label, parseDetails },
+			});
+		}
 	}
 
 	/** Access internal SDK client (for namespaces) */
@@ -209,32 +348,31 @@ class SessionNamespace {
 		roots?: boolean;
 		limit?: number;
 	}): Promise<SessionDetail[]> {
-		return this.api.sdk(
-			() =>
-				call(
-					this.api._sdk.session.list({
-						...(options != null
-							? {
-									query: {
-										...(options.roots !== undefined
-											? { roots: String(options.roots) }
-											: {}),
-										...(options.limit !== undefined
-											? { limit: String(options.limit) }
-											: {}),
-									} as Record<string, string>,
-								}
-							: {}),
-					}),
-				),
-			"session.list",
+		return this.api.sdk("session.list", OpenCodeSessionDetailArraySchema, () =>
+			call(
+				this.api._sdk.session.list({
+					...(options != null
+						? {
+								query: {
+									...(options.roots !== undefined
+										? { roots: String(options.roots) }
+										: {}),
+									...(options.limit !== undefined
+										? { limit: String(options.limit) }
+										: {}),
+								} as Record<string, string>,
+							}
+						: {}),
+				}),
+			),
 		);
 	}
 
 	async get(id: string): Promise<SessionDetail> {
 		return this.api.sdk(
-			() => call(this.api._sdk.session.get({ path: { id } })),
 			"session.get",
+			OpenCodeSessionDetailResponseSchema,
+			() => call(this.api._sdk.session.get({ path: { id } })),
 		);
 	}
 
@@ -243,41 +381,40 @@ class SessionNamespace {
 		parentID?: string;
 	}): Promise<SessionDetail> {
 		return this.api.sdk(
+			"session.create",
+			OpenCodeSessionDetailResponseSchema,
 			() =>
 				call(
 					this.api._sdk.session.create(
 						options != null ? { body: options } : {},
 					),
 				),
-			"session.create",
 		);
 	}
 
 	async delete(id: string): Promise<void> {
-		return this.api.sdk(
-			() => call(this.api._sdk.session.delete({ path: { id } })),
-			"session.delete",
+		await this.api.sdk("session.delete", Schema.Boolean, () =>
+			call(this.api._sdk.session.delete({ path: { id } })),
 		);
 	}
 
 	async update(id: string, options: { title?: string }): Promise<void> {
-		return this.api.sdk(
-			() =>
-				call(
-					this.api._sdk.session.update({
-						path: { id },
-						body: options,
-					}),
-				),
-			"session.update",
+		await this.api.sdk("session.update", OpenCodeSessionSchema, () =>
+			call(
+				this.api._sdk.session.update({
+					path: { id },
+					body: options,
+				}),
+			),
 		);
 	}
 
 	/** Get statuses for all sessions. Returns `Record<string, SessionStatus>`. */
 	async statuses(): Promise<Record<string, SessionStatus>> {
 		return this.api.sdk(
-			() => call(this.api._sdk.session.status()),
 			"session.statuses",
+			OpenCodeSessionStatusMapSchema,
+			() => call(this.api._sdk.session.status()),
 		);
 	}
 
@@ -293,6 +430,8 @@ class SessionNamespace {
 		options?: { limit?: number },
 	): Promise<Message[]> {
 		const data = await this.api.sdk(
+			"session.messages",
+			OpenCodeMessageWithPartsArraySchema,
 			() =>
 				call(
 					this.api._sdk.session.messages({
@@ -302,7 +441,6 @@ class SessionNamespace {
 							: {}),
 					}),
 				),
-			"session.messages",
 		);
 		return flattenMessages(data);
 	}
@@ -333,13 +471,14 @@ class SessionNamespace {
 	 */
 	async message(sessionId: string, messageId: string): Promise<Message> {
 		const data = await this.api.sdk(
+			"session.message",
+			OpenCodeMessageWithPartsSchema,
 			() =>
 				call(
 					this.api._sdk.session.message({
 						path: { id: sessionId, messageID: messageId },
 					}),
 				),
-			"session.message",
 		);
 		return flattenMessage(data);
 	}
@@ -356,31 +495,27 @@ class SessionNamespace {
 			agent?: string;
 		},
 	): Promise<void> {
-		return this.api.sdk(
-			() =>
-				call(
-					this.api._sdk.session.promptAsync({
-						path: { id: sessionId },
-						body: {
-							parts: [{ type: "text" as const, text: options.text }],
-							...(options.model != null ? { model: options.model } : {}),
-							...(options.agent != null ? { agent: options.agent } : {}),
-						},
-					}),
-				),
-			"session.prompt",
+		await this.api.sdk("session.prompt", Schema.Undefined, () =>
+			call(
+				this.api._sdk.session.promptAsync({
+					path: { id: sessionId },
+					body: {
+						parts: [{ type: "text" as const, text: options.text }],
+						...(options.model != null ? { model: options.model } : {}),
+						...(options.agent != null ? { agent: options.agent } : {}),
+					},
+				}),
+			),
 		);
 	}
 
 	async abort(sessionId: string): Promise<void> {
-		return this.api.sdk(
-			() =>
-				call(
-					this.api._sdk.session.abort({
-						path: { id: sessionId },
-					}),
-				),
-			"session.abort",
+		await this.api.sdk("session.abort", Schema.Boolean, () =>
+			call(
+				this.api._sdk.session.abort({
+					path: { id: sessionId },
+				}),
+			),
 		);
 	}
 
@@ -389,6 +524,8 @@ class SessionNamespace {
 		options?: { messageID?: string },
 	): Promise<SessionDetail> {
 		return this.api.sdk(
+			"session.fork",
+			OpenCodeSessionDetailResponseSchema,
 			() =>
 				call(
 					this.api._sdk.session.fork({
@@ -396,7 +533,6 @@ class SessionNamespace {
 						...(options != null ? { body: options } : {}),
 					}),
 				),
-			"session.fork",
 		);
 	}
 
@@ -404,39 +540,33 @@ class SessionNamespace {
 		sessionId: string,
 		options: { messageID: string; partID?: string },
 	): Promise<void> {
-		return this.api.sdk(
-			() =>
-				call(
-					this.api._sdk.session.revert({
-						path: { id: sessionId },
-						body: options,
-					}),
-				),
-			"session.revert",
+		await this.api.sdk("session.revert", OpenCodeSessionSchema, () =>
+			call(
+				this.api._sdk.session.revert({
+					path: { id: sessionId },
+					body: options,
+				}),
+			),
 		);
 	}
 
 	async unrevert(sessionId: string): Promise<void> {
-		return this.api.sdk(
-			() =>
-				call(
-					this.api._sdk.session.unrevert({
-						path: { id: sessionId },
-					}),
-				),
-			"session.unrevert",
+		await this.api.sdk("session.unrevert", OpenCodeSessionSchema, () =>
+			call(
+				this.api._sdk.session.unrevert({
+					path: { id: sessionId },
+				}),
+			),
 		);
 	}
 
 	async share(sessionId: string): Promise<{ url: string }> {
-		return this.api.sdk(
-			() =>
-				call(
-					this.api._sdk.session.share({
-						path: { id: sessionId },
-					}),
-				),
-			"session.share",
+		return this.api.sdk("session.share", OpenCodeShareResponseSchema, () =>
+			call(
+				this.api._sdk.session.share({
+					path: { id: sessionId },
+				}),
+			),
 		);
 	}
 
@@ -444,15 +574,13 @@ class SessionNamespace {
 		sessionId: string,
 		options?: { providerID: string; modelID: string },
 	): Promise<void> {
-		return this.api.sdk(
-			() =>
-				call(
-					this.api._sdk.session.summarize({
-						path: { id: sessionId },
-						...(options != null ? { body: options } : {}),
-					}),
-				),
-			"session.summarize",
+		await this.api.sdk("session.summarize", Schema.Boolean, () =>
+			call(
+				this.api._sdk.session.summarize({
+					path: { id: sessionId },
+					...(options != null ? { body: options } : {}),
+				}),
+			),
 		);
 	}
 
@@ -460,29 +588,28 @@ class SessionNamespace {
 		sessionId: string,
 		options?: { messageID?: string },
 	): Promise<{ diffs: Array<{ path: string; diff: string }> }> {
-		return this.api.sdk(
-			() =>
-				call(
-					this.api._sdk.session.diff({
-						path: { id: sessionId },
-						...(options?.messageID != null
-							? { query: { messageID: options.messageID } }
-							: {}),
-					}),
-				),
-			"session.diff",
+		return this.api.sdk("session.diff", OpenCodeDiffResponseSchema, () =>
+			call(
+				this.api._sdk.session.diff({
+					path: { id: sessionId },
+					...(options?.messageID != null
+						? { query: { messageID: options.messageID } }
+						: {}),
+				}),
+			),
 		);
 	}
 
 	async children(sessionId: string): Promise<SessionDetail[]> {
 		return this.api.sdk(
+			"session.children",
+			OpenCodeSessionDetailArraySchema,
 			() =>
 				call(
 					this.api._sdk.session.children({
 						path: { id: sessionId },
 					}),
 				),
-			"session.children",
 		);
 	}
 }
@@ -512,15 +639,13 @@ class PermissionNamespace {
 		permissionId: string,
 		response: "once" | "always" | "reject",
 	): Promise<void> {
-		return this.api.sdk(
-			() =>
-				call(
-					this.api._sdk.postSessionIdPermissionsPermissionId({
-						path: { id: sessionId, permissionID: permissionId },
-						body: { response },
-					}),
-				),
-			"permission.reply",
+		await this.api.sdk("permission.reply", Schema.Boolean, () =>
+			call(
+				this.api._sdk.postSessionIdPermissionsPermissionId({
+					path: { id: sessionId, permissionID: permissionId },
+					body: { response },
+				}),
+			),
 		);
 	}
 }
@@ -554,15 +679,15 @@ class ConfigNamespace {
 	constructor(private readonly api: OpenCodeAPI) {}
 
 	async get(): Promise<Record<string, unknown>> {
-		return this.api.sdk(() => call(this.api._sdk.config.get()), "config.get");
+		return this.api.sdk("config.get", OpenCodeConfigResponseSchema, () =>
+			call(this.api._sdk.config.get()),
+		);
 	}
 
 	async update(body: Record<string, unknown>): Promise<void> {
-		return this.api.sdk(
-			() =>
-				// biome-ignore lint/suspicious/noExplicitAny: Config body type is complex; callers pass partial config objects
-				call(this.api._sdk.config.update({ body: body as any })),
-			"config.update",
+		await this.api.sdk("config.update", OpenCodeConfigResponseSchema, () =>
+			// biome-ignore lint/suspicious/noExplicitAny: Config body type is complex; callers pass partial config objects
+			call(this.api._sdk.config.update({ body: body as any })),
 		);
 	}
 }
@@ -583,26 +708,26 @@ class ProviderNamespace {
 	 */
 	async list(): Promise<ProviderListResult> {
 		const data = await this.api.sdk(
-			() => call(this.api._sdk.provider.list()),
 			"provider.list",
+			OpenCodeProviderListResponseSchema,
+			() => call(this.api._sdk.provider.list()),
 		);
 		// Normalize SDK shape → ProviderListResult
-		// biome-ignore lint/suspicious/noExplicitAny: SDK shape differs from relay types — runtime normalization required
-		const raw = data as any;
-		const all = raw.all ?? raw.providers ?? [];
-		const providers = all.map((p: Record<string, unknown>) => ({
+		const providers: Provider[] = data.all.map((p) => ({
 			...p,
-			models:
-				p["models"] &&
-				typeof p["models"] === "object" &&
-				!Array.isArray(p["models"])
-					? Object.values(p["models"] as Record<string, unknown>)
-					: (p["models"] ?? []),
+			models: Object.values(p.models).map((model) => {
+				const { limit, variants, ...rest } = model;
+				return {
+					...rest,
+					limit: { ...limit },
+					...(variants != null ? { variants: { ...variants } } : {}),
+				};
+			}),
 		}));
 		return {
 			providers,
-			defaults: raw.default ?? raw.defaults ?? {},
-			connected: raw.connected ?? [],
+			defaults: { ...data.default },
+			connected: [...data.connected],
 		};
 	}
 }
@@ -613,7 +738,9 @@ class PtyNamespace {
 	constructor(private readonly api: OpenCodeAPI) {}
 
 	async list(): Promise<Array<{ id: string; [key: string]: unknown }>> {
-		return this.api.sdk(() => call(this.api._sdk.pty.list()), "pty.list");
+		return this.api.sdk("pty.list", OpenCodePtyArraySchema, () =>
+			call(this.api._sdk.pty.list()),
+		);
 	}
 
 	async create(options?: {
@@ -623,33 +750,26 @@ class PtyNamespace {
 		title?: string;
 		env?: Record<string, string>;
 	}): Promise<{ id: string; [key: string]: unknown }> {
-		return this.api.sdk(
-			() =>
-				call(
-					this.api._sdk.pty.create(options != null ? { body: options } : {}),
-				),
-			"pty.create",
+		return this.api.sdk("pty.create", OpenCodePtySchema, () =>
+			call(this.api._sdk.pty.create(options != null ? { body: options } : {})),
 		);
 	}
 
 	async delete(id: string): Promise<void> {
-		return this.api.sdk(
-			() => call(this.api._sdk.pty.remove({ path: { id } })),
-			"pty.delete",
+		await this.api.sdk("pty.delete", Schema.Boolean, () =>
+			call(this.api._sdk.pty.remove({ path: { id } })),
 		);
 	}
 
 	/** Resize a PTY session. Maps to sdk.pty.update() with size body. */
 	async resize(id: string, rows: number, cols: number): Promise<void> {
-		return this.api.sdk(
-			() =>
-				call(
-					this.api._sdk.pty.update({
-						path: { id },
-						body: { size: { rows, cols } },
-					}),
-				),
-			"pty.resize",
+		await this.api.sdk("pty.resize", OpenCodePtySchema, () =>
+			call(
+				this.api._sdk.pty.update({
+					path: { id },
+					body: { size: { rows, cols } },
+				}),
+			),
 		);
 	}
 }
@@ -662,21 +782,38 @@ class FileNamespace {
 	async list(
 		path: string,
 	): Promise<Array<{ name: string; type: string; size?: number }>> {
-		return this.api.sdk(
-			() => call(this.api._sdk.file.list({ query: { path } })),
+		const entries = await this.api.sdk(
 			"file.list",
+			OpenCodeFileEntryArraySchema,
+			() => call(this.api._sdk.file.list({ query: { path } })),
 		);
+		return entries.map((entry) => ({
+			name: entry.name,
+			type: entry.type,
+		}));
 	}
 
 	async read(path: string): Promise<{ content: string; binary?: boolean }> {
-		return this.api.sdk(
-			() => call(this.api._sdk.file.read({ query: { path } })),
-			"file.read",
+		const file = await this.api.sdk("file.read", OpenCodeFileReadSchema, () =>
+			call(this.api._sdk.file.read({ query: { path } })),
 		);
+		return {
+			content: file.content,
+			...(file.type === "binary" ? { binary: true } : {}),
+		};
 	}
 
-	async status(): Promise<Record<string, unknown>> {
-		return this.api.sdk(() => call(this.api._sdk.file.status()), "file.status");
+	async status(): Promise<
+		Array<{
+			path: string;
+			added: number;
+			removed: number;
+			status: "added" | "deleted" | "modified";
+		}>
+	> {
+		return this.api.sdk("file.status", OpenCodeFileStatusArraySchema, () =>
+			call(this.api._sdk.file.status()),
+		);
 	}
 }
 
@@ -686,33 +823,29 @@ class FindNamespace {
 	constructor(private readonly api: OpenCodeAPI) {}
 
 	async text(pattern: string): Promise<unknown[]> {
-		return this.api.sdk(
-			() => call(this.api._sdk.find.text({ query: { pattern } })),
-			"find.text",
+		return this.api.sdk("find.text", OpenCodeFindTextResponseSchema, () =>
+			call(this.api._sdk.find.text({ query: { pattern } })),
 		);
 	}
 
 	async files(query: string, options?: { dirs?: boolean }): Promise<unknown[]> {
-		return this.api.sdk(
-			() =>
-				call(
-					this.api._sdk.find.files({
-						query: {
-							query,
-							...(options?.dirs != null
-								? { dirs: options.dirs ? "true" : "false" }
-								: {}),
-						},
-					}),
-				),
-			"find.files",
+		return this.api.sdk("find.files", OpenCodeFindFilesArraySchema, () =>
+			call(
+				this.api._sdk.find.files({
+					query: {
+						query,
+						...(options?.dirs != null
+							? { dirs: options.dirs ? "true" : "false" }
+							: {}),
+					},
+				}),
+			),
 		);
 	}
 
 	async symbols(query: string): Promise<unknown[]> {
-		return this.api.sdk(
-			() => call(this.api._sdk.find.symbols({ query: { query } })),
-			"find.symbols",
+		return this.api.sdk("find.symbols", OpenCodeFindSymbolsResponseSchema, () =>
+			call(this.api._sdk.find.symbols({ query: { query } })),
 		);
 	}
 }
@@ -723,13 +856,22 @@ class AppNamespace {
 	constructor(private readonly api: OpenCodeAPI) {}
 
 	async agents(): Promise<Agent[]> {
-		return this.api.sdk(() => call(this.api._sdk.app.agents()), "app.agents");
+		const agents = await this.api.sdk(
+			"app.agents",
+			OpenCodeAgentArraySchema,
+			() => call(this.api._sdk.app.agents()),
+		);
+		return agents.map((agent) => ({
+			id: agent.name,
+			name: agent.name,
+			...(agent.description != null ? { description: agent.description } : {}),
+			mode: agent.mode,
+		}));
 	}
 
 	async commands(): Promise<Array<{ name: string; description?: string }>> {
-		return this.api.sdk(
-			() => call(this.api._sdk.command.list()),
-			"app.commands",
+		return this.api.sdk("app.commands", OpenCodeCommandArraySchema, () =>
+			call(this.api._sdk.command.list()),
 		);
 	}
 
@@ -739,19 +881,23 @@ class AppNamespace {
 	}
 
 	async path(): Promise<{ cwd: string }> {
-		return this.api.sdk(() => call(this.api._sdk.path.get()), "app.path");
+		const path = await this.api.sdk("app.path", OpenCodePathSchema, () =>
+			call(this.api._sdk.path.get()),
+		);
+		return { cwd: path.directory };
 	}
 
 	async vcs(): Promise<{ branch?: string; dirty?: boolean }> {
-		return this.api.sdk(() => call(this.api._sdk.vcs.get()), "app.vcs");
+		return this.api.sdk("app.vcs", OpenCodeVcsSchema, () =>
+			call(this.api._sdk.vcs.get()),
+		);
 	}
 
 	async projects(): Promise<
 		Array<{ id?: string; name?: string; path?: string; worktree?: string }>
 	> {
-		return this.api.sdk(
-			() => call(this.api._sdk.project.list()),
-			"app.projects",
+		return this.api.sdk("app.projects", OpenCodeProjectArraySchema, () =>
+			call(this.api._sdk.project.list()),
 		);
 	}
 
@@ -761,8 +907,9 @@ class AppNamespace {
 		path?: string;
 	}> {
 		return this.api.sdk(
-			() => call(this.api._sdk.project.current()),
 			"app.currentProject",
+			OpenCodeCurrentProjectSchema,
+			() => call(this.api._sdk.project.current()),
 		);
 	}
 }

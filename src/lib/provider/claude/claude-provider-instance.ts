@@ -20,7 +20,12 @@ import { readdirSync, readFileSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { query as sdkQuery } from "@anthropic-ai/claude-agent-sdk";
-import { Cause, Deferred, Effect, Exit, Runtime } from "effect";
+import { Cause, Data, Deferred, Effect, Exit, Runtime, Schema } from "effect";
+import {
+	ClaudeSDKMessageSchema,
+	ClaudeSDKOptionsJsonShapeSchema,
+	ClaudeSDKUserMessageSchema,
+} from "../../contracts/providers/claude-agent-sdk.js";
 import { createLogger } from "../../logger.js";
 import {
 	type ClaudeEventPersistEffect,
@@ -75,6 +80,16 @@ import type {
 
 const log = createLogger("claude-provider-instance");
 const SUBAGENT_POLL_TIMEOUT_MS = 2000;
+const MAX_DECODE_ERROR_LENGTH = 800;
+const MAX_DECODE_PAYLOAD_LOG_LENGTH = 1200;
+
+const decodeClaudeSDKMessage = Schema.decodeUnknownSync(ClaudeSDKMessageSchema);
+const decodeClaudeSDKUserMessage = Schema.decodeUnknownSync(
+	ClaudeSDKUserMessageSchema,
+);
+const decodeClaudeSDKOptionsJsonShape = Schema.decodeUnknownSync(
+	ClaudeSDKOptionsJsonShapeSchema,
+);
 
 function supportsMillionTokenContext(modelId: string): boolean {
 	const normalized = modelId.toLowerCase();
@@ -148,6 +163,80 @@ async function promiseWithTimeout<T>(
 		]);
 	} finally {
 		if (timer) clearTimeout(timer);
+	}
+}
+
+function truncateForProviderError(value: string, maxLength: number): string {
+	return value.length > maxLength ? `${value.slice(0, maxLength)}...` : value;
+}
+
+function safeStringify(value: unknown): string {
+	try {
+		return JSON.stringify(value) ?? String(value);
+	} catch {
+		return String(value);
+	}
+}
+
+function decodeFailureMessage(boundary: string, cause: unknown): string {
+	const details = truncateForProviderError(
+		cause instanceof Error ? cause.message : String(cause),
+		MAX_DECODE_ERROR_LENGTH,
+	);
+	return `${boundary} decode failed: ${details}`;
+}
+
+class ClaudeSDKDecodeError extends Data.TaggedError("ClaudeSDKDecodeError")<{
+	readonly boundary: string;
+	readonly cause: unknown;
+}> {
+	override get message(): string {
+		return decodeFailureMessage(this.boundary, this.cause);
+	}
+}
+
+function logDecodeFailure(
+	boundary: string,
+	cause: unknown,
+	payload: unknown,
+): void {
+	log.warn(
+		`${decodeFailureMessage(boundary, cause)}; payload=${truncateForProviderError(
+			safeStringify(payload),
+			MAX_DECODE_PAYLOAD_LOG_LENGTH,
+		)}`,
+	);
+}
+
+function decodeProviderMessage(message: unknown): SDKMessage {
+	try {
+		return decodeClaudeSDKMessage(message) as SDKMessage;
+	} catch (cause) {
+		logDecodeFailure("Claude SDK message", cause, message);
+		throw new ClaudeSDKDecodeError({ boundary: "Claude SDK message", cause });
+	}
+}
+
+function validateUserMessage(message: SDKUserMessage): SDKUserMessage {
+	try {
+		decodeClaudeSDKUserMessage(message);
+		return message;
+	} catch (cause) {
+		logDecodeFailure("Claude SDK user message", cause, message);
+		throw new ClaudeSDKDecodeError({
+			boundary: "Claude SDK user message",
+			cause,
+		});
+	}
+}
+
+function validateOptionsJsonShape(options: SDKOptions): SDKOptions {
+	try {
+		decodeClaudeSDKOptionsJsonShape(options);
+		return options;
+	} catch (cause) {
+		logDecodeFailure("Claude SDK options", cause, options);
+		throw new ClaudeSDKDecodeError({ boundary: "Claude SDK options", cause });
 	}
 }
 
@@ -520,7 +609,10 @@ export class ClaudeProviderInstance implements ProviderInstance {
 				promptQueue = queue;
 
 				// 2. Build initial user message and enqueue.
-				const userMessage = this.buildUserMessage(input);
+				const userMessage = yield* Effect.try({
+					try: () => validateUserMessage(this.buildUserMessage(input)),
+					catch: (cause) => cause,
+				});
 				yield* queue.enqueue(userMessage);
 
 				// 3. Build query options.
@@ -576,21 +668,25 @@ export class ClaudeProviderInstance implements ProviderInstance {
 				};
 
 				// 5. Build SDK options — canUseTool captures ctx by reference.
-				const options: SDKOptions = {
-					cwd: input.workspaceRoot,
-					abortController,
-					env: makeClaudeSdkEnv(),
-					includePartialMessages: true,
-					forwardSubagentText: true,
-					settingSources: ["user", "project", "local"],
-					canUseTool: bridge.createCanUseTool(ctx),
-					...(apiModelId ? { model: apiModelId } : {}),
-					...(resumeSessionId ? { resume: resumeSessionId } : {}),
-					...(input.agent ? { agent: input.agent } : {}),
-					...(input.variant
-						? { effort: input.variant as NonNullable<SDKOptions["effort"]> }
-						: {}),
-				};
+				const options = yield* Effect.try({
+					try: () =>
+						validateOptionsJsonShape({
+							cwd: input.workspaceRoot,
+							abortController,
+							env: makeClaudeSdkEnv(),
+							includePartialMessages: true,
+							forwardSubagentText: true,
+							settingSources: ["user", "project", "local"],
+							canUseTool: bridge.createCanUseTool(ctx),
+							...(apiModelId ? { model: apiModelId } : {}),
+							...(resumeSessionId ? { resume: resumeSessionId } : {}),
+							...(input.agent ? { agent: input.agent } : {}),
+							...(input.variant
+								? { effort: input.variant as NonNullable<SDKOptions["effort"]> }
+								: {}),
+						}),
+					catch: (cause) => cause,
+				});
 
 				// 6. Call query factory and assign to context.
 				const query = yield* Effect.try({
@@ -680,7 +776,10 @@ export class ClaudeProviderInstance implements ProviderInstance {
 			ctx.eventSink = input.eventSink;
 
 			// Build and enqueue the user message.
-			const userMessage = this.buildUserMessage(input);
+			const userMessage = yield* Effect.try({
+				try: () => validateUserMessage(this.buildUserMessage(input)),
+				catch: (cause) => cause,
+			});
 			yield* ctx.promptQueue.enqueue(userMessage);
 
 			return yield* Deferred.await(deferred);
@@ -753,7 +852,9 @@ export class ClaudeProviderInstance implements ProviderInstance {
 	): Promise<void> {
 		let resultFinalization: Promise<void> | undefined;
 		try {
-			for await (const message of ctx.query) {
+			const stream = ctx.query as AsyncIterable<unknown>;
+			for await (const rawMessage of stream) {
+				const message = decodeProviderMessage(rawMessage);
 				if (await this.pushForwardedSubagentMessage(ctx, message, runEffect)) {
 					continue;
 				}

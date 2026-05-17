@@ -1,4 +1,29 @@
-import { Data } from "effect";
+import { Data, Schema } from "effect";
+import {
+	OpenCodeMessageWithPartsSchema,
+	OpenCodePendingPermissionSchema,
+	OpenCodePendingQuestionSchema,
+	OpenCodeQuestionRejectRequestSchema,
+	OpenCodeQuestionReplyRequestSchema,
+} from "../contracts/providers/opencode-sdk.js";
+import { OpenCodeApiError } from "../errors.js";
+
+const OpenCodeSkillSchema = Schema.Struct({
+	name: Schema.String,
+	description: Schema.optional(Schema.String),
+});
+const OpenCodeSkillArraySchema = Schema.Array(
+	OpenCodeSkillSchema,
+) as unknown as Schema.Schema<Array<{ name: string; description?: string }>>;
+const OpenCodePendingPermissionArraySchema = Schema.Array(
+	OpenCodePendingPermissionSchema,
+) as unknown as Schema.Schema<unknown[]>;
+const OpenCodePendingQuestionArraySchema = Schema.Array(
+	OpenCodePendingQuestionSchema,
+) as unknown as Schema.Schema<unknown[]>;
+const OpenCodeMessageWithPartsArraySchema = Schema.Array(
+	OpenCodeMessageWithPartsSchema,
+) as unknown as Schema.Schema<unknown[]>;
 
 export interface GapEndpointsOptions {
 	baseUrl: string;
@@ -34,21 +59,29 @@ export class GapEndpoints {
 	}
 
 	async listPendingPermissions(): Promise<unknown[]> {
-		const res = await this.get("/permission");
-		return Array.isArray(res) ? res : [];
+		return this.get("/permission", OpenCodePendingPermissionArraySchema);
 	}
 
 	async listPendingQuestions(): Promise<unknown[]> {
-		const res = await this.get("/question");
-		return Array.isArray(res) ? res : [];
+		return this.get("/question", OpenCodePendingQuestionArraySchema);
 	}
 
 	async replyQuestion(id: string, answers: string[][]): Promise<void> {
-		await this.post(`/question/${id}/reply`, { answers });
+		await this.post(
+			`/question/${id}/reply`,
+			{ answers },
+			OpenCodeQuestionReplyRequestSchema,
+			Schema.Undefined,
+		);
 	}
 
 	async rejectQuestion(id: string): Promise<void> {
-		await this.post(`/question/${id}/reject`, {});
+		await this.post(
+			`/question/${id}/reject`,
+			{},
+			OpenCodeQuestionRejectRequestSchema,
+			Schema.Undefined,
+		);
 	}
 
 	async listSkills(
@@ -57,8 +90,7 @@ export class GapEndpoints {
 		const path = directory
 			? `/skill?directory=${encodeURIComponent(directory)}`
 			: "/skill";
-		const res = await this.get(path);
-		return Array.isArray(res) ? res : [];
+		return this.get(path, OpenCodeSkillArraySchema);
 	}
 
 	async getMessagesPage(
@@ -70,11 +102,10 @@ export class GapEndpoints {
 		if (options?.before) params.set("before", options.before);
 		const query = params.toString();
 		const path = `/session/${sessionId}/message${query ? `?${query}` : ""}`;
-		const res = await this.get(path);
-		return Array.isArray(res) ? res : [];
+		return this.get(path, OpenCodeMessageWithPartsArraySchema);
 	}
 
-	private async get(path: string): Promise<unknown> {
+	private async get<T>(path: string, schema: Schema.Schema<T>): Promise<T> {
 		const res = await this.fetch(
 			new Request(`${this.baseUrl}${path}`, {
 				method: "GET",
@@ -88,16 +119,25 @@ export class GapEndpoints {
 				status: res.status,
 			});
 		}
-		if (res.status === 204) return undefined;
-		return res.json();
+		const data =
+			res.status === 204
+				? undefined
+				: await parseJsonResponse("GET", path, res.status, res);
+		return decodeGapResponse("GET", path, res.status, schema, data);
 	}
 
-	private async post(path: string, body: unknown): Promise<unknown> {
+	private async post<T, Body>(
+		path: string,
+		body: unknown,
+		requestSchema: Schema.Schema<Body>,
+		responseSchema: Schema.Schema<T>,
+	): Promise<T> {
+		const decodedBody = decodeGapRequest("POST", path, requestSchema, body);
 		const res = await this.fetch(
 			new Request(`${this.baseUrl}${path}`, {
 				method: "POST",
 				headers: this.headers,
-				body: JSON.stringify(body),
+				body: JSON.stringify(decodedBody),
 			}),
 		);
 		if (!res.ok) {
@@ -107,9 +147,95 @@ export class GapEndpoints {
 				status: res.status,
 			});
 		}
-		if (res.status === 204) return undefined;
-		const ct = res.headers.get("content-type") ?? "";
-		if (ct.includes("application/json")) return res.json();
-		return undefined;
+		let data: unknown;
+		if (res.status !== 204) {
+			const ct = res.headers.get("content-type") ?? "";
+			if (ct.includes("application/json")) {
+				data = await parseJsonResponse("POST", path, res.status, res);
+			}
+		}
+		return decodeGapResponse("POST", path, res.status, responseSchema, data);
 	}
+}
+
+async function parseJsonResponse(
+	method: "GET" | "POST",
+	path: string,
+	status: number,
+	res: Response,
+): Promise<unknown> {
+	try {
+		return await res.json();
+	} catch (err) {
+		throw toMalformedGapError({
+			message: `Malformed OpenCode gap JSON during ${method} ${path}`,
+			method,
+			path,
+			status,
+			err,
+		});
+	}
+}
+
+function decodeGapRequest<T>(
+	method: "POST",
+	path: string,
+	schema: Schema.Schema<T>,
+	data: unknown,
+): T {
+	try {
+		return Schema.decodeUnknownSync(schema)(data);
+	} catch (err) {
+		throw toMalformedGapError({
+			message: `Malformed OpenCode gap request during ${method} ${path}`,
+			method,
+			path,
+			status: 400,
+			err,
+		});
+	}
+}
+
+function decodeGapResponse<T>(
+	method: "GET" | "POST",
+	path: string,
+	status: number,
+	schema: Schema.Schema<T>,
+	data: unknown,
+): T {
+	try {
+		return Schema.decodeUnknownSync(schema)(data);
+	} catch (err) {
+		throw toMalformedGapError({
+			message: `Malformed OpenCode gap response during ${method} ${path}`,
+			method,
+			path,
+			status,
+			err,
+		});
+	}
+}
+
+function toMalformedGapError(options: {
+	message: string;
+	method: "GET" | "POST";
+	path: string;
+	status: number;
+	err: unknown;
+}): OpenCodeApiError {
+	const cause =
+		options.err instanceof Error ? options.err : new Error(String(options.err));
+	const parseDetails = cause.message.slice(0, 2000);
+	return new OpenCodeApiError({
+		message: options.message,
+		endpoint: options.path,
+		responseStatus: options.status,
+		responseBody: { parseDetails },
+		cause,
+		context: {
+			method: options.method,
+			path: options.path,
+			parseDetails,
+		},
+	});
 }
