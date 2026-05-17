@@ -433,7 +433,10 @@ describe("Claude subagent materialization pipeline", () => {
 							const pollIntervalMs = 25;
 							const deadline = Date.now() + timeoutMs;
 							let state = yield* readProjectedState();
-							while (!hasProjectedChildTranscript(state) && Date.now() < deadline) {
+							while (
+								!hasProjectedChildTranscript(state) &&
+								Date.now() < deadline
+							) {
 								yield* Effect.promise(
 									() =>
 										new Promise<void>((resolve) =>
