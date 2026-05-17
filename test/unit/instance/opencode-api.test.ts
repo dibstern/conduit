@@ -72,6 +72,66 @@ function makeProvider(overrides: Record<string, unknown> = {}) {
 	};
 }
 
+function makeProviderWithCurrentModelShape() {
+	return makeProvider({
+		id: "helicone",
+		name: "Helicone",
+		env: ["HELICONE_API_KEY"],
+		models: {
+			"claude-opus-4-1-20250805": {
+				id: "claude-opus-4-1-20250805",
+				providerID: "helicone",
+				api: {
+					id: "claude-opus-4-1-20250805",
+					url: "https://ai-gateway.helicone.ai/v1",
+					npm: "@ai-sdk/openai-compatible",
+				},
+				name: "Anthropic: Claude Opus 4.1 (20250805)",
+				family: "claude-opus",
+				capabilities: {
+					temperature: true,
+					reasoning: true,
+					attachment: false,
+					toolcall: true,
+					input: {
+						text: true,
+						audio: false,
+						image: true,
+						video: false,
+						pdf: false,
+					},
+					output: {
+						text: true,
+						audio: false,
+						image: false,
+						video: false,
+						pdf: false,
+					},
+					interleaved: { field: "reasoning_content" },
+				},
+				cost: {
+					input: 15,
+					output: 75,
+					cache: {
+						read: 1.5,
+						write: 18.75,
+					},
+				},
+				limit: { context: 200000, output: 32000 },
+				status: "active",
+				options: {},
+				headers: {},
+				release_date: "2025-08-05",
+				variants: {
+					low: { reasoningEffort: "low" },
+					medium: { reasoningEffort: "medium" },
+					high: { reasoningEffort: "high" },
+				},
+			},
+		},
+	});
+}
+
 // Stub SDK client — test that methods delegate correctly
 function makeStubSdk() {
 	return {
@@ -535,6 +595,47 @@ describe("OpenCodeAPI", () => {
 			defaults: { anthropic: "claude-sonnet-4" },
 			connected: ["anthropic"],
 		});
+	});
+
+	it("provider.list() accepts the current nested model capabilities shape", async () => {
+		const sdk = makeStubSdk();
+		const gaps = makeStubGaps();
+		sdk.provider.list.mockResolvedValue({
+			data: {
+				all: [makeProviderWithCurrentModelShape()],
+				default: { helicone: "claude-opus-4-1-20250805" },
+				connected: ["helicone"],
+			},
+			error: undefined,
+			response: { status: 200 },
+		});
+		const api = new OpenCodeAPI({
+			sdk,
+			gapEndpoints: gaps,
+			baseUrl: "http://localhost:4096",
+			authHeaders: {},
+		});
+
+		const result = await api.provider.list();
+
+		expect(result.providers).toHaveLength(1);
+		const provider = result.providers[0];
+		if (!provider) throw new Error("expected one provider");
+		const models = provider.models ?? [];
+		expect(models).toHaveLength(1);
+		const model = models[0];
+		expect(model).toEqual(
+			expect.objectContaining({
+				id: "claude-opus-4-1-20250805",
+				name: "Anthropic: Claude Opus 4.1 (20250805)",
+				limit: { context: 200000, output: 32000 },
+				variants: {
+					low: { reasoningEffort: "low" },
+					medium: { reasoningEffort: "medium" },
+					high: { reasoningEffort: "high" },
+				},
+			}),
+		);
 	});
 
 	it("provider.list() rejects provider entries missing SDK-required fields", async () => {

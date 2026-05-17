@@ -420,30 +420,44 @@ type _OpenCodeProjectCoversSdkProject = AssertExtends<
 	SdkProject
 >;
 
+const OpenCodeProviderCostSchema = Schema.Struct({
+	input: Schema.Number,
+	output: Schema.Number,
+	cache_read: Schema.optional(Schema.Number),
+	cache_write: Schema.optional(Schema.Number),
+	cache: Schema.optional(
+		Schema.Struct({
+			read: Schema.optional(Schema.Number),
+			write: Schema.optional(Schema.Number),
+		}),
+	),
+	context_over_200k: Schema.optional(Schema.Unknown),
+});
+
+const OpenCodeProviderCapabilitiesSchema = Schema.Struct({
+	temperature: Schema.optional(Schema.Boolean),
+	reasoning: Schema.optional(Schema.Boolean),
+	attachment: Schema.optional(Schema.Boolean),
+	toolcall: Schema.optional(Schema.Boolean),
+	input: Schema.optional(
+		Schema.Record({ key: Schema.String, value: Schema.Boolean }),
+	),
+	output: Schema.optional(
+		Schema.Record({ key: Schema.String, value: Schema.Boolean }),
+	),
+	interleaved: Schema.optional(Schema.Unknown),
+});
+
 const OpenCodeProviderModelSchema = Schema.Struct({
 	id: Schema.String,
 	name: Schema.String,
 	release_date: Schema.String,
-	attachment: Schema.Boolean,
-	reasoning: Schema.Boolean,
-	temperature: Schema.Boolean,
-	tool_call: Schema.Boolean,
-	cost: Schema.optional(
-		Schema.Struct({
-			input: Schema.Number,
-			output: Schema.Number,
-			cache_read: Schema.optional(Schema.Number),
-			cache_write: Schema.optional(Schema.Number),
-			context_over_200k: Schema.optional(
-				Schema.Struct({
-					input: Schema.Number,
-					output: Schema.Number,
-					cache_read: Schema.optional(Schema.Number),
-					cache_write: Schema.optional(Schema.Number),
-				}),
-			),
-		}),
-	),
+	attachment: Schema.optional(Schema.Boolean),
+	reasoning: Schema.optional(Schema.Boolean),
+	temperature: Schema.optional(Schema.Boolean),
+	tool_call: Schema.optional(Schema.Boolean),
+	capabilities: Schema.optional(OpenCodeProviderCapabilitiesSchema),
+	cost: Schema.optional(OpenCodeProviderCostSchema),
 	limit: Schema.Struct({
 		context: Schema.Number,
 		output: Schema.Number,
@@ -459,11 +473,14 @@ const OpenCodeProviderModelSchema = Schema.Struct({
 		}),
 	),
 	experimental: Schema.optional(Schema.Boolean),
-	status: Schema.optional(Schema.Literal("alpha", "beta", "deprecated")),
+	status: Schema.optional(Schema.String),
 	options: Schema.Record({ key: Schema.String, value: Schema.Unknown }),
 	headers: Schema.optional(
 		Schema.Record({ key: Schema.String, value: Schema.String }),
 	),
+	providerID: Schema.optional(Schema.String),
+	api: Schema.optional(Schema.Unknown),
+	family: Schema.optional(Schema.String),
 	provider: Schema.optional(
 		Schema.Struct({
 			npm: Schema.String,
@@ -503,10 +520,9 @@ type _OpenCodeSdkProviderListCoversSchema = AssertExtends<
 	SdkProviderListResponse,
 	OpenCodeProviderListResponse
 >;
-type _OpenCodeProviderListCoversSdkProviderList = AssertExtends<
-	NormalizeSchemaType<OpenCodeProviderListResponse>,
-	SdkProviderListResponse
->;
+// OpenCode's live /provider payload has drifted ahead of the published SDK type
+// for model capabilities. Keep accepting the SDK shape, but let the runtime
+// schema also decode the nested capabilities payload used by newer servers.
 
 const OpenCodeModelRefSchema = Schema.Struct({
 	providerID: Schema.String,
