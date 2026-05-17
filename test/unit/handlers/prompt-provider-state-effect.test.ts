@@ -437,4 +437,92 @@ describe("handleMessage with Effect provider state persistence", () => {
 			);
 		},
 	);
+
+	it.effect("routes Claude event sink messages to their event session", () => {
+		const dir = mkdtempSync(join(tmpdir(), "conduit-claude-child-sink-"));
+		const filename = join(dir, "events.db");
+		const ws = mockWsHandler("parent-session");
+		const log = createSilentLogger();
+		const client = {
+			session: {
+				messagesPage: vi.fn(async () => []),
+			},
+		} as unknown as OpenCodeAPI;
+		const engine = {
+			getProviderForSession: vi.fn(() => "claude"),
+			dispatch: vi.fn(async (command: SendTurnCommand) => {
+				await Effect.runPromise(
+					command.input.eventSink.push(
+						canonicalEvent(
+							"text.delta",
+							"child-session",
+							{
+								messageId: "child-message-1",
+								partId: "child-message-1-0",
+								text: "child live update",
+							},
+							{ provider: "claude", createdAt: Date.now() },
+						),
+					),
+				);
+				return {
+					status: "completed" as const,
+					cost: 0,
+					tokens: { input: 0, output: 0 },
+					durationMs: 0,
+				};
+			}),
+		} as unknown as OrchestrationEngine;
+		const layer = Layer.mergeAll(
+			Layer.succeed(OpenCodeAPITag, client),
+			Layer.succeed(WebSocketHandlerTag, ws),
+			Layer.succeed(LoggerTag, log),
+			Layer.succeed(SessionManagerServiceTag, makeMockSessionManagerService()),
+			Layer.succeed(ConfigTag, {
+				httpServer: createServer(),
+				opencodeUrl: "http://127.0.0.1:1",
+				projectDir: "/tmp/project",
+				slug: "claude-child-sink-test",
+			} satisfies ProjectRelayConfig),
+			PendingInteractionServiceLive,
+			Layer.succeed(OrchestrationEngineTag, withDispatchEffect(engine)),
+			makePersistenceEffectLayer(filename),
+			makeOverridesStateLive(),
+		);
+
+		return Effect.gen(function* () {
+			yield* setClaudeModel("parent-session");
+			yield* handleMessage("client-1", { text: "trigger child event" });
+			const sendToSession = ws.sendToSession as ReturnType<typeof vi.fn>;
+			for (let attempt = 0; attempt < 10; attempt++) {
+				if (
+					sendToSession.mock.calls.some((call: unknown[]) => {
+						const msg = call[1] as { readonly type?: string } | undefined;
+						return msg?.type === "delta";
+					})
+				) {
+					break;
+				}
+				yield* Effect.promise(
+					() => new Promise((resolve) => setTimeout(resolve, 5)),
+				);
+			}
+
+			expect(sendToSession).toHaveBeenCalledWith(
+				"child-session",
+				expect.objectContaining({
+					type: "delta",
+					sessionId: "child-session",
+					text: "child live update",
+				}),
+			);
+		}).pipe(
+			Effect.provide(layer),
+			Effect.ensuring(
+				Effect.sync(() => {
+					rmSync(dir, { recursive: true, force: true });
+				}),
+			),
+		);
+	});
 });

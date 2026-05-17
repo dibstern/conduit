@@ -233,7 +233,11 @@ export function stageSessionMessagesToEvents(input: {
 		if (message.type !== "user" && message.type !== "assistant") continue;
 		const role: MessageRole = message.type;
 		const messageId = message.uuid;
-		if (!cursor.messageRoles.has(messageId)) {
+		const content = readContent(message.message);
+		if (
+			shouldCreateTranscriptMessage(role, content) &&
+			!cursor.messageRoles.has(messageId)
+		) {
 			cursor.messageRoles.set(messageId, role);
 			events.push(
 				canonicalEvent(
@@ -245,7 +249,6 @@ export function stageSessionMessagesToEvents(input: {
 			);
 		}
 
-		const content = readContent(message.message);
 		for (const [index, block] of content.entries()) {
 			appendContentBlockEvents({
 				events,
@@ -269,6 +272,20 @@ function readContent(message: unknown): readonly unknown[] {
 	if (typeof content === "string") return [{ type: "text", text: content }];
 	if (Array.isArray(content)) return content;
 	return [];
+}
+
+function shouldCreateTranscriptMessage(
+	role: MessageRole,
+	content: readonly unknown[],
+): boolean {
+	if (role === "assistant") return true;
+	return content.some(
+		(block) =>
+			isRecord(block) &&
+			block["type"] === "text" &&
+			typeof block["text"] === "string" &&
+			block["text"].length > 0,
+	);
 }
 
 function appendContentBlockEvents(input: {

@@ -426,6 +426,55 @@ describe("Claude subagent materializer", () => {
 		expect(repeatedStage.events).toEqual([]);
 	});
 
+	it("does not create empty user messages for tool_result-only snapshots", () => {
+		const cursor = newCursor();
+		const messages = [
+			contentMessage("assistant", "sub-assistant-tool-1", [
+				{
+					type: "tool_use",
+					id: "toolu-1",
+					name: "Bash",
+					input: { command: "pnpm test" },
+				},
+			]),
+			contentMessage("user", "sub-user-tool-result-1", [
+				{
+					type: "tool_result",
+					tool_use_id: "toolu-1",
+					content: "ok",
+				},
+			]),
+		];
+
+		const stage = stageSessionMessagesToEvents({
+			childSessionId: "child-session",
+			messages,
+			cursor,
+		});
+
+		expect(
+			stage.events.filter((event) => event.type === "message.created"),
+		).toEqual([
+			expect.objectContaining({
+				data: expect.objectContaining({
+					messageId: "sub-assistant-tool-1",
+					role: "assistant",
+				}),
+			}),
+		]);
+		expect(stage.events).toEqual(
+			expect.arrayContaining([
+				expect.objectContaining({
+					type: "tool.completed",
+					data: expect.objectContaining({
+						partId: "toolu-1",
+						result: "ok",
+					}),
+				}),
+			]),
+		);
+	});
+
 	it("lets callers stage cursor advances before committing them", () => {
 		const cursor = newCursor();
 		const firstStage = stageSessionMessagesToEvents({

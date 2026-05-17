@@ -54,6 +54,19 @@ const NOOP_EVENT_SINK: SendTurnInput["eventSink"] = {
 	resolveQuestion: () => Effect.void,
 };
 
+function targetSessionForRelayMessage(
+	msg: unknown,
+	fallbackSessionId: string,
+): string {
+	if (msg == null || typeof msg !== "object" || !("sessionId" in msg)) {
+		return fallbackSessionId;
+	}
+	const sessionId = (msg as { readonly sessionId?: unknown }).sessionId;
+	return typeof sessionId === "string" && sessionId.length > 0
+		? sessionId
+		: fallbackSessionId;
+}
+
 type PriorHistoryReaders = {
 	readQueryEffect?: ReadQueryEffect;
 };
@@ -306,7 +319,11 @@ export const sendMessageToSession = (input: SendMessageToSessionInput) =>
 					? createRelayEventSink({
 							sessionId: activeId,
 							providerId,
-							send: (msg) => wsHandler.sendToSession(activeId, msg),
+							send: (msg) =>
+								wsHandler.sendToSession(
+									targetSessionForRelayMessage(msg, activeId),
+									msg,
+								),
 							clearTimeout: () => {
 								runTimeout(clearProcessingTimeout(activeId));
 							},
