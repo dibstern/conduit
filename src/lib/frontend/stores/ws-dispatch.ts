@@ -456,6 +456,59 @@ async function convertHistoryAsync(
 	return result;
 }
 
+function isSubagentToolMessage(message: ChatMessage): message is ToolMessage {
+	return (
+		message.type === "tool" &&
+		(message.name === "Task" ||
+			message.name === "task" ||
+			message.name === "Agent")
+	);
+}
+
+function hasSubagentSessionLink(message: ToolMessage): boolean {
+	const metadata = message.metadata;
+	return (
+		typeof metadata?.["childSessionId"] === "string" ||
+		typeof metadata?.["sessionId"] === "string"
+	);
+}
+
+function isTerminalToolStatus(status: ToolMessage["status"]): boolean {
+	return status === "completed" || status === "error";
+}
+
+function preserveCachedSubagentToolState(
+	cachedMessages: readonly ChatMessage[],
+	freshMessages: readonly ChatMessage[],
+): ChatMessage[] {
+	const cachedByToolId = new Map<string, ToolMessage>();
+	for (const message of cachedMessages) {
+		if (isSubagentToolMessage(message)) cachedByToolId.set(message.id, message);
+	}
+	if (cachedByToolId.size === 0) return [...freshMessages];
+
+	return freshMessages.map((message) => {
+		if (!isSubagentToolMessage(message)) return message;
+		const cached = cachedByToolId.get(message.id);
+		if (!cached) return message;
+
+		let next = message;
+		if (!hasSubagentSessionLink(message) && hasSubagentSessionLink(cached)) {
+			next = {
+				...next,
+				metadata: { ...(cached.metadata ?? {}), ...(next.metadata ?? {}) },
+			};
+		}
+		if (
+			isTerminalToolStatus(cached.status) &&
+			!isTerminalToolStatus(next.status)
+		) {
+			next = { ...next, status: cached.status };
+		}
+		return next;
+	});
+}
+
 // ─── Shared chat-event dispatch ─────────────────────────────────────────────
 // Single dispatch function for ALL chat event types (PERSISTED_EVENT_TYPES
 // plus `status`). Used by both handleMessage (live) and replayEvents (replay)
@@ -751,12 +804,16 @@ export function handleMessage(msg: RelayMessage): void {
 				convertHistoryAsync(historyMsgs, renderMarkdown, capturedSlot.activity)
 					.then((chatMsgs) => {
 						if (chatMsgs && capturedSlot.activity.replayGeneration === actGen) {
+							const mergedChatMsgs = preserveCachedSubagentToolState(
+								getMessages(capturedSlot.messages),
+								chatMsgs,
+							);
 							capturedSlot.messages.toolRegistry.clear();
-							setMessages(capturedSlot.messages, chatMsgs);
+							setMessages(capturedSlot.messages, mergedChatMsgs);
 							seedRegistryFromMessages(
 								capturedSlot.activity,
 								capturedSlot.messages,
-								chatMsgs,
+								mergedChatMsgs,
 							);
 							capturedSlot.messages.historyHasMore = hasMore;
 							capturedSlot.messages.historyMessageCount = msgCount;

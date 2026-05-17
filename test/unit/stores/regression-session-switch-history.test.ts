@@ -480,6 +480,55 @@ describe("Combined protocol: REST API fallback (history in session_switched)", (
 		expect(currentChat().messages.some((m) => m.type === "user")).toBe(true);
 	});
 
+	it("keeps cached subagent links when REST history has the same Task without metadata", async () => {
+		const target = getOrCreateSessionSlot("parent-with-subagents");
+		setMessages(target.messages, [
+			createToolMessage({
+				uuid: "cached-tool",
+				id: "task-tool-1",
+				name: "Task",
+				status: "completed",
+				metadata: { childSessionId: "claude-subagent-abc" },
+			}),
+		]);
+		sessionState.currentId = "parent-with-subagents";
+
+		handleMessage({
+			type: "session_switched",
+			id: "parent-with-subagents",
+			sessionId: "parent-with-subagents",
+			history: {
+				messages: [
+					{
+						id: "m1",
+						role: "assistant",
+						parts: [
+							{
+								id: "task-tool-1",
+								type: "tool",
+								tool: "Task",
+								callID: "task-tool-1",
+								state: {
+									status: "running",
+									input: { subagent_type: "general" },
+								},
+							},
+						],
+					},
+				],
+				hasMore: false,
+			},
+		});
+
+		await vi.runAllTimersAsync();
+
+		const tool = currentChat().messages.find((m) => m.type === "tool");
+		expect(tool?.type).toBe("tool");
+		if (tool?.type !== "tool") throw new Error("expected Task tool");
+		expect(tool.metadata?.["childSessionId"]).toBe("claude-subagent-abc");
+		expect(tool.status).toBe("completed");
+	});
+
 	it("converts REST history into chatState.messages", async () => {
 		handleMessage({
 			type: "session_switched",
