@@ -1,29 +1,19 @@
-import { Data, Schema } from "effect";
+import { Data } from "effect";
 import {
-	OpenCodeMessageWithPartsSchema,
-	OpenCodePendingPermissionSchema,
-	OpenCodePendingQuestionSchema,
-	OpenCodeQuestionRejectRequestSchema,
-	OpenCodeQuestionReplyRequestSchema,
+	decodeOpenCodeMessageListResponse,
+	decodeOpenCodePendingPermissionListResponse,
+	decodeOpenCodePendingQuestionListResponse,
+	decodeOpenCodeQuestionRejectBody,
+	decodeOpenCodeQuestionReplyBody,
+	decodeOpenCodeSkillListResponse,
+	decodeOpenCodeUndefinedResponse,
+	encodeOpenCodeQuestionRejectBody,
+	encodeOpenCodeQuestionReplyBody,
 } from "../contracts/providers/opencode-sdk.js";
 import { OpenCodeApiError } from "../errors.js";
 
-const OpenCodeSkillSchema = Schema.Struct({
-	name: Schema.String,
-	description: Schema.optional(Schema.String),
-});
-const OpenCodeSkillArraySchema = Schema.Array(
-	OpenCodeSkillSchema,
-) as unknown as Schema.Schema<Array<{ name: string; description?: string }>>;
-const OpenCodePendingPermissionArraySchema = Schema.Array(
-	OpenCodePendingPermissionSchema,
-) as unknown as Schema.Schema<unknown[]>;
-const OpenCodePendingQuestionArraySchema = Schema.Array(
-	OpenCodePendingQuestionSchema,
-) as unknown as Schema.Schema<unknown[]>;
-const OpenCodeMessageWithPartsArraySchema = Schema.Array(
-	OpenCodeMessageWithPartsSchema,
-) as unknown as Schema.Schema<unknown[]>;
+type DecodeResponse<T> = (raw: unknown) => T;
+type EncodeBody<T> = (body: T) => unknown;
 
 export interface GapEndpointsOptions {
 	baseUrl: string;
@@ -59,28 +49,30 @@ export class GapEndpoints {
 	}
 
 	async listPendingPermissions(): Promise<unknown[]> {
-		return this.get("/permission", OpenCodePendingPermissionArraySchema);
+		return this.get("/permission", decodeOpenCodePendingPermissionListResponse);
 	}
 
 	async listPendingQuestions(): Promise<unknown[]> {
-		return this.get("/question", OpenCodePendingQuestionArraySchema);
+		return this.get("/question", decodeOpenCodePendingQuestionListResponse);
 	}
 
 	async replyQuestion(id: string, answers: string[][]): Promise<void> {
 		await this.post(
 			`/question/${id}/reply`,
+			decodeOpenCodeQuestionReplyBody,
+			encodeOpenCodeQuestionReplyBody,
 			{ answers },
-			OpenCodeQuestionReplyRequestSchema,
-			Schema.Undefined,
+			decodeOpenCodeUndefinedResponse,
 		);
 	}
 
 	async rejectQuestion(id: string): Promise<void> {
 		await this.post(
 			`/question/${id}/reject`,
+			decodeOpenCodeQuestionRejectBody,
+			encodeOpenCodeQuestionRejectBody,
 			{},
-			OpenCodeQuestionRejectRequestSchema,
-			Schema.Undefined,
+			decodeOpenCodeUndefinedResponse,
 		);
 	}
 
@@ -90,7 +82,7 @@ export class GapEndpoints {
 		const path = directory
 			? `/skill?directory=${encodeURIComponent(directory)}`
 			: "/skill";
-		return this.get(path, OpenCodeSkillArraySchema);
+		return this.get(path, decodeOpenCodeSkillListResponse);
 	}
 
 	async getMessagesPage(
@@ -102,10 +94,13 @@ export class GapEndpoints {
 		if (options?.before) params.set("before", options.before);
 		const query = params.toString();
 		const path = `/session/${sessionId}/message${query ? `?${query}` : ""}`;
-		return this.get(path, OpenCodeMessageWithPartsArraySchema);
+		return this.get(path, decodeOpenCodeMessageListResponse);
 	}
 
-	private async get<T>(path: string, schema: Schema.Schema<T>): Promise<T> {
+	private async get<T>(
+		path: string,
+		decodeResponse: DecodeResponse<T>,
+	): Promise<T> {
 		const res = await this.fetch(
 			new Request(`${this.baseUrl}${path}`, {
 				method: "GET",
@@ -123,21 +118,28 @@ export class GapEndpoints {
 			res.status === 204
 				? undefined
 				: await parseJsonResponse("GET", path, res.status, res);
-		return decodeGapResponse("GET", path, res.status, schema, data);
+		return decodeGapResponse("GET", path, res.status, decodeResponse, data);
 	}
 
 	private async post<T, Body>(
 		path: string,
-		body: unknown,
-		requestSchema: Schema.Schema<Body>,
-		responseSchema: Schema.Schema<T>,
+		validateBody: DecodeResponse<Body>,
+		encodeBody: EncodeBody<Body>,
+		body: Body,
+		decodeResponse: DecodeResponse<T>,
 	): Promise<T> {
-		const decodedBody = decodeGapRequest("POST", path, requestSchema, body);
+		const encodedBody = encodeGapRequest(
+			"POST",
+			path,
+			validateBody,
+			encodeBody,
+			body,
+		);
 		const res = await this.fetch(
 			new Request(`${this.baseUrl}${path}`, {
 				method: "POST",
 				headers: this.headers,
-				body: JSON.stringify(decodedBody),
+				body: JSON.stringify(encodedBody),
 			}),
 		);
 		if (!res.ok) {
@@ -154,7 +156,7 @@ export class GapEndpoints {
 				data = await parseJsonResponse("POST", path, res.status, res);
 			}
 		}
-		return decodeGapResponse("POST", path, res.status, responseSchema, data);
+		return decodeGapResponse("POST", path, res.status, decodeResponse, data);
 	}
 }
 
@@ -177,14 +179,16 @@ async function parseJsonResponse(
 	}
 }
 
-function decodeGapRequest<T>(
+function encodeGapRequest<T>(
 	method: "POST",
 	path: string,
-	schema: Schema.Schema<T>,
-	data: unknown,
-): T {
+	validateBody: DecodeResponse<T>,
+	encodeBody: EncodeBody<T>,
+	data: T,
+): unknown {
 	try {
-		return Schema.decodeUnknownSync(schema)(data);
+		validateBody(data);
+		return encodeBody(data);
 	} catch (err) {
 		throw toMalformedGapError({
 			message: `Malformed OpenCode gap request during ${method} ${path}`,
@@ -200,11 +204,11 @@ function decodeGapResponse<T>(
 	method: "GET" | "POST",
 	path: string,
 	status: number,
-	schema: Schema.Schema<T>,
+	decodeResponse: DecodeResponse<T>,
 	data: unknown,
 ): T {
 	try {
-		return Schema.decodeUnknownSync(schema)(data);
+		return decodeResponse(data);
 	} catch (err) {
 		throw toMalformedGapError({
 			message: `Malformed OpenCode gap response during ${method} ${path}`,

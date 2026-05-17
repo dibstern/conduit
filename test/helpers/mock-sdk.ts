@@ -92,7 +92,7 @@ export function makeSuccessResult(
 		uuid: "00000000-0000-0000-0000-000000000001" as `${string}-${string}-${string}-${string}-${string}`,
 		session_id: "sdk-session-1",
 		...overrides,
-	} as unknown as SDKResultMessage;
+	} as SDKResultMessage;
 }
 
 /** Create an error SDK result message with sensible defaults. */
@@ -120,7 +120,7 @@ export function makeErrorResult(
 		uuid: "00000000-0000-0000-0000-000000000002" as `${string}-${string}-${string}-${string}-${string}`,
 		session_id: "sdk-session-1",
 		...overrides,
-	} as unknown as SDKResultMessage;
+	} as SDKResultMessage;
 }
 
 // ─── SendTurnInput factory ──────────────────────────────────────────────────

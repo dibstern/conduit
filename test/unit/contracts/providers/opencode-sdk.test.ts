@@ -41,6 +41,13 @@ describe("OpenCode provider contract schemas", () => {
 			),
 		).toBe(true);
 		expect(
+			Either.isRight(
+				Schema.decodeUnknownEither(Schema.Array(OpenCodeSessionSchema))([
+					validSession,
+				]),
+			),
+		).toBe(true);
+		expect(
 			Either.isLeft(
 				Schema.decodeUnknownEither(OpenCodeSessionSchema)({
 					...validSession,
@@ -48,6 +55,23 @@ describe("OpenCode provider contract schemas", () => {
 				}),
 			),
 		).toBe(true);
+	});
+
+	it("decodes session status maps returned by OpenCode", () => {
+		const result = Schema.decodeUnknownEither(
+			Schema.Record({ key: Schema.String, value: OpenCodeSessionStatusSchema }),
+		)({
+			ses_1: { type: "idle" },
+			ses_2: { type: "busy" },
+			ses_3: {
+				type: "retry",
+				attempt: 2,
+				message: "rate limited",
+				next: 1700000000,
+			},
+		});
+
+		expect(Either.isRight(result)).toBe(true);
 	});
 
 	it("decodes relay session-detail extension fields returned by OpenCode", () => {

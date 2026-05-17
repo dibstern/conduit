@@ -15,25 +15,33 @@ import type {
 	Event as OpenCodeEvent,
 	OpencodeClient,
 } from "@opencode-ai/sdk/client";
-import { Schema } from "effect";
 import {
-	OpenCodeAgentSchema,
-	OpenCodeCommandSchema,
-	OpenCodeConfigResponseSchema,
-	OpenCodeFileContentSchema,
-	OpenCodeFileNodeSchema,
-	OpenCodeFileStatusEntrySchema,
-	OpenCodeFindFilesResponseSchema,
-	OpenCodeFindSymbolSchema,
-	OpenCodeFindTextMatchSchema,
-	OpenCodeMessageWithPartsSchema,
-	OpenCodePathSchema,
-	OpenCodeProjectSchema,
-	OpenCodeProviderListResponseSchema,
-	OpenCodePtySchema,
-	OpenCodeSessionDetailSchema,
-	OpenCodeSessionSchema,
-	OpenCodeSessionStatusSchema,
+	decodeOpenCodeAgentListResponse,
+	decodeOpenCodeBooleanResponse,
+	decodeOpenCodeCommandListResponse,
+	decodeOpenCodeConfigResponse,
+	decodeOpenCodeCurrentProjectResponse,
+	decodeOpenCodeDiffResponse,
+	decodeOpenCodeFileEntryListResponse,
+	decodeOpenCodeFileReadResponse,
+	decodeOpenCodeFileStatusListResponse,
+	decodeOpenCodeFindFilesResponse,
+	decodeOpenCodeFindSymbolsResponse,
+	decodeOpenCodeFindTextResponse,
+	decodeOpenCodeMessageListResponse,
+	decodeOpenCodeMessageWithPartsResponse,
+	decodeOpenCodePathResponse,
+	decodeOpenCodeProjectListResponse,
+	decodeOpenCodeProviderListResponse,
+	decodeOpenCodePtyListResponse,
+	decodeOpenCodePtyResponse,
+	decodeOpenCodeSessionDetailResponse,
+	decodeOpenCodeSessionListResponse,
+	decodeOpenCodeSessionResponse,
+	decodeOpenCodeSessionStatusMap,
+	decodeOpenCodeShareResponse,
+	decodeOpenCodeUndefinedResponse,
+	decodeOpenCodeVcsResponse,
 } from "../contracts/providers/opencode-sdk.js";
 import { OpenCodeApiError, OpenCodeConnectionError } from "../errors.js";
 import type { GapEndpoints } from "./gap-endpoints.js";
@@ -61,100 +69,14 @@ type SdkResult<T> = Promise<
 	}
 >;
 
-const OpenCodeSessionDetailResponseSchema =
-	OpenCodeSessionDetailSchema as unknown as Schema.Schema<SessionDetail>;
-const OpenCodeSessionDetailArraySchema = Schema.Array(
-	OpenCodeSessionDetailSchema,
-) as unknown as Schema.Schema<SessionDetail[]>;
-const OpenCodeSessionStatusMapSchema = Schema.Record({
-	key: Schema.String,
-	value: OpenCodeSessionStatusSchema,
-}) as unknown as Schema.Schema<Record<string, SessionStatus>>;
-const OpenCodeMessageWithPartsArraySchema = Schema.Array(
-	OpenCodeMessageWithPartsSchema,
-);
-const OpenCodeShareResponseSchema = Schema.Struct({
-	url: Schema.String,
-});
-const OpenCodeDiffResponseSchema = Schema.Struct({
-	diffs: Schema.Array(
-		Schema.Struct({
-			path: Schema.String,
-			diff: Schema.String,
-		}),
-	),
-}) as unknown as Schema.Schema<{
-	diffs: Array<{ path: string; diff: string }>;
-}>;
-const OpenCodeFileEntryArraySchema = Schema.Array(
-	OpenCodeFileNodeSchema,
-) as unknown as Schema.Schema<
-	Array<{
-		name: string;
-		path: string;
-		absolute: string;
-		type: "file" | "directory";
-		ignored: boolean;
-	}>
->;
-const OpenCodeFileReadSchema =
-	OpenCodeFileContentSchema as unknown as Schema.Schema<{
-		type: "text" | "binary";
-		content: string;
-		diff?: string;
-		encoding?: "base64";
-		mimeType?: string;
-	}>;
-const OpenCodeAgentArraySchema = Schema.Array(OpenCodeAgentSchema);
-const OpenCodeCommandArraySchema = Schema.Array(
-	OpenCodeCommandSchema,
-) as unknown as Schema.Schema<Array<{ name: string; description?: string }>>;
-const OpenCodeFileStatusArraySchema = Schema.Array(
-	OpenCodeFileStatusEntrySchema,
-) as unknown as Schema.Schema<
-	Array<{
-		path: string;
-		added: number;
-		removed: number;
-		status: "added" | "deleted" | "modified";
-	}>
->;
-const OpenCodeVcsSchema = Schema.Struct({
-	branch: Schema.optional(Schema.String),
-	dirty: Schema.optional(Schema.Boolean),
-}) as unknown as Schema.Schema<{ branch?: string; dirty?: boolean }>;
-const OpenCodeProjectArraySchema = Schema.Array(
-	OpenCodeProjectSchema,
-) as unknown as Schema.Schema<
-	Array<{ id: string; worktree: string; time: { created: number } }>
->;
-const OpenCodeCurrentProjectSchema =
-	OpenCodeProjectSchema as unknown as Schema.Schema<{
-		id: string;
-		worktree: string;
-		time: { created: number };
-	}>;
-const OpenCodePtyArraySchema = Schema.Array(
-	OpenCodePtySchema,
-) as unknown as Schema.Schema<
-	Array<{
-		id: string;
-		title: string;
-		command: string;
-		args: string[];
-		cwd: string;
-		status: "running" | "exited";
-		pid: number;
-	}>
->;
-const OpenCodeFindTextResponseSchema = Schema.Array(
-	OpenCodeFindTextMatchSchema,
-) as unknown as Schema.Schema<unknown[]>;
-const OpenCodeFindFilesArraySchema =
-	OpenCodeFindFilesResponseSchema as unknown as Schema.Schema<unknown[]>;
-const OpenCodeFindSymbolsResponseSchema = Schema.Array(
-	OpenCodeFindSymbolSchema,
-) as unknown as Schema.Schema<unknown[]>;
+type DecodeResponse<T> = (raw: unknown) => T;
+
+const decodeSessionDetailResponse: DecodeResponse<SessionDetail> = (raw) =>
+	decodeOpenCodeSessionDetailResponse(raw) as SessionDetail;
+const decodeSessionListResponse: DecodeResponse<SessionDetail[]> = (raw) =>
+	decodeOpenCodeSessionListResponse(raw).map(
+		(session) => session as SessionDetail,
+	);
 
 export interface OpenCodeAPIOptions {
 	sdk: OpencodeClient;
@@ -229,7 +151,7 @@ export class OpenCodeAPI {
 	 */
 	async sdk<T>(
 		label: string,
-		responseSchema: Schema.Schema<T>,
+		decodeResponse: DecodeResponse<T>,
 		fn: () => Promise<{
 			data: unknown;
 			error: unknown;
@@ -271,7 +193,7 @@ export class OpenCodeAPI {
 		}
 
 		try {
-			return Schema.decodeUnknownSync(responseSchema)(result.data);
+			return decodeResponse(result.data);
 		} catch (err) {
 			const cause = err instanceof Error ? err : new Error(String(err));
 			const status =
@@ -348,7 +270,7 @@ class SessionNamespace {
 		roots?: boolean;
 		limit?: number;
 	}): Promise<SessionDetail[]> {
-		return this.api.sdk("session.list", OpenCodeSessionDetailArraySchema, () =>
+		return this.api.sdk("session.list", decodeSessionListResponse, () =>
 			call(
 				this.api._sdk.session.list({
 					...(options != null
@@ -369,10 +291,8 @@ class SessionNamespace {
 	}
 
 	async get(id: string): Promise<SessionDetail> {
-		return this.api.sdk(
-			"session.get",
-			OpenCodeSessionDetailResponseSchema,
-			() => call(this.api._sdk.session.get({ path: { id } })),
+		return this.api.sdk("session.get", decodeSessionDetailResponse, () =>
+			call(this.api._sdk.session.get({ path: { id } })),
 		);
 	}
 
@@ -380,26 +300,21 @@ class SessionNamespace {
 		title?: string;
 		parentID?: string;
 	}): Promise<SessionDetail> {
-		return this.api.sdk(
-			"session.create",
-			OpenCodeSessionDetailResponseSchema,
-			() =>
-				call(
-					this.api._sdk.session.create(
-						options != null ? { body: options } : {},
-					),
-				),
+		return this.api.sdk("session.create", decodeSessionDetailResponse, () =>
+			call(
+				this.api._sdk.session.create(options != null ? { body: options } : {}),
+			),
 		);
 	}
 
 	async delete(id: string): Promise<void> {
-		await this.api.sdk("session.delete", Schema.Boolean, () =>
+		await this.api.sdk("session.delete", decodeOpenCodeBooleanResponse, () =>
 			call(this.api._sdk.session.delete({ path: { id } })),
 		);
 	}
 
 	async update(id: string, options: { title?: string }): Promise<void> {
-		await this.api.sdk("session.update", OpenCodeSessionSchema, () =>
+		await this.api.sdk("session.update", decodeOpenCodeSessionResponse, () =>
 			call(
 				this.api._sdk.session.update({
 					path: { id },
@@ -413,7 +328,7 @@ class SessionNamespace {
 	async statuses(): Promise<Record<string, SessionStatus>> {
 		return this.api.sdk(
 			"session.statuses",
-			OpenCodeSessionStatusMapSchema,
+			decodeOpenCodeSessionStatusMap,
 			() => call(this.api._sdk.session.status()),
 		);
 	}
@@ -431,7 +346,7 @@ class SessionNamespace {
 	): Promise<Message[]> {
 		const data = await this.api.sdk(
 			"session.messages",
-			OpenCodeMessageWithPartsArraySchema,
+			decodeOpenCodeMessageListResponse,
 			() =>
 				call(
 					this.api._sdk.session.messages({
@@ -472,7 +387,7 @@ class SessionNamespace {
 	async message(sessionId: string, messageId: string): Promise<Message> {
 		const data = await this.api.sdk(
 			"session.message",
-			OpenCodeMessageWithPartsSchema,
+			decodeOpenCodeMessageWithPartsResponse,
 			() =>
 				call(
 					this.api._sdk.session.message({
@@ -495,7 +410,7 @@ class SessionNamespace {
 			agent?: string;
 		},
 	): Promise<void> {
-		await this.api.sdk("session.prompt", Schema.Undefined, () =>
+		await this.api.sdk("session.prompt", decodeOpenCodeUndefinedResponse, () =>
 			call(
 				this.api._sdk.session.promptAsync({
 					path: { id: sessionId },
@@ -510,7 +425,7 @@ class SessionNamespace {
 	}
 
 	async abort(sessionId: string): Promise<void> {
-		await this.api.sdk("session.abort", Schema.Boolean, () =>
+		await this.api.sdk("session.abort", decodeOpenCodeBooleanResponse, () =>
 			call(
 				this.api._sdk.session.abort({
 					path: { id: sessionId },
@@ -523,16 +438,13 @@ class SessionNamespace {
 		sessionId: string,
 		options?: { messageID?: string },
 	): Promise<SessionDetail> {
-		return this.api.sdk(
-			"session.fork",
-			OpenCodeSessionDetailResponseSchema,
-			() =>
-				call(
-					this.api._sdk.session.fork({
-						path: { id: sessionId },
-						...(options != null ? { body: options } : {}),
-					}),
-				),
+		return this.api.sdk("session.fork", decodeSessionDetailResponse, () =>
+			call(
+				this.api._sdk.session.fork({
+					path: { id: sessionId },
+					...(options != null ? { body: options } : {}),
+				}),
+			),
 		);
 	}
 
@@ -540,7 +452,7 @@ class SessionNamespace {
 		sessionId: string,
 		options: { messageID: string; partID?: string },
 	): Promise<void> {
-		await this.api.sdk("session.revert", OpenCodeSessionSchema, () =>
+		await this.api.sdk("session.revert", decodeOpenCodeSessionResponse, () =>
 			call(
 				this.api._sdk.session.revert({
 					path: { id: sessionId },
@@ -551,7 +463,7 @@ class SessionNamespace {
 	}
 
 	async unrevert(sessionId: string): Promise<void> {
-		await this.api.sdk("session.unrevert", OpenCodeSessionSchema, () =>
+		await this.api.sdk("session.unrevert", decodeOpenCodeSessionResponse, () =>
 			call(
 				this.api._sdk.session.unrevert({
 					path: { id: sessionId },
@@ -561,7 +473,7 @@ class SessionNamespace {
 	}
 
 	async share(sessionId: string): Promise<{ url: string }> {
-		return this.api.sdk("session.share", OpenCodeShareResponseSchema, () =>
+		return this.api.sdk("session.share", decodeOpenCodeShareResponse, () =>
 			call(
 				this.api._sdk.session.share({
 					path: { id: sessionId },
@@ -574,7 +486,7 @@ class SessionNamespace {
 		sessionId: string,
 		options?: { providerID: string; modelID: string },
 	): Promise<void> {
-		await this.api.sdk("session.summarize", Schema.Boolean, () =>
+		await this.api.sdk("session.summarize", decodeOpenCodeBooleanResponse, () =>
 			call(
 				this.api._sdk.session.summarize({
 					path: { id: sessionId },
@@ -588,7 +500,7 @@ class SessionNamespace {
 		sessionId: string,
 		options?: { messageID?: string },
 	): Promise<{ diffs: Array<{ path: string; diff: string }> }> {
-		return this.api.sdk("session.diff", OpenCodeDiffResponseSchema, () =>
+		return this.api.sdk("session.diff", decodeOpenCodeDiffResponse, () =>
 			call(
 				this.api._sdk.session.diff({
 					path: { id: sessionId },
@@ -601,15 +513,12 @@ class SessionNamespace {
 	}
 
 	async children(sessionId: string): Promise<SessionDetail[]> {
-		return this.api.sdk(
-			"session.children",
-			OpenCodeSessionDetailArraySchema,
-			() =>
-				call(
-					this.api._sdk.session.children({
-						path: { id: sessionId },
-					}),
-				),
+		return this.api.sdk("session.children", decodeSessionListResponse, () =>
+			call(
+				this.api._sdk.session.children({
+					path: { id: sessionId },
+				}),
+			),
 		);
 	}
 }
@@ -639,7 +548,7 @@ class PermissionNamespace {
 		permissionId: string,
 		response: "once" | "always" | "reject",
 	): Promise<void> {
-		await this.api.sdk("permission.reply", Schema.Boolean, () =>
+		await this.api.sdk("permission.reply", decodeOpenCodeBooleanResponse, () =>
 			call(
 				this.api._sdk.postSessionIdPermissionsPermissionId({
 					path: { id: sessionId, permissionID: permissionId },
@@ -679,13 +588,13 @@ class ConfigNamespace {
 	constructor(private readonly api: OpenCodeAPI) {}
 
 	async get(): Promise<Record<string, unknown>> {
-		return this.api.sdk("config.get", OpenCodeConfigResponseSchema, () =>
+		return this.api.sdk("config.get", decodeOpenCodeConfigResponse, () =>
 			call(this.api._sdk.config.get()),
 		);
 	}
 
 	async update(body: Record<string, unknown>): Promise<void> {
-		await this.api.sdk("config.update", OpenCodeConfigResponseSchema, () =>
+		await this.api.sdk("config.update", decodeOpenCodeConfigResponse, () =>
 			// biome-ignore lint/suspicious/noExplicitAny: Config body type is complex; callers pass partial config objects
 			call(this.api._sdk.config.update({ body: body as any })),
 		);
@@ -709,7 +618,7 @@ class ProviderNamespace {
 	async list(): Promise<ProviderListResult> {
 		const data = await this.api.sdk(
 			"provider.list",
-			OpenCodeProviderListResponseSchema,
+			decodeOpenCodeProviderListResponse,
 			() => call(this.api._sdk.provider.list()),
 		);
 		// Normalize SDK shape → ProviderListResult
@@ -738,7 +647,7 @@ class PtyNamespace {
 	constructor(private readonly api: OpenCodeAPI) {}
 
 	async list(): Promise<Array<{ id: string; [key: string]: unknown }>> {
-		return this.api.sdk("pty.list", OpenCodePtyArraySchema, () =>
+		return this.api.sdk("pty.list", decodeOpenCodePtyListResponse, () =>
 			call(this.api._sdk.pty.list()),
 		);
 	}
@@ -750,20 +659,20 @@ class PtyNamespace {
 		title?: string;
 		env?: Record<string, string>;
 	}): Promise<{ id: string; [key: string]: unknown }> {
-		return this.api.sdk("pty.create", OpenCodePtySchema, () =>
+		return this.api.sdk("pty.create", decodeOpenCodePtyResponse, () =>
 			call(this.api._sdk.pty.create(options != null ? { body: options } : {})),
 		);
 	}
 
 	async delete(id: string): Promise<void> {
-		await this.api.sdk("pty.delete", Schema.Boolean, () =>
+		await this.api.sdk("pty.delete", decodeOpenCodeBooleanResponse, () =>
 			call(this.api._sdk.pty.remove({ path: { id } })),
 		);
 	}
 
 	/** Resize a PTY session. Maps to sdk.pty.update() with size body. */
 	async resize(id: string, rows: number, cols: number): Promise<void> {
-		await this.api.sdk("pty.resize", OpenCodePtySchema, () =>
+		await this.api.sdk("pty.resize", decodeOpenCodePtyResponse, () =>
 			call(
 				this.api._sdk.pty.update({
 					path: { id },
@@ -784,7 +693,7 @@ class FileNamespace {
 	): Promise<Array<{ name: string; type: string; size?: number }>> {
 		const entries = await this.api.sdk(
 			"file.list",
-			OpenCodeFileEntryArraySchema,
+			decodeOpenCodeFileEntryListResponse,
 			() => call(this.api._sdk.file.list({ query: { path } })),
 		);
 		return entries.map((entry) => ({
@@ -794,8 +703,10 @@ class FileNamespace {
 	}
 
 	async read(path: string): Promise<{ content: string; binary?: boolean }> {
-		const file = await this.api.sdk("file.read", OpenCodeFileReadSchema, () =>
-			call(this.api._sdk.file.read({ query: { path } })),
+		const file = await this.api.sdk(
+			"file.read",
+			decodeOpenCodeFileReadResponse,
+			() => call(this.api._sdk.file.read({ query: { path } })),
 		);
 		return {
 			content: file.content,
@@ -811,8 +722,10 @@ class FileNamespace {
 			status: "added" | "deleted" | "modified";
 		}>
 	> {
-		return this.api.sdk("file.status", OpenCodeFileStatusArraySchema, () =>
-			call(this.api._sdk.file.status()),
+		return this.api.sdk(
+			"file.status",
+			decodeOpenCodeFileStatusListResponse,
+			() => call(this.api._sdk.file.status()),
 		);
 	}
 }
@@ -823,13 +736,13 @@ class FindNamespace {
 	constructor(private readonly api: OpenCodeAPI) {}
 
 	async text(pattern: string): Promise<unknown[]> {
-		return this.api.sdk("find.text", OpenCodeFindTextResponseSchema, () =>
+		return this.api.sdk("find.text", decodeOpenCodeFindTextResponse, () =>
 			call(this.api._sdk.find.text({ query: { pattern } })),
 		);
 	}
 
 	async files(query: string, options?: { dirs?: boolean }): Promise<unknown[]> {
-		return this.api.sdk("find.files", OpenCodeFindFilesArraySchema, () =>
+		return this.api.sdk("find.files", decodeOpenCodeFindFilesResponse, () =>
 			call(
 				this.api._sdk.find.files({
 					query: {
@@ -844,7 +757,7 @@ class FindNamespace {
 	}
 
 	async symbols(query: string): Promise<unknown[]> {
-		return this.api.sdk("find.symbols", OpenCodeFindSymbolsResponseSchema, () =>
+		return this.api.sdk("find.symbols", decodeOpenCodeFindSymbolsResponse, () =>
 			call(this.api._sdk.find.symbols({ query: { query } })),
 		);
 	}
@@ -858,7 +771,7 @@ class AppNamespace {
 	async agents(): Promise<Agent[]> {
 		const agents = await this.api.sdk(
 			"app.agents",
-			OpenCodeAgentArraySchema,
+			decodeOpenCodeAgentListResponse,
 			() => call(this.api._sdk.app.agents()),
 		);
 		return agents.map((agent) => ({
@@ -870,7 +783,7 @@ class AppNamespace {
 	}
 
 	async commands(): Promise<Array<{ name: string; description?: string }>> {
-		return this.api.sdk("app.commands", OpenCodeCommandArraySchema, () =>
+		return this.api.sdk("app.commands", decodeOpenCodeCommandListResponse, () =>
 			call(this.api._sdk.command.list()),
 		);
 	}
@@ -881,14 +794,16 @@ class AppNamespace {
 	}
 
 	async path(): Promise<{ cwd: string }> {
-		const path = await this.api.sdk("app.path", OpenCodePathSchema, () =>
-			call(this.api._sdk.path.get()),
+		const path = await this.api.sdk(
+			"app.path",
+			decodeOpenCodePathResponse,
+			() => call(this.api._sdk.path.get()),
 		);
 		return { cwd: path.directory };
 	}
 
 	async vcs(): Promise<{ branch?: string; dirty?: boolean }> {
-		return this.api.sdk("app.vcs", OpenCodeVcsSchema, () =>
+		return this.api.sdk("app.vcs", decodeOpenCodeVcsResponse, () =>
 			call(this.api._sdk.vcs.get()),
 		);
 	}
@@ -896,7 +811,7 @@ class AppNamespace {
 	async projects(): Promise<
 		Array<{ id?: string; name?: string; path?: string; worktree?: string }>
 	> {
-		return this.api.sdk("app.projects", OpenCodeProjectArraySchema, () =>
+		return this.api.sdk("app.projects", decodeOpenCodeProjectListResponse, () =>
 			call(this.api._sdk.project.list()),
 		);
 	}
@@ -908,7 +823,7 @@ class AppNamespace {
 	}> {
 		return this.api.sdk(
 			"app.currentProject",
-			OpenCodeCurrentProjectSchema,
+			decodeOpenCodeCurrentProjectResponse,
 			() => call(this.api._sdk.project.current()),
 		);
 	}

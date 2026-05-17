@@ -733,3 +733,31 @@ type _ClaudeSdkOptionsOwnedFieldsFitSchema = AssertExtends<
 	>,
 	ClaudeSDKOptionsJsonShape
 >;
+
+const decodeClaudeSDKMessageEnvelope = Schema.decodeUnknownSync(
+	ClaudeSDKMessageSchema,
+);
+const decodeClaudeSDKUserMessageEnvelope = Schema.decodeUnknownSync(
+	ClaudeSDKUserMessageSchema,
+);
+const decodeClaudeSDKOptionsJsonShapeEnvelope = Schema.decodeUnknownSync(
+	ClaudeSDKOptionsJsonShapeSchema,
+);
+
+export function decodeClaudeSDKMessage(raw: unknown): SDKMessage {
+	// The schema validates the SDK envelope fields Conduit consumes while
+	// intentionally leaving nested provider-owned payloads opaque.
+	return decodeClaudeSDKMessageEnvelope(raw) as SDKMessage;
+}
+
+export function decodeClaudeSDKUserMessage(raw: unknown): SDKUserMessage {
+	decodeClaudeSDKUserMessageEnvelope(raw);
+	return raw as SDKUserMessage;
+}
+
+export function decodeClaudeSDKOptionsJsonShape(
+	options: ClaudeSDKOptions,
+): ClaudeSDKOptions {
+	decodeClaudeSDKOptionsJsonShapeEnvelope(options);
+	return options;
+}

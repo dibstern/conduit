@@ -144,8 +144,16 @@ describe("Claude Agent SDK provider contract schemas", () => {
 			uuid: "00000000-0000-0000-0000-000000000004",
 			session_id: "sdk-session-1",
 		};
+		const system = {
+			type: "system",
+			subtype: "status",
+			status: "requesting",
+			permissionMode: "default",
+			uuid: "00000000-0000-0000-0000-000000000005",
+			session_id: "sdk-session-1",
+		};
 
-		for (const message of [assistant, result, streamEvent]) {
+		for (const message of [assistant, result, streamEvent, system]) {
 			expect(
 				Either.isRight(
 					Schema.decodeUnknownEither(ClaudeSDKMessageSchema)(message),
@@ -187,6 +195,24 @@ describe("Claude Agent SDK provider contract schemas", () => {
 				Schema.decodeUnknownEither(ClaudeSDKMessageSchema)({
 					...result,
 					subtype: "not-a-result-subtype",
+				}),
+			),
+		).toBe(true);
+		expect(
+			Either.isLeft(
+				Schema.decodeUnknownEither(ClaudeSDKMessageSchema)({
+					message: assistant.message,
+					parent_tool_use_id: null,
+					uuid: "00000000-0000-0000-0000-000000000006",
+					session_id: "sdk-session-1",
+				}),
+			),
+		).toBe(true);
+		expect(
+			Either.isLeft(
+				Schema.decodeUnknownEither(ClaudeSDKMessageSchema)({
+					...assistant,
+					session_id: 123,
 				}),
 			),
 		).toBe(true);
