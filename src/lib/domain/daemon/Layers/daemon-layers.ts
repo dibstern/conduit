@@ -41,6 +41,7 @@ import {
 	removeSocketFile,
 	writePidFile,
 } from "../../../daemon/pid-manager.js";
+import { resolveTraceConfig } from "../../../env.js";
 import type { StoredProject } from "../../../types.js";
 import { generateSlug } from "../../../utils.js";
 import { AuthManagerFromConfigLive } from "../../server/Layers/auth-middleware.js";
@@ -134,6 +135,7 @@ import {
 	StorageMonitorTag,
 } from "./storage-monitor-layer.js";
 import { EnsureCertsLive, TlsCertLive, TlsCertTag } from "./tls-cert-layer.js";
+import { makeDaemonTracingLive } from "./tracing.js";
 import {
 	VersionCheckerLive,
 	VersionCheckerTag,
@@ -769,6 +771,7 @@ export const makeDaemonLive = (options: DaemonLiveOptions) => {
 	const foundation = Layer.mergeAll(
 		DaemonEventBusLive,
 		PinoLoggerLive,
+		makeDaemonTracingLive(resolveTraceConfig(configDir)),
 		DaemonConfigRefLive(options.initialConfig),
 		options.configMirror
 			? DaemonConfigMirrorLive(options.configMirror)

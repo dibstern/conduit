@@ -63,4 +63,55 @@ describe("env module", () => {
 		const { ENV } = await import("../../src/lib/env.js");
 		expect(ENV.opencodeUsername).toBe("opencode");
 	});
+
+	it("resolveTraceConfig defaults to local daemon logs under configDir", async () => {
+		const { resolveTraceConfig } = await import("../../src/lib/env.js");
+		expect(resolveTraceConfig("/tmp/conduit-config", {})).toEqual({
+			enabled: true,
+			filePath: "/tmp/conduit-config/logs/server.trace.ndjson",
+			maxBytes: 10_485_760,
+			maxFiles: 10,
+			batchWindowMs: 200,
+		});
+	});
+
+	it("resolveTraceConfig resolves relative trace files against configDir", async () => {
+		const { resolveTraceConfig } = await import("../../src/lib/env.js");
+		expect(
+			resolveTraceConfig("/tmp/conduit-config", {
+				CONDUIT_TRACE_FILE: "custom/trace.ndjson",
+			}).filePath,
+		).toBe("/tmp/conduit-config/custom/trace.ndjson");
+	});
+
+	it("resolveTraceConfig bounds numeric overrides and falls back on invalid numbers", async () => {
+		const { resolveTraceConfig } = await import("../../src/lib/env.js");
+		const config = resolveTraceConfig("/tmp/conduit-config", {
+			CONDUIT_TRACE_MAX_BYTES: "123abc",
+			CONDUIT_TRACE_MAX_FILES: "200",
+			CONDUIT_TRACE_BATCH_WINDOW_MS: "not-a-number",
+		});
+
+		expect(config.maxBytes).toBe(10_485_760);
+		expect(config.maxFiles).toBe(100);
+		expect(config.batchWindowMs).toBe(200);
+	});
+
+	it("resolveTraceConfig clamps complete numeric strings only", async () => {
+		const { resolveTraceConfig } = await import("../../src/lib/env.js");
+		const config = resolveTraceConfig("/tmp/conduit-config", {
+			CONDUIT_TRACE_MAX_BYTES: "1",
+		});
+
+		expect(config.maxBytes).toBe(1024);
+	});
+
+	it("resolveTraceConfig disables local tracing with CONDUIT_TRACE_ENABLED=0", async () => {
+		const { resolveTraceConfig } = await import("../../src/lib/env.js");
+		expect(
+			resolveTraceConfig("/tmp/conduit-config", {
+				CONDUIT_TRACE_ENABLED: "0",
+			}).enabled,
+		).toBe(false);
+	});
 });
