@@ -88,6 +88,31 @@ const makeMockOptions = (): DaemonLiveOptions => {
 	};
 };
 
+const waitForTraceRecord = (
+	path: string,
+	predicate: (record: Record<string, unknown>) => boolean,
+) =>
+	Effect.tryPromise({
+		try: async () => {
+			for (let attempt = 0; attempt < 80; attempt++) {
+				try {
+					const records = readFileSync(path, "utf8")
+						.trim()
+						.split("\n")
+						.filter(Boolean)
+						.map((line) => JSON.parse(line) as Record<string, unknown>);
+					const record = records.find(predicate);
+					if (record !== undefined) return record;
+				} catch {
+					// The trace file may not exist yet, or a writer may still be appending.
+				}
+				await new Promise((resolve) => setTimeout(resolve, 5));
+			}
+			throw new Error(`Timed out waiting for matching trace record in ${path}`);
+		},
+		catch: (cause) => cause,
+	});
+
 // ─── Tests ──────────────────────────────────────────────────────────────────
 
 describe("makeDaemonLive wiring", () => {
@@ -122,7 +147,7 @@ describe("makeDaemonLive wiring", () => {
 			const options = {
 				...makeMockOptions(),
 				initialConfig: makeDaemonConfigFromOptions({
-					port: 53123,
+					port: 0,
 					host: "0.0.0.0",
 					tlsEnabled: false,
 					hostExplicit: false,
@@ -137,7 +162,7 @@ describe("makeDaemonLive wiring", () => {
 			return Effect.gen(function* () {
 				const ref = yield* DaemonConfigRefTag;
 				const config = yield* Ref.get(ref);
-				expect(config.port).toBe(53123);
+				expect(config.port).toBeGreaterThan(0);
 				expect(config.host).toBe("0.0.0.0");
 				expect(config.tlsEnabled).toBe(false);
 				expect(config.hostExplicit).toBe(false);
@@ -167,6 +192,33 @@ describe("makeDaemonLive wiring", () => {
 			expect(typeof result.shouldAbort).toBe("boolean");
 		}).pipe(Effect.provide(makeDaemonLayer())),
 	);
+
+	it.scoped("installs local trace artifact tracing in Tier 0", () => {
+		const dir = mkdtempSync(join(tmpdir(), "conduit-daemon-wiring-"));
+		const options = {
+			...makeMockOptions(),
+			configDir: dir,
+			pidPath: join(dir, "daemon.pid"),
+			socketPath: join(dir, "relay.sock"),
+		} satisfies DaemonLiveOptions;
+		const tracePath = join(dir, "logs", "server.trace.ndjson");
+
+		return Effect.gen(function* () {
+			try {
+				yield* Effect.withSpan("daemon.wiring.trace")(Effect.void);
+				const record = yield* waitForTraceRecord(
+					tracePath,
+					(candidate) => candidate["name"] === "daemon.wiring.trace",
+				);
+				expect(record).toMatchObject({
+					type: "effect-span",
+					name: "daemon.wiring.trace",
+				});
+			} finally {
+				rmSync(dir, { recursive: true, force: true });
+			}
+		}).pipe(Effect.provide(Layer.fresh(makeDaemonLive(options))));
+	});
 
 	// ── Tier 1: Service Tags ─────────────────────────────────────────────
 
@@ -352,7 +404,7 @@ describe("makeDaemonLive wiring", () => {
 				pidPath: join(configDir, "daemon.pid"),
 				socketPath,
 				initialConfig: makeDaemonConfigFromOptions({
-					port: 53124,
+					port: 0,
 					host: "127.0.0.1",
 					tlsEnabled: false,
 					hostExplicit: false,
@@ -373,7 +425,7 @@ describe("makeDaemonLive wiring", () => {
 				};
 			}).pipe(Effect.provide(Layer.fresh(makeDaemonLive(options))));
 
-			expect(persisted.port).toBe(53124);
+			expect(persisted.port).toBeGreaterThan(0);
 			expect(persisted.projects).toEqual([]);
 			expect(persisted.instances).toEqual([]);
 		}),
@@ -398,7 +450,7 @@ describe("makeDaemonLive wiring", () => {
 					pidPath: join(configDir, "daemon.pid"),
 					socketPath,
 					initialConfig: makeDaemonConfigFromOptions({
-						port: 53125,
+						port: 0,
 						host: "127.0.0.1",
 						tlsEnabled: false,
 						hostExplicit: false,

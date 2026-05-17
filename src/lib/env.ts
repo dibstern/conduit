@@ -3,7 +3,7 @@
 // Import from here instead of reading process.env directly.
 
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { isAbsolute, join, resolve } from "node:path";
 
 import type { LogFormat, LogLevel } from "./logger.js";
 
@@ -20,6 +20,17 @@ export const DEFAULT_CONFIG_DIR: string =
 
 export const DEFAULT_PORT = 2633;
 export const DEFAULT_OC_PORT = 4096;
+export const DEFAULT_TRACE_MAX_BYTES = 10_485_760;
+export const DEFAULT_TRACE_MAX_FILES = 10;
+export const DEFAULT_TRACE_BATCH_WINDOW_MS = 200;
+
+export interface TraceEnvConfig {
+	readonly enabled: boolean;
+	readonly filePath: string;
+	readonly maxBytes: number;
+	readonly maxFiles: number;
+	readonly batchWindowMs: number;
+}
 
 // ─── Daemon IPC Environment Variables ───────────────────────────────────────
 // These are set by the parent process (via daemon-spawn.ts) and read by the
@@ -37,6 +48,55 @@ export const RELAY_ENV_KEYS = {
 	TLS: "CONDUIT_TLS",
 	OC_URL: "CONDUIT_OC_URL",
 } as const;
+
+const parseBoundedInteger = (
+	value: string | undefined,
+	defaultValue: number,
+	min: number,
+	max: number,
+): number => {
+	if (value == null || value.trim() === "") return defaultValue;
+	if (!/^\d+$/.test(value.trim())) return defaultValue;
+	const parsed = Number.parseInt(value, 10);
+	if (!Number.isFinite(parsed)) return defaultValue;
+	return Math.min(Math.max(parsed, min), max);
+};
+
+export const resolveTraceConfig = (
+	configDir: string,
+	env: NodeJS.ProcessEnv = process.env,
+): TraceEnvConfig => {
+	const configuredPath = env["CONDUIT_TRACE_FILE"];
+	const filePath =
+		configuredPath == null || configuredPath.trim() === ""
+			? join(configDir, "logs", "server.trace.ndjson")
+			: isAbsolute(configuredPath)
+				? configuredPath
+				: resolve(configDir, configuredPath);
+
+	return {
+		enabled: env["CONDUIT_TRACE_ENABLED"] !== "0",
+		filePath,
+		maxBytes: parseBoundedInteger(
+			env["CONDUIT_TRACE_MAX_BYTES"],
+			DEFAULT_TRACE_MAX_BYTES,
+			1024,
+			1_073_741_824,
+		),
+		maxFiles: parseBoundedInteger(
+			env["CONDUIT_TRACE_MAX_FILES"],
+			DEFAULT_TRACE_MAX_FILES,
+			0,
+			100,
+		),
+		batchWindowMs: parseBoundedInteger(
+			env["CONDUIT_TRACE_BATCH_WINDOW_MS"],
+			DEFAULT_TRACE_BATCH_WINDOW_MS,
+			10,
+			60_000,
+		),
+	};
+};
 
 // ─── User-Facing Environment Variables ──────────────────────────────────────
 // Read at process startup. Override via CLI flags or environment.
