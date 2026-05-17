@@ -111,6 +111,15 @@ describe("ProviderRuntimeEvent contracts", () => {
 		expect(explicitReclassifications.size).toBe(0);
 	});
 
+	it("decodes every canonical event type through the full runtime event union", () => {
+		for (const type of CANONICAL_EVENT_TYPES) {
+			expect(
+				Either.isRight(decodeEventEither({ ...baseEvent, type })),
+				type,
+			).toBe(true);
+		}
+	});
+
 	it("rejects unknown runtime event type", () => {
 		expect(
 			Either.isLeft(decodeEventEither({ ...baseEvent, type: "made.up" })),
@@ -154,6 +163,25 @@ describe("ProviderRuntimeEvent contracts", () => {
 							...baseEvent.rawSource,
 							[field]: { hidden: "sdk-message" },
 						},
+					}),
+				),
+				field,
+			).toBe(true);
+		}
+	});
+
+	it("rejects legacy top-level provider event fields", () => {
+		for (const [field, value] of Object.entries({
+			raw: { hidden: "provider-event" },
+			payload: { message: "legacy-payload" },
+			provider: "claude",
+			threadId: "thread_1",
+		})) {
+			expect(
+				Either.isLeft(
+					decodeEventEither({
+						...baseEvent,
+						[field]: value,
 					}),
 				),
 				field,
