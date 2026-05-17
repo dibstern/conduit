@@ -1,6 +1,12 @@
 // ─── Session Store Tests ─────────────────────────────────────────────────────
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
+	clearSessionChatState,
+	currentChat,
+	getOrCreateSessionSlot,
+	setMessages,
+} from "../../../src/lib/frontend/stores/chat.svelte.js";
+import {
 	routerState,
 	syncSlugState,
 } from "../../../src/lib/frontend/stores/router.svelte.js";
@@ -31,6 +37,7 @@ import type {
 	RelayMessage,
 	SessionInfo,
 } from "../../../src/lib/frontend/types.js";
+import { createToolMessage } from "../../../src/lib/frontend/utils/tool-message-factory.js";
 
 // ─── Helper: cast incomplete test data to the expected type ─────────────────
 function msg<T extends RelayMessage["type"]>(data: {
@@ -101,6 +108,34 @@ describe("switchToSession", () => {
 			sessionId: "new-session",
 			originId: expect.any(String),
 		});
+	});
+
+	it("keeps cached target session messages visible while loading fresh history", () => {
+		const viewSession = vi.fn();
+		const target = getOrCreateSessionSlot("parent-with-subagents");
+		setMessages(target.messages, [
+			createToolMessage({
+				uuid: "tool-uuid",
+				id: "task-tool-1",
+				name: "Task",
+				status: "completed",
+				metadata: { childSessionId: "claude-subagent-abc" },
+			}),
+		]);
+		sessionState.currentId = "child-subagent";
+		routerState.path = "/p/project-a/s/parent-with-subagents";
+		syncSlugState(routerState.path);
+
+		switchToSession("parent-with-subagents", viewSession);
+
+		const tool = currentChat().messages.find((m) => m.type === "tool");
+		expect(tool?.type).toBe("tool");
+		if (tool?.type !== "tool") throw new Error("expected tool message");
+		expect(tool.metadata?.["childSessionId"]).toBe("claude-subagent-abc");
+		expect(tool.status).toBe("completed");
+
+		clearSessionChatState("parent-with-subagents");
+		clearSessionChatState("child-subagent");
 	});
 });
 

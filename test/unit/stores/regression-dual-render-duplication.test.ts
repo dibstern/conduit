@@ -45,6 +45,7 @@ vi.mock("dompurify", () => ({
 import {
 	chatState,
 	clearMessages,
+	clearSessionChatState,
 	historyState,
 } from "../../../src/lib/frontend/stores/chat.svelte.js";
 import { sessionState } from "../../../src/lib/frontend/stores/session.svelte.js";
@@ -52,6 +53,9 @@ import { handleMessage } from "../../../src/lib/frontend/stores/ws.svelte.js";
 
 beforeEach(() => {
 	clearMessages();
+	for (const id of ["session-a", "session-b"]) {
+		clearSessionChatState(id);
+	}
 	sessionState.currentId = null;
 	vi.useFakeTimers();
 });

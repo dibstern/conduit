@@ -51,7 +51,10 @@ import {
 	addUserMessage,
 	chatState,
 	clearMessages,
+	clearSessionChatState,
+	currentChat,
 	getOrCreateSessionMessages,
+	getOrCreateSessionSlot,
 	handleDelta,
 	handleDone,
 	historyState,
@@ -60,9 +63,11 @@ import {
 	isStreaming,
 	type SessionActivity,
 	type SessionMessages,
+	setMessages,
 } from "../../../src/lib/frontend/stores/chat.svelte.js";
 import { sessionState } from "../../../src/lib/frontend/stores/session.svelte.js";
 import { handleMessage } from "../../../src/lib/frontend/stores/ws.svelte.js";
+import { createToolMessage } from "../../../src/lib/frontend/utils/tool-message-factory.js";
 import type { RelayMessage } from "../../../src/lib/shared-types.js";
 import { testActivity, testMessages } from "../../helpers/test-session-slot.js";
 
@@ -84,7 +89,7 @@ beforeEach(() => {
 	sessionState.searchQuery = "";
 	sessionState.hasMore = false;
 	// Register sessions so routePerSession's unknown-session guard passes.
-	for (const id of [
+	const knownSessionIds = [
 		"test-session",
 		"s1",
 		"s2",
@@ -100,7 +105,10 @@ beforeEach(() => {
 		"session-z",
 		"new-session",
 		"after",
-	]) {
+		"parent-with-subagents",
+	];
+	for (const id of knownSessionIds) {
+		clearSessionChatState(id);
 		sessionState.sessions.set(id, { id, title: "" });
 	}
 	vi.useFakeTimers();
@@ -432,6 +440,46 @@ describe("Combined protocol: session_switched with inline events", () => {
 // ─── REST API fallback: session_switched with history ────────────────────────
 
 describe("Combined protocol: REST API fallback (history in session_switched)", () => {
+	it("keeps cached target messages visible until REST history replacement commits", async () => {
+		const target = getOrCreateSessionSlot("parent-with-subagents");
+		setMessages(target.messages, [
+			createToolMessage({
+				uuid: "cached-tool",
+				id: "task-tool-1",
+				name: "Task",
+				status: "completed",
+				metadata: { childSessionId: "claude-subagent-abc" },
+			}),
+		]);
+		sessionState.currentId = "parent-with-subagents";
+
+		handleMessage({
+			type: "session_switched",
+			id: "parent-with-subagents",
+			sessionId: "parent-with-subagents",
+			history: {
+				messages: [
+					{
+						id: "m1",
+						role: "user",
+						parts: [{ id: "p1", type: "text", text: "fresh history" }],
+					},
+				],
+				hasMore: false,
+			},
+		});
+
+		const cachedTool = currentChat().messages.find((m) => m.type === "tool");
+		expect(cachedTool?.type).toBe("tool");
+		if (cachedTool?.type !== "tool") throw new Error("expected cached tool");
+		expect(cachedTool.metadata?.["childSessionId"]).toBe("claude-subagent-abc");
+		expect(cachedTool.status).toBe("completed");
+
+		await vi.runAllTimersAsync();
+		expect(currentChat().messages.some((m) => m.type === "tool")).toBe(false);
+		expect(currentChat().messages.some((m) => m.type === "user")).toBe(true);
+	});
+
 	it("converts REST history into chatState.messages", async () => {
 		handleMessage({
 			type: "session_switched",
@@ -539,8 +587,9 @@ describe("Combined protocol: REST API fallback (history in session_switched)", (
 describe("history_page for history pagination", () => {
 	it("history_page converts and prepends to chatState.messages", async () => {
 		sessionState.currentId = "test-session";
+		const slot = getOrCreateSessionSlot("test-session");
 		// Seed with a live message so we can verify prepend ordering
-		addUserMessage(ta, tm, "live message");
+		addUserMessage(slot.activity, slot.messages, "live message");
 
 		handleMessage({
 			type: "history_page",

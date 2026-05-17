@@ -636,6 +636,77 @@ describe("MessageProjector", () => {
 				providerTaskId: "task-1",
 			});
 		});
+
+		it("does not reopen a completed tool when late metadata arrives", () => {
+			projector.project(
+				makeStored(
+					"message.created",
+					"s1",
+					{
+						messageId: "m1",
+						role: "assistant",
+						sessionId: "s1",
+					} satisfies MessageCreatedPayload,
+					1,
+				),
+				db,
+			);
+			projector.project(
+				makeStored(
+					"tool.started",
+					"s1",
+					{
+						messageId: "m1",
+						partId: "tool1",
+						toolName: "Task",
+						callId: "tool1",
+						input: { tool: "Task", description: "Audit", prompt: "Go" },
+					} satisfies ToolStartedPayload,
+					2,
+				),
+				db,
+			);
+			projector.project(
+				makeStored(
+					"tool.completed",
+					"s1",
+					{
+						messageId: "m1",
+						partId: "tool1",
+						result: "done",
+						duration: 150,
+					} satisfies ToolCompletedPayload,
+					3,
+				),
+				db,
+			);
+			projector.project(
+				makeStored(
+					"tool.running",
+					"s1",
+					{
+						messageId: "m1",
+						partId: "tool1",
+						metadata: {
+							childSessionId: "claude-subagent-abc",
+							providerTaskId: "task-1",
+						},
+					} satisfies ToolRunningPayload,
+					4,
+				),
+				db,
+			);
+
+			const part = db.queryOne<MessagePartRow>(
+				"SELECT * FROM message_parts WHERE id = ?",
+				["tool1"],
+			);
+			expect(part?.status).toBe("completed");
+			expect(JSON.parse(part?.metadata ?? "{}")).toEqual({
+				childSessionId: "claude-subagent-abc",
+				providerTaskId: "task-1",
+			});
+		});
 	});
 
 	describe("tool.completed", () => {

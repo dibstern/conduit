@@ -162,6 +162,28 @@ function makeToolRunning(
 	);
 }
 
+function makeToolCompleted(
+	sessionId: string,
+	messageId: string,
+	partId: string,
+): CanonicalEvent {
+	return canonicalEvent(
+		"tool.completed",
+		sessionId,
+		{
+			messageId,
+			partId,
+			result: "done",
+			duration: 150,
+		},
+		{
+			eventId: createEventId(),
+			metadata: {},
+			createdAt: FIXED_TS,
+		},
+	);
+}
+
 function makeSessionStatus(
 	sessionId: string,
 	status: "idle" | "busy" | "error",
@@ -1069,6 +1091,41 @@ describe("Effect Message Projector (via ProjectionRunner)", () => {
 					childSessionId: "claude-subagent-abc",
 					providerTaskId: "task-1",
 					sdkSubagentId: "agent-abc",
+				});
+			}),
+		));
+
+	it("tool.running does not reopen completed message parts", () =>
+		runTest(
+			Effect.gen(function* () {
+				const sql = yield* SqlClient.SqlClient;
+				const store = yield* EventStoreEffectTag;
+				const runner = yield* ProjectionRunnerEffectTag;
+				yield* runner.markRecovered();
+
+				yield* seedSession("s1");
+				const e1 = yield* store.append(makeSessionCreated("s1"));
+				yield* runner.projectEvent(e1);
+				const e2 = yield* store.append(makeMessageCreated("s1", "m1"));
+				yield* runner.projectEvent(e2);
+				const e3 = yield* store.append(makeToolStarted("s1", "m1", "tool1"));
+				yield* runner.projectEvent(e3);
+				const e4 = yield* store.append(makeToolCompleted("s1", "m1", "tool1"));
+				yield* runner.projectEvent(e4);
+				const e5 = yield* store.append(
+					makeToolRunning("s1", "m1", "tool1", {
+						childSessionId: "claude-subagent-abc",
+						providerTaskId: "task-1",
+					}),
+				);
+				yield* runner.projectEvent(e5);
+
+				const rows = yield* sql<{ status: string; metadata: string | null }>`
+					SELECT status, metadata FROM message_parts WHERE id = 'tool1'`;
+				expect(rows[0]?.status).toBe("completed");
+				expect(JSON.parse(rows[0]?.metadata ?? "{}")).toEqual({
+					childSessionId: "claude-subagent-abc",
+					providerTaskId: "task-1",
 				});
 			}),
 		));

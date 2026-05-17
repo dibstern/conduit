@@ -24,6 +24,8 @@ import { historyToChatMessages } from "../utils/history-logic.js";
 import { createFrontendLogger } from "../utils/logger.js";
 import { renderMarkdown } from "../utils/markdown.js";
 import {
+	abortSessionReplay,
+	activateSessionChatState,
 	addUserMessage,
 	advanceTurnIfNewMessage,
 	beginReplayBatch,
@@ -693,6 +695,10 @@ export function handleMessage(msg: RelayMessage): void {
 			break;
 		}
 		case "session_switched": {
+			if (!msg.id) {
+				clearMessages();
+				break;
+			}
 			// Use the ID captured by switchToSession() before it changed currentId.
 			// Falls back to sessionState.currentId for server-initiated switches
 			// (e.g. CreateSession flow) where switchToSession() wasn't called.
@@ -709,13 +715,10 @@ export function handleMessage(msg: RelayMessage): void {
 			// Bump the outgoing session's replayGeneration to abort any in-flight
 			// convertHistoryAsync or replay for the previous session.
 			if (previousSessionId) {
-				const prevActivity = sessionActivity.get(previousSessionId);
-				if (prevActivity) prevActivity.replayGeneration++;
+				abortSessionReplay(previousSessionId);
 			}
 
-			// Idempotent — switchToSession() already cleared optimistically,
-			// but this covers server-initiated switches (new session, fork).
-			clearMessages();
+			activateSessionChatState(msg.id);
 			updateContextPercent(0);
 			clearTodoState();
 			clearSessionLocal(previousSessionId);
@@ -741,16 +744,15 @@ export function handleMessage(msg: RelayMessage): void {
 				const hasMore = msg.history.hasMore;
 				const msgCount = historyMsgs.length;
 				const capturedSlot = getOrCreateSessionSlot(msg.id);
-				const actGen = capturedSlot.activity.replayGeneration; // per-session snapshot
+				const actGen = ++capturedSlot.activity.replayGeneration; // per-session snapshot
+				capturedSlot.messages.historyLoading = true;
+				capturedSlot.messages.loadLifecycle = "loading";
+				chatState.loadLifecycle = "loading";
 				convertHistoryAsync(historyMsgs, renderMarkdown, capturedSlot.activity)
 					.then((chatMsgs) => {
 						if (chatMsgs && capturedSlot.activity.replayGeneration === actGen) {
-							// Commit to captured slot, not getCurrentSlot()
-							prependMessages(
-								capturedSlot.activity,
-								capturedSlot.messages,
-								chatMsgs,
-							);
+							capturedSlot.messages.toolRegistry.clear();
+							setMessages(capturedSlot.messages, chatMsgs);
 							seedRegistryFromMessages(
 								capturedSlot.activity,
 								capturedSlot.messages,
@@ -1053,6 +1055,7 @@ export async function replayEvents(
 
 	phaseStartReplay(slot.activity, slot.messages);
 	beginReplayBatch(slot.activity, slot.messages);
+	slot.messages.toolRegistry.clear();
 	startBufferingLiveEvents(slot.activity);
 
 	/** Ghost-write guard: abort if the slot's generation has changed

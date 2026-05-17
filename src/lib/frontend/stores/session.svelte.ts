@@ -17,7 +17,11 @@ import type {
 	RequestId,
 	SessionInfo,
 } from "../types.js";
-import { clearMessages, clearSessionChatState } from "./chat.svelte.js";
+import {
+	abortSessionReplay,
+	activateSessionChatState,
+	clearSessionChatState,
+} from "./chat.svelte.js";
 import { getBrowserClientId } from "./client-identity.js";
 import {
 	applyGetAgentsResponse,
@@ -437,12 +441,12 @@ export function switchToSession(
 ): void {
 	// Capture the outgoing session for permission cleanup in ws-dispatch.
 	_switchingFromId = sessionState.currentId;
+	if (_switchingFromId && _switchingFromId !== sessionId) {
+		abortSessionReplay(_switchingFromId);
+	}
 
 	sessionState.currentId = sessionId;
-
-	// Clear chat state for the incoming session.
-	// The session_switched handler will replay events or load history.
-	clearMessages();
+	activateSessionChatState(sessionId);
 
 	const slug = getCurrentSlug();
 	if (slug) navigate(`/p/${slug}/s/${sessionId}`);

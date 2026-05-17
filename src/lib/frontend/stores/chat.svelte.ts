@@ -572,7 +572,7 @@ export function beginReplayBatch(
 	_messages?: SessionMessages,
 ): void {
 	if (_messages) {
-		_messages.replayBatch = [...(_messages.messages ?? chatState.messages)];
+		_messages.replayBatch = [];
 	}
 }
 
@@ -1391,6 +1391,33 @@ export function seedRegistryFromMessages(
 	if (tools.length > 0) {
 		_messages.toolRegistry.seedFromHistory(tools);
 	}
+}
+
+export function abortSessionReplay(sessionId: string): void {
+	const activity = sessionActivity.get(sessionId);
+	if (!activity) return;
+	activity.replayGeneration++;
+	activity.liveEventBuffer = null;
+	if (activity.renderTimer) {
+		clearTimeout(activity.renderTimer);
+		activity.renderTimer = null;
+	}
+}
+
+export function activateSessionChatState(sessionId: string): void {
+	const activity = sessionActivity.get(sessionId);
+	const messages = sessionMessages.get(sessionId);
+
+	chatState.phase = activity?.phase ?? "idle";
+	chatState.turnEpoch = activity?.turnEpoch ?? 0;
+	chatState.currentMessageId = activity?.currentMessageId ?? null;
+	chatState.messages = messages?.messages ?? [];
+	chatState.currentAssistantText = messages?.currentAssistantText ?? "";
+	chatState.loadLifecycle = messages?.loadLifecycle ?? "empty";
+
+	historyState.hasMore = messages?.historyHasMore ?? false;
+	historyState.loading = messages?.historyLoading ?? false;
+	historyState.messageCount = messages?.historyMessageCount ?? 0;
 }
 
 export function clearMessages(): void {

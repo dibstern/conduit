@@ -300,7 +300,14 @@ export class MessageProjector implements Projector {
 			);
 			// Final-state UPDATE -- naturally idempotent
 			db.execute(
-				"UPDATE message_parts SET status = 'running', metadata = ?, updated_at = ? WHERE id = ?",
+				`UPDATE message_parts
+				 SET status = CASE
+				         WHEN status IN ('completed', 'error') THEN status
+				         ELSE 'running'
+				     END,
+				     metadata = ?,
+				     updated_at = ?
+				 WHERE id = ?`,
 				[metadata, event.createdAt, event.data.partId],
 			);
 			db.execute("UPDATE messages SET updated_at = ? WHERE id = ?", [

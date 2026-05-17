@@ -319,7 +319,12 @@ export const makeMessageProjector = (): EffectProjector => ({
 				);
 				yield* sql`
 					UPDATE message_parts
-					SET status = 'running', metadata = ${metadata}, updated_at = ${event.createdAt}
+					SET status = CASE
+							WHEN status IN ('completed', 'error') THEN status
+							ELSE 'running'
+						END,
+						metadata = ${metadata},
+						updated_at = ${event.createdAt}
 					WHERE id = ${event.data.partId}`;
 				yield* sql`UPDATE messages SET updated_at = ${event.createdAt} WHERE id = ${event.data.messageId}`;
 				return;

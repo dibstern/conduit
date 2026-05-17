@@ -47,6 +47,7 @@ import {
 	addUserMessage,
 	chatState,
 	clearMessages,
+	clearSessionChatState,
 	handleDelta,
 	handleDone,
 	isProcessing,
@@ -71,6 +72,9 @@ let tm: SessionMessages;
 
 beforeEach(() => {
 	clearMessages();
+	for (const id of ["session-a", "session-b"]) {
+		clearSessionChatState(id);
+	}
 	ta = testActivity();
 	tm = testMessages();
 	sessionState.rootSessions = [];
@@ -419,15 +423,15 @@ describe("Regression: mid-stream session switch preserves messages", () => {
 		);
 	});
 
-	it("switch back to session with NO cached events shows nothing (REST fallback needed)", () => {
+	it("switch back before server history arrives keeps the frontend cache visible", () => {
 		sessionState.currentId = "session-a";
 		addUserMessage(ta, tm, "message");
 		handleDelta(ta, tm, { type: "delta", sessionId: "s1", text: "response" });
 		vi.advanceTimersByTime(100);
 		handleDone(ta, tm, { type: "done", sessionId: "s1", code: 0 });
 
-		// Switch to B and back to A WITHOUT events (cache miss — relay would
-		// normally use REST fallback, but here we test the bare switch)
+		// Switch to B and back to A without server events/history yet. The
+		// frontend should keep its hot cache visible while the server fallback loads.
 		handleMessage({
 			type: "session_switched",
 			id: "session-b",
@@ -439,9 +443,7 @@ describe("Regression: mid-stream session switch preserves messages", () => {
 			sessionId: "session-a",
 		});
 
-		// Without events or history, messages should be empty
-		// (REST fallback would populate HistoryView, not chat messages)
-		expect(chatState.messages).toHaveLength(0);
+		expect(chatState.messages.length).toBeGreaterThan(0);
 		expect(sessionState.currentId).toBe("session-a");
 	});
 
