@@ -24,6 +24,7 @@ import {
 	ProjectorCursorEffectTag,
 } from "../../../../src/lib/persistence/effect/projector-cursor-effect.js";
 import { createAllEffectProjectors } from "../../../../src/lib/persistence/effect/projectors-effect.js";
+import { canonicalEvent } from "../../../../src/lib/persistence/events.js";
 import {
 	type ClaudeSubagentSdk,
 	type ClaudeSubagentTranscriptCursor,
@@ -542,6 +543,86 @@ describe("Claude subagent materializer", () => {
 				parent_id: "parent-session",
 				provider_sid: "agent-abc",
 			});
+		} finally {
+			rmSync(dir, { recursive: true, force: true });
+		}
+	});
+
+	it("final catch-up appends only unseen text for a live-polled message", async () => {
+		const dir = mkdtempSync(join(tmpdir(), "conduit-claude-subagent-suffix-"));
+		const filename = join(dir, "events.db");
+		try {
+			const result = await Effect.runPromise(
+				Effect.gen(function* () {
+					const persist = yield* ClaudeEventPersistEffectTag;
+					const childSessionId = claudeSubagentSessionId({
+						parentConduitSessionId: "parent-session",
+						parentClaudeSessionId: "sdk-parent",
+						sdkSubagentId: "agent-abc",
+					});
+					yield* persist.ensureClaudeSubagentSession({
+						childSessionId,
+						parentSessionId: "parent-session",
+						providerSessionId: "agent-abc",
+						title: "Explore Agent",
+					});
+					yield* persist.persistEvent(
+						canonicalEvent(
+							"message.created",
+							childSessionId,
+							{
+								messageId: "sub-assistant-1",
+								role: "assistant",
+								sessionId: childSessionId,
+							},
+							{ provider: "claude" },
+						),
+					);
+					yield* persist.persistEvent(
+						canonicalEvent(
+							"text.delta",
+							childSessionId,
+							{
+								messageId: "sub-assistant-1",
+								partId: "sub-assistant-1-0",
+								text: "Auth",
+							},
+							{ provider: "claude" },
+						),
+					);
+
+					const materialize = makeClaudeSubagentMaterializer({
+						sdk: {
+							listSubagents: async () => ["agent-abc"],
+							getSubagentMessages: async () => [
+								sessionMessage("assistant", "sub-assistant-1", "Auth is fine"),
+							],
+						},
+						persist,
+					});
+					yield* materialize({
+						parentConduitSessionId: "parent-session",
+						parentClaudeSessionId: "sdk-parent",
+						workspaceRoot: "/tmp/project",
+						knownTasks: new Map(),
+					});
+
+					const sql = yield* SqlClient.SqlClient;
+					const messages = yield* sql<{ text: string }>`
+						SELECT text FROM messages WHERE id = 'sub-assistant-1'`;
+					const textEvents = yield* sql<{ data: string }>`
+						SELECT data FROM events WHERE session_id = ${childSessionId} AND type = 'text.delta' ORDER BY sequence`;
+					return {
+						text: messages[0]?.text,
+						textDeltas: textEvents.map(
+							(row) => JSON.parse(row.data).text as string,
+						),
+					};
+				}).pipe(Effect.provide(makePersistenceLayer(filename))),
+			);
+
+			expect(result.text).toBe("Auth is fine");
+			expect(result.textDeltas).toEqual(["Auth", " is fine"]);
 		} finally {
 			rmSync(dir, { recursive: true, force: true });
 		}

@@ -50,6 +50,11 @@ export class ClaudeEventPersistEffectTag extends Context.Tag(
 )<ClaudeEventPersistEffectTag, ClaudeEventPersistEffect>() {}
 
 type PersistFailure = EventStoreError | ProjectionRunnerError | SqlError;
+type ExistingMessagePart = {
+	readonly id: string;
+	readonly text: string | null;
+	readonly status: string | null;
+};
 
 function claudeSubagentSessionCreatedEventId(childSessionId: string): EventId {
 	return Schema.decodeSync(EventId)(
@@ -239,12 +244,19 @@ export const makeClaudeEventPersistEffect = Effect.gen(function* () {
 				const existingRows = yield* sql<{ id: string }>`
 					SELECT id FROM messages WHERE session_id = ${input.childSessionId}`;
 				const existingMessageIds = new Set(existingRows.map((row) => row.id));
-				const events = input.events.filter((event) => {
-					const data = event.data as { readonly messageId?: string };
-					return (
-						data.messageId == null || !existingMessageIds.has(data.messageId)
-					);
-				});
+				const existingPartRows = yield* sql<ExistingMessagePart>`
+					SELECT id, text, status FROM message_parts
+					WHERE message_id IN (
+						SELECT id FROM messages WHERE session_id = ${input.childSessionId}
+					)`;
+				const existingParts = new Map(
+					existingPartRows.map((row) => [row.id, row]),
+				);
+				const events = filterExistingSubagentEvents(
+					input.events,
+					existingMessageIds,
+					existingParts,
+				);
 				const stored = yield* eventStore.appendBatch(events);
 				yield* projectBatch(stored);
 			}).pipe(Effect.mapError(mapPersistError("persistClaudeSubagent")));
@@ -256,3 +268,64 @@ export const makeClaudeEventPersistEffect = Effect.gen(function* () {
 		persistClaudeSubagent,
 	} satisfies ClaudeEventPersistEffect;
 });
+
+function filterExistingSubagentEvents(
+	events: readonly CanonicalEvent[],
+	existingMessageIds: ReadonlySet<string>,
+	existingParts: ReadonlyMap<string, ExistingMessagePart>,
+): CanonicalEvent[] {
+	const filtered: CanonicalEvent[] = [];
+	for (const event of events) {
+		const next = filterExistingSubagentEvent(
+			event,
+			existingMessageIds,
+			existingParts,
+		);
+		if (next) filtered.push(next);
+	}
+	return filtered;
+}
+
+function filterExistingSubagentEvent(
+	event: CanonicalEvent,
+	existingMessageIds: ReadonlySet<string>,
+	existingParts: ReadonlyMap<string, ExistingMessagePart>,
+): CanonicalEvent | undefined {
+	if (
+		event.type === "message.created" &&
+		existingMessageIds.has(event.data.messageId)
+	) {
+		return undefined;
+	}
+
+	if (event.type === "text.delta" || event.type === "thinking.delta") {
+		const existingText = existingParts.get(event.data.partId)?.text ?? "";
+		if (existingText.length === 0) return event;
+		if (!event.data.text.startsWith(existingText)) return undefined;
+		const suffix = event.data.text.slice(existingText.length);
+		if (suffix.length === 0) return undefined;
+		return {
+			...event,
+			data: {
+				...event.data,
+				text: suffix,
+			},
+		} as CanonicalEvent;
+	}
+
+	if (
+		(event.type === "thinking.start" || event.type === "tool.started") &&
+		existingParts.has(event.data.partId)
+	) {
+		return undefined;
+	}
+
+	if (
+		event.type === "tool.completed" &&
+		existingParts.get(event.data.partId)?.status === "completed"
+	) {
+		return undefined;
+	}
+
+	return event;
+}

@@ -22,6 +22,10 @@ import { join } from "node:path";
 import { query as sdkQuery } from "@anthropic-ai/claude-agent-sdk";
 import { Cause, Deferred, Effect, Exit, Runtime } from "effect";
 import { createLogger } from "../../logger.js";
+import {
+	type ClaudeEventPersistEffect,
+	ClaudeEventPersistEffectTag,
+} from "../../persistence/effect/claude-event-persist-effect.js";
 import { canonicalEvent } from "../../persistence/events.js";
 import { ProviderInstanceFailure } from "../errors.js";
 import type {
@@ -46,18 +50,30 @@ import type {
 	MaterializeClaudeSubagentsInput,
 	MaterializedClaudeSubagent,
 } from "./claude-subagent-materializer.js";
+import {
+	type ClaudeSubagentTranscriptCursor,
+	claudeSubagentSessionId,
+	commitClaudeSubagentTranscriptCursor,
+	defaultClaudeSubagentSdk,
+	stageSessionMessagesToEvents,
+} from "./claude-subagent-materializer.js";
 import { makeEffectPromptQueue } from "./effect-prompt-queue.js";
 import { serializePriorConversation } from "./history-transcript.js";
 import type {
 	ClaudeSessionContext,
+	ClaudeSubagentLivePoller,
 	PromptQueueController,
 	Query,
+	SDKMessage,
 	Options as SDKOptions,
 	SDKResultMessage,
+	SDKSystemLike,
 	SDKUserMessage,
+	SessionMessage,
 } from "./types.js";
 
 const log = createLogger("claude-provider-instance");
+const SUBAGENT_POLL_TIMEOUT_MS = 2000;
 
 function supportsMillionTokenContext(modelId: string): boolean {
 	const normalized = modelId.toLowerCase();
@@ -77,6 +93,61 @@ function claudeApiModelId(
 
 function asError(cause: unknown): Error {
 	return cause instanceof Error ? cause : new Error(String(cause));
+}
+
+function isClaudeTaskStartedMessage(
+	message: SDKMessage,
+): message is SDKSystemLike & {
+	readonly subtype: "task_started";
+	readonly task_id: string;
+	readonly tool_use_id: string;
+	readonly session_id?: string;
+} {
+	if (message.type !== "system" || message.subtype !== "task_started") {
+		return false;
+	}
+	const task = message as Record<string, unknown>;
+	return (
+		typeof task["task_id"] === "string" &&
+		typeof task["tool_use_id"] === "string"
+	);
+}
+
+function createClaudeSubagentTranscriptCursor(): ClaudeSubagentTranscriptCursor {
+	return {
+		messageRoles: new Map(),
+		textOffsets: new Map(),
+		thinkingOffsets: new Map(),
+		toolStarts: new Set(),
+		toolCompletions: new Set(),
+	};
+}
+
+function claudeSubagentTitle(subagentType: string | undefined): string {
+	if (!subagentType) return "Claude Subagent";
+	const first = subagentType[0]?.toUpperCase() ?? "";
+	return `${first}${subagentType.slice(1)} Agent`;
+}
+
+async function promiseWithTimeout<T>(
+	promise: Promise<T>,
+	timeoutMs: number,
+	label: string,
+): Promise<T> {
+	let timer: ReturnType<typeof setTimeout> | undefined;
+	try {
+		return await Promise.race([
+			promise,
+			new Promise<T>((_, reject) => {
+				timer = setTimeout(
+					() => reject(new Error(`${label} timed out after ${timeoutMs}ms`)),
+					timeoutMs,
+				);
+			}),
+		]);
+	} finally {
+		if (timer) clearTimeout(timer);
+	}
 }
 
 function makeRuntimeEffectRunner(
@@ -232,6 +303,8 @@ export interface ClaudeProviderInstanceDeps {
 	readonly materializeSubagents?: (
 		input: MaterializeClaudeSubagentsInput,
 	) => Effect.Effect<readonly MaterializedClaudeSubagent[], unknown>;
+	readonly ensureClaudeSubagentSession?: ClaudeEventPersistEffect["ensureClaudeSubagentSession"];
+	readonly subagentPollTimeoutMs?: number;
 }
 
 // ─── ClaudeProviderInstance ────────────────────────────────────────────────
@@ -476,6 +549,8 @@ export class ClaudeProviderInstance implements ProviderInstance {
 					pendingQuestions: new Map(),
 					inFlightTools: new Map(),
 					subagentTasks: new Map(),
+					subagentPollers: new Map(),
+					pendingSubagentMessages: new Map(),
 					eventSink: input.eventSink,
 					streamConsumer: undefined,
 					currentTurnId: input.turnId,
@@ -493,6 +568,7 @@ export class ClaudeProviderInstance implements ProviderInstance {
 					cwd: input.workspaceRoot,
 					abortController,
 					includePartialMessages: true,
+					forwardSubagentText: true,
 					settingSources: ["user", "project", "local"],
 					canUseTool: bridge.createCanUseTool(ctx),
 					...(apiModelId ? { model: apiModelId } : {}),
@@ -662,19 +738,28 @@ export class ClaudeProviderInstance implements ProviderInstance {
 		translator: ClaudeEventTranslator,
 		runEffect: <A>(effect: Effect.Effect<A, unknown>) => Promise<A>,
 	): Promise<void> {
+		let resultFinalization: Promise<void> | undefined;
 		try {
 			for await (const message of ctx.query) {
+				if (await this.pushForwardedSubagentMessage(ctx, message, runEffect)) {
+					continue;
+				}
 				await translator.translate(ctx, message);
+				await this.handleSubagentTaskStarted(ctx, message, runEffect);
 				if (message.type === "result") {
-					await this.materializeSubagentsAfterResult(
-						ctx,
-						message as unknown as SDKResultMessage,
+					const result = message as unknown as SDKResultMessage;
+					const finalizationCtx = this.detachSubagentFinalizationContext(ctx);
+					resultFinalization = this.finalizeSubagentsAfterResult(
+						finalizationCtx,
+						result,
 						runEffect,
 					);
-					this.resolveTurn(ctx, message as unknown as SDKResultMessage);
+					this.resolveTurn(ctx, result);
+					void resultFinalization;
 				}
 			}
 		} catch (err) {
+			this.stopSubagentPollers(ctx);
 			// Clear stale resume cursor so next turn starts a fresh SDK session
 			const errMsg = err instanceof Error ? err.message : String(err);
 			if (
@@ -696,12 +781,39 @@ export class ClaudeProviderInstance implements ProviderInstance {
 			}
 			this.resolveErrorTurn(ctx, err);
 		} finally {
+			if (!resultFinalization) {
+				this.stopSubagentPollers(ctx);
+			}
 			this.endedSessionStreams.add(ctx.sessionId);
 			this.rejectTurnIfPending(
 				ctx,
 				new Error("SDK stream ended without result"),
 			);
 		}
+	}
+
+	private detachSubagentFinalizationContext(
+		ctx: ClaudeSessionContext,
+	): ClaudeSessionContext {
+		const subagentPollers = new Map(ctx.subagentPollers ?? []);
+		const finalizationCtx = {
+			...ctx,
+			eventSink: ctx.eventSink,
+			resumeSessionId: ctx.resumeSessionId,
+			lastAssistantUuid: ctx.lastAssistantUuid,
+			subagentTasks: new Map(ctx.subagentTasks ?? []),
+			subagentPollers,
+			get stopped() {
+				return ctx.stopped;
+			},
+		} as ClaudeSessionContext;
+		(
+			ctx as { subagentPollers: Map<string, ClaudeSubagentLivePoller> }
+		).subagentPollers = new Map();
+		(
+			ctx as { pendingSubagentMessages: Map<string, SessionMessage[]> }
+		).pendingSubagentMessages = new Map();
+		return finalizationCtx;
 	}
 
 	private async materializeSubagentsAfterResult(
@@ -724,6 +836,7 @@ export class ClaudeProviderInstance implements ProviderInstance {
 
 		for (const child of materialized) {
 			if (!child.parentToolUseId || !ctx.eventSink) continue;
+			const task = ctx.subagentTasks?.get(child.sdkSubagentId);
 			await runEffect(
 				ctx.eventSink.push(
 					canonicalEvent(
@@ -733,6 +846,10 @@ export class ClaudeProviderInstance implements ProviderInstance {
 							messageId: result.uuid ?? ctx.lastAssistantUuid ?? "",
 							partId: child.parentToolUseId,
 							metadata: {
+								...(task?.description ? { description: task.description } : {}),
+								...(task?.subagentType
+									? { subagentType: task.subagentType }
+									: {}),
 								childSessionId: child.childSessionId,
 								sdkSubagentId: child.sdkSubagentId,
 								providerTaskId: child.sdkSubagentId,
@@ -743,6 +860,410 @@ export class ClaudeProviderInstance implements ProviderInstance {
 				),
 			);
 		}
+	}
+
+	private async finalizeSubagentsAfterResult(
+		ctx: ClaudeSessionContext,
+		result: SDKResultMessage,
+		runEffect: <A>(effect: Effect.Effect<A, unknown>) => Promise<A>,
+	): Promise<void> {
+		try {
+			await this.finalPollAndStopSubagents(ctx, runEffect);
+			await this.materializeSubagentsAfterResult(ctx, result, runEffect);
+		} catch (err) {
+			log.warn(
+				`Final Claude subagent catch-up failed for ${ctx.sessionId}: ${err instanceof Error ? err.message : err}`,
+			);
+		}
+	}
+
+	private async handleSubagentTaskStarted(
+		ctx: ClaudeSessionContext,
+		message: SDKMessage,
+		runEffect: <A>(effect: Effect.Effect<A, unknown>) => Promise<A>,
+	): Promise<void> {
+		if (!isClaudeTaskStartedMessage(message)) return;
+
+		const parentClaudeSessionId = ctx.resumeSessionId ?? message.session_id;
+		if (!parentClaudeSessionId) return;
+
+		const pollers = this.getSubagentPollers(ctx);
+		const existingPoller = pollers.get(message.task_id);
+		const childSessionId =
+			existingPoller?.childSessionId ??
+			claudeSubagentSessionId({
+				parentConduitSessionId: ctx.sessionId,
+				parentClaudeSessionId,
+				sdkSubagentId: message.task_id,
+			});
+		const task = ctx.subagentTasks?.get(message.task_id);
+		let sessionReady = false;
+		if (ctx.subagentTasks) {
+			ctx.subagentTasks.set(message.task_id, {
+				toolUseId: message.tool_use_id,
+				childSessionId,
+				...(task?.parentMessageId
+					? { parentMessageId: task.parentMessageId }
+					: {}),
+				...(task?.description ? { description: task.description } : {}),
+				...(task?.subagentType ? { subagentType: task.subagentType } : {}),
+			});
+		}
+
+		const ensureClaudeSubagentSession =
+			await this.resolveEnsureClaudeSubagentSession(runEffect).catch((err) => {
+				log.warn(
+					`Failed to resolve Claude subagent session ensure for ${ctx.sessionId}/${message.task_id}: ${err instanceof Error ? err.message : err}`,
+				);
+				return undefined;
+			});
+		sessionReady = ensureClaudeSubagentSession == null;
+		if (ensureClaudeSubagentSession) {
+			try {
+				// UX alternative: delay creating the child session until the first forwarded subagent message or final catch-up returns content.
+				await runEffect(
+					ensureClaudeSubagentSession({
+						childSessionId,
+						parentSessionId: ctx.sessionId,
+						providerSessionId: message.task_id,
+						title: claudeSubagentTitle(task?.subagentType),
+					}),
+				);
+				sessionReady = true;
+			} catch (err) {
+				log.warn(
+					`Failed to ensure Claude subagent session for ${ctx.sessionId}/${message.task_id}: ${err instanceof Error ? err.message : err}`,
+				);
+			}
+		}
+
+		if (ctx.eventSink) {
+			try {
+				await runEffect(
+					ctx.eventSink.push(
+						canonicalEvent(
+							"tool.running",
+							ctx.sessionId,
+							{
+								messageId: task?.parentMessageId ?? ctx.lastAssistantUuid ?? "",
+								partId: message.tool_use_id,
+								metadata: {
+									...(task?.description
+										? { description: task.description }
+										: {}),
+									...(task?.subagentType
+										? { subagentType: task.subagentType }
+										: {}),
+									childSessionId,
+									sdkSubagentId: message.task_id,
+									providerTaskId: message.task_id,
+								},
+							},
+							{ provider: "claude" },
+						),
+					),
+				);
+			} catch (err) {
+				log.warn(
+					`Failed to push Claude subagent metadata for ${ctx.sessionId}/${message.task_id}: ${err instanceof Error ? err.message : err}`,
+				);
+			}
+		}
+
+		if (existingPoller) {
+			if (sessionReady) {
+				existingPoller.sessionReady = true;
+				await this.flushPendingSubagentMessages(ctx, existingPoller, runEffect);
+			}
+			return;
+		}
+
+		const poller: ClaudeSubagentLivePoller = {
+			sdkSubagentId: message.task_id,
+			childSessionId,
+			parentClaudeSessionId,
+			parentToolUseId: message.tool_use_id,
+			cursor: createClaudeSubagentTranscriptCursor(),
+			sessionReady,
+			active: true,
+			timer: undefined,
+			currentPoll: undefined,
+		};
+		pollers.set(message.task_id, poller);
+		if (sessionReady) {
+			await this.flushPendingSubagentMessages(ctx, poller, runEffect);
+		}
+	}
+
+	private async pushForwardedSubagentMessage(
+		ctx: ClaudeSessionContext,
+		message: SDKMessage,
+		runEffect: <A>(effect: Effect.Effect<A, unknown>) => Promise<A>,
+	): Promise<boolean> {
+		if (message.type !== "assistant" && message.type !== "user") return false;
+		const parentToolUseId =
+			"parent_tool_use_id" in message &&
+			typeof message.parent_tool_use_id === "string"
+				? message.parent_tool_use_id
+				: undefined;
+		if (!parentToolUseId) return false;
+
+		const poller = this.findSubagentPollerByParentToolUseId(
+			ctx,
+			parentToolUseId,
+		);
+		if (!poller?.sessionReady) {
+			this.queuePendingSubagentMessage(
+				ctx,
+				parentToolUseId,
+				message as unknown as SessionMessage,
+			);
+			return true;
+		}
+
+		await this.pushForwardedSubagentMessages(
+			ctx,
+			poller,
+			[message as unknown as SessionMessage],
+			runEffect,
+		);
+		return true;
+	}
+
+	private queuePendingSubagentMessage(
+		ctx: ClaudeSessionContext,
+		parentToolUseId: string,
+		message: SessionMessage,
+	): void {
+		const pending = this.getPendingSubagentMessages(ctx);
+		const messages = pending.get(parentToolUseId);
+		if (messages) {
+			messages.push(message);
+		} else {
+			pending.set(parentToolUseId, [message]);
+		}
+	}
+
+	private async flushPendingSubagentMessages(
+		ctx: ClaudeSessionContext,
+		poller: ClaudeSubagentLivePoller,
+		runEffect: <A>(effect: Effect.Effect<A, unknown>) => Promise<A>,
+	): Promise<void> {
+		const pending = this.getPendingSubagentMessages(ctx);
+		const messages = pending.get(poller.parentToolUseId);
+		if (!messages || messages.length === 0) return;
+		pending.delete(poller.parentToolUseId);
+		await this.pushForwardedSubagentMessages(ctx, poller, messages, runEffect);
+	}
+
+	private async pushForwardedSubagentMessages(
+		ctx: ClaudeSessionContext,
+		poller: ClaudeSubagentLivePoller,
+		messages: readonly SessionMessage[],
+		runEffect: <A>(effect: Effect.Effect<A, unknown>) => Promise<A>,
+	): Promise<void> {
+		const stage = stageSessionMessagesToEvents({
+			childSessionId: poller.childSessionId,
+			messages,
+			cursor: poller.cursor,
+		});
+		const sink = ctx.eventSink;
+		if (!sink) return;
+		for (const event of stage.events) {
+			await runEffect(sink.push(event));
+		}
+		commitClaudeSubagentTranscriptCursor(poller.cursor, stage.cursor);
+	}
+
+	private findSubagentPollerByParentToolUseId(
+		ctx: ClaudeSessionContext,
+		parentToolUseId: string,
+	): ClaudeSubagentLivePoller | undefined {
+		const pollers = ctx.subagentPollers;
+		if (!pollers) return undefined;
+		for (const poller of pollers.values()) {
+			if (poller.parentToolUseId === parentToolUseId) return poller;
+		}
+		return undefined;
+	}
+
+	private getPendingSubagentMessages(
+		ctx: ClaudeSessionContext,
+	): Map<string, SessionMessage[]> {
+		if (ctx.pendingSubagentMessages) return ctx.pendingSubagentMessages;
+		const pending = new Map<string, SessionMessage[]>();
+		(
+			ctx as { pendingSubagentMessages: Map<string, SessionMessage[]> }
+		).pendingSubagentMessages = pending;
+		return pending;
+	}
+
+	private getSubagentPollers(
+		ctx: ClaudeSessionContext,
+	): Map<string, ClaudeSubagentLivePoller> {
+		if (ctx.subagentPollers) return ctx.subagentPollers;
+		const pollers = new Map<string, ClaudeSubagentLivePoller>();
+		(
+			ctx as { subagentPollers: Map<string, ClaudeSubagentLivePoller> }
+		).subagentPollers = pollers;
+		return pollers;
+	}
+
+	private resolveSubagentSdk(): ClaudeSubagentSdk | undefined {
+		return (
+			this.deps.subagentSdk ??
+			(this.deps.materializeSubagents ? defaultClaudeSubagentSdk : undefined)
+		);
+	}
+
+	private async resolveEnsureClaudeSubagentSession(
+		runEffect: <A>(effect: Effect.Effect<A, unknown>) => Promise<A>,
+	): Promise<
+		ClaudeEventPersistEffect["ensureClaudeSubagentSession"] | undefined
+	> {
+		if (this.deps.ensureClaudeSubagentSession) {
+			return this.deps.ensureClaudeSubagentSession;
+		}
+		const persistOption = await runEffect(
+			Effect.serviceOption(ClaudeEventPersistEffectTag),
+		);
+		return persistOption._tag === "Some"
+			? persistOption.value.ensureClaudeSubagentSession
+			: undefined;
+	}
+
+	private async pollClaudeSubagentOnce(
+		ctx: ClaudeSessionContext,
+		poller: ClaudeSubagentLivePoller,
+		subagentSdk: ClaudeSubagentSdk,
+		runEffect: <A>(effect: Effect.Effect<A, unknown>) => Promise<A>,
+		options: { readonly allowInactive?: boolean } = {},
+	): Promise<void> {
+		if (!this.canPollSubagent(ctx, poller, options)) return;
+		if (poller.currentPoll) {
+			await poller.currentPoll;
+			return;
+		}
+
+		const poll = this.pollClaudeSubagentSnapshot(
+			ctx,
+			poller,
+			subagentSdk,
+			runEffect,
+			options,
+		);
+		poller.currentPoll = poll;
+		try {
+			await poll;
+		} finally {
+			if (poller.currentPoll === poll) {
+				poller.currentPoll = undefined;
+			}
+		}
+	}
+
+	private async pollClaudeSubagentSnapshot(
+		ctx: ClaudeSessionContext,
+		poller: ClaudeSubagentLivePoller,
+		subagentSdk: ClaudeSubagentSdk,
+		runEffect: <A>(effect: Effect.Effect<A, unknown>) => Promise<A>,
+		options: { readonly allowInactive?: boolean },
+	): Promise<void> {
+		if (!this.canPollSubagent(ctx, poller, options)) return;
+		const messages = await promiseWithTimeout(
+			subagentSdk.getSubagentMessages(
+				poller.parentClaudeSessionId,
+				poller.sdkSubagentId,
+				{ dir: ctx.workspaceRoot },
+			),
+			this.subagentPollTimeoutMs(),
+			`Claude subagent poll ${ctx.sessionId}/${poller.sdkSubagentId}`,
+		);
+		if (!this.canPollSubagent(ctx, poller, options)) return;
+		const stage = stageSessionMessagesToEvents({
+			childSessionId: poller.childSessionId,
+			messages,
+			cursor: poller.cursor,
+		});
+		const sink = ctx.eventSink;
+		if (!sink || !this.canPollSubagent(ctx, poller, options)) return;
+		for (const event of stage.events) {
+			if (!this.canPollSubagent(ctx, poller, options)) return;
+			await runEffect(sink.push(event));
+		}
+		if (!this.canPollSubagent(ctx, poller, options)) return;
+		commitClaudeSubagentTranscriptCursor(poller.cursor, stage.cursor);
+	}
+
+	private canPollSubagent(
+		ctx: ClaudeSessionContext,
+		poller: ClaudeSubagentLivePoller,
+		options: { readonly allowInactive?: boolean },
+	): boolean {
+		return (
+			poller.sessionReady &&
+			!ctx.stopped &&
+			(poller.active || options.allowInactive === true)
+		);
+	}
+
+	private subagentPollTimeoutMs(): number {
+		return this.deps.subagentPollTimeoutMs ?? SUBAGENT_POLL_TIMEOUT_MS;
+	}
+
+	private async finalPollAndStopSubagents(
+		ctx: ClaudeSessionContext,
+		runEffect: <A>(effect: Effect.Effect<A, unknown>) => Promise<A>,
+	): Promise<void> {
+		const pollers = ctx.subagentPollers;
+		if (!pollers || pollers.size === 0) return;
+		const subagentSdk = this.resolveSubagentSdk();
+		if (!subagentSdk) {
+			this.stopSubagentPollers(ctx);
+			return;
+		}
+
+		for (const poller of pollers.values()) {
+			if (poller.timer) {
+				clearTimeout(poller.timer);
+				poller.timer = undefined;
+			}
+		}
+
+		for (const poller of pollers.values()) {
+			if (poller.currentPoll) {
+				try {
+					await poller.currentPoll;
+				} catch (err) {
+					log.warn(
+						`Claude subagent poll failed before final poll for ${ctx.sessionId}/${poller.sdkSubagentId}: ${err instanceof Error ? err.message : err}`,
+					);
+				}
+			}
+			try {
+				await this.pollClaudeSubagentOnce(ctx, poller, subagentSdk, runEffect, {
+					allowInactive: true,
+				});
+			} catch (err) {
+				log.warn(
+					`Final Claude subagent poll failed for ${ctx.sessionId}/${poller.sdkSubagentId}: ${err instanceof Error ? err.message : err}`,
+				);
+			}
+		}
+		this.stopSubagentPollers(ctx);
+	}
+
+	private stopSubagentPollers(ctx: ClaudeSessionContext): void {
+		const pollers = ctx.subagentPollers;
+		if (!pollers) return;
+		for (const poller of pollers.values()) {
+			poller.active = false;
+			if (poller.timer) {
+				clearTimeout(poller.timer);
+				poller.timer = undefined;
+			}
+		}
+		pollers.clear();
 	}
 
 	// ─── Turn resolution ──────────────────────────────────────────────────
@@ -954,6 +1475,8 @@ export class ClaudeProviderInstance implements ProviderInstance {
 	): Effect.Effect<void, unknown> {
 		return Effect.gen(this, function* () {
 			if (ctx.stopped) return;
+
+			this.stopSubagentPollers(ctx);
 
 			// 1. Complete in-flight tools as failed via EventSink.
 			for (const [, tool] of ctx.inFlightTools) {

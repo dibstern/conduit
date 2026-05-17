@@ -408,11 +408,22 @@ export class ClaudeEventTranslator {
 			...(task?.subagentType != null
 				? { subagentType: task.subagentType }
 				: {}),
+			...(task?.childSessionId != null
+				? { childSessionId: task.childSessionId }
+				: {}),
 			...metadata,
 		};
 		if (typeof providerTaskId === "string" && subagentTasks) {
+			const parentMessageId =
+				this.currentAssistantMessageId ||
+				ctx.lastAssistantUuid ||
+				task?.parentMessageId;
 			subagentTasks.set(providerTaskId, {
 				toolUseId: parentToolUseId,
+				...(typeof mergedMetadata["childSessionId"] === "string"
+					? { childSessionId: mergedMetadata["childSessionId"] }
+					: {}),
+				...(parentMessageId ? { parentMessageId } : {}),
 				...(typeof mergedMetadata["description"] === "string"
 					? { description: mergedMetadata["description"] }
 					: {}),

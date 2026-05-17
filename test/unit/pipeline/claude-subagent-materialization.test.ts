@@ -289,6 +289,19 @@ describe("Claude subagent materialization pipeline", () => {
 							eventSink: relaySink,
 						}),
 					);
+					const waitForFinalCatchUp = () =>
+						Effect.gen(function* () {
+							const deadline = Date.now() + 2_000;
+							while (Date.now() < deadline) {
+								const rows = yield* sql<MessageRow>`
+									SELECT * FROM messages WHERE session_id = ${childSessionId}`;
+								if (rows.length >= 2) return;
+								yield* Effect.promise(
+									() => new Promise<void>((resolve) => setTimeout(resolve, 25)),
+								);
+							}
+						});
+					yield* waitForFinalCatchUp();
 
 					const parentMessages = yield* sql<MessageRow>`
 						SELECT * FROM messages WHERE session_id = ${parentSessionId} ORDER BY created_at ASC, id ASC`;
@@ -565,6 +578,12 @@ describe("Claude subagent materialization pipeline", () => {
 						yield taskToolUse as SDKMessage;
 						yield taskToolStop as SDKMessage;
 						yield taskStarted as SDKMessage;
+						for (const message of transcript) {
+							yield {
+								...message,
+								parent_tool_use_id: "task-tool-live-1",
+							} as unknown as SDKMessage;
+						}
 						taskStartedTranslated?.();
 						await resultReady;
 						yield makeSuccessResult({
@@ -644,9 +663,7 @@ describe("Claude subagent materialization pipeline", () => {
 			expect(immediateTaskMessage?.metadata?.["childSessionId"]).toBe(
 				result.childSessionId,
 			);
-			expect(
-				result.getSubagentMessagesCallsBeforeResult,
-			).toBeGreaterThanOrEqual(2);
+			expect(result.getSubagentMessagesCallsBeforeResult).toBe(0);
 			expect(result.beforeResult.childChat).toEqual([
 				expect.objectContaining({ type: "user", text: "Inspect auth" }),
 				expect.objectContaining({ type: "assistant", rawText: "Auth is fine" }),

@@ -184,7 +184,10 @@ export function createToolRegistry(
 				reason: `Cannot update metadata on ${tracked.status} tool`,
 			};
 		}
-		tracked.tool = { ...tracked.tool, metadata };
+		tracked.tool = {
+			...tracked.tool,
+			metadata: { ...(tracked.tool.metadata ?? {}), ...metadata },
+		};
 		return { action: "update", uuid: tracked.uuid, tool: tracked.tool };
 	}
 
