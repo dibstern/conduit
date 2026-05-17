@@ -178,7 +178,7 @@ export function createToolRegistry(
 		if (!tracked) {
 			return { action: "reject", reason: `Unknown tool ID: ${id}` };
 		}
-		if (tracked.status === "completed" || tracked.status === "error") {
+		if (tracked.status === "error") {
 			return {
 				action: "reject",
 				reason: `Cannot update metadata on ${tracked.status} tool`,

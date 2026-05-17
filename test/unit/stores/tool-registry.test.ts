@@ -449,11 +449,19 @@ describe("updateMetadata", () => {
 		expect(result.action).toBe("reject");
 	});
 
-	it("rejects completed tool", () => {
-		registry.start("call-1", "Read");
+	it("merges late metadata on a completed tool without reopening it", () => {
+		registry.start("call-1", "Task");
+		registry.executing("call-1", { prompt: "do stuff" });
 		registry.complete("call-1", "done", false);
-		const result = registry.updateMetadata("call-1", { key: "val" });
-		expect(result.action).toBe("reject");
+		const result = registry.updateMetadata("call-1", {
+			childSessionId: "claude-subagent-abc",
+		});
+		expect(result.action).toBe("update");
+		if (result.action !== "update") throw new Error("unreachable");
+		expect(result.tool.status).toBe("completed");
+		expect(result.tool.metadata).toEqual({
+			childSessionId: "claude-subagent-abc",
+		});
 	});
 
 	it("rejects error tool", () => {
