@@ -48,6 +48,10 @@ function encodeJson(value: unknown): string {
 	return JSON.stringify(value);
 }
 
+function isAutoTitleRename(event: StoredEvent): boolean {
+	return event.metadata.source === "auto-title";
+}
+
 // ─── Session Projector ──────────────────────────────────────────────────────
 
 export const makeSessionProjector = (): EffectProjector => ({
@@ -84,6 +88,27 @@ export const makeSessionProjector = (): EffectProjector => ({
 			}
 
 			if (isEventType(event, "session.renamed")) {
+				if (isAutoTitleRename(event)) {
+					yield* sql`
+						UPDATE sessions SET title = ${event.data.title}, updated_at = ${event.createdAt}
+						WHERE id = ${event.data.sessionId}
+							AND provider IN ('claude', 'claude-sdk')
+							AND NOT EXISTS (
+								SELECT 1
+								FROM events prior
+								WHERE prior.session_id = ${event.data.sessionId}
+									AND prior.type = 'session.renamed'
+									AND prior.sequence < ${event.sequence}
+									AND COALESCE(json_extract(prior.metadata, '$.source'), '') <> 'auto-title'
+							)
+							AND (
+								title IS NULL
+								OR TRIM(title) = ''
+								OR LOWER(TRIM(title)) IN ('claude session', 'untitled', 'new session')
+								OR LOWER(TRIM(title)) LIKE 'new session %'
+							)`;
+					return;
+				}
 				yield* sql`UPDATE sessions SET title = ${event.data.title}, updated_at = ${event.createdAt} WHERE id = ${event.data.sessionId}`;
 				return;
 			}

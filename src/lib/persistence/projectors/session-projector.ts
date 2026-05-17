@@ -15,6 +15,10 @@ const SESSION_HANDLES = [
 	"message.created",
 ] as const;
 
+function isAutoTitleRename(event: StoredEvent): boolean {
+	return event.metadata.source === "auto-title";
+}
+
 /**
  * Projects session lifecycle events into the `sessions` read-model table.
  *
@@ -64,6 +68,35 @@ export class SessionProjector implements Projector {
 		}
 
 		if (isEventType(event, "session.renamed")) {
+			if (isAutoTitleRename(event)) {
+				db.execute(
+					`UPDATE sessions SET title = ?, updated_at = ?
+					 WHERE id = ?
+					   AND provider IN ('claude', 'claude-sdk')
+					   AND NOT EXISTS (
+					     SELECT 1
+					     FROM events prior
+					     WHERE prior.session_id = ?
+					       AND prior.type = 'session.renamed'
+					       AND prior.sequence < ?
+					       AND COALESCE(json_extract(prior.metadata, '$.source'), '') <> 'auto-title'
+					   )
+					   AND (
+					     title IS NULL
+					     OR TRIM(title) = ''
+					     OR LOWER(TRIM(title)) IN ('claude session', 'untitled', 'new session')
+					     OR LOWER(TRIM(title)) LIKE 'new session %'
+					   )`,
+					[
+						event.data.title,
+						event.createdAt,
+						event.data.sessionId,
+						event.data.sessionId,
+						event.sequence,
+					],
+				);
+				return;
+			}
 			db.execute("UPDATE sessions SET title = ?, updated_at = ? WHERE id = ?", [
 				event.data.title,
 				event.createdAt,
