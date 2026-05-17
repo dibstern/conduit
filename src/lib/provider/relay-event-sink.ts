@@ -147,7 +147,7 @@ export function createRelayEventSink(deps: RelayEventSinkDeps): RelayEventSink {
 					const result = translateCanonicalEvent(event);
 					if (result.kind === "emit") {
 						for (const raw of result.messages) {
-							const m = tagWithSessionId(raw, sessionId);
+							const m = tagWithSessionId(raw, event.sessionId || sessionId);
 							send(m);
 							const isTerminal =
 								m.type === "done" || (m.type === "error" && m.code !== "RETRY");
