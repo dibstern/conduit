@@ -54,7 +54,9 @@ export default defineConfig({
 					],
 					testTimeout: 10_000,
 					hookTimeout: 10_000,
-					pool: "threads",
+					// Some unit tests outside the explicit SQLite project still touch
+					// native SQLite bindings. Threads can segfault during teardown.
+					pool: "forks",
 				},
 			},
 		],
