@@ -20,6 +20,11 @@ _Avoid_: arbitrary provider JSON payload
 Nested JSON whose structure belongs to the provider or model/tool protocol and is not interpreted by Conduit.
 _Avoid_: Conduit contract field
 
+**Automatic Session Title**:
+A Conduit-owned session label generated from the first user message's domain and intent. It is capped at six words; overlong generated titles are truncated after the sixth word.
+If title generation fails, Conduit falls back to `Claude Session YYYY-MM-DD HH:mm` in the relay's local timezone.
+_Avoid_: provider session name, assistant summary, turn result
+
 **Session Approval**:
 A user decision that allows a provider runtime to continue using a requested tool without creating a file-backed permission rule.
 _Avoid_: persisted permission, config rule
@@ -42,6 +47,10 @@ _Avoid_: Conduit-invented permission scope
 - A **Provider Contract** defines what Conduit accepts from and sends to a **Provider Runtime**.
 - A **Provider Envelope** should be runtime-decoded before adapter translation.
 - A **Provider-Owned Payload** may remain opaque when Conduit does not read its internal fields.
+- An **Automatic Session Title** is derived from the first user message after Conduit accepts it, not from provider turn completion.
+- An **Automatic Session Title** is generated only when the first accepted user message is sent while the session is bound to Claude.
+- Existing sessions are not backfilled with an **Automatic Session Title**.
+- An **Automatic Session Title** must not overwrite a user-provided session title.
 - A **Session Approval** does not create a **Durable Permission Rule**.
 - **Approve And Remember** creates a **Durable Permission Rule** only through the provider runtime that owns the rule destination.
 - A **Durable Permission Rule** belongs to the provider runtime that owns the settings file.
