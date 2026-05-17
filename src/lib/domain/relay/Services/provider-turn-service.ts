@@ -1,0 +1,499 @@
+import { randomUUID } from "node:crypto";
+import { Context, Effect, Layer, Runtime } from "effect";
+import { formatErrorDetail, RelayError } from "../../../errors.js";
+import type { PromptOptions } from "../../../instance/sdk-types.js";
+import {
+	type ClaudeEventPersistEffect,
+	ClaudeEventPersistEffectTag,
+} from "../../../persistence/effect/claude-event-persist-effect.js";
+import { ProviderStateEffectTag } from "../../../persistence/effect/provider-state-effect.js";
+import {
+	type ReadQueryEffect,
+	ReadQueryEffectTag,
+} from "../../../persistence/effect/read-query-effect.js";
+import { messageRowsToHistory } from "../../../persistence/session-history-adapter.js";
+import type { OrchestrationEngine } from "../../../provider/orchestration-engine.js";
+import {
+	createRelayEventSink,
+	type RelayEventSinkPersist,
+} from "../../../provider/relay-event-sink.js";
+import type { SendTurnInput, TurnResult } from "../../../provider/types.js";
+import { OpenCodeAPITag } from "../../provider/Services/opencode-api-service.js";
+import { PendingInteractionServiceTag } from "./pending-interaction-service.js";
+import {
+	ConfigTag,
+	LoggerTag,
+	OrchestrationEngineTag,
+	WebSocketHandlerTag,
+} from "./services.js";
+import {
+	type SessionManagerService,
+	SessionManagerServiceTag,
+} from "./session-manager-service.js";
+import {
+	clearProcessingTimeout,
+	type OverridesStateTag,
+	PROCESSING_TIMEOUT_DURATION,
+	resetProcessingTimeout,
+} from "./session-overrides-state.js";
+import { SessionTitleServiceTag } from "./session-title-service.js";
+
+const CLAUDE_PROVIDER_ID = "claude";
+const OPENCODE_PROVIDER_ID = "opencode";
+
+const NOOP_EVENT_SINK: SendTurnInput["eventSink"] = {
+	push: () => Effect.void,
+	requestPermission: () => Effect.succeed({ decision: "once" as const }),
+	requestQuestion: () => Effect.succeed({}),
+	resolvePermission: () => Effect.void,
+	resolveQuestion: () => Effect.void,
+};
+
+export interface ProviderTurnServiceSendInput {
+	readonly clientId: string;
+	readonly sessionId: string;
+	readonly text: string;
+	readonly images?: readonly string[];
+	readonly model?: {
+		readonly providerID: string;
+		readonly modelID: string;
+	};
+	readonly modelUserSelected: boolean;
+	readonly agent?: string;
+	readonly variant?: string;
+	readonly contextWindow?: string;
+	readonly errorDelivery?: "client" | "session";
+}
+
+export interface ProviderTurnServiceInterruptInput {
+	readonly clientId: string;
+	readonly sessionId: string;
+}
+
+export interface ProviderTurnService {
+	readonly sendTurn: (
+		input: ProviderTurnServiceSendInput,
+	) => Effect.Effect<void, unknown, OverridesStateTag>;
+	readonly interruptTurn: (
+		input: ProviderTurnServiceInterruptInput,
+	) => Effect.Effect<boolean>;
+}
+
+export class ProviderTurnServiceTag extends Context.Tag("ProviderTurnService")<
+	ProviderTurnServiceTag,
+	ProviderTurnService
+>() {}
+
+export function isProviderTurnInterruptProvider(providerId: string): boolean {
+	return providerId === CLAUDE_PROVIDER_ID;
+}
+
+function isClaudeProviderId(providerId: string): boolean {
+	return providerId === CLAUDE_PROVIDER_ID;
+}
+
+function targetSessionForRelayMessage(
+	msg: unknown,
+	fallbackSessionId: string,
+): string {
+	if (msg == null || typeof msg !== "object" || !("sessionId" in msg)) {
+		return fallbackSessionId;
+	}
+	const sessionId = (msg as { readonly sessionId?: unknown }).sessionId;
+	return typeof sessionId === "string" && sessionId.length > 0
+		? sessionId
+		: fallbackSessionId;
+}
+
+type PriorHistoryReaders = {
+	readQueryEffect?: ReadQueryEffect;
+};
+
+function loadPriorHistoryForTurn(
+	sessionId: string,
+	sessionManagerService: SessionManagerService,
+	readers: PriorHistoryReaders,
+): Effect.Effect<SendTurnInput["history"], unknown> {
+	if (readers.readQueryEffect) {
+		return readers.readQueryEffect.getSessionMessagesWithParts(sessionId).pipe(
+			Effect.map(
+				(rows) =>
+					messageRowsToHistory(rows, {
+						pageSize: Number.MAX_SAFE_INTEGER,
+					}).messages,
+			),
+		);
+	}
+	return sessionManagerService
+		.loadPreRenderedHistory(sessionId)
+		.pipe(Effect.map((history) => history.messages));
+}
+
+function buildLegacyPrompt(input: ProviderTurnServiceSendInput): PromptOptions {
+	const prompt: PromptOptions = {
+		text: input.text,
+		...(input.images && input.images.length > 0
+			? { images: Array.from(input.images) }
+			: {}),
+	};
+	if (input.agent) prompt.agent = input.agent;
+	if (input.model && input.modelUserSelected) prompt.model = input.model;
+	if (input.variant) prompt.variant = input.variant;
+	return prompt;
+}
+
+export const makeProviderTurnService = Effect.gen(function* () {
+	const client = yield* OpenCodeAPITag;
+	const wsHandler = yield* WebSocketHandlerTag;
+	const log = yield* LoggerTag;
+	const sessionManagerService = yield* SessionManagerServiceTag;
+	const config = yield* ConfigTag;
+	const pendingInteractionService = yield* PendingInteractionServiceTag;
+	const runtime = yield* Effect.runtime<OverridesStateTag>();
+	const runTimeout = Runtime.runFork(runtime);
+
+	const sendErrorMessage = (
+		input: ProviderTurnServiceSendInput,
+		message: ReturnType<RelayError["toMessage"]>,
+	) => {
+		if (input.errorDelivery === "session") {
+			wsHandler.sendToSession(input.sessionId, message);
+		} else {
+			wsHandler.sendTo(input.clientId, message);
+		}
+	};
+
+	const loadClaudeHistory = (sessionId: string) =>
+		Effect.gen(function* () {
+			const readQueryEffectOption =
+				yield* Effect.serviceOption(ReadQueryEffectTag);
+			const historyReaders: PriorHistoryReaders = {
+				...(readQueryEffectOption._tag === "Some"
+					? { readQueryEffect: readQueryEffectOption.value }
+					: {}),
+			};
+			const result = yield* Effect.either(
+				loadPriorHistoryForTurn(
+					sessionId,
+					sessionManagerService,
+					historyReaders,
+				),
+			);
+			if (result._tag === "Right") {
+				return { history: result.right, loaded: true };
+			}
+			log.warn(
+				`Failed to load prior Claude history for ${sessionId}: ${
+					result.left instanceof Error ? result.left.message : result.left
+				}`,
+			);
+			return { history: [], loaded: false };
+		});
+
+	const maybePersistClaudeUserMessage = (input: {
+		readonly sessionId: string;
+		readonly text: string;
+		readonly isFirstClaudeMessage: boolean;
+	}) =>
+		Effect.gen(function* () {
+			const claudeEventPersistEffectOption = yield* Effect.serviceOption(
+				ClaudeEventPersistEffectTag,
+			);
+			if (claudeEventPersistEffectOption._tag === "None") return;
+
+			const persistResult = yield* Effect.either(
+				claudeEventPersistEffectOption.value.persistUserMessage(
+					input.sessionId,
+					input.text,
+				),
+			);
+			const titleServiceOption = yield* Effect.serviceOption(
+				SessionTitleServiceTag,
+			);
+			if (
+				input.isFirstClaudeMessage &&
+				titleServiceOption._tag === "Some" &&
+				persistResult._tag === "Right"
+			) {
+				yield* titleServiceOption.value.startForFirstClaudeMessage({
+					sessionId: input.sessionId,
+					firstMessage: input.text,
+				});
+			}
+			if (persistResult._tag === "Left") {
+				log.warn(
+					`Non-fatal persistence error for Claude user message: ${formatErrorDetail(persistResult.left)}`,
+				);
+			}
+		});
+
+	const makeEventSink = (
+		sessionId: string,
+		providerId: string,
+		persist: ClaudeEventPersistEffect | undefined,
+	): SendTurnInput["eventSink"] => {
+		if (!isClaudeProviderId(providerId)) return NOOP_EVENT_SINK;
+		let eventSinkPersist: RelayEventSinkPersist | undefined;
+		if (persist) eventSinkPersist = persist;
+		return createRelayEventSink({
+			sessionId,
+			providerId,
+			send: (msg) =>
+				wsHandler.sendToSession(
+					targetSessionForRelayMessage(msg, sessionId),
+					msg,
+				),
+			clearTimeout: () => {
+				runTimeout(clearProcessingTimeout(sessionId));
+			},
+			resetTimeout: () => {
+				runTimeout(
+					resetProcessingTimeout(sessionId, PROCESSING_TIMEOUT_DURATION),
+				);
+			},
+			...(eventSinkPersist ? { persist: eventSinkPersist } : {}),
+			pendingInteractions: {
+				beginPermissionRequest: (request) =>
+					pendingInteractionService.beginPermissionRequest(request),
+				resolvePermissionRequest: (requestId, response) =>
+					pendingInteractionService.resolvePermissionRequest(
+						requestId,
+						response,
+					),
+				beginQuestionRequest: (request) =>
+					pendingInteractionService.beginQuestionRequest(request),
+				resolveQuestionRequest: (requestId, answers) =>
+					pendingInteractionService.resolveQuestionRequest(requestId, answers),
+				cancelSessionInteractions: (reason) =>
+					pendingInteractionService.cancelSessionInteractions(
+						sessionId,
+						reason,
+					),
+			},
+		});
+	};
+
+	const handleDispatchFailure = (
+		input: ProviderTurnServiceSendInput,
+		sendErr: unknown,
+	) =>
+		Effect.gen(function* () {
+			log.warn(
+				`client=${input.clientId} session=${input.sessionId} Failed to send message:`,
+				formatErrorDetail(sendErr),
+			);
+			yield* clearProcessingTimeout(input.sessionId);
+			wsHandler.sendToSession(input.sessionId, {
+				type: "done",
+				sessionId: input.sessionId,
+				code: 1,
+			});
+			sendErrorMessage(
+				input,
+				RelayError.fromCaught(
+					sendErr,
+					"SEND_FAILED",
+					"Failed to send message",
+				).toMessage(input.sessionId),
+			);
+		});
+
+	const handleDispatchResult = (
+		input: ProviderTurnServiceSendInput,
+		result: TurnResult,
+	) =>
+		Effect.gen(function* () {
+			if (result.status === "error") {
+				const msg = result.error?.message ?? "Send failed";
+				log.warn(
+					`client=${input.clientId} session=${input.sessionId} engine dispatch error: ${msg}`,
+				);
+				yield* clearProcessingTimeout(input.sessionId);
+				wsHandler.sendToSession(input.sessionId, {
+					type: "done",
+					sessionId: input.sessionId,
+					code: 1,
+				});
+				sendErrorMessage(
+					input,
+					new RelayError(msg, {
+						code: "SEND_FAILED",
+					}).toMessage(input.sessionId),
+				);
+			}
+
+			if (result.status === "error" || !result.providerStateUpdates?.length) {
+				return;
+			}
+			const providerStateEffectOption = yield* Effect.serviceOption(
+				ProviderStateEffectTag,
+			);
+			if (providerStateEffectOption._tag === "None") return;
+
+			const updates = result.providerStateUpdates.map((update) => ({
+				key: update.key,
+				value: String(update.value),
+			}));
+			const saveResult = yield* Effect.either(
+				providerStateEffectOption.value.saveUpdates(input.sessionId, updates),
+			);
+			if (saveResult._tag === "Left") {
+				log.warn(
+					`Non-fatal provider state persistence error for ${input.sessionId}: ${formatErrorDetail(saveResult.left)}`,
+				);
+			}
+		});
+
+	const sendViaEngine = (
+		input: ProviderTurnServiceSendInput,
+		providerId: string,
+		orchestrationEngine: OrchestrationEngine,
+	) =>
+		Effect.gen(function* () {
+			const priorHistoryResult = isClaudeProviderId(providerId)
+				? yield* loadClaudeHistory(input.sessionId)
+				: { history: [], loaded: false };
+			const priorHistory = priorHistoryResult.history;
+			const isFirstClaudeMessage =
+				isClaudeProviderId(providerId) &&
+				priorHistoryResult.loaded &&
+				priorHistory.length === 0;
+
+			yield* isClaudeProviderId(providerId)
+				? maybePersistClaudeUserMessage({
+						sessionId: input.sessionId,
+						text: input.text,
+						isFirstClaudeMessage,
+					})
+				: Effect.void;
+
+			const claudeEventPersistEffectOption = yield* Effect.serviceOption(
+				ClaudeEventPersistEffectTag,
+			);
+			const providerStateEffectOption = yield* Effect.serviceOption(
+				ProviderStateEffectTag,
+			);
+			const providerState =
+				providerStateEffectOption._tag === "Some"
+					? yield* providerStateEffectOption.value.getState(input.sessionId)
+					: {};
+			const eventSink = makeEventSink(
+				input.sessionId,
+				providerId,
+				claudeEventPersistEffectOption._tag === "Some"
+					? claudeEventPersistEffectOption.value
+					: undefined,
+			);
+			const imageList =
+				input.images && input.images.length > 0
+					? Array.from(input.images)
+					: undefined;
+			const sendTurnInput: SendTurnInput = {
+				sessionId: input.sessionId,
+				turnId: randomUUID(),
+				prompt: input.text,
+				history: priorHistory,
+				providerState,
+				...(input.model && input.modelUserSelected
+					? {
+							model: {
+								providerId: input.model.providerID,
+								modelId: input.model.modelID,
+							},
+						}
+					: {}),
+				workspaceRoot: config.projectDir ?? "",
+				eventSink,
+				abortSignal: new AbortController().signal,
+				...(imageList ? { images: imageList } : {}),
+				...(input.agent ? { agent: input.agent } : {}),
+				...(input.variant ? { variant: input.variant } : {}),
+				...(input.contextWindow ? { contextWindow: input.contextWindow } : {}),
+			};
+
+			yield* Effect.forkDaemon(
+				orchestrationEngine
+					.dispatchEffect({
+						type: "send_turn",
+						providerId,
+						input: sendTurnInput,
+					})
+					.pipe(
+						Effect.flatMap((result) => handleDispatchResult(input, result)),
+						Effect.catchAll((error) => handleDispatchFailure(input, error)),
+					),
+			);
+		});
+
+	const sendTurn = (input: ProviderTurnServiceSendInput) =>
+		Effect.gen(function* () {
+			const engineOption = yield* Effect.serviceOption(OrchestrationEngineTag);
+			if (engineOption._tag === "Some") {
+				const providerId =
+					engineOption.value.getProviderForSession(input.sessionId) ??
+					(input.model && isClaudeProviderId(input.model.providerID)
+						? CLAUDE_PROVIDER_ID
+						: OPENCODE_PROVIDER_ID);
+				yield* sendViaEngine(input, providerId, engineOption.value);
+				return;
+			}
+
+			const sendResult = yield* Effect.either(
+				Effect.tryPromise(() =>
+					client.session.prompt(input.sessionId, buildLegacyPrompt(input)),
+				),
+			);
+			if (sendResult._tag === "Left") {
+				yield* handleDispatchFailure(input, sendResult.left);
+			}
+		});
+
+	const interruptTurn = (input: ProviderTurnServiceInterruptInput) =>
+		Effect.gen(function* () {
+			const engineOption = yield* Effect.serviceOption(OrchestrationEngineTag);
+			if (engineOption._tag === "None") return false;
+
+			const providerId = engineOption.value.getProviderForSession(
+				input.sessionId,
+			);
+			if (!providerId || !isProviderTurnInterruptProvider(providerId)) {
+				return false;
+			}
+
+			const interruptResult = yield* Effect.either(
+				engineOption.value.dispatchEffect({
+					type: "interrupt_turn",
+					sessionId: input.sessionId,
+				}),
+			);
+			if (interruptResult._tag === "Left") {
+				log.warn(
+					`client=${input.clientId} session=${input.sessionId} engine interrupt_turn failed:`,
+					formatErrorDetail(interruptResult.left),
+				);
+			}
+			wsHandler.sendToSession(input.sessionId, {
+				type: "done",
+				sessionId: input.sessionId,
+				code: 1,
+			});
+			return true;
+		});
+
+	return {
+		sendTurn,
+		interruptTurn,
+	} satisfies ProviderTurnService;
+});
+
+export const ProviderTurnServiceLive: Layer.Layer<
+	ProviderTurnServiceTag,
+	never,
+	| OpenCodeAPITag
+	| WebSocketHandlerTag
+	| LoggerTag
+	| ConfigTag
+	| SessionManagerServiceTag
+	| PendingInteractionServiceTag
+	| OverridesStateTag
+> = Layer.effect(ProviderTurnServiceTag, makeProviderTurnService);

@@ -2100,6 +2100,55 @@ describe("Effect runtime boundary grep", () => {
 		expect(hits).toEqual([]);
 	});
 
+	it("does not keep provider-turn policy in the prompt handler", () => {
+		const path = "src/lib/handlers/prompt.ts";
+		const source = readFileSync(join(REPO_ROOT, path), "utf8");
+		const retiredPolicyPatterns = [
+			{
+				pattern: /\bpersistUserMessage\b/,
+				reason:
+					"Claude user-message persistence belongs to ProviderTurnService",
+			},
+			{
+				pattern: /\bcreateRelayEventSink\b/,
+				reason: "RelayEventSink creation belongs to ProviderTurnService",
+			},
+			{
+				pattern: /\bProviderStateEffectTag\b/,
+				reason: "provider-state load/save belongs to ProviderTurnService",
+			},
+			{
+				pattern: /\bReadQueryEffectTag\b/,
+				reason: "Claude prior-history reads belong to ProviderTurnService",
+			},
+			{
+				pattern: /\bClaudeEventPersistEffectTag\b/,
+				reason: "Claude event persistence belongs to ProviderTurnService",
+			},
+			{
+				pattern: /\bSessionTitleServiceTag\b/,
+				reason: "first-Claude title policy belongs to ProviderTurnService",
+			},
+			{
+				pattern: /providerId === "claude"/,
+				reason:
+					"provider-specific turn branching belongs to ProviderTurnService",
+			},
+		] as const;
+
+		const hits = retiredPolicyPatterns.flatMap(({ pattern, reason }) =>
+			source
+				.split("\n")
+				.flatMap((line, index) =>
+					pattern.test(line)
+						? [{ path, line: index + 1, source: line.trim(), reason }]
+						: [],
+				),
+		);
+
+		expect(hits).toEqual([]);
+	});
+
 	it("does not keep production SessionManager EventEmitter bridges", () => {
 		const retiredBridgePatterns = [
 			{

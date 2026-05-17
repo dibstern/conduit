@@ -39,6 +39,7 @@ import {
 } from "../domain/relay/Services/instance-management-service.js";
 import { PendingInteractionServiceLive } from "../domain/relay/Services/pending-interaction-service.js";
 import { ProjectManagementServiceLive } from "../domain/relay/Services/project-management-service.js";
+import { ProviderTurnServiceLive } from "../domain/relay/Services/provider-turn-service.js";
 import {
 	makeRelayCommandGateLive,
 	RelayCommandGateTag,
@@ -755,9 +756,9 @@ export async function createProjectRelay(
 		relayStateBridgesAndStatus,
 	);
 	const baseLayers = relayStateServicesAndBridges;
-	const fullBaseLayers = Layer.merge(
-		baseLayers,
-		makeWsTransportLive({ noServer: true }),
+	const fullBaseLayers = Layer.provideMerge(
+		ProviderTurnServiceLive,
+		Layer.merge(baseLayers, makeWsTransportLive({ noServer: true })),
 	);
 
 	const effectRuntime: RelayRuntime = {
