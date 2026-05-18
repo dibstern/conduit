@@ -20,7 +20,7 @@
  * All payloads match the EventPayloadMap interfaces from Phase 1 Task 4.
  */
 import { randomUUID } from "node:crypto";
-import type { Effect } from "effect";
+import { Effect } from "effect";
 import type {
 	CanonicalEvent,
 	CanonicalEventType,
@@ -208,13 +208,13 @@ function taskCompletionResult(
 
 export interface ClaudeEventTranslatorDeps {
 	readonly getSink: (ctx: ClaudeSessionContext) => EventSink | undefined;
-	readonly runEffect: (effect: Effect.Effect<void, unknown>) => Promise<void>;
 }
 
 export class ClaudeEventTranslator {
 	// State tracker for mapping Claude content blocks to messageId/partId.
 	private currentAssistantMessageId = "";
 	private partIdCounter = 0;
+	private bufferedWrites: Effect.Effect<void, unknown>[] | undefined;
 
 	private nextPartId(): string {
 		return `claude-part-${this.partIdCounter++}`;
@@ -229,7 +229,14 @@ export class ClaudeEventTranslator {
 
 	constructor(private readonly deps: ClaudeEventTranslatorDeps) {}
 
-	async translate(
+	translate(
+		ctx: ClaudeSessionContext,
+		message: SDKMessage,
+	): Effect.Effect<void, unknown> {
+		return this.collectWrites(() => this.translateMessage(ctx, message));
+	}
+
+	private async translateMessage(
 		ctx: ClaudeSessionContext,
 		message: SDKMessage,
 	): Promise<void> {
@@ -260,20 +267,22 @@ export class ClaudeEventTranslator {
 		}
 	}
 
-	async translateError(
+	translateError(
 		ctx: ClaudeSessionContext,
 		cause: unknown,
-	): Promise<void> {
-		const errorMsg = cause instanceof Error ? cause.message : String(cause);
-		await this.push(
-			ctx,
-			makeCanonicalEvent("turn.error", ctx.sessionId, {
-				messageId: this.currentAssistantMessageId || "",
-				error: errorMsg,
-				code: "provider_error",
-			}),
-		);
-		this.resetInFlightState();
+	): Effect.Effect<void, unknown> {
+		return this.collectWrites(async () => {
+			const errorMsg = cause instanceof Error ? cause.message : String(cause);
+			await this.push(
+				ctx,
+				makeCanonicalEvent("turn.error", ctx.sessionId, {
+					messageId: this.currentAssistantMessageId || "",
+					error: errorMsg,
+					code: "provider_error",
+				}),
+			);
+			this.resetInFlightState();
+		});
 	}
 
 	// ─── System ──────────────────────────────────────────────────────────
@@ -1072,7 +1081,13 @@ export class ClaudeEventTranslator {
 
 	/** Flush any pendingStart tools (e.g. on stream interruption).
 	 *  Emits tool.started + tool.completed for each buffered tool. */
-	async flushPendingTools(ctx: ClaudeSessionContext): Promise<void> {
+	flushPendingTools(ctx: ClaudeSessionContext): Effect.Effect<void, unknown> {
+		return this.collectWrites(() => this.flushPendingToolsMessage(ctx));
+	}
+
+	private async flushPendingToolsMessage(
+		ctx: ClaudeSessionContext,
+	): Promise<void> {
 		for (const [index, tool] of ctx.inFlightTools) {
 			if (!tool.pendingStart) continue;
 			tool.pendingStart = false;
@@ -1112,12 +1127,33 @@ export class ClaudeEventTranslator {
 
 	// ─── Push Helper ─────────────────────────────────────────────────────
 
+	private collectWrites(
+		work: () => Promise<void>,
+	): Effect.Effect<void, unknown> {
+		return Effect.gen(this, function* () {
+			const previousWrites = this.bufferedWrites;
+			const writes: Effect.Effect<void, unknown>[] = [];
+			this.bufferedWrites = writes;
+			yield* Effect.tryPromise({
+				try: work,
+				catch: (cause) => cause,
+			}).pipe(
+				Effect.ensuring(
+					Effect.sync(() => {
+						this.bufferedWrites = previousWrites;
+					}),
+				),
+			);
+			yield* Effect.all(writes, { discard: true });
+		});
+	}
+
 	private async push(
 		ctx: ClaudeSessionContext,
 		event: CanonicalEvent,
 	): Promise<void> {
 		const sink = this.deps.getSink(ctx);
 		if (!sink) return;
-		await this.deps.runEffect(sink.push(event));
+		this.bufferedWrites?.push(sink.push(event));
 	}
 }
