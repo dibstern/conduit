@@ -91,7 +91,24 @@ export type ProviderRuntimeRawSource = Schema.Schema.Type<
 	typeof ProviderRuntimeRawSourceSchema
 >;
 
-export const ProviderRuntimeProviderRefsSchema = Schema.Struct({
+const PROVIDER_RUNTIME_PROVIDER_REF_KEYS = [
+	"providerSessionId",
+	"providerMessageId",
+	"providerTurnId",
+	"providerToolUseId",
+	"providerRequestId",
+	"providerTaskId",
+	"parentProviderTaskId",
+] as const;
+const providerRuntimeProviderRefKeys = new Set<string>(
+	PROVIDER_RUNTIME_PROVIDER_REF_KEYS,
+);
+
+const isProviderRefsMetadataOnly = (value: unknown) =>
+	isPlainRecord(value) &&
+	Object.keys(value).every((key) => providerRuntimeProviderRefKeys.has(key));
+
+const ProviderRuntimeProviderRefsStruct = Schema.Struct({
 	providerSessionId: Schema.optional(NonBlankString),
 	providerMessageId: Schema.optional(NonBlankString),
 	providerTurnId: Schema.optional(NonBlankString),
@@ -100,6 +117,11 @@ export const ProviderRuntimeProviderRefsSchema = Schema.Struct({
 	providerTaskId: Schema.optional(NonBlankString),
 	parentProviderTaskId: Schema.optional(NonBlankString),
 });
+
+export const ProviderRuntimeProviderRefsSchema = Schema.Unknown.pipe(
+	Schema.filter(isProviderRefsMetadataOnly),
+	Schema.compose(ProviderRuntimeProviderRefsStruct),
+);
 export type ProviderRuntimeProviderRefs = Schema.Schema.Type<
 	typeof ProviderRuntimeProviderRefsSchema
 >;
@@ -120,9 +142,19 @@ const REQUIRED_PROVIDER_RUNTIME_EVENT_KEYS = [
 	"data",
 ] as const;
 
-const hasRequiredProviderRuntimeEventKeys = (value: unknown) =>
+const PROVIDER_RUNTIME_EVENT_ENVELOPE_KEYS = [
+	...REQUIRED_PROVIDER_RUNTIME_EVENT_KEYS,
+	"turnId",
+	"metadata",
+] as const;
+const providerRuntimeEventEnvelopeKeys = new Set<string>(
+	PROVIDER_RUNTIME_EVENT_ENVELOPE_KEYS,
+);
+
+const hasOnlyProviderRuntimeEventEnvelopeKeys = (value: unknown) =>
 	isPlainRecord(value) &&
-	REQUIRED_PROVIDER_RUNTIME_EVENT_KEYS.every((key) => key in value);
+	REQUIRED_PROVIDER_RUNTIME_EVENT_KEYS.every((key) => key in value) &&
+	Object.keys(value).every((key) => providerRuntimeEventEnvelopeKeys.has(key));
 
 const ProviderRuntimeEventEnvelopeSchema = Schema.Struct({
 	eventId: NonBlankString,
@@ -140,7 +172,7 @@ const ProviderRuntimeEventEnvelopeSchema = Schema.Struct({
 });
 
 export const ProviderRuntimeEventSchema = Schema.Unknown.pipe(
-	Schema.filter(hasRequiredProviderRuntimeEventKeys),
+	Schema.filter(hasOnlyProviderRuntimeEventEnvelopeKeys),
 	Schema.compose(ProviderRuntimeEventEnvelopeSchema),
 );
 export type ProviderRuntimeEvent = Schema.Schema.Type<

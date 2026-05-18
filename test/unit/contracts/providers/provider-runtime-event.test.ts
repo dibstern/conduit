@@ -178,6 +178,19 @@ describe("ProviderRuntimeEvent contracts", () => {
 		}
 	});
 
+	it("rejects top-level raw payload fields", () => {
+		for (const field of ["raw", "payload", "rawPayload"] as const) {
+			expect(
+				Either.isLeft(
+					decodeEither({
+						...baseEvent,
+						[field]: { type: "provider-message", content: [] },
+					}),
+				),
+			).toBe(true);
+		}
+	});
+
 	it("decodes OpenCode refs", () => {
 		const providerRefs = {
 			providerSessionId: "opencode-session-1",
@@ -255,6 +268,24 @@ describe("ProviderRuntimeEvent contracts", () => {
 		});
 
 		expect(event.data).toEqual(data);
+	});
+
+	it("rejects unknown providerRefs keys", () => {
+		for (const providerRefs of [
+			{ providerSessionId: "session_1", providerMessageID: "msg_1" },
+			{ providerSessionId: "session_1", providerItemId: "item_1" },
+		]) {
+			expect(
+				Either.isLeft(
+					Schema.decodeUnknownEither(ProviderRuntimeProviderRefsSchema)(
+						providerRefs,
+					),
+				),
+			).toBe(true);
+			expect(Either.isLeft(decodeEither({ ...baseEvent, providerRefs }))).toBe(
+				true,
+			);
+		}
 	});
 
 	it("keeps ProviderRuntimeEvent contract-only in production code", () => {
