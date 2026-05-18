@@ -8,8 +8,16 @@ const RequiredUnknown = Schema.Unknown.pipe(
 	Schema.filter((value) => value !== undefined),
 );
 
-const isPlainRecord = (value: unknown): value is object =>
-	typeof value === "object" && value !== null && !Array.isArray(value);
+const isPlainRecord = (value: unknown): value is Record<string, unknown> => {
+	if (typeof value !== "object" || value === null || Array.isArray(value)) {
+		return false;
+	}
+
+	const prototype = Object.getPrototypeOf(value);
+	return prototype === Object.prototype || prototype === null;
+};
+
+const hasOwnKey = (value: object, key: string) => Object.hasOwn(value, key);
 
 export const PROVIDER_RUNTIME_EVENT_TYPES = [
 	"message.created",
@@ -153,7 +161,7 @@ const providerRuntimeEventEnvelopeKeys = new Set<string>(
 
 const hasOnlyProviderRuntimeEventEnvelopeKeys = (value: unknown) =>
 	isPlainRecord(value) &&
-	REQUIRED_PROVIDER_RUNTIME_EVENT_KEYS.every((key) => key in value) &&
+	REQUIRED_PROVIDER_RUNTIME_EVENT_KEYS.every((key) => hasOwnKey(value, key)) &&
 	Object.keys(value).every((key) => providerRuntimeEventEnvelopeKeys.has(key));
 
 const ProviderRuntimeEventEnvelopeSchema = Schema.Struct({

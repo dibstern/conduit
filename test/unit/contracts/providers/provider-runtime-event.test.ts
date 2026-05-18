@@ -69,6 +69,12 @@ describe("ProviderRuntimeEvent contracts", () => {
 		}
 	});
 
+	it("rejects inherited base envelope identity", () => {
+		const inheritedEnvelope = Object.create(baseEvent);
+
+		expect(Either.isLeft(decodeEither(inheritedEnvelope))).toBe(true);
+	});
+
 	it("covers every canonical event type or explicit reclassification", () => {
 		const explicitlyReclassified: readonly string[] = [];
 		const missingRuntimeTypes = CANONICAL_EVENT_TYPES.filter(
@@ -191,6 +197,12 @@ describe("ProviderRuntimeEvent contracts", () => {
 		}
 	});
 
+	it("rejects arbitrary unknown top-level fields", () => {
+		expect(Either.isLeft(decodeEither({ ...baseEvent, extra: true }))).toBe(
+			true,
+		);
+	});
+
 	it("decodes OpenCode refs", () => {
 		const providerRefs = {
 			providerSessionId: "opencode-session-1",
@@ -274,6 +286,24 @@ describe("ProviderRuntimeEvent contracts", () => {
 		for (const providerRefs of [
 			{ providerSessionId: "session_1", providerMessageID: "msg_1" },
 			{ providerSessionId: "session_1", providerItemId: "item_1" },
+		]) {
+			expect(
+				Either.isLeft(
+					Schema.decodeUnknownEither(ProviderRuntimeProviderRefsSchema)(
+						providerRefs,
+					),
+				),
+			).toBe(true);
+			expect(Either.isLeft(decodeEither({ ...baseEvent, providerRefs }))).toBe(
+				true,
+			);
+		}
+	});
+
+	it("rejects non-plain providerRefs objects", () => {
+		for (const providerRefs of [
+			new Date("2026-05-18T00:00:00.000Z"),
+			new Map([["providerSessionId", "session_1"]]),
 		]) {
 			expect(
 				Either.isLeft(
