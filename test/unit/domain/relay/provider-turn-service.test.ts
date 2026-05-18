@@ -170,8 +170,15 @@ const makeEngine = (input?: {
 	const dispatchEffect =
 		input?.dispatchEffect ??
 		vi.fn(() => Effect.succeed(input?.result ?? completedTurn()));
+	let providerId: string | undefined = input?.providerId;
 	return {
-		getProviderForSession: vi.fn(() => input?.providerId),
+		getProviderForSession: vi.fn(() => providerId),
+		bindSession: vi.fn((_sessionId: string, nextProviderId: string) => {
+			providerId = nextProviderId;
+		}),
+		unbindSession: vi.fn(() => {
+			providerId = undefined;
+		}),
 		dispatchEffect,
 	} as unknown as OrchestrationEngine;
 };
@@ -619,15 +626,104 @@ describe("ProviderTurnService", () => {
 				} as unknown as OpenCodeAPI;
 				const { layer } = serviceLayer({ engine, api });
 
-				yield* sendTurn().pipe(Effect.provide(layer));
-				yield* Deferred.await(sendStarted);
-				yield* interruptTurn().pipe(Effect.provide(layer));
+				yield* Effect.gen(function* () {
+					yield* sendTurn();
+					yield* Deferred.await(sendStarted);
+					yield* interruptTurn();
 
-				expect(interruptTurnEffect).toHaveBeenCalledWith("session-1");
-				expect(api.session.abort).not.toHaveBeenCalled();
+					expect(interruptTurnEffect).toHaveBeenCalledWith("session-1");
+					expect(api.session.abort).not.toHaveBeenCalled();
+
+					yield* Deferred.succeed(releaseSend, undefined);
+					yield* flushDispatch();
+				}).pipe(Effect.provide(layer));
+			}),
+	);
+
+	it.effect(
+		"interrupts a first Claude turn immediately after send returns before dispatch starts",
+		() =>
+			Effect.gen(function* () {
+				let boundProviderId: string | undefined;
+				const dispatchEffect = vi.fn((command) => {
+					if (command.type === "interrupt_turn") return Effect.void;
+					return Effect.succeed(completedTurn());
+				}) as unknown as OrchestrationEngine["dispatchEffect"];
+				const engine = {
+					getProviderForSession: vi.fn(() => boundProviderId),
+					bindSession: vi.fn((_sessionId: string, providerId: string) => {
+						boundProviderId = providerId;
+					}),
+					unbindSession: vi.fn(() => {
+						boundProviderId = undefined;
+					}),
+					dispatchEffect,
+				} as unknown as OrchestrationEngine;
+				const api = {
+					session: { abort: vi.fn(async () => undefined) },
+				} as unknown as OpenCodeAPI;
+				const { layer } = serviceLayer({ engine, api });
+
+				yield* Effect.gen(function* () {
+					const service = yield* ProviderTurnServiceTag;
+					yield* service.sendTurn(defaultInput());
+					yield* service.interruptTurn({
+						clientId: "client-1",
+						sessionId: "session-1",
+					});
+
+					expect(dispatchEffect).toHaveBeenCalledWith({
+						type: "interrupt_turn",
+						sessionId: "session-1",
+					});
+					expect(api.session.abort).not.toHaveBeenCalled();
+				}).pipe(Effect.provide(layer));
+			}),
+	);
+
+	it.effect(
+		"cancels pending send dispatch when the provider turn service scope closes",
+		() =>
+			Effect.gen(function* () {
+				const sendStarted = yield* Deferred.make<void>();
+				const releaseSend = yield* Deferred.make<void>();
+				let boundProviderId: string | undefined;
+				const dispatchEffect = vi.fn((command) => {
+					if (command.type !== "send_turn") return Effect.void;
+					return Effect.gen(function* () {
+						yield* Deferred.succeed(sendStarted, undefined);
+						yield* Deferred.await(releaseSend);
+						return yield* Effect.fail(new Error("late send failure"));
+					});
+				}) as unknown as OrchestrationEngine["dispatchEffect"];
+				const engine = {
+					getProviderForSession: vi.fn(() => boundProviderId),
+					bindSession: vi.fn((_sessionId: string, providerId: string) => {
+						boundProviderId = providerId;
+					}),
+					unbindSession: vi.fn(() => {
+						boundProviderId = undefined;
+					}),
+					dispatchEffect,
+				} as unknown as OrchestrationEngine;
+				const { layer, wsHandler } = serviceLayer({ engine });
+
+				yield* Effect.gen(function* () {
+					yield* sendTurn();
+					yield* Deferred.await(sendStarted);
+				}).pipe(Effect.provide(layer));
 
 				yield* Deferred.succeed(releaseSend, undefined);
 				yield* flushDispatch();
+
+				expect(wsHandler.sendToSession).not.toHaveBeenCalledWith(
+					"session-1",
+					expect.objectContaining({ type: "done" }),
+				);
+				expect(wsHandler.sendTo).not.toHaveBeenCalledWith(
+					"client-1",
+					expect.objectContaining({ type: "error" }),
+				);
 			}),
 	);
 });

@@ -1,5 +1,15 @@
 import { randomUUID } from "node:crypto";
-import { Context, Effect, Layer, Runtime } from "effect";
+import {
+	Context,
+	Deferred,
+	Effect,
+	type Fiber,
+	FiberId,
+	FiberMap,
+	Layer,
+	MutableHashMap,
+	Runtime,
+} from "effect";
 import { formatErrorDetail, RelayError } from "../../../errors.js";
 import type { PromptOptions } from "../../../instance/sdk-types.js";
 import {
@@ -49,6 +59,39 @@ const NOOP_EVENT_SINK: SendTurnInput["eventSink"] = {
 	resolveQuestion: () => Effect.void,
 };
 
+// Compatibility constructor support for the old prompt-handler fallback seam.
+// Production wiring uses the scoped Layer below so dispatch fibers are
+// interrupted with the relay ProviderTurnService scope.
+const makeUnsafeFiberMap = <K, A = unknown, E = unknown>(): FiberMap.FiberMap<
+	K,
+	A,
+	E
+> =>
+	({
+		[FiberMap.TypeId]: FiberMap.TypeId,
+		deferred: Deferred.unsafeMake<void, E>(FiberId.none),
+		state: {
+			_tag: "Open",
+			backing: MutableHashMap.empty<K, Fiber.RuntimeFiber<A, E>>(),
+		},
+		[Symbol.iterator](this: {
+			state:
+				| { readonly _tag: "Closed" }
+				| {
+						readonly _tag: "Open";
+						readonly backing: MutableHashMap.MutableHashMap<
+							K,
+							Fiber.RuntimeFiber<A, E>
+						>;
+				  };
+		}) {
+			if (this.state._tag === "Closed") {
+				return [][Symbol.iterator]();
+			}
+			return this.state.backing[Symbol.iterator]();
+		},
+	}) as unknown as FiberMap.FiberMap<K, A, E>;
+
 export interface ProviderTurnServiceSendInput {
 	readonly clientId: string;
 	readonly sessionId: string;
@@ -83,6 +126,10 @@ export class ProviderTurnServiceTag extends Context.Tag("ProviderTurnService")<
 	ProviderTurnServiceTag,
 	ProviderTurnService
 >() {}
+
+class ProviderTurnDispatchFibersTag extends Context.Tag(
+	"ProviderTurnDispatchFibers",
+)<ProviderTurnDispatchFibersTag, FiberMap.FiberMap<string, void, unknown>>() {}
 
 export function isProviderTurnInterruptProvider(providerId: string): boolean {
 	return providerId === CLAUDE_PROVIDER_ID;
@@ -151,6 +198,13 @@ export const makeProviderTurnService = Effect.gen(function* () {
 	const pendingInteractionService = yield* PendingInteractionServiceTag;
 	const runtime = yield* Effect.runtime<OverridesStateTag>();
 	const runTimeout = Runtime.runFork(runtime);
+	const dispatchFibersOption = yield* Effect.serviceOption(
+		ProviderTurnDispatchFibersTag,
+	);
+	const dispatchFibers =
+		dispatchFibersOption._tag === "Some"
+			? dispatchFibersOption.value
+			: makeUnsafeFiberMap<string, void, unknown>();
 
 	const sendErrorMessage = (
 		input: ProviderTurnServiceSendInput,
@@ -411,18 +465,43 @@ export const makeProviderTurnService = Effect.gen(function* () {
 				...(input.contextWindow ? { contextWindow: input.contextWindow } : {}),
 			};
 
-			yield* Effect.forkDaemon(
-				orchestrationEngine
-					.dispatchEffect({
+			const previousProviderId = orchestrationEngine.getProviderForSession(
+				input.sessionId,
+			);
+			const restorePreviousBinding = Effect.sync(() => {
+				if (previousProviderId) {
+					orchestrationEngine.bindSession(input.sessionId, previousProviderId);
+				} else {
+					orchestrationEngine.unbindSession(input.sessionId);
+				}
+			});
+			yield* Effect.sync(() =>
+				orchestrationEngine.bindSession(input.sessionId, providerId),
+			);
+
+			const dispatchProgram = Effect.try({
+				try: () =>
+					orchestrationEngine.dispatchEffect({
 						type: "send_turn",
 						providerId,
 						input: sendTurnInput,
-					})
-					.pipe(
-						Effect.flatMap((result) => handleDispatchResult(input, result)),
-						Effect.catchAll((error) => handleDispatchFailure(input, error)),
+					}),
+				catch: (cause) => cause,
+			}).pipe(
+				Effect.flatten,
+				Effect.flatMap((result) => handleDispatchResult(input, result)),
+				Effect.catchAll((error) =>
+					restorePreviousBinding.pipe(
+						Effect.zipRight(handleDispatchFailure(input, error)),
 					),
+				),
+				Effect.onInterrupt(() => restorePreviousBinding),
 			);
+			yield* FiberMap.run(
+				dispatchFibers,
+				`${input.sessionId}:${sendTurnInput.turnId}`,
+				dispatchProgram,
+			).pipe(Effect.asVoid);
 		});
 
 	const sendTurn = (input: ProviderTurnServiceSendInput) =>
@@ -510,6 +589,11 @@ export const makeProviderTurnService = Effect.gen(function* () {
 	} satisfies ProviderTurnService;
 });
 
+const ProviderTurnDispatchFibersLive = Layer.scoped(
+	ProviderTurnDispatchFibersTag,
+	FiberMap.make<string, void, unknown>(),
+);
+
 export const ProviderTurnServiceLive: Layer.Layer<
 	ProviderTurnServiceTag,
 	never,
@@ -520,4 +604,6 @@ export const ProviderTurnServiceLive: Layer.Layer<
 	| SessionManagerServiceTag
 	| PendingInteractionServiceTag
 	| OverridesStateTag
-> = Layer.effect(ProviderTurnServiceTag, makeProviderTurnService);
+> = Layer.effect(ProviderTurnServiceTag, makeProviderTurnService).pipe(
+	Layer.provide(ProviderTurnDispatchFibersLive),
+);
