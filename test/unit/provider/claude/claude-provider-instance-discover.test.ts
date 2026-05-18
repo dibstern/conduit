@@ -8,6 +8,7 @@ import {
 	__setProbeOverrideForTesting,
 	resetCapabilityCacheForTesting,
 } from "../../../../src/lib/provider/claude/claude-capabilities-probe.js";
+import { makeUnsafeClaudeCapabilitiesService } from "../../../../src/lib/provider/claude/claude-capabilities-service.js";
 import { ClaudeProviderInstance } from "../../../../src/lib/provider/claude/claude-provider-instance.js";
 
 describe("ClaudeProviderInstance.discoverEffect()", () => {
@@ -159,7 +160,7 @@ describe("ClaudeProviderInstance.discoverEffect()", () => {
 			expect(caps.models.every((m) => m.providerId === "claude")).toBe(true);
 		});
 
-		it("returns the same probe result across two provider instances", async () => {
+		it("shares probe results through an injected capabilities service", async () => {
 			const probe = vi.fn().mockResolvedValue({
 				models: [
 					{
@@ -172,9 +173,16 @@ describe("ClaudeProviderInstance.discoverEffect()", () => {
 				agents: [],
 			});
 			__setProbeOverrideForTesting(probe);
+			const capabilitiesService = makeUnsafeClaudeCapabilitiesService();
 
-			const a1 = new ClaudeProviderInstance({ workspaceRoot: workspace });
-			const a2 = new ClaudeProviderInstance({ workspaceRoot: workspace });
+			const a1 = new ClaudeProviderInstance({
+				workspaceRoot: workspace,
+				capabilitiesService,
+			});
+			const a2 = new ClaudeProviderInstance({
+				workspaceRoot: workspace,
+				capabilitiesService,
+			});
 			await Effect.runPromise(a1.discoverEffect());
 			await Effect.runPromise(a2.discoverEffect());
 			expect(probe).toHaveBeenCalledTimes(1);

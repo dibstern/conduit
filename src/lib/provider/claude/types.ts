@@ -138,15 +138,13 @@ export interface ClaudeSubagentLivePoller {
 	readonly cursor: ClaudeSubagentTranscriptCursor;
 	sessionReady: boolean;
 	active: boolean;
-	timer: ReturnType<typeof setTimeout> | undefined;
-	currentPoll: Promise<void> | undefined;
 }
 
 // ─── Session Context ───────────────────────────────────────────────────────
 
 /**
- * All state for a single Claude session. Owned by ClaudeProviderInstance and keyed
- * by conduit sessionId. One instance per live SDK `query()`.
+ * Per-session Claude state keyed by conduit sessionId. The Effect-owned Claude
+ * provider runtime stores these contexts and owns the SDK stream fibers.
  */
 export interface ClaudeSessionContext {
 	readonly sessionId: string;
@@ -162,7 +160,6 @@ export interface ClaudeSessionContext {
 	readonly pendingSubagentMessages?: Map<string, SessionMessage[]>;
 	/** EventSink for this session — updated on each turn (latest sink wins). */
 	eventSink: EventSink | undefined;
-	streamConsumer: Promise<void> | undefined;
 	currentTurnId: string | undefined;
 	currentModel: string | undefined;
 	currentApiModelId?: string;

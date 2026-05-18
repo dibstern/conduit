@@ -13,6 +13,13 @@ import type {
 } from "../../../../src/lib/provider/claude/types.js";
 import type { TurnResult } from "../../../../src/lib/provider/types.js";
 import {
+	getClaudeRuntimeSessionCountForTest,
+	hasClaudeRuntimeSessionForTest,
+	hasClaudeRuntimeTurnWaitersForTest,
+	setClaudeRuntimeSessionForTest,
+	setClaudeRuntimeTurnWaitersForTest,
+} from "../../../helpers/claude-runtime-state.js";
+import {
 	createMockEventSink,
 	createMockQuery,
 	makeBaseSendTurnInput,
@@ -43,7 +50,6 @@ function makeFakeSessionContext(
 		pendingQuestions: new Map(),
 		inFlightTools: new Map(),
 		eventSink: undefined,
-		streamConsumer: undefined,
 		currentTurnId: "turn-1",
 		currentModel: "claude-sonnet-4",
 		resumeSessionId: undefined,
@@ -81,26 +87,19 @@ describe("ClaudeProviderInstance lifecycle", () => {
 		it("closes all active sessions", async () => {
 			const instance = new ClaudeProviderInstance({ workspaceRoot: workspace });
 			const ctx = makeFakeSessionContext("sess-1");
-			(
-				instance as unknown as { sessions: Map<string, ClaudeSessionContext> }
-			).sessions.set("sess-1", ctx);
+			setClaudeRuntimeSessionForTest(instance, "sess-1", ctx);
 
 			await Effect.runPromise(instance.shutdownEffect());
 
 			expect(ctx.promptQueue.close).toHaveBeenCalled();
 			expect(ctx.query.close).toHaveBeenCalled();
-			expect(
-				(instance as unknown as { sessions: Map<string, unknown> }).sessions
-					.size,
-			).toBe(0);
+			expect(getClaudeRuntimeSessionCountForTest(instance)).toBe(0);
 		});
 
 		it("marks sessions as stopped", async () => {
 			const instance = new ClaudeProviderInstance({ workspaceRoot: workspace });
 			const ctx = makeFakeSessionContext("sess-1");
-			(
-				instance as unknown as { sessions: Map<string, ClaudeSessionContext> }
-			).sessions.set("sess-1", ctx);
+			setClaudeRuntimeSessionForTest(instance, "sess-1", ctx);
 
 			await Effect.runPromise(instance.shutdownEffect());
 
@@ -123,9 +122,7 @@ describe("ClaudeProviderInstance lifecycle", () => {
 			};
 			const ctx = makeFakeSessionContext("sess-1");
 			ctx.pendingApprovals.set("perm-1", pending);
-			(
-				instance as unknown as { sessions: Map<string, ClaudeSessionContext> }
-			).sessions.set("sess-1", ctx);
+			setClaudeRuntimeSessionForTest(instance, "sess-1", ctx);
 
 			await Effect.runPromise(instance.shutdownEffect());
 
@@ -146,9 +143,7 @@ describe("ClaudeProviderInstance lifecycle", () => {
 			};
 			const ctx = makeFakeSessionContext("sess-1");
 			ctx.pendingQuestions.set("q-1", pending);
-			(
-				instance as unknown as { sessions: Map<string, ClaudeSessionContext> }
-			).sessions.set("sess-1", ctx);
+			setClaudeRuntimeSessionForTest(instance, "sess-1", ctx);
 
 			await Effect.runPromise(instance.shutdownEffect());
 
@@ -159,18 +154,13 @@ describe("ClaudeProviderInstance lifecycle", () => {
 		it("is idempotent for already-stopped sessions", async () => {
 			const instance = new ClaudeProviderInstance({ workspaceRoot: workspace });
 			const ctx = makeFakeSessionContext("sess-1", { stopped: true });
-			(
-				instance as unknown as { sessions: Map<string, ClaudeSessionContext> }
-			).sessions.set("sess-1", ctx);
+			setClaudeRuntimeSessionForTest(instance, "sess-1", ctx);
 
 			await Effect.runPromise(instance.shutdownEffect());
 
 			// close/interrupt should NOT be called since session was already stopped
 			expect(ctx.promptQueue.close).not.toHaveBeenCalled();
-			expect(
-				(instance as unknown as { sessions: Map<string, unknown> }).sessions
-					.size,
-			).toBe(0);
+			expect(getClaudeRuntimeSessionCountForTest(instance)).toBe(0);
 		});
 	});
 
@@ -178,9 +168,7 @@ describe("ClaudeProviderInstance lifecycle", () => {
 		it("closes prompt queue and interrupts query", async () => {
 			const instance = new ClaudeProviderInstance({ workspaceRoot: workspace });
 			const ctx = makeFakeSessionContext("sess-1");
-			(
-				instance as unknown as { sessions: Map<string, ClaudeSessionContext> }
-			).sessions.set("sess-1", ctx);
+			setClaudeRuntimeSessionForTest(instance, "sess-1", ctx);
 
 			await Effect.runPromise(instance.interruptTurnEffect("sess-1"));
 
@@ -205,9 +193,7 @@ describe("ClaudeProviderInstance lifecycle", () => {
 			};
 			const ctx = makeFakeSessionContext("sess-1");
 			ctx.pendingApprovals.set("perm-1", pending);
-			(
-				instance as unknown as { sessions: Map<string, ClaudeSessionContext> }
-			).sessions.set("sess-1", ctx);
+			setClaudeRuntimeSessionForTest(instance, "sess-1", ctx);
 
 			await Effect.runPromise(instance.interruptTurnEffect("sess-1"));
 
@@ -218,17 +204,14 @@ describe("ClaudeProviderInstance lifecycle", () => {
 		it("rejects all queued turn deferreds with interrupt reason", async () => {
 			const instance = new ClaudeProviderInstance({ workspaceRoot: workspace });
 			const ctx = makeFakeSessionContext("sess-interrupt-reject");
-			(
-				instance as unknown as { sessions: Map<string, ClaudeSessionContext> }
-			).sessions.set("sess-interrupt-reject", ctx);
+			setClaudeRuntimeSessionForTest(instance, "sess-interrupt-reject", ctx);
 
 			const d1 = await Effect.runPromise(Deferred.make<TurnResult, Error>());
 			const d2 = await Effect.runPromise(Deferred.make<TurnResult, Error>());
-			(
-				instance as unknown as {
-					turnDeferredQueues: Map<string, (typeof d1)[]>;
-				}
-			).turnDeferredQueues.set("sess-interrupt-reject", [d1, d2]);
+			setClaudeRuntimeTurnWaitersForTest(instance, "sess-interrupt-reject", [
+				d1,
+				d2,
+			]);
 
 			const rejected: Error[] = [];
 			const caught = [
@@ -245,11 +228,7 @@ describe("ClaudeProviderInstance lifecycle", () => {
 			expect(rejected[0]?.message).toContain("interrupted");
 			expect(rejected[1]?.message).toContain("interrupted");
 			expect(
-				(
-					instance as unknown as {
-						turnDeferredQueues: Map<string, unknown>;
-					}
-				).turnDeferredQueues.has("sess-interrupt-reject"),
+				hasClaudeRuntimeTurnWaitersForTest(instance, "sess-interrupt-reject"),
 			).toBe(false);
 		});
 
@@ -267,9 +246,7 @@ describe("ClaudeProviderInstance lifecycle", () => {
 			};
 			const ctx = makeFakeSessionContext("sess-1");
 			ctx.pendingQuestions.set("q-1", pending);
-			(
-				instance as unknown as { sessions: Map<string, ClaudeSessionContext> }
-			).sessions.set("sess-1", ctx);
+			setClaudeRuntimeSessionForTest(instance, "sess-1", ctx);
 
 			await Effect.runPromise(instance.interruptTurnEffect("sess-1"));
 
@@ -293,9 +270,7 @@ describe("ClaudeProviderInstance lifecycle", () => {
 				input: {},
 				partialInputJson: "",
 			});
-			(
-				instance as unknown as { sessions: Map<string, ClaudeSessionContext> }
-			).sessions.set("sess-1", ctx);
+			setClaudeRuntimeSessionForTest(instance, "sess-1", ctx);
 
 			await Effect.runPromise(instance.interruptTurnEffect("sess-1"));
 
@@ -321,9 +296,7 @@ describe("ClaudeProviderInstance lifecycle", () => {
 				input: {},
 				partialInputJson: "",
 			});
-			(
-				instance as unknown as { sessions: Map<string, ClaudeSessionContext> }
-			).sessions.set("sess-1", ctx);
+			setClaudeRuntimeSessionForTest(instance, "sess-1", ctx);
 
 			// Should not throw even though eventSink is undefined
 			await Effect.runPromise(instance.interruptTurnEffect("sess-1"));
@@ -353,9 +326,7 @@ describe("ClaudeProviderInstance lifecycle", () => {
 				input: {},
 				partialInputJson: "",
 			});
-			(
-				instance as unknown as { sessions: Map<string, ClaudeSessionContext> }
-			).sessions.set("sess-1", ctx);
+			setClaudeRuntimeSessionForTest(instance, "sess-1", ctx);
 
 			await Effect.runPromise(instance.interruptTurnEffect("sess-1"));
 
@@ -384,9 +355,7 @@ describe("ClaudeProviderInstance lifecycle", () => {
 			const ctx = makeFakeSessionContext("sess-1", {
 				eventSink: sink,
 			});
-			(
-				instance as unknown as { sessions: Map<string, ClaudeSessionContext> }
-			).sessions.set("sess-1", ctx);
+			setClaudeRuntimeSessionForTest(instance, "sess-1", ctx);
 
 			await Effect.runPromise(instance.interruptTurnEffect("sess-1"));
 
@@ -416,9 +385,7 @@ describe("ClaudeProviderInstance lifecycle", () => {
 			};
 			const ctx = makeFakeSessionContext("sess-1");
 			ctx.pendingApprovals.set("perm-1", pending);
-			(
-				instance as unknown as { sessions: Map<string, ClaudeSessionContext> }
-			).sessions.set("sess-1", ctx);
+			setClaudeRuntimeSessionForTest(instance, "sess-1", ctx);
 
 			await Effect.runPromise(
 				instance.resolvePermissionEffect("sess-1", "perm-1", "once"),
@@ -438,9 +405,7 @@ describe("ClaudeProviderInstance lifecycle", () => {
 		it("is a no-op for unknown requestId", async () => {
 			const instance = new ClaudeProviderInstance({ workspaceRoot: workspace });
 			const ctx = makeFakeSessionContext("sess-1");
-			(
-				instance as unknown as { sessions: Map<string, ClaudeSessionContext> }
-			).sessions.set("sess-1", ctx);
+			setClaudeRuntimeSessionForTest(instance, "sess-1", ctx);
 
 			// Should not throw
 			await Effect.runPromise(
@@ -453,19 +418,14 @@ describe("ClaudeProviderInstance lifecycle", () => {
 		it("closes query and removes session from map", async () => {
 			const instance = new ClaudeProviderInstance({ workspaceRoot: workspace });
 			const ctx = makeFakeSessionContext("sess-end");
-			(
-				instance as unknown as { sessions: Map<string, ClaudeSessionContext> }
-			).sessions.set("sess-end", ctx);
+			setClaudeRuntimeSessionForTest(instance, "sess-end", ctx);
 
 			await Effect.runPromise(instance.endSessionEffect("sess-end"));
 
 			expect(ctx.promptQueue.close).toHaveBeenCalled();
 			expect(ctx.query.close).toHaveBeenCalled();
 			expect(ctx.stopped).toBe(true);
-			expect(
-				(instance as unknown as { sessions: Map<string, unknown> }).sessions
-					.size,
-			).toBe(0);
+			expect(getClaudeRuntimeSessionCountForTest(instance)).toBe(0);
 		});
 
 		it("is a no-op for unknown session", async () => {
@@ -477,17 +437,11 @@ describe("ClaudeProviderInstance lifecycle", () => {
 		it("rejects queued turn deferreds with reload reason", async () => {
 			const instance = new ClaudeProviderInstance({ workspaceRoot: workspace });
 			const ctx = makeFakeSessionContext("sess-reject");
-			(
-				instance as unknown as { sessions: Map<string, ClaudeSessionContext> }
-			).sessions.set("sess-reject", ctx);
+			setClaudeRuntimeSessionForTest(instance, "sess-reject", ctx);
 
 			const d1 = await Effect.runPromise(Deferred.make<TurnResult, Error>());
 			const d2 = await Effect.runPromise(Deferred.make<TurnResult, Error>());
-			(
-				instance as unknown as {
-					turnDeferredQueues: Map<string, (typeof d1)[]>;
-				}
-			).turnDeferredQueues.set("sess-reject", [d1, d2]);
+			setClaudeRuntimeTurnWaitersForTest(instance, "sess-reject", [d1, d2]);
 
 			const rejected: Error[] = [];
 			const caught = [
@@ -502,13 +456,9 @@ describe("ClaudeProviderInstance lifecycle", () => {
 			expect(rejected[0]?.message).toContain("reload");
 			expect(rejected[1]?.message).toContain("reload");
 			// The deferred queue should be cleared
-			expect(
-				(
-					instance as unknown as {
-						turnDeferredQueues: Map<string, unknown>;
-					}
-				).turnDeferredQueues.has("sess-reject"),
-			).toBe(false);
+			expect(hasClaudeRuntimeTurnWaitersForTest(instance, "sess-reject")).toBe(
+				false,
+			);
 		});
 
 		it("endSession followed by sendTurn creates a fresh query", async () => {
@@ -546,11 +496,9 @@ describe("ClaudeProviderInstance lifecycle", () => {
 
 			// End session (user-initiated reload)
 			await Effect.runPromise(instance.endSessionEffect("sess-reload-flow"));
-			expect(
-				(
-					instance as unknown as { sessions: Map<string, unknown> }
-				).sessions.has("sess-reload-flow"),
-			).toBe(false);
+			expect(hasClaudeRuntimeSessionForTest(instance, "sess-reload-flow")).toBe(
+				false,
+			);
 
 			// Next sendTurn should create a brand new query
 			const r2 = await Effect.runPromise(
@@ -582,9 +530,7 @@ describe("ClaudeProviderInstance lifecycle", () => {
 			};
 			const ctx = makeFakeSessionContext("sess-1");
 			ctx.pendingQuestions.set("q-1", pending);
-			(
-				instance as unknown as { sessions: Map<string, ClaudeSessionContext> }
-			).sessions.set("sess-1", ctx);
+			setClaudeRuntimeSessionForTest(instance, "sess-1", ctx);
 
 			await Effect.runPromise(
 				instance.resolveQuestionEffect("sess-1", "q-1", { answer: "yes" }),

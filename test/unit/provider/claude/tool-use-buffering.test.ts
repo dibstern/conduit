@@ -27,7 +27,6 @@ function makeCtx(
 		pendingQuestions: new Map(),
 		inFlightTools: new Map(),
 		eventSink: undefined,
-		streamConsumer: undefined,
 		currentTurnId: "turn-1",
 		currentModel: "claude-sonnet-4",
 		resumeSessionId: undefined,
@@ -53,9 +52,22 @@ function makeTranslator() {
 			resolvePermission: vi.fn(() => Effect.void),
 			resolveQuestion: vi.fn(() => Effect.void),
 		}),
-		runEffect: Effect.runPromise,
 	});
 	return { translator, events };
+}
+
+function runTranslate(
+	translator: ClaudeEventTranslator,
+	...args: Parameters<ClaudeEventTranslator["translate"]>
+): Promise<void> {
+	return Effect.runPromise(translator.translate(...args));
+}
+
+function runFlushPendingTools(
+	translator: ClaudeEventTranslator,
+	...args: Parameters<ClaudeEventTranslator["flushPendingTools"]>
+): Promise<void> {
+	return Effect.runPromise(translator.flushPendingTools(...args));
 }
 
 describe("ClaudeEventTranslator — tool_use buffering", () => {
@@ -64,7 +76,7 @@ describe("ClaudeEventTranslator — tool_use buffering", () => {
 		const ctx = makeCtx();
 
 		// content_block_start (tool_use) — should NOT emit tool.started yet
-		await translator.translate(ctx, {
+		await runTranslate(translator, ctx, {
 			type: "stream_event",
 			session_id: "ses-1",
 			event: {
@@ -83,7 +95,7 @@ describe("ClaudeEventTranslator — tool_use buffering", () => {
 		expect(afterStart).toHaveLength(0);
 
 		// input_json_delta chunks
-		await translator.translate(ctx, {
+		await runTranslate(translator, ctx, {
 			type: "stream_event",
 			session_id: "ses-1",
 			event: {
@@ -100,7 +112,7 @@ describe("ClaudeEventTranslator — tool_use buffering", () => {
 		expect(events.filter((e) => e.type === "tool.started")).toHaveLength(0);
 
 		// content_block_stop — NOW tool.started should emit with complete input
-		await translator.translate(ctx, {
+		await runTranslate(translator, ctx, {
 			type: "stream_event",
 			session_id: "ses-1",
 			event: { type: "content_block_stop", index: 0 },
@@ -129,7 +141,7 @@ describe("ClaudeEventTranslator — tool_use buffering", () => {
 		const { translator, events } = makeTranslator();
 		const ctx = makeCtx();
 
-		await translator.translate(ctx, {
+		await runTranslate(translator, ctx, {
 			type: "stream_event",
 			session_id: "ses-1",
 			event: {
@@ -144,7 +156,7 @@ describe("ClaudeEventTranslator — tool_use buffering", () => {
 			},
 		} as never);
 
-		await translator.translate(ctx, {
+		await runTranslate(translator, ctx, {
 			type: "stream_event",
 			session_id: "ses-1",
 			event: { type: "content_block_stop", index: 0 },
@@ -163,7 +175,7 @@ describe("ClaudeEventTranslator — tool_use buffering", () => {
 		const ctx = makeCtx();
 
 		// content_block_start but NO content_block_stop (simulates interruption)
-		await translator.translate(ctx, {
+		await runTranslate(translator, ctx, {
 			type: "stream_event",
 			session_id: "ses-1",
 			event: {
@@ -184,7 +196,7 @@ describe("ClaudeEventTranslator — tool_use buffering", () => {
 		expect(tool?.pendingStart).toBe(true);
 
 		// Simulate provider instance cleanup: flush pendingStart tools
-		await translator.flushPendingTools(ctx);
+		await runFlushPendingTools(translator, ctx);
 
 		const toolStarted = events.filter((e) => e.type === "tool.started");
 		expect(toolStarted).toHaveLength(1);
@@ -199,7 +211,7 @@ describe("ClaudeEventTranslator — tool_use buffering", () => {
 		const { translator, events } = makeTranslator();
 		const ctx = makeCtx();
 
-		await translator.translate(ctx, {
+		await runTranslate(translator, ctx, {
 			type: "stream_event",
 			session_id: "ses-1",
 			event: {
@@ -215,7 +227,7 @@ describe("ClaudeEventTranslator — tool_use buffering", () => {
 		} as never);
 
 		// Delta overrides with complete input
-		await translator.translate(ctx, {
+		await runTranslate(translator, ctx, {
 			type: "stream_event",
 			session_id: "ses-1",
 			event: {
@@ -228,7 +240,7 @@ describe("ClaudeEventTranslator — tool_use buffering", () => {
 			},
 		} as never);
 
-		await translator.translate(ctx, {
+		await runTranslate(translator, ctx, {
 			type: "stream_event",
 			session_id: "ses-1",
 			event: { type: "content_block_stop", index: 0 },
@@ -248,7 +260,7 @@ describe("ClaudeEventTranslator — tool_use buffering", () => {
 		const ctx = makeCtx();
 
 		// Two tool_use blocks started at different indices
-		await translator.translate(ctx, {
+		await runTranslate(translator, ctx, {
 			type: "stream_event",
 			session_id: "ses-1",
 			event: {
@@ -263,7 +275,7 @@ describe("ClaudeEventTranslator — tool_use buffering", () => {
 			},
 		} as never);
 
-		await translator.translate(ctx, {
+		await runTranslate(translator, ctx, {
 			type: "stream_event",
 			session_id: "ses-1",
 			event: {
@@ -279,7 +291,7 @@ describe("ClaudeEventTranslator — tool_use buffering", () => {
 		} as never);
 
 		// Deltas for each
-		await translator.translate(ctx, {
+		await runTranslate(translator, ctx, {
 			type: "stream_event",
 			session_id: "ses-1",
 			event: {
@@ -292,7 +304,7 @@ describe("ClaudeEventTranslator — tool_use buffering", () => {
 			},
 		} as never);
 
-		await translator.translate(ctx, {
+		await runTranslate(translator, ctx, {
 			type: "stream_event",
 			session_id: "ses-1",
 			event: {
@@ -306,13 +318,13 @@ describe("ClaudeEventTranslator — tool_use buffering", () => {
 		} as never);
 
 		// Stop both
-		await translator.translate(ctx, {
+		await runTranslate(translator, ctx, {
 			type: "stream_event",
 			session_id: "ses-1",
 			event: { type: "content_block_stop", index: 0 },
 		} as never);
 
-		await translator.translate(ctx, {
+		await runTranslate(translator, ctx, {
 			type: "stream_event",
 			session_id: "ses-1",
 			event: { type: "content_block_stop", index: 1 },
@@ -328,7 +340,7 @@ describe("ClaudeEventTranslator — tool_use buffering", () => {
 		const { translator, events } = makeTranslator();
 		const ctx = makeCtx();
 
-		await translator.translate(ctx, {
+		await runTranslate(translator, ctx, {
 			type: "stream_event",
 			session_id: "ses-1",
 			event: {
@@ -344,7 +356,7 @@ describe("ClaudeEventTranslator — tool_use buffering", () => {
 		} as never);
 
 		// Chunk 1: incomplete JSON — should not crash
-		await translator.translate(ctx, {
+		await runTranslate(translator, ctx, {
 			type: "stream_event",
 			session_id: "ses-1",
 			event: {
@@ -355,7 +367,7 @@ describe("ClaudeEventTranslator — tool_use buffering", () => {
 		} as never);
 
 		// Chunk 2: completes the JSON
-		await translator.translate(ctx, {
+		await runTranslate(translator, ctx, {
 			type: "stream_event",
 			session_id: "ses-1",
 			event: {
@@ -365,7 +377,7 @@ describe("ClaudeEventTranslator — tool_use buffering", () => {
 			},
 		} as never);
 
-		await translator.translate(ctx, {
+		await runTranslate(translator, ctx, {
 			type: "stream_event",
 			session_id: "ses-1",
 			event: { type: "content_block_stop", index: 0 },

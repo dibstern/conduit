@@ -14,12 +14,14 @@ import {
 	type MaterializedClaudeSubagent,
 } from "../../../../src/lib/provider/claude/claude-subagent-materializer.js";
 import type {
+	ClaudeSessionContext,
 	Query,
 	SDKMessage,
 	SDKPartialAssistantMessage,
 	SDKUserMessage,
 	SessionMessage,
 } from "../../../../src/lib/provider/claude/types.js";
+import { getClaudeRuntimeSessionForTest } from "../../../helpers/claude-runtime-state.js";
 import {
 	createMockEventSink,
 	createMockQuery,
@@ -2425,9 +2427,9 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 		});
 		(
 			instance as unknown as {
-				buildUserMessage(input: unknown): SDKUserMessage;
+				runtime: { buildUserMessage(input: unknown): SDKUserMessage };
 			}
-		).buildUserMessage = () =>
+		).runtime.buildUserMessage = () =>
 			({
 				type: "user",
 				message: { role: "assistant", content: [] },
@@ -2883,11 +2885,8 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 			instance.interruptTurnEffect("session-interrupt-2nd"),
 		);
 
-		// After interrupt, the stream consumer ends without a result for the
-		// second turn. The finally block calls rejectTurnIfPending, which rejects
-		// the deferred with "SDK stream ended without result". This is the
-		// expected behavior — the turn is rejected, not resolved, because no
-		// result message was yielded.
+		// The interrupt path rejects the queued turn directly before the stream can
+		// finish without a result.
 		const turn2Result = await turn2Promise;
 		expect(turn2Result._tag).toBe("Left");
 		if (turn2Result._tag === "Left") {
@@ -2896,9 +2895,7 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 				providerId: "claude",
 				operation: "sendTurn",
 			});
-			expect(turn2Result.left.message).toContain(
-				"SDK stream ended without result",
-			);
+			expect(turn2Result.left.message).toContain("Turn interrupted");
 		}
 	});
 
@@ -3224,14 +3221,12 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 		expect(r1.status).toBe("completed");
 
 		// Manually mark the session as stopped (simulating interruptTurn, etc.)
-		const ctx = (
-			instance as unknown as {
-				sessions: Map<
-					string,
-					{ stopped: boolean; resumeSessionId: string | undefined }
-				>;
+		const ctx = getClaudeRuntimeSessionForTest<
+			ClaudeSessionContext & {
+				stopped: boolean;
+				resumeSessionId: string | undefined;
 			}
-		).sessions.get("session-evict");
+		>(instance, "session-evict");
 		expect(ctx).toBeDefined();
 		(ctx as { resumeSessionId: string }).resumeSessionId =
 			"sdk-resume-after-stop";
@@ -3311,11 +3306,9 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 		expect(result.status).toBe("error");
 
 		// Verify the resume cursor was cleared on the session context
-		const ctx = (
-			instance as unknown as {
-				sessions: Map<string, { resumeSessionId: string | undefined }>;
-			}
-		).sessions.get("session-stale-resume");
+		const ctx = getClaudeRuntimeSessionForTest<
+			ClaudeSessionContext & { resumeSessionId: string | undefined }
+		>(instance, "session-stale-resume");
 		expect(ctx).toBeDefined();
 		expect(ctx?.resumeSessionId).toBeUndefined();
 	});
@@ -3371,11 +3364,9 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 
 		expect(result.status).toBe("error");
 
-		const ctx = (
-			instance as unknown as {
-				sessions: Map<string, { resumeSessionId: string | undefined }>;
-			}
-		).sessions.get("session-not-found-resume");
+		const ctx = getClaudeRuntimeSessionForTest<
+			ClaudeSessionContext & { resumeSessionId: string | undefined }
+		>(instance, "session-not-found-resume");
 		expect(ctx).toBeDefined();
 		expect(ctx?.resumeSessionId).toBeUndefined();
 	});
@@ -3432,11 +3423,9 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 		expect(result.status).toBe("error");
 
 		// The resume cursor should still be set — this error is not a stale session
-		const ctx = (
-			instance as unknown as {
-				sessions: Map<string, { resumeSessionId: string | undefined }>;
-			}
-		).sessions.get("session-unrelated-err");
+		const ctx = getClaudeRuntimeSessionForTest<
+			ClaudeSessionContext & { resumeSessionId: string | undefined }
+		>(instance, "session-unrelated-err");
 		expect(ctx).toBeDefined();
 		expect(ctx?.resumeSessionId).toBe("valid-sdk-session-123");
 	});
@@ -3493,11 +3482,9 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 		expect(result.status).toBe("error");
 
 		// ctx.resumeSessionId was never set, so it should still be undefined
-		const ctx = (
-			instance as unknown as {
-				sessions: Map<string, { resumeSessionId: string | undefined }>;
-			}
-		).sessions.get("session-no-cursor");
+		const ctx = getClaudeRuntimeSessionForTest<
+			ClaudeSessionContext & { resumeSessionId: string | undefined }
+		>(instance, "session-no-cursor");
 		expect(ctx).toBeDefined();
 		expect(ctx?.resumeSessionId).toBeUndefined();
 	});

@@ -27,7 +27,6 @@ function makeCtx(
 		pendingQuestions: new Map(),
 		inFlightTools: new Map(),
 		eventSink: undefined,
-		streamConsumer: undefined,
 		currentTurnId: "turn-1",
 		currentModel: "claude-sonnet-4",
 		resumeSessionId: undefined,
@@ -36,6 +35,13 @@ function makeCtx(
 		stopped: false,
 		...overrides,
 	};
+}
+
+function runTranslate(
+	translator: ClaudeEventTranslator,
+	...args: Parameters<ClaudeEventTranslator["translate"]>
+): Promise<void> {
+	return Effect.runPromise(translator.translate(...args));
 }
 
 describe("ClaudeEventTranslator — normalized tool input", () => {
@@ -54,13 +60,12 @@ describe("ClaudeEventTranslator — normalized tool input", () => {
 				resolvePermission: vi.fn(() => Effect.void),
 				resolveQuestion: vi.fn(() => Effect.void),
 			}),
-			runEffect: Effect.runPromise,
 		});
 
 		const ctx = makeCtx();
 
 		// Simulate content_block_start with a Read tool_use block
-		await translator.translate(ctx, {
+		await runTranslate(translator, ctx, {
 			type: "stream_event",
 			session_id: "ses-1",
 			event: {
@@ -76,7 +81,7 @@ describe("ClaudeEventTranslator — normalized tool input", () => {
 		} as never);
 
 		// Flush buffered tool.started via content_block_stop
-		await translator.translate(ctx, {
+		await runTranslate(translator, ctx, {
 			type: "stream_event",
 			session_id: "ses-1",
 			event: { type: "content_block_stop", index: 0 },
