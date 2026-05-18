@@ -529,7 +529,7 @@
 				<textarea
 					id="input"
 					rows="1"
-					placeholder="Message OpenCode&hellip;"
+					placeholder="Ask anything. / to use skills, @ to mention files"
 					autocomplete="off"
 					enterkeyhint={isMobile() ? "enter" : "send"}
 					class="flex-1 min-w-0 bg-transparent border-none text-text text-base font-sans leading-[1.4] pt-2 pb-1 px-2.5 resize-none outline-none min-h-6 max-h-[120px] overflow-y-auto placeholder:text-text-muted"
