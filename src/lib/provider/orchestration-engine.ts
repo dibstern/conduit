@@ -10,6 +10,7 @@ import { createLogger } from "../logger.js";
 import {
 	DuplicateCommand,
 	type OrchestrationError,
+	ProviderInstanceFailure,
 	SessionProviderNotBound,
 } from "./errors.js";
 import type { ProviderRegistry } from "./provider-registry.js";
@@ -218,22 +219,27 @@ export class OrchestrationEngine {
 			const previousProviderId = this.sessionBindings.get(
 				command.input.sessionId,
 			);
+			const restorePreviousBinding = Effect.sync(() => {
+				if (previousProviderId) {
+					this.sessionBindings.set(command.input.sessionId, previousProviderId);
+				} else {
+					this.sessionBindings.delete(command.input.sessionId);
+				}
+			});
 			yield* Effect.sync(() =>
 				this.sessionBindings.set(command.input.sessionId, command.providerId),
 			);
-			const result = yield* instance.sendTurnEffect(command.input).pipe(
-				Effect.tapError(() =>
-					Effect.sync(() => {
-						if (previousProviderId) {
-							this.sessionBindings.set(
-								command.input.sessionId,
-								previousProviderId,
-							);
-						} else {
-							this.sessionBindings.delete(command.input.sessionId);
-						}
+			const sendEffect = yield* Effect.try({
+				try: () => instance.sendTurnEffect(command.input),
+				catch: (cause) =>
+					new ProviderInstanceFailure({
+						providerId: command.providerId,
+						operation: "sendTurn",
+						cause,
 					}),
-				),
+			}).pipe(Effect.tapError(() => restorePreviousBinding));
+			const result = yield* sendEffect.pipe(
+				Effect.tapError(() => restorePreviousBinding),
 			);
 			return result;
 		});
