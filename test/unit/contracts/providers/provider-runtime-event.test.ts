@@ -318,7 +318,20 @@ describe("ProviderRuntimeEvent contracts", () => {
 		}
 	});
 
-	it("keeps ProviderRuntimeEvent contract-only in production code", () => {
+	it("allows ProviderRuntimeEvent only at contract, provider ingestion, and storage boundaries", () => {
+		const allowedRuntimeBoundaryImports = [
+			"src/lib/persistence/effect/claude-event-persist-effect.ts",
+			"src/lib/persistence/events.ts",
+			"src/lib/persistence/provider-runtime-event-store.ts",
+			"src/lib/provider/claude/claude-event-translator.ts",
+			"src/lib/provider/claude/claude-provider-runtime.ts",
+			"src/lib/provider/claude/claude-subagent-materializer.ts",
+			"src/lib/provider/event-sink.ts",
+			"src/lib/provider/provider-runtime-event-sink.ts",
+			"src/lib/provider/provider-runtime-event-to-canonical.ts",
+			"src/lib/provider/relay-event-sink.ts",
+			"src/lib/provider/types.ts",
+		];
 		const filesImportingContract = tsFiles(join(REPO_ROOT, "src/lib"))
 			.filter((file) => file !== CONTRACT_SOURCE_PATH)
 			.filter((file) => {
@@ -329,7 +342,7 @@ describe("ProviderRuntimeEvent contracts", () => {
 				);
 			});
 
-		expect(filesImportingContract).toEqual([]);
+		expect(filesImportingContract).toEqual(allowedRuntimeBoundaryImports);
 	});
 
 	it("stays implementation-free", () => {

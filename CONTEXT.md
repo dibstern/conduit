@@ -21,7 +21,7 @@ Nested JSON whose structure belongs to the provider or model/tool protocol and i
 _Avoid_: Conduit contract field
 
 **Provider Runtime Event**:
-A pre-storage event envelope emitted by a Provider Runtime inside Conduit. It names the Conduit session/turn, provider refs, and raw-source metadata needed for translation. It is not a stored event and not a browser message.
+A provider-generated durable event envelope emitted by a Provider Runtime inside Conduit. It names the Conduit session/turn, provider refs, and raw-source metadata needed for storage, projection, and compatibility translation. It is not a browser message.
 _Avoid_: CanonicalEvent, RelayMessage, raw SDK payload
 
 **Automatic Session Title**:
@@ -51,7 +51,7 @@ _Avoid_: Conduit-invented permission scope
 - A **Provider Contract** defines what Conduit accepts from and sends to a **Provider Runtime**.
 - A **Provider Envelope** should be runtime-decoded before adapter translation.
 - A **Provider-Owned Payload** may remain opaque when Conduit does not read its internal fields.
-- A **Provider Runtime Event** may be translated into a stored canonical event, but must not itself become the event store contract.
+- New provider-originated durable events are stored as **Provider Runtime Events**. Historical canonical rows remain readable through the legacy compatibility/upcaster path.
 - An **Automatic Session Title** is derived from the first user message after Conduit accepts it, not from provider turn completion.
 - An **Automatic Session Title** is generated only when the first accepted user message is sent while the session is bound to Claude.
 - Existing sessions are not backfilled with an **Automatic Session Title**.

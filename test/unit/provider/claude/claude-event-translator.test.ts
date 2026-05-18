@@ -1848,7 +1848,7 @@ describe("ClaudeEventTranslator", () => {
 		expect(tokens["cacheWrite"]).toBe(500);
 	});
 
-	it("all emitted events have provider set to 'claude'", async () => {
+	it("all emitted events have providerId set to 'claude'", async () => {
 		// Trigger several event types
 		await runTranslate(translator, ctx, {
 			type: "system",
@@ -1879,7 +1879,9 @@ describe("ClaudeEventTranslator", () => {
 		);
 
 		for (const event of sink.events) {
-			expect(event.provider).toBe("claude");
+			expect("providerId" in event ? event.providerId : undefined).toBe(
+				"claude",
+			);
 		}
 	});
 });

@@ -6,11 +6,11 @@ import {
 } from "@anthropic-ai/claude-agent-sdk";
 import { Effect } from "effect";
 import type { ClaudeEventPersistEffect } from "../../persistence/effect/claude-event-persist-effect.js";
+import type { MessageRole } from "../../persistence/events.js";
 import {
-	type CanonicalEvent,
-	canonicalEvent,
-	type MessageRole,
-} from "../../persistence/events.js";
+	makeProviderRuntimeEvent,
+	type ProviderRuntimeKnownEvent,
+} from "../provider-runtime-event-sink.js";
 import { normalizeToolInput } from "./normalize-tool-input.js";
 
 const PROVIDER = "claude" as const;
@@ -61,7 +61,7 @@ export interface ClaudeSubagentTranscriptCursor {
 }
 
 export interface ClaudeSubagentTranscriptStage {
-	readonly events: CanonicalEvent[];
+	readonly events: ProviderRuntimeKnownEvent[];
 	readonly cursor: ClaudeSubagentTranscriptCursor;
 }
 
@@ -158,7 +158,7 @@ function capitalize(value: string): string {
 function sessionMessagesToEvents(
 	sessionId: string,
 	messages: readonly SessionMessage[],
-): CanonicalEvent[] {
+): ProviderRuntimeKnownEvent[] {
 	return diffSessionMessagesToEvents({
 		childSessionId: sessionId,
 		messages,
@@ -208,7 +208,7 @@ export function diffSessionMessagesToEvents(input: {
 	readonly childSessionId: string;
 	readonly messages: readonly SessionMessage[];
 	readonly cursor: ClaudeSubagentTranscriptCursor;
-}): CanonicalEvent[] {
+}): ProviderRuntimeKnownEvent[] {
 	const stage = stageSessionMessagesToEvents(input);
 	commitClaudeSubagentTranscriptCursor(input.cursor, stage.cursor);
 	return stage.events;
@@ -219,14 +219,22 @@ export function stageSessionMessagesToEvents(input: {
 	readonly messages: readonly SessionMessage[];
 	readonly cursor: ClaudeSubagentTranscriptCursor;
 }): ClaudeSubagentTranscriptStage {
-	const events: CanonicalEvent[] = [];
+	const events: ProviderRuntimeKnownEvent[] = [];
 	const cursor = cloneClaudeSubagentTranscriptCursor(input.cursor);
 	const toolMessageIds = new Map<string, string>();
 	const baseCreatedAt = Date.now();
 	let eventIndex = 0;
-	const eventOptions = () => ({
-		provider: PROVIDER,
+	const eventOptions = (): {
+		providerId: typeof PROVIDER;
+		createdAt: number;
+		rawSource: { kind: "claude-sdk"; sourceSchema: string };
+	} => ({
+		providerId: PROVIDER,
 		createdAt: baseCreatedAt + eventIndex++,
+		rawSource: {
+			kind: "claude-sdk",
+			sourceSchema: "ClaudeSubagentSessionMessage",
+		},
 	});
 
 	for (const message of input.messages) {
@@ -240,7 +248,7 @@ export function stageSessionMessagesToEvents(input: {
 		) {
 			cursor.messageRoles.set(messageId, role);
 			events.push(
-				canonicalEvent(
+				makeProviderRuntimeEvent(
 					"message.created",
 					input.childSessionId,
 					{ messageId, role, sessionId: input.childSessionId },
@@ -289,14 +297,18 @@ function shouldCreateTranscriptMessage(
 }
 
 function appendContentBlockEvents(input: {
-	readonly events: CanonicalEvent[];
+	readonly events: ProviderRuntimeKnownEvent[];
 	readonly sessionId: string;
 	readonly messageId: string;
 	readonly block: unknown;
 	readonly index: number;
 	readonly cursor: ClaudeSubagentTranscriptCursor;
 	readonly toolMessageIds: Map<string, string>;
-	readonly eventOptions: () => { provider: typeof PROVIDER; createdAt: number };
+	readonly eventOptions: () => {
+		providerId: typeof PROVIDER;
+		createdAt: number;
+		rawSource: { kind: "claude-sdk"; sourceSchema: string };
+	};
 }): void {
 	if (!isRecord(input.block)) return;
 	const type = input.block["type"];
@@ -307,7 +319,7 @@ function appendContentBlockEvents(input: {
 		const text = input.block["text"];
 		if (previousOffset === undefined || text.length > previousOffset) {
 			input.events.push(
-				canonicalEvent(
+				makeProviderRuntimeEvent(
 					"text.delta",
 					input.sessionId,
 					{
@@ -334,7 +346,7 @@ function appendContentBlockEvents(input: {
 		const text = input.block["thinking"];
 		if (previousOffset === undefined) {
 			input.events.push(
-				canonicalEvent(
+				makeProviderRuntimeEvent(
 					"thinking.start",
 					input.sessionId,
 					{ messageId: input.messageId, partId },
@@ -342,7 +354,7 @@ function appendContentBlockEvents(input: {
 				),
 			);
 			input.events.push(
-				canonicalEvent(
+				makeProviderRuntimeEvent(
 					"thinking.delta",
 					input.sessionId,
 					{ messageId: input.messageId, partId, text },
@@ -350,7 +362,7 @@ function appendContentBlockEvents(input: {
 				),
 			);
 			input.events.push(
-				canonicalEvent(
+				makeProviderRuntimeEvent(
 					"thinking.end",
 					input.sessionId,
 					{ messageId: input.messageId, partId },
@@ -378,7 +390,7 @@ function appendContentBlockEvents(input: {
 		if (input.cursor.toolStarts.has(partId)) return;
 		input.cursor.toolStarts.add(partId);
 		input.events.push(
-			canonicalEvent(
+			makeProviderRuntimeEvent(
 				"tool.started",
 				input.sessionId,
 				{
@@ -408,7 +420,7 @@ function appendContentBlockEvents(input: {
 		if (input.cursor.toolCompletions.has(partId)) return;
 		input.cursor.toolCompletions.add(partId);
 		input.events.push(
-			canonicalEvent(
+			makeProviderRuntimeEvent(
 				"tool.completed",
 				input.sessionId,
 				{
