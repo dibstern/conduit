@@ -21,6 +21,7 @@ import type {
 
 export type {
 	AgentInfo,
+	AgentProviderScope,
 	AskUserQuestion,
 	CommandInfo,
 	ContextWindowOption,

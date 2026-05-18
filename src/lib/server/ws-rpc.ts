@@ -171,6 +171,7 @@ export const WsRpcServerLayer = WsRpcGroup.toLayer({
 			const result = yield* agentService.listAgents(request.sessionId);
 			return {
 				projectSlug: request.projectSlug,
+				providerScope: result.providerScope,
 				agents: result.agents,
 				...(result.activeAgentId != null
 					? { activeAgentId: result.activeAgentId }

@@ -57,6 +57,7 @@ const makeClaudeCapabilities = (
 /** Apply test-specific mock return values on top of shared factory defaults. */
 function applyTestDefaults(deps: ClientInitDeps): ClientInitDeps {
 	vi.mocked(deps.agentService.listAgents).mockResolvedValue({
+		providerScope: { id: "opencode", name: "OpenCode" },
 		agents: [{ id: "coder", name: "coder", description: "Main agent" }],
 	});
 	vi.mocked(deps.modelService.listProviders).mockResolvedValue(TEST_PROVIDERS);
@@ -391,6 +392,7 @@ describe("handleClientConnected — agent list", () => {
 
 		expect(deps.wsHandler.sendTo).toHaveBeenCalledWith("client-1", {
 			type: "agent_list",
+			providerScope: { id: "opencode", name: "OpenCode" },
 			agents: [{ id: "coder", name: "coder", description: "Main agent" }],
 		});
 	});
@@ -398,6 +400,7 @@ describe("handleClientConnected — agent list", () => {
 	it("sends Claude agents for a Claude-bound active session", async () => {
 		const deps = applyTestDefaults(createMockClientInitDeps());
 		vi.mocked(deps.agentService.listAgents).mockResolvedValue({
+			providerScope: { id: "claude", name: "Claude" },
 			agents: [
 				{ id: "Explore", name: "Explore", description: "Explorer" },
 				{ id: "OpusOnly", name: "OpusOnly", model: "opus" },
@@ -412,6 +415,7 @@ describe("handleClientConnected — agent list", () => {
 		expect(deps.agentService.listAgents).toHaveBeenCalledWith("session-1");
 		expect(deps.wsHandler.sendTo).toHaveBeenCalledWith("client-1", {
 			type: "agent_list",
+			providerScope: { id: "claude", name: "Claude" },
 			agents: [
 				{ id: "Explore", name: "Explore", description: "Explorer" },
 				{ id: "OpusOnly", name: "OpusOnly", model: "opus" },
@@ -424,6 +428,7 @@ describe("handleClientConnected — agent list", () => {
 	it("clears stale agent during Claude-bound client init", async () => {
 		const deps = applyTestDefaults(createMockClientInitDeps());
 		vi.mocked(deps.agentService.listAgents).mockResolvedValue({
+			providerScope: { id: "claude", name: "Claude" },
 			agents: [{ id: "Explore", name: "Explore" }],
 		});
 
@@ -432,6 +437,7 @@ describe("handleClientConnected — agent list", () => {
 		expect(deps.agentService.listAgents).toHaveBeenCalledWith("session-1");
 		expect(deps.wsHandler.sendTo).toHaveBeenCalledWith("client-1", {
 			type: "agent_list",
+			providerScope: { id: "claude", name: "Claude" },
 			agents: [{ id: "Explore", name: "Explore" }],
 		});
 	});

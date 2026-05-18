@@ -110,6 +110,7 @@ export const initMessages: MockMessage[] = [
 	},
 	{
 		type: "agent_list",
+		providerScope: { id: "opencode", name: "OpenCode" },
 		agents: [
 			{ id: "code", name: "Code", description: "General coding assistant" },
 		],
@@ -559,6 +560,7 @@ export const variantInitMessages: MockMessage[] = [
 	variantModelList,
 	{
 		type: "agent_list",
+		providerScope: { id: "opencode", name: "OpenCode" },
 		agents: [
 			{ id: "code", name: "Code", description: "General coding assistant" },
 		],
@@ -605,6 +607,7 @@ export const noVariantInitMessages: MockMessage[] = [
 	variantModelList,
 	{
 		type: "agent_list",
+		providerScope: { id: "opencode", name: "OpenCode" },
 		agents: [
 			{ id: "code", name: "Code", description: "General coding assistant" },
 		],
@@ -681,6 +684,7 @@ export const contextWindowInitMessages: MockMessage[] = [
 	contextWindowModelList,
 	{
 		type: "agent_list",
+		providerScope: { id: "opencode", name: "OpenCode" },
 		agents: [
 			{ id: "code", name: "Code", description: "General coding assistant" },
 		],
@@ -730,6 +734,7 @@ export const noContextWindowInitMessages: MockMessage[] = [
 	contextWindowModelList,
 	{
 		type: "agent_list",
+		providerScope: { id: "opencode", name: "OpenCode" },
 		agents: [
 			{ id: "code", name: "Code", description: "General coding assistant" },
 		],

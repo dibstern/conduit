@@ -94,6 +94,7 @@ describe("AgentService", () => {
 				const service = yield* AgentServiceTag;
 				const result = yield* service.listAgents("session-1");
 				expect(result).toEqual({
+					providerScope: { id: "opencode", name: "OpenCode" },
 					agents: [
 						{ id: "build", name: "build" },
 						{ id: "plan", name: "plan" },
@@ -130,6 +131,7 @@ describe("AgentService", () => {
 				const service = yield* AgentServiceTag;
 				const result = yield* service.listAgents("session-1");
 				expect(result).toEqual({
+					providerScope: { id: "claude", name: "Claude" },
 					agents: [
 						{ id: "Explore", name: "Explore", description: "Explorer" },
 						{ id: "Review", name: "Review", model: "opus" },
@@ -158,7 +160,10 @@ describe("AgentService", () => {
 				yield* setAgent("session-1", "Explore");
 				const service = yield* AgentServiceTag;
 				const result = yield* service.listAgents("session-1");
-				expect(result).toEqual({ agents: [] });
+				expect(result).toEqual({
+					providerScope: { id: "claude", name: "Claude" },
+					agents: [],
+				});
 				expect(log.warn).toHaveBeenCalledWith(
 					"Failed to discover Claude agents: claude offline",
 				);

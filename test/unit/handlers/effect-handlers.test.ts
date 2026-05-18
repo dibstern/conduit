@@ -247,6 +247,7 @@ describe("handleGetAgents", () => {
 					expect(client.app.agents).toHaveBeenCalledOnce();
 					expect(ws.sendTo).toHaveBeenCalledWith("client-1", {
 						type: "agent_list",
+						providerScope: { id: "opencode", name: "OpenCode" },
 						agents: filterAgents(mockAgents),
 					});
 				}),

@@ -583,6 +583,7 @@ export const handleClientConnectedEffect = (
 		if (agentResult._tag === "Right") {
 			wsHandler.sendTo(clientId, {
 				type: "agent_list",
+				providerScope: agentResult.right.providerScope,
 				agents: [...agentResult.right.agents],
 				...(agentResult.right.activeAgentId
 					? { activeAgentId: agentResult.right.activeAgentId }
@@ -1033,6 +1034,7 @@ export async function handleClientConnected(
 		const result = await deps.agentService.listAgents(activeId);
 		wsHandler.sendTo(clientId, {
 			type: "agent_list",
+			providerScope: result.providerScope,
 			agents: [...result.agents],
 			...(result.activeAgentId ? { activeAgentId: result.activeAgentId } : {}),
 		});

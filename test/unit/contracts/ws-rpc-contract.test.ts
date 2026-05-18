@@ -96,6 +96,7 @@ const provideRpc = <A, E>(effect: Effect.Effect<A, E, WsRpcTestEnv>) =>
 				GetAgents: (request) =>
 					Effect.succeed({
 						projectSlug: request.projectSlug,
+						providerScope: { id: "opencode", name: "OpenCode" },
 						agents: [{ id: "build", name: "Build" }],
 						...(request.sessionId ? { activeAgentId: "build" } : {}),
 					}),
@@ -426,6 +427,7 @@ describe("browser WebSocket RPC contract", () => {
 				});
 				expect(agents).toEqual({
 					projectSlug: "demo",
+					providerScope: { id: "opencode", name: "OpenCode" },
 					agents: [{ id: "build", name: "Build" }],
 					activeAgentId: "build",
 				});
