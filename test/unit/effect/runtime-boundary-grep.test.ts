@@ -225,6 +225,14 @@ describe("Effect runtime boundary grep", () => {
 	it("keeps provider-turn interrupt relay policy out of prompt handlers", () => {
 		const path = "src/lib/handlers/prompt.ts";
 		const source = readFileSync(join(REPO_ROOT, path), "utf8");
+		const cancelStart = source.indexOf("export const cancelSessionById");
+		const cancelEnd = source.indexOf(
+			"export const rewindSessionToMessage",
+			cancelStart,
+		);
+		expect(cancelStart).toBeGreaterThanOrEqual(0);
+		expect(cancelEnd).toBeGreaterThan(cancelStart);
+		const cancelSource = source.slice(cancelStart, cancelEnd);
 		const forbiddenPatterns = [
 			{
 				pattern: /\bOrchestrationEngineTag\b/,
@@ -242,6 +250,26 @@ describe("Effect runtime boundary grep", () => {
 					"prompt handlers should not dispatch provider interrupt commands directly",
 			},
 		] as const;
+		const forbiddenCancelPatterns = [
+			{
+				pattern: /\bOpenCodeAPITag\b/,
+				reason:
+					"OpenCode cancel fallback belongs in ProviderTurnService, not prompt handlers",
+			},
+			{
+				pattern: /\.session\.abort\(/,
+				reason:
+					"OpenCode abort fallback belongs in ProviderTurnService, not prompt handlers",
+			},
+			{
+				pattern: /type:\s*"done"/,
+				reason: "interrupt completion broadcasts belong in ProviderTurnService",
+			},
+			{
+				pattern: /\bclearProcessingTimeout\b/,
+				reason: "interrupt timeout cleanup belongs in ProviderTurnService",
+			},
+		] as const;
 
 		const hits = forbiddenPatterns.flatMap(({ pattern, reason }) =>
 			source
@@ -252,8 +280,22 @@ describe("Effect runtime boundary grep", () => {
 						: [],
 				),
 		);
+		const cancelHits = forbiddenCancelPatterns.flatMap(({ pattern, reason }) =>
+			cancelSource.split("\n").flatMap((line, index) =>
+				pattern.test(line)
+					? [
+							{
+								path,
+								line: source.slice(0, cancelStart).split("\n").length + index,
+								source: line.trim(),
+								reason,
+							},
+						]
+					: [],
+			),
+		);
 
-		expect(hits).toEqual([]);
+		expect([...hits, ...cancelHits]).toEqual([]);
 	});
 
 	it("keeps Claude translator writes Effect-shaped before sink writes", () => {

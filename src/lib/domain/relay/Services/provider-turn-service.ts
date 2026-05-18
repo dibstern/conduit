@@ -76,7 +76,7 @@ export interface ProviderTurnService {
 	) => Effect.Effect<void, unknown, OverridesStateTag>;
 	readonly interruptTurn: (
 		input: ProviderTurnServiceInterruptInput,
-	) => Effect.Effect<boolean>;
+	) => Effect.Effect<void, never, OverridesStateTag>;
 }
 
 export class ProviderTurnServiceTag extends Context.Tag("ProviderTurnService")<
@@ -448,16 +448,41 @@ export const makeProviderTurnService = Effect.gen(function* () {
 			}
 		});
 
+	const interruptLegacyTurn = (input: ProviderTurnServiceInterruptInput) =>
+		Effect.gen(function* () {
+			const abortResult = yield* Effect.either(
+				Effect.tryPromise(() => client.session.abort(input.sessionId)),
+			);
+			if (abortResult._tag === "Left") {
+				log.warn(
+					`client=${input.clientId} session=${input.sessionId} Abort failed:`,
+					formatErrorDetail(abortResult.left),
+				);
+			}
+			wsHandler.sendToSession(input.sessionId, {
+				type: "done",
+				sessionId: input.sessionId,
+				code: 1,
+			});
+		});
+
 	const interruptTurn = (input: ProviderTurnServiceInterruptInput) =>
 		Effect.gen(function* () {
+			log.info(`client=${input.clientId} session=${input.sessionId} Aborting`);
+			yield* clearProcessingTimeout(input.sessionId);
+
 			const engineOption = yield* Effect.serviceOption(OrchestrationEngineTag);
-			if (engineOption._tag === "None") return false;
+			if (engineOption._tag === "None") {
+				yield* interruptLegacyTurn(input);
+				return;
+			}
 
 			const providerId = engineOption.value.getProviderForSession(
 				input.sessionId,
 			);
 			if (!providerId || !isProviderTurnInterruptProvider(providerId)) {
-				return false;
+				yield* interruptLegacyTurn(input);
+				return;
 			}
 
 			const interruptResult = yield* Effect.either(
@@ -477,7 +502,6 @@ export const makeProviderTurnService = Effect.gen(function* () {
 				sessionId: input.sessionId,
 				code: 1,
 			});
-			return true;
 		});
 
 	return {

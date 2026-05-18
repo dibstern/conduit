@@ -15,7 +15,11 @@ import {
 	WebSocketHandlerTag,
 } from "../../../../src/lib/domain/relay/Services/services.js";
 import { SessionManagerServiceTag } from "../../../../src/lib/domain/relay/Services/session-manager-service.js";
-import { makeOverridesStateLive } from "../../../../src/lib/domain/relay/Services/session-overrides-state.js";
+import {
+	hasActiveProcessingTimeout,
+	makeOverridesStateLive,
+	startProcessingTimeout,
+} from "../../../../src/lib/domain/relay/Services/session-overrides-state.js";
 import type { SessionTitleService } from "../../../../src/lib/domain/relay/Services/session-title-service.js";
 import { SessionTitleServiceTag } from "../../../../src/lib/domain/relay/Services/session-title-service.js";
 import type { OpenCodeAPI } from "../../../../src/lib/instance/opencode-api.js";
@@ -241,6 +245,15 @@ const sendTurn = (input?: Partial<ProviderTurnServiceSendInput>) =>
 		const service = yield* ProviderTurnServiceTag;
 		yield* service.sendTurn(defaultInput(input));
 		yield* flushDispatch();
+	});
+
+const interruptTurn = () =>
+	Effect.gen(function* () {
+		const service = yield* ProviderTurnServiceTag;
+		yield* service.interruptTurn({
+			clientId: "client-1",
+			sessionId: "session-1",
+		});
 	});
 
 describe("ProviderTurnService", () => {
@@ -530,6 +543,33 @@ describe("ProviderTurnService", () => {
 					"session-1",
 					expect.objectContaining({ type: "delta" }),
 				);
+			}).pipe(Effect.provide(layer));
+		},
+	);
+
+	it.effect(
+		"falls back to OpenCode abort, clears processing timeout, and broadcasts done when no engine is present",
+		() => {
+			const api = {
+				session: { abort: vi.fn(async () => undefined) },
+			} as unknown as OpenCodeAPI;
+			const { layer, wsHandler } = serviceLayer({ api });
+
+			return Effect.gen(function* () {
+				yield* startProcessingTimeout(
+					"session-1",
+					"2 minutes",
+					() => Effect.void,
+				);
+				yield* interruptTurn();
+
+				expect(yield* hasActiveProcessingTimeout("session-1")).toBe(false);
+				expect(api.session.abort).toHaveBeenCalledWith("session-1");
+				expect(wsHandler.sendToSession).toHaveBeenCalledWith("session-1", {
+					type: "done",
+					sessionId: "session-1",
+					code: 1,
+				});
 			}).pipe(Effect.provide(layer));
 		},
 	);

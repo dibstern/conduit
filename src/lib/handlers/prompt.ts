@@ -13,7 +13,6 @@ import {
 } from "../domain/relay/Services/services.js";
 import { SessionManagerServiceTag } from "../domain/relay/Services/session-manager-service.js";
 import {
-	clearProcessingTimeout,
 	getAgent,
 	getContextWindow,
 	getModel,
@@ -22,7 +21,7 @@ import {
 	PROCESSING_TIMEOUT_DURATION,
 	startProcessingTimeout,
 } from "../domain/relay/Services/session-overrides-state.js";
-import { formatErrorDetail, RelayError } from "../errors.js";
+import { RelayError } from "../errors.js";
 
 // ─── Per-session input draft store ──────────────────────────────────────────
 // Stores the last input_sync text per session so that newly connecting clients
@@ -176,37 +175,10 @@ export const handleMessage = (
 
 export const cancelSessionById = (clientId: string, sessionId: string) =>
 	Effect.gen(function* () {
-		const client = yield* OpenCodeAPITag;
-		const wsHandler = yield* WebSocketHandlerTag;
-		const log = yield* LoggerTag;
-
-		log.info(`client=${clientId} session=${sessionId} Aborting`);
-		yield* clearProcessingTimeout(sessionId);
-
-		const providerTurnServiceOption = yield* Effect.serviceOption(
-			ProviderTurnServiceTag,
-		);
-		if (providerTurnServiceOption._tag === "Some") {
-			const interrupted = yield* providerTurnServiceOption.value.interruptTurn({
-				clientId,
-				sessionId,
-			});
-			if (interrupted) return;
-		}
-
-		const abortResult = yield* Effect.either(
-			Effect.tryPromise(() => client.session.abort(sessionId)),
-		);
-		if (abortResult._tag === "Left") {
-			log.warn(
-				`client=${clientId} session=${sessionId} Abort failed:`,
-				formatErrorDetail(abortResult.left),
-			);
-		}
-		wsHandler.sendToSession(sessionId, {
-			type: "done",
+		const providerTurnService = yield* ProviderTurnServiceTag;
+		yield* providerTurnService.interruptTurn({
+			clientId,
 			sessionId,
-			code: 1,
 		});
 	});
 

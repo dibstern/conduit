@@ -13,6 +13,10 @@ import {
 	PendingInteractionServiceTag,
 } from "../../../src/lib/domain/relay/Services/pending-interaction-service.js";
 import { ProjectManagementServiceLive } from "../../../src/lib/domain/relay/Services/project-management-service.js";
+import {
+	type ProviderTurnService,
+	ProviderTurnServiceTag,
+} from "../../../src/lib/domain/relay/Services/provider-turn-service.js";
 import type {
 	SessionManagerShape,
 	WebSocketHandlerShape,
@@ -47,7 +51,6 @@ import {
 	setDefaultModel,
 	setModel,
 	setVariant,
-	startProcessingTimeout,
 } from "../../../src/lib/domain/relay/Services/session-overrides-state.js";
 import {
 	type OpenCodeTerminalService,
@@ -2678,34 +2681,23 @@ describe("loadMoreHistoryForSession", () => {
 // ─── Prompt handler tests ─────────────────────────────────────────────────
 
 describe("cancelSessionById", () => {
-	it.effect("clears processing timeout and sends done when no engine", () => {
-		const ws = mockWsHandler();
-		const log = mockLogger();
-		const client = {
-			session: { abort: vi.fn(async () => {}) },
-		} as unknown as OpenCodeAPI;
+	it.effect("delegates cancellation to ProviderTurnService", () => {
+		const providerTurnService: ProviderTurnService = {
+			sendTurn: vi.fn(() => Effect.void),
+			interruptTurn: vi.fn(() => Effect.void),
+		};
 
 		const layer = Layer.mergeAll(
-			Layer.succeed(OpenCodeAPITag, client),
-			Layer.succeed(WebSocketHandlerTag, ws),
-			Layer.succeed(LoggerTag, log),
+			Layer.succeed(ProviderTurnServiceTag, providerTurnService),
 			makeOverridesStateLive(),
 		);
 
 		return Effect.gen(function* () {
-			yield* startProcessingTimeout(
-				"session-1",
-				"2 minutes",
-				() => Effect.void,
-			);
 			yield* cancelSessionById("client-1", "session-1");
 
-			expect(yield* hasActiveProcessingTimeout("session-1")).toBe(false);
-			expect(client.session.abort).toHaveBeenCalledWith("session-1");
-			expect(ws.sendToSession).toHaveBeenCalledWith("session-1", {
-				type: "done",
+			expect(providerTurnService.interruptTurn).toHaveBeenCalledWith({
+				clientId: "client-1",
 				sessionId: "session-1",
-				code: 1,
 			});
 		}).pipe(Effect.provide(layer));
 	});
