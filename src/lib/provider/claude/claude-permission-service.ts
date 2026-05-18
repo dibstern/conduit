@@ -127,10 +127,20 @@ export class ClaudePermissionService {
 		toolInput: Record<string, unknown>,
 		options: CanUseToolOptions,
 	): Effect.Effect<PermissionResult, unknown> {
-		if (toolName === "AskUserQuestion") {
-			return this.handleQuestionEffect(ctx, toolInput, options);
-		}
-		return this.handleToolPermissionEffect(ctx, toolName, toolInput, options);
+		const attributes = {
+			providerId: "claude",
+			sessionId: ctx.sessionId,
+			turnId: ctx.currentTurnId ?? "unknown",
+			toolName,
+		};
+		const effect =
+			toolName === "AskUserQuestion"
+				? this.handleQuestionEffect(ctx, toolInput, options)
+				: this.handleToolPermissionEffect(ctx, toolName, toolInput, options);
+		return effect.pipe(
+			Effect.annotateLogs(attributes),
+			Effect.withSpan("claude.permission", { attributes }),
+		);
 	}
 
 	resolvePermission(

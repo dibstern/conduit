@@ -108,6 +108,52 @@ function runTranslateError(
 	return Effect.runPromise(translator.translateError(...args));
 }
 
+function plannedRuntimeEventsForClaudeSdkFixture(
+	ctx: ClaudeSessionContext,
+	message: SDKMessage,
+): ReadonlyArray<unknown> {
+	if (message.type !== "result") return [];
+	if (message.subtype !== "success" || message.is_error) return [];
+	const messageId =
+		message.uuid ?? ctx.lastAssistantUuid ?? ctx.currentTurnId ?? ctx.sessionId;
+	return [
+		{
+			eventId: "runtime-event-1",
+			type: "turn.completed",
+			providerId: "claude",
+			sessionId: ctx.sessionId,
+			...(ctx.currentTurnId ? { turnId: ctx.currentTurnId } : {}),
+			providerRefs: {
+				...(message.session_id
+					? { providerSessionId: message.session_id }
+					: {}),
+				...(message.uuid ? { providerMessageId: message.uuid } : {}),
+			},
+			rawSource: {
+				kind: "claude.sdk.message",
+				providerMessageType: message.type,
+				sdkVariant: "agent-sdk",
+			},
+			createdAt: Date.now(),
+			data: {
+				messageId,
+				cost: message.total_cost_usd,
+				tokens: {
+					input: message.usage.input_tokens,
+					output: message.usage.output_tokens,
+					...(message.usage.cache_read_input_tokens > 0
+						? { cacheRead: message.usage.cache_read_input_tokens }
+						: {}),
+					...(message.usage.cache_creation_input_tokens > 0
+						? { cacheWrite: message.usage.cache_creation_input_tokens }
+						: {}),
+				},
+				duration: message.duration_ms,
+			},
+		},
+	];
+}
+
 // ─── Tests ────────────────────────────────────────────────────────────────
 
 describe("ClaudeEventTranslator", () => {
@@ -741,38 +787,63 @@ describe("ClaudeEventTranslator", () => {
 		expect(data["toolName"]).toBe("Bash");
 		expect(data["callId"]).toBe("tool-abc");
 		expect(data["input"]).toEqual({ tool: "Bash", command: "ls" });
+	});
 
+	it("decodes a Claude SDK result fixture to ProviderRuntimeEvent before canonical translation", () => {
+		const sdkResult = {
+			type: "result",
+			subtype: "success",
+			is_error: false,
+			duration_ms: 1234,
+			duration_api_ms: 1000,
+			num_turns: 1,
+			result: "done",
+			session_id: "sdk-session-1",
+			total_cost_usd: 0.12,
+			usage: {
+				input_tokens: 10,
+				output_tokens: 20,
+				cache_creation_input_tokens: 0,
+				cache_read_input_tokens: 5,
+			},
+			uuid: "assistant-result-1",
+		} as unknown as SDKMessage;
+
+		const runtimeEvents = plannedRuntimeEventsForClaudeSdkFixture(
+			ctx,
+			sdkResult,
+		);
 		const decodeRuntimeEvent = Schema.decodeUnknownSync(
 			ProviderRuntimeEventSchema,
 		);
-		const runtimeEvent = decodeRuntimeEvent({
-			eventId: started?.eventId,
-			type: started?.type,
+		const [decoded] = runtimeEvents.map((event) => decodeRuntimeEvent(event));
+
+		expect(decoded).toMatchObject({
+			type: "turn.completed",
 			providerId: "claude",
-			sessionId: started?.sessionId,
-			turnId: ctx.currentTurnId,
+			sessionId: "sess-1",
+			turnId: "turn-1",
 			providerRefs: {
-				providerSessionId: "test-session",
-				...(ctx.lastAssistantUuid
-					? { providerMessageId: ctx.lastAssistantUuid }
-					: {}),
-				providerToolUseId: "tool-abc",
+				providerSessionId: "sdk-session-1",
+				providerMessageId: "assistant-result-1",
 			},
 			rawSource: {
 				kind: "claude.sdk.message",
-				providerMessageType: "assistant",
-				providerMessageSubtype: "tool_use",
+				providerMessageType: "result",
 				sdkVariant: "agent-sdk",
 			},
-			createdAt: started?.createdAt,
-			data: started?.data,
-			metadata: started?.metadata,
+			data: {
+				messageId: "assistant-result-1",
+				cost: 0.12,
+				tokens: {
+					input: 10,
+					output: 20,
+					cacheRead: 5,
+				},
+				duration: 1234,
+			},
 		});
-		expect(runtimeEvent.providerRefs).toMatchObject({
-			providerSessionId: "test-session",
-			providerToolUseId: "tool-abc",
-		});
-		expect(runtimeEvent.data).toEqual(started?.data);
+		expect(JSON.stringify(decoded)).not.toContain("session_id");
 	});
 
 	// ─── 7. stream_event (content_block_delta: text_delta) ───────────────

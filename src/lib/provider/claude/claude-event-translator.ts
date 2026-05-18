@@ -236,162 +236,167 @@ export class ClaudeEventTranslator {
 		return this.collectWrites(() => this.translateMessage(ctx, message));
 	}
 
-	private async translateMessage(
+	private translateMessage(
 		ctx: ClaudeSessionContext,
 		message: SDKMessage,
-	): Promise<void> {
-		// Capture SDK session id for resume cursor on any message.
-		// All SDK message variants carry session_id (required or optional),
-		// but the union doesn't guarantee it statically — use an `in` guard.
-		if ("session_id" in message && typeof message.session_id === "string") {
-			ctx.resumeSessionId = message.session_id;
-		}
+	): Effect.Effect<void, unknown> {
+		return Effect.gen(this, function* () {
+			// Capture SDK session id for resume cursor on any message.
+			// All SDK message variants carry session_id (required or optional),
+			// but the union doesn't guarantee it statically — use an `in` guard.
+			if ("session_id" in message && typeof message.session_id === "string") {
+				ctx.resumeSessionId = message.session_id;
+			}
 
-		switch (message.type) {
-			case "system":
-				return this.translateSystem(ctx, message);
-			case "stream_event":
-				return this.translateStreamEvent(ctx, message);
-			case "assistant":
-				return this.translateAssistantSnapshot(ctx, message);
-			case "user":
-				return this.translateUserToolResults(ctx, message);
-			case "result":
-				return this.translateResult(ctx, message);
-			case "tool_progress":
-				return this.translateToolProgress(ctx, message);
-			default:
-				// Explicitly ignore known SDK message types we don't process
-				// (auth_status, rate_limit_event, prompt_suggestion, etc.)
-				return;
-		}
+			switch (message.type) {
+				case "system":
+					return yield* this.translateSystem(ctx, message);
+				case "stream_event":
+					return yield* this.translateStreamEvent(ctx, message);
+				case "assistant":
+					return yield* this.translateAssistantSnapshot(ctx, message);
+				case "user":
+					return yield* this.translateUserToolResults(ctx, message);
+				case "result":
+					return yield* this.translateResult(ctx, message);
+				case "tool_progress":
+					return yield* this.translateToolProgress(ctx, message);
+				default:
+					// Explicitly ignore known SDK message types we don't process
+					// (auth_status, rate_limit_event, prompt_suggestion, etc.)
+					return;
+			}
+		});
 	}
 
 	translateError(
 		ctx: ClaudeSessionContext,
 		cause: unknown,
 	): Effect.Effect<void, unknown> {
-		return this.collectWrites(async () => {
-			const errorMsg = cause instanceof Error ? cause.message : String(cause);
-			await this.push(
-				ctx,
-				makeCanonicalEvent("turn.error", ctx.sessionId, {
-					messageId: this.currentAssistantMessageId || "",
-					error: errorMsg,
-					code: "provider_error",
-				}),
-			);
-			this.resetInFlightState();
-		});
+		return this.collectWrites(() =>
+			Effect.gen(this, function* () {
+				const errorMsg = cause instanceof Error ? cause.message : String(cause);
+				yield* this.push(
+					ctx,
+					makeCanonicalEvent("turn.error", ctx.sessionId, {
+						messageId: this.currentAssistantMessageId || "",
+						error: errorMsg,
+						code: "provider_error",
+					}),
+				);
+				this.resetInFlightState();
+			}),
+		);
 	}
 
 	// ─── System ──────────────────────────────────────────────────────────
 
-	private async translateSystem(
+	private translateSystem(
 		ctx: ClaudeSessionContext,
 		message: SDKSystemLike,
-	): Promise<void> {
-		switch (message.subtype) {
-			case "status": {
-				await this.push(
-					ctx,
-					makeCanonicalEvent("session.status", ctx.sessionId, {
-						sessionId: ctx.sessionId,
-						status: "idle",
-					}),
-				);
-				return;
-			}
-
-			// SDK is retrying a failed API call. Surface it as
-			// session.status:retry so the UI can display retry progress
-			// instead of silence. Attempt/delay/error details travel via metadata.
-			case "api_retry": {
-				const {
-					attempt,
-					max_retries: maxRetries,
-					retry_delay_ms: retryDelayMs,
-				} = message;
-				// error_status is number | null in the SDK type
-				const errorStatus = message.error_status ?? undefined;
-				// error is SDKAssistantMessageError (string literal union)
-				const errorKind: string = message.error ?? "unknown";
-				const parts: string[] = [`Retrying (attempt ${attempt}/${maxRetries})`];
-				if (errorStatus !== undefined) {
-					parts.push(`HTTP ${errorStatus}`);
-				}
-				if (errorKind !== "unknown") parts.push(errorKind);
-				if (retryDelayMs !== undefined) {
-					const secs = Math.round(retryDelayMs / 100) / 10;
-					parts.push(`next in ${secs}s`);
-				}
-				const reason = parts.join(" · ");
-				await this.push(
-					ctx,
-					canonicalEvent(
-						"session.status",
-						ctx.sessionId,
-						{
+	): Effect.Effect<void, unknown> {
+		return Effect.gen(this, function* () {
+			switch (message.subtype) {
+				case "status": {
+					yield* this.push(
+						ctx,
+						makeCanonicalEvent("session.status", ctx.sessionId, {
 							sessionId: ctx.sessionId,
-							status: "retry",
-						},
-						{
-							provider: PROVIDER,
-							metadata: {
-								source: "api_retry",
-								correlationId: reason,
+							status: "idle",
+						}),
+					);
+					return;
+				}
+
+				// SDK is retrying a failed API call. Surface it as
+				// session.status:retry so the UI can display retry progress
+				// instead of silence. Attempt/delay/error details travel via metadata.
+				case "api_retry": {
+					const {
+						attempt,
+						max_retries: maxRetries,
+						retry_delay_ms: retryDelayMs,
+					} = message;
+					// error_status is number | null in the SDK type
+					const errorStatus = message.error_status ?? undefined;
+					// error is SDKAssistantMessageError (string literal union)
+					const errorKind: string = message.error ?? "unknown";
+					const parts: string[] = [
+						`Retrying (attempt ${attempt}/${maxRetries})`,
+					];
+					if (errorStatus !== undefined) {
+						parts.push(`HTTP ${errorStatus}`);
+					}
+					if (errorKind !== "unknown") parts.push(errorKind);
+					if (retryDelayMs !== undefined) {
+						const secs = Math.round(retryDelayMs / 100) / 10;
+						parts.push(`next in ${secs}s`);
+					}
+					const reason = parts.join(" · ");
+					yield* this.push(
+						ctx,
+						canonicalEvent(
+							"session.status",
+							ctx.sessionId,
+							{
+								sessionId: ctx.sessionId,
+								status: "retry",
 							},
-						},
-					),
-				);
-				return;
-			}
+							{
+								provider: PROVIDER,
+								metadata: {
+									source: "api_retry",
+									correlationId: reason,
+								},
+							},
+						),
+					);
+					return;
+				}
 
-			// Token usage updates. The SDK type declares usage as
-			// { total_tokens, tool_uses, duration_ms } but runtime payloads
-			// include input_tokens/output_tokens/cache_read_input_tokens.
-			// Cast to Record for those extended fields not in the SDK type.
-			case "task_progress": {
-				await this.translateTaskProgress(ctx, message);
-				return;
-			}
+				// Token usage updates. The SDK type declares usage as
+				// { total_tokens, tool_uses, duration_ms } but runtime payloads
+				// include input_tokens/output_tokens/cache_read_input_tokens.
+				// Cast to Record for those extended fields not in the SDK type.
+				case "task_progress": {
+					return yield* this.translateTaskProgress(ctx, message);
+				}
 
-			case "task_started": {
-				await this.translateTaskStarted(ctx, message);
-				return;
-			}
+				case "task_started": {
+					return yield* this.translateTaskStarted(ctx, message);
+				}
 
-			case "task_notification": {
-				await this.translateTaskNotification(ctx, message);
-				return;
-			}
+				case "task_notification": {
+					return yield* this.translateTaskNotification(ctx, message);
+				}
 
-			case "init": {
-				// Store model info on context
-				ctx.currentModel = message.model;
-				await this.push(
-					ctx,
-					makeCanonicalEvent("session.status", ctx.sessionId, {
-						sessionId: ctx.sessionId,
-						status: "idle",
-					}),
-				);
-				return;
-			}
+				case "init": {
+					// Store model info on context
+					ctx.currentModel = message.model;
+					yield* this.push(
+						ctx,
+						makeCanonicalEvent("session.status", ctx.sessionId, {
+							sessionId: ctx.sessionId,
+							status: "idle",
+						}),
+					);
+					return;
+				}
 
-			default:
-				// Ignore other system subtypes (compact_boundary, hook_*, etc.)
-				return;
-		}
+				default:
+					// Ignore other system subtypes (compact_boundary, hook_*, etc.)
+					return;
+			}
+		});
 	}
 
-	private async translateTaskStarted(
+	private translateTaskStarted(
 		ctx: ClaudeSessionContext,
 		message: SDKSystemLike & { subtype: "task_started" },
-	): Promise<void> {
-		if (!message.tool_use_id) return;
+	): Effect.Effect<void, unknown> {
+		if (!message.tool_use_id) return Effect.void;
 		const extras = message as unknown as Record<string, unknown>;
-		await this.pushTaskMetadata(ctx, message.tool_use_id, {
+		return this.pushTaskMetadata(ctx, message.tool_use_id, {
 			providerTaskId: message.task_id,
 			status: "running",
 			description: message.description,
@@ -407,14 +412,14 @@ export class ClaudeEventTranslator {
 		});
 	}
 
-	private async translateTaskProgress(
+	private translateTaskProgress(
 		ctx: ClaudeSessionContext,
 		message: SDKSystemLike & { subtype: "task_progress" },
-	): Promise<void> {
-		if (!message.tool_use_id) return;
+	): Effect.Effect<void, unknown> {
+		if (!message.tool_use_id) return Effect.void;
 		const usage = message.usage as Record<string, unknown>;
 		const extras = message as unknown as Record<string, unknown>;
-		await this.pushTaskMetadata(ctx, message.tool_use_id, {
+		return this.pushTaskMetadata(ctx, message.tool_use_id, {
 			providerTaskId: message.task_id,
 			status: "running",
 			description: message.description,
@@ -434,49 +439,51 @@ export class ClaudeEventTranslator {
 		});
 	}
 
-	private async translateTaskNotification(
+	private translateTaskNotification(
 		ctx: ClaudeSessionContext,
 		message: SDKSystemLike & { subtype: "task_notification" },
-	): Promise<void> {
-		if (!message.tool_use_id) return;
-		const usage = message.usage as Record<string, unknown> | undefined;
-		const extras = message as unknown as Record<string, unknown>;
-		const metadata = {
-			providerTaskId: message.task_id,
-			status: message.status,
-			outputFile: message.output_file,
-			summary: message.summary,
-			...(typeof extras["child_session_id"] === "string"
-				? { childSessionId: extras["child_session_id"] }
-				: {}),
-			...(usage
-				? {
-						totalTokens: usage["total_tokens"] ?? 0,
-						toolUses: usage["tool_uses"] ?? 0,
-						durationMs: usage["duration_ms"] ?? 0,
-					}
-				: {}),
-			...(message.skip_transcript !== undefined
-				? { skipTranscript: message.skip_transcript }
-				: {}),
-		};
-		await this.pushTaskMetadata(ctx, message.tool_use_id, metadata);
-		if (message.status === "completed") {
-			await this.completeTaskTool(
-				ctx,
-				message.tool_use_id,
-				taskCompletionResult(metadata),
-			);
-		}
+	): Effect.Effect<void, unknown> {
+		return Effect.gen(this, function* () {
+			if (!message.tool_use_id) return;
+			const usage = message.usage as Record<string, unknown> | undefined;
+			const extras = message as unknown as Record<string, unknown>;
+			const metadata = {
+				providerTaskId: message.task_id,
+				status: message.status,
+				outputFile: message.output_file,
+				summary: message.summary,
+				...(typeof extras["child_session_id"] === "string"
+					? { childSessionId: extras["child_session_id"] }
+					: {}),
+				...(usage
+					? {
+							totalTokens: usage["total_tokens"] ?? 0,
+							toolUses: usage["tool_uses"] ?? 0,
+							durationMs: usage["duration_ms"] ?? 0,
+						}
+					: {}),
+				...(message.skip_transcript !== undefined
+					? { skipTranscript: message.skip_transcript }
+					: {}),
+			};
+			yield* this.pushTaskMetadata(ctx, message.tool_use_id, metadata);
+			if (message.status === "completed") {
+				yield* this.completeTaskTool(
+					ctx,
+					message.tool_use_id,
+					taskCompletionResult(metadata),
+				);
+			}
+		});
 	}
 
-	private async translateToolProgress(
+	private translateToolProgress(
 		ctx: ClaudeSessionContext,
 		message: SDKMessage & { type: "tool_progress" },
-	): Promise<void> {
+	): Effect.Effect<void, unknown> {
 		const parentToolUseId = message.parent_tool_use_id;
-		if (!parentToolUseId) return;
-		await this.pushTaskMetadata(ctx, parentToolUseId, {
+		if (!parentToolUseId) return Effect.void;
+		return this.pushTaskMetadata(ctx, parentToolUseId, {
 			...(message.task_id ? { providerTaskId: message.task_id } : {}),
 			parentToolUseId,
 			activeToolUseId: message.tool_use_id,
@@ -485,72 +492,75 @@ export class ClaudeEventTranslator {
 		});
 	}
 
-	private async pushTaskMetadata(
+	private pushTaskMetadata(
 		ctx: ClaudeSessionContext,
 		parentToolUseId: string,
 		metadata: Record<string, unknown>,
-	): Promise<void> {
-		const providerTaskId = metadata["providerTaskId"];
-		const subagentTasks = ctx.subagentTasks;
-		const task =
-			typeof providerTaskId === "string" && subagentTasks
-				? subagentTasks.get(providerTaskId)
-				: undefined;
-		const parentMessageId =
-			this.currentAssistantMessageId ||
-			ctx.lastAssistantUuid ||
-			task?.parentMessageId ||
-			"";
-		const mergedMetadata = {
-			...(task?.description != null ? { description: task.description } : {}),
-			...(task?.subagentType != null
-				? { subagentType: task.subagentType }
-				: {}),
-			...(task?.childSessionId != null
-				? { childSessionId: task.childSessionId }
-				: {}),
-			...metadata,
-		};
-		if (typeof providerTaskId === "string" && subagentTasks) {
-			subagentTasks.set(providerTaskId, {
-				toolUseId: parentToolUseId,
-				...(typeof mergedMetadata["childSessionId"] === "string"
-					? { childSessionId: mergedMetadata["childSessionId"] }
+	): Effect.Effect<void, unknown> {
+		return Effect.gen(this, function* () {
+			const providerTaskId = metadata["providerTaskId"];
+			const subagentTasks = ctx.subagentTasks;
+			const task =
+				typeof providerTaskId === "string" && subagentTasks
+					? subagentTasks.get(providerTaskId)
+					: undefined;
+			const parentMessageId =
+				this.currentAssistantMessageId ||
+				ctx.lastAssistantUuid ||
+				task?.parentMessageId ||
+				"";
+			const mergedMetadata = {
+				...(task?.description != null ? { description: task.description } : {}),
+				...(task?.subagentType != null
+					? { subagentType: task.subagentType }
 					: {}),
-				...(parentMessageId ? { parentMessageId } : {}),
-				...(typeof mergedMetadata["description"] === "string"
-					? { description: mergedMetadata["description"] }
+				...(task?.childSessionId != null
+					? { childSessionId: task.childSessionId }
 					: {}),
-				...(typeof mergedMetadata["subagentType"] === "string"
-					? { subagentType: mergedMetadata["subagentType"] }
-					: {}),
-			});
-		}
-		await this.ensureTaskToolStarted(
-			ctx,
-			parentToolUseId,
-			mergedMetadata,
-			parentMessageId,
-		);
-		await this.push(
-			ctx,
-			makeCanonicalEvent("tool.running", ctx.sessionId, {
-				messageId: parentMessageId,
-				partId: parentToolUseId,
-				metadata: mergedMetadata,
-			}),
-		);
+				...metadata,
+			};
+			if (typeof providerTaskId === "string" && subagentTasks) {
+				subagentTasks.set(providerTaskId, {
+					toolUseId: parentToolUseId,
+					...(typeof mergedMetadata["childSessionId"] === "string"
+						? { childSessionId: mergedMetadata["childSessionId"] }
+						: {}),
+					...(parentMessageId ? { parentMessageId } : {}),
+					...(typeof mergedMetadata["description"] === "string"
+						? { description: mergedMetadata["description"] }
+						: {}),
+					...(typeof mergedMetadata["subagentType"] === "string"
+						? { subagentType: mergedMetadata["subagentType"] }
+						: {}),
+				});
+			}
+			yield* this.ensureTaskToolStarted(
+				ctx,
+				parentToolUseId,
+				mergedMetadata,
+				parentMessageId,
+			);
+			yield* this.push(
+				ctx,
+				makeCanonicalEvent("tool.running", ctx.sessionId, {
+					messageId: parentMessageId,
+					partId: parentToolUseId,
+					metadata: mergedMetadata,
+				}),
+			);
+		});
 	}
 
-	private async ensureTaskToolStarted(
+	private ensureTaskToolStarted(
 		ctx: ClaudeSessionContext,
 		parentToolUseId: string,
 		metadata: Record<string, unknown>,
 		messageId: string,
-	): Promise<void> {
+	): Effect.Effect<void, unknown> {
 		const tool = this.findInFlightTool(parentToolUseId, ctx);
-		if (!tool || !tool.pendingStart) return;
-		if (tool.toolName !== "Agent" && tool.toolName !== "Task") return;
+		if (!tool || !tool.pendingStart) return Effect.void;
+		if (tool.toolName !== "Agent" && tool.toolName !== "Task")
+			return Effect.void;
 
 		tool.pendingStart = false;
 		const rawInput = enrichTaskInput(
@@ -560,7 +570,7 @@ export class ClaudeEventTranslator {
 		tool.input = rawInput;
 		tool.bufferedInput = rawInput;
 		const input = normalizeToolInput(tool.toolName, rawInput);
-		await this.push(
+		return this.push(
 			ctx,
 			makeCanonicalEvent(
 				"tool.started",
@@ -577,23 +587,25 @@ export class ClaudeEventTranslator {
 		);
 	}
 
-	private async completeTaskTool(
+	private completeTaskTool(
 		ctx: ClaudeSessionContext,
 		parentToolUseId: string,
 		result: string | null,
-	): Promise<void> {
-		const messageId =
-			this.currentAssistantMessageId || ctx.lastAssistantUuid || "";
-		await this.push(
-			ctx,
-			makeCanonicalEvent("tool.completed", ctx.sessionId, {
-				messageId,
-				partId: parentToolUseId,
-				result,
-				duration: 0,
-			}),
-		);
-		this.deleteInFlightTool(parentToolUseId, ctx);
+	): Effect.Effect<void, unknown> {
+		return Effect.gen(this, function* () {
+			const messageId =
+				this.currentAssistantMessageId || ctx.lastAssistantUuid || "";
+			yield* this.push(
+				ctx,
+				makeCanonicalEvent("tool.completed", ctx.sessionId, {
+					messageId,
+					partId: parentToolUseId,
+					result,
+					duration: 0,
+				}),
+			);
+			this.deleteInFlightTool(parentToolUseId, ctx);
+		});
 	}
 
 	private taskMetadataForToolUseId(
@@ -638,10 +650,10 @@ export class ClaudeEventTranslator {
 
 	// ─── Stream Events ───────────────────────────────────────────────────
 
-	private async translateStreamEvent(
+	private translateStreamEvent(
 		ctx: ClaudeSessionContext,
 		message: SDKPartialAssistantMessage,
-	): Promise<void> {
+	): Effect.Effect<void, unknown> {
 		const event = message.event; // Typed: BetaRawMessageStreamEvent
 
 		switch (event.type) {
@@ -656,425 +668,440 @@ export class ClaudeEventTranslator {
 			case "message_delta":
 			case "message_stop":
 				// No action needed for these event types
-				return;
+				return Effect.void;
 		}
 	}
 
 	// ─── Message Start ──────────────────────────────────────────────────
 
-	private async handleMessageStart(
+	private handleMessageStart(
 		ctx: ClaudeSessionContext,
 		event: StreamEvent & { type: "message_start" },
-	): Promise<void> {
-		// Capture the assistant message ID at the START of streaming so all
-		// content blocks (text, tool_use, thinking) share a single messageId.
-		// Without this, currentAssistantMessageId is empty during streaming
-		// (only set later in translateAssistantSnapshot) and every block falls
-		// back to its own per-block UUID — creating dozens of separate messages
-		// in the persistence layer instead of one cohesive assistant message.
-		const msgId = event.message.id;
-		if (msgId && !this.currentAssistantMessageId) {
-			this.currentAssistantMessageId = msgId;
-			// Emit message.created so MessageProjector creates the row
-			// and TurnProjector can link the turn to its assistant message.
-			await this.push(
-				ctx,
-				makeCanonicalEvent("message.created", ctx.sessionId, {
-					messageId: msgId,
-					role: "assistant",
-					sessionId: ctx.sessionId,
-				}),
-			);
-			// Emit session.status: busy so TurnProjector transitions
-			// the turn from "pending" → "running".
-			await this.push(
-				ctx,
-				makeCanonicalEvent("session.status", ctx.sessionId, {
-					sessionId: ctx.sessionId,
-					status: "busy",
-				}),
-			);
-		}
+	): Effect.Effect<void, unknown> {
+		return Effect.gen(this, function* () {
+			// Capture the assistant message ID at the START of streaming so all
+			// content blocks (text, tool_use, thinking) share a single messageId.
+			// Without this, currentAssistantMessageId is empty during streaming
+			// (only set later in translateAssistantSnapshot) and every block falls
+			// back to its own per-block UUID — creating dozens of separate messages
+			// in the persistence layer instead of one cohesive assistant message.
+			const msgId = event.message.id;
+			if (msgId && !this.currentAssistantMessageId) {
+				this.currentAssistantMessageId = msgId;
+				// Emit message.created so MessageProjector creates the row
+				// and TurnProjector can link the turn to its assistant message.
+				yield* this.push(
+					ctx,
+					makeCanonicalEvent("message.created", ctx.sessionId, {
+						messageId: msgId,
+						role: "assistant",
+						sessionId: ctx.sessionId,
+					}),
+				);
+				// Emit session.status: busy so TurnProjector transitions
+				// the turn from "pending" → "running".
+				yield* this.push(
+					ctx,
+					makeCanonicalEvent("session.status", ctx.sessionId, {
+						sessionId: ctx.sessionId,
+						status: "busy",
+					}),
+				);
+			}
+		});
 	}
 
-	private async handleBlockStop(
+	private handleBlockStop(
 		ctx: ClaudeSessionContext,
 		event: StreamEvent & { type: "content_block_stop" },
-	): Promise<void> {
-		const index = event.index;
-		const tool = ctx.inFlightTools.get(index);
-		if (!tool) return;
+	): Effect.Effect<void, unknown> {
+		return Effect.gen(this, function* () {
+			const index = event.index;
+			const tool = ctx.inFlightTools.get(index);
+			if (!tool) return;
 
-		// Only complete text/thinking blocks here; tool_use blocks
-		// complete when their tool_result arrives.
-		if (tool.toolName === "__thinking") {
-			ctx.inFlightTools.delete(index);
-			await this.push(
-				ctx,
-				makeCanonicalEvent("thinking.end", ctx.sessionId, {
-					messageId: this.currentAssistantMessageId,
-					partId: tool.itemId,
-				}),
-			);
-			return;
-		}
-
-		if (tool.toolName === "__text") {
-			ctx.inFlightTools.delete(index);
-			await this.push(
-				ctx,
-				makeCanonicalEvent("tool.completed", ctx.sessionId, {
-					messageId: tool.itemId,
-					partId: `part-stop-${index}`,
-					result: null,
-					duration: 0,
-				}),
-			);
-			return;
-		}
-
-		// tool_use blocks: emit buffered tool.started now with complete input
-		if (tool.pendingStart) {
-			tool.pendingStart = false;
-			const taskMetadata = this.taskMetadataForToolUseId(ctx, tool.itemId);
-			const finalInput =
-				tool.toolName === "Agent" || tool.toolName === "Task"
-					? enrichTaskInput(tool.bufferedInput ?? tool.input, taskMetadata)
-					: (tool.bufferedInput ?? tool.input);
-			const normalizedInput = normalizeToolInput(tool.toolName, finalInput);
-			await this.push(
-				ctx,
-				makeCanonicalEvent(
-					"tool.started",
-					ctx.sessionId,
-					{
+			// Only complete text/thinking blocks here; tool_use blocks
+			// complete when their tool_result arrives.
+			if (tool.toolName === "__thinking") {
+				ctx.inFlightTools.delete(index);
+				yield* this.push(
+					ctx,
+					makeCanonicalEvent("thinking.end", ctx.sessionId, {
 						messageId: this.currentAssistantMessageId,
 						partId: tool.itemId,
-						toolName: canonicalToolName(tool.toolName, normalizedInput),
-						callId: tool.itemId,
-						input: normalizedInput,
-					},
-					{ schemaVersion: 2 },
-				),
-			);
-			await this.push(
-				ctx,
-				makeCanonicalEvent("tool.running", ctx.sessionId, {
-					messageId: this.currentAssistantMessageId,
-					partId: tool.itemId,
-				}),
-			);
-		}
-		// Do NOT delete from inFlightTools — tool_use blocks wait for tool_result
-
-		// tool_use blocks: do NOT complete here — wait for tool_result
-	}
-
-	private async handleBlockStart(
-		ctx: ClaudeSessionContext,
-		event: StreamEvent & { type: "content_block_start" },
-	): Promise<void> {
-		const index = event.index;
-		const block = event.content_block;
-
-		switch (block.type) {
-			case "text":
-			case "thinking": {
-				const itemId = randomUUID();
-				const toolName = block.type === "text" ? "__text" : "__thinking";
-				const tool: ToolInFlight = {
-					itemId,
-					toolName,
-					title: block.type === "text" ? "Assistant message" : "Thinking",
-					input: {},
-					partialInputJson: "",
-				};
-				ctx.inFlightTools.set(index, tool);
-				if (block.type === "thinking") {
-					// Emit thinking.start so the UI creates a ThinkingMessage with verbs.
-					// text blocks don't need an event — content streams via text.delta → delta.
-					await this.push(
-						ctx,
-						makeCanonicalEvent("thinking.start", ctx.sessionId, {
-							messageId: this.currentAssistantMessageId,
-							partId: tool.itemId,
-						}),
-					);
-				}
-				return;
-			}
-
-			case "tool_use":
-			case "server_tool_use":
-			case "mcp_tool_use": {
-				const toolName = block.name ?? "unknown";
-				const itemType = classifyToolItemType(toolName);
-				const rawInput = block.input;
-				const input =
-					rawInput && typeof rawInput === "object" && !Array.isArray(rawInput)
-						? (rawInput as Record<string, unknown>)
-						: {};
-				const blockId = block.id ?? randomUUID();
-				const tool: ToolInFlight = {
-					itemId: blockId,
-					toolName,
-					title: titleForItemType(itemType),
-					input,
-					partialInputJson: "",
-					pendingStart: true,
-				};
-				ctx.inFlightTools.set(index, tool);
-				// Do NOT emit tool.started here — buffered until content_block_stop
-				return;
-			}
-
-			// Other SDK block types (redacted_thinking, web_search_tool_result,
-			// web_fetch_tool_result, code_execution_tool_result,
-			// bash_code_execution_tool_result, text_editor_code_execution_tool_result,
-			// tool_search_tool_result, mcp_tool_result, container_upload,
-			// compaction) are silently ignored — they don't map to canonical events.
-			default:
-				return;
-		}
-	}
-
-	private async handleBlockDelta(
-		ctx: ClaudeSessionContext,
-		event: StreamEvent & { type: "content_block_delta" },
-	): Promise<void> {
-		const index = event.index;
-		const tool = ctx.inFlightTools.get(index);
-		const delta = event.delta;
-
-		switch (delta.type) {
-			case "text_delta":
-			case "thinking_delta": {
-				const text = delta.type === "text_delta" ? delta.text : delta.thinking;
-				if (text.length === 0) return;
-
-				const eventType =
-					delta.type === "text_delta" ? "text.delta" : "thinking.delta";
-				const partId = tool ? tool.itemId : this.nextPartId();
-				await this.push(
-					ctx,
-					makeCanonicalEvent(eventType, ctx.sessionId, {
-						messageId:
-							this.currentAssistantMessageId || tool?.itemId || randomUUID(),
-						partId,
-						text,
 					}),
 				);
 				return;
 			}
 
-			case "input_json_delta": {
-				if (!tool) return;
-				const partialJson = delta.partial_json;
-				const merged = tool.partialInputJson + partialJson;
-				tool.partialInputJson = merged;
-				let parsed: Record<string, unknown> | undefined;
-				try {
-					const p: unknown = JSON.parse(merged);
-					if (p && typeof p === "object" && !Array.isArray(p)) {
-						parsed = p as Record<string, unknown>;
-					}
-				} catch {
-					return;
-				}
-				if (!parsed) return;
-
-				const fingerprint = JSON.stringify(parsed);
-				if (tool.lastEmittedFingerprint === fingerprint) return;
-				tool.lastEmittedFingerprint = fingerprint;
-				tool.input = parsed;
-				tool.bufferedInput = parsed;
-				// Do NOT emit tool.input_updated or tool.running — buffered
+			if (tool.toolName === "__text") {
+				ctx.inFlightTools.delete(index);
+				yield* this.push(
+					ctx,
+					makeCanonicalEvent("tool.completed", ctx.sessionId, {
+						messageId: tool.itemId,
+						partId: `part-stop-${index}`,
+						result: null,
+						duration: 0,
+					}),
+				);
 				return;
 			}
 
-			// Other SDK delta types (citations_delta, signature_delta,
-			// compaction_delta) are silently ignored.
-			default:
-				return;
-		}
+			// tool_use blocks: emit buffered tool.started now with complete input
+			if (tool.pendingStart) {
+				tool.pendingStart = false;
+				const taskMetadata = this.taskMetadataForToolUseId(ctx, tool.itemId);
+				const finalInput =
+					tool.toolName === "Agent" || tool.toolName === "Task"
+						? enrichTaskInput(tool.bufferedInput ?? tool.input, taskMetadata)
+						: (tool.bufferedInput ?? tool.input);
+				const normalizedInput = normalizeToolInput(tool.toolName, finalInput);
+				yield* this.push(
+					ctx,
+					makeCanonicalEvent(
+						"tool.started",
+						ctx.sessionId,
+						{
+							messageId: this.currentAssistantMessageId,
+							partId: tool.itemId,
+							toolName: canonicalToolName(tool.toolName, normalizedInput),
+							callId: tool.itemId,
+							input: normalizedInput,
+						},
+						{ schemaVersion: 2 },
+					),
+				);
+				yield* this.push(
+					ctx,
+					makeCanonicalEvent("tool.running", ctx.sessionId, {
+						messageId: this.currentAssistantMessageId,
+						partId: tool.itemId,
+					}),
+				);
+			}
+			// Do NOT delete from inFlightTools — tool_use blocks wait for tool_result
+
+			// tool_use blocks: do NOT complete here — wait for tool_result
+		});
+	}
+
+	private handleBlockStart(
+		ctx: ClaudeSessionContext,
+		event: StreamEvent & { type: "content_block_start" },
+	): Effect.Effect<void, unknown> {
+		return Effect.gen(this, function* () {
+			const index = event.index;
+			const block = event.content_block;
+
+			switch (block.type) {
+				case "text":
+				case "thinking": {
+					const itemId = randomUUID();
+					const toolName = block.type === "text" ? "__text" : "__thinking";
+					const tool: ToolInFlight = {
+						itemId,
+						toolName,
+						title: block.type === "text" ? "Assistant message" : "Thinking",
+						input: {},
+						partialInputJson: "",
+					};
+					ctx.inFlightTools.set(index, tool);
+					if (block.type === "thinking") {
+						// Emit thinking.start so the UI creates a ThinkingMessage with verbs.
+						// text blocks don't need an event — content streams via text.delta → delta.
+						yield* this.push(
+							ctx,
+							makeCanonicalEvent("thinking.start", ctx.sessionId, {
+								messageId: this.currentAssistantMessageId,
+								partId: tool.itemId,
+							}),
+						);
+					}
+					return;
+				}
+
+				case "tool_use":
+				case "server_tool_use":
+				case "mcp_tool_use": {
+					const toolName = block.name ?? "unknown";
+					const itemType = classifyToolItemType(toolName);
+					const rawInput = block.input;
+					const input =
+						rawInput && typeof rawInput === "object" && !Array.isArray(rawInput)
+							? (rawInput as Record<string, unknown>)
+							: {};
+					const blockId = block.id ?? randomUUID();
+					const tool: ToolInFlight = {
+						itemId: blockId,
+						toolName,
+						title: titleForItemType(itemType),
+						input,
+						partialInputJson: "",
+						pendingStart: true,
+					};
+					ctx.inFlightTools.set(index, tool);
+					// Do NOT emit tool.started here — buffered until content_block_stop
+					return;
+				}
+
+				// Other SDK block types (redacted_thinking, web_search_tool_result,
+				// web_fetch_tool_result, code_execution_tool_result,
+				// bash_code_execution_tool_result, text_editor_code_execution_tool_result,
+				// tool_search_tool_result, mcp_tool_result, container_upload,
+				// compaction) are silently ignored — they don't map to canonical events.
+				default:
+					return;
+			}
+		});
+	}
+
+	private handleBlockDelta(
+		ctx: ClaudeSessionContext,
+		event: StreamEvent & { type: "content_block_delta" },
+	): Effect.Effect<void, unknown> {
+		return Effect.gen(this, function* () {
+			const index = event.index;
+			const tool = ctx.inFlightTools.get(index);
+			const delta = event.delta;
+
+			switch (delta.type) {
+				case "text_delta":
+				case "thinking_delta": {
+					const text =
+						delta.type === "text_delta" ? delta.text : delta.thinking;
+					if (text.length === 0) return;
+
+					const eventType =
+						delta.type === "text_delta" ? "text.delta" : "thinking.delta";
+					const partId = tool ? tool.itemId : this.nextPartId();
+					yield* this.push(
+						ctx,
+						makeCanonicalEvent(eventType, ctx.sessionId, {
+							messageId:
+								this.currentAssistantMessageId || tool?.itemId || randomUUID(),
+							partId,
+							text,
+						}),
+					);
+					return;
+				}
+
+				case "input_json_delta": {
+					if (!tool) return;
+					const partialJson = delta.partial_json;
+					const merged = tool.partialInputJson + partialJson;
+					tool.partialInputJson = merged;
+					let parsed: Record<string, unknown> | undefined;
+					try {
+						const p: unknown = JSON.parse(merged);
+						if (p && typeof p === "object" && !Array.isArray(p)) {
+							parsed = p as Record<string, unknown>;
+						}
+					} catch {
+						return;
+					}
+					if (!parsed) return;
+
+					const fingerprint = JSON.stringify(parsed);
+					if (tool.lastEmittedFingerprint === fingerprint) return;
+					tool.lastEmittedFingerprint = fingerprint;
+					tool.input = parsed;
+					tool.bufferedInput = parsed;
+					// Do NOT emit tool.input_updated or tool.running — buffered
+					return;
+				}
+
+				// Other SDK delta types (citations_delta, signature_delta,
+				// compaction_delta) are silently ignored.
+				default:
+					return;
+			}
+		});
 	}
 
 	// ─── Assistant Snapshot ──────────────────────────────────────────────
 
-	private async translateAssistantSnapshot(
+	private translateAssistantSnapshot(
 		ctx: ClaudeSessionContext,
 		message: SDKAssistantMessage,
-	): Promise<void> {
-		const uuid = message.uuid; // Typed: UUID
-		if (uuid) {
-			ctx.lastAssistantUuid = uuid;
-			this.currentAssistantMessageId = uuid;
-		}
+	): Effect.Effect<void> {
+		return Effect.sync(() => {
+			const uuid = message.uuid; // Typed: UUID
+			if (uuid) {
+				ctx.lastAssistantUuid = uuid;
+				this.currentAssistantMessageId = uuid;
+			}
+		});
 	}
 
 	// ─── User Tool Results ──────────────────────────────────────────────
 
-	private async translateUserToolResults(
+	private translateUserToolResults(
 		ctx: ClaudeSessionContext,
 		message: SDKUserMessage,
-	): Promise<void> {
-		const content = message.message.content;
-		if (!Array.isArray(content)) return;
+	): Effect.Effect<void, unknown> {
+		return Effect.gen(this, function* () {
+			const content = message.message.content;
+			if (!Array.isArray(content)) return;
 
-		for (const block of content) {
-			if (typeof block === "string") continue;
-			if (block.type !== "tool_result") continue;
-			const toolUseId = block.tool_use_id;
-			if (!toolUseId) continue;
+			for (const block of content) {
+				if (typeof block === "string") continue;
+				if (block.type !== "tool_result") continue;
+				const toolUseId = block.tool_use_id;
+				if (!toolUseId) continue;
 
-			// Find the in-flight tool by itemId
-			let matchedIndex: number | undefined;
-			let matchedTool: ToolInFlight | undefined;
-			for (const [idx, t] of ctx.inFlightTools) {
-				if (t.itemId === toolUseId) {
-					matchedIndex = idx;
-					matchedTool = t;
-					break;
+				// Find the in-flight tool by itemId
+				let matchedIndex: number | undefined;
+				let matchedTool: ToolInFlight | undefined;
+				for (const [idx, t] of ctx.inFlightTools) {
+					if (t.itemId === toolUseId) {
+						matchedIndex = idx;
+						matchedTool = t;
+						break;
+					}
 				}
-			}
-			if (!matchedTool || matchedIndex === undefined) continue;
+				if (!matchedTool || matchedIndex === undefined) continue;
 
-			const resultContent = serializeToolResultContent(block.content);
+				const resultContent = serializeToolResultContent(block.content);
 
-			if (resultContent.length > 0) {
-				await this.push(
+				if (resultContent.length > 0) {
+					yield* this.push(
+						ctx,
+						makeCanonicalEvent("tool.running", ctx.sessionId, {
+							messageId: this.currentAssistantMessageId,
+							partId: matchedTool.itemId,
+						}),
+					);
+				}
+
+				yield* this.push(
 					ctx,
-					makeCanonicalEvent("tool.running", ctx.sessionId, {
+					makeCanonicalEvent("tool.completed", ctx.sessionId, {
 						messageId: this.currentAssistantMessageId,
 						partId: matchedTool.itemId,
+						result: resultContent || null,
+						duration: 0,
 					}),
 				);
+				ctx.inFlightTools.delete(matchedIndex);
 			}
-
-			await this.push(
-				ctx,
-				makeCanonicalEvent("tool.completed", ctx.sessionId, {
-					messageId: this.currentAssistantMessageId,
-					partId: matchedTool.itemId,
-					result: resultContent || null,
-					duration: 0,
-				}),
-			);
-			ctx.inFlightTools.delete(matchedIndex);
-		}
+		});
 	}
 
 	// ─── Result ──────────────────────────────────────────────────────────
 
-	private async translateResult(
+	private translateResult(
 		ctx: ClaudeSessionContext,
 		result: SDKResultMessage,
-	): Promise<void> {
-		if (isInterruptedResult(result)) {
-			await this.push(
+	): Effect.Effect<void, unknown> {
+		return Effect.gen(this, function* () {
+			if (isInterruptedResult(result)) {
+				yield* this.push(
+					ctx,
+					makeCanonicalEvent("turn.interrupted", ctx.sessionId, {
+						messageId:
+							this.currentAssistantMessageId || ctx.lastAssistantUuid || "",
+					}),
+				);
+				this.resetInFlightState();
+				return;
+			}
+
+			if (result.subtype !== "success") {
+				const errors = result.errors.join("; ") || "Unknown error";
+				yield* this.push(
+					ctx,
+					makeCanonicalEvent("turn.error", ctx.sessionId, {
+						messageId:
+							this.currentAssistantMessageId || ctx.lastAssistantUuid || "",
+						error: errors,
+					}),
+				);
+				this.resetInFlightState();
+				return;
+			}
+
+			// result is now narrowed to SDKResultSuccess — typed access to
+			// result.is_error, result.result, result.uuid, result.usage, etc.
+
+			// Success subtype with is_error=true: the SDK wraps an upstream API
+			// error (e.g. "unknown provider for model X", 502s after all retries,
+			// reasoning_effort validation failures) as a synthetic successful
+			// completion whose `result` field contains the error text. Surface
+			// this as a turn.error so the UI shows the message instead of a
+			// silent empty assistant reply.
+			if (result.is_error) {
+				const errorText = result.result || "Provider returned an error";
+				yield* this.push(
+					ctx,
+					makeCanonicalEvent("turn.error", ctx.sessionId, {
+						messageId:
+							this.currentAssistantMessageId || ctx.lastAssistantUuid || "",
+						error: errorText,
+						code: "provider_error",
+					}),
+				);
+				this.resetInFlightState();
+				return;
+			}
+
+			// If the SDK bypassed streaming (short responses, slash commands handled
+			// locally, skill lookups), the full response text lives in `result.result`.
+			// Emit a synthetic text.delta so the UI renders it as an assistant bubble.
+			// Skip when any assistant message was already seen — streaming already
+			// delivered the content to avoid duplicate rendering.
+			const resultText = result.result;
+			if (
+				resultText &&
+				resultText.length > 0 &&
+				!ctx.lastAssistantUuid &&
+				!this.currentAssistantMessageId
+			) {
+				const resultUuid =
+					result.uuid ?? `claude-result-${ctx.sessionId}-${Date.now()}`;
+				this.currentAssistantMessageId = resultUuid;
+				ctx.lastAssistantUuid = resultUuid;
+				yield* this.push(
+					ctx,
+					makeCanonicalEvent("text.delta", ctx.sessionId, {
+						messageId: resultUuid,
+						partId: `${resultUuid}-0`,
+						text: resultText,
+					}),
+				);
+			}
+
+			// Usage — typed via NonNullableUsage on SDKResultSuccess
+			const usage = result.usage;
+			const tokens: {
+				readonly input?: number;
+				readonly output?: number;
+				readonly cacheRead?: number;
+				readonly cacheWrite?: number;
+			} = {
+				input: usage.input_tokens,
+				output: usage.output_tokens,
+				...(usage.cache_read_input_tokens > 0
+					? { cacheRead: usage.cache_read_input_tokens }
+					: {}),
+				...(usage.cache_creation_input_tokens > 0
+					? { cacheWrite: usage.cache_creation_input_tokens }
+					: {}),
+			};
+
+			yield* this.push(
 				ctx,
-				makeCanonicalEvent("turn.interrupted", ctx.sessionId, {
+				makeCanonicalEvent("turn.completed", ctx.sessionId, {
 					messageId:
 						this.currentAssistantMessageId || ctx.lastAssistantUuid || "",
+					cost: result.total_cost_usd,
+					tokens,
+					duration: result.duration_ms,
 				}),
 			);
 			this.resetInFlightState();
-			return;
-		}
-
-		if (result.subtype !== "success") {
-			const errors = result.errors.join("; ") || "Unknown error";
-			await this.push(
-				ctx,
-				makeCanonicalEvent("turn.error", ctx.sessionId, {
-					messageId:
-						this.currentAssistantMessageId || ctx.lastAssistantUuid || "",
-					error: errors,
-				}),
-			);
-			this.resetInFlightState();
-			return;
-		}
-
-		// result is now narrowed to SDKResultSuccess — typed access to
-		// result.is_error, result.result, result.uuid, result.usage, etc.
-
-		// Success subtype with is_error=true: the SDK wraps an upstream API
-		// error (e.g. "unknown provider for model X", 502s after all retries,
-		// reasoning_effort validation failures) as a synthetic successful
-		// completion whose `result` field contains the error text. Surface
-		// this as a turn.error so the UI shows the message instead of a
-		// silent empty assistant reply.
-		if (result.is_error) {
-			const errorText = result.result || "Provider returned an error";
-			await this.push(
-				ctx,
-				makeCanonicalEvent("turn.error", ctx.sessionId, {
-					messageId:
-						this.currentAssistantMessageId || ctx.lastAssistantUuid || "",
-					error: errorText,
-					code: "provider_error",
-				}),
-			);
-			this.resetInFlightState();
-			return;
-		}
-
-		// If the SDK bypassed streaming (short responses, slash commands handled
-		// locally, skill lookups), the full response text lives in `result.result`.
-		// Emit a synthetic text.delta so the UI renders it as an assistant bubble.
-		// Skip when any assistant message was already seen — streaming already
-		// delivered the content to avoid duplicate rendering.
-		const resultText = result.result;
-		if (
-			resultText &&
-			resultText.length > 0 &&
-			!ctx.lastAssistantUuid &&
-			!this.currentAssistantMessageId
-		) {
-			const resultUuid =
-				result.uuid ?? `claude-result-${ctx.sessionId}-${Date.now()}`;
-			this.currentAssistantMessageId = resultUuid;
-			ctx.lastAssistantUuid = resultUuid;
-			await this.push(
-				ctx,
-				makeCanonicalEvent("text.delta", ctx.sessionId, {
-					messageId: resultUuid,
-					partId: `${resultUuid}-0`,
-					text: resultText,
-				}),
-			);
-		}
-
-		// Usage — typed via NonNullableUsage on SDKResultSuccess
-		const usage = result.usage;
-		const tokens: {
-			readonly input?: number;
-			readonly output?: number;
-			readonly cacheRead?: number;
-			readonly cacheWrite?: number;
-		} = {
-			input: usage.input_tokens,
-			output: usage.output_tokens,
-			...(usage.cache_read_input_tokens > 0
-				? { cacheRead: usage.cache_read_input_tokens }
-				: {}),
-			...(usage.cache_creation_input_tokens > 0
-				? { cacheWrite: usage.cache_creation_input_tokens }
-				: {}),
-		};
-
-		await this.push(
-			ctx,
-			makeCanonicalEvent("turn.completed", ctx.sessionId, {
-				messageId:
-					this.currentAssistantMessageId || ctx.lastAssistantUuid || "",
-				cost: result.total_cost_usd,
-				tokens,
-				duration: result.duration_ms,
-			}),
-		);
-		this.resetInFlightState();
+		});
 	}
 
 	// ─── Flush Pending Tools ────────────────────────────────────────────
@@ -1085,59 +1112,58 @@ export class ClaudeEventTranslator {
 		return this.collectWrites(() => this.flushPendingToolsMessage(ctx));
 	}
 
-	private async flushPendingToolsMessage(
+	private flushPendingToolsMessage(
 		ctx: ClaudeSessionContext,
-	): Promise<void> {
-		for (const [index, tool] of ctx.inFlightTools) {
-			if (!tool.pendingStart) continue;
-			tool.pendingStart = false;
-			const taskMetadata = this.taskMetadataForToolUseId(ctx, tool.itemId);
-			const finalInput =
-				tool.toolName === "Agent" || tool.toolName === "Task"
-					? enrichTaskInput(tool.bufferedInput ?? tool.input, taskMetadata)
-					: (tool.bufferedInput ?? tool.input);
-			const normalizedInput = normalizeToolInput(tool.toolName, finalInput);
-			await this.push(
-				ctx,
-				makeCanonicalEvent(
-					"tool.started",
-					ctx.sessionId,
-					{
+	): Effect.Effect<void, unknown> {
+		return Effect.gen(this, function* () {
+			for (const [index, tool] of ctx.inFlightTools) {
+				if (!tool.pendingStart) continue;
+				tool.pendingStart = false;
+				const taskMetadata = this.taskMetadataForToolUseId(ctx, tool.itemId);
+				const finalInput =
+					tool.toolName === "Agent" || tool.toolName === "Task"
+						? enrichTaskInput(tool.bufferedInput ?? tool.input, taskMetadata)
+						: (tool.bufferedInput ?? tool.input);
+				const normalizedInput = normalizeToolInput(tool.toolName, finalInput);
+				yield* this.push(
+					ctx,
+					makeCanonicalEvent(
+						"tool.started",
+						ctx.sessionId,
+						{
+							messageId: this.currentAssistantMessageId,
+							partId: tool.itemId,
+							toolName: canonicalToolName(tool.toolName, normalizedInput),
+							callId: tool.itemId,
+							input: normalizedInput,
+						},
+						{ schemaVersion: 2 },
+					),
+				);
+				yield* this.push(
+					ctx,
+					makeCanonicalEvent("tool.completed", ctx.sessionId, {
 						messageId: this.currentAssistantMessageId,
 						partId: tool.itemId,
-						toolName: canonicalToolName(tool.toolName, normalizedInput),
-						callId: tool.itemId,
-						input: normalizedInput,
-					},
-					{ schemaVersion: 2 },
-				),
-			);
-			await this.push(
-				ctx,
-				makeCanonicalEvent("tool.completed", ctx.sessionId, {
-					messageId: this.currentAssistantMessageId,
-					partId: tool.itemId,
-					result: null,
-					duration: 0,
-				}),
-			);
-			ctx.inFlightTools.delete(index);
-		}
+						result: null,
+						duration: 0,
+					}),
+				);
+				ctx.inFlightTools.delete(index);
+			}
+		});
 	}
 
 	// ─── Push Helper ─────────────────────────────────────────────────────
 
 	private collectWrites(
-		work: () => Promise<void>,
+		work: () => Effect.Effect<void, unknown>,
 	): Effect.Effect<void, unknown> {
 		return Effect.gen(this, function* () {
 			const previousWrites = this.bufferedWrites;
 			const writes: Effect.Effect<void, unknown>[] = [];
 			this.bufferedWrites = writes;
-			yield* Effect.tryPromise({
-				try: work,
-				catch: (cause) => cause,
-			}).pipe(
+			yield* work().pipe(
 				Effect.ensuring(
 					Effect.sync(() => {
 						this.bufferedWrites = previousWrites;
@@ -1148,12 +1174,15 @@ export class ClaudeEventTranslator {
 		});
 	}
 
-	private async push(
+	private push(
 		ctx: ClaudeSessionContext,
 		event: CanonicalEvent,
-	): Promise<void> {
+	): Effect.Effect<void, unknown> {
 		const sink = this.deps.getSink(ctx);
-		if (!sink) return;
-		this.bufferedWrites?.push(sink.push(event));
+		if (!sink) return Effect.void;
+		const write = sink.push(event);
+		if (!this.bufferedWrites) return write;
+		this.bufferedWrites.push(write);
+		return Effect.void;
 	}
 }

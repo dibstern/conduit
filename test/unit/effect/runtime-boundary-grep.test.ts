@@ -222,6 +222,110 @@ describe("Effect runtime boundary grep", () => {
 		expect(hits).toEqual([]);
 	});
 
+	it("keeps provider-turn interrupt relay policy out of prompt handlers", () => {
+		const path = "src/lib/handlers/prompt.ts";
+		const source = readFileSync(join(REPO_ROOT, path), "utf8");
+		const forbiddenPatterns = [
+			{
+				pattern: /\bOrchestrationEngineTag\b/,
+				reason:
+					"prompt handlers should delegate provider-turn relay policy to ProviderTurnService",
+			},
+			{
+				pattern: /\bisProviderTurnInterruptProvider\b/,
+				reason:
+					"provider-specific interrupt eligibility belongs in ProviderTurnService",
+			},
+			{
+				pattern: /type:\s*"interrupt_turn"/,
+				reason:
+					"prompt handlers should not dispatch provider interrupt commands directly",
+			},
+		] as const;
+
+		const hits = forbiddenPatterns.flatMap(({ pattern, reason }) =>
+			source
+				.split("\n")
+				.flatMap((line, index) =>
+					pattern.test(line)
+						? [{ path, line: index + 1, source: line.trim(), reason }]
+						: [],
+				),
+		);
+
+		expect(hits).toEqual([]);
+	});
+
+	it("keeps Claude translator writes Effect-shaped before sink writes", () => {
+		const path = "src/lib/provider/claude/claude-event-translator.ts";
+		const source = readFileSync(join(REPO_ROOT, path), "utf8");
+		const forbiddenPatterns = [
+			{
+				pattern: /Promise<void>/,
+				reason: "translator internals should return Effect, not Promise<void>",
+			},
+			{
+				pattern: /\basync\s+(?:translateMessage|push)\b/,
+				reason: "translator message and push paths should be Effect-shaped",
+			},
+			{
+				pattern: /work:\s*\(\)\s*=>\s*Promise<void>/,
+				reason: "collectWrites should accept Effect work, not Promise work",
+			},
+		] as const;
+
+		const hits = forbiddenPatterns.flatMap(({ pattern, reason }) =>
+			source
+				.split("\n")
+				.flatMap((line, index) =>
+					pattern.test(line)
+						? [{ path, line: index + 1, source: line.trim(), reason }]
+						: [],
+				),
+		);
+
+		expect(hits).toEqual([]);
+	});
+
+	it("instruments Claude provider runtime Effect operations", () => {
+		const runtime = readFileSync(
+			join(REPO_ROOT, "src/lib/provider/claude/claude-provider-runtime.ts"),
+			"utf8",
+		);
+		const permission = readFileSync(
+			join(REPO_ROOT, "src/lib/provider/claude/claude-permission-service.ts"),
+			"utf8",
+		);
+		const capabilities = readFileSync(
+			join(REPO_ROOT, "src/lib/provider/claude/claude-capabilities-service.ts"),
+			"utf8",
+		);
+
+		for (const span of [
+			"claude.sendTurn",
+			"claude.stream.consume",
+			"claude.interrupt",
+			"claude.shutdown",
+		]) {
+			expect(runtime).toContain(`Effect.withSpan("${span}"`);
+		}
+		for (const field of [
+			"providerId: this.providerId",
+			"sessionId",
+			"turnId",
+		]) {
+			expect(runtime).toContain(field);
+		}
+		expect(permission).toContain('Effect.withSpan("claude.permission"');
+		expect(permission).toContain('providerId: "claude"');
+		expect(permission).toContain("Effect.annotateLogs(attributes)");
+		expect(capabilities).toContain(
+			'Effect.withSpan("claude.capabilities.probe"',
+		);
+		expect(capabilities).toContain('providerId: "claude"');
+		expect(capabilities).toContain("Effect.annotateLogs(attributes)");
+	});
+
 	it("constructs the daemon HTTP router handler inside the Layer effect", () => {
 		const path = "src/lib/domain/server/Layers/http-router-layer.ts";
 		const source = readFileSync(join(REPO_ROOT, path), "utf8");

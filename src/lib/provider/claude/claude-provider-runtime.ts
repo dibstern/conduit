@@ -444,7 +444,7 @@ export const makeClaudeProviderRuntime = (
 			streamFibers,
 		);
 		yield* Effect.addFinalizer(() =>
-			runtime.shutdownLocalEffect().pipe(Effect.ignore),
+			runtime.shutdownEffect().pipe(Effect.ignore),
 		);
 		return runtime;
 	});
@@ -667,7 +667,18 @@ export class ClaudeProviderRuntime {
 	sendTurnEffect(
 		input: SendTurnInput,
 	): Effect.Effect<TurnResult, ProviderInstanceFailure> {
-		return this.mapProviderFailure("sendTurn", this.sendTurnLocalEffect(input));
+		const attributes = {
+			providerId: this.providerId,
+			sessionId: input.sessionId,
+			turnId: input.turnId,
+		};
+		return this.mapProviderFailure(
+			"sendTurn",
+			this.sendTurnLocalEffect(input).pipe(
+				Effect.annotateLogs(attributes),
+				Effect.withSpan("claude.sendTurn", { attributes }),
+			),
+		);
 	}
 
 	private sendTurnLocalEffect(
@@ -980,7 +991,15 @@ export class ClaudeProviderRuntime {
 		ctx: ClaudeSessionContext,
 		translator: ClaudeTranslationService,
 	): Effect.Effect<void, unknown> {
-		return this.consumeStreamEffect(ctx, translator);
+		const attributes = {
+			providerId: this.providerId,
+			sessionId: ctx.sessionId,
+			turnId: ctx.currentTurnId ?? "unknown",
+		};
+		return this.consumeStreamEffect(ctx, translator).pipe(
+			Effect.annotateLogs(attributes),
+			Effect.withSpan("claude.stream.consume", { attributes }),
+		);
 	}
 
 	private consumeStreamEffect(
@@ -1759,9 +1778,13 @@ export class ClaudeProviderRuntime {
 	interruptTurnEffect(
 		sessionId: string,
 	): Effect.Effect<void, ProviderInstanceFailure> {
+		const attributes = { providerId: this.providerId, sessionId };
 		return this.mapProviderFailure(
 			"interruptTurn",
-			this.interruptSessionEffect(sessionId),
+			this.interruptSessionEffect(sessionId).pipe(
+				Effect.annotateLogs(attributes),
+				Effect.withSpan("claude.interrupt", { attributes }),
+			),
 		);
 	}
 
@@ -1960,7 +1983,14 @@ export class ClaudeProviderRuntime {
 	}
 
 	shutdownEffect(): Effect.Effect<void, ProviderInstanceFailure> {
-		return this.mapProviderFailure("shutdown", this.shutdownLocalEffect());
+		const attributes = { providerId: this.providerId };
+		return this.mapProviderFailure(
+			"shutdown",
+			this.shutdownLocalEffect().pipe(
+				Effect.annotateLogs(attributes),
+				Effect.withSpan("claude.shutdown", { attributes }),
+			),
+		);
 	}
 
 	shutdownLocalEffect(): Effect.Effect<void, unknown> {

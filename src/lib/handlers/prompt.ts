@@ -4,13 +4,11 @@ import { OpenCodeAPITag } from "../domain/provider/Services/opencode-api-service
 import { Effect } from "effect";
 import { AgentServiceTag } from "../domain/relay/Services/agent-service.js";
 import {
-	isProviderTurnInterruptProvider,
 	makeProviderTurnService,
 	ProviderTurnServiceTag,
 } from "../domain/relay/Services/provider-turn-service.js";
 import {
 	LoggerTag,
-	OrchestrationEngineTag,
 	WebSocketHandlerTag,
 } from "../domain/relay/Services/services.js";
 import { SessionManagerServiceTag } from "../domain/relay/Services/session-manager-service.js";
@@ -194,31 +192,6 @@ export const cancelSessionById = (clientId: string, sessionId: string) =>
 				sessionId,
 			});
 			if (interrupted) return;
-		}
-		const engineOption = yield* Effect.serviceOption(OrchestrationEngineTag);
-		if (engineOption._tag === "Some") {
-			const engine = engineOption.value;
-			const providerId = engine.getProviderForSession(sessionId);
-			if (providerId && isProviderTurnInterruptProvider(providerId)) {
-				const interruptResult = yield* Effect.either(
-					engine.dispatchEffect({
-						type: "interrupt_turn",
-						sessionId,
-					}),
-				);
-				if (interruptResult._tag === "Left") {
-					log.warn(
-						`client=${clientId} session=${sessionId} engine interrupt_turn failed:`,
-						formatErrorDetail(interruptResult.left),
-					);
-				}
-				wsHandler.sendToSession(sessionId, {
-					type: "done",
-					sessionId,
-					code: 1,
-				});
-				return;
-			}
 		}
 
 		const abortResult = yield* Effect.either(
