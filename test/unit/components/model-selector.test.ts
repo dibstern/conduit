@@ -149,6 +149,53 @@ describe("ModelSelector", () => {
 		expect(discoveryState.availableVariants).toEqual(["standard", "fast"]);
 	});
 
+	it("keeps a successful model switch when the follow-up agent refresh fails", async () => {
+		getAgentsRpcSpy.mockRejectedValueOnce(new Error("agent discovery failed"));
+		discoveryState.providers = [
+			...discoveryState.providers,
+			{
+				id: "opencode",
+				name: "OpenCode Zen",
+				configured: true,
+				models: [
+					{
+						id: "nemotron-3-super-free",
+						name: "Nemotron 3 Super Free",
+						provider: "opencode",
+					},
+				],
+			},
+		];
+
+		const { container, getByTitle } = render(ModelSelector);
+		await fireEvent.click(getByTitle("Switch model"));
+		const nemotron = container.querySelector<HTMLButtonElement>(
+			'[data-model-id="nemotron-3-super-free"][data-provider-id="opencode"]',
+		);
+		expect(nemotron).not.toBeNull();
+
+		await fireEvent.click(nemotron as HTMLButtonElement);
+
+		await waitFor(() => {
+			expect(switchModelRpcSpy).toHaveBeenCalledWith({
+				projectSlug: "project-a",
+				sessionId: "session-1",
+				modelId: "nemotron-3-super-free",
+				providerId: "opencode",
+			});
+		});
+		await waitFor(() => {
+			expect(getAgentsRpcSpy).toHaveBeenCalledWith({
+				projectSlug: "project-a",
+				sessionId: "session-1",
+			});
+		});
+		expect(discoveryState.currentModelId).toBe("nemotron-3-super-free");
+		expect(discoveryState.currentProviderId).toBe("opencode");
+		expect(discoveryState.currentVariant).toBe("fast");
+		expect(discoveryState.availableVariants).toEqual(["standard", "fast"]);
+	});
+
 	it("sets the default model through RPC", async () => {
 		const { container, getByTitle } = render(ModelSelector);
 		await fireEvent.click(getByTitle("Switch model"));

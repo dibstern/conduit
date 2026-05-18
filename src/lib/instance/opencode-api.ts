@@ -779,6 +779,7 @@ class AppNamespace {
 			name: agent.name,
 			...(agent.description != null ? { description: agent.description } : {}),
 			...(agent.mode != null ? { mode: agent.mode } : {}),
+			...(agent.hidden != null ? { hidden: agent.hidden } : {}),
 		}));
 	}
 

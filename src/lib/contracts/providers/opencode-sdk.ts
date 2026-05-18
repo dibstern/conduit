@@ -362,9 +362,10 @@ export const OpenCodeAgentSchema = Schema.Struct({
 	mode: Schema.optional(Schema.Literal("subagent", "primary", "all")),
 	builtIn: Schema.optional(Schema.Boolean),
 	native: Schema.optional(Schema.Boolean),
-	topP: Schema.optional(Schema.Number),
-	temperature: Schema.optional(Schema.Number),
-	color: Schema.optional(Schema.String),
+	hidden: Schema.optional(Schema.Boolean),
+	topP: Schema.optional(Schema.NullOr(Schema.Number)),
+	temperature: Schema.optional(Schema.NullOr(Schema.Number)),
+	color: Schema.optional(Schema.NullOr(Schema.String)),
 	permission: Schema.optional(Schema.Unknown),
 	model: Schema.optional(
 		Schema.Struct({
@@ -372,6 +373,7 @@ export const OpenCodeAgentSchema = Schema.Struct({
 			providerID: Schema.String,
 		}),
 	),
+	variant: Schema.optional(Schema.NullOr(Schema.String)),
 	prompt: Schema.optional(Schema.String),
 	tools: Schema.optional(
 		Schema.Record({ key: Schema.String, value: Schema.Boolean }),
@@ -380,6 +382,7 @@ export const OpenCodeAgentSchema = Schema.Struct({
 		Schema.Record({ key: Schema.String, value: Schema.Unknown }),
 	),
 	maxSteps: Schema.optional(Schema.Number),
+	steps: Schema.optional(Schema.Number),
 });
 
 export type OpenCodeAgent = Schema.Schema.Type<typeof OpenCodeAgentSchema>;

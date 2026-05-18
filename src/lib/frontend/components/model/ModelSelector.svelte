@@ -137,9 +137,10 @@
 					discoveryState.currentProviderId = response.provider;
 					discoveryState.currentVariant = response.variant;
 					discoveryState.availableVariants = response.variants;
-					return getAgentsRpc({ projectSlug, sessionId });
+					void getAgentsRpc({ projectSlug, sessionId })
+						.then(applyGetAgentsResponse)
+						.catch(() => undefined);
 				})
-				.then(applyGetAgentsResponse)
 				.catch(() => {
 					discoveryState.currentModelId = previousModelId;
 					discoveryState.currentProviderId = previousProviderId;
