@@ -989,80 +989,114 @@ export class ClaudeProviderRuntime {
 	): Effect.Effect<void, unknown> {
 		return Effect.gen(this, function* () {
 			let resultFinalizationStarted = false;
+			yield* this.consumeStreamLoopEffect(ctx, translator, () => {
+				resultFinalizationStarted = true;
+			}).pipe(
+				Effect.catchAll((err) =>
+					this.handleStreamFailureEffect(ctx, translator, err),
+				),
+				Effect.ensuring(
+					this.finalizeStreamConsumerEffect(
+						ctx,
+						() => resultFinalizationStarted,
+					).pipe(Effect.ignore),
+				),
+			);
+		});
+	}
+
+	private consumeStreamLoopEffect(
+		ctx: ClaudeSessionContext,
+		translator: ClaudeTranslationService,
+		markResultFinalizationStarted: () => void,
+	): Effect.Effect<void, unknown> {
+		return Effect.gen(this, function* () {
 			const iterator = (ctx.query as AsyncIterable<unknown>)[
 				Symbol.asyncIterator
 			]();
-			try {
-				while (true) {
-					if (ctx.stopped || !(yield* this.isCurrentSession(ctx))) break;
-					const nextResult = yield* Effect.either(
-						Effect.tryPromise({
-							try: () => iterator.next(),
-							catch: (cause) => cause,
-						}),
-					);
-					if (nextResult._tag === "Left") throw nextResult.left;
-					const next = nextResult.right;
-					if (next.done) break;
+			while (true) {
+				if (ctx.stopped || !(yield* this.isCurrentSession(ctx))) break;
+				const next = yield* Effect.tryPromise({
+					try: () => iterator.next(),
+					catch: (cause) => cause,
+				});
+				if (next.done) break;
 
-					const decodedMessage = decodeProviderMessage(next.value);
-					if (
-						yield* this.pushForwardedSubagentMessageEffect(ctx, decodedMessage)
-					) {
-						continue;
-					}
-					yield* translator.translate(ctx, decodedMessage);
-					yield* this.handleSubagentTaskStartedEffect(ctx, decodedMessage);
-					if (decodedMessage.type === "result") {
-						const finalizationCtx = this.detachSubagentFinalizationContext(ctx);
-						resultFinalizationStarted = true;
-						yield* Effect.forkDaemon(
-							this.finalizeSubagentsAfterResultEffect(
-								finalizationCtx,
-								decodedMessage,
-							).pipe(Effect.ignore),
-						);
-						yield* this.resolveTurnEffect(ctx, decodedMessage);
-					}
-				}
-			} catch (err) {
-				this.stopSubagentPollers(ctx);
-				if (ctx.stopped || !(yield* this.isCurrentSession(ctx))) return;
-				// Clear stale resume cursor so next turn starts a fresh SDK session
-				const errMsg = err instanceof Error ? err.message : String(err);
+				const decodedMessage = yield* Effect.try({
+					try: () => decodeProviderMessage(next.value),
+					catch: (cause) => cause,
+				});
 				if (
-					ctx.resumeSessionId &&
-					/invalid.session|session.*not.*found|session.*expired/i.test(errMsg)
+					yield* this.pushForwardedSubagentMessageEffect(ctx, decodedMessage)
 				) {
-					ctx.resumeSessionId = undefined;
-					log.warn(
-						`Session ${ctx.sessionId}: stale resume cursor cleared after: ${errMsg}`,
+					continue;
+				}
+				yield* translator.translate(ctx, decodedMessage);
+				yield* this.handleSubagentTaskStartedEffect(ctx, decodedMessage);
+				if (decodedMessage.type === "result") {
+					const finalizationCtx = this.detachSubagentFinalizationContext(ctx);
+					markResultFinalizationStarted();
+					yield* Effect.forkDaemon(
+						this.finalizeSubagentsAfterResultEffect(
+							finalizationCtx,
+							decodedMessage,
+						).pipe(Effect.ignore),
 					);
+					yield* this.resolveTurnEffect(ctx, decodedMessage);
 				}
+			}
+		});
+	}
 
-				yield* translator.translateError(ctx, err).pipe(
-					Effect.catchAll((translateErr) =>
-						Effect.sync(() => {
-							log.warn(
-								`translateError failed for session ${ctx.sessionId}: ${translateErr instanceof Error ? translateErr.message : translateErr}`,
-							);
-						}),
-					),
+	private handleStreamFailureEffect(
+		ctx: ClaudeSessionContext,
+		translator: ClaudeTranslationService,
+		err: unknown,
+	): Effect.Effect<void, unknown> {
+		return Effect.gen(this, function* () {
+			this.stopSubagentPollers(ctx);
+			if (ctx.stopped || !(yield* this.isCurrentSession(ctx))) return;
+			// Clear stale resume cursor so next turn starts a fresh SDK session
+			const errMsg = err instanceof Error ? err.message : String(err);
+			if (
+				ctx.resumeSessionId &&
+				/invalid.session|session.*not.*found|session.*expired/i.test(errMsg)
+			) {
+				ctx.resumeSessionId = undefined;
+				log.warn(
+					`Session ${ctx.sessionId}: stale resume cursor cleared after: ${errMsg}`,
 				);
-				yield* this.resolveErrorTurnEffect(ctx, err);
-			} finally {
-				if (!resultFinalizationStarted) {
-					this.stopSubagentPollers(ctx);
-				}
-				if (!ctx.stopped && (yield* this.isCurrentSession(ctx))) {
-					const current = yield* this.getSession(ctx.sessionId);
-					if (current === ctx) {
-						yield* this.markStreamEnded(ctx.sessionId);
-						yield* this.rejectTurnIfPendingEffect(
-							ctx,
-							new Error("SDK stream ended without result"),
+			}
+
+			yield* translator.translateError(ctx, err).pipe(
+				Effect.catchAll((translateErr) =>
+					Effect.sync(() => {
+						log.warn(
+							`translateError failed for session ${ctx.sessionId}: ${translateErr instanceof Error ? translateErr.message : translateErr}`,
 						);
-					}
+					}),
+				),
+			);
+			yield* this.resolveErrorTurnEffect(ctx, err);
+		});
+	}
+
+	private finalizeStreamConsumerEffect(
+		ctx: ClaudeSessionContext,
+		resultFinalizationStarted: () => boolean,
+	): Effect.Effect<void, unknown> {
+		return Effect.gen(this, function* () {
+			if (!resultFinalizationStarted()) {
+				this.stopSubagentPollers(ctx);
+			}
+			if (!ctx.stopped && (yield* this.isCurrentSession(ctx))) {
+				const current = yield* this.getSession(ctx.sessionId);
+				if (current === ctx) {
+					yield* this.markStreamEnded(ctx.sessionId);
+					yield* this.rejectTurnIfPendingEffect(
+						ctx,
+						new Error("SDK stream ended without result"),
+					);
 				}
 			}
 		});

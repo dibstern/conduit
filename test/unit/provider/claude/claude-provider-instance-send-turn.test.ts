@@ -2374,6 +2374,47 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 		expect(errorEvents.length).toBeGreaterThanOrEqual(1);
 	});
 
+	it("resolves with error status when event sink writes fail during stream translation", async () => {
+		const streamMessage = {
+			type: "stream_event",
+			event: {
+				type: "message_start",
+				message: { id: "assistant-sink-failure" },
+			},
+			parent_tool_use_id: null,
+			uuid: "00000000-0000-0000-0000-000000000210",
+			session_id: "sdk-session-1",
+		} as unknown as SDKMessage;
+		const mockQuery = createMockQuery([streamMessage]);
+		queryFactorySpy = vi.fn(() => mockQuery);
+		const instance = new ClaudeProviderInstance({
+			workspaceRoot: workspace,
+			queryFactory: queryFactorySpy,
+		});
+
+		const sink = createMockEventSink();
+		(sink.push as ReturnType<typeof vi.fn>).mockImplementation(() =>
+			Effect.fail(new Error("sink write failed")),
+		);
+		const input = makeBaseSendTurnInput({
+			sessionId: "session-sink-write-failure",
+			eventSink: sink,
+		});
+
+		const result = await Effect.runPromise(
+			instance.sendTurnEffect(input).pipe(
+				Effect.timeoutFail({
+					duration: "500 millis",
+					onTimeout: () =>
+						new Error("sendTurnEffect did not settle after sink failure"),
+				}),
+			),
+		);
+
+		expect(result.status).toBe("error");
+		expect(result.error?.message).toContain("sink write failed");
+	});
+
 	it("fails malformed SDK stream data before translation", async () => {
 		const hugeProviderPayload = "x".repeat(20_000);
 		const malformedMessage = {

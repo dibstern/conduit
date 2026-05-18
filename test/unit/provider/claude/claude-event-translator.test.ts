@@ -1550,6 +1550,42 @@ describe("ClaudeEventTranslator", () => {
 		expect(data["error"]).toBe("string error");
 	});
 
+	it("restores buffered write state when translation work fails", async () => {
+		let sessionIdReads = 0;
+		const failingCtx = {
+			...ctx,
+			get sessionId() {
+				sessionIdReads += 1;
+				if (sessionIdReads === 3) {
+					throw new Error("session id unavailable");
+				}
+				return "sess-1";
+			},
+		} as ClaudeSessionContext;
+
+		await expect(
+			runTranslate(
+				translator,
+				failingCtx,
+				makeStreamEvent({
+					type: "message_start",
+					message: { id: "assistant-buffer-restore" },
+				}),
+			),
+		).rejects.toThrow("session id unavailable");
+
+		expect(
+			(
+				translator as unknown as {
+					bufferedWrites?: Effect.Effect<void, unknown>[];
+				}
+			).bufferedWrites,
+		).toBeUndefined();
+
+		await runTranslateError(translator, ctx, new Error("after failure"));
+		expect(sink.events.map((event) => event.type)).toEqual(["turn.error"]);
+	});
+
 	it("resetInFlightState clears counters and message id", () => {
 		translator.resetInFlightState();
 		// Should not throw -- verifies it's callable

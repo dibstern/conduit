@@ -1134,14 +1134,16 @@ export class ClaudeEventTranslator {
 			const previousWrites = this.bufferedWrites;
 			const writes: Effect.Effect<void, unknown>[] = [];
 			this.bufferedWrites = writes;
-			try {
-				yield* Effect.tryPromise({
-					try: work,
-					catch: (cause) => cause,
-				});
-			} finally {
-				this.bufferedWrites = previousWrites;
-			}
+			yield* Effect.tryPromise({
+				try: work,
+				catch: (cause) => cause,
+			}).pipe(
+				Effect.ensuring(
+					Effect.sync(() => {
+						this.bufferedWrites = previousWrites;
+					}),
+				),
+			);
 			yield* Effect.all(writes, { discard: true });
 		});
 	}
