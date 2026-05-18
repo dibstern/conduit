@@ -18,7 +18,13 @@ export interface WireAgent {
 	readonly model?: string;
 }
 
+export interface AgentProviderScope {
+	readonly id: "opencode" | "claude";
+	readonly name: "OpenCode" | "Claude";
+}
+
 export interface AgentList {
+	readonly providerScope: AgentProviderScope;
 	readonly agents: readonly WireAgent[];
 	readonly activeAgentId?: string;
 }
@@ -97,6 +103,16 @@ export class AgentServiceTag extends Context.Tag("AgentService")<
 const describeError = (error: unknown): string =>
 	error instanceof Error ? error.message : String(error);
 
+const OPENCODE_PROVIDER_SCOPE: AgentProviderScope = {
+	id: "opencode",
+	name: "OpenCode",
+};
+
+const CLAUDE_PROVIDER_SCOPE: AgentProviderScope = {
+	id: "claude",
+	name: "Claude",
+};
+
 const withActiveAgent = (
 	agents: readonly WireAgent[],
 	sessionId: string | undefined,
@@ -111,6 +127,16 @@ const withActiveAgent = (
 		yield* clearAgent(sessionId);
 		return { agents };
 	});
+
+const scopedAgentList = (
+	providerScope: AgentProviderScope,
+	agents: readonly WireAgent[],
+	sessionId: string | undefined,
+) =>
+	Effect.map(withActiveAgent(agents, sessionId), (result) => ({
+		providerScope,
+		...result,
+	}));
 
 export const AgentServiceLive: Layer.Layer<
 	AgentServiceTag,
@@ -147,7 +173,7 @@ export const AgentServiceLive: Layer.Layer<
 						Effect.gen(function* () {
 							if (engineOption._tag !== "Some") {
 								return yield* provideOverrides(
-									withActiveAgent([], activeSessionId),
+									scopedAgentList(CLAUDE_PROVIDER_SCOPE, [], activeSessionId),
 								);
 							}
 							const result = yield* Effect.either(
@@ -161,11 +187,12 @@ export const AgentServiceLive: Layer.Layer<
 									`Failed to discover Claude agents: ${describeError(result.left)}`,
 								);
 								return yield* provideOverrides(
-									withActiveAgent([], activeSessionId),
+									scopedAgentList(CLAUDE_PROVIDER_SCOPE, [], activeSessionId),
 								);
 							}
 							return yield* provideOverrides(
-								withActiveAgent(
+								scopedAgentList(
+									CLAUDE_PROVIDER_SCOPE,
 									toWireAgents(result.right.agents ?? []),
 									activeSessionId,
 								),
@@ -184,7 +211,8 @@ export const AgentServiceLive: Layer.Layer<
 					);
 					if (rawAgentsResult._tag === "Right") {
 						return yield* provideOverrides(
-							withActiveAgent(
+							scopedAgentList(
+								OPENCODE_PROVIDER_SCOPE,
 								filterAgents(rawAgentsResult.right),
 								activeSessionId,
 							),

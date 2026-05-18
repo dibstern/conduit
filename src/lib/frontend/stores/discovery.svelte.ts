@@ -8,6 +8,7 @@ import type {
 } from "../transport/ws-rpc.js";
 import type {
 	AgentInfo,
+	AgentProviderScope,
 	CommandInfo,
 	ContextWindowOption,
 	ModelInfo,
@@ -82,6 +83,7 @@ const providersFromGetModelsResponse = (
 
 export const discoveryState = $state({
 	agents: [] as AgentInfo[],
+	agentProviderScope: null as AgentProviderScope | null,
 	activeAgentId: null as string | null,
 	providers: [] as ProviderInfo[],
 	currentModelId: "" as string,
@@ -127,8 +129,7 @@ export function getProviderGroups(): ProviderGroup[] {
 
 /** Format agent label for display. */
 export function formatAgentLabel(agent: AgentInfo): string {
-	const label = agent.name || agent.id;
-	return agent.model ? `${label} (${agent.model})` : label;
+	return agent.name || agent.id;
 }
 
 /** Build tooltip text for an agent. */
@@ -184,18 +185,24 @@ export function extractSlashQuery(
 export function handleAgentList(
 	msg: Extract<RelayMessage, { type: "agent_list" }>,
 ): void {
-	const { agents, activeAgentId } = msg;
+	const { agents, activeAgentId, providerScope } = msg;
 	if (Array.isArray(agents)) {
 		discoveryState.agents = agents;
 	}
+	if (providerScope) {
+		discoveryState.agentProviderScope = providerScope;
+	}
 	if (activeAgentId) {
 		discoveryState.activeAgentId = activeAgentId;
+	} else {
+		discoveryState.activeAgentId = null;
 	}
 }
 
 export function applyGetAgentsResponse(response: GetAgentsResponse): void {
 	handleAgentList({
 		type: "agent_list",
+		providerScope: response.providerScope,
 		agents: response.agents.map((agent) => ({
 			id: agent.id,
 			name: agent.name,
@@ -329,6 +336,7 @@ export function handleContextWindowInfo(
 /** Clear all discovery state (for project switch). */
 export function clearDiscoveryState(): void {
 	discoveryState.agents = [];
+	discoveryState.agentProviderScope = null;
 	discoveryState.activeAgentId = null;
 	discoveryState.providers = [];
 	discoveryState.currentModelId = "";

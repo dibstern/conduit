@@ -60,6 +60,11 @@ export const AgentInfoSchema = Schema.Struct({
 	model: Schema.optional(Schema.String),
 });
 
+export const AgentProviderScopeSchema = Schema.Struct({
+	id: Schema.String,
+	name: Schema.String,
+});
+
 export const CommandInfoSchema = Schema.Struct({
 	name: Schema.String,
 	description: Schema.optional(Schema.String),
@@ -254,6 +259,7 @@ export const ForkSessionResponseSchema = Schema.Struct({
 
 export const GetAgentsResponseSchema = Schema.Struct({
 	projectSlug: Schema.String,
+	providerScope: AgentProviderScopeSchema,
 	agents: Schema.Array(AgentInfoSchema),
 	activeAgentId: Schema.optional(Schema.String),
 });
@@ -335,6 +341,7 @@ export const GetToolContentResponseSchema = Schema.Struct({
 });
 
 export type AgentInfo = typeof AgentInfoSchema.Type;
+export type AgentProviderScope = typeof AgentProviderScopeSchema.Type;
 export type GetAgentsResponse = typeof GetAgentsResponseSchema.Type;
 export type CommandInfo = typeof CommandInfoSchema.Type;
 export type GetCommandsResponse = typeof GetCommandsResponseSchema.Type;

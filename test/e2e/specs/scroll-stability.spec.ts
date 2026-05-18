@@ -223,6 +223,7 @@ function createInitMessages(turnCount: number): MockMessage[] {
 		},
 		{
 			type: "agent_list",
+			providerScope: { id: "opencode", name: "OpenCode" },
 			agents: [
 				{
 					id: "code",
@@ -753,6 +754,7 @@ test.describe("Scroll Controller — Session Lifecycle", () => {
 					},
 					{
 						type: "agent_list",
+						providerScope: { id: "opencode", name: "OpenCode" },
 						agents: [
 							{
 								id: "code",
@@ -914,6 +916,7 @@ test.describe("Scroll Controller — Session Lifecycle", () => {
 				},
 				{
 					type: "agent_list",
+					providerScope: { id: "opencode", name: "OpenCode" },
 					agents: [
 						{
 							id: "code",
@@ -1150,6 +1153,7 @@ test.describe("Scroll Controller — Session Lifecycle", () => {
 					},
 					{
 						type: "agent_list",
+						providerScope: { id: "opencode", name: "OpenCode" },
 						agents: [
 							{
 								id: "code",

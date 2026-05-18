@@ -1,7 +1,9 @@
 // ─── Discovery Store Tests ───────────────────────────────────────────────────
 import { beforeEach, describe, expect, it } from "vitest";
 import {
+	applyGetAgentsResponse,
 	applyGetModelsResponse,
+	clearDiscoveryState,
 	discoveryState,
 	extractSlashQuery,
 	filterCommands,
@@ -39,6 +41,7 @@ function msg<T extends RelayMessage["type"]>(data: {
 
 beforeEach(() => {
 	discoveryState.agents = [];
+	discoveryState.agentProviderScope = null;
 	discoveryState.activeAgentId = null;
 	discoveryState.providers = [];
 	discoveryState.currentModelId = "";
@@ -66,9 +69,9 @@ describe("formatAgentLabel", () => {
 		expect(formatAgentLabel(agent)).toBe("a1");
 	});
 
-	it("includes model when an agent declares one", () => {
+	it("keeps model metadata out of the display label", () => {
 		const agent: AgentInfo = { id: "Explore", name: "Explore", model: "haiku" };
-		expect(formatAgentLabel(agent)).toBe("Explore (haiku)");
+		expect(formatAgentLabel(agent)).toBe("Explore");
 	});
 });
 
@@ -161,9 +164,45 @@ describe("handleAgentList", () => {
 			{ id: "a1", name: "Agent 1" },
 			{ id: "a2", name: "Agent 2" },
 		];
-		handleAgentList({ type: "agent_list", agents, activeAgentId: "a1" });
+		handleAgentList({
+			type: "agent_list",
+			providerScope: { id: "claude", name: "Claude" },
+			agents,
+			activeAgentId: "a1",
+		});
 		expect(discoveryState.agents).toHaveLength(2);
+		expect(discoveryState.agentProviderScope).toEqual({
+			id: "claude",
+			name: "Claude",
+		});
 		expect(discoveryState.activeAgentId).toBe("a1");
+	});
+
+	it("stores provider scope from get agents RPC responses", () => {
+		applyGetAgentsResponse({
+			projectSlug: "project-a",
+			providerScope: { id: "opencode", name: "OpenCode" },
+			agents: [{ id: "build", name: "Build" }],
+			activeAgentId: "build",
+		});
+
+		expect(discoveryState.agentProviderScope).toEqual({
+			id: "opencode",
+			name: "OpenCode",
+		});
+		expect(discoveryState.agents).toEqual([{ id: "build", name: "Build" }]);
+	});
+
+	it("clears stale active agent when a scoped list has no active override", () => {
+		discoveryState.activeAgentId = "missing";
+
+		handleAgentList({
+			type: "agent_list",
+			providerScope: { id: "claude", name: "Claude" },
+			agents: [{ id: "Explore", name: "Explore" }],
+		});
+
+		expect(discoveryState.activeAgentId).toBeNull();
 	});
 
 	it("ignores non-array agents", () => {
@@ -387,5 +426,19 @@ describe("getActiveContextWindowOptions", () => {
 			{ value: "200k", label: "200K", isDefault: true },
 			{ value: "1m", label: "1M (beta)" },
 		]);
+	});
+});
+
+describe("clearDiscoveryState", () => {
+	it("resets provider-scoped agent state on project switch", () => {
+		discoveryState.agentProviderScope = { id: "claude", name: "Claude" };
+		discoveryState.agents = [{ id: "Explore", name: "Explore" }];
+		discoveryState.activeAgentId = "Explore";
+
+		clearDiscoveryState();
+
+		expect(discoveryState.agentProviderScope).toBeNull();
+		expect(discoveryState.agents).toEqual([]);
+		expect(discoveryState.activeAgentId).toBeNull();
 	});
 });

@@ -393,7 +393,10 @@ export function createMockClientInitDeps(
 			replay: vi.fn(async () => undefined),
 		},
 		agentService: {
-			listAgents: vi.fn(async () => ({ agents: [] })),
+			listAgents: vi.fn(async () => ({
+				providerScope: { id: "opencode" as const, name: "OpenCode" as const },
+				agents: [],
+			})),
 		},
 		modelService: {
 			getSession: vi.fn(async () => ({

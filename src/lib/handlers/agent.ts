@@ -2,6 +2,7 @@
 
 import { Effect } from "effect";
 import {
+	type AgentList,
 	AgentServiceTag,
 	filterAgents,
 	toWireAgents,
@@ -13,14 +14,17 @@ import type { RelayMessage } from "../types.js";
 export { filterAgents, toWireAgents };
 
 function toAgentListMessage({
+	providerScope,
 	agents,
 	activeAgentId,
 }: {
+	readonly providerScope: AgentList["providerScope"];
 	readonly agents: readonly WireAgent[];
 	readonly activeAgentId?: string;
 }): Extract<RelayMessage, { type: "agent_list" }> {
 	return {
 		type: "agent_list",
+		providerScope,
 		agents: [...agents],
 		...(activeAgentId ? { activeAgentId } : {}),
 	};
