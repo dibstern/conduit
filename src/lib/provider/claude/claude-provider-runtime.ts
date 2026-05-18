@@ -16,6 +16,8 @@
  * - Shutdown is graceful: close every session's prompt queue, call the
  *   runtime's close(), then clear the session map.
  */
+
+import { randomUUID } from "node:crypto";
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
@@ -381,6 +383,12 @@ export interface ClaudeProviderRuntimeState {
 	readonly endedStreams: HashSet.HashSet<string>;
 }
 
+interface ClaudeSubagentFinalizationFiberKey {
+	readonly id: string;
+	readonly sessionId: string;
+	readonly turnId: string;
+}
+
 const emptyClaudeProviderRuntimeState = (): ClaudeProviderRuntimeState => ({
 	sessions: HashMap.empty(),
 	setupLocks: HashMap.empty(),
@@ -436,12 +444,18 @@ export const makeClaudeProviderRuntime = (
 			emptyClaudeProviderRuntimeState(),
 		);
 		const streamFibers = yield* FiberMap.make<string, void, unknown>();
+		const subagentFinalizationFibers = yield* FiberMap.make<
+			ClaudeSubagentFinalizationFiberKey,
+			void,
+			never
+		>();
 		const capabilitiesService =
 			deps.capabilitiesService ?? (yield* makeClaudeCapabilitiesService());
 		const runtime = new ClaudeProviderRuntime(
 			{ ...deps, capabilitiesService },
 			stateRef,
 			streamFibers,
+			subagentFinalizationFibers,
 		);
 		yield* Effect.addFinalizer(() =>
 			runtime.shutdownEffect().pipe(Effect.ignore),
@@ -462,6 +476,7 @@ export const makeUnsafeClaudeProviderRuntime = (
 			emptyClaudeProviderRuntimeState(),
 		),
 		makeUnsafeFiberMap<string, void, unknown>(),
+		makeUnsafeFiberMap<ClaudeSubagentFinalizationFiberKey, void, never>(),
 	);
 
 export const ClaudeProviderRuntimeLive = (
@@ -487,6 +502,11 @@ export class ClaudeProviderRuntime {
 		private readonly deps: ClaudeProviderInstanceDeps,
 		private readonly stateRef: Ref.Ref<ClaudeProviderRuntimeState>,
 		private readonly streamFibers: FiberMap.FiberMap<string, void, unknown>,
+		private readonly subagentFinalizationFibers: FiberMap.FiberMap<
+			ClaudeSubagentFinalizationFiberKey,
+			void,
+			never
+		>,
 	) {
 		this.queryFactory =
 			deps.queryFactory ??
@@ -1055,15 +1075,45 @@ export class ClaudeProviderRuntime {
 				if (decodedMessage.type === "result") {
 					const finalizationCtx = this.detachSubagentFinalizationContext(ctx);
 					markResultFinalizationStarted();
-					yield* Effect.forkDaemon(
-						this.finalizeSubagentsAfterResultEffect(
-							finalizationCtx,
-							decodedMessage,
-						).pipe(Effect.ignore),
+					yield* this.runSubagentFinalizationEffect(
+						finalizationCtx,
+						decodedMessage,
 					);
 					yield* this.resolveTurnEffect(ctx, decodedMessage);
 				}
 			}
+		});
+	}
+
+	private runSubagentFinalizationEffect(
+		ctx: ClaudeSessionContext,
+		result: SDKResultMessage,
+	): Effect.Effect<void> {
+		const key: ClaudeSubagentFinalizationFiberKey = {
+			id: randomUUID(),
+			sessionId: ctx.sessionId,
+			turnId: ctx.currentTurnId ?? "unknown",
+		};
+		return FiberMap.run(
+			this.subagentFinalizationFibers,
+			key,
+			this.finalizeSubagentsAfterResultEffect(ctx, result),
+		).pipe(Effect.asVoid);
+	}
+
+	private interruptSubagentFinalizersForSession(
+		sessionId: string,
+	): Effect.Effect<void> {
+		return Effect.gen(this, function* () {
+			const keys = Array.from(
+				this.subagentFinalizationFibers,
+				([key]) => key,
+			).filter((key) => key.sessionId === sessionId);
+			yield* Effect.forEach(
+				keys,
+				(key) => FiberMap.remove(this.subagentFinalizationFibers, key),
+				{ discard: true },
+			);
 		});
 	}
 
@@ -1160,6 +1210,7 @@ export class ClaudeProviderRuntime {
 				workspaceRoot: ctx.workspaceRoot,
 				knownTasks: ctx.subagentTasks ?? new Map(),
 			});
+			if (ctx.stopped) return;
 
 			for (const child of materialized) {
 				if (!child.parentToolUseId || !ctx.eventSink) continue;
@@ -1820,6 +1871,7 @@ export class ClaudeProviderRuntime {
 			if (ctx.stopped) return;
 
 			this.stopSubagentPollers(ctx);
+			yield* this.interruptSubagentFinalizersForSession(ctx.sessionId);
 
 			// 1. Complete in-flight tools as failed via EventSink.
 			for (const [, tool] of ctx.inFlightTools) {
@@ -2005,6 +2057,7 @@ export class ClaudeProviderRuntime {
 			}
 			yield* Ref.set(this.stateRef, emptyClaudeProviderRuntimeState());
 			yield* FiberMap.clear(this.streamFibers);
+			yield* FiberMap.clear(this.subagentFinalizationFibers);
 		});
 	}
 

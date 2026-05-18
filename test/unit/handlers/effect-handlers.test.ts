@@ -6,7 +6,7 @@ import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/openco
 // the Effect to completion, and asserts on captured calls.
 
 import { describe, it } from "@effect/vitest";
-import { Duration, Effect, Layer } from "effect";
+import { Deferred, Duration, Effect, Fiber, Layer } from "effect";
 import { expect, vi } from "vitest";
 import {
 	PendingInteractionServiceLive,
@@ -105,7 +105,9 @@ import {
 	type ReadQueryEffect,
 	ReadQueryEffectTag,
 } from "../../../src/lib/persistence/effect/read-query-effect.js";
-import type { OrchestrationEngine } from "../../../src/lib/provider/orchestration-engine.js";
+import { OrchestrationEngine } from "../../../src/lib/provider/orchestration-engine.js";
+import { ProviderRegistry } from "../../../src/lib/provider/provider-registry.js";
+import type { ProviderInstance } from "../../../src/lib/provider/types.js";
 import type { PermissionId, RequestId } from "../../../src/lib/shared-types.js";
 import type { ProjectRelayConfig } from "../../../src/lib/types.js";
 import {
@@ -113,6 +115,7 @@ import {
 	makeMockStatusPoller,
 	makeTestHandlerLayer,
 } from "../../helpers/mock-factories.js";
+import { makeBaseSendTurnInput } from "../../helpers/mock-sdk.js";
 import { withDispatchEffect } from "../../helpers/orchestration-engine-test-double.js";
 
 // ─── Mock factories ────────────────────────────────────────────────────────
@@ -1776,6 +1779,107 @@ describe("handlePermissionResponse", () => {
 				}),
 			);
 		},
+	);
+
+	it.effect(
+		"does not fall back to OpenCode permission reply while the first Claude turn is still in flight",
+		() =>
+			Effect.gen(function* () {
+				const ws = mockWsHandler({
+					getClientSession: vi.fn(() => "session-claude-in-flight"),
+				});
+				const log = mockLogger();
+				const client = {
+					permission: { reply: vi.fn(async () => {}) },
+					config: {
+						get: vi.fn(async () => ({})),
+						update: vi.fn(async () => {}),
+					},
+				} as unknown as OpenCodeAPI;
+				const config = mockConfig();
+				const sendStarted = yield* Deferred.make<void>();
+				const releaseSend = yield* Deferred.make<void>();
+				const instance: ProviderInstance = {
+					providerId: "claude",
+					discoverEffect: vi.fn(() =>
+						Effect.succeed({
+							models: [],
+							supportsTools: false,
+							supportsThinking: false,
+							supportsPermissions: false,
+							supportsQuestions: false,
+							supportsAttachments: false,
+							supportsFork: false,
+							supportsRevert: false,
+							commands: [],
+						}),
+					),
+					sendTurnEffect: vi.fn(() =>
+						Effect.gen(function* () {
+							yield* Deferred.succeed(sendStarted, undefined);
+							yield* Deferred.await(releaseSend);
+							return {
+								status: "completed" as const,
+								cost: 0,
+								tokens: { input: 0, output: 0 },
+								durationMs: 0,
+								providerStateUpdates: [],
+							};
+						}),
+					),
+					interruptTurnEffect: vi.fn(() => Effect.void),
+					resolvePermissionEffect: vi.fn(() => Effect.void),
+					resolveQuestionEffect: vi.fn(() => Effect.void),
+					shutdownEffect: vi.fn(() => Effect.void),
+					endSessionEffect: vi.fn(() => Effect.void),
+				};
+				const registry = new ProviderRegistry();
+				registry.registerInstance(instance);
+				const engine = new OrchestrationEngine({ registry });
+
+				const layer = Layer.mergeAll(
+					Layer.succeed(OpenCodeAPITag, client),
+					Layer.succeed(WebSocketHandlerTag, ws),
+					Layer.succeed(LoggerTag, log),
+					Layer.succeed(ConfigTag, config),
+					Layer.succeed(OrchestrationEngineTag, engine),
+					PendingInteractionServiceLive,
+				);
+
+				yield* Effect.gen(function* () {
+					const fiber = yield* Effect.fork(
+						engine.dispatchEffect({
+							type: "send_turn",
+							providerId: "claude",
+							input: makeBaseSendTurnInput({
+								sessionId: "session-claude-in-flight",
+							}),
+						}),
+					);
+					yield* Deferred.await(sendStarted);
+
+					const pendingInteractions = yield* PendingInteractionServiceTag;
+					yield* pendingInteractions.recordPermissionRequest({
+						requestId: "perm-claude-in-flight" as PermissionId,
+						sessionId: "session-claude-in-flight",
+						toolName: "Bash",
+						toolInput: { command: "npm test" },
+						always: [],
+					});
+					yield* handlePermissionResponse("client-1", {
+						requestId: "perm-claude-in-flight" as PermissionId,
+						decision: "allow_always",
+						persistScope: "tool",
+					});
+
+					expect(client.permission.reply).not.toHaveBeenCalled();
+					expect(client.config.get).not.toHaveBeenCalled();
+					expect(client.config.update).not.toHaveBeenCalled();
+
+					yield* Deferred.succeed(releaseSend, undefined);
+					yield* Fiber.join(fiber);
+				}).pipe(Effect.provide(layer));
+			}),
 	);
 
 	it.effect("processes permission response and broadcasts resolution", () => {

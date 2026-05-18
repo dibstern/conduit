@@ -1,5 +1,5 @@
 import { describe, it } from "@effect/vitest";
-import { Effect, Layer } from "effect";
+import { Deferred, Effect, Layer } from "effect";
 import { expect, vi } from "vitest";
 import { OpenCodeAPITag } from "../../../../src/lib/domain/provider/Services/opencode-api-service.js";
 import { PendingInteractionServiceLive } from "../../../../src/lib/domain/relay/Services/pending-interaction-service.js";
@@ -39,12 +39,14 @@ import {
 	ReadQueryEffectTag,
 } from "../../../../src/lib/persistence/effect/read-query-effect.js";
 import { canonicalEvent } from "../../../../src/lib/persistence/events.js";
-import type {
+import {
 	OrchestrationEngine,
-	SendTurnCommand,
+	type SendTurnCommand,
 } from "../../../../src/lib/provider/orchestration-engine.js";
+import { ProviderRegistry } from "../../../../src/lib/provider/provider-registry.js";
 import type {
 	EventSink,
+	ProviderInstance,
 	TurnResult,
 } from "../../../../src/lib/provider/types.js";
 import type { HistoryMessage } from "../../../../src/lib/shared-types.js";
@@ -572,5 +574,60 @@ describe("ProviderTurnService", () => {
 				});
 			}).pipe(Effect.provide(layer));
 		},
+	);
+
+	it.effect(
+		"interrupts a first Claude turn while engine dispatch is still in flight",
+		() =>
+			Effect.gen(function* () {
+				const sendStarted = yield* Deferred.make<void>();
+				const releaseSend = yield* Deferred.make<void>();
+				const interruptTurnEffect = vi.fn(() => Effect.void);
+				const instance: ProviderInstance = {
+					providerId: "claude",
+					discoverEffect: vi.fn(() =>
+						Effect.succeed({
+							models: [],
+							supportsTools: false,
+							supportsThinking: false,
+							supportsPermissions: false,
+							supportsQuestions: false,
+							supportsAttachments: false,
+							supportsFork: false,
+							supportsRevert: false,
+							commands: [],
+						}),
+					),
+					sendTurnEffect: vi.fn(() =>
+						Effect.gen(function* () {
+							yield* Deferred.succeed(sendStarted, undefined);
+							yield* Deferred.await(releaseSend);
+							return completedTurn();
+						}),
+					),
+					interruptTurnEffect,
+					resolvePermissionEffect: vi.fn(() => Effect.void),
+					resolveQuestionEffect: vi.fn(() => Effect.void),
+					shutdownEffect: vi.fn(() => Effect.void),
+					endSessionEffect: vi.fn(() => Effect.void),
+				};
+				const registry = new ProviderRegistry();
+				registry.registerInstance(instance);
+				const engine = new OrchestrationEngine({ registry });
+				const api = {
+					session: { abort: vi.fn(async () => undefined) },
+				} as unknown as OpenCodeAPI;
+				const { layer } = serviceLayer({ engine, api });
+
+				yield* sendTurn().pipe(Effect.provide(layer));
+				yield* Deferred.await(sendStarted);
+				yield* interruptTurn().pipe(Effect.provide(layer));
+
+				expect(interruptTurnEffect).toHaveBeenCalledWith("session-1");
+				expect(api.session.abort).not.toHaveBeenCalled();
+
+				yield* Deferred.succeed(releaseSend, undefined);
+				yield* flushDispatch();
+			}),
 	);
 });

@@ -1003,6 +1003,77 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 		}
 	});
 
+	it("does not write delayed final subagent metadata after shutdown", async () => {
+		const result = makeSuccessResult({
+			session_id: "sdk-parent-shutdown-catchup",
+			uuid: "00000000-0000-0000-0000-000000000624" as `${string}-${string}-${string}-${string}-${string}`,
+		} as Record<string, unknown>);
+		const mockQuery = createMockQuery([result as unknown as SDKMessage]);
+		queryFactorySpy = vi.fn(() => mockQuery);
+		let releaseMaterializer: (() => void) | undefined;
+		let markMaterializerStarted: (() => void) | undefined;
+		const materializerStarted = new Promise<void>((resolve) => {
+			markMaterializerStarted = resolve;
+		});
+		const materializeSubagents = vi.fn(() =>
+			Effect.promise<readonly MaterializedClaudeSubagent[]>(
+				() =>
+					new Promise((resolve) => {
+						markMaterializerStarted?.();
+						releaseMaterializer = () =>
+							resolve([
+								{
+									sdkSubagentId: "task-shutdown-catchup",
+									childSessionId: "child-shutdown-catchup",
+									parentToolUseId: "task-tool-shutdown-catchup",
+								},
+							]);
+					}),
+			),
+		);
+		const instance = new ClaudeProviderInstance({
+			workspaceRoot: workspace,
+			queryFactory: queryFactorySpy,
+			materializeSubagents,
+		});
+		const sink = createMockEventSink();
+		const turnPromise = Effect.runPromise(
+			instance.sendTurnEffect(
+				makeBaseSendTurnInput({
+					sessionId: "parent-shutdown-catchup",
+					workspaceRoot: workspace,
+					eventSink: sink,
+				}),
+			),
+		);
+
+		try {
+			await materializerStarted;
+			await turnPromise;
+			const push = sink.push as ReturnType<typeof vi.fn>;
+			push.mockClear();
+
+			await Effect.runPromise(instance.shutdownEffect());
+			releaseMaterializer?.();
+			await delay(25);
+
+			expect(
+				push.mock.calls.some(([event]) => {
+					const canonical = event as CanonicalEvent;
+					const data = canonical.data as { partId?: string };
+					return (
+						canonical.type === "tool.running" &&
+						data.partId === "task-tool-shutdown-catchup"
+					);
+				}),
+			).toBe(false);
+		} finally {
+			releaseMaterializer?.();
+			await turnPromise.catch(() => undefined);
+			await Effect.runPromise(instance.shutdownEffect());
+		}
+	});
+
 	it("uses the turn sink snapshot for delayed final subagent metadata", async () => {
 		const result1 = makeSuccessResult({
 			session_id: "sdk-parent-sink-snapshot",

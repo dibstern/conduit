@@ -329,6 +329,13 @@ describe("Effect runtime boundary grep", () => {
 		expect(hits).toEqual([]);
 	});
 
+	it("keeps Claude runtime fibers session-owned instead of daemon-owned", () => {
+		const path = "src/lib/provider/claude/claude-provider-runtime.ts";
+		const source = readFileSync(join(REPO_ROOT, path), "utf8");
+
+		expect(source.match(/\bforkDaemon\b/g) ?? []).toEqual([]);
+	});
+
 	it("instruments Claude provider runtime Effect operations", () => {
 		const runtime = readFileSync(
 			join(REPO_ROOT, "src/lib/provider/claude/claude-provider-runtime.ts"),

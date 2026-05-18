@@ -215,12 +215,25 @@ export class OrchestrationEngine {
 				),
 			);
 
-			// Bind AFTER sendTurn succeeds — if it throws, the session is not
-			// viable at the provider and should not be bound. Error TurnResults
-			// (non-throwing) still bind because the session exists at the provider.
-			const result = yield* instance.sendTurnEffect(command.input);
+			const previousProviderId = this.sessionBindings.get(
+				command.input.sessionId,
+			);
 			yield* Effect.sync(() =>
 				this.sessionBindings.set(command.input.sessionId, command.providerId),
+			);
+			const result = yield* instance.sendTurnEffect(command.input).pipe(
+				Effect.tapError(() =>
+					Effect.sync(() => {
+						if (previousProviderId) {
+							this.sessionBindings.set(
+								command.input.sessionId,
+								previousProviderId,
+							);
+						} else {
+							this.sessionBindings.delete(command.input.sessionId);
+						}
+					}),
+				),
 			);
 			return result;
 		});
