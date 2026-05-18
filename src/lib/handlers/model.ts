@@ -223,50 +223,47 @@ export const getModelsResponse = (
 			typeof engineOption.value.getProviderForSession === "function"
 				? engineOption.value.getProviderForSession(activeId)
 				: undefined;
-		const skipOpenCodeLookups =
+		const activeSessionUsesClaude =
 			activeId != null &&
 			isClaudeProvider(activeProviderId ?? fallbackModel?.providerID ?? "");
 
 		const providers: ProviderInfo[] = [];
 		let openCodeDiscoveryFailed = false;
 		let openCodeFailure: unknown;
-		if (!skipOpenCodeLookups) {
-			const openCodeProviderResult = yield* Effect.either(
-				modelService.listProviders(),
+		const openCodeProviderResult = yield* Effect.either(
+			modelService.listProviders(),
+		);
+		if (openCodeProviderResult._tag === "Right") {
+			const connectedSet = new Set(openCodeProviderResult.right.connected);
+			providers.push(
+				...openCodeProviderResult.right.providers
+					.map((p) => ({
+						id: p.id || p.name || "",
+						name: p.name || p.id || "",
+						configured: connectedSet.has(p.id) || connectedSet.has(p.name),
+						models: (p.models ?? []).map((m) => ({
+							id: m.id,
+							name: m.name || m.id,
+							provider: p.id || p.name || "",
+							...(m.limit && { limit: { ...m.limit } }),
+							...(m.variants &&
+								Object.keys(m.variants).length > 0 && {
+									variants: Object.keys(m.variants),
+								}),
+						})),
+					}))
+					.filter((p) => p.configured),
 			);
-			if (openCodeProviderResult._tag === "Right") {
-				const connectedSet = new Set(openCodeProviderResult.right.connected);
-				providers.push(
-					...openCodeProviderResult.right.providers
-						.map((p) => ({
-							id: p.id || p.name || "",
-							name: p.name || p.id || "",
-							configured: connectedSet.has(p.id) || connectedSet.has(p.name),
-							models: (p.models ?? []).map((m) => ({
-								id: m.id,
-								name: m.name || m.id,
-								provider: p.id || p.name || "",
-								...(m.limit && { limit: { ...m.limit } }),
-								...(m.variants &&
-									Object.keys(m.variants).length > 0 && {
-										variants: Object.keys(m.variants),
-									}),
-							})),
-						}))
-						.filter((p) => p.configured),
-				);
-			} else {
-				openCodeDiscoveryFailed = true;
-				openCodeFailure = openCodeProviderResult.left;
-				log.warn(
-					`OpenCode provider discovery failed during model refresh: ${formatErrorDetail(openCodeProviderResult.left)}`,
-				);
-			}
+		} else {
+			openCodeDiscoveryFailed = true;
+			openCodeFailure = openCodeProviderResult.left;
+			log.warn(
+				`OpenCode provider discovery failed during model refresh: ${formatErrorDetail(openCodeProviderResult.left)}`,
+			);
 		}
 
 		// Merge Claude in-process models when the orchestration engine is available.
 		let claudeDiscoveryFailed = false;
-		let claudeFailure: unknown;
 		if (engineOption._tag === "Some") {
 			const engineResult = yield* Effect.either(
 				engineOption.value.dispatchEffect({
@@ -306,11 +303,9 @@ export const getModelsResponse = (
 			}
 			if (engineResult._tag === "Left") {
 				claudeDiscoveryFailed = true;
-				claudeFailure = engineResult.left;
 			}
 		} else {
 			claudeDiscoveryFailed = true;
-			claudeFailure = new Error("Claude orchestration engine unavailable");
 		}
 		if (
 			openCodeDiscoveryFailed &&
@@ -319,17 +314,10 @@ export const getModelsResponse = (
 		) {
 			return yield* Effect.fail(openCodeFailure);
 		}
-		if (
-			skipOpenCodeLookups &&
-			claudeDiscoveryFailed &&
-			providers.length === 0
-		) {
-			return yield* Effect.fail(claudeFailure);
-		}
 
 		// Send model_info: prefer session's model, fall back to relay-side selection
 		let sessionModel: ModelOverride | undefined;
-		if (activeId && !skipOpenCodeLookups) {
+		if (activeId && !activeSessionUsesClaude) {
 			const sessionResult = yield* Effect.either(
 				modelService.getSession(activeId),
 			);

@@ -722,7 +722,7 @@ describe("sendModelsStateToClient", () => {
 		},
 	);
 	it.effect(
-		"skips OpenCode discovery for a Claude-bound session during model refresh",
+		"keeps OpenCode discovery while skipping session lookup for a Claude-bound model refresh",
 		() => {
 			const ws = mockWsHandler();
 			const engine = {
@@ -739,9 +739,17 @@ describe("sendModelsStateToClient", () => {
 			} as unknown as OrchestrationEngine;
 			const client = {
 				provider: {
-					list: vi.fn(async () => {
-						throw new Error("opencode offline");
-					}),
+					list: vi.fn(async () => ({
+						connected: ["openai"],
+						defaults: {},
+						providers: [
+							{
+								id: "openai",
+								name: "OpenAI",
+								models: [{ id: "gpt-5", name: "GPT-5" }],
+							},
+						],
+					})),
 				},
 				session: {
 					get: vi.fn(async () => {
@@ -766,8 +774,37 @@ describe("sendModelsStateToClient", () => {
 				});
 				yield* sendModelsStateToClient("client-1", "session-1");
 
-				expect(client.provider.list).not.toHaveBeenCalled();
+				expect(client.provider.list).toHaveBeenCalledOnce();
 				expect(client.session.get).not.toHaveBeenCalled();
+				expect(ws.sendTo).toHaveBeenCalledWith("client-1", {
+					type: "model_list",
+					providers: [
+						{
+							id: "openai",
+							name: "OpenAI",
+							configured: true,
+							models: [
+								{
+									id: "gpt-5",
+									name: "GPT-5",
+									provider: "openai",
+								},
+							],
+						},
+						{
+							id: "claude",
+							name: "Anthropic - claude",
+							configured: true,
+							models: [
+								{
+									id: "claude-opus-4-7",
+									name: "Claude Opus 4.7",
+									provider: "claude",
+								},
+							],
+						},
+					],
+				});
 				expect(ws.sendTo).toHaveBeenCalledWith("client-1", {
 					type: "model_info",
 					model: "claude-opus-4-7",
