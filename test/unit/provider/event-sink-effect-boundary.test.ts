@@ -11,9 +11,8 @@ describe("EventSink Effect boundary", () => {
 		const providerTypes = source("src/lib/provider/types.ts");
 
 		expect(providerTypes).toContain(
-			"event: ProviderRuntimeEvent | CanonicalEvent,",
+			"push(event: CanonicalEvent): Effect.Effect<void, unknown>;",
 		);
-		expect(providerTypes).toContain("): Effect.Effect<void, unknown>;");
 		expect(providerTypes).not.toContain(
 			"push(event: CanonicalEvent): Promise<void>",
 		);

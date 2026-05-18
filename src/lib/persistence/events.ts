@@ -1,12 +1,6 @@
 // src/lib/persistence/events.ts
 import { randomUUID } from "node:crypto";
 import { Schema } from "effect";
-import {
-	type ProviderRuntimeProviderRefs,
-	ProviderRuntimeProviderRefsSchema,
-	type ProviderRuntimeRawSource,
-	ProviderRuntimeRawSourceSchema,
-} from "../contracts/providers/provider-runtime-event.js";
 
 // ─── Branded ID Types ───────────────────────────────────────────────────────
 
@@ -277,10 +271,6 @@ export interface EventMetadata {
 	 *  field (or < 2) use raw provider-specific input shapes and need
 	 *  normalizeToolInput() upcast at replay time. */
 	readonly schemaVersion?: number;
-	readonly providerRuntimeSource?: "provider-runtime";
-	readonly providerRefs?: ProviderRuntimeProviderRefs;
-	readonly rawSource?: ProviderRuntimeRawSource;
-	readonly providerRuntimeMetadata?: Record<string, unknown>;
 }
 
 // ─── Event Envelopes ────────────────────────────────────────────────────────
@@ -339,20 +329,6 @@ export const EventMetadataSchema = Schema.Struct({
 	sseBatchId: Schema.optionalWith(Schema.String, { exact: true }),
 	sseBatchSize: Schema.optionalWith(Schema.Number, { exact: true }),
 	schemaVersion: Schema.optionalWith(Schema.Number, { exact: true }),
-	providerRuntimeSource: Schema.optionalWith(
-		Schema.Literal("provider-runtime"),
-		{ exact: true },
-	),
-	providerRefs: Schema.optionalWith(ProviderRuntimeProviderRefsSchema, {
-		exact: true,
-	}),
-	rawSource: Schema.optionalWith(ProviderRuntimeRawSourceSchema, {
-		exact: true,
-	}),
-	providerRuntimeMetadata: Schema.optionalWith(
-		Schema.Record({ key: Schema.String, value: Schema.Unknown }),
-		{ exact: true },
-	),
 });
 
 // ─── Payload Schemas ───────────────────────────────────────────────────────

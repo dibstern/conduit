@@ -21,13 +21,14 @@
  */
 import { randomUUID } from "node:crypto";
 import { Effect } from "effect";
-import type { ProviderRuntimeEvent } from "../../contracts/providers/provider-runtime-event.js";
 import type {
+	CanonicalEvent,
+	CanonicalEventType,
 	CanonicalToolInput,
 	EventMetadata,
 	EventPayloadMap,
 } from "../../persistence/events.js";
-import { makeProviderRuntimeEvent } from "../provider-runtime-event-sink.js";
+import { canonicalEvent } from "../../persistence/events.js";
 import type { EventSink } from "../types.js";
 import { normalizeToolInput } from "./normalize-tool-input.js";
 import type {
@@ -45,18 +46,18 @@ import type {
 const PROVIDER = "claude" as const;
 
 // ─── Typed event construction helper ───────────────────────────────────────
-// All provider-originated events are emitted as ProviderRuntimeEvent.
+// Uses the shared canonicalEvent() factory from persistence/events.ts.
+// All events are tagged with provider: "claude" via the PROVIDER constant.
 
-function makeClaudeRuntimeEvent<K extends keyof EventPayloadMap>(
+function makeCanonicalEvent<K extends CanonicalEventType>(
 	type: K,
 	sessionId: string,
 	data: EventPayloadMap[K],
 	metadata?: EventMetadata,
-): ProviderRuntimeEvent {
-	return makeProviderRuntimeEvent(type, sessionId, data, {
-		providerId: PROVIDER,
-		rawSource: { kind: "claude-sdk" },
-		...(metadata != null ? { metadata } : {}),
+): CanonicalEvent {
+	return canonicalEvent(type, sessionId, data, {
+		provider: PROVIDER,
+		...(metadata && { metadata }),
 	});
 }
 
@@ -277,7 +278,7 @@ export class ClaudeEventTranslator {
 				const errorMsg = cause instanceof Error ? cause.message : String(cause);
 				yield* this.push(
 					ctx,
-					makeClaudeRuntimeEvent("turn.error", ctx.sessionId, {
+					makeCanonicalEvent("turn.error", ctx.sessionId, {
 						messageId: this.currentAssistantMessageId || "",
 						error: errorMsg,
 						code: "provider_error",
@@ -299,7 +300,7 @@ export class ClaudeEventTranslator {
 				case "status": {
 					yield* this.push(
 						ctx,
-						makeClaudeRuntimeEvent("session.status", ctx.sessionId, {
+						makeCanonicalEvent("session.status", ctx.sessionId, {
 							sessionId: ctx.sessionId,
 							status: "idle",
 						}),
@@ -334,7 +335,7 @@ export class ClaudeEventTranslator {
 					const reason = parts.join(" · ");
 					yield* this.push(
 						ctx,
-						makeClaudeRuntimeEvent(
+						canonicalEvent(
 							"session.status",
 							ctx.sessionId,
 							{
@@ -342,8 +343,11 @@ export class ClaudeEventTranslator {
 								status: "retry",
 							},
 							{
-								source: "api_retry",
-								correlationId: reason,
+								provider: PROVIDER,
+								metadata: {
+									source: "api_retry",
+									correlationId: reason,
+								},
 							},
 						),
 					);
@@ -371,7 +375,7 @@ export class ClaudeEventTranslator {
 					ctx.currentModel = message.model;
 					yield* this.push(
 						ctx,
-						makeClaudeRuntimeEvent("session.status", ctx.sessionId, {
+						makeCanonicalEvent("session.status", ctx.sessionId, {
 							sessionId: ctx.sessionId,
 							status: "idle",
 						}),
@@ -538,7 +542,7 @@ export class ClaudeEventTranslator {
 			);
 			yield* this.push(
 				ctx,
-				makeClaudeRuntimeEvent("tool.running", ctx.sessionId, {
+				makeCanonicalEvent("tool.running", ctx.sessionId, {
 					messageId: parentMessageId,
 					partId: parentToolUseId,
 					metadata: mergedMetadata,
@@ -568,7 +572,7 @@ export class ClaudeEventTranslator {
 		const input = normalizeToolInput(tool.toolName, rawInput);
 		return this.push(
 			ctx,
-			makeClaudeRuntimeEvent(
+			makeCanonicalEvent(
 				"tool.started",
 				ctx.sessionId,
 				{
@@ -593,7 +597,7 @@ export class ClaudeEventTranslator {
 				this.currentAssistantMessageId || ctx.lastAssistantUuid || "";
 			yield* this.push(
 				ctx,
-				makeClaudeRuntimeEvent("tool.completed", ctx.sessionId, {
+				makeCanonicalEvent("tool.completed", ctx.sessionId, {
 					messageId,
 					partId: parentToolUseId,
 					result,
@@ -688,7 +692,7 @@ export class ClaudeEventTranslator {
 				// and TurnProjector can link the turn to its assistant message.
 				yield* this.push(
 					ctx,
-					makeClaudeRuntimeEvent("message.created", ctx.sessionId, {
+					makeCanonicalEvent("message.created", ctx.sessionId, {
 						messageId: msgId,
 						role: "assistant",
 						sessionId: ctx.sessionId,
@@ -698,7 +702,7 @@ export class ClaudeEventTranslator {
 				// the turn from "pending" → "running".
 				yield* this.push(
 					ctx,
-					makeClaudeRuntimeEvent("session.status", ctx.sessionId, {
+					makeCanonicalEvent("session.status", ctx.sessionId, {
 						sessionId: ctx.sessionId,
 						status: "busy",
 					}),
@@ -722,7 +726,7 @@ export class ClaudeEventTranslator {
 				ctx.inFlightTools.delete(index);
 				yield* this.push(
 					ctx,
-					makeClaudeRuntimeEvent("thinking.end", ctx.sessionId, {
+					makeCanonicalEvent("thinking.end", ctx.sessionId, {
 						messageId: this.currentAssistantMessageId,
 						partId: tool.itemId,
 					}),
@@ -734,7 +738,7 @@ export class ClaudeEventTranslator {
 				ctx.inFlightTools.delete(index);
 				yield* this.push(
 					ctx,
-					makeClaudeRuntimeEvent("tool.completed", ctx.sessionId, {
+					makeCanonicalEvent("tool.completed", ctx.sessionId, {
 						messageId: tool.itemId,
 						partId: `part-stop-${index}`,
 						result: null,
@@ -755,7 +759,7 @@ export class ClaudeEventTranslator {
 				const normalizedInput = normalizeToolInput(tool.toolName, finalInput);
 				yield* this.push(
 					ctx,
-					makeClaudeRuntimeEvent(
+					makeCanonicalEvent(
 						"tool.started",
 						ctx.sessionId,
 						{
@@ -770,7 +774,7 @@ export class ClaudeEventTranslator {
 				);
 				yield* this.push(
 					ctx,
-					makeClaudeRuntimeEvent("tool.running", ctx.sessionId, {
+					makeCanonicalEvent("tool.running", ctx.sessionId, {
 						messageId: this.currentAssistantMessageId,
 						partId: tool.itemId,
 					}),
@@ -808,7 +812,7 @@ export class ClaudeEventTranslator {
 						// text blocks don't need an event — content streams via text.delta → delta.
 						yield* this.push(
 							ctx,
-							makeClaudeRuntimeEvent("thinking.start", ctx.sessionId, {
+							makeCanonicalEvent("thinking.start", ctx.sessionId, {
 								messageId: this.currentAssistantMessageId,
 								partId: tool.itemId,
 							}),
@@ -873,7 +877,7 @@ export class ClaudeEventTranslator {
 					const partId = tool ? tool.itemId : this.nextPartId();
 					yield* this.push(
 						ctx,
-						makeClaudeRuntimeEvent(eventType, ctx.sessionId, {
+						makeCanonicalEvent(eventType, ctx.sessionId, {
 							messageId:
 								this.currentAssistantMessageId || tool?.itemId || randomUUID(),
 							partId,
@@ -964,7 +968,7 @@ export class ClaudeEventTranslator {
 				if (resultContent.length > 0) {
 					yield* this.push(
 						ctx,
-						makeClaudeRuntimeEvent("tool.running", ctx.sessionId, {
+						makeCanonicalEvent("tool.running", ctx.sessionId, {
 							messageId: this.currentAssistantMessageId,
 							partId: matchedTool.itemId,
 						}),
@@ -973,7 +977,7 @@ export class ClaudeEventTranslator {
 
 				yield* this.push(
 					ctx,
-					makeClaudeRuntimeEvent("tool.completed", ctx.sessionId, {
+					makeCanonicalEvent("tool.completed", ctx.sessionId, {
 						messageId: this.currentAssistantMessageId,
 						partId: matchedTool.itemId,
 						result: resultContent || null,
@@ -995,7 +999,7 @@ export class ClaudeEventTranslator {
 			if (isInterruptedResult(result)) {
 				yield* this.push(
 					ctx,
-					makeClaudeRuntimeEvent("turn.interrupted", ctx.sessionId, {
+					makeCanonicalEvent("turn.interrupted", ctx.sessionId, {
 						messageId:
 							this.currentAssistantMessageId || ctx.lastAssistantUuid || "",
 					}),
@@ -1008,7 +1012,7 @@ export class ClaudeEventTranslator {
 				const errors = result.errors.join("; ") || "Unknown error";
 				yield* this.push(
 					ctx,
-					makeClaudeRuntimeEvent("turn.error", ctx.sessionId, {
+					makeCanonicalEvent("turn.error", ctx.sessionId, {
 						messageId:
 							this.currentAssistantMessageId || ctx.lastAssistantUuid || "",
 						error: errors,
@@ -1031,7 +1035,7 @@ export class ClaudeEventTranslator {
 				const errorText = result.result || "Provider returned an error";
 				yield* this.push(
 					ctx,
-					makeClaudeRuntimeEvent("turn.error", ctx.sessionId, {
+					makeCanonicalEvent("turn.error", ctx.sessionId, {
 						messageId:
 							this.currentAssistantMessageId || ctx.lastAssistantUuid || "",
 						error: errorText,
@@ -1060,7 +1064,7 @@ export class ClaudeEventTranslator {
 				ctx.lastAssistantUuid = resultUuid;
 				yield* this.push(
 					ctx,
-					makeClaudeRuntimeEvent("text.delta", ctx.sessionId, {
+					makeCanonicalEvent("text.delta", ctx.sessionId, {
 						messageId: resultUuid,
 						partId: `${resultUuid}-0`,
 						text: resultText,
@@ -1088,7 +1092,7 @@ export class ClaudeEventTranslator {
 
 			yield* this.push(
 				ctx,
-				makeClaudeRuntimeEvent("turn.completed", ctx.sessionId, {
+				makeCanonicalEvent("turn.completed", ctx.sessionId, {
 					messageId:
 						this.currentAssistantMessageId || ctx.lastAssistantUuid || "",
 					cost: result.total_cost_usd,
@@ -1123,7 +1127,7 @@ export class ClaudeEventTranslator {
 				const normalizedInput = normalizeToolInput(tool.toolName, finalInput);
 				yield* this.push(
 					ctx,
-					makeClaudeRuntimeEvent(
+					makeCanonicalEvent(
 						"tool.started",
 						ctx.sessionId,
 						{
@@ -1138,7 +1142,7 @@ export class ClaudeEventTranslator {
 				);
 				yield* this.push(
 					ctx,
-					makeClaudeRuntimeEvent("tool.completed", ctx.sessionId, {
+					makeCanonicalEvent("tool.completed", ctx.sessionId, {
 						messageId: this.currentAssistantMessageId,
 						partId: tool.itemId,
 						result: null,
@@ -1172,7 +1176,7 @@ export class ClaudeEventTranslator {
 
 	private push(
 		ctx: ClaudeSessionContext,
-		event: ProviderRuntimeEvent,
+		event: CanonicalEvent,
 	): Effect.Effect<void, unknown> {
 		const sink = this.deps.getSink(ctx);
 		if (!sink) return Effect.void;

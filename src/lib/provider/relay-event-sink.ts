@@ -6,17 +6,12 @@
 // familiar RelayMessage shapes.
 
 import { Effect } from "effect";
-import {
-	isProviderRuntimeEvent,
-	type ProviderRuntimeEvent,
-} from "../contracts/providers/provider-runtime-event.js";
 import { createLogger } from "../logger.js";
 import type { CanonicalEvent } from "../persistence/events.js";
 import type { PermissionId } from "../shared-types.js";
 import { tagWithSessionId } from "../shared-types.js";
 import type { RelayMessage } from "../types.js";
 import { MissingPendingInteractions } from "./errors.js";
-import { providerRuntimeEventToCanonicalEvent } from "./provider-runtime-event-to-canonical.js";
 import type {
 	EventSink,
 	PermissionRequest,
@@ -131,18 +126,13 @@ export function createRelayEventSink(deps: RelayEventSinkDeps): RelayEventSink {
 	}
 
 	return {
-		push(
-			event: ProviderRuntimeEvent | CanonicalEvent,
-		): Effect.Effect<void, never> {
+		push(event: CanonicalEvent): Effect.Effect<void, never> {
 			return Effect.gen(function* () {
-				const canonical = isProviderRuntimeEvent(event)
-					? providerRuntimeEventToCanonicalEvent(event)
-					: event;
 				yield* Effect.sync(reset);
 				// Persist to SQLite when available (before WS send for durability)
 				if (persist) {
 					const persistResult = yield* Effect.either(
-						persist.persistEvent(canonical),
+						persist.persistEvent(event),
 					);
 					if (persistResult._tag === "Left") {
 						// Non-fatal — same pattern as dual-write-hook.ts:149.
@@ -150,16 +140,16 @@ export function createRelayEventSink(deps: RelayEventSinkDeps): RelayEventSink {
 						yield* Effect.sync(() => {
 							const err = persistResult.left;
 							log.debug(
-								`Persist failed for ${canonical.type} (session=${sessionId}): ${err instanceof Error ? err.message : err}`,
+								`Persist failed for ${event.type} (session=${sessionId}): ${err instanceof Error ? err.message : err}`,
 							);
 						});
 					}
 				}
 				yield* Effect.sync(() => {
-					const result = translateCanonicalEvent(canonical);
+					const result = translateCanonicalEvent(event);
 					if (result.kind === "emit") {
 						for (const raw of result.messages) {
-							const m = tagWithSessionId(raw, canonical.sessionId || sessionId);
+							const m = tagWithSessionId(raw, event.sessionId || sessionId);
 							send(m);
 							const isTerminal =
 								m.type === "done" || (m.type === "error" && m.code !== "RETRY");

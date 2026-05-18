@@ -49,8 +49,8 @@ import {
 	type ClaudeEventPersistEffect,
 	ClaudeEventPersistEffectTag,
 } from "../../persistence/effect/claude-event-persist-effect.js";
+import { canonicalEvent } from "../../persistence/events.js";
 import { ProviderInstanceFailure } from "../errors.js";
-import { makeProviderRuntimeEvent } from "../provider-runtime-event-sink.js";
 import type {
 	CommandInfo,
 	ModelInfo,
@@ -1216,7 +1216,7 @@ export class ClaudeProviderRuntime {
 				if (!child.parentToolUseId || !ctx.eventSink) continue;
 				const task = ctx.subagentTasks?.get(child.sdkSubagentId);
 				yield* ctx.eventSink.push(
-					makeProviderRuntimeEvent(
+					canonicalEvent(
 						"tool.running",
 						ctx.sessionId,
 						{
@@ -1232,14 +1232,7 @@ export class ClaudeProviderRuntime {
 								providerTaskId: child.sdkSubagentId,
 							},
 						},
-						{
-							providerId: "claude",
-							providerRefs: {
-								providerToolUseId: child.parentToolUseId,
-								providerTaskId: child.sdkSubagentId,
-							},
-							rawSource: { kind: "claude-sdk", sourceSchema: "subagent" },
-						},
+						{ provider: "claude" },
 					),
 				);
 			}
@@ -1324,7 +1317,7 @@ export class ClaudeProviderRuntime {
 			if (ctx.eventSink) {
 				yield* ctx.eventSink
 					.push(
-						makeProviderRuntimeEvent(
+						canonicalEvent(
 							"tool.running",
 							ctx.sessionId,
 							{
@@ -1342,14 +1335,7 @@ export class ClaudeProviderRuntime {
 									providerTaskId: message.task_id,
 								},
 							},
-							{
-								providerId: "claude",
-								providerRefs: {
-									providerToolUseId: message.tool_use_id,
-									providerTaskId: message.task_id,
-								},
-								rawSource: { kind: "claude-sdk", sourceSchema: "subagent" },
-							},
+							{ provider: "claude" },
 						),
 					)
 					.pipe(
@@ -1889,7 +1875,7 @@ export class ClaudeProviderRuntime {
 
 			// 1. Complete in-flight tools as failed via EventSink.
 			for (const [, tool] of ctx.inFlightTools) {
-				const event = makeProviderRuntimeEvent(
+				const event = canonicalEvent(
 					"tool.completed",
 					ctx.sessionId,
 					{
@@ -1898,11 +1884,7 @@ export class ClaudeProviderRuntime {
 						result: null,
 						duration: 0,
 					},
-					{
-						providerId: "claude",
-						providerRefs: { providerToolUseId: tool.itemId },
-						rawSource: { kind: "claude-sdk", sourceSchema: "cleanup" },
-					},
+					{ provider: "claude" },
 				);
 				if (ctx.eventSink) {
 					yield* ctx.eventSink.push(event).pipe(Effect.ignore);

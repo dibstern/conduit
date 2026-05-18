@@ -1,9 +1,6 @@
 import { SqlClient } from "@effect/sql";
 import type { SqlError } from "@effect/sql/SqlError";
 import { Context, Data, Effect, Schema } from "effect";
-import type { ProviderRuntimeEvent } from "../../contracts/providers/provider-runtime-event.js";
-import { isProviderRuntimeEvent } from "../../contracts/providers/provider-runtime-event.js";
-import { providerRuntimeEventToCanonicalEvent } from "../../provider/provider-runtime-event-to-canonical.js";
 import {
 	type CanonicalEvent,
 	canonicalEvent,
@@ -24,7 +21,7 @@ export class ClaudeEventPersistEffectError extends Data.TaggedError(
 
 export interface ClaudeEventPersistEffect {
 	readonly persistEvent: (
-		event: RuntimeCompatibleEvent,
+		event: CanonicalEvent,
 	) => Effect.Effect<void, ClaudeEventPersistEffectError>;
 
 	readonly persistUserMessage: (
@@ -37,7 +34,7 @@ export interface ClaudeEventPersistEffect {
 		readonly parentSessionId: string;
 		readonly providerSessionId: string;
 		readonly title: string;
-		readonly events: readonly RuntimeCompatibleEvent[];
+		readonly events: readonly CanonicalEvent[];
 	}) => Effect.Effect<void, ClaudeEventPersistEffectError>;
 
 	readonly ensureClaudeSubagentSession: (input: {
@@ -53,7 +50,6 @@ export class ClaudeEventPersistEffectTag extends Context.Tag(
 )<ClaudeEventPersistEffectTag, ClaudeEventPersistEffect>() {}
 
 type PersistFailure = EventStoreError | ProjectionRunnerError | SqlError;
-type RuntimeCompatibleEvent = CanonicalEvent | ProviderRuntimeEvent;
 type ExistingMessagePart = {
 	readonly id: string;
 	readonly text: string | null;
@@ -115,19 +111,13 @@ export const makeClaudeEventPersistEffect = Effect.gen(function* () {
 				? cause
 				: new ClaudeEventPersistEffectError({ operation, cause });
 
-	const toCanonicalEvent = (event: RuntimeCompatibleEvent): CanonicalEvent =>
-		isProviderRuntimeEvent(event)
-			? providerRuntimeEventToCanonicalEvent(event)
-			: event;
-
 	const persistEvent = (
-		event: RuntimeCompatibleEvent,
+		event: CanonicalEvent,
 	): Effect.Effect<void, ClaudeEventPersistEffectError> =>
 		Effect.gen(function* () {
-			const canonical = toCanonicalEvent(event);
 			yield* ensureRecovered();
-			yield* ensureSession(canonical.sessionId, "claude");
-			const stored = yield* eventStore.append(canonical);
+			yield* ensureSession(event.sessionId, "claude");
+			const stored = yield* eventStore.append(event);
 			yield* projectEvent(stored);
 		}).pipe(Effect.mapError(mapPersistError("persistEvent")));
 
@@ -263,7 +253,7 @@ export const makeClaudeEventPersistEffect = Effect.gen(function* () {
 					existingPartRows.map((row) => [row.id, row]),
 				);
 				const events = filterExistingSubagentEvents(
-					input.events.map(toCanonicalEvent),
+					input.events,
 					existingMessageIds,
 					existingParts,
 				);

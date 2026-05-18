@@ -5,7 +5,6 @@
 // Conduit owns all state. Instances turn prompts into event streams.
 
 import type { Effect, Scope } from "effect";
-import type { ProviderRuntimeEvent } from "../contracts/providers/provider-runtime-event.js";
 import type { CanonicalEvent } from "../persistence/events.js";
 import type { ProviderPermissionUpdate } from "../shared-types.js";
 import type { ProviderInstanceFailure } from "./errors.js";
@@ -59,9 +58,7 @@ export interface QuestionRequest {
  *   pending request when the UI returns an answer.
  */
 export interface EventSink {
-	push(
-		event: ProviderRuntimeEvent | CanonicalEvent,
-	): Effect.Effect<void, unknown>;
+	push(event: CanonicalEvent): Effect.Effect<void, unknown>;
 	requestPermission(
 		request: PermissionRequest,
 	): Effect.Effect<PermissionResponse, unknown>;
