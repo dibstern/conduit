@@ -128,6 +128,7 @@ export interface CreateSessionRpcInput {
 	readonly originId: string;
 	readonly title?: string;
 	readonly requestId?: string;
+	readonly providerId?: string;
 }
 
 export interface ViewSessionRpcInput {
@@ -566,6 +567,7 @@ const callCreateSession = (input: CreateSessionRpcInput) =>
 				originId: input.originId,
 				...(input.title != null ? { title: input.title } : {}),
 				...(input.requestId != null ? { requestId: input.requestId } : {}),
+				...(input.providerId != null ? { providerId: input.providerId } : {}),
 			});
 		}),
 	).pipe(

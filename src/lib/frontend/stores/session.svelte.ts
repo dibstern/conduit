@@ -26,6 +26,7 @@ import { getBrowserClientId } from "./client-identity.js";
 import {
 	applyGetAgentsResponse,
 	applyGetCommandsResponse,
+	discoveryState,
 } from "./discovery.svelte.js";
 import { getCurrentSlug, navigate } from "./router.svelte.js";
 import { uiState } from "./ui.svelte.js";
@@ -176,10 +177,13 @@ export function sendNewSession(
 		failNewSession(requestId, "No active project");
 		return requestId;
 	}
+	const providerId =
+		discoveryState.currentProviderId || discoveryState.defaultProviderId;
 	const input: CreateSessionRpcInput = {
 		projectSlug,
 		requestId,
 		originId: getBrowserClientId(),
+		...(providerId ? { providerId } : {}),
 	};
 	if (start) {
 		start(input);

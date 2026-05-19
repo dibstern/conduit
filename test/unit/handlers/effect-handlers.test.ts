@@ -89,6 +89,7 @@ import {
 	handleNewSession,
 	loadMoreHistoryForSession,
 	renameSessionForClient,
+	viewSessionForClient,
 } from "../../../src/lib/handlers/session.js";
 import {
 	handleGetCommands,
@@ -857,6 +858,104 @@ describe("switchModelForSession", () => {
 			expect(log.info).toHaveBeenCalled();
 		}).pipe(Effect.provide(layer));
 	});
+
+	it.effect(
+		"warms OpenCode on model switch without binding a local placeholder",
+		() => {
+			const ws = mockWsHandler();
+			const log = mockLogger();
+			const config = mockConfig();
+			const engine = {
+				dispatch: vi.fn(async () => ({ models: [] })),
+				bindSession: vi.fn(),
+				unbindSession: vi.fn(),
+			} as unknown as OrchestrationEngine;
+			const client = {
+				provider: {
+					list: vi.fn(async () => ({
+						connected: ["opencode"],
+						providers: [
+							{
+								id: "opencode",
+								name: "OpenCode",
+								models: [
+									{
+										id: "big-pickle",
+										name: "Big Pickle",
+										variants: { standard: {} },
+									},
+								],
+							},
+						],
+					})),
+				},
+				session: {
+					create: vi.fn(async () => {
+						throw new Error("session create should not run on model switch");
+					}),
+				},
+			} as unknown as OpenCodeAPI;
+			const readQuery = {
+				getToolContent: vi.fn(() => Effect.succeed(undefined)),
+				getSessionStatus: vi.fn(() => Effect.succeed("idle")),
+				getSession: vi.fn(() =>
+					Effect.succeed({
+						id: "ses-local-placeholder",
+						provider: "claude",
+						provider_sid: null,
+						title: "Untitled",
+						status: "idle",
+						parent_id: null,
+						fork_point_event: null,
+						last_message_at: null,
+						created_at: 1,
+						updated_at: 1,
+					}),
+				),
+				getAllSessionStatuses: vi.fn(() => Effect.succeed({})),
+				listSessions: vi.fn(() => Effect.succeed([])),
+				getSessionMessagesWithParts: vi.fn(() => Effect.succeed([])),
+			} satisfies ReadQueryEffect;
+
+			const layer = Layer.mergeAll(
+				openCodeModelLayer(client),
+				Layer.succeed(WebSocketHandlerTag, ws),
+				Layer.succeed(LoggerTag, log),
+				Layer.succeed(ConfigTag, config),
+				Layer.succeed(ReadQueryEffectTag, readQuery),
+				Layer.succeed(OrchestrationEngineTag, withDispatchEffect(engine)),
+				makeOverridesStateLive(),
+			);
+
+			return Effect.gen(function* () {
+				yield* switchModelForSession({
+					clientId: "client-1",
+					sessionId: "ses-local-placeholder",
+					modelId: "big-pickle",
+					providerId: "opencode",
+				});
+
+				expect(client.provider.list).toHaveBeenCalledOnce();
+				expect(client.session.create).not.toHaveBeenCalled();
+				expect(engine.bindSession).not.toHaveBeenCalledWith(
+					"ses-local-placeholder",
+					"opencode",
+				);
+				expect(engine.unbindSession).toHaveBeenCalledWith(
+					"ses-local-placeholder",
+				);
+				expect(yield* getModel("ses-local-placeholder")).toEqual({
+					providerID: "opencode",
+					modelID: "big-pickle",
+				});
+				expect(ws.sendToSession).toHaveBeenCalledWith("ses-local-placeholder", {
+					type: "variant_info",
+					variant: "",
+					variants: ["standard"],
+				});
+			}).pipe(Effect.provide(layer));
+		},
+	);
 
 	it.effect("returns Claude variants when switching to a Claude model", () => {
 		const ws = mockWsHandler({
@@ -2238,6 +2337,123 @@ describe("handleNewSession", () => {
 		});
 	});
 
+	it.effect("passes the requested provider to SessionManagerService", () => {
+		const ws = mockWsHandler();
+		const log = mockLogger();
+		const serviceCreateSession = vi.fn(() =>
+			Effect.succeed({
+				id: "opencode-session",
+				projectID: "project-1",
+				directory: "/tmp/project",
+				title: "OpenCode Session",
+				version: "1.0.0",
+				time: { created: 100, updated: 200 },
+			}),
+		);
+		const sendDualSessionLists = vi.fn(() => Effect.void);
+		const sessionManagerService = makeMockSessionManagerService({
+			createSession: serviceCreateSession,
+			sendDualSessionLists,
+		});
+		const layer = makeSessionLifecycleLayer({
+			ws,
+			sessionManagerService,
+			log,
+		});
+
+		return handleNewSession("client-1", {
+			title: "OpenCode Session",
+			requestId: "request-opencode" as RequestId,
+			providerId: "opencode",
+		}).pipe(
+			Effect.provide(layer),
+			Effect.tap(() => {
+				expect(serviceCreateSession).toHaveBeenCalledWith("OpenCode Session", {
+					providerId: "opencode",
+				});
+				expect(ws.setClientSession).toHaveBeenCalledWith(
+					"client-1",
+					"opencode-session",
+				);
+			}),
+		);
+	});
+
+	it.effect(
+		"does not start the OpenCode message poller for local Claude placeholders",
+		() => {
+			const ws = mockWsHandler();
+			const log = mockLogger();
+			const startPolling = vi.fn();
+			const sessionManagerService = makeMockSessionManagerService();
+			const client = {
+				session: { get: vi.fn(async () => ({})) },
+				provider: { list: vi.fn(async () => ({ providers: [] })) },
+				permission: { list: vi.fn(async () => []) },
+				question: { list: vi.fn(async () => []) },
+			} as unknown as OpenCodeAPI;
+			const readQuery = {
+				getToolContent: vi.fn(() => Effect.succeed(undefined)),
+				getSessionStatus: vi.fn(() => Effect.succeed("idle")),
+				getSession: vi.fn(() =>
+					Effect.succeed({
+						id: "ses-local-placeholder",
+						provider: "claude",
+						provider_sid: null,
+						title: "Untitled",
+						status: "idle",
+						parent_id: null,
+						fork_point_event: null,
+						last_message_at: null,
+						created_at: 1,
+						updated_at: 1,
+					}),
+				),
+				getAllSessionStatuses: vi.fn(() => Effect.succeed({})),
+				listSessions: vi.fn(() => Effect.succeed([])),
+				getSessionMessagesWithParts: vi.fn(() => Effect.succeed([])),
+			} satisfies ReadQueryEffect;
+			const layer = Layer.mergeAll(
+				openCodeModelLayer(client),
+				Layer.succeed(WebSocketHandlerTag, ws),
+				Layer.succeed(LoggerTag, log),
+				Layer.succeed(SessionManagerServiceTag, sessionManagerService),
+				Layer.succeed(ReadQueryEffectTag, readQuery),
+				PendingInteractionServiceLive,
+				Layer.succeed(
+					StatusPollerTag,
+					makeMockStatusPoller({
+						isProcessing: vi.fn(() => Effect.succeed(false)),
+					}),
+				),
+				Layer.succeed(PollerManagerTag, {
+					on: vi.fn(),
+					isPolling: vi.fn(() => false),
+					startPolling,
+					stopPolling: vi.fn(),
+					notifySSEEvent: vi.fn(),
+				}),
+				makeOverridesStateLive(),
+			);
+
+			return viewSessionForClient({
+				clientId: "client-1",
+				sessionId: "ses-local-placeholder",
+				skipMetadata: true,
+			}).pipe(
+				Effect.provide(layer),
+				Effect.tap(() => {
+					expect(ws.sendTo).toHaveBeenCalledWith("client-1", {
+						type: "session_switched",
+						id: "ses-local-placeholder",
+						sessionId: "ses-local-placeholder",
+					});
+					expect(startPolling).not.toHaveBeenCalled();
+				}),
+			);
+		},
+	);
+
 	it.effect("logs and completes when the service list broadcast fails", () => {
 		const ws = mockWsHandler();
 		const log = mockLogger();
@@ -3331,6 +3547,126 @@ describe("handleMessage", () => {
 			expect(sendDualSessionLists).not.toHaveBeenCalled();
 		}).pipe(Effect.provide(layer));
 	});
+
+	it.effect(
+		"materializes an empty local session before sending an OpenCode-selected first prompt",
+		() => {
+			const ws = mockWsHandler({
+				getClientSession: vi.fn(() => "ses-local-placeholder"),
+				getClientsForSession: vi.fn(() => ["client-1"]),
+			});
+			const log = mockLogger();
+			const serviceCreateSession = vi.fn(() =>
+				Effect.succeed({
+					id: "ses-opencode-created",
+					projectID: "project-1",
+					directory: "/tmp/project",
+					title: "Untitled",
+					version: "1.0.0",
+					time: { created: 100, updated: 100 },
+					providerID: "opencode",
+				}),
+			);
+			const sessionManagerService = makeMockSessionManagerService({
+				createSession: serviceCreateSession,
+				sendDualSessionLists: vi.fn(() => Effect.void),
+			});
+			const config = mockConfig();
+			const client = {} as unknown as OpenCodeAPI;
+			const readQuery = {
+				getToolContent: vi.fn(() => Effect.succeed(undefined)),
+				getSessionStatus: vi.fn(() => Effect.succeed("idle")),
+				getSession: vi.fn(() =>
+					Effect.succeed({
+						id: "ses-local-placeholder",
+						provider: "claude",
+						provider_sid: null,
+						title: "Untitled",
+						status: "idle",
+						parent_id: null,
+						fork_point_event: null,
+						last_message_at: null,
+						created_at: 1,
+						updated_at: 1,
+					}),
+				),
+				getAllSessionStatuses: vi.fn(() => Effect.succeed({})),
+				listSessions: vi.fn(() => Effect.succeed([])),
+				getSessionMessagesWithParts: vi.fn(() => Effect.succeed([])),
+			} satisfies ReadQueryEffect;
+			const engine = {
+				getProviderForSession: vi.fn(() => undefined),
+				bindSession: vi.fn(),
+				dispatch: vi.fn(async () => ({
+					status: "completed",
+					cost: 0,
+					tokens: { input: 0, output: 0 },
+					durationMs: 0,
+					providerStateUpdates: [],
+				})),
+			} as unknown as OrchestrationEngine;
+
+			const layer = Layer.mergeAll(
+				Layer.succeed(OpenCodeAPITag, client),
+				Layer.succeed(WebSocketHandlerTag, ws),
+				Layer.succeed(LoggerTag, log),
+				Layer.succeed(SessionManagerServiceTag, sessionManagerService),
+				Layer.succeed(ConfigTag, config),
+				PendingInteractionServiceLive,
+				Layer.succeed(OrchestrationEngineTag, withDispatchEffect(engine)),
+				Layer.succeed(ReadQueryEffectTag, readQuery),
+				makeOverridesStateLive(),
+			);
+
+			return Effect.gen(function* () {
+				yield* setModel("ses-local-placeholder", {
+					providerID: "opencode",
+					modelID: "big-pickle",
+				});
+
+				yield* handleMessage("client-1", { text: "Test query" });
+				yield* flushDispatchContinuation();
+
+				expect(serviceCreateSession).toHaveBeenCalledWith("Untitled", {
+					providerId: "opencode",
+				});
+				expect(engine.bindSession).toHaveBeenCalledWith(
+					"ses-opencode-created",
+					"opencode",
+				);
+				expect(ws.setClientSession).toHaveBeenCalledWith(
+					"client-1",
+					"ses-opencode-created",
+				);
+				expect(ws.sendTo).toHaveBeenCalledWith("client-1", {
+					type: "session_switched",
+					id: "ses-opencode-created",
+					sessionId: "ses-opencode-created",
+				});
+				expect(engine.dispatchEffect).toHaveBeenCalledWith(
+					expect.objectContaining({
+						type: "send_turn",
+						providerId: "opencode",
+						input: expect.objectContaining({
+							sessionId: "ses-opencode-created",
+							prompt: "Test query",
+							model: {
+								providerId: "opencode",
+								modelId: "big-pickle",
+							},
+						}),
+					}),
+				);
+				expect(engine.dispatchEffect).not.toHaveBeenCalledWith(
+					expect.objectContaining({
+						input: expect.objectContaining({
+							sessionId: "ses-local-placeholder",
+						}),
+					}),
+				);
+			}).pipe(Effect.provide(layer));
+		},
+	);
 
 	it.effect(
 		"keeps dispatch rejection recovery after launching continuation",

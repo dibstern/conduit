@@ -328,6 +328,106 @@ describe("SessionManagerService", () => {
 	);
 
 	it.scoped(
+		"live service creates through OpenCode when an OpenCode provider is requested",
+		() => {
+			const dbFile = join(
+				tmpdir(),
+				`conduit-session-manager-opencode-request-${Date.now()}.sqlite`,
+			);
+			const api = makeMockOpenCodeAPI();
+			vi.spyOn(api.session, "create").mockResolvedValue({
+				id: "opencode-session",
+				projectID: "project-1",
+				directory: "/tmp/project",
+				title: "OpenCode Session",
+				version: "1.0.0",
+				time: { created: 10, updated: 10 },
+			});
+			const engine = new OrchestrationEngine({
+				registry: new ProviderRegistry(),
+			});
+			const bindSession = vi.spyOn(engine, "bindSession");
+			const layer = Layer.provideMerge(
+				SessionManagerServiceLive,
+				Layer.mergeAll(
+					Layer.succeed(OpenCodeAPITag, api),
+					Layer.succeed(LoggerTag, makeMockLogger()),
+					makeSessionManagerStateLive(),
+					makeOverridesStateLive(),
+					DaemonEventBusLive,
+					makePersistenceEffectLayer(dbFile),
+					Layer.succeed(OrchestrationEngineTag, engine),
+				),
+			);
+
+			return Effect.gen(function* () {
+				const service = yield* SessionManagerServiceTag;
+
+				const session = yield* service.createSession("OpenCode Session", {
+					providerId: "opencode",
+				});
+
+				expect(session.id).toBe("opencode-session");
+				expect(api.session.create).toHaveBeenCalledWith({
+					title: "OpenCode Session",
+				});
+				expect(bindSession).toHaveBeenCalledWith(
+					"opencode-session",
+					"opencode",
+				);
+			}).pipe(
+				Effect.provide(Layer.fresh(layer)),
+				Effect.ensuring(Effect.sync(() => rmSync(dbFile, { force: true }))),
+			);
+		},
+	);
+
+	it.scoped(
+		"live service does not fabricate a local session when requested OpenCode creation fails",
+		() => {
+			const dbFile = join(
+				tmpdir(),
+				`conduit-session-manager-opencode-fail-${Date.now()}.sqlite`,
+			);
+			const api = makeMockOpenCodeAPI();
+			vi.spyOn(api.session, "create").mockRejectedValue(
+				new Error("OpenCode unavailable"),
+			);
+			const layer = Layer.provideMerge(
+				SessionManagerServiceLive,
+				Layer.mergeAll(
+					Layer.succeed(OpenCodeAPITag, api),
+					Layer.succeed(LoggerTag, makeMockLogger()),
+					makeSessionManagerStateLive(),
+					makeOverridesStateLive(),
+					DaemonEventBusLive,
+					makePersistenceEffectLayer(dbFile),
+				),
+			);
+
+			return Effect.gen(function* () {
+				const service = yield* SessionManagerServiceTag;
+
+				const result = yield* Effect.either(
+					service.createSession("OpenCode Session", {
+						providerId: "opencode",
+					}),
+				);
+				const sessions = yield* service.listSessions();
+
+				expect(result._tag).toBe("Left");
+				expect(api.session.create).toHaveBeenCalledWith({
+					title: "OpenCode Session",
+				});
+				expect(sessions).toEqual([]);
+			}).pipe(
+				Effect.provide(Layer.fresh(layer)),
+				Effect.ensuring(Effect.sync(() => rmSync(dbFile, { force: true }))),
+			);
+		},
+	);
+
+	it.scoped(
 		"live service creates a local Claude session before model discovery sets a default provider",
 		() => {
 			const dbFile = join(

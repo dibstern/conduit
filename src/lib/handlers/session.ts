@@ -37,6 +37,7 @@ interface ViewSessionPayload {
 interface NewSessionPayload {
 	readonly title?: string;
 	readonly requestId?: RequestId;
+	readonly providerId?: string;
 }
 
 interface DeleteSessionPayload {
@@ -263,6 +264,20 @@ const seedPaginationCursorFromHistory = (
 		}
 	});
 
+const shouldStartOpenCodePoller = (sessionId: string) =>
+	Effect.gen(function* () {
+		const readQueryOption = yield* Effect.serviceOption(ReadQueryEffectTag);
+		if (readQueryOption._tag === "None") return true;
+
+		const rowResult = yield* Effect.either(
+			readQueryOption.value.getSession(sessionId),
+		);
+		if (rowResult._tag === "Left") return true;
+
+		const row = rowResult.right;
+		return !row || row.provider === "opencode";
+	});
+
 const switchClientToSession = (
 	clientId: string,
 	sessionId: string,
@@ -306,7 +321,12 @@ const switchClientToSession = (
 			status: isProcessing ? "processing" : "idle",
 		});
 
-		if (!options?.skipPollerSeed && !pollerManager.isPolling(sessionId)) {
+		const canUseOpenCodePoller = yield* shouldStartOpenCodePoller(sessionId);
+		if (
+			canUseOpenCodePoller &&
+			!options?.skipPollerSeed &&
+			!pollerManager.isPolling(sessionId)
+		) {
 			pollerManager.startPolling(sessionId);
 		}
 	});
@@ -360,17 +380,22 @@ export const createSessionForClient = ({
 	clientId,
 	title,
 	requestId,
+	providerId,
 }: {
 	readonly clientId: string;
 	readonly title?: string;
 	readonly requestId?: string;
+	readonly providerId?: string;
 }) =>
 	Effect.gen(function* () {
 		const wsHandler = yield* WebSocketHandlerTag;
 		const sessionManagerService = yield* SessionManagerServiceTag;
 		const log = yield* LoggerTag;
 
-		const session = yield* sessionManagerService.createSession(title);
+		const session =
+			providerId != null
+				? yield* sessionManagerService.createSession(title, { providerId })
+				: yield* sessionManagerService.createSession(title);
 
 		yield* switchClientToSession(clientId, session.id, {
 			...(requestId != null && { requestId: requestId as RequestId }),
@@ -404,6 +429,7 @@ export const handleNewSession = (
 		clientId,
 		...(payload.title != null ? { title: payload.title } : {}),
 		...(payload.requestId != null ? { requestId: payload.requestId } : {}),
+		...(payload.providerId != null ? { providerId: payload.providerId } : {}),
 	}).pipe(Effect.asVoid);
 
 export const handleSwitchSession = (

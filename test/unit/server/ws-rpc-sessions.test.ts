@@ -49,13 +49,16 @@ describe("WsRpcServerLayer ListSessions", () => {
 				projectSlug: "project-a",
 				originId: "browser-tab-a",
 				requestId: "request-1",
+				providerId: "opencode",
 			});
 
 			expect(result).toEqual({
 				projectSlug: "project-a",
 				sessionId: "session-new",
 			});
-			expect(createSession).toHaveBeenCalledWith(undefined);
+			expect(createSession).toHaveBeenCalledWith(undefined, {
+				providerId: "opencode",
+			});
 			expect(wsHandler.setClientSession).toHaveBeenCalledWith(
 				"browser-tab-a",
 				"session-new",

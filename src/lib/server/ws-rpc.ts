@@ -720,6 +720,7 @@ export const WsRpcServerLayer = WsRpcGroup.toLayer({
 			clientId: request.originId,
 			...(request.title != null ? { title: request.title } : {}),
 			...(request.requestId != null ? { requestId: request.requestId } : {}),
+			...(request.providerId != null ? { providerId: request.providerId } : {}),
 		}).pipe(
 			Effect.map((session) => ({
 				projectSlug: request.projectSlug,

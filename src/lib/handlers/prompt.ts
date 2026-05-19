@@ -21,9 +21,11 @@ import {
 	getModel,
 	getVariant,
 	isModelUserSelected,
+	type ModelOverride,
 	type OverridesStateTag,
 	PROCESSING_TIMEOUT_DURATION,
 	resetProcessingTimeout,
+	setModel,
 	startProcessingTimeout,
 } from "../domain/relay/Services/session-overrides-state.js";
 import { SessionTitleServiceTag } from "../domain/relay/Services/session-title-service.js";
@@ -35,11 +37,13 @@ import {
 	ReadQueryEffectTag,
 } from "../persistence/effect/read-query-effect.js";
 import { messageRowsToHistory } from "../persistence/session-history-adapter.js";
+import type { OrchestrationEngine } from "../provider/orchestration-engine.js";
 import {
 	createRelayEventSink,
 	type RelayEventSinkPersist,
 } from "../provider/relay-event-sink.js";
 import type { SendTurnInput, TurnResult } from "../provider/types.js";
+import type { RelayMessage } from "../types.js";
 import { isClaudeProvider } from "./model.js";
 import type { PromptOptions } from "./types.js";
 
@@ -70,6 +74,85 @@ function targetSessionForRelayMessage(
 type PriorHistoryReaders = {
 	readQueryEffect?: ReadQueryEffect;
 };
+
+const materializeOpenCodeSessionIfNeeded = ({
+	activeId,
+	clientId,
+	providerId,
+	model,
+	modelUserSelected,
+	readQueryEffect,
+	sessionManagerService,
+	orchestrationEngine,
+	wsHandler,
+	log,
+}: {
+	readonly activeId: string;
+	readonly clientId: string;
+	readonly providerId: string;
+	readonly model?: ModelOverride;
+	readonly modelUserSelected: boolean;
+	readonly readQueryEffect?: ReadQueryEffect;
+	readonly sessionManagerService: SessionManagerService;
+	readonly orchestrationEngine: OrchestrationEngine;
+	readonly wsHandler: {
+		setClientSession(clientId: string, sessionId: string): void;
+		sendTo(clientId: string, msg: RelayMessage): void;
+		broadcast(msg: RelayMessage): void;
+	};
+	readonly log: {
+		info(...args: unknown[]): void;
+		warn(...args: unknown[]): void;
+	};
+}) =>
+	Effect.gen(function* () {
+		if (isClaudeProvider(providerId) || !readQueryEffect) return activeId;
+
+		const rowResult = yield* Effect.either(
+			readQueryEffect.getSession(activeId),
+		);
+		if (rowResult._tag === "Left") {
+			log.warn(
+				`Could not inspect session provider before OpenCode dispatch for ${activeId}: ${formatErrorDetail(rowResult.left)}`,
+			);
+			return activeId;
+		}
+
+		const row = rowResult.right;
+		if (!row || row.provider === "opencode") return activeId;
+
+		const targetProvider = model?.providerID ?? providerId;
+		const session = yield* sessionManagerService.createSession(row.title, {
+			providerId: targetProvider,
+		});
+		if (model && modelUserSelected) {
+			yield* setModel(session.id, model);
+		}
+		orchestrationEngine.bindSession(session.id, "opencode");
+		wsHandler.setClientSession(clientId, session.id);
+		wsHandler.sendTo(clientId, {
+			type: "session_switched",
+			id: session.id,
+			sessionId: session.id,
+		});
+		yield* Effect.forkDaemon(
+			sessionManagerService
+				.sendDualSessionLists((msg) => wsHandler.broadcast(msg))
+				.pipe(
+					Effect.catchAll((err) =>
+						Effect.sync(() =>
+							log.warn(
+								`Failed to broadcast session list after OpenCode materialization: ${err}`,
+							),
+						),
+					),
+				),
+		);
+		log.info(
+			`client=${clientId} materialized OpenCode session ${session.id} from local session ${activeId}`,
+		);
+		return session.id;
+	});
 
 function loadPriorHistoryForTurn(
 	sessionId: string,
@@ -137,7 +220,7 @@ export const sendMessageToSession = (input: SendMessageToSessionInput) =>
 		const { clientId, text, images, originId, excludeClientId } = input;
 		const imageList =
 			images && images.length > 0 ? Array.from(images) : undefined;
-		const activeId = input.sessionId;
+		let activeId = input.sessionId;
 		if (!text) return;
 		if (!activeId) {
 			if (input.missingSessionClientId) {
@@ -151,6 +234,37 @@ export const sendMessageToSession = (input: SendMessageToSessionInput) =>
 			}
 			return;
 		}
+		const originalActiveId = activeId;
+		const sessionModel = yield* getModel(activeId);
+		const sessionModelUserSelected = yield* isModelUserSelected(activeId);
+		const engineOption = yield* Effect.serviceOption(OrchestrationEngineTag);
+		const readQueryEffectOption =
+			yield* Effect.serviceOption(ReadQueryEffectTag);
+
+		if (engineOption._tag === "Some") {
+			const orchestrationEngine = engineOption.value;
+			let providerId = orchestrationEngine.getProviderForSession(activeId);
+			if (!providerId) {
+				providerId =
+					sessionModel && isClaudeProvider(sessionModel.providerID)
+						? "claude"
+						: "opencode";
+			}
+			activeId = yield* materializeOpenCodeSessionIfNeeded({
+				activeId,
+				clientId,
+				providerId,
+				...(sessionModel ? { model: sessionModel } : {}),
+				modelUserSelected: sessionModelUserSelected,
+				...(readQueryEffectOption._tag === "Some"
+					? { readQueryEffect: readQueryEffectOption.value }
+					: {}),
+				sessionManagerService,
+				orchestrationEngine,
+				wsHandler,
+				log,
+			});
+		}
 		log.info(
 			`client=${clientId} session=${activeId} → ${text.slice(0, 80)}${text.length > 80 ? "…" : ""}`,
 		);
@@ -163,6 +277,7 @@ export const sendMessageToSession = (input: SendMessageToSessionInput) =>
 		};
 
 		// Clear the input draft
+		if (originalActiveId !== activeId) clearSessionInputDraft(originalActiveId);
 		clearSessionInputDraft(activeId);
 
 		// Send user_message to OTHER clients viewing this session
@@ -191,8 +306,6 @@ export const sendMessageToSession = (input: SendMessageToSessionInput) =>
 				? yield* agentServiceOption.value.getActiveAgent(activeId)
 				: yield* getAgent(activeId);
 		if (sessionAgent) prompt.agent = sessionAgent;
-		const sessionModel = yield* getModel(activeId);
-		const sessionModelUserSelected = yield* isModelUserSelected(activeId);
 		if (sessionModel && sessionModelUserSelected) {
 			prompt.model = sessionModel;
 		}
@@ -226,15 +339,12 @@ export const sendMessageToSession = (input: SendMessageToSessionInput) =>
 		);
 
 		// Check if orchestration engine is available
-		const engineOption = yield* Effect.serviceOption(OrchestrationEngineTag);
 		const claudeEventPersistEffectOption = yield* Effect.serviceOption(
 			ClaudeEventPersistEffectTag,
 		);
 		const providerStateEffectOption = yield* Effect.serviceOption(
 			ProviderStateEffectTag,
 		);
-		const readQueryEffectOption =
-			yield* Effect.serviceOption(ReadQueryEffectTag);
 		const titleServiceOption = yield* Effect.serviceOption(
 			SessionTitleServiceTag,
 		);
