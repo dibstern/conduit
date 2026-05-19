@@ -204,6 +204,17 @@ function taskCompletionResult(
 	return null;
 }
 
+type ReadableContentBlockType = "text" | "thinking";
+
+interface ContentBlockState {
+	readonly type: ReadableContentBlockType;
+	readonly partId: string;
+	text: string;
+	textLength: number;
+	started: boolean;
+	ended: boolean;
+}
+
 // ─── Translator ────────────────────────────────────────────────────────────
 
 export interface ClaudeEventTranslatorDeps {
@@ -215,9 +226,114 @@ export class ClaudeEventTranslator {
 	// State tracker for mapping Claude content blocks to messageId/partId.
 	private currentAssistantMessageId = "";
 	private partIdCounter = 0;
+	private contentBlockStates = new Map<string, ContentBlockState>();
 
 	private nextPartId(): string {
 		return `claude-part-${this.partIdCounter++}`;
+	}
+
+	private contentBlockKey(messageId: string, index: number): string {
+		return `${messageId}:${index}`;
+	}
+
+	private getOrCreateContentBlockState(
+		messageId: string,
+		index: number,
+		type: ReadableContentBlockType,
+		partId: string,
+	): ContentBlockState {
+		const key = this.contentBlockKey(messageId, index);
+		const existing = this.contentBlockStates.get(key);
+		if (existing?.type === type) return existing;
+
+		const state: ContentBlockState = {
+			type,
+			partId,
+			text: "",
+			textLength: 0,
+			started: false,
+			ended: false,
+		};
+		this.contentBlockStates.set(key, state);
+		return state;
+	}
+
+	private assistantSnapshotMessageId(message: SDKAssistantMessage): string {
+		const id = message.message.id;
+		return typeof id === "string" && id.length > 0 ? id : message.uuid;
+	}
+
+	private async pushMessageCreated(
+		ctx: ClaudeSessionContext,
+		messageId: string,
+	): Promise<void> {
+		await this.push(
+			ctx,
+			makeCanonicalEvent("message.created", ctx.sessionId, {
+				messageId,
+				role: "assistant",
+				sessionId: ctx.sessionId,
+			}),
+		);
+	}
+
+	private async emitTextSuffix(
+		ctx: ClaudeSessionContext,
+		input: {
+			readonly messageId: string;
+			readonly index: number;
+			readonly type: ReadableContentBlockType;
+			readonly partId: string;
+			readonly text: string;
+			readonly complete?: boolean;
+		},
+	): Promise<void> {
+		const state = this.getOrCreateContentBlockState(
+			input.messageId,
+			input.index,
+			input.type,
+			input.partId,
+		);
+
+		if (input.type === "thinking" && !state.started) {
+			await this.push(
+				ctx,
+				makeCanonicalEvent("thinking.start", ctx.sessionId, {
+					messageId: input.messageId,
+					partId: state.partId,
+				}),
+			);
+			state.started = true;
+		}
+
+		if (input.text.length > state.textLength) {
+			const suffix = input.text.slice(state.textLength);
+			await this.push(
+				ctx,
+				makeCanonicalEvent(
+					input.type === "text" ? "text.delta" : "thinking.delta",
+					ctx.sessionId,
+					{
+						messageId: input.messageId,
+						partId: state.partId,
+						text: suffix,
+					},
+				),
+			);
+			state.text = input.text;
+			state.textLength = input.text.length;
+		}
+
+		if (input.type === "thinking" && input.complete && !state.ended) {
+			await this.push(
+				ctx,
+				makeCanonicalEvent("thinking.end", ctx.sessionId, {
+					messageId: input.messageId,
+					partId: state.partId,
+				}),
+			);
+			state.ended = true;
+		}
 	}
 
 	/** Reset in-flight state at the start of every new turn to prevent
@@ -225,6 +341,7 @@ export class ClaudeEventTranslator {
 	resetInFlightState(): void {
 		this.partIdCounter = 0;
 		this.currentAssistantMessageId = "";
+		this.contentBlockStates.clear();
 	}
 
 	constructor(private readonly deps: ClaudeEventTranslatorDeps) {}
@@ -668,14 +785,7 @@ export class ClaudeEventTranslator {
 			this.currentAssistantMessageId = msgId;
 			// Emit message.created so MessageProjector creates the row
 			// and TurnProjector can link the turn to its assistant message.
-			await this.push(
-				ctx,
-				makeCanonicalEvent("message.created", ctx.sessionId, {
-					messageId: msgId,
-					role: "assistant",
-					sessionId: ctx.sessionId,
-				}),
-			);
+			await this.pushMessageCreated(ctx, msgId);
 			// Emit session.status: busy so TurnProjector transitions
 			// the turn from "pending" → "running".
 			await this.push(
@@ -700,6 +810,14 @@ export class ClaudeEventTranslator {
 		// complete when their tool_result arrives.
 		if (tool.toolName === "__thinking") {
 			ctx.inFlightTools.delete(index);
+			const state = this.currentAssistantMessageId
+				? this.getOrCreateContentBlockState(
+						this.currentAssistantMessageId,
+						index,
+						"thinking",
+						tool.itemId,
+					)
+				: undefined;
 			await this.push(
 				ctx,
 				makeCanonicalEvent("thinking.end", ctx.sessionId, {
@@ -707,6 +825,7 @@ export class ClaudeEventTranslator {
 					partId: tool.itemId,
 				}),
 			);
+			if (state) state.ended = true;
 			return;
 		}
 
@@ -773,6 +892,7 @@ export class ClaudeEventTranslator {
 			case "thinking": {
 				const itemId = randomUUID();
 				const toolName = block.type === "text" ? "__text" : "__thinking";
+				const messageId = this.currentAssistantMessageId || itemId;
 				const tool: ToolInFlight = {
 					itemId,
 					toolName,
@@ -781,16 +901,28 @@ export class ClaudeEventTranslator {
 					partialInputJson: "",
 				};
 				ctx.inFlightTools.set(index, tool);
+				this.getOrCreateContentBlockState(
+					messageId,
+					index,
+					block.type,
+					tool.itemId,
+				);
 				if (block.type === "thinking") {
-					// Emit thinking.start so the UI creates a ThinkingMessage with verbs.
-					// text blocks don't need an event — content streams via text.delta → delta.
-					await this.push(
-						ctx,
-						makeCanonicalEvent("thinking.start", ctx.sessionId, {
-							messageId: this.currentAssistantMessageId,
-							partId: tool.itemId,
-						}),
-					);
+					await this.emitTextSuffix(ctx, {
+						messageId,
+						index,
+						type: "thinking",
+						partId: tool.itemId,
+						text: block.thinking,
+					});
+				} else if (block.text.length > 0) {
+					await this.emitTextSuffix(ctx, {
+						messageId,
+						index,
+						type: "text",
+						partId: tool.itemId,
+						text: block.text,
+					});
 				}
 				return;
 			}
@@ -843,18 +975,23 @@ export class ClaudeEventTranslator {
 				const text = delta.type === "text_delta" ? delta.text : delta.thinking;
 				if (text.length === 0) return;
 
-				const eventType =
-					delta.type === "text_delta" ? "text.delta" : "thinking.delta";
+				const type = delta.type === "text_delta" ? "text" : "thinking";
 				const partId = tool ? tool.itemId : this.nextPartId();
-				await this.push(
-					ctx,
-					makeCanonicalEvent(eventType, ctx.sessionId, {
-						messageId:
-							this.currentAssistantMessageId || tool?.itemId || randomUUID(),
-						partId,
-						text,
-					}),
+				const messageId =
+					this.currentAssistantMessageId || tool?.itemId || randomUUID();
+				const state = this.getOrCreateContentBlockState(
+					messageId,
+					index,
+					type,
+					partId,
 				);
+				await this.emitTextSuffix(ctx, {
+					messageId,
+					index,
+					type,
+					partId: state.partId,
+					text: state.text + text,
+				});
 				return;
 			}
 
@@ -896,10 +1033,57 @@ export class ClaudeEventTranslator {
 		ctx: ClaudeSessionContext,
 		message: SDKAssistantMessage,
 	): Promise<void> {
-		const uuid = message.uuid; // Typed: UUID
-		if (uuid) {
-			ctx.lastAssistantUuid = uuid;
-			this.currentAssistantMessageId = uuid;
+		ctx.lastAssistantUuid = message.uuid;
+
+		const messageId = this.currentAssistantMessageId
+			? this.currentAssistantMessageId
+			: this.assistantSnapshotMessageId(message);
+		this.currentAssistantMessageId = messageId;
+
+		const content = message.message.content;
+		if (!Array.isArray(content)) return;
+
+		const readableBlocks = content.filter(
+			(block) =>
+				isRecord(block) &&
+				((block["type"] === "text" && typeof block["text"] === "string") ||
+					(block["type"] === "thinking" &&
+						typeof block["thinking"] === "string")),
+		);
+		if (readableBlocks.length === 0) return;
+
+		await this.pushMessageCreated(ctx, messageId);
+
+		for (const [index, block] of content.entries()) {
+			if (!isRecord(block)) continue;
+			if (block["type"] === "text" && typeof block["text"] === "string") {
+				if (block["text"].length === 0) continue;
+				await this.emitTextSuffix(ctx, {
+					messageId,
+					index,
+					type: "text",
+					partId: `${messageId}-${index}`,
+					text: block["text"],
+				});
+				continue;
+			}
+			if (
+				block["type"] === "thinking" &&
+				typeof block["thinking"] === "string"
+			) {
+				const existing = this.contentBlockStates.get(
+					this.contentBlockKey(messageId, index),
+				);
+				if (block["thinking"].length === 0 && !existing) continue;
+				await this.emitTextSuffix(ctx, {
+					messageId,
+					index,
+					type: "thinking",
+					partId: `${messageId}-${index}`,
+					text: block["thinking"],
+					complete: true,
+				});
+			}
 		}
 	}
 

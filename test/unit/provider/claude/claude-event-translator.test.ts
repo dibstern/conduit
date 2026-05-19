@@ -560,6 +560,84 @@ describe("ClaudeEventTranslator", () => {
 		}
 	});
 
+	it("maps assistant snapshot thinking blocks through relay, history, and frontend messages", async () => {
+		const harness = createTestHarness();
+		try {
+			harness.seedSession("sess-thinking-snapshot", { provider: "claude" });
+			const runner = new ProjectionRunner({
+				db: harness.db,
+				eventStore: harness.eventStore,
+				cursorRepo: new ProjectorCursorRepository(harness.db),
+				projectors: createAllProjectors(),
+			});
+			runner.recover();
+			const relaySink = createRelayEventSink({
+				sessionId: "sess-thinking-snapshot",
+				send: vi.fn(),
+				persist: {
+					persistEvent: (event) =>
+						Effect.sync(() => {
+							const stored = harness.eventStore.append(event);
+							runner.projectEvent(stored);
+						}),
+				},
+			});
+			const relayTranslator = new ClaudeEventTranslator({
+				getSink: () => relaySink,
+				runEffect: Effect.runPromise,
+			});
+			const relayCtx = makeCtx({
+				sessionId: "sess-thinking-snapshot",
+				eventSink: relaySink,
+			});
+
+			await relayTranslator.translate(relayCtx, {
+				type: "assistant",
+				message: {
+					id: "msg-thinking-snapshot",
+					type: "message",
+					role: "assistant",
+					content: [
+						{ type: "thinking", thinking: "visible Claude thought" },
+						{ type: "text", text: "final answer" },
+					],
+					model: "claude-sonnet-4-5",
+					stop_reason: "end_turn",
+					stop_sequence: null,
+					usage: {
+						input_tokens: 10,
+						output_tokens: 5,
+					},
+				},
+				parent_tool_use_id: null,
+				uuid: "00000000-0000-0000-0000-000000000206",
+				session_id: "sdk-sess-thinking-snapshot",
+			} as unknown as SDKMessage);
+
+			const rows = new ReadQueryService(harness.db).getSessionMessagesWithParts(
+				"sess-thinking-snapshot",
+			);
+			const history = messageRowsToHistory(rows, { pageSize: 50 });
+			const messages = historyToChatMessages(history.messages);
+
+			expect(messages).toEqual(
+				expect.arrayContaining([
+					expect.objectContaining({
+						type: "thinking",
+						text: "visible Claude thought",
+						done: true,
+					}),
+					expect.objectContaining({
+						type: "assistant",
+						rawText: "final answer",
+					}),
+				]),
+			);
+		} finally {
+			harness.close();
+		}
+	});
+
 	// ─── 3b. system (subtype api_retry) ──────────────────────────────────
 
 	it("translates system/api_retry to session.status:retry with detail metadata", async () => {
@@ -961,8 +1039,10 @@ describe("ClaudeEventTranslator", () => {
 		} as unknown as SDKMessage);
 
 		expect(ctx.lastAssistantUuid).toBe("assist-uuid-123");
-		// No events emitted -- assistant snapshot only updates context
-		expect(sink.events).toHaveLength(0);
+		const textDelta = sink.events.find((e) => e.type === "text.delta");
+		expect(textDelta).toBeDefined();
+		expect(dataOf(textDelta)["messageId"]).toBe("msg-1");
+		expect(dataOf(textDelta)["text"]).toBe("Hello");
 	});
 
 	// ─── 12. user (tool_result) ──────────────────────────────────────────

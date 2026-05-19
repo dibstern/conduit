@@ -141,6 +141,9 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 		expect(
 			(callArgs["options"] as Record<string, unknown>)["forwardSubagentText"],
 		).toBe(true);
+		expect(
+			(callArgs["options"] as Record<string, unknown>)["settings"],
+		).toEqual({ showThinkingSummaries: true });
 
 		// Result should be a proper TurnResult
 		expect(result.status).toBe("completed");
