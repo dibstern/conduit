@@ -10,7 +10,7 @@
  */
 import { Effect } from "effect";
 import { describe, expect, it } from "vitest";
-import type { CanonicalEvent } from "../../../src/lib/persistence/events.js";
+import type { ProviderRuntimeEvent } from "../../../src/lib/contracts/providers/provider-runtime-event.js";
 import { ClaudeProviderInstance } from "../../../src/lib/provider/claude/claude-provider-instance.js";
 import type { EventSink } from "../../../src/lib/provider/types.js";
 
@@ -19,12 +19,12 @@ const RUN_EXPENSIVE = process.env["RUN_EXPENSIVE_E2E"] === "1";
 // ─── Collecting EventSink ──────────────────────────────────────────────────
 
 function createCollectingEventSink(): EventSink & {
-	readonly events: CanonicalEvent[];
+	readonly events: ProviderRuntimeEvent[];
 } {
-	const events: CanonicalEvent[] = [];
+	const events: ProviderRuntimeEvent[] = [];
 	return {
 		events,
-		push: (event: CanonicalEvent) =>
+		push: (event: ProviderRuntimeEvent) =>
 			Effect.sync(() => {
 				events.push(event);
 			}),

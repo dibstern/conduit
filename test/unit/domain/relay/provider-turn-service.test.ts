@@ -38,7 +38,6 @@ import {
 	ReadQueryEffectError,
 	ReadQueryEffectTag,
 } from "../../../../src/lib/persistence/effect/read-query-effect.js";
-import { canonicalEvent } from "../../../../src/lib/persistence/events.js";
 import {
 	OrchestrationEngine,
 	type SendTurnCommand,
@@ -57,6 +56,7 @@ import {
 	makeMockSessionManagerService,
 	makeMockWebSocketHandler,
 } from "../../../helpers/mock-factories.js";
+import { providerRuntimeEvent } from "../../../helpers/provider-runtime-event.js";
 
 const completedTurn = (overrides?: Partial<TurnResult>): TurnResult => ({
 	status: "completed",
@@ -144,6 +144,7 @@ const makePersistService = (
 	persistUserMessage: ClaudeEventPersistEffect["persistUserMessage"],
 ): ClaudeEventPersistEffect => ({
 	persistEvent: vi.fn(() => Effect.void),
+	persistEvents: vi.fn(() => Effect.void),
 	persistUserMessage,
 	persistClaudeSubagent: vi.fn(() => Effect.void),
 	ensureClaudeSubagentSession: vi.fn(() => Effect.void),
@@ -322,7 +323,7 @@ describe("ProviderTurnService", () => {
 				});
 
 				yield* command.input.eventSink.push(
-					canonicalEvent(
+					providerRuntimeEvent(
 						"text.delta",
 						"session-1",
 						{
@@ -330,7 +331,7 @@ describe("ProviderTurnService", () => {
 							partId: "assistant-1-0",
 							text: "hello",
 						},
-						{ provider: "claude" },
+						{ providerId: "claude" },
 					),
 				);
 				expect(wsHandler.sendToSession).toHaveBeenCalledWith(
@@ -536,7 +537,7 @@ describe("ProviderTurnService", () => {
 
 				if (eventSink) {
 					yield* eventSink.push(
-						canonicalEvent(
+						providerRuntimeEvent(
 							"text.delta",
 							"session-1",
 							{
@@ -544,7 +545,7 @@ describe("ProviderTurnService", () => {
 								partId: "assistant-1-0",
 								text: "should not emit",
 							},
-							{ provider: "opencode" },
+							{ providerId: "opencode" },
 						),
 					);
 				}

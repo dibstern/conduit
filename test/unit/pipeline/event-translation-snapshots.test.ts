@@ -1,11 +1,11 @@
 import { Effect } from "effect";
 import { describe, expect, it, vi } from "vitest";
-import { canonicalEvent } from "../../../src/lib/persistence/events.js";
 import {
 	createRelayEventSink,
 	type RelayEventSinkDeps,
 } from "../../../src/lib/provider/relay-event-sink.js";
 import type { RelayMessage } from "../../../src/lib/types.js";
+import { providerRuntimeEvent } from "../../helpers/provider-runtime-event.js";
 
 /**
  * SNAPSHOT STRATEGY: These tests intentionally use toEqual() for exact shape matching.
@@ -36,7 +36,7 @@ describe("Event translation snapshots — thinking lifecycle", () => {
 		const { sink, sent } = createCaptureSink();
 		await Effect.runPromise(
 			sink.push(
-				canonicalEvent("thinking.start", SESSION_ID, {
+				providerRuntimeEvent("thinking.start", SESSION_ID, {
 					messageId: "msg-1",
 					partId: "part-1",
 				}),
@@ -54,7 +54,7 @@ describe("Event translation snapshots — thinking lifecycle", () => {
 		const { sink, sent } = createCaptureSink();
 		await Effect.runPromise(
 			sink.push(
-				canonicalEvent("thinking.delta", SESSION_ID, {
+				providerRuntimeEvent("thinking.delta", SESSION_ID, {
 					messageId: "msg-1",
 					partId: "part-1",
 					text: "reasoning text",
@@ -74,7 +74,7 @@ describe("Event translation snapshots — thinking lifecycle", () => {
 		const { sink, sent } = createCaptureSink();
 		await Effect.runPromise(
 			sink.push(
-				canonicalEvent("thinking.end", SESSION_ID, {
+				providerRuntimeEvent("thinking.end", SESSION_ID, {
 					messageId: "msg-1",
 					partId: "part-1",
 				}),
@@ -93,7 +93,7 @@ describe("Event translation snapshots — thinking lifecycle", () => {
 
 		await Effect.runPromise(
 			sink.push(
-				canonicalEvent("thinking.start", SESSION_ID, {
+				providerRuntimeEvent("thinking.start", SESSION_ID, {
 					messageId: "msg-1",
 					partId: "part-1",
 				}),
@@ -101,7 +101,7 @@ describe("Event translation snapshots — thinking lifecycle", () => {
 		);
 		await Effect.runPromise(
 			sink.push(
-				canonicalEvent("thinking.delta", SESSION_ID, {
+				providerRuntimeEvent("thinking.delta", SESSION_ID, {
 					messageId: "msg-1",
 					partId: "part-1",
 					text: "deep thought",
@@ -110,7 +110,7 @@ describe("Event translation snapshots — thinking lifecycle", () => {
 		);
 		await Effect.runPromise(
 			sink.push(
-				canonicalEvent("thinking.end", SESSION_ID, {
+				providerRuntimeEvent("thinking.end", SESSION_ID, {
 					messageId: "msg-1",
 					partId: "part-1",
 				}),
@@ -129,7 +129,7 @@ describe("Event translation snapshots — thinking lifecycle", () => {
 		const { sink, sent } = createCaptureSink();
 		await Effect.runPromise(
 			sink.push(
-				canonicalEvent("message.created", SESSION_ID, {
+				providerRuntimeEvent("message.created", SESSION_ID, {
 					messageId: "msg-1",
 					role: "assistant",
 					sessionId: SESSION_ID,
@@ -145,7 +145,7 @@ describe("Event translation — structural minimum (safety net)", () => {
 		const { sink, sent } = createCaptureSink();
 		await Effect.runPromise(
 			sink.push(
-				canonicalEvent("thinking.start", SESSION_ID, {
+				providerRuntimeEvent("thinking.start", SESSION_ID, {
 					messageId: "msg-struct",
 					partId: "part-struct",
 				}),
@@ -161,7 +161,7 @@ describe("Event translation — structural minimum (safety net)", () => {
 		const { sink, sent } = createCaptureSink();
 		await Effect.runPromise(
 			sink.push(
-				canonicalEvent("thinking.delta", SESSION_ID, {
+				providerRuntimeEvent("thinking.delta", SESSION_ID, {
 					messageId: "msg-struct",
 					partId: "part-struct",
 					text: "content",
@@ -179,7 +179,7 @@ describe("Event translation — structural minimum (safety net)", () => {
 		const { sink, sent } = createCaptureSink();
 		await Effect.runPromise(
 			sink.push(
-				canonicalEvent("thinking.end", SESSION_ID, {
+				providerRuntimeEvent("thinking.end", SESSION_ID, {
 					messageId: "msg-struct",
 					partId: "part-struct",
 				}),
@@ -195,7 +195,7 @@ describe("Event translation — structural minimum (safety net)", () => {
 		const { sink, sent } = createCaptureSink();
 		await Effect.runPromise(
 			sink.push(
-				canonicalEvent("turn.completed", SESSION_ID, {
+				providerRuntimeEvent("turn.completed", SESSION_ID, {
 					messageId: "msg-struct",
 					cost: 0.01,
 					duration: 1000,

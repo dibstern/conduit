@@ -13,6 +13,7 @@ import {
 	makeMessageCreatedEvent,
 	makeTextDelta,
 } from "../../helpers/persistence-factories.js";
+import { providerRuntimeEventFromCanonical } from "../../helpers/provider-runtime-event.js";
 
 describe("RelayEventSink Effect persistence integration", () => {
 	it.effect(
@@ -32,11 +33,17 @@ describe("RelayEventSink Effect persistence integration", () => {
 				});
 
 				yield* sink.push(
-					makeMessageCreatedEvent("s1", "m1", {
-						role: "assistant",
-					}),
+					providerRuntimeEventFromCanonical(
+						makeMessageCreatedEvent("s1", "m1", {
+							role: "assistant",
+						}),
+					),
 				);
-				yield* sink.push(makeTextDelta("s1", "m1", "Hello from Claude"));
+				yield* sink.push(
+					providerRuntimeEventFromCanonical(
+						makeTextDelta("s1", "m1", "Hello from Claude"),
+					),
+				);
 
 				const messages = yield* readQuery.getSessionMessagesWithParts("s1");
 				expect(messages.length).toBeGreaterThanOrEqual(1);
@@ -66,7 +73,9 @@ describe("RelayEventSink Effect persistence integration", () => {
 			});
 
 			yield* sink.push(
-				makeMessageCreatedEvent("s-claude", "m1", { role: "assistant" }),
+				providerRuntimeEventFromCanonical(
+					makeMessageCreatedEvent("s-claude", "m1", { role: "assistant" }),
+				),
 			);
 
 			const sessions = yield* readQuery.listSessions();

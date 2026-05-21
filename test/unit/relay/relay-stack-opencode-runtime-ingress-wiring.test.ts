@@ -1,4 +1,4 @@
-// Regression guard: relay-stack should use Effect persistence dual-write only.
+// Regression guard: relay-stack should use Effect OpenCode runtime ingress only.
 import { mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import {
 	createServer,
@@ -7,10 +7,11 @@ import {
 } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { Effect, ManagedRuntime } from "effect";
+import { Effect, Layer, ManagedRuntime } from "effect";
 import { describe, expect, it } from "vitest";
+import { makeEffectOpenCodeRuntimeIngress } from "../../../src/lib/domain/relay/Services/opencode-runtime-ingress-service.js";
+import { ProviderRuntimeIngestionLive } from "../../../src/lib/domain/relay/Services/provider-runtime-ingestion-service.js";
 import { createSilentLogger } from "../../../src/lib/logger.js";
-import { makeEffectDualWriteHook } from "../../../src/lib/persistence/effect/dual-write-hook-effect.js";
 import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
 import { ReadQueryEffectTag } from "../../../src/lib/persistence/effect/read-query-effect.js";
 import { createProjectRelay } from "../../../src/lib/relay/relay-stack.js";
@@ -178,25 +179,29 @@ async function eventually<T>(
 	);
 }
 
-describe("Relay stack Effect dual-write wiring", () => {
-	it("does not construct the legacy DualWriteHook fallback", () => {
+describe("Relay stack Effect OpenCode runtime ingress wiring", () => {
+	it("does not construct the legacy OpenCodeRuntimeIngress fallback", () => {
 		const source = readFileSync("src/lib/relay/relay-stack.ts", "utf8");
 
-		expect(source).not.toContain("new DualWriteHook");
-		expect(source).toContain("makeEffectDualWriteHook");
-		expect(source).toContain(
-			"makePersistenceEffectLayer(config.persistenceDbPath)",
-		);
+		expect(source).not.toContain("new OpenCodeRuntimeIngress");
+		expect(source).toContain("makeEffectOpenCodeRuntimeIngress");
+		expect(source).toContain("ProviderRuntimeIngestionLive");
 	});
 
-	it("EffectDualWriteHook can process SSE events with Effect persistence", async () => {
-		const dir = mkdtempSync(join(tmpdir(), "conduit-effect-dual-write-"));
+	it("EffectOpenCodeRuntimeIngress can process SSE events with Effect persistence", async () => {
+		const dir = mkdtempSync(join(tmpdir(), "conduit-effect-runtime-ingress-"));
+		const persistenceLayer = makePersistenceEffectLayer(join(dir, "events.db"));
 		const runtime = ManagedRuntime.make(
-			makePersistenceEffectLayer(join(dir, "events.db")),
+			Layer.mergeAll(
+				persistenceLayer,
+				ProviderRuntimeIngestionLive.pipe(Layer.provide(persistenceLayer)),
+			),
 		);
 		try {
 			const hook = await runtime.runPromise(
-				makeEffectDualWriteHook(createSilentLogger().child("dual-write")),
+				makeEffectOpenCodeRuntimeIngress(
+					createSilentLogger().child("opencode-runtime-ingress"),
+				),
 			);
 
 			const result = await Effect.runPromise(
@@ -224,7 +229,7 @@ describe("Relay stack Effect dual-write wiring", () => {
 	});
 
 	it("wires relay-stack SSE events through Effect persistence into the read model", async () => {
-		const dir = mkdtempSync(join(tmpdir(), "conduit-relay-dual-write-"));
+		const dir = mkdtempSync(join(tmpdir(), "conduit-relay-runtime-ingress-"));
 		const projectDir = join(dir, "project");
 		mkdirSync(join(projectDir, ".conduit"), { recursive: true });
 		const dbPath = join(projectDir, ".conduit", "events.db");
@@ -239,12 +244,21 @@ describe("Relay stack Effect dual-write wiring", () => {
 				opencodeUrl: mock.url,
 				projectDir,
 				persistenceDbPath: dbPath,
-				slug: "dual-write-smoke",
+				slug: "runtime-ingress-smoke",
 				log: createSilentLogger(),
 				statusPollerInterval: 60_000,
 				messagePollerInterval: 60_000,
 			});
-			await mock.waitForSseClient();
+			await eventually(
+				() =>
+					Promise.race([
+						mock.waitForSseClient().then(() => true),
+						new Promise<false>((resolve) =>
+							setTimeout(() => resolve(false), 50),
+						),
+					]),
+				(connected) => connected,
+			);
 
 			mock.injectSSE([
 				{

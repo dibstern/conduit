@@ -3,9 +3,11 @@
 import type { SDKTaskStartedMessage } from "@anthropic-ai/claude-agent-sdk";
 import { Effect, Schema } from "effect";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { ProviderRuntimeEventSchema } from "../../../../src/lib/contracts/providers/provider-runtime-event.js";
+import {
+	type ProviderRuntimeEvent,
+	ProviderRuntimeEventSchema,
+} from "../../../../src/lib/contracts/providers/provider-runtime-event.js";
 import { historyToChatMessages } from "../../../../src/lib/frontend/utils/history-logic.js";
-import type { CanonicalEvent } from "../../../../src/lib/persistence/events.js";
 import {
 	createAllProjectors,
 	ProjectionRunner,
@@ -27,15 +29,17 @@ import { createTestHarness } from "../../../helpers/persistence-factories.js";
 // ─── Test Helpers ─────────────────────────────────────────────────────────
 
 /** Extract event data as a plain object for assertion access. */
-function dataOf(event: CanonicalEvent | undefined): Record<string, unknown> {
+function dataOf(
+	event: ProviderRuntimeEvent | undefined,
+): Record<string, unknown> {
 	return event?.data as unknown as Record<string, unknown>;
 }
 
-function makeStubSink(): EventSink & { events: CanonicalEvent[] } {
-	const events: CanonicalEvent[] = [];
+function makeStubSink(): EventSink & { events: ProviderRuntimeEvent[] } {
+	const events: ProviderRuntimeEvent[] = [];
 	return {
 		events,
-		push: vi.fn((event: CanonicalEvent) =>
+		push: vi.fn((event: ProviderRuntimeEvent) =>
 			Effect.sync(() => {
 				events.push(event);
 			}),
@@ -1848,7 +1852,7 @@ describe("ClaudeEventTranslator", () => {
 		expect(tokens["cacheWrite"]).toBe(500);
 	});
 
-	it("all emitted events have provider set to 'claude'", async () => {
+	it("all emitted events have providerId set to 'claude'", async () => {
 		// Trigger several event types
 		await runTranslate(translator, ctx, {
 			type: "system",
@@ -1879,7 +1883,7 @@ describe("ClaudeEventTranslator", () => {
 		);
 
 		for (const event of sink.events) {
-			expect(event.provider).toBe("claude");
+			expect(event.providerId).toBe("claude");
 		}
 	});
 });

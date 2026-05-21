@@ -5,7 +5,7 @@
 // Conduit owns all state. Instances turn prompts into event streams.
 
 import type { Effect, Scope } from "effect";
-import type { CanonicalEvent } from "../persistence/events.js";
+import type { ProviderRuntimeEvent } from "../contracts/providers/provider-runtime-event.js";
 import type { ProviderPermissionUpdate } from "../shared-types.js";
 import type { ProviderInstanceFailure } from "./errors.js";
 
@@ -49,7 +49,8 @@ export interface QuestionRequest {
 /**
  * EventSink is the provider instance's write interface to conduit's event store.
  *
- * - `push(event)`: append a canonical event to the store and project eagerly.
+ * - `push(event)`: ingest a provider runtime event, then append/project
+ *   Conduit-owned domain events.
  * - `requestPermission(request)`: Effect that emits permission.asked, waits
  *   until permission.resolved arrives, then returns the decision.
  * - `requestQuestion(request)`: Effect that emits question.asked, waits until
@@ -58,7 +59,7 @@ export interface QuestionRequest {
  *   pending request when the UI returns an answer.
  */
 export interface EventSink {
-	push(event: CanonicalEvent): Effect.Effect<void, unknown>;
+	push(event: ProviderRuntimeEvent): Effect.Effect<void, unknown>;
 	requestPermission(
 		request: PermissionRequest,
 	): Effect.Effect<PermissionResponse, unknown>;
@@ -224,8 +225,8 @@ export interface ProviderCapabilities {
  * ProviderInstance -- the 7-method contract for provider execution.
  *
  * Implementations wrap a provider's REST/SDK surface and translate provider
- * events into canonical events via the EventSink. Instances do not own session
- * state, message history, or projections -- conduit does.
+ * events into provider runtime events via the EventSink. Instances do not own
+ * session state, message history, or projections -- conduit does.
  *
  * Compared to t3code's provider instance shape (~12 methods with Effect):
  * - No startSession/stopSession/listSessions -- conduit owns session lifecycle

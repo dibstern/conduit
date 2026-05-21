@@ -263,6 +263,18 @@ export interface EventMetadata {
 	readonly correlationId?: string;
 	readonly adapterKey?: string;
 	readonly providerTurnId?: string;
+	readonly providerRuntimeEventId?: string;
+	readonly rawSource?: string;
+	readonly providerRefs?: {
+		readonly providerTurnId?: string;
+		readonly providerItemId?: string;
+		readonly providerMessageId?: string;
+		readonly providerToolUseId?: string;
+		readonly providerRequestId?: string;
+		readonly providerSessionId?: string;
+		readonly providerTaskId?: string;
+		readonly parentProviderTaskId?: string;
+	};
 	readonly synthetic?: boolean;
 	readonly source?: string;
 	readonly sseBatchId?: string;
@@ -324,6 +336,23 @@ export const EventMetadataSchema = Schema.Struct({
 	correlationId: Schema.optionalWith(Schema.String, { exact: true }),
 	adapterKey: Schema.optionalWith(Schema.String, { exact: true }),
 	providerTurnId: Schema.optionalWith(Schema.String, { exact: true }),
+	providerRuntimeEventId: Schema.optionalWith(Schema.String, { exact: true }),
+	rawSource: Schema.optionalWith(Schema.String, { exact: true }),
+	providerRefs: Schema.optionalWith(
+		Schema.Struct({
+			providerTurnId: Schema.optionalWith(Schema.String, { exact: true }),
+			providerItemId: Schema.optionalWith(Schema.String, { exact: true }),
+			providerMessageId: Schema.optionalWith(Schema.String, { exact: true }),
+			providerToolUseId: Schema.optionalWith(Schema.String, { exact: true }),
+			providerRequestId: Schema.optionalWith(Schema.String, { exact: true }),
+			providerSessionId: Schema.optionalWith(Schema.String, { exact: true }),
+			providerTaskId: Schema.optionalWith(Schema.String, { exact: true }),
+			parentProviderTaskId: Schema.optionalWith(Schema.String, {
+				exact: true,
+			}),
+		}),
+		{ exact: true },
+	),
 	synthetic: Schema.optionalWith(Schema.Boolean, { exact: true }),
 	source: Schema.optionalWith(Schema.String, { exact: true }),
 	sseBatchId: Schema.optionalWith(Schema.String, { exact: true }),

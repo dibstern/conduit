@@ -2174,7 +2174,7 @@ describe("Effect runtime boundary grep", () => {
 			{
 				path: "src/lib/relay/relay-stack.ts",
 				pattern:
-					/\b(?:config\.persistence|new ReadQueryService|new ProviderStateService|new SessionSeeder|new DualWriteHook|ReadQueryTag|ClaudeEventPersistTag|ProviderStateServiceTag)\b/,
+					/\b(?:config\.persistence|new ReadQueryService|new ProviderStateService|new SessionSeeder|new OpenCodeRuntimeIngress|ReadQueryTag|ClaudeEventPersistTag|ProviderStateServiceTag)\b/,
 				reason:
 					"relay-stack must not bridge legacy persistence objects into Effect services",
 			},
@@ -2773,8 +2773,9 @@ describe("Effect runtime boundary grep", () => {
 		expect(hits).toEqual([]);
 	});
 
-	it("keeps Effect dual-write persistence inside the relay runtime", () => {
-		const hookPath = "src/lib/persistence/effect/dual-write-hook-effect.ts";
+	it("keeps Effect OpenCode runtime ingress inside the relay runtime", () => {
+		const hookPath =
+			"src/lib/domain/relay/Services/opencode-runtime-ingress-service.ts";
 		const hookSource = readFileSync(join(REPO_ROOT, hookPath), "utf8");
 		const relayPath = "src/lib/relay/relay-stack.ts";
 		const relaySource = readFileSync(join(REPO_ROOT, relayPath), "utf8");
@@ -2784,27 +2785,28 @@ describe("Effect runtime boundary grep", () => {
 				source: hookSource,
 				pattern: /\bruntime\.runSync\(/g,
 				reason:
-					"EffectDualWriteHook must return Effect programs instead of entering a runtime",
+					"EffectOpenCodeRuntimeIngress must return Effect programs instead of entering a runtime",
 			},
 			{
 				path: hookPath,
 				source: hookSource,
 				pattern: /\bruntime\.runPromise\(/g,
-				reason: "EffectDualWriteHook must not own async runtime bridge calls",
+				reason:
+					"EffectOpenCodeRuntimeIngress must not own async runtime bridge calls",
 			},
 			{
 				path: relayPath,
 				source: relaySource,
-				pattern: /\bEffectDualWriteHook\(\{\s*runtime:/gs,
+				pattern: /\bEffectOpenCodeRuntimeIngress\(\{\s*runtime:/gs,
 				reason:
-					"relay-stack must not construct a separate persistence runtime for dual-write",
+					"relay-stack must not construct a separate persistence runtime for OpenCode runtime ingress",
 			},
 			{
 				path: relayPath,
 				source: relaySource,
 				pattern: /\beffectPersistenceRuntime\b/g,
 				reason:
-					"dual-write persistence should be owned by the relay runtime Layer graph",
+					"OpenCode runtime ingress persistence should be owned by the relay runtime Layer graph",
 			},
 		] as const;
 
@@ -2819,6 +2821,25 @@ describe("Effect runtime boundary grep", () => {
 		);
 
 		expect(hits).toEqual([]);
+	});
+
+	it("keeps OpenCode runtime ingress behind ProviderRuntimeIngestion", () => {
+		const openCodeRuntimeIngressSource = readFileSync(
+			join(
+				REPO_ROOT,
+				"src/lib/domain/relay/Services/opencode-runtime-ingress-service.ts",
+			),
+			"utf8",
+		);
+
+		expect(openCodeRuntimeIngressSource).not.toMatch(
+			/translateProviderRuntimeEventToDomain/,
+		);
+		expect(openCodeRuntimeIngressSource).not.toMatch(
+			/EventStore|PersistenceLayer|CanonicalEvent/,
+		);
+		expect(openCodeRuntimeIngressSource).toMatch(/ProviderRuntimeIngestionTag/);
+		expect(openCodeRuntimeIngressSource).toMatch(/ingestBatch/);
 	});
 
 	it("keeps relay startup as the only relay-stack runPromise boundary", () => {

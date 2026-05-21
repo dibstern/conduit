@@ -1,6 +1,6 @@
 import { Effect } from "effect";
 import { describe, expect, it, vi } from "vitest";
-import type { CanonicalEvent } from "../../../../src/lib/persistence/events.js";
+import type { ProviderRuntimeEvent } from "../../../../src/lib/contracts/providers/provider-runtime-event.js";
 import { ClaudeEventTranslator } from "../../../../src/lib/provider/claude/claude-event-translator.js";
 import type { ClaudeSessionContext } from "../../../../src/lib/provider/claude/types.js";
 
@@ -38,10 +38,10 @@ function makeCtx(
 }
 
 function makeTranslator() {
-	const events: CanonicalEvent[] = [];
+	const events: ProviderRuntimeEvent[] = [];
 	const translator = new ClaudeEventTranslator({
 		getSink: () => ({
-			push: (e: CanonicalEvent) =>
+			push: (e: ProviderRuntimeEvent) =>
 				Effect.sync(() => {
 					events.push(e);
 				}),
@@ -61,6 +61,13 @@ function runTranslate(
 	...args: Parameters<ClaudeEventTranslator["translate"]>
 ): Promise<void> {
 	return Effect.runPromise(translator.translate(...args));
+}
+
+function dataOf(
+	event: ProviderRuntimeEvent | undefined,
+): Record<string, unknown> {
+	expect(event).toBeDefined();
+	return event?.data as Record<string, unknown>;
 }
 
 function runFlushPendingTools(
@@ -120,7 +127,7 @@ describe("ClaudeEventTranslator — tool_use buffering", () => {
 
 		const toolStarted = events.filter((e) => e.type === "tool.started");
 		expect(toolStarted).toHaveLength(1);
-		expect(toolStarted[0]?.data.input).toEqual({
+		expect(dataOf(toolStarted[0])["input"]).toEqual({
 			tool: "Read",
 			filePath: "/src/main.ts",
 		});
@@ -164,7 +171,7 @@ describe("ClaudeEventTranslator — tool_use buffering", () => {
 
 		const toolStarted = events.filter((e) => e.type === "tool.started");
 		expect(toolStarted).toHaveLength(1);
-		expect(toolStarted[0]?.data.input).toEqual({
+		expect(dataOf(toolStarted[0])["input"]).toEqual({
 			tool: "Bash",
 			command: "echo hi",
 		});
@@ -200,7 +207,7 @@ describe("ClaudeEventTranslator — tool_use buffering", () => {
 
 		const toolStarted = events.filter((e) => e.type === "tool.started");
 		expect(toolStarted).toHaveLength(1);
-		expect(toolStarted[0]?.data.toolName).toBe("Read");
+		expect(dataOf(toolStarted[0])["toolName"]).toBe("Read");
 
 		// tool.completed should also be emitted for the interrupted tool
 		const toolCompleted = events.filter((e) => e.type === "tool.completed");
@@ -248,7 +255,7 @@ describe("ClaudeEventTranslator — tool_use buffering", () => {
 
 		const toolStarted = events.filter((e) => e.type === "tool.started");
 		expect(toolStarted).toHaveLength(1);
-		expect(toolStarted[0]?.data.input).toEqual({
+		expect(dataOf(toolStarted[0])["input"]).toEqual({
 			tool: "Bash",
 			command: "ls -la",
 			description: "list",
@@ -332,8 +339,8 @@ describe("ClaudeEventTranslator — tool_use buffering", () => {
 
 		const toolStarted = events.filter((e) => e.type === "tool.started");
 		expect(toolStarted).toHaveLength(2);
-		expect(toolStarted[0]?.data.toolName).toBe("Read");
-		expect(toolStarted[1]?.data.toolName).toBe("Bash");
+		expect(dataOf(toolStarted[0])["toolName"]).toBe("Read");
+		expect(dataOf(toolStarted[1])["toolName"]).toBe("Bash");
 	});
 
 	it("handles partial JSON that fails to parse mid-stream", async () => {
@@ -385,7 +392,7 @@ describe("ClaudeEventTranslator — tool_use buffering", () => {
 
 		const toolStarted = events.filter((e) => e.type === "tool.started");
 		expect(toolStarted).toHaveLength(1);
-		expect(toolStarted[0]?.data.input).toEqual({
+		expect(dataOf(toolStarted[0])["input"]).toEqual({
 			tool: "Grep",
 			pattern: "TODO",
 		});

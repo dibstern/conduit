@@ -990,7 +990,7 @@ export function handleResult(
 		...(messageId != null && { messageId }),
 	};
 	setMessages(messages, [...getMessages(messages), resultMsg]);
-	// Update context usage bar — dual-write: per-session + legacy
+	// Update context usage bar: per-session + legacy
 	updateContextFromTokens(messages, usage);
 }
 

@@ -44,13 +44,19 @@ import {
 	decodeClaudeSDKOptionsJsonShape,
 	decodeClaudeSDKUserMessage,
 } from "../../contracts/providers/claude-agent-sdk.js";
+import type { ProviderRuntimeEvent } from "../../contracts/providers/provider-runtime-event.js";
 import { createLogger } from "../../logger.js";
 import {
 	type ClaudeEventPersistEffect,
 	ClaudeEventPersistEffectTag,
 } from "../../persistence/effect/claude-event-persist-effect.js";
-import { canonicalEvent } from "../../persistence/events.js";
+import {
+	type CanonicalEventType,
+	createEventId,
+	type EventPayloadMap,
+} from "../../persistence/events.js";
 import { ProviderInstanceFailure } from "../errors.js";
+import { providerRefsFromRuntimeData } from "../provider-runtime-refs.js";
 import type {
 	CommandInfo,
 	ModelInfo,
@@ -103,6 +109,23 @@ const log = createLogger("claude-provider-runtime");
 const SUBAGENT_POLL_TIMEOUT_MS = 2000;
 const MAX_DECODE_ERROR_LENGTH = 800;
 const MAX_DECODE_PAYLOAD_LOG_LENGTH = 1200;
+
+function claudeRuntimeEvent<K extends CanonicalEventType>(
+	type: K,
+	sessionId: string,
+	data: EventPayloadMap[K],
+): ProviderRuntimeEvent {
+	return {
+		eventId: createEventId(),
+		type,
+		providerId: "claude",
+		sessionId,
+		providerRefs: providerRefsFromRuntimeData(type, data),
+		rawSource: { kind: "claude.provider-runtime" },
+		createdAt: Date.now(),
+		data,
+	};
+}
 
 function supportsMillionTokenContext(modelId: string): boolean {
 	const normalized = modelId.toLowerCase();
@@ -1216,24 +1239,19 @@ export class ClaudeProviderRuntime {
 				if (!child.parentToolUseId || !ctx.eventSink) continue;
 				const task = ctx.subagentTasks?.get(child.sdkSubagentId);
 				yield* ctx.eventSink.push(
-					canonicalEvent(
-						"tool.running",
-						ctx.sessionId,
-						{
-							messageId: result.uuid ?? ctx.lastAssistantUuid ?? "",
-							partId: child.parentToolUseId,
-							metadata: {
-								...(task?.description ? { description: task.description } : {}),
-								...(task?.subagentType
-									? { subagentType: task.subagentType }
-									: {}),
-								childSessionId: child.childSessionId,
-								sdkSubagentId: child.sdkSubagentId,
-								providerTaskId: child.sdkSubagentId,
-							},
+					claudeRuntimeEvent("tool.running", ctx.sessionId, {
+						messageId: result.uuid ?? ctx.lastAssistantUuid ?? "",
+						partId: child.parentToolUseId,
+						metadata: {
+							...(task?.description ? { description: task.description } : {}),
+							...(task?.subagentType
+								? { subagentType: task.subagentType }
+								: {}),
+							childSessionId: child.childSessionId,
+							sdkSubagentId: child.sdkSubagentId,
+							providerTaskId: child.sdkSubagentId,
 						},
-						{ provider: "claude" },
-					),
+					}),
 				);
 			}
 		});
@@ -1317,26 +1335,19 @@ export class ClaudeProviderRuntime {
 			if (ctx.eventSink) {
 				yield* ctx.eventSink
 					.push(
-						canonicalEvent(
-							"tool.running",
-							ctx.sessionId,
-							{
-								messageId: task?.parentMessageId ?? ctx.lastAssistantUuid ?? "",
-								partId: message.tool_use_id,
-								metadata: {
-									...(task?.description
-										? { description: task.description }
-										: {}),
-									...(task?.subagentType
-										? { subagentType: task.subagentType }
-										: {}),
-									childSessionId,
-									sdkSubagentId: message.task_id,
-									providerTaskId: message.task_id,
-								},
+						claudeRuntimeEvent("tool.running", ctx.sessionId, {
+							messageId: task?.parentMessageId ?? ctx.lastAssistantUuid ?? "",
+							partId: message.tool_use_id,
+							metadata: {
+								...(task?.description ? { description: task.description } : {}),
+								...(task?.subagentType
+									? { subagentType: task.subagentType }
+									: {}),
+								childSessionId,
+								sdkSubagentId: message.task_id,
+								providerTaskId: message.task_id,
 							},
-							{ provider: "claude" },
-						),
+						}),
 					)
 					.pipe(
 						Effect.catchAll((err) =>
@@ -1875,17 +1886,12 @@ export class ClaudeProviderRuntime {
 
 			// 1. Complete in-flight tools as failed via EventSink.
 			for (const [, tool] of ctx.inFlightTools) {
-				const event = canonicalEvent(
-					"tool.completed",
-					ctx.sessionId,
-					{
-						messageId: ctx.lastAssistantUuid ?? "",
-						partId: tool.itemId,
-						result: null,
-						duration: 0,
-					},
-					{ provider: "claude" },
-				);
+				const event = claudeRuntimeEvent("tool.completed", ctx.sessionId, {
+					messageId: ctx.lastAssistantUuid ?? "",
+					partId: tool.itemId,
+					result: null,
+					duration: 0,
+				});
 				if (ctx.eventSink) {
 					yield* ctx.eventSink.push(event).pipe(Effect.ignore);
 				}

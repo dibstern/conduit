@@ -37,8 +37,10 @@ import {
 	hasInstanceManagementConfig,
 	InstanceManagementServiceFromConfigLive,
 } from "../domain/relay/Services/instance-management-service.js";
+import { makeEffectOpenCodeRuntimeIngress } from "../domain/relay/Services/opencode-runtime-ingress-service.js";
 import { PendingInteractionServiceLive } from "../domain/relay/Services/pending-interaction-service.js";
 import { ProjectManagementServiceLive } from "../domain/relay/Services/project-management-service.js";
+import { ProviderRuntimeIngestionLive } from "../domain/relay/Services/provider-runtime-ingestion-service.js";
 import { ProviderTurnServiceLive } from "../domain/relay/Services/provider-turn-service.js";
 import {
 	makeRelayCommandGateLive,
@@ -92,7 +94,6 @@ import { formatErrorDetail } from "../errors.js";
 import { setDefaultModelForRelay } from "../handlers/model.js";
 import type { OpenCodeAPI } from "../instance/opencode-api.js";
 import { createLogger, type Logger } from "../logger.js";
-import { makeEffectDualWriteHook } from "../persistence/effect/dual-write-hook-effect.js";
 import {
 	makePersistenceEffectLayer,
 	type PersistenceEffectError,
@@ -652,6 +653,10 @@ export async function createProjectRelay(
 		config.persistenceDbPath != null
 			? makePersistenceEffectLayer(config.persistenceDbPath)
 			: undefined;
+	const providerRuntimeIngestionLayer =
+		persistenceEffectLayer != null
+			? ProviderRuntimeIngestionLive.pipe(Layer.provide(persistenceEffectLayer))
+			: undefined;
 	const providerOrchestrationDeps =
 		persistenceEffectLayer != null
 			? Layer.merge(openCodeApiLayer, persistenceEffectLayer)
@@ -730,6 +735,9 @@ export async function createProjectRelay(
 		loggerLayer,
 		providerOrchestrationLayer,
 		...(persistenceEffectLayer != null ? [persistenceEffectLayer] : []),
+		...(providerRuntimeIngestionLayer != null
+			? [providerRuntimeIngestionLayer]
+			: []),
 	);
 
 	// Optional bridge layers (only included when deps are present)
@@ -917,9 +925,11 @@ export async function createProjectRelay(
 				}
 				const statusPoller = yield* StatusPollerTag;
 				const pollerManager = yield* PollerManagerTag;
-				const dualWriteHook =
+				const opencodeRuntimeIngress =
 					persistenceEffectLayer != null
-						? yield* makeEffectDualWriteHook(log.child("dual-write"))
+						? yield* makeEffectOpenCodeRuntimeIngress(
+								log.child("opencode-runtime-ingress"),
+							)
 						: undefined;
 				if (config.signal?.aborted) {
 					return yield* Effect.fail(
@@ -996,7 +1006,9 @@ export async function createProjectRelay(
 							statusPoller,
 							slug: config.slug,
 							onDoneProcessed: monitoring.recordDoneDelivered,
-							...(dualWriteHook != null && { dualWriteHook }),
+							...(opencodeRuntimeIngress != null && {
+								opencodeRuntimeIngress,
+							}),
 						},
 						sseStream,
 					);

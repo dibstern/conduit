@@ -1,26 +1,32 @@
 import { Effect } from "effect";
 import { describe, expect, it, vi } from "vitest";
-import type { CanonicalEvent } from "../../../src/lib/persistence/events.js";
+import type { ProviderRuntimeEvent } from "../../../src/lib/contracts/providers/provider-runtime-event.js";
+import type {
+	CanonicalEventType,
+	EventPayloadMap,
+} from "../../../src/lib/persistence/events.js";
 import type { MissingPendingInteractions } from "../../../src/lib/provider/errors.js";
 import { createRelayEventSink } from "../../../src/lib/provider/relay-event-sink.js";
 import type { RelayMessage } from "../../../src/lib/types.js";
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
-function makeEvent<T extends CanonicalEvent["type"]>(
+function makeEvent<T extends CanonicalEventType>(
 	type: T,
-	data: Extract<CanonicalEvent, { type: T }>["data"],
+	data: EventPayloadMap[T],
 	metadata: Record<string, unknown> = {},
-): CanonicalEvent {
+): ProviderRuntimeEvent {
 	return {
 		eventId: `evt_${Math.random()}`,
 		sessionId: "ses-1",
 		type,
 		data,
 		metadata,
-		provider: "claude",
+		providerId: "claude",
+		providerRefs: {},
+		rawSource: { kind: "test.provider-runtime" },
 		createdAt: Date.now(),
-	} as CanonicalEvent;
+	};
 }
 
 // ─── Tests ──────────────────────────────────────────────────────────────────
@@ -261,7 +267,19 @@ describe("createRelayEventSink — persistence", () => {
 		});
 		await Effect.runPromise(sink.push(event));
 
-		expect(persistEvent).toHaveBeenCalledWith(event);
+		expect(persistEvent).toHaveBeenCalledWith(
+			expect.objectContaining({
+				eventId: event.eventId,
+				type: event.type,
+				sessionId: event.sessionId,
+				provider: event.providerId,
+				data: event.data,
+				metadata: expect.objectContaining({
+					providerRuntimeEventId: event.eventId,
+					rawSource: event.rawSource.kind,
+				}),
+			}),
+		);
 		expect(send).toHaveBeenCalledWith({
 			type: "delta",
 			sessionId: "ses-1",
@@ -356,6 +374,34 @@ describe("createRelayEventSink — persistence", () => {
 			text: "Hello",
 			messageId: "msg_1",
 		});
+	});
+
+	it("uses batch persistence for runtime events that map to multiple domain events", async () => {
+		const send = vi.fn();
+		const persistEvent = vi.fn(() => Effect.void);
+		const persistEvents = vi.fn(() => Effect.void);
+		const sink = createRelayEventSink({
+			sessionId: "ses-1",
+			send,
+			persist: { persistEvent, persistEvents },
+		});
+
+		await Effect.runPromise(
+			sink.push(
+				makeEvent("tool.completed", {
+					messageId: "msg_1",
+					partId: "tool_1",
+					result: "ok",
+					duration: 1,
+				}),
+			),
+		);
+
+		expect(persistEvent).not.toHaveBeenCalled();
+		expect(persistEvents).toHaveBeenCalledWith([
+			expect.objectContaining({ type: "tool.started" }),
+			expect.objectContaining({ type: "tool.completed" }),
+		]);
 	});
 });
 

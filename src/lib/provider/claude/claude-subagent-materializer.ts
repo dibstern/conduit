@@ -5,12 +5,19 @@ import {
 	type SessionMessage,
 } from "@anthropic-ai/claude-agent-sdk";
 import { Effect } from "effect";
+import type { ProviderRuntimeEvent } from "../../contracts/providers/provider-runtime-event.js";
 import type { ClaudeEventPersistEffect } from "../../persistence/effect/claude-event-persist-effect.js";
-import {
-	type CanonicalEvent,
-	canonicalEvent,
-	type MessageRole,
+import type {
+	CanonicalEvent,
+	CanonicalEventType,
+	EventPayloadMap,
+	MessageRole,
 } from "../../persistence/events.js";
+import {
+	emptyProviderRuntimeDomainMapperState,
+	translateProviderRuntimeEventToDomain,
+} from "../provider-runtime-event-to-domain.js";
+import { providerRefsFromRuntimeData } from "../provider-runtime-refs.js";
 import { normalizeToolInput } from "./normalize-tool-input.js";
 
 const PROVIDER = "claude" as const;
@@ -61,7 +68,7 @@ export interface ClaudeSubagentTranscriptCursor {
 }
 
 export interface ClaudeSubagentTranscriptStage {
-	readonly events: CanonicalEvent[];
+	readonly events: ProviderRuntimeEvent[];
 	readonly cursor: ClaudeSubagentTranscriptCursor;
 }
 
@@ -211,7 +218,43 @@ export function diffSessionMessagesToEvents(input: {
 }): CanonicalEvent[] {
 	const stage = stageSessionMessagesToEvents(input);
 	commitClaudeSubagentTranscriptCursor(input.cursor, stage.cursor);
-	return stage.events;
+	return runtimeEventsToDomain(stage.events);
+}
+
+function runtimeEventsToDomain(
+	events: readonly ProviderRuntimeEvent[],
+): CanonicalEvent[] {
+	let state = emptyProviderRuntimeDomainMapperState;
+	const domainEvents: CanonicalEvent[] = [];
+	for (const event of events) {
+		const result = translateProviderRuntimeEventToDomain(event, state);
+		domainEvents.push(...result.events);
+		state = result.state;
+	}
+	return domainEvents;
+}
+
+function providerRuntimeEvent<K extends CanonicalEventType>(
+	type: K,
+	sessionId: string,
+	data: EventPayloadMap[K],
+	options: { readonly provider?: typeof PROVIDER; readonly createdAt: number },
+): ProviderRuntimeEvent {
+	return {
+		eventId: `evt_${createHash("sha256")
+			.update(
+				`${sessionId}:${type}:${options.createdAt}:${JSON.stringify(data)}`,
+			)
+			.digest("hex")
+			.slice(0, 24)}`,
+		type,
+		providerId: options.provider ?? PROVIDER,
+		sessionId,
+		providerRefs: providerRefsFromRuntimeData(type, data),
+		rawSource: { kind: "claude.subagent.transcript" },
+		createdAt: options.createdAt,
+		data,
+	};
 }
 
 export function stageSessionMessagesToEvents(input: {
@@ -219,7 +262,7 @@ export function stageSessionMessagesToEvents(input: {
 	readonly messages: readonly SessionMessage[];
 	readonly cursor: ClaudeSubagentTranscriptCursor;
 }): ClaudeSubagentTranscriptStage {
-	const events: CanonicalEvent[] = [];
+	const events: ProviderRuntimeEvent[] = [];
 	const cursor = cloneClaudeSubagentTranscriptCursor(input.cursor);
 	const toolMessageIds = new Map<string, string>();
 	const baseCreatedAt = Date.now();
@@ -240,7 +283,7 @@ export function stageSessionMessagesToEvents(input: {
 		) {
 			cursor.messageRoles.set(messageId, role);
 			events.push(
-				canonicalEvent(
+				providerRuntimeEvent(
 					"message.created",
 					input.childSessionId,
 					{ messageId, role, sessionId: input.childSessionId },
@@ -289,7 +332,7 @@ function shouldCreateTranscriptMessage(
 }
 
 function appendContentBlockEvents(input: {
-	readonly events: CanonicalEvent[];
+	readonly events: ProviderRuntimeEvent[];
 	readonly sessionId: string;
 	readonly messageId: string;
 	readonly block: unknown;
@@ -307,7 +350,7 @@ function appendContentBlockEvents(input: {
 		const text = input.block["text"];
 		if (previousOffset === undefined || text.length > previousOffset) {
 			input.events.push(
-				canonicalEvent(
+				providerRuntimeEvent(
 					"text.delta",
 					input.sessionId,
 					{
@@ -334,7 +377,7 @@ function appendContentBlockEvents(input: {
 		const text = input.block["thinking"];
 		if (previousOffset === undefined) {
 			input.events.push(
-				canonicalEvent(
+				providerRuntimeEvent(
 					"thinking.start",
 					input.sessionId,
 					{ messageId: input.messageId, partId },
@@ -342,7 +385,7 @@ function appendContentBlockEvents(input: {
 				),
 			);
 			input.events.push(
-				canonicalEvent(
+				providerRuntimeEvent(
 					"thinking.delta",
 					input.sessionId,
 					{ messageId: input.messageId, partId, text },
@@ -350,7 +393,7 @@ function appendContentBlockEvents(input: {
 				),
 			);
 			input.events.push(
-				canonicalEvent(
+				providerRuntimeEvent(
 					"thinking.end",
 					input.sessionId,
 					{ messageId: input.messageId, partId },
@@ -378,7 +421,7 @@ function appendContentBlockEvents(input: {
 		if (input.cursor.toolStarts.has(partId)) return;
 		input.cursor.toolStarts.add(partId);
 		input.events.push(
-			canonicalEvent(
+			providerRuntimeEvent(
 				"tool.started",
 				input.sessionId,
 				{
@@ -408,7 +451,7 @@ function appendContentBlockEvents(input: {
 		if (input.cursor.toolCompletions.has(partId)) return;
 		input.cursor.toolCompletions.add(partId);
 		input.events.push(
-			canonicalEvent(
+			providerRuntimeEvent(
 				"tool.completed",
 				input.sessionId,
 				{

@@ -1,8 +1,8 @@
 // test/unit/provider/opencode-provider-instance-send-turn.test.ts
 import { Effect } from "effect";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import type { ProviderRuntimeEvent } from "../../../src/lib/contracts/providers/provider-runtime-event.js";
 import type { OpenCodeAPI } from "../../../src/lib/instance/opencode-api.js";
-import type { CanonicalEvent } from "../../../src/lib/persistence/events.js";
 import { OpenCodeProviderInstance } from "../../../src/lib/provider/opencode-provider-instance.js";
 import type {
 	EventSink,
@@ -41,12 +41,12 @@ function makeStubClient(overrides?: Record<string, unknown>): OpenCodeAPI {
 }
 
 function makeStubEventSink(): EventSink & {
-	pushedEvents: CanonicalEvent[];
+	pushedEvents: ProviderRuntimeEvent[];
 } {
-	const pushedEvents: CanonicalEvent[] = [];
+	const pushedEvents: ProviderRuntimeEvent[] = [];
 	return {
 		pushedEvents,
-		push: vi.fn((event: CanonicalEvent) =>
+		push: vi.fn((event: ProviderRuntimeEvent) =>
 			Effect.sync(() => {
 				pushedEvents.push(event);
 			}),
