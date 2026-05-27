@@ -19,7 +19,7 @@ T1/T2/T3 share one extraction, normalization, fingerprinting, and classification
 
 - **Deterministic.** No LLM calls. Reproducible across runs and machines.
 - **Cover Type-1 through Type-3** for TS/TSX in v1.
-- **Agent-friendly output.** JSON output, stable ordering, source spans, similarity scores, and run stats.
+- **Agent-friendly output.** JSON output, stable ordering, source spans, similarity scores, and deterministic run counts.
 - **Single structural IR.** All v1 input lowers to a uniform structural representation; one set of similarity/clustering rules.
 - **Fast first value.** Reuse the earlier UBM DRY-tool scope: TypeScript compiler AST, structural fingerprints, a non-blocking pilot sanity check against existing tools if useful, and Svelte only if the first pilot shows frontend coverage is necessary.
 
@@ -100,7 +100,7 @@ Do not create post-v1 Svelte or semantic parent beads during initial implementat
 
 ### Normative gates
 
-Create child beads in stages, not as one large backlog. At the start, create only the serial path through `structural-interface-checkpoint`. After that checkpoint freezes the Interfaces and any private extraction files, create the Wave 2 parallel extraction beads. After `structural-checkpoint`, create the conduit pilot beads. This keeps stale speculative beads out of Beads and lets each checkpoint turn new knowledge into exact work packets.
+Create child beads in stages, not as one large backlog. At the start, create only the serial path through `structural-interface-checkpoint`. After `T-OM-01` creates the first real extractor extension path and the checkpoint freezes the Interfaces, extension call sites, and private file ownership, create the Wave 2 parallel extraction beads. After `structural-checkpoint`, create the conduit pilot beads. This keeps stale speculative beads out of Beads and lets each checkpoint turn new knowledge into exact work packets.
 
 Authoritative dependency graph by stage:
 
@@ -119,33 +119,34 @@ bd dep add <t2-03b-id> <t2-03a-id>
 bd dep add <t2-04-id> <t2-03b-id>
 bd dep add <t3-ts-01-id> <t2-04-id>
 bd dep add <t3-idx-01-id> <t3-ts-01-id>
-bd dep add <structural-interface-checkpoint-id> <t3-idx-01-id>
+bd dep add <t-om-01-id> <t3-idx-01-id>
+bd dep add <structural-interface-checkpoint-id> <t-om-01-id>
 
 # Stage B: create only after the structural Interface checkpoint closes.
 # T3-TS-02 is serial because it may need StructuralCloneDetector changes.
 bd dep add <t3-ts-02-id> <structural-interface-checkpoint-id>
-bd dep add <t3-ts-03-id> <t3-ts-02-id>
-bd dep add <t3-ts-04-id> <t3-ts-02-id>
+bd dep add <t-class-01-id> <t3-ts-02-id>
+bd dep add <t-varfn-01-id> <t3-ts-02-id>
 bd dep add <t-cb-01-id> <t3-ts-02-id>
 bd dep add <t-cb-02-id> <t-cb-01-id>
 bd dep add <t-cb-03-id> <t-cb-02-id>
 bd dep add <t-cb-04-id> <t-cb-03-id>
 bd dep add <structural-checkpoint-id> <t3-ts-02-id>
-bd dep add <structural-checkpoint-id> <t3-ts-03-id>
-bd dep add <structural-checkpoint-id> <t3-ts-04-id>
+bd dep add <structural-checkpoint-id> <t-class-01-id>
+bd dep add <structural-checkpoint-id> <t-varfn-01-id>
 bd dep add <structural-checkpoint-id> <t-cb-04-id>
 
 # Stage C: create only after the structural checkpoint closes.
 bd dep add <conduit-snapshot-id> <structural-checkpoint-id>
-bd dep add <performance-profile-id> <conduit-snapshot-id>
+bd dep add <performance-profile-id> <structural-checkpoint-id>
 bd dep add <pilot-checkpoint-id> <conduit-snapshot-id>
 bd dep add <pilot-checkpoint-id> <performance-profile-id>
 ```
 
 Child beads inside a parent should depend only on the immediately required prior behavior. Do not create one dependency chain just because the plan is written top-to-bottom, and do not create a later-stage child bead before its checkpoint has closed. Parallel-ready examples:
 
-- After `CLI-JSON-01`, the conduit profile/effective-profile bead may run in parallel with the first T1 structural bead if their allowed files are disjoint.
-- After `structural-interface-checkpoint`, run `T3-TS-02` serially. Then extraction shape beads may run in parallel only if the checkpoint has frozen exact private extraction files, exact extension call sites, and each packet forbids shared orchestrator files.
+- After `CLI-JSON-01`, the conduit profile/effective-profile bead may run in parallel with the first T1 structural bead only if their allowed files are disjoint and the T1 packet explicitly owns any needed `Dry4tsRunner` wiring.
+- After `structural-interface-checkpoint`, run `T3-TS-02` serially. Then extraction shape beads may run in parallel only if `T-OM-01` created a real extractor extension path, the checkpoint has frozen exact private file ownership and extension call sites, and each packet forbids shared orchestrator files.
 - After the structural checkpoint, conduit snapshot and performance-profile prep may run in parallel.
 - Post-v1 Svelte and semantic skipped-evidence work may run in parallel with later analysis only after the pilot checkpoint creates explicit follow-up beads.
 
@@ -154,16 +155,16 @@ Parallel waves:
 | Wave | Ready after | Parallel-ready child beads | Serial exclusions |
 |---|---|---|---|
 | 0 | none | Package setup only | Workspace and lockfile owner; no parallel package edits. |
-| 1 | `CLI-JSON-01` | `PROFILE-CONDUIT-01` and `T1-01` if file scopes are disjoint | `ReportWriter` JSON contract is owned by `CLI-JSON-01`. |
-| 2 | `T3-TS-02` after `structural-interface-checkpoint` | `T3-TS-03`, `T3-TS-04`, `T-CB-01` | Only if the checkpoint created/froze exact extension call sites and private extraction files: `src/extract/ts-class-method-units.ts`, `src/extract/ts-variable-function-units.ts`, and `src/extract/ts-callback-eligibility.ts`. Otherwise these beads are serial. |
+| 1 | `CLI-JSON-01` | `PROFILE-CONDUIT-01` and `T1-01` if file scopes are disjoint | `ReportWriter` JSON contract is owned by `CLI-JSON-01`; `T1-01` must own any `Dry4tsRunner` wiring it needs unless `CLI-JSON-01` already froze that call site. |
+| 2 | `T3-TS-02` after `structural-interface-checkpoint` | `T-CLASS-01`, `T-VARFN-01`, `T-CB-01` | Only if `T-OM-01` created the first real extractor extension path and the checkpoint froze exact extension call sites and private file ownership: `src/extract/ts-class-method-units.ts`, `src/extract/ts-variable-function-units.ts`, and `src/extract/ts-callback-eligibility.ts`. Otherwise these beads are serial. |
 | 3 | Structural checkpoint | Deterministic conduit snapshot and performance profile | Pilot checkpoint waits for both. |
 
 Subagent launch checklist:
 
 1. **Wave 0 - serial bootstrap.** Do not launch implementation subagents. The orchestrator or integration owner creates the package setup bead, claims it, edits workspace/package files, verifies, and closes it.
-2. **Wave 1 - first parallel chance.** After `CLI-JSON-01` is green and closed, run `bd ready` and launch up to two subagents: one for `PROFILE-CONDUIT-01`, one for `T1-01`. Launch both only when their packet file scopes are disjoint. If either packet needs `src/report/report-writer.ts` or changes the JSON contract, run that bead serially.
+2. **Wave 1 - first parallel chance.** After `CLI-JSON-01` is green and closed, run `bd ready` and launch up to two subagents: one for `PROFILE-CONDUIT-01`, one for `T1-01`. Launch both only when their packet file scopes are disjoint. If either packet needs `src/report/report-writer.ts` or changes the JSON contract, run that bead serially. If `T1-01` needs `src/core/runner.ts`, list it as T1-owned and forbid it for the profile bead.
 3. **Stage A serial structural path.** After Wave 1, keep `T1-02` through `structural-interface-checkpoint` serial. These beads shape the core extractor and detector Interfaces; parallel work here creates merge churn faster than it creates value.
-4. **Wave 2 - extraction-shape fanout.** After `structural-interface-checkpoint` is closed, run `T3-TS-02` serially. Then launch parallel subagents only for ready beads with exact private files and frozen extension call sites. Preferred fanout is `T3-TS-03`, `T3-TS-04`, and `T-CB-01`.
+4. **Wave 2 - extraction-shape fanout.** After `structural-interface-checkpoint` is closed, run `T3-TS-02` serially. Then launch parallel subagents only for ready beads with exact private file ownership and frozen extension call sites. Preferred fanout is `T-CLASS-01`, `T-VARFN-01`, and `T-CB-01`.
 5. **Callback continuation.** `T-CB-02`, `T-CB-03`, and `T-CB-04` stay serial behind `T-CB-01` because they own the same callback eligibility file and acceptance file.
 6. **Wave 3 - pilot fanout.** After `structural-checkpoint` closes, launch two subagents: one for deterministic conduit snapshot, one for performance profile. The pilot checkpoint remains serial and integrates both reports before creating follow-up beads.
 7. **Post-v1 fanout.** Do not launch Svelte or semantic subagents until the pilot checkpoint creates concrete follow-up beads with examples, allowed files, and dependency edges.
@@ -207,7 +208,7 @@ Wave-specific prompt additions:
 ```text
 Wave 1 PROFILE-CONDUIT-01: preserve the existing JSON output contract; do not edit ReportWriter unless the packet explicitly owns it.
 Wave 1 T1-01: create the first structural path only; do not add T2/T3 behavior before its bead.
-Wave 2 extraction shape: add one new comparison-unit shape through the frozen extractor extension point; do not edit shared orchestrator files.
+Wave 2 extraction shape: add one new comparison-unit shape through the frozen extractor extension point and already-green detector path; do not edit shared orchestrator files.
 Wave 2 negative/similarity: run T3-TS-02 serially before launching extraction-shape subagents.
 Wave 3 pilot: record evidence only; do not tune thresholds, add MinHash, add Svelte, or add semantic-clone implementation in the pilot bead.
 ```
@@ -216,7 +217,7 @@ Serial ownership points:
 
 - `pnpm-workspace.yaml`, `packages/dry4ts/package.json`, and lockfile changes are owned by package/dependency beads.
 - `src/core/runner.ts`, `src/extract/comparison-unit-extractor.ts`, and `src/structural/structural-clone-detector.ts` are shared orchestrator files. They are serial unless a checkpoint bead explicitly freezes their Interface for parallel work.
-- `src/extract/ts-class-method-units.ts`, `src/extract/ts-variable-function-units.ts`, and `src/extract/ts-callback-eligibility.ts` are private Implementation files that exist only to make Wave 2 parallel-safe. Do not create them before the checkpoint unless the green implementation already needs that Locality. The checkpoint must also freeze the shared extractor dispatch call sites that invoke these files; private files without frozen call sites are not enough for parallel work.
+- `T-OM-01` owns the first real extractor extension path. `src/extract/ts-class-method-units.ts`, `src/extract/ts-variable-function-units.ts`, and `src/extract/ts-callback-eligibility.ts` are private Implementation files that exist only to make Wave 2 parallel-safe. Do not create them before the checkpoint unless the green implementation already needs that Locality. The checkpoint must verify, not create, the shared extractor dispatch call sites that invoke these files; private files without frozen call sites are not enough for parallel work.
 - Shared acceptance files should be split by behavior where possible. If two beads must edit the same acceptance file, make the later bead depend on the earlier one.
 - Parent beads, checkpoint beads, dependency beads, and integration beads are not parallel implementation work.
 
@@ -252,7 +253,7 @@ An integration agent or human owner merges one green bead branch at a time. For 
 Integration checkpoints:
 
 1. After package setup and CLI contract: verify workspace commands, dependency ownership, empty JSON output, and effective-profile reporting.
-2. After structural TS: verify T1/T2/T3 acceptance, callback eligibility, and file-order determinism.
+2. After structural TS: verify T1/T2/T3 acceptance, additional TS unit shapes, callback eligibility, and file-order determinism.
 3. Before pilot close: run conduit-slice regression and performance measurement, then create follow-up beads for Svelte, semantic skipped evidence, threshold, external-tool overlap, or architecture changes.
 
 Implementation agents should claim exactly one child bead, make the smallest maintainable change, run that bead's verification command, append durable Beads handoff notes, and create follow-up beads for discovered work. Integration owners close implementation beads after merged verification.
@@ -356,11 +357,11 @@ Module index:
 
 | Module | Interface | Implementation owns | Adapter(s) | Does not own | First behavior test |
 |---|---|---|---|---|---|
-| `Dry4tsRunner` | Target paths + raw command/profile request in, stable result model out. | Orchestration, deterministic stage ordering, run stats, error shape, and the programmatic public test surface. | CLI Adapter first. | Parsing, normalization, clone detection rules, JSON rendering. | `CLI-JSON-01` through the CLI, then most acceptance tests may use this Interface directly for speed. |
+| `Dry4tsRunner` | Target paths + raw command/profile request in, stable result model out. | Orchestration, deterministic stage ordering, deterministic run counts, error shape, and the programmatic public test surface. | CLI Adapter first. | Parsing, normalization, clone detection rules, JSON rendering, wall-clock performance reporting. | `CLI-JSON-01` through the CLI, then most acceptance tests may use this Interface directly for speed. |
 | `ComparisonUnitExtractor` | Target paths + resolved run profile in, comparison units with raw text, opaque normalized shape, unit kind, and source spans out. | File scanning, gitignore/profile ignores, parser selection, TS/TSX traversal, TS AST lowering to private `NormalNode`, callback eligibility, size filtering, source-span mapping. | None in v1; TS traversal is private Implementation. Future Svelte lowering stays private until two real Adapters are justified. | Hashing, similarity, clone classification, output formatting. | `T1-01` through `Dry4tsRunner`; direct Interface tests only after an extraction invariant is hard to diagnose through runner output. |
-| `StructuralCloneDetector` | Comparison units in, T1/T2 clusters and T3 pair candidates out. | Raw hashes, normalized-node hashes, subtree fingerprints, weighted Jaccard, most-specific classification, candidate counts, cheap candidate limiting. | None in v1; candidate index remains private Implementation until pilot data proves a real Adapter is needed. | Parsing, NormalNode lowering, post-v1 semantic detection, report writing. | `T1-01`, then `T2-01`, then `T3-TS-01` through the same Interface. |
+| `StructuralCloneDetector` | Comparison units in, T1 clusters, T2 pairs, and T3 pair candidates out. | Raw hashes, normalized-node hashes, subtree fingerprints, weighted Jaccard, most-specific classification, candidate counts, cheap candidate limiting. | None in v1; candidate index remains private Implementation until pilot data proves a real Adapter is needed. | Parsing, NormalNode lowering, post-v1 semantic detection, report writing. | `T1-01`, then `T2-01`, then `T3-TS-01` through the same Interface. |
 | `RunProfileResolver` | CLI args + built-in profile name in, resolved run profile out. | Defaults, built-in `default` and `conduit` profile config, profile merge order, validation, effective-config reporting. | None in v1; built-in profiles are config, not Adapters. | Clone detection behavior. | `PROFILE-CONDUIT-01` reports deterministic effective profile. |
-| `ReportWriter` | Clone result model in, stable JSON bytes out. | Sorting, ids, source-span formatting, similarity rendering, stats rendering. | JSON writer only in v1. | Detection and validation. | Empty scan emits stable JSON; T1 result preserves sorted member order. |
+| `ReportWriter` | Clone result model in, stable JSON bytes out. | Sorting, ids, source-span formatting, similarity rendering, and deterministic stats rendering. | JSON writer only in v1. | Detection, validation, and wall-clock performance reporting. | Empty scan emits stable JSON; T1 result preserves sorted member order. |
 
 Future extension areas:
 
@@ -397,13 +398,18 @@ packages/dry4ts/
       report-writer.test.ts
     property/
       file-order-determinism.test.ts
-    acceptance/
-      cli-json-contract.test.ts
-      profile.test.ts
-      type1.test.ts
-      type2.test.ts
-      type3-ts.test.ts
-      performance.test.ts
+	    acceptance/
+	      cli-json-contract.test.ts
+	      profile.test.ts
+	      type1.test.ts
+	      type2.test.ts
+	      type3-ts.test.ts
+	      type3-negative.test.ts
+	      extract-object-methods.test.ts
+	      extract-class-methods.test.ts
+	      extract-variable-functions.test.ts
+	      callback-eligibility.test.ts
+	      performance.test.ts
     regression/
       conduit-fixture.test.ts
     fixtures/
@@ -420,16 +426,16 @@ T1, T2, and T3 share one extraction and normalization pipeline. The three types 
 ### Comparison units
 
 **TS / TSX v1:**
-- function declarations
-- class methods
-- object methods (`{ foo() {...} }`)
-- arrow / function expressions assigned to variables
-- inline callback functions that meet the **callback eligibility rule**
+- function declarations (`T1-01` through `T3-IDX-01`)
+- object methods (`T-OM-01`, serial, creates the first extractor extension path)
+- class methods (`T-CLASS-01`, Wave 2 only after the extension path is frozen)
+- arrow / function expressions assigned to variables (`T-VARFN-01`, Wave 2 only after the extension path is frozen)
+- inline callback functions that meet the **callback eligibility rule** (`T-CB-01` through `T-CB-04`)
 
 **Callback eligibility rule.** An inline callback (e.g., the lambda passed to `.map(...)`, `.filter(...)`, `pipe(...)`) enters comparison if **any** of:
 
 1. Has `>= N` normalized nodes (profile config `callbackMinNodes`, default 24).
-2. Contains any control-flow construct (`if`, `switch`, `try`/`catch`, loops, top-level ternary).
+2. Contains any control-flow construct (`if`, `switch`, `try`/`catch`, loops).
 3. Body has `≥ 2` statements.
 
 Trivial callbacks (`x => x.foo`, `(a, b) => a - b`, `u => u.active`) fail all three and are excluded. Large single-expression projections like `user => ({ id, name, email, phone })` pass rule 1 and are kept. Small but structurally interesting callbacks like `x => { if (x > 0) return x; return -x; }` pass rule 2.
@@ -495,12 +501,12 @@ for each unit u:
   candidateIndex[looseStructuralSignature(u)].add(u) # added in T3-IDX-01
 
 T1Clusters  = rawHashTable buckets with size > 1
-T2Clusters  = astHashTable buckets with size > 1 and at least two distinct raw hashes
+T2Pairs     = pairs inside astHashTable buckets where raw hashes differ
 T3Candidates = pairs within eligible candidate sets, J >= threshold,
                excluding pairs whose raw hash or AST hash already makes them T1 or T2
 ```
 
-T1 and T2 are O(N) hash bucketing. T2 exclusion is pair-specific: a unit may appear in both a T1 cluster and a broader T2 AST bucket when it has a renamed/literal-changed sibling. Do not drop a whole member merely because it was already present in a T1 result. T3 is O(K^2) over the eligible candidate set; before `T3-IDX-01`, the eligible set may be all units for small fixtures. After `T3-IDX-01`, it is limited by loose candidate-index buckets, with bucket sizes recorded in stats so the pilot can identify whether MinHash or another limiter is worth adding.
+T1 is O(N) hash bucketing. T2 starts with O(N) AST hash buckets, then emits explicit pair entries only for members with different raw hashes. T2 exclusion is pair-specific: a unit may appear in both a T1 cluster and a T2 pair when it has a renamed/literal-changed sibling. Do not drop a whole member merely because it was already present in a T1 result. T3 is O(K^2) over the eligible candidate set; before `T3-IDX-01`, the eligible set may be all units for small fixtures. After `T3-IDX-01`, it is limited by loose candidate-index buckets, with bucket sizes recorded in deterministic stats so the pilot can identify whether MinHash or another limiter is worth adding.
 
 ### Classification
 
@@ -577,14 +583,15 @@ Do not pre-design semantic Modules, worker runners, Effect trace analyzers, or l
     "unitsCompared": 12453,
     "largestCandidateBucket": 112,
     "type1Clusters": 4,
-    "type2Clusters": 9,
-    "type3Pairs": 23,
-    "durationMs": 18400
+    "type2Pairs": 9,
+    "type3Pairs": 23
   }
 }
 ```
 
-In v1, `type3` entries are pair candidates with exactly two members. Do not merge overlapping T3 pairs into connected clusters until pilot output proves that extra Implementation is useful. T1/T2 may remain multi-member hash buckets. A Type-2 entry is emitted only when an AST bucket contains at least two distinct raw hashes; exact pairs inside that bucket are still classified as Type-1, but their members may appear in the Type-2 bucket when they also have renamed/literal-changed siblings.
+Default JSON must be byte-stable for the same input tree and profile. It may contain deterministic counts and bucket sizes, but it must not contain wall-clock duration, peak memory, timestamps, absolute temp paths, or other volatile runtime measurements. Performance measurements belong in the pilot performance artifact and Beads note, not in the default `ReportWriter` output.
+
+In v1, `type2` and `type3` entries are pair candidates with exactly two members. Do not merge overlapping T2/T3 pairs into connected clusters until pilot output proves that extra Implementation is useful. T1 may remain multi-member hash buckets. A Type-2 pair is emitted only when two members share an AST hash and have different raw hashes; exact pairs inside that AST bucket are still classified as Type-1, but either exact member may also appear in a separate Type-2 pair with a renamed/literal-changed sibling.
 
 ## CLI
 
@@ -657,49 +664,11 @@ Layered does not mean horizontal. Do not write all tests for a broad slice befor
 | **Acceptance** | End-to-end smoke for one caller-visible behavior at a time |
 | **Regression** | Snapshot vs conduit slice and non-blocking pilot comparisons |
 
-### Behavior inventory for unit/property tests
+### Local invariant tests
 
-This is a reference map for useful local tests, not implementation ordering, file-creation instructions, or closure criteria. A child bead starts with one failing public-interface behavior test. Add a unit or property test only after the acceptance behavior is green and the local test protects an invariant that would otherwise be hard to diagnose.
+Do not prewrite a unit-test suite from an imagined internal design. A child bead starts with one failing public-interface behavior test. After that test is green, add a local unit test only when the implementation revealed an invariant that would be hard to diagnose through runner output.
 
-**`ComparisonUnitExtractor` Implementation invariants**
-- Whitespace collapse leaves logic identical
-- Comments stripped (line + block)
-- String-literal whitespace preserved
-- Line ending normalization (`\r\n` ↔ `\n`)
-- Empty input handled
-- Identifier erasure: `const x = 1` and `const y = 1` → identical NormalNode
-- Literal erasure: `1` and `2` → identical NormalNode
-- Property name preservation/erasure honors config
-- Control flow preserved: `if/else` ≠ `switch`
-- Operator preserved: `+` ≠ `-`
-- Async / generator flag preserved
-- Statement order preserved
-- Destructuring positional shape preserved
-- Type structure light preservation (shape, not names)
-
-**`StructuralCloneDetector` Implementation invariants**
-- Raw-hash bucket lookup correctness
-- AST-hash bucket lookup correctness
-- T1 deduplication: a T1 pair is not also reported as T2
-- Pair-specific overlap: an exact T1 pair inside a larger AST bucket does not hide renamed/literal-changed siblings
-- Self-pairs excluded
-- Most-specific classification: T1 wins over T2 wins over T3
-- Pair below threshold dropped
-- Multiset count correctness (two identical subtrees → count 2)
-- Hash stability across runs
-- Empty / single-node trees handled
-- Identical multisets → 1.0
-- Disjoint multisets → 0.0
-- Subset relation → partial in expected range
-- Weight scheme behaves as specified
-- Same loose structural-signature bucket → eligible for Jaccard
-- Different bucket key → not pairwise compared only after `T3-IDX-01`; bucket rules must be loose enough to preserve inserted-guard near-misses
-- Largest bucket size is reported in stats
-
-**`ReportWriter` Implementation invariants**
-- Stable key ordering
-- Span-to-line mapping for TS source positions
-- Empty scan emits stable JSON
+Good local invariant tests protect concrete behavior already forced by a green acceptance path: hash-input determinism after `T1-02`, pair-specific T2 overlap after `T2-04`, Jaccard threshold math after `T3-TS-01`, or stable JSON sorting after `CLI-JSON-01`. They are not separate closure criteria, and they must not force helper files or private Modules to exist before the red behavior needs them.
 
 ### Property tests
 
@@ -727,14 +696,17 @@ End-to-end smoke for each v1 behavior.
 - `T2-02` — Identical structure with different literal values reported as T2.
 - `T2-03A` — Identical structure with different property names is NOT reported as T2 under default config because property names are preserved.
 - `T2-03B` — The same pair reports as T2 when a profile fixture enables `erasePropertyNames`.
-- `T2-04` — An AST bucket with an exact T1 pair plus a renamed/literal-changed sibling still reports the broader T2 relation; exact pairs are not duplicated as T2 pairs.
+- `T2-04` — An AST bucket with an exact T1 pair plus a renamed/literal-changed sibling still reports explicit T2 pairs for the renamed/literal-changed relations; exact pairs are not duplicated as T2 pairs.
 
 #### Type-3 TS
 - `T3-TS-01` — Function with the same broad structure plus one inserted early guard clause reports as a T3 pair, not T1/T2.
 - `T3-IDX-01` — Candidate-index stats are present and pairwise work is limited to loose structural-signature buckets without dropping the inserted-guard T3 pair.
 - `T3-TS-02` — Function with rewritten control flow does NOT match original at J ≥ threshold.
-- `T3-TS-03` — Class method clone detected across files.
-- `T3-TS-04` — Arrow function assigned to const detected.
+
+#### Additional TS unit shapes
+- `T-OM-01` — Object method clone detected through the first extractor extension path.
+- `T-CLASS-01` — Class method clone detected through the frozen extractor extension path.
+- `T-VARFN-01` — Arrow/function expression assigned to a variable detected through the frozen extractor extension path.
 
 #### Callback granularity
 - `T-CB-01` — Trivial callbacks (`x => x.foo`, `(a,b) => a-b`, `u => u.active`) excluded from comparison (no clone results formed).
@@ -743,7 +715,7 @@ End-to-end smoke for each v1 behavior.
 - `T-CB-04` — Callback with `>= 2` statements included even when below profile `callbackMinNodes`.
 
 #### Performance & determinism
-- `PERF-01` — Conduit pilot records runtime, peak memory, largest buckets, and slowest comparison stages. It does not judge false positives or create performance follow-up beads. No runtime or memory gate is introduced until the pilot data is reviewed.
+- `PERF-01` — Conduit pilot records runtime, peak memory, largest buckets, and slowest comparison stages in a performance artifact or Beads note, not in default JSON. It does not judge false positives or create performance follow-up beads. No runtime or memory gate is introduced until the pilot data is reviewed.
 
 ### Regression tests
 
@@ -762,12 +734,12 @@ End-to-end smoke for each v1 behavior.
 
 | Failure mode | Acceptance only | Layered |
 |---|---|---|
-| Normalizer drops wrong AST node | Sometimes (if it surfaces in a fixture) | Always (direct normalizer unit test) |
-| Hash input instability | No | Yes (deterministic hash-input fixture test) |
-| Wrong Jaccard weighting | Maybe (if it crosses threshold) | Always (similarity unit test) |
+| Normalizer drops wrong AST node | Sometimes, if it surfaces in a fixture | Add a local test only after a green behavior exposes the invariant |
+| Hash input instability | No | Add a deterministic hash-input fixture test after the relevant behavior exists |
+| Wrong Jaccard weighting | Maybe, if it crosses threshold | Add a similarity unit test after the T3 behavior is green |
 | Refactoring breaks T2/T3 detection | No | Add a property bead only after a concrete regression or invariant appears |
 | File ordering changes output | No | Yes (file-order-irrelevant property) |
-| T1 reported as T2 (or vice versa) | Maybe | Yes (focused classification unit test after the behavior exists) |
+| T1 reported as T2 (or vice versa) | Maybe | Add a focused classification unit test after the behavior exists |
 
 Do not attach numeric confidence or coverage targets. Use acceptance behavior, mutation-worthy invariants, determinism, and pilot evidence as closure signals.
 
@@ -802,35 +774,36 @@ Serial until `structural-interface-checkpoint` because extraction, normalization
 
 | Child bead | Depends on | Owner / files | Red | Expected failure | Green | Verification |
 |---|---|---|---|---|---|---|
-| `T1-01` byte-identical functions | `CLI-JSON-01` | Serial owner of first structural path: `src/extract/comparison-unit-extractor.ts`, `src/extract/ts-source.ts`, `src/structural/structural-clone-detector.ts`, `test/acceptance/type1.test.ts`. | `pnpm --filter dry4ts test -- test/acceptance/type1.test.ts -t "T1-01"` | No T1 cluster for identical functions. | TS function extraction, raw hash bucketing, stable JSON T1 cluster. | `pnpm --filter dry4ts test -- test/acceptance/type1.test.ts` |
+| `T1-01` byte-identical functions | `CLI-JSON-01` | Owner of first structural path: `src/core/runner.ts` if wiring is not already frozen, `src/extract/comparison-unit-extractor.ts`, `src/extract/ts-source.ts`, `src/structural/structural-clone-detector.ts`, `test/acceptance/type1.test.ts`. | `pnpm --filter dry4ts test -- test/acceptance/type1.test.ts -t "T1-01"` | No T1 cluster for identical functions. | TS function extraction, raw hash bucketing, stable JSON T1 cluster. | `pnpm --filter dry4ts test -- test/acceptance/type1.test.ts` |
 | `T1-02` whitespace/comments | `T1-01` | Raw-text normalization inside `ComparisonUnitExtractor` or private Implementation extracted after green. | `pnpm --filter dry4ts test -- test/acceptance/type1.test.ts -t "T1-02"` | Whitespace/comment-only changes miss T1. | Comments stripped, whitespace collapsed, string-literal whitespace preserved. | `pnpm --filter dry4ts test -- test/acceptance/type1.test.ts` |
 | `T1-03` same-file positions | `T1-02` | Source-span and unit identity mapping. | `pnpm --filter dry4ts test -- test/acceptance/type1.test.ts -t "T1-03"` | Same-file duplicates collapse into one member or lose spans. | Multiple comparison units from one file keep distinct source spans. | `pnpm --filter dry4ts test -- test/acceptance/type1.test.ts` |
 | `T2-01` renamed locals | `T1-03` | TypeScript AST normalization through `ComparisonUnitExtractor` and `StructuralCloneDetector`. | `pnpm --filter dry4ts test -- test/acceptance/type2.test.ts -t "T2-01"` | Renamed locals are missed or reported as T1. | TS AST normalization erases local names and reports T2, not T1. | `pnpm --filter dry4ts test -- test/acceptance/type2.test.ts` |
 | `T2-02` literal erasure | `T2-01` | TypeScript AST normalization only. | `pnpm --filter dry4ts test -- test/acceptance/type2.test.ts -t "T2-02"` | Literal changes break T2. | Literal values normalize away without hiding operators or control flow. | `pnpm --filter dry4ts test -- test/acceptance/type2.test.ts` |
 | `T2-03A` property names preserved by default | `T2-02` | Profile + TS normalization. | `pnpm --filter dry4ts test -- test/acceptance/type2.test.ts -t "T2-03A"` | Different property names report as T2 under default config. | Property names are preserved by default, so this pair is not a clone. | `pnpm --filter dry4ts test -- test/acceptance/type2.test.ts -t "T2-03A"` |
 | `T2-03B` property-name erasure profile | `T2-03A` | Profile + TS normalization. | `pnpm --filter dry4ts test -- test/acceptance/type2.test.ts -t "T2-03B"` | `erasePropertyNames` profile fixture still misses T2. | Property names are erased only when profile config enables it. | `pnpm --filter dry4ts test -- test/acceptance/type2.test.ts` |
-| `T2-04` pair-specific overlap | `T2-03B` | `StructuralCloneDetector` classification only. | `pnpm --filter dry4ts test -- test/acceptance/type2.test.ts -t "T2-04"` | A T1 pair in an AST bucket hides a renamed/literal-changed sibling. | Exclusion is pair-specific: exact pairs stay T1, renamed/literal-changed relations remain visible as T2. | `pnpm --filter dry4ts test -- test/acceptance/type2.test.ts` |
+| `T2-04` pair-specific overlap | `T2-03B` | `StructuralCloneDetector` classification only. | `pnpm --filter dry4ts test -- test/acceptance/type2.test.ts -t "T2-04"` | A T1 pair in an AST bucket hides a renamed/literal-changed sibling, or exact pairs are duplicated as T2. | Exclusion is pair-specific: exact pairs stay T1, renamed/literal-changed relations emit explicit two-member T2 pairs. | `pnpm --filter dry4ts test -- test/acceptance/type2.test.ts` |
 | `T3-TS-01` near-miss structural match | `T2-04` | `StructuralCloneDetector` T3 path: fingerprints, similarity, most-specific T3 pair classification. Candidate limiting is all-units or deliberately loose for this small fixture. | `pnpm --filter dry4ts test -- test/acceptance/type3-ts.test.ts -t "T3-TS-01"` | A true near-miss pair is missed or reported as T1/T2. | One function with the same broad structure plus one inserted early guard clause reports as a T3 pair. | `pnpm --filter dry4ts test -- test/acceptance/type3-ts.test.ts -t "T3-TS-01"` |
 | `T3-IDX-01` candidate index and stats | `T3-TS-01` | Private candidate index inside `StructuralCloneDetector`; avoid changing extractor. | `pnpm --filter dry4ts test -- test/acceptance/type3-ts.test.ts -t "T3-IDX-01"` | Pairwise work is unbounded, candidate bucket stats are missing, or the inserted-guard pair is pruned. | T3 comparisons run only inside loose structural-signature buckets, report largest candidate bucket stats, and still find the inserted-guard pair. | `pnpm --filter dry4ts test -- test/acceptance/type3-ts.test.ts` |
-| Structural interface checkpoint | `T3-IDX-01` | Integration owner only; freezes `Dry4tsRunner`, `ComparisonUnitExtractor`, `StructuralCloneDetector`, and `ReportWriter` Interfaces. If Wave 2 will run in parallel, this checkpoint also creates/finalizes exact shared extractor extension call sites plus private extraction files: `src/extract/ts-class-method-units.ts`, `src/extract/ts-variable-function-units.ts`, and `src/extract/ts-callback-eligibility.ts`. | No new red test. | Current T1/T2/T3 behavior fails, public Interface shape is still changing, or Wave 2 has no exact extension call sites and private ownership files. | Core interfaces are documented, the first T1/T2/T3 behaviors pass together, and any parallel Wave 2 file ownership/call-site ownership is exact. | `pnpm --filter dry4ts test -- test/acceptance/type1.test.ts test/acceptance/type2.test.ts test/acceptance/type3-ts.test.ts` |
+| `T-OM-01` object methods through extractor extension | `T3-IDX-01` | Serial owner of the first extractor extension path: `src/extract/comparison-unit-extractor.ts`, optional private `src/extract/ts-object-method-units.ts`, `test/acceptance/extract-object-methods.test.ts`. | `pnpm --filter dry4ts test -- test/acceptance/extract-object-methods.test.ts -t "T-OM-01"` | Object method clones are not extracted/reported. | Object methods enter comparison units through a real extractor extension path and report through the existing detector path. | `pnpm --filter dry4ts test -- test/acceptance/extract-object-methods.test.ts` |
+| Structural interface checkpoint | `T-OM-01` | Integration owner only; freezes `Dry4tsRunner`, `ComparisonUnitExtractor`, `StructuralCloneDetector`, and `ReportWriter` Interfaces. It verifies exact shared extractor extension call sites and Wave 2 private file ownership; it must not create new feature files or call sites. | No new red test. | Current T1/T2/T3/object-method behavior fails, public Interface shape is still changing, or Wave 2 has no exact extension call sites and private ownership files. | Core interfaces are documented, the first T1/T2/T3/object-method behaviors pass together, and any parallel Wave 2 file ownership/call-site ownership is exact. | `pnpm --filter dry4ts test -- test/acceptance/type1.test.ts test/acceptance/type2.test.ts test/acceptance/type3-ts.test.ts test/acceptance/extract-object-methods.test.ts` |
 | `T3-TS-02` rewritten-control-flow negative | Structural interface checkpoint | Serial owner for this bead; `test/acceptance/type3-negative.test.ts`; may edit `src/structural/structural-clone-detector.ts` if red proves classifier/similarity change is needed. | `pnpm --filter dry4ts test -- test/acceptance/type3-negative.test.ts -t "T3-TS-02"` | Materially different control flow is reported as T3. | Pair stays below threshold or is filtered by loose structural signature. | `pnpm --filter dry4ts test -- test/acceptance/type3-negative.test.ts` |
-| `T3-TS-03` class methods | `T3-TS-02` | `src/extract/ts-class-method-units.ts`, `test/acceptance/extract-class-methods.test.ts`; forbidden: `src/extract/comparison-unit-extractor.ts`, `src/structural/structural-clone-detector.ts`, `src/core/runner.ts`. | `pnpm --filter dry4ts test -- test/acceptance/extract-class-methods.test.ts -t "T3-TS-03"` | Class method clone is not extracted/reported. | Class methods enter comparison units through the frozen extractor extension call site and report T3 when structurally similar. | `pnpm --filter dry4ts test -- test/acceptance/extract-class-methods.test.ts` |
-| `T3-TS-04` exported const arrows | `T3-TS-02` | `src/extract/ts-variable-function-units.ts`, `test/acceptance/extract-variable-functions.test.ts`; forbidden: `src/extract/comparison-unit-extractor.ts`, `src/structural/structural-clone-detector.ts`, `src/core/runner.ts`. | `pnpm --filter dry4ts test -- test/acceptance/extract-variable-functions.test.ts -t "T3-TS-04"` | Arrow function clone is not extracted/reported. | Arrow/function expressions assigned to variables enter comparison units through the frozen extractor extension call site. | `pnpm --filter dry4ts test -- test/acceptance/extract-variable-functions.test.ts` |
+| `T-CLASS-01` class methods | `T3-TS-02` | `src/extract/ts-class-method-units.ts`, `test/acceptance/extract-class-methods.test.ts`; forbidden: `src/extract/comparison-unit-extractor.ts`, `src/structural/structural-clone-detector.ts`, `src/core/runner.ts`. | `pnpm --filter dry4ts test -- test/acceptance/extract-class-methods.test.ts -t "T-CLASS-01"` | Class method clone is not extracted/reported. | Byte-identical class methods enter comparison units through the frozen extractor extension call site and report through the existing T1 path. | `pnpm --filter dry4ts test -- test/acceptance/extract-class-methods.test.ts` |
+| `T-VARFN-01` exported const arrows/functions | `T3-TS-02` | `src/extract/ts-variable-function-units.ts`, `test/acceptance/extract-variable-functions.test.ts`; forbidden: `src/extract/comparison-unit-extractor.ts`, `src/structural/structural-clone-detector.ts`, `src/core/runner.ts`. | `pnpm --filter dry4ts test -- test/acceptance/extract-variable-functions.test.ts -t "T-VARFN-01"` | Variable-assigned function clone is not extracted/reported. | Byte-identical arrow/function expressions assigned to variables enter comparison units through the frozen extractor extension call site and report through the existing T1 path. | `pnpm --filter dry4ts test -- test/acceptance/extract-variable-functions.test.ts` |
 | `T-CB-01` trivial callbacks excluded | `T3-TS-02` | `src/extract/ts-callback-eligibility.ts`, `test/acceptance/callback-eligibility.test.ts`; forbidden: `src/extract/comparison-unit-extractor.ts`, `src/structural/structural-clone-detector.ts`, `src/core/runner.ts`. | `pnpm --filter dry4ts test -- test/acceptance/callback-eligibility.test.ts -t "T-CB-01"` | Trivial callbacks create noisy clone results. | Trivial callbacks fail eligibility through the frozen extractor extension call site and do not form results. | `pnpm --filter dry4ts test -- test/acceptance/callback-eligibility.test.ts` |
 | `T-CB-02` large projection callbacks included | `T-CB-01` | `src/extract/ts-callback-eligibility.ts`, `test/acceptance/callback-eligibility.test.ts`. | `pnpm --filter dry4ts test -- test/acceptance/callback-eligibility.test.ts -t "T-CB-02"` | Large projection callbacks are excluded. | Large single-expression projections enter comparison. | `pnpm --filter dry4ts test -- test/acceptance/callback-eligibility.test.ts` |
 | `T-CB-03` control-flow callbacks included | `T-CB-02` | `src/extract/ts-callback-eligibility.ts`, `test/acceptance/callback-eligibility.test.ts`. | `pnpm --filter dry4ts test -- test/acceptance/callback-eligibility.test.ts -t "T-CB-03"` | Small control-flow callbacks are excluded. | Control-flow callbacks enter comparison despite size. | `pnpm --filter dry4ts test -- test/acceptance/callback-eligibility.test.ts` |
 | `T-CB-04` multi-statement callbacks included | `T-CB-03` | `src/extract/ts-callback-eligibility.ts`, `test/acceptance/callback-eligibility.test.ts`. | `pnpm --filter dry4ts test -- test/acceptance/callback-eligibility.test.ts -t "T-CB-04"` | Multi-statement callbacks are excluded. | Callbacks with at least two statements enter comparison. | `pnpm --filter dry4ts test -- test/acceptance/callback-eligibility.test.ts` |
-| Structural checkpoint | `T3-TS-02`, `T3-TS-03`, `T3-TS-04`, `T-CB-04` | Integration owner only; no feature edits. | No new red test. | Any structural acceptance or determinism check fails after merging child branches. | T1/T2/T3 acceptance and file-order determinism pass on merged branch. | `pnpm --filter dry4ts test -- test/acceptance/type1.test.ts test/acceptance/type2.test.ts test/acceptance/type3-ts.test.ts test/property/file-order-determinism.test.ts` |
+| Structural checkpoint | `T3-TS-02`, `T-CLASS-01`, `T-VARFN-01`, `T-CB-04` | Integration owner only; no feature edits. | No new red test. | Any structural acceptance or determinism check fails after merging child branches. | T1/T2/T3 acceptance, extraction-shape acceptance, callback eligibility, and file-order determinism pass on merged branch. | `pnpm --filter dry4ts test -- test/acceptance/type1.test.ts test/acceptance/type2.test.ts test/acceptance/type3-ts.test.ts test/acceptance/extract-class-methods.test.ts test/acceptance/extract-variable-functions.test.ts test/acceptance/callback-eligibility.test.ts test/property/file-order-determinism.test.ts` |
 
 ### Parent - Conduit pilot
 
-Pilot work waits for the structural checkpoint. Keep snapshot and measurement separate so agents can run/review them independently.
+Pilot work waits for the structural checkpoint. Keep snapshot and measurement separate so agents can run/review them independently. The pilot report is integration-owned; parallel pilot subagents write Beads notes and optional artifacts, not `docs/pilot-conduit.md`.
 
 | Child bead | Depends on | Owner / files | Red | Expected failure | Green | Verification |
 |---|---|---|---|---|---|---|
-| Deterministic conduit snapshot | Structural checkpoint | `test/regression/conduit-fixture.test.ts`, `test/fixtures/conduit-slice/**`, `docs/pilot-conduit.md`. | `pnpm --filter dry4ts test -- test/regression/conduit-fixture.test.ts -t "conduit-slice snapshot"` | Conduit slice output is missing or unstable. | Copied conduit-slice fixture produces stable sorted JSON; updates require explicit review. | `pnpm --filter dry4ts test -- test/regression/conduit-fixture.test.ts` |
-| Performance profile | Deterministic conduit snapshot | `test/acceptance/performance.test.ts`, `docs/pilot-conduit.md`. | `pnpm --filter dry4ts test -- test/acceptance/performance.test.ts -t "PERF-01"` | Runtime, memory, bucket, or slow-stage stats are missing. | Records runtime, peak memory, largest buckets, and slowest stages only. | `pnpm --filter dry4ts test -- test/acceptance/performance.test.ts` |
-| Pilot checkpoint | Snapshot, performance | Integration owner only; no feature edits. | No new red test. | Pilot report lacks a decision about Svelte, semantic skipped evidence, thresholds, external overlap, false positives, candidate limiting, MinHash, or architecture follow-ups. | `docs/pilot-conduit.md` records findings and creates explicit follow-up Beads issues. | `pnpm --filter dry4ts test -- test/regression/conduit-fixture.test.ts test/acceptance/performance.test.ts` |
+| Deterministic conduit snapshot | Structural checkpoint | `test/regression/conduit-fixture.test.ts`, `test/fixtures/conduit-slice/**`; forbidden: `docs/pilot-conduit.md`. | `pnpm --filter dry4ts test -- test/regression/conduit-fixture.test.ts -t "conduit-slice snapshot"` | Conduit slice output is missing or unstable. | Copied conduit-slice fixture produces stable sorted JSON; findings go in the Beads note or optional artifact. | `pnpm --filter dry4ts test -- test/regression/conduit-fixture.test.ts` |
+| Performance profile | Structural checkpoint | `test/acceptance/performance.test.ts`; forbidden: `docs/pilot-conduit.md` and default JSON schema changes. | `pnpm --filter dry4ts test -- test/acceptance/performance.test.ts -t "PERF-01"` | Runtime, memory, bucket, or slow-stage measurements are missing from the performance artifact. | Records runtime, peak memory, largest buckets, and slowest stages in a Beads note or optional artifact only. | `pnpm --filter dry4ts test -- test/acceptance/performance.test.ts` |
+| Pilot checkpoint | Snapshot, performance | Integration owner only; owns `docs/pilot-conduit.md`; no feature edits. | No new red test. | Pilot report lacks a decision about Svelte, semantic skipped evidence, thresholds, external overlap, false positives, candidate limiting, MinHash, or architecture follow-ups. | `docs/pilot-conduit.md` integrates the snapshot/performance evidence and creates explicit follow-up Beads issues. | `pnpm --filter dry4ts test -- test/regression/conduit-fixture.test.ts test/acceptance/performance.test.ts` |
 
 ### Pilot-created follow-up examples
 
@@ -865,4 +838,4 @@ These are examples the pilot checkpoint may turn into concrete Beads issues. Do 
 - **Callback granularity.** Start with `nodes >= 24 OR control-flow OR >= 2 statements`. Revisit if pilot shows trivial-callback noise or missed-clone gaps.
 - **Property-name normalization.** Preserve property names by default. Revisit after pilot to evaluate erasure-on-domain-code false-positive rate.
 - **Candidate index.** Keep cheap structural-signature buckets in v1. Add MinHash only if pilot bucket stats show pairwise comparison blowups.
-- **Overlapping results across types.** Keep separate results per detected type. Revisit if pilot shows the same function repeatedly appearing in overlapping T2 clusters and T3 pairs in confusing ways.
+- **Overlapping results across types.** Keep separate results per detected type. Revisit if pilot shows the same function repeatedly appearing in overlapping T2/T3 pairs in confusing ways.
