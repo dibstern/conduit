@@ -152,6 +152,7 @@ export async function startForegroundDaemon(
 	let instances: ReadonlyArray<Readonly<OpenCodeInstance>> = [];
 	let stopped = false;
 	let refreshInFlight: Promise<void> | null = null;
+	let stopInFlight: Promise<void> | null = null;
 
 	const requireRuntime = () => {
 		if (runtime == null || handle == null || stopped) {
@@ -208,26 +209,32 @@ export async function startForegroundDaemon(
 	};
 
 	const stop = async () => {
+		if (stopInFlight != null) return stopInFlight;
 		const currentRuntime = runtime;
 		if (currentRuntime == null || stopped) return;
 		stopped = true;
-		await runRuntimeEffect(
-			currentRuntime,
-			Effect.gen(function* () {
-				yield* commitDaemonRuntimeConfig((config) => ({
-					...config,
-					shuttingDown: true,
-				}));
-				const persistence = yield* ConfigPersistenceTag;
-				yield* persistence.requestSave;
-				yield* persistence.flush;
-			}),
-		).catch((error: unknown) => {
-			throw new ForegroundDaemonStopError(error);
+		stopInFlight = (async () => {
+			await runRuntimeEffect(
+				currentRuntime,
+				Effect.gen(function* () {
+					yield* commitDaemonRuntimeConfig((config) => ({
+						...config,
+						shuttingDown: true,
+					}));
+					const persistence = yield* ConfigPersistenceTag;
+					yield* persistence.requestSave;
+					yield* persistence.flush;
+				}),
+			).catch((error: unknown) => {
+				throw new ForegroundDaemonStopError(error);
+			});
+			await currentRuntime.dispose();
+			runtime = null;
+			handle = null;
+		})().finally(() => {
+			stopInFlight = null;
 		});
-		await currentRuntime.dispose();
-		runtime = null;
-		handle = null;
+		return stopInFlight;
 	};
 
 	const initialConfig = buildInitialRuntimeConfig(options, configDir);

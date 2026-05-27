@@ -1,0 +1,7 @@
+[tools]
+pnpm = "10.33.4"
+node = "24.16.0"
+"npm:node-gyp" = "12.3.0"
+
+[settings.node]
+corepack = true
