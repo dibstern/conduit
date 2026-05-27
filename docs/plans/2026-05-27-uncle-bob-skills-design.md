@@ -48,7 +48,7 @@ Use these sources as principles, not as harnesses to copy wholesale:
 - Acceptance Pipeline Specification: use Gherkin examples as a behavioral source of truth, compile them into executable tests, then mutate examples to measure whether the acceptance tests are connected to real behavior.
 - SwarmForge: preserve role boundaries and artifact handoffs, but do not copy tmux/session orchestration or role-prompt bulk.
 - Matt Pocock skills: each skill is concise, responsible for one job, composable, progressively disclosed, and easy to adapt.
-- `crap4go`, `dry4go`, and `mutate4go`: use their metric intent and CLI ergonomics as references. Prefer existing TypeScript tools where they already solve the problem.
+- `crap4go`, `dry4go`, and `mutate4go`: use their metric intent and CLI ergonomics as references. Prefer existing TypeScript tools where they already solve the problem, except for structural DRY where Conduit will own `dry4ts`.
 
 ## Non-Goals
 
@@ -177,9 +177,11 @@ Outputs:
 
 Implementation direction:
 
-- Use `@cucumber/gherkin` as the parser/compiler primitive.
-- Keep the skill harness-agnostic.
-- For Conduit, the first adapter should generate Vitest tests that can use existing Effect, replay, integration, or Playwright helpers as appropriate.
+- Use Uncle Bob's JSON IR contract as the portable boundary: feature file -> parser -> JSON IR -> generated harness entrypoints.
+- Keep the skill harness-agnostic. Generated tests are intentionally project-specific and may target Playwright, Vitest, Cucumber, or another runner.
+- For Conduit, generate Playwright replay tests first for browser E2E acceptance. The generated tests should call the existing Playwright fixtures, page objects, replay harness, trace/screenshot/video configuration, and browser assertions rather than reimplementing a separate browser harness.
+- Add a Vitest service adapter only for non-browser acceptance surfaces such as protocol transforms, persistence projection, provider contracts, and relay state machines.
+- Reserve Playwright live acceptance for small smoke coverage. Do not run acceptance mutation against live OpenCode by default.
 
 ### `ubm-acceptance-run`
 
@@ -248,7 +250,9 @@ Outputs:
 
 Implementation direction:
 
-- Build a small TypeScript tool that combines AST complexity with coverage data.
+- Pilot Fallow first because it already reports TypeScript/JavaScript function complexity and exact CRAP scoring from Istanbul `coverage-final.json`.
+- Treat `@barney-media/crap-typescript` and `@sebassdc/crap4ts` as reference implementations or fallback candidates, not the default, unless the pilot proves they fit Conduit better.
+- Build only a thin Conduit wrapper/normalizer if Fallow provides the required per-function fields. Build a custom CRAP combiner only if existing tools cannot emit stable, function-level CRAP data with source spans, coverage provenance, and machine-readable JSON.
 - Do not rely blindly on Conduit's current `pnpm test:coverage`, because its configured coverage include list is intentionally narrow.
 - Keep thresholds advisory until calibrated.
 
@@ -271,7 +275,7 @@ Outputs:
 
 Implementation direction:
 
-- Build `dry4ts` as a TypeScript-native structural detector inspired by `dry4go`.
+- Build and maintain `dry4ts` as a TypeScript-native structural detector inspired by `dry4go`.
 - Use the TypeScript compiler AST.
 - Normalize identifiers, local names, property names, and literal values.
 - Compare function, method, object-method, and exported arrow-function bodies by structural fingerprints and Jaccard similarity.
@@ -328,9 +332,26 @@ Rules:
 
 ### Acceptance
 
-Use `@cucumber/gherkin` to parse and compile Gherkin into an intermediate representation.
+Use the acceptance pipeline as a spec-to-runner layer, not as a replacement for project test runners.
 
-Do not make the skills depend on `@cucumber/cucumber`. A project adapter may target Cucumber, Vitest, Playwright, or another runner. Conduit should start with generated Vitest because that fits the existing test stack and Effect helpers.
+Do not make the skills depend on `@cucumber/cucumber`. A project adapter may target Cucumber, Vitest, Playwright, or another runner. Conduit should start with generated Playwright replay tests for browser-visible acceptance behavior because replay mode exercises the real UI and relay while staying deterministic. Use generated Vitest tests for non-browser acceptance where a real browser adds no signal.
+
+Browser E2E support is a first-class adapter target:
+
+```text
+test/acceptance/features/session-lifecycle.feature
+  -> build/acceptance/session-lifecycle.json
+  -> test-results/ubm/generated/acceptance/playwright/session-lifecycle.spec.ts
+  -> pnpm exec playwright test --config test/e2e/playwright-acceptance.config.ts
+```
+
+The generated Playwright spec should be thin: load the JSON IR, call the acceptance runtime, and let step handlers use existing Conduit page objects and harness helpers. This preserves Playwright fixtures, projects, retries, traces, screenshots, videos, locators, and debug tooling.
+
+Tradeoffs:
+
+- Generated specs are less direct to debug than hand-written Playwright specs, so reports must map failures back to feature, scenario, example row, and step text.
+- Browser acceptance mutation can be slow. Run it against replay fixtures by default and keep live acceptance mutation opt-in.
+- Not every E2E belongs in Gherkin. Keep hand-written Playwright tests for visual regression, scroll stability, debug-panel behavior, timing-sensitive WebSocket checks, and exploratory browser coverage.
 
 ### Mutation
 
@@ -340,15 +361,25 @@ The first Conduit configuration should support a single source file and an expli
 
 ### DRY
 
-Build `dry4ts` if we want Uncle Bob-style structural duplication detection.
+Build `dry4ts` for Uncle Bob-style structural duplication detection.
 
 `jscpd` remains useful for copy/paste detection, but it is not equivalent to `dry4go` because `dry4go` normalizes AST structure and compares patterns whose identifiers and literals differ.
 
 ### CRAP
 
-Build a small CRAP combiner for TypeScript.
+Pilot Fallow before building a custom CRAP combiner.
 
-Existing TypeScript tools can report complexity and coverage separately, but the useful report here is per-function CRAP-style risk ordered for action.
+Fallow is the leading candidate because it has an active Rust-backed TypeScript/JavaScript analyzer, structured JSON output, function complexity, and free exact CRAP scoring from Istanbul coverage. If Fallow's JSON exposes stable per-function source spans, complexity, coverage, and CRAP score, `ubm-crap-report` should wrap Fallow output rather than own a parallel analyzer.
+
+`@barney-media/crap-typescript` is a focused fallback to test if Fallow is missing needed CRAP details. It uses the CRAP formula directly and derives function coverage from Istanbul statement and branch counters. Its scope is narrower than Fallow but closer to the metric we need.
+
+`@sebassdc/crap4ts` is a useful reference or quick experiment, but it is smaller and only uses statement coverage for its coverage fraction. That makes it less attractive as the long-term source of truth for Conduit.
+
+Build a custom combiner only if:
+
+- Fallow cannot emit stable machine-readable per-function CRAP entries.
+- The existing CRAP-specific tools cannot handle Conduit's V8/Istanbul coverage paths, TS/TSX source spans, nested functions, or branch coverage semantics.
+- We need output semantics tightly aligned with UBM artifact manifests and cannot get them from a thin wrapper.
 
 ## Portable Project Config
 
@@ -360,11 +391,21 @@ Use a small project config file rather than embedding Conduit paths in the skill
   "acceptance": {
     "featureDir": "test/acceptance/features",
     "generatedDir": "test-results/ubm/generated/acceptance",
-    "adapter": "vitest",
-    "runCommand": "pnpm exec vitest run test-results/ubm/generated/acceptance"
+    "defaultAdapter": "playwright-replay",
+    "adapters": {
+      "playwright-replay": {
+        "generatedDir": "test-results/ubm/generated/acceptance/playwright",
+        "runCommand": "pnpm build:frontend && pnpm exec playwright test --config test/e2e/playwright-acceptance.config.ts"
+      },
+      "vitest-service": {
+        "generatedDir": "test-results/ubm/generated/acceptance/vitest",
+        "runCommand": "pnpm exec vitest run test-results/ubm/generated/acceptance/vitest"
+      }
+    }
   },
   "quality": {
     "coverageCommand": "pnpm exec vitest run --coverage --coverage.reporter=json",
+    "crapProvider": "fallow",
     "propertyCommand": "pnpm test:pbt",
     "dryTargets": ["src", "test"],
     "mutationRunner": "stryker"
@@ -457,9 +498,10 @@ Avoid first:
 ### Phase 2: Acceptance Pipeline
 
 - Add project config.
-- Add `@cucumber/gherkin` parser integration.
-- Add the Vitest acceptance adapter.
-- Add example generated acceptance tests.
+- Add the parser and JSON IR integration.
+- Add the Playwright replay acceptance adapter for browser E2E.
+- Add example generated Playwright acceptance tests that call existing Conduit page objects and replay helpers.
+- Add the Vitest service adapter only after the browser adapter proves the runtime shape.
 
 ### Phase 3: Acceptance Mutation
 
@@ -469,7 +511,8 @@ Avoid first:
 
 ### Phase 4: Quality Reports
 
-- Add CRAP combiner.
+- Pilot Fallow for CRAP report generation.
+- Add a thin CRAP report wrapper if Fallow output is sufficient, or create a custom combiner only if the pilot proves a gap.
 - Add `dry4ts` MVP.
 - Add StrykerJS file-target config.
 - Wire property-scout to existing `fast-check` conventions.
@@ -486,7 +529,8 @@ Avoid first:
 - Should generated acceptance tests ever be committed, or should they always live under `test-results/ubm/`?
 - Should `dry4ts` normalize imported API names, or preserve selected framework names such as `Effect`, `Schema`, and `Layer` to reduce false positives?
 - Should CRAP reports include test files, or only production files?
-- Should acceptance mutation be allowed to run against Playwright replay tests, or only generated Vitest tests at first?
+- How many Playwright replay acceptance mutations are affordable per local run before mutation needs batching, sampling, or nightly-only scheduling?
+- Does Fallow's JSON output provide all per-function CRAP fields Conduit needs, or do we need a thin wrapper/fallback combiner?
 
 ## References
 
@@ -499,3 +543,6 @@ Avoid first:
 - `@cucumber/gherkin`: https://github.com/cucumber/gherkin
 - StrykerJS Vitest runner: https://stryker-mutator.io/docs/stryker-js/vitest-runner/
 - `jscpd`: https://jscpd.dev/
+- Fallow: https://github.com/fallow-rs/fallow
+- `@barney-media/crap-typescript`: https://github.com/fabian-barney/crap-typescript
+- `@sebassdc/crap4ts`: https://github.com/sebassdc/crap4ts
