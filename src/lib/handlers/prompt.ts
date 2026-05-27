@@ -64,7 +64,7 @@ export const sendMessageToSession = (input: SendMessageToSessionInput) =>
 		const { clientId, text, images, originId, excludeClientId } = input;
 		const imageList =
 			images && images.length > 0 ? Array.from(images) : undefined;
-		const activeId = input.sessionId;
+		let activeId = input.sessionId;
 		if (!text) return;
 		if (!activeId) {
 			if (input.missingSessionClientId) {
@@ -78,11 +78,28 @@ export const sendMessageToSession = (input: SendMessageToSessionInput) =>
 			}
 			return;
 		}
+		const originalActiveId = activeId;
+		const sessionModel = yield* getModel(activeId);
+		const sessionModelUserSelected = yield* isModelUserSelected(activeId);
+		const providerTurnServiceOption = yield* Effect.serviceOption(
+			ProviderTurnServiceTag,
+		);
+		const providerTurnService =
+			providerTurnServiceOption._tag === "Some"
+				? providerTurnServiceOption.value
+				: yield* makeProviderTurnService;
+		activeId = yield* providerTurnService.prepareTurnSession({
+			clientId,
+			sessionId: activeId,
+			...(sessionModel ? { model: sessionModel } : {}),
+			modelUserSelected: sessionModelUserSelected,
+		});
 		log.info(
 			`client=${clientId} session=${activeId} → ${text.slice(0, 80)}${text.length > 80 ? "…" : ""}`,
 		);
 
 		// Clear the input draft
+		if (originalActiveId !== activeId) clearSessionInputDraft(originalActiveId);
 		clearSessionInputDraft(activeId);
 
 		// Send user_message to OTHER clients viewing this session
@@ -106,8 +123,6 @@ export const sendMessageToSession = (input: SendMessageToSessionInput) =>
 			agentServiceOption._tag === "Some"
 				? yield* agentServiceOption.value.getActiveAgent(activeId)
 				: yield* getAgent(activeId);
-		const sessionModel = yield* getModel(activeId);
-		const sessionModelUserSelected = yield* isModelUserSelected(activeId);
 		const variant = yield* getVariant(activeId);
 		const contextWindow = yield* getContextWindow(activeId);
 
@@ -136,13 +151,6 @@ export const sendMessageToSession = (input: SendMessageToSessionInput) =>
 			}),
 		);
 
-		const providerTurnServiceOption = yield* Effect.serviceOption(
-			ProviderTurnServiceTag,
-		);
-		const providerTurnService =
-			providerTurnServiceOption._tag === "Some"
-				? providerTurnServiceOption.value
-				: yield* makeProviderTurnService;
 		yield* providerTurnService.sendTurn({
 			clientId,
 			sessionId: activeId,

@@ -45,6 +45,7 @@ import {
 	type OverridesStateTag,
 	PROCESSING_TIMEOUT_DURATION,
 	resetProcessingTimeout,
+	setModel,
 } from "./session-overrides-state.js";
 import { SessionTitleServiceTag } from "./session-title-service.js";
 
@@ -108,12 +109,22 @@ export interface ProviderTurnServiceSendInput {
 	readonly errorDelivery?: "client" | "session";
 }
 
+export interface ProviderTurnServicePrepareInput {
+	readonly clientId: string;
+	readonly sessionId: string;
+	readonly model?: ProviderTurnServiceSendInput["model"];
+	readonly modelUserSelected: boolean;
+}
+
 export interface ProviderTurnServiceInterruptInput {
 	readonly clientId: string;
 	readonly sessionId: string;
 }
 
 export interface ProviderTurnService {
+	readonly prepareTurnSession: (
+		input: ProviderTurnServicePrepareInput,
+	) => Effect.Effect<string, unknown, OverridesStateTag>;
 	readonly sendTurn: (
 		input: ProviderTurnServiceSendInput,
 	) => Effect.Effect<void, unknown, OverridesStateTag>;
@@ -504,6 +515,71 @@ export const makeProviderTurnService = Effect.gen(function* () {
 			).pipe(Effect.asVoid);
 		});
 
+	const prepareTurnSession = (input: ProviderTurnServicePrepareInput) =>
+		Effect.gen(function* () {
+			const engineOption = yield* Effect.serviceOption(OrchestrationEngineTag);
+			if (engineOption._tag === "None") return input.sessionId;
+
+			const orchestrationEngine = engineOption.value;
+			const providerId =
+				orchestrationEngine.getProviderForSession(input.sessionId) ??
+				(input.model && isClaudeProviderId(input.model.providerID)
+					? CLAUDE_PROVIDER_ID
+					: OPENCODE_PROVIDER_ID);
+			if (isClaudeProviderId(providerId)) return input.sessionId;
+
+			const readQueryEffectOption =
+				yield* Effect.serviceOption(ReadQueryEffectTag);
+			if (readQueryEffectOption._tag === "None") return input.sessionId;
+
+			const rowResult = yield* Effect.either(
+				readQueryEffectOption.value.getSession(input.sessionId),
+			);
+			if (rowResult._tag === "Left") {
+				log.warn(
+					`Could not inspect session provider before OpenCode dispatch for ${input.sessionId}: ${formatErrorDetail(rowResult.left)}`,
+				);
+				return input.sessionId;
+			}
+
+			const row = rowResult.right;
+			if (!row || row.provider === OPENCODE_PROVIDER_ID) {
+				return input.sessionId;
+			}
+
+			const targetProvider = input.model?.providerID ?? providerId;
+			const session = yield* sessionManagerService.createSession(row.title, {
+				providerId: targetProvider,
+			});
+			if (input.model && input.modelUserSelected) {
+				yield* setModel(session.id, input.model);
+			}
+			orchestrationEngine.bindSession(session.id, OPENCODE_PROVIDER_ID);
+			wsHandler.setClientSession(input.clientId, session.id);
+			wsHandler.sendTo(input.clientId, {
+				type: "session_switched",
+				id: session.id,
+				sessionId: session.id,
+			});
+			yield* Effect.forkDaemon(
+				sessionManagerService
+					.sendDualSessionLists((msg) => wsHandler.broadcast(msg))
+					.pipe(
+						Effect.catchAll((err) =>
+							Effect.sync(() =>
+								log.warn(
+									`Failed to broadcast session list after OpenCode materialization: ${err}`,
+								),
+							),
+						),
+					),
+			);
+			log.info(
+				`client=${input.clientId} materialized OpenCode session ${session.id} from local session ${input.sessionId}`,
+			);
+			return session.id;
+		});
+
 	const sendTurn = (input: ProviderTurnServiceSendInput) =>
 		Effect.gen(function* () {
 			const engineOption = yield* Effect.serviceOption(OrchestrationEngineTag);
@@ -584,6 +660,7 @@ export const makeProviderTurnService = Effect.gen(function* () {
 		});
 
 	return {
+		prepareTurnSession,
 		sendTurn,
 		interruptTurn,
 	} satisfies ProviderTurnService;

@@ -232,6 +232,7 @@ describe("Claude Agent SDK provider contract schemas", () => {
 			allowDangerouslySkipPermissions: false,
 			env: { CLAUDE_AGENT_SDK_CLIENT_APP: "conduit" },
 			effort: "high",
+			settings: { showThinkingSummaries: true },
 		};
 
 		expect(

@@ -79,6 +79,10 @@ export type ListSessionsOptions = {
 
 type SessionListMessage = Extract<RelayMessage, { type: "session_list" }>;
 
+export interface CreateSessionOptions {
+	readonly providerId?: string;
+}
+
 export interface HistoryPage {
 	messages: HistoryMessage[];
 	hasMore: boolean;
@@ -1004,6 +1008,7 @@ export interface SessionManagerService {
 	): Effect.Effect<SessionInfo[], SessionManagerError>;
 	createSession(
 		title?: string,
+		options?: CreateSessionOptions,
 	): Effect.Effect<SessionDetail, SessionManagerError>;
 	deleteSession(sessionId: string): Effect.Effect<void, SessionManagerError>;
 	renameSession(
@@ -1114,7 +1119,10 @@ export const SessionManagerServiceLive: Layer.Layer<
 						: base;
 				return yield* withEffectRead;
 			});
-		const serviceCreateSession = (title?: string) =>
+		const serviceCreateSession = (
+			title?: string,
+			options?: CreateSessionOptions,
+		) =>
 			Effect.gen(function* () {
 				const bindSessionProvider = (
 					session: SessionDetail,
@@ -1132,6 +1140,21 @@ export const SessionManagerServiceLive: Layer.Layer<
 						),
 					);
 				const createViaLocal = () => Effect.either(createLocalSession(title));
+
+				const requestedProvider = options?.providerId?.trim();
+				const requestedLocalProvider =
+					requestedProvider === "claude" || requestedProvider === "claude-sdk";
+				if (requestedProvider && !requestedLocalProvider) {
+					const openCodeResult = yield* createViaOpenCode();
+					if (openCodeResult._tag === "Right") {
+						yield* bindSessionProvider(openCodeResult.right, "opencode");
+						return openCodeResult.right;
+					}
+					return yield* new SessionManagerError({
+						operation: "createSession",
+						cause: openCodeResult.left,
+					});
+				}
 
 				const configuredProvider = yield* getConfiguredLocalSessionProvider();
 				if (configuredProvider == null || configuredProvider === "claude") {
@@ -1223,9 +1246,9 @@ export const SessionManagerServiceLive: Layer.Layer<
 					Effect.provideService(SessionManagerStateTag, stateRef),
 				),
 			listSessions: serviceListSessions,
-			createSession: (title) =>
+			createSession: (title, options) =>
 				Effect.gen(function* () {
-					const session = yield* serviceCreateSession(title);
+					const session = yield* serviceCreateSession(title, options);
 					yield* incrementLastKnownSessionCount().pipe(
 						Effect.provideService(SessionManagerStateTag, stateRef),
 					);

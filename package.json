@@ -2,6 +2,7 @@
 	"name": "conduit-code",
 	"version": "0.1.3",
 	"type": "module",
+	"packageManager": "pnpm@10.33.4",
 	"license": "MIT",
 	"description": "Web UI relay for OpenCode. Access your OpenCode sessions from any device.",
 	"repository": {
@@ -66,7 +67,7 @@
 		"prepublishOnly": "pnpm test:all",
 		"preversion": "pnpm check && pnpm lint && pnpm test:unit",
 		"postversion": "git push origin main --follow-tags",
-		"prepare": "lefthook install || true"
+		"prepare": "if command -v bd >/dev/null 2>&1; then bd hooks install --beads --chain || true; else pnpm exec lefthook install || true; fi"
 	},
 	"dependencies": {
 		"@anthropic-ai/claude-agent-sdk": "^0.2.132",
@@ -133,7 +134,7 @@
 		"vitest": "^3.0.0"
 	},
 	"engines": {
-		"node": ">=22.5.0"
+		"node": ">=24.16.0"
 	},
 	"pnpm": {
 		"onlyBuiltDependencies": [

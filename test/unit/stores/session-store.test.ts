@@ -6,6 +6,7 @@ import {
 	getOrCreateSessionSlot,
 	setMessages,
 } from "../../../src/lib/frontend/stores/chat.svelte.js";
+import { discoveryState } from "../../../src/lib/frontend/stores/discovery.svelte.js";
 import {
 	routerState,
 	syncSlugState,
@@ -90,6 +91,10 @@ beforeEach(() => {
 	sessionState.currentId = null;
 	sessionState.searchQuery = "";
 	sessionState.hasMore = false;
+	discoveryState.currentProviderId = "";
+	discoveryState.currentModelId = "";
+	discoveryState.defaultProviderId = "";
+	discoveryState.defaultModelId = "";
 	routerState.path = "/p/project-a/s/old-session";
 	syncSlugState(routerState.path);
 });
@@ -614,6 +619,23 @@ describe("sendNewSession", () => {
 			requestId,
 			originId: expect.any(String),
 		});
+	});
+
+	it("sends the active provider with CreateSession input", () => {
+		discoveryState.currentProviderId = "opencode";
+		discoveryState.currentModelId = "big-pickle";
+
+		const requestId = sendNewSession(mockStart);
+
+		expect(requestId).not.toBeNull();
+		expect(sent).toEqual([
+			{
+				projectSlug: "project-a",
+				requestId,
+				originId: expect.any(String),
+				providerId: "opencode",
+			},
+		]);
 	});
 
 	it("transitions to creating phase", () => {

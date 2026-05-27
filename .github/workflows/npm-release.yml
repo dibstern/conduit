@@ -35,16 +35,14 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
-      - uses: actions/setup-node@v6
+      - uses: jdx/mise-action@v4
         with:
-          node-version: '24'
-      - uses: pnpm/action-setup@v5
-        with:
-          version: latest
+          install: true
+          cache: true
       - name: Cache pnpm store
         uses: actions/cache@v5
         with:
-          path: ~/.pnpm-store
+          path: ~/.local/share/pnpm/store
           key: ${{ runner.os }}-pnpm-${{ hashFiles('**/pnpm-lock.yaml') }}
           restore-keys: ${{ runner.os }}-pnpm-
       - run: pnpm install --frozen-lockfile
@@ -69,16 +67,14 @@ jobs:
       OPENCODE_SERVER_PASSWORD: ci-test-password
     steps:
       - uses: actions/checkout@v6
-      - uses: actions/setup-node@v6
+      - uses: jdx/mise-action@v4
         with:
-          node-version: '24'
-      - uses: pnpm/action-setup@v5
-        with:
-          version: latest
+          install: true
+          cache: true
       - name: Cache pnpm store
         uses: actions/cache@v5
         with:
-          path: ~/.pnpm-store
+          path: ~/.local/share/pnpm/store
           key: ${{ runner.os }}-pnpm-${{ hashFiles('**/pnpm-lock.yaml') }}
           restore-keys: ${{ runner.os }}-pnpm-
       - run: pnpm install --frozen-lockfile
@@ -115,16 +111,14 @@ jobs:
       OPENCODE_SERVER_PASSWORD: ci-test-password
     steps:
       - uses: actions/checkout@v6
-      - uses: actions/setup-node@v6
+      - uses: jdx/mise-action@v4
         with:
-          node-version: '24'
-      - uses: pnpm/action-setup@v5
-        with:
-          version: latest
+          install: true
+          cache: true
       - name: Cache pnpm store
         uses: actions/cache@v5
         with:
-          path: ~/.pnpm-store
+          path: ~/.local/share/pnpm/store
           key: ${{ runner.os }}-pnpm-${{ hashFiles('**/pnpm-lock.yaml') }}
           restore-keys: ${{ runner.os }}-pnpm-
       - run: pnpm install --frozen-lockfile
@@ -167,16 +161,14 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
-      - uses: actions/setup-node@v6
+      - uses: jdx/mise-action@v4
         with:
-          node-version: '24'
-      - uses: pnpm/action-setup@v5
-        with:
-          version: latest
+          install: true
+          cache: true
       - name: Cache pnpm store
         uses: actions/cache@v5
         with:
-          path: ~/.pnpm-store
+          path: ~/.local/share/pnpm/store
           key: ${{ runner.os }}-pnpm-${{ hashFiles('**/pnpm-lock.yaml') }}
           restore-keys: ${{ runner.os }}-pnpm-
       - run: pnpm install --frozen-lockfile
@@ -195,17 +187,14 @@ jobs:
         with:
           fetch-depth: 0 # full history for gh release --generate-notes
 
-      - uses: actions/setup-node@v6
+      - uses: jdx/mise-action@v4
         with:
-          node-version: '24'
-          registry-url: 'https://registry.npmjs.org'
-      - uses: pnpm/action-setup@v5
-        with:
-          version: latest
+          install: true
+          cache: true
       - name: Cache pnpm store
         uses: actions/cache@v5
         with:
-          path: ~/.pnpm-store
+          path: ~/.local/share/pnpm/store
           key: ${{ runner.os }}-pnpm-${{ hashFiles('**/pnpm-lock.yaml') }}
           restore-keys: ${{ runner.os }}-pnpm-
       - run: pnpm install --frozen-lockfile
@@ -224,7 +213,7 @@ jobs:
       - name: Bump version
         id: bump
         run: |
-          npm version ${{ inputs.version }} --no-git-tag-version --ignore-scripts
+          pnpm version ${{ inputs.version }} --no-git-tag-version --ignore-scripts
           VERSION=$(node -p "require('./package.json').version")
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "tag=v$VERSION" >> "$GITHUB_OUTPUT"
@@ -240,8 +229,6 @@ jobs:
 
       - name: Publish to npm
         run: pnpm publish --no-git-checks --provenance --ignore-scripts
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
       - name: Create GitHub release
         run: gh release create "${{ steps.bump.outputs.tag }}" --generate-notes

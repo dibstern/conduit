@@ -867,6 +867,7 @@ export class ClaudeProviderRuntime {
 							env: makeClaudeSdkEnv(),
 							includePartialMessages: true,
 							forwardSubagentText: true,
+							settings: { showThinkingSummaries: true },
 							settingSources: ["user", "project", "local"],
 							canUseTool: bridge.createCanUseTool(ctx),
 							...(apiModelId ? { model: apiModelId } : {}),

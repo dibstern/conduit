@@ -24,6 +24,7 @@ import {
 	setVariant,
 } from "../domain/relay/Services/session-overrides-state.js";
 import { formatErrorDetail } from "../errors.js";
+import { ReadQueryEffectTag } from "../persistence/effect/read-query-effect.js";
 import {
 	loadRelaySettings,
 	saveRelaySettings,
@@ -144,6 +145,20 @@ const loadVariantsForModel = (activeModel: ModelOverride | undefined) =>
 		}
 
 		return [] as string[];
+	});
+
+const shouldBindOpenCodeSessionOnModelSwitch = (sessionId: string) =>
+	Effect.gen(function* () {
+		const readQueryOption = yield* Effect.serviceOption(ReadQueryEffectTag);
+		if (readQueryOption._tag === "None") return true;
+
+		const rowResult = yield* Effect.either(
+			readQueryOption.value.getSession(sessionId),
+		);
+		if (rowResult._tag === "Left") return true;
+
+		const row = rowResult.right;
+		return !row || row.provider === "opencode";
 	});
 
 const toSharedProviders = (
@@ -445,7 +460,13 @@ export const switchModelForSession = (input: SwitchModelInput) =>
 				const providerInstanceId = isClaudeProvider(providerId)
 					? "claude"
 					: "opencode";
-				engineOption.value.bindSession(sessionId, providerInstanceId);
+				if (providerInstanceId === "claude") {
+					engineOption.value.bindSession(sessionId, providerInstanceId);
+				} else if (yield* shouldBindOpenCodeSessionOnModelSwitch(sessionId)) {
+					engineOption.value.bindSession(sessionId, providerInstanceId);
+				} else {
+					engineOption.value.unbindSession(sessionId);
+				}
 			}
 		} else {
 			log.warn(

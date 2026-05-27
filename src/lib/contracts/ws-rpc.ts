@@ -775,6 +775,7 @@ export class CreateSession extends Schema.TaggedRequest<CreateSession>()(
 			originId: NonEmptyString,
 			title: Schema.optional(Schema.String),
 			requestId: Schema.optional(NonEmptyString),
+			providerId: Schema.optional(Schema.String),
 		},
 	},
 ) {}
