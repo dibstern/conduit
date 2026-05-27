@@ -1,17 +1,23 @@
 // ─── Relay Event Sink ────────────────────────────────────────────────────────
-// Translates provider-emitted CanonicalEvents into RelayMessages and pushes
-// them straight to WebSocket clients. Used for the in-process Claude SDK path
-// (ClaudeProviderInstance) where there is no SSE stream to piggy-back on. Permissions
-// and questions are routed through the same path so the UI receives the
-// familiar RelayMessage shapes.
+// Translates provider-emitted ProviderRuntimeEvents into Conduit domain events,
+// persists them when configured, then pushes RelayMessages to WebSocket clients.
+// Used for the in-process Claude SDK path where there is no SSE stream to
+// piggy-back on. Permissions and questions are routed through the same path so
+// the UI receives the familiar RelayMessage shapes.
 
 import { Effect } from "effect";
+import type { ProviderRuntimeEvent } from "../contracts/providers/provider-runtime-event.js";
 import { createLogger } from "../logger.js";
 import type { CanonicalEvent } from "../persistence/events.js";
+import { translateDomainEventToRelay } from "../relay/domain-event-to-relay.js";
 import type { PermissionId } from "../shared-types.js";
 import { tagWithSessionId } from "../shared-types.js";
 import type { RelayMessage } from "../types.js";
 import { MissingPendingInteractions } from "./errors.js";
+import {
+	emptyProviderRuntimeDomainMapperState,
+	translateProviderRuntimeEventToDomain,
+} from "./provider-runtime-event-to-domain.js";
 import type {
 	EventSink,
 	PermissionRequest,
@@ -21,30 +27,14 @@ import type {
 
 const log = createLogger("relay-event-sink");
 
-// ─── Translation Result ───────────────────────────────────────────────────
-
-type TranslationResult =
-	| {
-			kind: "emit";
-			messages: import("../shared-types.js").UntaggedRelayMessage[];
-	  }
-	| { kind: "silent"; reason: string };
-
-function emit(
-	...messages: import("../shared-types.js").UntaggedRelayMessage[]
-): TranslationResult {
-	return { kind: "emit", messages };
-}
-
-function silent(reason: string): TranslationResult {
-	return { kind: "silent", reason };
-}
-
 // ─── Deps ───────────────────────────────────────────────────────────────────
 
 export interface EffectRelayEventSinkPersist {
 	readonly persistEvent: (
 		event: CanonicalEvent,
+	) => Effect.Effect<void, unknown>;
+	readonly persistEvents?: (
+		events: readonly CanonicalEvent[],
 	) => Effect.Effect<void, unknown>;
 }
 
@@ -107,6 +97,7 @@ export type RelayEventSink = EventSink;
 
 export function createRelayEventSink(deps: RelayEventSinkDeps): RelayEventSink {
 	const { sessionId, send, clearTimeout, resetTimeout, persist } = deps;
+	let mapperState = emptyProviderRuntimeDomainMapperState;
 
 	function reset(): void {
 		if (resetTimeout) resetTimeout();
@@ -126,37 +117,66 @@ export function createRelayEventSink(deps: RelayEventSinkDeps): RelayEventSink {
 	}
 
 	return {
-		push(event: CanonicalEvent): Effect.Effect<void, never> {
+		push(event: ProviderRuntimeEvent): Effect.Effect<void, never> {
 			return Effect.gen(function* () {
 				yield* Effect.sync(reset);
-				// Persist to SQLite when available (before WS send for durability)
-				if (persist) {
-					const persistResult = yield* Effect.either(
-						persist.persistEvent(event),
-					);
-					if (persistResult._tag === "Left") {
-						// Non-fatal — same pattern as dual-write-hook.ts:149.
-						// Covers: disk full, DB locked, projection recovery guard, etc.
-						yield* Effect.sync(() => {
-							const err = persistResult.left;
-							log.debug(
-								`Persist failed for ${event.type} (session=${sessionId}): ${err instanceof Error ? err.message : err}`,
+				const result = translateProviderRuntimeEventToDomain(
+					event,
+					mapperState,
+				);
+				mapperState = result.state;
+
+				// Persist to SQLite when available (before WS send for durability).
+				// Real persistence implements persistEvents for atomic multi-event mappings;
+				// older tests and adapters can still provide persistEvent.
+				if (persist && result.events.length > 0) {
+					if (persist.persistEvents) {
+						const persistResult = yield* Effect.either(
+							persist.persistEvents(result.events),
+						);
+						if (persistResult._tag === "Left") {
+							yield* Effect.sync(() => {
+								const err = persistResult.left;
+								log.debug(
+									`Persist failed for runtime event ${event.type} (session=${sessionId}): ${err instanceof Error ? err.message : err}`,
+								);
+							});
+						}
+					} else {
+						for (const domainEvent of result.events) {
+							const persistResult = yield* Effect.either(
+								persist.persistEvent(domainEvent),
 							);
-						});
-					}
-				}
-				yield* Effect.sync(() => {
-					const result = translateCanonicalEvent(event);
-					if (result.kind === "emit") {
-						for (const raw of result.messages) {
-							const m = tagWithSessionId(raw, event.sessionId || sessionId);
-							send(m);
-							const isTerminal =
-								m.type === "done" || (m.type === "error" && m.code !== "RETRY");
-							if (isTerminal) finish();
+							if (persistResult._tag === "Left") {
+								yield* Effect.sync(() => {
+									const err = persistResult.left;
+									log.debug(
+										`Persist failed for ${domainEvent.type} (session=${sessionId}): ${err instanceof Error ? err.message : err}`,
+									);
+								});
+							}
 						}
 					}
-				});
+				}
+
+				for (const domainEvent of result.events) {
+					yield* Effect.sync(() => {
+						const translated = translateDomainEventToRelay(domainEvent);
+						if (translated.kind === "emit") {
+							for (const raw of translated.messages) {
+								const m = tagWithSessionId(
+									raw,
+									domainEvent.sessionId || sessionId,
+								);
+								send(m);
+								const isTerminal =
+									m.type === "done" ||
+									(m.type === "error" && m.code !== "RETRY");
+								if (isTerminal) finish();
+							}
+						}
+					});
+				}
 			});
 		},
 
@@ -311,150 +331,4 @@ export function createRelayEventSink(deps: RelayEventSinkDeps): RelayEventSink {
 			return Effect.void;
 		},
 	};
-}
-
-// ─── Translation ────────────────────────────────────────────────────────────
-// Maps CanonicalEvent (provider-emitted) → RelayMessage[] (client-facing).
-// An event may produce zero, one, or many relay messages.
-
-function translateCanonicalEvent(event: CanonicalEvent): TranslationResult {
-	switch (event.type) {
-		case "text.delta":
-			return emit({
-				type: "delta",
-				text: event.data.text,
-				messageId: event.data.messageId,
-			});
-
-		case "thinking.start":
-			return emit({ type: "thinking_start", messageId: event.data.messageId });
-
-		case "thinking.delta":
-			return emit({
-				type: "thinking_delta",
-				text: event.data.text,
-				messageId: event.data.messageId,
-			});
-
-		case "thinking.end":
-			return emit({ type: "thinking_stop", messageId: event.data.messageId });
-
-		case "tool.started": {
-			const { toolName, callId, input, messageId } = event.data;
-			return emit(
-				{ type: "tool_start", id: callId, name: toolName, messageId },
-				{
-					type: "tool_executing",
-					id: callId,
-					name: toolName,
-					input: isRecord(input) ? input : undefined,
-					messageId,
-				},
-			);
-		}
-
-		case "tool.running":
-			if (event.data.metadata) {
-				return emit({
-					type: "tool_executing",
-					id: event.data.partId,
-					name: "Task",
-					input: undefined,
-					metadata: event.data.metadata,
-					messageId: event.data.messageId,
-				});
-			}
-			return silent(
-				"ToolRunningPayload carries no callId; partId anchor already covered by tool.started",
-			);
-
-		case "tool.input_updated":
-			return silent("Historical event — no longer emitted after Phase 2");
-
-		case "tool.completed": {
-			const { partId, result, messageId } = event.data;
-			return emit({
-				type: "tool_result",
-				id: partId,
-				content: typeof result === "string" ? result : stringify(result),
-				is_error: false,
-				messageId,
-			});
-		}
-
-		case "turn.completed": {
-			const { tokens, cost, duration } = event.data;
-			return emit(
-				{
-					type: "result",
-					usage: {
-						input: tokens?.input ?? 0,
-						output: tokens?.output ?? 0,
-						cache_read: tokens?.cacheRead ?? 0,
-						cache_creation: tokens?.cacheWrite ?? 0,
-					},
-					cost: cost ?? 0,
-					duration: duration ?? 0,
-					sessionId: event.sessionId,
-				} satisfies RelayMessage,
-				{ type: "done", code: 0 },
-			);
-		}
-
-		case "turn.error": {
-			const { error, code } = event.data;
-			return emit(
-				{ type: "error", code: code ?? "TURN_ERROR", message: error },
-				{ type: "done", code: 1 },
-			);
-		}
-
-		case "turn.interrupted":
-			return emit({ type: "done", code: 1 });
-
-		case "session.status":
-			if (event.data.status === "retry") {
-				const reason =
-					typeof event.metadata.correlationId === "string"
-						? event.metadata.correlationId
-						: "Retrying";
-				return emit({ type: "error", code: "RETRY", message: reason });
-			}
-			return silent(
-				"prompt handler owns lifecycle; terminal done/error covers completion",
-			);
-
-		case "message.created":
-		case "session.created":
-		case "session.renamed":
-		case "session.provider_changed":
-			return silent("persistence-only event; no UI surface in relay");
-
-		case "permission.asked":
-		case "permission.resolved":
-		case "question.asked":
-		case "question.resolved":
-			return silent(
-				"handled via requestPermission/requestQuestion side-channel",
-			);
-
-		default:
-			return silent("unhandled event type");
-	}
-}
-
-// ─── Helpers ────────────────────────────────────────────────────────────────
-
-function isRecord(v: unknown): v is Record<string, unknown> {
-	return v !== null && typeof v === "object" && !Array.isArray(v);
-}
-
-function stringify(v: unknown): string {
-	if (v == null) return "";
-	if (typeof v === "string") return v;
-	try {
-		return JSON.stringify(v);
-	} catch {
-		return String(v);
-	}
 }

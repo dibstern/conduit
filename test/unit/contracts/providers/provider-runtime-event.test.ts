@@ -1,336 +1,413 @@
-import { readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
+import { join, relative } from "node:path";
 
 import { Either, Schema } from "effect";
 import { describe, expect, it } from "vitest";
 
 import {
-	decodeProviderRuntimeEvent,
-	decodeProviderRuntimeEvents,
-	isProviderRuntimeEvent,
+	ACTIVE_PROVIDER_RUNTIME_EVENT_TYPES,
+	HISTORICAL_PROVIDER_RUNTIME_EVENT_TYPES,
 	ProviderRuntimeEventSchema,
+	ProviderRuntimeEventTypeSchema,
+	ProviderRuntimeProviderRefsSchema,
+	ProviderRuntimeRawSourceSchema,
 } from "../../../../src/lib/contracts/providers/provider-runtime-event.js";
-
-const sourcePath = "src/lib/contracts/providers/provider-runtime-event.ts";
+import { CANONICAL_EVENT_TYPES } from "../../../../src/lib/persistence/events.js";
 
 const baseEvent = {
 	eventId: "evt_1",
-	provider: "claude",
-	threadId: "thread_1",
-	createdAt: "2026-05-17T00:00:00.000Z",
+	type: "message.created",
+	providerId: "claude",
+	sessionId: "session_1",
+	providerRefs: {},
+	rawSource: { kind: "claude-sdk" },
+	createdAt: "2026-05-18T00:00:00.000Z",
+	data: { messageId: "msg_1", role: "assistant", sessionId: "session_1" },
 };
 
 const decodeEither = (value: unknown) =>
 	Schema.decodeUnknownEither(ProviderRuntimeEventSchema)(value);
 
+const REPO_ROOT = process.cwd();
+const CONTRACT_SOURCE_PATH =
+	"src/lib/contracts/providers/provider-runtime-event.ts";
+const CONTRACT_SOURCE = join(REPO_ROOT, CONTRACT_SOURCE_PATH);
+
+function tsFiles(dir: string): string[] {
+	if (!existsSync(dir)) return [];
+
+	const files: string[] = [];
+	for (const entry of readdirSync(dir)) {
+		const path = join(dir, entry);
+		const stat = statSync(path);
+		if (stat.isDirectory()) {
+			files.push(...tsFiles(path));
+		} else if (path.endsWith(".ts")) {
+			files.push(relative(REPO_ROOT, path));
+		}
+	}
+	return files.sort();
+}
+
 describe("ProviderRuntimeEvent contracts", () => {
-	it("decodes a minimal session.started event", () => {
-		const event = decodeProviderRuntimeEvent({
+	it("rejects missing base envelope identity", () => {
+		expect(Either.isRight(decodeEither(baseEvent))).toBe(true);
+
+		for (const field of [
+			"eventId",
+			"type",
+			"providerId",
+			"sessionId",
+			"providerRefs",
+			"rawSource",
+			"createdAt",
+			"data",
+		] as const) {
+			const { [field]: _removed, ...eventWithoutRequiredField } = baseEvent;
+
+			expect(Either.isLeft(decodeEither(eventWithoutRequiredField))).toBe(true);
+		}
+	});
+
+	it("rejects inherited base envelope identity", () => {
+		const inheritedEnvelope = Object.create(baseEvent);
+
+		expect(Either.isLeft(decodeEither(inheritedEnvelope))).toBe(true);
+	});
+
+	it("covers every canonical event type or explicit reclassification", () => {
+		const explicitlyReclassified: readonly string[] = [];
+		const missingRuntimeTypes = CANONICAL_EVENT_TYPES.filter(
+			(type) =>
+				!explicitlyReclassified.includes(type) &&
+				Either.isLeft(
+					Schema.decodeUnknownEither(ProviderRuntimeEventTypeSchema)(type),
+				),
+		);
+
+		expect(missingRuntimeTypes).toEqual([]);
+	});
+
+	it("decodes raw-source metadata fields", () => {
+		const rawSource = {
+			kind: "claude-sdk",
+			providerMessageType: "assistant",
+			providerMessageSubtype: "content_block_delta",
+			sdkVariant: "typescript-v2-preview",
+			streamEventType: "message_delta",
+			endpoint: "/v1/messages",
+			sourceSchema: "ClaudeAgentSdkStreamMessageSchema",
+		};
+
+		const event = Schema.decodeUnknownSync(ProviderRuntimeEventSchema)({
 			...baseEvent,
-			type: "session.started",
+			rawSource,
 		});
 
-		expect(event).toEqual({ ...baseEvent, type: "session.started" });
-		expect(isProviderRuntimeEvent(event)).toBe(true);
+		expect(
+			Either.isRight(
+				Schema.decodeUnknownEither(ProviderRuntimeRawSourceSchema)(rawSource),
+			),
+		).toBe(true);
+		expect(event.rawSource).toEqual(rawSource);
 	});
 
-	it("keeps provider labels open when they are non-empty", () => {
-		for (const provider of ["claude", "opencode", "localFork"]) {
-			expect(
-				Either.isRight(
-					decodeEither({ ...baseEvent, provider, type: "session.started" }),
+	it("decodes Claude refs", () => {
+		const providerRefs = {
+			providerSessionId: "claude-session-1",
+			providerMessageId: "msg_1",
+			providerToolUseId: "toolu_1",
+			providerTaskId: "task_1",
+		};
+
+		const event = Schema.decodeUnknownSync(ProviderRuntimeEventSchema)({
+			...baseEvent,
+			type: "tool.started",
+			providerRefs,
+			data: {
+				messageId: "msg_1",
+				partId: "part_1",
+				toolName: "Bash",
+				callId: "toolu_1",
+				input: { command: "pnpm check" },
+			},
+		});
+
+		expect(
+			Either.isRight(
+				Schema.decodeUnknownEither(ProviderRuntimeProviderRefsSchema)(
+					providerRefs,
 				),
-			).toBe(true);
-		}
+			),
+		).toBe(true);
+		expect(event.providerRefs).toEqual(providerRefs);
+		expect(event.rawSource).not.toHaveProperty("raw");
 	});
 
-	it("rejects whitespace-only eventId, threadId, and provider", () => {
-		for (const field of ["eventId", "threadId", "provider"] as const) {
-			expect(
-				Either.isLeft(
-					decodeEither({
-						...baseEvent,
-						[field]: " \t\n ",
-						type: "session.started",
-					}),
+	it("marks tool.input_updated as historical compatibility", () => {
+		expect(
+			Either.isRight(
+				Schema.decodeUnknownEither(ProviderRuntimeEventTypeSchema)(
+					"tool.input_updated",
 				),
-			).toBe(true);
-		}
+			),
+		).toBe(true);
+		expect(HISTORICAL_PROVIDER_RUNTIME_EVENT_TYPES).toEqual([
+			"tool.input_updated",
+		]);
+		expect(ACTIVE_PROVIDER_RUNTIME_EVENT_TYPES).not.toContain(
+			"tool.input_updated",
+		);
 	});
 
-	it("rejects eventId, threadId, and provider with leading or trailing whitespace", () => {
-		for (const [field, value] of [
-			["eventId", " evt_1 "],
-			["threadId", " thread_1 "],
-			["provider", " claude "],
+	it("rejects unknown runtime event type", () => {
+		expect(Either.isLeft(decodeEither({ ...baseEvent, type: "made.up" }))).toBe(
+			true,
+		);
+	});
+
+	it("rejects raw payload fields in rawSource", () => {
+		for (const field of [
+			"raw",
+			"rawPayload",
+			"sdkPayload",
+			"providerPayload",
 		] as const) {
 			expect(
 				Either.isLeft(
 					decodeEither({
 						...baseEvent,
-						[field]: value,
-						type: "session.started",
+						rawSource: { kind: "claude-sdk", [field]: { type: "assistant" } },
 					}),
 				),
 			).toBe(true);
 		}
 	});
 
-	it("rejects unknown event types", () => {
-		expect(
-			Either.isLeft(decodeEither({ ...baseEvent, type: "message.created" })),
-		).toBe(true);
-	});
-
-	it("decodes every supported raw-source label", () => {
-		for (const source of [
-			"claude.sdk.message",
-			"claude.sdk.result",
-			"claude.sdk.permission",
-			"opencode.sdk.event",
-			"opencode.sdk.response",
-			"opencode.gap.response",
-			"conduit.provider.request",
-			"conduit.provider.translator",
-			"conduit.provider.runtime",
-		]) {
+	it("rejects top-level raw payload fields", () => {
+		for (const field of ["raw", "payload", "rawPayload"] as const) {
 			expect(
-				Either.isRight(
+				Either.isLeft(
 					decodeEither({
 						...baseEvent,
-						type: "session.started",
-						raw: { source, payload: { ok: true } },
+						[field]: { type: "provider-message", content: [] },
 					}),
 				),
 			).toBe(true);
 		}
 	});
 
-	it("preserves arbitrary nested raw payloads unchanged", () => {
-		const payload = {
-			arr: [1, "two", null, { nested: true }],
-			obj: { child: { enabled: false } },
-			nil: null,
-		};
-
-		const event = decodeProviderRuntimeEvent({
-			...baseEvent,
-			type: "session.started",
-			raw: {
-				source: "claude.sdk.message",
-				method: "query",
-				messageType: "assistant",
-				payload,
-			},
-		});
-
-		expect(event.raw?.payload).toEqual(payload);
+	it("rejects arbitrary unknown top-level fields", () => {
+		expect(Either.isLeft(decodeEither({ ...baseEvent, extra: true }))).toBe(
+			true,
+		);
 	});
 
-	it("decodes provider-native refs", () => {
+	it("decodes OpenCode refs", () => {
 		const providerRefs = {
-			providerTurnId: "sdk-turn-1",
-			providerItemId: "sdk-item-1",
-			providerRequestId: "sdk-request-1",
-			providerSessionId: "sdk-session-1",
+			providerSessionId: "opencode-session-1",
+			providerMessageId: "msg_1",
+			providerRequestId: "req_1",
 		};
 
-		const event = decodeProviderRuntimeEvent({
+		const event = Schema.decodeUnknownSync(ProviderRuntimeEventSchema)({
 			...baseEvent,
-			type: "session.started",
+			providerId: "opencode",
+			type: "permission.asked",
 			providerRefs,
+			rawSource: {
+				kind: "opencode-sdk",
+				streamEventType: "permission.asked",
+				endpoint: "/event",
+			},
+			data: {
+				id: "req_1",
+				sessionId: "session_1",
+				toolName: "Bash",
+				input: { command: "pnpm check", cwd: "/repo" },
+			},
 		});
 
+		expect(
+			Either.isRight(
+				Schema.decodeUnknownEither(ProviderRuntimeProviderRefsSchema)(
+					providerRefs,
+				),
+			),
+		).toBe(true);
+		expect(event.providerId).toBe("opencode");
 		expect(event.providerRefs).toEqual(providerRefs);
+		expect(event.data).toEqual({
+			id: "req_1",
+			sessionId: "session_1",
+			toolName: "Bash",
+			input: { command: "pnpm check", cwd: "/repo" },
+		});
 	});
 
-	it("decodes representative runtime event families", () => {
-		const examples = [
-			{
-				...baseEvent,
-				eventId: "evt_content_assistant",
-				type: "content.delta",
-				turnId: "turn_1",
-				itemId: "item_1",
-				payload: { streamKind: "assistant_text", text: "hello" },
+	it("preserves opaque provider-owned payloads", () => {
+		const data = {
+			messageId: "msg_1",
+			partId: "part_1",
+			toolName: "AskUserQuestion",
+			callId: "toolu_question_1",
+			input: {
+				questions: [
+					{
+						id: "q1",
+						header: "Confirm",
+						question: "Which paths should be changed?",
+						options: ["src", "test"],
+					},
+				],
+				nested: { resultShape: [{ ok: true }, null] },
 			},
-			{
-				...baseEvent,
-				eventId: "evt_content_reasoning",
-				type: "content.delta",
-				turnId: "turn_1",
-				itemId: "item_2",
-				payload: { streamKind: "reasoning_text", text: "thinking" },
+			result: {
+				answers: { q1: ["src", "test"] },
+				rawProviderResult: { status: "ok", values: [1, "two"] },
 			},
-			{
-				...baseEvent,
-				eventId: "evt_item_started",
-				type: "item.started",
-				itemId: "item_3",
-				payload: { itemType: "tool_call", status: "inProgress" },
-			},
-			{
-				...baseEvent,
-				eventId: "evt_item_completed",
-				type: "item.completed",
-				itemId: "item_4",
-				payload: { itemType: "assistant_message", status: "completed" },
-			},
-			{
-				...baseEvent,
-				eventId: "evt_request_opened",
-				type: "request.opened",
-				requestId: "request_1",
-				payload: {
-					requestType: "tool_permission",
-					title: "Run command",
-					description: "Allow Bash",
-					toolName: "Bash",
-					input: { command: "pnpm check", providerShape: ["survives"] },
-				},
-			},
-			{
-				...baseEvent,
-				eventId: "evt_request_resolved",
-				type: "request.resolved",
-				requestId: "request_1",
-				payload: { requestType: "tool_permission", decision: "approved" },
-			},
-			{
-				...baseEvent,
-				eventId: "evt_user_input_requested",
-				type: "user-input.requested",
-				requestId: "request_2",
-				payload: {
-					questions: [
-						{
-							id: "q1",
-							header: "Confirm",
-							question: "Which files?",
-							options: ["src", "test"],
-							multiSelect: true,
-						},
-					],
-				},
-			},
-			{
-				...baseEvent,
-				eventId: "evt_user_input_resolved",
-				type: "user-input.resolved",
-				requestId: "request_2",
-				payload: { answers: { q1: ["src", "test"] } },
-			},
-			{
-				...baseEvent,
-				eventId: "evt_turn_completed",
-				type: "turn.completed",
-				turnId: "turn_1",
-				payload: {
-					state: "completed",
-					durationMs: 123,
-					cost: { usd: 0.01 },
-					tokens: { input: 10, output: 20 },
-				},
-			},
-			{
-				...baseEvent,
-				eventId: "evt_runtime_error",
-				type: "runtime.error",
-				payload: {
-					errorClass: "validation",
-					message: "Malformed provider event",
-					code: "BAD_PROVIDER_EVENT",
-					retryable: false,
-				},
-			},
-		];
+		};
 
-		const decoded = decodeProviderRuntimeEvents(examples);
+		const event = Schema.decodeUnknownSync(ProviderRuntimeEventSchema)({
+			...baseEvent,
+			type: "tool.completed",
+			providerRefs: {
+				providerSessionId: "claude-session-1",
+				providerMessageId: "msg_1",
+				providerToolUseId: "toolu_question_1",
+			},
+			data,
+		});
 
-		expect(decoded).toHaveLength(examples.length);
-		expect(decoded[4]?.type).toBe("request.opened");
-		if (decoded[4]?.type === "request.opened") {
-			expect(decoded[4].payload.input).toEqual(examples[4]?.payload.input);
-		}
+		expect(event.data).toEqual(data);
 	});
 
-	it("rejects unsupported current canonical event names until translators exist", () => {
-		// Expected future mapping:
-		// message.created -> item.started/item.completed
-		// text.delta -> content.delta(streamKind: assistant_text)
-		// thinking.delta -> content.delta(streamKind: reasoning_text)
-		// tool.started -> item.started(itemType: tool_call)
-		// permission.asked -> request.opened(requestType: *_permission)
-		// question.asked -> user-input.requested
-		for (const type of [
-			"message.created",
-			"text.delta",
-			"thinking.delta",
-			"tool.started",
-			"permission.asked",
-			"question.asked",
-		]) {
-			expect(Either.isLeft(decodeEither({ ...baseEvent, type }))).toBe(true);
-		}
-	});
-
-	it("decodes unknown provider driver labels", () => {
-		for (const provider of [
-			"claudeAgentNext",
-			"opencode_work",
-			"local-provider",
+	it("rejects unknown providerRefs keys", () => {
+		for (const providerRefs of [
+			{ providerSessionId: "session_1", providerMessageID: "msg_1" },
+			{ providerSessionId: "session_1", providerItemId: "item_1" },
 		]) {
 			expect(
-				Either.isRight(
-					decodeEither({ ...baseEvent, provider, type: "session.started" }),
+				Either.isLeft(
+					Schema.decodeUnknownEither(ProviderRuntimeProviderRefsSchema)(
+						providerRefs,
+					),
 				),
 			).toBe(true);
+			expect(Either.isLeft(decodeEither({ ...baseEvent, providerRefs }))).toBe(
+				true,
+			);
 		}
 	});
 
-	it("keeps provider-looking raw fields opaque", () => {
-		const payload = {
-			type: "message.created",
-			provider: "claude",
-			tool: { name: "Bash", input: { command: "echo test" } },
-		};
+	it("rejects non-plain providerRefs objects", () => {
+		for (const providerRefs of [
+			new Date("2026-05-18T00:00:00.000Z"),
+			new Map([["providerSessionId", "session_1"]]),
+		]) {
+			expect(
+				Either.isLeft(
+					Schema.decodeUnknownEither(ProviderRuntimeProviderRefsSchema)(
+						providerRefs,
+					),
+				),
+			).toBe(true);
+			expect(Either.isLeft(decodeEither({ ...baseEvent, providerRefs }))).toBe(
+				true,
+			);
+		}
+	});
 
-		const event = decodeProviderRuntimeEvent({
-			...baseEvent,
-			type: "runtime.warning",
-			payload: {
-				errorClass: "provider",
-				message: "Provider sent an unmapped event",
-			},
-			raw: { source: "conduit.provider.translator", payload },
+	it("keeps ProviderRuntimeEvent as provider ingress, not persistence truth", () => {
+		const filesImportingContract = tsFiles(join(REPO_ROOT, "src/lib"))
+			.filter((file) => file !== CONTRACT_SOURCE_PATH)
+			.filter((file) => {
+				const source = readFileSync(join(REPO_ROOT, file), "utf8");
+				return (
+					source.includes("ProviderRuntimeEvent") ||
+					source.includes("provider-runtime-event.js")
+				);
+			});
+
+		const forbiddenPersistenceImports = filesImportingContract.filter(
+			(file) =>
+				file.startsWith("src/lib/persistence/") ||
+				file.startsWith("src/lib/persistence/projectors/"),
+		);
+
+		expect(forbiddenPersistenceImports).toEqual([]);
+		expect(filesImportingContract).toEqual(
+			expect.arrayContaining([
+				"src/lib/provider/types.ts",
+				"src/lib/provider/event-sink.ts",
+				"src/lib/provider/relay-event-sink.ts",
+				"src/lib/provider/provider-runtime-event-to-domain.ts",
+				"src/lib/domain/relay/Services/provider-runtime-ingestion-service.ts",
+			]),
+		);
+	});
+
+	it("keeps provider adapters from constructing durable domain events directly", () => {
+		const files = [
+			...tsFiles(join(REPO_ROOT, "src/lib/provider")),
+			...tsFiles(join(REPO_ROOT, "src/lib/relay")),
+		];
+		const allowed = new Set([
+			"src/lib/provider/provider-runtime-event-to-domain.ts",
+		]);
+		const unexpected = files.flatMap((file) => {
+			if (allowed.has(file)) return [];
+			const source = readFileSync(join(REPO_ROOT, file), "utf8");
+			return source.includes("canonicalEvent(") ? [file] : [];
 		});
 
-		expect(event.raw?.payload).toEqual(payload);
+		expect(unexpected).toEqual([]);
 	});
 
-	it("stays import-pure and independent of runtime modules", () => {
-		const source = readFileSync(sourcePath, "utf8");
+	it("keeps OpenCode runtime ingress outside persistence and behind ProviderRuntimeIngestion", () => {
+		for (const file of [
+			"src/lib/persistence/dual-write-hook.ts",
+			"src/lib/persistence/effect/dual-write-hook-effect.ts",
+		]) {
+			expect(existsSync(join(REPO_ROOT, file))).toBe(false);
+		}
 
-		expect(source).not.toMatch(
-			/from ['"].*..\/.*(provider|persistence|relay|frontend)/,
+		const effectIngressPath =
+			"src/lib/domain/relay/Services/opencode-runtime-ingress-service.ts";
+		const effectIngress = readFileSync(
+			join(REPO_ROOT, effectIngressPath),
+			"utf8",
 		);
-		expect(source).not.toMatch(/@anthropic-ai\/claude-agent-sdk/);
-		expect(source).not.toMatch(/@opencode-ai\/sdk/);
-		expect(source).not.toMatch(
-			/createLogger|EventSink|CanonicalEvent|RelayMessage|sqlite|fetch\(/,
+
+		expect(effectIngress).toContain("OpenCodeRuntimeEventTranslator");
+		expect(effectIngress).toContain("ProviderRuntimeIngestionTag");
+		expect(effectIngress).toContain("ingestBatch");
+		expect(effectIngress).not.toContain(
+			"translateProviderRuntimeEventToDomain",
 		);
+		expect(effectIngress).not.toContain("EventStoreEffectTag");
+		expect(effectIngress).not.toContain("CanonicalEvent");
 	});
 
-	it("uses module-scope decoder construction for exported decode helpers", () => {
-		const source = readFileSync(sourcePath, "utf8");
+	it("does not keep a legacy sync OpenCode runtime ingress", () => {
+		const legacyIngress = join(
+			REPO_ROOT,
+			"src/lib/domain/relay/Services/opencode-runtime-ingress-legacy.ts",
+		);
 
-		expect(source).toMatch(
-			/const decodeProviderRuntimeEventEnvelope = Schema\.decodeUnknownSync\(\s*ProviderRuntimeEventSchema,\s*\)/,
+		expect(existsSync(legacyIngress)).toBe(false);
+	});
+
+	it("stays implementation-free", () => {
+		const source = readFileSync(CONTRACT_SOURCE, "utf8");
+		const imports = Array.from(
+			source.matchAll(/^import\s+.*\s+from\s+["']([^"']+)["'];$/gm),
+			(match) => match[1],
 		);
-		expect(source).toMatch(
-			/const decodeProviderRuntimeEventsEnvelope = Schema\.decodeUnknownSync\(\s*ProviderRuntimeEventsSchema,\s*\)/,
-		);
-		expect(source).toMatch(
-			/export function decodeProviderRuntimeEvent\(raw: unknown\): ProviderRuntimeEvent \{\s*return decodeProviderRuntimeEventEnvelope\(raw\);\s*\}/s,
+
+		expect(imports).toEqual(["effect"]);
+		expect(source).not.toMatch(
+			/Context\.Tag|Layer|Effect\.|CanonicalEvent|ProviderInstance|RelayMessage|EventSink|sqlite|fetch\(/,
 		);
 	});
 });

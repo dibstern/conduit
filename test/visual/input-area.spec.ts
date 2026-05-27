@@ -23,7 +23,7 @@ test.describe("InputArea", () => {
 		await navigateToStory(page, "input-inputarea--empty");
 		const textarea = page.locator("#input");
 		await expect(textarea).toBeVisible();
-		await expect(textarea).toHaveAttribute("placeholder", /Message OpenCode/);
+		await expect(textarea).toHaveAttribute("placeholder", /Ask anything/);
 	});
 
 	test("shows send button", async ({ page }) => {

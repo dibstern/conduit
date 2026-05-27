@@ -1,8 +1,8 @@
 {
-  "database": "dolt",
-  "backend": "dolt",
-  "dolt_mode": "server",
-  "dolt_database": "conduit",
-  "project_id": "df93acf2-2fbc-4761-bd50-cd5bfec099f0",
-  "global_dolt_database": "beads_global"
+	"database": "dolt",
+	"backend": "dolt",
+	"dolt_mode": "server",
+	"dolt_database": "conduit",
+	"project_id": "df93acf2-2fbc-4761-bd50-cd5bfec099f0",
+	"global_dolt_database": "beads_global"
 }

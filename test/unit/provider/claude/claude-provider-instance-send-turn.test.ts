@@ -14,12 +14,14 @@ import {
 	type MaterializedClaudeSubagent,
 } from "../../../../src/lib/provider/claude/claude-subagent-materializer.js";
 import type {
+	ClaudeSessionContext,
 	Query,
 	SDKMessage,
 	SDKPartialAssistantMessage,
 	SDKUserMessage,
 	SessionMessage,
 } from "../../../../src/lib/provider/claude/types.js";
+import { getClaudeRuntimeSessionForTest } from "../../../helpers/claude-runtime-state.js";
 import {
 	createMockEventSink,
 	createMockQuery,
@@ -997,6 +999,77 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 			expect((turnResult as Awaited<typeof turnPromise>).status).toBe(
 				"completed",
 			);
+		} finally {
+			releaseMaterializer?.();
+			await turnPromise.catch(() => undefined);
+			await Effect.runPromise(instance.shutdownEffect());
+		}
+	});
+
+	it("does not write delayed final subagent metadata after shutdown", async () => {
+		const result = makeSuccessResult({
+			session_id: "sdk-parent-shutdown-catchup",
+			uuid: "00000000-0000-0000-0000-000000000624" as `${string}-${string}-${string}-${string}-${string}`,
+		} as Record<string, unknown>);
+		const mockQuery = createMockQuery([result as unknown as SDKMessage]);
+		queryFactorySpy = vi.fn(() => mockQuery);
+		let releaseMaterializer: (() => void) | undefined;
+		let markMaterializerStarted: (() => void) | undefined;
+		const materializerStarted = new Promise<void>((resolve) => {
+			markMaterializerStarted = resolve;
+		});
+		const materializeSubagents = vi.fn(() =>
+			Effect.promise<readonly MaterializedClaudeSubagent[]>(
+				() =>
+					new Promise((resolve) => {
+						markMaterializerStarted?.();
+						releaseMaterializer = () =>
+							resolve([
+								{
+									sdkSubagentId: "task-shutdown-catchup",
+									childSessionId: "child-shutdown-catchup",
+									parentToolUseId: "task-tool-shutdown-catchup",
+								},
+							]);
+					}),
+			),
+		);
+		const instance = new ClaudeProviderInstance({
+			workspaceRoot: workspace,
+			queryFactory: queryFactorySpy,
+			materializeSubagents,
+		});
+		const sink = createMockEventSink();
+		const turnPromise = Effect.runPromise(
+			instance.sendTurnEffect(
+				makeBaseSendTurnInput({
+					sessionId: "parent-shutdown-catchup",
+					workspaceRoot: workspace,
+					eventSink: sink,
+				}),
+			),
+		);
+
+		try {
+			await materializerStarted;
+			await turnPromise;
+			const push = sink.push as ReturnType<typeof vi.fn>;
+			push.mockClear();
+
+			await Effect.runPromise(instance.shutdownEffect());
+			releaseMaterializer?.();
+			await delay(25);
+
+			expect(
+				push.mock.calls.some(([event]) => {
+					const canonical = event as CanonicalEvent;
+					const data = canonical.data as { partId?: string };
+					return (
+						canonical.type === "tool.running" &&
+						data.partId === "task-tool-shutdown-catchup"
+					);
+				}),
+			).toBe(false);
 		} finally {
 			releaseMaterializer?.();
 			await turnPromise.catch(() => undefined);
@@ -2375,6 +2448,47 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 		expect(errorEvents.length).toBeGreaterThanOrEqual(1);
 	});
 
+	it("resolves with error status when event sink writes fail during stream translation", async () => {
+		const streamMessage = {
+			type: "stream_event",
+			event: {
+				type: "message_start",
+				message: { id: "assistant-sink-failure" },
+			},
+			parent_tool_use_id: null,
+			uuid: "00000000-0000-0000-0000-000000000210",
+			session_id: "sdk-session-1",
+		} as unknown as SDKMessage;
+		const mockQuery = createMockQuery([streamMessage]);
+		queryFactorySpy = vi.fn(() => mockQuery);
+		const instance = new ClaudeProviderInstance({
+			workspaceRoot: workspace,
+			queryFactory: queryFactorySpy,
+		});
+
+		const sink = createMockEventSink();
+		(sink.push as ReturnType<typeof vi.fn>).mockImplementation(() =>
+			Effect.fail(new Error("sink write failed")),
+		);
+		const input = makeBaseSendTurnInput({
+			sessionId: "session-sink-write-failure",
+			eventSink: sink,
+		});
+
+		const result = await Effect.runPromise(
+			instance.sendTurnEffect(input).pipe(
+				Effect.timeoutFail({
+					duration: "500 millis",
+					onTimeout: () =>
+						new Error("sendTurnEffect did not settle after sink failure"),
+				}),
+			),
+		);
+
+		expect(result.status).toBe("error");
+		expect(result.error?.message).toContain("sink write failed");
+	});
+
 	it("fails malformed SDK stream data before translation", async () => {
 		const hugeProviderPayload = "x".repeat(20_000);
 		const malformedMessage = {
@@ -2428,9 +2542,9 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 		});
 		(
 			instance as unknown as {
-				buildUserMessage(input: unknown): SDKUserMessage;
+				runtime: { buildUserMessage(input: unknown): SDKUserMessage };
 			}
-		).buildUserMessage = () =>
+		).runtime.buildUserMessage = () =>
 			({
 				type: "user",
 				message: { role: "assistant", content: [] },
@@ -2886,11 +3000,8 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 			instance.interruptTurnEffect("session-interrupt-2nd"),
 		);
 
-		// After interrupt, the stream consumer ends without a result for the
-		// second turn. The finally block calls rejectTurnIfPending, which rejects
-		// the deferred with "SDK stream ended without result". This is the
-		// expected behavior — the turn is rejected, not resolved, because no
-		// result message was yielded.
+		// The interrupt path rejects the queued turn directly before the stream can
+		// finish without a result.
 		const turn2Result = await turn2Promise;
 		expect(turn2Result._tag).toBe("Left");
 		if (turn2Result._tag === "Left") {
@@ -2899,9 +3010,7 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 				providerId: "claude",
 				operation: "sendTurn",
 			});
-			expect(turn2Result.left.message).toContain(
-				"SDK stream ended without result",
-			);
+			expect(turn2Result.left.message).toContain("Turn interrupted");
 		}
 	});
 
@@ -3227,14 +3336,12 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 		expect(r1.status).toBe("completed");
 
 		// Manually mark the session as stopped (simulating interruptTurn, etc.)
-		const ctx = (
-			instance as unknown as {
-				sessions: Map<
-					string,
-					{ stopped: boolean; resumeSessionId: string | undefined }
-				>;
+		const ctx = getClaudeRuntimeSessionForTest<
+			ClaudeSessionContext & {
+				stopped: boolean;
+				resumeSessionId: string | undefined;
 			}
-		).sessions.get("session-evict");
+		>(instance, "session-evict");
 		expect(ctx).toBeDefined();
 		(ctx as { resumeSessionId: string }).resumeSessionId =
 			"sdk-resume-after-stop";
@@ -3314,11 +3421,9 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 		expect(result.status).toBe("error");
 
 		// Verify the resume cursor was cleared on the session context
-		const ctx = (
-			instance as unknown as {
-				sessions: Map<string, { resumeSessionId: string | undefined }>;
-			}
-		).sessions.get("session-stale-resume");
+		const ctx = getClaudeRuntimeSessionForTest<
+			ClaudeSessionContext & { resumeSessionId: string | undefined }
+		>(instance, "session-stale-resume");
 		expect(ctx).toBeDefined();
 		expect(ctx?.resumeSessionId).toBeUndefined();
 	});
@@ -3374,11 +3479,9 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 
 		expect(result.status).toBe("error");
 
-		const ctx = (
-			instance as unknown as {
-				sessions: Map<string, { resumeSessionId: string | undefined }>;
-			}
-		).sessions.get("session-not-found-resume");
+		const ctx = getClaudeRuntimeSessionForTest<
+			ClaudeSessionContext & { resumeSessionId: string | undefined }
+		>(instance, "session-not-found-resume");
 		expect(ctx).toBeDefined();
 		expect(ctx?.resumeSessionId).toBeUndefined();
 	});
@@ -3435,11 +3538,9 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 		expect(result.status).toBe("error");
 
 		// The resume cursor should still be set — this error is not a stale session
-		const ctx = (
-			instance as unknown as {
-				sessions: Map<string, { resumeSessionId: string | undefined }>;
-			}
-		).sessions.get("session-unrelated-err");
+		const ctx = getClaudeRuntimeSessionForTest<
+			ClaudeSessionContext & { resumeSessionId: string | undefined }
+		>(instance, "session-unrelated-err");
 		expect(ctx).toBeDefined();
 		expect(ctx?.resumeSessionId).toBe("valid-sdk-session-123");
 	});
@@ -3496,11 +3597,9 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 		expect(result.status).toBe("error");
 
 		// ctx.resumeSessionId was never set, so it should still be undefined
-		const ctx = (
-			instance as unknown as {
-				sessions: Map<string, { resumeSessionId: string | undefined }>;
-			}
-		).sessions.get("session-no-cursor");
+		const ctx = getClaudeRuntimeSessionForTest<
+			ClaudeSessionContext & { resumeSessionId: string | undefined }
+		>(instance, "session-no-cursor");
 		expect(ctx).toBeDefined();
 		expect(ctx?.resumeSessionId).toBeUndefined();
 	});

@@ -735,6 +735,40 @@ describe("OrchestrationEngine", () => {
 			expect(throwingEngine.getProviderForSession("s-crash")).toBeUndefined();
 		});
 
+		it("sendTurnEffect synchronous throw does NOT leave stale early binding", async () => {
+			const throwingInstance = makeStubInstance("sync-thrower");
+			throwingInstance.sendTurnEffect.mockImplementation(() => {
+				throw new Error("Provider instance sync crash");
+			});
+
+			const throwingRegistry = new ProviderRegistry();
+			throwingRegistry.registerInstance(throwingInstance);
+			const throwingEngine = new OrchestrationEngine({
+				registry: throwingRegistry,
+			});
+
+			await expect(
+				dispatch(throwingEngine, {
+					type: "send_turn",
+					providerId: "sync-thrower",
+					input: {
+						sessionId: "s-sync-crash",
+						turnId: "t1",
+						prompt: "hello",
+						history: [],
+						providerState: {},
+						workspaceRoot: "/tmp",
+						eventSink: makeStubEventSink(),
+						abortSignal: new AbortController().signal,
+					},
+				}),
+			).rejects.toThrow("Provider instance sync crash");
+
+			expect(
+				throwingEngine.getProviderForSession("s-sync-crash"),
+			).toBeUndefined();
+		});
+
 		it("sendTurn returning error TurnResult still binds session (session exists at provider)", async () => {
 			// When sendTurn resolves with an error TurnResult (not throws),
 			// the session IS bound — the provider has the session, it just errored.

@@ -1,10 +1,13 @@
 // test/unit/provider/claude/claude-event-translator.test.ts
 
 import type { SDKTaskStartedMessage } from "@anthropic-ai/claude-agent-sdk";
-import { Effect } from "effect";
+import { Effect, Schema } from "effect";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import {
+	type ProviderRuntimeEvent,
+	ProviderRuntimeEventSchema,
+} from "../../../../src/lib/contracts/providers/provider-runtime-event.js";
 import { historyToChatMessages } from "../../../../src/lib/frontend/utils/history-logic.js";
-import type { CanonicalEvent } from "../../../../src/lib/persistence/events.js";
 import {
 	createAllProjectors,
 	ProjectionRunner,
@@ -26,15 +29,17 @@ import { createTestHarness } from "../../../helpers/persistence-factories.js";
 // ─── Test Helpers ─────────────────────────────────────────────────────────
 
 /** Extract event data as a plain object for assertion access. */
-function dataOf(event: CanonicalEvent | undefined): Record<string, unknown> {
+function dataOf(
+	event: ProviderRuntimeEvent | undefined,
+): Record<string, unknown> {
 	return event?.data as unknown as Record<string, unknown>;
 }
 
-function makeStubSink(): EventSink & { events: CanonicalEvent[] } {
-	const events: CanonicalEvent[] = [];
+function makeStubSink(): EventSink & { events: ProviderRuntimeEvent[] } {
+	const events: ProviderRuntimeEvent[] = [];
 	return {
 		events,
-		push: vi.fn((event: CanonicalEvent) =>
+		push: vi.fn((event: ProviderRuntimeEvent) =>
 			Effect.sync(() => {
 				events.push(event);
 			}),
@@ -71,7 +76,6 @@ function makeCtx(
 		pendingQuestions: new Map(),
 		inFlightTools: new Map(),
 		eventSink: undefined,
-		streamConsumer: undefined,
 		currentTurnId: "turn-1",
 		currentModel: "claude-sonnet-4",
 		resumeSessionId: undefined,
@@ -94,6 +98,66 @@ function makeStreamEvent(event: Record<string, unknown>): SDKMessage {
 	} as unknown as SDKMessage;
 }
 
+function runTranslate(
+	translator: ClaudeEventTranslator,
+	...args: Parameters<ClaudeEventTranslator["translate"]>
+): Promise<void> {
+	return Effect.runPromise(translator.translate(...args));
+}
+
+function runTranslateError(
+	translator: ClaudeEventTranslator,
+	...args: Parameters<ClaudeEventTranslator["translateError"]>
+): Promise<void> {
+	return Effect.runPromise(translator.translateError(...args));
+}
+
+function plannedRuntimeEventsForClaudeSdkFixture(
+	ctx: ClaudeSessionContext,
+	message: SDKMessage,
+): ReadonlyArray<unknown> {
+	if (message.type !== "result") return [];
+	if (message.subtype !== "success" || message.is_error) return [];
+	const messageId =
+		message.uuid ?? ctx.lastAssistantUuid ?? ctx.currentTurnId ?? ctx.sessionId;
+	return [
+		{
+			eventId: "runtime-event-1",
+			type: "turn.completed",
+			providerId: "claude",
+			sessionId: ctx.sessionId,
+			...(ctx.currentTurnId ? { turnId: ctx.currentTurnId } : {}),
+			providerRefs: {
+				...(message.session_id
+					? { providerSessionId: message.session_id }
+					: {}),
+				...(message.uuid ? { providerMessageId: message.uuid } : {}),
+			},
+			rawSource: {
+				kind: "claude.sdk.message",
+				providerMessageType: message.type,
+				sdkVariant: "agent-sdk",
+			},
+			createdAt: Date.now(),
+			data: {
+				messageId,
+				cost: message.total_cost_usd,
+				tokens: {
+					input: message.usage.input_tokens,
+					output: message.usage.output_tokens,
+					...(message.usage.cache_read_input_tokens > 0
+						? { cacheRead: message.usage.cache_read_input_tokens }
+						: {}),
+					...(message.usage.cache_creation_input_tokens > 0
+						? { cacheWrite: message.usage.cache_creation_input_tokens }
+						: {}),
+				},
+				duration: message.duration_ms,
+			},
+		},
+	];
+}
+
 // ─── Tests ────────────────────────────────────────────────────────────────
 
 describe("ClaudeEventTranslator", () => {
@@ -106,14 +170,13 @@ describe("ClaudeEventTranslator", () => {
 		ctx = makeCtx();
 		translator = new ClaudeEventTranslator({
 			getSink: () => sink,
-			runEffect: Effect.runPromise,
 		});
 	});
 
 	// ─── 1. system (subtype init) ────────────────────────────────────────
 
 	it("translates system/init to session.status and captures model", async () => {
-		await translator.translate(ctx, {
+		await runTranslate(translator, ctx, {
 			type: "system",
 			subtype: "init",
 			apiKeySource: "api_key",
@@ -147,7 +210,7 @@ describe("ClaudeEventTranslator", () => {
 	// ─── 2. system (subtype status) ──────────────────────────────────────
 
 	it("translates system/status to session.status", async () => {
-		await translator.translate(ctx, {
+		await runTranslate(translator, ctx, {
 			type: "system",
 			subtype: "status",
 			status: "compacting",
@@ -165,7 +228,7 @@ describe("ClaudeEventTranslator", () => {
 	// ─── 3. system (subtype task_progress) ───────────────────────────────
 
 	it("does not translate system/task_progress to main turn completion", async () => {
-		await translator.translate(ctx, {
+		await runTranslate(translator, ctx, {
 			type: "system",
 			subtype: "task_progress",
 			task_id: "task-1",
@@ -213,7 +276,7 @@ describe("ClaudeEventTranslator", () => {
 			session_id: "sdk-sess",
 		};
 
-		await translator.translate(ctx, taskStarted);
+		await runTranslate(translator, ctx, taskStarted);
 
 		const running = sink.events.find((e) => e.type === "tool.running");
 		expect(running).toBeDefined();
@@ -230,14 +293,16 @@ describe("ClaudeEventTranslator", () => {
 	});
 
 	it("starts each live Agent tool before task_started metadata updates it", async () => {
-		await translator.translate(
+		await runTranslate(
+			translator,
 			ctx,
 			makeStreamEvent({
 				type: "message_start",
 				message: { id: "assistant-live-agents" },
 			}),
 		);
-		await translator.translate(
+		await runTranslate(
+			translator,
 			ctx,
 			makeStreamEvent({
 				type: "content_block_start",
@@ -250,7 +315,8 @@ describe("ClaudeEventTranslator", () => {
 				},
 			}),
 		);
-		await translator.translate(
+		await runTranslate(
+			translator,
 			ctx,
 			makeStreamEvent({
 				type: "content_block_start",
@@ -264,7 +330,7 @@ describe("ClaudeEventTranslator", () => {
 			}),
 		);
 
-		await translator.translate(ctx, {
+		await runTranslate(translator, ctx, {
 			type: "system",
 			subtype: "task_started",
 			task_id: "sdk-agent-1",
@@ -275,7 +341,7 @@ describe("ClaudeEventTranslator", () => {
 			uuid: "00000000-0000-0000-0000-000000000201",
 			session_id: "sdk-sess",
 		} as unknown as SDKMessage);
-		await translator.translate(ctx, {
+		await runTranslate(translator, ctx, {
 			type: "system",
 			subtype: "task_started",
 			task_id: "sdk-agent-2",
@@ -336,7 +402,7 @@ describe("ClaudeEventTranslator", () => {
 			session_id: "sdk-sess",
 		} satisfies SDKTaskProgressMessage & { subagent_type: string };
 
-		await translator.translate(ctx, taskProgress);
+		await runTranslate(translator, ctx, taskProgress);
 
 		const running = sink.events.find((e) => e.type === "tool.running");
 		expect(running).toBeDefined();
@@ -349,14 +415,16 @@ describe("ClaudeEventTranslator", () => {
 	});
 
 	it("completes the live Agent tool when Claude reports task completion", async () => {
-		await translator.translate(
+		await runTranslate(
+			translator,
 			ctx,
 			makeStreamEvent({
 				type: "message_start",
 				message: { id: "assistant-completes-agent" },
 			}),
 		);
-		await translator.translate(
+		await runTranslate(
+			translator,
 			ctx,
 			makeStreamEvent({
 				type: "content_block_start",
@@ -369,7 +437,7 @@ describe("ClaudeEventTranslator", () => {
 				},
 			}),
 		);
-		await translator.translate(ctx, {
+		await runTranslate(translator, ctx, {
 			type: "system",
 			subtype: "task_started",
 			task_id: "sdk-agent-complete",
@@ -381,7 +449,7 @@ describe("ClaudeEventTranslator", () => {
 			session_id: "sdk-sess",
 		} as unknown as SDKMessage);
 
-		await translator.translate(ctx, {
+		await runTranslate(translator, ctx, {
 			type: "system",
 			subtype: "task_notification",
 			task_id: "sdk-agent-complete",
@@ -424,7 +492,6 @@ describe("ClaudeEventTranslator", () => {
 			});
 			const relayTranslator = new ClaudeEventTranslator({
 				getSink: () => relaySink,
-				runEffect: Effect.runPromise,
 			});
 			const relayCtx = makeCtx({
 				sessionId: "sess-contract",
@@ -525,11 +592,11 @@ describe("ClaudeEventTranslator", () => {
 				subagent_type: string;
 			};
 
-			await relayTranslator.translate(relayCtx, messageStart);
-			await relayTranslator.translate(relayCtx, taskToolUse);
-			await relayTranslator.translate(relayCtx, taskToolStop);
-			await relayTranslator.translate(relayCtx, taskStarted);
-			await relayTranslator.translate(relayCtx, taskProgress);
+			await runTranslate(relayTranslator, relayCtx, messageStart);
+			await runTranslate(relayTranslator, relayCtx, taskToolUse);
+			await runTranslate(relayTranslator, relayCtx, taskToolStop);
+			await runTranslate(relayTranslator, relayCtx, taskStarted);
+			await runTranslate(relayTranslator, relayCtx, taskProgress);
 
 			const rows = new ReadQueryService(harness.db).getSessionMessagesWithParts(
 				"sess-contract",
@@ -584,14 +651,13 @@ describe("ClaudeEventTranslator", () => {
 			});
 			const relayTranslator = new ClaudeEventTranslator({
 				getSink: () => relaySink,
-				runEffect: Effect.runPromise,
 			});
 			const relayCtx = makeCtx({
 				sessionId: "sess-thinking-snapshot",
 				eventSink: relaySink,
 			});
 
-			await relayTranslator.translate(relayCtx, {
+			await runTranslate(relayTranslator, relayCtx, {
 				type: "assistant",
 				message: {
 					id: "msg-thinking-snapshot",
@@ -641,7 +707,7 @@ describe("ClaudeEventTranslator", () => {
 	// ─── 3b. system (subtype api_retry) ──────────────────────────────────
 
 	it("translates system/api_retry to session.status:retry with detail metadata", async () => {
-		await translator.translate(ctx, {
+		await runTranslate(translator, ctx, {
 			type: "system",
 			subtype: "api_retry",
 			attempt: 3,
@@ -669,7 +735,8 @@ describe("ClaudeEventTranslator", () => {
 	// ─── 3c. stream_event (message_start) emits session.status: busy ─────
 
 	it("emits session.status busy after message.created on message_start", async () => {
-		await translator.translate(
+		await runTranslate(
+			translator,
 			ctx,
 			makeStreamEvent({
 				type: "message_start",
@@ -700,7 +767,8 @@ describe("ClaudeEventTranslator", () => {
 	});
 
 	it("does not emit session.status busy if message_start has no message id", async () => {
-		await translator.translate(
+		await runTranslate(
+			translator,
 			ctx,
 			makeStreamEvent({
 				type: "message_start",
@@ -714,7 +782,8 @@ describe("ClaudeEventTranslator", () => {
 	// ─── 4. stream_event (content_block_start: text) ─────────────────────
 
 	it("registers text block in inFlightTools without emitting tool.started", async () => {
-		await translator.translate(
+		await runTranslate(
+			translator,
 			ctx,
 			makeStreamEvent({
 				type: "content_block_start",
@@ -733,7 +802,8 @@ describe("ClaudeEventTranslator", () => {
 	// ─── 5. stream_event (content_block_start: thinking) ─────────────────
 
 	it("translates content_block_start thinking to thinking.start", async () => {
-		await translator.translate(
+		await runTranslate(
+			translator,
 			ctx,
 			makeStreamEvent({
 				type: "content_block_start",
@@ -758,7 +828,16 @@ describe("ClaudeEventTranslator", () => {
 	// ─── 6. stream_event (content_block_start: tool_use) ─────────────────
 
 	it("translates content_block_start tool_use to tool.started at block stop", async () => {
-		await translator.translate(
+		await runTranslate(
+			translator,
+			ctx,
+			makeStreamEvent({
+				type: "message_start",
+				message: { id: "assistant-message-1" },
+			}),
+		);
+		await runTranslate(
+			translator,
 			ctx,
 			makeStreamEvent({
 				type: "content_block_start",
@@ -777,7 +856,8 @@ describe("ClaudeEventTranslator", () => {
 		expect(ctx.inFlightTools.get(1)?.toolName).toBe("Bash");
 
 		// Emit content_block_stop to flush the buffered tool.started
-		await translator.translate(
+		await runTranslate(
+			translator,
 			ctx,
 			makeStreamEvent({ type: "content_block_stop", index: 1 }),
 		);
@@ -790,11 +870,69 @@ describe("ClaudeEventTranslator", () => {
 		expect(data["input"]).toEqual({ tool: "Bash", command: "ls" });
 	});
 
+	it("decodes a Claude SDK result fixture to ProviderRuntimeEvent before canonical translation", () => {
+		const sdkResult = {
+			type: "result",
+			subtype: "success",
+			is_error: false,
+			duration_ms: 1234,
+			duration_api_ms: 1000,
+			num_turns: 1,
+			result: "done",
+			session_id: "sdk-session-1",
+			total_cost_usd: 0.12,
+			usage: {
+				input_tokens: 10,
+				output_tokens: 20,
+				cache_creation_input_tokens: 0,
+				cache_read_input_tokens: 5,
+			},
+			uuid: "assistant-result-1",
+		} as unknown as SDKMessage;
+
+		const runtimeEvents = plannedRuntimeEventsForClaudeSdkFixture(
+			ctx,
+			sdkResult,
+		);
+		const decodeRuntimeEvent = Schema.decodeUnknownSync(
+			ProviderRuntimeEventSchema,
+		);
+		const [decoded] = runtimeEvents.map((event) => decodeRuntimeEvent(event));
+
+		expect(decoded).toMatchObject({
+			type: "turn.completed",
+			providerId: "claude",
+			sessionId: "sess-1",
+			turnId: "turn-1",
+			providerRefs: {
+				providerSessionId: "sdk-session-1",
+				providerMessageId: "assistant-result-1",
+			},
+			rawSource: {
+				kind: "claude.sdk.message",
+				providerMessageType: "result",
+				sdkVariant: "agent-sdk",
+			},
+			data: {
+				messageId: "assistant-result-1",
+				cost: 0.12,
+				tokens: {
+					input: 10,
+					output: 20,
+					cacheRead: 5,
+				},
+				duration: 1234,
+			},
+		});
+		expect(JSON.stringify(decoded)).not.toContain("session_id");
+	});
+
 	// ─── 7. stream_event (content_block_delta: text_delta) ───────────────
 
 	it("translates text_delta to text.delta", async () => {
 		// Seed a text block so the translator has an in-flight tool
-		await translator.translate(
+		await runTranslate(
+			translator,
 			ctx,
 			makeStreamEvent({
 				type: "content_block_start",
@@ -803,7 +941,8 @@ describe("ClaudeEventTranslator", () => {
 			}),
 		);
 
-		await translator.translate(
+		await runTranslate(
+			translator,
 			ctx,
 			makeStreamEvent({
 				type: "content_block_delta",
@@ -824,7 +963,8 @@ describe("ClaudeEventTranslator", () => {
 
 	it("translates thinking_delta to thinking.delta", async () => {
 		// Seed a thinking block
-		await translator.translate(
+		await runTranslate(
+			translator,
 			ctx,
 			makeStreamEvent({
 				type: "content_block_start",
@@ -833,7 +973,8 @@ describe("ClaudeEventTranslator", () => {
 			}),
 		);
 
-		await translator.translate(
+		await runTranslate(
+			translator,
 			ctx,
 			makeStreamEvent({
 				type: "content_block_delta",
@@ -854,7 +995,8 @@ describe("ClaudeEventTranslator", () => {
 
 	it("buffers input_json_delta — no tool.running or tool.input_updated until block stop", async () => {
 		// Seed a tool_use block
-		await translator.translate(
+		await runTranslate(
+			translator,
 			ctx,
 			makeStreamEvent({
 				type: "content_block_start",
@@ -869,7 +1011,8 @@ describe("ClaudeEventTranslator", () => {
 		);
 
 		// Send a complete JSON delta — should buffer, not emit
-		await translator.translate(
+		await runTranslate(
+			translator,
 			ctx,
 			makeStreamEvent({
 				type: "content_block_delta",
@@ -890,7 +1033,8 @@ describe("ClaudeEventTranslator", () => {
 		).toHaveLength(0);
 
 		// Stop the block — should emit tool.started with buffered input
-		await translator.translate(
+		await runTranslate(
+			translator,
 			ctx,
 			makeStreamEvent({ type: "content_block_stop", index: 0 }),
 		);
@@ -905,7 +1049,8 @@ describe("ClaudeEventTranslator", () => {
 
 	it("translates content_block_stop to tool.completed for text blocks", async () => {
 		// Start a text block
-		await translator.translate(
+		await runTranslate(
+			translator,
 			ctx,
 			makeStreamEvent({
 				type: "content_block_start",
@@ -917,7 +1062,8 @@ describe("ClaudeEventTranslator", () => {
 		expect(ctx.inFlightTools.has(0)).toBe(true);
 
 		// Stop the block
-		await translator.translate(
+		await runTranslate(
+			translator,
 			ctx,
 			makeStreamEvent({
 				type: "content_block_stop",
@@ -932,7 +1078,8 @@ describe("ClaudeEventTranslator", () => {
 
 	it("translates content_block_stop to thinking.end for thinking blocks", async () => {
 		// Establish assistant messageId via message_start (like real streaming)
-		await translator.translate(
+		await runTranslate(
+			translator,
 			ctx,
 			makeStreamEvent({
 				type: "message_start",
@@ -941,7 +1088,8 @@ describe("ClaudeEventTranslator", () => {
 		);
 
 		// Start a thinking block
-		await translator.translate(
+		await runTranslate(
+			translator,
 			ctx,
 			makeStreamEvent({
 				type: "content_block_start",
@@ -959,7 +1107,8 @@ describe("ClaudeEventTranslator", () => {
 		expect(ctx.inFlightTools.has(0)).toBe(true);
 
 		// Stop the block
-		await translator.translate(
+		await runTranslate(
+			translator,
 			ctx,
 			makeStreamEvent({
 				type: "content_block_stop",
@@ -986,7 +1135,8 @@ describe("ClaudeEventTranslator", () => {
 
 	it("does NOT complete tool_use blocks on content_block_stop", async () => {
 		// Start a tool_use block
-		await translator.translate(
+		await runTranslate(
+			translator,
 			ctx,
 			makeStreamEvent({
 				type: "content_block_start",
@@ -1001,7 +1151,8 @@ describe("ClaudeEventTranslator", () => {
 		);
 
 		// Stop event should NOT complete tool_use (it waits for tool_result)
-		await translator.translate(
+		await runTranslate(
+			translator,
 			ctx,
 			makeStreamEvent({
 				type: "content_block_stop",
@@ -1018,7 +1169,7 @@ describe("ClaudeEventTranslator", () => {
 	// ─── 11. assistant ───────────────────────────────────────────────────
 
 	it("translates assistant message and captures uuid on context", async () => {
-		await translator.translate(ctx, {
+		await runTranslate(translator, ctx, {
 			type: "assistant",
 			message: {
 				id: "msg-1",
@@ -1057,7 +1208,7 @@ describe("ClaudeEventTranslator", () => {
 			partialInputJson: "",
 		});
 
-		await translator.translate(ctx, {
+		await runTranslate(translator, ctx, {
 			type: "user",
 			message: {
 				role: "user",
@@ -1098,7 +1249,7 @@ describe("ClaudeEventTranslator", () => {
 			partialInputJson: "",
 		});
 
-		await translator.translate(ctx, {
+		await runTranslate(translator, ctx, {
 			type: "user",
 			message: {
 				role: "user",
@@ -1142,7 +1293,7 @@ describe("ClaudeEventTranslator", () => {
 			partialInputJson: "",
 		});
 
-		await translator.translate(ctx, {
+		await runTranslate(translator, ctx, {
 			type: "user",
 			message: {
 				role: "user",
@@ -1172,7 +1323,7 @@ describe("ClaudeEventTranslator", () => {
 		// Set assistant uuid so messageId is populated
 		ctx.lastAssistantUuid = "assist-uuid-1";
 
-		await translator.translate(ctx, {
+		await runTranslate(translator, ctx, {
 			type: "result",
 			subtype: "success",
 			duration_ms: 1200,
@@ -1218,7 +1369,7 @@ describe("ClaudeEventTranslator", () => {
 		// No assistant uuid set — simulates the non-streaming path.
 		expect(ctx.lastAssistantUuid).toBeUndefined();
 
-		await translator.translate(ctx, {
+		await runTranslate(translator, ctx, {
 			type: "result",
 			subtype: "success",
 			duration_ms: 5,
@@ -1256,7 +1407,7 @@ describe("ClaudeEventTranslator", () => {
 		// Simulate a streamed response: assistant uuid is set before result.
 		ctx.lastAssistantUuid = "streamed-uuid-1";
 
-		await translator.translate(ctx, {
+		await runTranslate(translator, ctx, {
 			type: "result",
 			subtype: "success",
 			duration_ms: 1500,
@@ -1288,7 +1439,7 @@ describe("ClaudeEventTranslator", () => {
 	it("translates result/error to turn.error", async () => {
 		ctx.lastAssistantUuid = "assist-uuid-2";
 
-		await translator.translate(ctx, {
+		await runTranslate(translator, ctx, {
 			type: "result",
 			subtype: "error_during_execution",
 			duration_ms: 500,
@@ -1318,7 +1469,7 @@ describe("ClaudeEventTranslator", () => {
 	});
 
 	it("translates result/error_max_turns to turn.error", async () => {
-		await translator.translate(ctx, {
+		await runTranslate(translator, ctx, {
 			type: "result",
 			subtype: "error_max_turns",
 			duration_ms: 5000,
@@ -1351,7 +1502,7 @@ describe("ClaudeEventTranslator", () => {
 	it("translates result with interrupt error to turn.interrupted", async () => {
 		ctx.lastAssistantUuid = "assist-uuid-3";
 
-		await translator.translate(ctx, {
+		await runTranslate(translator, ctx, {
 			type: "result",
 			subtype: "error_during_execution",
 			duration_ms: 500,
@@ -1380,7 +1531,7 @@ describe("ClaudeEventTranslator", () => {
 	});
 
 	it("translates result with 'interrupted' keyword to turn.interrupted", async () => {
-		await translator.translate(ctx, {
+		await runTranslate(translator, ctx, {
 			type: "result",
 			subtype: "error_during_execution",
 			duration_ms: 500,
@@ -1413,7 +1564,7 @@ describe("ClaudeEventTranslator", () => {
 		// but some unknown types like 'status' at the top level should also be ignored.
 		// The real SDKStatusMessage routes through system/status handler, which is tested above.
 		// This tests a raw `type: 'status'` message (not part of the union but defensive).
-		await translator.translate(ctx, {
+		await runTranslate(translator, ctx, {
 			type: "status",
 			status: "idle",
 			session_id: "sdk-sess",
@@ -1423,7 +1574,7 @@ describe("ClaudeEventTranslator", () => {
 	});
 
 	it("silently ignores rate_limit_event messages", async () => {
-		await translator.translate(ctx, {
+		await runTranslate(translator, ctx, {
 			type: "rate_limit_event",
 			rate_limit_info: {
 				status: "allowed",
@@ -1436,7 +1587,7 @@ describe("ClaudeEventTranslator", () => {
 	});
 
 	it("silently ignores prompt_suggestion messages", async () => {
-		await translator.translate(ctx, {
+		await runTranslate(translator, ctx, {
 			type: "prompt_suggestion",
 			suggestion: "Try asking about...",
 			uuid: "00000000-0000-0000-0000-000000000021",
@@ -1447,7 +1598,7 @@ describe("ClaudeEventTranslator", () => {
 	});
 
 	it("silently ignores auth_status messages", async () => {
-		await translator.translate(ctx, {
+		await runTranslate(translator, ctx, {
 			type: "auth_status",
 			isAuthenticating: false,
 			output: [],
@@ -1459,7 +1610,7 @@ describe("ClaudeEventTranslator", () => {
 	});
 
 	it("maps tool_progress messages to child task metadata", async () => {
-		await translator.translate(ctx, {
+		await runTranslate(translator, ctx, {
 			type: "tool_progress",
 			tool_use_id: "tool-1",
 			tool_name: "Bash",
@@ -1484,7 +1635,7 @@ describe("ClaudeEventTranslator", () => {
 	});
 
 	it("silently ignores system/task_notification messages", async () => {
-		await translator.translate(ctx, {
+		await runTranslate(translator, ctx, {
 			type: "system",
 			subtype: "task_notification",
 			task_id: "task-1",
@@ -1500,7 +1651,7 @@ describe("ClaudeEventTranslator", () => {
 	});
 
 	it("ignores system/task_started messages without a tool_use_id", async () => {
-		await translator.translate(ctx, {
+		await runTranslate(translator, ctx, {
 			type: "system",
 			subtype: "task_started",
 			task_id: "task-2",
@@ -1517,7 +1668,7 @@ describe("ClaudeEventTranslator", () => {
 	it("captures session_id on context from any message with session_id", async () => {
 		expect(ctx.resumeSessionId).toBeUndefined();
 
-		await translator.translate(ctx, {
+		await runTranslate(translator, ctx, {
 			type: "assistant",
 			message: {
 				id: "msg-2",
@@ -1538,7 +1689,7 @@ describe("ClaudeEventTranslator", () => {
 	});
 
 	it("pushes turn.error via translateError for unhandled exceptions", async () => {
-		await translator.translateError(ctx, new Error("SDK blew up"));
+		await runTranslateError(translator, ctx, new Error("SDK blew up"));
 
 		const err = sink.events.find((e) => e.type === "turn.error");
 		expect(err).toBeDefined();
@@ -1548,12 +1699,48 @@ describe("ClaudeEventTranslator", () => {
 	});
 
 	it("translateError handles non-Error values", async () => {
-		await translator.translateError(ctx, "string error");
+		await runTranslateError(translator, ctx, "string error");
 
 		const err = sink.events.find((e) => e.type === "turn.error");
 		expect(err).toBeDefined();
 		const data = dataOf(err);
 		expect(data["error"]).toBe("string error");
+	});
+
+	it("restores buffered write state when translation work fails", async () => {
+		let sessionIdReads = 0;
+		const failingCtx = {
+			...ctx,
+			get sessionId() {
+				sessionIdReads += 1;
+				if (sessionIdReads === 3) {
+					throw new Error("session id unavailable");
+				}
+				return "sess-1";
+			},
+		} as ClaudeSessionContext;
+
+		await expect(
+			runTranslate(
+				translator,
+				failingCtx,
+				makeStreamEvent({
+					type: "message_start",
+					message: { id: "assistant-buffer-restore" },
+				}),
+			),
+		).rejects.toThrow("session id unavailable");
+
+		expect(
+			(
+				translator as unknown as {
+					bufferedWrites?: Effect.Effect<void, unknown>[];
+				}
+			).bufferedWrites,
+		).toBeUndefined();
+
+		await runTranslateError(translator, ctx, new Error("after failure"));
+		expect(sink.events.map((event) => event.type)).toEqual(["turn.error"]);
 	});
 
 	it("resetInFlightState clears counters and message id", () => {
@@ -1563,7 +1750,8 @@ describe("ClaudeEventTranslator", () => {
 	});
 
 	it("handles server_tool_use block type", async () => {
-		await translator.translate(
+		await runTranslate(
+			translator,
 			ctx,
 			makeStreamEvent({
 				type: "content_block_start",
@@ -1576,7 +1764,8 @@ describe("ClaudeEventTranslator", () => {
 				},
 			}),
 		);
-		await translator.translate(
+		await runTranslate(
+			translator,
 			ctx,
 			makeStreamEvent({ type: "content_block_stop", index: 0 }),
 		);
@@ -1588,7 +1777,8 @@ describe("ClaudeEventTranslator", () => {
 	});
 
 	it("handles mcp_tool_use block type", async () => {
-		await translator.translate(
+		await runTranslate(
+			translator,
 			ctx,
 			makeStreamEvent({
 				type: "content_block_start",
@@ -1601,7 +1791,8 @@ describe("ClaudeEventTranslator", () => {
 				},
 			}),
 		);
-		await translator.translate(
+		await runTranslate(
+			translator,
 			ctx,
 			makeStreamEvent({ type: "content_block_stop", index: 0 }),
 		);
@@ -1616,7 +1807,8 @@ describe("ClaudeEventTranslator", () => {
 
 	it("text.delta with empty string is skipped", async () => {
 		// Seed a text block so the translator has an in-flight tool
-		await translator.translate(
+		await runTranslate(
+			translator,
 			ctx,
 			makeStreamEvent({
 				type: "content_block_start",
@@ -1628,7 +1820,8 @@ describe("ClaudeEventTranslator", () => {
 		const countBefore = sink.events.length;
 
 		// Send an empty text_delta
-		await translator.translate(
+		await runTranslate(
+			translator,
 			ctx,
 			makeStreamEvent({
 				type: "content_block_delta",
@@ -1646,7 +1839,8 @@ describe("ClaudeEventTranslator", () => {
 
 	it("input_json_delta with duplicate fingerprint is deduplicated (buffered input not overwritten)", async () => {
 		// Seed a tool_use block
-		await translator.translate(
+		await runTranslate(
+			translator,
 			ctx,
 			makeStreamEvent({
 				type: "content_block_start",
@@ -1661,7 +1855,8 @@ describe("ClaudeEventTranslator", () => {
 		);
 
 		// Send the first JSON delta
-		await translator.translate(
+		await runTranslate(
+			translator,
 			ctx,
 			makeStreamEvent({
 				type: "content_block_delta",
@@ -1685,7 +1880,8 @@ describe("ClaudeEventTranslator", () => {
 		// Reset partial input so a fresh identical JSON chunk triggers re-parse
 		if (tool) tool.partialInputJson = "";
 
-		await translator.translate(
+		await runTranslate(
+			translator,
 			ctx,
 			makeStreamEvent({
 				type: "content_block_delta",
@@ -1704,7 +1900,7 @@ describe("ClaudeEventTranslator", () => {
 	it("result with cache_creation_input_tokens includes cacheWrite", async () => {
 		ctx.lastAssistantUuid = "assist-uuid-cache";
 
-		await translator.translate(ctx, {
+		await runTranslate(translator, ctx, {
 			type: "result",
 			subtype: "success",
 			duration_ms: 800,
@@ -1735,9 +1931,9 @@ describe("ClaudeEventTranslator", () => {
 		expect(tokens["cacheWrite"]).toBe(500);
 	});
 
-	it("all emitted events have provider set to 'claude'", async () => {
+	it("all emitted events have providerId set to 'claude'", async () => {
 		// Trigger several event types
-		await translator.translate(ctx, {
+		await runTranslate(translator, ctx, {
 			type: "system",
 			subtype: "init",
 			apiKeySource: "api_key",
@@ -1755,7 +1951,8 @@ describe("ClaudeEventTranslator", () => {
 			session_id: "sdk-sess",
 		} as unknown as SDKMessage);
 
-		await translator.translate(
+		await runTranslate(
+			translator,
 			ctx,
 			makeStreamEvent({
 				type: "content_block_start",
@@ -1765,7 +1962,7 @@ describe("ClaudeEventTranslator", () => {
 		);
 
 		for (const event of sink.events) {
-			expect(event.provider).toBe("claude");
+			expect(event.providerId).toBe("claude");
 		}
 	});
 });

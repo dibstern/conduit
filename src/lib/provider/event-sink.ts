@@ -1,15 +1,19 @@
 // src/lib/provider/event-sink.ts
 // ─── Event Sink Implementation ──────────────────────────────────────────────
-// Wraps EventStore + ProjectionRunner so provider instances can push canonical events
-// without knowing about SQLite internals. Permission and question requests
-// block the provider instance's turn loop until the user resolves them.
+// Wraps EventStore + ProjectionRunner so provider instances can push runtime
+// events without knowing about SQLite internals. Permission and question
+// requests block the provider instance's turn loop until the user resolves them.
 
 import { Deferred, Effect } from "effect";
+import type { ProviderRuntimeEvent } from "../contracts/providers/provider-runtime-event.js";
 import { createLogger } from "../logger.js";
 import type { EventStore } from "../persistence/event-store.js";
-import type { CanonicalEvent } from "../persistence/events.js";
-import { canonicalEvent } from "../persistence/events.js";
 import type { ProjectionRunner } from "../persistence/projection-runner.js";
+import {
+	emptyProviderRuntimeDomainMapperState,
+	type ProviderRuntimeDomainMapperState,
+	translateProviderRuntimeEventToDomain,
+} from "./provider-runtime-event-to-domain.js";
 
 const log = createLogger("event-sink");
 
@@ -46,6 +50,8 @@ export class EventSinkImpl implements EventSink {
 
 	private readonly sessionId: string;
 	private readonly provider: string;
+	private mapperState: ProviderRuntimeDomainMapperState =
+		emptyProviderRuntimeDomainMapperState;
 
 	constructor(deps: EventSinkDeps) {
 		this.eventStore = deps.eventStore;
@@ -59,11 +65,20 @@ export class EventSinkImpl implements EventSink {
 		}
 	}
 
-	/** Append an event to the store and project it eagerly. */
-	push(event: CanonicalEvent): Effect.Effect<void, unknown> {
+	/** Ingest a runtime event, append mapped domain events, and project eagerly. */
+	push(event: ProviderRuntimeEvent): Effect.Effect<void, unknown> {
 		return Effect.sync(() => {
-			const stored = this.eventStore.append(event);
-			this.projectionRunner.projectEvent(stored);
+			const result = translateProviderRuntimeEventToDomain(
+				event,
+				this.mapperState,
+			);
+			const storedEvents = this.eventStore.appendBatch(result.events);
+			this.mapperState = result.state;
+			if (storedEvents.length === 1 && storedEvents[0]) {
+				this.projectionRunner.projectEvent(storedEvents[0]);
+			} else if (storedEvents.length > 1) {
+				this.projectionRunner.projectBatch(storedEvents);
+			}
 		});
 	}
 
@@ -75,18 +90,9 @@ export class EventSinkImpl implements EventSink {
 			const deferred = yield* Deferred.make<PermissionResponse, Error>();
 			this.pendingPermissions.set(request.requestId, deferred);
 
-			const event = canonicalEvent(
-				"permission.asked",
-				this.sessionId,
-				{
-					id: request.requestId,
-					sessionId: this.sessionId,
-					toolName: request.toolName,
-					input: request.toolInput,
-				},
-				{ provider: this.provider },
+			yield* this.push(
+				permissionAskedRuntimeEvent(this.provider, this.sessionId, request),
 			);
-			yield* this.push(event);
 
 			return yield* Deferred.await(deferred).pipe(
 				Effect.ensuring(
@@ -106,17 +112,9 @@ export class EventSinkImpl implements EventSink {
 			const deferred = yield* Deferred.make<Record<string, unknown>, Error>();
 			this.pendingQuestions.set(request.requestId, deferred);
 
-			const event = canonicalEvent(
-				"question.asked",
-				this.sessionId,
-				{
-					id: request.requestId,
-					sessionId: this.sessionId,
-					questions: request.questions,
-				},
-				{ provider: this.provider },
+			yield* this.push(
+				questionAskedRuntimeEvent(this.provider, this.sessionId, request),
 			);
-			yield* this.push(event);
 
 			return yield* Deferred.await(deferred).pipe(
 				Effect.ensuring(
@@ -137,19 +135,15 @@ export class EventSinkImpl implements EventSink {
 		response: PermissionResponse,
 	): Effect.Effect<void, unknown> {
 		return Effect.gen(this, function* () {
-			// Emit the permission.resolved event
-			const event = canonicalEvent(
-				"permission.resolved",
-				this.sessionId,
-				{
-					id: requestId,
-					decision: response.decision,
-				},
-				{ provider: this.provider },
+			yield* this.push(
+				permissionResolvedRuntimeEvent(
+					this.provider,
+					this.sessionId,
+					requestId,
+					response,
+				),
 			);
-			yield* this.push(event);
 
-			// Unblock the waiting provider instance
 			const deferred = this.pendingPermissions.get(requestId);
 			if (deferred) {
 				this.pendingPermissions.delete(requestId);
@@ -171,19 +165,15 @@ export class EventSinkImpl implements EventSink {
 		answers: Record<string, unknown>,
 	): Effect.Effect<void, unknown> {
 		return Effect.gen(this, function* () {
-			// Emit the question.resolved event
-			const event = canonicalEvent(
-				"question.resolved",
-				this.sessionId,
-				{
-					id: requestId,
+			yield* this.push(
+				questionResolvedRuntimeEvent(
+					this.provider,
+					this.sessionId,
+					requestId,
 					answers,
-				},
-				{ provider: this.provider },
+				),
 			);
-			yield* this.push(event);
 
-			// Unblock the waiting provider instance
 			const deferred = this.pendingQuestions.get(requestId);
 			if (deferred) {
 				this.pendingQuestions.delete(requestId);
@@ -215,4 +205,94 @@ export class EventSinkImpl implements EventSink {
 	get pendingCount(): number {
 		return this.pendingPermissions.size + this.pendingQuestions.size;
 	}
+}
+
+function permissionAskedRuntimeEvent(
+	providerId: string,
+	sessionId: string,
+	request: PermissionRequest,
+): ProviderRuntimeEvent {
+	return {
+		eventId: `${request.requestId}:permission.asked`,
+		type: "permission.asked",
+		providerId,
+		sessionId,
+		turnId: request.turnId,
+		providerRefs: {
+			providerRequestId: request.requestId,
+			providerToolUseId: request.providerItemId,
+		},
+		rawSource: { kind: "conduit.event-sink.permission" },
+		createdAt: Date.now(),
+		data: {
+			id: request.requestId,
+			toolName: request.toolName,
+			input: request.toolInput,
+		},
+	};
+}
+
+function permissionResolvedRuntimeEvent(
+	providerId: string,
+	sessionId: string,
+	requestId: string,
+	response: PermissionResponse,
+): ProviderRuntimeEvent {
+	return {
+		eventId: `${requestId}:permission.resolved`,
+		type: "permission.resolved",
+		providerId,
+		sessionId,
+		providerRefs: { providerRequestId: requestId },
+		rawSource: { kind: "conduit.event-sink.permission" },
+		createdAt: Date.now(),
+		data: {
+			id: requestId,
+			decision: response.decision,
+		},
+	};
+}
+
+function questionAskedRuntimeEvent(
+	providerId: string,
+	sessionId: string,
+	request: QuestionRequest,
+): ProviderRuntimeEvent {
+	return {
+		eventId: `${request.requestId}:question.asked`,
+		type: "question.asked",
+		providerId,
+		sessionId,
+		providerRefs: {
+			providerRequestId: request.requestId,
+			...(request.toolUseId ? { providerToolUseId: request.toolUseId } : {}),
+		},
+		rawSource: { kind: "conduit.event-sink.question" },
+		createdAt: Date.now(),
+		data: {
+			id: request.requestId,
+			questions: request.questions,
+		},
+	};
+}
+
+function questionResolvedRuntimeEvent(
+	providerId: string,
+	sessionId: string,
+	requestId: string,
+	answers: Record<string, unknown>,
+): ProviderRuntimeEvent {
+	return {
+		eventId: `${requestId}:question.resolved`,
+		type: "question.resolved",
+		providerId,
+		sessionId,
+		providerRefs: { providerRequestId: requestId },
+		rawSource: { kind: "conduit.event-sink.question" },
+		createdAt: Date.now(),
+		data: {
+			id: requestId,
+			answers,
+		},
+	};
 }

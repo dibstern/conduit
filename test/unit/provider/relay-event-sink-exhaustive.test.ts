@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vitest";
 import { CANONICAL_EVENT_TYPES } from "../../../src/lib/persistence/events.js";
 
-describe("relay-event-sink translateCanonicalEvent exhaustiveness", () => {
+describe("domain-event relay translation exhaustiveness", () => {
 	// These are the event types handled in the switch statement.
-	// Keep this list in sync with translateCanonicalEvent().
+	// Keep this list in sync with translateDomainEventToRelay().
 	const HANDLED_TYPES = new Set([
 		"text.delta",
 		"thinking.start",

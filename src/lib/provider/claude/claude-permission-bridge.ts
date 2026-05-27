@@ -1,62 +1,28 @@
 // src/lib/provider/claude/claude-permission-bridge.ts
 /**
- * ClaudePermissionBridge converts the Claude Agent SDK's pull-based
- * permission model (a canUseTool callback that blocks) into conduit's
- * push-based permission model (EventSink.requestPermission()).
+ * SDK adapter for Claude's Promise-shaped `canUseTool` callback.
  *
- * Flow:
- *   1. SDK calls canUseTool(toolName, input, { signal, toolUseID })
- *   2. Bridge creates a PendingApproval and stores it on ctx
- *   3. Bridge runs eventSink.requestPermission() -- this emits permission.asked
- *      and waits until the UI delivers the decision via resolvePermission()
- *   4. Bridge awaits either the sink promise or the abort signal
- *   5. Bridge returns the SDK PermissionResult
- *
- * The bridge exposes `resolvePermission()` so the provider instance can route the
- * UI's decision back to the bridge. Internally this just completes the
- * pending entry -- the actual SDK callback is unblocked by the EventSink's
- * requestPermission() Effect resolution.
+ * Permission/question core logic lives in ClaudePermissionService. This file is
+ * intentionally the only Promise boundary: the Claude SDK requires a Promise
+ * callback and AbortSignal-aware unblocking.
  */
-import { randomUUID } from "node:crypto";
 import { Effect } from "effect";
-import type {
-	EventSink,
-	PermissionDecision,
-	PermissionResponse,
-	QuestionRequest,
-} from "../types.js";
+import type { EventSink, PermissionDecision } from "../types.js";
+import {
+	ClaudePermissionService,
+	type ClaudePermissionServiceDeps,
+} from "./claude-permission-service.js";
 import type {
 	CanUseTool,
 	ClaudeSessionContext,
-	PendingApproval,
 	PermissionResult,
-	PermissionUpdate,
 } from "./types.js";
 
 type CanUseToolOptions = Parameters<CanUseTool>[2];
 
 export interface ClaudePermissionBridgeDeps {
 	readonly sink?: EventSink;
-}
-
-// AbortSignal-aware promise wrapper. When the abort signal fires,
-// the promise rejects cleanly so the SDK's canUseTool callback unblocks.
-function withAbort<T>(promise: Promise<T>, signal: AbortSignal): Promise<T> {
-	if (signal.aborted) return Promise.reject(new Error("Aborted"));
-	return new Promise((resolve, reject) => {
-		const onAbort = () => reject(new Error("Aborted"));
-		signal.addEventListener("abort", onAbort, { once: true });
-		promise.then(
-			(v) => {
-				signal.removeEventListener("abort", onAbort);
-				resolve(v);
-			},
-			(e) => {
-				signal.removeEventListener("abort", onAbort);
-				reject(e as Error);
-			},
-		);
-	});
+	readonly service?: ClaudePermissionService;
 }
 
 function runPermissionRequestAtSdkBoundary<T>(
@@ -65,263 +31,49 @@ function runPermissionRequestAtSdkBoundary<T>(
 	return Effect.runPromise(effect);
 }
 
-function toSdkPermissionUpdates(
-	updates: PermissionResponse["permissionUpdates"],
-): PermissionUpdate[] | undefined {
-	if (updates == null || updates.length === 0) return undefined;
-	return updates.map((update): PermissionUpdate => {
-		switch (update.type) {
-			case "addRules":
-			case "replaceRules":
-			case "removeRules":
-				return {
-					...update,
-					rules: update.rules.map((rule) => ({
-						toolName: rule.toolName,
-						...(rule.ruleContent != null
-							? { ruleContent: rule.ruleContent }
-							: {}),
-					})),
-				};
-			case "addDirectories":
-			case "removeDirectories":
-				return {
-					...update,
-					directories: [...update.directories],
-				};
-			case "setMode":
-				return { ...update };
-		}
-		return update;
-	});
-}
-
-function toQuestionRequestQuestions(
-	toolInput: Record<string, unknown>,
-): QuestionRequest["questions"] {
-	const rawQuestions = Array.isArray(toolInput["questions"])
-		? toolInput["questions"]
-		: [];
-	return rawQuestions.map((raw) => {
-		const question = isRecord(raw) ? raw : {};
-		const rawOptions = Array.isArray(question["options"])
-			? question["options"]
-			: [];
-		return {
-			question: stringField(question["question"]),
-			header: stringField(question["header"]),
-			options: rawOptions.map((rawOption) => {
-				const option = isRecord(rawOption) ? rawOption : {};
-				return {
-					label: stringField(option["label"]),
-					description: stringField(option["description"]),
-				};
-			}),
-			multiSelect:
-				question["multiSelect"] === true || question["multiple"] === true,
-			custom: question["custom"] !== false,
-		};
-	});
-}
-
-function toClaudeQuestionAnswers(
-	questions: QuestionRequest["questions"],
-	answers: Record<string, unknown>,
-): Record<string, string> {
-	const byQuestionText: Record<string, string> = {};
-	for (let i = 0; i < questions.length; i++) {
-		const question = questions[i];
-		if (!question) continue;
-		const answer = answers[String(i)] ?? answers[question.question];
-		if (typeof answer === "string" && answer.trim()) {
-			byQuestionText[question.question] = answer;
-		}
-	}
-	return byQuestionText;
-}
-
-function stringField(value: unknown): string {
-	return typeof value === "string" ? value : "";
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-	return value != null && typeof value === "object" && !Array.isArray(value);
-}
-
 export class ClaudePermissionBridge {
-	constructor(private readonly deps: ClaudePermissionBridgeDeps = {}) {}
+	private readonly service: ClaudePermissionService;
 
-	/**
-	 * Factory method that returns the exact SDK CanUseTool signature.
-	 * Called once per session to produce the callback passed to query() options.
-	 * The returned function captures ctx so the SDK doesn't need to know about
-	 * ClaudeSessionContext.
-	 */
+	constructor(deps: ClaudePermissionBridgeDeps = {}) {
+		const serviceDeps: ClaudePermissionServiceDeps = {
+			...(deps.sink ? { sink: deps.sink } : {}),
+		};
+		this.service = deps.service ?? new ClaudePermissionService(serviceDeps);
+	}
+
 	createCanUseTool(ctx: ClaudeSessionContext): CanUseTool {
 		return async (
 			toolName: string,
 			toolInput: Record<string, unknown>,
 			options: CanUseToolOptions,
 		): Promise<PermissionResult> => {
-			return this._handlePermission(ctx, toolName, toolInput, options);
+			return this.canUseTool(ctx, toolName, toolInput, options);
 		};
 	}
 
-	/**
-	 * Internal permission handler -- shared by createCanUseTool and legacy canUseTool.
-	 */
-	private async _handlePermission(
-		ctx: ClaudeSessionContext,
-		toolName: string,
-		toolInput: Record<string, unknown>,
-		options: CanUseToolOptions,
-	): Promise<PermissionResult> {
-		if (toolName === "AskUserQuestion") {
-			const sink = ctx.eventSink ?? this.deps.sink;
-			if (!sink) {
-				return {
-					behavior: "deny",
-					message: "Question sink unavailable.",
-				};
-			}
-			const questions = toQuestionRequestQuestions(toolInput ?? {});
-			try {
-				const answers = await runPermissionRequestAtSdkBoundary(
-					sink.requestQuestion({
-						requestId: options.toolUseID,
-						toolUseId: options.toolUseID,
-						questions,
-					}),
-				);
-				return {
-					behavior: "allow",
-					updatedInput: {
-						...(toolInput ?? {}),
-						answers: toClaudeQuestionAnswers(questions, answers),
-					},
-				};
-			} catch {
-				return {
-					behavior: "deny",
-					message: "Turn interrupted",
-				};
-			}
-		}
-
-		const requestId = randomUUID();
-		const createdAt = new Date().toISOString();
-		const sink = ctx.eventSink ?? this.deps.sink;
-		if (!sink) {
-			return {
-				behavior: "deny",
-				message: "Permission sink unavailable.",
-			};
-		}
-
-		// Track the pending approval on the session context for interrupt
-		// cleanup. The resolver completes the same EventSink.requestPermission()
-		// wait that the SDK callback is awaiting.
-		const pending: PendingApproval = {
-			requestId,
-			toolName,
-			toolInput: toolInput ?? {},
-			createdAt,
-			resolve: (decision) => sink.resolvePermission(requestId, { decision }),
-			reject: () => sink.resolvePermission(requestId, { decision: "reject" }),
-		};
-		ctx.pendingApprovals.set(requestId, pending);
-
-		try {
-			// Fire permission.asked at the SDK callback boundary.
-			const sinkPromise = runPermissionRequestAtSdkBoundary(
-				sink.requestPermission({
-					requestId,
-					sessionId: ctx.sessionId,
-					turnId: ctx.currentTurnId ?? "",
-					toolName,
-					toolInput: toolInput ?? {},
-					providerItemId: options.toolUseID,
-					...(options.suggestions != null
-						? { permissionSuggestions: options.suggestions }
-						: {}),
-					...(options.title != null ? { permissionTitle: options.title } : {}),
-					...(options.displayName != null
-						? { permissionDisplayName: options.displayName }
-						: {}),
-					...(options.description != null
-						? { permissionDescription: options.description }
-						: {}),
-				}),
-			);
-
-			// Race: sink resolution vs abort signal.
-			let decision: PermissionDecision;
-			let permissionUpdates: PermissionResponse["permissionUpdates"];
-			try {
-				const response = await withAbort(sinkPromise, options.signal);
-				// EventSink.requestPermission returns PermissionResponse { decision }.
-				// Guard against unexpected response shapes defensively.
-				if (
-					response &&
-					typeof response === "object" &&
-					"decision" in response
-				) {
-					decision = (response as { decision: PermissionDecision }).decision;
-					permissionUpdates = response.permissionUpdates;
-				} else {
-					decision = "reject";
-				}
-			} catch {
-				// Abort fired — return deny to unblock the SDK cleanly.
-				return {
-					behavior: "deny",
-					message: "Turn interrupted",
-				};
-			}
-
-			if (decision === "once" || decision === "always") {
-				const updatedPermissions = toSdkPermissionUpdates(permissionUpdates);
-				return {
-					behavior: "allow",
-					updatedInput: toolInput ?? {},
-					...(updatedPermissions != null ? { updatedPermissions } : {}),
-				};
-			}
-			return {
-				behavior: "deny",
-				message: "User declined tool execution.",
-			};
-		} finally {
-			// Single cleanup point — covers both success and abort paths.
-			ctx.pendingApprovals.delete(requestId);
-		}
-	}
-
-	/**
-	 * Legacy convenience method -- delegates to _handlePermission.
-	 * Prefer createCanUseTool() for SDK wiring.
-	 */
 	async canUseTool(
 		ctx: ClaudeSessionContext,
 		toolName: string,
 		toolInput: Record<string, unknown>,
 		options: CanUseToolOptions,
 	): Promise<PermissionResult> {
-		return this._handlePermission(ctx, toolName, toolInput, options);
+		try {
+			return await runPermissionRequestAtSdkBoundary(
+				this.service.handlePermissionEffect(ctx, toolName, toolInput, options),
+			);
+		} catch {
+			return {
+				behavior: "deny",
+				message: "Turn interrupted",
+			};
+		}
 	}
 
-	/**
-	 * Called by the provider instance's resolvePermission() to deliver a UI decision
-	 * into the pending canUseTool callback. This resolves the PendingApproval's
-	 * deferred, but the primary resolution path is through the EventSink.
-	 */
 	resolvePermission(
 		ctx: ClaudeSessionContext,
 		requestId: string,
 		decision: PermissionDecision,
 	): Effect.Effect<void, unknown> {
-		const pending = ctx.pendingApprovals.get(requestId);
-		if (!pending) return Effect.void;
-		return pending.resolve(decision);
+		return this.service.resolvePermission(ctx, requestId, decision);
 	}
 }

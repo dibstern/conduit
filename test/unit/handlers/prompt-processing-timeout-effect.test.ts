@@ -3,6 +3,7 @@ import { Effect, Layer } from "effect";
 import { expect, vi } from "vitest";
 import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
 import { PendingInteractionServiceLive } from "../../../src/lib/domain/relay/Services/pending-interaction-service.js";
+import { ProviderTurnServiceLive } from "../../../src/lib/domain/relay/Services/provider-turn-service.js";
 import {
 	ConfigTag,
 	LoggerTag,
@@ -80,7 +81,7 @@ describe("prompt processing timeouts through Effect state", () => {
 			const client = {
 				session: { abort: vi.fn(async () => undefined) },
 			} as unknown as OpenCodeAPI;
-			const layer = Layer.mergeAll(
+			const baseLayer = Layer.mergeAll(
 				Layer.succeed(OpenCodeAPITag, client),
 				Layer.succeed(WebSocketHandlerTag, ws),
 				Layer.succeed(LoggerTag, createSilentLogger()),
@@ -92,6 +93,7 @@ describe("prompt processing timeouts through Effect state", () => {
 				PendingInteractionServiceLive,
 				makeOverridesStateLive(),
 			);
+			const layer = Layer.provideMerge(ProviderTurnServiceLive, baseLayer);
 
 			return Effect.gen(function* () {
 				yield* startProcessingTimeout(

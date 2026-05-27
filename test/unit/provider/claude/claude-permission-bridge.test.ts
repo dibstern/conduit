@@ -103,7 +103,6 @@ function makeCtx(): ClaudeSessionContext {
 		pendingQuestions: new Map(),
 		inFlightTools: new Map(),
 		eventSink: undefined,
-		streamConsumer: undefined,
 		currentTurnId: "turn-1",
 		currentModel: undefined,
 		resumeSessionId: undefined,

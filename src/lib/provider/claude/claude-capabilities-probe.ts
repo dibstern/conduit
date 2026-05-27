@@ -10,7 +10,6 @@ import type {
 	ProviderAgentInfo,
 } from "../types.js";
 import { makeClaudeSdkEnv } from "./claude-sdk-env.js";
-import { TTLCache } from "./ttl-cache.js";
 
 const OUTPUT_LIMIT_BY_FAMILY: ReadonlyArray<[pattern: RegExp, output: number]> =
 	[
@@ -168,6 +167,8 @@ async function* singleMessage(): AsyncIterable<SDKUserMessage> {
 export async function probeClaudeCapabilities(
 	deps: ProbeDeps,
 ): Promise<ProbeResult> {
+	if (probeOverride) return probeOverride(deps.workspaceRoot);
+
 	const queryFactory = deps.queryFactory ?? sdkQuery;
 	const abortController = new AbortController();
 
@@ -214,39 +215,17 @@ export async function probeClaudeCapabilities(
 	}
 }
 
-const CAPABILITY_CACHE_TTL_MS = 5 * 60 * 1000;
-
 let probeOverride:
 	| ((workspaceRoot: string) => Promise<ProbeResult>)
 	| undefined;
-let caches = new Map<string, TTLCache<ProbeResult>>();
-
-function makeCache(workspaceRoot: string): TTLCache<ProbeResult> {
-	return new TTLCache<ProbeResult>(CAPABILITY_CACHE_TTL_MS, () =>
-		probeOverride
-			? probeOverride(workspaceRoot)
-			: probeClaudeCapabilities({ workspaceRoot }),
-	);
-}
-
-export async function getCachedClaudeCapabilities(
-	workspaceRoot: string,
-): Promise<ProbeResult> {
-	let cache = caches.get(workspaceRoot);
-	if (!cache) {
-		cache = makeCache(workspaceRoot);
-		caches.set(workspaceRoot, cache);
-	}
-	return cache.get();
-}
 
 export function resetCapabilityCacheForTesting(): void {
-	caches = new Map<string, TTLCache<ProbeResult>>();
+	// Capability caching now lives in ClaudeCapabilitiesService. This helper
+	// remains for tests that reset probe overrides between cases.
 }
 
 export function __setProbeOverrideForTesting(
 	fn: ((workspaceRoot: string) => Promise<ProbeResult>) | undefined,
 ): void {
 	probeOverride = fn;
-	caches = new Map<string, TTLCache<ProbeResult>>();
 }

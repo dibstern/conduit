@@ -1,6 +1,6 @@
 import { Effect } from "effect";
 import { describe, expect, it, vi } from "vitest";
-import type { CanonicalEvent } from "../../../../src/lib/persistence/events.js";
+import type { ProviderRuntimeEvent } from "../../../../src/lib/contracts/providers/provider-runtime-event.js";
 import { ClaudeEventTranslator } from "../../../../src/lib/provider/claude/claude-event-translator.js";
 import type { ClaudeSessionContext } from "../../../../src/lib/provider/claude/types.js";
 
@@ -27,7 +27,6 @@ function makeCtx(
 		pendingQuestions: new Map(),
 		inFlightTools: new Map(),
 		eventSink: undefined,
-		streamConsumer: undefined,
 		currentTurnId: "turn-1",
 		currentModel: "claude-sonnet-4",
 		resumeSessionId: undefined,
@@ -38,12 +37,26 @@ function makeCtx(
 	};
 }
 
+function runTranslate(
+	translator: ClaudeEventTranslator,
+	...args: Parameters<ClaudeEventTranslator["translate"]>
+): Promise<void> {
+	return Effect.runPromise(translator.translate(...args));
+}
+
+function dataOf(
+	event: ProviderRuntimeEvent | undefined,
+): Record<string, unknown> {
+	expect(event).toBeDefined();
+	return event?.data as Record<string, unknown>;
+}
+
 describe("ClaudeEventTranslator — normalized tool input", () => {
 	it("tool.started event carries CanonicalToolInput with camelCase fields", async () => {
-		const events: CanonicalEvent[] = [];
+		const events: ProviderRuntimeEvent[] = [];
 		const translator = new ClaudeEventTranslator({
 			getSink: () => ({
-				push: (e: CanonicalEvent) =>
+				push: (e: ProviderRuntimeEvent) =>
 					Effect.sync(() => {
 						events.push(e);
 					}),
@@ -54,13 +67,12 @@ describe("ClaudeEventTranslator — normalized tool input", () => {
 				resolvePermission: vi.fn(() => Effect.void),
 				resolveQuestion: vi.fn(() => Effect.void),
 			}),
-			runEffect: Effect.runPromise,
 		});
 
 		const ctx = makeCtx();
 
 		// Simulate content_block_start with a Read tool_use block
-		await translator.translate(ctx, {
+		await runTranslate(translator, ctx, {
 			type: "stream_event",
 			session_id: "ses-1",
 			event: {
@@ -76,7 +88,7 @@ describe("ClaudeEventTranslator — normalized tool input", () => {
 		} as never);
 
 		// Flush buffered tool.started via content_block_stop
-		await translator.translate(ctx, {
+		await runTranslate(translator, ctx, {
 			type: "stream_event",
 			session_id: "ses-1",
 			event: { type: "content_block_stop", index: 0 },
@@ -84,8 +96,10 @@ describe("ClaudeEventTranslator — normalized tool input", () => {
 
 		const toolStarted = events.find((e) => e.type === "tool.started");
 		expect(toolStarted).toBeDefined();
-		// biome-ignore lint/style/noNonNullAssertion: test assertion — toolStarted checked above
-		expect(toolStarted!.data.input).toEqual({
+		expect(toolStarted?.providerRefs).toEqual({
+			providerToolUseId: "toolu_123",
+		});
+		expect(dataOf(toolStarted)["input"]).toEqual({
 			tool: "Read",
 			filePath: "/src/main.ts",
 			offset: 10,

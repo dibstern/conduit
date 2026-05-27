@@ -1,8 +1,8 @@
 import { Effect } from "effect";
 import { beforeEach, describe, expect, it } from "vitest";
 import type { RelayMessage } from "../../../src/lib/frontend/types.js";
-import { canonicalEvent } from "../../../src/lib/persistence/events.js";
 import { createRelayEventSink } from "../../../src/lib/provider/relay-event-sink.js";
+import { providerRuntimeEvent } from "../../helpers/provider-runtime-event.js";
 
 /**
  * These tests specify the EXPECTED behavior for Claude session rejoin.
@@ -78,7 +78,7 @@ describe("Claude session rejoin — event flow contracts", () => {
 		// Push a text delta
 		await Effect.runPromise(
 			sink.push(
-				canonicalEvent("text.delta", SESSION_ID, {
+				providerRuntimeEvent("text.delta", SESSION_ID, {
 					messageId: "msg-1",
 					partId: "p1",
 					text: "Hello",
@@ -101,7 +101,7 @@ describe("Claude session rejoin — event flow contracts", () => {
 
 		await Effect.runPromise(
 			sink.push(
-				canonicalEvent("text.delta", SESSION_ID, {
+				providerRuntimeEvent("text.delta", SESSION_ID, {
 					messageId: "msg-1",
 					partId: "p1",
 					text: "Hello while away",
@@ -124,7 +124,7 @@ describe("Claude session rejoin — event flow contracts", () => {
 		wsHandler.setClientSession(CLIENT_ID, SESSION_ID);
 		await Effect.runPromise(
 			sink.push(
-				canonicalEvent("text.delta", SESSION_ID, {
+				providerRuntimeEvent("text.delta", SESSION_ID, {
 					messageId: "msg-1",
 					partId: "p1",
 					text: "Before navigate",
@@ -138,7 +138,7 @@ describe("Claude session rejoin — event flow contracts", () => {
 		// Phase 3: events continue server-side
 		await Effect.runPromise(
 			sink.push(
-				canonicalEvent("text.delta", SESSION_ID, {
+				providerRuntimeEvent("text.delta", SESSION_ID, {
 					messageId: "msg-1",
 					partId: "p1",
 					text: " while away",
@@ -152,7 +152,7 @@ describe("Claude session rejoin — event flow contracts", () => {
 		// Phase 5: new events should still flow
 		await Effect.runPromise(
 			sink.push(
-				canonicalEvent("text.delta", SESSION_ID, {
+				providerRuntimeEvent("text.delta", SESSION_ID, {
 					messageId: "msg-1",
 					partId: "p1",
 					text: " after return",
@@ -176,7 +176,7 @@ describe("Claude session rejoin — event flow contracts", () => {
 		wsHandler.setClientSession(CLIENT_ID, SESSION_ID);
 		await Effect.runPromise(
 			sink.push(
-				canonicalEvent("thinking.start", SESSION_ID, {
+				providerRuntimeEvent("thinking.start", SESSION_ID, {
 					messageId: "msg-1",
 					partId: "part-think-1",
 				}),
@@ -188,7 +188,7 @@ describe("Claude session rejoin — event flow contracts", () => {
 		wsHandler.setClientSession(CLIENT_ID, "other-session");
 		await Effect.runPromise(
 			sink.push(
-				canonicalEvent("thinking.delta", SESSION_ID, {
+				providerRuntimeEvent("thinking.delta", SESSION_ID, {
 					messageId: "msg-1",
 					partId: "part-think-1",
 					text: "reasoning while user is away...",
@@ -199,7 +199,7 @@ describe("Claude session rejoin — event flow contracts", () => {
 		// thinking.end arrives, client still away
 		await Effect.runPromise(
 			sink.push(
-				canonicalEvent("thinking.end", SESSION_ID, {
+				providerRuntimeEvent("thinking.end", SESSION_ID, {
 					messageId: "msg-1",
 					partId: "part-think-1",
 				}),
@@ -234,7 +234,7 @@ describe("Claude session rejoin — event flow contracts", () => {
 		wsHandler.setClientSession(CLIENT_ID, SESSION_ID);
 		await Effect.runPromise(
 			sink.push(
-				canonicalEvent("text.delta", SESSION_ID, {
+				providerRuntimeEvent("text.delta", SESSION_ID, {
 					messageId: "msg-1",
 					partId: "p1",
 					text: "streaming...",
@@ -245,7 +245,7 @@ describe("Claude session rejoin — event flow contracts", () => {
 		// Simulate turn completing with error (as PROCESSING_TIMEOUT would trigger)
 		await Effect.runPromise(
 			sink.push(
-				canonicalEvent("turn.error", SESSION_ID, {
+				providerRuntimeEvent("turn.error", SESSION_ID, {
 					messageId: "msg-1",
 					error: "Processing timeout",
 					code: "PROCESSING_TIMEOUT",

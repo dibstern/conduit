@@ -5,6 +5,7 @@
 
 import { Cause, Effect, Runtime } from "effect";
 import { mapQuestionFields } from "../bridges/question-bridge.js";
+import type { OpenCodeRuntimeIngressResult } from "../domain/relay/Services/opencode-runtime-ingress-service.js";
 import type {
 	PendingPermissionRecoveryInput,
 	PendingPermissionRequestInput,
@@ -14,10 +15,6 @@ import { SessionManagerServiceTag } from "../domain/relay/Services/session-manag
 import type { OverridesStateTag } from "../domain/relay/Services/session-overrides-state.js";
 import type { Logger } from "../logger.js";
 import { notificationContent } from "../notification-content.js";
-import type {
-	DualWriteHookPort,
-	DualWriteResult,
-} from "../persistence/dual-write-hook.js";
 import type { PushNotificationSender } from "../server/push.js";
 import type { PermissionId } from "../shared-types.js";
 import { tagWithSessionId } from "../shared-types.js";
@@ -136,8 +133,6 @@ export interface SSEWiringDeps {
 	slug?: string;
 	/** Optional: record that a "done" was delivered via SSE (for dedup with status-poller) */
 	onDoneProcessed?: (sessionId: string) => void;
-	/** Optional: dual-write hook for SQLite event store persistence */
-	dualWriteHook?: DualWriteHookPort;
 }
 
 export type EffectSSEWiringDeps = Omit<
@@ -148,7 +143,6 @@ export type EffectSSEWiringDeps = Omit<
 	| "getSessionParentMap"
 	| "getSessionStatuses"
 	| "statusPoller"
-	| "dualWriteHook"
 > & {
 	/** Optional: current session statuses for processing flags. */
 	getSessionStatuses?: () => Effect.Effect<
@@ -159,12 +153,12 @@ export type EffectSSEWiringDeps = Omit<
 		notifySSEIdle(sessionId: string): Effect.Effect<void>;
 		reconcileNow?(): Effect.Effect<void>;
 	};
-	/** Effect-native dual-write hook owned by the relay runtime. */
-	dualWriteHook?: {
+	/** Effect-native OpenCode runtime ingress owned by the relay runtime. */
+	opencodeRuntimeIngress?: {
 		onSSEEventEffect(
 			event: SSEEvent,
 			sessionId: string | undefined,
-		): Effect.Effect<DualWriteResult>;
+		): Effect.Effect<OpenCodeRuntimeIngressResult>;
 		onReconnect(): void;
 	};
 };
@@ -240,11 +234,6 @@ function recordSSEEventStart(
 ): void {
 	deps.log.verbose(`event=${event.type} session=${eventSessionId ?? "?"}`);
 
-	// ── Write to SQLite event store ─────────────────────────────────────
-	if (deps.dualWriteHook) {
-		deps.dualWriteHook.onSSEEvent(event, eventSessionId);
-	}
-
 	// ── Track message activity for session ordering ──────────────────────
 	// Record the timestamp of any message-related event so sessions are
 	// ordered by actual conversation activity, not metadata updates.
@@ -262,8 +251,11 @@ const recordSSEEventStartEffect = (
 		yield* Effect.sync(() =>
 			deps.log.verbose(`event=${event.type} session=${eventSessionId ?? "?"}`),
 		);
-		if (deps.dualWriteHook) {
-			yield* deps.dualWriteHook.onSSEEventEffect(event, eventSessionId);
+		if (deps.opencodeRuntimeIngress) {
+			yield* deps.opencodeRuntimeIngress.onSSEEventEffect(
+				event,
+				eventSessionId,
+			);
 		}
 
 		if (eventSessionId && event.type.startsWith("message.")) {
@@ -841,6 +833,7 @@ export const handleSSEEventEffect = (
 
 interface SSEConsumerCallbacks {
 	handleEvent(event: SSEEvent): void;
+	onReconnect?(): void;
 	reconcileOnConnected(): void;
 	recoverPendingPermissions(
 		pendingPermissions: Array<{
@@ -938,10 +931,7 @@ function wireSSEConsumerWithCallbacks(
 		const gen = ++rehydrationGen;
 		log.info("Connected to OpenCode event stream");
 
-		// Reset dual-write translator state on reconnect so part tracking
-		// starts fresh (avoids stale first-seen flags from the previous
-		// connection producing incorrect event sequences).
-		deps.dualWriteHook?.onReconnect();
+		callbacks.onReconnect?.();
 
 		deps.wsHandler.broadcast({
 			type: "connection_status",
@@ -1073,6 +1063,9 @@ export const wireSSEConsumerEffect = (
 							),
 						),
 					);
+				},
+				onReconnect: () => {
+					deps.opencodeRuntimeIngress?.onReconnect();
 				},
 				reconcileOnConnected: () => {
 					if (deps.statusPoller?.reconcileNow) {

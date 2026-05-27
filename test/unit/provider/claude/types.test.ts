@@ -49,13 +49,12 @@ describe("Claude provider instance types", () => {
 		expectTypeOf<PendingQuestion>().toHaveProperty("createdAt");
 	});
 
-	it("ClaudeSessionContext owns the prompt queue and query runtime", () => {
+	it("ClaudeSessionContext owns per-session query state", () => {
 		expectTypeOf<ClaudeSessionContext>().toHaveProperty("promptQueue");
 		expectTypeOf<ClaudeSessionContext>().toHaveProperty("query");
 		expectTypeOf<ClaudeSessionContext>().toHaveProperty("pendingApprovals");
 		expectTypeOf<ClaudeSessionContext>().toHaveProperty("pendingQuestions");
 		expectTypeOf<ClaudeSessionContext>().toHaveProperty("inFlightTools");
-		expectTypeOf<ClaudeSessionContext>().toHaveProperty("streamConsumer");
 		expectTypeOf<ClaudeSessionContext>().toHaveProperty("currentTurnId");
 		expectTypeOf<ClaudeSessionContext>().toHaveProperty("currentModel");
 		expectTypeOf<ClaudeSessionContext>().toHaveProperty("resumeSessionId");

@@ -558,6 +558,57 @@ describe("ProjectionRunner", () => {
 			expect(messages).toHaveLength(2);
 		});
 
+		it("recovers projections from durable domain events when runtime traces are absent", () => {
+			harness.seedSession("s-domain-only");
+			const traceTables = db.query<{ name: string }>(
+				"SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'provider_runtime_events'",
+			);
+			expect(traceTables).toEqual([]);
+
+			eventStore.append(
+				makeCanonical(
+					"message.created",
+					"s-domain-only",
+					{
+						messageId: "m-domain-only",
+						role: "assistant",
+						sessionId: "s-domain-only",
+					} satisfies MessageCreatedPayload,
+					now,
+				),
+			);
+			eventStore.append(
+				makeCanonical(
+					"text.delta",
+					"s-domain-only",
+					{
+						messageId: "m-domain-only",
+						partId: "m-domain-only:text",
+						text: "domain replay",
+					} satisfies TextDeltaPayload,
+					now + 1,
+				),
+			);
+
+			const result = runner.recover();
+			expect(result.totalReplayed).toBeGreaterThan(0);
+
+			const message = db.queryOne<{ id: string; text: string }>(
+				"SELECT id, text FROM messages WHERE id = ?",
+				["m-domain-only"],
+			);
+			const part = db.queryOne<{ text: string }>(
+				"SELECT text FROM message_parts WHERE id = ?",
+				["m-domain-only:text"],
+			);
+
+			expect(message).toEqual({
+				id: "m-domain-only",
+				text: "domain replay",
+			});
+			expect(part?.text).toBe("domain replay");
+		});
+
 		it("replays only events after the minimum cursor", () => {
 			harness.seedSession("s1");
 

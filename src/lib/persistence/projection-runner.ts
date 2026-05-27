@@ -256,7 +256,7 @@ export class ProjectionRunner {
 	/**
 	 * Project multiple events in a single transaction (S9 batch optimization).
 	 *
-	 * When the DualWriteHook detects a translation produced multiple events
+	 * When OpenCode runtime ingress detects a translation produced multiple events
 	 * (via sseBatchId), it calls projectBatch() instead of projectEvent()
 	 * for each event individually.
 	 *
