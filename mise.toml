@@ -1,0 +1,6 @@
+[tools]
+pnpm = "10.33.4"
+node = "24.16.0"
+
+[settings.node]
+corepack = true

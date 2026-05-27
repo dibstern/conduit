@@ -324,7 +324,7 @@ graph LR
 ## Requirements
 
 - [OpenCode](https://opencode.ai) — `opencode serve` running (port 4096)
-- Node.js 20.19+
+- Node.js 24.16.0 and pnpm 10.33.4 via mise (`mise trust && mise install`)
 - [mkcert](https://github.com/FiloSottile/mkcert) — push notifications (optional)
 - [Tailscale](https://tailscale.com) — remote access beyond LAN (optional)
 
