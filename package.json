@@ -67,7 +67,7 @@
 		"prepublishOnly": "pnpm test:all",
 		"preversion": "pnpm check && pnpm lint && pnpm test:unit",
 		"postversion": "git push origin main --follow-tags",
-		"prepare": "if command -v bd >/dev/null 2>&1; then bd hooks install --beads --chain || true; else pnpm exec lefthook install || true; fi"
+		"prepare": "node scripts/install-git-hooks.mjs"
 	},
 	"dependencies": {
 		"@anthropic-ai/claude-agent-sdk": "^0.2.132",
