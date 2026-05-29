@@ -1,0 +1,40 @@
+# Role template: child executable work packet.
+
+[[steps]]
+id = "{{logical_id}}"
+title = "{{title}}"
+type = "task"
+description = "{{description}}"
+needs = {{needs_array}}
+
+[steps.metadata.planToBeads]
+contractVersion = "plan-to-beads.v1"
+templateVersion = "{{template_version}}"
+role = "child"
+logicalId = "{{logical_id}}"
+planId = "{{plan_id}}"
+sourcePlan = "{{source_plan}}"
+contextRefs = {{context_refs_array}}
+inherits = {{inherits_array}}
+provides = {{provides_array}}
+
+[steps.metadata.workPacket]
+goal = "{{goal}}"
+inputs = {{inputs_array}}
+constraints = {{constraints_array}}
+outputShape = "{{output_shape}}"
+allowedFiles = {{allowed_files_array}}
+forbiddenFiles = {{forbidden_files_array}}
+redCommand = "{{red_command}}"
+expectedFailure = "{{expected_failure}}"
+greenScope = "{{green_scope}}"
+verification = "{{verification}}"
+acceptanceCriteria = {{acceptance_criteria_array}}
+failureConditions = {{failure_conditions_array}}
+
+[steps.metadata.workPacket.handoff]
+requiresBeadsNote = true
+requiresCommitSha = {{requires_commit_sha_bool}}
+closeByIntegrationOwner = {{close_by_integration_owner_bool}}
+artifactRoot = "{{artifact_root}}"
+notesSchema = {{handoff_notes_schema_table}}

@@ -33,6 +33,7 @@
 - [ ] Async reactor tests must wait through a public test harness seam such as `drain` or a test-only milestone stream. Do not use sleeps or infer reactor completion from unrelated DB polling.
 - [ ] Resolve Phase 0 crash-window decisions before any handler integration or parallel implementation stream. Record the chosen policy in the parent Beads issue design/notes.
 - [ ] Keep Phase 0 limited to Interface-shaping blockers: command id source, receipt states, duplicate return shape, crash policy, effective fingerprint inputs, deterministic id/time policy, and command read-model storage contract. Reactor backoff, reconnect freshness, diagnostics, and performance details are later RED-GREEN slices unless they change one of those Interfaces.
+- [ ] Phase 0 is not one broad architecture spike. Resolve one blocker decision at a time, with one focused fake-provider/SQLite proof or one written Beads decision per blocker, then stop before starting the next blocker.
 - [ ] Use parallel subagents only after the sequential gates are GREEN and only with disjoint file ownership. Each subagent prompt must include: Beads issue id, owned files/modules, forbidden files, validation command, expected output, and reminder not to revert others' work.
 - [ ] Parent agent owns Beads mutations during parallel work. Pre-create child issues and dependencies before dispatch; subagents report status and do not run `bd update`, `bd close`, `bd create`, or export-changing Beads commands unless the parent assigns a serialized Beads-only step.
 - [ ] Parent agent owns integration. After subagents return, review diffs, run the stream's focused validation, update/close the Beads child issue, then continue.
@@ -41,7 +42,7 @@
 
 - [ ] Serialize command handling through an Effect `Queue`; reply with `Deferred`.
 - [ ] Check durable receipt before decider.
-- [ ] Use pure decider: command + read model -> planned events or typed rejection.
+- [ ] Use pure decider: command + read model + injected deterministic id/time services -> planned events or typed rejection. Pure means no provider calls, network/process access, persistence writes, or runtime handles; it does not require event-id generation to use global randomness.
 - [ ] Commit durable command events, durable command read-model/outbox rows, and command receipt inside one SQL transaction. UI/relay projector rows may stay separately isolated unless command decision state depends on them. Any in-memory command cache is updated only after commit or reconciled from durable state; it is not part of the transaction contract.
 - [ ] Bootstrap command read model from projection snapshot before accepting commands.
 - [ ] Publish committed events via `PubSub`; each consumer gets its own stream.
@@ -49,6 +50,7 @@
 - [ ] Split command read-model bootstrap from full UI/relay snapshots. Engine startup should read the smallest snapshot needed for command decisions and recovered session/provider bindings.
 - [ ] Keep the command read model tombstone-aware. It must retain deleted/terminal project, thread, session, pending-interaction, and turn state needed to reject stale commands after restart without leaking those tombstones into normal UI/shell snapshots.
 - [ ] Include effective provider dispatch identity in command fingerprints: provider instance, selected model after aliases/version gating, normalized option values, material defaults, prompt-injected/settings-backed modes, runtime mode, interaction mode, and execution cwd/worktree when those fields affect provider behavior.
+- [ ] Fingerprint derived provider dispatch values, not just UI selections. Regression examples from current `t3code`: `contextWindow` changing the Claude API model suffix, `ultracode` normalizing to `xhigh` plus `settings.ultracode`, version-gated effort normalization, and session model-switch fallback to the active-session model all belong in the effective dispatch request when they affect provider execution.
 - [ ] Generate command, receipt, and orchestration ids/timestamps through injected `Clock`/`DateTime` and `Crypto`/ID services. If id generation can fail, fail before receipt consumption and map the failure to a typed dispatch error.
 - [ ] Treat provider readiness, probe timeout, and probe teardown failure as provider lookup failures before receipt consumption. Tests must prove any spawned probe/runtime scope is closed or force-killed on failure.
 - [ ] Back off retryable side-effect reactor failures with deterministic `Clock`/`TestClock` proof. Reactor failure handling should be observable and bounded, not a tight retry loop.
@@ -107,7 +109,7 @@
 - [ ] No Claude/OpenCode adapter refactor beyond orchestration command API and provider-output ingress convergence required by Phase 5.
 - [ ] No frontend redesign.
 - [ ] No broad reconnect UX redesign. Only transport/orchestration idempotency tests and narrow handler changes are in scope if needed.
-- [ ] No production diagnostics dashboard requirement. A bounded diagnostics read Interface is optional and must be non-authoritative.
+- [ ] No production diagnostics dashboard requirement. A bounded diagnostics read Interface is optional, non-authoritative, and defaults to a Beads follow-up unless a current reactor/backoff/ingestion RED test proves it is needed.
 - [ ] No live provider E2E requirement.
 - [ ] No provider-instance identity migration unless command routing tests prove current provider id is ambiguous.
 - [ ] No build/dependency/runtime migration from t3code, including TSGo, Effect beta upgrades, or VCS backoff constants.
@@ -118,15 +120,15 @@
 This is a write-set map, not a checklist to create every file up front. Create a file only when the current RED behavior needs a stable Interface or when the deletion test says the Module earns its keep. Prefer extending an existing deep Module over adding a one-call wrapper.
 
 - [ ] Create when forced by the command identity and deterministic id/time slice: `src/lib/provider/orchestration-command-contracts.ts`, or export the equivalent Interface from the existing orchestration Module.
-- [ ] Create when the pure planning slice goes RED: `src/lib/provider/orchestration-decider.ts`.
-- [ ] Create when projection behavior needs a named owner: `src/lib/provider/orchestration-projector.ts`.
+- [ ] Create when the pure planning slice goes RED: `src/lib/provider/orchestration-decider.ts`. Treat it as Implementation behind Provider Command Orchestration unless it passes the deletion test as a real Interface.
+- [ ] Create when projection behavior needs a named owner: `src/lib/provider/orchestration-projector.ts`. Treat it as Implementation unless multiple callers or adapters need its Interface.
 - [ ] Create when bootstrap/restart behavior proves the need for a narrow command snapshot Interface: `src/lib/provider/orchestration-read-model.ts`.
 - [ ] Create when provider side effects move out of dispatch: `src/lib/provider/orchestration-side-effect-reactor.ts`.
 - [ ] Create only if it hides transaction rules from multiple callers: `src/lib/provider/orchestration-command-commit.ts`.
 - [ ] Create only if active-provider recovery would otherwise remain spread across handlers/engine/session code: `src/lib/provider/orchestration-session-bindings.ts`.
-- [ ] Create only if rollout needs operator visibility: `src/lib/provider/orchestration-diagnostics.ts` for bounded non-authoritative reactor/ingestion diagnostics.
+- [ ] Create only if the current rollout proves operator visibility is needed: `src/lib/provider/orchestration-diagnostics.ts` for bounded non-authoritative reactor/ingestion diagnostics. Otherwise create a Beads follow-up.
 - [ ] Create only if reactor tests cannot use the production `drain` Interface directly: `test/unit/provider/orchestration-reactor-harness.ts` or equivalent deterministic reactor milestone harness.
-- [ ] Create tests one behavior at a time under `test/unit/provider/orchestration-decider.test.ts`, `test/unit/provider/orchestration-projector.test.ts`, and `test/unit/provider/orchestration-durable-receipts.test.ts`.
+- [ ] Create tests one behavior at a time under `test/unit/provider/orchestration-durable-receipts.test.ts` and public orchestration/ingestion entrypoint tests first. Add `test/unit/provider/orchestration-decider.test.ts` or `test/unit/provider/orchestration-projector.test.ts` only as supporting proof after the public Interface behavior is GREEN or when the Module earns a real Interface.
 - [ ] Create `test/unit/provider/orchestration-dispatch-boundary.test.ts` only when handler/domain-service behavior needs a public orchestration compatibility seam.
 - [ ] Create `test/unit/provider/orchestration-side-effect-reactor.test.ts` only when side-effect reactor work starts.
 - [ ] Extend `test/unit/provider/provider-runtime-ingestion.test.ts` and `test/unit/provider/relay-event-sink.test.ts` or equivalent focused tests only when proving provider-output ingestion publishes browser-visible relay messages.
@@ -151,12 +153,14 @@ The implementation should deepen one external provider command orchestration Mod
 
 Use this map to decide ownership, not to justify premature seams. One adapter is only a hypothetical seam; two adapters or repeated caller complexity make the seam real. If a planned Module would only pass data through to another Module, delete it from the design and keep the behavior behind the existing Interface.
 
+Decider and projector files are Implementation details by default. Test through the Provider Command Orchestration Interface first; add direct decider/projector tests only when they localize complex behavior that is already proven through the public Interface or when the deletion test shows those Modules have independent leverage.
+
 | Module | Interface Owner | Implementation Files | Adapters / Seams | Tests Cross | Forbidden Imports / Coupling |
 |---|---|---|---|---|---|
 | Provider Command Identity | `orchestration-command-contracts.ts` or the replacement command interface exported by orchestration | command id validation, stable payload extraction, effective provider dispatch identity canonicalization, injected id/time service use | browser/relay command id source, compatibility command builder, normalized provider settings/options adapter | handler/domain-service tests, deterministic id/time tests, provider-instance/model-option fingerprint tests, and orchestration dispatch tests | runtime handles in fingerprints: `eventSink`, `AbortSignal`, callbacks, loggers; raw UI option objects; provider-driver-only option maps; global random/time |
 | Provider Command Orchestration | `OrchestrationEngine.dispatchEffect` during compatibility, then the new orchestration Module interface | queue worker, receipt lookup, decider, command read model, side-effect request emission | provider registry adapter, persistence commit adapter, reactor adapter | duplicate, restart, lookup failure, handler compatibility tests | direct SQL in handlers; direct provider call from decider |
 | Durable Command Commit | new commit interface under provider or persistence ownership, only if it hides real transaction complexity | durable command event append, durable command read-model/outbox rows, receipt write, post-commit publication handoff | SQLite adapter, Effect persistence adapter | rollback/commit tests with real SQLite | provider side effects inside SQL transaction; UI/relay projector failure treated as command commit failure unless command decision state depends on it; treating in-memory state as rollbackable transaction state |
-| Provider Output Ingestion | `ProviderRuntimeIngestionTag.ingestBatch` | runtime-event mapper, append/projection/replay ownership, browser-visible relay publication proof | OpenCode SSE adapter, Claude SDK adapter, reactor provider-output adapter | ingestion, relay snapshot, live relay publication, reactor output tests | production reactor/sink calls to `translateProviderRuntimeEventToDomain` directly; second live relay mapper for provider output |
+| Provider Output Ingestion | `ProviderRuntimeIngestionTag.ingestBatch` | runtime-event mapper, append/projection/replay ownership, browser-visible relay publication proof | OpenCode SSE adapter, Claude SDK adapter, reactor provider-output adapter | ingestion, relay snapshot, local relay publication, reactor output tests | production reactor/sink calls to `translateProviderRuntimeEventToDomain` directly; second provider-output relay mapper |
 | Provider Session Binding Read Model | read-query/effect facade or orchestration compatibility facade | session/provider projection, command read model recovery | handler compatibility adapter while call sites migrate | fresh-engine restart and handler active-provider tests | authoritative `sessionBindings = new Map` in orchestration |
 | Command Read-Model Snapshot | read-query/effect facade returning the minimal command decision state | narrow SQL query shape, projection-state cursor, session/provider binding rows, active turn/approval state, command metadata, deleted/terminal tombstones needed for stale-command rejection | SQLite projection adapter, test fake that fails on full snapshot hydration | engine bootstrap/restart/tombstone tests, query-shape/performance guard if the path becomes hot | loading full relay/UI snapshot or message history just to decide provider commands; repeated filter/map chains over full snapshots; leaking tombstones into UI shell snapshots |
 | Reactor Quiescence Harness | public internal test seam such as `drain` or test-only milestone stream | side-effect reactor worker queue, ingestion worker queue, optional test-only runtime receipt publisher | production no-op adapter, test PubSub adapter | reactor/ingestion integration tests | durable recovery, relay replay, or production UI depending on test milestone receipts |
@@ -165,7 +169,8 @@ Use this map to decide ownership, not to justify premature seams. One adapter is
 
 ## Phases
 
-- [ ] Phase 0, Interface-shaping hard gate: fake provider + SQLite + restart/crash windows. Pick receipt states, duplicate return shape, stable command id source, effective provider dispatch fingerprint fields, deterministic id/time policy, command read-model storage contract, and crash-window recovery policy before integration. Do not include reactor backoff, reconnect UX/freshness, diagnostics, or broad performance work here unless it changes one of those Interfaces. Do not dispatch parallel streams or migrate handlers until the hard decisions below are recorded in Beads.
+- [ ] Phase 0, Interface-shaping hard gate: fake provider + SQLite + restart/crash windows, one blocker proof at a time. Pick receipt states, duplicate return shape, stable command id source, effective provider dispatch fingerprint fields, deterministic id/time policy, command read-model storage contract, and crash-window recovery policy before integration. Do not include reactor backoff, reconnect UX/freshness, diagnostics, or broad performance work here unless it changes one of those Interfaces. Do not dispatch parallel streams or migrate handlers until each hard decision below is recorded in its Beads decision issue.
+- [ ] Phase 0z, Wave 0 contract artifact: before any Wave 1 parallel streams, serialize one contract artifact that pins the durable command handoff between receipt schema/commit work and decider/projector/read-model work. It must name the exact durable rows, transaction ownership, outbox/read-model handoff, receipt statuses/fingerprint fields, and TypeScript Interface or exported types that Wave 1 A and B share. A Beads note alone is not enough; the contract must exist in the agreed code/document artifact that both streams are instructed to follow.
 - [ ] Phase 0a, command identity propagation: prove browser/relay-origin command id reaches provider command dispatch for `send_turn` and `interrupt_turn`. Mutating provider commands without durable `commandId` fail before provider lookup or provider side effects.
 - [ ] Phase 1, event-log independence: remove durable event-store dependency on projection/read-model tables; projection owns creating/updating sessions from `session.created`.
 - [ ] Phase 1b, provider-runtime ingestion cleanup: remove `ProviderRuntimeIngestion` session pre-seeding after event-log independence is GREEN.
@@ -174,15 +179,20 @@ Use this map to decide ownership, not to justify premature seams. One adapter is
 - [ ] Phase 3, decider/projector: model current commands as events/read model without provider calls. Split command read-model bootstrap/query from full UI/relay snapshots, keep command tombstones out of shell/UI snapshots, and prove engine startup does not hydrate message history it does not need.
 - [ ] Phase 4, engine queue: dispatch checks receipt, serializes command handling, decides, commits events/read-model/receipt, and resolves same-process duplicate waiters.
 - [ ] Phase 4b, restart duplicate behavior: a fresh engine over the same DB replays accepted duplicate commands from durable receipts/read models without a provider call.
-- [ ] Phase 5, side-effect reactor: provider calls execute from durable requested events; idempotent by command id/sequence; retryable failures use deterministic bounded backoff; provider output enters through `ProviderRuntimeIngestion`; and one live relay proof shows ingested provider output becomes browser-visible through the existing relay owner. Reactor and ingestion tests wait through deterministic `drain`/milestone Interfaces, not sleeps. This is mandatory before reactor completion unless a compatibility exception is explicitly reclassified and statically guarded outside production provider output.
-- [ ] Phase 5b, optional diagnostics: if reactor/ingestion diagnostics are added, expose bounded read-only queue/backoff/recent-failure summaries and prove recovery ignores them.
+- [ ] Phase 5a, side-effect reactor request execution: provider calls execute after durable requested events commit, idempotent by command id/sequence, and never inside the decider or SQL transaction.
+- [ ] Phase 5b, provider-output ingestion handoff: side-effect reactor output enters through `ProviderRuntimeIngestion`; no production reactor/sink path translates runtime events directly.
+- [ ] Phase 5c, relay publication proof: one local relay/WebSocket or relay-sink proof with fake provider runtime input shows ingested provider output becomes browser-visible through the existing relay owner. This is not a live Claude/OpenCode E2E requirement.
+- [ ] Phase 5d, reactor quiescence and retry: reactor and ingestion tests wait through deterministic `drain`/milestone Interfaces, not sleeps; retryable failures use deterministic bounded backoff.
+- [ ] Phase 5e, optional diagnostics follow-up by default: add diagnostics only if a reactor/backoff/ingestion RED test proves rollout visibility is needed. Otherwise create a Beads follow-up and keep diagnostics out of the critical path.
 - [ ] Phase 6, provider session binding read-model cutover: active provider lookup comes from recovered projection/read-model state, with `getProviderForSession` kept only as a compatibility read if still needed.
 - [ ] Phase 7, handler/reconnect compatibility: old `dispatchEffect` facade preserves callers until handlers can accept command acknowledgements and command id requirements directly. Browser resume/reconnect must reattach to durable state without redriving mutating provider commands.
 - [ ] Phase 8, cleanup: remove in-memory dedupe/session maps, toy idempotency service, direct provider-output mapper bypasses, and obsolete compatibility adapters.
 
 ## Phase 0 Hard Decisions
 
-These decisions are not implementation trivia. They determine the public Interface and the recovery behavior. Keep this gate narrow: resolve only the blockers below with a fake-provider + SQLite spike, record the result in the parent Beads issue, and only then start Phase 1 or any parallel stream.
+These decisions are not implementation trivia. They determine the public Interface and the recovery behavior. Keep this gate narrow: resolve only the blockers below with focused fake-provider + SQLite proofs, record each result in its own Beads decision issue, and only then start Phase 1 or any parallel stream.
+
+Work top to bottom. A Phase 0 blocker is a TDD slice: one question, one proof or explicit decision, one Beads update, then stop. Do not settle multiple blockers in one broad spike.
 
 - [ ] Receipt state model. Decide the minimum durable states needed for command acknowledgement, rejection, side-effect request, side-effect completion, and side-effect failure. Avoid storing provider result payloads unless a behavior test proves projection cannot derive the needed status.
 - [ ] Duplicate accepted return shape. Decide what the compatibility facade returns for same-process duplicates, restart duplicates with a prior `TurnResult`, and restart duplicates with only command ack/read-model status available.
@@ -190,6 +200,7 @@ These decisions are not implementation trivia. They determine the public Interfa
 - [ ] Crash after accepted receipt before provider side effect. Recommended default: mark the command interrupted/orphaned and do not automatically retry provider execution unless the committed command explicitly declares retryable semantics.
 - [ ] Crash after provider completion before completion event persists. Recommended default: expose incomplete side-effect state from durable receipt/read model and require explicit retry/reconciliation behavior; never silently send the same provider side effect twice.
 - [ ] Effective provider dispatch fingerprint fields. Decide which normalized provider options and defaults are material after alias/version gates and settings/prompt injection. Include provider instance, selected model, runtime mode, interaction mode, and cwd/worktree only when they affect provider execution.
+- [ ] Derived provider dispatch fingerprint examples. For Claude-like providers, decide and test representative derived values such as `contextWindow` altering the API model id, `ultracode` becoming `xhigh` plus a provider setting, version-gated effort normalization, and session model-switch fallback to the active-session model. These are examples of effective dispatch identity, not separate command concepts.
 - [ ] Deterministic id/time generation policy. Decide the injected `Clock`/`DateTime` and `Crypto`/ID service ownership for command ids, receipt ids, timestamps, and test-controlled failures. Prove ID generation failure fails before receipt consumption.
 - [ ] Command read-model storage contract. Decide which durable rows are part of the command decision transaction, which UI/relay projector writes stay isolated, and which narrow query shape the engine can use at bootstrap.
 - [ ] Receipt retention interface, only if eviction changes the duplicate/retry contract for this migration. If not, create a Beads follow-up and do not block Phase 1 on retention tuning.
@@ -204,6 +215,7 @@ Granularity rules for every slice:
 - [ ] Do not create all listed test files for a slice before the first RED is GREEN. Add the next file only when the next public behavior needs that file.
 - [ ] Repository, projector, and static-guard tests are supporting proof. The primary proof for orchestration behavior is through the public Interface that callers use.
 - [ ] If a slice wants a new Module only for test convenience, stop and try to test through the existing public Interface first.
+- [ ] Phase 0 blockers follow the same rule: settle one blocker decision and proof before starting the next blocker.
 
 1. [ ] Command identity propagates before provider lookup and missing ids are rejected. Test `send_turn` first, then `interrupt_turn`; the browser/relay-origin command id must reach orchestration dispatch unchanged.
    - Run: `pnpm vitest run test/unit/handlers/prompt*.test.ts test/unit/provider/orchestration-dispatch-boundary.test.ts -t "propagates commandId to provider command dispatch|requires commandId for mutating provider commands"`
@@ -229,43 +241,46 @@ Granularity rules for every slice:
 8. [ ] Restart duplicate replays from durable receipt/read model.
    - Run: `pnpm vitest run test/unit/provider/orchestration-durable-receipts.test.ts -t "replays accepted send_turn after restart without provider call"`
    - Expected RED: fresh engine calls provider again.
-9. [ ] Effective provider dispatch identity is part of command fingerprinting. Start with same command id and changed provider instance. Add selected model after alias/version gating, normalized provider option values, material defaults, runtime mode, interaction mode, prompt-injected/settings-backed modes, and execution cwd/worktree as separate examples only after the provider-instance case is GREEN.
+9. [ ] Effective provider dispatch identity is part of command fingerprinting. Start with same command id and changed provider instance. Add selected model after alias/version gating, normalized provider option values, material defaults, runtime mode, interaction mode, prompt-injected/settings-backed modes, and execution cwd/worktree as separate examples only after the provider-instance case is GREEN. Include derived provider examples before calling the fingerprint slice complete: Claude `contextWindow` changing the resolved API model id, `ultracode` normalizing to `xhigh` plus `settings.ultracode`, version-gated effort normalization, and session model-switch fallback to the active-session model.
    - Run: `pnpm vitest run test/unit/provider/orchestration-durable-receipts.test.ts -t "rejects reused command id when effective provider dispatch identity changes"`
    - Expected RED: changed effective dispatch identity replays an accepted receipt, calls the provider, or hashes raw unsorted UI option objects.
 10. [ ] Provider lookup failure does not consume command receipts. Include unknown provider, readiness failure, probe timeout, and probe teardown failure as separate RED-GREEN examples.
    - Run: `pnpm vitest run test/unit/provider/orchestration-engine-effect.test.ts -t "provider lookup failures do not consume command receipts|provider readiness failure closes probe scope"`
    - Expected RED: lookup/readiness failure consumes a receipt, prevents retry after provider registration, or leaves a spawned probe/runtime scope open.
-11. [ ] Decider and projector become behavior units.
-   - Run: `pnpm vitest run test/unit/provider/orchestration-decider.test.ts -t "plans send_turn side effect from command and read model"`
-   - Expected RED: module/API missing, or behavior can only be proven by calling a provider instance.
+11. [ ] Provider Command Orchestration plans a side-effect request without calling a provider. Test through the public orchestration dispatch Interface first; add direct decider/projector tests only as supporting proof after this behavior is GREEN or if those Modules earn real Interfaces.
+   - Run: `pnpm vitest run test/unit/provider/orchestration-engine-effect.test.ts test/unit/provider/orchestration-durable-receipts.test.ts -t "plans send_turn side effect from command and read model without provider call"`
+   - Expected RED: behavior can only be proven by calling a provider instance, or the engine cannot expose a planned side-effect request through the public orchestration Interface.
 12. [ ] Accepted command durable commit is atomic for command state. Commit planned command events, durable command read-model/outbox rows, and receipt together; keep UI/relay projector failures isolated unless command decision state depends on them.
    - Run: `pnpm vitest run test/unit/provider/orchestration-durable-receipts.test.ts -t "commits accepted command state and receipt atomically"`
    - Expected RED: partial durable command event, command read-model/outbox row, or receipt survives after failure. Do not assert rollback of in-memory cache or unrelated UI projector state; prove in-memory state updates after commit or reconciles from durable state.
 13. [ ] Command ack metrics use first committed durable event publication. Test through the orchestration dispatch Interface with metrics/spans captured by the test layer.
    - Run: `pnpm vitest run test/unit/provider/orchestration-engine-effect.test.ts -t "records command ack when the first committed event is published"`
    - Expected RED: no ack metric/span exists, or ack waits for provider completion/browser delivery instead of first durable event publish.
-14. [ ] Reactor runs side effects after commit and ingests provider output.
-   - Run: `pnpm vitest run test/unit/provider/orchestration-side-effect-reactor.test.ts -t "executes committed side effect once and ingests provider output"`
-   - Expected RED: no reactor API exists, provider call happens inline during dispatch, output bypasses `ProviderRuntimeIngestion`, or tests need sleeps/polling to observe quiescence.
-15. [ ] Provider output ingestion publishes browser-visible relay messages through one owner. Test one live relay path around `ProviderRuntimeIngestion`/`RelayEventSink` so ingested provider output reaches browser-visible messages without a second mapper.
+14. [ ] Reactor executes a committed side-effect request after command commit. Do not test provider output ingestion in this first reactor RED.
+   - Run: `pnpm vitest run test/unit/provider/orchestration-side-effect-reactor.test.ts -t "executes committed side effect once after commit"`
+   - Expected RED: no reactor API exists, provider call happens inline during dispatch, provider call occurs before durable requested event commit, or the provider receives the same event sequence/command id twice.
+15. [ ] Reactor hands provider output to `ProviderRuntimeIngestion`. Use a fake ingestion Adapter; do not require relay publication in this slice.
+   - Run: `pnpm vitest run test/unit/provider/orchestration-side-effect-reactor.test.ts -t "hands provider output to provider runtime ingestion"`
+   - Expected RED: provider output bypasses `ProviderRuntimeIngestion`, the reactor calls `translateProviderRuntimeEventToDomain` directly, or output handoff cannot be observed without provider logs.
+16. [ ] Provider output ingestion publishes browser-visible relay messages through one owner. Test one local relay path around `ProviderRuntimeIngestion`/`RelayEventSink` with fake provider runtime input so ingested provider output reaches browser-visible messages without a second mapper.
    - Run: `pnpm vitest run test/unit/provider/provider-runtime-ingestion.test.ts test/unit/provider/relay-event-sink.test.ts -t "ingested provider output is relayed to browser clients"`
    - Expected RED: provider output is only persisted/drained and never published to relay clients, or a production sink bypasses `ProviderRuntimeIngestion` to translate provider events directly.
-16. [ ] Reactor exposes deterministic quiescence without sleeps. Add only after the first side-effect reactor behavior is GREEN.
+17. [ ] Reactor exposes deterministic quiescence without sleeps. Add only after the first side-effect reactor behavior is GREEN.
    - Run: `pnpm vitest run test/unit/provider/orchestration-side-effect-reactor.test.ts -t "drains committed side effects without sleeps"`
    - Expected RED: test must sleep, poll unrelated DB state, or infer completion from provider logs instead of awaiting a public `drain` or milestone Interface.
-17. [ ] Reactor backs off retryable provider failures without hot looping. Use `TestClock` to advance retry time and prove failure state is visible through the reactor/outbox, not the decider.
+18. [ ] Reactor backs off retryable provider failures without hot looping. Use `TestClock` to advance retry time and prove failure state is visible through the reactor/outbox, not the decider.
    - Run: `pnpm vitest run test/unit/provider/orchestration-side-effect-reactor.test.ts -t "backs off retryable provider failures without hot looping"`
    - Expected RED: repeated provider failures retry immediately, require sleeps to test, or failure state is hidden from the reactor/outbox.
-18. [ ] Browser resume/reconnect reattaches to durable command state without redriving mutating provider commands. Start with one prompt/send-turn reconnect path; only then add stale heartbeat, missing heartbeat, and completed/running variants.
+19. [ ] Browser resume/reconnect reattaches to durable command state without redriving mutating provider commands. Start with one prompt/send-turn reconnect path; only then add stale heartbeat, missing heartbeat, and completed/running variants.
    - Run: `pnpm vitest run test/unit/handlers/prompt*.test.ts test/unit/provider/orchestration-dispatch-boundary.test.ts -t "reconnect replays durable command state without redispatching provider command"`
    - Expected RED: reconnect creates a new command id, resends the provider side effect, or depends on transport heartbeat as command recovery state.
-19. [ ] Handler compatibility and command id requirements migrate one command family at a time. Start with prompt/send turn. Then add interrupt. Then permission/question. Then model/settings/reload/context-window only if those remain mutating provider commands.
+20. [ ] Handler compatibility and command id requirements migrate one command family at a time. Start with prompt/send turn. Then add interrupt. Then permission/question. Then model/settings/reload/context-window only if those remain mutating provider commands.
    - Run: `pnpm vitest run test/unit/handlers/prompt*.test.ts test/unit/provider/orchestration-dispatch-boundary.test.ts -t "requires commandId for mutating provider commands|preserves prompt dispatch compatibility"`
    - Expected RED: mutating command accepted without `commandId`, or compatibility result shape regresses.
-20. [ ] Optional diagnostics stay bounded and non-authoritative. Add this slice only if `orchestration-diagnostics.ts` is created.
+21. [ ] Optional diagnostics stay bounded and non-authoritative. Default to a Beads follow-up. Add this slice only if a reactor/backoff/ingestion RED test proves rollout visibility is needed and `orchestration-diagnostics.ts` is created.
    - Run: `pnpm vitest run test/unit/provider/orchestration-diagnostics.test.ts -t "reports bounded reactor status without recovery dependency"`
    - Expected RED: diagnostics are unbounded, include provider payloads, or a recovery/projection path reads diagnostics.
-21. [ ] Cleanup guards last. Add static grep guards only after behavior replacement paths are GREEN.
+22. [ ] Cleanup guards last. Add static grep guards only after behavior replacement paths are GREEN.
    - Run: `pnpm vitest run test/unit/effect/runtime-boundary-grep.test.ts test/unit/provider/orchestration-dispatch-boundary.test.ts`
    - Expected RED: `processedCommands`, toy `IdempotencySetTag`, authoritative `sessionBindings`, fingerprintless receipts, raw UI option fingerprinting, provider-driver-only option maps, global random/time in core orchestration, authoritative TTL dedupe, heartbeat/diagnostics recovery dependencies, tight reactor retry loops, or provider-output bypass imports still exist.
 
@@ -291,20 +306,23 @@ Use subagents for parallel implementation only after the sequential gates below 
 - [ ] Gate D: command read-model snapshot Interface is agreed and has one GREEN bootstrap test plus one tombstone/stale-command test before engine queue work fans out.
 - [ ] Gate E: Phase 0 hard decisions are recorded in Beads, especially crash-window policy and duplicate accepted return shape.
 - [ ] Gate F: command read-model storage contract, durable command transaction scope, deterministic id/time seams, and effective provider dispatch fingerprint inputs are recorded in Beads before Wave 1 A/B can edit persistence or read-model files.
+- [ ] Gate F2: the Wave 0 contract artifact exists before Wave 1 parallel work. It must be concrete enough that Wave 1 A and B can implement against it without negotiating shared row names, receipt statuses, outbox shape, read-model handoff, or exported TypeScript types during parallel edits.
+- [ ] Gate G, Wave 4 only: parent records an exact handler ownership map in Beads before dispatching any handler subagent after F1.
 
-After Gates C, D, E, and F, run Wave 1 streams in parallel only if each stream has its own pre-created Beads child issue and the parent agent gives each subagent a disjoint write set. The parent agent performs all Beads updates/closures while subagents are running; subagents return evidence for the parent to record. Later waves depend on Wave 1 contracts and must not be dispatched speculatively.
+After Gates C, D, E, F, and F2, run Wave 1 streams in parallel only if each stream has its own pre-created Beads child issue and the parent agent gives each subagent a disjoint write set. The parent agent performs all Beads updates/closures while subagents are running; subagents return evidence for the parent to record. Later waves depend on Wave 1 contracts and must not be dispatched speculatively.
 
 | Stream | Beads Child | Owned Files / Modules | Depends On | Focused Validation | Must Not Touch |
 |---|---|---|---|---|---|
-| Wave 1 A. Receipt schema and durable commit | `bd create --parent <parent> --title "Durable command commit"` | `src/lib/persistence/command-receipts.ts`, migrations, optional `orchestration-command-commit.ts`, persistence tests | Gates C, D, E, F | `pnpm vitest run test/unit/persistence/command-receipts.test.ts test/unit/persistence/schema.test.ts test/unit/provider/orchestration-durable-receipts.test.ts -t "commits accepted command state and receipt atomically|rejects reused command id when effective provider dispatch identity changes"` | handler files, provider adapters, reactor |
-| Wave 1 B. Decider/projector/read model | `bd create --parent <parent> --title "Provider command decider and projector"` | `orchestration-decider.ts`, `orchestration-projector.ts`, `orchestration-read-model.ts`, related tests, one tombstone example at a time | Gates C, D, E, F | `pnpm vitest run test/unit/provider/orchestration-decider.test.ts test/unit/provider/orchestration-projector.test.ts test/unit/provider/orchestration-engine-effect.test.ts -t "command read model includes tombstones for stale command decisions"` | persistence migrations, handlers, provider runtime adapters |
+| Wave 0. Durable command contract artifact | `bd create --parent <parent> --title "Wave 0 durable command contract artifact"` | `src/lib/provider/orchestration-command-contracts.ts` or the existing orchestration Module export that owns command/receipt/read-model handoff types, plus the relevant Beads decision designs | Gates C, D, E, F | `pnpm vitest run test/unit/provider/orchestration-engine-effect.test.ts -t "bootstraps from command read model without loading full relay snapshot"` or no code test if this is a pure contract/design artifact; parent must review the artifact before Wave 1 | migrations, handlers, provider adapters, reactor |
+| Wave 1 A. Receipt schema and durable commit | `bd create --parent <parent> --title "Durable command commit"` | `src/lib/persistence/command-receipts.ts`, migrations, optional `orchestration-command-commit.ts`, persistence tests | Gates C, D, E, F, F2 and Wave 0 artifact | `pnpm vitest run test/unit/persistence/command-receipts.test.ts test/unit/persistence/schema.test.ts test/unit/provider/orchestration-durable-receipts.test.ts -t "commits accepted command state and receipt atomically|rejects reused command id when effective provider dispatch identity changes"` | handler files, provider adapters, reactor, unowned read-model/projector symbols |
+| Wave 1 B. Decider/projector/read model | `bd create --parent <parent> --title "Provider command decider and projector"` | `orchestration-decider.ts`, `orchestration-projector.ts`, `orchestration-read-model.ts`, related tests, one tombstone example at a time. Decider/projector stay Implementation unless the deletion test proves a real Interface. | Gates C, D, E, F, F2 and Wave 0 artifact | `pnpm vitest run test/unit/provider/orchestration-engine-effect.test.ts test/unit/provider/orchestration-durable-receipts.test.ts -t "plans send_turn side effect from command and read model without provider call|command read model includes tombstones for stale command decisions"` | persistence migrations, handlers, provider runtime adapters, unowned receipt/commit symbols |
 | Wave 1 D. Provider-output ingestion convergence | `bd create --parent <parent> --title "Provider output ingestion convergence"` | `provider-runtime-ingestion-service.ts`, `event-sink.ts`, `relay-event-sink.ts`, Claude persist/materializer paths, ingestion/reactor output tests | Gates C, E | `pnpm vitest run test/unit/provider/provider-runtime-ingestion.test.ts test/unit/provider/relay-event-sink.test.ts test/unit/effect/runtime-boundary-grep.test.ts` | command receipt schema, engine queue internals |
 | Wave 2 C. Engine queue and duplicate waiters | `bd create --parent <parent> --title "Durable orchestration engine queue"` | `orchestration-engine.ts`, `orchestration-wiring.ts`, engine tests | Wave 1 A and B interface contracts agreed | `pnpm vitest run test/unit/provider/orchestration-engine.test.ts test/unit/provider/orchestration-engine-effect.test.ts` | migrations except agreed interfaces, handler migration, provider-output sinks |
-| Wave 3 E. Side-effect reactor | `bd create --parent <parent> --title "Provider side-effect reactor"` | `orchestration-side-effect-reactor.ts`, reactor tests, provider registry adapter if needed, optional test harness, optional `orchestration-diagnostics.ts` | Wave 1 A, B, D plus Wave 2 C ack/queue contract | `pnpm vitest run test/unit/provider/orchestration-side-effect-reactor.test.ts test/unit/provider/orchestration-diagnostics.test.ts` if diagnostics are implemented | handlers, event-store schema |
+| Wave 3 E. Side-effect reactor | `bd create --parent <parent> --title "Provider side-effect reactor"` | `orchestration-side-effect-reactor.ts`, reactor tests, provider registry adapter if needed, optional test harness. `orchestration-diagnostics.ts` only if a RED test proves rollout visibility is needed. | Wave 1 A, B, D plus Wave 2 C ack/queue contract | `pnpm vitest run test/unit/provider/orchestration-side-effect-reactor.test.ts` plus diagnostics test only if diagnostics are implemented | handlers, event-store schema |
 | Wave 4 F1. Prompt/send-turn handler and reconnect compatibility | `bd create --parent <parent> --title "Prompt command handler compatibility"` | `src/lib/handlers/prompt.ts`, provider-turn-service prompt path, prompt/reconnect tests | Wave 2 C and Wave 3 E | `pnpm vitest run test/unit/handlers/prompt*.test.ts test/unit/domain/relay/provider-turn-service.test.ts test/unit/provider/orchestration-dispatch-boundary.test.ts -t "reconnect replays durable command state without redispatching provider command|requires commandId for mutating provider commands|preserves prompt dispatch compatibility"` | decider/projector internals, migrations |
-| Wave 4 F2. Interrupt/end-session handler compatibility | `bd create --parent <parent> --title "Interrupt and end-session command compatibility"` | interrupt/end-session handler or domain-service paths and focused tests | F1 or explicit non-overlap proof | focused handler/domain-service command-id and duplicate tests for interrupt/end-session | prompt compatibility, migrations, decider/projector internals |
-| Wave 4 F3. Permission/question handler compatibility | `bd create --parent <parent> --title "Permission and question command compatibility"` | `permissions.ts`, question resolution path, focused handler/domain-service tests | F1 or explicit non-overlap proof | focused duplicate/no-op tests for resolved permission/question commands | prompt compatibility, migrations, decider/projector internals |
-| Wave 4 F4. Model/settings/reload/context-window compatibility | `bd create --parent <parent> --title "Provider settings command compatibility"` | `model.ts`, `settings.ts`, `reload.ts`, `context-window.ts`, domain service tests | F1 or explicit non-overlap proof | focused command-id and compatibility tests only for paths that remain mutating provider commands | prompt compatibility, migrations, decider/projector internals |
+| Wave 4 F2. Interrupt/end-session handler compatibility | `bd create --parent <parent> --title "Interrupt and end-session command compatibility"` | exact files/symbols from the Wave 4 ownership map; usually interrupt/end-session handler or domain-service paths and focused tests | F1 and Gate G | focused handler/domain-service command-id and duplicate tests for interrupt/end-session | any file not assigned in the ownership map; prompt compatibility, migrations, decider/projector internals |
+| Wave 4 F3. Permission/question handler compatibility | `bd create --parent <parent> --title "Permission and question command compatibility"` | exact files/symbols from the Wave 4 ownership map; usually `permissions.ts`, question resolution path, and focused handler/domain-service tests | F1 and Gate G | focused duplicate/no-op tests for resolved permission/question commands | any file not assigned in the ownership map; prompt compatibility, migrations, decider/projector internals |
+| Wave 4 F4. Model/settings/reload/context-window compatibility | `bd create --parent <parent> --title "Provider settings command compatibility"` | exact files/symbols from the Wave 4 ownership map; usually `model.ts`, `settings.ts`, `reload.ts`, `context-window.ts`, and domain-service tests | F1 and Gate G | focused command-id and compatibility tests only for paths that remain mutating provider commands | any file not assigned in the ownership map; prompt compatibility, migrations, decider/projector internals |
 
 Subagent prompt template:
 
@@ -321,7 +339,7 @@ Return: files inspected, files changed, validation run with outcome, Beads issue
 
 The parent agent must not dispatch two subagents that can edit the same file. If two streams need the same file, serialize them or split a smaller interface contract first.
 
-Do not dispatch all Wave 4 handler streams by default. Start with F1. Dispatch F2-F4 in parallel only if F1 proves the compatibility shape and the remaining write sets are disjoint.
+Do not dispatch all Wave 4 handler streams by default. Start with F1. Before F2-F4, the parent must record a Wave 4 ownership map in Beads listing exact files, exact symbols/routes, tests, and forbidden files for each stream. Dispatch F2-F4 in parallel only if F1 proves the compatibility shape, the map is explicit, and the remaining write sets are disjoint. If `provider-turn-service` or another domain-service file is needed by more than one stream, serialize those streams.
 
 ## Beads Execution Protocol
 
@@ -332,18 +350,25 @@ bd prime
 bd show <parent-id>
 bd update <parent-id> --claim
 bd update <parent-id> --append-notes "Phase 0 hard decisions must be resolved before parallel streams or handler migration."
-bd create --parent <parent-id> --title "Phase 0 durable command policy decisions" --type=decision --priority=1 --spec-id "docs/plans/2026-05-18-provider-orchestration-durable-receipts-decider-projector.md"
+bd create --parent <parent-id> --title "Phase 0 receipt state model" --type=decision --priority=1 --spec-id "docs/plans/2026-05-18-provider-orchestration-durable-receipts-decider-projector.md"
+bd create --parent <parent-id> --title "Phase 0 duplicate accepted return shape" --type=decision --priority=1 --spec-id "docs/plans/2026-05-18-provider-orchestration-durable-receipts-decider-projector.md"
+bd create --parent <parent-id> --title "Phase 0 stable provider command id source" --type=decision --priority=1 --spec-id "docs/plans/2026-05-18-provider-orchestration-durable-receipts-decider-projector.md"
+bd create --parent <parent-id> --title "Phase 0 crash-window recovery policies" --type=decision --priority=1 --spec-id "docs/plans/2026-05-18-provider-orchestration-durable-receipts-decider-projector.md"
+bd create --parent <parent-id> --title "Phase 0 effective dispatch fingerprint fields" --type=decision --priority=1 --spec-id "docs/plans/2026-05-18-provider-orchestration-durable-receipts-decider-projector.md"
 bd create --parent <parent-id> --title "Command identity propagation" --type=task --priority=2 --spec-id "docs/plans/2026-05-18-provider-orchestration-durable-receipts-decider-projector.md"
-bd create --parent <parent-id> --title "Deterministic orchestration id and time seams" --type=task --priority=2 --spec-id "docs/plans/2026-05-18-provider-orchestration-durable-receipts-decider-projector.md"
+bd create --parent <parent-id> --title "Phase 0 deterministic orchestration id and time seams" --type=decision --priority=1 --spec-id "docs/plans/2026-05-18-provider-orchestration-durable-receipts-decider-projector.md"
 bd create --parent <parent-id> --title "Event-log independence" --type=task --priority=2 --spec-id "docs/plans/2026-05-18-provider-orchestration-durable-receipts-decider-projector.md"
 bd create --parent <parent-id> --title "Command read-model snapshot bootstrap" --type=task --priority=2 --spec-id "docs/plans/2026-05-18-provider-orchestration-durable-receipts-decider-projector.md"
-bd create --parent <parent-id> --title "Command read-model storage contract" --type=decision --priority=1 --spec-id "docs/plans/2026-05-18-provider-orchestration-durable-receipts-decider-projector.md"
+bd create --parent <parent-id> --title "Phase 0 command read-model storage contract" --type=decision --priority=1 --spec-id "docs/plans/2026-05-18-provider-orchestration-durable-receipts-decider-projector.md"
+bd create --parent <parent-id> --title "Wave 0 durable command contract artifact" --type=task --priority=1 --spec-id "docs/plans/2026-05-18-provider-orchestration-durable-receipts-decider-projector.md"
+bd create --parent <parent-id> --title "Receipt retention policy follow-up" --type=task --priority=3 --spec-id "docs/plans/2026-05-18-provider-orchestration-durable-receipts-decider-projector.md"
 bd create --parent <parent-id> --title "Durable command commit" --type=task --priority=2 --spec-id "docs/plans/2026-05-18-provider-orchestration-durable-receipts-decider-projector.md"
 bd create --parent <parent-id> --title "Provider command decider and projector" --type=task --priority=2 --spec-id "docs/plans/2026-05-18-provider-orchestration-durable-receipts-decider-projector.md"
 bd create --parent <parent-id> --title "Provider output ingestion convergence" --type=task --priority=2 --spec-id "docs/plans/2026-05-18-provider-orchestration-durable-receipts-decider-projector.md"
 bd create --parent <parent-id> --title "Durable orchestration engine queue" --type=task --priority=2 --spec-id "docs/plans/2026-05-18-provider-orchestration-durable-receipts-decider-projector.md"
 bd create --parent <parent-id> --title "Provider side-effect reactor" --type=task --priority=2 --spec-id "docs/plans/2026-05-18-provider-orchestration-durable-receipts-decider-projector.md"
 bd create --parent <parent-id> --title "Prompt command handler compatibility" --type=task --priority=2 --spec-id "docs/plans/2026-05-18-provider-orchestration-durable-receipts-decider-projector.md"
+bd create --parent <parent-id> --title "Wave 4 handler ownership map" --type=decision --priority=2 --spec-id "docs/plans/2026-05-18-provider-orchestration-durable-receipts-decider-projector.md"
 bd dep add <child-that-depends> <blocking-child>
 bd dep cycles
 ```
@@ -351,8 +376,10 @@ bd dep cycles
 During implementation:
 
 - [ ] Parent or serialized single agent claims exactly one child issue before editing: `bd update <child-id> --claim`.
+- [ ] Pre-created Phase 0 child issues are only tracking placeholders. Claim and investigate only the current blocker; do not inspect, decide, or batch-update later Phase 0 decision issues while the current blocker is still open.
 - [ ] Parallel subagents do not mutate Beads. They return evidence and status text; the parent updates/blocks/closes Beads issues after integration.
-- [ ] Put chosen Phase 0 policies in the decision issue with `bd update <decision-id> --design "<policy summary>"` before closing it.
+- [ ] Put each chosen Phase 0 policy in that blocker decision issue with `bd update <decision-id> --design "<policy summary>"` before closing it. Close one blocker before claiming the next Phase 0 blocker.
+- [ ] Close the Wave 0 contract artifact before dispatching Wave 1 A/B. Parent review must confirm the contract names the shared durable rows, receipt statuses, fingerprint fields, outbox/read-model handoff, and exported TypeScript Interface that both streams use.
 - [ ] Record blockers in Beads, not markdown TODOs.
 - [ ] If a new durable follow-up appears, create a Beads issue immediately with `--parent <parent-id>` or a dependency on the current child.
 - [ ] Close a child only after its focused validation passes or the plan explicitly reclassifies the behavior.
@@ -376,17 +403,18 @@ At session close:
 - [ ] Given two same-process `send_turn` dispatches with same `commandId`, when fake provider is blocked by `Deferred`, then provider receives one call and both callers resolve from the same command result/ack.
 - [ ] Given a persisted accepted receipt and a fresh engine, when the same `send_turn` is dispatched after restart, then provider is not called and the caller receives accepted/replayed status from receipt/read model.
 - [ ] Given same `commandId` with a different prompt/session/provider, when dispatched, then fingerprint mismatch is rejected and persisted; provider not called.
-- [ ] Given same `commandId` with a different effective provider dispatch identity, including provider instance, selected model after alias/version gates, normalized provider option, material default, runtime mode, interaction mode, prompt-injected/settings-backed mode, or execution cwd/worktree, when dispatched, then fingerprint mismatch is rejected and persisted; provider not called.
+- [ ] Given same `commandId` with a different effective provider dispatch identity, including provider instance, selected model after alias/version gates, normalized provider option, material default, runtime mode, interaction mode, prompt-injected/settings-backed mode, derived provider setting/model id, or execution cwd/worktree, when dispatched, then fingerprint mismatch is rejected and persisted; provider not called. Representative derived examples include Claude `contextWindow` resolving a different API model id, `ultracode` producing `xhigh` plus `settings.ultracode`, version-gated effort normalization, and session model-switch fallback to the active-session model.
 - [ ] Given unknown provider, provider readiness failure, probe timeout, or probe teardown failure at first dispatch, when dispatch fails before side-effect request, then no receipt is consumed, any spawned probe/runtime scope is closed or force-killed, and retry after registering a ready provider works.
 - [ ] Given receipt accepted but crash occurs before provider side effect, when recovery starts, then Phase 0 selected policy is applied exactly. Recommended: mark orphaned/interrupted; no automatic provider retry unless command says retryable.
 - [ ] Given provider completes turn but relay crashes before completion event persists, when recovery starts, then read model/receipt exposes incomplete side effect without double-sending.
+- [ ] Given a durable side-effect-requested event has committed, when the side-effect reactor runs, then the provider Adapter is called once after commit and not from the decider or SQL transaction.
 - [ ] Given the side-effect reactor receives provider output after a requested side effect, then the output is handed to `ProviderRuntimeIngestion.ingestBatch`; no new production reactor/sink path calls `translateProviderRuntimeEventToDomain` directly.
-- [ ] Given provider output is ingested through `ProviderRuntimeIngestion`, when browser clients are subscribed through the relay, then browser-visible messages are published by one relay owner without adding a second provider-output mapper.
+- [ ] Given provider output is ingested through `ProviderRuntimeIngestion`, when local relay clients are subscribed through the relay or relay sink, then browser-visible messages are published by one relay owner without adding a second provider-output mapper.
 - [ ] Given side-effect reactor or ingestion work is queued, when tests wait for completion, then they wait through `drain` or a test-only milestone stream and use no timing sleeps.
 - [ ] Given a retryable provider side-effect failure, when the reactor handles it, then retries use bounded backoff proven with `TestClock`, failure state is visible through reactor/outbox state, and the decider remains side-effect free.
 - [ ] Given command ack observability is captured, when dispatch commits the first durable event, then ack duration stops at that publication point and does not wait for provider completion or browser receipt.
 - [ ] Given the browser resumes or reconnects while a command is accepted/running/completed, when the client reattaches, then it observes durable command/session state and does not mint a new mutating command id or trigger another provider side effect.
-- [ ] Given orchestration diagnostics are enabled, when recovery/projection/relay replay runs with diagnostics removed, truncated, or stale, then behavior is unchanged; diagnostics only show bounded queue/backoff/recent-failure visibility.
+- [ ] If orchestration diagnostics are implemented, given diagnostics are enabled, when recovery/projection/relay replay runs with diagnostics removed, truncated, or stale, then behavior is unchanged; diagnostics only show bounded queue/backoff/recent-failure visibility.
 - [ ] Given duplicate permission/question resolution after request already resolved, when dispatched, then provider receives at most one resolution and duplicate is a no-op/replayed acceptance.
 - [ ] Given interrupt races with turn completion, when both commands process, then read model reaches one terminal state and provider receives at most one interrupt for that command id.
 - [ ] Given end session with pending permission/question, when command runs, then pending interactions are cancelled exactly once and session binding is removed if requested.
@@ -400,8 +428,9 @@ At session close:
 | Mutating commands have durable idempotency. | Durable receipts tests. | Same command id never causes a second provider side effect after acceptance. |
 | Command fingerprints prevent accidental id reuse. | Fingerprint mismatch scenario test. | Same id with different stable payload records rejection and does not call provider. |
 | Effective provider dispatch identity is part of durable idempotency. | Provider-instance/model/options/defaults fingerprint tests. | Same id with changed provider instance, selected model after aliases/version gates, normalized options, material defaults, prompt-injected/settings-backed modes, runtime mode, interaction mode, or execution cwd/worktree records rejection and does not call provider. |
+| Wave 1 parallel streams share a pinned command contract. | Wave 0 contract artifact review plus Wave 1 validation. | Receipt/commit and decider/read-model streams implement the same durable rows, receipt statuses, fingerprint fields, outbox/read-model handoff, and exported TypeScript Interface without renegotiating during parallel edits. |
 | Provider lookup/readiness failure does not consume idempotency. | Unknown-provider, readiness, probe timeout, and teardown failure retry tests. | Failed lookup/readiness leaves no receipt, closes or force-kills probe/runtime scope, and retry after registration can succeed. |
-| Decider is side-effect free. | Import/static guard and decider tests. | Decider imports no provider registry/instance, no persistence implementation, no network/process modules. |
+| Decider is side-effect free. | Public orchestration planning test first; import/static guard and direct decider tests only as supporting proof. | Planning produces side-effect-requested events without provider calls; decider imports no provider registry/instance, no persistence implementation, no network/process modules. |
 | Receipt write is transactional with accepted command state. | SQLite rollback/commit test. | Durable command event append, durable command read-model/outbox rows, and receipt appear together or not at all; UI/relay projectors are isolated unless command decision state depends on them; in-memory caches update only after commit or reconcile from durable state. |
 | Side effects are outside DB transaction. | Reactor test with transaction spy/fake provider. | Provider call occurs only after durable side-effect-requested event is committed. |
 | Queue order is deterministic. | Queue test with `Deferred` gates. | Same-session commands process in submit order; no timing sleeps required. |
@@ -412,11 +441,11 @@ At session close:
 | Command identity is stable before provider dispatch. | Handler/domain-service test plus orchestration dispatch test. | Browser/relay-origin command id reaches `send_turn`/`interrupt_turn`; missing id fails before provider lookup. |
 | Core id/time generation is deterministic and injected. | Orchestration/receipt tests with deterministic and failing ID/time services. | Receipt timestamps and generated ids are test-controlled; failing id generation leaves no consumed receipt and no provider lookup. |
 | Durable command commit is a deep Module. | Transaction behavior tests through one commit Interface. | Engine does not know low-level event append/projection/receipt ordering. |
-| Provider output has one durable ingress and relay owner. | Reactor/provider sink tests, live relay publication proof, and static guard. | New production provider output routes through `ProviderRuntimeIngestion`; browser-visible messages are published through the relay owner; mapper imports outside ingestion/translator tests are deleted or explicitly reclassified. |
+| Provider output has one durable ingress and relay owner. | Reactor/provider sink tests, local relay publication proof with fake provider runtime input, and static guard. | New production provider output routes through `ProviderRuntimeIngestion`; browser-visible messages are published through the relay owner; mapper imports outside ingestion/translator tests are deleted or explicitly reclassified. |
 | Reactor quiescence is deterministic in tests. | Reactor/ingestion tests wait on `drain` or test-only milestone stream. | No sleeps, arbitrary polling loops, or provider-log inference are required to prove side-effect completion. |
 | Reactor retry is bounded and testable. | Reactor failure/backoff test using `TestClock`. | Retryable provider failures do not hot-loop; next retry/failure status is visible through reactor/outbox state; decider remains side-effect free. |
 | Browser reconnect is idempotent. | Reconnect/handler test using existing durable command id. | Reconnect observes command/session state without minting a new mutating command id or invoking provider side effects again. |
-| Diagnostics are non-authoritative. | Optional diagnostics test and recovery test with diagnostics removed. | Diagnostics are bounded and redacted; no recovery, projection, replay, or idempotency path reads them as source of truth. |
+| Diagnostics are non-authoritative if implemented. | Default Beads follow-up; optional diagnostics test and recovery test with diagnostics removed only if implementation is pulled into this migration. | Diagnostics are bounded and redacted; no recovery, projection, replay, or idempotency path reads them as source of truth. |
 | Existing handler behavior preserved during compatibility phase. | Handler tests. | Prompt/permission/question/model/settings/reload/context-window call sites still receive expected compatibility results/errors. |
 | Observability exists for command lifecycle. | Span/metric/log assertion or static test. | Command id, type, session/provider, outcome, ack sequence are annotated without high-cardinality payloads; ack ends at first committed durable event publication. |
 | In-memory idempotency is removed. | Static guard. | `processedCommands`, toy `IdempotencySetTag`, and mutable `sessionBindings` are gone or explicitly reclassified. |
@@ -432,6 +461,7 @@ Every item below must be removed or explicitly reclassified before the migration
 - [ ] `command_receipts` lacks fingerprint/result status needed by tests. Prove schema tests assert all required columns/indexes.
 - [ ] Fingerprintless t3code-style receipt copied into Conduit. Prove schema and dispatch tests reject same `commandId` with a different stable payload.
 - [ ] Effective provider dispatch identity omitted from fingerprint. Prove schema/dispatch tests reject same `commandId` when provider instance, selected model after aliases/version gates, normalized provider options, material defaults, prompt-injected/settings-backed modes, runtime mode, interaction mode, or execution cwd/worktree changes.
+- [ ] Derived provider dispatch values omitted from fingerprint. Prove tests reject same `commandId` when effective Claude-like values change because `contextWindow` resolved a different API model id, `ultracode` changed effective effort/settings, effort normalization changed across provider version gates, or session model-switch fallback changed the model actually sent to the provider.
 - [ ] Raw UI/provider option objects fingerprinted directly. Prove option order, alias resolution, version gating, and default injection are normalized before hashing.
 - [ ] Provider options keyed by driver instead of instance. Prove multiple same-driver provider instances keep distinct options when command execution depends on them.
 - [ ] Command snapshot drops stale-command tombstones or shares UI snapshot shape. Prove stale/deleted/terminal command decisions work after restart and shell/UI snapshots still hide tombstones.
@@ -453,16 +483,18 @@ Every item below must be removed or explicitly reclassified before the migration
 
 ## Verification Commands
 
+These are phase-boundary/final checks, not permission to write or run a horizontal test batch. During implementation, run the focused command attached to the current RED-GREEN slice and add broader commands only when the changed surface justifies them.
+
 - [ ] `pnpm vitest run test/unit/handlers/prompt*.test.ts test/unit/provider/orchestration-dispatch-boundary.test.ts -t "propagates commandId to provider command dispatch|requires commandId for mutating provider commands"`
 - [ ] `pnpm vitest run test/unit/provider/orchestration-engine-effect.test.ts test/unit/provider/orchestration-durable-receipts.test.ts -t "uses injected id and time sources|id generation failure does not consume command receipt"`
-- [ ] `pnpm vitest run test/unit/provider/orchestration-decider.test.ts`
-- [ ] `pnpm vitest run test/unit/provider/orchestration-projector.test.ts`
+- [ ] `pnpm vitest run test/unit/provider/orchestration-decider.test.ts` only if direct decider tests were added as supporting proof.
+- [ ] `pnpm vitest run test/unit/provider/orchestration-projector.test.ts` only if direct projector tests were added as supporting proof.
 - [ ] `pnpm vitest run test/unit/provider/orchestration-durable-receipts.test.ts`
 - [ ] `pnpm vitest run test/unit/provider/orchestration-engine.test.ts test/unit/provider/orchestration-engine-effect.test.ts`
 - [ ] `pnpm vitest run test/unit/provider/orchestration-engine-effect.test.ts -t "bootstraps from command read model without loading full relay snapshot|command read model includes tombstones for stale command decisions|records command ack when the first committed event is published"`
 - [ ] `pnpm vitest run test/unit/provider/orchestration-durable-receipts.test.ts -t "rejects reused command id when effective provider dispatch identity changes|replays accepted send_turn after restart without provider call"`
 - [ ] `pnpm vitest run test/unit/provider/orchestration-engine-effect.test.ts -t "provider lookup failures do not consume command receipts|provider readiness failure closes probe scope"`
-- [ ] `pnpm vitest run test/unit/provider/orchestration-side-effect-reactor.test.ts -t "executes committed side effect once and ingests provider output|drains committed side effects without sleeps|backs off retryable provider failures without hot looping"`
+- [ ] `pnpm vitest run test/unit/provider/orchestration-side-effect-reactor.test.ts -t "executes committed side effect once after commit|hands provider output to provider runtime ingestion|drains committed side effects without sleeps|backs off retryable provider failures without hot looping"`
 - [ ] `pnpm vitest run test/unit/provider/provider-runtime-ingestion.test.ts test/unit/provider/relay-event-sink.test.ts -t "ingested provider output is relayed to browser clients"`
 - [ ] `pnpm vitest run test/unit/provider/orchestration-dispatch-boundary.test.ts test/unit/handlers/prompt*.test.ts -t "reconnect replays durable command state without redispatching provider command"`
 - [ ] `pnpm vitest run test/unit/provider/orchestration-diagnostics.test.ts -t "reports bounded reactor status without recovery dependency"` if diagnostics are implemented.
@@ -481,6 +513,7 @@ Every item below must be removed or explicitly reclassified before the migration
 - [ ] High risk: current `dispatchEffect(send_turn)` returns `TurnResult`; durable command dispatch may need ack-first semantics. Keep compatibility facade until handlers migrate.
 - [ ] High risk: crash after accept before side effect. This is a Phase 0 blocker; do not write handler migration code or dispatch parallel streams until the policy is chosen and recorded in Beads.
 - [ ] High risk: Phase 0 can become a horizontal architecture spike. Keep it to Interface-shaping blockers; move reactor backoff, reconnect freshness, diagnostics, and performance details to later behavior slices or Beads follow-ups.
+- [ ] High risk: decider/projector files can become shallow test-only Interfaces. Test through Provider Command Orchestration first and keep decider/projector as Implementation unless the deletion test proves independent leverage.
 - [ ] Risk: provider option canonicalization can cause false mismatches if option order, defaults, provider aliases, model version gates, or settings/prompt injection are unstable. Canonicalize the effective dispatch request and decide whether default options are material before adding receipt tests.
 - [ ] Risk: global id/time generation can make restart/duplicate tests flaky or unprovable. Require injected `Clock`/ID services before durable receipt behavior is considered GREEN.
 - [ ] Risk: parallel subagents can race on `.beads`/Dolt exports. Parent owns Beads mutations while subagents run; subagents return Beads note text instead of updating issues directly.
@@ -490,6 +523,7 @@ Every item below must be removed or explicitly reclassified before the migration
 - [ ] Risk: reactor backoff can hide stuck provider work. Pair bounded retry with visible failure/outbox state and optional diagnostics; do not silently swallow repeated failures.
 - [ ] Risk: a test-only quiescence Interface can accidentally become a production replay contract. Name it as test-only, use production no-op/test PubSub adapters if needed, and statically guard recovery against it.
 - [ ] Risk: diagnostics history can grow into a shadow event store. Keep it bounded, redacted, disposable, and absent from replay/recovery code.
+- [ ] Risk: optional diagnostics can look required because they appear in scenarios and verification. Default to a Beads follow-up unless a reactor/backoff/ingestion RED test proves rollout visibility is needed now.
 - [ ] Tradeoff: converging provider output behind `ProviderRuntimeIngestion` reduces duplicated mapping logic, but may require a short compatibility adapter for existing provider event sinks. Keep that adapter outside production reactor wiring and guard it.
 - [ ] Tradeoff: receipts-only hotfix is smaller for urgent duplicate bugs; full decider/projector shape is better but larger.
 - [ ] Tradeoff: per-session queue is simpler for ordering; global queue matches t3code and is easier for deterministic receipt handling. Prefer global queue first.
@@ -528,6 +562,7 @@ Blocker decisions:
 - [ ] Recovery for orphaned accepted command. Recommended: mark interrupted/error, no automatic retry by default.
 - [ ] Recovery for provider-completed-before-completion-event-persisted. Recommended: expose incomplete side-effect status and require explicit retry/reconcile path; no automatic duplicate provider send.
 - [ ] Which effective provider dispatch fields are material to a command fingerprint? Recommended: include provider instance, selected model after aliases/version gates, canonical explicit options, prompt-injected/settings-backed modes, and material defaults only after a red test proves defaults affect provider execution.
+- [ ] Which derived provider dispatch values are material to a command fingerprint? Recommended: include values that change the provider request after normalization, such as Claude `contextWindow` API model suffix, `ultracode` effective effort/settings, version-gated effort mapping, and active-session model fallback.
 - [ ] Deterministic id/time seams. Recommended: orchestration receives injected `Clock`/`DateTime` and `Crypto`/ID service; failing ID generation maps to typed dispatch error before receipt lookup/upsert.
 - [ ] Command read-model storage contract. Recommended: command decision rows/outbox/receipt commit atomically; UI/relay projector writes remain isolated unless command decision state depends on them.
 - [ ] Does execution cwd/worktree belong in every fingerprint or only commands that call providers from that cwd? Recommended: include when provider calls receive or derive cwd/worktree.
@@ -535,7 +570,7 @@ Blocker decisions:
 Non-blocker decisions, unless the current slice proves otherwise:
 
 - [ ] Is `discover` receipted? Recommended: no, unless tests expose user-visible duplicate/race bug.
-- [ ] How long to retain receipts? Recommended: current eviction plus explicit test for retry after eviction behavior; if not needed for rollout, file a Beads follow-up.
+- [ ] How long to retain receipts? Recommended: choose permanent, time-bounded with explicit expired-receipt behavior, or best-effort. Current eviction plus an explicit retry-after-eviction test is acceptable only if that behavior is recorded; if not needed for rollout, file a Beads follow-up.
 - [ ] Should command contracts live under `src/lib/contracts/providers/`? Recommended: no unless they cross process/wire boundary; start under provider orchestration.
 - [ ] Should reactor quiescence use a `drain` Interface, a test-only milestone stream, or both? Recommended: start with `drain` for worker queues and add a test-only milestone stream only when a test must await a named post-provider milestone.
 - [ ] What is the initial reactor backoff policy? Recommended: exponential with cap, injectable policy, and `TestClock` tests for first failure, repeated failure, reset after success, and cap.
@@ -545,19 +580,20 @@ Non-blocker decisions, unless the current slice proves otherwise:
 
 ## Concrete Steps
 
-1. Run `bd prime`, claim/create the parent Beads issue, and pre-create child Beads issues for the Phase 0 decision gate, command identity, deterministic id/time seams, Gate A, Gate B, Gate C, Gate D, Gate F, and each Wave 1 stream. Parent owns Beads updates while parallel subagents run.
+1. Run `bd prime`, claim/create the parent Beads issue, and pre-create child Beads issues for each Phase 0 blocker decision, command identity, deterministic id/time seams, Gate A, Gate B, Gate C, Gate D, Gate F, Wave 4 ownership map, and each Wave 1 stream. Parent owns Beads updates while parallel subagents run.
 2. Run prereq tests and prove `docs/plans/2026-05-20-delete-legacy-opencode-runtime-ingress.md` is complete or explicitly reclassified.
-3. Spike only Interface-shaping Phase 0 blockers with fake provider + SQLite: receipt states, duplicate return shape, stable command id source, effective provider dispatch fingerprint fields, deterministic id/time policy, command read-model storage contract, and crash windows. Record blocker decisions in the Phase 0 Beads decision issue before implementation proceeds.
+3. Resolve only Interface-shaping Phase 0 blockers with fake provider + SQLite, one blocker at a time: receipt states, duplicate return shape, stable command id source, effective provider dispatch fingerprint fields, deterministic id/time policy, command read-model storage contract, and crash windows. Record each blocker decision in its own Beads decision issue before claiming the next blocker.
 4. Execute TDD vertical slice 1: command identity propagation and missing-id rejection for prompt/send-turn, then interrupt.
 5. Execute TDD vertical slice 2: deterministic id/time seams and failing ID service behavior.
 6. Execute TDD vertical slices 3 and 4: event log appends before session projection, then `ProviderRuntimeIngestion` stops pre-seeding sessions.
 7. Execute TDD vertical slices 5 and 6: engine bootstraps from narrow command read-model snapshot, then carries one stale-command tombstone without leaking it into shell/UI snapshots.
 8. Execute TDD vertical slices 7 and 8: same-process duplicate `send_turn`, then restart duplicate replay from durable receipt/read model.
 9. Execute TDD vertical slices 9 and 10: effective provider dispatch fingerprint mismatch one field at a time, then provider lookup/readiness/probe failures without receipt consumption or leaked scopes.
-10. After Gates C, D, E, and F are GREEN, dispatch Wave 1 subagents for A, B, and D only if their Beads issues, owned files, forbidden files, and validation commands are explicit and disjoint.
-11. Integrate Wave 1, then dispatch Wave 2 C for engine queue and duplicate waiters.
-12. Integrate Wave 2, then dispatch Wave 3 E for side-effect reactor with deterministic quiescence, backoff proof, and provider-output ingestion/relay proof.
-13. Add optional diagnostics only if the reactor/backoff rollout needs bounded operator visibility and the diagnostics Module passes the deletion test; otherwise file a Beads follow-up.
-14. Migrate handler and reconnect compatibility as Wave 4, starting with F1 prompt/send turn. Dispatch F2-F4 only after F1 proves the compatibility shape and their write sets are disjoint.
-15. Run cleanup guards only after behavior tests prove replacements.
-16. Close completed Beads children, update blockers/follow-ups in Beads, and run the verification commands selected by changed surface.
+10. Execute and close Wave 0: produce the durable command contract artifact that pins shared durable rows, transaction ownership, receipt statuses, fingerprint fields including derived provider values, outbox/read-model handoff, and exported TypeScript Interface/types for Wave 1.
+11. After Gates C, D, E, F, and F2 are GREEN, dispatch Wave 1 subagents for A, B, and D only if their Beads issues, owned files, forbidden files, and validation commands are explicit and disjoint.
+12. Integrate Wave 1, then dispatch Wave 2 C for engine queue and duplicate waiters.
+13. Integrate Wave 2, then dispatch Wave 3 E for side-effect reactor as separate tracer bullets: provider call after commit, provider-output handoff to `ProviderRuntimeIngestion`, local relay publication proof, deterministic quiescence, and bounded retry/backoff.
+14. Add optional diagnostics only if a reactor/backoff/ingestion RED test proves rollout visibility is needed and the diagnostics Module passes the deletion test; otherwise file a Beads follow-up.
+15. Migrate handler and reconnect compatibility as Wave 4, starting with F1 prompt/send turn. Before F2-F4, record exact file/symbol ownership in the Wave 4 ownership-map Beads issue. Dispatch F2-F4 only after F1 proves the compatibility shape and the mapped write sets are disjoint.
+16. Run cleanup guards only after behavior tests prove replacements.
+17. Close completed Beads children, update blockers/follow-ups in Beads, and run the verification commands selected by changed surface.

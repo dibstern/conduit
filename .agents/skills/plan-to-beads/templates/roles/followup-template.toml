@@ -1,0 +1,30 @@
+# Role template: followup-template.
+# This is normally not executable work. It defines how later beads should be created.
+
+[[steps]]
+id = "{{logical_id}}"
+title = "{{title}}"
+type = "chore"
+description = "{{description}}"
+needs = {{needs_array}}
+
+[steps.metadata.planToBeads]
+contractVersion = "plan-to-beads.v1"
+templateVersion = "{{template_version}}"
+role = "followup-template"
+logicalId = "{{logical_id}}"
+planId = "{{plan_id}}"
+sourcePlan = "{{source_plan}}"
+contextRefs = {{context_refs_array}}
+inherits = {{inherits_array}}
+provides = {{provides_array}}
+createExecutableChildren = false
+
+[steps.metadata.followupTemplate]
+trigger = "{{trigger}}"
+requiredEvidence = {{required_evidence_array}}
+requiredFields = {{required_fields_array}}
+defaultNeeds = {{default_needs_array}}
+defaultContextRefs = {{default_context_refs_array}}
+defaultConstraints = {{default_constraints_array}}
+promotionRules = {{promotion_rules_array}}

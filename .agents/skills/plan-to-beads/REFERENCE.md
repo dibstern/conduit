@@ -1,294 +1,135 @@
 # Plan To Beads Reference
 
-## Formula Skeleton
+## Purpose
 
-```toml
-formula = "plan-to-beads-executable-plan"
-description = "Convert a structured implementation plan into a persistent executable Beads molecule."
-version = 1
-type = "workflow"
+`/plan-to-beads` turns a structured implementation plan into a Beads-backed work graph. The source templates are generic. A generated plan-specific formula or direct `bd` mutation hydrates placeholders from a plan IR.
 
-[vars.plan_id]
-description = "Short plan id, e.g. dry4ts"
-required = true
+## Plan IR
 
-[vars.plan_title]
-description = "Human title for the plan"
-required = true
+The converter should build this IR before rendering templates:
 
-[vars.source_plan]
-description = "Original plan path or empty for Beads-only plans"
-default = ""
+```json
+{
+  "planId": "short-stable-id",
+  "planTitle": "Human title",
+  "sourcePlan": "docs/plans/example.md",
+  "roles": [
+    {
+      "role": "child",
+      "logicalId": "stage-behavior-01",
+      "title": "Concrete behavior title",
+      "needs": ["fixture-basic"],
+      "contextRefs": ["global-contract", "architecture-core"],
+      "inherits": ["stage-parent"],
+      "metadata": {}
+    }
+  ]
+}
 ```
 
-## Shared Metadata Envelope
+Use the IR as the only source for plan-specific values. Do not edit the generic templates with concrete behavior names, file paths, expected failures, or commands.
 
-Put role and wiring data under `steps.metadata.planToBeads`.
+## Hooking Shared Context Into Children
 
-```toml
-[steps.metadata.planToBeads]
-contractVersion = "plan-to-beads.v1"
-role = "child"
-logicalId = "t1-01"
-sourcePlan = "{{source_plan}}"
-inherits = ["structural-parent"]
-contextRefs = ["global-contract", "architecture-policy", "testing-policy"]
-provides = []
-```
+Every role exposes context through `provides`; children consume it through `contextRefs` or `inherits`.
 
-Field meaning:
+| Source role | Child hook | Meaning |
+| --- | --- | --- |
+| `global-contract` | `contextRefs` | Scope, non-goals, repo/package boundary, global constraints |
+| `architecture` | `contextRefs` | Module ownership, public/private interfaces, forbidden seams |
+| `policy` | `contextRefs` | TDD rules, output policy, profile policy, subagent rules |
+| `fixture` | `inputs` plus `contextRefs` | Fixture provenance, refresh policy, expected signal |
+| `parent` | `inherits` | Stage defaults, owner files, shared forbidden files |
+| `checkpoint` | `needs` and `contextRefs` | Fanout gate, integration validation, frozen extension points |
+| `pilot` | `needs` and `contextRefs` | Measurement evidence that creates or rejects follow-up work |
+| `followup-template` | `contextRefs` | Schema for later child beads, not executable work by default |
 
-- `role`: one of `global-contract`, `parent`, `architecture`, `policy`, `fixture`, `child`, `checkpoint`, `pilot`, `followup-template`.
-- `logicalId`: stable id used by formulas, docs, `contextRefs`, and validation.
-- `inherits`: parent/stage defaults to merge into the agent packet.
-- `contextRefs`: beads the agent must read before executing this bead.
-- `provides`: named contract or fixture made available to later beads.
+`needs` gates readiness. `contextRefs` tells an agent what to read. `inherits` merges defaults into the child prompt contract. `provides` names data that later beads may reference.
 
-## Global Contract Bead
+## Role To Type Mapping
 
-```toml
-[[steps]]
-id = "global-contract"
-title = "{{plan_id}}: global contract"
-type = "decision"
-description = "Scope, non-goals, repo boundaries, global constraints, and success criteria."
+Use these defaults unless the repository has stricter conventions:
 
-[steps.metadata.planToBeads]
-contractVersion = "plan-to-beads.v1"
-role = "global-contract"
-logicalId = "global-contract"
-sourcePlan = "{{source_plan}}"
-provides = ["globalContract"]
+| Role | Beads type | Why |
+| --- | --- | --- |
+| `epic` | `epic` or molecule root | Whole plan instance |
+| `global-contract` | `decision` | Durable scope and non-goals |
+| `architecture` | `decision` | Cross-cutting design contract |
+| `policy` | `decision` | Cross-cutting execution rules |
+| `parent` | `feature` | Deliverable stage or feature group |
+| `child` | `task` | One executable implementation contract |
+| `checkpoint` | `task` or `gate` | Validation and fanout readiness |
+| `fixture` | `chore` | Mechanical/provenance work |
+| `pilot` | `task` | Evidence collection with validation |
+| `followup-template` | `chore` | Non-executable template for later work |
 
-[steps.metadata.globalContract]
-scope = []
-nonGoals = []
-repoBoundary = []
-packageBoundary = []
-successCriteria = []
-globalForbiddenWork = []
-requiredSkills = []
-```
+`parent` should usually be a `feature`, not a `task`, because it groups behavior and carries stage defaults. Use `chore` for non-product mechanical work such as fixture manifests, validation sweeps, export/sync, or template maintenance.
 
-## Architecture Bead
+## Version Control
 
-```toml
-[[steps]]
-id = "architecture-policy"
-title = "{{plan_id}}: architecture policy"
-type = "decision"
-needs = ["global-contract"]
+- Commit generic source templates in `.agents/skills/plan-to-beads/templates/`.
+- Generate plan-specific formulas in `.beads/generated-formulas/<plan-id>.formula.toml` for review.
+- Install a generated formula into `.beads/formulas/` only when the user wants a reusable formula name.
+- Store molecule instances and runtime status in Beads/Dolt; `.beads/*.jsonl` are passive exports.
+- Include `contractVersion = "plan-to-beads.v1"` and `templateVersion` in rendered metadata.
 
-[steps.metadata.planToBeads]
-contractVersion = "plan-to-beads.v1"
-role = "architecture"
-logicalId = "architecture-policy"
-contextRefs = ["global-contract"]
-provides = ["architecturePolicy"]
+## Rendering Strategy
 
-[[steps.metadata.architecturePolicy.modules]]
-name = "ComparisonUnitExtractor"
-interface = "Resolved input paths and profile in; comparison units out."
-implementationOwns = ["scanning", "parsing", "source spans"]
-doesNotOwn = ["clone classification", "report formatting"]
-seamRules = ["Do not create one-adapter seams."]
-```
+Preferred path:
 
-## Policy Bead
+1. Parse the plan into IR.
+2. Validate IR completeness.
+3. Compose `templates/formula/executable-plan.formula.toml` with role snippets from `templates/roles/`.
+4. Replace every placeholder.
+5. Write a plan-specific generated formula.
+6. `bd cook` and `bd mol pour --dry-run`.
 
-```toml
-[[steps]]
-id = "testing-policy"
-title = "{{plan_id}}: TDD and validation policy"
-type = "decision"
-needs = ["global-contract"]
+Small-plan fallback:
 
-[steps.metadata.planToBeads]
-contractVersion = "plan-to-beads.v1"
-role = "policy"
-logicalId = "testing-policy"
-contextRefs = ["global-contract"]
-provides = ["testingPolicy"]
+1. Hydrate role templates directly into `bd create`, `bd update`, and `bd dep add`.
+2. Query Beads after mutation.
+3. Run the same schema validation against Beads metadata.
 
-[steps.metadata.testingPolicy]
-redGreenRefactor = true
-oneBehaviorPerChild = true
-requireSingleRedCommand = true
-requireVerificationCommand = true
-parserMocksAllowed = false
-```
+## Template Layers
 
-## Parent / Stage Bead
+- `templates/formula/`: outer formula shape and common vars.
+- `templates/roles/`: one Beads issue/step per role.
+- `templates/contracts/`: reusable metadata snippets for child work packets, subagent launch packets, and durable handoff notes.
 
-```toml
-[[steps]]
-id = "structural-parent"
-title = "{{plan_id}}: structural implementation"
-type = "feature"
-needs = ["architecture-policy", "testing-policy"]
+The converter may inline contract snippets into role snippets, or render role snippets directly when the role already contains the needed fields. The generated formula is the first artifact that must be valid TOML.
 
-[steps.metadata.planToBeads]
-contractVersion = "plan-to-beads.v1"
-role = "parent"
-logicalId = "structural-parent"
-contextRefs = ["global-contract", "architecture-policy", "testing-policy"]
-provides = ["stageDefaults:structural"]
+## Validation Checklist
 
-[steps.metadata.stageContract]
-stage = "structural"
-creationGate = "Create children only after global context and policies exist."
-defaultAllowedRoots = ["packages/{{plan_id}}"]
-defaultForbiddenFiles = []
-sharedOwnershipRules = []
-serialByDefault = true
+Before pouring:
 
-[steps.metadata.stageContract.parallelPolicy]
-wave = 1
-maxSubagents = 1
-disjointFileScopesRequired = true
-```
+- Generated TOML has no unresolved `{{...}}` placeholders.
+- `bd cook <generated-formula> --dry-run` succeeds.
+- Dry-run pour shows the expected root, context beads, parents, checkpoints, and children.
+- All `logicalId` values are unique.
+- All `needs`, `contextRefs`, `inherits`, `provides`, fixture refs, and follow-up template refs resolve.
+- All child beads contain required `workPacket` fields.
+- `redCommand` targets exactly one behavior; broader commands live in `verification`.
+- `allowedFiles` and `forbiddenFiles` are concrete after hydration.
+- Parallel waves have disjoint write ownership or checkpoint-owned merge rules.
+- Checkpoints define validation commands, fanout rules, subagent launch packet shape, and handoff requirements.
+- Fixture beads preserve source provenance and refresh policy.
 
-## Fixture Bead
-
-```toml
-[[steps]]
-id = "fixture-t1-basic"
-title = "{{plan_id}}: T1 fixture manifest"
-type = "chore"
-needs = ["structural-parent"]
-
-[steps.metadata.planToBeads]
-contractVersion = "plan-to-beads.v1"
-role = "fixture"
-logicalId = "fixture-t1-basic"
-contextRefs = ["global-contract", "testing-policy"]
-provides = ["fixture:t1-basic"]
-
-[steps.metadata.fixtureManifest]
-fixtureId = "t1-basic"
-source = "hand-crafted behavior fixture"
-refreshPolicy = "manual explicit review only"
-expectedSignals = ["stable T1 output"]
-
-[[steps.metadata.fixtureManifest.files]]
-sourcePath = "inline plan fixture"
-fixturePath = "packages/{{plan_id}}/test/fixtures/t1-basic/a.ts"
-reason = "T1 positive behavior"
-```
-
-## Child Work Packet
-
-```toml
-[[steps]]
-id = "t1-01"
-title = "{{plan_id}}: T1 reports byte-identical functions"
-type = "task"
-needs = ["fixture-t1-basic"]
-
-[steps.metadata.planToBeads]
-contractVersion = "plan-to-beads.v1"
-role = "child"
-logicalId = "t1-01"
-inherits = ["structural-parent"]
-contextRefs = ["global-contract", "architecture-policy", "testing-policy", "fixture-t1-basic"]
-
-[steps.metadata.workPacket]
-goal = "Implement one vertical T1 behavior."
-inputs = ["fixture:t1-basic"]
-constraints = ["red-green-refactor", "minimal green implementation only"]
-allowedFiles = ["packages/{{plan_id}}/src/extract/comparison-unit-extractor.ts"]
-forbiddenFiles = ["packages/{{plan_id}}/src/report/report-writer.ts"]
-redCommand = "pnpm --filter {{plan_id}} test -- test/acceptance/type1.test.ts -t \"T1-01\""
-expectedFailure = "No T1 cluster for identical functions."
-greenScope = "Extract eligible TS functions and report T1 through runner output."
-verification = "pnpm --filter {{plan_id}} test -- test/acceptance/type1.test.ts"
-failureConditions = ["Needs a forbidden/shared file", "Dependency is not closed"]
-
-[steps.metadata.workPacket.handoff]
-requiresBeadsNote = true
-requiresCommitSha = true
-closeByIntegrationOwner = true
-```
-
-## Checkpoint Bead
-
-```toml
-[[steps]]
-id = "structural-checkpoint"
-title = "{{plan_id}}: structural checkpoint"
-type = "task"
-needs = ["t1-01"]
-
-[steps.metadata.planToBeads]
-contractVersion = "plan-to-beads.v1"
-role = "checkpoint"
-logicalId = "structural-checkpoint"
-contextRefs = ["global-contract", "architecture-policy", "testing-policy"]
-provides = ["checkpoint:structural"]
-
-[steps.metadata.checkpointContract]
-gateFor = "next-stage-child-creation"
-requiresClosed = ["t1-01"]
-validationCommands = ["pnpm --filter {{plan_id}} test -- test/acceptance/type1.test.ts"]
-fanoutRules = ["Do not create next-stage children until this checkpoint is closed."]
-blocksChildCreationUntilClosed = true
-```
-
-## Pilot Bead
-
-```toml
-[[steps]]
-id = "pilot-snapshot"
-title = "{{plan_id}}: pilot snapshot"
-type = "task"
-needs = ["structural-checkpoint"]
-
-[steps.metadata.planToBeads]
-contractVersion = "plan-to-beads.v1"
-role = "pilot"
-logicalId = "pilot-snapshot"
-contextRefs = ["global-contract", "structural-checkpoint"]
-
-[steps.metadata.pilotContract]
-purpose = "Collect evidence only; do not tune behavior in this bead."
-commands = []
-forbiddenWork = ["threshold tuning", "new detection tracks"]
-```
-
-## Follow-Up Template Bead
-
-```toml
-[[steps]]
-id = "followup-template"
-title = "{{plan_id}}: follow-up template"
-type = "chore"
-needs = ["pilot-snapshot"]
-
-[steps.metadata.planToBeads]
-contractVersion = "plan-to-beads.v1"
-role = "followup-template"
-logicalId = "followup-template"
-createExecutableChildren = false
-
-[steps.metadata.followupTemplate]
-trigger = "Pilot finds a concrete false negative or false positive."
-requiredFields = ["observedEvidence", "proposedBehavior", "redCommand", "greenScope", "verification"]
-```
-
-## Validation Queries
+After pouring:
 
 ```bash
-bd cook .beads/formulas/plan-to-beads-executable-plan.formula.toml --dry-run
-bd cook .beads/formulas/plan-to-beads-executable-plan.formula.toml --mode=runtime --var plan_id=dry4ts --var plan_title="dry4ts"
-bd mol pour plan-to-beads-executable-plan --dry-run --var plan_id=dry4ts --var plan_title="dry4ts"
 bd dep cycles
 bd list --has-metadata-key planToBeads --json
+bd ready
 ```
 
-After runtime cooking, inspect metadata for unresolved placeholders:
+## Placeholder Rules
 
-```bash
-bd cook .beads/formulas/plan-to-beads-executable-plan.formula.toml --mode=runtime --var plan_id=dry4ts --var plan_title="dry4ts" | rg '\{\{'
-```
+Use `{{snake_case}}` placeholders. Array and object placeholders represent already-rendered TOML fragments, not quoted strings.
 
-If placeholders remain inside nested metadata, do not pour the molecule as-is. Either generate a plan-specific formula with concrete metadata values or update the poured beads with `bd update <id> --metadata '<json>'`.
+Examples:
+
+- `{{plan_id}}` renders as a scalar string fragment when quoted.
+- `{{needs_array}}` renders as a TOML array, for example `["global-contract"]`.
+- `{{work_packet_table}}` renders as nested TOML fields.
+
+The source snippets may not be valid standalone TOML before hydration. The generated formula must be valid TOML.

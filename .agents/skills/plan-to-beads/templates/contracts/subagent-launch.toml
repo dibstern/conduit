@@ -1,0 +1,19 @@
+# Contract template: subagent launch packet.
+# Usually embedded in parent or checkpoint metadata.
+
+launchWhen = "{{launch_when}}"
+wave = "{{parallel_wave}}"
+maxSubagents = {{max_subagents_int}}
+claimCommand = "{{claim_command}}"
+readyCommand = "{{ready_command}}"
+dependencyFreshnessCommand = "{{dependency_freshness_command}}"
+worktreePolicy = "{{worktree_policy}}"
+branchNamePattern = "{{branch_name_pattern}}"
+promptTemplate = "{{prompt_template}}"
+allowedFiles = {{allowed_files_array}}
+forbiddenFiles = {{forbidden_files_array}}
+handoffRequired = true
+handoffLocation = "{{handoff_location}}"
+closePolicy = "{{close_policy}}"
+mergeCheckpointRef = "{{merge_checkpoint_ref}}"
+failureConditions = {{failure_conditions_array}}

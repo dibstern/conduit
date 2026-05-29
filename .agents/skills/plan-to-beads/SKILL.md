@@ -1,94 +1,80 @@
 ---
 name: plan-to-beads
-description: Convert implementation plans into executable Beads formulas and molecules with machine-readable prompt-contract metadata. Use when the user asks to convert a plan/spec/design into Beads, create an executable beads plan, define work packets, or prepare parallel agent work from a plan.
+description: Convert structured implementation plans into Beads-backed executable work graphs with prompt-contract metadata and generated formula templates. Use when the user asks to turn a plan into Beads, create plan-to-beads formulas or molecules, validate Beads work packets, or prepare plans for parallel agent execution.
 ---
 
 # Plan To Beads
 
-Turn a written plan into a persistent Beads molecule where Beads, not the prose doc, become the executable work graph.
+Convert a written implementation plan into Beads issues/molecules where Beads hold the executable work graph and each child bead carries a prompt contract.
 
 ## Quick Start
 
 1. Run `bd prime`.
-2. Read the plan and any repo-local formula at `.beads/formulas/plan-to-beads-executable-plan.formula.toml`.
-3. Produce or update a TOML formula with global, parent/stage, policy, architecture, fixture, checkpoint, pilot, and child steps. Use `needs` for execution dependencies and `contextRefs` / `inherits` / `provides` in `steps.metadata.planToBeads` for read-time context.
-4. Validate before pouring:
+2. Read the plan and extract a plan IR: roles, stable logical ids, dependencies, shared context, fixtures, stages, children, checkpoints, pilot work, and follow-up templates.
+3. Hydrate the generic templates in `templates/` from that IR. Do not put plan-specific facts in the source templates.
+4. Generate a plan-specific formula under `.beads/generated-formulas/<plan-id>.formula.toml` for review.
+5. Validate, then pour only after approval:
 
 ```bash
-bd cook .beads/formulas/plan-to-beads-executable-plan.formula.toml --dry-run
-bd cook .beads/formulas/plan-to-beads-executable-plan.formula.toml --mode=runtime --var plan_id=<id> --var plan_title="<title>"
-bd mol pour plan-to-beads-executable-plan --dry-run --var plan_id=<id> --var plan_title="<title>"
-```
-
-5. After user approval, pour the molecule and run graph checks:
-
-```bash
-bd mol pour plan-to-beads-executable-plan --var plan_id=<id> --var plan_title="<title>" --var source_plan=<path>
+bd cook .beads/generated-formulas/<plan-id>.formula.toml --dry-run
+bd mol pour <plan-id>-executable-plan --dry-run
 bd dep cycles
-bd list --has-metadata-key planToBeads --json
 ```
-
-Important: verify runtime `bd cook` output. If `{{vars}}` remain inside nested metadata, create a plan-specific formula with concrete metadata values or patch metadata after pour with `bd update --metadata`; do not pour placeholder work packets.
 
 ## Core Model
 
-- **Formula**: version-controlled TOML template in `.beads/formulas/`.
-- **Molecule**: persistent Beads instance created by `bd mol pour`; use this for implementation work.
-- **Wisp**: ephemeral workflow; do not use for durable implementation plans.
-- **Child bead**: one executable prompt contract.
-- **Context bead**: shared information a child reads, not a readiness dependency unless listed in `needs`.
+- **Epic/root molecule**: the whole plan instance.
+- **Context beads**: global contract, architecture, policy, fixture, pilot, and follow-up-template beads. Children read these through `contextRefs`.
+- **Parent/stage beads**: feature-level grouping and inherited defaults for a stage.
+- **Checkpoint beads**: integration gates, fanout readiness, validation, and subagent launch rules.
+- **Child beads**: one executable prompt contract and one TDD behavior.
 
-Use two different links:
-
-- `needs`: execution ordering. Becomes Beads dependency gating and affects `bd ready`.
-- `contextRefs`: read-time context. Used by agents to build the prompt packet; does not imply execution blocking.
-
-## Role Mapping
-
-Use these issue types unless repo convention says otherwise:
-
-- `feature`: parent/stage beads that group deliverable work.
-- `task`: executable child beads, checkpoints, pilots, and integration steps.
-- `decision`: architecture, policy, scope, and design-context beads.
-- `chore`: validation, fixture refresh, export/sync, and other mechanical work.
-- `human` or `gate`: approval or async coordination steps when the formula needs a real gate.
-
-The molecule root created by `bd mol pour` is the plan instance. If creating issues manually, use an `epic` root.
+Use `needs` for execution dependencies that affect readiness. Use `contextRefs`, `inherits`, and `provides` inside metadata for read-time context and schema wiring.
 
 ## Workflow
 
-1. Extract stable logical ids from the plan. Create ids if missing.
-2. Move global scope/non-goals/repo constraints into a `global-contract` decision bead.
-3. Move shared Module/Interface/ownership rules into `architecture` decision beads.
-4. Move TDD, validation, output, profile, parallel, and subagent rules into `policy` beads.
-5. Move fixture provenance and refresh policy into `fixture` beads.
-6. Convert each vertical behavior into a `child` bead with a `workPacket`.
-7. Convert integration/fanout gates into `checkpoint` beads.
-8. Convert measurement-only work into `pilot` beads.
-9. Keep optional future work as `followup-template` metadata unless it should become real backlog now.
+1. Normalize the plan into the schema in [REFERENCE.md](REFERENCE.md).
+2. Create context beads first: global contract, architecture, policies, fixtures, and stage parents.
+3. Convert each vertical behavior into a `child` bead with `workPacket`.
+4. Convert gates and integration handoffs into `checkpoint` beads.
+5. Keep speculative work as `followup-template` beads unless the plan explicitly says to create executable work now.
+6. Generate dependencies from `needs`; do not duplicate the graph only in prose.
+7. Run the validation checklist before pouring or marking the plan converted.
 
-Do not duplicate whole-plan context into every child. Children reference context with `contextRefs` and inherit parent defaults with `inherits`.
+## Child Contract Rules
 
-## Required Child Fields
+Each executable child must define:
 
-Every child bead metadata must include `goal`, `allowedFiles`, `forbiddenFiles`, `redCommand`, `expectedFailure`, `greenScope`, `verification`, `failureConditions`, and `handoff.requiresBeadsNote = true`.
+- `goal`
+- `inputs`
+- `constraints`
+- `allowedFiles`
+- `forbiddenFiles`
+- `redCommand`
+- `expectedFailure`
+- `greenScope`
+- `verification`
+- `failureConditions`
+- `handoff.requiresBeadsNote = true`
 
-If any required field cannot be filled from the plan, create a `decision` or `human` gate bead instead of inventing details.
+If any field cannot be derived from the plan, create a decision/checkpoint bead instead of inventing details.
 
-## Validation Checklist
+## Template Rules
+
+- Source templates under `templates/` are generic and placeholder-only.
+- Plan-specific formulas are generated artifacts; put them under `.beads/generated-formulas/` unless the user asks to install a formula in `.beads/formulas/`.
+- Template placeholders use `{{snake_case}}`; array/object placeholders represent already-rendered TOML.
+- Role templates are snippets; the generator may compose them into a full formula or hydrate directly into `bd create`/`bd update` commands.
+
+## Validation
 
 Before calling the conversion usable:
 
-- Formula cooks in compile and runtime mode.
-- Cooked metadata contains no unresolved `{{vars}}`.
-- Dry-run pour shows the expected graph.
+- The generated formula cooks with no unresolved placeholders.
 - Every `logicalId` is unique.
-- Every `needs`, `contextRefs`, `inherits`, `provides`, and fixture ref resolves.
-- Every child has required work-packet fields.
-- Parallel-ready children have disjoint allowed file ownership.
-- Checkpoints list validation commands and fanout rules.
-- Optional/future work is not executable unless explicitly marked for creation.
+- Every `needs`, `contextRefs`, `inherits`, `provides`, and fixture reference resolves.
+- Every child has the required work packet fields.
+- Parallel-ready children have disjoint writable file scopes or an explicit checkpoint-owned merge rule.
+- Checkpoints define validation commands, fanout rules, and handoff requirements.
 
-## Reference
-
-For TOML snippets and metadata schemas, see [REFERENCE.md](REFERENCE.md).
+See [REFERENCE.md](REFERENCE.md) for schemas, role mappings, and the full validation checklist.

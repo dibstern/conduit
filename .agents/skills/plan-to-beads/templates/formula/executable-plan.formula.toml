@@ -1,0 +1,30 @@
+# Generic formula skeleton for /plan-to-beads.
+# This file is a source template, not a directly pourable plan.
+# /plan-to-beads hydrates placeholders and inserts rendered role snippets.
+
+formula = "{{plan_id}}-executable-plan"
+description = "{{plan_description}}"
+version = {{formula_version}}
+type = "workflow"
+
+[metadata.planToBeads]
+contractVersion = "plan-to-beads.v1"
+templateVersion = "{{template_version}}"
+planId = "{{plan_id}}"
+sourcePlan = "{{source_plan}}"
+generatedBy = "plan-to-beads"
+
+[vars.plan_id]
+description = "Short stable plan id."
+required = true
+
+[vars.plan_title]
+description = "Human-readable plan title."
+required = true
+
+[vars.source_plan]
+description = "Source plan path or empty for Beads-only plans."
+default = ""
+
+# Insert hydrated role snippets below this line.
+# {{rendered_role_steps}}
