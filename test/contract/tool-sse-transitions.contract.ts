@@ -211,11 +211,11 @@ describe("Tool SSE Transition Validation (live)", () => {
 				},
 			});
 
-			// Send a prompt that will trigger at least one tool (e.g., Read)
-			// Using a simple prompt that forces tool use
+			// Send a prompt that triggers bash without requiring external-directory
+			// permission from the isolated OpenCode test instance.
 			await sendPrompt(
 				testSession.id,
-				"Read the file at /tmp/.conduit-tool-transition-test and tell me what it says. Create it first with the content 'tool-transition-test' if it doesn't exist. Use the bash tool.",
+				"Use the bash tool to run exactly: printf 'tool-transition-test\\n'. Tell me the output.",
 			);
 
 			// Wait for SSE collection to complete
