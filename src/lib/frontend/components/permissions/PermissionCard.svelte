@@ -102,13 +102,17 @@
 	const hasPatterns = $derived(alwaysPatterns.length > 0);
 
 	function sendPermissionResponse(
-		input: Omit<RespondPermissionRpcInput, "projectSlug" | "originId">,
+		input: Omit<
+			RespondPermissionRpcInput,
+			"projectSlug" | "originId" | "commandId"
+		>,
 	) {
 		const projectSlug = getCurrentSlug();
 		if (!projectSlug) return;
 		void respondPermissionRpc({
 			projectSlug,
 			originId: getBrowserClientId(),
+			commandId: crypto.randomUUID(),
 			...input,
 		});
 	}

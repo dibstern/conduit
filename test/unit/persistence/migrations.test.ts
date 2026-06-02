@@ -110,8 +110,11 @@ describe("Migration Runner", () => {
 		client = SqliteClient.memory();
 		const baseline = schemaMigrations[0];
 		const metadataMigration = schemaMigrations[1];
-		if (!baseline || !metadataMigration) {
-			throw new Error("Expected event-store baseline and metadata migrations");
+		const durableCommandMigration = schemaMigrations[2];
+		if (!baseline || !metadataMigration || !durableCommandMigration) {
+			throw new Error(
+				"Expected event-store baseline, metadata, and durable command migrations",
+			);
 		}
 
 		runMigrations(client, [baseline]);
@@ -128,11 +131,20 @@ describe("Migration Runner", () => {
 				name: "add_message_part_metadata",
 				checksum: calculateMigrationChecksum(metadataMigration),
 			},
+			{
+				id: 3,
+				name: "add_durable_provider_commands",
+				checksum: calculateMigrationChecksum(durableCommandMigration),
+			},
 		]);
 		columns = client
 			.query<{ name: string }>("PRAGMA table_info(message_parts)")
 			.map((column) => column.name);
 		expect(columns).toContain("metadata");
+		columns = client
+			.query<{ name: string }>("PRAGMA table_info(command_receipts)")
+			.map((column) => column.name);
+		expect(columns).toContain("fingerprint_hash");
 	});
 
 	it("rolls back a failed migration without affecting prior ones", () => {

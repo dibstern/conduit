@@ -389,6 +389,7 @@ function recordTurn(
 							client.RespondPermission({
 								projectSlug: ws.projectSlug,
 								originId: ws.clientId,
+								commandId: crypto.randomUUID(),
 								requestId,
 								decision: "allow",
 							}),
@@ -421,6 +422,7 @@ function recordTurn(
 						client.AnswerQuestion({
 							projectSlug: ws.projectSlug,
 							originId: ws.clientId,
+							commandId: crypto.randomUUID(),
 							toolId,
 							answers,
 						}),
@@ -471,6 +473,7 @@ function recordTurn(
 				projectSlug: ws.projectSlug,
 				sessionId,
 				text: prompt,
+				commandId: crypto.randomUUID(),
 				originId: ws.clientId,
 			}),
 		).catch((error) => {

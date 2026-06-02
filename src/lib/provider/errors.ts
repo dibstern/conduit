@@ -28,6 +28,14 @@ export class DuplicateCommand extends Data.TaggedError("DuplicateCommand")<{
 	}
 }
 
+export class MissingCommandId extends Data.TaggedError("MissingCommandId")<{
+	readonly commandType: string;
+}> {
+	get message(): string {
+		return `Missing commandId for mutating provider command: ${this.commandType}`;
+	}
+}
+
 export class ProviderInstanceFailure extends Data.TaggedError(
 	"ProviderInstanceFailure",
 )<{
@@ -57,4 +65,5 @@ export type OrchestrationError =
 	| ProviderNotRegistered
 	| SessionProviderNotBound
 	| DuplicateCommand
+	| MissingCommandId
 	| ProviderInstanceFailure;

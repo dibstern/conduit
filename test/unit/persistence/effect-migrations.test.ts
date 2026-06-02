@@ -93,6 +93,7 @@ describe("Effect SQL migrations", () => {
 				expect(rows).toEqual([
 					{ migration_id: 1, name: "create_event_store_tables" },
 					{ migration_id: 2, name: "add_message_part_metadata" },
+					{ migration_id: 3, name: "add_durable_provider_commands" },
 				]);
 
 				const legacyRows = yield* sql<{ id: number; name: string }>`
@@ -100,6 +101,7 @@ describe("Effect SQL migrations", () => {
 				expect(legacyRows).toEqual([
 					{ id: 1, name: "create_event_store_tables" },
 					{ id: 2, name: "add_message_part_metadata" },
+					{ id: 3, name: "add_durable_provider_commands" },
 				]);
 			}).pipe(
 				Effect.provide(
@@ -125,11 +127,17 @@ describe("Effect SQL migrations", () => {
 				expect(migrationRows).toEqual([
 					{ migration_id: 1, name: "create_event_store_tables" },
 					{ migration_id: 2, name: "add_message_part_metadata" },
+					{ migration_id: 3, name: "add_durable_provider_commands" },
 				]);
 
 				const columns = yield* sql<{ name: string }>`
 				PRAGMA table_info(message_parts)`;
 				expect(columns.map((column) => column.name)).toContain("metadata");
+				const receiptColumns = yield* sql<{ name: string }>`
+				PRAGMA table_info(command_receipts)`;
+				expect(receiptColumns.map((column) => column.name)).toContain(
+					"fingerprint_hash",
+				);
 			}).pipe(
 				Effect.provide(
 					makeFileSqlLayer((filename) =>

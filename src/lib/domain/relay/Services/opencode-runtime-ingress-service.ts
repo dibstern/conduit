@@ -94,8 +94,11 @@ export class EffectOpenCodeRuntimeIngress
 		return this.withSql(
 			Effect.gen(function* () {
 				const sql = yield* SqlClient.SqlClient;
-				const rows = yield* sql<{ id: string }>`
-					SELECT id FROM sessions WHERE id = ${sessionId} LIMIT 1`;
+				const rows = yield* sql<{ sequence: number }>`
+					SELECT sequence FROM events
+					WHERE session_id = ${sessionId}
+						AND type = 'session.created'
+					LIMIT 1`;
 				return rows.length > 0;
 			}),
 		).pipe(Effect.catchAllCause(() => Effect.succeed(false)));

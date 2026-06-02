@@ -16,6 +16,7 @@ import { getCommandsForSession } from "./settings.js";
 export interface ReloadProviderSessionInput {
 	readonly clientId: string;
 	readonly sessionId: string;
+	readonly commandId: string;
 }
 
 export const reloadProviderSessionForClient = (
@@ -34,6 +35,7 @@ export const reloadProviderSessionForClient = (
 				const engine = yield* OrchestrationEngineTag;
 				yield* engine.dispatchEffect({
 					type: "end_session",
+					commandId: input.commandId,
 					sessionId: input.sessionId,
 				});
 			}),

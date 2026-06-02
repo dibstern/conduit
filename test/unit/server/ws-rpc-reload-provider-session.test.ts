@@ -39,6 +39,7 @@ describe("WsRpcServerLayer ReloadProviderSession", () => {
 				const result = yield* client.ReloadProviderSession({
 					projectSlug: "project-a",
 					sessionId: "session-1",
+					commandId: "cmd-reload-session",
 					originId: "browser-1",
 				});
 
@@ -48,6 +49,7 @@ describe("WsRpcServerLayer ReloadProviderSession", () => {
 				});
 				expect(engine.dispatchEffect).toHaveBeenCalledWith({
 					type: "end_session",
+					commandId: "cmd-reload-session",
 					sessionId: "session-1",
 				});
 				expect(wsHandler.sendTo).toHaveBeenCalledWith(

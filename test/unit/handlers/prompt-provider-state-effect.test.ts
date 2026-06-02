@@ -118,7 +118,10 @@ describe("handleMessage with Effect provider state persistence", () => {
 				INSERT INTO provider_state (session_id, key, value)
 				VALUES ('session-provider-state', 'resumeSessionId', 'sdk-session-prev')`;
 
-				yield* handleMessage("client-1", { text: "continue" });
+				yield* handleMessage("client-1", {
+					text: "continue",
+					commandId: "cmd-provider-state-continue",
+				});
 				yield* Effect.promise(
 					() => new Promise((resolve) => setImmediate(resolve)),
 				);
@@ -215,7 +218,10 @@ describe("handleMessage with Effect provider state persistence", () => {
 					NULL, NULL, NULL, NULL, NULL, NULL, 0, 2, 2
 				)`;
 
-			yield* handleMessage("client-1", { text: "continue from there" });
+			yield* handleMessage("client-1", {
+				text: "continue from there",
+				commandId: "cmd-provider-state-continue-from-there",
+			});
 			yield* Effect.promise(
 				() => new Promise((resolve) => setImmediate(resolve)),
 			);
@@ -292,6 +298,7 @@ describe("handleMessage with Effect provider state persistence", () => {
 			yield* setClaudeModel("session-claude-user-effect");
 			yield* handleMessage("client-1", {
 				text: "persist this through effect",
+				commandId: "cmd-provider-state-persist-effect",
 			});
 
 			const readQuery = yield* ReadQueryEffectTag;
@@ -394,7 +401,10 @@ describe("handleMessage with Effect provider state persistence", () => {
 
 			return Effect.gen(function* () {
 				yield* setClaudeModel("session-claude-sink-effect");
-				yield* handleMessage("client-1", { text: "trigger assistant" });
+				yield* handleMessage("client-1", {
+					text: "trigger assistant",
+					commandId: "cmd-provider-state-trigger-assistant",
+				});
 
 				const readQuery = yield* ReadQueryEffectTag;
 				let messages = yield* readQuery.getSessionMessagesWithParts(
@@ -492,7 +502,10 @@ describe("handleMessage with Effect provider state persistence", () => {
 
 		return Effect.gen(function* () {
 			yield* setClaudeModel("parent-session");
-			yield* handleMessage("client-1", { text: "trigger child event" });
+			yield* handleMessage("client-1", {
+				text: "trigger child event",
+				commandId: "cmd-provider-state-child-event",
+			});
 			const sendToSession = ws.sendToSession as ReturnType<typeof vi.fn>;
 			for (let attempt = 0; attempt < 10; attempt++) {
 				if (

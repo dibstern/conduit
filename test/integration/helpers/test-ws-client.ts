@@ -113,6 +113,7 @@ export class TestWsClient {
 			readonly sessionId?: string;
 			readonly images?: readonly string[];
 			readonly originId?: string;
+			readonly commandId?: string;
 		} = {},
 	): Promise<void> {
 		const sessionId = opts.sessionId ?? this.getActiveSessionId();
@@ -130,6 +131,7 @@ export class TestWsClient {
 							projectSlug: "integration-test",
 							sessionId,
 							text,
+							commandId: opts.commandId ?? crypto.randomUUID(),
 							...(opts.images ? { images: [...opts.images] } : {}),
 							...(opts.originId ? { originId: opts.originId } : {}),
 						});
@@ -321,6 +323,7 @@ export class TestWsClient {
 						yield* client.CancelSession({
 							projectSlug: "integration-test",
 							sessionId,
+							commandId: crypto.randomUUID(),
 						});
 					}),
 				).pipe(

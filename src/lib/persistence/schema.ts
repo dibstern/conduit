@@ -5,6 +5,8 @@ import type { Migration } from "./migrations.js";
 
 export const CURRENT_EVENT_STORE_MIGRATION = "0001_current_event_store.sql";
 export const MESSAGE_PART_METADATA_MIGRATION = "0002_message_part_metadata.sql";
+export const DURABLE_PROVIDER_COMMANDS_MIGRATION =
+	"0003_durable_provider_commands.sql";
 
 export function readMigrationSql(filename: string): string {
 	return readFileSync(
@@ -23,5 +25,10 @@ export const schemaMigrations: readonly Migration[] = [
 		id: 2,
 		name: "add_message_part_metadata",
 		sql: readMigrationSql(MESSAGE_PART_METADATA_MIGRATION),
+	},
+	{
+		id: 3,
+		name: "add_durable_provider_commands",
+		sql: readMigrationSql(DURABLE_PROVIDER_COMMANDS_MIGRATION),
 	},
 ];

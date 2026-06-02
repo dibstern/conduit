@@ -30,6 +30,7 @@ describe("WsRpcServerLayer CancelSession", () => {
 				const result = yield* client.CancelSession({
 					projectSlug: "project-a",
 					sessionId: "session-1",
+					commandId: "cmd-stop-opencode",
 				});
 
 				expect(result).toEqual({ ok: true });
@@ -73,12 +74,14 @@ describe("WsRpcServerLayer CancelSession", () => {
 			const result = yield* client.CancelSession({
 				projectSlug: "project-a",
 				sessionId: "session-claude",
+				commandId: "cmd-stop-1",
 			});
 
 			expect(result).toEqual({ ok: true });
 			expect(abort).not.toHaveBeenCalled();
 			expect(engine.dispatchEffect).toHaveBeenCalledWith({
 				type: "interrupt_turn",
+				commandId: "cmd-stop-1",
 				sessionId: "session-claude",
 			});
 			expect(calls).toContainEqual({

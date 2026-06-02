@@ -74,6 +74,7 @@ const defaultInput = (
 	overrides?: Partial<ProviderTurnServiceSendInput>,
 ): ProviderTurnServiceSendInput => ({
 	clientId: "client-1",
+	commandId: "cmd-send-default",
 	sessionId: "session-1",
 	text: "current prompt",
 	model:
@@ -262,6 +263,7 @@ const interruptTurn = () =>
 		const service = yield* ProviderTurnServiceTag;
 		yield* service.interruptTurn({
 			clientId: "client-1",
+			commandId: "cmd-interrupt-default",
 			sessionId: "session-1",
 		});
 	});
@@ -293,7 +295,9 @@ describe("ProviderTurnService", () => {
 			});
 
 			return Effect.gen(function* () {
-				yield* sendTurn();
+				yield* sendTurn({
+					commandId: "cmd-send-1",
+				} as Partial<ProviderTurnServiceSendInput>);
 				const command = vi.mocked(engine.dispatchEffect).mock
 					.calls[0]?.[0] as SendTurnCommand;
 
@@ -308,6 +312,7 @@ describe("ProviderTurnService", () => {
 				expect(providerState.getState).toHaveBeenCalledWith("session-1");
 				expect(command).toMatchObject({
 					type: "send_turn",
+					commandId: "cmd-send-1",
 					providerId: "claude",
 					input: {
 						sessionId: "session-1",
@@ -670,11 +675,13 @@ describe("ProviderTurnService", () => {
 					yield* service.sendTurn(defaultInput());
 					yield* service.interruptTurn({
 						clientId: "client-1",
+						commandId: "cmd-interrupt-1",
 						sessionId: "session-1",
 					});
 
 					expect(dispatchEffect).toHaveBeenCalledWith({
 						type: "interrupt_turn",
+						commandId: "cmd-interrupt-1",
 						sessionId: "session-1",
 					});
 					expect(api.session.abort).not.toHaveBeenCalled();

@@ -186,7 +186,11 @@
 		const projectSlug = getCurrentSlug();
 		const sessionId = sessionState.currentId;
 		if (projectSlug && sessionId) {
-			void reloadProviderSessionRpc({ projectSlug, sessionId });
+			void reloadProviderSessionRpc({
+				projectSlug,
+				sessionId,
+				commandId: crypto.randomUUID(),
+			});
 		}
 		showToast("Reloading skills…", { duration: 1500 });
 		dropdownOpen = false;

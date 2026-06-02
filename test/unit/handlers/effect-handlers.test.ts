@@ -474,6 +474,7 @@ describe("reloadProviderSessionForClient", () => {
 		return reloadProviderSessionForClient({
 			clientId: "client-1",
 			sessionId: "session-42",
+			commandId: "cmd-reload-session",
 		}).pipe(
 			Effect.provide(layer),
 			Effect.tap(() => {
@@ -481,6 +482,7 @@ describe("reloadProviderSessionForClient", () => {
 				expect(engine.dispatchEffect).toHaveBeenCalledWith(
 					expect.objectContaining({
 						type: "end_session",
+						commandId: "cmd-reload-session",
 						sessionId: "session-42",
 					}),
 				);
@@ -1949,6 +1951,7 @@ describe("handlePermissionResponse", () => {
 					const fiber = yield* Effect.fork(
 						engine.dispatchEffect({
 							type: "send_turn",
+							commandId: "cmd-claude-in-flight",
 							providerId: "claude",
 							input: makeBaseSendTurnInput({
 								sessionId: "session-claude-in-flight",
@@ -2561,6 +2564,96 @@ describe("handleNewSession", () => {
 		},
 	);
 
+	it.effect(
+		"reconnect replays durable command state without redispatching provider command",
+		() => {
+			const ws = mockWsHandler();
+			const log = mockLogger();
+			const dispatchEffect = vi.fn(() => Effect.void);
+			const startPolling = vi.fn();
+			const client = {
+				session: { get: vi.fn(async () => ({})) },
+				provider: { list: vi.fn(async () => ({ providers: [] })) },
+				permission: { list: vi.fn(async () => []) },
+				question: { list: vi.fn(async () => []) },
+			} as unknown as OpenCodeAPI;
+			const readQuery = {
+				getToolContent: vi.fn(() => Effect.succeed(undefined)),
+				getSessionStatus: vi.fn(() => Effect.succeed("processing")),
+				getSession: vi.fn(() =>
+					Effect.succeed({
+						id: "session-in-flight",
+						provider: "opencode",
+						provider_sid: null,
+						title: "In flight",
+						status: "processing",
+						parent_id: null,
+						fork_point_event: null,
+						last_message_at: null,
+						created_at: 1,
+						updated_at: 1,
+					}),
+				),
+				getAllSessionStatuses: vi.fn(() => Effect.succeed({})),
+				listSessions: vi.fn(() => Effect.succeed([])),
+				getSessionMessagesWithParts: vi.fn(() => Effect.succeed([])),
+			} satisfies ReadQueryEffect;
+			const sessionManagerService = makeMockSessionManagerService({
+				loadPreRenderedHistory: vi.fn(() =>
+					Effect.succeed({
+						messages: [],
+						hasMore: false,
+					}),
+				),
+			});
+			const layer = Layer.mergeAll(
+				openCodeModelLayer(client),
+				Layer.succeed(WebSocketHandlerTag, ws),
+				Layer.succeed(LoggerTag, log),
+				Layer.succeed(SessionManagerServiceTag, sessionManagerService),
+				Layer.succeed(ReadQueryEffectTag, readQuery),
+				PendingInteractionServiceLive,
+				Layer.succeed(
+					OrchestrationEngineTag,
+					withDispatchEffect({
+						dispatch: vi.fn(async () => undefined),
+						dispatchEffect,
+					} as unknown as OrchestrationEngine),
+				),
+				Layer.succeed(
+					StatusPollerTag,
+					makeMockStatusPoller({
+						isProcessing: vi.fn(() => Effect.succeed(true)),
+					}),
+				),
+				Layer.succeed(PollerManagerTag, {
+					on: vi.fn(),
+					isPolling: vi.fn(() => false),
+					startPolling,
+					stopPolling: vi.fn(),
+					notifySSEEvent: vi.fn(),
+				}),
+				makeOverridesStateLive(),
+			);
+
+			return viewSessionForClient({
+				clientId: "client-1",
+				sessionId: "session-in-flight",
+				skipMetadata: true,
+			}).pipe(
+				Effect.provide(layer),
+				Effect.tap(() => {
+					expect(dispatchEffect).not.toHaveBeenCalled();
+					expect(ws.sendTo).toHaveBeenCalledWith("client-1", {
+						type: "status",
+						sessionId: "session-in-flight",
+						status: "processing",
+					});
+				}),
+			);
+		},
+	);
+
 	it.effect("logs and completes when the service list broadcast fails", () => {
 		const ws = mockWsHandler();
 		const log = mockLogger();
@@ -3014,10 +3107,11 @@ describe("cancelSessionById", () => {
 		);
 
 		return Effect.gen(function* () {
-			yield* cancelSessionById("client-1", "session-1");
+			yield* cancelSessionById("client-1", "session-1", "cmd-cancel-test");
 
 			expect(providerTurnService.interruptTurn).toHaveBeenCalledWith({
 				clientId: "client-1",
+				commandId: "cmd-cancel-test",
 				sessionId: "session-1",
 			});
 		}).pipe(Effect.provide(layer));
@@ -3138,7 +3232,10 @@ describe("handleMessage", () => {
 			makeOverridesStateLive(),
 		);
 
-		return handleMessage("client-1", { text: "hello" }).pipe(
+		return handleMessage("client-1", {
+			text: "hello",
+			commandId: "cmd-no-session",
+		}).pipe(
 			Effect.provide(layer),
 			Effect.tap(() => {
 				expect(ws.sendTo).toHaveBeenCalledWith(
@@ -3213,7 +3310,10 @@ describe("handleMessage", () => {
 
 		return Effect.gen(function* () {
 			yield* setContextWindow("session-1", "1m");
-			yield* handleMessage("client-1", { text: "hello world" });
+			yield* handleMessage("client-1", {
+				text: "hello world",
+				commandId: "cmd-context-window",
+			});
 			yield* flushDispatchContinuation();
 			expect(engine.dispatchEffect).toHaveBeenCalledWith(
 				expect.objectContaining({
@@ -3285,7 +3385,10 @@ describe("handleMessage", () => {
 			);
 
 			return Effect.gen(function* () {
-				yield* handleMessage("client-1", { text: "hello world" });
+				yield* handleMessage("client-1", {
+					text: "hello world",
+					commandId: "cmd-pending-question",
+				});
 				yield* flushDispatchContinuation();
 				const pendingInteractions = yield* PendingInteractionServiceTag;
 				const pendingQuestions =
@@ -3382,7 +3485,10 @@ describe("handleMessage", () => {
 				makeOverridesStateLive(),
 			);
 
-			return handleMessage("client-1", { text: "new prompt" }).pipe(
+			return handleMessage("client-1", {
+				text: "new prompt",
+				commandId: "cmd-sqlite-history",
+			}).pipe(
 				Effect.provide(layer),
 				Effect.tap(() => {
 					expect(readQuery.getSessionMessagesWithParts).toHaveBeenCalledWith(
@@ -3470,7 +3576,10 @@ describe("handleMessage", () => {
 				makeOverridesStateLive(),
 			);
 
-			return handleMessage("client-1", { text: "new prompt" }).pipe(
+			return handleMessage("client-1", {
+				text: "new prompt",
+				commandId: "cmd-prerendered-history",
+			}).pipe(
 				Effect.provide(layer),
 				Effect.tap(() => {
 					expect(loadPreRenderedHistory).toHaveBeenCalledWith("session-1");
@@ -3574,7 +3683,10 @@ describe("handleMessage", () => {
 			);
 
 			return Effect.gen(function* () {
-				yield* handleMessage("client-1", { text: "First prompt" });
+				yield* handleMessage("client-1", {
+					text: "First prompt",
+					commandId: "cmd-first-prompt",
+				});
 				yield* flushDispatchContinuation();
 
 				expect(listSessions).not.toHaveBeenCalled();
@@ -3636,7 +3748,10 @@ describe("handleMessage", () => {
 		);
 
 		return Effect.gen(function* () {
-			yield* handleMessage("client-1", { text: "First prompt" });
+			yield* handleMessage("client-1", {
+				text: "First prompt",
+				commandId: "cmd-first-prompt-title",
+			});
 			yield* flushDispatchContinuation();
 
 			expect(listSessions).not.toHaveBeenCalled();
@@ -3721,7 +3836,10 @@ describe("handleMessage", () => {
 					modelID: "big-pickle",
 				});
 
-				yield* handleMessage("client-1", { text: "Test query" });
+				yield* handleMessage("client-1", {
+					text: "Test query",
+					commandId: "cmd-materialize-opencode",
+				});
 				yield* flushDispatchContinuation();
 
 				expect(serviceCreateSession).toHaveBeenCalledWith("Untitled", {
@@ -3797,7 +3915,10 @@ describe("handleMessage", () => {
 			);
 
 			return Effect.gen(function* () {
-				yield* handleMessage("client-1", { text: "First prompt" });
+				yield* handleMessage("client-1", {
+					text: "First prompt",
+					commandId: "cmd-dispatch-rejection",
+				});
 				yield* flushDispatchContinuation();
 
 				expect(yield* hasActiveProcessingTimeout("session-1")).toBe(false);
@@ -3849,7 +3970,10 @@ describe("handleMessage", () => {
 			makeOverridesStateLive(),
 		);
 
-		return handleMessage("client-1", { text: "hello world" }).pipe(
+		return handleMessage("client-1", {
+			text: "hello world",
+			commandId: "cmd-legacy-prompt",
+		}).pipe(
 			Effect.provide(layer),
 			Effect.tap(() => {
 				expect(client.session.prompt).toHaveBeenCalledWith("session-1", {

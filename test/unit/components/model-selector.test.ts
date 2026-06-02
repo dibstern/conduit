@@ -72,6 +72,7 @@ vi.mock("../../../src/lib/frontend/transport/ws-rpc-client.js", () => ({
 	reloadProviderSessionRpc: (input: {
 		projectSlug: string;
 		sessionId: string;
+		commandId: string;
 	}) => reloadProviderSessionRpcSpy(input),
 	setDefaultModelRpc: (input: { model: string; provider: string }) =>
 		setDefaultModelRpcSpy(input),
@@ -230,6 +231,7 @@ describe("ModelSelector", () => {
 			expect(reloadProviderSessionRpcSpy).toHaveBeenCalledWith({
 				projectSlug: "project-a",
 				sessionId: "session-1",
+				commandId: expect.any(String),
 			});
 		});
 		expect(wsSendSpy).not.toHaveBeenCalled();

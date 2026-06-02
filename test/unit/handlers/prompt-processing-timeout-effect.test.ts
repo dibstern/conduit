@@ -68,7 +68,10 @@ describe("prompt processing timeouts through Effect state", () => {
 		);
 
 		return Effect.gen(function* () {
-			yield* handleMessage("client-1", { text: "hello" });
+			yield* handleMessage("client-1", {
+				text: "hello",
+				commandId: "cmd-timeout-send",
+			});
 
 			expect(yield* hasActiveProcessingTimeout("session-1")).toBe(true);
 		}).pipe(Effect.provide(layer));
@@ -101,7 +104,7 @@ describe("prompt processing timeouts through Effect state", () => {
 					"2 minutes",
 					() => Effect.void,
 				);
-				yield* cancelSessionById("client-1", "session-1");
+				yield* cancelSessionById("client-1", "session-1", "cmd-cancel-test");
 
 				expect(yield* hasActiveProcessingTimeout("session-1")).toBe(false);
 			}).pipe(Effect.provide(layer));

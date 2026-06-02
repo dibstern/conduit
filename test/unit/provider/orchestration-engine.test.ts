@@ -2,7 +2,7 @@
 import { mkdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { Effect, Ref } from "effect";
+import { Deferred, Effect } from "effect";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 // Mock the logger module so we can spy on log.error calls
@@ -60,6 +60,7 @@ import {
 	type DiscoverCommand,
 	type EndSessionCommand,
 	type InterruptTurnCommand,
+	type OrchestrationCommand,
 	OrchestrationEngine,
 	type OrchestrationResult,
 	type ResolvePermissionCommand,
@@ -105,13 +106,11 @@ function dispatch(
 ): Promise<void>;
 function dispatch(
 	engine: OrchestrationEngine,
-	command:
-		| SendTurnCommand
-		| DiscoverCommand
-		| InterruptTurnCommand
-		| ResolvePermissionCommand
-		| ResolveQuestionCommand
-		| EndSessionCommand,
+	command: OrchestrationCommand,
+): Promise<OrchestrationResult>;
+function dispatch(
+	engine: OrchestrationEngine,
+	command: OrchestrationCommand,
 ): Promise<OrchestrationResult> {
 	return Effect.runPromise(engine.dispatchEffect(command));
 }
@@ -178,6 +177,7 @@ describe("OrchestrationEngine", () => {
 		it("routes sendTurn to the correct instance", async () => {
 			const result = await dispatch(engine, {
 				type: "send_turn",
+				commandId: "cmd-route-send",
 				providerId: "opencode",
 				input: {
 					sessionId: "s1",
@@ -203,6 +203,7 @@ describe("OrchestrationEngine", () => {
 			await expect(
 				dispatch(engine, {
 					type: "send_turn",
+					commandId: "cmd-unknown-provider",
 					providerId: "unknown",
 					input: {
 						sessionId: "s1",
@@ -224,6 +225,7 @@ describe("OrchestrationEngine", () => {
 		it("records session-to-provider binding", async () => {
 			await dispatch(engine, {
 				type: "send_turn",
+				commandId: "cmd-bind-session",
 				providerId: "opencode",
 				input: {
 					sessionId: "s1",
@@ -252,6 +254,7 @@ describe("OrchestrationEngine", () => {
 
 			await dispatch(engine, {
 				type: "interrupt_turn",
+				commandId: "cmd-interrupt",
 				sessionId: "s1",
 			});
 
@@ -262,6 +265,7 @@ describe("OrchestrationEngine", () => {
 			await expect(
 				dispatch(engine, {
 					type: "interrupt_turn",
+					commandId: "cmd-missing-binding",
 					sessionId: "unknown-session",
 				}),
 			).rejects.toThrow("No provider bound to session: unknown-session");
@@ -274,6 +278,7 @@ describe("OrchestrationEngine", () => {
 
 			await dispatch(engine, {
 				type: "resolve_permission",
+				commandId: "cmd-resolve-permission",
 				sessionId: "s1",
 				requestId: "perm-1",
 				decision: "always",
@@ -293,6 +298,7 @@ describe("OrchestrationEngine", () => {
 
 			await dispatch(engine, {
 				type: "resolve_question",
+				commandId: "cmd-resolve-question",
 				sessionId: "s1",
 				requestId: "q1",
 				answers: { choice: "yes" },
@@ -322,6 +328,7 @@ describe("OrchestrationEngine", () => {
 
 			await dispatch(engine, {
 				type: "end_session",
+				commandId: "cmd-end-session",
 				sessionId: "s-end-1",
 			});
 
@@ -331,6 +338,7 @@ describe("OrchestrationEngine", () => {
 		it("is a no-op when session has no binding", async () => {
 			await dispatch(engine, {
 				type: "end_session",
+				commandId: "cmd-end-session-unbound",
 				sessionId: "unbound",
 			});
 
@@ -342,6 +350,7 @@ describe("OrchestrationEngine", () => {
 
 			await dispatch(engine, {
 				type: "end_session",
+				commandId: "cmd-end-session-keep",
 				sessionId: "s-keep",
 			});
 
@@ -353,6 +362,7 @@ describe("OrchestrationEngine", () => {
 
 			await dispatch(engine, {
 				type: "end_session",
+				commandId: "cmd-end-session-drop",
 				sessionId: "s-drop",
 				unbind: true,
 			});
@@ -375,6 +385,7 @@ describe("OrchestrationEngine", () => {
 			await expect(
 				dispatch(engine, {
 					type: "end_session",
+					commandId: "cmd-end-session-error",
 					sessionId: "s-err",
 				}),
 			).rejects.toThrow("provider instance boom");
@@ -424,7 +435,102 @@ describe("OrchestrationEngine", () => {
 	});
 
 	describe("idempotency", () => {
-		it("rejects duplicate command IDs", async () => {
+		it("rejects send_turn without commandId before provider lookup", async () => {
+			const getInstanceEffect = vi.spyOn(registry, "getInstanceEffect");
+
+			await expect(
+				dispatch(engine, {
+					type: "send_turn",
+					providerId: "opencode",
+					input: {
+						sessionId: "s1",
+						turnId: "t1",
+						prompt: "hello",
+						history: [],
+						providerState: {},
+						model: {
+							providerId: "anthropic",
+							modelId: "claude-sonnet",
+						},
+						workspaceRoot: "/tmp",
+						eventSink: makeStubEventSink(),
+						abortSignal: new AbortController().signal,
+					},
+				} as unknown as SendTurnCommand),
+			).rejects.toThrow(
+				"Missing commandId for mutating provider command: send_turn",
+			);
+
+			expect(getInstanceEffect).not.toHaveBeenCalled();
+			expect(opencode.sendTurnEffect).not.toHaveBeenCalled();
+		});
+
+		it("rejects interrupt_turn without commandId before provider side effects", async () => {
+			engine.bindSession("s1", "opencode");
+			const getInstanceEffect = vi.spyOn(registry, "getInstanceEffect");
+
+			await expect(
+				dispatch(engine, {
+					type: "interrupt_turn",
+					sessionId: "s1",
+				} as unknown as InterruptTurnCommand),
+			).rejects.toThrow(
+				"Missing commandId for mutating provider command: interrupt_turn",
+			);
+
+			expect(getInstanceEffect).not.toHaveBeenCalled();
+			expect(opencode.interruptTurnEffect).not.toHaveBeenCalled();
+		});
+
+		it.each([
+			{
+				command: {
+					type: "resolve_permission",
+					sessionId: "s1",
+					requestId: "perm-1",
+					decision: "once",
+				},
+				commandType: "resolve_permission",
+				providerMethod: () => opencode.resolvePermissionEffect,
+			},
+			{
+				command: {
+					type: "resolve_question",
+					sessionId: "s1",
+					requestId: "question-1",
+					answers: {},
+				},
+				commandType: "resolve_question",
+				providerMethod: () => opencode.resolveQuestionEffect,
+			},
+			{
+				command: {
+					type: "end_session",
+					sessionId: "s1",
+				},
+				commandType: "end_session",
+				providerMethod: () => opencode.endSessionEffect,
+			},
+		] as const)("rejects $commandType without commandId before provider side effects", async ({
+			command,
+			commandType,
+			providerMethod,
+		}) => {
+			engine.bindSession("s1", "opencode");
+
+			await expect(
+				dispatch(engine, command as unknown as OrchestrationCommand),
+			).rejects.toThrow(
+				`Missing commandId for mutating provider command: ${commandType}`,
+			);
+			expect(providerMethod()).not.toHaveBeenCalled();
+		});
+
+		it("shares in-flight duplicate command IDs", async () => {
+			const gate = await Effect.runPromise(Deferred.make<void>());
+			opencode.sendTurnEffect.mockReturnValueOnce(
+				Deferred.await(gate).pipe(Effect.as(makeSuccessResult())),
+			);
 			const command: SendTurnCommand = {
 				type: "send_turn",
 				commandId: "cmd-1",
@@ -445,17 +551,20 @@ describe("OrchestrationEngine", () => {
 				},
 			};
 
-			await dispatch(engine, command);
+			const first = dispatch(engine, command);
+			const duplicate = dispatch(engine, command);
+			await Promise.resolve();
 
-			// Second dispatch with same commandId should be rejected
-			await expect(dispatch(engine, command)).rejects.toThrow(
-				"Duplicate command: cmd-1",
-			);
+			expect(opencode.sendTurnEffect).toHaveBeenCalledTimes(1);
+			Effect.runSync(Deferred.succeed(gate, undefined));
+			await expect(first).resolves.toEqual(makeSuccessResult());
+			await expect(duplicate).resolves.toEqual(makeSuccessResult());
 		});
 
-		it("allows commands without commandId (no idempotency check)", async () => {
-			const makeCommand = (): SendTurnCommand => ({
+		it("allows different command IDs to run independently", async () => {
+			const makeCommand = (commandId: string): SendTurnCommand => ({
 				type: "send_turn",
+				commandId,
 				providerId: "opencode",
 				input: {
 					sessionId: "s1",
@@ -473,53 +582,10 @@ describe("OrchestrationEngine", () => {
 				},
 			});
 
-			await dispatch(engine, makeCommand());
-			await dispatch(engine, makeCommand()); // Should not throw
+			await dispatch(engine, makeCommand("cmd-independent-1"));
+			await dispatch(engine, makeCommand("cmd-independent-2"));
 
 			expect(opencode.sendTurnEffect).toHaveBeenCalledTimes(2);
-		});
-	});
-
-	describe("processedCommands pruning", () => {
-		it("evicts oldest entries when exceeding 10,000 threshold", async () => {
-			// Access the private processedCommands Ref via the engine instance
-			const commandsRef = (
-				engine as unknown as {
-					processedCommands: Ref.Ref<Set<string>>;
-				}
-			).processedCommands;
-
-			// Fill the Ref<Set> to just above the threshold
-			const bigSet = new Set<string>();
-			for (let i = 0; i < 10_001; i++) {
-				bigSet.add(`pre-${i}`);
-			}
-			Effect.runSync(Ref.set(commandsRef, bigSet));
-
-			// Dispatch one more command to trigger pruning
-			await dispatch(engine, {
-				type: "send_turn",
-				commandId: "trigger-prune",
-				providerId: "opencode",
-				input: {
-					sessionId: "s1",
-					turnId: "t1",
-					prompt: "hello",
-					history: [],
-					providerState: {},
-					workspaceRoot: "/tmp",
-					eventSink: makeStubEventSink(),
-					abortSignal: new AbortController().signal,
-				},
-			});
-
-			// After pruning, the set should be roughly half its previous size
-			// (10,002 entries → prune 5,000 → ~5,002 remaining)
-			const commands = Effect.runSync(Ref.get(commandsRef));
-			expect(commands.size).toBeLessThanOrEqual(5_100);
-			expect(commands.size).toBeGreaterThan(0);
-			// The trigger command should still be in the set
-			expect(commands.has("trigger-prune")).toBe(true);
 		});
 	});
 
@@ -581,6 +647,7 @@ describe("OrchestrationEngine", () => {
 			const sink = createMockEventSink();
 			const result = await dispatch(claudeEngine, {
 				type: "send_turn",
+				commandId: "cmd-claude-integration",
 				providerId: "claude",
 				input: makeBaseSendTurnInput({
 					sessionId: "int-session-1",
@@ -617,6 +684,7 @@ describe("OrchestrationEngine", () => {
 			const sink = createMockEventSink();
 			await dispatch(claudeEngine, {
 				type: "send_turn",
+				commandId: "cmd-claude-bind",
 				providerId: "claude",
 				input: makeBaseSendTurnInput({
 					sessionId: "int-session-bind",
@@ -680,6 +748,7 @@ describe("OrchestrationEngine", () => {
 			const sink = createMockEventSink();
 			const result = await dispatch(claudeEngine, {
 				type: "send_turn",
+				commandId: "cmd-claude-error-result",
 				providerId: "claude",
 				input: makeBaseSendTurnInput({
 					sessionId: "int-session-err",
@@ -717,6 +786,7 @@ describe("OrchestrationEngine", () => {
 			await expect(
 				dispatch(throwingEngine, {
 					type: "send_turn",
+					commandId: "cmd-provider-crash",
 					providerId: "thrower",
 					input: {
 						sessionId: "s-crash",
@@ -750,6 +820,7 @@ describe("OrchestrationEngine", () => {
 			await expect(
 				dispatch(throwingEngine, {
 					type: "send_turn",
+					commandId: "cmd-provider-sync-crash",
 					providerId: "sync-thrower",
 					input: {
 						sessionId: "s-sync-crash",
@@ -820,6 +891,7 @@ describe("OrchestrationEngine", () => {
 			const sink = createMockEventSink();
 			const result = await dispatch(claudeEngine, {
 				type: "send_turn",
+				commandId: "cmd-claude-erred-result",
 				providerId: "claude",
 				input: makeBaseSendTurnInput({
 					sessionId: "int-session-erred",
@@ -862,6 +934,7 @@ describe("OrchestrationEngine", () => {
 			await expect(
 				dispatch(eng, {
 					type: "interrupt_turn",
+					commandId: "cmd-interrupt-error",
 					sessionId: "s-err",
 				}),
 			).rejects.toThrow("Provider instance interrupt failed");
@@ -894,6 +967,7 @@ describe("OrchestrationEngine", () => {
 			await expect(
 				dispatch(eng, {
 					type: "resolve_permission",
+					commandId: "cmd-permission-error",
 					sessionId: "s-perm",
 					requestId: "req-1",
 					decision: "always",
