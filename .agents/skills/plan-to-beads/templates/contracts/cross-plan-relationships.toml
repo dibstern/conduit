@@ -1,5 +1,15 @@
 # Contract templates: relationships to plans outside the generated Beads graph.
 
+[[crossPlanRelationship]]
+logicalId = "{{cross_plan_relationship_logical_id}}"
+target = "{{cross_plan_relationship_target}}"
+relationshipType = "{{cross_plan_relationship_type}}"
+condition = "{{cross_plan_relationship_condition}}"
+blockingUntil = "{{cross_plan_relationship_blocking_until}}"
+statusKnownAtConversion = "{{cross_plan_relationship_status_known_at_conversion}}"
+doNotGuess = {{cross_plan_relationship_do_not_guess_bool}}
+notes = "{{cross_plan_relationship_notes}}"
+
 [[relatedPlans]]
 path = "{{related_plan_path}}"
 relationship = "{{related_plan_relationship}}"

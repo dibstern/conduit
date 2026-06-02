@@ -31,6 +31,15 @@ The converter should build this IR before rendering templates:
       "contextRefs": ["global-contract", "architecture-core"],
       "inherits": ["stage-parent"],
       "typedContractRefs": ["trace-artifact-contract"],
+      "contextUse": [
+        {
+          "ref": "architecture-core",
+          "phase": "before-edit",
+          "required": true,
+          "reason": "Module boundaries constrain the patch",
+          "failureIfMissing": "Stop and create a decision bead"
+        }
+      ],
       "metadata": {}
     }
   ]
@@ -57,8 +66,20 @@ Every role exposes context through `provides`; children consume it through `cont
 | `checkpoint` | `needs` and `contextRefs` | Fanout gate, integration validation, frozen extension points |
 | `pilot` | `needs` and `contextRefs` | Measurement evidence that creates or rejects follow-up work |
 | `followup-template` | `contextRefs` | Schema for later child beads, not executable work by default |
+| `acceptance-pipeline` | `needs`, `contextRefs`, `acceptanceMatrixRefs` | Optional generated acceptance and acceptance-mutation proof layer |
 
 `needs` gates readiness. `contextRefs` tells an agent what to read. `inherits` merges defaults into the child prompt contract. `typedContractRefs` points at typed snippets inside context beads. `provides` names data that later beads may reference.
+
+`contextUse` adds timing and failure behavior to context references. Use it when an agent must know whether to read a context bead before editing, during implementation, during verification, during handoff, or only when blocked.
+
+```toml
+[[contextUse]]
+ref = "{{context_ref}}"
+phase = "before-edit" # before-edit|during-edit|verification|handoff|if-blocked
+required = true
+reason = "{{why_this_context_is_needed}}"
+failureIfMissing = "{{what_agent_should_do_if_missing}}"
+```
 
 ## Typed Context Attachment Rules
 
@@ -79,8 +100,28 @@ Use the smallest durable owner that matches the information.
 | Forbidden state or static proof obligation | `guardrail` | `guardrailRefs`, `contextRefs` |
 | Completed work and archive overlays | `progress` | `evidenceRefs`, `contextRefs` |
 | Future conditional work | `followup-template` | `contextRefs`, promoted later into child beads |
+| Generated acceptance or mutation proof | `acceptance-pipeline` | `needs`, `contextRefs`, `acceptanceMatrixRefs` |
 
 Do not duplicate large snippets into every child. A child should carry only its own executable prompt contract plus references to the context snippets it must obey.
+
+## Canonical Ownership
+
+Use these owners to keep the schema MECE. Similarly named snippets should be aliases or views, not separate sources of truth.
+
+| Concept | Canonical owner | Aliases or views |
+| --- | --- | --- |
+| Expected product behavior | `acceptanceMatrix` | `acceptanceCriteria`, `manualAcceptance`, `operatorSmoke` |
+| Observed command/run evidence | `evidenceRun` | `verificationResult`, `guardrailEvidence`, `failedAttempt` |
+| Allowed, forbidden, and read-only paths | `changeSurface` | child `allowedFiles`, child `forbiddenFiles` |
+| Intended file action | `fileOperations` | none |
+| Actual handoff changes | `fileTouches` | none |
+| Parallel file ownership | `ownershipMap` | parent defaults, checkpoint merge contract |
+| Cross-plan relationship | `crossPlanRelationship` | `blockedByPlan`, `amendsPlan`, `supersedesPlan`, `relatedPlans` |
+| Agent execution contract | child `workPacket` subcontracts | legacy flat child fields |
+| Integration/fanout gate | checkpoint subcontracts | legacy flat checkpoint fields |
+| APS product-behavior proof | `acceptance-pipeline` role | acceptance matrix refs on children/checkpoints |
+
+When a plan contains a resolved fact, attach it as a typed snippet to the smallest durable owner. When it contains work with status, dependencies, ownership, or closure, create a bead.
 
 ## Role To Type Mapping
 
@@ -102,6 +143,7 @@ Use these defaults unless the repository has stricter conventions:
 | `fixture` | `chore` | Mechanical/provenance work |
 | `pilot` | `task` | Evidence collection with validation |
 | `followup-template` | `chore` | Non-executable template for later work |
+| `acceptance-pipeline` | `task` | Optional generated acceptance or mutation proof layer |
 
 `parent` should usually be a `feature`, not a `task`, because it groups behavior and carries stage defaults. Use `chore` for non-product mechanical work such as fixture manifests, validation sweeps, export/sync, or template maintenance.
 
@@ -111,7 +153,8 @@ Use these defaults unless the repository has stricter conventions:
 - Generate plan-specific formulas in `.beads/generated-formulas/<plan-id>.formula.toml` for review.
 - Install a generated formula into `.beads/formulas/` only when the user wants a reusable formula name.
 - Store molecule instances and runtime status in Beads/Dolt; `.beads/*.jsonl` are passive exports.
-- Include `contractVersion = "plan-to-beads.v2"` and `templateVersion` in rendered metadata.
+- Include `contractVersion = "plan-to-beads.v3"` and `templateVersion` in rendered metadata.
+- Treat existing `plan-to-beads.v2` flat child and checkpoint fields as compatibility input. Generators should normalize them into v3 subcontracts before rendering new formulas.
 
 ## Rendering Strategy
 
@@ -153,57 +196,66 @@ The contract snippets are reusable TOML fragments. They should be attached to ro
 | `file-operations` | `fileOperations`, `fileTouches`, `ownershipMap`, `changeSurface`, `commitBoundary`, `deliverySequence`, `publication`, `releaseGate` | `child`, `parent`, `checkpoint` |
 | `architecture-contracts` | `moduleMap`, `boundaryClassification`, `protocolContract`, `artifactContract`, `configContract`, `commandCatalog`, `mappingTable`, `sourceAuthority`, `referencePattern`, `priorArt` | `architecture`, `global-contract` |
 | `risk-operational` | `riskRegister`, `edgeCaseRegister`, `operationalProcedure`, `runbook`, `rollbackProcedure`, `manualRecovery` | `policy`, `checkpoint`, `pilot` |
-| `cross-plan-relationships` | `relatedPlans`, `blockedByPlan`, `prerequisitePlans`, `updatesPlan`, `amendsPlan`, `supersedesPlan`, `prerequisiteFor`, `externalPlanDependency` | `epic`, `global-contract`, `decision`, `followup-template` |
+| `cross-plan-relationships` | `crossPlanRelationship`, `relatedPlans`, `blockedByPlan`, `prerequisitePlans`, `updatesPlan`, `amendsPlan`, `supersedesPlan`, `prerequisiteFor`, `externalPlanDependency` | `epic`, `global-contract`, `decision`, `followup-template` |
 | `executor-policy` | `executorProfile`, `requiredSkills`, `implementationMode`, `agentInstructions`, `applicationLifecycle` | `policy`, `parent`, `checkpoint` |
+| `context-use` | `contextUse` | any role that references context |
+| `acceptance-pipeline` | `gherkinFeatureContract`, `jsonIrContract`, `acceptanceGeneratorContract`, `stepHandlerContract`, `runnerAdapterContract`, `mutationContract`, `mutationReportContract` | `acceptance-pipeline`, `checkpoint` |
 
 Use new top-level roles only when the information needs independent lifecycle or status. Otherwise attach the snippet to an existing role.
 
-## Child Work Packet Extensions
+## Child Work Packet Shape
 
-In addition to the required core fields, child beads may carry:
+Each executable child is a durable prompt contract. New formulas should render these subcontracts instead of flat fields:
 
-- `orderedSteps`
-- `fileTouches`
-- `expectedBefore`
-- `expectedAfter`
-- `expectedRedShape`
-- `refactorProof`
-- `proofCommand`
-- `implementationSketches`
-- `codeContracts`
-- `inlineFixtures`
-- `conditionalValidation`
-- `commitBoundary`
-- `requiredSkills`
-- `boundaryDoubles`
-- `forbiddenMocks`
-- `handoffEvidence`
-- `acceptanceMatrixRefs`
-- `guardrailRefs`
-- `evidenceRefs`
-- `riskRefs`
-- `externalPlanRefs`
+| Subcontract | Owns |
+| --- | --- |
+| `goalContract` | goal, expected outcome, non-goals, behavior id |
+| `inputContract` | source plan, inputs, context refs, `contextUse`, fixtures, baselines, evidence, external plans |
+| `constraintContract` | allowed/forbidden/read-only files, guardrails, risks, skills, tools, doubles, mocks |
+| `executionContract` | ordered steps, green scope, implementation limits, sketches, code contracts, inline fixtures |
+| `validationContract` | red command, expected failure, expected red shape, verification, acceptance refs, proof command |
+| `outputContract` | output shape, patch shape, file touches, file-operation refs, commit boundary, evidence to record |
+| `failureContract` | failure conditions, stop conditions, blocker decisions, follow-up templates, escalation |
+| `handoffContract` | Beads note requirement, commit SHA requirement, artifact root, close owner, notes schema |
 
-Keep these fields specific to the child. Shared material should live in context beads and be referenced.
+Compatibility mapping from v2:
 
-## Checkpoint Extensions
+| v2 field | v3 home |
+| --- | --- |
+| `goal` | `goalContract.goal` |
+| `inputs`, `contextRefs`, `inherits`, `typedContractRefs` | `inputContract` |
+| `constraints`, `allowedFiles`, `forbiddenFiles`, `requiredSkills`, `boundaryDoubles`, `forbiddenMocks` | `constraintContract` |
+| `orderedSteps`, `greenScope`, `implementationSketches`, `codeContracts`, `inlineFixtures`, `expectedBefore`, `expectedAfter` | `executionContract` |
+| `redCommand`, `expectedFailure`, `expectedRedShape`, `verification`, `acceptanceCriteria`, `acceptanceMatrixRefs`, `proofCommand`, `conditionalValidation` | `validationContract` |
+| `outputShape`, `fileTouches`, `commitBoundary`, `handoffEvidence` | `outputContract` |
+| `failureConditions` | `failureContract` |
+| `handoff` | `handoffContract` |
 
-Checkpoints may represent pre-edit readiness, fanout, integration, completion, publication, or release gates. Add:
+## Checkpoint Shape
 
-- `gateKind`
-- `preconditions`
-- `validationCatalogRefs`
-- `acceptanceMatrixRefs`
-- `manualAcceptance`
-- `guardrailRefs`
-- `fanoutRules`
-- `frozenInterfaces`
-- `mergeOwner`
-- `commitScope`
-- `escalationCriteria`
-- `stopConditions`
-- `conditionalBranches`
-- `releaseGate`
+Checkpoints may represent pre-edit readiness, fanout, integration, completion, publication, or release gates. New formulas should render these subcontracts:
+
+| Subcontract | Owns |
+| --- | --- |
+| `gateContract` | gate kind, target, preconditions, closed dependencies, blocking behavior, guardrails, release gate |
+| `fanoutContract` | parallel launch rules, subagent checklist, frozen extension points, allowed/blocked child refs |
+| `mergeContract` | merge owner, commit scope, ownership-map refs, handoff validation, conflict policy |
+| `validationContract` | validation commands, validation catalog refs, acceptance matrix refs, manual acceptance, evidence |
+| `escalationContract` | escalation criteria, stop conditions, conditional branches, decision refs |
+
+## Acceptance Pipeline Shape
+
+Use `acceptance-pipeline` only when the plan requires generated acceptance tests, a JSON acceptance IR, or acceptance mutation. It is not a default child bead. It records the product-behavior proof layer that checkpoints or children can depend on.
+
+| Subcontract | Owns |
+| --- | --- |
+| `gherkinFeatureContract` | feature paths, supported and unsupported Gherkin subset, scenario/examples policy |
+| `jsonIrContract` | generated IR paths, schema ref, canonical fields, deterministic ordering |
+| `acceptanceGeneratorContract` | generator command, generated test paths, source-feature isolation, determinism proof |
+| `stepHandlerContract` | handler paths, matching policy, world-state policy, unsupported-step behavior |
+| `runnerAdapterContract` | normal acceptance command and success/failure/infrastructure shapes |
+| `mutationContract` | acceptance mutation command, scope, threshold, result shape, differential policy |
+| `mutationReportContract` | JSON/text report paths, survived policy, error policy |
 
 ## Validation Checklist
 
@@ -214,17 +266,22 @@ Before pouring:
 - Dry-run pour shows the expected root, context beads, parents, checkpoints, and children.
 - All `logicalId` values are unique.
 - All `needs`, `contextRefs`, `inherits`, `provides`, fixture refs, and follow-up template refs resolve.
-- All child beads contain required `workPacket` fields.
+- All required `contextUse` refs resolve and state phase, reason, and failure behavior.
+- All child beads contain required v3 `workPacket` subcontracts.
 - `redCommand` targets exactly one behavior; broader commands live in `verification`.
 - `allowedFiles` and `forbiddenFiles` are concrete after hydration.
+- Child file scope is normalized into `constraintContract`; shared file ownership is normalized into `ownershipMap` or checkpoint `mergeContract`.
 - Typed child refs resolve: `typedContractRefs`, `acceptanceMatrixRefs`, `guardrailRefs`, `evidenceRefs`, `riskRefs`, and `externalPlanRefs`.
+- `verificationResult` snippets either reference an `evidenceRun` or are normalized into one by the generator.
+- Cross-plan aliases normalize into `crossPlanRelationship` records before validation.
 - Evidence, progress, and audit snippets are not converted into child beads unless the plan states executable future work.
 - Acceptance criteria remain separate from validation commands.
 - File operation intent is preserved, not flattened to paths only.
 - Cross-plan relationships are represented even when they cannot become internal `needs`.
 - Unresolved decisions are `decision` roles or checkpoint stop conditions, not settled implementation tasks.
 - Parallel waves have disjoint write ownership or checkpoint-owned merge rules.
-- Checkpoints define validation commands, fanout rules, subagent launch packet shape, and handoff requirements.
+- Checkpoints define gate, fanout, merge, validation, and escalation contracts.
+- Acceptance-pipeline beads, when present, define normal acceptance and mutation commands plus expected result shapes.
 - Fixture beads preserve source provenance and refresh policy.
 
 After pouring:

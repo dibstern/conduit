@@ -8,7 +8,7 @@ description = "{{description}}"
 needs = {{needs_array}}
 
 [steps.metadata.planToBeads]
-contractVersion = "plan-to-beads.v2"
+contractVersion = "plan-to-beads.v3"
 templateVersion = "{{template_version}}"
 role = "parent"
 logicalId = "{{logical_id}}"
@@ -18,6 +18,7 @@ contextRefs = {{context_refs_array}}
 inherits = {{inherits_array}}
 typedContractRefs = {{typed_contract_refs_array}}
 provides = {{provides_array}}
+contextUse = {{context_use_array_of_tables}}
 
 [steps.metadata.stageContract]
 stage = "{{stage}}"

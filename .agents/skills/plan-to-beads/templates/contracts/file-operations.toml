@@ -14,18 +14,23 @@ path = "{{file_touch_path}}"
 operation = "{{file_touch_operation}}"
 reason = "{{file_touch_reason}}"
 expectedTouch = {{file_touch_expected_bool}}
+observedBy = "{{file_touch_observed_by}}"
+handoffOnly = {{file_touch_handoff_only_bool}}
 
 [[ownershipMap]]
 logicalId = "{{ownership_map_logical_id}}"
 owners = {{ownership_map_owners_array_of_tables}}
 sharedFiles = {{ownership_map_shared_files_array_of_tables}}
 conflictResolution = "{{ownership_map_conflict_resolution}}"
+parallelPolicy = "{{ownership_map_parallel_policy}}"
 
 [[changeSurface]]
 logicalId = "{{change_surface_logical_id}}"
+allowedPaths = {{change_surface_allowed_paths_array}}
 allowedOperations = {{change_surface_allowed_operations_array}}
 readOnlyPaths = {{change_surface_read_only_paths_array}}
 forbiddenPaths = {{change_surface_forbidden_paths_array}}
+requiresCheckpointOwner = {{change_surface_requires_checkpoint_owner_bool}}
 
 [[commitBoundary]]
 logicalId = "{{commit_boundary_logical_id}}"

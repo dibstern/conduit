@@ -6,6 +6,7 @@
 logicalId = "{{evidence_logical_id}}"
 kind = "{{evidence_kind}}"
 source = "{{evidence_source}}"
+phase = "{{evidence_phase}}"
 cwd = "{{evidence_cwd}}"
 command = "{{evidence_command}}"
 environment = {{evidence_environment_table}}
@@ -23,6 +24,7 @@ reverifyRequired = {{evidence_reverify_required_bool}}
 
 [[verificationResult]]
 logicalId = "{{verification_logical_id}}"
+evidenceRunRef = "{{verification_evidence_run_ref}}"
 command = "{{verification_command}}"
 cwd = "{{verification_cwd}}"
 exitCode = {{verification_exit_code_int}}
@@ -31,6 +33,7 @@ expectedResult = "{{verification_expected_result}}"
 logPath = "{{verification_log_path}}"
 observedAt = "{{verification_observed_at}}"
 reverifyRequired = {{verification_reverify_required_bool}}
+statusAtConversion = "{{verification_status_at_conversion}}"
 
 [[baselineSnapshot]]
 logicalId = "{{baseline_logical_id}}"

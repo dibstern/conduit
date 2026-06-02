@@ -1,0 +1,11 @@
+# Contract template: timed context consumption.
+# Attach to any role metadata that must tell agents when to read a referenced bead.
+
+[[contextUse]]
+ref = "{{context_use_ref}}"
+phase = "{{context_use_phase}}"
+required = {{context_use_required_bool}}
+reason = "{{context_use_reason}}"
+failureIfMissing = "{{context_use_failure_if_missing}}"
+maxDepth = "{{context_use_max_depth}}"
+stalePolicy = "{{context_use_stale_policy}}"

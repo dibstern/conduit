@@ -9,7 +9,7 @@ description = "{{description}}"
 needs = {{needs_array}}
 
 [steps.metadata.planToBeads]
-contractVersion = "plan-to-beads.v2"
+contractVersion = "plan-to-beads.v3"
 templateVersion = "{{template_version}}"
 role = "review"
 logicalId = "{{logical_id}}"

@@ -1,0 +1,73 @@
+# Role template: optional acceptance pipeline proof layer.
+
+[[steps]]
+id = "{{logical_id}}"
+title = "{{title}}"
+type = "task"
+description = "{{description}}"
+needs = {{needs_array}}
+
+[steps.metadata.planToBeads]
+contractVersion = "plan-to-beads.v3"
+templateVersion = "{{template_version}}"
+role = "acceptance-pipeline"
+logicalId = "{{logical_id}}"
+planId = "{{plan_id}}"
+sourcePlan = "{{source_plan}}"
+contextRefs = {{context_refs_array}}
+inherits = {{inherits_array}}
+typedContractRefs = {{typed_contract_refs_array}}
+provides = {{provides_array}}
+contextUse = {{context_use_array_of_tables}}
+
+[steps.metadata.acceptancePipelineContract]
+logicalId = "{{acceptance_pipeline_logical_id}}"
+appliesTo = "{{acceptance_pipeline_applies_to}}"
+featureRefs = {{acceptance_pipeline_feature_refs_array}}
+acceptanceMatrixRefs = {{acceptance_pipeline_acceptance_matrix_refs_array}}
+evidenceRefs = {{acceptance_pipeline_evidence_refs_array}}
+
+[steps.metadata.acceptancePipelineContract.gherkinFeatureContract]
+featurePaths = {{gherkin_feature_paths_array}}
+supportedSyntax = {{gherkin_supported_syntax_array}}
+unsupportedSyntax = {{gherkin_unsupported_syntax_array}}
+scenarioPolicy = "{{gherkin_scenario_policy}}"
+examplesPolicy = "{{gherkin_examples_policy}}"
+
+[steps.metadata.acceptancePipelineContract.jsonIrContract]
+irPaths = {{json_ir_paths_array}}
+schemaRef = "{{json_ir_schema_ref}}"
+canonicalFields = {{json_ir_canonical_fields_array}}
+deterministicOrdering = "{{json_ir_deterministic_ordering}}"
+
+[steps.metadata.acceptancePipelineContract.acceptanceGeneratorContract]
+generatorCommand = "{{acceptance_generator_command}}"
+generatedTestPaths = {{generated_test_paths_array}}
+mustNotReadSourceFeature = {{generator_must_not_read_source_feature_bool}}
+determinismCommand = "{{generator_determinism_command}}"
+
+[steps.metadata.acceptancePipelineContract.stepHandlerContract]
+handlerPaths = {{step_handler_paths_array}}
+matchingPolicy = "{{step_handler_matching_policy}}"
+worldStatePolicy = "{{step_handler_world_state_policy}}"
+unsupportedStepPolicy = "{{step_handler_unsupported_step_policy}}"
+
+[steps.metadata.acceptancePipelineContract.runnerAdapterContract]
+normalAcceptanceCommand = "{{normal_acceptance_command}}"
+runnerKind = "{{runner_kind}}"
+successShape = "{{runner_success_shape}}"
+failureShape = "{{runner_failure_shape}}"
+infrastructureErrorShape = "{{runner_infrastructure_error_shape}}"
+
+[steps.metadata.acceptancePipelineContract.mutationContract]
+mutationCommand = "{{acceptance_mutation_command}}"
+mutationScope = "{{acceptance_mutation_scope}}"
+mutationThreshold = "{{acceptance_mutation_threshold}}"
+mutationResultShape = "{{acceptance_mutation_result_shape}}"
+differentialPolicy = "{{acceptance_mutation_differential_policy}}"
+
+[steps.metadata.acceptancePipelineContract.mutationReportContract]
+jsonReportPath = "{{acceptance_mutation_json_report_path}}"
+textReportPath = "{{acceptance_mutation_text_report_path}}"
+survivedPolicy = "{{acceptance_mutation_survived_policy}}"
+errorPolicy = "{{acceptance_mutation_error_policy}}"

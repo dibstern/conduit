@@ -8,7 +8,7 @@ description = "{{description}}"
 needs = {{needs_array}}
 
 [steps.metadata.planToBeads]
-contractVersion = "plan-to-beads.v2"
+contractVersion = "plan-to-beads.v3"
 templateVersion = "{{template_version}}"
 role = "checkpoint"
 logicalId = "{{logical_id}}"
@@ -18,26 +18,43 @@ contextRefs = {{context_refs_array}}
 inherits = {{inherits_array}}
 typedContractRefs = {{typed_contract_refs_array}}
 provides = {{provides_array}}
+contextUse = {{context_use_array_of_tables}}
 
 [steps.metadata.checkpointContract]
+[steps.metadata.checkpointContract.gateContract]
 gateKind = "{{gate_kind}}"
 gateFor = "{{gate_for}}"
 preconditions = {{preconditions_array}}
 requiresClosed = {{requires_closed_array}}
+blocksChildCreationUntilClosed = {{blocks_child_creation_until_closed_bool}}
+guardrailRefs = {{guardrail_refs_array}}
+releaseGate = {{release_gate_table}}
+
+[steps.metadata.checkpointContract.fanoutContract]
+fanoutRules = {{fanout_rules_array}}
+subagentLaunchChecklist = {{subagent_launch_checklist_array}}
+frozenExtensionPoints = {{frozen_extension_points_array}}
+frozenInterfaces = {{frozen_interfaces_array_of_tables}}
+allowedChildRefs = {{allowed_child_refs_array}}
+blockedChildRefs = {{blocked_child_refs_array}}
+
+[steps.metadata.checkpointContract.mergeContract]
+mergeOwner = "{{merge_owner}}"
+commitScope = {{commit_scope_table}}
+ownershipMapRefs = {{ownership_map_refs_array}}
+handoffValidation = {{handoff_validation_array}}
+conflictPolicy = "{{conflict_policy}}"
+
+[steps.metadata.checkpointContract.validationContract]
 validationCommands = {{validation_commands_array}}
 validationCatalogRefs = {{validation_catalog_refs_array}}
 acceptanceMatrixRefs = {{acceptance_matrix_refs_array}}
 manualAcceptance = {{manual_acceptance_array_of_tables}}
-guardrailRefs = {{guardrail_refs_array}}
-fanoutRules = {{fanout_rules_array}}
-blocksChildCreationUntilClosed = {{blocks_child_creation_until_closed_bool}}
-frozenExtensionPoints = {{frozen_extension_points_array}}
-frozenInterfaces = {{frozen_interfaces_array_of_tables}}
-mergeOwner = "{{merge_owner}}"
-commitScope = {{commit_scope_table}}
-subagentLaunchChecklist = {{subagent_launch_checklist_array}}
-handoffValidation = {{handoff_validation_array}}
+evidenceRefs = {{evidence_refs_array}}
+evidenceToRecord = {{evidence_to_record_array}}
+
+[steps.metadata.checkpointContract.escalationContract]
 escalationCriteria = {{escalation_criteria_array}}
 stopConditions = {{stop_conditions_array}}
 conditionalBranches = {{conditional_branches_array_of_tables}}
-releaseGate = {{release_gate_table}}
+decisionRefs = {{decision_refs_array}}

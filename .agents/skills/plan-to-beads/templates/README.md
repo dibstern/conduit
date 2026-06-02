@@ -6,6 +6,8 @@ These files are generic role templates. They are not plan-specific formulas.
 
 Placeholders use `{{snake_case}}`. Placeholders ending in `_array`, `_table`, `_tables`, or `_object` are pre-rendered TOML fragments.
 
+The current generic schema is `plan-to-beads.v3`. v3 keeps Beads as the durable graph, makes each child bead a prompt contract, and stores shared plan context in timed `contextUse` refs plus typed context snippets.
+
 ## Files
 
 - `formula/executable-plan.formula.toml`: full-formula skeleton.
@@ -15,6 +17,7 @@ Placeholders use `{{snake_case}}`. Placeholders ending in `_array`, `_table`, `_
 ## Contract Families
 
 - `work-packet.toml`: executable child prompt contract.
+- `context-use.toml`: timed references that say when an agent must read shared context.
 - `subagent-launch.toml`: implementation-agent launch packet.
 - `handoff-note.toml`: durable Beads handoff note shape.
 - `evidence-records.toml`: baselines, verification results, source grounding, inventories, guardrail evidence, and failed attempts.
@@ -26,7 +29,8 @@ Placeholders use `{{snake_case}}`. Placeholders ending in `_array`, `_table`, `_
 - `file-operations.toml`: action-aware file touches, ownership maps, change surfaces, commit boundaries, delivery, publication, and release gates.
 - `architecture-contracts.toml`: module maps, boundary classifications, protocols, artifacts, config, command catalogs, mapping tables, source authority, reference patterns, and prior art.
 - `risk-operational.toml`: risk registers, edge cases, procedures, runbooks, rollback, and manual recovery.
-- `cross-plan-relationships.toml`: related plans, prerequisites, blockers, amendments, supersession, and external plan dependencies.
+- `cross-plan-relationships.toml`: canonical cross-plan relationships plus aliases for prerequisites, blockers, amendments, supersession, and external plan dependencies.
 - `executor-policy.toml`: implementation agent skills, modes, tools, worktree policy, handoff policy, and application lifecycle.
+- `acceptance-pipeline.toml`: optional acceptance-pipeline proof layer for plans that require generated acceptance tests or acceptance mutation.
 
 Do not commit concrete plan behavior, file paths, commands, or expected failures into these templates.

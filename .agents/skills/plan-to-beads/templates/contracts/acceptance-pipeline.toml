@@ -1,0 +1,54 @@
+# Contract template: optional Bob Martin-style acceptance pipeline proof layer.
+# Use only when a plan asks for generated acceptance tests or acceptance mutation.
+
+[acceptancePipelineContract]
+logicalId = "{{acceptance_pipeline_logical_id}}"
+appliesTo = "{{acceptance_pipeline_applies_to}}"
+featureRefs = {{acceptance_pipeline_feature_refs_array}}
+acceptanceMatrixRefs = {{acceptance_pipeline_acceptance_matrix_refs_array}}
+evidenceRefs = {{acceptance_pipeline_evidence_refs_array}}
+
+[acceptancePipelineContract.gherkinFeatureContract]
+featurePaths = {{gherkin_feature_paths_array}}
+supportedSyntax = {{gherkin_supported_syntax_array}}
+unsupportedSyntax = {{gherkin_unsupported_syntax_array}}
+scenarioPolicy = "{{gherkin_scenario_policy}}"
+examplesPolicy = "{{gherkin_examples_policy}}"
+
+[acceptancePipelineContract.jsonIrContract]
+irPaths = {{json_ir_paths_array}}
+schemaRef = "{{json_ir_schema_ref}}"
+canonicalFields = {{json_ir_canonical_fields_array}}
+deterministicOrdering = "{{json_ir_deterministic_ordering}}"
+
+[acceptancePipelineContract.acceptanceGeneratorContract]
+generatorCommand = "{{acceptance_generator_command}}"
+generatedTestPaths = {{generated_test_paths_array}}
+mustNotReadSourceFeature = {{generator_must_not_read_source_feature_bool}}
+determinismCommand = "{{generator_determinism_command}}"
+
+[acceptancePipelineContract.stepHandlerContract]
+handlerPaths = {{step_handler_paths_array}}
+matchingPolicy = "{{step_handler_matching_policy}}"
+worldStatePolicy = "{{step_handler_world_state_policy}}"
+unsupportedStepPolicy = "{{step_handler_unsupported_step_policy}}"
+
+[acceptancePipelineContract.runnerAdapterContract]
+normalAcceptanceCommand = "{{normal_acceptance_command}}"
+runnerKind = "{{runner_kind}}"
+successShape = "{{runner_success_shape}}"
+failureShape = "{{runner_failure_shape}}"
+infrastructureErrorShape = "{{runner_infrastructure_error_shape}}"
+
+[acceptancePipelineContract.mutationContract]
+mutationCommand = "{{acceptance_mutation_command}}"
+mutationScope = "{{acceptance_mutation_scope}}"
+mutationThreshold = "{{acceptance_mutation_threshold}}"
+mutationResultShape = "{{acceptance_mutation_result_shape}}"
+differentialPolicy = "{{acceptance_mutation_differential_policy}}"
+
+[acceptancePipelineContract.mutationReportContract]
+jsonReportPath = "{{acceptance_mutation_json_report_path}}"
+textReportPath = "{{acceptance_mutation_text_report_path}}"
+survivedPolicy = "{{acceptance_mutation_survived_policy}}"
+errorPolicy = "{{acceptance_mutation_error_policy}}"
