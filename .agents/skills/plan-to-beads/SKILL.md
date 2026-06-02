@@ -11,11 +11,12 @@ Convert a written implementation plan into Beads issues/molecules where Beads ho
 
 1. Run `bd prime`.
 2. Read the plan and extract a plan IR: roles, stable logical ids, dependencies, shared context, `contextUse`, typed contract snippets, fixtures, stages, children, checkpoints, optional acceptance-pipeline work, pilot work, decisions, guardrails, reviews, progress overlays, and follow-up templates.
-3. Hydrate the generic templates in `templates/` from that IR. Do not put plan-specific facts in the source templates.
+3. Hydrate the generic templates in `templates/` from that IR. Prefer `scripts/render-plan-to-beads.cjs`; do not put plan-specific facts in the source templates.
 4. Generate a plan-specific formula under `.beads/generated-formulas/<plan-id>.formula.toml` for review.
 5. Validate the generated formula:
 
 ```bash
+node .agents/skills/plan-to-beads/scripts/render-plan-to-beads.cjs <plan-ir.json> .beads/generated-formulas/<plan-id>.formula.toml
 node .agents/skills/plan-to-beads/scripts/validate-plan-to-beads.cjs .beads/generated-formulas/<plan-id>.formula.toml
 bd cook .beads/generated-formulas/<plan-id>.formula.toml --dry-run
 ```
@@ -75,10 +76,6 @@ If any field cannot be derived from the plan, create a decision/checkpoint bead 
 - Template placeholders use `{{snake_case}}`; array/object placeholders represent already-rendered TOML.
 - Role templates are snippets; the generator may compose them into a full formula or hydrate directly into `bd create`/`bd update` commands.
 - Child `contextUse` has one canonical home: `workPacket.inputContract.contextUse`.
-
-## Bead Or Snippet Rule
-
-Use a separate bead when the item has lifecycle, dependencies, readiness, ownership, or closure. Use a typed snippet when it is read-only context attached to the smallest durable owner. For example, an unresolved architecture decision is a `decision` bead; a resolved decision inside a stage is a snippet. A fixture refresh task is a bead; fixture provenance is a snippet.
 
 ## Validation
 

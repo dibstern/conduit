@@ -42,11 +42,17 @@ evidenceRefs = []
 externalPlanRefs = []
 ```
 
-Validate before pouring:
+Validate before approval:
 
 ```bash
+node .agents/skills/plan-to-beads/scripts/render-plan-to-beads.cjs plan-ir.json .beads/generated-formulas/json-report.formula.toml
 node .agents/skills/plan-to-beads/scripts/validate-plan-to-beads.cjs .beads/generated-formulas/json-report.formula.toml
 bd cook .beads/generated-formulas/json-report.formula.toml --dry-run
+```
+
+Persist and dry-run pour only after approval:
+
+```bash
 bd cook .beads/generated-formulas/json-report.formula.toml --persist --force
 bd mol pour json-report-executable-plan --dry-run
 bd dep cycles

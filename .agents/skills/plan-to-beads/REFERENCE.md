@@ -68,7 +68,7 @@ Every role exposes context through `provides`; children consume it through `cont
 | `followup-template` | `contextRefs` | Schema for later child beads, not executable work by default |
 | `acceptance-pipeline` | `needs`, `contextRefs`, `acceptanceMatrixRefs` | Optional generated acceptance and acceptance-mutation proof layer |
 
-`needs` gates readiness. `contextRefs` tells an agent what to read. `inherits` merges defaults into the child prompt contract. `typedContractRefs` points at typed snippets inside context beads. `provides` names data that later beads may reference.
+`needs` gates readiness. `contextRefs` tells an agent what to read. `inherits` merges defaults into the child prompt contract. `typedContractRefs` points at typed snippets inside context beads. `provides` declares named data that later beads may reference.
 
 `contextUse` adds timing and failure behavior to context references. Use it when an agent must know whether to read a context bead before editing, during implementation, during verification, during handoff, or only when blocked.
 
@@ -105,6 +105,8 @@ Use the smallest durable owner that matches the information.
 | Generated acceptance or mutation proof | `acceptance-pipeline` | `needs`, `contextRefs`, `acceptanceMatrixRefs` |
 
 Do not duplicate large snippets into every child. A child should carry only its own executable prompt contract plus references to the context snippets it must obey.
+
+Use a separate bead when the item has lifecycle, dependencies, readiness, ownership, or closure. Use a typed snippet when it is read-only context attached to the smallest durable owner. For example, an unresolved architecture decision is a `decision` bead; a resolved decision inside a stage is a snippet. A fixture refresh task is a bead; fixture provenance is a snippet.
 
 ## Canonical Ownership
 
@@ -165,12 +167,10 @@ Preferred path:
 
 1. Parse the plan into IR.
 2. Validate IR completeness.
-3. Compose `templates/formula/executable-plan.formula.toml` with role snippets from `templates/roles/`.
-4. Replace every placeholder.
-5. Write a plan-specific generated formula.
-6. Run `node .agents/skills/plan-to-beads/scripts/validate-plan-to-beads.cjs <generated-formula>`.
-7. Run `bd cook <generated-formula> --dry-run`.
-8. After approval, run `bd cook <generated-formula> --persist --force`, then `bd mol pour <formula-id> --dry-run`.
+3. Run `node .agents/skills/plan-to-beads/scripts/render-plan-to-beads.cjs <plan-ir.json> <generated-formula>`.
+4. Run `node .agents/skills/plan-to-beads/scripts/validate-plan-to-beads.cjs <generated-formula>`.
+5. Run `bd cook <generated-formula> --dry-run`.
+6. After approval, run `bd cook <generated-formula> --persist --force`, then `bd mol pour <formula-id> --dry-run`.
 
 Small-plan fallback:
 
@@ -185,6 +185,8 @@ Small-plan fallback:
 - `templates/contracts/`: reusable metadata snippets for child work packets, subagent launch packets, durable handoff notes, and typed shared context.
 
 The converter may inline contract snippets into role snippets, or render role snippets directly when the role already contains the needed fields. The generated formula is the first artifact that must be valid TOML.
+
+`scripts/render-plan-to-beads.cjs` is the deterministic placeholder hydrator. It expects a plan IR with top-level plan fields and `roles` entries. Each role may provide values directly or under `metadata`/`values`; missing arrays render as `[]`, missing tables as `{}`, booleans as `false`, integers as `0`, and strings as empty strings.
 
 ## Typed Contract Snippet Library
 
@@ -271,7 +273,8 @@ Before pouring:
 - `bd cook <generated-formula> --dry-run` succeeds.
 - Dry-run pour shows the expected root, context beads, parents, checkpoints, and children.
 - All `logicalId` values are unique.
-- All `needs`, `contextRefs`, `inherits`, `provides`, fixture refs, and follow-up template refs resolve.
+- All `needs`, `contextRefs`, `inherits`, fixture refs, and follow-up template refs resolve.
+- `provides` values are unique declarations and become valid reference targets.
 - All required `contextUse` refs resolve and state phase, reason, and failure behavior.
 - All child beads contain required v3 `workPacket` subcontracts.
 - Child `contextUse` appears only under `workPacket.inputContract`.

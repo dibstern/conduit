@@ -13,6 +13,7 @@ The current generic schema is `plan-to-beads.v3`. v3 keeps Beads as the durable 
 - `formula/executable-plan.formula.toml`: full-formula skeleton.
 - `roles/*.toml`: role snippets for one Beads issue/step.
 - `contracts/*.toml`: reusable metadata table snippets used by role templates.
+- `../scripts/render-plan-to-beads.cjs`: deterministic IR-to-formula placeholder hydrator.
 - `../scripts/validate-plan-to-beads.cjs`: deterministic checks for the skill source and generated formulas.
 
 ## Contract Families
