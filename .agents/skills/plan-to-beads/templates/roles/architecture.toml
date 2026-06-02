@@ -8,7 +8,7 @@ description = "{{description}}"
 needs = {{needs_array}}
 
 [steps.metadata.planToBeads]
-contractVersion = "plan-to-beads.v1"
+contractVersion = "plan-to-beads.v2"
 templateVersion = "{{template_version}}"
 role = "architecture"
 logicalId = "{{logical_id}}"
@@ -16,6 +16,7 @@ planId = "{{plan_id}}"
 sourcePlan = "{{source_plan}}"
 contextRefs = {{context_refs_array}}
 inherits = {{inherits_array}}
+typedContractRefs = {{typed_contract_refs_array}}
 provides = {{provides_array}}
 
 [steps.metadata.architectureContract]
@@ -26,3 +27,11 @@ seamRules = {{seam_rules_array}}
 ownershipRules = {{ownership_rules_array}}
 deletionTests = {{deletion_tests_array}}
 forbiddenArchitecture = {{forbidden_architecture_array}}
+moduleMaps = {{module_maps_array_of_tables}}
+boundaryClassifications = {{boundary_classifications_array_of_tables}}
+protocolContracts = {{protocol_contracts_array_of_tables}}
+artifactContracts = {{artifact_contracts_array_of_tables}}
+configContracts = {{config_contracts_array_of_tables}}
+sourceAuthorities = {{source_authorities_array_of_tables}}
+referencePatterns = {{reference_patterns_array_of_tables}}
+priorArt = {{prior_art_array_of_tables}}

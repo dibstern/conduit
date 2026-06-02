@@ -1,0 +1,30 @@
+# Role template: progress / archive / historical status overlay.
+# Use when converting completed or live-progress records losslessly.
+
+[[steps]]
+id = "{{logical_id}}"
+title = "{{title}}"
+type = "chore"
+description = "{{description}}"
+needs = {{needs_array}}
+
+[steps.metadata.planToBeads]
+contractVersion = "plan-to-beads.v2"
+templateVersion = "{{template_version}}"
+role = "progress"
+logicalId = "{{logical_id}}"
+planId = "{{plan_id}}"
+sourcePlan = "{{source_plan}}"
+contextRefs = {{context_refs_array}}
+inherits = {{inherits_array}}
+typedContractRefs = {{typed_contract_refs_array}}
+provides = {{provides_array}}
+
+[steps.metadata.progressContract]
+progressEntries = {{progress_entries_array_of_tables}}
+completedSlices = {{completed_slices_array_of_tables}}
+historicalStatus = {{historical_status_array_of_tables}}
+archiveProvenance = {{archive_provenance_array_of_tables}}
+residualDebt = {{residual_debt_array_of_tables}}
+statusOverlays = {{status_overlays_array_of_tables}}
+evidenceRefs = {{evidence_refs_array}}

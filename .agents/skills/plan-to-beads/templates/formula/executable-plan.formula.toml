@@ -8,7 +8,7 @@ version = {{formula_version}}
 type = "workflow"
 
 [metadata.planToBeads]
-contractVersion = "plan-to-beads.v1"
+contractVersion = "plan-to-beads.v2"
 templateVersion = "{{template_version}}"
 planId = "{{plan_id}}"
 sourcePlan = "{{source_plan}}"

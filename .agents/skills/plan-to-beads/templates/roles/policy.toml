@@ -8,7 +8,7 @@ description = "{{description}}"
 needs = {{needs_array}}
 
 [steps.metadata.planToBeads]
-contractVersion = "plan-to-beads.v1"
+contractVersion = "plan-to-beads.v2"
 templateVersion = "{{template_version}}"
 role = "policy"
 logicalId = "{{logical_id}}"
@@ -16,6 +16,7 @@ planId = "{{plan_id}}"
 sourcePlan = "{{source_plan}}"
 contextRefs = {{context_refs_array}}
 inherits = {{inherits_array}}
+typedContractRefs = {{typed_contract_refs_array}}
 provides = {{provides_array}}
 
 [steps.metadata.policyContract]
@@ -25,3 +26,6 @@ defaults = {{defaults_table}}
 validationCommands = {{validation_commands_array}}
 failureConditions = {{failure_conditions_array}}
 appliesToRoles = {{applies_to_roles_array}}
+executorProfiles = {{executor_profiles_array_of_tables}}
+guardrailRefs = {{guardrail_refs_array}}
+riskRefs = {{risk_refs_array}}

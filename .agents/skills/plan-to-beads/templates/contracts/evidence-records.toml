@@ -1,0 +1,76 @@
+# Contract templates: evidence, baselines, and historical observations.
+# Attach these under the role that owns the observed context. Do not convert
+# historical evidence into executable child work unless the plan says it is future work.
+
+[[evidenceRun]]
+logicalId = "{{evidence_logical_id}}"
+kind = "{{evidence_kind}}"
+source = "{{evidence_source}}"
+cwd = "{{evidence_cwd}}"
+command = "{{evidence_command}}"
+environment = {{evidence_environment_table}}
+expected = "{{evidence_expected}}"
+actual = "{{evidence_actual}}"
+exitCode = {{evidence_exit_code_int}}
+classification = "{{evidence_classification}}"
+logPath = "{{evidence_log_path}}"
+evidenceRefs = {{evidence_refs_array}}
+caveats = {{evidence_caveats_array}}
+rerunOf = "{{evidence_rerun_of}}"
+observedAt = "{{evidence_observed_at}}"
+staleAfter = "{{evidence_stale_after}}"
+reverifyRequired = {{evidence_reverify_required_bool}}
+
+[[verificationResult]]
+logicalId = "{{verification_logical_id}}"
+command = "{{verification_command}}"
+cwd = "{{verification_cwd}}"
+exitCode = {{verification_exit_code_int}}
+result = "{{verification_result}}"
+expectedResult = "{{verification_expected_result}}"
+logPath = "{{verification_log_path}}"
+observedAt = "{{verification_observed_at}}"
+reverifyRequired = {{verification_reverify_required_bool}}
+
+[[baselineSnapshot]]
+logicalId = "{{baseline_logical_id}}"
+source = "{{baseline_source}}"
+observedFiles = {{baseline_observed_files_array}}
+observedBehaviors = {{baseline_observed_behaviors_array}}
+environment = {{baseline_environment_table}}
+driftRisk = "{{baseline_drift_risk}}"
+reverifyRequired = {{baseline_reverify_required_bool}}
+supersededBy = "{{baseline_superseded_by}}"
+
+[[sourceGrounding]]
+logicalId = "{{source_grounding_logical_id}}"
+source = "{{source_grounding_source}}"
+paths = {{source_grounding_paths_array}}
+symbols = {{source_grounding_symbols_array}}
+claims = {{source_grounding_claims_array}}
+authority = "{{source_grounding_authority}}"
+reverifyRequired = {{source_grounding_reverify_required_bool}}
+
+[[inventorySnapshot]]
+logicalId = "{{inventory_logical_id}}"
+source = "{{inventory_source}}"
+items = {{inventory_items_array_of_tables}}
+observedAt = "{{inventory_observed_at}}"
+staleAfter = "{{inventory_stale_after}}"
+
+[[guardrailEvidence]]
+logicalId = "{{guardrail_evidence_logical_id}}"
+guardrailRef = "{{guardrail_ref}}"
+proofCommand = "{{guardrail_proof_command}}"
+expectedResult = "{{guardrail_expected_result}}"
+actualResult = "{{guardrail_actual_result}}"
+observedAt = "{{guardrail_observed_at}}"
+
+[[failedAttempt]]
+logicalId = "{{failed_attempt_logical_id}}"
+attemptedCommand = "{{failed_attempt_command}}"
+attemptedChange = "{{failed_attempt_change}}"
+failure = "{{failed_attempt_failure}}"
+lesson = "{{failed_attempt_lesson}}"
+retryPolicy = "{{failed_attempt_retry_policy}}"
+evidenceRefs = {{failed_attempt_evidence_refs_array}}

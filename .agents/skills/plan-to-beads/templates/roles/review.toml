@@ -1,0 +1,34 @@
+# Role template: review / audit / amendment sidecar.
+# Use when a plan contains findings or amendments rather than direct child work.
+
+[[steps]]
+id = "{{logical_id}}"
+title = "{{title}}"
+type = "task"
+description = "{{description}}"
+needs = {{needs_array}}
+
+[steps.metadata.planToBeads]
+contractVersion = "plan-to-beads.v2"
+templateVersion = "{{template_version}}"
+role = "review"
+logicalId = "{{logical_id}}"
+planId = "{{plan_id}}"
+sourcePlan = "{{source_plan}}"
+contextRefs = {{context_refs_array}}
+inherits = {{inherits_array}}
+typedContractRefs = {{typed_contract_refs_array}}
+provides = {{provides_array}}
+
+[steps.metadata.reviewContract]
+reviewMode = "{{review_mode}}"
+auditor = "{{review_auditor}}"
+sourcePlans = {{review_source_plans_array}}
+coverage = {{review_coverage_array}}
+auditFindings = {{audit_findings_array_of_tables}}
+reviewRuns = {{review_runs_array_of_tables}}
+reviewDispositions = {{review_dispositions_array_of_tables}}
+amendmentLedgers = {{amendment_ledgers_array_of_tables}}
+planEdits = {{plan_edits_array_of_tables}}
+nonActionableFindings = {{non_actionable_findings_array_of_tables}}
+rerunInstructions = "{{review_rerun_instructions}}"

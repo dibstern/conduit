@@ -1,0 +1,33 @@
+# Contract templates: implementation-agent and harness policy.
+# Keep this distinct from product-domain subagents described by the plan.
+
+[[executorProfile]]
+logicalId = "{{executor_profile_logical_id}}"
+requiredSkills = {{executor_profile_required_skills_array}}
+requiredCommands = {{executor_profile_required_commands_array}}
+forbiddenTools = {{executor_profile_forbidden_tools_array}}
+implementationMode = "{{executor_profile_implementation_mode}}"
+worktreePolicy = "{{executor_profile_worktree_policy}}"
+handoffPolicy = "{{executor_profile_handoff_policy}}"
+applicationDomain = "{{executor_profile_application_domain}}"
+doNotConfuseWithSubagentLaunch = {{executor_profile_do_not_confuse_with_subagent_launch_bool}}
+
+[[requiredSkills]]
+skills = {{required_skills_array}}
+reason = "{{required_skills_reason}}"
+
+[[implementationMode]]
+mode = "{{implementation_mode}}"
+constraints = {{implementation_mode_constraints_array}}
+validationPolicy = "{{implementation_mode_validation_policy}}"
+
+[[agentInstructions]]
+instructions = {{agent_instructions_array}}
+failureBehavior = "{{agent_instructions_failure_behavior}}"
+handoffShape = "{{agent_instructions_handoff_shape}}"
+
+[[applicationLifecycle]]
+domain = "{{application_lifecycle_domain}}"
+startup = {{application_lifecycle_startup_array}}
+shutdown = {{application_lifecycle_shutdown_array}}
+doNotAssume = {{application_lifecycle_do_not_assume_array}}

@@ -1,0 +1,47 @@
+# Contract templates: relationships to plans outside the generated Beads graph.
+
+[[relatedPlans]]
+path = "{{related_plan_path}}"
+relationship = "{{related_plan_relationship}}"
+condition = "{{related_plan_condition}}"
+statusKnownAtConversion = "{{related_plan_status_known_at_conversion}}"
+
+[[blockedByPlan]]
+path = "{{blocked_by_plan_path}}"
+condition = "{{blocked_by_plan_condition}}"
+blockingUntil = "{{blocked_by_plan_blocking_until}}"
+doNotGuess = {{blocked_by_plan_do_not_guess_bool}}
+
+[[prerequisitePlans]]
+path = "{{prerequisite_plan_path}}"
+condition = "{{prerequisite_plan_condition}}"
+blockingUntil = "{{prerequisite_plan_blocking_until}}"
+doNotGuess = {{prerequisite_plan_do_not_guess_bool}}
+
+[[updatesPlan]]
+path = "{{updates_plan_path}}"
+condition = "{{updates_plan_condition}}"
+statusKnownAtConversion = "{{updates_plan_status_known_at_conversion}}"
+
+[[amendsPlan]]
+path = "{{amends_plan_path}}"
+condition = "{{amends_plan_condition}}"
+doesNotReplaceTarget = {{amends_plan_does_not_replace_target_bool}}
+
+[[supersedesPlan]]
+path = "{{supersedes_plan_path}}"
+condition = "{{supersedes_plan_condition}}"
+statusKnownAtConversion = "{{supersedes_plan_status_known_at_conversion}}"
+
+[[prerequisiteFor]]
+path = "{{prerequisite_for_plan_path}}"
+condition = "{{prerequisite_for_condition}}"
+statusKnownAtConversion = "{{prerequisite_for_status_known_at_conversion}}"
+
+[[externalPlanDependency]]
+path = "{{external_plan_dependency_path}}"
+relationship = "{{external_plan_dependency_relationship}}"
+condition = "{{external_plan_dependency_condition}}"
+blockingUntil = "{{external_plan_dependency_blocking_until}}"
+doNotGuess = {{external_plan_dependency_do_not_guess_bool}}
+statusKnownAtConversion = "{{external_plan_dependency_status_known_at_conversion}}"

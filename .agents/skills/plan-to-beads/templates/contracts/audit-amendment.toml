@@ -1,0 +1,53 @@
+# Contract templates: audits, reviews, and plan amendments.
+# Use these for review sidecars. Findings become child work only after a target
+# plan context and executable red/green contract are known.
+
+[[auditFinding]]
+findingId = "{{finding_id}}"
+severity = "{{finding_severity}}"
+sourcePlan = "{{finding_source_plan}}"
+sourceTaskRefs = {{finding_source_task_refs_array}}
+evidenceRefs = {{finding_evidence_refs_array}}
+problem = "{{finding_problem}}"
+impact = "{{finding_impact}}"
+requiredAmendment = "{{finding_required_amendment}}"
+disposition = "{{finding_disposition}}"
+appliedStatus = "{{finding_applied_status}}"
+
+[[reviewRun]]
+logicalId = "{{review_run_logical_id}}"
+auditor = "{{review_auditor}}"
+reviewMode = "{{review_mode}}"
+coverage = {{review_coverage_array}}
+sourcePlans = {{review_source_plans_array}}
+rerunInstructions = "{{review_rerun_instructions}}"
+evidenceRefs = {{review_evidence_refs_array}}
+
+[[reviewDisposition]]
+findingId = "{{disposition_finding_id}}"
+status = "{{disposition_status}}"
+rationale = "{{disposition_rationale}}"
+appliedBy = "{{disposition_applied_by}}"
+appliedAt = "{{disposition_applied_at}}"
+followupRefs = {{disposition_followup_refs_array}}
+
+[[amendmentLedger]]
+logicalId = "{{amendment_logical_id}}"
+amendsPlan = "{{amendment_amends_plan}}"
+targetPlanPath = "{{amendment_target_plan_path}}"
+doesNotReplaceTarget = {{amendment_does_not_replace_target_bool}}
+entries = {{amendment_entries_array_of_tables}}
+
+[[planEdit]]
+logicalId = "{{plan_edit_logical_id}}"
+targetPlanPath = "{{plan_edit_target_plan_path}}"
+editReason = "{{plan_edit_reason}}"
+sectionsChanged = {{plan_edit_sections_changed_array}}
+sourceFindingRefs = {{plan_edit_source_finding_refs_array}}
+validation = "{{plan_edit_validation}}"
+
+[[nonActionableFinding]]
+findingId = "{{non_actionable_finding_id}}"
+reason = "{{non_actionable_reason}}"
+evidenceRefs = {{non_actionable_evidence_refs_array}}
+reopenTrigger = "{{non_actionable_reopen_trigger}}"

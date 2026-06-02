@@ -8,7 +8,7 @@ description = "{{description}}"
 needs = {{needs_array}}
 
 [steps.metadata.planToBeads]
-contractVersion = "plan-to-beads.v1"
+contractVersion = "plan-to-beads.v2"
 templateVersion = "{{template_version}}"
 role = "pilot"
 logicalId = "{{logical_id}}"
@@ -16,6 +16,7 @@ planId = "{{plan_id}}"
 sourcePlan = "{{source_plan}}"
 contextRefs = {{context_refs_array}}
 inherits = {{inherits_array}}
+typedContractRefs = {{typed_contract_refs_array}}
 provides = {{provides_array}}
 
 [steps.metadata.pilotContract]
@@ -23,6 +24,9 @@ purpose = "{{purpose}}"
 commands = {{commands_array}}
 metrics = {{metrics_array}}
 evidenceOutputs = {{evidence_outputs_array}}
+evidenceRuns = {{evidence_runs_array_of_tables}}
+operatorSmoke = {{operator_smoke_array_of_tables}}
+runbooks = {{runbooks_array_of_tables}}
 decisionRules = {{decision_rules_array}}
 forbiddenWork = {{forbidden_work_array}}
 followupTemplateRefs = {{followup_template_refs_array}}

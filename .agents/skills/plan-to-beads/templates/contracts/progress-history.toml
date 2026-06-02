@@ -1,0 +1,49 @@
+# Contract templates: progress, archive, and historical overlays.
+# These records preserve what happened; they are not future tasks by default.
+
+[[progressEntry]]
+logicalId = "{{progress_logical_id}}"
+status = "{{progress_status}}"
+statusDate = "{{progress_status_date}}"
+sourceDate = "{{progress_source_date}}"
+summary = "{{progress_summary}}"
+evidenceRefs = {{progress_evidence_refs_array}}
+supersedes = {{progress_supersedes_array}}
+supersededBy = {{progress_superseded_by_array}}
+
+[[completedSlice]]
+logicalId = "{{completed_slice_logical_id}}"
+completedAt = "{{completed_slice_completed_at}}"
+completedBy = "{{completed_slice_completed_by}}"
+closedBlockers = {{completed_slice_closed_blockers_array}}
+verificationRefs = {{completed_slice_verification_refs_array}}
+residualRisk = "{{completed_slice_residual_risk}}"
+
+[[historicalStatus]]
+logicalId = "{{historical_status_logical_id}}"
+authoritativeOrder = {{historical_status_authoritative_order_array}}
+status = "{{historical_status}}"
+sourcePlan = "{{historical_status_source_plan}}"
+caveats = {{historical_status_caveats_array}}
+
+[[archiveProvenance]]
+logicalId = "{{archive_provenance_logical_id}}"
+liveProgressPath = "{{archive_live_progress_path}}"
+archivePath = "{{archive_path}}"
+appendPolicy = "{{archive_append_policy}}"
+archivedAt = "{{archive_archived_at}}"
+
+[[residualDebt]]
+logicalId = "{{residual_debt_logical_id}}"
+remainingDebt = "{{residual_debt_remaining}}"
+cleanupPrerequisite = "{{residual_debt_cleanup_prerequisite}}"
+risk = "{{residual_debt_risk}}"
+followupTemplateRefs = {{residual_debt_followup_template_refs_array}}
+
+[[statusOverlay]]
+logicalId = "{{status_overlay_logical_id}}"
+scope = "{{status_overlay_scope}}"
+status = "{{status_overlay_status}}"
+source = "{{status_overlay_source}}"
+supersedes = {{status_overlay_supersedes_array}}
+notes = {{status_overlay_notes_array}}

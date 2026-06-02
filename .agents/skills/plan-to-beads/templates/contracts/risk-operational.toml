@@ -1,0 +1,42 @@
+# Contract templates: risks, edge cases, runbooks, rollback, and recovery.
+
+[[riskRegister]]
+logicalId = "{{risk_logical_id}}"
+risk = "{{risk}}"
+severity = "{{risk_severity}}"
+mitigation = "{{risk_mitigation}}"
+proof = "{{risk_proof}}"
+acceptedTradeoff = "{{risk_accepted_tradeoff}}"
+
+[[edgeCaseRegister]]
+logicalId = "{{edge_case_logical_id}}"
+edgeCase = "{{edge_case}}"
+expectedBehavior = "{{edge_case_expected_behavior}}"
+proof = "{{edge_case_proof}}"
+
+[[operationalProcedure]]
+logicalId = "{{procedure_logical_id}}"
+procedureSteps = {{procedure_steps_array}}
+environmentPrereqs = {{procedure_environment_prereqs_array}}
+stopConditions = {{procedure_stop_conditions_array}}
+evidenceToRecord = {{procedure_evidence_to_record_array}}
+
+[[runbook]]
+logicalId = "{{runbook_logical_id}}"
+name = "{{runbook_name}}"
+procedureSteps = {{runbook_procedure_steps_array}}
+environmentPrereqs = {{runbook_environment_prereqs_array}}
+expectedObservableResult = "{{runbook_expected_observable_result}}"
+stopConditions = {{runbook_stop_conditions_array}}
+
+[[rollbackProcedure]]
+logicalId = "{{rollback_logical_id}}"
+rollbackPlan = "{{rollback_plan}}"
+recoverySteps = {{rollback_recovery_steps_array}}
+validation = "{{rollback_validation}}"
+
+[[manualRecovery]]
+logicalId = "{{manual_recovery_logical_id}}"
+trigger = "{{manual_recovery_trigger}}"
+recoverySteps = {{manual_recovery_steps_array}}
+escalationCriteria = {{manual_recovery_escalation_criteria_array}}

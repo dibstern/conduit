@@ -1,0 +1,47 @@
+# Contract templates: negative-state contracts and proof obligations.
+
+[[staticGuardrail]]
+logicalId = "{{static_guardrail_logical_id}}"
+forbiddenState = "{{static_guardrail_forbidden_state}}"
+forbiddenPattern = "{{static_guardrail_forbidden_pattern}}"
+requiredPattern = "{{static_guardrail_required_pattern}}"
+scope = {{static_guardrail_scope_array}}
+allowedLocations = {{static_guardrail_allowed_locations_array}}
+knownNonExceptions = {{static_guardrail_known_non_exceptions_array}}
+proofCommand = "{{static_guardrail_proof_command}}"
+expectedResult = "{{static_guardrail_expected_result}}"
+resolutionPolicy = "{{static_guardrail_resolution_policy}}"
+completionBlocksUntilResolved = {{static_guardrail_completion_blocks_bool}}
+reclassificationRule = "{{static_guardrail_reclassification_rule}}"
+
+[[boundaryGuard]]
+logicalId = "{{boundary_guard_logical_id}}"
+boundary = "{{boundary_guard_boundary}}"
+forbiddenCrossing = "{{boundary_guard_forbidden_crossing}}"
+allowedExceptions = {{boundary_guard_allowed_exceptions_array}}
+proofCommand = "{{boundary_guard_proof_command}}"
+
+[[guardrailRegistry]]
+logicalId = "{{guardrail_registry_logical_id}}"
+guardrailRefs = {{guardrail_registry_refs_array}}
+appliesToRoles = {{guardrail_registry_applies_to_roles_array}}
+completionPolicy = "{{guardrail_registry_completion_policy}}"
+
+[[antiPattern]]
+logicalId = "{{anti_pattern_logical_id}}"
+pattern = "{{anti_pattern_pattern}}"
+whyForbidden = "{{anti_pattern_why_forbidden}}"
+allowedExceptionRefs = {{anti_pattern_allowed_exception_refs_array}}
+
+[[allowedException]]
+logicalId = "{{allowed_exception_logical_id}}"
+scope = "{{allowed_exception_scope}}"
+reason = "{{allowed_exception_reason}}"
+expiresWhen = "{{allowed_exception_expires_when}}"
+proofRequired = "{{allowed_exception_proof_required}}"
+
+[[changeSurfaceGuard]]
+logicalId = "{{change_surface_guard_logical_id}}"
+changeSurfaceRefs = {{change_surface_guard_refs_array}}
+forbiddenTo = {{change_surface_guard_forbidden_to_array}}
+condition = "{{change_surface_guard_condition}}"
