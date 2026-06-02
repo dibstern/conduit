@@ -18,7 +18,6 @@ contextRefs = {{context_refs_array}}
 inherits = {{inherits_array}}
 typedContractRefs = {{typed_contract_refs_array}}
 provides = {{provides_array}}
-contextUse = {{context_use_array_of_tables}}
 
 [steps.metadata.workPacket]
 [steps.metadata.workPacket.goalContract]

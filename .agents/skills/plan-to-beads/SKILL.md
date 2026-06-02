@@ -13,10 +13,17 @@ Convert a written implementation plan into Beads issues/molecules where Beads ho
 2. Read the plan and extract a plan IR: roles, stable logical ids, dependencies, shared context, `contextUse`, typed contract snippets, fixtures, stages, children, checkpoints, optional acceptance-pipeline work, pilot work, decisions, guardrails, reviews, progress overlays, and follow-up templates.
 3. Hydrate the generic templates in `templates/` from that IR. Do not put plan-specific facts in the source templates.
 4. Generate a plan-specific formula under `.beads/generated-formulas/<plan-id>.formula.toml` for review.
-5. Validate, then pour only after approval:
+5. Validate the generated formula:
 
 ```bash
+node .agents/skills/plan-to-beads/scripts/validate-plan-to-beads.cjs .beads/generated-formulas/<plan-id>.formula.toml
 bd cook .beads/generated-formulas/<plan-id>.formula.toml --dry-run
+```
+
+6. Pour only after approval. Persist the generated formula as a proto first, or install it into `.beads/formulas/` if the user wants a reusable formula:
+
+```bash
+bd cook .beads/generated-formulas/<plan-id>.formula.toml --persist --force
 bd mol pour <plan-id>-executable-plan --dry-run
 bd dep cycles
 ```
@@ -32,24 +39,7 @@ bd dep cycles
 
 Use `needs` for execution dependencies that affect readiness. Use `contextRefs`, `inherits`, `provides`, and `typedContractRefs` inside metadata for read-time context and schema wiring. Use `contextUse` when the role must say exactly when an agent reads a context bead: `before-edit`, `during-edit`, `verification`, `handoff`, or `if-blocked`.
 
-## Typed Contract Snippets
-
-Use contract snippets when a plan contains reusable context that is not itself executable child work:
-
-- evidence and baselines: `evidenceRun`, `verificationResult` as an `evidenceRun` shortcut, `baselineSnapshot`, `sourceGrounding`, `inventorySnapshot`, `guardrailEvidence`, `failedAttempt`
-- audits and amendments: `auditFinding`, `reviewRun`, `reviewDisposition`, `amendmentLedger`, `planEdit`, `nonActionableFinding`
-- progress/history: `progressEntry`, `completedSlice`, `historicalStatus`, `archiveProvenance`, `residualDebt`, `statusOverlay`
-- decisions: `openDecision`, `blockerDecision`, `decisionOptions`, `decisionNeeded`, `conditionalBranch`
-- acceptance proof: `acceptanceMatrix`, `acceptanceCriterion`, `acceptanceScenario`, `acceptanceTrace`, `manualAcceptance`, `operatorSmoke`
-- guardrails: `staticGuardrail`, `boundaryGuard`, `guardrailRegistry`, `antiPattern`, `allowedException`, `changeSurfaceGuard`
-- ownership and delivery: `fileOperations`, `fileTouches`, `ownershipMap`, `changeSurface`, `commitBoundary`, `deliverySequence`, `publication`, `releaseGate`
-- architecture and provenance: `moduleMap`, `boundaryClassification`, `protocolContract`, `artifactContract`, `configContract`, `commandCatalog`, `mappingTable`, `sourceAuthority`, `referencePattern`, `priorArt`
-- risk and operations: `riskRegister`, `edgeCaseRegister`, `operationalProcedure`, `runbook`, `rollbackProcedure`, `manualRecovery`
-- cross-plan relationships: canonical `crossPlanRelationship`, plus aliases such as `relatedPlans`, `blockedByPlan`, `prerequisitePlans`, `updatesPlan`, `amendsPlan`, `supersedesPlan`, `prerequisiteFor`, `externalPlanDependency`
-- executor policy: `executorProfile`, `requiredSkills`, `implementationMode`, `agentInstructions`, `applicationLifecycle`
-- acceptance pipeline proof: `gherkinFeatureContract`, `jsonIrContract`, `acceptanceGeneratorContract`, `stepHandlerContract`, `runnerAdapterContract`, `mutationContract`, `mutationReportContract`
-
-Prefer attaching these snippets to the smallest durable context bead that owns them. Children should reference them through `contextRefs`, `inputs`, `typedContractRefs`, `acceptanceMatrixRefs`, `guardrailRefs`, or `evidenceRefs`.
+Use snippets when a plan contains reusable context that is not itself executable child work. Attach snippets to the smallest durable context bead that owns them, then reference them from children through `contextRefs`, `inputs`, `typedContractRefs`, `acceptanceMatrixRefs`, `guardrailRefs`, or `evidenceRefs`. See [REFERENCE.md](REFERENCE.md) for the snippet library.
 
 ## Workflow
 
@@ -61,14 +51,14 @@ Prefer attaching these snippets to the smallest durable context bead that owns t
 6. Create `acceptance-pipeline` beads only when the plan explicitly wants generated acceptance tests, a JSON acceptance IR, or acceptance mutation proof.
 7. Keep speculative work as `followup-template` beads unless the plan explicitly says to create executable work now.
 8. Generate dependencies from `needs`; do not duplicate the graph only in prose.
-9. Run the validation checklist before pouring or marking the plan converted.
+9. Run the validator and validation checklist before pouring or marking the plan converted.
 
 ## Child Contract Rules
 
 Each executable child must define these prompt-contract subcontracts:
 
 - `goalContract`: `goal`, `expectedOutcome`, `nonGoals`, and the behavior id.
-- `inputContract`: `inputs`, `contextRefs`, `contextUse`, fixtures, baselines, evidence, and external plans.
+- `inputContract`: `inputs`, `contextRefs`, child `contextUse`, fixtures, baselines, evidence, and external plans.
 - `constraintContract`: allowed, forbidden, and read-only files; guardrails; required skills; tools; mock policy.
 - `executionContract`: ordered steps, `greenScope`, implementation limits, fixtures, and code contracts.
 - `validationContract`: `redCommand`, `expectedFailure`, `expectedRedShape`, verification, acceptance refs, and proof command.
@@ -84,6 +74,7 @@ If any field cannot be derived from the plan, create a decision/checkpoint bead 
 - Plan-specific formulas are generated artifacts; put them under `.beads/generated-formulas/` unless the user asks to install a formula in `.beads/formulas/`.
 - Template placeholders use `{{snake_case}}`; array/object placeholders represent already-rendered TOML.
 - Role templates are snippets; the generator may compose them into a full formula or hydrate directly into `bd create`/`bd update` commands.
+- Child `contextUse` has one canonical home: `workPacket.inputContract.contextUse`.
 
 ## Bead Or Snippet Rule
 
@@ -93,6 +84,7 @@ Use a separate bead when the item has lifecycle, dependencies, readiness, owners
 
 Before calling the conversion usable:
 
+- `node .agents/skills/plan-to-beads/scripts/validate-plan-to-beads.cjs <generated-formula>` passes.
 - The generated formula cooks with no unresolved placeholders.
 - Every `logicalId` is unique.
 - Every `needs`, `contextRefs`, `inherits`, `provides`, and fixture reference resolves.
@@ -104,4 +96,4 @@ Before calling the conversion usable:
 - Acceptance-pipeline beads, when present, define normal acceptance and mutation contracts.
 - Evidence and progress snippets are marked as historical or requiring reverify; they are not treated as future work unless a child/checkpoint depends on them.
 
-See [REFERENCE.md](REFERENCE.md) for schemas, role mappings, and the full validation checklist.
+See [EXAMPLES.md](EXAMPLES.md) for a minimal conversion and [REFERENCE.md](REFERENCE.md) for schemas, role mappings, and the full validation checklist.

@@ -13,6 +13,7 @@ The current generic schema is `plan-to-beads.v3`. v3 keeps Beads as the durable 
 - `formula/executable-plan.formula.toml`: full-formula skeleton.
 - `roles/*.toml`: role snippets for one Beads issue/step.
 - `contracts/*.toml`: reusable metadata table snippets used by role templates.
+- `../scripts/validate-plan-to-beads.cjs`: deterministic checks for the skill source and generated formulas.
 
 ## Contract Families
 
@@ -34,3 +35,5 @@ The current generic schema is `plan-to-beads.v3`. v3 keeps Beads as the durable 
 - `acceptance-pipeline.toml`: optional acceptance-pipeline proof layer for plans that require generated acceptance tests or acceptance mutation.
 
 Do not commit concrete plan behavior, file paths, commands, or expected failures into these templates.
+
+Child `contextUse` belongs only under `workPacket.inputContract.contextUse`. Non-child roles may expose `contextUse` in role metadata when they consume shared context directly.

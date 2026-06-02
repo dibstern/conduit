@@ -72,6 +72,8 @@ Every role exposes context through `provides`; children consume it through `cont
 
 `contextUse` adds timing and failure behavior to context references. Use it when an agent must know whether to read a context bead before editing, during implementation, during verification, during handoff, or only when blocked.
 
+For child beads, the canonical home is `workPacket.inputContract.contextUse`. Do not also render `contextUse` into the child `planToBeads` metadata table. For non-child roles, role-level `contextUse` is acceptable when that role directly consumes context.
+
 ```toml
 [[contextUse]]
 ref = "{{context_ref}}"
@@ -152,6 +154,7 @@ Use these defaults unless the repository has stricter conventions:
 - Commit generic source templates in `.agents/skills/plan-to-beads/templates/`.
 - Generate plan-specific formulas in `.beads/generated-formulas/<plan-id>.formula.toml` for review.
 - Install a generated formula into `.beads/formulas/` only when the user wants a reusable formula name.
+- Do not call `bd mol pour` directly against `.beads/generated-formulas/`; `pour` needs a persisted proto or a formula on the Beads search path.
 - Store molecule instances and runtime status in Beads/Dolt; `.beads/*.jsonl` are passive exports.
 - Include `contractVersion = "plan-to-beads.v3"` and `templateVersion` in rendered metadata.
 - Treat existing `plan-to-beads.v2` flat child and checkpoint fields as compatibility input. Generators should normalize them into v3 subcontracts before rendering new formulas.
@@ -165,7 +168,9 @@ Preferred path:
 3. Compose `templates/formula/executable-plan.formula.toml` with role snippets from `templates/roles/`.
 4. Replace every placeholder.
 5. Write a plan-specific generated formula.
-6. `bd cook` and `bd mol pour --dry-run`.
+6. Run `node .agents/skills/plan-to-beads/scripts/validate-plan-to-beads.cjs <generated-formula>`.
+7. Run `bd cook <generated-formula> --dry-run`.
+8. After approval, run `bd cook <generated-formula> --persist --force`, then `bd mol pour <formula-id> --dry-run`.
 
 Small-plan fallback:
 
@@ -262,12 +267,14 @@ Use `acceptance-pipeline` only when the plan requires generated acceptance tests
 Before pouring:
 
 - Generated TOML has no unresolved `{{...}}` placeholders.
+- `node .agents/skills/plan-to-beads/scripts/validate-plan-to-beads.cjs <generated-formula>` passes.
 - `bd cook <generated-formula> --dry-run` succeeds.
 - Dry-run pour shows the expected root, context beads, parents, checkpoints, and children.
 - All `logicalId` values are unique.
 - All `needs`, `contextRefs`, `inherits`, `provides`, fixture refs, and follow-up template refs resolve.
 - All required `contextUse` refs resolve and state phase, reason, and failure behavior.
 - All child beads contain required v3 `workPacket` subcontracts.
+- Child `contextUse` appears only under `workPacket.inputContract`.
 - `redCommand` targets exactly one behavior; broader commands live in `verification`.
 - `allowedFiles` and `forbiddenFiles` are concrete after hydration.
 - Child file scope is normalized into `constraintContract`; shared file ownership is normalized into `ownershipMap` or checkpoint `mergeContract`.
