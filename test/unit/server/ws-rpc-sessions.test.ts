@@ -268,6 +268,7 @@ describe("WsRpcServerLayer ListSessions", () => {
 			const result = yield* client.RespondPermission({
 				projectSlug: "project-a",
 				originId: "browser-tab-a",
+				commandId: "cmd-respond-permission",
 				requestId: "per-1",
 				decision: "allow",
 			});
@@ -309,6 +310,7 @@ describe("WsRpcServerLayer ListSessions", () => {
 			const result = yield* client.AnswerQuestion({
 				projectSlug: "project-a",
 				originId: "browser-tab-a",
+				commandId: "cmd-answer-question",
 				toolId: "que-1",
 				answers: { "0": "PostgreSQL" },
 			});
@@ -350,6 +352,7 @@ describe("WsRpcServerLayer ListSessions", () => {
 			const result = yield* client.RejectQuestion({
 				projectSlug: "project-a",
 				originId: "browser-tab-a",
+				commandId: "cmd-reject-question",
 				toolId: "que-1",
 			});
 

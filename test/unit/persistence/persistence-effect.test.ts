@@ -95,6 +95,12 @@ describe("Persistence Effect", () => {
 				"messages",
 				"pending_approvals",
 				"projector_cursors",
+				"provider_command_interactions",
+				"provider_command_meta",
+				"provider_command_outbox",
+				"provider_command_sessions",
+				"provider_command_tombstones",
+				"provider_command_turns",
 				"provider_state",
 				"session_providers",
 				"sessions",
@@ -124,6 +130,7 @@ describe("Persistence Effect", () => {
 			expect(migrationRows).toEqual([
 				{ migration_id: 1, name: "create_event_store_tables" },
 				{ migration_id: 2, name: "add_message_part_metadata" },
+				{ migration_id: 3, name: "add_durable_provider_commands" },
 			]);
 
 			const legacyMigrationTable = yield* sql<{ name: string }>`

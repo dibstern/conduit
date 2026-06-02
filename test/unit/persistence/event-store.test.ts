@@ -37,6 +37,18 @@ describe("EventStore", () => {
 			expect(stored.sessionId).toBe("s1");
 		});
 
+		it("appends session.created before the session projection row exists", () => {
+			const event = makeSessionCreatedEvent("s1");
+			const stored = store.append(event);
+
+			expect(stored.sequence).toBe(1);
+			expect(stored.streamVersion).toBe(0);
+			expect(stored.sessionId).toBe("s1");
+			expect(
+				harness.db.queryOne("SELECT id FROM sessions WHERE id = ?", ["s1"]),
+			).toBeUndefined();
+		});
+
 		it("assigns incrementing stream versions per session", () => {
 			harness.seedSession("s1");
 			const e1 = store.append(makeSessionCreatedEvent("s1"));

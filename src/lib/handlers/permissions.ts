@@ -28,6 +28,7 @@ import type {
 
 interface PermissionResponsePayload {
 	readonly requestId: PermissionId;
+	readonly commandId?: string;
 	readonly decision: string;
 	readonly persistScope?: "tool" | "pattern";
 	readonly persistPattern?: string;
@@ -36,11 +37,13 @@ interface PermissionResponsePayload {
 
 interface AskUserResponsePayload {
 	readonly toolId: string;
+	readonly commandId?: string;
 	readonly answers: Record<string, string>;
 }
 
 interface QuestionRejectPayload {
 	readonly toolId: string;
+	readonly commandId?: string;
 }
 
 /**

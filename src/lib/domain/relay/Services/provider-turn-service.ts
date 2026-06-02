@@ -31,6 +31,10 @@ import type { SendTurnInput, TurnResult } from "../../../provider/types.js";
 import { OpenCodeAPITag } from "../../provider/Services/opencode-api-service.js";
 import { PendingInteractionServiceTag } from "./pending-interaction-service.js";
 import {
+	type ProviderRuntimeIngestion,
+	ProviderRuntimeIngestionTag,
+} from "./provider-runtime-ingestion-service.js";
+import {
 	ConfigTag,
 	LoggerTag,
 	OrchestrationEngineTag,
@@ -95,6 +99,7 @@ const makeUnsafeFiberMap = <K, A = unknown, E = unknown>(): FiberMap.FiberMap<
 
 export interface ProviderTurnServiceSendInput {
 	readonly clientId: string;
+	readonly commandId: string;
 	readonly sessionId: string;
 	readonly text: string;
 	readonly images?: readonly string[];
@@ -118,6 +123,7 @@ export interface ProviderTurnServicePrepareInput {
 
 export interface ProviderTurnServiceInterruptInput {
 	readonly clientId: string;
+	readonly commandId: string;
 	readonly sessionId: string;
 }
 
@@ -296,6 +302,7 @@ export const makeProviderTurnService = Effect.gen(function* () {
 		sessionId: string,
 		providerId: string,
 		persist: ClaudeEventPersistEffect | undefined,
+		ingestion: ProviderRuntimeIngestion | undefined,
 	): SendTurnInput["eventSink"] => {
 		if (!isClaudeProviderId(providerId)) return NOOP_EVENT_SINK;
 		let eventSinkPersist: RelayEventSinkPersist | undefined;
@@ -317,6 +324,7 @@ export const makeProviderTurnService = Effect.gen(function* () {
 				);
 			},
 			...(eventSinkPersist ? { persist: eventSinkPersist } : {}),
+			...(ingestion ? { ingestion } : {}),
 			pendingInteractions: {
 				beginPermissionRequest: (request) =>
 					pendingInteractionService.beginPermissionRequest(request),
@@ -435,6 +443,9 @@ export const makeProviderTurnService = Effect.gen(function* () {
 			const claudeEventPersistEffectOption = yield* Effect.serviceOption(
 				ClaudeEventPersistEffectTag,
 			);
+			const providerRuntimeIngestionOption = yield* Effect.serviceOption(
+				ProviderRuntimeIngestionTag,
+			);
 			const providerStateEffectOption = yield* Effect.serviceOption(
 				ProviderStateEffectTag,
 			);
@@ -447,6 +458,9 @@ export const makeProviderTurnService = Effect.gen(function* () {
 				providerId,
 				claudeEventPersistEffectOption._tag === "Some"
 					? claudeEventPersistEffectOption.value
+					: undefined,
+				providerRuntimeIngestionOption._tag === "Some"
+					? providerRuntimeIngestionOption.value
 					: undefined,
 			);
 			const imageList =
@@ -494,6 +508,7 @@ export const makeProviderTurnService = Effect.gen(function* () {
 				try: () =>
 					orchestrationEngine.dispatchEffect({
 						type: "send_turn",
+						commandId: input.commandId,
 						providerId,
 						input: sendTurnInput,
 					}),
@@ -643,6 +658,7 @@ export const makeProviderTurnService = Effect.gen(function* () {
 			const interruptResult = yield* Effect.either(
 				engineOption.value.dispatchEffect({
 					type: "interrupt_turn",
+					commandId: input.commandId,
 					sessionId: input.sessionId,
 				}),
 			);

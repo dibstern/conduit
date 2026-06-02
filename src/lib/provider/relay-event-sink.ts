@@ -7,6 +7,7 @@
 
 import { Effect } from "effect";
 import type { ProviderRuntimeEvent } from "../contracts/providers/provider-runtime-event.js";
+import type { ProviderRuntimeIngestion } from "../domain/relay/Services/provider-runtime-ingestion-service.js";
 import { createLogger } from "../logger.js";
 import type { CanonicalEvent } from "../persistence/events.js";
 import { translateDomainEventToRelay } from "../relay/domain-event-to-relay.js";
@@ -50,6 +51,8 @@ export interface RelayEventSinkDeps {
 	readonly resetTimeout?: () => void;
 	/** Optional: persist events to SQLite for session history survival. */
 	readonly persist?: RelayEventSinkPersist;
+	/** Optional durable runtime ingestion owner. When present, push() delegates provider output to this path. */
+	readonly ingestion?: Pick<ProviderRuntimeIngestion, "ingest">;
 	/** Effect-owned pending interaction state. Required when permission/question methods are used. */
 	readonly pendingInteractions?: {
 		beginPermissionRequest(entry: {
@@ -117,9 +120,16 @@ export function createRelayEventSink(deps: RelayEventSinkDeps): RelayEventSink {
 	}
 
 	return {
-		push(event: ProviderRuntimeEvent): Effect.Effect<void, never> {
+		push(event: ProviderRuntimeEvent): Effect.Effect<void, unknown> {
 			return Effect.gen(function* () {
 				yield* Effect.sync(reset);
+				if (deps.ingestion) {
+					yield* deps.ingestion.ingest(event);
+					if (isTerminalRuntimeEvent(event)) {
+						yield* Effect.sync(finish);
+					}
+					return;
+				}
 				const result = translateProviderRuntimeEventToDomain(
 					event,
 					mapperState,
@@ -331,4 +341,12 @@ export function createRelayEventSink(deps: RelayEventSinkDeps): RelayEventSink {
 			return Effect.void;
 		},
 	};
+}
+
+function isTerminalRuntimeEvent(event: ProviderRuntimeEvent): boolean {
+	return (
+		event.type === "turn.completed" ||
+		event.type === "turn.interrupted" ||
+		event.type === "turn.error"
+	);
 }

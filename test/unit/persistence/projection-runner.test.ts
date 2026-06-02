@@ -122,7 +122,6 @@ describe("ProjectionRunner", () => {
 			// Call recover on empty store to set _recovered = true
 			runner.recover();
 
-			harness.seedSession("s1");
 			const sessionEvent = eventStore.append(
 				makeCanonical(
 					"session.created",
@@ -138,7 +137,7 @@ describe("ProjectionRunner", () => {
 
 			runner.projectEvent(sessionEvent);
 
-			// Verify session projection was written (UPSERT updates the seeded row)
+			// Verify session projection was written by session.created.
 			const session = db.queryOne<{ id: string; title: string }>(
 				"SELECT id, title FROM sessions WHERE id = ?",
 				["s1"],

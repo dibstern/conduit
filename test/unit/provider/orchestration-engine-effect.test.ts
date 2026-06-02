@@ -240,6 +240,7 @@ describe("OrchestrationEngine dispatchEffect", () => {
 
 				yield* engine.dispatchEffect({
 					type: "interrupt_turn",
+					commandId: "cmd-effect-interrupt",
 					sessionId: "session-1",
 				});
 
@@ -273,6 +274,7 @@ describe("OrchestrationEngine dispatchEffect", () => {
 
 				yield* engine.dispatchEffect({
 					type: "resolve_permission",
+					commandId: "cmd-effect-resolve-permission",
 					sessionId: "session-1",
 					requestId: "perm-1",
 					decision: "once",
@@ -313,6 +315,7 @@ describe("OrchestrationEngine dispatchEffect", () => {
 
 				yield* engine.dispatchEffect({
 					type: "resolve_question",
+					commandId: "cmd-effect-resolve-question",
 					sessionId: "session-1",
 					requestId: "question-1",
 					answers,
@@ -350,6 +353,7 @@ describe("OrchestrationEngine dispatchEffect", () => {
 
 				yield* engine.dispatchEffect({
 					type: "end_session",
+					commandId: "cmd-effect-end-session",
 					sessionId: "session-1",
 					unbind: true,
 				});

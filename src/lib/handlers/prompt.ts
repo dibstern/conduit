@@ -32,6 +32,7 @@ const sessionInputDrafts = new Map<string, string>();
 interface LegacyMessagePayload {
 	text: string;
 	images?: string[];
+	commandId?: string;
 }
 
 /** Get the stored input draft for a session (empty string if none). */
@@ -50,6 +51,7 @@ export interface SendMessageToSessionInput {
 	readonly text: string;
 	readonly images?: readonly string[];
 	readonly originId?: string;
+	readonly commandId: string;
 	readonly excludeClientId?: string;
 	readonly missingSessionClientId?: string;
 	readonly errorDelivery?: "client" | "session";
@@ -155,6 +157,7 @@ export const sendMessageToSession = (input: SendMessageToSessionInput) =>
 			clientId,
 			sessionId: activeId,
 			text,
+			commandId: input.commandId,
 			...(imageList ? { images: imageList } : {}),
 			...(sessionModel ? { model: sessionModel } : {}),
 			modelUserSelected: sessionModelUserSelected,
@@ -171,21 +174,38 @@ export const handleMessage = (
 ) =>
 	Effect.gen(function* () {
 		const wsHandler = yield* WebSocketHandlerTag;
+		if (!payload.text) return;
+		if (!payload.commandId) {
+			wsHandler.sendTo(
+				clientId,
+				new RelayError(
+					"Missing commandId for mutating provider command: send_turn",
+					{ code: "MISSING_COMMAND_ID" },
+				).toSystemError(),
+			);
+			return;
+		}
 		yield* sendMessageToSession({
 			clientId,
 			sessionId: wsHandler.getClientSession(clientId),
 			text: payload.text,
+			commandId: payload.commandId,
 			...(payload.images ? { images: payload.images } : {}),
 			excludeClientId: clientId,
 			missingSessionClientId: clientId,
 		});
 	});
 
-export const cancelSessionById = (clientId: string, sessionId: string) =>
+export const cancelSessionById = (
+	clientId: string,
+	sessionId: string,
+	commandId: string,
+) =>
 	Effect.gen(function* () {
 		const providerTurnService = yield* ProviderTurnServiceTag;
 		yield* providerTurnService.interruptTurn({
 			clientId,
+			commandId,
 			sessionId,
 		});
 	});

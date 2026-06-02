@@ -30,7 +30,10 @@ describe("agent selection state", () => {
 				sessionId: "session-1",
 				agentId: "plan",
 			});
-			yield* handleMessage("client-1", { text: "implement this" });
+			yield* handleMessage("client-1", {
+				text: "implement this",
+				commandId: "cmd-agent-prompt-1",
+			});
 
 			expect(api.session.prompt).toHaveBeenCalledWith(
 				"session-1",
@@ -62,7 +65,10 @@ describe("agent selection state", () => {
 
 		return Effect.gen(function* () {
 			yield* setDefaultAgent("plan");
-			yield* handleMessage("client-1", { text: "implement this" });
+			yield* handleMessage("client-1", {
+				text: "implement this",
+				commandId: "cmd-agent-prompt-2",
+			});
 
 			expect(api.session.prompt).toHaveBeenCalledWith(
 				"session-1",

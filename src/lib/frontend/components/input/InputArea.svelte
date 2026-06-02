@@ -255,6 +255,7 @@
 				projectSlug,
 				sessionId: sid,
 				text: messageText,
+				commandId: crypto.randomUUID(),
 				...(imageUrls ? { images: imageUrls } : {}),
 				originId: getBrowserClientId(),
 			}).catch(() => {
@@ -287,7 +288,11 @@
 		const sessionId = sessionState.currentId;
 		const projectSlug = getCurrentSlug();
 		if (!sessionId || !projectSlug) return;
-		void cancelSessionRpc({ projectSlug, sessionId }).catch(() => {
+		void cancelSessionRpc({
+			projectSlug,
+			sessionId,
+			commandId: crypto.randomUUID(),
+		}).catch(() => {
 			showToast("Failed to stop session", { variant: "error" });
 		});
 	}

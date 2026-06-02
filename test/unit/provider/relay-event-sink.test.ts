@@ -250,6 +250,56 @@ describe("createRelayEventSink — translation", () => {
 });
 
 describe("createRelayEventSink — persistence", () => {
+	it("delegates provider output to ProviderRuntimeIngestion when provided", async () => {
+		const send = vi.fn();
+		const persistEvent = vi.fn(() => Effect.void);
+		const event = makeEvent("text.delta", {
+			messageId: "msg_1",
+			partId: "part_1",
+			text: "Hello",
+		});
+		const ingestion = {
+			ingest: vi.fn(() => Effect.succeed(1)),
+		};
+		const sink = createRelayEventSink({
+			sessionId: "ses-1",
+			send,
+			persist: { persistEvent },
+			ingestion,
+		});
+
+		await Effect.runPromise(sink.push(event));
+
+		expect(ingestion.ingest).toHaveBeenCalledWith(event);
+		expect(persistEvent).not.toHaveBeenCalled();
+		expect(send).not.toHaveBeenCalled();
+	});
+
+	it("returns ProviderRuntimeIngestion failures in the Effect error channel", async () => {
+		const send = vi.fn();
+		const event = makeEvent("text.delta", {
+			messageId: "msg_1",
+			partId: "part_1",
+			text: "Hello",
+		});
+		const ingestionError = {
+			_tag: "TestIngestionFailure",
+			message: "ingestion failed",
+		};
+		const sink = createRelayEventSink({
+			sessionId: "ses-1",
+			send,
+			ingestion: {
+				ingest: vi.fn(() => Effect.fail(ingestionError)),
+			},
+		});
+
+		const result = await Effect.runPromise(Effect.either(sink.push(event)));
+
+		expect(result).toMatchObject({ _tag: "Left", left: ingestionError });
+		expect(send).not.toHaveBeenCalled();
+	});
+
 	it("runs Effect persistence when persist deps are provided", async () => {
 		const send = vi.fn();
 		const persistEvent = vi.fn(() => Effect.void);

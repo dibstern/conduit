@@ -184,11 +184,12 @@ describe("PersistenceDiagnostics", () => {
 		});
 
 		it("detects foreign key violations", () => {
-			// Temporarily disable FK enforcement to create an orphaned event
+			// Temporarily disable FK enforcement to create an orphaned read-model row.
+			// Events intentionally do not FK to sessions; append must be projection-independent.
 			db.execute("PRAGMA foreign_keys = OFF");
 			db.execute(
-				`INSERT INTO events (event_id, session_id, stream_version, type, data, metadata, provider, created_at)
-				 VALUES ('evt_orphan', 'nonexistent_session', 0, 'session.created', '{}', '{}', 'opencode', ${FIXED_TEST_TIMESTAMP})`,
+				`INSERT INTO messages (id, session_id, role, text, created_at, updated_at)
+				 VALUES ('msg_orphan', 'nonexistent_session', 'assistant', '', ${FIXED_TEST_TIMESTAMP}, ${FIXED_TEST_TIMESTAMP})`,
 			);
 			db.execute("PRAGMA foreign_keys = ON");
 

@@ -40,7 +40,7 @@ import {
 import { makeEffectOpenCodeRuntimeIngress } from "../domain/relay/Services/opencode-runtime-ingress-service.js";
 import { PendingInteractionServiceLive } from "../domain/relay/Services/pending-interaction-service.js";
 import { ProjectManagementServiceLive } from "../domain/relay/Services/project-management-service.js";
-import { ProviderRuntimeIngestionLive } from "../domain/relay/Services/provider-runtime-ingestion-service.js";
+import { makeProviderRuntimeIngestionLive } from "../domain/relay/Services/provider-runtime-ingestion-service.js";
 import { ProviderTurnServiceLive } from "../domain/relay/Services/provider-turn-service.js";
 import {
 	makeRelayCommandGateLive,
@@ -655,7 +655,21 @@ export async function createProjectRelay(
 			: undefined;
 	const providerRuntimeIngestionLayer =
 		persistenceEffectLayer != null
-			? ProviderRuntimeIngestionLive.pipe(Layer.provide(persistenceEffectLayer))
+			? makeProviderRuntimeIngestionLive({
+					relayPublisher: {
+						publish: (msg) =>
+							Effect.sync(() => {
+								wsHandler.sendToSession(
+									"sessionId" in msg &&
+										typeof msg.sessionId === "string" &&
+										msg.sessionId.length > 0
+										? msg.sessionId
+										: "",
+									msg,
+								);
+							}),
+					},
+				}).pipe(Layer.provide(persistenceEffectLayer))
 			: undefined;
 	const providerOrchestrationDeps =
 		persistenceEffectLayer != null

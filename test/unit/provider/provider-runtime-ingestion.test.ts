@@ -7,6 +7,7 @@ import {
 	type ProviderRuntimeEvent,
 } from "../../../src/lib/contracts/providers/provider-runtime-event.js";
 import {
+	makeProviderRuntimeIngestionLive,
 	ProviderRuntimeIngestionLive,
 	ProviderRuntimeIngestionTag,
 } from "../../../src/lib/domain/relay/Services/provider-runtime-ingestion-service.js";
@@ -106,27 +107,75 @@ function makeHarness(options?: {
 		markRecovered: vi.fn(() => Effect.void),
 	} satisfies ProjectionRunnerEffect;
 
-	const sql = (() => Effect.succeed([])) as unknown as SqlClient.SqlClient & {
+	const executeSql = vi.fn(() => Effect.succeed([]));
+	const sql = executeSql as unknown as SqlClient.SqlClient & {
 		withTransaction: <A, E, R>(
 			effect: Effect.Effect<A, E, R>,
 		) => Effect.Effect<A, E, R>;
 	};
 	sql.withTransaction = <A, E, R>(effect: Effect.Effect<A, E, R>) => effect;
 
-	const layer = ProviderRuntimeIngestionLive.pipe(
-		Layer.provide(
-			Layer.mergeAll(
-				Layer.succeed(EventStoreEffectTag, eventStore),
-				Layer.succeed(ProjectionRunnerEffectTag, projectionRunner),
-				Layer.succeed(SqlClient.SqlClient, sql),
-			),
-		),
+	const depsLayer = Layer.mergeAll(
+		Layer.succeed(EventStoreEffectTag, eventStore),
+		Layer.succeed(ProjectionRunnerEffectTag, projectionRunner),
+		Layer.succeed(SqlClient.SqlClient, sql),
 	);
+	const layer = ProviderRuntimeIngestionLive.pipe(Layer.provide(depsLayer));
 
-	return { appended, projected, append, appendBatch, projectEvent, layer };
+	return {
+		appended,
+		projected,
+		append,
+		appendBatch,
+		projectEvent,
+		executeSql,
+		depsLayer,
+		layer,
+	};
 }
 
 describe("ProviderRuntimeIngestion", () => {
+	it("publishes ingested provider output to relay clients through the ingestion owner", async () => {
+		const harness = makeHarness();
+		const published: unknown[] = [];
+		const layer = makeProviderRuntimeIngestionLive({
+			relayPublisher: {
+				publish: (message) =>
+					Effect.sync(() => {
+						published.push(message);
+					}),
+			},
+		}).pipe(Layer.provide(harness.depsLayer));
+
+		await Effect.runPromise(
+			Effect.gen(function* () {
+				const ingestion = yield* ProviderRuntimeIngestionTag;
+				yield* ingestion.ingest(
+					runtimeEvent({
+						eventId: "runtime-text-delta",
+						type: "text.delta",
+						turnId: "turn-1",
+						data: {
+							messageId: "message-1",
+							partId: "text-1",
+							text: "hello",
+						},
+					}),
+				);
+				yield* ingestion.drain();
+			}).pipe(Effect.provide(layer)),
+		);
+
+		expect(published).toEqual([
+			{
+				type: "delta",
+				sessionId: "session-123",
+				text: "hello",
+				messageId: "message-1",
+			},
+		]);
+	});
+
 	it("ingests related runtime events as one ordered domain-event batch", async () => {
 		const harness = makeHarness();
 
@@ -172,6 +221,33 @@ describe("ProviderRuntimeIngestion", () => {
 			"session.created",
 			"message.created",
 		]);
+	});
+
+	it("does not pre-seed session projection rows for session.created", async () => {
+		const harness = makeHarness();
+
+		await Effect.runPromise(
+			Effect.gen(function* () {
+				const ingestion = yield* ProviderRuntimeIngestionTag;
+				yield* ingestion.ingest(
+					runtimeEvent({
+						eventId: "runtime-session-created",
+						type: "session.created",
+						data: {
+							sessionId: "session-123",
+							title: "Untitled",
+							provider: "claude",
+						},
+					}),
+				);
+			}).pipe(Effect.provide(harness.layer)),
+		);
+
+		expect(harness.appendBatch).toHaveBeenCalledTimes(1);
+		expect(harness.appended).toEqual([
+			expect.objectContaining({ type: "session.created" }),
+		]);
+		expect(harness.executeSql).not.toHaveBeenCalled();
 	});
 
 	it("appends mapped domain events and projects the stored events eagerly", async () => {

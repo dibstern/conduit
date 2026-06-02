@@ -171,6 +171,7 @@ describe("Provider wiring with Claude provider instance", () => {
 		const result = await Effect.runPromise(
 			engine.dispatchEffect({
 				type: "send_turn",
+				commandId: "cmd-provider-wiring",
 				providerId: "claude",
 				input: makeBaseSendTurnInput({
 					sessionId: "e2e-session-1",
