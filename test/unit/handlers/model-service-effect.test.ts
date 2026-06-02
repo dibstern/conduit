@@ -110,6 +110,95 @@ describe("model handlers with Effect-native model service", () => {
 	);
 
 	it.effect(
+		"keeps configured OpenCode providers in model refreshes for Claude-bound sessions",
+		() => {
+			const wsHandler = makeMockWebSocketHandler({
+				getClientSession: vi.fn(() => "session-1"),
+			});
+			const logger = makeMockLogger();
+			const modelService = {
+				listProviders: vi.fn(() =>
+					Effect.succeed({
+						connected: ["openai"],
+						defaults: {},
+						providers: [
+							{
+								id: "openai",
+								name: "OpenAI",
+								models: [{ id: "gpt-5", name: "GPT-5" }],
+							},
+						],
+					}),
+				),
+				getSession: vi.fn(),
+				persistDefaultModel: vi.fn(() => Effect.succeed(undefined)),
+			};
+			const engine = withDispatchEffect({
+				getProviderForSession: vi.fn(() => "claude"),
+				dispatch: vi.fn(async () => ({
+					models: [{ id: "sonnet", name: "Sonnet", providerId: "claude" }],
+					supportsTools: true,
+					supportsThinking: true,
+					supportsPermissions: true,
+					supportsQuestions: true,
+					supportsAttachments: true,
+					supportsFork: true,
+					supportsRevert: true,
+					commands: [],
+				})),
+			});
+
+			const layer = Layer.mergeAll(
+				Layer.succeed(OpenCodeModelServiceTag, modelService),
+				Layer.succeed(WebSocketHandlerTag, wsHandler),
+				Layer.succeed(LoggerTag, logger),
+				Layer.succeed(OrchestrationEngineTag, engine),
+				makeOverridesStateLive(),
+			);
+
+			return Effect.gen(function* () {
+				yield* setModel("session-1", {
+					providerID: "claude",
+					modelID: "sonnet",
+				});
+				yield* sendModelsStateToClient("client-1");
+
+				expect(modelService.listProviders).toHaveBeenCalledOnce();
+				expect(modelService.getSession).not.toHaveBeenCalled();
+				expect(wsHandler.sendTo).toHaveBeenCalledWith("client-1", {
+					type: "model_list",
+					providers: [
+						{
+							id: "openai",
+							name: "OpenAI",
+							configured: true,
+							models: [
+								{
+									id: "gpt-5",
+									name: "GPT-5",
+									provider: "openai",
+								},
+							],
+						},
+						{
+							id: "claude",
+							name: "Anthropic - claude",
+							configured: true,
+							models: [
+								{
+									id: "sonnet",
+									name: "Sonnet",
+									provider: "claude",
+								},
+							],
+						},
+					],
+				});
+			}).pipe(Effect.provide(layer));
+		},
+	);
+
+	it.effect(
 		"switches OpenCode variants using the model service without requiring the Promise OpenCode API tag",
 		() => {
 			const wsHandler = makeMockWebSocketHandler({

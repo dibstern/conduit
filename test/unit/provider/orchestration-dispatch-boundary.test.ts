@@ -43,6 +43,17 @@ describe("orchestration dispatch boundary", () => {
 		expect(source).not.toMatch(/Effect\s*\.\s*run(?:Promise|Sync)\s*\(/);
 	});
 
+	it("orchestration engine does not keep authoritative processed-command caches", () => {
+		const source = readFileSync(
+			join(REPO_ROOT, "src/lib/provider/orchestration-engine.ts"),
+			"utf8",
+		);
+
+		expect(source).not.toContain("processedCommands");
+		expect(source).not.toContain("PROCESSED_COMMANDS_MAX");
+		expect(source).not.toContain("IdempotencySetTag");
+	});
+
 	it("relay stop lets the scoped runtime own orchestration shutdown", () => {
 		const source = readFileSync(
 			join(REPO_ROOT, "src/lib/relay/relay-stack.ts"),

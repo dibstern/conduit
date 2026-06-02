@@ -1,8 +1,8 @@
 import { Effect } from "effect";
 import { beforeEach, describe, expect, it } from "vitest";
 import type { RelayMessage } from "../../../src/lib/frontend/types.js";
-import { canonicalEvent } from "../../../src/lib/persistence/events.js";
 import { createRelayEventSink } from "../../../src/lib/provider/relay-event-sink.js";
+import { providerRuntimeEvent } from "../../helpers/provider-runtime-event.js";
 
 /**
  * Higher-fidelity mock that tracks per-client session subscriptions
@@ -63,7 +63,7 @@ describe("Rejoin integration — delivery layer fidelity", () => {
 		// Phase 1: streaming while viewing
 		await Effect.runPromise(
 			sink.push(
-				canonicalEvent("text.delta", SESSION, {
+				providerRuntimeEvent("text.delta", SESSION, {
 					messageId: "msg-1",
 					partId: "p1",
 					text: "hello",
@@ -78,7 +78,7 @@ describe("Rejoin integration — delivery layer fidelity", () => {
 		delivery.switchSession("c1", "other-session");
 		await Effect.runPromise(
 			sink.push(
-				canonicalEvent("text.delta", SESSION, {
+				providerRuntimeEvent("text.delta", SESSION, {
 					messageId: "msg-1",
 					partId: "p1",
 					text: " world",
@@ -94,7 +94,7 @@ describe("Rejoin integration — delivery layer fidelity", () => {
 		delivery.switchSession("c1", SESSION);
 		await Effect.runPromise(
 			sink.push(
-				canonicalEvent("text.delta", SESSION, {
+				providerRuntimeEvent("text.delta", SESSION, {
 					messageId: "msg-1",
 					partId: "p1",
 					text: "!",
@@ -119,7 +119,7 @@ describe("Rejoin integration — delivery layer fidelity", () => {
 		// thinking.start while viewing
 		await Effect.runPromise(
 			sink.push(
-				canonicalEvent("thinking.start", SESSION, {
+				providerRuntimeEvent("thinking.start", SESSION, {
 					messageId: "msg-1",
 					partId: "pt1",
 				}),
@@ -130,7 +130,7 @@ describe("Rejoin integration — delivery layer fidelity", () => {
 		delivery.switchSession("c1", "other");
 		await Effect.runPromise(
 			sink.push(
-				canonicalEvent("thinking.delta", SESSION, {
+				providerRuntimeEvent("thinking.delta", SESSION, {
 					messageId: "msg-1",
 					partId: "pt1",
 					text: "deep thought",
@@ -139,7 +139,7 @@ describe("Rejoin integration — delivery layer fidelity", () => {
 		);
 		await Effect.runPromise(
 			sink.push(
-				canonicalEvent("thinking.end", SESSION, {
+				providerRuntimeEvent("thinking.end", SESSION, {
 					messageId: "msg-1",
 					partId: "pt1",
 				}),
@@ -150,7 +150,7 @@ describe("Rejoin integration — delivery layer fidelity", () => {
 		delivery.switchSession("c1", SESSION);
 		await Effect.runPromise(
 			sink.push(
-				canonicalEvent("text.delta", SESSION, {
+				providerRuntimeEvent("text.delta", SESSION, {
 					messageId: "msg-1",
 					partId: "p1",
 					text: "answer",
@@ -210,7 +210,7 @@ describe("Multi-client / multi-tab delivery", () => {
 
 		await Effect.runPromise(
 			sink.push(
-				canonicalEvent("text.delta", SESSION, {
+				providerRuntimeEvent("text.delta", SESSION, {
 					messageId: "msg-1",
 					partId: "p1",
 					text: "shared delta",
@@ -243,7 +243,7 @@ describe("Multi-client / multi-tab delivery", () => {
 
 		await Effect.runPromise(
 			sink.push(
-				canonicalEvent("text.delta", SESSION, {
+				providerRuntimeEvent("text.delta", SESSION, {
 					messageId: "msg-1",
 					partId: "p1",
 					text: "only tab-2",
@@ -277,7 +277,7 @@ describe("Multi-client / multi-tab delivery", () => {
 
 		await Effect.runPromise(
 			sink.push(
-				canonicalEvent("text.delta", SESSION, {
+				providerRuntimeEvent("text.delta", SESSION, {
 					messageId: "msg-1",
 					partId: "p1",
 					text: "after return",
@@ -310,7 +310,7 @@ describe("Multi-client / multi-tab delivery", () => {
 
 		await Effect.runPromise(
 			sink.push(
-				canonicalEvent("text.delta", SESSION, {
+				providerRuntimeEvent("text.delta", SESSION, {
 					messageId: "msg-1",
 					partId: "p1",
 					text: "while both away",
@@ -332,7 +332,7 @@ describe("Multi-client / multi-tab delivery", () => {
 
 		await Effect.runPromise(
 			sink.push(
-				canonicalEvent("text.delta", SESSION, {
+				providerRuntimeEvent("text.delta", SESSION, {
 					messageId: "msg-1",
 					partId: "p1",
 					text: "after both return",

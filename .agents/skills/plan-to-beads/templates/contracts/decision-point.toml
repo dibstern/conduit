@@ -1,0 +1,39 @@
+# Contract templates: open, blocker, and conditional decisions.
+
+[[openDecision]]
+logicalId = "{{decision_logical_id}}"
+question = "{{decision_question}}"
+status = "{{decision_status}}"
+recommendedDefault = "{{decision_recommended_default}}"
+options = {{decision_options_array_of_tables}}
+selectedOption = "{{decision_selected_option}}"
+rationale = "{{decision_rationale}}"
+tradeoffs = {{decision_tradeoffs_array}}
+blockingScope = {{decision_blocking_scope_array}}
+requiredBefore = {{decision_required_before_array}}
+proofRequired = "{{decision_proof_required}}"
+defaultIfUnanswered = "{{decision_default_if_unanswered}}"
+followupTrigger = "{{decision_followup_trigger}}"
+externalDecisionOwner = "{{decision_external_owner}}"
+
+[[blockerDecision]]
+logicalId = "{{blocker_decision_logical_id}}"
+question = "{{blocker_decision_question}}"
+blocks = {{blocker_decision_blocks_array}}
+condition = "{{blocker_decision_condition}}"
+resolutionPolicy = "{{blocker_decision_resolution_policy}}"
+escalationCriteria = {{blocker_decision_escalation_criteria_array}}
+
+[[decisionNeeded]]
+logicalId = "{{decision_needed_logical_id}}"
+neededBy = "{{decision_needed_by}}"
+question = "{{decision_needed_question}}"
+minimumAnswerShape = "{{decision_needed_minimum_answer_shape}}"
+stopUntilResolved = {{decision_needed_stop_until_resolved_bool}}
+
+[[conditionalBranch]]
+logicalId = "{{conditional_branch_logical_id}}"
+condition = "{{conditional_branch_condition}}"
+ifTrueRefs = {{conditional_branch_if_true_refs_array}}
+ifFalseRefs = {{conditional_branch_if_false_refs_array}}
+doNotGuess = {{conditional_branch_do_not_guess_bool}}

@@ -1,0 +1,43 @@
+# Role template: checkpoint / integration gate.
+
+[[steps]]
+id = "{{logical_id}}"
+title = "{{title}}"
+type = "task"
+description = "{{description}}"
+needs = {{needs_array}}
+
+[steps.metadata.planToBeads]
+contractVersion = "plan-to-beads.v2"
+templateVersion = "{{template_version}}"
+role = "checkpoint"
+logicalId = "{{logical_id}}"
+planId = "{{plan_id}}"
+sourcePlan = "{{source_plan}}"
+contextRefs = {{context_refs_array}}
+inherits = {{inherits_array}}
+typedContractRefs = {{typed_contract_refs_array}}
+provides = {{provides_array}}
+
+[steps.metadata.checkpointContract]
+gateKind = "{{gate_kind}}"
+gateFor = "{{gate_for}}"
+preconditions = {{preconditions_array}}
+requiresClosed = {{requires_closed_array}}
+validationCommands = {{validation_commands_array}}
+validationCatalogRefs = {{validation_catalog_refs_array}}
+acceptanceMatrixRefs = {{acceptance_matrix_refs_array}}
+manualAcceptance = {{manual_acceptance_array_of_tables}}
+guardrailRefs = {{guardrail_refs_array}}
+fanoutRules = {{fanout_rules_array}}
+blocksChildCreationUntilClosed = {{blocks_child_creation_until_closed_bool}}
+frozenExtensionPoints = {{frozen_extension_points_array}}
+frozenInterfaces = {{frozen_interfaces_array_of_tables}}
+mergeOwner = "{{merge_owner}}"
+commitScope = {{commit_scope_table}}
+subagentLaunchChecklist = {{subagent_launch_checklist_array}}
+handoffValidation = {{handoff_validation_array}}
+escalationCriteria = {{escalation_criteria_array}}
+stopConditions = {{stop_conditions_array}}
+conditionalBranches = {{conditional_branches_array_of_tables}}
+releaseGate = {{release_gate_table}}

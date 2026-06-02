@@ -38,6 +38,27 @@ describe("RelayMessage Schema", () => {
 		expect(Either.isLeft(result)).toBe(true);
 	});
 
+	it("requires provider scope on agent list messages", () => {
+		const scoped = {
+			type: "agent_list",
+			providerScope: { id: "claude", name: "Claude" },
+			agents: [{ id: "Explore", name: "Explore" }],
+		};
+		const missingScope = {
+			type: "agent_list",
+			agents: [{ id: "Explore", name: "Explore" }],
+		};
+
+		expect(
+			Either.isRight(Schema.decodeUnknownEither(RelayMessageSchema)(scoped)),
+		).toBe(true);
+		expect(
+			Either.isLeft(
+				Schema.decodeUnknownEither(RelayMessageSchema)(missingScope),
+			),
+		).toBe(true);
+	});
+
 	it("RelayMessage type is compatible with existing code", () => {
 		const msg: typeof RelayMessageSchema.Type = {
 			type: "delta",

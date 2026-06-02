@@ -1,11 +1,13 @@
 // test/unit/provider/claude/claude-event-translator.test.ts
 
 import type { SDKTaskStartedMessage } from "@anthropic-ai/claude-agent-sdk";
-import { Effect } from "effect";
+import { Effect, Schema } from "effect";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { decodeProviderRuntimeEvent } from "../../../../src/lib/contracts/providers/provider-runtime-event.js";
+import {
+	type ProviderRuntimeEvent,
+	ProviderRuntimeEventSchema,
+} from "../../../../src/lib/contracts/providers/provider-runtime-event.js";
 import { historyToChatMessages } from "../../../../src/lib/frontend/utils/history-logic.js";
-import type { CanonicalEvent } from "../../../../src/lib/persistence/events.js";
 import {
 	createAllProjectors,
 	ProjectionRunner,
@@ -27,15 +29,17 @@ import { createTestHarness } from "../../../helpers/persistence-factories.js";
 // ─── Test Helpers ─────────────────────────────────────────────────────────
 
 /** Extract event data as a plain object for assertion access. */
-function dataOf(event: CanonicalEvent | undefined): Record<string, unknown> {
+function dataOf(
+	event: ProviderRuntimeEvent | undefined,
+): Record<string, unknown> {
 	return event?.data as unknown as Record<string, unknown>;
 }
 
-function makeStubSink(): EventSink & { events: CanonicalEvent[] } {
-	const events: CanonicalEvent[] = [];
+function makeStubSink(): EventSink & { events: ProviderRuntimeEvent[] } {
+	const events: ProviderRuntimeEvent[] = [];
 	return {
 		events,
-		push: vi.fn((event: CanonicalEvent) =>
+		push: vi.fn((event: ProviderRuntimeEvent) =>
 			Effect.sync(() => {
 				events.push(event);
 			}),
@@ -106,6 +110,52 @@ function runTranslateError(
 	...args: Parameters<ClaudeEventTranslator["translateError"]>
 ): Promise<void> {
 	return Effect.runPromise(translator.translateError(...args));
+}
+
+function plannedRuntimeEventsForClaudeSdkFixture(
+	ctx: ClaudeSessionContext,
+	message: SDKMessage,
+): ReadonlyArray<unknown> {
+	if (message.type !== "result") return [];
+	if (message.subtype !== "success" || message.is_error) return [];
+	const messageId =
+		message.uuid ?? ctx.lastAssistantUuid ?? ctx.currentTurnId ?? ctx.sessionId;
+	return [
+		{
+			eventId: "runtime-event-1",
+			type: "turn.completed",
+			providerId: "claude",
+			sessionId: ctx.sessionId,
+			...(ctx.currentTurnId ? { turnId: ctx.currentTurnId } : {}),
+			providerRefs: {
+				...(message.session_id
+					? { providerSessionId: message.session_id }
+					: {}),
+				...(message.uuid ? { providerMessageId: message.uuid } : {}),
+			},
+			rawSource: {
+				kind: "claude.sdk.message",
+				providerMessageType: message.type,
+				sdkVariant: "agent-sdk",
+			},
+			createdAt: Date.now(),
+			data: {
+				messageId,
+				cost: message.total_cost_usd,
+				tokens: {
+					input: message.usage.input_tokens,
+					output: message.usage.output_tokens,
+					...(message.usage.cache_read_input_tokens > 0
+						? { cacheRead: message.usage.cache_read_input_tokens }
+						: {}),
+					...(message.usage.cache_creation_input_tokens > 0
+						? { cacheWrite: message.usage.cache_creation_input_tokens }
+						: {}),
+				},
+				duration: message.duration_ms,
+			},
+		},
+	];
 }
 
 // ─── Tests ────────────────────────────────────────────────────────────────
@@ -577,6 +627,83 @@ describe("ClaudeEventTranslator", () => {
 		}
 	});
 
+	it("maps assistant snapshot thinking blocks through relay, history, and frontend messages", async () => {
+		const harness = createTestHarness();
+		try {
+			harness.seedSession("sess-thinking-snapshot", { provider: "claude" });
+			const runner = new ProjectionRunner({
+				db: harness.db,
+				eventStore: harness.eventStore,
+				cursorRepo: new ProjectorCursorRepository(harness.db),
+				projectors: createAllProjectors(),
+			});
+			runner.recover();
+			const relaySink = createRelayEventSink({
+				sessionId: "sess-thinking-snapshot",
+				send: vi.fn(),
+				persist: {
+					persistEvent: (event) =>
+						Effect.sync(() => {
+							const stored = harness.eventStore.append(event);
+							runner.projectEvent(stored);
+						}),
+				},
+			});
+			const relayTranslator = new ClaudeEventTranslator({
+				getSink: () => relaySink,
+			});
+			const relayCtx = makeCtx({
+				sessionId: "sess-thinking-snapshot",
+				eventSink: relaySink,
+			});
+
+			await runTranslate(relayTranslator, relayCtx, {
+				type: "assistant",
+				message: {
+					id: "msg-thinking-snapshot",
+					type: "message",
+					role: "assistant",
+					content: [
+						{ type: "thinking", thinking: "visible Claude thought" },
+						{ type: "text", text: "final answer" },
+					],
+					model: "claude-sonnet-4-5",
+					stop_reason: "end_turn",
+					stop_sequence: null,
+					usage: {
+						input_tokens: 10,
+						output_tokens: 5,
+					},
+				},
+				parent_tool_use_id: null,
+				uuid: "00000000-0000-0000-0000-000000000206",
+				session_id: "sdk-sess-thinking-snapshot",
+			} as unknown as SDKMessage);
+
+			const rows = new ReadQueryService(harness.db).getSessionMessagesWithParts(
+				"sess-thinking-snapshot",
+			);
+			const history = messageRowsToHistory(rows, { pageSize: 50 });
+			const messages = historyToChatMessages(history.messages);
+
+			expect(messages).toEqual(
+				expect.arrayContaining([
+					expect.objectContaining({
+						type: "thinking",
+						text: "visible Claude thought",
+						done: true,
+					}),
+					expect.objectContaining({
+						type: "assistant",
+						rawText: "final answer",
+					}),
+				]),
+			);
+		} finally {
+			harness.close();
+		}
+	});
+
 	// ─── 3b. system (subtype api_retry) ──────────────────────────────────
 
 	it("translates system/api_retry to session.status:retry with detail metadata", async () => {
@@ -741,35 +868,63 @@ describe("ClaudeEventTranslator", () => {
 		expect(data["toolName"]).toBe("Bash");
 		expect(data["callId"]).toBe("tool-abc");
 		expect(data["input"]).toEqual({ tool: "Bash", command: "ls" });
+	});
 
-		const runtimeEvent = decodeProviderRuntimeEvent({
-			eventId: started?.eventId,
-			type: started?.type,
+	it("decodes a Claude SDK result fixture to ProviderRuntimeEvent before canonical translation", () => {
+		const sdkResult = {
+			type: "result",
+			subtype: "success",
+			is_error: false,
+			duration_ms: 1234,
+			duration_api_ms: 1000,
+			num_turns: 1,
+			result: "done",
+			session_id: "sdk-session-1",
+			total_cost_usd: 0.12,
+			usage: {
+				input_tokens: 10,
+				output_tokens: 20,
+				cache_creation_input_tokens: 0,
+				cache_read_input_tokens: 5,
+			},
+			uuid: "assistant-result-1",
+		} as unknown as SDKMessage;
+
+		const runtimeEvents = plannedRuntimeEventsForClaudeSdkFixture(
+			ctx,
+			sdkResult,
+		);
+		const decodeRuntimeEvent = Schema.decodeUnknownSync(
+			ProviderRuntimeEventSchema,
+		);
+		const [decoded] = runtimeEvents.map((event) => decodeRuntimeEvent(event));
+
+		expect(decoded).toMatchObject({
+			type: "turn.completed",
 			providerId: "claude",
-			sessionId: started?.sessionId,
-			turnId: ctx.currentTurnId,
+			sessionId: "sess-1",
+			turnId: "turn-1",
 			providerRefs: {
-				providerSessionId: "test-session",
-				...(ctx.lastAssistantUuid
-					? { providerMessageId: ctx.lastAssistantUuid }
-					: {}),
-				providerToolUseId: "tool-abc",
+				providerSessionId: "sdk-session-1",
+				providerMessageId: "assistant-result-1",
 			},
 			rawSource: {
 				kind: "claude.sdk.message",
-				providerMessageType: "assistant",
-				providerMessageSubtype: "tool_use",
+				providerMessageType: "result",
 				sdkVariant: "agent-sdk",
 			},
-			createdAt: started?.createdAt,
-			data: started?.data,
-			metadata: started?.metadata,
+			data: {
+				messageId: "assistant-result-1",
+				cost: 0.12,
+				tokens: {
+					input: 10,
+					output: 20,
+					cacheRead: 5,
+				},
+				duration: 1234,
+			},
 		});
-		expect(runtimeEvent.providerRefs).toMatchObject({
-			providerSessionId: "test-session",
-			providerToolUseId: "tool-abc",
-		});
-		expect(runtimeEvent.data).toEqual(started?.data);
+		expect(JSON.stringify(decoded)).not.toContain("session_id");
 	});
 
 	// ─── 7. stream_event (content_block_delta: text_delta) ───────────────
@@ -1035,8 +1190,10 @@ describe("ClaudeEventTranslator", () => {
 		} as unknown as SDKMessage);
 
 		expect(ctx.lastAssistantUuid).toBe("assist-uuid-123");
-		// No events emitted -- assistant snapshot only updates context
-		expect(sink.events).toHaveLength(0);
+		const textDelta = sink.events.find((e) => e.type === "text.delta");
+		expect(textDelta).toBeDefined();
+		expect(dataOf(textDelta)["messageId"]).toBe("msg-1");
+		expect(dataOf(textDelta)["text"]).toBe("Hello");
 	});
 
 	// ─── 12. user (tool_result) ──────────────────────────────────────────
@@ -1774,7 +1931,7 @@ describe("ClaudeEventTranslator", () => {
 		expect(tokens["cacheWrite"]).toBe(500);
 	});
 
-	it("all emitted events have provider set to 'claude'", async () => {
+	it("all emitted events have providerId set to 'claude'", async () => {
 		// Trigger several event types
 		await runTranslate(translator, ctx, {
 			type: "system",
@@ -1805,7 +1962,7 @@ describe("ClaudeEventTranslator", () => {
 		);
 
 		for (const event of sink.events) {
-			expect(event.provider).toBe("claude");
+			expect(event.providerId).toBe("claude");
 		}
 	});
 });

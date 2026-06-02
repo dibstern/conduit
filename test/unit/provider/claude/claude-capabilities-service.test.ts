@@ -1,11 +1,15 @@
 import { describe, it } from "@effect/vitest";
-import { Deferred, Effect, Fiber, TestClock } from "effect";
+import { Deferred, Effect, Fiber, Layer, TestClock } from "effect";
 import { expect, vi } from "vitest";
 import {
 	__setProbeOverrideForTesting,
 	resetCapabilityCacheForTesting,
 } from "../../../../src/lib/provider/claude/claude-capabilities-probe.js";
-import { makeClaudeCapabilitiesService } from "../../../../src/lib/provider/claude/claude-capabilities-service.js";
+import {
+	ClaudeCapabilitiesServiceLive,
+	ClaudeCapabilitiesServiceTag,
+	makeClaudeCapabilitiesService,
+} from "../../../../src/lib/provider/claude/claude-capabilities-service.js";
 
 describe("ClaudeCapabilitiesService", () => {
 	it.effect("caches per layer and expires with TestClock", () =>
@@ -65,6 +69,67 @@ describe("ClaudeCapabilitiesService", () => {
 			expect(probe).toHaveBeenCalledTimes(1);
 			__setProbeOverrideForTesting(undefined);
 			resetCapabilityCacheForTesting();
+		}),
+	);
+
+	it.effect("does not share cached probes across fresh service layers", () =>
+		Effect.gen(function* () {
+			const firstQueryFactory = vi.fn(() => ({
+				initializationResult: vi.fn(async () => ({
+					models: [
+						{
+							value: "claude-layer-one",
+							displayName: "Layer One",
+						},
+					],
+					commands: [],
+					agents: [],
+				})),
+			}));
+			const secondQueryFactory = vi.fn(() => ({
+				initializationResult: vi.fn(async () => ({
+					models: [
+						{
+							value: "claude-layer-two",
+							displayName: "Layer Two",
+						},
+					],
+					commands: [],
+					agents: [],
+				})),
+			}));
+			const readTwice = Effect.gen(function* () {
+				const service = yield* ClaudeCapabilitiesServiceTag;
+				const first = yield* service.get("/tmp/workspace");
+				const second = yield* service.get("/tmp/workspace");
+				return [first, second] as const;
+			});
+
+			const [firstLayerInitial, firstLayerCached] = yield* readTwice.pipe(
+				Effect.provide(
+					Layer.fresh(
+						ClaudeCapabilitiesServiceLive({
+							queryFactory: firstQueryFactory,
+						}),
+					),
+				),
+			);
+			const [secondLayerInitial, secondLayerCached] = yield* readTwice.pipe(
+				Effect.provide(
+					Layer.fresh(
+						ClaudeCapabilitiesServiceLive({
+							queryFactory: secondQueryFactory,
+						}),
+					),
+				),
+			);
+
+			expect(firstLayerInitial.models[0]?.id).toBe("claude-layer-one");
+			expect(firstLayerCached.models[0]?.id).toBe("claude-layer-one");
+			expect(secondLayerInitial.models[0]?.id).toBe("claude-layer-two");
+			expect(secondLayerCached.models[0]?.id).toBe("claude-layer-two");
+			expect(firstQueryFactory).toHaveBeenCalledTimes(1);
+			expect(secondQueryFactory).toHaveBeenCalledTimes(1);
 		}),
 	);
 });

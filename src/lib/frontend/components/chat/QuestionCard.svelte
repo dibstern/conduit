@@ -159,6 +159,7 @@
 		void answerQuestionRpc({
 			projectSlug,
 			originId: getBrowserClientId(),
+			commandId: crypto.randomUUID(),
 			toolId: request.toolId,
 			answers,
 		})
@@ -200,6 +201,7 @@
 		void rejectQuestionRpc({
 			projectSlug,
 			originId: getBrowserClientId(),
+			commandId: crypto.randomUUID(),
 			toolId: request.toolId,
 		});
 		resolved = "skipped";

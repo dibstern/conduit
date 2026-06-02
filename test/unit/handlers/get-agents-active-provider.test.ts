@@ -120,6 +120,7 @@ describe("handleGetAgents active provider", () => {
 			expect(client.app.agents).not.toHaveBeenCalled();
 			expect(ws.sendTo).toHaveBeenCalledWith("client-1", {
 				type: "agent_list",
+				providerScope: { id: "claude", name: "Claude" },
 				agents: [
 					{ id: "Explore", name: "Explore", description: "Explorer" },
 					{
@@ -171,6 +172,7 @@ describe("handleGetAgents active provider", () => {
 				Effect.tap(() => {
 					expect(ws.sendTo).toHaveBeenCalledWith("client-1", {
 						type: "agent_list",
+						providerScope: { id: "claude", name: "Claude" },
 						agents: [
 							{ id: "Any", name: "Any" },
 							{ id: "OpusOnly", name: "OpusOnly", model: "opus" },
@@ -207,6 +209,7 @@ describe("handleGetAgents active provider", () => {
 					expect(engine.dispatchEffect).not.toHaveBeenCalled();
 					expect(ws.sendTo).toHaveBeenCalledWith("client-1", {
 						type: "agent_list",
+						providerScope: { id: "opencode", name: "OpenCode" },
 						agents: [{ id: "build", name: "build" }],
 					});
 				}),
@@ -232,6 +235,7 @@ describe("handleGetAgents active provider", () => {
 				expect(client.app.agents).toHaveBeenCalledOnce();
 				expect(ws.sendTo).toHaveBeenCalledWith("client-1", {
 					type: "agent_list",
+					providerScope: { id: "opencode", name: "OpenCode" },
 					agents: [{ id: "build", name: "build" }],
 				});
 			}),
@@ -278,6 +282,7 @@ describe("handleGetAgents active provider", () => {
 					});
 					expect(ws.sendTo).toHaveBeenCalledWith("client-1", {
 						type: "agent_list",
+						providerScope: { id: "claude", name: "Claude" },
 						agents: [{ id: "Explore", name: "Explore", model: "haiku" }],
 					});
 				}),
@@ -328,6 +333,7 @@ describe("handleGetAgents active provider", () => {
 				});
 				expect(ws.sendTo).toHaveBeenCalledWith("client-1", {
 					type: "agent_list",
+					providerScope: { id: "claude", name: "Claude" },
 					agents: [{ id: "Explore", name: "Explore", model: "haiku" }],
 				});
 			}).pipe(Effect.provide(agentHandlerLayer({ client, ws, engine })));
@@ -365,6 +371,7 @@ describe("handleGetAgents active provider", () => {
 			expect(yield* getAgent("session-1")).toBeUndefined();
 			expect(ws.sendTo).toHaveBeenCalledWith("client-1", {
 				type: "agent_list",
+				providerScope: { id: "claude", name: "Claude" },
 				agents: [{ id: "Explore", name: "Explore" }],
 			});
 		}).pipe(Effect.provide(agentHandlerLayer({ client, ws, engine })));

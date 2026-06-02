@@ -22,7 +22,6 @@ describe("handleSSEEventEffect", () => {
 			pendingInteractions: _pendingInteractions,
 			sessionService: _sessionService,
 			getSessionParentMap: _getSessionParentMap,
-			dualWriteHook: _dualWriteHook,
 			getSessionStatuses: _getSessionStatuses,
 			statusPoller: _statusPoller,
 			...effectDeps
@@ -84,7 +83,6 @@ describe("handleSSEEventEffect", () => {
 			pendingInteractions: _pendingInteractions,
 			sessionService: _sessionService,
 			getSessionParentMap: _getSessionParentMap,
-			dualWriteHook: _dualWriteHook,
 			getSessionStatuses: _getSessionStatuses,
 			statusPoller: _statusPoller,
 			...effectDeps

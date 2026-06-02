@@ -1,6 +1,6 @@
 import { Effect } from "effect";
 import { describe, expect, it, vi } from "vitest";
-import type { CanonicalEvent } from "../../../../src/lib/persistence/events.js";
+import type { ProviderRuntimeEvent } from "../../../../src/lib/contracts/providers/provider-runtime-event.js";
 import { ClaudeEventTranslator } from "../../../../src/lib/provider/claude/claude-event-translator.js";
 import type { ClaudeSessionContext } from "../../../../src/lib/provider/claude/types.js";
 
@@ -44,12 +44,19 @@ function runTranslate(
 	return Effect.runPromise(translator.translate(...args));
 }
 
+function dataOf(
+	event: ProviderRuntimeEvent | undefined,
+): Record<string, unknown> {
+	expect(event).toBeDefined();
+	return event?.data as Record<string, unknown>;
+}
+
 describe("ClaudeEventTranslator — normalized tool input", () => {
 	it("tool.started event carries CanonicalToolInput with camelCase fields", async () => {
-		const events: CanonicalEvent[] = [];
+		const events: ProviderRuntimeEvent[] = [];
 		const translator = new ClaudeEventTranslator({
 			getSink: () => ({
-				push: (e: CanonicalEvent) =>
+				push: (e: ProviderRuntimeEvent) =>
 					Effect.sync(() => {
 						events.push(e);
 					}),
@@ -89,8 +96,10 @@ describe("ClaudeEventTranslator — normalized tool input", () => {
 
 		const toolStarted = events.find((e) => e.type === "tool.started");
 		expect(toolStarted).toBeDefined();
-		// biome-ignore lint/style/noNonNullAssertion: test assertion — toolStarted checked above
-		expect(toolStarted!.data.input).toEqual({
+		expect(toolStarted?.providerRefs).toEqual({
+			providerToolUseId: "toolu_123",
+		});
+		expect(dataOf(toolStarted)["input"]).toEqual({
 			tool: "Read",
 			filePath: "/src/main.ts",
 			offset: 10,

@@ -1,5 +1,5 @@
 import { describe, it } from "@effect/vitest";
-import { Effect } from "effect";
+import { Deferred, Effect, Fiber } from "effect";
 import { expect, vi } from "vitest";
 import {
 	OrchestrationEngine,
@@ -148,6 +148,46 @@ describe("OrchestrationEngine dispatchEffect", () => {
 	);
 
 	it.effect(
+		"binds a first provider turn while sendTurn is still in flight",
+		() =>
+			Effect.gen(function* () {
+				const registry = new ProviderRegistry();
+				const engine = new OrchestrationEngine({ registry });
+				const sendStarted = yield* Deferred.make<void>();
+				const releaseSend = yield* Deferred.make<void>();
+				const instance = makeStubInstance("claude");
+				instance.sendTurnEffect.mockReturnValue(
+					Effect.gen(function* () {
+						yield* Deferred.succeed(sendStarted, undefined);
+						yield* Deferred.await(releaseSend);
+						return {
+							status: "completed" as const,
+							cost: 0,
+							tokens: { input: 1, output: 1 },
+							durationMs: 1,
+							providerStateUpdates: [],
+						};
+					}),
+				);
+				registry.registerInstance(instance);
+
+				const fiber = yield* Effect.fork(
+					engine.dispatchEffect({
+						...sendTurnCommand(),
+						commandId: "cmd-bind-in-flight",
+						providerId: "claude",
+					}),
+				);
+				yield* Deferred.await(sendStarted);
+
+				expect(engine.getProviderForSession("session-1")).toBe("claude");
+
+				yield* Deferred.succeed(releaseSend, undefined);
+				yield* Fiber.join(fiber);
+			}),
+	);
+
+	it.effect(
 		"dispatches discovery through the provider instance Effect boundary",
 		() =>
 			Effect.gen(function* () {
@@ -200,6 +240,7 @@ describe("OrchestrationEngine dispatchEffect", () => {
 
 				yield* engine.dispatchEffect({
 					type: "interrupt_turn",
+					commandId: "cmd-effect-interrupt",
 					sessionId: "session-1",
 				});
 
@@ -233,6 +274,7 @@ describe("OrchestrationEngine dispatchEffect", () => {
 
 				yield* engine.dispatchEffect({
 					type: "resolve_permission",
+					commandId: "cmd-effect-resolve-permission",
 					sessionId: "session-1",
 					requestId: "perm-1",
 					decision: "once",
@@ -273,6 +315,7 @@ describe("OrchestrationEngine dispatchEffect", () => {
 
 				yield* engine.dispatchEffect({
 					type: "resolve_question",
+					commandId: "cmd-effect-resolve-question",
 					sessionId: "session-1",
 					requestId: "question-1",
 					answers,
@@ -310,6 +353,7 @@ describe("OrchestrationEngine dispatchEffect", () => {
 
 				yield* engine.dispatchEffect({
 					type: "end_session",
+					commandId: "cmd-effect-end-session",
 					sessionId: "session-1",
 					unbind: true,
 				});

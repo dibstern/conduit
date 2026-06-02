@@ -31,8 +31,8 @@
 
 	// Cached instance name — survives store clearing on WS disconnect.
 	// Updated whenever a fresh value is derived from the store; retains
-	// last-known name so the overlay can show "Reconnecting to Personal..."
-	// even after clearInstanceState() runs.
+	// last-known name so reconnect actions still target the right instance even
+	// after clearInstanceState() runs.
 	let cachedInstanceName = $state("OpenCode");
 	let cachedInstanceId = $state<string | null>(null);
 	let cachedInstanceStatus = $state<InstanceStatus | null>(null);
@@ -99,8 +99,8 @@
 	);
 
 	// ─── Status display text ────────────────────────────────────────────────────
-	// When statusText is set (e.g. "Disconnected"), incorporate the instance name
-	// so the overlay always shows which instance we're connected/reconnecting to.
+	// Keep reconnect copy generic; instance/provider names remain available for
+	// action buttons and connecting state.
 
 	const displayStatusText = $derived.by(() => {
 		if (
@@ -111,7 +111,7 @@
 			return `Connecting to ${connectionTargetName} server...`;
 		}
 		if (wsState.statusText === "Disconnected") {
-			return `Reconnecting to ${connectionTargetName} server...`;
+			return "Reconnecting...";
 		}
 		return wsState.statusText;
 	});

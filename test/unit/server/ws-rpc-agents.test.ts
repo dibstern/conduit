@@ -31,6 +31,7 @@ describe("WsRpcServerLayer GetAgents", () => {
 
 			expect(result).toEqual({
 				projectSlug: "project-a",
+				providerScope: { id: "opencode", name: "OpenCode" },
 				agents: [
 					{ id: "build", name: "build", description: "Build things" },
 					{ id: "plan", name: "plan" },

@@ -1,0 +1,37 @@
+# Role template: decision / blocker / conditional branch.
+# Use when execution needs an independently tracked answer before work can proceed.
+
+[[steps]]
+id = "{{logical_id}}"
+title = "{{title}}"
+type = "decision"
+description = "{{description}}"
+needs = {{needs_array}}
+
+[steps.metadata.planToBeads]
+contractVersion = "plan-to-beads.v2"
+templateVersion = "{{template_version}}"
+role = "decision"
+logicalId = "{{logical_id}}"
+planId = "{{plan_id}}"
+sourcePlan = "{{source_plan}}"
+contextRefs = {{context_refs_array}}
+inherits = {{inherits_array}}
+typedContractRefs = {{typed_contract_refs_array}}
+provides = {{provides_array}}
+
+[steps.metadata.decisionContract]
+question = "{{decision_question}}"
+status = "{{decision_status}}"
+recommendedDefault = "{{decision_recommended_default}}"
+options = {{decision_options_array_of_tables}}
+selectedOption = "{{decision_selected_option}}"
+rationale = "{{decision_rationale}}"
+tradeoffs = {{decision_tradeoffs_array}}
+blockingScope = {{decision_blocking_scope_array}}
+requiredBefore = {{decision_required_before_array}}
+proofRequired = "{{decision_proof_required}}"
+defaultIfUnanswered = "{{decision_default_if_unanswered}}"
+followupTrigger = "{{decision_followup_trigger}}"
+externalDecisionOwner = "{{decision_external_owner}}"
+conditionalBranches = {{conditional_branches_array_of_tables}}

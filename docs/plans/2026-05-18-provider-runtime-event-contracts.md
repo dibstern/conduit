@@ -35,6 +35,19 @@
 - [ ] Include `tool.input_updated` only as explicit historical compatibility, with a test explaining that new provider runtimes should not emit it.
 - [ ] Provider-owned payload fields stay opaque with `Schema.Unknown` where Conduit does not read internals.
 
+## Implementation Patterns
+
+- [ ] Keep this pure contract code: `effect/Schema`, exported types, constants, and narrow helpers only.
+- [ ] Do not add `Context.Tag`, `Layer`, `Effect` services, provider adapters, persistence helpers, relay helpers, or frontend helpers.
+- [ ] Use `Schema.Struct`, `Schema.Union`, `Schema.Literal`, `Schema.Record`, `Schema.Unknown`, and exported decode helpers if needed.
+- [ ] Do not import `CanonicalEvent`, `ProviderInstance`, `RelayMessage`, provider implementation types, or persistence implementation types.
+- [ ] If canonical type coverage is needed, import only pure constants/types from `src/lib/persistence/events.ts`; if that creates implementation coupling, stop and ask.
+- [ ] Use `@effect/vitest` only if the test runs Effect programs. Use plain Vitest for pure schema decode tests.
+- [ ] Test opaque payload survival by deep equality after decode, not by string matching.
+- [ ] Test negative cases with `Schema.decodeUnknownEither(...)` and assert `Either.isLeft(...)`; do not snapshot full parse errors.
+- [ ] Keep raw-source metadata shallow and explicit. Never add catch-all spreading from provider SDK messages into `rawSource`.
+- [ ] Do not add generated schemas or schema generation plumbing in this PR.
+
 ## Files
 
 - [ ] Create: `src/lib/contracts/providers/provider-runtime-event.ts`

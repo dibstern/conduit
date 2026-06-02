@@ -60,6 +60,11 @@ export const AgentInfoSchema = Schema.Struct({
 	model: Schema.optional(Schema.String),
 });
 
+export const AgentProviderScopeSchema = Schema.Struct({
+	id: Schema.String,
+	name: Schema.String,
+});
+
 export const CommandInfoSchema = Schema.Struct({
 	name: Schema.String,
 	description: Schema.optional(Schema.String),
@@ -254,6 +259,7 @@ export const ForkSessionResponseSchema = Schema.Struct({
 
 export const GetAgentsResponseSchema = Schema.Struct({
 	projectSlug: Schema.String,
+	providerScope: AgentProviderScopeSchema,
 	agents: Schema.Array(AgentInfoSchema),
 	activeAgentId: Schema.optional(Schema.String),
 });
@@ -335,6 +341,7 @@ export const GetToolContentResponseSchema = Schema.Struct({
 });
 
 export type AgentInfo = typeof AgentInfoSchema.Type;
+export type AgentProviderScope = typeof AgentProviderScopeSchema.Type;
 export type GetAgentsResponse = typeof GetAgentsResponseSchema.Type;
 export type CommandInfo = typeof CommandInfoSchema.Type;
 export type GetCommandsResponse = typeof GetCommandsResponseSchema.Type;
@@ -656,6 +663,7 @@ export class ReloadProviderSession extends Schema.TaggedRequest<ReloadProviderSe
 		payload: {
 			projectSlug: NonEmptyString,
 			sessionId: NonEmptyString,
+			commandId: NonEmptyString,
 			originId: Schema.optional(NonEmptyString),
 		},
 	},
@@ -768,6 +776,7 @@ export class CreateSession extends Schema.TaggedRequest<CreateSession>()(
 			originId: NonEmptyString,
 			title: Schema.optional(Schema.String),
 			requestId: Schema.optional(NonEmptyString),
+			providerId: Schema.optional(Schema.String),
 		},
 	},
 ) {}
@@ -820,6 +829,7 @@ export class RespondPermission extends Schema.TaggedRequest<RespondPermission>()
 		payload: {
 			projectSlug: NonEmptyString,
 			originId: NonEmptyString,
+			commandId: NonEmptyString,
 			requestId: NonEmptyString,
 			decision: PermissionDecisionSchema,
 			persistScope: Schema.optional(PermissionPersistScopeSchema),
@@ -837,6 +847,7 @@ export class AnswerQuestion extends Schema.TaggedRequest<AnswerQuestion>()(
 		payload: {
 			projectSlug: NonEmptyString,
 			originId: NonEmptyString,
+			commandId: NonEmptyString,
 			toolId: NonEmptyString,
 			answers: Schema.Record({ key: Schema.String, value: Schema.String }),
 		},
@@ -851,6 +862,7 @@ export class RejectQuestion extends Schema.TaggedRequest<RejectQuestion>()(
 		payload: {
 			projectSlug: NonEmptyString,
 			originId: NonEmptyString,
+			commandId: NonEmptyString,
 			toolId: NonEmptyString,
 		},
 	},
@@ -893,6 +905,7 @@ export class SendMessage extends Schema.TaggedRequest<SendMessage>()(
 			text: Schema.String,
 			images: Schema.optional(Schema.Array(Schema.String)),
 			originId: Schema.optional(NonEmptyString),
+			commandId: NonEmptyString,
 		},
 	},
 ) {}
@@ -919,6 +932,7 @@ export class CancelSession extends Schema.TaggedRequest<CancelSession>()(
 		payload: {
 			projectSlug: NonEmptyString,
 			sessionId: NonEmptyString,
+			commandId: NonEmptyString,
 		},
 	},
 ) {}

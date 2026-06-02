@@ -56,6 +56,10 @@
     },
     {
       "type": "agent_list",
+      "providerScope": {
+        "id": "opencode",
+        "name": "OpenCode"
+      },
       "agents": [
         {
           "id": "build",

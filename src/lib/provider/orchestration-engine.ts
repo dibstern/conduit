@@ -4,12 +4,13 @@
 // Routes commands to the correct provider instance via ProviderRegistry.
 // Manages session-to-provider mapping.
 
-import { Effect, Ref } from "effect";
+import { Deferred, Effect } from "effect";
 
 import { createLogger } from "../logger.js";
 import {
-	DuplicateCommand,
+	MissingCommandId,
 	type OrchestrationError,
+	ProviderInstanceFailure,
 	SessionProviderNotBound,
 } from "./errors.js";
 import type { ProviderRegistry } from "./provider-registry.js";
@@ -26,20 +27,20 @@ const log = createLogger("orchestration-engine");
 
 export interface SendTurnCommand {
 	readonly type: "send_turn";
-	readonly commandId?: string;
+	readonly commandId: string;
 	readonly providerId: string;
 	readonly input: SendTurnInput;
 }
 
 export interface InterruptTurnCommand {
 	readonly type: "interrupt_turn";
-	readonly commandId?: string;
+	readonly commandId: string;
 	readonly sessionId: string;
 }
 
 export interface ResolvePermissionCommand {
 	readonly type: "resolve_permission";
-	readonly commandId?: string;
+	readonly commandId: string;
 	readonly sessionId: string;
 	readonly requestId: string;
 	readonly decision: PermissionDecision;
@@ -47,7 +48,7 @@ export interface ResolvePermissionCommand {
 
 export interface ResolveQuestionCommand {
 	readonly type: "resolve_question";
-	readonly commandId?: string;
+	readonly commandId: string;
 	readonly sessionId: string;
 	readonly requestId: string;
 	readonly answers: Record<string, unknown>;
@@ -61,7 +62,7 @@ export interface DiscoverCommand {
 
 export interface EndSessionCommand {
 	readonly type: "end_session";
-	readonly commandId?: string;
+	readonly commandId: string;
 	readonly sessionId: string;
 	/** Default false -- keep binding. Set true to also unbind. */
 	readonly unbind?: boolean;
@@ -96,12 +97,13 @@ export interface OrchestrationEngineOptions {
 export class OrchestrationEngine {
 	private readonly registry: ProviderRegistry;
 	private readonly sessionBindings = new Map<string, string>();
-	private processedCommands: Ref.Ref<Set<string>>;
-	private static readonly PROCESSED_COMMANDS_MAX = 10_000;
+	private readonly inFlightCommands = new Map<
+		string,
+		Deferred.Deferred<OrchestrationResult, OrchestrationError>
+	>();
 
 	constructor(options: OrchestrationEngineOptions) {
 		this.registry = options.registry;
-		this.processedCommands = Ref.unsafeMake(new Set<string>());
 	}
 
 	dispatchEffect(
@@ -129,73 +131,66 @@ export class OrchestrationEngine {
 		command: OrchestrationCommand,
 	): Effect.Effect<OrchestrationResult, OrchestrationError> {
 		return Effect.gen(this, function* () {
-			yield* this.ensureCommandNotProcessed(command);
+			yield* this.ensureMutatingCommandHasId(command);
+			if (!command.commandId) {
+				return yield* this.runCommandEffect(command);
+			}
+			const commandId = command.commandId;
 
-			let result: OrchestrationResult;
+			const existing = this.inFlightCommands.get(commandId);
+			if (existing) return yield* Deferred.await(existing);
 
+			const deferred = yield* Deferred.make<
+				OrchestrationResult,
+				OrchestrationError
+			>();
+			this.inFlightCommands.set(commandId, deferred);
+
+			return yield* this.runCommandEffect(command).pipe(
+				Effect.tap((result) => Deferred.succeed(deferred, result)),
+				Effect.tapError((error) => Deferred.fail(deferred, error)),
+				Effect.ensuring(
+					Effect.sync(() => {
+						if (this.inFlightCommands.get(commandId) === deferred) {
+							this.inFlightCommands.delete(commandId);
+						}
+					}),
+				),
+			);
+		});
+	}
+
+	private ensureMutatingCommandHasId(
+		command: OrchestrationCommand,
+	): Effect.Effect<void, MissingCommandId> {
+		if (command.type !== "discover" && !command.commandId) {
+			return Effect.fail(new MissingCommandId({ commandType: command.type }));
+		}
+		return Effect.void;
+	}
+
+	private runCommandEffect(
+		command: OrchestrationCommand,
+	): Effect.Effect<OrchestrationResult, OrchestrationError> {
+		return Effect.gen(this, function* () {
 			switch (command.type) {
 				case "send_turn":
-					result = yield* this.handleSendTurnEffect(command);
-					break;
+					return yield* this.handleSendTurnEffect(command);
 				case "interrupt_turn":
-					result = yield* this.handleInterruptTurnEffect(command);
-					break;
+					return yield* this.handleInterruptTurnEffect(command);
 				case "resolve_permission":
-					result = yield* this.handleResolvePermissionEffect(command);
-					break;
+					return yield* this.handleResolvePermissionEffect(command);
 				case "resolve_question":
-					result = yield* this.handleResolveQuestionEffect(command);
-					break;
+					return yield* this.handleResolveQuestionEffect(command);
 				case "discover":
-					result = yield* this.handleDiscoverEffect(command);
-					break;
+					return yield* this.handleDiscoverEffect(command);
 				case "end_session":
-					result = yield* this.handleEndSessionEffect(command);
-					break;
+					return yield* this.handleEndSessionEffect(command);
 				default: {
 					const _exhaustive: never = command;
 					return _exhaustive;
 				}
 			}
-
-			yield* this.markCommandProcessed(command);
-			return result;
-		});
-	}
-
-	private ensureCommandNotProcessed(
-		command: OrchestrationCommand,
-	): Effect.Effect<void, DuplicateCommand> {
-		if (!command.commandId) return Effect.void;
-		const id = command.commandId;
-		return Effect.gen(this, function* () {
-			const isDuplicate = yield* Ref.modify(this.processedCommands, (set) => {
-				if (set.has(id)) return [true, set] as const;
-				return [false, set] as const;
-			});
-			if (isDuplicate) {
-				return yield* new DuplicateCommand({ commandId: id });
-			}
-		});
-	}
-
-	private markCommandProcessed(
-		command: OrchestrationCommand,
-	): Effect.Effect<void> {
-		if (!command.commandId) return Effect.void;
-		const id = command.commandId;
-		return Ref.modify(this.processedCommands, (set) => {
-			const next = new Set(set);
-			next.add(id);
-			if (next.size > OrchestrationEngine.PROCESSED_COMMANDS_MAX) {
-				const evictCount = OrchestrationEngine.PROCESSED_COMMANDS_MAX / 2;
-				let count = 0;
-				for (const entry of next) {
-					if (count++ >= evictCount) break;
-					next.delete(entry);
-				}
-			}
-			return [undefined, next] as const;
 		});
 	}
 
@@ -215,12 +210,30 @@ export class OrchestrationEngine {
 				),
 			);
 
-			// Bind AFTER sendTurn succeeds — if it throws, the session is not
-			// viable at the provider and should not be bound. Error TurnResults
-			// (non-throwing) still bind because the session exists at the provider.
-			const result = yield* instance.sendTurnEffect(command.input);
+			const previousProviderId = this.sessionBindings.get(
+				command.input.sessionId,
+			);
+			const restorePreviousBinding = Effect.sync(() => {
+				if (previousProviderId) {
+					this.sessionBindings.set(command.input.sessionId, previousProviderId);
+				} else {
+					this.sessionBindings.delete(command.input.sessionId);
+				}
+			});
 			yield* Effect.sync(() =>
 				this.sessionBindings.set(command.input.sessionId, command.providerId),
+			);
+			const sendEffect = yield* Effect.try({
+				try: () => instance.sendTurnEffect(command.input),
+				catch: (cause) =>
+					new ProviderInstanceFailure({
+						providerId: command.providerId,
+						operation: "sendTurn",
+						cause,
+					}),
+			}).pipe(Effect.tapError(() => restorePreviousBinding));
+			const result = yield* sendEffect.pipe(
+				Effect.tapError(() => restorePreviousBinding),
 			);
 			return result;
 		});
@@ -397,7 +410,7 @@ export class OrchestrationEngine {
 			yield* this.registry.shutdownAllEffect();
 			yield* Effect.sync(() => {
 				this.sessionBindings.clear();
-				this.processedCommands = Ref.unsafeMake(new Set<string>());
+				this.inFlightCommands.clear();
 			});
 		});
 	}
@@ -413,7 +426,4 @@ export class OrchestrationEngine {
 		}
 		return Effect.succeed(providerId);
 	}
-
-	// pruneProcessedCommands() removed — FIFO eviction is now inlined
-	// in the Ref.modify call within dispatch().
 }

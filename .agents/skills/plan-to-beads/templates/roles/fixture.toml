@@ -1,0 +1,31 @@
+# Role template: fixture.
+
+[[steps]]
+id = "{{logical_id}}"
+title = "{{title}}"
+type = "chore"
+description = "{{description}}"
+needs = {{needs_array}}
+
+[steps.metadata.planToBeads]
+contractVersion = "plan-to-beads.v2"
+templateVersion = "{{template_version}}"
+role = "fixture"
+logicalId = "{{logical_id}}"
+planId = "{{plan_id}}"
+sourcePlan = "{{source_plan}}"
+contextRefs = {{context_refs_array}}
+inherits = {{inherits_array}}
+typedContractRefs = {{typed_contract_refs_array}}
+provides = {{provides_array}}
+
+[steps.metadata.fixtureManifest]
+fixtureId = "{{fixture_id}}"
+source = "{{fixture_source}}"
+refreshPolicy = "{{refresh_policy}}"
+expectedSignals = {{expected_signals_array}}
+files = {{fixture_files_array_of_tables}}
+provenanceNotes = {{provenance_notes_array}}
+validationCommands = {{validation_commands_array}}
+sourceGrounding = {{source_grounding_array_of_tables}}
+inventorySnapshots = {{inventory_snapshots_array_of_tables}}

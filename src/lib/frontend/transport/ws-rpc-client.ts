@@ -37,6 +37,7 @@ import {
 export interface CancelSessionRpcInput {
 	readonly projectSlug: string;
 	readonly sessionId: string;
+	readonly commandId: string;
 }
 
 export interface GetModelsRpcInput {
@@ -128,6 +129,7 @@ export interface CreateSessionRpcInput {
 	readonly originId: string;
 	readonly title?: string;
 	readonly requestId?: string;
+	readonly providerId?: string;
 }
 
 export interface ViewSessionRpcInput {
@@ -152,6 +154,7 @@ export interface ForkSessionRpcInput {
 export interface RespondPermissionRpcInput {
 	readonly projectSlug: string;
 	readonly originId: string;
+	readonly commandId: string;
 	readonly requestId: string;
 	readonly decision: PermissionDecision;
 	readonly persistScope?: PermissionPersistScope;
@@ -162,6 +165,7 @@ export interface RespondPermissionRpcInput {
 export interface AnswerQuestionRpcInput {
 	readonly projectSlug: string;
 	readonly originId: string;
+	readonly commandId: string;
 	readonly toolId: string;
 	readonly answers: Readonly<Record<string, string>>;
 }
@@ -169,6 +173,7 @@ export interface AnswerQuestionRpcInput {
 export interface RejectQuestionRpcInput {
 	readonly projectSlug: string;
 	readonly originId: string;
+	readonly commandId: string;
 	readonly toolId: string;
 }
 
@@ -232,6 +237,7 @@ export interface SetDefaultModelRpcInput {
 export interface ReloadProviderSessionRpcInput {
 	readonly projectSlug: string;
 	readonly sessionId: string;
+	readonly commandId: string;
 	readonly originId?: string;
 }
 
@@ -271,6 +277,7 @@ export interface SendMessageRpcInput {
 	readonly projectSlug: string;
 	readonly sessionId: string;
 	readonly text: string;
+	readonly commandId: string;
 	readonly images?: readonly string[];
 	readonly originId?: string;
 }
@@ -566,6 +573,7 @@ const callCreateSession = (input: CreateSessionRpcInput) =>
 				originId: input.originId,
 				...(input.title != null ? { title: input.title } : {}),
 				...(input.requestId != null ? { requestId: input.requestId } : {}),
+				...(input.providerId != null ? { providerId: input.providerId } : {}),
 			});
 		}),
 	).pipe(
@@ -630,6 +638,7 @@ const callRespondPermission = (input: RespondPermissionRpcInput) =>
 			yield* client.RespondPermission({
 				projectSlug: input.projectSlug,
 				originId: input.originId,
+				commandId: input.commandId,
 				requestId: input.requestId,
 				decision: input.decision,
 				...(input.persistScope != null
@@ -637,6 +646,9 @@ const callRespondPermission = (input: RespondPermissionRpcInput) =>
 					: {}),
 				...(input.persistPattern != null
 					? { persistPattern: input.persistPattern }
+					: {}),
+				...(input.permissionDestination != null
+					? { permissionDestination: input.permissionDestination }
 					: {}),
 			});
 		}),
@@ -654,6 +666,7 @@ const callAnswerQuestion = (input: AnswerQuestionRpcInput) =>
 			yield* client.AnswerQuestion({
 				projectSlug: input.projectSlug,
 				originId: input.originId,
+				commandId: input.commandId,
 				toolId: input.toolId,
 				answers: { ...input.answers },
 			});
@@ -669,7 +682,12 @@ const callRejectQuestion = (input: RejectQuestionRpcInput) =>
 	Effect.scoped(
 		Effect.gen(function* () {
 			const client = yield* RpcClient.make(WsRpcGroup);
-			yield* client.RejectQuestion(input);
+			yield* client.RejectQuestion({
+				projectSlug: input.projectSlug,
+				originId: input.originId,
+				commandId: input.commandId,
+				toolId: input.toolId,
+			});
 		}),
 	).pipe(
 		Effect.provide(RpcClient.layerProtocolSocket()),
@@ -836,6 +854,7 @@ const callReloadProviderSession = (input: ReloadProviderSessionRpcInput) =>
 			return yield* client.ReloadProviderSession({
 				projectSlug: input.projectSlug,
 				sessionId: input.sessionId,
+				commandId: input.commandId,
 				...(input.originId ? { originId: input.originId } : {}),
 			});
 		}),
@@ -929,6 +948,7 @@ const callSendMessage = (input: SendMessageRpcInput) =>
 				projectSlug: input.projectSlug,
 				sessionId: input.sessionId,
 				text: input.text,
+				commandId: input.commandId,
 				...(input.images ? { images: [...input.images] } : {}),
 				...(input.originId ? { originId: input.originId } : {}),
 			});

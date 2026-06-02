@@ -690,6 +690,18 @@ export const ClaudeSDKOptionsJsonShapeSchema = Schema.Struct({
 	resume: Schema.optional(Schema.String),
 	agent: Schema.optional(Schema.String),
 	includePartialMessages: Schema.optional(Schema.Boolean),
+	settings: Schema.optional(
+		Schema.Union(
+			Schema.String,
+			Schema.Struct({
+				showThinkingSummaries: Schema.optional(Schema.Boolean),
+			}).pipe(
+				Schema.extend(
+					Schema.Record({ key: Schema.String, value: Schema.Unknown }),
+				),
+			),
+		),
+	),
 	settingSources: Schema.optional(
 		Schema.Array(Schema.Literal("user", "project", "local")),
 	),

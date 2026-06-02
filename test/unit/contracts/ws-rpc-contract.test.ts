@@ -96,6 +96,7 @@ const provideRpc = <A, E>(effect: Effect.Effect<A, E, WsRpcTestEnv>) =>
 				GetAgents: (request) =>
 					Effect.succeed({
 						projectSlug: request.projectSlug,
+						providerScope: { id: "opencode", name: "OpenCode" },
 						agents: [{ id: "build", name: "Build" }],
 						...(request.sessionId ? { activeAgentId: "build" } : {}),
 					}),
@@ -426,6 +427,7 @@ describe("browser WebSocket RPC contract", () => {
 				});
 				expect(agents).toEqual({
 					projectSlug: "demo",
+					providerScope: { id: "opencode", name: "OpenCode" },
 					agents: [{ id: "build", name: "Build" }],
 					activeAgentId: "build",
 				});
@@ -629,6 +631,7 @@ describe("browser WebSocket RPC contract", () => {
 				const reload = yield* client.ReloadProviderSession({
 					projectSlug: "demo",
 					sessionId: "session-1",
+					commandId: "cmd-reload-session",
 				});
 				expect(reload).toEqual({
 					projectSlug: "demo",
@@ -736,6 +739,7 @@ describe("browser WebSocket RPC contract", () => {
 					yield* client.RespondPermission({
 						projectSlug: "demo",
 						originId: "browser-tab-a",
+						commandId: "cmd-respond-permission",
 						requestId: "per-1",
 						decision: "allow",
 					}),
@@ -745,6 +749,7 @@ describe("browser WebSocket RPC contract", () => {
 					yield* client.AnswerQuestion({
 						projectSlug: "demo",
 						originId: "browser-tab-a",
+						commandId: "cmd-answer-question",
 						toolId: "que-1",
 						answers: { "0": "yes" },
 					}),
@@ -754,6 +759,7 @@ describe("browser WebSocket RPC contract", () => {
 					yield* client.RejectQuestion({
 						projectSlug: "demo",
 						originId: "browser-tab-a",
+						commandId: "cmd-reject-question",
 						toolId: "que-1",
 					}),
 				).toEqual({ ok: true });
@@ -789,6 +795,7 @@ describe("browser WebSocket RPC contract", () => {
 						projectSlug: "demo",
 						sessionId: "session-1",
 						text: "hello",
+						commandId: "cmd-send-contract",
 					}),
 				).toEqual({ ok: true });
 
@@ -923,6 +930,7 @@ describe("browser WebSocket RPC contract", () => {
 			new RespondPermission({
 				projectSlug: "demo",
 				originId: "browser-tab-a",
+				commandId: "cmd-respond-permission",
 				requestId: "per-1",
 				decision: "allow",
 			})._tag,
@@ -931,6 +939,7 @@ describe("browser WebSocket RPC contract", () => {
 			new AnswerQuestion({
 				projectSlug: "demo",
 				originId: "browser-tab-a",
+				commandId: "cmd-answer-question",
 				toolId: "que-1",
 				answers: { "0": "yes" },
 			})._tag,
@@ -939,6 +948,7 @@ describe("browser WebSocket RPC contract", () => {
 			new RejectQuestion({
 				projectSlug: "demo",
 				originId: "browser-tab-a",
+				commandId: "cmd-reject-question",
 				toolId: "que-1",
 			})._tag,
 		).toBe("RejectQuestion");
@@ -979,6 +989,7 @@ describe("browser WebSocket RPC contract", () => {
 			new ReloadProviderSession({
 				projectSlug: "demo",
 				sessionId: "session-1",
+				commandId: "cmd-reload-session",
 			})._tag,
 		).toBe("ReloadProviderSession");
 		expect(
@@ -1024,6 +1035,7 @@ describe("browser WebSocket RPC contract", () => {
 				projectSlug: "demo",
 				sessionId: "session-1",
 				text: "hello",
+				commandId: "cmd-send-contract",
 			})._tag,
 		).toBe("SendMessage");
 		expect(
@@ -1035,7 +1047,11 @@ describe("browser WebSocket RPC contract", () => {
 			})._tag,
 		).toBe("SyncInputDraft");
 		expect(
-			new CancelSession({ projectSlug: "demo", sessionId: "session-1" })._tag,
+			new CancelSession({
+				projectSlug: "demo",
+				sessionId: "session-1",
+				commandId: "cmd-stop-contract",
+			})._tag,
 		).toBe("CancelSession");
 		expect(new SetLogLevel({ projectSlug: "demo", level: "debug" })._tag).toBe(
 			"SetLogLevel",
@@ -1050,5 +1066,22 @@ describe("browser WebSocket RPC contract", () => {
 		});
 
 		expect(decoded._tag).toBe("Left");
+	});
+
+	it("requires commandId on mutating provider command RPCs", () => {
+		const sendWithoutCommandId = Schema.decodeUnknownEither(WsRpcRequest)({
+			_tag: "SendMessage",
+			projectSlug: "demo",
+			sessionId: "session-1",
+			text: "hello",
+		});
+		const cancelWithoutCommandId = Schema.decodeUnknownEither(WsRpcRequest)({
+			_tag: "CancelSession",
+			projectSlug: "demo",
+			sessionId: "session-1",
+		});
+
+		expect(sendWithoutCommandId._tag).toBe("Left");
+		expect(cancelWithoutCommandId._tag).toBe("Left");
 	});
 });

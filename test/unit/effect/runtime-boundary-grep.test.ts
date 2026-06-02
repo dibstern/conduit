@@ -222,6 +222,159 @@ describe("Effect runtime boundary grep", () => {
 		expect(hits).toEqual([]);
 	});
 
+	it("keeps provider-turn interrupt relay policy out of prompt handlers", () => {
+		const path = "src/lib/handlers/prompt.ts";
+		const source = readFileSync(join(REPO_ROOT, path), "utf8");
+		const cancelStart = source.indexOf("export const cancelSessionById");
+		const cancelEnd = source.indexOf(
+			"export const rewindSessionToMessage",
+			cancelStart,
+		);
+		expect(cancelStart).toBeGreaterThanOrEqual(0);
+		expect(cancelEnd).toBeGreaterThan(cancelStart);
+		const cancelSource = source.slice(cancelStart, cancelEnd);
+		const forbiddenPatterns = [
+			{
+				pattern: /\bOrchestrationEngineTag\b/,
+				reason:
+					"prompt handlers should delegate provider-turn relay policy to ProviderTurnService",
+			},
+			{
+				pattern: /\bisProviderTurnInterruptProvider\b/,
+				reason:
+					"provider-specific interrupt eligibility belongs in ProviderTurnService",
+			},
+			{
+				pattern: /type:\s*"interrupt_turn"/,
+				reason:
+					"prompt handlers should not dispatch provider interrupt commands directly",
+			},
+		] as const;
+		const forbiddenCancelPatterns = [
+			{
+				pattern: /\bOpenCodeAPITag\b/,
+				reason:
+					"OpenCode cancel fallback belongs in ProviderTurnService, not prompt handlers",
+			},
+			{
+				pattern: /\.session\.abort\(/,
+				reason:
+					"OpenCode abort fallback belongs in ProviderTurnService, not prompt handlers",
+			},
+			{
+				pattern: /type:\s*"done"/,
+				reason: "interrupt completion broadcasts belong in ProviderTurnService",
+			},
+			{
+				pattern: /\bclearProcessingTimeout\b/,
+				reason: "interrupt timeout cleanup belongs in ProviderTurnService",
+			},
+		] as const;
+
+		const hits = forbiddenPatterns.flatMap(({ pattern, reason }) =>
+			source
+				.split("\n")
+				.flatMap((line, index) =>
+					pattern.test(line)
+						? [{ path, line: index + 1, source: line.trim(), reason }]
+						: [],
+				),
+		);
+		const cancelHits = forbiddenCancelPatterns.flatMap(({ pattern, reason }) =>
+			cancelSource.split("\n").flatMap((line, index) =>
+				pattern.test(line)
+					? [
+							{
+								path,
+								line: source.slice(0, cancelStart).split("\n").length + index,
+								source: line.trim(),
+								reason,
+							},
+						]
+					: [],
+			),
+		);
+
+		expect([...hits, ...cancelHits]).toEqual([]);
+	});
+
+	it("keeps Claude translator writes Effect-shaped before sink writes", () => {
+		const path = "src/lib/provider/claude/claude-event-translator.ts";
+		const source = readFileSync(join(REPO_ROOT, path), "utf8");
+		const forbiddenPatterns = [
+			{
+				pattern: /Promise<void>/,
+				reason: "translator internals should return Effect, not Promise<void>",
+			},
+			{
+				pattern: /\basync\s+(?:translateMessage|push)\b/,
+				reason: "translator message and push paths should be Effect-shaped",
+			},
+			{
+				pattern: /work:\s*\(\)\s*=>\s*Promise<void>/,
+				reason: "collectWrites should accept Effect work, not Promise work",
+			},
+		] as const;
+
+		const hits = forbiddenPatterns.flatMap(({ pattern, reason }) =>
+			source
+				.split("\n")
+				.flatMap((line, index) =>
+					pattern.test(line)
+						? [{ path, line: index + 1, source: line.trim(), reason }]
+						: [],
+				),
+		);
+
+		expect(hits).toEqual([]);
+	});
+
+	it("keeps Claude runtime fibers session-owned instead of daemon-owned", () => {
+		const path = "src/lib/provider/claude/claude-provider-runtime.ts";
+		const source = readFileSync(join(REPO_ROOT, path), "utf8");
+
+		expect(source.match(/\bforkDaemon\b/g) ?? []).toEqual([]);
+	});
+
+	it("instruments Claude provider runtime Effect operations", () => {
+		const runtime = readFileSync(
+			join(REPO_ROOT, "src/lib/provider/claude/claude-provider-runtime.ts"),
+			"utf8",
+		);
+		const permission = readFileSync(
+			join(REPO_ROOT, "src/lib/provider/claude/claude-permission-service.ts"),
+			"utf8",
+		);
+		const capabilities = readFileSync(
+			join(REPO_ROOT, "src/lib/provider/claude/claude-capabilities-service.ts"),
+			"utf8",
+		);
+
+		for (const span of [
+			"claude.sendTurn",
+			"claude.stream.consume",
+			"claude.interrupt",
+			"claude.shutdown",
+		]) {
+			expect(runtime).toContain(`Effect.withSpan("${span}"`);
+		}
+		for (const field of [
+			"providerId: this.providerId",
+			"sessionId",
+			"turnId",
+		]) {
+			expect(runtime).toContain(field);
+		}
+		expect(permission).toContain('Effect.withSpan("claude.permission"');
+		expect(permission).toContain('providerId: "claude"');
+		expect(permission).toContain("Effect.annotateLogs(attributes)");
+		expect(capabilities).toContain(
+			'Effect.withSpan("claude.capabilities.probe"',
+		);
+		expect(capabilities).toContain('providerId: "claude"');
+		expect(capabilities).toContain("Effect.annotateLogs(attributes)");
+	});
+
 	it("constructs the daemon HTTP router handler inside the Layer effect", () => {
 		const path = "src/lib/domain/server/Layers/http-router-layer.ts";
 		const source = readFileSync(join(REPO_ROOT, path), "utf8");
@@ -2021,7 +2174,7 @@ describe("Effect runtime boundary grep", () => {
 			{
 				path: "src/lib/relay/relay-stack.ts",
 				pattern:
-					/\b(?:config\.persistence|new ReadQueryService|new ProviderStateService|new SessionSeeder|new DualWriteHook|ReadQueryTag|ClaudeEventPersistTag|ProviderStateServiceTag)\b/,
+					/\b(?:config\.persistence|new ReadQueryService|new ProviderStateService|new SessionSeeder|new OpenCodeRuntimeIngress|ReadQueryTag|ClaudeEventPersistTag|ProviderStateServiceTag)\b/,
 				reason:
 					"relay-stack must not bridge legacy persistence objects into Effect services",
 			},
@@ -2620,8 +2773,9 @@ describe("Effect runtime boundary grep", () => {
 		expect(hits).toEqual([]);
 	});
 
-	it("keeps Effect dual-write persistence inside the relay runtime", () => {
-		const hookPath = "src/lib/persistence/effect/dual-write-hook-effect.ts";
+	it("keeps Effect OpenCode runtime ingress inside the relay runtime", () => {
+		const hookPath =
+			"src/lib/domain/relay/Services/opencode-runtime-ingress-service.ts";
 		const hookSource = readFileSync(join(REPO_ROOT, hookPath), "utf8");
 		const relayPath = "src/lib/relay/relay-stack.ts";
 		const relaySource = readFileSync(join(REPO_ROOT, relayPath), "utf8");
@@ -2631,27 +2785,28 @@ describe("Effect runtime boundary grep", () => {
 				source: hookSource,
 				pattern: /\bruntime\.runSync\(/g,
 				reason:
-					"EffectDualWriteHook must return Effect programs instead of entering a runtime",
+					"EffectOpenCodeRuntimeIngress must return Effect programs instead of entering a runtime",
 			},
 			{
 				path: hookPath,
 				source: hookSource,
 				pattern: /\bruntime\.runPromise\(/g,
-				reason: "EffectDualWriteHook must not own async runtime bridge calls",
+				reason:
+					"EffectOpenCodeRuntimeIngress must not own async runtime bridge calls",
 			},
 			{
 				path: relayPath,
 				source: relaySource,
-				pattern: /\bEffectDualWriteHook\(\{\s*runtime:/gs,
+				pattern: /\bEffectOpenCodeRuntimeIngress\(\{\s*runtime:/gs,
 				reason:
-					"relay-stack must not construct a separate persistence runtime for dual-write",
+					"relay-stack must not construct a separate persistence runtime for OpenCode runtime ingress",
 			},
 			{
 				path: relayPath,
 				source: relaySource,
 				pattern: /\beffectPersistenceRuntime\b/g,
 				reason:
-					"dual-write persistence should be owned by the relay runtime Layer graph",
+					"OpenCode runtime ingress persistence should be owned by the relay runtime Layer graph",
 			},
 		] as const;
 
@@ -2666,6 +2821,25 @@ describe("Effect runtime boundary grep", () => {
 		);
 
 		expect(hits).toEqual([]);
+	});
+
+	it("keeps OpenCode runtime ingress behind ProviderRuntimeIngestion", () => {
+		const openCodeRuntimeIngressSource = readFileSync(
+			join(
+				REPO_ROOT,
+				"src/lib/domain/relay/Services/opencode-runtime-ingress-service.ts",
+			),
+			"utf8",
+		);
+
+		expect(openCodeRuntimeIngressSource).not.toMatch(
+			/translateProviderRuntimeEventToDomain/,
+		);
+		expect(openCodeRuntimeIngressSource).not.toMatch(
+			/EventStore|PersistenceLayer|CanonicalEvent/,
+		);
+		expect(openCodeRuntimeIngressSource).toMatch(/ProviderRuntimeIngestionTag/);
+		expect(openCodeRuntimeIngressSource).toMatch(/ingestBatch/);
 	});
 
 	it("keeps relay startup as the only relay-stack runPromise boundary", () => {

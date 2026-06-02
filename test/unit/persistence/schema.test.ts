@@ -10,7 +10,7 @@ describe("Schema Migration", () => {
 		client?.close();
 	});
 
-	it("creates all 12 tables", () => {
+	it("creates all durable event-store tables", () => {
 		client = SqliteClient.memory();
 		runMigrations(client, schemaMigrations);
 		const tables = client
@@ -26,6 +26,12 @@ describe("Schema Migration", () => {
 			"messages",
 			"pending_approvals",
 			"projector_cursors",
+			"provider_command_interactions",
+			"provider_command_meta",
+			"provider_command_outbox",
+			"provider_command_sessions",
+			"provider_command_tombstones",
+			"provider_command_turns",
 			"provider_state",
 			"session_providers",
 			"sessions",
@@ -63,6 +69,11 @@ describe("Schema Migration", () => {
 			{ name: "idx_activities_tone", table: "activities", unique: false },
 			{ name: "idx_activities_turn", table: "activities", unique: false },
 			{
+				name: "idx_command_receipts_project",
+				table: "command_receipts",
+				unique: false,
+			},
+			{
 				name: "idx_command_receipts_session",
 				table: "command_receipts",
 				unique: false,
@@ -97,6 +108,21 @@ describe("Schema Migration", () => {
 			{
 				name: "idx_pending_approvals_session_status",
 				table: "pending_approvals",
+				unique: false,
+			},
+			{
+				name: "idx_provider_command_outbox_status",
+				table: "provider_command_outbox",
+				unique: false,
+			},
+			{
+				name: "idx_provider_command_tombstones_session",
+				table: "provider_command_tombstones",
+				unique: false,
+			},
+			{
+				name: "idx_provider_command_turns_session",
+				table: "provider_command_turns",
 				unique: false,
 			},
 			{
@@ -206,6 +232,14 @@ describe("Schema Migration", () => {
 			"result_sequence",
 			"error",
 			"created_at",
+			"command_type",
+			"project_key",
+			"fingerprint_hash",
+			"fingerprint_version",
+			"accepted_sequence",
+			"side_effect_sequence",
+			"error_code",
+			"updated_at",
 		]);
 	});
 
@@ -229,20 +263,10 @@ describe("Schema Migration", () => {
 		expect(applied).toEqual([]);
 	});
 
-	it("uses RESTRICT (not CASCADE) for session foreign keys", () => {
+	it("does not require a session projection row before appending events", () => {
 		client = SqliteClient.memory();
 		runMigrations(client, schemaMigrations);
-		client.execute(
-			"INSERT INTO sessions (id, provider, title, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
-			[
-				"s1",
-				"opencode",
-				"Test Session",
-				"idle",
-				1_000_000_000_000,
-				1_000_000_000_000,
-			],
-		);
+
 		client.execute(
 			"INSERT INTO events (event_id, session_id, stream_version, type, data, provider, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
 			[
@@ -255,12 +279,15 @@ describe("Schema Migration", () => {
 				1_000_000_000_000,
 			],
 		);
-		expect(() =>
-			client.execute("DELETE FROM sessions WHERE id = ?", ["s1"]),
-		).toThrow(/FOREIGN KEY constraint/);
+
+		const rows = client.query<{ session_id: string }>(
+			"SELECT session_id FROM events WHERE event_id = ?",
+			["evt-1"],
+		);
+		expect(rows).toEqual([{ session_id: "s1" }]);
 	});
 
-	it("events FK requires delete-dependents-first order for eviction", () => {
+	it("keeps durable events independent from session projection deletion", () => {
 		client = SqliteClient.memory();
 		runMigrations(client, schemaMigrations);
 		client.execute(
@@ -286,9 +313,14 @@ describe("Schema Migration", () => {
 				1_000_000_000_000,
 			],
 		);
-		client.execute("DELETE FROM events WHERE session_id = ?", ["s1"]);
 		expect(() =>
 			client.execute("DELETE FROM sessions WHERE id = ?", ["s1"]),
 		).not.toThrow();
+
+		const rows = client.query<{ event_id: string }>(
+			"SELECT event_id FROM events WHERE session_id = ?",
+			["s1"],
+		);
+		expect(rows).toEqual([{ event_id: "evt-1" }]);
 	});
 });

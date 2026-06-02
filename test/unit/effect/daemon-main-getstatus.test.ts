@@ -88,7 +88,12 @@ describe("daemon main runtime config status", () => {
 		} catch {
 			// ignore failed startup or restart shutdown races
 		}
-		await rm(tmpDir, { recursive: true, force: true });
+		await rm(tmpDir, {
+			recursive: true,
+			force: true,
+			maxRetries: 5,
+			retryDelay: 20,
+		});
 	});
 
 	it("reports TLS success with 0.0.0.0 host and the actual bound port", async () => {

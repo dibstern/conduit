@@ -912,6 +912,39 @@ describe("OpenCodeAPI", () => {
 		]);
 	});
 
+	it("app.agents() accepts nullable OpenCode agent config fields", async () => {
+		const sdk = makeStubSdk();
+		const gaps = makeStubGaps();
+		sdk.app.agents.mockResolvedValue({
+			data: [
+				makeAgent({
+					topP: null,
+					temperature: null,
+					color: null,
+					variant: null,
+					steps: 12,
+				}),
+			],
+			error: undefined,
+			response: { status: 200, url: "/agent" },
+		});
+		const api = new OpenCodeAPI({
+			sdk,
+			gapEndpoints: gaps,
+			baseUrl: "http://localhost:4096",
+			authHeaders: {},
+		});
+
+		await expect(api.app.agents()).resolves.toEqual([
+			{
+				id: "build",
+				name: "build",
+				description: "Build agent",
+				mode: "primary",
+			},
+		]);
+	});
+
 	it("app.commands() decodes SDK commands with required templates", async () => {
 		const sdk = makeStubSdk();
 		const gaps = makeStubGaps();

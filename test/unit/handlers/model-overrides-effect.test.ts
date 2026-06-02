@@ -182,7 +182,10 @@ describe("model handlers with Effect override state", () => {
 					providerId: "openai",
 					modelId: "gpt-4",
 				});
-				yield* handleMessage("client-1", { text: "ship it" });
+				yield* handleMessage("client-1", {
+					text: "ship it",
+					commandId: "cmd-model-overrides",
+				});
 				yield* flushDispatchContinuation();
 
 				expect(engine.dispatchEffect).toHaveBeenCalledWith(

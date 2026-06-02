@@ -16,6 +16,8 @@
  * - Shutdown is graceful: close every session's prompt queue, call the
  *   runtime's close(), then clear the session map.
  */
+
+import { randomUUID } from "node:crypto";
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
@@ -42,13 +44,19 @@ import {
 	decodeClaudeSDKOptionsJsonShape,
 	decodeClaudeSDKUserMessage,
 } from "../../contracts/providers/claude-agent-sdk.js";
+import type { ProviderRuntimeEvent } from "../../contracts/providers/provider-runtime-event.js";
 import { createLogger } from "../../logger.js";
 import {
 	type ClaudeEventPersistEffect,
 	ClaudeEventPersistEffectTag,
 } from "../../persistence/effect/claude-event-persist-effect.js";
-import { canonicalEvent } from "../../persistence/events.js";
+import {
+	type CanonicalEventType,
+	createEventId,
+	type EventPayloadMap,
+} from "../../persistence/events.js";
 import { ProviderInstanceFailure } from "../errors.js";
+import { providerRefsFromRuntimeData } from "../provider-runtime-refs.js";
 import type {
 	CommandInfo,
 	ModelInfo,
@@ -101,6 +109,23 @@ const log = createLogger("claude-provider-runtime");
 const SUBAGENT_POLL_TIMEOUT_MS = 2000;
 const MAX_DECODE_ERROR_LENGTH = 800;
 const MAX_DECODE_PAYLOAD_LOG_LENGTH = 1200;
+
+function claudeRuntimeEvent<K extends CanonicalEventType>(
+	type: K,
+	sessionId: string,
+	data: EventPayloadMap[K],
+): ProviderRuntimeEvent {
+	return {
+		eventId: createEventId(),
+		type,
+		providerId: "claude",
+		sessionId,
+		providerRefs: providerRefsFromRuntimeData(type, data),
+		rawSource: { kind: "claude.provider-runtime" },
+		createdAt: Date.now(),
+		data,
+	};
+}
 
 function supportsMillionTokenContext(modelId: string): boolean {
 	const normalized = modelId.toLowerCase();
@@ -381,6 +406,12 @@ export interface ClaudeProviderRuntimeState {
 	readonly endedStreams: HashSet.HashSet<string>;
 }
 
+interface ClaudeSubagentFinalizationFiberKey {
+	readonly id: string;
+	readonly sessionId: string;
+	readonly turnId: string;
+}
+
 const emptyClaudeProviderRuntimeState = (): ClaudeProviderRuntimeState => ({
 	sessions: HashMap.empty(),
 	setupLocks: HashMap.empty(),
@@ -436,15 +467,21 @@ export const makeClaudeProviderRuntime = (
 			emptyClaudeProviderRuntimeState(),
 		);
 		const streamFibers = yield* FiberMap.make<string, void, unknown>();
+		const subagentFinalizationFibers = yield* FiberMap.make<
+			ClaudeSubagentFinalizationFiberKey,
+			void,
+			never
+		>();
 		const capabilitiesService =
 			deps.capabilitiesService ?? (yield* makeClaudeCapabilitiesService());
 		const runtime = new ClaudeProviderRuntime(
 			{ ...deps, capabilitiesService },
 			stateRef,
 			streamFibers,
+			subagentFinalizationFibers,
 		);
 		yield* Effect.addFinalizer(() =>
-			runtime.shutdownLocalEffect().pipe(Effect.ignore),
+			runtime.shutdownEffect().pipe(Effect.ignore),
 		);
 		return runtime;
 	});
@@ -462,6 +499,7 @@ export const makeUnsafeClaudeProviderRuntime = (
 			emptyClaudeProviderRuntimeState(),
 		),
 		makeUnsafeFiberMap<string, void, unknown>(),
+		makeUnsafeFiberMap<ClaudeSubagentFinalizationFiberKey, void, never>(),
 	);
 
 export const ClaudeProviderRuntimeLive = (
@@ -487,6 +525,11 @@ export class ClaudeProviderRuntime {
 		private readonly deps: ClaudeProviderInstanceDeps,
 		private readonly stateRef: Ref.Ref<ClaudeProviderRuntimeState>,
 		private readonly streamFibers: FiberMap.FiberMap<string, void, unknown>,
+		private readonly subagentFinalizationFibers: FiberMap.FiberMap<
+			ClaudeSubagentFinalizationFiberKey,
+			void,
+			never
+		>,
 	) {
 		this.queryFactory =
 			deps.queryFactory ??
@@ -667,7 +710,18 @@ export class ClaudeProviderRuntime {
 	sendTurnEffect(
 		input: SendTurnInput,
 	): Effect.Effect<TurnResult, ProviderInstanceFailure> {
-		return this.mapProviderFailure("sendTurn", this.sendTurnLocalEffect(input));
+		const attributes = {
+			providerId: this.providerId,
+			sessionId: input.sessionId,
+			turnId: input.turnId,
+		};
+		return this.mapProviderFailure(
+			"sendTurn",
+			this.sendTurnLocalEffect(input).pipe(
+				Effect.annotateLogs(attributes),
+				Effect.withSpan("claude.sendTurn", { attributes }),
+			),
+		);
 	}
 
 	private sendTurnLocalEffect(
@@ -813,6 +867,7 @@ export class ClaudeProviderRuntime {
 							env: makeClaudeSdkEnv(),
 							includePartialMessages: true,
 							forwardSubagentText: true,
+							settings: { showThinkingSummaries: true },
 							settingSources: ["user", "project", "local"],
 							canUseTool: bridge.createCanUseTool(ctx),
 							...(apiModelId ? { model: apiModelId } : {}),
@@ -980,7 +1035,15 @@ export class ClaudeProviderRuntime {
 		ctx: ClaudeSessionContext,
 		translator: ClaudeTranslationService,
 	): Effect.Effect<void, unknown> {
-		return this.consumeStreamEffect(ctx, translator);
+		const attributes = {
+			providerId: this.providerId,
+			sessionId: ctx.sessionId,
+			turnId: ctx.currentTurnId ?? "unknown",
+		};
+		return this.consumeStreamEffect(ctx, translator).pipe(
+			Effect.annotateLogs(attributes),
+			Effect.withSpan("claude.stream.consume", { attributes }),
+		);
 	}
 
 	private consumeStreamEffect(
@@ -1036,15 +1099,45 @@ export class ClaudeProviderRuntime {
 				if (decodedMessage.type === "result") {
 					const finalizationCtx = this.detachSubagentFinalizationContext(ctx);
 					markResultFinalizationStarted();
-					yield* Effect.forkDaemon(
-						this.finalizeSubagentsAfterResultEffect(
-							finalizationCtx,
-							decodedMessage,
-						).pipe(Effect.ignore),
+					yield* this.runSubagentFinalizationEffect(
+						finalizationCtx,
+						decodedMessage,
 					);
 					yield* this.resolveTurnEffect(ctx, decodedMessage);
 				}
 			}
+		});
+	}
+
+	private runSubagentFinalizationEffect(
+		ctx: ClaudeSessionContext,
+		result: SDKResultMessage,
+	): Effect.Effect<void> {
+		const key: ClaudeSubagentFinalizationFiberKey = {
+			id: randomUUID(),
+			sessionId: ctx.sessionId,
+			turnId: ctx.currentTurnId ?? "unknown",
+		};
+		return FiberMap.run(
+			this.subagentFinalizationFibers,
+			key,
+			this.finalizeSubagentsAfterResultEffect(ctx, result),
+		).pipe(Effect.asVoid);
+	}
+
+	private interruptSubagentFinalizersForSession(
+		sessionId: string,
+	): Effect.Effect<void> {
+		return Effect.gen(this, function* () {
+			const keys = Array.from(
+				this.subagentFinalizationFibers,
+				([key]) => key,
+			).filter((key) => key.sessionId === sessionId);
+			yield* Effect.forEach(
+				keys,
+				(key) => FiberMap.remove(this.subagentFinalizationFibers, key),
+				{ discard: true },
+			);
 		});
 	}
 
@@ -1141,29 +1234,25 @@ export class ClaudeProviderRuntime {
 				workspaceRoot: ctx.workspaceRoot,
 				knownTasks: ctx.subagentTasks ?? new Map(),
 			});
+			if (ctx.stopped) return;
 
 			for (const child of materialized) {
 				if (!child.parentToolUseId || !ctx.eventSink) continue;
 				const task = ctx.subagentTasks?.get(child.sdkSubagentId);
 				yield* ctx.eventSink.push(
-					canonicalEvent(
-						"tool.running",
-						ctx.sessionId,
-						{
-							messageId: result.uuid ?? ctx.lastAssistantUuid ?? "",
-							partId: child.parentToolUseId,
-							metadata: {
-								...(task?.description ? { description: task.description } : {}),
-								...(task?.subagentType
-									? { subagentType: task.subagentType }
-									: {}),
-								childSessionId: child.childSessionId,
-								sdkSubagentId: child.sdkSubagentId,
-								providerTaskId: child.sdkSubagentId,
-							},
+					claudeRuntimeEvent("tool.running", ctx.sessionId, {
+						messageId: result.uuid ?? ctx.lastAssistantUuid ?? "",
+						partId: child.parentToolUseId,
+						metadata: {
+							...(task?.description ? { description: task.description } : {}),
+							...(task?.subagentType
+								? { subagentType: task.subagentType }
+								: {}),
+							childSessionId: child.childSessionId,
+							sdkSubagentId: child.sdkSubagentId,
+							providerTaskId: child.sdkSubagentId,
 						},
-						{ provider: "claude" },
-					),
+					}),
 				);
 			}
 		});
@@ -1247,26 +1336,19 @@ export class ClaudeProviderRuntime {
 			if (ctx.eventSink) {
 				yield* ctx.eventSink
 					.push(
-						canonicalEvent(
-							"tool.running",
-							ctx.sessionId,
-							{
-								messageId: task?.parentMessageId ?? ctx.lastAssistantUuid ?? "",
-								partId: message.tool_use_id,
-								metadata: {
-									...(task?.description
-										? { description: task.description }
-										: {}),
-									...(task?.subagentType
-										? { subagentType: task.subagentType }
-										: {}),
-									childSessionId,
-									sdkSubagentId: message.task_id,
-									providerTaskId: message.task_id,
-								},
+						claudeRuntimeEvent("tool.running", ctx.sessionId, {
+							messageId: task?.parentMessageId ?? ctx.lastAssistantUuid ?? "",
+							partId: message.tool_use_id,
+							metadata: {
+								...(task?.description ? { description: task.description } : {}),
+								...(task?.subagentType
+									? { subagentType: task.subagentType }
+									: {}),
+								childSessionId,
+								sdkSubagentId: message.task_id,
+								providerTaskId: message.task_id,
 							},
-							{ provider: "claude" },
-						),
+						}),
 					)
 					.pipe(
 						Effect.catchAll((err) =>
@@ -1759,9 +1841,13 @@ export class ClaudeProviderRuntime {
 	interruptTurnEffect(
 		sessionId: string,
 	): Effect.Effect<void, ProviderInstanceFailure> {
+		const attributes = { providerId: this.providerId, sessionId };
 		return this.mapProviderFailure(
 			"interruptTurn",
-			this.interruptSessionEffect(sessionId),
+			this.interruptSessionEffect(sessionId).pipe(
+				Effect.annotateLogs(attributes),
+				Effect.withSpan("claude.interrupt", { attributes }),
+			),
 		);
 	}
 
@@ -1797,20 +1883,16 @@ export class ClaudeProviderRuntime {
 			if (ctx.stopped) return;
 
 			this.stopSubagentPollers(ctx);
+			yield* this.interruptSubagentFinalizersForSession(ctx.sessionId);
 
 			// 1. Complete in-flight tools as failed via EventSink.
 			for (const [, tool] of ctx.inFlightTools) {
-				const event = canonicalEvent(
-					"tool.completed",
-					ctx.sessionId,
-					{
-						messageId: ctx.lastAssistantUuid ?? "",
-						partId: tool.itemId,
-						result: null,
-						duration: 0,
-					},
-					{ provider: "claude" },
-				);
+				const event = claudeRuntimeEvent("tool.completed", ctx.sessionId, {
+					messageId: ctx.lastAssistantUuid ?? "",
+					partId: tool.itemId,
+					result: null,
+					duration: 0,
+				});
 				if (ctx.eventSink) {
 					yield* ctx.eventSink.push(event).pipe(Effect.ignore);
 				}
@@ -1960,7 +2042,14 @@ export class ClaudeProviderRuntime {
 	}
 
 	shutdownEffect(): Effect.Effect<void, ProviderInstanceFailure> {
-		return this.mapProviderFailure("shutdown", this.shutdownLocalEffect());
+		const attributes = { providerId: this.providerId };
+		return this.mapProviderFailure(
+			"shutdown",
+			this.shutdownLocalEffect().pipe(
+				Effect.annotateLogs(attributes),
+				Effect.withSpan("claude.shutdown", { attributes }),
+			),
+		);
 	}
 
 	shutdownLocalEffect(): Effect.Effect<void, unknown> {
@@ -1975,6 +2064,7 @@ export class ClaudeProviderRuntime {
 			}
 			yield* Ref.set(this.stateRef, emptyClaudeProviderRuntimeState());
 			yield* FiberMap.clear(this.streamFibers);
+			yield* FiberMap.clear(this.subagentFinalizationFibers);
 		});
 	}
 

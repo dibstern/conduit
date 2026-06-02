@@ -4,6 +4,7 @@ import type { SqlError } from "@effect/sql/SqlError";
 import { Effect } from "effect";
 import {
 	CURRENT_EVENT_STORE_MIGRATION,
+	DURABLE_PROVIDER_COMMANDS_MIGRATION,
 	MESSAGE_PART_METADATA_MIGRATION,
 	readMigrationSql,
 } from "../schema.js";
@@ -13,6 +14,9 @@ export const EFFECT_SQL_MIGRATIONS_TABLE = "effect_sql_migrations";
 const baselineMigrationSql = readMigrationSql(CURRENT_EVENT_STORE_MIGRATION);
 const messagePartMetadataMigrationSql = readMigrationSql(
 	MESSAGE_PART_METADATA_MIGRATION,
+);
+const durableProviderCommandsMigrationSql = readMigrationSql(
+	DURABLE_PROVIDER_COMMANDS_MIGRATION,
 );
 
 const expectedTableColumns = {
@@ -34,6 +38,14 @@ const expectedTableColumns = {
 		"result_sequence",
 		"error",
 		"created_at",
+		"command_type",
+		"project_key",
+		"fingerprint_hash",
+		"fingerprint_version",
+		"accepted_sequence",
+		"side_effect_sequence",
+		"error_code",
+		"updated_at",
 	],
 	events: [
 		"sequence",
@@ -93,6 +105,88 @@ const expectedTableColumns = {
 		"resolved_at",
 	],
 	projector_cursors: ["projector_name", "last_applied_seq", "updated_at"],
+	provider_command_interactions: [
+		"project_key",
+		"session_id",
+		"interaction_id",
+		"turn_id",
+		"kind",
+		"status",
+		"request_sequence",
+		"result_sequence",
+		"created_at",
+		"updated_at",
+		"tombstoned_at",
+		"tombstone_reason",
+		"retain_until",
+	],
+	provider_command_meta: [
+		"project_key",
+		"last_applied_sequence",
+		"schema_version",
+		"rebuilt_at",
+	],
+	provider_command_outbox: [
+		"request_sequence",
+		"command_id",
+		"project_key",
+		"session_id",
+		"provider_id",
+		"effect_type",
+		"payload_json",
+		"status",
+		"attempt_count",
+		"result_sequence",
+		"error_code",
+		"next_attempt_at",
+		"requested_at",
+		"updated_at",
+	],
+	provider_command_sessions: [
+		"project_key",
+		"session_id",
+		"provider_id",
+		"provider_kind",
+		"provider_session_id",
+		"status",
+		"active_turn_id",
+		"last_sequence",
+		"created_at",
+		"updated_at",
+		"tombstoned_at",
+		"tombstone_reason",
+		"retain_until",
+	],
+	provider_command_tombstones: [
+		"project_key",
+		"scope_kind",
+		"scope_id",
+		"session_id",
+		"turn_id",
+		"causation_command_id",
+		"event_sequence",
+		"reason_code",
+		"tombstoned_at",
+		"retain_until",
+		"details_json",
+	],
+	provider_command_turns: [
+		"project_key",
+		"session_id",
+		"turn_id",
+		"command_id",
+		"status",
+		"user_message_id",
+		"assistant_message_id",
+		"side_effect_sequence",
+		"result_sequence",
+		"error_code",
+		"created_at",
+		"updated_at",
+		"tombstoned_at",
+		"tombstone_reason",
+		"retain_until",
+	],
 	provider_state: ["session_id", "key", "value"],
 	session_providers: [
 		"id",
@@ -132,12 +226,29 @@ const expectedTableColumns = {
 } as const;
 
 const expectedTableNames = Object.keys(expectedTableColumns).sort();
+const durableProviderCommandTableNames = [
+	"provider_command_interactions",
+	"provider_command_meta",
+	"provider_command_outbox",
+	"provider_command_sessions",
+	"provider_command_tombstones",
+	"provider_command_turns",
+] as const;
+const durableProviderCommandTableNameSet = new Set<string>(
+	durableProviderCommandTableNames,
+);
+const preDurableProviderCommandTableNames = expectedTableNames.filter(
+	(name) => !durableProviderCommandTableNameSet.has(name),
+);
+const preDurableCommandReceiptColumns =
+	expectedTableColumns.command_receipts.slice(0, 6);
 
 const expectedIndexNames = [
 	"idx_activities_session_created",
 	"idx_activities_session_kind",
 	"idx_activities_tone",
 	"idx_activities_turn",
+	"idx_command_receipts_project",
 	"idx_command_receipts_session",
 	"idx_events_session_seq",
 	"idx_events_session_version",
@@ -147,6 +258,9 @@ const expectedIndexNames = [
 	"idx_messages_turn",
 	"idx_pending_approvals_pending",
 	"idx_pending_approvals_session_status",
+	"idx_provider_command_outbox_status",
+	"idx_provider_command_tombstones_session",
+	"idx_provider_command_turns_session",
 	"idx_session_providers_active",
 	"idx_session_providers_session",
 	"idx_sessions_parent",
@@ -156,6 +270,18 @@ const expectedIndexNames = [
 	"idx_turns_assistant_message",
 	"idx_turns_session_requested",
 ] as const;
+const durableProviderCommandIndexNames = [
+	"idx_command_receipts_project",
+	"idx_provider_command_outbox_status",
+	"idx_provider_command_tombstones_session",
+	"idx_provider_command_turns_session",
+] as const;
+const durableProviderCommandIndexNameSet = new Set<string>(
+	durableProviderCommandIndexNames,
+);
+const preDurableProviderCommandIndexNames = expectedIndexNames.filter(
+	(name) => !durableProviderCommandIndexNameSet.has(name),
+);
 
 const migrationKeyPattern = /^(\d+)_(.+)$/;
 
@@ -209,7 +335,10 @@ const verifyExistingBaselineSchema: Effect.Effect<
 			AND name NOT IN ('_migrations', ${EFFECT_SQL_MIGRATIONS_TABLE})
 		ORDER BY name`;
 	const actualTableNames = tables.map((row) => row.name);
-	if (!sameStrings(actualTableNames, expectedTableNames)) {
+	const knownTableShape =
+		sameStrings(actualTableNames, expectedTableNames) ||
+		sameStrings(actualTableNames, preDurableProviderCommandTableNames);
+	if (!knownTableShape) {
 		return yield* failSchemaMismatch(
 			`Existing event-store tables differ from baseline migration. Expected ${expectedTableNames.join(", ")}, got ${actualTableNames.join(", ")}`,
 		);
@@ -220,7 +349,10 @@ const verifyExistingBaselineSchema: Effect.Effect<
 		WHERE type='index' AND name NOT LIKE 'sqlite_%'
 		ORDER BY name`;
 	const actualIndexNames = indexes.map((row) => row.name);
-	if (!sameStrings(actualIndexNames, expectedIndexNames)) {
+	const knownIndexShape =
+		sameStrings(actualIndexNames, expectedIndexNames) ||
+		sameStrings(actualIndexNames, preDurableProviderCommandIndexNames);
+	if (!knownIndexShape) {
 		return yield* failSchemaMismatch(
 			`Existing event-store indexes differ from baseline migration. Expected ${expectedIndexNames.join(", ")}, got ${actualIndexNames.join(", ")}`,
 		);
@@ -229,12 +361,20 @@ const verifyExistingBaselineSchema: Effect.Effect<
 	for (const [tableName, expectedColumns] of Object.entries(
 		expectedTableColumns,
 	)) {
+		if (
+			durableProviderCommandTableNameSet.has(tableName) &&
+			!actualTableNames.includes(tableName)
+		) {
+			continue;
+		}
 		const columns = yield* sql.unsafe<{ name: string }>(
 			`PRAGMA table_info(${tableName})`,
 		);
 		const actualColumns = columns.map((column) => column.name);
 		const matchesKnownSchema =
 			sameStrings(actualColumns, expectedColumns) ||
+			(tableName === "command_receipts" &&
+				sameStrings(actualColumns, preDurableCommandReceiptColumns)) ||
 			(tableName === "message_parts" &&
 				sameStrings(
 					actualColumns,
@@ -283,9 +423,24 @@ const runMessagePartMetadataMigration: Effect.Effect<
 	yield* executeSqlStatements(messagePartMetadataMigrationSql);
 });
 
+const runDurableProviderCommandsMigration: Effect.Effect<
+	void,
+	unknown,
+	SqlClient.SqlClient
+> = Effect.gen(function* () {
+	const sql = yield* SqlClient.SqlClient;
+	const columns = yield* sql.unsafe<{ name: string }>(
+		"PRAGMA table_info(command_receipts)",
+	);
+	if (columns.some((column) => column.name === "fingerprint_hash")) return;
+
+	yield* executeSqlStatements(durableProviderCommandsMigrationSql);
+});
+
 export const effectMigrationEntries = {
 	"0001_create_event_store_tables": runBaselineEventStoreMigration,
 	"0002_add_message_part_metadata": runMessagePartMetadataMigration,
+	"0003_add_durable_provider_commands": runDurableProviderCommandsMigration,
 } satisfies Record<string, Effect.Effect<void, unknown, SqlClient.SqlClient>>;
 
 export function makeEffectMigrationLoader(

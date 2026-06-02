@@ -1,0 +1,73 @@
+# Contract templates: architecture, boundary, data, config, command, and provenance contracts.
+
+[[moduleMap]]
+module = "{{module_map_module}}"
+interfaceOwner = "{{module_map_interface_owner}}"
+implementationFiles = {{module_map_implementation_files_array}}
+adapterPolicy = "{{module_map_adapter_policy}}"
+doesNotOwn = {{module_map_does_not_own_array}}
+deletionTest = "{{module_map_deletion_test}}"
+
+[[boundaryClassification]]
+logicalId = "{{boundary_classification_logical_id}}"
+boundary = "{{boundary_classification_boundary}}"
+classification = "{{boundary_classification_classification}}"
+strictFields = {{boundary_classification_strict_fields_array}}
+opaqueFields = {{boundary_classification_opaque_fields_array}}
+degradeAllowed = {{boundary_classification_degrade_allowed_bool}}
+
+[[protocolContract]]
+logicalId = "{{protocol_contract_logical_id}}"
+protocol = "{{protocol_contract_protocol}}"
+schemaVersion = "{{protocol_contract_schema_version}}"
+fieldRules = {{protocol_contract_field_rules_array_of_tables}}
+compatibilityExpectation = "{{protocol_contract_compatibility_expectation}}"
+
+[[artifactContract]]
+logicalId = "{{artifact_contract_logical_id}}"
+artifact = "{{artifact_contract_artifact}}"
+schemaVersion = "{{artifact_contract_schema_version}}"
+format = "{{artifact_contract_format}}"
+fieldRules = {{artifact_contract_field_rules_array_of_tables}}
+bounds = {{artifact_contract_bounds_table}}
+redactionRules = {{artifact_contract_redaction_rules_array}}
+
+[[configContract]]
+logicalId = "{{config_contract_logical_id}}"
+configSurface = "{{config_contract_surface}}"
+defaults = {{config_contract_defaults_table}}
+overrides = {{config_contract_overrides_array_of_tables}}
+validationRules = {{config_contract_validation_rules_array}}
+disableSwitch = "{{config_contract_disable_switch}}"
+
+[[commandCatalog]]
+logicalId = "{{command_catalog_logical_id}}"
+commands = {{command_catalog_commands_array_of_tables}}
+selectionPolicy = "{{command_catalog_selection_policy}}"
+
+[[mappingTable]]
+logicalId = "{{mapping_table_logical_id}}"
+sourceFields = {{mapping_table_source_fields_array}}
+targetFields = {{mapping_table_target_fields_array}}
+rules = {{mapping_table_rules_array_of_tables}}
+
+[[sourceAuthority]]
+logicalId = "{{source_authority_logical_id}}"
+sourceSystem = "{{source_authority_source_system}}"
+sourceCommit = "{{source_authority_source_commit}}"
+authorityOrder = {{source_authority_order_array}}
+compatibilityExpectation = "{{source_authority_compatibility_expectation}}"
+
+[[referencePattern]]
+logicalId = "{{reference_pattern_logical_id}}"
+source = "{{reference_pattern_source}}"
+pattern = "{{reference_pattern_pattern}}"
+adaptationNotes = "{{reference_pattern_adaptation_notes}}"
+doNotCopy = {{reference_pattern_do_not_copy_array}}
+
+[[priorArt]]
+logicalId = "{{prior_art_logical_id}}"
+source = "{{prior_art_source}}"
+lessons = {{prior_art_lessons_array}}
+adoptedPrinciples = {{prior_art_adopted_principles_array}}
+rejectedDetails = {{prior_art_rejected_details_array}}

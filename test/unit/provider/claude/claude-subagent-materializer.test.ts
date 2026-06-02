@@ -36,6 +36,10 @@ import {
 } from "../../../../src/lib/provider/claude/claude-subagent-materializer.js";
 import type { SessionMessage } from "../../../../src/lib/provider/claude/types.js";
 
+function dataOf(event: { readonly data: unknown }): Record<string, unknown> {
+	return event.data as Record<string, unknown>;
+}
+
 function newCursor(): ClaudeSubagentTranscriptCursor {
 	return {
 		messageRoles: new Map(),
@@ -234,7 +238,7 @@ describe("Claude subagent materializer", () => {
 		expect(
 			firstEvents
 				.filter((event) => event.type === "text.delta")
-				.map((event) => event.data.text),
+				.map((event) => dataOf(event)["text"]),
 		).toEqual(["Auth"]);
 		expect(cursor.messageRoles.get("sub-assistant-1")).toBe("assistant");
 		expect(cursor.textOffsets.get("sub-assistant-1:0")).toBe("Auth".length);
@@ -249,7 +253,7 @@ describe("Claude subagent materializer", () => {
 		expect(
 			secondEvents
 				.filter((event) => event.type === "text.delta")
-				.map((event) => event.data.text),
+				.map((event) => dataOf(event)["text"]),
 		).toEqual([" is fine"]);
 
 		const retryEvents = diffSessionMessagesToEvents({
@@ -272,7 +276,7 @@ describe("Claude subagent materializer", () => {
 		expect(
 			firstStage.events
 				.filter((event) => event.type === "text.delta")
-				.map((event) => event.data.text),
+				.map((event) => dataOf(event)["text"]),
 		).toEqual(["Auth"]);
 		commitClaudeSubagentTranscriptCursor(cursor, firstStage.cursor);
 
@@ -286,7 +290,7 @@ describe("Claude subagent materializer", () => {
 		expect(
 			secondStage.events
 				.filter((event) => event.type === "text.delta")
-				.map((event) => event.data.text),
+				.map((event) => dataOf(event)["text"]),
 		).toEqual([" is fine"]);
 		commitClaudeSubagentTranscriptCursor(cursor, secondStage.cursor);
 
@@ -332,7 +336,7 @@ describe("Claude subagent materializer", () => {
 		expect(
 			growStage.events
 				.filter((event) => event.type === "text.delta")
-				.map((event) => event.data.text),
+				.map((event) => dataOf(event)["text"]),
 		).toEqual([" today"]);
 	});
 
@@ -356,7 +360,7 @@ describe("Claude subagent materializer", () => {
 		expect(
 			firstStage.events
 				.filter((event) => event.type === "thinking.delta")
-				.map((event) => event.data.text),
+				.map((event) => dataOf(event)["text"]),
 		).toEqual(["Checking"]);
 		commitClaudeSubagentTranscriptCursor(cursor, firstStage.cursor);
 
@@ -485,7 +489,7 @@ describe("Claude subagent materializer", () => {
 		expect(
 			firstStage.events
 				.filter((event) => event.type === "text.delta")
-				.map((event) => event.data.text),
+				.map((event) => dataOf(event)["text"]),
 		).toEqual(["Auth"]);
 		expect(cursor.messageRoles.has("sub-assistant-1")).toBe(false);
 		expect(cursor.textOffsets.get("sub-assistant-1:0")).toBeUndefined();
@@ -498,7 +502,7 @@ describe("Claude subagent materializer", () => {
 		expect(
 			retryStage.events
 				.filter((event) => event.type === "text.delta")
-				.map((event) => event.data.text),
+				.map((event) => dataOf(event)["text"]),
 		).toEqual(["Auth"]);
 
 		commitClaudeSubagentTranscriptCursor(cursor, firstStage.cursor);

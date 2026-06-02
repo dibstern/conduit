@@ -24,6 +24,10 @@ export interface ClaudeEventPersistEffect {
 		event: CanonicalEvent,
 	) => Effect.Effect<void, ClaudeEventPersistEffectError>;
 
+	readonly persistEvents: (
+		events: readonly CanonicalEvent[],
+	) => Effect.Effect<void, ClaudeEventPersistEffectError>;
+
 	readonly persistUserMessage: (
 		sessionId: string,
 		text: string,
@@ -120,6 +124,19 @@ export const makeClaudeEventPersistEffect = Effect.gen(function* () {
 			const stored = yield* eventStore.append(event);
 			yield* projectEvent(stored);
 		}).pipe(Effect.mapError(mapPersistError("persistEvent")));
+
+	const persistEvents = (
+		events: readonly CanonicalEvent[],
+	): Effect.Effect<void, ClaudeEventPersistEffectError> =>
+		Effect.gen(function* () {
+			if (events.length === 0) return;
+			yield* ensureRecovered();
+			for (const sessionId of new Set(events.map((event) => event.sessionId))) {
+				yield* ensureSession(sessionId, "claude");
+			}
+			const stored = yield* eventStore.appendBatch(events);
+			yield* projectBatch(stored);
+		}).pipe(Effect.mapError(mapPersistError("persistEvents")));
 
 	const persistUserMessage = (
 		sessionId: string,
@@ -263,6 +280,7 @@ export const makeClaudeEventPersistEffect = Effect.gen(function* () {
 
 	return {
 		persistEvent,
+		persistEvents,
 		persistUserMessage,
 		ensureClaudeSubagentSession,
 		persistClaudeSubagent,

@@ -21,8 +21,16 @@ Nested JSON whose structure belongs to the provider or model/tool protocol and i
 _Avoid_: Conduit contract field
 
 **Provider Runtime Event**:
-A pre-storage event envelope emitted by a Provider Runtime inside Conduit. It names the Conduit session/turn, provider refs, and raw-source metadata needed for translation. It is not a stored event and not a browser message.
+A pre-storage ingress envelope emitted by a Provider Runtime inside Conduit. It names the Conduit session/turn, provider refs, and raw-source metadata needed for translation into Conduit-owned durable domain events. It is not a stored event, not a browser message, and not a recovery source of truth.
 _Avoid_: CanonicalEvent, RelayMessage, raw SDK payload
+
+**Runtime Trace**:
+Optional diagnostic output linked to provider refs or runtime event ids. It may be absent, disabled, expired, bounded, or redacted without changing recovery, projection, or relay replay.
+_Avoid_: event store source of truth, replay contract
+
+**Provider-Scoped Agent Selector**:
+A UI control for selecting an agent from the current session's provider runtime only.
+_Avoid_: cross-provider agent picker, mixed agent dropdown
 
 **Automatic Session Title**:
 A Conduit-owned session label generated from the first user message's domain and intent. It is capped at six words; overlong generated titles are truncated after the sixth word.
@@ -53,6 +61,12 @@ _Avoid_: Conduit-invented permission scope
 - A **Provider-Owned Payload** may remain opaque when Conduit does not read its internal fields.
 - A **Provider Runtime Event** may be translated into a stored canonical event, but must not itself become the event store contract.
 - A **Provider Runtime Event** carries **Provider-Owned Payload** under event data, not as a whole SDK message tunneled through raw-source metadata.
+- A **Runtime Trace** is non-authoritative diagnostics; Conduit recovery, projections, and relay replay must work from durable domain events alone.
+- A **Provider-Scoped Agent Selector** shows agents from exactly one **Provider Runtime**.
+- A **Provider-Scoped Agent Selector** follows the current session's provider runtime; provider switching belongs to model selection.
+- A **Provider-Scoped Agent Selector** should name its current provider scope when opened.
+- A **Provider-Scoped Agent Selector** row shows agent identity and compact metadata; long agent descriptions belong in tooltips, not row bodies.
+- A **Provider-Scoped Agent Selector** preserves the provider runtime's agent order.
 - An **Automatic Session Title** is derived from the first user message after Conduit accepts it, not from provider turn completion.
 - An **Automatic Session Title** is generated only when the first accepted user message is sent while the session is bound to Claude.
 - Existing sessions are not backfilled with an **Automatic Session Title**.

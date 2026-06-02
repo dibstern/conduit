@@ -39,6 +39,29 @@
 - [ ] Permission core becomes `ClaudePermissionService`; only the SDK callback adapter returns `Promise`.
 - [ ] Provider turn module lives under relay/domain ownership. Recommended path: `src/lib/domain/relay/Services/provider-turn-service.ts`.
 
+## Implementation Patterns
+
+- [ ] Define services with `Context.Tag` plus `Layer.effect` / `Layer.scoped`. Do not use `Effect.Service`.
+- [ ] Use `Layer.scoped`, `Effect.addFinalizer`, and `Effect.forkScoped` for Claude stream lifecycle. Do not use `Effect.forkDaemon` for SDK consumers.
+- [ ] Use `FiberMap` for per-session Claude stream fibers. Avoid `Map<string, Fiber>` and manual interrupt loops unless documented inline.
+- [ ] Use `Ref` or `SynchronizedRef` with `HashMap` for session/runtime state. Use native `Map` only when values contain mutable Effect primitives, and document the exception inline.
+- [ ] Use `Deferred` for setup locks, turn waiters, shutdown coordination, and one-shot SDK/result waits.
+- [ ] Do not add hand-rolled `new Promise`, `Promise.race`, timeout promises, or runtime `setTimeout` for app-owned coordination.
+- [ ] Use `Clock`, `Duration`, `Schedule`, `Effect.sleep`, and `TestClock` for time and TTL behavior.
+- [ ] Keep SDK Promise boundaries tiny and named. The SDK `canUseTool` adapter may return `Promise`; the permission core must return `Effect`.
+- [ ] The SDK callback adapter should be the only Claude production `Effect.runPromise` edge. Update the runtime-boundary allowlist if the adapter file/name changes.
+- [ ] Use `Data.TaggedError` for expected failures. Expose expected failures in the `E` channel.
+- [ ] Use `Effect.catchTag` for expected errors. Use broad `catchAll` only for deliberate degrade paths with warning/error logging.
+- [ ] Use `@effect/vitest` `it.effect` / `it.scoped` for tests that run Effect programs. Do not wrap with manual `Effect.runPromise`.
+- [ ] Use `Layer.fresh(testLayer)` for stateful test Layers.
+- [ ] Use `TestClock.adjust(...)` for time-dependent tests. Do not sleep real time in unit tests.
+- [ ] Use `Effect.annotateLogs` and `Effect.withSpan` around send turn, stream consume, permission, capability probe, interrupt, shutdown. Include provider id, session id, and turn id where available.
+- [ ] Make Claude capabilities cache Layer-owned. No module-level singleton `TTLCache`; use `Clock`/`TestClock` and in-flight dedupe with `Deferred`.
+- [ ] Keep provider-turn policy separate from Claude SDK runtime. `ProviderTurnService` owns relay policy; Claude runtime owns SDK session execution.
+- [ ] Translators must be pure or return `Effect`. Do not inject a Promise-shaped `runEffect` callback into translator code.
+- [ ] Use `ProviderRuntimeEvent` only as pre-storage vocabulary or test target. Do not replace `CanonicalEvent`, `RelayEventSink`, event-store schemas, or frontend messages in this PR.
+- [ ] Build explicit fake SDK stream fixtures for blocking streams, malformed items, result messages, stream errors, abort, and subagent events. Avoid generic happy-path async generators.
+
 ## Provider Turn Module Scope
 
 - [ ] Move from `prompt.ts`: provider selection, Claude prior-history load, first-Claude title start, Claude user-message persistence, event sink creation, provider-state load/save, `SendTurnInput` assembly, dispatch result/failure handling.

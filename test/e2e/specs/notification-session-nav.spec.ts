@@ -71,6 +71,7 @@ const twoSessionInit: MockMessage[] = [
 	},
 	{
 		type: "agent_list",
+		providerScope: { id: "opencode", name: "OpenCode" },
 		agents: [
 			{ id: "code", name: "Code", description: "General coding assistant" },
 		],

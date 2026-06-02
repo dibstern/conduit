@@ -34,6 +34,7 @@ import { InstanceManagementServiceLive } from "../../src/lib/domain/relay/Servic
 import { makePollerManagerStateLive } from "../../src/lib/domain/relay/Services/message-poller.js";
 import { PendingInteractionServiceLive } from "../../src/lib/domain/relay/Services/pending-interaction-service.js";
 import { ProjectManagementServiceLive } from "../../src/lib/domain/relay/Services/project-management-service.js";
+import { ProviderTurnServiceLive } from "../../src/lib/domain/relay/Services/provider-turn-service.js";
 import { ScanServiceLive } from "../../src/lib/domain/relay/Services/scan-service.js";
 import {
 	ConfigTag,
@@ -393,7 +394,10 @@ export function createMockClientInitDeps(
 			replay: vi.fn(async () => undefined),
 		},
 		agentService: {
-			listAgents: vi.fn(async () => ({ agents: [] })),
+			listAgents: vi.fn(async () => ({
+				providerScope: { id: "opencode" as const, name: "OpenCode" as const },
+				agents: [],
+			})),
 		},
 		modelService: {
 			getSession: vi.fn(async () => ({
@@ -1062,6 +1066,20 @@ export function makeTestHandlerLayer(
 			: InstanceManagementServiceLive.pipe(
 					Layer.provide(Layer.succeed(InstanceMgmtTag, instanceMgmt)),
 				);
+	const providerTurnServiceLayer = ProviderTurnServiceLive.pipe(
+		Layer.provide(
+			Layer.mergeAll(
+				openCodeApiLayer,
+				wsHandlerLayer,
+				loggerLayer,
+				configLayer,
+				sessionManagerServiceLayer,
+				PendingInteractionServiceLive,
+				overridesStateLayer,
+				orchestrationLayer,
+			),
+		),
+	);
 
 	return Layer.mergeAll(
 		openCodeApiLayer,
@@ -1076,6 +1094,7 @@ export function makeTestHandlerLayer(
 		openCodeTerminalServiceLayer,
 		instanceManagementServiceLayer,
 		PendingInteractionServiceLive,
+		providerTurnServiceLayer,
 		sessionManagerServiceLayer,
 		wsHandlerLayer,
 		overridesStateLayer,

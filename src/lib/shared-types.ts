@@ -163,6 +163,11 @@ export interface AgentInfo {
 	model?: string;
 }
 
+export interface AgentProviderScope {
+	id: string;
+	name: string;
+}
+
 export interface ProviderInfo {
 	id: string;
 	name: string;
@@ -486,6 +491,11 @@ const AgentInfoSchema = Schema.Struct({
 	model: Schema.optional(Schema.String),
 });
 
+const AgentProviderScopeSchema = Schema.Struct({
+	id: Schema.String,
+	name: Schema.String,
+});
+
 const CommandInfoSchema = Schema.Struct({
 	name: Schema.String,
 	description: Schema.optional(Schema.String),
@@ -760,6 +770,7 @@ const ModelListSchema = Schema.Struct({
 
 const AgentListSchema = Schema.Struct({
 	type: Schema.Literal("agent_list"),
+	providerScope: AgentProviderScopeSchema,
 	agents: Schema.Array(AgentInfoSchema),
 	activeAgentId: Schema.optional(Schema.String),
 });
@@ -1328,7 +1339,12 @@ export type RelayMessage =
 	| { type: "model_info"; model: string; provider: string }
 	| { type: "default_model_info"; model: string; provider: string }
 	| { type: "model_list"; providers: ProviderInfo[] }
-	| { type: "agent_list"; agents: AgentInfo[]; activeAgentId?: string }
+	| {
+			type: "agent_list";
+			providerScope: AgentProviderScope;
+			agents: AgentInfo[];
+			activeAgentId?: string;
+	  }
 	| { type: "command_list"; commands: CommandInfo[] }
 	// ── Projects ───────────────────────────────────────────────────────────
 	| {

@@ -25,8 +25,7 @@ CREATE TABLE events (
 	data            TEXT    NOT NULL,
 	metadata        TEXT    NOT NULL DEFAULT '{}',
 	provider        TEXT    NOT NULL,
-	created_at      INTEGER NOT NULL,
-	FOREIGN KEY (session_id) REFERENCES sessions(id)
+	created_at      INTEGER NOT NULL
 );
 
 CREATE UNIQUE INDEX idx_events_session_version ON events (session_id, stream_version);

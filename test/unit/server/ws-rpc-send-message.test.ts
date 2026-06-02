@@ -11,12 +11,59 @@ import {
 	makeRecordingWebSocketHandler,
 	makeTestHandlerLayer,
 } from "../../helpers/mock-factories.js";
+import { withDispatchEffect } from "../../helpers/orchestration-engine-test-double.js";
 
 const rpcClient = Effect.gen(function* () {
 	return yield* RpcTest.makeClient(WsRpcGroup);
 });
 
 describe("WsRpcServerLayer SendMessage", () => {
+	it.effect("passes commandId through to provider orchestration", () => {
+		const dispatch = vi.fn(() =>
+			Effect.succeed({
+				status: "completed" as const,
+				cost: 0,
+				tokens: { input: 0, output: 0 },
+				durationMs: 0,
+				providerStateUpdates: [],
+			}),
+		);
+		const engine = withDispatchEffect({
+			getProviderForSession: vi.fn(() => "claude"),
+			dispatchEffect: dispatch,
+		});
+
+		return Effect.gen(function* () {
+			const client = yield* rpcClient;
+
+			yield* client.SendMessage({
+				projectSlug: "project-a",
+				sessionId: "session-1",
+				text: "hello",
+				originId: "browser-tab-a",
+				commandId: "cmd-send-1",
+			});
+
+			expect(dispatch).toHaveBeenCalledWith(
+				expect.objectContaining({
+					type: "send_turn",
+					commandId: "cmd-send-1",
+				}),
+			);
+		}).pipe(
+			Effect.scoped,
+			Effect.provide(
+				WsRpcServerLayer.pipe(
+					Layer.provideMerge(
+						makeTestHandlerLayer({
+							orchestrationEngine: engine,
+						}),
+					),
+				),
+			),
+		);
+	});
+
 	it.effect("sends prompts through the shared prompt path", () => {
 		const prompt = vi.fn(async () => undefined);
 		const api = makeMockOpenCodeAPI();
@@ -35,6 +82,7 @@ describe("WsRpcServerLayer SendMessage", () => {
 				text: "hello",
 				images: ["data:image/png;base64,abc"],
 				originId: "browser-tab-a",
+				commandId: "cmd-send-legacy-test",
 			});
 
 			expect(result).toEqual({ ok: true });
@@ -102,6 +150,7 @@ describe("WsRpcServerLayer SendMessage", () => {
 				sessionId: "session-1",
 				text: "first",
 				originId: "browser-tab-a",
+				commandId: "cmd-rate-1",
 			});
 
 			const second = yield* Effect.either(
@@ -110,6 +159,7 @@ describe("WsRpcServerLayer SendMessage", () => {
 					sessionId: "session-1",
 					text: "second",
 					originId: "browser-tab-a",
+					commandId: "cmd-rate-2",
 				}),
 			);
 

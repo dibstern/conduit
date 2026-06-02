@@ -220,3 +220,17 @@ After work, summarize:
 Keep summaries short. Do not explain obvious edits.
 
 Oververbosity:low
+
+<!-- BEGIN BEADS INTEGRATION -->
+## Beads Issue and Task Tracker
+
+This repo uses Beads (`bd` CLI tool) for durable task tracking. Run `bd prime` for guidance when working on tasks, and load the `beads` skill at `~/.agents/skills/beads/SKILL.md` for guidance.
+Use Beads for shared tasks, blockers, follow-ups, and handoff; do not use markdown TODOs as project state.
+Issues live in Dolt; `.beads/*.jsonl` files are passive git exports. Commit tracked `.beads` changes only when they reflect this task’s Beads state.
+
+### Rules
+
+- Use `bd` for all task tracking; do not create markdown TODO lists or Todo/Task tools.
+- Run `bd prime` for detailed command reference and session close protocol
+- Keep persistent project memory in Beads via `bd remember`; do not create ad hoc memory files.
+<!-- END BEADS INTEGRATION -->

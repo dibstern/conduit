@@ -37,6 +37,7 @@ const makePersistService = (
 	persistUserMessage: ClaudeEventPersistEffect["persistUserMessage"],
 ): ClaudeEventPersistEffect => ({
 	persistEvent: vi.fn(() => Effect.void),
+	persistEvents: vi.fn(() => Effect.void),
 	persistUserMessage,
 	persistClaudeSubagent: vi.fn(() => Effect.void),
 	ensureClaudeSubagentSession: vi.fn(() => Effect.void),
@@ -134,7 +135,10 @@ describe("Claude prompt title generation", () => {
 			);
 
 			return Effect.gen(function* () {
-				yield* handleMessage("client-1", { text: "current prompt" });
+				yield* handleMessage("client-1", {
+					text: "current prompt",
+					commandId: "cmd-auto-rename-current",
+				});
 
 				expect(persistService.persistUserMessage).toHaveBeenCalledWith(
 					"session-1",
@@ -163,7 +167,10 @@ describe("Claude prompt title generation", () => {
 		});
 
 		return Effect.gen(function* () {
-			yield* handleMessage("client-1", { text: "follow up" });
+			yield* handleMessage("client-1", {
+				text: "follow up",
+				commandId: "cmd-auto-rename-follow-up",
+			});
 
 			expect(persistService.persistUserMessage).toHaveBeenCalledWith(
 				"session-1",
@@ -190,7 +197,10 @@ describe("Claude prompt title generation", () => {
 		});
 
 		return Effect.gen(function* () {
-			yield* handleMessage("client-1", { text: "opencode prompt" });
+			yield* handleMessage("client-1", {
+				text: "opencode prompt",
+				commandId: "cmd-auto-rename-opencode",
+			});
 
 			expect(persistService.persistUserMessage).not.toHaveBeenCalled();
 			expect(titleService.startForFirstClaudeMessage).not.toHaveBeenCalled();
@@ -225,7 +235,10 @@ describe("Claude prompt title generation", () => {
 			});
 
 			return Effect.gen(function* () {
-				yield* handleMessage("client-1", { text: "first prompt" });
+				yield* handleMessage("client-1", {
+					text: "first prompt",
+					commandId: "cmd-auto-rename-first",
+				});
 
 				expect(persistService.persistUserMessage).toHaveBeenCalledWith(
 					"session-1",
@@ -273,7 +286,10 @@ describe("Claude prompt title generation", () => {
 			);
 
 			return Effect.gen(function* () {
-				yield* handleMessage("client-1", { text: "maybe first prompt" });
+				yield* handleMessage("client-1", {
+					text: "maybe first prompt",
+					commandId: "cmd-auto-rename-maybe-first",
+				});
 
 				expect(
 					sessionManagerService.loadPreRenderedHistory,

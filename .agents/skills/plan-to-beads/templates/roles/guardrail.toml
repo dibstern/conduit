@@ -1,0 +1,36 @@
+# Role template: guardrail / negative-state contract.
+# Use when a forbidden state or proof obligation must be durable and queryable.
+
+[[steps]]
+id = "{{logical_id}}"
+title = "{{title}}"
+type = "chore"
+description = "{{description}}"
+needs = {{needs_array}}
+
+[steps.metadata.planToBeads]
+contractVersion = "plan-to-beads.v2"
+templateVersion = "{{template_version}}"
+role = "guardrail"
+logicalId = "{{logical_id}}"
+planId = "{{plan_id}}"
+sourcePlan = "{{source_plan}}"
+contextRefs = {{context_refs_array}}
+inherits = {{inherits_array}}
+typedContractRefs = {{typed_contract_refs_array}}
+provides = {{provides_array}}
+
+[steps.metadata.guardrailContract]
+forbiddenState = "{{forbidden_state}}"
+forbiddenPattern = "{{forbidden_pattern}}"
+requiredPattern = "{{required_pattern}}"
+scope = {{guardrail_scope_array}}
+allowedLocations = {{guardrail_allowed_locations_array}}
+knownNonExceptions = {{guardrail_known_non_exceptions_array}}
+proofCommand = "{{proof_command}}"
+expectedResult = "{{expected_result}}"
+resolutionPolicy = "{{resolution_policy}}"
+completionBlocksUntilResolved = {{completion_blocks_until_resolved_bool}}
+reclassificationRule = "{{reclassification_rule}}"
+guardrailEvidenceRefs = {{guardrail_evidence_refs_array}}
+allowedExceptionRefs = {{allowed_exception_refs_array}}

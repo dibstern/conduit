@@ -1,18 +1,20 @@
 // test/unit/provider/event-sink.test.ts
 import { Effect, Fiber } from "effect";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import type { ProviderRuntimeEvent } from "../../../src/lib/contracts/providers/provider-runtime-event.js";
 import type { CanonicalEvent } from "../../../src/lib/persistence/events.js";
 import { EventSinkImpl } from "../../../src/lib/provider/event-sink.js";
 import type {
 	PermissionRequest,
 	QuestionRequest,
 } from "../../../src/lib/provider/types.js";
+import { providerRuntimeEvent } from "../../helpers/provider-runtime-event.js";
 
 // ─── Mock dependencies ─────────────────────────────────────────────────────
 
 function makeMockEventStore() {
 	const appendedEvents: CanonicalEvent[] = [];
-	return {
+	const store = {
 		append: vi.fn((event: CanonicalEvent) => {
 			appendedEvents.push(event);
 			return {
@@ -21,27 +23,39 @@ function makeMockEventStore() {
 				streamVersion: 1,
 			};
 		}),
+		appendBatch: vi.fn((events: readonly CanonicalEvent[]) =>
+			events.map((event) => store.append(event)),
+		),
 		appendedEvents,
 	};
+	return store;
 }
 
 function makeMockProjectionRunner() {
-	return {
+	const runner = {
 		projectEvent: vi.fn(),
+		projectBatch: vi.fn((events: readonly unknown[]) => {
+			for (const event of events) {
+				// Keep the old tests observing projectEvent calls while production uses batch projection.
+				runner.projectEvent(event);
+			}
+		}),
 	};
+	return runner;
 }
 
-function makeEvent(overrides?: Partial<CanonicalEvent>): CanonicalEvent {
+function makeEvent(
+	overrides?: Partial<ProviderRuntimeEvent>,
+): ProviderRuntimeEvent {
 	return {
-		eventId: "evt-1",
-		type: "text.delta",
-		sessionId: "s1",
-		createdAt: Date.now(),
-		metadata: {},
-		provider: "opencode",
-		data: { messageId: "m1", partId: "p1", text: "hello" },
+		...providerRuntimeEvent(
+			"text.delta",
+			"s1",
+			{ messageId: "m1", partId: "p1", text: "hello" },
+			{ eventId: "evt-1", providerId: "opencode" },
+		),
 		...overrides,
-	} as CanonicalEvent;
+	};
 }
 
 describe("EventSinkImpl", () => {
@@ -67,7 +81,14 @@ describe("EventSinkImpl", () => {
 			const event = makeEvent();
 			await Effect.runPromise(sink.push(event));
 
-			expect(eventStore.append).toHaveBeenCalledWith(event);
+			expect(eventStore.append).toHaveBeenCalledWith(
+				expect.objectContaining({
+					eventId: event.eventId,
+					type: event.type,
+					sessionId: event.sessionId,
+					provider: event.providerId,
+				}),
+			);
 			expect(projectionRunner.projectEvent).toHaveBeenCalledTimes(1);
 		});
 

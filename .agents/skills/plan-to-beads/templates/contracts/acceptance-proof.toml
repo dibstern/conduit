@@ -1,0 +1,46 @@
+# Contract templates: acceptance proof and scenarios.
+# Acceptance explains why a command or manual check proves a product criterion.
+
+[[acceptanceMatrix]]
+logicalId = "{{acceptance_matrix_logical_id}}"
+criteria = {{acceptance_matrix_criteria_array_of_tables}}
+ownerLogicalId = "{{acceptance_matrix_owner_logical_id}}"
+evidenceToRecord = {{acceptance_matrix_evidence_to_record_array}}
+
+[[acceptanceCriterion]]
+logicalId = "{{acceptance_criterion_logical_id}}"
+criterion = "{{acceptance_criterion}}"
+proof = "{{acceptance_proof}}"
+expectedAssertion = "{{acceptance_expected_assertion}}"
+ownerLogicalId = "{{acceptance_owner_logical_id}}"
+prerequisites = {{acceptance_prerequisites_array}}
+
+[[acceptanceScenario]]
+logicalId = "{{acceptance_scenario_logical_id}}"
+given = {{acceptance_given_array}}
+when = {{acceptance_when_array}}
+then = {{acceptance_then_array}}
+tracePath = "{{acceptance_trace_path}}"
+evidenceToRecord = {{acceptance_evidence_to_record_array}}
+
+[[acceptanceTrace]]
+logicalId = "{{acceptance_trace_logical_id}}"
+criterionRef = "{{acceptance_trace_criterion_ref}}"
+childRefs = {{acceptance_trace_child_refs_array}}
+checkpointRefs = {{acceptance_trace_checkpoint_refs_array}}
+verificationRefs = {{acceptance_trace_verification_refs_array}}
+
+[[manualAcceptance]]
+logicalId = "{{manual_acceptance_logical_id}}"
+manualSteps = {{manual_acceptance_steps_array}}
+expectedObservableResult = "{{manual_acceptance_expected_result}}"
+environmentPrereqs = {{manual_acceptance_environment_prereqs_array}}
+evidenceToRecord = {{manual_acceptance_evidence_to_record_array}}
+
+[[operatorSmoke]]
+logicalId = "{{operator_smoke_logical_id}}"
+setup = {{operator_smoke_setup_array}}
+commands = {{operator_smoke_commands_array}}
+expectedObservableResult = "{{operator_smoke_expected_result}}"
+stopConditions = {{operator_smoke_stop_conditions_array}}
+evidenceToRecord = {{operator_smoke_evidence_to_record_array}}

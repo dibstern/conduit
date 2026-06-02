@@ -171,6 +171,7 @@ export const WsRpcServerLayer = WsRpcGroup.toLayer({
 			const result = yield* agentService.listAgents(request.sessionId);
 			return {
 				projectSlug: request.projectSlug,
+				providerScope: result.providerScope,
 				agents: result.agents,
 				...(result.activeAgentId != null
 					? { activeAgentId: result.activeAgentId }
@@ -554,6 +555,7 @@ export const WsRpcServerLayer = WsRpcGroup.toLayer({
 		reloadProviderSessionForClient({
 			clientId: request.originId ?? "rpc",
 			sessionId: request.sessionId,
+			commandId: request.commandId,
 		}).pipe(
 			Effect.as({
 				projectSlug: request.projectSlug,
@@ -719,6 +721,7 @@ export const WsRpcServerLayer = WsRpcGroup.toLayer({
 			clientId: request.originId,
 			...(request.title != null ? { title: request.title } : {}),
 			...(request.requestId != null ? { requestId: request.requestId } : {}),
+			...(request.providerId != null ? { providerId: request.providerId } : {}),
 		}).pipe(
 			Effect.map((session) => ({
 				projectSlug: request.projectSlug,
@@ -791,6 +794,7 @@ export const WsRpcServerLayer = WsRpcGroup.toLayer({
 	RespondPermission: (request) =>
 		handlePermissionResponse(request.originId, {
 			requestId: request.requestId as PermissionId,
+			commandId: request.commandId,
 			decision: request.decision,
 			...(request.persistScope != null
 				? { persistScope: request.persistScope }
@@ -814,6 +818,7 @@ export const WsRpcServerLayer = WsRpcGroup.toLayer({
 	AnswerQuestion: (request) =>
 		handleAskUserResponse(request.originId, {
 			toolId: request.toolId,
+			commandId: request.commandId,
 			answers: request.answers,
 		}).pipe(
 			Effect.as({ ok: true as const }),
@@ -828,6 +833,7 @@ export const WsRpcServerLayer = WsRpcGroup.toLayer({
 	RejectQuestion: (request) =>
 		handleQuestionReject(request.originId, {
 			toolId: request.toolId,
+			commandId: request.commandId,
 		}).pipe(
 			Effect.as({ ok: true as const }),
 			Effect.catchAll((error) =>
@@ -892,6 +898,7 @@ export const WsRpcServerLayer = WsRpcGroup.toLayer({
 				clientId: request.originId ?? "rpc",
 				sessionId: request.sessionId,
 				text: request.text,
+				commandId: request.commandId,
 				...(request.images ? { images: request.images } : {}),
 				...(request.originId ? { originId: request.originId } : {}),
 				errorDelivery: "session",
@@ -922,7 +929,7 @@ export const WsRpcServerLayer = WsRpcGroup.toLayer({
 			),
 		),
 	CancelSession: (request) =>
-		cancelSessionById("rpc", request.sessionId).pipe(
+		cancelSessionById("rpc", request.sessionId, request.commandId).pipe(
 			Effect.as({ ok: true as const }),
 		),
 	SetLogLevel: (request) =>

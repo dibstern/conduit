@@ -4,18 +4,15 @@ import { OpenCodeAPITag } from "../domain/provider/Services/opencode-api-service
 import { Effect } from "effect";
 import { AgentServiceTag } from "../domain/relay/Services/agent-service.js";
 import {
-	isProviderTurnInterruptProvider,
 	makeProviderTurnService,
 	ProviderTurnServiceTag,
 } from "../domain/relay/Services/provider-turn-service.js";
 import {
 	LoggerTag,
-	OrchestrationEngineTag,
 	WebSocketHandlerTag,
 } from "../domain/relay/Services/services.js";
 import { SessionManagerServiceTag } from "../domain/relay/Services/session-manager-service.js";
 import {
-	clearProcessingTimeout,
 	getAgent,
 	getContextWindow,
 	getModel,
@@ -24,7 +21,7 @@ import {
 	PROCESSING_TIMEOUT_DURATION,
 	startProcessingTimeout,
 } from "../domain/relay/Services/session-overrides-state.js";
-import { formatErrorDetail, RelayError } from "../errors.js";
+import { RelayError } from "../errors.js";
 
 // ─── Per-session input draft store ──────────────────────────────────────────
 // Stores the last input_sync text per session so that newly connecting clients
@@ -35,6 +32,7 @@ const sessionInputDrafts = new Map<string, string>();
 interface LegacyMessagePayload {
 	text: string;
 	images?: string[];
+	commandId?: string;
 }
 
 /** Get the stored input draft for a session (empty string if none). */
@@ -53,6 +51,7 @@ export interface SendMessageToSessionInput {
 	readonly text: string;
 	readonly images?: readonly string[];
 	readonly originId?: string;
+	readonly commandId: string;
 	readonly excludeClientId?: string;
 	readonly missingSessionClientId?: string;
 	readonly errorDelivery?: "client" | "session";
@@ -67,7 +66,7 @@ export const sendMessageToSession = (input: SendMessageToSessionInput) =>
 		const { clientId, text, images, originId, excludeClientId } = input;
 		const imageList =
 			images && images.length > 0 ? Array.from(images) : undefined;
-		const activeId = input.sessionId;
+		let activeId = input.sessionId;
 		if (!text) return;
 		if (!activeId) {
 			if (input.missingSessionClientId) {
@@ -81,11 +80,28 @@ export const sendMessageToSession = (input: SendMessageToSessionInput) =>
 			}
 			return;
 		}
+		const originalActiveId = activeId;
+		const sessionModel = yield* getModel(activeId);
+		const sessionModelUserSelected = yield* isModelUserSelected(activeId);
+		const providerTurnServiceOption = yield* Effect.serviceOption(
+			ProviderTurnServiceTag,
+		);
+		const providerTurnService =
+			providerTurnServiceOption._tag === "Some"
+				? providerTurnServiceOption.value
+				: yield* makeProviderTurnService;
+		activeId = yield* providerTurnService.prepareTurnSession({
+			clientId,
+			sessionId: activeId,
+			...(sessionModel ? { model: sessionModel } : {}),
+			modelUserSelected: sessionModelUserSelected,
+		});
 		log.info(
 			`client=${clientId} session=${activeId} → ${text.slice(0, 80)}${text.length > 80 ? "…" : ""}`,
 		);
 
 		// Clear the input draft
+		if (originalActiveId !== activeId) clearSessionInputDraft(originalActiveId);
 		clearSessionInputDraft(activeId);
 
 		// Send user_message to OTHER clients viewing this session
@@ -109,8 +125,6 @@ export const sendMessageToSession = (input: SendMessageToSessionInput) =>
 			agentServiceOption._tag === "Some"
 				? yield* agentServiceOption.value.getActiveAgent(activeId)
 				: yield* getAgent(activeId);
-		const sessionModel = yield* getModel(activeId);
-		const sessionModelUserSelected = yield* isModelUserSelected(activeId);
 		const variant = yield* getVariant(activeId);
 		const contextWindow = yield* getContextWindow(activeId);
 
@@ -139,17 +153,11 @@ export const sendMessageToSession = (input: SendMessageToSessionInput) =>
 			}),
 		);
 
-		const providerTurnServiceOption = yield* Effect.serviceOption(
-			ProviderTurnServiceTag,
-		);
-		const providerTurnService =
-			providerTurnServiceOption._tag === "Some"
-				? providerTurnServiceOption.value
-				: yield* makeProviderTurnService;
 		yield* providerTurnService.sendTurn({
 			clientId,
 			sessionId: activeId,
 			text,
+			commandId: input.commandId,
 			...(imageList ? { images: imageList } : {}),
 			...(sessionModel ? { model: sessionModel } : {}),
 			modelUserSelected: sessionModelUserSelected,
@@ -166,74 +174,39 @@ export const handleMessage = (
 ) =>
 	Effect.gen(function* () {
 		const wsHandler = yield* WebSocketHandlerTag;
+		if (!payload.text) return;
+		if (!payload.commandId) {
+			wsHandler.sendTo(
+				clientId,
+				new RelayError(
+					"Missing commandId for mutating provider command: send_turn",
+					{ code: "MISSING_COMMAND_ID" },
+				).toSystemError(),
+			);
+			return;
+		}
 		yield* sendMessageToSession({
 			clientId,
 			sessionId: wsHandler.getClientSession(clientId),
 			text: payload.text,
+			commandId: payload.commandId,
 			...(payload.images ? { images: payload.images } : {}),
 			excludeClientId: clientId,
 			missingSessionClientId: clientId,
 		});
 	});
 
-export const cancelSessionById = (clientId: string, sessionId: string) =>
+export const cancelSessionById = (
+	clientId: string,
+	sessionId: string,
+	commandId: string,
+) =>
 	Effect.gen(function* () {
-		const client = yield* OpenCodeAPITag;
-		const wsHandler = yield* WebSocketHandlerTag;
-		const log = yield* LoggerTag;
-
-		log.info(`client=${clientId} session=${sessionId} Aborting`);
-		yield* clearProcessingTimeout(sessionId);
-
-		const providerTurnServiceOption = yield* Effect.serviceOption(
-			ProviderTurnServiceTag,
-		);
-		if (providerTurnServiceOption._tag === "Some") {
-			const interrupted = yield* providerTurnServiceOption.value.interruptTurn({
-				clientId,
-				sessionId,
-			});
-			if (interrupted) return;
-		}
-		const engineOption = yield* Effect.serviceOption(OrchestrationEngineTag);
-		if (engineOption._tag === "Some") {
-			const engine = engineOption.value;
-			const providerId = engine.getProviderForSession(sessionId);
-			if (providerId && isProviderTurnInterruptProvider(providerId)) {
-				const interruptResult = yield* Effect.either(
-					engine.dispatchEffect({
-						type: "interrupt_turn",
-						sessionId,
-					}),
-				);
-				if (interruptResult._tag === "Left") {
-					log.warn(
-						`client=${clientId} session=${sessionId} engine interrupt_turn failed:`,
-						formatErrorDetail(interruptResult.left),
-					);
-				}
-				wsHandler.sendToSession(sessionId, {
-					type: "done",
-					sessionId,
-					code: 1,
-				});
-				return;
-			}
-		}
-
-		const abortResult = yield* Effect.either(
-			Effect.tryPromise(() => client.session.abort(sessionId)),
-		);
-		if (abortResult._tag === "Left") {
-			log.warn(
-				`client=${clientId} session=${sessionId} Abort failed:`,
-				formatErrorDetail(abortResult.left),
-			);
-		}
-		wsHandler.sendToSession(sessionId, {
-			type: "done",
+		const providerTurnService = yield* ProviderTurnServiceTag;
+		yield* providerTurnService.interruptTurn({
+			clientId,
+			commandId,
 			sessionId,
-			code: 1,
 		});
 	});
 

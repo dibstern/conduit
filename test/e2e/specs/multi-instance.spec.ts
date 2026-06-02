@@ -323,7 +323,7 @@ test.describe("Header: Instance Badge", () => {
 // ─── Group 3: ConnectOverlay Instance Name (PARTIALLY IMPLEMENTED) ──────────
 // The overlay shows `Connecting to ${instanceName}...` only when statusText is
 // empty (initial connection). After disconnect, statusText is "Disconnected" and
-// the instanceName fallback is not displayed.
+// the generic reconnecting copy is displayed.
 //
 // Current behavior: instanceName resolves from the instance store, but the store
 // is empty during initial connect (instance_list arrives after WS connects),
@@ -332,32 +332,19 @@ test.describe("Header: Instance Badge", () => {
 // The instance-aware disconnect message (e.g., "OpenCode instance 'work' is not
 // responding") from the design doc is NOT yet implemented.
 
-test.describe("ConnectOverlay: Instance Name", () => {
-	// The ConnectOverlay shows `Connecting to ${instanceName}...` only when
-	// wsState.statusText is empty (initial connection). However:
-	// 1. During initial connect, the instance store is empty → always "OpenCode"
-	// 2. After disconnect, statusText is "Disconnected" → instanceName not shown
-	// 3. The WS mock connects instantly → overlay hides before we can assert
-	//
-	// Both tests are deferred until the overlay is enhanced per the design doc
-	// to show instance-specific messages like "OpenCode instance 'work' is not
-	// responding. [Start Instance] [Switch Instance]"
-
-	test("shows instance name in connecting message when instance store is populated", async ({
+test.describe("ConnectOverlay: Reconnect Message", () => {
+	test("shows generic reconnecting message when instance store is populated", async ({
 		page,
 		baseURL,
 	}) => {
-		// The overlay should show "Connecting to Personal..." when reconnecting
-		// to an instance that was previously known. This requires the overlay to
-		// use the instance store even after disconnect (currently it's cleared).
 		const control = await setupMultiInstance(page, baseURL);
 		control.close();
 		const overlay = page.locator(".connect-overlay");
 		await expect(overlay).toBeVisible({ timeout: 5_000 });
-		await expect(overlay).toContainText("Personal");
+		await expect(overlay).toContainText("Reconnecting...");
 	});
 
-	test("falls back to 'OpenCode' with no instance binding", async ({
+	test("shows generic reconnecting message with no instance binding", async ({
 		page,
 		baseURL,
 	}) => {
@@ -365,7 +352,7 @@ test.describe("ConnectOverlay: Instance Name", () => {
 		control.close();
 		const overlay = page.locator(".connect-overlay");
 		await expect(overlay).toBeVisible({ timeout: 5_000 });
-		await expect(overlay).toContainText("OpenCode");
+		await expect(overlay).toContainText("Reconnecting...");
 	});
 });
 

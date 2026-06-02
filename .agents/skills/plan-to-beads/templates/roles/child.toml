@@ -1,0 +1,62 @@
+# Role template: child executable work packet.
+
+[[steps]]
+id = "{{logical_id}}"
+title = "{{title}}"
+type = "task"
+description = "{{description}}"
+needs = {{needs_array}}
+
+[steps.metadata.planToBeads]
+contractVersion = "plan-to-beads.v2"
+templateVersion = "{{template_version}}"
+role = "child"
+logicalId = "{{logical_id}}"
+planId = "{{plan_id}}"
+sourcePlan = "{{source_plan}}"
+contextRefs = {{context_refs_array}}
+inherits = {{inherits_array}}
+typedContractRefs = {{typed_contract_refs_array}}
+provides = {{provides_array}}
+
+[steps.metadata.workPacket]
+goal = "{{goal}}"
+inputs = {{inputs_array}}
+constraints = {{constraints_array}}
+outputShape = "{{output_shape}}"
+allowedFiles = {{allowed_files_array}}
+forbiddenFiles = {{forbidden_files_array}}
+orderedSteps = {{ordered_steps_array}}
+fileTouches = {{file_touches_array_of_tables}}
+expectedBefore = "{{expected_before}}"
+expectedAfter = "{{expected_after}}"
+redCommand = "{{red_command}}"
+expectedFailure = "{{expected_failure}}"
+expectedRedShape = "{{expected_red_shape}}"
+greenScope = "{{green_scope}}"
+verification = "{{verification}}"
+acceptanceCriteria = {{acceptance_criteria_array}}
+acceptanceMatrixRefs = {{acceptance_matrix_refs_array}}
+guardrailRefs = {{guardrail_refs_array}}
+evidenceRefs = {{evidence_refs_array}}
+riskRefs = {{risk_refs_array}}
+externalPlanRefs = {{external_plan_refs_array}}
+refactorProof = "{{refactor_proof}}"
+proofCommand = "{{proof_command}}"
+implementationSketches = {{implementation_sketches_array}}
+codeContracts = {{code_contracts_array_of_tables}}
+inlineFixtures = {{inline_fixtures_array_of_tables}}
+conditionalValidation = {{conditional_validation_array_of_tables}}
+commitBoundary = {{commit_boundary_table}}
+requiredSkills = {{required_skills_array}}
+boundaryDoubles = {{boundary_doubles_array}}
+forbiddenMocks = {{forbidden_mocks_array}}
+failureConditions = {{failure_conditions_array}}
+handoffEvidence = {{handoff_evidence_array}}
+
+[steps.metadata.workPacket.handoff]
+requiresBeadsNote = true
+requiresCommitSha = {{requires_commit_sha_bool}}
+closeByIntegrationOwner = {{close_by_integration_owner_bool}}
+artifactRoot = "{{artifact_root}}"
+notesSchema = {{handoff_notes_schema_table}}

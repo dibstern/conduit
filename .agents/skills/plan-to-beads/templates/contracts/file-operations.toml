@@ -1,0 +1,53 @@
+# Contract templates: file ownership, file operations, and delivery boundaries.
+
+[[fileOperations]]
+path = "{{file_operation_path}}"
+operation = "{{file_operation_operation}}"
+reason = "{{file_operation_reason}}"
+ownerLogicalId = "{{file_operation_owner_logical_id}}"
+sharedOwner = "{{file_operation_shared_owner}}"
+forbiddenTo = {{file_operation_forbidden_to_array}}
+condition = "{{file_operation_condition}}"
+
+[[fileTouches]]
+path = "{{file_touch_path}}"
+operation = "{{file_touch_operation}}"
+reason = "{{file_touch_reason}}"
+expectedTouch = {{file_touch_expected_bool}}
+
+[[ownershipMap]]
+logicalId = "{{ownership_map_logical_id}}"
+owners = {{ownership_map_owners_array_of_tables}}
+sharedFiles = {{ownership_map_shared_files_array_of_tables}}
+conflictResolution = "{{ownership_map_conflict_resolution}}"
+
+[[changeSurface]]
+logicalId = "{{change_surface_logical_id}}"
+allowedOperations = {{change_surface_allowed_operations_array}}
+readOnlyPaths = {{change_surface_read_only_paths_array}}
+forbiddenPaths = {{change_surface_forbidden_paths_array}}
+
+[[commitBoundary]]
+logicalId = "{{commit_boundary_logical_id}}"
+commitMessage = "{{commit_boundary_commit_message}}"
+gitAddPaths = {{commit_boundary_git_add_paths_array}}
+commitCondition = "{{commit_boundary_commit_condition}}"
+rollbackPlan = "{{commit_boundary_rollback_plan}}"
+
+[[deliverySequence]]
+logicalId = "{{delivery_sequence_logical_id}}"
+steps = {{delivery_sequence_steps_array}}
+observeBeforeConsumerSwitch = "{{delivery_sequence_observe_before_consumer_switch}}"
+backupRequired = {{delivery_sequence_backup_required_bool}}
+
+[[publication]]
+logicalId = "{{publication_logical_id}}"
+prCreation = "{{publication_pr_creation}}"
+pushRequired = {{publication_push_required_bool}}
+publishCondition = "{{publication_condition}}"
+
+[[releaseGate]]
+logicalId = "{{release_gate_logical_id}}"
+gate = "{{release_gate_gate}}"
+proofRequired = "{{release_gate_proof_required}}"
+blocksUntil = "{{release_gate_blocks_until}}"

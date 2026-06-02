@@ -1,5 +1,5 @@
 import { describe, it } from "@effect/vitest";
-import { Effect, Layer } from "effect";
+import { Deferred, Effect, Layer } from "effect";
 import { expect, vi } from "vitest";
 import { OpenCodeAPITag } from "../../../../src/lib/domain/provider/Services/opencode-api-service.js";
 import { PendingInteractionServiceLive } from "../../../../src/lib/domain/relay/Services/pending-interaction-service.js";
@@ -15,7 +15,11 @@ import {
 	WebSocketHandlerTag,
 } from "../../../../src/lib/domain/relay/Services/services.js";
 import { SessionManagerServiceTag } from "../../../../src/lib/domain/relay/Services/session-manager-service.js";
-import { makeOverridesStateLive } from "../../../../src/lib/domain/relay/Services/session-overrides-state.js";
+import {
+	hasActiveProcessingTimeout,
+	makeOverridesStateLive,
+	startProcessingTimeout,
+} from "../../../../src/lib/domain/relay/Services/session-overrides-state.js";
 import type { SessionTitleService } from "../../../../src/lib/domain/relay/Services/session-title-service.js";
 import { SessionTitleServiceTag } from "../../../../src/lib/domain/relay/Services/session-title-service.js";
 import type { OpenCodeAPI } from "../../../../src/lib/instance/opencode-api.js";
@@ -34,13 +38,14 @@ import {
 	ReadQueryEffectError,
 	ReadQueryEffectTag,
 } from "../../../../src/lib/persistence/effect/read-query-effect.js";
-import { canonicalEvent } from "../../../../src/lib/persistence/events.js";
-import type {
+import {
 	OrchestrationEngine,
-	SendTurnCommand,
+	type SendTurnCommand,
 } from "../../../../src/lib/provider/orchestration-engine.js";
+import { ProviderRegistry } from "../../../../src/lib/provider/provider-registry.js";
 import type {
 	EventSink,
+	ProviderInstance,
 	TurnResult,
 } from "../../../../src/lib/provider/types.js";
 import type { HistoryMessage } from "../../../../src/lib/shared-types.js";
@@ -51,6 +56,7 @@ import {
 	makeMockSessionManagerService,
 	makeMockWebSocketHandler,
 } from "../../../helpers/mock-factories.js";
+import { providerRuntimeEvent } from "../../../helpers/provider-runtime-event.js";
 
 const completedTurn = (overrides?: Partial<TurnResult>): TurnResult => ({
 	status: "completed",
@@ -68,6 +74,7 @@ const defaultInput = (
 	overrides?: Partial<ProviderTurnServiceSendInput>,
 ): ProviderTurnServiceSendInput => ({
 	clientId: "client-1",
+	commandId: "cmd-send-default",
 	sessionId: "session-1",
 	text: "current prompt",
 	model:
@@ -138,6 +145,7 @@ const makePersistService = (
 	persistUserMessage: ClaudeEventPersistEffect["persistUserMessage"],
 ): ClaudeEventPersistEffect => ({
 	persistEvent: vi.fn(() => Effect.void),
+	persistEvents: vi.fn(() => Effect.void),
 	persistUserMessage,
 	persistClaudeSubagent: vi.fn(() => Effect.void),
 	ensureClaudeSubagentSession: vi.fn(() => Effect.void),
@@ -164,8 +172,15 @@ const makeEngine = (input?: {
 	const dispatchEffect =
 		input?.dispatchEffect ??
 		vi.fn(() => Effect.succeed(input?.result ?? completedTurn()));
+	let providerId: string | undefined = input?.providerId;
 	return {
-		getProviderForSession: vi.fn(() => input?.providerId),
+		getProviderForSession: vi.fn(() => providerId),
+		bindSession: vi.fn((_sessionId: string, nextProviderId: string) => {
+			providerId = nextProviderId;
+		}),
+		unbindSession: vi.fn(() => {
+			providerId = undefined;
+		}),
 		dispatchEffect,
 	} as unknown as OrchestrationEngine;
 };
@@ -243,6 +258,16 @@ const sendTurn = (input?: Partial<ProviderTurnServiceSendInput>) =>
 		yield* flushDispatch();
 	});
 
+const interruptTurn = () =>
+	Effect.gen(function* () {
+		const service = yield* ProviderTurnServiceTag;
+		yield* service.interruptTurn({
+			clientId: "client-1",
+			commandId: "cmd-interrupt-default",
+			sessionId: "session-1",
+		});
+	});
+
 describe("ProviderTurnService", () => {
 	it.effect(
 		"dispatches the first Claude turn after loading empty persisted history and persisting the user message",
@@ -270,7 +295,9 @@ describe("ProviderTurnService", () => {
 			});
 
 			return Effect.gen(function* () {
-				yield* sendTurn();
+				yield* sendTurn({
+					commandId: "cmd-send-1",
+				} as Partial<ProviderTurnServiceSendInput>);
 				const command = vi.mocked(engine.dispatchEffect).mock
 					.calls[0]?.[0] as SendTurnCommand;
 
@@ -285,6 +312,7 @@ describe("ProviderTurnService", () => {
 				expect(providerState.getState).toHaveBeenCalledWith("session-1");
 				expect(command).toMatchObject({
 					type: "send_turn",
+					commandId: "cmd-send-1",
 					providerId: "claude",
 					input: {
 						sessionId: "session-1",
@@ -300,7 +328,7 @@ describe("ProviderTurnService", () => {
 				});
 
 				yield* command.input.eventSink.push(
-					canonicalEvent(
+					providerRuntimeEvent(
 						"text.delta",
 						"session-1",
 						{
@@ -308,7 +336,7 @@ describe("ProviderTurnService", () => {
 							partId: "assistant-1-0",
 							text: "hello",
 						},
-						{ provider: "claude" },
+						{ providerId: "claude" },
 					),
 				);
 				expect(wsHandler.sendToSession).toHaveBeenCalledWith(
@@ -514,7 +542,7 @@ describe("ProviderTurnService", () => {
 
 				if (eventSink) {
 					yield* eventSink.push(
-						canonicalEvent(
+						providerRuntimeEvent(
 							"text.delta",
 							"session-1",
 							{
@@ -522,7 +550,7 @@ describe("ProviderTurnService", () => {
 								partId: "assistant-1-0",
 								text: "should not emit",
 							},
-							{ provider: "opencode" },
+							{ providerId: "opencode" },
 						),
 					);
 				}
@@ -532,5 +560,178 @@ describe("ProviderTurnService", () => {
 				);
 			}).pipe(Effect.provide(layer));
 		},
+	);
+
+	it.effect(
+		"falls back to OpenCode abort, clears processing timeout, and broadcasts done when no engine is present",
+		() => {
+			const api = {
+				session: { abort: vi.fn(async () => undefined) },
+			} as unknown as OpenCodeAPI;
+			const { layer, wsHandler } = serviceLayer({ api });
+
+			return Effect.gen(function* () {
+				yield* startProcessingTimeout(
+					"session-1",
+					"2 minutes",
+					() => Effect.void,
+				);
+				yield* interruptTurn();
+
+				expect(yield* hasActiveProcessingTimeout("session-1")).toBe(false);
+				expect(api.session.abort).toHaveBeenCalledWith("session-1");
+				expect(wsHandler.sendToSession).toHaveBeenCalledWith("session-1", {
+					type: "done",
+					sessionId: "session-1",
+					code: 1,
+				});
+			}).pipe(Effect.provide(layer));
+		},
+	);
+
+	it.effect(
+		"interrupts a first Claude turn while engine dispatch is still in flight",
+		() =>
+			Effect.gen(function* () {
+				const sendStarted = yield* Deferred.make<void>();
+				const releaseSend = yield* Deferred.make<void>();
+				const interruptTurnEffect = vi.fn(() => Effect.void);
+				const instance: ProviderInstance = {
+					providerId: "claude",
+					discoverEffect: vi.fn(() =>
+						Effect.succeed({
+							models: [],
+							supportsTools: false,
+							supportsThinking: false,
+							supportsPermissions: false,
+							supportsQuestions: false,
+							supportsAttachments: false,
+							supportsFork: false,
+							supportsRevert: false,
+							commands: [],
+						}),
+					),
+					sendTurnEffect: vi.fn(() =>
+						Effect.gen(function* () {
+							yield* Deferred.succeed(sendStarted, undefined);
+							yield* Deferred.await(releaseSend);
+							return completedTurn();
+						}),
+					),
+					interruptTurnEffect,
+					resolvePermissionEffect: vi.fn(() => Effect.void),
+					resolveQuestionEffect: vi.fn(() => Effect.void),
+					shutdownEffect: vi.fn(() => Effect.void),
+					endSessionEffect: vi.fn(() => Effect.void),
+				};
+				const registry = new ProviderRegistry();
+				registry.registerInstance(instance);
+				const engine = new OrchestrationEngine({ registry });
+				const api = {
+					session: { abort: vi.fn(async () => undefined) },
+				} as unknown as OpenCodeAPI;
+				const { layer } = serviceLayer({ engine, api });
+
+				yield* Effect.gen(function* () {
+					yield* sendTurn();
+					yield* Deferred.await(sendStarted);
+					yield* interruptTurn();
+
+					expect(interruptTurnEffect).toHaveBeenCalledWith("session-1");
+					expect(api.session.abort).not.toHaveBeenCalled();
+
+					yield* Deferred.succeed(releaseSend, undefined);
+					yield* flushDispatch();
+				}).pipe(Effect.provide(layer));
+			}),
+	);
+
+	it.effect(
+		"interrupts a first Claude turn immediately after send returns before dispatch starts",
+		() =>
+			Effect.gen(function* () {
+				let boundProviderId: string | undefined;
+				const dispatchEffect = vi.fn((command) => {
+					if (command.type === "interrupt_turn") return Effect.void;
+					return Effect.succeed(completedTurn());
+				}) as unknown as OrchestrationEngine["dispatchEffect"];
+				const engine = {
+					getProviderForSession: vi.fn(() => boundProviderId),
+					bindSession: vi.fn((_sessionId: string, providerId: string) => {
+						boundProviderId = providerId;
+					}),
+					unbindSession: vi.fn(() => {
+						boundProviderId = undefined;
+					}),
+					dispatchEffect,
+				} as unknown as OrchestrationEngine;
+				const api = {
+					session: { abort: vi.fn(async () => undefined) },
+				} as unknown as OpenCodeAPI;
+				const { layer } = serviceLayer({ engine, api });
+
+				yield* Effect.gen(function* () {
+					const service = yield* ProviderTurnServiceTag;
+					yield* service.sendTurn(defaultInput());
+					yield* service.interruptTurn({
+						clientId: "client-1",
+						commandId: "cmd-interrupt-1",
+						sessionId: "session-1",
+					});
+
+					expect(dispatchEffect).toHaveBeenCalledWith({
+						type: "interrupt_turn",
+						commandId: "cmd-interrupt-1",
+						sessionId: "session-1",
+					});
+					expect(api.session.abort).not.toHaveBeenCalled();
+				}).pipe(Effect.provide(layer));
+			}),
+	);
+
+	it.effect(
+		"cancels pending send dispatch when the provider turn service scope closes",
+		() =>
+			Effect.gen(function* () {
+				const sendStarted = yield* Deferred.make<void>();
+				const releaseSend = yield* Deferred.make<void>();
+				let boundProviderId: string | undefined;
+				const dispatchEffect = vi.fn((command) => {
+					if (command.type !== "send_turn") return Effect.void;
+					return Effect.gen(function* () {
+						yield* Deferred.succeed(sendStarted, undefined);
+						yield* Deferred.await(releaseSend);
+						return yield* Effect.fail(new Error("late send failure"));
+					});
+				}) as unknown as OrchestrationEngine["dispatchEffect"];
+				const engine = {
+					getProviderForSession: vi.fn(() => boundProviderId),
+					bindSession: vi.fn((_sessionId: string, providerId: string) => {
+						boundProviderId = providerId;
+					}),
+					unbindSession: vi.fn(() => {
+						boundProviderId = undefined;
+					}),
+					dispatchEffect,
+				} as unknown as OrchestrationEngine;
+				const { layer, wsHandler } = serviceLayer({ engine });
+
+				yield* Effect.gen(function* () {
+					yield* sendTurn();
+					yield* Deferred.await(sendStarted);
+				}).pipe(Effect.provide(layer));
+
+				yield* Deferred.succeed(releaseSend, undefined);
+				yield* flushDispatch();
+
+				expect(wsHandler.sendToSession).not.toHaveBeenCalledWith(
+					"session-1",
+					expect.objectContaining({ type: "done" }),
+				);
+				expect(wsHandler.sendTo).not.toHaveBeenCalledWith(
+					"client-1",
+					expect.objectContaining({ type: "error" }),
+				);
+			}),
 	);
 });

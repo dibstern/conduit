@@ -1,5 +1,15 @@
 import { randomUUID } from "node:crypto";
-import { Context, Effect, Layer, Runtime } from "effect";
+import {
+	Context,
+	Deferred,
+	Effect,
+	type Fiber,
+	FiberId,
+	FiberMap,
+	Layer,
+	MutableHashMap,
+	Runtime,
+} from "effect";
 import { formatErrorDetail, RelayError } from "../../../errors.js";
 import type { PromptOptions } from "../../../instance/sdk-types.js";
 import {
@@ -21,6 +31,10 @@ import type { SendTurnInput, TurnResult } from "../../../provider/types.js";
 import { OpenCodeAPITag } from "../../provider/Services/opencode-api-service.js";
 import { PendingInteractionServiceTag } from "./pending-interaction-service.js";
 import {
+	type ProviderRuntimeIngestion,
+	ProviderRuntimeIngestionTag,
+} from "./provider-runtime-ingestion-service.js";
+import {
 	ConfigTag,
 	LoggerTag,
 	OrchestrationEngineTag,
@@ -35,6 +49,7 @@ import {
 	type OverridesStateTag,
 	PROCESSING_TIMEOUT_DURATION,
 	resetProcessingTimeout,
+	setModel,
 } from "./session-overrides-state.js";
 import { SessionTitleServiceTag } from "./session-title-service.js";
 
@@ -49,8 +64,42 @@ const NOOP_EVENT_SINK: SendTurnInput["eventSink"] = {
 	resolveQuestion: () => Effect.void,
 };
 
+// Compatibility constructor support for the old prompt-handler fallback seam.
+// Production wiring uses the scoped Layer below so dispatch fibers are
+// interrupted with the relay ProviderTurnService scope.
+const makeUnsafeFiberMap = <K, A = unknown, E = unknown>(): FiberMap.FiberMap<
+	K,
+	A,
+	E
+> =>
+	({
+		[FiberMap.TypeId]: FiberMap.TypeId,
+		deferred: Deferred.unsafeMake<void, E>(FiberId.none),
+		state: {
+			_tag: "Open",
+			backing: MutableHashMap.empty<K, Fiber.RuntimeFiber<A, E>>(),
+		},
+		[Symbol.iterator](this: {
+			state:
+				| { readonly _tag: "Closed" }
+				| {
+						readonly _tag: "Open";
+						readonly backing: MutableHashMap.MutableHashMap<
+							K,
+							Fiber.RuntimeFiber<A, E>
+						>;
+				  };
+		}) {
+			if (this.state._tag === "Closed") {
+				return [][Symbol.iterator]();
+			}
+			return this.state.backing[Symbol.iterator]();
+		},
+	}) as unknown as FiberMap.FiberMap<K, A, E>;
+
 export interface ProviderTurnServiceSendInput {
 	readonly clientId: string;
+	readonly commandId: string;
 	readonly sessionId: string;
 	readonly text: string;
 	readonly images?: readonly string[];
@@ -65,24 +114,39 @@ export interface ProviderTurnServiceSendInput {
 	readonly errorDelivery?: "client" | "session";
 }
 
+export interface ProviderTurnServicePrepareInput {
+	readonly clientId: string;
+	readonly sessionId: string;
+	readonly model?: ProviderTurnServiceSendInput["model"];
+	readonly modelUserSelected: boolean;
+}
+
 export interface ProviderTurnServiceInterruptInput {
 	readonly clientId: string;
+	readonly commandId: string;
 	readonly sessionId: string;
 }
 
 export interface ProviderTurnService {
+	readonly prepareTurnSession: (
+		input: ProviderTurnServicePrepareInput,
+	) => Effect.Effect<string, unknown, OverridesStateTag>;
 	readonly sendTurn: (
 		input: ProviderTurnServiceSendInput,
 	) => Effect.Effect<void, unknown, OverridesStateTag>;
 	readonly interruptTurn: (
 		input: ProviderTurnServiceInterruptInput,
-	) => Effect.Effect<boolean>;
+	) => Effect.Effect<void, never, OverridesStateTag>;
 }
 
 export class ProviderTurnServiceTag extends Context.Tag("ProviderTurnService")<
 	ProviderTurnServiceTag,
 	ProviderTurnService
 >() {}
+
+class ProviderTurnDispatchFibersTag extends Context.Tag(
+	"ProviderTurnDispatchFibers",
+)<ProviderTurnDispatchFibersTag, FiberMap.FiberMap<string, void, unknown>>() {}
 
 export function isProviderTurnInterruptProvider(providerId: string): boolean {
 	return providerId === CLAUDE_PROVIDER_ID;
@@ -151,6 +215,13 @@ export const makeProviderTurnService = Effect.gen(function* () {
 	const pendingInteractionService = yield* PendingInteractionServiceTag;
 	const runtime = yield* Effect.runtime<OverridesStateTag>();
 	const runTimeout = Runtime.runFork(runtime);
+	const dispatchFibersOption = yield* Effect.serviceOption(
+		ProviderTurnDispatchFibersTag,
+	);
+	const dispatchFibers =
+		dispatchFibersOption._tag === "Some"
+			? dispatchFibersOption.value
+			: makeUnsafeFiberMap<string, void, unknown>();
 
 	const sendErrorMessage = (
 		input: ProviderTurnServiceSendInput,
@@ -231,6 +302,7 @@ export const makeProviderTurnService = Effect.gen(function* () {
 		sessionId: string,
 		providerId: string,
 		persist: ClaudeEventPersistEffect | undefined,
+		ingestion: ProviderRuntimeIngestion | undefined,
 	): SendTurnInput["eventSink"] => {
 		if (!isClaudeProviderId(providerId)) return NOOP_EVENT_SINK;
 		let eventSinkPersist: RelayEventSinkPersist | undefined;
@@ -252,6 +324,7 @@ export const makeProviderTurnService = Effect.gen(function* () {
 				);
 			},
 			...(eventSinkPersist ? { persist: eventSinkPersist } : {}),
+			...(ingestion ? { ingestion } : {}),
 			pendingInteractions: {
 				beginPermissionRequest: (request) =>
 					pendingInteractionService.beginPermissionRequest(request),
@@ -370,6 +443,9 @@ export const makeProviderTurnService = Effect.gen(function* () {
 			const claudeEventPersistEffectOption = yield* Effect.serviceOption(
 				ClaudeEventPersistEffectTag,
 			);
+			const providerRuntimeIngestionOption = yield* Effect.serviceOption(
+				ProviderRuntimeIngestionTag,
+			);
 			const providerStateEffectOption = yield* Effect.serviceOption(
 				ProviderStateEffectTag,
 			);
@@ -382,6 +458,9 @@ export const makeProviderTurnService = Effect.gen(function* () {
 				providerId,
 				claudeEventPersistEffectOption._tag === "Some"
 					? claudeEventPersistEffectOption.value
+					: undefined,
+				providerRuntimeIngestionOption._tag === "Some"
+					? providerRuntimeIngestionOption.value
 					: undefined,
 			);
 			const imageList =
@@ -411,18 +490,109 @@ export const makeProviderTurnService = Effect.gen(function* () {
 				...(input.contextWindow ? { contextWindow: input.contextWindow } : {}),
 			};
 
-			yield* Effect.forkDaemon(
-				orchestrationEngine
-					.dispatchEffect({
+			const previousProviderId = orchestrationEngine.getProviderForSession(
+				input.sessionId,
+			);
+			const restorePreviousBinding = Effect.sync(() => {
+				if (previousProviderId) {
+					orchestrationEngine.bindSession(input.sessionId, previousProviderId);
+				} else {
+					orchestrationEngine.unbindSession(input.sessionId);
+				}
+			});
+			yield* Effect.sync(() =>
+				orchestrationEngine.bindSession(input.sessionId, providerId),
+			);
+
+			const dispatchProgram = Effect.try({
+				try: () =>
+					orchestrationEngine.dispatchEffect({
 						type: "send_turn",
+						commandId: input.commandId,
 						providerId,
 						input: sendTurnInput,
-					})
+					}),
+				catch: (cause) => cause,
+			}).pipe(
+				Effect.flatten,
+				Effect.flatMap((result) => handleDispatchResult(input, result)),
+				Effect.catchAll((error) =>
+					restorePreviousBinding.pipe(
+						Effect.zipRight(handleDispatchFailure(input, error)),
+					),
+				),
+				Effect.onInterrupt(() => restorePreviousBinding),
+			);
+			yield* FiberMap.run(
+				dispatchFibers,
+				`${input.sessionId}:${sendTurnInput.turnId}`,
+				dispatchProgram,
+			).pipe(Effect.asVoid);
+		});
+
+	const prepareTurnSession = (input: ProviderTurnServicePrepareInput) =>
+		Effect.gen(function* () {
+			const engineOption = yield* Effect.serviceOption(OrchestrationEngineTag);
+			if (engineOption._tag === "None") return input.sessionId;
+
+			const orchestrationEngine = engineOption.value;
+			const providerId =
+				orchestrationEngine.getProviderForSession(input.sessionId) ??
+				(input.model && isClaudeProviderId(input.model.providerID)
+					? CLAUDE_PROVIDER_ID
+					: OPENCODE_PROVIDER_ID);
+			if (isClaudeProviderId(providerId)) return input.sessionId;
+
+			const readQueryEffectOption =
+				yield* Effect.serviceOption(ReadQueryEffectTag);
+			if (readQueryEffectOption._tag === "None") return input.sessionId;
+
+			const rowResult = yield* Effect.either(
+				readQueryEffectOption.value.getSession(input.sessionId),
+			);
+			if (rowResult._tag === "Left") {
+				log.warn(
+					`Could not inspect session provider before OpenCode dispatch for ${input.sessionId}: ${formatErrorDetail(rowResult.left)}`,
+				);
+				return input.sessionId;
+			}
+
+			const row = rowResult.right;
+			if (!row || row.provider === OPENCODE_PROVIDER_ID) {
+				return input.sessionId;
+			}
+
+			const targetProvider = input.model?.providerID ?? providerId;
+			const session = yield* sessionManagerService.createSession(row.title, {
+				providerId: targetProvider,
+			});
+			if (input.model && input.modelUserSelected) {
+				yield* setModel(session.id, input.model);
+			}
+			orchestrationEngine.bindSession(session.id, OPENCODE_PROVIDER_ID);
+			wsHandler.setClientSession(input.clientId, session.id);
+			wsHandler.sendTo(input.clientId, {
+				type: "session_switched",
+				id: session.id,
+				sessionId: session.id,
+			});
+			yield* Effect.forkDaemon(
+				sessionManagerService
+					.sendDualSessionLists((msg) => wsHandler.broadcast(msg))
 					.pipe(
-						Effect.flatMap((result) => handleDispatchResult(input, result)),
-						Effect.catchAll((error) => handleDispatchFailure(input, error)),
+						Effect.catchAll((err) =>
+							Effect.sync(() =>
+								log.warn(
+									`Failed to broadcast session list after OpenCode materialization: ${err}`,
+								),
+							),
+						),
 					),
 			);
+			log.info(
+				`client=${input.clientId} materialized OpenCode session ${session.id} from local session ${input.sessionId}`,
+			);
+			return session.id;
 		});
 
 	const sendTurn = (input: ProviderTurnServiceSendInput) =>
@@ -448,21 +618,47 @@ export const makeProviderTurnService = Effect.gen(function* () {
 			}
 		});
 
+	const interruptLegacyTurn = (input: ProviderTurnServiceInterruptInput) =>
+		Effect.gen(function* () {
+			const abortResult = yield* Effect.either(
+				Effect.tryPromise(() => client.session.abort(input.sessionId)),
+			);
+			if (abortResult._tag === "Left") {
+				log.warn(
+					`client=${input.clientId} session=${input.sessionId} Abort failed:`,
+					formatErrorDetail(abortResult.left),
+				);
+			}
+			wsHandler.sendToSession(input.sessionId, {
+				type: "done",
+				sessionId: input.sessionId,
+				code: 1,
+			});
+		});
+
 	const interruptTurn = (input: ProviderTurnServiceInterruptInput) =>
 		Effect.gen(function* () {
+			log.info(`client=${input.clientId} session=${input.sessionId} Aborting`);
+			yield* clearProcessingTimeout(input.sessionId);
+
 			const engineOption = yield* Effect.serviceOption(OrchestrationEngineTag);
-			if (engineOption._tag === "None") return false;
+			if (engineOption._tag === "None") {
+				yield* interruptLegacyTurn(input);
+				return;
+			}
 
 			const providerId = engineOption.value.getProviderForSession(
 				input.sessionId,
 			);
 			if (!providerId || !isProviderTurnInterruptProvider(providerId)) {
-				return false;
+				yield* interruptLegacyTurn(input);
+				return;
 			}
 
 			const interruptResult = yield* Effect.either(
 				engineOption.value.dispatchEffect({
 					type: "interrupt_turn",
+					commandId: input.commandId,
 					sessionId: input.sessionId,
 				}),
 			);
@@ -477,14 +673,19 @@ export const makeProviderTurnService = Effect.gen(function* () {
 				sessionId: input.sessionId,
 				code: 1,
 			});
-			return true;
 		});
 
 	return {
+		prepareTurnSession,
 		sendTurn,
 		interruptTurn,
 	} satisfies ProviderTurnService;
 });
+
+const ProviderTurnDispatchFibersLive = Layer.scoped(
+	ProviderTurnDispatchFibersTag,
+	FiberMap.make<string, void, unknown>(),
+);
 
 export const ProviderTurnServiceLive: Layer.Layer<
 	ProviderTurnServiceTag,
@@ -496,4 +697,6 @@ export const ProviderTurnServiceLive: Layer.Layer<
 	| SessionManagerServiceTag
 	| PendingInteractionServiceTag
 	| OverridesStateTag
-> = Layer.effect(ProviderTurnServiceTag, makeProviderTurnService);
+> = Layer.effect(ProviderTurnServiceTag, makeProviderTurnService).pipe(
+	Layer.provide(ProviderTurnDispatchFibersLive),
+);

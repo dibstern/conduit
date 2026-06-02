@@ -1,32 +1,38 @@
 import { Effect } from "effect";
 import { describe, expect, it } from "vitest";
-import type { CanonicalEvent } from "../../../src/lib/persistence/events.js";
+import type { ProviderRuntimeEvent } from "../../../src/lib/contracts/providers/provider-runtime-event.js";
+import type {
+	CanonicalEventType,
+	EventPayloadMap,
+} from "../../../src/lib/persistence/events.js";
 
 // We need to test translateCanonicalEvent directly. It's currently a
 // module-private function. We'll export it in step 3 and import here.
 // For now, test through the public createRelayEventSink.push() surface.
 
-function makeEvent<T extends CanonicalEvent["type"]>(
+function makeEvent<T extends CanonicalEventType>(
 	type: T,
-	data: Extract<CanonicalEvent, { type: T }>["data"],
+	data: EventPayloadMap[T],
 	metadata: Record<string, unknown> = {},
-): CanonicalEvent {
+): ProviderRuntimeEvent {
 	return {
 		eventId: `evt_test`,
 		sessionId: "ses-1",
 		type,
 		data,
 		metadata,
-		provider: "claude",
+		providerId: "claude",
+		providerRefs: {},
+		rawSource: { kind: "test.provider-runtime" },
 		createdAt: Date.now(),
-	} as CanonicalEvent;
+	};
 }
 
 describe("translateCanonicalEvent — TranslationResult shape", () => {
 	// Payload-carrying events MUST produce { kind: "emit", messages: [...] }
 	// with at least one message.
 	const EMIT_CASES: Array<{
-		type: CanonicalEvent["type"];
+		type: CanonicalEventType;
 		data: Record<string, unknown>;
 		meta?: Record<string, unknown>;
 		expectedTypes: string[];
@@ -65,7 +71,7 @@ describe("translateCanonicalEvent — TranslationResult shape", () => {
 		{
 			type: "tool.completed",
 			data: { messageId: "m", partId: "p", result: "ok", duration: 0 },
-			expectedTypes: ["tool_result"],
+			expectedTypes: ["tool_start", "tool_executing", "tool_result"],
 		},
 		{
 			type: "turn.completed",
@@ -112,7 +118,7 @@ describe("translateCanonicalEvent — TranslationResult shape", () => {
 
 	// Intentionally-silent events MUST NOT produce relay messages.
 	const SILENT_CASES: Array<{
-		type: CanonicalEvent["type"];
+		type: CanonicalEventType;
 		data: Record<string, unknown>;
 	}> = [
 		{ type: "tool.running", data: { messageId: "m", partId: "p" } },
