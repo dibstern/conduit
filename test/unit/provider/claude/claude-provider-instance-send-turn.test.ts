@@ -3076,6 +3076,9 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 			eventSink: sinkA,
 		});
 		await Effect.runPromise(instance.sendTurnEffect(input1));
+		const sinkAPush = sinkA.push as ReturnType<typeof vi.fn>;
+		const sinkBPush = sinkB.push as ReturnType<typeof vi.fn>;
+		const sinkACallCountAfterFirstTurn = sinkAPush.mock.calls.length;
 
 		// Second turn with sinkB
 		const input2 = makeBaseSendTurnInput({
@@ -3089,7 +3092,13 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 		await turn2Promise;
 
 		// sinkA should have received events during the first turn.
-		expect(sinkA.push).toHaveBeenCalled();
+		expect(sinkAPush).toHaveBeenCalled();
+		expect(sinkAPush).toHaveBeenCalledTimes(sinkACallCountAfterFirstTurn);
+		expect(
+			sinkBPush.mock.calls.some(([event]) => {
+				return (event as CanonicalEvent).type === "turn.completed";
+			}),
+		).toBe(true);
 
 		// The second turn reused the same SDK query, so enqueueTurn updated the
 		// context instead of constructing a new translator.

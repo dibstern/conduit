@@ -177,6 +177,19 @@ describe("ClaudeProviderInstance lifecycle", () => {
 			expect(ctx.stopped).toBe(true);
 		});
 
+		it("is idempotent for an already-interrupted active session", async () => {
+			const instance = new ClaudeProviderInstance({ workspaceRoot: workspace });
+			const ctx = makeFakeSessionContext("sess-1");
+			setClaudeRuntimeSessionForTest(instance, "sess-1", ctx);
+
+			await Effect.runPromise(instance.interruptTurnEffect("sess-1"));
+			await Effect.runPromise(instance.interruptTurnEffect("sess-1"));
+
+			expect(ctx.promptQueue.close).toHaveBeenCalledTimes(1);
+			expect(ctx.query.interrupt).toHaveBeenCalledTimes(1);
+			expect(ctx.stopped).toBe(true);
+		});
+
 		it("resolves pending approvals with reject", async () => {
 			const instance = new ClaudeProviderInstance({ workspaceRoot: workspace });
 			const resolvedWith: string[] = [];

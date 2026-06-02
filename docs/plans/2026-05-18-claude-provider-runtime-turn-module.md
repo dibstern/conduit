@@ -1,7 +1,16 @@
 # Claude Provider Runtime And Provider Turn Module Plan
 
 **Date:** 2026-05-18
-**Status:** Ready after `ProviderRuntimeEvent` contracts-only PR
+**Status:** Implemented and verified on 2026-06-02 after merge from `main`
+
+## Completion Update, 2026-06-02
+
+- [x] Merged `main` into `ds/provider-runtime-turn-module`.
+- [x] Strengthened the latest-sink proof in `claude-provider-instance-send-turn.test.ts`: a follow-up turn reuses the live SDK query, does not send second-turn completion events to the stale first sink, and does send them to the second sink.
+- [x] Added the repeated-interrupt proof in `claude-provider-instance-lifecycle.test.ts`: a second interrupt of an already-interrupted active session is harmless and does not close or interrupt resources twice.
+- [x] Ran the current Claude provider unit suite: `pnpm vitest run test/unit/provider/claude`.
+- [x] Ran the current Claude provider integration proof: `pnpm exec vitest run --config vitest.integration.config.ts test/integration/flows/claude-provider-instance.integration.ts`. The older direct `pnpm vitest run ...` command does not include integration tests in this repo's default Vitest project set.
+- [x] Ran handler and Effect guard proofs, `pnpm check`, `git diff --check`, and the optional live Claude SDK E2E command.
 
 ## Goal
 
@@ -167,13 +176,13 @@ Every item below must be removed or explicitly reclassified before the migration
 
 These commands run the acceptance proofs. They are not acceptance criteria.
 
-- [ ] `pnpm vitest run test/unit/provider/claude`
-- [ ] `pnpm vitest run test/integration/flows/claude-provider-instance.integration.ts`
-- [ ] `pnpm vitest run test/unit/handlers/prompt*.test.ts test/unit/handlers/effect-handlers.test.ts`
-- [ ] `pnpm vitest run test/unit/effect/runtime-boundary-grep.test.ts`
-- [ ] `pnpm check`
-- [ ] `git diff --check`
-- [ ] Optional only with local Claude auth: `RUN_EXPENSIVE_E2E=1 pnpm vitest run --config vitest.e2e.config.ts test/e2e/provider/claude-provider-instance-real-sdk.test.ts`
+- [x] `pnpm vitest run test/unit/provider/claude`
+- [x] `pnpm exec vitest run --config vitest.integration.config.ts test/integration/flows/claude-provider-instance.integration.ts`
+- [x] `pnpm vitest run test/unit/handlers/prompt*.test.ts test/unit/handlers/effect-handlers.test.ts`
+- [x] `pnpm vitest run test/unit/effect/runtime-boundary-grep.test.ts`
+- [x] `pnpm check`
+- [x] `git diff --check`
+- [x] Optional only with local Claude auth: `RUN_EXPENSIVE_E2E=1 pnpm vitest run --config vitest.e2e.config.ts test/e2e/provider/claude-provider-instance-real-sdk.test.ts`
 
 ## Risk
 
