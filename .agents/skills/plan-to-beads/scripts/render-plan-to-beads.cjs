@@ -9,6 +9,39 @@ const formulaTemplatePath = path.join(
 	"templates/formula/executable-plan.formula.toml",
 );
 const rolesDir = path.join(skillRoot, "templates/roles");
+const roleTemplateCache = new Map();
+
+const typedContractFieldByKind = {
+	amendmentLedger: "amendment_ledgers_array_of_tables",
+	archiveProvenance: "archive_provenance_array_of_tables",
+	artifactContract: "artifact_contracts_array_of_tables",
+	auditFinding: "audit_findings_array_of_tables",
+	boundaryClassification: "boundary_classifications_array_of_tables",
+	completedSlice: "completed_slices_array_of_tables",
+	conditionalBranch: "conditional_branches_array_of_tables",
+	configContract: "config_contracts_array_of_tables",
+	crossPlanRelationship: "cross_plan_relationships_array_of_tables",
+	evidenceRun: "evidence_runs_array_of_tables",
+	executorProfile: "executor_profiles_array_of_tables",
+	historicalStatus: "historical_status_array_of_tables",
+	inventorySnapshot: "inventory_snapshots_array_of_tables",
+	manualAcceptance: "manual_acceptance_array_of_tables",
+	moduleMap: "module_maps_array_of_tables",
+	nonActionableFinding: "non_actionable_findings_array_of_tables",
+	operatorSmoke: "operator_smoke_array_of_tables",
+	planEdit: "plan_edits_array_of_tables",
+	priorArt: "prior_art_array_of_tables",
+	progressEntry: "progress_entries_array_of_tables",
+	protocolContract: "protocol_contracts_array_of_tables",
+	referencePattern: "reference_patterns_array_of_tables",
+	residualDebt: "residual_debt_array_of_tables",
+	reviewDisposition: "review_dispositions_array_of_tables",
+	reviewRun: "review_runs_array_of_tables",
+	runbook: "runbooks_array_of_tables",
+	sourceAuthority: "source_authorities_array_of_tables",
+	sourceGrounding: "source_grounding_array_of_tables",
+	statusOverlay: "status_overlays_array_of_tables",
+};
 
 function usage() {
 	console.error(
@@ -92,6 +125,90 @@ function renderTemplate(template, values) {
 		);
 }
 
+function roleTemplate(roleName) {
+	if (!roleTemplateCache.has(roleName)) {
+		const templatePath = path.join(rolesDir, `${roleName}.toml`);
+		if (!fs.existsSync(templatePath)) {
+			throw new Error(`No role template exists for role "${roleName}".`);
+		}
+		roleTemplateCache.set(roleName, fs.readFileSync(templatePath, "utf8"));
+	}
+	return roleTemplateCache.get(roleName);
+}
+
+function asArray(value) {
+	if (value === undefined) return [];
+	return Array.isArray(value) ? value : [value];
+}
+
+function mergeUnique(a, b) {
+	return Array.from(new Set([...asArray(a), ...asArray(b)].filter(Boolean)));
+}
+
+function typedContractField(contract) {
+	const explicit =
+		contract.targetField ?? contract.target_field ?? contract.field;
+	if (explicit) return explicit;
+	const kind = contract.kind;
+	const field = typedContractFieldByKind[kind];
+	if (!field) {
+		throw new Error(
+			`typedContract "${contract.logicalId ?? contract.logical_id ?? "<unknown>"}" has unsupported kind "${kind}"; add targetField.`,
+		);
+	}
+	return field;
+}
+
+function typedContractEntry(contract) {
+	const metadata = contract.metadata ?? {};
+	const entry = {
+		logicalId: contract.logicalId ?? contract.logical_id ?? "",
+		kind: contract.kind ?? "",
+		...metadata,
+	};
+	if (contract.provides) entry.provides = contract.provides;
+	return entry;
+}
+
+function rolesWithTypedContracts(ir) {
+	const roles = (ir.roles ?? []).map((role) => ({
+		...role,
+		values: { ...(role.values ?? {}) },
+	}));
+	const byLogicalId = new Map(
+		roles.map((role) => [role.logicalId ?? role.logical_id, role]),
+	);
+
+	for (const contract of ir.typedContracts ?? ir.typed_contracts ?? []) {
+		const ownerId = contract.ownerLogicalId ?? contract.owner_logical_id;
+		const owner = byLogicalId.get(ownerId);
+		if (!owner) {
+			throw new Error(
+				`typedContract "${contract.logicalId ?? contract.logical_id ?? "<unknown>"}" owner "${ownerId}" does not match any role logicalId.`,
+			);
+		}
+
+		const field = typedContractField(contract);
+		const template = roleTemplate(owner.role);
+		if (!template.includes(`{{${field}}}`)) {
+			throw new Error(
+				`typedContract "${contract.logicalId ?? contract.logical_id ?? "<unknown>"}" targets "${field}", but role "${owner.role}" does not render that field.`,
+			);
+		}
+
+		owner.values[field] = [
+			...asArray(owner.values[field] ?? owner.metadata?.[field]),
+			typedContractEntry(contract),
+		];
+		owner.provides = mergeUnique(
+			owner.provides,
+			contract.provides ?? [contract.logicalId ?? contract.logical_id],
+		);
+	}
+
+	return roles;
+}
+
 function rootValues(ir) {
 	return {
 		formula_version: ir.formulaVersion ?? 1,
@@ -135,20 +252,12 @@ function renderRole(ir, role) {
 	const roleName = role.role;
 	if (!roleName) throw new Error("Every role entry must include role.");
 
-	const templatePath = path.join(rolesDir, `${roleName}.toml`);
-	if (!fs.existsSync(templatePath)) {
-		throw new Error(`No role template exists for role "${roleName}".`);
-	}
-
-	return renderTemplate(
-		fs.readFileSync(templatePath, "utf8"),
-		roleValues(ir, role),
-	);
+	return renderTemplate(roleTemplate(roleName), roleValues(ir, role));
 }
 
 function renderFormula(ir) {
 	const formulaTemplate = fs.readFileSync(formulaTemplatePath, "utf8");
-	const roles = ir.roles ?? [];
+	const roles = rolesWithTypedContracts(ir);
 	if (!Array.isArray(roles) || roles.length === 0) {
 		throw new Error("Plan IR must include at least one role.");
 	}
@@ -170,7 +279,25 @@ function printSchema() {
 				planDescription: "Short formula description",
 				formulaVersion: 1,
 				templateVersion: "plan-to-beads.v3",
+				typedContracts: [
+					{
+						logicalId: "example-artifact-contract",
+						kind: "artifactContract",
+						ownerLogicalId: "example-architecture",
+						targetField: "artifact_contracts_array_of_tables",
+						provides: ["example-artifact-contract"],
+						metadata: {},
+					},
+				],
 				roles: [
+					{
+						role: "architecture",
+						logicalId: "example-architecture",
+						title: "Architecture context",
+						description: "Owns typed contracts.",
+						provides: ["example-architecture"],
+						values: {},
+					},
 					{
 						role: "child",
 						logicalId: "example-child-01",

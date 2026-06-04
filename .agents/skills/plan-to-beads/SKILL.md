@@ -26,6 +26,7 @@ bd cook .beads/generated-formulas/<plan-id>.formula.toml --dry-run
 ```bash
 bd cook .beads/generated-formulas/<plan-id>.formula.toml --persist --force
 bd mol pour <plan-id>-executable-plan --dry-run
+bd mol pour <plan-id>-executable-plan
 bd dep cycles
 ```
 
@@ -87,7 +88,7 @@ Before calling the conversion usable:
 - Every `needs`, `contextRefs`, `inherits`, `provides`, and fixture reference resolves.
 - Every required `contextUse` ref resolves and has a phase, reason, and failure behavior.
 - Every `typedContractRefs`, `acceptanceMatrixRefs`, `guardrailRefs`, `evidenceRefs`, and cross-plan reference either resolves or is explicitly external.
-- Every child has the required work-packet subcontracts.
+- Every child has the required work-packet subcontracts and non-empty executable fields.
 - Parallel-ready children have disjoint writable file scopes or an explicit checkpoint-owned merge rule.
 - Checkpoints define gate, fanout, merge, validation, and escalation contracts.
 - Acceptance-pipeline beads, when present, define normal acceptance and mutation contracts.

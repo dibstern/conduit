@@ -119,6 +119,105 @@ function getInlineString(block, key) {
 	return match ? match[2] : "";
 }
 
+function hasArrayValues(block, key) {
+	const match = block.match(
+		new RegExp(`(^|\\n)\\s*${key}\\s*=\\s*(\\[[\\s\\S]*?\\])`, "m"),
+	);
+	if (!match) return false;
+	return !/^\[\s*\]$/.test(match[2]);
+}
+
+function requireString(relative, id, tableName, table, key) {
+	if (!getString(table, key).trim()) {
+		errors.push(`${relative}:${id}: ${tableName}.${key} must be non-empty.`);
+	}
+}
+
+function validateChildCompleteness(relative, id, step) {
+	const goalContract = getTable(
+		step,
+		"[steps.metadata.workPacket.goalContract]",
+	);
+	const inputContract = getTable(
+		step,
+		"[steps.metadata.workPacket.inputContract]",
+	);
+	const constraintContract = getTable(
+		step,
+		"[steps.metadata.workPacket.constraintContract]",
+	);
+	const executionContract = getTable(
+		step,
+		"[steps.metadata.workPacket.executionContract]",
+	);
+	const validationContract = getTable(
+		step,
+		"[steps.metadata.workPacket.validationContract]",
+	);
+	const outputContract = getTable(
+		step,
+		"[steps.metadata.workPacket.outputContract]",
+	);
+	const failureContract = getTable(
+		step,
+		"[steps.metadata.workPacket.failureContract]",
+	);
+
+	requireString(relative, id, "goalContract", goalContract, "goal");
+	requireString(relative, id, "goalContract", goalContract, "expectedOutcome");
+	requireString(relative, id, "goalContract", goalContract, "behaviorId");
+	requireString(relative, id, "inputContract", inputContract, "sourcePlan");
+	requireString(
+		relative,
+		id,
+		"executionContract",
+		executionContract,
+		"greenScope",
+	);
+	requireString(
+		relative,
+		id,
+		"validationContract",
+		validationContract,
+		"redCommand",
+	);
+	requireString(
+		relative,
+		id,
+		"validationContract",
+		validationContract,
+		"expectedFailure",
+	);
+	requireString(
+		relative,
+		id,
+		"validationContract",
+		validationContract,
+		"verification",
+	);
+	requireString(relative, id, "outputContract", outputContract, "outputShape");
+	requireString(relative, id, "outputContract", outputContract, "patchShape");
+
+	if (
+		!hasArrayValues(constraintContract, "allowedFiles") &&
+		!getString(constraintContract, "changeSurfaceRef").trim()
+	) {
+		errors.push(
+			`${relative}:${id}: constraintContract must define allowedFiles or changeSurfaceRef.`,
+		);
+	}
+
+	if (
+		!hasArrayValues(failureContract, "failureConditions") &&
+		!hasArrayValues(failureContract, "stopConditions") &&
+		!hasArrayValues(failureContract, "blockerDecisionRefs")
+	) {
+		errors.push(
+			`${relative}:${id}: failureContract must define failureConditions, stopConditions, or blockerDecisionRefs.`,
+		);
+	}
+}
+
 function isExternalRef(ref) {
 	return ref.startsWith("external:");
 }
@@ -275,6 +374,7 @@ function validateGeneratedFormula(file) {
 				if (!step.includes(table))
 					errors.push(`${relative}:${id}: missing ${table}.`);
 			}
+			validateChildCompleteness(relative, id, step);
 
 			const planMetadata = getTable(step, "[steps.metadata.planToBeads]");
 			const inputContract = getTable(

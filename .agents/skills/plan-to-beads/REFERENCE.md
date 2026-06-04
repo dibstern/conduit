@@ -18,6 +18,7 @@ The converter should build this IR before rendering templates:
       "logicalId": "trace-artifact-contract",
       "kind": "artifactContract",
       "ownerLogicalId": "architecture-core",
+      "targetField": "artifact_contracts_array_of_tables",
       "provides": ["trace-artifact-contract"],
       "metadata": {}
     }
@@ -47,6 +48,8 @@ The converter should build this IR before rendering templates:
 ```
 
 Use the IR as the only source for plan-specific values. Do not edit the generic templates with concrete behavior names, file paths, expected failures, or commands.
+
+Top-level `typedContracts` are optional convenience input. During rendering, each one is attached to the role named by `ownerLogicalId`; `targetField` may name the destination placeholder explicitly. If `targetField` is omitted, the renderer supports common snippet kinds such as `artifactContract`, `protocolContract`, `moduleMap`, `auditFinding`, `progressEntry`, `evidenceRun`, and `sourceGrounding`. The renderer also adds the contract's `provides` values to the owner role so child `typedContractRefs` resolve.
 
 ## Hooking Shared Context Into Children
 
@@ -277,6 +280,7 @@ Before pouring:
 - `provides` values are unique declarations and become valid reference targets.
 - All required `contextUse` refs resolve and state phase, reason, and failure behavior.
 - All child beads contain required v3 `workPacket` subcontracts.
+- Child executable fields are non-empty: `goal`, `expectedOutcome`, `behaviorId`, `sourcePlan`, `greenScope`, `redCommand`, `expectedFailure`, `verification`, `outputShape`, `patchShape`, either `allowedFiles` or `changeSurfaceRef`, and at least one failure/stop/blocker condition.
 - Child `contextUse` appears only under `workPacket.inputContract`.
 - `redCommand` targets exactly one behavior; broader commands live in `verification`.
 - `allowedFiles` and `forbiddenFiles` are concrete after hydration.
