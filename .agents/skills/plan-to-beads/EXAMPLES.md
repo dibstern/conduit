@@ -174,22 +174,14 @@ Generated Beads shape:
 - `child`: behavior `T1`, with `goalContract`, `inputContract`, `constraintContract`, `executionContract`, `validationContract`, `outputContract`, `failureContract`, and `handoffContract`.
 - `checkpoint`: verifies the report stage and owns integration/close rules.
 
-The child references shared context instead of copying it:
+The child references shared context instead of copying it. Render this IR and inspect these fields in the generated formula:
 
-```toml
-[steps.metadata.workPacket.inputContract]
-sourcePlan = "docs/plans/json-report.md"
-contextRefs = ["json-report-global-contract", "json-report-stage"]
-inherits = ["json-report-stage"]
-typedContractRefs = []
-contextUse = [
-  { ref = "json-report-global-contract", phase = "before-edit", required = true, reason = "Scope and non-goals constrain the patch", failureIfMissing = "Stop and create a decision bead" }
-]
-fixtureRefs = []
-baselineRefs = []
-evidenceRefs = []
-externalPlanRefs = []
-```
+- `steps.metadata.planToBeads.contextRefs`
+- `steps.metadata.planToBeads.typedContractRefs`
+- `steps.metadata.workPacket.inputContract.contextRefs`
+- `steps.metadata.workPacket.inputContract.inherits`
+- `steps.metadata.workPacket.inputContract.typedContractRefs`
+- `steps.metadata.workPacket.inputContract.contextUse`
 
 Validate before approval:
 
@@ -197,6 +189,7 @@ Validate before approval:
 node .agents/skills/plan-to-beads/scripts/render-plan-to-beads.cjs plan-ir.json .beads/generated-formulas/json-report.formula.toml
 node .agents/skills/plan-to-beads/scripts/validate-plan-to-beads.cjs .beads/generated-formulas/json-report.formula.toml
 bd cook .beads/generated-formulas/json-report.formula.toml --dry-run
+bd cook .beads/generated-formulas/json-report.formula.toml --mode=runtime --dry-run
 ```
 
 Persist and dry-run pour only after approval:

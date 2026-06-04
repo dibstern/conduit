@@ -19,6 +19,7 @@ Convert a written implementation plan into Beads issues/molecules where Beads ho
 node .agents/skills/plan-to-beads/scripts/render-plan-to-beads.cjs <plan-ir.json> .beads/generated-formulas/<plan-id>.formula.toml
 node .agents/skills/plan-to-beads/scripts/validate-plan-to-beads.cjs .beads/generated-formulas/<plan-id>.formula.toml
 bd cook .beads/generated-formulas/<plan-id>.formula.toml --dry-run
+bd cook .beads/generated-formulas/<plan-id>.formula.toml --mode=runtime --dry-run
 ```
 
 6. Pour only after approval. Persist the generated formula as a proto first, or install it into `.beads/formulas/` if the user wants a reusable formula:
@@ -83,7 +84,7 @@ If any field cannot be derived from the plan, create a decision/checkpoint bead 
 Before calling the conversion usable:
 
 - `node .agents/skills/plan-to-beads/scripts/validate-plan-to-beads.cjs <generated-formula>` passes.
-- The generated formula cooks with no unresolved placeholders.
+- The generated formula cooks in runtime mode with no unresolved placeholders.
 - Every `logicalId` is unique.
 - Every `needs`, `contextRefs`, `inherits`, `provides`, and fixture reference resolves.
 - Every required `contextUse` ref resolves and has a phase, reason, and failure behavior.

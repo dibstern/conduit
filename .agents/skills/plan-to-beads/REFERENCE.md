@@ -173,7 +173,8 @@ Preferred path:
 3. Run `node .agents/skills/plan-to-beads/scripts/render-plan-to-beads.cjs <plan-ir.json> <generated-formula>`.
 4. Run `node .agents/skills/plan-to-beads/scripts/validate-plan-to-beads.cjs <generated-formula>`.
 5. Run `bd cook <generated-formula> --dry-run`.
-6. After approval, run `bd cook <generated-formula> --persist --force`, then `bd mol pour <formula-id> --dry-run`.
+6. Run `bd cook <generated-formula> --mode=runtime --dry-run`.
+7. After approval, run `bd cook <generated-formula> --persist --force`, then `bd mol pour <formula-id> --dry-run`.
 
 Small-plan fallback:
 
@@ -274,6 +275,7 @@ Before pouring:
 - Generated TOML has no unresolved `{{...}}` placeholders.
 - `node .agents/skills/plan-to-beads/scripts/validate-plan-to-beads.cjs <generated-formula>` passes.
 - `bd cook <generated-formula> --dry-run` succeeds.
+- `bd cook <generated-formula> --mode=runtime --dry-run` succeeds.
 - Dry-run pour shows the expected root, context beads, parents, checkpoints, and children.
 - All `logicalId` values are unique.
 - All `needs`, `contextRefs`, `inherits`, fixture refs, and follow-up template refs resolve.

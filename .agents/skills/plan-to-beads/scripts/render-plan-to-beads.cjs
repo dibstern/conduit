@@ -269,54 +269,181 @@ function renderFormula(ir) {
 	);
 }
 
-function printSchema() {
-	console.log(
-		JSON.stringify(
+function minimalExampleIr() {
+	return {
+		planId: "example-plan",
+		planTitle: "Example Plan",
+		sourcePlan: "docs/plans/example-plan.md",
+		planDescription: "Minimal valid plan-to-beads IR.",
+		formulaVersion: 1,
+		templateVersion: "plan-to-beads.v3",
+		typedContracts: [
 			{
-				planId: "short-stable-id",
-				planTitle: "Human title",
-				sourcePlan: "docs/plans/example.md",
-				planDescription: "Short formula description",
-				formulaVersion: 1,
-				templateVersion: "plan-to-beads.v3",
-				typedContracts: [
-					{
-						logicalId: "example-artifact-contract",
-						kind: "artifactContract",
-						ownerLogicalId: "example-architecture",
-						targetField: "artifact_contracts_array_of_tables",
-						provides: ["example-artifact-contract"],
-						metadata: {},
-					},
-				],
-				roles: [
-					{
-						role: "architecture",
-						logicalId: "example-architecture",
-						title: "Architecture context",
-						description: "Owns typed contracts.",
-						provides: ["example-architecture"],
-						values: {},
-					},
-					{
-						role: "child",
-						logicalId: "example-child-01",
-						title: "Concrete behavior title",
-						description: "One executable behavior.",
-						needs: [],
-						contextRefs: [],
-						inherits: [],
-						typedContractRefs: [],
-						provides: [],
-						contextUse: [],
-						values: {},
-					},
-				],
+				logicalId: "example-artifact-contract",
+				kind: "artifactContract",
+				ownerLogicalId: "example-architecture",
+				targetField: "artifact_contracts_array_of_tables",
+				provides: ["example-artifact-contract"],
+				metadata: {
+					artifact: "Example JSON report",
+					schemaVersion: "v1",
+					format: "json",
+					fieldRules: [
+						{
+							field: "generatedAt",
+							rule: "Stable timestamp string.",
+						},
+					],
+				},
 			},
-			null,
-			2,
-		),
-	);
+		],
+		roles: [
+			{
+				role: "epic",
+				logicalId: "example-epic",
+				title: "Example Plan",
+				description: "Root plan molecule.",
+				provides: ["example-epic"],
+			},
+			{
+				role: "global-contract",
+				logicalId: "example-global-contract",
+				title: "Example scope",
+				description: "Scope and non-goals.",
+				provides: ["example-global-contract"],
+				values: {
+					scope_array: ["Add generatedAt to JSON reports."],
+					non_goals_array: ["Do not change text output."],
+				},
+			},
+			{
+				role: "architecture",
+				logicalId: "example-architecture",
+				title: "Example architecture",
+				description: "ReportWriter owns the JSON output contract.",
+				contextRefs: ["example-global-contract"],
+				provides: ["example-architecture"],
+			},
+			{
+				role: "parent",
+				logicalId: "example-stage",
+				title: "Example implementation stage",
+				description: "Stage defaults for one behavior.",
+				contextRefs: ["example-global-contract", "example-architecture"],
+				provides: ["example-stage"],
+				values: {
+					stage: "json-output",
+					objective: "Add the JSON-only timestamp behavior.",
+					default_allowed_files_array: [
+						"packages/example/src/report-writer.ts",
+						"packages/example/test/report-json.test.ts",
+					],
+					default_forbidden_files_array: [
+						"packages/example/src/text-report-writer.ts",
+					],
+					serial_by_default_bool: true,
+				},
+			},
+			{
+				role: "child",
+				logicalId: "example-t1-generated-at",
+				title: "T1 JSON generatedAt field",
+				description: "One red-green behavior for generatedAt.",
+				needs: ["example-stage"],
+				contextRefs: ["example-global-contract", "example-architecture"],
+				inherits: ["example-stage"],
+				typedContractRefs: ["example-artifact-contract"],
+				contextUse: [
+					{
+						ref: "example-global-contract",
+						phase: "before-edit",
+						required: true,
+						reason: "Scope and non-goals constrain the patch.",
+						failureIfMissing: "Stop and create a decision bead.",
+					},
+				],
+				values: {
+					goal: "Make empty input write a JSON report with generatedAt.",
+					expected_outcome:
+						"The JSON report includes generatedAt and text output is unchanged.",
+					non_goals_array: ["Do not change text output."],
+					behavior_id: "T1-generatedAt",
+					inputs_array: [{ type: "plan", path: "docs/plans/example-plan.md" }],
+					constraints_array: [
+						"Use red-green-refactor.",
+						"Keep the patch JSON-only.",
+					],
+					allowed_files_array: [
+						"packages/example/src/report-writer.ts",
+						"packages/example/test/report-json.test.ts",
+					],
+					forbidden_files_array: ["packages/example/src/text-report-writer.ts"],
+					ordered_steps_array: [
+						"Run the red command.",
+						"Implement the minimal JSON field.",
+						"Run verification.",
+					],
+					green_scope:
+						"Add only the JSON generatedAt field and deterministic test fixture.",
+					red_command: 'pnpm test -- report-json -t "T1 generatedAt"',
+					expected_failure: "JSON output has no generatedAt.",
+					expected_red_shape:
+						"A single assertion failure for the missing generatedAt field.",
+					verification: "pnpm test -- report-json",
+					acceptance_criteria_array: ["JSON output contains generatedAt."],
+					output_shape: "Patch plus Beads handoff note.",
+					patch_shape: "One focused code/test patch.",
+					file_touches_array_of_tables: [
+						{
+							path: "packages/example/src/report-writer.ts",
+							operation: "modify",
+							reason: "Write generatedAt.",
+						},
+						{
+							path: "packages/example/test/report-json.test.ts",
+							operation: "modify",
+							reason: "Prove generatedAt.",
+						},
+					],
+					commit_boundary_table: {
+						commitMessage: "test: add JSON report generatedAt",
+						gitAddPaths: [
+							"packages/example/src/report-writer.ts",
+							"packages/example/test/report-json.test.ts",
+						],
+					},
+					failure_conditions_array: [
+						"Stop if the behavior requires text output changes.",
+					],
+					requires_commit_sha_bool: true,
+					handoff_notes_schema_table: {
+						summary: "string",
+						verification: "string",
+					},
+				},
+			},
+			{
+				role: "checkpoint",
+				logicalId: "example-checkpoint",
+				title: "Example integration checkpoint",
+				description: "Verify and close the implementation stage.",
+				needs: ["example-t1-generated-at"],
+				contextRefs: ["example-global-contract", "example-architecture"],
+				provides: ["example-checkpoint"],
+				values: {
+					gate_kind: "integration",
+					gate_for: "example-stage",
+					validation_commands_array: ["pnpm test -- report-json"],
+					merge_owner: "integration-owner",
+					conflict_policy: "Stop and resolve with the checkpoint owner.",
+				},
+			},
+		],
+	};
+}
+
+function printSchema() {
+	console.log(JSON.stringify(minimalExampleIr(), null, 2));
 }
 
 const args = process.argv.slice(2);
