@@ -418,3 +418,64 @@ walker.
 
 On approval, proceed to an implementation plan (writing-plans), then build via the skill-authoring path
 (`write-a-skill` / `writing-skills`). Track the work in Beads.
+
+---
+
+## 16. Revision 2 — final decisions (2026-06-05)
+
+This section **supersedes** earlier choices where they conflict. It folds in the prior exploration in
+`.agents/skills/plan-to-beads/design/{schema-engine-options.md,direct-bd-mutation-and-review-artifacts.md}`
+and the §14 sign-offs. The §3–§11 backbone (single source of truth, slim MECE roles, work-packet ontology,
+edges, acceptance profile, progressive disclosure, coverage ledger + review) **stands**; only the engine,
+packaging, and mutation model change.
+
+### 16.1 The skill becomes portable (not conduit-specific)
+It is extracted into a **standalone package** (its own `package.json`, its own `node --test` suite) that can
+live in its own repo or `~/.agents/skills`; conduit *consumes* it. `bd` is assumed present wherever it runs.
+This re-weights every "conduit already has X" argument to zero.
+
+### 16.2 Schema engine = **Zod** (supersedes "hand-authored JSON Schema" in §5 and the doc's Effect-hybrid)
+The source of truth is a **Zod schema in TypeScript** — runtime validation *and* static `z.infer` types in one
+place, portable, agent-familiar, light single dependency, and able to emit JSON Schema if a language-neutral
+contract is ever wanted. Authored as `.ts`, run with `node --experimental-strip-types` (node 24) or `tsx` —
+**no build step**. This also lets **normalization fold into decode**: defaults, `logicalId` aliasing, and
+stage-default inheritance happen during parse, collapsing the separate "normalizer" (old §6) into the schema
+layer plus one small post-parse pass. *Rationale:* once the skill is portable, Effect's only real edges
+(already-a-dep, conduit Effect-migration strategy) vanish; JSON Schema can't be the source because the
+requirement is TS-type representability. Zod's `discriminatedUnion` also enforces per-role/per-child-kind
+shape natively, which **removes the riskiest mechanic from the old plan** (ajv `$ref`/sub-schema selection).
+
+### 16.3 Mutation model = **additive reconcile** (supersedes "create-only" framing in §4/§7)
+Optimised for *updating the bead representation as plans evolve*. Foundations:
+- **Stable identity** in metadata: `planId` + `logicalId` (the `key`) + `planContentHash` (hash of
+  plan-owned fields only).
+- **Field-ownership split:** *plan-owned* (title, description, `workPacket`, plan-derived deps) is reconciled;
+  *execution-owned* (`status`, `assignee`, `notes`, close-state, human-added deps) is **never clobbered**.
+- **Each run:** desired = normalized `graph.json`; current = `bd list --json` filtered by `metadata.planId`;
+  diff per `logicalId` into **create / update(plan-owned only) / noop / orphan(flag, no auto-delete) /
+  conflict(fail-closed when `current ≠ lastApplied` AND `desired ≠ lastApplied` by `planContentHash`)**.
+- **Apply** in dependency-safe order; **idempotent + resumable** because `bd` has no atomic multi-op
+  transaction. **Full reconcile** (auto-removal, plan-derived dep removal, rollback) is deferred; additive
+  grows into it with no rewrite.
+
+### 16.4 Pipeline (final)
+`classify (coverage ledger) → draft graph.json → Zod parse+normalize → validate (Zod + ref-integrity incl.
+workPacket-internal refs and the `@external` convention + coverage well-formedness) → adversarial review →
+generated Markdown review artifact (graphs > ~8 nodes) → reconcile → apply (bd create --graph for creates,
+bd update --metadata + bd dep for updates) → post-apply validation (bd dep cycles + metadata query +
+bd swarm validate)`. Formulas are **dropped** (no `--export-formula` for now). Coordination uses native
+`bd swarm`/`gate`/`merge-slot`.
+
+### 16.5 §14 sign-offs resolved
+- **Generation model:** Zod decode + one normalization pass (the G2 idea, now native to the schema layer).
+- **Role/kind set:** confirmed (`context.*` subroles; child kinds tdd/fixture/acceptance/integration).
+- **Profile default:** ship `validationProfile:"tdd"`; flip to `tdd+acceptance` later (one-line default).
+
+### 16.6 Audit fixes folded in (reports under `docs/plans/audits/`)
+`kind:tdd` must **require** `executionContract` (so `greenScope` is enforced); the schema must **permit**
+`coverage`; the `role → bd type` map must cover **every** role (incl. `context.global`); the `@external` ref
+convention is defined explicitly; ref-integrity also parses **workPacket-internal** refs; and **no test may
+touch the shared `.beads` store** — bd-mutating tests run against an **isolated/throwaway db**, never the real
+store, and never via `git checkout .beads`.
+
+The implementation plan is `docs/plans/2026-06-04-plan-to-beads-rebuild.md` (rewritten for this revision).
