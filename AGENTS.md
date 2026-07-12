@@ -51,6 +51,32 @@ pnpm test:all > test-output.log 2>&1 || (echo "Tests failed, see test-output.log
 
 Read `docs/agent-guide/testing.md` before choosing broader verification. Use the narrowest integration, E2E, daemon, multi-instance, or visual command that matches the changed surface.
 
+### Visual Acceptance Gate (UBM pipeline)
+
+For changes that can affect the frontend behavior or appearance covered by
+`features/*.feature` — the message composer/input area, its layout, styling, or
+test IDs, the acceptance harness (`acceptance/`), feature files, or committed
+baselines — run the visual acceptance pipeline **before claiming completion**.
+This is a local gate (run on your machine); it is not enforced in CI.
+
+```bash
+pnpm acceptance:visual              # functional + visual scenarios
+pnpm acceptance:visual:capture      # (re)capture baselines after an intended UI change
+```
+
+- The pipeline turns Gherkin into JSON IR, generates a Playwright entrypoint, and
+  runs it against a mocked-WS `vite preview` build — no backend required
+  (see `acceptance/README.md`).
+- Commit baseline PNGs (`acceptance/visual/baselines/`) only after visual review,
+  and only when the UI change was intentional.
+- `pnpm acceptance:mutation:visual` is a slower, separate quality workflow that
+  mutates Gherkin example values to confirm the assertions are genuinely wired;
+  run it when strengthening a feature, not on every change. Surviving mutations
+  that are semantically equivalent (e.g. non-boundary text tweaks) are expected.
+
+Do not claim the acceptance gate passes unless `pnpm acceptance:visual` was
+actually run and is green against a real baseline.
+
 ## Deeper Docs
 
 - `docs/agent-guide/architecture.md`: deeper runtime architecture and request or event flow.

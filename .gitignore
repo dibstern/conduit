@@ -23,3 +23,9 @@ media/_test_output/
 
 # bv (beads viewer) local config and caches
 .bv/
+
+# APS acceptance pipeline: built tool binaries (source is vendored under acceptance/tools/go)
+/build/acceptance/bin/
+/build/acceptance/ir/
+/build/acceptance/dry/
+/build/acceptance-mutation/
