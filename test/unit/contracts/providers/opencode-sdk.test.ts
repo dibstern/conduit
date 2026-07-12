@@ -162,7 +162,7 @@ describe("OpenCode provider contract schemas", () => {
 		).toBe(true);
 	});
 
-	it("decodes file-list envelopes from SDK and legacy mock responses", () => {
+	it("decodes SDK file-list envelopes and rejects nodes missing required 1.17.18 fields", () => {
 		expect(
 			Either.isRight(
 				Schema.decodeUnknownEither(OpenCodeFileNodeSchema)({
@@ -174,8 +174,10 @@ describe("OpenCode provider contract schemas", () => {
 				}),
 			),
 		).toBe(true);
+		// 1.17.18 makes path/absolute/ignored required; a node with only
+		// name+type (older/legacy shape) is now rejected (grill #9: latest-only).
 		expect(
-			Either.isRight(
+			Either.isLeft(
 				Schema.decodeUnknownEither(OpenCodeFileNodeSchema)({
 					name: "package.json",
 					type: "file",

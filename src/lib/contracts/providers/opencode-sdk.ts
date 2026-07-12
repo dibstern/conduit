@@ -3,6 +3,7 @@ import type {
 	Agent as SdkAgent,
 	Command as SdkCommand,
 	Config as SdkConfig,
+	Event as SdkEvent,
 	File as SdkFile,
 	FileContent as SdkFileContent,
 	FileNode as SdkFileNode,
@@ -196,10 +197,10 @@ type _OpenCodePtyCoversSdkPty = AssertExtends<
 
 export const OpenCodeFileNodeSchema = Schema.Struct({
 	name: Schema.String,
-	path: Schema.optional(Schema.String),
-	absolute: Schema.optional(Schema.String),
+	path: Schema.String,
+	absolute: Schema.String,
 	type: Schema.Literal("file", "directory"),
-	ignored: Schema.optional(Schema.Boolean),
+	ignored: Schema.Boolean,
 });
 
 export type OpenCodeFileNode = Schema.Schema.Type<
@@ -209,6 +210,10 @@ export type OpenCodeFileNode = Schema.Schema.Type<
 type _OpenCodeSdkFileNodeCoversSchema = AssertExtends<
 	SdkFileNode,
 	OpenCodeFileNode
+>;
+type _OpenCodeFileNodeCoversSdkFileNode = AssertExtends<
+	NormalizeSchemaType<OpenCodeFileNode>,
+	SdkFileNode
 >;
 
 const OpenCodeFileContentPatchHunkSchema = Schema.Struct({
@@ -449,109 +454,91 @@ export const OpenCodeCurrentProjectResponseSchema =
 		time: { created: number };
 	}>;
 
-const OpenCodeProviderCostSchema = Schema.Struct({
-	input: Schema.Number,
-	output: Schema.Number,
-	cache_read: Schema.optional(Schema.Number),
-	cache_write: Schema.optional(Schema.Number),
-	cache: Schema.optional(
-		Schema.Struct({
-			read: Schema.optional(Schema.Number),
-			write: Schema.optional(Schema.Number),
-		}),
-	),
-	context_over_200k: Schema.optional(Schema.Unknown),
+const OpenCodeOpaquePropertiesSchema = Schema.Record({
+	key: Schema.String,
+	value: Schema.Unknown,
 });
 
-const OpenCodeProviderCapabilitiesSchema = Schema.Struct({
-	temperature: Schema.optional(Schema.Boolean),
-	reasoning: Schema.optional(Schema.Boolean),
-	attachment: Schema.optional(Schema.Boolean),
-	toolcall: Schema.optional(Schema.Boolean),
-	input: Schema.optional(
-		Schema.Record({ key: Schema.String, value: Schema.Boolean }),
-	),
-	output: Schema.optional(
-		Schema.Record({ key: Schema.String, value: Schema.Boolean }),
-	),
-	interleaved: Schema.optional(Schema.Unknown),
-});
+type OpenCodeProviderModel = {
+	id: string;
+	name: string;
+	limit: { context: number; output: number };
+	variants?: Record<string, Record<string, unknown>>;
+};
 
 const OpenCodeProviderModelSchema = Schema.Struct({
 	id: Schema.String,
 	name: Schema.String,
-	release_date: Schema.String,
-	attachment: Schema.optional(Schema.Boolean),
-	reasoning: Schema.optional(Schema.Boolean),
-	temperature: Schema.optional(Schema.Boolean),
-	tool_call: Schema.optional(Schema.Boolean),
-	capabilities: Schema.optional(OpenCodeProviderCapabilitiesSchema),
-	cost: Schema.optional(OpenCodeProviderCostSchema),
 	limit: Schema.Struct({
 		context: Schema.Number,
 		output: Schema.Number,
 	}),
-	modalities: Schema.optional(
-		Schema.Struct({
-			input: Schema.Array(
-				Schema.Literal("text", "audio", "image", "video", "pdf"),
-			),
-			output: Schema.Array(
-				Schema.Literal("text", "audio", "image", "video", "pdf"),
-			),
-		}),
-	),
-	experimental: Schema.optional(Schema.Boolean),
-	status: Schema.optional(Schema.String),
-	options: Schema.Record({ key: Schema.String, value: Schema.Unknown }),
-	headers: Schema.optional(
-		Schema.Record({ key: Schema.String, value: Schema.String }),
-	),
-	providerID: Schema.optional(Schema.String),
-	api: Schema.optional(Schema.Unknown),
-	family: Schema.optional(Schema.String),
-	provider: Schema.optional(
-		Schema.Struct({
-			npm: Schema.String,
-		}),
-	),
 	variants: Schema.optional(
 		Schema.Record({
 			key: Schema.String,
 			value: Schema.Record({ key: Schema.String, value: Schema.Unknown }),
 		}),
 	),
-});
+}).pipe(
+	Schema.extend(OpenCodeOpaquePropertiesSchema),
+) as unknown as Schema.Schema<OpenCodeProviderModel>;
+
+type OpenCodeProviderListEntry = {
+	name: string;
+	id: string;
+	models: Record<string, OpenCodeProviderModel>;
+};
 
 const OpenCodeProviderListEntrySchema = Schema.Struct({
-	api: Schema.optional(Schema.String),
 	name: Schema.String,
-	env: Schema.Array(Schema.String),
 	id: Schema.String,
-	npm: Schema.optional(Schema.String),
 	models: Schema.Record({
 		key: Schema.String,
 		value: OpenCodeProviderModelSchema,
 	}),
-});
+}).pipe(
+	Schema.extend(OpenCodeOpaquePropertiesSchema),
+) as unknown as Schema.Schema<OpenCodeProviderListEntry>;
+
+export type OpenCodeProviderListResponse = {
+	all: OpenCodeProviderListEntry[];
+	default: Record<string, string>;
+	connected: string[];
+};
 
 export const OpenCodeProviderListResponseSchema = Schema.Struct({
 	all: Schema.Array(OpenCodeProviderListEntrySchema),
 	default: Schema.Record({ key: Schema.String, value: Schema.String }),
 	connected: Schema.Array(Schema.String),
-});
-
-export type OpenCodeProviderListResponse = Schema.Schema.Type<
-	typeof OpenCodeProviderListResponseSchema
->;
+}) as unknown as Schema.Schema<OpenCodeProviderListResponse>;
 
 type _OpenCodeSdkProviderListCoversSchema = AssertExtends<
 	SdkProviderListResponse,
 	OpenCodeProviderListResponse
 >;
-// OpenCode's live /provider payload has drifted ahead of the published SDK type
-// for model capabilities. Keep accepting the SDK shape, but let the runtime
-// schema also decode the nested capabilities payload used by newer servers.
+
+type SdkProviderListEntry = SdkProviderListResponse["all"][number];
+type SdkProviderListModel = SdkProviderListEntry["models"][string];
+type SdkProviderListReadView = {
+	all: Array<{
+		id: SdkProviderListEntry["id"];
+		name: SdkProviderListEntry["name"];
+		models: Record<string, Pick<SdkProviderListModel, "id" | "name" | "limit">>;
+	}>;
+	default: SdkProviderListResponse["default"];
+	connected: SdkProviderListResponse["connected"];
+};
+type _OpenCodeProviderListCoversSdkReadView = AssertExtends<
+	NormalizeSchemaType<OpenCodeProviderListResponse>,
+	SdkProviderListReadView
+>;
+// SDK 1.17.18 also declares provider api/env/npm and model release_date,
+// attachment, reasoning, temperature, tool_call, cost, modalities,
+// experimental, status, options, headers, and provider. Live servers have also
+// exposed capabilities, providerID, api, family, variants, and nested cache
+// pricing. Conduit reads provider/model identity, limit, variants, defaults,
+// and connected IDs only, so those fields are strict while all other provider-
+// owned model catalog fields are preserved opaquely.
 
 const OpenCodeModelRefSchema = Schema.Struct({
 	providerID: Schema.String,
@@ -707,10 +694,12 @@ export const OpenCodeMessageListResponseSchema = Schema.Array(
 	OpenCodeMessageWithPartsSchema,
 ) as unknown as Schema.Schema<OpenCodeMessageWithParts[]>;
 
-const OpenCodeOpaquePropertiesSchema = Schema.Record({
-	key: Schema.String,
-	value: Schema.Unknown,
-});
+type OpenCodeSdkEventType = SdkEvent["type"];
+type OpenCodeGapEventType =
+	| "message.created"
+	| "message.part.delta"
+	| "permission.asked"
+	| "question.asked";
 
 export const OPEN_CODE_CONSUMED_EVENT_TYPES = [
 	"message.created",
@@ -733,6 +722,17 @@ export const OPEN_CODE_CONSUMED_EVENT_TYPES = [
 	"file.watcher.updated",
 	"installation.update-available",
 ] as const;
+
+type OpenCodeConsumedEventType =
+	(typeof OPEN_CODE_CONSUMED_EVENT_TYPES)[number];
+type OpenCodeSdkConsumedEventType = Exclude<
+	OpenCodeConsumedEventType,
+	OpenCodeGapEventType
+>;
+type _OpenCodeSdkContainsConsumedEventTypes = AssertExtends<
+	OpenCodeSdkConsumedEventType,
+	OpenCodeSdkEventType
+>;
 
 const OpenCodeEventBasePropertiesSchema = Schema.Struct({}).pipe(
 	Schema.extend(OpenCodeOpaquePropertiesSchema),
@@ -760,12 +760,14 @@ const OpenCodePartUpdatedEventSchema = Schema.Struct({
 		partID: Schema.optional(Schema.String),
 		messageID: Schema.optional(Schema.String),
 		part: OpenCodePartSchema,
+		delta: Schema.optional(Schema.String),
 	}).pipe(Schema.extend(OpenCodeOpaquePropertiesSchema)),
 });
 
 const OpenCodePartRemovedEventSchema = Schema.Struct({
 	type: Schema.Literal("message.part.removed"),
 	properties: Schema.Struct({
+		sessionID: Schema.String,
 		partID: Schema.String,
 		messageID: Schema.String,
 	}).pipe(Schema.extend(OpenCodeOpaquePropertiesSchema)),
@@ -773,24 +775,40 @@ const OpenCodePartRemovedEventSchema = Schema.Struct({
 
 const OpenCodeMessageUpdatedEventSchema = Schema.Struct({
 	type: Schema.Literal("message.updated"),
-	properties: OpenCodeEventBasePropertiesSchema,
-});
-
-const OpenCodeMessageRemovedEventSchema = Schema.Struct({
-	type: Schema.Literal("message.removed"),
-	properties: Schema.Struct({ messageID: Schema.String }).pipe(
+	properties: Schema.Struct({ info: OpenCodeMessageSchema }).pipe(
 		Schema.extend(OpenCodeOpaquePropertiesSchema),
 	),
 });
 
+const OpenCodeMessageRemovedEventSchema = Schema.Struct({
+	type: Schema.Literal("message.removed"),
+	properties: Schema.Struct({
+		sessionID: Schema.String,
+		messageID: Schema.String,
+	}).pipe(Schema.extend(OpenCodeOpaquePropertiesSchema)),
+});
+
 const OpenCodeSessionStatusEventSchema = Schema.Struct({
 	type: Schema.Literal("session.status"),
-	properties: OpenCodeEventBasePropertiesSchema,
+	properties: Schema.Struct({
+		sessionID: Schema.String,
+		status: OpenCodeSessionStatusSchema,
+	}).pipe(Schema.extend(OpenCodeOpaquePropertiesSchema)),
 });
+
+const OpenCodeEventErrorSchema = Schema.Struct({
+	name: Schema.String,
+	data: Schema.Struct({
+		message: Schema.optional(Schema.String),
+	}).pipe(Schema.extend(OpenCodeOpaquePropertiesSchema)),
+}).pipe(Schema.extend(OpenCodeOpaquePropertiesSchema));
 
 const OpenCodeSessionErrorEventSchema = Schema.Struct({
 	type: Schema.Literal("session.error"),
-	properties: OpenCodeEventBasePropertiesSchema,
+	properties: Schema.Struct({
+		sessionID: Schema.optional(Schema.String),
+		error: Schema.optional(OpenCodeEventErrorSchema),
+	}).pipe(Schema.extend(OpenCodeOpaquePropertiesSchema)),
 });
 
 const OpenCodePermissionAskedEventSchema = Schema.Struct({
@@ -803,9 +821,11 @@ const OpenCodePermissionAskedEventSchema = Schema.Struct({
 
 const OpenCodePermissionRepliedEventSchema = Schema.Struct({
 	type: Schema.Literal("permission.replied"),
-	properties: Schema.Struct({ id: Schema.String }).pipe(
-		Schema.extend(OpenCodeOpaquePropertiesSchema),
-	),
+	properties: Schema.Struct({
+		sessionID: Schema.String,
+		permissionID: Schema.String,
+		response: Schema.String,
+	}).pipe(Schema.extend(OpenCodeOpaquePropertiesSchema)),
 });
 
 const OpenCodeQuestionAskedEventSchema = Schema.Struct({
@@ -818,27 +838,46 @@ const OpenCodeQuestionAskedEventSchema = Schema.Struct({
 
 const OpenCodeSessionUpdatedEventSchema = Schema.Struct({
 	type: Schema.Literal("session.updated"),
-	properties: OpenCodeEventBasePropertiesSchema,
+	properties: Schema.Struct({ info: OpenCodeSessionSchema }).pipe(
+		Schema.extend(OpenCodeOpaquePropertiesSchema),
+	),
+});
+
+const OpenCodeTodoSchema = Schema.Struct({
+	content: Schema.String,
+	status: Schema.String,
+	priority: Schema.String,
+	id: Schema.String,
 });
 
 const OpenCodeTodoUpdatedEventSchema = Schema.Struct({
 	type: Schema.Literal("todo.updated"),
-	properties: OpenCodeEventBasePropertiesSchema,
+	properties: Schema.Struct({
+		sessionID: Schema.String,
+		todos: Schema.Array(OpenCodeTodoSchema),
+	}).pipe(Schema.extend(OpenCodeOpaquePropertiesSchema)),
 });
 
 const OpenCodePtyCreatedEventSchema = Schema.Struct({
 	type: Schema.Literal("pty.created"),
-	properties: OpenCodeEventBasePropertiesSchema,
+	properties: Schema.Struct({ info: OpenCodePtySchema }).pipe(
+		Schema.extend(OpenCodeOpaquePropertiesSchema),
+	),
 });
 
 const OpenCodePtyExitedEventSchema = Schema.Struct({
 	type: Schema.Literal("pty.exited"),
-	properties: OpenCodeEventBasePropertiesSchema,
+	properties: Schema.Struct({
+		id: Schema.String,
+		exitCode: Schema.Number,
+	}).pipe(Schema.extend(OpenCodeOpaquePropertiesSchema)),
 });
 
 const OpenCodePtyDeletedEventSchema = Schema.Struct({
 	type: Schema.Literal("pty.deleted"),
-	properties: OpenCodeEventBasePropertiesSchema,
+	properties: Schema.Struct({ id: Schema.String }).pipe(
+		Schema.extend(OpenCodeOpaquePropertiesSchema),
+	),
 });
 
 const OpenCodeFileEditedEventSchema = Schema.Struct({
@@ -850,14 +889,17 @@ const OpenCodeFileEditedEventSchema = Schema.Struct({
 
 const OpenCodeFileWatcherUpdatedEventSchema = Schema.Struct({
 	type: Schema.Literal("file.watcher.updated"),
-	properties: Schema.Struct({ file: Schema.String }).pipe(
-		Schema.extend(OpenCodeOpaquePropertiesSchema),
-	),
+	properties: Schema.Struct({
+		file: Schema.String,
+		event: Schema.Literal("add", "change", "unlink"),
+	}).pipe(Schema.extend(OpenCodeOpaquePropertiesSchema)),
 });
 
 const OpenCodeInstallationUpdateAvailableEventSchema = Schema.Struct({
 	type: Schema.Literal("installation.update-available"),
-	properties: OpenCodeEventBasePropertiesSchema,
+	properties: Schema.Struct({ version: Schema.String }).pipe(
+		Schema.extend(OpenCodeOpaquePropertiesSchema),
+	),
 });
 
 export const OpenCodeEventSchema = Schema.Union(
@@ -884,6 +926,11 @@ export const OpenCodeEventSchema = Schema.Union(
 
 export type OpenCodeEvent = Schema.Schema.Type<typeof OpenCodeEventSchema>;
 
+type _OpenCodeSdkConsumedEventsCoverSchemaEnvelopes = AssertExtends<
+	Extract<SdkEvent, { type: OpenCodeSdkConsumedEventType }>,
+	OpenCodeEvent
+>;
+
 export const OpenCodeSessionCreateRequestSchema = Schema.Struct({
 	parentID: Schema.optional(Schema.String),
 	title: Schema.optional(Schema.String),
@@ -897,6 +944,10 @@ type _OpenCodeSdkSessionCreateRequestCoversSchema = AssertExtends<
 	NonNullable<SessionCreateData["body"]>,
 	OpenCodeSessionCreateRequest
 >;
+type _OpenCodeSessionCreateRequestCoversSdk = AssertExtends<
+	NormalizeSchemaType<OpenCodeSessionCreateRequest>,
+	NonNullable<SessionCreateData["body"]>
+>;
 
 export const OpenCodeSessionUpdateRequestSchema = Schema.Struct({
 	title: Schema.optional(Schema.String),
@@ -909,6 +960,10 @@ export type OpenCodeSessionUpdateRequest = Schema.Schema.Type<
 type _OpenCodeSdkSessionUpdateRequestCoversSchema = AssertExtends<
 	NonNullable<SessionUpdateData["body"]>,
 	OpenCodeSessionUpdateRequest
+>;
+type _OpenCodeSessionUpdateRequestCoversSdk = AssertExtends<
+	NormalizeSchemaType<OpenCodeSessionUpdateRequest>,
+	NonNullable<SessionUpdateData["body"]>
 >;
 
 const OpenCodePartInputTimeSchema = Schema.Struct({
@@ -932,7 +987,31 @@ const OpenCodeFilePartInputSchema = Schema.Struct({
 	mime: Schema.String,
 	filename: Schema.optional(Schema.String),
 	url: Schema.String,
-	source: Schema.optional(Schema.Unknown),
+	source: Schema.optional(
+		Schema.Union(
+			Schema.Struct({
+				text: Schema.Struct({
+					value: Schema.String,
+					start: Schema.Number,
+					end: Schema.Number,
+				}),
+				type: Schema.Literal("file"),
+				path: Schema.String,
+			}),
+			Schema.Struct({
+				text: Schema.Struct({
+					value: Schema.String,
+					start: Schema.Number,
+					end: Schema.Number,
+				}),
+				type: Schema.Literal("symbol"),
+				path: Schema.String,
+				range: OpenCodeRangeSchema,
+				name: Schema.String,
+				kind: Schema.Number,
+			}),
+		),
+	),
 });
 
 const OpenCodeAgentPartInputSchema = Schema.Struct({
@@ -983,6 +1062,10 @@ type _OpenCodeSdkSessionPromptRequestCoversSchema = AssertExtends<
 	NonNullable<SessionPromptAsyncData["body"]>,
 	OpenCodeSessionPromptRequest
 >;
+type _OpenCodeSessionPromptRequestCoversSdk = AssertExtends<
+	NormalizeSchemaType<OpenCodeSessionPromptRequest>,
+	NonNullable<SessionPromptAsyncData["body"]>
+>;
 
 export const OpenCodePermissionReplyRequestSchema = Schema.Struct({
 	response: Schema.Literal("once", "always", "reject"),
@@ -995,6 +1078,10 @@ export type OpenCodePermissionReplyRequest = Schema.Schema.Type<
 type _OpenCodeSdkPermissionReplyRequestCoversSchema = AssertExtends<
 	NonNullable<PostSessionIdPermissionsPermissionIdData["body"]>,
 	OpenCodePermissionReplyRequest
+>;
+type _OpenCodePermissionReplyRequestCoversSdk = AssertExtends<
+	NormalizeSchemaType<OpenCodePermissionReplyRequest>,
+	NonNullable<PostSessionIdPermissionsPermissionIdData["body"]>
 >;
 
 export const OpenCodeQuestionReplyRequestSchema = Schema.Struct({
@@ -1045,10 +1132,10 @@ export const OpenCodeFileEntryListResponseSchema = Schema.Array(
 ) as unknown as Schema.Schema<
 	Array<{
 		name: string;
-		path?: string;
-		absolute?: string;
+		path: string;
+		absolute: string;
 		type: "file" | "directory";
-		ignored?: boolean;
+		ignored: boolean;
 	}>
 >;
 
