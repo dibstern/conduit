@@ -59,6 +59,7 @@ function contentMessage(
 		uuid,
 		session_id: "sdk-parent",
 		parent_tool_use_id: null,
+		parent_agent_id: null,
 		message: {
 			role: type,
 			content,

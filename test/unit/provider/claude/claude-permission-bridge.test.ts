@@ -155,6 +155,7 @@ describe("ClaudePermissionBridge", () => {
 			{
 				signal: ac.signal,
 				toolUseID: "tool-abc",
+				requestId: "req-tool-abc",
 			},
 		);
 
@@ -204,6 +205,7 @@ describe("ClaudePermissionBridge", () => {
 			{
 				signal: ac.signal,
 				toolUseID: "tool-question",
+				requestId: "req-tool-question",
 			},
 		);
 
@@ -260,6 +262,7 @@ describe("ClaudePermissionBridge", () => {
 			{
 				signal: ac.signal,
 				toolUseID: "tool-xyz",
+				requestId: "req-tool-xyz",
 			},
 		);
 		expect(result.behavior).toBe("deny");
@@ -281,6 +284,7 @@ describe("ClaudePermissionBridge", () => {
 			{
 				signal: ac.signal,
 				toolUseID: "tool-q",
+				requestId: "req-tool-q",
 			},
 		);
 
@@ -306,6 +310,7 @@ describe("ClaudePermissionBridge", () => {
 			{
 				signal: ac.signal,
 				toolUseID: "tool-r",
+				requestId: "req-tool-r",
 			},
 		);
 		expect(result.behavior).toBe("allow");
@@ -337,6 +342,7 @@ describe("ClaudePermissionBridge", () => {
 		const options = {
 			signal: ac.signal,
 			toolUseID: "tool-remember",
+			requestId: "req-tool-remember",
 			suggestions,
 			title: "Claude wants to run npm test",
 			displayName: "Run command",
@@ -377,9 +383,11 @@ describe("ClaudePermissionBridge", () => {
 			{
 				signal: ac.signal,
 				toolUseID: "tool-create",
+				requestId: "req-tool-create",
 			},
 		);
-		expect(result.behavior).toBe("allow");
+		expect(result).not.toBeNull();
+		expect(result!.behavior).toBe("allow");
 	});
 
 	it("resolvePermission resolves the pending approval's deferred", async () => {
@@ -395,6 +403,7 @@ describe("ClaudePermissionBridge", () => {
 			{
 				signal: ac.signal,
 				toolUseID: "tool-resolve",
+				requestId: "req-tool-resolve",
 			},
 		);
 
@@ -452,6 +461,7 @@ describe("ClaudePermissionBridge", () => {
 			{
 				signal: acA.signal,
 				toolUseID: "tool-a",
+				requestId: "req-tool-a",
 			},
 		);
 		const promiseB = bridge.canUseTool(
@@ -461,6 +471,7 @@ describe("ClaudePermissionBridge", () => {
 			{
 				signal: acB.signal,
 				toolUseID: "tool-b",
+				requestId: "req-tool-b",
 			},
 		);
 
@@ -503,7 +514,11 @@ describe("ClaudePermissionBridge", () => {
 			ctx,
 			"Bash",
 			{ command: "rm -rf /" },
-			{ signal: ac.signal, toolUseID: "tool-weird" },
+			{
+				signal: ac.signal,
+				toolUseID: "tool-weird",
+				requestId: "req-tool-weird",
+			},
 		);
 		expect(result.behavior).toBe("deny");
 
@@ -515,7 +530,11 @@ describe("ClaudePermissionBridge", () => {
 			ctx,
 			"Bash",
 			{ command: "echo hi" },
-			{ signal: ac.signal, toolUseID: "tool-empty" },
+			{
+				signal: ac.signal,
+				toolUseID: "tool-empty",
+				requestId: "req-tool-empty",
+			},
 		);
 		expect(result2.behavior).toBe("deny");
 
@@ -527,7 +546,11 @@ describe("ClaudePermissionBridge", () => {
 			ctx,
 			"Bash",
 			{ command: "echo bye" },
-			{ signal: ac.signal, toolUseID: "tool-undef" },
+			{
+				signal: ac.signal,
+				toolUseID: "tool-undef",
+				requestId: "req-tool-undef",
+			},
 		);
 		expect(result3.behavior).toBe("deny");
 	});

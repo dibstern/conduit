@@ -823,6 +823,7 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 				uuid: "sub-user-live-transcript-1",
 				session_id: parentClaudeSessionId,
 				parent_tool_use_id: null,
+				parent_agent_id: null,
 				message: {
 					role: "user",
 					content: [{ type: "text", text: "Inspect auth" }],
@@ -833,6 +834,7 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 				uuid: "sub-assistant-live-transcript-1",
 				session_id: parentClaudeSessionId,
 				parent_tool_use_id: null,
+				parent_agent_id: null,
 				message: {
 					role: "assistant",
 					content: [{ type: "text", text: "Auth is fine" }],
@@ -1222,6 +1224,7 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 				uuid: "sub-assistant-ensure-fails-1",
 				session_id: parentClaudeSessionId,
 				parent_tool_use_id: null,
+				parent_agent_id: null,
 				message: {
 					role: "assistant",
 					content: [{ type: "text", text: "Should not persist" }],

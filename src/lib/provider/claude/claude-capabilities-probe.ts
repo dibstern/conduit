@@ -1,8 +1,10 @@
 import type {
+	SDKControlInitializeResponse,
 	Options as SDKOptions,
 	SDKUserMessage,
 } from "@anthropic-ai/claude-agent-sdk";
 import { query as sdkQuery } from "@anthropic-ai/claude-agent-sdk";
+import { decodeClaudeSDKOptionsJsonShape } from "../../contracts/providers/claude-agent-sdk.js";
 import type {
 	CommandInfo,
 	ContextWindowOption,
@@ -48,6 +50,12 @@ interface InitializationResultSubset {
 interface CapabilityQuery {
 	initializationResult(): Promise<InitializationResultSubset>;
 }
+
+type AssertExtends<_A extends B, B> = true;
+type _ClaudeSdkInitializationResultFitsConsumedShape = AssertExtends<
+	SDKControlInitializeResponse,
+	InitializationResultSubset
+>;
 
 export interface ProbeResult {
 	readonly models: ReadonlyArray<ModelInfo>;
@@ -173,18 +181,19 @@ export async function probeClaudeCapabilities(
 	const abortController = new AbortController();
 
 	try {
+		const options = {
+			persistSession: false,
+			maxTurns: 0,
+			cwd: deps.workspaceRoot,
+			env: makeClaudeSdkEnv(),
+			settingSources: ["user", "project", "local"],
+			abortController,
+			allowedTools: [],
+			stderr: () => {},
+		} satisfies SDKOptions;
 		const query = queryFactory({
 			prompt: singleMessage(),
-			options: {
-				persistSession: false,
-				maxTurns: 0,
-				cwd: deps.workspaceRoot,
-				env: makeClaudeSdkEnv(),
-				settingSources: ["user", "project", "local"],
-				abortController,
-				allowedTools: [],
-				stderr: () => {},
-			},
+			options: decodeClaudeSDKOptionsJsonShape(options),
 		});
 		const init = await query.initializationResult();
 		const subscriptionType = init.account?.subscriptionType;

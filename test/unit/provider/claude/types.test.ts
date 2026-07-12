@@ -1,6 +1,7 @@
 // test/unit/provider/claude/types.test.ts
 
 import type { Effect } from "effect";
+import type { SDKControlInterruptResponse } from "@anthropic-ai/claude-agent-sdk";
 import { describe, expect, expectTypeOf, it } from "vitest";
 import type {
 	ClaudeResumeCursor,
@@ -17,7 +18,9 @@ import type {
 describe("Claude provider instance types", () => {
 	it("Query extends AsyncGenerator<SDKMessage, void>", () => {
 		expectTypeOf<Query>().toMatchTypeOf<AsyncGenerator<SDKMessage, void>>();
-		expectTypeOf<Query["interrupt"]>().toEqualTypeOf<() => Promise<void>>();
+		expectTypeOf<Query["interrupt"]>().toEqualTypeOf<
+			() => Promise<SDKControlInterruptResponse | undefined>
+		>();
 		expectTypeOf<Query["setModel"]>().toEqualTypeOf<
 			(model?: string) => Promise<void>
 		>();

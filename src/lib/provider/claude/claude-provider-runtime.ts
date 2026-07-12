@@ -234,8 +234,7 @@ function decodeProviderMessage(message: unknown): SDKMessage {
 
 function validateUserMessage(message: SDKUserMessage): SDKUserMessage {
 	try {
-		decodeClaudeSDKUserMessage(message);
-		return message;
+		return decodeClaudeSDKUserMessage(message);
 	} catch (cause) {
 		logDecodeFailure("Claude SDK user message", cause, message);
 		throw new ClaudeSDKDecodeError({
@@ -247,8 +246,7 @@ function validateUserMessage(message: SDKUserMessage): SDKUserMessage {
 
 function validateOptionsJsonShape(options: SDKOptions): SDKOptions {
 	try {
-		decodeClaudeSDKOptionsJsonShape(options);
-		return options;
+		return decodeClaudeSDKOptionsJsonShape(options);
 	} catch (cause) {
 		logDecodeFailure("Claude SDK options", cause, options);
 		throw new ClaudeSDKDecodeError({ boundary: "Claude SDK options", cause });
@@ -1743,14 +1741,16 @@ export class ClaudeProviderRuntime {
 		// wraps an upstream API error (e.g. "unknown provider for model X",
 		// 502s after all retries) as a synthetic successful completion.
 		// Treat those as errors so the caller sees failure, not success.
-		const isErrorFlag = (result as { is_error?: boolean }).is_error === true;
+		const isErrorFlag = result.is_error;
 		const isSuccess = result.subtype === "success" && !isErrorFlag;
 		const isInterrupted = !isSuccess && isInterruptedResult(result);
 		// Error text source depends on result shape:
 		//  - error_during_execution (and other non-success subtypes): `errors` array
 		//  - success + is_error=true: `result` field contains the provider error text
-		const errorsField = (result as unknown as { errors?: string[] }).errors;
-		const resultField = (result as unknown as { result?: string }).result;
+		const errorsField =
+			result.subtype === "success" ? undefined : result.errors;
+		const resultField =
+			result.subtype === "success" ? result.result : undefined;
 		const errorMessage =
 			Array.isArray(errorsField) && errorsField.length > 0
 				? errorsField.join("; ")
