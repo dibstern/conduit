@@ -12,6 +12,10 @@ _Avoid_: backend, model server
 The externally documented and locally installed request, response, and event shapes that a provider runtime exposes to Conduit.
 _Avoid_: guessed SDK shape, TypeScript-only guarantee
 
+**Provider Model Catalog**:
+The live set of models, variants, limits, and agent/model metadata exposed by an installed provider SDK or provider runtime discovery call.
+_Avoid_: Conduit-owned hardcoded latest model list
+
 **Provider Envelope**:
 The discriminants and fields Conduit reads in order to route, translate, persist, or display a provider message.
 _Avoid_: arbitrary provider JSON payload
@@ -57,6 +61,7 @@ _Avoid_: Conduit-invented permission scope
 
 - A **Provider Runtime** may request a **Session Approval** during a turn.
 - A **Provider Contract** defines what Conduit accepts from and sends to a **Provider Runtime**.
+- A **Provider Model Catalog** belongs to the provider runtime; Conduit may cache or display it, but should not redefine which provider model is latest.
 - A **Provider Envelope** should be runtime-decoded before adapter translation.
 - A **Provider-Owned Payload** may remain opaque when Conduit does not read its internal fields.
 - A **Provider Runtime Event** may be translated into a stored canonical event, but must not itself become the event store contract.
