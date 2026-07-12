@@ -195,25 +195,29 @@ type _OpenCodePtyCoversSdkPty = AssertExtends<
 	SdkPty
 >;
 
+// Conduit reads only name/type from file nodes (see handlers/files.ts), so
+// only those are strict; path/absolute/ignored are provider-owned fields the
+// live 1.17.18 server sends but Conduit does not read, kept optional so their
+// absence cannot fail-close (grill decision #10). No reverse (fully-normalized)
+// assertion here — FileNode is a partially-read provider payload, not a shape
+// Conduit fully normalizes.
 export const OpenCodeFileNodeSchema = Schema.Struct({
 	name: Schema.String,
-	path: Schema.String,
-	absolute: Schema.String,
+	path: Schema.optional(Schema.String),
+	absolute: Schema.optional(Schema.String),
 	type: Schema.Literal("file", "directory"),
-	ignored: Schema.Boolean,
+	ignored: Schema.optional(Schema.Boolean),
 });
 
 export type OpenCodeFileNode = Schema.Schema.Type<
 	typeof OpenCodeFileNodeSchema
 >;
 
+// Every SDK file node is a valid OpenCodeFileNode (proves the read fields
+// name/type exist in the installed SDK type with compatible shapes).
 type _OpenCodeSdkFileNodeCoversSchema = AssertExtends<
 	SdkFileNode,
 	OpenCodeFileNode
->;
-type _OpenCodeFileNodeCoversSdkFileNode = AssertExtends<
-	NormalizeSchemaType<OpenCodeFileNode>,
-	SdkFileNode
 >;
 
 const OpenCodeFileContentPatchHunkSchema = Schema.Struct({
