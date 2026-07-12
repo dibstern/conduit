@@ -7,7 +7,7 @@ Date: 2026-06-26
 - Conduit is a browser-facing orchestrator for AI coding assistants. It keeps durable conversation state in its own event store while provider runtimes execute stateless turns.
 - The existing glossary term for this work is **Provider Contract**: the externally documented and locally installed request, response, and event shapes that a provider runtime exposes to Conduit.
 - Current package versions in `package.json` are `@anthropic-ai/claude-agent-sdk` `^0.2.132` and `@opencode-ai/sdk` `^1.4.3`.
-- Current npm latest versions checked during the session are `@anthropic-ai/claude-agent-sdk` `0.3.193`, `@anthropic-ai/claude-code` `2.1.193`, `@opencode-ai/sdk` `1.17.11`, and `opencode-ai` `1.17.11`.
+- Current npm latest versions (re-checked 2026-07-12) are `@anthropic-ai/claude-agent-sdk` `0.3.207`, `@anthropic-ai/claude-code` `2.1.207`, `@opencode-ai/sdk` `1.17.18`, and `opencode-ai` `1.17.18`. (Session-original 2026-06-26 values were `0.3.193`/`2.1.193`/`1.17.11`/`1.17.11`.)
 - Claude integration goes through `src/lib/provider/claude/*`, especially `claude-provider-runtime.ts`, `claude-capabilities-probe.ts`, `types.ts`, and `src/lib/contracts/providers/claude-agent-sdk.ts`.
 - OpenCode integration goes through `src/lib/instance/*`, `src/lib/provider/opencode-provider-instance.ts`, and `src/lib/contracts/providers/opencode-sdk.ts`.
 - The repo already has compile-time SDK conformance checks and runtime schema decoders for provider envelopes, but those need to be refreshed and exercised against the upgraded SDKs.
