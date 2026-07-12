@@ -847,11 +847,14 @@ const OpenCodeSessionUpdatedEventSchema = Schema.Struct({
 	),
 });
 
+// Conduit reads only content/status from todos and synthesizes its own id;
+// priority/id are provider-owned and unread, kept optional so they cannot
+// fail-close (grill #10).
 const OpenCodeTodoSchema = Schema.Struct({
 	content: Schema.String,
 	status: Schema.String,
-	priority: Schema.String,
-	id: Schema.String,
+	priority: Schema.optional(Schema.String),
+	id: Schema.optional(Schema.String),
 });
 
 const OpenCodeTodoUpdatedEventSchema = Schema.Struct({
@@ -894,8 +897,10 @@ const OpenCodeFileEditedEventSchema = Schema.Struct({
 const OpenCodeFileWatcherUpdatedEventSchema = Schema.Struct({
 	type: Schema.Literal("file.watcher.updated"),
 	properties: Schema.Struct({
+		// Conduit reads only `file`; `event` is provider-owned and unread, kept
+		// optional so a new watcher event kind cannot fail-close (grill #10).
 		file: Schema.String,
-		event: Schema.Literal("add", "change", "unlink"),
+		event: Schema.optional(Schema.Literal("add", "change", "unlink")),
 	}).pipe(Schema.extend(OpenCodeOpaquePropertiesSchema)),
 });
 
