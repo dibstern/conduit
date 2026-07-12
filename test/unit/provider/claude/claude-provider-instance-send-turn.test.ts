@@ -335,6 +335,7 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 					container: null,
 					context_management: null,
 					model: "claude-sonnet-4-5",
+					stop_details: null,
 					stop_reason: null,
 					stop_sequence: null,
 					usage: {

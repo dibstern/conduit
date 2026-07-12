@@ -1,3 +1,8 @@
+# Satisfy the @anthropic-ai/claude-agent-sdk@0.3.207 peer (>=0.93.0); the
+# transitive @anthropic-ai/sdk otherwise resolves to 0.81.0.
+overrides:
+  '@anthropic-ai/sdk': 0.93.0
+
 allowBuilds:
   '@evilmartians/lefthook': false
   '@parcel/watcher': false

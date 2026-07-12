@@ -82,6 +82,7 @@ type ClaudeSDKReadStreamContentBlock =
 				| "redacted_thinking"
 				| "web_search_tool_result"
 				| "web_fetch_tool_result"
+				| "advisor_tool_result"
 				| "code_execution_tool_result"
 				| "bash_code_execution_tool_result"
 				| "text_editor_code_execution_tool_result"
@@ -141,6 +142,7 @@ function isClaudeSDKReadStreamContentBlock(
 		case "redacted_thinking":
 		case "web_search_tool_result":
 		case "web_fetch_tool_result":
+		case "advisor_tool_result":
 		case "code_execution_tool_result":
 		case "bash_code_execution_tool_result":
 		case "text_editor_code_execution_tool_result":
