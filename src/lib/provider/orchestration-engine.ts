@@ -14,6 +14,10 @@ import {
 	SessionProviderNotBound,
 } from "./errors.js";
 import type { ProviderRegistry } from "./provider-registry.js";
+import {
+	InMemoryProviderSessionBindingReadModel,
+	type ProviderSessionBindingReadModel,
+} from "./provider-session-binding-read-model.js";
 import type {
 	PermissionDecision,
 	ProviderCapabilities,
@@ -90,13 +94,14 @@ export interface SessionBinding {
 
 export interface OrchestrationEngineOptions {
 	readonly registry: ProviderRegistry;
+	readonly sessionBindingReadModel?: ProviderSessionBindingReadModel;
 }
 
 // ─── OrchestrationEngine ────────────────────────────────────────────────────
 
 export class OrchestrationEngine {
 	private readonly registry: ProviderRegistry;
-	private readonly sessionBindings = new Map<string, string>();
+	private readonly sessionBindingReadModel: ProviderSessionBindingReadModel;
 	private readonly inFlightCommands = new Map<
 		string,
 		Deferred.Deferred<OrchestrationResult, OrchestrationError>
@@ -104,6 +109,9 @@ export class OrchestrationEngine {
 
 	constructor(options: OrchestrationEngineOptions) {
 		this.registry = options.registry;
+		this.sessionBindingReadModel =
+			options.sessionBindingReadModel ??
+			new InMemoryProviderSessionBindingReadModel();
 	}
 
 	dispatchEffect(
@@ -210,18 +218,24 @@ export class OrchestrationEngine {
 				),
 			);
 
-			const previousProviderId = this.sessionBindings.get(
+			const previousProviderId = this.sessionBindingReadModel.getProviderForSession(
 				command.input.sessionId,
 			);
 			const restorePreviousBinding = Effect.sync(() => {
 				if (previousProviderId) {
-					this.sessionBindings.set(command.input.sessionId, previousProviderId);
+					this.sessionBindingReadModel.bindSession(
+						command.input.sessionId,
+						previousProviderId,
+					);
 				} else {
-					this.sessionBindings.delete(command.input.sessionId);
+					this.sessionBindingReadModel.unbindSession(command.input.sessionId);
 				}
 			});
 			yield* Effect.sync(() =>
-				this.sessionBindings.set(command.input.sessionId, command.providerId),
+				this.sessionBindingReadModel.bindSession(
+					command.input.sessionId,
+					command.providerId,
+				),
 			);
 			const sendEffect = yield* Effect.try({
 				try: () => instance.sendTurnEffect(command.input),
@@ -345,7 +359,9 @@ export class OrchestrationEngine {
 		command: EndSessionCommand,
 	): Effect.Effect<void, OrchestrationError> {
 		return Effect.gen(this, function* () {
-			const providerId = this.sessionBindings.get(command.sessionId);
+			const providerId = this.sessionBindingReadModel.getProviderForSession(
+				command.sessionId,
+			);
 			if (!providerId) {
 				yield* Effect.sync(() =>
 					log.debug(
@@ -373,7 +389,7 @@ export class OrchestrationEngine {
 				);
 			if (command.unbind) {
 				yield* Effect.sync(() =>
-					this.sessionBindings.delete(command.sessionId),
+					this.sessionBindingReadModel.unbindSession(command.sessionId),
 				);
 			}
 		});
@@ -383,24 +399,22 @@ export class OrchestrationEngine {
 
 	/** Bind a session to a provider. */
 	bindSession(sessionId: string, providerId: string): void {
-		this.sessionBindings.set(sessionId, providerId);
+		this.sessionBindingReadModel.bindSession(sessionId, providerId);
 	}
 
 	/** Unbind a session from its provider. */
 	unbindSession(sessionId: string): void {
-		this.sessionBindings.delete(sessionId);
+		this.sessionBindingReadModel.unbindSession(sessionId);
 	}
 
 	/** Get the provider ID for a session, or undefined if not bound. */
 	getProviderForSession(sessionId: string): string | undefined {
-		return this.sessionBindings.get(sessionId);
+		return this.sessionBindingReadModel.getProviderForSession(sessionId);
 	}
 
 	/** List all bound sessions with their provider IDs. */
 	listBoundSessions(): SessionBinding[] {
-		return [...this.sessionBindings.entries()].map(
-			([sessionId, providerId]) => ({ sessionId, providerId }),
-		);
+		return this.sessionBindingReadModel.listBoundSessions();
 	}
 
 	/** Shutdown the engine and all provider instances. */
@@ -409,7 +423,7 @@ export class OrchestrationEngine {
 			yield* Effect.sync(() => log.info("OrchestrationEngine shutting down"));
 			yield* this.registry.shutdownAllEffect();
 			yield* Effect.sync(() => {
-				this.sessionBindings.clear();
+				this.sessionBindingReadModel.clearTransientBindings();
 				this.inFlightCommands.clear();
 			});
 		});
@@ -420,7 +434,8 @@ export class OrchestrationEngine {
 	private getProviderForSessionEffect(
 		sessionId: string,
 	): Effect.Effect<string, SessionProviderNotBound> {
-		const providerId = this.sessionBindings.get(sessionId);
+		const providerId =
+			this.sessionBindingReadModel.getProviderForSession(sessionId);
 		if (!providerId) {
 			return Effect.fail(new SessionProviderNotBound({ sessionId }));
 		}

@@ -9,6 +9,7 @@ import { OpenCodeAPITag } from "../domain/provider/Services/opencode-api-service
 import { OrchestrationEngineTag } from "../domain/relay/Services/services.js";
 import type { OpenCodeAPI } from "../instance/opencode-api.js";
 import { createLogger } from "../logger.js";
+import { SqliteClient } from "../persistence/sqlite-client.js";
 import { ClaudeEventPersistEffectTag } from "../persistence/effect/claude-event-persist-effect.js";
 import type { SSEEvent } from "../relay/opencode-events.js";
 import {
@@ -21,6 +22,10 @@ import {
 	OpenCodeProviderInstance,
 } from "./opencode-provider-instance.js";
 import { OrchestrationEngine } from "./orchestration-engine.js";
+import {
+	SqliteProviderSessionBindingReadModel,
+	type ProviderSessionBindingReadModel,
+} from "./provider-session-binding-read-model.js";
 import { ProviderRegistry, ProviderRegistryTag } from "./provider-registry.js";
 import type { TurnResult } from "./types.js";
 
@@ -29,10 +34,13 @@ const log = createLogger("orchestration-wiring");
 export interface OrchestrationLayerOptions {
 	readonly client: OpenCodeAPI;
 	readonly workspaceRoot?: string;
+	readonly persistenceDbPath?: string;
+	readonly sessionBindingReadModel?: ProviderSessionBindingReadModel;
 }
 
 export interface OrchestrationRuntimeLayerOptions {
 	readonly workspaceRoot?: string;
+	readonly persistenceDbPath?: string;
 }
 
 export interface OrchestrationLayer {
@@ -91,7 +99,12 @@ function createOrchestrationComponents(
 	});
 	registry.registerInstance(claudeInstance);
 
-	const engine = new OrchestrationEngine({ registry });
+	const engine = new OrchestrationEngine({
+		registry,
+		...(options.sessionBindingReadModel != null
+			? { sessionBindingReadModel: options.sessionBindingReadModel }
+			: {}),
+	});
 
 	return { engine, registry, openCodeInstance };
 }
@@ -125,7 +138,24 @@ const createOrchestrationComponentsEffect = (
 		});
 		registry.registerInstance(claudeInstance);
 
-		const engine = new OrchestrationEngine({ registry });
+		const persistenceDbPath = options.persistenceDbPath;
+		const sessionBindingDb =
+			persistenceDbPath != null
+				? yield* Effect.sync(() => SqliteClient.open(persistenceDbPath))
+				: undefined;
+		if (sessionBindingDb != null) {
+			yield* Effect.addFinalizer(() =>
+				Effect.sync(() => sessionBindingDb.close()),
+			);
+		}
+		const sessionBindingReadModel =
+			sessionBindingDb != null
+				? new SqliteProviderSessionBindingReadModel(sessionBindingDb)
+				: undefined;
+		const engine = new OrchestrationEngine({
+			registry,
+			...(sessionBindingReadModel != null ? { sessionBindingReadModel } : {}),
+		});
 		return { engine, registry, openCodeInstance };
 	});
 
@@ -190,6 +220,9 @@ export const makeOrchestrationRuntimeLayer = (
 				client,
 				...(options.workspaceRoot != null
 					? { workspaceRoot: options.workspaceRoot }
+					: {}),
+				...(options.persistenceDbPath != null
+					? { persistenceDbPath: options.persistenceDbPath }
 					: {}),
 			});
 			yield* Effect.addFinalizer(() => components.engine.shutdownEffect());

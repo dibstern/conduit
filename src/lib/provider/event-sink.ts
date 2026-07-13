@@ -1,8 +1,8 @@
 // src/lib/provider/event-sink.ts
 // ─── Event Sink Implementation ──────────────────────────────────────────────
-// Wraps EventStore + ProjectionRunner so provider instances can push runtime
-// events without knowing about SQLite internals. Permission and question
-// requests block the provider instance's turn loop until the user resolves them.
+// Legacy EventStore test/compatibility adapter. Production provider output is
+// routed through ProviderRuntimeIngestion; this class remains for direct
+// EventStore/ProjectionRunner unit coverage and older non-relay tests.
 
 import { Deferred, Effect } from "effect";
 import type { ProviderRuntimeEvent } from "../contracts/providers/provider-runtime-event.js";

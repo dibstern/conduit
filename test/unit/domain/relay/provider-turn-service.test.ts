@@ -4,6 +4,10 @@ import { expect, vi } from "vitest";
 import { OpenCodeAPITag } from "../../../../src/lib/domain/provider/Services/opencode-api-service.js";
 import { PendingInteractionServiceLive } from "../../../../src/lib/domain/relay/Services/pending-interaction-service.js";
 import {
+	type ProviderRuntimeIngestion,
+	ProviderRuntimeIngestionTag,
+} from "../../../../src/lib/domain/relay/Services/provider-runtime-ingestion-service.js";
+import {
 	ProviderTurnServiceLive,
 	type ProviderTurnServiceSendInput,
 	ProviderTurnServiceTag,
@@ -164,6 +168,15 @@ const makeTitleService = (): SessionTitleService => ({
 	startForFirstClaudeMessage: vi.fn(() => Effect.void),
 });
 
+const makeIngestion = (
+	overrides?: Partial<ProviderRuntimeIngestion>,
+): ProviderRuntimeIngestion => ({
+	ingest: vi.fn(() => Effect.succeed(1)),
+	ingestBatch: vi.fn(() => Effect.succeed(1)),
+	drain: vi.fn(() => Effect.void),
+	...overrides,
+});
+
 const makeEngine = (input?: {
 	readonly providerId?: "claude" | "opencode" | undefined;
 	readonly result?: TurnResult;
@@ -189,6 +202,7 @@ const serviceLayer = (input: {
 	readonly engine?: OrchestrationEngine;
 	readonly readQuery?: ReadQueryEffect;
 	readonly persist?: ClaudeEventPersistEffect;
+	readonly ingestion?: ProviderRuntimeIngestion;
 	readonly providerState?: ProviderStateEffect;
 	readonly titleService?: SessionTitleService;
 	readonly sessionHistory?: readonly HistoryMessage[];
@@ -237,6 +251,12 @@ const serviceLayer = (input: {
 			Layer.succeed(ClaudeEventPersistEffectTag, input.persist),
 		);
 	}
+	if (input.ingestion) {
+		baseLayer = Layer.merge(
+			baseLayer,
+			Layer.succeed(ProviderRuntimeIngestionTag, input.ingestion),
+		);
+	}
 	if (input.providerState) {
 		baseLayer = Layer.merge(
 			baseLayer,
@@ -270,6 +290,55 @@ const interruptTurn = () =>
 
 describe("ProviderTurnService", () => {
 	it.effect(
+		"fails closed for Claude provider output when ProviderRuntimeIngestion is unavailable",
+		() =>
+			Effect.gen(function* () {
+				let capturedSink: EventSink | undefined;
+				const dispatchEffect = vi.fn((command) => {
+					if (command.type === "send_turn") {
+						capturedSink = command.input.eventSink;
+						return Effect.succeed(completedTurn());
+					}
+					return Effect.void;
+				}) as unknown as OrchestrationEngine["dispatchEffect"];
+				const engine = makeEngine({
+					providerId: "claude",
+					dispatchEffect,
+				});
+				const { layer } = serviceLayer({ engine });
+
+				yield* sendTurn().pipe(Effect.provide(layer));
+
+				const sink = capturedSink;
+				expect(sink).toBeDefined();
+				if (!sink) return;
+
+				const result = yield* Effect.either(
+					sink.push(
+						providerRuntimeEvent(
+							"text.delta",
+							"session-1",
+							{
+								messageId: "msg-1",
+								partId: "part-1",
+								text: "hello",
+							},
+							{ eventId: "evt-missing-ingestion", providerId: "claude" },
+						),
+					),
+				);
+
+				expect(result).toMatchObject({
+					_tag: "Left",
+					left: {
+						_tag: "ProviderRuntimeIngestionRequired",
+						sessionId: "session-1",
+					},
+				});
+			}),
+	);
+
+	it.effect(
 		"dispatches the first Claude turn after loading empty persisted history and persisting the user message",
 		() => {
 			const engine = makeEngine();
@@ -278,6 +347,7 @@ describe("ProviderTurnService", () => {
 			const persist = makePersistService(
 				vi.fn(() => Effect.sync(() => events.push("persist"))),
 			);
+			const ingestion = makeIngestion();
 			const titleService: SessionTitleService = {
 				startForFirstClaudeMessage: vi.fn(() =>
 					Effect.sync(() => events.push("title")),
@@ -290,6 +360,7 @@ describe("ProviderTurnService", () => {
 				engine,
 				readQuery,
 				persist,
+				ingestion,
 				providerState,
 				titleService,
 			});
@@ -339,7 +410,13 @@ describe("ProviderTurnService", () => {
 						{ providerId: "claude" },
 					),
 				);
-				expect(wsHandler.sendToSession).toHaveBeenCalledWith(
+				expect(ingestion.ingest).toHaveBeenCalledWith(
+					expect.objectContaining({
+						type: "text.delta",
+						sessionId: "session-1",
+					}),
+				);
+				expect(wsHandler.sendToSession).not.toHaveBeenCalledWith(
 					"session-1",
 					expect.objectContaining({ type: "delta", text: "hello" }),
 				);

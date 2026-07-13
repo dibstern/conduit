@@ -27,7 +27,14 @@ import {
 	createRelayEventSink,
 	type RelayEventSinkPersist,
 } from "../../../provider/relay-event-sink.js";
-import type { SendTurnInput, TurnResult } from "../../../provider/types.js";
+import type {
+	EventSink,
+	PermissionRequest,
+	PermissionResponse,
+	QuestionRequest,
+	SendTurnInput,
+	TurnResult,
+} from "../../../provider/types.js";
 import { OpenCodeAPITag } from "../../provider/Services/opencode-api-service.js";
 import { PendingInteractionServiceTag } from "./pending-interaction-service.js";
 import {
@@ -62,6 +69,32 @@ const NOOP_EVENT_SINK: SendTurnInput["eventSink"] = {
 	requestQuestion: () => Effect.succeed({}),
 	resolvePermission: () => Effect.void,
 	resolveQuestion: () => Effect.void,
+};
+
+export class ProviderRuntimeIngestionRequired extends Error {
+	readonly _tag = "ProviderRuntimeIngestionRequired" as const;
+
+	constructor(readonly sessionId: string) {
+		super(
+			`ProviderRuntimeIngestion is required for provider output: session=${sessionId}`,
+		);
+	}
+}
+
+const makeProviderRuntimeIngestionRequiredSink = (
+	sessionId: string,
+): EventSink => {
+	const fail = () => Effect.fail(new ProviderRuntimeIngestionRequired(sessionId));
+	return {
+		push: fail,
+		requestPermission: (_request: PermissionRequest) => fail(),
+		requestQuestion: (_request: QuestionRequest) => fail(),
+		resolvePermission: (_requestId: string, _response: PermissionResponse) =>
+			fail(),
+		resolveQuestion: (_requestId: string, _answers: Record<string, unknown>) =>
+			fail(),
+		cancelSessionInteractions: () => Effect.void,
+	};
 };
 
 // Compatibility constructor support for the old prompt-handler fallback seam.
@@ -305,6 +338,7 @@ export const makeProviderTurnService = Effect.gen(function* () {
 		ingestion: ProviderRuntimeIngestion | undefined,
 	): SendTurnInput["eventSink"] => {
 		if (!isClaudeProviderId(providerId)) return NOOP_EVENT_SINK;
+		if (!ingestion) return makeProviderRuntimeIngestionRequiredSink(sessionId);
 		let eventSinkPersist: RelayEventSinkPersist | undefined;
 		if (persist) eventSinkPersist = persist;
 		return createRelayEventSink({

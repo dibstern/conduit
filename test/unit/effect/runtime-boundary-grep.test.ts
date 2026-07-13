@@ -2842,6 +2842,26 @@ describe("Effect runtime boundary grep", () => {
 		expect(openCodeRuntimeIngressSource).toMatch(/ingestBatch/);
 	});
 
+	it("keeps ProviderTurnService Claude output behind ProviderRuntimeIngestion", () => {
+		const providerTurnServiceSource = readFileSync(
+			join(
+				REPO_ROOT,
+				"src/lib/domain/relay/Services/provider-turn-service.ts",
+			),
+			"utf8",
+		);
+
+		expect(providerTurnServiceSource).toMatch(
+			/ProviderRuntimeIngestionRequired/,
+		);
+		expect(providerTurnServiceSource).toMatch(
+			/if \(!ingestion\) return makeProviderRuntimeIngestionRequiredSink/,
+		);
+		expect(providerTurnServiceSource).toMatch(
+			/createRelayEventSink\(\{[\s\S]*\.\.\(ingestion \? \{ ingestion \} : \{\}\)/,
+		);
+	});
+
 	it("keeps relay startup as the only relay-stack runPromise boundary", () => {
 		const path = "src/lib/relay/relay-stack.ts";
 		const source = readFileSync(join(REPO_ROOT, path), "utf8");

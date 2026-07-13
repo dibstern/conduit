@@ -612,6 +612,9 @@ export async function createProjectRelay(
 	// ── Orchestration runtime layer (provider instance routing) ─────────────
 	const orchestrationRuntimeLayer = makeOrchestrationRuntimeLayer({
 		...(config.projectDir != null && { workspaceRoot: config.projectDir }),
+		...(config.persistenceDbPath != null
+			? { persistenceDbPath: config.persistenceDbPath }
+			: {}),
 	});
 
 	const translator = createTranslator();

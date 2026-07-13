@@ -1,10 +1,14 @@
 import { describe, it } from "@effect/vitest";
 import { Deferred, Effect, Fiber } from "effect";
 import { expect, vi } from "vitest";
+import { runMigrations } from "../../../src/lib/persistence/migrations.js";
+import { schemaMigrations } from "../../../src/lib/persistence/schema.js";
+import { SqliteClient } from "../../../src/lib/persistence/sqlite-client.js";
 import {
 	OrchestrationEngine,
 	type SendTurnCommand,
 } from "../../../src/lib/provider/orchestration-engine.js";
+import { SqliteProviderSessionBindingReadModel } from "../../../src/lib/provider/provider-session-binding-read-model.js";
 import { ProviderRegistry } from "../../../src/lib/provider/provider-registry.js";
 import type {
 	ProviderCapabilities,
@@ -81,7 +85,52 @@ function sendTurnCommand(): SendTurnCommand {
 	};
 }
 
+function seedProjectedSessionBinding(
+	db: SqliteClient,
+	sessionId: string,
+	providerId: string,
+): void {
+	const now = 1_735_689_600_000;
+	db.execute(
+		"INSERT INTO sessions (id, provider, title, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
+		[sessionId, providerId, "Persisted session", "idle", now, now],
+	);
+	db.execute(
+		"INSERT INTO session_providers (id, session_id, provider, status, activated_at) VALUES (?, ?, ?, 'active', ?)",
+		[`${sessionId}:initial`, sessionId, providerId, now],
+	);
+}
+
 describe("OrchestrationEngine dispatchEffect", () => {
+	it.effect(
+		"recovers session provider bindings from the durable read model in a fresh engine",
+		() =>
+			Effect.gen(function* () {
+				const db = SqliteClient.memory();
+				runMigrations(db, schemaMigrations);
+				seedProjectedSessionBinding(db, "session-1", "claude");
+				const registry = new ProviderRegistry();
+				const instance = makeStubInstance("claude");
+				registry.registerInstance(instance);
+				const engine = new OrchestrationEngine({
+					registry,
+					sessionBindingReadModel: new SqliteProviderSessionBindingReadModel(
+						db,
+					),
+				});
+
+				yield* engine.dispatchEffect({
+					type: "interrupt_turn",
+					commandId: "cmd-durable-binding-interrupt",
+					sessionId: "session-1",
+				});
+
+				expect(instance.interruptTurnEffect).toHaveBeenCalledWith("session-1");
+				expect(engine.getProviderForSession("session-1")).toBe("claude");
+				db.close();
+			}),
+	);
+
 	it.effect(
 		"returns typed provider lookup failures without consuming command idempotency",
 		() =>

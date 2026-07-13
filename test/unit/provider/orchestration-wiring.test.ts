@@ -1,8 +1,13 @@
 // test/unit/provider/orchestration-wiring.test.ts
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { Effect, Layer, ManagedRuntime } from "effect";
 import { describe, expect, it, vi } from "vitest";
 import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
 import type { OpenCodeAPI } from "../../../src/lib/instance/opencode-api.js";
+import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
+import { SqliteClient } from "../../../src/lib/persistence/sqlite-client.js";
 import {
 	OpenCodeDriver,
 	OpenCodeProviderInstance,
@@ -51,6 +56,24 @@ function makeStubClient(): OpenCodeAPI {
 	} as unknown as OpenCodeAPI;
 }
 
+function seedProjectedSessionBinding(
+	dbPath: string,
+	sessionId: string,
+	providerId: string,
+): void {
+	const now = 1_735_689_600_000;
+	const db = SqliteClient.open(dbPath);
+	db.execute(
+		"INSERT INTO sessions (id, provider, title, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
+		[sessionId, providerId, "Persisted session", "idle", now, now],
+	);
+	db.execute(
+		"INSERT INTO session_providers (id, session_id, provider, status, activated_at) VALUES (?, ?, ?, 'active', ?)",
+		[`${sessionId}:initial`, sessionId, providerId, now],
+	);
+	db.close();
+}
+
 describe("Orchestration wiring", () => {
 	it("createOrchestrationLayer returns engine, registry, and OpenCode instance", () => {
 		const client = makeStubClient();
@@ -85,6 +108,34 @@ describe("Orchestration wiring", () => {
 			expect(layer.registry.hasInstance("claude")).toBe(true);
 		} finally {
 			await runtime.dispose();
+		}
+	});
+
+	it("wires persisted session bindings into the scoped runtime layer", async () => {
+		const client = makeStubClient();
+		const tempDir = mkdtempSync(join(tmpdir(), "conduit-orchestration-"));
+		const dbPath = join(tempDir, "events.db");
+		const runtime = ManagedRuntime.make(
+			makeOrchestrationRuntimeLayer({ persistenceDbPath: dbPath }).pipe(
+				Layer.provide(
+					Layer.merge(
+						Layer.succeed(OpenCodeAPITag, client),
+						makePersistenceEffectLayer(dbPath),
+					),
+				),
+			),
+		);
+
+		try {
+			const layer = await runtime.runPromise(getOrchestrationLayer);
+			seedProjectedSessionBinding(dbPath, "persisted-session", "claude");
+
+			expect(layer.engine.getProviderForSession("persisted-session")).toBe(
+				"claude",
+			);
+		} finally {
+			await runtime.dispose();
+			rmSync(tempDir, { recursive: true, force: true });
 		}
 	});
 
