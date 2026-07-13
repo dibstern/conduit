@@ -1,7 +1,7 @@
 // test/unit/provider/claude/types.test.ts
 
-import type { Effect } from "effect";
 import type { SDKControlInterruptResponse } from "@anthropic-ai/claude-agent-sdk";
+import type { Effect } from "effect";
 import { describe, expect, expectTypeOf, it } from "vitest";
 import type {
 	ClaudeResumeCursor,

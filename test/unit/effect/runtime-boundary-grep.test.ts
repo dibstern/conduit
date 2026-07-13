@@ -2844,10 +2844,7 @@ describe("Effect runtime boundary grep", () => {
 
 	it("keeps ProviderTurnService Claude output behind ProviderRuntimeIngestion", () => {
 		const providerTurnServiceSource = readFileSync(
-			join(
-				REPO_ROOT,
-				"src/lib/domain/relay/Services/provider-turn-service.ts",
-			),
+			join(REPO_ROOT, "src/lib/domain/relay/Services/provider-turn-service.ts"),
 			"utf8",
 		);
 

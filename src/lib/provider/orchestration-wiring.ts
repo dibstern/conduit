@@ -9,8 +9,8 @@ import { OpenCodeAPITag } from "../domain/provider/Services/opencode-api-service
 import { OrchestrationEngineTag } from "../domain/relay/Services/services.js";
 import type { OpenCodeAPI } from "../instance/opencode-api.js";
 import { createLogger } from "../logger.js";
-import { SqliteClient } from "../persistence/sqlite-client.js";
 import { ClaudeEventPersistEffectTag } from "../persistence/effect/claude-event-persist-effect.js";
+import { SqliteClient } from "../persistence/sqlite-client.js";
 import type { SSEEvent } from "../relay/opencode-events.js";
 import {
 	defaultClaudeSubagentSdk,
@@ -22,11 +22,11 @@ import {
 	OpenCodeProviderInstance,
 } from "./opencode-provider-instance.js";
 import { OrchestrationEngine } from "./orchestration-engine.js";
-import {
-	SqliteProviderSessionBindingReadModel,
-	type ProviderSessionBindingReadModel,
-} from "./provider-session-binding-read-model.js";
 import { ProviderRegistry, ProviderRegistryTag } from "./provider-registry.js";
+import {
+	type ProviderSessionBindingReadModel,
+	SqliteProviderSessionBindingReadModel,
+} from "./provider-session-binding-read-model.js";
 import type { TurnResult } from "./types.js";
 
 const log = createLogger("orchestration-wiring");

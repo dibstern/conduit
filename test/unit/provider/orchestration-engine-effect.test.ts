@@ -8,8 +8,8 @@ import {
 	OrchestrationEngine,
 	type SendTurnCommand,
 } from "../../../src/lib/provider/orchestration-engine.js";
-import { SqliteProviderSessionBindingReadModel } from "../../../src/lib/provider/provider-session-binding-read-model.js";
 import { ProviderRegistry } from "../../../src/lib/provider/provider-registry.js";
+import { SqliteProviderSessionBindingReadModel } from "../../../src/lib/provider/provider-session-binding-read-model.js";
 import type {
 	ProviderCapabilities,
 	ProviderInstance,

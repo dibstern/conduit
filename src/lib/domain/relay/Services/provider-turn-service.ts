@@ -84,7 +84,8 @@ export class ProviderRuntimeIngestionRequired extends Error {
 const makeProviderRuntimeIngestionRequiredSink = (
 	sessionId: string,
 ): EventSink => {
-	const fail = () => Effect.fail(new ProviderRuntimeIngestionRequired(sessionId));
+	const fail = () =>
+		Effect.fail(new ProviderRuntimeIngestionRequired(sessionId));
 	return {
 		push: fail,
 		requestPermission: (_request: PermissionRequest) => fail(),

@@ -797,9 +797,7 @@ export function handleSSEEvent(deps: SSEWiringDeps, event: SSEEvent): void {
 		handleQuestionAsked(deps, eventSessionId);
 	}
 	if (isPermissionRepliedEvent(event)) {
-		deps.pendingInteractions.markPermissionReplied(
-			event.properties.requestID,
-		);
+		deps.pendingInteractions.markPermissionReplied(event.properties.requestID);
 	}
 
 	handleSSEEventAfterPending(deps, event, eventSessionId);

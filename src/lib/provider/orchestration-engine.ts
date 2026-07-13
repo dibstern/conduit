@@ -218,9 +218,10 @@ export class OrchestrationEngine {
 				),
 			);
 
-			const previousProviderId = this.sessionBindingReadModel.getProviderForSession(
-				command.input.sessionId,
-			);
+			const previousProviderId =
+				this.sessionBindingReadModel.getProviderForSession(
+					command.input.sessionId,
+				);
 			const restorePreviousBinding = Effect.sync(() => {
 				if (previousProviderId) {
 					this.sessionBindingReadModel.bindSession(
