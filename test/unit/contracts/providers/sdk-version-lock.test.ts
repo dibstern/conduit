@@ -21,8 +21,10 @@ const satisfiesMinFloor = (version: string, range: string): boolean => {
 	const floor = match.slice(1, 4).map(Number);
 	const actual = version.split(".").map(Number);
 	for (let i = 0; i < 3; i++) {
-		if (actual[i] > floor[i]) return true;
-		if (actual[i] < floor[i]) return false;
+		const a = actual[i] ?? 0;
+		const f = floor[i] ?? 0;
+		if (a > f) return true;
+		if (a < f) return false;
 	}
 	return true;
 };
