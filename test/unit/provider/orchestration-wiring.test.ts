@@ -139,6 +139,32 @@ describe("Orchestration wiring", () => {
 		}
 	});
 
+	it("exposes a reactor drain quiescence seam through the wired runtime layer", async () => {
+		const client = makeStubClient();
+		const tempDir = mkdtempSync(join(tmpdir(), "conduit-orchestration-"));
+		const dbPath = join(tempDir, "events.db");
+		const runtime = ManagedRuntime.make(
+			makeOrchestrationRuntimeLayer({ persistenceDbPath: dbPath }).pipe(
+				Layer.provide(
+					Layer.merge(
+						Layer.succeed(OpenCodeAPITag, client),
+						makePersistenceEffectLayer(dbPath),
+					),
+				),
+			),
+		);
+
+		try {
+			const layer = await runtime.runPromise(getOrchestrationLayer);
+			// No committed side effects: the reactor reaches quiescence deterministically
+			// (no sleeps), proving the drain seam is wired through the production path.
+			await Effect.runPromise(layer.drainSideEffects());
+		} finally {
+			await runtime.dispose();
+			rmSync(tempDir, { recursive: true, force: true });
+		}
+	});
+
 	it("creates provider instances through plain drivers", async () => {
 		const client = makeStubClient();
 		const instance = await Effect.runPromise(

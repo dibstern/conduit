@@ -1,6 +1,10 @@
 import { describe, it } from "@effect/vitest";
 import { Effect } from "effect";
 import { expect, vi } from "vitest";
+import {
+	decodeProviderRuntimeEvent,
+	type ProviderRuntimeEvent,
+} from "../../../src/lib/contracts/providers/provider-runtime-event.js";
 import { runMigrations } from "../../../src/lib/persistence/migrations.js";
 import { schemaMigrations } from "../../../src/lib/persistence/schema.js";
 import { SqliteClient } from "../../../src/lib/persistence/sqlite-client.js";
@@ -126,6 +130,56 @@ describe("OrchestrationEngine durable receipts", () => {
 			expect(row?.updated_at).toBe(4242);
 			db.close();
 		}),
+	);
+
+	it.effect(
+		"routes committed send_turn through the reactor to provider runtime ingestion",
+		() =>
+			Effect.gen(function* () {
+				const db = SqliteClient.memory();
+				runMigrations(db, schemaMigrations);
+				const runtimeEvent = decodeProviderRuntimeEvent({
+					eventId: "runtime-text-1",
+					type: "text.delta",
+					providerId: "opencode",
+					sessionId: "session-1",
+					turnId: "turn-1",
+					providerRefs: {},
+					rawSource: { kind: "test.provider-runtime" },
+					createdAt: 1000,
+					data: { messageId: "message-1", partId: "text-1", text: "streamed" },
+				});
+				const ingest = vi.fn((_event: ProviderRuntimeEvent) =>
+					Effect.succeed(1),
+				);
+				const command = sendTurnCommand();
+				const commandSinkPush = vi.spyOn(command.input.eventSink, "push");
+				const registry = new ProviderRegistry();
+				const instance = makeStubInstance("opencode");
+				// Provider streams output through the sink it is handed; the reactor's
+				// sink routes to ProviderRuntimeIngestion, not the command's sink.
+				instance.sendTurnEffect.mockImplementation((input) =>
+					input.eventSink.push(runtimeEvent).pipe(Effect.as(COMPLETED)),
+				);
+				registry.registerInstance(instance);
+				const engine = new OrchestrationEngine({
+					registry,
+					durableCommands: {
+						...makeDurableOptions({ db }),
+						ingestion: { ingest },
+					},
+				});
+
+				const result = yield* engine.dispatchEffect(command);
+
+				expect(result).toMatchObject({ status: "completed" });
+				expect(ingest).toHaveBeenCalledWith(runtimeEvent);
+				expect(commandSinkPush).not.toHaveBeenCalled();
+				expect(receiptRow(db, "cmd-durable-1")?.status).toBe(
+					"side_effect_completed",
+				);
+				db.close();
+			}),
 	);
 
 	it.effect("id generation failure does not consume command receipt", () =>

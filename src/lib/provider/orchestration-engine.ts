@@ -6,6 +6,7 @@
 
 import { Deferred, Effect } from "effect";
 
+import type { ProviderRuntimeIngestion } from "../domain/relay/Services/provider-runtime-ingestion-service.js";
 import { createLogger } from "../logger.js";
 import type { SqliteClient } from "../persistence/sqlite-client.js";
 import {
@@ -28,6 +29,7 @@ import {
 	type CommandReadModelSnapshot,
 	isCommandScopeTombstoned,
 } from "./orchestration-read-model.js";
+import { ProviderSideEffectReactor } from "./orchestration-side-effect-reactor.js";
 import type { ProviderRegistry } from "./provider-registry.js";
 import {
 	InMemoryProviderSessionBindingReadModel,
@@ -123,6 +125,12 @@ export interface DurableCommandStoreOptions {
 	readonly projectKey: string;
 	readonly now: () => number;
 	readonly generateId: () => string;
+	/**
+	 * Provider-output sink for the side-effect reactor. Production supplies the
+	 * shared ProviderRuntimeIngestion so streamed provider events are persisted
+	 * exactly as the inline path did. Absent in narrow unit tests (no-op sink).
+	 */
+	readonly ingestion?: Pick<ProviderRuntimeIngestion, "ingest">;
 }
 
 export interface OrchestrationEngineOptions {
@@ -134,6 +142,7 @@ export interface OrchestrationEngineOptions {
 interface DurableCommandRuntime {
 	readonly commit: DurableCommandCommitRepository;
 	readonly receipts: CommandReadModelRepository;
+	readonly reactor: ProviderSideEffectReactor;
 	readonly db: SqliteClient;
 	readonly projectKey: string;
 	readonly now: () => number;
@@ -176,6 +185,15 @@ export class OrchestrationEngine {
 			this.durable = {
 				commit: new DurableCommandCommitRepository(durable.db),
 				receipts,
+				// Single provider executor. Shares the durable DB, registry, and
+				// wall-clock with the engine; provider output streams to the shared
+				// ProviderRuntimeIngestion (no-op sink when none is supplied).
+				reactor: new ProviderSideEffectReactor({
+					db: durable.db,
+					registry: this.registry,
+					ingestion: durable.ingestion ?? { ingest: () => Effect.succeed(0) },
+					nowMs: durable.now,
+				}),
 				db: durable.db,
 				projectKey: durable.projectKey,
 				now: durable.now,
@@ -291,8 +309,11 @@ export class OrchestrationEngine {
 	 * and id generation happen before provider lookup and before any durable
 	 * write, so a duplicate replays, a fingerprint mismatch rejects, and an
 	 * id-gen failure fails — all without consuming a receipt or calling the
-	 * provider. Provider execution stays inline (current behavior); the reactor
-	 * cutover is cev.5.
+	 * provider. After the durable commit the side-effect reactor is the single
+	 * provider executor: it drains the outbox row, streams output to
+	 * ProviderRuntimeIngestion, and records completion/failure. The provider
+	 * result flows back so the same-process waiter and provider-state
+	 * persistence behave exactly as the former inline path did.
 	 */
 	private handleDurableSendTurnEffect(
 		command: SendTurnCommand,
@@ -349,10 +370,9 @@ export class OrchestrationEngine {
 			const nowMs = durable.now();
 
 			// Provider lookup before durable commit: a lookup failure consumes no
-			// receipt and can be retried after registration.
-			const instance = yield* this.registry.getInstanceEffect(
-				command.providerId,
-			);
+			// receipt and can be retried after registration. The reactor re-looks
+			// up the instance when it executes; this is the pre-commit fail-fast.
+			yield* this.registry.getInstanceEffect(command.providerId);
 
 			yield* Effect.try({
 				try: () =>
@@ -371,20 +391,27 @@ export class OrchestrationEngine {
 					}),
 			});
 
-			return yield* this.sendTurnThroughInstanceEffect(command, instance).pipe(
-				Effect.tap(() =>
-					Effect.sync(() =>
-						this.markSendTurnCompleted(
-							durable,
-							command.commandId,
-							durable.now(),
-						),
-					),
+			// Bind the session so follow-up commands route to this provider,
+			// matching the inline path.
+			yield* Effect.sync(() =>
+				this.sessionBindingReadModel.bindSession(
+					command.input.sessionId,
+					command.providerId,
 				),
-				Effect.tapError(() =>
-					Effect.sync(() =>
-						this.rollbackAcceptedSendTurn(durable, command.commandId),
-					),
+			);
+
+			// The reactor is the single provider executor: it performs the call
+			// once, ingests output, and records completion/failure. Its result
+			// (carrying provider-state updates) is surfaced to the waiter.
+			return yield* durable.reactor.runCommand(command.commandId).pipe(
+				Effect.mapError((cause) =>
+					cause instanceof ProviderInstanceFailure
+						? cause
+						: new ProviderInstanceFailure({
+								providerId: command.providerId,
+								operation: "sendTurn",
+								cause,
+							}),
 				),
 			);
 		});
@@ -420,44 +447,6 @@ export class OrchestrationEngine {
 				events: [],
 			}),
 		);
-	}
-
-	private markSendTurnCompleted(
-		durable: DurableCommandRuntime,
-		commandId: string,
-		nowMs: number,
-	): void {
-		durable.db.runInTransaction(() => {
-			durable.db.execute(
-				"UPDATE command_receipts SET status = 'side_effect_completed', updated_at = ? WHERE command_id = ?",
-				[nowMs, commandId],
-			);
-			durable.db.execute(
-				"UPDATE provider_command_outbox SET status = 'completed', updated_at = ? WHERE command_id = ?",
-				[nowMs, commandId],
-			);
-		});
-	}
-
-	/**
-	 * Inline provider failure (non-crash): remove the accepted receipt + outbox
-	 * row so a fresh dispatch can retry, preserving current retry-after-failure
-	 * behavior. A crash between commit and completion leaves the receipt in
-	 * `side_effect_requested`, which replays as orphaned (no re-execution).
-	 */
-	private rollbackAcceptedSendTurn(
-		durable: DurableCommandRuntime,
-		commandId: string,
-	): void {
-		durable.db.runInTransaction(() => {
-			durable.db.execute(
-				"DELETE FROM provider_command_outbox WHERE command_id = ?",
-				[commandId],
-			);
-			durable.db.execute("DELETE FROM command_receipts WHERE command_id = ?", [
-				commandId,
-			]);
-		});
 	}
 
 	private handleInlineSendTurnEffect(
@@ -681,6 +670,16 @@ export class OrchestrationEngine {
 	/** List all bound sessions with their provider IDs. */
 	listBoundSessions(): SessionBinding[] {
 		return this.sessionBindingReadModel.listBoundSessions();
+	}
+
+	/**
+	 * Drain any committed-but-unexecuted provider side effects through the
+	 * reactor (crash recovery / orphaned outbox rows). Same-process dispatch
+	 * already awaits its own execution; this is the deterministic quiescence
+	 * seam for tests and startup recovery. No-op when durable commands are off.
+	 */
+	drainSideEffects(): Effect.Effect<void, unknown> {
+		return this.durable ? this.durable.reactor.drain() : Effect.void;
 	}
 
 	/** Shutdown the engine and all provider instances. */

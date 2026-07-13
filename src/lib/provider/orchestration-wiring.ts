@@ -7,6 +7,7 @@
 import { randomUUID } from "node:crypto";
 import { Context, Effect, Layer, type Scope } from "effect";
 import { OpenCodeAPITag } from "../domain/provider/Services/opencode-api-service.js";
+import { ProviderRuntimeIngestionTag } from "../domain/relay/Services/provider-runtime-ingestion-service.js";
 import { OrchestrationEngineTag } from "../domain/relay/Services/services.js";
 import type { OpenCodeAPI } from "../instance/opencode-api.js";
 import { createLogger } from "../logger.js";
@@ -59,6 +60,12 @@ export interface OrchestrationLayer {
 	wireSSEToInstance(
 		sseOn: (event: "event", handler: (e: unknown) => void) => void,
 	): void;
+	/**
+	 * Deterministic quiescence seam: drain committed-but-unexecuted provider
+	 * side effects through the reactor (crash recovery / test flush). Same-process
+	 * dispatch already awaits its own execution.
+	 */
+	drainSideEffects(): Effect.Effect<void, unknown>;
 }
 
 const TURN_COMPLETE_RESULT: TurnResult = {
@@ -158,7 +165,12 @@ const createOrchestrationComponentsEffect = (
 		// Durable command receipts share the persistence DB with the session
 		// binding read model. `now`/`generateId` are supplied at this wiring edge
 		// (wall clock + random) so core orchestration stays free of Date.now /
-		// global randomness.
+		// global randomness. The shared ProviderRuntimeIngestion (when present) is
+		// handed to the engine's side-effect reactor so streamed provider output
+		// is persisted exactly as the former inline path did.
+		const ingestionOption = yield* Effect.serviceOption(
+			ProviderRuntimeIngestionTag,
+		);
 		const durableCommands =
 			sessionBindingDb != null
 				? {
@@ -167,6 +179,9 @@ const createOrchestrationComponentsEffect = (
 							options.projectKey ?? options.workspaceRoot ?? process.cwd(),
 						now: () => Date.now(),
 						generateId: () => `disp_${randomUUID()}`,
+						...(ingestionOption._tag === "Some"
+							? { ingestion: ingestionOption.value }
+							: {}),
 					}
 				: undefined;
 		const engine = new OrchestrationEngine({
@@ -207,7 +222,13 @@ function createOrchestrationView(
 		});
 	}
 
-	return { engine, registry, openCodeInstance, wireSSEToInstance };
+	return {
+		engine,
+		registry,
+		openCodeInstance,
+		wireSSEToInstance,
+		drainSideEffects: () => engine.drainSideEffects(),
+	};
 }
 
 /**

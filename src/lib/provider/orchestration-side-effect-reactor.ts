@@ -3,7 +3,20 @@ import type { ProviderRuntimeIngestion } from "../domain/relay/Services/provider
 import type { SqliteClient } from "../persistence/sqlite-client.js";
 import { ProviderInstanceFailure, ProviderNotRegistered } from "./errors.js";
 import type { ProviderRegistry } from "./provider-registry.js";
-import type { EventSink, SendTurnInput } from "./types.js";
+import type { EventSink, SendTurnInput, TurnResult } from "./types.js";
+
+/**
+ * Synthesized completion result for effects that produce no provider
+ * `TurnResult` (interrupt) or for an idempotent replay where the row was
+ * already executed. Provider state flows back through send_turn results.
+ */
+const REACTOR_COMPLETED_RESULT: TurnResult = {
+	status: "completed",
+	cost: 0,
+	tokens: { input: 0, output: 0 },
+	durationMs: 0,
+	providerStateUpdates: [],
+};
 
 interface ProviderCommandOutboxRow {
 	readonly request_sequence: number;
@@ -66,6 +79,18 @@ class ProviderSideEffectInteractionUnsupported extends Data.TaggedError(
 	}
 }
 
+class ProviderCommandNotExecutable extends Data.TaggedError(
+	"ProviderCommandNotExecutable",
+)<{
+	readonly commandId: string;
+	readonly errorCode: string | null;
+	readonly code: "provider_command_not_executable";
+}> {
+	get message(): string {
+		return `Provider command is no longer executable: ${this.commandId}`;
+	}
+}
+
 export interface ProviderSideEffectReactorOptions {
 	readonly db: SqliteClient;
 	readonly registry: ProviderRegistry;
@@ -91,17 +116,57 @@ export class ProviderSideEffectReactor {
 			const now = this.options.nowMs();
 			const row = yield* this.nextPendingRequest(now);
 			if (!row) return 0;
+			// Recovery / background path: no waiter, so the row outcome is recorded
+			// durably and swallowed here.
+			yield* Effect.either(this.executeRow(row));
+			return 1;
+		});
+	}
 
-			yield* this.markRunning(row, now);
+	/**
+	 * Execute a single committed command by id and surface its provider result
+	 * to a same-process waiter. Shares the single executor (`executeRow`) with
+	 * `drain()`; provider execution is idempotent via the `markRunning` status
+	 * guard. When the row is no longer pending (already drained), the durable
+	 * receipt supplies the outcome.
+	 */
+	runCommand(commandId: string): Effect.Effect<TurnResult, unknown> {
+		return Effect.gen(this, function* () {
+			const row = yield* this.pendingRequestForCommand(commandId);
+			if (row) return yield* this.executeRow(row);
 
+			const receipt = yield* this.receiptOutcome(commandId);
+			if (receipt?.status === "side_effect_completed") {
+				return REACTOR_COMPLETED_RESULT;
+			}
+			return yield* Effect.fail(
+				new ProviderCommandNotExecutable({
+					commandId,
+					errorCode: receipt?.error_code ?? null,
+					code: "provider_command_not_executable",
+				}),
+			);
+		});
+	}
+
+	/**
+	 * Single provider executor: claim the row, run the provider effect, and
+	 * record completion or (retryable) failure. Returns the provider `TurnResult`
+	 * (carrying provider-state updates) on success; fails with the provider error
+	 * on failure so the caller can surface it to a waiter.
+	 */
+	private executeRow(
+		row: ProviderCommandOutboxRow,
+	): Effect.Effect<TurnResult, unknown> {
+		return Effect.gen(this, function* () {
+			yield* this.markRunning(row, this.options.nowMs());
 			const result = yield* Effect.either(this.runProviderEffect(row));
 			if (result._tag === "Left") {
 				yield* this.markFailed(row, result.left, this.options.nowMs());
-				return 1;
+				return yield* Effect.fail(result.left);
 			}
-
 			yield* this.markCompleted(row, this.options.nowMs());
-			return 1;
+			return result.right;
 		});
 	}
 
@@ -160,7 +225,7 @@ export class ProviderSideEffectReactor {
 
 	private runProviderEffect(
 		row: ProviderCommandOutboxRow,
-	): Effect.Effect<void, unknown> {
+	): Effect.Effect<TurnResult, unknown> {
 		return Effect.gen(this, function* () {
 			const instance = yield* this.options.registry.getInstanceEffect(
 				row.provider_id,
@@ -168,16 +233,15 @@ export class ProviderSideEffectReactor {
 
 			if (row.effect_type === "send_turn") {
 				const payload = yield* this.parseSendTurnPayload(row);
-				yield* instance.sendTurnEffect({
+				return yield* instance.sendTurnEffect({
 					...payload,
 					eventSink: this.makeIngestionEventSink(),
 					abortSignal: new AbortController().signal,
 				});
-				return;
 			}
 			if (row.effect_type === "interrupt_turn") {
 				yield* instance.interruptTurnEffect(row.session_id);
-				return;
+				return REACTOR_COMPLETED_RESULT;
 			}
 			return yield* Effect.fail(
 				new UnknownProviderCommandEffect({
@@ -185,6 +249,56 @@ export class ProviderSideEffectReactor {
 					code: "unknown_provider_command_effect",
 				}),
 			);
+		});
+	}
+
+	private pendingRequestForCommand(
+		commandId: string,
+	): Effect.Effect<
+		ProviderCommandOutboxRow | undefined,
+		ProviderCommandStoreFailure
+	> {
+		return Effect.try({
+			try: () =>
+				this.options.db.queryOne<ProviderCommandOutboxRow>(
+					`SELECT request_sequence, command_id, project_key, session_id, provider_id,
+					        effect_type, payload_json, attempt_count
+					 FROM provider_command_outbox
+					 WHERE command_id = ? AND status IN ('pending', 'retryable_failed')
+					 ORDER BY request_sequence
+					 LIMIT 1`,
+					[commandId],
+				),
+			catch: (cause) =>
+				new ProviderCommandStoreFailure({
+					operation: "pendingRequestForCommand",
+					code: "provider_command_store_failure",
+					cause,
+				}),
+		});
+	}
+
+	private receiptOutcome(
+		commandId: string,
+	): Effect.Effect<
+		{ readonly status: string; readonly error_code: string | null } | undefined,
+		ProviderCommandStoreFailure
+	> {
+		return Effect.try({
+			try: () =>
+				this.options.db.queryOne<{
+					readonly status: string;
+					readonly error_code: string | null;
+				}>(
+					"SELECT status, error_code FROM command_receipts WHERE command_id = ?",
+					[commandId],
+				),
+			catch: (cause) =>
+				new ProviderCommandStoreFailure({
+					operation: "receiptOutcome",
+					code: "provider_command_store_failure",
+					cause,
+				}),
 		});
 	}
 

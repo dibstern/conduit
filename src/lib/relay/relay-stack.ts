@@ -675,9 +675,17 @@ export async function createProjectRelay(
 					},
 				}).pipe(Layer.provide(persistenceEffectLayer))
 			: undefined;
+	// The orchestration engine's side-effect reactor consumes the SAME
+	// ProviderRuntimeIngestion instance the relay uses (Effect memoizes the shared
+	// layer reference), so committed provider side effects stream through one
+	// ingestion pipeline — no duplicate event append.
 	const providerOrchestrationDeps =
-		persistenceEffectLayer != null
-			? Layer.merge(openCodeApiLayer, persistenceEffectLayer)
+		persistenceEffectLayer != null && providerRuntimeIngestionLayer != null
+			? Layer.mergeAll(
+					openCodeApiLayer,
+					persistenceEffectLayer,
+					providerRuntimeIngestionLayer,
+				)
 			: openCodeApiLayer;
 	const providerOrchestrationLayer = orchestrationRuntimeLayer.pipe(
 		Layer.provide(providerOrchestrationDeps),
