@@ -1,4 +1,4 @@
-import { Data, Effect } from "effect";
+import { Clock, Data, Duration, Effect } from "effect";
 import type { ProviderRuntimeIngestion } from "../domain/relay/Services/provider-runtime-ingestion-service.js";
 import type { SqliteClient } from "../persistence/sqlite-client.js";
 import { ProviderInstanceFailure, ProviderNotRegistered } from "./errors.js";
@@ -95,9 +95,13 @@ export interface ProviderSideEffectReactorOptions {
 	readonly db: SqliteClient;
 	readonly registry: ProviderRegistry;
 	readonly ingestion: Pick<ProviderRuntimeIngestion, "ingest">;
-	readonly nowMs: () => number;
-	readonly retryDelayMs?: number;
+	/** Optional deterministic override; defaults to the Effect Clock service. */
+	readonly nowMs?: () => number;
+	readonly retryBackoff?: (failureCount: number) => Duration.DurationInput;
 }
+
+const defaultRetryBackoff = (failureCount: number): Duration.DurationInput =>
+	Duration.millis(Math.min(1000 * 2 ** Math.max(0, failureCount - 1), 30_000));
 
 export class ProviderSideEffectReactor {
 	constructor(private readonly options: ProviderSideEffectReactorOptions) {}
@@ -113,7 +117,7 @@ export class ProviderSideEffectReactor {
 
 	runOnce(): Effect.Effect<number, unknown> {
 		return Effect.gen(this, function* () {
-			const now = this.options.nowMs();
+			const now = yield* this.currentTimeMillis();
 			const row = yield* this.nextPendingRequest(now);
 			if (!row) return 0;
 			// Recovery / background path: no waiter, so the row outcome is recorded
@@ -159,15 +163,24 @@ export class ProviderSideEffectReactor {
 		row: ProviderCommandOutboxRow,
 	): Effect.Effect<TurnResult, unknown> {
 		return Effect.gen(this, function* () {
-			yield* this.markRunning(row, this.options.nowMs());
+			const startedAt = yield* this.currentTimeMillis();
+			yield* this.markRunning(row, startedAt);
 			const result = yield* Effect.either(this.runProviderEffect(row));
 			if (result._tag === "Left") {
-				yield* this.markFailed(row, result.left, this.options.nowMs());
+				const failedAt = yield* this.currentTimeMillis();
+				yield* this.markFailed(row, result.left, failedAt);
 				return yield* Effect.fail(result.left);
 			}
-			yield* this.markCompleted(row, this.options.nowMs());
+			const completedAt = yield* this.currentTimeMillis();
+			yield* this.markCompleted(row, completedAt);
 			return result.right;
 		});
+	}
+
+	private currentTimeMillis(): Effect.Effect<number> {
+		return this.options.nowMs
+			? Effect.sync(this.options.nowMs)
+			: Clock.currentTimeMillis;
 	}
 
 	private nextPendingRequest(
@@ -361,8 +374,9 @@ export class ProviderSideEffectReactor {
 		updatedAt: number,
 	): Effect.Effect<void, ProviderCommandStoreFailure> {
 		const retryable = isRetryableProviderFailure(error);
+		const retryBackoff = this.options.retryBackoff ?? defaultRetryBackoff;
 		const nextAttemptAt = retryable
-			? updatedAt + (this.options.retryDelayMs ?? 1000)
+			? updatedAt + Duration.toMillis(retryBackoff(row.attempt_count + 1))
 			: null;
 		const errorCode = providerFailureCode(error);
 		return Effect.try({

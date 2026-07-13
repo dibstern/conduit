@@ -1,5 +1,6 @@
-import { Effect } from "effect";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { describe, it } from "@effect/vitest";
+import { Duration, Effect, TestClock } from "effect";
+import { afterEach, beforeEach, expect, vi } from "vitest";
 import {
 	decodeProviderRuntimeEvent,
 	type ProviderRuntimeEvent,
@@ -73,7 +74,6 @@ describe("ProviderSideEffectReactor", () => {
 			db,
 			registry: new ProviderRegistry([makeProvider(sendTurn)]),
 			ingestion: { ingest: vi.fn(() => Effect.succeed(1)) },
-			nowMs: () => 2000,
 		});
 
 		expect(sendTurn).not.toHaveBeenCalled();
@@ -139,7 +139,6 @@ describe("ProviderSideEffectReactor", () => {
 			db,
 			registry: new ProviderRegistry([makeProvider(sendTurn)]),
 			ingestion: { ingest },
-			nowMs: () => 2000,
 		});
 
 		await Effect.runPromise(reactor.drain());
@@ -147,56 +146,95 @@ describe("ProviderSideEffectReactor", () => {
 		expect(ingest).toHaveBeenCalledWith(runtimeEvent);
 	});
 
-	it("backs off retryable provider failures without hot looping", async () => {
-		let now = 2000;
-		const sendTurn = vi.fn(
-			(
-				_input: SendTurnInput,
-			): Effect.Effect<TurnResult, ProviderInstanceFailure> =>
-				Effect.fail(
-					new ProviderInstanceFailure({
-						providerId: "claude",
-						operation: "sendTurn",
-						cause: { code: "rate_limit", retryable: true },
+	it.effect("backs off retryable provider failures without hot looping", () =>
+		Effect.gen(function* () {
+			let providerCalls = 0;
+			const sendTurn = vi.fn(
+				(
+					_input: SendTurnInput,
+				): Effect.Effect<TurnResult, ProviderInstanceFailure> =>
+					Effect.suspend(() => {
+						providerCalls += 1;
+						if (providerCalls === 5) return Effect.succeed(completedTurn);
+						return Effect.fail(
+							new ProviderInstanceFailure({
+								providerId: "claude",
+								operation: "sendTurn",
+								cause: { code: "rate_limit", retryable: true },
+							}),
+						);
 					}),
-				),
-		);
-		seedSendTurnOutbox(db);
-		const reactor = new ProviderSideEffectReactor({
-			db,
-			registry: new ProviderRegistry([makeProvider(sendTurn)]),
-			ingestion: { ingest: vi.fn(() => Effect.succeed(1)) },
-			nowMs: () => now,
-			retryDelayMs: 500,
-		});
+			);
+			seedSendTurnOutbox(db);
+			const reactor = new ProviderSideEffectReactor({
+				db,
+				registry: new ProviderRegistry([makeProvider(sendTurn)]),
+				ingestion: { ingest: vi.fn(() => Effect.succeed(1)) },
+				retryBackoff: (failureCount) =>
+					Duration.millis(Math.min(100 * 2 ** (failureCount - 1), 400)),
+			});
 
-		await Effect.runPromise(reactor.drain());
-		await Effect.runPromise(reactor.drain());
+			yield* reactor.drain();
+			yield* reactor.drain();
 
-		expect(sendTurn).toHaveBeenCalledTimes(1);
-		expect(
-			db.queryOne<{
-				status: string;
-				attempt_count: number;
-				error_code: string | null;
-				next_attempt_at: number | null;
-			}>(
-				`SELECT status, attempt_count, error_code, next_attempt_at
-				 FROM provider_command_outbox WHERE request_sequence = ?`,
-				[10],
-			),
-		).toEqual({
-			status: "retryable_failed",
-			attempt_count: 1,
-			error_code: "rate_limit",
-			next_attempt_at: 2500,
-		});
+			expect(sendTurn).toHaveBeenCalledTimes(1);
+			expect(readOutboxRetryState(db, 10)).toEqual({
+				status: "retryable_failed",
+				attempt_count: 1,
+				error_code: "rate_limit",
+				next_attempt_at: 100,
+			});
 
-		now = 2500;
-		await Effect.runPromise(reactor.drain());
+			yield* TestClock.adjust("99 millis");
+			yield* reactor.drain();
+			expect(sendTurn).toHaveBeenCalledTimes(1);
 
-		expect(sendTurn).toHaveBeenCalledTimes(2);
-	});
+			yield* TestClock.adjust("1 millis");
+			yield* reactor.drain();
+			expect(sendTurn).toHaveBeenCalledTimes(2);
+			expect(readOutboxRetryState(db, 10)).toMatchObject({
+				attempt_count: 2,
+				next_attempt_at: 300,
+			});
+
+			yield* TestClock.adjust("200 millis");
+			yield* reactor.drain();
+			expect(sendTurn).toHaveBeenCalledTimes(3);
+			expect(readOutboxRetryState(db, 10)).toMatchObject({
+				attempt_count: 3,
+				next_attempt_at: 700,
+			});
+
+			yield* TestClock.adjust("400 millis");
+			yield* reactor.drain();
+			expect(sendTurn).toHaveBeenCalledTimes(4);
+			expect(readOutboxRetryState(db, 10)).toMatchObject({
+				attempt_count: 4,
+				next_attempt_at: 1100,
+			});
+
+			yield* TestClock.adjust("400 millis");
+			yield* reactor.drain();
+			expect(sendTurn).toHaveBeenCalledTimes(5);
+			expect(readOutboxRetryState(db, 10)).toMatchObject({
+				status: "completed",
+				attempt_count: 5,
+			});
+
+			seedSendTurnOutbox(db, {
+				commandId: "cmd-2",
+				requestSequence: 20,
+			});
+			yield* reactor.drain();
+
+			expect(sendTurn).toHaveBeenCalledTimes(6);
+			expect(readOutboxRetryState(db, 20)).toMatchObject({
+				status: "retryable_failed",
+				attempt_count: 1,
+				next_attempt_at: 1200,
+			});
+		}),
+	);
 
 	it("marks provider lookup failures instead of leaving outbox rows running", async () => {
 		seedSendTurnOutbox(db);
@@ -204,7 +242,6 @@ describe("ProviderSideEffectReactor", () => {
 			db,
 			registry: new ProviderRegistry(),
 			ingestion: { ingest: vi.fn(() => Effect.succeed(1)) },
-			nowMs: () => 2000,
 		});
 
 		await Effect.runPromise(reactor.runOnce());
@@ -235,7 +272,6 @@ describe("ProviderSideEffectReactor", () => {
 			db,
 			registry: new ProviderRegistry([makeProvider(sendTurn)]),
 			ingestion: { ingest: vi.fn(() => Effect.succeed(1)) },
-			nowMs: () => 2000,
 		});
 
 		await Effect.runPromise(reactor.runOnce());
@@ -264,7 +300,6 @@ describe("ProviderSideEffectReactor", () => {
 			db,
 			registry: new ProviderRegistry([makeProvider(sendTurn)]),
 			ingestion: { ingest: vi.fn(() => Effect.succeed(1)) },
-			nowMs: () => 2000,
 		});
 
 		await Effect.runPromise(reactor.runOnce());
@@ -310,7 +345,6 @@ describe("ProviderSideEffectReactor", () => {
 			db,
 			registry: new ProviderRegistry([makeProvider(sendTurn)]),
 			ingestion: { ingest: vi.fn(() => Effect.succeed(1)) },
-			nowMs: () => 2000,
 		});
 
 		await Effect.runPromise(reactor.runOnce());
@@ -330,15 +364,21 @@ describe("ProviderSideEffectReactor", () => {
 
 function seedSendTurnOutbox(
 	db: SqliteClient,
-	options: { readonly payloadJson?: string } = {},
+	options: {
+		readonly commandId?: string;
+		readonly payloadJson?: string;
+		readonly requestSequence?: number;
+	} = {},
 ): void {
+	const commandId = options.commandId ?? "cmd-1";
+	const requestSequence = options.requestSequence ?? 10;
 	db.execute(
 		`INSERT INTO command_receipts (
 			command_id, session_id, status, created_at, command_type, project_key,
 			fingerprint_hash, fingerprint_version, side_effect_sequence, updated_at
 		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		[
-			"cmd-1",
+			commandId,
 			"session-1",
 			"side_effect_requested",
 			1000,
@@ -346,7 +386,7 @@ function seedSendTurnOutbox(
 			"project-1",
 			"sha256:abc",
 			1,
-			10,
+			requestSequence,
 			1000,
 		],
 	);
@@ -356,8 +396,8 @@ function seedSendTurnOutbox(
 			effect_type, payload_json, status, attempt_count, requested_at, updated_at
 		) VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', 0, ?, ?)`,
 		[
-			10,
-			"cmd-1",
+			requestSequence,
+			commandId,
 			"project-1",
 			"session-1",
 			"claude",
@@ -374,5 +414,18 @@ function seedSendTurnOutbox(
 			1000,
 			1000,
 		],
+	);
+}
+
+function readOutboxRetryState(db: SqliteClient, requestSequence: number) {
+	return db.queryOne<{
+		status: string;
+		attempt_count: number;
+		error_code: string | null;
+		next_attempt_at: number | null;
+	}>(
+		`SELECT status, attempt_count, error_code, next_attempt_at
+		 FROM provider_command_outbox WHERE request_sequence = ?`,
+		[requestSequence],
 	);
 }
