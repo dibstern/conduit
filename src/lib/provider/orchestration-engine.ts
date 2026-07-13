@@ -163,6 +163,26 @@ const REPLAYED_TURN_RESULT: TurnResult = {
 	providerStateUpdates: [],
 };
 
+/**
+ * Result returned when a durable receipt is still `side_effect_requested` — the
+ * command was committed but never executed (crash between commit and provider
+ * execution). Per the plan's crash policy the provider is NOT re-executed on
+ * replay; the caller receives an explicit incomplete/orphaned status rather than
+ * a synthetic success.
+ */
+const ORPHANED_TURN_RESULT: TurnResult = {
+	status: "interrupted",
+	cost: 0,
+	tokens: { input: 0, output: 0 },
+	durationMs: 0,
+	providerStateUpdates: [],
+	error: {
+		code: "interrupted",
+		message:
+			"Provider command was committed but never executed (orphaned by an earlier crash); not re-executing per crash policy.",
+	},
+};
+
 // ─── OrchestrationEngine ────────────────────────────────────────────────────
 
 export class OrchestrationEngine {
@@ -334,11 +354,13 @@ export class OrchestrationEngine {
 						new CommandFingerprintMismatch({ commandId: command.commandId }),
 					);
 				}
-				if (
-					existing.status === "side_effect_requested" ||
-					existing.status === "side_effect_completed"
-				) {
+				if (existing.status === "side_effect_completed") {
 					return REPLAYED_TURN_RESULT;
+				}
+				if (existing.status === "side_effect_requested") {
+					// Committed but never executed (orphaned). Do not re-execute the
+					// provider; surface an explicit incomplete status.
+					return ORPHANED_TURN_RESULT;
 				}
 			}
 
@@ -402,18 +424,22 @@ export class OrchestrationEngine {
 
 			// The reactor is the single provider executor: it performs the call
 			// once, ingests output, and records completion/failure. Its result
-			// (carrying provider-state updates) is surfaced to the waiter.
-			return yield* durable.reactor.runCommand(command.commandId).pipe(
-				Effect.mapError((cause) =>
-					cause instanceof ProviderInstanceFailure
-						? cause
-						: new ProviderInstanceFailure({
-								providerId: command.providerId,
-								operation: "sendTurn",
-								cause,
-							}),
-				),
-			);
+			// (carrying provider-state updates) is surfaced to the waiter. The
+			// caller's real event sink is threaded through so provider-driven
+			// permission/question interactions resolve exactly as the inline path.
+			return yield* durable.reactor
+				.runCommand(command.commandId, command.input.eventSink)
+				.pipe(
+					Effect.mapError((cause) =>
+						cause instanceof ProviderInstanceFailure
+							? cause
+							: new ProviderInstanceFailure({
+									providerId: command.providerId,
+									operation: "sendTurn",
+									cause,
+								}),
+					),
+				);
 		});
 	}
 

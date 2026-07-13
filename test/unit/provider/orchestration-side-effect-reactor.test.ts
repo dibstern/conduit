@@ -236,6 +236,57 @@ describe("ProviderSideEffectReactor", () => {
 		}),
 	);
 
+	it("does not run the provider when the exclusive markRunning claim is lost (finding #1)", async () => {
+		const sendTurn = vi.fn((_input: SendTurnInput) =>
+			Effect.succeed(completedTurn),
+		);
+		seedSendTurnOutbox(db);
+		// Simulate a concurrent executor that already claimed the row and
+		// completed the command between this fiber's SELECT and markRunning.
+		db.execute(
+			"UPDATE provider_command_outbox SET status = 'running' WHERE request_sequence = ?",
+			[10],
+		);
+		db.execute(
+			"UPDATE command_receipts SET status = 'side_effect_completed' WHERE command_id = ?",
+			["cmd-1"],
+		);
+		const reactor = new ProviderSideEffectReactor({
+			db,
+			registry: new ProviderRegistry([makeProvider(sendTurn)]),
+			ingestion: { ingest: vi.fn(() => Effect.succeed(1)) },
+		});
+
+		// The row this fiber selected while it was still pending.
+		const row = {
+			request_sequence: 10,
+			command_id: "cmd-1",
+			project_key: "project-1",
+			session_id: "session-1",
+			provider_id: "claude",
+			effect_type: "send_turn",
+			payload_json: JSON.stringify({
+				sessionId: "session-1",
+				turnId: "turn-1",
+				prompt: "hello",
+				history: [],
+				providerState: {},
+				workspaceRoot: "/repo",
+			}),
+			attempt_count: 0,
+		};
+		const result = await Effect.runPromise(
+			(
+				reactor as unknown as {
+					executeRow(r: typeof row): Effect.Effect<TurnResult, unknown>;
+				}
+			).executeRow(row),
+		);
+
+		expect(sendTurn).not.toHaveBeenCalled();
+		expect(result.status).toBe("completed");
+	});
+
 	it("marks provider lookup failures instead of leaving outbox rows running", async () => {
 		seedSendTurnOutbox(db);
 		const reactor = new ProviderSideEffectReactor({

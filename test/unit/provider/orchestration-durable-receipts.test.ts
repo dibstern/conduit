@@ -8,6 +8,11 @@ import {
 import { runMigrations } from "../../../src/lib/persistence/migrations.js";
 import { schemaMigrations } from "../../../src/lib/persistence/schema.js";
 import { SqliteClient } from "../../../src/lib/persistence/sqlite-client.js";
+import { ProviderInstanceFailure } from "../../../src/lib/provider/errors.js";
+import {
+	effectiveDispatchFingerprint,
+	fingerprintHash,
+} from "../../../src/lib/provider/orchestration-command-fingerprint.js";
 import {
 	type DurableCommandStoreOptions,
 	OrchestrationEngine,
@@ -294,6 +299,196 @@ describe("OrchestrationEngine durable receipts", () => {
 				);
 				expect(rejectedAgain._tag).toBe("Left");
 				expect(thirdInstance.sendTurnEffect).not.toHaveBeenCalled();
+				db.close();
+			}),
+	);
+
+	it.effect(
+		"resolves provider permission requests through the caller's sink on the durable path (finding #3)",
+		() =>
+			Effect.gen(function* () {
+				const db = SqliteClient.memory();
+				runMigrations(db, schemaMigrations);
+				const command = sendTurnCommand();
+				// The caller's real, interaction-capable sink must answer the
+				// provider's permission request; on the durable path the reactor
+				// used to substitute a failing ingestion-only sink (deny).
+				const requestPermission = vi.fn(() =>
+					Effect.succeed({ decision: "once" as const }),
+				);
+				command.input.eventSink.requestPermission = requestPermission;
+				const registry = new ProviderRegistry();
+				const instance = makeStubInstance("opencode");
+				instance.sendTurnEffect.mockImplementation((input) =>
+					input.eventSink
+						.requestPermission({
+							requestId: "req-1",
+							sessionId: "session-1",
+							turnId: "turn-1",
+							toolName: "Bash",
+							toolInput: { command: "whoami" },
+							providerItemId: "tool-1",
+						})
+						.pipe(Effect.as(COMPLETED)),
+				);
+				registry.registerInstance(instance);
+				const engine = new OrchestrationEngine({
+					registry,
+					durableCommands: makeDurableOptions({ db }),
+				});
+
+				const result = yield* engine.dispatchEffect(command);
+
+				expect(result).toMatchObject({ status: "completed" });
+				expect(requestPermission).toHaveBeenCalledTimes(1);
+				expect(receiptRow(db, "cmd-durable-1")?.status).toBe(
+					"side_effect_completed",
+				);
+				db.close();
+			}),
+	);
+
+	it.effect(
+		"redispatch after retryable failure leaves one live outbox row; drain does not re-invoke the provider (finding #2)",
+		() =>
+			Effect.gen(function* () {
+				const db = SqliteClient.memory();
+				runMigrations(db, schemaMigrations);
+				let providerCalls = 0;
+				const registry = new ProviderRegistry();
+				const instance = makeStubInstance("opencode");
+				instance.sendTurnEffect.mockImplementation(() =>
+					Effect.suspend(() => {
+						providerCalls += 1;
+						if (providerCalls === 1) {
+							return Effect.fail(
+								new ProviderInstanceFailure({
+									providerId: "opencode",
+									operation: "sendTurn",
+									cause: { code: "rate_limit", retryable: true },
+								}),
+							);
+						}
+						return Effect.succeed(COMPLETED);
+					}),
+				);
+				registry.registerInstance(instance);
+				const engine = new OrchestrationEngine({
+					registry,
+					durableCommands: makeDurableOptions({ db }),
+				});
+
+				const first = yield* Effect.either(
+					engine.dispatchEffect(sendTurnCommand()),
+				);
+				expect(first._tag).toBe("Left");
+				expect(providerCalls).toBe(1);
+
+				const retry = yield* engine.dispatchEffect(sendTurnCommand());
+				expect(retry).toMatchObject({ status: "completed" });
+				expect(providerCalls).toBe(2);
+
+				// The leftover-pending-row bug made a background drain invoke the
+				// provider a third time for the already-completed command.
+				yield* engine.drainSideEffects();
+				expect(providerCalls).toBe(2);
+
+				const rows = db.query<{ status: string }>(
+					`SELECT status FROM provider_command_outbox
+					 WHERE command_id = ? ORDER BY request_sequence`,
+					["cmd-durable-1"],
+				);
+				expect(rows.map((r) => r.status)).toEqual(["completed"]);
+				db.close();
+			}),
+	);
+
+	it.effect(
+		"records provider-declared error turns as failed, not completed (finding #4)",
+		() =>
+			Effect.gen(function* () {
+				const db = SqliteClient.memory();
+				runMigrations(db, schemaMigrations);
+				const errorTurn: TurnResult = {
+					status: "error",
+					cost: 0,
+					tokens: { input: 0, output: 0 },
+					durationMs: 0,
+					error: { code: "provider_error", message: "boom" },
+					providerStateUpdates: [],
+				};
+				const registry = new ProviderRegistry();
+				const instance = makeStubInstance("opencode");
+				// Provider declares failure on the SUCCESS channel.
+				instance.sendTurnEffect.mockReturnValue(Effect.succeed(errorTurn));
+				registry.registerInstance(instance);
+				const engine = new OrchestrationEngine({
+					registry,
+					durableCommands: makeDurableOptions({ db }),
+				});
+
+				const result = yield* engine.dispatchEffect(sendTurnCommand());
+				expect(result).toMatchObject({ status: "error" });
+				expect(receiptRow(db, "cmd-durable-1")?.status).toBe(
+					"side_effect_failed",
+				);
+
+				// Restart replay must NOT synthesize success without executing.
+				const secondRegistry = new ProviderRegistry();
+				const secondInstance = makeStubInstance("opencode");
+				secondRegistry.registerInstance(secondInstance);
+				const secondEngine = new OrchestrationEngine({
+					registry: secondRegistry,
+					durableCommands: makeDurableOptions({ db }),
+				});
+				yield* Effect.either(secondEngine.dispatchEffect(sendTurnCommand()));
+				expect(secondInstance.sendTurnEffect).toHaveBeenCalled();
+				db.close();
+			}),
+	);
+
+	it.effect(
+		"replays an orphaned committed-but-unexecuted command as incomplete, not completed (finding #7)",
+		() =>
+			Effect.gen(function* () {
+				const db = SqliteClient.memory();
+				runMigrations(db, schemaMigrations);
+				const command = sendTurnCommand();
+				// Simulate a crash after commit but before execution: a
+				// side_effect_requested receipt whose fingerprint matches the command.
+				const hash = fingerprintHash(effectiveDispatchFingerprint(command));
+				db.execute(
+					`INSERT INTO command_receipts (
+						command_id, session_id, status, created_at, command_type,
+						project_key, fingerprint_hash, fingerprint_version,
+						side_effect_sequence, updated_at
+					) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+					[
+						command.commandId,
+						"session-1",
+						"side_effect_requested",
+						1000,
+						"send_turn",
+						"project-1",
+						hash,
+						2,
+						1,
+						1000,
+					],
+				);
+				const registry = new ProviderRegistry();
+				const instance = makeStubInstance("opencode");
+				registry.registerInstance(instance);
+				const engine = new OrchestrationEngine({
+					registry,
+					durableCommands: makeDurableOptions({ db }),
+				});
+
+				const result = yield* engine.dispatchEffect(command);
+
+				expect(result.status).toBe("interrupted");
+				expect(result.status).not.toBe("completed");
+				expect(instance.sendTurnEffect).not.toHaveBeenCalled();
 				db.close();
 			}),
 	);

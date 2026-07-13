@@ -75,6 +75,16 @@ export class DurableCommandCommitRepository {
 		request: DurableCommandOutboxRequest,
 		updatedAt: number,
 	): void {
+		// One live execution claim per command id. A re-dispatch after a
+		// retryable failure recommits the same command; supersede any prior
+		// non-terminal outbox row (pending/running/retryable_failed) so the fresh
+		// pending row is the only executable claim. Terminal rows (completed/
+		// failed) are preserved as history.
+		this.db.execute(
+			`DELETE FROM provider_command_outbox
+			 WHERE command_id = ? AND status NOT IN ('completed', 'failed')`,
+			[request.commandId],
+		);
 		this.db.execute(
 			`INSERT INTO provider_command_outbox (
 				request_sequence, command_id, project_key, session_id, provider_id,

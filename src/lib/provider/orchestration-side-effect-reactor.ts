@@ -133,23 +133,22 @@ export class ProviderSideEffectReactor {
 	 * `drain()`; provider execution is idempotent via the `markRunning` status
 	 * guard. When the row is no longer pending (already drained), the durable
 	 * receipt supplies the outcome.
+	 *
+	 * `interactions` is the caller's real interaction-capable event sink for the
+	 * same-process dispatch path. Provider output still streams to the durable
+	 * ProviderRuntimeIngestion, but permission/question requests route through
+	 * this sink so Claude tool approvals and `AskUserQuestion` behave exactly as
+	 * the inline path did. The recovery/`drain()` path has no waiter, so it omits
+	 * it and interactions remain unsupported.
 	 */
-	runCommand(commandId: string): Effect.Effect<TurnResult, unknown> {
+	runCommand(
+		commandId: string,
+		interactions?: EventSink,
+	): Effect.Effect<TurnResult, unknown> {
 		return Effect.gen(this, function* () {
 			const row = yield* this.pendingRequestForCommand(commandId);
-			if (row) return yield* this.executeRow(row);
-
-			const receipt = yield* this.receiptOutcome(commandId);
-			if (receipt?.status === "side_effect_completed") {
-				return REACTOR_COMPLETED_RESULT;
-			}
-			return yield* Effect.fail(
-				new ProviderCommandNotExecutable({
-					commandId,
-					errorCode: receipt?.error_code ?? null,
-					code: "provider_command_not_executable",
-				}),
-			);
+			if (row) return yield* this.executeRow(row, interactions);
+			return yield* this.durableOutcome(commandId);
 		});
 	}
 
@@ -161,19 +160,61 @@ export class ProviderSideEffectReactor {
 	 */
 	private executeRow(
 		row: ProviderCommandOutboxRow,
+		interactions?: EventSink,
 	): Effect.Effect<TurnResult, unknown> {
 		return Effect.gen(this, function* () {
 			const startedAt = yield* this.currentTimeMillis();
-			yield* this.markRunning(row, startedAt);
-			const result = yield* Effect.either(this.runProviderEffect(row));
+			// The `pending -> running` update is the exclusive execution claim.
+			// If it changes no rows another executor already claimed this row, so
+			// do NOT run the provider effect; surface the durable outcome instead.
+			const claimed = yield* this.markRunning(row, startedAt);
+			if (claimed === 0) {
+				return yield* this.durableOutcome(row.command_id);
+			}
+			const result = yield* Effect.either(
+				this.runProviderEffect(row, interactions),
+			);
 			if (result._tag === "Left") {
 				const failedAt = yield* this.currentTimeMillis();
 				yield* this.markFailed(row, result.left, failedAt);
 				return yield* Effect.fail(result.left);
 			}
+			const turn = result.right;
+			if (turn.status !== "completed") {
+				// Provider-declared failure delivered on the success channel (e.g.
+				// TurnResult { status: "error" | "interrupted" }). Record the true
+				// failed outcome durably so restart replay never synthesizes a
+				// completed receipt, then surface the real result to the waiter.
+				const failedAt = yield* this.currentTimeMillis();
+				yield* this.markResultFailed(row, turn, failedAt);
+				return turn;
+			}
 			const completedAt = yield* this.currentTimeMillis();
 			yield* this.markCompleted(row, completedAt);
-			return result.right;
+			return turn;
+		});
+	}
+
+	/**
+	 * Durable outcome for a command that this fiber did not execute (lost the
+	 * `markRunning` claim, or the row was already drained): completed receipts
+	 * replay the synthesized ack; anything else is not executable.
+	 */
+	private durableOutcome(
+		commandId: string,
+	): Effect.Effect<TurnResult, unknown> {
+		return Effect.gen(this, function* () {
+			const receipt = yield* this.receiptOutcome(commandId);
+			if (receipt?.status === "side_effect_completed") {
+				return REACTOR_COMPLETED_RESULT;
+			}
+			return yield* Effect.fail(
+				new ProviderCommandNotExecutable({
+					commandId,
+					errorCode: receipt?.error_code ?? null,
+					code: "provider_command_not_executable",
+				}),
+			);
 		});
 	}
 
@@ -210,13 +251,15 @@ export class ProviderSideEffectReactor {
 		});
 	}
 
+	/** Returns the number of rows updated: 1 when this fiber won the exclusive
+	 * `pending -> running` claim, 0 when another executor already claimed it. */
 	private markRunning(
 		row: ProviderCommandOutboxRow,
 		updatedAt: number,
-	): Effect.Effect<void, ProviderCommandStoreFailure> {
+	): Effect.Effect<number, ProviderCommandStoreFailure> {
 		return Effect.try({
 			try: () => {
-				this.options.db.execute(
+				const { changes } = this.options.db.execute(
 					`UPDATE provider_command_outbox
 					 SET status = 'running',
 					     attempt_count = attempt_count + 1,
@@ -226,6 +269,7 @@ export class ProviderSideEffectReactor {
 					   AND status IN ('pending', 'retryable_failed')`,
 					[updatedAt, row.request_sequence],
 				);
+				return Number(changes);
 			},
 			catch: (cause) =>
 				new ProviderCommandStoreFailure({
@@ -238,6 +282,7 @@ export class ProviderSideEffectReactor {
 
 	private runProviderEffect(
 		row: ProviderCommandOutboxRow,
+		interactions?: EventSink,
 	): Effect.Effect<TurnResult, unknown> {
 		return Effect.gen(this, function* () {
 			const instance = yield* this.options.registry.getInstanceEffect(
@@ -248,7 +293,7 @@ export class ProviderSideEffectReactor {
 				const payload = yield* this.parseSendTurnPayload(row);
 				return yield* instance.sendTurnEffect({
 					...payload,
-					eventSink: this.makeIngestionEventSink(),
+					eventSink: this.makeReactorEventSink(interactions),
 					abortSignal: new AbortController().signal,
 				});
 			}
@@ -368,17 +413,48 @@ export class ProviderSideEffectReactor {
 		});
 	}
 
+	/** Failure from the Effect error channel (thrown/failed provider effect). */
 	private markFailed(
 		row: ProviderCommandOutboxRow,
 		error: unknown,
 		updatedAt: number,
 	): Effect.Effect<void, ProviderCommandStoreFailure> {
-		const retryable = isRetryableProviderFailure(error);
+		return this.writeFailure(
+			row,
+			isRetryableProviderFailure(error),
+			providerFailureCode(error),
+			updatedAt,
+		);
+	}
+
+	/**
+	 * Failure delivered on the success channel as a non-`completed` TurnResult
+	 * (provider-declared error/interrupted). Recorded as a failed receipt so
+	 * restart replay reflects the true outcome rather than synthesizing success.
+	 */
+	private markResultFailed(
+		row: ProviderCommandOutboxRow,
+		turn: TurnResult,
+		updatedAt: number,
+	): Effect.Effect<void, ProviderCommandStoreFailure> {
+		return this.writeFailure(
+			row,
+			turn.error?.retryable === true,
+			turn.error?.code ?? turn.status,
+			updatedAt,
+		);
+	}
+
+	private writeFailure(
+		row: ProviderCommandOutboxRow,
+		retryable: boolean,
+		errorCode: string,
+		updatedAt: number,
+	): Effect.Effect<void, ProviderCommandStoreFailure> {
 		const retryBackoff = this.options.retryBackoff ?? defaultRetryBackoff;
 		const nextAttemptAt = retryable
 			? updatedAt + Duration.toMillis(retryBackoff(row.attempt_count + 1))
 			: null;
-		const errorCode = providerFailureCode(error);
 		return Effect.try({
 			try: () => {
 				this.options.db.runInTransaction(() => {
@@ -414,25 +490,53 @@ export class ProviderSideEffectReactor {
 		});
 	}
 
-	private makeIngestionEventSink(): EventSink {
+	/**
+	 * Event sink handed to the provider during execution. Provider OUTPUT always
+	 * streams to the durable ProviderRuntimeIngestion (the mandatory persistence
+	 * seam). INTERACTIONS (permission/question) route through the caller's real
+	 * sink on the same-process dispatch path so Claude tool approvals and
+	 * `AskUserQuestion` resolve; on the recovery/`drain()` path there is no waiter
+	 * to answer them, so they remain unsupported.
+	 */
+	private makeReactorEventSink(interactions?: EventSink): EventSink {
+		const push: EventSink["push"] = (event) =>
+			this.options.ingestion.ingest(event).pipe(Effect.asVoid);
+		if (!interactions) {
+			return {
+				push,
+				requestPermission: () =>
+					Effect.fail(
+						new ProviderSideEffectInteractionUnsupported({
+							operation: "requestPermission",
+							code: "provider_side_effect_interaction_unsupported",
+						}),
+					),
+				requestQuestion: () =>
+					Effect.fail(
+						new ProviderSideEffectInteractionUnsupported({
+							operation: "requestQuestion",
+							code: "provider_side_effect_interaction_unsupported",
+						}),
+					),
+				resolvePermission: () => Effect.void,
+				resolveQuestion: () => Effect.void,
+			};
+		}
 		return {
-			push: (event) => this.options.ingestion.ingest(event).pipe(Effect.asVoid),
-			requestPermission: () =>
-				Effect.fail(
-					new ProviderSideEffectInteractionUnsupported({
-						operation: "requestPermission",
-						code: "provider_side_effect_interaction_unsupported",
-					}),
-				),
-			requestQuestion: () =>
-				Effect.fail(
-					new ProviderSideEffectInteractionUnsupported({
-						operation: "requestQuestion",
-						code: "provider_side_effect_interaction_unsupported",
-					}),
-				),
-			resolvePermission: () => Effect.void,
-			resolveQuestion: () => Effect.void,
+			push,
+			requestPermission: (request) => interactions.requestPermission(request),
+			requestQuestion: (request) => interactions.requestQuestion(request),
+			resolvePermission: (requestId, response) =>
+				interactions.resolvePermission(requestId, response),
+			resolveQuestion: (requestId, answers) =>
+				interactions.resolveQuestion(requestId, answers),
+			...(interactions.cancelSessionInteractions
+				? {
+						cancelSessionInteractions: (reason: string) =>
+							// biome-ignore lint/style/noNonNullAssertion: guarded by the truthy check above.
+							interactions.cancelSessionInteractions!(reason),
+					}
+				: {}),
 		};
 	}
 }
