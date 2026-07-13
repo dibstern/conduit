@@ -569,8 +569,8 @@ describe("CanonicalEventTranslator", () => {
 		it("translates to canonical permission.resolved", () => {
 			const event = makeSSEEvent("permission.replied", {
 				sessionID: SESSION_ID,
-				permissionID: "perm-001",
-				response: "always",
+				requestID: "perm-001",
+				reply: "always",
 			});
 
 			const events = assertEvents(translator.translate(event, SESSION_ID));

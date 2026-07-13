@@ -699,10 +699,18 @@ export const OpenCodeMessageListResponseSchema = Schema.Array(
 ) as unknown as Schema.Schema<OpenCodeMessageWithParts[]>;
 
 type OpenCodeSdkEventType = SdkEvent["type"];
+// Gap events: the SDK's generated Event union either omits these entirely
+// (message.created, message.part.delta, permission.asked, question.asked) or
+// declares a shape that disagrees with the real server binary. permission.replied
+// is the latter case — the npm SDK types say { sessionID, permissionID, response }
+// but a live opencode 1.17.18 server emits { sessionID, requestID, reply } (wire
+// verified). Excluding it here keeps our schema following the wire instead of the
+// incorrect SDK type in the conformance check below.
 type OpenCodeGapEventType =
 	| "message.created"
 	| "message.part.delta"
 	| "permission.asked"
+	| "permission.replied"
 	| "question.asked";
 
 export const OPEN_CODE_CONSUMED_EVENT_TYPES = [
@@ -825,10 +833,13 @@ const OpenCodePermissionAskedEventSchema = Schema.Struct({
 
 const OpenCodePermissionRepliedEventSchema = Schema.Struct({
 	type: Schema.Literal("permission.replied"),
+	// Wire-verified against opencode 1.17.18 (see OpenCodeGapEventType note):
+	// the real event is { sessionID, requestID, reply }, not the SDK's
+	// { sessionID, permissionID, response }.
 	properties: Schema.Struct({
 		sessionID: Schema.String,
-		permissionID: Schema.String,
-		response: Schema.String,
+		requestID: Schema.String,
+		reply: Schema.String,
 	}).pipe(Schema.extend(OpenCodeOpaquePropertiesSchema)),
 });
 

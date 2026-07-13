@@ -480,8 +480,8 @@ describe("handleSSEEvent", () => {
 			type: "permission.replied",
 			properties: {
 				sessionID: "s1",
-				permissionID: "perm-1",
-				response: "once",
+				requestID: "perm-1",
+				reply: "once",
 			},
 		};
 		handleSSEEvent(deps, event);

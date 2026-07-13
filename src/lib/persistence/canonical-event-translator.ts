@@ -461,10 +461,11 @@ export class CanonicalEventTranslator {
 
 		return [
 			canonicalEvent("permission.resolved", sessionId, {
-				id: event.properties.permissionID,
-				// OpenCode 1.17.18 reports the actual reply ("once" | "always" |
-				// "reject") on the event; it was previously hardcoded to "once".
-				decision: event.properties.response,
+				// `requestID` is the replied-to permission id (== asked event's
+				// properties.id); `reply` is the actual decision. Verified via
+				// live wire capture against opencode 1.17.18.
+				id: event.properties.requestID,
+				decision: event.properties.reply,
 			}),
 		];
 	}

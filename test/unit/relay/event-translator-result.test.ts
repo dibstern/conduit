@@ -39,7 +39,7 @@ describe("translator returns TranslateResult", () => {
 		// permission.replied is handled by the bridge, not the translator
 		const result = translator.translate({
 			type: "permission.replied",
-			properties: { id: "perm1" },
+			properties: { sessionID: "s1", requestID: "perm1", reply: "once" },
 		});
 		expect(result.ok).toBe(false);
 		if (!result.ok) {

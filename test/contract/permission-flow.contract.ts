@@ -90,6 +90,40 @@ describe("AC3 — Permission Flow Shape Validation", () => {
 		});
 	});
 
+	// Guards against the SDK-vs-server skew that broke permission clearing:
+	// npm @opencode-ai/sdk types declare permission.replied as
+	// { permissionID, response }, but the real server binary emits
+	// { requestID, reply }. This asserts the LIVE /doc — not the committed
+	// snapshot — so the wire shape our consumers depend on cannot drift silently.
+	describe("Live permission event shapes (/doc)", () => {
+		it("permission.asked payload exposes permission + patterns", async () => {
+			if (skipIfNoServer()) return;
+			const doc = await apiGet<{
+				components?: { schemas?: Record<string, unknown> };
+			}>("/doc");
+			const asked = doc.components?.schemas?.["EventPermissionAsked"] as
+				| { properties?: { properties?: { properties?: object } } }
+				| undefined;
+			const keys = Object.keys(asked?.properties?.properties?.properties ?? {});
+			expect(keys).toEqual(expect.arrayContaining(["permission", "patterns"]));
+		});
+
+		it("permission.replied payload exposes requestID + reply (not permissionID/response)", async () => {
+			if (skipIfNoServer()) return;
+			const doc = await apiGet<{
+				components?: { schemas?: Record<string, unknown> };
+			}>("/doc");
+			const replied = doc.components?.schemas?.["EventPermissionReplied"] as
+				| { properties?: { properties?: { properties?: object } } }
+				| undefined;
+			const keys = Object.keys(
+				replied?.properties?.properties?.properties ?? {},
+			);
+			expect(keys).toEqual(expect.arrayContaining(["requestID", "reply"]));
+			expect(keys).not.toContain("permissionID");
+		});
+	});
+
 	describe("Permission reply values", () => {
 		it("our assumed reply values match snapshot spec", async () => {
 			if (skipIfNoServer()) return;

@@ -798,7 +798,7 @@ export function handleSSEEvent(deps: SSEWiringDeps, event: SSEEvent): void {
 	}
 	if (isPermissionRepliedEvent(event)) {
 		deps.pendingInteractions.markPermissionReplied(
-			event.properties.permissionID,
+			event.properties.requestID,
 		);
 	}
 
@@ -828,7 +828,7 @@ export const handleSSEEventEffect = (
 		}
 		if (isPermissionRepliedEvent(event)) {
 			yield* pendingInteractions.markPermissionReplied(
-				event.properties.permissionID,
+				event.properties.requestID,
 			);
 		}
 
