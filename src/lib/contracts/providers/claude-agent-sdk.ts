@@ -89,7 +89,8 @@ type ClaudeSDKReadStreamContentBlock =
 				| "tool_search_tool_result"
 				| "mcp_tool_result"
 				| "container_upload"
-				| "compaction";
+				| "compaction"
+				| "fallback";
 	  };
 
 type ClaudeSDKReadStreamDelta =
@@ -150,6 +151,7 @@ function isClaudeSDKReadStreamContentBlock(
 		case "mcp_tool_result":
 		case "container_upload":
 		case "compaction":
+		case "fallback":
 			return true;
 		default:
 			return false;
