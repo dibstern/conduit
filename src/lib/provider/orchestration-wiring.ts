@@ -4,6 +4,7 @@
 // instances, engine) from an OpenCodeClient. Used by relay-stack.ts to
 // instantiate the provider layer alongside the existing relay pipeline.
 
+import { randomUUID } from "node:crypto";
 import { Context, Effect, Layer, type Scope } from "effect";
 import { OpenCodeAPITag } from "../domain/provider/Services/opencode-api-service.js";
 import { OrchestrationEngineTag } from "../domain/relay/Services/services.js";
@@ -35,12 +36,14 @@ export interface OrchestrationLayerOptions {
 	readonly client: OpenCodeAPI;
 	readonly workspaceRoot?: string;
 	readonly persistenceDbPath?: string;
+	readonly projectKey?: string;
 	readonly sessionBindingReadModel?: ProviderSessionBindingReadModel;
 }
 
 export interface OrchestrationRuntimeLayerOptions {
 	readonly workspaceRoot?: string;
 	readonly persistenceDbPath?: string;
+	readonly projectKey?: string;
 }
 
 export interface OrchestrationLayer {
@@ -152,9 +155,24 @@ const createOrchestrationComponentsEffect = (
 			sessionBindingDb != null
 				? new SqliteProviderSessionBindingReadModel(sessionBindingDb)
 				: undefined;
+		// Durable command receipts share the persistence DB with the session
+		// binding read model. `now`/`generateId` are supplied at this wiring edge
+		// (wall clock + random) so core orchestration stays free of Date.now /
+		// global randomness.
+		const durableCommands =
+			sessionBindingDb != null
+				? {
+						db: sessionBindingDb,
+						projectKey:
+							options.projectKey ?? options.workspaceRoot ?? process.cwd(),
+						now: () => Date.now(),
+						generateId: () => `disp_${randomUUID()}`,
+					}
+				: undefined;
 		const engine = new OrchestrationEngine({
 			registry,
 			...(sessionBindingReadModel != null ? { sessionBindingReadModel } : {}),
+			...(durableCommands != null ? { durableCommands } : {}),
 		});
 		return { engine, registry, openCodeInstance };
 	});
@@ -223,6 +241,9 @@ export const makeOrchestrationRuntimeLayer = (
 					: {}),
 				...(options.persistenceDbPath != null
 					? { persistenceDbPath: options.persistenceDbPath }
+					: {}),
+				...(options.projectKey != null
+					? { projectKey: options.projectKey }
 					: {}),
 			});
 			yield* Effect.addFinalizer(() => components.engine.shutdownEffect());

@@ -40,7 +40,18 @@ export class DurableCommandCommitRepository {
 				command_id, session_id, status, result_sequence, error, created_at,
 				command_type, project_key, fingerprint_hash, fingerprint_version,
 				accepted_sequence, side_effect_sequence, error_code, updated_at
-			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			ON CONFLICT (command_id) DO UPDATE SET
+				status = excluded.status,
+				result_sequence = excluded.result_sequence,
+				command_type = excluded.command_type,
+				project_key = excluded.project_key,
+				fingerprint_hash = excluded.fingerprint_hash,
+				fingerprint_version = excluded.fingerprint_version,
+				accepted_sequence = excluded.accepted_sequence,
+				side_effect_sequence = excluded.side_effect_sequence,
+				error_code = excluded.error_code,
+				updated_at = excluded.updated_at`,
 			[
 				receipt.commandId,
 				receipt.sessionId,

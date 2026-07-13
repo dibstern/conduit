@@ -7,12 +7,27 @@
 import { Deferred, Effect } from "effect";
 
 import { createLogger } from "../logger.js";
+import type { SqliteClient } from "../persistence/sqlite-client.js";
 import {
+	CommandFingerprintMismatch,
+	CommandIdGenerationFailed,
 	MissingCommandId,
 	type OrchestrationError,
 	ProviderInstanceFailure,
 	SessionProviderNotBound,
+	StaleCommandRejected,
 } from "./errors.js";
+import { DurableCommandCommitRepository } from "./orchestration-command-commit.js";
+import {
+	effectiveDispatchFingerprint,
+	fingerprintHash,
+} from "./orchestration-command-fingerprint.js";
+import { decideDurableSendTurnCommand } from "./orchestration-decider.js";
+import {
+	CommandReadModelRepository,
+	type CommandReadModelSnapshot,
+	isCommandScopeTombstoned,
+} from "./orchestration-read-model.js";
 import type { ProviderRegistry } from "./provider-registry.js";
 import {
 	InMemoryProviderSessionBindingReadModel,
@@ -21,6 +36,7 @@ import {
 import type {
 	PermissionDecision,
 	ProviderCapabilities,
+	ProviderInstance,
 	SendTurnInput,
 	TurnResult,
 } from "./types.js";
@@ -92,16 +108,58 @@ export interface SessionBinding {
 
 // ─── Engine Options ─────────────────────────────────────────────────────────
 
+/**
+ * Durable command store wiring. When supplied, the engine treats durable
+ * command receipts as the authoritative dedupe: it checks the receipt before
+ * dispatch, rejects reused ids with a changed effective-dispatch fingerprint,
+ * and replays accepted commands after restart without a provider call. The
+ * in-memory `inFlightCommands` map remains only a same-process waiter.
+ *
+ * `now`/`generateId` are injected so tests can control time and force id-gen
+ * failures; production supplies wall-clock and a random id at the wiring edge.
+ */
+export interface DurableCommandStoreOptions {
+	readonly db: SqliteClient;
+	readonly projectKey: string;
+	readonly now: () => number;
+	readonly generateId: () => string;
+}
+
 export interface OrchestrationEngineOptions {
 	readonly registry: ProviderRegistry;
 	readonly sessionBindingReadModel?: ProviderSessionBindingReadModel;
+	readonly durableCommands?: DurableCommandStoreOptions;
 }
+
+interface DurableCommandRuntime {
+	readonly commit: DurableCommandCommitRepository;
+	readonly receipts: CommandReadModelRepository;
+	readonly db: SqliteClient;
+	readonly projectKey: string;
+	readonly now: () => number;
+	readonly generateId: () => string;
+	readonly snapshot: CommandReadModelSnapshot;
+}
+
+/**
+ * Result returned when a durable receipt replays an already-accepted send_turn
+ * without re-invoking the provider (restart / duplicate). Result payloads are
+ * not persisted in receipts, so the ack shape is synthesized.
+ */
+const REPLAYED_TURN_RESULT: TurnResult = {
+	status: "completed",
+	cost: 0,
+	tokens: { input: 0, output: 0 },
+	durationMs: 0,
+	providerStateUpdates: [],
+};
 
 // ─── OrchestrationEngine ────────────────────────────────────────────────────
 
 export class OrchestrationEngine {
 	private readonly registry: ProviderRegistry;
 	private readonly sessionBindingReadModel: ProviderSessionBindingReadModel;
+	private readonly durable?: DurableCommandRuntime;
 	private readonly inFlightCommands = new Map<
 		string,
 		Deferred.Deferred<OrchestrationResult, OrchestrationError>
@@ -112,6 +170,22 @@ export class OrchestrationEngine {
 		this.sessionBindingReadModel =
 			options.sessionBindingReadModel ??
 			new InMemoryProviderSessionBindingReadModel();
+		if (options.durableCommands) {
+			const durable = options.durableCommands;
+			const receipts = new CommandReadModelRepository(durable.db);
+			this.durable = {
+				commit: new DurableCommandCommitRepository(durable.db),
+				receipts,
+				db: durable.db,
+				projectKey: durable.projectKey,
+				now: durable.now,
+				generateId: durable.generateId,
+				// Narrow command read-model bootstrap: load only the command decision
+				// snapshot (receipts + stale-command tombstones), never the full
+				// relay/UI snapshot or message history.
+				snapshot: receipts.bootstrap(),
+			};
+		}
 	}
 
 	dispatchEffect(
@@ -207,11 +281,202 @@ export class OrchestrationEngine {
 	private handleSendTurnEffect(
 		command: SendTurnCommand,
 	): Effect.Effect<TurnResult, OrchestrationError> {
+		return this.durable
+			? this.handleDurableSendTurnEffect(command, this.durable)
+			: this.handleInlineSendTurnEffect(command);
+	}
+
+	/**
+	 * Durable-receipt send_turn path. Order matters: fingerprint + receipt check
+	 * and id generation happen before provider lookup and before any durable
+	 * write, so a duplicate replays, a fingerprint mismatch rejects, and an
+	 * id-gen failure fails — all without consuming a receipt or calling the
+	 * provider. Provider execution stays inline (current behavior); the reactor
+	 * cutover is cev.5.
+	 */
+	private handleDurableSendTurnEffect(
+		command: SendTurnCommand,
+		durable: DurableCommandRuntime,
+	): Effect.Effect<TurnResult, OrchestrationError> {
 		return Effect.gen(this, function* () {
+			const hash = fingerprintHash(effectiveDispatchFingerprint(command));
+
+			const existing = yield* Effect.sync(() =>
+				durable.receipts.checkReceipt(command.commandId),
+			);
+			if (existing) {
+				if (
+					existing.fingerprintHash !== undefined &&
+					existing.fingerprintHash !== hash
+				) {
+					return yield* Effect.fail(
+						new CommandFingerprintMismatch({ commandId: command.commandId }),
+					);
+				}
+				if (
+					existing.status === "side_effect_requested" ||
+					existing.status === "side_effect_completed"
+				) {
+					return REPLAYED_TURN_RESULT;
+				}
+			}
+
+			if (
+				isCommandScopeTombstoned(
+					durable.snapshot,
+					"session",
+					command.input.sessionId,
+				)
+			) {
+				return yield* Effect.fail(
+					new StaleCommandRejected({
+						commandId: command.commandId,
+						scopeKind: "session",
+						scopeId: command.input.sessionId,
+					}),
+				);
+			}
+
+			// Injected id generation before receipt consumption / provider lookup.
+			const dispatchId = yield* Effect.try({
+				try: () => durable.generateId(),
+				catch: (cause) =>
+					new CommandIdGenerationFailed({
+						commandId: command.commandId,
+						cause,
+					}),
+			});
+			const nowMs = durable.now();
+
+			// Provider lookup before durable commit: a lookup failure consumes no
+			// receipt and can be retried after registration.
 			const instance = yield* this.registry.getInstanceEffect(
 				command.providerId,
 			);
 
+			yield* Effect.try({
+				try: () =>
+					this.commitAcceptedSendTurn(
+						command,
+						durable,
+						hash,
+						dispatchId,
+						nowMs,
+					),
+				catch: (cause) =>
+					new ProviderInstanceFailure({
+						providerId: command.providerId,
+						operation: "commitSendTurn",
+						cause,
+					}),
+			});
+
+			return yield* this.sendTurnThroughInstanceEffect(command, instance).pipe(
+				Effect.tap(() =>
+					Effect.sync(() =>
+						this.markSendTurnCompleted(
+							durable,
+							command.commandId,
+							durable.now(),
+						),
+					),
+				),
+				Effect.tapError(() =>
+					Effect.sync(() =>
+						this.rollbackAcceptedSendTurn(durable, command.commandId),
+					),
+				),
+			);
+		});
+	}
+
+	private commitAcceptedSendTurn(
+		command: SendTurnCommand,
+		durable: DurableCommandRuntime,
+		fingerprintHashValue: string,
+		dispatchId: string,
+		nowMs: number,
+	): void {
+		const requestSequence =
+			(durable.db.queryOne<{ readonly m: number }>(
+				"SELECT COALESCE(MAX(request_sequence), 0) AS m FROM provider_command_outbox",
+			)?.m ?? 0) + 1;
+		const {
+			eventSink: _eventSink,
+			abortSignal: _abortSignal,
+			...payload
+		} = command.input;
+		const payloadJson = JSON.stringify({ ...payload, dispatchId });
+		durable.commit.commit(
+			decideDurableSendTurnCommand({
+				commandId: command.commandId,
+				projectKey: durable.projectKey,
+				sessionId: command.input.sessionId,
+				providerId: command.providerId,
+				fingerprintHash: fingerprintHashValue,
+				nowMs,
+				requestSequence,
+				payloadJson,
+				events: [],
+			}),
+		);
+	}
+
+	private markSendTurnCompleted(
+		durable: DurableCommandRuntime,
+		commandId: string,
+		nowMs: number,
+	): void {
+		durable.db.runInTransaction(() => {
+			durable.db.execute(
+				"UPDATE command_receipts SET status = 'side_effect_completed', updated_at = ? WHERE command_id = ?",
+				[nowMs, commandId],
+			);
+			durable.db.execute(
+				"UPDATE provider_command_outbox SET status = 'completed', updated_at = ? WHERE command_id = ?",
+				[nowMs, commandId],
+			);
+		});
+	}
+
+	/**
+	 * Inline provider failure (non-crash): remove the accepted receipt + outbox
+	 * row so a fresh dispatch can retry, preserving current retry-after-failure
+	 * behavior. A crash between commit and completion leaves the receipt in
+	 * `side_effect_requested`, which replays as orphaned (no re-execution).
+	 */
+	private rollbackAcceptedSendTurn(
+		durable: DurableCommandRuntime,
+		commandId: string,
+	): void {
+		durable.db.runInTransaction(() => {
+			durable.db.execute(
+				"DELETE FROM provider_command_outbox WHERE command_id = ?",
+				[commandId],
+			);
+			durable.db.execute("DELETE FROM command_receipts WHERE command_id = ?", [
+				commandId,
+			]);
+		});
+	}
+
+	private handleInlineSendTurnEffect(
+		command: SendTurnCommand,
+	): Effect.Effect<TurnResult, OrchestrationError> {
+		return Effect.gen(this, function* () {
+			const instance = yield* this.registry.getInstanceEffect(
+				command.providerId,
+			);
+			return yield* this.sendTurnThroughInstanceEffect(command, instance);
+		});
+	}
+
+	/** Bind the session, invoke the provider inline, restore binding on error. */
+	private sendTurnThroughInstanceEffect(
+		command: SendTurnCommand,
+		instance: ProviderInstance,
+	): Effect.Effect<TurnResult, OrchestrationError> {
+		return Effect.gen(this, function* () {
 			yield* Effect.sync(() =>
 				log.info(
 					`Dispatching sendTurn: session=${command.input.sessionId} provider=${command.providerId}`,

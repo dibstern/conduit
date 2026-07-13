@@ -50,6 +50,39 @@ export class ProviderInstanceFailure extends Data.TaggedError(
 	}
 }
 
+export class CommandIdGenerationFailed extends Data.TaggedError(
+	"CommandIdGenerationFailed",
+)<{
+	readonly commandId: string;
+	readonly cause: unknown;
+}> {
+	get message(): string {
+		return `Command id generation failed for command ${this.commandId}`;
+	}
+}
+
+export class CommandFingerprintMismatch extends Data.TaggedError(
+	"CommandFingerprintMismatch",
+)<{
+	readonly commandId: string;
+}> {
+	get message(): string {
+		return `Command ${this.commandId} reused with a different effective dispatch fingerprint`;
+	}
+}
+
+export class StaleCommandRejected extends Data.TaggedError(
+	"StaleCommandRejected",
+)<{
+	readonly commandId: string;
+	readonly scopeKind: string;
+	readonly scopeId: string;
+}> {
+	get message(): string {
+		return `Command ${this.commandId} rejected: ${this.scopeKind} ${this.scopeId} is tombstoned`;
+	}
+}
+
 export class MissingPendingInteractions extends Data.TaggedError(
 	"MissingPendingInteractions",
 )<{
@@ -66,4 +99,7 @@ export type OrchestrationError =
 	| SessionProviderNotBound
 	| DuplicateCommand
 	| MissingCommandId
-	| ProviderInstanceFailure;
+	| ProviderInstanceFailure
+	| CommandIdGenerationFailed
+	| CommandFingerprintMismatch
+	| StaleCommandRejected;

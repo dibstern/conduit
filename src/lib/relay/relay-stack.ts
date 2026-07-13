@@ -615,6 +615,7 @@ export async function createProjectRelay(
 		...(config.persistenceDbPath != null
 			? { persistenceDbPath: config.persistenceDbPath }
 			: {}),
+		...(config.slug != null ? { projectKey: config.slug } : {}),
 	});
 
 	const translator = createTranslator();

@@ -1,3 +1,4 @@
+import type { SQLInputValue } from "node:sqlite";
 import { Data } from "effect";
 import {
 	DURABLE_COMMAND_RECEIPT_STATUSES,
@@ -5,10 +6,13 @@ import {
 } from "./orchestration-command-contracts.js";
 
 type CommandReadModelDb = {
-	readonly query: <T>(sql: string, params?: readonly unknown[]) => T[];
+	readonly query: <T>(
+		sql: string,
+		params?: ReadonlyArray<SQLInputValue>,
+	) => T[];
 	readonly queryOne: <T>(
 		sql: string,
-		params?: readonly unknown[],
+		params?: ReadonlyArray<SQLInputValue>,
 	) => T | undefined;
 };
 
@@ -95,8 +99,33 @@ function rowToReceipt(row: CommandReceiptRow): CommandReceiptSnapshot {
 	};
 }
 
+export interface CommandReceiptCheck {
+	readonly status: CommandReceiptStatus;
+	readonly fingerprintHash: string | undefined;
+}
+
 export class CommandReadModelRepository {
 	constructor(private readonly db: CommandReadModelDb) {}
+
+	/**
+	 * Narrow point read of a single command receipt for the durable dedupe /
+	 * fingerprint-mismatch decision. Returns the durable status and the stored
+	 * effective-dispatch fingerprint, or `undefined` if no receipt exists.
+	 */
+	checkReceipt(commandId: string): CommandReceiptCheck | undefined {
+		const row = this.db.queryOne<{
+			readonly status: string;
+			readonly fingerprint_hash: string | null;
+		}>(
+			"SELECT status, fingerprint_hash FROM command_receipts WHERE command_id = ?",
+			[commandId],
+		);
+		if (!row) return undefined;
+		return {
+			status: toCommandReceiptStatus(row.status),
+			fingerprintHash: row.fingerprint_hash ?? undefined,
+		};
+	}
 
 	bootstrap(): CommandReadModelSnapshot {
 		const receiptRows = this.db.query<CommandReceiptRow>(
@@ -107,6 +136,10 @@ export class CommandReadModelRepository {
 		const lastSequence = this.db.queryOne<LastSequenceRow>(
 			"SELECT MAX(sequence) AS last_sequence FROM events",
 		);
+		const tombstoneRows = this.db.query<{
+			readonly scope_kind: string;
+			readonly scope_id: string;
+		}>("SELECT scope_kind, scope_id FROM provider_command_tombstones");
 
 		return {
 			lastEventSequence: lastSequence?.last_sequence ?? 0,
@@ -116,7 +149,14 @@ export class CommandReadModelRepository {
 					return [receipt.commandId, receipt];
 				}),
 			),
-			tombstones: new Set(),
+			tombstones: new Set(
+				tombstoneRows.map((row) =>
+					tombstoneKey(
+						row.scope_kind as CommandTombstoneScopeKind,
+						row.scope_id,
+					),
+				),
+			),
 		};
 	}
 }
