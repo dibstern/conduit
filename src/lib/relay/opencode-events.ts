@@ -174,6 +174,7 @@ export interface PartUpdatedEvent extends SSEEventBase {
 		messageID?: string;
 		part?: {
 			id?: string;
+			messageID?: string;
 			type?: PartType;
 			callID?: string;
 			tool?: string;
@@ -261,10 +262,16 @@ export function isSessionErrorEvent(
 
 // ─── Permission Replied ──────────────────────────────────────────────────────
 
+// SDK 1.17.18 EventPermissionReplied.properties = { sessionID, permissionID,
+// response }; there is no top-level `id`. Older code read `properties.id`, so
+// the guard was always false against a real server and pending permissions were
+// never cleared.
 export interface PermissionRepliedEvent extends SSEEventBase {
 	type: "permission.replied";
 	properties: {
-		id: string;
+		sessionID: string;
+		permissionID: string;
+		response: "once" | "always" | "reject";
 	};
 }
 
@@ -273,7 +280,7 @@ export function isPermissionRepliedEvent(
 ): event is PermissionRepliedEvent {
 	if (!hasProps(event) || event.type !== "permission.replied") return false;
 	const p = event.properties;
-	return typeof p["id"] === "string";
+	return typeof p["permissionID"] === "string";
 }
 
 // ─── Message Updated ─────────────────────────────────────────────────────────

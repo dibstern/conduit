@@ -153,7 +153,9 @@ export class OpenCodeRuntimeEventTranslator {
 		if (!rawPart?.type) return null;
 
 		const partId = props.partID ?? rawPart.id ?? "";
-		const messageId = props.messageID ?? "";
+		// SDK 1.17.18 EventMessagePartUpdated.properties = { part, delta? }; the
+		// message id lives on the part, not at the top level (same as part id).
+		const messageId = rawPart.messageID ?? props.messageID ?? "";
 		const parts = this.getOrCreateParts(sessionId);
 		const existing = parts.get(partId);
 
@@ -353,8 +355,10 @@ export class OpenCodeRuntimeEventTranslator {
 		if (!isPermissionRepliedEvent(event)) return null;
 		return [
 			opencodeRuntimeEvent("permission.resolved", sessionId, event, {
-				id: event.properties.id,
-				decision: "once",
+				id: event.properties.permissionID,
+				// OpenCode 1.17.18 reports the actual reply ("once" | "always" |
+				// "reject"); it was previously hardcoded to "once".
+				decision: event.properties.response,
 			}),
 		];
 	}

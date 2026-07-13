@@ -797,7 +797,9 @@ export function handleSSEEvent(deps: SSEWiringDeps, event: SSEEvent): void {
 		handleQuestionAsked(deps, eventSessionId);
 	}
 	if (isPermissionRepliedEvent(event)) {
-		deps.pendingInteractions.markPermissionReplied(event.properties.id);
+		deps.pendingInteractions.markPermissionReplied(
+			event.properties.permissionID,
+		);
 	}
 
 	handleSSEEventAfterPending(deps, event, eventSessionId);
@@ -825,7 +827,9 @@ export const handleSSEEventEffect = (
 			yield* handleQuestionAskedEffect(deps, eventSessionId);
 		}
 		if (isPermissionRepliedEvent(event)) {
-			yield* pendingInteractions.markPermissionReplied(event.properties.id);
+			yield* pendingInteractions.markPermissionReplied(
+				event.properties.permissionID,
+			);
 		}
 
 		yield* handleSSEEventAfterPendingEffect(deps, event, eventSessionId);
@@ -1001,6 +1005,16 @@ function wireSSEConsumerWithCallbacks(
 	});
 	consumer.on("error", (err) => log.warn(`Error: ${err.message}`));
 
+	// Decode boundary: raw SSE frames are forwarded as `SSEEvent` without a
+	// fail-closed envelope decode against OpenCodeEventSchema. Field-level
+	// strictness (grill #10) is enforced downstream at the per-event translator
+	// sites via the hand-written type guards in opencode-events.ts, which only
+	// read the fields Conduit consumes. A blanket fail-closed decode here would
+	// be actively unsafe today: those guards intentionally model a subset (and,
+	// where they drift from the SDK — see conduit-test-1ao — a stricter gate
+	// would drop live events wholesale rather than degrade one translator). Wire
+	// OpenCodeEventSchema here only once the consumer guards are reconciled to
+	// the SDK shapes (tracked in conduit-test-8g7).
 	consumer.on("event", (event: unknown) => {
 		callbacks.handleEvent(event as SSEEvent);
 	});

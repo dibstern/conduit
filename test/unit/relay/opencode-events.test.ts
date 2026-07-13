@@ -312,12 +312,16 @@ describe("isPermissionRepliedEvent", () => {
 		expect(
 			isPermissionRepliedEvent({
 				type: "permission.replied",
-				properties: { id: "req1" },
+				properties: {
+					sessionID: "s1",
+					permissionID: "req1",
+					response: "once",
+				},
 			}),
 		).toBe(true);
 	});
 
-	it("returns false when id is missing", () => {
+	it("returns false when permissionID is missing", () => {
 		expect(
 			isPermissionRepliedEvent({
 				type: "permission.replied",
@@ -330,7 +334,7 @@ describe("isPermissionRepliedEvent", () => {
 		expect(
 			isPermissionRepliedEvent({
 				type: "permission.asked",
-				properties: { id: "req1" },
+				properties: { permissionID: "req1" },
 			}),
 		).toBe(false);
 	});

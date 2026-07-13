@@ -461,10 +461,10 @@ export class CanonicalEventTranslator {
 
 		return [
 			canonicalEvent("permission.resolved", sessionId, {
-				id: event.properties.id,
-				// We don't know the actual decision from the SSE event;
-				// default to "once" as the most common case
-				decision: "once",
+				id: event.properties.permissionID,
+				// OpenCode 1.17.18 reports the actual reply ("once" | "always" |
+				// "reject") on the event; it was previously hardcoded to "once".
+				decision: event.properties.response,
 			}),
 		];
 	}

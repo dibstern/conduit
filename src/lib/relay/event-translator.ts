@@ -897,7 +897,8 @@ function handlePartUpdated(
 	// OpenCode puts part ID in properties.part.id, not properties.partID
 	const partID = props.partID ?? part.id ?? "";
 
-	const messageId = props.messageID;
+	// Likewise the message id lives on the part (Part.messageID), not top-level.
+	const messageId = part.messageID ?? props.messageID;
 	const isNew = !seenParts.has(partID);
 
 	// Track the part

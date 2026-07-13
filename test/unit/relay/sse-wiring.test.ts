@@ -478,7 +478,11 @@ describe("handleSSEEvent", () => {
 
 		const event: OpenCodeEvent = {
 			type: "permission.replied",
-			properties: { id: "perm-1" },
+			properties: {
+				sessionID: "s1",
+				permissionID: "perm-1",
+				response: "once",
+			},
 		};
 		handleSSEEvent(deps, event);
 

@@ -568,7 +568,9 @@ describe("CanonicalEventTranslator", () => {
 	describe("permission.replied", () => {
 		it("translates to canonical permission.resolved", () => {
 			const event = makeSSEEvent("permission.replied", {
-				id: "perm-001",
+				sessionID: SESSION_ID,
+				permissionID: "perm-001",
+				response: "always",
 			});
 
 			const events = assertEvents(translator.translate(event, SESSION_ID));
@@ -576,7 +578,7 @@ describe("CanonicalEventTranslator", () => {
 			expect(events[0]?.type).toBe("permission.resolved");
 			expect(events[0]?.data).toMatchObject({
 				id: "perm-001",
-				decision: "once",
+				decision: "always",
 			});
 		});
 	});
