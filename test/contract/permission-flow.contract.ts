@@ -65,8 +65,8 @@ describe("AC3 — Permission Flow Shape Validation", () => {
 			if (skipIfNoServer()) return;
 			const doc = loadSnapshotSpec();
 			const schemas = doc.components?.schemas ?? {};
-			expect(schemas).toHaveProperty("Event.permission.asked");
-			expect(schemas).toHaveProperty("Event.permission.replied");
+			expect(schemas).toHaveProperty("EventPermissionAsked");
+			expect(schemas).toHaveProperty("EventPermissionReplied");
 		});
 	});
 

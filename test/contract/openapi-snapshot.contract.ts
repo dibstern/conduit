@@ -130,7 +130,7 @@ describe("AC5 — OpenAPI Spec Snapshot Comparison", () => {
 		const requiredEndpoints = [
 			"/global/health",
 			"/global/event",
-			"/global/sync-event",
+			"/event",
 			"/global/config",
 			"/global/dispose",
 			"/global/upgrade",
@@ -161,7 +161,6 @@ describe("AC5 — OpenAPI Spec Snapshot Comparison", () => {
 			"TextPart",
 			"Event",
 			"GlobalEvent",
-			"SyncEvent",
 		];
 
 		const schemas = new Set(
@@ -179,16 +178,16 @@ describe("AC5 — OpenAPI Spec Snapshot Comparison", () => {
 		if (skipIfNoServer() || !snapshotSpec) return;
 		const schemas = Object.keys(snapshotSpec.components?.schemas ?? {});
 		expect(schemas).toContain("PermissionRequest");
-		expect(schemas).toContain("Event.permission.asked");
-		expect(schemas).toContain("Event.permission.replied");
+		expect(schemas).toContain("EventPermissionAsked");
+		expect(schemas).toContain("EventPermissionReplied");
 	});
 
 	it("question-related schemas exist in the snapshot", () => {
 		if (skipIfNoServer() || !snapshotSpec) return;
 		const schemas = Object.keys(snapshotSpec.components?.schemas ?? {});
 		expect(schemas).toContain("QuestionRequest");
-		expect(schemas).toContain("Event.question.asked");
-		expect(schemas).toContain("Event.question.replied");
+		expect(schemas).toContain("EventQuestionAsked");
+		expect(schemas).toContain("EventQuestionReplied");
 	});
 
 	it("snapshot schemas are internally consistent (no orphan references)", () => {

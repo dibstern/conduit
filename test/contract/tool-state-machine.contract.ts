@@ -88,10 +88,9 @@ describe("AC6 — Tool Part State Machine Validation", () => {
 			if (skipIfNoServer()) return;
 			const doc = loadSnapshotSpec();
 
-			// The snapshot (captured from v1.3.13) includes global event
-			// stream paths that the live /doc no longer lists.
+			// Event-stream endpoints in the 1.17.18 snapshot.
 			expect(doc.paths).toHaveProperty("/global/event");
-			expect(doc.paths).toHaveProperty("/global/sync-event");
+			expect(doc.paths).toHaveProperty("/event");
 		});
 	});
 
@@ -140,8 +139,8 @@ describe("AC6 — Tool Part State Machine Validation", () => {
 			const doc = loadSnapshotSpec();
 
 			const schemas = doc.components?.schemas ?? {};
-			expect(schemas).toHaveProperty("Event.message.part.updated");
-			expect(schemas).toHaveProperty("Event.message.updated");
+			expect(schemas).toHaveProperty("EventMessagePartUpdated");
+			expect(schemas).toHaveProperty("EventMessageUpdated");
 		});
 	});
 
