@@ -243,4 +243,40 @@ describe("OrchestrationEngine durable receipts", () => {
 				db.close();
 			}),
 	);
+
+	it.effect(
+		"honors stale-command tombstones from the narrow command read model",
+		() =>
+			Effect.gen(function* () {
+				const db = SqliteClient.memory();
+				runMigrations(db, schemaMigrations);
+				// Seed a session-scope tombstone directly in the command read model
+				// (no full relay/UI snapshot rows exist).
+				db.execute(
+					`INSERT INTO provider_command_tombstones
+						(project_key, scope_kind, scope_id, event_sequence, reason_code, tombstoned_at)
+					 VALUES ('project-1', 'session', 'session-1', 1, 'session_deleted', 500)`,
+				);
+
+				const registry = new ProviderRegistry();
+				const instance = makeStubInstance("opencode");
+				registry.registerInstance(instance);
+				const engine = new OrchestrationEngine({
+					registry,
+					durableCommands: makeDurableOptions({ db }),
+				});
+
+				const rejected = yield* Effect.either(
+					engine.dispatchEffect(sendTurnCommand()),
+				);
+
+				expect(rejected._tag).toBe("Left");
+				if (rejected._tag === "Left") {
+					expect(rejected.left._tag).toBe("StaleCommandRejected");
+				}
+				expect(instance.sendTurnEffect).not.toHaveBeenCalled();
+				expect(receiptRow(db, "cmd-durable-1")).toBeUndefined();
+				db.close();
+			}),
+	);
 });
