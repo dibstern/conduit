@@ -99,6 +99,33 @@ describe("effectiveDispatchFingerprint", () => {
 		expect(hashOf(base)).not.toBe(hashOf(million));
 	});
 
+	it("changes when the OpenCode model provider changes for the same model id (finding #6)", () => {
+		const anthropic = sendTurn({
+			providerId: "opencode",
+			input: {
+				model: { providerId: "anthropic", modelId: "claude-3-5-sonnet" },
+			},
+		});
+		const openai = sendTurn({
+			providerId: "opencode",
+			input: { model: { providerId: "openai", modelId: "claude-3-5-sonnet" } },
+		});
+		expect(hashOf(anthropic)).not.toBe(hashOf(openai));
+	});
+
+	it("represents the Claude active-session model fallback when the command omits a model (finding #6)", () => {
+		const command = sendTurn({ providerId: "claude" });
+		const withSonnet = fingerprintHash(
+			effectiveDispatchFingerprint(command, { activeSessionModelId: "sonnet" }),
+		);
+		const withOpus = fingerprintHash(
+			effectiveDispatchFingerprint(command, { activeSessionModelId: "opus" }),
+		);
+		const withNone = fingerprintHash(effectiveDispatchFingerprint(command));
+		expect(withSonnet).not.toBe(withOpus);
+		expect(withSonnet).not.toBe(withNone);
+	});
+
 	it("ignores contextWindow when it does not derive a different model (opus has no 1m)", () => {
 		const base = sendTurn({
 			input: { model: { providerId: "claude", modelId: "opus" } },

@@ -26,7 +26,7 @@ describe("orchestration decider", () => {
 			sessionId: "session-1",
 			status: "side_effect_requested",
 			fingerprintHash: "sha256:abc",
-			fingerprintVersion: 1,
+			fingerprintVersion: 2,
 			acceptedSequence: 1,
 			sideEffectSequence: 1,
 			createdAt: 1000,

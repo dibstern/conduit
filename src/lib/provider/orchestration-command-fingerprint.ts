@@ -8,11 +8,22 @@
 
 import { createHash } from "node:crypto";
 import { claudeApiModelId } from "./claude/claude-api-model-id.js";
-import type {
-	DurableCommandFingerprint,
-	DurableCommandFingerprintField,
+import {
+	DURABLE_COMMAND_FINGERPRINT_VERSION,
+	type DurableCommandFingerprint,
+	type DurableCommandFingerprintField,
 } from "./orchestration-command-contracts.js";
 import type { SendTurnCommand } from "./orchestration-engine.js";
+
+export interface EffectiveDispatchFingerprintOptions {
+	/**
+	 * The session's active model, used as the Claude fallback when the command
+	 * omits an explicit model selection (mirrors the runtime's
+	 * `input.model?.modelId ?? ctx.currentModel`). Absent for a fresh session or
+	 * when the caller cannot resolve it.
+	 */
+	readonly activeSessionModelId?: string;
+}
 
 function sha256Hex(value: string): string {
 	return createHash("sha256").update(value).digest("hex");
@@ -31,21 +42,33 @@ function normalizeOptions(
 }
 
 /**
- * Selected model after provider-specific derivation. For Claude the
- * context-window option folds into the API model id suffix (e.g. `sonnet[1m]`)
- * only when the model actually supports it, so raw contextWindow is not
- * fingerprinted separately for Claude.
+ * Selected model after provider-specific derivation.
+ *
+ * - Claude: the context-window option folds into the API model id suffix (e.g.
+ *   `sonnet[1m]`) only when the model supports it, so raw contextWindow is not
+ *   fingerprinted separately. When the command omits a model, the effective
+ *   model is the active-session model fallback (mirroring the runtime's
+ *   `input.model?.modelId ?? ctx.currentModel`).
+ * - OpenCode: dispatch sends the `{providerId, modelId}` pair, so the model
+ *   provider is part of the effective model identity — a different model
+ *   provider with the same model id is a materially different dispatch.
  */
-function effectiveModel(command: SendTurnCommand): string | null {
+function effectiveModel(
+	command: SendTurnCommand,
+	options: EffectiveDispatchFingerprintOptions,
+): unknown {
 	const { providerId, input } = command;
 	if (providerId === "claude") {
-		return claudeApiModelId(input.model?.modelId, input.contextWindow) ?? null;
+		const modelId = input.model?.modelId ?? options.activeSessionModelId;
+		return claudeApiModelId(modelId, input.contextWindow) ?? null;
 	}
-	return input.model?.modelId ?? null;
+	if (!input.model) return null;
+	return { providerId: input.model.providerId, modelId: input.model.modelId };
 }
 
 export function effectiveDispatchFingerprint(
 	command: SendTurnCommand,
+	options: EffectiveDispatchFingerprintOptions = {},
 ): DurableCommandFingerprint {
 	const { providerId, input } = command;
 	const providerOptions = normalizeOptions({
@@ -65,11 +88,11 @@ export function effectiveDispatchFingerprint(
 		workspaceRoot: input.workspaceRoot,
 		promptText: input.prompt,
 		imageDigests: (input.images ?? []).map(sha256Hex),
-		effectiveModel: effectiveModel(command),
+		effectiveModel: effectiveModel(command, options),
 		providerOptions,
 		materialDefaults: null,
 	};
-	return { version: 1, fields };
+	return { version: DURABLE_COMMAND_FINGERPRINT_VERSION, fields };
 }
 
 /** Canonical JSON with recursively sorted object keys. */
