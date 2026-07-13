@@ -577,6 +577,43 @@ describe("ProviderTurnService", () => {
 	);
 
 	it.effect(
+		"finalizes an interrupted dispatch result by clearing the processing timeout and broadcasting done",
+		() => {
+			const engine = makeEngine({
+				providerId: "opencode",
+				result: {
+					status: "interrupted",
+					cost: 0,
+					tokens: { input: 0, output: 0 },
+					durationMs: 0,
+					providerStateUpdates: [],
+					error: { code: "interrupted", message: "Turn interrupted" },
+				},
+			});
+			const { layer, wsHandler } = serviceLayer({ engine });
+
+			return Effect.gen(function* () {
+				yield* startProcessingTimeout(
+					"session-1",
+					"2 minutes",
+					() => Effect.void,
+				);
+				yield* sendTurn();
+
+				// Without finalization the browser stays "processing" until the
+				// 2-minute PROCESSING_TIMEOUT: the timeout must be cleared and a
+				// `done` broadcast immediately.
+				expect(yield* hasActiveProcessingTimeout("session-1")).toBe(false);
+				expect(wsHandler.sendToSession).toHaveBeenCalledWith("session-1", {
+					type: "done",
+					sessionId: "session-1",
+					code: 1,
+				});
+			}).pipe(Effect.provide(layer));
+		},
+	);
+
+	it.effect(
 		"dispatches OpenCode turns with a no-op sink and without Claude policy",
 		() => {
 			let eventSink: EventSink | undefined;

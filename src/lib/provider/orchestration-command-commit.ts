@@ -77,12 +77,25 @@ export class DurableCommandCommitRepository {
 	): void {
 		// One live execution claim per command id. A re-dispatch after a
 		// retryable failure recommits the same command; supersede any prior
-		// non-terminal outbox row (pending/running/retryable_failed) so the fresh
-		// pending row is the only executable claim. Terminal rows (completed/
-		// failed) are preserved as history.
+		// *idle* non-terminal row (pending/retryable_failed) so the fresh pending
+		// row is the only executable claim. A `running` row is an active claim
+		// held by an executor — superseding it would let a second executor run
+		// the provider concurrently, so refuse the recommit and let the whole
+		// commit transaction roll back. Terminal rows (completed/failed) are
+		// preserved as history.
+		const running = this.db.queryOne<{ readonly n: number }>(
+			`SELECT COUNT(*) AS n FROM provider_command_outbox
+			 WHERE command_id = ? AND status = 'running'`,
+			[request.commandId],
+		);
+		if ((running?.n ?? 0) > 0) {
+			throw new Error(
+				`Cannot recommit command ${request.commandId}: an execution claim is already running`,
+			);
+		}
 		this.db.execute(
 			`DELETE FROM provider_command_outbox
-			 WHERE command_id = ? AND status NOT IN ('completed', 'failed')`,
+			 WHERE command_id = ? AND status IN ('pending', 'retryable_failed')`,
 			[request.commandId],
 		);
 		this.db.execute(

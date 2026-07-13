@@ -411,10 +411,18 @@ export const makeProviderTurnService = Effect.gen(function* () {
 		result: TurnResult,
 	) =>
 		Effect.gen(function* () {
-			if (result.status === "error") {
-				const msg = result.error?.message ?? "Send failed";
+			// Any non-`completed` terminal status (error / interrupted / cancelled)
+			// must finalize the turn: a completed turn's `done` arrives via the
+			// streamed provider events, but these results emit no such stream, so
+			// without this the browser stays "processing" until the 2-minute
+			// PROCESSING_TIMEOUT. Clear the timeout, broadcast `done`, and surface
+			// the reason.
+			if (result.status !== "completed") {
+				const msg =
+					result.error?.message ??
+					(result.status === "error" ? "Send failed" : `Turn ${result.status}`);
 				log.warn(
-					`client=${input.clientId} session=${input.sessionId} engine dispatch error: ${msg}`,
+					`client=${input.clientId} session=${input.sessionId} engine dispatch ${result.status}: ${msg}`,
 				);
 				yield* clearProcessingTimeout(input.sessionId);
 				wsHandler.sendToSession(input.sessionId, {
@@ -428,9 +436,10 @@ export const makeProviderTurnService = Effect.gen(function* () {
 						code: "SEND_FAILED",
 					}).toMessage(input.sessionId),
 				);
+				return;
 			}
 
-			if (result.status === "error" || !result.providerStateUpdates?.length) {
+			if (!result.providerStateUpdates?.length) {
 				return;
 			}
 			const providerStateEffectOption = yield* Effect.serviceOption(

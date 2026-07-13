@@ -102,6 +102,10 @@ function rowToReceipt(row: CommandReceiptRow): CommandReceiptSnapshot {
 export interface CommandReceiptCheck {
 	readonly status: CommandReceiptStatus;
 	readonly fingerprintHash: string | undefined;
+	/** Scheme version the stored hash was computed under. Hashes are only
+	 * comparable within a version; a mismatch means the stored hash cannot be
+	 * trusted to equal a freshly computed one. */
+	readonly fingerprintVersion: number | undefined;
 }
 
 export class CommandReadModelRepository {
@@ -116,14 +120,16 @@ export class CommandReadModelRepository {
 		const row = this.db.queryOne<{
 			readonly status: string;
 			readonly fingerprint_hash: string | null;
+			readonly fingerprint_version: number | null;
 		}>(
-			"SELECT status, fingerprint_hash FROM command_receipts WHERE command_id = ?",
+			"SELECT status, fingerprint_hash, fingerprint_version FROM command_receipts WHERE command_id = ?",
 			[commandId],
 		);
 		if (!row) return undefined;
 		return {
 			status: toCommandReceiptStatus(row.status),
 			fingerprintHash: row.fingerprint_hash ?? undefined,
+			fingerprintVersion: row.fingerprint_version ?? undefined,
 		};
 	}
 

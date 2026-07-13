@@ -19,6 +19,7 @@ import {
 	StaleCommandRejected,
 } from "./errors.js";
 import { DurableCommandCommitRepository } from "./orchestration-command-commit.js";
+import { DURABLE_COMMAND_FINGERPRINT_VERSION } from "./orchestration-command-contracts.js";
 import {
 	effectiveDispatchFingerprint,
 	fingerprintHash,
@@ -346,9 +347,19 @@ export class OrchestrationEngine {
 				durable.receipts.checkReceipt(command.commandId),
 			);
 			if (existing) {
+				// The stored hash is only comparable to a freshly computed one within
+				// the same fingerprint scheme version. A version mismatch (a receipt
+				// written under an older scheme) is treated as a fingerprint mismatch:
+				// reject rather than risk replaying — or, worse, re-executing — a
+				// command whose identity cannot be verified. No v1 receipts exist in
+				// any deployed database (the durable path is unreleased), so this is a
+				// forward-compatibility guard, not a live migration path.
 				if (
 					existing.fingerprintHash !== undefined &&
-					existing.fingerprintHash !== hash
+					(existing.fingerprintHash !== hash ||
+						(existing.fingerprintVersion !== undefined &&
+							existing.fingerprintVersion !==
+								DURABLE_COMMAND_FINGERPRINT_VERSION))
 				) {
 					return yield* Effect.fail(
 						new CommandFingerprintMismatch({ commandId: command.commandId }),
@@ -358,8 +369,20 @@ export class OrchestrationEngine {
 					return REPLAYED_TURN_RESULT;
 				}
 				if (existing.status === "side_effect_requested") {
-					// Committed but never executed (orphaned). Do not re-execute the
-					// provider; surface an explicit incomplete status.
+					// Committed but never executed (orphaned). Terminalize any leftover
+					// executable outbox row so a later recovery drain cannot execute it
+					// for real (crash policy: never re-execute an orphaned command). The
+					// receipt stays `side_effect_requested` so subsequent replays remain
+					// idempotently orphaned. Then surface an explicit incomplete status.
+					yield* Effect.sync(() =>
+						durable.db.execute(
+							`UPDATE provider_command_outbox
+							 SET status = 'failed', error_code = 'orphaned', updated_at = ?
+							 WHERE command_id = ?
+							   AND status IN ('pending', 'running', 'retryable_failed')`,
+							[durable.now(), command.commandId],
+						),
+					);
 					return ORPHANED_TURN_RESULT;
 				}
 			}

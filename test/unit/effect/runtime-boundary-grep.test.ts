@@ -117,6 +117,12 @@ const allowedPlainErrorThrows: readonly AllowedPlainThrow[] = [
 		snippetPattern: /routePerSession: missing sessionId/,
 		reason: "dev-only frontend event-routing invariant",
 	},
+	{
+		path: "src/lib/provider/orchestration-command-commit.ts",
+		snippetPattern: /Cannot recommit command/,
+		reason:
+			"synchronous transaction abort: refuses to supersede a live running outbox claim (single-live-claim invariant); the throw rolls back runInTransaction",
+	},
 ];
 
 function tsFiles(dir: string): string[] {

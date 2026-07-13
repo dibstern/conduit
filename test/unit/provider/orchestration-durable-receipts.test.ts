@@ -494,6 +494,141 @@ describe("OrchestrationEngine durable receipts", () => {
 	);
 
 	it.effect(
+		"orphan replay terminalizes the leftover outbox row so a later drain cannot execute it (re-review finding #2)",
+		() =>
+			Effect.gen(function* () {
+				const db = SqliteClient.memory();
+				runMigrations(db, schemaMigrations);
+				const command = sendTurnCommand();
+				const hash = fingerprintHash(effectiveDispatchFingerprint(command));
+				// Crash after commit but before execution: a side_effect_requested
+				// receipt AND the still-pending outbox row it committed.
+				db.execute(
+					`INSERT INTO command_receipts (
+						command_id, session_id, status, created_at, command_type,
+						project_key, fingerprint_hash, fingerprint_version,
+						side_effect_sequence, updated_at
+					) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+					[
+						command.commandId,
+						"session-1",
+						"side_effect_requested",
+						1000,
+						"send_turn",
+						"project-1",
+						hash,
+						2,
+						1,
+						1000,
+					],
+				);
+				const {
+					eventSink: _sink,
+					abortSignal: _abort,
+					...payload
+				} = command.input;
+				db.execute(
+					`INSERT INTO provider_command_outbox (
+						request_sequence, command_id, project_key, session_id, provider_id,
+						effect_type, payload_json, status, attempt_count, requested_at, updated_at
+					) VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', 0, ?, ?)`,
+					[
+						1,
+						command.commandId,
+						"project-1",
+						"session-1",
+						"opencode",
+						"send_turn",
+						JSON.stringify({ ...payload, dispatchId: "disp-1" }),
+						1000,
+						1000,
+					],
+				);
+				const registry = new ProviderRegistry();
+				const instance = makeStubInstance("opencode");
+				registry.registerInstance(instance);
+				const engine = new OrchestrationEngine({
+					registry,
+					durableCommands: makeDurableOptions({ db }),
+				});
+
+				const result = yield* engine.dispatchEffect(command);
+				expect(result.status).toBe("interrupted");
+				expect(instance.sendTurnEffect).not.toHaveBeenCalled();
+
+				// A later recovery drain must NOT execute the orphaned command.
+				yield* engine.drainSideEffects();
+				expect(instance.sendTurnEffect).not.toHaveBeenCalled();
+
+				const rows = db.query<{ status: string }>(
+					`SELECT status FROM provider_command_outbox
+					 WHERE command_id = ? ORDER BY request_sequence`,
+					[command.commandId],
+				);
+				expect(
+					rows.every(
+						(r) =>
+							r.status !== "pending" &&
+							r.status !== "running" &&
+							r.status !== "retryable_failed",
+					),
+				).toBe(true);
+				db.close();
+			}),
+	);
+
+	it.effect(
+		"rejects a receipt written under an older fingerprint scheme version instead of replaying it (re-review finding #5)",
+		() =>
+			Effect.gen(function* () {
+				const db = SqliteClient.memory();
+				runMigrations(db, schemaMigrations);
+				const command = sendTurnCommand();
+				// Hash matches the current command, but the receipt was written under
+				// fingerprint scheme version 1. Hashes are only comparable within a
+				// scheme version, so this must be treated as a fingerprint mismatch,
+				// never a completed replay and never a re-execution.
+				const hash = fingerprintHash(effectiveDispatchFingerprint(command));
+				db.execute(
+					`INSERT INTO command_receipts (
+						command_id, session_id, status, created_at, command_type,
+						project_key, fingerprint_hash, fingerprint_version,
+						side_effect_sequence, updated_at
+					) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+					[
+						command.commandId,
+						"session-1",
+						"side_effect_completed",
+						1000,
+						"send_turn",
+						"project-1",
+						hash,
+						1,
+						1,
+						1000,
+					],
+				);
+				const registry = new ProviderRegistry();
+				const instance = makeStubInstance("opencode");
+				registry.registerInstance(instance);
+				const engine = new OrchestrationEngine({
+					registry,
+					durableCommands: makeDurableOptions({ db }),
+				});
+
+				const result = yield* Effect.either(engine.dispatchEffect(command));
+				expect(result._tag).toBe("Left");
+				if (result._tag === "Left") {
+					expect((result.left as { _tag: string })._tag).toBe(
+						"CommandFingerprintMismatch",
+					);
+				}
+				expect(instance.sendTurnEffect).not.toHaveBeenCalled();
+				db.close();
+			}),
+	);
+
+	it.effect(
 		"honors stale-command tombstones from the narrow command read model",
 		() =>
 			Effect.gen(function* () {
