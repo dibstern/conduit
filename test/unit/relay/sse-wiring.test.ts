@@ -910,6 +910,67 @@ describe("wireSSEConsumer", () => {
 		);
 	});
 
+	it("forwards a schema-valid event without a decode warning (conduit-test-8g7)", () => {
+		const warnSpy = vi.fn();
+		const log = { ...createSilentLogger(), warn: warnSpy };
+		const deps = createMockSSEWiringDeps({ log });
+		const listeners = new Map<string, (...args: unknown[]) => void>();
+		const consumer = {
+			on: vi.fn((name: string, fn: (...args: unknown[]) => void) => {
+				listeners.set(name, fn);
+			}),
+		} as unknown as Parameters<typeof wireSSEConsumer>[1];
+		wireSSEConsumer(deps, consumer);
+
+		const event = {
+			type: "message.part.delta",
+			properties: {
+				sessionID: "s1",
+				partID: "p1",
+				field: "text",
+				delta: "hi",
+			},
+		};
+		// biome-ignore lint/style/noNonNullAssertion: safe — Map.get after set
+		listeners.get("event")!(event);
+
+		expect(deps.translator.translate).toHaveBeenCalled();
+		expect(warnSpy).not.toHaveBeenCalledWith(
+			expect.stringContaining("failed OpenCodeEventSchema decode"),
+		);
+	});
+
+	it("warns but still forwards an event that fails schema decode — never drops (conduit-test-8g7)", () => {
+		const warnSpy = vi.fn();
+		const log = { ...createSilentLogger(), warn: warnSpy };
+		const deps = createMockSSEWiringDeps({ log });
+		const listeners = new Map<string, (...args: unknown[]) => void>();
+		const consumer = {
+			on: vi.fn((name: string, fn: (...args: unknown[]) => void) => {
+				listeners.set(name, fn);
+			}),
+		} as unknown as Parameters<typeof wireSSEConsumer>[1];
+		wireSSEConsumer(deps, consumer);
+
+		// Well-formed envelope, but an event type not in the modeled union.
+		const unknownEvent = {
+			type: "server.brand.new.v99",
+			properties: { sessionID: "s1" },
+		};
+		// biome-ignore lint/style/noNonNullAssertion: safe — Map.get after set
+		listeners.get("event")!(unknownEvent);
+
+		// Forwarded raw despite decode failure (never dropped)…
+		expect(deps.translator.translate).toHaveBeenCalledWith(
+			unknownEvent,
+			expect.anything(),
+		);
+		// …and the drift is surfaced as a warning.
+		expect(warnSpy).toHaveBeenCalledWith(
+			expect.stringContaining("failed OpenCodeEventSchema decode"),
+		);
+	});
+
 	it("logs SSE lifecycle events", () => {
 		const infoSpy = vi.fn();
 		const warnSpy = vi.fn();
