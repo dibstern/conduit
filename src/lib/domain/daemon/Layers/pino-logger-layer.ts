@@ -20,16 +20,24 @@ import type { Logger as PinoLogger } from "pino";
  * Annotations from Effect.annotateLogs are forwarded as Pino child bindings.
  * The most recent span label (from Effect.withLogSpan) is included as "span".
  */
+const formatPart = (part: unknown): string => {
+	if (typeof part === "string") return part;
+	if (part instanceof Error) return part.message;
+	try {
+		return JSON.stringify(part);
+	} catch {
+		return String(part);
+	}
+};
+
 export const makePinoLoggerLive = (pino: PinoLogger): Layer.Layer<never> =>
 	Logger.replace(
 		Logger.defaultLogger,
 		Logger.make(({ logLevel, message, annotations, spans, cause }) => {
 			// message is an array of parts — join them into a single string
 			const text = Array.isArray(message)
-				? message.map((m) => (typeof m === "string" ? m : String(m))).join(" ")
-				: typeof message === "string"
-					? message
-					: String(message);
+				? message.map(formatPart).join(" ")
+				: formatPart(message);
 
 			// Convert Effect annotations HashMap to a plain object for Pino bindings
 			const bindings: Record<string, unknown> = {};

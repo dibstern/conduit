@@ -145,6 +145,32 @@ describe("PinoLoggerLive", () => {
 		}),
 	);
 
+	it.effect("serializes object message parts instead of [object Object]", () =>
+		Effect.gen(function* () {
+			const mock = mockPino();
+			yield* Effect.logWarning("Project relay failed", {
+				error: "sqlite module version mismatch",
+			}).pipe(Effect.provide(layer(mock)));
+			expect(mock.root.warn).toHaveBeenCalled();
+			// biome-ignore lint/style/noNonNullAssertion: safe — prior assertion guarantees called
+			const text = mock.root.warn.mock.calls[0]![0] as string;
+			expect(text).not.toContain("[object Object]");
+			expect(text).toContain("sqlite module version mismatch");
+		}),
+	);
+
+	it.effect("formats Error message parts with their message", () =>
+		Effect.gen(function* () {
+			const mock = mockPino();
+			yield* Effect.logWarning("upgrade rejected", new Error("boom")).pipe(
+				Effect.provide(layer(mock)),
+			);
+			expect(mock.root.warn).toHaveBeenCalled();
+			// biome-ignore lint/style/noNonNullAssertion: safe — prior assertion guarantees called
+			expect(mock.root.warn.mock.calls[0]![0]).toContain("boom");
+		}),
+	);
+
 	it.effect(
 		"includes cause in pino error call when Effect cause is non-empty",
 		() =>
