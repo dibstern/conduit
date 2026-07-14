@@ -1,5 +1,5 @@
 import { describe, it } from "@effect/vitest";
-import { Duration, Effect, TestClock } from "effect";
+import { Deferred, Duration, Effect, Fiber, Option, TestClock } from "effect";
 import { afterEach, beforeEach, expect, vi } from "vitest";
 import {
 	decodeProviderRuntimeEvent,
@@ -286,6 +286,213 @@ describe("ProviderSideEffectReactor", () => {
 		expect(sendTurn).not.toHaveBeenCalled();
 		expect(result.status).toBe("completed");
 	});
+
+	it.effect(
+		"claim loser blocks while the winner runs, then resolves with the winner's completed outcome",
+		() =>
+			Effect.gen(function* () {
+				seedSendTurnOutbox(db);
+				db.execute(
+					"UPDATE provider_command_outbox SET status = 'running' WHERE request_sequence = ?",
+					[10],
+				);
+				const reactor = new ProviderSideEffectReactor({
+					db,
+					registry: new ProviderRegistry(),
+					ingestion: { ingest: vi.fn(() => Effect.succeed(1)) },
+					outcomePollInterval: "100 millis",
+					outcomePollTimeout: "500 millis",
+				});
+
+				const loser = yield* Effect.fork(reactor.runCommand("cmd-1"));
+				yield* Effect.yieldNow();
+				expect(Option.isNone(yield* Fiber.poll(loser))).toBe(true);
+
+				yield* TestClock.adjust("100 millis");
+				expect(Option.isNone(yield* Fiber.poll(loser))).toBe(true);
+
+				db.execute(
+					"UPDATE command_receipts SET status = 'side_effect_completed' WHERE command_id = ?",
+					["cmd-1"],
+				);
+				yield* TestClock.adjust("100 millis");
+
+				const result = yield* Fiber.join(loser);
+				expect(result).toEqual({
+					status: "completed",
+					cost: 0,
+					tokens: { input: 0, output: 0 },
+					durationMs: 0,
+					providerStateUpdates: [],
+				});
+			}),
+	);
+
+	it.effect(
+		"claim loser surfaces the winner's failed outcome as ProviderCommandNotExecutable",
+		() =>
+			Effect.gen(function* () {
+				const reactor = new ProviderSideEffectReactor({
+					db,
+					registry: new ProviderRegistry(),
+					ingestion: { ingest: vi.fn(() => Effect.succeed(1)) },
+					outcomePollInterval: "100 millis",
+					outcomePollTimeout: "100 millis",
+				});
+				const terminalOutboxStates = ["failed", "retryable_failed"] as const;
+
+				for (const [index, outboxStatus] of terminalOutboxStates.entries()) {
+					const commandId = `cmd-${index + 1}`;
+					const requestSequence = (index + 1) * 10;
+					const errorCode = `winner_${outboxStatus}`;
+					seedSendTurnOutbox(db, { commandId, requestSequence });
+					db.execute(
+						"UPDATE provider_command_outbox SET status = 'running' WHERE request_sequence = ?",
+						[requestSequence],
+					);
+
+					const loser = yield* Effect.fork(reactor.runCommand(commandId));
+					yield* Effect.yieldNow();
+					expect(Option.isNone(yield* Fiber.poll(loser))).toBe(true);
+
+					db.runInTransaction(() => {
+						db.execute(
+							"UPDATE provider_command_outbox SET status = ?, error_code = ? WHERE request_sequence = ?",
+							[outboxStatus, errorCode, requestSequence],
+						);
+						db.execute(
+							"UPDATE command_receipts SET status = 'side_effect_failed', error_code = ? WHERE command_id = ?",
+							[errorCode, commandId],
+						);
+					});
+					yield* TestClock.adjust("100 millis");
+
+					const error = yield* Effect.flip(Fiber.join(loser));
+					expect(error).toMatchObject({
+						_tag: "ProviderCommandNotExecutable",
+						commandId,
+						errorCode,
+					});
+				}
+			}),
+	);
+
+	it.effect(
+		"claim loser fails with ProviderCommandNotExecutable when the poll cap expires",
+		() =>
+			Effect.gen(function* () {
+				seedSendTurnOutbox(db);
+				db.execute(
+					"UPDATE provider_command_outbox SET status = 'running' WHERE request_sequence = ?",
+					[10],
+				);
+				const reactor = new ProviderSideEffectReactor({
+					db,
+					registry: new ProviderRegistry(),
+					ingestion: { ingest: vi.fn(() => Effect.succeed(1)) },
+					outcomePollInterval: "100 millis",
+					outcomePollTimeout: "250 millis",
+				});
+				const missingReceiptError = yield* Effect.flip(
+					reactor.runCommand("missing-command"),
+				);
+				expect(missingReceiptError).toMatchObject({
+					_tag: "ProviderCommandNotExecutable",
+					commandId: "missing-command",
+					errorCode: null,
+				});
+
+				const loser = yield* Effect.fork(reactor.runCommand("cmd-1"));
+				yield* Effect.yieldNow();
+				yield* TestClock.adjust("200 millis");
+				expect(Option.isNone(yield* Fiber.poll(loser))).toBe(true);
+
+				yield* TestClock.adjust("100 millis");
+				const error = yield* Effect.flip(Fiber.join(loser));
+				expect(error).toMatchObject({
+					_tag: "ProviderCommandNotExecutable",
+					commandId: "cmd-1",
+					errorCode: null,
+				});
+			}),
+	);
+
+	it.effect(
+		"clamps a zero outcome poll interval so poll cap expiry remains bounded",
+		() =>
+			Effect.gen(function* () {
+				seedSendTurnOutbox(db);
+				db.execute(
+					"UPDATE provider_command_outbox SET status = 'running' WHERE request_sequence = ?",
+					[10],
+				);
+				const reactor = new ProviderSideEffectReactor({
+					db,
+					registry: new ProviderRegistry(),
+					ingestion: { ingest: vi.fn(() => Effect.succeed(1)) },
+					outcomePollInterval: 0,
+					outcomePollTimeout: "100 millis",
+				});
+
+				const loser = yield* Effect.fork(reactor.runCommand("cmd-1"));
+				yield* Effect.yieldNow();
+				expect(Option.isNone(yield* Fiber.poll(loser))).toBe(true);
+
+				yield* TestClock.adjust("100 millis");
+				const error = yield* Effect.flip(Fiber.join(loser));
+				expect(error).toMatchObject({
+					_tag: "ProviderCommandNotExecutable",
+					commandId: "cmd-1",
+					errorCode: null,
+				});
+			}),
+	);
+
+	it.effect(
+		"two executors racing one row: the loser awaits the winner rather than throwing",
+		() =>
+			Effect.gen(function* () {
+				const winnerStarted = yield* Deferred.make<void>();
+				const releaseWinner = yield* Deferred.make<void>();
+				const sendTurn = vi.fn((_input: SendTurnInput) =>
+					Effect.gen(function* () {
+						yield* Deferred.succeed(winnerStarted, undefined);
+						yield* Deferred.await(releaseWinner);
+						return completedTurn;
+					}),
+				);
+				seedSendTurnOutbox(db);
+				const registry = new ProviderRegistry([makeProvider(sendTurn)]);
+				const winnerReactor = new ProviderSideEffectReactor({
+					db,
+					registry,
+					ingestion: { ingest: vi.fn(() => Effect.succeed(1)) },
+					outcomePollInterval: "100 millis",
+					outcomePollTimeout: "500 millis",
+				});
+				const loserReactor = new ProviderSideEffectReactor({
+					db,
+					registry,
+					ingestion: { ingest: vi.fn(() => Effect.succeed(1)) },
+					outcomePollInterval: "100 millis",
+					outcomePollTimeout: "500 millis",
+				});
+
+				const winner = yield* Effect.fork(winnerReactor.runCommand("cmd-1"));
+				yield* Deferred.await(winnerStarted);
+				const loser = yield* Effect.fork(loserReactor.runCommand("cmd-1"));
+				yield* Effect.yieldNow();
+
+				expect(Option.isNone(yield* Fiber.poll(loser))).toBe(true);
+				yield* Deferred.succeed(releaseWinner, undefined);
+				expect((yield* Fiber.join(winner)).status).toBe("completed");
+				expect(Option.isNone(yield* Fiber.poll(loser))).toBe(true);
+
+				yield* TestClock.adjust("100 millis");
+				expect((yield* Fiber.join(loser)).status).toBe("completed");
+				expect(sendTurn).toHaveBeenCalledTimes(1);
+			}),
+	);
 
 	it("marks provider lookup failures instead of leaving outbox rows running", async () => {
 		seedSendTurnOutbox(db);

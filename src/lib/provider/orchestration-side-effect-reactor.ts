@@ -98,10 +98,27 @@ export interface ProviderSideEffectReactorOptions {
 	/** Optional deterministic override; defaults to the Effect Clock service. */
 	readonly nowMs?: () => number;
 	readonly retryBackoff?: (failureCount: number) => Duration.DurationInput;
+	readonly outcomePollInterval?: Duration.DurationInput;
+	readonly outcomePollTimeout?: Duration.DurationInput;
 }
 
 const defaultRetryBackoff = (failureCount: number): Duration.DurationInput =>
 	Duration.millis(Math.min(1000 * 2 ** Math.max(0, failureCount - 1), 30_000));
+const defaultOutcomePollInterval: Duration.DurationInput = Duration.millis(500);
+const defaultOutcomePollTimeout: Duration.DurationInput =
+	Duration.millis(900_000);
+
+function clampPollDuration(
+	duration: Duration.DurationInput,
+	minimumMillis: number,
+): Duration.Duration {
+	const millis = Duration.toMillis(duration);
+	return Duration.millis(
+		Number.isFinite(millis)
+			? Math.min(Math.max(millis, minimumMillis), Number.MAX_SAFE_INTEGER)
+			: minimumMillis,
+	);
+}
 
 export class ProviderSideEffectReactor {
 	constructor(private readonly options: ProviderSideEffectReactorOptions) {}
@@ -197,25 +214,61 @@ export class ProviderSideEffectReactor {
 
 	/**
 	 * Durable outcome for a command that this fiber did not execute (lost the
-	 * `markRunning` claim, or the row was already drained): completed receipts
-	 * replay the synthesized ack; anything else is not executable.
+	 * `markRunning` claim, or the row was already drained): terminal receipts
+	 * replay the winner's outcome, while a present non-terminal receipt is
+	 * polled on an injected, bounded cadence.
 	 */
 	private durableOutcome(
 		commandId: string,
 	): Effect.Effect<TurnResult, unknown> {
 		return Effect.gen(this, function* () {
-			const receipt = yield* this.receiptOutcome(commandId);
-			if (receipt?.status === "side_effect_completed") {
-				return REACTOR_COMPLETED_RESULT;
-			}
-			return yield* Effect.fail(
-				new ProviderCommandNotExecutable({
-					commandId,
-					errorCode: receipt?.error_code ?? null,
-					code: "provider_command_not_executable",
-				}),
+			const pollInterval = clampPollDuration(
+				this.options.outcomePollInterval ?? defaultOutcomePollInterval,
+				1,
 			);
+			const pollTimeout = clampPollDuration(
+				this.options.outcomePollTimeout ?? defaultOutcomePollTimeout,
+				0,
+			);
+			const maxPolls = Math.ceil(
+				Duration.toMillis(pollTimeout) / Duration.toMillis(pollInterval),
+			);
+
+			for (let poll = 0; poll <= maxPolls; poll += 1) {
+				const receipt = yield* this.receiptOutcome(commandId);
+				if (!receipt) {
+					return yield* this.commandNotExecutable(commandId, null);
+				}
+				if (receipt.status === "side_effect_completed") {
+					return REACTOR_COMPLETED_RESULT;
+				}
+				if (receipt.status === "side_effect_failed") {
+					return yield* this.commandNotExecutable(
+						commandId,
+						receipt.error_code,
+					);
+				}
+				if (poll === maxPolls) {
+					return yield* this.commandNotExecutable(commandId, null);
+				}
+				yield* Effect.sleep(pollInterval);
+			}
+
+			return yield* this.commandNotExecutable(commandId, null);
 		});
+	}
+
+	private commandNotExecutable(
+		commandId: string,
+		errorCode: string | null,
+	): Effect.Effect<never, ProviderCommandNotExecutable> {
+		return Effect.fail(
+			new ProviderCommandNotExecutable({
+				commandId,
+				errorCode,
+				code: "provider_command_not_executable",
+			}),
+		);
 	}
 
 	private currentTimeMillis(): Effect.Effect<number> {
