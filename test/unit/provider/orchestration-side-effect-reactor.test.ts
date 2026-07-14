@@ -418,6 +418,37 @@ describe("ProviderSideEffectReactor", () => {
 	);
 
 	it.effect(
+		"clamps a zero outcome poll interval so poll cap expiry remains bounded",
+		() =>
+			Effect.gen(function* () {
+				seedSendTurnOutbox(db);
+				db.execute(
+					"UPDATE provider_command_outbox SET status = 'running' WHERE request_sequence = ?",
+					[10],
+				);
+				const reactor = new ProviderSideEffectReactor({
+					db,
+					registry: new ProviderRegistry(),
+					ingestion: { ingest: vi.fn(() => Effect.succeed(1)) },
+					outcomePollInterval: 0,
+					outcomePollTimeout: "100 millis",
+				});
+
+				const loser = yield* Effect.fork(reactor.runCommand("cmd-1"));
+				yield* Effect.yieldNow();
+				expect(Option.isNone(yield* Fiber.poll(loser))).toBe(true);
+
+				yield* TestClock.adjust("100 millis");
+				const error = yield* Effect.flip(Fiber.join(loser));
+				expect(error).toMatchObject({
+					_tag: "ProviderCommandNotExecutable",
+					commandId: "cmd-1",
+					errorCode: null,
+				});
+			}),
+	);
+
+	it.effect(
 		"two executors racing one row: the loser awaits the winner rather than throwing",
 		() =>
 			Effect.gen(function* () {

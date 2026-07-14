@@ -108,6 +108,18 @@ const defaultOutcomePollInterval: Duration.DurationInput = Duration.millis(500);
 const defaultOutcomePollTimeout: Duration.DurationInput =
 	Duration.millis(900_000);
 
+function clampPollDuration(
+	duration: Duration.DurationInput,
+	minimumMillis: number,
+): Duration.Duration {
+	const millis = Duration.toMillis(duration);
+	return Duration.millis(
+		Number.isFinite(millis)
+			? Math.min(Math.max(millis, minimumMillis), Number.MAX_SAFE_INTEGER)
+			: minimumMillis,
+	);
+}
+
 export class ProviderSideEffectReactor {
 	constructor(private readonly options: ProviderSideEffectReactorOptions) {}
 
@@ -210,10 +222,14 @@ export class ProviderSideEffectReactor {
 		commandId: string,
 	): Effect.Effect<TurnResult, unknown> {
 		return Effect.gen(this, function* () {
-			const pollInterval =
-				this.options.outcomePollInterval ?? defaultOutcomePollInterval;
-			const pollTimeout =
-				this.options.outcomePollTimeout ?? defaultOutcomePollTimeout;
+			const pollInterval = clampPollDuration(
+				this.options.outcomePollInterval ?? defaultOutcomePollInterval,
+				1,
+			);
+			const pollTimeout = clampPollDuration(
+				this.options.outcomePollTimeout ?? defaultOutcomePollTimeout,
+				0,
+			);
 			const maxPolls = Math.ceil(
 				Duration.toMillis(pollTimeout) / Duration.toMillis(pollInterval),
 			);
