@@ -6,6 +6,7 @@ import type {
 	SDKBackgroundTasksChangedMessage,
 	SDKCommandsChangedMessage,
 	SDKCompactBoundaryMessage,
+	SDKControlInitializeResponse,
 	SDKControlRequestProgressMessage,
 	SDKConversationResetMessage,
 	SDKElicitationCompleteMessage,
@@ -1116,6 +1117,50 @@ type _ClaudeOptionsSchemaFitsSdkOwnedFields = AssertExtends<
 		| "allowDangerouslySkipPermissions"
 		| "env"
 		| "effort"
+	>
+>;
+
+// ── Capability-probe initialization result (decode-with-warn boundary) ──
+// The capabilities probe consumes query.initializationResult() to build the
+// model/command/agent catalogs. Unlike the streaming message boundary this is
+// best-effort — an empty catalog is survivable and must NOT fail-close the
+// probe — so this schema exists so the probe can decode-with-warn: validate the
+// fields it reads and log drift (a renamed or absent commands/agents/models/
+// account) instead of silently yielding empty catalogs. Only consumed fields
+// are modeled; excess provider-owned fields are ignored on decode.
+export const ClaudeSDKInitializationResultSubsetSchema = Schema.Struct({
+	models: Schema.Array(
+		Schema.Struct({
+			value: Schema.String,
+			displayName: Schema.String,
+			supportedEffortLevels: Schema.optional(Schema.Array(Schema.String)),
+		}),
+	),
+	commands: Schema.Array(
+		Schema.Struct({
+			name: Schema.String,
+			description: Schema.optional(Schema.String),
+			argumentHint: Schema.optional(Schema.String),
+		}),
+	),
+	agents: Schema.Array(
+		Schema.Struct({
+			name: Schema.String,
+			description: Schema.optional(Schema.String),
+			model: Schema.optional(Schema.String),
+		}),
+	),
+	account: Schema.Struct({
+		subscriptionType: Schema.optional(Schema.String),
+	}),
+});
+
+// Keep the runtime subset honest against the installed SDK: the SDK's
+// initialization response must satisfy the shape the probe decodes.
+type _ClaudeSdkInitializationResultSubsetFitsSdk = AssertExtends<
+	SDKControlInitializeResponse,
+	NormalizeSchemaType<
+		Schema.Schema.Type<typeof ClaudeSDKInitializationResultSubsetSchema>
 	>
 >;
 
