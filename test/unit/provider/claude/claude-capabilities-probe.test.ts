@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { probeClaudeCapabilities } from "../../../../src/lib/provider/claude/claude-capabilities-probe.js";
+import { createTestLogger } from "../../../../src/lib/logger.js";
 
 describe("probeClaudeCapabilities", () => {
 	const workspaceRoot = "/tmp/claude-workspace";
@@ -375,5 +376,49 @@ describe("probeClaudeCapabilities", () => {
 			workspaceRoot,
 		});
 		expect(result.models[0]?.limit).toBeUndefined();
+	});
+
+	describe("initializationResult decode-with-warn (observability)", () => {
+		function loggerSpy() {
+			const logger = createTestLogger();
+			logger.warn = vi.fn();
+			return logger;
+		}
+
+		it("does not warn when init matches the consumed SDK shape", async () => {
+			const logger = loggerSpy();
+			const queryFactory = makeFakeQuery({
+				initResult: {
+					models: [{ value: "claude-opus-4-8", displayName: "Opus 4.8" }],
+					commands: [{ name: "init", description: "d", argumentHint: "h" }],
+					agents: [{ name: "reviewer", description: "reviews" }],
+					account: { subscriptionType: "Max" },
+				},
+			});
+			const result = await probeClaudeCapabilities({
+				queryFactory,
+				workspaceRoot,
+				logger,
+			});
+			expect(result.models).toHaveLength(1);
+			expect(logger.warn).not.toHaveBeenCalled();
+		});
+
+		it("warns but still returns catalogs when init drifts — never fail-closes", async () => {
+			const logger = loggerSpy();
+			// commands/agents/account absent → drift from the SDK's required shape
+			const queryFactory = makeFakeQuery({ initResult: { models: [] } });
+			const result = await probeClaudeCapabilities({
+				queryFactory,
+				workspaceRoot,
+				logger,
+			});
+			expect(result.commands).toEqual([]);
+			expect(result.agents).toEqual([]);
+			expect(logger.warn).toHaveBeenCalledTimes(1);
+			expect(vi.mocked(logger.warn).mock.calls[0]?.[0]).toContain(
+				"failed subset decode",
+			);
+		});
 	});
 });

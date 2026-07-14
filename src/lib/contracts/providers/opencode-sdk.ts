@@ -922,6 +922,688 @@ const OpenCodeInstallationUpdateAvailableEventSchema = Schema.Struct({
 	),
 });
 
+// ── Full OpenCode 1.17.18 event catalog ──────────────────────────────────
+// Documentation-modeled from the live server /doc. Most of these events are
+// not consumed by conduit today; they are modeled so the available event
+// data surface is explicit and discoverable. (conduit-test-8g7)
+const OpenCodeCatalogUpdatedEventSchema = Schema.Struct({
+	type: Schema.Literal("catalog.updated"),
+	properties: Schema.Struct({}).pipe(
+		Schema.extend(OpenCodeOpaquePropertiesSchema),
+	),
+});
+
+const OpenCodeCommandExecutedEventSchema = Schema.Struct({
+	type: Schema.Literal("command.executed"),
+	properties: Schema.Struct({
+		name: Schema.String,
+		sessionID: Schema.String,
+		arguments: Schema.String,
+		messageID: Schema.String,
+	}).pipe(Schema.extend(OpenCodeOpaquePropertiesSchema)),
+});
+
+const OpenCodeGlobalDisposedEventSchema = Schema.Struct({
+	type: Schema.Literal("global.disposed"),
+	properties: Schema.Struct({}).pipe(
+		Schema.extend(OpenCodeOpaquePropertiesSchema),
+	),
+});
+
+const OpenCodeInstallationUpdatedEventSchema = Schema.Struct({
+	type: Schema.Literal("installation.updated"),
+	properties: Schema.Struct({
+		version: Schema.String,
+	}).pipe(Schema.extend(OpenCodeOpaquePropertiesSchema)),
+});
+
+const OpenCodeIntegrationConnectionUpdatedEventSchema = Schema.Struct({
+	type: Schema.Literal("integration.connection.updated"),
+	properties: Schema.Struct({
+		integrationID: Schema.String,
+	}).pipe(Schema.extend(OpenCodeOpaquePropertiesSchema)),
+});
+
+const OpenCodeIntegrationUpdatedEventSchema = Schema.Struct({
+	type: Schema.Literal("integration.updated"),
+	properties: Schema.Struct({}).pipe(
+		Schema.extend(OpenCodeOpaquePropertiesSchema),
+	),
+});
+
+const OpenCodeLspUpdatedEventSchema = Schema.Struct({
+	type: Schema.Literal("lsp.updated"),
+	properties: Schema.Struct({}).pipe(
+		Schema.extend(OpenCodeOpaquePropertiesSchema),
+	),
+});
+
+const OpenCodeMcpBrowserOpenFailedEventSchema = Schema.Struct({
+	type: Schema.Literal("mcp.browser.open.failed"),
+	properties: Schema.Struct({
+		mcpName: Schema.String,
+		url: Schema.String,
+	}).pipe(Schema.extend(OpenCodeOpaquePropertiesSchema)),
+});
+
+const OpenCodeMcpToolsChangedEventSchema = Schema.Struct({
+	type: Schema.Literal("mcp.tools.changed"),
+	properties: Schema.Struct({
+		server: Schema.String,
+	}).pipe(Schema.extend(OpenCodeOpaquePropertiesSchema)),
+});
+
+const OpenCodeModelsDevRefreshedEventSchema = Schema.Struct({
+	type: Schema.Literal("models-dev.refreshed"),
+	properties: Schema.Struct({}).pipe(
+		Schema.extend(OpenCodeOpaquePropertiesSchema),
+	),
+});
+
+const OpenCodePermissionV2AskedEventSchema = Schema.Struct({
+	type: Schema.Literal("permission.v2.asked"),
+	properties: Schema.Struct({
+		id: Schema.String,
+		sessionID: Schema.String,
+		action: Schema.String,
+		resources: Schema.Array(Schema.String),
+		save: Schema.optional(Schema.Array(Schema.String)),
+		metadata: Schema.optional(Schema.Unknown),
+		source: Schema.optional(Schema.Unknown),
+	}).pipe(Schema.extend(OpenCodeOpaquePropertiesSchema)),
+});
+
+const OpenCodePermissionV2RepliedEventSchema = Schema.Struct({
+	type: Schema.Literal("permission.v2.replied"),
+	properties: Schema.Struct({
+		sessionID: Schema.String,
+		requestID: Schema.String,
+		reply: Schema.Unknown,
+	}).pipe(Schema.extend(OpenCodeOpaquePropertiesSchema)),
+});
+
+const OpenCodePluginAddedEventSchema = Schema.Struct({
+	type: Schema.Literal("plugin.added"),
+	properties: Schema.Struct({
+		id: Schema.String,
+	}).pipe(Schema.extend(OpenCodeOpaquePropertiesSchema)),
+});
+
+const OpenCodeProjectDirectoriesUpdatedEventSchema = Schema.Struct({
+	type: Schema.Literal("project.directories.updated"),
+	properties: Schema.Struct({
+		projectID: Schema.String,
+	}).pipe(Schema.extend(OpenCodeOpaquePropertiesSchema)),
+});
+
+const OpenCodeProjectUpdatedEventSchema = Schema.Struct({
+	type: Schema.Literal("project.updated"),
+	properties: Schema.Struct({
+		id: Schema.String,
+		worktree: Schema.String,
+		vcs: Schema.optional(Schema.Unknown),
+		name: Schema.optional(Schema.String),
+		icon: Schema.optional(Schema.Unknown),
+		commands: Schema.optional(Schema.Unknown),
+		time: Schema.Unknown,
+		sandboxes: Schema.Array(Schema.String),
+	}).pipe(Schema.extend(OpenCodeOpaquePropertiesSchema)),
+});
+
+const OpenCodePtyUpdatedEventSchema = Schema.Struct({
+	type: Schema.Literal("pty.updated"),
+	properties: Schema.Struct({
+		info: OpenCodePtySchema,
+	}).pipe(Schema.extend(OpenCodeOpaquePropertiesSchema)),
+});
+
+const OpenCodeQuestionRejectedEventSchema = Schema.Struct({
+	type: Schema.Literal("question.rejected"),
+	properties: Schema.Struct({
+		sessionID: Schema.String,
+		requestID: Schema.String,
+	}).pipe(Schema.extend(OpenCodeOpaquePropertiesSchema)),
+});
+
+const OpenCodeQuestionRepliedEventSchema = Schema.Struct({
+	type: Schema.Literal("question.replied"),
+	properties: Schema.Struct({
+		sessionID: Schema.String,
+		requestID: Schema.String,
+		answers: Schema.Array(Schema.Unknown),
+	}).pipe(Schema.extend(OpenCodeOpaquePropertiesSchema)),
+});
+
+const OpenCodeQuestionV2AskedEventSchema = Schema.Struct({
+	type: Schema.Literal("question.v2.asked"),
+	properties: Schema.Struct({
+		id: Schema.String,
+		sessionID: Schema.String,
+		questions: Schema.Array(Schema.Unknown),
+		tool: Schema.optional(Schema.Unknown),
+	}).pipe(Schema.extend(OpenCodeOpaquePropertiesSchema)),
+});
+
+const OpenCodeQuestionV2RejectedEventSchema = Schema.Struct({
+	type: Schema.Literal("question.v2.rejected"),
+	properties: Schema.Struct({
+		sessionID: Schema.String,
+		requestID: Schema.String,
+	}).pipe(Schema.extend(OpenCodeOpaquePropertiesSchema)),
+});
+
+const OpenCodeQuestionV2RepliedEventSchema = Schema.Struct({
+	type: Schema.Literal("question.v2.replied"),
+	properties: Schema.Struct({
+		sessionID: Schema.String,
+		requestID: Schema.String,
+		answers: Schema.Array(Schema.Unknown),
+	}).pipe(Schema.extend(OpenCodeOpaquePropertiesSchema)),
+});
+
+const OpenCodeReferenceUpdatedEventSchema = Schema.Struct({
+	type: Schema.Literal("reference.updated"),
+	properties: Schema.Struct({}).pipe(
+		Schema.extend(OpenCodeOpaquePropertiesSchema),
+	),
+});
+
+const OpenCodeServerConnectedEventSchema = Schema.Struct({
+	type: Schema.Literal("server.connected"),
+	properties: Schema.Struct({}).pipe(
+		Schema.extend(OpenCodeOpaquePropertiesSchema),
+	),
+});
+
+const OpenCodeServerInstanceDisposedEventSchema = Schema.Struct({
+	type: Schema.Literal("server.instance.disposed"),
+	properties: Schema.Struct({
+		directory: Schema.String,
+	}).pipe(Schema.extend(OpenCodeOpaquePropertiesSchema)),
+});
+
+const OpenCodeSessionCompactedEventSchema = Schema.Struct({
+	type: Schema.Literal("session.compacted"),
+	properties: Schema.Struct({
+		sessionID: Schema.String,
+	}).pipe(Schema.extend(OpenCodeOpaquePropertiesSchema)),
+});
+
+const OpenCodeSessionCreatedEventSchema = Schema.Struct({
+	type: Schema.Literal("session.created"),
+	properties: Schema.Struct({
+		sessionID: Schema.String,
+		info: OpenCodeSessionSchema,
+	}).pipe(Schema.extend(OpenCodeOpaquePropertiesSchema)),
+});
+
+const OpenCodeSessionDeletedEventSchema = Schema.Struct({
+	type: Schema.Literal("session.deleted"),
+	properties: Schema.Struct({
+		sessionID: Schema.String,
+		info: OpenCodeSessionSchema,
+	}).pipe(Schema.extend(OpenCodeOpaquePropertiesSchema)),
+});
+
+const OpenCodeSessionDiffEventSchema = Schema.Struct({
+	type: Schema.Literal("session.diff"),
+	properties: Schema.Struct({
+		sessionID: Schema.String,
+		diff: Schema.Array(Schema.Unknown),
+	}).pipe(Schema.extend(OpenCodeOpaquePropertiesSchema)),
+});
+
+const OpenCodeSessionIdleEventSchema = Schema.Struct({
+	type: Schema.Literal("session.idle"),
+	properties: Schema.Struct({
+		sessionID: Schema.String,
+	}).pipe(Schema.extend(OpenCodeOpaquePropertiesSchema)),
+});
+
+const OpenCodeSessionNextAgentSwitchedEventSchema = Schema.Struct({
+	type: Schema.Literal("session.next.agent.switched"),
+	properties: Schema.Struct({
+		timestamp: Schema.Number,
+		sessionID: Schema.String,
+		messageID: Schema.String,
+		agent: Schema.String,
+	}).pipe(Schema.extend(OpenCodeOpaquePropertiesSchema)),
+});
+
+const OpenCodeSessionNextCompactionDeltaEventSchema = Schema.Struct({
+	type: Schema.Literal("session.next.compaction.delta"),
+	properties: Schema.Struct({
+		timestamp: Schema.Number,
+		sessionID: Schema.String,
+		messageID: Schema.String,
+		text: Schema.String,
+	}).pipe(Schema.extend(OpenCodeOpaquePropertiesSchema)),
+});
+
+const OpenCodeSessionNextCompactionEndedEventSchema = Schema.Struct({
+	type: Schema.Literal("session.next.compaction.ended"),
+	properties: Schema.Struct({
+		timestamp: Schema.Number,
+		sessionID: Schema.String,
+		messageID: Schema.String,
+		reason: Schema.Literal("auto", "manual"),
+		text: Schema.String,
+		recent: Schema.String,
+	}).pipe(Schema.extend(OpenCodeOpaquePropertiesSchema)),
+});
+
+const OpenCodeSessionNextCompactionStartedEventSchema = Schema.Struct({
+	type: Schema.Literal("session.next.compaction.started"),
+	properties: Schema.Struct({
+		timestamp: Schema.Number,
+		sessionID: Schema.String,
+		messageID: Schema.String,
+		reason: Schema.Literal("auto", "manual"),
+	}).pipe(Schema.extend(OpenCodeOpaquePropertiesSchema)),
+});
+
+const OpenCodeSessionNextContextUpdatedEventSchema = Schema.Struct({
+	type: Schema.Literal("session.next.context.updated"),
+	properties: Schema.Struct({
+		timestamp: Schema.Number,
+		sessionID: Schema.String,
+		messageID: Schema.String,
+		text: Schema.String,
+	}).pipe(Schema.extend(OpenCodeOpaquePropertiesSchema)),
+});
+
+const OpenCodeSessionNextModelSwitchedEventSchema = Schema.Struct({
+	type: Schema.Literal("session.next.model.switched"),
+	properties: Schema.Struct({
+		timestamp: Schema.Number,
+		sessionID: Schema.String,
+		messageID: Schema.String,
+		model: OpenCodeModelRefSchema,
+	}).pipe(Schema.extend(OpenCodeOpaquePropertiesSchema)),
+});
+
+const OpenCodeSessionNextMovedEventSchema = Schema.Struct({
+	type: Schema.Literal("session.next.moved"),
+	properties: Schema.Struct({
+		timestamp: Schema.Number,
+		sessionID: Schema.String,
+		location: Schema.Unknown,
+		subdirectory: Schema.optional(Schema.String),
+	}).pipe(Schema.extend(OpenCodeOpaquePropertiesSchema)),
+});
+
+const OpenCodeSessionNextPromptAdmittedEventSchema = Schema.Struct({
+	type: Schema.Literal("session.next.prompt.admitted"),
+	properties: Schema.Struct({
+		timestamp: Schema.Number,
+		sessionID: Schema.String,
+		messageID: Schema.String,
+		prompt: Schema.Unknown,
+		delivery: Schema.Literal("steer", "queue"),
+	}).pipe(Schema.extend(OpenCodeOpaquePropertiesSchema)),
+});
+
+const OpenCodeSessionNextPromptedEventSchema = Schema.Struct({
+	type: Schema.Literal("session.next.prompted"),
+	properties: Schema.Struct({
+		timestamp: Schema.Number,
+		sessionID: Schema.String,
+		messageID: Schema.String,
+		prompt: Schema.Unknown,
+		delivery: Schema.Literal("steer", "queue"),
+	}).pipe(Schema.extend(OpenCodeOpaquePropertiesSchema)),
+});
+
+const OpenCodeSessionNextReasoningDeltaEventSchema = Schema.Struct({
+	type: Schema.Literal("session.next.reasoning.delta"),
+	properties: Schema.Struct({
+		timestamp: Schema.Number,
+		sessionID: Schema.String,
+		assistantMessageID: Schema.String,
+		reasoningID: Schema.String,
+		delta: Schema.String,
+	}).pipe(Schema.extend(OpenCodeOpaquePropertiesSchema)),
+});
+
+const OpenCodeSessionNextReasoningEndedEventSchema = Schema.Struct({
+	type: Schema.Literal("session.next.reasoning.ended"),
+	properties: Schema.Struct({
+		timestamp: Schema.Number,
+		sessionID: Schema.String,
+		assistantMessageID: Schema.String,
+		reasoningID: Schema.String,
+		text: Schema.String,
+		providerMetadata: Schema.optional(Schema.Unknown),
+	}).pipe(Schema.extend(OpenCodeOpaquePropertiesSchema)),
+});
+
+const OpenCodeSessionNextReasoningStartedEventSchema = Schema.Struct({
+	type: Schema.Literal("session.next.reasoning.started"),
+	properties: Schema.Struct({
+		timestamp: Schema.Number,
+		sessionID: Schema.String,
+		assistantMessageID: Schema.String,
+		reasoningID: Schema.String,
+		providerMetadata: Schema.optional(Schema.Unknown),
+	}).pipe(Schema.extend(OpenCodeOpaquePropertiesSchema)),
+});
+
+const OpenCodeSessionNextRetriedEventSchema = Schema.Struct({
+	type: Schema.Literal("session.next.retried"),
+	properties: Schema.Struct({
+		timestamp: Schema.Number,
+		sessionID: Schema.String,
+		attempt: Schema.Number,
+		error: Schema.Unknown,
+	}).pipe(Schema.extend(OpenCodeOpaquePropertiesSchema)),
+});
+
+const OpenCodeSessionNextRevertClearedEventSchema = Schema.Struct({
+	type: Schema.Literal("session.next.revert.cleared"),
+	properties: Schema.Struct({
+		timestamp: Schema.Number,
+		sessionID: Schema.String,
+	}).pipe(Schema.extend(OpenCodeOpaquePropertiesSchema)),
+});
+
+const OpenCodeSessionNextRevertCommittedEventSchema = Schema.Struct({
+	type: Schema.Literal("session.next.revert.committed"),
+	properties: Schema.Struct({
+		timestamp: Schema.Number,
+		sessionID: Schema.String,
+		messageID: Schema.String,
+	}).pipe(Schema.extend(OpenCodeOpaquePropertiesSchema)),
+});
+
+const OpenCodeSessionNextRevertStagedEventSchema = Schema.Struct({
+	type: Schema.Literal("session.next.revert.staged"),
+	properties: Schema.Struct({
+		timestamp: Schema.Number,
+		sessionID: Schema.String,
+		revert: Schema.Unknown,
+	}).pipe(Schema.extend(OpenCodeOpaquePropertiesSchema)),
+});
+
+const OpenCodeSessionNextShellEndedEventSchema = Schema.Struct({
+	type: Schema.Literal("session.next.shell.ended"),
+	properties: Schema.Struct({
+		timestamp: Schema.Number,
+		sessionID: Schema.String,
+		callID: Schema.String,
+		output: Schema.String,
+	}).pipe(Schema.extend(OpenCodeOpaquePropertiesSchema)),
+});
+
+const OpenCodeSessionNextShellStartedEventSchema = Schema.Struct({
+	type: Schema.Literal("session.next.shell.started"),
+	properties: Schema.Struct({
+		timestamp: Schema.Number,
+		sessionID: Schema.String,
+		messageID: Schema.String,
+		callID: Schema.String,
+		command: Schema.String,
+	}).pipe(Schema.extend(OpenCodeOpaquePropertiesSchema)),
+});
+
+const OpenCodeSessionNextStepEndedEventSchema = Schema.Struct({
+	type: Schema.Literal("session.next.step.ended"),
+	properties: Schema.Struct({
+		timestamp: Schema.Number,
+		sessionID: Schema.String,
+		assistantMessageID: Schema.String,
+		finish: Schema.String,
+		cost: Schema.Number,
+		tokens: Schema.Unknown,
+		snapshot: Schema.optional(Schema.String),
+		files: Schema.optional(Schema.Array(Schema.String)),
+	}).pipe(Schema.extend(OpenCodeOpaquePropertiesSchema)),
+});
+
+const OpenCodeSessionNextStepFailedEventSchema = Schema.Struct({
+	type: Schema.Literal("session.next.step.failed"),
+	properties: Schema.Struct({
+		timestamp: Schema.Number,
+		sessionID: Schema.String,
+		assistantMessageID: Schema.String,
+		error: Schema.Unknown,
+	}).pipe(Schema.extend(OpenCodeOpaquePropertiesSchema)),
+});
+
+const OpenCodeSessionNextStepStartedEventSchema = Schema.Struct({
+	type: Schema.Literal("session.next.step.started"),
+	properties: Schema.Struct({
+		timestamp: Schema.Number,
+		sessionID: Schema.String,
+		assistantMessageID: Schema.String,
+		agent: Schema.String,
+		model: OpenCodeModelRefSchema,
+		snapshot: Schema.optional(Schema.String),
+	}).pipe(Schema.extend(OpenCodeOpaquePropertiesSchema)),
+});
+
+const OpenCodeSessionNextSyntheticEventSchema = Schema.Struct({
+	type: Schema.Literal("session.next.synthetic"),
+	properties: Schema.Struct({
+		timestamp: Schema.Number,
+		sessionID: Schema.String,
+		messageID: Schema.String,
+		text: Schema.String,
+	}).pipe(Schema.extend(OpenCodeOpaquePropertiesSchema)),
+});
+
+const OpenCodeSessionNextTextDeltaEventSchema = Schema.Struct({
+	type: Schema.Literal("session.next.text.delta"),
+	properties: Schema.Struct({
+		timestamp: Schema.Number,
+		sessionID: Schema.String,
+		assistantMessageID: Schema.String,
+		textID: Schema.String,
+		delta: Schema.String,
+	}).pipe(Schema.extend(OpenCodeOpaquePropertiesSchema)),
+});
+
+const OpenCodeSessionNextTextEndedEventSchema = Schema.Struct({
+	type: Schema.Literal("session.next.text.ended"),
+	properties: Schema.Struct({
+		timestamp: Schema.Number,
+		sessionID: Schema.String,
+		assistantMessageID: Schema.String,
+		textID: Schema.String,
+		text: Schema.String,
+	}).pipe(Schema.extend(OpenCodeOpaquePropertiesSchema)),
+});
+
+const OpenCodeSessionNextTextStartedEventSchema = Schema.Struct({
+	type: Schema.Literal("session.next.text.started"),
+	properties: Schema.Struct({
+		timestamp: Schema.Number,
+		sessionID: Schema.String,
+		assistantMessageID: Schema.String,
+		textID: Schema.String,
+	}).pipe(Schema.extend(OpenCodeOpaquePropertiesSchema)),
+});
+
+const OpenCodeSessionNextToolCalledEventSchema = Schema.Struct({
+	type: Schema.Literal("session.next.tool.called"),
+	properties: Schema.Struct({
+		timestamp: Schema.Number,
+		sessionID: Schema.String,
+		assistantMessageID: Schema.String,
+		callID: Schema.String,
+		tool: Schema.String,
+		input: Schema.Unknown,
+		provider: Schema.Unknown,
+	}).pipe(Schema.extend(OpenCodeOpaquePropertiesSchema)),
+});
+
+const OpenCodeSessionNextToolFailedEventSchema = Schema.Struct({
+	type: Schema.Literal("session.next.tool.failed"),
+	properties: Schema.Struct({
+		timestamp: Schema.Number,
+		sessionID: Schema.String,
+		assistantMessageID: Schema.String,
+		callID: Schema.String,
+		error: Schema.Unknown,
+		result: Schema.optional(Schema.Unknown),
+		provider: Schema.Unknown,
+	}).pipe(Schema.extend(OpenCodeOpaquePropertiesSchema)),
+});
+
+const OpenCodeSessionNextToolInputDeltaEventSchema = Schema.Struct({
+	type: Schema.Literal("session.next.tool.input.delta"),
+	properties: Schema.Struct({
+		timestamp: Schema.Number,
+		sessionID: Schema.String,
+		assistantMessageID: Schema.String,
+		callID: Schema.String,
+		delta: Schema.String,
+	}).pipe(Schema.extend(OpenCodeOpaquePropertiesSchema)),
+});
+
+const OpenCodeSessionNextToolInputEndedEventSchema = Schema.Struct({
+	type: Schema.Literal("session.next.tool.input.ended"),
+	properties: Schema.Struct({
+		timestamp: Schema.Number,
+		sessionID: Schema.String,
+		assistantMessageID: Schema.String,
+		callID: Schema.String,
+		text: Schema.String,
+	}).pipe(Schema.extend(OpenCodeOpaquePropertiesSchema)),
+});
+
+const OpenCodeSessionNextToolInputStartedEventSchema = Schema.Struct({
+	type: Schema.Literal("session.next.tool.input.started"),
+	properties: Schema.Struct({
+		timestamp: Schema.Number,
+		sessionID: Schema.String,
+		assistantMessageID: Schema.String,
+		callID: Schema.String,
+		name: Schema.String,
+	}).pipe(Schema.extend(OpenCodeOpaquePropertiesSchema)),
+});
+
+const OpenCodeSessionNextToolProgressEventSchema = Schema.Struct({
+	type: Schema.Literal("session.next.tool.progress"),
+	properties: Schema.Struct({
+		timestamp: Schema.Number,
+		sessionID: Schema.String,
+		assistantMessageID: Schema.String,
+		callID: Schema.String,
+		structured: Schema.Unknown,
+		content: Schema.Array(Schema.Unknown),
+	}).pipe(Schema.extend(OpenCodeOpaquePropertiesSchema)),
+});
+
+const OpenCodeSessionNextToolSuccessEventSchema = Schema.Struct({
+	type: Schema.Literal("session.next.tool.success"),
+	properties: Schema.Struct({
+		timestamp: Schema.Number,
+		sessionID: Schema.String,
+		assistantMessageID: Schema.String,
+		callID: Schema.String,
+		structured: Schema.Unknown,
+		content: Schema.Array(Schema.Unknown),
+		outputPaths: Schema.optional(Schema.Array(Schema.String)),
+		result: Schema.optional(Schema.Unknown),
+		provider: Schema.Unknown,
+	}).pipe(Schema.extend(OpenCodeOpaquePropertiesSchema)),
+});
+
+const OpenCodeTuiCommandExecuteEventSchema = Schema.Struct({
+	type: Schema.Literal("tui.command.execute"),
+	properties: Schema.Struct({
+		command: Schema.Union(
+			Schema.Literal(
+				"session.list",
+				"session.new",
+				"session.share",
+				"session.interrupt",
+				"session.compact",
+				"session.page.up",
+				"session.page.down",
+				"session.line.up",
+				"session.line.down",
+				"session.half.page.up",
+				"session.half.page.down",
+				"session.first",
+				"session.last",
+				"prompt.clear",
+				"prompt.submit",
+				"agent.cycle",
+			),
+			Schema.String,
+		),
+	}).pipe(Schema.extend(OpenCodeOpaquePropertiesSchema)),
+});
+
+const OpenCodeTuiPromptAppendEventSchema = Schema.Struct({
+	type: Schema.Literal("tui.prompt.append"),
+	properties: Schema.Struct({
+		text: Schema.String,
+	}).pipe(Schema.extend(OpenCodeOpaquePropertiesSchema)),
+});
+
+const OpenCodeTuiSessionSelectEventSchema = Schema.Struct({
+	type: Schema.Literal("tui.session.select"),
+	properties: Schema.Struct({
+		sessionID: Schema.String,
+	}).pipe(Schema.extend(OpenCodeOpaquePropertiesSchema)),
+});
+
+const OpenCodeTuiToastShowEventSchema = Schema.Struct({
+	type: Schema.Literal("tui.toast.show"),
+	properties: Schema.Struct({
+		title: Schema.optional(Schema.String),
+		message: Schema.String,
+		variant: Schema.Literal("info", "success", "warning", "error"),
+		duration: Schema.optional(Schema.Number),
+	}).pipe(Schema.extend(OpenCodeOpaquePropertiesSchema)),
+});
+
+const OpenCodeVcsBranchUpdatedEventSchema = Schema.Struct({
+	type: Schema.Literal("vcs.branch.updated"),
+	properties: Schema.Struct({
+		branch: Schema.optional(Schema.String),
+	}).pipe(Schema.extend(OpenCodeOpaquePropertiesSchema)),
+});
+
+const OpenCodeWorkspaceFailedEventSchema = Schema.Struct({
+	type: Schema.Literal("workspace.failed"),
+	properties: Schema.Struct({
+		message: Schema.String,
+	}).pipe(Schema.extend(OpenCodeOpaquePropertiesSchema)),
+});
+
+const OpenCodeWorkspaceReadyEventSchema = Schema.Struct({
+	type: Schema.Literal("workspace.ready"),
+	properties: Schema.Struct({
+		name: Schema.String,
+	}).pipe(Schema.extend(OpenCodeOpaquePropertiesSchema)),
+});
+
+const OpenCodeWorkspaceStatusEventSchema = Schema.Struct({
+	type: Schema.Literal("workspace.status"),
+	properties: Schema.Struct({
+		workspaceID: Schema.String,
+		status: Schema.Literal("connected", "connecting", "disconnected", "error"),
+	}).pipe(Schema.extend(OpenCodeOpaquePropertiesSchema)),
+});
+
+const OpenCodeWorktreeFailedEventSchema = Schema.Struct({
+	type: Schema.Literal("worktree.failed"),
+	properties: Schema.Struct({
+		message: Schema.String,
+	}).pipe(Schema.extend(OpenCodeOpaquePropertiesSchema)),
+});
+
+const OpenCodeWorktreeReadyEventSchema = Schema.Struct({
+	type: Schema.Literal("worktree.ready"),
+	properties: Schema.Struct({
+		name: Schema.String,
+		branch: Schema.optional(Schema.String),
+	}).pipe(Schema.extend(OpenCodeOpaquePropertiesSchema)),
+});
+
 export const OpenCodeEventSchema = Schema.Union(
 	OpenCodeMessageCreatedEventSchema,
 	OpenCodePartDeltaEventSchema,
@@ -942,6 +1624,77 @@ export const OpenCodeEventSchema = Schema.Union(
 	OpenCodeFileEditedEventSchema,
 	OpenCodeFileWatcherUpdatedEventSchema,
 	OpenCodeInstallationUpdateAvailableEventSchema,
+	OpenCodeCatalogUpdatedEventSchema,
+	OpenCodeCommandExecutedEventSchema,
+	OpenCodeGlobalDisposedEventSchema,
+	OpenCodeInstallationUpdatedEventSchema,
+	OpenCodeIntegrationConnectionUpdatedEventSchema,
+	OpenCodeIntegrationUpdatedEventSchema,
+	OpenCodeLspUpdatedEventSchema,
+	OpenCodeMcpBrowserOpenFailedEventSchema,
+	OpenCodeMcpToolsChangedEventSchema,
+	OpenCodeModelsDevRefreshedEventSchema,
+	OpenCodePermissionV2AskedEventSchema,
+	OpenCodePermissionV2RepliedEventSchema,
+	OpenCodePluginAddedEventSchema,
+	OpenCodeProjectDirectoriesUpdatedEventSchema,
+	OpenCodeProjectUpdatedEventSchema,
+	OpenCodePtyUpdatedEventSchema,
+	OpenCodeQuestionRejectedEventSchema,
+	OpenCodeQuestionRepliedEventSchema,
+	OpenCodeQuestionV2AskedEventSchema,
+	OpenCodeQuestionV2RejectedEventSchema,
+	OpenCodeQuestionV2RepliedEventSchema,
+	OpenCodeReferenceUpdatedEventSchema,
+	OpenCodeServerConnectedEventSchema,
+	OpenCodeServerInstanceDisposedEventSchema,
+	OpenCodeSessionCompactedEventSchema,
+	OpenCodeSessionCreatedEventSchema,
+	OpenCodeSessionDeletedEventSchema,
+	OpenCodeSessionDiffEventSchema,
+	OpenCodeSessionIdleEventSchema,
+	OpenCodeSessionNextAgentSwitchedEventSchema,
+	OpenCodeSessionNextCompactionDeltaEventSchema,
+	OpenCodeSessionNextCompactionEndedEventSchema,
+	OpenCodeSessionNextCompactionStartedEventSchema,
+	OpenCodeSessionNextContextUpdatedEventSchema,
+	OpenCodeSessionNextModelSwitchedEventSchema,
+	OpenCodeSessionNextMovedEventSchema,
+	OpenCodeSessionNextPromptAdmittedEventSchema,
+	OpenCodeSessionNextPromptedEventSchema,
+	OpenCodeSessionNextReasoningDeltaEventSchema,
+	OpenCodeSessionNextReasoningEndedEventSchema,
+	OpenCodeSessionNextReasoningStartedEventSchema,
+	OpenCodeSessionNextRetriedEventSchema,
+	OpenCodeSessionNextRevertClearedEventSchema,
+	OpenCodeSessionNextRevertCommittedEventSchema,
+	OpenCodeSessionNextRevertStagedEventSchema,
+	OpenCodeSessionNextShellEndedEventSchema,
+	OpenCodeSessionNextShellStartedEventSchema,
+	OpenCodeSessionNextStepEndedEventSchema,
+	OpenCodeSessionNextStepFailedEventSchema,
+	OpenCodeSessionNextStepStartedEventSchema,
+	OpenCodeSessionNextSyntheticEventSchema,
+	OpenCodeSessionNextTextDeltaEventSchema,
+	OpenCodeSessionNextTextEndedEventSchema,
+	OpenCodeSessionNextTextStartedEventSchema,
+	OpenCodeSessionNextToolCalledEventSchema,
+	OpenCodeSessionNextToolFailedEventSchema,
+	OpenCodeSessionNextToolInputDeltaEventSchema,
+	OpenCodeSessionNextToolInputEndedEventSchema,
+	OpenCodeSessionNextToolInputStartedEventSchema,
+	OpenCodeSessionNextToolProgressEventSchema,
+	OpenCodeSessionNextToolSuccessEventSchema,
+	OpenCodeTuiCommandExecuteEventSchema,
+	OpenCodeTuiPromptAppendEventSchema,
+	OpenCodeTuiSessionSelectEventSchema,
+	OpenCodeTuiToastShowEventSchema,
+	OpenCodeVcsBranchUpdatedEventSchema,
+	OpenCodeWorkspaceFailedEventSchema,
+	OpenCodeWorkspaceReadyEventSchema,
+	OpenCodeWorkspaceStatusEventSchema,
+	OpenCodeWorktreeFailedEventSchema,
+	OpenCodeWorktreeReadyEventSchema,
 );
 
 export type OpenCodeEvent = Schema.Schema.Type<typeof OpenCodeEventSchema>;

@@ -3,8 +3,9 @@
 // OpenCode, translates them, filters by session, records to cache, broadcasts
 // to browser clients, and sends push notifications.
 
-import { Cause, Effect, Runtime } from "effect";
+import { Cause, Effect, Either, Runtime, Schema } from "effect";
 import { mapQuestionFields } from "../bridges/question-bridge.js";
+import { OpenCodeEventSchema } from "../contracts/providers/opencode-sdk.js";
 import type { OpenCodeRuntimeIngressResult } from "../domain/relay/Services/opencode-runtime-ingress-service.js";
 import type {
 	PendingPermissionRecoveryInput,
@@ -36,6 +37,10 @@ import {
 	isSessionErrorEvent,
 } from "./opencode-events.js";
 import type { SSEStreamEvents } from "./sse-stream.js";
+
+// Built once: envelope decoder for the fail-closed ingestion gate (see the
+// consumer "event" handler). Returns Either<OpenCodeEvent, ParseError>.
+const decodeOpenCodeEvent = Schema.decodeUnknownEither(OpenCodeEventSchema);
 
 // ─── Session ID extraction ────────────────────────────────────────────────────
 // OpenCode SSE events store sessionID in different locations by event type:
@@ -1003,17 +1008,24 @@ function wireSSEConsumerWithCallbacks(
 	});
 	consumer.on("error", (err) => log.warn(`Error: ${err.message}`));
 
-	// Decode boundary: raw SSE frames are forwarded as `SSEEvent` without a
-	// fail-closed envelope decode against OpenCodeEventSchema. Field-level
-	// strictness (grill #10) is enforced downstream at the per-event translator
-	// sites via the hand-written type guards in opencode-events.ts, which only
-	// read the fields Conduit consumes. A blanket fail-closed decode here would
-	// be actively unsafe today: those guards intentionally model a subset (and,
-	// where they drift from the SDK — see conduit-test-1ao — a stricter gate
-	// would drop live events wholesale rather than degrade one translator). Wire
-	// OpenCodeEventSchema here only once the consumer guards are reconciled to
-	// the SDK shapes (tracked in conduit-test-8g7).
+	// Decode boundary (conduit-test-8g7). OpenCodeEventSchema now models the full
+	// 1.17.18 event surface (all 89 event types), and the consumer guards are
+	// reconciled to the real wire (conduit-test-nz8), so an envelope decode here
+	// is finally meaningful: a failure means the frame is malformed or the server
+	// introduced a new/renamed event type we do not yet model. We surface that as
+	// a warning but ALWAYS forward the raw event — a hard fail-closed drop would
+	// silently lose live traffic (e.g. a future server event) and regress today's
+	// pass-through behavior. Field-level consumption stays guarded per translator.
 	consumer.on("event", (event: unknown) => {
+		if (Either.isLeft(decodeOpenCodeEvent(event))) {
+			const type =
+				typeof (event as { type?: unknown } | null)?.type === "string"
+					? (event as { type: string }).type
+					: "(unknown)";
+			log.warn(
+				`SSE event failed OpenCodeEventSchema decode (forwarded raw): type=${type}`,
+			);
+		}
 		callbacks.handleEvent(event as SSEEvent);
 	});
 }

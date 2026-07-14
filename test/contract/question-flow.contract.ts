@@ -67,9 +67,9 @@ describe("AC4 — Question Flow Shape Validation", () => {
 			if (skipIfNoServer()) return;
 			const doc = loadSnapshotSpec();
 			const schemas = doc.components?.schemas ?? {};
-			expect(schemas).toHaveProperty("Event.question.asked");
-			expect(schemas).toHaveProperty("Event.question.replied");
-			expect(schemas).toHaveProperty("Event.question.rejected");
+			expect(schemas).toHaveProperty("EventQuestionAsked");
+			expect(schemas).toHaveProperty("EventQuestionReplied");
+			expect(schemas).toHaveProperty("EventQuestionRejected");
 		});
 	});
 

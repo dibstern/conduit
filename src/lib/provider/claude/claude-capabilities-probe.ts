@@ -4,7 +4,12 @@ import type {
 	SDKUserMessage,
 } from "@anthropic-ai/claude-agent-sdk";
 import { query as sdkQuery } from "@anthropic-ai/claude-agent-sdk";
-import { decodeClaudeSDKOptionsJsonShape } from "../../contracts/providers/claude-agent-sdk.js";
+import { Either, Schema } from "effect";
+import {
+	ClaudeSDKInitializationResultSubsetSchema,
+	decodeClaudeSDKOptionsJsonShape,
+} from "../../contracts/providers/claude-agent-sdk.js";
+import { createLogger, type Logger } from "../../logger.js";
 import type {
 	CommandInfo,
 	ContextWindowOption,
@@ -12,6 +17,15 @@ import type {
 	ProviderAgentInfo,
 } from "../types.js";
 import { makeClaudeSdkEnv } from "./claude-sdk-env.js";
+
+const defaultLog = createLogger("claude-capabilities-probe");
+
+// Best-effort observability decode: the probe survives an empty catalog, so we
+// never fail-close here — but a renamed/absent commands/agents/models/account
+// field would silently yield empty catalogs, so log the drift instead.
+const decodeInitializationResult = Schema.decodeUnknownEither(
+	ClaudeSDKInitializationResultSubsetSchema,
+);
 
 const OUTPUT_LIMIT_BY_FAMILY: ReadonlyArray<[pattern: RegExp, output: number]> =
 	[
@@ -70,6 +84,7 @@ export interface ProbeDeps {
 		prompt: string | AsyncIterable<SDKUserMessage>;
 		options?: SDKOptions;
 	}) => CapabilityQuery;
+	readonly logger?: Logger;
 }
 
 function inferLimits(
@@ -196,6 +211,15 @@ export async function probeClaudeCapabilities(
 			options: decodeClaudeSDKOptionsJsonShape(options),
 		});
 		const init = await query.initializationResult();
+		const decoded = decodeInitializationResult(init);
+		if (Either.isLeft(decoded)) {
+			(deps.logger ?? defaultLog).warn(
+				`Claude initializationResult failed subset decode (using raw with fallbacks): ${decoded.left.message.slice(
+					0,
+					400,
+				)}`,
+			);
+		}
 		const subscriptionType = init.account?.subscriptionType;
 		const commands: CommandInfo[] = (init.commands ?? []).map((command) => ({
 			name: command.name,
