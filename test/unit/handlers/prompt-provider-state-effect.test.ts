@@ -8,6 +8,7 @@ import { Effect, Layer } from "effect";
 import { expect, vi } from "vitest";
 import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
 import { PendingInteractionServiceLive } from "../../../src/lib/domain/relay/Services/pending-interaction-service.js";
+import { makeProviderRuntimeIngestionLive } from "../../../src/lib/domain/relay/Services/provider-runtime-ingestion-service.js";
 import {
 	ConfigTag,
 	LoggerTag,
@@ -62,6 +63,30 @@ const setClaudeModel = (sessionId: string) =>
 		providerID: "claude",
 		modelID: "claude-sonnet-4-5",
 	});
+
+// Mirror relay-stack production wiring: cev.3 makes ProviderRuntimeIngestion the
+// mandatory Claude provider-output seam. Provider events pushed through the sink
+// are persisted and republished via this ingestion path, exactly as production
+// builds it from the daemon's always-present persistence DB.
+const makeIngestionLayer = (
+	persistence: ReturnType<typeof makePersistenceEffectLayer>,
+	ws: WebSocketHandlerShape,
+) =>
+	makeProviderRuntimeIngestionLive({
+		relayPublisher: {
+			publish: (msg) =>
+				Effect.sync(() => {
+					ws.sendToSession(
+						"sessionId" in msg &&
+							typeof msg.sessionId === "string" &&
+							msg.sessionId.length > 0
+							? msg.sessionId
+							: "",
+						msg,
+					);
+				}),
+		},
+	}).pipe(Layer.provide(persistence));
 
 describe("handleMessage with Effect provider state persistence", () => {
 	it.effect(
@@ -333,6 +358,7 @@ describe("handleMessage with Effect provider state persistence", () => {
 		() => {
 			const dir = mkdtempSync(join(tmpdir(), "conduit-claude-sink-effect-"));
 			const filename = join(dir, "events.db");
+			const persistence = makePersistenceEffectLayer(filename);
 			const ws = mockWsHandler("session-claude-sink-effect");
 			const log = createSilentLogger();
 			const client = {
@@ -395,7 +421,8 @@ describe("handleMessage with Effect provider state persistence", () => {
 				} satisfies ProjectRelayConfig),
 				PendingInteractionServiceLive,
 				Layer.succeed(OrchestrationEngineTag, withDispatchEffect(engine)),
-				makePersistenceEffectLayer(filename),
+				persistence,
+				makeIngestionLayer(persistence, ws),
 				makeOverridesStateLive(),
 			);
 
@@ -451,6 +478,7 @@ describe("handleMessage with Effect provider state persistence", () => {
 	it.effect("routes Claude event sink messages to their event session", () => {
 		const dir = mkdtempSync(join(tmpdir(), "conduit-claude-child-sink-"));
 		const filename = join(dir, "events.db");
+		const persistence = makePersistenceEffectLayer(filename);
 		const ws = mockWsHandler("parent-session");
 		const log = createSilentLogger();
 		const client = {
@@ -496,7 +524,8 @@ describe("handleMessage with Effect provider state persistence", () => {
 			} satisfies ProjectRelayConfig),
 			PendingInteractionServiceLive,
 			Layer.succeed(OrchestrationEngineTag, withDispatchEffect(engine)),
-			makePersistenceEffectLayer(filename),
+			persistence,
+			makeIngestionLayer(persistence, ws),
 			makeOverridesStateLive(),
 		);
 

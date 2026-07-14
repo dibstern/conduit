@@ -14,7 +14,6 @@ describe("PersistenceLayer", () => {
 		layer = PersistenceLayer.memory();
 		expect(layer).toBeDefined();
 		expect(layer.eventStore).toBeDefined();
-		expect(layer.commandReceipts).toBeDefined();
 		expect(layer.db).toBeDefined();
 	});
 

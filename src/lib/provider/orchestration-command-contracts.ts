@@ -41,8 +41,17 @@ export const DURABLE_COMMAND_FINGERPRINT_FIELDS = [
 export type DurableCommandFingerprintField =
 	(typeof DURABLE_COMMAND_FINGERPRINT_FIELDS)[number];
 
+/**
+ * Effective-dispatch fingerprint scheme version. Bumped from 1 to 2 when the
+ * canonicalizer began folding the model provider id into the effective model
+ * and representing the Claude active-session model fallback. Pre-existing
+ * receipts were written under v1, so their stored fingerprint hash differs from
+ * a v2 recomputation of the same command.
+ */
+export const DURABLE_COMMAND_FINGERPRINT_VERSION = 2;
+
 export interface DurableCommandFingerprint {
-	readonly version: 1;
+	readonly version: typeof DURABLE_COMMAND_FINGERPRINT_VERSION;
 	readonly fields: Readonly<Record<DurableCommandFingerprintField, unknown>>;
 }
 
@@ -53,7 +62,7 @@ export interface DurableCommandReceiptWrite {
 	readonly sessionId: string;
 	readonly status: DurableCommandReceiptStatus;
 	readonly fingerprintHash: string;
-	readonly fingerprintVersion: 1;
+	readonly fingerprintVersion: typeof DURABLE_COMMAND_FINGERPRINT_VERSION;
 	readonly acceptedSequence?: number;
 	readonly sideEffectSequence?: number;
 	readonly resultSequence?: number;

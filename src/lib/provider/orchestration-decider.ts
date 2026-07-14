@@ -1,5 +1,6 @@
 import type { CanonicalEvent } from "../persistence/events.js";
 import type { DurableCommandCommitInput } from "./orchestration-command-commit.js";
+import { DURABLE_COMMAND_FINGERPRINT_VERSION } from "./orchestration-command-contracts.js";
 
 export interface DurableSendTurnCommandDecisionInput {
 	readonly commandId: string;
@@ -25,7 +26,7 @@ export function decideDurableSendTurnCommand(
 			sessionId: input.sessionId,
 			status: "side_effect_requested",
 			fingerprintHash: input.fingerprintHash,
-			fingerprintVersion: 1,
+			fingerprintVersion: DURABLE_COMMAND_FINGERPRINT_VERSION,
 			acceptedSequence: input.requestSequence,
 			sideEffectSequence: input.requestSequence,
 			createdAt: input.nowMs,

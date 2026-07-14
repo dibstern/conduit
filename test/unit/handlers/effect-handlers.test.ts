@@ -13,6 +13,7 @@ import {
 	PendingInteractionServiceTag,
 } from "../../../src/lib/domain/relay/Services/pending-interaction-service.js";
 import { ProjectManagementServiceLive } from "../../../src/lib/domain/relay/Services/project-management-service.js";
+import { ProviderRuntimeIngestionTag } from "../../../src/lib/domain/relay/Services/provider-runtime-ingestion-service.js";
 import {
 	type ProviderTurnService,
 	ProviderTurnServiceTag,
@@ -3380,6 +3381,15 @@ describe("handleMessage", () => {
 				Layer.succeed(SessionManagerServiceTag, sessionManagerService),
 				Layer.succeed(ConfigTag, config),
 				PendingInteractionServiceLive,
+				// Production always supplies ProviderRuntimeIngestion for Claude output
+				// (relay-stack builds it from the daemon's always-present persistence
+				// DB). cev.3 makes the seam mandatory, so the Claude event sink needs
+				// it present to avoid the failing guard sink.
+				Layer.succeed(ProviderRuntimeIngestionTag, {
+					ingest: () => Effect.succeed(0),
+					ingestBatch: () => Effect.succeed(0),
+					drain: () => Effect.void,
+				}),
 				Layer.succeed(OrchestrationEngineTag, withDispatchEffect(engine)),
 				makeOverridesStateLive(),
 			);

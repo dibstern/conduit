@@ -4,12 +4,15 @@
 // instances, engine) from an OpenCodeClient. Used by relay-stack.ts to
 // instantiate the provider layer alongside the existing relay pipeline.
 
+import { randomUUID } from "node:crypto";
 import { Context, Effect, Layer, type Scope } from "effect";
 import { OpenCodeAPITag } from "../domain/provider/Services/opencode-api-service.js";
+import { ProviderRuntimeIngestionTag } from "../domain/relay/Services/provider-runtime-ingestion-service.js";
 import { OrchestrationEngineTag } from "../domain/relay/Services/services.js";
 import type { OpenCodeAPI } from "../instance/opencode-api.js";
 import { createLogger } from "../logger.js";
 import { ClaudeEventPersistEffectTag } from "../persistence/effect/claude-event-persist-effect.js";
+import { SqliteClient } from "../persistence/sqlite-client.js";
 import type { SSEEvent } from "../relay/opencode-events.js";
 import {
 	defaultClaudeSubagentSdk,
@@ -22,6 +25,10 @@ import {
 } from "./opencode-provider-instance.js";
 import { OrchestrationEngine } from "./orchestration-engine.js";
 import { ProviderRegistry, ProviderRegistryTag } from "./provider-registry.js";
+import {
+	type ProviderSessionBindingReadModel,
+	SqliteProviderSessionBindingReadModel,
+} from "./provider-session-binding-read-model.js";
 import type { TurnResult } from "./types.js";
 
 const log = createLogger("orchestration-wiring");
@@ -29,10 +36,15 @@ const log = createLogger("orchestration-wiring");
 export interface OrchestrationLayerOptions {
 	readonly client: OpenCodeAPI;
 	readonly workspaceRoot?: string;
+	readonly persistenceDbPath?: string;
+	readonly projectKey?: string;
+	readonly sessionBindingReadModel?: ProviderSessionBindingReadModel;
 }
 
 export interface OrchestrationRuntimeLayerOptions {
 	readonly workspaceRoot?: string;
+	readonly persistenceDbPath?: string;
+	readonly projectKey?: string;
 }
 
 export interface OrchestrationLayer {
@@ -48,6 +60,12 @@ export interface OrchestrationLayer {
 	wireSSEToInstance(
 		sseOn: (event: "event", handler: (e: unknown) => void) => void,
 	): void;
+	/**
+	 * Deterministic quiescence seam: drain committed-but-unexecuted provider
+	 * side effects through the reactor (crash recovery / test flush). Same-process
+	 * dispatch already awaits its own execution.
+	 */
+	drainSideEffects(): Effect.Effect<void, unknown>;
 }
 
 const TURN_COMPLETE_RESULT: TurnResult = {
@@ -91,7 +109,12 @@ function createOrchestrationComponents(
 	});
 	registry.registerInstance(claudeInstance);
 
-	const engine = new OrchestrationEngine({ registry });
+	const engine = new OrchestrationEngine({
+		registry,
+		...(options.sessionBindingReadModel != null
+			? { sessionBindingReadModel: options.sessionBindingReadModel }
+			: {}),
+	});
 
 	return { engine, registry, openCodeInstance };
 }
@@ -125,7 +148,47 @@ const createOrchestrationComponentsEffect = (
 		});
 		registry.registerInstance(claudeInstance);
 
-		const engine = new OrchestrationEngine({ registry });
+		const persistenceDbPath = options.persistenceDbPath;
+		const sessionBindingDb =
+			persistenceDbPath != null
+				? yield* Effect.sync(() => SqliteClient.open(persistenceDbPath))
+				: undefined;
+		if (sessionBindingDb != null) {
+			yield* Effect.addFinalizer(() =>
+				Effect.sync(() => sessionBindingDb.close()),
+			);
+		}
+		const sessionBindingReadModel =
+			sessionBindingDb != null
+				? new SqliteProviderSessionBindingReadModel(sessionBindingDb)
+				: undefined;
+		// Durable command receipts share the persistence DB with the session
+		// binding read model. `now`/`generateId` are supplied at this wiring edge
+		// (wall clock + random) so core orchestration stays free of Date.now /
+		// global randomness. The shared ProviderRuntimeIngestion (when present) is
+		// handed to the engine's side-effect reactor so streamed provider output
+		// is persisted exactly as the former inline path did.
+		const ingestionOption = yield* Effect.serviceOption(
+			ProviderRuntimeIngestionTag,
+		);
+		const durableCommands =
+			sessionBindingDb != null
+				? {
+						db: sessionBindingDb,
+						projectKey:
+							options.projectKey ?? options.workspaceRoot ?? process.cwd(),
+						now: () => Date.now(),
+						generateId: () => `disp_${randomUUID()}`,
+						...(ingestionOption._tag === "Some"
+							? { ingestion: ingestionOption.value }
+							: {}),
+					}
+				: undefined;
+		const engine = new OrchestrationEngine({
+			registry,
+			...(sessionBindingReadModel != null ? { sessionBindingReadModel } : {}),
+			...(durableCommands != null ? { durableCommands } : {}),
+		});
 		return { engine, registry, openCodeInstance };
 	});
 
@@ -159,7 +222,13 @@ function createOrchestrationView(
 		});
 	}
 
-	return { engine, registry, openCodeInstance, wireSSEToInstance };
+	return {
+		engine,
+		registry,
+		openCodeInstance,
+		wireSSEToInstance,
+		drainSideEffects: () => engine.drainSideEffects(),
+	};
 }
 
 /**
@@ -190,6 +259,12 @@ export const makeOrchestrationRuntimeLayer = (
 				client,
 				...(options.workspaceRoot != null
 					? { workspaceRoot: options.workspaceRoot }
+					: {}),
+				...(options.persistenceDbPath != null
+					? { persistenceDbPath: options.persistenceDbPath }
+					: {}),
+				...(options.projectKey != null
+					? { projectKey: options.projectKey }
 					: {}),
 			});
 			yield* Effect.addFinalizer(() => components.engine.shutdownEffect());

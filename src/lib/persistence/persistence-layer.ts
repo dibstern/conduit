@@ -1,4 +1,3 @@
-import { CommandReceiptRepository } from "./command-receipts.js";
 import { EventStore } from "./event-store.js";
 import { EventStoreEviction } from "./eviction.js";
 import { runMigrations } from "./migrations.js";
@@ -10,7 +9,6 @@ import { SqliteClient } from "./sqlite-client.js";
 export class PersistenceLayer {
 	readonly db: SqliteClient;
 	readonly eventStore: EventStore;
-	readonly commandReceipts: CommandReceiptRepository;
 	readonly cursorRepo: ProjectorCursorRepository;
 	readonly projectionRunner: ProjectionRunner;
 	readonly eviction: EventStoreEviction;
@@ -20,7 +18,6 @@ export class PersistenceLayer {
 		this.db = db;
 		runMigrations(db, schemaMigrations);
 		this.eventStore = new EventStore(db);
-		this.commandReceipts = new CommandReceiptRepository(db);
 		this.cursorRepo = new ProjectorCursorRepository(db);
 		this.projectionRunner = new ProjectionRunner({
 			projectors: createAllProjectors(),

@@ -117,6 +117,12 @@ const allowedPlainErrorThrows: readonly AllowedPlainThrow[] = [
 		snippetPattern: /routePerSession: missing sessionId/,
 		reason: "dev-only frontend event-routing invariant",
 	},
+	{
+		path: "src/lib/provider/orchestration-command-commit.ts",
+		snippetPattern: /Cannot recommit command/,
+		reason:
+			"synchronous transaction abort: refuses to supersede a live running outbox claim (single-live-claim invariant); the throw rolls back runInTransaction",
+	},
 ];
 
 function tsFiles(dir: string): string[] {
@@ -2842,6 +2848,23 @@ describe("Effect runtime boundary grep", () => {
 		expect(openCodeRuntimeIngressSource).toMatch(/ingestBatch/);
 	});
 
+	it("keeps ProviderTurnService Claude output behind ProviderRuntimeIngestion", () => {
+		const providerTurnServiceSource = readFileSync(
+			join(REPO_ROOT, "src/lib/domain/relay/Services/provider-turn-service.ts"),
+			"utf8",
+		);
+
+		expect(providerTurnServiceSource).toMatch(
+			/ProviderRuntimeIngestionRequired/,
+		);
+		expect(providerTurnServiceSource).toMatch(
+			/if \(!ingestion\) return makeProviderRuntimeIngestionRequiredSink/,
+		);
+		expect(providerTurnServiceSource).toMatch(
+			/createRelayEventSink\(\{[\s\S]*\.\.\(ingestion \? \{ ingestion \} : \{\}\)/,
+		);
+	});
+
 	it("keeps relay startup as the only relay-stack runPromise boundary", () => {
 		const path = "src/lib/relay/relay-stack.ts";
 		const source = readFileSync(join(REPO_ROOT, path), "utf8");
@@ -3331,5 +3354,103 @@ describe("Effect runtime boundary grep", () => {
 		);
 
 		expect(hits).toEqual([]);
+	});
+
+	it("does not restore the legacy IdempotencySetTag service", () => {
+		const rule =
+			"docs/plans/2026-05-18-provider-orchestration-durable-receipts-decider-projector.md Phase 8 requires the toy idempotency service to stay deleted";
+		const hits = productionSourceFiles(join(REPO_ROOT, "src")).flatMap(
+			(file) => {
+				const path = relative(REPO_ROOT, file);
+				return readFileSync(file, "utf8")
+					.split("\n")
+					.flatMap((line, index) =>
+						/\bIdempotencySetTag\b/.test(line)
+							? [{ path, line: index + 1, source: line.trim(), rule }]
+							: [],
+					);
+			},
+		);
+
+		expect(hits, rule).toEqual([]);
+	});
+
+	it("does not restore the orchestration engine in-memory dedupe cache", () => {
+		const path = "src/lib/provider/orchestration-engine.ts";
+		const source = readFileSync(join(REPO_ROOT, path), "utf8");
+		const rule =
+			"docs/plans/2026-05-18-provider-orchestration-durable-receipts-decider-projector.md Phase 8 requires in-memory dedupe state to stay removed";
+		const hits = source
+			.split("\n")
+			.flatMap((line, index) =>
+				/\b(?:processedCommands|PROCESSED_COMMANDS_MAX)\b/.test(line)
+					? [{ path, line: index + 1, source: line.trim(), rule }]
+					: [],
+			);
+
+		expect(hits, rule).toEqual([]);
+	});
+
+	it("keeps orchestration session bindings behind the durable read model", () => {
+		const path = "src/lib/provider/orchestration-engine.ts";
+		const source = readFileSync(join(REPO_ROOT, path), "utf8");
+		const rule =
+			"docs/plans/2026-05-18-provider-orchestration-durable-receipts-decider-projector.md Provider Session Binding Read Model forbids an authoritative sessionBindings Map in orchestration";
+		const pattern = /\bsessionBindings\s*=\s*new\s+Map(?:<[^>]*>)?\s*\(/g;
+		const hits = Array.from(source.matchAll(pattern), (match) => ({
+			path,
+			line: source.slice(0, match.index).split("\n").length,
+			source: match[0],
+			rule,
+		}));
+
+		expect(hits, rule).toEqual([]);
+	});
+
+	it("keeps provider side-effect output behind ProviderRuntimeIngestion", () => {
+		const path = "src/lib/provider/orchestration-side-effect-reactor.ts";
+		const source = readFileSync(join(REPO_ROOT, path), "utf8");
+		const rule =
+			"docs/plans/2026-05-18-provider-orchestration-durable-receipts-decider-projector.md Provider Output Ingestion forbids the durable reactor from importing translateProviderRuntimeEventToDomain directly";
+		const pattern =
+			/import\s*\{[^}]*\btranslateProviderRuntimeEventToDomain\b[^}]*\}\s*from\s*["'][^"']+["']/gs;
+		const hits = Array.from(source.matchAll(pattern), (match) => ({
+			path,
+			line: source.slice(0, match.index).split("\n").length,
+			source: match[0].trim(),
+			rule,
+		}));
+
+		expect(hits, rule).toEqual([]);
+	});
+
+	it("does not restore the legacy command receipt repository", () => {
+		const legacyPath = "src/lib/persistence/command-receipts.ts";
+		const rule =
+			"docs/plans/2026-05-18-provider-orchestration-durable-receipts-decider-projector.md Durable Command Commit and Phase 8 cleanup require the legacy CommandReceiptRepository module to stay deleted";
+		const moduleHits = existsSync(join(REPO_ROOT, legacyPath))
+			? [
+					{
+						path: legacyPath,
+						line: 1,
+						source: "legacy receipt module exists",
+						rule,
+					},
+				]
+			: [];
+		const referenceHits = productionSourceFiles(join(REPO_ROOT, "src")).flatMap(
+			(file) => {
+				const path = relative(REPO_ROOT, file);
+				return readFileSync(file, "utf8")
+					.split("\n")
+					.flatMap((line, index) =>
+						/\bCommandReceiptRepository\b/.test(line)
+							? [{ path, line: index + 1, source: line.trim(), rule }]
+							: [],
+					);
+			},
+		);
+
+		expect([...moduleHits, ...referenceHits], rule).toEqual([]);
 	});
 });

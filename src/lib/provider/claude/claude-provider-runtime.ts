@@ -65,6 +65,7 @@ import type {
 	SendTurnInput,
 	TurnResult,
 } from "../types.js";
+import { claudeApiModelId } from "./claude-api-model-id.js";
 import type { ProbeResult } from "./claude-capabilities-probe.js";
 import {
 	type ClaudeCapabilitiesService,
@@ -125,22 +126,6 @@ function claudeRuntimeEvent<K extends CanonicalEventType>(
 		createdAt: Date.now(),
 		data,
 	};
-}
-
-function supportsMillionTokenContext(modelId: string): boolean {
-	const normalized = modelId.toLowerCase();
-	return normalized === "sonnet" || /^claude-.*sonnet(?:-|$)/.test(normalized);
-}
-
-function claudeApiModelId(
-	modelId: string | undefined,
-	contextWindow: string | undefined,
-): string | undefined {
-	if (!modelId) return undefined;
-	if (contextWindow === "1m" && supportsMillionTokenContext(modelId)) {
-		return `${modelId}[1m]`;
-	}
-	return modelId;
 }
 
 function asError(cause: unknown): Error {

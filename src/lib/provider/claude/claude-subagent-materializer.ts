@@ -224,6 +224,8 @@ export function diffSessionMessagesToEvents(input: {
 function runtimeEventsToDomain(
 	events: readonly ProviderRuntimeEvent[],
 ): CanonicalEvent[] {
+	// Offline transcript materialization: these runtime-shaped events are staged
+	// from already-fetched child-session messages, not live provider output.
 	let state = emptyProviderRuntimeDomainMapperState;
 	const domainEvents: CanonicalEvent[] = [];
 	for (const event of events) {

@@ -40,7 +40,18 @@ export class DurableCommandCommitRepository {
 				command_id, session_id, status, result_sequence, error, created_at,
 				command_type, project_key, fingerprint_hash, fingerprint_version,
 				accepted_sequence, side_effect_sequence, error_code, updated_at
-			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			ON CONFLICT (command_id) DO UPDATE SET
+				status = excluded.status,
+				result_sequence = excluded.result_sequence,
+				command_type = excluded.command_type,
+				project_key = excluded.project_key,
+				fingerprint_hash = excluded.fingerprint_hash,
+				fingerprint_version = excluded.fingerprint_version,
+				accepted_sequence = excluded.accepted_sequence,
+				side_effect_sequence = excluded.side_effect_sequence,
+				error_code = excluded.error_code,
+				updated_at = excluded.updated_at`,
 			[
 				receipt.commandId,
 				receipt.sessionId,
@@ -64,6 +75,29 @@ export class DurableCommandCommitRepository {
 		request: DurableCommandOutboxRequest,
 		updatedAt: number,
 	): void {
+		// One live execution claim per command id. A re-dispatch after a
+		// retryable failure recommits the same command; supersede any prior
+		// *idle* non-terminal row (pending/retryable_failed) so the fresh pending
+		// row is the only executable claim. A `running` row is an active claim
+		// held by an executor — superseding it would let a second executor run
+		// the provider concurrently, so refuse the recommit and let the whole
+		// commit transaction roll back. Terminal rows (completed/failed) are
+		// preserved as history.
+		const running = this.db.queryOne<{ readonly n: number }>(
+			`SELECT COUNT(*) AS n FROM provider_command_outbox
+			 WHERE command_id = ? AND status = 'running'`,
+			[request.commandId],
+		);
+		if ((running?.n ?? 0) > 0) {
+			throw new Error(
+				`Cannot recommit command ${request.commandId}: an execution claim is already running`,
+			);
+		}
+		this.db.execute(
+			`DELETE FROM provider_command_outbox
+			 WHERE command_id = ? AND status IN ('pending', 'retryable_failed')`,
+			[request.commandId],
+		);
 		this.db.execute(
 			`INSERT INTO provider_command_outbox (
 				request_sequence, command_id, project_key, session_id, provider_id,

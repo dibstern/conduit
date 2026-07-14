@@ -4,6 +4,9 @@
 // Used for the in-process Claude SDK path where there is no SSE stream to
 // piggy-back on. Permissions and questions are routed through the same path so
 // the UI receives the familiar RelayMessage shapes.
+// Production ProviderTurnService fail-closes Claude output unless
+// ProviderRuntimeIngestion is present; the local translation branch here remains
+// for focused translator and compatibility tests.
 
 import { Effect } from "effect";
 import type { ProviderRuntimeEvent } from "../contracts/providers/provider-runtime-event.js";

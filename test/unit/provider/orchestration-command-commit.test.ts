@@ -29,7 +29,7 @@ describe("DurableCommandCommitRepository", () => {
 				sessionId: "session-1",
 				status: "side_effect_requested",
 				fingerprintHash: "sha256:abc",
-				fingerprintVersion: 1,
+				fingerprintVersion: 2,
 				acceptedSequence: 1,
 				sideEffectSequence: 1,
 				createdAt: 1000,
@@ -73,6 +73,72 @@ describe("DurableCommandCommitRepository", () => {
 		).toEqual({ last_applied_sequence: 1 });
 	});
 
+	it("refuses to recommit a command while an execution claim is already running", () => {
+		// An executor (e.g. a background drain) has already claimed the row:
+		// status = 'running'. A concurrent redispatch must NOT supersede this live
+		// claim and insert a competing pending row, or the provider would be
+		// invoked a second time. The recommit must fail and roll back.
+		db.execute(
+			`INSERT INTO provider_command_outbox (
+				request_sequence, command_id, project_key, session_id, provider_id,
+				effect_type, payload_json, status, attempt_count, requested_at, updated_at
+			) VALUES (?, ?, ?, ?, ?, ?, ?, 'running', 1, ?, ?)`,
+			[
+				1,
+				"cmd-1",
+				"project-1",
+				"session-1",
+				"claude",
+				"send_turn",
+				"{}",
+				1000,
+				1000,
+			],
+		);
+
+		expect(() =>
+			repository.commit({
+				events: [makeSessionCreatedEvent("session-1")],
+				receipt: {
+					commandId: "cmd-1",
+					commandType: "send_turn",
+					projectKey: "project-1",
+					sessionId: "session-1",
+					status: "side_effect_requested",
+					fingerprintHash: "sha256:abc",
+					fingerprintVersion: 2,
+					acceptedSequence: 1,
+					sideEffectSequence: 1,
+					createdAt: 2000,
+					updatedAt: 2000,
+				},
+				outboxRequests: [
+					{
+						requestSequence: 2,
+						commandId: "cmd-1",
+						projectKey: "project-1",
+						sessionId: "session-1",
+						providerId: "claude",
+						effectType: "send_turn",
+						payloadJson: "{}",
+					},
+				],
+				readModelRows: ["provider_command_meta"],
+			}),
+		).toThrow(/already running/);
+
+		// The live running claim survives untouched; no competing pending row was
+		// inserted; the whole commit (receipt included) rolled back.
+		expect(
+			db.query<{ request_sequence: number; status: string }>(
+				`SELECT request_sequence, status FROM provider_command_outbox
+				 WHERE command_id = ? ORDER BY request_sequence`,
+				["cmd-1"],
+			),
+		).toEqual([{ request_sequence: 1, status: "running" }]);
+		expect(db.query("SELECT * FROM command_receipts")).toEqual([]);
+	});
+
 	it("rolls back every durable row when any write fails", () => {
 		const event = makeSessionCreatedEvent("session-1");
 
@@ -86,7 +152,7 @@ describe("DurableCommandCommitRepository", () => {
 					sessionId: "session-1",
 					status: "side_effect_requested",
 					fingerprintHash: "sha256:abc",
-					fingerprintVersion: 1,
+					fingerprintVersion: 2,
 					acceptedSequence: 1,
 					sideEffectSequence: 1,
 					createdAt: 1000,
