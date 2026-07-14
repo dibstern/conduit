@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
-import { probeClaudeCapabilities } from "../../../../src/lib/provider/claude/claude-capabilities-probe.js";
 import { createTestLogger } from "../../../../src/lib/logger.js";
+import { probeClaudeCapabilities } from "../../../../src/lib/provider/claude/claude-capabilities-probe.js";
 
 describe("probeClaudeCapabilities", () => {
 	const workspaceRoot = "/tmp/claude-workspace";
