@@ -8,6 +8,7 @@ import {
 	createRelayStack,
 	type RelayStack,
 } from "../../../src/lib/relay/relay-stack.js";
+import type { OpenCodeRecording } from "../../e2e/fixtures/recorded/types.js";
 import { loadOpenCodeRecording } from "../../e2e/helpers/recorded-loader.js";
 import { MockOpenCodeServer } from "../../helpers/mock-opencode-server.js";
 import { TestWsClient } from "./test-ws-client.js";
@@ -30,9 +31,13 @@ export interface RelayHarness {
  * Uses port 0 (OS-assigned) to avoid conflicts.
  */
 export async function createRelayHarness(
-	recordingName = "chat-simple",
+	recordingName: string | OpenCodeRecording = "chat-simple",
+	options: { readonly persistenceDbPath?: string } = {},
 ): Promise<RelayHarness> {
-	const recording = loadOpenCodeRecording(recordingName);
+	const recording =
+		typeof recordingName === "string"
+			? loadOpenCodeRecording(recordingName)
+			: recordingName;
 	const mock = new MockOpenCodeServer(recording);
 	await mock.start();
 
@@ -44,6 +49,9 @@ export async function createRelayHarness(
 		slug: "integration-test",
 		sessionTitle: "Integration Test Session",
 		log: createSilentLogger(),
+		...(options.persistenceDbPath != null
+			? { persistenceDbPath: options.persistenceDbPath }
+			: {}),
 	});
 
 	const relayPort = stack.getPort();

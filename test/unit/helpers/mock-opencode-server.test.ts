@@ -419,6 +419,74 @@ describe("MockOpenCodeServer", () => {
 		expect(events.length).toBe(5);
 	});
 
+	it("applies before and limit to SSE-accumulated session messages", async () => {
+		const interactions: OpenCodeRecording["interactions"] = [
+			{
+				kind: "rest",
+				method: "POST",
+				path: "/session/ses_1/prompt_async",
+				status: 200,
+				responseBody: {},
+			},
+		];
+		for (let index = 1; index <= 4; index++) {
+			interactions.push(
+				{
+					kind: "sse",
+					type: "message.updated",
+					properties: {
+						info: {
+							id: `m${index}`,
+							sessionID: "ses_1",
+							role: index % 2 === 0 ? "assistant" : "user",
+							time: { created: index },
+						},
+					},
+					delayMs: 0,
+				},
+				{
+					kind: "sse",
+					type: "message.part.updated",
+					properties: {
+						part: {
+							id: `p${index}`,
+							sessionID: "ses_1",
+							messageID: `m${index}`,
+							type: "text",
+							text: `text-${index}`,
+						},
+					},
+					delayMs: 0,
+				},
+			);
+		}
+		const paginationMock = new MockOpenCodeServer({
+			name: "sse-pagination",
+			recordedAt: new Date().toISOString(),
+			opencodeVersion: "1.17.18",
+			interactions,
+		});
+		await paginationMock.start();
+		try {
+			paginationMock.triggerPromptSse("ses_1");
+			await new Promise((resolve) => setTimeout(resolve, 100));
+
+			const newest = (await (
+				await fetch(`${paginationMock.url}/session/ses_1/message?limit=2`)
+			).json()) as Array<{ info: { id: string } }>;
+			const older = (await (
+				await fetch(
+					`${paginationMock.url}/session/ses_1/message?before=m4&limit=2`,
+				)
+			).json()) as Array<{ info: { id: string } }>;
+
+			expect(newest.map((message) => message.info.id)).toEqual(["m3", "m4"]);
+			expect(older.map((message) => message.info.id)).toEqual(["m2", "m3"]);
+		} finally {
+			await paginationMock.stop();
+		}
+	});
+
 	it("reset() re-initializes all queues", async () => {
 		// Drain some responses
 		await fetch(`${mock.url}/path`);

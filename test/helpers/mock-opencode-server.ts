@@ -801,12 +801,28 @@ export class MockOpenCodeServer {
 				? this.sseMessages.get(sessionId)
 				: undefined;
 			if (sessionMsgs && sessionMsgs.size > 0) {
-				const messages = [...sessionMsgs.values()].map((m) => ({
+				let messages = [...sessionMsgs.values()];
+				const query = new URL(path, "http://127.0.0.1").searchParams;
+				const before = query.get("before");
+				if (before != null) {
+					const beforeIndex = messages.findIndex(
+						(message) => message.info["id"] === before,
+					);
+					messages = beforeIndex >= 0 ? messages.slice(0, beforeIndex) : [];
+				}
+				const limitText = query.get("limit");
+				if (limitText != null) {
+					const limit = Number.parseInt(limitText, 10);
+					if (Number.isFinite(limit) && limit >= 0) {
+						messages = messages.slice(Math.max(0, messages.length - limit));
+					}
+				}
+				const response = messages.map((m) => ({
 					info: m.info,
 					parts: m.parts,
 				}));
 				res.writeHead(200, { "Content-Type": "application/json" });
-				res.end(JSON.stringify(messages));
+				res.end(JSON.stringify(response));
 				return;
 			}
 		}

@@ -17,6 +17,7 @@ import {
 	type GetProjectsResponse,
 	type GetTodoResponse,
 	type ListSessionsResponse,
+	type PermissionDecision,
 	type PtyListResponse,
 	WsRpcGroup,
 } from "../../../src/lib/contracts/ws-rpc.js";
@@ -148,7 +149,42 @@ export class TestWsClient {
 		}
 	}
 
-	async createSession(title?: string): Promise<ReceivedMessage> {
+	async respondPermission(
+		requestId: string,
+		decision: PermissionDecision = "allow",
+	): Promise<void> {
+		const previousWebSocket = globalThis.WebSocket;
+		const clientId = this.clientId;
+		globalThis.WebSocket = WebSocket as unknown as typeof globalThis.WebSocket;
+		try {
+			await Effect.runPromise(
+				Effect.scoped(
+					Effect.gen(function* () {
+						const client = yield* RpcClient.make(WsRpcGroup);
+						yield* client.RespondPermission({
+							projectSlug: "integration-test",
+							originId: clientId,
+							commandId: crypto.randomUUID(),
+							requestId,
+							decision,
+						});
+					}),
+				).pipe(
+					Effect.provide(RpcClient.layerProtocolSocket()),
+					Effect.provide(Socket.layerWebSocket(this.rpcUrl)),
+					Effect.provide(Socket.layerWebSocketConstructorGlobal),
+					Effect.provide(RpcSerialization.layerJson),
+				),
+			);
+		} finally {
+			globalThis.WebSocket = previousWebSocket;
+		}
+	}
+
+	async createSession(
+		title?: string,
+		opts: { readonly providerId?: string } = {},
+	): Promise<ReceivedMessage> {
 		const previousWebSocket = globalThis.WebSocket;
 		const clientId = this.clientId;
 		globalThis.WebSocket = WebSocket as unknown as typeof globalThis.WebSocket;
@@ -161,6 +197,7 @@ export class TestWsClient {
 							projectSlug: "integration-test",
 							originId: clientId,
 							...(title != null ? { title } : {}),
+							...(opts.providerId ? { providerId: opts.providerId } : {}),
 						});
 					}),
 				).pipe(
