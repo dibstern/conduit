@@ -29,3 +29,10 @@ media/_test_output/
 /build/acceptance/ir/
 /build/acceptance/dry/
 /build/acceptance-mutation/
+
+# APS acceptance pipeline: generated Playwright specs and run artifacts (derived from IR)
+/acceptance/generated/
+/acceptance/visual/artifacts/
+
+# Session scratch scripts
+/.scratch/

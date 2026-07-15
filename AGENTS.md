@@ -97,7 +97,7 @@ actually run and is green against a real baseline.
       `curl -s -u "opencode:$OPENCODE_SERVER_PASSWORD" "$OPENCODE_URL/<DESIRED-PATH>" 2>&1 | python3 -m json.tool`.
     - Claude: use Claude Agent SDK logs/events and conduit's persisted event stream; there usually is no separate
       localhost provider endpoint to curl.
-- Check the daemon logs in `~/.opencode/daemon.log` for errors or unexpected behavior.
+- Check the daemon logs in `~/.config/conduit/daemon.log` for errors or unexpected behavior. The per-project durable event store lives at `<project>/.conduit/events.db`.
 - You can use `playwright-cli console` (see the playwright-cli skill) to inspect the console logs to help debug the frontend.
 - Don't remove temporary debug logging until you're confident you've fixed the issue.
 
