@@ -16,6 +16,7 @@ import {
 	isQuestionAskedEvent,
 	isSessionErrorEvent,
 	isSessionStatusEvent,
+	sessionErrorText,
 } from "../relay/opencode-events.js";
 import {
 	type CanonicalEvent,
@@ -418,7 +419,7 @@ export class CanonicalEventTranslator {
 		if (!isSessionErrorEvent(event)) return null;
 
 		const errName = event.properties.error?.name ?? "Unknown";
-		const errMsg = event.properties.error?.data?.message ?? "An error occurred";
+		const errMsg = sessionErrorText(event.properties.error);
 
 		return [
 			canonicalEvent("turn.error", sessionId, {

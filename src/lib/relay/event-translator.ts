@@ -30,6 +30,7 @@ import {
 	isSessionErrorEvent,
 	isSessionStatusEvent,
 	isTodoUpdatedEvent,
+	sessionErrorText,
 } from "./opencode-events.js";
 
 // ─── Compile-time exhaustiveness assertion ──────────────────────────────────
@@ -710,8 +711,7 @@ export function createTranslator(): Translator {
 					return { ok: false, reason: "session error: invalid event" };
 				}
 				const errName = event.properties.error?.name ?? "Unknown";
-				const errMsg =
-					event.properties.error?.data?.message ?? "An error occurred";
+				const errMsg = sessionErrorText(event.properties.error);
 				return {
 					ok: true,
 					messages: [{ type: "error", code: errName, message: errMsg }],

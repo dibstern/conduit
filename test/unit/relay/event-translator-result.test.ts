@@ -24,6 +24,29 @@ describe("translator returns TranslateResult", () => {
 		}
 	});
 
+	it("strips OpenCode's 'undefined: ' artifact from session.error messages", () => {
+		const result = translator.translate({
+			type: "session.error",
+			properties: {
+				sessionID: "s1",
+				error: {
+					name: "APIError",
+					data: {
+						message: "undefined: The provided model identifier is invalid.",
+					},
+				},
+			},
+		});
+		expect(result).toHaveProperty("ok", true);
+		if (result.ok) {
+			expect(result.messages[0]).toMatchObject({
+				type: "error",
+				code: "APIError",
+				message: "The provided model identifier is invalid.",
+			});
+		}
+	});
+
 	it("returns ok: false with reason for unknown events", () => {
 		const result = translator.translate({
 			type: "some.unknown.event",

@@ -95,4 +95,31 @@ describe("OpenCodeRuntimeEventTranslator", () => {
 			providerToolUseId: "call-1",
 		});
 	});
+
+	it("matches legacy translation for session.error and strips the 'undefined: ' artifact", () => {
+		const legacy = new CanonicalEventTranslator();
+		const runtime = new OpenCodeRuntimeEventTranslator();
+		const sessionId = "ses-opencode";
+		const event = makeSSEEvent("session.error", {
+			sessionID: sessionId,
+			error: {
+				name: "APIError",
+				data: {
+					message: "undefined: The provided model identifier is invalid.",
+				},
+			},
+		});
+
+		const domainEvents = runtimeToDomain(runtime, event, sessionId);
+		const legacyEvents = legacy.translate(event, sessionId) ?? [];
+		// messageId provenance differs between the pipelines (the runtime→domain
+		// mapper stamps the envelope id); compare the error payload fields.
+		const expected = {
+			error: "The provided model identifier is invalid.",
+			code: "APIError",
+		};
+		expect(domainEvents[0]?.type).toBe("turn.error");
+		expect(domainEvents[0]?.data).toMatchObject(expected);
+		expect(legacyEvents[0]?.data).toMatchObject(expected);
+	});
 });

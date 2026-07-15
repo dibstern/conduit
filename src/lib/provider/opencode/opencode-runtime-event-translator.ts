@@ -15,6 +15,7 @@ import {
 	isQuestionAskedEvent,
 	isSessionErrorEvent,
 	isSessionStatusEvent,
+	sessionErrorText,
 } from "../../relay/opencode-events.js";
 import { normalizeToolInput } from "./normalize-tool-input.js";
 
@@ -323,7 +324,7 @@ export class OpenCodeRuntimeEventTranslator {
 		return [
 			opencodeRuntimeEvent("turn.error", sessionId, event, {
 				messageId: "",
-				error: event.properties.error?.data?.message ?? "An error occurred",
+				error: sessionErrorText(event.properties.error),
 				code: event.properties.error?.name ?? "Unknown",
 			}),
 		];

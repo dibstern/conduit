@@ -523,6 +523,26 @@ describe("CanonicalEventTranslator", () => {
 			});
 		});
 
+		it("strips OpenCode's 'undefined: ' message artifact", () => {
+			// Real payload captured from OpenCode relaying a Bedrock 400:
+			// data.message arrives as "undefined: The provided model identifier is invalid."
+			const event = makeSSEEvent("session.error", {
+				sessionID: SESSION_ID,
+				error: {
+					name: "APIError",
+					data: {
+						message: "undefined: The provided model identifier is invalid.",
+					},
+				},
+			});
+
+			const events = assertEvents(translator.translate(event, SESSION_ID));
+			expect(events[0]?.data).toMatchObject({
+				error: "The provided model identifier is invalid.",
+				code: "APIError",
+			});
+		});
+
 		it("uses defaults when error fields are missing", () => {
 			const event = makeSSEEvent("session.error", {
 				sessionID: SESSION_ID,

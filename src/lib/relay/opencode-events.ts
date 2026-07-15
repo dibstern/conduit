@@ -251,6 +251,21 @@ export interface SessionErrorEvent extends SSEEventBase {
 	};
 }
 
+/**
+ * Human-readable message for a session.error payload. OpenCode sometimes
+ * interpolates a missing field into data.message (e.g. "undefined: The
+ * provided model identifier is invalid." from a Bedrock 400) — strip that
+ * artifact so users see the actual provider message.
+ */
+export function sessionErrorText(
+	error: SessionErrorEvent["properties"]["error"],
+): string {
+	const message = error?.data?.message ?? "An error occurred";
+	return message.startsWith("undefined: ")
+		? message.slice("undefined: ".length)
+		: message;
+}
+
 // All properties are optional in the interface — downstream uses optional chaining.
 // No runtime validation needed beyond type string.
 export function isSessionErrorEvent(
