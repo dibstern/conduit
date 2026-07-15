@@ -161,6 +161,79 @@ const shouldBindOpenCodeSessionOnModelSwitch = (sessionId: string) =>
 		return !row || row.provider === "opencode";
 	});
 
+// ─── Bedrock geo-routing grouping ────────────────────────────────────────────
+// OpenCode's amazon-bedrock catalog lists each model once per inference-profile
+// scope (bare id, us., eu., apac., global.). Collapse them into one entry with
+// routingOptions (value = full model id). Global is the default: it is the only
+// scope AWS guarantees is invokable from any commercial source region.
+
+const GEO_PREFIX_PATTERN = /^(global|us|eu|apac|jp|au|us-gov)\.(.+)$/;
+const IN_REGION_SCOPE = "in-region";
+const GEO_SCOPE_ORDER = [
+	"global",
+	"us",
+	"eu",
+	"apac",
+	"jp",
+	"au",
+	"us-gov",
+	IN_REGION_SCOPE,
+];
+const GEO_SCOPE_LABELS: Record<string, string> = {
+	global: "Global",
+	us: "US",
+	eu: "EU",
+	apac: "APAC",
+	jp: "JP",
+	au: "AU",
+	"us-gov": "US Gov",
+	[IN_REGION_SCOPE]: "In-region",
+};
+
+export function groupGeoRoutingModels<T extends { id: string; name: string }>(
+	models: ReadonlyArray<T>,
+): Array<T & { routingOptions?: ContextWindowOption[] }> {
+	const groups = new Map<string, Array<{ scope: string; model: T }>>();
+	for (const model of models) {
+		const match = model.id.match(GEO_PREFIX_PATTERN);
+		const scope = match?.[1] ?? IN_REGION_SCOPE;
+		const baseId = match?.[2] ?? model.id;
+		const entries = groups.get(baseId) ?? [];
+		entries.push({ scope, model });
+		groups.set(baseId, entries);
+	}
+
+	const result: Array<T & { routingOptions?: ContextWindowOption[] }> = [];
+	for (const entries of groups.values()) {
+		const first = entries[0];
+		if (!first) continue;
+		if (entries.length === 1) {
+			result.push(first.model);
+			continue;
+		}
+		entries.sort(
+			(a, b) =>
+				GEO_SCOPE_ORDER.indexOf(a.scope) - GEO_SCOPE_ORDER.indexOf(b.scope),
+		);
+		const defaultEntry =
+			entries.find((e) => e.scope === "global") ??
+			entries.find((e) => e.scope === IN_REGION_SCOPE) ??
+			first;
+		const bareName = entries.find((e) => e.scope === IN_REGION_SCOPE)?.model
+			.name;
+		result.push({
+			...defaultEntry.model,
+			name: bareName ?? defaultEntry.model.name.replace(/\s*\([^)]*\)$/, ""),
+			routingOptions: entries.map((e) => ({
+				value: e.model.id,
+				label: GEO_SCOPE_LABELS[e.scope] ?? e.scope,
+				...(e === defaultEntry ? { isDefault: true } : {}),
+			})),
+		});
+	}
+	return result;
+}
+
 const toSharedProviders = (
 	providers: GetModelsResponse["providers"],
 ): ProviderInfo[] =>
@@ -199,6 +272,12 @@ const toSharedProviders = (
 				? {
 						contextWindowOptions:
 							cloneContextWindowOptions(model.contextWindowOptions) ?? [],
+					}
+				: {}),
+			...(model.routingOptions
+				? {
+						routingOptions:
+							cloneContextWindowOptions(model.routingOptions) ?? [],
 					}
 				: {}),
 		})),
@@ -252,21 +331,28 @@ export const getModelsResponse = (
 			const connectedSet = new Set(openCodeProviderResult.right.connected);
 			providers.push(
 				...openCodeProviderResult.right.providers
-					.map((p) => ({
-						id: p.id || p.name || "",
-						name: p.name || p.id || "",
-						configured: connectedSet.has(p.id) || connectedSet.has(p.name),
-						models: (p.models ?? []).map((m) => ({
+					.map((p) => {
+						const providerId = p.id || p.name || "";
+						const models = (p.models ?? []).map((m) => ({
 							id: m.id,
 							name: m.name || m.id,
-							provider: p.id || p.name || "",
+							provider: providerId,
 							...(m.limit && { limit: { ...m.limit } }),
 							...(m.variants &&
 								Object.keys(m.variants).length > 0 && {
 									variants: Object.keys(m.variants),
 								}),
-						})),
-					}))
+						}));
+						return {
+							id: providerId,
+							name: p.name || p.id || "",
+							configured: connectedSet.has(p.id) || connectedSet.has(p.name),
+							models:
+								providerId === "amazon-bedrock"
+									? groupGeoRoutingModels(models)
+									: models,
+						};
+					})
 					.filter((p) => p.configured),
 			);
 		} else {
@@ -356,7 +442,13 @@ export const getModelsResponse = (
 		let variantList: string[] = [];
 		if (activeModel) {
 			for (const p of providers) {
-				const m = p.models.find((mod) => mod.id === activeModel.modelID);
+				const m = p.models.find(
+					(mod) =>
+						mod.id === activeModel.modelID ||
+						mod.routingOptions?.some(
+							(option) => option.value === activeModel.modelID,
+						),
+				);
 				if (m?.variants) {
 					variantList = [...m.variants];
 					break;

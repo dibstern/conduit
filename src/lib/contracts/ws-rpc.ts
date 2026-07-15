@@ -29,6 +29,7 @@ export const ModelInfoSchema = Schema.Struct({
 	contextWindowOptions: Schema.optional(
 		Schema.Array(ContextWindowOptionSchema),
 	),
+	routingOptions: Schema.optional(Schema.Array(ContextWindowOptionSchema)),
 });
 
 export const ProviderInfoSchema = Schema.Struct({

@@ -143,5 +143,43 @@ export const WithVariants: Story = {
 	},
 };
 
+/** Grouped Bedrock model with geo routing scope chips (Global default). */
+export const WithRoutingOptions: Story = {
+	beforeEach: () => {
+		discoveryState.providers = [
+			{
+				id: "amazon-bedrock",
+				name: "Amazon Bedrock",
+				configured: true,
+				models: [
+					{
+						id: "global.anthropic.claude-fable-5",
+						name: "Claude Fable 5",
+						provider: "amazon-bedrock",
+						routingOptions: [
+							{
+								value: "global.anthropic.claude-fable-5",
+								label: "Global",
+								isDefault: true,
+							},
+							{ value: "us.anthropic.claude-fable-5", label: "US" },
+							{ value: "eu.anthropic.claude-fable-5", label: "EU" },
+							{ value: "anthropic.claude-fable-5", label: "In-region" },
+						],
+					},
+				],
+			},
+		];
+		discoveryState.currentModelId = "us.anthropic.claude-fable-5";
+		discoveryState.currentProviderId = "amazon-bedrock";
+	},
+	play: async ({ canvasElement }) => {
+		// Open dropdown to show the scope chips
+		await new Promise((r) => setTimeout(r, 50));
+		const btn = canvasElement.querySelector(".model-btn") as HTMLElement;
+		btn?.click();
+	},
+};
+
 /** No models or providers — shows placeholder text. */
 export const NoModels: Story = {};

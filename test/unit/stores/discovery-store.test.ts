@@ -10,6 +10,7 @@ import {
 	formatAgentLabel,
 	formatModelName,
 	getActiveContextWindowOptions,
+	getActiveModel,
 	handleAgentList,
 	handleCommandList,
 	handleContextWindowInfo,
@@ -330,6 +331,37 @@ describe("setActiveModel", () => {
 		setActiveModel("model-y", "provider-z");
 		expect(discoveryState.currentModelId).toBe("model-y");
 		expect(discoveryState.currentProviderId).toBe("provider-z");
+	});
+});
+
+// ─── getActiveModel with grouped routing options ────────────────────────────
+
+describe("getActiveModel", () => {
+	it("resolves a grouped model when the active id is a routing option", () => {
+		discoveryState.providers = [
+			{
+				id: "amazon-bedrock",
+				name: "Amazon Bedrock",
+				configured: true,
+				models: [
+					{
+						id: "global.anthropic.claude-fable-5",
+						name: "Claude Fable 5",
+						provider: "amazon-bedrock",
+						routingOptions: [
+							{
+								value: "global.anthropic.claude-fable-5",
+								label: "Global",
+								isDefault: true,
+							},
+							{ value: "us.anthropic.claude-fable-5", label: "US" },
+						],
+					},
+				],
+			},
+		];
+		discoveryState.currentModelId = "us.anthropic.claude-fable-5";
+		expect(getActiveModel()?.name).toBe("Claude Fable 5");
 	});
 });
 

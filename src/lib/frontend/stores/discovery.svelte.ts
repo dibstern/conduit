@@ -113,9 +113,15 @@ export function getAllModels(): ModelInfo[] {
 	return discoveryState.providers.flatMap((p) => p.models);
 }
 
-/** Get the currently active model. */
+/** Get the currently active model. Grouped models (Bedrock geo routing)
+ *  match when the active id is any of their routing option values. */
 export function getActiveModel(): ModelInfo | undefined {
-	return getAllModels().find((m) => m.id === discoveryState.currentModelId);
+	const currentId = discoveryState.currentModelId;
+	return getAllModels().find(
+		(m) =>
+			m.id === currentId ||
+			m.routingOptions?.some((option) => option.value === currentId),
+	);
 }
 
 /** Get models grouped by provider for dropdown rendering. */

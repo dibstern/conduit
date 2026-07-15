@@ -42,9 +42,16 @@
 	/** All provider groups (including unconfigured ones that have models). */
 	const allGroups = $derived(getProviderGroups());
 
-	/** Display name for the current model button, with date suffix stripped. */
+	/** Display name for the current model button, with date suffix stripped.
+	 *  Grouped models (Bedrock geo routing) append the active scope label. */
 	const displayName = $derived.by(() => {
-		if (activeModel) return stripDateSuffix(formatModelName(activeModel));
+		if (activeModel) {
+			const base = stripDateSuffix(formatModelName(activeModel));
+			const scope = activeModel.routingOptions?.find(
+				(option) => option.value === discoveryState.currentModelId,
+			);
+			return scope ? `${base} · ${scope.label}` : base;
+		}
 		if (discoveryState.currentModelId) {
 			return stripDateSuffix(discoveryState.currentModelId);
 		}
@@ -79,7 +86,12 @@
 	}
 
 	function isActiveModel(model: ModelInfo): boolean {
-		return model.id === discoveryState.currentModelId;
+		return (
+			model.id === discoveryState.currentModelId ||
+			!!model.routingOptions?.some(
+				(option) => option.value === discoveryState.currentModelId,
+			)
+		);
 	}
 
 	function isDefaultModel(model: ModelInfo): boolean {
@@ -115,13 +127,14 @@
 		dropdownOpen = !dropdownOpen;
 	}
 
-	function handleModelClick(model: ModelInfo, e: MouseEvent) {
+	function handleModelClick(model: ModelInfo, e: MouseEvent, modelId?: string) {
 		e.stopPropagation();
+		const targetId = modelId ?? model.id;
 		const previousModelId = discoveryState.currentModelId;
 		const previousProviderId = discoveryState.currentProviderId;
 		const previousVariant = discoveryState.currentVariant;
 		const previousVariants = discoveryState.availableVariants;
-		discoveryState.currentModelId = model.id;
+		discoveryState.currentModelId = targetId;
 		discoveryState.currentProviderId = model.provider;
 		const projectSlug = getCurrentSlug();
 		const sessionId = sessionState.currentId;
@@ -129,7 +142,7 @@
 			void switchModelRpc({
 				projectSlug,
 				sessionId,
-				modelId: model.id,
+				modelId: targetId,
 				providerId: model.provider,
 			})
 				.then((response) => {
@@ -295,6 +308,20 @@
 										</span>
 									{/if}
 								</button>
+								{#if model.routingOptions}
+									<span class="model-routing flex items-center gap-0.5 shrink-0 mr-1">
+										{#each model.routingOptions as option (option.value)}
+											<button
+												class="px-1.5 py-0.5 text-xs border-none rounded cursor-pointer transition-colors duration-100 {option.value === discoveryState.currentModelId ? 'bg-bg text-accent font-semibold' : 'bg-transparent text-text-dimmer hover:bg-bg hover:text-text-secondary'}"
+												title="Route via {option.label}{option.isDefault ? ' (default)' : ''}"
+												data-routing-value={option.value}
+												onclick={(e) => handleModelClick(model, e, option.value)}
+											>
+												{option.label}
+											</button>
+										{/each}
+									</span>
+								{/if}
 								{#if !isDefaultModel(model)}
 									<button
 										class="shrink-0 px-1.5 py-1 mr-1 text-xs text-text-dimmer bg-transparent border-none cursor-pointer rounded hover:bg-bg hover:text-text-secondary transition-colors duration-100"

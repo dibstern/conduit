@@ -189,6 +189,8 @@ export interface ModelInfo {
 	limit?: { context?: number; output?: number };
 	variants?: string[];
 	contextWindowOptions?: ContextWindowOption[];
+	/** Geo routing scopes for grouped Bedrock models; value is the full model id to send. */
+	routingOptions?: ContextWindowOption[];
 }
 
 export interface CommandInfo {
@@ -480,6 +482,7 @@ const ProviderInfoSchema = Schema.Struct({
 			contextWindowOptions: Schema.optional(
 				Schema.Array(ContextWindowOptionSchema),
 			),
+			routingOptions: Schema.optional(Schema.Array(ContextWindowOptionSchema)),
 		}),
 	),
 });
