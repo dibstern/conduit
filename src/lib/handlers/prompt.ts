@@ -112,7 +112,7 @@ export const sendMessageToSession = (input: SendMessageToSessionInput) =>
 					type: "user_message",
 					sessionId: activeId,
 					text,
-					...(originId ? { originId } : {}),
+					...(originId && originalActiveId === activeId ? { originId } : {}),
 				});
 			}
 		}

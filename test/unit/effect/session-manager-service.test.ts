@@ -366,6 +366,7 @@ describe("SessionManagerService", () => {
 				const session = yield* service.createSession("OpenCode Session", {
 					providerId: "opencode",
 				});
+				const sessions = yield* service.listSessions();
 
 				expect(session.id).toBe("opencode-session");
 				expect(api.session.create).toHaveBeenCalledWith({
@@ -375,6 +376,12 @@ describe("SessionManagerService", () => {
 					"opencode-session",
 					"opencode",
 				);
+				expect(sessions).toEqual([
+					expect.objectContaining({
+						id: "opencode-session",
+						title: "OpenCode Session",
+					}),
+				]);
 			}).pipe(
 				Effect.provide(Layer.fresh(layer)),
 				Effect.ensuring(Effect.sync(() => rmSync(dbFile, { force: true }))),

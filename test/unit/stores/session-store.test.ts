@@ -17,6 +17,7 @@ import {
 	completeNewSession,
 	ERROR_DISPLAY_MS,
 	failNewSession,
+	findSession,
 	getFilteredSessions,
 	groupSessionsByDate,
 	handleSessionForked,
@@ -290,6 +291,34 @@ describe("handleSessionSwitched", () => {
 			sessionId: "abc",
 		});
 		expect(sessionState.currentId).toBe("abc");
+	});
+
+	it("records a switched subagent in allSessions with its parent", () => {
+		handleSessionSwitched(
+			msg({
+				type: "session_switched",
+				id: "child-session",
+				sessionId: "child-session",
+				parentID: "parent-session",
+			}),
+		);
+
+		expect(sessionState.allSessions).toContainEqual({
+			id: "child-session",
+			title: "",
+			parentID: "parent-session",
+		});
+		expect(findSession("child-session")?.parentID).toBe("parent-session");
+	});
+
+	it("does not add a parent-less switched session to allSessions", () => {
+		handleSessionSwitched({
+			type: "session_switched",
+			id: "root-session",
+			sessionId: "root-session",
+		});
+
+		expect(sessionState.allSessions).toEqual([]);
 	});
 
 	it("ignores missing id", () => {

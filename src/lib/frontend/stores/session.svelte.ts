@@ -376,6 +376,13 @@ export function handleSessionSwitched(
 	const { id, requestId } = msg;
 	if (id) {
 		sessionState.currentId = id;
+		if (msg.parentID) {
+			const session = { id, title: "", parentID: msg.parentID };
+			if (!sessionState.allSessions.some((candidate) => candidate.id === id)) {
+				sessionState.allSessions = [session, ...sessionState.allSessions];
+			}
+			sessionState.sessions.set(id, session);
+		}
 		// Ensure the session is in the id-keyed Map so routePerSession's
 		// unknown-session guard won't drop events for the active session.
 		if (!sessionState.sessions.has(id)) {

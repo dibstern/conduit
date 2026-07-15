@@ -1,11 +1,23 @@
+import { Effect, Layer } from "effect";
 import { describe, expect, it, vi } from "vitest";
 import {
 	type ClientInitDeps,
 	handleClientConnected,
+	handleClientConnectedEffect,
 } from "../../../src/lib/bridges/client-init.js";
+import {
+	type ReadQueryEffect,
+	ReadQueryEffectTag,
+} from "../../../src/lib/persistence/effect/read-query-effect.js";
+import type { OrchestrationEngine } from "../../../src/lib/provider/orchestration-engine.js";
 import type { ProviderCapabilities } from "../../../src/lib/provider/types.js";
 import type { PermissionId } from "../../../src/lib/shared-types.js";
-import { createMockClientInitDeps } from "../../helpers/mock-factories.js";
+import {
+	createMockClientInitDeps,
+	makeMockSessionManagerService,
+	makeMockWebSocketHandler,
+	makeTestHandlerLayer,
+} from "../../helpers/mock-factories.js";
 
 /** Cast a plain string to PermissionId for test data. */
 const pid = (s: string) => s as PermissionId;
@@ -66,6 +78,120 @@ function applyTestDefaults(deps: ClientInitDeps): ClientInitDeps {
 	);
 	return deps;
 }
+
+function makeEmptyHistoryReadQuery(
+	provider: string,
+	parentId: string | null = null,
+): ReadQueryEffect {
+	return {
+		getToolContent: vi.fn(() => Effect.succeed(undefined)),
+		getSessionStatus: vi.fn(() => Effect.succeed(undefined)),
+		getSession: vi.fn(() =>
+			Effect.succeed({
+				id: "requested-session",
+				provider,
+				provider_sid: null,
+				title: "Requested session",
+				status: "idle",
+				parent_id: parentId,
+				fork_point_event: null,
+				last_message_at: null,
+				created_at: 1,
+				updated_at: 1,
+			}),
+		),
+		getAllSessionStatuses: vi.fn(() => Effect.succeed({})),
+		listSessions: vi.fn(() => Effect.succeed([])),
+		getSessionMessagesWithParts: vi.fn(() => Effect.succeed([])),
+	};
+}
+
+function makeClientInitEffectLayer(
+	readQuery: ReadQueryEffect,
+	loadPreRenderedHistory: ReturnType<typeof vi.fn>,
+) {
+	const wsHandler = makeMockWebSocketHandler();
+	const sessionManagerService = makeMockSessionManagerService({
+		loadPreRenderedHistory,
+	});
+	const orchestrationEngine = {
+		getProviderForSession: vi.fn(() => undefined),
+		dispatchEffect: vi.fn(() => Effect.succeed(makeClaudeCapabilities())),
+	} as unknown as OrchestrationEngine;
+
+	return {
+		wsHandler,
+		layer: Layer.merge(
+			makeTestHandlerLayer({
+				wsHandler,
+				sessionManagerService,
+				orchestrationEngine,
+			}),
+			Layer.succeed(ReadQueryEffectTag, readQuery),
+		),
+	};
+}
+
+describe("handleClientConnectedEffect — empty projected history", () => {
+	it("falls back to OpenCode history for a requested session", async () => {
+		const loadPreRenderedHistory = vi.fn(() =>
+			Effect.succeed({
+				messages: [
+					{ id: "history-1", role: "user" as const, text: "Recovered" },
+				],
+				hasMore: false,
+			}),
+		);
+		const { wsHandler, layer } = makeClientInitEffectLayer(
+			makeEmptyHistoryReadQuery("opencode", "parent-session"),
+			loadPreRenderedHistory,
+		);
+
+		await Effect.runPromise(
+			handleClientConnectedEffect("client-1", "requested-session").pipe(
+				Effect.provide(layer),
+			),
+		);
+
+		expect(loadPreRenderedHistory).toHaveBeenCalledWith("requested-session");
+		expect(wsHandler.sendTo).toHaveBeenCalledWith("client-1", {
+			type: "session_switched",
+			id: "requested-session",
+			sessionId: "requested-session",
+			parentID: "parent-session",
+			history: {
+				messages: [{ id: "history-1", role: "user", text: "Recovered" }],
+				hasMore: false,
+			},
+		});
+	});
+
+	it("keeps empty history for a requested Claude session", async () => {
+		const loadPreRenderedHistory = vi.fn(() =>
+			Effect.succeed({
+				messages: [{ id: "history-1", role: "user" as const, text: "Wrong" }],
+				hasMore: false,
+			}),
+		);
+		const { wsHandler, layer } = makeClientInitEffectLayer(
+			makeEmptyHistoryReadQuery("claude-sdk"),
+			loadPreRenderedHistory,
+		);
+
+		await Effect.runPromise(
+			handleClientConnectedEffect("client-1", "requested-session").pipe(
+				Effect.provide(layer),
+			),
+		);
+
+		expect(loadPreRenderedHistory).not.toHaveBeenCalled();
+		expect(wsHandler.sendTo).toHaveBeenCalledWith("client-1", {
+			type: "session_switched",
+			id: "requested-session",
+			sessionId: "requested-session",
+		});
+	});
+});
 
 // ─── Session with REST history ───────────────────────────────────────────────
 // MessageCache has been removed (Task 50.5). resolveSessionHistory now always

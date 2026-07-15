@@ -563,6 +563,9 @@ export interface RelayStackConfig {
 	statusPollerInterval?: number;
 	/** Override the message polling interval in milliseconds (default: 750). */
 	messagePollerInterval?: number;
+	/** SQLite event-store path — enables the durable persistence pipeline
+	 *  (same wiring the daemon passes to createProjectRelay). */
+	persistenceDbPath?: string;
 }
 
 // ─── Stack ───────────────────────────────────────────────────────────────────
@@ -1286,6 +1289,9 @@ export async function createRelayStack(
 		}),
 		...(config.messagePollerInterval != null && {
 			messagePollerInterval: config.messagePollerInterval,
+		}),
+		...(config.persistenceDbPath != null && {
+			persistenceDbPath: config.persistenceDbPath,
 		}),
 	});
 	relays.set(config.slug, relay);

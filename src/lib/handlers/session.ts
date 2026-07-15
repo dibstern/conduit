@@ -222,10 +222,26 @@ const resolveSessionHistory = (sessionId: string) =>
 		const sessionManagerService = yield* SessionManagerServiceTag;
 		const log = yield* LoggerTag;
 
+		let projectedSource: SessionHistorySource = { kind: "empty" };
 		if (readQueryOption._tag === "Some") {
 			const rows =
 				yield* readQueryOption.value.getSessionMessagesWithParts(sessionId);
-			return resolveSessionHistoryFromRows(rows, { pageSize: 50 });
+			projectedSource = resolveSessionHistoryFromRows(rows, { pageSize: 50 });
+
+			// The projection is authoritative only for relay-local (claude)
+			// sessions. OpenCode projections currently persist structure without
+			// message text, so provider REST history stays the source of truth
+			// for opencode rows; the projection is the fallback when REST fails.
+			const sessionRowResult = yield* Effect.either(
+				readQueryOption.value.getSession(sessionId),
+			);
+			if (
+				sessionRowResult._tag === "Right" &&
+				sessionRowResult.right != null &&
+				sessionRowResult.right.provider !== "opencode"
+			) {
+				return projectedSource;
+			}
 		}
 
 		const historyResult = yield* Effect.either(
@@ -237,6 +253,8 @@ const resolveSessionHistory = (sessionId: string) =>
 				history: historyResult.right,
 			} satisfies SessionHistorySource;
 		}
+
+		if (projectedSource.kind !== "empty") return projectedSource;
 
 		log.warn(`Failed to load history for ${sessionId}: ${historyResult.left}`);
 		return { kind: "empty" } satisfies SessionHistorySource;
@@ -302,6 +320,16 @@ const switchClientToSession = (
 			sessionId,
 			pollerIsProcessing || hasActiveTimeout,
 		);
+		const readQueryOption = yield* Effect.serviceOption(ReadQueryEffectTag);
+		let parentID: string | undefined;
+		if (readQueryOption._tag === "Some") {
+			const sessionRowResult = yield* Effect.either(
+				readQueryOption.value.getSession(sessionId),
+			);
+			if (sessionRowResult._tag === "Right") {
+				parentID = sessionRowResult.right?.parent_id ?? undefined;
+			}
+		}
 
 		yield* seedPaginationCursorFromHistory(sessionId, patchedSource);
 
@@ -310,6 +338,7 @@ const switchClientToSession = (
 			clientId,
 			buildSessionSwitchedMessage(sessionId, patchedSource, {
 				...(draft ? { draft } : {}),
+				...(parentID != null ? { parentID } : {}),
 				...(options?.requestId != null ? { requestId: options.requestId } : {}),
 			}),
 		);

@@ -717,6 +717,7 @@ const SessionSwitchedSchema = Schema.Struct({
 	type: Schema.Literal("session_switched"),
 	id: Schema.String,
 	sessionId: Schema.String,
+	parentID: Schema.optional(Schema.String),
 	requestId: Schema.optional(RequestId),
 	events: Schema.optional(Schema.Array(Schema.Unknown)),
 	eventsHasMore: Schema.optional(Schema.Boolean),
@@ -1298,6 +1299,7 @@ export type RelayMessage =
 			type: "session_switched";
 			id: string;
 			sessionId: string;
+			parentID?: string;
 			/** Correlation ID echoed from CreateSession request. */
 			requestId?: RequestId;
 			/** Raw events for client replay (cache hit). */

@@ -253,10 +253,26 @@ const sendInitErrorEffect = (clientId: string, err: unknown, prefix: string) =>
 const resolveClientInitHistoryEffect = (sessionId: string) =>
 	Effect.gen(function* () {
 		const readQueryOption = yield* Effect.serviceOption(ReadQueryEffectTag);
+		let projectedSource: SessionHistorySource = { kind: "empty" };
 		if (readQueryOption._tag === "Some") {
 			const rows =
 				yield* readQueryOption.value.getSessionMessagesWithParts(sessionId);
-			return resolveSessionHistoryFromRows(rows, { pageSize: 50 });
+			projectedSource = resolveSessionHistoryFromRows(rows, { pageSize: 50 });
+
+			// The projection is authoritative only for relay-local (claude)
+			// sessions. OpenCode projections currently persist structure without
+			// message text, so provider REST history stays the source of truth
+			// for opencode rows; the projection is the fallback when REST fails.
+			const sessionRowResult = yield* Effect.either(
+				readQueryOption.value.getSession(sessionId),
+			);
+			if (
+				sessionRowResult._tag === "Right" &&
+				sessionRowResult.right != null &&
+				sessionRowResult.right.provider !== "opencode"
+			) {
+				return projectedSource;
+			}
 		}
 
 		const sessionManagerService = yield* SessionManagerServiceTag;
@@ -269,6 +285,8 @@ const resolveClientInitHistoryEffect = (sessionId: string) =>
 				history: historyResult.right,
 			} satisfies SessionHistorySource;
 		}
+
+		if (projectedSource.kind !== "empty") return projectedSource;
 
 		const logger = yield* LoggerTag;
 		logger.warn(
@@ -332,6 +350,16 @@ const switchClientToSessionForInitEffect = (
 			sessionId,
 			pollerIsProcessing || hasActiveTimeout,
 		);
+		const readQueryOption = yield* Effect.serviceOption(ReadQueryEffectTag);
+		let parentID: string | undefined;
+		if (readQueryOption._tag === "Some") {
+			const sessionRowResult = yield* Effect.either(
+				readQueryOption.value.getSession(sessionId),
+			);
+			if (sessionRowResult._tag === "Right") {
+				parentID = sessionRowResult.right?.parent_id ?? undefined;
+			}
+		}
 		yield* seedPaginationCursorFromHistoryEffect(sessionId, patchedSource);
 
 		const draft = getSessionInputDraft(sessionId);
@@ -339,6 +367,7 @@ const switchClientToSessionForInitEffect = (
 			clientId,
 			buildSessionSwitchedMessage(sessionId, patchedSource, {
 				...(draft ? { draft } : {}),
+				...(parentID != null ? { parentID } : {}),
 			}),
 		);
 		wsHandler.sendTo(clientId, {

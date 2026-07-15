@@ -10,6 +10,34 @@ const SENSITIVE_KEYS = new Set([
 	"cookie",
 ]);
 
+const MAX_ERROR_CAUSE_DEPTH = 8;
+const GENERIC_EFFECT_ERROR_MESSAGE = "An error has occurred";
+
+function isMeaningfulErrorMessage(message: string): boolean {
+	const trimmed = message.trim();
+	return trimmed !== "" && trimmed !== GENERIC_EFFECT_ERROR_MESSAGE;
+}
+
+function findCauseMessage(error: Error): string {
+	let detail = error.message;
+	let current: unknown = error.cause;
+	const visited = new Set<Error>([error]);
+
+	for (let depth = 0; depth < MAX_ERROR_CAUSE_DEPTH; depth++) {
+		if (typeof current === "string") {
+			if (current.trim()) detail = current;
+			break;
+		}
+		if (!(current instanceof Error) || visited.has(current)) break;
+
+		visited.add(current);
+		if (isMeaningfulErrorMessage(current.message)) detail = current.message;
+		current = current.cause;
+	}
+
+	return detail;
+}
+
 /** Redact sensitive values from a context object */
 export function redactSensitive(
 	obj: Record<string, unknown>,
@@ -45,7 +73,11 @@ export function formatErrorDetail(err: unknown): string {
 		const bodyStr = typeof body === "string" ? body : JSON.stringify(body);
 		return `${err.message} — ${bodyStr}`;
 	}
-	if (err instanceof Error) return err.message;
+	if (err instanceof Error) {
+		return isMeaningfulErrorMessage(err.message)
+			? err.message
+			: findCauseMessage(err);
+	}
 	if (typeof err === "string") return err;
 	return "Unknown error";
 }

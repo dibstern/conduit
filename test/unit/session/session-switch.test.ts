@@ -157,6 +157,18 @@ describe("buildSessionSwitchedMessage", () => {
 		expect("requestId" in msg).toBe(false);
 	});
 
+	it.each<SessionHistorySource>([
+		{ kind: "cached-events", events: [], hasMore: false },
+		{ kind: "rest-history", history: { messages: [], hasMore: false } },
+		{ kind: "empty" },
+	])("includes parentID for every history source", (source) => {
+		const msg = buildSessionSwitchedMessage("ses_child", source, {
+			parentID: "ses_parent",
+		});
+
+		expect(msg.parentID).toBe("ses_parent");
+	});
+
 	it("includes both draft and requestId with cached-events", () => {
 		const events: RelayMessage[] = [
 			{ type: "delta", sessionId: "s1", text: "hi" },

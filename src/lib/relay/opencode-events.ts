@@ -174,8 +174,13 @@ export interface PartUpdatedEvent extends SSEEventBase {
 		messageID?: string;
 		part?: {
 			id?: string;
+			sessionID?: string;
 			messageID?: string;
 			type?: PartType;
+			mime?: string;
+			filename?: string;
+			url?: string;
+			source?: unknown;
 			callID?: string;
 			tool?: string;
 			state?: {
@@ -183,6 +188,7 @@ export interface PartUpdatedEvent extends SSEEventBase {
 				input?: unknown;
 				output?: string;
 				error?: string;
+				metadata?: Record<string, unknown>;
 			};
 			time?: { start?: number; end?: number };
 		};

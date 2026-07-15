@@ -34,6 +34,7 @@ export type SessionHistorySource =
 /** Options for building the session_switched message. */
 export interface SessionSwitchMessageOptions {
 	readonly draft?: string;
+	readonly parentID?: string;
 	readonly requestId?: RequestId;
 }
 
@@ -211,6 +212,7 @@ export function buildSessionSwitchedMessage(
 ): Extract<RelayMessage, { type: "session_switched" }> {
 	const optionalFields = {
 		...(options?.draft ? { inputText: options.draft } : {}),
+		...(options?.parentID != null ? { parentID: options.parentID } : {}),
 		...(options?.requestId != null ? { requestId: options.requestId } : {}),
 	};
 

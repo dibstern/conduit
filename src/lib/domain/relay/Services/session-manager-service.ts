@@ -1133,10 +1133,43 @@ export const SessionManagerServiceLive: Layer.Layer<
 							engineOption.value.bindSession(session.id, providerId);
 						}
 					});
+				const seedOpenCodeSession = (session: SessionDetail) => {
+					if (sqlOption._tag === "None") {
+						return Effect.sync(() => {
+							log.warn(
+								`OpenCode session ${session.id} was created without persistence services; session list seeding skipped`,
+							);
+						});
+					}
+
+					const now = Date.now();
+					const sessionTitle = normalizeSessionTitle(session.title);
+					return sqlOption.value`
+						INSERT OR IGNORE INTO sessions (
+							id, provider, provider_sid, title, status, created_at, updated_at
+						) VALUES (
+							${session.id}, 'opencode', ${session.id}, ${sessionTitle}, 'idle', ${now}, ${now}
+						)`.pipe(
+						Effect.asVoid,
+						Effect.catchAll((cause) =>
+							Effect.sync(() => {
+								log.warn(
+									`Failed to seed OpenCode session ${session.id} in the read model: ${String(cause)}`,
+								);
+							}),
+						),
+					);
+				};
 				const createViaOpenCode = () =>
 					Effect.either(
 						createSession(title).pipe(
 							Effect.provideService(OpenCodeAPITag, api),
+						),
+					).pipe(
+						Effect.tap((result) =>
+							result._tag === "Right"
+								? seedOpenCodeSession(result.right)
+								: Effect.void,
 						),
 					);
 				const createViaLocal = () => Effect.either(createLocalSession(title));
