@@ -416,6 +416,13 @@ export const getModelsResponse = (
 			return yield* Effect.fail(openCodeFailure);
 		}
 
+		// Provider catalogs arrive in arbitrary order; sort for the picker.
+		for (const provider of providers) {
+			provider.models.sort((a, b) =>
+				a.name.localeCompare(b.name, undefined, { sensitivity: "base" }),
+			);
+		}
+
 		// Send model_info: prefer session's model, fall back to relay-side selection
 		let sessionModel: ModelOverride | undefined;
 		if (activeId && !activeSessionUsesClaude) {

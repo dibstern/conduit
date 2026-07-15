@@ -73,6 +73,57 @@ describe("groupGeoRoutingModels", () => {
 		expect(grouped[0]).not.toHaveProperty("routingOptions");
 	});
 
+	it.effect(
+		"getModelsResponse sorts models by name within each provider",
+		() => {
+			const modelService = {
+				listProviders: vi.fn(() =>
+					Effect.succeed({
+						connected: ["openai"],
+						defaults: {},
+						providers: [
+							{
+								id: "openai",
+								name: "OpenAI",
+								models: [
+									{ id: "o3", name: "o3" },
+									{ id: "gpt-5.6-sol", name: "GPT-5.6 Sol" },
+									{ id: "gpt-4.1", name: "gpt-4.1" },
+								],
+							},
+						],
+					}),
+				),
+				getSession: vi.fn(() =>
+					Effect.fail(new Cause.UnknownException("no session")),
+				),
+				persistDefaultModel: vi.fn(() => Effect.succeed(undefined)),
+			};
+			const layer = Layer.mergeAll(
+				Layer.succeed(OpenCodeModelServiceTag, modelService),
+				Layer.succeed(WebSocketHandlerTag, makeMockWebSocketHandler()),
+				Layer.succeed(LoggerTag, makeMockLogger()),
+				Layer.succeed(
+					OrchestrationEngineTag,
+					withDispatchEffect({ dispatch: vi.fn(async () => ({ models: [] })) }),
+				),
+				makeOverridesStateLive(),
+			);
+
+			return getModelsResponse().pipe(
+				Effect.provide(layer),
+				Effect.tap((response) => {
+					const openai = response.providers.find((p) => p.id === "openai");
+					expect(openai?.models.map((m) => m.name)).toEqual([
+						"gpt-4.1",
+						"GPT-5.6 Sol",
+						"o3",
+					]);
+				}),
+			);
+		},
+	);
+
 	it.effect("getModelsResponse groups only the amazon-bedrock provider", () => {
 		const modelService = {
 			listProviders: vi.fn(() =>
