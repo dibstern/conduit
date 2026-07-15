@@ -3,7 +3,10 @@
 		"includes": [
 			"**",
 			"!dist",
+			"!build",
 			"!node_modules",
+			"!acceptance/generated",
+			"!acceptance/visual/artifacts",
 			"!test-results",
 			"!.claude",
 			"!.worktrees",
