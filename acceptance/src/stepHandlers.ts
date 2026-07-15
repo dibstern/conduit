@@ -1,11 +1,22 @@
+import type { Page } from "@playwright/test";
 import { initMessages } from "../../test/e2e/fixtures/mockup-state.js";
-import { mockRelayWebSocket } from "../../test/e2e/helpers/ws-mock.js";
+import {
+	mockWsRpc,
+	type RpcMockControl,
+} from "../../test/e2e/helpers/rpc-mock.js";
+import {
+	mockRelayWebSocket,
+	type WsMockControl,
+} from "../../test/e2e/helpers/ws-mock.js";
 import { InputPage } from "../../test/e2e/page-objects/input.page.js";
 import { PlaywrightDriver } from "./playwrightDriver.js";
 import type { AcceptanceLifecycle, StepHandler } from "./runtime.js";
 import { currentVisualMode } from "./visualMode.js";
 
 const driver = new PlaywrightDriver();
+const relayControls = new WeakMap<Page, WsMockControl>();
+const rpcControls = new WeakMap<Page, RpcMockControl>();
+const composerMessages = new WeakMap<Page, string>();
 
 function exampleValue(example: Record<string, string>, key: string): string {
 	const value = example[key];
@@ -47,12 +58,20 @@ export const conduitVisualHandlers: StepHandler[] = [
 				throw new Error(`Unsupported conduit mockup: ${mockup ?? ""}`);
 			}
 
-			await mockRelayWebSocket(world.page, {
+			const relayControl = await mockRelayWebSocket(world.page, {
 				initMessages,
 				responses: new Map(),
 				initDelay: 0,
 				messageDelay: 0,
 			});
+			relayControls.set(world.page, relayControl);
+			const rpcControl = await mockWsRpc(world.page, {
+				handlers: {
+					SendMessage: async () => undefined,
+					SyncInputDraft: async () => undefined,
+				},
+			});
+			rpcControls.set(world.page, rpcControl);
 
 			const baseUrl =
 				process.env["CONDUIT_BASE_URL"] ?? "http://localhost:4173";
@@ -81,9 +100,72 @@ export const conduitVisualHandlers: StepHandler[] = [
 	},
 	{
 		name: "type into composer",
-		match: /^I type .* into the composer$/,
-		run: async ({ world, example }) => {
-			await new InputPage(world.page).type(exampleValue(example, "message"));
+		match: /^I type (.*) into the composer$/,
+		run: async ({ world, match }) => {
+			const message = match[1] ?? "";
+			composerMessages.set(world.page, message);
+			await new InputPage(world.page).type(message);
+		},
+	},
+	{
+		name: "send composer message",
+		match: /^I send the composer message$/,
+		run: async ({ world }) => {
+			await new InputPage(world.page).send();
+		},
+	},
+	{
+		name: "replay sent message after session switch",
+		match: /^the mock relay replays the sent message in a new session$/,
+		run: async ({ world }) => {
+			const message = composerMessages.get(world.page);
+			const rpcControl = rpcControls.get(world.page);
+			const relayControl = relayControls.get(world.page);
+			if (message == null || !rpcControl || !relayControl) {
+				throw new Error("Mock relay controls were not initialised");
+			}
+
+			await rpcControl.waitForRequest(
+				(request) =>
+					request.tag === "SendMessage" && request.payload["text"] === message,
+			);
+			await relayControl.sendMessages([
+				{ type: "session_switched", id: "sess-first-send" },
+				{ type: "user_message", text: message },
+			]);
+		},
+	},
+	{
+		name: "replay subagent session switch",
+		match: /^the mock relay replays a session switch with parentID$/,
+		run: async ({ world }) => {
+			const relayControl = relayControls.get(world.page);
+			if (!relayControl) throw new Error("Mock relay was not initialised");
+			relayControl.sendMessage({
+				type: "session_switched",
+				id: "sess-subagent",
+				parentID: "sess-mockup-001",
+			});
+		},
+	},
+	{
+		name: "assert transcript message",
+		match: /^the transcript shows (.*)$/,
+		run: async ({ world, match }) => {
+			const message = match[1] ?? "";
+			await world.page
+				.locator("#messages")
+				.getByText(message, { exact: true })
+				.waitFor({ state: "visible" });
+		},
+	},
+	{
+		name: "assert subagent parent link",
+		match: /^the subagent parent link is visible$/,
+		run: async ({ world }) => {
+			await world.page
+				.getByRole("button", { name: /PARENT/ })
+				.waitFor({ state: "visible" });
 		},
 	},
 	{

@@ -45,21 +45,23 @@ until curl --fail --silent --output /dev/null "$CONDUIT_BASE_URL"; do
   sleep 0.1
 done
 
-gherkin-parser \
-  features/composer-send-button.feature \
-  build/acceptance/ir/composer-send-button.json
+for feature in composer-send-button session-visibility; do
+  gherkin-parser \
+    "features/$feature.feature" \
+    "build/acceptance/ir/$feature.json"
 
-gherkin-ir-dry-checker \
-  build/acceptance/ir/composer-send-button.json \
-  build/acceptance/dry/composer-send-button.json
+  gherkin-ir-dry-checker \
+    "build/acceptance/ir/$feature.json" \
+    "build/acceptance/dry/$feature.json"
 
-pnpm exec tsx \
-  acceptance/bin/acceptance-entrypoint-generator.ts \
-  build/acceptance/ir/composer-send-button.json \
-  acceptance/generated
+  pnpm exec tsx \
+    acceptance/bin/acceptance-entrypoint-generator.ts \
+    "build/acceptance/ir/$feature.json" \
+    acceptance/generated
 
-pnpm exec tsx \
-  acceptance/generated/composer-send-button.acceptance.ts \
-  build/acceptance/ir/composer-send-button.json
+  pnpm exec tsx \
+    "acceptance/generated/$feature.acceptance.ts" \
+    "build/acceptance/ir/$feature.json"
+done
 
 echo "PASS acceptance visual pipeline"
