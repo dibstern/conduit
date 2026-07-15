@@ -2,6 +2,7 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
 	createEventId,
+	type FileAttachedPayload,
 	type MessageCreatedPayload,
 	type StoredEvent,
 	type TextDeltaPayload,
@@ -103,6 +104,7 @@ describe("MessageProjector", () => {
 			"tool.started",
 			"tool.running",
 			"tool.completed",
+			"file.attached",
 			"turn.completed",
 			"turn.error",
 		]);
@@ -763,6 +765,97 @@ describe("MessageProjector", () => {
 				content: "file contents",
 			});
 			expect(parts[0]?.duration).toBe(150);
+		});
+
+		it("merges completion metadata into existing tool metadata", () => {
+			projector.project(
+				makeStored("tool.started", "s1", {
+					messageId: "m1",
+					partId: "tool1",
+					toolName: "Task",
+					callId: "tool1",
+					input: { tool: "Task", description: "Audit", prompt: "Go" },
+				} satisfies ToolStartedPayload),
+				db,
+			);
+			projector.project(
+				makeStored(
+					"tool.running",
+					"s1",
+					{
+						messageId: "m1",
+						partId: "tool1",
+						metadata: { providerTaskId: "task-1" },
+					} satisfies ToolRunningPayload,
+					2,
+				),
+				db,
+			);
+			const completed = makeStored(
+				"tool.completed",
+				"s1",
+				{
+					messageId: "m1",
+					partId: "tool1",
+					result: "done",
+					duration: 150,
+					metadata: { sessionId: "ses-child" },
+				} satisfies ToolCompletedPayload,
+				3,
+			);
+
+			projector.project(completed, db);
+			projector.project(completed, db);
+
+			const part = db.queryOne<MessagePartRow>(
+				"SELECT * FROM message_parts WHERE id = ?",
+				["tool1"],
+			);
+			expect(JSON.parse(part?.metadata ?? "{}")).toEqual({
+				providerTaskId: "task-1",
+				sessionId: "ses-child",
+			});
+		});
+	});
+
+	describe("file.attached", () => {
+		it("defensively creates the message and inserts the file part once", () => {
+			const attached = makeStored(
+				"file.attached",
+				"s1",
+				{
+					messageId: "m-file",
+					partId: "file1",
+					mime: "image/png",
+					filename: "screenshot.png",
+					url: "data:image/png;base64,AAAA",
+				} satisfies FileAttachedPayload,
+				1,
+			);
+
+			projector.project(attached, db);
+			projector.project(attached, db);
+
+			const message = db.queryOne<MessageRow>(
+				"SELECT * FROM messages WHERE id = ?",
+				["m-file"],
+			);
+			const parts = db.query<MessagePartRow>(
+				"SELECT * FROM message_parts WHERE message_id = ?",
+				["m-file"],
+			);
+			expect(message?.role).toBe("assistant");
+			expect(parts).toHaveLength(1);
+			expect(parts[0]).toMatchObject({
+				id: "file1",
+				type: "file",
+				sort_order: 0,
+			});
+			expect(JSON.parse(parts[0]?.metadata ?? "{}")).toEqual({
+				mime: "image/png",
+				filename: "screenshot.png",
+				url: "data:image/png;base64,AAAA",
+			});
 		});
 	});
 

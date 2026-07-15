@@ -2,6 +2,7 @@
 
 exports[`Exhaustiveness guards > EventPayloadMap key snapshot > snapshot of all canonical event types — breaks when new types added 1`] = `
 [
+  "file.attached",
   "message.created",
   "permission.asked",
   "permission.resolved",

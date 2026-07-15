@@ -52,7 +52,7 @@ describe("Exhaustiveness guards", () => {
 			}
 		});
 
-		it("accepts valid part types: text, thinking, tool", () => {
+		it("accepts valid part types: text, thinking, tool, file", () => {
 			harness = createTestHarness();
 			try {
 				harness.seedSession("ses-check-ok");
@@ -61,7 +61,12 @@ describe("Exhaustiveness guards", () => {
 					["msg-check-ok", "ses-check-ok", "assistant", 1000, 1000],
 				);
 
-				for (const [idx, type] of ["text", "thinking", "tool"].entries()) {
+				for (const [idx, type] of [
+					"text",
+					"thinking",
+					"tool",
+					"file",
+				].entries()) {
 					expect(() =>
 						harness.db.execute(
 							"INSERT INTO message_parts (id, message_id, type, text, sort_order, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)",

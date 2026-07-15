@@ -14,8 +14,8 @@ import {
 } from "../../../src/lib/persistence/events.js";
 
 describe("Canonical Event Types", () => {
-	it("exports all 20 canonical event types", () => {
-		expect(CANONICAL_EVENT_TYPES).toHaveLength(20);
+	it("exports all 21 canonical event types", () => {
+		expect(CANONICAL_EVENT_TYPES).toHaveLength(21);
 		expect(CANONICAL_EVENT_TYPES).toContain("message.created");
 		expect(CANONICAL_EVENT_TYPES).toContain("text.delta");
 		expect(CANONICAL_EVENT_TYPES).toContain("thinking.start");
@@ -24,6 +24,7 @@ describe("Canonical Event Types", () => {
 		expect(CANONICAL_EVENT_TYPES).toContain("tool.started");
 		expect(CANONICAL_EVENT_TYPES).toContain("tool.running");
 		expect(CANONICAL_EVENT_TYPES).toContain("tool.completed");
+		expect(CANONICAL_EVENT_TYPES).toContain("file.attached");
 		expect(CANONICAL_EVENT_TYPES).toContain("tool.input_updated");
 		expect(CANONICAL_EVENT_TYPES).toContain("turn.completed");
 		expect(CANONICAL_EVENT_TYPES).toContain("turn.error");

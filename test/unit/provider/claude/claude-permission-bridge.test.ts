@@ -387,6 +387,7 @@ describe("ClaudePermissionBridge", () => {
 			},
 		);
 		expect(result).not.toBeNull();
+		// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
 		expect(result!.behavior).toBe("allow");
 	});
 

@@ -18,6 +18,7 @@ const MESSAGE_HANDLES = [
 	"tool.started",
 	"tool.running",
 	"tool.completed",
+	"file.attached",
 	"turn.completed",
 	"turn.error",
 ] as const;
@@ -60,6 +61,7 @@ function mergeMetadata(
  * - `tool.started`     -> INSERT message_parts row with type=tool, ON CONFLICT DO NOTHING
  * - `tool.running`     -> UPDATE message_parts.status to running
  * - `tool.completed`   -> UPDATE message_parts with result, duration, status=completed
+ * - `file.attached`    -> INSERT message_parts row with type=file, ON CONFLICT DO NOTHING
  * - `turn.completed`   -> Finalize: cost, tokens, is_streaming=0
  * - `turn.error`       -> Finalize: is_streaming=0
  *
@@ -318,16 +320,68 @@ export class MessageProjector implements Projector {
 		}
 
 		if (isEventType(event, "tool.completed")) {
+			const current = db.queryOne<{ metadata: string | null }>(
+				"SELECT metadata FROM message_parts WHERE id = ?",
+				[event.data.partId],
+			);
+			const metadata = mergeMetadata(
+				current?.metadata ?? null,
+				event.data.metadata,
+			);
 			// Final-state UPDATE -- naturally idempotent
 			db.execute(
 				`UPDATE message_parts
-				 SET result = ?, duration = ?, status = 'completed', updated_at = ?
+				 SET result = ?, duration = ?, status = 'completed', metadata = ?, updated_at = ?
 				 WHERE id = ?`,
 				[
 					encodeJson(event.data.result),
 					event.data.duration,
+					metadata,
 					event.createdAt,
 					event.data.partId,
+				],
+			);
+			db.execute("UPDATE messages SET updated_at = ? WHERE id = ?", [
+				event.createdAt,
+				event.data.messageId,
+			]);
+			return;
+		}
+
+		if (isEventType(event, "file.attached")) {
+			// Defensive: OpenCode can report user file parts without a preceding
+			// message.created event, so preserve the same fallback role caveat as tools.
+			db.execute(
+				`INSERT OR IGNORE INTO messages
+				 (id, session_id, role, text, is_streaming, created_at, updated_at)
+				 VALUES (?, ?, 'assistant', '', 1, ?, ?)`,
+				[
+					event.data.messageId,
+					event.sessionId,
+					event.createdAt,
+					event.createdAt,
+				],
+			);
+			db.execute(
+				`INSERT INTO message_parts
+				 (id, message_id, type, metadata, sort_order, created_at, updated_at)
+				 VALUES (?, ?, 'file', ?,
+				     COALESCE((SELECT MAX(sort_order) + 1 FROM message_parts WHERE message_id = ?), 0),
+				     ?, ?)
+				 ON CONFLICT (id) DO NOTHING`,
+				[
+					event.data.partId,
+					event.data.messageId,
+					encodeJson({
+						mime: event.data.mime,
+						...(event.data.filename != null
+							? { filename: event.data.filename }
+							: {}),
+						url: event.data.url,
+					}),
+					event.data.messageId,
+					event.createdAt,
+					event.createdAt,
 				],
 			);
 			db.execute("UPDATE messages SET updated_at = ? WHERE id = ?", [

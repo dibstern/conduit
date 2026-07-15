@@ -111,10 +111,16 @@ describe("Migration Runner", () => {
 		const baseline = schemaMigrations[0];
 		const metadataMigration = schemaMigrations[1];
 		const durableCommandMigration = schemaMigrations[2];
-		if (!baseline || !metadataMigration || !durableCommandMigration) {
-			throw new Error(
-				"Expected event-store baseline, metadata, and durable command migrations",
-			);
+		const dropEventsSessionFkMigration = schemaMigrations[3];
+		const messagePartsFileTypeMigration = schemaMigrations[4];
+		if (
+			!baseline ||
+			!metadataMigration ||
+			!durableCommandMigration ||
+			!dropEventsSessionFkMigration ||
+			!messagePartsFileTypeMigration
+		) {
+			throw new Error("Expected all event-store schema migrations");
 		}
 
 		runMigrations(client, [baseline]);
@@ -135,6 +141,16 @@ describe("Migration Runner", () => {
 				id: 3,
 				name: "add_durable_provider_commands",
 				checksum: calculateMigrationChecksum(durableCommandMigration),
+			},
+			{
+				id: 4,
+				name: "drop_events_session_fk",
+				checksum: calculateMigrationChecksum(dropEventsSessionFkMigration),
+			},
+			{
+				id: 5,
+				name: "message_parts_file_type",
+				checksum: calculateMigrationChecksum(messagePartsFileTypeMigration),
 			},
 		]);
 		columns = client

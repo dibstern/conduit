@@ -268,6 +268,7 @@ describe("translateProviderRuntimeEventToDomain", () => {
 					partId: "tool-1",
 					result: { exitCode: 0, text: "ok" },
 					duration: 12,
+					metadata: { sessionId: "ses-child" },
 				},
 			}),
 		];
@@ -314,9 +315,40 @@ describe("translateProviderRuntimeEventToDomain", () => {
 					partId: "tool-1",
 					result: { exitCode: 0, text: "ok" },
 					duration: 12,
+					metadata: { sessionId: "ses-child" },
 				},
 			}),
 		);
+	});
+
+	it("maps runtime file.attached to durable file.attached", () => {
+		const { events } = translateProviderRuntimeEventToDomain(
+			runtimeEvent({
+				eventId: "file-attached",
+				type: "file.attached",
+				data: {
+					messageId: "message-1",
+					partId: "file-1",
+					mime: "image/png",
+					filename: "screenshot.png",
+					url: "data:image/png;base64,AAAA",
+				},
+			}),
+		);
+
+		expect(events).toEqual([
+			expect.objectContaining({
+				eventId: "file-attached",
+				type: "file.attached",
+				data: {
+					messageId: "message-1",
+					partId: "file-1",
+					mime: "image/png",
+					filename: "screenshot.png",
+					url: "data:image/png;base64,AAAA",
+				},
+			}),
+		]);
 	});
 
 	it("synthesizes tool.started before tool.completed when completion arrives without prior tool start", () => {

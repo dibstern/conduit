@@ -28,6 +28,7 @@ export const PROVIDER_RUNTIME_EVENT_TYPES = [
 	"tool.started",
 	"tool.running",
 	"tool.completed",
+	"file.attached",
 	"tool.input_updated",
 	"turn.completed",
 	"turn.error",

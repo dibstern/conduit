@@ -13,6 +13,7 @@ describe("domain-event relay translation exhaustiveness", () => {
 		"tool.running",
 		"tool.input_updated",
 		"tool.completed",
+		"file.attached",
 		"turn.completed",
 		"turn.error",
 		"turn.interrupted",

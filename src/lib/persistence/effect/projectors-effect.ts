@@ -188,6 +188,7 @@ export const makeMessageProjector = (): EffectProjector => ({
 		"tool.started",
 		"tool.running",
 		"tool.completed",
+		"file.attached",
 		"turn.completed",
 		"turn.error",
 	],
@@ -332,10 +333,41 @@ export const makeMessageProjector = (): EffectProjector => ({
 
 			if (isEventType(event, "tool.completed")) {
 				const resultJson = encodeJson(event.data.result);
+				const rows = yield* sql<{ metadata: string | null }>`
+					SELECT metadata FROM message_parts WHERE id = ${event.data.partId}`;
+				const metadata = mergeMetadata(
+					rows[0]?.metadata ?? null,
+					event.data.metadata,
+				);
 				yield* sql`
 					UPDATE message_parts
-					SET result = ${resultJson}, duration = ${event.data.duration}, status = 'completed', updated_at = ${event.createdAt}
+					SET result = ${resultJson}, duration = ${event.data.duration}, status = 'completed', metadata = ${metadata}, updated_at = ${event.createdAt}
 					WHERE id = ${event.data.partId}`;
+				yield* sql`UPDATE messages SET updated_at = ${event.createdAt} WHERE id = ${event.data.messageId}`;
+				return;
+			}
+
+			if (isEventType(event, "file.attached")) {
+				yield* sql`
+					INSERT OR IGNORE INTO messages
+					(id, session_id, role, text, is_streaming, created_at, updated_at)
+					VALUES (${event.data.messageId}, ${event.sessionId}, 'assistant', '', 1, ${event.createdAt}, ${event.createdAt})`;
+
+				const metadata = encodeJson({
+					mime: event.data.mime,
+					...(event.data.filename != null
+						? { filename: event.data.filename }
+						: {}),
+					url: event.data.url,
+				});
+				yield* sql`
+					INSERT INTO message_parts
+					(id, message_id, type, metadata, sort_order, created_at, updated_at)
+					VALUES (${event.data.partId}, ${event.data.messageId}, 'file', ${metadata},
+						COALESCE((SELECT MAX(sort_order) + 1 FROM message_parts WHERE message_id = ${event.data.messageId}), 0),
+						${event.createdAt}, ${event.createdAt})
+					ON CONFLICT (id) DO NOTHING`;
+
 				yield* sql`UPDATE messages SET updated_at = ${event.createdAt} WHERE id = ${event.data.messageId}`;
 				return;
 			}

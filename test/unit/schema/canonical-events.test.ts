@@ -148,6 +148,27 @@ describe("Canonical event schemas", () => {
 					partId: "p1",
 					result: { output: "done" },
 					duration: 100,
+					metadata: { sessionId: "ses-child" },
+				},
+				metadata: {},
+				provider: "opencode",
+				createdAt: Date.now(),
+			};
+			const result = Schema.decodeUnknownEither(CanonicalEventSchema)(raw);
+			expect(Either.isRight(result)).toBe(true);
+		});
+
+		it("decodes file.attached event", () => {
+			const raw = {
+				eventId: "evt_file",
+				sessionId: "s1",
+				type: "file.attached",
+				data: {
+					messageId: "m1",
+					partId: "file1",
+					mime: "image/png",
+					filename: "screenshot.png",
+					url: "data:image/png;base64,AAAA",
 				},
 				metadata: {},
 				provider: "opencode",

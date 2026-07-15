@@ -94,6 +94,8 @@ describe("Effect SQL migrations", () => {
 					{ migration_id: 1, name: "create_event_store_tables" },
 					{ migration_id: 2, name: "add_message_part_metadata" },
 					{ migration_id: 3, name: "add_durable_provider_commands" },
+					{ migration_id: 4, name: "drop_events_session_fk" },
+					{ migration_id: 5, name: "message_parts_file_type" },
 				]);
 
 				const legacyRows = yield* sql<{ id: number; name: string }>`
@@ -102,6 +104,8 @@ describe("Effect SQL migrations", () => {
 					{ id: 1, name: "create_event_store_tables" },
 					{ id: 2, name: "add_message_part_metadata" },
 					{ id: 3, name: "add_durable_provider_commands" },
+					{ id: 4, name: "drop_events_session_fk" },
+					{ id: 5, name: "message_parts_file_type" },
 				]);
 			}).pipe(
 				Effect.provide(
@@ -128,6 +132,8 @@ describe("Effect SQL migrations", () => {
 					{ migration_id: 1, name: "create_event_store_tables" },
 					{ migration_id: 2, name: "add_message_part_metadata" },
 					{ migration_id: 3, name: "add_durable_provider_commands" },
+					{ migration_id: 4, name: "drop_events_session_fk" },
+					{ migration_id: 5, name: "message_parts_file_type" },
 				]);
 
 				const columns = yield* sql<{ name: string }>`

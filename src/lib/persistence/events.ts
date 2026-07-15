@@ -45,6 +45,7 @@ export const CANONICAL_EVENT_TYPES = [
 	"tool.started",
 	"tool.running",
 	"tool.completed",
+	"file.attached",
 	"tool.input_updated", // Retained for historical event compatibility — no longer emitted after Phase 2
 	"turn.completed",
 	"turn.error",
@@ -111,6 +112,15 @@ export interface ToolCompletedPayload {
 	readonly partId: string;
 	readonly result: unknown;
 	readonly duration: number;
+	readonly metadata?: Record<string, unknown>;
+}
+
+export interface FileAttachedPayload {
+	readonly messageId: string;
+	readonly partId: string;
+	readonly mime: string;
+	readonly filename?: string;
+	readonly url: string;
 }
 
 // ─── Canonical Tool Input ───────────────────────────────────────────────────
@@ -237,6 +247,7 @@ export interface EventPayloadMap {
 	"tool.started": ToolStartedPayload;
 	"tool.running": ToolRunningPayload;
 	"tool.completed": ToolCompletedPayload;
+	"file.attached": FileAttachedPayload;
 	"tool.input_updated": {
 		readonly messageId: string;
 		readonly partId: string;
@@ -496,6 +507,18 @@ const ToolCompletedPayloadSchema = Schema.Struct({
 	partId: Schema.String,
 	result: Schema.Unknown,
 	duration: Schema.Number,
+	metadata: Schema.optionalWith(
+		Schema.Record({ key: Schema.String, value: Schema.Unknown }),
+		{ exact: true },
+	),
+});
+
+const FileAttachedPayloadSchema = Schema.Struct({
+	messageId: Schema.String,
+	partId: Schema.String,
+	mime: Schema.String,
+	filename: Schema.optionalWith(Schema.String, { exact: true }),
+	url: Schema.String,
 });
 
 // Historical compat — open record with required messageId and partId
@@ -620,6 +643,10 @@ const ToolCompletedEventSchema = eventEnvelope(
 	"tool.completed",
 	ToolCompletedPayloadSchema,
 );
+const FileAttachedEventSchema = eventEnvelope(
+	"file.attached",
+	FileAttachedPayloadSchema,
+);
 const ToolInputUpdatedEventSchema = eventEnvelope(
 	"tool.input_updated",
 	ToolInputUpdatedPayloadSchema,
@@ -669,7 +696,7 @@ const QuestionResolvedEventSchema = eventEnvelope(
 	QuestionResolvedPayloadSchema,
 );
 
-// ─── Canonical Event Schema (Union of all 20 event types) ──────────────────
+// ─── Canonical Event Schema (Union of all 21 event types) ──────────────────
 
 export const CanonicalEventSchema = Schema.Union(
 	MessageCreatedEventSchema,
@@ -680,6 +707,7 @@ export const CanonicalEventSchema = Schema.Union(
 	ToolStartedEventSchema,
 	ToolRunningEventSchema,
 	ToolCompletedEventSchema,
+	FileAttachedEventSchema,
 	ToolInputUpdatedEventSchema,
 	TurnCompletedEventSchema,
 	TurnErrorEventSchema,
@@ -721,6 +749,7 @@ const PAYLOAD_REQUIRED_FIELDS: Record<CanonicalEventType, readonly string[]> = {
 	"tool.started": ["messageId", "partId", "toolName", "callId"],
 	"tool.running": ["messageId", "partId"],
 	"tool.completed": ["messageId", "partId", "result", "duration"],
+	"file.attached": ["messageId", "partId", "mime", "url"],
 	"tool.input_updated": ["messageId", "partId"], // Historical compat
 	"turn.completed": ["messageId"],
 	"turn.error": ["messageId", "error"],

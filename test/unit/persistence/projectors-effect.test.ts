@@ -166,6 +166,7 @@ function makeToolCompleted(
 	sessionId: string,
 	messageId: string,
 	partId: string,
+	metadata?: Record<string, unknown>,
 ): CanonicalEvent {
 	return canonicalEvent(
 		"tool.completed",
@@ -175,6 +176,30 @@ function makeToolCompleted(
 			partId,
 			result: "done",
 			duration: 150,
+			...(metadata !== undefined ? { metadata } : {}),
+		},
+		{
+			eventId: createEventId(),
+			metadata: {},
+			createdAt: FIXED_TS,
+		},
+	);
+}
+
+function makeFileAttached(
+	sessionId: string,
+	messageId: string,
+	partId: string,
+): CanonicalEvent {
+	return canonicalEvent(
+		"file.attached",
+		sessionId,
+		{
+			messageId,
+			partId,
+			mime: "image/png",
+			filename: "screenshot.png",
+			url: "data:image/png;base64,AAAA",
 		},
 		{
 			eventId: createEventId(),
@@ -1158,6 +1183,68 @@ describe("Effect Message Projector (via ProjectionRunner)", () => {
 					SELECT metadata FROM message_parts WHERE id = 'tool1'`;
 				expect(JSON.parse(rows[0]?.metadata ?? "{}")).toEqual({
 					providerTaskId: "task-1",
+				});
+			}),
+		));
+
+	it("tool.completed merges metadata into message parts", () =>
+		runTest(
+			Effect.gen(function* () {
+				const sql = yield* SqlClient.SqlClient;
+				const store = yield* EventStoreEffectTag;
+				const runner = yield* ProjectionRunnerEffectTag;
+				yield* runner.markRecovered();
+
+				yield* seedSession("s1");
+				const e1 = yield* store.append(makeSessionCreated("s1"));
+				yield* runner.projectEvent(e1);
+				const e2 = yield* store.append(makeMessageCreated("s1", "m1"));
+				yield* runner.projectEvent(e2);
+				const e3 = yield* store.append(makeToolStarted("s1", "m1", "tool1"));
+				yield* runner.projectEvent(e3);
+				const e4 = yield* store.append(
+					makeToolRunning("s1", "m1", "tool1", { providerTaskId: "task-1" }),
+				);
+				yield* runner.projectEvent(e4);
+				const e5 = yield* store.append(
+					makeToolCompleted("s1", "m1", "tool1", {
+						sessionId: "ses-child",
+					}),
+				);
+				yield* runner.projectEvent(e5);
+
+				const rows = yield* sql<{ metadata: string | null }>`
+					SELECT metadata FROM message_parts WHERE id = 'tool1'`;
+				expect(JSON.parse(rows[0]?.metadata ?? "{}")).toEqual({
+					providerTaskId: "task-1",
+					sessionId: "ses-child",
+				});
+			}),
+		));
+
+	it("file.attached creates a file message part", () =>
+		runTest(
+			Effect.gen(function* () {
+				const sql = yield* SqlClient.SqlClient;
+				const store = yield* EventStoreEffectTag;
+				const runner = yield* ProjectionRunnerEffectTag;
+				yield* runner.markRecovered();
+
+				yield* seedSession("s1");
+				const e1 = yield* store.append(makeSessionCreated("s1"));
+				yield* runner.projectEvent(e1);
+				const e2 = yield* store.append(makeFileAttached("s1", "m1", "file1"));
+				yield* runner.projectEvent(e2);
+
+				const rows = yield* sql<{
+					type: string;
+					metadata: string | null;
+				}>`SELECT type, metadata FROM message_parts WHERE id = 'file1'`;
+				expect(rows[0]?.type).toBe("file");
+				expect(JSON.parse(rows[0]?.metadata ?? "{}")).toEqual({
+					mime: "image/png",
+					filename: "screenshot.png",
+					url: "data:image/png;base64,AAAA",
 				});
 			}),
 		));

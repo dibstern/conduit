@@ -131,6 +131,8 @@ describe("Persistence Effect", () => {
 				{ migration_id: 1, name: "create_event_store_tables" },
 				{ migration_id: 2, name: "add_message_part_metadata" },
 				{ migration_id: 3, name: "add_durable_provider_commands" },
+				{ migration_id: 4, name: "drop_events_session_fk" },
+				{ migration_id: 5, name: "message_parts_file_type" },
 			]);
 
 			const legacyMigrationTable = yield* sql<{ name: string }>`

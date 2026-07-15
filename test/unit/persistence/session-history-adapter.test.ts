@@ -103,6 +103,16 @@ describe("messageRowsToHistory", () => {
 		const result = messageRowsToHistory(rows, { pageSize: 2 });
 		expect(result.hasMore).toBe(true);
 		expect(result.messages).toHaveLength(2);
+		expect(result.messages.map((message) => message.id)).toEqual(["m2", "m3"]);
+	});
+
+	it("sets hasMore=false at the exact page-size boundary", () => {
+		const rows = [makeMessageWithParts("m1"), makeMessageWithParts("m2")];
+
+		const result = messageRowsToHistory(rows, { pageSize: 2 });
+
+		expect(result.hasMore).toBe(false);
+		expect(result.messages.map((message) => message.id)).toEqual(["m1", "m2"]);
 	});
 
 	it("handles empty result", () => {
@@ -196,6 +206,35 @@ describe("messageRowsToHistory", () => {
 			childSessionId: "claude-subagent-abc",
 			providerTaskId: "task-1",
 		});
+	});
+
+	it("lifts file metadata to top-level file part fields", () => {
+		const rows: MessageWithParts[] = [
+			makeMessageWithParts("m1", {
+				parts: [
+					makePartRow("file1", "m1", {
+						type: "file",
+						metadata: JSON.stringify({
+							mime: "image/png",
+							filename: "screenshot.png",
+							url: "data:image/png;base64,AAAA",
+						}),
+					}),
+				],
+			}),
+		];
+
+		const result = messageRowsToHistory(rows, { pageSize: 50 });
+		const file = result.messages[0]?.parts?.[0];
+
+		expect(file).toEqual({
+			id: "file1",
+			type: "file",
+			mime: "image/png",
+			filename: "screenshot.png",
+			url: "data:image/png;base64,AAAA",
+		});
+		expect(file).not.toHaveProperty("state");
 	});
 
 	it("omits state for metadata-only parts with malformed metadata", () => {

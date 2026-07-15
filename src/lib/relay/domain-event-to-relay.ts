@@ -119,6 +119,7 @@ export function translateDomainEventToRelay(
 			);
 
 		case "message.created":
+		case "file.attached":
 		case "session.created":
 		case "session.renamed":
 		case "session.provider_changed":

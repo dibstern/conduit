@@ -27,7 +27,7 @@ import {
 // ─── Part Tracking ───────────────────────────────────────────────────────────
 
 interface TrackedPart {
-	type: string; // "text" | "tool" | "reasoning"
+	type: string; // "text" | "tool" | "reasoning" | "file"
 	status?: string | undefined; // ToolStatus for tool parts
 	thinkingStarted?: boolean | undefined; // Whether thinking.start has been emitted
 }
@@ -45,7 +45,7 @@ export class CanonicalEventTranslator {
 	/**
 	 * Translate an OpenCode SSE event into zero or more canonical events.
 	 *
-	 * Returns null for events that are not persisted (PTY, file, unknown)
+	 * Returns null for events that are not persisted (PTY, unknown)
 	 * or when sessionId is missing.
 	 */
 	translate(
@@ -215,7 +215,7 @@ export class CanonicalEventTranslator {
 		if (!rawPart?.type) return null;
 
 		const partId = props.partID ?? rawPart.id ?? "";
-		const messageId = props.messageID ?? "";
+		const messageId = rawPart.messageID ?? props.messageID ?? "";
 		const parts = this.getOrCreateParts(sessionId);
 		const existing = parts.get(partId);
 
@@ -263,6 +263,9 @@ export class CanonicalEventTranslator {
 			const status = rawPart.state?.status;
 			const toolName = mapToolName(rawPart.tool ?? "");
 			const callId = rawPart.callID ?? partId;
+			const metadata = isPlainObject(rawPart.state?.metadata)
+				? rawPart.state.metadata
+				: undefined;
 
 			if (status === "pending") {
 				return [
@@ -306,6 +309,7 @@ export class CanonicalEventTranslator {
 					canonicalEvent("tool.running", sessionId, {
 						messageId,
 						partId,
+						...(metadata ? { metadata } : {}),
 					}),
 				);
 				return results;
@@ -325,11 +329,29 @@ export class CanonicalEventTranslator {
 								? (rawPart.state?.error ?? "Unknown error")
 								: (rawPart.state?.output ?? ""),
 						duration,
+						...(metadata ? { metadata } : {}),
 					}),
 				];
 			}
 
 			return null;
+		}
+
+		if (rawPart.type === "file" && !existing) {
+			if (typeof rawPart.mime !== "string" || typeof rawPart.url !== "string") {
+				return null;
+			}
+			return [
+				canonicalEvent("file.attached", sessionId, {
+					messageId,
+					partId,
+					mime: rawPart.mime,
+					...(typeof rawPart.filename === "string"
+						? { filename: rawPart.filename }
+						: {}),
+					url: rawPart.url,
+				}),
+			];
 		}
 
 		return null;
@@ -510,4 +532,12 @@ export class CanonicalEventTranslator {
 			}),
 		];
 	}
+}
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+	if (value == null || typeof value !== "object" || Array.isArray(value)) {
+		return false;
+	}
+	const prototype = Object.getPrototypeOf(value);
+	return prototype === Object.prototype || prototype === null;
 }

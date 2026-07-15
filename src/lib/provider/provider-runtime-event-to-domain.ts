@@ -192,6 +192,7 @@ export function translateProviderRuntimeEventToDomain(
 					partId,
 					result: data["result"] ?? "",
 					duration: numberFieldValue(data["duration"]) ?? 0,
+					...(isRecord(data["metadata"]) ? { metadata: data["metadata"] } : {}),
 				},
 				eventOptions(event),
 			),
@@ -204,6 +205,18 @@ export function translateProviderRuntimeEventToDomain(
 				partId,
 			),
 		};
+	}
+
+	if (event.type === "file.attached") {
+		const partId = partIdFromData(event, data);
+		const filename = stringField(data["filename"]);
+		return singleEvent(event, state, "file.attached", {
+			messageId: messageIdForPart(event, data, state, partId),
+			partId,
+			mime: stringField(data["mime"]) ?? "",
+			...(filename != null ? { filename } : {}),
+			url: stringField(data["url"]) ?? "",
+		});
 	}
 
 	if (event.type === "turn.completed") {

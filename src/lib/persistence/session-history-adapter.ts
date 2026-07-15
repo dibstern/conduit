@@ -36,6 +36,24 @@ function parseObjectJson(value: string): Record<string, unknown> | undefined {
 }
 
 function partRowToHistoryPart(row: MessagePartRow): HistoryMessagePart {
+	if (row.type === "file") {
+		const metadata =
+			row.metadata != null ? parseObjectJson(row.metadata) : undefined;
+		return {
+			id: row.id,
+			type: "file",
+			...(typeof metadata?.["mime"] === "string"
+				? { mime: metadata["mime"] }
+				: {}),
+			...(typeof metadata?.["filename"] === "string"
+				? { filename: metadata["filename"] }
+				: {}),
+			...(typeof metadata?.["url"] === "string"
+				? { url: metadata["url"] }
+				: {}),
+		};
+	}
+
 	let state: NonNullable<HistoryMessagePart["state"]> | undefined;
 	if (
 		row.status != null ||
@@ -87,18 +105,16 @@ function partRowToHistoryPart(row: MessagePartRow): HistoryMessagePart {
  * into the HistoryMessage format expected by the frontend's session_switched
  * handler.
  *
- * Uses the over-fetch pattern: pass rows over-fetched by 1 (i.e. the query
- * was run with `limit = pageSize + 1`). This function detects `hasMore` by
- * checking `rows.length > pageSize`, then slices to `pageSize`.
+ * Uses all ascending rows from the read model to detect exact `hasMore`, then
+ * keeps the newest `pageSize` rows while preserving ascending display order.
  */
 export function messageRowsToHistory(
 	rows: MessageWithParts[],
 	opts: { pageSize: number },
 ): HistoryResult {
-	// Over-fetch detection: if rows.length > pageSize, there are more rows.
-	// Slice to pageSize before building messages.
+	// The read query returns oldest-to-newest; keep the tail for REST parity.
 	const hasMore = rows.length > opts.pageSize;
-	const pageRows = hasMore ? rows.slice(0, opts.pageSize) : rows;
+	const pageRows = hasMore ? rows.slice(rows.length - opts.pageSize) : rows;
 
 	const messages: HistoryMessage[] = pageRows.map((row) => {
 		const parts = row.parts.map(partRowToHistoryPart);

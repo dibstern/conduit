@@ -354,6 +354,103 @@ describe("OpenCode Runtime Ingress Projection (SSE → append → project → re
 		});
 	});
 
+	it("projects modern OpenCode message content without duplicating completion", async () => {
+		await ingestOk(
+			makeSSEEvent("message.updated", {
+				sessionID: SESSION_ID,
+				info: {
+					id: "user-msg-modern",
+					role: "user",
+					time: { created: 1000 },
+				},
+			}),
+		);
+		await ingestOk(
+			makeSSEEvent("message.part.updated", {
+				sessionID: SESSION_ID,
+				part: {
+					id: "user-part-modern",
+					sessionID: SESSION_ID,
+					messageID: "user-msg-modern",
+					type: "text",
+					text: "ping",
+				},
+			}),
+		);
+		await ingestOk(
+			makeSSEEvent("message.updated", {
+				sessionID: SESSION_ID,
+				info: {
+					id: "assistant-msg-modern",
+					role: "assistant",
+					time: { created: 2000 },
+				},
+			}),
+		);
+		await ingestOk(
+			makeSSEEvent("message.part.delta", {
+				sessionID: SESSION_ID,
+				messageID: "assistant-msg-modern",
+				partID: "assistant-part-modern",
+				field: "text",
+				delta: "po",
+			}),
+		);
+		await ingestOk(
+			makeSSEEvent("message.part.delta", {
+				sessionID: SESSION_ID,
+				messageID: "assistant-msg-modern",
+				partID: "assistant-part-modern",
+				field: "text",
+				delta: "n",
+			}),
+		);
+		await ingestOk(
+			makeSSEEvent("message.part.updated", {
+				sessionID: SESSION_ID,
+				part: {
+					id: "assistant-part-modern",
+					sessionID: SESSION_ID,
+					messageID: "assistant-msg-modern",
+					type: "text",
+					text: "pong",
+				},
+			}),
+		);
+		await ingestOk(
+			makeSSEEvent("message.updated", {
+				sessionID: SESSION_ID,
+				info: {
+					id: "assistant-msg-modern",
+					role: "assistant",
+					cost: 0.01,
+					tokens: { input: 10, output: 2 },
+					time: { created: 2000, completed: 2100 },
+				},
+			}),
+		);
+
+		const messages = await currentRuntime().runPromise(
+			Effect.gen(function* () {
+				const sql = yield* SqlClient.SqlClient;
+				return yield* sql<{ id: string; role: string; text: string }>`
+					SELECT id, role, text
+					FROM messages
+					WHERE session_id = ${SESSION_ID}
+					ORDER BY CASE WHEN role = 'user' THEN 0 ELSE 1 END, id`;
+			}),
+		);
+		expect(messages).toEqual([
+			{ id: "user-msg-modern", role: "user", text: "ping" },
+			{ id: "assistant-msg-modern", role: "assistant", text: "pong" },
+		]);
+
+		const stored = await readStored();
+		expect(
+			stored.filter((event) => event.type === "turn.completed"),
+		).toHaveLength(1);
+	});
+
 	it("projection errors are logged and surfaced while stored events remain durable", async () => {
 		await disposeRuntime();
 		await startRuntime([
