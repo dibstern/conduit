@@ -311,6 +311,20 @@ describe("decodeClaudeSDKMessage", () => {
 		}
 	});
 
+	it("accepts the SSE keepalive ping stream event", () => {
+		// Captured live 2026-07-15: the SDK passes the API's keepalive through
+		// as a stream_event; rejecting it killed the whole session stream
+		// consumer ("SDK stream ended without result").
+		const ping = {
+			type: "stream_event",
+			event: { type: "ping" },
+			parent_tool_use_id: null,
+			uuid: UUID,
+			session_id: SESSION_ID,
+		};
+		expect(() => decodeClaudeSDKMessage(ping)).not.toThrow();
+	});
+
 	it("rejects malformed fields that Conduit reads", () => {
 		const malformedMessages = [
 			{

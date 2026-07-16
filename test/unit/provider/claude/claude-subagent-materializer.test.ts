@@ -194,7 +194,8 @@ describe("Claude subagent materializer", () => {
 			childSessionId,
 			parentSessionId: "parent-session",
 			providerSessionId: "agent-abc",
-			title: "Explore Agent",
+			// Task description preferred over "<subagentType> Agent"
+			title: "Audit auth",
 			events: [
 				expect.objectContaining({
 					type: "message.created",

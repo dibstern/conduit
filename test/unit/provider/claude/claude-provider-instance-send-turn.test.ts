@@ -2495,7 +2495,12 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 		expect(result.error?.message).toContain("sink write failed");
 	});
 
-	it("fails malformed SDK stream data before translation", async () => {
+	it("skips malformed SDK stream messages instead of killing the stream", async () => {
+		// Captured live 2026-07-15: one unknown keepalive message failing
+		// decode killed the whole long-lived stream consumer, so the send
+		// died with "SDK stream ended without result". Vocabulary drift in a
+		// single message must not take down the session; the failure is
+		// logged (with truncated payload) and the message skipped.
 		const hugeProviderPayload = "x".repeat(20_000);
 		const malformedMessage = {
 			type: "system",
@@ -2503,7 +2508,7 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 			session_id: "sdk-session-1",
 			hugeProviderPayload,
 		} as unknown as SDKMessage;
-		const mockQuery = createMockQuery([malformedMessage]);
+		const mockQuery = createMockQuery([malformedMessage, makeSuccessResult()]);
 		queryFactorySpy = vi.fn(() => mockQuery);
 
 		const instance = new ClaudeProviderInstance({
@@ -2521,23 +2526,13 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 			),
 		);
 
-		expect(result.status).toBe("error");
-		expect(result.error?.code).toBe("provider_error");
-		expect(result.error?.message).toContain("Claude SDK message decode failed");
-		expect(result.error?.message).not.toContain("x".repeat(500));
+		// The malformed message is skipped; the turn completes from the
+		// messages that do decode.
+		expect(result.status).toBe("completed");
 
 		const pushCalls = (sink.push as ReturnType<typeof vi.fn>).mock
 			.calls as Array<[CanonicalEvent]>;
-		expect(pushCalls.map((call) => call[0].type)).not.toContain(
-			"session.status",
-		);
-		const errorEvents = pushCalls.filter(
-			(call) => call[0].type === "turn.error",
-		);
-		expect(errorEvents).toHaveLength(1);
-		const errorPayload = errorEvents[0]?.[0].data as { error?: string };
-		expect(errorPayload.error).toContain("Claude SDK message decode failed");
-		expect(errorPayload.error).not.toContain("x".repeat(500));
+		expect(pushCalls.map((call) => call[0].type)).not.toContain("turn.error");
 	});
 
 	it("fails an invalid constructed SDK user message before calling query", async () => {

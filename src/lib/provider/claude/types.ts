@@ -55,7 +55,12 @@ import type {
 // can extract it from SDKPartialAssistantMessage. This is a discriminated
 // union with type: 'message_start' | 'message_delta' | 'message_stop' |
 // 'content_block_start' | 'content_block_delta' | 'content_block_stop'.
-export type StreamEvent = SDKPartialAssistantMessage["event"];
+// The SDK's typings omit the SSE keepalive `ping` event, but the runtime
+// passes it through (observed live 2026-07-15); widen so handlers can ignore
+// it explicitly instead of failing decode.
+export type StreamEvent =
+	| SDKPartialAssistantMessage["event"]
+	| { readonly type: "ping" };
 
 // ─── System Message Subtypes ────────────────────────────────────────────
 // Multiple SDK types share `type: 'system'` but differ in `subtype`.
@@ -168,6 +173,11 @@ export interface ClaudeSessionContext {
 	lastAssistantUuid: string | undefined;
 	turnCount: number;
 	stopped: boolean;
+	/** Set when a user prompt is enqueued while the SDK's streaming turn is
+	 *  still open (no `result` arrives between queued sends). The next
+	 *  message_start then starts a fresh assistant message instead of merging
+	 *  the reply into the previous turn's message. */
+	pendingAssistantBoundary?: boolean;
 }
 
 /**

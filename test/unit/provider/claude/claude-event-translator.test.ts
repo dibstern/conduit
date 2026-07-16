@@ -1050,7 +1050,10 @@ describe("ClaudeEventTranslator", () => {
 
 	// ─── 10. stream_event (content_block_stop) ───────────────────────────
 
-	it("translates content_block_stop to tool.completed for text blocks", async () => {
+	it("clears text blocks on content_block_stop without emitting tool events", async () => {
+		// The tool.completed this used to emit carried the text part's own
+		// uuid as messageId, which the ingress pipeline expanded into a
+		// phantom "Unknown" tool plus an empty assistant message row.
 		// Start a text block
 		await runTranslate(
 			translator,
@@ -1074,8 +1077,10 @@ describe("ClaudeEventTranslator", () => {
 			}),
 		);
 
-		const completed = sink.events.filter((e) => e.type === "tool.completed");
-		expect(completed).toHaveLength(1);
+		const toolEvents = sink.events.filter(
+			(e) => e.type === "tool.completed" || e.type === "tool.started",
+		);
+		expect(toolEvents).toHaveLength(0);
 		expect(ctx.inFlightTools.has(0)).toBe(false);
 	});
 

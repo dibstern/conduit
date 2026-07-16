@@ -118,7 +118,7 @@ type ClaudeSDKReadStreamEvent =
 			readonly delta: ClaudeSDKReadStreamDelta;
 	  }
 	| { readonly type: "content_block_stop"; readonly index: number }
-	| { readonly type: "message_delta" | "message_stop" };
+	| { readonly type: "message_delta" | "message_stop" | "ping" };
 
 function isUnknownRecord(value: unknown): value is Record<string, unknown> {
 	return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -203,6 +203,8 @@ function isClaudeSDKReadStreamEvent(
 			return typeof value["index"] === "number";
 		case "message_delta":
 		case "message_stop":
+		// SSE keepalive passed through by the SDK; carries no content.
+		case "ping":
 			return true;
 		default:
 			return false;

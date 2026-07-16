@@ -239,8 +239,15 @@ export class ClaudeEventTranslator {
 		return `claude-part-${this.partIdCounter++}`;
 	}
 
-	private contentBlockKey(messageId: string, index: number): string {
-		return `${messageId}:${index}`;
+	private contentBlockKey(
+		messageId: string,
+		index: number,
+		type: ReadableContentBlockType,
+	): string {
+		// Type-scoped: the SDK's per-block assistant snapshots index their
+		// content array independently of the wire content_block index, so a
+		// text block can land on an index the stream used for thinking.
+		return `${messageId}:${index}:${type}`;
 	}
 
 	private getOrCreateContentBlockState(
@@ -249,9 +256,9 @@ export class ClaudeEventTranslator {
 		type: ReadableContentBlockType,
 		partId: string,
 	): ContentBlockState {
-		const key = this.contentBlockKey(messageId, index);
+		const key = this.contentBlockKey(messageId, index, type);
 		const existing = this.contentBlockStates.get(key);
-		if (existing?.type === type) return existing;
+		if (existing) return existing;
 
 		const state: ContentBlockState = {
 			type,
@@ -263,6 +270,27 @@ export class ClaudeEventTranslator {
 		};
 		this.contentBlockStates.set(key, state);
 		return state;
+	}
+
+	/** Find the streamed state an assistant-snapshot block corresponds to.
+	 *  Snapshot content-array indexes don't line up with wire content_block
+	 *  indexes (per-block snapshots restart at 0), so match by message, type,
+	 *  and text prefix instead — the snapshot text extends what streamed. */
+	private findSnapshotBlockState(
+		messageId: string,
+		type: ReadableContentBlockType,
+		text: string,
+	): ContentBlockState | undefined {
+		const prefix = `${messageId}:`;
+		let best: ContentBlockState | undefined;
+		for (const [key, state] of this.contentBlockStates) {
+			if (!key.startsWith(prefix) || state.type !== type) continue;
+			if (!text.startsWith(state.text) && !state.text.startsWith(text)) {
+				continue;
+			}
+			if (!best || state.text.length > best.text.length) best = state;
+		}
+		return best;
 	}
 
 	private assistantSnapshotMessageId(message: SDKAssistantMessage): string {
@@ -295,14 +323,26 @@ export class ClaudeEventTranslator {
 			readonly complete?: boolean;
 		},
 	): Effect.Effect<void, unknown> {
-		return Effect.gen(this, function* () {
-			const state = this.getOrCreateContentBlockState(
-				input.messageId,
-				input.index,
-				input.type,
-				input.partId,
-			);
+		const state = this.getOrCreateContentBlockState(
+			input.messageId,
+			input.index,
+			input.type,
+			input.partId,
+		);
+		return this.emitTextSuffixForState(ctx, state, input);
+	}
 
+	private emitTextSuffixForState(
+		ctx: ClaudeSessionContext,
+		state: ContentBlockState,
+		input: {
+			readonly messageId: string;
+			readonly type: ReadableContentBlockType;
+			readonly text: string;
+			readonly complete?: boolean;
+		},
+	): Effect.Effect<void, unknown> {
+		return Effect.gen(this, function* () {
 			if (input.type === "thinking" && !state.started) {
 				yield* this.push(
 					ctx,
@@ -777,7 +817,10 @@ export class ClaudeEventTranslator {
 		ctx: ClaudeSessionContext,
 		message: SDKPartialAssistantMessage,
 	): Effect.Effect<void, unknown> {
-		const event = message.event; // Typed: BetaRawMessageStreamEvent
+		// Cast: StreamEvent widens the SDK typing with the `ping` keepalive
+		// the runtime really does pass through but the SDK's types omit
+		// (plain annotation would be flow-narrowed back to the SDK type).
+		const event = message.event as StreamEvent;
 
 		switch (event.type) {
 			case "message_start":
@@ -790,6 +833,7 @@ export class ClaudeEventTranslator {
 				return this.handleBlockStop(ctx, event);
 			case "message_delta":
 			case "message_stop":
+			case "ping":
 				// No action needed for these event types
 				return Effect.void;
 		}
@@ -809,7 +853,19 @@ export class ClaudeEventTranslator {
 			// back to its own per-block UUID — creating dozens of separate messages
 			// in the persistence layer instead of one cohesive assistant message.
 			const msgId = event.message.id;
-			if (msgId && !this.currentAssistantMessageId) {
+			// A queued prompt was enqueued mid-turn (the SDK keeps one streaming
+			// turn open across queued sends, so no `result` reset happens): the
+			// next API round answers the queued message — start a fresh
+			// assistant message instead of merging into the previous one.
+			const boundary =
+				ctx.pendingAssistantBoundary === true &&
+				Boolean(msgId) &&
+				msgId !== this.currentAssistantMessageId;
+			if (boundary) {
+				ctx.pendingAssistantBoundary = false;
+				this.contentBlockStates.clear();
+			}
+			if (msgId && (boundary || !this.currentAssistantMessageId)) {
 				this.currentAssistantMessageId = msgId;
 				// Emit message.created so MessageProjector creates the row
 				// and TurnProjector can link the turn to its assistant message.
@@ -860,16 +916,11 @@ export class ClaudeEventTranslator {
 			}
 
 			if (tool.toolName === "__text") {
+				// Plain text blocks need no completion event. The tool.completed
+				// this used to emit carried the part's own uuid as messageId,
+				// which the ingress pipeline expanded into a phantom "Unknown"
+				// tool plus a phantom empty assistant message row.
 				ctx.inFlightTools.delete(index);
-				yield* this.push(
-					ctx,
-					makeProviderRuntimeEvent("tool.completed", ctx.sessionId, {
-						messageId: tool.itemId,
-						partId: `part-stop-${index}`,
-						result: null,
-						duration: 0,
-					}),
-				);
 				return;
 			}
 
@@ -1072,9 +1123,18 @@ export class ClaudeEventTranslator {
 		return Effect.gen(this, function* () {
 			ctx.lastAssistantUuid = message.uuid;
 
-			const messageId = this.currentAssistantMessageId
-				? this.currentAssistantMessageId
-				: this.assistantSnapshotMessageId(message);
+			const snapshotId = this.assistantSnapshotMessageId(message);
+			let messageId: string;
+			if (
+				ctx.pendingAssistantBoundary === true &&
+				snapshotId !== this.currentAssistantMessageId
+			) {
+				ctx.pendingAssistantBoundary = false;
+				this.contentBlockStates.clear();
+				messageId = snapshotId;
+			} else {
+				messageId = this.currentAssistantMessageId || snapshotId;
+			}
 			this.currentAssistantMessageId = messageId;
 
 			const content = message.message.content;
@@ -1091,15 +1151,26 @@ export class ClaudeEventTranslator {
 
 			yield* this.pushMessageCreated(ctx, messageId);
 
+			// Snapshot content-array indexes are NOT the wire content_block
+			// indexes (per-block snapshots restart at 0), so resolve each block
+			// to its streamed state by type + text prefix. Only when nothing
+			// streamed (partial messages off or missed) does the snapshot mint
+			// its own part.
 			for (const [index, block] of content.entries()) {
 				if (!isRecord(block)) continue;
 				if (block["type"] === "text" && typeof block["text"] === "string") {
 					if (block["text"].length === 0) continue;
-					yield* this.emitTextSuffix(ctx, {
+					const state =
+						this.findSnapshotBlockState(messageId, "text", block["text"]) ??
+						this.getOrCreateContentBlockState(
+							messageId,
+							index,
+							"text",
+							`${messageId}-${index}`,
+						);
+					yield* this.emitTextSuffixForState(ctx, state, {
 						messageId,
-						index,
 						type: "text",
-						partId: `${messageId}-${index}`,
 						text: block["text"],
 					});
 					continue;
@@ -1108,15 +1179,23 @@ export class ClaudeEventTranslator {
 					block["type"] === "thinking" &&
 					typeof block["thinking"] === "string"
 				) {
-					const existing = this.contentBlockStates.get(
-						this.contentBlockKey(messageId, index),
+					const existing = this.findSnapshotBlockState(
+						messageId,
+						"thinking",
+						block["thinking"],
 					);
 					if (block["thinking"].length === 0 && !existing) continue;
-					yield* this.emitTextSuffix(ctx, {
+					const state =
+						existing ??
+						this.getOrCreateContentBlockState(
+							messageId,
+							index,
+							"thinking",
+							`${messageId}-${index}`,
+						);
+					yield* this.emitTextSuffixForState(ctx, state, {
 						messageId,
-						index,
 						type: "thinking",
-						partId: `${messageId}-${index}`,
 						text: block["thinking"],
 						complete: true,
 					});

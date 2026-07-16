@@ -134,9 +134,14 @@ export function makeClaudeSubagentMaterializer(deps: {
 						),
 					catch: (cause) => cause,
 				});
-				const title = task?.subagentType
-					? `${capitalize(task.subagentType)} Agent`
-					: "Claude Subagent";
+				// Prefer the Task's human description — the raw subagent type is
+				// an internal identifier (e.g. "local_agent") and reads as noise
+				// in the session sidebar.
+				const title =
+					task?.description ??
+					(task?.subagentType
+						? `${capitalize(task.subagentType)} Agent`
+						: "Claude Subagent");
 
 				yield* deps.persist.persistClaudeSubagent({
 					childSessionId,

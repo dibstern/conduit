@@ -160,7 +160,15 @@ function createClaudeSubagentTranscriptCursor(): ClaudeSubagentTranscriptCursor 
 	};
 }
 
-function claudeSubagentTitle(subagentType: string | undefined): string {
+/** Prefer the Task's human description ("Audit auth flow") — the raw
+ *  subagent type is an internal identifier (e.g. "local_agent") and reads
+ *  as noise in the session sidebar. */
+function claudeSubagentTitle(task?: {
+	readonly description?: string;
+	readonly subagentType?: string;
+}): string {
+	if (task?.description) return task.description;
+	const subagentType = task?.subagentType;
 	if (!subagentType) return "Claude Subagent";
 	const first = subagentType[0]?.toUpperCase() ?? "";
 	return `${first}${subagentType.slice(1)} Agent`;
@@ -948,11 +956,15 @@ export class ClaudeProviderRuntime {
 			ctx.currentTurnId = input.turnId;
 			ctx.eventSink = input.eventSink;
 
-			// Build and enqueue the user message.
+			// Build and enqueue the user message. Mark the assistant-message
+			// boundary: if the SDK's streaming turn is still open (queued send),
+			// no `result` will reset the translator, and without the marker the
+			// reply to this prompt would merge into the previous turn's message.
 			const userMessage = yield* Effect.try({
 				try: () => validateUserMessage(this.buildUserMessage(input)),
 				catch: (cause) => cause,
 			});
+			ctx.pendingAssistantBoundary = true;
 			yield* ctx.promptQueue.enqueue(userMessage);
 
 			return yield* Deferred.await(deferred);
@@ -1068,10 +1080,21 @@ export class ClaudeProviderRuntime {
 				});
 				if (next.done) break;
 
+				// A single message failing decode (SDK vocabulary drift) must not
+				// kill the long-lived stream consumer — that turned one unknown
+				// keepalive into "SDK stream ended without result" for the whole
+				// session. Skip it; decodeProviderMessage already logged payload.
 				const decodedMessage = yield* Effect.try({
 					try: () => decodeProviderMessage(next.value),
 					catch: (cause) => cause,
-				});
+				}).pipe(
+					Effect.catchAll((cause) =>
+						cause instanceof ClaudeSDKDecodeError
+							? Effect.succeed(undefined)
+							: Effect.fail(cause),
+					),
+				);
+				if (decodedMessage === undefined) continue;
 				if (
 					yield* this.pushForwardedSubagentMessageEffect(ctx, decodedMessage)
 				) {
@@ -1301,7 +1324,7 @@ export class ClaudeProviderRuntime {
 					childSessionId,
 					parentSessionId: ctx.sessionId,
 					providerSessionId: message.task_id,
-					title: claudeSubagentTitle(task?.subagentType),
+					title: claudeSubagentTitle(task),
 				}).pipe(
 					Effect.as(true),
 					Effect.catchAll((err) =>
