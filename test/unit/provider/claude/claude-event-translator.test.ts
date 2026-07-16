@@ -2,7 +2,7 @@
 
 import type { SDKTaskStartedMessage } from "@anthropic-ai/claude-agent-sdk";
 import { Effect, Schema } from "effect";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
 	type ProviderRuntimeEvent,
 	ProviderRuntimeEventSchema,
@@ -25,6 +25,7 @@ import type {
 import { createRelayEventSink } from "../../../../src/lib/provider/relay-event-sink.js";
 import type { EventSink } from "../../../../src/lib/provider/types.js";
 import { createTestHarness } from "../../../helpers/persistence-factories.js";
+import { assertProviderRuntimeStreamInvariants } from "../../../helpers/provider-runtime-stream-invariants.js";
 
 // ─── Test Helpers ─────────────────────────────────────────────────────────
 
@@ -98,10 +99,21 @@ function makeStreamEvent(event: Record<string, unknown>): SDKMessage {
 	} as unknown as SDKMessage;
 }
 
+// Tools seeded into ctx.inFlightTools before the first translate call opened
+// mid-turn — their tool.started happened "before the test window". Snapshot
+// them so the afterEach invariant check doesn't flag their running/completed
+// events as orphans. Captured on the FIRST call only: tools the translator
+// itself registers mid-stream must still earn a real tool.started.
+let seededToolPartIds: Set<string> | null = null;
+
 function runTranslate(
 	translator: ClaudeEventTranslator,
 	...args: Parameters<ClaudeEventTranslator["translate"]>
 ): Promise<void> {
+	const [ctx] = args;
+	seededToolPartIds ??= new Set(
+		[...ctx.inFlightTools.values()].map((tool) => tool.itemId),
+	);
 	return Effect.runPromise(translator.translate(...args));
 }
 
@@ -168,8 +180,18 @@ describe("ClaudeEventTranslator", () => {
 	beforeEach(() => {
 		sink = makeStubSink();
 		ctx = makeCtx();
+		seededToolPartIds = null;
 		translator = new ClaudeEventTranslator({
 			getSink: () => sink,
+		});
+	});
+
+	// Scenario assertions above say what should happen; this says what must
+	// never happen (phantom tools, self-minted messageIds, malformed
+	// envelopes) — across every scenario in this file.
+	afterEach(() => {
+		assertProviderRuntimeStreamInvariants(sink.events, {
+			preStartedToolPartIds: seededToolPartIds ?? [],
 		});
 	});
 

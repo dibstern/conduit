@@ -18,7 +18,7 @@
 //   starts a fresh assistant message.
 
 import { Effect } from "effect";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ProviderRuntimeEvent } from "../../../../src/lib/contracts/providers/provider-runtime-event.js";
 import { ClaudeEventTranslator } from "../../../../src/lib/provider/claude/claude-event-translator.js";
 import type {
@@ -26,6 +26,7 @@ import type {
 	SDKMessage,
 } from "../../../../src/lib/provider/claude/types.js";
 import type { EventSink } from "../../../../src/lib/provider/types.js";
+import { assertProviderRuntimeStreamInvariants } from "../../../helpers/provider-runtime-stream-invariants.js";
 
 function dataOf(event: ProviderRuntimeEvent): Record<string, unknown> {
 	return event.data as unknown as Record<string, unknown>;
@@ -114,6 +115,10 @@ describe("assistant snapshot vs stream dedupe", () => {
 		sink = makeStubSink();
 		ctx = makeCtx();
 		translator = new ClaudeEventTranslator({ getSink: () => sink });
+	});
+
+	afterEach(() => {
+		assertProviderRuntimeStreamInvariants(sink.events);
 	});
 
 	async function feed(...messages: SDKMessage[]): Promise<void> {

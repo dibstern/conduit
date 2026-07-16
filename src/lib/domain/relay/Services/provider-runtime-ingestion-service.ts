@@ -69,6 +69,26 @@ export const makeProviderRuntimeIngestionLive = (
 								event,
 								nextState,
 							);
+							// The mapper synthesizes a tool.started for an orphan
+							// tool.completed so the UI can render something — but an
+							// orphan means an upstream translator broke the tool
+							// lifecycle (2026-07-15: a phantom "Unknown" tool card).
+							// Surface it loudly instead of laundering it silently.
+							const synthesized =
+								event.type === "tool.completed" &&
+								result.events.some((domain) => domain.type === "tool.started");
+							if (synthesized) {
+								yield* Effect.logWarning(
+									"ingress synthesized tool.started for orphan tool.completed — upstream translator emitted completed without started",
+								).pipe(
+									Effect.annotateLogs({
+										providerId: event.providerId,
+										sessionId: event.sessionId,
+										eventId: event.eventId,
+										data: JSON.stringify(event.data),
+									}),
+								);
+							}
 							domainEvents.push(...result.events);
 							nextState = result.state;
 						}

@@ -234,6 +234,7 @@ export class ClaudeEventTranslator {
 	private partIdCounter = 0;
 	private bufferedWrites: Effect.Effect<void, unknown>[] | undefined;
 	private contentBlockStates = new Map<string, ContentBlockState>();
+	private announcedMessageIds = new Set<string>();
 
 	private nextPartId(): string {
 		return `claude-part-${this.partIdCounter++}`;
@@ -298,18 +299,29 @@ export class ClaudeEventTranslator {
 		return typeof id === "string" && id.length > 0 ? id : message.uuid;
 	}
 
+	/** Announce an assistant message, exactly once per turn. Every content
+	 *  event must be preceded by message.created for its messageId — content
+	 *  attributed to an unannounced id only renders via the projector's
+	 *  defensive message insert, which is how the 2026-07-15 phantom empty
+	 *  assistant row materialized. */
 	private pushMessageCreated(
 		ctx: ClaudeSessionContext,
 		messageId: string,
 	): Effect.Effect<void, unknown> {
-		return this.push(
-			ctx,
-			makeProviderRuntimeEvent("message.created", ctx.sessionId, {
-				messageId,
-				role: "assistant",
-				sessionId: ctx.sessionId,
-			}),
-		);
+		return Effect.suspend(() => {
+			if (messageId.length === 0 || this.announcedMessageIds.has(messageId)) {
+				return Effect.void;
+			}
+			this.announcedMessageIds.add(messageId);
+			return this.push(
+				ctx,
+				makeProviderRuntimeEvent("message.created", ctx.sessionId, {
+					messageId,
+					role: "assistant",
+					sessionId: ctx.sessionId,
+				}),
+			);
+		});
 	}
 
 	private emitTextSuffix(
@@ -343,6 +355,8 @@ export class ClaudeEventTranslator {
 		},
 	): Effect.Effect<void, unknown> {
 		return Effect.gen(this, function* () {
+			yield* this.pushMessageCreated(ctx, input.messageId);
+
 			if (input.type === "thinking" && !state.started) {
 				yield* this.push(
 					ctx,
@@ -391,6 +405,7 @@ export class ClaudeEventTranslator {
 		this.partIdCounter = 0;
 		this.currentAssistantMessageId = "";
 		this.contentBlockStates.clear();
+		this.announcedMessageIds.clear();
 	}
 
 	constructor(private readonly deps: ClaudeEventTranslatorDeps) {}
@@ -1331,6 +1346,7 @@ export class ClaudeEventTranslator {
 					result.uuid ?? `claude-result-${ctx.sessionId}-${Date.now()}`;
 				this.currentAssistantMessageId = resultUuid;
 				ctx.lastAssistantUuid = resultUuid;
+				yield* this.pushMessageCreated(ctx, resultUuid);
 				yield* this.push(
 					ctx,
 					makeProviderRuntimeEvent("text.delta", ctx.sessionId, {
