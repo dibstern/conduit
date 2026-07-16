@@ -1069,14 +1069,6 @@ export function handleDone(
 		if (mutated) setMessages(messages, patched);
 	}
 
-	activity.turnEpoch++;
-	chatState.turnEpoch = activity.turnEpoch;
-	log.debug(
-		"handleDone turnEpoch=%d currentMessageId=%s phase=%s",
-		activity.turnEpoch,
-		activity.currentMessageId,
-		activity.phase,
-	);
 	// NOTE: currentMessageId is intentionally NOT reset here. It must
 	// persist so that advanceTurnIfNewMessage can compare the next turn's
 	// messageId against it. Resetting to null makes every post-done turn
@@ -1088,6 +1080,26 @@ export function handleDone(
 	// phase to "idle" synchronously, so when the batched effect fires,
 	// isProcessing() is false and the guard skips the scroll.
 	requestScrollOnNextContent();
+	finalizeTurn(activity, "done");
+}
+
+/** The single turn-end choke point. EVERY path that ends a turn — done,
+ *  non-RETRY error, server-authoritative idle — must funnel through here.
+ *  The turnEpoch bump is what releases user messages from the "Queued"
+ *  shimmer (`turnEpoch <= sentDuringEpoch`); a turn-ending path that skips
+ *  it leaves queued messages shimmering forever (the 2026-07-15 bug, where
+ *  only handleDone bumped). Do not bump the epoch or call phaseToIdle
+ *  directly from a new turn-ending handler — call this. */
+function finalizeTurn(activity: SessionActivity, source: string): void {
+	activity.turnEpoch++;
+	chatState.turnEpoch = activity.turnEpoch;
+	log.debug(
+		"finalizeTurn source=%s turnEpoch=%d currentMessageId=%s phase=%s",
+		source,
+		activity.turnEpoch,
+		activity.currentMessageId,
+		activity.phase,
+	);
 	phaseToIdle(activity);
 }
 
@@ -1138,8 +1150,16 @@ export function handleStatus(
 			flushAndFinalizeAssistant(activity, messages);
 		}
 
-		// 2. Set phase to idle
-		phaseToIdle(activity);
+		// 2. End the turn. If a turn was live (processing/streaming), this is
+		// a turn-ending path like done/error — it must go through finalizeTurn
+		// or user messages queued into the dead turn shimmer forever (e.g. a
+		// turn that died without done/error, surfaced only by reconnect).
+		// A redundant idle while already idle is not a turn end — no bump.
+		if (activity.phase !== "idle") {
+			finalizeTurn(activity, "status-idle");
+		} else {
+			phaseToIdle(activity);
+		}
 
 		// 3. Clear in-flight state
 		activity.currentMessageId = null;
@@ -1242,11 +1262,8 @@ export function handleError(
 		// isProcessing guard that the content-change effect relies on.
 		requestScrollOnNextContent();
 		addSystemMessage(activity, messages, message, "error", errorMeta);
-		// The turn is over. Bump turnEpoch like handleDone does, or user
-		// messages sent during the dead turn shimmer "Queued" forever.
-		activity.turnEpoch++;
-		chatState.turnEpoch = activity.turnEpoch;
-		phaseToIdle(activity);
+		// The turn is over — a non-RETRY error terminates it just like done.
+		finalizeTurn(activity, "error");
 	}
 }
 

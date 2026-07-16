@@ -52,6 +52,7 @@ import {
 	handleDelta,
 	handleDone,
 	handleError,
+	handleStatus,
 	isStreaming,
 	type SessionActivity,
 	type SessionMessages,
@@ -157,6 +158,49 @@ describe("turnEpoch tracking", () => {
 			(m): m is UserMessage => m.type === "user",
 		);
 		expect(after && isVisuallyQueued(after)).toBe(false);
+	});
+
+	it("increments when the server declares idle over a live turn", () => {
+		// The third turn-ending path besides done and error: a turn that dies
+		// without either (daemon restart, lost events) surfaces as an
+		// authoritative status:idle. It must clear queued shimmers like done.
+		handleDelta(ta, tm, {
+			type: "delta",
+			sessionId: "test-session",
+			text: "partial",
+		});
+		addUserMessage(ta, tm, "queued while processing", undefined, true);
+		const queued = chatState.messages.find(
+			(m): m is UserMessage => m.type === "user",
+		);
+		expect(queued && isVisuallyQueued(queued)).toBe(true);
+
+		handleStatus(ta, tm, {
+			type: "status",
+			sessionId: "test-session",
+			status: "idle",
+		});
+
+		const after = chatState.messages.find(
+			(m): m is UserMessage => m.type === "user",
+		);
+		expect(after && isVisuallyQueued(after)).toBe(false);
+	});
+
+	it("does not advance the epoch on redundant idle statuses", () => {
+		// Periodic/reconnect status:idle while already idle is not a turn end.
+		const before = chatState.turnEpoch;
+		handleStatus(ta, tm, {
+			type: "status",
+			sessionId: "test-session",
+			status: "idle",
+		});
+		handleStatus(ta, tm, {
+			type: "status",
+			sessionId: "test-session",
+			status: "idle",
+		});
+		expect(chatState.turnEpoch).toBe(before);
 	});
 
 	it("does not advance the epoch on RETRY notices", () => {
