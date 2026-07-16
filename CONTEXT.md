@@ -63,6 +63,8 @@ _Avoid_: Conduit-invented permission scope
 - A **Provider Contract** defines what Conduit accepts from and sends to a **Provider Runtime**.
 - A **Provider Model Catalog** belongs to the provider runtime; Conduit may cache or display it, but should not redefine which provider model is latest.
 - A **Provider Envelope** should be runtime-decoded before adapter translation.
+- A **Provider Envelope** that fails decode on a *stream* boundary is skipped and logged; it must not terminate the provider runtime's stream consumer or fail the turn (ADR-0001).
+- A **Provider Contract** is pinned by captured wire traffic — **Runtime Trace** replay fixtures — not by SDK type declarations alone; on SDK upgrades, reconcile against a fresh capture (ADR-0002).
 - A **Provider-Owned Payload** may remain opaque when Conduit does not read its internal fields.
 - A **Provider Runtime Event** may be translated into a stored canonical event, but must not itself become the event store contract.
 - A **Provider Runtime Event** carries **Provider-Owned Payload** under event data, not as a whole SDK message tunneled through raw-source metadata.
