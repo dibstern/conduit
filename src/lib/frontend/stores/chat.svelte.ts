@@ -1242,6 +1242,10 @@ export function handleError(
 		// isProcessing guard that the content-change effect relies on.
 		requestScrollOnNextContent();
 		addSystemMessage(activity, messages, message, "error", errorMeta);
+		// The turn is over. Bump turnEpoch like handleDone does, or user
+		// messages sent during the dead turn shimmer "Queued" forever.
+		activity.turnEpoch++;
+		chatState.turnEpoch = activity.turnEpoch;
 		phaseToIdle(activity);
 	}
 }

@@ -51,6 +51,7 @@ import {
 	clearMessages,
 	handleDelta,
 	handleDone,
+	handleError,
 	isStreaming,
 	type SessionActivity,
 	type SessionMessages,
@@ -128,6 +129,50 @@ describe("turnEpoch tracking", () => {
 
 		handleDone(ta, tm, { type: "done", sessionId: "test-session", code: 0 });
 		expect(chatState.turnEpoch).toBe(1);
+	});
+
+	it("increments when a turn dies with a prominent error", () => {
+		// Captured 2026-07-15: a queued send died with SEND_FAILED and the
+		// user message shimmered "Queued" forever — only handleDone advanced
+		// the epoch, and errored turns never reach it.
+		handleDelta(ta, tm, {
+			type: "delta",
+			sessionId: "test-session",
+			text: "partial",
+		});
+		addUserMessage(ta, tm, "queued while processing", undefined, true);
+		const queued = chatState.messages.find(
+			(m): m is UserMessage => m.type === "user",
+		);
+		expect(queued && isVisuallyQueued(queued)).toBe(true);
+
+		handleError(ta, tm, {
+			type: "error",
+			sessionId: "test-session",
+			code: "SEND_FAILED",
+			message: "Provider instance sendTurn failed",
+		});
+
+		const after = chatState.messages.find(
+			(m): m is UserMessage => m.type === "user",
+		);
+		expect(after && isVisuallyQueued(after)).toBe(false);
+	});
+
+	it("does not advance the epoch on RETRY notices", () => {
+		handleDelta(ta, tm, {
+			type: "delta",
+			sessionId: "test-session",
+			text: "partial",
+		});
+		const before = chatState.turnEpoch;
+		handleError(ta, tm, {
+			type: "error",
+			sessionId: "test-session",
+			code: "RETRY",
+			message: "Retrying (attempt 1/3)",
+		});
+		expect(chatState.turnEpoch).toBe(before);
 	});
 
 	it("increments for each turn", () => {
