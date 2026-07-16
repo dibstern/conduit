@@ -93,6 +93,7 @@ import {
 } from "./claude-translation-service.js";
 import { makeEffectPromptQueue } from "./effect-prompt-queue.js";
 import { serializePriorConversation } from "./history-transcript.js";
+import { captureClaudeSdkMessage } from "./sdk-trace-capture.js";
 import type {
 	ClaudeSessionContext,
 	ClaudeSubagentLivePoller,
@@ -1079,6 +1080,7 @@ export class ClaudeProviderRuntime {
 					catch: (cause) => cause,
 				});
 				if (next.done) break;
+				captureClaudeSdkMessage(ctx.sessionId, next.value);
 
 				// A single message failing decode (SDK vocabulary drift) must not
 				// kill the long-lived stream consumer — that turned one unknown
