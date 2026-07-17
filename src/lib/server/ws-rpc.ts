@@ -5,8 +5,12 @@ import { DirectoryListingServiceTag } from "../domain/relay/Services/directory-l
 import { InstanceManagementServiceTag } from "../domain/relay/Services/instance-management-service.js";
 import { ProjectManagementServiceTag } from "../domain/relay/Services/project-management-service.js";
 import { ScanServiceTag } from "../domain/relay/Services/scan-service.js";
-import { WebSocketHandlerTag } from "../domain/relay/Services/services.js";
+import {
+	LoggerTag,
+	WebSocketHandlerTag,
+} from "../domain/relay/Services/services.js";
 import { SessionManagerServiceTag } from "../domain/relay/Services/session-manager-service.js";
+import { setPermissionMode } from "../domain/relay/Services/session-overrides-state.js";
 import { OpenCodeTerminalServiceTag } from "../domain/relay/Services/terminal-service.js";
 import { switchContextWindowForSession } from "../handlers/context-window.js";
 import {
@@ -112,6 +116,8 @@ export {
 	type SwitchContextWindowResponse,
 	SwitchModel,
 	type SwitchModelResponse,
+	SwitchPermissionMode,
+	type SwitchPermissionModeResponse,
 	SwitchVariant,
 	type SwitchVariantResponse,
 	SyncInputDraft,
@@ -603,6 +609,20 @@ export const WsRpcServerLayer = WsRpcGroup.toLayer({
 				),
 			),
 		),
+	SwitchPermissionMode: (request) =>
+		Effect.gen(function* () {
+			const wsHandler = yield* WebSocketHandlerTag;
+			const log = yield* LoggerTag;
+			yield* setPermissionMode(request.sessionId, request.mode);
+			wsHandler.sendToSession(request.sessionId, {
+				type: "permission_mode_info",
+				mode: request.mode,
+			});
+			log.info(
+				`client=${request.originId ?? "rpc"} session=${request.sessionId} Switched permission mode to: ${request.mode}`,
+			);
+			return { projectSlug: request.projectSlug, mode: request.mode };
+		}),
 	GetFileTree: (request) =>
 		getFileTreeEntries().pipe(
 			Effect.map((entries) => ({

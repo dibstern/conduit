@@ -1,6 +1,7 @@
 import { Socket } from "@effect/platform";
 import { RpcClient, RpcSerialization } from "@effect/rpc";
 import { Effect } from "effect";
+import type { SessionPermissionMode } from "../../shared-types.js";
 import { runTransportEffect } from "./runtime.js";
 import {
 	type CreateSessionResponse,
@@ -30,6 +31,7 @@ import {
 	type SetDefaultModelResponse,
 	type SwitchContextWindowResponse,
 	type SwitchModelResponse,
+	type SwitchPermissionModeResponse,
 	type SwitchVariantResponse,
 	WsRpcGroup,
 } from "./ws-rpc.js";
@@ -252,6 +254,13 @@ export interface SwitchVariantRpcInput {
 	readonly projectSlug: string;
 	readonly sessionId: string;
 	readonly variant: string;
+	readonly originId?: string;
+}
+
+export interface SwitchPermissionModeRpcInput {
+	readonly projectSlug: string;
+	readonly sessionId: string;
+	readonly mode: SessionPermissionMode;
 	readonly originId?: string;
 }
 
@@ -901,6 +910,24 @@ const callSwitchVariant = (input: SwitchVariantRpcInput) =>
 		Effect.provide(RpcSerialization.layerJson),
 	);
 
+const callSwitchPermissionMode = (input: SwitchPermissionModeRpcInput) =>
+	Effect.scoped(
+		Effect.gen(function* () {
+			const client = yield* RpcClient.make(WsRpcGroup);
+			return yield* client.SwitchPermissionMode({
+				projectSlug: input.projectSlug,
+				sessionId: input.sessionId,
+				mode: input.mode,
+				...(input.originId ? { originId: input.originId } : {}),
+			});
+		}),
+	).pipe(
+		Effect.provide(RpcClient.layerProtocolSocket()),
+		Effect.provide(Socket.layerWebSocket(makeWsRpcUrl(input.projectSlug))),
+		Effect.provide(Socket.layerWebSocketConstructorGlobal),
+		Effect.provide(RpcSerialization.layerJson),
+	);
+
 const callListSessions = (input: ListSessionsRpcInput) =>
 	Effect.scoped(
 		Effect.gen(function* () {
@@ -1217,6 +1244,12 @@ export async function switchVariantRpc(
 	input: SwitchVariantRpcInput,
 ): Promise<SwitchVariantResponse> {
 	return await runTransportEffect(callSwitchVariant(input));
+}
+
+export async function switchPermissionModeRpc(
+	input: SwitchPermissionModeRpcInput,
+): Promise<SwitchPermissionModeResponse> {
+	return await runTransportEffect(callSwitchPermissionMode(input));
 }
 
 export async function listSessionsRpc(

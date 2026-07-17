@@ -15,6 +15,7 @@ import {
 	getDefaultModel,
 	getDefaultVariant,
 	getModel,
+	getPermissionMode,
 	getVariant,
 	type ModelOverride,
 	type OverridesStateTag,
@@ -485,6 +486,9 @@ export const getModelsResponse = (
 				contextWindow: currentContextWindow,
 				options: findContextWindowOptions(providers, activeModel?.modelID),
 			},
+			permissionMode: activeId
+				? yield* getPermissionMode(activeId)
+				: ("ask" as const),
 		};
 	});
 

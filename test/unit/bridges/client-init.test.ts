@@ -164,6 +164,10 @@ describe("handleClientConnectedEffect — empty projected history", () => {
 				hasMore: false,
 			},
 		});
+		expect(wsHandler.sendTo).toHaveBeenCalledWith("client-1", {
+			type: "permission_mode_info",
+			mode: "ask",
+		});
 	});
 
 	it("keeps empty history for a requested Claude session", async () => {

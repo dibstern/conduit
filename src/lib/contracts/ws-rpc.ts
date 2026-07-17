@@ -1,5 +1,6 @@
 import { Rpc, RpcGroup } from "@effect/rpc";
 import { Schema } from "effect";
+import { SessionPermissionModeSchema } from "../shared-types.js";
 
 const NonEmptyString = Schema.NonEmptyString;
 
@@ -165,6 +166,7 @@ export const GetModelsResponseSchema = Schema.Struct({
 	active: Schema.optional(ModelSelectionSchema),
 	variant: Schema.optional(VariantInfoSchema),
 	contextWindow: Schema.optional(ContextWindowInfoSchema),
+	permissionMode: Schema.optional(SessionPermissionModeSchema),
 });
 
 export const SwitchContextWindowResponseSchema = Schema.Struct({
@@ -192,6 +194,11 @@ export const SwitchVariantResponseSchema = Schema.Struct({
 	projectSlug: Schema.String,
 	variant: Schema.String,
 	variants: Schema.Array(Schema.String),
+});
+
+export const SwitchPermissionModeResponseSchema = Schema.Struct({
+	projectSlug: Schema.String,
+	mode: SessionPermissionModeSchema,
 });
 
 export const OkResponseSchema = Schema.Struct({
@@ -374,6 +381,8 @@ export type SetDefaultModelResponse = typeof SetDefaultModelResponseSchema.Type;
 export type ReloadProviderSessionResponse =
 	typeof ReloadProviderSessionResponseSchema.Type;
 export type SwitchVariantResponse = typeof SwitchVariantResponseSchema.Type;
+export type SwitchPermissionModeResponse =
+	typeof SwitchPermissionModeResponseSchema.Type;
 export type SessionInfo = typeof SessionInfoSchema.Type;
 export type ListSessionsResponse = typeof ListSessionsResponseSchema.Type;
 export type CreateSessionResponse = typeof CreateSessionResponseSchema.Type;
@@ -698,6 +707,20 @@ export class SwitchVariant extends Schema.TaggedRequest<SwitchVariant>()(
 	},
 ) {}
 
+export class SwitchPermissionMode extends Schema.TaggedRequest<SwitchPermissionMode>()(
+	"SwitchPermissionMode",
+	{
+		failure: WsRpcError,
+		success: SwitchPermissionModeResponseSchema,
+		payload: {
+			projectSlug: NonEmptyString,
+			sessionId: NonEmptyString,
+			mode: SessionPermissionModeSchema,
+			originId: Schema.optional(NonEmptyString),
+		},
+	},
+) {}
+
 export class GetFileTree extends Schema.TaggedRequest<GetFileTree>()(
 	"GetFileTree",
 	{
@@ -963,6 +986,7 @@ export const WsRpcRequest = Schema.Union(
 	ReloadProviderSession,
 	RenameSession,
 	SwitchVariant,
+	SwitchPermissionMode,
 	GetFileTree,
 	GetFileList,
 	GetFileContent,
@@ -1013,6 +1037,7 @@ export const WsRpcGroup = RpcGroup.make(
 	Rpc.fromTaggedRequest(ReloadProviderSession),
 	Rpc.fromTaggedRequest(RenameSession),
 	Rpc.fromTaggedRequest(SwitchVariant),
+	Rpc.fromTaggedRequest(SwitchPermissionMode),
 	Rpc.fromTaggedRequest(GetFileTree),
 	Rpc.fromTaggedRequest(GetFileList),
 	Rpc.fromTaggedRequest(GetFileContent),

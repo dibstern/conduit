@@ -120,6 +120,7 @@ describe("WsRpcServerLayer GetModels", () => {
 					variant: "careful",
 					variants: ["fast", "careful"],
 				});
+				expect(result.permissionMode).toBe("ask");
 				expect(result.contextWindow).toEqual({
 					contextWindow: "200k",
 					options: [{ value: "200k", label: "200K", isDefault: true }],

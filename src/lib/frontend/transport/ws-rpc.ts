@@ -73,6 +73,8 @@ export {
 	type SwitchContextWindowResponse,
 	SwitchModel,
 	type SwitchModelResponse,
+	SwitchPermissionMode,
+	type SwitchPermissionModeResponse,
 	SwitchVariant,
 	type SwitchVariantResponse,
 	SyncInputDraft,

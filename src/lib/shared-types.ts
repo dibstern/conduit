@@ -1018,6 +1018,11 @@ const ContextWindowInfoSchema = Schema.Struct({
 	options: Schema.Array(ContextWindowOptionSchema),
 });
 
+const PermissionModeInfoSchema = Schema.Struct({
+	type: Schema.Literal("permission_mode_info"),
+	mode: SessionPermissionModeSchema,
+});
+
 const ProxyDetectedSchema = Schema.Struct({
 	type: Schema.Literal("proxy_detected"),
 	found: Schema.Boolean,
@@ -1122,6 +1127,7 @@ export const RelayMessageSchema = Schema.Union(
 	// Variant / thinking level
 	VariantInfoSchema,
 	ContextWindowInfoSchema,
+	PermissionModeInfoSchema,
 	ProxyDetectedSchema,
 	ScanResultSchema,
 	// Cross-session notifications
@@ -1189,6 +1195,7 @@ export const RELAY_MESSAGE_TYPES = [
 	"provider_session_reloaded",
 	"variant_info",
 	"context_window_info",
+	"permission_mode_info",
 	"proxy_detected",
 	"scan_result",
 	"notification_event",
@@ -1453,6 +1460,7 @@ export type RelayMessage =
 	| { type: "provider_session_reloaded"; sessionId: string }
 	// ── Variant / thinking level ────────────────────────────────────────
 	| { type: "variant_info"; variant?: string; variants?: string[] }
+	| { type: "permission_mode_info"; mode: SessionPermissionMode }
 	| {
 			type: "context_window_info";
 			contextWindow: string;

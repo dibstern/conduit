@@ -45,6 +45,7 @@ import {
 	SwitchAgent,
 	SwitchContextWindow,
 	SwitchModel,
+	SwitchPermissionMode,
 	SwitchVariant,
 	SyncInputDraft,
 	ViewSession,
@@ -297,6 +298,11 @@ const provideRpc = <A, E>(effect: Effect.Effect<A, E, WsRpcTestEnv>) =>
 						variant: request.variant,
 						variants: ["low", "medium", "high", "max"],
 					}),
+				SwitchPermissionMode: (request) =>
+					Effect.succeed({
+						projectSlug: request.projectSlug,
+						mode: request.mode,
+					}),
 				GetTodo: (request) =>
 					Effect.succeed({
 						projectSlug: request.projectSlug,
@@ -391,6 +397,7 @@ describe("browser WebSocket RPC contract", () => {
 		expect(WsRpcGroup.requests.has("ReloadProviderSession")).toBe(true);
 		expect(WsRpcGroup.requests.has("RenameSession")).toBe(true);
 		expect(WsRpcGroup.requests.has("SwitchVariant")).toBe(true);
+		expect(WsRpcGroup.requests.has("SwitchPermissionMode")).toBe(true);
 		expect(WsRpcGroup.requests.has("GetFileTree")).toBe(true);
 		expect(WsRpcGroup.requests.has("GetFileList")).toBe(true);
 		expect(WsRpcGroup.requests.has("GetFileContent")).toBe(true);
@@ -655,6 +662,16 @@ describe("browser WebSocket RPC contract", () => {
 					projectSlug: "demo",
 					variant: "high",
 					variants: ["low", "medium", "high", "max"],
+				});
+
+				const permissionMode = yield* client.SwitchPermissionMode({
+					projectSlug: "demo",
+					sessionId: "session-1",
+					mode: "acceptEdits",
+				});
+				expect(permissionMode).toEqual({
+					projectSlug: "demo",
+					mode: "acceptEdits",
 				});
 
 				const fileTree = yield* client.GetFileTree({ projectSlug: "demo" });
@@ -1006,6 +1023,13 @@ describe("browser WebSocket RPC contract", () => {
 				variant: "high",
 			})._tag,
 		).toBe("SwitchVariant");
+		expect(
+			new SwitchPermissionMode({
+				projectSlug: "demo",
+				sessionId: "session-1",
+				mode: "auto",
+			})._tag,
+		).toBe("SwitchPermissionMode");
 		expect(new GetFileTree({ projectSlug: "demo" })._tag).toBe("GetFileTree");
 		expect(new GetFileList({ projectSlug: "demo" })._tag).toBe("GetFileList");
 		expect(
@@ -1065,6 +1089,16 @@ describe("browser WebSocket RPC contract", () => {
 			projectSlug: "demo",
 		});
 
+		expect(decoded._tag).toBe("Left");
+	});
+
+	it("rejects unknown permission modes at the contract boundary", () => {
+		const decoded = Schema.decodeUnknownEither(WsRpcRequest)({
+			_tag: "SwitchPermissionMode",
+			projectSlug: "demo",
+			sessionId: "session-1",
+			mode: "yolo",
+		});
 		expect(decoded._tag).toBe("Left");
 	});
 

@@ -30,6 +30,7 @@ const METADATA_TYPES: ReadonlySet<string> = new Set([
 	"scan_result",
 	"variant_info",
 	"context_window_info",
+	"permission_mode_info",
 	"proxy_detected",
 ]);
 

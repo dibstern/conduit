@@ -35,6 +35,7 @@ import {
 	getDefaultModel,
 	getDefaultVariant,
 	getModel,
+	getPermissionMode,
 	getVariant,
 	hasActiveProcessingTimeout,
 	setDefaultModel,
@@ -696,6 +697,10 @@ export const handleClientConnectedEffect = (
 						? yield* getContextWindow(activeId)
 						: yield* getDefaultContextWindow(),
 					options: findContextWindowOptions(providers, activeModelId),
+				});
+				wsHandler.sendTo(clientId, {
+					type: "permission_mode_info",
+					mode: activeId ? yield* getPermissionMode(activeId) : "ask",
 				});
 
 				const defaultModel = yield* getDefaultModel();
