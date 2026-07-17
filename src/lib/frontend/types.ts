@@ -43,6 +43,7 @@ export type {
 	RelayMessage,
 	RequestId,
 	SessionInfo,
+	SessionPermissionMode,
 	TodoItem,
 	TodoStatus,
 	ToolName,

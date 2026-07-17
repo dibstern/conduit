@@ -17,6 +17,7 @@ import {
 	handleDefaultModelInfo,
 	handleModelInfo,
 	handleModelList,
+	handlePermissionModeInfo,
 	setActiveAgent,
 	setActiveModel,
 } from "../../../src/lib/frontend/stores/discovery.svelte.js";
@@ -55,6 +56,7 @@ beforeEach(() => {
 	discoveryState.availableVariants = [];
 	discoveryState.currentContextWindow = "";
 	discoveryState.availableContextWindowOptions = [];
+	discoveryState.permissionMode = "ask";
 });
 
 // ─── Pure helper: formatAgentLabel ──────────────────────────────────────────
@@ -260,6 +262,7 @@ describe("applyGetModelsResponse", () => {
 				contextWindow: "200k",
 				options: [{ value: "200k", label: "200K", isDefault: true }],
 			},
+			permissionMode: "acceptEdits",
 		};
 
 		applyGetModelsResponse(response);
@@ -273,6 +276,18 @@ describe("applyGetModelsResponse", () => {
 		expect(discoveryState.availableContextWindowOptions).toEqual([
 			{ value: "200k", label: "200K", isDefault: true },
 		]);
+		expect(discoveryState.permissionMode).toBe("acceptEdits");
+	});
+});
+
+// ─── handlePermissionModeInfo ───────────────────────────────────────────────
+
+describe("handlePermissionModeInfo", () => {
+	it("sets the session permission mode", () => {
+		handlePermissionModeInfo(
+			msg({ type: "permission_mode_info", mode: "auto" }),
+		);
+		expect(discoveryState.permissionMode).toBe("auto");
 	});
 });
 

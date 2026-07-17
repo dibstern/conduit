@@ -74,6 +74,7 @@ import {
 	handleDefaultModelInfo,
 	handleModelInfo,
 	handleModelList,
+	handlePermissionModeInfo,
 	handleVariantInfo,
 } from "./discovery.svelte.js";
 import { handleFileTree } from "./file-tree.svelte.js";
@@ -879,6 +880,9 @@ export function handleMessage(msg: RelayMessage): void {
 			break;
 		case "default_model_info":
 			handleDefaultModelInfo(msg);
+			break;
+		case "permission_mode_info":
+			handlePermissionModeInfo(msg);
 			break;
 		case "variant_info":
 			handleVariantInfo(msg);

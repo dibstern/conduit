@@ -13,6 +13,7 @@
 	// biome-ignore lint/style/useImportType: FileMenu is used as a value for bind:this
 	import FileMenu from "./FileMenu.svelte";
 	import ModelSelector from "../model/ModelSelector.svelte";
+	import PermissionModeSelector from "./PermissionModeSelector.svelte";
 	// biome-ignore lint/style/useImportType: SubagentBackBar is used as a value for bind:this
 	import SubagentBackBar from "../chat/SubagentBackBar.svelte";
 	import PastePreview from "../chat/PastePreview.svelte";
@@ -568,6 +569,9 @@
 
 				<!-- Model selector -->
 				<ModelSelector />
+
+				<!-- Approvals (permission mode) selector -->
+				<PermissionModeSelector />
 
 			</div>
 

@@ -45,7 +45,7 @@ until curl --fail --silent --output /dev/null "$CONDUIT_BASE_URL"; do
   sleep 0.1
 done
 
-for feature in composer-send-button session-visibility; do
+for feature in composer-send-button composer-approvals-dropdown session-visibility; do
   gherkin-parser \
     "features/$feature.feature" \
     "build/acceptance/ir/$feature.json"

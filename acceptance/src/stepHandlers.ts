@@ -69,6 +69,10 @@ export const conduitVisualHandlers: StepHandler[] = [
 				handlers: {
 					SendMessage: async () => undefined,
 					SyncInputDraft: async () => undefined,
+					SwitchPermissionMode: async (payload) => ({
+						projectSlug: "myapp",
+						mode: payload["mode"],
+					}),
 				},
 			});
 			rpcControls.set(world.page, rpcControl);
@@ -197,6 +201,32 @@ export const conduitVisualHandlers: StepHandler[] = [
 					`Expected send button enabled=${expectedEnabled}, got ${actualEnabled}`,
 				);
 			}
+		},
+	},
+	{
+		name: "set approvals mode",
+		match: /^I set approvals to (ask|acceptEdits|auto)$/,
+		run: async ({ world, match }) => {
+			const mode = match[1] ?? "";
+			await world.page.getByTestId("permission-mode-badge").click();
+			await world.page.getByTestId(`permission-mode-option-${mode}`).click();
+		},
+	},
+	{
+		name: "assert approvals pill label",
+		match: /^the approvals pill shows (Ask|Edits|All)$/,
+		run: async ({ world, match }) => {
+			const label = match[1] ?? "";
+			await world.page.waitForFunction(
+				(expected) => {
+					const badge = document.querySelector(
+						'[data-testid="permission-mode-badge"]',
+					);
+					return badge?.textContent?.trim().startsWith(expected) ?? false;
+				},
+				label,
+				{ timeout: 2_000 },
+			);
 		},
 	},
 	{

@@ -15,6 +15,7 @@ import type {
 	ProviderGroup,
 	ProviderInfo,
 	RelayMessage,
+	SessionPermissionMode,
 } from "../types.js";
 
 const cloneContextWindowOptions = (
@@ -96,6 +97,7 @@ export const discoveryState = $state({
 	availableVariants: [] as string[],
 	currentContextWindow: "" as string,
 	availableContextWindowOptions: [] as ReadonlyArray<ContextWindowOption>,
+	permissionMode: "ask" as SessionPermissionMode,
 });
 
 // ─── Derived getters ────────────────────────────────────────────────────────
@@ -260,6 +262,12 @@ export function applyGetModelsResponse(response: GetModelsResponse): void {
 			options: cloneContextWindowOptions(response.contextWindow.options) ?? [],
 		});
 	}
+	if (response.permissionMode) {
+		handlePermissionModeInfo({
+			type: "permission_mode_info",
+			mode: response.permissionMode,
+		});
+	}
 }
 
 export function handleModelInfo(
@@ -339,6 +347,14 @@ export function handleContextWindowInfo(
 	discoveryState.availableContextWindowOptions = msg.options ?? [];
 }
 
+// ─── Permission-mode handler ────────────────────────────────────────────────
+
+export function handlePermissionModeInfo(
+	msg: Extract<RelayMessage, { type: "permission_mode_info" }>,
+): void {
+	discoveryState.permissionMode = msg.mode;
+}
+
 /** Clear all discovery state (for project switch). */
 export function clearDiscoveryState(): void {
 	discoveryState.agents = [];
@@ -355,4 +371,5 @@ export function clearDiscoveryState(): void {
 	discoveryState.availableVariants = [];
 	discoveryState.currentContextWindow = "";
 	discoveryState.availableContextWindowOptions = [];
+	discoveryState.permissionMode = "ask";
 }
