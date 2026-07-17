@@ -2,6 +2,7 @@ import { Effect } from "effect";
 import { describe, expect, it, vi } from "vitest";
 import type { ProviderRuntimeEvent } from "../../../src/lib/contracts/providers/provider-runtime-event.js";
 import type {
+	CanonicalEvent,
 	CanonicalEventType,
 	EventPayloadMap,
 } from "../../../src/lib/persistence/events.js";
@@ -693,6 +694,192 @@ describe("createRelayEventSink — permission/question", () => {
 			"que_1",
 			{ "0": "Yes" },
 		);
+	});
+});
+
+describe("createRelayEventSink — permission mode short-circuit", () => {
+	const request = {
+		requestId: "req_auto",
+		toolName: "Edit",
+		toolInput: { file_path: "/tmp/example.ts" },
+		sessionId: "ses-1",
+		turnId: "turn_1",
+		providerItemId: "toolu_1",
+	};
+
+	const makePendingInteractions = () => {
+		const beginPermissionRequest = vi.fn(() =>
+			Effect.succeed({
+				awaitResponse: Effect.succeed({ decision: "once" as const }),
+			}),
+		);
+		return {
+			beginPermissionRequest,
+			port: {
+				beginPermissionRequest,
+				resolvePermissionRequest: vi.fn(() => Effect.succeed(true)),
+				beginQuestionRequest: vi.fn(() =>
+					Effect.succeed({ awaitAnswers: Effect.succeed({}) }),
+				),
+				resolveQuestionRequest: vi.fn(() => Effect.succeed(true)),
+			},
+		};
+	};
+
+	it.each([
+		{ mode: "auto" as const, toolName: "Bash", shortCircuits: true },
+		{ mode: "auto" as const, toolName: "Edit", shortCircuits: true },
+		{ mode: "acceptEdits" as const, toolName: "Edit", shortCircuits: true },
+		{ mode: "acceptEdits" as const, toolName: "Write", shortCircuits: true },
+		{
+			mode: "acceptEdits" as const,
+			toolName: "NotebookEdit",
+			shortCircuits: true,
+		},
+		{ mode: "acceptEdits" as const, toolName: "Bash", shortCircuits: false },
+		{
+			mode: "acceptEdits" as const,
+			toolName: "mcp__foo__bar",
+			shortCircuits: false,
+		},
+		{ mode: "ask" as const, toolName: "Edit", shortCircuits: false },
+		{ mode: undefined, toolName: "Edit", shortCircuits: false },
+	])("mode=$mode tool=$toolName shortCircuits=$shortCircuits", async ({
+		mode,
+		toolName,
+		shortCircuits,
+	}) => {
+		const send = vi.fn();
+		const { beginPermissionRequest, port } = makePendingInteractions();
+		const sink = createRelayEventSink({
+			sessionId: "ses-1",
+			send,
+			pendingInteractions: port,
+			...(mode == null
+				? {}
+				: { getPermissionMode: () => Effect.succeed(mode) }),
+		});
+
+		await expect(
+			Effect.runPromise(sink.requestPermission({ ...request, toolName })),
+		).resolves.toEqual({ decision: "once" });
+
+		if (shortCircuits) {
+			expect(beginPermissionRequest).not.toHaveBeenCalled();
+			expect(send).not.toHaveBeenCalledWith(
+				expect.objectContaining({ type: "permission_request" }),
+			);
+		} else {
+			expect(beginPermissionRequest).toHaveBeenCalledOnce();
+			expect(send).toHaveBeenCalledWith(
+				expect.objectContaining({
+					type: "permission_request",
+					toolName,
+				}),
+			);
+		}
+	});
+
+	it("persists canonical asked and auto-resolved audit events", async () => {
+		const send = vi.fn();
+		const persistEvent = vi.fn((_event: CanonicalEvent) => Effect.void);
+		const persistEvents = vi.fn(
+			(_events: readonly CanonicalEvent[]) => Effect.void,
+		);
+		const sink = createRelayEventSink({
+			sessionId: "ses-1",
+			providerId: "claude",
+			send,
+			persist: { persistEvent, persistEvents },
+			getPermissionMode: () => Effect.succeed("auto" as const),
+		});
+
+		await expect(
+			Effect.runPromise(sink.requestPermission(request)),
+		).resolves.toEqual({ decision: "once" });
+
+		const persisted = persistEvents.mock.calls.flatMap(([events]) => events);
+		expect(persisted).toEqual([
+			expect.objectContaining({
+				type: "permission.asked",
+				data: expect.objectContaining({
+					id: "req_auto",
+					toolName: "Edit",
+				}),
+			}),
+			expect.objectContaining({
+				type: "permission.resolved",
+				data: expect.objectContaining({
+					id: "req_auto",
+					decision: "once",
+					resolvedBy: "auto",
+				}),
+			}),
+		]);
+		expect(send).not.toHaveBeenCalledWith(
+			expect.objectContaining({ type: "permission_request" }),
+		);
+	});
+
+	it("ingests asked and resolved runtime audit events", async () => {
+		const send = vi.fn();
+		const ingest = vi.fn((_event: ProviderRuntimeEvent) => Effect.succeed(1));
+		const sink = createRelayEventSink({
+			sessionId: "ses-1",
+			providerId: "claude",
+			send,
+			ingestion: { ingest },
+			getPermissionMode: () => Effect.succeed("auto" as const),
+		});
+
+		await expect(
+			Effect.runPromise(sink.requestPermission(request)),
+		).resolves.toEqual({ decision: "once" });
+
+		expect(ingest).toHaveBeenCalledTimes(2);
+		expect(ingest).toHaveBeenNthCalledWith(
+			1,
+			expect.objectContaining({ type: "permission.asked" }),
+		);
+		expect(ingest).toHaveBeenNthCalledWith(
+			2,
+			expect.objectContaining({
+				type: "permission.resolved",
+				data: expect.objectContaining({ resolvedBy: "auto" }),
+			}),
+		);
+		expect(send).not.toHaveBeenCalledWith(
+			expect.objectContaining({ type: "permission_request" }),
+		);
+	});
+
+	it("keeps an auto-approval non-fatal when audit persistence fails", async () => {
+		const persistEvent = vi.fn((_event: CanonicalEvent) => Effect.void);
+		const persistEvents = vi.fn((_events: readonly CanonicalEvent[]) =>
+			Effect.fail(new Error("audit failed")),
+		);
+		const sink = createRelayEventSink({
+			sessionId: "ses-1",
+			send: vi.fn(),
+			persist: { persistEvent, persistEvents },
+			getPermissionMode: () => Effect.succeed("auto" as const),
+		});
+
+		await expect(
+			Effect.runPromise(sink.requestPermission(request)),
+		).resolves.toEqual({ decision: "once" });
+	});
+
+	it("auto-approves without a pending interaction port", async () => {
+		const sink = createRelayEventSink({
+			sessionId: "ses-1",
+			send: vi.fn(),
+			getPermissionMode: () => Effect.succeed("auto" as const),
+		});
+
+		await expect(
+			Effect.runPromise(sink.requestPermission(request)),
+		).resolves.toEqual({ decision: "once" });
 	});
 });
 

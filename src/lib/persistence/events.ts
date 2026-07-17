@@ -222,6 +222,7 @@ export interface PermissionAskedPayload {
 export interface PermissionResolvedPayload {
 	readonly id: string;
 	readonly decision: PermissionDecision;
+	readonly resolvedBy?: "auto";
 }
 
 export interface QuestionAskedPayload {
@@ -581,6 +582,7 @@ const PermissionAskedPayloadSchema = Schema.Struct({
 const PermissionResolvedPayloadSchema = Schema.Struct({
 	id: Schema.String,
 	decision: PermissionDecisionSchema,
+	resolvedBy: Schema.optionalWith(Schema.Literal("auto"), { exact: true }),
 });
 
 const QuestionAskedPayloadSchema = Schema.Struct({

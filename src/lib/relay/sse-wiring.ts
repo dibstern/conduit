@@ -13,11 +13,14 @@ import type {
 } from "../domain/relay/Services/pending-interaction-service.js";
 import { PendingInteractionServiceTag } from "../domain/relay/Services/pending-interaction-service.js";
 import { SessionManagerServiceTag } from "../domain/relay/Services/session-manager-service.js";
-import type { OverridesStateTag } from "../domain/relay/Services/session-overrides-state.js";
+import {
+	getPermissionMode,
+	type OverridesStateTag,
+} from "../domain/relay/Services/session-overrides-state.js";
 import type { Logger } from "../logger.js";
 import { notificationContent } from "../notification-content.js";
 import type { PushNotificationSender } from "../server/push.js";
-import type { PermissionId } from "../shared-types.js";
+import type { PermissionId, SessionPermissionMode } from "../shared-types.js";
 import { tagWithSessionId } from "../shared-types.js";
 import type { PendingPermission, RelayMessage } from "../types.js";
 import {
@@ -158,6 +161,12 @@ export type EffectSSEWiringDeps = Omit<
 		notifySSEIdle(sessionId: string): Effect.Effect<void>;
 		reconcileNow?(): Effect.Effect<void>;
 	};
+	/** Optional: reply to an OpenCode permission (auto-approve path). */
+	replyPermission?: (
+		sessionId: string,
+		permissionId: string,
+		response: "once",
+	) => Promise<void>;
 	/** Effect-native OpenCode runtime ingress owned by the relay runtime. */
 	opencodeRuntimeIngress?: {
 		onSSEEventEffect(
@@ -292,6 +301,16 @@ function permissionRequestInput(
 		},
 		always: props.always ?? [],
 	};
+}
+
+/** OpenCode ask types auto-approved under "acceptEdits" ("edit" is a first-class category). */
+function opencodeModeCoversAsk(
+	mode: SessionPermissionMode,
+	permissionType: string,
+): boolean {
+	if (mode === "auto") return true;
+	if (mode === "acceptEdits") return permissionType === "edit";
+	return false;
 }
 
 function permissionRecoveryInputs(
@@ -819,12 +838,44 @@ export const handleSSEEventEffect = (
 
 		if (event.type === "permission.asked") {
 			const input = permissionRequestInput(event, eventSessionId);
-			const pending = input
-				? yield* pendingInteractions.recordPermissionRequest(input)
-				: null;
-			yield* Effect.sync(() =>
-				broadcastPermissionAsked(deps, event, eventSessionId, pending),
-			);
+			const mode = input?.sessionId
+				? yield* getPermissionMode(input.sessionId)
+				: ("ask" as const);
+			const reply = deps.replyPermission;
+			let autoApproved = false;
+			if (
+				input?.sessionId &&
+				reply &&
+				opencodeModeCoversAsk(mode, input.toolName)
+			) {
+				const replied = yield* Effect.either(
+					Effect.tryPromise(() =>
+						reply(input.sessionId, input.requestId, "once"),
+					),
+				);
+				if (replied._tag === "Right") {
+					autoApproved = true;
+					yield* Effect.sync(() =>
+						deps.log.info(
+							`auto-approved ${input.toolName} (mode=${mode}, session=${input.sessionId}, request=${input.requestId})`,
+						),
+					);
+				} else {
+					yield* Effect.sync(() =>
+						deps.log.warn(
+							`auto-approve reply failed, falling back to card (request=${input.requestId}): ${replied.left}`,
+						),
+					);
+				}
+			}
+			if (!autoApproved) {
+				const pending = input
+					? yield* pendingInteractions.recordPermissionRequest(input)
+					: null;
+				yield* Effect.sync(() =>
+					broadcastPermissionAsked(deps, event, eventSessionId, pending),
+				);
+			}
 		}
 		if (event.type === "question.asked") {
 			yield* handleQuestionAskedEffect(deps, eventSessionId);

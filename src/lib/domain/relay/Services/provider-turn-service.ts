@@ -53,7 +53,8 @@ import {
 } from "./session-manager-service.js";
 import {
 	clearProcessingTimeout,
-	type OverridesStateTag,
+	getPermissionMode,
+	OverridesStateTag,
 	PROCESSING_TIMEOUT_DURATION,
 	resetProcessingTimeout,
 	setModel,
@@ -248,6 +249,7 @@ export const makeProviderTurnService = Effect.gen(function* () {
 	const config = yield* ConfigTag;
 	const pendingInteractionService = yield* PendingInteractionServiceTag;
 	const runtime = yield* Effect.runtime<OverridesStateTag>();
+	const overridesRef = yield* OverridesStateTag;
 	const runTimeout = Runtime.runFork(runtime);
 	const dispatchFibersOption = yield* Effect.serviceOption(
 		ProviderTurnDispatchFibersTag,
@@ -358,6 +360,10 @@ export const makeProviderTurnService = Effect.gen(function* () {
 					resetProcessingTimeout(sessionId, PROCESSING_TIMEOUT_DURATION),
 				);
 			},
+			getPermissionMode: () =>
+				getPermissionMode(sessionId).pipe(
+					Effect.provideService(OverridesStateTag, overridesRef),
+				),
 			...(eventSinkPersist ? { persist: eventSinkPersist } : {}),
 			...(ingestion ? { ingestion } : {}),
 			pendingInteractions: {

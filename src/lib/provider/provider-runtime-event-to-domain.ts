@@ -311,6 +311,7 @@ export function translateProviderRuntimeEventToDomain(
 		return singleEvent(event, state, "permission.resolved", {
 			id: requestId(event, data),
 			decision: permissionDecision(stringField(data["decision"]) ?? ""),
+			...(data["resolvedBy"] === "auto" ? { resolvedBy: "auto" as const } : {}),
 		});
 	}
 

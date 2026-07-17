@@ -55,6 +55,14 @@ const ProviderPermissionModeSchema = Schema.Literal(
 	"auto",
 );
 
+/** Conduit-level per-session approval mode (distinct from provider-native permission modes). */
+export const SessionPermissionModeSchema = Schema.Literal(
+	"ask",
+	"acceptEdits",
+	"auto",
+);
+export type SessionPermissionMode = typeof SessionPermissionModeSchema.Type;
+
 export const ProviderPermissionUpdateSchema = Schema.Union(
 	Schema.Struct({
 		type: Schema.Literal("addRules"),

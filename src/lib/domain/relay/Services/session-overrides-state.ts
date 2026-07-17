@@ -19,6 +19,7 @@ import {
 	Layer,
 	Ref,
 } from "effect";
+import type { SessionPermissionMode } from "../../../shared-types.js";
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -32,6 +33,7 @@ export interface SessionState {
 	agent?: string;
 	variant?: string;
 	contextWindow?: string;
+	permissionMode?: SessionPermissionMode;
 	modelUserSelected: boolean;
 	processingTimeoutCallback?: () => Effect.Effect<void>;
 	processingTimeoutToken?: symbol;
@@ -305,6 +307,33 @@ export const getVariant = (sessionId: string) =>
 		const ref = yield* OverridesStateTag;
 		const state = yield* Ref.get(ref);
 		return state.sessions.get(sessionId)?.variant ?? state.defaultVariant;
+	});
+
+// ─── Per-Session Permission Mode ────────────────────────────────────────────
+
+/** Set the approval mode for a session. */
+export const setPermissionMode = (
+	sessionId: string,
+	mode: SessionPermissionMode,
+) =>
+	Effect.gen(function* () {
+		const ref = yield* OverridesStateTag;
+		yield* Ref.update(ref, (state) => {
+			const [sessions, entry] = getOrCreate(state.sessions, sessionId);
+			const next = new Map(sessions);
+			next.set(sessionId, { ...entry, permissionMode: mode });
+			return { ...state, sessions: next };
+		});
+	});
+
+/** Get the approval mode for a session. Defaults to "ask". */
+export const getPermissionMode = (
+	sessionId: string,
+): Effect.Effect<SessionPermissionMode, never, OverridesStateTag> =>
+	Effect.gen(function* () {
+		const ref = yield* OverridesStateTag;
+		const state = yield* Ref.get(ref);
+		return state.sessions.get(sessionId)?.permissionMode ?? "ask";
 	});
 
 // ─── Per-Session Context Window ─────────────────────────────────────────────

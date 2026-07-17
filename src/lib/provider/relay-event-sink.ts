@@ -14,7 +14,7 @@ import type { ProviderRuntimeIngestion } from "../domain/relay/Services/provider
 import { createLogger } from "../logger.js";
 import type { CanonicalEvent } from "../persistence/events.js";
 import { translateDomainEventToRelay } from "../relay/domain-event-to-relay.js";
-import type { PermissionId } from "../shared-types.js";
+import type { PermissionId, SessionPermissionMode } from "../shared-types.js";
 import { tagWithSessionId } from "../shared-types.js";
 import type { RelayMessage } from "../types.js";
 import { MissingPendingInteractions } from "./errors.js";
@@ -30,6 +30,15 @@ import type {
 } from "./types.js";
 
 const log = createLogger("relay-event-sink");
+
+/** Claude tool names auto-approved under "acceptEdits". Anything else falls back to ask. */
+const EDIT_TOOL_NAMES = new Set(["Edit", "Write", "NotebookEdit"]);
+
+function modeCoversAsk(mode: SessionPermissionMode, toolName: string): boolean {
+	if (mode === "auto") return true;
+	if (mode === "acceptEdits") return EDIT_TOOL_NAMES.has(toolName);
+	return false;
+}
 
 // ─── Deps ───────────────────────────────────────────────────────────────────
 
@@ -52,6 +61,11 @@ export interface RelayEventSinkDeps {
 	readonly clearTimeout?: () => void;
 	/** Optional: reset processing timeout on any activity. */
 	readonly resetTimeout?: () => void;
+	/**
+	 * Optional live per-session approval mode lookup. Absent → "ask" (flow unchanged).
+	 * Read per request so a mid-turn toggle applies to the next ask.
+	 */
+	readonly getPermissionMode?: () => Effect.Effect<SessionPermissionMode>;
 	/** Optional: persist events to SQLite for session history survival. */
 	readonly persist?: RelayEventSinkPersist;
 	/** Optional durable runtime ingestion owner. When present, push() delegates provider output to this path. */
@@ -122,7 +136,50 @@ export function createRelayEventSink(deps: RelayEventSinkDeps): RelayEventSink {
 		});
 	}
 
-	return {
+	const recordAutoApproval = (
+		request: PermissionRequest,
+	): Effect.Effect<void> =>
+		Effect.gen(function* () {
+			const providerId = deps.providerId ?? "unknown";
+			const base = {
+				providerId,
+				sessionId,
+				rawSource: { kind: "conduit.relay-event-sink.auto-permission" },
+				createdAt: Date.now(),
+			};
+			const asked: ProviderRuntimeEvent = {
+				...base,
+				eventId: `${request.requestId}:permission.asked`,
+				type: "permission.asked",
+				turnId: request.turnId,
+				providerRefs: {
+					providerRequestId: request.requestId,
+					providerToolUseId: request.providerItemId,
+				},
+				data: {
+					id: request.requestId,
+					toolName: request.toolName,
+					input: request.toolInput,
+				},
+			};
+			const resolved: ProviderRuntimeEvent = {
+				...base,
+				eventId: `${request.requestId}:permission.resolved`,
+				type: "permission.resolved",
+				providerRefs: { providerRequestId: request.requestId },
+				data: { id: request.requestId, decision: "once", resolvedBy: "auto" },
+			};
+			const result = yield* Effect.either(
+				sink.push(asked).pipe(Effect.andThen(sink.push(resolved))),
+			);
+			if (result._tag === "Left") {
+				log.warn(
+					`auto-approval audit persist failed (session=${sessionId}, request=${request.requestId}): ${result.left instanceof Error ? result.left.message : result.left}`,
+				);
+			}
+		});
+
+	const sink: RelayEventSink = {
 		push(event: ProviderRuntimeEvent): Effect.Effect<void, unknown> {
 			return Effect.gen(function* () {
 				yield* Effect.sync(reset);
@@ -198,6 +255,18 @@ export function createRelayEventSink(deps: RelayEventSinkDeps): RelayEventSink {
 		): Effect.Effect<PermissionResponse, unknown> {
 			return Effect.gen(function* () {
 				yield* Effect.sync(reset);
+				const mode = deps.getPermissionMode
+					? yield* deps.getPermissionMode()
+					: "ask";
+				if (modeCoversAsk(mode, request.toolName)) {
+					yield* recordAutoApproval(request);
+					yield* Effect.sync(() =>
+						log.info(
+							`auto-approved ${request.toolName} (mode=${mode}, session=${sessionId}, request=${request.requestId})`,
+						),
+					);
+					return { decision: "once" } as const;
+				}
 				const pendingInteractions = deps.pendingInteractions;
 				if (!pendingInteractions) {
 					return yield* Effect.fail(
@@ -344,6 +413,7 @@ export function createRelayEventSink(deps: RelayEventSinkDeps): RelayEventSink {
 			return Effect.void;
 		},
 	};
+	return sink;
 }
 
 function isTerminalRuntimeEvent(event: ProviderRuntimeEvent): boolean {

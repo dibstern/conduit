@@ -23,6 +23,8 @@ import {
 	getDefaultModel,
 	getDefaultVariant,
 	getModel,
+	getOverrides,
+	getPermissionMode,
 	getVariant,
 	hasActiveProcessingTimeout,
 	isModelUserSelected,
@@ -37,6 +39,7 @@ import {
 	setDefaultVariant,
 	setModel,
 	setModelDefault,
+	setPermissionMode,
 	setVariant,
 	startProcessingTimeout,
 } from "../../../src/lib/domain/relay/Services/session-overrides-state.js";
@@ -223,6 +226,57 @@ describe("SessionOverrides Effect", () => {
 			yield* setVariant("sess-1", "high");
 			yield* setVariant("sess-1", "");
 			expect(yield* getVariant("sess-1")).toBe("");
+		}).pipe(Effect.provide(Layer.fresh(makeOverridesStateLive()))),
+	);
+
+	// ─── Per-Session Permission Mode ────────────────────────────────────────
+
+	it.effect('getPermissionMode defaults to "ask" for an unknown session', () =>
+		Effect.gen(function* () {
+			expect(yield* getPermissionMode("unknown")).toBe("ask");
+		}).pipe(Effect.provide(Layer.fresh(makeOverridesStateLive()))),
+	);
+
+	it.effect("setPermissionMode stores the mode", () =>
+		Effect.gen(function* () {
+			yield* setPermissionMode("sess-1", "auto");
+			expect(yield* getPermissionMode("sess-1")).toBe("auto");
+
+			yield* setPermissionMode("sess-1", "acceptEdits");
+			expect(yield* getPermissionMode("sess-1")).toBe("acceptEdits");
+		}).pipe(Effect.provide(Layer.fresh(makeOverridesStateLive()))),
+	);
+
+	it.effect("setPermissionMode preserves other overrides", () =>
+		Effect.gen(function* () {
+			yield* setVariant("sess-1", "high");
+			yield* setModel("sess-1", {
+				providerID: "anthropic",
+				modelID: "claude-4",
+			});
+			yield* setPermissionMode("sess-1", "auto");
+
+			expect(yield* getOverrides("sess-1")).toMatchObject({
+				variant: "high",
+				model: { providerID: "anthropic", modelID: "claude-4" },
+				permissionMode: "auto",
+			});
+		}).pipe(Effect.provide(Layer.fresh(makeOverridesStateLive()))),
+	);
+
+	it.effect('setPermissionMode("ask") returns flow to ask', () =>
+		Effect.gen(function* () {
+			yield* setPermissionMode("sess-1", "auto");
+			yield* setPermissionMode("sess-1", "ask");
+			expect(yield* getPermissionMode("sess-1")).toBe("ask");
+		}).pipe(Effect.provide(Layer.fresh(makeOverridesStateLive()))),
+	);
+
+	it.effect('clearSession resets mode to "ask"', () =>
+		Effect.gen(function* () {
+			yield* setPermissionMode("sess-1", "auto");
+			yield* clearSession("sess-1");
+			expect(yield* getPermissionMode("sess-1")).toBe("ask");
 		}).pipe(Effect.provide(Layer.fresh(makeOverridesStateLive()))),
 	);
 

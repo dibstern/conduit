@@ -1032,6 +1032,8 @@ export async function createProjectRelay(
 							getSessionStatuses: () => statusPoller.getCurrentStatuses(),
 							listPendingQuestions: () => api.question.list(),
 							listPendingPermissions: () => api.permission.list(),
+							replyPermission: (sessionId, permissionId, response) =>
+								api.permission.reply(sessionId, permissionId, response),
 							statusPoller,
 							slug: config.slug,
 							onDoneProcessed: monitoring.recordDoneDelivered,
