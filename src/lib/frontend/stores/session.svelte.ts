@@ -8,6 +8,7 @@ import {
 	createSessionRpc,
 	getAgentsRpc,
 	getCommandsRpc,
+	getModelsRpc,
 	type ViewSessionRpcInput,
 	viewSessionRpc,
 } from "../transport/ws-rpc-client.js";
@@ -26,6 +27,7 @@ import { getBrowserClientId } from "./client-identity.js";
 import {
 	applyGetAgentsResponse,
 	applyGetCommandsResponse,
+	applyGetModelsResponse,
 	discoveryState,
 } from "./discovery.svelte.js";
 import { getCurrentSlug, navigate } from "./router.svelte.js";
@@ -479,6 +481,11 @@ export function switchToSession(
 			.catch(() => undefined);
 		void getCommandsRpc({ projectSlug: slug, sessionId })
 			.then(applyGetCommandsResponse)
+			.catch(() => undefined);
+		// Re-syncs per-session overrides (variant, context window, permission
+		// mode) that connect-time hydration cannot see for later switches.
+		void getModelsRpc({ projectSlug: slug, sessionId })
+			.then(applyGetModelsResponse)
 			.catch(() => undefined);
 	}
 }

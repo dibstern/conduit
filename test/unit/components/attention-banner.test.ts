@@ -28,6 +28,9 @@ vi.mock("../../../src/lib/frontend/transport/ws-rpc-client.js", () => ({
 		projectSlug: "project-a",
 		commands: [],
 	})),
+	getModelsRpc: vi.fn(async () => {
+		throw new Error("models unavailable in test");
+	}),
 	viewSessionRpc: (input: unknown) => viewSessionRpcSpy(input),
 }));
 
