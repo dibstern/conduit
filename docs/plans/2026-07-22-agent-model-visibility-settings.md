@@ -230,9 +230,13 @@ CRITICAL: `VisibilityInfoSchema` must be added to the `RelayMessageSchema` runti
 
 ```ts
 it("decodes visibility_info messages", () => {
-	// decode via the same helper/schema the file already uses, e.g.:
-	// expect(decodeRelayMessage({ type: "visibility_info", hiddenModels: ["a/b"], hiddenAgents: ["c/d"] }))
-	//   .toEqual({ type: "visibility_info", hiddenModels: ["a/b"], hiddenAgents: ["c/d"] })
+	// Use the file's existing idiom (see its agent_list case):
+	// const result = Schema.decodeUnknownEither(RelayMessageSchema)({
+	// 	type: "visibility_info",
+	// 	hiddenModels: ["a/b"],
+	// 	hiddenAgents: ["c/d"],
+	// });
+	// expect(Either.isRight(result)).toBe(true);
 });
 ```
 
@@ -375,7 +379,7 @@ Expected: PASS.
 
 **Step 5: Wire into `src/lib/server/ws-rpc.ts`**
 
-Import `getHiddenEntries, setHiddenEntriesForRelay` from `../handlers/visibility.js` and `ConfigTag` (see how other handlers in this file access config; if handlers there use `yield*` inside `Effect.gen`, follow that).
+Import `getHiddenEntries, setHiddenEntriesForRelay` from `../handlers/visibility.js` and `ConfigTag` from `../domain/relay/Services/services.js` (no handler in this file reads `ConfigTag` directly yet — these wraps are the first — but it IS in the layer environment, used transitively via `SetDefaultModel`).
 
 - `GetModels` handler (~line 696): wrap so the response gains `hiddenModels`:
 
@@ -423,7 +427,7 @@ SetHiddenEntries: (request) =>
 
 **Step 6: Typecheck + regression**
 
-The tests that actually cover the edited handlers are `ws-rpc-agents.test.ts` and `ws-rpc-models.test.ts`. Update `test/unit/server/ws-rpc-agents.test.ts` first: its full-response `toEqual` (~line 32) must now expect `hiddenAgents: []` — and give the stubbed `ConfigTag` a tempdir `configDir` so the assertion doesn't depend on the developer's real settings file. Check `ws-rpc-models.test.ts` for the same pattern on GetModels.
+The tests that actually cover the edited handlers are `ws-rpc-agents.test.ts` and `ws-rpc-models.test.ts`. Update `test/unit/server/ws-rpc-agents.test.ts` first: its full-response `toEqual` (~line 32) must now expect `hiddenAgents: []` — and give the stubbed `ConfigTag` a tempdir `configDir` (`makeMockConfig({ configDir })`) so the assertion doesn't depend on the developer's real settings file. `ws-rpc-models.test.ts` uses per-field assertions (lines ~83-127) and needs NO expectation change from `hiddenModels` — just re-run it.
 
 Run: `bash -o pipefail -c 'pnpm check 2>&1 | tail -c 800'`
 Run: `pnpm vitest run test/unit/server/ws-rpc-agents.test.ts test/unit/server/ws-rpc-models.test.ts 2>&1 | tail -c 800`

@@ -52,6 +52,15 @@ B. **[Task 6] Native `<input type="checkbox">` vs the panel's `ToggleSetting` co
 | A. Toggle races (user: drop guard) | 6 | `visibilityBusy` removed; comment documents last-write-wins rationale |
 | B. Checkbox style (user: ToggleSetting) | 6 | Markup rows switched to compact `ToggleSetting`; instruction to read the component's props first |
 
+## Re-audit (loop 2) — PASSED
+
+Three verifiers over the amended tasks (2+5, 3, 4+6). All 10 amendments confirmed resolved against real source. Three residual minor snippet/pointer fixes applied inline and verified by inspection:
+- Step 3a test sketch now uses the file's `Schema.decodeUnknownEither` + `Either.isRight` idiom.
+- Task 3 `ConfigTag` import pointer retargeted to `../domain/relay/Services/services.js` (first direct reader in that file; tag confirmed present in the layer env).
+- `ws-rpc-models.test.ts` confirmed to need no expectation changes (per-field assertions).
+
+Notable confirmations: inline `Effect.try` beats exporting the module-private `saveRelaySettingsEffect`; `ToggleSetting` props match plan markup exactly; `ToastVariant` fix valid. Remaining notes are Accept-level only. **Audit clean.**
+
 ## Accept (informational highlights — no plan change)
 
 - Task 1 fully clean; merge semantics and tests verified against real code.
