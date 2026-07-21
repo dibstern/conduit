@@ -141,9 +141,11 @@ git commit -m "feat(relay): persist hiddenModels/hiddenAgents in relay settings"
 
 **Files:**
 - Modify: `src/lib/contracts/ws-rpc.ts` (`GetModelsResponseSchema` ~line 163, `GetAgentsResponseSchema` ~line 268, tagged-request section ~line 654, request list ~line 977, `WsRpcGroup` ~line 1027)
+- Modify: `src/lib/frontend/transport/ws-rpc.ts` (hand-maintained re-export barrel — `ws-rpc-client.ts` imports response types from here, NOT from contracts)
 - Modify: `src/lib/shared-types.ts` (push schemas ~line 778, message-type list ~line 1159, `RelayMessage` union ~line 1361)
+- Test: `test/unit/schema/relay-message.test.ts` (decode assertion — see Step 3a)
 
-No unit test — these are schema declarations; `pnpm check` is the verification, and Tasks 3–4 exercise them.
+`pnpm check` alone is NOT sufficient here: the `RelayMessageSchema` union has no compile-time link to the message-type string list, and the frontend boundary (`effect-boundary.ts:52-65`) throws `ProtocolDecodeError` at runtime for a known type missing from the schema union. Step 3a's test closes that gap.
 
 **Step 1: Extend response schemas** in `src/lib/contracts/ws-rpc.ts`:
 
@@ -201,6 +203,8 @@ export type SetHiddenEntriesResponse = typeof SetHiddenEntriesResponseSchema.Typ
 
 Register `SetHiddenEntries` in BOTH the request list (~line 977–985 block, next to `SetDefaultModel`) and `WsRpcGroup` (`Rpc.fromTaggedRequest(SetHiddenEntries)` next to the `SetDefaultModel` entry ~line 1036). Mirror exactly how `SetDefaultModel` appears in each place.
 
+**Step 2a: Update the frontend transport barrel.** `src/lib/frontend/transport/ws-rpc.ts` is an explicit re-export list that `ws-rpc-client.ts` imports from. Add `SetHiddenEntriesResponse` (and `SetHiddenEntries` if the barrel re-exports request classes — mirror exactly what it does for `SetDefaultModel`/`SetDefaultModelResponse`).
+
 **Step 3: Add the push message** in `src/lib/shared-types.ts`. After `AgentListSchema` (~line 788):
 
 ```ts
@@ -220,15 +224,28 @@ Then wire it everywhere the sibling messages appear (find each by searching for 
 | { type: "visibility_info"; hiddenModels: string[]; hiddenAgents: string[] }
 ```
 
-**Step 4: Typecheck**
+CRITICAL: `VisibilityInfoSchema` must be added to the `RelayMessageSchema` runtime union — forgetting it still passes `pnpm check` but makes every client throw `ProtocolDecodeError` on the first broadcast.
+
+**Step 3a: Add a decode regression test.** In `test/unit/schema/relay-message.test.ts` (follow the file's existing decode-assertion pattern for a sibling message like `agent_list`), add:
+
+```ts
+it("decodes visibility_info messages", () => {
+	// decode via the same helper/schema the file already uses, e.g.:
+	// expect(decodeRelayMessage({ type: "visibility_info", hiddenModels: ["a/b"], hiddenAgents: ["c/d"] }))
+	//   .toEqual({ type: "visibility_info", hiddenModels: ["a/b"], hiddenAgents: ["c/d"] })
+});
+```
+
+**Step 4: Typecheck + schema test**
 
 Run: `bash -o pipefail -c 'pnpm check 2>&1 | tail -c 800'`
-Expected: clean. (If `shared-types.ts` has an exhaustive frontend dispatch switch, Task 4 adds the case; a temporary unhandled-message-type error here is acceptable only if `pnpm check` still passes — otherwise add a no-op dispatch case now and replace it in Task 4.)
+Run: `pnpm vitest run test/unit/schema/relay-message.test.ts 2>&1 | tail -c 800`
+Expected: clean / PASS. (If `shared-types.ts` has an exhaustive frontend dispatch switch, Task 4 adds the case; a temporary unhandled-message-type error here is acceptable only if `pnpm check` still passes — otherwise add a no-op dispatch case now and replace it in Task 4.)
 
 **Step 5: Commit**
 
 ```bash
-git add src/lib/contracts/ws-rpc.ts src/lib/shared-types.ts
+git add src/lib/contracts/ws-rpc.ts src/lib/frontend/transport/ws-rpc.ts src/lib/shared-types.ts test/unit/schema/relay-message.test.ts
 git commit -m "feat(contracts): SetHiddenEntries rpc + visibility_info push message"
 ```
 
@@ -239,7 +256,10 @@ git commit -m "feat(contracts): SetHiddenEntries rpc + visibility_info push mess
 **Files:**
 - Create: `src/lib/handlers/visibility.ts`
 - Modify: `src/lib/server/ws-rpc.ts` (`GetModels` handler ~line 696, `GetAgents` handler ~line 174, new `SetHiddenEntries` entry next to `SetDefaultModel` ~line 539)
+- Modify: `test/unit/server/ws-rpc-agents.test.ts` (its `toEqual` on the full GetAgents response at ~line 32 breaks when `hiddenAgents` is added — update expectations)
 - Test: `test/unit/handlers/visibility.test.ts`
+
+**Test isolation warning:** `makeMockConfig` in `test/helpers/mock-factories.ts` defaults `configDir` to `undefined`, which makes `getHiddenEntries` read the developer's REAL `~/.conduit/settings.jsonc`. Every test touching these handlers must stub `ConfigTag` with a tempdir `configDir`.
 
 **Step 1: Write the failing test**
 
@@ -318,7 +338,12 @@ export const setHiddenEntriesForRelay = (input: SetHiddenEntriesInput) =>
 		const log = yield* LoggerTag;
 		const config = yield* ConfigTag;
 
-		yield* Effect.sync(() =>
+		// Effect.try, NOT Effect.sync: an fs throw must surface as a typed failure
+		// that the RPC entry's Effect.catchAll can convert to WsRpcError (an
+		// Effect.sync throw becomes an uncatchable defect). This mirrors
+		// saveRelaySettingsEffect in src/lib/handlers/model.ts:41-48 — reuse or
+		// extract that helper if it fits.
+		yield* Effect.try(() =>
 			saveRelaySettings(
 				{
 					...(input.hiddenModels !== undefined
@@ -398,18 +423,20 @@ SetHiddenEntries: (request) =>
 
 **Step 6: Typecheck + regression**
 
+The tests that actually cover the edited handlers are `ws-rpc-agents.test.ts` and `ws-rpc-models.test.ts`. Update `test/unit/server/ws-rpc-agents.test.ts` first: its full-response `toEqual` (~line 32) must now expect `hiddenAgents: []` — and give the stubbed `ConfigTag` a tempdir `configDir` so the assertion doesn't depend on the developer's real settings file. Check `ws-rpc-models.test.ts` for the same pattern on GetModels.
+
 Run: `bash -o pipefail -c 'pnpm check 2>&1 | tail -c 800'`
-Run: `pnpm vitest run test/unit/server/ws-rpc-default-model.test.ts test/unit/server/ws-rpc-model-switch.test.ts 2>&1 | tail -c 800`
-Expected: clean / PASS (these cover the RPC handler table we edited).
+Run: `pnpm vitest run test/unit/server/ws-rpc-agents.test.ts test/unit/server/ws-rpc-models.test.ts 2>&1 | tail -c 800`
+Expected: clean / PASS.
 
 **Step 7: Commit**
 
 ```bash
-git add src/lib/handlers/visibility.ts src/lib/server/ws-rpc.ts test/unit/handlers/visibility.test.ts
+git add src/lib/handlers/visibility.ts src/lib/server/ws-rpc.ts test/unit/handlers/visibility.test.ts test/unit/server/ws-rpc-agents.test.ts test/unit/server/ws-rpc-models.test.ts
 git commit -m "feat(server): SetHiddenEntries rpc handler with visibility_info broadcast"
 ```
 
-**Coverage rationale:** persist+broadcast+return, partial-update semantics, empty default. Regression: the two existing ws-rpc server test files re-run because we touched the handler table.
+**Coverage rationale:** persist+broadcast+return, partial-update semantics, empty default, fs-failure surfaced as WsRpcError (via Effect.try). Regression: `ws-rpc-agents`/`ws-rpc-models` re-run because they cover the edited GetAgents/GetModels handlers.
 
 ---
 
@@ -455,6 +482,18 @@ describe("visibility filtering", () => {
 	it("handleVisibilityInfo updates state and clearDiscoveryState resets it", () => {
 		// handleVisibilityInfo({type:"visibility_info", hiddenModels:["a/b"], hiddenAgents:["c/d"]})
 		// expect discoveryState.hiddenModels/hiddenAgents set; after clearDiscoveryState() both []
+	});
+
+	// RPC-reply paths (applyGetModelsResponse / applyGetAgentsResponse)
+	it("applyGetModelsResponse with hiddenModels populates state", () => {
+		// response including hiddenModels: ["openai/gpt-4o"] => discoveryState.hiddenModels === ["openai/gpt-4o"]
+	});
+	it("applyGetAgentsResponse with hiddenAgents populates state", () => {
+		// response including hiddenAgents: ["opencode/plan"] => discoveryState.hiddenAgents === ["opencode/plan"]
+	});
+	it("responses omitting hidden fields leave existing hidden state untouched", () => {
+		// pre-set discoveryState.hiddenModels/hiddenAgents, then apply responses WITHOUT the
+		// optional fields (old-server shape) => state unchanged (the `if (response.hiddenX)` guards)
 	});
 });
 ```
@@ -586,7 +625,7 @@ const allGroups = $derived(getVisibleProviderGroups());
 
 Swap `getProviderGroups` → `getVisibleProviderGroups` in the import.
 
-**Step 3: RPC client.** In `src/lib/frontend/transport/ws-rpc-client.ts`, mirror the `SetDefaultModel` plumbing exactly (input type, `callSetHiddenEntries` following the `callSetLogLevel` shape at ~line 1008, exported async wrapper next to `getModelsRpc` at ~line 1027):
+**Step 3: RPC client.** In `src/lib/frontend/transport/ws-rpc-client.ts`, mirror the `SetDefaultModel` plumbing exactly (input type, `callSetHiddenEntries` following the RESPONSE-RETURNING helper shape of `callGetModels`/`callSetDefaultModel` — NOT `callSetLogLevel`, which yields without `return` and discards the response — exported async wrapper next to `getModelsRpc` at ~line 1027):
 
 ```ts
 export interface SetHiddenEntriesRpcInput {
@@ -616,7 +655,7 @@ export async function setHiddenEntriesRpc(
 }
 ```
 
-(Import `SetHiddenEntriesResponse` where the other response types are imported. If existing input types in this file are declared differently — e.g. derived from the request payload — follow that convention instead.)
+(Import `SetHiddenEntriesResponse` from `./ws-rpc.js` — the transport barrel updated in Task 2 Step 2a — exactly where the other response types are imported. If existing input types in this file are declared differently — e.g. derived from the request payload — follow that convention instead.)
 
 **Step 4: Typecheck**
 
@@ -651,8 +690,6 @@ No new unit test — this is declarative markup over already-tested store getter
 
 ```ts
 // ─── Agents & Models visibility ─────────────────────────────────────────
-let visibilityBusy = $state(false);
-
 const hiddenModelSet = $derived(new Set(discoveryState.hiddenModels));
 const hiddenAgentSet = $derived(new Set(discoveryState.hiddenAgents));
 const agentScopeId = $derived(discoveryState.agentProviderScope?.id ?? null);
@@ -670,26 +707,27 @@ $effect(() => {
 	}
 });
 
+// No busy-guard by design (user decision): every call sends the ABSOLUTE hidden
+// lists computed from current state, so rapid toggles are last-write-wins safe;
+// a guard would silently drop input and desync the toggles.
 async function persistHidden(update: {
 	hiddenModels?: string[];
 	hiddenAgents?: string[];
 }): Promise<void> {
 	const slug = getCurrentSlug();
-	if (!slug || visibilityBusy) return;
+	if (!slug) return;
 	const prevModels = discoveryState.hiddenModels;
 	const prevAgents = discoveryState.hiddenAgents;
 	// Optimistic update; the visibility_info broadcast confirms it.
 	if (update.hiddenModels) discoveryState.hiddenModels = update.hiddenModels;
 	if (update.hiddenAgents) discoveryState.hiddenAgents = update.hiddenAgents;
-	visibilityBusy = true;
 	try {
 		await setHiddenEntriesRpc({ projectSlug: slug, ...update });
 	} catch {
 		discoveryState.hiddenModels = prevModels;
 		discoveryState.hiddenAgents = prevAgents;
-		showToast("Failed to save visibility settings", "error");
-	} finally {
-		visibilityBusy = false;
+		// NOTE: showToast's 2nd arg is an options object; valid variants are "default" | "warn".
+		showToast("Failed to save visibility settings", { variant: "warn" });
 	}
 }
 
@@ -725,7 +763,9 @@ function toggleAgent(agentId: string): void {
 
 (`showToast` is already imported in this file. Match the file's `$effect`/handler style; if `getCurrentSlug` is already imported, don't duplicate.)
 
-**Step 3: Tab content markup.** Add a `{:else if activeTab === "visibility"}` branch following the Appearance section's visual language (section headers `text-xs font-semibold uppercase tracking-widest text-text-muted`, rows in `bg-bg-surface border border-border rounded-[10px]`):
+**Step 3: Tab content markup.** Add a `{:else if activeTab === "visibility"}` branch following the Appearance section's visual language (section headers `text-xs font-semibold uppercase tracking-widest text-text-muted`, rows in `bg-bg-surface border border-border rounded-[10px]`).
+
+**Use `ToggleSetting` rows, not native checkboxes** (user decision — visual consistency with the rest of the panel). `ToggleSetting` is already imported in this file; read `src/lib/frontend/components/shared/ToggleSetting.svelte` first and reuse its `label`/`checked`/`onchange`/`class` props, omitting `icon`/`description` for compact rows. Adapt the sketch below accordingly — replace each `<label><input type="checkbox">…</label>` row with a compact `ToggleSetting` (e.g. `class="px-2 py-1 gap-3 font-brand"` tuned to match the panel):
 
 ```svelte
 {:else if activeTab === "visibility"}
@@ -750,14 +790,12 @@ function toggleAgent(agentId: string): void {
 				</div>
 				<div class="space-y-1 bg-bg-surface border border-border rounded-[10px] px-4 py-2">
 					{#each provider.models as model (model.id)}
-						<label class="flex items-center gap-3 py-1.5 cursor-pointer text-sm text-text font-brand">
-							<input
-								type="checkbox"
-								checked={!hiddenModelSet.has(`${provider.id}/${model.id}`)}
-								onchange={() => toggleModel(provider.id, model.id)}
-							/>
-							<span>{model.name || model.id}</span>
-						</label>
+						<ToggleSetting
+							label={model.name || model.id}
+							checked={!hiddenModelSet.has(`${provider.id}/${model.id}`)}
+							onchange={() => toggleModel(provider.id, model.id)}
+							class="py-1.5 gap-3 font-brand"
+						/>
 					{/each}
 				</div>
 			</div>
@@ -771,14 +809,12 @@ function toggleAgent(agentId: string): void {
 				</div>
 				<div class="space-y-1 bg-bg-surface border border-border rounded-[10px] px-4 py-2">
 					{#each discoveryState.agents as agent (agent.id)}
-						<label class="flex items-center gap-3 py-1.5 cursor-pointer text-sm text-text font-brand">
-							<input
-								type="checkbox"
-								checked={!hiddenAgentSet.has(`${agentScopeId}/${agent.id}`)}
-								onchange={() => toggleAgent(agent.id)}
-							/>
-							<span>{agent.name || agent.id}</span>
-						</label>
+						<ToggleSetting
+							label={agent.name || agent.id}
+							checked={!hiddenAgentSet.has(`${agentScopeId}/${agent.id}`)}
+							onchange={() => toggleAgent(agent.id)}
+							class="py-1.5 gap-3 font-brand"
+						/>
 					{/each}
 				</div>
 			</div>
