@@ -1,6 +1,7 @@
 <!-- ─── Settings Panel ────────────────────────────────────────────────────── -->
 <!-- Modal settings panel with tabbed navigation. Uses the 68-mockup card   -->
-<!-- design. Tabs: Notifications, Appearance, Instances, Debug.             -->
+<!-- design. Tabs: Notifications, Appearance, Agents & Models, Instances,   -->
+<!-- Debug.                                                                 -->
 
 <script lang="ts">
 	import { untrack } from "svelte";
@@ -24,6 +25,11 @@
 		isScanInFlight,
 	} from "../../stores/instance.svelte.js";
 	import { confirm, showToast } from "../../stores/ui.svelte.js";
+	import {
+		applyGetAgentsResponse,
+		applyGetModelsResponse,
+		discoveryState,
+	} from "../../stores/discovery.svelte.js";
 	import { copyToClipboard } from "../../utils/clipboard.js";
 	import { featureFlags, toggleFeature } from "../../stores/feature-flags.svelte.js";
 	import {
@@ -40,9 +46,12 @@
 	import { getCurrentSlug } from "../../stores/router.svelte.js";
 	import {
 		detectProxyRpc,
+		getAgentsRpc,
+		getModelsRpc,
 		removeInstanceRpc,
 		renameInstanceRpc,
 		scanNowRpc,
+		setHiddenEntriesRpc,
 		startInstanceRpc,
 		stopInstanceRpc,
 	} from "../../transport/ws-rpc-client.js";
@@ -278,6 +287,89 @@
 		saveNotifSettings(notifSettings);
 	}
 
+	// ─── Agents & Models visibility ─────────────────────────────────────────
+
+	const hiddenModelSet = $derived(new Set(discoveryState.hiddenModels));
+	const hiddenAgentSet = $derived(new Set(discoveryState.hiddenAgents));
+	const agentScopeId = $derived(discoveryState.agentProviderScope?.id ?? null);
+	const modelProviders = $derived(
+		discoveryState.providers.filter((p) => p.models.length > 0),
+	);
+	let modelsFetchPending = $state(false);
+
+	// Lazy-load lists when the tab opens with empty discovery state.
+	$effect(() => {
+		if (!visible || activeTab !== "visibility") return;
+		const projectSlug = getCurrentSlug();
+		if (!projectSlug) return;
+		if (discoveryState.providers.length === 0) {
+			modelsFetchPending = true;
+			void getModelsRpc({ projectSlug })
+				.then(applyGetModelsResponse)
+				.catch((err) => log.warn("Visibility models fetch failed:", err))
+				.finally(() => {
+					modelsFetchPending = false;
+				});
+		}
+		if (discoveryState.agents.length === 0) {
+			void getAgentsRpc({ projectSlug })
+				.then(applyGetAgentsResponse)
+				.catch((err) => log.warn("Visibility agents fetch failed:", err));
+		}
+	});
+
+	// No busy-guard by design: every call sends the ABSOLUTE hidden lists
+	// computed from current state, so rapid toggles are last-write-wins safe;
+	// a guard would silently drop input and desync the toggles.
+	async function persistHidden(update: {
+		hiddenModels?: string[];
+		hiddenAgents?: string[];
+	}): Promise<void> {
+		const projectSlug = getRpcProjectSlug();
+		if (!projectSlug) return;
+		const prevModels = discoveryState.hiddenModels;
+		const prevAgents = discoveryState.hiddenAgents;
+		// Optimistic update; the visibility_info broadcast confirms it.
+		if (update.hiddenModels) discoveryState.hiddenModels = update.hiddenModels;
+		if (update.hiddenAgents) discoveryState.hiddenAgents = update.hiddenAgents;
+		try {
+			await setHiddenEntriesRpc({ projectSlug, ...update });
+		} catch {
+			discoveryState.hiddenModels = prevModels;
+			discoveryState.hiddenAgents = prevAgents;
+			showToast("Failed to save visibility settings", { variant: "warn" });
+		}
+	}
+
+	function toggleModel(providerId: string, modelId: string): void {
+		const key = `${providerId}/${modelId}`;
+		const next = new Set(discoveryState.hiddenModels);
+		if (next.has(key)) next.delete(key);
+		else next.add(key);
+		void persistHidden({ hiddenModels: [...next] });
+	}
+
+	function toggleProviderAll(providerId: string, hide: boolean): void {
+		const provider = discoveryState.providers.find((p) => p.id === providerId);
+		if (!provider) return;
+		const next = new Set(discoveryState.hiddenModels);
+		for (const m of provider.models) {
+			const key = `${providerId}/${m.id}`;
+			if (hide) next.add(key);
+			else next.delete(key);
+		}
+		void persistHidden({ hiddenModels: [...next] });
+	}
+
+	function toggleAgent(agentId: string): void {
+		if (!agentScopeId) return;
+		const key = `${agentScopeId}/${agentId}`;
+		const next = new Set(discoveryState.hiddenAgents);
+		if (next.has(key)) next.delete(key);
+		else next.add(key);
+		void persistHidden({ hiddenAgents: [...next] });
+	}
+
 	// ─── Backdrop / escape ──────────────────────────────────────────────────
 
 	function handleBackdropClick(e: MouseEvent) {
@@ -319,6 +411,7 @@
 				{#each [
 					{ id: "notifications", label: "Alerts" },
 					{ id: "appearance", label: "Theme" },
+					{ id: "visibility", label: "Agents & Models" },
 					{ id: "instances", label: "Instances" },
 					{ id: "debug", label: "Debug" },
 				] as tab}
@@ -409,6 +502,65 @@
 								</div>
 							{/if}
 						{/each}
+					</div>
+
+				<!-- ═══ Agents & Models ═══ -->
+				{:else if activeTab === "visibility"}
+					<div class="space-y-4">
+						<div class="px-1 text-xs text-text-muted font-brand">
+							Unchecked items are hidden from the input-area dropdowns. New
+							models and agents appear automatically.
+						</div>
+
+						<!-- Models -->
+						{#if modelProviders.length === 0}
+							<div class="px-1 text-xs text-text-muted font-brand">
+								{modelsFetchPending ? "Loading models…" : "No models available"}
+							</div>
+						{/if}
+						{#each modelProviders as provider (provider.id)}
+							{@const allHidden = provider.models.every((m) => hiddenModelSet.has(`${provider.id}/${m.id}`))}
+							<div>
+								<div class="flex items-center justify-between px-1 mb-2">
+									<div class="text-xs font-semibold uppercase tracking-widest text-text-muted font-brand">{provider.name}</div>
+									<button
+										class="text-xs text-text-muted hover:text-text cursor-pointer border-none bg-transparent font-brand"
+										onclick={() => toggleProviderAll(provider.id, !allHidden)}
+									>
+										{allHidden ? "Show all" : "Hide all"}
+									</button>
+								</div>
+								<div class="space-y-1 bg-bg-surface border border-border rounded-[10px] px-4 py-2">
+									{#each provider.models as model (model.id)}
+										<ToggleSetting
+											label={model.name || model.id}
+											checked={!hiddenModelSet.has(`${provider.id}/${model.id}`)}
+											onchange={() => toggleModel(provider.id, model.id)}
+											class="py-1.5 gap-3 font-brand border-none bg-transparent"
+										/>
+									{/each}
+								</div>
+							</div>
+						{/each}
+
+						<!-- Agents (current provider scope only) -->
+						{#if agentScopeId && discoveryState.agents.length > 0}
+							<div>
+								<div class="text-xs font-semibold uppercase tracking-widest text-text-muted px-1 mb-2 font-brand">
+									{discoveryState.agentProviderScope?.name} agents
+								</div>
+								<div class="space-y-1 bg-bg-surface border border-border rounded-[10px] px-4 py-2">
+									{#each discoveryState.agents as agent (agent.id)}
+										<ToggleSetting
+											label={agent.name || agent.id}
+											checked={!hiddenAgentSet.has(`${agentScopeId}/${agent.id}`)}
+											onchange={() => toggleAgent(agent.id)}
+											class="py-1.5 gap-3 font-brand border-none bg-transparent"
+										/>
+									{/each}
+								</div>
+							</div>
+						{/if}
 					</div>
 
 				<!-- ═══ Instances ═══ -->
