@@ -208,4 +208,64 @@ describe("relay-settings", () => {
 			});
 		});
 	});
+
+	describe("hidden entries persistence", () => {
+		it("saves and loads hiddenModels and hiddenAgents", () => {
+			saveRelaySettings(
+				{
+					hiddenModels: ["openai/gpt-4o", "claude/claude-haiku-4"],
+					hiddenAgents: ["opencode/plan"],
+				},
+				tempDir,
+			);
+			const settings = loadRelaySettings(tempDir);
+			expect(settings.hiddenModels).toEqual([
+				"openai/gpt-4o",
+				"claude/claude-haiku-4",
+			]);
+			expect(settings.hiddenAgents).toEqual(["opencode/plan"]);
+		});
+
+		it("replaces (not merges) hidden lists on save", () => {
+			saveRelaySettings({ hiddenModels: ["a/b", "c/d"] }, tempDir);
+			saveRelaySettings({ hiddenModels: ["e/f"] }, tempDir);
+			expect(loadRelaySettings(tempDir).hiddenModels).toEqual(["e/f"]);
+		});
+
+		it("clears a hidden list when saving an empty array", () => {
+			saveRelaySettings({ hiddenAgents: ["opencode/plan"] }, tempDir);
+			saveRelaySettings({ hiddenAgents: [] }, tempDir);
+			expect(loadRelaySettings(tempDir).hiddenAgents).toEqual([]);
+		});
+
+		it("preserves hidden lists when saving unrelated fields", () => {
+			saveRelaySettings({ hiddenModels: ["a/b"] }, tempDir);
+			saveRelaySettings({ defaultModel: "openai/gpt-4o" }, tempDir);
+			const settings = loadRelaySettings(tempDir);
+			expect(settings.hiddenModels).toEqual(["a/b"]);
+			expect(settings.defaultModel).toBe("openai/gpt-4o");
+		});
+
+		it("preserves defaultModel/defaultVariants when saving hidden lists", () => {
+			saveRelaySettings(
+				{
+					defaultModel: "openai/gpt-4o",
+					defaultVariants: { "openai/gpt-4o": "high" },
+				},
+				tempDir,
+			);
+			saveRelaySettings({ hiddenModels: ["a/b"] }, tempDir);
+			const settings = loadRelaySettings(tempDir);
+			expect(settings.defaultModel).toBe("openai/gpt-4o");
+			expect(settings.defaultVariants).toEqual({ "openai/gpt-4o": "high" });
+			expect(settings.hiddenModels).toEqual(["a/b"]);
+		});
+
+		it("returns undefined hidden lists when never saved", () => {
+			saveRelaySettings({ defaultModel: "a/b" }, tempDir);
+			const settings = loadRelaySettings(tempDir);
+			expect(settings.hiddenModels).toBeUndefined();
+			expect(settings.hiddenAgents).toBeUndefined();
+		});
+	});
 });

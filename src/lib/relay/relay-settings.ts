@@ -12,6 +12,10 @@ import { DEFAULT_CONFIG_DIR } from "../env.js";
 export interface RelaySettings {
 	defaultModel?: string;
 	defaultVariants?: Record<string, string>;
+	/** Model keys ("<providerId>/<modelId>") hidden from the model dropdown. */
+	hiddenModels?: string[];
+	/** Agent keys ("<scopeId>/<agentId>") hidden from the agent dropdown. */
+	hiddenAgents?: string[];
 }
 
 // ─── Constants ──────────────────────────────────────────────────────────────
@@ -71,6 +75,15 @@ export function saveRelaySettings(
 			...existing.defaultVariants,
 			...settings.defaultVariants,
 		};
+	}
+
+	// Hidden lists use replace semantics: a provided array wins wholesale,
+	// including an empty array (which clears the list).
+	if (settings.hiddenModels !== undefined) {
+		merged.hiddenModels = [...settings.hiddenModels];
+	}
+	if (settings.hiddenAgents !== undefined) {
+		merged.hiddenAgents = [...settings.hiddenAgents];
 	}
 
 	const tmpPath = join(dir, `.${SETTINGS_FILE}.tmp`);
