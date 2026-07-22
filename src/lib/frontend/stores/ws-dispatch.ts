@@ -76,6 +76,7 @@ import {
 	handleModelList,
 	handlePermissionModeInfo,
 	handleVariantInfo,
+	handleVisibilityInfo,
 } from "./discovery.svelte.js";
 import { handleFileTree } from "./file-tree.svelte.js";
 import {
@@ -874,6 +875,9 @@ export function handleMessage(msg: RelayMessage): void {
 			break;
 		case "model_list":
 			handleModelList(msg);
+			break;
+		case "visibility_info":
+			handleVisibilityInfo(msg);
 			break;
 		case "model_info":
 			handleModelInfo(msg);

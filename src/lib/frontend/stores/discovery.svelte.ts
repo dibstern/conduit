@@ -98,6 +98,10 @@ export const discoveryState = $state({
 	currentContextWindow: "" as string,
 	availableContextWindowOptions: [] as ReadonlyArray<ContextWindowOption>,
 	permissionMode: "ask" as SessionPermissionMode,
+	/** Global hide-list keys: model `<providerId>/<modelId>`. */
+	hiddenModels: [] as string[],
+	/** Global hide-list keys: agent `<scopeId>/<agentId>`. */
+	hiddenAgents: [] as string[],
 });
 
 // ─── Derived getters ────────────────────────────────────────────────────────
@@ -131,6 +135,36 @@ export function getProviderGroups(): ProviderGroup[] {
 	return discoveryState.providers
 		.filter((p) => p.models.length > 0)
 		.map((p) => ({ provider: p, models: p.models }));
+}
+
+/** Agents visible in the dropdown after applying the global hide-list.
+ *  Never-brick: if filtering would leave zero agents, show all. */
+export function getVisibleAgents(): AgentInfo[] {
+	const scopeId = discoveryState.agentProviderScope?.id;
+	if (!scopeId || discoveryState.hiddenAgents.length === 0) {
+		return discoveryState.agents;
+	}
+	const hidden = new Set(discoveryState.hiddenAgents);
+	const visible = discoveryState.agents.filter(
+		(a) => !hidden.has(`${scopeId}/${a.id}`),
+	);
+	return visible.length > 0 ? visible : discoveryState.agents;
+}
+
+/** Provider groups visible in the dropdown after applying the global hide-list.
+ *  Groups with zero visible models are dropped.
+ *  Never-brick: if filtering would leave zero models overall, show all. */
+export function getVisibleProviderGroups(): ProviderGroup[] {
+	const all = getProviderGroups();
+	if (discoveryState.hiddenModels.length === 0) return all;
+	const hidden = new Set(discoveryState.hiddenModels);
+	const filtered = all
+		.map((g) => ({
+			provider: g.provider,
+			models: g.models.filter((m) => !hidden.has(`${g.provider.id}/${m.id}`)),
+		}))
+		.filter((g) => g.models.length > 0);
+	return filtered.length > 0 ? filtered : all;
 }
 
 // ─── Pure helpers ───────────────────────────────────────────────────────────
@@ -221,6 +255,9 @@ export function applyGetAgentsResponse(response: GetAgentsResponse): void {
 			? { activeAgentId: response.activeAgentId }
 			: {}),
 	});
+	if (response.hiddenAgents) {
+		discoveryState.hiddenAgents = [...response.hiddenAgents];
+	}
 }
 
 export function handleModelList(
@@ -267,6 +304,9 @@ export function applyGetModelsResponse(response: GetModelsResponse): void {
 			type: "permission_mode_info",
 			mode: response.permissionMode,
 		});
+	}
+	if (response.hiddenModels) {
+		discoveryState.hiddenModels = [...response.hiddenModels];
 	}
 }
 
@@ -355,6 +395,15 @@ export function handlePermissionModeInfo(
 	discoveryState.permissionMode = msg.mode;
 }
 
+// ─── Visibility handler ─────────────────────────────────────────────────────
+
+export function handleVisibilityInfo(
+	msg: Extract<RelayMessage, { type: "visibility_info" }>,
+): void {
+	discoveryState.hiddenModels = [...msg.hiddenModels];
+	discoveryState.hiddenAgents = [...msg.hiddenAgents];
+}
+
 /** Clear all discovery state (for project switch). */
 export function clearDiscoveryState(): void {
 	discoveryState.agents = [];
@@ -372,4 +421,6 @@ export function clearDiscoveryState(): void {
 	discoveryState.currentContextWindow = "";
 	discoveryState.availableContextWindowOptions = [];
 	discoveryState.permissionMode = "ask";
+	discoveryState.hiddenModels = [];
+	discoveryState.hiddenAgents = [];
 }
