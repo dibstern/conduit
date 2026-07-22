@@ -6,6 +6,7 @@ import { InstanceManagementServiceTag } from "../domain/relay/Services/instance-
 import { ProjectManagementServiceTag } from "../domain/relay/Services/project-management-service.js";
 import { ScanServiceTag } from "../domain/relay/Services/scan-service.js";
 import {
+	ConfigTag,
 	LoggerTag,
 	WebSocketHandlerTag,
 } from "../domain/relay/Services/services.js";
@@ -44,6 +45,10 @@ import {
 	getTodoState,
 	normalizeProjectTitle,
 } from "../handlers/settings.js";
+import {
+	getHiddenEntries,
+	setHiddenEntriesForRelay,
+} from "../handlers/visibility.js";
 import type { OpenCodeInstance, PermissionId } from "../shared-types.js";
 
 export {
@@ -173,6 +178,7 @@ const broadcastInstanceList = (instances: ReadonlyArray<OpenCodeInstance>) =>
 export const WsRpcServerLayer = WsRpcGroup.toLayer({
 	GetAgents: (request) =>
 		Effect.gen(function* () {
+			const config = yield* ConfigTag;
 			const agentService = yield* AgentServiceTag;
 			const result = yield* agentService.listAgents(request.sessionId);
 			return {
@@ -182,6 +188,7 @@ export const WsRpcServerLayer = WsRpcGroup.toLayer({
 				...(result.activeAgentId != null
 					? { activeAgentId: result.activeAgentId }
 					: {}),
+				hiddenAgents: getHiddenEntries(config.configDir).hiddenAgents,
 			};
 		}).pipe(
 			Effect.catchAll((error) =>
@@ -557,10 +564,24 @@ export const WsRpcServerLayer = WsRpcGroup.toLayer({
 				),
 			),
 		),
-	// TODO(Task 3): replace stub with real persistence + visibility_info broadcast.
-	SetHiddenEntries: () =>
-		Effect.fail(
-			new WsRpcError({ message: "SetHiddenEntries not implemented yet" }),
+	SetHiddenEntries: (request) =>
+		setHiddenEntriesForRelay({
+			clientId: request.originId ?? "rpc",
+			hiddenModels: request.hiddenModels,
+			hiddenAgents: request.hiddenAgents,
+		}).pipe(
+			Effect.map((entries) => ({
+				projectSlug: request.projectSlug,
+				hiddenModels: entries.hiddenModels,
+				hiddenAgents: entries.hiddenAgents,
+			})),
+			Effect.catchAll((error) =>
+				Effect.fail(
+					new WsRpcError({
+						message: `SetHiddenEntries failed: ${String(error)}`,
+					}),
+				),
+			),
 		),
 	ReloadProviderSession: (request) =>
 		reloadProviderSessionForClient({
@@ -699,9 +720,16 @@ export const WsRpcServerLayer = WsRpcGroup.toLayer({
 			),
 		),
 	GetModels: (request) =>
-		getModelsResponse({
-			projectSlug: request.projectSlug,
-			...(request.sessionId != null ? { sessionId: request.sessionId } : {}),
+		Effect.gen(function* () {
+			const config = yield* ConfigTag;
+			const response = yield* getModelsResponse({
+				projectSlug: request.projectSlug,
+				...(request.sessionId != null ? { sessionId: request.sessionId } : {}),
+			});
+			return {
+				...response,
+				hiddenModels: getHiddenEntries(config.configDir).hiddenModels,
+			};
 		}).pipe(
 			Effect.catchAll((error) =>
 				Effect.fail(

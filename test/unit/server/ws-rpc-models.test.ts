@@ -1,3 +1,6 @@
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { RpcTest } from "@effect/rpc";
 import { describe, it } from "@effect/vitest";
 import { Effect, Layer } from "effect";
@@ -9,6 +12,7 @@ import {
 } from "../../../src/lib/domain/relay/Services/session-overrides-state.js";
 import { WsRpcServerLayer } from "../../../src/lib/server/ws-rpc.js";
 import {
+	makeMockConfig,
 	makeMockOpenCodeAPI,
 	makeTestHandlerLayer,
 } from "../../helpers/mock-factories.js";
@@ -130,7 +134,13 @@ describe("WsRpcServerLayer GetModels", () => {
 				Effect.provide(
 					WsRpcServerLayer.pipe(
 						Layer.provideMerge(
-							makeTestHandlerLayer({ api, orchestrationEngine }),
+							makeTestHandlerLayer({
+								api,
+								orchestrationEngine,
+								config: makeMockConfig({
+									configDir: mkdtempSync(join(tmpdir(), "conduit-rpc-models-")),
+								}),
+							}),
 						),
 					),
 				),
