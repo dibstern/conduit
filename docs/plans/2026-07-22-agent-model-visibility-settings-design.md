@@ -43,6 +43,13 @@ Absent or empty means everything is visible.
   persists via `saveRelaySettings`, then rebroadcasts `model_list` /
   `agent_list` so all connected clients update live.
 
+> **As implemented:** live updates use a dedicated `visibility_info` push
+> message instead of rebroadcasting `model_list`/`agent_list` (`agent_list` is
+> per-client provider-scoped, so a global rebroadcast would be wrong). Broadcasts
+> go through the per-project relay, so an already-open tab on a *different*
+> project picks the change up on its next connect/refetch rather than instantly —
+> eventually consistent, acceptable for a single-user daemon.
+
 ### 3. Frontend filtering
 
 `discoveryState` (`src/lib/frontend/stores/discovery.svelte.ts`) stores the
