@@ -167,6 +167,7 @@ export const GetModelsResponseSchema = Schema.Struct({
 	variant: Schema.optional(VariantInfoSchema),
 	contextWindow: Schema.optional(ContextWindowInfoSchema),
 	permissionMode: Schema.optional(SessionPermissionModeSchema),
+	hiddenModels: Schema.optional(Schema.Array(Schema.String)),
 });
 
 export const SwitchContextWindowResponseSchema = Schema.Struct({
@@ -184,6 +185,12 @@ export const SwitchModelResponseSchema = Schema.Struct({
 });
 
 export const SetDefaultModelResponseSchema = SwitchModelResponseSchema;
+
+export const SetHiddenEntriesResponseSchema = Schema.Struct({
+	projectSlug: Schema.String,
+	hiddenModels: Schema.Array(Schema.String),
+	hiddenAgents: Schema.Array(Schema.String),
+});
 
 export const ReloadProviderSessionResponseSchema = Schema.Struct({
 	projectSlug: Schema.String,
@@ -270,6 +277,7 @@ export const GetAgentsResponseSchema = Schema.Struct({
 	providerScope: AgentProviderScopeSchema,
 	agents: Schema.Array(AgentInfoSchema),
 	activeAgentId: Schema.optional(Schema.String),
+	hiddenAgents: Schema.optional(Schema.Array(Schema.String)),
 });
 
 export const GetCommandsResponseSchema = Schema.Struct({
@@ -378,6 +386,8 @@ export type SwitchContextWindowResponse =
 	typeof SwitchContextWindowResponseSchema.Type;
 export type SwitchModelResponse = typeof SwitchModelResponseSchema.Type;
 export type SetDefaultModelResponse = typeof SetDefaultModelResponseSchema.Type;
+export type SetHiddenEntriesResponse =
+	typeof SetHiddenEntriesResponseSchema.Type;
 export type ReloadProviderSessionResponse =
 	typeof ReloadProviderSessionResponseSchema.Type;
 export type SwitchVariantResponse = typeof SwitchVariantResponseSchema.Type;
@@ -660,6 +670,20 @@ export class SetDefaultModel extends Schema.TaggedRequest<SetDefaultModel>()(
 			projectSlug: NonEmptyString,
 			model: NonEmptyString,
 			provider: NonEmptyString,
+			originId: Schema.optional(NonEmptyString),
+		},
+	},
+) {}
+
+export class SetHiddenEntries extends Schema.TaggedRequest<SetHiddenEntries>()(
+	"SetHiddenEntries",
+	{
+		failure: WsRpcError,
+		success: SetHiddenEntriesResponseSchema,
+		payload: {
+			projectSlug: NonEmptyString,
+			hiddenModels: Schema.optional(Schema.Array(Schema.String)),
+			hiddenAgents: Schema.optional(Schema.Array(Schema.String)),
 			originId: Schema.optional(NonEmptyString),
 		},
 	},
@@ -983,6 +1007,7 @@ export const WsRpcRequest = Schema.Union(
 	SwitchContextWindow,
 	SwitchModel,
 	SetDefaultModel,
+	SetHiddenEntries,
 	ReloadProviderSession,
 	RenameSession,
 	SwitchVariant,
@@ -1034,6 +1059,7 @@ export const WsRpcGroup = RpcGroup.make(
 	Rpc.fromTaggedRequest(SwitchContextWindow),
 	Rpc.fromTaggedRequest(SwitchModel),
 	Rpc.fromTaggedRequest(SetDefaultModel),
+	Rpc.fromTaggedRequest(SetHiddenEntries),
 	Rpc.fromTaggedRequest(ReloadProviderSession),
 	Rpc.fromTaggedRequest(RenameSession),
 	Rpc.fromTaggedRequest(SwitchVariant),

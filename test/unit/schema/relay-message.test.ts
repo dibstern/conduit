@@ -59,6 +59,16 @@ describe("RelayMessage Schema", () => {
 		).toBe(true);
 	});
 
+	it("decodes visibility_info messages", () => {
+		const raw = {
+			type: "visibility_info",
+			hiddenModels: ["a/b"],
+			hiddenAgents: ["c/d"],
+		};
+		const result = Schema.decodeUnknownEither(RelayMessageSchema)(raw);
+		expect(Either.isRight(result)).toBe(true);
+	});
+
 	it("RelayMessage type is compatible with existing code", () => {
 		const msg: typeof RelayMessageSchema.Type = {
 			type: "delta",

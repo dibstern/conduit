@@ -787,6 +787,12 @@ const AgentListSchema = Schema.Struct({
 	activeAgentId: Schema.optional(Schema.String),
 });
 
+const VisibilityInfoSchema = Schema.Struct({
+	type: Schema.Literal("visibility_info"),
+	hiddenModels: Schema.Array(Schema.String),
+	hiddenAgents: Schema.Array(Schema.String),
+});
+
 const CommandListSchema = Schema.Struct({
 	type: Schema.Literal("command_list"),
 	commands: Schema.Array(CommandInfoSchema),
@@ -1076,6 +1082,7 @@ export const RelayMessageSchema = Schema.Union(
 	DefaultModelInfoSchema,
 	ModelListSchema,
 	AgentListSchema,
+	VisibilityInfoSchema,
 	CommandListSchema,
 	// Projects
 	ProjectListSchema,
@@ -1159,6 +1166,7 @@ export const RELAY_MESSAGE_TYPES = [
 	"default_model_info",
 	"model_list",
 	"agent_list",
+	"visibility_info",
 	"command_list",
 	"project_list",
 	"file_list",
@@ -1365,6 +1373,7 @@ export type RelayMessage =
 			agents: AgentInfo[];
 			activeAgentId?: string;
 	  }
+	| { type: "visibility_info"; hiddenModels: string[]; hiddenAgents: string[] }
 	| { type: "command_list"; commands: CommandInfo[] }
 	// ── Projects ───────────────────────────────────────────────────────────
 	| {

@@ -557,6 +557,11 @@ export const WsRpcServerLayer = WsRpcGroup.toLayer({
 				),
 			),
 		),
+	// TODO(Task 3): replace stub with real persistence + visibility_info broadcast.
+	SetHiddenEntries: () =>
+		Effect.fail(
+			new WsRpcError({ message: "SetHiddenEntries not implemented yet" }),
+		),
 	ReloadProviderSession: (request) =>
 		reloadProviderSessionForClient({
 			clientId: request.originId ?? "rpc",

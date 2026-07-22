@@ -286,6 +286,12 @@ const provideRpc = <A, E>(effect: Effect.Effect<A, E, WsRpcTestEnv>) =>
 						variant: "",
 						variants: [],
 					}),
+				SetHiddenEntries: (request) =>
+					Effect.succeed({
+						projectSlug: request.projectSlug,
+						hiddenModels: request.hiddenModels ?? [],
+						hiddenAgents: request.hiddenAgents ?? [],
+					}),
 				ReloadProviderSession: (request) =>
 					Effect.succeed({
 						projectSlug: request.projectSlug,

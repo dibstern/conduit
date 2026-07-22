@@ -64,6 +64,8 @@ export {
 	type SessionInfo,
 	SetDefaultModel,
 	type SetDefaultModelResponse,
+	SetHiddenEntries,
+	type SetHiddenEntriesResponse,
 	SetLogLevel,
 	SetProjectInstance,
 	StartInstance,
