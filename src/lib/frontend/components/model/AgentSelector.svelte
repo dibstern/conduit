@@ -8,6 +8,7 @@
 		buildAgentTooltip,
 		discoveryState,
 		getActiveAgent,
+		getVisibleAgents,
 		formatAgentLabel,
 	} from "../../stores/discovery.svelte.js";
 	import { getCurrentSlug } from "../../stores/router.svelte.js";
@@ -31,8 +32,8 @@
 
 	// ─── Derived ────────────────────────────────────────────────────────────────
 
-	/** Visible agents — server already filters out hidden/subagent agents. */
-	const visibleAgents = $derived(discoveryState.agents);
+	/** Visible agents — global hide-list applied (server filters subagents). */
+	const visibleAgents = $derived(getVisibleAgents());
 	const providerName = $derived(
 		discoveryState.agentProviderScope?.name ?? "Provider",
 	);

@@ -14,7 +14,7 @@
 		applyGetAgentsResponse,
 		discoveryState,
 		getActiveModel,
-		getProviderGroups,
+		getVisibleProviderGroups,
 		formatModelName,
 		isProviderConfigured,
 	} from "../../stores/discovery.svelte.js";
@@ -39,8 +39,8 @@
 
 	const activeModel = $derived(getActiveModel());
 
-	/** All provider groups (including unconfigured ones that have models). */
-	const allGroups = $derived(getProviderGroups());
+	/** Provider groups with the global hide-list applied. */
+	const visibleGroups = $derived(getVisibleProviderGroups());
 
 	/** Display name for the current model button, with date suffix stripped.
 	 *  Grouped models (Bedrock geo routing) append the active scope label. */
@@ -261,14 +261,14 @@
 		<div
 		class="model-dropdown absolute bottom-[calc(100%+4px)] left-0 min-w-80 max-w-[90vw] max-h-[400px] overflow-y-auto bg-bg-alt border border-border rounded-xl shadow-[0_-4px_24px_rgba(var(--shadow-rgb),0.4)] z-[200] py-1.5 font-brand"
 		>
-			{#if allGroups.length === 0}
+			{#if visibleGroups.length === 0}
 				<div
 					class="model-empty py-4 px-3.5 text-center text-base text-text-dimmer"
 				>
 					No models available
 				</div>
 			{:else}
-				{#each allGroups as group (group.provider.id)}
+				{#each visibleGroups as group (group.provider.id)}
 					<div class={providerSectionClass(group)}>
 						<div
 							class="model-provider-header py-2 px-3.5 pt-2 text-sm font-semibold uppercase tracking-[0.5px] text-text-dimmer"

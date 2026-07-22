@@ -29,6 +29,7 @@ import {
 	type RpcLogLevel,
 	type ScanNowResponse,
 	type SetDefaultModelResponse,
+	type SetHiddenEntriesResponse,
 	type SwitchContextWindowResponse,
 	type SwitchModelResponse,
 	type SwitchPermissionModeResponse,
@@ -233,6 +234,13 @@ export interface SetDefaultModelRpcInput {
 	readonly projectSlug: string;
 	readonly model: string;
 	readonly provider: string;
+	readonly originId?: string;
+}
+
+export interface SetHiddenEntriesRpcInput {
+	readonly projectSlug: string;
+	readonly hiddenModels?: readonly string[];
+	readonly hiddenAgents?: readonly string[];
 	readonly originId?: string;
 }
 
@@ -856,6 +864,24 @@ const callSetDefaultModel = (input: SetDefaultModelRpcInput) =>
 		Effect.provide(RpcSerialization.layerJson),
 	);
 
+const callSetHiddenEntries = (input: SetHiddenEntriesRpcInput) =>
+	Effect.scoped(
+		Effect.gen(function* () {
+			const client = yield* RpcClient.make(WsRpcGroup);
+			return yield* client.SetHiddenEntries({
+				projectSlug: input.projectSlug,
+				...(input.hiddenModels ? { hiddenModels: input.hiddenModels } : {}),
+				...(input.hiddenAgents ? { hiddenAgents: input.hiddenAgents } : {}),
+				...(input.originId ? { originId: input.originId } : {}),
+			});
+		}),
+	).pipe(
+		Effect.provide(RpcClient.layerProtocolSocket()),
+		Effect.provide(Socket.layerWebSocket(makeWsRpcUrl(input.projectSlug))),
+		Effect.provide(Socket.layerWebSocketConstructorGlobal),
+		Effect.provide(RpcSerialization.layerJson),
+	);
+
 const callReloadProviderSession = (input: ReloadProviderSessionRpcInput) =>
 	Effect.scoped(
 		Effect.gen(function* () {
@@ -1226,6 +1252,12 @@ export async function setDefaultModelRpc(
 	input: SetDefaultModelRpcInput,
 ): Promise<SetDefaultModelResponse> {
 	return await runTransportEffect(callSetDefaultModel(input));
+}
+
+export async function setHiddenEntriesRpc(
+	input: SetHiddenEntriesRpcInput,
+): Promise<SetHiddenEntriesResponse> {
+	return await runTransportEffect(callSetHiddenEntries(input));
 }
 
 export async function reloadProviderSessionRpc(
