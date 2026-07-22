@@ -69,6 +69,17 @@ describe("translateCanonicalEvent — TranslationResult shape", () => {
 			expectedTypes: ["tool_start", "tool_executing"],
 		},
 		{
+			type: "tool.running",
+			data: {
+				messageId: "m",
+				partId: "p",
+				input: { tool: "Skill", name: "commit" },
+				callId: "c",
+				toolName: "Skill",
+			},
+			expectedTypes: ["tool_executing"],
+		},
+		{
 			type: "tool.completed",
 			data: { messageId: "m", partId: "p", result: "ok", duration: 0 },
 			expectedTypes: ["tool_start", "tool_executing", "tool_result"],
@@ -115,6 +126,34 @@ describe("translateCanonicalEvent — TranslationResult shape", () => {
 			expect(sent.map((m) => m.type)).toEqual(expectedTypes);
 		});
 	}
+
+	it("tool.running with refreshed input anchors tool_executing to callId", async () => {
+		const sent: Array<Record<string, unknown>> = [];
+		const { createRelayEventSink } = await import(
+			"../../../src/lib/provider/relay-event-sink.js"
+		);
+		const sink = createRelayEventSink({
+			sessionId: "ses-1",
+			send: (msg: unknown) => sent.push(msg as Record<string, unknown>),
+		});
+		await Effect.runPromise(
+			sink.push(
+				makeEvent("tool.running", {
+					messageId: "m",
+					partId: "p",
+					input: { tool: "Skill", name: "commit" },
+					callId: "c",
+					toolName: "Skill",
+				} as never),
+			),
+		);
+		expect(sent[0]).toMatchObject({
+			type: "tool_executing",
+			id: "c",
+			name: "Skill",
+			input: { tool: "Skill", name: "commit" },
+		});
+	});
 
 	// Intentionally-silent events MUST NOT produce relay messages.
 	const SILENT_CASES: Array<{

@@ -159,6 +159,14 @@ export function translateProviderRuntimeEventToDomain(
 						...(isRecord(data["metadata"])
 							? { metadata: data["metadata"] }
 							: {}),
+						// Refreshed input for tools whose args stream after tool.started
+						...(isRecord(data["input"]) ? { input: data["input"] } : {}),
+						...(typeof data["callId"] === "string"
+							? { callId: data["callId"] }
+							: {}),
+						...(typeof data["toolName"] === "string"
+							? { toolName: data["toolName"] }
+							: {}),
 					},
 					eventOptions(event),
 				),
@@ -193,6 +201,12 @@ export function translateProviderRuntimeEventToDomain(
 					result: data["result"] ?? "",
 					duration: numberFieldValue(data["duration"]) ?? 0,
 					...(isRecord(data["metadata"]) ? { metadata: data["metadata"] } : {}),
+					// Refreshed input for tools whose args stream after tool.started.
+					// On an orphan completion the input belongs to the synthesized
+					// tool.started above instead.
+					...(toolWasStarted && isRecord(data["input"])
+						? { input: data["input"] }
+						: {}),
 				},
 				eventOptions(event),
 			),

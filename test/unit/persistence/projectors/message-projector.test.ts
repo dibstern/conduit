@@ -767,6 +767,128 @@ describe("MessageProjector", () => {
 			expect(parts[0]?.duration).toBe(150);
 		});
 
+		it("refreshes input when tool.running carries one, keeps it otherwise", () => {
+			projector.project(
+				makeStored("tool.started", "s1", {
+					messageId: "m1",
+					partId: "tool1",
+					toolName: "Skill",
+					callId: "call_1",
+					input: { tool: "Skill", name: "" },
+				} satisfies ToolStartedPayload),
+				db,
+			);
+			// Metadata-only running update must not clobber the stored input
+			projector.project(
+				makeStored(
+					"tool.running",
+					"s1",
+					{
+						messageId: "m1",
+						partId: "tool1",
+						metadata: { providerTaskId: "task-1" },
+					} satisfies ToolRunningPayload,
+					2,
+				),
+				db,
+			);
+			const kept = db.queryOne<MessagePartRow>(
+				"SELECT * FROM message_parts WHERE id = ?",
+				["tool1"],
+			);
+			expect(JSON.parse(kept?.input ?? "null")).toEqual({
+				tool: "Skill",
+				name: "",
+			});
+
+			projector.project(
+				makeStored(
+					"tool.running",
+					"s1",
+					{
+						messageId: "m1",
+						partId: "tool1",
+						input: { tool: "Skill", name: "commit" },
+						callId: "call_1",
+						toolName: "Skill",
+					} satisfies ToolRunningPayload,
+					3,
+				),
+				db,
+			);
+			const refreshed = db.queryOne<MessagePartRow>(
+				"SELECT * FROM message_parts WHERE id = ?",
+				["tool1"],
+			);
+			expect(refreshed?.status).toBe("running");
+			expect(JSON.parse(refreshed?.input ?? "null")).toEqual({
+				tool: "Skill",
+				name: "commit",
+			});
+		});
+
+		it("refreshes input when tool.completed carries one, keeps it otherwise", () => {
+			projector.project(
+				makeStored("tool.started", "s1", {
+					messageId: "m1",
+					partId: "tool1",
+					toolName: "Skill",
+					callId: "call_1",
+					// Skill input args stream late: started captured an empty name
+					input: { tool: "Skill", name: "" },
+				} satisfies ToolStartedPayload),
+				db,
+			);
+			projector.project(
+				makeStored(
+					"tool.completed",
+					"s1",
+					{
+						messageId: "m1",
+						partId: "tool1",
+						result: "skill output",
+						duration: 100,
+						input: { tool: "Skill", name: "commit" },
+					} satisfies ToolCompletedPayload,
+					2,
+				),
+				db,
+			);
+
+			const refreshed = db.queryOne<MessagePartRow>(
+				"SELECT * FROM message_parts WHERE id = ?",
+				["tool1"],
+			);
+			expect(JSON.parse(refreshed?.input ?? "null")).toEqual({
+				tool: "Skill",
+				name: "commit",
+			});
+
+			// A completion without input must not clobber the stored value
+			projector.project(
+				makeStored(
+					"tool.completed",
+					"s1",
+					{
+						messageId: "m1",
+						partId: "tool1",
+						result: "skill output",
+						duration: 100,
+					} satisfies ToolCompletedPayload,
+					3,
+				),
+				db,
+			);
+			const kept = db.queryOne<MessagePartRow>(
+				"SELECT * FROM message_parts WHERE id = ?",
+				["tool1"],
+			);
+			expect(JSON.parse(kept?.input ?? "null")).toEqual({
+				tool: "Skill",
+				name: "commit",
+			});
+		});
+
 		it("merges completion metadata into existing tool metadata", () => {
 			projector.project(
 				makeStored("tool.started", "s1", {

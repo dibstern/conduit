@@ -321,6 +321,73 @@ describe("translateProviderRuntimeEventToDomain", () => {
 		);
 	});
 
+	it("passes refreshed tool input through tool.running and tool.completed", () => {
+		const sequence = [
+			runtimeEvent({
+				eventId: "skill-start",
+				type: "tool.started",
+				turnId: "turn-1",
+				data: {
+					messageId: "message-1",
+					partId: "skill-1",
+					toolName: "Skill",
+					callId: "call-skill-1",
+					input: { tool: "Skill", name: "" },
+				},
+			}),
+			runtimeEvent({
+				eventId: "skill-running",
+				type: "tool.running",
+				turnId: "turn-1",
+				data: {
+					messageId: "message-1",
+					partId: "skill-1",
+					input: { tool: "Skill", name: "commit" },
+					callId: "call-skill-1",
+					toolName: "Skill",
+				},
+			}),
+			runtimeEvent({
+				eventId: "skill-complete",
+				type: "tool.completed",
+				turnId: "turn-1",
+				data: {
+					messageId: "message-1",
+					partId: "skill-1",
+					result: "done",
+					duration: 10,
+					input: { tool: "Skill", name: "commit" },
+				},
+			}),
+		];
+		const [, running, completed] = foldRuntimeEvents(sequence).events;
+
+		expect(running).toEqual(
+			expect.objectContaining({
+				type: "tool.running",
+				data: {
+					messageId: "message-1",
+					partId: "skill-1",
+					input: { tool: "Skill", name: "commit" },
+					callId: "call-skill-1",
+					toolName: "Skill",
+				},
+			}),
+		);
+		expect(completed).toEqual(
+			expect.objectContaining({
+				type: "tool.completed",
+				data: {
+					messageId: "message-1",
+					partId: "skill-1",
+					result: "done",
+					duration: 10,
+					input: { tool: "Skill", name: "commit" },
+				},
+			}),
+		);
+	});
+
 	it("maps runtime file.attached to durable file.attached", () => {
 		const { events } = translateProviderRuntimeEventToDomain(
 			runtimeEvent({

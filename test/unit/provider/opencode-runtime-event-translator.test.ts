@@ -339,6 +339,157 @@ describe("OpenCodeRuntimeEventTranslator", () => {
 		]);
 	});
 
+	it("attaches refreshed input once when skill args stream after the part is first seen", () => {
+		const translator = new OpenCodeRuntimeEventTranslator();
+		const sessionId = "ses-opencode";
+		const part = {
+			id: "part-skill-1",
+			messageID: "msg-assistant-1",
+			type: "tool" as const,
+			tool: "skill",
+			callID: "call-skill-1",
+		};
+
+		// Args stream late: pending arrives with empty input
+		const started = translator.translate(
+			makeSSEEvent("message.part.updated", {
+				sessionID: sessionId,
+				part: { ...part, state: { status: "pending", input: {} } },
+			}),
+			sessionId,
+		);
+		expect(started).toMatchObject([
+			{
+				type: "tool.started",
+				data: { input: { tool: "Skill", name: "" } },
+			},
+		]);
+
+		const running = translator.translate(
+			makeSSEEvent("message.part.updated", {
+				sessionID: sessionId,
+				part: {
+					...part,
+					state: { status: "running", input: { name: "commit" } },
+				},
+			}),
+			sessionId,
+		);
+		expect(running).toMatchObject([
+			{
+				type: "tool.running",
+				data: {
+					input: { tool: "Skill", name: "commit" },
+					callId: "call-skill-1",
+					toolName: "Skill",
+				},
+			},
+		]);
+
+		// running already delivered the refresh — completed must not duplicate it
+		const completed = translator.translate(
+			makeSSEEvent("message.part.updated", {
+				sessionID: sessionId,
+				part: {
+					...part,
+					state: {
+						status: "completed",
+						input: { name: "commit" },
+						output: "done",
+					},
+					time: { start: 1000, end: 2000 },
+				},
+			}),
+			sessionId,
+		);
+		expect(completed?.[0]?.type).toBe("tool.completed");
+		expect(completed?.[0]?.data).not.toHaveProperty("input");
+	});
+
+	it("attaches refreshed input to tool.completed when args arrive only at completion", () => {
+		const translator = new OpenCodeRuntimeEventTranslator();
+		const sessionId = "ses-opencode";
+		const part = {
+			id: "part-skill-2",
+			messageID: "msg-assistant-1",
+			type: "tool" as const,
+			tool: "skill",
+			callID: "call-skill-2",
+		};
+
+		translator.translate(
+			makeSSEEvent("message.part.updated", {
+				sessionID: sessionId,
+				part: { ...part, state: { status: "pending", input: {} } },
+			}),
+			sessionId,
+		);
+		const completed = translator.translate(
+			makeSSEEvent("message.part.updated", {
+				sessionID: sessionId,
+				part: {
+					...part,
+					state: {
+						status: "completed",
+						input: { name: "commit" },
+						output: "done",
+					},
+					time: { start: 1000, end: 2000 },
+				},
+			}),
+			sessionId,
+		);
+		expect(completed).toMatchObject([
+			{
+				type: "tool.completed",
+				data: { input: { tool: "Skill", name: "commit" } },
+			},
+		]);
+	});
+
+	it("does not attach input to running or completed when it was complete at start", () => {
+		const translator = new OpenCodeRuntimeEventTranslator();
+		const sessionId = "ses-opencode";
+		const part = {
+			id: "part-bash-1",
+			messageID: "msg-assistant-1",
+			type: "tool" as const,
+			tool: "bash",
+			callID: "call-bash-1",
+		};
+
+		translator.translate(
+			makeSSEEvent("message.part.updated", {
+				sessionID: sessionId,
+				part: { ...part, state: { status: "pending", input: { command: "ls" } } },
+			}),
+			sessionId,
+		);
+		const running = translator.translate(
+			makeSSEEvent("message.part.updated", {
+				sessionID: sessionId,
+				part: {
+					...part,
+					state: { status: "running", input: { command: "ls" } },
+				},
+			}),
+			sessionId,
+		);
+		const completed = translator.translate(
+			makeSSEEvent("message.part.updated", {
+				sessionID: sessionId,
+				part: {
+					...part,
+					state: { status: "completed", input: { command: "ls" }, output: "" },
+					time: { start: 1000, end: 1100 },
+				},
+			}),
+			sessionId,
+		);
+		expect(running?.[0]?.data).not.toHaveProperty("input");
+		expect(completed?.[0]?.data).not.toHaveProperty("input");
+	});
+
 	it("emits one file.attached event per file part for user and assistant messages", () => {
 		const translator = new OpenCodeRuntimeEventTranslator();
 		const sessionId = "ses-opencode";

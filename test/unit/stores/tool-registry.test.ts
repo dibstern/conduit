@@ -164,6 +164,20 @@ describe("backward transitions rejected", () => {
 		expect(second.action).toBe("reject");
 	});
 
+	it("refreshes input while running (late-streamed args, e.g. skill)", () => {
+		registry.start("call-1", "Skill");
+		registry.executing("call-1", { tool: "Skill", name: "" });
+
+		const refresh = registry.executing("call-1", {
+			tool: "Skill",
+			name: "commit",
+		});
+		expect(refresh.action).toBe("update");
+		if (refresh.action !== "update") throw new Error("unreachable");
+		expect(refresh.tool.status).toBe("running");
+		expect(refresh.tool.input).toEqual({ tool: "Skill", name: "commit" });
+	});
+
 	it("duplicate start after complete returns duplicate", () => {
 		registry.start("call-1", "Read");
 		registry.complete("call-1", "done", false);

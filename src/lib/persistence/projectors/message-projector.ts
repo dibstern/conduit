@@ -300,7 +300,9 @@ export class MessageProjector implements Projector {
 				current?.metadata ?? null,
 				event.data.metadata,
 			);
-			// Final-state UPDATE -- naturally idempotent
+			// Final-state UPDATE -- naturally idempotent. COALESCE keeps the
+			// tool.started input unless the event carries a refreshed one
+			// (providers that stream input args after the part first appears).
 			db.execute(
 				`UPDATE message_parts
 				 SET status = CASE
@@ -308,9 +310,15 @@ export class MessageProjector implements Projector {
 				         ELSE 'running'
 				     END,
 				     metadata = ?,
+				     input = COALESCE(?, input),
 				     updated_at = ?
 				 WHERE id = ?`,
-				[metadata, event.createdAt, event.data.partId],
+				[
+					metadata,
+					event.data.input !== undefined ? encodeJson(event.data.input) : null,
+					event.createdAt,
+					event.data.partId,
+				],
 			);
 			db.execute("UPDATE messages SET updated_at = ? WHERE id = ?", [
 				event.createdAt,
@@ -328,15 +336,18 @@ export class MessageProjector implements Projector {
 				current?.metadata ?? null,
 				event.data.metadata,
 			);
-			// Final-state UPDATE -- naturally idempotent
+			// Final-state UPDATE -- naturally idempotent. COALESCE keeps the
+			// tool.started input unless the event carries a refreshed one
+			// (providers that stream input args after the part first appears).
 			db.execute(
 				`UPDATE message_parts
-				 SET result = ?, duration = ?, status = 'completed', metadata = ?, updated_at = ?
+				 SET result = ?, duration = ?, status = 'completed', metadata = ?, input = COALESCE(?, input), updated_at = ?
 				 WHERE id = ?`,
 				[
 					encodeJson(event.data.result),
 					event.data.duration,
 					metadata,
+					event.data.input !== undefined ? encodeJson(event.data.input) : null,
 					event.createdAt,
 					event.data.partId,
 				],

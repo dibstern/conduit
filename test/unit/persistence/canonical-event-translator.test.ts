@@ -270,6 +270,134 @@ describe("CanonicalEventTranslator", () => {
 			});
 		});
 
+		it("carries refreshed input on tool.completed for late-arriving skill args", () => {
+			// Skill parts stream their input args after the part is first seen:
+			// pending arrives with an empty input, so tool.started captures name "".
+			const pending = makeSSEEvent("message.part.updated", {
+				sessionID: SESSION_ID,
+				messageID: "msg-001",
+				partID: "part-t6",
+				part: {
+					id: "part-t6",
+					type: "tool",
+					callID: "call-006",
+					tool: "skill",
+					state: { status: "pending", input: {} },
+				},
+			});
+			const started = assertEvents(translator.translate(pending, SESSION_ID));
+			expect(started[0]?.type).toBe("tool.started");
+			expect(started[0]?.data).toMatchObject({
+				input: { tool: "Skill", name: "" },
+			});
+
+			const completed = makeSSEEvent("message.part.updated", {
+				sessionID: SESSION_ID,
+				messageID: "msg-001",
+				partID: "part-t6",
+				part: {
+					id: "part-t6",
+					type: "tool",
+					callID: "call-006",
+					tool: "skill",
+					state: {
+						status: "completed",
+						output: '<skill_content name="commit">…</skill_content>',
+						input: { name: "commit" },
+					},
+					time: { start: 1000, end: 2000 },
+				},
+			});
+			const events = assertEvents(translator.translate(completed, SESSION_ID));
+			expect(events).toHaveLength(1);
+			expect(events[0]?.type).toBe("tool.completed");
+			expect(events[0]?.data).toMatchObject({
+				input: { tool: "Skill", name: "commit" },
+			});
+		});
+
+		it("carries refreshed input on tool.running, then omits it on tool.completed", () => {
+			const pending = makeSSEEvent("message.part.updated", {
+				sessionID: SESSION_ID,
+				messageID: "msg-001",
+				partID: "part-t8",
+				part: {
+					id: "part-t8",
+					type: "tool",
+					callID: "call-008",
+					tool: "skill",
+					state: { status: "pending", input: {} },
+				},
+			});
+			translator.translate(pending, SESSION_ID);
+
+			const running = makeSSEEvent("message.part.updated", {
+				sessionID: SESSION_ID,
+				messageID: "msg-001",
+				partID: "part-t8",
+				part: {
+					id: "part-t8",
+					type: "tool",
+					callID: "call-008",
+					tool: "skill",
+					state: { status: "running", input: { name: "commit" } },
+				},
+			});
+			const runningEvents = assertEvents(
+				translator.translate(running, SESSION_ID),
+			);
+			expect(runningEvents).toHaveLength(1);
+			expect(runningEvents[0]?.type).toBe("tool.running");
+			expect(runningEvents[0]?.data).toMatchObject({
+				input: { tool: "Skill", name: "commit" },
+				callId: "call-008",
+				toolName: "Skill",
+			});
+
+			// running already delivered the refresh — completed must not duplicate it
+			const completed = makeSSEEvent("message.part.updated", {
+				sessionID: SESSION_ID,
+				messageID: "msg-001",
+				partID: "part-t8",
+				part: {
+					id: "part-t8",
+					type: "tool",
+					callID: "call-008",
+					tool: "skill",
+					state: {
+						status: "completed",
+						output: "done",
+						input: { name: "commit" },
+					},
+					time: { start: 1000, end: 2000 },
+				},
+			});
+			const completedEvents = assertEvents(
+				translator.translate(completed, SESSION_ID),
+			);
+			expect(completedEvents[0]?.type).toBe("tool.completed");
+			expect(completedEvents[0]?.data).not.toHaveProperty("input");
+		});
+
+		it("omits input on tool.completed when the part carries none", () => {
+			const event = makeSSEEvent("message.part.updated", {
+				sessionID: SESSION_ID,
+				messageID: "msg-001",
+				partID: "part-t7",
+				part: {
+					id: "part-t7",
+					type: "tool",
+					callID: "call-007",
+					tool: "grep",
+					state: { status: "completed", output: "match found" },
+					time: { start: 1000, end: 2500 },
+				},
+			});
+
+			const events = assertEvents(translator.translate(event, SESSION_ID));
+			expect(events[0]?.data).not.toHaveProperty("input");
+		});
+
 		it("translates tool error to tool.completed with error as result", () => {
 			const event = makeSSEEvent("message.part.updated", {
 				sessionID: SESSION_ID,

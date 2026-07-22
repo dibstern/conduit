@@ -13,12 +13,16 @@
 	// ─── Skill name parsing ──────────────────────────────────────────────
 	const skillName = $derived.by(() => {
 		const inp = message.input as Record<string, unknown> | null | undefined;
-		const inputName = inp?.["name"] ?? inp?.["skill_name"] ?? inp?.["skillName"];
+		const inputName =
+			inp?.["name"] ?? inp?.["skill"] ?? inp?.["skill_name"] ?? inp?.["skillName"];
 		if (typeof inputName === "string" && inputName.length > 0) return inputName;
+		// Historical sessions persisted before input normalization was fixed:
+		// recover the name from the result (OpenCode wraps it in <skill_content>,
+		// Claude replies "Launching skill: <name>").
 		const match = message.result?.match(
-			/^<skill_content\b[^>]*(?:name|skill_name)=["']([^"']+)["']/,
+			/^<skill_content\b[^>]*(?:name|skill_name)=["']([^"']+)["']|^Launching skill: (\S+)/,
 		);
-		return match?.[1] ?? null;
+		return match?.[1] ?? match?.[2] ?? null;
 	});
 
 	/** Format the skill name for display: kebab-case → Title Case */

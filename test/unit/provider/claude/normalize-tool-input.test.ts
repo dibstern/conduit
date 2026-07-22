@@ -157,6 +157,15 @@ describe("Claude normalizeToolInput", () => {
 		expect(result).toEqual({ tool: "Skill", name: "commit" });
 	});
 
+	it("normalizes Skill from the SDK's skill key", () => {
+		// Claude Agent SDK Skill input is { skill: string, args?: string }
+		const result = normalizeToolInput("Skill", {
+			skill: "diagnose",
+			args: "",
+		});
+		expect(result).toEqual({ tool: "Skill", name: "diagnose" });
+	});
+
 	it("normalizes AskUserQuestion", () => {
 		const questions = [{ question: "Continue?", header: "Confirm" }];
 		const result = normalizeToolInput("AskUserQuestion", { questions });

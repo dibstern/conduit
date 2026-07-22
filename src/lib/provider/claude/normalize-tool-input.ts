@@ -90,9 +90,10 @@ export function normalizeToolInput(
 			};
 
 		case "Skill":
+			// Claude SDK Skill input is { skill: string, args?: string }
 			return {
 				tool: "Skill",
-				name: str(input, "name"),
+				name: str(input, "skill", "name"),
 			};
 
 		case "AskUserQuestion":

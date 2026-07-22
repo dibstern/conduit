@@ -24,6 +24,8 @@ interface TrackedPart {
 	readonly status?: string;
 	readonly thinkingStarted?: boolean;
 	readonly emittedCharacters?: number;
+	/** Tool parts only: the input delivered downstream so far was empty (args stream late, e.g. skill). */
+	readonly toolInputEmpty?: boolean;
 }
 
 export class OpenCodeRuntimeEventTranslator {
@@ -209,6 +211,7 @@ export class OpenCodeRuntimeEventTranslator {
 				rawPart.state?.status,
 				existing?.thinkingStarted,
 				emittedCharacters,
+				existing?.toolInputEmpty,
 			),
 		);
 
@@ -290,8 +293,31 @@ export class OpenCodeRuntimeEventTranslator {
 			const metadata = isPlainObject(rawPart.state?.metadata)
 				? rawPart.state.metadata
 				: undefined;
+			// Some tools (e.g. skill) stream input args after the part is first
+			// seen, so tool.started can capture an empty input. Track that and
+			// attach the refreshed input to the next lifecycle event once the
+			// args arrive — never for tools whose input was complete at start.
+			const hasInput =
+				isPlainObject(rawPart.state?.input) &&
+				Object.keys(rawPart.state.input).length > 0;
+			const inputRefreshed = existing?.toolInputEmpty === true && hasInput;
+			const stillEmpty = existing
+				? existing.toolInputEmpty === true && !inputRefreshed
+				: !hasInput;
+			const setTracked = (toolInputEmpty: boolean) =>
+				parts.set(
+					partId,
+					trackedPart(
+						"tool",
+						rawPart.state?.status,
+						existing?.thinkingStarted,
+						emittedCharacters,
+						toolInputEmpty,
+					),
+				);
 
 			if (status === "pending") {
+				setTracked(stillEmpty);
 				return [
 					opencodeRuntimeEvent("tool.started", sessionId, event, {
 						messageId,
@@ -304,6 +330,7 @@ export class OpenCodeRuntimeEventTranslator {
 			}
 
 			if (status === "running") {
+				setTracked(stillEmpty);
 				const events: ProviderRuntimeEvent[] = [];
 				if (!existing) {
 					events.push(
@@ -321,12 +348,20 @@ export class OpenCodeRuntimeEventTranslator {
 						messageId,
 						partId,
 						...(metadata ? { metadata } : {}),
+						...(inputRefreshed
+							? {
+									input: normalizeToolInput(toolName, rawPart.state?.input),
+									callId,
+									toolName,
+								}
+							: {}),
 					}),
 				);
 				return events;
 			}
 
 			if (status === "completed" || status === "error") {
+				setTracked(stillEmpty);
 				const duration =
 					rawPart.time?.end && rawPart.time?.start
 						? rawPart.time.end - rawPart.time.start
@@ -341,6 +376,9 @@ export class OpenCodeRuntimeEventTranslator {
 								: (rawPart.state?.output ?? ""),
 						duration,
 						...(metadata ? { metadata } : {}),
+						...(inputRefreshed
+							? { input: normalizeToolInput(toolName, rawPart.state?.input) }
+							: {}),
 					}),
 				];
 			}
@@ -601,12 +639,14 @@ function trackedPart(
 	status?: string,
 	thinkingStarted?: boolean,
 	emittedCharacters?: number,
+	toolInputEmpty?: boolean,
 ): TrackedPart {
 	return {
 		type,
 		...(status != null ? { status } : {}),
 		...(thinkingStarted != null ? { thinkingStarted } : {}),
 		...(emittedCharacters != null ? { emittedCharacters } : {}),
+		...(toolInputEmpty != null ? { toolInputEmpty } : {}),
 	};
 }
 

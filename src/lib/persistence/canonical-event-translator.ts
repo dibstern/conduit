@@ -30,6 +30,7 @@ interface TrackedPart {
 	type: string; // "text" | "tool" | "reasoning" | "file"
 	status?: string | undefined; // ToolStatus for tool parts
 	thinkingStarted?: boolean | undefined; // Whether thinking.start has been emitted
+	toolInputEmpty?: boolean | undefined; // Tool parts only: input delivered downstream so far was empty (args stream late, e.g. skill)
 }
 
 // ─── Translator ──────────────────────────────────────────────────────────────
@@ -224,6 +225,7 @@ export class CanonicalEventTranslator {
 			type: rawPart.type,
 			status: rawPart.state?.status,
 			thinkingStarted: existing?.thinkingStarted,
+			toolInputEmpty: existing?.toolInputEmpty,
 		});
 
 		// ── Reasoning lifecycle ──────────────────────────────────────────
@@ -266,6 +268,23 @@ export class CanonicalEventTranslator {
 			const metadata = isPlainObject(rawPart.state?.metadata)
 				? rawPart.state.metadata
 				: undefined;
+			// Some tools (e.g. skill) stream input args after the part is first
+			// seen, so tool.started can capture an empty input. Track that and
+			// attach the refreshed input to the next lifecycle event once the
+			// args arrive — never for tools whose input was complete at start.
+			const hasInput =
+				isPlainObject(rawPart.state?.input) &&
+				Object.keys(rawPart.state.input).length > 0;
+			const inputRefreshed = existing?.toolInputEmpty === true && hasInput;
+			const stillEmpty = existing
+				? existing.toolInputEmpty === true && !inputRefreshed
+				: !hasInput;
+			parts.set(partId, {
+				type: rawPart.type,
+				status: rawPart.state?.status,
+				thinkingStarted: existing?.thinkingStarted,
+				toolInputEmpty: stillEmpty,
+			});
 
 			if (status === "pending") {
 				return [
@@ -310,6 +329,13 @@ export class CanonicalEventTranslator {
 						messageId,
 						partId,
 						...(metadata ? { metadata } : {}),
+						...(inputRefreshed
+							? {
+									input: normalizeToolInput(toolName, rawPart.state?.input),
+									callId,
+									toolName,
+								}
+							: {}),
 					}),
 				);
 				return results;
@@ -330,6 +356,9 @@ export class CanonicalEventTranslator {
 								: (rawPart.state?.output ?? ""),
 						duration,
 						...(metadata ? { metadata } : {}),
+						...(inputRefreshed
+							? { input: normalizeToolInput(toolName, rawPart.state?.input) }
+							: {}),
 					}),
 				];
 			}

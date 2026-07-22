@@ -47,20 +47,35 @@ export function translateDomainEventToRelay(
 			);
 		}
 
-		case "tool.running":
-			if (event.data.metadata) {
+		case "tool.running": {
+			const { partId, messageId, metadata, input, callId, toolName } =
+				event.data;
+			// Refreshed input (args streamed after tool.started, e.g. skill):
+			// anchor to callId — the id tool_start registered the tool under.
+			if (isRecord(input)) {
 				return emit({
 					type: "tool_executing",
-					id: event.data.partId,
+					id: callId ?? partId,
+					name: toolName ?? "Task",
+					input,
+					...(metadata ? { metadata } : {}),
+					messageId,
+				});
+			}
+			if (metadata) {
+				return emit({
+					type: "tool_executing",
+					id: partId,
 					name: "Task",
 					input: undefined,
-					metadata: event.data.metadata,
-					messageId: event.data.messageId,
+					metadata,
+					messageId,
 				});
 			}
 			return silent(
 				"ToolRunningPayload carries no callId; partId anchor already covered by tool.started",
 			);
+		}
 
 		case "tool.input_updated":
 			return silent("Historical event - no longer emitted after Phase 2");

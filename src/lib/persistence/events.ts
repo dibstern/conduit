@@ -105,6 +105,11 @@ export interface ToolRunningPayload {
 	readonly messageId: string;
 	readonly partId: string;
 	readonly metadata?: Record<string, unknown>;
+	/** Refreshed tool input — present when the provider streamed input args after tool.started (e.g. OpenCode skill parts). */
+	readonly input?: CanonicalToolInput | unknown;
+	/** Anchors the input refresh to the tool_start id in live clients; only set alongside input. */
+	readonly callId?: string;
+	readonly toolName?: string;
 }
 
 export interface ToolCompletedPayload {
@@ -113,6 +118,8 @@ export interface ToolCompletedPayload {
 	readonly result: unknown;
 	readonly duration: number;
 	readonly metadata?: Record<string, unknown>;
+	/** Final tool input — present when the provider streamed input args after tool.started (e.g. OpenCode skill parts). */
+	readonly input?: CanonicalToolInput | unknown;
 }
 
 export interface FileAttachedPayload {
@@ -501,6 +508,9 @@ const ToolRunningPayloadSchema = Schema.Struct({
 		Schema.Record({ key: Schema.String, value: Schema.Unknown }),
 		{ exact: true },
 	),
+	input: Schema.optionalWith(CanonicalToolInputSchema, { exact: true }),
+	callId: Schema.optionalWith(Schema.String, { exact: true }),
+	toolName: Schema.optionalWith(Schema.String, { exact: true }),
 });
 
 const ToolCompletedPayloadSchema = Schema.Struct({
@@ -512,6 +522,7 @@ const ToolCompletedPayloadSchema = Schema.Struct({
 		Schema.Record({ key: Schema.String, value: Schema.Unknown }),
 		{ exact: true },
 	),
+	input: Schema.optionalWith(CanonicalToolInputSchema, { exact: true }),
 });
 
 const FileAttachedPayloadSchema = Schema.Struct({

@@ -134,6 +134,17 @@ export function createToolRegistry(
 		}
 
 		if (tracked.status === "running") {
+			// Late-arriving input (args streamed after the tool started, e.g.
+			// skill): refresh it in place. Metadata-only updates still go
+			// through updateMetadata.
+			if (input !== undefined) {
+				tracked.tool = {
+					...tracked.tool,
+					input,
+					...(metadata !== undefined && { metadata }),
+				};
+				return { action: "update", uuid: tracked.uuid, tool: tracked.tool };
+			}
 			return {
 				action: "reject",
 				reason:
