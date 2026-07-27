@@ -101,6 +101,9 @@ export function translateDomainEventToRelay(
 						output: tokens?.output ?? 0,
 						cache_read: tokens?.cacheRead ?? 0,
 						cache_creation: tokens?.cacheWrite ?? 0,
+						...(tokens?.contextWindow
+							? { context_window: tokens.contextWindow }
+							: {}),
 					},
 					cost: cost ?? 0,
 					duration: duration ?? 0,

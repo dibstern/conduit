@@ -114,13 +114,15 @@ describe("Migration Runner", () => {
 		const dropEventsSessionFkMigration = schemaMigrations[3];
 		const messagePartsFileTypeMigration = schemaMigrations[4];
 		const messagePartsCompactionTypeMigration = schemaMigrations[5];
+		const messagesContextWindowMigration = schemaMigrations[6];
 		if (
 			!baseline ||
 			!metadataMigration ||
 			!durableCommandMigration ||
 			!dropEventsSessionFkMigration ||
 			!messagePartsFileTypeMigration ||
-			!messagePartsCompactionTypeMigration
+			!messagePartsCompactionTypeMigration ||
+			!messagesContextWindowMigration
 		) {
 			throw new Error("Expected all event-store schema migrations");
 		}
@@ -161,6 +163,11 @@ describe("Migration Runner", () => {
 					messagePartsCompactionTypeMigration,
 				),
 			},
+			{
+				id: 7,
+				name: "messages_context_window",
+				checksum: calculateMigrationChecksum(messagesContextWindowMigration),
+			},
 		]);
 		columns = client
 			.query<{ name: string }>("PRAGMA table_info(message_parts)")
@@ -170,6 +177,10 @@ describe("Migration Runner", () => {
 			.query<{ name: string }>("PRAGMA table_info(command_receipts)")
 			.map((column) => column.name);
 		expect(columns).toContain("fingerprint_hash");
+		columns = client
+			.query<{ name: string }>("PRAGMA table_info(messages)")
+			.map((column) => column.name);
+		expect(columns).toContain("context_window");
 	});
 
 	it("rolls back a failed migration without affecting prior ones", () => {

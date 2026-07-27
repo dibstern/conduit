@@ -412,6 +412,7 @@ export class MessageProjector implements Projector {
 				 tokens_out = ?,
 				 tokens_cache_read = ?,
 				 tokens_cache_write = ?,
+				 context_window = ?,
 				 is_streaming = 0,
 				 updated_at = ?
 				 WHERE id = ?`,
@@ -421,6 +422,7 @@ export class MessageProjector implements Projector {
 					tokens?.output ?? null,
 					tokens?.cacheRead ?? null,
 					tokens?.cacheWrite ?? null,
+					tokens?.contextWindow ?? null,
 					event.createdAt,
 					event.data.messageId,
 				],

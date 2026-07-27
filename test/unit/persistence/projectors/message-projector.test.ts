@@ -51,6 +51,7 @@ interface MessageRow {
 	tokens_out: number | null;
 	tokens_cache_read: number | null;
 	tokens_cache_write: number | null;
+	context_window: number | null;
 	is_streaming: number;
 	created_at: number;
 	updated_at: number;
@@ -1007,6 +1008,7 @@ describe("MessageProjector", () => {
 						output: 350,
 						cacheRead: 200,
 						cacheWrite: 50,
+						contextWindow: 1_000_000,
 					},
 				} satisfies TurnCompletedPayload,
 				2,
@@ -1022,6 +1024,7 @@ describe("MessageProjector", () => {
 			expect(row?.tokens_out).toBe(350);
 			expect(row?.tokens_cache_read).toBe(200);
 			expect(row?.tokens_cache_write).toBe(50);
+			expect(row?.context_window).toBe(1_000_000);
 			expect(row?.is_streaming).toBe(0);
 		});
 	});

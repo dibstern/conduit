@@ -253,6 +253,7 @@ export interface UsageInfo {
 	output: number;
 	cache_read: number;
 	cache_creation: number;
+	context_window?: number;
 }
 
 // ─── PTY / Terminal ─────────────────────────────────────────────────────────
@@ -334,6 +335,7 @@ export interface HistoryMessage {
 		input?: number;
 		output?: number;
 		cache?: { read?: number; write?: number };
+		context_window?: number;
 	};
 	[key: string]: unknown;
 }
@@ -450,6 +452,7 @@ const UsageInfoSchema = Schema.Struct({
 	output: Schema.Number,
 	cache_read: Schema.Number,
 	cache_creation: Schema.Number,
+	context_window: Schema.optional(Schema.Number),
 });
 
 const SessionInfoSchema = Schema.Struct({

@@ -2143,7 +2143,7 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 			instance.sendTurnEffect(
 				makeBaseSendTurnInput({
 					sessionId: "session-sonnet-1m",
-					model: { providerId: "claude", modelId: "claude-sonnet-4-5" },
+					model: { providerId: "claude", modelId: "claude-sonnet-4-6" },
 					contextWindow: "1m",
 				}),
 			),
@@ -2154,7 +2154,7 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 			unknown
 		>;
 		expect((callArgs["options"] as Record<string, unknown>)["model"]).toBe(
-			"claude-sonnet-4-5[1m]",
+			"claude-sonnet-4-6[1m]",
 		);
 	});
 
@@ -2176,7 +2176,7 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 				instance.sendTurnEffect(
 					makeBaseSendTurnInput({
 						sessionId,
-						model: { providerId: "claude", modelId: "claude-sonnet-4-5" },
+						model: { providerId: "claude", modelId: "claude-sonnet-4-6" },
 						...(contextWindow ? { contextWindow } : {}),
 					}),
 				),
@@ -2187,13 +2187,17 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 				unknown
 			>;
 			expect((callArgs["options"] as Record<string, unknown>)["model"]).toBe(
-				"claude-sonnet-4-5",
+				"claude-sonnet-4-6",
 			);
 		}
 	});
 
-	it("does not apply the [1m] suffix to non-Sonnet models", async () => {
-		for (const modelId of ["claude-opus-4-5", "claude-haiku-4-5"]) {
+	it("does not apply the [1m] suffix to models without a selectable 1M option", async () => {
+		for (const modelId of [
+			"claude-opus-4-8",
+			"claude-opus-4-7",
+			"claude-haiku-4-5",
+		]) {
 			const resultMsg = makeSuccessResult();
 			const mockQuery = createMockQuery([resultMsg]);
 			queryFactorySpy = vi.fn(() => mockQuery);
@@ -2295,7 +2299,7 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 					sessionId: "session-context-switch",
 					turnId: "turn-1",
 					eventSink: sink,
-					model: { providerId: "claude", modelId: "claude-sonnet-4-5" },
+					model: { providerId: "claude", modelId: "claude-sonnet-4-6" },
 					contextWindow: "200k",
 				}),
 			),
@@ -2309,7 +2313,7 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 					sessionId: "session-context-switch",
 					turnId: "turn-2",
 					eventSink: sink,
-					model: { providerId: "claude", modelId: "claude-sonnet-4-5" },
+					model: { providerId: "claude", modelId: "claude-sonnet-4-6" },
 					contextWindow: "1m",
 				}),
 			),
@@ -2324,7 +2328,7 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 					sessionId: "session-context-switch",
 					turnId: "turn-3",
 					eventSink: sink,
-					model: { providerId: "claude", modelId: "claude-sonnet-4-5" },
+					model: { providerId: "claude", modelId: "claude-sonnet-4-6" },
 					contextWindow: "200k",
 				}),
 			),
@@ -2333,8 +2337,8 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 		const turn3 = await turn3Promise;
 		expect(turn3.status).toBe("completed");
 
-		expect(setModel).toHaveBeenNthCalledWith(1, "claude-sonnet-4-5[1m]");
-		expect(setModel).toHaveBeenNthCalledWith(2, "claude-sonnet-4-5");
+		expect(setModel).toHaveBeenNthCalledWith(1, "claude-sonnet-4-6[1m]");
+		expect(setModel).toHaveBeenNthCalledWith(2, "claude-sonnet-4-6");
 	});
 
 	// ── Test 5: Stream consumer translates all messages ───────────────────

@@ -312,7 +312,9 @@ export function historyToChatMessages(
 			// Append a ResultMessage if cost/token metadata is present
 			const hasCost = msg.cost !== undefined && msg.cost > 0;
 			const hasTokens =
-				msg.tokens?.input !== undefined || msg.tokens?.output !== undefined;
+				msg.tokens?.input !== undefined ||
+				msg.tokens?.output !== undefined ||
+				msg.tokens?.context_window !== undefined;
 			const hasDuration =
 				msg.time?.created !== undefined && msg.time?.completed !== undefined;
 
@@ -335,6 +337,9 @@ export function historyToChatMessages(
 					}),
 					...(msg.tokens?.cache?.write != null && {
 						cacheWrite: msg.tokens.cache.write,
+					}),
+					...(msg.tokens?.context_window != null && {
+						context_window: msg.tokens.context_window,
 					}),
 					...(msg.time?.created != null && { createdAt: msg.time.created }),
 				} satisfies ResultMessage);

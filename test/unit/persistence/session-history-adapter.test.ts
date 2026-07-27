@@ -50,6 +50,7 @@ function makeMessageWithParts(
 		tokens_out: null,
 		tokens_cache_read: null,
 		tokens_cache_write: null,
+		context_window: null,
 		is_streaming: 0,
 		created_at: 1_000_000_000_000,
 		updated_at: 1_000_000_000_000,
@@ -79,6 +80,7 @@ describe("messageRowsToHistory", () => {
 				cost: 0.01,
 				tokens_in: 10,
 				tokens_out: 20,
+				context_window: 1_000_000,
 			}),
 		];
 
@@ -90,6 +92,7 @@ describe("messageRowsToHistory", () => {
 		expect(first?.role).toBe("user");
 		expect(second?.id).toBe("m2");
 		expect(second?.role).toBe("assistant");
+		expect(second?.tokens?.context_window).toBe(1_000_000);
 		expect(result.hasMore).toBe(false);
 	});
 

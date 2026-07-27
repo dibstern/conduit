@@ -803,6 +803,7 @@ function tokensValue(value: unknown):
 			output?: number;
 			cacheRead?: number;
 			cacheWrite?: number;
+			contextWindow?: number;
 	  }
 	| undefined {
 	if (!isRecord(value)) return undefined;
@@ -811,6 +812,7 @@ function tokensValue(value: unknown):
 		output?: number;
 		cacheRead?: number;
 		cacheWrite?: number;
+		contextWindow?: number;
 	} = {};
 	if (typeof value["input"] === "number") tokens.input = value["input"];
 	if (typeof value["output"] === "number") tokens.output = value["output"];
@@ -818,5 +820,7 @@ function tokensValue(value: unknown):
 		tokens.cacheRead = value["cacheRead"];
 	if (typeof value["cacheWrite"] === "number")
 		tokens.cacheWrite = value["cacheWrite"];
+	if (typeof value["contextWindow"] === "number")
+		tokens.contextWindow = value["contextWindow"];
 	return Object.keys(tokens).length > 0 ? tokens : undefined;
 }

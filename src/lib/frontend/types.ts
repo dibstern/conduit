@@ -140,6 +140,7 @@ export interface ResultMessage {
 	outputTokens?: number;
 	cacheRead?: number;
 	cacheWrite?: number;
+	context_window?: number;
 	messageId?: string;
 	/** Unix-ms timestamp from the source HistoryMessage. Used for timestamp-based fork splitting. */
 	createdAt?: number;

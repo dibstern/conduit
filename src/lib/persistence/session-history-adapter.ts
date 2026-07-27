@@ -145,11 +145,16 @@ export function messageRowsToHistory(
 			...(row.text ? { text: row.text } : {}),
 			parts,
 			...(row.cost != null ? { cost: row.cost } : {}),
-			...(row.tokens_in != null || row.tokens_out != null
+			...(row.tokens_in != null ||
+			row.tokens_out != null ||
+			row.context_window != null
 				? {
 						tokens: {
 							...(row.tokens_in != null ? { input: row.tokens_in } : {}),
 							...(row.tokens_out != null ? { output: row.tokens_out } : {}),
+							...(row.context_window != null
+								? { context_window: row.context_window }
+								: {}),
 							...(row.tokens_cache_read != null ||
 							row.tokens_cache_write != null
 								? {

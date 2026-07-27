@@ -968,6 +968,9 @@ export function handleResult(
 				outputTokens: usage?.output ?? lastMsg.outputTokens,
 				cacheRead: usage?.cache_read ?? lastMsg.cacheRead,
 				cacheWrite: usage?.cache_creation ?? lastMsg.cacheWrite,
+				...(usage?.context_window != null
+					? { context_window: usage.context_window }
+					: {}),
 				...(messageId != null && { messageId }),
 			};
 			setMessages(messages, msgs);
@@ -987,6 +990,9 @@ export function handleResult(
 		outputTokens: usage?.output,
 		cacheRead: usage?.cache_read,
 		cacheWrite: usage?.cache_creation,
+		...(usage?.context_window != null
+			? { context_window: usage.context_window }
+			: {}),
 		...(messageId != null && { messageId }),
 	};
 	setMessages(messages, [...getMessages(messages), resultMsg]);
@@ -994,7 +1000,8 @@ export function handleResult(
 	updateContextFromTokens(messages, usage);
 }
 
-/** Compute context window usage from token counts and current model's limit. */
+/** Compute context usage from token counts and the turn's effective window,
+ *  falling back to the current model limit for legacy result messages. */
 function updateContextFromTokens(
 	messages: SessionMessages,
 	usage:
@@ -1003,6 +1010,7 @@ function updateContextFromTokens(
 				output?: number;
 				cache_read?: number;
 				cache_creation?: number;
+				context_window?: number;
 		  }
 		| undefined,
 ): void {
@@ -1013,7 +1021,12 @@ function updateContextFromTokens(
 		(usage.cache_read ?? 0) +
 		(usage.cache_creation ?? 0);
 	if (total <= 0) return;
-	const limit = currentContextLimit();
+	const limit =
+		typeof usage.context_window === "number" &&
+		Number.isFinite(usage.context_window) &&
+		usage.context_window > 0
+			? usage.context_window
+			: currentContextLimit();
 	if (limit) {
 		// Clamp: context occupancy can never exceed the window; >100 means
 		// stale aggregate token data (pre-fix history rows).
@@ -1070,6 +1083,7 @@ export function restoreContextFromMessages(messages: SessionMessages): void {
 			...(m.outputTokens != null && { output: m.outputTokens }),
 			...(m.cacheRead != null && { cache_read: m.cacheRead }),
 			...(m.cacheWrite != null && { cache_creation: m.cacheWrite }),
+			...(m.context_window != null && { context_window: m.context_window }),
 		});
 		return;
 	}

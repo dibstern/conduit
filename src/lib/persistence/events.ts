@@ -181,6 +181,7 @@ export interface TurnCompletedPayload {
 		readonly output?: number;
 		readonly cacheRead?: number;
 		readonly cacheWrite?: number;
+		readonly contextWindow?: number;
 	};
 	readonly duration?: number;
 }
@@ -400,6 +401,7 @@ const TokensSchema = Schema.Struct({
 	output: Schema.optionalWith(Schema.Number, { exact: true }),
 	cacheRead: Schema.optionalWith(Schema.Number, { exact: true }),
 	cacheWrite: Schema.optionalWith(Schema.Number, { exact: true }),
+	contextWindow: Schema.optionalWith(Schema.Number, { exact: true }),
 });
 
 const MessageCreatedPayloadSchema = Schema.Struct({

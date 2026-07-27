@@ -381,6 +381,7 @@ export const makeMessageProjector = (): EffectProjector => ({
 					tokens_out = ${tokens?.output ?? null},
 					tokens_cache_read = ${tokens?.cacheRead ?? null},
 					tokens_cache_write = ${tokens?.cacheWrite ?? null},
+					context_window = ${tokens?.contextWindow ?? null},
 					is_streaming = 0,
 					updated_at = ${event.createdAt}
 					WHERE id = ${event.data.messageId}`;
