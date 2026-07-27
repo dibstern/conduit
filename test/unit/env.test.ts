@@ -1,25 +1,28 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 describe("env module", () => {
-	const originalEnv = process.env;
-
 	beforeEach(() => {
 		vi.resetModules();
-		process.env = { ...originalEnv };
 	});
 
 	afterEach(() => {
-		process.env = originalEnv;
+		vi.unstubAllEnvs();
 	});
 
 	it("exports DEFAULT_CONFIG_DIR from homedir when XDG_CONFIG_HOME is unset", async () => {
-		delete process.env["XDG_CONFIG_HOME"];
+		// CONDUIT_CONFIG_DIR takes precedence over the XDG/homedir logic, so it
+		// must be cleared to exercise the fallback (it is set in this machine's env).
+		vi.stubEnv("CONDUIT_CONFIG_DIR", undefined);
+		vi.stubEnv("XDG_CONFIG_HOME", undefined);
 		const { DEFAULT_CONFIG_DIR } = await import("../../src/lib/env.js");
 		expect(DEFAULT_CONFIG_DIR).toMatch(/\.conduit$/);
 	});
 
 	it("respects XDG_CONFIG_HOME when set", async () => {
-		process.env["XDG_CONFIG_HOME"] = "/tmp/xdg-test";
+		// CONDUIT_CONFIG_DIR takes precedence over XDG_CONFIG_HOME, so clear it
+		// to exercise the XDG branch (it is set in this machine's env).
+		vi.stubEnv("CONDUIT_CONFIG_DIR", undefined);
+		vi.stubEnv("XDG_CONFIG_HOME", "/tmp/xdg-test");
 		const { DEFAULT_CONFIG_DIR } = await import("../../src/lib/env.js");
 		expect(DEFAULT_CONFIG_DIR).toBe("/tmp/xdg-test/conduit");
 	});
@@ -35,31 +38,31 @@ describe("env module", () => {
 	});
 
 	it("ENV.host defaults to 127.0.0.1 when HOST is not set", async () => {
-		delete process.env["HOST"];
+		vi.stubEnv("HOST", undefined);
 		const { ENV } = await import("../../src/lib/env.js");
 		expect(ENV.host).toBe("127.0.0.1");
 	});
 
 	it("ENV.host respects HOST env var", async () => {
-		process.env["HOST"] = "0.0.0.0";
+		vi.stubEnv("HOST", "0.0.0.0");
 		const { ENV } = await import("../../src/lib/env.js");
 		expect(ENV.host).toBe("0.0.0.0");
 	});
 
 	it("ENV.debug is false by default", async () => {
-		delete process.env["DEBUG"];
+		vi.stubEnv("DEBUG", undefined);
 		const { ENV } = await import("../../src/lib/env.js");
 		expect(ENV.debug).toBe(false);
 	});
 
 	it('ENV.debug is true when DEBUG="1"', async () => {
-		process.env["DEBUG"] = "1";
+		vi.stubEnv("DEBUG", "1");
 		const { ENV } = await import("../../src/lib/env.js");
 		expect(ENV.debug).toBe(true);
 	});
 
 	it('ENV.opencodeUsername defaults to "opencode"', async () => {
-		delete process.env["OPENCODE_SERVER_USERNAME"];
+		vi.stubEnv("OPENCODE_SERVER_USERNAME", undefined);
 		const { ENV } = await import("../../src/lib/env.js");
 		expect(ENV.opencodeUsername).toBe("opencode");
 	});
