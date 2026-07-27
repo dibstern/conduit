@@ -21,6 +21,7 @@ export interface ProviderRuntimeIngestion {
 	) => Effect.Effect<number, unknown>;
 	readonly ingestBatch: (
 		events: readonly ProviderRuntimeEvent[],
+		options?: { readonly publish?: boolean },
 	) => Effect.Effect<number, unknown>;
 	readonly drain: () => Effect.Effect<void, unknown>;
 }
@@ -57,6 +58,7 @@ export const makeProviderRuntimeIngestionLive = (
 
 			const ingestBatch = (
 				events: readonly ProviderRuntimeEvent[],
+				ingestOptions: { readonly publish?: boolean } = {},
 			): Effect.Effect<number, unknown> =>
 				ingestSemaphore.withPermits(1)(
 					Effect.gen(function* () {
@@ -107,7 +109,7 @@ export const makeProviderRuntimeIngestionLive = (
 								.pipe(Effect.provideService(SqlClient.SqlClient, sql));
 						}
 
-						if (options.relayPublisher) {
+						if (options.relayPublisher && ingestOptions.publish !== false) {
 							yield* publishRelayMessages(storedEvents, options.relayPublisher);
 						}
 

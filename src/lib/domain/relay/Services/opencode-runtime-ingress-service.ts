@@ -153,7 +153,13 @@ export class EffectOpenCodeRuntimeIngress
 			const runtimeEvents: ProviderRuntimeEvent[] = sessionSeeded
 				? [opencodeSessionCreatedRuntimeEvent(sessionId), ...translated]
 				: [...translated];
-			const written = yield* this.ingestion.ingestBatch(runtimeEvents);
+			// Persist only — never publish. The legacy SSE translator
+			// (sse-wiring.ts) is the sole live-delivery path to the browser for
+			// OpenCode; publishing here too would deliver every streamed delta
+			// twice (rendered as doubled text, e.g. "I'mI'm ready. ready.").
+			const written = yield* this.ingestion.ingestBatch(runtimeEvents, {
+				publish: false,
+			});
 			if (sessionSeeded) this.seenSessions.add(sessionId);
 
 			this.stats.eventsWritten += written;
