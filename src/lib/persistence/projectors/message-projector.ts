@@ -21,6 +21,7 @@ const MESSAGE_HANDLES = [
 	"file.attached",
 	"turn.completed",
 	"turn.error",
+	"session.compaction",
 ] as const;
 
 function mergeMetadata(
@@ -431,6 +432,48 @@ export class MessageProjector implements Projector {
 			db.execute(
 				"UPDATE messages SET is_streaming = 0, updated_at = ? WHERE id = ?",
 				[event.createdAt, event.data.messageId],
+			);
+			return;
+		}
+
+		if (isEventType(event, "session.compaction")) {
+			// Only the terminal "completed" boundary is persisted; "started"/"failed"
+			// are transient notices filtered out before persistence. Persist it as a
+			// synthetic assistant message owning a single `compaction` part so the
+			// "Context compacted" divider (and the reduced context-% bar) survive a
+			// reload. Deterministic ids keyed on the event sequence make replay a
+			// no-op via ON CONFLICT DO NOTHING.
+			if (event.data.state !== "completed") return;
+			const messageId = `compaction-${event.sequence}`;
+			const partId = `compaction-part-${event.sequence}`;
+			db.execute(
+				`INSERT INTO messages
+				 (id, session_id, role, text, is_streaming, created_at, updated_at)
+				 VALUES (?, ?, 'assistant', '', 0, ?, ?)
+				 ON CONFLICT (id) DO NOTHING`,
+				[messageId, event.data.sessionId, event.createdAt, event.createdAt],
+			);
+			const metadata = encodeJson({
+				...(typeof event.data.preTokens === "number"
+					? { preTokens: event.data.preTokens }
+					: {}),
+				...(typeof event.data.postTokens === "number"
+					? { postTokens: event.data.postTokens }
+					: {}),
+			});
+			db.execute(
+				`INSERT INTO message_parts
+				 (id, message_id, type, text, metadata, sort_order, created_at, updated_at)
+				 VALUES (?, ?, 'compaction', ?, ?, 0, ?, ?)
+				 ON CONFLICT (id) DO NOTHING`,
+				[
+					partId,
+					messageId,
+					event.data.detail,
+					metadata,
+					event.createdAt,
+					event.createdAt,
+				],
 			);
 			return;
 		}

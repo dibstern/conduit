@@ -104,7 +104,7 @@
 		{#if dropdownOpen}
 			<div
 				data-testid="context-window-dropdown"
-				class="absolute bottom-[calc(100%+4px)] right-0 w-44 bg-bg-alt border border-border rounded-lg shadow-[0_-4px_16px_rgba(var(--shadow-rgb),0.3)] z-[210] py-1 font-brand"
+				class="absolute bottom-[calc(100%+4px)] right-0 w-44 bg-bg-alt border border-border rounded-lg shadow-menu z-[var(--z-popover-raised)] py-1 font-brand"
 			>
 				<button
 					data-testid="context-window-option-default"

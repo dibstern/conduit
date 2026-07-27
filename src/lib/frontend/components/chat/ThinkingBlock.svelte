@@ -54,7 +54,7 @@
 >
 	{#if !message.done}
 		<!-- Streaming: inline thinking display -->
-		<div class="glow-brand-b bg-bg-surface/80 rounded-[10px] py-2 px-3">
+		<div class="glow-brand-b bg-bg-surface/80 rounded-panel py-2 px-3">
 			<div class="flex items-center gap-1.5 mb-1.5">
 				<BlockGrid cols={5} mode="fast" blockSize={2} gap={0.75} class="self-center" />
 				<span class="text-xs text-brand-b font-medium">{label}…</span>
@@ -68,7 +68,7 @@
 	{:else}
 		<!-- Done: compact collapsible bar -->
 		<button
-			class="thinking-header flex items-center gap-1.5 cursor-pointer py-2 px-3 select-none glow-brand-b rounded-[10px] text-xs text-text-dimmer hover:bg-bg-surface transition-colors duration-150 w-full text-left"
+			class="thinking-header flex items-center gap-1.5 cursor-pointer py-2 px-3 select-none glow-brand-b rounded-panel text-xs text-text-dimmer hover:bg-bg-surface transition-colors duration-150 w-full text-left"
 			onclick={handleToggle}
 		>
 			<span
@@ -88,7 +88,7 @@
 
 		{#if expanded && message.text}
 			<div
-				class="thinking-content glow-brand-b rounded-[10px] py-2 px-3 font-mono text-base leading-[1.7] text-text-secondary whitespace-pre-wrap break-words max-h-[300px] overflow-y-auto"
+				class="thinking-content glow-brand-b rounded-panel py-2 px-3 font-mono text-base leading-[1.7] text-text-secondary whitespace-pre-wrap break-words max-h-[300px] overflow-y-auto"
 			>
 				{message.text}
 			</div>

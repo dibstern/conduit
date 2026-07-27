@@ -522,7 +522,7 @@
 {#if visible}
 	<!-- svelte-ignore a11y_click_events_have_key_events -->
 	<!-- svelte-ignore a11y_no_static_element_interactions -->
-	<div class="fixed inset-0 z-[200] flex items-center justify-center bg-[rgba(var(--overlay-rgb),0.15)] backdrop-blur-sm" onclick={handleBackdropClick}>
+	<div class="fixed inset-0 z-[var(--z-popover)] flex items-center justify-center bg-[rgba(var(--overlay-rgb),0.15)] backdrop-blur-sm" onclick={handleBackdropClick}>
 		<div id="settings-panel" class="bg-bg border border-border rounded-xl shadow-2xl max-w-lg w-full mx-4 flex flex-col max-h-[80vh]">
 			<!-- Header -->
 			<div class="flex items-center justify-between px-5 py-3 border-b border-border">
@@ -566,7 +566,7 @@
 							onchange={togglePush}
 							disabled={pushBusy || pushUnavailable}
 							dimmed={pushUnavailable}
-							class="bg-bg-surface border border-border rounded-[10px] px-5 py-4 gap-4 font-brand {pushBusy || pushUnavailable ? 'opacity-60' : ''}"
+							class="bg-bg-surface border border-border rounded-panel px-5 py-4 gap-4 font-brand {pushBusy || pushUnavailable ? 'opacity-60' : ''}"
 						/>
 						<ToggleSetting
 							icon="bell"
@@ -574,7 +574,7 @@
 							description="Show desktop notifications when tasks complete"
 							checked={notifSettings.browser}
 							onchange={toggleBrowser}
-							class="bg-bg-surface border border-border rounded-[10px] px-5 py-4 gap-4 font-brand"
+							class="bg-bg-surface border border-border rounded-panel px-5 py-4 gap-4 font-brand"
 						/>
 						<ToggleSetting
 							icon="volume-2"
@@ -582,7 +582,7 @@
 							description="Play a sound when notifications are triggered"
 							checked={notifSettings.sound}
 							onchange={toggleSound}
-							class="bg-bg-surface border border-border rounded-[10px] px-5 py-4 gap-4 font-brand"
+							class="bg-bg-surface border border-border rounded-panel px-5 py-4 gap-4 font-brand"
 						/>
 						{#if pushUnavailable}
 							<div class="px-2 py-1.5 text-xs text-text-muted">Push notifications require HTTPS. Enable a certificate in the CLI settings.</div>
@@ -657,7 +657,7 @@
 										{allHidden ? "Show all" : "Hide all"}
 									</button>
 								</div>
-								<div class="space-y-1 bg-bg-surface border border-border rounded-[10px] px-4 py-2">
+								<div class="space-y-1 bg-bg-surface border border-border rounded-panel px-4 py-2">
 									{#each provider.models as model (model.id)}
 										<ToggleSetting
 											label={model.name || model.id}
@@ -676,7 +676,7 @@
 								<div class="text-xs font-semibold uppercase tracking-widest text-text-muted px-1 mb-2 font-brand">
 									{discoveryState.agentProviderScope?.name} agents
 								</div>
-								<div class="space-y-1 bg-bg-surface border border-border rounded-[10px] px-4 py-2">
+								<div class="space-y-1 bg-bg-surface border border-border rounded-panel px-4 py-2">
 									{#each discoveryState.agents as agent (agent.id)}
 										<ToggleSetting
 											label={agent.name || agent.id}
@@ -919,7 +919,7 @@
 							description="Shows WebSocket state transitions, timing, and lifecycle events."
 							checked={featureFlags.debug}
 							onchange={() => toggleFeature("debug")}
-							class="bg-bg-surface border border-border rounded-[10px] px-5 py-4 gap-4 font-brand"
+							class="bg-bg-surface border border-border rounded-panel px-5 py-4 gap-4 font-brand"
 						/>
 						<div class="text-xs text-text-dimmer space-y-1.5 px-1 font-brand">
 							<div>URL param: <code class="px-1 py-0.5 bg-white/[0.08] rounded text-text-muted">?feats=debug</code></div>

@@ -96,6 +96,7 @@ describe("Effect SQL migrations", () => {
 					{ migration_id: 3, name: "add_durable_provider_commands" },
 					{ migration_id: 4, name: "drop_events_session_fk" },
 					{ migration_id: 5, name: "message_parts_file_type" },
+					{ migration_id: 6, name: "message_parts_compaction_type" },
 				]);
 
 				const legacyRows = yield* sql<{ id: number; name: string }>`
@@ -106,6 +107,7 @@ describe("Effect SQL migrations", () => {
 					{ id: 3, name: "add_durable_provider_commands" },
 					{ id: 4, name: "drop_events_session_fk" },
 					{ id: 5, name: "message_parts_file_type" },
+					{ id: 6, name: "message_parts_compaction_type" },
 				]);
 			}).pipe(
 				Effect.provide(
@@ -134,6 +136,7 @@ describe("Effect SQL migrations", () => {
 					{ migration_id: 3, name: "add_durable_provider_commands" },
 					{ migration_id: 4, name: "drop_events_session_fk" },
 					{ migration_id: 5, name: "message_parts_file_type" },
+					{ migration_id: 6, name: "message_parts_compaction_type" },
 				]);
 
 				const columns = yield* sql<{ name: string }>`

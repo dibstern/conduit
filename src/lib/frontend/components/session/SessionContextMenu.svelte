@@ -89,13 +89,13 @@
 <!-- svelte-ignore a11y_click_events_have_key_events -->
 <!-- svelte-ignore a11y_no_static_element_interactions -->
 <div
-	class="fixed inset-0 z-[200]"
+	class="fixed inset-0 z-[var(--z-popover)]"
 	onclick={handleBackdropClick}
 >
 	<!-- Menu dropdown -->
 	<div
 		bind:this={menuEl}
-		class="session-ctx-menu fixed z-[201] min-w-[180px] bg-bg-alt border border-border rounded-lg py-1 shadow-[0_4px_16px_rgba(var(--shadow-rgb),0.3)]"
+		class="session-ctx-menu fixed z-[var(--z-popover-raised)] min-w-[180px] bg-bg-alt border border-border rounded-lg py-1 shadow-panel"
 		style={menuStyle}
 		onclick={(e) => e.stopPropagation()}
 	>

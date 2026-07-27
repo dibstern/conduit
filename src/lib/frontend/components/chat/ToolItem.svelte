@@ -22,7 +22,7 @@
 	);
 
 	const groupRadius = $derived.by(() => {
-		if (isFirstInGroup && isLastInGroup) return "rounded-[10px]";
+		if (isFirstInGroup && isLastInGroup) return "rounded-panel";
 		if (isFirstInGroup) return "rounded-t-[10px]";
 		if (isLastInGroup) return "rounded-b-[10px]";
 		return "";

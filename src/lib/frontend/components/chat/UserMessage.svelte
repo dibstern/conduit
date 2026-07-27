@@ -26,7 +26,7 @@
 	data-uuid={message.uuid}
 >
 	<div
-		class="bg-bg-surface rounded-[10px] py-4 px-5 relative glow-brand-a"
+		class="bg-bg-surface rounded-panel py-4 px-5 relative glow-brand-a"
 		class:border={isQueued}
 		class:border-dashed={isQueued}
 		class:border-border={isQueued}

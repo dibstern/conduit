@@ -199,7 +199,7 @@
 
 	<!-- Dropdown menu (opens upward, fixed to sidebar bottom-left like ThemePicker) -->
 	<div
-		class="fixed bottom-[56px] left-2 w-[240px] bg-bg-alt border border-border rounded-lg shadow-xl z-[1000] py-1.5 overflow-hidden"
+		class="fixed bottom-[56px] left-2 w-[240px] bg-bg-alt border border-border rounded-lg shadow-xl z-[var(--z-top)] py-1.5 overflow-hidden"
 	>
 		<ToggleSetting
 			icon="smartphone"

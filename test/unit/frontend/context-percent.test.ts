@@ -100,6 +100,75 @@ describe("context percent computation", () => {
 		restoreContextFromMessages(messages);
 		expect(messages.contextPercent).toBe(30);
 	});
+
+	it("restores percent from a compaction divider's postTokens", () => {
+		discoveryState.currentModelId = "claude-fable-5";
+		setClaudeProvider([
+			{
+				id: "claude-fable-5",
+				name: "Claude Fable 5",
+				providerId: "claude",
+				limit: { context: 200_000, output: 128_000 },
+			},
+		]);
+		setMessages(messages, [
+			{ type: "result", uuid: "r1", inputTokens: 10, cacheRead: 179_990 },
+			{
+				type: "system",
+				uuid: "c1",
+				text: "Context compacted",
+				postTokens: 100_000,
+			},
+		] as never);
+		restoreContextFromMessages(messages);
+		expect(messages.contextPercent).toBe(50);
+	});
+
+	it("skips the zero-token /compact result and falls through to the divider", () => {
+		discoveryState.currentModelId = "claude-fable-5";
+		setClaudeProvider([
+			{
+				id: "claude-fable-5",
+				name: "Claude Fable 5",
+				providerId: "claude",
+				limit: { context: 200_000, output: 128_000 },
+			},
+		]);
+		setMessages(messages, [
+			{
+				type: "system",
+				uuid: "c1",
+				text: "Context compacted",
+				postTokens: 100_000,
+			},
+			{ type: "result", uuid: "r1", inputTokens: 0, outputTokens: 0 },
+		] as never);
+		restoreContextFromMessages(messages);
+		expect(messages.contextPercent).toBe(50);
+	});
+
+	it("prefers a real turn's result over an earlier compaction divider", () => {
+		discoveryState.currentModelId = "claude-fable-5";
+		setClaudeProvider([
+			{
+				id: "claude-fable-5",
+				name: "Claude Fable 5",
+				providerId: "claude",
+				limit: { context: 200_000, output: 128_000 },
+			},
+		]);
+		setMessages(messages, [
+			{
+				type: "system",
+				uuid: "c1",
+				text: "Context compacted",
+				postTokens: 100_000,
+			},
+			{ type: "result", uuid: "r1", inputTokens: 10, cacheRead: 19_990 },
+		] as never);
+		restoreContextFromMessages(messages);
+		expect(messages.contextPercent).toBe(10);
+	});
 });
 
 describe("claude capability probe — fable family limits", () => {

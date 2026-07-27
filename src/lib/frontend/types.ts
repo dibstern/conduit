@@ -155,6 +155,10 @@ export interface SystemMessage {
 	errorCode?: string;
 	statusCode?: number;
 	details?: Record<string, unknown>;
+	/** Post-compaction context size, present on persisted compaction dividers.
+	 *  Lets restoreContextFromMessages recover the reduced context-% bar on
+	 *  reload when no real turn has run since the compaction. */
+	postTokens?: number;
 }
 
 // ─── Session Types (frontend-only) ──────────────────────────────────────────

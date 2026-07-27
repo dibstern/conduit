@@ -38,6 +38,7 @@ import {
 	flushPendingRender,
 	getMessages,
 	getOrCreateSessionSlot,
+	handleCompaction,
 	handleDelta,
 	handleDone,
 	handleError,
@@ -157,6 +158,7 @@ const PER_SESSION_EVENT_TYPES: ReadonlySet<string> =
 		"done",
 		"error",
 		"status",
+		"compaction",
 		"user_message",
 		"part_removed",
 		"message_removed",
@@ -278,6 +280,9 @@ function routePerSession(event: PerSessionEvent): void {
 		case "status":
 			handleStatus(activity, messages, event);
 			break;
+		case "compaction":
+			handleCompaction(activity, messages, event);
+			break;
 		case "error":
 			handleChatError(activity, messages, event);
 			triggerNotifications(event);
@@ -389,6 +394,7 @@ const CHAT_EVENT_TYPES: ReadonlySet<string> = new Set([
 	"result",
 	"done",
 	"status",
+	"compaction",
 	"error",
 ]);
 
@@ -649,6 +655,9 @@ function dispatchChatEvent(event: RelayMessage, ctx: DispatchContext): boolean {
 		}
 		case "status":
 			handleStatus(activity, messages, event);
+			return true;
+		case "compaction":
+			handleCompaction(activity, messages, event);
 			return true;
 		case "error":
 			if (ctx.isReplay) {

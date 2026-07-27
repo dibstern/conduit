@@ -246,7 +246,7 @@
 				<div class="fv-code flex min-h-0">
 					<!-- Gutter (line numbers) -->
 				<pre
-					class="fv-gutter shrink-0 py-3 pr-2 pl-3.5 text-right select-none border-r border-border-subtle min-w-[44px] sticky left-0 bg-bg z-[1] font-mono leading-[1.55] text-text-dimmer/50"
+					class="fv-gutter shrink-0 py-3 pr-2 pl-3.5 text-right select-none border-r border-border-subtle min-w-[44px] sticky left-0 bg-bg z-[var(--z-raised)] font-mono leading-[1.55] text-text-dimmer/50"
 					style="font-size: {fontSize}px"
 				>{lineNumbers}</pre>
 					<!-- Code content -->

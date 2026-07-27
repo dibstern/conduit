@@ -11,6 +11,8 @@ export const DROP_EVENTS_SESSION_FK_MIGRATION =
 	"0004_drop_events_session_fk.sql";
 export const MESSAGE_PARTS_FILE_TYPE_MIGRATION =
 	"0005_message_parts_file_type.sql";
+export const MESSAGE_PARTS_COMPACTION_TYPE_MIGRATION =
+	"0006_message_parts_compaction_type.sql";
 
 export function readMigrationSql(filename: string): string {
 	return readFileSync(
@@ -44,5 +46,10 @@ export const schemaMigrations: readonly Migration[] = [
 		id: 5,
 		name: "message_parts_file_type",
 		sql: readMigrationSql(MESSAGE_PARTS_FILE_TYPE_MIGRATION),
+	},
+	{
+		id: 6,
+		name: "message_parts_compaction_type",
+		sql: readMigrationSql(MESSAGE_PARTS_COMPACTION_TYPE_MIGRATION),
 	},
 ];

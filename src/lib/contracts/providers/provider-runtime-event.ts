@@ -36,6 +36,7 @@ export const PROVIDER_RUNTIME_EVENT_TYPES = [
 	"session.created",
 	"session.renamed",
 	"session.status",
+	"session.compaction",
 	"session.provider_changed",
 	"permission.asked",
 	"permission.resolved",

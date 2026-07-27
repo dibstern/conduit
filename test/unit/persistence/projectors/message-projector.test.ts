@@ -107,6 +107,7 @@ describe("MessageProjector", () => {
 			"file.attached",
 			"turn.completed",
 			"turn.error",
+			"session.compaction",
 		]);
 	});
 
@@ -1672,6 +1673,101 @@ describe("MessageProjector", () => {
 			expect(parts).toHaveLength(1);
 			expect(parts[0]?.sort_order).toBe(0);
 			expect(parts[0]?.text).toBe("Hmm..."); // not doubled
+		});
+	});
+
+	describe("session.compaction", () => {
+		it("persists a completed boundary as a synthetic assistant message + compaction part", () => {
+			const event = makeStored(
+				"session.compaction",
+				"s1",
+				{
+					sessionId: "s1",
+					state: "completed",
+					detail: "Context compacted · 195k → 96k",
+					preTokens: 194925,
+					postTokens: 96000,
+				},
+				7,
+			);
+
+			projector.project(event, db);
+
+			const msg = db.queryOne<MessageRow>(
+				"SELECT * FROM messages WHERE id = ?",
+				["compaction-7"],
+			);
+			expect(msg?.role).toBe("assistant");
+			expect(msg?.is_streaming).toBe(0);
+			expect(msg?.session_id).toBe("s1");
+
+			const part = db.queryOne<MessagePartRow>(
+				"SELECT * FROM message_parts WHERE id = ?",
+				["compaction-part-7"],
+			);
+			expect(part?.type).toBe("compaction");
+			expect(part?.message_id).toBe("compaction-7");
+			expect(part?.text).toBe("Context compacted · 195k → 96k");
+			expect(JSON.parse(part?.metadata ?? "{}")).toEqual({
+				preTokens: 194925,
+				postTokens: 96000,
+			});
+		});
+
+		it("is idempotent on replay (deterministic ids + ON CONFLICT DO NOTHING)", () => {
+			const event = makeStored(
+				"session.compaction",
+				"s1",
+				{
+					sessionId: "s1",
+					state: "completed",
+					detail: "Context compacted",
+					postTokens: 50000,
+				},
+				3,
+			);
+
+			projector.project(event, db);
+			projector.project(event, db, { replaying: true });
+
+			const msgs = db.query<MessageRow>("SELECT * FROM messages WHERE id = ?", [
+				"compaction-3",
+			]);
+			const parts = db.query<MessagePartRow>(
+				"SELECT * FROM message_parts WHERE id = ?",
+				["compaction-part-3"],
+			);
+			expect(msgs).toHaveLength(1);
+			expect(parts).toHaveLength(1);
+		});
+
+		it.each([
+			"started",
+			"failed",
+		] as const)("does NOT persist a %s boundary (transient notice)", (state) => {
+			const event = makeStored(
+				"session.compaction",
+				"s1",
+				{
+					sessionId: "s1",
+					state,
+					detail: state === "started" ? "Compacting…" : "Compaction failed",
+				},
+				4,
+			);
+
+			projector.project(event, db);
+
+			const msgs = db.query<MessageRow>(
+				"SELECT * FROM messages WHERE session_id = ?",
+				["s1"],
+			);
+			const parts = db.query<MessagePartRow>(
+				"SELECT * FROM message_parts WHERE type = 'compaction'",
+				[],
+			);
+			expect(msgs).toHaveLength(0);
+			expect(parts).toHaveLength(0);
 		});
 	});
 });

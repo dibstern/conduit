@@ -24,7 +24,7 @@
 	</button>
 	<div
 		id="attach-menu"
-		class="absolute bottom-[calc(100%+8px)] left-0 min-w-[170px] bg-bg-surface border border-border rounded-[10px] p-1 shadow-[0_-4px_24px_rgba(var(--shadow-rgb),0.4)] z-10 overflow-hidden"
+		class="absolute bottom-[calc(100%+8px)] left-0 min-w-[170px] bg-bg-surface border border-border rounded-panel p-1 shadow-menu-lg z-10 overflow-hidden"
 		class:hidden={!open}
 	>
 		<button
