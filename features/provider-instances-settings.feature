@@ -15,6 +15,19 @@ Examples:
   | OpenCode | Staging OC  |
   | Claude   | Work Claude |
 
+Scenario: editing a named instance updates it in the settings list
+  Given a named OpenCode instance Staging OC is already configured
+  When I open settings to the Instances tab
+  And I rename the Staging OC instance to Prod OC via edit
+  Then the Instances list shows Prod OC
+  And the Instances list does not show Staging OC
+
+Scenario: removing a named instance drops it from the settings list
+  Given a named OpenCode instance Staging OC is already configured
+  When I open settings to the Instances tab
+  And I remove the Staging OC instance
+  Then the Instances list does not show Staging OC
+
 Scenario Outline: the instance editor matches the approved layout
   When I open settings to the Instances tab
   And I start adding a Claude instance
