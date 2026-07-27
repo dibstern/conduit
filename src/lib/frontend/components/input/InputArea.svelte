@@ -14,6 +14,7 @@
 	import FileMenu from "./FileMenu.svelte";
 	import ModelSelector from "../model/ModelSelector.svelte";
 	import PermissionModeSelector from "./PermissionModeSelector.svelte";
+	import SkillHighlightBackdrop from "./SkillHighlightBackdrop.svelte";
 	// biome-ignore lint/style/useImportType: SubagentBackBar is used as a value for bind:this
 	import SubagentBackBar from "../chat/SubagentBackBar.svelte";
 	import PastePreview from "../chat/PastePreview.svelte";
@@ -41,6 +42,8 @@
 	let fileMenuRef: FileMenu | undefined = $state();
 	let subagentBackBarRef: SubagentBackBar | undefined = $state();
 	let cursorPos = $state(0);
+	let scrollTop = $state(0);
+	let composing = $state(false);
 
 	// ─── Per-session input drafts ─────────────────────────────────────────────
 	// Each session keeps its own unsent input text. Switching sessions saves the
@@ -92,6 +95,9 @@
 	const slashQuery = $derived(extractSlashQuery(inputText, cursorPos));
 	const commandMenuVisible = $derived(slashQuery !== null);
 	const commandQuery = $derived(slashQuery?.query ?? "");
+
+	/** Names of known slash commands/skills, for inline recognition in the composer. */
+	const commandNameSet = $derived(new Set(discoveryState.commands.map((c) => c.name)));
 
 	// ─── File menu state ──────────────────────────────────────────────────────
 
@@ -166,6 +172,21 @@
 		if (textareaEl) {
 			cursorPos = textareaEl.selectionStart ?? 0;
 		}
+	}
+
+	/** Keep the highlight backdrop's scroll aligned with the textarea. */
+	function handleScroll() {
+		if (textareaEl) scrollTop = textareaEl.scrollTop;
+	}
+
+	// During IME composition the textarea must show its own pre-commit text, so we
+	// reveal the textarea text and hide the backdrop until composition ends.
+	function handleCompositionStart() {
+		composing = true;
+	}
+
+	function handleCompositionEnd() {
+		composing = false;
 	}
 
 	function handleKeydown(e: KeyboardEvent) {
@@ -531,20 +552,31 @@
 		>
 
 			<!-- Textarea row -->
-			<div class="flex items-start">
+			<div class="relative flex items-start">
+				<SkillHighlightBackdrop
+					text={inputText}
+					commandNames={commandNameSet}
+					{scrollTop}
+					dimmed={composing}
+				/>
 				<textarea
 					id="input"
 					rows="1"
 					placeholder="Ask anything. / to use skills, @ to mention files"
 					autocomplete="off"
 					enterkeyhint={isMobile() ? "enter" : "send"}
-					class="flex-1 min-w-0 bg-transparent border-none text-text text-base font-sans leading-[1.4] pt-2 pb-1 px-2.5 resize-none outline-none min-h-6 max-h-[120px] overflow-y-auto placeholder:text-text-muted"
+					class="relative z-10 flex-1 min-w-0 bg-transparent border-none caret-[var(--color-text)] text-base font-sans leading-[1.4] pt-2 pb-1 px-2.5 resize-none outline-none min-h-6 max-h-[120px] overflow-y-auto placeholder:text-text-muted"
+					class:text-transparent={!composing}
+					class:text-text={composing}
 					bind:value={inputText}
 					bind:this={textareaEl}
 					oninput={handleInput}
 					onkeydown={handleKeydown}
 					onkeyup={handleKeyup}
 					onclick={handleClick}
+					onscroll={handleScroll}
+					oncompositionstart={handleCompositionStart}
+					oncompositionend={handleCompositionEnd}
 				></textarea>
 			</div>
 

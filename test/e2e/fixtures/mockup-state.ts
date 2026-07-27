@@ -115,6 +115,14 @@ export const initMessages: MockMessage[] = [
 			{ id: "code", name: "Code", description: "General coding assistant" },
 		],
 	},
+	{
+		type: "command_list",
+		commands: [
+			{ name: "code-review", description: "Review the current diff" },
+			{ name: "commit", description: "Create a git commit" },
+			{ name: "test", description: "Run the test suite" },
+		],
+	},
 ];
 
 // ─── Turn 1 response (completed) ─────────────────────────────────────────────
