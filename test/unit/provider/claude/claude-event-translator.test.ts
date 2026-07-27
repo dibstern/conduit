@@ -2098,4 +2098,127 @@ describe("ClaudeEventTranslator", () => {
 			expect(event.providerId).toBe("claude");
 		}
 	});
+
+	// ─── Regression: multi-step turn must not clump text into one part ───
+	// A single agentic turn spans multiple SDK assistant messages (one per
+	// tool round). Each round's stream restarts content_block index at 0, but
+	// the translator pins currentAssistantMessageId to the first round's id.
+	// If the content-block key (messageId:index:type) ignores the round, every
+	// text segment collides on `msg:0:text` and merges into ONE part — created
+	// before any tool — so all narration renders clumped ahead of every tool
+	// call (both live and on reload). Post-tool text MUST get a distinct partId.
+	it("assigns distinct partIds to text before and after a tool across SDK message rounds", async () => {
+		// ── Round 1: text, then a tool ──
+		await runTranslate(
+			translator,
+			ctx,
+			makeStreamEvent({
+				type: "message_start",
+				message: { id: "assistant-round-1" },
+			}),
+		);
+		await runTranslate(
+			translator,
+			ctx,
+			makeStreamEvent({
+				type: "content_block_start",
+				index: 0,
+				content_block: { type: "text", text: "" },
+			}),
+		);
+		await runTranslate(
+			translator,
+			ctx,
+			makeStreamEvent({
+				type: "content_block_delta",
+				index: 0,
+				delta: { type: "text_delta", text: "Before the tool." },
+			}),
+		);
+		await runTranslate(
+			translator,
+			ctx,
+			makeStreamEvent({ type: "content_block_stop", index: 0 }),
+		);
+		await runTranslate(
+			translator,
+			ctx,
+			makeStreamEvent({
+				type: "content_block_start",
+				index: 1,
+				content_block: {
+					type: "tool_use",
+					id: "toolu_round1",
+					name: "Bash",
+					input: { command: "ls" },
+				},
+			}),
+		);
+		await runTranslate(
+			translator,
+			ctx,
+			makeStreamEvent({ type: "content_block_stop", index: 1 }),
+		);
+
+		// ── Round 2: a NEW SDK message, content_block index restarts at 0 ──
+		await runTranslate(
+			translator,
+			ctx,
+			makeStreamEvent({
+				type: "message_start",
+				message: { id: "assistant-round-2" },
+			}),
+		);
+		await runTranslate(
+			translator,
+			ctx,
+			makeStreamEvent({
+				type: "content_block_start",
+				index: 0,
+				content_block: { type: "text", text: "" },
+			}),
+		);
+		await runTranslate(
+			translator,
+			ctx,
+			makeStreamEvent({
+				type: "content_block_delta",
+				index: 0,
+				delta: { type: "text_delta", text: "After the tool." },
+			}),
+		);
+		await runTranslate(
+			translator,
+			ctx,
+			makeStreamEvent({ type: "content_block_stop", index: 0 }),
+		);
+
+		const textDeltas = sink.events.filter((e) => e.type === "text.delta");
+		const before = textDeltas.find(
+			(e) => dataOf(e)["text"] === "Before the tool.",
+		);
+		const after = textDeltas.find(
+			(e) => dataOf(e)["text"] === "After the tool.",
+		);
+		expect(before, "pre-tool text delta emitted").toBeDefined();
+		expect(after, "post-tool text delta emitted").toBeDefined();
+
+		// The two text segments are logically separate parts (a tool call runs
+		// between them). They MUST have distinct partIds so the projector orders
+		// them as text → tool → text, not [merged text] → tool.
+		expect(dataOf(after)["partId"]).not.toBe(dataOf(before)["partId"]);
+
+		// And all text stays under one cohesive assistant message.
+		expect(dataOf(before)["messageId"]).toBe("assistant-round-1");
+		expect(dataOf(after)["messageId"]).toBe("assistant-round-1");
+
+		// Sanity: the post-tool text is emitted AFTER the tool.started, so the
+		// chronological interleave is preserved in emission order too.
+		const startedIdx = sink.events.findIndex((e) => e.type === "tool.started");
+		const afterIdx = sink.events.findIndex(
+			(e) => e.type === "text.delta" && dataOf(e)["text"] === "After the tool.",
+		);
+		expect(startedIdx).toBeGreaterThanOrEqual(0);
+		expect(afterIdx).toBeGreaterThan(startedIdx);
+	});
 });

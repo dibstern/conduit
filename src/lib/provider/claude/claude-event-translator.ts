@@ -232,6 +232,15 @@ export class ClaudeEventTranslator {
 	// State tracker for mapping Claude content blocks to messageId/partId.
 	private currentAssistantMessageId = "";
 	private partIdCounter = 0;
+	// A single agentic turn spans multiple SDK assistant messages (one per
+	// tool round). Each round's stream restarts content_block index at 0, but
+	// currentAssistantMessageId stays pinned to the first round's id. Without a
+	// per-round discriminator the content-block key `msg:index:type` collides
+	// across rounds, merging every text segment into ONE part created before
+	// any tool — so all narration renders clumped ahead of every tool call.
+	// stepIndex advances per round to keep restarted indexes on distinct parts.
+	private stepIndex = 0;
+	private lastStreamStepId: string | undefined;
 	private bufferedWrites: Effect.Effect<void, unknown>[] | undefined;
 	private contentBlockStates = new Map<string, ContentBlockState>();
 	private announcedMessageIds = new Set<string>();
@@ -257,10 +266,13 @@ export class ClaudeEventTranslator {
 		index: number,
 		type: ReadableContentBlockType,
 	): string {
-		// Type-scoped: the SDK's per-block assistant snapshots index their
-		// content array independently of the wire content_block index, so a
-		// text block can land on an index the stream used for thinking.
-		return `${messageId}:${index}:${type}`;
+		// Step-scoped + type-scoped: (1) each tool round is its own SDK message
+		// whose content_block indexes restart at 0, so stepIndex keeps a later
+		// round's text/tool blocks off the earlier round's parts; (2) the SDK's
+		// per-block assistant snapshots index their content array independently
+		// of the wire content_block index, so a text block can land on an index
+		// the stream used for thinking.
+		return `${messageId}:${this.stepIndex}:${index}:${type}`;
 	}
 
 	private getOrCreateContentBlockState(
@@ -415,6 +427,8 @@ export class ClaudeEventTranslator {
 	 *  stale entries from a previous turn or reconnect. */
 	resetInFlightState(): void {
 		this.partIdCounter = 0;
+		this.stepIndex = 0;
+		this.lastStreamStepId = undefined;
 		this.currentAssistantMessageId = "";
 		this.contentBlockStates.clear();
 		this.announcedMessageIds.clear();
@@ -892,6 +906,18 @@ export class ClaudeEventTranslator {
 			if (boundary) {
 				ctx.pendingAssistantBoundary = false;
 				this.contentBlockStates.clear();
+				// Fresh assistant message: restart step numbering.
+				this.stepIndex = 0;
+				this.lastStreamStepId = msgId;
+			} else if (msgId && msgId !== this.lastStreamStepId) {
+				// A new SDK assistant message within the same turn (each tool
+				// round is its own message whose content_block indexes restart at
+				// 0). Advance the step so restarted indexes map to fresh parts
+				// instead of colliding with the previous round — which merged all
+				// narration into one part rendered ahead of every tool call.
+				// The first round (lastStreamStepId undefined) stays at step 0.
+				if (this.lastStreamStepId !== undefined) this.stepIndex++;
+				this.lastStreamStepId = msgId;
 			}
 			if (msgId && (boundary || !this.currentAssistantMessageId)) {
 				this.currentAssistantMessageId = msgId;
