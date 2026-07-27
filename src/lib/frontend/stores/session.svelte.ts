@@ -9,6 +9,7 @@ import {
 	getAgentsRpc,
 	getCommandsRpc,
 	getModelsRpc,
+	switchPermissionModeRpc,
 	type ViewSessionRpcInput,
 	viewSessionRpc,
 } from "../transport/ws-rpc-client.js";
@@ -29,6 +30,7 @@ import {
 	applyGetCommandsResponse,
 	applyGetModelsResponse,
 	discoveryState,
+	flushPendingPermissionMode,
 } from "./discovery.svelte.js";
 import { getCurrentSlug, navigate } from "./router.svelte.js";
 import { uiState } from "./ui.svelte.js";
@@ -389,6 +391,12 @@ export function handleSessionSwitched(
 		// unknown-session guard won't drop events for the active session.
 		if (!sessionState.sessions.has(id)) {
 			sessionState.sessions.set(id, { id, title: "" });
+		}
+		// A permission mode selected before any session was bound can only be
+		// delivered now that we know the session id.
+		const slug = getCurrentSlug();
+		if (slug) {
+			flushPendingPermissionMode(slug, id, switchPermissionModeRpc);
 		}
 	}
 	// Co-located: complete the creation state machine if this session_switched

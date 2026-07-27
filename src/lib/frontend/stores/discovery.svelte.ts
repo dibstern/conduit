@@ -98,6 +98,8 @@ export const discoveryState = $state({
 	currentContextWindow: "" as string,
 	availableContextWindowOptions: [] as ReadonlyArray<ContextWindowOption>,
 	permissionMode: "ask" as SessionPermissionMode,
+	/** Mode selected while no session was bound — flushed on session bind. */
+	pendingPermissionMode: null as SessionPermissionMode | null,
 	/** Global hide-list keys: model `<providerId>/<modelId>`. */
 	hiddenModels: [] as string[],
 	/** Global hide-list keys: agent `<scopeId>/<agentId>`. */
@@ -404,6 +406,35 @@ export function handleVisibilityInfo(
 	discoveryState.hiddenAgents = [...msg.hiddenAgents];
 }
 
+/**
+ * Flush a permission mode that was selected while no session was bound
+ * (e.g. cold start before session_switched). Called when a session binds so
+ * the user's pre-bind selection actually reaches the server instead of being
+ * silently dropped (the first turn would still ask, and any re-sync would
+ * flip the pill back to "Ask").
+ */
+export function flushPendingPermissionMode(
+	projectSlug: string,
+	sessionId: string,
+	send: (input: {
+		projectSlug: string;
+		sessionId: string;
+		mode: SessionPermissionMode;
+	}) => Promise<unknown>,
+): void {
+	const mode = discoveryState.pendingPermissionMode;
+	if (mode == null) return;
+	discoveryState.pendingPermissionMode = null;
+	discoveryState.permissionMode = mode;
+	if (mode === "ask") return; // server default — nothing to persist
+	void send({ projectSlug, sessionId, mode }).catch(() => {
+		// Server never got it: reflect the truthful default.
+		if (discoveryState.permissionMode === mode) {
+			discoveryState.permissionMode = "ask";
+		}
+	});
+}
+
 /** Clear all discovery state (for project switch). */
 export function clearDiscoveryState(): void {
 	discoveryState.agents = [];
@@ -421,6 +452,7 @@ export function clearDiscoveryState(): void {
 	discoveryState.currentContextWindow = "";
 	discoveryState.availableContextWindowOptions = [];
 	discoveryState.permissionMode = "ask";
+	discoveryState.pendingPermissionMode = null;
 	discoveryState.hiddenModels = [];
 	discoveryState.hiddenAgents = [];
 }

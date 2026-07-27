@@ -49,6 +49,7 @@
 		const projectSlug = getCurrentSlug();
 		const sessionId = sessionState.currentId;
 		if (projectSlug && sessionId) {
+			discoveryState.pendingPermissionMode = null;
 			void switchPermissionModeRpc({ projectSlug, sessionId, mode }).catch(
 				() => {
 					if (discoveryState.permissionMode === mode) {
@@ -56,6 +57,10 @@
 					}
 				},
 			);
+		} else {
+			// No session bound yet (e.g. cold start before session_switched):
+			// remember the choice; handleSessionSwitched flushes it on bind.
+			discoveryState.pendingPermissionMode = mode;
 		}
 	}
 
