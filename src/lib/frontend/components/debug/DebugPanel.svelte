@@ -352,7 +352,7 @@
 {#if visible}
 	<!-- svelte-ignore a11y_no_static_element_interactions -->
 	<div
-		class="debug-panel fixed z-[9999] flex flex-col bg-black/90 backdrop-blur-sm border border-green-900/50 rounded-lg shadow-2xl font-mono text-sm leading-relaxed overflow-hidden"
+		class="debug-panel fixed z-[var(--z-debug)] flex flex-col bg-black/90 backdrop-blur-sm border border-green-900/50 rounded-lg shadow-2xl font-mono text-sm leading-relaxed overflow-hidden"
 		style={panelPos.x === -1
 			? `bottom: 1rem; right: 1rem; width: ${panelSize.width}px; height: ${panelSize.height}px; min-width: 300px; min-height: 160px; max-width: 90vw; max-height: 80vh;`
 			: `left: ${panelPos.x}px; top: ${panelPos.y}px; width: ${panelSize.width}px; height: ${panelSize.height}px; min-width: 300px; min-height: 160px; max-width: 90vw; max-height: 80vh;`}

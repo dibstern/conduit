@@ -7,7 +7,7 @@
 	import Toast from "./Toast.svelte";
 </script>
 
-<div class="fixed top-16 right-4 z-[400] max-w-[320px] flex flex-col gap-2 pointer-events-none">
+<div class="fixed top-16 right-4 z-[var(--z-toast)] max-w-[320px] flex flex-col gap-2 pointer-events-none">
 	<AttentionBanner />
 	<Toast />
 </div>

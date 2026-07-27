@@ -97,6 +97,31 @@
 
 	--text-2xl: 24px;
 	--text-2xl--line-height: 1.2;
+
+	/* ── Z-Index Layers (theme-invariant) ────────────────
+	   Referenced as z-[var(--z-name)] (Tailwind v4 has no z-index theme namespace).
+	   Values preserve the current stacking order — do not reorder. */
+	--z-raised: 1;
+	--z-dropdown: 60;
+	--z-popover: 200;
+	--z-popover-raised: 210;
+	--z-modal: 300;
+	--z-overlay: 350;
+	--z-toast: 400;
+	--z-top: 1000;
+	--z-debug: 9999;
+
+	/* ── Elevation / Shadows ──────────────────────────────
+	   Compose with the runtime var(--shadow-rgb) produced by computeVars(). */
+	--shadow-menu: 0 -4px 16px rgba(var(--shadow-rgb), 0.3);
+	--shadow-menu-lg: 0 -4px 24px rgba(var(--shadow-rgb), 0.4);
+	--shadow-panel: 0 4px 16px rgba(var(--shadow-rgb), 0.3);
+	--shadow-modal: 0 8px 32px rgba(var(--shadow-rgb), 0.4);
+	--shadow-dropdown: 0 8px 32px rgba(var(--shadow-rgb), 0.3);
+
+	/* ── Radius ───────────────────────────────────────────
+	   Panel/card corner used across setup + settings surfaces. */
+	--radius-panel: 10px;
 }
 
 @utility glow-brand-a {

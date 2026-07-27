@@ -121,7 +121,7 @@
 		{#if variantDropdownOpen}
 			<div
 				data-testid="variant-dropdown"
-			class="absolute bottom-[calc(100%+4px)] right-0 w-40 bg-bg-alt border border-border rounded-lg shadow-[0_-4px_16px_rgba(var(--shadow-rgb),0.3)] z-[210] py-1 font-brand"
+			class="absolute bottom-[calc(100%+4px)] right-0 w-40 bg-bg-alt border border-border rounded-lg shadow-menu z-[var(--z-popover-raised)] py-1 font-brand"
 			>
 				<!-- Default option (clears variant) -->
 				<button

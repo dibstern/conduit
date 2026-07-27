@@ -75,7 +75,7 @@
 		<!-- Usage Panel -->
 		{#if showUsage}
 			<div
-				class="info-panel bg-bg-alt border border-border rounded-lg shadow-[0_4px_16px_rgba(var(--shadow-rgb),0.3)] min-w-[220px] max-w-[280px]"
+				class="info-panel bg-bg-alt border border-border rounded-lg shadow-panel min-w-[220px] max-w-[280px]"
 			>
 				<div
 					class="info-panel-header flex items-center justify-between px-3 py-2 border-b border-border"
@@ -129,7 +129,7 @@
 		<!-- Status Panel -->
 		{#if showStatus}
 			<div
-				class="info-panel bg-bg-alt border border-border rounded-lg shadow-[0_4px_16px_rgba(var(--shadow-rgb),0.3)] min-w-[220px] max-w-[280px]"
+				class="info-panel bg-bg-alt border border-border rounded-lg shadow-panel min-w-[220px] max-w-[280px]"
 			>
 				<div
 					class="info-panel-header flex items-center justify-between px-3 py-2 border-b border-border"
@@ -195,7 +195,7 @@
 		<!-- Context Panel -->
 		{#if showContext}
 			<div
-				class="info-panel bg-bg-alt border border-border rounded-lg shadow-[0_4px_16px_rgba(var(--shadow-rgb),0.3)] min-w-[220px] max-w-[280px]"
+				class="info-panel bg-bg-alt border border-border rounded-lg shadow-panel min-w-[220px] max-w-[280px]"
 			>
 				<div
 					class="info-panel-header flex items-center justify-between px-3 py-2 border-b border-border"

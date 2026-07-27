@@ -242,7 +242,7 @@
 <div id="agent-selector" class:hidden={shouldHide}>
 	<button
 		bind:this={triggerEl}
-	class="inline-flex items-center gap-[2px] h-9 px-2 border-none bg-transparent text-text-muted text-xs font-medium cursor-pointer whitespace-nowrap transition-[background,color] duration-150 rounded-[10px] max-w-[160px] hover:bg-bg-alt hover:text-text-secondary font-brand"
+	class="inline-flex items-center gap-[2px] h-9 px-2 border-none bg-transparent text-text-muted text-xs font-medium cursor-pointer whitespace-nowrap transition-[background,color] duration-150 rounded-panel max-w-[160px] hover:bg-bg-alt hover:text-text-secondary font-brand"
 		title="Switch agent"
 		onclick={toggleDropdown}
 		aria-haspopup="listbox"
@@ -260,7 +260,7 @@
 		bind:this={portalEl}
 		use:portal
 		data-testid="agent-dropdown"
-		class="agent-dropdown-panel max-w-[calc(100vw-16px)] bg-bg-alt border border-border rounded-lg shadow-[0_-4px_24px_rgba(var(--shadow-rgb),0.4)] py-1.5 font-brand"
+		class="agent-dropdown-panel max-w-[calc(100vw-16px)] bg-bg-alt border border-border rounded-lg shadow-menu-lg py-1.5 font-brand"
 		style={portalStyle}
 		role="listbox"
 		aria-label={providerHeading}

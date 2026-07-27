@@ -102,11 +102,11 @@
 	<!-- svelte-ignore a11y_click_events_have_key_events -->
 	<!-- svelte-ignore a11y_no_static_element_interactions -->
 	<div
-		class="modal-backdrop fixed inset-0 bg-[rgba(var(--overlay-rgb),0.5)] backdrop-blur-[2px] flex items-center justify-center z-[300] transition-opacity duration-200 ease-linear"
+		class="modal-backdrop fixed inset-0 bg-[rgba(var(--overlay-rgb),0.5)] backdrop-blur-[2px] flex items-center justify-center z-[var(--z-modal)] transition-opacity duration-200 ease-linear"
 		onclick={handleBackdropClick}
 	>
 		<div
-			class="modal-dialog bg-bg-alt border border-border rounded-xl py-5 px-6 max-w-80 w-[90%] shadow-[0_8px_32px_rgba(var(--shadow-rgb),0.4)]"
+			class="modal-dialog bg-bg-alt border border-border rounded-xl py-5 px-6 max-w-80 w-[90%] shadow-modal"
 		>
 			<h3 class="text-sm font-semibold text-text mb-4">
 				Rewind to this point?

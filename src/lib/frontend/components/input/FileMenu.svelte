@@ -105,7 +105,7 @@
 <div id="file-menu" class:hidden={!isVisible}>
 	{#if isVisible}
 		<div
-			class="file-menu-list absolute bottom-full left-0 right-0 mb-1 bg-bg-surface border border-border rounded-xl shadow-[0_-4px_16px_rgba(0,0,0,0.3)] max-h-[300px] overflow-y-auto z-[60] py-1"
+			class="file-menu-list absolute bottom-full left-0 right-0 mb-1 bg-bg-surface border border-border rounded-xl shadow-menu max-h-[300px] overflow-y-auto z-[var(--z-dropdown)] py-1"
 		>
 			{#if loading && entries.length === 0}
 				<div

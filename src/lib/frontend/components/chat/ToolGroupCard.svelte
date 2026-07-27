@@ -39,9 +39,9 @@
 </script>
 
 <div class="max-w-[760px] mx-auto px-5 my-1.5">
-	<div class="{group.status === 'completed' ? '' : 'bg-bg-surface'} rounded-[10px] relative overflow-hidden {group.status === 'error' ? 'glow-tool-error' : group.status === 'completed' ? 'glow-brand-b' : group.status === 'running' ? 'glow-tool-running' : ''}">
+	<div class="{group.status === 'completed' ? '' : 'bg-bg-surface'} rounded-panel relative overflow-hidden {group.status === 'error' ? 'glow-tool-error' : group.status === 'completed' ? 'glow-brand-b' : group.status === 'running' ? 'glow-tool-running' : ''}">
 		{#if group.status === 'running'}
-			<div class="absolute inset-0 pointer-events-none rounded-[10px]" style="background: linear-gradient(90deg, transparent 0%, rgba(234,179,8,0.04) 50%, transparent 100%); animation: tool-shimmer-slide 2s ease-in-out infinite;"></div>
+			<div class="absolute inset-0 pointer-events-none rounded-panel" style="background: linear-gradient(90deg, transparent 0%, rgba(234,179,8,0.04) 50%, transparent 100%); animation: tool-shimmer-slide 2s ease-in-out infinite;"></div>
 		{/if}
 		<!-- Header button -->
 		<button

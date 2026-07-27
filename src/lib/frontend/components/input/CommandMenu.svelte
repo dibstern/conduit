@@ -112,7 +112,7 @@
 <div id="command-menu" class:hidden={!isVisible}>
 	{#if isVisible}
 		<div
-			class="cmd-menu absolute bottom-full left-0 right-0 mb-1 bg-bg-surface border border-border rounded-xl shadow-[0_-4px_16px_rgba(var(--shadow-rgb),0.3)] max-h-[300px] overflow-y-auto z-[60] py-1"
+			class="cmd-menu absolute bottom-full left-0 right-0 mb-1 bg-bg-surface border border-border rounded-xl shadow-menu max-h-[300px] overflow-y-auto z-[var(--z-dropdown)] py-1"
 		>
 			{#each filtered as cmd, i}
 				<div

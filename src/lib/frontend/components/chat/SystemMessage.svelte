@@ -23,7 +23,7 @@
 
 <div class="max-w-[760px] mx-auto my-2 px-5">
 	<div
-		class="flex flex-col gap-1 py-2 px-3 text-base rounded-[10px] {containerClasses}"
+		class="flex flex-col gap-1 py-2 px-3 text-base rounded-panel {containerClasses}"
 	>
 		<div class="flex items-start gap-2">
 			<span class="shrink-0 mt-0.5 [&_.lucide]:w-3 [&_.lucide]:h-3">

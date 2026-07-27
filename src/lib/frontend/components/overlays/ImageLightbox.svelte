@@ -23,11 +23,11 @@
   <!-- svelte-ignore a11y_click_events_have_key_events -->
   <!-- svelte-ignore a11y_no_static_element_interactions -->
   <div
-    class="modal-backdrop fixed inset-0 bg-black/85 flex items-center justify-center z-[300] transition-opacity duration-200 ease-linear"
+    class="modal-backdrop fixed inset-0 bg-black/85 flex items-center justify-center z-[var(--z-modal)] transition-opacity duration-200 ease-linear"
     onclick={handleBackdropClick}
   >
     <button
-      class="absolute top-4 right-4 bg-white/15 border-none text-white w-9 h-9 rounded-full text-xl cursor-pointer z-[1] hover:bg-white/25"
+      class="absolute top-4 right-4 bg-white/15 border-none text-white w-9 h-9 rounded-full text-xl cursor-pointer z-[var(--z-raised)] hover:bg-white/25"
       onclick={closeLightbox}
       aria-label="Close lightbox"
     >
