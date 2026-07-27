@@ -235,14 +235,15 @@ describe("ClaudeEventTranslator", () => {
 		await runTranslate(translator, ctx, {
 			type: "system",
 			subtype: "status",
-			status: "compacting",
+			status: "requesting",
 			uuid: "00000000-0000-0000-0000-000000000002",
 			session_id: "sdk-sess",
 		} as unknown as SDKMessage);
 
 		const statusEvent = sink.events.find((e) => e.type === "session.status");
 		expect(statusEvent).toBeDefined();
-		// The translator falls back to "idle" if status is not a valid SessionStatusValue
+		// Non-compaction statuses fall back to "idle" (compaction statuses are
+		// handled separately as session.compaction — see the compaction tests below)
 		const data = dataOf(statusEvent);
 		expect(data["sessionId"]).toBe("sess-1");
 	});
@@ -755,6 +756,66 @@ describe("ClaudeEventTranslator", () => {
 		expect(meta["correlationId"]).toMatch(/attempt 3\/10/);
 		expect(meta["correlationId"]).toMatch(/HTTP 502/);
 		expect(meta["correlationId"]).toMatch(/next in 2\.2s/);
+	});
+
+	// ─── 3b-compaction. system (compact_boundary / status compaction) ────
+
+	it("translates system/compact_boundary to session.compaction:completed with token deltas", async () => {
+		await runTranslate(translator, ctx, {
+			type: "system",
+			subtype: "compact_boundary",
+			compact_metadata: {
+				trigger: "manual",
+				pre_tokens: 194925,
+				post_tokens: 95521,
+			},
+			session_id: "sdk-sess",
+			uuid: "00000000-0000-0000-0000-0000000000c1",
+		} as unknown as SDKMessage);
+
+		const event = sink.events.find((e) => e.type === "session.compaction");
+		expect(event).toBeDefined();
+		const data = dataOf(event);
+		expect(data["state"]).toBe("completed");
+		expect(data["preTokens"]).toBe(194925);
+		expect(data["postTokens"]).toBe(95521);
+		expect(data["detail"]).toMatch(/Context compacted/);
+		expect(data["detail"]).toMatch(/195k → 96k/);
+	});
+
+	it("translates system/status compact_result:failed to session.compaction:failed with error", async () => {
+		await runTranslate(translator, ctx, {
+			type: "system",
+			subtype: "status",
+			status: null,
+			compact_result: "failed",
+			compact_error: "context too small to compact",
+			session_id: "sdk-sess",
+			uuid: "00000000-0000-0000-0000-0000000000c2",
+		} as unknown as SDKMessage);
+
+		const event = sink.events.find((e) => e.type === "session.compaction");
+		expect(event).toBeDefined();
+		expect(dataOf(event)["state"]).toBe("failed");
+		expect(dataOf(event)["detail"]).toMatch(/context too small to compact/);
+		// A failed compaction must not masquerade as an idle session.status.
+		expect(sink.events.some((e) => e.type === "session.status")).toBe(false);
+	});
+
+	it("translates system/status:compacting to session.compaction:started (not idle)", async () => {
+		await runTranslate(translator, ctx, {
+			type: "system",
+			subtype: "status",
+			status: "compacting",
+			session_id: "sdk-sess",
+			uuid: "00000000-0000-0000-0000-0000000000c3",
+		} as unknown as SDKMessage);
+
+		const event = sink.events.find((e) => e.type === "session.compaction");
+		expect(event).toBeDefined();
+		expect(dataOf(event)["state"]).toBe("started");
+		// "compacting" means busy — it must not emit session.status idle.
+		expect(sink.events.some((e) => e.type === "session.status")).toBe(false);
 	});
 
 	// ─── 3c. stream_event (message_start) emits session.status: busy ─────

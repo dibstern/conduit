@@ -8,6 +8,7 @@ exports[`Exhaustiveness guards > EventPayloadMap key snapshot > snapshot of all 
   "permission.resolved",
   "question.asked",
   "question.resolved",
+  "session.compaction",
   "session.created",
   "session.provider_changed",
   "session.renamed",

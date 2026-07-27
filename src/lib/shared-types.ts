@@ -309,6 +309,10 @@ export interface HistoryMessagePart {
 	callID?: string;
 	tool?: string;
 	time?: unknown;
+	/** Context size before/after a compaction boundary — present on `compaction`
+	 *  parts so the divider and context-% bar can be reconstructed on reload. */
+	preTokens?: number;
+	postTokens?: number;
 	[key: string]: unknown;
 }
 
@@ -399,6 +403,8 @@ const HistoryMessagePartSchema = Schema.Struct({
 	callID: Schema.optional(Schema.String),
 	tool: Schema.optional(Schema.String),
 	time: Schema.optional(Schema.Unknown),
+	preTokens: Schema.optional(Schema.Number),
+	postTokens: Schema.optional(Schema.Number),
 });
 
 const HistoryMessageSchema = Schema.Struct({
@@ -709,6 +715,15 @@ const StatusSchema = Schema.Struct({
 	type: Schema.Literal("status"),
 	sessionId: Schema.String,
 	status: Schema.String,
+});
+
+const CompactionSchema = Schema.Struct({
+	type: Schema.Literal("compaction"),
+	sessionId: Schema.String,
+	state: Schema.Literal("started", "completed", "failed"),
+	detail: Schema.String,
+	preTokens: Schema.optional(Schema.Number),
+	postTokens: Schema.optional(Schema.Number),
 });
 
 const DoneSchema = Schema.Struct({
@@ -1072,6 +1087,7 @@ export const RelayMessageSchema = Schema.Union(
 	// Session lifecycle
 	ResultSchema,
 	StatusSchema,
+	CompactionSchema,
 	DoneSchema,
 	SessionSwitchedSchema,
 	SessionListSchema,
@@ -1157,6 +1173,7 @@ export const RELAY_MESSAGE_TYPES = [
 	"ask_user_error",
 	"result",
 	"status",
+	"compaction",
 	"done",
 	"session_switched",
 	"session_list",
@@ -1317,6 +1334,14 @@ export type RelayMessage =
 			messageId?: string;
 	  }
 	| { type: "status"; sessionId: string; status: string }
+	| {
+			type: "compaction";
+			sessionId: string;
+			state: "started" | "completed" | "failed";
+			detail: string;
+			preTokens?: number;
+			postTokens?: number;
+	  }
 	| { type: "done"; sessionId: string; code: number }
 	| {
 			type: "session_switched";
@@ -1514,6 +1539,7 @@ export type PerSessionEventType =
 	| "done"
 	| "error"
 	| "status"
+	| "compaction"
 	| "user_message"
 	| "part_removed"
 	| "message_removed"

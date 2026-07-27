@@ -113,12 +113,14 @@ describe("Migration Runner", () => {
 		const durableCommandMigration = schemaMigrations[2];
 		const dropEventsSessionFkMigration = schemaMigrations[3];
 		const messagePartsFileTypeMigration = schemaMigrations[4];
+		const messagePartsCompactionTypeMigration = schemaMigrations[5];
 		if (
 			!baseline ||
 			!metadataMigration ||
 			!durableCommandMigration ||
 			!dropEventsSessionFkMigration ||
-			!messagePartsFileTypeMigration
+			!messagePartsFileTypeMigration ||
+			!messagePartsCompactionTypeMigration
 		) {
 			throw new Error("Expected all event-store schema migrations");
 		}
@@ -151,6 +153,13 @@ describe("Migration Runner", () => {
 				id: 5,
 				name: "message_parts_file_type",
 				checksum: calculateMigrationChecksum(messagePartsFileTypeMigration),
+			},
+			{
+				id: 6,
+				name: "message_parts_compaction_type",
+				checksum: calculateMigrationChecksum(
+					messagePartsCompactionTypeMigration,
+				),
 			},
 		]);
 		columns = client

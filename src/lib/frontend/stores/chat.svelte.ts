@@ -1043,7 +1043,28 @@ export function restoreContextFromMessages(messages: SessionMessages): void {
 	const msgs = getMessages(messages);
 	for (let i = msgs.length - 1; i >= 0; i--) {
 		const m = msgs[i];
+		// A compaction divider defines context size when it is the most recent
+		// context-defining event (i.e. no real turn ran after `/compact`). The
+		// `/compact` turn itself reports 0 tokens, so its result is skipped below.
+		if (m?.type === "system" && typeof m.postTokens === "number") {
+			const limit = currentContextLimit();
+			if (limit !== undefined) {
+				messages.contextPercent = Math.min(
+					100,
+					Math.round((m.postTokens / limit) * 100),
+				);
+			}
+			return;
+		}
 		if (m?.type !== "result") continue;
+		const total =
+			(m.inputTokens ?? 0) +
+			(m.outputTokens ?? 0) +
+			(m.cacheRead ?? 0) +
+			(m.cacheWrite ?? 0);
+		// Skip zero-token results (e.g. the `/compact` turn) so the walk falls
+		// through to the compaction divider that carries the true post size.
+		if (total <= 0) continue;
 		updateContextFromTokens(messages, {
 			...(m.inputTokens != null && { input: m.inputTokens }),
 			...(m.outputTokens != null && { output: m.outputTokens }),
@@ -1291,6 +1312,34 @@ export function handleError(
 		addSystemMessage(activity, messages, message, "error", errorMeta);
 		// The turn is over — a non-RETRY error terminates it just like done.
 		finalizeTurn(activity, "error");
+	}
+}
+
+export function handleCompaction(
+	activity: SessionActivity,
+	messages: SessionMessages,
+	msg: Extract<RelayMessage, { type: "compaction" }>,
+): void {
+	requestScrollOnNextContent();
+	addSystemMessage(
+		activity,
+		messages,
+		msg.detail,
+		msg.state === "failed" ? "error" : "info",
+	);
+
+	if (
+		msg.state === "completed" &&
+		typeof msg.postTokens === "number" &&
+		msg.postTokens > 0
+	) {
+		const limit = currentContextLimit();
+		if (limit !== undefined) {
+			messages.contextPercent = Math.min(
+				100,
+				Math.round((msg.postTokens / limit) * 100),
+			);
+		}
 	}
 }
 

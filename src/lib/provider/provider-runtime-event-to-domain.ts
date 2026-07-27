@@ -300,6 +300,18 @@ export function translateProviderRuntimeEventToDomain(
 		});
 	}
 
+	if (event.type === "session.compaction") {
+		const preTokens = numberFieldValue(data["preTokens"]);
+		const postTokens = numberFieldValue(data["postTokens"]);
+		return singleEvent(event, state, "session.compaction", {
+			sessionId: event.sessionId,
+			state: sessionCompactionState(data["state"]),
+			detail: stringField(data["detail"]) ?? "Compaction update",
+			...(preTokens != null ? { preTokens } : {}),
+			...(postTokens != null ? { postTokens } : {}),
+		});
+	}
+
 	if (event.type === "session.provider_changed") {
 		const oldProvider = stringField(data["oldProvider"]);
 		const newProvider = stringField(data["newProvider"]);
@@ -776,6 +788,13 @@ function messageRole(value: unknown): MessageRole {
 function sessionStatus(value: unknown): SessionStatusValue {
 	if (value === "busy" || value === "retry" || value === "error") return value;
 	return "idle";
+}
+
+function sessionCompactionState(
+	value: unknown,
+): "started" | "completed" | "failed" {
+	if (value === "completed" || value === "failed") return value;
+	return "started";
 }
 
 function tokensValue(value: unknown):

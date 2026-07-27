@@ -604,6 +604,50 @@ describe("historyToChatMessages: edge cases", () => {
 	});
 });
 
+// ─── Compaction dividers ────────────────────────────────────────────────────
+
+describe("historyToChatMessages: compaction dividers", () => {
+	it("renders a persisted compaction part as an info SystemMessage carrying postTokens", () => {
+		const messages: HistoryMessage[] = [
+			assistantMsg("compaction-7", [
+				{
+					id: "compaction-part-7",
+					type: "compaction" as PartType,
+					text: "Context compacted · 195k → 96k",
+					preTokens: 194925,
+					postTokens: 96000,
+				},
+			]),
+		];
+
+		const result = historyToChatMessages(messages);
+
+		expect(result).toHaveLength(1);
+		expect(result[0]).toMatchObject({
+			type: "system",
+			variant: "info",
+			text: "Context compacted · 195k → 96k",
+			postTokens: 96000,
+		});
+	});
+
+	it("omits postTokens when the compaction part has none", () => {
+		const messages: HistoryMessage[] = [
+			assistantMsg("compaction-8", [
+				{
+					id: "compaction-part-8",
+					type: "compaction" as PartType,
+					text: "Context compacted",
+				},
+			]),
+		];
+
+		const [msg] = historyToChatMessages(messages);
+		expect(msg?.type).toBe("system");
+		expect(msg).not.toHaveProperty("postTokens");
+	});
+});
+
 // ─── applyHistoryQueuedFlag (REMOVED) ───────────────────────────────────────
 // Tests removed along with the function — it wrote the old mutable `queued`
 // boolean which was replaced by the immutable `sentDuringEpoch` pattern.

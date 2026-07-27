@@ -36,6 +36,22 @@ function parseObjectJson(value: string): Record<string, unknown> | undefined {
 }
 
 function partRowToHistoryPart(row: MessagePartRow): HistoryMessagePart {
+	if (row.type === "compaction") {
+		const metadata =
+			row.metadata != null ? parseObjectJson(row.metadata) : undefined;
+		return {
+			id: row.id,
+			type: "compaction",
+			...(row.text ? { text: row.text } : {}),
+			...(typeof metadata?.["preTokens"] === "number"
+				? { preTokens: metadata["preTokens"] }
+				: {}),
+			...(typeof metadata?.["postTokens"] === "number"
+				? { postTokens: metadata["postTokens"] }
+				: {}),
+		};
+	}
+
 	if (row.type === "file") {
 		const metadata =
 			row.metadata != null ? parseObjectJson(row.metadata) : undefined;

@@ -7,6 +7,7 @@ import {
 	DROP_EVENTS_SESSION_FK_MIGRATION,
 	DURABLE_PROVIDER_COMMANDS_MIGRATION,
 	MESSAGE_PART_METADATA_MIGRATION,
+	MESSAGE_PARTS_COMPACTION_TYPE_MIGRATION,
 	MESSAGE_PARTS_FILE_TYPE_MIGRATION,
 	readMigrationSql,
 } from "../schema.js";
@@ -25,6 +26,9 @@ const dropEventsSessionFkMigrationSql = readMigrationSql(
 );
 const messagePartsFileTypeMigrationSql = readMigrationSql(
 	MESSAGE_PARTS_FILE_TYPE_MIGRATION,
+);
+const messagePartsCompactionTypeMigrationSql = readMigrationSql(
+	MESSAGE_PARTS_COMPACTION_TYPE_MIGRATION,
 );
 
 const expectedTableColumns = {
@@ -453,12 +457,17 @@ const runMessagePartsFileTypeMigration = executeSqlStatements(
 	messagePartsFileTypeMigrationSql,
 );
 
+const runMessagePartsCompactionTypeMigration = executeSqlStatements(
+	messagePartsCompactionTypeMigrationSql,
+);
+
 export const effectMigrationEntries = {
 	"0001_create_event_store_tables": runBaselineEventStoreMigration,
 	"0002_add_message_part_metadata": runMessagePartMetadataMigration,
 	"0003_add_durable_provider_commands": runDurableProviderCommandsMigration,
 	"0004_drop_events_session_fk": runDropEventsSessionFkMigration,
 	"0005_message_parts_file_type": runMessagePartsFileTypeMigration,
+	"0006_message_parts_compaction_type": runMessagePartsCompactionTypeMigration,
 } satisfies Record<string, Effect.Effect<void, unknown, SqlClient.SqlClient>>;
 
 export function makeEffectMigrationLoader(
