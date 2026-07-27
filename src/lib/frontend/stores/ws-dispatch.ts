@@ -60,6 +60,7 @@ import {
 	prependMessages,
 	registerClearMessagesHook,
 	renderDeferredMarkdown,
+	restoreContextFromMessages,
 	type SessionActivity,
 	type SessionMessages,
 	seedRegistryFromMessages,
@@ -817,6 +818,7 @@ export function handleMessage(msg: RelayMessage): void {
 								capturedSlot.messages,
 								mergedChatMsgs,
 							);
+							restoreContextFromMessages(capturedSlot.messages);
 							capturedSlot.messages.historyHasMore = hasMore;
 							capturedSlot.messages.historyMessageCount = msgCount;
 							historyState.hasMore = hasMore;

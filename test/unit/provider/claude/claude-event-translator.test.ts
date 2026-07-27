@@ -1388,6 +1388,109 @@ describe("ClaudeEventTranslator", () => {
 		expect(data["duration"]).toBe(1200);
 	});
 
+	// ─── 13a-2. result tokens use the LAST request's usage, not the turn sum ──
+	// Regression: SDK result.usage is cumulative across every API request in
+	// the turn — cache_read re-counts the whole prompt per tool round, so a
+	// long turn reports millions of tokens and the context bar showed >5000%.
+	// The last assistant message's per-request usage is the actual context
+	// occupancy; turn.completed must prefer it. Subagent assistant messages
+	// (parent_tool_use_id set) must not overwrite the main-chain capture.
+
+	it("emits last main-chain per-request usage on turn.completed, ignoring cumulative result usage", async () => {
+		const assistantMsg = (
+			uuid: string,
+			usage: Record<string, number>,
+			parentToolUseId: string | null = null,
+		): SDKMessage =>
+			({
+				type: "assistant",
+				message: {
+					id: `msg-${uuid}`,
+					type: "message",
+					role: "assistant",
+					content: [{ type: "text", text: `text-${uuid}` }],
+					model: "claude-fable-5",
+					stop_reason: "end_turn",
+					stop_sequence: null,
+					usage,
+				},
+				parent_tool_use_id: parentToolUseId,
+				uuid,
+				session_id: "sdk-sess",
+			}) as unknown as SDKMessage;
+
+		// First API round
+		await runTranslate(
+			translator,
+			ctx,
+			assistantMsg("00000000-0000-0000-0000-000000000301", {
+				input_tokens: 20,
+				output_tokens: 300,
+				cache_read_input_tokens: 100_000,
+				cache_creation_input_tokens: 2_000,
+			}),
+		);
+		// Last main-chain API round — this is the current context occupancy
+		await runTranslate(
+			translator,
+			ctx,
+			assistantMsg("00000000-0000-0000-0000-000000000302", {
+				input_tokens: 30,
+				output_tokens: 800,
+				cache_read_input_tokens: 110_000,
+				cache_creation_input_tokens: 1_500,
+			}),
+		);
+		// Subagent chatter after it must NOT overwrite the main-chain usage
+		await runTranslate(
+			translator,
+			ctx,
+			assistantMsg(
+				"00000000-0000-0000-0000-000000000303",
+				{
+					input_tokens: 5,
+					output_tokens: 50,
+					cache_read_input_tokens: 9_000,
+					cache_creation_input_tokens: 100,
+				},
+				"tool-subagent-1",
+			),
+		);
+
+		await runTranslate(translator, ctx, {
+			type: "result",
+			subtype: "success",
+			duration_ms: 5000,
+			duration_api_ms: 4000,
+			is_error: false,
+			num_turns: 1,
+			result: "done",
+			stop_reason: "end_turn",
+			total_cost_usd: 1.5,
+			// Cumulative turn aggregate — must NOT be used for tokens
+			usage: {
+				input_tokens: 500,
+				output_tokens: 20_000,
+				cache_read_input_tokens: 3_300_000,
+				cache_creation_input_tokens: 80_000,
+			},
+			modelUsage: {},
+			permission_denials: [],
+			uuid: "00000000-0000-0000-0000-000000000310",
+			session_id: "sdk-sess",
+		} as unknown as SDKMessage);
+
+		const turnCompleted = sink.events.find((e) => e.type === "turn.completed");
+		expect(turnCompleted).toBeDefined();
+		const tokens = dataOf(turnCompleted)["tokens"] as Record<string, unknown>;
+		expect(tokens["input"]).toBe(30);
+		expect(tokens["output"]).toBe(800);
+		expect(tokens["cacheRead"]).toBe(110_000);
+		expect(tokens["cacheWrite"]).toBe(1_500);
+		// Cost and duration still reflect the whole turn
+		expect(dataOf(turnCompleted)["cost"]).toBeCloseTo(1.5);
+	});
+
 	// ─── 13b. result (success, no streaming, text in result field) ──────────
 	// Regression: short responses and slash-command dispatch (e.g. "/usage")
 	// bypass the stream_event/assistant path entirely. The SDK returns a

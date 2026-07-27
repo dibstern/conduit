@@ -235,6 +235,18 @@ export class ClaudeEventTranslator {
 	private bufferedWrites: Effect.Effect<void, unknown>[] | undefined;
 	private contentBlockStates = new Map<string, ContentBlockState>();
 	private announcedMessageIds = new Set<string>();
+	// Per-request usage of the LAST main-chain assistant message. The SDK's
+	// result.usage is cumulative across every API request in the turn (cache
+	// reads re-count the whole prompt per tool round), so it wildly overstates
+	// context occupancy. The last request's usage IS the current context.
+	private lastMainRequestUsage:
+		| {
+				readonly input?: number;
+				readonly output?: number;
+				readonly cacheRead?: number;
+				readonly cacheWrite?: number;
+		  }
+		| undefined;
 
 	private nextPartId(): string {
 		return `claude-part-${this.partIdCounter++}`;
@@ -406,6 +418,7 @@ export class ClaudeEventTranslator {
 		this.currentAssistantMessageId = "";
 		this.contentBlockStates.clear();
 		this.announcedMessageIds.clear();
+		this.lastMainRequestUsage = undefined;
 	}
 
 	constructor(private readonly deps: ClaudeEventTranslatorDeps) {}
@@ -1138,6 +1151,33 @@ export class ClaudeEventTranslator {
 		return Effect.gen(this, function* () {
 			ctx.lastAssistantUuid = message.uuid;
 
+			// Capture this request's usage (main chain only — subagent
+			// messages carry parent_tool_use_id and live in their own context).
+			if (message.parent_tool_use_id == null) {
+				const usage = (message.message as { usage?: unknown }).usage;
+				if (isRecord(usage)) {
+					const num = (v: unknown): number | undefined =>
+						typeof v === "number" ? v : undefined;
+					const input = num(usage["input_tokens"]);
+					const output = num(usage["output_tokens"]);
+					const cacheRead = num(usage["cache_read_input_tokens"]);
+					const cacheWrite = num(usage["cache_creation_input_tokens"]);
+					if (
+						input != null ||
+						output != null ||
+						cacheRead != null ||
+						cacheWrite != null
+					) {
+						this.lastMainRequestUsage = {
+							...(input != null ? { input } : {}),
+							...(output != null ? { output } : {}),
+							...(cacheRead != null && cacheRead > 0 ? { cacheRead } : {}),
+							...(cacheWrite != null && cacheWrite > 0 ? { cacheWrite } : {}),
+						};
+					}
+				}
+			}
+
 			const snapshotId = this.assistantSnapshotMessageId(message);
 			let messageId: string;
 			if (
@@ -1357,14 +1397,18 @@ export class ClaudeEventTranslator {
 				);
 			}
 
-			// Usage — typed via NonNullableUsage on SDKResultSuccess
+			// Prefer the last main-chain request's usage: result.usage is
+			// cumulative across all API requests in the turn, which overstates
+			// context occupancy (the context bar consumes these tokens). Fall
+			// back to result.usage when no assistant message was seen (e.g.
+			// non-streaming slash-command turns).
 			const usage = result.usage;
 			const tokens: {
 				readonly input?: number;
 				readonly output?: number;
 				readonly cacheRead?: number;
 				readonly cacheWrite?: number;
-			} = {
+			} = this.lastMainRequestUsage ?? {
 				input: usage.input_tokens,
 				output: usage.output_tokens,
 				...(usage.cache_read_input_tokens > 0

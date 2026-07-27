@@ -1013,17 +1013,44 @@ function updateContextFromTokens(
 		(usage.cache_read ?? 0) +
 		(usage.cache_creation ?? 0);
 	if (total <= 0) return;
+	const limit = currentContextLimit();
+	if (limit) {
+		// Clamp: context occupancy can never exceed the window; >100 means
+		// stale aggregate token data (pre-fix history rows).
+		messages.contextPercent = Math.min(100, Math.round((total / limit) * 100));
+	}
+}
 
-	// Find the current model's context limit
+/** Resolve the effective context limit: the selected context-window override
+ *  ("200k" / "1m") wins over the model's default limit. */
+function currentContextLimit(): number | undefined {
+	const override = discoveryState.currentContextWindow;
+	if (override === "1m") return 1_000_000;
+	if (override === "200k") return 200_000;
 	const modelId = discoveryState.currentModelId;
-	if (!modelId) return;
+	if (!modelId) return undefined;
 	for (const p of discoveryState.providers) {
 		const model = p.models.find((m) => m.id === modelId);
-		if (model?.limit?.context) {
-			const pct = Math.round((total / model.limit.context) * 100);
-			messages.contextPercent = pct;
-			return;
-		}
+		if (model?.limit?.context) return model.limit.context;
+	}
+	return undefined;
+}
+
+/** Restore the context usage bar from the last result message after a
+ *  history replay — live turns update it via handleResult, but a page
+ *  reload otherwise leaves contextPercent at 0 until the next turn. */
+export function restoreContextFromMessages(messages: SessionMessages): void {
+	const msgs = getMessages(messages);
+	for (let i = msgs.length - 1; i >= 0; i--) {
+		const m = msgs[i];
+		if (m?.type !== "result") continue;
+		updateContextFromTokens(messages, {
+			...(m.inputTokens != null && { input: m.inputTokens }),
+			...(m.outputTokens != null && { output: m.outputTokens }),
+			...(m.cacheRead != null && { cache_read: m.cacheRead }),
+			...(m.cacheWrite != null && { cache_creation: m.cacheWrite }),
+		});
+		return;
 	}
 }
 

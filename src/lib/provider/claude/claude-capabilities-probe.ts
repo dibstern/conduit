@@ -29,6 +29,7 @@ const decodeInitializationResult = Schema.decodeUnknownEither(
 
 const OUTPUT_LIMIT_BY_FAMILY: ReadonlyArray<[pattern: RegExp, output: number]> =
 	[
+		[/^(?:claude-)?fable/i, 128_000],
 		[/^(?:claude-)?opus/i, 32_000],
 		[/^(?:claude-)?sonnet/i, 64_000],
 		[/^(?:claude-)?haiku/i, 8_192],
@@ -111,9 +112,16 @@ const CONTEXT_WINDOW_OPTIONS_BY_FAMILY: Record<
 		{ value: "200k", label: "200K", isDefault: true },
 		{ value: "1m", label: "1M (beta)" },
 	],
+	fable: [
+		{ value: "200k", label: "200K", isDefault: true },
+		{ value: "1m", label: "1M" },
+	],
 };
 
-function familyFor(modelId: string): "opus" | "sonnet" | "haiku" | undefined {
+function familyFor(
+	modelId: string,
+): "opus" | "sonnet" | "haiku" | "fable" | undefined {
+	if (/^(?:claude-)?fable/i.test(modelId)) return "fable";
 	if (/^(?:claude-)?opus/i.test(modelId)) return "opus";
 	if (/^(?:claude-)?sonnet/i.test(modelId)) return "sonnet";
 	if (/^(?:claude-)?haiku/i.test(modelId)) return "haiku";
