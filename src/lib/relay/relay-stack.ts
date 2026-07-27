@@ -62,6 +62,7 @@ import {
 	StatusPollerTag,
 	WebSocketHandlerTag,
 } from "../domain/relay/Services/services.js";
+import { SessionEventBusLive } from "../domain/relay/Services/session-event-bus.js";
 import { SessionManagerServiceTag } from "../domain/relay/Services/session-manager-service.js";
 import {
 	type OverridesStateTag,
@@ -676,7 +677,11 @@ export async function createProjectRelay(
 								);
 							}),
 					},
-				}).pipe(Layer.provide(persistenceEffectLayer))
+				}).pipe(
+					Layer.provide(
+						Layer.mergeAll(persistenceEffectLayer, SessionEventBusLive),
+					),
+				)
 			: undefined;
 	// The orchestration engine's side-effect reactor consumes the SAME
 	// ProviderRuntimeIngestion instance the relay uses (Effect memoizes the shared

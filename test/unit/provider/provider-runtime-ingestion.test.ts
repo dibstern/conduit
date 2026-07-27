@@ -1,6 +1,6 @@
 import { SqlClient } from "@effect/sql";
 import type { SqlError } from "@effect/sql/SqlError";
-import { Deferred, Effect, Fiber, Layer } from "effect";
+import { Chunk, Deferred, Effect, Fiber, Layer, Stream } from "effect";
 import { describe, expect, it, vi } from "vitest";
 import {
 	decodeProviderRuntimeEvent,
@@ -11,6 +11,10 @@ import {
 	ProviderRuntimeIngestionLive,
 	ProviderRuntimeIngestionTag,
 } from "../../../src/lib/domain/relay/Services/provider-runtime-ingestion-service.js";
+import {
+	SessionEventBusLive,
+	SessionEventBusTag,
+} from "../../../src/lib/domain/relay/Services/session-event-bus.js";
 import {
 	type EventStoreEffect,
 	EventStoreEffectTag,
@@ -173,6 +177,38 @@ describe("ProviderRuntimeIngestion", () => {
 				text: "hello",
 				messageId: "message-1",
 			},
+		]);
+	});
+
+	it("publishes committed stored events to the session event bus post-commit", async () => {
+		const harness = makeHarness();
+		const layer = ProviderRuntimeIngestionLive.pipe(
+			Layer.provide(harness.depsLayer),
+			Layer.provideMerge(SessionEventBusLive),
+		);
+
+		const received = await Effect.runPromise(
+			Effect.scoped(
+				Effect.gen(function* () {
+					const bus = yield* SessionEventBusTag;
+					// Subscribe before ingesting so the committed event buffers.
+					const stream = yield* bus.subscribe({ sessionId: "session-123" });
+					const ingestion = yield* ProviderRuntimeIngestionTag;
+					yield* ingestion.ingest(
+						runtimeEvent({
+							eventId: "committed-1",
+							type: "message.created",
+							turnId: "turn-1",
+							data: { messageId: "message-1", role: "assistant" },
+						}),
+					);
+					return yield* stream.pipe(Stream.take(1), Stream.runCollect);
+				}).pipe(Effect.provide(layer)),
+			),
+		);
+
+		expect(Chunk.toReadonlyArray(received)).toEqual([
+			expect.objectContaining({ eventId: "committed-1", sequence: 1 }),
 		]);
 	});
 

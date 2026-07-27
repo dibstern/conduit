@@ -13,6 +13,7 @@ import { makePollerManagerStateLive } from "../Services/message-poller.js";
 import { PtyManagerStateLive } from "../Services/pty-manager-service.js";
 import { RelayEventBusLive } from "../Services/relay-event-bus.js";
 import { RelayStatusSnapshotLive } from "../Services/relay-status-snapshot.js";
+import { SessionEventBusLive } from "../Services/session-event-bus.js";
 import { SessionManagerServiceLive } from "../Services/session-manager-service.js";
 import { makeSessionManagerStateLive } from "../Services/session-manager-state.js";
 import { makeOverridesStateLive } from "../Services/session-overrides-state.js";
@@ -65,6 +66,8 @@ export const RelayStateLive = Layer.mergeAll(
 	ClientMessageSerializationLive,
 	// Per-relay domain event fanout
 	RelayEventBusLive,
+	// Per-relay committed-event change signal (streaming subscriptions)
+	SessionEventBusLive,
 	// PTY state
 	PtyManagerStateLive,
 	// Instance management state

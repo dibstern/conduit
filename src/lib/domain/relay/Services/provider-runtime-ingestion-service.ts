@@ -1,5 +1,5 @@
 import { SqlClient } from "@effect/sql";
-import { Context, Effect, Layer, Ref } from "effect";
+import { Context, Effect, Layer, Option, Ref } from "effect";
 import type { ProviderRuntimeEvent } from "../../../contracts/providers/provider-runtime-event.js";
 import { EventStoreEffectTag } from "../../../persistence/effect/event-store-effect.js";
 import { ProjectionRunnerEffectTag } from "../../../persistence/effect/projection-runner-effect.js";
@@ -11,6 +11,7 @@ import {
 import { translateDomainEventToRelay } from "../../../relay/domain-event-to-relay.js";
 import { tagWithSessionId } from "../../../shared-types.js";
 import type { RelayMessage } from "../../../types.js";
+import { SessionEventBusTag } from "./session-event-bus.js";
 
 export interface ProviderRuntimeIngestion {
 	readonly ingest: (
@@ -48,6 +49,10 @@ export const makeProviderRuntimeIngestionLive = (
 			const eventStore = yield* EventStoreEffectTag;
 			const projectionRunner = yield* ProjectionRunnerEffectTag;
 			const sql = yield* SqlClient.SqlClient;
+			// Optional so minimal harnesses (and non-relay ingestion) need not wire
+			// the bus; production provides it via RelayStateLive. serviceOption adds
+			// no requirement to this Layer's context.
+			const sessionEventBus = yield* Effect.serviceOption(SessionEventBusTag);
 			const mapperStateRef = yield* Ref.make(
 				emptyProviderRuntimeDomainMapperState,
 			);
@@ -114,6 +119,18 @@ export const makeProviderRuntimeIngestionLive = (
 							yield* projectionRunner
 								.projectBatch(storedEvents)
 								.pipe(Effect.provideService(SqlClient.SqlClient, sql));
+						}
+
+						// Post-commit change signal for streaming subscriptions. Gated by
+						// the same `publish` flag as the WS path so history replay never
+						// signals live subscribers. Carries StoredEvents (with sequence)
+						// for resume-by-sequence downstream.
+						if (
+							Option.isSome(sessionEventBus) &&
+							ingestOptions.publish !== false &&
+							storedEvents.length > 0
+						) {
+							yield* sessionEventBus.value.publish(storedEvents);
 						}
 
 						if (options.relayPublisher && ingestOptions.publish !== false) {
