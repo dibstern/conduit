@@ -359,6 +359,51 @@ describe("ClaudeProviderInstance lifecycle", () => {
 			});
 		});
 
+		it("persists turn.interrupted + session.status idle for an in-flight turn", async () => {
+			const instance = new ClaudeProviderInstance({ workspaceRoot: workspace });
+			const sink = createMockEventSink();
+			const ctx = makeFakeSessionContext("sess-1", {
+				eventSink: sink,
+				lastAssistantUuid: "asst-uuid",
+			});
+			setClaudeRuntimeSessionForTest(instance, "sess-1", ctx);
+			const deferred = await Effect.runPromise(
+				Deferred.make<TurnResult, Error>(),
+			);
+			setClaudeRuntimeTurnWaitersForTest(instance, "sess-1", [deferred]);
+			const caught = collectTurnFailure(deferred, []);
+
+			await Effect.runPromise(instance.interruptTurnEffect("sess-1"));
+			await caught;
+
+			const pushCalls = (sink.push as ReturnType<typeof vi.fn>).mock
+				.calls as Array<[CanonicalEvent]>;
+			const interrupted = pushCalls.find(
+				(call) => call[0].type === "turn.interrupted",
+			);
+			expect(interrupted?.[0].data).toMatchObject({ messageId: "asst-uuid" });
+			const idle = pushCalls.find((call) => call[0].type === "session.status");
+			expect(idle?.[0].data).toMatchObject({
+				sessionId: "sess-1",
+				status: "idle",
+			});
+		});
+
+		it("does not emit terminal turn events when no turn is in flight", async () => {
+			const instance = new ClaudeProviderInstance({ workspaceRoot: workspace });
+			const sink = createMockEventSink();
+			const ctx = makeFakeSessionContext("sess-1", { eventSink: sink });
+			setClaudeRuntimeSessionForTest(instance, "sess-1", ctx);
+
+			await Effect.runPromise(instance.interruptTurnEffect("sess-1"));
+
+			const pushCalls = (sink.push as ReturnType<typeof vi.fn>).mock
+				.calls as Array<[CanonicalEvent]>;
+			expect(
+				pushCalls.some((call) => call[0].type === "turn.interrupted"),
+			).toBe(false);
+		});
+
 		it("treats cancelSessionInteractions as best-effort when it throws synchronously", async () => {
 			const instance = new ClaudeProviderInstance({ workspaceRoot: workspace });
 			const sink = createMockEventSink();

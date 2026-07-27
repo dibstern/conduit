@@ -120,12 +120,31 @@ export class TurnProjector implements Projector {
 		}
 
 		if (isEventType(event, "turn.interrupted")) {
-			db.execute(
+			const { changes } = db.execute(
 				`UPDATE turns
 				 SET state = 'interrupted', completed_at = ?
 				 WHERE assistant_message_id = ?`,
 				[event.createdAt, event.data.messageId],
 			);
+			if (Number(changes) === 0) {
+				// Interrupts emitted from provider cleanup may carry a messageId
+				// that never matched an assistant message (or none at all, when
+				// the turn was cut before the assistant reply started). Fall back
+				// to closing the most recent still-open turn so it can't stay
+				// 'running' forever.
+				db.execute(
+					`UPDATE turns
+					 SET state = 'interrupted', completed_at = ?
+					 WHERE id = (
+					   SELECT id FROM turns
+					   WHERE session_id = ?
+					     AND state IN ('pending', 'running')
+					   ORDER BY requested_at DESC
+					   LIMIT 1
+					 )`,
+					[event.createdAt, event.sessionId],
+				);
+			}
 			return;
 		}
 

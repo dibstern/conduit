@@ -1882,8 +1882,9 @@ export class ClaudeProviderRuntime {
 	/**
 	 * Shared cleanup for a single session — used by both interruptTurn()
 	 * and shutdown(). Emits tool.completed for in-flight tools, resolves
-	 * pending approvals with deny, rejects pending questions, closes the
-	 * prompt queue, and interrupts the SDK query.
+	 * pending approvals with deny, rejects pending questions, persists
+	 * turn.interrupted + session.status idle for any in-flight turn, closes
+	 * the prompt queue, and interrupts the SDK query.
 	 */
 	private cleanupSessionEffect(
 		ctx: ClaudeSessionContext,
@@ -1931,10 +1932,33 @@ export class ClaudeProviderRuntime {
 				);
 			}
 
-			// 4. Close prompt queue.
+			// 4. Persist terminal turn state. The SDK's post-interrupt `result`
+			// message is never translated (stream finalizers bail once
+			// `stopped` is set), so without this the turn row stays 'running'
+			// and the session stays 'busy' forever — the UI keeps showing the
+			// session as processing until the next turn accidentally resets it.
+			if (ctx.eventSink && (yield* this.hasPendingTurn(ctx.sessionId))) {
+				yield* ctx.eventSink
+					.push(
+						claudeRuntimeEvent("turn.interrupted", ctx.sessionId, {
+							messageId: ctx.lastAssistantUuid ?? "",
+						}),
+					)
+					.pipe(Effect.ignore);
+				yield* ctx.eventSink
+					.push(
+						claudeRuntimeEvent("session.status", ctx.sessionId, {
+							sessionId: ctx.sessionId,
+							status: "idle",
+						}),
+					)
+					.pipe(Effect.ignore);
+			}
+
+			// 5. Close prompt queue.
 			yield* ctx.promptQueue.close().pipe(Effect.ignore);
 
-			// 5. Interrupt SDK query.
+			// 6. Interrupt SDK query.
 			yield* Effect.tryPromise({
 				try: () => ctx.query.interrupt(),
 				catch: (cause) => cause,

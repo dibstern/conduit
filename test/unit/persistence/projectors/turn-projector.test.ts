@@ -431,6 +431,94 @@ describe("TurnProjector", () => {
 			expect(row?.state).toBe("interrupted");
 			expect(row?.completed_at).toBe(now + 2000);
 		});
+
+		it("falls back to the latest open turn when messageId matches nothing", () => {
+			projector.project(
+				makeStored(
+					"message.created",
+					"s1",
+					{
+						messageId: "user_m1",
+						role: "user",
+						sessionId: "s1",
+					} satisfies MessageCreatedPayload,
+					1,
+					now,
+				),
+				db,
+			);
+			// Turn transitions to running, but the interrupt arrives before the
+			// assistant message id is known (e.g. permission rejected mid-turn),
+			// so the messageId matches no assistant_message_id.
+			projector.project(
+				makeStored(
+					"session.status",
+					"s1",
+					{ sessionId: "s1", status: "busy" } satisfies SessionStatusPayload,
+					2,
+					now + 50,
+				),
+				db,
+			);
+
+			projector.project(
+				makeStored(
+					"turn.interrupted",
+					"s1",
+					{
+						messageId: "unknown-uuid",
+					} satisfies TurnInterruptedPayload,
+					3,
+					now + 2000,
+				),
+				db,
+			);
+
+			const row = db.queryOne<TurnRow>("SELECT * FROM turns WHERE id = ?", [
+				"user_m1",
+			]);
+			expect(row?.state).toBe("interrupted");
+			expect(row?.completed_at).toBe(now + 2000);
+		});
+
+		it("fallback leaves other sessions' open turns untouched", () => {
+			db.execute(
+				"INSERT INTO sessions (id, provider, title, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
+				["s2", "opencode", "Other", "idle", now, now],
+			);
+			projector.project(
+				makeStored(
+					"message.created",
+					"s2",
+					{
+						messageId: "user_s2",
+						role: "user",
+						sessionId: "s2",
+					} satisfies MessageCreatedPayload,
+					1,
+					now,
+				),
+				db,
+			);
+
+			projector.project(
+				makeStored(
+					"turn.interrupted",
+					"s1",
+					{
+						messageId: "unknown-uuid",
+					} satisfies TurnInterruptedPayload,
+					2,
+					now + 2000,
+				),
+				db,
+			);
+
+			const row = db.queryOne<TurnRow>("SELECT * FROM turns WHERE id = ?", [
+				"user_s2",
+			]);
+			expect(row?.state).toBe("pending");
+		});
 	});
 
 	describe("full turn lifecycle", () => {
