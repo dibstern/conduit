@@ -1,8 +1,9 @@
 // Tokenizes composer text into runs of plain text and slash-command ("skill")
 // tokens so the input backdrop can render recognised skills as pills and unknown
-// ones as errors. A "skill token" is a `/name` that sits in command position
-// (start of input or after whitespace) and is NOT immediately followed by another
-// `/` — the latter guard keeps file paths like `/etc/hosts` from lighting up.
+// ones as errors while leaving common absolute-path roots plain. A slash token is
+// a `/name` that sits in command position (start of input or after whitespace)
+// and is NOT immediately followed by another `/` — the latter guard keeps file
+// paths like `/etc/hosts` from lighting up.
 
 export type SkillSegmentKind = "text" | "skill" | "unknown";
 
@@ -16,6 +17,35 @@ export interface SkillSegment {
 	 */
 	readonly key: string;
 }
+
+// Bare absolute-path roots are common in prose but otherwise look exactly like
+// slash commands. Keep this exact-case allowlist to Unix FHS and common macOS roots.
+const ABSOLUTE_PATH_ROOTS: ReadonlySet<string> = new Set([
+	"bin",
+	"boot",
+	"dev",
+	"etc",
+	"home",
+	"lib",
+	"media",
+	"mnt",
+	"opt",
+	"proc",
+	"root",
+	"run",
+	"sbin",
+	"srv",
+	"sys",
+	"tmp",
+	"usr",
+	"var",
+	"Users",
+	"Applications",
+	"Library",
+	"System",
+	"Volumes",
+	"private",
+]);
 
 // `(^|\s)` — command position. The trailing `(?![\w:/-])` requires the token to
 // end at a real boundary: forbidding a following name char blocks the regex from
@@ -40,7 +70,11 @@ export function tokenizeSkills(
 		if (pre) segments.push({ text: pre, kind: "text", key: `t${last}` });
 
 		const name = token.slice(1);
-		const kind: SkillSegmentKind = knownNames.has(name) ? "skill" : "unknown";
+		const kind: SkillSegmentKind = knownNames.has(name)
+			? "skill"
+			: ABSOLUTE_PATH_ROOTS.has(name)
+				? "text"
+				: "unknown";
 		const occ = occurrences.get(name) ?? 0;
 		occurrences.set(name, occ + 1);
 		segments.push({ text: token, kind, key: `${kind}:${name}:${occ}` });

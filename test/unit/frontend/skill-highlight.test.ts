@@ -40,6 +40,26 @@ describe("tokenizeSkills", () => {
 		]);
 	});
 
+	it.each([
+		"/tmp",
+		"/usr",
+		"/opt",
+		"/etc",
+		"/Users",
+	])("treats the absolute-path root %s as text in command positions", (root) => {
+		expect(kinds(tokenizeSkills(root, known))).toEqual([[root, "text"]]);
+		expect(kinds(tokenizeSkills(`open ${root}`, known))).toEqual([
+			["open ", "text"],
+			[root, "text"],
+		]);
+	});
+
+	it("still marks /bogus as `unknown`", () => {
+		expect(kinds(tokenizeSkills("/bogus", known))).toEqual([
+			["/bogus", "unknown"],
+		]);
+	});
+
 	it("recognises a token at the very start of the input", () => {
 		const segs = tokenizeSkills("/commit the change", known);
 		expect(segs[0]).toMatchObject({ text: "/commit", kind: "skill" });
