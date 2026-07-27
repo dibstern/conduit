@@ -379,7 +379,7 @@
 		<div
 			id="model-picker"
 			data-testid="model-picker"
-			class="model-dropdown absolute bottom-[calc(100%+8px)] right-0 w-[404px] max-w-[90vw] h-[376px] flex flex-row overflow-hidden bg-bg-alt border border-border rounded-[14px] shadow-[0_-6px_30px_rgba(var(--shadow-rgb),0.55)] z-[200] font-brand"
+			class="model-dropdown absolute bottom-[calc(100%+8px)] right-0 w-[404px] max-w-[90vw] h-[376px] flex flex-row overflow-hidden bg-bg-alt border border-border rounded-[14px] shadow-menu-lg z-[var(--z-popover)] font-brand"
 		>
 			<!-- 48px instance rail -->
 			<div
@@ -557,7 +557,7 @@
 <!-- Rail hover tooltip — opens toward the rail (fixed, outside the popover clip) -->
 {#if pickerOpen && railTooltip}
 	<div
-		class="fixed z-[300] pointer-events-none bg-black text-white text-[11px] leading-[1.3] py-1.5 px-2 rounded-md border border-border whitespace-nowrap shadow-[0_6px_20px_rgba(0,0,0,0.5)] before:content-[''] before:absolute before:-left-[5px] before:top-[9px] before:border-y-[5px] before:border-y-transparent before:border-r-[5px] before:border-r-black"
+		class="fixed z-[var(--z-modal)] pointer-events-none bg-black text-white text-[11px] leading-[1.3] py-1.5 px-2 rounded-md border border-border whitespace-nowrap shadow-panel before:content-[''] before:absolute before:-left-[5px] before:top-[9px] before:border-y-[5px] before:border-y-transparent before:border-r-[5px] before:border-r-black"
 		style="top:{railTooltip.top}px;left:{railTooltip.left}px"
 	>
 		{railTooltip.label}
