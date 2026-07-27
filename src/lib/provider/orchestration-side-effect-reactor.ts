@@ -1,4 +1,5 @@
 import { Clock, Data, Duration, Effect } from "effect";
+import type { ProviderDriverKind } from "../contracts/provider-instance.js";
 import type { ProviderRuntimeIngestion } from "../domain/relay/Services/provider-runtime-ingestion-service.js";
 import type { SqliteClient } from "../persistence/sqlite-client.js";
 import { ProviderInstanceFailure, ProviderNotRegistered } from "./errors.js";
@@ -100,6 +101,9 @@ export interface ProviderSideEffectReactorOptions {
 	readonly retryBackoff?: (failureCount: number) => Duration.DurationInput;
 	readonly outcomePollInterval?: Duration.DurationInput;
 	readonly outcomePollTimeout?: Duration.DurationInput;
+	readonly resolveProviderDriver?: (
+		providerId: string,
+	) => ProviderDriverKind | undefined;
 }
 
 const defaultRetryBackoff = (failureCount: number): Duration.DurationInput =>
@@ -338,9 +342,15 @@ export class ProviderSideEffectReactor {
 		interactions?: EventSink,
 	): Effect.Effect<TurnResult, unknown> {
 		return Effect.gen(this, function* () {
-			const instance = yield* this.options.registry.getInstanceEffect(
-				row.provider_id,
-			);
+			const driver = this.options.resolveProviderDriver
+				? this.options.resolveProviderDriver(row.provider_id)
+				: row.provider_id;
+			if (driver === undefined) {
+				return yield* Effect.fail(
+					new ProviderNotRegistered({ providerId: row.provider_id }),
+				);
+			}
+			const instance = yield* this.options.registry.getInstanceEffect(driver);
 
 			if (row.effect_type === "send_turn") {
 				const payload = yield* this.parseSendTurnPayload(row);

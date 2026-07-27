@@ -172,6 +172,7 @@ export interface SendTurnInput {
 	 */
 	readonly model?: ModelSelection;
 	readonly workspaceRoot: string;
+	readonly configDir?: string;
 	readonly eventSink: EventSink;
 	readonly abortSignal: AbortSignal;
 	readonly variant?: string;

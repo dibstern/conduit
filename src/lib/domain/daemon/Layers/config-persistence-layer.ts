@@ -18,6 +18,7 @@ import {
 } from "effect";
 import {
 	type DaemonConfig,
+	loadDaemonConfig,
 	saveDaemonConfig,
 } from "../../../daemon/config-persistence.js";
 import {
@@ -127,11 +128,57 @@ export class ConfigWriterTag extends Context.Tag("ConfigWriter")<
 	ConfigWriter
 >() {}
 
+type PersistedInstanceConfig = NonNullable<DaemonConfig["instances"]>[number];
+
+const mergePersistedInstanceConfigs = (
+	runtimeInstances: ReadonlyArray<PersistedInstanceConfig>,
+	persistedInstances: ReadonlyArray<PersistedInstanceConfig>,
+): PersistedInstanceConfig[] => {
+	const persistedById = new Map(
+		persistedInstances.map((instance) => [instance.id, instance]),
+	);
+	const runtimeIds = new Set(runtimeInstances.map((instance) => instance.id));
+
+	return [
+		...runtimeInstances.map((runtimeInstance) => {
+			const persistedInstance = persistedById.get(runtimeInstance.id);
+			return {
+				...persistedInstance,
+				...runtimeInstance,
+				driver:
+					persistedInstance?.driver ?? runtimeInstance.driver ?? "opencode",
+				...(persistedInstance?.configDir !== undefined
+					? { configDir: persistedInstance.configDir }
+					: runtimeInstance.configDir !== undefined
+						? { configDir: runtimeInstance.configDir }
+						: {}),
+			};
+		}),
+		...persistedInstances.filter(
+			(instance) =>
+				!runtimeIds.has(instance.id) &&
+				(instance.driver ?? "opencode") !== "opencode",
+		),
+	];
+};
+
 export const makeConfigWriterLive = (configDir: string) =>
 	Layer.succeed(ConfigWriterTag, {
 		write: (config: DaemonConfig) =>
 			Effect.tryPromise({
-				try: () => saveDaemonConfig(config, configDir),
+				try: () => {
+					const persisted = loadDaemonConfig(configDir);
+					return saveDaemonConfig(
+						{
+							...config,
+							instances: mergePersistedInstanceConfigs(
+								config.instances ?? [],
+								persisted?.instances ?? [],
+							),
+						},
+						configDir,
+					);
+				},
 				catch: (cause) =>
 					new ConfigPersistenceWriteError({
 						operation: "saveDaemonConfig",

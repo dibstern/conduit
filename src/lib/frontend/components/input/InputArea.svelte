@@ -12,21 +12,21 @@
 	import ContextBar from "./ContextBar.svelte";
 	// biome-ignore lint/style/useImportType: FileMenu is used as a value for bind:this
 	import FileMenu from "./FileMenu.svelte";
-	import ModelSelector from "../model/ModelSelector.svelte";
+	import InstanceModelPicker from "../model/InstanceModelPicker.svelte";
 	import PermissionModeSelector from "./PermissionModeSelector.svelte";
 	// biome-ignore lint/style/useImportType: SubagentBackBar is used as a value for bind:this
 	import SubagentBackBar from "../chat/SubagentBackBar.svelte";
 	import PastePreview from "../chat/PastePreview.svelte";
 	import { addUserMessage, currentChat, getOrCreateSessionSlot, inputSyncState, isProcessing } from "../../stores/chat.svelte.js";
-	import { discoveryState, extractSlashQuery } from "../../stores/discovery.svelte.js";
+	import { discoveryState, extractSlashQuery, getEffectiveInstanceId } from "../../stores/discovery.svelte.js";
 	import { extractAtQuery, fileTreeState, filterFiles } from "../../stores/file-tree.svelte.js";
 	import { fetchFileContent, fetchDirectoryListing, resizeImageIfNeeded } from "./input-utils.js";
-	import { sessionState } from "../../stores/session.svelte.js";
+	import { sessionState, switchToSession } from "../../stores/session.svelte.js";
 	import { getCurrentSlug } from "../../stores/router.svelte.js";
 	import { showToast } from "../../stores/ui.svelte.js";
 	import { rateLimitChatSend } from "../../stores/ws.svelte.js";
 	import { getBrowserClientId } from "../../stores/client-identity.js";
-	import { cancelSessionRpc, sendMessageRpc, syncInputDraftRpc } from "../../transport/ws-rpc-client.js";
+	import { cancelSessionRpc, createSessionRpc, sendMessageRpc, syncInputDraftRpc } from "../../transport/ws-rpc-client.js";
 	import { buildAttachedMessage, parseAtReferences } from "../../utils/file-attach.js";
 	import type { FileAttachment } from "../../utils/file-attach.js";
 	import type { PendingImage } from "../../types.js";
@@ -241,16 +241,30 @@
 		// Always send immediately — OpenCode queues server-side when busy.
 		// When the LLM is processing, `sentDuringEpoch` is recorded so the
 		// UI can derive the "Queued" shimmer reactively.
-		const sid = sessionState.currentId;
 		const projectSlug = getCurrentSlug();
-		if (!sid || !projectSlug) {
-			showToast("No active session", { variant: "error" });
+		if (!projectSlug) {
+			showToast("No active project", { variant: "error" });
 			return;
 		}
-		if (sid) {
-			const { activity, messages } = getOrCreateSessionSlot(sid);
-			addUserMessage(activity, messages, messageText, imageUrls, isProcessing());
+		let sid = sessionState.currentId;
+		if (!sid) {
+			// First send with no active session: create one bound to the selected
+			// harness instance (the picker's pre-creation draft), then send into it.
+			try {
+				const created = await createSessionRpc({
+					projectSlug,
+					originId: getBrowserClientId(),
+					instanceId: getEffectiveInstanceId(),
+				});
+				sid = created.sessionId;
+				switchToSession(sid);
+			} catch {
+				showToast("Failed to create session", { variant: "error" });
+				return;
+			}
 		}
+		const { activity, messages } = getOrCreateSessionSlot(sid);
+		addUserMessage(activity, messages, messageText, imageUrls, isProcessing());
 		rateLimitChatSend(() => {
 			void sendMessageRpc({
 				projectSlug,
@@ -566,19 +580,18 @@
 					<div id="agent-selector-wrap">
 						<AgentSelector />
 					</div>
-
-				<!-- Model selector -->
-				<ModelSelector />
-
-				<!-- Approvals (permission mode) selector -->
-				<PermissionModeSelector />
-
-			</div>
+				</div>
 
 				<div
 					id="input-bottom-right"
-					class="flex items-center gap-1 shrink-0"
+					class="flex items-center gap-1 min-w-0"
 				>
+					<!-- Harness instance + model picker -->
+					<InstanceModelPicker />
+
+					<!-- Approvals (permission mode) selector -->
+					<PermissionModeSelector />
+
 					<!-- Send / Stop buttons -->
 					<button
 						id="send"

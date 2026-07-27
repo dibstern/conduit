@@ -217,6 +217,39 @@ describe("handleGetAgents active provider", () => {
 		},
 	);
 
+	it.effect(
+		"uses the requested instance instead of the active session provider",
+		() => {
+			const ws = mockWsHandler({
+				getClientSession: vi.fn(() => "session-1"),
+			});
+			const client = {
+				app: {
+					agents: vi.fn(async () => [
+						{ id: "build", name: "build", mode: "primary" as const },
+					]),
+				},
+			} as unknown as OpenCodeAPI;
+			const engine = {
+				getProviderForSession: vi.fn(() => "claude"),
+				dispatchEffect: vi.fn(),
+			} as unknown as OrchestrationEngine;
+
+			return handleGetAgents("client-1", { instanceId: "opencode" }).pipe(
+				Effect.provide(agentHandlerLayer({ client, ws, engine })),
+				Effect.tap(() => {
+					expect(engine.dispatchEffect).not.toHaveBeenCalled();
+					expect(ws.sendTo).toHaveBeenCalledWith("client-1", {
+						type: "agent_list",
+						instanceId: "opencode",
+						providerScope: { id: "opencode", name: "OpenCode" },
+						agents: [{ id: "build", name: "build" }],
+					});
+				}),
+			);
+		},
+	);
+
 	it.effect("preserves OpenCode behavior when no active session exists", () => {
 		const ws = mockWsHandler({
 			getClientSession: vi.fn(() => undefined),

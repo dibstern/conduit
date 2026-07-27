@@ -1,4 +1,10 @@
 import { type Cause, Context, Effect, Layer } from "effect";
+import {
+	defaultInstanceIdForDriver,
+	isKnownDriverKind,
+	type ProviderDriverKind,
+	type ProviderInstanceId,
+} from "../../../contracts/provider-instance.js";
 import type { Agent } from "../../../instance/sdk-types.js";
 import type { ProviderAgentInfo } from "../../../provider/types.js";
 import { OpenCodeAPITag } from "../../provider/Services/opencode-api-service.js";
@@ -24,6 +30,7 @@ export interface AgentProviderScope {
 }
 
 export interface AgentList {
+	readonly instanceId?: ProviderInstanceId;
 	readonly providerScope: AgentProviderScope;
 	readonly agents: readonly WireAgent[];
 	readonly activeAgentId?: string;
@@ -90,6 +97,8 @@ export function toWireAgents(
 export interface AgentService {
 	listAgents(
 		activeSessionId: string | undefined,
+		instanceId?: ProviderInstanceId,
+		instanceDriver?: ProviderDriverKind,
 	): Effect.Effect<AgentList, Cause.UnknownException>;
 	getActiveAgent(sessionId: string): Effect.Effect<string | undefined>;
 	switchAgent(input: SwitchAgentInput): Effect.Effect<void>;
@@ -116,6 +125,7 @@ const CLAUDE_PROVIDER_SCOPE: AgentProviderScope = {
 const withActiveAgent = (
 	agents: readonly WireAgent[],
 	sessionId: string | undefined,
+	clearMissing: boolean,
 ) =>
 	Effect.gen(function* () {
 		if (!sessionId) return { agents };
@@ -124,7 +134,9 @@ const withActiveAgent = (
 		if (agents.some((agent) => agent.id === activeAgentId)) {
 			return { agents, activeAgentId };
 		}
-		yield* clearAgent(sessionId);
+		if (clearMissing) {
+			yield* clearAgent(sessionId);
+		}
 		return { agents };
 	});
 
@@ -132,11 +144,24 @@ const scopedAgentList = (
 	providerScope: AgentProviderScope,
 	agents: readonly WireAgent[],
 	sessionId: string | undefined,
+	instanceId?: ProviderInstanceId,
 ) =>
-	Effect.map(withActiveAgent(agents, sessionId), (result) => ({
-		providerScope,
-		...result,
-	}));
+	Effect.map(
+		withActiveAgent(agents, sessionId, instanceId === undefined),
+		(result) => ({
+			...(instanceId === undefined ? {} : { instanceId }),
+			providerScope,
+			...result,
+		}),
+	);
+
+const resolveBuiltInInstanceDriver = (
+	instanceId: ProviderInstanceId,
+): ProviderDriverKind => {
+	if (instanceId === defaultInstanceIdForDriver("claude")) return "claude";
+	if (instanceId === defaultInstanceIdForDriver("opencode")) return "opencode";
+	return isKnownDriverKind(instanceId) ? instanceId : "opencode";
+};
 
 export const AgentServiceLive: Layer.Layer<
 	AgentServiceTag,
@@ -154,26 +179,43 @@ export const AgentServiceLive: Layer.Layer<
 		) => Effect.provideService(effect, OverridesStateTag, overridesRef);
 
 		return {
-			listAgents: (activeSessionId) =>
+			listAgents: (activeSessionId, instanceId, instanceDriver) =>
 				Effect.gen(function* () {
-					const activeProviderId =
-						activeSessionId &&
-						engineOption._tag === "Some" &&
-						typeof engineOption.value.getProviderForSession === "function"
-							? engineOption.value.getProviderForSession(activeSessionId)
-							: undefined;
-					const defaultModel =
-						activeProviderId == null
-							? yield* provideOverrides(getDefaultModel())
-							: undefined;
-					const preferredProviderId =
-						activeProviderId ?? defaultModel?.providerID;
+					const isInstanceScoped = instanceId !== undefined;
+					const instanceDriverUnavailable =
+						instanceId !== undefined &&
+						instanceDriver !== undefined &&
+						!isKnownDriverKind(instanceDriver);
+					let preferredProviderId: ProviderDriverKind | undefined;
+					if (instanceId !== undefined) {
+						preferredProviderId =
+							instanceDriver !== undefined && isKnownDriverKind(instanceDriver)
+								? instanceDriver
+								: resolveBuiltInInstanceDriver(instanceId);
+					} else {
+						const activeProviderId =
+							activeSessionId &&
+							engineOption._tag === "Some" &&
+							typeof engineOption.value.getProviderForSession === "function"
+								? engineOption.value.getProviderForSession(activeSessionId)
+								: undefined;
+						const defaultModel =
+							activeProviderId == null
+								? yield* provideOverrides(getDefaultModel())
+								: undefined;
+						preferredProviderId = activeProviderId ?? defaultModel?.providerID;
+					}
 
 					const listClaudeAgents = () =>
 						Effect.gen(function* () {
 							if (engineOption._tag !== "Some") {
 								return yield* provideOverrides(
-									scopedAgentList(CLAUDE_PROVIDER_SCOPE, [], activeSessionId),
+									scopedAgentList(
+										CLAUDE_PROVIDER_SCOPE,
+										[],
+										activeSessionId,
+										instanceId,
+									),
 								);
 							}
 							const result = yield* Effect.either(
@@ -187,7 +229,12 @@ export const AgentServiceLive: Layer.Layer<
 									`Failed to discover Claude agents: ${describeError(result.left)}`,
 								);
 								return yield* provideOverrides(
-									scopedAgentList(CLAUDE_PROVIDER_SCOPE, [], activeSessionId),
+									scopedAgentList(
+										CLAUDE_PROVIDER_SCOPE,
+										[],
+										activeSessionId,
+										instanceId,
+									),
 								);
 							}
 							return yield* provideOverrides(
@@ -195,13 +242,28 @@ export const AgentServiceLive: Layer.Layer<
 									CLAUDE_PROVIDER_SCOPE,
 									toWireAgents(result.right.agents ?? []),
 									activeSessionId,
+									instanceId,
 								),
 							);
 						});
 
+					if (instanceDriverUnavailable) {
+						log.warn(
+							`Cannot discover agents for unavailable provider driver: ${instanceDriver}`,
+						);
+						return yield* provideOverrides(
+							scopedAgentList(
+								OPENCODE_PROVIDER_SCOPE,
+								[],
+								activeSessionId,
+								instanceId,
+							),
+						);
+					}
+
 					if (
 						preferredProviderId === "claude" &&
-						engineOption._tag === "Some"
+						(isInstanceScoped || engineOption._tag === "Some")
 					) {
 						return yield* listClaudeAgents();
 					}
@@ -215,6 +277,21 @@ export const AgentServiceLive: Layer.Layer<
 								OPENCODE_PROVIDER_SCOPE,
 								filterAgents(rawAgentsResult.right),
 								activeSessionId,
+								instanceId,
+							),
+						);
+					}
+
+					if (isInstanceScoped) {
+						log.warn(
+							`Failed to discover OpenCode agents: ${describeError(rawAgentsResult.left)}`,
+						);
+						return yield* provideOverrides(
+							scopedAgentList(
+								OPENCODE_PROVIDER_SCOPE,
+								[],
+								activeSessionId,
+								instanceId,
 							),
 						);
 					}

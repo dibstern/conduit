@@ -42,6 +42,7 @@ const providersFromGetModelsResponse = (
 ): ProviderInfo[] =>
 	providers.map((provider) => ({
 		id: provider.id,
+		...(provider.instanceId != null ? { instanceId: provider.instanceId } : {}),
 		name: provider.name,
 		configured: provider.configured,
 		models: provider.models.map((model) => ({
@@ -80,6 +81,43 @@ const providersFromGetModelsResponse = (
 		})),
 	}));
 
+// ─── Provider instances ─────────────────────────────────────────────────────
+// The composer's harness picker selects a provider *instance*. Default
+// instances are derived from the discovered providers: the "claude" provider
+// belongs to the Claude driver's default instance; every other provider
+// catalog comes from the OpenCode driver's default instance. Named instances
+// (provider.instanceId) flow through unchanged so future config-defined
+// instances need no rework here.
+
+export interface InstanceOption {
+	readonly id: string;
+	readonly driver: "claude" | "opencode";
+	readonly label: string;
+	/** Non-default instance of a driver — disambiguated with an accent badge. */
+	readonly isCustom: boolean;
+	/** Newly-added instance — rendered with a sparkle in the rail. */
+	readonly isNew?: boolean;
+}
+
+const DRIVER_LABELS = { claude: "Claude", opencode: "OpenCode" } as const;
+
+const INSTANCE_DRAFT_KEY = "conduit-selected-instance";
+
+function loadInstanceDraft(): string | null {
+	try {
+		return localStorage.getItem(INSTANCE_DRAFT_KEY);
+	} catch {
+		return null;
+	}
+}
+
+/** Map a provider catalog id to the default instance id of its driver. */
+export function instanceIdForProviderId(
+	providerId: string,
+): "claude" | "opencode" {
+	return providerId === "claude" ? "claude" : "opencode";
+}
+
 // ─── State ──────────────────────────────────────────────────────────────────
 
 export const discoveryState = $state({
@@ -104,6 +142,9 @@ export const discoveryState = $state({
 	hiddenModels: [] as string[],
 	/** Global hide-list keys: agent `<scopeId>/<agentId>`. */
 	hiddenAgents: [] as string[],
+	/** Pre-creation harness choice (client-persisted draft). Survives reload;
+	 *  never authoritative once a session is bound (harness is fixed then). */
+	selectedInstanceId: loadInstanceDraft() as string | null,
 });
 
 // ─── Derived getters ────────────────────────────────────────────────────────
@@ -167,6 +208,90 @@ export function getVisibleProviderGroups(): ProviderGroup[] {
 		}))
 		.filter((g) => g.models.length > 0);
 	return filtered.length > 0 ? filtered : all;
+}
+
+/** Instances available in the harness rail, derived from discovered providers.
+ *  Default driver instances sort first (Claude, then OpenCode), named
+ *  instances after. */
+export function getAvailableInstances(): InstanceOption[] {
+	const byId = new Map<string, InstanceOption>();
+	for (const provider of discoveryState.providers) {
+		const driver = instanceIdForProviderId(provider.id);
+		const id = provider.instanceId ?? driver;
+		if (!byId.has(id)) {
+			byId.set(id, {
+				id,
+				driver,
+				label: id === driver ? DRIVER_LABELS[driver] : id,
+				isCustom: id !== driver,
+			});
+		}
+	}
+	const rank = (i: InstanceOption) =>
+		i.id === "claude" ? 0 : i.id === "opencode" ? 1 : 2;
+	return [...byId.values()].sort(
+		(a, b) => rank(a) - rank(b) || a.label.localeCompare(b.label),
+	);
+}
+
+/** Visible provider groups scoped to one instance (the picker's right pane). */
+export function getProviderGroupsForInstance(
+	instanceId: string,
+): ProviderGroup[] {
+	return getVisibleProviderGroups().filter(
+		(g) =>
+			(g.provider.instanceId ?? instanceIdForProviderId(g.provider.id)) ===
+			instanceId,
+	);
+}
+
+/** The instance the composer is currently aimed at (pre-creation): the
+ *  explicit draft when still available, else the instance derived from the
+ *  current/default model's provider. Bound-session locking is layered on top
+ *  by the picker (it needs session state). */
+export function getEffectiveInstanceId(): string {
+	const available = getAvailableInstances();
+	const isAvailable = (id: string) =>
+		available.length === 0 || available.some((i) => i.id === id);
+	const selected = discoveryState.selectedInstanceId;
+	if (selected != null && isAvailable(selected)) return selected;
+	const derived = instanceIdForProviderId(
+		discoveryState.currentProviderId || discoveryState.defaultProviderId,
+	);
+	if (isAvailable(derived)) return derived;
+	return available[0]?.id ?? derived;
+}
+
+/** Select a harness instance (pre-creation only). Persists the draft and, if
+ *  the active model falls outside the instance, re-aims the local model
+ *  selection at the instance's default-or-first visible model. */
+export function selectInstance(instanceId: string): void {
+	discoveryState.selectedInstanceId = instanceId;
+	try {
+		localStorage.setItem(INSTANCE_DRAFT_KEY, instanceId);
+	} catch {
+		// localStorage unavailable (private browsing) — draft is best-effort.
+	}
+	const groups = getProviderGroupsForInstance(instanceId);
+	const models = groups.flatMap((g) => g.models);
+	const currentInScope = models.some(
+		(m) =>
+			m.id === discoveryState.currentModelId ||
+			m.routingOptions?.some(
+				(option) => option.value === discoveryState.currentModelId,
+			),
+	);
+	if (currentInScope) return;
+	const preferred =
+		models.find(
+			(m) =>
+				m.id === discoveryState.defaultModelId &&
+				m.provider === discoveryState.defaultProviderId,
+		) ?? models[0];
+	if (preferred) {
+		discoveryState.currentModelId = preferred.id;
+		discoveryState.currentProviderId = preferred.provider;
+	}
 }
 
 // ─── Pure helpers ───────────────────────────────────────────────────────────
@@ -455,4 +580,6 @@ export function clearDiscoveryState(): void {
 	discoveryState.pendingPermissionMode = null;
 	discoveryState.hiddenModels = [];
 	discoveryState.hiddenAgents = [];
+	// selectedInstanceId is intentionally kept: it is a client-side draft
+	// preference (instances are daemon-global), not server discovery state.
 }

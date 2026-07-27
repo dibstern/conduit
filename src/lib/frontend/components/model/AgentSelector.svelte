@@ -242,6 +242,7 @@
 <div id="agent-selector" class:hidden={shouldHide}>
 	<button
 		bind:this={triggerEl}
+		data-testid="agent-selector-trigger"
 	class="inline-flex items-center gap-[2px] h-9 px-2 border-none bg-transparent text-text-muted text-xs font-medium cursor-pointer whitespace-nowrap transition-[background,color] duration-150 rounded-[10px] max-w-[160px] hover:bg-bg-alt hover:text-text-secondary font-brand"
 		title="Switch agent"
 		onclick={toggleDropdown}
@@ -265,7 +266,10 @@
 		role="listbox"
 		aria-label={providerHeading}
 	>
-		<div class="px-3.5 pb-1.5 pt-1 text-xs font-semibold uppercase tracking-[0.5px] text-text-dimmer">
+		<div
+			data-testid="agent-scope-label"
+			class="px-3.5 pb-1.5 pt-1 text-xs font-semibold uppercase tracking-[0.5px] text-text-dimmer"
+		>
 			{providerHeading}
 		</div>
 
@@ -278,6 +282,7 @@
 				<button
 					role="option"
 					aria-selected={isActive(agent)}
+					data-testid="agent-option-{agent.id}"
 					data-agent-id={agent.id}
 					data-agent-index={index}
 					class={agentItemClass(agent, index)}

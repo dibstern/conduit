@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { SqlClient } from "@effect/sql";
@@ -7,7 +7,10 @@ import { Effect, HashMap, Layer, Option, Ref } from "effect";
 import { expect, vi } from "vitest";
 import { DaemonEventBusLive } from "../../../src/lib/domain/daemon/Services/daemon-pubsub.js";
 import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
-import { LoggerTag } from "../../../src/lib/domain/relay/Services/services.js";
+import {
+	ConfigTag,
+	LoggerTag,
+} from "../../../src/lib/domain/relay/Services/services.js";
 import {
 	createSession,
 	deleteSession,
@@ -30,7 +33,10 @@ import {
 	ReadQueryEffectTag,
 } from "../../../src/lib/persistence/effect/read-query-effect.js";
 import { canonicalEvent } from "../../../src/lib/persistence/events.js";
-import { makeMockLogger } from "../../helpers/mock-factories.js";
+import {
+	makeMockConfig,
+	makeMockLogger,
+} from "../../helpers/mock-factories.js";
 
 describe("SessionManager Effect", () => {
 	const makeMockApi = () => ({
@@ -52,6 +58,7 @@ describe("SessionManager Effect", () => {
 		mockApi: ReturnType<typeof makeMockApi>,
 		filename: string,
 		readQueryOverride?: ReadQueryEffect,
+		configDir?: string,
 	) =>
 		Layer.provideMerge(
 			SessionManagerServiceLive,
@@ -62,6 +69,9 @@ describe("SessionManager Effect", () => {
 				makePersistenceEffectLayer(filename),
 				...(readQueryOverride
 					? [Layer.succeed(ReadQueryEffectTag, readQueryOverride)]
+					: []),
+				...(configDir
+					? [Layer.succeed(ConfigTag, makeMockConfig({ configDir }))]
 					: []),
 			),
 		);
@@ -232,6 +242,77 @@ describe("SessionManager Effect", () => {
 					"session.renamed",
 					"session.created",
 				]);
+			}).pipe(
+				Effect.provide(layer),
+				Effect.ensuring(
+					Effect.sync(() => rmSync(dir, { recursive: true, force: true })),
+				),
+			);
+		},
+	);
+
+	it.effect(
+		"renames a named Claude instance session through the event store",
+		() => {
+			const mockApi = makeMockApi();
+			const dir = mkdtempSync(join(tmpdir(), "conduit-rename-named-session-"));
+			const filename = join(dir, "events.db");
+			const sessionId = "ses-named-claude-rename";
+			writeFileSync(
+				join(dir, "daemon.json"),
+				JSON.stringify({
+					pid: 1234,
+					port: 2633,
+					pinHash: null,
+					tls: false,
+					debug: false,
+					keepAwake: false,
+					dangerouslySkipPermissions: false,
+					projects: [],
+					instances: [
+						{
+							id: "work-claude",
+							name: "Work Claude",
+							port: 0,
+							managed: false,
+							driver: "claude",
+						},
+					],
+				}),
+			);
+			const layer = makeLiveServiceLayer(mockApi, filename, undefined, dir);
+
+			return Effect.gen(function* () {
+				const store = yield* EventStoreEffectTag;
+				const runner = yield* ProjectionRunnerEffectTag;
+				const readQuery = yield* ReadQueryEffectTag;
+				const service = yield* SessionManagerServiceTag;
+				const sql = yield* SqlClient.SqlClient;
+				yield* runner.markRecovered();
+				yield* sql`
+					INSERT INTO sessions (id, provider, title, status, created_at, updated_at)
+					VALUES (${sessionId}, 'work-claude', 'Claude Session', 'idle', 1000, 1000)`;
+
+				const created = yield* store.append(
+					canonicalEvent(
+						"session.created",
+						sessionId,
+						{
+							sessionId,
+							title: "Claude Session",
+							provider: "work-claude",
+						},
+						{ provider: "work-claude", createdAt: 1000 },
+					),
+				);
+				yield* runner.projectEvent(created);
+
+				yield* service.renameSession(sessionId, "Named title");
+
+				expect(mockApi.session.update).not.toHaveBeenCalled();
+				expect((yield* readQuery.getSession(sessionId))?.title).toBe(
+					"Named title",
+				);
 			}).pipe(
 				Effect.provide(layer),
 				Effect.ensuring(

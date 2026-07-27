@@ -35,6 +35,7 @@ export const ModelInfoSchema = Schema.Struct({
 
 export const ProviderInfoSchema = Schema.Struct({
 	id: Schema.String,
+	instanceId: Schema.optional(Schema.String),
 	name: Schema.String,
 	configured: Schema.Boolean,
 	models: Schema.Array(ModelInfoSchema),
@@ -162,6 +163,7 @@ const HistoryMessageSchema = Schema.Struct({
 
 export const GetModelsResponseSchema = Schema.Struct({
 	projectSlug: Schema.String,
+	instanceId: Schema.optional(Schema.String),
 	providers: Schema.Array(ProviderInfoSchema),
 	active: Schema.optional(ModelSelectionSchema),
 	variant: Schema.optional(VariantInfoSchema),
@@ -274,6 +276,7 @@ export const ForkSessionResponseSchema = Schema.Struct({
 
 export const GetAgentsResponseSchema = Schema.Struct({
 	projectSlug: Schema.String,
+	instanceId: Schema.optional(Schema.String),
 	providerScope: AgentProviderScopeSchema,
 	agents: Schema.Array(AgentInfoSchema),
 	activeAgentId: Schema.optional(Schema.String),
@@ -414,6 +417,7 @@ export class GetAgents extends Schema.TaggedRequest<GetAgents>()("GetAgents", {
 	payload: {
 		projectSlug: NonEmptyString,
 		sessionId: Schema.optional(Schema.String),
+		instanceId: Schema.optional(Schema.String),
 	},
 }) {}
 
@@ -798,6 +802,7 @@ export class GetModels extends Schema.TaggedRequest<GetModels>()("GetModels", {
 	payload: {
 		projectSlug: NonEmptyString,
 		sessionId: Schema.optional(Schema.String),
+		instanceId: Schema.optional(Schema.String),
 	},
 }) {}
 
@@ -824,6 +829,9 @@ export class CreateSession extends Schema.TaggedRequest<CreateSession>()(
 			originId: NonEmptyString,
 			title: Schema.optional(Schema.String),
 			requestId: Schema.optional(NonEmptyString),
+			instanceId: Schema.optional(
+				Schema.String.pipe(Schema.brand("ProviderInstanceId")),
+			),
 			providerId: Schema.optional(Schema.String),
 		},
 	},

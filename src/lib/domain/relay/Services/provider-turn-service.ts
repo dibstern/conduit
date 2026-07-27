@@ -10,6 +10,12 @@ import {
 	MutableHashMap,
 	Runtime,
 } from "effect";
+import type { ProviderDriverKind } from "../../../contracts/provider-instance.js";
+import {
+	loadDaemonConfig,
+	resolveClaudeInstanceConfigDir,
+	resolveProviderRoutingDriver,
+} from "../../../daemon/config-persistence.js";
 import { formatErrorDetail, RelayError } from "../../../errors.js";
 import type { PromptOptions } from "../../../instance/sdk-types.js";
 import {
@@ -183,12 +189,14 @@ class ProviderTurnDispatchFibersTag extends Context.Tag(
 	"ProviderTurnDispatchFibers",
 )<ProviderTurnDispatchFibersTag, FiberMap.FiberMap<string, void, unknown>>() {}
 
-export function isProviderTurnInterruptProvider(providerId: string): boolean {
-	return providerId === CLAUDE_PROVIDER_ID;
+export function isProviderTurnInterruptProvider(
+	driver: ProviderDriverKind,
+): boolean {
+	return driver === CLAUDE_PROVIDER_ID;
 }
 
-function isClaudeProviderId(providerId: string): boolean {
-	return providerId === CLAUDE_PROVIDER_ID;
+function isClaudeDriver(driver: ProviderDriverKind): boolean {
+	return driver === CLAUDE_PROVIDER_ID;
 }
 
 function targetSessionForRelayMessage(
@@ -336,17 +344,17 @@ export const makeProviderTurnService = Effect.gen(function* () {
 
 	const makeEventSink = (
 		sessionId: string,
-		providerId: string,
+		driver: ProviderDriverKind,
 		persist: ClaudeEventPersistEffect | undefined,
 		ingestion: ProviderRuntimeIngestion | undefined,
 	): SendTurnInput["eventSink"] => {
-		if (!isClaudeProviderId(providerId)) return NOOP_EVENT_SINK;
+		if (!isClaudeDriver(driver)) return NOOP_EVENT_SINK;
 		if (!ingestion) return makeProviderRuntimeIngestionRequiredSink(sessionId);
 		let eventSinkPersist: RelayEventSinkPersist | undefined;
 		if (persist) eventSinkPersist = persist;
 		return createRelayEventSink({
 			sessionId,
-			providerId,
+			providerId: driver,
 			send: (msg) =>
 				wsHandler.sendToSession(
 					targetSessionForRelayMessage(msg, sessionId),
@@ -470,19 +478,21 @@ export const makeProviderTurnService = Effect.gen(function* () {
 	const sendViaEngine = (
 		input: ProviderTurnServiceSendInput,
 		providerId: string,
+		driver: ProviderDriverKind,
+		claudeConfigDir: string | undefined,
 		orchestrationEngine: OrchestrationEngine,
 	) =>
 		Effect.gen(function* () {
-			const priorHistoryResult = isClaudeProviderId(providerId)
+			const priorHistoryResult = isClaudeDriver(driver)
 				? yield* loadClaudeHistory(input.sessionId)
 				: { history: [], loaded: false };
 			const priorHistory = priorHistoryResult.history;
 			const isFirstClaudeMessage =
-				isClaudeProviderId(providerId) &&
+				isClaudeDriver(driver) &&
 				priorHistoryResult.loaded &&
 				priorHistory.length === 0;
 
-			yield* isClaudeProviderId(providerId)
+			yield* isClaudeDriver(driver)
 				? maybePersistClaudeUserMessage({
 						sessionId: input.sessionId,
 						text: input.text,
@@ -505,7 +515,7 @@ export const makeProviderTurnService = Effect.gen(function* () {
 					: {};
 			const eventSink = makeEventSink(
 				input.sessionId,
-				providerId,
+				driver,
 				claudeEventPersistEffectOption._tag === "Some"
 					? claudeEventPersistEffectOption.value
 					: undefined,
@@ -532,6 +542,9 @@ export const makeProviderTurnService = Effect.gen(function* () {
 						}
 					: {}),
 				workspaceRoot: config.projectDir ?? "",
+				...(claudeConfigDir === undefined
+					? {}
+					: { configDir: claudeConfigDir }),
 				eventSink,
 				abortSignal: new AbortController().signal,
 				...(imageList ? { images: imageList } : {}),
@@ -588,10 +601,14 @@ export const makeProviderTurnService = Effect.gen(function* () {
 			const orchestrationEngine = engineOption.value;
 			const providerId =
 				orchestrationEngine.getProviderForSession(input.sessionId) ??
-				(input.model && isClaudeProviderId(input.model.providerID)
+				(input.model && input.model.providerID === CLAUDE_PROVIDER_ID
 					? CLAUDE_PROVIDER_ID
 					: OPENCODE_PROVIDER_ID);
-			if (isClaudeProviderId(providerId)) return input.sessionId;
+			const daemonConfig = loadDaemonConfig(config.configDir);
+			const driver = resolveProviderRoutingDriver(daemonConfig, providerId);
+			if (driver === undefined || isClaudeDriver(driver)) {
+				return input.sessionId;
+			}
 
 			const readQueryEffectOption =
 				yield* Effect.serviceOption(ReadQueryEffectTag);
@@ -608,7 +625,11 @@ export const makeProviderTurnService = Effect.gen(function* () {
 			}
 
 			const row = rowResult.right;
-			if (!row || row.provider === OPENCODE_PROVIDER_ID) {
+			if (
+				!row ||
+				resolveProviderRoutingDriver(daemonConfig, row.provider) ===
+					OPENCODE_PROVIDER_ID
+			) {
 				return input.sessionId;
 			}
 
@@ -651,10 +672,27 @@ export const makeProviderTurnService = Effect.gen(function* () {
 			if (engineOption._tag === "Some") {
 				const providerId =
 					engineOption.value.getProviderForSession(input.sessionId) ??
-					(input.model && isClaudeProviderId(input.model.providerID)
+					(input.model && input.model.providerID === CLAUDE_PROVIDER_ID
 						? CLAUDE_PROVIDER_ID
 						: OPENCODE_PROVIDER_ID);
-				yield* sendViaEngine(input, providerId, engineOption.value);
+				const daemonConfig = loadDaemonConfig(config.configDir);
+				const driver = resolveProviderRoutingDriver(daemonConfig, providerId);
+				if (driver === undefined) {
+					yield* handleDispatchFailure(
+						input,
+						new Error(
+							`Cannot resolve provider instance for turn routing: ${providerId}`,
+						),
+					);
+					return;
+				}
+				yield* sendViaEngine(
+					input,
+					providerId,
+					driver,
+					resolveClaudeInstanceConfigDir(daemonConfig, providerId),
+					engineOption.value,
+				);
 				return;
 			}
 
@@ -700,7 +738,26 @@ export const makeProviderTurnService = Effect.gen(function* () {
 			const providerId = engineOption.value.getProviderForSession(
 				input.sessionId,
 			);
-			if (!providerId || !isProviderTurnInterruptProvider(providerId)) {
+			if (!providerId) {
+				yield* interruptLegacyTurn(input);
+				return;
+			}
+			const driver = resolveProviderRoutingDriver(
+				loadDaemonConfig(config.configDir),
+				providerId,
+			);
+			if (driver === undefined) {
+				log.warn(
+					`client=${input.clientId} session=${input.sessionId} Cannot resolve provider instance for interrupt routing: ${providerId}`,
+				);
+				wsHandler.sendToSession(input.sessionId, {
+					type: "done",
+					sessionId: input.sessionId,
+					code: 1,
+				});
+				return;
+			}
+			if (!isProviderTurnInterruptProvider(driver)) {
 				yield* interruptLegacyTurn(input);
 				return;
 			}

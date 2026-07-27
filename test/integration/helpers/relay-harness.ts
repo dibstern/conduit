@@ -32,7 +32,11 @@ export interface RelayHarness {
  */
 export async function createRelayHarness(
 	recordingName: string | OpenCodeRecording = "chat-simple",
-	options: { readonly persistenceDbPath?: string } = {},
+	options: {
+		readonly persistenceDbPath?: string;
+		/** Config directory holding daemon.json (named provider instances). */
+		readonly configDir?: string;
+	} = {},
 ): Promise<RelayHarness> {
 	const recording =
 		typeof recordingName === "string"
@@ -52,6 +56,7 @@ export async function createRelayHarness(
 		...(options.persistenceDbPath != null
 			? { persistenceDbPath: options.persistenceDbPath }
 			: {}),
+		...(options.configDir != null ? { configDir: options.configDir } : {}),
 	});
 
 	const relayPort = stack.getPort();

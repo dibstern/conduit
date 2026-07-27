@@ -1,4 +1,9 @@
 import { Effect } from "effect";
+import { ProviderInstanceIdSchema } from "../contracts/provider-instance.js";
+import {
+	loadDaemonConfig,
+	resolveInstanceDriver,
+} from "../daemon/config-persistence.js";
 import { RateLimiterTag } from "../domain/relay/Layers/rate-limiter-layer.js";
 import { AgentServiceTag } from "../domain/relay/Services/agent-service.js";
 import { DirectoryListingServiceTag } from "../domain/relay/Services/directory-listing-service.js";
@@ -180,9 +185,26 @@ export const WsRpcServerLayer = WsRpcGroup.toLayer({
 		Effect.gen(function* () {
 			const config = yield* ConfigTag;
 			const agentService = yield* AgentServiceTag;
-			const result = yield* agentService.listAgents(request.sessionId);
+			const instanceId =
+				request.instanceId === undefined
+					? undefined
+					: ProviderInstanceIdSchema.make(request.instanceId);
+			const daemonConfig =
+				instanceId === undefined ? null : loadDaemonConfig(config.configDir);
+			const instanceDriver =
+				instanceId === undefined || daemonConfig === null
+					? undefined
+					: resolveInstanceDriver(daemonConfig, instanceId);
+			const result = yield* agentService.listAgents(
+				request.sessionId,
+				instanceId,
+				instanceDriver,
+			);
 			return {
 				projectSlug: request.projectSlug,
+				...(result.instanceId === undefined
+					? {}
+					: { instanceId: result.instanceId }),
 				providerScope: result.providerScope,
 				agents: result.agents,
 				...(result.activeAgentId != null
@@ -725,6 +747,9 @@ export const WsRpcServerLayer = WsRpcGroup.toLayer({
 			const response = yield* getModelsResponse({
 				projectSlug: request.projectSlug,
 				...(request.sessionId != null ? { sessionId: request.sessionId } : {}),
+				...(request.instanceId != null
+					? { instanceId: request.instanceId }
+					: {}),
 			});
 			return {
 				...response,
@@ -774,6 +799,7 @@ export const WsRpcServerLayer = WsRpcGroup.toLayer({
 			clientId: request.originId,
 			...(request.title != null ? { title: request.title } : {}),
 			...(request.requestId != null ? { requestId: request.requestId } : {}),
+			...(request.instanceId != null ? { instanceId: request.instanceId } : {}),
 			...(request.providerId != null ? { providerId: request.providerId } : {}),
 		}).pipe(
 			Effect.map((session) => ({

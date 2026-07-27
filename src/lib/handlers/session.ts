@@ -3,6 +3,7 @@ import { OpenCodeAPITag } from "../domain/provider/Services/opencode-api-service
 
 import { Effect } from "effect";
 import { mapQuestionFields } from "../bridges/question-bridge.js";
+import type { ProviderInstanceId } from "../contracts/provider-instance.js";
 import { PendingInteractionServiceTag } from "../domain/relay/Services/pending-interaction-service.js";
 import {
 	LoggerTag,
@@ -37,6 +38,7 @@ interface ViewSessionPayload {
 interface NewSessionPayload {
 	readonly title?: string;
 	readonly requestId?: RequestId;
+	readonly instanceId?: ProviderInstanceId;
 	readonly providerId?: string;
 }
 
@@ -409,11 +411,13 @@ export const createSessionForClient = ({
 	clientId,
 	title,
 	requestId,
+	instanceId,
 	providerId,
 }: {
 	readonly clientId: string;
 	readonly title?: string;
 	readonly requestId?: string;
+	readonly instanceId?: ProviderInstanceId;
 	readonly providerId?: string;
 }) =>
 	Effect.gen(function* () {
@@ -422,8 +426,11 @@ export const createSessionForClient = ({
 		const log = yield* LoggerTag;
 
 		const session =
-			providerId != null
-				? yield* sessionManagerService.createSession(title, { providerId })
+			instanceId != null || providerId != null
+				? yield* sessionManagerService.createSession(title, {
+						...(instanceId != null ? { instanceId } : {}),
+						...(providerId != null ? { providerId } : {}),
+					})
 				: yield* sessionManagerService.createSession(title);
 
 		yield* switchClientToSession(clientId, session.id, {
@@ -458,6 +465,7 @@ export const handleNewSession = (
 		clientId,
 		...(payload.title != null ? { title: payload.title } : {}),
 		...(payload.requestId != null ? { requestId: payload.requestId } : {}),
+		...(payload.instanceId != null ? { instanceId: payload.instanceId } : {}),
 		...(payload.providerId != null ? { providerId: payload.providerId } : {}),
 	}).pipe(Effect.asVoid);
 

@@ -856,7 +856,11 @@ export class ClaudeProviderRuntime {
 						validateOptionsJsonShape({
 							cwd: input.workspaceRoot,
 							abortController,
-							env: makeClaudeSdkEnv(),
+							env: makeClaudeSdkEnv(
+								input.configDir !== undefined
+									? { configDir: input.configDir }
+									: undefined,
+							),
 							includePartialMessages: true,
 							forwardSubagentText: true,
 							settings: { showThinkingSummaries: true },

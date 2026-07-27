@@ -1,6 +1,7 @@
 import { Socket } from "@effect/platform";
 import { RpcClient, RpcSerialization } from "@effect/rpc";
 import { Effect } from "effect";
+import { ProviderInstanceIdSchema } from "../../contracts/provider-instance.js";
 import type { SessionPermissionMode } from "../../shared-types.js";
 import { runTransportEffect } from "./runtime.js";
 import {
@@ -46,11 +47,13 @@ export interface CancelSessionRpcInput {
 export interface GetModelsRpcInput {
 	readonly projectSlug: string;
 	readonly sessionId?: string;
+	readonly instanceId?: string;
 }
 
 export interface GetAgentsRpcInput {
 	readonly projectSlug: string;
 	readonly sessionId?: string;
+	readonly instanceId?: string;
 }
 
 export interface GetCommandsRpcInput {
@@ -132,6 +135,8 @@ export interface CreateSessionRpcInput {
 	readonly originId: string;
 	readonly title?: string;
 	readonly requestId?: string;
+	/** Harness instance to bind the session to (preferred over providerId). */
+	readonly instanceId?: string;
 	readonly providerId?: string;
 }
 
@@ -590,6 +595,9 @@ const callCreateSession = (input: CreateSessionRpcInput) =>
 				originId: input.originId,
 				...(input.title != null ? { title: input.title } : {}),
 				...(input.requestId != null ? { requestId: input.requestId } : {}),
+				...(input.instanceId != null
+					? { instanceId: ProviderInstanceIdSchema.make(input.instanceId) }
+					: {}),
 				...(input.providerId != null ? { providerId: input.providerId } : {}),
 			});
 		}),

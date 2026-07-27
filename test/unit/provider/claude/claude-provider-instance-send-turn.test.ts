@@ -155,6 +155,33 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 		expect(result.durationMs).toBe(1500);
 	});
 
+	it("uses the turn's Claude config dir when creating the SDK query", async () => {
+		const mockQuery = createMockQuery([makeSuccessResult()]);
+		queryFactorySpy = vi.fn(() => mockQuery);
+		const instance = new ClaudeProviderInstance({
+			workspaceRoot: workspace,
+			queryFactory: queryFactorySpy,
+		});
+
+		await Effect.runPromise(
+			instance.sendTurnEffect(
+				makeBaseSendTurnInput({
+					sessionId: "session-named-instance",
+					configDir: "/instances/work-claude",
+				}),
+			),
+		);
+
+		const call = queryFactorySpy.mock.calls[0]?.[0] as {
+			readonly options: {
+				readonly env?: Record<string, string | undefined>;
+			};
+		};
+		expect(call.options.env?.["CLAUDE_CONFIG_DIR"]).toBe(
+			"/instances/work-claude",
+		);
+	});
+
 	it("uses the current session event sink for Claude permission callbacks", async () => {
 		const firstQuery = createMockQuery([
 			makeSuccessResult({ session_id: "sdk-session-1" } as Record<

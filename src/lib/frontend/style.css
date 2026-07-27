@@ -13,6 +13,10 @@
 	--color-brand-a-glow: rgba(255, 45, 123, 0.15);
 	--color-brand-b-glow: rgba(0, 229, 255, 0.15);
 
+	/* Harness (provider driver) identity colors — theme-independent, like brand. */
+	--color-harness-claude: #d97757; /* Claude clay */
+	--color-harness-opencode: #00e5ff; /* OpenCode cyan */
+
 	--animate-cascade-a: pixel-cascade-a 2.4s ease-in-out infinite;
 	--animate-cascade-b: pixel-cascade-b 2.4s ease-in-out infinite;
 	--animate-cascade-a-fast: pixel-cascade-a 1.4s ease-in-out infinite;

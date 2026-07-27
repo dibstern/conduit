@@ -29,8 +29,8 @@ import {
 	applyGetAgentsResponse,
 	applyGetCommandsResponse,
 	applyGetModelsResponse,
-	discoveryState,
 	flushPendingPermissionMode,
+	getEffectiveInstanceId,
 } from "./discovery.svelte.js";
 import { getCurrentSlug, navigate } from "./router.svelte.js";
 import { uiState } from "./ui.svelte.js";
@@ -181,13 +181,13 @@ export function sendNewSession(
 		failNewSession(requestId, "No active project");
 		return requestId;
 	}
-	const providerId =
-		discoveryState.currentProviderId || discoveryState.defaultProviderId;
 	const input: CreateSessionRpcInput = {
 		projectSlug,
 		requestId,
 		originId: getBrowserClientId(),
-		...(providerId ? { providerId } : {}),
+		// Bind the session to the selected harness instance (replaces the
+		// legacy implicit default-model-provider derivation).
+		instanceId: getEffectiveInstanceId(),
 	};
 	if (start) {
 		start(input);
