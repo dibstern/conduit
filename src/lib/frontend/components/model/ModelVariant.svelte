@@ -4,7 +4,7 @@
 
 <script lang="ts">
 	import Icon from "../shared/Icon.svelte";
-	import { clickOutside } from "../shared/use-click-outside.svelte.js";
+	import { dismiss } from "../ui/actions/use-dismiss.svelte.js";
 	import {
 		discoveryState,
 		getActiveModelVariants,
@@ -106,7 +106,14 @@
 </script>
 
 {#if variants.length > 0}
-	<div class="relative" use:clickOutside={() => { variantDropdownOpen = false; }}>
+	<div
+		class="relative"
+		use:dismiss={{
+			onDismiss: () => {
+				variantDropdownOpen = false;
+			},
+		}}
+	>
 		<button
 			data-testid="variant-badge"
 		class="inline-flex items-center gap-1 h-6 px-2 ml-0.5 border border-border bg-bg-alt text-text-muted text-xs font-medium cursor-pointer whitespace-nowrap rounded-full transition-colors duration-100 hover:bg-bg hover:text-text-secondary font-brand"

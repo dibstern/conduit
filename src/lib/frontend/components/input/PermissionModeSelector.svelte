@@ -4,7 +4,7 @@
 
 <script lang="ts">
 	import Icon from "../shared/Icon.svelte";
-	import { clickOutside } from "../shared/use-click-outside.svelte.js";
+	import { dismiss } from "../ui/actions/use-dismiss.svelte.js";
 	import { discoveryState } from "../../stores/discovery.svelte.js";
 	import { getCurrentSlug } from "../../stores/router.svelte.js";
 	import { sessionState } from "../../stores/session.svelte.js";
@@ -74,7 +74,14 @@
 	});
 </script>
 
-<div class="relative" use:clickOutside={() => { dropdownOpen = false; }}>
+<div
+	class="relative"
+	use:dismiss={{
+		onDismiss: () => {
+			dropdownOpen = false;
+		},
+	}}
+>
 	<button
 		data-testid="permission-mode-badge"
 		class="inline-flex items-center gap-1 h-6 px-2 ml-0.5 border text-xs font-medium cursor-pointer whitespace-nowrap rounded-full transition-colors duration-100 font-brand {isElevated

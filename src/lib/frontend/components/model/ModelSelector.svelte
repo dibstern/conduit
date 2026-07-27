@@ -9,7 +9,7 @@
 	import ContextWindowSelector from "./ContextWindowSelector.svelte";
 	// biome-ignore lint/style/useImportType: ModelVariant is used as a value for bind:this
 	import ModelVariant from "./ModelVariant.svelte";
-	import { clickOutside } from "../shared/use-click-outside.svelte.js";
+	import { dismiss } from "../ui/actions/use-dismiss.svelte.js";
 	import {
 		applyGetAgentsResponse,
 		discoveryState,
@@ -225,7 +225,15 @@
 	});
 </script>
 
-<div id="model-display" class="relative inline-flex items-center" use:clickOutside={() => { dropdownOpen = false; }}>
+<div
+	id="model-display"
+	class="relative inline-flex items-center"
+	use:dismiss={{
+		onDismiss: () => {
+			dropdownOpen = false;
+		},
+	}}
+>
 	<!-- Model button -->
 	<button
 	class="model-btn inline-flex items-center gap-[2px] h-9 px-2 border-none bg-transparent text-text-muted text-xs font-medium cursor-pointer whitespace-nowrap transition-[background,color] duration-150 rounded-panel max-w-[180px] max-sm:max-w-[120px] hover:bg-bg-alt hover:text-text-secondary font-brand {hasModel ? '' : 'opacity-50'}"

@@ -23,7 +23,7 @@
 		instanceStatusColor,
 	} from "../../stores/instance.svelte.js";
 	import Icon from "../shared/Icon.svelte";
-	import { clickOutside } from "../shared/use-click-outside.svelte.js";
+	import { dismiss } from "../ui/actions/use-dismiss.svelte.js";
 	import DirectoryAutocomplete from "./DirectoryAutocomplete.svelte";
 	import ProjectContextMenu from "./ProjectContextMenu.svelte";
 	import { confirm } from "../../stores/ui.svelte.js";
@@ -274,7 +274,17 @@
 	});
 </script>
 
-<div class="proj-switcher relative" use:clickOutside={() => { if (document.getElementById("confirm-modal")) return; open = false; showAddForm = false; addError = ""; }}>
+<div
+	class="proj-switcher relative"
+	use:dismiss={{
+		onDismiss: () => {
+			if (document.getElementById("confirm-modal")) return;
+			open = false;
+			showAddForm = false;
+			addError = "";
+		},
+	}}
+>
 	<!-- Main button — always rendered -->
 	<!-- svelte-ignore a11y_click_events_have_key_events -->
 	<!-- svelte-ignore a11y_no_static_element_interactions -->

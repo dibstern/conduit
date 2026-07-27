@@ -8,7 +8,7 @@
 	} from "../../stores/theme.svelte.js";
 	import { uiState } from "../../stores/ui.svelte.js";
 	import { routerState } from "../../stores/router.svelte.js";
-	import { clickOutside } from "../shared/use-click-outside.svelte.js";
+	import { dismiss } from "../ui/actions/use-dismiss.svelte.js";
 
 	const lists = $derived(getThemeLists());
 
@@ -99,7 +99,7 @@
 		class="theme-picker"
 		role="listbox"
 		aria-label="Select theme"
-		use:clickOutside={closeThemePicker}
+			use:dismiss={{ onDismiss: closeThemePicker }}
 	>
 		{@render themeSection("Dark", lists.dark)}
 		{@render themeSection("Light", lists.light)}
