@@ -461,7 +461,10 @@ describe("OpenCodeRuntimeEventTranslator", () => {
 		translator.translate(
 			makeSSEEvent("message.part.updated", {
 				sessionID: sessionId,
-				part: { ...part, state: { status: "pending", input: { command: "ls" } } },
+				part: {
+					...part,
+					state: { status: "pending", input: { command: "ls" } },
+				},
 			}),
 			sessionId,
 		);
