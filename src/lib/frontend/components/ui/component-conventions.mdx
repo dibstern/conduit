@@ -1,0 +1,74 @@
+import { Meta } from "@storybook/addon-docs/blocks";
+
+<Meta title="UI/Component API Conventions" />
+
+# Component API conventions
+
+The `components/ui/` layer is conduit's design system: one curated, accessible,
+token-disciplined set of primitives that every feature component consumes.
+`Button.svelte` is the exemplar — new primitives follow the contract below.
+
+## Props
+
+- **Typed `$props()`, no `any`.** Declare an inline props type; extend the native
+  element attributes (e.g. `HTMLButtonAttributes`) via `& Omit<…, handledKeys>` and
+  spread `...rest` onto the root element so consumers can pass `title`, `data-*`,
+  `aria-*`, `form`, etc.
+- **`variant` + `size`, not booleans.** Prefer a single closed `variant` union over
+  a spray of boolean flags (`primary`/`danger`/… beats `isPrimary`/`isDanger`). Keep
+  the set small and semantic.
+- **Sensible defaults.** Default to the least-emphasized safe choice (`Button`
+  defaults to `variant="secondary"`), so emphasis is always intentional.
+- **Naming.** camelCase props; boolean props read as states (`loading`, `disabled`,
+  `iconOnly`); event props use the native lowercase name (`onclick`).
+
+## Variant styling
+
+- **Typed class maps, no new dependency.** Select plain Tailwind **token** classes
+  from a `Record<Variant, string>` (and a derived size string). No `clsx` /
+  `tailwind-merge` / `cva` — consistent with `ToggleSetting.svelte`.
+- **Tokens only.** Use design tokens (`bg-accent`, `text-text`, `border-border`,
+  `bg-error`, radius/`z`/shadow scales). No hardcoded hex, no arbitrary
+  `z-[…]`/`shadow-[…]`/`rgba(…)` where a token exists — enforced by
+  `scripts/check-design-tokens.mjs`.
+- **`class` is additive, not an override.** Accept `class?: string` and append it
+  after the variant/size classes: `[BASE, variant, size, className].filter(Boolean).join(" ")`.
+  Order in the `class` **attribute** does not decide the CSS cascade — conflicting
+  utilities are resolved by Tailwind's generated stylesheet order, so `class="px-2"`
+  can silently lose to a variant's `px-4`. Treat `class` as **additive** (layout:
+  `w-full`, `shrink-0`, margins). To change a styled property, add a `variant`/`size`;
+  for a genuine one-off override use Tailwind's important modifier (`px-2!`), which
+  raises specificity and wins regardless of order. (We deliberately avoid a
+  `tailwind-merge` dependency.)
+
+## Accessibility (baked in, not bolted on)
+
+- Correct roles/semantics by construction; keyboard operability by default.
+- **Suppress focus with `focus-visible:outline-hidden` (not `outline-none`)** so a
+  transparent outline survives for forced-colors / high-contrast users when the
+  box-shadow ring is stripped.
+- **Busy ≠ disabled.** A `loading` control stays focusable (`aria-disabled` +
+  `aria-busy`, not the native `disabled` attribute) and guards its handler, so
+  keyboard/screen-reader context is not lost mid-action. Reserve native `disabled`
+  for genuinely unavailable controls.
+- **Icon-only controls require an accessible name** — expressed as a discriminated
+  props union (the Svelte type-checker / editor flags a missing `ariaLabel`), backed
+  by a dev-time `console.warn` runtime backstop for callers that bypass the types.
+- Interactive primitives compose the Phase-1 actions (`use-focus-trap`,
+  `use-dismiss`, `use-roving-focus`) rather than re-implementing focus/keyboard logic.
+
+## Every primitive ships together
+
+In the same commit: the `.svelte` primitive, a `.stories.ts` covering every
+variant/state via `argTypes`, an **asserting** `play()` interaction test, a green
+`addon-a11y` panel, and a behavioral unit test under
+`test/unit/components/`. Pass a text label to a snippet `children` from a
+`.stories.ts` / test with `createRawSnippet(() => ({ render: () => \`<span>…</span>\` }))`
+— plain, trusted text only (the interpolated string is not HTML-escaped).
+
+## When to add a primitive
+
+Add one only when the pattern is **shared and reused** (a control copy-pasted across
+several features) and **owns behavior or a11y** worth centralizing. A one-off layout
+belongs in its feature. Extend an existing primitive with a `variant` before forking
+a new component.
