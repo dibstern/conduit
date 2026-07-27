@@ -1241,10 +1241,21 @@ function ensureSentDuringEpochOnLastUnrespondedUser(
 		if (m.type === "user") {
 			// Already has sentDuringEpoch — write-once, don't touch
 			if (m.sentDuringEpoch != null) return;
-			// Has an assistant response after it — not queued
+			// Any assistant-side content after it means the turn was answered.
+			// historyToChatMessages emits type:"assistant" only for TEXT parts,
+			// so a turn answered with only tool calls / thinking / a result bar
+			// has no "assistant" message. Checking for "assistant" alone would
+			// mistake those answered turns for queued ones and shimmer "Queued"
+			// on reload (rest-history is the only reload path for Claude sessions).
 			const hasResponse = msgs
 				.slice(i + 1)
-				.some((msg) => msg.type === "assistant");
+				.some(
+					(msg) =>
+						msg.type === "assistant" ||
+						msg.type === "tool" ||
+						msg.type === "thinking" ||
+						msg.type === "result",
+				);
 			if (hasResponse) return;
 			// No sentDuringEpoch and no response — set it
 			setMessages(
