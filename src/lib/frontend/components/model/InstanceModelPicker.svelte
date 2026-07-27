@@ -155,9 +155,15 @@
 	}
 
 	function instanceTooltip(instance: InstanceOption): string {
+		// Surface live instance health (merged from instanceState) on hover;
+		// healthy is the norm, so only annotate degraded states.
+		const status =
+			instance.status && instance.status !== "healthy"
+				? ` · ${instance.status}`
+				: "";
 		return isInstanceDisabled(instance)
 			? `${instance.label} — harness is fixed for this session`
-			: instance.label;
+			: `${instance.label}${status}`;
 	}
 
 	function providerSectionClass(group: ProviderGroup): string {
