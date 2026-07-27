@@ -43,6 +43,7 @@ describe("ConfigPersistenceLive", () => {
 		keepAwake: false,
 		keepAwakeCommand: undefined,
 		keepAwakeArgs: undefined,
+		claudeConfigDir: undefined,
 		shuttingDown: false,
 		dismissedPaths: new Set(),
 		startTime: Date.now(),
@@ -96,6 +97,31 @@ describe("ConfigPersistenceLive", () => {
 
 			expect(writes.length).toBe(1);
 			expect(writes[0]?.port).toBe(7777);
+		}),
+	);
+
+	it.scoped("persists claudeConfigDir when set, omits it when unset", () =>
+		Effect.gen(function* () {
+			const { layer, writes } = makeTestLayer();
+			const scope = yield* Scope.make();
+			const ctx = yield* Layer.buildWithScope(Layer.fresh(layer), scope);
+			const persistence = Context.get(ctx, ConfigPersistenceTag);
+			const configRef = Context.get(ctx, DaemonConfigRefTag);
+
+			yield* persistence.requestSave;
+			yield* persistence.flush;
+			yield* Ref.update(configRef, (c) => ({
+				...c,
+				claudeConfigDir: "/home/user/.ccs/instances/personal",
+			}));
+			yield* persistence.requestSave;
+			yield* Scope.close(scope, Exit.void);
+
+			expect(writes.length).toBe(2);
+			expect("claudeConfigDir" in (writes[0] ?? {})).toBe(false);
+			expect(writes[1]?.claudeConfigDir).toBe(
+				"/home/user/.ccs/instances/personal",
+			);
 		}),
 	);
 

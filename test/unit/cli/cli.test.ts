@@ -1785,6 +1785,7 @@ describe("T21: HELP_TEXT documents all parseArgs flags (and vice versa)", () => 
 		"--host",
 		"-H",
 		"--oc-port",
+		"--claude-config-dir",
 		"--no-update",
 		"--debug",
 		"-y",

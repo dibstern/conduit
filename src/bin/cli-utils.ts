@@ -61,6 +61,8 @@ export interface ParsedArgs {
 	yes: boolean;
 	noHttps: boolean;
 	skipPerms: boolean;
+	/** Claude Code config dir (CLAUDE_CONFIG_DIR) for Claude SDK subprocesses; persisted in daemon.json. */
+	claudeConfigDir?: string;
 	logLevel: LogLevel;
 	logFormat?: LogFormat;
 	restartDaemon: boolean;
@@ -164,6 +166,15 @@ export function parseArgs(argv: string[]): ParsedArgs {
 				const val = argv[i + 1];
 				if (val !== undefined && !val.startsWith("--")) {
 					result.host = val;
+					i++;
+				}
+				break;
+			}
+
+			case "--claude-config-dir": {
+				const val = argv[i + 1];
+				if (val !== undefined && !val.startsWith("--")) {
+					result.claudeConfigDir = val;
 					i++;
 				}
 				break;
@@ -477,6 +488,9 @@ Options:
                         When used with --instance, sets the instance port
   -H, --host <addr>     Bind address (default: 127.0.0.1, or HOST env var)
   --oc-port <port>      OpenCode server port (default: 4096)
+  --claude-config-dir <path>
+                        Claude Code config dir (CLAUDE_CONFIG_DIR) for Claude
+                        sessions; persisted in daemon.json for future starts
   --managed             Mark as managed (spawned by relay-daemon; used with --instance add)
   --url <url>           External URL for unmanaged instances (used with --instance add)
   --log-level <level>   Set log level: error, warn, info (default), verbose, debug

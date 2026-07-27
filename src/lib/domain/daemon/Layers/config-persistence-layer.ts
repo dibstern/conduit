@@ -76,6 +76,9 @@ export const buildDaemonConfigSnapshot = Effect.gen(function* () {
 			keepAwakeArgs: runtime.keepAwakeArgs,
 		}),
 		dangerouslySkipPermissions: false,
+		...(runtime.claudeConfigDir !== undefined && {
+			claudeConfigDir: runtime.claudeConfigDir,
+		}),
 		projects: projects.map((project) => {
 			const sessionCount =
 				runtime.persistedSessionCounts.get(project.slug) ?? 0;

@@ -276,6 +276,7 @@ describe("DaemonHandleTag", () => {
 					keepAwake: true,
 					keepAwakeCommand: undefined,
 					keepAwakeArgs: undefined,
+					claudeConfigDir: undefined,
 					shuttingDown: false,
 					dismissedPaths: new Set(["/tmp/new-project"]),
 					startTime: Date.now() - 1_000,

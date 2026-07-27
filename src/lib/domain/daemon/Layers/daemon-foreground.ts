@@ -81,6 +81,8 @@ const buildInitialRuntimeConfig = (
 		options.keepAwakeCommand ?? persisted?.keepAwakeCommand ?? undefined;
 	const keepAwakeArgs =
 		options.keepAwakeArgs ?? persisted?.keepAwakeArgs ?? undefined;
+	const claudeConfigDir =
+		options.claudeConfigDir ?? persisted?.claudeConfigDir ?? undefined;
 
 	return makeDaemonConfigFromOptions({
 		port: options.port ?? persisted?.port ?? DEFAULT_PORT,
@@ -91,6 +93,7 @@ const buildInitialRuntimeConfig = (
 		keepAwake: options.keepAwake ?? persisted?.keepAwake ?? false,
 		...(keepAwakeCommand !== undefined && { keepAwakeCommand }),
 		...(keepAwakeArgs !== undefined && { keepAwakeArgs }),
+		...(claudeConfigDir !== undefined && { claudeConfigDir }),
 		dismissedPaths: persisted?.dismissedPaths ?? [],
 		startTime: Date.now(),
 		persistedSessionCounts: persistedSessionCounts(persisted),
@@ -238,6 +241,11 @@ export async function startForegroundDaemon(
 	};
 
 	const initialConfig = buildInitialRuntimeConfig(options, configDir);
+	// Claude SDK subprocesses (and PTY sessions) inherit the daemon's env, so
+	// a configured Claude profile must be applied before any provider starts.
+	if (initialConfig.claudeConfigDir !== undefined) {
+		process.env["CLAUDE_CONFIG_DIR"] = initialConfig.claudeConfigDir;
+	}
 	const mirrorRuntimeConfig = (config: DaemonRuntimeConfig) => {
 		status = {
 			...status,

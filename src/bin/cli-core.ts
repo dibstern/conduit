@@ -105,6 +105,9 @@ export async function run(argv: string[], options?: CLIOptions): Promise<void> {
 				{
 					port: args.port,
 					...(args.host ? { host: args.host } : {}),
+					...(args.claudeConfigDir
+						? { claudeConfigDir: args.claudeConfigDir }
+						: {}),
 					...opts,
 				},
 				isDaemonRunning,
@@ -134,6 +137,7 @@ export async function run(argv: string[], options?: CLIOptions): Promise<void> {
 		const opencodeUrl = process.env[RELAY_ENV_KEYS.OC_URL];
 		const keepAwakeCommand = process.env[RELAY_ENV_KEYS.KEEP_AWAKE_COMMAND];
 		const keepAwakeArgsRaw = process.env[RELAY_ENV_KEYS.KEEP_AWAKE_ARGS];
+		const claudeConfigDir = process.env[RELAY_ENV_KEYS.CLAUDE_CONFIG_DIR];
 		await startDaemonChildProcessFn({
 			port: daemonPort,
 			...(daemonHost ? { host: daemonHost } : {}),
@@ -145,6 +149,7 @@ export async function run(argv: string[], options?: CLIOptions): Promise<void> {
 				? { keepAwakeArgs: JSON.parse(keepAwakeArgsRaw) as string[] }
 				: {}),
 			tlsEnabled: process.env[RELAY_ENV_KEYS.TLS] === "1",
+			...(claudeConfigDir ? { claudeConfigDir } : {}),
 			...(opencodeUrl ? { opencodeUrl } : {}),
 			logLevel: args.logLevel,
 			logFormat: args.logFormat ?? "json",
@@ -177,6 +182,9 @@ export async function run(argv: string[], options?: CLIOptions): Promise<void> {
 		const daemon = await startForegroundDaemonFn({
 			port: args.port,
 			...(args.host ? { host: args.host } : {}),
+			...(args.claudeConfigDir
+				? { claudeConfigDir: args.claudeConfigDir }
+				: {}),
 			opencodeUrl,
 			// Always enable TLS in foreground (matches daemon spawn behavior).
 			// Gracefully falls back to HTTP if mkcert is not available.

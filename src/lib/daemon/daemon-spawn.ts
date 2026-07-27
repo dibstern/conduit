@@ -85,6 +85,9 @@ export function buildSpawnConfig(options?: DaemonOptions): SpawnConfig {
 	if (options?.keepAwakeArgs) {
 		env[RELAY_ENV_KEYS.KEEP_AWAKE_ARGS] = JSON.stringify(options.keepAwakeArgs);
 	}
+	if (options?.claudeConfigDir) {
+		env[RELAY_ENV_KEYS.CLAUDE_CONFIG_DIR] = options.claudeConfigDir;
+	}
 	// Always enable TLS — the daemon will auto-generate certs via mkcert
 	// and gracefully fall back to HTTP if mkcert is not available.
 	env[RELAY_ENV_KEYS.TLS] = "1";
@@ -167,6 +170,9 @@ export async function spawnDaemon(
 	}
 	if (options?.keepAwakeArgs) {
 		env[RELAY_ENV_KEYS.KEEP_AWAKE_ARGS] = JSON.stringify(options.keepAwakeArgs);
+	}
+	if (options?.claudeConfigDir) {
+		env[RELAY_ENV_KEYS.CLAUDE_CONFIG_DIR] = options.claudeConfigDir;
 	}
 	// Always enable TLS — the daemon will auto-generate certs via mkcert
 	// and gracefully fall back to HTTP if mkcert is not available.

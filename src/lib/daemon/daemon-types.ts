@@ -22,6 +22,8 @@ export interface DaemonOptions {
 	keepAwakeCommand?: string;
 	/** Args for user-provided keep-awake command. */
 	keepAwakeArgs?: string[];
+	/** Claude Code config dir (CLAUDE_CONFIG_DIR) for Claude SDK subprocesses. */
+	claudeConfigDir?: string;
 	/** OpenCode server URL (e.g., "http://localhost:4096") */
 	opencodeUrl?: string;
 	/** Override the static file directory (default: dist/frontend relative to cwd) */

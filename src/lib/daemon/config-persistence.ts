@@ -32,6 +32,11 @@ export interface DaemonConfig {
 	/** Arguments for the keep-awake command override. */
 	keepAwakeArgs?: string[];
 	dangerouslySkipPermissions: boolean;
+	/**
+	 * Claude Code config directory (CLAUDE_CONFIG_DIR) for Claude SDK
+	 * subprocesses. Applied to process.env at daemon startup; restart to change.
+	 */
+	claudeConfigDir?: string;
 	projects: Array<{
 		path: string;
 		slug: string;
@@ -90,6 +95,7 @@ export const DaemonConfigSchema = Schema.Struct({
 	keepAwakeCommand: Schema.optional(Schema.String),
 	keepAwakeArgs: Schema.optional(Schema.Array(Schema.String)),
 	dangerouslySkipPermissions: Schema.Boolean,
+	claudeConfigDir: Schema.optional(Schema.String),
 	projects: Schema.Array(DaemonProjectSchema),
 	instances: Schema.optional(Schema.Array(DaemonInstanceSchema)),
 	dismissedPaths: Schema.optional(Schema.Array(Schema.String)),

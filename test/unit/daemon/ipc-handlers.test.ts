@@ -119,6 +119,7 @@ const makeMockConfigRef = () => {
 			keepAwake: false,
 			keepAwakeCommand: undefined,
 			keepAwakeArgs: undefined,
+			claudeConfigDir: undefined,
 			shuttingDown: false,
 			dismissedPaths: new Set<string>(),
 			startTime: Date.now(),
