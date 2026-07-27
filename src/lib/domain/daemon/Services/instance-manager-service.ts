@@ -118,22 +118,31 @@ const buildInstanceManagerState = (
 	return {
 		instances: HashMap.fromIterable(
 			initialInstances.map((instance) => {
+				const driver = instance.driver ?? "opencode";
 				const opencodeInstance: OpenCodeInstance = {
 					id: instance.id,
 					name: instance.name,
-					port: instance.port,
-					managed: instance.managed,
-					status: "starting",
+					port: driver === "claude" ? 0 : instance.port,
+					managed: driver === "claude" ? false : instance.managed,
+					driver,
+					status: driver === "claude" ? "healthy" : "starting",
 					restartCount: 0,
 					createdAt: now,
 					...(instance.env !== undefined ? { env: instance.env } : {}),
+					...(instance.configDir !== undefined
+						? { configDir: instance.configDir }
+						: {}),
+					...(driver === "opencode" && instance.url !== undefined
+						? { url: instance.url }
+						: {}),
 				};
 				return [instance.id, opencodeInstance] as const;
 			}),
 		),
 		externalUrls: HashMap.fromIterable(
 			initialInstances.flatMap((instance) =>
-				instance.url === undefined
+				instance.url === undefined ||
+				(instance.driver ?? "opencode") !== "opencode"
 					? []
 					: ([[instance.id, instance.url]] as const),
 			),
@@ -288,9 +297,10 @@ export const addInstance = (input: AddInstanceInput) =>
 	Effect.gen(function* () {
 		const ref = yield* InstanceManagerStateTag;
 		const fiberMap = yield* PollerFibersTag;
+		const driver = input.driver ?? "opencode";
 
 		const inputExternalUrl = input.url;
-		if (inputExternalUrl !== undefined) {
+		if (driver === "opencode" && inputExternalUrl !== undefined) {
 			yield* Effect.try({
 				try: () => new URL(inputExternalUrl),
 				catch: (cause) => invalidInstanceUrl(input.id, inputExternalUrl, cause),
@@ -301,13 +311,18 @@ export const addInstance = (input: AddInstanceInput) =>
 		const instance: OpenCodeInstance = {
 			id: input.id,
 			name: input.name,
-			port: input.port,
-			managed: input.managed,
-			status: "starting",
+			port: driver === "claude" ? 0 : input.port,
+			managed: driver === "claude" ? false : input.managed,
+			driver,
+			status: driver === "claude" ? "healthy" : "starting",
 			restartCount: 0,
 			createdAt: now,
 			// Only include optional env when defined (exactOptionalPropertyTypes)
 			...(input.env !== undefined ? { env: input.env } : {}),
+			...(input.configDir !== undefined ? { configDir: input.configDir } : {}),
+			...(driver === "opencode" && inputExternalUrl !== undefined
+				? { url: inputExternalUrl }
+				: {}),
 		};
 
 		// Atomic capacity check + slot reservation via Ref.modify.
@@ -333,7 +348,7 @@ export const addInstance = (input: AddInstanceInput) =>
 				// Under capacity — reserve the slot atomically
 				const newInstances = HashMap.set(state.instances, input.id, instance);
 				const newExternalUrls =
-					inputExternalUrl !== undefined
+					driver === "opencode" && inputExternalUrl !== undefined
 						? HashMap.set(state.externalUrls, input.id, inputExternalUrl)
 						: state.externalUrls;
 				return [
@@ -351,11 +366,13 @@ export const addInstance = (input: AddInstanceInput) =>
 		}
 
 		// Start health poll fiber — FiberMap auto-interrupts if one already exists for this key
-		yield* FiberMap.run(
-			fiberMap,
-			pollerKey(input.id),
-			Effect.never.pipe(Effect.interruptible),
-		);
+		if (driver === "opencode") {
+			yield* FiberMap.run(
+				fiberMap,
+				pollerKey(input.id),
+				Effect.never.pipe(Effect.interruptible),
+			);
+		}
 
 		yield* requestConfigSave;
 
@@ -419,7 +436,7 @@ export const getInstances = Effect.gen(function* () {
 
 /**
  * Get all instance records in daemon.json shape, including unmanaged external
- * URLs stored outside OpenCodeInstance to keep the transport type clean.
+ * URLs tracked separately for lifecycle lookup.
  */
 export const getPersistedInstanceConfigs = Effect.gen(function* () {
 	const ref = yield* InstanceManagerStateTag;
@@ -432,8 +449,10 @@ export const getPersistedInstanceConfigs = Effect.gen(function* () {
 			name: inst.name,
 			port: inst.port,
 			managed: inst.managed,
+			driver: inst.driver ?? "opencode",
 			...(inst.env !== undefined ? { env: inst.env } : {}),
 			...(Option.isSome(externalUrl) ? { url: externalUrl.value } : {}),
+			...(inst.configDir !== undefined ? { configDir: inst.configDir } : {}),
 		});
 	}
 	return configs;
@@ -447,7 +466,9 @@ export const startInitialUnmanagedInstanceHealthPollers = Effect.gen(
 		yield* Effect.forEach(
 			HashMap.values(state.instances),
 			(instance) =>
-				instance.managed ? Effect.void : startHealthPoller(instance.id),
+				instance.managed || instance.driver === "claude"
+					? Effect.void
+					: startHealthPoller(instance.id),
 			{ concurrency: 1, discard: true },
 		);
 	},
@@ -472,7 +493,15 @@ export const startHealthPoller = (instanceId: string) =>
 			healthCheckOption,
 			() => InstanceHealthCheckLiveService,
 		);
-		const { config } = yield* Ref.get(stateRef);
+		const initialState = yield* Ref.get(stateRef);
+		const { config } = initialState;
+		const initialInstance = HashMap.get(initialState.instances, instanceId);
+		if (
+			Option.isNone(initialInstance) ||
+			initialInstance.value.driver === "claude"
+		) {
+			return;
+		}
 
 		const pollOnce = Effect.gen(function* () {
 			const state = yield* Ref.get(stateRef);
@@ -480,6 +509,7 @@ export const startHealthPoller = (instanceId: string) =>
 			if (Option.isNone(instanceOpt)) return;
 
 			const instance = instanceOpt.value;
+			if (instance.driver === "claude") return;
 
 			// Guard: stop polling managed instances in stopped/unhealthy state
 			if (
@@ -628,7 +658,7 @@ export const startManagedOpenCodeServers = Effect.gen(function* () {
 	const ref = yield* InstanceManagerStateTag;
 	const state = yield* Ref.get(ref);
 	const managedInstances = Array.from(HashMap.values(state.instances)).filter(
-		(instance) => instance.managed,
+		(instance) => instance.managed && instance.driver !== "claude",
 	);
 	yield* Effect.forEach(managedInstances, startManagedOpenCodeServer, {
 		concurrency: 1,
@@ -653,6 +683,10 @@ export const scheduleRestart = (instanceId: string) =>
 
 		// Check restart rate limit
 		const state = yield* Ref.get(stateRef);
+		const instance = HashMap.get(state.instances, instanceId);
+		if (Option.isNone(instance) || instance.value.driver === "claude") {
+			return;
+		}
 		const timestamps = Option.getOrElse(
 			HashMap.get(state.restartTimestamps, instanceId),
 			() => [] as ReadonlyArray<number>,
@@ -725,6 +759,7 @@ export const restartInstance = (instanceId: string) =>
 		const state = yield* Ref.get(stateRef);
 		const instOpt = HashMap.get(state.instances, instanceId);
 		if (Option.isNone(instOpt)) return;
+		if (instOpt.value.driver === "claude") return;
 
 		yield* Ref.update(stateRef, (s) => ({
 			...s,
@@ -759,6 +794,9 @@ export const cancelInstanceFibers = (instanceId: string) =>
 export const startInstance = (instanceId: string) =>
 	Effect.gen(function* () {
 		const stateRef = yield* InstanceManagerStateTag;
+		const state = yield* Ref.get(stateRef);
+		const instance = HashMap.get(state.instances, instanceId);
+		if (Option.isSome(instance) && instance.value.driver === "claude") return;
 		yield* Ref.update(stateRef, (s) => ({
 			...s,
 			instances: HashMap.modify(s.instances, instanceId, (inst) => ({
@@ -778,8 +816,11 @@ export const startInstance = (instanceId: string) =>
  */
 export const stopInstance = (instanceId: string) =>
 	Effect.gen(function* () {
-		yield* cancelInstanceFibers(instanceId);
 		const stateRef = yield* InstanceManagerStateTag;
+		const state = yield* Ref.get(stateRef);
+		const instance = HashMap.get(state.instances, instanceId);
+		if (Option.isSome(instance) && instance.value.driver === "claude") return;
+		yield* cancelInstanceFibers(instanceId);
 		yield* Ref.update(stateRef, (s) => ({
 			...s,
 			instances: HashMap.modify(s.instances, instanceId, (inst) => ({
@@ -799,17 +840,38 @@ export const stopInstance = (instanceId: string) =>
 export const updateInstance = (
 	instanceId: string,
 	updates: Partial<
-		Pick<OpenCodeInstance, "name" | "port" | "env" | "managed" | "status">
+		Pick<
+			OpenCodeInstance,
+			"name" | "port" | "env" | "managed" | "status" | "driver" | "configDir"
+		>
 	>,
 ) =>
 	Effect.gen(function* () {
 		const stateRef = yield* InstanceManagerStateTag;
+		if (updates.driver === "claude") {
+			yield* cancelInstanceFibers(instanceId);
+		}
 		yield* Ref.update(stateRef, (s) => ({
 			...s,
-			instances: HashMap.modify(s.instances, instanceId, (inst) => ({
-				...inst,
-				...updates,
-			})),
+			instances: HashMap.modify(s.instances, instanceId, (inst) => {
+				const updated = { ...inst, ...updates };
+				if (updates.driver !== "claude") return updated;
+				const { url: _url, ...claudeInstance } = updated;
+				return {
+					...claudeInstance,
+					managed: false,
+					port: 0,
+					status: "healthy" as const,
+				};
+			}),
+			externalUrls:
+				updates.driver === "claude"
+					? HashMap.remove(s.externalUrls, instanceId)
+					: s.externalUrls,
+			restartTimestamps:
+				updates.driver === "claude"
+					? HashMap.remove(s.restartTimestamps, instanceId)
+					: s.restartTimestamps,
 		}));
 		yield* publishInstanceStatusChanged(instanceId);
 		yield* requestConfigSave;
@@ -831,7 +893,9 @@ export const persistConfig = Effect.gen(function* () {
  */
 export const getExternalUrl = (instanceId: string, daemonHost: string) =>
 	getInstance(instanceId).pipe(
-		Effect.map((inst) => `http://${daemonHost}:${inst.port}`),
+		Effect.map((inst) =>
+			inst.driver === "claude" ? null : `http://${daemonHost}:${inst.port}`,
+		),
 		Effect.catchTag("InstanceNotFound", () => Effect.succeed(null)),
 	);
 
@@ -847,6 +911,7 @@ export const getInstanceUrl = (instanceId: string) =>
 		if (Option.isNone(inst)) {
 			return yield* instanceNotFound(instanceId);
 		}
+		if (inst.value.driver === "claude") return null;
 		const externalUrl = HashMap.get(state.externalUrls, instanceId);
 		if (Option.isSome(externalUrl)) {
 			return externalUrl.value;

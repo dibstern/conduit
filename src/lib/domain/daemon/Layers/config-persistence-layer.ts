@@ -137,28 +137,34 @@ const mergePersistedInstanceConfigs = (
 	const persistedById = new Map(
 		persistedInstances.map((instance) => [instance.id, instance]),
 	);
-	const runtimeIds = new Set(runtimeInstances.map((instance) => instance.id));
+	const runtimeById = new Map(
+		runtimeInstances.map((instance) => [instance.id, instance]),
+	);
+
+	const mergeInstance = (runtimeInstance: PersistedInstanceConfig) => {
+		const persistedInstance = persistedById.get(runtimeInstance.id);
+		return {
+			...persistedInstance,
+			...runtimeInstance,
+			driver: runtimeInstance.driver ?? persistedInstance?.driver ?? "opencode",
+			...(runtimeInstance.configDir !== undefined
+				? { configDir: runtimeInstance.configDir }
+				: persistedInstance?.configDir !== undefined
+					? { configDir: persistedInstance.configDir }
+					: {}),
+		};
+	};
 
 	return [
-		...runtimeInstances.map((runtimeInstance) => {
-			const persistedInstance = persistedById.get(runtimeInstance.id);
-			return {
-				...persistedInstance,
-				...runtimeInstance,
-				driver:
-					persistedInstance?.driver ?? runtimeInstance.driver ?? "opencode",
-				...(persistedInstance?.configDir !== undefined
-					? { configDir: persistedInstance.configDir }
-					: runtimeInstance.configDir !== undefined
-						? { configDir: runtimeInstance.configDir }
-						: {}),
-			};
+		...persistedInstances.flatMap((persistedInstance) => {
+			const runtimeInstance = runtimeById.get(persistedInstance.id);
+			return runtimeInstance === undefined
+				? []
+				: [mergeInstance(runtimeInstance)];
 		}),
-		...persistedInstances.filter(
-			(instance) =>
-				!runtimeIds.has(instance.id) &&
-				(instance.driver ?? "opencode") !== "opencode",
-		),
+		...runtimeInstances
+			.filter((instance) => !persistedById.has(instance.id))
+			.map(mergeInstance),
 	];
 };
 

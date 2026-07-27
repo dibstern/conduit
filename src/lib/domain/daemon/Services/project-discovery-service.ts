@@ -33,7 +33,9 @@ export const discoverProjectsEffect: Effect.Effect<
 	const configRef = yield* DaemonConfigRefTag;
 
 	const instances = yield* getInstances;
-	const instanceList = Array.from(instances);
+	const instanceList = Array.from(instances).filter(
+		(instance) => (instance.driver ?? "opencode") === "opencode",
+	);
 	if (instanceList.length === 0) {
 		yield* Effect.logInfo("No instances available for project discovery");
 		return 0;

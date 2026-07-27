@@ -2,6 +2,7 @@
 // Types shared between server and frontend.
 // Imported by src/lib/types.ts (server) and frontend code.
 
+import type { ProviderDriverKind } from "./contracts/provider-instance.js";
 // SDK-derived type aliases (Task 10) — single source of truth for Part/Tool enums.
 // Imported for local use; re-exported below for downstream consumers.
 import type { PartType, ToolStatus } from "./instance/sdk-types.js";
@@ -568,6 +569,9 @@ const OpenCodeInstanceSchema = Schema.Struct({
 	name: Schema.String,
 	port: Schema.Number,
 	managed: Schema.Boolean,
+	driver: Schema.optional(Schema.String),
+	configDir: Schema.optional(Schema.String),
+	url: Schema.optional(Schema.String),
 	status: InstanceStatusSchema,
 	pid: Schema.optional(Schema.Number),
 	env: Schema.optional(
@@ -1587,6 +1591,9 @@ export interface OpenCodeInstance {
 	name: string;
 	port: number;
 	managed: boolean;
+	driver?: ProviderDriverKind;
+	configDir?: string;
+	url?: string;
 	status: InstanceStatus;
 	pid?: number;
 	env?: Record<string, string>;
@@ -1601,6 +1608,8 @@ export interface InstanceConfig {
 	name: string;
 	port: number;
 	managed: boolean;
+	driver?: ProviderDriverKind;
+	configDir?: string;
 	env?: Record<string, string>;
 	/** For external (unmanaged) instances: the full URL */
 	url?: string;

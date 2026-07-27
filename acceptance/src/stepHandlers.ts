@@ -24,6 +24,20 @@ const driver = new PlaywrightDriver();
 const relayControls = new WeakMap<Page, WsMockControl>();
 const rpcControls = new WeakMap<Page, RpcMockControl>();
 const composerMessages = new WeakMap<Page, string>();
+/** Per-page mock instance list — mutated by the Add/Update/Remove RPC handlers
+ *  so the SettingsPanel editor and the composer rail see consistent state. */
+const mockInstances = new WeakMap<Page, Array<Record<string, unknown>>>();
+
+/** Mirror the relay's makeInstanceId slugging so rail test ids stay stable. */
+function instanceSlug(name: string): string {
+	return (
+		name
+			.toLowerCase()
+			.replace(/[^a-z0-9-]/g, "-")
+			.replace(/-+/g, "-")
+			.replace(/^-|-$/g, "") || "instance"
+	);
+}
 
 /** Map a harness/instance display label (e.g. "OpenCode · Local") to the
  *  default instance id of its driver. */
@@ -117,12 +131,59 @@ export const conduitVisualHandlers: StepHandler[] = [
 				messageDelay: 0,
 			});
 			relayControls.set(world.page, relayControl);
+			const page = world.page;
+			mockInstances.set(page, []);
 			/** Instance bound by the composer's CreateSession — session-scoped
 			 *  GetAgents afterwards returns that harness's agents (mirrors the
 			 *  real server, where the created session is bound to the instance). */
 			let createdSessionInstance: string | undefined;
 			const rpcControl = await mockWsRpc(world.page, {
 				handlers: {
+					AddInstance: async (payload) => {
+						const list = mockInstances.get(page) ?? [];
+						const name =
+							typeof payload["name"] === "string"
+								? payload["name"]
+								: "instance";
+						const inst: Record<string, unknown> = {
+							id: instanceSlug(name),
+							name,
+							port: typeof payload["port"] === "number" ? payload["port"] : 0,
+							managed: payload["managed"] === true,
+							status: "healthy",
+							restartCount: 0,
+							createdAt: 1,
+							driver: payload["driver"] === "claude" ? "claude" : "opencode",
+							...(typeof payload["configDir"] === "string"
+								? { configDir: payload["configDir"] }
+								: {}),
+						};
+						const next = [...list.filter((i) => i["id"] !== inst["id"]), inst];
+						mockInstances.set(page, next);
+						return { projectSlug: "myapp", instances: next };
+					},
+					UpdateInstance: async (payload) => {
+						const list = mockInstances.get(page) ?? [];
+						const next = list.map((i) =>
+							i["id"] === payload["instanceId"]
+								? {
+										...i,
+										...(typeof payload["name"] === "string"
+											? { name: payload["name"] }
+											: {}),
+									}
+								: i,
+						);
+						mockInstances.set(page, next);
+						return { projectSlug: "myapp", instances: next };
+					},
+					RemoveInstance: async (payload) => {
+						const next = (mockInstances.get(page) ?? []).filter(
+							(i) => i["id"] !== payload["instanceId"],
+						);
+						mockInstances.set(page, next);
+						return { projectSlug: "myapp", instances: next };
+					},
 					SendMessage: async () => undefined,
 					SyncInputDraft: async () => undefined,
 					SwitchPermissionMode: async (payload) => ({
@@ -521,6 +582,80 @@ export const conduitVisualHandlers: StepHandler[] = [
 				throw new Error(
 					`Visual match failed for ${baseline}: ${(result.diffRatio * 100).toFixed(2)}% of pixels differ. Artifacts: ${world.artifacts.join(", ")}`,
 				);
+			}
+		},
+	},
+	{
+		name: "open settings to instances tab",
+		match: /^I open settings to the Instances tab$/,
+		run: async ({ world }) => {
+			const page = world.page;
+			await page.evaluate(() =>
+				window.dispatchEvent(
+					new CustomEvent("settings:open", { detail: { tab: "instances" } }),
+				),
+			);
+			await page
+				.locator("#settings-panel")
+				.waitFor({ state: "visible", timeout: 5_000 });
+			await page.getByTestId("settings-tab-instances").click();
+			await page
+				.locator("#instances-settings")
+				.waitFor({ state: "visible", timeout: 5_000 });
+		},
+	},
+	{
+		name: "start adding a driver instance",
+		match: /^I start adding a (OpenCode|Claude) instance$/,
+		run: async ({ world, match }) => {
+			const driverName = (match[1] ?? "").toLowerCase();
+			await world.page.getByTestId("add-instance-btn").click();
+			await world.page
+				.getByTestId("instance-form")
+				.waitFor({ state: "visible", timeout: 5_000 });
+			await world.page
+				.getByTestId(`instance-form-driver-${driverName}`)
+				.click();
+		},
+	},
+	{
+		name: "add a named instance",
+		match: /^I add an? (OpenCode|Claude) instance named (.+)$/,
+		run: async ({ world, match }) => {
+			const page = world.page;
+			const driverName = (match[1] ?? "").toLowerCase();
+			const name = (match[2] ?? "").trim();
+			await page.getByTestId("add-instance-btn").click();
+			await page
+				.getByTestId("instance-form")
+				.waitFor({ state: "visible", timeout: 5_000 });
+			await page.getByTestId(`instance-form-driver-${driverName}`).click();
+			await page.getByTestId("instance-form-name").fill(name);
+			await page.getByTestId("instance-form-save").click();
+			await page
+				.getByTestId("instance-form")
+				.waitFor({ state: "hidden", timeout: 5_000 });
+			// Close settings so the composer/model-picker is interactable next.
+			await page.getByTestId("settings-close-btn").click();
+			await page
+				.locator("#settings-panel")
+				.waitFor({ state: "hidden", timeout: 5_000 });
+		},
+	},
+	{
+		name: "instance is selectable in the rail",
+		match: /^the (.+) instance is selectable in the rail$/,
+		run: async ({ world, match }) => {
+			const name = (match[1] ?? "").trim();
+			await openModelPicker(world.page);
+			// Rail buttons are icon-only and keyed by the instance's slug id.
+			const railButton = world.page.getByTestId(
+				`picker-instance-${instanceSlug(name)}`,
+			);
+			await railButton.waitFor({ state: "visible", timeout: 5_000 });
+			const disabled = await railButton.getAttribute("aria-disabled");
+			if (disabled === "true") {
+				throw new Error(`Rail instance "${name}" is present but disabled`);
 			}
 		},
 	},

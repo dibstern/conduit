@@ -165,7 +165,9 @@ export const resolveSmartDefaultInstances = (
 		if (options.smartDefault !== true) return instances;
 
 		const defaultIndex = instances.findIndex(
-			(instance) => instance.id === "default",
+			(instance) =>
+				instance.id === "default" &&
+				(instance.driver ?? "opencode") === "opencode",
 		);
 		if (defaultIndex >= 0) {
 			const defaultInstance = instances[defaultIndex];
@@ -178,5 +180,7 @@ export const resolveSmartDefaultInstances = (
 			);
 		}
 
-		return [yield* detectDefaultInstance, ...instances];
+		return instances.some((instance) => instance.id === "default")
+			? instances
+			: [yield* detectDefaultInstance, ...instances];
 	}).pipe(Effect.withSpan("daemon.smartDefault.resolveInstances"));

@@ -2,6 +2,7 @@
 // Command routing and validation for the JSON-lines IPC protocol.
 
 import { Either, Schema } from "effect";
+import { ProviderDriverKindSchema } from "../contracts/provider-instance.js";
 import type { IPCCommand, IPCResponse } from "../types.js";
 import { assertNever } from "../utils.js";
 
@@ -102,10 +103,24 @@ const InstanceAddBaseSchema = Schema.Struct({
 	port: Schema.optional(PortSchema),
 	env: Schema.optional(EnvSchema),
 	url: Schema.optional(NonEmptyStr),
+	driver: Schema.optional(ProviderDriverKindSchema),
+	configDir: Schema.optional(Schema.String),
 });
 
 const InstanceAddSchema = InstanceAddBaseSchema.pipe(
 	Schema.filter((cmd) => {
+		if (cmd.driver === "claude") {
+			if (cmd.managed) {
+				return "instance_add: Claude instances must not be managed";
+			}
+			if (cmd.port !== undefined) {
+				return "instance_add: Claude instances must not include 'port'";
+			}
+			if (cmd.url !== undefined) {
+				return "instance_add: Claude instances must not include 'url'";
+			}
+			return undefined;
+		}
 		if (cmd.managed) {
 			// Managed instances require a valid port
 			if (cmd.port === undefined) {
@@ -154,6 +169,8 @@ const InstanceUpdateSchema = Schema.Struct({
 	name: Schema.optional(Schema.String),
 	env: Schema.optional(EnvSchema),
 	port: Schema.optional(Schema.Number),
+	driver: Schema.optional(ProviderDriverKindSchema),
+	configDir: Schema.optional(Schema.String),
 });
 
 const InstanceStatusSchema = Schema.Struct({
@@ -378,6 +395,27 @@ function instanceAddError(
 			error: "instance_add requires a boolean 'managed' field",
 		};
 	}
+	if (cmd["driver"] === "claude") {
+		if (cmd["managed"]) {
+			return {
+				ok: false,
+				error: "instance_add: Claude instances must not be managed",
+			};
+		}
+		if (cmd["port"] !== undefined) {
+			return {
+				ok: false,
+				error: "instance_add: Claude instances must not include 'port'",
+			};
+		}
+		if (cmd["url"] !== undefined) {
+			return {
+				ok: false,
+				error: "instance_add: Claude instances must not include 'url'",
+			};
+		}
+		return { ok: false, error: "instance_add validation failed" };
+	}
 	if (
 		cmd["managed"] &&
 		(typeof cmd["port"] !== "number" || cmd["port"] <= 0 || cmd["port"] > 65535)
@@ -458,6 +496,8 @@ export function createCommandRouter(handlers: {
 		managed?: boolean,
 		env?: Record<string, string>,
 		url?: string,
+		driver?: string,
+		configDir?: string,
 	) => Promise<IPCResponse>;
 	instanceRemove: (id: string) => Promise<IPCResponse>;
 	instanceStart: (id: string) => Promise<IPCResponse>;
@@ -467,6 +507,8 @@ export function createCommandRouter(handlers: {
 		name?: string,
 		env?: Record<string, string>,
 		port?: number,
+		driver?: string,
+		configDir?: string,
 	) => Promise<IPCResponse>;
 	instanceStatus: (id: string) => Promise<IPCResponse>;
 }) {
@@ -510,6 +552,8 @@ export function createCommandRouter(handlers: {
 					cmd.managed,
 					cmd.env,
 					cmd.url,
+					cmd.driver,
+					cmd.configDir,
 				);
 			case "instance_remove":
 				return handlers.instanceRemove(cmd.id);
@@ -518,7 +562,14 @@ export function createCommandRouter(handlers: {
 			case "instance_stop":
 				return handlers.instanceStop(cmd.id);
 			case "instance_update":
-				return handlers.instanceUpdate(cmd.id, cmd.name, cmd.env, cmd.port);
+				return handlers.instanceUpdate(
+					cmd.id,
+					cmd.name,
+					cmd.env,
+					cmd.port,
+					cmd.driver,
+					cmd.configDir,
+				);
 			case "instance_status":
 				return handlers.instanceStatus(cmd.id);
 			default:

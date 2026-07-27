@@ -27,7 +27,13 @@ export interface InstanceManagementDeps {
 	stopInstance: (id: string) => void | PromiseLike<void>;
 	updateInstance: (
 		id: string,
-		updates: { name?: string; env?: Record<string, string>; port?: number },
+		updates: {
+			name?: string;
+			env?: Record<string, string>;
+			port?: number;
+			driver?: import("../contracts/provider-instance.js").ProviderDriverKind;
+			configDir?: string;
+		},
 	) => OpenCodeInstance | PromiseLike<OpenCodeInstance>;
 	persistConfig: () => void | PromiseLike<void>;
 }

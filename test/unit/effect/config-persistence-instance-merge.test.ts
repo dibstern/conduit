@@ -179,6 +179,15 @@ describe("config persistence instance merge", () => {
 								managed: true,
 								env: { OPENCODE_CONFIG_DIR: "/old/opencode" },
 							},
+							{
+								id: "work-claude",
+								name: "Work Claude",
+								port: 0,
+								managed: false,
+								env: { CLAUDE_PROFILE: "work" },
+								driver: "claude",
+								configDir: "/persisted/claude",
+							},
 						]),
 					),
 				),
@@ -215,14 +224,6 @@ describe("config persistence instance merge", () => {
 
 				expect(readConfig().instances).toEqual([
 					{
-						id: "new-opencode",
-						name: "New OpenCode",
-						port: 6096,
-						managed: false,
-						url: "https://opencode.example.test",
-						driver: "opencode",
-					},
-					{
 						id: "work-claude",
 						name: "Work Claude",
 						port: 0,
@@ -230,8 +231,31 @@ describe("config persistence instance merge", () => {
 						driver: "claude",
 						configDir: "/persisted/claude",
 					},
+					{
+						id: "new-opencode",
+						name: "New OpenCode",
+						port: 6096,
+						managed: false,
+						url: "https://opencode.example.test",
+						driver: "opencode",
+					},
 				]);
-			}).pipe(Effect.provide(Layer.fresh(makePersistenceLayer([])))),
+			}).pipe(
+				Effect.provide(
+					Layer.fresh(
+						makePersistenceLayer([
+							{
+								id: "work-claude",
+								name: "Work Claude",
+								port: 0,
+								managed: false,
+								driver: "claude",
+								configDir: "/persisted/claude",
+							},
+						]),
+					),
+				),
+			),
 	);
 
 	it.scoped(
@@ -284,10 +308,108 @@ describe("config persistence instance merge", () => {
 								port: 7096,
 								managed: true,
 							},
+							{
+								id: "work-claude",
+								name: "Work Claude",
+								port: 0,
+								managed: false,
+								driver: "claude",
+								configDir: "/persisted/claude",
+							},
 						]),
 					),
 				),
 			),
+	);
+
+	it.scoped("removes a configured Claude instance", () =>
+		Effect.gen(function* () {
+			writeConfig({
+				...baseConfig,
+				instances: [
+					{
+						id: "work-claude",
+						name: "Work Claude",
+						port: 0,
+						managed: false,
+						driver: "claude",
+						configDir: "/persisted/claude",
+					},
+				],
+			});
+
+			yield* removeInstance("work-claude");
+			const persistence = yield* ConfigPersistenceTag;
+			yield* persistence.flush;
+
+			expect(readConfig().instances).toEqual([]);
+		}).pipe(
+			Effect.provide(
+				Layer.fresh(
+					makePersistenceLayer([
+						{
+							id: "work-claude",
+							name: "Work Claude",
+							port: 0,
+							managed: false,
+							driver: "claude",
+							configDir: "/persisted/claude",
+						},
+					]),
+				),
+			),
+		),
+	);
+
+	it.scoped("updates a configured Claude instance directory", () =>
+		Effect.gen(function* () {
+			writeConfig({
+				...baseConfig,
+				instances: [
+					{
+						id: "work-claude",
+						name: "Work Claude",
+						port: 0,
+						managed: false,
+						driver: "claude",
+						configDir: "/profiles/work",
+					},
+				],
+			});
+
+			yield* updateInstance("work-claude", {
+				driver: "claude",
+				configDir: "/profiles/personal",
+			});
+			const persistence = yield* ConfigPersistenceTag;
+			yield* persistence.flush;
+
+			expect(readConfig().instances).toEqual([
+				{
+					id: "work-claude",
+					name: "Work Claude",
+					port: 0,
+					managed: false,
+					driver: "claude",
+					configDir: "/profiles/personal",
+				},
+			]);
+		}).pipe(
+			Effect.provide(
+				Layer.fresh(
+					makePersistenceLayer([
+						{
+							id: "work-claude",
+							name: "Work Claude",
+							port: 0,
+							managed: false,
+							driver: "claude",
+							configDir: "/profiles/work",
+						},
+					]),
+				),
+			),
+		),
 	);
 
 	it.scoped("keeps synthesized defaults unchanged after a config save", () =>

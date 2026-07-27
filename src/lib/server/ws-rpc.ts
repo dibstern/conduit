@@ -416,6 +416,49 @@ export const WsRpcServerLayer = WsRpcGroup.toLayer({
 				instances,
 			};
 		}).pipe(Effect.catchAll(mapRpcFailure("RenameInstance"))),
+	AddInstance: (request) =>
+		Effect.gen(function* () {
+			const instanceService = yield* instanceServiceOrFail("AddInstance");
+			const name = request.name.trim();
+			if (!name) {
+				return yield* Effect.fail(
+					new WsRpcError({ message: "AddInstance failed: name is required" }),
+				);
+			}
+			const instances = yield* instanceService.add({
+				name,
+				...(request.driver !== undefined && { driver: request.driver }),
+				...(request.managed !== undefined && { managed: request.managed }),
+				...(request.port !== undefined && { port: request.port }),
+				...(request.url !== undefined && { url: request.url }),
+				...(request.env !== undefined && { env: { ...request.env } }),
+				...(request.configDir !== undefined && {
+					configDir: request.configDir,
+				}),
+			});
+			yield* broadcastInstanceList(instances);
+			return {
+				projectSlug: request.projectSlug,
+				instances,
+			};
+		}).pipe(Effect.catchAll(mapRpcFailure("AddInstance"))),
+	UpdateInstance: (request) =>
+		Effect.gen(function* () {
+			const instanceService = yield* instanceServiceOrFail("UpdateInstance");
+			const instances = yield* instanceService.update(request.instanceId, {
+				...(request.name !== undefined && { name: request.name }),
+				...(request.port !== undefined && { port: request.port }),
+				...(request.env !== undefined && { env: { ...request.env } }),
+				...(request.configDir !== undefined && {
+					configDir: request.configDir,
+				}),
+			});
+			yield* broadcastInstanceList(instances);
+			return {
+				projectSlug: request.projectSlug,
+				instances,
+			};
+		}).pipe(Effect.catchAll(mapRpcFailure("UpdateInstance"))),
 	ScanNow: (request) =>
 		Effect.gen(function* () {
 			const scanService = yield* ScanServiceTag;

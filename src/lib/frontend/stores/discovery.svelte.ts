@@ -11,12 +11,14 @@ import type {
 	AgentProviderScope,
 	CommandInfo,
 	ContextWindowOption,
+	InstanceStatus,
 	ModelInfo,
 	ProviderGroup,
 	ProviderInfo,
 	RelayMessage,
 	SessionPermissionMode,
 } from "../types.js";
+import { instanceState } from "./instance.svelte.js";
 
 const cloneContextWindowOptions = (
 	options:
@@ -97,6 +99,8 @@ export interface InstanceOption {
 	readonly isCustom: boolean;
 	/** Newly-added instance — rendered with a sparkle in the rail. */
 	readonly isNew?: boolean;
+	/** Live status from the configured-instance source, when known. */
+	readonly status?: InstanceStatus;
 }
 
 const DRIVER_LABELS = { claude: "Claude", opencode: "OpenCode" } as const;
@@ -210,11 +214,15 @@ export function getVisibleProviderGroups(): ProviderGroup[] {
 	return filtered.length > 0 ? filtered : all;
 }
 
-/** Instances available in the harness rail, derived from discovered providers.
- *  Default driver instances sort first (Claude, then OpenCode), named
- *  instances after. */
+/** Instances available in the harness rail. Configured provider instances are
+ *  the source of truth (so an instance with no discovered models is still
+ *  selectable); discovered providers supply the always-present default drivers
+ *  and the model catalog. Default driver instances sort first (Claude, then
+ *  OpenCode), named instances after. */
 export function getAvailableInstances(): InstanceOption[] {
 	const byId = new Map<string, InstanceOption>();
+	// 1. Discovered providers — default drivers, plus named instances that
+	//    already surface models.
 	for (const provider of discoveryState.providers) {
 		const driver = instanceIdForProviderId(provider.id);
 		const id = provider.instanceId ?? driver;
@@ -226,6 +234,25 @@ export function getAvailableInstances(): InstanceOption[] {
 				isCustom: id !== driver,
 			});
 		}
+	}
+	// 2. Configured instances (from instance_list) — selectable even without
+	//    discovered models. Merge live status onto matching entries; add any
+	//    that discovery did not surface, using the configured display name.
+	for (const inst of instanceState.instances) {
+		const driver: "claude" | "opencode" =
+			inst.driver === "claude" ? "claude" : "opencode";
+		const existing = byId.get(inst.id);
+		if (existing) {
+			byId.set(inst.id, { ...existing, status: inst.status });
+			continue;
+		}
+		byId.set(inst.id, {
+			id: inst.id,
+			driver,
+			label: inst.name || inst.id,
+			isCustom: inst.id !== "claude" && inst.id !== "opencode",
+			status: inst.status,
+		});
 	}
 	const rank = (i: InstanceOption) =>
 		i.id === "claude" ? 0 : i.id === "opencode" ? 1 : 2;
