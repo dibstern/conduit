@@ -15,6 +15,7 @@
  *   tool.completed (block stop, tool result)
  *   turn.error (SDK errors)
  *   session.status (system init, status updates)
+ *   session.compaction (compaction progress and results)
  *   turn.completed (result)
  *
  * All payloads match the EventPayloadMap interfaces from Phase 1 Task 4.
@@ -159,6 +160,10 @@ function serializeToolResultContent(content: unknown): string {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
 	return value != null && typeof value === "object" && !Array.isArray(value);
+}
+
+function fmtTokens(tokens: number): string {
+	return tokens >= 1_000 ? `${Math.round(tokens / 1_000)}k` : `${tokens}`;
 }
 
 function canonicalToolName(
@@ -506,11 +511,71 @@ export class ClaudeEventTranslator {
 		return Effect.gen(this, function* () {
 			switch (message.subtype) {
 				case "status": {
+					if (message.compact_result === "failed") {
+						const detail = message.compact_error
+							? `Compaction failed: ${message.compact_error}`
+							: "Compaction failed";
+						yield* this.push(
+							ctx,
+							makeProviderRuntimeEvent("session.compaction", ctx.sessionId, {
+								sessionId: ctx.sessionId,
+								state: "failed",
+								detail,
+							}),
+						);
+						return;
+					}
+					if (message.compact_result === "success") return;
+					if (message.status === "compacting") {
+						yield* this.push(
+							ctx,
+							makeProviderRuntimeEvent("session.compaction", ctx.sessionId, {
+								sessionId: ctx.sessionId,
+								state: "started",
+								detail: "Compacting conversation…",
+							}),
+						);
+						return;
+					}
 					yield* this.push(
 						ctx,
 						makeProviderRuntimeEvent("session.status", ctx.sessionId, {
 							sessionId: ctx.sessionId,
 							status: "idle",
+						}),
+					);
+					return;
+				}
+
+				case "compact_boundary": {
+					const metadata: Record<string, unknown> = isRecord(
+						message.compact_metadata,
+					)
+						? message.compact_metadata
+						: {};
+					const preTokens =
+						typeof metadata["pre_tokens"] === "number"
+							? metadata["pre_tokens"]
+							: undefined;
+					const postTokens =
+						typeof metadata["post_tokens"] === "number"
+							? metadata["post_tokens"]
+							: undefined;
+					let detail = "Context compacted";
+					if (metadata["trigger"] === "auto") detail += " (auto)";
+					if (preTokens !== undefined && postTokens !== undefined) {
+						detail += ` · ${fmtTokens(preTokens)} → ${fmtTokens(postTokens)}`;
+					} else if (preTokens !== undefined) {
+						detail += ` · from ${fmtTokens(preTokens)}`;
+					}
+					yield* this.push(
+						ctx,
+						makeProviderRuntimeEvent("session.compaction", ctx.sessionId, {
+							sessionId: ctx.sessionId,
+							state: "completed",
+							detail,
+							...(preTokens !== undefined ? { preTokens } : {}),
+							...(postTokens !== undefined ? { postTokens } : {}),
 						}),
 					);
 					return;
@@ -589,7 +654,7 @@ export class ClaudeEventTranslator {
 				}
 
 				default:
-					// Ignore other system subtypes (compact_boundary, hook_*, etc.)
+					// Ignore other system subtypes (hook_*, etc.)
 					return;
 			}
 		});

@@ -27,6 +27,7 @@ const CLAUDE_PRODUCED_TYPES = [
 	"turn.error",
 	"turn.interrupted",
 	"session.status",
+	"session.compaction",
 ] as const satisfies readonly CanonicalEventType[];
 
 /**

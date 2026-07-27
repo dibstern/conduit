@@ -295,6 +295,33 @@ describe("messageRowsToHistory", () => {
 		expect(msg?.time).toEqual({ created: 1000, completed: 2000 });
 	});
 
+	it("lifts compaction token metadata to top-level part fields", () => {
+		const rows: MessageWithParts[] = [
+			makeMessageWithParts("compaction-7", {
+				role: "assistant",
+				parts: [
+					makePartRow("compaction-part-7", "compaction-7", {
+						type: "compaction",
+						text: "Context compacted · 195k → 96k",
+						metadata: JSON.stringify({ preTokens: 194925, postTokens: 96000 }),
+					}),
+				],
+			}),
+		];
+
+		const result = messageRowsToHistory(rows, { pageSize: 50 });
+		const part = result.messages[0]?.parts?.[0];
+
+		expect(part).toEqual({
+			id: "compaction-part-7",
+			type: "compaction",
+			text: "Context compacted · 195k → 96k",
+			preTokens: 194925,
+			postTokens: 96000,
+		});
+		expect(part).not.toHaveProperty("state");
+	});
+
 	it("does not set state on text parts with no status/input/result", () => {
 		const rows: MessageWithParts[] = [
 			makeMessageWithParts("m1", {

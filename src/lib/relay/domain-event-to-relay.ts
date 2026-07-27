@@ -133,6 +133,18 @@ export function translateDomainEventToRelay(
 				"prompt handler owns lifecycle; terminal done/error covers completion",
 			);
 
+		case "session.compaction": {
+			const { state, detail, preTokens, postTokens } = event.data;
+			return emit({
+				type: "compaction",
+				sessionId: event.sessionId,
+				state,
+				detail,
+				...(preTokens != null ? { preTokens } : {}),
+				...(postTokens != null ? { postTokens } : {}),
+			});
+		}
+
 		case "message.created":
 		case "file.attached":
 		case "session.created":

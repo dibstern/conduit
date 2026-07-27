@@ -3,10 +3,7 @@ import { Context, Effect, Layer, Ref } from "effect";
 import type { ProviderRuntimeEvent } from "../../../contracts/providers/provider-runtime-event.js";
 import { EventStoreEffectTag } from "../../../persistence/effect/event-store-effect.js";
 import { ProjectionRunnerEffectTag } from "../../../persistence/effect/projection-runner-effect.js";
-import type {
-	CanonicalEvent,
-	StoredEvent,
-} from "../../../persistence/events.js";
+import type { CanonicalEvent } from "../../../persistence/events.js";
 import {
 	emptyProviderRuntimeDomainMapperState,
 	translateProviderRuntimeEventToDomain,
@@ -95,7 +92,17 @@ export const makeProviderRuntimeIngestionLive = (
 							nextState = result.state;
 						}
 
-						const storedEvents = yield* eventStore.appendBatch(domainEvents);
+						// Compaction notices are UI-only EXCEPT the terminal "completed"
+						// boundary, which persists as a synthetic marker so the "Context
+						// compacted" divider survives a page reload. All states still
+						// publish to the wire below (publishRelayMessages(domainEvents)).
+						const persistentEvents = domainEvents.filter(
+							(event) =>
+								event.type !== "session.compaction" ||
+								event.data.state === "completed",
+						);
+						const storedEvents =
+							yield* eventStore.appendBatch(persistentEvents);
 
 						yield* Ref.set(mapperStateRef, nextState);
 
@@ -110,7 +117,7 @@ export const makeProviderRuntimeIngestionLive = (
 						}
 
 						if (options.relayPublisher && ingestOptions.publish !== false) {
-							yield* publishRelayMessages(storedEvents, options.relayPublisher);
+							yield* publishRelayMessages(domainEvents, options.relayPublisher);
 						}
 
 						return domainEvents.length;
@@ -128,7 +135,7 @@ export const makeProviderRuntimeIngestionLive = (
 export const ProviderRuntimeIngestionLive = makeProviderRuntimeIngestionLive();
 
 function publishRelayMessages(
-	events: readonly StoredEvent[],
+	events: readonly CanonicalEvent[],
 	publisher: ProviderRuntimeRelayPublisher,
 ): Effect.Effect<void, unknown> {
 	return Effect.forEach(

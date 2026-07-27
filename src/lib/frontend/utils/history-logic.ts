@@ -9,6 +9,7 @@ import type {
 	HistoryMessage,
 	HistoryMessagePart,
 	ResultMessage,
+	SystemMessage,
 	ThinkingMessage,
 	ToolMessage,
 	Turn,
@@ -235,6 +236,21 @@ function convertAssistantParts(
 						...(createdAt != null && { createdAt }),
 					}),
 				);
+				break;
+			}
+			case "compaction": {
+				// Persisted `/compact` boundary → the same "Context compacted"
+				// divider the live path renders via addSystemMessage. postTokens
+				// lets restoreContextFromMessages recover the reduced context bar.
+				result.push({
+					type: "system",
+					uuid: generateUuid(),
+					text: part.text ?? "",
+					variant: "info",
+					...(typeof part.postTokens === "number" && part.postTokens > 0
+						? { postTokens: part.postTokens }
+						: {}),
+				} satisfies SystemMessage);
 				break;
 			}
 			default:
