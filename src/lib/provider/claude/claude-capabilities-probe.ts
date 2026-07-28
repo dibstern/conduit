@@ -116,7 +116,10 @@ const PREMIUM_SUBSCRIPTION_TYPES = new Set([
 
 function isPremium(subscriptionType: string | undefined): boolean {
 	if (!subscriptionType) return false;
-	const normalized = subscriptionType.toLowerCase().replace(/[\s_-]+/g, "");
+	const normalized = subscriptionType
+		.toLowerCase()
+		.replace(/[\s_-]+/g, "")
+		.replace(/^claude/, "");
 	return PREMIUM_SUBSCRIPTION_TYPES.has(normalized);
 }
 

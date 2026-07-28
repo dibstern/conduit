@@ -237,6 +237,38 @@ describe("probeClaudeCapabilities", () => {
 		expect(optionsFor("claude-haiku-4-5")).toBeUndefined();
 	});
 
+	it("maps a suffixed catalog value to its context-window options without changing its id", async () => {
+		const queryFactory = makeFakeQuery({
+			initResult: {
+				models: [{ value: "opus[1m]", displayName: "Opus (1M context)" }],
+			},
+		});
+		const result = await probeClaudeCapabilities({
+			queryFactory,
+			workspaceRoot,
+		});
+		expect(result.models[0]).toMatchObject({
+			id: "opus[1m]",
+			contextWindowOptions: [
+				{ value: "200k", label: "200k" },
+				{ value: "1m", label: "1M", isDefault: true },
+			],
+		});
+	});
+
+	it("does not expose context-window options for the default catalog value", async () => {
+		const queryFactory = makeFakeQuery({
+			initResult: {
+				models: [{ value: "default", displayName: "Default (recommended)" }],
+			},
+		});
+		const result = await probeClaudeCapabilities({
+			queryFactory,
+			workspaceRoot,
+		});
+		expect(result.models[0]?.contextWindowOptions).toBeUndefined();
+	});
+
 	it("flips 1m default for premium subscriptions", async () => {
 		const queryFactory = makeFakeQuery({
 			initResult: {
@@ -277,6 +309,26 @@ describe("probeClaudeCapabilities", () => {
 		).toBeUndefined();
 	});
 
+	it("keeps 200k default for Claude Pro", async () => {
+		const queryFactory = makeFakeQuery({
+			initResult: {
+				models: [{ value: "claude-sonnet-4-6", displayName: "Sonnet 4.6" }],
+				account: { subscriptionType: "Claude Pro" },
+			},
+		});
+		const result = await probeClaudeCapabilities({
+			queryFactory,
+			workspaceRoot,
+		});
+		expect(result.models[0]?.contextWindowOptions?.[0]).toMatchObject({
+			value: "200k",
+			isDefault: true,
+		});
+		expect(
+			result.models[0]?.contextWindowOptions?.[1]?.isDefault,
+		).toBeUndefined();
+	});
+
 	it.each([
 		"max",
 		"maxplan",
@@ -286,6 +338,8 @@ describe("probeClaudeCapabilities", () => {
 		"team",
 		"MAX",
 		"Max Plan",
+		"Claude Max",
+		"Claude Enterprise",
 	])("recognises %s as premium", async (sub) => {
 		const queryFactory = makeFakeQuery({
 			initResult: {
@@ -301,6 +355,23 @@ describe("probeClaudeCapabilities", () => {
 			(o) => o.value === "1m",
 		);
 		expect(onem?.isDefault).toBe(true);
+	});
+
+	it("exposes 1M-default options for the live Claude Max opus catalog entry", async () => {
+		const queryFactory = makeFakeQuery({
+			initResult: {
+				models: [{ value: "opus[1m]", displayName: "Opus (1M context)" }],
+				account: { subscriptionType: "Claude Max" },
+			},
+		});
+		const result = await probeClaudeCapabilities({
+			queryFactory,
+			workspaceRoot,
+		});
+		expect(result.models[0]?.contextWindowOptions).toEqual([
+			{ value: "200k", label: "200k" },
+			{ value: "1m", label: "1M", isDefault: true },
+		]);
 	});
 
 	it("calls query() with runtime-equivalent workspace discovery options", async () => {
