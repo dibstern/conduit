@@ -41,7 +41,10 @@ describe("provider SDK version locks", () => {
 		).version;
 
 		expect(installedVersion).toBe(pinnedVersion);
-		expect(pinnedVersion).toBe("0.3.207");
+		// Bumped from 0.3.207: its vendored CLI resolved the "opus" alias — the
+		// value its own model catalog advertises — to claude-opus-4-8, so picking
+		// "Opus" in conduit silently ran the previous generation.
+		expect(pinnedVersion).toBe("0.3.220");
 	});
 
 	it("locks the installed OpenCode SDK to the pinned dependency version", () => {

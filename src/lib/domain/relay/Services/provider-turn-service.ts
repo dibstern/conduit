@@ -527,13 +527,24 @@ export const makeProviderTurnService = Effect.gen(function* () {
 				input.images && input.images.length > 0
 					? Array.from(input.images)
 					: undefined;
+			// OpenCode keeps its own session model, so we only override it on an
+			// explicit pick. The Claude SDK has no such memory: omitting `model`
+			// makes it resolve the config dir's settings.json `model` instead, so a
+			// session inheriting the global default (or one whose per-session pick
+			// was lost to a daemon restart) would silently run a different model
+			// than the one conduit displays. Always send what we display.
+			const sendModel =
+				input.model &&
+				(input.modelUserSelected ||
+					(isClaudeDriver(driver) &&
+						input.model.providerID === CLAUDE_PROVIDER_ID));
 			const sendTurnInput: SendTurnInput = {
 				sessionId: input.sessionId,
 				turnId: randomUUID(),
 				prompt: input.text,
 				history: priorHistory,
 				providerState,
-				...(input.model && input.modelUserSelected
+				...(sendModel && input.model
 					? {
 							model: {
 								providerId: input.model.providerID,

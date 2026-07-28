@@ -368,6 +368,34 @@ describe("ProviderTurnService", () => {
 	);
 
 	it.effect(
+		"sends the displayed Claude model even when it came from the global default",
+		() => {
+			const engine = makeEngine();
+			const { layer } = serviceLayer({
+				engine,
+				readQuery: makeReadQuery(vi.fn(() => Effect.succeed([]))),
+				persist: makePersistService(vi.fn(() => Effect.void)),
+				ingestion: makeIngestion(),
+			});
+
+			return Effect.gen(function* () {
+				// modelUserSelected=false is the state for a session that inherited the
+				// global default (or lost its per-session pick to a daemon restart).
+				// Omitting `model` hands model choice to the Claude CLI's
+				// settings.json, which silently runs a different model than the one
+				// conduit is displaying.
+				yield* sendTurn({ modelUserSelected: false });
+				const command = vi.mocked(engine.dispatchEffect).mock
+					.calls[0]?.[0] as SendTurnCommand;
+				expect(command.input.model).toEqual({
+					providerId: "claude",
+					modelId: "claude-sonnet-4-5",
+				});
+			}).pipe(Effect.provide(layer));
+		},
+	);
+
+	it.effect(
 		"dispatches the first Claude turn after loading empty persisted history and persisting the user message",
 		() => {
 			const engine = makeEngine();
