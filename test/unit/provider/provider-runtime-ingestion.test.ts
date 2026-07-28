@@ -12,6 +12,7 @@ import {
 	ProviderRuntimeIngestionTag,
 } from "../../../src/lib/domain/relay/Services/provider-runtime-ingestion-service.js";
 import {
+	type SessionEventBus,
 	SessionEventBusLive,
 	SessionEventBusTag,
 } from "../../../src/lib/domain/relay/Services/session-event-bus.js";
@@ -210,6 +211,62 @@ describe("ProviderRuntimeIngestion", () => {
 		expect(Chunk.toReadonlyArray(received)).toEqual([
 			expect.objectContaining({ eventId: "committed-1", sequence: 1 }),
 		]);
+	});
+
+	it.each([
+		{
+			name: "publishes to both sinks by default",
+			options: undefined,
+			expectedBusCalls: 1,
+			expectedRelayCalls: 1,
+		},
+		{
+			name: "publishes only to the bus when relay publishing is disabled",
+			options: { publishToRelay: false },
+			expectedBusCalls: 1,
+			expectedRelayCalls: 0,
+		},
+		{
+			name: "publishes only to the relay when bus publishing is disabled",
+			options: { publishToBus: false },
+			expectedBusCalls: 0,
+			expectedRelayCalls: 1,
+		},
+	])("$name", async ({ options, expectedBusCalls, expectedRelayCalls }) => {
+		const harness = makeHarness();
+		const busPublish = vi.fn(() => Effect.void);
+		const relayPublish = vi.fn(() => Effect.void);
+		const busLayer = Layer.succeed(SessionEventBusTag, {
+			publish: busPublish,
+			subscribe: () => Effect.succeed(Stream.empty),
+		} satisfies SessionEventBus);
+		const layer = makeProviderRuntimeIngestionLive({
+			relayPublisher: { publish: relayPublish },
+		}).pipe(Layer.provide(harness.depsLayer), Layer.provideMerge(busLayer));
+
+		await Effect.runPromise(
+			Effect.gen(function* () {
+				const ingestion = yield* ProviderRuntimeIngestionTag;
+				yield* ingestion.ingestBatch(
+					[
+						runtimeEvent({
+							eventId: "publication-matrix-delta",
+							type: "text.delta",
+							turnId: "turn-1",
+							data: {
+								messageId: "message-1",
+								partId: "text-1",
+								text: "hello",
+							},
+						}),
+					],
+					options,
+				);
+			}).pipe(Effect.provide(layer)),
+		);
+
+		expect(busPublish).toHaveBeenCalledTimes(expectedBusCalls);
+		expect(relayPublish).toHaveBeenCalledTimes(expectedRelayCalls);
 	});
 
 	it("ingests related runtime events as one ordered domain-event batch", async () => {

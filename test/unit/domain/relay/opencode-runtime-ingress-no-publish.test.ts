@@ -1,11 +1,9 @@
-// ─── OpenCode Runtime Ingress Must Not Publish (streaming dedup regression) ──
-// The OpenCode runtime ingress exists to PERSIST provider events into the event
-// store. The legacy SSE translator (sse-wiring.ts) is the sole live-delivery
-// path to the browser for OpenCode. Because the ingress shares the same
-// publisher-bearing ProviderRuntimeIngestion instance that the Claude
-// orchestration path needs, it used to ALSO publish every event — so each
-// streamed text delta reached the browser twice and rendered doubled
-// ("I'mI'm ready. ready."). This test locks the ingress to persist-only.
+// ─── OpenCode Runtime Ingress Must Not Publish To Relay ─────────────────────
+// The OpenCode runtime ingress persists provider events and signals committed
+// events to SessionEventBus. The legacy SSE translator (sse-wiring.ts) is the
+// sole live-delivery path to the browser for OpenCode. If the ingress also
+// publishes to the relay, each streamed text delta reaches the browser twice
+// and renders doubled ("I'mI'm ready. ready.").
 
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -21,6 +19,10 @@ import {
 	makeProviderRuntimeIngestionLive,
 	type ProviderRuntimeRelayPublisher,
 } from "../../../../src/lib/domain/relay/Services/provider-runtime-ingestion-service.js";
+import {
+	type SessionEventBus,
+	SessionEventBusTag,
+} from "../../../../src/lib/domain/relay/Services/session-event-bus.js";
 import { makePersistenceEffectLayer } from "../../../../src/lib/persistence/effect/live.js";
 import { makeSSEEvent } from "../../../helpers/sse-factories.js";
 
@@ -33,28 +35,43 @@ function makeLogger(): OpenCodeRuntimeIngressLog {
 function makeTestRuntime(
 	dbPath: string,
 	relayPublisher: ProviderRuntimeRelayPublisher,
+	sessionEventBus: SessionEventBus,
 ) {
 	const persistenceLayer = makePersistenceEffectLayer(dbPath);
+	const sessionEventBusLayer = Layer.succeed(
+		SessionEventBusTag,
+		sessionEventBus,
+	);
 	return ManagedRuntime.make(
 		Layer.mergeAll(
 			persistenceLayer,
 			makeProviderRuntimeIngestionLive({ relayPublisher }).pipe(
 				Layer.provide(persistenceLayer),
+				Layer.provideMerge(sessionEventBusLayer),
 			),
 		),
 	);
 }
 
-describe("OpenCode runtime ingress is persist-only (does not publish to browser)", () => {
+describe("OpenCode runtime ingress does not publish to relay/browser", () => {
 	let dir: string;
 	let runtime: ReturnType<typeof makeTestRuntime> | undefined;
-	let publish: ReturnType<typeof vi.fn>;
+	let publishToBus: ReturnType<typeof vi.fn>;
+	let publishToRelay: ReturnType<typeof vi.fn>;
 	let hook: EffectOpenCodeRuntimeIngress;
 
 	beforeEach(async () => {
 		dir = mkdtempSync(join(tmpdir(), "conduit-ingress-nopublish-"));
-		publish = vi.fn(() => Effect.void);
-		const rt = makeTestRuntime(join(dir, "events.db"), { publish });
+		publishToBus = vi.fn(() => Effect.void);
+		publishToRelay = vi.fn(() => Effect.void);
+		const rt = makeTestRuntime(
+			join(dir, "events.db"),
+			{ publish: publishToRelay },
+			{
+				publish: publishToBus,
+				subscribe: () => Effect.dieMessage("unused in this test"),
+			},
+		);
 		runtime = rt;
 		hook = await rt.runPromise(makeEffectOpenCodeRuntimeIngress(makeLogger()));
 	});
@@ -96,7 +113,32 @@ describe("OpenCode runtime ingress is persist-only (does not publish to browser)
 		);
 
 		// The legacy translator is the only path allowed to deliver OpenCode
-		// events to the browser. If the ingress publishes anything, deltas double.
-		expect(publish).not.toHaveBeenCalled();
+		// events to the browser. If the ingress publishes to the relay, deltas double.
+		expect(publishToRelay).not.toHaveBeenCalled();
+	});
+
+	it("signals committed events to SessionEventBus without publishing to the browser", async () => {
+		await ingest(
+			makeSSEEvent("message.created", {
+				sessionID: SESSION_ID,
+				messageID: "msg-bus-001",
+				info: { role: "assistant", parts: [] },
+			}),
+		);
+
+		expect(publishToBus).toHaveBeenCalledTimes(1);
+		expect(publishToBus).toHaveBeenCalledWith(
+			expect.arrayContaining([
+				expect.objectContaining({
+					type: "session.created",
+					sessionId: SESSION_ID,
+				}),
+				expect.objectContaining({
+					type: "message.created",
+					sessionId: SESSION_ID,
+				}),
+			]),
+		);
+		expect(publishToRelay).not.toHaveBeenCalled();
 	});
 });

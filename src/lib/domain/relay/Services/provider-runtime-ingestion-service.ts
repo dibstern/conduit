@@ -19,7 +19,10 @@ export interface ProviderRuntimeIngestion {
 	) => Effect.Effect<number, unknown>;
 	readonly ingestBatch: (
 		events: readonly ProviderRuntimeEvent[],
-		options?: { readonly publish?: boolean },
+		options?: {
+			readonly publishToBus?: boolean;
+			readonly publishToRelay?: boolean;
+		},
 	) => Effect.Effect<number, unknown>;
 	readonly drain: () => Effect.Effect<void, unknown>;
 }
@@ -60,7 +63,10 @@ export const makeProviderRuntimeIngestionLive = (
 
 			const ingestBatch = (
 				events: readonly ProviderRuntimeEvent[],
-				ingestOptions: { readonly publish?: boolean } = {},
+				ingestOptions: {
+					readonly publishToBus?: boolean;
+					readonly publishToRelay?: boolean;
+				} = {},
 			): Effect.Effect<number, unknown> =>
 				ingestSemaphore.withPermits(1)(
 					Effect.gen(function* () {
@@ -121,19 +127,20 @@ export const makeProviderRuntimeIngestionLive = (
 								.pipe(Effect.provideService(SqlClient.SqlClient, sql));
 						}
 
-						// Post-commit change signal for streaming subscriptions. Gated by
-						// the same `publish` flag as the WS path so history replay never
-						// signals live subscribers. Carries StoredEvents (with sequence)
-						// for resume-by-sequence downstream.
+						// Post-commit change signal for streaming subscriptions. Carries
+						// StoredEvents (with sequence) for resume-by-sequence downstream.
 						if (
 							Option.isSome(sessionEventBus) &&
-							ingestOptions.publish !== false &&
+							ingestOptions.publishToBus !== false &&
 							storedEvents.length > 0
 						) {
 							yield* sessionEventBus.value.publish(storedEvents);
 						}
 
-						if (options.relayPublisher && ingestOptions.publish !== false) {
+						if (
+							options.relayPublisher &&
+							ingestOptions.publishToRelay !== false
+						) {
 							yield* publishRelayMessages(domainEvents, options.relayPublisher);
 						}
 
