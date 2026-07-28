@@ -185,6 +185,7 @@ export interface Message {
 		input?: number;
 		output?: number;
 		cache?: { read?: number; write?: number };
+		contextWindow?: number;
 	};
 	time?: { created?: number; completed?: number };
 }

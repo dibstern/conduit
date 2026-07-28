@@ -87,6 +87,7 @@ export interface TurnTokens {
 	readonly cacheRead?: number;
 	readonly cacheWrite?: number;
 	readonly reasoning?: number;
+	readonly contextWindow?: number;
 }
 
 export type TurnErrorCode =

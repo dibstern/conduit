@@ -9,6 +9,7 @@ import {
 	MESSAGE_PART_METADATA_MIGRATION,
 	MESSAGE_PARTS_COMPACTION_TYPE_MIGRATION,
 	MESSAGE_PARTS_FILE_TYPE_MIGRATION,
+	MESSAGES_CONTEXT_WINDOW_MIGRATION,
 	readMigrationSql,
 } from "../schema.js";
 
@@ -29,6 +30,9 @@ const messagePartsFileTypeMigrationSql = readMigrationSql(
 );
 const messagePartsCompactionTypeMigrationSql = readMigrationSql(
 	MESSAGE_PARTS_COMPACTION_TYPE_MIGRATION,
+);
+const messagesContextWindowMigrationSql = readMigrationSql(
+	MESSAGES_CONTEXT_WINDOW_MIGRATION,
 );
 
 const expectedTableColumns = {
@@ -102,6 +106,7 @@ const expectedTableColumns = {
 		"last_applied_seq",
 		"created_at",
 		"updated_at",
+		"context_window",
 	],
 	pending_approvals: [
 		"id",
@@ -391,6 +396,11 @@ const verifyExistingBaselineSchema: Effect.Effect<
 				sameStrings(
 					actualColumns,
 					expectedColumns.filter((column) => column !== "metadata"),
+				)) ||
+			(tableName === "messages" &&
+				sameStrings(
+					actualColumns,
+					expectedColumns.filter((column) => column !== "context_window"),
 				));
 		if (!matchesKnownSchema) {
 			return yield* failSchemaMismatch(
@@ -461,6 +471,20 @@ const runMessagePartsCompactionTypeMigration = executeSqlStatements(
 	messagePartsCompactionTypeMigrationSql,
 );
 
+const runMessagesContextWindowMigration: Effect.Effect<
+	void,
+	unknown,
+	SqlClient.SqlClient
+> = Effect.gen(function* () {
+	const sql = yield* SqlClient.SqlClient;
+	const columns = yield* sql.unsafe<{ name: string }>(
+		"PRAGMA table_info(messages)",
+	);
+	if (columns.some((column) => column.name === "context_window")) return;
+
+	yield* executeSqlStatements(messagesContextWindowMigrationSql);
+});
+
 export const effectMigrationEntries = {
 	"0001_create_event_store_tables": runBaselineEventStoreMigration,
 	"0002_add_message_part_metadata": runMessagePartMetadataMigration,
@@ -468,6 +492,7 @@ export const effectMigrationEntries = {
 	"0004_drop_events_session_fk": runDropEventsSessionFkMigration,
 	"0005_message_parts_file_type": runMessagePartsFileTypeMigration,
 	"0006_message_parts_compaction_type": runMessagePartsCompactionTypeMigration,
+	"0007_messages_context_window": runMessagesContextWindowMigration,
 } satisfies Record<string, Effect.Effect<void, unknown, SqlClient.SqlClient>>;
 
 export function makeEffectMigrationLoader(

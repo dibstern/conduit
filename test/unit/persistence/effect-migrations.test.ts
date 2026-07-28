@@ -97,6 +97,7 @@ describe("Effect SQL migrations", () => {
 					{ migration_id: 4, name: "drop_events_session_fk" },
 					{ migration_id: 5, name: "message_parts_file_type" },
 					{ migration_id: 6, name: "message_parts_compaction_type" },
+					{ migration_id: 7, name: "messages_context_window" },
 				]);
 
 				const legacyRows = yield* sql<{ id: number; name: string }>`
@@ -108,6 +109,7 @@ describe("Effect SQL migrations", () => {
 					{ id: 4, name: "drop_events_session_fk" },
 					{ id: 5, name: "message_parts_file_type" },
 					{ id: 6, name: "message_parts_compaction_type" },
+					{ id: 7, name: "messages_context_window" },
 				]);
 			}).pipe(
 				Effect.provide(
@@ -137,6 +139,7 @@ describe("Effect SQL migrations", () => {
 					{ migration_id: 4, name: "drop_events_session_fk" },
 					{ migration_id: 5, name: "message_parts_file_type" },
 					{ migration_id: 6, name: "message_parts_compaction_type" },
+					{ migration_id: 7, name: "messages_context_window" },
 				]);
 
 				const columns = yield* sql<{ name: string }>`
@@ -146,6 +149,11 @@ describe("Effect SQL migrations", () => {
 				PRAGMA table_info(command_receipts)`;
 				expect(receiptColumns.map((column) => column.name)).toContain(
 					"fingerprint_hash",
+				);
+				const messageColumns = yield* sql<{ name: string }>`
+				PRAGMA table_info(messages)`;
+				expect(messageColumns.map((column) => column.name)).toContain(
+					"context_window",
 				);
 			}).pipe(
 				Effect.provide(

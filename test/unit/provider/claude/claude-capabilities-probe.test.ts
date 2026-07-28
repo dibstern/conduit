@@ -195,13 +195,19 @@ describe("probeClaudeCapabilities", () => {
 		expect(result.subscriptionType).toBeUndefined();
 	});
 
-	it("adds contextWindowOptions for Sonnet family", async () => {
+	it("mirrors the built-in Claude context-window options per model slug", async () => {
 		const queryFactory = makeFakeQuery({
 			initResult: {
 				models: [
-					{ value: "claude-sonnet-4-7", displayName: "Sonnet 4.7" },
+					{ value: "claude-fable-5", displayName: "Fable 5" },
+					{ value: "claude-opus-5", displayName: "Opus 5" },
+					{ value: "claude-opus-4-8", displayName: "Opus 4.8" },
 					{ value: "claude-opus-4-7", displayName: "Opus 4.7" },
-					{ value: "claude-haiku-4-7", displayName: "Haiku 4.7" },
+					{ value: "claude-opus-4-6", displayName: "Opus 4.6" },
+					{ value: "claude-opus-4-5", displayName: "Opus 4.5" },
+					{ value: "claude-sonnet-5", displayName: "Sonnet 5" },
+					{ value: "claude-sonnet-4-6", displayName: "Sonnet 4.6" },
+					{ value: "claude-haiku-4-5", displayName: "Haiku 4.5" },
 				],
 			},
 		});
@@ -209,21 +215,32 @@ describe("probeClaudeCapabilities", () => {
 			queryFactory,
 			workspaceRoot,
 		});
-		const sonnet = result.models.find((m) => m.id === "claude-sonnet-4-7");
-		const opus = result.models.find((m) => m.id === "claude-opus-4-7");
-		const haiku = result.models.find((m) => m.id === "claude-haiku-4-7");
-		expect(sonnet?.contextWindowOptions).toEqual([
-			{ value: "200k", label: "200K", isDefault: true },
-			{ value: "1m", label: "1M (beta)" },
-		]);
-		expect(opus?.contextWindowOptions).toBeUndefined();
-		expect(haiku?.contextWindowOptions).toBeUndefined();
+		const optionsFor = (modelId: string) =>
+			result.models.find((model) => model.id === modelId)?.contextWindowOptions;
+		const default1mOptions = [
+			{ value: "200k", label: "200k" },
+			{ value: "1m", label: "1M", isDefault: true },
+		];
+		const default200kOptions = [
+			{ value: "200k", label: "200k", isDefault: true },
+			{ value: "1m", label: "1M" },
+		];
+
+		expect(optionsFor("claude-fable-5")).toEqual(default1mOptions);
+		expect(optionsFor("claude-opus-5")).toEqual(default1mOptions);
+		expect(optionsFor("claude-opus-4-6")).toEqual(default1mOptions);
+		expect(optionsFor("claude-sonnet-5")).toEqual(default200kOptions);
+		expect(optionsFor("claude-sonnet-4-6")).toEqual(default200kOptions);
+		expect(optionsFor("claude-opus-4-8")).toBeUndefined();
+		expect(optionsFor("claude-opus-4-7")).toBeUndefined();
+		expect(optionsFor("claude-opus-4-5")).toBeUndefined();
+		expect(optionsFor("claude-haiku-4-5")).toBeUndefined();
 	});
 
 	it("flips 1m default for premium subscriptions", async () => {
 		const queryFactory = makeFakeQuery({
 			initResult: {
-				models: [{ value: "claude-sonnet-4-7", displayName: "Sonnet 4.7" }],
+				models: [{ value: "claude-sonnet-4-6", displayName: "Sonnet 4.6" }],
 				account: { subscriptionType: "max" },
 			},
 		});
@@ -232,15 +249,15 @@ describe("probeClaudeCapabilities", () => {
 			workspaceRoot,
 		});
 		expect(result.models[0]?.contextWindowOptions).toEqual([
-			{ value: "200k", label: "200K" },
-			{ value: "1m", label: "1M (beta)", isDefault: true },
+			{ value: "200k", label: "200k" },
+			{ value: "1m", label: "1M", isDefault: true },
 		]);
 	});
 
 	it("keeps 200k default for non-premium subscriptions", async () => {
 		const queryFactory = makeFakeQuery({
 			initResult: {
-				models: [{ value: "claude-sonnet-4-7", displayName: "Sonnet 4.7" }],
+				models: [{ value: "claude-sonnet-4-6", displayName: "Sonnet 4.6" }],
 				account: { subscriptionType: "Pro" },
 			},
 		});
@@ -272,7 +289,7 @@ describe("probeClaudeCapabilities", () => {
 	])("recognises %s as premium", async (sub) => {
 		const queryFactory = makeFakeQuery({
 			initResult: {
-				models: [{ value: "claude-sonnet-4-7", displayName: "Sonnet 4.7" }],
+				models: [{ value: "claude-sonnet-4-6", displayName: "Sonnet 4.6" }],
 				account: { subscriptionType: sub },
 			},
 		});

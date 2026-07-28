@@ -16,6 +16,7 @@ import type {
 	ModelInfo,
 	ProviderAgentInfo,
 } from "../types.js";
+import { contextWindowOptionsForModel } from "./claude-api-model-id.js";
 import { makeClaudeSdkEnv } from "./claude-sdk-env.js";
 
 const defaultLog = createLogger("claude-capabilities-probe");
@@ -104,38 +105,6 @@ function effortLevelsToVariants(
 	return Object.fromEntries(levels.map((level) => [level, {}]));
 }
 
-const CONTEXT_WINDOW_OPTIONS_BY_FAMILY: Record<
-	string,
-	ReadonlyArray<ContextWindowOption>
-> = {
-	sonnet: [
-		{ value: "200k", label: "200K", isDefault: true },
-		{ value: "1m", label: "1M (beta)" },
-	],
-	fable: [
-		{ value: "200k", label: "200K", isDefault: true },
-		{ value: "1m", label: "1M" },
-	],
-};
-
-function familyFor(
-	modelId: string,
-): "opus" | "sonnet" | "haiku" | "fable" | undefined {
-	if (/^(?:claude-)?fable/i.test(modelId)) return "fable";
-	if (/^(?:claude-)?opus/i.test(modelId)) return "opus";
-	if (/^(?:claude-)?sonnet/i.test(modelId)) return "sonnet";
-	if (/^(?:claude-)?haiku/i.test(modelId)) return "haiku";
-	return undefined;
-}
-
-function contextWindowOptionsFor(
-	modelId: string,
-): ReadonlyArray<ContextWindowOption> | undefined {
-	const family = familyFor(modelId);
-	if (!family) return undefined;
-	return CONTEXT_WINDOW_OPTIONS_BY_FAMILY[family];
-}
-
 const PREMIUM_SUBSCRIPTION_TYPES = new Set([
 	"max",
 	"maxplan",
@@ -171,7 +140,7 @@ function sdkModelToConduit(
 	const limit = inferLimits(model.value);
 	const variants = effortLevelsToVariants(model.supportedEffortLevels);
 	const contextWindowOptions = adjustForSubscription(
-		contextWindowOptionsFor(model.value),
+		contextWindowOptionsForModel(model.value),
 		subscriptionType,
 	);
 	return {

@@ -26,7 +26,12 @@ function assistantMsg(
 	parts: Array<{ id: string; type: PartType; [key: string]: unknown }>,
 	meta?: {
 		cost?: number;
-		tokens?: { input?: number; output?: number; cache?: { read?: number } };
+		tokens?: {
+			input?: number;
+			output?: number;
+			cache?: { read?: number };
+			context_window?: number;
+		};
 		time?: { created?: number; completed?: number };
 	},
 ): HistoryMessage {
@@ -344,7 +349,12 @@ describe("historyToChatMessages: result bars", () => {
 		const messages = [
 			assistantMsg("m1", [{ id: "p1", type: "text", text: "Done." }], {
 				cost: 0.0042,
-				tokens: { input: 1000, output: 200, cache: { read: 500 } },
+				tokens: {
+					input: 1000,
+					output: 200,
+					cache: { read: 500 },
+					context_window: 1_000_000,
+				},
 				time: { created: 1000, completed: 3500 },
 			}),
 		];
@@ -358,6 +368,7 @@ describe("historyToChatMessages: result bars", () => {
 			inputTokens: 1000,
 			outputTokens: 200,
 			cacheRead: 500,
+			context_window: 1_000_000,
 			duration: 2500,
 		});
 	});

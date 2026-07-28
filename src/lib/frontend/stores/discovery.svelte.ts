@@ -518,8 +518,13 @@ export function getActiveModelVariants(): string[] {
 	return discoveryState.availableVariants;
 }
 
-/** Get the available context-window options for the currently active model. */
+/** Get the available context-window options for the currently active model.
+ *  Prefer the selected model's own options so the dropdown appears the moment a
+ *  supporting model is picked, without waiting for a server context_window_info
+ *  round-trip; fall back to the last server-provided list otherwise. */
 export function getActiveContextWindowOptions(): ReadonlyArray<ContextWindowOption> {
+	const modelOptions = getActiveModel()?.contextWindowOptions;
+	if (modelOptions && modelOptions.length > 0) return modelOptions;
 	return discoveryState.availableContextWindowOptions;
 }
 

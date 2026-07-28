@@ -24,6 +24,7 @@ export interface MessageRow {
 	tokens_out: number | null;
 	tokens_cache_read: number | null;
 	tokens_cache_write: number | null;
+	context_window: number | null;
 	is_streaming: number;
 	created_at: number;
 	updated_at: number;

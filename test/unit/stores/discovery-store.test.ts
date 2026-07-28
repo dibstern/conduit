@@ -474,6 +474,66 @@ describe("getActiveContextWindowOptions", () => {
 			{ value: "1m", label: "1M (beta)" },
 		]);
 	});
+
+	it("prefers the selected model's own options over the server list", () => {
+		const modelOptions = [
+			{ value: "200k", label: "200k" },
+			{ value: "1m", label: "1M", isDefault: true },
+		];
+		handleModelList(
+			msg({
+				type: "model_list",
+				providers: [
+					{
+						id: "claude",
+						name: "Claude",
+						configured: true,
+						models: [
+							{
+								id: "claude-opus-5",
+								name: "Opus 5",
+								provider: "claude",
+								contextWindowOptions: modelOptions,
+							},
+						],
+					},
+				],
+			}),
+		);
+		discoveryState.currentModelId = "claude-opus-5";
+		// Stale server list from a previously-selected model must not win.
+		discoveryState.availableContextWindowOptions = [
+			{ value: "200k", label: "200K", isDefault: true },
+		];
+
+		expect(getActiveContextWindowOptions()).toEqual(modelOptions);
+	});
+
+	it("falls back to the server list when the active model has no options", () => {
+		handleModelList(
+			msg({
+				type: "model_list",
+				providers: [
+					{
+						id: "claude",
+						name: "Claude",
+						configured: true,
+						models: [
+							{ id: "claude-haiku-4-5", name: "Haiku", provider: "claude" },
+						],
+					},
+				],
+			}),
+		);
+		discoveryState.currentModelId = "claude-haiku-4-5";
+		discoveryState.availableContextWindowOptions = [
+			{ value: "200k", label: "200K", isDefault: true },
+		];
+
+		expect(getActiveContextWindowOptions()).toEqual([
+			{ value: "200k", label: "200K", isDefault: true },
+		]);
+	});
 });
 
 describe("clearDiscoveryState", () => {

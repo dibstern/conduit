@@ -244,7 +244,9 @@ function extractUserText(msg: Message): string {
 function synthesizeResultEvent(msg: Message): UntaggedRelayMessage | null {
 	const hasCost = msg.cost !== undefined && msg.cost > 0;
 	const hasTokens =
-		msg.tokens?.input !== undefined || msg.tokens?.output !== undefined;
+		msg.tokens?.input !== undefined ||
+		msg.tokens?.output !== undefined ||
+		msg.tokens?.contextWindow !== undefined;
 
 	if (!hasCost && !hasTokens) return null;
 
@@ -260,6 +262,9 @@ function synthesizeResultEvent(msg: Message): UntaggedRelayMessage | null {
 			output: msg.tokens?.output ?? 0,
 			cache_read: msg.tokens?.cache?.read ?? 0,
 			cache_creation: msg.tokens?.cache?.write ?? 0,
+			...(msg.tokens?.contextWindow
+				? { context_window: msg.tokens.contextWindow }
+				: {}),
 		},
 		cost: msg.cost ?? 0,
 		duration,

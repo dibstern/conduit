@@ -123,6 +123,7 @@ const historyRow = (text: string) => ({
 	tokens_out: null,
 	tokens_cache_read: null,
 	tokens_cache_write: null,
+	context_window: null,
 	is_streaming: 0,
 	created_at: 1,
 	updated_at: 1,
