@@ -64,6 +64,7 @@ import {
 	PROCESSING_TIMEOUT_DURATION,
 	resetProcessingTimeout,
 	setModel,
+	setModelDefault,
 } from "./session-overrides-state.js";
 import { SessionTitleServiceTag } from "./session-title-service.js";
 
@@ -483,8 +484,58 @@ export const makeProviderTurnService = Effect.gen(function* () {
 		orchestrationEngine: OrchestrationEngine,
 	) =>
 		Effect.gen(function* () {
+			let resolvedInput = input;
+			if (isClaudeDriver(driver) && input.model === undefined) {
+				const discovery = yield* Effect.either(
+					orchestrationEngine.dispatchEffect({
+						type: "discover",
+						providerId,
+					}),
+				);
+				const models =
+					discovery._tag === "Right" ? (discovery.right.models ?? []) : [];
+				const inferred =
+					models.find((model) => model.id === "default") ?? models[0];
+				if (inferred === undefined) {
+					const reason =
+						discovery._tag === "Left"
+							? `discovery failed: ${formatErrorDetail(discovery.left)}`
+							: "discovery returned no usable model catalog";
+					log.error(
+						`client=${input.clientId} session=${input.sessionId} Claude model inference failed: ${reason}`,
+					);
+					yield* clearProcessingTimeout(input.sessionId);
+					sendErrorMessage(input, {
+						type: "error",
+						code: "MODEL_REQUIRED",
+						message: "A Claude model is required, but none could be selected.",
+						sessionId: input.sessionId,
+					});
+					wsHandler.sendToSession(input.sessionId, {
+						type: "done",
+						sessionId: input.sessionId,
+						code: 1,
+					});
+					return;
+				}
+
+				const inferredModel = {
+					providerID: inferred.providerId,
+					modelID: inferred.id,
+				};
+				yield* setModelDefault(input.sessionId, inferredModel);
+				log.info(
+					`session=${input.sessionId} inferred provider=${inferred.providerId} model=${inferred.id} reason=no server-side session or default model; inferred from Claude catalog`,
+				);
+				resolvedInput = {
+					...input,
+					model: inferredModel,
+					modelUserSelected: false,
+				};
+			}
+
 			const priorHistoryResult = isClaudeDriver(driver)
-				? yield* loadClaudeHistory(input.sessionId)
+				? yield* loadClaudeHistory(resolvedInput.sessionId)
 				: { history: [], loaded: false };
 			const priorHistory = priorHistoryResult.history;
 			const isFirstClaudeMessage =
@@ -494,8 +545,8 @@ export const makeProviderTurnService = Effect.gen(function* () {
 
 			yield* isClaudeDriver(driver)
 				? maybePersistClaudeUserMessage({
-						sessionId: input.sessionId,
-						text: input.text,
+						sessionId: resolvedInput.sessionId,
+						text: resolvedInput.text,
 						isFirstClaudeMessage,
 					})
 				: Effect.void;
@@ -511,10 +562,12 @@ export const makeProviderTurnService = Effect.gen(function* () {
 			);
 			const providerState =
 				providerStateEffectOption._tag === "Some"
-					? yield* providerStateEffectOption.value.getState(input.sessionId)
+					? yield* providerStateEffectOption.value.getState(
+							resolvedInput.sessionId,
+						)
 					: {};
 			const eventSink = makeEventSink(
-				input.sessionId,
+				resolvedInput.sessionId,
 				driver,
 				claudeEventPersistEffectOption._tag === "Some"
 					? claudeEventPersistEffectOption.value
@@ -524,8 +577,8 @@ export const makeProviderTurnService = Effect.gen(function* () {
 					: undefined,
 			);
 			const imageList =
-				input.images && input.images.length > 0
-					? Array.from(input.images)
+				resolvedInput.images && resolvedInput.images.length > 0
+					? Array.from(resolvedInput.images)
 					: undefined;
 			// OpenCode keeps its own session model, so we only override it on an
 			// explicit pick. The Claude SDK has no such memory: omitting `model`
@@ -534,21 +587,21 @@ export const makeProviderTurnService = Effect.gen(function* () {
 			// was lost to a daemon restart) would silently run a different model
 			// than the one conduit displays. Always send what we display.
 			const sendModel =
-				input.model &&
-				(input.modelUserSelected ||
+				resolvedInput.model &&
+				(resolvedInput.modelUserSelected ||
 					(isClaudeDriver(driver) &&
-						input.model.providerID === CLAUDE_PROVIDER_ID));
+						resolvedInput.model.providerID === CLAUDE_PROVIDER_ID));
 			const sendTurnInput: SendTurnInput = {
-				sessionId: input.sessionId,
+				sessionId: resolvedInput.sessionId,
 				turnId: randomUUID(),
-				prompt: input.text,
+				prompt: resolvedInput.text,
 				history: priorHistory,
 				providerState,
-				...(sendModel && input.model
+				...(sendModel && resolvedInput.model
 					? {
 							model: {
-								providerId: input.model.providerID,
-								modelId: input.model.modelID,
+								providerId: resolvedInput.model.providerID,
+								modelId: resolvedInput.model.modelID,
 							},
 						}
 					: {}),
@@ -559,47 +612,52 @@ export const makeProviderTurnService = Effect.gen(function* () {
 				eventSink,
 				abortSignal: new AbortController().signal,
 				...(imageList ? { images: imageList } : {}),
-				...(input.agent ? { agent: input.agent } : {}),
-				...(input.variant ? { variant: input.variant } : {}),
-				...(input.contextWindow ? { contextWindow: input.contextWindow } : {}),
+				...(resolvedInput.agent ? { agent: resolvedInput.agent } : {}),
+				...(resolvedInput.variant ? { variant: resolvedInput.variant } : {}),
+				...(resolvedInput.contextWindow
+					? { contextWindow: resolvedInput.contextWindow }
+					: {}),
 			};
 
 			const previousProviderId = orchestrationEngine.getProviderForSession(
-				input.sessionId,
+				resolvedInput.sessionId,
 			);
 			const restorePreviousBinding = Effect.sync(() => {
 				if (previousProviderId) {
-					orchestrationEngine.bindSession(input.sessionId, previousProviderId);
+					orchestrationEngine.bindSession(
+						resolvedInput.sessionId,
+						previousProviderId,
+					);
 				} else {
-					orchestrationEngine.unbindSession(input.sessionId);
+					orchestrationEngine.unbindSession(resolvedInput.sessionId);
 				}
 			});
 			yield* Effect.sync(() =>
-				orchestrationEngine.bindSession(input.sessionId, providerId),
+				orchestrationEngine.bindSession(resolvedInput.sessionId, providerId),
 			);
 
 			const dispatchProgram = Effect.try({
 				try: () =>
 					orchestrationEngine.dispatchEffect({
 						type: "send_turn",
-						commandId: input.commandId,
+						commandId: resolvedInput.commandId,
 						providerId,
 						input: sendTurnInput,
 					}),
 				catch: (cause) => cause,
 			}).pipe(
 				Effect.flatten,
-				Effect.flatMap((result) => handleDispatchResult(input, result)),
+				Effect.flatMap((result) => handleDispatchResult(resolvedInput, result)),
 				Effect.catchAll((error) =>
 					restorePreviousBinding.pipe(
-						Effect.zipRight(handleDispatchFailure(input, error)),
+						Effect.zipRight(handleDispatchFailure(resolvedInput, error)),
 					),
 				),
 				Effect.onInterrupt(() => restorePreviousBinding),
 			);
 			yield* FiberMap.run(
 				dispatchFibers,
-				`${input.sessionId}:${sendTurnInput.turnId}`,
+				`${resolvedInput.sessionId}:${sendTurnInput.turnId}`,
 				dispatchProgram,
 			).pipe(Effect.asVoid);
 		});

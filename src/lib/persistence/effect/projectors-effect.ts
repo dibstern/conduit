@@ -415,6 +415,7 @@ export const makeTurnProjector = (): EffectProjector => ({
 		"turn.completed",
 		"turn.error",
 		"turn.interrupted",
+		"turn.model_resolved",
 	],
 	project: (event: StoredEvent) =>
 		Effect.gen(function* () {
@@ -483,6 +484,22 @@ export const makeTurnProjector = (): EffectProjector => ({
 					UPDATE turns
 					SET state = 'interrupted', completed_at = ${event.createdAt}
 					WHERE assistant_message_id = ${event.data.messageId}`;
+				return;
+			}
+
+			if (isEventType(event, "turn.model_resolved")) {
+				yield* sql`
+					UPDATE turns
+					SET requested_model = ${event.data.requestedModel ?? null},
+						expected_model = ${event.data.expectedModel ?? null},
+						actual_model = ${event.data.actualModel}
+					WHERE id = (
+						SELECT id FROM turns
+						WHERE session_id = ${event.sessionId}
+							AND state IN ('pending', 'running')
+						ORDER BY requested_at DESC
+						LIMIT 1
+					)`;
 				return;
 			}
 		}).pipe(

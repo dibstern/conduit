@@ -289,6 +289,7 @@ describe("Claude subagent materialization pipeline", () => {
 						makeBaseSendTurnInput({
 							sessionId: parentSessionId,
 							workspaceRoot: dir,
+							model: { providerId: "claude", modelId: "sonnet" },
 							providerState: { resumeSessionId: parentClaudeSessionId },
 							eventSink: relaySink,
 						}),
@@ -636,6 +637,7 @@ describe("Claude subagent materialization pipeline", () => {
 							makeBaseSendTurnInput({
 								sessionId: parentSessionId,
 								workspaceRoot: dir,
+								model: { providerId: "claude", modelId: "sonnet" },
 								providerState: { resumeSessionId: parentClaudeSessionId },
 								eventSink: relaySink,
 							}),

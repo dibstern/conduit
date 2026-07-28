@@ -8,6 +8,7 @@ import {
 	ProviderRuntimeEventSchema,
 } from "../../../../src/lib/contracts/providers/provider-runtime-event.js";
 import { historyToChatMessages } from "../../../../src/lib/frontend/utils/history-logic.js";
+import { createTestLogger } from "../../../../src/lib/logger.js";
 import {
 	createAllProjectors,
 	ProjectionRunner,
@@ -99,6 +100,26 @@ function makeStreamEvent(event: Record<string, unknown>): SDKMessage {
 	} as unknown as SDKMessage;
 }
 
+function makeInitMessage(model: string): SDKMessage {
+	return {
+		type: "system",
+		subtype: "init",
+		apiKeySource: "api_key",
+		claude_code_version: "1.0.0",
+		cwd: "/tmp/ws",
+		tools: ["Bash", "Read", "Write"],
+		mcp_servers: [],
+		model,
+		permissionMode: "default",
+		slash_commands: [],
+		output_style: "text",
+		skills: [],
+		plugins: [],
+		uuid: "00000000-0000-0000-0000-000000000001",
+		session_id: "sdk-sess-new",
+	} as unknown as SDKMessage;
+}
+
 // Tools seeded into ctx.inFlightTools before the first translate call opened
 // mid-turn — their tool.started happened "before the test window". Snapshot
 // them so the afterEach invariant check doesn't flag their running/completed
@@ -176,13 +197,17 @@ describe("ClaudeEventTranslator", () => {
 	let sink: ReturnType<typeof makeStubSink>;
 	let translator: ClaudeEventTranslator;
 	let ctx: ClaudeSessionContext;
+	let logger: ReturnType<typeof createTestLogger>;
 
 	beforeEach(() => {
 		sink = makeStubSink();
 		ctx = makeCtx();
 		seededToolPartIds = null;
+		logger = createTestLogger();
+		logger.warn = vi.fn();
 		translator = new ClaudeEventTranslator({
 			getSink: () => sink,
+			logger,
 		});
 	});
 
@@ -197,24 +222,20 @@ describe("ClaudeEventTranslator", () => {
 
 	// ─── 1. system (subtype init) ────────────────────────────────────────
 
-	it("translates system/init to session.status and captures model", async () => {
-		await runTranslate(translator, ctx, {
-			type: "system",
-			subtype: "init",
-			apiKeySource: "api_key",
-			claude_code_version: "1.0.0",
-			cwd: "/tmp/ws",
-			tools: ["Bash", "Read", "Write"],
-			mcp_servers: [],
-			model: "claude-sonnet-4-5",
-			permissionMode: "default",
-			slash_commands: [],
-			output_style: "text",
-			skills: [],
-			plugins: [],
-			uuid: "00000000-0000-0000-0000-000000000001",
-			session_id: "sdk-sess-new",
-		} as unknown as SDKMessage);
+	it("emits matching model evidence before idle without changing the requested model", async () => {
+		ctx.currentModel = "sonnet";
+		ctx.expectedApiModelId = "claude-sonnet-5";
+		await runTranslate(translator, ctx, makeInitMessage("claude-sonnet-5"));
+
+		expect(sink.events.map((event) => event.type)).toEqual([
+			"turn.model_resolved",
+			"session.status",
+		]);
+		expect(dataOf(sink.events[0])).toEqual({
+			requestedModel: "sonnet",
+			expectedModel: "claude-sonnet-5",
+			actualModel: "claude-sonnet-5",
+		});
 
 		const statusEvent = sink.events.find((e) => e.type === "session.status");
 		expect(statusEvent).toBeDefined();
@@ -222,11 +243,56 @@ describe("ClaudeEventTranslator", () => {
 		expect(data["sessionId"]).toBe("sess-1");
 		expect(data["status"]).toBe("idle");
 
-		// Model captured on context
-		expect(ctx.currentModel).toBe("claude-sonnet-4-5");
+		expect(ctx.currentModel).toBe("sonnet");
+		expect(logger.warn).not.toHaveBeenCalled();
 
 		// SDK session_id captured for resume
 		expect(ctx.resumeSessionId).toBe("sdk-sess-new");
+	});
+
+	it("emits unequal evidence and logs one model-drift warning", async () => {
+		ctx.currentModel = "sonnet";
+		ctx.expectedApiModelId = "claude-sonnet-5";
+
+		await runTranslate(translator, ctx, makeInitMessage("claude-opus-5[1m]"));
+
+		expect(dataOf(sink.events[0])).toEqual({
+			requestedModel: "sonnet",
+			expectedModel: "claude-sonnet-5",
+			actualModel: "claude-opus-5[1m]",
+		});
+		expect(logger.warn).toHaveBeenCalledTimes(1);
+		expect(vi.mocked(logger.warn).mock.calls[0]?.[0]).toContain("sess-1");
+		expect(vi.mocked(logger.warn).mock.calls[0]?.[0]).toContain("sonnet");
+		expect(vi.mocked(logger.warn).mock.calls[0]?.[0]).toContain(
+			"claude-sonnet-5",
+		);
+		expect(vi.mocked(logger.warn).mock.calls[0]?.[0]).toContain(
+			"claude-opus-5[1m]",
+		);
+	});
+
+	it.each([
+		[
+			"requested without expected",
+			{ currentModel: "sonnet" },
+			{
+				requestedModel: "sonnet",
+				actualModel: "claude-sonnet-5",
+			},
+		],
+		[
+			"actual only",
+			{ currentModel: undefined },
+			{ actualModel: "claude-sonnet-5" },
+		],
+	] as const)("emits %s evidence without warning", async (_name, overrides, data) => {
+		Object.assign(ctx, overrides);
+
+		await runTranslate(translator, ctx, makeInitMessage("claude-sonnet-5"));
+
+		expect(dataOf(sink.events[0])).toEqual(data);
+		expect(logger.warn).not.toHaveBeenCalled();
 	});
 
 	// ─── 2. system (subtype status) ──────────────────────────────────────

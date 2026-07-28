@@ -24,7 +24,9 @@ import {
 } from "../../../../src/lib/domain/relay/Services/services.js";
 import { SessionManagerServiceTag } from "../../../../src/lib/domain/relay/Services/session-manager-service.js";
 import {
+	getModel,
 	hasActiveProcessingTimeout,
+	isModelUserSelected,
 	makeOverridesStateLive,
 	startProcessingTimeout,
 } from "../../../../src/lib/domain/relay/Services/session-overrides-state.js";
@@ -53,6 +55,8 @@ import {
 import { ProviderRegistry } from "../../../../src/lib/provider/provider-registry.js";
 import type {
 	EventSink,
+	ModelInfo,
+	ProviderCapabilities,
 	ProviderInstance,
 	TurnResult,
 } from "../../../../src/lib/provider/types.js";
@@ -75,6 +79,20 @@ const completedTurn = (overrides?: Partial<TurnResult>): TurnResult => ({
 	...overrides,
 });
 
+const modelCapabilities = (
+	models: readonly ModelInfo[],
+): ProviderCapabilities => ({
+	models,
+	supportsTools: true,
+	supportsThinking: true,
+	supportsPermissions: true,
+	supportsQuestions: true,
+	supportsAttachments: true,
+	supportsFork: false,
+	supportsRevert: false,
+	commands: [],
+});
+
 const flushDispatch = () =>
 	Effect.promise<void>(() => new Promise((resolve) => setImmediate(resolve)));
 
@@ -93,24 +111,35 @@ const writeDaemonConfig = (config: DaemonConfig): string => {
 	return configDir;
 };
 
+type TestSendInputOverrides = Omit<
+	Partial<ProviderTurnServiceSendInput>,
+	"model"
+> & {
+	model?: ProviderTurnServiceSendInput["model"] | undefined;
+};
+
 const defaultInput = (
-	overrides?: Partial<ProviderTurnServiceSendInput>,
-): ProviderTurnServiceSendInput => ({
-	clientId: "client-1",
-	commandId: "cmd-send-default",
-	sessionId: "session-1",
-	text: "current prompt",
-	model:
-		overrides?.model === undefined
-			? {
+	overrides?: TestSendInputOverrides,
+): ProviderTurnServiceSendInput => {
+	const { model: overrideModel, ...rest } = overrides ?? {};
+	const model =
+		overrides && "model" in overrides
+			? overrideModel
+			: {
 					providerID: "claude",
 					modelID: "claude-sonnet-4-5",
-				}
-			: overrides.model,
-	modelUserSelected: overrides?.modelUserSelected ?? true,
-	errorDelivery: "client",
-	...overrides,
-});
+				};
+	return {
+		clientId: "client-1",
+		commandId: "cmd-send-default",
+		sessionId: "session-1",
+		text: "current prompt",
+		...(model === undefined ? {} : { model }),
+		modelUserSelected: overrides?.modelUserSelected ?? true,
+		errorDelivery: "client",
+		...rest,
+	};
+};
 
 const historyRow = (text: string) => ({
 	id: `message-${text}`,
@@ -162,6 +191,7 @@ const makeReadQuery = (
 	getSession: vi.fn(() => Effect.succeed(undefined)),
 	getAllSessionStatuses: vi.fn(() => Effect.succeed({})),
 	listSessions: vi.fn(() => Effect.succeed([])),
+	getLatestTurnModelExecution: vi.fn(() => Effect.succeed(undefined)),
 	getSessionMessagesWithParts,
 });
 
@@ -300,7 +330,7 @@ const serviceLayer = (input: {
 	};
 };
 
-const sendTurn = (input?: Partial<ProviderTurnServiceSendInput>) =>
+const sendTurn = (input?: TestSendInputOverrides) =>
 	Effect.gen(function* () {
 		const service = yield* ProviderTurnServiceTag;
 		yield* service.sendTurn(defaultInput(input));
@@ -390,6 +420,318 @@ describe("ProviderTurnService", () => {
 				expect(command.input.model).toEqual({
 					providerId: "claude",
 					modelId: "claude-sonnet-4-5",
+				});
+			}).pipe(Effect.provide(layer));
+		},
+	);
+
+	it.effect(
+		"infers exact default for a model-less Claude turn and stores it as non-user-selected",
+		() => {
+			const dispatchEffect = vi.fn((command) =>
+				command.type === "discover"
+					? Effect.succeed(
+							modelCapabilities([
+								{ id: "opus", name: "Opus", providerId: "claude" },
+								{
+									id: "default",
+									name: "Default",
+									providerId: "claude",
+								},
+							]),
+						)
+					: Effect.succeed(completedTurn()),
+			) as unknown as OrchestrationEngine["dispatchEffect"];
+			const engine = makeEngine({
+				providerId: "claude",
+				dispatchEffect,
+			});
+			const persist = makePersistService(vi.fn(() => Effect.void));
+			const { layer, log } = serviceLayer({
+				engine,
+				readQuery: makeReadQuery(vi.fn(() => Effect.succeed([]))),
+				persist,
+				ingestion: makeIngestion(),
+			});
+
+			return Effect.gen(function* () {
+				yield* sendTurn({ model: undefined, modelUserSelected: false });
+
+				expect(dispatchEffect).toHaveBeenCalledWith({
+					type: "discover",
+					providerId: "claude",
+				});
+				const sendCommand = vi
+					.mocked(dispatchEffect)
+					.mock.calls.map(([command]) => command)
+					.find((command) => command.type === "send_turn");
+				expect(sendCommand).toMatchObject({
+					type: "send_turn",
+					input: {
+						model: { providerId: "claude", modelId: "default" },
+					},
+				});
+				expect(yield* getModel("session-1")).toEqual({
+					providerID: "claude",
+					modelID: "default",
+				});
+				expect(yield* isModelUserSelected("session-1")).toBe(false);
+				expect(persist.persistUserMessage).toHaveBeenCalledWith(
+					"session-1",
+					"current prompt",
+				);
+				expect(log.info).toHaveBeenCalledWith(
+					expect.stringContaining(
+						"reason=no server-side session or default model; inferred from Claude catalog",
+					),
+				);
+				expect(log.info).toHaveBeenCalledWith(
+					expect.stringContaining("model=default"),
+				);
+			}).pipe(Effect.provide(layer));
+		},
+	);
+
+	it.effect(
+		"infers the first Claude catalog entry when no exact default exists",
+		() => {
+			const dispatchEffect = vi.fn((command) =>
+				command.type === "discover"
+					? Effect.succeed(
+							modelCapabilities([
+								{ id: "sonnet", name: "Sonnet", providerId: "claude" },
+								{ id: "opus", name: "Opus", providerId: "claude" },
+							]),
+						)
+					: Effect.succeed(completedTurn()),
+			) as unknown as OrchestrationEngine["dispatchEffect"];
+			const engine = makeEngine({ providerId: "claude", dispatchEffect });
+			const { layer } = serviceLayer({ engine });
+
+			return Effect.gen(function* () {
+				yield* sendTurn({ model: undefined, modelUserSelected: false });
+
+				const sendCommand = vi
+					.mocked(dispatchEffect)
+					.mock.calls.map(([command]) => command)
+					.find((command) => command.type === "send_turn");
+				expect(sendCommand).toMatchObject({
+					input: {
+						model: { providerId: "claude", modelId: "sonnet" },
+					},
+				});
+			}).pipe(Effect.provide(layer));
+		},
+	);
+
+	it.effect("infers opus from the provider fallback catalog", () => {
+		const dispatchEffect = vi.fn((command) =>
+			command.type === "discover"
+				? Effect.succeed(
+						modelCapabilities([
+							{ id: "opus", name: "Opus", providerId: "claude" },
+							{ id: "sonnet", name: "Sonnet", providerId: "claude" },
+						]),
+					)
+				: Effect.succeed(completedTurn()),
+		) as unknown as OrchestrationEngine["dispatchEffect"];
+		const engine = makeEngine({ providerId: "claude", dispatchEffect });
+		const { layer } = serviceLayer({ engine });
+
+		return Effect.gen(function* () {
+			yield* sendTurn({ model: undefined, modelUserSelected: false });
+
+			const sendCommand = vi
+				.mocked(dispatchEffect)
+				.mock.calls.map(([command]) => command)
+				.find((command) => command.type === "send_turn");
+			expect(sendCommand).toMatchObject({
+				input: {
+					model: { providerId: "claude", modelId: "opus" },
+				},
+			});
+		}).pipe(Effect.provide(layer));
+	});
+
+	it.effect("does not discover when the Claude input model is explicit", () => {
+		const dispatchEffect = vi.fn((command) =>
+			command.type === "discover"
+				? Effect.die(new Error("unexpected discovery"))
+				: Effect.succeed(completedTurn()),
+		) as unknown as OrchestrationEngine["dispatchEffect"];
+		const engine = makeEngine({ providerId: "claude", dispatchEffect });
+		const { layer } = serviceLayer({ engine });
+
+		return Effect.gen(function* () {
+			yield* sendTurn({
+				model: { providerID: "claude", modelID: "sonnet" },
+			});
+
+			expect(
+				vi
+					.mocked(dispatchEffect)
+					.mock.calls.some(([command]) => command.type === "discover"),
+			).toBe(false);
+			expect(dispatchEffect).toHaveBeenCalledWith(
+				expect.objectContaining({
+					type: "send_turn",
+					input: expect.objectContaining({
+						model: { providerId: "claude", modelId: "sonnet" },
+					}),
+				}),
+			);
+		}).pipe(Effect.provide(layer));
+	});
+
+	it.effect(
+		"returns MODEL_REQUIRED before side effects when Claude discovery fails",
+		() => {
+			const dispatchEffect = vi.fn((command) =>
+				command.type === "discover"
+					? Effect.fail(new Error("discovery unavailable"))
+					: Effect.succeed(completedTurn()),
+			) as unknown as OrchestrationEngine["dispatchEffect"];
+			const engine = makeEngine({ providerId: "claude", dispatchEffect });
+			const readQuery = makeReadQuery(vi.fn(() => Effect.succeed([])));
+			const persist = makePersistService(vi.fn(() => Effect.void));
+			const { layer, log, wsHandler } = serviceLayer({
+				engine,
+				readQuery,
+				persist,
+			});
+
+			return Effect.gen(function* () {
+				yield* startProcessingTimeout(
+					"session-1",
+					"2 minutes",
+					() => Effect.void,
+				);
+				yield* sendTurn({ model: undefined, modelUserSelected: false });
+
+				expect(yield* hasActiveProcessingTimeout("session-1")).toBe(false);
+				expect(readQuery.getSessionMessagesWithParts).not.toHaveBeenCalled();
+				expect(persist.persistUserMessage).not.toHaveBeenCalled();
+				expect(engine.bindSession).not.toHaveBeenCalled();
+				expect(dispatchEffect).toHaveBeenCalledTimes(1);
+				expect(log.error).toHaveBeenCalledWith(
+					expect.stringContaining("discovery unavailable"),
+				);
+				expect(wsHandler.sendTo).toHaveBeenCalledWith(
+					"client-1",
+					expect.objectContaining({
+						type: "error",
+						code: "MODEL_REQUIRED",
+						sessionId: "session-1",
+					}),
+				);
+				expect(wsHandler.sendToSession).toHaveBeenCalledWith("session-1", {
+					type: "done",
+					sessionId: "session-1",
+					code: 1,
+				});
+			}).pipe(Effect.provide(layer));
+		},
+	);
+
+	it.effect(
+		"returns MODEL_REQUIRED before side effects for an empty Claude catalog",
+		() => {
+			const dispatchEffect = vi.fn((command) =>
+				command.type === "discover"
+					? Effect.succeed(modelCapabilities([]))
+					: Effect.succeed(completedTurn()),
+			) as unknown as OrchestrationEngine["dispatchEffect"];
+			const engine = makeEngine({ providerId: "claude", dispatchEffect });
+			const readQuery = makeReadQuery(vi.fn(() => Effect.succeed([])));
+			const persist = makePersistService(vi.fn(() => Effect.void));
+			const { layer, log, wsHandler } = serviceLayer({
+				engine,
+				readQuery,
+				persist,
+			});
+
+			return Effect.gen(function* () {
+				yield* startProcessingTimeout(
+					"session-1",
+					"2 minutes",
+					() => Effect.void,
+				);
+				yield* sendTurn({ model: undefined, modelUserSelected: false });
+
+				expect(yield* hasActiveProcessingTimeout("session-1")).toBe(false);
+				expect(readQuery.getSessionMessagesWithParts).not.toHaveBeenCalled();
+				expect(persist.persistUserMessage).not.toHaveBeenCalled();
+				expect(engine.bindSession).not.toHaveBeenCalled();
+				expect(dispatchEffect).toHaveBeenCalledTimes(1);
+				expect(log.error).toHaveBeenCalledWith(
+					expect.stringContaining("no usable model catalog"),
+				);
+				expect(wsHandler.sendTo).toHaveBeenCalledWith(
+					"client-1",
+					expect.objectContaining({
+						type: "error",
+						code: "MODEL_REQUIRED",
+						sessionId: "session-1",
+					}),
+				);
+				expect(wsHandler.sendToSession).toHaveBeenCalledWith("session-1", {
+					type: "done",
+					sessionId: "session-1",
+					code: 1,
+				});
+			}).pipe(Effect.provide(layer));
+		},
+	);
+
+	it.effect(
+		"returns MODEL_REQUIRED before side effects when Claude discovery omits its model catalog",
+		() => {
+			const capabilitiesWithoutModels = {
+				...modelCapabilities([]),
+				models: undefined,
+			} as unknown as ProviderCapabilities;
+			const dispatchEffect = vi.fn((command) =>
+				command.type === "discover"
+					? Effect.succeed(capabilitiesWithoutModels)
+					: Effect.succeed(completedTurn()),
+			) as unknown as OrchestrationEngine["dispatchEffect"];
+			const engine = makeEngine({ providerId: "claude", dispatchEffect });
+			const readQuery = makeReadQuery(vi.fn(() => Effect.succeed([])));
+			const persist = makePersistService(vi.fn(() => Effect.void));
+			const { layer, log, wsHandler } = serviceLayer({
+				engine,
+				readQuery,
+				persist,
+			});
+
+			return Effect.gen(function* () {
+				yield* startProcessingTimeout(
+					"session-1",
+					"2 minutes",
+					() => Effect.void,
+				);
+				yield* sendTurn({ model: undefined, modelUserSelected: false });
+
+				expect(yield* hasActiveProcessingTimeout("session-1")).toBe(false);
+				expect(readQuery.getSessionMessagesWithParts).not.toHaveBeenCalled();
+				expect(persist.persistUserMessage).not.toHaveBeenCalled();
+				expect(engine.bindSession).not.toHaveBeenCalled();
+				expect(dispatchEffect).toHaveBeenCalledTimes(1);
+				expect(log.error).toHaveBeenCalledWith(
+					expect.stringContaining("no usable model catalog"),
+				);
+				expect(wsHandler.sendTo).toHaveBeenCalledWith(
+					"client-1",
+					expect.objectContaining({
+						type: "error",
+						code: "MODEL_REQUIRED",
+						sessionId: "session-1",
+					}),
+				);
+				expect(wsHandler.sendToSession).toHaveBeenCalledWith("session-1", {
+					type: "done",
+					sessionId: "session-1",
+					code: 1,
 				});
 			}).pipe(Effect.provide(layer));
 		},
@@ -852,6 +1194,32 @@ describe("ProviderTurnService", () => {
 			}).pipe(Effect.provide(layer));
 		},
 	);
+
+	it.effect("keeps OpenCode model omission unchanged", () => {
+		const engine = makeEngine({ providerId: "opencode" });
+		const { layer } = serviceLayer({ engine });
+
+		return Effect.gen(function* () {
+			yield* sendTurn({ model: undefined, modelUserSelected: false });
+
+			expect(engine.dispatchEffect).toHaveBeenCalledWith(
+				expect.objectContaining({
+					type: "send_turn",
+					providerId: "opencode",
+				}),
+			);
+			const command = vi.mocked(engine.dispatchEffect).mock.calls[0]?.[0];
+			if (command?.type !== "send_turn") {
+				throw new Error("Expected a send_turn command");
+			}
+			expect(command.input.model).toBeUndefined();
+			expect(
+				vi
+					.mocked(engine.dispatchEffect)
+					.mock.calls.some(([call]) => call.type === "discover"),
+			).toBe(false);
+		}).pipe(Effect.provide(layer));
+	});
 
 	it.effect(
 		"falls back to OpenCode abort, clears processing timeout, and broadcasts done when no engine is present",

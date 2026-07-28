@@ -57,6 +57,25 @@ export const ContextWindowInfoSchema = Schema.Struct({
 	options: Schema.Array(ContextWindowOptionSchema),
 });
 
+export const ModelExecutionSchema = Schema.Struct({
+	requestedModel: Schema.optional(Schema.String),
+	expectedModel: Schema.optional(Schema.String),
+	actualModel: Schema.String,
+	drifted: Schema.optional(Schema.Boolean),
+}).pipe(
+	Schema.filter(
+		(execution) =>
+			execution.drifted === undefined ||
+			(execution.expectedModel !== undefined &&
+				execution.drifted ===
+					(execution.actualModel !== execution.expectedModel)),
+		{
+			message: () =>
+				"drifted requires expectedModel and must equal actualModel !== expectedModel",
+		},
+	),
+);
+
 export const AgentInfoSchema = Schema.Struct({
 	id: Schema.String,
 	name: Schema.String,
@@ -174,6 +193,7 @@ export const GetModelsResponseSchema = Schema.Struct({
 	contextWindow: Schema.optional(ContextWindowInfoSchema),
 	permissionMode: Schema.optional(SessionPermissionModeSchema),
 	hiddenModels: Schema.optional(Schema.Array(Schema.String)),
+	modelExecution: Schema.optional(ModelExecutionSchema),
 });
 
 export const SwitchContextWindowResponseSchema = Schema.Struct({

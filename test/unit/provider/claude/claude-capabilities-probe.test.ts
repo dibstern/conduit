@@ -10,6 +10,7 @@ describe("probeClaudeCapabilities", () => {
 			models?: Array<{
 				value: string;
 				displayName: string;
+				resolvedModel?: string;
 				supportedEffortLevels?: string[];
 			}>;
 			account?: { subscriptionType?: string };
@@ -61,6 +62,36 @@ describe("probeClaudeCapabilities", () => {
 			context: 200_000,
 			output: 64_000,
 		});
+	});
+
+	it("preserves resolvedModel when present and preserves its absence", async () => {
+		const logger = createTestLogger();
+		logger.warn = vi.fn();
+		const queryFactory = makeFakeQuery({
+			initResult: {
+				models: [
+					{
+						value: "sonnet",
+						displayName: "Sonnet",
+						resolvedModel: "claude-sonnet-5",
+					},
+					{ value: "legacy", displayName: "Legacy" },
+				],
+				commands: [],
+				agents: [],
+				account: {},
+			},
+		});
+
+		const result = await probeClaudeCapabilities({
+			queryFactory,
+			workspaceRoot,
+			logger,
+		});
+
+		expect(result.models[0]?.resolvedModel).toBe("claude-sonnet-5");
+		expect(result.models[1]).not.toHaveProperty("resolvedModel");
+		expect(logger.warn).not.toHaveBeenCalled();
 	});
 
 	it("maps SDK supportedEffortLevels into ModelInfo.variants", async () => {

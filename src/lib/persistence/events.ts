@@ -50,6 +50,7 @@ export const CANONICAL_EVENT_TYPES = [
 	"turn.completed",
 	"turn.error",
 	"turn.interrupted",
+	"turn.model_resolved",
 	"session.created",
 	"session.renamed",
 	"session.status",
@@ -196,6 +197,12 @@ export interface TurnInterruptedPayload {
 	readonly messageId: string;
 }
 
+export interface TurnModelResolvedPayload {
+	readonly requestedModel?: string;
+	readonly expectedModel?: string;
+	readonly actualModel: string;
+}
+
 export interface SessionCreatedPayload {
 	readonly sessionId: string;
 	readonly title: string;
@@ -274,6 +281,7 @@ export interface EventPayloadMap {
 	"turn.completed": TurnCompletedPayload;
 	"turn.error": TurnErrorPayload;
 	"turn.interrupted": TurnInterruptedPayload;
+	"turn.model_resolved": TurnModelResolvedPayload;
 	"session.created": SessionCreatedPayload;
 	"session.renamed": SessionRenamedPayload;
 	"session.status": SessionStatusPayload;
@@ -570,6 +578,14 @@ const TurnInterruptedPayloadSchema = Schema.Struct({
 	messageId: Schema.String,
 });
 
+const NonEmptyStringSchema = Schema.String.pipe(Schema.minLength(1));
+
+const TurnModelResolvedPayloadSchema = Schema.Struct({
+	requestedModel: Schema.optionalWith(NonEmptyStringSchema, { exact: true }),
+	expectedModel: Schema.optionalWith(NonEmptyStringSchema, { exact: true }),
+	actualModel: NonEmptyStringSchema,
+});
+
 const SessionCreatedPayloadSchema = Schema.Struct({
 	sessionId: Schema.String,
 	title: Schema.String,
@@ -696,6 +712,10 @@ const TurnInterruptedEventSchema = eventEnvelope(
 	"turn.interrupted",
 	TurnInterruptedPayloadSchema,
 );
+const TurnModelResolvedEventSchema = eventEnvelope(
+	"turn.model_resolved",
+	TurnModelResolvedPayloadSchema,
+);
 const SessionCreatedEventSchema = eventEnvelope(
 	"session.created",
 	SessionCreatedPayloadSchema,
@@ -749,6 +769,7 @@ export const CanonicalEventSchema = Schema.Union(
 	TurnCompletedEventSchema,
 	TurnErrorEventSchema,
 	TurnInterruptedEventSchema,
+	TurnModelResolvedEventSchema,
 	SessionCreatedEventSchema,
 	SessionRenamedEventSchema,
 	SessionStatusEventSchema,
@@ -793,6 +814,7 @@ const PAYLOAD_REQUIRED_FIELDS: Record<CanonicalEventType, readonly string[]> = {
 	"turn.completed": ["messageId"],
 	"turn.error": ["messageId", "error"],
 	"turn.interrupted": ["messageId"],
+	"turn.model_resolved": ["actualModel"],
 	"permission.asked": ["id", "sessionId", "toolName"],
 	"permission.resolved": ["id", "decision"],
 	"question.asked": ["id", "sessionId", "questions"],

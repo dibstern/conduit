@@ -4,6 +4,7 @@ import { Effect, Layer } from "effect";
 import { expect, vi } from "vitest";
 import { WsRpcGroup } from "../../../src/lib/contracts/ws-rpc.js";
 import { RateLimiterLive } from "../../../src/lib/domain/relay/Layers/rate-limiter-layer.js";
+import { setModel } from "../../../src/lib/domain/relay/Services/session-overrides-state.js";
 import { WsRpcServerLayer } from "../../../src/lib/server/ws-rpc.js";
 import {
 	makeMockOpenCodeAPI,
@@ -35,6 +36,10 @@ describe("WsRpcServerLayer SendMessage", () => {
 
 		return Effect.gen(function* () {
 			const client = yield* rpcClient;
+			yield* setModel("session-1", {
+				providerID: "claude",
+				modelID: "sonnet",
+			});
 
 			yield* client.SendMessage({
 				projectSlug: "project-a",

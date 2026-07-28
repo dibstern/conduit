@@ -124,6 +124,9 @@ export function translateDomainEventToRelay(
 		case "turn.interrupted":
 			return emit({ type: "done", code: 1 });
 
+		case "turn.model_resolved":
+			return silent("persistence/ws-rpc-only event");
+
 		case "session.status":
 			if (event.data.status === "retry") {
 				const reason =

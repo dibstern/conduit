@@ -239,6 +239,49 @@ describe("Canonical event schemas", () => {
 			expect(Either.isRight(result)).toBe(true);
 		});
 
+		it("decodes turn.model_resolved with complete or degraded evidence", () => {
+			for (const data of [
+				{
+					requestedModel: "sonnet",
+					expectedModel: "claude-sonnet-5",
+					actualModel: "claude-sonnet-5",
+				},
+				{ requestedModel: "sonnet", actualModel: "claude-sonnet-5" },
+				{ actualModel: "claude-sonnet-5" },
+			]) {
+				const result = Schema.decodeUnknownEither(CanonicalEventSchema)({
+					eventId: "evt_model",
+					sessionId: "s1",
+					type: "turn.model_resolved",
+					data,
+					metadata: {},
+					provider: "claude",
+					createdAt: Date.now(),
+				});
+				expect(Either.isRight(result)).toBe(true);
+			}
+		});
+
+		it("rejects malformed turn.model_resolved evidence", () => {
+			for (const data of [
+				{},
+				{ actualModel: "" },
+				{ actualModel: "claude-sonnet-5", requestedModel: "" },
+				{ actualModel: "claude-sonnet-5", expectedModel: "" },
+			]) {
+				const result = Schema.decodeUnknownEither(CanonicalEventSchema)({
+					eventId: "evt_model_invalid",
+					sessionId: "s1",
+					type: "turn.model_resolved",
+					data,
+					metadata: {},
+					provider: "claude",
+					createdAt: Date.now(),
+				});
+				expect(Either.isLeft(result)).toBe(true);
+			}
+		});
+
 		it("decodes session.created event", () => {
 			const raw = {
 				eventId: "evt_13",

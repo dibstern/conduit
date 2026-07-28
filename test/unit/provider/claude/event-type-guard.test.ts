@@ -22,4 +22,8 @@ describe("Claude event type guard", () => {
 	it("produced set includes thinking.end (regression)", () => {
 		expect(CLAUDE_PRODUCED.has("thinking.end")).toBe(true);
 	});
+
+	it("classifies turn.model_resolved as Claude-produced", () => {
+		expect(CLAUDE_PRODUCED.has("turn.model_resolved")).toBe(true);
+	});
 });

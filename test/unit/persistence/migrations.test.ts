@@ -115,6 +115,7 @@ describe("Migration Runner", () => {
 		const messagePartsFileTypeMigration = schemaMigrations[4];
 		const messagePartsCompactionTypeMigration = schemaMigrations[5];
 		const messagesContextWindowMigration = schemaMigrations[6];
+		const turnModelExecutionMigration = schemaMigrations[7];
 		if (
 			!baseline ||
 			!metadataMigration ||
@@ -122,7 +123,8 @@ describe("Migration Runner", () => {
 			!dropEventsSessionFkMigration ||
 			!messagePartsFileTypeMigration ||
 			!messagePartsCompactionTypeMigration ||
-			!messagesContextWindowMigration
+			!messagesContextWindowMigration ||
+			!turnModelExecutionMigration
 		) {
 			throw new Error("Expected all event-store schema migrations");
 		}
@@ -168,6 +170,11 @@ describe("Migration Runner", () => {
 				name: "messages_context_window",
 				checksum: calculateMigrationChecksum(messagesContextWindowMigration),
 			},
+			{
+				id: 8,
+				name: "turn_model_execution",
+				checksum: calculateMigrationChecksum(turnModelExecutionMigration),
+			},
 		]);
 		columns = client
 			.query<{ name: string }>("PRAGMA table_info(message_parts)")
@@ -181,6 +188,51 @@ describe("Migration Runner", () => {
 			.query<{ name: string }>("PRAGMA table_info(messages)")
 			.map((column) => column.name);
 		expect(columns).toContain("context_window");
+		columns = client
+			.query<{ name: string }>("PRAGMA table_info(turns)")
+			.map((column) => column.name);
+		expect(columns).toEqual(
+			expect.arrayContaining([
+				"requested_model",
+				"expected_model",
+				"actual_model",
+			]),
+		);
+	});
+
+	it("upgrades a migration-7 database with turn model execution columns once", () => {
+		client = SqliteClient.memory();
+		const migrationsThrough7 = schemaMigrations.slice(0, 7);
+		const turnModelExecutionMigration = schemaMigrations[7];
+		if (!turnModelExecutionMigration) {
+			throw new Error("Expected turn model execution migration");
+		}
+		runMigrations(client, migrationsThrough7);
+
+		let columns = client
+			.query<{ name: string }>("PRAGMA table_info(turns)")
+			.map((column) => column.name);
+		expect(columns).not.toContain("actual_model");
+
+		expect(runMigrations(client, schemaMigrations)).toEqual([
+			{
+				id: 8,
+				name: "turn_model_execution",
+				checksum: calculateMigrationChecksum(turnModelExecutionMigration),
+			},
+		]);
+		expect(runMigrations(client, schemaMigrations)).toEqual([]);
+
+		columns = client
+			.query<{ name: string }>("PRAGMA table_info(turns)")
+			.map((column) => column.name);
+		expect(columns).toEqual(
+			expect.arrayContaining([
+				"requested_model",
+				"expected_model",
+				"actual_model",
+			]),
+		);
 	});
 
 	it("rolls back a failed migration without affecting prior ones", () => {

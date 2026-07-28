@@ -122,6 +122,15 @@ describe("Persistence Effect", () => {
 				"provider",
 				"created_at",
 			]);
+			const turnColumns = yield* sql<{ name: string }>`
+				PRAGMA table_info(turns)`;
+			expect(turnColumns.map((column) => column.name)).toEqual(
+				expect.arrayContaining([
+					"requested_model",
+					"expected_model",
+					"actual_model",
+				]),
+			);
 
 			const migrationRows = yield* sql<{
 				migration_id: number;
@@ -135,6 +144,7 @@ describe("Persistence Effect", () => {
 				{ migration_id: 5, name: "message_parts_file_type" },
 				{ migration_id: 6, name: "message_parts_compaction_type" },
 				{ migration_id: 7, name: "messages_context_window" },
+				{ migration_id: 8, name: "turn_model_execution" },
 			]);
 
 			const legacyMigrationTable = yield* sql<{ name: string }>`

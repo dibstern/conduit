@@ -98,6 +98,7 @@ function makeReadQueryEffect(rows: readonly SessionRow[]): ReadQueryEffect {
 		),
 		getAllSessionStatuses: vi.fn(() => Effect.succeed({})),
 		listSessions: vi.fn(() => Effect.succeed(rows)),
+		getLatestTurnModelExecution: vi.fn(() => Effect.succeed(undefined)),
 		getSessionMessagesWithParts: vi.fn(() => Effect.succeed([])),
 	};
 }

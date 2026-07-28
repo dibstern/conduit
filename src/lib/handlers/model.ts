@@ -522,6 +522,34 @@ export const getModelsResponse = (
 		const currentContextWindow = activeId
 			? yield* getContextWindow(activeId)
 			: yield* getDefaultContextWindow();
+		let modelExecution: GetModelsResponse["modelExecution"];
+		if (activeId) {
+			const readQueryOption = yield* Effect.serviceOption(ReadQueryEffectTag);
+			if (readQueryOption._tag === "Some") {
+				const executionResult = yield* Effect.either(
+					readQueryOption.value.getLatestTurnModelExecution(activeId),
+				);
+				if (executionResult._tag === "Left") {
+					log.warn(
+						`Failed to read latest model execution for session ${activeId}: ${formatErrorDetail(executionResult.left)}`,
+					);
+				} else if (executionResult.right) {
+					const row = executionResult.right;
+					modelExecution = {
+						...(row.requested_model === null
+							? {}
+							: { requestedModel: row.requested_model }),
+						...(row.expected_model === null
+							? {}
+							: {
+									expectedModel: row.expected_model,
+									drifted: row.actual_model !== row.expected_model,
+								}),
+						actualModel: row.actual_model,
+					};
+				}
+			}
+		}
 
 		return {
 			projectSlug: input.projectSlug ?? "",
@@ -546,6 +574,7 @@ export const getModelsResponse = (
 			permissionMode: activeId
 				? yield* getPermissionMode(activeId)
 				: ("ask" as const),
+			...(modelExecution === undefined ? {} : { modelExecution }),
 		};
 	});
 

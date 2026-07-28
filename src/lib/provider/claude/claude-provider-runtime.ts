@@ -65,7 +65,10 @@ import type {
 	SendTurnInput,
 	TurnResult,
 } from "../types.js";
-import { claudeApiModelId } from "./claude-api-model-id.js";
+import {
+	claudeApiModelId,
+	expectedClaudeReportedModelId,
+} from "./claude-api-model-id.js";
 import type { ProbeResult } from "./claude-capabilities-probe.js";
 import {
 	type ClaudeCapabilitiesService,
@@ -484,8 +487,13 @@ export const makeUnsafeClaudeProviderRuntime = (
 	new ClaudeProviderRuntime(
 		{
 			...deps,
-			capabilitiesService:
-				deps.capabilitiesService ?? makeUnsafeClaudeCapabilitiesService(),
+			// A custom queryFactory is an unsafe-constructor test seam only.
+			// Production callers must use ClaudeDriver/makeClaudeProviderRuntime so
+			// the default capabilities oracle remains wired. Tests that need drift
+			// observability must inject capabilitiesService with their queryFactory.
+			...(!deps.capabilitiesService && !deps.queryFactory
+				? { capabilitiesService: makeUnsafeClaudeCapabilitiesService() }
+				: {}),
 		},
 		Ref.unsafeMake<ClaudeProviderRuntimeState>(
 			emptyClaudeProviderRuntimeState(),
@@ -697,6 +705,27 @@ export class ClaudeProviderRuntime {
 			: Effect.fail(new Error("Claude capabilities service unavailable"));
 	}
 
+	private expectedApiModelIdEffect(
+		requestedModelId: string | undefined,
+		contextWindow: string | undefined,
+		workspaceRoot: string,
+		agent: string | undefined,
+	): Effect.Effect<string | undefined> {
+		if (agent !== undefined) return Effect.succeed(undefined);
+		const service = this.deps.capabilitiesService;
+		if (!service) return Effect.succeed(undefined);
+		return service.get(workspaceRoot).pipe(
+			Effect.map((probe) =>
+				expectedClaudeReportedModelId(
+					requestedModelId,
+					contextWindow,
+					probe.models,
+				),
+			),
+			Effect.catchAll(() => Effect.succeed(undefined)),
+		);
+	}
+
 	// ─── sendTurn ─────────────────────────────────────────────────────────
 
 	sendTurnEffect(
@@ -777,6 +806,23 @@ export class ClaudeProviderRuntime {
 	): Effect.Effect<TurnResult, unknown> {
 		return Effect.gen(this, function* () {
 			const { sessionId } = input;
+			const apiModelId = claudeApiModelId(
+				input.model?.modelId,
+				input.contextWindow,
+			);
+			if (apiModelId === undefined) {
+				return yield* Effect.fail(
+					new Error(
+						"Claude runtime invariant violated: model is required before query creation",
+					),
+				);
+			}
+			const expectedApiModelId = yield* this.expectedApiModelIdEffect(
+				input.model?.modelId,
+				input.contextWindow,
+				input.workspaceRoot,
+				input.agent,
+			);
 			yield* this.markStreamLive(sessionId);
 
 			const deferred = yield* Deferred.make<TurnResult, Error>();
@@ -820,11 +866,6 @@ export class ClaudeProviderRuntime {
 					typeof input.providerState["resumeSessionId"] === "string"
 						? input.providerState["resumeSessionId"]
 						: undefined;
-				const apiModelId = claudeApiModelId(
-					input.model?.modelId,
-					input.contextWindow,
-				);
-
 				// 4. Create session context (query assigned after creation below).
 				const ctx: ClaudeSessionContext = {
 					sessionId,
@@ -842,7 +883,8 @@ export class ClaudeProviderRuntime {
 					eventSink: input.eventSink,
 					currentTurnId: input.turnId,
 					currentModel: input.model?.modelId,
-					...(apiModelId ? { currentApiModelId: apiModelId } : {}),
+					currentApiModelId: apiModelId,
+					...(expectedApiModelId ? { expectedApiModelId } : {}),
 					...(input.agent ? { currentAgent: input.agent } : {}),
 					resumeSessionId,
 					lastAssistantUuid: undefined,
@@ -866,7 +908,7 @@ export class ClaudeProviderRuntime {
 							settings: { showThinkingSummaries: true },
 							settingSources: ["user", "project", "local"],
 							canUseTool: bridge.createCanUseTool(ctx),
-							...(apiModelId ? { model: apiModelId } : {}),
+							model: apiModelId,
 							...(resumeSessionId ? { resume: resumeSessionId } : {}),
 							...(input.agent ? { agent: input.agent } : {}),
 							...(input.variant
@@ -952,6 +994,17 @@ export class ClaudeProviderRuntime {
 			}
 			if (input.model?.modelId) {
 				ctx.currentModel = input.model.modelId;
+			}
+			const expectedApiModelId = yield* this.expectedApiModelIdEffect(
+				baseModelId,
+				input.contextWindow,
+				input.workspaceRoot,
+				input.agent,
+			);
+			if (expectedApiModelId === undefined) {
+				delete ctx.expectedApiModelId;
+			} else {
+				ctx.expectedApiModelId = expectedApiModelId;
 			}
 
 			const deferred = yield* Deferred.make<TurnResult, Error>();

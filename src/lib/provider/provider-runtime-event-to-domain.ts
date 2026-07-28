@@ -12,6 +12,7 @@ import {
 	type SessionStatusValue,
 	type TurnCompletedPayload,
 	type TurnErrorPayload,
+	type TurnModelResolvedPayload,
 } from "../persistence/events.js";
 
 export type ProviderRuntimeDomainMapperState = {
@@ -265,6 +266,17 @@ export function translateProviderRuntimeEventToDomain(
 		return singleEvent(event, state, "turn.interrupted", {
 			messageId: messageIdFromDataOrState(event, data, state),
 		});
+	}
+
+	if (event.type === "turn.model_resolved") {
+		const requestedModel = stringField(data["requestedModel"]);
+		const expectedModel = stringField(data["expectedModel"]);
+		const payload = {
+			...(requestedModel !== undefined ? { requestedModel } : {}),
+			...(expectedModel !== undefined ? { expectedModel } : {}),
+			actualModel: stringField(data["actualModel"]) ?? "",
+		} satisfies TurnModelResolvedPayload;
+		return singleEvent(event, state, "turn.model_resolved", payload);
 	}
 
 	if (event.type === "session.created") {

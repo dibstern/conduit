@@ -62,3 +62,48 @@ export function claudeApiModelId(
 	}
 	return baseModelId;
 }
+
+export function expectedClaudeReportedModelId(
+	requestedModelId: string | undefined,
+	contextWindow: string | undefined,
+	catalogModels: readonly {
+		readonly id: string;
+		readonly resolvedModel?: string;
+	}[],
+): string | undefined {
+	const outboundId = claudeApiModelId(requestedModelId, contextWindow);
+	if (outboundId === undefined) return undefined;
+
+	const exactMatch = catalogModels.find((model) => model.id === outboundId);
+	if (exactMatch) {
+		return exactMatch.resolvedModel || undefined;
+	}
+
+	const withoutContextSuffix = (modelId: string): string =>
+		modelId.replace(/\[1m\]$/i, "");
+	const outboundBaseId = withoutContextSuffix(outboundId);
+	const outboundUses1m = outboundBaseId !== outboundId;
+	let expectedModel: string | undefined;
+
+	for (const model of catalogModels) {
+		if (
+			withoutContextSuffix(model.id) !== outboundBaseId ||
+			!model.resolvedModel
+		) {
+			continue;
+		}
+		const resolvedBaseId = withoutContextSuffix(model.resolvedModel);
+		const normalizedResolvedModel = outboundUses1m
+			? `${resolvedBaseId}[1m]`
+			: resolvedBaseId;
+		if (
+			expectedModel !== undefined &&
+			expectedModel !== normalizedResolvedModel
+		) {
+			return undefined;
+		}
+		expectedModel = normalizedResolvedModel;
+	}
+
+	return expectedModel;
+}

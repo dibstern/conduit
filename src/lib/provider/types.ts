@@ -135,6 +135,8 @@ export interface ModelInfo {
 	readonly id: string;
 	readonly name: string;
 	readonly providerId: string;
+	/** Backend-only SDK oracle for the exact model id reported at runtime. */
+	readonly resolvedModel?: string;
 	readonly limit?: { context?: number; output?: number };
 	readonly variants?: Record<string, Record<string, unknown>>;
 	/**
@@ -168,8 +170,9 @@ export interface SendTurnInput {
 	readonly history: readonly HistoryMessage[];
 	readonly providerState: Readonly<Record<string, unknown>>;
 	/**
-	 * Optional model selection. If absent, the provider uses its default.
-	 * OpenCodeProviderInstance skips the model field in the REST call when absent.
+	 * Optional shared model selection. OpenCode may omit the model from its
+	 * provider request. Claude's relay path infers a catalog model, and its
+	 * runtime rejects direct model-less dispatches.
 	 */
 	readonly model?: ModelSelection;
 	readonly workspaceRoot: string;

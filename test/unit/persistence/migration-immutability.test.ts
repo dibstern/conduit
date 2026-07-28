@@ -36,6 +36,8 @@ const SHIPPED_MIGRATION_HASHES: Record<string, string> = {
 		"ac54eede8dfd2fb98e8f71c785cdb6b5187dbb0b33c521afa9b3b917b8610eca",
 	"0007_messages_context_window.sql":
 		"f48d8a577eebf710b78092f158e3d90b3c5c96f728e9c1f89086863546d1bcc7",
+	"0008_turn_model_execution.sql":
+		"533178028fca7bd02eb561be6ca068515a916e24aa24d268359e80755d2f8096",
 };
 
 describe("shipped migrations are immutable", () => {

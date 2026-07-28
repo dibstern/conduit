@@ -102,6 +102,7 @@ function makeEmptyHistoryReadQuery(
 		),
 		getAllSessionStatuses: vi.fn(() => Effect.succeed({})),
 		listSessions: vi.fn(() => Effect.succeed([])),
+		getLatestTurnModelExecution: vi.fn(() => Effect.succeed(undefined)),
 		getSessionMessagesWithParts: vi.fn(() => Effect.succeed([])),
 	};
 }

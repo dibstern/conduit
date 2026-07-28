@@ -6,6 +6,7 @@ import type {
 	MessageRow,
 	MessageWithParts,
 	SessionRow,
+	TurnModelExecutionRow,
 } from "../read-model-types.js";
 
 export class ReadQueryEffectError extends Data.TaggedError(
@@ -40,6 +41,13 @@ export interface ReadQueryEffect {
 	readonly getSessionMessagesWithParts: (
 		sessionId: string,
 	) => Effect.Effect<MessageWithParts[], ReadQueryEffectError | SqlError>;
+
+	readonly getLatestTurnModelExecution: (
+		sessionId: string,
+	) => Effect.Effect<
+		TurnModelExecutionRow | undefined,
+		ReadQueryEffectError | SqlError
+	>;
 }
 
 export class ReadQueryEffectTag extends Context.Tag("ReadQueryEffect")<
@@ -193,6 +201,32 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 			),
 		);
 
+	const getLatestTurnModelExecution = (
+		sessionId: string,
+	): Effect.Effect<
+		TurnModelExecutionRow | undefined,
+		ReadQueryEffectError | SqlError
+	> =>
+		Effect.gen(function* () {
+			const rows = yield* sql<TurnModelExecutionRow>`
+				SELECT requested_model, expected_model, actual_model
+				FROM turns
+				WHERE session_id = ${sessionId}
+					AND actual_model IS NOT NULL
+				ORDER BY requested_at DESC
+				LIMIT 1`;
+			return rows[0];
+		}).pipe(
+			Effect.mapError((e) =>
+				e instanceof ReadQueryEffectError
+					? e
+					: new ReadQueryEffectError({
+							operation: "getLatestTurnModelExecution",
+							cause: e,
+						}),
+			),
+		);
+
 	return {
 		getToolContent,
 		getSessionStatus,
@@ -200,5 +234,6 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 		getAllSessionStatuses,
 		listSessions,
 		getSessionMessagesWithParts,
+		getLatestTurnModelExecution,
 	} satisfies ReadQueryEffect;
 });

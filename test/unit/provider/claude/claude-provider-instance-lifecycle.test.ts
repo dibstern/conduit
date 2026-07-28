@@ -547,6 +547,7 @@ describe("ClaudeProviderInstance lifecycle", () => {
 					makeBaseSendTurnInput({
 						sessionId: "sess-reload-flow",
 						turnId: "turn-1",
+						model: { providerId: "claude", modelId: "sonnet" },
 						eventSink: sink,
 					}),
 				),
@@ -564,6 +565,7 @@ describe("ClaudeProviderInstance lifecycle", () => {
 					makeBaseSendTurnInput({
 						sessionId: "sess-reload-flow",
 						turnId: "turn-2",
+						model: { providerId: "claude", modelId: "sonnet" },
 						eventSink: sink,
 					}),
 				),

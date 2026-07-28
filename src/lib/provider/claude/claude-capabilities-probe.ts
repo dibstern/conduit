@@ -39,6 +39,7 @@ const OUTPUT_LIMIT_BY_FAMILY: ReadonlyArray<[pattern: RegExp, output: number]> =
 interface SDKModelInfoSubset {
 	readonly value: string;
 	readonly displayName: string;
+	readonly resolvedModel?: string;
 	readonly supportedEffortLevels?: readonly string[];
 }
 
@@ -150,6 +151,9 @@ function sdkModelToConduit(
 		id: model.value,
 		name: model.displayName,
 		providerId: "claude",
+		...(model.resolvedModel !== undefined
+			? { resolvedModel: model.resolvedModel }
+			: {}),
 		...(limit ? { limit } : {}),
 		...(variants ? { variants } : {}),
 		...(contextWindowOptions ? { contextWindowOptions } : {}),

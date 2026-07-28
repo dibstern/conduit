@@ -18,6 +18,7 @@ import {
 	GetFileList,
 	GetFileTree,
 	GetModels,
+	GetModelsResponseSchema,
 	GetProjects,
 	GetTodo,
 	GetToolContent,
@@ -26,6 +27,7 @@ import {
 	ListPtys,
 	ListSessions,
 	LoadMoreHistory,
+	ModelExecutionSchema,
 	RejectQuestion,
 	ReloadProviderSession,
 	RemoveInstance,
@@ -403,6 +405,54 @@ const provideRpc = <A, E>(effect: Effect.Effect<A, E, WsRpcTestEnv>) =>
 	);
 
 describe("browser WebSocket RPC contract", () => {
+	it("decodes model execution with known and unknown drift", () => {
+		const decodeExecution = Schema.decodeUnknownSync(ModelExecutionSchema);
+		expect(
+			decodeExecution({
+				requestedModel: "sonnet",
+				expectedModel: "claude-sonnet-5",
+				actualModel: "claude-fable-4-0",
+				drifted: true,
+			}),
+		).toEqual({
+			requestedModel: "sonnet",
+			expectedModel: "claude-sonnet-5",
+			actualModel: "claude-fable-4-0",
+			drifted: true,
+		});
+		expect(
+			decodeExecution({
+				expectedModel: "claude-opus-4-6",
+				actualModel: "claude-opus-4-6",
+				drifted: false,
+			}),
+		).toEqual({
+			expectedModel: "claude-opus-4-6",
+			actualModel: "claude-opus-4-6",
+			drifted: false,
+		});
+		expect(
+			decodeExecution({
+				requestedModel: "agent-model",
+				actualModel: "claude-sonnet-5",
+			}),
+		).toEqual({
+			requestedModel: "agent-model",
+			actualModel: "claude-sonnet-5",
+		});
+
+		const response = Schema.decodeUnknownSync(GetModelsResponseSchema)({
+			projectSlug: "demo",
+			providers: [],
+			modelExecution: {
+				actualModel: "claude-sonnet-5",
+			},
+		});
+		expect(response.modelExecution).toEqual({
+			actualModel: "claude-sonnet-5",
+		});
+	});
+
 	it("preserves provider driver metadata in instance-list responses", () => {
 		const response = Schema.decodeUnknownSync(InstanceListResponseSchema)({
 			projectSlug: "demo",

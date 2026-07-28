@@ -11,6 +11,7 @@ import {
 	MESSAGE_PARTS_FILE_TYPE_MIGRATION,
 	MESSAGES_CONTEXT_WINDOW_MIGRATION,
 	readMigrationSql,
+	TURN_MODEL_EXECUTION_MIGRATION,
 } from "../schema.js";
 
 export const EFFECT_SQL_MIGRATIONS_TABLE = "effect_sql_migrations";
@@ -33,6 +34,9 @@ const messagePartsCompactionTypeMigrationSql = readMigrationSql(
 );
 const messagesContextWindowMigrationSql = readMigrationSql(
 	MESSAGES_CONTEXT_WINDOW_MIGRATION,
+);
+const turnModelExecutionMigrationSql = readMigrationSql(
+	TURN_MODEL_EXECUTION_MIGRATION,
 );
 
 const expectedTableColumns = {
@@ -239,6 +243,9 @@ const expectedTableColumns = {
 		"requested_at",
 		"started_at",
 		"completed_at",
+		"requested_model",
+		"expected_model",
+		"actual_model",
 	],
 } as const;
 
@@ -401,6 +408,16 @@ const verifyExistingBaselineSchema: Effect.Effect<
 				sameStrings(
 					actualColumns,
 					expectedColumns.filter((column) => column !== "context_window"),
+				)) ||
+			(tableName === "turns" &&
+				sameStrings(
+					actualColumns,
+					expectedColumns.filter(
+						(column) =>
+							column !== "requested_model" &&
+							column !== "expected_model" &&
+							column !== "actual_model",
+					),
 				));
 		if (!matchesKnownSchema) {
 			return yield* failSchemaMismatch(
@@ -485,6 +502,25 @@ const runMessagesContextWindowMigration: Effect.Effect<
 	yield* executeSqlStatements(messagesContextWindowMigrationSql);
 });
 
+const runTurnModelExecutionMigration: Effect.Effect<
+	void,
+	unknown,
+	SqlClient.SqlClient
+> = Effect.gen(function* () {
+	const sql = yield* SqlClient.SqlClient;
+	const columns = yield* sql.unsafe<{ name: string }>(
+		"PRAGMA table_info(turns)",
+	);
+	const existing = new Set(columns.map((column) => column.name));
+	const columnNames = ["requested_model", "expected_model", "actual_model"];
+	const statements = splitSqlStatements(turnModelExecutionMigrationSql);
+	for (const [index, columnName] of columnNames.entries()) {
+		if (existing.has(columnName)) continue;
+		const statement = statements[index];
+		if (statement) yield* sql.unsafe(statement);
+	}
+});
+
 export const effectMigrationEntries = {
 	"0001_create_event_store_tables": runBaselineEventStoreMigration,
 	"0002_add_message_part_metadata": runMessagePartMetadataMigration,
@@ -493,6 +529,7 @@ export const effectMigrationEntries = {
 	"0005_message_parts_file_type": runMessagePartsFileTypeMigration,
 	"0006_message_parts_compaction_type": runMessagePartsCompactionTypeMigration,
 	"0007_messages_context_window": runMessagesContextWindowMigration,
+	"0008_turn_model_execution": runTurnModelExecutionMigration,
 } satisfies Record<string, Effect.Effect<void, unknown, SqlClient.SqlClient>>;
 
 export function makeEffectMigrationLoader(

@@ -63,6 +63,15 @@ export interface TurnRow {
 	requested_at: number;
 	started_at: number | null;
 	completed_at: number | null;
+	requested_model: string | null;
+	expected_model: string | null;
+	actual_model: string | null;
+}
+
+export interface TurnModelExecutionRow {
+	requested_model: string | null;
+	expected_model: string | null;
+	actual_model: string;
 }
 
 export interface PendingApprovalRow {

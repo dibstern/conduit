@@ -23,6 +23,7 @@
 import { randomUUID } from "node:crypto";
 import { Effect } from "effect";
 import type { ProviderRuntimeEvent } from "../../contracts/providers/provider-runtime-event.js";
+import { createLogger, type Logger } from "../../logger.js";
 import type {
 	CanonicalEventType,
 	CanonicalToolInput,
@@ -45,6 +46,7 @@ import type {
 } from "./types.js";
 
 const PROVIDER = "claude" as const;
+const defaultLog = createLogger("claude-event-translator");
 
 // ─── Typed event construction helper ───────────────────────────────────────
 // Events are provider ingress envelopes. The EventSink owns conversion to
@@ -231,6 +233,7 @@ interface ContentBlockState {
 
 export interface ClaudeEventTranslatorDeps {
 	readonly getSink: (ctx: ClaudeSessionContext) => EventSink | undefined;
+	readonly logger?: Logger;
 }
 
 export class ClaudeEventTranslator {
@@ -641,8 +644,29 @@ export class ClaudeEventTranslator {
 				}
 
 				case "init": {
-					// Store model info on context
-					ctx.currentModel = message.model;
+					const modelEvidence = {
+						...(ctx.currentModel ? { requestedModel: ctx.currentModel } : {}),
+						...(ctx.expectedApiModelId
+							? { expectedModel: ctx.expectedApiModelId }
+							: {}),
+						actualModel: message.model,
+					};
+					yield* this.push(
+						ctx,
+						makeProviderRuntimeEvent(
+							"turn.model_resolved",
+							ctx.sessionId,
+							modelEvidence,
+						),
+					);
+					if (
+						ctx.expectedApiModelId !== undefined &&
+						ctx.expectedApiModelId !== message.model
+					) {
+						(this.deps.logger ?? defaultLog).warn(
+							`Claude model drift: session=${ctx.sessionId} requested=${ctx.currentModel ?? "<none>"} expected=${ctx.expectedApiModelId} actual=${message.model}`,
+						);
+					}
 					yield* this.push(
 						ctx,
 						makeProviderRuntimeEvent("session.status", ctx.sessionId, {

@@ -1135,6 +1135,7 @@ export const ClaudeSDKInitializationResultSubsetSchema = Schema.Struct({
 		Schema.Struct({
 			value: Schema.String,
 			displayName: Schema.String,
+			resolvedModel: Schema.optional(Schema.String),
 			supportedEffortLevels: Schema.optional(Schema.Array(Schema.String)),
 		}),
 	),
