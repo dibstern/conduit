@@ -148,6 +148,29 @@ test.describe("Permission mode with a bound session", () => {
 			.toMatchObject({ sessionId: "sess-pm-001", mode: "auto" });
 	});
 
+	test("re-selecting the mode already shown still asserts it to the server", async ({
+		page,
+	}) => {
+		const { rpc } = await setup(page, boundInit);
+		await page
+			.locator(".connect-overlay")
+			.waitFor({ state: "hidden", timeout: 10_000 });
+
+		await selectAll(page);
+		await expect.poll(() => switchCalls(rpc).length).toBe(1);
+
+		// The server keeps the mode in memory only, so a daemon restart resets it
+		// to "ask" while this client still shows "All". If picking the mode the
+		// pill already displays short-circuits, the user has no way back to
+		// auto-approval without selecting some other mode first.
+		await selectAll(page);
+		await expect.poll(() => switchCalls(rpc).length).toBe(2);
+		await expect
+			.poll(() => switchCalls(rpc).at(-1)?.payload)
+			.toMatchObject({ sessionId: "sess-pm-001", mode: "auto" });
+		await expect(pill(page)).toContainText("All");
+	});
+
 	test("mode survives navigate away and back (server re-sync)", async ({
 		page,
 	}) => {

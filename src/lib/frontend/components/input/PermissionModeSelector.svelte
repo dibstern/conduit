@@ -40,10 +40,15 @@
 		dropdownOpen = !dropdownOpen;
 	}
 
+	/** Always re-assert to the server, even when the pill already shows this
+	 *  mode. The server keeps the mode in memory only, so a daemon restart
+	 *  resets it to "ask" while this client still believes "All" — and an
+	 *  equality short-circuit would make clicking "All" a silent no-op, with no
+	 *  way back to auto-approval short of picking another mode first. The RPC
+	 *  is idempotent, so asserting costs nothing and removes the trap. */
 	function selectMode(mode: SessionPermissionMode, e: MouseEvent) {
 		e.stopPropagation();
 		dropdownOpen = false;
-		if (mode === discoveryState.permissionMode) return;
 		const previousMode = discoveryState.permissionMode;
 		discoveryState.permissionMode = mode;
 		const projectSlug = getCurrentSlug();
