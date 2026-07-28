@@ -69,10 +69,45 @@ describe("SessionProjector", () => {
 			"session.renamed",
 			"session.status",
 			"session.provider_changed",
+			"session.deleted",
 			"turn.completed",
 			"turn.error",
 			"message.created",
 		]);
+	});
+
+	describe("session.deleted", () => {
+		it("deletes the session row", () => {
+			projector.project(
+				makeStored("session.created", "s1", {
+					sessionId: "s1",
+					title: "Doomed",
+					provider: "opencode",
+				} satisfies SessionCreatedPayload),
+				db,
+			);
+			expect(
+				db.queryOne<SessionRow>("SELECT * FROM sessions WHERE id = ?", ["s1"]),
+			).toBeDefined();
+
+			projector.project(
+				makeStored("session.deleted", "s1", { sessionId: "s1" }, 2),
+				db,
+			);
+
+			expect(
+				db.queryOne<SessionRow>("SELECT * FROM sessions WHERE id = ?", ["s1"]),
+			).toBeUndefined();
+		});
+
+		it("is a no-op for an already-absent row", () => {
+			expect(() =>
+				projector.project(
+					makeStored("session.deleted", "missing", { sessionId: "missing" }),
+					db,
+				),
+			).not.toThrow();
+		});
 	});
 
 	describe("session.created", () => {

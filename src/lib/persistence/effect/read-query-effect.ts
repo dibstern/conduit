@@ -56,6 +56,21 @@ export interface ReadQueryEffect {
 		{ readonly messages: MessageWithParts[]; readonly sequence: number },
 		ReadQueryEffectError | SqlError
 	>;
+
+	/**
+	 * Shell (session-list) snapshot for a streaming subscription: every session
+	 * row, recency-ordered, plus the sequence high-water mark those rows
+	 * reflect, read in ONE transaction so no append slips between the mark and
+	 * the rows. The mark is the session projector's cursor — the last sequence
+	 * whose projection COMMITTED — not `MAX(events.sequence)`, which could
+	 * claim an appended-but-not-yet-projected event and gap live delivery. The
+	 * cursor is read before the rows: under-claiming is safe for whole-row
+	 * upserts (idempotent re-emit); over-claiming would lose updates.
+	 */
+	readonly getSessionListSnapshot: () => Effect.Effect<
+		{ readonly rows: readonly SessionRow[]; readonly sequence: number },
+		ReadQueryEffectError | SqlError
+	>;
 }
 
 export class ReadQueryEffectTag extends Context.Tag("ReadQueryEffect")<
@@ -264,6 +279,32 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 				),
 			);
 
+	const getSessionListSnapshot = (): Effect.Effect<
+		{ readonly rows: readonly SessionRow[]; readonly sequence: number },
+		ReadQueryEffectError | SqlError
+	> =>
+		sql
+			.withTransaction(
+				Effect.gen(function* () {
+					const cursorRows = yield* sql<{ hwm: number | null }>`
+						SELECT last_applied_seq AS hwm FROM projector_cursors
+						WHERE projector_name = 'session'`;
+					const rows = yield* sql<SessionRow>`
+						SELECT * FROM sessions ORDER BY updated_at DESC`;
+					return { rows, sequence: cursorRows[0]?.hwm ?? 0 };
+				}),
+			)
+			.pipe(
+				Effect.mapError((e) =>
+					e instanceof ReadQueryEffectError
+						? e
+						: new ReadQueryEffectError({
+								operation: "getSessionListSnapshot",
+								cause: e,
+							}),
+				),
+			);
+
 	return {
 		getToolContent,
 		getSessionStatus,
@@ -272,5 +313,6 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 		listSessions,
 		getSessionMessagesWithParts,
 		getSessionDetailSnapshot,
+		getSessionListSnapshot,
 	} satisfies ReadQueryEffect;
 });

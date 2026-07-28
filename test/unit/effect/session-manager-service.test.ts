@@ -94,6 +94,9 @@ function makeReadQueryEffect(rows: readonly SessionRow[]): ReadQueryEffect {
 		getSessionDetailSnapshot: vi.fn(() =>
 			Effect.succeed({ messages: [], sequence: 0 }),
 		),
+		getSessionListSnapshot: vi.fn(() =>
+			Effect.succeed({ rows: [], sequence: 0 }),
+		),
 		getSessionMessagesWithParts: vi.fn(() => Effect.succeed([])),
 	};
 }

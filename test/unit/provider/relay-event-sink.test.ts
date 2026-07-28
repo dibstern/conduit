@@ -1,9 +1,11 @@
 import { Effect } from "effect";
 import { describe, expect, it, vi } from "vitest";
-import type { ProviderRuntimeEvent } from "../../../src/lib/contracts/providers/provider-runtime-event.js";
+import type {
+	ProviderRuntimeEvent,
+	ProviderRuntimeEventType,
+} from "../../../src/lib/contracts/providers/provider-runtime-event.js";
 import type {
 	CanonicalEvent,
-	CanonicalEventType,
 	EventPayloadMap,
 } from "../../../src/lib/persistence/events.js";
 import type { MissingPendingInteractions } from "../../../src/lib/provider/errors.js";
@@ -12,7 +14,7 @@ import type { RelayMessage } from "../../../src/lib/types.js";
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
-function makeEvent<T extends CanonicalEventType>(
+function makeEvent<T extends ProviderRuntimeEventType>(
 	type: T,
 	data: EventPayloadMap[T],
 	metadata: Record<string, unknown> = {},

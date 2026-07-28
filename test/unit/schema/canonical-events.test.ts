@@ -305,6 +305,20 @@ describe("Canonical event schemas", () => {
 			expect(Either.isRight(result)).toBe(true);
 		});
 
+		it("decodes session.deleted event", () => {
+			const raw = {
+				eventId: "evt_16b",
+				sessionId: "s1",
+				type: "session.deleted",
+				data: { sessionId: "s1" },
+				metadata: {},
+				provider: "opencode",
+				createdAt: Date.now(),
+			};
+			const result = Schema.decodeUnknownEither(CanonicalEventSchema)(raw);
+			expect(Either.isRight(result)).toBe(true);
+		});
+
 		it("decodes permission.asked event", () => {
 			const raw = {
 				eventId: "evt_17",

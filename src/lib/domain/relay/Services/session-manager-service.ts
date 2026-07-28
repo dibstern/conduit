@@ -29,6 +29,7 @@ import type {
 	SessionDetail,
 	SessionStatus,
 } from "../../../instance/sdk-types.js";
+import { ClaudeEventPersistEffectTag } from "../../../persistence/effect/claude-event-persist-effect.js";
 import { EventStoreEffectTag } from "../../../persistence/effect/event-store-effect.js";
 import { ProjectionRunnerEffectTag } from "../../../persistence/effect/projection-runner-effect.js";
 import { ReadQueryEffectTag } from "../../../persistence/effect/read-query-effect.js";
@@ -462,6 +463,53 @@ const createLocalSession = (title?: string) =>
 	}).pipe(Effect.withSpan("session.createLocalSession"));
 
 /**
+ * Append the durable `session.deleted` tombstone through the persist choke
+ * point (append → project → publish): the session projector deletes the row
+ * and the SessionEventBus signals streaming subscribers (the shell emits a
+ * `remove`, and resume-by-sequence sees touched-but-absent → `remove`). Child
+ * session ids ride in the payload, captured BEFORE the tombstone persists —
+ * the cascade nulls their `parent_id`, after which they can no longer be found
+ * by parent — so both live delivery and replay can signal each child's changed
+ * row. No-op when the SQLite persistence stack is not wired.
+ */
+const appendSessionDeletedTombstone = (sessionId: string) =>
+	Effect.gen(function* () {
+		const persistOption = yield* Effect.serviceOption(
+			ClaudeEventPersistEffectTag,
+		);
+		if (Option.isNone(persistOption)) return;
+
+		const readQueryOption = yield* Effect.serviceOption(ReadQueryEffectTag);
+		const rows =
+			readQueryOption._tag === "Some"
+				? (yield* readQueryOption.value.getSessionListSnapshot()).rows
+				: [];
+		const row = rows.find((r) => r.id === sessionId);
+		const childSessionIds = rows
+			.filter((r) => r.parent_id === sessionId)
+			.map((r) => r.id);
+
+		yield* persistOption.value.persistEvent(
+			canonicalEvent(
+				"session.deleted",
+				sessionId,
+				childSessionIds.length === 0
+					? { sessionId }
+					: { sessionId, childSessionIds },
+				{ provider: row?.provider ?? "opencode" },
+			),
+		);
+	}).pipe(
+		Effect.mapError(
+			(cause) =>
+				new SessionManagerError({
+					operation: "deleteSession.tombstone",
+					cause,
+				}),
+		),
+	);
+
+/**
  * Delete a session via the API and clear all associated state.
  */
 export const deleteSession = (sessionId: string) =>
@@ -476,6 +524,8 @@ export const deleteSession = (sessionId: string) =>
 					new SessionManagerError({ operation: "deleteSession", cause }),
 			),
 		);
+
+		yield* appendSessionDeletedTombstone(sessionId);
 
 		yield* Ref.update(stateRef, (s) => {
 			let cachedParentMap = HashMap.remove(s.cachedParentMap, sessionId);

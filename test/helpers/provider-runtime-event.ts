@@ -1,11 +1,13 @@
-import type { ProviderRuntimeEvent } from "../../src/lib/contracts/providers/provider-runtime-event.js";
+import type {
+	ProviderRuntimeEvent,
+	ProviderRuntimeEventType,
+} from "../../src/lib/contracts/providers/provider-runtime-event.js";
 import type {
 	CanonicalEvent,
-	CanonicalEventType,
 	EventPayloadMap,
 } from "../../src/lib/persistence/events.js";
 
-export function providerRuntimeEvent<K extends CanonicalEventType>(
+export function providerRuntimeEvent<K extends ProviderRuntimeEventType>(
 	type: K,
 	sessionId: string,
 	data: EventPayloadMap[K],
@@ -31,7 +33,8 @@ export function providerRuntimeEvent<K extends CanonicalEventType>(
 }
 
 export function providerRuntimeEventFromCanonical(
-	event: CanonicalEvent,
+	// Providers never emit conduit-initiated types (e.g. session.deleted).
+	event: Extract<CanonicalEvent, { type: ProviderRuntimeEventType }>,
 	options: {
 		readonly rawSourceKind?: string;
 	} = {},

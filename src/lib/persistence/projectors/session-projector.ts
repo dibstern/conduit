@@ -10,6 +10,7 @@ const SESSION_HANDLES = [
 	"session.renamed",
 	"session.status",
 	"session.provider_changed",
+	"session.deleted",
 	"turn.completed",
 	"turn.error",
 	"message.created",
@@ -27,6 +28,7 @@ function isAutoTitleRename(event: StoredEvent): boolean {
  * - `session.renamed`         -> UPDATE title
  * - `session.status`          -> UPDATE status
  * - `session.provider_changed`-> UPDATE provider
+ * - `session.deleted`         -> DELETE the session row
  * - `turn.completed`          -> UPDATE updated_at only
  * - `turn.error`              -> UPDATE updated_at only
  * - `message.created`         -> UPDATE last_message_at (P8 -- denormalized for efficient ordering)
@@ -124,6 +126,36 @@ export class SessionProjector implements Projector {
 				"UPDATE sessions SET provider = ?, updated_at = ? WHERE id = ?",
 				[event.data.newProvider, event.createdAt, event.data.sessionId],
 			);
+			return;
+		}
+
+		if (isEventType(event, "session.deleted")) {
+			// Read-model cascade (events stay durable): clear every table with an
+			// FK to sessions — child tables first, mirroring eviction's order —
+			// then orphan child sessions (their parent ref would otherwise block
+			// the delete) and drop the row itself.
+			const sessionId = event.data.sessionId;
+			db.execute(
+				"DELETE FROM message_parts WHERE message_id IN (SELECT id FROM messages WHERE session_id = ?)",
+				[sessionId],
+			);
+			db.execute("DELETE FROM pending_approvals WHERE session_id = ?", [
+				sessionId,
+			]);
+			db.execute("DELETE FROM activities WHERE session_id = ?", [sessionId]);
+			db.execute("DELETE FROM messages WHERE session_id = ?", [sessionId]);
+			db.execute("DELETE FROM turns WHERE session_id = ?", [sessionId]);
+			db.execute("DELETE FROM session_providers WHERE session_id = ?", [
+				sessionId,
+			]);
+			db.execute("DELETE FROM tool_content WHERE session_id = ?", [sessionId]);
+			db.execute("DELETE FROM provider_state WHERE session_id = ?", [
+				sessionId,
+			]);
+			db.execute("UPDATE sessions SET parent_id = NULL WHERE parent_id = ?", [
+				sessionId,
+			]);
+			db.execute("DELETE FROM sessions WHERE id = ?", [sessionId]);
 			return;
 		}
 

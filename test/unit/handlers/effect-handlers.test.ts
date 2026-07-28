@@ -927,6 +927,9 @@ describe("switchModelForSession", () => {
 				getSessionDetailSnapshot: vi.fn(() =>
 					Effect.succeed({ messages: [], sequence: 0 }),
 				),
+				getSessionListSnapshot: vi.fn(() =>
+					Effect.succeed({ rows: [], sequence: 0 }),
+				),
 				getSessionMessagesWithParts: vi.fn(() => Effect.succeed([])),
 			} satisfies ReadQueryEffect;
 
@@ -1407,6 +1410,9 @@ describe("handleGetToolContent", () => {
 				listSessions: vi.fn(() => Effect.succeed([])),
 				getSessionDetailSnapshot: vi.fn(() =>
 					Effect.succeed({ messages: [], sequence: 0 }),
+				),
+				getSessionListSnapshot: vi.fn(() =>
+					Effect.succeed({ rows: [], sequence: 0 }),
 				),
 				getSessionMessagesWithParts: vi.fn(() => Effect.succeed([])),
 			} satisfies ReadQueryEffect;
@@ -2532,6 +2538,9 @@ describe("handleNewSession", () => {
 				getSessionDetailSnapshot: vi.fn(() =>
 					Effect.succeed({ messages: [], sequence: 0 }),
 				),
+				getSessionListSnapshot: vi.fn(() =>
+					Effect.succeed({ rows: [], sequence: 0 }),
+				),
 				getSessionMessagesWithParts: vi.fn(() => Effect.succeed([])),
 			} satisfies ReadQueryEffect;
 			const layer = Layer.mergeAll(
@@ -2609,6 +2618,9 @@ describe("handleNewSession", () => {
 				listSessions: vi.fn(() => Effect.succeed([])),
 				getSessionDetailSnapshot: vi.fn(() =>
 					Effect.succeed({ messages: [], sequence: 0 }),
+				),
+				getSessionListSnapshot: vi.fn(() =>
+					Effect.succeed({ rows: [], sequence: 0 }),
 				),
 				getSessionMessagesWithParts: vi.fn(() => Effect.succeed([])),
 			} satisfies ReadQueryEffect;
@@ -3544,6 +3556,9 @@ describe("handleMessage", () => {
 				getSessionDetailSnapshot: vi.fn(() =>
 					Effect.succeed({ messages: [], sequence: 0 }),
 				),
+				getSessionListSnapshot: vi.fn(() =>
+					Effect.succeed({ rows: [], sequence: 0 }),
+				),
 				getSessionMessagesWithParts: vi.fn(() =>
 					Effect.succeed([
 						{
@@ -3916,6 +3931,9 @@ describe("handleMessage", () => {
 				listSessions: vi.fn(() => Effect.succeed([])),
 				getSessionDetailSnapshot: vi.fn(() =>
 					Effect.succeed({ messages: [], sequence: 0 }),
+				),
+				getSessionListSnapshot: vi.fn(() =>
+					Effect.succeed({ rows: [], sequence: 0 }),
 				),
 				getSessionMessagesWithParts: vi.fn(() => Effect.succeed([])),
 			} satisfies ReadQueryEffect;

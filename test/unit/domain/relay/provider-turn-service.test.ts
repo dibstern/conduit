@@ -146,6 +146,9 @@ const makeReadQuery = (
 	getSessionDetailSnapshot: vi.fn(() =>
 		Effect.succeed({ messages: [], sequence: 0 }),
 	),
+	getSessionListSnapshot: vi.fn(() =>
+		Effect.succeed({ rows: [], sequence: 0 }),
+	),
 });
 
 const makePersistService = (

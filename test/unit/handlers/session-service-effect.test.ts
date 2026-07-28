@@ -142,6 +142,9 @@ function makeEmptySessionReadQuery(provider: string): ReadQueryEffect {
 		getSessionDetailSnapshot: vi.fn(() =>
 			Effect.succeed({ messages: [], sequence: 0 }),
 		),
+		getSessionListSnapshot: vi.fn(() =>
+			Effect.succeed({ rows: [], sequence: 0 }),
+		),
 		getSessionMessagesWithParts: vi.fn(() => Effect.succeed([])),
 	};
 }
@@ -234,6 +237,9 @@ describe("session handlers with Effect-native model service", () => {
 				listSessions: vi.fn(() => Effect.succeed([])),
 				getSessionDetailSnapshot: vi.fn(() =>
 					Effect.succeed({ messages: [], sequence: 0 }),
+				),
+				getSessionListSnapshot: vi.fn(() =>
+					Effect.succeed({ rows: [], sequence: 0 }),
 				),
 				getSessionMessagesWithParts: vi.fn(() =>
 					Effect.succeed([
@@ -386,6 +392,9 @@ describe("session handlers with Effect-native model service", () => {
 			// projection produces today (structure without content).
 			getSessionDetailSnapshot: vi.fn(() =>
 				Effect.succeed({ messages: [], sequence: 0 }),
+			),
+			getSessionListSnapshot: vi.fn(() =>
+				Effect.succeed({ rows: [], sequence: 0 }),
 			),
 			getSessionMessagesWithParts: vi.fn(() =>
 				Effect.succeed([

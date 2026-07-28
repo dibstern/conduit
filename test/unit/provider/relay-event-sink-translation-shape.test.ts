@@ -1,16 +1,16 @@
 import { Effect } from "effect";
 import { describe, expect, it } from "vitest";
-import type { ProviderRuntimeEvent } from "../../../src/lib/contracts/providers/provider-runtime-event.js";
 import type {
-	CanonicalEventType,
-	EventPayloadMap,
-} from "../../../src/lib/persistence/events.js";
+	ProviderRuntimeEvent,
+	ProviderRuntimeEventType,
+} from "../../../src/lib/contracts/providers/provider-runtime-event.js";
+import type { EventPayloadMap } from "../../../src/lib/persistence/events.js";
 
 // We need to test translateCanonicalEvent directly. It's currently a
 // module-private function. We'll export it in step 3 and import here.
 // For now, test through the public createRelayEventSink.push() surface.
 
-function makeEvent<T extends CanonicalEventType>(
+function makeEvent<T extends ProviderRuntimeEventType>(
 	type: T,
 	data: EventPayloadMap[T],
 	metadata: Record<string, unknown> = {},
@@ -32,7 +32,7 @@ describe("translateCanonicalEvent — TranslationResult shape", () => {
 	// Payload-carrying events MUST produce { kind: "emit", messages: [...] }
 	// with at least one message.
 	const EMIT_CASES: Array<{
-		type: CanonicalEventType;
+		type: ProviderRuntimeEventType;
 		data: Record<string, unknown>;
 		meta?: Record<string, unknown>;
 		expectedTypes: string[];
@@ -157,7 +157,7 @@ describe("translateCanonicalEvent — TranslationResult shape", () => {
 
 	// Intentionally-silent events MUST NOT produce relay messages.
 	const SILENT_CASES: Array<{
-		type: CanonicalEventType;
+		type: ProviderRuntimeEventType;
 		data: Record<string, unknown>;
 	}> = [
 		{ type: "tool.running", data: { messageId: "m", partId: "p" } },

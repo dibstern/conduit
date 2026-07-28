@@ -80,6 +80,7 @@ export const makeSessionProjector = (): EffectProjector => ({
 		"session.renamed",
 		"session.status",
 		"session.provider_changed",
+		"session.deleted",
 		"turn.completed",
 		"turn.error",
 		"message.created",
@@ -143,6 +144,24 @@ export const makeSessionProjector = (): EffectProjector => ({
 
 			if (isEventType(event, "session.provider_changed")) {
 				yield* sql`UPDATE sessions SET provider = ${event.data.newProvider}, updated_at = ${event.createdAt} WHERE id = ${event.data.sessionId}`;
+				return;
+			}
+
+			if (isEventType(event, "session.deleted")) {
+				// Read-model cascade (events stay durable): clear every table with
+				// an FK to sessions — child tables first, mirroring eviction's
+				// order — then orphan child sessions and drop the row itself.
+				const sessionId = event.data.sessionId;
+				yield* sql`DELETE FROM message_parts WHERE message_id IN (SELECT id FROM messages WHERE session_id = ${sessionId})`;
+				yield* sql`DELETE FROM pending_approvals WHERE session_id = ${sessionId}`;
+				yield* sql`DELETE FROM activities WHERE session_id = ${sessionId}`;
+				yield* sql`DELETE FROM messages WHERE session_id = ${sessionId}`;
+				yield* sql`DELETE FROM turns WHERE session_id = ${sessionId}`;
+				yield* sql`DELETE FROM session_providers WHERE session_id = ${sessionId}`;
+				yield* sql`DELETE FROM tool_content WHERE session_id = ${sessionId}`;
+				yield* sql`DELETE FROM provider_state WHERE session_id = ${sessionId}`;
+				yield* sql`UPDATE sessions SET parent_id = NULL WHERE parent_id = ${sessionId}`;
+				yield* sql`DELETE FROM sessions WHERE id = ${sessionId}`;
 				return;
 			}
 

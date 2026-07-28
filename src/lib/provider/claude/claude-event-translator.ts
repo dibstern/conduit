@@ -22,9 +22,11 @@
  */
 import { randomUUID } from "node:crypto";
 import { Effect } from "effect";
-import type { ProviderRuntimeEvent } from "../../contracts/providers/provider-runtime-event.js";
 import type {
-	CanonicalEventType,
+	ProviderRuntimeEvent,
+	ProviderRuntimeEventType,
+} from "../../contracts/providers/provider-runtime-event.js";
+import type {
 	CanonicalToolInput,
 	EventPayloadMap,
 } from "../../persistence/events.js";
@@ -50,7 +52,7 @@ const PROVIDER = "claude" as const;
 // Events are provider ingress envelopes. The EventSink owns conversion to
 // durable domain events before append/projection.
 
-function makeProviderRuntimeEvent<K extends CanonicalEventType>(
+function makeProviderRuntimeEvent<K extends ProviderRuntimeEventType>(
 	type: K,
 	sessionId: string,
 	data: EventPayloadMap[K],

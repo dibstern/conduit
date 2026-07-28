@@ -44,14 +44,16 @@ import {
 	decodeClaudeSDKOptionsJsonShape,
 	decodeClaudeSDKUserMessage,
 } from "../../contracts/providers/claude-agent-sdk.js";
-import type { ProviderRuntimeEvent } from "../../contracts/providers/provider-runtime-event.js";
+import type {
+	ProviderRuntimeEvent,
+	ProviderRuntimeEventType,
+} from "../../contracts/providers/provider-runtime-event.js";
 import { createLogger } from "../../logger.js";
 import {
 	type ClaudeEventPersistEffect,
 	ClaudeEventPersistEffectTag,
 } from "../../persistence/effect/claude-event-persist-effect.js";
 import {
-	type CanonicalEventType,
 	createEventId,
 	type EventPayloadMap,
 } from "../../persistence/events.js";
@@ -112,7 +114,7 @@ const SUBAGENT_POLL_TIMEOUT_MS = 2000;
 const MAX_DECODE_ERROR_LENGTH = 800;
 const MAX_DECODE_PAYLOAD_LOG_LENGTH = 1200;
 
-function claudeRuntimeEvent<K extends CanonicalEventType>(
+function claudeRuntimeEvent<K extends ProviderRuntimeEventType>(
 	type: K,
 	sessionId: string,
 	data: EventPayloadMap[K],

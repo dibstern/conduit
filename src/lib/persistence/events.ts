@@ -55,6 +55,7 @@ export const CANONICAL_EVENT_TYPES = [
 	"session.status",
 	"session.compaction",
 	"session.provider_changed",
+	"session.deleted",
 	"permission.asked",
 	"permission.resolved",
 	"question.asked",
@@ -228,6 +229,17 @@ export interface SessionProviderChangedPayload {
 	readonly newProvider: string;
 }
 
+export interface SessionDeletedPayload {
+	readonly sessionId: string;
+	/**
+	 * Sessions whose `parent_id` the projector cascade nulls when this session
+	 * is deleted, captured BEFORE the tombstone persists (afterwards the
+	 * children can no longer be found by parent). Optional: historical
+	 * tombstones lack it, and it is omitted when the session has no children.
+	 */
+	readonly childSessionIds?: readonly string[];
+}
+
 export interface PermissionAskedPayload {
 	readonly id: string;
 	readonly sessionId: string;
@@ -278,6 +290,7 @@ export interface EventPayloadMap {
 	"session.status": SessionStatusPayload;
 	"session.compaction": SessionCompactionPayload;
 	"session.provider_changed": SessionProviderChangedPayload;
+	"session.deleted": SessionDeletedPayload;
 	"permission.asked": PermissionAskedPayload;
 	"permission.resolved": PermissionResolvedPayload;
 	"question.asked": QuestionAskedPayload;
@@ -601,6 +614,13 @@ const SessionProviderChangedPayloadSchema = Schema.Struct({
 	newProvider: Schema.String,
 });
 
+const SessionDeletedPayloadSchema = Schema.Struct({
+	sessionId: Schema.String,
+	childSessionIds: Schema.optionalWith(Schema.Array(Schema.String), {
+		exact: true,
+	}),
+});
+
 const PermissionAskedPayloadSchema = Schema.Struct({
 	id: Schema.String,
 	sessionId: Schema.String,
@@ -714,6 +734,10 @@ const SessionProviderChangedEventSchema = eventEnvelope(
 	"session.provider_changed",
 	SessionProviderChangedPayloadSchema,
 );
+const SessionDeletedEventSchema = eventEnvelope(
+	"session.deleted",
+	SessionDeletedPayloadSchema,
+);
 const PermissionAskedEventSchema = eventEnvelope(
 	"permission.asked",
 	PermissionAskedPayloadSchema,
@@ -731,7 +755,7 @@ const QuestionResolvedEventSchema = eventEnvelope(
 	QuestionResolvedPayloadSchema,
 );
 
-// ─── Canonical Event Schema (Union of all 22 event types) ──────────────────
+// ─── Canonical Event Schema (Union of all 23 event types) ──────────────────
 
 export const CanonicalEventSchema = Schema.Union(
 	MessageCreatedEventSchema,
@@ -752,6 +776,7 @@ export const CanonicalEventSchema = Schema.Union(
 	SessionStatusEventSchema,
 	SessionCompactionEventSchema,
 	SessionProviderChangedEventSchema,
+	SessionDeletedEventSchema,
 	PermissionAskedEventSchema,
 	PermissionResolvedEventSchema,
 	QuestionAskedEventSchema,
@@ -778,6 +803,7 @@ const PAYLOAD_REQUIRED_FIELDS: Record<CanonicalEventType, readonly string[]> = {
 	"session.status": ["sessionId", "status"],
 	"session.compaction": ["sessionId", "state", "detail"],
 	"session.provider_changed": ["sessionId", "oldProvider", "newProvider"],
+	"session.deleted": ["sessionId"],
 	"message.created": ["messageId", "role", "sessionId"],
 	"text.delta": ["messageId", "partId", "text"],
 	"thinking.start": ["messageId", "partId"],
