@@ -5,6 +5,16 @@ const DIRECT_ANTHROPIC_ENV_KEYS = [
 	"ANTHROPIC_AUTH_TOKEN",
 	"ANTHROPIC_BASE_URL",
 	"ANTHROPIC_CUSTOM_HEADERS",
+	// Model-alias overrides: a daemon launched from a shell where Claude Code
+	// (or ccs) applied a settings env block would silently reroute every
+	// session's alias resolution — e.g. compaction resolving "opus" to a
+	// Bedrock inference profile an OAuth session can't use. Sessions must get
+	// alias resolution from their config dir, not the daemon's launch shell.
+	"ANTHROPIC_MODEL",
+	"ANTHROPIC_DEFAULT_OPUS_MODEL",
+	"ANTHROPIC_DEFAULT_SONNET_MODEL",
+	"ANTHROPIC_DEFAULT_HAIKU_MODEL",
+	"ANTHROPIC_SMALL_FAST_MODEL",
 ] as const;
 
 export function makeClaudeSdkEnv(opts?: {

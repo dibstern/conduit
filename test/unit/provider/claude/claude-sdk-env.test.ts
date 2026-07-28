@@ -30,4 +30,16 @@ describe("makeClaudeSdkEnv", () => {
 			"/daemon/claude",
 		);
 	});
+
+	it("strips model-alias overrides inherited from the daemon's launch shell", () => {
+		vi.stubEnv("ANTHROPIC_DEFAULT_OPUS_MODEL", "au.anthropic.claude-opus-5");
+		vi.stubEnv("ANTHROPIC_MODEL", "au.anthropic.claude-opus-5");
+		vi.stubEnv("ANTHROPIC_SMALL_FAST_MODEL", "au.anthropic.claude-haiku-4-5");
+
+		const env = makeClaudeSdkEnv();
+
+		expect(env).not.toHaveProperty("ANTHROPIC_DEFAULT_OPUS_MODEL");
+		expect(env).not.toHaveProperty("ANTHROPIC_MODEL");
+		expect(env).not.toHaveProperty("ANTHROPIC_SMALL_FAST_MODEL");
+	});
 });
