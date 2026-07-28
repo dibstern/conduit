@@ -659,7 +659,13 @@ export async function createProjectRelay(
 	const openCodeApiLayer = OpenCodeAPILive.pipe(Layer.provide(configLayer));
 	const persistenceEffectLayer =
 		config.persistenceDbPath != null
-			? makePersistenceEffectLayer(config.persistenceDbPath)
+			? makePersistenceEffectLayer(
+					config.persistenceDbPath,
+					undefined,
+					// Same shared bus the ingestion layer merges below, so Claude
+					// persist writes (user messages) reach live detail subscriptions.
+					SessionEventBusLive,
+				)
 			: undefined;
 	const providerRuntimeIngestionLayer =
 		persistenceEffectLayer != null

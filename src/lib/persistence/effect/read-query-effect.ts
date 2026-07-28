@@ -40,12 +40,48 @@ export interface ReadQueryEffect {
 	readonly getSessionMessagesWithParts: (
 		sessionId: string,
 	) => Effect.Effect<MessageWithParts[], ReadQueryEffectError | SqlError>;
+
+	/**
+	 * Session-detail snapshot for a streaming subscription: the session's
+	 * projected transcript rows plus the sequence high-water mark those rows
+	 * reflect, read in ONE transaction so no append slips between the rows and
+	 * the mark. The mark is `MAX(messages.last_applied_seq)` — the per-message
+	 * watermark the message projector co-commits with every applied append-type
+	 * delta — not `MAX(events.sequence)`, so it never claims deltas that are
+	 * appended-but-not-yet-projected (which would gap live delivery).
+	 */
+	readonly getSessionDetailSnapshot: (
+		sessionId: string,
+	) => Effect.Effect<
+		{ readonly messages: MessageWithParts[]; readonly sequence: number },
+		ReadQueryEffectError | SqlError
+	>;
 }
 
 export class ReadQueryEffectTag extends Context.Tag("ReadQueryEffect")<
 	ReadQueryEffectTag,
 	ReadQueryEffect
 >() {}
+
+/** Attach each part to its message, preserving message and part order. */
+function groupMessagesWithParts(
+	messages: readonly MessageRow[],
+	parts: readonly MessagePartRow[],
+): MessageWithParts[] {
+	const partsByMessage = new Map<string, MessagePartRow[]>();
+	for (const part of parts) {
+		let existing = partsByMessage.get(part.message_id);
+		if (!existing) {
+			existing = [];
+			partsByMessage.set(part.message_id, existing);
+		}
+		existing.push(part);
+	}
+	return messages.map((message) => ({
+		...message,
+		parts: partsByMessage.get(message.id) ?? [],
+	}));
+}
 
 export const makeReadQueryEffect = Effect.gen(function* () {
 	const sql = yield* SqlClient.SqlClient;
@@ -168,20 +204,7 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 				JOIN target_messages tm ON mp.message_id = tm.id
 				ORDER BY mp.message_id, mp.sort_order`;
 
-			const partsByMessage = new Map<string, MessagePartRow[]>();
-			for (const part of parts) {
-				let existing = partsByMessage.get(part.message_id);
-				if (!existing) {
-					existing = [];
-					partsByMessage.set(part.message_id, existing);
-				}
-				existing.push(part);
-			}
-
-			return messages.map((message) => ({
-				...message,
-				parts: partsByMessage.get(message.id) ?? [],
-			}));
+			return groupMessagesWithParts(messages, parts);
 		}).pipe(
 			Effect.mapError((e) =>
 				e instanceof ReadQueryEffectError
@@ -193,6 +216,54 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 			),
 		);
 
+	const getSessionDetailSnapshot = (
+		sessionId: string,
+	): Effect.Effect<
+		{ readonly messages: MessageWithParts[]; readonly sequence: number },
+		ReadQueryEffectError | SqlError
+	> =>
+		sql
+			.withTransaction(
+				Effect.gen(function* () {
+					const messages = yield* sql<MessageRow>`
+						SELECT * FROM messages
+						WHERE session_id = ${sessionId}
+						ORDER BY created_at ASC, id ASC`;
+
+					let parts: readonly MessagePartRow[] = [];
+					if (messages.length > 0) {
+						parts = yield* sql<MessagePartRow>`
+							WITH target_messages AS (
+								SELECT id FROM messages
+								WHERE session_id = ${sessionId}
+								ORDER BY created_at ASC, id ASC
+							)
+							SELECT mp.* FROM message_parts mp
+							JOIN target_messages tm ON mp.message_id = tm.id
+							ORDER BY mp.message_id, mp.sort_order`;
+					}
+
+					const hwmRows = yield* sql<{ hwm: number | null }>`
+						SELECT MAX(last_applied_seq) AS hwm FROM messages
+						WHERE session_id = ${sessionId}`;
+
+					return {
+						messages: groupMessagesWithParts(messages, parts),
+						sequence: hwmRows[0]?.hwm ?? 0,
+					};
+				}),
+			)
+			.pipe(
+				Effect.mapError((e) =>
+					e instanceof ReadQueryEffectError
+						? e
+						: new ReadQueryEffectError({
+								operation: "getSessionDetailSnapshot",
+								cause: e,
+							}),
+				),
+			);
+
 	return {
 		getToolContent,
 		getSessionStatus,
@@ -200,5 +271,6 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 		getAllSessionStatuses,
 		listSessions,
 		getSessionMessagesWithParts,
+		getSessionDetailSnapshot,
 	} satisfies ReadQueryEffect;
 });

@@ -320,6 +320,9 @@ describe("SessionManager Effect", () => {
 				getSession: vi.fn(() => Effect.fail(readQueryFailure)),
 				getAllSessionStatuses: vi.fn(() => Effect.succeed({})),
 				listSessions: vi.fn(() => Effect.succeed([])),
+				getSessionDetailSnapshot: vi.fn(() =>
+					Effect.succeed({ messages: [], sequence: 0 }),
+				),
 				getSessionMessagesWithParts: vi.fn(() => Effect.succeed([])),
 			};
 			const layer = makeLiveServiceLayer(mockApi, filename, readQuery);

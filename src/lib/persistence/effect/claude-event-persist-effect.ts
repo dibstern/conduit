@@ -1,6 +1,7 @@
 import { SqlClient } from "@effect/sql";
 import type { SqlError } from "@effect/sql/SqlError";
-import { Context, Data, Effect, Schema } from "effect";
+import { Context, Data, Effect, Option, Schema } from "effect";
+import { SessionEventBusTag } from "../../domain/relay/Services/session-event-bus.js";
 import {
 	type CanonicalEvent,
 	canonicalEvent,
@@ -22,15 +23,18 @@ export class ClaudeEventPersistEffectError extends Data.TaggedError(
 export interface ClaudeEventPersistEffect {
 	readonly persistEvent: (
 		event: CanonicalEvent,
+		options?: { readonly publish?: boolean },
 	) => Effect.Effect<void, ClaudeEventPersistEffectError>;
 
 	readonly persistEvents: (
 		events: readonly CanonicalEvent[],
+		options?: { readonly publish?: boolean },
 	) => Effect.Effect<void, ClaudeEventPersistEffectError>;
 
 	readonly persistUserMessage: (
 		sessionId: string,
 		text: string,
+		options?: { readonly publish?: boolean },
 	) => Effect.Effect<void, ClaudeEventPersistEffectError>;
 
 	readonly persistClaudeSubagent: (input: {
@@ -70,6 +74,11 @@ export const makeClaudeEventPersistEffect = Effect.gen(function* () {
 	const sql = yield* SqlClient.SqlClient;
 	const eventStore = yield* EventStoreEffectTag;
 	const projectionRunner = yield* ProjectionRunnerEffectTag;
+	// Optional so minimal harnesses (and non-relay persistence) need not wire the
+	// bus. Production provides the SAME shared SessionEventBus the ingestion
+	// choke point uses, so streaming subscriptions see Claude-persisted writes
+	// (notably user messages) live rather than only on resume/replay.
+	const sessionEventBus = yield* Effect.serviceOption(SessionEventBusTag);
 
 	const withSql = <A, E>(
 		effect: Effect.Effect<A, E, SqlClient.SqlClient>,
@@ -108,6 +117,20 @@ export const makeClaudeEventPersistEffect = Effect.gen(function* () {
 	): Effect.Effect<void, ProjectionRunnerError | SqlError> =>
 		withSql(projectionRunner.projectBatch(stored));
 
+	// Post-commit change signal, mirroring the ingestion choke point. Published
+	// AFTER projection commits so a bus signal always implies its projection is
+	// durable. Gated by `publish` (defaults on when a bus is wired) for callers
+	// that must stay silent, e.g. history replay.
+	const publishStored = (
+		stored: readonly StoredEvent[],
+		options?: { readonly publish?: boolean },
+	): Effect.Effect<void> =>
+		Option.isSome(sessionEventBus) &&
+		options?.publish !== false &&
+		stored.length > 0
+			? sessionEventBus.value.publish(stored)
+			: Effect.void;
+
 	const mapPersistError =
 		(operation: string) =>
 		(cause: unknown): ClaudeEventPersistEffectError =>
@@ -115,18 +138,41 @@ export const makeClaudeEventPersistEffect = Effect.gen(function* () {
 				? cause
 				: new ClaudeEventPersistEffectError({ operation, cause });
 
+	// Append → project → publish as ONE all-or-nothing, uninterruptible region:
+	// - projectBatch (unlike the failure-swallowing projectEvent) FAILS when a
+	//   projector fails and rolls the projection transaction back, so the bus is
+	//   never signalled for a projection that did not commit — "a bus signal
+	//   implies committed projection". This matches persistEvents /
+	//   persistUserMessage and the ingestion service's batch path. (Ingestion's
+	//   single-event path still swallows-then-publishes; recorded out of scope.)
+	// - uninterruptible: an interrupt cannot land between the projection commit
+	//   and the publish, which would leave durable+projected work that no live
+	//   subscriber ever hears about (no later catch-up republishes it).
+	const commitAndSignal = (
+		events: readonly CanonicalEvent[],
+		options?: { readonly publish?: boolean },
+	): Effect.Effect<void, PersistFailure> =>
+		Effect.uninterruptible(
+			Effect.gen(function* () {
+				const stored = yield* eventStore.appendBatch(events);
+				yield* projectBatch(stored);
+				yield* publishStored(stored, options);
+			}),
+		);
+
 	const persistEvent = (
 		event: CanonicalEvent,
+		options?: { readonly publish?: boolean },
 	): Effect.Effect<void, ClaudeEventPersistEffectError> =>
 		Effect.gen(function* () {
 			yield* ensureRecovered();
 			yield* ensureSession(event.sessionId, "claude");
-			const stored = yield* eventStore.append(event);
-			yield* projectEvent(stored);
+			yield* commitAndSignal([event], options);
 		}).pipe(Effect.mapError(mapPersistError("persistEvent")));
 
 	const persistEvents = (
 		events: readonly CanonicalEvent[],
+		options?: { readonly publish?: boolean },
 	): Effect.Effect<void, ClaudeEventPersistEffectError> =>
 		Effect.gen(function* () {
 			if (events.length === 0) return;
@@ -134,13 +180,13 @@ export const makeClaudeEventPersistEffect = Effect.gen(function* () {
 			for (const sessionId of new Set(events.map((event) => event.sessionId))) {
 				yield* ensureSession(sessionId, "claude");
 			}
-			const stored = yield* eventStore.appendBatch(events);
-			yield* projectBatch(stored);
+			yield* commitAndSignal(events, options);
 		}).pipe(Effect.mapError(mapPersistError("persistEvents")));
 
 	const persistUserMessage = (
 		sessionId: string,
 		text: string,
+		options?: { readonly publish?: boolean },
 	): Effect.Effect<void, ClaudeEventPersistEffectError> =>
 		Effect.gen(function* () {
 			yield* ensureRecovered();
@@ -148,39 +194,41 @@ export const makeClaudeEventPersistEffect = Effect.gen(function* () {
 
 			const now = Date.now();
 			const userMsgId = crypto.randomUUID();
-			const stored = yield* eventStore.appendBatch([
-				canonicalEvent(
-					"session.created",
-					sessionId,
-					{
+			yield* commitAndSignal(
+				[
+					canonicalEvent(
+						"session.created",
 						sessionId,
-						title: "Claude Session",
-						provider: "claude",
-					},
-					{ provider: "claude", createdAt: now },
-				),
-				canonicalEvent(
-					"message.created",
-					sessionId,
-					{
-						messageId: userMsgId,
-						role: "user",
+						{
+							sessionId,
+							title: "Claude Session",
+							provider: "claude",
+						},
+						{ provider: "claude", createdAt: now },
+					),
+					canonicalEvent(
+						"message.created",
 						sessionId,
-					},
-					{ provider: "claude", createdAt: now },
-				),
-				canonicalEvent(
-					"text.delta",
-					sessionId,
-					{
-						messageId: userMsgId,
-						partId: `${userMsgId}-0`,
-						text,
-					},
-					{ provider: "claude", createdAt: now },
-				),
-			]);
-			yield* projectBatch(stored);
+						{
+							messageId: userMsgId,
+							role: "user",
+							sessionId,
+						},
+						{ provider: "claude", createdAt: now },
+					),
+					canonicalEvent(
+						"text.delta",
+						sessionId,
+						{
+							messageId: userMsgId,
+							partId: `${userMsgId}-0`,
+							text,
+						},
+						{ provider: "claude", createdAt: now },
+					),
+				],
+				options,
+			);
 		}).pipe(Effect.mapError(mapPersistError("persistUserMessage")));
 
 	const ensureClaudeSubagentSession: ClaudeEventPersistEffect["ensureClaudeSubagentSession"] =

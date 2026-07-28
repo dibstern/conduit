@@ -143,6 +143,9 @@ const makeReadQuery = (
 	getAllSessionStatuses: vi.fn(() => Effect.succeed({})),
 	listSessions: vi.fn(() => Effect.succeed([])),
 	getSessionMessagesWithParts,
+	getSessionDetailSnapshot: vi.fn(() =>
+		Effect.succeed({ messages: [], sequence: 0 }),
+	),
 });
 
 const makePersistService = (

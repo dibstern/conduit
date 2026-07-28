@@ -924,6 +924,9 @@ describe("switchModelForSession", () => {
 				),
 				getAllSessionStatuses: vi.fn(() => Effect.succeed({})),
 				listSessions: vi.fn(() => Effect.succeed([])),
+				getSessionDetailSnapshot: vi.fn(() =>
+					Effect.succeed({ messages: [], sequence: 0 }),
+				),
 				getSessionMessagesWithParts: vi.fn(() => Effect.succeed([])),
 			} satisfies ReadQueryEffect;
 
@@ -1402,6 +1405,9 @@ describe("handleGetToolContent", () => {
 				getSession: vi.fn(() => Effect.succeed(undefined)),
 				getAllSessionStatuses: vi.fn(() => Effect.succeed({})),
 				listSessions: vi.fn(() => Effect.succeed([])),
+				getSessionDetailSnapshot: vi.fn(() =>
+					Effect.succeed({ messages: [], sequence: 0 }),
+				),
 				getSessionMessagesWithParts: vi.fn(() => Effect.succeed([])),
 			} satisfies ReadQueryEffect;
 
@@ -2523,6 +2529,9 @@ describe("handleNewSession", () => {
 				),
 				getAllSessionStatuses: vi.fn(() => Effect.succeed({})),
 				listSessions: vi.fn(() => Effect.succeed([])),
+				getSessionDetailSnapshot: vi.fn(() =>
+					Effect.succeed({ messages: [], sequence: 0 }),
+				),
 				getSessionMessagesWithParts: vi.fn(() => Effect.succeed([])),
 			} satisfies ReadQueryEffect;
 			const layer = Layer.mergeAll(
@@ -2598,6 +2607,9 @@ describe("handleNewSession", () => {
 				),
 				getAllSessionStatuses: vi.fn(() => Effect.succeed({})),
 				listSessions: vi.fn(() => Effect.succeed([])),
+				getSessionDetailSnapshot: vi.fn(() =>
+					Effect.succeed({ messages: [], sequence: 0 }),
+				),
 				getSessionMessagesWithParts: vi.fn(() => Effect.succeed([])),
 			} satisfies ReadQueryEffect;
 			const sessionManagerService = makeMockSessionManagerService({
@@ -3529,6 +3541,9 @@ describe("handleMessage", () => {
 				getSession: vi.fn(() => Effect.succeed(undefined)),
 				getAllSessionStatuses: vi.fn(() => Effect.succeed({})),
 				listSessions: vi.fn(() => Effect.succeed([])),
+				getSessionDetailSnapshot: vi.fn(() =>
+					Effect.succeed({ messages: [], sequence: 0 }),
+				),
 				getSessionMessagesWithParts: vi.fn(() =>
 					Effect.succeed([
 						{
@@ -3899,6 +3914,9 @@ describe("handleMessage", () => {
 				),
 				getAllSessionStatuses: vi.fn(() => Effect.succeed({})),
 				listSessions: vi.fn(() => Effect.succeed([])),
+				getSessionDetailSnapshot: vi.fn(() =>
+					Effect.succeed({ messages: [], sequence: 0 }),
+				),
 				getSessionMessagesWithParts: vi.fn(() => Effect.succeed([])),
 			} satisfies ReadQueryEffect;
 			const engine = {

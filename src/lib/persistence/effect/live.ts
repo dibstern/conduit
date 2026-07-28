@@ -7,6 +7,7 @@ import {
 	type PersistenceError,
 	type PersistenceServiceTag,
 } from "../../domain/persistence/Services/persistence-service.js";
+import type { SessionEventBusTag } from "../../domain/relay/Services/session-event-bus.js";
 import {
 	ClaudeEventPersistEffectTag,
 	makeClaudeEventPersistEffect,
@@ -57,6 +58,12 @@ export type PersistenceEffectRuntime = ManagedRuntime.ManagedRuntime<
 export function makePersistenceEffectLayer(
 	filename: string,
 	projectors: readonly EffectProjector[] = createAllEffectProjectors(),
+	// When supplied, the SAME shared bus layer used by the ingestion choke point.
+	// Wiring it here lets ClaudeEventPersistEffect publish committed writes (e.g.
+	// user messages) as a post-commit change signal. Omitted → persist stays
+	// silent (serviceOption resolves None). Must be the shared instance so all
+	// publishers and subscribers meet on one PubSub under Effect memoization.
+	sessionEventBusLayer?: Layer.Layer<SessionEventBusTag>,
 ) {
 	const sqliteLayer = SqliteNode.layer({ filename }).pipe(
 		Layer.provide(Reactivity.layer),
@@ -93,12 +100,19 @@ export function makePersistenceEffectLayer(
 		makeProviderStateEffect,
 	).pipe(Layer.provide(baseLayer));
 
+	const claudeEventPersistDeps = Layer.mergeAll(
+		baseLayer,
+		eventStoreLayer,
+		projectionRunnerLayer,
+	);
 	const claudeEventPersistLayer = Layer.effect(
 		ClaudeEventPersistEffectTag,
 		makeClaudeEventPersistEffect,
 	).pipe(
 		Layer.provide(
-			Layer.mergeAll(baseLayer, eventStoreLayer, projectionRunnerLayer),
+			sessionEventBusLayer
+				? Layer.merge(claudeEventPersistDeps, sessionEventBusLayer)
+				: claudeEventPersistDeps,
 		),
 	);
 
