@@ -102,4 +102,64 @@ describe("dismiss", () => {
 
 		expect(onDismiss).not.toHaveBeenCalled();
 	});
+
+	it("dismisses only the topmost stacked surface on Escape", async () => {
+		const lowerOnDismiss = vi.fn();
+		const upperOnDismiss = vi.fn();
+		render(DismissHost, {
+			props: { options: { onDismiss: lowerOnDismiss } },
+		});
+		const upper = render(DismissHost, {
+			props: { options: { onDismiss: upperOnDismiss } },
+		});
+
+		await fireEvent.keyDown(document, { key: "Escape" });
+
+		expect(lowerOnDismiss).not.toHaveBeenCalled();
+		expect(upperOnDismiss).toHaveBeenCalledOnce();
+
+		upper.unmount();
+		await fireEvent.keyDown(document, { key: "Escape" });
+
+		expect(lowerOnDismiss).toHaveBeenCalledOnce();
+		expect(upperOnDismiss).toHaveBeenCalledOnce();
+	});
+
+	it("preserves mount order when a lower surface is re-enabled", async () => {
+		const lowerOnDismiss = vi.fn();
+		const upperOnDismiss = vi.fn();
+		const lower = render(DismissHost, {
+			props: { options: { onDismiss: lowerOnDismiss } },
+		});
+		render(DismissHost, {
+			props: { options: { onDismiss: upperOnDismiss } },
+		});
+
+		await lower.rerender({
+			options: { onDismiss: lowerOnDismiss, enabled: false },
+		});
+		await lower.rerender({
+			options: { onDismiss: lowerOnDismiss, enabled: true },
+		});
+		await fireEvent.keyDown(document, { key: "Escape" });
+
+		expect(lowerOnDismiss).not.toHaveBeenCalled();
+		expect(upperOnDismiss).toHaveBeenCalledOnce();
+	});
+
+	it("lets an enabled lower surface dismiss beneath a disabled upper surface", async () => {
+		const lowerOnDismiss = vi.fn();
+		const upperOnDismiss = vi.fn();
+		render(DismissHost, {
+			props: { options: { onDismiss: lowerOnDismiss } },
+		});
+		render(DismissHost, {
+			props: { options: { onDismiss: upperOnDismiss, enabled: false } },
+		});
+
+		await fireEvent.keyDown(document, { key: "Escape" });
+
+		expect(lowerOnDismiss).toHaveBeenCalledOnce();
+		expect(upperOnDismiss).not.toHaveBeenCalled();
+	});
 });

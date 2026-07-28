@@ -50,6 +50,8 @@
 	--color-warning-bg: rgba(234, 179, 8, 0.12);
 
 	--overlay-rgb: 255, 255, 255;
+	/* Modal/overlay backdrop — composes the runtime overlay channel. */
+	--color-backdrop: rgba(var(--overlay-rgb), 0.5);
 	--shadow-rgb: 0, 0, 0;
 
 	/* Syntax highlighting defaults (conduit dark theme) */
