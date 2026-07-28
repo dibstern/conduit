@@ -3,6 +3,7 @@
 
 import type { ToolName, ToolStatus } from "../../shared-types.js";
 import type { ChatMessage, ToolMessage } from "../types.js";
+import { isSubagentToolName } from "./subagent-tools.js";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -127,10 +128,8 @@ export function groupMessages(messages: ChatMessage[]): GroupedMessage[] {
 			// subagent card with session navigation, not ToolGroupItem.
 			if (
 				msg.name === "AskUserQuestion" ||
-				msg.name === "Task" ||
-				msg.name === "task" ||
-				msg.name === "Agent" ||
-				msg.name === "Skill"
+				msg.name === "Skill" ||
+				isSubagentToolName(msg.name)
 			) {
 				flushBatch();
 				result.push(msg);

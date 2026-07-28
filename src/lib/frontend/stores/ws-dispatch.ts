@@ -23,6 +23,7 @@ import type {
 import { historyToChatMessages } from "../utils/history-logic.js";
 import { createFrontendLogger } from "../utils/logger.js";
 import { renderMarkdown } from "../utils/markdown.js";
+import { isSubagentToolName } from "../utils/subagent-tools.js";
 import {
 	abortSessionReplay,
 	activateSessionChatState,
@@ -466,12 +467,7 @@ async function convertHistoryAsync(
 }
 
 function isSubagentToolMessage(message: ChatMessage): message is ToolMessage {
-	return (
-		message.type === "tool" &&
-		(message.name === "Task" ||
-			message.name === "task" ||
-			message.name === "Agent")
-	);
+	return message.type === "tool" && isSubagentToolName(message.name);
 }
 
 function hasSubagentSessionLink(message: ToolMessage): boolean {
