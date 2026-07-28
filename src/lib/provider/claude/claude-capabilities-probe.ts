@@ -16,7 +16,10 @@ import type {
 	ModelInfo,
 	ProviderAgentInfo,
 } from "../types.js";
-import { contextWindowOptionsForModel } from "./claude-api-model-id.js";
+import {
+	contextWindowOptionsForModel,
+	hasContextWindowRow,
+} from "./claude-api-model-id.js";
 import { makeClaudeSdkEnv } from "./claude-sdk-env.js";
 
 const defaultLog = createLogger("claude-capabilities-probe");
@@ -92,11 +95,42 @@ export interface ProbeDeps {
 
 function inferLimits(
 	modelId: string,
+	resolvedModel: string | undefined,
 ): { context: number; output: number } | undefined {
 	for (const [pattern, output] of OUTPUT_LIMIT_BY_FAMILY) {
-		if (pattern.test(modelId)) return { context: 200_000, output };
+		if (!pattern.test(modelId)) continue;
+		// A trailing [1m] on what the SDK RESOLVED is the SDK's own report that
+		// the 1M window is in effect: the CLI drops the suffix for models that
+		// do not take it (claude-fable-5[1m] resolves to claude-fable-5) and
+		// keeps it for those that do (opus[1m] -> claude-opus-5[1m]). Prefer
+		// that over the requested id, which is only what we asked for. Falling
+		// back to a flat 200_000 for every family is how this read wrong before.
+		const effectiveId = resolvedModel ?? modelId;
+		return {
+			context: /\[1m\]$/i.test(effectiveId) ? 1_000_000 : 200_000,
+			output,
+		};
 	}
 	return undefined;
+}
+
+// The SDK bakes the context window into the model's NAME ("Opus (1M context)")
+// while conduit exposes that window as its own control. Two owners for one
+// fact, and the label wins visually — so the rail reads "Opus (1M context)"
+// while the selector beside it says 200k. Strip the qualifier only where we
+// actually render the control: without a selector the parenthetical is the
+// user's only signal, and dropping it would delete information rather than
+// de-duplicate it.
+const CONTEXT_WINDOW_QUALIFIER =
+	/\s*\(\s*\d+(?:\.\d+)?\s*[km]\s+context(?:\s+window)?\s*\)\s*$/i;
+
+function modelDisplayName(
+	displayName: string,
+	contextWindowOptions: ReadonlyArray<ContextWindowOption> | undefined,
+): string {
+	if (contextWindowOptions === undefined) return displayName;
+	const stripped = displayName.replace(CONTEXT_WINDOW_QUALIFIER, "").trim();
+	return stripped === "" ? displayName : stripped;
 }
 
 function effortLevelsToVariants(
@@ -140,16 +174,22 @@ function adjustForSubscription(
 function sdkModelToConduit(
 	model: SDKModelInfoSubset,
 	subscriptionType: string | undefined,
+	log: Logger,
 ): ModelInfo {
-	const limit = inferLimits(model.value);
+	const limit = inferLimits(model.value, model.resolvedModel);
 	const variants = effortLevelsToVariants(model.supportedEffortLevels);
+	if (!hasContextWindowRow(model.value)) {
+		log.warn(
+			`Claude catalog advertises "${model.value}" with no context-window row; its 200k/1M selector will not render and a requested 1M window will be dropped silently. Add a row to CONTEXT_WINDOW_OPTIONS_BY_MODEL.`,
+		);
+	}
 	const contextWindowOptions = adjustForSubscription(
 		contextWindowOptionsForModel(model.value),
 		subscriptionType,
 	);
 	return {
 		id: model.value,
-		name: model.displayName,
+		name: modelDisplayName(model.displayName, contextWindowOptions),
 		providerId: "claude",
 		...(model.resolvedModel !== undefined
 			? { resolvedModel: model.resolvedModel }
@@ -219,7 +259,7 @@ export async function probeClaudeCapabilities(
 		}));
 		return {
 			models: (init.models ?? []).map((model) =>
-				sdkModelToConduit(model, subscriptionType),
+				sdkModelToConduit(model, subscriptionType, deps.logger ?? defaultLog),
 			),
 			...(subscriptionType ? { subscriptionType } : {}),
 			commands,

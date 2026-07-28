@@ -13,7 +13,7 @@
 // a coding agent) produces no "assistant" message, so an ANSWERED message is
 // mistaken for a queued one and shimmers "Queued" after navigating back.
 
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.hoisted(() => {
 	let store: Record<string, string> = {};

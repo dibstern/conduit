@@ -91,7 +91,11 @@ describe("probeClaudeCapabilities", () => {
 
 		expect(result.models[0]?.resolvedModel).toBe("claude-sonnet-5");
 		expect(result.models[1]).not.toHaveProperty("resolvedModel");
-		expect(logger.warn).not.toHaveBeenCalled();
+		// This fixture's "legacy" id legitimately has no context-window row, so
+		// scope the assertion to the drift this test is about.
+		expect(logger.warn).not.toHaveBeenCalledWith(
+			expect.stringContaining("subset decode"),
+		);
 	});
 
 	it("maps SDK supportedEffortLevels into ModelInfo.variants", async () => {
@@ -285,6 +289,122 @@ describe("probeClaudeCapabilities", () => {
 				{ value: "1m", label: "1M", isDefault: true },
 			],
 		});
+	});
+
+	it("drops the context-window qualifier from the name when a selector owns it", async () => {
+		const queryFactory = makeFakeQuery({
+			initResult: {
+				models: [
+					{ value: "opus[1m]", displayName: "Opus (1M context)" },
+					{ value: "sonnet", displayName: "Sonnet (200k context)" },
+				],
+			},
+		});
+		const result = await probeClaudeCapabilities({
+			queryFactory,
+			workspaceRoot,
+		});
+		// The rail must not claim a window the selector beside it contradicts.
+		expect(result.models[0]?.name).toBe("Opus");
+		expect(result.models[1]?.name).toBe("Sonnet");
+	});
+
+	it("keeps a name's qualifier when no selector renders for that model", async () => {
+		const queryFactory = makeFakeQuery({
+			initResult: {
+				models: [
+					{ value: "haiku", displayName: "Haiku (200k context)" },
+					{ value: "default", displayName: "Default (recommended)" },
+				],
+			},
+		});
+		const result = await probeClaudeCapabilities({
+			queryFactory,
+			workspaceRoot,
+		});
+		// Without a control owning the fact, the parenthetical is the user's
+		// only signal — stripping it would delete information, not de-duplicate.
+		expect(result.models[0]?.name).toBe("Haiku (200k context)");
+		expect(result.models[1]?.name).toBe("Default (recommended)");
+	});
+
+	it("never renders an empty name if the qualifier is the whole label", async () => {
+		const queryFactory = makeFakeQuery({
+			initResult: {
+				models: [{ value: "opus[1m]", displayName: "(1M context)" }],
+			},
+		});
+		const result = await probeClaudeCapabilities({
+			queryFactory,
+			workspaceRoot,
+		});
+		expect(result.models[0]?.name).toBe("(1M context)");
+	});
+
+	it("reads the context limit off the model the SDK actually resolved", async () => {
+		const queryFactory = makeFakeQuery({
+			initResult: {
+				models: [
+					{
+						value: "opus[1m]",
+						displayName: "Opus (1M context)",
+						resolvedModel: "claude-opus-5[1m]",
+					},
+					{
+						// The CLI drops the suffix for models that do not take it,
+						// so this entry is NOT running a 1M window despite asking.
+						value: "claude-fable-5[1m]",
+						displayName: "Fable 5 (1M context)",
+						resolvedModel: "claude-fable-5",
+					},
+					{
+						value: "sonnet",
+						displayName: "Sonnet",
+						resolvedModel: "claude-sonnet-5",
+					},
+				],
+			},
+		});
+		const result = await probeClaudeCapabilities({
+			queryFactory,
+			workspaceRoot,
+		});
+		expect(result.models[0]?.limit?.context).toBe(1_000_000);
+		expect(result.models[1]?.limit?.context).toBe(200_000);
+		expect(result.models[2]?.limit?.context).toBe(200_000);
+	});
+
+	it("falls back to the requested id for the context limit when resolvedModel is absent", async () => {
+		const queryFactory = makeFakeQuery({
+			initResult: {
+				models: [{ value: "opus[1m]", displayName: "Opus (1M context)" }],
+			},
+		});
+		const result = await probeClaudeCapabilities({
+			queryFactory,
+			workspaceRoot,
+		});
+		expect(result.models[0]?.limit?.context).toBe(1_000_000);
+	});
+
+	it("warns when the catalog advertises a model the context-window table has no row for", async () => {
+		const logger = createTestLogger();
+		logger.warn = vi.fn();
+		const queryFactory = makeFakeQuery({
+			initResult: {
+				models: [
+					{ value: "claude-opus-9", displayName: "Opus 9" },
+					// An explicitly-undefined row is a decision, not a gap.
+					{ value: "haiku", displayName: "Haiku" },
+				],
+			},
+		});
+		await probeClaudeCapabilities({ queryFactory, workspaceRoot, logger });
+		const rowWarnings = (logger.warn as ReturnType<typeof vi.fn>).mock.calls
+			.map(([message]) => String(message))
+			.filter((message) => message.includes("context-window row"));
+		expect(rowWarnings).toHaveLength(1);
+		expect(rowWarnings[0]).toContain("claude-opus-9");
 	});
 
 	it("does not expose context-window options for the default catalog value", async () => {

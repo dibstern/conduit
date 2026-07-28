@@ -30,16 +30,39 @@ const CONTEXT_WINDOW_OPTIONS_BY_MODEL: Readonly<
 	opus: OPTIONS_1M_DEFAULT,
 	sonnet: OPTIONS_200K_DEFAULT,
 	haiku: undefined,
+	// The catalog's "default" entry resolves to whichever model Claude Code
+	// recommends, so conduit cannot say which windows it offers. Present and
+	// explicitly undefined: no selector, by decision rather than by omission.
+	default: undefined,
 };
+
+function normalizeModelId(modelId: string): string {
+	return modelId
+		.toLowerCase()
+		.replace(/\[1m\]$/, "")
+		.replace(/-\d{8}$/, "");
+}
 
 export function contextWindowOptionsForModel(
 	modelId: string,
 ): readonly ContextWindowOption[] | undefined {
-	const normalizedModelId = modelId
-		.toLowerCase()
-		.replace(/\[1m\]$/, "")
-		.replace(/-\d{8}$/, "");
-	return CONTEXT_WINDOW_OPTIONS_BY_MODEL[normalizedModelId];
+	return CONTEXT_WINDOW_OPTIONS_BY_MODEL[normalizeModelId(modelId)];
+}
+
+/**
+ * Whether the table has a row for this model at all.
+ *
+ * A row set to `undefined` is a decision — this model has no selectable 1M
+ * window. A *missing* key is a gap, and it fails silently twice over: the
+ * selector never renders, and `claudeApiModelId` quietly drops a user's "1m"
+ * request. Only a caller that sees the live catalog can tell the two apart, so
+ * it gets the key-presence check and warns on the gap.
+ */
+export function hasContextWindowRow(modelId: string): boolean {
+	return Object.hasOwn(
+		CONTEXT_WINDOW_OPTIONS_BY_MODEL,
+		normalizeModelId(modelId),
+	);
 }
 
 export function modelHasSelectable1m(modelId: string): boolean {

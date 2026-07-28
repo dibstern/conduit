@@ -3,8 +3,41 @@ import {
 	claudeApiModelId,
 	contextWindowOptionsForModel,
 	expectedClaudeReportedModelId,
+	hasContextWindowRow,
 	modelHasSelectable1m,
 } from "../../../../src/lib/provider/claude/claude-api-model-id.js";
+
+describe("hasContextWindowRow", () => {
+	// A row set to undefined is a decision; a missing key is a gap that fails
+	// silently twice (no selector renders, and a requested 1M is dropped).
+	it.each([
+		"claude-opus-5",
+		"claude-haiku-4-5",
+		"opus",
+		"haiku",
+		"default",
+	])("reports a row for the catalogued id %s", (modelId) => {
+		expect(hasContextWindowRow(modelId)).toBe(true);
+	});
+
+	it("normalizes the same way the lookup does", () => {
+		expect(hasContextWindowRow("opus[1m]")).toBe(true);
+		expect(hasContextWindowRow("OPUS")).toBe(true);
+		expect(hasContextWindowRow("claude-haiku-4-5-20251001")).toBe(true);
+	});
+
+	it("reports no row for an id the table has never seen", () => {
+		expect(hasContextWindowRow("claude-opus-9")).toBe(false);
+		expect(hasContextWindowRow("gpt-5")).toBe(false);
+	});
+
+	it("distinguishes a missing row from an explicitly undefined one", () => {
+		expect(contextWindowOptionsForModel("haiku")).toBeUndefined();
+		expect(contextWindowOptionsForModel("claude-opus-9")).toBeUndefined();
+		expect(hasContextWindowRow("haiku")).toBe(true);
+		expect(hasContextWindowRow("claude-opus-9")).toBe(false);
+	});
+});
 
 describe("Claude context-window model capabilities", () => {
 	const options1mDefault = [
