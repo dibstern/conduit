@@ -512,7 +512,7 @@ export const singleInstanceList: MockMessage = {
 	type: "instance_list",
 	instances: [
 		{
-			id: "default",
+			id: "opencode",
 			name: "Default",
 			port: 4096,
 			managed: true,

@@ -289,13 +289,13 @@ describe("makeDaemonLive wiring", () => {
 		return Effect.gen(function* () {
 			const stateRef = yield* InstanceManagerStateTag;
 			const state = yield* Ref.get(stateRef);
-			const instance = HashMap.get(state.instances, "default");
-			const externalUrl = HashMap.get(state.externalUrls, "default");
+			const instance = HashMap.get(state.instances, "opencode");
+			const externalUrl = HashMap.get(state.externalUrls, "opencode");
 
 			expect(instance._tag).toBe("Some");
 			if (instance._tag === "Some") {
 				expect(instance.value).toMatchObject({
-					id: "default",
+					id: "opencode",
 					name: "Default",
 					port: 4567,
 					managed: false,

@@ -13,6 +13,7 @@ import { Context, Effect, Layer, Option, Schema } from "effect";
 import {
 	defaultInstanceIdForDriver,
 	isKnownDriverKind,
+	migrateLegacyDefaultOpencodeInstanceId,
 	type ProviderDriverKind,
 	type ProviderInstanceId,
 	ProviderInstanceIdSchema,
@@ -270,7 +271,7 @@ export const ServerConfigLive = (configDir?: string) =>
 			// DaemonConfig uses exact optional properties (key absent, never
 			// undefined). The schema guarantees structural correctness.
 			const decoded = yield* Schema.decodeUnknown(DaemonConfigSchema)(json);
-			return decoded as unknown as DaemonConfig;
+			return migrateLegacyInstanceIds(decoded as unknown as DaemonConfig);
 		}),
 	);
 
@@ -303,12 +304,40 @@ export function getConfigDir(): string {
 
 // ─── Daemon Config ──────────────────────────────────────────────────────────
 
+/**
+ * Normalize the legacy default OpenCode instance id to the canonical one.
+ *
+ * Pre-driver-model installs stored the sole OpenCode server as instance id
+ * `"default"`; the driver+instance model canonicalizes the default OpenCode
+ * instance as `defaultInstanceIdForDriver("opencode") === "opencode"`. A
+ * lingering `"default"` id desyncs the config (and every project binding) from
+ * the composer rail, which keys OpenCode providers to `"opencode"` — leaving
+ * the OpenCode harness unpickable and duplicated. Rewriting the id to the
+ * canonical value on load makes the existing code correct end-to-end. URL
+ * resolution is preserved: the canonical `"opencode"` instance falls back to
+ * the project-default client (`config.opencodeUrl`, which defaults to probing
+ * localhost:4096 — the same server the legacy `"default"` instance pointed at).
+ *
+ * Idempotent; a no-op when there is no legacy OpenCode `"default"` instance or
+ * an `"opencode"` instance already exists (never creates a duplicate id).
+ */
+export function migrateLegacyInstanceIds(config: DaemonConfig): DaemonConfig {
+	if (config.instances === undefined) return config;
+	const migrated = migrateLegacyDefaultOpencodeInstanceId(
+		config.instances,
+		config.projects,
+	);
+	return migrated === null
+		? config
+		: { ...config, instances: migrated.instances, projects: migrated.projects };
+}
+
 /** Read and parse daemon.json. Returns null if missing or corrupt. */
 export function loadDaemonConfig(configDir?: string): DaemonConfig | null {
 	try {
 		const dir = resolveDir(configDir);
 		const data = readFileSync(join(dir, "daemon.json"), "utf-8");
-		return JSON.parse(data) as DaemonConfig;
+		return migrateLegacyInstanceIds(JSON.parse(data) as DaemonConfig);
 	} catch {
 		return null;
 	}

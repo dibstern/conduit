@@ -107,7 +107,7 @@ describe("startForegroundDaemon", () => {
 			await vi.waitFor(() => {
 				expect(daemon.getInstances()).toEqual([
 					expect.objectContaining({
-						id: "default",
+						id: "opencode",
 						managed: false,
 						port: opencodePort,
 						status: "healthy",
@@ -165,7 +165,7 @@ describe("startForegroundDaemon", () => {
 			await vi.waitFor(() => {
 				expect(daemon.getInstances()).toEqual([
 					expect.objectContaining({
-						id: "default",
+						id: "opencode",
 						managed: false,
 						port: opencodePort,
 						status: "healthy",

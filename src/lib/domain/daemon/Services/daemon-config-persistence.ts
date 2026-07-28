@@ -5,6 +5,7 @@
 
 import { FileSystem } from "@effect/platform";
 import { Context, Effect, Ref } from "effect";
+import { migrateLegacyDefaultOpencodeInstanceId } from "../../../contracts/provider-instance.js";
 import type {
 	DaemonInstanceConfig,
 	DaemonProject,
@@ -75,7 +76,7 @@ function deserializeConfig(raw: Record<string, unknown>): DaemonState {
 		? (raw["dismissedPaths"] as string[])
 		: [];
 
-	return {
+	const state: DaemonState = {
 		...defaults,
 		// Overlay persisted fields that are present in the JSON
 		...(typeof raw["pid"] === "number" && { pid: raw["pid"] }),
@@ -112,6 +113,16 @@ function deserializeConfig(raw: Record<string, unknown>): DaemonState {
 		}),
 		dismissedPaths: new Set(dismissedArr),
 	};
+
+	// Normalize a pre-driver-model legacy default OpenCode instance id to the
+	// canonical "opencode" so the seeded instance list matches the composer rail.
+	const migrated = migrateLegacyDefaultOpencodeInstanceId(
+		state.instances,
+		state.projects,
+	);
+	return migrated === null
+		? state
+		: { ...state, instances: migrated.instances, projects: migrated.projects };
 }
 
 // ─── loadConfig ────────────────────────────────────────────────────────────────

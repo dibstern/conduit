@@ -7,6 +7,7 @@ import { afterEach, beforeEach } from "vitest";
 import {
 	type DaemonConfig,
 	loadDaemonConfig,
+	migrateLegacyInstanceIds,
 	resolveConfiguredInstances,
 } from "../../../src/lib/daemon/config-persistence.js";
 import {
@@ -444,4 +445,125 @@ describe("config persistence instance merge", () => {
 			),
 		),
 	);
+});
+
+describe("migrateLegacyInstanceIds", () => {
+	it("rewrites a legacy default OpenCode instance and its project bindings", () => {
+		const migrated = migrateLegacyInstanceIds({
+			...baseConfig,
+			instances: [
+				{
+					id: "default",
+					name: "opencode",
+					port: 4096,
+					managed: false,
+					url: "http://localhost:4096",
+					driver: "opencode",
+				},
+			],
+			projects: [
+				{
+					path: "/tmp/app",
+					slug: "app",
+					title: "App",
+					addedAt: 1,
+					instanceId: "default",
+				},
+			],
+		});
+
+		expect(migrated.instances).toEqual([
+			{
+				id: "opencode",
+				name: "opencode",
+				port: 4096,
+				managed: false,
+				url: "http://localhost:4096",
+				driver: "opencode",
+			},
+		]);
+		expect(migrated.projects[0]?.instanceId).toBe("opencode");
+	});
+
+	it("treats a driverless legacy default as OpenCode", () => {
+		const migrated = migrateLegacyInstanceIds({
+			...baseConfig,
+			instances: [
+				{ id: "default", name: "Default", port: 4096, managed: false },
+			],
+		});
+		expect(migrated.instances?.[0]?.id).toBe("opencode");
+	});
+
+	it("leaves a Claude instance keyed as default untouched", () => {
+		const config: DaemonConfig = {
+			...baseConfig,
+			instances: [
+				{
+					id: "default",
+					name: "Claude",
+					port: 0,
+					managed: false,
+					driver: "claude",
+				},
+			],
+		};
+		expect(migrateLegacyInstanceIds(config)).toBe(config);
+	});
+
+	it("is a no-op when a canonical opencode instance already exists", () => {
+		const config: DaemonConfig = {
+			...baseConfig,
+			instances: [
+				{
+					id: "default",
+					name: "Legacy",
+					port: 4096,
+					managed: false,
+					driver: "opencode",
+				},
+				{
+					id: "opencode",
+					name: "Canonical",
+					port: 4096,
+					managed: false,
+					driver: "opencode",
+				},
+			],
+		};
+		expect(migrateLegacyInstanceIds(config)).toBe(config);
+	});
+
+	it("is a no-op when there are no instances", () => {
+		expect(migrateLegacyInstanceIds(baseConfig)).toBe(baseConfig);
+	});
+
+	it("migrates a persisted legacy default when the config is loaded", () => {
+		writeConfig({
+			...baseConfig,
+			instances: [
+				{
+					id: "default",
+					name: "opencode",
+					port: 4096,
+					managed: false,
+					url: "http://localhost:4096",
+					driver: "opencode",
+				},
+			],
+			projects: [
+				{
+					path: "/tmp/app",
+					slug: "app",
+					title: "App",
+					addedAt: 1,
+					instanceId: "default",
+				},
+			],
+		});
+
+		const loaded = readConfig();
+		expect(loaded.instances?.[0]?.id).toBe("opencode");
+		expect(loaded.projects[0]?.instanceId).toBe("opencode");
+	});
 });

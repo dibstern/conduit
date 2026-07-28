@@ -3,12 +3,21 @@ import {
 	DEFAULT_OPENCODE_PORT,
 	DEFAULT_OPENCODE_URL,
 } from "../../../constants.js";
+import { defaultInstanceIdForDriver } from "../../../contracts/provider-instance.js";
 import {
 	findFreePort,
 	isOpencodeInstalled,
 	probeOpenCode,
 } from "../../../daemon/daemon-utils.js";
 import type { DaemonInstanceConfig } from "./daemon-state.js";
+
+/**
+ * Canonical id for the default OpenCode instance. The composer rail keys every
+ * non-Claude provider to this id, so the daemon must seed the default OpenCode
+ * server under the same id or the OpenCode harness is unpickable/duplicated.
+ */
+const DEFAULT_OPENCODE_INSTANCE_ID: string =
+	defaultInstanceIdForDriver("opencode");
 
 export class OpenCodeUnavailableError extends Data.TaggedError(
 	"OpenCodeUnavailableError",
@@ -43,7 +52,7 @@ const portFromUrl = (url: string): number => {
 };
 
 export const defaultInstanceForUrl = (url: string): DaemonInstanceConfig => ({
-	id: "default",
+	id: DEFAULT_OPENCODE_INSTANCE_ID,
 	name: "Default",
 	port: portFromUrl(url),
 	managed: false,
@@ -136,7 +145,7 @@ const detectDefaultInstance = Effect.gen(function* () {
 
 	const freePort = yield* findAvailablePort(DEFAULT_OPENCODE_PORT);
 	return {
-		id: "default",
+		id: DEFAULT_OPENCODE_INSTANCE_ID,
 		name: "Default",
 		port: freePort,
 		managed: true,
@@ -153,7 +162,7 @@ export const resolveSmartDefaultInstances = (
 	Effect.gen(function* () {
 		let instances = [...initialInstances];
 		const existingDefault = instances.find(
-			(instance) => instance.id === "default",
+			(instance) => instance.id === DEFAULT_OPENCODE_INSTANCE_ID,
 		);
 		if (existingDefault == null && options.defaultOpencodeUrl != null) {
 			instances = [
@@ -166,7 +175,7 @@ export const resolveSmartDefaultInstances = (
 
 		const defaultIndex = instances.findIndex(
 			(instance) =>
-				instance.id === "default" &&
+				instance.id === DEFAULT_OPENCODE_INSTANCE_ID &&
 				(instance.driver ?? "opencode") === "opencode",
 		);
 		if (defaultIndex >= 0) {
@@ -180,7 +189,9 @@ export const resolveSmartDefaultInstances = (
 			);
 		}
 
-		return instances.some((instance) => instance.id === "default")
+		return instances.some(
+			(instance) => instance.id === DEFAULT_OPENCODE_INSTANCE_ID,
+		)
 			? instances
 			: [yield* detectDefaultInstance, ...instances];
 	}).pipe(Effect.withSpan("daemon.smartDefault.resolveInstances"));

@@ -20,6 +20,7 @@ import {
 	Ref,
 	Schedule,
 } from "effect";
+import { defaultInstanceIdForDriver } from "../../../contracts/provider-instance.js";
 import {
 	instanceAlreadyExists,
 	instanceLimitExceeded,
@@ -157,7 +158,11 @@ const withConfiguredDefaultInstance = (
 	options?: InstanceManagerStateOptions,
 ): ReadonlyArray<DaemonInstanceConfig> => {
 	if (options?.defaultOpencodeUrl == null) return initialInstances;
-	if (initialInstances.some((instance) => instance.id === "default")) {
+	if (
+		initialInstances.some(
+			(instance) => instance.id === defaultInstanceIdForDriver("opencode"),
+		)
+	) {
 		return initialInstances;
 	}
 	return [
