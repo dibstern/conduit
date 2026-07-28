@@ -215,6 +215,95 @@ describe("OpenCodeProviderInstance.sendTurn()", () => {
 		expect(result.status).toBe("completed");
 	});
 
+	it("fails with send_failed (no hang) when the bound named instance cannot be resolved", async () => {
+		instance = new OpenCodeProviderInstance({
+			client,
+			clientForSession: () =>
+				Effect.fail(new Error('OpenCode instance "oc-b" is not configured')),
+		});
+
+		const result = await Effect.runPromise(
+			instance.sendTurnEffect(makeSendTurnInput()),
+		);
+
+		expect(result.status).toBe("error");
+		expect(result.error?.code).toBe("send_failed");
+		expect(result.error?.message).toContain('"oc-b"');
+		expect(client.session.prompt).not.toHaveBeenCalled();
+	});
+
+	it("routes the prompt to the named instance client resolved for the session", async () => {
+		const namedClient = makeStubClient();
+		instance = new OpenCodeProviderInstance({
+			client,
+			clientForSession: (sessionId) =>
+				Effect.succeed(sessionId === "s1" ? namedClient : undefined),
+		});
+
+		const resultPromise = Effect.runPromise(
+			instance.sendTurnEffect(makeSendTurnInput()),
+		);
+		instance.notifyTurnCompleted("s1", {
+			status: "completed",
+			cost: 0,
+			tokens: { input: 0, output: 0 },
+			durationMs: 0,
+			providerStateUpdates: [],
+		});
+		await resultPromise;
+
+		expect(namedClient.session.prompt).toHaveBeenCalledWith(
+			"s1",
+			expect.objectContaining({ text: "Write hello world" }),
+		);
+		expect(client.session.prompt).not.toHaveBeenCalled();
+	});
+
+	it("returns send_failed when the named instance server rejects the prompt", async () => {
+		const namedClient = makeStubClient({
+			session: {
+				prompt: vi.fn(async () => {
+					throw new Error("fetch failed: ECONNREFUSED");
+				}),
+				abort: vi.fn(async () => {}),
+			},
+		});
+		instance = new OpenCodeProviderInstance({
+			client,
+			clientForSession: () => Effect.succeed(namedClient),
+		});
+
+		const result = await Effect.runPromise(
+			instance.sendTurnEffect(makeSendTurnInput()),
+		);
+
+		expect(result.status).toBe("error");
+		expect(result.error?.code).toBe("send_failed");
+		expect(result.error?.message).toContain("ECONNREFUSED");
+		expect(client.session.prompt).not.toHaveBeenCalled();
+	});
+
+	it("uses the default client when the resolver yields undefined", async () => {
+		instance = new OpenCodeProviderInstance({
+			client,
+			clientForSession: () => Effect.succeed(undefined),
+		});
+
+		const resultPromise = Effect.runPromise(
+			instance.sendTurnEffect(makeSendTurnInput()),
+		);
+		instance.notifyTurnCompleted("s1", {
+			status: "completed",
+			cost: 0,
+			tokens: { input: 0, output: 0 },
+			durationMs: 0,
+			providerStateUpdates: [],
+		});
+		await resultPromise;
+
+		expect(client.session.prompt).toHaveBeenCalled();
+	});
+
 	it("only resolves for the matching session", async () => {
 		const input = makeSendTurnInput({ sessionId: "s1" });
 		const resultPromise = Effect.runPromise(instance.sendTurnEffect(input));

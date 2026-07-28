@@ -9,6 +9,7 @@ import {
 	DaemonEventBusLive,
 	subscribeToDaemonEvents,
 } from "../../../src/lib/domain/daemon/Services/daemon-pubsub.js";
+import { InstanceHealthCheckTag } from "../../../src/lib/domain/daemon/Services/instance-health-service.js";
 import {
 	type AddInstanceInput,
 	addInstance,
@@ -18,6 +19,7 @@ import {
 	getPersistedInstanceConfigs,
 	makeInstanceManagerStateLive,
 	persistConfig,
+	startInitialUnmanagedInstanceHealthPollers,
 	startInstance,
 	stopInstance,
 	updateInstance,
@@ -101,6 +103,50 @@ describe("InstanceManager — missing methods", () => {
 				expect(event._tag).toBe("InstanceStatusChanged");
 			}).pipe(Effect.provide(Layer.fresh(testLayer))),
 		);
+
+		it.scoped(
+			"keeps configured Claude instances healthy without health checks",
+			() => {
+				let healthChecks = 0;
+				const claudeLayer = Layer.mergeAll(
+					makeInstanceManagerStateLive(undefined, [
+						{
+							id: "work-claude",
+							name: "Work Claude",
+							port: 0,
+							managed: true,
+							driver: "claude",
+							configDir: "/profiles/work",
+						},
+					]),
+					DaemonEventBusLive,
+					ConfigPersistenceNoopLive,
+					Layer.succeed(InstanceHealthCheckTag, {
+						check: () =>
+							Effect.sync(() => {
+								healthChecks++;
+								return true;
+							}),
+					}),
+				);
+
+				return Effect.gen(function* () {
+					yield* startInitialUnmanagedInstanceHealthPollers;
+					yield* startInstance("work-claude");
+					yield* stopInstance("work-claude");
+					yield* Effect.yieldNow();
+
+					const instance = yield* getInstance("work-claude");
+					expect(instance).toMatchObject({
+						driver: "claude",
+						configDir: "/profiles/work",
+						managed: false,
+						status: "healthy",
+					});
+					expect(healthChecks).toBe(0);
+				}).pipe(Effect.provide(Layer.fresh(claudeLayer)));
+			},
+		);
 	});
 
 	describe("stopInstance", () => {
@@ -163,6 +209,34 @@ describe("InstanceManager — missing methods", () => {
 
 				const inst = yield* getInstance("inst-1");
 				expect(inst.status).toBe("healthy");
+			}).pipe(Effect.provide(Layer.fresh(testLayer))),
+		);
+
+		it.scoped("converts OpenCode state to a config-only Claude instance", () =>
+			Effect.gen(function* () {
+				yield* addInstance({
+					id: "convert-me",
+					name: "Convert Me",
+					port: 4096,
+					managed: false,
+					url: "https://opencode.example.test",
+				});
+
+				yield* updateInstance("convert-me", {
+					driver: "claude",
+					configDir: "/profiles/work",
+				});
+
+				const instance = yield* getInstance("convert-me");
+				expect(instance).toMatchObject({
+					driver: "claude",
+					configDir: "/profiles/work",
+					managed: false,
+					port: 0,
+					status: "healthy",
+				});
+				expect(instance.url).toBeUndefined();
+				expect(yield* getInstanceUrl("convert-me")).toBeNull();
 			}).pipe(Effect.provide(Layer.fresh(testLayer))),
 		);
 	});
@@ -256,9 +330,39 @@ describe("InstanceManager — missing methods", () => {
 							port: 4096,
 							managed: false,
 							url: "https://opencode.example.test",
+							driver: "opencode",
 						},
 					]);
 				}).pipe(Effect.provide(Layer.fresh(testLayer))),
+		);
+
+		it.scoped("persists Claude driver and config directory", () =>
+			Effect.gen(function* () {
+				yield* addInstance({
+					id: "work-claude",
+					name: "Work Claude",
+					port: 0,
+					managed: false,
+					driver: "claude",
+					configDir: "/profiles/work",
+				});
+				yield* updateInstance("work-claude", {
+					driver: "claude",
+					configDir: "/profiles/personal",
+				});
+
+				const configs = yield* getPersistedInstanceConfigs;
+				expect(configs).toEqual([
+					{
+						id: "work-claude",
+						name: "Work Claude",
+						port: 0,
+						managed: false,
+						driver: "claude",
+						configDir: "/profiles/personal",
+					},
+				]);
+			}).pipe(Effect.provide(Layer.fresh(testLayer))),
 		);
 
 		it.scoped("returns localhost URL with instance port", () =>

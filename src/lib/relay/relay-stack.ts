@@ -37,6 +37,10 @@ import {
 	hasInstanceManagementConfig,
 	InstanceManagementServiceFromConfigLive,
 } from "../domain/relay/Services/instance-management-service.js";
+import {
+	OpenCodeInstanceClientsLive,
+	OpenCodeInstanceClientsTag,
+} from "../domain/relay/Services/opencode-instance-clients.js";
 import { makeEffectOpenCodeRuntimeIngress } from "../domain/relay/Services/opencode-runtime-ingress-service.js";
 import { PendingInteractionServiceLive } from "../domain/relay/Services/pending-interaction-service.js";
 import { ProjectManagementServiceLive } from "../domain/relay/Services/project-management-service.js";
@@ -577,6 +581,8 @@ export interface RelayStack {
 	sseStream: SSEStreamPort;
 	client: OpenCodeAPI;
 	translator: ReturnType<typeof createTranslator>;
+	/** Initial project relay's orchestration view (provider instances/engine). */
+	orchestration: OrchestrationLayer;
 	/** Session selected during relay startup. */
 	readonly initialSessionId: string;
 
@@ -619,6 +625,7 @@ export async function createProjectRelay(
 			? { persistenceDbPath: config.persistenceDbPath }
 			: {}),
 		...(config.slug != null ? { projectKey: config.slug } : {}),
+		...(config.configDir != null ? { configDir: config.configDir } : {}),
 	});
 
 	const translator = createTranslator();
@@ -678,6 +685,12 @@ export async function createProjectRelay(
 					},
 				}).pipe(Layer.provide(persistenceEffectLayer))
 			: undefined;
+	// Named OpenCode instance clients (Phase 4.4): one shared layer reference
+	// (Effect memoizes it) so orchestration wiring, the session manager, and
+	// the startup SSE wiring all see the same lazy per-instance client cache.
+	const openCodeInstanceClientsLayer = OpenCodeInstanceClientsLive.pipe(
+		Layer.provide(Layer.mergeAll(configLayer, loggerLayer)),
+	);
 	// The orchestration engine's side-effect reactor consumes the SAME
 	// ProviderRuntimeIngestion instance the relay uses (Effect memoizes the shared
 	// layer reference), so committed provider side effects stream through one
@@ -688,8 +701,9 @@ export async function createProjectRelay(
 					openCodeApiLayer,
 					persistenceEffectLayer,
 					providerRuntimeIngestionLayer,
+					openCodeInstanceClientsLayer,
 				)
-			: openCodeApiLayer;
+			: Layer.mergeAll(openCodeApiLayer, openCodeInstanceClientsLayer);
 	const providerOrchestrationLayer = orchestrationRuntimeLayer.pipe(
 		Layer.provide(providerOrchestrationDeps),
 	);
@@ -763,6 +777,7 @@ export async function createProjectRelay(
 		configLayer,
 		loggerLayer,
 		providerOrchestrationLayer,
+		openCodeInstanceClientsLayer,
 		...(persistenceEffectLayer != null ? [persistenceEffectLayer] : []),
 		...(providerRuntimeIngestionLayer != null
 			? [providerRuntimeIngestionLayer]
@@ -1020,30 +1035,65 @@ export async function createProjectRelay(
 						pollerLog,
 						onDoneProcessed: monitoring.recordDoneDelivered,
 					});
-					yield* wireSSEConsumerEffect(
-						{
-							translator,
-							wsHandler,
-							...(config.pushManager != null && {
-								pushManager: config.pushManager,
-							}),
-							log: sseLog,
-							pipelineLog,
-							getSessionStatuses: () => statusPoller.getCurrentStatuses(),
-							listPendingQuestions: () => api.question.list(),
-							listPendingPermissions: () => api.permission.list(),
-							replyPermission: (sessionId, permissionId, response) =>
-								api.permission.reply(sessionId, permissionId, response),
-							statusPoller,
-							slug: config.slug,
-							onDoneProcessed: monitoring.recordDoneDelivered,
-							...(opencodeRuntimeIngress != null && {
-								opencodeRuntimeIngress,
-							}),
-						},
-						sseStream,
-					);
+					const sseConsumerDeps = {
+						translator,
+						wsHandler,
+						...(config.pushManager != null && {
+							pushManager: config.pushManager,
+						}),
+						log: sseLog,
+						pipelineLog,
+						getSessionStatuses: () => statusPoller.getCurrentStatuses(),
+						listPendingQuestions: () => api.question.list(),
+						listPendingPermissions: () => api.permission.list(),
+						replyPermission: (
+							sessionId: string,
+							permissionId: string,
+							response: "once",
+						) => api.permission.reply(sessionId, permissionId, response),
+						statusPoller,
+						slug: config.slug,
+						onDoneProcessed: monitoring.recordDoneDelivered,
+						...(opencodeRuntimeIngress != null && {
+							opencodeRuntimeIngress,
+						}),
+					};
+					yield* wireSSEConsumerEffect(sseConsumerDeps, sseStream);
 					yield* sseStream.connectEffect();
+					// Named OpenCode instances (Phase 4.4): lazily created
+					// per-instance SSE streams join the SAME pipeline — turn
+					// completion via wireSSEToInstance, streaming/persistence via
+					// wireSSEConsumerEffect. Pending permission/question recovery
+					// lists stay on the default api (accepted degradation), and the
+					// ingress translator reset stays owned by the default stream's
+					// reconnects so a named stream's (re)connect cannot reset
+					// in-flight default-session ingestion state.
+					const instanceClients = yield* OpenCodeInstanceClientsTag;
+					yield* instanceClients.registerStreamWirer((stream) =>
+						Effect.gen(function* () {
+							yield* Effect.sync(() =>
+								orchestration.wireSSEToInstance((event, handler) => {
+									stream.on(event, handler);
+								}),
+							);
+							yield* wireSSEConsumerEffect(
+								{
+									...sseConsumerDeps,
+									...(opencodeRuntimeIngress != null && {
+										opencodeRuntimeIngress: {
+											onSSEEventEffect: (event, sessionId) =>
+												opencodeRuntimeIngress.onSSEEventEffect(
+													event,
+													sessionId,
+												),
+											onReconnect: () => {},
+										},
+									}),
+								},
+								stream,
+							);
+						}),
+					);
 				}
 				const gate = yield* RelayCommandGateTag;
 				yield* gate.markReady();
@@ -1373,6 +1423,7 @@ export async function createRelayStack(
 		sseStream: relay.sseStream,
 		client: relay.client,
 		translator: relay.translator,
+		orchestration: relay.orchestration,
 		initialSessionId: relay.initialSessionId,
 
 		getPort() {

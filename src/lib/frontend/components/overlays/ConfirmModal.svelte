@@ -45,12 +45,14 @@
       </p>
       <div class="flex gap-2 justify-end">
         <button
+          data-testid="confirm-modal-cancel"
           class="bg-transparent border border-border text-text-muted rounded-lg py-1.5 px-4 text-base cursor-pointer hover:bg-[rgba(var(--overlay-rgb),0.05)]"
           onclick={handleCancel}
         >
           Cancel
         </button>
         <button
+          data-testid="confirm-modal-action"
           class="bg-accent border-none text-bg rounded-lg py-1.5 px-4 text-base font-medium cursor-pointer hover:bg-accent-hover"
           onclick={handleAction}
         >

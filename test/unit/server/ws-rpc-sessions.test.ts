@@ -2,6 +2,7 @@ import { RpcTest } from "@effect/rpc";
 import { describe, it } from "@effect/vitest";
 import { Effect, Layer } from "effect";
 import { expect, vi } from "vitest";
+import { ProviderInstanceIdSchema } from "../../../src/lib/contracts/provider-instance.js";
 import { WsRpcGroup } from "../../../src/lib/contracts/ws-rpc.js";
 import { PendingInteractionServiceTag } from "../../../src/lib/domain/relay/Services/pending-interaction-service.js";
 import type { SessionManagerService } from "../../../src/lib/domain/relay/Services/session-manager-service.js";
@@ -49,6 +50,7 @@ describe("WsRpcServerLayer ListSessions", () => {
 				projectSlug: "project-a",
 				originId: "browser-tab-a",
 				requestId: "request-1",
+				instanceId: ProviderInstanceIdSchema.make("opencode"),
 				providerId: "opencode",
 			});
 
@@ -57,6 +59,7 @@ describe("WsRpcServerLayer ListSessions", () => {
 				sessionId: "session-new",
 			});
 			expect(createSession).toHaveBeenCalledWith(undefined, {
+				instanceId: "opencode",
 				providerId: "opencode",
 			});
 			expect(wsHandler.setClientSession).toHaveBeenCalledWith(

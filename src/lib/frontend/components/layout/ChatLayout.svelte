@@ -52,7 +52,7 @@
 	import { applyPtyListResponse, terminalState, destroyAll } from "../../stores/terminal.svelte.js";
 	import { applyListSessionsResponse, clearSessionState, switchToSession } from "../../stores/session.svelte.js";
 	import { clearAllPermissions } from "../../stores/permissions.svelte.js";
-	import { applyGetAgentsResponse, applyGetCommandsResponse, applyGetModelsResponse, clearDiscoveryState } from "../../stores/discovery.svelte.js";
+	import { applyGetAgentsResponse, applyGetCommandsResponse, applyGetModelsResponse, clearDiscoveryState, discoveryState } from "../../stores/discovery.svelte.js";
 	import { todoState, clearTodoState } from "../../stores/todo.svelte.js";
 	import { applyGetFileTreeResponse, requestFileTree, clearFileTreeState } from "../../stores/file-tree.svelte.js";
 	import { applyGetProjectsResponse } from "../../stores/project.svelte.js";
@@ -352,9 +352,15 @@
 						showToast("Failed to load sessions", { variant: "error" });
 					});
 				const routeSessionId = getCurrentSessionId();
+				// With no session in the route, scope the agent fetch to the
+				// client-persisted harness draft so the agent list matches the
+				// picker's pre-creation selection after a reload.
+				const draftInstanceId =
+					routeSessionId == null ? discoveryState.selectedInstanceId : null;
 					void getAgentsRpc({
 						projectSlug: slug,
 						...(routeSessionId != null ? { sessionId: routeSessionId } : {}),
+						...(draftInstanceId != null ? { instanceId: draftInstanceId } : {}),
 					})
 						.then(applyGetAgentsResponse)
 						.catch(() => undefined);

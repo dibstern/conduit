@@ -4,11 +4,13 @@ set -eu
 ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT_DIR"
 
-FEATURE_FILE="features/composer-send-button.feature"
+FEATURE_NAME="${MUTATION_FEATURE:-composer-send-button}"
+FEATURE_FILE="features/${FEATURE_NAME}.feature"
+BASE_JSON="build/acceptance-mutation/base/${FEATURE_NAME}.json"
 
 strip_mutation_manifest() {
 	feature_file="$1"
-	tmp_file="$(mktemp "${TMPDIR:-/tmp}/composer-send-button-feature.XXXXXX")"
+	tmp_file="$(mktemp "${TMPDIR:-/tmp}/acceptance-mutation-feature.XXXXXX")"
 	awk '
 		/^# mutation-stamp: / { next }
 		/^# acceptance-mutation-manifest-begin$/ { in_manifest = 1; next }
@@ -71,11 +73,11 @@ done
 
 gherkin-parser \
 	"$FEATURE_FILE" \
-	build/acceptance-mutation/base/composer-send-button.json
+	"$BASE_JSON"
 
 pnpm exec tsx \
 	acceptance/bin/acceptance-entrypoint-generator.ts \
-	build/acceptance-mutation/base/composer-send-button.json \
+	"$BASE_JSON" \
 	build/acceptance-mutation/generated
 
 gherkin-mutator \

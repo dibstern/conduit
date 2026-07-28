@@ -9,6 +9,7 @@
 
 import { Context, Effect, Layer, Ref } from "effect";
 
+import type { ProviderDriverKind } from "../../../contracts/provider-instance.js";
 import { DEFAULT_CONFIG_DIR, DEFAULT_PORT } from "../../../env.js";
 
 // ─── Supporting interfaces ──────────────────────────────────────────────────
@@ -24,7 +25,7 @@ export interface DaemonProject {
 	sessionCount?: number;
 }
 
-/** OpenCode instance configuration. */
+/** Provider instance configuration persisted in daemon.json. */
 export interface DaemonInstanceConfig {
 	id: string;
 	name: string;
@@ -32,6 +33,8 @@ export interface DaemonInstanceConfig {
 	managed: boolean;
 	env?: Record<string, string>;
 	url?: string;
+	driver?: ProviderDriverKind;
+	configDir?: string;
 }
 
 // ─── DaemonState ────────────────────────────────────────────────────────────

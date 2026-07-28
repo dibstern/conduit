@@ -1,6 +1,10 @@
 import { describe, it } from "@effect/vitest";
 import { Deferred, Effect, Fiber } from "effect";
 import { expect, vi } from "vitest";
+import {
+	type DaemonConfig,
+	resolveProviderRoutingDriver,
+} from "../../../src/lib/daemon/config-persistence.js";
 import { runMigrations } from "../../../src/lib/persistence/migrations.js";
 import { schemaMigrations } from "../../../src/lib/persistence/schema.js";
 import { SqliteClient } from "../../../src/lib/persistence/sqlite-client.js";
@@ -193,6 +197,138 @@ describe("OrchestrationEngine dispatchEffect", () => {
 				expect(sendTurn).not.toHaveBeenCalled();
 				expect(sendTurnEffect).toHaveBeenCalledWith(command.input);
 				expect(engine.getProviderForSession("session-1")).toBe("opencode");
+			}),
+	);
+
+	it.effect(
+		"routes a named Claude instance binding through the default Claude runtime",
+		() =>
+			Effect.gen(function* () {
+				const config: DaemonConfig = {
+					pid: 1234,
+					port: 2633,
+					pinHash: null,
+					tls: false,
+					debug: false,
+					keepAwake: false,
+					dangerouslySkipPermissions: false,
+					projects: [],
+					instances: [
+						{
+							id: "work-claude",
+							name: "Work Claude",
+							port: 0,
+							managed: false,
+							driver: "claude",
+						},
+					],
+				};
+				const registry = new ProviderRegistry();
+				const instance = makeStubInstance("claude");
+				registry.registerInstance(instance);
+				const engine = new OrchestrationEngine({
+					registry,
+					resolveProviderDriver: (providerId) =>
+						resolveProviderRoutingDriver(config, providerId),
+				});
+				const command = {
+					...sendTurnCommand(),
+					commandId: "cmd-named-claude",
+					providerId: "work-claude",
+				};
+
+				const result = yield* engine.dispatchEffect(command);
+
+				expect(result).toMatchObject({ status: "completed" });
+				expect(instance.sendTurnEffect).toHaveBeenCalledWith(command.input);
+				expect(engine.getProviderForSession("session-1")).toBe("work-claude");
+			}),
+	);
+
+	it.effect(
+		"routes a named OpenCode instance binding through the default OpenCode runtime",
+		() =>
+			Effect.gen(function* () {
+				const config: DaemonConfig = {
+					pid: 1234,
+					port: 2633,
+					pinHash: null,
+					tls: false,
+					debug: false,
+					keepAwake: false,
+					dangerouslySkipPermissions: false,
+					projects: [],
+					instances: [
+						{
+							id: "work-opencode",
+							name: "Work OpenCode",
+							port: 4096,
+							managed: true,
+							driver: "opencode",
+						},
+					],
+				};
+				const registry = new ProviderRegistry();
+				const instance = makeStubInstance("opencode");
+				registry.registerInstance(instance);
+				const engine = new OrchestrationEngine({
+					registry,
+					resolveProviderDriver: (providerId) =>
+						resolveProviderRoutingDriver(config, providerId),
+				});
+				const command = {
+					...sendTurnCommand(),
+					commandId: "cmd-named-opencode",
+					providerId: "work-opencode",
+				};
+
+				const result = yield* engine.dispatchEffect(command);
+
+				expect(result).toMatchObject({ status: "completed" });
+				expect(instance.sendTurnEffect).toHaveBeenCalledWith(command.input);
+				expect(engine.getProviderForSession("session-1")).toBe("work-opencode");
+			}),
+	);
+
+	it.effect(
+		"rejects an unresolvable instance binding without dispatching to OpenCode",
+		() =>
+			Effect.gen(function* () {
+				const config: DaemonConfig = {
+					pid: 1234,
+					port: 2633,
+					pinHash: null,
+					tls: false,
+					debug: false,
+					keepAwake: false,
+					dangerouslySkipPermissions: false,
+					projects: [],
+				};
+				const registry = new ProviderRegistry();
+				const openCodeInstance = makeStubInstance("opencode");
+				registry.registerInstance(openCodeInstance);
+				const engine = new OrchestrationEngine({
+					registry,
+					resolveProviderDriver: (providerId) =>
+						resolveProviderRoutingDriver(config, providerId),
+				});
+				const command = {
+					...sendTurnCommand(),
+					commandId: "cmd-deleted-instance",
+					providerId: "deleted-instance",
+				};
+
+				const result = yield* Effect.either(engine.dispatchEffect(command));
+
+				expect(result).toMatchObject({
+					_tag: "Left",
+					left: {
+						_tag: "ProviderNotRegistered",
+						providerId: "deleted-instance",
+					},
+				});
+				expect(openCodeInstance.sendTurnEffect).not.toHaveBeenCalled();
+				expect(engine.getProviderForSession("session-1")).toBe(undefined);
 			}),
 	);
 

@@ -141,10 +141,14 @@ export const DaemonHandleLive: Layer.Layer<
 						Effect.provideService(InstanceManagerStateTag, instanceState),
 					),
 				);
+				const opencodeInstances = instances.filter(
+					(instance) => (instance.driver ?? "opencode") === "opencode",
+				);
 				const resolvedInstanceId =
 					instanceId ??
-					instances.find((instance) => instance.status === "healthy")?.id ??
-					instances[0]?.id;
+					opencodeInstances.find((instance) => instance.status === "healthy")
+						?.id ??
+					opencodeInstances[0]?.id;
 				const project: StoredProject = {
 					slug: slug ?? generateSlug(normalizedDirectory, existingSlugs),
 					directory: normalizedDirectory,

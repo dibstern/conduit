@@ -1,6 +1,7 @@
 import { Rpc, RpcGroup } from "@effect/rpc";
 import { Schema } from "effect";
 import { SessionPermissionModeSchema } from "../shared-types.js";
+import { ProviderDriverKindSchema } from "./provider-instance.js";
 
 const NonEmptyString = Schema.NonEmptyString;
 
@@ -35,6 +36,7 @@ export const ModelInfoSchema = Schema.Struct({
 
 export const ProviderInfoSchema = Schema.Struct({
 	id: Schema.String,
+	instanceId: Schema.optional(Schema.String),
 	name: Schema.String,
 	configured: Schema.Boolean,
 	models: Schema.Array(ModelInfoSchema),
@@ -93,6 +95,9 @@ export const OpenCodeInstanceSchema = Schema.Struct({
 	name: Schema.String,
 	port: Schema.Number,
 	managed: Schema.Boolean,
+	driver: Schema.optional(Schema.suspend(() => ProviderDriverKindSchema)),
+	configDir: Schema.optional(Schema.String),
+	url: Schema.optional(Schema.String),
 	status: InstanceStatusSchema,
 	pid: Schema.optional(Schema.Number),
 	env: Schema.optional(
@@ -162,6 +167,7 @@ const HistoryMessageSchema = Schema.Struct({
 
 export const GetModelsResponseSchema = Schema.Struct({
 	projectSlug: Schema.String,
+	instanceId: Schema.optional(Schema.String),
 	providers: Schema.Array(ProviderInfoSchema),
 	active: Schema.optional(ModelSelectionSchema),
 	variant: Schema.optional(VariantInfoSchema),
@@ -274,6 +280,7 @@ export const ForkSessionResponseSchema = Schema.Struct({
 
 export const GetAgentsResponseSchema = Schema.Struct({
 	projectSlug: Schema.String,
+	instanceId: Schema.optional(Schema.String),
 	providerScope: AgentProviderScopeSchema,
 	agents: Schema.Array(AgentInfoSchema),
 	activeAgentId: Schema.optional(Schema.String),
@@ -414,6 +421,7 @@ export class GetAgents extends Schema.TaggedRequest<GetAgents>()("GetAgents", {
 	payload: {
 		projectSlug: NonEmptyString,
 		sessionId: Schema.optional(Schema.String),
+		instanceId: Schema.optional(Schema.String),
 	},
 }) {}
 
@@ -536,6 +544,44 @@ export class RenameInstance extends Schema.TaggedRequest<RenameInstance>()(
 			projectSlug: NonEmptyString,
 			instanceId: NonEmptyString,
 			name: NonEmptyString,
+		},
+	},
+) {}
+
+export class AddInstance extends Schema.TaggedRequest<AddInstance>()(
+	"AddInstance",
+	{
+		failure: WsRpcError,
+		success: InstanceListResponseSchema,
+		payload: {
+			projectSlug: NonEmptyString,
+			name: NonEmptyString,
+			driver: Schema.optional(Schema.suspend(() => ProviderDriverKindSchema)),
+			managed: Schema.optional(Schema.Boolean),
+			port: Schema.optional(Schema.Number),
+			url: Schema.optional(Schema.String),
+			env: Schema.optional(
+				Schema.Record({ key: Schema.String, value: Schema.String }),
+			),
+			configDir: Schema.optional(Schema.String),
+		},
+	},
+) {}
+
+export class UpdateInstance extends Schema.TaggedRequest<UpdateInstance>()(
+	"UpdateInstance",
+	{
+		failure: WsRpcError,
+		success: InstanceListResponseSchema,
+		payload: {
+			projectSlug: NonEmptyString,
+			instanceId: NonEmptyString,
+			name: Schema.optional(Schema.String),
+			port: Schema.optional(Schema.Number),
+			env: Schema.optional(
+				Schema.Record({ key: Schema.String, value: Schema.String }),
+			),
+			configDir: Schema.optional(Schema.String),
 		},
 	},
 ) {}
@@ -798,6 +844,7 @@ export class GetModels extends Schema.TaggedRequest<GetModels>()("GetModels", {
 	payload: {
 		projectSlug: NonEmptyString,
 		sessionId: Schema.optional(Schema.String),
+		instanceId: Schema.optional(Schema.String),
 	},
 }) {}
 
@@ -824,6 +871,9 @@ export class CreateSession extends Schema.TaggedRequest<CreateSession>()(
 			originId: NonEmptyString,
 			title: Schema.optional(Schema.String),
 			requestId: Schema.optional(NonEmptyString),
+			instanceId: Schema.optional(
+				Schema.String.pipe(Schema.brand("ProviderInstanceId")),
+			),
 			providerId: Schema.optional(Schema.String),
 		},
 	},
@@ -1025,6 +1075,8 @@ export const WsRpcRequest = Schema.Union(
 	StopInstance,
 	RemoveInstance,
 	RenameInstance,
+	AddInstance,
+	UpdateInstance,
 	ScanNow,
 	DetectProxy,
 	ListPtys,
@@ -1077,6 +1129,8 @@ export const WsRpcGroup = RpcGroup.make(
 	Rpc.fromTaggedRequest(StopInstance),
 	Rpc.fromTaggedRequest(RemoveInstance),
 	Rpc.fromTaggedRequest(RenameInstance),
+	Rpc.fromTaggedRequest(AddInstance),
+	Rpc.fromTaggedRequest(UpdateInstance),
 	Rpc.fromTaggedRequest(ScanNow),
 	Rpc.fromTaggedRequest(DetectProxy),
 	Rpc.fromTaggedRequest(ListPtys),

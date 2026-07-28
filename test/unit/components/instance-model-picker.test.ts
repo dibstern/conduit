@@ -1,6 +1,6 @@
 import { cleanup, fireEvent, render, waitFor } from "@testing-library/svelte";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import ModelSelector from "../../../src/lib/frontend/components/model/ModelSelector.svelte";
+import InstanceModelPicker from "../../../src/lib/frontend/components/model/InstanceModelPicker.svelte";
 import {
 	clearDiscoveryState,
 	discoveryState,
@@ -83,7 +83,7 @@ vi.mock("../../../src/lib/frontend/stores/ui.svelte.js", () => ({
 	showToast: showToastSpy,
 }));
 
-describe("ModelSelector", () => {
+describe("InstanceModelPicker", () => {
 	beforeEach(() => {
 		wsSendSpy.mockClear();
 		getAgentsRpcSpy.mockClear();
@@ -124,7 +124,7 @@ describe("ModelSelector", () => {
 	});
 
 	it("refreshes active-provider agents after switching model", async () => {
-		const { container, getByTitle } = render(ModelSelector);
+		const { container, getByTitle } = render(InstanceModelPicker);
 		await fireEvent.click(getByTitle("Switch model"));
 		const opus = container.querySelector<HTMLButtonElement>(
 			'[data-model-id="claude-opus-4-7"]',
@@ -152,37 +152,22 @@ describe("ModelSelector", () => {
 
 	it("keeps a successful model switch when the follow-up agent refresh fails", async () => {
 		getAgentsRpcSpy.mockRejectedValueOnce(new Error("agent discovery failed"));
-		discoveryState.providers = [
-			...discoveryState.providers,
-			{
-				id: "opencode",
-				name: "OpenCode Zen",
-				configured: true,
-				models: [
-					{
-						id: "nemotron-3-super-free",
-						name: "Nemotron 3 Super Free",
-						provider: "opencode",
-					},
-				],
-			},
-		];
 
-		const { container, getByTitle } = render(ModelSelector);
+		const { container, getByTitle } = render(InstanceModelPicker);
 		await fireEvent.click(getByTitle("Switch model"));
-		const nemotron = container.querySelector<HTMLButtonElement>(
-			'[data-model-id="nemotron-3-super-free"][data-provider-id="opencode"]',
+		const opus = container.querySelector<HTMLButtonElement>(
+			'[data-model-id="claude-opus-4-7"][data-provider-id="claude"]',
 		);
-		expect(nemotron).not.toBeNull();
+		expect(opus).not.toBeNull();
 
-		await fireEvent.click(nemotron as HTMLButtonElement);
+		await fireEvent.click(opus as HTMLButtonElement);
 
 		await waitFor(() => {
 			expect(switchModelRpcSpy).toHaveBeenCalledWith({
 				projectSlug: "project-a",
 				sessionId: "session-1",
-				modelId: "nemotron-3-super-free",
-				providerId: "opencode",
+				modelId: "claude-opus-4-7",
+				providerId: "claude",
 			});
 		});
 		await waitFor(() => {
@@ -191,14 +176,14 @@ describe("ModelSelector", () => {
 				sessionId: "session-1",
 			});
 		});
-		expect(discoveryState.currentModelId).toBe("nemotron-3-super-free");
-		expect(discoveryState.currentProviderId).toBe("opencode");
+		expect(discoveryState.currentModelId).toBe("claude-opus-4-7");
+		expect(discoveryState.currentProviderId).toBe("claude");
 		expect(discoveryState.currentVariant).toBe("fast");
 		expect(discoveryState.availableVariants).toEqual(["standard", "fast"]);
 	});
 
 	it("sets the default model through RPC", async () => {
-		const { container, getByTitle } = render(ModelSelector);
+		const { container, getByTitle } = render(InstanceModelPicker);
 		await fireEvent.click(getByTitle("Switch model"));
 		const opus = container.querySelector<HTMLButtonElement>(
 			'[data-model-id="claude-opus-4-7"]',
@@ -223,7 +208,7 @@ describe("ModelSelector", () => {
 	});
 
 	it("reloads provider session through RPC", async () => {
-		const { getByTitle } = render(ModelSelector);
+		const { getByTitle } = render(InstanceModelPicker);
 		await fireEvent.click(getByTitle("Switch model"));
 		await fireEvent.click(getByTitle("Reload skills and commands from disk"));
 
@@ -238,5 +223,46 @@ describe("ModelSelector", () => {
 		expect(showToastSpy).toHaveBeenCalledWith("Reloading skills…", {
 			duration: 1500,
 		});
+	});
+
+	it("locks the rail to the bound harness for an existing session", async () => {
+		discoveryState.providers = [
+			...discoveryState.providers,
+			{
+				id: "anthropic",
+				name: "Anthropic - opencode",
+				configured: true,
+				models: [
+					{
+						id: "claude-sonnet-4",
+						name: "claude-sonnet-4",
+						provider: "anthropic",
+					},
+				],
+			},
+		];
+
+		const { container, getByTitle } = render(InstanceModelPicker);
+		await fireEvent.click(getByTitle("Switch model"));
+
+		const claudeRail = container.querySelector<HTMLButtonElement>(
+			'[data-testid="picker-instance-claude"]',
+		);
+		const opencodeRail = container.querySelector<HTMLButtonElement>(
+			'[data-testid="picker-instance-opencode"]',
+		);
+		expect(claudeRail?.getAttribute("aria-pressed")).toBe("true");
+		expect(opencodeRail?.getAttribute("aria-disabled")).toBe("true");
+
+		// Clicking a disabled (non-bound) instance is a no-op: the model list
+		// stays scoped to the bound harness.
+		await fireEvent.click(opencodeRail as HTMLButtonElement);
+		expect(claudeRail?.getAttribute("aria-pressed")).toBe("true");
+		expect(
+			container.querySelector('[data-model-id="claude-sonnet-4"]'),
+		).toBeNull();
+		expect(
+			container.querySelector('[data-model-id="claude-opus-4-7"]'),
+		).not.toBeNull();
 	});
 });

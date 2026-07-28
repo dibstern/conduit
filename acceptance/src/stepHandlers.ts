@@ -1,5 +1,12 @@
 import type { Page } from "@playwright/test";
-import { initMessages } from "../../test/e2e/fixtures/mockup-state.js";
+import {
+	claudeBoundSessionMessages,
+	claudeInstanceAgents,
+	dualDriverProviders,
+	openCodeBoundSessionMessages,
+	openCodeInstanceAgents,
+	unboundInitMessages,
+} from "../../test/e2e/fixtures/mockup-state.js";
 import {
 	mockWsRpc,
 	type RpcMockControl,
@@ -17,6 +24,65 @@ const driver = new PlaywrightDriver();
 const relayControls = new WeakMap<Page, WsMockControl>();
 const rpcControls = new WeakMap<Page, RpcMockControl>();
 const composerMessages = new WeakMap<Page, string>();
+/** Per-page mock instance list — mutated by the Add/Update/Remove RPC handlers
+ *  so the SettingsPanel editor and the composer rail see consistent state. */
+const mockInstances = new WeakMap<Page, Array<Record<string, unknown>>>();
+
+/** Mirror the relay's makeInstanceId slugging so rail test ids stay stable. */
+function instanceSlug(name: string): string {
+	return (
+		name
+			.toLowerCase()
+			.replace(/[^a-z0-9-]/g, "-")
+			.replace(/-+/g, "-")
+			.replace(/^-|-$/g, "") || "instance"
+	);
+}
+
+/** Map a harness/instance display label (e.g. "OpenCode · Local") to the
+ *  default instance id of its driver. */
+function instanceIdForLabel(label: string): string {
+	const driverName = (label.split("·")[0] ?? label).trim().toLowerCase();
+	if (driverName !== "claude" && driverName !== "opencode") {
+		throw new Error(`Unknown harness/instance label: ${label}`);
+	}
+	return driverName;
+}
+
+function requireRelayControl(page: Page): WsMockControl {
+	const control = relayControls.get(page);
+	if (!control) throw new Error("Mock relay was not initialised");
+	return control;
+}
+
+function requireRpcControl(page: Page): RpcMockControl {
+	const control = rpcControls.get(page);
+	if (!control) throw new Error("Mock RPC was not initialised");
+	return control;
+}
+
+async function openModelPicker(page: Page): Promise<void> {
+	const picker = page.locator("#model-picker");
+	if ((await picker.count()) === 0) {
+		await page.getByTestId("model-picker-trigger").click();
+	}
+	await picker.waitFor({ state: "visible", timeout: 5_000 });
+}
+
+async function selectRailInstance(page: Page, label: string): Promise<void> {
+	await openModelPicker(page);
+	await page
+		.getByTestId(`picker-instance-${instanceIdForLabel(label)}`)
+		.click();
+}
+
+async function ensureAgentDropdownOpen(page: Page): Promise<void> {
+	const dropdown = page.getByTestId("agent-dropdown");
+	if ((await dropdown.count()) === 0) {
+		await page.getByTestId("agent-selector-trigger").click();
+	}
+	await dropdown.waitFor({ state: "visible", timeout: 5_000 });
+}
 
 function exampleValue(example: Record<string, string>, key: string): string {
 	const value = example[key];
@@ -59,20 +125,100 @@ export const conduitVisualHandlers: StepHandler[] = [
 			}
 
 			const relayControl = await mockRelayWebSocket(world.page, {
-				initMessages,
+				initMessages: unboundInitMessages,
 				responses: new Map(),
 				initDelay: 0,
 				messageDelay: 0,
 			});
 			relayControls.set(world.page, relayControl);
+			const page = world.page;
+			mockInstances.set(page, []);
+			/** Instance bound by the composer's CreateSession — session-scoped
+			 *  GetAgents afterwards returns that harness's agents (mirrors the
+			 *  real server, where the created session is bound to the instance). */
+			let createdSessionInstance: string | undefined;
 			const rpcControl = await mockWsRpc(world.page, {
 				handlers: {
+					AddInstance: async (payload) => {
+						const list = mockInstances.get(page) ?? [];
+						const name =
+							typeof payload["name"] === "string"
+								? payload["name"]
+								: "instance";
+						const inst: Record<string, unknown> = {
+							id: instanceSlug(name),
+							name,
+							port: typeof payload["port"] === "number" ? payload["port"] : 0,
+							managed: payload["managed"] === true,
+							status: "healthy",
+							restartCount: 0,
+							createdAt: 1,
+							driver: payload["driver"] === "claude" ? "claude" : "opencode",
+							...(typeof payload["configDir"] === "string"
+								? { configDir: payload["configDir"] }
+								: {}),
+						};
+						const next = [...list.filter((i) => i["id"] !== inst["id"]), inst];
+						mockInstances.set(page, next);
+						return { projectSlug: "myapp", instances: next };
+					},
+					UpdateInstance: async (payload) => {
+						const list = mockInstances.get(page) ?? [];
+						const next = list.map((i) =>
+							i["id"] === payload["instanceId"]
+								? {
+										...i,
+										...(typeof payload["name"] === "string"
+											? { name: payload["name"] }
+											: {}),
+									}
+								: i,
+						);
+						mockInstances.set(page, next);
+						return { projectSlug: "myapp", instances: next };
+					},
+					RemoveInstance: async (payload) => {
+						const next = (mockInstances.get(page) ?? []).filter(
+							(i) => i["id"] !== payload["instanceId"],
+						);
+						mockInstances.set(page, next);
+						return { projectSlug: "myapp", instances: next };
+					},
 					SendMessage: async () => undefined,
 					SyncInputDraft: async () => undefined,
 					SwitchPermissionMode: async (payload) => ({
 						projectSlug: "myapp",
 						mode: payload["mode"],
 					}),
+					CreateSession: async (payload) => {
+						createdSessionInstance =
+							typeof payload["instanceId"] === "string"
+								? payload["instanceId"]
+								: undefined;
+						return { projectSlug: "myapp", sessionId: "sess-first-send" };
+					},
+					GetModels: async () => ({
+						projectSlug: "myapp",
+						providers: dualDriverProviders,
+						active: { model: "claude-sonnet-4", provider: "anthropic" },
+					}),
+					GetAgents: async (payload) => {
+						const instanceId =
+							typeof payload["instanceId"] === "string"
+								? payload["instanceId"]
+								: payload["sessionId"] === "sess-first-send"
+									? createdSessionInstance
+									: undefined;
+						const claude = instanceId === "claude";
+						return {
+							projectSlug: "myapp",
+							...(instanceId != null ? { instanceId } : {}),
+							providerScope: claude
+								? { id: "claude", name: "Claude" }
+								: { id: "opencode", name: "OpenCode" },
+							agents: claude ? claudeInstanceAgents : openCodeInstanceAgents,
+						};
+					},
 				},
 			});
 			rpcControls.set(world.page, rpcControl);
@@ -129,13 +275,19 @@ export const conduitVisualHandlers: StepHandler[] = [
 				throw new Error("Mock relay controls were not initialised");
 			}
 
-			await rpcControl.waitForRequest(
+			const sendRequest = await rpcControl.waitForRequest(
 				(request) =>
 					request.tag === "SendMessage" && request.payload["text"] === message,
 			);
+			// Echo the sender's originId like the real relay: the sending tab
+			// ignores its own broadcast and keeps its local echo (no duplicate).
 			await relayControl.sendMessages([
 				{ type: "session_switched", id: "sess-first-send" },
-				{ type: "user_message", text: message },
+				{
+					type: "user_message",
+					text: message,
+					originId: sendRequest.payload["originId"],
+				},
 			]);
 		},
 	},
@@ -230,6 +382,184 @@ export const conduitVisualHandlers: StepHandler[] = [
 		},
 	},
 	{
+		name: "session exists on harness",
+		match: /^a session already exists on the (Claude|OpenCode) harness$/,
+		run: async ({ world, match }) => {
+			const harness = match[1] ?? "";
+			const relayControl = requireRelayControl(world.page);
+			await relayControl.sendMessages(
+				instanceIdForLabel(harness) === "claude"
+					? claudeBoundSessionMessages
+					: openCodeBoundSessionMessages,
+			);
+			// Wait until the binding reached the UI (trigger reflects the harness).
+			await world.page.waitForFunction(
+				(expected) => {
+					const trigger = document.querySelector(
+						'[data-testid="model-picker-trigger"]',
+					);
+					return trigger?.getAttribute("data-instance-id") === expected;
+				},
+				instanceIdForLabel(harness),
+				{ timeout: 5_000 },
+			);
+		},
+	},
+	{
+		name: "open model picker",
+		match: /^I open the model picker$/,
+		run: async ({ world }) => {
+			await openModelPicker(world.page);
+		},
+	},
+	{
+		name: "select instance in rail",
+		match: /^I select the (.+) instance in the rail$/,
+		run: async ({ world, match }) => {
+			await selectRailInstance(world.page, match[1] ?? "");
+		},
+	},
+	{
+		name: "select harness",
+		match: /^I select the (Claude|OpenCode) harness$/,
+		run: async ({ world, match }) => {
+			await selectRailInstance(world.page, match[1] ?? "");
+			// Close the picker so follow-up steps interact with the toolbar.
+			await world.page.keyboard.press("Escape");
+			await world.page
+				.locator("#model-picker")
+				.waitFor({ state: "detached", timeout: 5_000 });
+		},
+	},
+	{
+		name: "assert session created on harness",
+		match: /^a session is created on the (Claude|OpenCode) harness$/,
+		run: async ({ world, match }) => {
+			const expected = instanceIdForLabel(match[1] ?? "");
+			const rpcControl = requireRpcControl(world.page);
+			await rpcControl.waitForRequest(
+				(request) =>
+					request.tag === "CreateSession" &&
+					request.payload["instanceId"] === expected,
+			);
+		},
+	},
+	{
+		name: "assert model trigger instance icon",
+		match: /^the model trigger shows the (Claude|OpenCode) instance icon$/,
+		run: async ({ world, match }) => {
+			await world.page.waitForFunction(
+				(expected) => {
+					const trigger = document.querySelector(
+						'[data-testid="model-picker-trigger"]',
+					);
+					const icon = trigger?.querySelector("[data-driver]");
+					return (
+						trigger?.getAttribute("data-instance-id") === expected &&
+						icon?.getAttribute("data-driver") === expected
+					);
+				},
+				instanceIdForLabel(match[1] ?? ""),
+				{ timeout: 5_000 },
+			);
+		},
+	},
+	{
+		name: "assert rail instance selected",
+		match: /^the (Claude|OpenCode) instance in the rail is selected$/,
+		run: async ({ world, match }) => {
+			const id = instanceIdForLabel(match[1] ?? "");
+			await world.page.waitForFunction(
+				(instanceId) => {
+					const button = document.querySelector(
+						`[data-testid="picker-instance-${instanceId}"]`,
+					);
+					return button?.getAttribute("aria-pressed") === "true";
+				},
+				id,
+				{ timeout: 5_000 },
+			);
+		},
+	},
+	{
+		name: "assert other harness instances disabled",
+		match: /^instances of other harnesses in the rail are disabled$/,
+		run: async ({ world, example }) => {
+			const bound = instanceIdForLabel(exampleValue(example, "harness"));
+			const result = await world.page.evaluate((boundId) => {
+				const buttons = Array.from(
+					document.querySelectorAll('[data-testid^="picker-instance-"]'),
+				);
+				const others = buttons.filter(
+					(b) => b.getAttribute("data-driver") !== boundId,
+				);
+				return {
+					otherCount: others.length,
+					allDisabled: others.every(
+						(b) => b.getAttribute("aria-disabled") === "true",
+					),
+				};
+			}, bound);
+			if (result.otherCount === 0) {
+				throw new Error("No other-harness instances rendered in the rail");
+			}
+			if (!result.allDisabled) {
+				throw new Error(
+					"Expected all other-harness rail instances to be disabled",
+				);
+			}
+		},
+	},
+	{
+		name: "assert agent selector lists agents",
+		match: /^the agent selector lists (.+)$/,
+		run: async ({ world, match }) => {
+			await ensureAgentDropdownOpen(world.page);
+			const agentIds = (match[1] ?? "").split(",").map((id) => id.trim());
+			for (const agentId of agentIds) {
+				await world.page
+					.locator(`[data-testid="agent-option-${agentId}"]`)
+					.waitFor({ state: "visible", timeout: 5_000 });
+			}
+		},
+	},
+	{
+		name: "assert agent selector does not list agents",
+		match: /^the agent selector does not list (.+)$/,
+		run: async ({ world, match }) => {
+			await ensureAgentDropdownOpen(world.page);
+			const agentIds = (match[1] ?? "").split(",").map((id) => id.trim());
+			await world.page.waitForFunction(
+				(ids) =>
+					ids.every(
+						(id) =>
+							document.querySelector(`[data-testid="agent-option-${id}"]`) ===
+							null,
+					),
+				agentIds,
+				{ timeout: 5_000 },
+			);
+		},
+	},
+	{
+		name: "assert agent selector scope label",
+		match: /^the agent selector label shows (.+) agents$/,
+		run: async ({ world, match }) => {
+			await ensureAgentDropdownOpen(world.page);
+			const scopeName = match[1] ?? "";
+			await world.page.waitForFunction(
+				(expected) => {
+					const label = document.querySelector(
+						'[data-testid="agent-scope-label"]',
+					);
+					return label?.textContent?.trim() === `${expected} agents`;
+				},
+				scopeName,
+				{ timeout: 5_000 },
+			);
+		},
+	},
+	{
 		name: "visually match composer region",
 		match:
 			/^the ([a-z0-9-]+) region visually matches ([a-z0-9-]+) at ([0-9]+(?:\.[0-9]+)?) percent$/,
@@ -252,6 +582,168 @@ export const conduitVisualHandlers: StepHandler[] = [
 				throw new Error(
 					`Visual match failed for ${baseline}: ${(result.diffRatio * 100).toFixed(2)}% of pixels differ. Artifacts: ${world.artifacts.join(", ")}`,
 				);
+			}
+		},
+	},
+	{
+		name: "open settings to instances tab",
+		match: /^I open settings to the Instances tab$/,
+		run: async ({ world }) => {
+			const page = world.page;
+			await page.evaluate(() =>
+				window.dispatchEvent(
+					new CustomEvent("settings:open", { detail: { tab: "instances" } }),
+				),
+			);
+			await page
+				.locator("#settings-panel")
+				.waitFor({ state: "visible", timeout: 5_000 });
+			await page.getByTestId("settings-tab-instances").click();
+			await page
+				.locator("#instances-settings")
+				.waitFor({ state: "visible", timeout: 5_000 });
+		},
+	},
+	{
+		name: "start adding a driver instance",
+		match: /^I start adding a (OpenCode|Claude) instance$/,
+		run: async ({ world, match }) => {
+			const driverName = (match[1] ?? "").toLowerCase();
+			await world.page.getByTestId("add-instance-btn").click();
+			await world.page
+				.getByTestId("instance-form")
+				.waitFor({ state: "visible", timeout: 5_000 });
+			await world.page
+				.getByTestId(`instance-form-driver-${driverName}`)
+				.click();
+		},
+	},
+	{
+		name: "add a named instance",
+		match: /^I add an? (OpenCode|Claude) instance named (.+)$/,
+		run: async ({ world, match }) => {
+			const page = world.page;
+			const driverName = (match[1] ?? "").toLowerCase();
+			const name = (match[2] ?? "").trim();
+			await page.getByTestId("add-instance-btn").click();
+			await page
+				.getByTestId("instance-form")
+				.waitFor({ state: "visible", timeout: 5_000 });
+			await page.getByTestId(`instance-form-driver-${driverName}`).click();
+			await page.getByTestId("instance-form-name").fill(name);
+			await page.getByTestId("instance-form-save").click();
+			await page
+				.getByTestId("instance-form")
+				.waitFor({ state: "hidden", timeout: 5_000 });
+			// Close settings so the composer/model-picker is interactable next.
+			await page.getByTestId("settings-close-btn").click();
+			await page
+				.locator("#settings-panel")
+				.waitFor({ state: "hidden", timeout: 5_000 });
+		},
+	},
+	{
+		name: "named instance already configured",
+		match: /^a named (OpenCode|Claude) instance (.+) is already configured$/,
+		run: async ({ world, match }) => {
+			const driverName = (match[1] ?? "").toLowerCase();
+			const name = (match[2] ?? "").trim();
+			const inst: Record<string, unknown> = {
+				id: instanceSlug(name),
+				name,
+				port: driverName === "opencode" ? 4099 : 0,
+				managed: false,
+				status: "healthy",
+				restartCount: 0,
+				createdAt: 1,
+				driver: driverName,
+				...(driverName === "claude" ? { configDir: "/profiles/seed" } : {}),
+			};
+			// Seed BOTH the mock RPC store (so edit/remove RPCs stay consistent)
+			// and the live frontend state (via a pushed instance_list).
+			const list = [...(mockInstances.get(world.page) ?? []), inst];
+			mockInstances.set(world.page, list);
+			await requireRelayControl(world.page).sendMessages([
+				{ type: "instance_list", instances: list },
+			]);
+		},
+	},
+	{
+		name: "rename instance via edit",
+		match: /^I rename the (.+) instance to (.+) via edit$/,
+		run: async ({ world, match }) => {
+			const page = world.page;
+			const id = instanceSlug((match[1] ?? "").trim());
+			const to = (match[2] ?? "").trim();
+			await page.getByTestId(`instance-row-${id}`).click();
+			await page.getByTestId("edit-instance-btn").click();
+			await page
+				.getByTestId("instance-form")
+				.waitFor({ state: "visible", timeout: 5_000 });
+			await page.getByTestId("instance-form-name").fill(to);
+			await page.getByTestId("instance-form-save").click();
+			await page
+				.getByTestId("instance-form")
+				.waitFor({ state: "hidden", timeout: 5_000 });
+		},
+	},
+	{
+		name: "remove instance from settings",
+		match: /^I remove the (.+) instance$/,
+		run: async ({ world, match }) => {
+			const page = world.page;
+			const id = instanceSlug((match[1] ?? "").trim());
+			await page.getByTestId(`instance-row-${id}`).click();
+			await page.getByTestId("remove-instance-btn").click();
+			await page
+				.locator("#confirm-modal")
+				.waitFor({ state: "visible", timeout: 5_000 });
+			await page.getByTestId("confirm-modal-action").click();
+			await page
+				.locator("#confirm-modal")
+				.waitFor({ state: "hidden", timeout: 5_000 });
+		},
+	},
+	{
+		name: "instances list shows name",
+		match: /^the Instances list shows (.+)$/,
+		run: async ({ world, match }) => {
+			const name = (match[1] ?? "").trim();
+			await world.page
+				.locator("#instance-settings-list")
+				.getByText(name, { exact: true })
+				.waitFor({ state: "visible", timeout: 5_000 });
+		},
+	},
+	{
+		name: "instances list does not show name",
+		match: /^the Instances list does not show (.+)$/,
+		run: async ({ world, match }) => {
+			const name = (match[1] ?? "").trim();
+			await world.page.waitForFunction(
+				(n) => {
+					const list = document.querySelector("#instance-settings-list");
+					return list ? !(list.textContent ?? "").includes(n) : true;
+				},
+				name,
+				{ timeout: 5_000 },
+			);
+		},
+	},
+	{
+		name: "instance is selectable in the rail",
+		match: /^the (.+) instance is selectable in the rail$/,
+		run: async ({ world, match }) => {
+			const name = (match[1] ?? "").trim();
+			await openModelPicker(world.page);
+			// Rail buttons are icon-only and keyed by the instance's slug id.
+			const railButton = world.page.getByTestId(
+				`picker-instance-${instanceSlug(name)}`,
+			);
+			await railButton.waitFor({ state: "visible", timeout: 5_000 });
+			const disabled = await railButton.getAttribute("aria-disabled");
+			if (disabled === "true") {
+				throw new Error(`Rail instance "${name}" is present but disabled`);
 			}
 		},
 	},

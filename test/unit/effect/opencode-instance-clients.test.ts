@@ -1,0 +1,90 @@
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { Effect, Layer } from "effect";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import type { DaemonConfig } from "../../../src/lib/daemon/config-persistence.js";
+import {
+	OpenCodeInstanceClientsLive,
+	OpenCodeInstanceClientsTag,
+} from "../../../src/lib/domain/relay/Services/opencode-instance-clients.js";
+import {
+	ConfigTag,
+	LoggerTag,
+} from "../../../src/lib/domain/relay/Services/services.js";
+import {
+	makeMockConfig,
+	makeMockLogger,
+} from "../../helpers/mock-factories.js";
+
+const tempDirs: string[] = [];
+
+afterEach(() => {
+	vi.unstubAllGlobals();
+	for (const dir of tempDirs.splice(0)) {
+		rmSync(dir, { recursive: true, force: true });
+	}
+});
+
+describe("OpenCodeInstanceClients", () => {
+	it("fails promptly when a named instance server is unreachable", async () => {
+		const configDir = mkdtempSync(join(tmpdir(), "opencode-instance-clients-"));
+		tempDirs.push(configDir);
+		const daemonConfig: DaemonConfig = {
+			pid: 1234,
+			port: 2633,
+			pinHash: null,
+			tls: false,
+			debug: false,
+			keepAwake: false,
+			dangerouslySkipPermissions: false,
+			projects: [],
+			instances: [
+				{
+					id: "work-oc",
+					name: "Work OpenCode",
+					port: 0,
+					managed: false,
+					driver: "opencode",
+					url: "http://named-instance.invalid",
+				},
+			],
+		};
+		writeFileSync(join(configDir, "daemon.json"), JSON.stringify(daemonConfig));
+		vi.stubGlobal(
+			"fetch",
+			vi.fn(async () => {
+				throw new Error("connect ECONNREFUSED");
+			}),
+		);
+
+		const layer = OpenCodeInstanceClientsLive.pipe(
+			Layer.provide(
+				Layer.mergeAll(
+					Layer.succeed(
+						ConfigTag,
+						makeMockConfig({
+							configDir,
+							projectDir: "/test/project",
+						}),
+					),
+					Layer.succeed(LoggerTag, makeMockLogger()),
+				),
+			),
+		);
+		const result = await Effect.runPromise(
+			Effect.scoped(
+				Effect.gen(function* () {
+					const clients = yield* OpenCodeInstanceClientsTag;
+					yield* clients.registerStreamWirer(() => Effect.void);
+					return yield* Effect.either(clients.clientFor("work-oc"));
+				}).pipe(Effect.provide(layer)),
+			),
+		);
+
+		expect(result._tag).toBe("Left");
+		if (result._tag === "Left") {
+			expect(result.left.message).toContain("ECONNREFUSED");
+		}
+	}, 8_000);
+});

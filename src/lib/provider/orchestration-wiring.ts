@@ -6,7 +6,12 @@
 
 import { randomUUID } from "node:crypto";
 import { Context, Effect, Layer, type Scope } from "effect";
+import {
+	loadDaemonConfig,
+	resolveProviderRoutingDriver,
+} from "../daemon/config-persistence.js";
 import { OpenCodeAPITag } from "../domain/provider/Services/opencode-api-service.js";
+import { OpenCodeInstanceClientsTag } from "../domain/relay/Services/opencode-instance-clients.js";
 import { ProviderRuntimeIngestionTag } from "../domain/relay/Services/provider-runtime-ingestion-service.js";
 import { OrchestrationEngineTag } from "../domain/relay/Services/services.js";
 import type { OpenCodeAPI } from "../instance/opencode-api.js";
@@ -39,12 +44,14 @@ export interface OrchestrationLayerOptions {
 	readonly persistenceDbPath?: string;
 	readonly projectKey?: string;
 	readonly sessionBindingReadModel?: ProviderSessionBindingReadModel;
+	readonly configDir?: string;
 }
 
 export interface OrchestrationRuntimeLayerOptions {
 	readonly workspaceRoot?: string;
 	readonly persistenceDbPath?: string;
 	readonly projectKey?: string;
+	readonly configDir?: string;
 }
 
 export interface OrchestrationLayer {
@@ -111,6 +118,11 @@ function createOrchestrationComponents(
 
 	const engine = new OrchestrationEngine({
 		registry,
+		resolveProviderDriver: (providerId) =>
+			resolveProviderRoutingDriver(
+				loadDaemonConfig(options.configDir),
+				providerId,
+			),
 		...(options.sessionBindingReadModel != null
 			? { sessionBindingReadModel: options.sessionBindingReadModel }
 			: {}),
@@ -124,11 +136,48 @@ const createOrchestrationComponentsEffect = (
 ): Effect.Effect<OrchestrationComponents, never, Scope.Scope> =>
 	Effect.gen(function* () {
 		const registry = new ProviderRegistry();
+
+		const persistenceDbPath = options.persistenceDbPath;
+		const sessionBindingDb =
+			persistenceDbPath != null
+				? yield* Effect.sync(() => SqliteClient.open(persistenceDbPath))
+				: undefined;
+		if (sessionBindingDb != null) {
+			yield* Effect.addFinalizer(() =>
+				Effect.sync(() => sessionBindingDb.close()),
+			);
+		}
+		const sessionBindingReadModel =
+			sessionBindingDb != null
+				? new SqliteProviderSessionBindingReadModel(sessionBindingDb)
+				: undefined;
+
+		// Phase 4.4: sessions bound to a NAMED OpenCode instance route their
+		// provider calls to that instance's client. The binding is set before
+		// sendTurn dispatches (orchestration-engine binds session→providerId),
+		// so a session-keyed resolver over the binding read model is correct
+		// for sendTurn/interrupt/permission/question alike.
+		const instanceClientsOption = yield* Effect.serviceOption(
+			OpenCodeInstanceClientsTag,
+		);
+		const clientForSession =
+			instanceClientsOption._tag === "Some" && sessionBindingReadModel != null
+				? (sessionId: string) =>
+						Effect.suspend(() => {
+							const boundInstanceId =
+								sessionBindingReadModel.getProviderForSession(sessionId);
+							return boundInstanceId == null
+								? Effect.succeed(undefined)
+								: instanceClientsOption.value.clientFor(boundInstanceId);
+						})
+				: undefined;
+
 		const openCodeInstance = (yield* OpenCodeDriver.create({
 			client: options.client,
 			...(options.workspaceRoot != null
 				? { workspaceRoot: options.workspaceRoot }
 				: {}),
+			...(clientForSession != null ? { clientForSession } : {}),
 		})) as OpenCodeProviderInstance;
 		registry.registerInstance(openCodeInstance);
 
@@ -147,21 +196,6 @@ const createOrchestrationComponentsEffect = (
 			...(materializeSubagents ? { materializeSubagents } : {}),
 		});
 		registry.registerInstance(claudeInstance);
-
-		const persistenceDbPath = options.persistenceDbPath;
-		const sessionBindingDb =
-			persistenceDbPath != null
-				? yield* Effect.sync(() => SqliteClient.open(persistenceDbPath))
-				: undefined;
-		if (sessionBindingDb != null) {
-			yield* Effect.addFinalizer(() =>
-				Effect.sync(() => sessionBindingDb.close()),
-			);
-		}
-		const sessionBindingReadModel =
-			sessionBindingDb != null
-				? new SqliteProviderSessionBindingReadModel(sessionBindingDb)
-				: undefined;
 		// Durable command receipts share the persistence DB with the session
 		// binding read model. `now`/`generateId` are supplied at this wiring edge
 		// (wall clock + random) so core orchestration stays free of Date.now /
@@ -186,6 +220,11 @@ const createOrchestrationComponentsEffect = (
 				: undefined;
 		const engine = new OrchestrationEngine({
 			registry,
+			resolveProviderDriver: (providerId) =>
+				resolveProviderRoutingDriver(
+					loadDaemonConfig(options.configDir),
+					providerId,
+				),
 			...(sessionBindingReadModel != null ? { sessionBindingReadModel } : {}),
 			...(durableCommands != null ? { durableCommands } : {}),
 		});
@@ -266,6 +305,7 @@ export const makeOrchestrationRuntimeLayer = (
 				...(options.projectKey != null
 					? { projectKey: options.projectKey }
 					: {}),
+				...(options.configDir != null ? { configDir: options.configDir } : {}),
 			});
 			yield* Effect.addFinalizer(() => components.engine.shutdownEffect());
 			return components;

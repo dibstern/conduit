@@ -6,6 +6,7 @@
 
 import { Effect, Either, Schema } from "effect";
 import type { IPCCommand, IPCResponse } from "../types.js";
+import { ProviderDriverKindSchema } from "./provider-instance.js";
 
 const NonEmptyString = Schema.NonEmptyString;
 const PinString = Schema.String.pipe(Schema.pattern(/^\d{4,8}$/));
@@ -53,6 +54,9 @@ export const IpcOpenCodeInstanceSchema = Schema.Struct({
 	name: Schema.String,
 	port: Schema.Number,
 	managed: Schema.Boolean,
+	driver: Schema.optional(ProviderDriverKindSchema),
+	configDir: Schema.optional(Schema.String),
+	url: Schema.optional(Schema.String),
 	status: IpcInstanceStatusSchema,
 	pid: Schema.optional(Schema.Number),
 	env: Schema.optional(Env),
@@ -230,6 +234,8 @@ export class InstanceAdd extends Schema.TaggedRequest<InstanceAdd>()(
 			port: Schema.optional(Port),
 			env: Schema.optional(Env),
 			url: Schema.optional(NonEmptyString),
+			driver: Schema.optional(ProviderDriverKindSchema),
+			configDir: Schema.optional(Schema.String),
 		},
 	},
 ) {}
@@ -271,6 +277,8 @@ export class InstanceUpdate extends Schema.TaggedRequest<InstanceUpdate>()(
 			name: Schema.optional(Schema.String),
 			env: Schema.optional(Env),
 			port: Schema.optional(Schema.Number),
+			driver: Schema.optional(ProviderDriverKindSchema),
+			configDir: Schema.optional(Schema.String),
 		},
 	},
 ) {}
@@ -310,6 +318,18 @@ const instanceAddValidation = (
 	request: Schema.Schema.Type<typeof IpcTaggedRequestUnion>,
 ): string | undefined => {
 	if (request._tag !== "InstanceAdd") return undefined;
+	if (request.driver === "claude") {
+		if (request.managed) {
+			return "InstanceAdd: Claude instances must not be managed";
+		}
+		if (request.port !== undefined) {
+			return "InstanceAdd: Claude instances must not include 'port'";
+		}
+		if (request.url !== undefined) {
+			return "InstanceAdd: Claude instances must not include 'url'";
+		}
+		return undefined;
+	}
 	if (request.managed) {
 		if (request.port === undefined) {
 			return "InstanceAdd requires a valid 'port' (1-65535) for managed instances";
@@ -403,6 +423,10 @@ export function taggedRequestToCommand(request: IpcTaggedRequest): IPCCommand {
 				...(request.port !== undefined ? { port: request.port } : {}),
 				...(request.env !== undefined ? { env: request.env } : {}),
 				...(request.url !== undefined ? { url: request.url } : {}),
+				...(request.driver !== undefined ? { driver: request.driver } : {}),
+				...(request.configDir !== undefined
+					? { configDir: request.configDir }
+					: {}),
 			};
 		case "InstanceRemove":
 			return { cmd: "instance_remove", id: request.id };
@@ -417,6 +441,10 @@ export function taggedRequestToCommand(request: IpcTaggedRequest): IPCCommand {
 				...(request.name !== undefined ? { name: request.name } : {}),
 				...(request.env !== undefined ? { env: request.env } : {}),
 				...(request.port !== undefined ? { port: request.port } : {}),
+				...(request.driver !== undefined ? { driver: request.driver } : {}),
+				...(request.configDir !== undefined
+					? { configDir: request.configDir }
+					: {}),
 			};
 		case "InstanceStatus":
 			return { cmd: "instance_status", id: request.id };
@@ -475,6 +503,10 @@ export function commandToTaggedRequestPayload(command: IPCCommand): unknown {
 				...(command.port !== undefined ? { port: command.port } : {}),
 				...(command.env !== undefined ? { env: command.env } : {}),
 				...(command.url !== undefined ? { url: command.url } : {}),
+				...(command.driver !== undefined ? { driver: command.driver } : {}),
+				...(command.configDir !== undefined
+					? { configDir: command.configDir }
+					: {}),
 			};
 		case "instance_remove":
 			return { _tag: "InstanceRemove", id: command.id };
@@ -489,6 +521,10 @@ export function commandToTaggedRequestPayload(command: IPCCommand): unknown {
 				...(command.name !== undefined ? { name: command.name } : {}),
 				...(command.env !== undefined ? { env: command.env } : {}),
 				...(command.port !== undefined ? { port: command.port } : {}),
+				...(command.driver !== undefined ? { driver: command.driver } : {}),
+				...(command.configDir !== undefined
+					? { configDir: command.configDir }
+					: {}),
 			};
 		case "instance_status":
 			return { _tag: "InstanceStatus", id: command.id };

@@ -20,6 +20,16 @@ import {
 	Schedule,
 } from "effect";
 import {
+	isKnownDriverKind,
+	type ProviderDriverKind,
+	type ProviderInstanceId,
+} from "../../../contracts/provider-instance.js";
+import {
+	loadDaemonConfig,
+	resolveInstanceDriver,
+	resolveProviderRoutingDriver,
+} from "../../../daemon/config-persistence.js";
+import {
 	type ForkEntry,
 	loadForkMetadata,
 	saveForkMetadata,
@@ -43,6 +53,7 @@ import {
 	publishSessionCreated,
 	publishSessionDeleted,
 } from "../../daemon/Services/daemon-pubsub.js";
+import { OpenCodeInstanceClientsTag } from "./opencode-instance-clients.js";
 import { RelayStatusSnapshotTag } from "./relay-status-snapshot.js";
 import {
 	ConfigTag,
@@ -61,6 +72,8 @@ const retryPolicy = Schedule.exponential("500 millis").pipe(
 
 const DEFAULT_HISTORY_PAGE_SIZE = 50;
 const CURSOR_SCAN_LIMIT = 10_000;
+const CLAUDE_PROVIDER_ID = "claude";
+const CLAUDE_SDK_PROVIDER_ID = "claude-sdk";
 
 // ─── Error types ───────────────────────────────────────────────────────────
 
@@ -80,6 +93,7 @@ export type ListSessionsOptions = {
 type SessionListMessage = Extract<RelayMessage, { type: "session_list" }>;
 
 export interface CreateSessionOptions {
+	readonly instanceId?: ProviderInstanceId;
 	readonly providerId?: string;
 }
 
@@ -330,8 +344,10 @@ const normalizeSessionTitle = (title?: string): string => {
 	return trimmed ? trimmed : "Untitled";
 };
 
-const isClaudeSessionRow = (row: SessionRow): boolean =>
-	row.provider === "claude" || row.provider === "claude-sdk";
+const isClaudeSessionRow = (row: SessionRow, configDir?: string): boolean =>
+	row.provider === CLAUDE_SDK_PROVIDER_ID ||
+	resolveProviderRoutingDriver(loadDaemonConfig(configDir), row.provider) ===
+		CLAUDE_PROVIDER_ID;
 
 const createLocalSessionId = (): string =>
 	`ses_${randomUUID().replaceAll("-", "")}`;
@@ -352,7 +368,10 @@ const getConfiguredLocalSessionProvider = () =>
 		return undefined;
 	});
 
-const createLocalSession = (title?: string) =>
+const createLocalSession = (
+	title?: string,
+	selectedInstanceId?: ProviderInstanceId,
+) =>
 	Effect.gen(function* () {
 		const eventStoreOption = yield* Effect.serviceOption(EventStoreEffectTag);
 		const projectionRunnerOption = yield* Effect.serviceOption(
@@ -375,7 +394,10 @@ const createLocalSession = (title?: string) =>
 		const eventStore = eventStoreOption.value;
 		const projectionRunner = projectionRunnerOption.value;
 		const sql = sqlOption.value;
-		const provider = yield* getLocalSessionProvider();
+		const provider =
+			selectedInstanceId === undefined
+				? yield* getLocalSessionProvider()
+				: selectedInstanceId;
 		const sessionId = createLocalSessionId();
 		const now = Date.now();
 		const sessionTitle = normalizeSessionTitle(title);
@@ -517,6 +539,7 @@ const renameSQLiteBackedClaudeSession = (sessionId: string, title: string) =>
 			ProjectionRunnerEffectTag,
 		);
 		const sqlOption = yield* Effect.serviceOption(SqlClient.SqlClient);
+		const configOption = yield* Effect.serviceOption(ConfigTag);
 
 		if (
 			readQueryOption._tag === "None" ||
@@ -560,7 +583,15 @@ const renameSQLiteBackedClaudeSession = (sessionId: string, title: string) =>
 					}),
 			),
 		);
-		if (!row || !isClaudeSessionRow(row)) return false;
+		if (
+			!row ||
+			!isClaudeSessionRow(
+				row,
+				configOption._tag === "Some" ? configOption.value.configDir : undefined,
+			)
+		) {
+			return false;
+		}
 
 		const now = Date.now();
 
@@ -1078,6 +1109,9 @@ export const SessionManagerServiceLive: Layer.Layer<
 		);
 		const sqlOption = yield* Effect.serviceOption(SqlClient.SqlClient);
 		const statusPollerOption = yield* Effect.serviceOption(StatusPollerTag);
+		const instanceClientsOption = yield* Effect.serviceOption(
+			OpenCodeInstanceClientsTag,
+		);
 		if (configOption._tag === "Some") {
 			const forkMeta = loadForkMetadata(configDir);
 			if (forkMeta.size > 0) {
@@ -1126,7 +1160,7 @@ export const SessionManagerServiceLive: Layer.Layer<
 			Effect.gen(function* () {
 				const bindSessionProvider = (
 					session: SessionDetail,
-					providerId: "claude" | "opencode",
+					providerId: string,
 				) =>
 					Effect.sync(() => {
 						if (engineOption._tag === "Some") {
@@ -1160,23 +1194,175 @@ export const SessionManagerServiceLive: Layer.Layer<
 						),
 					);
 				};
-				const createViaOpenCode = () =>
+				const persistOpenCodeInstanceBinding = (
+					session: SessionDetail,
+					instanceId: ProviderInstanceId,
+				) =>
+					Effect.gen(function* () {
+						if (
+							eventStoreEffectOption._tag === "None" ||
+							projectionRunnerEffectOption._tag === "None" ||
+							sqlOption._tag === "None"
+						) {
+							return yield* new SessionManagerError({
+								operation: "createSession.persistInstanceBinding",
+								cause: "SQLite event-store services are unavailable",
+							});
+						}
+
+						const eventStore = eventStoreEffectOption.value;
+						const projectionRunner = projectionRunnerEffectOption.value;
+						const sql = sqlOption.value;
+						const withSql = <A, E>(
+							effect: Effect.Effect<A, E, SqlClient.SqlClient>,
+						): Effect.Effect<A, E> =>
+							effect.pipe(Effect.provideService(SqlClient.SqlClient, sql));
+
+						const recovered = yield* projectionRunner.isRecovered();
+						if (!recovered) {
+							yield* withSql(projectionRunner.recover()).pipe(
+								Effect.mapError(
+									(cause) =>
+										new SessionManagerError({
+											operation: "createSession.persistInstanceBinding.recover",
+											cause,
+										}),
+								),
+								Effect.asVoid,
+							);
+						}
+
+						const now = Date.now();
+						const stored = yield* eventStore
+							.append(
+								canonicalEvent(
+									"session.created",
+									session.id,
+									{
+										sessionId: session.id,
+										title: normalizeSessionTitle(session.title),
+										provider: instanceId,
+										providerSessionId: session.id,
+									},
+									{
+										provider: instanceId,
+										createdAt: now,
+										metadata: { source: "relay", synthetic: true },
+									},
+								),
+							)
+							.pipe(
+								Effect.mapError(
+									(cause) =>
+										new SessionManagerError({
+											operation: "createSession.persistInstanceBinding.append",
+											cause,
+										}),
+								),
+							);
+
+						yield* withSql(projectionRunner.projectEvent(stored)).pipe(
+							Effect.mapError(
+								(cause) =>
+									new SessionManagerError({
+										operation: "createSession.persistInstanceBinding.project",
+										cause,
+									}),
+							),
+						);
+					});
+				const resolveSelectedDriver = (
+					instanceId: ProviderInstanceId,
+				): Effect.Effect<ProviderDriverKind, SessionManagerError> =>
+					Effect.gen(function* () {
+						const daemonConfig = loadDaemonConfig(configDir);
+						if (daemonConfig !== null) {
+							return resolveInstanceDriver(daemonConfig, instanceId);
+						}
+						if (isKnownDriverKind(instanceId)) {
+							return instanceId;
+						}
+						return yield* new SessionManagerError({
+							operation: "createSession.resolveInstanceDriver",
+							cause: `Cannot resolve provider instance without daemon config: ${instanceId}`,
+						});
+					});
+				const createViaOpenCode = (instanceId?: ProviderInstanceId) =>
 					Effect.either(
-						createSession(title).pipe(
-							Effect.provideService(OpenCodeAPITag, api),
-						),
-					).pipe(
-						Effect.tap((result) =>
-							result._tag === "Right"
-								? seedOpenCodeSession(result.right)
-								: Effect.void,
-						),
+						Effect.gen(function* () {
+							// Phase 4.4: a session bound to a NAMED OpenCode instance is
+							// created on THAT instance's server; the default id (and
+							// wirings without the instance-clients service, e.g. legacy
+							// or unit harnesses) use the project-default client. A named
+							// instance that cannot be resolved fails the create cleanly
+							// instead of silently landing on the default server.
+							const instanceApi =
+								instanceId !== undefined &&
+								instanceClientsOption._tag === "Some"
+									? yield* instanceClientsOption.value
+											.clientFor(instanceId)
+											.pipe(
+												Effect.mapError(
+													(cause) =>
+														new SessionManagerError({
+															operation: "createSession.resolveInstanceClient",
+															cause,
+														}),
+												),
+											)
+									: undefined;
+							const session = yield* createSession(title).pipe(
+								Effect.provideService(OpenCodeAPITag, instanceApi ?? api),
+							);
+							yield* seedOpenCodeSession(session);
+							if (instanceId !== undefined) {
+								yield* persistOpenCodeInstanceBinding(session, instanceId);
+							}
+							return session;
+						}),
 					);
-				const createViaLocal = () => Effect.either(createLocalSession(title));
+				const createViaLocal = (instanceId?: ProviderInstanceId) =>
+					Effect.either(createLocalSession(title, instanceId));
+
+				const selectedInstanceId = options?.instanceId;
+				if (selectedInstanceId !== undefined) {
+					const selectedDriver =
+						yield* resolveSelectedDriver(selectedInstanceId);
+					if (selectedDriver === CLAUDE_PROVIDER_ID) {
+						const localResult = yield* createViaLocal(selectedInstanceId);
+						if (localResult._tag === "Right") {
+							yield* bindSessionProvider(localResult.right, selectedInstanceId);
+							return localResult.right;
+						}
+						return yield* new SessionManagerError({
+							operation: "createSession",
+							cause: localResult.left,
+						});
+					}
+					if (selectedDriver === "opencode") {
+						const openCodeResult = yield* createViaOpenCode(selectedInstanceId);
+						if (openCodeResult._tag === "Right") {
+							yield* bindSessionProvider(
+								openCodeResult.right,
+								selectedInstanceId,
+							);
+							return openCodeResult.right;
+						}
+						return yield* new SessionManagerError({
+							operation: "createSession",
+							cause: openCodeResult.left,
+						});
+					}
+					return yield* new SessionManagerError({
+						operation: "createSession",
+						cause: `Unsupported provider driver for instance ${selectedInstanceId}: ${selectedDriver}`,
+					});
+				}
 
 				const requestedProvider = options?.providerId?.trim();
 				const requestedLocalProvider =
-					requestedProvider === "claude" || requestedProvider === "claude-sdk";
+					requestedProvider === CLAUDE_PROVIDER_ID ||
+					requestedProvider === CLAUDE_SDK_PROVIDER_ID;
 				if (requestedProvider && !requestedLocalProvider) {
 					const openCodeResult = yield* createViaOpenCode();
 					if (openCodeResult._tag === "Right") {
@@ -1190,7 +1376,10 @@ export const SessionManagerServiceLive: Layer.Layer<
 				}
 
 				const configuredProvider = yield* getConfiguredLocalSessionProvider();
-				if (configuredProvider == null || configuredProvider === "claude") {
+				if (
+					configuredProvider == null ||
+					configuredProvider === CLAUDE_PROVIDER_ID
+				) {
 					const localResult = yield* createViaLocal();
 					if (localResult._tag === "Right") {
 						yield* bindSessionProvider(localResult.right, "claude");
@@ -1226,7 +1415,7 @@ export const SessionManagerServiceLive: Layer.Layer<
 				);
 				const localResult = yield* createViaLocal();
 				if (localResult._tag === "Right") {
-					if (localResult.right.providerID === "claude") {
+					if (localResult.right.providerID === CLAUDE_PROVIDER_ID) {
 						yield* bindSessionProvider(localResult.right, "claude");
 					}
 					return localResult.right;

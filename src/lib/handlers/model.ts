@@ -1,7 +1,18 @@
 // ─── Model Handlers ──────────────────────────────────────────────────────────
 
 import { Data, Effect } from "effect";
+import {
+	defaultInstanceIdForDriver,
+	isKnownDriverKind,
+	type ProviderDriverKind,
+	type ProviderInstanceId,
+	ProviderInstanceIdSchema,
+} from "../contracts/provider-instance.js";
 import type { GetModelsResponse } from "../contracts/ws-rpc.js";
+import {
+	loadDaemonConfig,
+	resolveInstanceDriver,
+} from "../daemon/config-persistence.js";
 import {
 	ConfigTag,
 	LoggerTag,
@@ -57,6 +68,14 @@ const saveRelaySettingsEffect = (
 export function isClaudeProvider(providerId: string): boolean {
 	return providerId === "claude";
 }
+
+const resolveBuiltInInstanceDriver = (
+	instanceId: ProviderInstanceId,
+): ProviderDriverKind => {
+	if (instanceId === defaultInstanceIdForDriver("claude")) return "claude";
+	if (instanceId === defaultInstanceIdForDriver("opencode")) return "opencode";
+	return isKnownDriverKind(instanceId) ? instanceId : "opencode";
+};
 
 /** Helper: resolve session from WebSocketHandler context. */
 const resolveSessionFromContext = (clientId: string) =>
@@ -240,6 +259,9 @@ const toSharedProviders = (
 ): ProviderInfo[] =>
 	providers.map((provider) => ({
 		id: provider.id,
+		...(provider.instanceId === undefined
+			? {}
+			: { instanceId: provider.instanceId }),
 		name: provider.name,
 		configured: provider.configured,
 		models: provider.models.map((model) => ({
@@ -289,6 +311,7 @@ export const getModelsResponse = (
 		readonly projectSlug?: string;
 		readonly clientId?: string;
 		readonly sessionId?: string;
+		readonly instanceId?: string;
 	} = {},
 ): Effect.Effect<
 	GetModelsResponse,
@@ -303,6 +326,21 @@ export const getModelsResponse = (
 		const modelService = yield* OpenCodeModelServiceTag;
 		const log = yield* LoggerTag;
 		const engineOption = yield* Effect.serviceOption(OrchestrationEngineTag);
+		const configOption = yield* Effect.serviceOption(ConfigTag);
+		const instanceId =
+			input.instanceId === undefined
+				? undefined
+				: ProviderInstanceIdSchema.make(input.instanceId);
+		const daemonConfig =
+			instanceId === undefined || configOption._tag === "None"
+				? null
+				: loadDaemonConfig(configOption.value.configDir);
+		const instanceDriver =
+			instanceId === undefined
+				? undefined
+				: daemonConfig === null
+					? resolveBuiltInInstanceDriver(instanceId)
+					: resolveInstanceDriver(daemonConfig, instanceId);
 
 		const activeId =
 			input.sessionId ??
@@ -318,55 +356,65 @@ export const getModelsResponse = (
 			typeof engineOption.value.getProviderForSession === "function"
 				? engineOption.value.getProviderForSession(activeId)
 				: undefined;
-		const activeSessionUsesClaude =
-			activeId != null &&
-			isClaudeProvider(activeProviderId ?? fallbackModel?.providerID ?? "");
+		const selectedDriver: ProviderDriverKind = isClaudeProvider(
+			activeProviderId ?? fallbackModel?.providerID ?? "",
+		)
+			? "claude"
+			: "opencode";
+		const selectedModelMatchesInstance =
+			instanceDriver === undefined || instanceDriver === selectedDriver;
 
 		const providers: ProviderInfo[] = [];
 		let openCodeDiscoveryFailed = false;
 		let openCodeFailure: unknown;
-		const openCodeProviderResult = yield* Effect.either(
-			modelService.listProviders(),
-		);
-		if (openCodeProviderResult._tag === "Right") {
-			const connectedSet = new Set(openCodeProviderResult.right.connected);
-			providers.push(
-				...openCodeProviderResult.right.providers
-					.map((p) => {
-						const providerId = p.id || p.name || "";
-						const models = (p.models ?? []).map((m) => ({
-							id: m.id,
-							name: m.name || m.id,
-							provider: providerId,
-							...(m.limit && { limit: { ...m.limit } }),
-							...(m.variants &&
-								Object.keys(m.variants).length > 0 && {
-									variants: Object.keys(m.variants),
-								}),
-						}));
-						return {
-							id: providerId,
-							name: p.name || p.id || "",
-							configured: connectedSet.has(p.id) || connectedSet.has(p.name),
-							models:
-								providerId === "amazon-bedrock"
-									? groupGeoRoutingModels(models)
-									: models,
-						};
-					})
-					.filter((p) => p.configured),
+		if (instanceDriver === undefined || instanceDriver === "opencode") {
+			const openCodeProviderResult = yield* Effect.either(
+				modelService.listProviders(),
 			);
-		} else {
-			openCodeDiscoveryFailed = true;
-			openCodeFailure = openCodeProviderResult.left;
-			log.warn(
-				`OpenCode provider discovery failed during model refresh: ${formatErrorDetail(openCodeProviderResult.left)}`,
-			);
+			if (openCodeProviderResult._tag === "Right") {
+				const connectedSet = new Set(openCodeProviderResult.right.connected);
+				providers.push(
+					...openCodeProviderResult.right.providers
+						.map((p) => {
+							const providerId = p.id || p.name || "";
+							const models = (p.models ?? []).map((m) => ({
+								id: m.id,
+								name: m.name || m.id,
+								provider: providerId,
+								...(m.limit && { limit: { ...m.limit } }),
+								...(m.variants &&
+									Object.keys(m.variants).length > 0 && {
+										variants: Object.keys(m.variants),
+									}),
+							}));
+							return {
+								id: providerId,
+								...(instanceId === undefined ? {} : { instanceId }),
+								name: p.name || p.id || "",
+								configured: connectedSet.has(p.id) || connectedSet.has(p.name),
+								models:
+									providerId === "amazon-bedrock"
+										? groupGeoRoutingModels(models)
+										: models,
+							};
+						})
+						.filter((p) => p.configured),
+				);
+			} else {
+				openCodeDiscoveryFailed = true;
+				openCodeFailure = openCodeProviderResult.left;
+				log.warn(
+					`OpenCode provider discovery failed during model refresh: ${formatErrorDetail(openCodeProviderResult.left)}`,
+				);
+			}
 		}
 
 		// Merge Claude in-process models when the orchestration engine is available.
 		let claudeDiscoveryFailed = false;
-		if (engineOption._tag === "Some") {
+		if (
+			(instanceDriver === undefined || instanceDriver === "claude") &&
+			engineOption._tag === "Some"
+		) {
 			const engineResult = yield* Effect.either(
 				engineOption.value.dispatchEffect({
 					type: "discover",
@@ -384,6 +432,7 @@ export const getModelsResponse = (
 				}
 				providers.push({
 					id: "claude",
+					...(instanceId === undefined ? {} : { instanceId }),
 					name: "Anthropic - claude",
 					configured: true,
 					models: engineResult.right.models.map((m) => ({
@@ -406,10 +455,11 @@ export const getModelsResponse = (
 			if (engineResult._tag === "Left") {
 				claudeDiscoveryFailed = true;
 			}
-		} else {
+		} else if (instanceDriver === undefined || instanceDriver === "claude") {
 			claudeDiscoveryFailed = true;
 		}
 		if (
+			instanceId === undefined &&
 			openCodeDiscoveryFailed &&
 			claudeDiscoveryFailed &&
 			providers.length === 0
@@ -426,7 +476,11 @@ export const getModelsResponse = (
 
 		// Send model_info: prefer session's model, fall back to relay-side selection
 		let sessionModel: ModelOverride | undefined;
-		if (activeId && !activeSessionUsesClaude) {
+		if (
+			activeId &&
+			selectedModelMatchesInstance &&
+			selectedDriver === "opencode"
+		) {
 			const sessionResult = yield* Effect.either(
 				modelService.getSession(activeId),
 			);
@@ -441,7 +495,9 @@ export const getModelsResponse = (
 				);
 			}
 		}
-		const activeModel = sessionModel ?? fallbackModel;
+		const activeModel = selectedModelMatchesInstance
+			? (sessionModel ?? fallbackModel)
+			: undefined;
 
 		// Send variant_info for the current model so clients get refreshed state
 		const currentVariant = activeId
@@ -469,6 +525,7 @@ export const getModelsResponse = (
 
 		return {
 			projectSlug: input.projectSlug ?? "",
+			...(instanceId === undefined ? {} : { instanceId }),
 			providers,
 			...(activeModel
 				? {
@@ -495,6 +552,7 @@ export const getModelsResponse = (
 export const sendModelsStateToClient = (
 	clientId: string,
 	sessionId?: string,
+	instanceId?: string,
 ): Effect.Effect<
 	void,
 	unknown,
@@ -508,11 +566,15 @@ export const sendModelsStateToClient = (
 		const response = yield* getModelsResponse({
 			clientId,
 			...(sessionId ? { sessionId } : {}),
+			...(instanceId ? { instanceId } : {}),
 		});
 		const wsHandler = yield* WebSocketHandlerTag;
 
 		wsHandler.sendTo(clientId, {
 			type: "model_list",
+			...(response.instanceId === undefined
+				? {}
+				: { instanceId: response.instanceId }),
 			providers: toSharedProviders(response.providers),
 		});
 		if (response.active) {

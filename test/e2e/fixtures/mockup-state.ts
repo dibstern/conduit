@@ -125,6 +125,96 @@ export const initMessages: MockMessage[] = [
 	},
 ];
 
+// ─── Harness / instance-picker fixtures ──────────────────────────────────────
+// The composer's instance-rail model picker needs both drivers discoverable:
+// the "claude" provider belongs to the Claude driver's default instance, the
+// "anthropic" catalog to the OpenCode driver's default instance.
+
+export const dualDriverProviders = [
+	{
+		id: "claude",
+		name: "Anthropic - claude",
+		configured: true,
+		models: [
+			{ id: "claude-opus-4-1", name: "claude-opus-4-1", provider: "claude" },
+			{
+				id: "claude-sonnet-4-5",
+				name: "claude-sonnet-4-5",
+				provider: "claude",
+			},
+		],
+	},
+	{
+		id: "anthropic",
+		name: "Anthropic - opencode",
+		configured: true,
+		models: [
+			{
+				id: "claude-haiku-3.5",
+				name: "claude-haiku-3.5",
+				provider: "anthropic",
+			},
+			{ id: "claude-sonnet-4", name: "claude-sonnet-4", provider: "anthropic" },
+		],
+	},
+];
+
+export const dualDriverModelList: MockMessage = {
+	type: "model_list",
+	providers: dualDriverProviders,
+};
+
+export const claudeInstanceAgents = [
+	{ id: "planner", name: "Planner" },
+	{ id: "reviewer", name: "Reviewer" },
+];
+
+/** Two agents so the selector stays visible (it hides with a single agent). */
+export const openCodeInstanceAgents = [
+	{ id: "opencode-triage", name: "opencode-triage" },
+	{ id: "build", name: "Build" },
+];
+
+export const claudeAgentList: MockMessage = {
+	type: "agent_list",
+	providerScope: { id: "claude", name: "Claude" },
+	agents: claudeInstanceAgents,
+};
+
+export const openCodeAgentList: MockMessage = {
+	type: "agent_list",
+	providerScope: { id: "opencode", name: "OpenCode" },
+	agents: openCodeInstanceAgents,
+};
+
+/** Connected-but-unbound init: like initMessages but WITHOUT session_switched.
+ *  No session is bound, so the harness rail is fully interactive and the
+ *  composer's first send creates the session (CreateSession + instanceId). */
+export const unboundInitMessages: MockMessage[] = [
+	...initMessages.filter(
+		(m) =>
+			m.type !== "session_switched" &&
+			m.type !== "model_list" &&
+			m.type !== "agent_list",
+	),
+	dualDriverModelList,
+	openCodeAgentList,
+];
+
+/** Bind an existing session to the Claude harness (locked-rail mode). */
+export const claudeBoundSessionMessages: MockMessage[] = [
+	{ type: "session_switched", id: "sess-bound-claude" },
+	{ type: "model_info", model: "claude-sonnet-4-5", provider: "claude" },
+	claudeAgentList,
+];
+
+/** Bind an existing session to the OpenCode harness (locked-rail mode). */
+export const openCodeBoundSessionMessages: MockMessage[] = [
+	{ type: "session_switched", id: "sess-bound-opencode" },
+	{ type: "model_info", model: "claude-sonnet-4", provider: "anthropic" },
+	openCodeAgentList,
+];
+
 // ─── Turn 1 response (completed) ─────────────────────────────────────────────
 // Sent after user message: "Help me implement a WebSocket handler for the relay server"
 

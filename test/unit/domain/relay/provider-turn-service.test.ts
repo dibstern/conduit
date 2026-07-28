@@ -1,6 +1,10 @@
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, it } from "@effect/vitest";
 import { Deferred, Effect, Layer } from "effect";
-import { expect, vi } from "vitest";
+import { afterEach, expect, vi } from "vitest";
+import type { DaemonConfig } from "../../../../src/lib/daemon/config-persistence.js";
 import { OpenCodeAPITag } from "../../../../src/lib/domain/provider/Services/opencode-api-service.js";
 import { PendingInteractionServiceLive } from "../../../../src/lib/domain/relay/Services/pending-interaction-service.js";
 import {
@@ -73,6 +77,21 @@ const completedTurn = (overrides?: Partial<TurnResult>): TurnResult => ({
 
 const flushDispatch = () =>
 	Effect.promise<void>(() => new Promise((resolve) => setImmediate(resolve)));
+
+const tempConfigDirs: string[] = [];
+
+afterEach(() => {
+	for (const configDir of tempConfigDirs.splice(0)) {
+		rmSync(configDir, { recursive: true, force: true });
+	}
+});
+
+const writeDaemonConfig = (config: DaemonConfig): string => {
+	const configDir = mkdtempSync(join(tmpdir(), "provider-turn-routing-"));
+	tempConfigDirs.push(configDir);
+	writeFileSync(join(configDir, "daemon.json"), JSON.stringify(config));
+	return configDir;
+};
 
 const defaultInput = (
 	overrides?: Partial<ProviderTurnServiceSendInput>,
@@ -178,7 +197,7 @@ const makeIngestion = (
 });
 
 const makeEngine = (input?: {
-	readonly providerId?: "claude" | "opencode" | undefined;
+	readonly providerId?: string | undefined;
 	readonly result?: TurnResult;
 	readonly dispatchEffect?: OrchestrationEngine["dispatchEffect"];
 }) => {
@@ -207,6 +226,7 @@ const serviceLayer = (input: {
 	readonly titleService?: SessionTitleService;
 	readonly sessionHistory?: readonly HistoryMessage[];
 	readonly api?: OpenCodeAPI;
+	readonly configDir?: string;
 }) => {
 	const wsHandler = makeMockWebSocketHandler({
 		getClientsForSession: vi.fn(() => ["client-1"]),
@@ -224,7 +244,15 @@ const serviceLayer = (input: {
 		Layer.succeed(OpenCodeAPITag, input.api ?? makeMockOpenCodeAPI()),
 		Layer.succeed(WebSocketHandlerTag, wsHandler),
 		Layer.succeed(LoggerTag, log),
-		Layer.succeed(ConfigTag, makeMockConfig({ projectDir: "/test/project" })),
+		Layer.succeed(
+			ConfigTag,
+			makeMockConfig({
+				projectDir: "/test/project",
+				...(input.configDir === undefined
+					? {}
+					: { configDir: input.configDir }),
+			}),
+		),
 		Layer.succeed(SessionManagerServiceTag, sessionManagerService),
 		PendingInteractionServiceLive,
 		makeOverridesStateLive(),
@@ -425,8 +453,117 @@ describe("ProviderTurnService", () => {
 	);
 
 	it.effect(
+		"applies Claude turn policy to a named Claude instance binding",
+		() => {
+			const configDir = writeDaemonConfig({
+				pid: 1234,
+				port: 2633,
+				pinHash: null,
+				tls: false,
+				debug: false,
+				keepAwake: false,
+				dangerouslySkipPermissions: false,
+				projects: [],
+				instances: [
+					{
+						id: "work-claude",
+						name: "Work Claude",
+						port: 0,
+						managed: false,
+						driver: "claude",
+						configDir: "/instances/work-claude",
+					},
+				],
+			});
+			const engine = makeEngine({ providerId: "work-claude" });
+			const readQuery = makeReadQuery(vi.fn(() => Effect.succeed([])));
+			const persist = makePersistService(vi.fn(() => Effect.void));
+			const { layer } = serviceLayer({
+				engine,
+				readQuery,
+				persist,
+				ingestion: makeIngestion(),
+				configDir,
+			});
+
+			return Effect.gen(function* () {
+				yield* sendTurn();
+
+				expect(readQuery.getSessionMessagesWithParts).toHaveBeenCalledWith(
+					"session-1",
+				);
+				expect(persist.persistUserMessage).toHaveBeenCalledWith(
+					"session-1",
+					"current prompt",
+				);
+				expect(engine.dispatchEffect).toHaveBeenCalledWith(
+					expect.objectContaining({
+						type: "send_turn",
+						providerId: "work-claude",
+						input: expect.objectContaining({
+							configDir: "/instances/work-claude",
+							history: [],
+						}),
+					}),
+				);
+			}).pipe(Effect.provide(layer));
+		},
+	);
+
+	it.effect(
+		"surfaces SEND_FAILED without dispatch when the bound instance is unresolvable",
+		() => {
+			const configDir = writeDaemonConfig({
+				pid: 1234,
+				port: 2633,
+				pinHash: null,
+				tls: false,
+				debug: false,
+				keepAwake: false,
+				dangerouslySkipPermissions: false,
+				projects: [],
+			});
+			const engine = makeEngine({ providerId: "deleted-instance" });
+			const { layer, wsHandler } = serviceLayer({
+				engine,
+				configDir,
+			});
+
+			return Effect.gen(function* () {
+				yield* sendTurn();
+
+				expect(engine.dispatchEffect).not.toHaveBeenCalled();
+				expect(wsHandler.sendToSession).toHaveBeenCalledWith("session-1", {
+					type: "done",
+					sessionId: "session-1",
+					code: 1,
+				});
+				expect(wsHandler.sendTo).toHaveBeenCalledWith(
+					"client-1",
+					expect.objectContaining({
+						type: "error",
+						code: "SEND_FAILED",
+						sessionId: "session-1",
+						message: expect.stringContaining("deleted-instance"),
+					}),
+				);
+			}).pipe(Effect.provide(layer));
+		},
+	);
+
+	it.effect(
 		"dispatches a later Claude turn without starting title generation",
 		() => {
+			const configDir = writeDaemonConfig({
+				pid: 1234,
+				port: 2633,
+				pinHash: null,
+				tls: false,
+				debug: false,
+				keepAwake: false,
+				dangerouslySkipPermissions: false,
+				projects: [],
+			});
 			const engine = makeEngine({ providerId: "claude" });
 			const persist = makePersistService(vi.fn(() => Effect.void));
 			const titleService = makeTitleService();
@@ -435,6 +572,7 @@ describe("ProviderTurnService", () => {
 				persist,
 				titleService,
 				sessionHistory: [historyMessage("Earlier prompt")],
+				configDir,
 			});
 
 			return Effect.gen(function* () {
@@ -454,6 +592,11 @@ describe("ProviderTurnService", () => {
 						}),
 					}),
 				);
+				const command = vi.mocked(engine.dispatchEffect).mock.calls[0]?.[0];
+				if (command?.type !== "send_turn") {
+					throw new Error("Expected a send_turn command");
+				}
+				expect(command.input).not.toHaveProperty("configDir");
 			}).pipe(Effect.provide(layer));
 		},
 	);
@@ -653,6 +796,11 @@ describe("ProviderTurnService", () => {
 						input: expect.objectContaining({ history: [] }),
 					}),
 				);
+				const command = vi.mocked(engine.dispatchEffect).mock.calls[0]?.[0];
+				if (command?.type !== "send_turn") {
+					throw new Error("Expected a send_turn command");
+				}
+				expect(command.input).not.toHaveProperty("configDir");
 
 				if (eventSink) {
 					yield* eventSink.push(

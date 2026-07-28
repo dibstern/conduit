@@ -342,6 +342,10 @@ export const IpcHandlersLayer: Layer.Layer<
 				managed: request.managed,
 				...(request.env !== undefined ? { env: request.env } : {}),
 				...(request.url !== undefined ? { url: request.url } : {}),
+				...(request.driver !== undefined ? { driver: request.driver } : {}),
+				...(request.configDir !== undefined
+					? { configDir: request.configDir }
+					: {}),
 			});
 			return instance;
 		}).pipe(
@@ -395,10 +399,15 @@ export const IpcHandlersLayer: Layer.Layer<
 				name?: string;
 				env?: Record<string, string>;
 				port?: number;
+				driver?: string;
+				configDir?: string;
 			} = {};
 			if (request.name !== undefined) updates.name = request.name;
 			if (request.env !== undefined) updates.env = request.env;
 			if (request.port !== undefined) updates.port = request.port;
+			if (request.driver !== undefined) updates.driver = request.driver;
+			if (request.configDir !== undefined)
+				updates.configDir = request.configDir;
 			yield* updateEffectInstance(request.id, updates);
 			return yield* getEffectInstance(request.id);
 		}).pipe(

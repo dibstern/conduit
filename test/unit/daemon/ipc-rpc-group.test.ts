@@ -186,6 +186,7 @@ describe("IPC RPC request group", () => {
 
 					expect(result.ok).toBe(true);
 					expect(result.instances).toHaveLength(1);
+					expect(result.instances[0]?.driver).toBe("opencode");
 				}),
 			),
 	);
@@ -272,6 +273,88 @@ describe("IPC RPC request group", () => {
 						lastUsed: addedAt,
 					},
 				]);
+			}),
+		),
+	);
+
+	it.effect("lists unmanaged OpenCode instances with driver and status", () =>
+		provideRpc(
+			Effect.gen(function* () {
+				const client = yield* RpcTest.makeClient(IpcRpcGroup);
+				const added = yield* client.InstanceAdd({
+					name: "Remote OpenCode",
+					managed: false,
+					url: "https://opencode.example.test",
+				});
+
+				expect(added.instance).toMatchObject({
+					id: "remote-opencode",
+					driver: "opencode",
+					managed: false,
+					status: "starting",
+					url: "https://opencode.example.test",
+				});
+
+				const listed = yield* client.InstanceList({});
+				expect(
+					listed.instances.find(
+						(instance) => instance.id === "remote-opencode",
+					),
+				).toMatchObject({
+					driver: "opencode",
+					managed: false,
+					status: "starting",
+					url: "https://opencode.example.test",
+				});
+			}),
+		),
+	);
+
+	it.effect("lists Claude instances and treats start and stop as no-ops", () =>
+		provideRpc(
+			Effect.gen(function* () {
+				const client = yield* RpcTest.makeClient(IpcRpcGroup);
+				const added = yield* client.InstanceAdd({
+					name: "Work Claude",
+					managed: false,
+					driver: "claude",
+					configDir: "/profiles/work",
+				});
+
+				expect(added.instance).toMatchObject({
+					id: "work-claude",
+					name: "Work Claude",
+					driver: "claude",
+					configDir: "/profiles/work",
+					managed: false,
+					status: "healthy",
+				});
+
+				expect(yield* client.InstanceStart({ id: "work-claude" })).toEqual({
+					ok: true,
+				});
+				expect(yield* client.InstanceStop({ id: "work-claude" })).toEqual({
+					ok: true,
+				});
+				const updated = yield* client.InstanceUpdate({
+					id: "work-claude",
+					driver: "claude",
+					configDir: "/profiles/personal",
+				});
+				expect(updated.instance).toMatchObject({
+					driver: "claude",
+					configDir: "/profiles/personal",
+					status: "healthy",
+				});
+
+				const listed = yield* client.InstanceList({});
+				expect(
+					listed.instances.find((instance) => instance.id === "work-claude"),
+				).toMatchObject({
+					driver: "claude",
+					configDir: "/profiles/personal",
+					status: "healthy",
+				});
 			}),
 		),
 	);
@@ -370,6 +453,81 @@ describe("IPC RPC request group", () => {
 			);
 			expect(Either.isLeft(result)).toBe(true);
 		}
+	});
+
+	it("validates Claude InstanceAdd payloads without changing OpenCode rules", () => {
+		const claude = Schema.decodeUnknownEither(IpcTaggedRequestSchema)({
+			_tag: "InstanceAdd",
+			name: "Work Claude",
+			managed: false,
+			driver: "claude",
+			configDir: "/profiles/work",
+		});
+		expect(Either.isRight(claude)).toBe(true);
+
+		const invalidClaudeRequests = [
+			{
+				request: {
+					_tag: "InstanceAdd",
+					name: "Claude With Port",
+					managed: false,
+					driver: "claude",
+					port: 4096,
+				},
+				error: "Claude instances must not include 'port'",
+			},
+			{
+				request: {
+					_tag: "InstanceAdd",
+					name: "Managed Claude",
+					managed: true,
+					driver: "claude",
+				},
+				error: "Claude instances must not be managed",
+			},
+			{
+				request: {
+					_tag: "InstanceAdd",
+					name: "Claude With URL",
+					managed: false,
+					driver: "claude",
+					url: "http://localhost:4096",
+				},
+				error: "Claude instances must not include 'url'",
+			},
+		];
+
+		for (const { request, error } of invalidClaudeRequests) {
+			const result = Schema.decodeUnknownEither(IpcTaggedRequestSchema)(
+				request,
+			);
+			expect(Either.isLeft(result)).toBe(true);
+			if (Either.isLeft(result)) {
+				expect(String(result.left)).toContain(error);
+			}
+		}
+
+		expect(
+			Either.isLeft(
+				Schema.decodeUnknownEither(IpcTaggedRequestSchema)({
+					_tag: "InstanceAdd",
+					name: "Managed OpenCode Missing Port",
+					managed: true,
+					driver: "opencode",
+				}),
+			),
+		).toBe(true);
+		expect(
+			Either.isRight(
+				Schema.decodeUnknownEither(IpcTaggedRequestSchema)({
+					_tag: "InstanceAdd",
+					name: "Managed OpenCode",
+					managed: true,
+					driver: "opencode",
+					port: 4096,
+				}),
+			),
+		).toBe(true);
 	});
 
 	it("encodes legacy add_project commands to _tag request payloads", () => {
