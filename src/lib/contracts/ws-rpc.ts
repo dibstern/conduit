@@ -180,6 +180,7 @@ const HistoryMessageSchema = Schema.Struct({
 	tokens: Schema.optional(
 		Schema.Record({ key: Schema.String, value: Schema.Unknown }),
 	),
+	modelExecution: Schema.optional(ModelExecutionSchema),
 }).pipe(
 	Schema.extend(Schema.Record({ key: Schema.String, value: Schema.Unknown })),
 );

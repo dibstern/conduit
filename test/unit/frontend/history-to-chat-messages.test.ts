@@ -46,6 +46,30 @@ function assistantMsg(
 // ─── User messages ──────────────────────────────────────────────────────────
 
 describe("historyToChatMessages: user messages", () => {
+	it("carries per-turn model execution onto the user transcript message", () => {
+		const result = historyToChatMessages([
+			{
+				...userMsg("m1", "Use Sonnet"),
+				modelExecution: {
+					requestedModel: "sonnet",
+					expectedModel: "claude-sonnet-5",
+					actualModel: "claude-fable-4-0",
+					drifted: true,
+				},
+			},
+		]);
+
+		expect(result[0]).toMatchObject({
+			type: "user",
+			modelExecution: {
+				requestedModel: "sonnet",
+				expectedModel: "claude-sonnet-5",
+				actualModel: "claude-fable-4-0",
+				drifted: true,
+			},
+		});
+	});
+
 	it("converts a simple user message to UserMessage", () => {
 		const messages = [userMsg("m1", "Hello world")];
 		const result = historyToChatMessages(messages);

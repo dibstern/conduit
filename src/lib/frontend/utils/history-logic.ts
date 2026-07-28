@@ -294,6 +294,9 @@ export function historyToChatMessages(
 				uuid: generateUuid(),
 				text: extractDisplayText(text),
 				...(msg.time?.created != null && { createdAt: msg.time.created }),
+				...(msg.modelExecution != null
+					? { modelExecution: msg.modelExecution }
+					: {}),
 			} satisfies UserMessage);
 		} else if (msg.role === "assistant") {
 			// Assistant messages: convert each part to the appropriate ChatMessage

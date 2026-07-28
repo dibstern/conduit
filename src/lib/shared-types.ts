@@ -319,6 +319,13 @@ export interface HistoryMessagePart {
 	[key: string]: unknown;
 }
 
+export interface ModelExecution {
+	requestedModel?: string;
+	expectedModel?: string;
+	actualModel: string;
+	drifted?: boolean;
+}
+
 /**
  * A single message from the OpenCode REST history API.
  *
@@ -339,6 +346,7 @@ export interface HistoryMessage {
 		cache?: { read?: number; write?: number };
 		context_window?: number;
 	};
+	modelExecution?: ModelExecution;
 	[key: string]: unknown;
 }
 
@@ -411,6 +419,25 @@ const HistoryMessagePartSchema = Schema.Struct({
 	postTokens: Schema.optional(Schema.Number),
 });
 
+const ModelExecutionSchema = Schema.Struct({
+	requestedModel: Schema.optional(Schema.String),
+	expectedModel: Schema.optional(Schema.String),
+	actualModel: Schema.String,
+	drifted: Schema.optional(Schema.Boolean),
+}).pipe(
+	Schema.filter(
+		(execution) =>
+			execution.drifted === undefined ||
+			(execution.expectedModel !== undefined &&
+				execution.drifted ===
+					(execution.actualModel !== execution.expectedModel)),
+		{
+			message: () =>
+				"drifted requires expectedModel and must equal actualModel !== expectedModel",
+		},
+	),
+);
+
 const HistoryMessageSchema = Schema.Struct({
 	id: Schema.String,
 	role: Schema.Literal("user", "assistant"),
@@ -434,6 +461,7 @@ const HistoryMessageSchema = Schema.Struct({
 			),
 		}),
 	),
+	modelExecution: Schema.optional(ModelExecutionSchema),
 });
 
 const AskUserQuestionSchema = Schema.Struct({

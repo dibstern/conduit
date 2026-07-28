@@ -123,6 +123,41 @@ describe("InstanceModelPicker", () => {
 		sessionState.currentId = null;
 	});
 
+	it("shows the exact current drift warning with catalog display names", () => {
+		discoveryState.modelExecution = {
+			requestedModel: "claude-sonnet-4-7",
+			expectedModel: "claude-sonnet-4-7",
+			actualModel: "claude-opus-4-7",
+			drifted: true,
+		};
+
+		const { getByText } = render(InstanceModelPicker);
+
+		expect(
+			getByText("⚠ Running Claude Opus 4.7 — you selected Claude Sonnet 4.7"),
+		).toBeTruthy();
+	});
+
+	it("hides the current drift warning unless drift is exactly true with a requested model", () => {
+		discoveryState.modelExecution = {
+			requestedModel: "claude-sonnet-4-7",
+			expectedModel: "claude-sonnet-4-7",
+			actualModel: "claude-opus-4-7",
+			drifted: false,
+		};
+		const matching = render(InstanceModelPicker);
+		expect(matching.queryByText(/⚠ Running/)).toBeNull();
+		matching.unmount();
+
+		discoveryState.modelExecution = {
+			expectedModel: "claude-sonnet-4-7",
+			actualModel: "claude-opus-4-7",
+			drifted: true,
+		};
+		const partial = render(InstanceModelPicker);
+		expect(partial.queryByText(/⚠ Running/)).toBeNull();
+	});
+
 	it("refreshes active-provider agents after switching model", async () => {
 		const { container, getByTitle } = render(InstanceModelPicker);
 		await fireEvent.click(getByTitle("Switch model"));

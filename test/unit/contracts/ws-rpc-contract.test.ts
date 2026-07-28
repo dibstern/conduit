@@ -27,6 +27,7 @@ import {
 	ListPtys,
 	ListSessions,
 	LoadMoreHistory,
+	LoadMoreHistoryResponseSchema,
 	ModelExecutionSchema,
 	RejectQuestion,
 	ReloadProviderSession,
@@ -405,6 +406,58 @@ const provideRpc = <A, E>(effect: Effect.Effect<A, E, WsRpcTestEnv>) =>
 	);
 
 describe("browser WebSocket RPC contract", () => {
+	it("decodes per-turn model execution in history responses", () => {
+		const decode = Schema.decodeUnknownSync(LoadMoreHistoryResponseSchema);
+		const decoded = decode({
+			projectSlug: "demo",
+			sessionId: "session-1",
+			messages: [
+				{
+					id: "user-1",
+					role: "user",
+					modelExecution: {
+						requestedModel: "sonnet",
+						expectedModel: "claude-sonnet-5",
+						actualModel: "claude-fable-4-0",
+						drifted: true,
+					},
+				},
+				{
+					id: "user-0",
+					role: "user",
+				},
+			],
+			hasMore: false,
+		});
+
+		expect(decoded.messages[0]?.modelExecution).toEqual({
+			requestedModel: "sonnet",
+			expectedModel: "claude-sonnet-5",
+			actualModel: "claude-fable-4-0",
+			drifted: true,
+		});
+		expect(decoded.messages[1]).not.toHaveProperty("modelExecution");
+
+		expect(() =>
+			decode({
+				projectSlug: "demo",
+				sessionId: "session-1",
+				messages: [
+					{
+						id: "user-1",
+						role: "user",
+						modelExecution: {
+							expectedModel: "claude-sonnet-5",
+							actualModel: "claude-fable-4-0",
+							drifted: false,
+						},
+					},
+				],
+				hasMore: false,
+			}),
+		).toThrow();
+	});
+
 	it("decodes model execution with known and unknown drift", () => {
 		const decodeExecution = Schema.decodeUnknownSync(ModelExecutionSchema);
 		expect(

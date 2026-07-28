@@ -49,6 +49,11 @@ export interface MessagePartRow {
 
 export interface MessageWithParts extends MessageRow {
 	parts: MessagePartRow[];
+	modelExecution?: {
+		requestedModel?: string;
+		expectedModel?: string;
+		actualModel: string;
+	};
 }
 
 export interface TurnRow {

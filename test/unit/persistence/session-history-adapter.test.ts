@@ -124,6 +124,53 @@ describe("messageRowsToHistory", () => {
 		expect(result.hasMore).toBe(false);
 	});
 
+	it("exposes model drift only on the turn's user message", () => {
+		const modelExecution = {
+			requestedModel: "sonnet",
+			expectedModel: "claude-sonnet-5",
+			actualModel: "claude-fable-4-0",
+		};
+		const rows = [
+			makeMessageWithParts("user", {
+				role: "user",
+				modelExecution,
+			}),
+			makeMessageWithParts("assistant", {
+				role: "assistant",
+				modelExecution,
+			}),
+		];
+
+		const result = messageRowsToHistory(rows, { pageSize: 50 });
+
+		expect(result.messages[0]?.modelExecution).toEqual({
+			...modelExecution,
+			drifted: true,
+		});
+		expect(result.messages[1]).not.toHaveProperty("modelExecution");
+	});
+
+	it("omits drift for historical and partial turn evidence", () => {
+		const historical = makeMessageWithParts("historical", { role: "user" });
+		const partial = makeMessageWithParts("partial", {
+			role: "user",
+			modelExecution: {
+				requestedModel: "sonnet",
+				actualModel: "claude-sonnet-5",
+			},
+		});
+
+		const result = messageRowsToHistory([historical, partial], {
+			pageSize: 50,
+		});
+
+		expect(result.messages[0]).not.toHaveProperty("modelExecution");
+		expect(result.messages[1]?.modelExecution).toEqual({
+			requestedModel: "sonnet",
+			actualModel: "claude-sonnet-5",
+		});
+	});
+
 	it("maps parts from MessagePartRow to HistoryMessagePart", () => {
 		const rows: MessageWithParts[] = [
 			makeMessageWithParts("m1", {

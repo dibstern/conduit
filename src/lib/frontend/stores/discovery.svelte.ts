@@ -139,6 +139,7 @@ export const discoveryState = $state({
 	availableVariants: [] as string[],
 	currentContextWindow: "" as string,
 	availableContextWindowOptions: [] as ReadonlyArray<ContextWindowOption>,
+	modelExecution: null as GetModelsResponse["modelExecution"] | null,
 	permissionMode: "ask" as SessionPermissionMode,
 	/** Mode selected while no session was bound — flushed on session bind. */
 	pendingPermissionMode: null as SessionPermissionMode | null,
@@ -338,6 +339,15 @@ export function formatModelName(model: ModelInfo): string {
 	return model.name || model.id;
 }
 
+export function getModelDisplayName(modelId: string): string {
+	const model = getAllModels().find(
+		(candidate) =>
+			candidate.id === modelId ||
+			candidate.routingOptions?.some((option) => option.value === modelId),
+	);
+	return model ? formatModelName(model) : modelId;
+}
+
 /** Check if a provider is configured. */
 export function isProviderConfigured(provider: ProviderInfo): boolean {
 	return provider.configured;
@@ -453,6 +463,9 @@ export function applyGetModelsResponse(response: GetModelsResponse): void {
 			options: cloneContextWindowOptions(response.contextWindow.options) ?? [],
 		});
 	}
+	discoveryState.modelExecution = response.modelExecution
+		? { ...response.modelExecution }
+		: null;
 	if (response.permissionMode) {
 		handlePermissionModeInfo({
 			type: "permission_mode_info",
@@ -608,6 +621,7 @@ export function clearDiscoveryState(): void {
 	discoveryState.availableVariants = [];
 	discoveryState.currentContextWindow = "";
 	discoveryState.availableContextWindowOptions = [];
+	discoveryState.modelExecution = null;
 	discoveryState.permissionMode = "ask";
 	discoveryState.pendingPermissionMode = null;
 	discoveryState.hiddenModels = [];

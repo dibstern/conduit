@@ -3,6 +3,8 @@ import {
 	claudeBoundSessionMessages,
 	claudeInstanceAgents,
 	dualDriverProviders,
+	modelExecutionMockups,
+	modelExecutionProviders,
 	openCodeBoundSessionMessages,
 	openCodeInstanceAgents,
 	unboundInitMessages,
@@ -120,12 +122,16 @@ export const conduitVisualHandlers: StepHandler[] = [
 		match: /^the conduit app is served with the ([a-z0-9-]+) mockup$/,
 		run: async ({ world, match }) => {
 			const mockup = match[1];
-			if (mockup !== "connected") {
+			const modelExecutionMockup =
+				mockup != null && mockup in modelExecutionMockups
+					? modelExecutionMockups[mockup as keyof typeof modelExecutionMockups]
+					: undefined;
+			if (mockup !== "connected" && !modelExecutionMockup) {
 				throw new Error(`Unsupported conduit mockup: ${mockup ?? ""}`);
 			}
 
 			const relayControl = await mockRelayWebSocket(world.page, {
-				initMessages: unboundInitMessages,
+				initMessages: modelExecutionMockup?.initMessages ?? unboundInitMessages,
 				responses: new Map(),
 				initDelay: 0,
 				messageDelay: 0,
@@ -199,8 +205,15 @@ export const conduitVisualHandlers: StepHandler[] = [
 					},
 					GetModels: async () => ({
 						projectSlug: "myapp",
-						providers: dualDriverProviders,
-						active: { model: "claude-sonnet-4", provider: "anthropic" },
+						providers: modelExecutionMockup
+							? modelExecutionProviders
+							: dualDriverProviders,
+						active: modelExecutionMockup
+							? { model: "opus[1m]", provider: "claude" }
+							: { model: "claude-sonnet-4", provider: "anthropic" },
+						...(modelExecutionMockup
+							? { modelExecution: modelExecutionMockup.modelExecution }
+							: {}),
 					}),
 					GetAgents: async (payload) => {
 						const instanceId =
@@ -239,6 +252,19 @@ export const conduitVisualHandlers: StepHandler[] = [
 					state: "visible",
 					timeout: 10_000,
 				});
+				if (modelExecutionMockup) {
+					await rpcControl.waitForRequest(
+						(request) => request.tag === "GetModels",
+					);
+					await world.page
+						.getByTestId("model-picker-trigger")
+						.getByText("Opus", { exact: true })
+						.waitFor({ state: "visible", timeout: 5_000 });
+					await world.page
+						.locator("#messages")
+						.getByText(modelExecutionMockup.transcriptText, { exact: true })
+						.waitFor({ state: "visible", timeout: 5_000 });
+				}
 			} catch (error) {
 				const message = error instanceof Error ? error.message : String(error);
 				throw new Error(
@@ -246,6 +272,54 @@ export const conduitVisualHandlers: StepHandler[] = [
 					{ cause: error },
 				);
 			}
+		},
+	},
+	{
+		name: "assert composer model drift text",
+		match: /^the composer model drift indicator reads (.+)$/,
+		run: async ({ world, match }) => {
+			const expected = match[1] ?? "";
+			await world.page.waitForFunction(
+				(text) =>
+					document
+						.querySelector('[data-testid="current-model-drift"]')
+						?.textContent?.trim() === text,
+				expected,
+				{ timeout: 5_000 },
+			);
+		},
+	},
+	{
+		name: "assert turn model drift text",
+		match: /^the turn model drift marker reads (.+)$/,
+		run: async ({ world, match }) => {
+			const expected = match[1] ?? "";
+			await world.page.waitForFunction(
+				(text) =>
+					document
+						.querySelector('[data-testid="turn-model-drift"]')
+						?.textContent?.trim() === text,
+				expected,
+				{ timeout: 5_000 },
+			);
+		},
+	},
+	{
+		name: "assert composer model drift absent",
+		match: /^no composer model drift indicator is rendered$/,
+		run: async ({ world }) => {
+			await world.page
+				.getByTestId("current-model-drift")
+				.waitFor({ state: "detached", timeout: 2_000 });
+		},
+	},
+	{
+		name: "assert turn model drift absent",
+		match: /^no turn model drift marker is rendered$/,
+		run: async ({ world }) => {
+			await world.page
+				.getByTestId("turn-model-drift")
+				.waitFor({ state: "detached", timeout: 2_000 });
 		},
 	},
 	{

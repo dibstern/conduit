@@ -11,6 +11,7 @@ import {
 	formatModelName,
 	getActiveContextWindowOptions,
 	getActiveModel,
+	getModelDisplayName,
 	handleAgentList,
 	handleCommandList,
 	handleContextWindowInfo,
@@ -57,6 +58,7 @@ beforeEach(() => {
 	discoveryState.currentContextWindow = "";
 	discoveryState.availableContextWindowOptions = [];
 	discoveryState.permissionMode = "ask";
+	discoveryState.modelExecution = null;
 });
 
 // ─── Pure helper: formatAgentLabel ──────────────────────────────────────────
@@ -93,6 +95,22 @@ describe("formatModelName", () => {
 	it("falls back to id when name is empty", () => {
 		const model: ModelInfo = { id: "m1", name: "", provider: "openai" };
 		expect(formatModelName(model)).toBe("m1");
+	});
+});
+
+describe("getModelDisplayName", () => {
+	it("resolves catalog names and falls back to the raw id", () => {
+		discoveryState.providers = [
+			{
+				id: "claude",
+				name: "Claude",
+				configured: true,
+				models: [{ id: "sonnet", name: "Sonnet 5", provider: "claude" }],
+			},
+		];
+
+		expect(getModelDisplayName("sonnet")).toBe("Sonnet 5");
+		expect(getModelDisplayName("claude-sonnet-5")).toBe("claude-sonnet-5");
 	});
 });
 
@@ -263,6 +281,12 @@ describe("applyGetModelsResponse", () => {
 				options: [{ value: "200k", label: "200K", isDefault: true }],
 			},
 			permissionMode: "acceptEdits",
+			modelExecution: {
+				requestedModel: "claude-sonnet",
+				expectedModel: "claude-sonnet-5",
+				actualModel: "claude-fable-4-0",
+				drifted: true,
+			},
 		};
 
 		applyGetModelsResponse(response);
@@ -277,6 +301,10 @@ describe("applyGetModelsResponse", () => {
 			{ value: "200k", label: "200K", isDefault: true },
 		]);
 		expect(discoveryState.permissionMode).toBe("acceptEdits");
+		expect(discoveryState.modelExecution).toEqual(response.modelExecution);
+
+		applyGetModelsResponse({ projectSlug: "project-a", providers: [] });
+		expect(discoveryState.modelExecution).toBeNull();
 	});
 });
 
@@ -541,11 +569,17 @@ describe("clearDiscoveryState", () => {
 		discoveryState.agentProviderScope = { id: "claude", name: "Claude" };
 		discoveryState.agents = [{ id: "Explore", name: "Explore" }];
 		discoveryState.activeAgentId = "Explore";
+		discoveryState.modelExecution = {
+			expectedModel: "claude-sonnet-5",
+			actualModel: "claude-fable-4-0",
+			drifted: true,
+		};
 
 		clearDiscoveryState();
 
 		expect(discoveryState.agentProviderScope).toBeNull();
 		expect(discoveryState.agents).toEqual([]);
 		expect(discoveryState.activeAgentId).toBeNull();
+		expect(discoveryState.modelExecution).toBeNull();
 	});
 });

@@ -11,6 +11,7 @@ import type {
 	AskUserQuestion,
 	FileEntry,
 	HistoryMessage,
+	ModelExecution,
 	ModelInfo,
 	PermissionId,
 	ProviderInfo,
@@ -30,6 +31,7 @@ export type {
 	HistoryMessage,
 	HistoryMessagePart,
 	InstanceStatus,
+	ModelExecution,
 	ModelInfo,
 	OpenCodeInstance,
 	PartType,
@@ -87,6 +89,7 @@ export interface UserMessage {
 	sentDuringEpoch?: number;
 	/** Unix-ms timestamp from the source HistoryMessage. Used for timestamp-based fork splitting. */
 	createdAt?: number;
+	modelExecution?: ModelExecution;
 }
 
 export interface AssistantMessage {

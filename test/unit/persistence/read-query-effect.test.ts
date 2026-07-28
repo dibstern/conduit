@@ -136,3 +136,40 @@ describe("ReadQueryEffect.getLatestTurnModelExecution", () => {
 		}).pipe(Effect.provide(testLayer)),
 	);
 });
+
+describe("ReadQueryEffect.getSessionMessagesWithParts", () => {
+	it.effect("carries each turn's model execution on its messages", () =>
+		Effect.gen(function* () {
+			yield* makeEffectSqlMigrator();
+			yield* seedSession("s1");
+			const sql = yield* SqlClient.SqlClient;
+			yield* sql`
+				INSERT INTO turns
+				(id, session_id, state, user_message_id, requested_at,
+				 requested_model, expected_model, actual_model)
+				VALUES
+				('drift-turn', 's1', 'completed', 'drift-user', 1,
+				 'sonnet', 'claude-sonnet-5', 'claude-fable-4-0'),
+				('historical-turn', 's1', 'completed', 'historical-user', 2,
+				 NULL, NULL, NULL)`;
+			yield* sql`
+				INSERT INTO messages
+				(id, session_id, turn_id, role, text, created_at, updated_at)
+				VALUES
+				('drift-user', 's1', 'drift-turn', 'user', 'First', 1, 1),
+				('drift-assistant', 's1', 'drift-turn', 'assistant', 'Reply', 2, 2),
+				('historical-user', 's1', 'historical-turn', 'user', 'Old', 3, 3)`;
+
+			const readQuery = yield* makeReadQueryEffect;
+			const messages = yield* readQuery.getSessionMessagesWithParts("s1");
+
+			expect(messages[0]?.modelExecution).toEqual({
+				requestedModel: "sonnet",
+				expectedModel: "claude-sonnet-5",
+				actualModel: "claude-fable-4-0",
+			});
+			expect(messages[1]?.modelExecution).toEqual(messages[0]?.modelExecution);
+			expect(messages[2]).not.toHaveProperty("modelExecution");
+		}).pipe(Effect.provide(testLayer)),
+	);
+});

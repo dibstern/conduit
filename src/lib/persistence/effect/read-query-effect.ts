@@ -160,10 +160,21 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 		sessionId: string,
 	): Effect.Effect<MessageWithParts[], ReadQueryEffectError | SqlError> =>
 		Effect.gen(function* () {
-			const messages = yield* sql<MessageRow>`
-				SELECT * FROM messages
-				WHERE session_id = ${sessionId}
-				ORDER BY created_at ASC, id ASC`;
+			const messages = yield* sql<
+				MessageRow & {
+					turn_requested_model: string | null;
+					turn_expected_model: string | null;
+					turn_actual_model: string | null;
+				}
+			>`
+				SELECT messages.*,
+					turns.requested_model AS turn_requested_model,
+					turns.expected_model AS turn_expected_model,
+					turns.actual_model AS turn_actual_model
+				FROM messages
+				LEFT JOIN turns ON turns.id = messages.turn_id
+				WHERE messages.session_id = ${sessionId}
+				ORDER BY messages.created_at ASC, messages.id ASC`;
 			if (messages.length === 0) return [];
 
 			const parts = yield* sql<MessagePartRow>`
@@ -186,10 +197,31 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 				existing.push(part);
 			}
 
-			return messages.map((message) => ({
-				...message,
-				parts: partsByMessage.get(message.id) ?? [],
-			}));
+			return messages.map((message) => {
+				const {
+					turn_requested_model,
+					turn_expected_model,
+					turn_actual_model,
+					...messageRow
+				} = message;
+				return {
+					...messageRow,
+					parts: partsByMessage.get(message.id) ?? [],
+					...(turn_actual_model === null
+						? {}
+						: {
+								modelExecution: {
+									...(turn_requested_model === null
+										? {}
+										: { requestedModel: turn_requested_model }),
+									...(turn_expected_model === null
+										? {}
+										: { expectedModel: turn_expected_model }),
+									actualModel: turn_actual_model,
+								},
+							}),
+				};
+			});
 		}).pipe(
 			Effect.mapError((e) =>
 				e instanceof ReadQueryEffectError

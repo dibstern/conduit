@@ -145,6 +145,20 @@ export function messageRowsToHistory(
 			...(row.text ? { text: row.text } : {}),
 			parts,
 			...(row.cost != null ? { cost: row.cost } : {}),
+			...(row.role === "user" && row.modelExecution
+				? {
+						modelExecution: {
+							...row.modelExecution,
+							...(row.modelExecution.expectedModel === undefined
+								? {}
+								: {
+										drifted:
+											row.modelExecution.actualModel !==
+											row.modelExecution.expectedModel,
+									}),
+						},
+					}
+				: {}),
 			...(row.tokens_in != null ||
 			row.tokens_out != null ||
 			row.context_window != null

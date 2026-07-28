@@ -13,11 +13,13 @@
 	import ModelVariant from "./ModelVariant.svelte";
 	import { clickOutside } from "../shared/use-click-outside.svelte.js";
 	import {
+		applyGetModelsResponse,
 		applyGetAgentsResponse,
 		discoveryState,
 		getActiveModel,
 		getAvailableInstances,
 		getEffectiveInstanceId,
+		getModelDisplayName,
 		getProviderGroupsForInstance,
 		formatModelName,
 		type InstanceOption,
@@ -25,11 +27,13 @@
 		isProviderConfigured,
 		selectInstance,
 	} from "../../stores/discovery.svelte.js";
+	import { currentChat } from "../../stores/chat.svelte.js";
 	import { getCurrentSlug } from "../../stores/router.svelte.js";
 	import { sessionState } from "../../stores/session.svelte.js";
 	import { showToast } from "../../stores/ui.svelte.js";
 	import {
 		getAgentsRpc,
+		getModelsRpc,
 		reloadProviderSessionRpc,
 		setDefaultModelRpc,
 		switchModelRpc,
@@ -88,6 +92,29 @@
 
 	const activeModel = $derived(getActiveModel());
 	const hasModel = $derived(!!discoveryState.currentModelId);
+	const currentDrift = $derived(
+		discoveryState.modelExecution?.drifted === true &&
+			discoveryState.modelExecution.requestedModel &&
+			discoveryState.modelExecution.expectedModel &&
+			discoveryState.modelExecution.actualModel
+			? discoveryState.modelExecution
+			: null,
+	);
+
+	$effect(() => {
+		const turnEpoch = currentChat().turnEpoch;
+		const projectSlug = getCurrentSlug();
+		const sessionId = sessionState.currentId;
+		if (turnEpoch === 0 || !projectSlug || !sessionId) return;
+
+		void getModelsRpc({ projectSlug, sessionId })
+			.then((response) => {
+				if (sessionState.currentId === sessionId) {
+					applyGetModelsResponse(response);
+				}
+			})
+			.catch(() => undefined);
+	});
 
 	/** Display name for the trigger button, with date suffix stripped.
 	 *  Grouped models (Bedrock geo routing) append the active scope label. */
@@ -373,6 +400,15 @@
 			variantRef?.close();
 		}}
 	/>
+
+	{#if currentDrift}
+		<span
+			data-testid="current-model-drift"
+			class="inline-flex items-center shrink-0 rounded-lg border border-warning/30 bg-warning-bg px-2 py-1 text-[11px] leading-[1.3] font-medium text-warning"
+		>
+			⚠ Running {getModelDisplayName(currentDrift.actualModel)} — you selected {getModelDisplayName(currentDrift.requestedModel)}
+		</span>
+	{/if}
 
 	<!-- Upward popover: instance rail + model list -->
 	{#if pickerOpen}

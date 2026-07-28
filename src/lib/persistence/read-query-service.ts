@@ -342,8 +342,21 @@ export class ReadQueryService {
 	 */
 	getSessionMessagesWithParts(sessionId: string): MessageWithParts[] {
 		try {
-			const messages = this.db.query<MessageRow>(
-				"SELECT * FROM messages WHERE session_id = ? ORDER BY created_at ASC, id ASC",
+			const messages = this.db.query<
+				MessageRow & {
+					turn_requested_model: string | null;
+					turn_expected_model: string | null;
+					turn_actual_model: string | null;
+				}
+			>(
+				`SELECT messages.*,
+					turns.requested_model AS turn_requested_model,
+					turns.expected_model AS turn_expected_model,
+					turns.actual_model AS turn_actual_model
+				FROM messages
+				LEFT JOIN turns ON turns.id = messages.turn_id
+				WHERE messages.session_id = ?
+				ORDER BY messages.created_at ASC, messages.id ASC`,
 				[sessionId],
 			);
 			if (messages.length === 0) return [];
@@ -371,10 +384,31 @@ export class ReadQueryService {
 				arr.push(part);
 			}
 
-			return messages.map((m) => ({
-				...m,
-				parts: partsByMessage.get(m.id) ?? [],
-			}));
+			return messages.map((message) => {
+				const {
+					turn_requested_model,
+					turn_expected_model,
+					turn_actual_model,
+					...messageRow
+				} = message;
+				return {
+					...messageRow,
+					parts: partsByMessage.get(message.id) ?? [],
+					...(turn_actual_model === null
+						? {}
+						: {
+								modelExecution: {
+									...(turn_requested_model === null
+										? {}
+										: { requestedModel: turn_requested_model }),
+									...(turn_expected_model === null
+										? {}
+										: { expectedModel: turn_expected_model }),
+									actualModel: turn_actual_model,
+								},
+							}),
+				};
+			});
 		} catch (err) {
 			throw new PersistenceError({
 				code: "PROJECTION_FAILED",
