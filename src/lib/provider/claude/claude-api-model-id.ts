@@ -36,6 +36,8 @@ const CONTEXT_WINDOW_OPTIONS_BY_MODEL: Readonly<
 	default: undefined,
 };
 
+const HAS_1M_SUFFIX = /\[1m\]$/i;
+
 function normalizeModelId(modelId: string): string {
 	return modelId
 		.toLowerCase()
@@ -46,7 +48,20 @@ function normalizeModelId(modelId: string): string {
 export function contextWindowOptionsForModel(
 	modelId: string,
 ): readonly ContextWindowOption[] | undefined {
-	return CONTEXT_WINDOW_OPTIONS_BY_MODEL[normalizeModelId(modelId)];
+	const normalizedModelId = normalizeModelId(modelId);
+	if (Object.hasOwn(CONTEXT_WINDOW_OPTIONS_BY_MODEL, normalizedModelId)) {
+		return CONTEXT_WINDOW_OPTIONS_BY_MODEL[normalizedModelId];
+	}
+	// The catalog advertising a value in its [1m] form is the provider proving
+	// that model takes the suffix — better evidence than this table, which is a
+	// standing guess about someone else's inventory and is exactly what went
+	// stale in d06b49c0. Without this, a model the SDK ships tomorrow renders no
+	// selector at all and silently drops a requested 1M window.
+	//
+	// It only ever fills a gap: an explicit row always wins, so "haiku" keeps
+	// its no-1M decision even if something hands us "haiku[1m]" — the CLI does
+	// not validate the suffix, so that gate stays load-bearing.
+	return HAS_1M_SUFFIX.test(modelId) ? OPTIONS_1M_DEFAULT : undefined;
 }
 
 /**
@@ -79,8 +94,11 @@ export function claudeApiModelId(
 ): string | undefined {
 	if (modelId === undefined) return undefined;
 	if (contextWindow === undefined || contextWindow === "") return modelId;
-	const baseModelId = modelId.replace(/\[1m\]$/i, "");
-	if (contextWindow === "1m" && modelHasSelectable1m(baseModelId)) {
+	const baseModelId = modelId.replace(HAS_1M_SUFFIX, "");
+	// Ask about the id as advertised, not the stripped base: for a model the
+	// table has no row for, the suffix is the only evidence that 1M exists, and
+	// stripping it first would throw that evidence away before the question.
+	if (contextWindow === "1m" && modelHasSelectable1m(modelId)) {
 		return `${baseModelId}[1m]`;
 	}
 	return baseModelId;

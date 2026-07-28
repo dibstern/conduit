@@ -405,6 +405,36 @@ describe("probeClaudeCapabilities", () => {
 			.filter((message) => message.includes("context-window row"));
 		expect(rowWarnings).toHaveLength(1);
 		expect(rowWarnings[0]).toContain("claude-opus-9");
+		expect(rowWarnings[0]).toContain("no [1m] suffix to infer from");
+	});
+
+	it("renders a 1M selector for an uncatalogued model the SDK advertises suffixed", async () => {
+		const logger = createTestLogger();
+		logger.warn = vi.fn();
+		const queryFactory = makeFakeQuery({
+			initResult: {
+				models: [
+					{ value: "claude-opus-9[1m]", displayName: "Opus 9 (1M context)" },
+				],
+			},
+		});
+		const result = await probeClaudeCapabilities({
+			queryFactory,
+			workspaceRoot,
+			logger,
+		});
+		// A model the SDK ships tomorrow must not lose its selector entirely.
+		expect(result.models[0]?.contextWindowOptions).toEqual([
+			{ value: "200k", label: "200k" },
+			{ value: "1m", label: "1M", isDefault: true },
+		]);
+		// ...and the derived selector still owns the fact, so the name sheds it.
+		expect(result.models[0]?.name).toBe("Opus 9");
+		expect(
+			(logger.warn as ReturnType<typeof vi.fn>).mock.calls
+				.map(([message]) => String(message))
+				.filter((message) => message.includes("context-window row")),
+		).toHaveLength(1);
 	});
 
 	it("does not expose context-window options for the default catalog value", async () => {

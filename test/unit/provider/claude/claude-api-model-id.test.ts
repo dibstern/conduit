@@ -39,6 +39,50 @@ describe("hasContextWindowRow", () => {
 	});
 });
 
+describe("1M inferred from an advertised [1m] suffix", () => {
+	const options1mDefault = [
+		{ value: "200k", label: "200k" },
+		{ value: "1m", label: "1M", isDefault: true },
+	];
+
+	it("offers 1M for a model the table has never seen but the catalog advertises suffixed", () => {
+		// The provider shipping the [1m] form is proof the model takes it.
+		expect(contextWindowOptionsForModel("claude-opus-9[1m]")).toEqual(
+			options1mDefault,
+		);
+		expect(modelHasSelectable1m("claude-opus-9[1m]")).toBe(true);
+		expect(claudeApiModelId("claude-opus-9[1m]", "1m")).toBe(
+			"claude-opus-9[1m]",
+		);
+		expect(claudeApiModelId("claude-opus-9[1m]", "200k")).toBe("claude-opus-9");
+	});
+
+	it("offers nothing for an unknown model with no suffix to infer from", () => {
+		expect(contextWindowOptionsForModel("claude-opus-9")).toBeUndefined();
+		expect(modelHasSelectable1m("claude-opus-9")).toBe(false);
+		expect(claudeApiModelId("claude-opus-9", "1m")).toBe("claude-opus-9");
+	});
+
+	it("lets an explicit row beat the suffix, so the haiku gate stays load-bearing", () => {
+		// The CLI does not validate the suffix — haiku[1m] resolves to a haiku
+		// that never had a 1M window — so a deliberate no-1M row must win.
+		expect(contextWindowOptionsForModel("haiku[1m]")).toBeUndefined();
+		expect(modelHasSelectable1m("haiku[1m]")).toBe(false);
+		expect(claudeApiModelId("haiku[1m]", "1m")).toBe("haiku");
+		expect(contextWindowOptionsForModel("claude-opus-4-8[1m]")).toBeUndefined();
+		expect(claudeApiModelId("claude-opus-4-8[1m]", "1m")).toBe(
+			"claude-opus-4-8",
+		);
+	});
+
+	it("leaves catalogued models exactly as they were", () => {
+		expect(contextWindowOptionsForModel("opus[1m]")).toEqual(options1mDefault);
+		expect(claudeApiModelId("opus[1m]", "1m")).toBe("opus[1m]");
+		expect(claudeApiModelId("opus[1m]", "200k")).toBe("opus");
+		expect(claudeApiModelId("sonnet", "1m")).toBe("sonnet[1m]");
+	});
+});
+
 describe("Claude context-window model capabilities", () => {
 	const options1mDefault = [
 		{ value: "200k", label: "200k" },

@@ -178,15 +178,17 @@ function sdkModelToConduit(
 ): ModelInfo {
 	const limit = inferLimits(model.value, model.resolvedModel);
 	const variants = effortLevelsToVariants(model.supportedEffortLevels);
-	if (!hasContextWindowRow(model.value)) {
-		log.warn(
-			`Claude catalog advertises "${model.value}" with no context-window row; its 200k/1M selector will not render and a requested 1M window will be dropped silently. Add a row to CONTEXT_WINDOW_OPTIONS_BY_MODEL.`,
-		);
-	}
 	const contextWindowOptions = adjustForSubscription(
 		contextWindowOptionsForModel(model.value),
 		subscriptionType,
 	);
+	if (!hasContextWindowRow(model.value)) {
+		log.warn(
+			contextWindowOptions
+				? `Claude catalog advertises "${model.value}" with no context-window row; falling back to a 1M-default selector because the advertised value carries the [1m] suffix. Add a row to CONTEXT_WINDOW_OPTIONS_BY_MODEL to record the intended default.`
+				: `Claude catalog advertises "${model.value}" with no context-window row and no [1m] suffix to infer from; its 200k/1M selector will not render and a requested 1M window will be dropped silently. Add a row to CONTEXT_WINDOW_OPTIONS_BY_MODEL.`,
+		);
+	}
 	return {
 		id: model.value,
 		name: modelDisplayName(model.displayName, contextWindowOptions),
