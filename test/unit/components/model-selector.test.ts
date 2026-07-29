@@ -52,12 +52,6 @@ vi.mock(
 	"../../../src/lib/frontend/components/model/ContextWindowSelector.svelte",
 	closeableEmptyComponent,
 );
-vi.mock(
-	"../../../src/lib/frontend/components/shared/use-click-outside.svelte.js",
-	() => ({
-		clickOutside: () => ({ destroy: () => {} }),
-	}),
-);
 vi.mock("../../../src/lib/frontend/stores/ws.svelte.js", () => ({
 	wsSend: (...args: unknown[]) => wsSendSpy(...args),
 }));

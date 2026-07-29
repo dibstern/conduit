@@ -54,8 +54,9 @@ token-disciplined set of primitives that every feature component consumes.
 - **Icon-only controls require an accessible name** — expressed as a discriminated
   props union (the Svelte type-checker / editor flags a missing `ariaLabel`), backed
   by a dev-time `console.warn` runtime backstop for callers that bypass the types.
-- Interactive primitives compose the Phase-1 actions (`use-focus-trap`,
-  `use-dismiss`, `use-roving-focus`) rather than re-implementing focus/keyboard logic.
+- Interactive overlay primitives delegate focus, dismissal, and roving focus to
+  Bits UI. `use-background-inert` only supplements Dialog's missing assistive-tech
+  background hiding.
 
 ## Every primitive ships together
 

@@ -1,9 +1,9 @@
 <script lang="ts">
+	import { Dialog } from "bits-ui";
 	import type { Snippet } from "svelte";
 	import Icon from "./Icon.svelte";
 	import Button from "./Button.svelte";
-	import { dismiss } from "./actions/use-dismiss.svelte.js";
-	import { focusTrap } from "./actions/use-focus-trap.svelte.js";
+	import { backgroundInert } from "./actions/use-background-inert.svelte.js";
 
 	type ModalSize = "sm" | "md" | "lg";
 
@@ -45,9 +45,6 @@
 		footer,
 	}: ModalOwnProps = $props();
 
-	const uid = $props.id();
-	const titleId = `${uid}-title`;
-	const descriptionId = `${uid}-description`;
 	const resolvedTitle = $derived(title?.trim() ? title : undefined);
 
 	const SIZE_CLASSES: Record<ModalSize, string> = {
@@ -68,36 +65,76 @@
 </script>
 
 {#if open}
-	<div
-		class="fixed inset-0 z-[var(--z-modal)] flex items-center justify-center bg-backdrop backdrop-blur-[2px]"
-	>
-		<div
-			role="dialog"
-			aria-modal="true"
-			aria-labelledby={resolvedTitle ? titleId : undefined}
-			aria-label={resolvedTitle ? undefined : ariaLabel}
-			aria-describedby={description ? descriptionId : undefined}
-			class={panelClass}
-			use:focusTrap
-			use:dismiss={{ onDismiss: onclose, enabled: dismissible }}
-		>
-			{#if resolvedTitle || description}
-				<header class="flex flex-col gap-1 pr-8">
-					{#if resolvedTitle}<h2 id={titleId} class="text-base font-semibold text-text">{resolvedTitle}</h2>{/if}
-					{#if description}<p id={descriptionId} class="text-sm text-text-secondary">{description}</p>{/if}
-				</header>
-			{/if}
-			<div class="min-h-0 overflow-y-auto">{@render children()}</div>
-			{#if footer}
-				<footer class="flex justify-end gap-2">{@render footer()}</footer>
-			{/if}
-			{#if showClose}
-				<div class="absolute top-3 right-3">
-					<Button variant="ghost" size="sm" iconOnly ariaLabel="Close" onclick={onclose}>
-						<Icon name="x" size={16} />
-					</Button>
-				</div>
-			{/if}
-		</div>
-	</div>
+	<!-- Keep the inert boundary in the consumer's DOM tree; dialog content is portaled. -->
+	<span hidden use:backgroundInert></span>
 {/if}
+
+<Dialog.Root
+	{open}
+	onOpenChange={(value) => {
+		if (!value) onclose();
+	}}
+>
+	<Dialog.Portal>
+		<Dialog.Overlay
+			class="fixed inset-0 z-[var(--z-modal)] bg-backdrop backdrop-blur-[2px]"
+		/>
+		<Dialog.Content
+			aria-label={resolvedTitle ? undefined : ariaLabel}
+			onEscapeKeydown={(event) => {
+				event.preventDefault();
+				if (dismissible) onclose();
+			}}
+			onInteractOutside={(event) => {
+				event.preventDefault();
+				if (dismissible) onclose();
+			}}
+		>
+			{#snippet child({ props })}
+				<div class="fixed inset-0 z-[var(--z-modal)] flex items-center justify-center">
+					<div {...props} class={panelClass}>
+						{#if resolvedTitle || description}
+							<header class="flex flex-col gap-1 pr-8">
+								{#if resolvedTitle}
+									<Dialog.Title>
+										{#snippet child({ props: titleProps })}
+											<h2 {...titleProps} class="text-base font-semibold text-text">
+												{resolvedTitle}
+											</h2>
+										{/snippet}
+									</Dialog.Title>
+								{/if}
+								{#if description}
+									<Dialog.Description>
+										{#snippet child({ props: descriptionProps })}
+											<p {...descriptionProps} class="text-sm text-text-secondary">
+												{description}
+											</p>
+										{/snippet}
+									</Dialog.Description>
+								{/if}
+							</header>
+						{/if}
+						<div class="min-h-0 overflow-y-auto">{@render children()}</div>
+						{#if footer}
+							<footer class="flex justify-end gap-2">{@render footer()}</footer>
+						{/if}
+						{#if showClose}
+							<div class="absolute top-3 right-3">
+								<Button
+									variant="ghost"
+									size="sm"
+									iconOnly
+									ariaLabel="Close"
+									onclick={onclose}
+								>
+									<Icon name="x" size={16} />
+								</Button>
+							</div>
+						{/if}
+					</div>
+				</div>
+			{/snippet}
+		</Dialog.Content>
+	</Dialog.Portal>
+</Dialog.Root>

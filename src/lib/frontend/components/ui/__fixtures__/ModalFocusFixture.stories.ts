@@ -1,10 +1,10 @@
 import type { Meta, StoryObj } from "@storybook/svelte-vite";
-import FocusTrapFixture from "./FocusTrapFixture.svelte";
+import ModalFocusFixture from "./ModalFocusFixture.svelte";
 
 const meta = {
-	title: "Actions/FocusTrap",
-	component: FocusTrapFixture,
-} satisfies Meta<typeof FocusTrapFixture>;
+	title: "Fixtures/ModalFocus",
+	component: ModalFocusFixture,
+} satisfies Meta<typeof ModalFocusFixture>;
 
 export default meta;
 type Story = StoryObj<typeof meta>;

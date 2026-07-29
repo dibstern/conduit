@@ -86,6 +86,7 @@
 		"@opentelemetry/exporter-trace-otlp-http": "^0.215.0",
 		"@opentelemetry/sdk-trace-node": "^2.7.0",
 		"better-sqlite3": "^12.9.0",
+		"bits-ui": "2.18.1",
 		"dompurify": "^3.3.1",
 		"effect": "^3.21.2",
 		"ignore": "^7.0.5",

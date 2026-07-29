@@ -27,11 +27,12 @@ export const Default: Story = {
 export const EscapeRestoresFocus: Story = {
 	play: async ({ canvasElement }) => {
 		const canvas = within(canvasElement);
+		const body = within(canvasElement.ownerDocument.body);
 		const trigger = canvas.getByRole("button", { name: "Open modal" });
 
 		await userEvent.click(trigger);
 
-		const dialog = canvas.getByRole("dialog", { name: "Modal title" });
+		const dialog = body.getByRole("dialog", { name: "Modal title" });
 		await expect(dialog).toBeVisible();
 		await expect(
 			dialog.contains(document.activeElement) ||
@@ -40,7 +41,7 @@ export const EscapeRestoresFocus: Story = {
 
 		await userEvent.keyboard("{Escape}");
 
-		await expect(canvas.queryByRole("dialog")).not.toBeInTheDocument();
+		await expect(body.queryByRole("dialog")).not.toBeInTheDocument();
 		await expect(trigger).toHaveFocus();
 	},
 };
@@ -55,9 +56,9 @@ export const Description: Story = {
 		description: "Supporting details for this action.",
 	},
 	play: async ({ canvasElement }) => {
-		const canvas = within(canvasElement);
-		const dialog = canvas.getByRole("dialog");
-		const description = canvas.getByText("Supporting details for this action.");
+		const body = within(canvasElement.ownerDocument.body);
+		const dialog = body.getByRole("dialog");
+		const description = body.getByText("Supporting details for this action.");
 
 		await expect(dialog).toHaveAttribute("aria-describedby", description.id);
 	},
@@ -78,10 +79,10 @@ export const Headerless: Story = {
 		ariaLabel: "Quick actions",
 	},
 	play: async ({ canvasElement }) => {
-		const canvas = within(canvasElement);
+		const body = within(canvasElement.ownerDocument.body);
 
 		await expect(
-			canvas.getByRole("dialog", { name: "Quick actions" }),
+			body.getByRole("dialog", { name: "Quick actions" }),
 		).toBeVisible();
 	},
 };
@@ -93,10 +94,10 @@ export const NonDismissible: Story = {
 		showClose: false,
 	},
 	play: async ({ canvasElement }) => {
-		const canvas = within(canvasElement);
+		const body = within(canvasElement.ownerDocument.body);
 
 		await userEvent.keyboard("{Escape}");
 
-		await expect(canvas.getByRole("dialog")).toBeVisible();
+		await expect(body.getByRole("dialog")).toBeVisible();
 	},
 };

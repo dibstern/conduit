@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render } from "@testing-library/svelte";
+import { cleanup, fireEvent, render, waitFor } from "@testing-library/svelte";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import ModalDemo from "../../../src/lib/frontend/components/ui/__fixtures__/ModalDemo.svelte";
 
@@ -7,6 +7,17 @@ describe("Modal", () => {
 		vi.spyOn(Element.prototype, "getClientRects").mockReturnValue({
 			length: 1,
 		} as unknown as DOMRectList);
+		vi.spyOn(Element.prototype, "getBoundingClientRect").mockReturnValue({
+			x: 100,
+			y: 100,
+			top: 100,
+			right: 200,
+			bottom: 200,
+			left: 100,
+			width: 100,
+			height: 100,
+			toJSON: () => ({}),
+		} as DOMRect);
 	});
 
 	afterEach(() => {
@@ -105,14 +116,21 @@ describe("Modal", () => {
 			props: { initiallyOpen: true, onclose },
 		});
 		const dialog = getByRole("dialog");
-		const backdrop = dialog.parentElement;
+		const backdrop = document.querySelector<HTMLElement>(
+			"[data-dialog-overlay]",
+		);
 
 		expect(backdrop).not.toBeNull();
-		await fireEvent.click(dialog);
-		expect(onclose).not.toHaveBeenCalled();
+		await new Promise((resolve) => setTimeout(resolve, 10));
+		await fireEvent.pointerDown(dialog, { button: 0, pointerType: "mouse" });
+		await fireEvent.pointerDown(backdrop as HTMLElement, {
+			button: 0,
+			pointerType: "mouse",
+			clientX: 0,
+			clientY: 0,
+		});
 
-		await fireEvent.click(backdrop as HTMLElement);
-		expect(onclose).toHaveBeenCalledOnce();
+		await waitFor(() => expect(onclose).toHaveBeenCalledOnce());
 	});
 
 	it("keeps dismiss gestures inert while leaving the close button independent", async () => {
@@ -121,12 +139,22 @@ describe("Modal", () => {
 			props: { initiallyOpen: true, dismissible: false, onclose },
 		});
 		const dialog = getByRole("dialog");
-		const backdrop = dialog.parentElement;
+		const backdrop = document.querySelector<HTMLElement>(
+			"[data-dialog-overlay]",
+		);
 
 		expect(backdrop).not.toBeNull();
 		await fireEvent.keyDown(document, { key: "Escape" });
-		await fireEvent.click(backdrop as HTMLElement);
+		await new Promise((resolve) => setTimeout(resolve, 10));
+		await fireEvent.pointerDown(backdrop as HTMLElement, {
+			button: 0,
+			pointerType: "mouse",
+			clientX: 0,
+			clientY: 0,
+		});
+		await new Promise((resolve) => setTimeout(resolve, 20));
 		expect(onclose).not.toHaveBeenCalled();
+		expect(getByRole("dialog")).toBe(dialog);
 
 		await fireEvent.click(getByRole("button", { name: "Close" }));
 		expect(onclose).toHaveBeenCalledOnce();
@@ -155,7 +183,7 @@ describe("Modal", () => {
 		const focusable = dialog.querySelectorAll<HTMLElement>(
 			'a[href],button:not([disabled]),textarea:not([disabled]),input:not([disabled]),select:not([disabled]),[tabindex]:not([tabindex="-1"])',
 		);
-		expect(document.activeElement).toBe(firstAction);
+		await waitFor(() => expect(document.activeElement).toBe(firstAction));
 		expect(focusable.item(focusable.length - 1)).toBe(
 			getByRole("button", { name: "Close" }),
 		);
@@ -163,7 +191,7 @@ describe("Modal", () => {
 		await fireEvent.click(getByRole("button", { name: "Close" }));
 
 		expect(queryByRole("dialog")).toBeNull();
-		expect(document.activeElement).toBe(trigger);
+		await waitFor(() => expect(document.activeElement).toBe(trigger));
 	});
 
 	it("makes the background inert while open and restores it on close", async () => {

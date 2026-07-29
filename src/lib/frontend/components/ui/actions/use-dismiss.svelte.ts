@@ -1,3 +1,8 @@
+/**
+ * Legacy dismissal action retained for the six feature consumers
+ * ModelVariant, ContextWindowSelector, ModelSelector, ProjectSwitcher,
+ * ThemePicker, and PermissionModeSelector until de3.3.4 migrates them to Bits.
+ */
 export interface DismissOptions {
 	/** Fired on a dismiss gesture (outside-click or Escape). */
 	onDismiss: () => void;

@@ -25,12 +25,6 @@ const emptyComponent = vi.hoisted(
 );
 
 vi.mock("../../../src/lib/frontend/components/ui/Icon.svelte", emptyComponent);
-vi.mock(
-	"../../../src/lib/frontend/components/shared/use-click-outside.svelte.js",
-	() => ({
-		clickOutside: () => ({ destroy: () => {} }),
-	}),
-);
 vi.mock("../../../src/lib/frontend/stores/router.svelte.js", () => ({
 	getCurrentSlug: () => "project-a",
 }));
