@@ -169,11 +169,13 @@ Preserve exit codes when needed:
 ```bash
 tmp="$(mktemp)"
 COMMAND >"$tmp" 2>&1
-status=$?
+rc=$?
 tail -c 5000 "$tmp"
 rm -f "$tmp"
-exit "$status"
+exit "$rc"
 ```
+
+Call it `rc`, never `status`. The agent shell here is zsh, where `status` is a read-only alias for `$?`: the assignment fails with `read-only variable: status`, the rest of the block never runs, and the whole thing reports exit 1. The command itself has already executed by then, so a `git push` or migration that genuinely succeeded reads back as a failure — and the natural response, running it again, is the dangerous one. The same line is fine under bash, so this hides until it doesn't.
 
 Avoid unbounded `cat`, broad `rg`, `find`, `ls -R`, `git diff`, tests, builds, and `select *`.
 
