@@ -244,12 +244,15 @@ describe("MockOpenCodeServer", () => {
 		controller.abort();
 		await collecting;
 
-		expect(events.length).toBe(5);
-		expect(events[0]).toMatchObject({ type: "session.status" });
-		expect(events[1]).toMatchObject({ type: "message.part.delta" });
-		expect(events[2]).toMatchObject({ type: "session.status" });
-		expect(events[3]).toMatchObject({ type: "message.part.delta" });
-		expect(events[4]).toMatchObject({ type: "session.status" });
+		// Every SSE connection starts with the server.connected handshake
+		// frame, matching real OpenCode.
+		expect(events.length).toBe(6);
+		expect(events[0]).toMatchObject({ type: "server.connected" });
+		expect(events[1]).toMatchObject({ type: "session.status" });
+		expect(events[2]).toMatchObject({ type: "message.part.delta" });
+		expect(events[3]).toMatchObject({ type: "session.status" });
+		expect(events[4]).toMatchObject({ type: "message.part.delta" });
+		expect(events[5]).toMatchObject({ type: "session.status" });
 	});
 
 	it("emits all post-prompt SSE events when prompt fires (including permission-adjacent)", async () => {
@@ -270,12 +273,15 @@ describe("MockOpenCodeServer", () => {
 		controller.abort();
 		await collecting;
 
-		expect(events.length).toBe(5);
-		expect(events[0]).toMatchObject({ type: "session.status" });
-		expect(events[1]).toMatchObject({ type: "message.part.delta" });
-		expect(events[2]).toMatchObject({ type: "session.status" });
-		expect(events[3]).toMatchObject({ type: "message.part.delta" });
-		expect(events[4]).toMatchObject({ type: "session.status" });
+		// Every SSE connection starts with the server.connected handshake
+		// frame, matching real OpenCode.
+		expect(events.length).toBe(6);
+		expect(events[0]).toMatchObject({ type: "server.connected" });
+		expect(events[1]).toMatchObject({ type: "session.status" });
+		expect(events[2]).toMatchObject({ type: "message.part.delta" });
+		expect(events[3]).toMatchObject({ type: "session.status" });
+		expect(events[4]).toMatchObject({ type: "message.part.delta" });
+		expect(events[5]).toMatchObject({ type: "session.status" });
 	});
 
 	it("emits post-prompt SSE events independently of REST consumption", async () => {
@@ -300,12 +306,15 @@ describe("MockOpenCodeServer", () => {
 		// The FIXTURE has 5 SSE events after prompt_async — 3 before
 		// the permission reply REST entry + 2 after it — all in segment 1
 		// since permission reply is NOT a prompt boundary
-		expect(events.length).toBe(5);
-		expect(events[0]).toMatchObject({ type: "session.status" });
-		expect(events[1]).toMatchObject({ type: "message.part.delta" });
-		expect(events[2]).toMatchObject({ type: "session.status" });
-		expect(events[3]).toMatchObject({ type: "message.part.delta" });
-		expect(events[4]).toMatchObject({ type: "session.status" });
+		// Every SSE connection starts with the server.connected handshake
+		// frame, matching real OpenCode.
+		expect(events.length).toBe(6);
+		expect(events[0]).toMatchObject({ type: "server.connected" });
+		expect(events[1]).toMatchObject({ type: "session.status" });
+		expect(events[2]).toMatchObject({ type: "message.part.delta" });
+		expect(events[3]).toMatchObject({ type: "session.status" });
+		expect(events[4]).toMatchObject({ type: "message.part.delta" });
+		expect(events[5]).toMatchObject({ type: "session.status" });
 	});
 
 	it("segments SSE events by prompt boundary for multi-turn", async () => {
@@ -381,10 +390,12 @@ describe("MockOpenCodeServer", () => {
 			});
 			await new Promise((r) => setTimeout(r, 100));
 
-			expect(events).toHaveLength(3);
-			expect(events[0]).toMatchObject({ type: "session.created" });
-			expect(events[1]).toMatchObject({ type: "message.part.delta" });
-			expect(events[2]).toMatchObject({ type: "session.idle" });
+			// First frame is the server.connected handshake, as on real OpenCode.
+			expect(events).toHaveLength(4);
+			expect(events[0]).toMatchObject({ type: "server.connected" });
+			expect(events[1]).toMatchObject({ type: "session.created" });
+			expect(events[2]).toMatchObject({ type: "message.part.delta" });
+			expect(events[3]).toMatchObject({ type: "session.idle" });
 
 			await fetch(`${multiMock.url}/session/ses_1/prompt_async`, {
 				method: "POST",
@@ -394,9 +405,9 @@ describe("MockOpenCodeServer", () => {
 			controller.abort();
 			await collecting;
 
-			expect(events).toHaveLength(5);
-			expect(events[3]).toMatchObject({ type: "message.part.delta" });
-			expect(events[4]).toMatchObject({ type: "session.idle" });
+			expect(events).toHaveLength(6);
+			expect(events[4]).toMatchObject({ type: "message.part.delta" });
+			expect(events[5]).toMatchObject({ type: "session.idle" });
 		} finally {
 			await multiMock.stop();
 		}
@@ -416,7 +427,9 @@ describe("MockOpenCodeServer", () => {
 		controller.abort();
 		await collecting;
 
-		expect(events.length).toBe(5);
+		// 5 fixture events plus the server.connected handshake frame.
+		expect(events.length).toBe(6);
+		expect(events[0]).toMatchObject({ type: "server.connected" });
 	});
 
 	it("applies before and limit to SSE-accumulated session messages", async () => {

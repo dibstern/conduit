@@ -138,11 +138,16 @@ export const OpenCodeInstanceClientsLive: Layer.Layer<
 				);
 				const stream = new SSEStream({ api, log: log.child(instanceId) });
 				const connected = yield* Deferred.make<void, Error>();
+				let lastStreamError: Error | undefined;
 				stream.on("connected", () => {
 					Deferred.unsafeDone(connected, Effect.void);
 				});
 				stream.on("error", (error) => {
-					Deferred.unsafeDone(connected, Effect.fail(error));
+					// Conduit is the single retry owner: a transport error here is
+					// not fatal — the stream's reconnect loop keeps trying inside
+					// the connect window. Keep the last error so a timeout still
+					// explains why the connection never came up.
+					lastStreamError = error;
 				});
 				yield* wirer(stream);
 				yield* stream.connectEffect();
@@ -152,7 +157,11 @@ export const OpenCodeInstanceClientsLive: Layer.Layer<
 							duration: NAMED_INSTANCE_CONNECT_TIMEOUT,
 							onTimeout: () =>
 								new Error(
-									`Timed out connecting to OpenCode instance "${instanceId}" at ${url}`,
+									`Timed out connecting to OpenCode instance "${instanceId}" at ${url}${
+										lastStreamError
+											? ` (last error: ${lastStreamError.message})`
+											: ""
+									}`,
 								),
 						}),
 					),

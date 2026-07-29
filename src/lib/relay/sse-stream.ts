@@ -1,11 +1,14 @@
 // ─── SSE Stream (Effect-based) ───────────────────────────────────────────────
 // SDK-backed SSE consumer using api.event.subscribe().
-// Internally powered by Effect Fiber + Schedule for lifecycle and reconnection.
-// Keeps the callback-based public API for compatibility with relay wiring.
+// Internally powered by an Effect fiber running an explicit reconnect loop.
+// Conduit is the single retry owner: the SDK's internal SSE retry is disabled
+// via sseMaxRetryAttempts so transport errors surface here instead of being
+// swallowed. Keeps the callback-based public API for relay wiring.
 
-import { Duration, Effect, Fiber, Schedule } from "effect";
+import { Duration, Effect, Fiber } from "effect";
 import { createSilentLogger, type Logger } from "../logger.js";
 import type { ConnectionHealth } from "../types.js";
+import { calculateBackoffDelay } from "./sse-backoff.js";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -14,6 +17,8 @@ export interface SSEStreamOptions {
 		event: {
 			subscribe(options?: {
 				signal?: AbortSignal;
+				sseMaxRetryAttempts?: number;
+				onSseError?: (error: unknown) => void;
 			}): Promise<{ stream: AsyncGenerator<unknown> }>;
 		};
 	};
@@ -21,7 +26,10 @@ export interface SSEStreamOptions {
 	baseDelay?: number;
 	/** Maximum reconnection delay in ms (default: 30_000). */
 	maxDelay?: number;
-	/** Mark stream as stale if no event within this window (default: 60_000). */
+	/**
+	 * Tear down the connection if no event arrives within this window
+	 * (default: 30_000 — three missed 10s OpenCode heartbeats).
+	 */
 	staleThreshold?: number;
 	log?: Logger;
 }
@@ -58,17 +66,6 @@ export type SSEStreamPort = SSEStreamEvents &
 	SSEStreamHealth &
 	SSEStreamLifecycle;
 
-// ─── Reconnect schedule factory ─────────────────────────────────────────────
-
-function makeReconnectSchedule(baseDelay: number, maxDelay: number) {
-	return Schedule.exponential(Duration.millis(baseDelay)).pipe(
-		Schedule.jittered,
-		Schedule.whileOutput((d) => Duration.toMillis(d) <= maxDelay),
-		// Cap total retry time at 5 minutes of continuous failures
-		Schedule.upTo(Duration.minutes(5)),
-	);
-}
-
 // ─── SSE Stream ──────────────────────────────────────────────────────────────
 
 export class SSEStream implements SSEStreamPort {
@@ -82,6 +79,15 @@ export class SSEStream implements SSEStreamPort {
 	private connected = false;
 	private lastEventAt: number | null = null;
 	private reconnectCount = 0;
+
+	/** When the current connection was established; null while disconnected. */
+	private connectedAt: number | null = null;
+
+	/** Whether the current connection was torn down by the staleness watchdog. */
+	private staleTeardown = false;
+
+	/** Monotonic id of the current consume-loop run; guards the un-wedge finalizer. */
+	private runCounter = 0;
 
 	/** AbortController for the current SSE connection. */
 	private sseAbort: AbortController | null = null;
@@ -113,7 +119,7 @@ export class SSEStream implements SSEStreamPort {
 		this.log = options.log ?? createSilentLogger();
 		this.baseDelay = options.baseDelay ?? 1000;
 		this.maxDelay = options.maxDelay ?? 30_000;
-		this.staleThreshold = options.staleThreshold ?? 60_000;
+		this.staleThreshold = options.staleThreshold ?? 30_000;
 	}
 
 	/** Register a callback for a specific broadcast event type. */
@@ -180,8 +186,11 @@ export class SSEStream implements SSEStreamPort {
 
 	private isStale(): boolean {
 		if (!this.connected) return false;
-		if (this.lastEventAt === null) return false;
-		return Date.now() - this.lastEventAt > this.staleThreshold;
+		// Based on max(connectedAt, lastEventAt) so a connection that never
+		// yields any event is still caught.
+		const last = Math.max(this.connectedAt ?? 0, this.lastEventAt ?? 0);
+		if (last === 0) return false;
+		return Date.now() - last > this.staleThreshold;
 	}
 
 	private enqueueLifecycleEffect(
@@ -219,14 +228,23 @@ export class SSEStream implements SSEStreamPort {
 	}
 
 	private startConnectionEffect(): Effect.Effect<void> {
-		return Effect.gen(this, function* () {
-			if (this.running) return;
-			this.running = true;
-			this.reconnectCount = 0;
+		// Uninterruptible so an interrupt cannot land between `running = true`
+		// and the fork — that would leave `running` stuck with no loop fiber
+		// (and no finalizer) to ever clear it. The forked loop itself must be
+		// explicitly interruptible: a fiber forked inside an uninterruptible
+		// region inherits that status, and disconnect relies on interruption.
+		return Effect.uninterruptible(
+			Effect.gen(this, function* () {
+				if (this.running) return;
+				this.running = true;
+				this.reconnectCount = 0;
 
-			// Launch the Effect-based consume loop as a daemon fiber.
-			this.fiber = yield* Effect.forkDaemon(this.consumeLoop());
-		});
+				// Launch the Effect-based consume loop as a daemon fiber.
+				this.fiber = yield* Effect.forkDaemon(
+					Effect.interruptible(this.consumeLoop()),
+				);
+			}),
+		);
 	}
 
 	private stopCurrentConnectionEffect(): Effect.Effect<void> {
@@ -251,27 +269,39 @@ export class SSEStream implements SSEStreamPort {
 		});
 	}
 
-	/** Invoke all registered callbacks for a given event type. */
+	/**
+	 * Invoke all registered callbacks for a given event type.
+	 * Listener errors are logged, not propagated — a throwing listener would
+	 * otherwise defect the consume-loop fiber and silently kill the stream.
+	 */
 	private notify<K extends keyof SSEStreamCallbacks>(
 		event: K,
 		...args: Parameters<SSEStreamCallbacks[K]>
 	): void {
 		for (const cb of this.callbacks[event]) {
-			(cb as (...a: unknown[]) => void)(...args);
+			try {
+				(cb as (...a: unknown[]) => void)(...args);
+			} catch (err) {
+				try {
+					this.log.warn(`SSE '${event}' listener threw`, err);
+				} catch {
+					// The logger itself failed (e.g. EPIPE at shutdown) — drop it.
+				}
+			}
 		}
 	}
 
 	/**
-	 * Effect-based consume loop with automatic reconnection.
+	 * Effect-based consume loop that owns reconnection.
 	 *
-	 * Uses Effect.retry with an exponential schedule for reconnection.
-	 * Each connection attempt creates a fresh AbortController and consumes
-	 * the SDK's AsyncGenerator as a stream.
+	 * Runs one connection at a time and sleeps with capped, jittered
+	 * exponential backoff between attempts. The loop never gives up while
+	 * `running` is true; `disconnectEffect` interrupts it.
 	 */
 	private consumeLoop(): Effect.Effect<void, never, never> {
-		const schedule = makeReconnectSchedule(this.baseDelay, this.maxDelay);
+		const runId = ++this.runCounter;
 
-		// Single connection attempt — connects, consumes events, returns on error
+		// Single connection attempt — connects, consumes events, fails on error
 		const singleConnection: Effect.Effect<void, Error, never> = Effect.async<
 			void,
 			Error
@@ -284,41 +314,84 @@ export class SSEStream implements SSEStreamPort {
 
 			this.sseAbort = new AbortController();
 			const abort = this.sseAbort;
+			let sseError: unknown;
+
+			const staleError = () =>
+				new Error(`SSE stream stale: no events for ${this.staleThreshold}ms`);
 
 			const run = async () => {
-				const { stream } = await this.api.event.subscribe({
-					signal: abort.signal,
-				});
+				// Dead-stream watchdog: OpenCode emits server.heartbeat every 10s,
+				// so a silent connection is a half-open socket. Abort it so the
+				// SDK generator returns and the loop reconnects.
+				let staleTimer: ReturnType<typeof setTimeout> | undefined;
+				const armStaleTimer = () => {
+					clearTimeout(staleTimer);
+					staleTimer = setTimeout(() => {
+						this.staleTeardown = true;
+						abort.abort();
+					}, this.staleThreshold);
+				};
 
-				this.reconnectCount =
-					this.connected === false && this.reconnectCount > 0
-						? this.reconnectCount
-						: 0;
-				this.connected = true;
-				this.notify("connected");
+				try {
+					const { stream } = await this.api.event.subscribe({
+						signal: abort.signal,
+						// Conduit owns reconnection — the SDK must fail fast. On error
+						// the SDK fires onSseError and ends the stream instead of
+						// silently retrying forever.
+						sseMaxRetryAttempts: 1,
+						onSseError: (error) => {
+							sseError = error;
+						},
+					});
 
-				for await (const event of stream) {
-					if (!this.running) break;
+					// subscribe() does no network I/O — the SDK issues the fetch on
+					// the stream's first next(). The first yielded frame (OpenCode
+					// always sends server.connected first) is the connect signal;
+					// arming the watchdog here catches a stream that never yields.
+					armStaleTimer();
 
-					const evt = event as { type?: string };
-					this.lastEventAt = Date.now();
+					for await (const event of stream) {
+						if (!this.running) break;
 
-					if (
-						evt.type === "server.heartbeat" ||
-						evt.type === "server.connected"
-					) {
-						this.notify("heartbeat");
-						continue;
+						if (!this.connected) {
+							this.connectedAt = Date.now();
+							this.connected = true;
+							this.notify("connected");
+						}
+
+						const evt = event as { type?: string };
+						this.lastEventAt = Date.now();
+						armStaleTimer();
+
+						if (
+							evt.type === "server.heartbeat" ||
+							evt.type === "server.connected"
+						) {
+							this.notify("heartbeat");
+							continue;
+						}
+
+						this.notify("event", event);
 					}
-
-					this.notify("event", event);
+				} finally {
+					clearTimeout(staleTimer);
 				}
 
-				// Stream ended gracefully — signal reconnect if still running
+				// Stream ended — signal reconnect if still running
 				if (this.running) {
 					this.connected = false;
-					this.notify("disconnected", undefined);
-					resume(Effect.fail(new Error("SSE stream ended")));
+					const error = this.staleTeardown
+						? staleError()
+						: sseError === undefined
+							? undefined
+							: sseError instanceof Error
+								? sseError
+								: new Error(String(sseError));
+					this.notify("disconnected", error);
+					// With sseMaxRetryAttempts: 1 the SDK never throws — transport
+					// errors exit here, so this is where "error" must fire too.
+					if (error) this.notify("error", error);
+					resume(Effect.fail(error ?? new Error("SSE stream ended")));
 				} else {
 					resume(Effect.void);
 				}
@@ -329,11 +402,13 @@ export class SSEStream implements SSEStreamPort {
 					resume(Effect.void);
 					return;
 				}
-				const error = err instanceof Error ? err : new Error(String(err));
-				if (error.name === "AbortError") {
+				const raw = err instanceof Error ? err : new Error(String(err));
+				// A stale-watchdog abort is a real failure, not a clean shutdown.
+				if (raw.name === "AbortError" && !this.staleTeardown) {
 					resume(Effect.void);
 					return;
 				}
+				const error = this.staleTeardown ? staleError() : raw;
 				this.connected = false;
 				this.notify("disconnected", error);
 				this.notify("error", error);
@@ -349,27 +424,56 @@ export class SSEStream implements SSEStreamPort {
 			}).pipe(Effect.catchAll(() => Effect.void));
 		});
 
-		// Wrap with retry using the Effect Schedule, notifying reconnection callbacks
-		return singleConnection.pipe(
-			Effect.tapError(() =>
+		const loop = Effect.gen(this, function* () {
+			let attempt = 0;
+			while (this.running) {
+				this.connectedAt = null;
+				this.staleTeardown = false;
+				yield* Effect.catchAll(singleConnection, () => Effect.void);
+				if (!this.running) return;
+
+				// Reset the backoff only after a connection that stayed healthy
+				// for at least maxDelay — not on a mere successful subscribe(),
+				// or an accept-then-drop server would be hammered at baseDelay.
+				// A stale teardown was never healthy, whatever its uptime.
+				if (
+					!this.staleTeardown &&
+					this.connectedAt !== null &&
+					Date.now() - this.connectedAt >= this.maxDelay
+				) {
+					attempt = 0;
+				}
+
+				// The jittered delay below is both what we sleep and what we
+				// report — a single source of truth for the callback payload.
+				const delay =
+					calculateBackoffDelay(attempt, {
+						baseDelay: this.baseDelay,
+						maxDelay: this.maxDelay,
+						multiplier: 2,
+					}) *
+					(0.8 + Math.random() * 0.4);
+				attempt++;
+				this.reconnectCount++;
+				this.notify("reconnecting", { attempt, delay });
+				yield* Effect.sleep(Duration.millis(delay));
+			}
+		});
+
+		// Un-wedge guard: if this loop dies for any reason while it is still
+		// the active run, clear the flags so connectEffect() can start fresh.
+		// Keyed on runId — a new run can only start once `running` is false,
+		// so a stale finalizer can never clobber a newer run's state.
+		return loop.pipe(
+			Effect.ensuring(
 				Effect.sync(() => {
-					if (!this.running) return;
-					this.reconnectCount++;
-					const delay = Math.min(
-						this.baseDelay * 2 ** (this.reconnectCount - 1),
-						this.maxDelay,
-					);
-					this.notify("reconnecting", {
-						attempt: this.reconnectCount,
-						delay,
-					});
-					this.log.debug(
-						`Reconnecting in ~${delay}ms (attempt ${this.reconnectCount})`,
-					);
+					if (runId !== this.runCounter) return;
+					const wasRunning = this.running;
+					this.running = false;
+					this.connected = false;
+					if (wasRunning) this.notify("disconnected", undefined);
 				}),
 			),
-			Effect.retry(schedule),
-			Effect.catchAll(() => Effect.void),
 		);
 	}
 }
