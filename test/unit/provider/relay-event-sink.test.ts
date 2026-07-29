@@ -727,8 +727,10 @@ describe("createRelayEventSink — permission mode short-circuit", () => {
 	};
 
 	it.each([
-		{ mode: "auto" as const, toolName: "Bash", shortCircuits: true },
-		{ mode: "auto" as const, toolName: "Edit", shortCircuits: true },
+		{ mode: "full" as const, toolName: "Bash", shortCircuits: true },
+		{ mode: "full" as const, toolName: "Edit", shortCircuits: true },
+		{ mode: "auto" as const, toolName: "Bash", shortCircuits: false },
+		{ mode: "auto" as const, toolName: "Edit", shortCircuits: false },
 		{ mode: "acceptEdits" as const, toolName: "Edit", shortCircuits: true },
 		{ mode: "acceptEdits" as const, toolName: "Write", shortCircuits: true },
 		{
@@ -791,7 +793,7 @@ describe("createRelayEventSink — permission mode short-circuit", () => {
 			providerId: "claude",
 			send,
 			persist: { persistEvent, persistEvents },
-			getPermissionMode: () => Effect.succeed("auto" as const),
+			getPermissionMode: () => Effect.succeed("full" as const),
 		});
 
 		await expect(
@@ -829,7 +831,7 @@ describe("createRelayEventSink — permission mode short-circuit", () => {
 			providerId: "claude",
 			send,
 			ingestion: { ingest },
-			getPermissionMode: () => Effect.succeed("auto" as const),
+			getPermissionMode: () => Effect.succeed("full" as const),
 		});
 
 		await expect(
@@ -862,7 +864,7 @@ describe("createRelayEventSink — permission mode short-circuit", () => {
 			sessionId: "ses-1",
 			send: vi.fn(),
 			persist: { persistEvent, persistEvents },
-			getPermissionMode: () => Effect.succeed("auto" as const),
+			getPermissionMode: () => Effect.succeed("full" as const),
 		});
 
 		await expect(
@@ -874,7 +876,7 @@ describe("createRelayEventSink — permission mode short-circuit", () => {
 		const sink = createRelayEventSink({
 			sessionId: "ses-1",
 			send: vi.fn(),
-			getPermissionMode: () => Effect.succeed("auto" as const),
+			getPermissionMode: () => Effect.succeed("full" as const),
 		});
 
 		await expect(

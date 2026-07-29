@@ -35,7 +35,7 @@ const log = createLogger("relay-event-sink");
 const EDIT_TOOL_NAMES = new Set(["Edit", "Write", "NotebookEdit"]);
 
 function modeCoversAsk(mode: SessionPermissionMode, toolName: string): boolean {
-	if (mode === "auto") return true;
+	if (mode === "full") return true;
 	if (mode === "acceptEdits") return EDIT_TOOL_NAMES.has(toolName);
 	return false;
 }

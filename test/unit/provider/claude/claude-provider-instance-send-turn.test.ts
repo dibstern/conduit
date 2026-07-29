@@ -182,6 +182,70 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 		expect(result.durationMs).toBe(1500);
 	});
 
+	it.each([
+		{ mode: "ask" as const, expectedPermissionMode: undefined },
+		{ mode: "acceptEdits" as const, expectedPermissionMode: undefined },
+		{ mode: "auto" as const, expectedPermissionMode: "auto" },
+		{ mode: "full" as const, expectedPermissionMode: undefined },
+	])("passes SDK permissionMode only for conduit $mode mode", async ({
+		mode,
+		expectedPermissionMode,
+	}) => {
+		queryFactorySpy = vi.fn(() => createMockQuery([makeSuccessResult()]));
+		const instance = new ClaudeProviderInstance({
+			workspaceRoot: workspace,
+			queryFactory: queryFactorySpy,
+		});
+
+		await Effect.runPromise(
+			instance.sendTurnEffect(
+				makeBaseSendTurnInput({
+					sessionId: `session-permission-${mode}`,
+					permissionMode: mode,
+				}),
+			),
+		);
+
+		const call = queryFactorySpy.mock.calls[0]?.[0] as {
+			readonly options: { readonly permissionMode?: string };
+		};
+		expect(call.options.permissionMode).toBe(expectedPermissionMode);
+		if (expectedPermissionMode === undefined) {
+			expect(call.options).not.toHaveProperty("permissionMode");
+		}
+	});
+
+	it("applies a permission-mode update that arrives during query construction", async () => {
+		const query = createMockQuery([makeSuccessResult()]);
+		let modeUpdate: Promise<void> | undefined;
+		let instance: ClaudeProviderInstance;
+		queryFactorySpy = vi.fn(() => {
+			modeUpdate = Effect.runPromise(
+				instance.setPermissionModeEffect("session-permission-race", "auto"),
+			);
+			return query;
+		});
+		instance = new ClaudeProviderInstance({
+			workspaceRoot: workspace,
+			queryFactory: queryFactorySpy,
+		});
+
+		await Effect.runPromise(
+			instance.sendTurnEffect(
+				makeBaseSendTurnInput({
+					sessionId: "session-permission-race",
+					permissionMode: "ask",
+				}),
+			),
+		);
+		if (!modeUpdate) {
+			throw new Error("query factory did not start the permission-mode update");
+		}
+		await modeUpdate;
+
+		expect(query.setPermissionMode).toHaveBeenCalledWith("auto");
+	});
+
 	it("rejects a model-less direct Claude call before query creation", async () => {
 		queryFactorySpy = vi.fn(() => createMockQuery([makeSuccessResult()]));
 		const instance = new ClaudeProviderInstance({

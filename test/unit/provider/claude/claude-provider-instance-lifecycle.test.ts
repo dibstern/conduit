@@ -83,6 +83,27 @@ describe("ClaudeProviderInstance lifecycle", () => {
 		rmSync(workspace, { recursive: true, force: true });
 	});
 
+	describe("setPermissionModeEffect()", () => {
+		it.each([
+			{ mode: "auto" as const, sdkMode: "auto" },
+			{ mode: "ask" as const, sdkMode: "default" },
+		])("updates a live query to $sdkMode for conduit $mode", async ({
+			mode,
+			sdkMode,
+		}) => {
+			const instance = new ClaudeProviderInstance({
+				workspaceRoot: workspace,
+			});
+			const query = createMockQuery([]);
+			const ctx = makeFakeSessionContext("sess-1", { query });
+			setClaudeRuntimeSessionForTest(instance, "sess-1", ctx);
+
+			await Effect.runPromise(instance.setPermissionModeEffect("sess-1", mode));
+
+			expect(query.setPermissionMode).toHaveBeenCalledWith(sdkMode);
+		});
+	});
+
 	describe("shutdown()", () => {
 		it("closes all active sessions", async () => {
 			const instance = new ClaudeProviderInstance({ workspaceRoot: workspace });

@@ -611,6 +611,7 @@ export const makeProviderTurnService = Effect.gen(function* () {
 					: { configDir: claudeConfigDir }),
 				eventSink,
 				abortSignal: new AbortController().signal,
+				permissionMode: yield* getPermissionMode(resolvedInput.sessionId),
 				...(imageList ? { images: imageList } : {}),
 				...(resolvedInput.agent ? { agent: resolvedInput.agent } : {}),
 				...(resolvedInput.variant ? { variant: resolvedInput.variant } : {}),

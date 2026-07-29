@@ -239,8 +239,8 @@ describe("SessionOverrides Effect", () => {
 
 	it.effect("setPermissionMode stores the mode", () =>
 		Effect.gen(function* () {
-			yield* setPermissionMode("sess-1", "auto");
-			expect(yield* getPermissionMode("sess-1")).toBe("auto");
+			yield* setPermissionMode("sess-1", "full");
+			expect(yield* getPermissionMode("sess-1")).toBe("full");
 
 			yield* setPermissionMode("sess-1", "acceptEdits");
 			expect(yield* getPermissionMode("sess-1")).toBe("acceptEdits");
@@ -254,19 +254,19 @@ describe("SessionOverrides Effect", () => {
 				providerID: "anthropic",
 				modelID: "claude-4",
 			});
-			yield* setPermissionMode("sess-1", "auto");
+			yield* setPermissionMode("sess-1", "full");
 
 			expect(yield* getOverrides("sess-1")).toMatchObject({
 				variant: "high",
 				model: { providerID: "anthropic", modelID: "claude-4" },
-				permissionMode: "auto",
+				permissionMode: "full",
 			});
 		}).pipe(Effect.provide(Layer.fresh(makeOverridesStateLive()))),
 	);
 
 	it.effect('setPermissionMode("ask") returns flow to ask', () =>
 		Effect.gen(function* () {
-			yield* setPermissionMode("sess-1", "auto");
+			yield* setPermissionMode("sess-1", "full");
 			yield* setPermissionMode("sess-1", "ask");
 			expect(yield* getPermissionMode("sess-1")).toBe("ask");
 		}).pipe(Effect.provide(Layer.fresh(makeOverridesStateLive()))),
@@ -274,7 +274,7 @@ describe("SessionOverrides Effect", () => {
 
 	it.effect('clearSession resets mode to "ask"', () =>
 		Effect.gen(function* () {
-			yield* setPermissionMode("sess-1", "auto");
+			yield* setPermissionMode("sess-1", "full");
 			yield* clearSession("sess-1");
 			expect(yield* getPermissionMode("sess-1")).toBe("ask");
 		}).pipe(Effect.provide(Layer.fresh(makeOverridesStateLive()))),

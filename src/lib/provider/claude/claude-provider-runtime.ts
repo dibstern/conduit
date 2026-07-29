@@ -909,6 +909,9 @@ export class ClaudeProviderRuntime {
 							settingSources: ["user", "project", "local"],
 							canUseTool: bridge.createCanUseTool(ctx),
 							model: apiModelId,
+							...(input.permissionMode === "auto"
+								? { permissionMode: "auto" }
+								: {}),
 							...(resumeSessionId ? { resume: resumeSessionId } : {}),
 							...(input.agent ? { agent: input.agent } : {}),
 							...(input.variant
@@ -970,6 +973,27 @@ export class ClaudeProviderRuntime {
 	}
 
 	// ─── enqueueTurn ──────────────────────────────────────────────────────
+
+	setPermissionModeEffect(
+		sessionId: string,
+		mode: "auto" | "default",
+	): Effect.Effect<void, ProviderInstanceFailure> {
+		return this.mapProviderFailure(
+			"set permission mode",
+			Effect.gen(this, function* () {
+				const pending = yield* this.getSetupLock(sessionId);
+				if (pending) {
+					yield* Deferred.await(pending);
+				}
+				const ctx = yield* this.getSession(sessionId);
+				if (!ctx) return;
+				yield* Effect.tryPromise({
+					try: () => ctx.query.setPermissionMode(mode),
+					catch: (cause) => cause,
+				});
+			}),
+		);
+	}
 
 	private enqueueTurnEffect(
 		ctx: ClaudeSessionContext,

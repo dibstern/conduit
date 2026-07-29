@@ -61,6 +61,7 @@ export const SessionPermissionModeSchema = Schema.Literal(
 	"ask",
 	"acceptEdits",
 	"auto",
+	"full",
 );
 export type SessionPermissionMode = typeof SessionPermissionModeSchema.Type;
 

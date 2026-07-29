@@ -431,7 +431,7 @@ export const conduitVisualHandlers: StepHandler[] = [
 	},
 	{
 		name: "set approvals mode",
-		match: /^I set approvals to (ask|acceptEdits|auto)$/,
+		match: /^I set approvals to (ask|acceptEdits|auto|full)$/,
 		run: async ({ world, match }) => {
 			const mode = match[1] ?? "";
 			await world.page.getByTestId("permission-mode-badge").click();
@@ -439,8 +439,25 @@ export const conduitVisualHandlers: StepHandler[] = [
 		},
 	},
 	{
+		name: "assert approvals dropdown omits a mode",
+		match:
+			/^the approvals dropdown does not offer (ask|acceptEdits|auto|full)$/,
+		run: async ({ world, match }) => {
+			const mode = match[1] ?? "";
+			await world.page.getByTestId("permission-mode-badge").click();
+			await world.page.waitForFunction(
+				(m) =>
+					document.querySelector(
+						`[data-testid="permission-mode-option-${m}"]`,
+					) === null,
+				mode,
+				{ timeout: 5_000 },
+			);
+		},
+	},
+	{
 		name: "assert approvals pill label",
-		match: /^the approvals pill shows (Ask|Edits|All)$/,
+		match: /^the approvals pill shows (Ask|Edits|Auto|Full access)$/,
 		run: async ({ world, match }) => {
 			const label = match[1] ?? "";
 			await world.page.waitForFunction(

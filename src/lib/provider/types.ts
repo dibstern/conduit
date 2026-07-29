@@ -6,7 +6,10 @@
 
 import type { Effect, Scope } from "effect";
 import type { ProviderRuntimeEvent } from "../contracts/providers/provider-runtime-event.js";
-import type { ProviderPermissionUpdate } from "../shared-types.js";
+import type {
+	ProviderPermissionUpdate,
+	SessionPermissionMode,
+} from "../shared-types.js";
 import type { ProviderInstanceFailure } from "./errors.js";
 
 // ─── Permission / Question Decisions ────────────────────────────────────────
@@ -179,6 +182,7 @@ export interface SendTurnInput {
 	readonly configDir?: string;
 	readonly eventSink: EventSink;
 	readonly abortSignal: AbortSignal;
+	readonly permissionMode?: SessionPermissionMode;
 	readonly variant?: string;
 	readonly contextWindow?: string;
 	readonly images?: readonly string[];
@@ -271,6 +275,12 @@ export interface ProviderInstance {
 		requestId: string,
 		answers: Record<string, unknown>,
 	): Effect.Effect<void, ProviderInstanceFailure>;
+
+	/** Update a live provider query's classifier mode when supported. */
+	readonly setPermissionModeEffect?: (
+		sessionId: string,
+		mode: SessionPermissionMode,
+	) => Effect.Effect<void, ProviderInstanceFailure>;
 
 	/** Graceful shutdown -- clean up connections, abort pending turns */
 	shutdownEffect(): Effect.Effect<void, ProviderInstanceFailure>;

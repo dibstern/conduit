@@ -1212,7 +1212,7 @@ describe("browser WebSocket RPC contract", () => {
 			new SwitchPermissionMode({
 				projectSlug: "demo",
 				sessionId: "session-1",
-				mode: "auto",
+				mode: "full",
 			})._tag,
 		).toBe("SwitchPermissionMode");
 		expect(new GetFileTree({ projectSlug: "demo" })._tag).toBe("GetFileTree");

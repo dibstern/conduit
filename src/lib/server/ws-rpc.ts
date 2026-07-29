@@ -54,6 +54,7 @@ import {
 	getHiddenEntries,
 	setHiddenEntriesForRelay,
 } from "../handlers/visibility.js";
+import { ProviderRegistryTag } from "../provider/provider-registry.js";
 import type { OpenCodeInstance, PermissionId } from "../shared-types.js";
 
 export {
@@ -704,6 +705,16 @@ export const WsRpcServerLayer = WsRpcGroup.toLayer({
 		Effect.gen(function* () {
 			const wsHandler = yield* WebSocketHandlerTag;
 			const log = yield* LoggerTag;
+			const registryOption = yield* Effect.serviceOption(ProviderRegistryTag);
+			if (registryOption._tag === "Some") {
+				const providerInstance = registryOption.value.getInstance("claude");
+				if (providerInstance?.setPermissionModeEffect) {
+					yield* providerInstance.setPermissionModeEffect(
+						request.sessionId,
+						request.mode,
+					);
+				}
+			}
 			yield* setPermissionMode(request.sessionId, request.mode);
 			wsHandler.sendToSession(request.sessionId, {
 				type: "permission_mode_info",
@@ -713,7 +724,7 @@ export const WsRpcServerLayer = WsRpcGroup.toLayer({
 				`client=${request.originId ?? "rpc"} session=${request.sessionId} Switched permission mode to: ${request.mode}`,
 			);
 			return { projectSlug: request.projectSlug, mode: request.mode };
-		}),
+		}).pipe(Effect.catchAll(mapRpcFailure("SwitchPermissionMode"))),
 	GetFileTree: (request) =>
 		getFileTreeEntries().pipe(
 			Effect.map((entries) => ({
