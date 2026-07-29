@@ -21,6 +21,10 @@ export default meta;
 type Story = StoryObj<typeof meta>;
 
 export const Default: Story = {
+	args: { initiallyOpen: true },
+};
+
+export const EscapeRestoresFocus: Story = {
 	play: async ({ canvasElement }) => {
 		const canvas = within(canvasElement);
 		const trigger = canvas.getByRole("button", { name: "Open modal" });

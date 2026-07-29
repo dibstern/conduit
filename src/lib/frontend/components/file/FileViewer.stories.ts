@@ -3,7 +3,7 @@ import { expect, fn, waitFor } from "storybook/test";
 import { fileBrowserListeners } from "../../stores/ws.svelte.js";
 import { applyGetFileContentResponse } from "../../stores/ws-dispatch.js";
 import { mockFileContent } from "../../stories/mocks.js";
-import FileViewer from "./FileViewer.svelte";
+import FileViewerHost from "./__fixtures__/FileViewerHost.svelte";
 
 const truncatedFileContent = "export const migrationBaseline = true;\n".repeat(
 	1_500,
@@ -25,7 +25,7 @@ async function showFile(response: {
 
 const meta = {
 	title: "File/FileViewer",
-	component: FileViewer,
+	component: FileViewerHost,
 	tags: ["autodocs"],
 	parameters: { layout: "fullscreen" },
 	args: {
@@ -35,7 +35,7 @@ const meta = {
 	beforeEach: () => {
 		localStorage.removeItem("file-viewer-font-size");
 	},
-} satisfies Meta<typeof FileViewer>;
+} satisfies Meta<typeof FileViewerHost>;
 
 export default meta;
 type Story = StoryObj<typeof meta>;
@@ -76,6 +76,16 @@ export const TruncatedFile: Story = {
 			expect(canvasElement.textContent).toContain(
 				"File truncated — showing first 50 KB",
 			);
+		});
+
+		// The notice is the last child of the scroll region, so at rest it sits ~25k
+		// pixels below the fold and the baseline would depict an ordinary file.
+		// Scroll to it: the truncated state is the only thing this story exists for.
+		const scroller = canvasElement.querySelector(".fv-code")?.parentElement;
+		expect(scroller).not.toBeNull();
+		scroller?.scrollTo({ top: scroller.scrollHeight });
+		await waitFor(() => {
+			expect(scroller?.scrollTop).toBeGreaterThan(0);
 		});
 	},
 };
