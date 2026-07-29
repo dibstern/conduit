@@ -73,7 +73,10 @@ export class OpenCodeProviderInstance implements ProviderInstance {
 		| undefined;
 	private readonly pendingTurns = new Map<
 		string,
-		Deferred.Deferred<TurnResult, Error>
+		{
+			readonly deferred: Deferred.Deferred<TurnResult, Error>;
+			inFlight: number;
+		}
 	>();
 
 	constructor(options: OpenCodeProviderInstanceOptions) {
@@ -205,8 +208,14 @@ export class OpenCodeProviderInstance implements ProviderInstance {
 			}
 			const client = clientResult.right;
 
-			const deferred = yield* Deferred.make<TurnResult, Error>();
-			this.pendingTurns.set(sessionId, deferred);
+			let pendingTurn = this.pendingTurns.get(sessionId);
+			if (pendingTurn) {
+				pendingTurn.inFlight += 1;
+			} else {
+				const deferred = yield* Deferred.make<TurnResult, Error>();
+				pendingTurn = { deferred, inFlight: 1 };
+				this.pendingTurns.set(sessionId, pendingTurn);
+			}
 
 			const onAbort = () => {
 				log.info(`Turn aborted for session ${sessionId}`);
@@ -218,7 +227,13 @@ export class OpenCodeProviderInstance implements ProviderInstance {
 
 			const cleanup = Effect.sync(() => {
 				abortSignal.removeEventListener("abort", onAbort);
-				this.pendingTurns.delete(sessionId);
+				pendingTurn.inFlight -= 1;
+				if (
+					pendingTurn.inFlight === 0 &&
+					this.pendingTurns.get(sessionId) === pendingTurn
+				) {
+					this.pendingTurns.delete(sessionId);
+				}
 			});
 
 			return yield* Effect.gen(this, function* () {
@@ -249,7 +264,7 @@ export class OpenCodeProviderInstance implements ProviderInstance {
 					return sendFailedTurnResult(message);
 				}
 
-				return yield* Deferred.await(deferred);
+				return yield* Deferred.await(pendingTurn.deferred);
 			}).pipe(Effect.ensuring(cleanup));
 		});
 	}
@@ -263,12 +278,12 @@ export class OpenCodeProviderInstance implements ProviderInstance {
 	 * connection; the provider instance just waits for notification.
 	 */
 	notifyTurnCompleted(sessionId: string, result: TurnResult): void {
-		const deferred = this.pendingTurns.get(sessionId);
-		if (deferred) {
+		const pendingTurn = this.pendingTurns.get(sessionId);
+		if (pendingTurn && this.pendingTurns.get(sessionId) === pendingTurn) {
 			this.pendingTurns.delete(sessionId);
 			// SSE callbacks are synchronous; complete the Effect Deferred directly
 			// instead of adding an app-internal runtime bridge.
-			Deferred.unsafeDone(deferred, Effect.succeed(result));
+			Deferred.unsafeDone(pendingTurn.deferred, Effect.succeed(result));
 		} else {
 			log.debug(
 				`notifyTurnCompleted: no pending turn for session ${sessionId} -- may have already completed`,
@@ -351,11 +366,11 @@ export class OpenCodeProviderInstance implements ProviderInstance {
 		// per-session state is the pending turn Deferred; fail it so the caller
 		// unblocks. We do not call client.session.abort: reload is a provider
 		// instance reset, while interruptTurn/cancel is a provider cancellation.
-		const deferred = this.pendingTurns.get(sessionId);
-		if (deferred) {
+		const pendingTurn = this.pendingTurns.get(sessionId);
+		if (pendingTurn && this.pendingTurns.get(sessionId) === pendingTurn) {
 			this.pendingTurns.delete(sessionId);
 			Deferred.unsafeDone(
-				deferred,
+				pendingTurn.deferred,
 				Effect.fail(new Error("Session ended (reload)")),
 			);
 		}
@@ -367,9 +382,11 @@ export class OpenCodeProviderInstance implements ProviderInstance {
 		return Effect.sync(() => {
 			log.info("OpenCodeProviderInstance shutting down");
 
-			for (const [sessionId, deferred] of this.pendingTurns) {
+			for (const [sessionId, pendingTurn] of this.pendingTurns) {
+				if (this.pendingTurns.get(sessionId) !== pendingTurn) continue;
+				this.pendingTurns.delete(sessionId);
 				Deferred.unsafeDone(
-					deferred,
+					pendingTurn.deferred,
 					Effect.fail(
 						new Error(
 							`Provider instance shutdown -- turn for session ${sessionId} cancelled`,
