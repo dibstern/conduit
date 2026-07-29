@@ -209,6 +209,20 @@ export class SSEStream implements SSEStreamPort {
 			};
 			const run = this.lifecycleQueue.then(runWork, runWork);
 			this.lifecycleQueue = run.catch(() => {});
+			// Interruption canceler (c4z). Without this, an interrupted caller
+			// leaves `resume` inert, so the work effect — and therefore its
+			// `Effect.ensuring(release)` — never runs, `completion` never
+			// settles, and the queue is poisoned for every later connect,
+			// disconnect and drain (including the shutdown finalizer).
+			// Releasing here settles this entry so the chain keeps moving.
+			// If interruption wins before `runWork` fires, the queued work is
+			// skipped entirely — its caller is gone. If the work had already
+			// started, interruption unwinds it and its own inner
+			// `ensuring(release)` runs first (finalizers unwind inside-out),
+			// so this canceler only ever double-releases an entry whose work
+			// has already terminated. Promise resolution is idempotent, and
+			// mutual exclusion is preserved either way.
+			return Effect.sync(release);
 		});
 	}
 
