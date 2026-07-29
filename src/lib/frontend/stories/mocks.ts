@@ -5,13 +5,26 @@
 
 import type {
 	AssistantMessage,
+	ProjectInfo,
 	ResultMessage,
 	SessionInfo,
 	SystemMessage,
 	ThinkingMessage,
+	TodoItem,
 	ToolMessage,
 	UserMessage,
 } from "../types.js";
+import type { ToolGroup } from "../utils/group-tools.js";
+
+// ─── Projects ────────────────────────────────────────────────────────────────
+
+export const mockProject: ProjectInfo = {
+	slug: "conduit",
+	title: "Conduit",
+	directory: "/Users/dev/src/conduit",
+	clientCount: 2,
+	instanceId: "instance-local",
+};
 
 // ─── Sessions ────────────────────────────────────────────────────────────────
 
@@ -41,6 +54,27 @@ export const mockSessionLongTitle: SessionInfo = {
 	updatedAt: "2026-02-25T07:30:00Z",
 	messageCount: 45,
 	processing: false,
+};
+
+export const mockSubagentSession: SessionInfo = {
+	id: "sess_01JTEST000000000000000006",
+	title: "Inspect the Storybook coverage gaps",
+	createdAt: "2026-02-25T09:00:00Z",
+	updatedAt: "2026-02-25T09:04:00Z",
+	messageCount: 4,
+	processing: true,
+	parentID: mockSession.id,
+};
+
+export const mockForkSession: SessionInfo = {
+	id: "sess_01JTEST000000000000000007",
+	title: "Try the alternative migration approach",
+	createdAt: "2026-02-25T09:10:00Z",
+	updatedAt: "2026-02-25T09:12:00Z",
+	messageCount: 2,
+	processing: false,
+	parentID: mockSession.id,
+	forkMessageId: "msg-assistant-002",
 };
 
 export const mockSessions: SessionInfo[] = [
@@ -347,6 +381,120 @@ export const mockToolSubagentCompleted: ToolMessage = {
 	isError: false,
 };
 
+export const mockToolSubagentPending: ToolMessage = {
+	type: "tool",
+	uuid: "msg-tool-subagent-003",
+	id: "tool-subagent-003",
+	name: "Task",
+	status: "pending",
+	input: {
+		description: "Map the remaining visual coverage gaps",
+		subagentType: "explore",
+		prompt:
+			"Inspect the uncovered chat components and report their render states.",
+	},
+};
+
+export const mockToolSubagentError: ToolMessage = {
+	type: "tool",
+	uuid: "msg-tool-subagent-004",
+	id: "tool-subagent-004",
+	name: "Task",
+	status: "error",
+	input: {
+		description: "Review the migration safety gate",
+		subagentType: "general",
+		prompt: "Verify that every active chat component has a visual reference.",
+	},
+	result: "Subagent stopped before completing the review.",
+	isError: true,
+};
+
+export const mockToolSkillCompleted: ToolMessage = {
+	type: "tool",
+	uuid: "msg-tool-skill-001",
+	id: "tool-skill-001",
+	name: "Skill",
+	status: "completed",
+	input: { name: "systematic-debugging" },
+	result:
+		'<skill_content name="systematic-debugging">\nReproduce the failure, isolate the cause, and verify the smallest corrective change.\n</skill_content>',
+	isError: false,
+};
+
+export const mockToolSkillPending: ToolMessage = {
+	type: "tool",
+	uuid: "msg-tool-skill-002",
+	id: "tool-skill-002",
+	name: "Skill",
+	status: "pending",
+	input: { name: "verification-before-completion" },
+};
+
+export const mockToolSkillRunning: ToolMessage = {
+	type: "tool",
+	uuid: "msg-tool-skill-003",
+	id: "tool-skill-003",
+	name: "Skill",
+	status: "running",
+	input: { name: "frontend-design" },
+};
+
+export const mockToolSkillError: ToolMessage = {
+	type: "tool",
+	uuid: "msg-tool-skill-004",
+	id: "tool-skill-004",
+	name: "Skill",
+	status: "error",
+	input: { name: "missing-skill" },
+	result: "The requested skill could not be loaded.",
+	isError: true,
+};
+
+export const mockToolTruncated: ToolMessage = {
+	type: "tool",
+	uuid: "msg-tool-009",
+	id: "tool-009",
+	name: "Grep",
+	status: "completed",
+	input: { pattern: "TODO|FIXME", path: "src/lib/frontend" },
+	result:
+		"src/lib/frontend/components/chat/MessageList.svelte:118:// TODO: preserve scroll anchor\nsrc/lib/frontend/stores/chat.svelte.ts:442:// FIXME: remove compatibility path",
+	isError: false,
+	isTruncated: true,
+	fullContentLength: 24576,
+};
+
+export const mockToolGroupCompleted: ToolGroup = {
+	type: "tool-group",
+	uuid: "group-msg-tool-003",
+	category: "explore",
+	label: "Explored",
+	summary: "2 reads",
+	tools: [mockToolCompleted, mockToolReadWithOffset],
+	status: "completed",
+};
+
+export const mockToolGroupRunning: ToolGroup = {
+	type: "tool-group",
+	uuid: "group-msg-tool-002",
+	category: "edit",
+	label: "Edited",
+	summary: "2 edits",
+	tools: [mockToolRunning, mockToolWithDiff],
+	status: "running",
+};
+
+export const mockToolGroupError: ToolGroup = {
+	type: "tool-group",
+	uuid: "group-msg-tool-004",
+	category: "shell",
+	label: "Shell",
+	summary: "2 bashs",
+	tools: [mockToolBash, mockToolError],
+	status: "error",
+};
+
 // ─── Question Tool Messages ──────────────────────────────────────────────────
 
 export const mockQuestionRunning: ToolMessage = {
@@ -485,6 +633,35 @@ export const mockSystemError: SystemMessage = {
 	variant: "error",
 };
 
+// ─── Todos ──────────────────────────────────────────────────────────────────
+
+export const mockTodoPending: TodoItem = {
+	id: "todo-001",
+	subject: "Add Storybook coverage for setup components",
+	description: "Capture every visible status before the primitive migration.",
+	status: "pending",
+};
+
+export const mockTodoInProgress: TodoItem = {
+	id: "todo-002",
+	subject: "Verify deterministic file viewer fixtures",
+	description: "Keep paths, content, and rendered state stable across runs.",
+	status: "in_progress",
+};
+
+export const mockTodoCompleted: TodoItem = {
+	id: "todo-003",
+	subject: "Review the component prop contracts",
+	description: "Confirmed against each component's $props declaration.",
+	status: "completed",
+};
+
+export const mockTodoCancelled: TodoItem = {
+	id: "todo-004",
+	subject: "Capture baseline PNGs automatically",
+	status: "cancelled",
+};
+
 // ─── File Tree ───────────────────────────────────────────────────────────────
 
 export const mockFileTree = [
@@ -507,6 +684,15 @@ export const mockFileTree = [
 	{ name: "package.json", type: "file" as const },
 	{ name: "README.md", type: "file" as const },
 ];
+
+export const mockFileContent = `import { Effect } from "effect";
+
+export const loadProject = (slug: string) =>
+	Effect.gen(function* () {
+		const project = yield* findProject(slug);
+		return { ...project, connected: true };
+	});
+`;
 
 // ─── Terminal ────────────────────────────────────────────────────────────────
 
