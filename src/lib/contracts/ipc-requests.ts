@@ -34,12 +34,20 @@ export const IpcProjectSchema = Schema.Struct({
 	isProcessing: Schema.optional(Schema.Boolean),
 });
 
+const IpcSseHealthSchema = Schema.Struct({
+	connected: Schema.Boolean,
+	lastEventAt: Schema.NullOr(Schema.Number),
+	reconnectCount: Schema.Number,
+	stale: Schema.Boolean,
+});
+
 export const IpcStatusProjectSchema = Schema.Struct({
 	slug: Schema.String,
 	directory: Schema.String,
 	title: Schema.String,
 	status: Schema.optional(Schema.String),
 	lastUsed: Schema.optional(Schema.Number),
+	sse: Schema.optional(IpcSseHealthSchema),
 });
 
 export const IpcInstanceStatusSchema = Schema.Literal(

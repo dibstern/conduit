@@ -237,6 +237,9 @@ export const DaemonHandleLive: Layer.Layer<
 						...(entry.project.lastUsed !== undefined && {
 							lastUsed: entry.project.lastUsed,
 						}),
+						...(relayStatus?.sse !== undefined && {
+							sse: relayStatus.sse,
+						}),
 					});
 				}
 

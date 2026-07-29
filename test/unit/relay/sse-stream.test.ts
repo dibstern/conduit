@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { createSilentLogger } from "../../../src/lib/logger.js";
 import { calculateBackoffDelay } from "../../../src/lib/relay/sse-backoff.js";
 import { SSEStream } from "../../../src/lib/relay/sse-stream.js";
+import type { ConnectionHealth } from "../../../src/lib/types.js";
 
 function makeStubApi(events: Array<{ type: string; properties?: unknown }>) {
 	return {
@@ -152,10 +153,67 @@ describe("SSEStream", () => {
 	it("reports health state", () => {
 		const api = makeStubApi([]);
 		const stream = new SSEStream({ api });
-		const health = stream.getHealth();
-		expect(health).toHaveProperty("connected");
-		expect(health).toHaveProperty("lastEventAt");
-		expect(health).toHaveProperty("reconnectCount");
+		const health: ConnectionHealth = stream.getHealth();
+		expect(health).toEqual({
+			connected: false,
+			lastEventAt: null,
+			reconnectCount: 0,
+			stale: false,
+		});
+		expect(health.stale).toBe(false);
+	});
+
+	it("pulls current staleness and clears it after disconnect", async () => {
+		let now = 1_000;
+		const nowSpy = vi.spyOn(Date, "now").mockImplementation(() => now);
+		const api = {
+			event: {
+				subscribe: vi.fn(async ({ signal }: { signal?: AbortSignal } = {}) => ({
+					stream: (async function* () {
+						yield { type: "server.connected" };
+						await new Promise<void>((resolve) => {
+							if (signal?.aborted) {
+								resolve();
+								return;
+							}
+							signal?.addEventListener("abort", () => resolve(), {
+								once: true,
+							});
+						});
+					})(),
+				})),
+			},
+			// biome-ignore lint/suspicious/noExplicitAny: lightweight mock for unit test
+		} as any;
+		const stream = new SSEStream({
+			api,
+			staleThreshold: 1_000_000,
+		});
+		const connected = deferred();
+		stream.on("connected", () => connected.resolve());
+
+		try {
+			await connect(stream);
+			await connected.promise;
+			expect(stream.getHealth()).toEqual({
+				connected: true,
+				lastEventAt: 1_000,
+				reconnectCount: 0,
+				stale: false,
+			});
+
+			now += 1_000_000;
+			expect(stream.getHealth().stale).toBe(false);
+
+			now += 1;
+			expect(stream.getHealth().stale).toBe(true);
+
+			await disconnect(stream);
+			expect(stream.getHealth().stale).toBe(false);
+		} finally {
+			await disconnect(stream);
+			nowSpy.mockRestore();
+		}
 	});
 
 	it("isConnected returns false before connect", () => {
@@ -701,6 +759,25 @@ describe("SSEStream reconnection", () => {
 			1000,
 		);
 		expect(api.event.subscribe.mock.calls.length).toBeGreaterThanOrEqual(25);
+	});
+
+	it("publishes an advancing reconnect count within one lifecycle", async () => {
+		const api = failingApi();
+		const stream = new SSEStream({ api, baseDelay: 1, maxDelay: 2 });
+		const thirdReconnect = deferred();
+		const publishedCounts: number[] = [];
+		stream.on("reconnecting", () => {
+			publishedCounts.push(stream.getHealth().reconnectCount);
+			if (publishedCounts.length === 3) thirdReconnect.resolve();
+		});
+
+		try {
+			await connect(stream);
+			await withTimeout(thirdReconnect.promise, "third reconnect", 5_000);
+			expect(publishedCounts.slice(0, 3)).toEqual([1, 2, 3]);
+		} finally {
+			await drain(stream);
+		}
 	});
 
 	it("T2: reconnect delays follow the jittered backoff curve and plateau at maxDelay", async () => {

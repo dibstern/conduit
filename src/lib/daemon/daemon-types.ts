@@ -4,6 +4,7 @@
 // and its heavy transitive dependencies.
 
 import type { LogFormat, LogLevel } from "../logger.js";
+import type { ConnectionHealth } from "../types.js";
 
 // ─── DaemonOptions ─────────────────────────────────────────────────────────
 
@@ -66,6 +67,7 @@ export interface DaemonStatus {
 		title: string;
 		status?: string;
 		lastUsed?: number;
+		sse?: ConnectionHealth;
 	}>;
 }
 
