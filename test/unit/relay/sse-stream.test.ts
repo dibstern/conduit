@@ -1,4 +1,4 @@
-import { Effect } from "effect";
+import { Effect, Option } from "effect";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createSilentLogger } from "../../../src/lib/logger.js";
 import { calculateBackoffDelay } from "../../../src/lib/relay/sse-backoff.js";
@@ -478,6 +478,177 @@ describe("SSEStream", () => {
 		if (assertionFailure) throw assertionFailure;
 		expect(api.event.subscribe).toHaveBeenCalledTimes(2);
 		await disconnect(stream);
+	});
+
+	// c4z: an interrupted caller must not poison the lifecycle queue.
+	it("does not poison the lifecycle queue when a queued caller is interrupted", async () => {
+		const cleanupStarted = deferred();
+		const releaseCleanup = deferred();
+		const api = makeStubApi([]);
+
+		api.event.subscribe.mockImplementation(
+			async ({ signal }: { signal?: AbortSignal } = {}) => ({
+				stream: (async function* () {
+					try {
+						yield { type: "server.connected" };
+						await new Promise<void>((resolve) => {
+							if (signal?.aborted) {
+								resolve();
+								return;
+							}
+							signal?.addEventListener("abort", () => resolve(), {
+								once: true,
+							});
+						});
+					} finally {
+						cleanupStarted.resolve();
+						await releaseCleanup.promise;
+					}
+				})(),
+			}),
+		);
+
+		const stream = new SSEStream({ api });
+		const connected = deferred();
+		stream.on("connected", () => connected.resolve());
+
+		await connect(stream);
+		await withTimeout(connected.promise, "initial connection");
+
+		// Disconnect aborts the stream and then blocks awaiting generator cleanup,
+		// so it owns the lifecycle queue slot for the duration of this test.
+		const firstDisconnect = disconnect(stream);
+
+		try {
+			await withTimeout(cleanupStarted.promise, "first cleanup to start");
+
+			// This connect queues behind the in-flight disconnect, then is
+			// interrupted by the timeout before it ever reaches the head.
+			const timedConnect = await Effect.runPromise(
+				stream.connectEffect().pipe(Effect.timeoutOption("10 millis")),
+			);
+
+			expect(Option.isNone(timedConnect)).toBe(true);
+			// Proves the queued work never started.
+			expect(api.event.subscribe).toHaveBeenCalledTimes(1);
+		} finally {
+			releaseCleanup.resolve();
+			await withTimeout(firstDisconnect, "first disconnect to finish");
+		}
+
+		// Before the fix the interrupted entry's `completion` promise never
+		// settles, so the queue is permanently pending and this drain hangs.
+		await withTimeout(drain(stream), "drain after interrupted queued connect");
+	});
+
+	it("continues the lifecycle queue when the active caller is interrupted", async () => {
+		const firstCleanupStarted = deferred();
+		const releaseFirstCleanup = deferred();
+		const firstCleanupFinished = deferred();
+		const secondSubscribed = deferred();
+		const observed: string[] = [];
+		let subscribeCount = 0;
+		const api = makeStubApi([]);
+
+		api.event.subscribe.mockImplementation(
+			async ({ signal }: { signal?: AbortSignal } = {}) => {
+				subscribeCount++;
+				const connectionNumber = subscribeCount;
+				observed.push(`subscribe-${connectionNumber}`);
+				if (connectionNumber === 2) secondSubscribed.resolve();
+
+				return {
+					stream: (async function* () {
+						try {
+							yield { type: "server.connected" };
+							await new Promise<void>((resolve) => {
+								if (signal?.aborted) {
+									resolve();
+									return;
+								}
+								signal?.addEventListener("abort", () => resolve(), {
+									once: true,
+								});
+							});
+						} finally {
+							if (connectionNumber === 1) {
+								observed.push("first-cleanup-started");
+								firstCleanupStarted.resolve();
+								await releaseFirstCleanup.promise;
+								observed.push("first-cleanup-finished");
+								firstCleanupFinished.resolve();
+							}
+						}
+					})(),
+				};
+			},
+		);
+
+		const stream = new SSEStream({ api });
+		const connected = deferred();
+		stream.on("connected", () => connected.resolve());
+
+		await connect(stream);
+		await withTimeout(connected.promise, "initial connection");
+
+		const activeAbort = new AbortController();
+		const activeDisconnect = Effect.runPromise(stream.disconnectEffect(), {
+			signal: activeAbort.signal,
+		}).then(
+			() => "completed" as const,
+			() => "interrupted" as const,
+		);
+		let queuedConnect: Promise<void> | undefined;
+		let assertionFailure: unknown;
+
+		try {
+			await withTimeout(firstCleanupStarted.promise, "first cleanup to start");
+			queuedConnect = connect(stream);
+
+			// Give any already-runnable Promise continuation one event-loop turn.
+			// This is not a timing allowance: microtasks must run before this timer,
+			// so an entry released before interruption cannot hide on a loaded host.
+			await new Promise<void>((resolve) => setTimeout(resolve, 0));
+			expect(api.event.subscribe).toHaveBeenCalledTimes(1);
+
+			observed.push("active-interruption-sent");
+			activeAbort.abort();
+			expect(
+				await withTimeout(activeDisconnect, "active disconnect interruption"),
+			).toBe("interrupted");
+
+			// Fiber.interrupt sends interruption to the child and then awaits its
+			// exit. Interrupting this parent wait releases the lifecycle entry while
+			// the child's async-generator finalizer is still draining. That overlap
+			// predates the c4z canceler; the invariant is that interruption advances
+			// the queue, not that generator cleanup and the next subscribe never overlap.
+			await withTimeout(
+				secondSubscribed.promise,
+				"queued connect after active interruption",
+			);
+			expect(observed).toEqual([
+				"subscribe-1",
+				"first-cleanup-started",
+				"active-interruption-sent",
+				"subscribe-2",
+			]);
+		} catch (error) {
+			assertionFailure = error;
+		} finally {
+			activeAbort.abort();
+			releaseFirstCleanup.resolve();
+			await withTimeout(
+				firstCleanupFinished.promise,
+				"first cleanup to finish",
+			);
+			await withTimeout(activeDisconnect, "active disconnect to settle");
+			if (queuedConnect) {
+				await withTimeout(queuedConnect, "queued connect to finish");
+			}
+			await withTimeout(drain(stream), "final lifecycle drain");
+		}
+
+		if (assertionFailure) throw assertionFailure;
 	});
 });
 
