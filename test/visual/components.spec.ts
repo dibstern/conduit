@@ -10,7 +10,7 @@
 
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { expect, test } from "@playwright/test";
+import { errors, expect, test } from "@playwright/test";
 
 // ─── Story Discovery ─────────────────────────────────────────────────────────
 
@@ -53,12 +53,12 @@ async function freezeAnimations(
 }
 
 /**
- * Wait for Storybook's current render to finish its play lifecycle.
+ * Wait for Storybook's current render to reach a terminal lifecycle phase.
  *
  * A fixed sleep races play() functions: ui-modal--escape-restores-focus
  * straddled the old 800ms boundary and was captured with its modal still open.
- * This is best-effort because stories without play() (or older preview state)
- * may never expose a terminal phase; those fall back to the existing settle.
+ * Older preview state may not expose a terminal phase; that timeout is surfaced
+ * before falling back to the existing additive settle.
  */
 async function waitForStoryTerminalPhase(
 	page: import("@playwright/test").Page,
@@ -73,7 +73,6 @@ async function waitForStoryTerminalPhase(
 							storyRenders?: Array<{
 								id?: string;
 								phase?: string;
-								story?: { playFunction?: unknown };
 							}>;
 						};
 					}
@@ -81,9 +80,6 @@ async function waitForStoryTerminalPhase(
 				const render = preview?.storyRenders?.find(
 					(candidate) => candidate.id === currentStoryId,
 				);
-
-				if (render?.story && !render.story.playFunction) return true;
-
 				return ["finished", "errored", "aborted"].includes(render?.phase ?? "");
 			},
 			storyId,
@@ -92,8 +88,11 @@ async function waitForStoryTerminalPhase(
 				timeout: 5_000,
 			},
 		)
-		.catch(() => {
-			// Preserve the previous timing path when Storybook exposes no phase.
+		.catch((error: unknown) => {
+			if (!(error instanceof errors.TimeoutError)) throw error;
+			console.warn(
+				`Storybook render phase did not reach a terminal state for ${storyId} within 5s; using the additive settle`,
+			);
 		});
 }
 

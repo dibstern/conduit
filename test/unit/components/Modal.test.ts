@@ -1,6 +1,7 @@
 import { cleanup, fireEvent, render, waitFor } from "@testing-library/svelte";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import ModalDemo from "../../../src/lib/frontend/components/ui/__fixtures__/ModalDemo.svelte";
+import OverlappingModals from "./fixtures/OverlappingModals.svelte";
 
 describe("Modal", () => {
 	beforeEach(() => {
@@ -110,6 +111,22 @@ describe("Modal", () => {
 		expect(getByRole("dialog")).toBeTruthy();
 	});
 
+	it("stays open when an unprevented Bits close is refused by the parent", async () => {
+		const onclose = vi.fn();
+		const { getByRole } = render(ModalDemo, {
+			props: {
+				initiallyOpen: true,
+				onclose,
+				withBitsClose: true,
+			},
+		});
+
+		await fireEvent.click(getByRole("button", { name: "Close through Bits" }));
+
+		expect(onclose).toHaveBeenCalledOnce();
+		expect(getByRole("dialog")).toBeTruthy();
+	});
+
 	it("dismisses on backdrop clicks but not panel clicks", async () => {
 		const onclose = vi.fn();
 		const { getByRole } = render(ModalDemo, {
@@ -123,6 +140,8 @@ describe("Modal", () => {
 		expect(backdrop).not.toBeNull();
 		await new Promise((resolve) => setTimeout(resolve, 10));
 		await fireEvent.pointerDown(dialog, { button: 0, pointerType: "mouse" });
+		expect(onclose).not.toHaveBeenCalled();
+
 		await fireEvent.pointerDown(backdrop as HTMLElement, {
 			button: 0,
 			pointerType: "mouse",
@@ -210,5 +229,67 @@ describe("Modal", () => {
 
 		expect(trigger.hasAttribute("inert")).toBe(false);
 		expect(trigger.hasAttribute("aria-hidden")).toBe(false);
+	});
+
+	it("never inerts portaled dialog content", () => {
+		const view = render(OverlappingModals);
+
+		const dialogs = document.querySelectorAll<HTMLElement>('[role="dialog"]');
+		expect(dialogs).toHaveLength(2);
+		const overlays = document.querySelectorAll<HTMLElement>(
+			"[data-dialog-overlay]",
+		);
+		expect(overlays).toHaveLength(2);
+		for (const portalElement of [...dialogs, ...overlays]) {
+			let current: HTMLElement | null = portalElement;
+			while (current && current !== document.body) {
+				expect(current.hasAttribute("inert")).toBe(false);
+				expect(current.hasAttribute("aria-hidden")).toBe(false);
+				current = current.parentElement;
+			}
+		}
+		expect(view.getByTestId("background-control").hasAttribute("inert")).toBe(
+			true,
+		);
+	});
+
+	it("keeps overlapping modals compositional when closed out of order", async () => {
+		const view = render(OverlappingModals);
+		const background = view.getByTestId("background-control");
+
+		expect(background.hasAttribute("inert")).toBe(true);
+		expect(background.getAttribute("aria-hidden")).toBe("true");
+
+		await view.rerender({ firstOpen: false, secondOpen: true });
+
+		expect(background.hasAttribute("inert")).toBe(true);
+		expect(background.getAttribute("aria-hidden")).toBe("true");
+
+		await view.rerender({ firstOpen: false, secondOpen: false });
+
+		expect(background.hasAttribute("inert")).toBe(false);
+		expect(background.hasAttribute("aria-hidden")).toBe(false);
+	});
+
+	it("contains focus when the modal has no tabbable descendants", async () => {
+		const { getByRole } = render(ModalDemo, {
+			props: {
+				initiallyOpen: true,
+				showClose: false,
+				bodyHasAction: false,
+			},
+		});
+		const dialog = getByRole("dialog");
+		await waitFor(() => expect(document.activeElement).toBe(dialog));
+
+		const tab = new KeyboardEvent("keydown", {
+			key: "Tab",
+			bubbles: true,
+			cancelable: true,
+		});
+		dialog.dispatchEvent(tab);
+
+		expect(tab.defaultPrevented).toBe(true);
+		expect(document.activeElement).toBe(dialog);
 	});
 });

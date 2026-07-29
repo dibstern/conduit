@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { Dialog } from "bits-ui";
 	import { untrack } from "svelte";
 	import Button from "../Button.svelte";
 	import Modal from "../Modal.svelte";
@@ -11,6 +12,8 @@
 		dismissible?: boolean;
 		showClose?: boolean;
 		withFooter?: boolean;
+		bodyHasAction?: boolean;
+		withBitsClose?: boolean;
 		initiallyOpen?: boolean;
 		/** Overrides the default close-on-dismiss wiring (controlled-proof tests). */
 		onclose?: () => void;
@@ -24,6 +27,8 @@
 		dismissible,
 		showClose,
 		withFooter = false,
+		bodyHasAction = true,
+		withBitsClose = false,
 		initiallyOpen = false,
 		onclose,
 	}: DemoProps = $props();
@@ -36,7 +41,12 @@
 
 {#snippet body()}
 	<p>Modal body content.</p>
-	<Button variant="secondary">First action</Button>
+	{#if bodyHasAction}
+		<Button variant="secondary">First action</Button>
+	{/if}
+	{#if withBitsClose}
+		<Dialog.Close>Close through Bits</Dialog.Close>
+	{/if}
 {/snippet}
 
 {#snippet actions()}

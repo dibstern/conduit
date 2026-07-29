@@ -3,7 +3,10 @@
 	import type { Snippet } from "svelte";
 	import Icon from "./Icon.svelte";
 	import Button from "./Button.svelte";
-	import { backgroundInert } from "./actions/use-background-inert.svelte.js";
+	import {
+		backgroundInert,
+		exemptFromBackgroundInert,
+	} from "./actions/use-background-inert.svelte.js";
 
 	type ModalSize = "sm" | "md" | "lg";
 
@@ -62,23 +65,48 @@
 			.filter(Boolean)
 			.join(" "),
 	);
+
+	function containFocusWithoutTabbables(event: KeyboardEvent) {
+		if (event.key !== "Tab") return;
+		const dialog = event.currentTarget as HTMLElement;
+		const hasTabbableDescendant = Array.from(
+			dialog.querySelectorAll<HTMLElement>(
+				'a[href],button:not([disabled]),textarea:not([disabled]),input:not([disabled]),select:not([disabled]),[tabindex]:not([tabindex="-1"])',
+			),
+		).some(
+			(element) =>
+				element.offsetParent !== null || element.getClientRects().length > 0,
+		);
+		if (hasTabbableDescendant) return;
+
+		// Bits' focus scope returns early for an empty tabbable list, which would
+		// otherwise let Tab escape a supported showClose={false} read-only modal.
+		event.preventDefault();
+		dialog.focus();
+	}
 </script>
 
 {#if open}
-	<!-- Keep the inert boundary in the consumer's DOM tree; dialog content is portaled. -->
+	<!-- Keep the inert boundary in the consumer tree; live portal content is explicitly exempted. -->
 	<span hidden use:backgroundInert></span>
 {/if}
 
 <Dialog.Root
-	{open}
-	onOpenChange={(value) => {
-		if (!value) onclose();
-	}}
+	bind:open={
+		() => open,
+		(value) => {
+			if (!value) onclose();
+		}
+	}
 >
 	<Dialog.Portal>
 		<Dialog.Overlay
 			class="fixed inset-0 z-[var(--z-modal)] bg-backdrop backdrop-blur-[2px]"
-		/>
+		>
+			{#snippet child({ props })}
+				<div {...props} use:exemptFromBackgroundInert></div>
+			{/snippet}
+		</Dialog.Overlay>
 		<Dialog.Content
 			aria-label={resolvedTitle ? undefined : ariaLabel}
 			onEscapeKeydown={(event) => {
@@ -92,7 +120,12 @@
 		>
 			{#snippet child({ props })}
 				<div class="fixed inset-0 z-[var(--z-modal)] flex items-center justify-center">
-					<div {...props} class={panelClass}>
+					<div
+						{...props}
+						class={panelClass}
+						onkeydown={containFocusWithoutTabbables}
+						use:exemptFromBackgroundInert
+					>
 						{#if resolvedTitle || description}
 							<header class="flex flex-col gap-1 pr-8">
 								{#if resolvedTitle}
