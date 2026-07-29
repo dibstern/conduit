@@ -1082,6 +1082,113 @@ describe("Effect Message Projector (via ProjectionRunner)", () => {
 			}),
 		));
 
+	it("corrects a user message created after text.delta", () =>
+		runTest(
+			Effect.gen(function* () {
+				const sql = yield* SqlClient.SqlClient;
+				const store = yield* EventStoreEffectTag;
+				const runner = yield* ProjectionRunnerEffectTag;
+				yield* runner.markRecovered();
+
+				yield* seedSession("s1");
+				const sessionCreated = yield* store.append(makeSessionCreated("s1"));
+				yield* runner.projectEvent(sessionCreated);
+				const textDelta = yield* store.append(
+					makeTextDelta("s1", "m-user", "hi"),
+				);
+				yield* runner.projectEvent(textDelta);
+				const messageCreated = yield* store.append(
+					makeMessageCreated("s1", "m-user", { role: "user" }),
+				);
+				yield* runner.projectEvent(messageCreated);
+
+				const rows = yield* sql<{
+					role: string;
+					is_streaming: number;
+				}>`SELECT role, is_streaming FROM messages WHERE id = 'm-user'`;
+				expect(rows[0]).toEqual({
+					role: "user",
+					is_streaming: 0,
+				});
+			}),
+		));
+
+	it("corrects a user message created after file.attached", () =>
+		runTest(
+			Effect.gen(function* () {
+				const sql = yield* SqlClient.SqlClient;
+				const store = yield* EventStoreEffectTag;
+				const runner = yield* ProjectionRunnerEffectTag;
+				yield* runner.markRecovered();
+
+				yield* seedSession("s1");
+				const sessionCreated = yield* store.append(makeSessionCreated("s1"));
+				yield* runner.projectEvent(sessionCreated);
+				const fileAttached = yield* store.append(
+					makeFileAttached("s1", "m-user", "file1"),
+				);
+				yield* runner.projectEvent(fileAttached);
+				const messageCreated = yield* store.append(
+					makeMessageCreated("s1", "m-user", { role: "user" }),
+				);
+				yield* runner.projectEvent(messageCreated);
+
+				const messages = yield* sql<{
+					role: string;
+					is_streaming: number;
+				}>`SELECT role, is_streaming FROM messages WHERE id = 'm-user'`;
+				expect(messages[0]).toEqual({
+					role: "user",
+					is_streaming: 0,
+				});
+
+				const parts = yield* sql<{
+					message_id: string;
+					type: string;
+				}>`SELECT message_id, type FROM message_parts WHERE id = 'file1'`;
+				expect(parts[0]).toEqual({
+					message_id: "m-user",
+					type: "file",
+				});
+			}),
+		));
+
+	it("does not resurrect streaming when message.created is replayed", () =>
+		runTest(
+			Effect.gen(function* () {
+				const sql = yield* SqlClient.SqlClient;
+				const store = yield* EventStoreEffectTag;
+				const runner = yield* ProjectionRunnerEffectTag;
+				yield* runner.markRecovered();
+
+				yield* seedSession("s1");
+				const sessionCreated = yield* store.append(makeSessionCreated("s1"));
+				yield* runner.projectEvent(sessionCreated);
+				const messageCreated = yield* store.append(
+					makeMessageCreated("s1", "m1", { role: "assistant" }),
+				);
+				yield* runner.projectEvent(messageCreated);
+				const textDelta = yield* store.append(
+					makeTextDelta("s1", "m1", "hello"),
+				);
+				yield* runner.projectEvent(textDelta);
+				const turnCompleted = yield* store.append(
+					makeTurnCompleted("s1", "m1"),
+				);
+				yield* runner.projectEvent(turnCompleted);
+				yield* runner.projectEvent(messageCreated);
+
+				const rows = yield* sql<{
+					role: string;
+					text: string;
+					is_streaming: number;
+				}>`SELECT role, text, is_streaming FROM messages WHERE id = 'm1'`;
+				expect(rows[0]?.role).toBe("assistant");
+				expect(rows[0]?.text).toBe("hello");
+				expect(rows[0]?.is_streaming).toBe(0);
+			}),
+		));
+
 	it("text.delta accumulates text on messages", () =>
 		runTest(
 			Effect.gen(function* () {

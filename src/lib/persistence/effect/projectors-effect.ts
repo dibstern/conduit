@@ -202,7 +202,8 @@ export const makeMessageProjector = (): EffectProjector => ({
 					INSERT INTO messages
 					(id, session_id, role, text, is_streaming, created_at, updated_at)
 					VALUES (${event.data.messageId}, ${event.data.sessionId}, ${event.data.role}, '', ${isStreaming}, ${event.createdAt}, ${event.createdAt})
-					ON CONFLICT (id) DO NOTHING`;
+					ON CONFLICT (id) DO UPDATE SET role = excluded.role, is_streaming = excluded.is_streaming
+					WHERE messages.role <> excluded.role`;
 				return;
 			}
 

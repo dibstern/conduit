@@ -136,7 +136,7 @@ describe("MessageProjector", () => {
 			expect(row?.updated_at).toBe(event.createdAt);
 		});
 
-		it("is idempotent (INSERT ON CONFLICT DO NOTHING)", () => {
+		it("is idempotent on replay", () => {
 			const event = makeStored("message.created", "s1", {
 				messageId: "m1",
 				role: "user",
@@ -1423,6 +1423,131 @@ describe("MessageProjector", () => {
 				["m-existing"],
 			);
 			expect(count?.cnt).toBe(1);
+		});
+	});
+
+	describe("message.created is authoritative for role", () => {
+		it("corrects a user message created after text.delta", () => {
+			const textDelta = makeStored(
+				"text.delta",
+				"s1",
+				{
+					messageId: "m-user",
+					partId: "p1",
+					text: "hi",
+				} satisfies TextDeltaPayload,
+				1,
+			);
+			projector.project(textDelta, db);
+
+			const messageCreated = makeStored(
+				"message.created",
+				"s1",
+				{
+					messageId: "m-user",
+					role: "user",
+					sessionId: "s1",
+				} satisfies MessageCreatedPayload,
+				2,
+			);
+			projector.project(messageCreated, db);
+
+			const row = db.queryOne<Pick<MessageRow, "role" | "is_streaming">>(
+				"SELECT role, is_streaming FROM messages WHERE id = ?",
+				["m-user"],
+			);
+			expect(row).toEqual({
+				role: "user",
+				is_streaming: 0,
+			});
+		});
+
+		it("corrects a user message created after file.attached", () => {
+			const fileAttached = makeStored(
+				"file.attached",
+				"s1",
+				{
+					messageId: "m-user",
+					partId: "file1",
+					mime: "image/png",
+					filename: "screenshot.png",
+					url: "data:image/png;base64,AAAA",
+				} satisfies FileAttachedPayload,
+				1,
+			);
+			projector.project(fileAttached, db);
+
+			const messageCreated = makeStored(
+				"message.created",
+				"s1",
+				{
+					messageId: "m-user",
+					role: "user",
+					sessionId: "s1",
+				} satisfies MessageCreatedPayload,
+				2,
+			);
+			projector.project(messageCreated, db);
+
+			const row = db.queryOne<Pick<MessageRow, "role" | "is_streaming">>(
+				"SELECT role, is_streaming FROM messages WHERE id = ?",
+				["m-user"],
+			);
+			expect(row).toEqual({
+				role: "user",
+				is_streaming: 0,
+			});
+
+			const part = db.queryOne<Pick<MessagePartRow, "message_id" | "type">>(
+				"SELECT message_id, type FROM message_parts WHERE id = ?",
+				["file1"],
+			);
+			expect(part).toEqual({
+				message_id: "m-user",
+				type: "file",
+			});
+		});
+
+		it("does not resurrect streaming when message.created is replayed", () => {
+			const messageCreated = makeStored(
+				"message.created",
+				"s1",
+				{
+					messageId: "m1",
+					role: "assistant",
+					sessionId: "s1",
+				} satisfies MessageCreatedPayload,
+				1,
+			);
+			projector.project(messageCreated, db);
+
+			const textDelta = makeStored(
+				"text.delta",
+				"s1",
+				{
+					messageId: "m1",
+					partId: "p1",
+					text: "hello",
+				} satisfies TextDeltaPayload,
+				2,
+			);
+			projector.project(textDelta, db);
+
+			const turnCompleted = makeStored(
+				"turn.completed",
+				"s1",
+				{ messageId: "m1" } satisfies TurnCompletedPayload,
+				3,
+			);
+			projector.project(turnCompleted, db);
+			projector.project(messageCreated, db);
+
+			const row = db.queryOne<
+				Pick<MessageRow, "role" | "text" | "is_streaming">
+			>("SELECT role, text, is_streaming FROM messages WHERE id = ?", ["m1"]);
+			expect(row?.role).toBe("assistant");
+			expect(row?.text).toBe("hello");
+			expect(row?.is_streaming).toBe(0);
 		});
 	});
 

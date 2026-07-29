@@ -87,7 +87,8 @@ export class MessageProjector implements Projector {
 				`INSERT INTO messages
 				 (id, session_id, role, text, is_streaming, created_at, updated_at)
 				 VALUES (?, ?, ?, '', ?, ?, ?)
-				 ON CONFLICT (id) DO NOTHING`,
+				 ON CONFLICT (id) DO UPDATE SET role = excluded.role, is_streaming = excluded.is_streaming
+				 WHERE messages.role <> excluded.role`,
 				[
 					event.data.messageId,
 					event.data.sessionId,
