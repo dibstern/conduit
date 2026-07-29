@@ -19,7 +19,10 @@ interface StoryEntry {
 	title: string;
 	name: string;
 	type: "story" | "docs";
+	tags?: string[];
 }
+
+const VIEWPORT_CAPTURE_TAG = "viewport-capture";
 
 function loadStories(): StoryEntry[] {
 	const cwd = process.env["STORYBOOK_CWD"] ?? process.cwd();
@@ -157,14 +160,110 @@ if (stories.length > 0) {
 					const screenshotOpts = sizeNorm
 						? { maxDiffPixelRatio: sizeNorm.maxDiffPixelRatio }
 						: {};
-					if (box && box.height > 0) {
-						await expect(root).toHaveScreenshot(
+					// A zero-height root already falls back to the viewport, so it is
+					// as safe as an explicit tag. The guard below only needs to police
+					// the element-capture path — the one that can silently crop
+					// content away and still produce a plausible image.
+					const usesViewportCapture =
+						story.tags?.includes(VIEWPORT_CAPTURE_TAG) ||
+						!box ||
+						box.height <= 0;
+
+					if (!usesViewportCapture) {
+						const escapedElement = await page.evaluate(() => {
+							const storybookRoot =
+								document.querySelector<HTMLElement>("#storybook-root");
+							if (!storybookRoot) {
+								return null;
+							}
+
+							const tolerance = 1;
+
+							// Both capture modes clip at the viewport, so only the
+							// on-screen part of a rect can ever differ between them.
+							// Comparing raw rects instead flags content that is
+							// off-canvas (a closed drawer parked at x=-260) or that
+							// overflows the viewport edge (a 400px element in a 393px
+							// viewport) — neither of which a page capture would
+							// recover, so neither is a reason to switch modes.
+							const clipToViewport = (r: DOMRect) => ({
+								left: Math.max(r.left, 0),
+								top: Math.max(r.top, 0),
+								right: Math.min(r.right, window.innerWidth),
+								bottom: Math.min(r.bottom, window.innerHeight),
+							});
+							const rootVisible = clipToViewport(
+								storybookRoot.getBoundingClientRect(),
+							);
+
+							for (const element of document.querySelectorAll<HTMLElement>(
+								"*",
+							)) {
+								if (
+									element === storybookRoot ||
+									element.contains(storybookRoot)
+								) {
+									continue;
+								}
+
+								const style = getComputedStyle(element);
+								if (
+									(style.position !== "fixed" &&
+										style.position !== "absolute") ||
+									style.display === "none" ||
+									style.visibility === "hidden" ||
+									Number.parseFloat(style.opacity) <= 0
+								) {
+									continue;
+								}
+
+								const rect = element.getBoundingClientRect();
+								if (rect.width === 0 || rect.height === 0) {
+									continue;
+								}
+
+								const visible = clipToViewport(rect);
+								if (
+									visible.right - visible.left <= 0 ||
+									visible.bottom - visible.top <= 0
+								) {
+									continue;
+								}
+
+								const contained =
+									visible.left >= rootVisible.left - tolerance &&
+									visible.top >= rootVisible.top - tolerance &&
+									visible.right <= rootVisible.right + tolerance &&
+									visible.bottom <= rootVisible.bottom + tolerance;
+								if (!contained) {
+									return {
+										tagName: element.tagName.toLowerCase(),
+										classList: Array.from(element.classList),
+									};
+								}
+							}
+
+							return null;
+						});
+
+						if (escapedElement) {
+							const elementName = [
+								escapedElement.tagName,
+								...escapedElement.classList,
+							].join(".");
+							throw new Error(
+								`Story "${story.id}" has visible fixed or absolute content outside #storybook-root: ${elementName}. Add the "${VIEWPORT_CAPTURE_TAG}" tag to this story.`,
+							);
+						}
+					}
+
+					if (usesViewportCapture) {
+						await expect(page).toHaveScreenshot(
 							`${story.id}.png`,
 							screenshotOpts,
 						);
 					} else {
-						// Fall back to full-page screenshot for overlays/modals
-						await expect(page).toHaveScreenshot(
+						await expect(root).toHaveScreenshot(
 							`${story.id}.png`,
 							screenshotOpts,
 						);

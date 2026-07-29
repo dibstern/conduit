@@ -31,6 +31,9 @@ export const FileBrowserPanel: Story = {
 };
 
 export const MobileOpen: Story = {
+	// The open mobile sidebar lays a fixed, full-viewport dimming backdrop over
+	// the page; an element capture crops it to the sidebar's own height.
+	tags: ["viewport-capture"],
 	parameters: {
 		viewport: { defaultViewport: "mobile1" },
 	},

@@ -5,7 +5,7 @@ import ModalDemo from "./__fixtures__/ModalDemo.svelte";
 const meta = {
 	title: "UI/Modal",
 	component: ModalDemo,
-	tags: ["autodocs"],
+	tags: ["autodocs", "viewport-capture"],
 	argTypes: {
 		title: { control: "text" },
 		ariaLabel: { control: "text" },

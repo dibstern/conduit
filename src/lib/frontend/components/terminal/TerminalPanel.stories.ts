@@ -1,6 +1,6 @@
 import type { Meta, StoryObj } from "@storybook/svelte-vite";
 import { destroyAll, terminalState } from "../../stores/terminal.svelte.js";
-import TerminalPanel from "./TerminalPanel.svelte";
+import TerminalPanelHost from "./__fixtures__/TerminalPanelHost.svelte";
 
 function resetTerminal() {
 	destroyAll();
@@ -29,13 +29,13 @@ function setTabs(
 
 const meta = {
 	title: "Terminal/TerminalPanel",
-	component: TerminalPanel,
+	component: TerminalPanelHost,
 	tags: ["autodocs"],
 	parameters: { layout: "fullscreen" },
 	beforeEach: () => {
 		resetTerminal();
 	},
-} satisfies Meta<typeof TerminalPanel>;
+} satisfies Meta<typeof TerminalPanelHost>;
 
 export default meta;
 type Story = StoryObj<typeof meta>;

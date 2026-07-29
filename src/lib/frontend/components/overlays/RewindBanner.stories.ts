@@ -29,6 +29,9 @@ export const Active: Story = {
 
 /** Rewind mode with a message selected — confirmation modal showing. */
 export const WithModal: Story = {
+	// The confirmation modal is a fixed full-viewport backdrop; without this the
+	// baseline is a 34px strip of the banner and the modal is absent.
+	tags: ["viewport-capture"],
 	beforeEach: () => {
 		uiState.rewindActive = true;
 		uiState.rewindSelectedUuid = "msg-abc-123";

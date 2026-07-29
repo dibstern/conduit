@@ -1,11 +1,17 @@
 import type { Meta, StoryObj } from "@storybook/svelte-vite";
 import { discoveryState } from "../../stores/discovery.svelte.js";
-import ModelSelector from "./ModelSelector.svelte";
+import ModelSelectorHost from "./__fixtures__/ModelSelectorHost.svelte";
 
 const meta = {
 	title: "Model/ModelSelector",
-	component: ModelSelector,
+	component: ModelSelectorHost,
 	tags: ["autodocs"],
+	args: {
+		reserveDropUpSpace: false,
+	},
+	argTypes: {
+		reserveDropUpSpace: { control: false },
+	},
 	beforeEach: () => {
 		// Reset state for each story
 		discoveryState.providers = [];
@@ -16,7 +22,7 @@ const meta = {
 		discoveryState.currentContextWindow = "";
 		discoveryState.availableContextWindowOptions = [];
 	},
-} satisfies Meta<typeof ModelSelector>;
+} satisfies Meta<typeof ModelSelectorHost>;
 
 export default meta;
 type Story = StoryObj<typeof meta>;
@@ -89,6 +95,9 @@ export const Closed: Story = {
 
 /** Dropdown opened — user clicked the model button. */
 export const Open: Story = {
+	args: {
+		reserveDropUpSpace: true,
+	},
 	beforeEach: () => {
 		discoveryState.providers = defaultProviders;
 		discoveryState.currentModelId = "claude-sonnet-4-20250514";
@@ -104,6 +113,9 @@ export const Open: Story = {
 
 /** Multiple providers with models grouped — some unconfigured. */
 export const WithGroups: Story = {
+	args: {
+		reserveDropUpSpace: true,
+	},
 	beforeEach: () => {
 		discoveryState.providers = multiProviders;
 		discoveryState.currentModelId = "claude-sonnet-4-20250514";
@@ -145,6 +157,9 @@ export const WithVariants: Story = {
 
 /** Grouped Bedrock model with geo routing scope chips (Global default). */
 export const WithRoutingOptions: Story = {
+	args: {
+		reserveDropUpSpace: true,
+	},
 	beforeEach: () => {
 		discoveryState.providers = [
 			{

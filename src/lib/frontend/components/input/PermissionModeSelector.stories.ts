@@ -32,6 +32,7 @@ export const AutoApprove: Story = {
 };
 
 export const DropdownOpen: Story = {
+	tags: ["viewport-capture"],
 	play: async ({ canvasElement }) => {
 		await userEvent.click(
 			within(canvasElement).getByTestId("permission-mode-badge"),

@@ -1,16 +1,22 @@
 import type { Meta, StoryObj } from "@storybook/svelte-vite";
 import { discoveryState } from "../../stores/discovery.svelte.js";
-import ContextWindowSelector from "./ContextWindowSelector.svelte";
+import ContextWindowSelectorHost from "./__fixtures__/ContextWindowSelectorHost.svelte";
 
 const meta = {
 	title: "Model/ContextWindowSelector",
-	component: ContextWindowSelector,
+	component: ContextWindowSelectorHost,
 	tags: ["autodocs"],
+	args: {
+		reserveDropUpSpace: false,
+	},
+	argTypes: {
+		reserveDropUpSpace: { control: false },
+	},
 	beforeEach: () => {
 		discoveryState.currentContextWindow = "";
 		discoveryState.availableContextWindowOptions = [];
 	},
-} satisfies Meta<typeof ContextWindowSelector>;
+} satisfies Meta<typeof ContextWindowSelectorHost>;
 
 export default meta;
 type Story = StoryObj<typeof meta>;
@@ -51,6 +57,9 @@ export const Selected1M: Story = {
 
 /** Dropdown open with both options visible. */
 export const Open: Story = {
+	args: {
+		reserveDropUpSpace: true,
+	},
 	beforeEach: () => {
 		discoveryState.availableContextWindowOptions = standardOptions;
 		discoveryState.currentContextWindow = "";
