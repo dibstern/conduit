@@ -97,13 +97,26 @@ const daemonHandleStub = Layer.succeed(DaemonHandleTag, {
 			uptime: 0,
 			port: 2633,
 			host: "127.0.0.1",
-			projectCount: 0,
+			projectCount: 1,
 			sessionCount: 0,
 			clientCount: 0,
 			pinEnabled: false,
 			tlsEnabled: true,
 			keepAwake: false,
-			projects: [],
+			projects: [
+				{
+					slug: "alpha",
+					directory: "/work/alpha",
+					title: "Alpha",
+					status: "ready",
+					sse: {
+						connected: true,
+						lastEventAt: 1_234,
+						reconnectCount: 2,
+						stale: false,
+					},
+				},
+			],
 		}),
 	getProjects: () => Effect.succeed([]),
 	getInstances: () => Effect.succeed([]),
@@ -255,6 +268,32 @@ describe("makeDaemonHttpRouterLive", () => {
 		}),
 	);
 
+	it.scoped("serves nested SSE health from the daemon status response", () =>
+		Effect.gen(function* () {
+			const staticDir = yield* makeStaticDir;
+			const routerLayer = makeDaemonRouterLayer(staticDir, { projects: [] });
+
+			yield* Effect.gen(function* () {
+				const handler = yield* DaemonHttpRequestHandlerTag;
+				const { port } = yield* startServer(handler);
+
+				const response = yield* Effect.tryPromise(() =>
+					fetch(`http://127.0.0.1:${port}/health`),
+				);
+				expect(response.status).toBe(200);
+				const body = (yield* Effect.tryPromise(() => response.json())) as {
+					projects: Array<{ sse?: unknown }>;
+				};
+				expect(body.projects[0]?.sse).toEqual({
+					connected: true,
+					lastEventAt: 1_234,
+					reconnectCount: 2,
+					stale: false,
+				});
+			}).pipe(Effect.provide(Layer.fresh(routerLayer)));
+		}),
+	);
+
 	it.scoped(
 		"serves daemon project list from Effect-owned registry and relay snapshots",
 		() =>
@@ -289,7 +328,20 @@ describe("makeDaemonHttpRouterLive", () => {
 						],
 					],
 					relaySnapshots: new Map([
-						["alpha", { sessionCount: 7, clients: 3, isProcessing: true }],
+						[
+							"alpha",
+							{
+								sessionCount: 7,
+								clients: 3,
+								isProcessing: true,
+								sse: {
+									connected: true,
+									lastEventAt: 1_234,
+									reconnectCount: 2,
+									stale: false,
+								},
+							},
+						],
 					]),
 					persistedSessionCounts: new Map([["broken", 5]]),
 				});

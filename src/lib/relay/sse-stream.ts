@@ -52,7 +52,7 @@ export interface SSEStreamEvents {
 }
 
 export interface SSEStreamHealth {
-	getHealth(): ConnectionHealth & { stale: boolean };
+	getHealth(): ConnectionHealth;
 	isConnected(): boolean;
 }
 
@@ -160,7 +160,7 @@ export class SSEStream implements SSEStreamPort {
 	}
 
 	/** Get connection health snapshot. */
-	getHealth(): ConnectionHealth & { stale: boolean } {
+	getHealth(): ConnectionHealth {
 		return {
 			connected: this.connected,
 			lastEventAt: this.lastEventAt,

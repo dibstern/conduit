@@ -119,7 +119,7 @@ import {
 	makeWsRpcWebSocketHandler,
 	type RpcWebSocketHandlerShape,
 } from "../server/ws-rpc-handler.js";
-import type { ProjectRelayConfig } from "../types.js";
+import type { ConnectionHealth, ProjectRelayConfig } from "../types.js";
 import { generateSlug } from "../utils.js";
 
 /** Runtime bridge between imperative relay-stack and Effect handler pipeline. */
@@ -539,6 +539,8 @@ export interface ProjectRelayStatusSnapshot {
 	readonly sessionCount: number;
 	readonly clients: number;
 	readonly isProcessing: boolean;
+	/** Health of this project's default OpenCode SSE stream. */
+	readonly sse: ConnectionHealth;
 }
 
 // ─── Full Stack Config ──────────────────────────────────────────────────────
@@ -1139,6 +1141,7 @@ export async function createProjectRelay(
 		return {
 			...statusSnapshot.getSnapshot(),
 			clients: wsHandler.getClientCount(),
+			sse: sseStream.getHealth(),
 		};
 	};
 

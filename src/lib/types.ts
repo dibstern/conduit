@@ -161,9 +161,10 @@ export interface PendingPermission {
 // ─── Connection health ──────────────────────────────────────────────────────
 
 export interface ConnectionHealth {
-	connected: boolean;
-	lastEventAt: number | null;
-	reconnectCount: number;
+	readonly connected: boolean;
+	readonly lastEventAt: number | null;
+	readonly reconnectCount: number;
+	readonly stale: boolean;
 }
 
 // ─── Project info ───────────────────────────────────────────────────────────
