@@ -43,6 +43,7 @@ const CLAUDE_NOT_APPLICABLE_TYPES = [
 	"session.created", // Emitted directly in prompt.ts via eventStore.append(), not via translator
 	"session.renamed", // Title changes handled by auto-rename in prompt.ts
 	"session.provider_changed", // Provider switching is a relay-level concept
+	"session.permission_mode_changed", // Relay-level concept appended directly by SwitchPermissionMode, never emitted by the translator
 	"permission.asked", // Interactive asks use requestPermission(); auto-approved asks persist via synthetic sink push (audit)
 	"permission.resolved", // Interactive resolutions use resolvePermission(); auto-approvals persist via synthetic sink push (audit)
 	"question.asked", // Routed through requestQuestion(), not push()

@@ -9,7 +9,6 @@ import type { ProviderRuntimeEvent } from "../../contracts/providers/provider-ru
 import type { ClaudeEventPersistEffect } from "../../persistence/effect/claude-event-persist-effect.js";
 import type {
 	CanonicalEvent,
-	CanonicalEventType,
 	EventPayloadMap,
 	MessageRole,
 } from "../../persistence/events.js";
@@ -241,7 +240,7 @@ function runtimeEventsToDomain(
 	return domainEvents;
 }
 
-function providerRuntimeEvent<K extends CanonicalEventType>(
+function providerRuntimeEvent<K extends ProviderRuntimeEvent["type"]>(
 	type: K,
 	sessionId: string,
 	data: EventPayloadMap[K],

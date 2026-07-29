@@ -76,7 +76,9 @@ describe("ProviderRuntimeEvent contracts", () => {
 	});
 
 	it("covers every canonical event type or explicit reclassification", () => {
-		const explicitlyReclassified: readonly string[] = [];
+		const explicitlyReclassified: readonly string[] = [
+			"session.permission_mode_changed",
+		];
 		const missingRuntimeTypes = CANONICAL_EVENT_TYPES.filter(
 			(type) =>
 				!explicitlyReclassified.includes(type) &&

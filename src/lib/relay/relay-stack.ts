@@ -66,7 +66,10 @@ import {
 	StatusPollerTag,
 	WebSocketHandlerTag,
 } from "../domain/relay/Services/services.js";
-import { SessionManagerServiceTag } from "../domain/relay/Services/session-manager-service.js";
+import {
+	restoreSessionPermissionModes,
+	SessionManagerServiceTag,
+} from "../domain/relay/Services/session-manager-service.js";
 import {
 	type OverridesStateTag,
 	setDefaultAgent,
@@ -958,6 +961,14 @@ export async function createProjectRelay(
 							}
 							return "";
 						});
+				const restoredPermissionModes = yield* restoreSessionPermissionModes();
+				if (restoredPermissionModes > 0) {
+					yield* Effect.sync(() =>
+						log.info(
+							`Restored permission modes for ${restoredPermissionModes} session(s)`,
+						),
+					);
+				}
 				const orchestration = yield* getOrchestrationLayer;
 				yield* PollerStateTag;
 				yield* PollerPubSubTag;

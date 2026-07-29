@@ -116,6 +116,7 @@ describe("Migration Runner", () => {
 		const messagePartsCompactionTypeMigration = schemaMigrations[5];
 		const messagesContextWindowMigration = schemaMigrations[6];
 		const turnModelExecutionMigration = schemaMigrations[7];
+		const sessionsPermissionModeMigration = schemaMigrations[8];
 		if (
 			!baseline ||
 			!metadataMigration ||
@@ -124,7 +125,8 @@ describe("Migration Runner", () => {
 			!messagePartsFileTypeMigration ||
 			!messagePartsCompactionTypeMigration ||
 			!messagesContextWindowMigration ||
-			!turnModelExecutionMigration
+			!turnModelExecutionMigration ||
+			!sessionsPermissionModeMigration
 		) {
 			throw new Error("Expected all event-store schema migrations");
 		}
@@ -175,6 +177,11 @@ describe("Migration Runner", () => {
 				name: "turn_model_execution",
 				checksum: calculateMigrationChecksum(turnModelExecutionMigration),
 			},
+			{
+				id: 9,
+				name: "sessions_permission_mode",
+				checksum: calculateMigrationChecksum(sessionsPermissionModeMigration),
+			},
 		]);
 		columns = client
 			.query<{ name: string }>("PRAGMA table_info(message_parts)")
@@ -204,8 +211,9 @@ describe("Migration Runner", () => {
 		client = SqliteClient.memory();
 		const migrationsThrough7 = schemaMigrations.slice(0, 7);
 		const turnModelExecutionMigration = schemaMigrations[7];
-		if (!turnModelExecutionMigration) {
-			throw new Error("Expected turn model execution migration");
+		const sessionsPermissionModeMigration = schemaMigrations[8];
+		if (!turnModelExecutionMigration || !sessionsPermissionModeMigration) {
+			throw new Error("Expected remaining event-store migrations");
 		}
 		runMigrations(client, migrationsThrough7);
 
@@ -219,6 +227,11 @@ describe("Migration Runner", () => {
 				id: 8,
 				name: "turn_model_execution",
 				checksum: calculateMigrationChecksum(turnModelExecutionMigration),
+			},
+			{
+				id: 9,
+				name: "sessions_permission_mode",
+				checksum: calculateMigrationChecksum(sessionsPermissionModeMigration),
 			},
 		]);
 		expect(runMigrations(client, schemaMigrations)).toEqual([]);

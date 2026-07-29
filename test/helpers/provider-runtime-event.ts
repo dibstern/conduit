@@ -1,11 +1,10 @@
 import type { ProviderRuntimeEvent } from "../../src/lib/contracts/providers/provider-runtime-event.js";
 import type {
 	CanonicalEvent,
-	CanonicalEventType,
 	EventPayloadMap,
 } from "../../src/lib/persistence/events.js";
 
-export function providerRuntimeEvent<K extends CanonicalEventType>(
+export function providerRuntimeEvent<K extends ProviderRuntimeEvent["type"]>(
 	type: K,
 	sessionId: string,
 	data: EventPayloadMap[K],
@@ -37,6 +36,11 @@ export function providerRuntimeEventFromCanonical(
 	} = {},
 ): ProviderRuntimeEvent {
 	const metadata = metadataRecord(event.metadata);
+	if (event.type === "session.permission_mode_changed") {
+		throw new Error(
+			"session.permission_mode_changed is not a provider runtime event",
+		);
+	}
 	return {
 		eventId: event.eventId,
 		type: event.type,

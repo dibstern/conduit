@@ -9,13 +9,15 @@ import type {
 } from "../../../src/lib/persistence/events.js";
 import {
 	CANONICAL_EVENT_TYPES,
+	canonicalEvent,
 	createCommandId,
 	createEventId,
+	validateEventPayload,
 } from "../../../src/lib/persistence/events.js";
 
 describe("Canonical Event Types", () => {
-	it("exports all 23 canonical event types", () => {
-		expect(CANONICAL_EVENT_TYPES).toHaveLength(23);
+	it("exports all 24 canonical event types", () => {
+		expect(CANONICAL_EVENT_TYPES).toHaveLength(24);
 		expect(CANONICAL_EVENT_TYPES).toContain("message.created");
 		expect(CANONICAL_EVENT_TYPES).toContain("text.delta");
 		expect(CANONICAL_EVENT_TYPES).toContain("thinking.start");
@@ -35,6 +37,7 @@ describe("Canonical Event Types", () => {
 		expect(CANONICAL_EVENT_TYPES).toContain("session.status");
 		expect(CANONICAL_EVENT_TYPES).toContain("session.compaction");
 		expect(CANONICAL_EVENT_TYPES).toContain("session.provider_changed");
+		expect(CANONICAL_EVENT_TYPES).toContain("session.permission_mode_changed");
 		expect(CANONICAL_EVENT_TYPES).toContain("permission.asked");
 		expect(CANONICAL_EVENT_TYPES).toContain("permission.resolved");
 		expect(CANONICAL_EVENT_TYPES).toContain("question.asked");
@@ -103,5 +106,22 @@ describe("Canonical Event Types", () => {
 	it("EventMetadata can be empty", () => {
 		const meta: EventMetadata = {};
 		expect(meta).toEqual({});
+	});
+
+	it("validates permission mode change required fields", () => {
+		const event = canonicalEvent("session.permission_mode_changed", "s1", {
+			sessionId: "s1",
+			mode: "auto",
+		});
+		expect(() => validateEventPayload(event)).not.toThrow();
+
+		const missingMode = {
+			...event,
+			data: { sessionId: "s1" },
+		};
+		// @ts-expect-error Deliberately malformed payload verifies runtime validation.
+		expect(() => validateEventPayload(missingMode)).toThrow(
+			"missing required fields: mode",
+		);
 	});
 });

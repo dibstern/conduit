@@ -80,6 +80,7 @@ export const makeSessionProjector = (): EffectProjector => ({
 		"session.renamed",
 		"session.status",
 		"session.provider_changed",
+		"session.permission_mode_changed",
 		"turn.completed",
 		"turn.error",
 		"message.created",
@@ -143,6 +144,11 @@ export const makeSessionProjector = (): EffectProjector => ({
 
 			if (isEventType(event, "session.provider_changed")) {
 				yield* sql`UPDATE sessions SET provider = ${event.data.newProvider}, updated_at = ${event.createdAt} WHERE id = ${event.data.sessionId}`;
+				return;
+			}
+
+			if (isEventType(event, "session.permission_mode_changed")) {
+				yield* sql`UPDATE sessions SET permission_mode = ${event.data.mode}, updated_at = ${event.createdAt} WHERE id = ${event.data.sessionId}`;
 				return;
 			}
 

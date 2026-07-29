@@ -145,6 +145,7 @@ describe("Persistence Effect", () => {
 				{ migration_id: 6, name: "message_parts_compaction_type" },
 				{ migration_id: 7, name: "messages_context_window" },
 				{ migration_id: 8, name: "turn_model_execution" },
+				{ migration_id: 9, name: "sessions_permission_mode" },
 			]);
 
 			const legacyMigrationTable = yield* sql<{ name: string }>`

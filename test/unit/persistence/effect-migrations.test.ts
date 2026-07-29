@@ -99,6 +99,7 @@ describe("Effect SQL migrations", () => {
 					{ migration_id: 6, name: "message_parts_compaction_type" },
 					{ migration_id: 7, name: "messages_context_window" },
 					{ migration_id: 8, name: "turn_model_execution" },
+					{ migration_id: 9, name: "sessions_permission_mode" },
 				]);
 
 				const legacyRows = yield* sql<{ id: number; name: string }>`
@@ -112,6 +113,7 @@ describe("Effect SQL migrations", () => {
 					{ id: 6, name: "message_parts_compaction_type" },
 					{ id: 7, name: "messages_context_window" },
 					{ id: 8, name: "turn_model_execution" },
+					{ id: 9, name: "sessions_permission_mode" },
 				]);
 			}).pipe(
 				Effect.provide(
@@ -136,6 +138,7 @@ describe("Effect SQL migrations", () => {
 					[6, "message_parts_compaction_type"],
 					[7, "messages_context_window"],
 					[8, "turn_model_execution"],
+					[9, "sessions_permission_mode"],
 				]);
 
 				const sql = yield* SqlClient.SqlClient;
@@ -154,8 +157,8 @@ describe("Effect SQL migrations", () => {
 					name: string;
 				}>`SELECT migration_id, name FROM effect_sql_migrations ORDER BY migration_id`;
 				expect(effectHistory.at(-1)).toEqual({
-					migration_id: 8,
-					name: "turn_model_execution",
+					migration_id: 9,
+					name: "sessions_permission_mode",
 				});
 				const legacyHistory = yield* sql<{ id: number; name: string }>`
 					SELECT id, name FROM _migrations ORDER BY id`;
@@ -195,6 +198,7 @@ describe("Effect SQL migrations", () => {
 					{ migration_id: 6, name: "message_parts_compaction_type" },
 					{ migration_id: 7, name: "messages_context_window" },
 					{ migration_id: 8, name: "turn_model_execution" },
+					{ migration_id: 9, name: "sessions_permission_mode" },
 				]);
 
 				const columns = yield* sql<{ name: string }>`
@@ -219,6 +223,11 @@ describe("Effect SQL migrations", () => {
 						"actual_model",
 					]),
 				);
+				const sessionColumns = yield* sql<{ name: string }>`
+				PRAGMA table_info(sessions)`;
+				expect(sessionColumns.map((column) => column.name)).toContain(
+					"permission_mode",
+				);
 			}).pipe(
 				Effect.provide(
 					makeFileSqlLayer((filename) =>
@@ -228,6 +237,64 @@ describe("Effect SQL migrations", () => {
 								throw new Error("Expected event-store baseline migration");
 							}
 							runMigrations(db, [baseline]);
+						}),
+					),
+				),
+			),
+	);
+
+	it.effect(
+		"adds the sessions permission mode column to a migration-8 database",
+		() =>
+			Effect.gen(function* () {
+				yield* makeEffectSqlMigrator();
+
+				const sql = yield* SqlClient.SqlClient;
+				const columns = yield* sql<{ name: string }>`
+					PRAGMA table_info(sessions)`;
+				expect(columns.map((column) => column.name)).toContain(
+					"permission_mode",
+				);
+				expect(yield* makeEffectSqlMigrator()).toEqual([]);
+			}).pipe(
+				Effect.provide(
+					makeFileSqlLayer((filename) =>
+						seedDatabase(filename, (db) =>
+							runMigrations(db, schemaMigrations.slice(0, 8)),
+						),
+					),
+				),
+			),
+	);
+
+	it.effect(
+		"is idempotent when the sessions permission mode column already exists",
+		() =>
+			Effect.gen(function* () {
+				yield* makeEffectSqlMigrator();
+
+				const sql = yield* SqlClient.SqlClient;
+				const columns = yield* sql<{ name: string }>`
+					PRAGMA table_info(sessions)`;
+				expect(
+					columns.filter((column) => column.name === "permission_mode"),
+				).toHaveLength(1);
+				const history = yield* sql<{ migration_id: number; name: string }>`
+					SELECT migration_id, name
+					FROM effect_sql_migrations
+					ORDER BY migration_id`;
+				expect(history.at(-1)).toEqual({
+					migration_id: 9,
+					name: "sessions_permission_mode",
+				});
+			}).pipe(
+				Effect.provide(
+					makeFileSqlLayer((filename) =>
+						seedDatabase(filename, (db) => {
+							runMigrations(db, schemaMigrations.slice(0, 8));
+							db.execute(
+								"ALTER TABLE sessions ADD COLUMN permission_mode TEXT",
+							);
 						}),
 					),
 				),

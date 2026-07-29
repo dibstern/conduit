@@ -15,7 +15,9 @@ import {
 	createSession,
 	deleteSession,
 	listSessions,
+	persistSessionPermissionMode,
 	recordMessageActivity,
+	restoreSessionPermissionModes,
 	SessionManagerServiceLive,
 	SessionManagerServiceTag,
 } from "../../../src/lib/domain/relay/Services/session-manager-service.js";
@@ -23,6 +25,10 @@ import {
 	makeSessionManagerStateLive,
 	SessionManagerStateTag,
 } from "../../../src/lib/domain/relay/Services/session-manager-state.js";
+import {
+	getPermissionMode,
+	makeOverridesStateLive,
+} from "../../../src/lib/domain/relay/Services/session-overrides-state.js";
 import type { OpenCodeAPI } from "../../../src/lib/instance/opencode-api.js";
 import { EventStoreEffectTag } from "../../../src/lib/persistence/effect/event-store-effect.js";
 import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
@@ -417,6 +423,88 @@ describe("SessionManager Effect", () => {
 				expect(mockApi.session.update).not.toHaveBeenCalled();
 			}).pipe(
 				Effect.provide(layer),
+				Effect.ensuring(
+					Effect.sync(() => rmSync(dir, { recursive: true, force: true })),
+				),
+			);
+		},
+	);
+
+	it.effect(
+		"persists permission mode as an event and projects the session row",
+		() => {
+			const dir = mkdtempSync(join(tmpdir(), "conduit-permission-mode-"));
+			const filename = join(dir, "events.db");
+
+			return Effect.gen(function* () {
+				const sql = yield* SqlClient.SqlClient;
+				const store = yield* EventStoreEffectTag;
+				const runner = yield* ProjectionRunnerEffectTag;
+				const readQuery = yield* ReadQueryEffectTag;
+				const sessionId = "ses-permission-mode";
+				yield* runner.markRecovered();
+				yield* sql`
+				INSERT INTO sessions (id, provider, title, status, created_at, updated_at)
+				VALUES (${sessionId}, 'claude', 'Permission session', 'idle', 1000, 1000)`;
+
+				yield* persistSessionPermissionMode(sessionId, "full");
+
+				const events = yield* store.readBySession(sessionId);
+				expect(events.map((event) => event.type)).toEqual([
+					"session.permission_mode_changed",
+				]);
+				expect(events[0]?.data).toEqual({ sessionId, mode: "full" });
+				expect((yield* readQuery.getSession(sessionId))?.permission_mode).toBe(
+					"full",
+				);
+			}).pipe(
+				Effect.provide(makePersistenceEffectLayer(filename)),
+				Effect.ensuring(
+					Effect.sync(() => rmSync(dir, { recursive: true, force: true })),
+				),
+			);
+		},
+	);
+
+	it.effect(
+		"permission mode persistence is a no-op without persistence services",
+		() =>
+			Effect.gen(function* () {
+				expect(
+					yield* persistSessionPermissionMode("ses-no-persistence", "auto"),
+				).toBeUndefined();
+			}),
+	);
+
+	it.effect(
+		"restores valid persisted permission modes and skips null or invalid values",
+		() => {
+			const dir = mkdtempSync(join(tmpdir(), "conduit-restore-mode-"));
+			const filename = join(dir, "events.db");
+
+			return Effect.gen(function* () {
+				const sql = yield* SqlClient.SqlClient;
+				const runner = yield* ProjectionRunnerEffectTag;
+				yield* runner.markRecovered();
+				yield* sql`
+					INSERT INTO sessions (
+						id, provider, title, status, permission_mode, created_at, updated_at
+					) VALUES
+						('ses-auto', 'claude', 'Auto', 'idle', 'auto', 1000, 1000),
+						('ses-default', 'claude', 'Default', 'idle', NULL, 1000, 1000),
+						('ses-invalid', 'claude', 'Invalid', 'idle', 'broken', 1000, 1000)`;
+
+				expect(yield* restoreSessionPermissionModes()).toBe(1);
+				expect(yield* getPermissionMode("ses-auto")).toBe("auto");
+				expect(yield* getPermissionMode("ses-default")).toBe("ask");
+				expect(yield* getPermissionMode("ses-invalid")).toBe("ask");
+			}).pipe(
+				Effect.provide(
+					Layer.merge(
+						makePersistenceEffectLayer(filename),
+						Layer.fresh(makeOverridesStateLive()),
+					),
+				),
 				Effect.ensuring(
 					Effect.sync(() => rmSync(dir, { recursive: true, force: true })),
 				),

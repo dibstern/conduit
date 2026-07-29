@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
 	createEventId,
 	type SessionCreatedPayload,
+	type SessionPermissionModeChangedPayload,
 	type SessionProviderChangedPayload,
 	type SessionRenamedPayload,
 	type SessionStatusPayload,
@@ -43,6 +44,7 @@ interface SessionRow {
 	status: string;
 	parent_id: string | null;
 	fork_point_event: string | null;
+	permission_mode: string | null;
 	created_at: number;
 	updated_at: number;
 }
@@ -69,6 +71,7 @@ describe("SessionProjector", () => {
 			"session.renamed",
 			"session.status",
 			"session.provider_changed",
+			"session.permission_mode_changed",
 			"turn.completed",
 			"turn.error",
 			"message.created",
@@ -277,6 +280,54 @@ describe("SessionProjector", () => {
 			);
 			expect(row?.provider).toBe("claude");
 			expect(row?.updated_at).toBe(now + 2000);
+		});
+	});
+
+	describe("session.permission_mode_changed", () => {
+		it("updates permission mode and updated_at for the target session only", () => {
+			for (const sessionId of ["s1", "s2"]) {
+				projector.project(
+					makeStored(
+						"session.created",
+						sessionId,
+						{
+							sessionId,
+							title: `Session ${sessionId}`,
+							provider: "opencode",
+						} satisfies SessionCreatedPayload,
+						1,
+						now,
+					),
+					db,
+				);
+			}
+
+			projector.project(
+				makeStored(
+					"session.permission_mode_changed",
+					"s1",
+					{
+						sessionId: "s1",
+						mode: "auto",
+					} satisfies SessionPermissionModeChangedPayload,
+					2,
+					now + 2500,
+				),
+				db,
+			);
+
+			const target = db.queryOne<SessionRow>(
+				"SELECT * FROM sessions WHERE id = ?",
+				["s1"],
+			);
+			const other = db.queryOne<SessionRow>(
+				"SELECT * FROM sessions WHERE id = ?",
+				["s2"],
+			);
+			expect(target?.permission_mode).toBe("auto");
+			expect(target?.updated_at).toBe(now + 2500);
+			expect(other?.permission_mode).toBeNull();
+			expect(other?.updated_at).toBe(now);
 		});
 	});
 

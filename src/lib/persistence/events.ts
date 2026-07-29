@@ -28,6 +28,16 @@ export type ProviderType = (typeof PROVIDER_TYPES)[number];
 export const SESSION_STATUSES = ["idle", "busy", "retry", "error"] as const;
 export type SessionStatusValue = (typeof SESSION_STATUSES)[number];
 
+// Keep in sync with SessionPermissionModeSchema in src/lib/shared-types.ts.
+export const SESSION_PERMISSION_MODES = [
+	"ask",
+	"acceptEdits",
+	"auto",
+	"full",
+] as const;
+export type SessionPermissionModeValue =
+	(typeof SESSION_PERMISSION_MODES)[number];
+
 export const PERMISSION_DECISIONS = ["once", "always", "reject"] as const;
 export type PermissionDecision = (typeof PERMISSION_DECISIONS)[number];
 
@@ -56,6 +66,7 @@ export const CANONICAL_EVENT_TYPES = [
 	"session.status",
 	"session.compaction",
 	"session.provider_changed",
+	"session.permission_mode_changed",
 	"permission.asked",
 	"permission.resolved",
 	"question.asked",
@@ -236,6 +247,11 @@ export interface SessionProviderChangedPayload {
 	readonly newProvider: string;
 }
 
+export interface SessionPermissionModeChangedPayload {
+	readonly sessionId: string;
+	readonly mode: SessionPermissionModeValue;
+}
+
 export interface PermissionAskedPayload {
 	readonly id: string;
 	readonly sessionId: string;
@@ -287,6 +303,7 @@ export interface EventPayloadMap {
 	"session.status": SessionStatusPayload;
 	"session.compaction": SessionCompactionPayload;
 	"session.provider_changed": SessionProviderChangedPayload;
+	"session.permission_mode_changed": SessionPermissionModeChangedPayload;
 	"permission.asked": PermissionAskedPayload;
 	"permission.resolved": PermissionResolvedPayload;
 	"question.asked": QuestionAskedPayload;
@@ -619,6 +636,11 @@ const SessionProviderChangedPayloadSchema = Schema.Struct({
 	newProvider: Schema.String,
 });
 
+const SessionPermissionModeChangedPayloadSchema = Schema.Struct({
+	sessionId: Schema.String,
+	mode: Schema.Literal(...SESSION_PERMISSION_MODES),
+});
+
 const PermissionAskedPayloadSchema = Schema.Struct({
 	id: Schema.String,
 	sessionId: Schema.String,
@@ -736,6 +758,10 @@ const SessionProviderChangedEventSchema = eventEnvelope(
 	"session.provider_changed",
 	SessionProviderChangedPayloadSchema,
 );
+const SessionPermissionModeChangedEventSchema = eventEnvelope(
+	"session.permission_mode_changed",
+	SessionPermissionModeChangedPayloadSchema,
+);
 const PermissionAskedEventSchema = eventEnvelope(
 	"permission.asked",
 	PermissionAskedPayloadSchema,
@@ -753,7 +779,7 @@ const QuestionResolvedEventSchema = eventEnvelope(
 	QuestionResolvedPayloadSchema,
 );
 
-// ─── Canonical Event Schema (Union of all 22 event types) ──────────────────
+// ─── Canonical Event Schema (Union of all 24 event types) ──────────────────
 
 export const CanonicalEventSchema = Schema.Union(
 	MessageCreatedEventSchema,
@@ -775,6 +801,7 @@ export const CanonicalEventSchema = Schema.Union(
 	SessionStatusEventSchema,
 	SessionCompactionEventSchema,
 	SessionProviderChangedEventSchema,
+	SessionPermissionModeChangedEventSchema,
 	PermissionAskedEventSchema,
 	PermissionResolvedEventSchema,
 	QuestionAskedEventSchema,
@@ -801,6 +828,7 @@ const PAYLOAD_REQUIRED_FIELDS: Record<CanonicalEventType, readonly string[]> = {
 	"session.status": ["sessionId", "status"],
 	"session.compaction": ["sessionId", "state", "detail"],
 	"session.provider_changed": ["sessionId", "oldProvider", "newProvider"],
+	"session.permission_mode_changed": ["sessionId", "mode"],
 	"message.created": ["messageId", "role", "sessionId"],
 	"text.delta": ["messageId", "partId", "text"],
 	"thinking.start": ["messageId", "partId"],

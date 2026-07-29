@@ -18,6 +18,7 @@ import {
 	Option,
 	Ref,
 	Schedule,
+	Schema,
 } from "effect";
 import {
 	isKnownDriverKind,
@@ -46,7 +47,11 @@ import { canonicalEvent } from "../../../persistence/events.js";
 import type { SessionRow } from "../../../persistence/read-model-types.js";
 import { sessionRowsToSessionInfoList } from "../../../persistence/session-list-adapter.js";
 import { toSessionInfoList } from "../../../session/session-info-list.js";
-import type { HistoryMessage } from "../../../shared-types.js";
+import {
+	type HistoryMessage,
+	type SessionPermissionMode,
+	SessionPermissionModeSchema,
+} from "../../../shared-types.js";
 import type { RelayMessage, SessionInfo } from "../../../types.js";
 import {
 	DaemonEventBusTag,
@@ -62,7 +67,10 @@ import {
 	StatusPollerTag,
 } from "./services.js";
 import { SessionManagerStateTag } from "./session-manager-state.js";
-import { OverridesStateTag } from "./session-overrides-state.js";
+import {
+	OverridesStateTag,
+	setPermissionMode,
+} from "./session-overrides-state.js";
 
 // ─── Retry policy ──────────────────────────────────────────────────────────
 
@@ -632,6 +640,141 @@ const renameSQLiteBackedClaudeSession = (sessionId: string, title: string) =>
 		);
 
 		return true;
+	});
+
+export const persistSessionPermissionMode = (
+	sessionId: string,
+	mode: SessionPermissionMode,
+) =>
+	Effect.gen(function* () {
+		const eventStoreOption = yield* Effect.serviceOption(EventStoreEffectTag);
+		const projectionRunnerOption = yield* Effect.serviceOption(
+			ProjectionRunnerEffectTag,
+		);
+		const sqlOption = yield* Effect.serviceOption(SqlClient.SqlClient);
+
+		if (
+			eventStoreOption._tag === "None" ||
+			projectionRunnerOption._tag === "None" ||
+			sqlOption._tag === "None"
+		) {
+			return yield* Effect.void;
+		}
+
+		const eventStore = eventStoreOption.value;
+		const projectionRunner = projectionRunnerOption.value;
+		const sql = sqlOption.value;
+
+		const withSql = <A, E>(
+			effect: Effect.Effect<A, E, SqlClient.SqlClient>,
+		): Effect.Effect<A, E> =>
+			effect.pipe(Effect.provideService(SqlClient.SqlClient, sql));
+
+		const recovered = yield* projectionRunner.isRecovered();
+		if (!recovered) {
+			yield* withSql(projectionRunner.recover()).pipe(
+				Effect.mapError(
+					(cause) =>
+						new SessionManagerError({
+							operation: "persistPermissionMode.recover",
+							cause,
+						}),
+				),
+				Effect.asVoid,
+			);
+		}
+
+		const now = Date.now();
+		const stored = yield* eventStore
+			.append(
+				canonicalEvent(
+					"session.permission_mode_changed",
+					sessionId,
+					{ sessionId, mode },
+					{
+						createdAt: now,
+						metadata: { source: "relay" },
+					},
+				),
+			)
+			.pipe(
+				Effect.mapError(
+					(cause) =>
+						new SessionManagerError({
+							operation: "persistPermissionMode.append",
+							cause,
+						}),
+				),
+			);
+
+		yield* withSql(projectionRunner.projectEvent(stored)).pipe(
+			Effect.mapError(
+				(cause) =>
+					new SessionManagerError({
+						operation: "persistPermissionMode.project",
+						cause,
+					}),
+			),
+		);
+	});
+
+export const restoreSessionPermissionModes = () =>
+	Effect.gen(function* () {
+		const readQueryOption = yield* Effect.serviceOption(ReadQueryEffectTag);
+		const projectionRunnerOption = yield* Effect.serviceOption(
+			ProjectionRunnerEffectTag,
+		);
+		const sqlOption = yield* Effect.serviceOption(SqlClient.SqlClient);
+
+		if (
+			readQueryOption._tag === "None" ||
+			projectionRunnerOption._tag === "None" ||
+			sqlOption._tag === "None"
+		) {
+			return yield* Effect.succeed(0);
+		}
+
+		const readQuery = readQueryOption.value;
+		const projectionRunner = projectionRunnerOption.value;
+		const sql = sqlOption.value;
+
+		const withSql = <A, E>(
+			effect: Effect.Effect<A, E, SqlClient.SqlClient>,
+		): Effect.Effect<A, E> =>
+			effect.pipe(Effect.provideService(SqlClient.SqlClient, sql));
+
+		const recovered = yield* projectionRunner.isRecovered();
+		if (!recovered) {
+			yield* withSql(projectionRunner.recover()).pipe(
+				Effect.mapError(
+					(cause) =>
+						new SessionManagerError({
+							operation: "restorePermissionModes.recover",
+							cause,
+						}),
+				),
+				Effect.asVoid,
+			);
+		}
+
+		const rows = yield* readQuery.listSessions().pipe(
+			Effect.mapError(
+				(cause) =>
+					new SessionManagerError({
+						operation: "restorePermissionModes.listSessions",
+						cause,
+					}),
+			),
+		);
+		const isSessionPermissionMode = Schema.is(SessionPermissionModeSchema);
+		let restored = 0;
+		for (const row of rows) {
+			const mode = row.permission_mode;
+			if (mode === null || !isSessionPermissionMode(mode)) continue;
+			yield* setPermissionMode(row.id, mode);
+			restored += 1;
+		}
+		return restored;
 	});
 
 /**

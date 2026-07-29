@@ -25,7 +25,6 @@ import { Effect } from "effect";
 import type { ProviderRuntimeEvent } from "../../contracts/providers/provider-runtime-event.js";
 import { createLogger, type Logger } from "../../logger.js";
 import type {
-	CanonicalEventType,
 	CanonicalToolInput,
 	EventPayloadMap,
 } from "../../persistence/events.js";
@@ -52,7 +51,7 @@ const defaultLog = createLogger("claude-event-translator");
 // Events are provider ingress envelopes. The EventSink owns conversion to
 // durable domain events before append/projection.
 
-function makeProviderRuntimeEvent<K extends CanonicalEventType>(
+function makeProviderRuntimeEvent<K extends ProviderRuntimeEvent["type"]>(
 	type: K,
 	sessionId: string,
 	data: EventPayloadMap[K],

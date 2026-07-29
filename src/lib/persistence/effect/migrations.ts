@@ -11,6 +11,7 @@ import {
 	MESSAGE_PARTS_FILE_TYPE_MIGRATION,
 	MESSAGES_CONTEXT_WINDOW_MIGRATION,
 	readMigrationSql,
+	SESSIONS_PERMISSION_MODE_MIGRATION,
 	TURN_MODEL_EXECUTION_MIGRATION,
 } from "../schema.js";
 
@@ -37,6 +38,9 @@ const messagesContextWindowMigrationSql = readMigrationSql(
 );
 const turnModelExecutionMigrationSql = readMigrationSql(
 	TURN_MODEL_EXECUTION_MIGRATION,
+);
+const sessionsPermissionModeMigrationSql = readMigrationSql(
+	SESSIONS_PERMISSION_MODE_MIGRATION,
 );
 
 const expectedTableColumns = {
@@ -229,6 +233,7 @@ const expectedTableColumns = {
 		"last_message_at",
 		"created_at",
 		"updated_at",
+		"permission_mode",
 	],
 	tool_content: ["tool_id", "session_id", "content", "created_at"],
 	turns: [
@@ -409,6 +414,11 @@ const verifyExistingBaselineSchema: Effect.Effect<
 					actualColumns,
 					expectedColumns.filter((column) => column !== "context_window"),
 				)) ||
+			(tableName === "sessions" &&
+				sameStrings(
+					actualColumns,
+					expectedColumns.filter((column) => column !== "permission_mode"),
+				)) ||
 			(tableName === "turns" &&
 				sameStrings(
 					actualColumns,
@@ -521,6 +531,20 @@ const runTurnModelExecutionMigration: Effect.Effect<
 	}
 });
 
+const runSessionsPermissionModeMigration: Effect.Effect<
+	void,
+	unknown,
+	SqlClient.SqlClient
+> = Effect.gen(function* () {
+	const sql = yield* SqlClient.SqlClient;
+	const columns = yield* sql.unsafe<{ name: string }>(
+		"PRAGMA table_info(sessions)",
+	);
+	if (columns.some((column) => column.name === "permission_mode")) return;
+
+	yield* executeSqlStatements(sessionsPermissionModeMigrationSql);
+});
+
 export const effectMigrationEntries = {
 	"0001_create_event_store_tables": runBaselineEventStoreMigration,
 	"0002_add_message_part_metadata": runMessagePartMetadataMigration,
@@ -530,6 +554,7 @@ export const effectMigrationEntries = {
 	"0006_message_parts_compaction_type": runMessagePartsCompactionTypeMigration,
 	"0007_messages_context_window": runMessagesContextWindowMigration,
 	"0008_turn_model_execution": runTurnModelExecutionMigration,
+	"0009_sessions_permission_mode": runSessionsPermissionModeMigration,
 } satisfies Record<string, Effect.Effect<void, unknown, SqlClient.SqlClient>>;
 
 export function makeEffectMigrationLoader(

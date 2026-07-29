@@ -1051,6 +1051,52 @@ describe("Effect Session Projector (via ProjectionRunner)", () => {
 				expect(rows[0]?.status).toBe("busy");
 			}),
 		));
+
+	it("session.permission_mode_changed updates only the target session", () =>
+		runTest(
+			Effect.gen(function* () {
+				const sql = yield* SqlClient.SqlClient;
+				const store = yield* EventStoreEffectTag;
+				const runner = yield* ProjectionRunnerEffectTag;
+				yield* runner.markRecovered();
+
+				for (const sessionId of ["s1", "s2"]) {
+					yield* seedSession(sessionId);
+					const created = yield* store.append(
+						makeSessionCreated(sessionId, { createdAt: FIXED_TS }),
+					);
+					yield* runner.projectEvent(created);
+				}
+
+				const changed = yield* store.append(
+					canonicalEvent(
+						"session.permission_mode_changed",
+						"s1",
+						{ sessionId: "s1", mode: "auto" },
+						{ createdAt: FIXED_TS + 2500 },
+					),
+				);
+				yield* runner.projectEvent(changed);
+
+				const rows = yield* sql<{
+					id: string;
+					permission_mode: string | null;
+					updated_at: number;
+				}>`
+					SELECT id, permission_mode, updated_at
+					FROM sessions
+					WHERE id IN ('s1', 's2')
+					ORDER BY id`;
+				expect(rows).toEqual([
+					{
+						id: "s1",
+						permission_mode: "auto",
+						updated_at: FIXED_TS + 2500,
+					},
+					{ id: "s2", permission_mode: null, updated_at: FIXED_TS },
+				]);
+			}),
+		));
 });
 
 // ─── Message Projector Tests ────────────────────────────────────────────────
