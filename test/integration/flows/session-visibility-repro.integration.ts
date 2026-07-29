@@ -22,6 +22,12 @@ import type {
 } from "../../e2e/fixtures/recorded/types.js";
 import { loadOpenCodeRecording } from "../../e2e/helpers/recorded-loader.js";
 import {
+	assistantInfo,
+	bindOpenCodeSession,
+	materializeOpenCodeTurn,
+	userInfo,
+} from "../helpers/opencode-differential.js";
+import {
 	createRelayHarness,
 	type RelayHarness,
 } from "../helpers/relay-harness.js";
@@ -95,48 +101,6 @@ function recordingWithFirstPromptSse(
 	};
 }
 
-// Schema-complete message infos: loadPreRenderedHistory decodes REST bodies
-// against OpenCodeMessageSchema, which requires agent/model on user messages
-// and parentID/modelID/providerID/mode/path/cost/tokens on assistant
-// messages. Minimal infos fail decode and silently downgrade the "REST" side
-// of the differential to the projection fallback — trivial parity.
-function userInfo(sessionId: string, id: string, created: number) {
-	return {
-		id,
-		sessionID: sessionId,
-		role: "user",
-		time: { created },
-		agent: "build",
-		model: { providerID: "anthropic", modelID: "claude-sonnet-4-5" },
-	};
-}
-
-function assistantInfo(
-	sessionId: string,
-	id: string,
-	created: number,
-	completed?: number,
-) {
-	return {
-		id,
-		sessionID: sessionId,
-		role: "assistant",
-		time: { created, ...(completed != null ? { completed } : {}) },
-		parentID: "",
-		modelID: "claude-sonnet-4-5",
-		providerID: "anthropic",
-		mode: "build",
-		path: { cwd: "/", root: "/" },
-		cost: 0,
-		tokens: {
-			input: 10,
-			output: 5,
-			reasoning: 0,
-			cache: { read: 0, write: 0 },
-		},
-	};
-}
-
 function paginationSse(
 	sessionId: string,
 	count: number,
@@ -182,55 +146,6 @@ function projectedHistory(dbPath: string, sessionId: string, pageSize = 50) {
 	}
 }
 
-/**
- * Bind a fresh session to the OpenCode engine (REPRO-C's materialization
- * pattern). Without this the default session runs on the Claude provider and
- * never touches the mock — the "differential" would silently compare the
- * projection with itself. Returns the local session id; the first sendMessage
- * to it materializes an OpenCode session (session_switched with a new id).
- */
-async function bindOpenCodeSession(
-	client: TestWsClient,
-	title: string,
-): Promise<string> {
-	const modelList = await client.waitFor("model_list");
-	const providers = modelList["providers"] as Array<{
-		id: string;
-		models: Array<{ id: string }>;
-	}>;
-	const provider = providers?.find(
-		(candidate) => candidate.id !== "claude" && candidate.models.length > 0,
-	);
-	if (!provider) throw new Error("model_list has no OpenCode provider");
-	const model = provider.models[0];
-	if (!model) throw new Error("OpenCode provider has no models");
-
-	const created = await client.createSession(title, { providerId: "claude" });
-	const localId = created["id"] as string;
-	if (!localId) throw new Error("createSession returned no id");
-	await client.switchModel(model.id, provider.id, localId);
-	await new Promise((resolve) => setTimeout(resolve, 250));
-	client.clearReceived();
-	return localId;
-}
-
-/** Send the first message to a bound session and wait for materialization. */
-async function materializeOpenCodeTurn(
-	client: TestWsClient,
-	localId: string,
-	prompt: string,
-): Promise<string> {
-	await client.sendMessage(prompt, {
-		sessionId: localId,
-		originId: client.getClientId(),
-	});
-	const switched = await client.waitFor("session_switched", {
-		timeout: 15_000,
-		predicate: (message) => message["id"] !== localId,
-	});
-	return switched["id"] as string;
-}
-
 async function runPaginationDifferential(count: number) {
 	const synthetic = recordingWithFirstPromptSse(
 		`pagination-${count}`,
@@ -246,11 +161,16 @@ async function runPaginationDifferential(count: number) {
 	try {
 		client1 = await paginationHarness.connectWsClient();
 		await client1.waitForInitialState();
-		const localId = await bindOpenCodeSession(client1, `Pagination ${count}`);
+		const localId = await bindOpenCodeSession(
+			client1,
+			dbPath,
+			`Pagination ${count}`,
+		);
 		// The real prompt fires the mock's first SSE segment (the synthetic
 		// stream), remapped onto the materialized OpenCode session id.
 		const sessionId = await materializeOpenCodeTurn(
 			client1,
+			dbPath,
 			localId,
 			synthetic.prompt,
 		);
@@ -492,9 +412,14 @@ describe("Integration: Session Visibility Repros", () => {
 		});
 		const client1 = await textHarness.connectWsClient();
 		await client1.waitForInitialState();
-		const localId = await bindOpenCodeSession(client1, "Text Differential");
+		const localId = await bindOpenCodeSession(
+			client1,
+			textDbPath,
+			"Text Differential",
+		);
 		const sessionId = await materializeOpenCodeTurn(
 			client1,
+			textDbPath,
 			localId,
 			"Reply with just the word 'pong'.",
 		);
@@ -575,9 +500,14 @@ describe("Integration: Session Visibility Repros", () => {
 		try {
 			const client1 = await toolHarness.connectWsClient();
 			await client1.waitForInitialState();
-			const localId = await bindOpenCodeSession(client1, "Tool Differential");
+			const localId = await bindOpenCodeSession(
+				client1,
+				toolDbPath,
+				"Tool Differential",
+			);
 			const sessionId = await materializeOpenCodeTurn(
 				client1,
+				toolDbPath,
 				localId,
 				"List the files in the current directory.",
 			);
@@ -742,9 +672,14 @@ describe("Integration: Session Visibility Repros", () => {
 		try {
 			client1 = await metadataHarness.connectWsClient();
 			await client1.waitForInitialState();
-			const localId = await bindOpenCodeSession(client1, "Metadata Repro");
+			const localId = await bindOpenCodeSession(
+				client1,
+				dbPath,
+				"Metadata Repro",
+			);
 			const sessionId = await materializeOpenCodeTurn(
 				client1,
+				dbPath,
 				localId,
 				synthetic.prompt,
 			);
@@ -861,9 +796,14 @@ describe("Integration: Session Visibility Repros", () => {
 		try {
 			client1 = await fileHarness.connectWsClient();
 			await client1.waitForInitialState();
-			const localId = await bindOpenCodeSession(client1, "File Part Repro");
+			const localId = await bindOpenCodeSession(
+				client1,
+				dbPath,
+				"File Part Repro",
+			);
 			const sessionId = await materializeOpenCodeTurn(
 				client1,
+				dbPath,
 				localId,
 				synthetic.prompt,
 			);
@@ -935,9 +875,14 @@ describe("Integration: Session Visibility Repros", () => {
 		try {
 			client1 = await permissionHarness.connectWsClient();
 			await client1.waitForInitialState();
-			const localId = await bindOpenCodeSession(client1, "Permission Repro");
+			const localId = await bindOpenCodeSession(
+				client1,
+				dbPath,
+				"Permission Repro",
+			);
 			const sessionId = await materializeOpenCodeTurn(
 				client1,
+				dbPath,
 				localId,
 				"List the files in the current directory using bash: ls -la",
 			);
