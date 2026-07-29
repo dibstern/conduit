@@ -10,8 +10,8 @@
 	import { getFileContentRpc, getFileListRpc } from "../../transport/ws-rpc-client.js";
 	import { applyGetFileContentResponse, applyGetFileListResponse } from "../../stores/ws-dispatch.js";
 	import FileTreeNode from "./FileTreeNode.svelte";
-	import Icon from "../shared/Icon.svelte";
-	import BlockGrid from "../shared/BlockGrid.svelte";
+	import Icon from "../ui/Icon.svelte";
+	import BlockGrid from "../ui/BlockGrid.svelte";
 
 	// ─── State ─────────────────────────────────────────────────────────────────
 

@@ -22,7 +22,7 @@
 		getHealthyInstances,
 		instanceStatusColor,
 	} from "../../stores/instance.svelte.js";
-	import Icon from "../shared/Icon.svelte";
+	import Icon from "../ui/Icon.svelte";
 	import { dismiss } from "../ui/actions/use-dismiss.svelte.js";
 	import DirectoryAutocomplete from "./DirectoryAutocomplete.svelte";
 	import ProjectContextMenu from "./ProjectContextMenu.svelte";

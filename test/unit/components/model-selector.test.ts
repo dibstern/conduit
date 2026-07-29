@@ -43,10 +43,7 @@ const closeableEmptyComponent = vi.hoisted(
 	() => async () => import("../../helpers/CloseableEmpty.svelte"),
 );
 
-vi.mock(
-	"../../../src/lib/frontend/components/shared/Icon.svelte",
-	emptyComponent,
-);
+vi.mock("../../../src/lib/frontend/components/ui/Icon.svelte", emptyComponent);
 vi.mock(
 	"../../../src/lib/frontend/components/model/ModelVariant.svelte",
 	closeableEmptyComponent,

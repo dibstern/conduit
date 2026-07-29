@@ -1,6 +1,6 @@
 <script lang="ts">
 	import type { Snippet } from "svelte";
-	import Icon from "../shared/Icon.svelte";
+	import Icon from "./Icon.svelte";
 	import Button from "./Button.svelte";
 	import { dismiss } from "./actions/use-dismiss.svelte.js";
 	import { focusTrap } from "./actions/use-focus-trap.svelte.js";

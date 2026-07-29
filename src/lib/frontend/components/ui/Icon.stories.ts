@@ -2,7 +2,7 @@ import type { Meta, StoryObj } from "@storybook/svelte-vite";
 import Icon from "./Icon.svelte";
 
 const meta = {
-	title: "Shared/Icon",
+	title: "UI/Icon",
 	component: Icon,
 	tags: ["autodocs"],
 	argTypes: {

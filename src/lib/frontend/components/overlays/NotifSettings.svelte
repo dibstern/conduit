@@ -6,7 +6,7 @@
   key fetch, browser subscribe, server registration).
 -->
 <script lang="ts">
-	import ToggleSetting from "../shared/ToggleSetting.svelte";
+	import Toggle from "../ui/Toggle.svelte";
 	import {
 		type NotifSettings,
 		getNotifSettings,
@@ -201,7 +201,7 @@
 	<div
 		class="fixed bottom-[56px] left-2 w-[240px] bg-bg-alt border border-border rounded-lg shadow-xl z-[var(--z-top)] py-1.5 overflow-hidden"
 	>
-		<ToggleSetting
+		<Toggle
 			icon="smartphone"
 			label="Push notifications"
 			checked={settings.push}
@@ -210,14 +210,14 @@
 			dimmed={pushUnavailable}
 		/>
 
-		<ToggleSetting
+		<Toggle
 			icon="bell"
 			label="Browser alerts"
 			checked={settings.browser}
 			onchange={toggleBrowser}
 		/>
 
-		<ToggleSetting
+		<Toggle
 			icon="volume-2"
 			label="Sound"
 			checked={settings.sound}

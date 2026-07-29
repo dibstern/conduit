@@ -19,7 +19,7 @@
 	import { getBrowserClientId } from "../../stores/client-identity.js";
 	import { forkSessionRpc } from "../../transport/ws-rpc-client.js";
 	import { assertNever } from "../../../utils.js";
-	import Icon from "../shared/Icon.svelte";
+	import Icon from "../ui/Icon.svelte";
 	import { initTableScrollShadows } from "../../utils/table-scroll.js";
 	import hljs from "highlight.js";
 	// Register aliases for template languages not natively supported by highlight.js.

@@ -6,8 +6,8 @@
 	import type { ToolMessage, QuestionRequest, AskUserQuestion } from "../../types.js";
 	import { permissionsState } from "../../stores/permissions.svelte.js";
 
-	import Icon from "../shared/Icon.svelte";
-	import BlockGrid from '../shared/BlockGrid.svelte';
+	import Icon from "../ui/Icon.svelte";
+	import BlockGrid from '../ui/BlockGrid.svelte';
 	import QuestionCard from "./QuestionCard.svelte";
 
 	let { message, groupRadius }: {

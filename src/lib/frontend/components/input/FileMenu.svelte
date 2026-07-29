@@ -3,8 +3,8 @@
 <!-- supports keyboard navigation (ArrowUp/Down, Enter, Escape) and mouse selection. -->
 
 <script lang="ts">
-	import Icon from "../shared/Icon.svelte";
-	import BlockGrid from "../shared/BlockGrid.svelte";
+	import Icon from "../ui/Icon.svelte";
+	import BlockGrid from "../ui/BlockGrid.svelte";
 
 	// ─── Props ──────────────────────────────────────────────────────────────────
 

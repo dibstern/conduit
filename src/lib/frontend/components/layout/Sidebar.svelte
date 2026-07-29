@@ -3,8 +3,8 @@
 <!-- Desktop: collapsible via toggle. Mobile: slide-over with overlay. -->
 
 <script lang="ts">
-	import Icon from "../shared/Icon.svelte";
-	import BlockGrid from "../shared/BlockGrid.svelte";
+	import Icon from "../ui/Icon.svelte";
+	import BlockGrid from "../ui/BlockGrid.svelte";
 	import SessionList from "../session/SessionList.svelte";
 	import ProjectSwitcher from "../project/ProjectSwitcher.svelte";
 	import SidebarFilePanel from "../file/SidebarFilePanel.svelte";

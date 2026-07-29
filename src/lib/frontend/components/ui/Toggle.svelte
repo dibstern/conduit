@@ -1,5 +1,5 @@
 <!--
-  ToggleSetting — A labeled toggle switch row.
+  Toggle — A labeled toggle switch row.
   Renders: [icon?] [label + description?] .............. [switch]
   The entire row is a single <button> — no nested interactive elements,
   proper semantics, and the full row is the touch target on mobile.

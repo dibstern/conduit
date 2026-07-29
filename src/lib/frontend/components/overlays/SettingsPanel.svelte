@@ -5,8 +5,8 @@
 
 <script lang="ts">
 	import { untrack } from "svelte";
-	import Icon from "../shared/Icon.svelte";
-	import ToggleSetting from "../shared/ToggleSetting.svelte";
+	import Icon from "../ui/Icon.svelte";
+	import Toggle from "../ui/Toggle.svelte";
 	import { createFrontendLogger } from "../../utils/logger.js";
 	import type { Base16Theme } from "../../stores/theme-compute.js";
 
@@ -431,7 +431,7 @@
 				<!-- ═══ Notifications ═══ -->
 				{#if activeTab === "notifications"}
 					<div class="space-y-2">
-						<ToggleSetting
+						<Toggle
 							icon="smartphone"
 							label="Push notifications"
 							description="Receive push notifications even when the tab is closed"
@@ -441,7 +441,7 @@
 							dimmed={pushUnavailable}
 							class="bg-bg-surface border border-border rounded-panel px-5 py-4 gap-4 font-brand {pushBusy || pushUnavailable ? 'opacity-60' : ''}"
 						/>
-						<ToggleSetting
+						<Toggle
 							icon="bell"
 							label="Browser alerts"
 							description="Show desktop notifications when tasks complete"
@@ -449,7 +449,7 @@
 							onchange={toggleBrowser}
 							class="bg-bg-surface border border-border rounded-panel px-5 py-4 gap-4 font-brand"
 						/>
-						<ToggleSetting
+						<Toggle
 							icon="volume-2"
 							label="Sound"
 							description="Play a sound when notifications are triggered"
@@ -532,7 +532,7 @@
 								</div>
 								<div class="space-y-1 bg-bg-surface border border-border rounded-panel px-4 py-2">
 									{#each provider.models as model (model.id)}
-										<ToggleSetting
+										<Toggle
 											label={model.name || model.id}
 											checked={!hiddenModelSet.has(`${provider.id}/${model.id}`)}
 											onchange={() => toggleModel(provider.id, model.id)}
@@ -551,7 +551,7 @@
 								</div>
 								<div class="space-y-1 bg-bg-surface border border-border rounded-panel px-4 py-2">
 									{#each discoveryState.agents as agent (agent.id)}
-										<ToggleSetting
+										<Toggle
 											label={agent.name || agent.id}
 											checked={!hiddenAgentSet.has(`${agentScopeId}/${agent.id}`)}
 											onchange={() => toggleAgent(agent.id)}
@@ -692,7 +692,7 @@
 				<!-- ═══ Debug ═══ -->
 				{:else if activeTab === "debug"}
 					<div class="space-y-2">
-						<ToggleSetting
+						<Toggle
 							label="Connection debug panel"
 							description="Shows WebSocket state transitions, timing, and lifecycle events."
 							checked={featureFlags.debug}

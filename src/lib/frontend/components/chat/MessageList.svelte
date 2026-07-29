@@ -36,7 +36,7 @@
 	import PermissionCard from "../permissions/PermissionCard.svelte";
 	import QuestionCard from "./QuestionCard.svelte";
 	import HistoryLoader from "./HistoryLoader.svelte";
-	import BlockGrid from "../shared/BlockGrid.svelte";
+	import BlockGrid from "../ui/BlockGrid.svelte";
 
 
 	let messagesEl: HTMLDivElement | undefined = $state();

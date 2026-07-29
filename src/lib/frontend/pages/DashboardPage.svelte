@@ -9,7 +9,7 @@
 	import { navigate } from "../stores/router.svelte.js";
 	import type { DashboardProject } from "./dashboard-types.js";
 	import ProjectContextMenu from "../components/project/ProjectContextMenu.svelte";
-	import Icon from "../components/shared/Icon.svelte";
+	import Icon from "../components/ui/Icon.svelte";
 	import { confirm } from "../stores/ui.svelte.js";
 
 	export type { DashboardProject };

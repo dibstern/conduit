@@ -6,7 +6,7 @@
 	import type { SessionInfo } from "../../types.js";
 	import { copyToClipboard } from "../../utils/clipboard.js";
 	import { showToast } from "../../stores/ui.svelte.js";
-	import Icon from "../shared/Icon.svelte";
+	import Icon from "../ui/Icon.svelte";
 
 	// ─── Props ──────────────────────────────────────────────────────────────────
 

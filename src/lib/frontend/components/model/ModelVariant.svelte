@@ -3,7 +3,7 @@
 <!-- Manages its own dropdown state, outside-click, and Ctrl+T shortcut. -->
 
 <script lang="ts">
-	import Icon from "../shared/Icon.svelte";
+	import Icon from "../ui/Icon.svelte";
 	import { dismiss } from "../ui/actions/use-dismiss.svelte.js";
 	import {
 		discoveryState,

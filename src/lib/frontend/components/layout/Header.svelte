@@ -3,7 +3,7 @@
 <!-- Settings, notification, and terminal buttons live in the sidebar footer. -->
 
 <script lang="ts">
-	import Icon from "../shared/Icon.svelte";
+	import Icon from "../ui/Icon.svelte";
 	import {
 		uiState,
 		toggleSidebar,

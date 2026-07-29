@@ -4,8 +4,8 @@
 
 <script lang="ts">
 	import type { ToolMessage } from "../../types.js";
-	import Icon from "../shared/Icon.svelte";
-	import BlockGrid from '../shared/BlockGrid.svelte';
+	import Icon from "../ui/Icon.svelte";
+	import BlockGrid from '../ui/BlockGrid.svelte';
 
 	let { message }: { message: ToolMessage } = $props();
 	let expanded = $state(false);

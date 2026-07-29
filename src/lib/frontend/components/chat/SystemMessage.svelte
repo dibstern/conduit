@@ -3,7 +3,7 @@
 
 <script lang="ts">
 	import type { SystemMessage } from "../../types.js";
-	import Icon from "../shared/Icon.svelte";
+	import Icon from "../ui/Icon.svelte";
 
 	let { message }: { message: SystemMessage } = $props();
 

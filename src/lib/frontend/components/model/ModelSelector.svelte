@@ -4,7 +4,7 @@
 <!-- Variant and context-window badges are rendered by sibling components. -->
 
 <script lang="ts">
-	import Icon from "../shared/Icon.svelte";
+	import Icon from "../ui/Icon.svelte";
 	// biome-ignore lint/style/useImportType: ContextWindowSelector is used as a value for bind:this
 	import ContextWindowSelector from "./ContextWindowSelector.svelte";
 	// biome-ignore lint/style/useImportType: ModelVariant is used as a value for bind:this

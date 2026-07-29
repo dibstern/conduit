@@ -26,8 +26,8 @@
 	import { closeMobileSidebar, confirm, toggleHideSubagentSessions, uiState } from "../../stores/ui.svelte.js";
 	import SessionItem from "./SessionItem.svelte";
 	import SessionContextMenu from "./SessionContextMenu.svelte";
-	import Icon from "../shared/Icon.svelte";
-	import BlockGrid from "../shared/BlockGrid.svelte";
+	import Icon from "../ui/Icon.svelte";
+	import BlockGrid from "../ui/BlockGrid.svelte";
 
 	// ─── Local state ────────────────────────────────────────────────────────────
 

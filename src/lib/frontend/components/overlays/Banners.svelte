@@ -9,7 +9,7 @@
 	import { uiState, removeBanner } from "../../stores/ui.svelte.js";
 	import { discoveryState } from "../../stores/discovery.svelte.js";
 	import { instanceState } from "../../stores/instance.svelte.js";
-	import Icon from "../shared/Icon.svelte";
+	import Icon from "../ui/Icon.svelte";
 	import { assertNever } from "../../../utils.js";
 
 	// ─── Instance health check ─────────────────────────────────────────────────

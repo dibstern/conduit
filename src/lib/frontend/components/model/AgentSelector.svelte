@@ -3,7 +3,7 @@
 
 <script lang="ts">
 	import { tick } from "svelte";
-	import Icon from "../shared/Icon.svelte";
+	import Icon from "../ui/Icon.svelte";
 	import {
 		buildAgentTooltip,
 		discoveryState,

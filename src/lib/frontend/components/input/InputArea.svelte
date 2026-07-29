@@ -4,7 +4,7 @@
 
 <script lang="ts">
 	import { untrack } from "svelte";
-	import Icon from "../shared/Icon.svelte";
+	import Icon from "../ui/Icon.svelte";
 	import AgentSelector from "../model/AgentSelector.svelte";
 	import AttachMenu from "./AttachMenu.svelte";
 	// biome-ignore lint/style/useImportType: CommandMenu is used as a value for bind:this

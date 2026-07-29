@@ -5,8 +5,8 @@
 <script lang="ts">
 	import type { ToolGroup } from "../../utils/group-tools.js";
 	import ToolGroupItem from "./ToolGroupItem.svelte";
-	import Icon from "../shared/Icon.svelte";
-	import BlockGrid from '../shared/BlockGrid.svelte';
+	import Icon from "../ui/Icon.svelte";
+	import BlockGrid from '../ui/BlockGrid.svelte';
 
 	let { group }: { group: ToolGroup } = $props();
 	let expanded = $state(false);

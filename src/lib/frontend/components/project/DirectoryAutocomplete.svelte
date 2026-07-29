@@ -7,7 +7,7 @@
 	import { onDestroy } from "svelte";
 	import { getCurrentSlug } from "../../stores/router.svelte.js";
 	import { listDirectoriesRpc } from "../../transport/ws-rpc-client.js";
-	import Icon from "../shared/Icon.svelte";
+	import Icon from "../ui/Icon.svelte";
 
 	// ─── Props ──────────────────────────────────────────────────────────────────
 

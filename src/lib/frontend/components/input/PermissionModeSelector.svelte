@@ -3,7 +3,7 @@
 <!-- Amber tint when not "ask" so an auto-approving session is visibly so.   -->
 
 <script lang="ts">
-	import Icon from "../shared/Icon.svelte";
+	import Icon from "../ui/Icon.svelte";
 	import { dismiss } from "../ui/actions/use-dismiss.svelte.js";
 	import { discoveryState } from "../../stores/discovery.svelte.js";
 	import { getCurrentSlug } from "../../stores/router.svelte.js";

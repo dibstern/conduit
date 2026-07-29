@@ -9,8 +9,8 @@
 	import { copyToClipboard } from "../../utils/clipboard.js";
 	import { showToast, openMobileSidebar, setSidebarPanel, uiState } from "../../stores/ui.svelte.js";
 	import hljs from "highlight.js";
-	import Icon from "../shared/Icon.svelte";
-	import BlockGrid from "../shared/BlockGrid.svelte";
+	import Icon from "../ui/Icon.svelte";
+	import BlockGrid from "../ui/BlockGrid.svelte";
 
 	let {
 		visible = false,

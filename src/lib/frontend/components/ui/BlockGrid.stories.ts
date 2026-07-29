@@ -2,7 +2,7 @@ import type { Meta, StoryObj } from "@storybook/svelte-vite";
 import BlockGrid from "./BlockGrid.svelte";
 
 const meta = {
-	title: "Shared/BlockGrid",
+	title: "UI/BlockGrid",
 	component: BlockGrid,
 	tags: ["autodocs"],
 	argTypes: {

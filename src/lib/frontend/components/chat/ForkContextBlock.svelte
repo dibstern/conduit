@@ -4,7 +4,7 @@
 
 <script lang="ts">
 	import { sessionState } from "../../stores/session.svelte.js";
-	import Icon from "../shared/Icon.svelte";
+	import Icon from "../ui/Icon.svelte";
 
 	interface Props {
 		children: import("svelte").Snippet;

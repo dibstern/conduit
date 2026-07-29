@@ -3,7 +3,7 @@
 
 <script lang="ts">
 	import type { ContextWindowOption } from "../../types.js";
-	import Icon from "../shared/Icon.svelte";
+	import Icon from "../ui/Icon.svelte";
 	import { dismiss } from "../ui/actions/use-dismiss.svelte.js";
 	import {
 		discoveryState,

@@ -2,7 +2,7 @@
 <!-- Attach button with camera/photos dropdown menu. -->
 
 <script lang="ts">
-	import Icon from "../shared/Icon.svelte";
+	import Icon from "../ui/Icon.svelte";
 
 	let { open, onToggle, onCamera, onPhotos }: {
 		open: boolean;

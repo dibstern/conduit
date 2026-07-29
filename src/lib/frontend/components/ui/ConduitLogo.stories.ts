@@ -2,7 +2,7 @@ import type { Meta, StoryObj } from "@storybook/svelte-vite";
 import ConduitLogo from "./ConduitLogo.svelte";
 
 const meta = {
-	title: "Shared/ConduitLogo",
+	title: "UI/ConduitLogo",
 	component: ConduitLogo,
 	tags: ["autodocs"],
 	argTypes: {

@@ -4,7 +4,7 @@
 <!-- Preserves .plan-banner, .plan-card, .plan-approval classes for E2E/CSS.    -->
 
 <script lang="ts">
-	import Icon from "../shared/Icon.svelte";
+	import Icon from "../ui/Icon.svelte";
 	import { renderMarkdown } from "../../utils/markdown.js";
 	import { initTableScrollShadows } from "../../utils/table-scroll.js";
 	import { copyToClipboard } from "../../utils/clipboard.js";

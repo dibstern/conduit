@@ -11,8 +11,8 @@
 	import { applyToolContentResponse } from "../../stores/ws-dispatch.js";
 	import { getToolContentRpc } from "../../transport/ws-rpc-client.js";
 
-	import Icon from "../shared/Icon.svelte";
-	import BlockGrid from '../shared/BlockGrid.svelte';
+	import Icon from "../ui/Icon.svelte";
+	import BlockGrid from '../ui/BlockGrid.svelte';
 
 	let { message, groupRadius }: {
 		message: ToolMessage;

@@ -2,7 +2,7 @@
   Button — the primitive action control (components/ui exemplar).
 
   Variant + size are selected from typed maps of plain Tailwind token classes
-  (no clsx/tailwind-merge dependency; consistent with ToggleSetting.svelte). The
+  (no clsx/tailwind-merge dependency; consistent with Toggle.svelte). The
   consumer `class` is appended for ADDITIVE utilities (layout/spacing); it does
   NOT reliably override a variant/size utility — see ./component-conventions.mdx.
 
@@ -39,7 +39,7 @@
 <script lang="ts">
 	import type { HTMLButtonAttributes } from "svelte/elements";
 	import type { Snippet } from "svelte";
-	import Icon from "../shared/Icon.svelte";
+	import Icon from "./Icon.svelte";
 
 	type ButtonOwnProps = {
 		variant?: ButtonVariant;

@@ -16,7 +16,7 @@
 	import { startInstanceRpc } from "../../transport/ws-rpc-client.js";
 	import type { InstanceStatus } from "../../types.js";
 	import { CONNECT_FADEOUT_MS } from "../../ui-constants.js";
-	import ConduitLogo from '../shared/ConduitLogo.svelte';
+	import ConduitLogo from '../ui/ConduitLogo.svelte';
 
 	// ─── State ──────────────────────────────────────────────────────────────────
 

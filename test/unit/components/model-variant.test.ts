@@ -24,10 +24,7 @@ const emptyComponent = vi.hoisted(
 	() => async () => import("../../helpers/Empty.svelte"),
 );
 
-vi.mock(
-	"../../../src/lib/frontend/components/shared/Icon.svelte",
-	emptyComponent,
-);
+vi.mock("../../../src/lib/frontend/components/ui/Icon.svelte", emptyComponent);
 vi.mock(
 	"../../../src/lib/frontend/components/shared/use-click-outside.svelte.js",
 	() => ({

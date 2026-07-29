@@ -4,7 +4,7 @@
 
 <script lang="ts">
 	import type { ProjectInfo } from "../../types.js";
-	import Icon from "../shared/Icon.svelte";
+	import Icon from "../ui/Icon.svelte";
 
 	// ─── Props ──────────────────────────────────────────────────────────────────
 

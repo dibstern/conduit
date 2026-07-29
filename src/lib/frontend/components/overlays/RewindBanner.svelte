@@ -5,7 +5,7 @@
   conversation only, files only.
 -->
 <script lang="ts">
-	import Icon from "../shared/Icon.svelte";
+	import Icon from "../ui/Icon.svelte";
 	import {
 		uiState,
 		exitRewindMode,
