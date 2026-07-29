@@ -46,6 +46,11 @@ async function createMockOpenCode(): Promise<MockOpenCode> {
 				Connection: "keep-alive",
 			});
 			res.write(": heartbeat\n\n");
+			// Real OpenCode's first SSE frame is always server.connected; conduit
+			// treats the first yielded event as its connect signal.
+			res.write(
+				`data: ${JSON.stringify({ type: "server.connected", properties: {} })}\n\n`,
+			);
 			sseClients.add(res);
 			req.on("close", () => sseClients.delete(res));
 			return;
