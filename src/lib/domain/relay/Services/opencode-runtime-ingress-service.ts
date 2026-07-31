@@ -185,9 +185,6 @@ export class EffectOpenCodeRuntimeIngress
 						sessionId != null
 							? yield* this.hasDurableSession(sessionId)
 							: false;
-					if (durableSession && sessionId != null) {
-						this.seenSessions.add(sessionId);
-					}
 					this.log.warn("opencode-runtime-ingress: failed to ingest event", {
 						eventType: event.type,
 						sessionId,

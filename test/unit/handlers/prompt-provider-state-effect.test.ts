@@ -492,6 +492,35 @@ describe("handleMessage with Effect provider state persistence", () => {
 				await Effect.runPromise(
 					command.input.eventSink.push(
 						providerRuntimeEvent(
+							"session.created",
+							"child-session",
+							{
+								sessionId: "child-session",
+								title: "Child session",
+								provider: "claude",
+								parentId: "parent-session",
+							},
+							{ providerId: "claude", createdAt: Date.now() },
+						),
+					),
+				);
+				await Effect.runPromise(
+					command.input.eventSink.push(
+						providerRuntimeEvent(
+							"message.created",
+							"child-session",
+							{
+								messageId: "child-message-1",
+								role: "assistant",
+								sessionId: "child-session",
+							},
+							{ providerId: "claude", createdAt: Date.now() },
+						),
+					),
+				);
+				await Effect.runPromise(
+					command.input.eventSink.push(
+						providerRuntimeEvent(
 							"text.delta",
 							"child-session",
 							{

@@ -451,7 +451,7 @@ describe("OpenCode Runtime Ingress Projection (SSE → append → project → re
 		).toHaveLength(1);
 	});
 
-	it("projection errors are logged and surfaced while stored events remain durable", async () => {
+	it("single-event retry continues surfacing projector errors while stored events remain durable", async () => {
 		await disposeRuntime();
 		await startRuntime([
 			...createAllEffectProjectors(),
@@ -496,15 +496,90 @@ describe("OpenCode Runtime Ingress Projection (SSE → append → project → re
 		);
 
 		expect(retryResult).toMatchObject({
-			ok: true,
-			eventsWritten: 1,
-			sessionSeeded: false,
+			ok: false,
+			reason: "error",
 		});
+		expect(log.warn).toHaveBeenCalledTimes(2);
 
 		const storedAfterRetry = await readStored();
 		expect(
 			storedAfterRetry.filter((event) => event.type === "session.created"),
-		).toHaveLength(1);
+		).toHaveLength(2);
+		const projectedMessages = await currentRuntime().runPromise(
+			Effect.gen(function* () {
+				const sql = yield* SqlClient.SqlClient;
+				return yield* sql<{ id: string }>`
+					SELECT id
+					FROM messages
+					WHERE session_id = ${SESSION_ID}`;
+			}),
+		);
+		expect(projectedMessages).toEqual([]);
+	});
+
+	it("retries the session seed after a transient projector failure", async () => {
+		let projectionAttempts = 0;
+		await disposeRuntime();
+		await startRuntime([
+			...createAllEffectProjectors(),
+			{
+				name: "transient-failing-message-projector",
+				handles: ["message.created"],
+				project: () => {
+					projectionAttempts++;
+					return projectionAttempts === 1
+						? Effect.fail(
+								new ProjectionError({
+									projector: "transient-failing-message-projector",
+									operation: "project",
+									cause: new Error("simulated transient projection failure"),
+								}),
+							)
+						: Effect.void;
+				},
+			},
+		]);
+
+		const firstResult = await ingest(
+			makeSSEEvent("message.created", {
+				sessionID: SESSION_ID,
+				messageID: "msg-transient-001",
+				info: { role: "assistant", parts: [] },
+			}),
+		);
+		expect(firstResult).toMatchObject({
+			ok: false,
+			reason: "error",
+		});
+
+		const recoveryResult = await ingest(
+			makeSSEEvent("message.created", {
+				sessionID: SESSION_ID,
+				messageID: "msg-transient-002",
+				info: { role: "assistant", parts: [] },
+			}),
+		);
+		expect(recoveryResult).toMatchObject({
+			ok: true,
+			sessionSeeded: true,
+		});
+
+		const projection = await currentRuntime().runPromise(
+			Effect.gen(function* () {
+				const sql = yield* SqlClient.SqlClient;
+				const sessions = yield* sql<{ id: string }>`
+					SELECT id FROM sessions WHERE id = ${SESSION_ID}`;
+				const messages = yield* sql<{ id: string }>`
+					SELECT id FROM messages
+					WHERE session_id = ${SESSION_ID}
+					ORDER BY id`;
+				return { sessions, messages };
+			}),
+		);
+		expect(projection).toEqual({
+			sessions: [{ id: SESSION_ID }],
+			messages: [{ id: "msg-transient-002" }],
+		});
 	});
 
 	it("projector cursors advance after successful projection", async () => {

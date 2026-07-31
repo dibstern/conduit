@@ -1,13 +1,13 @@
 import { SqlClient } from "@effect/sql";
 import type { SqlError } from "@effect/sql/SqlError";
-import { Context, Data, Effect, Option, Schema } from "effect";
-import { SessionEventBusTag } from "../../domain/relay/Services/session-event-bus.js";
+import { Context, Data, Effect, Schema } from "effect";
 import {
 	type CanonicalEvent,
 	canonicalEvent,
 	EventId,
 	type StoredEvent,
 } from "../events.js";
+import { makeCommitAndSignal } from "./commit-and-signal.js";
 import type { EventStoreError } from "./event-store-effect.js";
 import { EventStoreEffectTag } from "./event-store-effect.js";
 import type { ProjectionRunnerError } from "./projection-runner-effect.js";
@@ -74,11 +74,6 @@ export const makeClaudeEventPersistEffect = Effect.gen(function* () {
 	const sql = yield* SqlClient.SqlClient;
 	const eventStore = yield* EventStoreEffectTag;
 	const projectionRunner = yield* ProjectionRunnerEffectTag;
-	// Optional so minimal harnesses (and non-relay persistence) need not wire the
-	// bus. Production provides the SAME shared SessionEventBus the ingestion
-	// choke point uses, so streaming subscriptions see Claude-persisted writes
-	// (notably user messages) live rather than only on resume/replay.
-	const sessionEventBus = yield* Effect.serviceOption(SessionEventBusTag);
 
 	const withSql = <A, E>(
 		effect: Effect.Effect<A, E, SqlClient.SqlClient>,
@@ -116,20 +111,7 @@ export const makeClaudeEventPersistEffect = Effect.gen(function* () {
 		stored: readonly StoredEvent[],
 	): Effect.Effect<void, ProjectionRunnerError | SqlError> =>
 		withSql(projectionRunner.projectBatch(stored));
-
-	// Post-commit change signal, mirroring the ingestion choke point. Published
-	// AFTER projection commits so a bus signal always implies its projection is
-	// durable. Gated by `publish` (defaults on when a bus is wired) for callers
-	// that must stay silent, e.g. history replay.
-	const publishStored = (
-		stored: readonly StoredEvent[],
-		options?: { readonly publish?: boolean },
-	): Effect.Effect<void> =>
-		Option.isSome(sessionEventBus) &&
-		options?.publish !== false &&
-		stored.length > 0
-			? sessionEventBus.value.publish(stored)
-			: Effect.void;
+	const commitAndSignal = yield* makeCommitAndSignal;
 
 	const mapPersistError =
 		(operation: string) =>
@@ -137,28 +119,6 @@ export const makeClaudeEventPersistEffect = Effect.gen(function* () {
 			cause instanceof ClaudeEventPersistEffectError
 				? cause
 				: new ClaudeEventPersistEffectError({ operation, cause });
-
-	// Append → project → publish as ONE all-or-nothing, uninterruptible region:
-	// - projectBatch (unlike the failure-swallowing projectEvent) FAILS when a
-	//   projector fails and rolls the projection transaction back, so the bus is
-	//   never signalled for a projection that did not commit — "a bus signal
-	//   implies committed projection". This matches persistEvents /
-	//   persistUserMessage and the ingestion service's batch path. (Ingestion's
-	//   single-event path still swallows-then-publishes; recorded out of scope.)
-	// - uninterruptible: an interrupt cannot land between the projection commit
-	//   and the publish, which would leave durable+projected work that no live
-	//   subscriber ever hears about (no later catch-up republishes it).
-	const commitAndSignal = (
-		events: readonly CanonicalEvent[],
-		options?: { readonly publish?: boolean },
-	): Effect.Effect<void, PersistFailure> =>
-		Effect.uninterruptible(
-			Effect.gen(function* () {
-				const stored = yield* eventStore.appendBatch(events);
-				yield* projectBatch(stored);
-				yield* publishStored(stored, options);
-			}),
-		);
 
 	const persistEvent = (
 		event: CanonicalEvent,

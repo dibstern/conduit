@@ -65,9 +65,15 @@ function makeHarness(options?: {
 		event: StoredEvent,
 		callIndex: number,
 	) => Effect.Effect<void, ProjectionRunnerError | SqlError>;
+	readonly projectBatchEffect?: (
+		events: readonly StoredEvent[],
+		callIndex: number,
+	) => Effect.Effect<void, ProjectionRunnerError | SqlError>;
 }) {
 	const appended: CanonicalEvent[] = [];
 	const projected: StoredEvent[] = [];
+	const batchProjected: StoredEvent[] = [];
+	let projectBatchCallIndex = 0;
 	const append = vi.fn((event: CanonicalEvent) => {
 		appended.push(event);
 		const stored = {
@@ -87,6 +93,15 @@ function makeHarness(options?: {
 		projected.push(event);
 		return options?.projectEffect?.(event, projected.length) ?? Effect.void;
 	});
+	const projectBatch = vi.fn((events: readonly StoredEvent[]) => {
+		projectBatchCallIndex += 1;
+		projected.push(...events);
+		batchProjected.push(...events);
+		return (
+			options?.projectBatchEffect?.(events, projectBatchCallIndex) ??
+			Effect.void
+		);
+	});
 
 	const eventStore = {
 		append,
@@ -98,7 +113,7 @@ function makeHarness(options?: {
 	} satisfies EventStoreEffect;
 	const projectionRunner = {
 		projectEvent,
-		projectBatch: vi.fn(() => Effect.void),
+		projectBatch,
 		recover: vi.fn(() =>
 			Effect.succeed({
 				startCursor: 0,
@@ -130,9 +145,11 @@ function makeHarness(options?: {
 	return {
 		appended,
 		projected,
+		batchProjected,
 		append,
 		appendBatch,
 		projectEvent,
+		projectBatch,
 		executeSql,
 		depsLayer,
 		layer,
@@ -269,6 +286,113 @@ describe("ProviderRuntimeIngestion", () => {
 		expect(relayPublish).toHaveBeenCalledTimes(expectedRelayCalls);
 	});
 
+	it("single stored events fail ingestion and do not publish when projectBatch fails", async () => {
+		const harness = makeHarness({
+			projectBatchEffect: () =>
+				Effect.fail(
+					new ProjectionRunnerError({
+						operation: "projectBatch",
+						cause: new Error("projection failed"),
+					}),
+				),
+		});
+		const busPublish = vi.fn(() => Effect.void);
+		const relayPublish = vi.fn(() => Effect.void);
+		const busLayer = Layer.succeed(SessionEventBusTag, {
+			publish: busPublish,
+			subscribe: () => Effect.succeed(Stream.empty),
+		} satisfies SessionEventBus);
+		const layer = makeProviderRuntimeIngestionLive({
+			relayPublisher: { publish: relayPublish },
+		}).pipe(Layer.provide(harness.depsLayer), Layer.provideMerge(busLayer));
+
+		const result = await Effect.runPromise(
+			Effect.gen(function* () {
+				const ingestion = yield* ProviderRuntimeIngestionTag;
+				return yield* ingestion
+					.ingest(
+						runtimeEvent({
+							eventId: "single-event-projection-failure",
+							type: "message.created",
+							turnId: "turn-1",
+							data: {
+								messageId: "message-1",
+								role: "assistant",
+							},
+						}),
+					)
+					.pipe(Effect.either);
+			}).pipe(Effect.provide(layer)),
+		);
+
+		expect(result._tag).toBe("Left");
+		expect(harness.projectBatch).toHaveBeenCalledTimes(1);
+		expect(harness.projectBatch).toHaveBeenCalledWith([
+			expect.objectContaining({
+				eventId: "single-event-projection-failure",
+				sequence: 1,
+			}),
+		]);
+		expect(harness.projectEvent).not.toHaveBeenCalled();
+		expect(busPublish).not.toHaveBeenCalled();
+		expect(relayPublish).not.toHaveBeenCalled();
+	});
+
+	it("an interrupt cannot split ingestion projection from its bus signal", async () => {
+		const publishStarted = await Effect.runPromise(Deferred.make<void>());
+		const publishGate = await Effect.runPromise(Deferred.make<void>());
+		const published: StoredEvent[] = [];
+		let projectedCountAtPublish = 0;
+		const harness = makeHarness();
+		const busLayer = Layer.succeed(SessionEventBusTag, {
+			publish: (events) =>
+				Effect.gen(function* () {
+					yield* Deferred.succeed(publishStarted, undefined);
+					yield* Deferred.await(publishGate);
+					published.push(...events);
+				}),
+			subscribe: () => Effect.succeed(Stream.empty),
+		} satisfies SessionEventBus);
+		const layer = ProviderRuntimeIngestionLive.pipe(
+			Layer.provide(harness.depsLayer),
+			Layer.provideMerge(busLayer),
+		);
+
+		await Effect.runPromise(
+			Effect.gen(function* () {
+				const ingestion = yield* ProviderRuntimeIngestionTag;
+				const fiber = yield* Effect.fork(
+					ingestion.ingest(
+						runtimeEvent({
+							eventId: "interrupt-during-bus-publish",
+							type: "message.created",
+							turnId: "turn-1",
+							data: {
+								messageId: "message-1",
+								role: "assistant",
+							},
+						}),
+					),
+				);
+
+				yield* Deferred.await(publishStarted);
+				projectedCountAtPublish = harness.projected.length;
+				yield* Fiber.interruptFork(fiber);
+				yield* Effect.yieldNow();
+				yield* Deferred.succeed(publishGate, undefined);
+				yield* Fiber.await(fiber);
+			}).pipe(Effect.provide(layer)),
+		);
+
+		expect(projectedCountAtPublish).toBe(1);
+		expect(published).toEqual([
+			expect.objectContaining({
+				eventId: "interrupt-during-bus-publish",
+				sequence: 1,
+			}),
+		]);
+	});
+
 	it("ingests related runtime events as one ordered domain-event batch", async () => {
 		const harness = makeHarness();
 
@@ -383,8 +507,9 @@ describe("ProviderRuntimeIngestion", () => {
 				},
 			}),
 		]);
-		expect(harness.projectEvent).toHaveBeenCalledTimes(1);
-		expect(harness.projected).toEqual([
+		expect(harness.projectBatch).toHaveBeenCalledTimes(1);
+		expect(harness.projectEvent).not.toHaveBeenCalled();
+		expect(harness.batchProjected).toEqual([
 			expect.objectContaining({
 				eventId: "runtime-event-1",
 				sequence: 1,
@@ -594,11 +719,11 @@ describe("ProviderRuntimeIngestion", () => {
 
 	it("advances mapper state after append even when eager projection fails", async () => {
 		const harness = makeHarness({
-			projectEffect: (_event, callIndex) =>
+			projectBatchEffect: (_events, callIndex) =>
 				callIndex === 1
 					? Effect.fail(
 							new ProjectionRunnerError({
-								operation: "projectEvent",
+								operation: "projectBatch",
 								cause: new Error("projection failed"),
 							}),
 						)
@@ -649,7 +774,8 @@ describe("ProviderRuntimeIngestion", () => {
 				},
 			}),
 		]);
-		expect(harness.projectEvent).toHaveBeenCalledTimes(2);
+		expect(harness.projectBatch).toHaveBeenCalledTimes(2);
+		expect(harness.projectEvent).not.toHaveBeenCalled();
 	});
 
 	it("appends all domain events from one runtime event as a single durable batch", async () => {
