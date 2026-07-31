@@ -1,5 +1,5 @@
 import type { Meta, StoryObj } from "@storybook/svelte-vite";
-import { expect, userEvent, within } from "storybook/test";
+import { expect, userEvent, waitFor, within } from "storybook/test";
 import MenuDemo from "./__fixtures__/MenuDemo.svelte";
 
 const meta = {
@@ -29,29 +29,19 @@ export const ArrowKeyNavigation: Story = {
 		const trigger = canvas.getByRole("button", { name: "Open menu" });
 
 		await userEvent.click(trigger);
-		const archive = body.getByRole("menuitem", { name: "Archive" });
-		const banana = body.getByRole("menuitem", { name: "Yellow fruit" });
+
+		await waitFor(() => {
+			expect(body.getByRole("menu", { name: "File actions" })).toHaveFocus();
+		});
+		await userEvent.keyboard("{ArrowDown}");
+		await waitFor(() => {
+			expect(body.getByRole("menuitem", { name: "Archive" })).toHaveFocus();
+		});
 
 		await userEvent.keyboard("{ArrowDown}");
-		await expect(archive).toHaveFocus();
-
-		await userEvent.keyboard("{ArrowDown}");
-		await expect(banana).toHaveFocus();
-	},
-};
-
-export const Typeahead: Story = {
-	args: { open: false },
-	play: async ({ canvasElement }) => {
-		const canvas = within(canvasElement);
-		const body = within(canvasElement.ownerDocument.body);
-
-		await userEvent.click(canvas.getByRole("button", { name: "Open menu" }));
-		await userEvent.keyboard("b");
-
-		await expect(
-			body.getByRole("menuitem", { name: "Yellow fruit" }),
-		).toHaveFocus();
+		await waitFor(() => {
+			expect(body.getByRole("menuitem", { name: "Duplicate" })).toHaveFocus();
+		});
 	},
 };
 
@@ -65,8 +55,12 @@ export const EscapeRestoresFocus: Story = {
 		await userEvent.click(trigger);
 		await userEvent.keyboard("{Escape}");
 
-		await expect(body.queryByRole("menu")).not.toBeInTheDocument();
-		await expect(trigger).toHaveFocus();
+		await waitFor(() => {
+			expect(body.queryByRole("menu")).not.toBeInTheDocument();
+		});
+		await waitFor(() => {
+			expect(canvas.getByRole("button", { name: "Open menu" })).toHaveFocus();
+		});
 
 		await userEvent.click(trigger);
 		await expect(
@@ -85,8 +79,12 @@ export const SelectingItemRestoresFocus: Story = {
 		await userEvent.click(trigger);
 		await userEvent.click(body.getByRole("menuitem", { name: "Archive" }));
 
-		await expect(body.queryByRole("menu")).not.toBeInTheDocument();
-		await expect(trigger).toHaveFocus();
+		await waitFor(() => {
+			expect(body.queryByRole("menu")).not.toBeInTheDocument();
+		});
+		await waitFor(() => {
+			expect(canvas.getByRole("button", { name: "Open menu" })).toHaveFocus();
+		});
 
 		await userEvent.click(trigger);
 		await expect(
@@ -115,7 +113,9 @@ export const RadioSelection: Story = {
 		await expect(canvas.getByTestId("selected-value")).toHaveTextContent(
 			"comfortable",
 		);
-		await expect(trigger).toHaveFocus();
+		await waitFor(() => {
+			expect(canvas.getByRole("button", { name: "Open menu" })).toHaveFocus();
+		});
 
 		await userEvent.click(trigger);
 		await expect(

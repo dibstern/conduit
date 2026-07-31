@@ -12,7 +12,6 @@
 	type MenuItemOwnProps = {
 		variant?: MenuItemVariant;
 		disabled?: boolean;
-		textValue?: string;
 		closeOnSelect?: boolean;
 		onselect?: (event: Event) => void;
 		class?: string;
@@ -39,7 +38,6 @@
 	let {
 		variant = "default",
 		disabled = false,
-		textValue,
 		href,
 		closeOnSelect = true,
 		onselect,
@@ -65,20 +63,10 @@
 	{#snippet child({ props })}
 		{#if href !== undefined}
 			<a {...props} {href}>
-				{#if textValue}
-					<span class="sr-only" aria-hidden="true" data-menu-text-value>
-						{textValue}
-					</span>
-				{/if}
 				{@render children()}
 			</a>
 		{:else}
 			<div {...props}>
-				{#if textValue}
-					<span class="sr-only" aria-hidden="true" data-menu-text-value>
-						{textValue}
-					</span>
-				{/if}
 				{@render children()}
 			</div>
 		{/if}

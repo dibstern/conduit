@@ -29,7 +29,7 @@
 
 	<MenuGroup label="Actions">
 		<MenuItem>Archive</MenuItem>
-		<MenuItem textValue="Banana">Yellow fruit</MenuItem>
+		<MenuItem>Duplicate</MenuItem>
 		<MenuItem variant="danger">Delete</MenuItem>
 	</MenuGroup>
 	<MenuSeparator />

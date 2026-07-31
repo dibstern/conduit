@@ -11,7 +11,6 @@
 	type MenuRadioItemProps = {
 		value: string;
 		disabled?: boolean;
-		textValue?: string;
 		closeOnSelect?: boolean;
 		onselect?: (event: Event) => void;
 		class?: string;
@@ -29,7 +28,6 @@
 	let {
 		value,
 		disabled = false,
-		textValue,
 		closeOnSelect = true,
 		onselect,
 		class: className,
@@ -59,11 +57,6 @@
 	{#snippet child({ props, checked })}
 		<div {...props}>
 			<span class="min-w-0 flex-1">
-				{#if textValue}
-					<span class="sr-only" aria-hidden="true" data-menu-text-value>
-						{textValue}
-					</span>
-				{/if}
 				{@render children()}
 			</span>
 			{#if checked}

@@ -6,6 +6,7 @@
  * Verifies every story in the built Storybook renders correctly:
  * - Page loads (HTTP 200)
  * - No JavaScript errors (excluding known noise)
+ * - Storybook's render and play() lifecycle succeeds
  * - #storybook-root has children
  * - Dimensions are reported
  *
@@ -98,19 +99,120 @@ for (const story of stories) {
 
 		await page.waitForTimeout(800);
 
-		const info = await page.evaluate(() => {
-			const root = document.querySelector("#storybook-root");
-			if (!root) return { exists: false, width: 0, height: 0, children: 0 };
-			const rect = root.getBoundingClientRect();
-			return {
-				exists: true,
-				width: Math.round(rect.width),
-				height: Math.round(rect.height),
-				children: root.children.length,
-			};
-		});
+		const initialRenderState = await page.evaluate((storyId) => {
+			const preview = window.__STORYBOOK_PREVIEW__;
+			if (!preview || !Array.isArray(preview.storyRenders)) {
+				return {
+					apiError: "window.__STORYBOOK_PREVIEW__.storyRenders is unavailable",
+				};
+			}
 
-		if (errors.length > 0) {
+			const render = preview.storyRenders.find(
+				(candidate) => candidate.id === storyId,
+			);
+			if (!render) {
+				return { apiError: `no StoryRender found for ${storyId}` };
+			}
+			if (typeof render.phase !== "string") {
+				return { apiError: `StoryRender.phase is unavailable for ${storyId}` };
+			}
+
+			return { phase: render.phase };
+		}, story.id);
+
+		if (initialRenderState.apiError) {
+			throw new Error(
+				`Storybook render API unavailable: ${initialRenderState.apiError}`,
+			);
+		}
+
+		if (
+			!["finished", "errored", "aborted"].includes(initialRenderState.phase)
+		) {
+			await page.waitForFunction(
+				(storyId) => {
+					const render = window.__STORYBOOK_PREVIEW__?.storyRenders?.find(
+						(candidate) => candidate.id === storyId,
+					);
+					return ["finished", "errored", "aborted"].includes(
+						render?.phase ?? "",
+					);
+				},
+				story.id,
+				{ polling: 50, timeout: 4_200 },
+			);
+		}
+
+		const info = await page.evaluate((storyId) => {
+			const root = document.querySelector("#storybook-root");
+			const rect = root?.getBoundingClientRect();
+			const preview = window.__STORYBOOK_PREVIEW__;
+			if (!preview || !Array.isArray(preview.storyRenders)) {
+				return {
+					apiError: "window.__STORYBOOK_PREVIEW__.storyRenders is unavailable",
+				};
+			}
+
+			const render = preview.storyRenders.find(
+				(candidate) => candidate.id === storyId,
+			);
+			if (!render || typeof render.phase !== "string") {
+				return { apiError: `StoryRender state is unavailable for ${storyId}` };
+			}
+
+			const addons = window.__STORYBOOK_ADDONS_PREVIEW;
+			const channel =
+				typeof addons?.hasChannel === "function" && addons.hasChannel()
+					? addons.getChannel()
+					: undefined;
+			if (!channel || typeof channel.last !== "function") {
+				return { apiError: "Storybook preview channel history is unavailable" };
+			}
+
+			const playException = channel.last("playFunctionThrewException")?.[0];
+			const storyFinished = channel.last("storyFinished")?.[0];
+			if (render.phase === "finished" && !storyFinished) {
+				return { apiError: "Storybook storyFinished payload is unavailable" };
+			}
+
+			return {
+				exists: Boolean(root),
+				width: Math.round(rect?.width ?? 0),
+				height: Math.round(rect?.height ?? 0),
+				children: root?.children.length ?? 0,
+				phase: render.phase,
+				playError:
+					typeof playException?.message === "string"
+						? playException.message
+						: undefined,
+				finishedStatus:
+					typeof storyFinished?.status === "string"
+						? storyFinished.status
+						: undefined,
+			};
+		}, story.id);
+
+		if (info.apiError) {
+			unusedExemptions.delete(story.id);
+			console.log(`  FAIL  ${story.id} — Storybook API: ${info.apiError}`);
+			results.fail++;
+			results.errors.push({
+				id: story.id,
+				reason: `Storybook API: ${info.apiError}`,
+			});
+		} else if (
+			info.phase === "errored" ||
+			info.playError ||
+			info.finishedStatus === "error"
+		) {
+			unusedExemptions.delete(story.id);
+			const reason = info.playError
+				? `play() failed: ${info.playError}`
+				: `Storybook render failed (phase=${info.phase}, status=${info.finishedStatus ?? "unknown"})`;
+			console.log(`  FAIL  ${story.id} — ${reason}`);
+			results.fail++;
+			results.errors.push({ id: story.id, reason });
+		} else if (errors.length > 0) {
 			// Failed for a reason the waiver never covered; don't also call it stale.
 			unusedExemptions.delete(story.id);
 			const msg = errors[0].slice(0, 80);

@@ -214,30 +214,6 @@ describe("Menu", () => {
 		customAnchor.remove();
 	});
 
-	it("places MenuItem textValue first in typeahead text", () => {
-		const { getByRole } = render(MenuTestHarness);
-		const archive = getByRole("menuitem", { name: "Archive" });
-
-		expect(
-			archive.querySelector("[data-menu-text-value]")?.textContent?.trim(),
-		).toBe("Store archive");
-		expect(archive.textContent?.trim().startsWith("Store archive")).toBe(true);
-	});
-
-	it("places MenuRadioItem textValue first in typeahead text", () => {
-		const { getByRole } = render(MenuTestHarness);
-		const comfortable = getByRole("menuitemradio", {
-			name: "Comfortable",
-		});
-
-		expect(
-			comfortable.querySelector("[data-menu-text-value]")?.textContent?.trim(),
-		).toBe("Roomy density");
-		expect(comfortable.textContent?.trim().startsWith("Roomy density")).toBe(
-			true,
-		);
-	});
-
 	it("renders native-link items and selects them on a plain click", async () => {
 		const onproject = vi.fn();
 		const { getByRole, queryByRole } = render(MenuTestHarness, {

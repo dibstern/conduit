@@ -1,5 +1,5 @@
 import type { Meta, StoryObj } from "@storybook/svelte-vite";
-import { expect, userEvent, within } from "storybook/test";
+import { expect, userEvent, waitFor, within } from "storybook/test";
 import ModalDemo from "./__fixtures__/ModalDemo.svelte";
 
 const meta = {
@@ -34,15 +34,21 @@ export const EscapeRestoresFocus: Story = {
 
 		const dialog = body.getByRole("dialog", { name: "Modal title" });
 		await expect(dialog).toBeVisible();
-		await expect(
-			dialog.contains(document.activeElement) ||
-				dialog === document.activeElement,
-		).toBe(true);
+		await waitFor(() => {
+			expect(
+				dialog.contains(document.activeElement) ||
+					dialog === document.activeElement,
+			).toBe(true);
+		});
 
 		await userEvent.keyboard("{Escape}");
 
-		await expect(body.queryByRole("dialog")).not.toBeInTheDocument();
-		await expect(trigger).toHaveFocus();
+		await waitFor(() => {
+			expect(body.queryByRole("dialog")).not.toBeInTheDocument();
+		});
+		await waitFor(() => {
+			expect(canvas.getByRole("button", { name: "Open modal" })).toHaveFocus();
+		});
 	},
 };
 

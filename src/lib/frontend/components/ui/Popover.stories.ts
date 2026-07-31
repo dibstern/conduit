@@ -1,5 +1,5 @@
 import type { Meta, StoryObj } from "@storybook/svelte-vite";
-import { expect, userEvent, within } from "storybook/test";
+import { expect, userEvent, waitFor, within } from "storybook/test";
 import PopoverDemo from "./__fixtures__/PopoverDemo.svelte";
 
 const meta = {
@@ -45,8 +45,14 @@ export const EscapeRestoresFocus: Story = {
 		await userEvent.click(trigger);
 		await userEvent.keyboard("{Escape}");
 
-		await expect(body.queryByRole("dialog")).not.toBeInTheDocument();
-		await expect(trigger).toHaveFocus();
+		await waitFor(() => {
+			expect(body.queryByRole("dialog")).not.toBeInTheDocument();
+		});
+		await waitFor(() => {
+			expect(
+				canvas.getByRole("button", { name: "Open popover" }),
+			).toHaveFocus();
+		});
 
 		await userEvent.click(trigger);
 		await expect(body.getByRole("dialog", { name: "Details" })).toBeVisible();

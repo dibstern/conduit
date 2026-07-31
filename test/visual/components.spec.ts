@@ -96,6 +96,90 @@ async function waitForStoryTerminalPhase(
 		});
 }
 
+/**
+ * Fail instead of screenshotting a render whose play() or Storybook lifecycle
+ * failed. This runs after the existing additive settle so a terminal phase
+ * cannot race its corresponding Storybook channel event.
+ */
+async function assertStoryRenderSucceeded(
+	page: import("@playwright/test").Page,
+	storyId: string,
+): Promise<void> {
+	const result = await page.evaluate((currentStoryId) => {
+		const storybookWindow = window as Window & {
+			__STORYBOOK_PREVIEW__?: {
+				storyRenders?: Array<{
+					id?: string;
+					phase?: string;
+				}>;
+			};
+			__STORYBOOK_ADDONS_PREVIEW?: {
+				hasChannel?: () => boolean;
+				getChannel?: () => {
+					last?: (eventName: string) => unknown[] | undefined;
+				};
+			};
+		};
+		if (!storybookWindow.__STORYBOOK_PREVIEW__?.storyRenders) {
+			return {
+				apiError: "window.__STORYBOOK_PREVIEW__.storyRenders is unavailable",
+			};
+		}
+
+		const render = storybookWindow.__STORYBOOK_PREVIEW__.storyRenders.find(
+			(candidate) => candidate.id === currentStoryId,
+		);
+		if (!render || typeof render.phase !== "string") {
+			return {
+				apiError: `StoryRender state is unavailable for ${currentStoryId}`,
+			};
+		}
+
+		const addons = storybookWindow.__STORYBOOK_ADDONS_PREVIEW;
+		const channel =
+			addons?.hasChannel?.() === true ? addons.getChannel?.() : undefined;
+		if (!channel?.last) {
+			return { apiError: "Storybook preview channel history is unavailable" };
+		}
+
+		const playException = channel.last("playFunctionThrewException")?.[0] as
+			| { message?: unknown }
+			| undefined;
+		const storyFinished = channel.last("storyFinished")?.[0] as
+			| { status?: unknown }
+			| undefined;
+		if (render.phase === "finished" && !storyFinished) {
+			return { apiError: "Storybook storyFinished payload is unavailable" };
+		}
+
+		return {
+			phase: render.phase,
+			playError:
+				typeof playException?.message === "string"
+					? playException.message
+					: undefined,
+			finishedStatus:
+				typeof storyFinished?.status === "string"
+					? storyFinished.status
+					: undefined,
+		};
+	}, storyId);
+
+	if (result.apiError) {
+		throw new Error(`Storybook render API unavailable: ${result.apiError}`);
+	}
+	if (
+		result.phase === "errored" ||
+		result.playError ||
+		result.finishedStatus === "error"
+	) {
+		const detail = result.playError
+			? `play() failed: ${result.playError}`
+			: `render failed (phase=${result.phase}, status=${result.finishedStatus ?? "unknown"})`;
+		throw new Error(`Story "${storyId}" ${detail}`);
+	}
+}
+
 // ─── Tests ───────────────────────────────────────────────────────────────────
 
 let stories: StoryEntry[];
@@ -182,6 +266,7 @@ if (stories.length > 0) {
 					// Keep the historical settle after the phase wait/fallback. Waiting may
 					// only increase; shortening it risks baseline churn across all stories.
 					await page.waitForTimeout(800);
+					await assertStoryRenderSucceeded(page, story.id);
 					await freezeAnimations(page);
 
 					// Detect zero-height root (fixed-position content escapes flow)

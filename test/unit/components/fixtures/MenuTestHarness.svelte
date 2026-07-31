@@ -41,11 +41,7 @@
 	{/snippet}
 
 	<MenuGroup label="Actions" data-testid="actions-group">
-		<MenuItem
-			textValue="Store archive"
-			onselect={onarchive}
-			data-testid="archive-item"
-		>
+		<MenuItem onselect={onarchive} data-testid="archive-item">
 			Archive
 		</MenuItem>
 		<MenuItem variant="danger">Delete</MenuItem>
@@ -55,9 +51,7 @@
 	<MenuGroup label="Density">
 		<MenuRadioGroup bind:value={selected}>
 			<MenuRadioItem value="compact">Compact</MenuRadioItem>
-			<MenuRadioItem value="comfortable" textValue="Roomy density">
-				Comfortable
-			</MenuRadioItem>
+			<MenuRadioItem value="comfortable">Comfortable</MenuRadioItem>
 		</MenuRadioGroup>
 	</MenuGroup>
 </Menu>
