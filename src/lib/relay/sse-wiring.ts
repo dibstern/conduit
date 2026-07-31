@@ -308,7 +308,7 @@ function opencodeModeCoversAsk(
 	mode: SessionPermissionMode,
 	permissionType: string,
 ): boolean {
-	if (mode === "auto") return true;
+	if (mode === "full") return true;
 	if (mode === "acceptEdits") return permissionType === "edit";
 	return false;
 }

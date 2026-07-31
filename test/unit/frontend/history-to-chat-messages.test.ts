@@ -26,7 +26,12 @@ function assistantMsg(
 	parts: Array<{ id: string; type: PartType; [key: string]: unknown }>,
 	meta?: {
 		cost?: number;
-		tokens?: { input?: number; output?: number; cache?: { read?: number } };
+		tokens?: {
+			input?: number;
+			output?: number;
+			cache?: { read?: number };
+			context_window?: number;
+		};
 		time?: { created?: number; completed?: number };
 	},
 ): HistoryMessage {
@@ -41,6 +46,30 @@ function assistantMsg(
 // ─── User messages ──────────────────────────────────────────────────────────
 
 describe("historyToChatMessages: user messages", () => {
+	it("carries per-turn model execution onto the user transcript message", () => {
+		const result = historyToChatMessages([
+			{
+				...userMsg("m1", "Use Sonnet"),
+				modelExecution: {
+					requestedModel: "sonnet",
+					expectedModel: "claude-sonnet-5",
+					actualModel: "claude-fable-4-0",
+					drifted: true,
+				},
+			},
+		]);
+
+		expect(result[0]).toMatchObject({
+			type: "user",
+			modelExecution: {
+				requestedModel: "sonnet",
+				expectedModel: "claude-sonnet-5",
+				actualModel: "claude-fable-4-0",
+				drifted: true,
+			},
+		});
+	});
+
 	it("converts a simple user message to UserMessage", () => {
 		const messages = [userMsg("m1", "Hello world")];
 		const result = historyToChatMessages(messages);
@@ -344,7 +373,12 @@ describe("historyToChatMessages: result bars", () => {
 		const messages = [
 			assistantMsg("m1", [{ id: "p1", type: "text", text: "Done." }], {
 				cost: 0.0042,
-				tokens: { input: 1000, output: 200, cache: { read: 500 } },
+				tokens: {
+					input: 1000,
+					output: 200,
+					cache: { read: 500 },
+					context_window: 1_000_000,
+				},
 				time: { created: 1000, completed: 3500 },
 			}),
 		];
@@ -358,6 +392,7 @@ describe("historyToChatMessages: result bars", () => {
 			inputTokens: 1000,
 			outputTokens: 200,
 			cacheRead: 500,
+			context_window: 1_000_000,
 			duration: 2500,
 		});
 	});

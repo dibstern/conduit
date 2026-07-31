@@ -101,6 +101,9 @@ export function translateDomainEventToRelay(
 						output: tokens?.output ?? 0,
 						cache_read: tokens?.cacheRead ?? 0,
 						cache_creation: tokens?.cacheWrite ?? 0,
+						...(tokens?.contextWindow
+							? { context_window: tokens.contextWindow }
+							: {}),
 					},
 					cost: cost ?? 0,
 					duration: duration ?? 0,
@@ -120,6 +123,9 @@ export function translateDomainEventToRelay(
 
 		case "turn.interrupted":
 			return emit({ type: "done", code: 1 });
+
+		case "turn.model_resolved":
+			return silent("persistence/ws-rpc-only event");
 
 		case "session.status":
 			if (event.data.status === "retry") {
@@ -151,6 +157,7 @@ export function translateDomainEventToRelay(
 		case "session.renamed":
 		case "session.provider_changed":
 		case "session.deleted":
+		case "session.permission_mode_changed":
 			return silent("persistence-only event; no UI surface in relay");
 
 		case "permission.asked":

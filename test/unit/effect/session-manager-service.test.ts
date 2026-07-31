@@ -5,6 +5,12 @@ import { join } from "node:path";
 import { describe, it } from "@effect/vitest";
 import { Effect, HashMap, Layer, Option, Queue, Ref, TestClock } from "effect";
 import { expect, vi } from "vitest";
+import { ProviderInstanceIdSchema } from "../../../src/lib/contracts/provider-instance.js";
+import {
+	type DaemonConfig,
+	resolveInstanceDriver,
+	saveDaemonConfig,
+} from "../../../src/lib/daemon/config-persistence.js";
 import {
 	loadForkMetadata,
 	saveForkMetadata,
@@ -56,6 +62,7 @@ import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/
 import type { ReadQueryEffect } from "../../../src/lib/persistence/effect/read-query-effect.js";
 import { ReadQueryEffectTag } from "../../../src/lib/persistence/effect/read-query-effect.js";
 import type { SessionRow } from "../../../src/lib/persistence/read-model-types.js";
+import { SqliteClient } from "../../../src/lib/persistence/sqlite-client.js";
 import { OrchestrationEngine } from "../../../src/lib/provider/orchestration-engine.js";
 import { ProviderRegistry } from "../../../src/lib/provider/provider-registry.js";
 import type { HistoryMessage } from "../../../src/lib/shared-types.js";
@@ -76,6 +83,7 @@ function makeRow(id: string, overrides?: Partial<SessionRow>): SessionRow {
 		parent_id: null,
 		fork_point_event: null,
 		last_message_at: null,
+		permission_mode: null,
 		created_at: 1000,
 		updated_at: 2000,
 		...overrides,
@@ -97,6 +105,7 @@ function makeReadQueryEffect(rows: readonly SessionRow[]): ReadQueryEffect {
 		getSessionListSnapshot: vi.fn(() =>
 			Effect.succeed({ rows: [], sequence: 0 }),
 		),
+		getLatestTurnModelExecution: vi.fn(() => Effect.succeed(undefined)),
 		getSessionMessagesWithParts: vi.fn(() => Effect.succeed([])),
 	};
 }
@@ -391,6 +400,130 @@ describe("SessionManagerService", () => {
 			}).pipe(
 				Effect.provide(Layer.fresh(layer)),
 				Effect.ensuring(Effect.sync(() => rmSync(dbFile, { force: true }))),
+			);
+		},
+	);
+
+	it.scoped(
+		"binds explicitly selected default instances through their config-resolved drivers and persists active bindings",
+		() => {
+			const tmpDir = mkdtempSync(
+				join(tmpdir(), "conduit-session-manager-instance-binding-"),
+			);
+			const dbFile = join(tmpDir, "events.sqlite");
+			const daemonConfig: DaemonConfig = {
+				pid: process.pid,
+				port: 2633,
+				pinHash: null,
+				tls: false,
+				debug: false,
+				keepAwake: false,
+				dangerouslySkipPermissions: false,
+				projects: [],
+			};
+			const relayConfig: ProjectRelayConfig = {
+				httpServer: createServer(),
+				opencodeUrl: "http://localhost:4096",
+				projectDir: "/tmp/project",
+				slug: "project",
+				configDir: tmpDir,
+			};
+			const api = makeMockOpenCodeAPI();
+			vi.spyOn(api.session, "create").mockResolvedValue({
+				id: "opencode-instance-session",
+				projectID: "project-1",
+				directory: "/tmp/project",
+				title: "OpenCode Instance Session",
+				version: "1.0.0",
+				time: { created: 10, updated: 10 },
+			});
+			const engine = new OrchestrationEngine({
+				registry: new ProviderRegistry(),
+			});
+			const layer = Layer.provideMerge(
+				SessionManagerServiceLive,
+				Layer.mergeAll(
+					Layer.succeed(OpenCodeAPITag, api),
+					Layer.succeed(LoggerTag, makeMockLogger()),
+					Layer.succeed(ConfigTag, relayConfig),
+					makeSessionManagerStateLive(),
+					makeOverridesStateLive(),
+					DaemonEventBusLive,
+					makePersistenceEffectLayer(dbFile),
+					Layer.succeed(OrchestrationEngineTag, engine),
+				),
+			);
+			const claudeInstanceId = ProviderInstanceIdSchema.make("claude");
+			const openCodeInstanceId = ProviderInstanceIdSchema.make("opencode");
+
+			return Effect.gen(function* () {
+				yield* Effect.tryPromise(() => saveDaemonConfig(daemonConfig, tmpDir));
+				yield* setDefaultModel({
+					providerID: "opencode",
+					modelID: "openai/gpt-5",
+				});
+				const service = yield* SessionManagerServiceTag;
+
+				const claudeSession = yield* service.createSession(
+					"Claude Instance Session",
+					{ instanceId: claudeInstanceId },
+				);
+				const openCodeSession = yield* service.createSession(
+					"OpenCode Instance Session",
+					{ instanceId: openCodeInstanceId },
+				);
+
+				const bindings = yield* Effect.sync(() => {
+					const db = SqliteClient.open(dbFile);
+					try {
+						return db.query<{
+							readonly session_id: string;
+							readonly provider: string;
+							readonly status: string;
+						}>(
+							`SELECT session_id, provider, status
+							 FROM session_providers
+							 WHERE session_id IN (?, ?) AND status = 'active'
+							 ORDER BY session_id`,
+							[claudeSession.id, openCodeSession.id],
+						);
+					} finally {
+						db.close();
+					}
+				});
+
+				expect(bindings).toHaveLength(2);
+				const resolvedBindings = Object.fromEntries(
+					bindings.map((binding) => [
+						binding.session_id,
+						{
+							instanceId: binding.provider,
+							driver: resolveInstanceDriver(
+								daemonConfig,
+								ProviderInstanceIdSchema.make(binding.provider),
+							),
+							status: binding.status,
+						},
+					]),
+				);
+				expect(resolvedBindings).toEqual({
+					[claudeSession.id]: {
+						instanceId: "claude",
+						driver: "claude",
+						status: "active",
+					},
+					[openCodeSession.id]: {
+						instanceId: "opencode",
+						driver: "opencode",
+						status: "active",
+					},
+				});
+				expect(api.session.create).toHaveBeenCalledOnce();
+			}).pipe(
+				Effect.provide(Layer.fresh(layer)),
+				Effect.ensuring(
+					Effect.sync(() => rmSync(tmpDir, { recursive: true, force: true })),
+				),
 			);
 		},
 	);

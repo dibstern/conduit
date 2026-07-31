@@ -252,6 +252,35 @@ function makeTurnCompleted(
 	});
 }
 
+function makeTurnModelResolved(
+	sessionId: string,
+	actualModel: string,
+	opts?: {
+		requestedModel?: string;
+		expectedModel?: string;
+		createdAt?: number;
+	},
+): CanonicalEvent {
+	return canonicalEvent(
+		"turn.model_resolved",
+		sessionId,
+		{
+			...(opts?.requestedModel !== undefined
+				? { requestedModel: opts.requestedModel }
+				: {}),
+			...(opts?.expectedModel !== undefined
+				? { expectedModel: opts.expectedModel }
+				: {}),
+			actualModel,
+		},
+		{
+			eventId: createEventId(),
+			metadata: {},
+			createdAt: opts?.createdAt ?? FIXED_TS,
+		},
+	);
+}
+
 function makePermissionAsked(
 	sessionId: string,
 	id: string,
@@ -1022,6 +1051,52 @@ describe("Effect Session Projector (via ProjectionRunner)", () => {
 				expect(rows[0]?.status).toBe("busy");
 			}),
 		));
+
+	it("session.permission_mode_changed updates only the target session", () =>
+		runTest(
+			Effect.gen(function* () {
+				const sql = yield* SqlClient.SqlClient;
+				const store = yield* EventStoreEffectTag;
+				const runner = yield* ProjectionRunnerEffectTag;
+				yield* runner.markRecovered();
+
+				for (const sessionId of ["s1", "s2"]) {
+					yield* seedSession(sessionId);
+					const created = yield* store.append(
+						makeSessionCreated(sessionId, { createdAt: FIXED_TS }),
+					);
+					yield* runner.projectEvent(created);
+				}
+
+				const changed = yield* store.append(
+					canonicalEvent(
+						"session.permission_mode_changed",
+						"s1",
+						{ sessionId: "s1", mode: "auto" },
+						{ createdAt: FIXED_TS + 2500 },
+					),
+				);
+				yield* runner.projectEvent(changed);
+
+				const rows = yield* sql<{
+					id: string;
+					permission_mode: string | null;
+					updated_at: number;
+				}>`
+					SELECT id, permission_mode, updated_at
+					FROM sessions
+					WHERE id IN ('s1', 's2')
+					ORDER BY id`;
+				expect(rows).toEqual([
+					{
+						id: "s1",
+						permission_mode: "auto",
+						updated_at: FIXED_TS + 2500,
+					},
+					{ id: "s2", permission_mode: null, updated_at: FIXED_TS },
+				]);
+			}),
+		));
 });
 
 // ─── Message Projector Tests ────────────────────────────────────────────────
@@ -1246,6 +1321,171 @@ describe("Effect Message Projector (via ProjectionRunner)", () => {
 					filename: "screenshot.png",
 					url: "data:image/png;base64,AAAA",
 				});
+			}),
+		));
+});
+
+// ─── Turn Projector Tests ───────────────────────────────────────────────────
+
+describe("Effect Turn Projector (via ProjectionRunner)", () => {
+	it("updates only the newest open turn and is replay-idempotent", () =>
+		runTest(
+			Effect.gen(function* () {
+				const sql = yield* SqlClient.SqlClient;
+				const store = yield* EventStoreEffectTag;
+				const runner = yield* ProjectionRunnerEffectTag;
+				yield* runner.markRecovered();
+				yield* seedSession("s1");
+				yield* sql`
+					INSERT INTO turns
+					(id, session_id, state, user_message_id, requested_at)
+					VALUES
+					('completed', 's1', 'completed', 'completed', ${FIXED_TS}),
+					('running', 's1', 'running', 'running', ${FIXED_TS + 1}),
+					('pending', 's1', 'pending', 'pending', ${FIXED_TS + 2})`;
+
+				const event = yield* store.append(
+					makeTurnModelResolved("s1", "claude-sonnet-5[1m]", {
+						requestedModel: "sonnet",
+						expectedModel: "claude-sonnet-5[1m]",
+					}),
+				);
+				yield* runner.projectEvent(event);
+				yield* runner.projectEvent(event);
+
+				const rows = yield* sql<{
+					id: string;
+					requested_model: string | null;
+					expected_model: string | null;
+					actual_model: string | null;
+				}>`SELECT id, requested_model, expected_model, actual_model
+					FROM turns ORDER BY requested_at`;
+				expect(rows).toEqual([
+					{
+						id: "completed",
+						requested_model: null,
+						expected_model: null,
+						actual_model: null,
+					},
+					{
+						id: "running",
+						requested_model: null,
+						expected_model: null,
+						actual_model: null,
+					},
+					{
+						id: "pending",
+						requested_model: "sonnet",
+						expected_model: "claude-sonnet-5[1m]",
+						actual_model: "claude-sonnet-5[1m]",
+					},
+				]);
+			}),
+		));
+
+	it("preserves nullable evidence", () =>
+		runTest(
+			Effect.gen(function* () {
+				const sql = yield* SqlClient.SqlClient;
+				const store = yield* EventStoreEffectTag;
+				const runner = yield* ProjectionRunnerEffectTag;
+				yield* runner.markRecovered();
+				yield* seedSession("s1");
+				yield* sql`
+					INSERT INTO turns
+					(id, session_id, state, user_message_id, requested_at)
+					VALUES ('pending', 's1', 'pending', 'pending', ${FIXED_TS})`;
+
+				const event = yield* store.append(
+					makeTurnModelResolved("s1", "claude-opus-4-6"),
+				);
+				yield* runner.projectEvent(event);
+
+				const rows = yield* sql<{
+					requested_model: string | null;
+					expected_model: string | null;
+					actual_model: string | null;
+				}>`SELECT requested_model, expected_model, actual_model
+					FROM turns WHERE id = 'pending'`;
+				expect(rows[0]).toEqual({
+					requested_model: null,
+					expected_model: null,
+					actual_model: "claude-opus-4-6",
+				});
+			}),
+		));
+
+	it("updates the newest running turn", () =>
+		runTest(
+			Effect.gen(function* () {
+				const sql = yield* SqlClient.SqlClient;
+				const store = yield* EventStoreEffectTag;
+				const runner = yield* ProjectionRunnerEffectTag;
+				yield* runner.markRecovered();
+				yield* seedSession("s1");
+				yield* sql`
+					INSERT INTO turns
+					(id, session_id, state, user_message_id, requested_at)
+					VALUES
+					('older-running', 's1', 'running', 'older-running', ${FIXED_TS}),
+					('newest-running', 's1', 'running', 'newest-running', ${FIXED_TS + 1})`;
+
+				const event = yield* store.append(
+					makeTurnModelResolved("s1", "claude-sonnet-5", {
+						requestedModel: "sonnet",
+						expectedModel: "claude-sonnet-5",
+					}),
+				);
+				yield* runner.projectEvent(event);
+
+				const rows = yield* sql<{
+					id: string;
+					requested_model: string | null;
+					expected_model: string | null;
+					actual_model: string | null;
+				}>`SELECT id, requested_model, expected_model, actual_model
+					FROM turns ORDER BY requested_at`;
+				expect(rows).toEqual([
+					{
+						id: "older-running",
+						requested_model: null,
+						expected_model: null,
+						actual_model: null,
+					},
+					{
+						id: "newest-running",
+						requested_model: "sonnet",
+						expected_model: "claude-sonnet-5",
+						actual_model: "claude-sonnet-5",
+					},
+				]);
+			}),
+		));
+
+	it("does not attach evidence when no open turn exists", () =>
+		runTest(
+			Effect.gen(function* () {
+				const sql = yield* SqlClient.SqlClient;
+				const store = yield* EventStoreEffectTag;
+				const runner = yield* ProjectionRunnerEffectTag;
+				yield* runner.markRecovered();
+				yield* seedSession("s1");
+				yield* sql`
+					INSERT INTO turns
+					(id, session_id, state, user_message_id, requested_at)
+					VALUES ('completed', 's1', 'completed', 'completed', ${FIXED_TS})`;
+
+				const event = yield* store.append(
+					makeTurnModelResolved("s1", "claude-sonnet-5", {
+						requestedModel: "sonnet",
+						expectedModel: "claude-sonnet-5",
+					}),
+				);
+				yield* runner.projectEvent(event);
+
+				const rows = yield* sql<{ actual_model: string | null }>`
+					SELECT actual_model FROM turns WHERE id = 'completed'`;
+				expect(rows[0]?.actual_model).toBeNull();
 			}),
 		));
 });

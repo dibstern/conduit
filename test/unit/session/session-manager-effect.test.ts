@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { SqlClient } from "@effect/sql";
@@ -7,12 +7,17 @@ import { Effect, HashMap, Layer, Option, Ref } from "effect";
 import { expect, vi } from "vitest";
 import { DaemonEventBusLive } from "../../../src/lib/domain/daemon/Services/daemon-pubsub.js";
 import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
-import { LoggerTag } from "../../../src/lib/domain/relay/Services/services.js";
+import {
+	ConfigTag,
+	LoggerTag,
+} from "../../../src/lib/domain/relay/Services/services.js";
 import {
 	createSession,
 	deleteSession,
 	listSessions,
+	persistSessionPermissionMode,
 	recordMessageActivity,
+	restoreSessionPermissionModes,
 	SessionManagerServiceLive,
 	SessionManagerServiceTag,
 } from "../../../src/lib/domain/relay/Services/session-manager-service.js";
@@ -20,6 +25,10 @@ import {
 	makeSessionManagerStateLive,
 	SessionManagerStateTag,
 } from "../../../src/lib/domain/relay/Services/session-manager-state.js";
+import {
+	getPermissionMode,
+	makeOverridesStateLive,
+} from "../../../src/lib/domain/relay/Services/session-overrides-state.js";
 import type { OpenCodeAPI } from "../../../src/lib/instance/opencode-api.js";
 import { EventStoreEffectTag } from "../../../src/lib/persistence/effect/event-store-effect.js";
 import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
@@ -30,7 +39,10 @@ import {
 	ReadQueryEffectTag,
 } from "../../../src/lib/persistence/effect/read-query-effect.js";
 import { canonicalEvent } from "../../../src/lib/persistence/events.js";
-import { makeMockLogger } from "../../helpers/mock-factories.js";
+import {
+	makeMockConfig,
+	makeMockLogger,
+} from "../../helpers/mock-factories.js";
 
 describe("SessionManager Effect", () => {
 	const makeMockApi = () => ({
@@ -52,6 +64,7 @@ describe("SessionManager Effect", () => {
 		mockApi: ReturnType<typeof makeMockApi>,
 		filename: string,
 		readQueryOverride?: ReadQueryEffect,
+		configDir?: string,
 	) =>
 		Layer.provideMerge(
 			SessionManagerServiceLive,
@@ -62,6 +75,9 @@ describe("SessionManager Effect", () => {
 				makePersistenceEffectLayer(filename),
 				...(readQueryOverride
 					? [Layer.succeed(ReadQueryEffectTag, readQueryOverride)]
+					: []),
+				...(configDir
+					? [Layer.succeed(ConfigTag, makeMockConfig({ configDir }))]
 					: []),
 			),
 		);
@@ -242,6 +258,77 @@ describe("SessionManager Effect", () => {
 	);
 
 	it.effect(
+		"renames a named Claude instance session through the event store",
+		() => {
+			const mockApi = makeMockApi();
+			const dir = mkdtempSync(join(tmpdir(), "conduit-rename-named-session-"));
+			const filename = join(dir, "events.db");
+			const sessionId = "ses-named-claude-rename";
+			writeFileSync(
+				join(dir, "daemon.json"),
+				JSON.stringify({
+					pid: 1234,
+					port: 2633,
+					pinHash: null,
+					tls: false,
+					debug: false,
+					keepAwake: false,
+					dangerouslySkipPermissions: false,
+					projects: [],
+					instances: [
+						{
+							id: "work-claude",
+							name: "Work Claude",
+							port: 0,
+							managed: false,
+							driver: "claude",
+						},
+					],
+				}),
+			);
+			const layer = makeLiveServiceLayer(mockApi, filename, undefined, dir);
+
+			return Effect.gen(function* () {
+				const store = yield* EventStoreEffectTag;
+				const runner = yield* ProjectionRunnerEffectTag;
+				const readQuery = yield* ReadQueryEffectTag;
+				const service = yield* SessionManagerServiceTag;
+				const sql = yield* SqlClient.SqlClient;
+				yield* runner.markRecovered();
+				yield* sql`
+					INSERT INTO sessions (id, provider, title, status, created_at, updated_at)
+					VALUES (${sessionId}, 'work-claude', 'Claude Session', 'idle', 1000, 1000)`;
+
+				const created = yield* store.append(
+					canonicalEvent(
+						"session.created",
+						sessionId,
+						{
+							sessionId,
+							title: "Claude Session",
+							provider: "work-claude",
+						},
+						{ provider: "work-claude", createdAt: 1000 },
+					),
+				);
+				yield* runner.projectEvent(created);
+
+				yield* service.renameSession(sessionId, "Named title");
+
+				expect(mockApi.session.update).not.toHaveBeenCalled();
+				expect((yield* readQuery.getSession(sessionId))?.title).toBe(
+					"Named title",
+				);
+			}).pipe(
+				Effect.provide(layer),
+				Effect.ensuring(
+					Effect.sync(() => rmSync(dir, { recursive: true, force: true })),
+				),
+			);
+		},
+	);
+
+	it.effect(
 		"falls back to API rename when persistence has no matching session row",
 		() => {
 			const mockApi = makeMockApi();
@@ -326,6 +413,7 @@ describe("SessionManager Effect", () => {
 				getSessionListSnapshot: vi.fn(() =>
 					Effect.succeed({ rows: [], sequence: 0 }),
 				),
+				getLatestTurnModelExecution: vi.fn(() => Effect.succeed(undefined)),
 				getSessionMessagesWithParts: vi.fn(() => Effect.succeed([])),
 			};
 			const layer = makeLiveServiceLayer(mockApi, filename, readQuery);
@@ -341,6 +429,88 @@ describe("SessionManager Effect", () => {
 				expect(mockApi.session.update).not.toHaveBeenCalled();
 			}).pipe(
 				Effect.provide(layer),
+				Effect.ensuring(
+					Effect.sync(() => rmSync(dir, { recursive: true, force: true })),
+				),
+			);
+		},
+	);
+
+	it.effect(
+		"persists permission mode as an event and projects the session row",
+		() => {
+			const dir = mkdtempSync(join(tmpdir(), "conduit-permission-mode-"));
+			const filename = join(dir, "events.db");
+
+			return Effect.gen(function* () {
+				const sql = yield* SqlClient.SqlClient;
+				const store = yield* EventStoreEffectTag;
+				const runner = yield* ProjectionRunnerEffectTag;
+				const readQuery = yield* ReadQueryEffectTag;
+				const sessionId = "ses-permission-mode";
+				yield* runner.markRecovered();
+				yield* sql`
+				INSERT INTO sessions (id, provider, title, status, created_at, updated_at)
+				VALUES (${sessionId}, 'claude', 'Permission session', 'idle', 1000, 1000)`;
+
+				yield* persistSessionPermissionMode(sessionId, "full");
+
+				const events = yield* store.readBySession(sessionId);
+				expect(events.map((event) => event.type)).toEqual([
+					"session.permission_mode_changed",
+				]);
+				expect(events[0]?.data).toEqual({ sessionId, mode: "full" });
+				expect((yield* readQuery.getSession(sessionId))?.permission_mode).toBe(
+					"full",
+				);
+			}).pipe(
+				Effect.provide(makePersistenceEffectLayer(filename)),
+				Effect.ensuring(
+					Effect.sync(() => rmSync(dir, { recursive: true, force: true })),
+				),
+			);
+		},
+	);
+
+	it.effect(
+		"permission mode persistence is a no-op without persistence services",
+		() =>
+			Effect.gen(function* () {
+				expect(
+					yield* persistSessionPermissionMode("ses-no-persistence", "auto"),
+				).toBeUndefined();
+			}),
+	);
+
+	it.effect(
+		"restores valid persisted permission modes and skips null or invalid values",
+		() => {
+			const dir = mkdtempSync(join(tmpdir(), "conduit-restore-mode-"));
+			const filename = join(dir, "events.db");
+
+			return Effect.gen(function* () {
+				const sql = yield* SqlClient.SqlClient;
+				const runner = yield* ProjectionRunnerEffectTag;
+				yield* runner.markRecovered();
+				yield* sql`
+					INSERT INTO sessions (
+						id, provider, title, status, permission_mode, created_at, updated_at
+					) VALUES
+						('ses-auto', 'claude', 'Auto', 'idle', 'auto', 1000, 1000),
+						('ses-default', 'claude', 'Default', 'idle', NULL, 1000, 1000),
+						('ses-invalid', 'claude', 'Invalid', 'idle', 'broken', 1000, 1000)`;
+
+				expect(yield* restoreSessionPermissionModes()).toBe(1);
+				expect(yield* getPermissionMode("ses-auto")).toBe("auto");
+				expect(yield* getPermissionMode("ses-default")).toBe("ask");
+				expect(yield* getPermissionMode("ses-invalid")).toBe("ask");
+			}).pipe(
+				Effect.provide(
+					Layer.merge(
+						makePersistenceEffectLayer(filename),
+						Layer.fresh(makeOverridesStateLive()),
+					),
+				),
 				Effect.ensuring(
 					Effect.sync(() => rmSync(dir, { recursive: true, force: true })),
 				),

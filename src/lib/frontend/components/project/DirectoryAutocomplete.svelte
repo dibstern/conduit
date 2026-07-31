@@ -166,7 +166,7 @@
 	<!-- Drop-up popup -->
 	{#if visible && entries.length > 0}
 		<div
-			class="dir-autocomplete-list absolute bottom-full left-0 right-0 mb-1 bg-bg-surface border border-border rounded-lg shadow-[0_-4px_16px_rgba(0,0,0,0.3)] max-h-[200px] overflow-y-auto z-[130] py-1"
+			class="dir-autocomplete-list absolute bottom-full left-0 right-0 mb-1 bg-bg-surface border border-border rounded-lg shadow-menu max-h-[200px] overflow-y-auto z-[var(--z-dropdown)] py-1"
 		>
 			{#each entries as entry, i}
 				{@const lastSlash = entry.lastIndexOf(

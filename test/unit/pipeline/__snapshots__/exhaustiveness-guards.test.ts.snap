@@ -11,6 +11,7 @@ exports[`Exhaustiveness guards > EventPayloadMap key snapshot > snapshot of all 
   "session.compaction",
   "session.created",
   "session.deleted",
+  "session.permission_mode_changed",
   "session.provider_changed",
   "session.renamed",
   "session.status",
@@ -25,5 +26,6 @@ exports[`Exhaustiveness guards > EventPayloadMap key snapshot > snapshot of all 
   "turn.completed",
   "turn.error",
   "turn.interrupted",
+  "turn.model_resolved",
 ]
 `;

@@ -78,7 +78,10 @@ describe("ProviderRuntimeEvent contracts", () => {
 	it("covers every canonical event type or explicit reclassification", () => {
 		// Conduit-initiated types never transit provider ingress: the session
 		// delete path appends session.deleted directly at the persist choke point.
-		const explicitlyReclassified: readonly string[] = ["session.deleted"];
+		const explicitlyReclassified: readonly string[] = [
+			"session.deleted",
+			"session.permission_mode_changed",
+		];
 		const missingRuntimeTypes = CANONICAL_EVENT_TYPES.filter(
 			(type) =>
 				!explicitlyReclassified.includes(type) &&
@@ -88,6 +91,24 @@ describe("ProviderRuntimeEvent contracts", () => {
 		);
 
 		expect(missingRuntimeTypes).toEqual([]);
+	});
+
+	it("decodes turn.model_resolved evidence without changing its ids", () => {
+		const event = Schema.decodeUnknownSync(ProviderRuntimeEventSchema)({
+			...baseEvent,
+			type: "turn.model_resolved",
+			data: {
+				requestedModel: "sonnet",
+				expectedModel: "claude-sonnet-5[1m]",
+				actualModel: "claude-sonnet-5[1m]",
+			},
+		});
+
+		expect(event.data).toEqual({
+			requestedModel: "sonnet",
+			expectedModel: "claude-sonnet-5[1m]",
+			actualModel: "claude-sonnet-5[1m]",
+		});
 	});
 
 	it("decodes raw-source metadata fields", () => {

@@ -13,6 +13,11 @@ export const MESSAGE_PARTS_FILE_TYPE_MIGRATION =
 	"0005_message_parts_file_type.sql";
 export const MESSAGE_PARTS_COMPACTION_TYPE_MIGRATION =
 	"0006_message_parts_compaction_type.sql";
+export const MESSAGES_CONTEXT_WINDOW_MIGRATION =
+	"0007_messages_context_window.sql";
+export const TURN_MODEL_EXECUTION_MIGRATION = "0008_turn_model_execution.sql";
+export const SESSIONS_PERMISSION_MODE_MIGRATION =
+	"0009_sessions_permission_mode.sql";
 
 export function readMigrationSql(filename: string): string {
 	return readFileSync(
@@ -51,5 +56,20 @@ export const schemaMigrations: readonly Migration[] = [
 		id: 6,
 		name: "message_parts_compaction_type",
 		sql: readMigrationSql(MESSAGE_PARTS_COMPACTION_TYPE_MIGRATION),
+	},
+	{
+		id: 7,
+		name: "messages_context_window",
+		sql: readMigrationSql(MESSAGES_CONTEXT_WINDOW_MIGRATION),
+	},
+	{
+		id: 8,
+		name: "turn_model_execution",
+		sql: readMigrationSql(TURN_MODEL_EXECUTION_MIGRATION),
+	},
+	{
+		id: 9,
+		name: "sessions_permission_mode",
+		sql: readMigrationSql(SESSIONS_PERMISSION_MODE_MIGRATION),
 	},
 ];

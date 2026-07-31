@@ -114,9 +114,9 @@ test.describe("Smart Default Detection", () => {
 		const { daemon } = smartDaemon;
 		const instances = daemon.getInstances();
 
-		// Should have exactly one "default" instance
+		// Should have exactly one "opencode" instance
 		const defaultInst = instances.find(
-			(i: { id: string }) => i.id === "default",
+			(i: { id: string }) => i.id === "opencode",
 		);
 		expect(defaultInst).toBeDefined();
 		// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion

@@ -925,12 +925,24 @@ export class MockOpenCodeServer {
 		// SSE comments (lines starting with ':') are ignored by clients.
 		res.write(": ok\n\n");
 
-		// Keepalive every 15 seconds
+		// Real OpenCode's first SSE frame is always server.connected; conduit
+		// treats the first yielded event (not the HTTP accept) as its connect
+		// signal, so the mock must be faithful here.
+		res.write(
+			`data: ${JSON.stringify({ type: "server.connected", properties: {} })}\n\n`,
+		);
+
+		// Real OpenCode emits server.heartbeat as a data event every 10s
+		// (Stream.tick in its event route). A comment keepalive would yield no
+		// event, and conduit's 30s staleness watchdog would tear down any
+		// harness connection that idles past 30s.
 		const interval = setInterval(() => {
 			if (!res.writableEnded) {
-				res.write(": keepalive\n\n");
+				res.write(
+					`data: ${JSON.stringify({ type: "server.heartbeat", properties: {} })}\n\n`,
+				);
 			}
-		}, 15_000);
+		}, 10_000);
 		this.keepaliveIntervals.add(interval);
 
 		this.sseClients.add(res);

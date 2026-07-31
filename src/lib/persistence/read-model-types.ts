@@ -9,6 +9,7 @@ export interface SessionRow {
 	parent_id: string | null;
 	fork_point_event: string | null;
 	last_message_at: number | null;
+	permission_mode: string | null;
 	created_at: number;
 	updated_at: number;
 }
@@ -24,6 +25,7 @@ export interface MessageRow {
 	tokens_out: number | null;
 	tokens_cache_read: number | null;
 	tokens_cache_write: number | null;
+	context_window: number | null;
 	is_streaming: number;
 	created_at: number;
 	updated_at: number;
@@ -48,6 +50,11 @@ export interface MessagePartRow {
 
 export interface MessageWithParts extends MessageRow {
 	parts: MessagePartRow[];
+	modelExecution?: {
+		requestedModel?: string;
+		expectedModel?: string;
+		actualModel: string;
+	};
 }
 
 export interface TurnRow {
@@ -62,6 +69,15 @@ export interface TurnRow {
 	requested_at: number;
 	started_at: number | null;
 	completed_at: number | null;
+	requested_model: string | null;
+	expected_model: string | null;
+	actual_model: string | null;
+}
+
+export interface TurnModelExecutionRow {
+	requested_model: string | null;
+	expected_model: string | null;
+	actual_model: string;
 }
 
 export interface PendingApprovalRow {

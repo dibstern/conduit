@@ -166,8 +166,12 @@ export interface ClaudeSessionContext {
 	/** EventSink for this session — updated on each turn (latest sink wins). */
 	eventSink: EventSink | undefined;
 	currentTurnId: string | undefined;
+	/** Conduit's requested catalog/base model id for the current turn. */
 	currentModel: string | undefined;
+	/** Exact model id sent to the Claude SDK after context-window normalization. */
 	currentApiModelId?: string;
+	/** Oracle-normalized model id expected from the SDK's system/init report. */
+	expectedApiModelId?: string;
 	currentAgent?: string;
 	resumeSessionId: string | undefined;
 	lastAssistantUuid: string | undefined;

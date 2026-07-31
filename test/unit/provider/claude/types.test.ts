@@ -60,6 +60,8 @@ describe("Claude provider instance types", () => {
 		expectTypeOf<ClaudeSessionContext>().toHaveProperty("inFlightTools");
 		expectTypeOf<ClaudeSessionContext>().toHaveProperty("currentTurnId");
 		expectTypeOf<ClaudeSessionContext>().toHaveProperty("currentModel");
+		expectTypeOf<ClaudeSessionContext>().toHaveProperty("currentApiModelId");
+		expectTypeOf<ClaudeSessionContext>().toHaveProperty("expectedApiModelId");
 		expectTypeOf<ClaudeSessionContext>().toHaveProperty("resumeSessionId");
 		expectTypeOf<ClaudeSessionContext>().toHaveProperty("lastAssistantUuid");
 		expectTypeOf<ClaudeSessionContext>().toHaveProperty("turnCount");

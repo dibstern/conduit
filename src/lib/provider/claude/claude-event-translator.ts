@@ -26,6 +26,7 @@ import type {
 	ProviderRuntimeEvent,
 	ProviderRuntimeEventType,
 } from "../../contracts/providers/provider-runtime-event.js";
+import { createLogger, type Logger } from "../../logger.js";
 import type {
 	CanonicalToolInput,
 	EventPayloadMap,
@@ -47,6 +48,7 @@ import type {
 } from "./types.js";
 
 const PROVIDER = "claude" as const;
+const defaultLog = createLogger("claude-event-translator");
 
 // ─── Typed event construction helper ───────────────────────────────────────
 // Events are provider ingress envelopes. The EventSink owns conversion to
@@ -233,6 +235,7 @@ interface ContentBlockState {
 
 export interface ClaudeEventTranslatorDeps {
 	readonly getSink: (ctx: ClaudeSessionContext) => EventSink | undefined;
+	readonly logger?: Logger;
 }
 
 export class ClaudeEventTranslator {
@@ -643,8 +646,29 @@ export class ClaudeEventTranslator {
 				}
 
 				case "init": {
-					// Store model info on context
-					ctx.currentModel = message.model;
+					const modelEvidence = {
+						...(ctx.currentModel ? { requestedModel: ctx.currentModel } : {}),
+						...(ctx.expectedApiModelId
+							? { expectedModel: ctx.expectedApiModelId }
+							: {}),
+						actualModel: message.model,
+					};
+					yield* this.push(
+						ctx,
+						makeProviderRuntimeEvent(
+							"turn.model_resolved",
+							ctx.sessionId,
+							modelEvidence,
+						),
+					);
+					if (
+						ctx.expectedApiModelId !== undefined &&
+						ctx.expectedApiModelId !== message.model
+					) {
+						(this.deps.logger ?? defaultLog).warn(
+							`Claude model drift: session=${ctx.sessionId} requested=${ctx.currentModel ?? "<none>"} expected=${ctx.expectedApiModelId} actual=${message.model}`,
+						);
+					}
 					yield* this.push(
 						ctx,
 						makeProviderRuntimeEvent("session.status", ctx.sessionId, {
@@ -1496,7 +1520,7 @@ export class ClaudeEventTranslator {
 			// back to result.usage when no assistant message was seen (e.g.
 			// non-streaming slash-command turns).
 			const usage = result.usage;
-			const tokens: {
+			const usageTokens: {
 				readonly input?: number;
 				readonly output?: number;
 				readonly cacheRead?: number;
@@ -1510,6 +1534,23 @@ export class ClaudeEventTranslator {
 				...(usage.cache_creation_input_tokens > 0
 					? { cacheWrite: usage.cache_creation_input_tokens }
 					: {}),
+			};
+			let effectiveWindow: number | undefined;
+			for (const modelUsage of Object.values(result.modelUsage ?? {})) {
+				const contextWindow = modelUsage.contextWindow;
+				if (Number.isFinite(contextWindow) && contextWindow > 0) {
+					effectiveWindow = Math.max(effectiveWindow ?? 0, contextWindow);
+				}
+			}
+			if (
+				effectiveWindow === undefined &&
+				(ctx.currentApiModelId ?? ctx.currentModel)?.endsWith("[1m]")
+			) {
+				effectiveWindow = 1_000_000;
+			}
+			const tokens = {
+				...usageTokens,
+				...(effectiveWindow ? { contextWindow: effectiveWindow } : {}),
 			};
 
 			yield* this.push(

@@ -1,9 +1,9 @@
 // ─── Permission Mode Selector E2E Tests ─────────────────────────────────────
-// Tests the Ask/Edits/All approvals pill in the input area via WS mock.
+// Tests the Ask/Edits/Full access approvals pill in the input area via WS mock.
 //
-// Regression coverage for: selecting "All" before any session is bound
+// Regression coverage for: selecting "Full access" before any session is bound
 // (e.g. PWA cold start before session_switched arrives) was silently dropped —
-// the pill showed "All" locally but the server never received the switch, so
+// the pill showed "Full access" locally but the server never received the switch, so
 // the first turn still asked permissions and any re-sync flipped the pill
 // back to "Ask".
 //
@@ -56,6 +56,14 @@ const boundInit: MockMessage[] = [
 	{ type: "session_switched", id: "sess-pm-001" },
 	{ type: "status", status: "idle" },
 	{ type: "model_info", model: "claude-sonnet-4", provider: "anthropic" },
+	sessionList,
+	modelList,
+];
+
+const claudeBoundInit: MockMessage[] = [
+	{ type: "session_switched", id: "sess-pm-001" },
+	{ type: "status", status: "idle" },
+	{ type: "model_info", model: "claude-sonnet-4", provider: "claude" },
 	sessionList,
 	modelList,
 ];
@@ -123,16 +131,62 @@ async function setup(
 const pill = (page: Page) =>
 	page.locator("[data-testid='permission-mode-badge']");
 
-async function selectAll(page: Page): Promise<void> {
+async function selectFullAccess(page: Page): Promise<void> {
 	await pill(page).click();
-	await page.locator("[data-testid='permission-mode-option-auto']").click();
+	await page.locator("[data-testid='permission-mode-option-full']").click();
 }
 
 const switchCalls = (rpc: RpcMockControl) =>
 	rpc.getRequests().filter((r) => r.tag === "SwitchPermissionMode");
 
 test.describe("Permission mode with a bound session", () => {
-	test("selecting All sends SwitchPermissionMode for the current session", async ({
+	test("shows Auto for Claude", async ({ page }) => {
+		await setup(page, claudeBoundInit);
+		await page
+			.locator(".connect-overlay")
+			.waitFor({ state: "hidden", timeout: 10_000 });
+		await pill(page).click();
+		await expect(
+			page.locator("[data-testid='permission-mode-option-auto']"),
+		).toBeVisible();
+	});
+
+	test("hides Auto for non-Claude providers", async ({ page }) => {
+		await setup(page, boundInit);
+		await page
+			.locator(".connect-overlay")
+			.waitFor({ state: "hidden", timeout: 10_000 });
+		await pill(page).click();
+		await expect(
+			page.locator("[data-testid='permission-mode-option-auto']"),
+		).toHaveCount(0);
+	});
+
+	test("switching an Auto session to an OpenCode model resets it to Ask", async ({
+		page,
+	}) => {
+		const { relay, rpc, serverModes } = await setup(page, claudeBoundInit);
+		await page
+			.locator(".connect-overlay")
+			.waitFor({ state: "hidden", timeout: 10_000 });
+
+		relay.sendMessage({ type: "permission_mode_info", mode: "auto" });
+		await expect(pill(page)).toContainText("Auto");
+
+		relay.sendMessage({
+			type: "model_info",
+			model: "claude-sonnet-4",
+			provider: "anthropic",
+		});
+
+		await expect(pill(page)).toContainText("Ask");
+		await expect
+			.poll(() => switchCalls(rpc).at(-1)?.payload)
+			.toMatchObject({ sessionId: "sess-pm-001", mode: "ask" });
+		expect(serverModes.get("sess-pm-001")).toBe("ask");
+	});
+
+	test("selecting Full access sends SwitchPermissionMode for the current session", async ({
 		page,
 	}) => {
 		const { rpc } = await setup(page, boundInit);
@@ -140,12 +194,35 @@ test.describe("Permission mode with a bound session", () => {
 			.locator(".connect-overlay")
 			.waitFor({ state: "hidden", timeout: 10_000 });
 
-		await selectAll(page);
-		await expect(pill(page)).toContainText("All");
+		await selectFullAccess(page);
+		await expect(pill(page)).toContainText("Full access");
 
 		await expect
 			.poll(() => switchCalls(rpc).at(-1)?.payload)
-			.toMatchObject({ sessionId: "sess-pm-001", mode: "auto" });
+			.toMatchObject({ sessionId: "sess-pm-001", mode: "full" });
+	});
+
+	test("re-selecting the mode already shown still asserts it to the server", async ({
+		page,
+	}) => {
+		const { rpc } = await setup(page, boundInit);
+		await page
+			.locator(".connect-overlay")
+			.waitFor({ state: "hidden", timeout: 10_000 });
+
+		await selectFullAccess(page);
+		await expect.poll(() => switchCalls(rpc).length).toBe(1);
+
+		// The server keeps the mode in memory only, so a daemon restart resets it
+		// to "ask" while this client still shows "Full access". If picking the mode the
+		// pill already displays short-circuits, the user has no way back to
+		// auto-approval without selecting some other mode first.
+		await selectFullAccess(page);
+		await expect.poll(() => switchCalls(rpc).length).toBe(2);
+		await expect
+			.poll(() => switchCalls(rpc).at(-1)?.payload)
+			.toMatchObject({ sessionId: "sess-pm-001", mode: "full" });
+		await expect(pill(page)).toContainText("Full access");
 	});
 
 	test("mode survives navigate away and back (server re-sync)", async ({
@@ -155,13 +232,13 @@ test.describe("Permission mode with a bound session", () => {
 		await page
 			.locator(".connect-overlay")
 			.waitFor({ state: "hidden", timeout: 10_000 });
-		await selectAll(page);
+		await selectFullAccess(page);
 		await expect.poll(() => switchCalls(rpc).length).toBeGreaterThan(0);
 
-		// Full reload navigation (PWA-style revisit) — re-sync must keep "All".
+		// Full reload navigation (PWA-style revisit) — re-sync must keep "Full access".
 		await page.goto(`${BASE}/p/myapp/s/sess-pm-001`);
 		await page.locator("#input").waitFor({ state: "visible", timeout: 10_000 });
-		await expect(pill(page)).toContainText("All");
+		await expect(pill(page)).toContainText("Full access");
 	});
 });
 
@@ -171,9 +248,9 @@ test.describe("Permission mode selected before session bind (regression)", () =>
 	}) => {
 		const { relay, rpc, serverModes } = await setup(page, unboundInit);
 
-		// Cold-start window: no session bound yet. Select "All".
-		await selectAll(page);
-		await expect(pill(page)).toContainText("All");
+		// Cold-start window: no session bound yet. Select "Full access".
+		await selectFullAccess(page);
+		await expect(pill(page)).toContainText("Full access");
 		expect(switchCalls(rpc)).toHaveLength(0);
 
 		// Session binds (server session_switched, e.g. connect completes or the
@@ -183,14 +260,14 @@ test.describe("Permission mode selected before session bind (regression)", () =>
 		// The pending selection must be flushed to the server for that session.
 		await expect
 			.poll(() => switchCalls(rpc).at(-1)?.payload, { timeout: 5000 })
-			.toMatchObject({ sessionId: "sess-pm-001", mode: "auto" });
-		await expect(pill(page)).toContainText("All");
-		expect(serverModes.get("sess-pm-001")).toBe("auto");
+			.toMatchObject({ sessionId: "sess-pm-001", mode: "full" });
+		await expect(pill(page)).toContainText("Full access");
+		expect(serverModes.get("sess-pm-001")).toBe("full");
 
 		// A later hydration push reflecting the (now stored) server mode must
 		// not flip the pill.
-		relay.sendMessage({ type: "permission_mode_info", mode: "auto" });
-		await expect(pill(page)).toContainText("All");
+		relay.sendMessage({ type: "permission_mode_info", mode: "full" });
+		await expect(pill(page)).toContainText("Full access");
 	});
 
 	test("re-selecting Ask before bind clears the pending elevated mode", async ({
@@ -198,17 +275,17 @@ test.describe("Permission mode selected before session bind (regression)", () =>
 	}) => {
 		const { relay, rpc } = await setup(page, unboundInit);
 
-		await selectAll(page);
+		await selectFullAccess(page);
 		await pill(page).click();
 		await page.locator("[data-testid='permission-mode-option-ask']").click();
 		await expect(pill(page)).toContainText("Ask");
 
 		relay.sendMessage({ type: "session_switched", id: "sess-pm-001" });
 
-		// Flushing "ask" (or nothing) is acceptable; flushing "auto" is not.
+		// Flushing "ask" (or nothing) is acceptable; flushing "full" is not.
 		await page.waitForTimeout(500);
 		const flushed = switchCalls(rpc).map((c) => c.payload["mode"]);
-		expect(flushed).not.toContain("auto");
+		expect(flushed).not.toContain("full");
 		await expect(pill(page)).toContainText("Ask");
 	});
 });

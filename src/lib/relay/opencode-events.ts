@@ -319,6 +319,7 @@ interface MessagePayload {
 		input?: number;
 		output?: number;
 		cache?: { read?: number; write?: number };
+		contextWindow?: number;
 	};
 	time?: { created?: number; completed?: number };
 }

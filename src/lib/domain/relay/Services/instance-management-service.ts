@@ -1,4 +1,5 @@
 import { Context, Data, Effect, Layer } from "effect";
+import type { ProviderDriverKind } from "../../../contracts/provider-instance.js";
 import type {
 	InstanceConfig,
 	OpenCodeInstance,
@@ -29,12 +30,16 @@ export interface AddInstanceInput {
 	readonly port?: number | undefined;
 	readonly managed?: boolean | undefined;
 	readonly env?: Record<string, string> | undefined;
+	readonly driver?: ProviderDriverKind | undefined;
+	readonly configDir?: string | undefined;
 }
 
 export interface UpdateInstanceInput {
 	readonly name?: string | undefined;
 	readonly env?: Record<string, string> | undefined;
 	readonly port?: number | undefined;
+	readonly driver?: ProviderDriverKind | undefined;
+	readonly configDir?: string | undefined;
 }
 
 export interface InstanceManagementService {
@@ -164,6 +169,8 @@ const makeInstanceManagementService = (
 					managed,
 					...(input.env != null && { env: input.env }),
 					...(hasUrl && input.url != null && { url: input.url }),
+					...(input.driver != null && { driver: input.driver }),
+					...(input.configDir != null && { configDir: input.configDir }),
 				};
 				yield* Effect.tryPromise({
 					try: () => Promise.resolve(instanceMgmt.addInstance(id, config)),
@@ -201,10 +208,14 @@ const makeInstanceManagementService = (
 					name?: string;
 					env?: Record<string, string>;
 					port?: number;
+					driver?: ProviderDriverKind;
+					configDir?: string;
 				} = {};
 				if (typeof input.name === "string") updates.name = input.name;
 				if (typeof input.port === "number") updates.port = input.port;
 				if (input.env !== undefined) updates.env = input.env;
+				if (input.driver !== undefined) updates.driver = input.driver;
+				if (input.configDir !== undefined) updates.configDir = input.configDir;
 
 				yield* Effect.tryPromise({
 					try: () =>

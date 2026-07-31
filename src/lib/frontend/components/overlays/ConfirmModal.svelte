@@ -34,23 +34,25 @@
   <!-- svelte-ignore a11y_no_static_element_interactions -->
   <div
     id="confirm-modal"
-    class="modal-backdrop fixed inset-0 bg-[rgba(var(--overlay-rgb),0.5)] backdrop-blur-[2px] flex items-center justify-center z-[300] transition-opacity duration-200 ease-linear"
+    class="modal-backdrop fixed inset-0 bg-[rgba(var(--overlay-rgb),0.5)] backdrop-blur-[2px] flex items-center justify-center z-[var(--z-modal)] transition-opacity duration-200 ease-linear"
     onclick={handleBackdropClick}
   >
     <div
-      class="modal-dialog bg-bg-alt border border-border rounded-xl py-5 px-6 max-w-80 w-[90%] shadow-[0_8px_32px_rgba(var(--shadow-rgb),0.4)]"
+      class="modal-dialog bg-bg-alt border border-border rounded-xl py-5 px-6 max-w-80 w-[90%] shadow-modal"
     >
       <p class="text-sm text-text leading-normal mb-4">
         {uiState.confirmDialog.text}
       </p>
       <div class="flex gap-2 justify-end">
         <button
+          data-testid="confirm-modal-cancel"
           class="bg-transparent border border-border text-text-muted rounded-lg py-1.5 px-4 text-base cursor-pointer hover:bg-[rgba(var(--overlay-rgb),0.05)]"
           onclick={handleCancel}
         >
           Cancel
         </button>
         <button
+          data-testid="confirm-modal-action"
           class="bg-accent border-none text-bg rounded-lg py-1.5 px-4 text-base font-medium cursor-pointer hover:bg-accent-hover"
           onclick={handleAction}
         >

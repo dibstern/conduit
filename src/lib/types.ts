@@ -108,6 +108,8 @@ export type IPCCommand =
 			port?: number;
 			env?: Record<string, string>;
 			url?: string;
+			driver?: import("./contracts/provider-instance.js").ProviderDriverKind;
+			configDir?: string;
 	  }
 	| { cmd: "instance_remove"; id: string }
 	| { cmd: "instance_start"; id: string }
@@ -118,6 +120,8 @@ export type IPCCommand =
 			name?: string;
 			env?: Record<string, string>;
 			port?: number;
+			driver?: import("./contracts/provider-instance.js").ProviderDriverKind;
+			configDir?: string;
 	  }
 	| { cmd: "instance_status"; id: string };
 
@@ -157,9 +161,10 @@ export interface PendingPermission {
 // ─── Connection health ──────────────────────────────────────────────────────
 
 export interface ConnectionHealth {
-	connected: boolean;
-	lastEventAt: number | null;
-	reconnectCount: number;
+	readonly connected: boolean;
+	readonly lastEventAt: number | null;
+	readonly reconnectCount: number;
+	readonly stale: boolean;
 }
 
 // ─── Project info ───────────────────────────────────────────────────────────
@@ -261,7 +266,13 @@ export interface ProjectRelayConfig {
 	/** Update an instance's name, env, or port. */
 	updateInstance?: (
 		id: string,
-		updates: { name?: string; env?: Record<string, string>; port?: number },
+		updates: {
+			name?: string;
+			env?: Record<string, string>;
+			port?: number;
+			driver?: import("./contracts/provider-instance.js").ProviderDriverKind;
+			configDir?: string;
+		},
 	) => MaybePromise<import("./shared-types.js").OpenCodeInstance>;
 	/** Persist daemon config to disk after instance mutations. */
 	persistConfig?: () => MaybePromise<void>;

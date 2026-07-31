@@ -96,6 +96,7 @@ function makeEmptyHistoryReadQuery(
 				parent_id: parentId,
 				fork_point_event: null,
 				last_message_at: null,
+				permission_mode: null,
 				created_at: 1,
 				updated_at: 1,
 			}),
@@ -108,6 +109,7 @@ function makeEmptyHistoryReadQuery(
 		getSessionListSnapshot: vi.fn(() =>
 			Effect.succeed({ rows: [], sequence: 0 }),
 		),
+		getLatestTurnModelExecution: vi.fn(() => Effect.succeed(undefined)),
 		getSessionMessagesWithParts: vi.fn(() => Effect.succeed([])),
 	};
 }

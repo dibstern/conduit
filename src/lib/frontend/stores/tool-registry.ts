@@ -6,6 +6,7 @@ import type { ToolStatus } from "../../shared-types.js";
 import type { ChatMessage, ToolMessage } from "../types.js";
 import { generateUuid } from "../utils/format.js";
 import type { FrontendLogger } from "../utils/logger.js";
+import { isSubagentToolName } from "../utils/subagent-tools.js";
 import { createToolMessage } from "../utils/tool-message-factory.js";
 
 // ─── Public Types ───────────────────────────────────────────────────────────
@@ -258,6 +259,11 @@ export function createToolRegistry(
 			const msg = messages[i]!;
 			if (msg.type !== "tool") continue;
 			if (msg.status !== "pending" && msg.status !== "running") continue;
+			// A running subagent tool is NOT finished just because the parent turn
+			// ended — leave it to its own event-driven completion. Force-completing
+			// here shows "Done" while the subagent is still in progress (and that
+			// stale "completed" gets pinned across navigate-in/out reloads).
+			if (isSubagentToolName(msg.name)) continue;
 
 			indices.push(i);
 

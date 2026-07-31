@@ -80,7 +80,7 @@
 	class="skill-item max-w-[760px] mx-auto px-5 my-1.5"
 	data-tool-id={message.id}
 >
-	<div class="{message.status === 'completed' ? '' : 'bg-bg-surface'} rounded-[10px] {message.status === 'error' ? 'glow-tool-error' : message.status === 'completed' ? 'glow-brand-b' : message.status === 'running' ? 'glow-tool-running' : ''}">
+	<div class="{message.status === 'completed' ? '' : 'bg-bg-surface'} rounded-panel {message.status === 'error' ? 'glow-tool-error' : message.status === 'completed' ? 'glow-brand-b' : message.status === 'running' ? 'glow-tool-running' : ''}">
 		<button
 			class="skill-header flex items-center gap-2.5 w-full py-2 px-3 cursor-pointer select-text text-xs text-text-dimmer hover:bg-bg-surface transition-colors duration-150 border-none text-left rounded-t-[10px]"
 			onclick={handleToggle}

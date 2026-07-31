@@ -6,6 +6,7 @@
 
 import { Deferred, Effect } from "effect";
 
+import type { ProviderDriverKind } from "../contracts/provider-instance.js";
 import type { ProviderRuntimeIngestion } from "../domain/relay/Services/provider-runtime-ingestion-service.js";
 import { createLogger } from "../logger.js";
 import type { SqliteClient } from "../persistence/sqlite-client.js";
@@ -15,6 +16,7 @@ import {
 	MissingCommandId,
 	type OrchestrationError,
 	ProviderInstanceFailure,
+	ProviderNotRegistered,
 	SessionProviderNotBound,
 	StaleCommandRejected,
 } from "./errors.js";
@@ -138,6 +140,9 @@ export interface OrchestrationEngineOptions {
 	readonly registry: ProviderRegistry;
 	readonly sessionBindingReadModel?: ProviderSessionBindingReadModel;
 	readonly durableCommands?: DurableCommandStoreOptions;
+	readonly resolveProviderDriver?: (
+		providerId: string,
+	) => ProviderDriverKind | undefined;
 }
 
 interface DurableCommandRuntime {
@@ -189,6 +194,9 @@ const ORPHANED_TURN_RESULT: TurnResult = {
 export class OrchestrationEngine {
 	private readonly registry: ProviderRegistry;
 	private readonly sessionBindingReadModel: ProviderSessionBindingReadModel;
+	private readonly resolveProviderDriver:
+		| ((providerId: string) => ProviderDriverKind | undefined)
+		| undefined;
 	private readonly durable?: DurableCommandRuntime;
 	private readonly inFlightCommands = new Map<
 		string,
@@ -200,6 +208,7 @@ export class OrchestrationEngine {
 		this.sessionBindingReadModel =
 			options.sessionBindingReadModel ??
 			new InMemoryProviderSessionBindingReadModel();
+		this.resolveProviderDriver = options.resolveProviderDriver;
 		if (options.durableCommands) {
 			const durable = options.durableCommands;
 			const receipts = new CommandReadModelRepository(durable.db);
@@ -214,6 +223,9 @@ export class OrchestrationEngine {
 					registry: this.registry,
 					ingestion: durable.ingestion ?? { ingest: () => Effect.succeed(0) },
 					nowMs: durable.now,
+					...(this.resolveProviderDriver
+						? { resolveProviderDriver: this.resolveProviderDriver }
+						: {}),
 				}),
 				db: durable.db,
 				projectKey: durable.projectKey,
@@ -417,7 +429,7 @@ export class OrchestrationEngine {
 			// Provider lookup before durable commit: a lookup failure consumes no
 			// receipt and can be retried after registration. The reactor re-looks
 			// up the instance when it executes; this is the pre-commit fail-fast.
-			yield* this.registry.getInstanceEffect(command.providerId);
+			yield* this.getProviderInstanceEffect(command.providerId);
 
 			yield* Effect.try({
 				try: () =>
@@ -502,7 +514,7 @@ export class OrchestrationEngine {
 		command: SendTurnCommand,
 	): Effect.Effect<TurnResult, OrchestrationError> {
 		return Effect.gen(this, function* () {
-			const instance = yield* this.registry.getInstanceEffect(
+			const instance = yield* this.getProviderInstanceEffect(
 				command.providerId,
 			);
 			return yield* this.sendTurnThroughInstanceEffect(command, instance);
@@ -564,7 +576,7 @@ export class OrchestrationEngine {
 			const providerId = yield* this.getProviderForSessionEffect(
 				command.sessionId,
 			);
-			const instance = yield* this.registry.getInstanceEffect(providerId);
+			const instance = yield* this.getProviderInstanceEffect(providerId);
 
 			yield* Effect.sync(() =>
 				log.info(`Dispatching interruptTurn: session=${command.sessionId}`),
@@ -591,7 +603,7 @@ export class OrchestrationEngine {
 			const providerId = yield* this.getProviderForSessionEffect(
 				command.sessionId,
 			);
-			const instance = yield* this.registry.getInstanceEffect(providerId);
+			const instance = yield* this.getProviderInstanceEffect(providerId);
 
 			return yield* instance
 				.resolvePermissionEffect(
@@ -618,7 +630,7 @@ export class OrchestrationEngine {
 			const providerId = yield* this.getProviderForSessionEffect(
 				command.sessionId,
 			);
-			const instance = yield* this.registry.getInstanceEffect(providerId);
+			const instance = yield* this.getProviderInstanceEffect(providerId);
 
 			return yield* instance
 				.resolveQuestionEffect(
@@ -642,7 +654,7 @@ export class OrchestrationEngine {
 		command: DiscoverCommand,
 	): Effect.Effect<ProviderCapabilities, OrchestrationError> {
 		return Effect.gen(this, function* () {
-			const instance = yield* this.registry.getInstanceEffect(
+			const instance = yield* this.getProviderInstanceEffect(
 				command.providerId,
 			);
 			return yield* instance
@@ -674,7 +686,7 @@ export class OrchestrationEngine {
 				);
 				return;
 			}
-			const instance = yield* this.registry.getInstanceEffect(providerId);
+			const instance = yield* this.getProviderInstanceEffect(providerId);
 			yield* Effect.sync(() =>
 				log.info(
 					`Dispatching endSession: session=${command.sessionId} provider=${providerId}`,
@@ -744,6 +756,18 @@ export class OrchestrationEngine {
 	}
 
 	// ─── Internal ─────────────────────────────────────────────────────────
+
+	private getProviderInstanceEffect(
+		providerId: string,
+	): Effect.Effect<ProviderInstance, ProviderNotRegistered> {
+		const driver = this.resolveProviderDriver
+			? this.resolveProviderDriver(providerId)
+			: providerId;
+		if (driver === undefined) {
+			return Effect.fail(new ProviderNotRegistered({ providerId }));
+		}
+		return this.registry.getInstanceEffect(driver);
+	}
 
 	private getProviderForSessionEffect(
 		sessionId: string,

@@ -294,7 +294,7 @@ describe("instance status broadcast", () => {
 		const instances = daemon.getInstances();
 		expect(instances.length).toBeGreaterThan(0);
 		// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-		expect(instances[0]!.id).toBe("default");
+		expect(instances[0]!.id).toBe("opencode");
 	});
 
 	it("status_changed listener is wired (does not throw without relays)", async () => {
@@ -307,7 +307,7 @@ describe("instance status broadcast", () => {
 		// Verify getInstances works and the daemon was started successfully.
 		expect(daemon.getInstances()).toHaveLength(1);
 		// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-		expect(daemon.getInstances()[0]!.id).toBe("default");
+		expect(daemon.getInstances()[0]!.id).toBe("opencode");
 	});
 
 	it("health checker authenticates with real OpenCode server", async () => {
@@ -360,7 +360,7 @@ describe("instance status broadcast", () => {
 		const instances = daemon.getInstances();
 		expect(instances).toHaveLength(1);
 		// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-		expect(instances[0]!.id).toBe("default");
+		expect(instances[0]!.id).toBe("opencode");
 		// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
 		expect(instances[0]!.status).toBe("healthy");
 	}, 20_000);

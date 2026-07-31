@@ -18,13 +18,17 @@ import {
 	GetFileList,
 	GetFileTree,
 	GetModels,
+	GetModelsResponseSchema,
 	GetProjects,
 	GetTodo,
 	GetToolContent,
+	InstanceListResponseSchema,
 	ListDirectories,
 	ListPtys,
 	ListSessions,
 	LoadMoreHistory,
+	LoadMoreHistoryResponseSchema,
+	ModelExecutionSchema,
 	RejectQuestion,
 	ReloadProviderSession,
 	RemoveInstance,
@@ -212,6 +216,42 @@ const provideRpc = <A, E>(effect: Effect.Effect<A, E, WsRpcTestEnv>) =>
 							},
 						],
 					}),
+				AddInstance: (request) =>
+					Effect.succeed({
+						projectSlug: request.projectSlug,
+						instances: [
+							{
+								id: "added",
+								name: request.name,
+								port: request.port ?? 0,
+								managed: request.managed ?? false,
+								status: "healthy" as const,
+								restartCount: 0,
+								createdAt: 1,
+								...(request.driver !== undefined
+									? { driver: request.driver }
+									: {}),
+								...(request.configDir !== undefined
+									? { configDir: request.configDir }
+									: {}),
+							},
+						],
+					}),
+				UpdateInstance: (request) =>
+					Effect.succeed({
+						projectSlug: request.projectSlug,
+						instances: [
+							{
+								id: request.instanceId,
+								name: request.name ?? "instance",
+								port: request.port ?? 0,
+								managed: false,
+								status: "healthy" as const,
+								restartCount: 0,
+								createdAt: 1,
+							},
+						],
+					}),
 				ScanNow: (request) =>
 					Effect.succeed({
 						projectSlug: request.projectSlug,
@@ -366,6 +406,145 @@ const provideRpc = <A, E>(effect: Effect.Effect<A, E, WsRpcTestEnv>) =>
 	);
 
 describe("browser WebSocket RPC contract", () => {
+	it("decodes per-turn model execution in history responses", () => {
+		const decode = Schema.decodeUnknownSync(LoadMoreHistoryResponseSchema);
+		const decoded = decode({
+			projectSlug: "demo",
+			sessionId: "session-1",
+			messages: [
+				{
+					id: "user-1",
+					role: "user",
+					modelExecution: {
+						requestedModel: "sonnet",
+						expectedModel: "claude-sonnet-5",
+						actualModel: "claude-fable-4-0",
+						drifted: true,
+					},
+				},
+				{
+					id: "user-0",
+					role: "user",
+				},
+			],
+			hasMore: false,
+		});
+
+		expect(decoded.messages[0]?.modelExecution).toEqual({
+			requestedModel: "sonnet",
+			expectedModel: "claude-sonnet-5",
+			actualModel: "claude-fable-4-0",
+			drifted: true,
+		});
+		expect(decoded.messages[1]).not.toHaveProperty("modelExecution");
+
+		expect(() =>
+			decode({
+				projectSlug: "demo",
+				sessionId: "session-1",
+				messages: [
+					{
+						id: "user-1",
+						role: "user",
+						modelExecution: {
+							expectedModel: "claude-sonnet-5",
+							actualModel: "claude-fable-4-0",
+							drifted: false,
+						},
+					},
+				],
+				hasMore: false,
+			}),
+		).toThrow();
+	});
+
+	it("decodes model execution with known and unknown drift", () => {
+		const decodeExecution = Schema.decodeUnknownSync(ModelExecutionSchema);
+		expect(
+			decodeExecution({
+				requestedModel: "sonnet",
+				expectedModel: "claude-sonnet-5",
+				actualModel: "claude-fable-4-0",
+				drifted: true,
+			}),
+		).toEqual({
+			requestedModel: "sonnet",
+			expectedModel: "claude-sonnet-5",
+			actualModel: "claude-fable-4-0",
+			drifted: true,
+		});
+		expect(
+			decodeExecution({
+				expectedModel: "claude-opus-4-6",
+				actualModel: "claude-opus-4-6",
+				drifted: false,
+			}),
+		).toEqual({
+			expectedModel: "claude-opus-4-6",
+			actualModel: "claude-opus-4-6",
+			drifted: false,
+		});
+		expect(
+			decodeExecution({
+				requestedModel: "agent-model",
+				actualModel: "claude-sonnet-5",
+			}),
+		).toEqual({
+			requestedModel: "agent-model",
+			actualModel: "claude-sonnet-5",
+		});
+
+		const response = Schema.decodeUnknownSync(GetModelsResponseSchema)({
+			projectSlug: "demo",
+			providers: [],
+			modelExecution: {
+				actualModel: "claude-sonnet-5",
+			},
+		});
+		expect(response.modelExecution).toEqual({
+			actualModel: "claude-sonnet-5",
+		});
+	});
+
+	it("preserves provider driver metadata in instance-list responses", () => {
+		const response = Schema.decodeUnknownSync(InstanceListResponseSchema)({
+			projectSlug: "demo",
+			instances: [
+				{
+					id: "work-claude",
+					name: "Work Claude",
+					port: 0,
+					managed: false,
+					status: "healthy",
+					driver: "claude",
+					configDir: "/profiles/work",
+					restartCount: 0,
+					createdAt: 1,
+				},
+				{
+					id: "remote-opencode",
+					name: "Remote OpenCode",
+					port: 0,
+					managed: false,
+					status: "healthy",
+					driver: "opencode",
+					url: "https://opencode.example.test",
+					restartCount: 0,
+					createdAt: 1,
+				},
+			],
+		});
+
+		expect(response.instances[0]).toMatchObject({
+			driver: "claude",
+			configDir: "/profiles/work",
+		});
+		expect(response.instances[1]).toMatchObject({
+			driver: "opencode",
+			url: "https://opencode.example.test",
+		});
+	});
+
 	it("exports one shared WsRpcGroup for frontend and server", () => {
 		expect(FrontendWsRpcGroup).toBe(WsRpcGroup);
 		expect(ServerWsRpcGroup).toBe(WsRpcGroup);
@@ -1033,7 +1212,7 @@ describe("browser WebSocket RPC contract", () => {
 			new SwitchPermissionMode({
 				projectSlug: "demo",
 				sessionId: "session-1",
-				mode: "auto",
+				mode: "full",
 			})._tag,
 		).toBe("SwitchPermissionMode");
 		expect(new GetFileTree({ projectSlug: "demo" })._tag).toBe("GetFileTree");

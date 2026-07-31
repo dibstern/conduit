@@ -177,6 +177,52 @@ describe("daemon-config-persistence", () => {
 		}),
 	);
 
+	it.effect(
+		"loadConfig migrates a legacy default OpenCode instance id and its project bindings",
+		() =>
+			Effect.gen(function* () {
+				const testFs = makeTestFileSystem();
+				const diskState = {
+					pid: 1,
+					port: 2633,
+					host: "127.0.0.1",
+					pinHash: null,
+					tls: false,
+					debug: false,
+					keepAwake: false,
+					dangerouslySkipPermissions: false,
+					projects: [
+						{ path: "/proj", slug: "proj", addedAt: 1, instanceId: "default" },
+					],
+					instances: [
+						{
+							id: "default",
+							name: "Default",
+							port: 4096,
+							managed: false,
+							url: "http://localhost:4096",
+							driver: "opencode",
+						},
+					],
+					dismissedPaths: [],
+				};
+				testFs.files.set(CONFIG_PATH, JSON.stringify(diskState));
+
+				const state = yield* loadConfig.pipe(
+					Effect.provide(
+						Layer.mergeAll(
+							testFs.layer,
+							Layer.succeed(PersistencePathTag, CONFIG_PATH),
+						),
+					),
+				);
+
+				expect(state.instances).toHaveLength(1);
+				expect(state.instances[0]?.id).toBe("opencode");
+				expect(state.projects[0]?.instanceId).toBe("opencode");
+			}),
+	);
+
 	it.effect("loadConfig returns emptyDaemonState() on missing file", () =>
 		Effect.gen(function* () {
 			const testFs = makeTestFileSystem();

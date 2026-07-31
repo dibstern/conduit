@@ -11,6 +11,7 @@ const TURN_HANDLES = [
 	"turn.completed",
 	"turn.error",
 	"turn.interrupted",
+	"turn.model_resolved",
 ] as const;
 
 /**
@@ -145,6 +146,29 @@ export class TurnProjector implements Projector {
 					[event.createdAt, event.sessionId],
 				);
 			}
+			return;
+		}
+
+		if (isEventType(event, "turn.model_resolved")) {
+			db.execute(
+				`UPDATE turns
+				 SET requested_model = ?,
+				     expected_model = ?,
+				     actual_model = ?
+				 WHERE id = (
+				   SELECT id FROM turns
+				   WHERE session_id = ?
+				     AND state IN ('pending', 'running')
+				   ORDER BY requested_at DESC
+				   LIMIT 1
+				 )`,
+				[
+					event.data.requestedModel ?? null,
+					event.data.expectedModel ?? null,
+					event.data.actualModel,
+					event.sessionId,
+				],
+			);
 			return;
 		}
 

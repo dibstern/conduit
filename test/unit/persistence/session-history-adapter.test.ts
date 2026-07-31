@@ -50,6 +50,7 @@ function makeMessageWithParts(
 		tokens_out: null,
 		tokens_cache_read: null,
 		tokens_cache_write: null,
+		context_window: null,
 		is_streaming: 0,
 		created_at: 1_000_000_000_000,
 		updated_at: 1_000_000_000_000,
@@ -79,6 +80,7 @@ describe("messageRowsToHistory", () => {
 				cost: 0.01,
 				tokens_in: 10,
 				tokens_out: 20,
+				context_window: 1_000_000,
 			}),
 		];
 
@@ -90,6 +92,7 @@ describe("messageRowsToHistory", () => {
 		expect(first?.role).toBe("user");
 		expect(second?.id).toBe("m2");
 		expect(second?.role).toBe("assistant");
+		expect(second?.tokens?.context_window).toBe(1_000_000);
 		expect(result.hasMore).toBe(false);
 	});
 
@@ -119,6 +122,53 @@ describe("messageRowsToHistory", () => {
 		const result = messageRowsToHistory([], { pageSize: 50 });
 		expect(result.messages).toEqual([]);
 		expect(result.hasMore).toBe(false);
+	});
+
+	it("exposes model drift only on the turn's user message", () => {
+		const modelExecution = {
+			requestedModel: "sonnet",
+			expectedModel: "claude-sonnet-5",
+			actualModel: "claude-fable-4-0",
+		};
+		const rows = [
+			makeMessageWithParts("user", {
+				role: "user",
+				modelExecution,
+			}),
+			makeMessageWithParts("assistant", {
+				role: "assistant",
+				modelExecution,
+			}),
+		];
+
+		const result = messageRowsToHistory(rows, { pageSize: 50 });
+
+		expect(result.messages[0]?.modelExecution).toEqual({
+			...modelExecution,
+			drifted: true,
+		});
+		expect(result.messages[1]).not.toHaveProperty("modelExecution");
+	});
+
+	it("omits drift for historical and partial turn evidence", () => {
+		const historical = makeMessageWithParts("historical", { role: "user" });
+		const partial = makeMessageWithParts("partial", {
+			role: "user",
+			modelExecution: {
+				requestedModel: "sonnet",
+				actualModel: "claude-sonnet-5",
+			},
+		});
+
+		const result = messageRowsToHistory([historical, partial], {
+			pageSize: 50,
+		});
+
+		expect(result.messages[0]).not.toHaveProperty("modelExecution");
+		expect(result.messages[1]?.modelExecution).toEqual({
+			requestedModel: "sonnet",
+			actualModel: "claude-sonnet-5",
+		});
 	});
 
 	it("maps parts from MessagePartRow to HistoryMessagePart", () => {

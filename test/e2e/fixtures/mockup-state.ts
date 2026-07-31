@@ -115,6 +115,226 @@ export const initMessages: MockMessage[] = [
 			{ id: "code", name: "Code", description: "General coding assistant" },
 		],
 	},
+	{
+		type: "command_list",
+		commands: [
+			{ name: "code-review", description: "Review the current diff" },
+			{ name: "commit", description: "Create a git commit" },
+			{ name: "test", description: "Run the test suite" },
+		],
+	},
+];
+
+// ─── Harness / instance-picker fixtures ──────────────────────────────────────
+// The composer's instance-rail model picker needs both drivers discoverable:
+// the "claude" provider belongs to the Claude driver's default instance, the
+// "anthropic" catalog to the OpenCode driver's default instance.
+
+export const dualDriverProviders = [
+	{
+		id: "claude",
+		name: "Anthropic - claude",
+		configured: true,
+		models: [
+			{ id: "claude-opus-4-1", name: "claude-opus-4-1", provider: "claude" },
+			{
+				id: "claude-sonnet-4-5",
+				name: "claude-sonnet-4-5",
+				provider: "claude",
+			},
+		],
+	},
+	{
+		id: "anthropic",
+		name: "Anthropic - opencode",
+		configured: true,
+		models: [
+			{
+				id: "claude-haiku-3.5",
+				name: "claude-haiku-3.5",
+				provider: "anthropic",
+			},
+			{ id: "claude-sonnet-4", name: "claude-sonnet-4", provider: "anthropic" },
+		],
+	},
+];
+
+export const dualDriverModelList: MockMessage = {
+	type: "model_list",
+	providers: dualDriverProviders,
+};
+
+export const claudeInstanceAgents = [
+	{ id: "planner", name: "Planner" },
+	{ id: "reviewer", name: "Reviewer" },
+];
+
+/** Two agents so the selector stays visible (it hides with a single agent). */
+export const openCodeInstanceAgents = [
+	{ id: "opencode-triage", name: "opencode-triage" },
+	{ id: "build", name: "Build" },
+];
+
+export const claudeAgentList: MockMessage = {
+	type: "agent_list",
+	providerScope: { id: "claude", name: "Claude" },
+	agents: claudeInstanceAgents,
+};
+
+export const openCodeAgentList: MockMessage = {
+	type: "agent_list",
+	providerScope: { id: "opencode", name: "OpenCode" },
+	agents: openCodeInstanceAgents,
+};
+
+/** Connected-but-unbound init: like initMessages but WITHOUT session_switched.
+ *  No session is bound, so the harness rail is fully interactive and the
+ *  composer's first send creates the session (CreateSession + instanceId). */
+export const unboundInitMessages: MockMessage[] = [
+	...initMessages.filter(
+		(m) =>
+			m.type !== "session_switched" &&
+			m.type !== "model_list" &&
+			m.type !== "agent_list",
+	),
+	dualDriverModelList,
+	openCodeAgentList,
+];
+
+// ─── Model-execution drift fixtures ─────────────────────────────────────────
+
+interface ModelExecutionFixture {
+	requestedModel?: string;
+	expectedModel?: string;
+	actualModel: string;
+	drifted: boolean;
+}
+
+const driftedModelExecution: ModelExecutionFixture = {
+	requestedModel: "opus[1m]",
+	expectedModel: "claude-opus-5[1m]",
+	actualModel: "claude-fable-5",
+	drifted: true,
+};
+
+const rawIdModelExecution: ModelExecutionFixture = {
+	requestedModel: "opus[1m]",
+	expectedModel: "claude-opus-5[1m]",
+	actualModel: "claude-unlisted-5",
+	drifted: true,
+};
+
+const matchingModelExecution: ModelExecutionFixture = {
+	requestedModel: "opus[1m]",
+	expectedModel: "claude-opus-5[1m]",
+	actualModel: "claude-opus-5[1m]",
+	drifted: false,
+};
+
+const partialModelExecution: ModelExecutionFixture = {
+	expectedModel: "claude-opus-5[1m]",
+	actualModel: "claude-fable-5",
+	drifted: true,
+};
+
+export const modelExecutionProviders = dualDriverProviders.map((provider) =>
+	provider.id === "claude"
+		? {
+				...provider,
+				models: [
+					{ id: "opus[1m]", name: "Opus", provider: "claude" },
+					{ id: "claude-fable-5", name: "Fable 5", provider: "claude" },
+					...provider.models,
+				],
+			}
+		: provider,
+);
+
+function modelExecutionInitMessages(
+	transcriptText: string,
+	modelExecution: ModelExecutionFixture,
+): MockMessage[] {
+	return [
+		{
+			type: "session_switched",
+			id: "sess-mockup-001",
+			history: {
+				messages: [
+					{
+						id: `msg-${transcriptText.toLowerCase().replaceAll(" ", "-")}`,
+						role: "user",
+						parts: [
+							{
+								id: `part-${transcriptText.toLowerCase().replaceAll(" ", "-")}`,
+								type: "text",
+								text: transcriptText,
+							},
+						],
+						modelExecution,
+					},
+				],
+				hasMore: false,
+			},
+		},
+		...unboundInitMessages.filter(
+			(message) =>
+				message.type !== "model_info" &&
+				message.type !== "model_list" &&
+				message.type !== "agent_list",
+		),
+		{ type: "model_info", model: "opus[1m]", provider: "claude" },
+		{ type: "model_list", providers: modelExecutionProviders },
+		claudeAgentList,
+	];
+}
+
+export const modelExecutionMockups = {
+	"drifted-model": {
+		transcriptText: "Run this turn with Opus",
+		modelExecution: driftedModelExecution,
+		initMessages: modelExecutionInitMessages(
+			"Run this turn with Opus",
+			driftedModelExecution,
+		),
+	},
+	"raw-id-model-drift": {
+		transcriptText: "Run this turn with an unlisted model",
+		modelExecution: rawIdModelExecution,
+		initMessages: modelExecutionInitMessages(
+			"Run this turn with an unlisted model",
+			rawIdModelExecution,
+		),
+	},
+	"matching-model": {
+		transcriptText: "Run this normal turn with Opus",
+		modelExecution: matchingModelExecution,
+		initMessages: modelExecutionInitMessages(
+			"Run this normal turn with Opus",
+			matchingModelExecution,
+		),
+	},
+	"partial-model-drift": {
+		transcriptText: "Run this turn with incomplete model evidence",
+		modelExecution: partialModelExecution,
+		initMessages: modelExecutionInitMessages(
+			"Run this turn with incomplete model evidence",
+			partialModelExecution,
+		),
+	},
+};
+
+/** Bind an existing session to the Claude harness (locked-rail mode). */
+export const claudeBoundSessionMessages: MockMessage[] = [
+	{ type: "session_switched", id: "sess-bound-claude" },
+	{ type: "model_info", model: "claude-sonnet-4-5", provider: "claude" },
+	claudeAgentList,
+];
+
+/** Bind an existing session to the OpenCode harness (locked-rail mode). */
+export const openCodeBoundSessionMessages: MockMessage[] = [
+	{ type: "session_switched", id: "sess-bound-opencode" },
+	{ type: "model_info", model: "claude-sonnet-4", provider: "anthropic" },
+	openCodeAgentList,
 ];
 
 // ─── Turn 1 response (completed) ─────────────────────────────────────────────
@@ -292,7 +512,7 @@ export const singleInstanceList: MockMessage = {
 	type: "instance_list",
 	instances: [
 		{
-			id: "default",
+			id: "opencode",
 			name: "Default",
 			port: 4096,
 			managed: true,

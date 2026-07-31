@@ -61,12 +61,17 @@ function makeStubInstance(providerId: string): ProviderInstance & {
 }
 
 function sendTurnCommand(
-	overrides: { commandId?: string; prompt?: string } = {},
+	overrides: {
+		commandId?: string;
+		prompt?: string;
+		providerId?: string;
+		configDir?: string;
+	} = {},
 ): SendTurnCommand {
 	return {
 		type: "send_turn",
 		commandId: overrides.commandId ?? "cmd-durable-1",
-		providerId: "opencode",
+		providerId: overrides.providerId ?? "opencode",
 		input: {
 			sessionId: "session-1",
 			turnId: "turn-1",
@@ -74,6 +79,9 @@ function sendTurnCommand(
 			history: [],
 			providerState: {},
 			workspaceRoot: "/tmp/project",
+			...(overrides.configDir === undefined
+				? {}
+				: { configDir: overrides.configDir }),
 			eventSink: createMockEventSink(),
 			abortSignal: new AbortController().signal,
 		},
@@ -133,6 +141,34 @@ describe("OrchestrationEngine durable receipts", () => {
 			expect(row?.status).toBe("side_effect_completed");
 			expect(row?.fingerprint_hash).toMatch(/^sha256:/);
 			expect(row?.updated_at).toBe(4242);
+			db.close();
+		}),
+	);
+
+	it.effect("preserves a Claude config dir through durable dispatch", () =>
+		Effect.gen(function* () {
+			const db = SqliteClient.memory();
+			runMigrations(db, schemaMigrations);
+			const registry = new ProviderRegistry();
+			const instance = makeStubInstance("claude");
+			registry.registerInstance(instance);
+			const engine = new OrchestrationEngine({
+				registry,
+				durableCommands: makeDurableOptions({ db }),
+			});
+
+			yield* engine.dispatchEffect(
+				sendTurnCommand({
+					providerId: "claude",
+					configDir: "/instances/work-claude",
+				}),
+			);
+
+			expect(instance.sendTurnEffect).toHaveBeenCalledWith(
+				expect.objectContaining({
+					configDir: "/instances/work-claude",
+				}),
+			);
 			db.close();
 		}),
 	);

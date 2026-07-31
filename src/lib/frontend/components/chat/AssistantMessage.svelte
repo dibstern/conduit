@@ -379,7 +379,7 @@
 	onkeydown={handleKeydown}
 	role="article"
 >
-	<div class="bg-bg-surface rounded-[10px] py-4 px-5 relative glow-brand-b transition-colors duration-150 {containerCopyClass}">
+	<div class="bg-bg-surface rounded-panel py-4 px-5 relative glow-brand-b transition-colors duration-150 {containerCopyClass}">
 		<!-- Action buttons (hover) — top-right icon row -->
 		{#if message.finalized}
 			<div

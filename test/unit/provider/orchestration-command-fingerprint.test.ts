@@ -88,11 +88,13 @@ describe("effectiveDispatchFingerprint", () => {
 
 	it("folds Claude contextWindow into the effective API model id (1m sonnet)", () => {
 		const base = sendTurn({
-			input: { model: { providerId: "claude", modelId: "sonnet" } },
+			input: {
+				model: { providerId: "claude", modelId: "claude-sonnet-5" },
+			},
 		});
 		const million = sendTurn({
 			input: {
-				model: { providerId: "claude", modelId: "sonnet" },
+				model: { providerId: "claude", modelId: "claude-sonnet-5" },
 				contextWindow: "1m",
 			},
 		});
@@ -126,13 +128,15 @@ describe("effectiveDispatchFingerprint", () => {
 		expect(withSonnet).not.toBe(withNone);
 	});
 
-	it("ignores contextWindow when it does not derive a different model (opus has no 1m)", () => {
+	it("ignores contextWindow for Opus 4.8, which has no selectable 1m", () => {
 		const base = sendTurn({
-			input: { model: { providerId: "claude", modelId: "opus" } },
+			input: {
+				model: { providerId: "claude", modelId: "claude-opus-4-8" },
+			},
 		});
 		const million = sendTurn({
 			input: {
-				model: { providerId: "claude", modelId: "opus" },
+				model: { providerId: "claude", modelId: "claude-opus-4-8" },
 				contextWindow: "1m",
 			},
 		});

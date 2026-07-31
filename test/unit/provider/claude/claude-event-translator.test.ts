@@ -8,6 +8,7 @@ import {
 	ProviderRuntimeEventSchema,
 } from "../../../../src/lib/contracts/providers/provider-runtime-event.js";
 import { historyToChatMessages } from "../../../../src/lib/frontend/utils/history-logic.js";
+import { createTestLogger } from "../../../../src/lib/logger.js";
 import {
 	createAllProjectors,
 	ProjectionRunner,
@@ -99,6 +100,26 @@ function makeStreamEvent(event: Record<string, unknown>): SDKMessage {
 	} as unknown as SDKMessage;
 }
 
+function makeInitMessage(model: string): SDKMessage {
+	return {
+		type: "system",
+		subtype: "init",
+		apiKeySource: "api_key",
+		claude_code_version: "1.0.0",
+		cwd: "/tmp/ws",
+		tools: ["Bash", "Read", "Write"],
+		mcp_servers: [],
+		model,
+		permissionMode: "default",
+		slash_commands: [],
+		output_style: "text",
+		skills: [],
+		plugins: [],
+		uuid: "00000000-0000-0000-0000-000000000001",
+		session_id: "sdk-sess-new",
+	} as unknown as SDKMessage;
+}
+
 // Tools seeded into ctx.inFlightTools before the first translate call opened
 // mid-turn — their tool.started happened "before the test window". Snapshot
 // them so the afterEach invariant check doesn't flag their running/completed
@@ -176,13 +197,17 @@ describe("ClaudeEventTranslator", () => {
 	let sink: ReturnType<typeof makeStubSink>;
 	let translator: ClaudeEventTranslator;
 	let ctx: ClaudeSessionContext;
+	let logger: ReturnType<typeof createTestLogger>;
 
 	beforeEach(() => {
 		sink = makeStubSink();
 		ctx = makeCtx();
 		seededToolPartIds = null;
+		logger = createTestLogger();
+		logger.warn = vi.fn();
 		translator = new ClaudeEventTranslator({
 			getSink: () => sink,
+			logger,
 		});
 	});
 
@@ -197,24 +222,20 @@ describe("ClaudeEventTranslator", () => {
 
 	// ─── 1. system (subtype init) ────────────────────────────────────────
 
-	it("translates system/init to session.status and captures model", async () => {
-		await runTranslate(translator, ctx, {
-			type: "system",
-			subtype: "init",
-			apiKeySource: "api_key",
-			claude_code_version: "1.0.0",
-			cwd: "/tmp/ws",
-			tools: ["Bash", "Read", "Write"],
-			mcp_servers: [],
-			model: "claude-sonnet-4-5",
-			permissionMode: "default",
-			slash_commands: [],
-			output_style: "text",
-			skills: [],
-			plugins: [],
-			uuid: "00000000-0000-0000-0000-000000000001",
-			session_id: "sdk-sess-new",
-		} as unknown as SDKMessage);
+	it("emits matching model evidence before idle without changing the requested model", async () => {
+		ctx.currentModel = "sonnet";
+		ctx.expectedApiModelId = "claude-sonnet-5";
+		await runTranslate(translator, ctx, makeInitMessage("claude-sonnet-5"));
+
+		expect(sink.events.map((event) => event.type)).toEqual([
+			"turn.model_resolved",
+			"session.status",
+		]);
+		expect(dataOf(sink.events[0])).toEqual({
+			requestedModel: "sonnet",
+			expectedModel: "claude-sonnet-5",
+			actualModel: "claude-sonnet-5",
+		});
 
 		const statusEvent = sink.events.find((e) => e.type === "session.status");
 		expect(statusEvent).toBeDefined();
@@ -222,11 +243,56 @@ describe("ClaudeEventTranslator", () => {
 		expect(data["sessionId"]).toBe("sess-1");
 		expect(data["status"]).toBe("idle");
 
-		// Model captured on context
-		expect(ctx.currentModel).toBe("claude-sonnet-4-5");
+		expect(ctx.currentModel).toBe("sonnet");
+		expect(logger.warn).not.toHaveBeenCalled();
 
 		// SDK session_id captured for resume
 		expect(ctx.resumeSessionId).toBe("sdk-sess-new");
+	});
+
+	it("emits unequal evidence and logs one model-drift warning", async () => {
+		ctx.currentModel = "sonnet";
+		ctx.expectedApiModelId = "claude-sonnet-5";
+
+		await runTranslate(translator, ctx, makeInitMessage("claude-opus-5[1m]"));
+
+		expect(dataOf(sink.events[0])).toEqual({
+			requestedModel: "sonnet",
+			expectedModel: "claude-sonnet-5",
+			actualModel: "claude-opus-5[1m]",
+		});
+		expect(logger.warn).toHaveBeenCalledTimes(1);
+		expect(vi.mocked(logger.warn).mock.calls[0]?.[0]).toContain("sess-1");
+		expect(vi.mocked(logger.warn).mock.calls[0]?.[0]).toContain("sonnet");
+		expect(vi.mocked(logger.warn).mock.calls[0]?.[0]).toContain(
+			"claude-sonnet-5",
+		);
+		expect(vi.mocked(logger.warn).mock.calls[0]?.[0]).toContain(
+			"claude-opus-5[1m]",
+		);
+	});
+
+	it.each([
+		[
+			"requested without expected",
+			{ currentModel: "sonnet" },
+			{
+				requestedModel: "sonnet",
+				actualModel: "claude-sonnet-5",
+			},
+		],
+		[
+			"actual only",
+			{ currentModel: undefined },
+			{ actualModel: "claude-sonnet-5" },
+		],
+	] as const)("emits %s evidence without warning", async (_name, overrides, data) => {
+		Object.assign(ctx, overrides);
+
+		await runTranslate(translator, ctx, makeInitMessage("claude-sonnet-5"));
+
+		expect(dataOf(sink.events[0])).toEqual(data);
+		expect(logger.warn).not.toHaveBeenCalled();
 	});
 
 	// ─── 2. system (subtype status) ──────────────────────────────────────
@@ -725,6 +791,117 @@ describe("ClaudeEventTranslator", () => {
 					}),
 				]),
 			);
+		} finally {
+			harness.close();
+		}
+	});
+
+	it("persists the result context window through history hydration", async () => {
+		const harness = createTestHarness();
+		try {
+			harness.seedSession("sess-context-window", { provider: "claude" });
+			const runner = new ProjectionRunner({
+				db: harness.db,
+				eventStore: harness.eventStore,
+				cursorRepo: new ProjectorCursorRepository(harness.db),
+				projectors: createAllProjectors(),
+			});
+			runner.recover();
+			const send = vi.fn();
+			const relaySink = createRelayEventSink({
+				sessionId: "sess-context-window",
+				send,
+				persist: {
+					persistEvent: (event) =>
+						Effect.sync(() => {
+							const stored = harness.eventStore.append(event);
+							runner.projectEvent(stored);
+						}),
+				},
+			});
+			const relayTranslator = new ClaudeEventTranslator({
+				getSink: () => relaySink,
+			});
+			const relayCtx = makeCtx({
+				sessionId: "sess-context-window",
+				eventSink: relaySink,
+				currentApiModelId: "claude-sonnet-4[1m]",
+			});
+
+			await runTranslate(relayTranslator, relayCtx, {
+				type: "assistant",
+				message: {
+					id: "msg-context-window",
+					type: "message",
+					role: "assistant",
+					content: [{ type: "text", text: "within the million-token window" }],
+					model: "claude-sonnet-4",
+					stop_reason: "end_turn",
+					stop_sequence: null,
+					usage: {
+						input_tokens: 10_000,
+						output_tokens: 100,
+						cache_read_input_tokens: 320_000,
+						cache_creation_input_tokens: 0,
+					},
+				},
+				parent_tool_use_id: null,
+				uuid: "00000000-0000-0000-0000-000000000207",
+				session_id: "sdk-sess-context-window",
+			} as unknown as SDKMessage);
+			await runTranslate(relayTranslator, relayCtx, {
+				type: "result",
+				subtype: "success",
+				duration_ms: 1200,
+				duration_api_ms: 900,
+				is_error: false,
+				num_turns: 1,
+				result: "done",
+				stop_reason: "end_turn",
+				total_cost_usd: 0.12,
+				usage: {
+					input_tokens: 10_000,
+					output_tokens: 100,
+					cache_read_input_tokens: 320_000,
+					cache_creation_input_tokens: 0,
+				},
+				modelUsage: {
+					"claude-sonnet-4[1m]": { contextWindow: 1_000_000 },
+				},
+				permission_denials: [],
+				uuid: "00000000-0000-0000-0000-000000000208",
+				session_id: "sdk-sess-context-window",
+			} as unknown as SDKMessage);
+
+			expect(send).toHaveBeenCalledWith(
+				expect.objectContaining({
+					type: "result",
+					usage: expect.objectContaining({ context_window: 1_000_000 }),
+				}),
+			);
+
+			const rows = new ReadQueryService(harness.db).getSessionMessagesWithParts(
+				"sess-context-window",
+			);
+			const assistantRow = rows.find((row) => row.role === "assistant") as
+				| ((typeof rows)[number] & { context_window?: number })
+				| undefined;
+			expect(assistantRow?.context_window).toBe(1_000_000);
+
+			const history = messageRowsToHistory(rows, { pageSize: 50 });
+			const assistantHistory = history.messages.find(
+				(message) => message.role === "assistant",
+			);
+			expect(
+				(assistantHistory?.tokens as { context_window?: number } | undefined)
+					?.context_window,
+			).toBe(1_000_000);
+
+			const messages = historyToChatMessages(history.messages);
+			const result = messages.find((message) => message.type === "result");
+			expect(
+				result?.type === "result" ? result.context_window : undefined,
+			).toBe(1_000_000);
 		} finally {
 			harness.close();
 		}
@@ -1447,6 +1624,73 @@ describe("ClaudeEventTranslator", () => {
 		expect(tokens["cacheWrite"]).toBe(5);
 		expect(data["cost"]).toBeCloseTo(0.0123);
 		expect(data["duration"]).toBe(1200);
+	});
+
+	it("uses the largest finite positive context window from result model usage", async () => {
+		ctx.lastAssistantUuid = "assist-uuid-context-window";
+
+		await runTranslate(translator, ctx, {
+			type: "result",
+			subtype: "success",
+			duration_ms: 1200,
+			duration_api_ms: 900,
+			is_error: false,
+			num_turns: 1,
+			result: "done",
+			stop_reason: "end_turn",
+			total_cost_usd: 0.0123,
+			usage: {
+				input_tokens: 100,
+				output_tokens: 50,
+				cache_read_input_tokens: 320_000,
+				cache_creation_input_tokens: 5,
+			},
+			modelUsage: {
+				"claude-sonnet-4": { contextWindow: 200_000 },
+				"claude-sonnet-4[1m]": { contextWindow: 1_000_000 },
+				ignored: { contextWindow: Number.POSITIVE_INFINITY },
+			},
+			permission_denials: [],
+			uuid: "00000000-0000-0000-0000-000000000011",
+			session_id: "sdk-sess",
+		} as unknown as SDKMessage);
+
+		const turnCompleted = sink.events.find((e) => e.type === "turn.completed");
+		const tokens = dataOf(turnCompleted)["tokens"] as Record<string, unknown>;
+		expect(tokens["contextWindow"]).toBe(1_000_000);
+	});
+
+	it("falls back to the effective 1m API model suffix when model usage has no window", async () => {
+		ctx.lastAssistantUuid = "assist-uuid-context-window-fallback";
+		ctx.currentApiModelId = "claude-sonnet-4[1m]";
+
+		await runTranslate(translator, ctx, {
+			type: "result",
+			subtype: "success",
+			duration_ms: 1200,
+			duration_api_ms: 900,
+			is_error: false,
+			num_turns: 1,
+			result: "done",
+			stop_reason: "end_turn",
+			total_cost_usd: 0.0123,
+			usage: {
+				input_tokens: 100,
+				output_tokens: 50,
+				cache_read_input_tokens: 320_000,
+				cache_creation_input_tokens: 5,
+			},
+			modelUsage: {
+				ignored: { contextWindow: 0 },
+			},
+			permission_denials: [],
+			uuid: "00000000-0000-0000-0000-000000000012",
+			session_id: "sdk-sess",
+		} as unknown as SDKMessage);
+
+		const turnCompleted = sink.events.find((e) => e.type === "turn.completed");
+		const tokens = dataOf(turnCompleted)["tokens"] as Record<string, unknown>;
+		expect(tokens["contextWindow"]).toBe(1_000_000);
 	});
 
 	// ─── 13a-2. result tokens use the LAST request's usage, not the turn sum ──

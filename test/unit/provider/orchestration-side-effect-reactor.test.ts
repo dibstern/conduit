@@ -5,6 +5,10 @@ import {
 	decodeProviderRuntimeEvent,
 	type ProviderRuntimeEvent,
 } from "../../../src/lib/contracts/providers/provider-runtime-event.js";
+import {
+	type DaemonConfig,
+	resolveProviderRoutingDriver,
+} from "../../../src/lib/daemon/config-persistence.js";
 import { runMigrations } from "../../../src/lib/persistence/migrations.js";
 import { schemaMigrations } from "../../../src/lib/persistence/schema.js";
 import { SqliteClient } from "../../../src/lib/persistence/sqlite-client.js";
@@ -99,6 +103,43 @@ describe("ProviderSideEffectReactor", () => {
 				["cmd-1"],
 			),
 		).toEqual({ status: "side_effect_completed" });
+	});
+
+	it("routes a durable named-instance command through its driver runtime", async () => {
+		const config: DaemonConfig = {
+			pid: 1234,
+			port: 2633,
+			pinHash: null,
+			tls: false,
+			debug: false,
+			keepAwake: false,
+			dangerouslySkipPermissions: false,
+			projects: [],
+			instances: [
+				{
+					id: "work-claude",
+					name: "Work Claude",
+					port: 0,
+					managed: false,
+					driver: "claude",
+				},
+			],
+		};
+		const sendTurn = vi.fn((_input: SendTurnInput) =>
+			Effect.succeed(completedTurn),
+		);
+		seedSendTurnOutbox(db, { providerId: "work-claude" });
+		const reactor = new ProviderSideEffectReactor({
+			db,
+			registry: new ProviderRegistry([makeProvider(sendTurn)]),
+			ingestion: { ingest: vi.fn(() => Effect.succeed(1)) },
+			resolveProviderDriver: (providerId) =>
+				resolveProviderRoutingDriver(config, providerId),
+		});
+
+		await Effect.runPromise(reactor.drain());
+
+		expect(sendTurn).toHaveBeenCalledTimes(1);
 	});
 
 	it("hands provider output to provider runtime ingestion", async () => {
@@ -625,6 +666,7 @@ function seedSendTurnOutbox(
 	options: {
 		readonly commandId?: string;
 		readonly payloadJson?: string;
+		readonly providerId?: string;
 		readonly requestSequence?: number;
 	} = {},
 ): void {
@@ -658,7 +700,7 @@ function seedSendTurnOutbox(
 			commandId,
 			"project-1",
 			"session-1",
-			"claude",
+			options.providerId ?? "claude",
 			"send_turn",
 			options.payloadJson ??
 				JSON.stringify({

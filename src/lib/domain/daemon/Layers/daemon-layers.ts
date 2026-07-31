@@ -339,12 +339,19 @@ const resolveProjectOpencodeUrl = (project: {
 	readonly instanceId?: string;
 }) =>
 	Effect.gen(function* () {
+		const instances = Array.from(yield* getEffectInstances);
 		if (project.instanceId != null) {
-			return yield* getInstanceUrl(project.instanceId);
+			const selected = instances.find(
+				(instance) => instance.id === project.instanceId,
+			);
+			if ((selected?.driver ?? "opencode") === "opencode") {
+				return yield* getInstanceUrl(project.instanceId);
+			}
 		}
 
-		const instances = Array.from(yield* getEffectInstances);
-		const first = instances[0];
+		const first = instances.find(
+			(instance) => (instance.driver ?? "opencode") === "opencode",
+		);
 		if (first == null) return null;
 		return yield* getInstanceUrl(first.id);
 	});

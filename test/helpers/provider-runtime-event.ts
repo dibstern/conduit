@@ -33,7 +33,7 @@ export function providerRuntimeEvent<K extends ProviderRuntimeEventType>(
 }
 
 export function providerRuntimeEventFromCanonical(
-	// Providers never emit conduit-initiated types (e.g. session.deleted).
+	// Providers never emit conduit-initiated canonical event types.
 	event: Extract<CanonicalEvent, { type: ProviderRuntimeEventType }>,
 	options: {
 		readonly rawSourceKind?: string;

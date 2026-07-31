@@ -12,6 +12,7 @@ import {
 	type SessionStatusValue,
 	type TurnCompletedPayload,
 	type TurnErrorPayload,
+	type TurnModelResolvedPayload,
 } from "../persistence/events.js";
 
 export type ProviderRuntimeDomainMapperState = {
@@ -265,6 +266,17 @@ export function translateProviderRuntimeEventToDomain(
 		return singleEvent(event, state, "turn.interrupted", {
 			messageId: messageIdFromDataOrState(event, data, state),
 		});
+	}
+
+	if (event.type === "turn.model_resolved") {
+		const requestedModel = stringField(data["requestedModel"]);
+		const expectedModel = stringField(data["expectedModel"]);
+		const payload = {
+			...(requestedModel !== undefined ? { requestedModel } : {}),
+			...(expectedModel !== undefined ? { expectedModel } : {}),
+			actualModel: stringField(data["actualModel"]) ?? "",
+		} satisfies TurnModelResolvedPayload;
+		return singleEvent(event, state, "turn.model_resolved", payload);
 	}
 
 	if (event.type === "session.created") {
@@ -803,6 +815,7 @@ function tokensValue(value: unknown):
 			output?: number;
 			cacheRead?: number;
 			cacheWrite?: number;
+			contextWindow?: number;
 	  }
 	| undefined {
 	if (!isRecord(value)) return undefined;
@@ -811,6 +824,7 @@ function tokensValue(value: unknown):
 		output?: number;
 		cacheRead?: number;
 		cacheWrite?: number;
+		contextWindow?: number;
 	} = {};
 	if (typeof value["input"] === "number") tokens.input = value["input"];
 	if (typeof value["output"] === "number") tokens.output = value["output"];
@@ -818,5 +832,7 @@ function tokensValue(value: unknown):
 		tokens.cacheRead = value["cacheRead"];
 	if (typeof value["cacheWrite"] === "number")
 		tokens.cacheWrite = value["cacheWrite"];
+	if (typeof value["contextWindow"] === "number")
+		tokens.contextWindow = value["contextWindow"];
 	return Object.keys(tokens).length > 0 ? tokens : undefined;
 }

@@ -33,6 +33,7 @@ export const PROVIDER_RUNTIME_EVENT_TYPES = [
 	"turn.completed",
 	"turn.error",
 	"turn.interrupted",
+	"turn.model_resolved",
 	"session.created",
 	"session.renamed",
 	"session.status",

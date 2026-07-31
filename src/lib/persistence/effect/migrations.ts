@@ -9,7 +9,10 @@ import {
 	MESSAGE_PART_METADATA_MIGRATION,
 	MESSAGE_PARTS_COMPACTION_TYPE_MIGRATION,
 	MESSAGE_PARTS_FILE_TYPE_MIGRATION,
+	MESSAGES_CONTEXT_WINDOW_MIGRATION,
 	readMigrationSql,
+	SESSIONS_PERMISSION_MODE_MIGRATION,
+	TURN_MODEL_EXECUTION_MIGRATION,
 } from "../schema.js";
 
 export const EFFECT_SQL_MIGRATIONS_TABLE = "effect_sql_migrations";
@@ -29,6 +32,15 @@ const messagePartsFileTypeMigrationSql = readMigrationSql(
 );
 const messagePartsCompactionTypeMigrationSql = readMigrationSql(
 	MESSAGE_PARTS_COMPACTION_TYPE_MIGRATION,
+);
+const messagesContextWindowMigrationSql = readMigrationSql(
+	MESSAGES_CONTEXT_WINDOW_MIGRATION,
+);
+const turnModelExecutionMigrationSql = readMigrationSql(
+	TURN_MODEL_EXECUTION_MIGRATION,
+);
+const sessionsPermissionModeMigrationSql = readMigrationSql(
+	SESSIONS_PERMISSION_MODE_MIGRATION,
 );
 
 const expectedTableColumns = {
@@ -102,6 +114,7 @@ const expectedTableColumns = {
 		"last_applied_seq",
 		"created_at",
 		"updated_at",
+		"context_window",
 	],
 	pending_approvals: [
 		"id",
@@ -220,6 +233,7 @@ const expectedTableColumns = {
 		"last_message_at",
 		"created_at",
 		"updated_at",
+		"permission_mode",
 	],
 	tool_content: ["tool_id", "session_id", "content", "created_at"],
 	turns: [
@@ -234,6 +248,9 @@ const expectedTableColumns = {
 		"requested_at",
 		"started_at",
 		"completed_at",
+		"requested_model",
+		"expected_model",
+		"actual_model",
 	],
 } as const;
 
@@ -391,6 +408,26 @@ const verifyExistingBaselineSchema: Effect.Effect<
 				sameStrings(
 					actualColumns,
 					expectedColumns.filter((column) => column !== "metadata"),
+				)) ||
+			(tableName === "messages" &&
+				sameStrings(
+					actualColumns,
+					expectedColumns.filter((column) => column !== "context_window"),
+				)) ||
+			(tableName === "sessions" &&
+				sameStrings(
+					actualColumns,
+					expectedColumns.filter((column) => column !== "permission_mode"),
+				)) ||
+			(tableName === "turns" &&
+				sameStrings(
+					actualColumns,
+					expectedColumns.filter(
+						(column) =>
+							column !== "requested_model" &&
+							column !== "expected_model" &&
+							column !== "actual_model",
+					),
 				));
 		if (!matchesKnownSchema) {
 			return yield* failSchemaMismatch(
@@ -461,6 +498,53 @@ const runMessagePartsCompactionTypeMigration = executeSqlStatements(
 	messagePartsCompactionTypeMigrationSql,
 );
 
+const runMessagesContextWindowMigration: Effect.Effect<
+	void,
+	unknown,
+	SqlClient.SqlClient
+> = Effect.gen(function* () {
+	const sql = yield* SqlClient.SqlClient;
+	const columns = yield* sql.unsafe<{ name: string }>(
+		"PRAGMA table_info(messages)",
+	);
+	if (columns.some((column) => column.name === "context_window")) return;
+
+	yield* executeSqlStatements(messagesContextWindowMigrationSql);
+});
+
+const runTurnModelExecutionMigration: Effect.Effect<
+	void,
+	unknown,
+	SqlClient.SqlClient
+> = Effect.gen(function* () {
+	const sql = yield* SqlClient.SqlClient;
+	const columns = yield* sql.unsafe<{ name: string }>(
+		"PRAGMA table_info(turns)",
+	);
+	const existing = new Set(columns.map((column) => column.name));
+	const columnNames = ["requested_model", "expected_model", "actual_model"];
+	const statements = splitSqlStatements(turnModelExecutionMigrationSql);
+	for (const [index, columnName] of columnNames.entries()) {
+		if (existing.has(columnName)) continue;
+		const statement = statements[index];
+		if (statement) yield* sql.unsafe(statement);
+	}
+});
+
+const runSessionsPermissionModeMigration: Effect.Effect<
+	void,
+	unknown,
+	SqlClient.SqlClient
+> = Effect.gen(function* () {
+	const sql = yield* SqlClient.SqlClient;
+	const columns = yield* sql.unsafe<{ name: string }>(
+		"PRAGMA table_info(sessions)",
+	);
+	if (columns.some((column) => column.name === "permission_mode")) return;
+
+	yield* executeSqlStatements(sessionsPermissionModeMigrationSql);
+});
+
 export const effectMigrationEntries = {
 	"0001_create_event_store_tables": runBaselineEventStoreMigration,
 	"0002_add_message_part_metadata": runMessagePartMetadataMigration,
@@ -468,6 +552,9 @@ export const effectMigrationEntries = {
 	"0004_drop_events_session_fk": runDropEventsSessionFkMigration,
 	"0005_message_parts_file_type": runMessagePartsFileTypeMigration,
 	"0006_message_parts_compaction_type": runMessagePartsCompactionTypeMigration,
+	"0007_messages_context_window": runMessagesContextWindowMigration,
+	"0008_turn_model_execution": runTurnModelExecutionMigration,
+	"0009_sessions_permission_mode": runSessionsPermissionModeMigration,
 } satisfies Record<string, Effect.Effect<void, unknown, SqlClient.SqlClient>>;
 
 export function makeEffectMigrationLoader(

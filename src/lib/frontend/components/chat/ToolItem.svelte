@@ -5,6 +5,7 @@
 <script lang="ts">
 	import type { ToolMessage } from "../../types.js";
 	import { permissionsState } from "../../stores/permissions.svelte.js";
+	import { isSubagentToolName } from "../../utils/subagent-tools.js";
 
 	import ToolQuestionCard from "./ToolQuestionCard.svelte";
 	import ToolSubagentCard from "./ToolSubagentCard.svelte";
@@ -17,12 +18,10 @@
 	} = $props();
 
 	const isQuestion = $derived(message.name === "AskUserQuestion");
-	const isSubagent = $derived(
-		message.name === "Task" || message.name === "task" || message.name === "Agent",
-	);
+	const isSubagent = $derived(isSubagentToolName(message.name));
 
 	const groupRadius = $derived.by(() => {
-		if (isFirstInGroup && isLastInGroup) return "rounded-[10px]";
+		if (isFirstInGroup && isLastInGroup) return "rounded-panel";
 		if (isFirstInGroup) return "rounded-t-[10px]";
 		if (isLastInGroup) return "rounded-b-[10px]";
 		return "";

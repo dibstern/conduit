@@ -45,6 +45,7 @@
 	import { setPushActive } from "../../stores/ws.svelte.js";
 	import { getCurrentSlug } from "../../stores/router.svelte.js";
 	import {
+		addInstanceRpc,
 		detectProxyRpc,
 		getAgentsRpc,
 		getModelsRpc,
@@ -54,6 +55,7 @@
 		setHiddenEntriesRpc,
 		startInstanceRpc,
 		stopInstanceRpc,
+		updateInstanceRpc,
 	} from "../../transport/ws-rpc-client.js";
 
 	// ─── Props ──────────────────────────────────────────────────────────────
@@ -76,6 +78,19 @@
 	let expandedScenario = $state<string | null>(null);
 	let copiedKey = $state<string | null>(null);
 	let copyTimer: ReturnType<typeof setTimeout> | null = null;
+
+	// Named-instance editor (add/edit a provider instance)
+	let instanceFormMode = $state<"add" | "edit" | null>(null);
+	let editingInstanceId = $state<string | null>(null);
+	let formDriver = $state<"claude" | "opencode">("opencode");
+	let formName = $state("");
+	let formConfigDir = $state("");
+	let formManaged = $state(false);
+	let formPort = $state("");
+	let formUrl = $state("");
+	let formEnv = $state("");
+	let formSaving = $state(false);
+	const DRIVER_OPTIONS = ["opencode", "claude"] as const;
 
 	// Notification settings
 	let notifSettings: NotifSettings = $state(getNotifSettings());
@@ -111,6 +126,7 @@
 			expandedInstanceId = null;
 			renamingInstanceId = null;
 			expandedScenario = null;
+			closeInstanceForm();
 			// Only refresh notification settings if no toggle operation is
 			// in progress. Reading pushBusy via untrack() avoids adding it
 			// as a dependency (which would re-trigger this effect when the
@@ -174,6 +190,116 @@
 					showToast("Failed to remove instance", { variant: "warn" }),
 				);
 		}
+	}
+	function instanceDriver(inst: { driver?: string }): "claude" | "opencode" {
+		return inst.driver === "claude" ? "claude" : "opencode";
+	}
+	function closeInstanceForm() {
+		instanceFormMode = null;
+		editingInstanceId = null;
+		formDriver = "opencode";
+		formName = "";
+		formConfigDir = "";
+		formManaged = false;
+		formPort = "";
+		formUrl = "";
+		formEnv = "";
+		formSaving = false;
+	}
+	function openAddInstance(driver: "claude" | "opencode" = "opencode") {
+		closeInstanceForm();
+		instanceFormMode = "add";
+		formDriver = driver;
+	}
+	function openEditInstance(inst: {
+		id: string;
+		name: string;
+		driver?: string;
+		port?: number;
+		configDir?: string;
+		managed?: boolean;
+		env?: Record<string, string>;
+	}) {
+		expandedInstanceId = null;
+		instanceFormMode = "edit";
+		editingInstanceId = inst.id;
+		formDriver = instanceDriver(inst);
+		formName = inst.name;
+		formConfigDir = inst.configDir ?? "";
+		formManaged = inst.managed ?? false;
+		formPort = inst.port ? String(inst.port) : "";
+		formUrl = "";
+		formEnv = inst.env
+			? Object.entries(inst.env)
+					.map(([k, v]) => `${k}=${v}`)
+					.join("\n")
+			: "";
+	}
+	/** Parse `KEY=VALUE` lines into an env record; blank/`#` lines are ignored. */
+	function parseEnv(text: string): Record<string, string> | undefined {
+		const env: Record<string, string> = {};
+		for (const line of text.split("\n")) {
+			const trimmed = line.trim();
+			if (!trimmed || trimmed.startsWith("#")) continue;
+			const eq = trimmed.indexOf("=");
+			if (eq <= 0) continue;
+			env[trimmed.slice(0, eq).trim()] = trimmed.slice(eq + 1).trim();
+		}
+		return Object.keys(env).length > 0 ? env : undefined;
+	}
+	function submitInstanceForm() {
+		const name = formName.trim();
+		if (!name) {
+			showToast("Instance name is required", { variant: "warn" });
+			return;
+		}
+		const projectSlug = getRpcProjectSlug();
+		if (!projectSlug) return;
+		const isClaude = formDriver === "claude";
+		const port = formPort.trim() ? Number(formPort.trim()) : undefined;
+		if (!isClaude && port !== undefined && !Number.isInteger(port)) {
+			showToast("Port must be a whole number", { variant: "warn" });
+			return;
+		}
+		const env = isClaude ? undefined : parseEnv(formEnv);
+		const configDir = formConfigDir.trim() || undefined;
+		const url = formUrl.trim() || undefined;
+		formSaving = true;
+		const request =
+			instanceFormMode === "edit" && editingInstanceId
+				? updateInstanceRpc({
+						projectSlug,
+						instanceId: editingInstanceId,
+						name,
+						...(isClaude
+							? { configDir }
+							: { ...(port !== undefined ? { port } : {}), env }),
+					})
+				: addInstanceRpc({
+						projectSlug,
+						name,
+						driver: formDriver,
+						...(isClaude
+							? { managed: false, configDir }
+							: {
+									managed: formManaged,
+									...(port !== undefined ? { port } : {}),
+									...(url !== undefined ? { url } : {}),
+									env,
+								}),
+					});
+		void request
+			.then((response) => {
+				applyInstanceListResponse(response);
+				closeInstanceForm();
+			})
+			.catch(() => {
+				formSaving = false;
+				showToast(
+					`Failed to ${instanceFormMode === "edit" ? "update" : "add"} instance`,
+					{ variant: "warn" },
+				);
+			});
 	}
 	function handleScanNow() {
 		const projectSlug = getRpcProjectSlug();
@@ -396,12 +522,12 @@
 {#if visible}
 	<!-- svelte-ignore a11y_click_events_have_key_events -->
 	<!-- svelte-ignore a11y_no_static_element_interactions -->
-	<div class="fixed inset-0 z-[200] flex items-center justify-center bg-[rgba(var(--overlay-rgb),0.15)] backdrop-blur-sm" onclick={handleBackdropClick}>
+	<div class="fixed inset-0 z-[var(--z-popover)] flex items-center justify-center bg-[rgba(var(--overlay-rgb),0.15)] backdrop-blur-sm" onclick={handleBackdropClick}>
 		<div id="settings-panel" class="bg-bg border border-border rounded-xl shadow-2xl max-w-lg w-full mx-4 flex flex-col max-h-[80vh]">
 			<!-- Header -->
 			<div class="flex items-center justify-between px-5 py-3 border-b border-border">
 				<h2 class="text-lg font-semibold text-text font-brand">Settings</h2>
-				<button class="text-text-muted hover:text-text p-1 cursor-pointer border-none bg-transparent" onclick={() => onClose?.()}>
+				<button data-testid="settings-close-btn" class="text-text-muted hover:text-text p-1 cursor-pointer border-none bg-transparent" onclick={() => onClose?.()}>
 					<Icon name="x" size={16} />
 				</button>
 			</div>
@@ -416,6 +542,7 @@
 					{ id: "debug", label: "Debug" },
 				] as tab}
 					<button
+						data-testid="settings-tab-{tab.id}"
 						class="px-3 py-2 text-sm font-medium border-b-2 -mb-px transition-colors cursor-pointer border-none bg-transparent {activeTab === tab.id ? 'border-brand-a text-text' : 'border-transparent text-text-muted hover:text-text'}"
 						style="border-bottom: 2px solid {activeTab === tab.id ? 'var(--color-brand-a)' : 'transparent'};"
 						onclick={() => (activeTab = tab.id)}
@@ -439,7 +566,7 @@
 							onchange={togglePush}
 							disabled={pushBusy || pushUnavailable}
 							dimmed={pushUnavailable}
-							class="bg-bg-surface border border-border rounded-[10px] px-5 py-4 gap-4 font-brand {pushBusy || pushUnavailable ? 'opacity-60' : ''}"
+							class="bg-bg-surface border border-border rounded-panel px-5 py-4 gap-4 font-brand {pushBusy || pushUnavailable ? 'opacity-60' : ''}"
 						/>
 						<ToggleSetting
 							icon="bell"
@@ -447,7 +574,7 @@
 							description="Show desktop notifications when tasks complete"
 							checked={notifSettings.browser}
 							onchange={toggleBrowser}
-							class="bg-bg-surface border border-border rounded-[10px] px-5 py-4 gap-4 font-brand"
+							class="bg-bg-surface border border-border rounded-panel px-5 py-4 gap-4 font-brand"
 						/>
 						<ToggleSetting
 							icon="volume-2"
@@ -455,7 +582,7 @@
 							description="Play a sound when notifications are triggered"
 							checked={notifSettings.sound}
 							onchange={toggleSound}
-							class="bg-bg-surface border border-border rounded-[10px] px-5 py-4 gap-4 font-brand"
+							class="bg-bg-surface border border-border rounded-panel px-5 py-4 gap-4 font-brand"
 						/>
 						{#if pushUnavailable}
 							<div class="px-2 py-1.5 text-xs text-text-muted">Push notifications require HTTPS. Enable a certificate in the CLI settings.</div>
@@ -530,7 +657,7 @@
 										{allHidden ? "Show all" : "Hide all"}
 									</button>
 								</div>
-								<div class="space-y-1 bg-bg-surface border border-border rounded-[10px] px-4 py-2">
+								<div class="space-y-1 bg-bg-surface border border-border rounded-panel px-4 py-2">
 									{#each provider.models as model (model.id)}
 										<ToggleSetting
 											label={model.name || model.id}
@@ -549,7 +676,7 @@
 								<div class="text-xs font-semibold uppercase tracking-widest text-text-muted px-1 mb-2 font-brand">
 									{discoveryState.agentProviderScope?.name} agents
 								</div>
-								<div class="space-y-1 bg-bg-surface border border-border rounded-[10px] px-4 py-2">
+								<div class="space-y-1 bg-bg-surface border border-border rounded-panel px-4 py-2">
 									{#each discoveryState.agents as agent (agent.id)}
 										<ToggleSetting
 											label={agent.name || agent.id}
@@ -565,21 +692,108 @@
 
 				<!-- ═══ Instances ═══ -->
 				{:else if activeTab === "instances"}
+					<div id="instances-settings">
 					<div class="flex items-center justify-between mb-3">
 						<span class="text-xs text-text-muted font-medium uppercase tracking-wide font-brand">
 							{instances.length} instance{instances.length !== 1 ? "s" : ""}
 						</span>
-					<button
-						type="button"
-					class="flex items-center gap-1.5 px-2.5 py-1 text-xs rounded border border-border text-text-muted hover:text-text hover:border-text-muted transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed font-brand"
-						data-testid="scan-now-btn"
-						disabled={scanInFlight}
-						onclick={handleScanNow}
-					>
+						<div class="flex items-center gap-2">
+						<button
+							type="button"
+							class="flex items-center gap-1.5 px-2.5 py-1 text-xs rounded border border-border text-text-muted hover:text-text hover:border-text-muted transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed font-brand"
+							data-testid="scan-now-btn"
+							disabled={scanInFlight}
+							onclick={handleScanNow}
+						>
 							<Icon name="refresh-cw" size={12} class={scanInFlight ? "animate-spin" : ""} />
 							{scanInFlight ? "Scanning..." : "Scan Now"}
 						</button>
+						<button
+							type="button"
+							class="flex items-center gap-1.5 px-2.5 py-1 text-xs rounded border border-brand-a text-brand-a hover:bg-brand-a/10 transition-colors cursor-pointer font-brand"
+							data-testid="add-instance-btn"
+							onclick={() => openAddInstance()}
+						>
+							<Icon name="plus" size={12} />
+							Add
+						</button>
+						</div>
 					</div>
+
+					{#if instanceFormMode !== null}
+						<div class="mb-3 border border-border rounded-lg p-3 space-y-3 font-brand" data-testid="instance-form">
+							<div class="flex items-center justify-between">
+								<span class="text-xs text-text-muted font-medium uppercase tracking-wide">
+									{instanceFormMode === "edit" ? "Edit instance" : "New instance"}
+								</span>
+							</div>
+							{#if instanceFormMode === "add"}
+								<div class="flex gap-1.5" role="group" aria-label="Driver">
+									{#each DRIVER_OPTIONS as driverOption}
+										<button
+											type="button"
+											data-testid="instance-form-driver-{driverOption}"
+											aria-pressed={formDriver === driverOption}
+											class="flex-1 px-3 py-1.5 text-xs rounded border transition-colors cursor-pointer {formDriver === driverOption ? 'border-brand-a text-text bg-brand-a/10' : 'border-border text-text-muted hover:text-text'}"
+											onclick={() => (formDriver = driverOption)}
+										>
+											{driverOption === "claude" ? "Claude" : "OpenCode"}
+										</button>
+									{/each}
+								</div>
+							{/if}
+							<label class="block space-y-1">
+								<span class="text-xs text-text-muted">Name</span>
+								<input
+									type="text"
+									data-testid="instance-form-name"
+									class="w-full px-2 py-1.5 text-sm border border-border rounded bg-bg text-text focus:border-brand-a outline-none"
+									placeholder={formDriver === "claude" ? "Work Claude" : "Staging OC"}
+									bind:value={formName}
+								/>
+							</label>
+							{#if formDriver === "claude"}
+								<label class="block space-y-1">
+									<span class="text-xs text-text-muted">Config directory <span class="opacity-60">(optional)</span></span>
+									<input
+										type="text"
+										data-testid="instance-form-configdir"
+										class="w-full px-2 py-1.5 text-sm border border-border rounded bg-bg text-text focus:border-brand-a outline-none"
+										placeholder="~/.config/claude/work"
+										bind:value={formConfigDir}
+									/>
+								</label>
+							{:else}
+								<label class="flex items-center gap-2 text-sm text-text cursor-pointer">
+									<input type="checkbox" data-testid="instance-form-managed" bind:checked={formManaged} />
+									<span>Managed <span class="text-xs text-text-muted">(conduit starts the server)</span></span>
+								</label>
+								{#if formManaged}
+									<label class="block space-y-1">
+										<span class="text-xs text-text-muted">Port</span>
+										<input type="text" inputmode="numeric" data-testid="instance-form-port" class="w-full px-2 py-1.5 text-sm border border-border rounded bg-bg text-text focus:border-brand-a outline-none" placeholder="4098" bind:value={formPort} />
+									</label>
+								{:else}
+									<label class="block space-y-1">
+										<span class="text-xs text-text-muted">URL <span class="opacity-60">(or port)</span></span>
+										<input type="text" data-testid="instance-form-url" class="w-full px-2 py-1.5 text-sm border border-border rounded bg-bg text-text focus:border-brand-a outline-none" placeholder="http://127.0.0.1:4098" bind:value={formUrl} />
+									</label>
+									<label class="block space-y-1">
+										<span class="text-xs text-text-muted">Port <span class="opacity-60">(optional)</span></span>
+										<input type="text" inputmode="numeric" data-testid="instance-form-port" class="w-full px-2 py-1.5 text-sm border border-border rounded bg-bg text-text focus:border-brand-a outline-none" placeholder="4098" bind:value={formPort} />
+									</label>
+								{/if}
+								<label class="block space-y-1">
+									<span class="text-xs text-text-muted">Environment <span class="opacity-60">(KEY=VALUE per line, optional)</span></span>
+									<textarea data-testid="instance-form-env" rows="2" class="w-full px-2 py-1.5 text-sm border border-border rounded bg-bg text-text focus:border-brand-a outline-none resize-y font-mono" placeholder="ANTHROPIC_API_KEY=sk-ant-..." bind:value={formEnv}></textarea>
+								</label>
+							{/if}
+							<div class="flex justify-end gap-2 pt-1">
+								<button type="button" data-testid="instance-form-cancel" class="px-3 py-1 text-xs rounded border border-border text-text-muted hover:text-text cursor-pointer bg-transparent" onclick={closeInstanceForm}>Cancel</button>
+								<button type="button" data-testid="instance-form-save" disabled={formSaving} class="px-3 py-1 text-xs rounded border border-brand-a text-brand-a hover:bg-brand-a/10 cursor-pointer bg-transparent disabled:opacity-50 disabled:cursor-not-allowed" onclick={submitInstanceForm}>{formSaving ? "Saving..." : "Save"}</button>
+							</div>
+						</div>
+					{/if}
 
 					{#if scanResult && !scanInFlight}
 					<div class="mb-3 text-xs text-text-muted bg-white/[0.04] rounded px-2.5 py-1.5 font-brand">
@@ -598,7 +812,8 @@
 					{#if instances.length > 0}
 					<div id="instance-settings-list" class="space-y-1 font-brand">
 							{#each instances as inst}
-								<div class="border border-border rounded-lg">
+								{@const driver = instanceDriver(inst)}
+								<div class="border border-border rounded-lg" data-testid="instance-row-{inst.id}" data-driver={driver}>
 									<button class="flex items-center justify-between w-full px-3 py-2 text-left text-sm hover:bg-white/[0.03] cursor-pointer bg-transparent border-none" onclick={() => handleToggleInstance(inst.id)}>
 										<div class="flex items-center gap-2 min-w-0">
 											<span class={"w-2 h-2 rounded-full shrink-0 " + instanceStatusColor(inst.status)}></span>
@@ -608,20 +823,26 @@
 											{:else}
 												<span class="font-medium text-text truncate">{inst.name}</span>
 											{/if}
-											{#if !inst.managed}
+											<span class="text-xs text-text-muted bg-white/[0.08] px-1.5 py-0.5 rounded-full shrink-0">{driver === "claude" ? "Claude" : "OpenCode"}</span>
+											{#if driver === "opencode" && !inst.managed}
 												<span class="text-xs text-text-muted bg-white/[0.08] px-1.5 py-0.5 rounded-full">discovered</span>
 											{/if}
 										</div>
-										<span class="text-text-muted text-xs shrink-0 ml-2">:{inst.port}</span>
+										{#if driver === "claude"}
+											<span class="text-text-muted text-xs shrink-0 ml-2 truncate max-w-[10rem]">{inst.configDir || "env"}</span>
+										{:else}
+											<span class="text-text-muted text-xs shrink-0 ml-2">:{inst.port}</span>
+										{/if}
 									</button>
 									{#if expandedInstanceId === inst.id}
 										<div class="flex flex-wrap gap-2 px-3 py-2 border-t border-border">
-											{#if inst.managed}
+											{#if driver === "opencode" && inst.managed}
 												<button class="px-3 py-1 text-xs rounded border border-border text-text hover:bg-white/[0.05] cursor-pointer bg-transparent" onclick={() => handleStart(inst.id)}>Start</button>
 												<button class="px-3 py-1 text-xs rounded border border-border text-text hover:bg-white/[0.05] cursor-pointer bg-transparent" onclick={() => handleStop(inst.id)}>Stop</button>
 											{/if}
+											<button class="px-3 py-1 text-xs rounded border border-border text-accent hover:bg-accent/10 cursor-pointer bg-transparent" data-testid="edit-instance-btn" onclick={() => openEditInstance(inst)}>Edit</button>
 											<button class="px-3 py-1 text-xs rounded border border-border text-accent hover:bg-accent/10 cursor-pointer bg-transparent" data-testid="rename-instance-btn" onclick={() => startRename(inst.id, inst.name)}>Rename</button>
-											<button class="px-3 py-1 text-xs rounded border border-red-700 text-red-500 hover:bg-red-500/10 cursor-pointer bg-transparent" onclick={() => handleRemove(inst.id, inst.name)}>Remove</button>
+											<button class="px-3 py-1 text-xs rounded border border-red-700 text-red-500 hover:bg-red-500/10 cursor-pointer bg-transparent" data-testid="remove-instance-btn" onclick={() => handleRemove(inst.id, inst.name)}>Remove</button>
 										</div>
 									{/if}
 								</div>
@@ -688,6 +909,7 @@
 							</div>
 						</div>
 					{/if}
+					</div>
 
 				<!-- ═══ Debug ═══ -->
 				{:else if activeTab === "debug"}
@@ -697,7 +919,7 @@
 							description="Shows WebSocket state transitions, timing, and lifecycle events."
 							checked={featureFlags.debug}
 							onchange={() => toggleFeature("debug")}
-							class="bg-bg-surface border border-border rounded-[10px] px-5 py-4 gap-4 font-brand"
+							class="bg-bg-surface border border-border rounded-panel px-5 py-4 gap-4 font-brand"
 						/>
 						<div class="text-xs text-text-dimmer space-y-1.5 px-1 font-brand">
 							<div>URL param: <code class="px-1 py-0.5 bg-white/[0.08] rounded text-text-muted">?feats=debug</code></div>

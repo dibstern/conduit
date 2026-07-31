@@ -654,6 +654,7 @@ describe("OrchestrationEngine", () => {
 					turnId: "int-turn-1",
 					prompt: "Integration test prompt",
 					workspaceRoot: claudeWorkspace,
+					model: { providerId: "claude", modelId: "sonnet" },
 					eventSink: sink,
 				}),
 			});
@@ -690,6 +691,7 @@ describe("OrchestrationEngine", () => {
 					sessionId: "int-session-bind",
 					turnId: "int-turn-1",
 					workspaceRoot: claudeWorkspace,
+					model: { providerId: "claude", modelId: "sonnet" },
 					eventSink: sink,
 				}),
 			});
@@ -754,6 +756,7 @@ describe("OrchestrationEngine", () => {
 					sessionId: "int-session-err",
 					turnId: "int-turn-err",
 					workspaceRoot: claudeWorkspace,
+					model: { providerId: "claude", modelId: "sonnet" },
 					eventSink: sink,
 				}),
 			});
@@ -897,6 +900,7 @@ describe("OrchestrationEngine", () => {
 					sessionId: "int-session-erred",
 					turnId: "int-turn-erred",
 					workspaceRoot: claudeWorkspace,
+					model: { providerId: "claude", modelId: "sonnet" },
 					eventSink: sink,
 				}),
 			});

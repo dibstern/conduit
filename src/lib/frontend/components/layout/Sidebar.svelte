@@ -142,7 +142,7 @@
 <!-- Sidebar overlay (mobile backdrop) -->
 <div
 	id="sidebar-overlay"
-	class="fixed inset-0 bg-[rgba(var(--overlay-rgb),0.45)] backdrop-blur-[2px] z-[350] transition-opacity duration-[250ms] ease-linear"
+	class="fixed inset-0 bg-[rgba(var(--overlay-rgb),0.45)] backdrop-blur-[2px] z-[var(--z-overlay)] transition-opacity duration-[250ms] ease-linear"
 	class:hidden={!uiState.mobileSidebarOpen}
 	onclick={handleOverlayClick}
 	onkeydown={undefined}
@@ -272,7 +272,7 @@
 	{#if uiState.mobileSidebarOpen}
 		<!-- svelte-ignore a11y_no_static_element_interactions -->
 		<div
-			class="mobile-sidebar-resize absolute top-0 bottom-0 -right-1 w-3 cursor-col-resize md:hidden z-[1] flex items-center justify-center"
+			class="mobile-sidebar-resize absolute top-0 bottom-0 -right-1 w-3 cursor-col-resize md:hidden z-[var(--z-raised)] flex items-center justify-center"
 			onmousedown={handleMobileResizeStart}
 			ontouchstart={handleMobileResizeStart}
 		>

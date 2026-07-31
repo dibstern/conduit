@@ -2,6 +2,7 @@
 // Types shared between server and frontend.
 // Imported by src/lib/types.ts (server) and frontend code.
 
+import type { ProviderDriverKind } from "./contracts/provider-instance.js";
 // SDK-derived type aliases (Task 10) — single source of truth for Part/Tool enums.
 // Imported for local use; re-exported below for downstream consumers.
 import type { PartType, ToolStatus } from "./instance/sdk-types.js";
@@ -60,6 +61,7 @@ export const SessionPermissionModeSchema = Schema.Literal(
 	"ask",
 	"acceptEdits",
 	"auto",
+	"full",
 );
 export type SessionPermissionMode = typeof SessionPermissionModeSchema.Type;
 
@@ -178,6 +180,7 @@ export interface AgentProviderScope {
 
 export interface ProviderInfo {
 	id: string;
+	instanceId?: string;
 	name: string;
 	configured: boolean;
 	models: ModelInfo[];
@@ -253,6 +256,7 @@ export interface UsageInfo {
 	output: number;
 	cache_read: number;
 	cache_creation: number;
+	context_window?: number;
 }
 
 // ─── PTY / Terminal ─────────────────────────────────────────────────────────
@@ -316,6 +320,13 @@ export interface HistoryMessagePart {
 	[key: string]: unknown;
 }
 
+export interface ModelExecution {
+	requestedModel?: string;
+	expectedModel?: string;
+	actualModel: string;
+	drifted?: boolean;
+}
+
 /**
  * A single message from the OpenCode REST history API.
  *
@@ -334,7 +345,9 @@ export interface HistoryMessage {
 		input?: number;
 		output?: number;
 		cache?: { read?: number; write?: number };
+		context_window?: number;
 	};
+	modelExecution?: ModelExecution;
 	[key: string]: unknown;
 }
 
@@ -407,6 +420,25 @@ const HistoryMessagePartSchema = Schema.Struct({
 	postTokens: Schema.optional(Schema.Number),
 });
 
+const ModelExecutionSchema = Schema.Struct({
+	requestedModel: Schema.optional(Schema.String),
+	expectedModel: Schema.optional(Schema.String),
+	actualModel: Schema.String,
+	drifted: Schema.optional(Schema.Boolean),
+}).pipe(
+	Schema.filter(
+		(execution) =>
+			execution.drifted === undefined ||
+			(execution.expectedModel !== undefined &&
+				execution.drifted ===
+					(execution.actualModel !== execution.expectedModel)),
+		{
+			message: () =>
+				"drifted requires expectedModel and must equal actualModel !== expectedModel",
+		},
+	),
+);
+
 const HistoryMessageSchema = Schema.Struct({
 	id: Schema.String,
 	role: Schema.Literal("user", "assistant"),
@@ -430,6 +462,7 @@ const HistoryMessageSchema = Schema.Struct({
 			),
 		}),
 	),
+	modelExecution: Schema.optional(ModelExecutionSchema),
 });
 
 const AskUserQuestionSchema = Schema.Struct({
@@ -450,6 +483,7 @@ const UsageInfoSchema = Schema.Struct({
 	output: Schema.Number,
 	cache_read: Schema.Number,
 	cache_creation: Schema.Number,
+	context_window: Schema.optional(Schema.Number),
 });
 
 const SessionInfoSchema = Schema.Struct({
@@ -473,6 +507,7 @@ const ContextWindowOptionSchema = Schema.Struct({
 
 const ProviderInfoSchema = Schema.Struct({
 	id: Schema.String,
+	instanceId: Schema.optional(Schema.String),
 	name: Schema.String,
 	configured: Schema.Boolean,
 	models: Schema.Array(
@@ -572,6 +607,9 @@ const OpenCodeInstanceSchema = Schema.Struct({
 	name: Schema.String,
 	port: Schema.Number,
 	managed: Schema.Boolean,
+	driver: Schema.optional(Schema.String),
+	configDir: Schema.optional(Schema.String),
+	url: Schema.optional(Schema.String),
 	status: InstanceStatusSchema,
 	pid: Schema.optional(Schema.Number),
 	env: Schema.optional(
@@ -792,11 +830,13 @@ const DefaultModelInfoSchema = Schema.Struct({
 
 const ModelListSchema = Schema.Struct({
 	type: Schema.Literal("model_list"),
+	instanceId: Schema.optional(Schema.String),
 	providers: Schema.Array(ProviderInfoSchema),
 });
 
 const AgentListSchema = Schema.Struct({
 	type: Schema.Literal("agent_list"),
+	instanceId: Schema.optional(Schema.String),
 	providerScope: AgentProviderScopeSchema,
 	agents: Schema.Array(AgentInfoSchema),
 	activeAgentId: Schema.optional(Schema.String),
@@ -1391,9 +1431,10 @@ export type RelayMessage =
 	// ── Model / Agent / Commands ───────────────────────────────────────────
 	| { type: "model_info"; model: string; provider: string }
 	| { type: "default_model_info"; model: string; provider: string }
-	| { type: "model_list"; providers: ProviderInfo[] }
+	| { type: "model_list"; instanceId?: string; providers: ProviderInfo[] }
 	| {
 			type: "agent_list";
+			instanceId?: string;
 			providerScope: AgentProviderScope;
 			agents: AgentInfo[];
 			activeAgentId?: string;
@@ -1608,6 +1649,9 @@ export interface OpenCodeInstance {
 	name: string;
 	port: number;
 	managed: boolean;
+	driver?: ProviderDriverKind;
+	configDir?: string;
+	url?: string;
 	status: InstanceStatus;
 	pid?: number;
 	env?: Record<string, string>;
@@ -1622,6 +1666,8 @@ export interface InstanceConfig {
 	name: string;
 	port: number;
 	managed: boolean;
+	driver?: ProviderDriverKind;
+	configDir?: string;
 	env?: Record<string, string>;
 	/** For external (unmanaged) instances: the full URL */
 	url?: string;

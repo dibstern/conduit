@@ -137,14 +137,14 @@ describe("RelayFactoryLive Effect persistence wiring", () => {
 								slug: "effect-project",
 								title: "Effect Project",
 								directory: projectDir,
-								instanceId: "default",
+								instanceId: "opencode",
 							},
 						]),
 						makeInstanceManagerStateLive(
 							undefined,
 							[
 								{
-									id: "default",
+									id: "opencode",
 									name: "Default",
 									port: 4096,
 									managed: false,
@@ -169,7 +169,7 @@ describe("RelayFactoryLive Effect persistence wiring", () => {
 							slug: "effect-project",
 							title: "Effect Project",
 							directory: projectDir,
-							instanceId: "default",
+							instanceId: "opencode",
 						},
 						"http://localhost:4096",
 					)
@@ -197,12 +197,12 @@ describe("RelayFactoryLive Effect persistence wiring", () => {
 						slug: "effect-project",
 						title: "Effect Project",
 						directory: projectDir,
-						instanceId: "default",
+						instanceId: "opencode",
 					},
 				]);
 				expect(instances).toEqual([
 					expect.objectContaining({
-						id: "default",
+						id: "opencode",
 						name: "Default",
 						port: 4096,
 						managed: false,
@@ -531,14 +531,14 @@ describe("RelayFactoryLive Effect persistence wiring", () => {
 						slug: "effect-project",
 						title: "Effect Project",
 						directory: projectDir,
-						instanceId: "default",
+						instanceId: "opencode",
 					},
 				]),
 				makeInstanceManagerStateLive(
 					undefined,
 					[
 						{
-							id: "default",
+							id: "opencode",
 							name: "Default",
 							port: 4096,
 							managed: false,

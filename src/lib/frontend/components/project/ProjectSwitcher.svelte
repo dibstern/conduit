@@ -297,7 +297,7 @@
 				</span>
 				{#if countLabel}
 					<span
-						class="shrink-0 text-sm font-bold px-2 py-[1px] rounded-[10px] bg-accent/15 text-accent leading-normal"
+						class="shrink-0 text-sm font-bold px-2 py-[1px] rounded-panel bg-accent/15 text-accent leading-normal"
 					>
 						{countLabel}
 					</span>
@@ -315,7 +315,7 @@
 	<!-- Dropdown menu -->
 	{#if open}
 		<div
-			class="absolute top-full left-0 right-0 z-[120] mt-0.5 min-w-[240px] max-w-[320px] bg-bg-surface border border-border rounded-[10px] shadow-[0_8px_32px_rgba(0,0,0,0.3)] p-1 overflow-hidden font-brand"
+			class="absolute top-full left-0 right-0 z-[var(--z-dropdown)] mt-0.5 min-w-[240px] max-w-[320px] bg-bg-surface border border-border rounded-panel shadow-dropdown p-1 overflow-hidden font-brand"
 			data-testid="project-switcher-dropdown"
 		>
 			<!-- Header -->

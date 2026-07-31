@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { CANONICAL_EVENT_TYPES } from "../../../src/lib/persistence/events.js";
+import {
+	CANONICAL_EVENT_TYPES,
+	canonicalEvent,
+} from "../../../src/lib/persistence/events.js";
+import { translateDomainEventToRelay } from "../../../src/lib/relay/domain-event-to-relay.js";
 
 describe("domain-event relay translation exhaustiveness", () => {
 	// These are the event types handled in the switch statement.
@@ -17,6 +21,7 @@ describe("domain-event relay translation exhaustiveness", () => {
 		"turn.completed",
 		"turn.error",
 		"turn.interrupted",
+		"turn.model_resolved",
 		"session.status",
 		"session.compaction",
 		"message.created",
@@ -24,6 +29,7 @@ describe("domain-event relay translation exhaustiveness", () => {
 		"session.renamed",
 		"session.provider_changed",
 		"session.deleted",
+		"session.permission_mode_changed",
 		"permission.asked",
 		"permission.resolved",
 		"question.asked",
@@ -33,6 +39,21 @@ describe("domain-event relay translation exhaustiveness", () => {
 	it("handles every canonical event type", () => {
 		const missing = CANONICAL_EVENT_TYPES.filter((t) => !HANDLED_TYPES.has(t));
 		expect(missing).toEqual([]);
+	});
+
+	it("keeps turn.model_resolved on the persistence and ws-rpc path", () => {
+		const result = translateDomainEventToRelay(
+			canonicalEvent("turn.model_resolved", "session-1", {
+				requestedModel: "sonnet",
+				expectedModel: "claude-sonnet-5",
+				actualModel: "claude-sonnet-5",
+			}),
+		);
+
+		expect(result).toEqual({
+			kind: "silent",
+			reason: "persistence/ws-rpc-only event",
+		});
 	});
 
 	it("HANDLED_TYPES does not contain stale entries", () => {
