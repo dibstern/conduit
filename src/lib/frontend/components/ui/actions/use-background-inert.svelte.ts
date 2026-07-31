@@ -1,7 +1,7 @@
 /**
- * Supplements Bits Dialog by hiding background content from assistive technology.
- * Bits owns focus trapping and dismissal, but does not apply aria-hidden or inert
- * outside the dialog.
+ * Hides background content from assistive technology while a modal boundary is
+ * active. Live portaled overlays register an exemption so menus, popovers, and
+ * dialogs remain interactive even when they mount in a sibling body branch.
  */
 interface BackgroundState {
 	element: Element;
@@ -11,7 +11,7 @@ interface BackgroundState {
 }
 
 const activeBoundaryNodes = new Set<HTMLElement>();
-const activeDialogNodes = new Set<HTMLElement>();
+const activeOverlayNodes = new Set<HTMLElement>();
 const backgroundStates = new Map<Element, BackgroundState>();
 let backgroundObserver: MutationObserver | undefined;
 
@@ -31,9 +31,9 @@ function restoreBackground(state: BackgroundState) {
 	}
 }
 
-function containsLiveDialog(element: Element): boolean {
-	for (const dialog of activeDialogNodes) {
-		if (element === dialog || element.contains(dialog)) return true;
+function containsLiveOverlay(element: Element): boolean {
+	for (const overlay of activeOverlayNodes) {
+		if (element === overlay || element.contains(overlay)) return true;
 	}
 	return false;
 }
@@ -46,7 +46,7 @@ function syncBackground() {
 		while (current.parentElement) {
 			const parent = current.parentElement;
 			for (const sibling of parent.children) {
-				if (sibling !== current && !containsLiveDialog(sibling)) {
+				if (sibling !== current && !containsLiveOverlay(sibling)) {
 					background.add(sibling);
 				}
 			}
@@ -68,10 +68,10 @@ function syncBackground() {
 		element.setAttribute("aria-hidden", "true");
 	}
 
-	// A portal mounted into managed background is restored as soon as its live
-	// dialog registers, regardless of boundary/content mount order.
+	// Restore anything that dropped out of the freshly computed background.
+	// This covers live-overlay registration and shrinking nested-boundary sets.
 	for (const [element, state] of backgroundStates) {
-		if (!containsLiveDialog(element)) continue;
+		if (background.has(element)) continue;
 		restoreBackground(state);
 		backgroundStates.delete(element);
 	}
@@ -84,16 +84,16 @@ function restoreAllBackground() {
 	backgroundStates.clear();
 }
 
-/** Explicitly registers live portaled content that background inerting must skip. */
+/** Registers live portaled overlay content that background inerting must skip. */
 export function exemptFromBackgroundInert(node: HTMLElement): {
 	destroy(): void;
 } {
-	activeDialogNodes.add(node);
+	activeOverlayNodes.add(node);
 	syncBackground();
 
 	return {
 		destroy() {
-			activeDialogNodes.delete(node);
+			activeOverlayNodes.delete(node);
 			if (activeBoundaryNodes.size > 0) syncBackground();
 		},
 	};

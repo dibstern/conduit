@@ -29,8 +29,9 @@ token-disciplined set of primitives that every feature component consumes.
   `tailwind-merge` / `cva` — consistent with `Toggle.svelte`.
 - **Tokens only.** Use design tokens (`bg-accent`, `text-text`, `border-border`,
   `bg-error`, radius/`z`/shadow scales). No hardcoded hex, no arbitrary
-  `z-[…]`/`shadow-[…]`/`rgba(…)` where a token exists — enforced by
-  `scripts/check-design-tokens.mjs`.
+  `z-[…]`/`shadow-[…]`/`rgba(…)` where a token exists.
+  `scripts/check-design-tokens.mjs` enforces these rules in `.svelte` files under
+  `src/lib/frontend`; shared `.ts` class constants still require review.
 - **`class` is additive, not an override.** Accept `class?: string` and append it
   after the variant/size classes: `[BASE, variant, size, className].filter(Boolean).join(" ")`.
   Order in the `class` **attribute** does not decide the CSS cascade — conflicting
@@ -55,8 +56,17 @@ token-disciplined set of primitives that every feature component consumes.
   props union (the Svelte type-checker / editor flags a missing `ariaLabel`), backed
   by a dev-time `console.warn` runtime backstop for callers that bypass the types.
 - Interactive overlay primitives delegate focus, dismissal, and roving focus to
-  Bits UI. `use-background-inert` only supplements Dialog's missing assistive-tech
-  background hiding.
+  Bits UI. `use-background-inert` supplements the missing assistive-tech
+  background hiding and exempts live Dialog, Menu, and Popover portal branches.
+
+## Floating overlays inside a Modal
+
+`Menu` and `Popover` portal to `body` by default and register themselves as live
+background-inert exemptions. Their canonical `--z-popover` layer is intentionally
+below `--z-modal`, though, so a floating surface triggered inside a Modal must pass
+`portalTo` targeting an element inside that Modal's content subtree. The local
+portal target resolves both stacking and inert containment without speculative
+global overlay coordination.
 
 ## Every primitive ships together
 
