@@ -4,13 +4,13 @@
 	import { setFieldContext } from "./field-context";
 
 	type FieldProps = {
-		label?: string;
-		hint?: string;
-		error?: string;
-		required?: boolean;
+		label?: string | undefined;
+		hint?: string | undefined;
+		error?: string | undefined;
+		required?: boolean | undefined;
 		/** Override the auto-generated control id (targets the child control, not the wrapper). */
-		id?: string;
-		class?: string;
+		id?: string | undefined;
+		class?: string | undefined;
 		children: Snippet;
 	} & Omit<HTMLAttributes<HTMLDivElement>, "class" | "id">;
 

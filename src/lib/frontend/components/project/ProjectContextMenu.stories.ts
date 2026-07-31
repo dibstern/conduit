@@ -18,7 +18,6 @@ const meta = {
 	args: {
 		project: mockProject,
 		anchor,
-		onrename: fn(),
 		ondelete: fn(),
 		onclose: fn(),
 	},
@@ -27,8 +26,8 @@ const meta = {
 export default meta;
 type Story = StoryObj<typeof meta>;
 
-export const Default: Story = {};
-
-export const WithoutRename: Story = {
-	args: { onrename: undefined },
+export const Default: Story = {
+	args: { onrename: fn() },
 };
+
+export const WithoutRename: Story = {};

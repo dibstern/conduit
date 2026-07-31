@@ -1,16 +1,15 @@
 <script lang="ts">
-	import { DropdownMenu } from "bits-ui";
+	import { DropdownMenu, type DropdownMenuGroupProps } from "bits-ui";
 	import type { Snippet } from "svelte";
-	import type { HTMLAttributes } from "svelte/elements";
 	import { FLOATING_ITEM_PADDING_CLASSES } from "./floating-styles.js";
 
 	type MenuGroupProps = {
 		label: string;
-		class?: string;
+		class?: string | undefined;
 		children: Snippet;
 	} & Omit<
-		HTMLAttributes<HTMLDivElement>,
-		"class" | "children" | "role"
+		DropdownMenuGroupProps,
+		"child" | "children" | "class"
 	>;
 
 	let {
@@ -19,9 +18,17 @@
 		children,
 		...rest
 	}: MenuGroupProps = $props();
+
+	const groupProps: Omit<
+		DropdownMenuGroupProps,
+		"child" | "children"
+	> = $derived({
+		...rest,
+		...(className === undefined ? {} : { class: className }),
+	});
 </script>
 
-<DropdownMenu.Group {...rest} class={className}>
+<DropdownMenu.Group {...groupProps}>
 	<DropdownMenu.GroupHeading>
 		{#snippet child({ props })}
 			<div

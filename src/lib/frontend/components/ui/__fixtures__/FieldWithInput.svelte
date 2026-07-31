@@ -8,10 +8,10 @@
 		error,
 		required = false,
 	}: {
-		label?: string;
-		hint?: string;
-		error?: string;
-		required?: boolean;
+		label?: string | undefined;
+		hint?: string | undefined;
+		error?: string | undefined;
+		required?: boolean | undefined;
 	} = $props();
 </script>
 

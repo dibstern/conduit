@@ -21,13 +21,15 @@ const BLUE_PIXEL =
 const GREEN_PIXEL =
 	"data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==";
 
+const firstMockImage: PendingImage = {
+	id: "img-1",
+	dataUrl: RED_PIXEL,
+	name: "screenshot.png",
+	size: 24576,
+};
+
 const mockImages: PendingImage[] = [
-	{
-		id: "img-1",
-		dataUrl: RED_PIXEL,
-		name: "screenshot.png",
-		size: 24576,
-	},
+	firstMockImage,
 	{
 		id: "img-2",
 		dataUrl: BLUE_PIXEL,
@@ -51,7 +53,7 @@ export const WithImages: Story = {
 
 export const SingleImage: Story = {
 	args: {
-		images: [mockImages[0]],
+		images: [firstMockImage],
 		onRemove: (id: string) => console.log("Remove image:", id),
 	},
 };

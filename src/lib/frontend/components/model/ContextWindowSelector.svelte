@@ -13,7 +13,12 @@
 	import { sessionState } from "../../stores/session.svelte.js";
 	import { switchContextWindowRpc } from "../../transport/ws-rpc-client.js";
 
-	let { onOpen }: { onOpen?: () => void } = $props();
+	let { onOpen }: { onOpen?: (() => void) | undefined } = $props();
+	const contextWindowState: {
+		availableContextWindowOptions: Awaited<
+			ReturnType<typeof switchContextWindowRpc>
+		>["options"];
+	} = discoveryState;
 
 	let dropdownOpen = $state(false);
 
@@ -62,7 +67,7 @@
 			})
 				.then((response) => {
 					discoveryState.currentContextWindow = response.contextWindow;
-					discoveryState.availableContextWindowOptions = response.options;
+					contextWindowState.availableContextWindowOptions = response.options;
 				})
 				.catch(() => {
 					discoveryState.currentContextWindow = previousContextWindow;

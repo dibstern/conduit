@@ -9,11 +9,11 @@
 	import { getFieldContext } from "./field-context";
 
 	type SelectProps = {
-		value?: string | number;
-		size?: FieldSize;
+		value?: string | number | undefined;
+		size?: FieldSize | undefined;
 		/** Standalone invalid flag; a wrapping <Field> also forces it. */
-		invalid?: boolean;
-		class?: string;
+		invalid?: boolean | undefined;
+		class?: string | undefined;
 		children: Snippet;
 	} & Omit<
 		HTMLSelectAttributes,

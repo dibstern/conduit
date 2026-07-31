@@ -54,6 +54,7 @@
 			scrollCtrl.attach(messagesEl);
 			return () => scrollCtrl.detach();
 		}
+		return undefined;
 	});
 
 	// Reset scroll state on session switch
@@ -107,9 +108,7 @@
 	// Derived first-message UUID — changes only on prepend or session switch,
 	// NOT on appends or content updates. This prevents the $effect.pre from
 	// firing spuriously when message html/status fields change.
-	const firstMessageUuid = $derived(
-		currentChat().messages.length > 0 ? currentChat().messages[0]?.uuid : "",
-	);
+	const firstMessageUuid = $derived(currentChat().messages[0]?.uuid ?? "");
 
 	// Track previous state for prepend detection
 	let prevFirstUuid = "";
@@ -166,7 +165,7 @@
 		if (msgEl) {
 			e.preventDefault();
 			e.stopPropagation();
-			const uuid = msgEl.dataset.uuid ?? null;
+			const uuid = msgEl.dataset["uuid"] ?? null;
 			selectRewindMessage(uuid);
 		}
 	}

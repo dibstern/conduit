@@ -16,11 +16,13 @@
 		getChildren,
 	}: {
 		entry: FileEntry;
-		depth?: number;
-		parentPath?: string;
-		onFileClick?: (path: string) => void;
-		onDirClick?: (path: string) => void;
-		getChildren?: (path: string) => FileEntry[] | undefined;
+		depth?: number | undefined;
+		parentPath?: string | undefined;
+		onFileClick?: ((path: string) => void) | undefined;
+		onDirClick?: ((path: string) => void) | undefined;
+		getChildren?:
+			| ((path: string) => FileEntry[] | undefined)
+			| undefined;
 	} = $props();
 
 	let expanded = $state(false);

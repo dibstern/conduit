@@ -16,21 +16,21 @@
 		/** Any dismiss gesture (Escape, backdrop click, close button). The parent decides what it means. */
 		onclose: () => void;
 		/** Supporting text under the title; auto-wired to aria-describedby. */
-		description?: string;
-		size?: ModalSize;
+		description?: string | undefined;
+		size?: ModalSize | undefined;
 		/** Escape + backdrop-click dismissal. Default true. The close button is gated by `showClose`. */
-		dismissible?: boolean;
+		dismissible?: boolean | undefined;
 		/** Corner close button. Default true. */
-		showClose?: boolean;
+		showClose?: boolean | undefined;
 		/** Extra classes on the dialog panel. */
-		class?: string;
+		class?: string | undefined;
 		children: Snippet;
 		/** Action row, rendered right-aligned below the body. */
-		footer?: Snippet;
+		footer?: Snippet | undefined;
 	} & (
 		// A dialog must have an accessible name: `title` renders the labelled <h2>;
 		// headerless dialogs must pass `ariaLabel` instead (compile-enforced, per Button).
-		| { title: string; ariaLabel?: never }
+		| { title: string; ariaLabel?: undefined }
 		| { title?: undefined; ariaLabel: string }
 	);
 

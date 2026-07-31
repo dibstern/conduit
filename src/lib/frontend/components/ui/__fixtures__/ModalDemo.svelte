@@ -5,18 +5,18 @@
 	import Modal from "../Modal.svelte";
 
 	type DemoProps = {
-		title?: string;
-		ariaLabel?: string;
-		description?: string;
-		size?: "sm" | "md" | "lg";
-		dismissible?: boolean;
-		showClose?: boolean;
-		withFooter?: boolean;
-		bodyHasAction?: boolean;
-		withBitsClose?: boolean;
-		initiallyOpen?: boolean;
+		title?: string | undefined;
+		ariaLabel?: string | undefined;
+		description?: string | undefined;
+		size?: "sm" | "md" | "lg" | undefined;
+		dismissible?: boolean | undefined;
+		showClose?: boolean | undefined;
+		withFooter?: boolean | undefined;
+		bodyHasAction?: boolean | undefined;
+		withBitsClose?: boolean | undefined;
+		initiallyOpen?: boolean | undefined;
 		/** Overrides the default close-on-dismiss wiring (controlled-proof tests). */
-		onclose?: () => void;
+		onclose?: (() => void) | undefined;
 	};
 
 	let {

@@ -14,6 +14,10 @@ token-disciplined set of primitives that every feature component consumes.
   element attributes (e.g. `HTMLButtonAttributes`) via `& Omit<…, handledKeys>` and
   spread `...rest` onto the root element so consumers can pass `title`, `data-*`,
   `aria-*`, `form`, etc.
+- **Optional props include `undefined`.** Under `exactOptionalPropertyTypes`, write
+  `prop?: T | undefined` for component-owned optional props. After `$props()`
+  destructuring, an absent prop and an explicitly `undefined` prop have the same
+  runtime meaning, so the public type must accept both.
 - **`variant` + `size`, not booleans.** Prefer a single closed `variant` union over
   a spray of boolean flags (`primary`/`danger`/… beats `isPrimary`/`isDanger`). Keep
   the set small and semantic.
@@ -30,10 +34,12 @@ token-disciplined set of primitives that every feature component consumes.
 - **Tokens only.** Use design tokens (`bg-accent`, `text-text`, `border-border`,
   `bg-error`, radius/`z`/shadow scales). No hardcoded hex, no arbitrary
   `z-[…]`/`shadow-[…]`/`rgba(…)` where a token exists.
-  `scripts/check-design-tokens.mjs` enforces these rules in `.svelte` files under
-  `src/lib/frontend`; shared `.ts` class constants still require review.
-- **`class` is additive, not an override.** Accept `class?: string` and append it
-  after the variant/size classes: `[BASE, variant, size, className].filter(Boolean).join(" ")`.
+  `scripts/check-design-tokens.mjs` enforces these rules in both `.svelte` and `.ts`
+  files under `src/lib/frontend`, so hoisting a class string into a shared constant
+  (e.g. `ui/floating-styles.ts`) no longer moves it out of the scanner's reach.
+- **`class` is additive, not an override.** Accept
+  `class?: string | undefined` and append it after the variant/size classes:
+  `[BASE, variant, size, className].filter(Boolean).join(" ")`.
   Order in the `class` **attribute** does not decide the CSS cascade — conflicting
   utilities are resolved by Tailwind's generated stylesheet order, so `class="px-2"`
   can silently lose to a variant's `px-4`. Treat `class` as **additive** (layout:

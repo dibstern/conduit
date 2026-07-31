@@ -1,16 +1,19 @@
 <script lang="ts">
-	import { DropdownMenu } from "bits-ui";
+	import { DropdownMenu, type DropdownMenuRadioGroupProps } from "bits-ui";
 	import type { Snippet } from "svelte";
-	import type { HTMLAttributes } from "svelte/elements";
 
 	type MenuRadioGroupProps = {
-		value?: string;
-		onvaluechange?: (value: string) => void;
-		class?: string;
+		value?: string | undefined;
+		onvaluechange?: ((value: string) => void) | undefined;
+		class?: string | undefined;
 		children: Snippet;
 	} & Omit<
-		HTMLAttributes<HTMLDivElement>,
-		"class" | "children" | "value" | "onchange"
+		DropdownMenuRadioGroupProps,
+		| "child"
+		| "children"
+		| "class"
+		| "onValueChange"
+		| "value"
 	>;
 
 	let {
@@ -20,13 +23,24 @@
 		children,
 		...rest
 	}: MenuRadioGroupProps = $props();
+
+	function handleValueChange(nextValue: string) {
+		onvaluechange?.(nextValue);
+	}
+
+	const radioGroupProps: Omit<
+		DropdownMenuRadioGroupProps,
+		"child" | "children" | "onValueChange" | "value"
+	> = $derived({
+		...rest,
+		...(className === undefined ? {} : { class: className }),
+	});
 </script>
 
 <DropdownMenu.RadioGroup
-	{...rest}
+	{...radioGroupProps}
 	bind:value
-	onValueChange={onvaluechange}
-	class={className}
+	onValueChange={handleValueChange}
 >
 	{@render children()}
 </DropdownMenu.RadioGroup>

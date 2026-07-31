@@ -11,7 +11,10 @@
 	import { applyToolContentResponse } from "../../stores/ws-dispatch.js";
 	import { getToolContentRpc } from "../../transport/ws-rpc-client.js";
 
-	let { message, isLast = false }: { message: ToolMessage; isLast?: boolean } = $props();
+	let { message, isLast = false }: {
+		message: ToolMessage;
+		isLast?: boolean | undefined;
+	} = $props();
 	let expanded = $state(false);
 	let loadingFullContent = $state(false);
 
@@ -27,8 +30,8 @@
 		if (message.name !== "Bash") return null;
 		const inp = message.input as Record<string, unknown> | null | undefined;
 		if (!inp) return null;
-		const cmd = inp.command as string | undefined;
-		return cmd ?? null;
+		const cmd = inp["command"];
+		return typeof cmd === "string" ? cmd : null;
 	});
 
 	function formatKB(length: number): string {

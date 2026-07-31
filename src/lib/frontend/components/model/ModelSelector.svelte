@@ -34,6 +34,7 @@
 	let dropdownOpen = $state(false);
 	let variantRef: ModelVariant | undefined = $state();
 	let contextWindowRef: ContextWindowSelector | undefined = $state();
+	const variantState: { availableVariants: readonly string[] } = discoveryState;
 
 	// ─── Derived ────────────────────────────────────────────────────────────────
 
@@ -149,7 +150,7 @@
 					discoveryState.currentModelId = response.model;
 					discoveryState.currentProviderId = response.provider;
 					discoveryState.currentVariant = response.variant;
-					discoveryState.availableVariants = response.variants;
+					variantState.availableVariants = response.variants;
 					void getAgentsRpc({ projectSlug, sessionId })
 						.then(applyGetAgentsResponse)
 						.catch(() => undefined);
@@ -183,7 +184,7 @@
 					discoveryState.defaultModelId = response.model;
 					discoveryState.defaultProviderId = response.provider;
 					discoveryState.currentVariant = response.variant;
-					discoveryState.availableVariants = response.variants;
+					variantState.availableVariants = response.variants;
 				})
 				.catch(() => {
 					discoveryState.defaultModelId = previousDefaultModelId;

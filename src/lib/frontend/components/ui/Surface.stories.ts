@@ -37,7 +37,7 @@ type Story = StoryObj<typeof meta>;
 export const Variants: Story = {
 	render: () => ({
 		Component: SurfaceStoryGallery,
-		props: { axis: "variants" },
+		props: { axis: "variants", children: content("Surface") },
 	}),
 };
 
@@ -45,7 +45,10 @@ export const Variants: Story = {
 export const PaddingAndElevation: Story = {
 	render: () => ({
 		Component: SurfaceStoryGallery,
-		props: { axis: "padding-elevation" },
+		props: {
+			axis: "padding-elevation",
+			children: content("Surface"),
+		},
 	}),
 };
 

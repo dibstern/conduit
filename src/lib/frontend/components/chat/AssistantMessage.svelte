@@ -163,6 +163,7 @@
 		}
 		// Fallback for environments without requestIdleCallback (SSR, old browsers)
 		postRender();
+		return undefined;
 	});
 
 	// ─── Code block headers ────────────────────────────────────────────────────
@@ -348,9 +349,7 @@
 		}
 	});
 
-	// TODO: Look into this warning:
-	// This comparison appears to be unintentional because the types '"idle"' and '"done"' have no overlap.ts(2367)
-	const hintColor = $derived(
+	const hintColor = $derived.by(() =>
 		copyState === "done" ? "text-success" : "text-text-dimmer",
 	);
 

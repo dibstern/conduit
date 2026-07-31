@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { DropdownMenu } from "bits-ui";
+	import { DropdownMenu, type DropdownMenuItemProps } from "bits-ui";
 	import type { Snippet } from "svelte";
 	import type { HTMLAnchorAttributes, HTMLAttributes } from "svelte/elements";
 	import {
@@ -8,23 +8,30 @@
 	} from "./floating-styles.js";
 
 	type MenuItemVariant = keyof typeof MENU_ITEM_VARIANT_CLASSES;
+	type MenuAnchorAttributes = Omit<
+		HTMLAnchorAttributes,
+		keyof HTMLAttributes<HTMLElement>
+	> &
+		HTMLAttributes<HTMLElement>;
 
 	type MenuItemOwnProps = {
-		variant?: MenuItemVariant;
-		disabled?: boolean;
-		closeOnSelect?: boolean;
-		onselect?: (event: Event) => void;
-		class?: string;
+		variant?: MenuItemVariant | undefined;
+		disabled?: boolean | undefined;
+		closeOnSelect?: boolean | undefined;
+		onselect?: ((event: Event) => void) | undefined;
+		class?: string | undefined;
+		id?: string | undefined;
 		children: Snippet;
 	};
 
 	type MenuItemProps =
 		| (MenuItemOwnProps &
 				Omit<
-					HTMLAnchorAttributes,
+					MenuAnchorAttributes,
 					| "class"
 					| "children"
 					| "href"
+					| "id"
 					| "role"
 					| "aria-disabled"
 					| "onselect"
@@ -32,13 +39,19 @@
 		| (MenuItemOwnProps &
 				Omit<
 					HTMLAttributes<HTMLDivElement>,
-					"class" | "children" | "role" | "aria-disabled" | "onselect"
+					| "class"
+					| "children"
+					| "id"
+					| "role"
+					| "aria-disabled"
+					| "onselect"
 				> & { href?: undefined });
 
 	let {
 		variant = "default",
 		disabled = false,
 		href,
+		id,
 		closeOnSelect = true,
 		onselect,
 		class: className,
@@ -51,15 +64,25 @@
 			.filter(Boolean)
 			.join(" "),
 	);
+
+	function handleSelect(event: Event) {
+		onselect?.(event);
+	}
+
+	const itemProps: Omit<
+		DropdownMenuItemProps,
+		"child" | "children"
+	> = $derived({
+		...rest,
+		...(id === undefined ? {} : { id }),
+		disabled,
+		closeOnSelect,
+		onSelect: handleSelect,
+		class: itemClass,
+	});
 </script>
 
-<DropdownMenu.Item
-	{...rest}
-	{disabled}
-	{closeOnSelect}
-	onSelect={onselect}
-	class={itemClass}
->
+<DropdownMenu.Item {...itemProps}>
 	{#snippet child({ props })}
 		{#if href !== undefined}
 			<a {...props} {href}>

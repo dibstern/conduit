@@ -1,9 +1,14 @@
 <script lang="ts">
+	import type { ComponentProps } from "svelte";
 	import Surface from "../Surface.svelte";
 
 	type GalleryAxis = "variants" | "padding-elevation";
 
-	let { axis }: { axis: GalleryAxis } = $props();
+	let {
+		axis = "variants",
+	}: ComponentProps<typeof import("../Surface.svelte").default> & {
+		axis?: GalleryAxis | undefined;
+	} = $props();
 
 	const variants = ["card", "inset", "floating", "plain"] as const;
 	const paddings = ["none", "sm", "md", "lg"] as const;

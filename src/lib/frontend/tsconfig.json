@@ -22,7 +22,8 @@
 		"./**/*.svelte",
 		"../shared-types.ts",
 		"../handlers/payloads.ts",
-		"../vite-env.d.ts"
+		"../vite-env.d.ts",
+		"../../../test/**/*.svelte"
 	],
 	"exclude": ["./sw.ts"]
 }

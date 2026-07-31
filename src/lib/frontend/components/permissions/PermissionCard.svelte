@@ -66,11 +66,13 @@
 		const toolName = request.toolName.toLowerCase();
 
 		if (toolName === "bash" || toolName === "command") {
-			const cmd = toolInput.command ?? toolInput.cmd ?? toolInput.input;
+			const cmd =
+				toolInput["command"] ?? toolInput["cmd"] ?? toolInput["input"];
 			if (typeof cmd === "string") return cmd;
 		}
 		if (toolName === "edit" || toolName === "write" || toolName === "read") {
-			const path = toolInput.file_path ?? toolInput.path ?? toolInput.file;
+			const path =
+				toolInput["file_path"] ?? toolInput["path"] ?? toolInput["file"];
 			if (typeof path === "string") return path;
 		}
 

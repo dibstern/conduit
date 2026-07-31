@@ -13,7 +13,7 @@
 		switchToSession,
 		sendNewSession,
 		sessionCreation,
-		handleSessionList,
+		applyListSessionsResponse,
 	} from "../../stores/session.svelte.js";
 	import { getCurrentSlug, getSessionHref } from "../../stores/router.svelte.js";
 	import { getBrowserClientId } from "../../stores/client-identity.js";
@@ -104,12 +104,7 @@
 			(response) => {
 				if (localSearchValue.trim() !== trimmed) return;
 				if (uiState.hideSubagentSessions !== roots) return;
-				handleSessionList({
-					type: "session_list",
-					sessions: response.sessions,
-					roots: response.roots,
-					search: true,
-				});
+				applyListSessionsResponse(response);
 			},
 		);
 	}

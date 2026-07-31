@@ -18,14 +18,14 @@
 		permissionsState,
 	} from "../../stores/permissions.svelte.js";
 
-	let { request, inline = false, synthetic = false }: { 
-		request: QuestionRequest; 
-		inline?: boolean;
+	let { request, inline = false, synthetic = false }: {
+		request: QuestionRequest;
+		inline?: boolean | undefined;
 		/** True when this question was reconstructed from tool input data
 		 *  rather than received via a live `ask_user` WebSocket event.
 		 *  This happens when viewing a session started outside this browser
 		 *  (e.g. from the terminal). The answer may not be deliverable. */
-		synthetic?: boolean;
+		synthetic?: boolean | undefined;
 	} = $props();
 
 	// ─── Local state ────────────────────────────────────────────────────────
@@ -73,8 +73,7 @@
 
 	function rebuildSelections() {
 		const next = new Map<number, string>();
-		for (let qIdx = 0; qIdx < request.questions.length; qIdx++) {
-			const q = request.questions[qIdx];
+		for (const [qIdx, q] of request.questions.entries()) {
 			if (q.multiSelect) {
 				const checked = multiChecked.get(qIdx) ?? new Set();
 				const values: string[] = [];

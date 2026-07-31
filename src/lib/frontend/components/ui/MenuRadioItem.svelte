@@ -1,7 +1,6 @@
 <script lang="ts">
-	import { DropdownMenu } from "bits-ui";
+	import { DropdownMenu, type DropdownMenuRadioItemProps } from "bits-ui";
 	import type { Snippet } from "svelte";
-	import type { HTMLAttributes } from "svelte/elements";
 	import Icon from "./Icon.svelte";
 	import {
 		FLOATING_ITEM_CLASSES,
@@ -10,19 +9,20 @@
 
 	type MenuRadioItemProps = {
 		value: string;
-		disabled?: boolean;
-		closeOnSelect?: boolean;
-		onselect?: (event: Event) => void;
-		class?: string;
+		disabled?: boolean | undefined;
+		closeOnSelect?: boolean | undefined;
+		onselect?: ((event: Event) => void) | undefined;
+		class?: string | undefined;
 		children: Snippet;
 	} & Omit<
-		HTMLAttributes<HTMLDivElement>,
+		DropdownMenuRadioItemProps,
 		| "class"
+		| "child"
 		| "children"
-		| "role"
-		| "aria-checked"
-		| "aria-disabled"
-		| "onselect"
+		| "closeOnSelect"
+		| "disabled"
+		| "onSelect"
+		| "value"
 	>;
 
 	let {
@@ -44,16 +44,25 @@
 			.filter(Boolean)
 			.join(" "),
 	);
+
+	function handleSelect(event: Event) {
+		onselect?.(event);
+	}
+
+	const radioItemProps: Omit<
+		DropdownMenuRadioItemProps,
+		"child" | "children"
+	> = $derived({
+		...rest,
+		value,
+		disabled,
+		closeOnSelect,
+		onSelect: handleSelect,
+		class: itemClass,
+	});
 </script>
 
-<DropdownMenu.RadioItem
-	{...rest}
-	{value}
-	{disabled}
-	{closeOnSelect}
-	onSelect={onselect}
-	class={itemClass}
->
+<DropdownMenu.RadioItem {...radioItemProps}>
 	{#snippet child({ props, checked })}
 		<div {...props}>
 			<span class="min-w-0 flex-1">

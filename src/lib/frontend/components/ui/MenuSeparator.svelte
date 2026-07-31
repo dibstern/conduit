@@ -1,12 +1,11 @@
 <script lang="ts">
-	import { DropdownMenu } from "bits-ui";
-	import type { HTMLAttributes } from "svelte/elements";
+	import { DropdownMenu, type DropdownMenuSeparatorProps } from "bits-ui";
 
 	type MenuSeparatorProps = {
-		class?: string;
+		class?: string | undefined;
 	} & Omit<
-		HTMLAttributes<HTMLDivElement>,
-		"class" | "children" | "role"
+		DropdownMenuSeparatorProps,
+		"child" | "children" | "class"
 	>;
 
 	let {
@@ -17,9 +16,14 @@
 	const separatorClass = $derived(
 		["my-1 h-px bg-border", className].filter(Boolean).join(" "),
 	);
+
+	const separatorProps: Omit<
+		DropdownMenuSeparatorProps,
+		"child" | "children"
+	> = $derived(rest);
 </script>
 
-<DropdownMenu.Separator {...rest}>
+<DropdownMenu.Separator {...separatorProps}>
 	{#snippet child({ props })}
 		<div {...props} role="separator" class={separatorClass}></div>
 	{/snippet}

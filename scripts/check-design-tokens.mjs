@@ -33,15 +33,23 @@ const WARNING_RULES = [
 	},
 ];
 
-function collectSvelteFiles(directory) {
+// Both extensions are scanned: class strings are increasingly hoisted into shared
+// `.ts` constants (e.g. components/ui/floating-styles.ts), and a scanner that reads
+// only `.svelte` would let a token violation escape simply by being extracted.
+const SCANNED_EXTENSIONS = [".svelte", ".ts"];
+
+function collectSourceFiles(directory) {
 	const files = [];
 
 	for (const entry of readdirSync(directory, { withFileTypes: true })) {
 		if (entry.isDirectory()) {
 			if (!SKIPPED_DIRECTORIES.has(entry.name)) {
-				files.push(...collectSvelteFiles(resolve(directory, entry.name)));
+				files.push(...collectSourceFiles(resolve(directory, entry.name)));
 			}
-		} else if (entry.isFile() && entry.name.endsWith(".svelte")) {
+		} else if (
+			entry.isFile() &&
+			SCANNED_EXTENSIONS.some((extension) => entry.name.endsWith(extension))
+		) {
 			files.push(resolve(directory, entry.name));
 		}
 	}
@@ -56,7 +64,7 @@ function displayPath(file) {
 let hardCount = 0;
 let warningCount = 0;
 
-for (const file of collectSvelteFiles(ROOT).sort()) {
+for (const file of collectSourceFiles(ROOT).sort()) {
 	const lines = readFileSync(file, "utf8").split(/\r?\n/);
 
 	for (const [index, line] of lines.entries()) {

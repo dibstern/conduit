@@ -1,7 +1,10 @@
 <script lang="ts">
-	import { Popover as BitsPopover } from "bits-ui";
+	import {
+		Popover as BitsPopover,
+		type PopoverContentProps,
+		type PopoverPortalProps,
+	} from "bits-ui";
 	import type { Snippet } from "svelte";
-	import type { HTMLAttributes } from "svelte/elements";
 	import {
 		exemptFromBackgroundInert,
 	} from "./actions/use-background-inert.svelte.js";
@@ -16,27 +19,33 @@
 	type TriggerSnippet = Snippet<[{ props: Record<string, unknown> }]>;
 
 	type PopoverOwnProps = {
-		open?: boolean;
-		onopenchange?: (open: boolean) => void;
-		side?: PopoverSide;
-		align?: PopoverAlign;
-		sideOffset?: number;
-		alignOffset?: number;
-		portalTo?: HTMLElement | string;
-		class?: string;
+		open?: boolean | undefined;
+		onopenchange?: ((open: boolean) => void) | undefined;
+		side?: PopoverSide | undefined;
+		align?: PopoverAlign | undefined;
+		sideOffset?: number | undefined;
+		alignOffset?: number | undefined;
+		portalTo?: HTMLElement | string | undefined;
+		class?: string | undefined;
 		trigger: TriggerSnippet;
 		children: Snippet;
 	} & Omit<
-		HTMLAttributes<HTMLDivElement>,
+		PopoverContentProps,
 		| "class"
+		| "child"
 		| "children"
-		| "title"
-		| "role"
+		| "collisionPadding"
+		| "preventScroll"
+		| "side"
+		| "sideOffset"
+		| "align"
+		| "alignOffset"
+		| "strategy"
 		| "aria-label"
 		| "aria-labelledby"
 	> &
 		(
-			| { title: string; ariaLabel?: never }
+			| { title: string; ariaLabel?: undefined }
 			| { title?: undefined; ariaLabel: string }
 		);
 
@@ -64,6 +73,34 @@
 		[FLOATING_SURFACE_CLASSES, className].filter(Boolean).join(" "),
 	);
 
+	function handleOpenChange(nextOpen: boolean) {
+		onopenchange?.(nextOpen);
+	}
+
+	const portalProps: PopoverPortalProps = $derived(
+		portalTo === undefined ? {} : { to: portalTo },
+	);
+	const contentProps: Omit<
+		PopoverContentProps,
+		"child" | "children"
+	> = $derived({
+		...rest,
+		...(side === undefined ? {} : { side }),
+		align,
+		sideOffset,
+		...(alignOffset === undefined ? {} : { alignOffset }),
+		preventScroll: FLOATING_POSITIONING_DEFAULTS.preventScroll,
+		strategy: FLOATING_POSITIONING_DEFAULTS.strategy,
+		collisionPadding: FLOATING_POSITIONING_DEFAULTS.collisionPadding,
+		role: "dialog",
+		...(resolvedTitle
+			? { "aria-labelledby": titleId }
+			: resolvedAriaLabel === undefined
+				? {}
+				: { "aria-label": resolvedAriaLabel }),
+		class: contentClass,
+	});
+
 	if (import.meta.env.DEV) {
 		$effect(() => {
 			if (!resolvedTitle && !resolvedAriaLabel) {
@@ -75,28 +112,15 @@
 	}
 </script>
 
-<BitsPopover.Root bind:open onOpenChange={onopenchange}>
+<BitsPopover.Root bind:open onOpenChange={handleOpenChange}>
 	<BitsPopover.Trigger>
 		{#snippet child({ props })}
 			{@render trigger({ props })}
 		{/snippet}
 	</BitsPopover.Trigger>
 
-	<BitsPopover.Portal to={portalTo}>
-		<BitsPopover.Content
-			{...rest}
-			{side}
-			{align}
-			{sideOffset}
-			{alignOffset}
-			preventScroll={FLOATING_POSITIONING_DEFAULTS.preventScroll}
-			strategy={FLOATING_POSITIONING_DEFAULTS.strategy}
-			collisionPadding={FLOATING_POSITIONING_DEFAULTS.collisionPadding}
-			role="dialog"
-			aria-label={resolvedTitle ? undefined : resolvedAriaLabel}
-			aria-labelledby={resolvedTitle ? titleId : undefined}
-			class={contentClass}
-		>
+	<BitsPopover.Portal {...portalProps}>
+		<BitsPopover.Content {...contentProps}>
 			{#snippet child({ props, wrapperProps })}
 				<div {...wrapperProps}>
 					<div {...props} use:exemptFromBackgroundInert>

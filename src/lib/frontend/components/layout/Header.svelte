@@ -38,6 +38,7 @@
 				return "bg-success animate-[pulse-dot_1.2s_ease-in-out_infinite]";
 			case "error":
 				return "bg-error";
+			case "connecting":
 			case "disconnected":
 			case "":
 				return "bg-text-muted";

@@ -8,8 +8,11 @@
 
 	let {
 		visible = false,
-		onClose,
-	}: { visible?: boolean; onClose?: () => void } = $props();
+		onClose = () => undefined,
+	}: {
+		visible?: boolean | undefined;
+		onClose?: (() => void) | undefined;
+	} = $props();
 </script>
 
 <div class="flex h-screen w-full justify-end">

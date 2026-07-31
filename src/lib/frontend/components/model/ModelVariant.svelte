@@ -15,7 +15,9 @@
 
 	// ─── Props ──────────────────────────────────────────────────────────────────
 
-	let { onOpen }: { onOpen?: () => void } = $props();
+	let { onOpen }: { onOpen?: (() => void) | undefined } = $props();
+
+	const variantState: { availableVariants: readonly string[] } = discoveryState;
 
 	// ─── State ──────────────────────────────────────────────────────────────────
 
@@ -59,7 +61,7 @@
 			})
 				.then((response) => {
 					discoveryState.currentVariant = response.variant;
-					discoveryState.availableVariants = response.variants;
+					variantState.availableVariants = response.variants;
 				})
 				.catch(() => {
 					discoveryState.currentVariant = previousVariant;
