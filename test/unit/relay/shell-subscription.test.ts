@@ -17,6 +17,7 @@ import {
 import { expect } from "vitest";
 import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
 import type { Envelope } from "../../../src/lib/domain/relay/Services/read-model-subscription.js";
+import { OrchestrationEngineTag } from "../../../src/lib/domain/relay/Services/services.js";
 import {
 	SessionEventBusLive,
 	SessionEventBusTag,
@@ -42,6 +43,7 @@ import {
 } from "../../../src/lib/persistence/events.js";
 import type { SessionRow } from "../../../src/lib/persistence/read-model-types.js";
 import { makeMockOpenCodeAPI } from "../../helpers/mock-factories.js";
+import { withDispatchEffect } from "../../helpers/orchestration-engine-test-double.js";
 
 // ─── Real-stack harness ──────────────────────────────────────────────────────
 // A fresh temp-file persistence stack + the real SessionEventBus per test,
@@ -64,6 +66,10 @@ const makeShellTestLayer = () => {
 	return Layer.mergeAll(
 		makePersistenceEffectLayer(filename, undefined, SessionEventBusLive),
 		SessionEventBusLive,
+		Layer.succeed(
+			OrchestrationEngineTag,
+			withDispatchEffect({ dispatch: async () => undefined }),
+		),
 		cleanup,
 	);
 };

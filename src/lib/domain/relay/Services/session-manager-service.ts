@@ -546,14 +546,103 @@ export const deleteSession = (sessionId: string) =>
 	Effect.gen(function* () {
 		const api = yield* OpenCodeAPITag;
 		const stateRef = yield* SessionManagerStateTag;
+		const readQueryOption = yield* Effect.serviceOption(ReadQueryEffectTag);
+		const configOption = yield* Effect.serviceOption(ConfigTag);
+		const row =
+			readQueryOption._tag === "Some"
+				? yield* readQueryOption.value.getSession(sessionId).pipe(
+						Effect.mapError(
+							(cause) =>
+								new SessionManagerError({
+									operation: "deleteSession.getSession",
+									cause,
+								}),
+						),
+					)
+				: undefined;
 
-		// No retry: delete is not idempotent — retrying a 404 would fail unnecessarily.
-		yield* Effect.tryPromise(() => api.session.delete(sessionId)).pipe(
-			Effect.mapError(
-				(cause) =>
-					new SessionManagerError({ operation: "deleteSession", cause }),
-			),
-		);
+		if (
+			row &&
+			isClaudeSessionRow(
+				row,
+				configOption._tag === "Some" ? configOption.value.configDir : undefined,
+			)
+		) {
+			const engineOption = yield* Effect.serviceOption(OrchestrationEngineTag);
+			if (engineOption._tag === "None") {
+				return yield* Effect.fail(
+					new SessionManagerError({
+						operation: "deleteSession",
+						cause: new Error(
+							"Orchestration engine is required to delete a Claude session",
+						),
+					}),
+				);
+			}
+			yield* engineOption.value
+				.dispatchEffect({
+					type: "end_session",
+					commandId: randomUUID(),
+					sessionId,
+					unbind: true,
+				})
+				.pipe(
+					Effect.mapError(
+						(cause) =>
+							new SessionManagerError({
+								operation: "deleteSession",
+								cause,
+							}),
+					),
+				);
+		} else {
+			let deleteApi = api;
+			if (row && row.provider !== "opencode") {
+				const instanceClientsOption = yield* Effect.serviceOption(
+					OpenCodeInstanceClientsTag,
+				);
+				if (instanceClientsOption._tag === "None") {
+					return yield* Effect.fail(
+						new SessionManagerError({
+							operation: "deleteSession.resolveInstanceClient",
+							cause: new Error(
+								`OpenCode instance client is required for "${row.provider}"`,
+							),
+						}),
+					);
+				}
+				const instanceApi = yield* instanceClientsOption.value
+					.clientFor(row.provider)
+					.pipe(
+						Effect.mapError(
+							(cause) =>
+								new SessionManagerError({
+									operation: "deleteSession.resolveInstanceClient",
+									cause,
+								}),
+						),
+					);
+				if (!instanceApi) {
+					return yield* Effect.fail(
+						new SessionManagerError({
+							operation: "deleteSession.resolveInstanceClient",
+							cause: new Error(
+								`OpenCode instance client "${row.provider}" was not resolved`,
+							),
+						}),
+					);
+				}
+				deleteApi = instanceApi;
+			}
+
+			// No retry: delete is not idempotent — retrying a 404 would fail unnecessarily.
+			yield* Effect.tryPromise(() => deleteApi.session.delete(sessionId)).pipe(
+				Effect.mapError(
+					(cause) =>
+						new SessionManagerError({ operation: "deleteSession", cause }),
+				),
+			);
+		}
 
 		yield* appendSessionDeletedTombstone(sessionId);
 
@@ -1674,10 +1763,42 @@ export const SessionManagerServiceLive: Layer.Layer<
 				}),
 			deleteSession: (sessionId) =>
 				Effect.gen(function* () {
-					yield* deleteSession(sessionId).pipe(
+					const base = deleteSession(sessionId).pipe(
 						Effect.provideService(OpenCodeAPITag, api),
 						Effect.provideService(SessionManagerStateTag, stateRef),
 					);
+					const withReadQuery =
+						readQueryEffectOption._tag === "Some"
+							? base.pipe(
+									Effect.provideService(
+										ReadQueryEffectTag,
+										readQueryEffectOption.value,
+									),
+								)
+							: base;
+					const withConfig =
+						configOption._tag === "Some"
+							? withReadQuery.pipe(
+									Effect.provideService(ConfigTag, configOption.value),
+								)
+							: withReadQuery;
+					const withEngine =
+						engineOption._tag === "Some"
+							? withConfig.pipe(
+									Effect.provideService(
+										OrchestrationEngineTag,
+										engineOption.value,
+									),
+								)
+							: withConfig;
+					yield* instanceClientsOption._tag === "Some"
+						? withEngine.pipe(
+								Effect.provideService(
+									OpenCodeInstanceClientsTag,
+									instanceClientsOption.value,
+								),
+							)
+						: withEngine;
 					yield* publishSessionDeleted(sessionId).pipe(
 						Effect.provideService(DaemonEventBusTag, eventBus),
 					);

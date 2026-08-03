@@ -21,6 +21,10 @@ import {
 } from "../../../src/lib/domain/daemon/Services/daemon-pubsub.js";
 import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
 import {
+	type OpenCodeInstanceClients,
+	OpenCodeInstanceClientsTag,
+} from "../../../src/lib/domain/relay/Services/opencode-instance-clients.js";
+import {
 	RelayStatusSnapshotLive,
 	RelayStatusSnapshotTag,
 } from "../../../src/lib/domain/relay/Services/relay-status-snapshot.js";
@@ -72,6 +76,7 @@ import {
 	makeMockOpenCodeAPI,
 	makeMockStatusPoller,
 } from "../../helpers/mock-factories.js";
+import { withDispatchEffect } from "../../helpers/orchestration-engine-test-double.js";
 
 function makeRow(id: string, overrides?: Partial<SessionRow>): SessionRow {
 	return {
@@ -616,10 +621,15 @@ describe("SessionManagerService", () => {
 	);
 
 	it.scoped(
-		"live service publishes one SessionDeleted after delete succeeds",
+		"deletes a Claude session through orchestration and unbinds it",
 		() => {
 			const api = makeMockOpenCodeAPI();
 			vi.spyOn(api.session, "delete").mockResolvedValue(undefined);
+			const readQuery = makeReadQueryEffect([
+				makeRow("deleted-session", { provider: "claude" }),
+			]);
+			const dispatch = vi.fn(async () => undefined);
+			const engine = withDispatchEffect({ dispatch });
 			const layer = Layer.provideMerge(
 				SessionManagerServiceLive,
 				Layer.mergeAll(
@@ -627,6 +637,8 @@ describe("SessionManagerService", () => {
 					Layer.succeed(LoggerTag, makeMockLogger()),
 					makeSessionManagerStateLive(),
 					DaemonEventBusLive,
+					Layer.succeed(ReadQueryEffectTag, readQuery),
+					Layer.succeed(OrchestrationEngineTag, engine),
 				),
 			);
 
@@ -637,7 +649,121 @@ describe("SessionManagerService", () => {
 
 				yield* service.deleteSession("deleted-session");
 
+				expect(readQuery.getSession).toHaveBeenCalledOnce();
+				expect(readQuery.getSession).toHaveBeenCalledWith("deleted-session");
+				expect(dispatch).toHaveBeenCalledOnce();
+				expect(dispatch).toHaveBeenCalledWith({
+					type: "end_session",
+					commandId: expect.any(String),
+					sessionId: "deleted-session",
+					unbind: true,
+				});
+				expect(api.session.delete).not.toHaveBeenCalled();
+				const event = yield* Queue.poll(sub);
+				expect(Option.getOrNull(event)).toMatchObject({
+					_tag: "SessionDeleted",
+					sessionId: "deleted-session",
+				});
+				const extra = yield* Queue.poll(sub);
+				expect(Option.isNone(extra)).toBe(true);
+			}).pipe(Effect.provide(Layer.fresh(layer)));
+		},
+	);
+
+	it.scoped("deletes a named OpenCode session through its bound client", () => {
+		const api = makeMockOpenCodeAPI();
+		vi.spyOn(api.session, "delete").mockResolvedValue(undefined);
+		const namedApi = makeMockOpenCodeAPI();
+		vi.spyOn(namedApi.session, "delete").mockResolvedValue(undefined);
+		const readQuery = makeReadQueryEffect([
+			makeRow("deleted-session", { provider: "work-oc" }),
+		]);
+		const clientFor = vi.fn((instanceId: string) =>
+			Effect.succeed(instanceId === "work-oc" ? namedApi : undefined),
+		);
+		const instanceClients = {
+			clientFor,
+			registerStreamWirer: () => Effect.void,
+		} satisfies OpenCodeInstanceClients;
+		const dispatch = vi.fn(async () => undefined);
+		const engine = withDispatchEffect({ dispatch });
+		const layer = Layer.provideMerge(
+			SessionManagerServiceLive,
+			Layer.mergeAll(
+				Layer.succeed(OpenCodeAPITag, api),
+				Layer.succeed(LoggerTag, makeMockLogger()),
+				makeSessionManagerStateLive(),
+				DaemonEventBusLive,
+				Layer.succeed(ReadQueryEffectTag, readQuery),
+				Layer.succeed(OpenCodeInstanceClientsTag, instanceClients),
+				Layer.succeed(OrchestrationEngineTag, engine),
+			),
+		);
+
+		return Effect.gen(function* () {
+			const service = yield* SessionManagerServiceTag;
+			const sub = yield* subscribeToDaemonEvents;
+
+			yield* service.deleteSession("deleted-session");
+
+			expect(readQuery.getSession).toHaveBeenCalledOnce();
+			expect(readQuery.getSession).toHaveBeenCalledWith("deleted-session");
+			expect(clientFor).toHaveBeenCalledOnce();
+			expect(clientFor).toHaveBeenCalledWith("work-oc");
+			expect(namedApi.session.delete).toHaveBeenCalledOnce();
+			expect(namedApi.session.delete).toHaveBeenCalledWith("deleted-session");
+			expect(api.session.delete).not.toHaveBeenCalled();
+			expect(dispatch).not.toHaveBeenCalled();
+			const event = yield* Queue.poll(sub);
+			expect(Option.getOrNull(event)).toMatchObject({
+				_tag: "SessionDeleted",
+				sessionId: "deleted-session",
+			});
+			const extra = yield* Queue.poll(sub);
+			expect(Option.isNone(extra)).toBe(true);
+		}).pipe(Effect.provide(Layer.fresh(layer)));
+	});
+
+	it.scoped(
+		"deletes a project-default OpenCode session after classifying its row",
+		() => {
+			const api = makeMockOpenCodeAPI();
+			vi.spyOn(api.session, "delete").mockResolvedValue(undefined);
+			const readQuery = makeReadQueryEffect([
+				makeRow("deleted-session", { provider: "opencode" }),
+			]);
+			const clientFor = vi.fn(() => Effect.succeed(undefined));
+			const instanceClients = {
+				clientFor,
+				registerStreamWirer: () => Effect.void,
+			} satisfies OpenCodeInstanceClients;
+			const dispatch = vi.fn(async () => undefined);
+			const engine = withDispatchEffect({ dispatch });
+			const layer = Layer.provideMerge(
+				SessionManagerServiceLive,
+				Layer.mergeAll(
+					Layer.succeed(OpenCodeAPITag, api),
+					Layer.succeed(LoggerTag, makeMockLogger()),
+					makeSessionManagerStateLive(),
+					DaemonEventBusLive,
+					Layer.succeed(ReadQueryEffectTag, readQuery),
+					Layer.succeed(OpenCodeInstanceClientsTag, instanceClients),
+					Layer.succeed(OrchestrationEngineTag, engine),
+				),
+			);
+
+			return Effect.gen(function* () {
+				const service = yield* SessionManagerServiceTag;
+				const sub = yield* subscribeToDaemonEvents;
+
+				yield* service.deleteSession("deleted-session");
+
+				expect(readQuery.getSession).toHaveBeenCalledOnce();
+				expect(readQuery.getSession).toHaveBeenCalledWith("deleted-session");
+				expect(api.session.delete).toHaveBeenCalledOnce();
 				expect(api.session.delete).toHaveBeenCalledWith("deleted-session");
+				expect(clientFor).not.toHaveBeenCalled();
+				expect(dispatch).not.toHaveBeenCalled();
 				const event = yield* Queue.poll(sub);
 				expect(Option.getOrNull(event)).toMatchObject({
 					_tag: "SessionDeleted",
