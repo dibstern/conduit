@@ -24,6 +24,25 @@ interface StoryEntry {
 
 const VIEWPORT_CAPTURE_TAG = "viewport-capture";
 
+/** Fidelity-gate mode for migration swap commits — see playwright.config.ts. */
+const STRICT = process.env["VISUAL_STRICT"] === "1";
+
+/**
+ * Stories that a strict recapture cannot reproduce on the very next strict run.
+ * Measured 2026-08-03: recapture the whole suite under VISUAL_STRICT=1, then
+ * re-run it immediately — 843 of 848 captures came back byte-identical, so
+ * zero-diff is achievable here; these three are not, for their own reasons.
+ * Each is a bug to fix (conduit-test-de3.20), not a tolerance to grant.
+ */
+const STRICT_NONDETERMINISTIC: Record<string, string> = {
+	"chat-thinkingblock--active":
+		"active/animated state the suite's animation disabling does not reach",
+	"ui-menu--arrow-key-navigation":
+		"play()-driven; keyboard navigation has not settled by capture time",
+	"overlays-settingspanel--default":
+		"SettingsPanel stories appear to share module state across parallel workers — which of them fails moves between runs",
+};
+
 function loadStories(): StoryEntry[] {
 	const cwd = process.env["STORYBOOK_CWD"] ?? process.cwd();
 	const indexPath = join(cwd, "dist", "storybook", "index.json");
@@ -259,6 +278,19 @@ if (stories.length > 0) {
 						return;
 					}
 
+					const strictFlakeReason = STRICT_NONDETERMINISTIC[story.id];
+					if (STRICT && strictFlakeReason) {
+						// Announced, not silent: strict mode's whole value is that a red
+						// run means something, so a story it cannot hold to zero-diff is
+						// named here with its reason rather than left permanently red
+						// (which trains everyone to ignore the colour) or quietly passed.
+						test.skip(
+							true,
+							`[visual:strict] NOT covered by the fidelity gate — ${strictFlakeReason} (conduit-test-de3.20)`,
+						);
+						return;
+					}
+
 					await page.goto(`/iframe.html?id=${story.id}&viewMode=story`, {
 						waitUntil: "domcontentloaded",
 					});
@@ -283,9 +315,21 @@ if (stories.length > 0) {
 						await page.waitForTimeout(50);
 					}
 
-					const screenshotOpts = sizeNorm
-						? { maxDiffPixelRatio: sizeNorm.maxDiffPixelRatio }
-						: {};
+					// Per-story tolerances are a per-CALL option, which beats the
+					// config-level one — so leaving this in place under VISUAL_STRICT
+					// would let a story quietly opt out of the fidelity gate while the
+					// run still reported strict. Under strict the override is dropped
+					// and the exemption is announced, so a story that then fails is
+					// read as "not provably identical" rather than as a broken mode.
+					if (sizeNorm && STRICT) {
+						console.warn(
+							`[visual:strict] ignoring the ${sizeNorm.maxDiffPixelRatio} tolerance for "${story.id}"; it is held to zero-diff like every other story.`,
+						);
+					}
+					const screenshotOpts =
+						sizeNorm && !STRICT
+							? { maxDiffPixelRatio: sizeNorm.maxDiffPixelRatio }
+							: {};
 					// A zero-height root already falls back to the viewport, so it is
 					// as safe as an explicit tag. The guard below only needs to police
 					// the element-capture path — the one that can silently crop

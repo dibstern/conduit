@@ -59,6 +59,7 @@
 		"storybook": "storybook dev -p 6006",
 		"storybook:build": "storybook build -o dist/storybook",
 		"test:storybook-visual": "pnpm storybook:build && pnpm exec playwright test --config test/visual/playwright.config.ts",
+		"test:storybook-visual:strict": "VISUAL_STRICT=1 pnpm test:storybook-visual",
 		"test:storybook-visual:update": "pnpm storybook:build && pnpm exec playwright test --config test/visual/playwright.config.ts --update-snapshots",
 		"test:storybook-visual:update-all": "bash scripts/update-visual-snapshots.sh",
 		"test:storybook-visual:update-linux": "bash scripts/update-visual-snapshots.sh linux",

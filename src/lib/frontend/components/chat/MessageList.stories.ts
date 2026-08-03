@@ -1,6 +1,6 @@
 import type { Meta, StoryObj } from "@storybook/svelte-vite";
 import {
-	getOrCreateSessionMessages,
+	getOrCreateSessionSlot,
 	resetChatState,
 } from "../../stores/chat.svelte.js";
 import { sessionState } from "../../stores/session.svelte.js";
@@ -37,25 +37,25 @@ export const Empty: Story = {};
 
 export const SingleUserMessage: Story = {
 	beforeEach: () => {
-		getOrCreateSessionMessages(testId).messages = [mockUserMessage];
+		getOrCreateSessionSlot(testId).messages.messages = [mockUserMessage];
 	},
 };
 
 export const SingleAssistantMessage: Story = {
 	beforeEach: () => {
-		getOrCreateSessionMessages(testId).messages = [mockAssistantSimple];
+		getOrCreateSessionSlot(testId).messages.messages = [mockAssistantSimple];
 	},
 };
 
 export const FullConversation: Story = {
 	beforeEach: () => {
-		getOrCreateSessionMessages(testId).messages = [...mockConversation];
+		getOrCreateSessionSlot(testId).messages.messages = [...mockConversation];
 	},
 };
 
 export const MixedTypes: Story = {
 	beforeEach: () => {
-		getOrCreateSessionMessages(testId).messages = [
+		getOrCreateSessionSlot(testId).messages.messages = [
 			mockUserMessage,
 			mockThinkingDone,
 			mockToolCompleted,

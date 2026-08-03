@@ -104,8 +104,13 @@ export const ManyProjects: Story = {
 				title: `Project ${i + 1}`,
 				status,
 				...(status === "error" ? { error: "Connection refused" } : {}),
-				sessions: Math.floor(Math.random() * 20),
-				clients: Math.floor(Math.random() * 5),
+				// Deterministic, but spread across one- and two-digit counts so the
+				// baseline still exercises varying label widths. A story with a
+				// committed baseline may never draw from Math.random()/Date.now():
+				// the capture then differs on every run, and only survives because
+				// the diff tolerance is wide enough to hide a few changed digits.
+				sessions: (i * 7) % 20,
+				clients: i % 5,
 				isProcessing: i % 3 === 0,
 			};
 		}),

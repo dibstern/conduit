@@ -28,7 +28,9 @@ function setupState(opts: {
 			([id, title]) => ({
 				id,
 				title,
-				createdAt: Date.now(),
+				// Fixed epoch, not Date.now(): stories with committed baselines must
+				// be deterministic even where the value is not currently rendered.
+				createdAt: 1_735_689_600_000,
 			}),
 		) as typeof sessionState.allSessions;
 
