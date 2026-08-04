@@ -545,6 +545,88 @@ const runSessionsPermissionModeMigration: Effect.Effect<
 	yield* executeSqlStatements(sessionsPermissionModeMigrationSql);
 });
 
+/** 2026-07-15T00:00:00.000Z — midnight UTC of the day 0004_drop_events_session_fk shipped (b2b698c6). */
+export const LEGACY_SKELETON_CUTOFF_MS = 1_784_073_600_000;
+export const MAX_PURGEABLE_SKELETON_SESSIONS = 25;
+
+/** Ids matching the legacy-skeleton predicate. Shared by the migration and the boot diagnostic. */
+export const selectLegacySkeletonSessionIds: Effect.Effect<
+	readonly string[],
+	unknown,
+	SqlClient.SqlClient
+> = Effect.gen(function* () {
+	const sql = yield* SqlClient.SqlClient;
+	const rows = yield* sql<{ id: string }>`
+			WITH RECURSIVE
+			cohort(id, parent_id) AS (
+				SELECT s.id, s.parent_id
+				FROM sessions s
+				WHERE s.created_at < ${LEGACY_SKELETON_CUTOFF_MS}
+					AND s.provider = 'opencode'
+					AND NOT EXISTS (SELECT 1 FROM messages m WHERE m.session_id = s.id)
+			),
+			ancestry(id, parent_id, depth) AS (
+				SELECT id, parent_id, 0
+				FROM cohort
+				UNION ALL
+				SELECT ancestry.id, parent.parent_id, ancestry.depth + 1
+				FROM ancestry
+				JOIN cohort parent ON parent.id = ancestry.parent_id
+				WHERE ancestry.depth < 64
+			)
+			SELECT id
+			FROM ancestry
+			GROUP BY id
+			ORDER BY MAX(depth) DESC, id`;
+	return rows.map((row) => row.id);
+});
+
+const runPurgeLegacySkeletonSessionsMigration: Effect.Effect<
+	void,
+	unknown,
+	SqlClient.SqlClient
+> = Effect.gen(function* () {
+	const sql = yield* SqlClient.SqlClient;
+	const ids = yield* selectLegacySkeletonSessionIds;
+
+	if (ids.length === 0) return;
+
+	if (ids.length > MAX_PURGEABLE_SKELETON_SESSIONS) {
+		// Deliberately does NOT fail. Failing would roll back the whole migrator run
+		// (Migrator.js:129) including this migration's bookkeeping row (Migrator.js:114),
+		// permanently freezing the store at migration 9. See spec 3.3.1.
+		yield* Effect.logError(
+			`Legacy skeleton purge ABORTED: ${ids.length} sessions matched, above the ` +
+				`${MAX_PURGEABLE_SKELETON_SESSIONS} safety threshold. Nothing was deleted. ` +
+				`Matched session ids: ${ids.join(", ")}`,
+		);
+		return;
+	}
+
+	for (const id of ids) {
+		// FK-safe order; messages/message_parts intentionally absent (spec 3.2).
+		yield* sql`DELETE FROM activities WHERE session_id = ${id}`;
+		yield* sql`DELETE FROM pending_approvals WHERE session_id = ${id}`;
+		yield* sql`DELETE FROM turns WHERE session_id = ${id}`;
+		yield* sql`DELETE FROM session_providers WHERE session_id = ${id}`;
+		yield* sql`DELETE FROM tool_content WHERE session_id = ${id}`;
+		yield* sql`DELETE FROM provider_state WHERE session_id = ${id}`;
+		yield* sql`DELETE FROM command_receipts WHERE session_id = ${id}`;
+		yield* sql`DELETE FROM provider_command_outbox WHERE session_id = ${id}`;
+		yield* sql`DELETE FROM provider_command_interactions WHERE session_id = ${id}`;
+		yield* sql`DELETE FROM provider_command_turns WHERE session_id = ${id}`;
+		yield* sql`DELETE FROM provider_command_tombstones WHERE session_id = ${id}`;
+		yield* sql`DELETE FROM provider_command_sessions WHERE session_id = ${id}`;
+		yield* sql`DELETE FROM events WHERE session_id = ${id}`;
+		yield* sql`DELETE FROM sessions WHERE id = ${id}`;
+	}
+
+	yield* Effect.logWarning(
+		`Purged ${ids.length} legacy skeleton session(s) predating the ` +
+			`2026-07-15 events FK drop (zero message rows). Session ids: ${ids.join(", ")}`,
+	);
+});
+
 export const effectMigrationEntries = {
 	"0001_create_event_store_tables": runBaselineEventStoreMigration,
 	"0002_add_message_part_metadata": runMessagePartMetadataMigration,
@@ -555,6 +637,8 @@ export const effectMigrationEntries = {
 	"0007_messages_context_window": runMessagesContextWindowMigration,
 	"0008_turn_model_execution": runTurnModelExecutionMigration,
 	"0009_sessions_permission_mode": runSessionsPermissionModeMigration,
+	"0010_purge_legacy_skeleton_sessions":
+		runPurgeLegacySkeletonSessionsMigration,
 } satisfies Record<string, Effect.Effect<void, unknown, SqlClient.SqlClient>>;
 
 export function makeEffectMigrationLoader(

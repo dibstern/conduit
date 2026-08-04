@@ -4,7 +4,11 @@
 
 import { SqlClient } from "@effect/sql";
 import { Context, Data, Effect, Layer } from "effect";
-import { makeEffectSqlMigrator } from "../../../persistence/effect/migrations.js";
+import {
+	MAX_PURGEABLE_SKELETON_SESSIONS,
+	makeEffectSqlMigrator,
+	selectLegacySkeletonSessionIds,
+} from "../../../persistence/effect/migrations.js";
 
 export class PersistenceError extends Data.TaggedError("PersistenceError")<{
 	operation: string;
@@ -44,6 +48,25 @@ export const makePersistenceServiceLive: Layer.Layer<
 		);
 
 		yield* migrate;
+
+		// Boot diagnostic: if the 0010 purge circuit breaker tripped, the cohort is still
+		// present and must stay noticeable on every boot, not just the boot that tripped it.
+		// Wrapped so a diagnostic failure can never prevent startup.
+		yield* selectLegacySkeletonSessionIds.pipe(
+			Effect.flatMap((ids) =>
+				ids.length > MAX_PURGEABLE_SKELETON_SESSIONS
+					? Effect.logError(
+							`Legacy skeleton purge circuit breaker is TRIPPED: ${ids.length} sessions match ` +
+								`the purge predicate, above the ${MAX_PURGEABLE_SKELETON_SESSIONS} threshold. ` +
+								`Nothing has been deleted. Review the predicate before raising the threshold; ` +
+								`the full id list was logged once by migration 0010_purge_legacy_skeleton_sessions.`,
+						)
+					: Effect.void,
+			),
+			Effect.provideService(SqlClient.SqlClient, sql),
+			Effect.catchAllCause(() => Effect.void),
+			Effect.withSpan("persistence.legacySkeletonBreakerCheck"),
+		);
 
 		const healthCheck = sql`SELECT 1 AS ok`.pipe(
 			Effect.map((rows) => rows.length > 0),
