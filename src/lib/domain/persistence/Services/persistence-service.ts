@@ -51,7 +51,9 @@ export const makePersistenceServiceLive: Layer.Layer<
 
 		// Boot diagnostic: if the 0010 purge circuit breaker tripped, the cohort is still
 		// present and must stay noticeable on every boot, not just the boot that tripped it.
-		// Wrapped so a diagnostic failure can never prevent startup.
+		// catchAllCause, not catchAll: this must swallow DEFECTS too, or a throw inside
+		// the query would defeat the whole point of the wrapper and turn a safety check
+		// into the outage it exists to avoid.
 		yield* selectLegacySkeletonSessionIds.pipe(
 			Effect.flatMap((ids) =>
 				ids.length > MAX_PURGEABLE_SKELETON_SESSIONS
