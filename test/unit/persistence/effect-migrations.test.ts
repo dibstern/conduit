@@ -100,6 +100,7 @@ describe("Effect SQL migrations", () => {
 					{ migration_id: 7, name: "messages_context_window" },
 					{ migration_id: 8, name: "turn_model_execution" },
 					{ migration_id: 9, name: "sessions_permission_mode" },
+					{ migration_id: 10, name: "purge_legacy_skeleton_sessions" },
 				]);
 
 				const legacyRows = yield* sql<{ id: number; name: string }>`
@@ -139,6 +140,7 @@ describe("Effect SQL migrations", () => {
 					[7, "messages_context_window"],
 					[8, "turn_model_execution"],
 					[9, "sessions_permission_mode"],
+					[10, "purge_legacy_skeleton_sessions"],
 				]);
 
 				const sql = yield* SqlClient.SqlClient;
@@ -157,8 +159,8 @@ describe("Effect SQL migrations", () => {
 					name: string;
 				}>`SELECT migration_id, name FROM effect_sql_migrations ORDER BY migration_id`;
 				expect(effectHistory.at(-1)).toEqual({
-					migration_id: 9,
-					name: "sessions_permission_mode",
+					migration_id: 10,
+					name: "purge_legacy_skeleton_sessions",
 				});
 				const legacyHistory = yield* sql<{ id: number; name: string }>`
 					SELECT id, name FROM _migrations ORDER BY id`;
@@ -199,6 +201,7 @@ describe("Effect SQL migrations", () => {
 					{ migration_id: 7, name: "messages_context_window" },
 					{ migration_id: 8, name: "turn_model_execution" },
 					{ migration_id: 9, name: "sessions_permission_mode" },
+					{ migration_id: 10, name: "purge_legacy_skeleton_sessions" },
 				]);
 
 				const columns = yield* sql<{ name: string }>`
@@ -284,8 +287,8 @@ describe("Effect SQL migrations", () => {
 					FROM effect_sql_migrations
 					ORDER BY migration_id`;
 				expect(history.at(-1)).toEqual({
-					migration_id: 9,
-					name: "sessions_permission_mode",
+					migration_id: 10,
+					name: "purge_legacy_skeleton_sessions",
 				});
 			}).pipe(
 				Effect.provide(

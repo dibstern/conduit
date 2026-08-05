@@ -6,13 +6,19 @@ import { join } from "node:path";
 import { SqlClient } from "@effect/sql";
 import { SqliteClient as EffectSqliteClient } from "@effect/sql-sqlite-node";
 import { describe, it } from "@effect/vitest";
-import { Effect, Layer } from "effect";
+import { Effect, Layer, Logger } from "effect";
 import { expect } from "vitest";
 import {
 	makePersistenceServiceLive,
 	PersistenceServiceTag,
 	withTransaction,
 } from "../../../src/lib/domain/persistence/Services/persistence-service.js";
+import {
+	LEGACY_SKELETON_CUTOFF_MS,
+	MAX_PURGEABLE_SKELETON_SESSIONS,
+} from "../../../src/lib/persistence/effect/migrations.js";
+import { runMigrations } from "../../../src/lib/persistence/migrations.js";
+import { schemaMigrations } from "../../../src/lib/persistence/schema.js";
 import { SqliteClient as SyncSqliteClient } from "../../../src/lib/persistence/sqlite-client.js";
 
 function makeTestSqlLayer(setup?: (filename: string) => void) {
@@ -72,6 +78,32 @@ function expectMigrationFailure(error: unknown, reason: string) {
 	};
 	expect(persistenceError.operation).toBe("migrate");
 	expect(String(persistenceError.cause)).toContain(reason);
+}
+
+function seedTrippedDatabase(db: SyncSqliteClient) {
+	runMigrations(db, schemaMigrations);
+	for (let index = 0; index <= MAX_PURGEABLE_SKELETON_SESSIONS; index++) {
+		db.execute(
+			"INSERT INTO sessions (id, provider, created_at, updated_at) VALUES (?, ?, ?, ?)",
+			[
+				`matching-${index.toString().padStart(2, "0")}`,
+				"opencode",
+				LEGACY_SKELETON_CUTOFF_MS - 1,
+				LEGACY_SKELETON_CUTOFF_MS - 1,
+			],
+		);
+	}
+}
+
+function makeErrorLogger(messages: string[]) {
+	const logger = Logger.make<unknown, void>((options) => {
+		if (options.logLevel._tag !== "Error") return;
+		const parts = Array.isArray(options.message)
+			? options.message
+			: [options.message];
+		messages.push(parts.map(String).join(" "));
+	});
+	return Logger.replace(Logger.defaultLogger, logger);
 }
 
 describe("Persistence Effect", () => {
@@ -146,6 +178,7 @@ describe("Persistence Effect", () => {
 				{ migration_id: 7, name: "messages_context_window" },
 				{ migration_id: 8, name: "turn_model_execution" },
 				{ migration_id: 9, name: "sessions_permission_mode" },
+				{ migration_id: 10, name: "purge_legacy_skeleton_sessions" },
 			]);
 
 			const legacyMigrationTable = yield* sql<{ name: string }>`
@@ -179,6 +212,125 @@ describe("Persistence Effect", () => {
 				Layer.provideMerge(
 					makePersistenceServiceLive,
 					EffectSqliteClient.layer({ filename: ":memory:" }),
+				),
+			),
+		),
+	);
+
+	it.effect("startup completes when the legacy skeleton breaker trips", () =>
+		Effect.gen(function* () {
+			yield* PersistenceServiceTag;
+		}).pipe(
+			Effect.provide(
+				makePersistenceLayer((filename) =>
+					seedDatabase(filename, seedTrippedDatabase),
+				),
+			),
+		),
+	);
+
+	it.scoped(
+		"re-announces a tripped legacy skeleton breaker on every startup",
+		() => {
+			const messages: string[] = [];
+			return Effect.gen(function* () {
+				const dir = yield* Effect.sync(() =>
+					mkdtempSync(join(tmpdir(), "conduit-persistence-breaker-")),
+				);
+				yield* Effect.addFinalizer(() =>
+					Effect.sync(() => rmSync(dir, { recursive: true, force: true })),
+				);
+				const filename = join(dir, "events.db");
+				seedDatabase(filename, seedTrippedDatabase);
+				const layer = Layer.provideMerge(
+					makePersistenceServiceLive,
+					EffectSqliteClient.layer({ filename }),
+				);
+
+				yield* Effect.provide(PersistenceServiceTag, layer);
+				yield* Effect.provide(PersistenceServiceTag, layer);
+
+				expect(
+					messages.filter((message) =>
+						message.includes(
+							"Legacy skeleton purge circuit breaker is TRIPPED",
+						),
+					),
+				).toHaveLength(2);
+			}).pipe(Effect.provide(makeErrorLogger(messages)));
+		},
+	);
+
+	it.effect(
+		"does not announce the legacy skeleton breaker for a clean store",
+		() => {
+			const messages: string[] = [];
+			return Effect.gen(function* () {
+				yield* PersistenceServiceTag;
+				expect(
+					messages.some((message) =>
+						message.includes(
+							"Legacy skeleton purge circuit breaker is TRIPPED",
+						),
+					),
+				).toBe(false);
+			}).pipe(
+				Effect.provide(makePersistenceLayer()),
+				Effect.provide(makeErrorLogger(messages)),
+			);
+		},
+	);
+
+	it.effect("diagnostic failure cannot prevent startup", () =>
+		Effect.gen(function* () {
+			yield* PersistenceServiceTag;
+		}).pipe(
+			Effect.provide(
+				makePersistenceLayer((filename) =>
+					seedDatabase(filename, (db) => {
+						runMigrations(db, schemaMigrations);
+						db.exec(`
+							CREATE TABLE effect_sql_migrations (
+								migration_id INTEGER PRIMARY KEY NOT NULL,
+								created_at DATETIME NOT NULL DEFAULT current_timestamp,
+								name VARCHAR(255) NOT NULL
+							);
+							INSERT INTO effect_sql_migrations (migration_id, name)
+							VALUES (10, 'purge_legacy_skeleton_sessions');
+							DROP TABLE message_parts;
+							DROP TABLE messages;
+						`);
+					}),
+				),
+			),
+		),
+	);
+
+	it.effect("diagnostic defect cannot prevent startup", () =>
+		Effect.gen(function* () {
+			yield* PersistenceServiceTag;
+		}).pipe(
+			Effect.provide(
+				makePersistenceLayer((filename) =>
+					seedDatabase(filename, seedTrippedDatabase),
+				),
+			),
+			Effect.provide(
+				Logger.replace(
+					Logger.defaultLogger,
+					Logger.make<unknown, void>((options) => {
+						const parts = Array.isArray(options.message)
+							? options.message
+							: [options.message];
+						if (
+							parts
+								.map(String)
+								.join(" ")
+								.includes("Legacy skeleton purge circuit breaker is TRIPPED")
+						) {
+							throw new Error("diagnostic defect");
+						}
+					}),
 				),
 			),
 		),

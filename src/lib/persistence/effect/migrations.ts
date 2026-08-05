@@ -545,6 +545,117 @@ const runSessionsPermissionModeMigration: Effect.Effect<
 	yield* executeSqlStatements(sessionsPermissionModeMigrationSql);
 });
 
+/** 2026-07-15T00:00:00.000Z — midnight UTC of the day 0004_drop_events_session_fk shipped (b2b698c6). */
+export const LEGACY_SKELETON_CUTOFF_MS = 1_784_073_600_000;
+export const MAX_PURGEABLE_SKELETON_SESSIONS = 25;
+
+/** Ids matching the legacy-skeleton predicate. Shared by the migration and the boot diagnostic. */
+export const selectLegacySkeletonSessionIds: Effect.Effect<
+	readonly string[],
+	unknown,
+	SqlClient.SqlClient
+> = Effect.gen(function* () {
+	const sql = yield* SqlClient.SqlClient;
+	const rows = yield* sql<{ id: string }>`
+			WITH RECURSIVE
+			cohort(id, parent_id) AS (
+				SELECT s.id, s.parent_id
+				FROM sessions s
+				WHERE s.created_at < ${LEGACY_SKELETON_CUTOFF_MS}
+					AND s.provider = 'opencode'
+					AND NOT EXISTS (SELECT 1 FROM messages m WHERE m.session_id = s.id)
+			),
+			-- Order by ancestry depth, descendants first. sessions.parent_id is a
+			-- self-referencing FK, so deleting a forked parent while its child is
+			-- still present raises FOREIGN KEY constraint failed. A raise here is
+			-- not a local failure: it kills the migration, which rolls back the
+			-- whole migrator run un-recorded and freezes the store at migration 9
+			-- forever (see the circuit-breaker comment below).
+			--
+			-- depth < 64 is a cycle guard, and it is load-bearing. SQLite does NOT
+			-- error on a cyclic recursive CTE — it loops forever. parent_id cycles
+			-- are not prevented by the schema and are reachable, because the session
+			-- projector can set parent_id on an already-existing row. This query runs
+			-- on EVERY BOOT (migration plus the startup diagnostic), so one cyclic row
+			-- without this bound hangs relay startup permanently, and no Effect error
+			-- handler can catch a hang. The bound must stay above
+			-- MAX_PURGEABLE_SKELETON_SESSIONS: reaching depth 64 needs 65+ cohort rows,
+			-- which trips the threshold and deletes nothing, so truncation is
+			-- unreachable in the delete path.
+			ancestry(id, parent_id, depth) AS (
+				SELECT id, parent_id, 0
+				FROM cohort
+				UNION ALL
+				SELECT ancestry.id, parent.parent_id, ancestry.depth + 1
+				FROM ancestry
+				JOIN cohort parent ON parent.id = ancestry.parent_id
+				WHERE ancestry.depth < 64
+			)
+			SELECT id
+			FROM ancestry
+			GROUP BY id
+			ORDER BY MAX(depth) DESC, id`;
+	return rows.map((row) => row.id);
+});
+
+const runPurgeLegacySkeletonSessionsMigration: Effect.Effect<
+	void,
+	unknown,
+	SqlClient.SqlClient
+> = Effect.gen(function* () {
+	const sql = yield* SqlClient.SqlClient;
+	const ids = yield* selectLegacySkeletonSessionIds;
+
+	if (ids.length === 0) return;
+
+	if (ids.length > MAX_PURGEABLE_SKELETON_SESSIONS) {
+		// Deliberately does NOT fail, and must never be "corrected" to throw or
+		// Effect.fail. @effect/sql inserts bookkeeping rows for all pending
+		// migrations before any body runs (Migrator.js:114) and wraps the run in one
+		// transaction (Migrator.js:129), and converts a failure into a defect
+		// (Migrator.js:84). So failing here rolls back un-recorded and permanently
+		// freezes the store at migration 9 on every subsequent boot — and as a defect
+		// it escapes Effect.mapError at the call site. Loudness is provided instead by
+		// the boot diagnostic in persistence-service.ts, which re-checks every boot
+		// while the condition persists. Tracked as conduit-test-070.
+		yield* Effect.logError(
+			`Legacy skeleton purge ABORTED: ${ids.length} sessions matched, above the ` +
+				`${MAX_PURGEABLE_SKELETON_SESSIONS} safety threshold. Nothing was deleted. ` +
+				`Matched session ids: ${ids.join(", ")}`,
+		);
+		return;
+	}
+
+	for (const id of ids) {
+		// FK-safe delete order. messages and message_parts are INTENTIONALLY ABSENT
+		// and must not be added to "complete" this list. Their FKs are the backstop:
+		// this migration is unattended, irreversible hard-delete with no dry-run, so
+		// if the predicate above is ever widened to match a session that actually has
+		// messages, the DELETE below raises FOREIGN KEY constraint failed and the
+		// transaction rolls back instead of quietly destroying real content. Deleting
+		// messages here would remove exactly that protection. Tracked as conduit-test-070.
+		yield* sql`DELETE FROM activities WHERE session_id = ${id}`;
+		yield* sql`DELETE FROM pending_approvals WHERE session_id = ${id}`;
+		yield* sql`DELETE FROM turns WHERE session_id = ${id}`;
+		yield* sql`DELETE FROM session_providers WHERE session_id = ${id}`;
+		yield* sql`DELETE FROM tool_content WHERE session_id = ${id}`;
+		yield* sql`DELETE FROM provider_state WHERE session_id = ${id}`;
+		yield* sql`DELETE FROM command_receipts WHERE session_id = ${id}`;
+		yield* sql`DELETE FROM provider_command_outbox WHERE session_id = ${id}`;
+		yield* sql`DELETE FROM provider_command_interactions WHERE session_id = ${id}`;
+		yield* sql`DELETE FROM provider_command_turns WHERE session_id = ${id}`;
+		yield* sql`DELETE FROM provider_command_tombstones WHERE session_id = ${id}`;
+		yield* sql`DELETE FROM provider_command_sessions WHERE session_id = ${id}`;
+		yield* sql`DELETE FROM events WHERE session_id = ${id}`;
+		yield* sql`DELETE FROM sessions WHERE id = ${id}`;
+	}
+
+	yield* Effect.logWarning(
+		`Purged ${ids.length} legacy skeleton session(s) predating the ` +
+			`2026-07-15 events FK drop (zero message rows). Session ids: ${ids.join(", ")}`,
+	);
+});
+
 export const effectMigrationEntries = {
 	"0001_create_event_store_tables": runBaselineEventStoreMigration,
 	"0002_add_message_part_metadata": runMessagePartMetadataMigration,
@@ -555,6 +666,8 @@ export const effectMigrationEntries = {
 	"0007_messages_context_window": runMessagesContextWindowMigration,
 	"0008_turn_model_execution": runTurnModelExecutionMigration,
 	"0009_sessions_permission_mode": runSessionsPermissionModeMigration,
+	"0010_purge_legacy_skeleton_sessions":
+		runPurgeLegacySkeletonSessionsMigration,
 } satisfies Record<string, Effect.Effect<void, unknown, SqlClient.SqlClient>>;
 
 export function makeEffectMigrationLoader(
