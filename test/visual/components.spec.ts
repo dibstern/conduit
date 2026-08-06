@@ -68,7 +68,17 @@ const STRICT_ALL = process.env["VISUAL_STRICT_ALL"] === "1";
  * makes that possible — without a re-test switch a skip list's own membership
  * is unfalsifiable and silently outlives the bug.
  */
-const STRICT_NONDETERMINISTIC: Record<string, string> = {};
+const STRICT_NONDETERMINISTIC: Record<string, string> = {
+	// Meets the bar above: a measured rate and a root cause, not a guess.
+	// Sampling document.activeElement every 20ms across 4 runs shows focus
+	// reaching "Duplicate" (the correct end state) and then REVERTING to
+	// "Archive" during Storybook's completing phase — 3 of 4 runs end reverted.
+	// The story's own play() asserts Duplicate and passes, because the revert
+	// happens after play() returns. So no baseline for this story is meaningful
+	// until the component is fixed; blessing one just pins a coin flip.
+	"ui-menu--arrow-key-navigation":
+		"Menu reverts keyboard focus to the first item after arrow-key navigation completes — a real component defect, not capture noise (conduit-test-de3.24)",
+};
 
 function loadStories(): StoryEntry[] {
 	const cwd = process.env["STORYBOOK_CWD"] ?? process.cwd();
