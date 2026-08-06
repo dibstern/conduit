@@ -1388,17 +1388,6 @@ export class ClaudeProviderRuntime {
 				});
 			const task = ctx.subagentTasks?.get(message.task_id);
 			let sessionReady = false;
-			if (ctx.subagentTasks) {
-				ctx.subagentTasks.set(message.task_id, {
-					toolUseId: message.tool_use_id,
-					childSessionId,
-					...(task?.parentMessageId
-						? { parentMessageId: task.parentMessageId }
-						: {}),
-					...(task?.description ? { description: task.description } : {}),
-					...(task?.subagentType ? { subagentType: task.subagentType } : {}),
-				});
-			}
 
 			const ensureClaudeSubagentSession =
 				yield* this.resolveEnsureClaudeSubagentSessionEffect();
@@ -1422,6 +1411,19 @@ export class ClaudeProviderRuntime {
 					),
 				);
 				sessionReady = ensured;
+			}
+			if (!sessionReady) return;
+
+			if (ctx.subagentTasks) {
+				ctx.subagentTasks.set(message.task_id, {
+					toolUseId: message.tool_use_id,
+					childSessionId,
+					...(task?.parentMessageId
+						? { parentMessageId: task.parentMessageId }
+						: {}),
+					...(task?.description ? { description: task.description } : {}),
+					...(task?.subagentType ? { subagentType: task.subagentType } : {}),
+				});
 			}
 
 			if (ctx.eventSink) {

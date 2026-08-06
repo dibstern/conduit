@@ -1335,7 +1335,7 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 		}
 	});
 
-	it("keeps parent metadata but drops child transcript when early child session ensure fails", async () => {
+	it("does not expose deterministic child state when early child session ensure fails", async () => {
 		const parentSessionId = "parent-session-ensure-fails";
 		const parentClaudeSessionId = "sdk-parent-ensure-fails";
 		const sdkSubagentId = "task-ensure-fails";
@@ -1424,34 +1424,26 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 			const events = (sink.push as ReturnType<typeof vi.fn>).mock.calls.map(
 				([event]) => event as CanonicalEvent,
 			);
-			expect(events).toEqual(
-				expect.arrayContaining([
-					expect.objectContaining({
-						type: "tool.running",
-						sessionId: parentSessionId,
-						data: expect.objectContaining({
-							partId: taskToolUseId,
-							metadata: expect.objectContaining({
-								childSessionId,
-								providerTaskId: sdkSubagentId,
-							}),
-						}),
-					}),
-					expect.objectContaining({
-						type: "tool.running",
-						sessionId: parentSessionId,
-						data: expect.objectContaining({
-							partId: taskToolUseId,
-							metadata: expect.objectContaining({
-								childSessionId,
-								providerTaskId: sdkSubagentId,
-							}),
-						}),
-					}),
-				]),
+			const deterministicChildLinks = events.filter(
+				(event) =>
+					event.sessionId === parentSessionId &&
+					(event.data as { metadata?: Record<string, unknown> }).metadata?.[
+						"childSessionId"
+					] === childSessionId,
 			);
+			expect(deterministicChildLinks).toEqual([]);
 			expect(events.some((event) => event.sessionId === childSessionId)).toBe(
 				false,
+			);
+			const ctx = getClaudeRuntimeSessionForTest(instance, parentSessionId);
+			expect(
+				ctx?.subagentTasks?.get(sdkSubagentId)?.childSessionId,
+			).toBeUndefined();
+			expect(ctx?.subagentPollers?.has(sdkSubagentId)).toBe(false);
+
+			releaseResult?.();
+			await expect(turnPromise).resolves.toEqual(
+				expect.objectContaining({ status: "completed" }),
 			);
 		} finally {
 			releaseResult?.();

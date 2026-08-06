@@ -168,6 +168,14 @@ const recoverProjections = Effect.gen(function* () {
 	yield* runner.recover();
 });
 
+const establishSession = (sessionId: string) =>
+	Effect.gen(function* () {
+		const eventStore = yield* EventStoreEffectTag;
+		const runner = yield* ProjectionRunnerEffectTag;
+		const stored = yield* eventStore.append(sessionCreated(sessionId));
+		yield* runner.projectEvent(stored);
+	});
+
 // The ingestion choke point, inline: append → project → publish. A real store,
 // real message projector, real bus — the faithful production write path.
 const commit = (
@@ -518,22 +526,22 @@ describe("subscribeSessionDetail", () => {
 		() =>
 			Effect.gen(function* () {
 				yield* recoverProjections;
+				yield* establishSession(SID);
 				const { q } = yield* openDetail({ sessionId: SID });
 				yield* takeN(q, 2); // snapshot(empty) + synchronized
 
 				const persist = yield* ClaudeEventPersistEffectTag;
 				yield* persist.persistUserMessage(SID, "hello from user");
 
-				// persistUserMessage commits session.created, message.created(user),
-				// text.delta — all published post-projection as one batch.
-				const delivered = (yield* takeN(q, 3)).map(expectEventDelta);
+				// Lifecycle establishment owns session.created. User persistence emits
+				// only message.created(user) and text.delta.
+				const delivered = (yield* takeN(q, 2)).map(expectEventDelta);
 				expect(delivered.map((e) => e.type)).toEqual([
-					"session.created",
 					"message.created",
 					"text.delta",
 				]);
-				const created = delivered[1];
-				const delta = delivered[2];
+				const created = delivered[0];
+				const delta = delivered[1];
 				if (
 					created?.type !== "message.created" ||
 					delta?.type !== "text.delta"
@@ -542,6 +550,16 @@ describe("subscribeSessionDetail", () => {
 				}
 				expect(created.data.role).toBe("user");
 				expect(delta.data.text).toBe("hello from user");
+				const sql = yield* SqlClient.SqlClient;
+				const counts = yield* sql<{
+					event_count: number;
+					creation_count: number;
+				}>`
+					SELECT
+						COUNT(*) AS event_count,
+						SUM(CASE WHEN type = 'session.created' THEN 1 ELSE 0 END) AS creation_count
+					FROM events WHERE session_id = ${SID}`;
+				expect(counts[0]).toEqual({ event_count: 3, creation_count: 1 });
 			}).pipe(Effect.provide(makeDetailTestLayer())),
 	);
 
@@ -550,6 +568,7 @@ describe("subscribeSessionDetail", () => {
 		() =>
 			Effect.gen(function* () {
 				yield* recoverProjections;
+				yield* establishSession(SID);
 				const { q } = yield* openDetail({ sessionId: SID });
 				yield* takeN(q, 2);
 
@@ -638,6 +657,7 @@ describe("subscribeSessionDetail", () => {
 			// ("a bus signal implies committed projection").
 			Effect.gen(function* () {
 				yield* recoverProjections;
+				yield* establishSession(SID);
 				const bus = yield* SessionEventBusTag;
 				const events = yield* bus.subscribe({ sessionId: SID });
 				const persist = yield* ClaudeEventPersistEffectTag;
@@ -706,6 +726,7 @@ describe("subscribeSessionDetail", () => {
 
 				yield* Effect.gen(function* () {
 					yield* recoverProjections;
+					yield* establishSession(SID);
 					const persist = yield* ClaudeEventPersistEffectTag;
 					const sql = yield* SqlClient.SqlClient;
 
@@ -726,7 +747,6 @@ describe("subscribeSessionDetail", () => {
 					// …the signal still lands: projected ⇒ published, never one only.
 					const delivered = yield* Ref.get(published);
 					expect(delivered.map((e) => e.type)).toEqual([
-						"session.created",
 						"message.created",
 						"text.delta",
 					]);

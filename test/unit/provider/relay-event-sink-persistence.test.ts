@@ -6,8 +6,11 @@ import { describe, it } from "@effect/vitest";
 import { Effect } from "effect";
 import { expect, vi } from "vitest";
 import { ClaudeEventPersistEffectTag } from "../../../src/lib/persistence/effect/claude-event-persist-effect.js";
+import { EventStoreEffectTag } from "../../../src/lib/persistence/effect/event-store-effect.js";
 import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
+import { ProjectionRunnerEffectTag } from "../../../src/lib/persistence/effect/projection-runner-effect.js";
 import { ReadQueryEffectTag } from "../../../src/lib/persistence/effect/read-query-effect.js";
+import { canonicalEvent } from "../../../src/lib/persistence/events.js";
 import { createRelayEventSink } from "../../../src/lib/provider/relay-event-sink.js";
 import {
 	makeMessageCreatedEvent,
@@ -23,6 +26,18 @@ describe("RelayEventSink Effect persistence integration", () => {
 			const layer = makePersistenceEffectLayer(join(dir, "events.db"));
 
 			return Effect.gen(function* () {
+				const eventStore = yield* EventStoreEffectTag;
+				const runner = yield* ProjectionRunnerEffectTag;
+				yield* runner.recover();
+				const creation = yield* eventStore.append(
+					canonicalEvent(
+						"session.created",
+						"s1",
+						{ sessionId: "s1", title: "Claude Session", provider: "claude" },
+						{ provider: "claude" },
+					),
+				);
+				yield* runner.projectEvent(creation);
 				const persist = yield* ClaudeEventPersistEffectTag;
 				const readQuery = yield* ReadQueryEffectTag;
 				const send = vi.fn();
@@ -58,40 +73,39 @@ describe("RelayEventSink Effect persistence integration", () => {
 		},
 	);
 
-	it.effect("creates the session row with provider claude", () => {
-		const dir = mkdtempSync(join(tmpdir(), "conduit-relay-sink-effect-"));
-		const layer = makePersistenceEffectLayer(join(dir, "events.db"));
+	it.effect(
+		"does not create a session row for a missing compatibility event",
+		() => {
+			const dir = mkdtempSync(join(tmpdir(), "conduit-relay-sink-effect-"));
+			const layer = makePersistenceEffectLayer(join(dir, "events.db"));
 
-		return Effect.gen(function* () {
-			const persist = yield* ClaudeEventPersistEffectTag;
-			const readQuery = yield* ReadQueryEffectTag;
-			const send = vi.fn();
-			const sink = createRelayEventSink({
-				sessionId: "s-claude",
-				send,
-				persist,
-			});
+			return Effect.gen(function* () {
+				const persist = yield* ClaudeEventPersistEffectTag;
+				const readQuery = yield* ReadQueryEffectTag;
+				const eventStore = yield* EventStoreEffectTag;
+				const send = vi.fn();
+				const sink = createRelayEventSink({
+					sessionId: "s-claude",
+					send,
+					persist,
+				});
 
-			yield* sink.push(
-				providerRuntimeEventFromCanonical(
-					makeMessageCreatedEvent("s-claude", "m1", { role: "assistant" }),
+				yield* sink.push(
+					providerRuntimeEventFromCanonical(
+						makeMessageCreatedEvent("s-claude", "m1", { role: "assistant" }),
+					),
+				);
+
+				const sessions = yield* readQuery.listSessions();
+				const events = yield* eventStore.readAllBySession("s-claude");
+				expect(sessions).toEqual([]);
+				expect(events).toEqual([]);
+			}).pipe(
+				Effect.provide(layer),
+				Effect.ensuring(
+					Effect.sync(() => rmSync(dir, { recursive: true, force: true })),
 				),
 			);
-
-			const sessions = yield* readQuery.listSessions();
-			expect(sessions).toEqual(
-				expect.arrayContaining([
-					expect.objectContaining({
-						id: "s-claude",
-						provider: "claude",
-					}),
-				]),
-			);
-		}).pipe(
-			Effect.provide(layer),
-			Effect.ensuring(
-				Effect.sync(() => rmSync(dir, { recursive: true, force: true })),
-			),
-		);
-	});
+		},
+	);
 });

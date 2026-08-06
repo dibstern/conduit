@@ -337,9 +337,19 @@ export const makeProviderTurnService = Effect.gen(function* () {
 				});
 			}
 			if (persistResult._tag === "Left") {
-				log.warn(
-					`Non-fatal persistence error for Claude user message: ${formatErrorDetail(persistResult.left)}`,
-				);
+				const error = persistResult.left;
+				if (error._tag === "ClaudeSessionLifecycleError") {
+					log.error(
+						`Claude turn persistence rejected by session lifecycle: ` +
+							`session=${error.sessionId} operation=${error.operation} ` +
+							`role=${error.role} reason=${error.reason}`,
+					);
+					return yield* error;
+				} else {
+					log.warn(
+						`Non-fatal persistence error for Claude user message: ${formatErrorDetail(error)}`,
+					);
+				}
 			}
 		});
 

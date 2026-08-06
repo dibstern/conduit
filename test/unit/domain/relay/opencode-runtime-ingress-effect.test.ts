@@ -13,9 +13,11 @@ import {
 import {
 	type ProviderRuntimeIngestion,
 	ProviderRuntimeIngestionLive,
+	ProviderRuntimeIngestionTag,
 } from "../../../../src/lib/domain/relay/Services/provider-runtime-ingestion-service.js";
 import { makePersistenceEffectLayer } from "../../../../src/lib/persistence/effect/live.js";
 import type { ProjectionRunnerEffect } from "../../../../src/lib/persistence/effect/projection-runner-effect.js";
+import { opencodeSessionCreatedRuntimeEvent } from "../../../../src/lib/provider/opencode/opencode-runtime-event-translator.js";
 import {
 	makeSSEEvent,
 	makeUnknownSSEEvent,
@@ -159,6 +161,49 @@ describe("EffectOpenCodeRuntimeIngress", () => {
 				event_count: 2,
 			},
 		]);
+	});
+
+	it("does not recreate a durable OpenCode session after ingress restarts", async () => {
+		if (!runtime) throw new Error("test runtime not initialized");
+		await runtime.runPromise(
+			Effect.gen(function* () {
+				const ingestion = yield* ProviderRuntimeIngestionTag;
+				yield* ingestion.ingest(
+					opencodeSessionCreatedRuntimeEvent(SESSION_ID, "opencode"),
+				);
+			}),
+		);
+
+		const restartedIngress = await runtime.runPromise(
+			makeEffectOpenCodeRuntimeIngress(makeLogger()),
+		);
+		const result = await Effect.runPromise(
+			restartedIngress.onSSEEventEffect(
+				makeSSEEvent("message.created", {
+					sessionID: SESSION_ID,
+					messageID: "msg-after-restart",
+					info: { role: "assistant", parts: [] },
+				}),
+				SESSION_ID,
+				"opencode",
+			),
+		);
+		const creationCount = runtime.runSync(
+			Effect.gen(function* () {
+				const sql = yield* SqlClient.SqlClient;
+				const rows = yield* sql<{ readonly count: number }>`
+					SELECT COUNT(*) AS count FROM events
+					WHERE session_id = ${SESSION_ID} AND type = 'session.created'`;
+				return rows[0]?.count;
+			}),
+		);
+
+		expect(result).toMatchObject({
+			ok: true,
+			eventsWritten: 1,
+			sessionSeeded: true,
+		});
+		expect(creationCount).toBe(1);
 	});
 });
 

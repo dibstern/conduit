@@ -105,6 +105,19 @@ export class EffectOpenCodeRuntimeIngress
 		).pipe(Effect.catchAllCause(() => Effect.succeed(false)));
 	}
 
+	private hasProjectedSession(sessionId: string): Effect.Effect<boolean> {
+		return this.withSql(
+			Effect.gen(function* () {
+				const sql = yield* SqlClient.SqlClient;
+				const rows = yield* sql<{ id: string }>`
+					SELECT id FROM sessions
+					WHERE id = ${sessionId}
+					LIMIT 1`;
+				return rows.length > 0;
+			}),
+		).pipe(Effect.catchAllCause(() => Effect.succeed(false)));
+	}
+
 	recoverEffect(): Effect.Effect<void, ProjectionRunnerError | SqlError> {
 		return this.withSql(this.projectionRunner.recover()).pipe(Effect.asVoid);
 	}
@@ -152,7 +165,9 @@ export class EffectOpenCodeRuntimeIngress
 			}
 
 			const sessionSeeded = !this.seenSessions.has(sessionId);
-			const runtimeEvents: ProviderRuntimeEvent[] = sessionSeeded
+			const shouldAppendSessionCreation =
+				sessionSeeded && !(yield* this.hasProjectedSession(sessionId));
+			const runtimeEvents: ProviderRuntimeEvent[] = shouldAppendSessionCreation
 				? [
 						opencodeSessionCreatedRuntimeEvent(sessionId, providerInstanceId),
 						...translated,
@@ -166,7 +181,7 @@ export class EffectOpenCodeRuntimeIngress
 			const written = yield* this.ingestion.ingestBatch(runtimeEvents, {
 				publishToRelay: false,
 			});
-			if (sessionSeeded) this.seenSessions.add(sessionId);
+			this.seenSessions.add(sessionId);
 
 			this.stats.eventsWritten += written;
 			this.log.debug("opencode-runtime-ingress: appended events", {

@@ -24,9 +24,12 @@ import {
 import { handleMessage } from "../../../src/lib/handlers/prompt.js";
 import type { OpenCodeAPI } from "../../../src/lib/instance/opencode-api.js";
 import { createSilentLogger } from "../../../src/lib/logger.js";
+import { EventStoreEffectTag } from "../../../src/lib/persistence/effect/event-store-effect.js";
 import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
+import { ProjectionRunnerEffectTag } from "../../../src/lib/persistence/effect/projection-runner-effect.js";
 import { ProviderStateEffectTag } from "../../../src/lib/persistence/effect/provider-state-effect.js";
 import { ReadQueryEffectTag } from "../../../src/lib/persistence/effect/read-query-effect.js";
+import { canonicalEvent } from "../../../src/lib/persistence/events.js";
 import type {
 	OrchestrationEngine,
 	SendTurnCommand,
@@ -62,6 +65,22 @@ const setClaudeModel = (sessionId: string) =>
 	setModel(sessionId, {
 		providerID: "claude",
 		modelID: "claude-sonnet-4-5",
+	});
+
+const establishClaudeSession = (sessionId: string) =>
+	Effect.gen(function* () {
+		const eventStore = yield* EventStoreEffectTag;
+		const runner = yield* ProjectionRunnerEffectTag;
+		if (!(yield* runner.isRecovered())) yield* runner.recover();
+		const creation = yield* eventStore.append(
+			canonicalEvent(
+				"session.created",
+				sessionId,
+				{ sessionId, title: "Claude Session", provider: "claude" },
+				{ provider: "claude" },
+			),
+		);
+		yield* runner.projectEvent(creation);
 	});
 
 // Mirror relay-stack production wiring: cev.3 makes ProviderRuntimeIngestion the
@@ -134,11 +153,9 @@ describe("handleMessage with Effect provider state persistence", () => {
 			);
 
 			return Effect.gen(function* () {
+				yield* establishClaudeSession("session-provider-state");
 				yield* setClaudeModel("session-provider-state");
 				const sql = yield* SqlClient.SqlClient;
-				yield* sql`
-				INSERT INTO sessions (id, provider, title, status, created_at, updated_at)
-				VALUES ('session-provider-state', 'claude', 'Provider State', 'idle', 1, 1)`;
 				yield* sql`
 				INSERT INTO provider_state (session_id, key, value)
 				VALUES ('session-provider-state', 'resumeSessionId', 'sdk-session-prev')`;
@@ -221,11 +238,9 @@ describe("handleMessage with Effect provider state persistence", () => {
 		);
 
 		return Effect.gen(function* () {
+			yield* establishClaudeSession("session-history-effect");
 			yield* setClaudeModel("session-history-effect");
 			const sql = yield* SqlClient.SqlClient;
-			yield* sql`
-				INSERT INTO sessions (id, provider, title, status, created_at, updated_at)
-				VALUES ('session-history-effect', 'claude', 'History Session', 'idle', 1, 1)`;
 			yield* sql`
 				INSERT INTO messages (
 					id, session_id, turn_id, role, text, cost, tokens_in, tokens_out,
@@ -320,6 +335,7 @@ describe("handleMessage with Effect provider state persistence", () => {
 		);
 
 		return Effect.gen(function* () {
+			yield* establishClaudeSession("session-claude-user-effect");
 			yield* setClaudeModel("session-claude-user-effect");
 			yield* handleMessage("client-1", {
 				text: "persist this through effect",
@@ -427,6 +443,7 @@ describe("handleMessage with Effect provider state persistence", () => {
 			);
 
 			return Effect.gen(function* () {
+				yield* establishClaudeSession("session-claude-sink-effect");
 				yield* setClaudeModel("session-claude-sink-effect");
 				yield* handleMessage("client-1", {
 					text: "trigger assistant",
@@ -559,6 +576,7 @@ describe("handleMessage with Effect provider state persistence", () => {
 		);
 
 		return Effect.gen(function* () {
+			yield* establishClaudeSession("parent-session");
 			yield* setClaudeModel("parent-session");
 			yield* handleMessage("client-1", {
 				text: "trigger child event",

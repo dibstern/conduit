@@ -1482,6 +1482,10 @@ export interface SessionManagerService {
 		title?: string,
 		options?: CreateSessionOptions,
 	): Effect.Effect<SessionDetail, SessionManagerError>;
+	establishOpenCodeSession(
+		session: SessionDetail,
+		providerInstanceId: ProviderInstanceId,
+	): Effect.Effect<void, SessionManagerError>;
 	deleteSession(sessionId: string): Effect.Effect<void, SessionManagerError>;
 	renameSession(
 		sessionId: string,
@@ -1573,6 +1577,155 @@ export const SessionManagerServiceLive: Layer.Layer<
 				? statusPollerOption.value.getCurrentStatuses()
 				: Effect.succeed(undefined);
 		};
+		const establishOpenCodeSession = (
+			session: SessionDetail,
+			providerInstanceId: ProviderInstanceId,
+		): Effect.Effect<void, SessionManagerError> =>
+			Effect.gen(function* () {
+				const persistenceConfigured =
+					configOption._tag === "Some" &&
+					configOption.value.persistenceDbPath != null;
+				const persistenceUnavailable =
+					eventStoreEffectOption._tag === "None" &&
+					projectionRunnerEffectOption._tag === "None" &&
+					sqlOption._tag === "None";
+				if (!persistenceConfigured && persistenceUnavailable) return;
+
+				if (
+					eventStoreEffectOption._tag === "None" ||
+					projectionRunnerEffectOption._tag === "None" ||
+					sqlOption._tag === "None"
+				) {
+					return yield* new SessionManagerError({
+						operation: "establishOpenCodeSession.services",
+						cause: "SQLite event-store services are unavailable",
+					});
+				}
+
+				const eventStore = eventStoreEffectOption.value;
+				const projectionRunner = projectionRunnerEffectOption.value;
+				const sql = sqlOption.value;
+				const withSql = <A, E>(
+					effect: Effect.Effect<A, E, SqlClient.SqlClient>,
+				): Effect.Effect<A, E> =>
+					effect.pipe(Effect.provideService(SqlClient.SqlClient, sql));
+
+				const recovered = yield* projectionRunner.isRecovered();
+				if (!recovered) {
+					yield* withSql(projectionRunner.recover()).pipe(
+						Effect.mapError(
+							(cause) =>
+								new SessionManagerError({
+									operation: "establishOpenCodeSession.recover",
+									cause,
+								}),
+						),
+						Effect.asVoid,
+					);
+				}
+
+				const now = Date.now();
+				const normalizedTitle = normalizeSessionTitle(session.title);
+				const insertedRows = yield* sql<{ readonly id: string }>`
+					INSERT OR IGNORE INTO sessions (
+						id, provider, provider_sid, title, status, created_at, updated_at
+					) VALUES (
+						${session.id}, ${providerInstanceId}, ${session.id}, ${normalizedTitle}, 'idle', ${now}, ${now}
+					)
+					RETURNING id`.pipe(
+					Effect.mapError(
+						(cause) =>
+							new SessionManagerError({
+								operation: "establishOpenCodeSession.seed",
+								cause,
+							}),
+					),
+				);
+				const insertedSeed = insertedRows.length > 0;
+				const establish = Effect.gen(function* () {
+					const stored = yield* eventStore
+						.append(
+							canonicalEvent(
+								"session.created",
+								session.id,
+								{
+									sessionId: session.id,
+									title: normalizedTitle,
+									provider: providerInstanceId,
+									providerSessionId: session.id,
+								},
+								{
+									provider: providerInstanceId,
+									createdAt: now,
+									metadata: { source: "relay", synthetic: true },
+								},
+							),
+						)
+						.pipe(
+							Effect.mapError(
+								(cause) =>
+									new SessionManagerError({
+										operation: "establishOpenCodeSession.append",
+										cause,
+									}),
+							),
+						);
+
+					yield* withSql(projectionRunner.projectEvent(stored)).pipe(
+						Effect.mapError(
+							(cause) =>
+								new SessionManagerError({
+									operation: "establishOpenCodeSession.project",
+									cause,
+								}),
+						),
+					);
+
+					const establishedRows = yield* sql<{ readonly id: string }>`
+						SELECT sessions.id
+						FROM sessions
+						JOIN session_providers
+							ON session_providers.session_id = sessions.id
+						WHERE sessions.id = ${session.id}
+							AND sessions.provider = ${providerInstanceId}
+							AND sessions.provider_sid = ${session.id}
+							AND session_providers.id = ${`${session.id}:initial`}
+							AND session_providers.provider = ${providerInstanceId}
+							AND session_providers.status = 'active'
+						LIMIT 1`.pipe(
+						Effect.mapError(
+							(cause) =>
+								new SessionManagerError({
+									operation: "establishOpenCodeSession.project",
+									cause,
+								}),
+						),
+					);
+					if (establishedRows.length === 0) {
+						return yield* new SessionManagerError({
+							operation: "establishOpenCodeSession.project",
+							cause: `Projected session ${session.id} has no matching active provider binding`,
+						});
+					}
+				});
+
+				yield* establish.pipe(
+					Effect.catchAll((establishmentError) => {
+						if (!insertedSeed) return Effect.fail(establishmentError);
+						return sql`DELETE FROM sessions WHERE id = ${session.id}`.pipe(
+							Effect.asVoid,
+							Effect.mapError(
+								(cleanupError) =>
+									new SessionManagerError({
+										operation: "establishOpenCodeSession.project",
+										cause: { establishmentError, cleanupError },
+									}),
+							),
+							Effect.zipRight(Effect.fail(establishmentError)),
+						);
+					}),
+				);
+			});
 		const serviceListSessions = (options?: ListSessionsOptions) =>
 			Effect.gen(function* () {
 				const statuses = yield* currentStatuses(options?.statuses);
@@ -1607,113 +1760,6 @@ export const SessionManagerServiceLive: Layer.Layer<
 						if (engineOption._tag === "Some") {
 							engineOption.value.bindSession(session.id, providerId);
 						}
-					});
-				const seedOpenCodeSession = (
-					session: SessionDetail,
-					providerInstanceId: ProviderInstanceId,
-				) => {
-					if (sqlOption._tag === "None") {
-						return Effect.sync(() => {
-							log.warn(
-								`OpenCode session ${session.id} was created without persistence services; session list seeding skipped`,
-							);
-						});
-					}
-
-					const now = Date.now();
-					const sessionTitle = normalizeSessionTitle(session.title);
-					return sqlOption.value`
-						INSERT OR IGNORE INTO sessions (
-							id, provider, provider_sid, title, status, created_at, updated_at
-						) VALUES (
-							${session.id}, ${providerInstanceId}, ${session.id}, ${sessionTitle}, 'idle', ${now}, ${now}
-						)`.pipe(
-						Effect.asVoid,
-						Effect.catchAll((cause) =>
-							Effect.sync(() => {
-								log.warn(
-									`Failed to seed OpenCode session ${session.id} in the read model: ${String(cause)}`,
-								);
-							}),
-						),
-					);
-				};
-				const persistOpenCodeInstanceBinding = (
-					session: SessionDetail,
-					instanceId: ProviderInstanceId,
-				) =>
-					Effect.gen(function* () {
-						if (
-							eventStoreEffectOption._tag === "None" ||
-							projectionRunnerEffectOption._tag === "None" ||
-							sqlOption._tag === "None"
-						) {
-							return yield* new SessionManagerError({
-								operation: "createSession.persistInstanceBinding",
-								cause: "SQLite event-store services are unavailable",
-							});
-						}
-
-						const eventStore = eventStoreEffectOption.value;
-						const projectionRunner = projectionRunnerEffectOption.value;
-						const sql = sqlOption.value;
-						const withSql = <A, E>(
-							effect: Effect.Effect<A, E, SqlClient.SqlClient>,
-						): Effect.Effect<A, E> =>
-							effect.pipe(Effect.provideService(SqlClient.SqlClient, sql));
-
-						const recovered = yield* projectionRunner.isRecovered();
-						if (!recovered) {
-							yield* withSql(projectionRunner.recover()).pipe(
-								Effect.mapError(
-									(cause) =>
-										new SessionManagerError({
-											operation: "createSession.persistInstanceBinding.recover",
-											cause,
-										}),
-								),
-								Effect.asVoid,
-							);
-						}
-
-						const now = Date.now();
-						const stored = yield* eventStore
-							.append(
-								canonicalEvent(
-									"session.created",
-									session.id,
-									{
-										sessionId: session.id,
-										title: normalizeSessionTitle(session.title),
-										provider: instanceId,
-										providerSessionId: session.id,
-									},
-									{
-										provider: instanceId,
-										createdAt: now,
-										metadata: { source: "relay", synthetic: true },
-									},
-								),
-							)
-							.pipe(
-								Effect.mapError(
-									(cause) =>
-										new SessionManagerError({
-											operation: "createSession.persistInstanceBinding.append",
-											cause,
-										}),
-								),
-							);
-
-						yield* withSql(projectionRunner.projectEvent(stored)).pipe(
-							Effect.mapError(
-								(cause) =>
-									new SessionManagerError({
-										operation: "createSession.persistInstanceBinding.project",
-										cause,
-									}),
-							),
-						);
 					});
 				const resolveSelectedDriver = (
 					instanceId: ProviderInstanceId,
@@ -1758,13 +1804,10 @@ export const SessionManagerServiceLive: Layer.Layer<
 							const session = yield* createSession(title).pipe(
 								Effect.provideService(OpenCodeAPITag, instanceApi ?? api),
 							);
-							yield* seedOpenCodeSession(
+							yield* establishOpenCodeSession(
 								session,
 								instanceId ?? defaultInstanceIdForDriver("opencode"),
 							);
-							if (instanceId !== undefined) {
-								yield* persistOpenCodeInstanceBinding(session, instanceId);
-							}
 							return session;
 						}),
 					);
@@ -1915,6 +1958,7 @@ export const SessionManagerServiceLive: Layer.Layer<
 					Effect.provideService(SessionManagerStateTag, stateRef),
 				),
 			listSessions: serviceListSessions,
+			establishOpenCodeSession,
 			createSession: (title, options) =>
 				Effect.gen(function* () {
 					const session = yield* serviceCreateSession(title, options);

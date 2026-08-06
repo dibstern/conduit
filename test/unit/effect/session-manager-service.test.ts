@@ -2,6 +2,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { SqlClient } from "@effect/sql";
 import { describe, it } from "@effect/vitest";
 import {
 	Deferred,
@@ -73,8 +74,13 @@ import {
 } from "../../../src/lib/domain/relay/Services/session-overrides-state.js";
 import { OpenCodeApiError } from "../../../src/lib/errors.js";
 import type { SessionStatus } from "../../../src/lib/instance/sdk-types.js";
+import { ClaudeEventPersistEffectTag } from "../../../src/lib/persistence/effect/claude-event-persist-effect.js";
 import { EventStoreEffectTag } from "../../../src/lib/persistence/effect/event-store-effect.js";
 import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
+import {
+	createAllEffectProjectors,
+	ProjectionError,
+} from "../../../src/lib/persistence/effect/projectors-effect.js";
 import type { ReadQueryEffect } from "../../../src/lib/persistence/effect/read-query-effect.js";
 import { ReadQueryEffectTag } from "../../../src/lib/persistence/effect/read-query-effect.js";
 import { runMigrations } from "../../../src/lib/persistence/migrations.js";
@@ -368,6 +374,10 @@ describe("SessionManagerService", () => {
 	it.scoped(
 		"live service publishes one SessionCreated after create succeeds",
 		() => {
+			const dbFile = join(
+				tmpdir(),
+				`conduit-session-manager-daemon-event-${Date.now()}.sqlite`,
+			);
 			const api = makeMockOpenCodeAPI();
 			vi.spyOn(api.session, "create").mockResolvedValue({
 				id: "created-session",
@@ -384,6 +394,7 @@ describe("SessionManagerService", () => {
 					Layer.succeed(LoggerTag, makeMockLogger()),
 					makeSessionManagerStateLive(),
 					DaemonEventBusLive,
+					makePersistenceEffectLayer(dbFile),
 				),
 			);
 
@@ -391,7 +402,9 @@ describe("SessionManagerService", () => {
 				const sub = yield* subscribeToDaemonEvents;
 				const service = yield* SessionManagerServiceTag;
 
-				const session = yield* service.createSession("Created");
+				const session = yield* service.createSession("Created", {
+					providerId: "opencode",
+				});
 
 				expect(session.id).toBe("created-session");
 				expect(api.session.create).toHaveBeenCalledWith({ title: "Created" });
@@ -402,7 +415,10 @@ describe("SessionManagerService", () => {
 				});
 				const extra = yield* Queue.poll(sub);
 				expect(Option.isNone(extra)).toBe(true);
-			}).pipe(Effect.provide(Layer.fresh(layer)));
+			}).pipe(
+				Effect.provide(Layer.fresh(layer)),
+				Effect.ensuring(Effect.sync(() => rmSync(dbFile, { force: true }))),
+			);
 		},
 	);
 
@@ -494,20 +510,47 @@ describe("SessionManagerService", () => {
 					providerId: "opencode",
 				});
 				const sessions = yield* service.listSessions();
-				const persistedProvider = yield* Effect.sync(() => {
+				const persisted = yield* Effect.sync(() => {
 					const db = SqliteClient.open(dbFile);
 					try {
-						return db.queryOne<{ readonly provider: string }>(
-							"SELECT provider FROM sessions WHERE id = ?",
-							[session.id],
-						)?.provider;
+						return {
+							session: db.queryOne<{
+								readonly provider: string;
+								readonly provider_sid: string | null;
+							}>("SELECT provider, provider_sid FROM sessions WHERE id = ?", [
+								session.id,
+							]),
+							creationCount: db.queryOne<{ readonly count: number }>(
+								"SELECT COUNT(*) AS count FROM events WHERE session_id = ? AND type = 'session.created'",
+								[session.id],
+							)?.count,
+							binding: db.queryOne<{
+								readonly id: string;
+								readonly provider: string;
+								readonly status: string;
+							}>(
+								"SELECT id, provider, status FROM session_providers WHERE session_id = ? AND status = 'active'",
+								[session.id],
+							),
+						};
 					} finally {
 						db.close();
 					}
 				});
 
 				expect(session.id).toBe("opencode-session");
-				expect(persistedProvider).toBe("opencode");
+				expect(persisted).toEqual({
+					session: {
+						provider: "opencode",
+						provider_sid: "opencode-session",
+					},
+					creationCount: 1,
+					binding: {
+						id: "opencode-session:initial",
+						provider: "opencode",
+						status: "active",
+					},
+				});
 				expect(api.session.create).toHaveBeenCalledWith({
 					title: "OpenCode Session",
 				});
@@ -521,6 +564,294 @@ describe("SessionManagerService", () => {
 						title: "OpenCode Session",
 					}),
 				]);
+			}).pipe(
+				Effect.provide(Layer.fresh(layer)),
+				Effect.ensuring(Effect.sync(() => rmSync(dbFile, { force: true }))),
+			);
+		},
+	);
+
+	it.scoped(
+		"creates an OpenCode session when durable persistence is not configured",
+		() => {
+			const api = makeMockOpenCodeAPI();
+			vi.spyOn(api.session, "create").mockResolvedValue({
+				id: "no-persistence-session",
+				projectID: "project-1",
+				directory: "/tmp/project",
+				title: "No persistence",
+				version: "1.0.0",
+				time: { created: 10, updated: 10 },
+			});
+			const layer = Layer.provideMerge(
+				SessionManagerServiceLive,
+				Layer.mergeAll(
+					Layer.succeed(OpenCodeAPITag, api),
+					Layer.succeed(LoggerTag, makeMockLogger()),
+					makeSessionManagerStateLive(),
+					DaemonEventBusLive,
+				),
+			);
+
+			return Effect.gen(function* () {
+				const service = yield* SessionManagerServiceTag;
+				const result = yield* Effect.either(
+					service.createSession("No persistence", {
+						providerId: "opencode",
+					}),
+				);
+
+				expect(result).toMatchObject({
+					_tag: "Right",
+					right: expect.objectContaining({ id: "no-persistence-session" }),
+				});
+				expect(api.session.create).toHaveBeenCalledOnce();
+			}).pipe(Effect.provide(Layer.fresh(layer)));
+		},
+	);
+
+	it.scoped(
+		"establishes a fork-shaped OpenCode child before Claude message persistence",
+		() => {
+			const dbFile = join(
+				tmpdir(),
+				`conduit-session-manager-fork-establish-${Date.now()}.sqlite`,
+			);
+			const layer = Layer.provideMerge(
+				SessionManagerServiceLive,
+				Layer.mergeAll(
+					Layer.succeed(OpenCodeAPITag, makeMockOpenCodeAPI()),
+					Layer.succeed(LoggerTag, makeMockLogger()),
+					makeSessionManagerStateLive(),
+					makeOverridesStateLive(),
+					DaemonEventBusLive,
+					makePersistenceEffectLayer(dbFile),
+				),
+			);
+
+			return Effect.gen(function* () {
+				const service = yield* SessionManagerServiceTag;
+				const persist = yield* ClaudeEventPersistEffectTag;
+				const child = {
+					id: "forked-opencode-child",
+					projectID: "project-1",
+					directory: "/tmp/project",
+					title: "Forked Session",
+					version: "1.0.0",
+					time: { created: 10, updated: 10 },
+				};
+				yield* service.establishOpenCodeSession(
+					child,
+					ProviderInstanceIdSchema.make("opencode"),
+				);
+				yield* persist.persistUserMessage(child.id, "Claude turn on fork");
+
+				const state = yield* Effect.sync(() => {
+					const db = SqliteClient.open(dbFile);
+					try {
+						return {
+							session: db.queryOne<{
+								provider: string;
+								provider_sid: string | null;
+							}>("SELECT provider, provider_sid FROM sessions WHERE id = ?", [
+								child.id,
+							]),
+							creations: db.queryOne<{ count: number }>(
+								"SELECT COUNT(*) AS count FROM events WHERE session_id = ? AND type = 'session.created'",
+								[child.id],
+							)?.count,
+							binding: db.queryOne<{ provider: string }>(
+								"SELECT provider FROM session_providers WHERE session_id = ? AND status = 'active'",
+								[child.id],
+							)?.provider,
+						};
+					} finally {
+						db.close();
+					}
+				});
+
+				expect(state).toEqual({
+					session: {
+						provider: "opencode",
+						provider_sid: child.id,
+					},
+					creations: 1,
+					binding: "opencode",
+				});
+			}).pipe(
+				Effect.provide(Layer.fresh(layer)),
+				Effect.ensuring(Effect.sync(() => rmSync(dbFile, { force: true }))),
+			);
+		},
+	);
+
+	it.scoped(
+		"fails establishment when projection does not create an active provider binding",
+		() => {
+			const dbFile = join(
+				tmpdir(),
+				`conduit-session-manager-project-failure-${Date.now()}.sqlite`,
+			);
+			const projectors = createAllEffectProjectors().map((projector) =>
+				projector.name === "provider"
+					? {
+							...projector,
+							project: () =>
+								Effect.fail(
+									new ProjectionError({
+										projector: "provider",
+										operation: "project",
+										cause: new Error("provider binding unavailable"),
+									}),
+								),
+						}
+					: projector,
+			);
+			const layer = Layer.provideMerge(
+				SessionManagerServiceLive,
+				Layer.mergeAll(
+					Layer.succeed(OpenCodeAPITag, makeMockOpenCodeAPI()),
+					Layer.succeed(LoggerTag, makeMockLogger()),
+					makeSessionManagerStateLive(),
+					DaemonEventBusLive,
+					makePersistenceEffectLayer(dbFile, projectors),
+				),
+			);
+
+			return Effect.gen(function* () {
+				const service = yield* SessionManagerServiceTag;
+				const result = yield* Effect.either(
+					service.establishOpenCodeSession(
+						{
+							id: "missing-provider-binding",
+							projectID: "project-1",
+							directory: "/tmp/project",
+							title: "Missing binding",
+							version: "1.0.0",
+							time: { created: 10, updated: 10 },
+						},
+						ProviderInstanceIdSchema.make("opencode"),
+					),
+				);
+				const sql = yield* SqlClient.SqlClient;
+				const sessions = yield* sql<{ readonly id: string }>`
+					SELECT id FROM sessions WHERE id = 'missing-provider-binding'`;
+				const bindings = yield* sql<{ readonly id: string }>`
+					SELECT id FROM session_providers WHERE session_id = 'missing-provider-binding'`;
+				const creations = yield* sql<{ readonly count: number }>`
+					SELECT COUNT(*) AS count FROM events
+					WHERE session_id = 'missing-provider-binding' AND type = 'session.created'`;
+
+				expect(result).toMatchObject({
+					_tag: "Left",
+					left: expect.objectContaining({
+						operation: "establishOpenCodeSession.project",
+					}),
+				});
+				expect(sessions).toEqual([]);
+				expect(bindings).toEqual([]);
+				expect(creations[0]?.count).toBe(1);
+			}).pipe(
+				Effect.provide(Layer.fresh(layer)),
+				Effect.ensuring(Effect.sync(() => rmSync(dbFile, { force: true }))),
+			);
+		},
+	);
+
+	it.scoped(
+		"removes a newly seeded row when canonical establishment append fails",
+		() => {
+			const dbFile = join(
+				tmpdir(),
+				`conduit-session-manager-append-failure-${Date.now()}.sqlite`,
+			);
+			const layer = Layer.provideMerge(
+				SessionManagerServiceLive,
+				Layer.mergeAll(
+					Layer.succeed(OpenCodeAPITag, makeMockOpenCodeAPI()),
+					Layer.succeed(LoggerTag, makeMockLogger()),
+					makeSessionManagerStateLive(),
+					DaemonEventBusLive,
+					makePersistenceEffectLayer(dbFile),
+				),
+			);
+
+			return Effect.gen(function* () {
+				const sql = yield* SqlClient.SqlClient;
+				yield* sql.unsafe(`
+					CREATE TRIGGER reject_session_creation_event
+					BEFORE INSERT ON events
+					WHEN NEW.type = 'session.created'
+					BEGIN
+						SELECT RAISE(ABORT, 'simulated append failure');
+					END
+				`);
+				const service = yield* SessionManagerServiceTag;
+				const result = yield* Effect.either(
+					service.establishOpenCodeSession(
+						{
+							id: "append-failed-session",
+							projectID: "project-1",
+							directory: "/tmp/project",
+							title: "Append failed",
+							version: "1.0.0",
+							time: { created: 10, updated: 10 },
+						},
+						ProviderInstanceIdSchema.make("opencode"),
+					),
+				);
+				const sessions = yield* sql<{ readonly id: string }>`
+					SELECT id FROM sessions WHERE id = 'append-failed-session'`;
+				const events = yield* sql<{ readonly id: string }>`
+					SELECT event_id AS id FROM events WHERE session_id = 'append-failed-session'`;
+
+				expect(result).toMatchObject({
+					_tag: "Left",
+					left: expect.objectContaining({
+						operation: "establishOpenCodeSession.append",
+					}),
+				});
+				expect(sessions).toEqual([]);
+				expect(events).toEqual([]);
+			}).pipe(
+				Effect.provide(Layer.fresh(layer)),
+				Effect.ensuring(Effect.sync(() => rmSync(dbFile, { force: true }))),
+			);
+		},
+	);
+
+	it.scoped(
+		"keeps native Claude creation singular after first user-message persistence",
+		() => {
+			const dbFile = join(
+				tmpdir(),
+				`conduit-session-manager-claude-single-create-${Date.now()}.sqlite`,
+			);
+			const layer = Layer.provideMerge(
+				SessionManagerServiceLive,
+				Layer.mergeAll(
+					Layer.succeed(OpenCodeAPITag, makeMockOpenCodeAPI()),
+					Layer.succeed(LoggerTag, makeMockLogger()),
+					makeSessionManagerStateLive(),
+					makeOverridesStateLive(),
+					DaemonEventBusLive,
+					makePersistenceEffectLayer(dbFile),
+				),
+			);
+
+			return Effect.gen(function* () {
+				const service = yield* SessionManagerServiceTag;
+				const persist = yield* ClaudeEventPersistEffectTag;
+				const session = yield* service.createSession("Native Claude", {
+					providerId: "claude",
+				});
+				yield* persist.persistUserMessage(session.id, "First message");
+				const eventStore = yield* EventStoreEffectTag;
+				const events = yield* eventStore.readAllBySession(session.id);
+
+				expect(
+					events.filter((event) => event.type === "session.created"),
+				).toHaveLength(1);
 			}).pipe(
 				Effect.provide(Layer.fresh(layer)),
 				Effect.ensuring(Effect.sync(() => rmSync(dbFile, { force: true }))),
@@ -1542,6 +1873,10 @@ describe("SessionManagerService", () => {
 	it.scoped(
 		"live service updates the relay status session-count snapshot",
 		() => {
+			const dbFile = join(
+				tmpdir(),
+				`conduit-session-manager-status-snapshot-${Date.now()}.sqlite`,
+			);
 			const api = makeMockOpenCodeAPI();
 			vi.spyOn(api.session, "list").mockResolvedValue([
 				{
@@ -1578,6 +1913,7 @@ describe("SessionManagerService", () => {
 					makeSessionManagerStateLive(),
 					DaemonEventBusLive,
 					RelayStatusSnapshotLive,
+					makePersistenceEffectLayer(dbFile),
 				),
 			);
 
@@ -1586,15 +1922,42 @@ describe("SessionManagerService", () => {
 				const snapshot = yield* RelayStatusSnapshotTag;
 
 				expect(snapshot.getSnapshot().sessionCount).toBe(0);
+				yield* service.establishOpenCodeSession(
+					{
+						id: "session-1",
+						projectID: "project-1",
+						directory: "/tmp/project",
+						title: "Session 1",
+						version: "1.0.0",
+						time: { created: 1, updated: 1 },
+					},
+					ProviderInstanceIdSchema.make("opencode"),
+				);
+				yield* service.establishOpenCodeSession(
+					{
+						id: "session-2",
+						projectID: "project-1",
+						directory: "/tmp/project",
+						title: "Session 2",
+						version: "1.0.0",
+						time: { created: 2, updated: 2 },
+					},
+					ProviderInstanceIdSchema.make("opencode"),
+				);
 				yield* service.listSessions();
 				expect(snapshot.getSnapshot().sessionCount).toBe(2);
 
-				yield* service.createSession("Session 3");
+				yield* service.createSession("Session 3", {
+					providerId: "opencode",
+				});
 				expect(snapshot.getSnapshot().sessionCount).toBe(3);
 
 				yield* service.deleteSession("session-1");
 				expect(snapshot.getSnapshot().sessionCount).toBe(2);
-			}).pipe(Effect.provide(Layer.fresh(layer)));
+			}).pipe(
+				Effect.provide(Layer.fresh(layer)),
+				Effect.ensuring(Effect.sync(() => rmSync(dbFile, { force: true }))),
+			);
 		},
 	);
 

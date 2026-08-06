@@ -802,6 +802,7 @@ export function makeMockSessionManagerService(
 			]),
 		),
 		createSession: vi.fn(() => Effect.succeed({ id: "session-new" })),
+		establishOpenCodeSession: vi.fn(() => Effect.void),
 		deleteSession: vi.fn(() => Effect.void),
 		renameSession: vi.fn(() => Effect.void),
 		clearPaginationCursor: vi.fn(() => Effect.void),

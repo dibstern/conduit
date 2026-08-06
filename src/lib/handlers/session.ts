@@ -3,7 +3,10 @@ import { OpenCodeAPITag } from "../domain/provider/Services/opencode-api-service
 
 import { Effect } from "effect";
 import { mapQuestionFields } from "../bridges/question-bridge.js";
-import type { ProviderInstanceId } from "../contracts/provider-instance.js";
+import {
+	defaultInstanceIdForDriver,
+	type ProviderInstanceId,
+} from "../contracts/provider-instance.js";
 import { PendingInteractionServiceTag } from "../domain/relay/Services/pending-interaction-service.js";
 import {
 	LoggerTag,
@@ -667,6 +670,10 @@ export const forkSessionForClient = ({
 			client.session.fork(sessionId, {
 				...(messageId != null && { messageID: messageId }),
 			}),
+		);
+		yield* sessionManagerService.establishOpenCodeSession(
+			forked,
+			defaultInstanceIdForDriver("opencode"),
 		);
 
 		yield* clearEffectOverrideSession(sessionId);

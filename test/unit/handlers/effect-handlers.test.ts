@@ -6,7 +6,7 @@ import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/openco
 // the Effect to completion, and asserts on captured calls.
 
 import { describe, it } from "@effect/vitest";
-import { Deferred, Duration, Effect, Fiber, Layer } from "effect";
+import { Deferred, Duration, Effect, Exit, Fiber, Layer } from "effect";
 import { expect, vi } from "vitest";
 import {
 	PendingInteractionServiceLive,
@@ -1469,6 +1469,97 @@ describe("handleGetToolContent", () => {
 });
 
 describe("handleForkSession", () => {
+	it.effect(
+		"waits for durable OpenCode establishment before exposing a fork",
+		() =>
+			Effect.gen(function* () {
+				const started = yield* Deferred.make<void>();
+				const gate = yield* Deferred.make<void>();
+				const establishOpenCodeSession = vi.fn(() =>
+					Deferred.succeed(started, undefined).pipe(
+						Effect.zipRight(Deferred.await(gate)),
+					),
+				);
+				const setForkEntry = vi.fn(() => Effect.void);
+				const sendDualSessionLists = vi.fn(() => Effect.void);
+				const ws = mockWsHandler();
+				const layer = makeForkSessionLayer({
+					ws,
+					sessionManagerService: makeMockSessionManagerService({
+						establishOpenCodeSession,
+						setForkEntry,
+						sendDualSessionLists,
+					}),
+				});
+
+				const fiber = yield* Effect.fork(
+					handleForkSession("client-1", {
+						sessionId: "ses-parent",
+						messageId: "msg-1",
+					}).pipe(Effect.provide(layer)),
+				);
+				yield* Deferred.await(started);
+
+				expect(establishOpenCodeSession).toHaveBeenCalledWith(
+					expect.objectContaining({ id: "ses-child" }),
+					"opencode",
+				);
+				expect(setForkEntry).not.toHaveBeenCalled();
+				expect(ws.broadcast).not.toHaveBeenCalled();
+				expect(ws.sendTo).not.toHaveBeenCalled();
+				expect(sendDualSessionLists).not.toHaveBeenCalled();
+
+				yield* Deferred.succeed(gate, undefined);
+				yield* Fiber.join(fiber);
+
+				expect(setForkEntry).toHaveBeenCalledOnce();
+				expect(ws.broadcast).toHaveBeenCalledWith(
+					expect.objectContaining({ type: "session_forked" }),
+				);
+				expect(ws.sendTo).toHaveBeenCalledWith(
+					"client-1",
+					expect.objectContaining({ type: "session_switched" }),
+				);
+				expect(sendDualSessionLists).toHaveBeenCalled();
+			}),
+	);
+
+	it.effect("does not expose a fork when durable establishment fails", () => {
+		const setForkEntry = vi.fn(() => Effect.void);
+		const sendDualSessionLists = vi.fn(() => Effect.void);
+		const ws = mockWsHandler();
+		const layer = makeForkSessionLayer({
+			ws,
+			sessionManagerService: makeMockSessionManagerService({
+				establishOpenCodeSession: vi.fn(() =>
+					Effect.fail(
+						new SessionManagerError({
+							operation: "establishOpenCodeSession.append",
+							cause: "event store unavailable",
+						}),
+					),
+				),
+				setForkEntry,
+				sendDualSessionLists,
+			}),
+		});
+
+		return Effect.exit(
+			handleForkSession("client-1", {
+				sessionId: "ses-parent",
+				messageId: "msg-1",
+			}).pipe(Effect.provide(layer)),
+		).pipe(
+			Effect.tap((exit) => {
+				expect(Exit.isFailure(exit)).toBe(true);
+				expect(setForkEntry).not.toHaveBeenCalled();
+				expect(ws.broadcast).not.toHaveBeenCalled();
+				expect(ws.sendTo).not.toHaveBeenCalled();
+				expect(sendDualSessionLists).not.toHaveBeenCalled();
+			}),
+		);
+	});
+
 	it.effect(
 		"clears Effect override state for the forked source session",
 		() => {

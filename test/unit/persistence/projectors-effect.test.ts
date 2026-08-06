@@ -1043,6 +1043,50 @@ describe("Effect Session Projector (via ProjectionRunner)", () => {
 			}),
 		));
 
+	it("cold recovery preserves the first provider owner across historical duplicate creation", () =>
+		runTest(
+			Effect.gen(function* () {
+				const sql = yield* SqlClient.SqlClient;
+				const store = yield* EventStoreEffectTag;
+				const runner = yield* ProjectionRunnerEffectTag;
+				const sessionId = "s-cold-provider-owner";
+
+				yield* store.append(
+					makeSessionCreated(sessionId, {
+						provider: "work-oc",
+						providerSessionId: sessionId,
+						createdAt: FIXED_TS,
+					}),
+				);
+				yield* store.append(
+					makeSessionCreated(sessionId, {
+						provider: "claude",
+						createdAt: FIXED_TS + 1,
+					}),
+				);
+				yield* runner.recover();
+
+				const sessions = yield* sql<{
+					provider: string;
+					provider_sid: string | null;
+				}>`
+					SELECT provider, provider_sid FROM sessions WHERE id = ${sessionId}`;
+				const bindings = yield* sql<{
+					id: string;
+					provider: string;
+				}>`
+					SELECT id, provider FROM session_providers
+					WHERE session_id = ${sessionId} AND status = 'active'`;
+
+				expect(sessions).toEqual([
+					{ provider: "work-oc", provider_sid: sessionId },
+				]);
+				expect(bindings).toEqual([
+					{ id: `${sessionId}:initial`, provider: "work-oc" },
+				]);
+			}),
+		));
+
 	it("session.created writes parent and provider session ids, then preserves them when omitted", () =>
 		runTest(
 			Effect.gen(function* () {

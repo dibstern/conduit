@@ -12,12 +12,15 @@ import {
 	setDefaultVariant,
 } from "../../../src/lib/domain/relay/Services/session-overrides-state.js";
 import { ClaudeEventPersistEffectTag } from "../../../src/lib/persistence/effect/claude-event-persist-effect.js";
+import { EventStoreEffectTag } from "../../../src/lib/persistence/effect/event-store-effect.js";
 import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
+import { ProjectionRunnerEffectTag } from "../../../src/lib/persistence/effect/projection-runner-effect.js";
 import {
 	type ReadQueryEffect,
 	ReadQueryEffectError,
 	ReadQueryEffectTag,
 } from "../../../src/lib/persistence/effect/read-query-effect.js";
+import { canonicalEvent } from "../../../src/lib/persistence/events.js";
 import type { ClaudeCapabilitiesService } from "../../../src/lib/provider/claude/claude-capabilities-service.js";
 import { ClaudeProviderInstance } from "../../../src/lib/provider/claude/claude-provider-instance.js";
 import type { SDKMessage } from "../../../src/lib/provider/claude/types.js";
@@ -235,6 +238,24 @@ describe("WsRpcServerLayer GetModels", () => {
 
 			return Effect.gen(function* () {
 				const persist = yield* ClaudeEventPersistEffectTag;
+				const eventStore = yield* EventStoreEffectTag;
+				const projectionRunner = yield* ProjectionRunnerEffectTag;
+				yield* projectionRunner.recover();
+				for (const sessionId of ["match-session", "drift-session"]) {
+					const stored = yield* eventStore.append(
+						canonicalEvent(
+							"session.created",
+							sessionId,
+							{
+								sessionId,
+								title: sessionId,
+								provider: "claude",
+							},
+							{ provider: "claude" },
+						),
+					);
+					yield* projectionRunner.projectEvent(stored);
+				}
 				const matchSink = createRelayEventSink({
 					sessionId: "match-session",
 					send: vi.fn(),

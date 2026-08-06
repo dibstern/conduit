@@ -37,6 +37,7 @@ import {
 	type ClaudeEventPersistEffect,
 	ClaudeEventPersistEffectError,
 	ClaudeEventPersistEffectTag,
+	ClaudeSessionLifecycleError,
 } from "../../../../src/lib/persistence/effect/claude-event-persist-effect.js";
 import {
 	type ProviderStateEffect,
@@ -1049,6 +1050,53 @@ describe("ProviderTurnService", () => {
 				);
 				expect(engine.dispatchEffect).toHaveBeenCalledWith(
 					expect.objectContaining({ type: "send_turn", providerId: "claude" }),
+				);
+			}).pipe(Effect.provide(layer));
+		},
+	);
+
+	it.effect(
+		"fails the turn without dispatch when Claude user-message persistence rejects the lifecycle",
+		() => {
+			const engine = makeEngine({ providerId: "claude" });
+			const persist = makePersistService(
+				vi.fn(() =>
+					Effect.fail(
+						new ClaudeSessionLifecycleError({
+							operation: "persistUserMessage",
+							sessionId: "session-1",
+							role: "existing-session",
+							reason: "missing-session",
+						}),
+					),
+				),
+			);
+			const titleService = makeTitleService();
+			const { layer, log } = serviceLayer({ engine, persist, titleService });
+
+			return Effect.gen(function* () {
+				const result = yield* Effect.either(sendTurn());
+
+				expect(result).toMatchObject({
+					_tag: "Left",
+					left: expect.objectContaining({
+						_tag: "ClaudeSessionLifecycleError",
+						sessionId: "session-1",
+					}),
+				});
+				expect(log.error).toHaveBeenCalledWith(
+					"Claude turn persistence rejected by session lifecycle: " +
+						"session=session-1 operation=persistUserMessage " +
+						"role=existing-session reason=missing-session",
+				);
+				expect(log.warn).not.toHaveBeenCalledWith(
+					expect.stringContaining(
+						"Non-fatal persistence error for Claude user message",
+					),
+				);
+				expect(titleService.startForFirstClaudeMessage).not.toHaveBeenCalled();
+				expect(engine.dispatchEffect).not.toHaveBeenCalledWith(
+					expect.objectContaining({ type: "send_turn" }),
 				);
 			}).pipe(Effect.provide(layer));
 		},

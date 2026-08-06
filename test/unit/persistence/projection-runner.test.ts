@@ -493,6 +493,56 @@ describe("ProjectionRunner", () => {
 	});
 
 	describe("recover", () => {
+		it("preserves the first provider owner across historical duplicate creation", () => {
+			const sessionId = "s-sync-cold-provider-owner";
+			eventStore.append(
+				makeCanonical(
+					"session.created",
+					sessionId,
+					{
+						sessionId,
+						title: "OpenCode Session",
+						provider: "work-oc",
+						providerSessionId: sessionId,
+					} satisfies SessionCreatedPayload,
+					now,
+				),
+			);
+			eventStore.append(
+				makeCanonical(
+					"session.created",
+					sessionId,
+					{
+						sessionId,
+						title: "Claude duplicate",
+						provider: "claude",
+					} satisfies SessionCreatedPayload,
+					now + 1,
+				),
+			);
+
+			runner.recover();
+
+			const session = db.queryOne<{
+				provider: string;
+				provider_sid: string | null;
+			}>("SELECT provider, provider_sid FROM sessions WHERE id = ?", [
+				sessionId,
+			]);
+			const bindings = db.query<{ id: string; provider: string }>(
+				"SELECT id, provider FROM session_providers WHERE session_id = ? AND status = 'active'",
+				[sessionId],
+			);
+
+			expect(session).toEqual({
+				provider: "work-oc",
+				provider_sid: sessionId,
+			});
+			expect(bindings).toEqual([
+				{ id: `${sessionId}:initial`, provider: "work-oc" },
+			]);
+		});
+
 		it("replays events from the minimum cursor position", () => {
 			harness.seedSession("s1");
 
