@@ -28,6 +28,18 @@ const VIEWPORT_CAPTURE_TAG = "viewport-capture";
 const STRICT = process.env["VISUAL_STRICT"] === "1";
 
 /**
+ * Re-test the known-flaky list instead of trusting it: `VISUAL_STRICT_ALL=1`
+ * ignores STRICT_NONDETERMINISTIC entirely.
+ *
+ * A skip list with no way to re-run its members goes stale silently, and then
+ * a story that was fixed months ago is still excluded from the only gate that
+ * would notice it regressing. It also makes the list unfalsifiable as evidence:
+ * measuring flake before adding an entry and after adding it compares different
+ * denominators, so the second number looks like an improvement it did not earn.
+ */
+const STRICT_ALL = process.env["VISUAL_STRICT_ALL"] === "1";
+
+/**
  * Stories that a strict recapture cannot reproduce on the very next strict run.
  * Measured 2026-08-03: recapture the whole suite under VISUAL_STRICT=1, then
  * re-run it immediately — 843 of 848 captures came back byte-identical, so
@@ -39,8 +51,17 @@ const STRICT_NONDETERMINISTIC: Record<string, string> = {
 		"active/animated state the suite's animation disabling does not reach",
 	"ui-menu--arrow-key-navigation":
 		"play()-driven; keyboard navigation has not settled by capture time",
+	// Re-measured 2026-08-06 with VISUAL_STRICT_ALL=1 over three consecutive
+	// probes: which SettingsPanel story fails moves between runs (probe 1 Debug
+	// + Notifications Enabled, probe 2 Default + Notifications Enabled + Debug,
+	// probe 3 none). Naming only --default, as this list first did, left the
+	// other two silently uncovered — the flake is the family's, not one story's.
 	"overlays-settingspanel--default":
-		"SettingsPanel stories appear to share module state across parallel workers — which of them fails moves between runs",
+		"SettingsPanel stories share module state across parallel workers; which one fails moves between runs",
+	"overlays-settingspanel--debug":
+		"SettingsPanel stories share module state across parallel workers; which one fails moves between runs",
+	"overlays-settingspanel--notifications-enabled":
+		"SettingsPanel stories share module state across parallel workers; which one fails moves between runs",
 };
 
 function loadStories(): StoryEntry[] {
@@ -111,6 +132,78 @@ async function waitForStoryTerminalPhase(
 			if (!(error instanceof errors.TimeoutError)) throw error;
 			console.warn(
 				`Storybook render phase did not reach a terminal state for ${storyId} within 5s; using the additive settle`,
+			);
+		});
+}
+
+/** Require a quiet window long enough to cover delayed portalled DOM teardown. */
+const QUIET_MS = 150;
+
+/** Bound permanently animating stories while keeping their timeout non-fatal. */
+const QUIESCENCE_TIMEOUT_MS = 3_000;
+
+/**
+ * Wait for running animations and then for a mutation-free DOM window.
+ *
+ * Portalled content can outlive Storybook's terminal render phase. Observe the
+ * document root so mutations outside #storybook-root also extend the settle.
+ */
+async function waitForDomQuiescence(
+	page: import("@playwright/test").Page,
+	storyId: string,
+): Promise<void> {
+	await page
+		.evaluate(
+			async ({ quietMs, timeoutMs }) =>
+				await new Promise<boolean>((resolve) => {
+					let observer: MutationObserver | undefined;
+					let quietTimer: number | undefined;
+					let timeoutTimer: number | undefined;
+					let resolved = false;
+
+					const finish = (settled: boolean) => {
+						if (resolved) return;
+						resolved = true;
+						observer?.disconnect();
+						if (quietTimer !== undefined) window.clearTimeout(quietTimer);
+						if (timeoutTimer !== undefined) window.clearTimeout(timeoutTimer);
+						resolve(settled);
+					};
+
+					timeoutTimer = window.setTimeout(() => finish(false), timeoutMs);
+
+					void Promise.allSettled(
+						document.getAnimations().map((animation) => animation.finished),
+					).then(() => {
+						if (resolved) return;
+
+						observer = new MutationObserver(() => {
+							if (quietTimer !== undefined) {
+								window.clearTimeout(quietTimer);
+							}
+							quietTimer = window.setTimeout(() => finish(true), quietMs);
+						});
+						observer.observe(document.documentElement, {
+							childList: true,
+							subtree: true,
+							attributes: true,
+							characterData: true,
+						});
+						quietTimer = window.setTimeout(() => finish(true), quietMs);
+					});
+				}),
+			{ quietMs: QUIET_MS, timeoutMs: QUIESCENCE_TIMEOUT_MS },
+		)
+		.then((settled) => {
+			if (settled) return;
+			console.warn(
+				`DOM did not quiesce for ${storyId} within ${QUIESCENCE_TIMEOUT_MS}ms; continuing to screenshot`,
+			);
+		})
+		.catch((error: unknown) => {
+			console.warn(
+				`DOM quiescence wait failed for ${storyId}; continuing to screenshot`,
+				error,
 			);
 		});
 }
@@ -279,7 +372,7 @@ if (stories.length > 0) {
 					}
 
 					const strictFlakeReason = STRICT_NONDETERMINISTIC[story.id];
-					if (STRICT && strictFlakeReason) {
+					if (STRICT && !STRICT_ALL && strictFlakeReason) {
 						// Announced, not silent: strict mode's whole value is that a red
 						// run means something, so a story it cannot hold to zero-diff is
 						// named here with its reason rather than left permanently red
@@ -298,6 +391,7 @@ if (stories.length > 0) {
 					// Keep the historical settle after the phase wait/fallback. Waiting may
 					// only increase; shortening it risks baseline churn across all stories.
 					await page.waitForTimeout(800);
+					await waitForDomQuiescence(page, story.id);
 					await assertStoryRenderSucceeded(page, story.id);
 					await freezeAnimations(page);
 
