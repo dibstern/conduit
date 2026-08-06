@@ -76,10 +76,11 @@ describe("ProviderRuntimeEvent contracts", () => {
 	});
 
 	it("covers every canonical event type or explicit reclassification", () => {
-		// Conduit-initiated types never transit provider ingress: the session
-		// delete path appends session.deleted directly at the persist choke point.
+		// Conduit-initiated deletion events never transit provider ingress: the
+		// delete path appends tombstones and cleanup diagnostics directly.
 		const explicitlyReclassified: readonly string[] = [
 			"session.deleted",
+			"session.provider_cleanup_failed",
 			"session.permission_mode_changed",
 		];
 		const missingRuntimeTypes = CANONICAL_EVENT_TYPES.filter(

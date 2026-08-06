@@ -13,6 +13,7 @@ exports[`Exhaustiveness guards > EventPayloadMap key snapshot > snapshot of all 
   "session.deleted",
   "session.permission_mode_changed",
   "session.provider_changed",
+  "session.provider_cleanup_failed",
   "session.renamed",
   "session.status",
   "text.delta",

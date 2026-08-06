@@ -1,4 +1,7 @@
 // biome-ignore-all lint/suspicious/noExplicitAny: test mocks use `as any` for partial service shapes
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, it } from "@effect/vitest";
 import { Effect, Layer, PubSub } from "effect";
 import { expect, vi } from "vitest";
@@ -21,6 +24,8 @@ import {
 } from "../../../src/lib/domain/relay/Services/session-manager-service.js";
 import { makeSessionManagerStateLive } from "../../../src/lib/domain/relay/Services/session-manager-state.js";
 import { createSilentLogger } from "../../../src/lib/logger.js";
+import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
+import { SqliteClient } from "../../../src/lib/persistence/sqlite-client.js";
 import type { MonitoringState } from "../../../src/lib/relay/monitoring-types.js";
 import {
 	handleSessionCreated,
@@ -28,6 +33,7 @@ import {
 	SessionLifecycleHistoryRebuildError,
 } from "../../../src/lib/relay/session-lifecycle-wiring.js";
 import {
+	makeMockLogger,
 	makeMockOpenCodeAPI,
 	makeMockStatusPoller,
 } from "../../helpers/mock-factories.js";
@@ -110,7 +116,10 @@ function makeServiceLifecycleTestLayer(
 	services: ReturnType<typeof makeMockServices>,
 	deps: ReturnType<typeof makeMockDeps>,
 	api = makeMockOpenCodeAPI(),
+	dbFile?: string,
 ) {
+	const persistenceLayer =
+		dbFile === undefined ? Layer.empty : makePersistenceEffectLayer(dbFile);
 	const wiringLayer = makeSessionLifecycleWiringLive({
 		translator: deps.translator as any,
 		sseTracker: deps.sseTracker as any,
@@ -126,6 +135,7 @@ function makeServiceLifecycleTestLayer(
 		Layer.succeed(LoggerTag, services.log),
 		makeSessionManagerStateLive(),
 		DaemonEventBusLive,
+		persistenceLayer,
 	);
 
 	return Layer.mergeAll(wiringLayer, SessionManagerServiceLive).pipe(
@@ -263,9 +273,15 @@ describe("SessionLifecycleWiringLive", () => {
 	it.live(
 		"SessionManagerServiceLive deleteSession drives lifecycle cleanup without SessionEventBridgeLive",
 		() => {
+			const tmpDir = mkdtempSync(
+				join(tmpdir(), "conduit-session-lifecycle-delete-"),
+			);
+			const dbFile = join(tmpDir, "events.sqlite");
 			const services = makeMockServices();
 			const deps = makeMockDeps();
 			const api = makeMockOpenCodeAPI();
+			const logger = makeMockLogger();
+			services.log = logger;
 			deps.monitoringState.current = {
 				sessions: new Map([["service-deleted", { phase: "idle" as const }]]),
 			};
@@ -275,8 +291,22 @@ describe("SessionLifecycleWiringLive", () => {
 				yield* Effect.sleep("10 millis");
 				yield* service.deleteSession("service-deleted");
 				yield* Effect.sleep("50 millis");
+				const receipt = yield* Effect.sync(() => {
+					const db = SqliteClient.open(dbFile);
+					try {
+						return db.queryOne<{
+							readonly data: string;
+							readonly provider: string;
+						}>(
+							"SELECT data, provider FROM events WHERE session_id = ? AND type = 'session.provider_cleanup_failed'",
+							["service-deleted"],
+						);
+					} finally {
+						db.close();
+					}
+				});
 
-				expect(api.session.delete).toHaveBeenCalledWith("service-deleted");
+				expect(api.session.delete).not.toHaveBeenCalled();
 				expect(deps.translator.reset).toHaveBeenCalledWith("service-deleted");
 				expect(services.pollerManager.stopPolling).toHaveBeenCalledWith(
 					"service-deleted",
@@ -288,10 +318,22 @@ describe("SessionLifecycleWiringLive", () => {
 				expect(
 					deps.monitoringState.current.sessions.has("service-deleted"),
 				).toBe(false);
+				expect(receipt?.provider).toBe("unknown");
+				expect(receipt?.data).toContain('"sessionId":"service-deleted"');
+				expect(receipt?.data).toContain('"provider":"unknown"');
+				expect(receipt?.data).toContain(
+					'"reason":"provider_route: no provider route could be determined, so cleanup was skipped"',
+				);
+				expect(logger.warn).toHaveBeenCalledOnce();
 			}).pipe(
 				Effect.scoped,
 				Effect.provide(
-					Layer.fresh(makeServiceLifecycleTestLayer(services, deps, api)),
+					Layer.fresh(
+						makeServiceLifecycleTestLayer(services, deps, api, dbFile),
+					),
+				),
+				Effect.ensuring(
+					Effect.sync(() => rmSync(tmpDir, { recursive: true, force: true })),
 				),
 			);
 		},

@@ -89,6 +89,8 @@ export interface EndSessionCommand {
 	readonly type: "end_session";
 	readonly commandId: string;
 	readonly sessionId: string;
+	/** Explicit provider-instance route captured before session projections change. */
+	readonly targetProviderId?: string;
 	/** Default false -- keep binding. Set true to also unbind. */
 	readonly unbind?: boolean;
 }
@@ -675,9 +677,13 @@ export class OrchestrationEngine {
 		command: EndSessionCommand,
 	): Effect.Effect<void, OrchestrationError> {
 		return Effect.gen(this, function* () {
-			const providerId = this.sessionBindingReadModel.getProviderForSession(
-				command.sessionId,
-			);
+			const targetBindingRevision =
+				command.targetProviderId === undefined
+					? undefined
+					: this.sessionBindingReadModel.getBindingRevision(command.sessionId);
+			const providerId =
+				command.targetProviderId ??
+				this.sessionBindingReadModel.getProviderForSession(command.sessionId);
 			if (!providerId) {
 				yield* Effect.sync(() =>
 					log.debug(
@@ -686,23 +692,39 @@ export class OrchestrationEngine {
 				);
 				return;
 			}
-			const instance = yield* this.getProviderInstanceEffect(providerId);
-			yield* Effect.sync(() =>
-				log.info(
-					`Dispatching endSession: session=${command.sessionId} provider=${providerId}`,
-				),
-			);
-			yield* instance
-				.endSessionEffect(command.sessionId)
-				.pipe(
-					Effect.tapError((error) =>
+			const endSession = Effect.gen(this, function* () {
+				const instance = yield* this.getProviderInstanceEffect(providerId);
+				yield* Effect.sync(() =>
+					log.info(
+						`Dispatching endSession: session=${command.sessionId} provider=${providerId}`,
+					),
+				);
+				return yield* instance
+					.endSessionEffect(command.sessionId)
+					.pipe(
+						Effect.tapError((error) =>
+							Effect.sync(() =>
+								log.error(
+									`endSession failed: session=${command.sessionId} provider=${providerId}: ${error.message}`,
+								),
+							),
+						),
+					);
+			});
+			if (command.targetProviderId !== undefined && command.unbind) {
+				return yield* endSession.pipe(
+					Effect.ensuring(
 						Effect.sync(() =>
-							log.error(
-								`endSession failed: session=${command.sessionId} provider=${providerId}: ${error.message}`,
+							this.sessionBindingReadModel.unbindSessionIfBoundTo(
+								command.sessionId,
+								providerId,
+								targetBindingRevision ?? 0,
 							),
 						),
 					),
 				);
+			}
+			yield* endSession;
 			if (command.unbind) {
 				yield* Effect.sync(() =>
 					this.sessionBindingReadModel.unbindSession(command.sessionId),

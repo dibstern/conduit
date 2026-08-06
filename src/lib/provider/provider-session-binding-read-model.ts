@@ -16,6 +16,12 @@ export interface ProviderSessionBinding {
 export interface ProviderSessionBindingReadModel {
 	bindSession(sessionId: string, providerId: string): void;
 	unbindSession(sessionId: string): void;
+	getBindingRevision(sessionId: string): number;
+	unbindSessionIfBoundTo(
+		sessionId: string,
+		providerId: string,
+		bindingRevision: number,
+	): void;
 	getProviderForSession(sessionId: string): string | undefined;
 	listBoundSessions(): ProviderSessionBinding[];
 	clearTransientBindings(): void;
@@ -30,13 +36,39 @@ export class InMemoryProviderSessionBindingReadModel
 	implements ProviderSessionBindingReadModel
 {
 	private readonly bindings = new Map<string, string>();
+	private readonly bindingRevisions = new Map<string, number>();
 
 	bindSession(sessionId: string, providerId: string): void {
 		this.bindings.set(sessionId, providerId);
+		this.bindingRevisions.set(
+			sessionId,
+			(this.bindingRevisions.get(sessionId) ?? 0) + 1,
+		);
 	}
 
 	unbindSession(sessionId: string): void {
 		this.bindings.delete(sessionId);
+		this.bindingRevisions.set(
+			sessionId,
+			(this.bindingRevisions.get(sessionId) ?? 0) + 1,
+		);
+	}
+
+	getBindingRevision(sessionId: string): number {
+		return this.bindingRevisions.get(sessionId) ?? 0;
+	}
+
+	unbindSessionIfBoundTo(
+		sessionId: string,
+		providerId: string,
+		bindingRevision: number,
+	): void {
+		if (
+			this.bindings.get(sessionId) === providerId &&
+			this.getBindingRevision(sessionId) === bindingRevision
+		) {
+			this.bindings.delete(sessionId);
+		}
 	}
 
 	getProviderForSession(sessionId: string): string | undefined {
@@ -52,6 +84,7 @@ export class InMemoryProviderSessionBindingReadModel
 
 	clearTransientBindings(): void {
 		this.bindings.clear();
+		this.bindingRevisions.clear();
 	}
 }
 
@@ -59,15 +92,41 @@ export class SqliteProviderSessionBindingReadModel
 	implements ProviderSessionBindingReadModel
 {
 	private readonly transientBindings = new Map<string, string | null>();
+	private readonly bindingRevisions = new Map<string, number>();
 
 	constructor(private readonly db: SessionBindingReadModelDb) {}
 
 	bindSession(sessionId: string, providerId: string): void {
 		this.transientBindings.set(sessionId, providerId);
+		this.bindingRevisions.set(
+			sessionId,
+			(this.bindingRevisions.get(sessionId) ?? 0) + 1,
+		);
 	}
 
 	unbindSession(sessionId: string): void {
 		this.transientBindings.set(sessionId, null);
+		this.bindingRevisions.set(
+			sessionId,
+			(this.bindingRevisions.get(sessionId) ?? 0) + 1,
+		);
+	}
+
+	getBindingRevision(sessionId: string): number {
+		return this.bindingRevisions.get(sessionId) ?? 0;
+	}
+
+	unbindSessionIfBoundTo(
+		sessionId: string,
+		providerId: string,
+		bindingRevision: number,
+	): void {
+		if (
+			this.getProviderForSession(sessionId) === providerId &&
+			this.getBindingRevision(sessionId) === bindingRevision
+		) {
+			this.transientBindings.set(sessionId, null);
+		}
 	}
 
 	getProviderForSession(sessionId: string): string | undefined {
@@ -121,5 +180,6 @@ export class SqliteProviderSessionBindingReadModel
 
 	clearTransientBindings(): void {
 		this.transientBindings.clear();
+		this.bindingRevisions.clear();
 	}
 }

@@ -157,6 +157,7 @@ export function translateDomainEventToRelay(
 		case "session.renamed":
 		case "session.provider_changed":
 		case "session.deleted":
+		case "session.provider_cleanup_failed":
 		case "session.permission_mode_changed":
 			return silent("persistence-only event; no UI surface in relay");
 

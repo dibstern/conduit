@@ -3,7 +3,18 @@ import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "@effect/vitest";
-import { Effect, HashMap, Layer, Option, Queue, Ref, TestClock } from "effect";
+import {
+	Deferred,
+	Effect,
+	Exit,
+	Fiber,
+	HashMap,
+	Layer,
+	Option,
+	Queue,
+	Ref,
+	TestClock,
+} from "effect";
 import { expect, vi } from "vitest";
 import { ProviderInstanceIdSchema } from "../../../src/lib/contracts/provider-instance.js";
 import {
@@ -62,13 +73,18 @@ import {
 } from "../../../src/lib/domain/relay/Services/session-overrides-state.js";
 import { OpenCodeApiError } from "../../../src/lib/errors.js";
 import type { SessionStatus } from "../../../src/lib/instance/sdk-types.js";
+import { EventStoreEffectTag } from "../../../src/lib/persistence/effect/event-store-effect.js";
 import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
 import type { ReadQueryEffect } from "../../../src/lib/persistence/effect/read-query-effect.js";
 import { ReadQueryEffectTag } from "../../../src/lib/persistence/effect/read-query-effect.js";
+import { runMigrations } from "../../../src/lib/persistence/migrations.js";
 import type { SessionRow } from "../../../src/lib/persistence/read-model-types.js";
+import { schemaMigrations } from "../../../src/lib/persistence/schema.js";
 import { SqliteClient } from "../../../src/lib/persistence/sqlite-client.js";
 import { OrchestrationEngine } from "../../../src/lib/provider/orchestration-engine.js";
 import { ProviderRegistry } from "../../../src/lib/provider/provider-registry.js";
+import { SqliteProviderSessionBindingReadModel } from "../../../src/lib/provider/provider-session-binding-read-model.js";
+import type { ProviderInstance } from "../../../src/lib/provider/types.js";
 import type { HistoryMessage } from "../../../src/lib/shared-types.js";
 import type { ProjectRelayConfig } from "../../../src/lib/types.js";
 import {
@@ -113,6 +129,97 @@ function makeReadQueryEffect(rows: readonly SessionRow[]): ReadQueryEffect {
 		getLatestTurnModelExecution: vi.fn(() => Effect.succeed(undefined)),
 		getSessionMessagesWithParts: vi.fn(() => Effect.succeed([])),
 	};
+}
+
+function makeNamedOpenCodeDaemonConfig(): DaemonConfig {
+	return {
+		pid: process.pid,
+		port: 2633,
+		pinHash: null,
+		tls: false,
+		debug: false,
+		keepAwake: false,
+		dangerouslySkipPermissions: false,
+		projects: [],
+		instances: [
+			{
+				id: "work-oc",
+				name: "Work OpenCode",
+				port: 4096,
+				managed: false,
+				driver: "opencode",
+			},
+		],
+	};
+}
+
+function makeRelayConfig(configDir: string): ProjectRelayConfig {
+	return {
+		httpServer: createServer(),
+		opencodeUrl: "http://localhost:4096",
+		projectDir: "/tmp/project",
+		slug: "project",
+		configDir,
+	};
+}
+
+function seedProjectedSessionBinding(
+	dbFile: string,
+	sessionId: string,
+	providerId: string,
+): void {
+	const db = SqliteClient.open(dbFile);
+	try {
+		runMigrations(db, schemaMigrations);
+		const now = 1_735_689_600_000;
+		db.execute(
+			"INSERT INTO sessions (id, provider, title, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
+			[sessionId, providerId, "Persisted session", "idle", now, now],
+		);
+		db.execute(
+			"INSERT INTO session_providers (id, session_id, provider, status, activated_at) VALUES (?, ?, ?, 'active', ?)",
+			[`${sessionId}:initial`, sessionId, providerId, now],
+		);
+	} finally {
+		db.close();
+	}
+}
+
+function readProjectedDeleteState(dbFile: string, sessionId: string) {
+	const db = SqliteClient.open(dbFile);
+	try {
+		return {
+			sessionPresent:
+				db.queryOne<{ readonly id: string }>(
+					"SELECT id FROM sessions WHERE id = ?",
+					[sessionId],
+				) !== undefined,
+			bindingPresent:
+				db.queryOne<{ readonly id: string }>(
+					"SELECT id FROM session_providers WHERE session_id = ?",
+					[sessionId],
+				) !== undefined,
+		};
+	} finally {
+		db.close();
+	}
+}
+
+function readTombstoneFirstState(dbFile: string, sessionId: string) {
+	const projected = readProjectedDeleteState(dbFile, sessionId);
+	const db = SqliteClient.open(dbFile);
+	try {
+		return {
+			...projected,
+			tombstonePresent:
+				db.queryOne<{ readonly type: string }>(
+					"SELECT type FROM events WHERE session_id = ? AND type = 'session.deleted'",
+					[sessionId],
+				) !== undefined,
+		};
+	} finally {
+		db.close();
+	}
 }
 
 function makeHistoryMessage(
@@ -621,157 +728,706 @@ describe("SessionManagerService", () => {
 	);
 
 	it.scoped(
-		"deletes a Claude session through orchestration and unbinds it",
+		"deletes locally and records cleanup failure when end_session and provider delete both fail",
 		() => {
-			const api = makeMockOpenCodeAPI();
-			vi.spyOn(api.session, "delete").mockResolvedValue(undefined);
-			const readQuery = makeReadQueryEffect([
-				makeRow("deleted-session", { provider: "claude" }),
-			]);
-			const dispatch = vi.fn(async () => undefined);
-			const engine = withDispatchEffect({ dispatch });
-			const layer = Layer.provideMerge(
-				SessionManagerServiceLive,
-				Layer.mergeAll(
-					Layer.succeed(OpenCodeAPITag, api),
-					Layer.succeed(LoggerTag, makeMockLogger()),
-					makeSessionManagerStateLive(),
-					DaemonEventBusLive,
-					Layer.succeed(ReadQueryEffectTag, readQuery),
-					Layer.succeed(OrchestrationEngineTag, engine),
-				),
+			const tmpDir = mkdtempSync(
+				join(tmpdir(), "conduit-session-delete-all-fail-"),
 			);
-
-			return Effect.gen(function* () {
-				const service = yield* SessionManagerServiceTag;
-				yield* service.recordMessageActivity("deleted-session", 123);
-				const sub = yield* subscribeToDaemonEvents;
-
-				yield* service.deleteSession("deleted-session");
-
-				expect(readQuery.getSession).toHaveBeenCalledOnce();
-				expect(readQuery.getSession).toHaveBeenCalledWith("deleted-session");
-				expect(dispatch).toHaveBeenCalledOnce();
-				expect(dispatch).toHaveBeenCalledWith({
-					type: "end_session",
-					commandId: expect.any(String),
-					sessionId: "deleted-session",
-					unbind: true,
-				});
-				expect(api.session.delete).not.toHaveBeenCalled();
-				const event = yield* Queue.poll(sub);
-				expect(Option.getOrNull(event)).toMatchObject({
-					_tag: "SessionDeleted",
-					sessionId: "deleted-session",
-				});
-				const extra = yield* Queue.poll(sub);
-				expect(Option.isNone(extra)).toBe(true);
-			}).pipe(Effect.provide(Layer.fresh(layer)));
-		},
-	);
-
-	it.scoped("deletes a named OpenCode session through its bound client", () => {
-		const api = makeMockOpenCodeAPI();
-		vi.spyOn(api.session, "delete").mockResolvedValue(undefined);
-		const namedApi = makeMockOpenCodeAPI();
-		vi.spyOn(namedApi.session, "delete").mockResolvedValue(undefined);
-		const readQuery = makeReadQueryEffect([
-			makeRow("deleted-session", { provider: "work-oc" }),
-		]);
-		const clientFor = vi.fn((instanceId: string) =>
-			Effect.succeed(instanceId === "work-oc" ? namedApi : undefined),
-		);
-		const instanceClients = {
-			clientFor,
-			registerStreamWirer: () => Effect.void,
-		} satisfies OpenCodeInstanceClients;
-		const dispatch = vi.fn(async () => undefined);
-		const engine = withDispatchEffect({ dispatch });
-		const layer = Layer.provideMerge(
-			SessionManagerServiceLive,
-			Layer.mergeAll(
-				Layer.succeed(OpenCodeAPITag, api),
-				Layer.succeed(LoggerTag, makeMockLogger()),
-				makeSessionManagerStateLive(),
-				DaemonEventBusLive,
-				Layer.succeed(ReadQueryEffectTag, readQuery),
-				Layer.succeed(OpenCodeInstanceClientsTag, instanceClients),
-				Layer.succeed(OrchestrationEngineTag, engine),
-			),
-		);
-
-		return Effect.gen(function* () {
-			const service = yield* SessionManagerServiceTag;
-			const sub = yield* subscribeToDaemonEvents;
-
-			yield* service.deleteSession("deleted-session");
-
-			expect(readQuery.getSession).toHaveBeenCalledOnce();
-			expect(readQuery.getSession).toHaveBeenCalledWith("deleted-session");
-			expect(clientFor).toHaveBeenCalledOnce();
-			expect(clientFor).toHaveBeenCalledWith("work-oc");
-			expect(namedApi.session.delete).toHaveBeenCalledOnce();
-			expect(namedApi.session.delete).toHaveBeenCalledWith("deleted-session");
-			expect(api.session.delete).not.toHaveBeenCalled();
-			expect(dispatch).not.toHaveBeenCalled();
-			const event = yield* Queue.poll(sub);
-			expect(Option.getOrNull(event)).toMatchObject({
-				_tag: "SessionDeleted",
-				sessionId: "deleted-session",
-			});
-			const extra = yield* Queue.poll(sub);
-			expect(Option.isNone(extra)).toBe(true);
-		}).pipe(Effect.provide(Layer.fresh(layer)));
-	});
-
-	it.scoped(
-		"deletes a project-default OpenCode session after classifying its row",
-		() => {
+			const dbFile = join(tmpDir, "events.sqlite");
+			const sessionId = "deleted-session";
+			seedProjectedSessionBinding(dbFile, sessionId, "work-oc");
 			const api = makeMockOpenCodeAPI();
 			vi.spyOn(api.session, "delete").mockResolvedValue(undefined);
-			const readQuery = makeReadQueryEffect([
-				makeRow("deleted-session", { provider: "opencode" }),
-			]);
-			const clientFor = vi.fn(() => Effect.succeed(undefined));
+			const namedApi = makeMockOpenCodeAPI();
+			const providerDeleteObservations: ReturnType<
+				typeof readTombstoneFirstState
+			>[] = [];
+			vi.spyOn(namedApi.session, "delete").mockImplementation(async () => {
+				providerDeleteObservations.push(
+					readTombstoneFirstState(dbFile, sessionId),
+				);
+				throw new Error("upstream delete unavailable");
+			});
+			const clientFor = vi.fn(() => Effect.succeed(namedApi));
 			const instanceClients = {
 				clientFor,
 				registerStreamWirer: () => Effect.void,
 			} satisfies OpenCodeInstanceClients;
-			const dispatch = vi.fn(async () => undefined);
-			const engine = withDispatchEffect({ dispatch });
+			const dispatchObservations: ReturnType<typeof readTombstoneFirstState>[] =
+				[];
+			const dispatch = vi.fn(() =>
+				Effect.sync(() => {
+					dispatchObservations.push(readTombstoneFirstState(dbFile, sessionId));
+				}).pipe(
+					Effect.zipRight(Effect.fail(new Error("orchestration unavailable"))),
+				),
+			);
+			const engine = withDispatchEffect({ dispatchEffect: dispatch });
+			engine.bindSession(sessionId, "work-oc");
+			const logger = makeMockLogger();
 			const layer = Layer.provideMerge(
 				SessionManagerServiceLive,
 				Layer.mergeAll(
 					Layer.succeed(OpenCodeAPITag, api),
-					Layer.succeed(LoggerTag, makeMockLogger()),
+					Layer.succeed(LoggerTag, logger),
+					Layer.succeed(ConfigTag, makeRelayConfig(tmpDir)),
 					makeSessionManagerStateLive(),
 					DaemonEventBusLive,
-					Layer.succeed(ReadQueryEffectTag, readQuery),
+					makePersistenceEffectLayer(dbFile),
 					Layer.succeed(OpenCodeInstanceClientsTag, instanceClients),
 					Layer.succeed(OrchestrationEngineTag, engine),
 				),
 			);
 
 			return Effect.gen(function* () {
+				yield* Effect.tryPromise(() =>
+					saveDaemonConfig(makeNamedOpenCodeDaemonConfig(), tmpDir),
+				);
 				const service = yield* SessionManagerServiceTag;
+				const stateRef = yield* SessionManagerStateTag;
+				yield* Ref.update(stateRef, (state) => ({
+					cachedParentMap: HashMap.set(
+						HashMap.set(state.cachedParentMap, sessionId, "parent"),
+						"child",
+						sessionId,
+					),
+					lastMessageAt: HashMap.set(state.lastMessageAt, sessionId, 123),
+					forkMeta: HashMap.set(state.forkMeta, sessionId, {
+						forkMessageId: "message-1",
+						parentID: "parent",
+					}),
+					pendingQuestionCounts: HashMap.set(
+						state.pendingQuestionCounts,
+						sessionId,
+						1,
+					),
+					paginationCursors: HashMap.set(
+						state.paginationCursors,
+						sessionId,
+						"message-1",
+					),
+					lastKnownSessionCount: 2,
+				}));
 				const sub = yield* subscribeToDaemonEvents;
 
-				yield* service.deleteSession("deleted-session");
+				const deleteExit = yield* Effect.exit(service.deleteSession(sessionId));
+				const eventStore = yield* EventStoreEffectTag;
+				const events = yield* eventStore.readAllBySession(sessionId);
+				const projected = readProjectedDeleteState(dbFile, sessionId);
+				const state = yield* Ref.get(stateRef);
+				const daemonEvent = Option.getOrNull(yield* Queue.poll(sub));
 
-				expect(readQuery.getSession).toHaveBeenCalledOnce();
-				expect(readQuery.getSession).toHaveBeenCalledWith("deleted-session");
-				expect(api.session.delete).toHaveBeenCalledOnce();
-				expect(api.session.delete).toHaveBeenCalledWith("deleted-session");
-				expect(clientFor).not.toHaveBeenCalled();
-				expect(dispatch).not.toHaveBeenCalled();
-				const event = yield* Queue.poll(sub);
-				expect(Option.getOrNull(event)).toMatchObject({
-					_tag: "SessionDeleted",
-					sessionId: "deleted-session",
+				expect({
+					deleteSucceeded: Exit.isSuccess(deleteExit),
+					projected,
+					eventTypes: events.map((event) => event.type),
+					dispatchCalls: dispatch.mock.calls.length,
+					providerDeleteCalls: vi.mocked(namedApi.session.delete).mock.calls
+						.length,
+					localStateCleared:
+						!HashMap.has(state.cachedParentMap, sessionId) &&
+						!HashMap.has(state.cachedParentMap, "child") &&
+						!HashMap.has(state.lastMessageAt, sessionId) &&
+						!HashMap.has(state.forkMeta, sessionId) &&
+						!HashMap.has(state.pendingQuestionCounts, sessionId) &&
+						!HashMap.has(state.paginationCursors, sessionId),
+					sessionCount: state.lastKnownSessionCount,
+					daemonEvent: daemonEvent?._tag,
+					warnings: vi.mocked(logger.warn).mock.calls.length,
+				}).toEqual({
+					deleteSucceeded: true,
+					projected: {
+						sessionPresent: false,
+						bindingPresent: false,
+					},
+					eventTypes: ["session.deleted", "session.provider_cleanup_failed"],
+					dispatchCalls: 1,
+					providerDeleteCalls: 1,
+					localStateCleared: true,
+					sessionCount: 1,
+					daemonEvent: "SessionDeleted",
+					warnings: 1,
 				});
-				const extra = yield* Queue.poll(sub);
-				expect(Option.isNone(extra)).toBe(true);
-			}).pipe(Effect.provide(Layer.fresh(layer)));
+				expect(events.at(-1)?.data).toMatchObject({
+					reason:
+						"end_session: orchestration unavailable; provider_delete: upstream delete unavailable",
+				});
+				expect(dispatchObservations).toEqual([
+					{
+						sessionPresent: false,
+						bindingPresent: false,
+						tombstonePresent: true,
+					},
+				]);
+				expect(providerDeleteObservations).toEqual(dispatchObservations);
+			}).pipe(
+				Effect.provide(Layer.fresh(layer)),
+				Effect.ensuring(
+					Effect.sync(() => rmSync(tmpDir, { recursive: true, force: true })),
+				),
+			);
+		},
+	);
+
+	it.scoped(
+		"cleans up OpenCode driver state and upstream state without writing a failure receipt",
+		() => {
+			const tmpDir = mkdtempSync(
+				join(tmpdir(), "conduit-session-delete-opencode-success-"),
+			);
+			const dbFile = join(tmpDir, "events.sqlite");
+			const sessionId = "deleted-session";
+			seedProjectedSessionBinding(dbFile, sessionId, "opencode");
+			const api = makeMockOpenCodeAPI();
+			const providerDeleteObservations: ReturnType<
+				typeof readTombstoneFirstState
+			>[] = [];
+			vi.spyOn(api.session, "delete").mockImplementation(async () => {
+				providerDeleteObservations.push(
+					readTombstoneFirstState(dbFile, sessionId),
+				);
+			});
+			const dispatchObservations: ReturnType<typeof readTombstoneFirstState>[] =
+				[];
+			const dispatch = vi.fn(async () => {
+				dispatchObservations.push(readTombstoneFirstState(dbFile, sessionId));
+			});
+			const engine = withDispatchEffect({ dispatch });
+			engine.bindSession(sessionId, "opencode");
+			const logger = makeMockLogger();
+			const layer = Layer.provideMerge(
+				SessionManagerServiceLive,
+				Layer.mergeAll(
+					Layer.succeed(OpenCodeAPITag, api),
+					Layer.succeed(LoggerTag, logger),
+					makeSessionManagerStateLive(),
+					DaemonEventBusLive,
+					makePersistenceEffectLayer(dbFile),
+					Layer.succeed(OrchestrationEngineTag, engine),
+				),
+			);
+
+			return Effect.gen(function* () {
+				const service = yield* SessionManagerServiceTag;
+				yield* service.deleteSession(sessionId);
+				const eventStore = yield* EventStoreEffectTag;
+				const events = yield* eventStore.readAllBySession(sessionId);
+
+				expect(dispatch).toHaveBeenCalledOnce();
+				expect(dispatch).toHaveBeenCalledWith({
+					type: "end_session",
+					commandId: expect.any(String),
+					sessionId,
+					targetProviderId: "opencode",
+					unbind: true,
+				});
+				expect(api.session.delete).toHaveBeenCalledOnce();
+				expect(api.session.delete).toHaveBeenCalledWith(sessionId);
+				expect(dispatchObservations).toEqual([
+					{
+						sessionPresent: false,
+						bindingPresent: false,
+						tombstonePresent: true,
+					},
+				]);
+				expect(providerDeleteObservations).toEqual(dispatchObservations);
+				expect(events.map((event) => event.type)).toEqual(["session.deleted"]);
+				expect(logger.warn).not.toHaveBeenCalled();
+			}).pipe(
+				Effect.provide(Layer.fresh(layer)),
+				Effect.ensuring(
+					Effect.sync(() => rmSync(tmpDir, { recursive: true, force: true })),
+				),
+			);
+		},
+	);
+
+	it.scoped(
+		"persists a queryable named-instance cleanup failure receipt with log-safe detail",
+		() => {
+			const tmpDir = mkdtempSync(
+				join(tmpdir(), "conduit-session-delete-receipt-"),
+			);
+			const dbFile = join(tmpDir, "events.sqlite");
+			const sessionId = "deleted-session";
+			seedProjectedSessionBinding(dbFile, sessionId, "work-oc");
+			const api = makeMockOpenCodeAPI();
+			vi.spyOn(api.session, "delete").mockResolvedValue(undefined);
+			const namedApi = makeMockOpenCodeAPI();
+			const deleteError = new Error("named instance unavailable");
+			deleteError.stack =
+				"Error: named instance unavailable\nUNIQUE_DELETE_STACK_SENTINEL";
+			vi.spyOn(namedApi.session, "delete").mockRejectedValue(deleteError);
+			const clientFor = vi.fn(() => Effect.succeed(namedApi));
+			const instanceClients = {
+				clientFor,
+				registerStreamWirer: () => Effect.void,
+			} satisfies OpenCodeInstanceClients;
+			const dispatch = vi.fn(async () => undefined);
+			const engine = withDispatchEffect({ dispatch });
+			engine.bindSession(sessionId, "work-oc");
+			const layer = Layer.provideMerge(
+				SessionManagerServiceLive,
+				Layer.mergeAll(
+					Layer.succeed(OpenCodeAPITag, api),
+					Layer.succeed(LoggerTag, makeMockLogger()),
+					Layer.succeed(ConfigTag, makeRelayConfig(tmpDir)),
+					makeSessionManagerStateLive(),
+					DaemonEventBusLive,
+					makePersistenceEffectLayer(dbFile),
+					Layer.succeed(OpenCodeInstanceClientsTag, instanceClients),
+					Layer.succeed(OrchestrationEngineTag, engine),
+				),
+			);
+
+			return Effect.gen(function* () {
+				yield* Effect.tryPromise(() =>
+					saveDaemonConfig(makeNamedOpenCodeDaemonConfig(), tmpDir),
+				);
+				const service = yield* SessionManagerServiceTag;
+				const deleteExit = yield* Effect.exit(service.deleteSession(sessionId));
+				const eventStore = yield* EventStoreEffectTag;
+				const events = yield* eventStore.readAllBySession(sessionId);
+				const receipt = events.find(
+					(event) => event.type === "session.provider_cleanup_failed",
+				);
+
+				expect(receipt).toMatchObject({
+					type: "session.provider_cleanup_failed",
+					sessionId,
+					provider: "opencode",
+					data: {
+						sessionId,
+						provider: "opencode",
+						instanceId: "work-oc",
+						reason: "provider_delete: named instance unavailable",
+					},
+				});
+				expect(Exit.isSuccess(deleteExit)).toBe(true);
+				expect(receipt?.data.reason).not.toContain(
+					"UNIQUE_DELETE_STACK_SENTINEL",
+				);
+				expect(events.map((event) => event.type)).toEqual([
+					"session.deleted",
+					"session.provider_cleanup_failed",
+				]);
+				expect(readProjectedDeleteState(dbFile, sessionId).sessionPresent).toBe(
+					false,
+				);
+			}).pipe(
+				Effect.provide(Layer.fresh(layer)),
+				Effect.ensuring(
+					Effect.sync(() => rmSync(tmpDir, { recursive: true, force: true })),
+				),
+			);
+		},
+	);
+
+	it.scoped(
+		"still deletes locally and records a receipt when cleanup detail rendering throws",
+		() => {
+			const tmpDir = mkdtempSync(
+				join(tmpdir(), "conduit-session-delete-render-defect-"),
+			);
+			const dbFile = join(tmpDir, "events.sqlite");
+			const sessionId = "deleted-session";
+			seedProjectedSessionBinding(dbFile, sessionId, "work-oc");
+			const api = makeMockOpenCodeAPI();
+			const namedApi = makeMockOpenCodeAPI();
+			const nestedFormattingError = new OpenCodeApiError({
+				message: "nested formatting failed",
+				endpoint: `/session/${sessionId}`,
+				responseStatus: 500,
+				responseBody: { invalidJsonNumber: 1n },
+			});
+			const responseBody = {};
+			Object.defineProperty(responseBody, "detail", {
+				enumerable: true,
+				get: () => {
+					throw nestedFormattingError;
+				},
+			});
+			vi.spyOn(namedApi.session, "delete").mockRejectedValue(
+				new OpenCodeApiError({
+					message: "provider rejected cleanup",
+					endpoint: `/session/${sessionId}`,
+					responseStatus: 500,
+					responseBody,
+				}),
+			);
+			const instanceClients = {
+				clientFor: vi.fn(() => Effect.succeed(namedApi)),
+				registerStreamWirer: () => Effect.void,
+			} satisfies OpenCodeInstanceClients;
+			const engine = withDispatchEffect({
+				dispatch: vi.fn(async () => undefined),
+			});
+			engine.bindSession(sessionId, "work-oc");
+			const layer = Layer.provideMerge(
+				SessionManagerServiceLive,
+				Layer.mergeAll(
+					Layer.succeed(OpenCodeAPITag, api),
+					Layer.succeed(LoggerTag, makeMockLogger()),
+					Layer.succeed(ConfigTag, makeRelayConfig(tmpDir)),
+					makeSessionManagerStateLive(),
+					DaemonEventBusLive,
+					makePersistenceEffectLayer(dbFile),
+					Layer.succeed(OpenCodeInstanceClientsTag, instanceClients),
+					Layer.succeed(OrchestrationEngineTag, engine),
+				),
+			);
+
+			return Effect.gen(function* () {
+				yield* Effect.tryPromise(() =>
+					saveDaemonConfig(makeNamedOpenCodeDaemonConfig(), tmpDir),
+				);
+				const service = yield* SessionManagerServiceTag;
+				const deleteExit = yield* Effect.exit(service.deleteSession(sessionId));
+				const eventStore = yield* EventStoreEffectTag;
+				const events = yield* eventStore.readAllBySession(sessionId);
+				const receipt = events.find(
+					(event) => event.type === "session.provider_cleanup_failed",
+				);
+
+				expect(Exit.isSuccess(deleteExit)).toBe(true);
+				expect(receipt?.data.reason).toBe(
+					"provider_delete: cleanup error detail unavailable",
+				);
+				expect(events.map((event) => event.type)).toEqual([
+					"session.deleted",
+					"session.provider_cleanup_failed",
+				]);
+			}).pipe(
+				Effect.provide(Layer.fresh(layer)),
+				Effect.ensuring(
+					Effect.sync(() => rmSync(tmpDir, { recursive: true, force: true })),
+				),
+			);
+		},
+	);
+
+	it.scoped("bounds the durable provider cleanup failure reason", () => {
+		const tmpDir = mkdtempSync(
+			join(tmpdir(), "conduit-session-delete-bounded-reason-"),
+		);
+		const dbFile = join(tmpDir, "events.sqlite");
+		const sessionId = "deleted-session";
+		seedProjectedSessionBinding(dbFile, sessionId, "work-oc");
+		const api = makeMockOpenCodeAPI();
+		const namedApi = makeMockOpenCodeAPI();
+		vi.spyOn(namedApi.session, "delete").mockRejectedValue(
+			new OpenCodeApiError({
+				message: "oversized provider rejection",
+				endpoint: `/session/${sessionId}`,
+				responseStatus: 500,
+				responseBody: { detail: "x".repeat(100_000) },
+			}),
+		);
+		const instanceClients = {
+			clientFor: vi.fn(() => Effect.succeed(namedApi)),
+			registerStreamWirer: () => Effect.void,
+		} satisfies OpenCodeInstanceClients;
+		const engine = withDispatchEffect({
+			dispatch: vi.fn(async () => undefined),
+		});
+		engine.bindSession(sessionId, "work-oc");
+		const layer = Layer.provideMerge(
+			SessionManagerServiceLive,
+			Layer.mergeAll(
+				Layer.succeed(OpenCodeAPITag, api),
+				Layer.succeed(LoggerTag, makeMockLogger()),
+				Layer.succeed(ConfigTag, makeRelayConfig(tmpDir)),
+				makeSessionManagerStateLive(),
+				DaemonEventBusLive,
+				makePersistenceEffectLayer(dbFile),
+				Layer.succeed(OpenCodeInstanceClientsTag, instanceClients),
+				Layer.succeed(OrchestrationEngineTag, engine),
+			),
+		);
+
+		return Effect.gen(function* () {
+			yield* Effect.tryPromise(() =>
+				saveDaemonConfig(makeNamedOpenCodeDaemonConfig(), tmpDir),
+			);
+			const service = yield* SessionManagerServiceTag;
+			yield* service.deleteSession(sessionId);
+			const eventStore = yield* EventStoreEffectTag;
+			const events = yield* eventStore.readAllBySession(sessionId);
+			const receipt = events.find(
+				(event) => event.type === "session.provider_cleanup_failed",
+			);
+
+			expect(receipt?.data.reason.length).toBeLessThanOrEqual(4_000);
+			expect(receipt?.data.reason).toContain("... [truncated]");
+		}).pipe(
+			Effect.provide(Layer.fresh(layer)),
+			Effect.ensuring(
+				Effect.sync(() => rmSync(tmpDir, { recursive: true, force: true })),
+			),
+		);
+	});
+
+	it.scoped(
+		"dispatches Claude end_session after the tombstone is projected",
+		() => {
+			const tmpDir = mkdtempSync(
+				join(tmpdir(), "conduit-session-delete-claude-order-"),
+			);
+			const dbFile = join(tmpDir, "events.sqlite");
+			const sessionId = "deleted-session";
+			seedProjectedSessionBinding(dbFile, sessionId, "claude");
+			const api = makeMockOpenCodeAPI();
+			vi.spyOn(api.session, "delete").mockResolvedValue(undefined);
+			const dispatchObservations: Array<{
+				readonly sessionPresent: boolean;
+				readonly bindingPresent: boolean;
+				readonly tombstonePresent: boolean;
+			}> = [];
+			const dispatch = vi.fn(async () => {
+				dispatchObservations.push(readTombstoneFirstState(dbFile, sessionId));
+			});
+			const engine = withDispatchEffect({ dispatch });
+			engine.bindSession(sessionId, "claude");
+			const layer = Layer.provideMerge(
+				SessionManagerServiceLive,
+				Layer.mergeAll(
+					Layer.succeed(OpenCodeAPITag, api),
+					Layer.succeed(LoggerTag, makeMockLogger()),
+					makeSessionManagerStateLive(),
+					DaemonEventBusLive,
+					makePersistenceEffectLayer(dbFile),
+					Layer.succeed(OrchestrationEngineTag, engine),
+				),
+			);
+
+			return Effect.gen(function* () {
+				const service = yield* SessionManagerServiceTag;
+				yield* service.deleteSession(sessionId);
+				const eventStore = yield* EventStoreEffectTag;
+				const events = yield* eventStore.readAllBySession(sessionId);
+
+				expect(dispatchObservations).toEqual([
+					{
+						sessionPresent: false,
+						bindingPresent: false,
+						tombstonePresent: true,
+					},
+				]);
+				expect(dispatch).toHaveBeenCalledWith({
+					type: "end_session",
+					commandId: expect.any(String),
+					sessionId,
+					targetProviderId: "claude",
+					unbind: true,
+				});
+				expect(api.session.delete).not.toHaveBeenCalled();
+				expect(events.map((event) => event.type)).toEqual(["session.deleted"]);
+			}).pipe(
+				Effect.provide(Layer.fresh(layer)),
+				Effect.ensuring(
+					Effect.sync(() => rmSync(tmpDir, { recursive: true, force: true })),
+				),
+			);
+		},
+	);
+
+	it.scoped(
+		"captures a durable-only provider binding before tombstone projection and targets it for cleanup",
+		() => {
+			const tmpDir = mkdtempSync(
+				join(tmpdir(), "conduit-session-delete-durable-binding-"),
+			);
+			const dbFile = join(tmpDir, "events.sqlite");
+			const sessionId = "deleted-session";
+			const db = SqliteClient.open(dbFile);
+			runMigrations(db, schemaMigrations);
+			const now = 1_735_689_600_000;
+			db.execute(
+				"INSERT INTO sessions (id, provider, title, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
+				[sessionId, "work-oc", "Persisted session", "idle", now, now],
+			);
+			db.execute(
+				"INSERT INTO session_providers (id, session_id, provider, status, activated_at) VALUES (?, ?, ?, 'active', ?)",
+				[`${sessionId}:initial`, sessionId, "work-oc", now],
+			);
+			const bindingReadModel = new SqliteProviderSessionBindingReadModel(db);
+			const cleanupObservations: Array<{
+				readonly sessionPresent: boolean;
+				readonly bindingPresent: boolean;
+			}> = [];
+			const providerInstance: ProviderInstance = {
+				providerId: "opencode",
+				discoverEffect: () =>
+					Effect.succeed({
+						models: [],
+						supportsTools: false,
+						supportsThinking: false,
+						supportsPermissions: false,
+						supportsQuestions: false,
+						supportsAttachments: false,
+						supportsFork: false,
+						supportsRevert: false,
+						commands: [],
+					}),
+				sendTurnEffect: () =>
+					Effect.succeed({
+						status: "completed",
+						cost: 0,
+						tokens: { input: 0, output: 0 },
+						durationMs: 0,
+						providerStateUpdates: [],
+					}),
+				interruptTurnEffect: () => Effect.void,
+				resolvePermissionEffect: () => Effect.void,
+				resolveQuestionEffect: () => Effect.void,
+				shutdownEffect: () => Effect.void,
+				endSessionEffect: vi.fn(() =>
+					Effect.sync(() => {
+						cleanupObservations.push(
+							readProjectedDeleteState(dbFile, sessionId),
+						);
+					}),
+				),
+			};
+			const registry = new ProviderRegistry([providerInstance]);
+			const daemonConfig = makeNamedOpenCodeDaemonConfig();
+			const engine = new OrchestrationEngine({
+				registry,
+				sessionBindingReadModel: bindingReadModel,
+				resolveProviderDriver: (providerId) =>
+					resolveInstanceDriver(daemonConfig, providerId),
+			});
+			const api = makeMockOpenCodeAPI();
+			vi.spyOn(api.session, "delete").mockResolvedValue(undefined);
+			const namedApi = makeMockOpenCodeAPI();
+			vi.spyOn(namedApi.session, "delete").mockResolvedValue(undefined);
+			const clientFor = vi.fn(() => Effect.succeed(namedApi));
+			const instanceClients = {
+				clientFor,
+				registerStreamWirer: () => Effect.void,
+			} satisfies OpenCodeInstanceClients;
+			const layer = Layer.provideMerge(
+				SessionManagerServiceLive,
+				Layer.mergeAll(
+					Layer.succeed(OpenCodeAPITag, api),
+					Layer.succeed(LoggerTag, makeMockLogger()),
+					Layer.succeed(ConfigTag, makeRelayConfig(tmpDir)),
+					makeSessionManagerStateLive(),
+					DaemonEventBusLive,
+					makePersistenceEffectLayer(dbFile),
+					Layer.succeed(OpenCodeInstanceClientsTag, instanceClients),
+					Layer.succeed(OrchestrationEngineTag, engine),
+				),
+			);
+
+			return Effect.gen(function* () {
+				yield* Effect.tryPromise(() => saveDaemonConfig(daemonConfig, tmpDir));
+				expect(engine.getProviderForSession(sessionId)).toBe("work-oc");
+				const service = yield* SessionManagerServiceTag;
+				yield* service.deleteSession(sessionId);
+				const eventStore = yield* EventStoreEffectTag;
+				const events = yield* eventStore.readAllBySession(sessionId);
+
+				expect(providerInstance.endSessionEffect).toHaveBeenCalledOnce();
+				expect(cleanupObservations).toEqual([
+					{ sessionPresent: false, bindingPresent: false },
+				]);
+				expect(engine.getProviderForSession(sessionId)).toBeUndefined();
+				expect(clientFor).toHaveBeenCalledWith("work-oc");
+				expect(namedApi.session.delete).toHaveBeenCalledWith(sessionId);
+				expect(events.map((event) => event.type)).toEqual(["session.deleted"]);
+			}).pipe(
+				Effect.provide(Layer.fresh(layer)),
+				Effect.ensuring(
+					Effect.sync(() => {
+						db.close();
+						rmSync(tmpDir, { recursive: true, force: true });
+					}),
+				),
+			);
+		},
+	);
+
+	it.scoped(
+		"records a cleanup failure receipt when provider cleanup exceeds its timeout",
+		() => {
+			const tmpDir = mkdtempSync(
+				join(tmpdir(), "conduit-session-delete-timeout-"),
+			);
+			const dbFile = join(tmpDir, "events.sqlite");
+			const sessionId = "deleted-session";
+			seedProjectedSessionBinding(dbFile, sessionId, "work-oc");
+
+			return Effect.gen(function* () {
+				const cleanupStarted = yield* Deferred.make<void>();
+				const neverSettles = Deferred.succeed(cleanupStarted, undefined).pipe(
+					Effect.zipRight(Effect.never),
+				);
+				const dispatchEffect = vi.fn(() => neverSettles);
+				const engine = withDispatchEffect({ dispatchEffect });
+				engine.bindSession(sessionId, "work-oc");
+				const bindSession = vi.spyOn(engine, "bindSession");
+				const api = makeMockOpenCodeAPI();
+				const clientFor = vi.fn(() => neverSettles);
+				const instanceClients = {
+					clientFor,
+					registerStreamWirer: () => Effect.void,
+				} satisfies OpenCodeInstanceClients;
+				const layer = Layer.provideMerge(
+					SessionManagerServiceLive,
+					Layer.mergeAll(
+						Layer.succeed(OpenCodeAPITag, api),
+						Layer.succeed(LoggerTag, makeMockLogger()),
+						Layer.succeed(ConfigTag, makeRelayConfig(tmpDir)),
+						makeSessionManagerStateLive(),
+						DaemonEventBusLive,
+						makePersistenceEffectLayer(dbFile),
+						Layer.succeed(OpenCodeInstanceClientsTag, instanceClients),
+						Layer.succeed(OrchestrationEngineTag, engine),
+					),
+				);
+
+				yield* Effect.gen(function* () {
+					yield* Effect.tryPromise(() =>
+						saveDaemonConfig(makeNamedOpenCodeDaemonConfig(), tmpDir),
+					);
+					const service = yield* SessionManagerServiceTag;
+					const fiber = yield* Effect.fork(service.deleteSession(sessionId));
+					yield* Deferred.await(cleanupStarted);
+					engine.bindSession(sessionId, "claude");
+					yield* TestClock.adjust("1999 millis");
+					expect(Option.isNone(yield* Fiber.poll(fiber))).toBe(true);
+					yield* TestClock.adjust("1 millis");
+					const completed = yield* Fiber.poll(fiber);
+					if (Option.isNone(completed)) {
+						yield* Fiber.interrupt(fiber);
+					}
+					expect(Option.isSome(completed)).toBe(true);
+					if (Option.isSome(completed)) {
+						expect(Exit.isSuccess(completed.value)).toBe(true);
+					}
+
+					const eventStore = yield* EventStoreEffectTag;
+					const events = yield* eventStore.readAllBySession(sessionId);
+					const receipt = events.find(
+						(event) => event.type === "session.provider_cleanup_failed",
+					);
+					expect(
+						readProjectedDeleteState(dbFile, sessionId).sessionPresent,
+					).toBe(false);
+					expect(events.some((event) => event.type === "session.deleted")).toBe(
+						true,
+					);
+					expect(receipt?.data.reason).toBe("cleanup: timed out after 2s");
+					expect(engine.getProviderForSession(sessionId)).toBe("claude");
+					expect(bindSession).toHaveBeenCalledOnce();
+					expect(bindSession).toHaveBeenCalledWith(sessionId, "claude");
+				}).pipe(Effect.provide(Layer.fresh(layer)));
+			}).pipe(
+				Effect.ensuring(
+					Effect.sync(() => rmSync(tmpDir, { recursive: true, force: true })),
+				),
+			);
 		},
 	);
 

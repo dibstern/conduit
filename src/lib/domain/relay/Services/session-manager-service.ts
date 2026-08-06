@@ -10,9 +10,11 @@ import { OpenCodeAPITag } from "../../provider/Services/opencode-api-service.js"
 // SessionManagerServiceTag bundles them for callers that prefer a service object.
 
 import {
+	Cause,
 	Context,
 	Data,
 	Effect,
+	Exit,
 	HashMap,
 	Layer,
 	Option,
@@ -35,7 +37,7 @@ import {
 	loadForkMetadata,
 	saveForkMetadata,
 } from "../../../daemon/fork-metadata.js";
-import { OpenCodeApiError } from "../../../errors.js";
+import { formatErrorDetail, OpenCodeApiError } from "../../../errors.js";
 import type {
 	SessionDetail,
 	SessionStatus,
@@ -83,6 +85,39 @@ const DEFAULT_HISTORY_PAGE_SIZE = 50;
 const CURSOR_SCAN_LIMIT = 10_000;
 const CLAUDE_PROVIDER_ID = "claude";
 const CLAUDE_SDK_PROVIDER_ID = "claude-sdk";
+// The delete handler's broadcasts wait for this Effect, so provider cleanup
+// must not delay the already-committed local deletion indefinitely.
+const PROVIDER_CLEANUP_TIMEOUT = "2 seconds";
+// Provider response bodies are untrusted; bound both durable receipts and the
+// matching warning so one cleanup failure cannot create oversized diagnostics.
+const PROVIDER_CLEANUP_DETAIL_MAX_LENGTH = 2_000;
+const PROVIDER_CLEANUP_REASON_MAX_LENGTH = 4_000;
+const PROVIDER_CLEANUP_TRUNCATION_MARKER = "... [truncated]";
+const PROVIDER_CLEANUP_DETAIL_FALLBACK = "cleanup error detail unavailable";
+
+function truncateProviderCleanupDiagnostic(
+	detail: string,
+	maximumLength: number,
+): string {
+	if (detail.length <= maximumLength) {
+		return detail;
+	}
+	return `${detail.slice(
+		0,
+		maximumLength - PROVIDER_CLEANUP_TRUNCATION_MARKER.length,
+	)}${PROVIDER_CLEANUP_TRUNCATION_MARKER}`;
+}
+
+function renderProviderCleanupDetail(error: unknown): string {
+	try {
+		return truncateProviderCleanupDiagnostic(
+			formatErrorDetail(error),
+			PROVIDER_CLEANUP_DETAIL_MAX_LENGTH,
+		);
+	} catch {
+		return PROVIDER_CLEANUP_DETAIL_FALLBACK;
+	}
+}
 
 // ─── Error types ───────────────────────────────────────────────────────────
 
@@ -529,6 +564,7 @@ const appendSessionDeletedTombstone = (sessionId: string) =>
 				{ provider: row?.provider ?? "opencode" },
 			),
 		);
+		return row;
 	}).pipe(
 		Effect.mapError(
 			(cause) =>
@@ -546,105 +582,23 @@ export const deleteSession = (sessionId: string) =>
 	Effect.gen(function* () {
 		const api = yield* OpenCodeAPITag;
 		const stateRef = yield* SessionManagerStateTag;
-		const readQueryOption = yield* Effect.serviceOption(ReadQueryEffectTag);
+		const logOption = yield* Effect.serviceOption(LoggerTag);
+		const engineOption = yield* Effect.serviceOption(OrchestrationEngineTag);
+		const instanceClientsOption = yield* Effect.serviceOption(
+			OpenCodeInstanceClientsTag,
+		);
+		const eventStoreOption = yield* Effect.serviceOption(EventStoreEffectTag);
 		const configOption = yield* Effect.serviceOption(ConfigTag);
-		const row =
-			readQueryOption._tag === "Some"
-				? yield* readQueryOption.value.getSession(sessionId).pipe(
-						Effect.mapError(
-							(cause) =>
-								new SessionManagerError({
-									operation: "deleteSession.getSession",
-									cause,
-								}),
+		const bindingExit =
+			engineOption._tag === "Some"
+				? yield* Effect.exit(
+						Effect.sync(() =>
+							engineOption.value.getProviderForSession(sessionId),
 						),
 					)
 				: undefined;
 
-		if (
-			row &&
-			isClaudeSessionRow(
-				row,
-				configOption._tag === "Some" ? configOption.value.configDir : undefined,
-			)
-		) {
-			const engineOption = yield* Effect.serviceOption(OrchestrationEngineTag);
-			if (engineOption._tag === "None") {
-				return yield* Effect.fail(
-					new SessionManagerError({
-						operation: "deleteSession",
-						cause: new Error(
-							"Orchestration engine is required to delete a Claude session",
-						),
-					}),
-				);
-			}
-			yield* engineOption.value
-				.dispatchEffect({
-					type: "end_session",
-					commandId: randomUUID(),
-					sessionId,
-					unbind: true,
-				})
-				.pipe(
-					Effect.mapError(
-						(cause) =>
-							new SessionManagerError({
-								operation: "deleteSession",
-								cause,
-							}),
-					),
-				);
-		} else {
-			let deleteApi = api;
-			if (row && row.provider !== "opencode") {
-				const instanceClientsOption = yield* Effect.serviceOption(
-					OpenCodeInstanceClientsTag,
-				);
-				if (instanceClientsOption._tag === "None") {
-					return yield* Effect.fail(
-						new SessionManagerError({
-							operation: "deleteSession.resolveInstanceClient",
-							cause: new Error(
-								`OpenCode instance client is required for "${row.provider}"`,
-							),
-						}),
-					);
-				}
-				const instanceApi = yield* instanceClientsOption.value
-					.clientFor(row.provider)
-					.pipe(
-						Effect.mapError(
-							(cause) =>
-								new SessionManagerError({
-									operation: "deleteSession.resolveInstanceClient",
-									cause,
-								}),
-						),
-					);
-				if (!instanceApi) {
-					return yield* Effect.fail(
-						new SessionManagerError({
-							operation: "deleteSession.resolveInstanceClient",
-							cause: new Error(
-								`OpenCode instance client "${row.provider}" was not resolved`,
-							),
-						}),
-					);
-				}
-				deleteApi = instanceApi;
-			}
-
-			// No retry: delete is not idempotent — retrying a 404 would fail unnecessarily.
-			yield* Effect.tryPromise(() => deleteApi.session.delete(sessionId)).pipe(
-				Effect.mapError(
-					(cause) =>
-						new SessionManagerError({ operation: "deleteSession", cause }),
-				),
-			);
-		}
-
-		yield* appendSessionDeletedTombstone(sessionId);
+		const row = yield* appendSessionDeletedTombstone(sessionId);
 
 		yield* Ref.update(stateRef, (s) => {
 			let cachedParentMap = HashMap.remove(s.cachedParentMap, sessionId);
@@ -673,6 +627,210 @@ export const deleteSession = (sessionId: string) =>
 		});
 		const state = yield* Ref.get(stateRef);
 		yield* updateRelaySessionCountSnapshot(state.lastKnownSessionCount);
+
+		const cleanupFailures: string[] = [];
+		const capturedBinding =
+			bindingExit !== undefined && Exit.isSuccess(bindingExit)
+				? bindingExit.value
+				: undefined;
+		if (bindingExit !== undefined && Exit.isFailure(bindingExit)) {
+			cleanupFailures.push(
+				`binding_resolution: ${renderProviderCleanupDetail(
+					Cause.squash(bindingExit.cause),
+				)}`,
+			);
+		}
+
+		const capturedIdentity = capturedBinding ?? row?.provider;
+		const capturedInstanceId =
+			capturedIdentity === CLAUDE_SDK_PROVIDER_ID
+				? CLAUDE_PROVIDER_ID
+				: capturedIdentity;
+		const providerResolutionExit =
+			capturedInstanceId === undefined
+				? undefined
+				: yield* Effect.exit(
+						Effect.sync(() => {
+							if (isKnownDriverKind(capturedInstanceId)) {
+								return capturedInstanceId;
+							}
+							return resolveProviderRoutingDriver(
+								configOption._tag === "Some"
+									? loadDaemonConfig(configOption.value.configDir)
+									: null,
+								capturedInstanceId,
+							);
+						}),
+					);
+		const provider =
+			providerResolutionExit !== undefined &&
+			Exit.isSuccess(providerResolutionExit)
+				? providerResolutionExit.value
+				: undefined;
+		if (
+			providerResolutionExit !== undefined &&
+			Exit.isFailure(providerResolutionExit)
+		) {
+			cleanupFailures.push(
+				`provider_resolution: ${renderProviderCleanupDetail(
+					Cause.squash(providerResolutionExit.cause),
+				)}`,
+			);
+		} else if (capturedInstanceId !== undefined && provider === undefined) {
+			cleanupFailures.push(
+				`provider_resolution: provider driver is unavailable for "${capturedInstanceId}"`,
+			);
+		}
+		if (capturedInstanceId === undefined || provider === undefined) {
+			cleanupFailures.push(
+				"provider_route: no provider route could be determined, so cleanup was skipped",
+			);
+		}
+
+		const providerCleanup = Effect.gen(function* () {
+			if (capturedInstanceId === undefined || provider === undefined) {
+				return;
+			}
+
+			if (engineOption._tag === "None") {
+				cleanupFailures.push(
+					"end_session: orchestration engine is unavailable",
+				);
+			} else {
+				const engine = engineOption.value;
+				const endSessionExit = yield* Effect.exit(
+					Effect.suspend(() =>
+						engine.dispatchEffect({
+							type: "end_session",
+							commandId: randomUUID(),
+							sessionId,
+							targetProviderId: capturedInstanceId,
+							unbind: true,
+						}),
+					),
+				);
+				if (Exit.isFailure(endSessionExit)) {
+					if (Exit.isInterrupted(endSessionExit)) {
+						return yield* Effect.failCause(endSessionExit.cause);
+					}
+					cleanupFailures.push(
+						`end_session: ${renderProviderCleanupDetail(
+							Cause.squash(endSessionExit.cause),
+						)}`,
+					);
+				}
+			}
+
+			if (provider === "opencode") {
+				const providerDeleteExit = yield* Effect.exit(
+					Effect.gen(function* () {
+						let deleteApi = api;
+						if (capturedInstanceId !== "opencode") {
+							if (instanceClientsOption._tag === "None") {
+								return yield* Effect.fail(
+									new Error(
+										`OpenCode instance client registry is unavailable for "${capturedInstanceId}"`,
+									),
+								);
+							}
+							const resolved =
+								yield* instanceClientsOption.value.clientFor(
+									capturedInstanceId,
+								);
+							if (resolved === undefined) {
+								return yield* Effect.fail(
+									new Error(
+										`OpenCode instance client "${capturedInstanceId}" was not resolved`,
+									),
+								);
+							}
+							deleteApi = resolved;
+						}
+
+						yield* Effect.tryPromise({
+							try: () => deleteApi.session.delete(sessionId),
+							catch: (cause) => cause,
+						});
+					}),
+				);
+				if (Exit.isFailure(providerDeleteExit)) {
+					if (Exit.isInterrupted(providerDeleteExit)) {
+						return yield* Effect.failCause(providerDeleteExit.cause);
+					}
+					cleanupFailures.push(
+						`provider_delete: ${renderProviderCleanupDetail(
+							Cause.squash(providerDeleteExit.cause),
+						)}`,
+					);
+				}
+			}
+		});
+
+		const cleanupExit = yield* Effect.exit(
+			providerCleanup.pipe(Effect.timeout(PROVIDER_CLEANUP_TIMEOUT)),
+		);
+		if (Exit.isFailure(cleanupExit)) {
+			const failure = Cause.failureOption(cleanupExit.cause);
+			cleanupFailures.push(
+				Option.isSome(failure) && Cause.isTimeoutException(failure.value)
+					? "cleanup: timed out after 2s"
+					: `cleanup: ${renderProviderCleanupDetail(
+							Cause.squash(cleanupExit.cause),
+						)}`,
+			);
+		}
+
+		if (cleanupFailures.length > 0) {
+			const reason = truncateProviderCleanupDiagnostic(
+				cleanupFailures.join("; "),
+				PROVIDER_CLEANUP_REASON_MAX_LENGTH,
+			);
+			const payload = {
+				sessionId,
+				provider: provider ?? capturedInstanceId ?? "unknown",
+				...(provider !== undefined &&
+				capturedInstanceId !== undefined &&
+				capturedInstanceId !== provider
+					? { instanceId: capturedInstanceId }
+					: {}),
+				reason,
+			};
+			const receiptExit =
+				eventStoreOption._tag === "Some"
+					? yield* Effect.exit(
+							eventStoreOption.value
+								.append(
+									canonicalEvent(
+										"session.provider_cleanup_failed",
+										sessionId,
+										payload,
+										{ provider: payload.provider },
+									),
+								)
+								.pipe(Effect.asVoid),
+						)
+					: undefined;
+			const receiptFailure =
+				receiptExit !== undefined && Exit.isFailure(receiptExit)
+					? ` receipt_append_failed=${renderProviderCleanupDetail(
+							Cause.squash(receiptExit.cause),
+						)}`
+					: eventStoreOption._tag === "None"
+						? " receipt_append_failed=event store unavailable"
+						: "";
+
+			if (logOption._tag === "Some") {
+				yield* Effect.exit(
+					Effect.sync(() =>
+						logOption.value.warn(
+							`Provider cleanup failed: session=${sessionId} provider=${payload.provider}` +
+								`${payload.instanceId ? ` instanceId=${payload.instanceId}` : ""}` +
+								` reason=${reason}${receiptFailure}`,
+						),
+					),
+				);
+			}
+		}
 	}).pipe(
 		Effect.annotateLogs("sessionId", sessionId),
 		Effect.withSpan("session.deleteSession", { attributes: { sessionId } }),
@@ -1766,6 +1924,7 @@ export const SessionManagerServiceLive: Layer.Layer<
 					const base = deleteSession(sessionId).pipe(
 						Effect.provideService(OpenCodeAPITag, api),
 						Effect.provideService(SessionManagerStateTag, stateRef),
+						Effect.provideService(LoggerTag, log),
 					);
 					const withReadQuery =
 						readQueryEffectOption._tag === "Some"
@@ -1776,12 +1935,21 @@ export const SessionManagerServiceLive: Layer.Layer<
 									),
 								)
 							: base;
-					const withConfig =
-						configOption._tag === "Some"
+					const withEventStore =
+						eventStoreEffectOption._tag === "Some"
 							? withReadQuery.pipe(
-									Effect.provideService(ConfigTag, configOption.value),
+									Effect.provideService(
+										EventStoreEffectTag,
+										eventStoreEffectOption.value,
+									),
 								)
 							: withReadQuery;
+					const withConfig =
+						configOption._tag === "Some"
+							? withEventStore.pipe(
+									Effect.provideService(ConfigTag, configOption.value),
+								)
+							: withEventStore;
 					const withEngine =
 						engineOption._tag === "Some"
 							? withConfig.pipe(

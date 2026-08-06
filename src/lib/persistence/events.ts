@@ -67,6 +67,7 @@ export const CANONICAL_EVENT_TYPES = [
 	"session.compaction",
 	"session.provider_changed",
 	"session.deleted",
+	"session.provider_cleanup_failed",
 	"session.permission_mode_changed",
 	"permission.asked",
 	"permission.resolved",
@@ -259,6 +260,13 @@ export interface SessionDeletedPayload {
 	readonly childSessionIds?: readonly string[];
 }
 
+export interface SessionProviderCleanupFailedPayload {
+	readonly sessionId: string;
+	readonly provider: string;
+	readonly instanceId?: string;
+	readonly reason: string;
+}
+
 export interface SessionPermissionModeChangedPayload {
 	readonly sessionId: string;
 	readonly mode: SessionPermissionModeValue;
@@ -316,6 +324,7 @@ export interface EventPayloadMap {
 	"session.compaction": SessionCompactionPayload;
 	"session.provider_changed": SessionProviderChangedPayload;
 	"session.deleted": SessionDeletedPayload;
+	"session.provider_cleanup_failed": SessionProviderCleanupFailedPayload;
 	"session.permission_mode_changed": SessionPermissionModeChangedPayload;
 	"permission.asked": PermissionAskedPayload;
 	"permission.resolved": PermissionResolvedPayload;
@@ -656,6 +665,13 @@ const SessionDeletedPayloadSchema = Schema.Struct({
 	}),
 });
 
+const SessionProviderCleanupFailedPayloadSchema = Schema.Struct({
+	sessionId: Schema.String,
+	provider: Schema.String,
+	instanceId: Schema.optionalWith(Schema.String, { exact: true }),
+	reason: Schema.String,
+});
+
 const SessionPermissionModeChangedPayloadSchema = Schema.Struct({
 	sessionId: Schema.String,
 	mode: Schema.Literal(...SESSION_PERMISSION_MODES),
@@ -782,6 +798,10 @@ const SessionDeletedEventSchema = eventEnvelope(
 	"session.deleted",
 	SessionDeletedPayloadSchema,
 );
+const SessionProviderCleanupFailedEventSchema = eventEnvelope(
+	"session.provider_cleanup_failed",
+	SessionProviderCleanupFailedPayloadSchema,
+);
 const SessionPermissionModeChangedEventSchema = eventEnvelope(
 	"session.permission_mode_changed",
 	SessionPermissionModeChangedPayloadSchema,
@@ -803,7 +823,7 @@ const QuestionResolvedEventSchema = eventEnvelope(
 	QuestionResolvedPayloadSchema,
 );
 
-// ─── Canonical Event Schema (Union of all 25 event types) ──────────────────
+// ─── Canonical Event Schema (Union of all 26 event types) ──────────────────
 
 export const CanonicalEventSchema = Schema.Union(
 	MessageCreatedEventSchema,
@@ -826,6 +846,7 @@ export const CanonicalEventSchema = Schema.Union(
 	SessionCompactionEventSchema,
 	SessionProviderChangedEventSchema,
 	SessionDeletedEventSchema,
+	SessionProviderCleanupFailedEventSchema,
 	SessionPermissionModeChangedEventSchema,
 	PermissionAskedEventSchema,
 	PermissionResolvedEventSchema,
@@ -854,6 +875,7 @@ const PAYLOAD_REQUIRED_FIELDS: Record<CanonicalEventType, readonly string[]> = {
 	"session.compaction": ["sessionId", "state", "detail"],
 	"session.provider_changed": ["sessionId", "oldProvider", "newProvider"],
 	"session.deleted": ["sessionId"],
+	"session.provider_cleanup_failed": ["sessionId", "provider", "reason"],
 	"session.permission_mode_changed": ["sessionId", "mode"],
 	"message.created": ["messageId", "role", "sessionId"],
 	"text.delta": ["messageId", "partId", "text"],

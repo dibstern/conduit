@@ -362,6 +362,38 @@ describe("Canonical event schemas", () => {
 			expect(Either.isRight(result)).toBe(true);
 		});
 
+		it("decodes session.provider_cleanup_failed events with default and named instances", () => {
+			const defaultProvider = {
+				eventId: "evt_16c",
+				sessionId: "s1",
+				type: "session.provider_cleanup_failed",
+				data: {
+					sessionId: "s1",
+					provider: "opencode",
+					reason: "provider_delete: unavailable",
+				},
+				metadata: {},
+				provider: "opencode",
+				createdAt: Date.now(),
+			};
+			const namedInstance = {
+				...defaultProvider,
+				eventId: "evt_16d",
+				data: {
+					...defaultProvider.data,
+					instanceId: "work-oc",
+				},
+			};
+
+			expect(
+				[defaultProvider, namedInstance].map((event) =>
+					Either.isRight(
+						Schema.decodeUnknownEither(CanonicalEventSchema)(event),
+					),
+				),
+			).toEqual([true, true]);
+		});
+
 		it("decodes permission.asked event", () => {
 			const raw = {
 				eventId: "evt_17",
