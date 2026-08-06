@@ -91,7 +91,19 @@ export default defineConfig({
 		launchOptions: { args: DETERMINISTIC_RASTER_ARGS },
 	},
 	webServer: {
-		command: "pnpm exec http-server dist/storybook -p 6007 -s",
+		// `npx --no-install`, NOT `pnpm exec`. The Linux baselines are captured by
+		// running this same config inside mcr.microsoft.com/playwright:*-noble
+		// (scripts/update-visual-snapshots.sh), and that image ships node and npx
+		// but NO pnpm — verified 2026-08-06: `pnpm --version` => command not found.
+		// With `pnpm exec` here, Playwright cannot start the static server inside
+		// the container, so the run dies before capturing a single snapshot. That
+		// is the mechanism behind 366 of the 726 linux goldens never having existed
+		// (conduit-test-de3.10); the script was not merely unrun, it could not work.
+		// `npx --no-install http-server` resolves from the mounted node_modules
+		// both on the host (v14.1.1) and in the container. `--no-install` so a
+		// missing dependency fails loudly rather than being fetched from the
+		// network in the middle of a capture run.
+		command: "npx --no-install http-server dist/storybook -p 6007 -s",
 		port: 6007,
 		reuseExistingServer: !process.env["CI"],
 		cwd: process.cwd().replace(/\/test\/visual$/, ""),
