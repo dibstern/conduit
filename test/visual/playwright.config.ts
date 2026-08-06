@@ -40,6 +40,40 @@ import { defineConfig } from "@playwright/test";
  */
 const strict = process.env["VISUAL_STRICT"] === "1";
 
+/**
+ * Chromium's default compositing is not bit-reproducible, and zero-tolerance
+ * mode is the only thing sensitive enough to notice.
+ *
+ * Measured 2026-08-06 (conduit-test-de3.20). Overlays/SettingsPanel failed
+ * strict on every run, roaming between its Default / Debug / Notifications
+ * Enabled stories — which reads exactly like shared story state under parallel
+ * workers, and is not. The actual diff is ~8 pixels, each off by 1/255 in a
+ * single channel, all on the rounded corners of a panel that sits above a
+ * `backdrop-blur-sm` layer (SettingsPanel.svelte:399). It is the GPU compositing
+ * the blurred backdrop against the panel edge, not anything the app controls.
+ *
+ * Recapture-then-rerun, four runs, no flags:   4 of 4 runs FAILED (3,3,1,3).
+ * Recapture-then-rerun, ten runs, these flags: 0 of 10 runs failed.
+ *
+ * The list is deliberately not reduced further: `--disable-gpu` ALONE was
+ * measured and is NOT sufficient — it passed three consecutive runs and failed
+ * the fourth, which is precisely how a flaky fix disguises itself as a fix.
+ * Narrowing the set is only worth doing against a run count large enough to see
+ * a ~25% per-run failure rate, so the set is adopted and justified as a set.
+ *
+ * These flags shift a small number of pixels, so they invalidate baselines:
+ * two of the three SettingsPanel captures moved by 45-47 of the same ±1 corner
+ * pixels, one was byte-identical. Change them only alongside a full recapture.
+ */
+const DETERMINISTIC_RASTER_ARGS = [
+	"--disable-gpu",
+	"--disable-partial-raster",
+	"--disable-skia-runtime-opts",
+	"--disable-lcd-text",
+	"--force-color-profile=srgb",
+	"--disable-composited-antialiasing",
+];
+
 export default defineConfig({
 	testDir: ".",
 	testMatch: "**/*.spec.ts",
@@ -54,6 +88,7 @@ export default defineConfig({
 	use: {
 		baseURL: "http://localhost:6007",
 		colorScheme: "dark",
+		launchOptions: { args: DETERMINISTIC_RASTER_ARGS },
 	},
 	webServer: {
 		command: "pnpm exec http-server dist/storybook -p 6007 -s",

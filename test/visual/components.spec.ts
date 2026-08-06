@@ -46,23 +46,29 @@ const STRICT_ALL = process.env["VISUAL_STRICT_ALL"] === "1";
  * zero-diff is achievable here; these three are not, for their own reasons.
  * Each is a bug to fix (conduit-test-de3.20), not a tolerance to grant.
  */
-const STRICT_NONDETERMINISTIC: Record<string, string> = {
-	"chat-thinkingblock--active":
-		"active/animated state the suite's animation disabling does not reach",
-	"ui-menu--arrow-key-navigation":
-		"play()-driven; keyboard navigation has not settled by capture time",
-	// Re-measured 2026-08-06 with VISUAL_STRICT_ALL=1 over three consecutive
-	// probes: which SettingsPanel story fails moves between runs (probe 1 Debug
-	// + Notifications Enabled, probe 2 Default + Notifications Enabled + Debug,
-	// probe 3 none). Naming only --default, as this list first did, left the
-	// other two silently uncovered — the flake is the family's, not one story's.
-	"overlays-settingspanel--default":
-		"SettingsPanel stories share module state across parallel workers; which one fails moves between runs",
-	"overlays-settingspanel--debug":
-		"SettingsPanel stories share module state across parallel workers; which one fails moves between runs",
-	"overlays-settingspanel--notifications-enabled":
-		"SettingsPanel stories share module state across parallel workers; which one fails moves between runs",
-};
+/**
+ * Deliberately EMPTY, and that emptiness is the assertion: as of 2026-08-06
+ * every story in the suite is held to zero-diff, with none exempted.
+ *
+ * It held five entries until conduit-test-de3.20 root-caused all of them, and
+ * every one of those five reasons was wrong — which is the argument for keeping
+ * the map rather than deleting it. Two of the three diagnoses written here were
+ * guesses that read like findings:
+ *
+ * - `chat-thinkingblock--active` was blamed on an animation the freeze "does
+ *   not reach". It draws its label from `Math.random()` (see `pinRandomness`).
+ * - The three `overlays-settingspanel--*` entries were blamed on shared module
+ *   state across parallel workers. It is GPU compositing noise on the corners
+ *   of a panel above a blurred backdrop, fixed by launch flags in
+ *   playwright.config.ts — story isolation would not have touched it.
+ *
+ * So: an entry here is a confession that a story is not covered by the gate,
+ * never an explanation. Add one only with a measured failure rate, and treat
+ * the reason string as a hypothesis to disprove. `VISUAL_STRICT_ALL=1` is what
+ * makes that possible — without a re-test switch a skip list's own membership
+ * is unfalsifiable and silently outlives the bug.
+ */
+const STRICT_NONDETERMINISTIC: Record<string, string> = {};
 
 function loadStories(): StoryEntry[] {
 	const cwd = process.env["STORYBOOK_CWD"] ?? process.cwd();
@@ -74,6 +80,44 @@ function loadStories(): StoryEntry[] {
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
+
+/**
+ * Pin `Math.random` so a story cannot bake a coin flip into its baseline.
+ *
+ * Found 2026-08-06 (conduit-test-de3.20): ThinkingBlock.svelte:29 picks its
+ * label from `Math.random()` over 57 verbs, so Chat/ThinkingBlock > Active had
+ * a 1-in-57 chance per capture of matching its own baseline. The committed
+ * images prove how long that survived — the darwin baseline reads "Simulating…"
+ * and the linux one reads "Brewing…" for the same story. The default 1%
+ * tolerance is wider than a word, so nothing ever went red.
+ *
+ * This lives in the harness rather than in the component or the one story on
+ * purpose: fixing the component leaves the next entropy-drawing story to repeat
+ * it, and "never call Math.random in a story with a committed baseline" is a
+ * rule someone has to remember. Here it is a property of the capture
+ * environment instead.
+ *
+ * A counter-based sequence, NOT a constant: AssistantMessage.svelte:96,241
+ * derive mermaid element ids from Math.random, and a constant would make two
+ * diagrams in one story collide on the same DOM id.
+ *
+ * `Date.now` is deliberately NOT pinned — `play()` bodies use `waitFor`, which
+ * needs the clock to advance. Stories needing a fixed clock stub it themselves
+ * (see DebugPanel.stories.ts).
+ */
+async function pinRandomness(
+	page: import("@playwright/test").Page,
+): Promise<void> {
+	await page.addInitScript(() => {
+		let seed = 0x2f6e2b1;
+		Math.random = () => {
+			seed = (seed + 0x6d2b79f5) | 0;
+			let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
+			t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+			return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+		};
+	});
+}
 
 /** Inject CSS to freeze all animations and transitions for deterministic screenshots. */
 async function freezeAnimations(
@@ -384,6 +428,7 @@ if (stories.length > 0) {
 						return;
 					}
 
+					await pinRandomness(page);
 					await page.goto(`/iframe.html?id=${story.id}&viewMode=story`, {
 						waitUntil: "domcontentloaded",
 					});
