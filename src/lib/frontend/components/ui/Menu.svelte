@@ -40,7 +40,9 @@
 		| "class"
 		| "collisionPadding"
 		| "customAnchor"
+		| "id"
 		| "loop"
+		| "onOpenAutoFocus"
 		| "preventScroll"
 		| "side"
 		| "sideOffset"
@@ -67,8 +69,38 @@
 		[FLOATING_MENU_CONTENT_CLASSES, className].filter(Boolean).join(" "),
 	);
 
+	/**
+	 * bits-ui 2.18.1 destructures `id` out in its popper layer and never applies
+	 * it to the content element, so the rendered menu carries no id at all. Its
+	 * keydown handler gates typeahead and Home/End on
+	 * `target.closest("[data-dropdown-menu-content]")?.id === contentId`, which
+	 * can never match an empty id — typing a letter in an open menu does nothing
+	 * (conduit-test-de3.3.11). We own the element, so we own the id.
+	 */
+	const contentId = $props.id();
+	let contentNode = $state<HTMLElement | null>(null);
+
 	function handleOpenChange(nextOpen: boolean) {
 		onopenchange?.(nextOpen);
+	}
+
+	/**
+	 * bits-ui mounts the content's focus scope twice per open, so its
+	 * open-auto-focus runs twice, each time deferred to a rAF. The second one
+	 * lands after the user has already arrowed down the menu, refocuses the
+	 * content, and bits' own focus handler then resets roving focus to the first
+	 * item (conduit-test-de3.24). Taking the initial focus ourselves makes it
+	 * idempotent: focus the menu only while it is open and focus is still
+	 * outside it.
+	 */
+	function focusContentOnce(event: Event) {
+		event.preventDefault();
+		requestAnimationFrame(() => {
+			const node = contentNode;
+			if (!open || !node) return;
+			if (node.contains(node.ownerDocument.activeElement)) return;
+			node.focus();
+		});
 	}
 
 	const portalProps: DropdownMenuPortalProps = $derived(
@@ -79,6 +111,8 @@
 		"child" | "children"
 	> = $derived({
 		...rest,
+		id: contentId,
+		onOpenAutoFocus: focusContentOnce,
 		...(side === undefined ? {} : { side }),
 		align,
 		sideOffset,
@@ -104,7 +138,12 @@
 		<DropdownMenu.Content {...contentProps}>
 			{#snippet child({ props, wrapperProps })}
 				<div {...wrapperProps}>
-					<div {...props} use:exemptFromBackgroundInert>
+					<div
+						{...props}
+						id={contentId}
+						bind:this={contentNode}
+						use:exemptFromBackgroundInert
+					>
 						{@render children()}
 					</div>
 				</div>

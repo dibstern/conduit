@@ -41,14 +41,13 @@ const STRICT_ALL = process.env["VISUAL_STRICT_ALL"] === "1";
 
 /**
  * Stories that a strict recapture cannot reproduce on the very next strict run.
- * Measured 2026-08-03: recapture the whole suite under VISUAL_STRICT=1, then
- * re-run it immediately — 843 of 848 captures came back byte-identical, so
- * zero-diff is achievable here; these three are not, for their own reasons.
- * Each is a bug to fix (conduit-test-de3.20), not a tolerance to grant.
- */
-/**
+ *
  * Deliberately EMPTY, and that emptiness is the assertion: as of 2026-08-06
  * every story in the suite is held to zero-diff, with none exempted.
+ *
+ * It last held `ui-menu--arrow-key-navigation`, whose capture was a coin flip
+ * between two focus states. That entry is gone because the component defect it
+ * named is fixed (conduit-test-de3.24), not because the flake was tolerated.
  *
  * It held five entries until conduit-test-de3.20 root-caused all of them, and
  * every one of those five reasons was wrong — which is the argument for keeping
@@ -68,17 +67,7 @@ const STRICT_ALL = process.env["VISUAL_STRICT_ALL"] === "1";
  * makes that possible — without a re-test switch a skip list's own membership
  * is unfalsifiable and silently outlives the bug.
  */
-const STRICT_NONDETERMINISTIC: Record<string, string> = {
-	// Meets the bar above: a measured rate and a root cause, not a guess.
-	// Sampling document.activeElement every 20ms across 4 runs shows focus
-	// reaching "Duplicate" (the correct end state) and then REVERTING to
-	// "Archive" during Storybook's completing phase — 3 of 4 runs end reverted.
-	// The story's own play() asserts Duplicate and passes, because the revert
-	// happens after play() returns. So no baseline for this story is meaningful
-	// until the component is fixed; blessing one just pins a coin flip.
-	"ui-menu--arrow-key-navigation":
-		"Menu reverts keyboard focus to the first item after arrow-key navigation completes — a real component defect, not capture noise (conduit-test-de3.24)",
-};
+const STRICT_NONDETERMINISTIC: Record<string, string> = {};
 
 function loadStories(): StoryEntry[] {
 	const cwd = process.env["STORYBOOK_CWD"] ?? process.cwd();

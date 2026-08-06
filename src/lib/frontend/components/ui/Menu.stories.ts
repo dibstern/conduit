@@ -45,6 +45,30 @@ export const ArrowKeyNavigation: Story = {
 	},
 };
 
+export const Typeahead: Story = {
+	args: { open: false },
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		const body = within(canvasElement.ownerDocument.body);
+		const trigger = canvas.getByRole("button", { name: "Open menu" });
+
+		await userEvent.click(trigger);
+
+		await waitFor(() => {
+			expect(body.getByRole("menu", { name: "File actions" })).toHaveFocus();
+		});
+		await userEvent.keyboard("{ArrowDown}");
+		await waitFor(() => {
+			expect(body.getByRole("menuitem", { name: "Archive" })).toHaveFocus();
+		});
+
+		await userEvent.keyboard("d");
+		await waitFor(() => {
+			expect(body.getByRole("menuitem", { name: "Duplicate" })).toHaveFocus();
+		});
+	},
+};
+
 export const EscapeRestoresFocus: Story = {
 	args: { open: false },
 	play: async ({ canvasElement }) => {
