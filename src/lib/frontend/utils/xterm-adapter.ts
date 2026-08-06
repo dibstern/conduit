@@ -4,33 +4,21 @@
 import { FitAddon } from "@xterm/addon-fit";
 import { Terminal } from "@xterm/xterm";
 import "@xterm/xterm/css/xterm.css";
+import conduitTheme from "../../themes/conduit.json" with { type: "json" };
+import type { Base16Theme } from "../stores/theme-compute.js";
+import { computeTerminalTheme } from "../stores/theme-compute.js";
 import type { TerminalAdapter } from "../types.js";
 
-// ─── ANSI Theme Colors (design system) ──────────────────────────────────────
-
-export const ANSI_THEME: Record<string, string> = {
-	background: "#111111",
-	foreground: "#EEEEEE",
-	cursor: "#EEEEEE",
-	cursorAccent: "#111111",
-	selectionBackground: "rgba(92, 156, 245, 0.3)",
-	black: "#0A0A0A",
-	red: "#E06C75",
-	green: "#7FD88F",
-	yellow: "#FAB283",
-	blue: "#5C9CF5",
-	magenta: "#9D7CD8",
-	cyan: "#56B6C2",
-	white: "#EEEEEE",
-	brightBlack: "#606060",
-	brightRed: "#E06C75",
-	brightGreen: "#7FD88F",
-	brightYellow: "#FAB283",
-	brightBlue: "#5C9CF5",
-	brightMagenta: "#9D7CD8",
-	brightCyan: "#56B6C2",
-	brightWhite: "#EEEEEE",
-};
+// ─── Default Terminal Palette ───────────────────────────────────────────────
+// Derived from the bundled "conduit" theme (the app default) via
+// computeTerminalTheme — the same Base16→xterm hex mapping TerminalTab.svelte
+// uses for live theme switching. This is NOT a hand-picked palette; it is
+// only the value used before a runtime theme is resolved (initial
+// construction, or a startup race before the theme store finishes loading).
+// Every subsequent update is driven by TerminalTab.svelte's reactive effect.
+export const ANSI_THEME: Record<string, string> = computeTerminalTheme(
+	conduitTheme as Base16Theme,
+);
 
 // ─── Options ────────────────────────────────────────────────────────────────
 

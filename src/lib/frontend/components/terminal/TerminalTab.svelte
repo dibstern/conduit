@@ -172,7 +172,8 @@
 		if (currentTheme) {
 			adapter.setTheme(computeTerminalTheme(currentTheme));
 		} else {
-			// Default theme — reset terminal to built-in ANSI colors
+			// No runtime theme resolved yet — fall back to ANSI_THEME, which is
+			// itself derived from the default (conduit) theme, not hardcoded.
 			adapter.setTheme(ANSI_THEME);
 		}
 	});
