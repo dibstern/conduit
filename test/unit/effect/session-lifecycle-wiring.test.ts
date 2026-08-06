@@ -291,14 +291,15 @@ describe("SessionLifecycleWiringLive", () => {
 				yield* Effect.sleep("10 millis");
 				yield* service.deleteSession("service-deleted");
 				yield* Effect.sleep("50 millis");
-				const receipt = yield* Effect.sync(() => {
+				const events = yield* Effect.sync(() => {
 					const db = SqliteClient.open(dbFile);
 					try {
-						return db.queryOne<{
+						return db.query<{
+							readonly type: string;
 							readonly data: string;
 							readonly provider: string;
 						}>(
-							"SELECT data, provider FROM events WHERE session_id = ? AND type = 'session.provider_cleanup_failed'",
+							"SELECT type, data, provider FROM events WHERE session_id = ? ORDER BY sequence ASC",
 							["service-deleted"],
 						);
 					} finally {
@@ -318,6 +319,10 @@ describe("SessionLifecycleWiringLive", () => {
 				expect(
 					deps.monitoringState.current.sessions.has("service-deleted"),
 				).toBe(false);
+				expect(events.map((event) => event.type)).toEqual([
+					"session.provider_cleanup_failed",
+				]);
+				const receipt = events[0];
 				expect(receipt?.provider).toBe("unknown");
 				expect(receipt?.data).toContain('"sessionId":"service-deleted"');
 				expect(receipt?.data).toContain('"provider":"unknown"');

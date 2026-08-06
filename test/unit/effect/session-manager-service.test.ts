@@ -1381,6 +1381,95 @@ describe("SessionManagerService", () => {
 		},
 	);
 
+	it.scoped("coalesces concurrent deletes of the same session", () => {
+		const tmpDir = mkdtempSync(
+			join(tmpdir(), "conduit-session-delete-single-flight-"),
+		);
+		const dbFile = join(tmpDir, "events.sqlite");
+		const sessionId = "concurrently-deleted-session";
+		seedProjectedSessionBinding(dbFile, sessionId, "opencode");
+
+		return Effect.gen(function* () {
+			const cleanupStarted = yield* Deferred.make<void>();
+			const releaseCleanup = yield* Deferred.make<void>();
+			const api = makeMockOpenCodeAPI();
+			vi.spyOn(api.session, "delete").mockImplementation(() =>
+				Effect.runPromise(
+					Deferred.succeed(cleanupStarted, undefined).pipe(
+						Effect.zipRight(Deferred.await(releaseCleanup)),
+					),
+				),
+			);
+			const dispatch = vi.fn(() => Effect.void);
+			const engine = withDispatchEffect({ dispatchEffect: dispatch });
+			engine.bindSession(sessionId, "opencode");
+			dispatch.mockImplementation(() =>
+				Effect.sync(() => engine.unbindSession(sessionId)),
+			);
+			const layer = Layer.provideMerge(
+				SessionManagerServiceLive,
+				Layer.mergeAll(
+					Layer.succeed(OpenCodeAPITag, api),
+					Layer.succeed(LoggerTag, makeMockLogger()),
+					makeSessionManagerStateLive(),
+					DaemonEventBusLive,
+					RelayStatusSnapshotLive,
+					makePersistenceEffectLayer(dbFile),
+					Layer.succeed(OrchestrationEngineTag, engine),
+				),
+			);
+
+			yield* Effect.gen(function* () {
+				const service = yield* SessionManagerServiceTag;
+				const stateRef = yield* SessionManagerStateTag;
+				const relayStatus = yield* RelayStatusSnapshotTag;
+				const daemonEvents = yield* subscribeToDaemonEvents;
+				yield* Ref.update(stateRef, (state) => ({
+					...state,
+					lastKnownSessionCount: 2,
+				}));
+
+				const winner = yield* Effect.fork(service.deleteSession(sessionId));
+				yield* Deferred.await(cleanupStarted);
+				const follower = yield* Effect.fork(service.deleteSession(sessionId));
+				yield* Effect.yieldNow();
+				yield* Deferred.succeed(releaseCleanup, undefined);
+
+				const outcomes = [
+					yield* Fiber.join(winner),
+					yield* Fiber.join(follower),
+				];
+				const eventStore = yield* EventStoreEffectTag;
+				const persistedEvents = yield* eventStore.readAllBySession(sessionId);
+				const state = yield* Ref.get(stateRef);
+				const publishedEvents = yield* Queue.takeAll(daemonEvents);
+
+				expect(outcomes).toEqual([true, false]);
+				expect(
+					persistedEvents.filter((event) => event.type === "session.deleted"),
+				).toHaveLength(1);
+				expect(
+					persistedEvents.filter(
+						(event) => event.type === "session.provider_cleanup_failed",
+					),
+				).toHaveLength(0);
+				expect(dispatch).toHaveBeenCalledOnce();
+				expect(api.session.delete).toHaveBeenCalledOnce();
+				expect(state.lastKnownSessionCount).toBe(1);
+				expect(relayStatus.getSnapshot().sessionCount).toBe(1);
+				expect(
+					Array.from(publishedEvents).filter(
+						(event) => event._tag === "SessionDeleted",
+					),
+				).toHaveLength(1);
+			}).pipe(Effect.provide(Layer.fresh(layer)));
+		}).pipe(
+			Effect.ensuring(
+				Effect.sync(() => rmSync(tmpDir, { recursive: true, force: true })),
+			),
+		);
+	});
+
 	it.scoped(
 		"persists a queryable named-instance cleanup failure receipt with log-safe detail",
 		() => {

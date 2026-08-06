@@ -122,7 +122,7 @@ describe("session handler wire snapshots", () => {
 			getClientsForSession: vi.fn(() => []),
 		});
 		const sessionManagerService = makeMockSessionManagerService({
-			deleteSession: vi.fn(() => Effect.void),
+			deleteSession: vi.fn(() => Effect.succeed(true)),
 			sendDualSessionLists: vi.fn((send) =>
 				Effect.sync(() => {
 					send({

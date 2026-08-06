@@ -2982,6 +2982,53 @@ describe("handleNewSession", () => {
 
 describe("handleDeleteSession", () => {
 	it.effect(
+		"does not repeat client-side deletion effects for a coalesced caller",
+		() => {
+			const ws = mockWsHandler({
+				getClientsForSession: vi.fn(() => ["viewer-1"]),
+			});
+			const log = mockLogger();
+			const deleteSession = vi.fn(() => Effect.succeed(false));
+			const listSessions = vi.fn(() =>
+				Effect.succeed([
+					{
+						id: "remaining-session",
+						title: "Remaining Session",
+						updatedAt: 200,
+						messageCount: 0,
+					},
+				]),
+			);
+			const sendDualSessionLists = vi.fn(() => Effect.void);
+			const sessionManagerService = makeMockSessionManagerService({
+				deleteSession,
+				listSessions,
+				sendDualSessionLists,
+			});
+			const layer = makeSessionLifecycleLayer({
+				ws,
+				sessionManagerService,
+				log,
+			});
+
+			return handleDeleteSession("client-1", {
+				sessionId: "deleted-session",
+			}).pipe(
+				Effect.provide(layer),
+				Effect.tap(() => {
+					expect(deleteSession).toHaveBeenCalledWith("deleted-session");
+					expect(listSessions).not.toHaveBeenCalled();
+					expect(ws.setClientSession).not.toHaveBeenCalled();
+					expect(ws.sendTo).not.toHaveBeenCalled();
+					expect(ws.broadcast).not.toHaveBeenCalled();
+					expect(sendDualSessionLists).not.toHaveBeenCalled();
+					expect(log.info).not.toHaveBeenCalled();
+				}),
+			);
+		},
+	);
+
+	it.effect(
 		"deletes and broadcasts lists through SessionManagerService",
 		() => {
 			const ws = mockWsHandler({
@@ -2998,7 +3045,7 @@ describe("handleDeleteSession", () => {
 			const legacyDeleteSession = vi.fn(async () => {
 				throw new Error("legacy deleteSession should not be used");
 			});
-			const serviceDeleteSession = vi.fn(() => Effect.void);
+			const serviceDeleteSession = vi.fn(() => Effect.succeed(true));
 			const sessionMgr = mockSessionManager({
 				deleteSession: legacyDeleteSession,
 				listSessions: legacyListSessions,
@@ -3082,7 +3129,7 @@ describe("handleDeleteSession", () => {
 			const legacyDeleteSession = vi.fn(async () => {
 				throw new Error("legacy deleteSession should not be used");
 			});
-			const serviceDeleteSession = vi.fn(() => Effect.void);
+			const serviceDeleteSession = vi.fn(() => Effect.succeed(true));
 			const sessionMgr = mockSessionManager({
 				deleteSession: legacyDeleteSession,
 				listSessions: legacyListSessions,

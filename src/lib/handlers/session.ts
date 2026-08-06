@@ -530,7 +530,8 @@ export const deleteSessionForClient = ({
 		// Find ALL clients viewing this session before deletion
 		const viewers = wsHandler.getClientsForSession(id);
 
-		yield* sessionManagerService.deleteSession(id);
+		const didDelete = yield* sessionManagerService.deleteSession(id);
+		if (!didDelete) return;
 
 		const sessions =
 			viewers.length > 0 ? yield* sessionManagerService.listSessions() : [];

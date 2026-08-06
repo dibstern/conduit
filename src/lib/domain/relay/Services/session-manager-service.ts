@@ -13,6 +13,7 @@ import {
 	Cause,
 	Context,
 	Data,
+	Deferred,
 	Effect,
 	Exit,
 	HashMap,
@@ -1486,7 +1487,7 @@ export interface SessionManagerService {
 		session: SessionDetail,
 		providerInstanceId: ProviderInstanceId,
 	): Effect.Effect<void, SessionManagerError>;
-	deleteSession(sessionId: string): Effect.Effect<void, SessionManagerError>;
+	deleteSession(sessionId: string): Effect.Effect<boolean, SessionManagerError>;
 	renameSession(
 		sessionId: string,
 		title: string,
@@ -1557,6 +1558,10 @@ export const SessionManagerServiceLive: Layer.Layer<
 		const instanceClientsOption = yield* Effect.serviceOption(
 			OpenCodeInstanceClientsTag,
 		);
+		const inFlightDeletes = new Map<
+			string,
+			Deferred.Deferred<void, SessionManagerError>
+		>();
 		if (configOption._tag === "Some") {
 			const forkMeta = loadForkMetadata(configDir);
 			if (forkMeta.size > 0) {
@@ -1972,6 +1977,14 @@ export const SessionManagerServiceLive: Layer.Layer<
 				}),
 			deleteSession: (sessionId) =>
 				Effect.gen(function* () {
+					const completion = yield* Deferred.make<void, SessionManagerError>();
+					const existing = inFlightDeletes.get(sessionId);
+					if (existing) {
+						yield* Deferred.await(existing);
+						return false;
+					}
+
+					inFlightDeletes.set(sessionId, completion);
 					const base = deleteSession(sessionId).pipe(
 						Effect.provideService(OpenCodeAPITag, api),
 						Effect.provideService(SessionManagerStateTag, stateRef),
@@ -2010,17 +2023,32 @@ export const SessionManagerServiceLive: Layer.Layer<
 									),
 								)
 							: withConfig;
-					yield* instanceClientsOption._tag === "Some"
-						? withEngine.pipe(
-								Effect.provideService(
-									OpenCodeInstanceClientsTag,
-									instanceClientsOption.value,
-								),
-							)
-						: withEngine;
-					yield* publishSessionDeleted(sessionId).pipe(
-						Effect.provideService(DaemonEventBusTag, eventBus),
-					);
+					const deleteAndPublish = Effect.gen(function* () {
+						yield* instanceClientsOption._tag === "Some"
+							? withEngine.pipe(
+									Effect.provideService(
+										OpenCodeInstanceClientsTag,
+										instanceClientsOption.value,
+									),
+								)
+							: withEngine;
+						yield* publishSessionDeleted(sessionId).pipe(
+							Effect.provideService(DaemonEventBusTag, eventBus),
+						);
+					});
+					const exit = yield* Effect.exit(deleteAndPublish);
+
+					yield* Deferred.done(completion, exit);
+					yield* Effect.sync(() => {
+						if (inFlightDeletes.get(sessionId) === completion) {
+							inFlightDeletes.delete(sessionId);
+						}
+					});
+
+					return yield* Exit.matchEffect(exit, {
+						onFailure: Effect.failCause,
+						onSuccess: () => Effect.succeed(true),
+					});
 				}),
 			renameSession: (sessionId, title) =>
 				(() => {
