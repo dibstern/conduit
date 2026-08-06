@@ -13,14 +13,16 @@ export interface ProviderSessionBinding {
 	readonly providerId: string;
 }
 
+export type ProviderSessionBindingRevision = number | string;
+
 export interface ProviderSessionBindingReadModel {
 	bindSession(sessionId: string, providerId: string): void;
 	unbindSession(sessionId: string): void;
-	getBindingRevision(sessionId: string): number;
+	getBindingRevision(sessionId: string): ProviderSessionBindingRevision;
 	unbindSessionIfBoundTo(
 		sessionId: string,
 		providerId: string,
-		bindingRevision: number,
+		bindingRevision: ProviderSessionBindingRevision,
 	): void;
 	getProviderForSession(sessionId: string): string | undefined;
 	listBoundSessions(): ProviderSessionBinding[];
@@ -32,42 +34,45 @@ interface ProviderSessionBindingRow {
 	readonly provider: string;
 }
 
+interface DurableProviderSessionBindingRevisionRow {
+	readonly id: string;
+	readonly activated_at: number;
+}
+
 export class InMemoryProviderSessionBindingReadModel
 	implements ProviderSessionBindingReadModel
 {
 	private readonly bindings = new Map<string, string>();
 	private readonly bindingRevisions = new Map<string, number>();
+	private bindingRevisionGenerator = 0;
 
 	bindSession(sessionId: string, providerId: string): void {
+		this.bindingRevisionGenerator += 1;
 		this.bindings.set(sessionId, providerId);
-		this.bindingRevisions.set(
-			sessionId,
-			(this.bindingRevisions.get(sessionId) ?? 0) + 1,
-		);
+		this.bindingRevisions.set(sessionId, this.bindingRevisionGenerator);
 	}
 
 	unbindSession(sessionId: string): void {
+		this.bindingRevisionGenerator += 1;
 		this.bindings.delete(sessionId);
-		this.bindingRevisions.set(
-			sessionId,
-			(this.bindingRevisions.get(sessionId) ?? 0) + 1,
-		);
+		this.bindingRevisions.delete(sessionId);
 	}
 
-	getBindingRevision(sessionId: string): number {
+	getBindingRevision(sessionId: string): ProviderSessionBindingRevision {
 		return this.bindingRevisions.get(sessionId) ?? 0;
 	}
 
 	unbindSessionIfBoundTo(
 		sessionId: string,
 		providerId: string,
-		bindingRevision: number,
+		bindingRevision: ProviderSessionBindingRevision,
 	): void {
 		if (
 			this.bindings.get(sessionId) === providerId &&
 			this.getBindingRevision(sessionId) === bindingRevision
 		) {
 			this.bindings.delete(sessionId);
+			this.bindingRevisions.delete(sessionId);
 		}
 	}
 
@@ -93,39 +98,49 @@ export class SqliteProviderSessionBindingReadModel
 {
 	private readonly transientBindings = new Map<string, string | null>();
 	private readonly bindingRevisions = new Map<string, number>();
+	private bindingRevisionGenerator = 0;
 
 	constructor(private readonly db: SessionBindingReadModelDb) {}
 
 	bindSession(sessionId: string, providerId: string): void {
+		this.bindingRevisionGenerator += 1;
 		this.transientBindings.set(sessionId, providerId);
-		this.bindingRevisions.set(
-			sessionId,
-			(this.bindingRevisions.get(sessionId) ?? 0) + 1,
-		);
+		this.bindingRevisions.set(sessionId, this.bindingRevisionGenerator);
 	}
 
 	unbindSession(sessionId: string): void {
+		this.bindingRevisionGenerator += 1;
 		this.transientBindings.set(sessionId, null);
-		this.bindingRevisions.set(
-			sessionId,
-			(this.bindingRevisions.get(sessionId) ?? 0) + 1,
-		);
+		this.bindingRevisions.delete(sessionId);
 	}
 
-	getBindingRevision(sessionId: string): number {
-		return this.bindingRevisions.get(sessionId) ?? 0;
+	getBindingRevision(sessionId: string): ProviderSessionBindingRevision {
+		if (this.transientBindings.has(sessionId)) {
+			return this.bindingRevisions.get(sessionId) ?? 0;
+		}
+
+		const row = this.db.queryOne<DurableProviderSessionBindingRevisionRow>(
+			`SELECT id, activated_at
+			 FROM session_providers
+			 WHERE session_id = ? AND status = 'active'
+			 ORDER BY activated_at DESC, id DESC
+			 LIMIT 1`,
+			[sessionId],
+		);
+		return row === undefined ? 0 : JSON.stringify([row.id, row.activated_at]);
 	}
 
 	unbindSessionIfBoundTo(
 		sessionId: string,
 		providerId: string,
-		bindingRevision: number,
+		bindingRevision: ProviderSessionBindingRevision,
 	): void {
 		if (
 			this.getProviderForSession(sessionId) === providerId &&
 			this.getBindingRevision(sessionId) === bindingRevision
 		) {
 			this.transientBindings.set(sessionId, null);
+			this.bindingRevisions.delete(sessionId);
 		}
 	}
 
