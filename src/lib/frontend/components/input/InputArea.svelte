@@ -618,6 +618,7 @@
 						class="send-btn shrink-0 w-8 h-8 rounded-[10px] border-none bg-brand-a text-white cursor-pointer flex items-center justify-center transition-[background,opacity] duration-150 touch-manipulation hover:not-disabled:opacity-90 disabled:opacity-25 disabled:cursor-default active:not-disabled:opacity-70"
 						disabled={!canSend}
 						title={isProcessing() ? "Queue message" : "Send message"}
+						aria-label={isProcessing() ? "Queue message" : "Send message"}
 						onclick={handleSendClick}
 					>
 						<Icon name="arrow-up" size={18} />
@@ -628,6 +629,7 @@
 							type="button"
 							class="shrink-0 w-8 h-8 rounded-[10px] bg-transparent border border-border text-text-muted cursor-pointer flex items-center justify-center transition-[background,color,opacity] duration-150 touch-manipulation hover:bg-bg-alt hover:text-text active:opacity-70"
 							title="Stop generating"
+							aria-label="Stop generating"
 							onclick={handleStop}
 						>
 							<Icon name="square" size={18} />

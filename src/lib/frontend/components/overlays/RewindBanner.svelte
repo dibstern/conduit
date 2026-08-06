@@ -90,6 +90,7 @@
 		<button
 			class="rewind-banner-exit flex items-center justify-center w-6 h-6 rounded bg-transparent border-none text-accent cursor-pointer hover:bg-[rgba(var(--overlay-rgb),0.06)]"
 			title="Exit rewind mode"
+			aria-label="Exit rewind mode"
 			onclick={handleExit}
 		>
 			<Icon name="x" size={16} />

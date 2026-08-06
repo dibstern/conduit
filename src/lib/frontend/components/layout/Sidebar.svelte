@@ -174,6 +174,7 @@
 			id="sidebar-toggle-btn"
 			class="flex items-center justify-center bg-none border-none text-text-muted cursor-pointer p-1 rounded-md transition-[color,background] duration-150 hover:text-text hover:bg-bg-alt"
 			title="Close sidebar"
+			aria-label="Close sidebar"
 			onclick={handleCloseSidebar}
 		>
 			<Icon name="panel-left-close" size={18} />

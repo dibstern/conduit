@@ -388,6 +388,7 @@
 				<button
 					class="flex items-center justify-center w-7 h-7 rounded-md border cursor-pointer transition-colors duration-150 backdrop-blur-sm {copyState === 'done' ? 'border-success/30 bg-success/10 text-success' : copyState === 'primed' ? 'border-brand-b/30 bg-brand-b/10 text-brand-b' : 'border-border-subtle/50 bg-bg-surface/80 text-text-muted hover:text-text-secondary'}"
 					title={copyState === 'done' ? 'Copied!' : copyState === 'primed' ? 'Click to confirm copy' : 'Copy message'}
+					aria-label={copyState === 'done' ? 'Copied!' : copyState === 'primed' ? 'Click to confirm copy' : 'Copy message'}
 					onclick={handleClick}
 				>
 					{#if copyState === 'done'}
@@ -400,6 +401,7 @@
 					<button
 						class="flex items-center justify-center w-7 h-7 rounded-md border border-border-subtle/50 bg-bg-surface/80 text-text-muted hover:text-text-secondary cursor-pointer transition-colors duration-150 backdrop-blur-sm"
 						title="Fork from here"
+						aria-label="Fork from here"
 						onclick={handleFork}
 					>
 						<Icon name="git-fork" size={14} />

@@ -412,6 +412,7 @@
 				class="text-gray-500 hover:text-gray-300 cursor-pointer text-xs leading-none px-2 py-1.5"
 				onclick={() => onClose?.()}
 				title="Close panel"
+				aria-label="Close panel"
 			>
 				&times;
 			</button>

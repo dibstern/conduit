@@ -241,6 +241,7 @@
 				? 'text-text-muted group-hover:text-text-secondary hover:text-text hover:bg-bg-alt'
 				: 'text-text-dimmer/50 group-hover:text-text-dimmer hover:text-text hover:bg-bg-alt'}"
 			title="More options"
+			aria-label="More options"
 			onclick={handleMoreClick}
 		>
 			<Icon name="ellipsis" size={13} />

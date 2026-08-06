@@ -323,6 +323,7 @@
 					<button
 						type="button"
 						title="New session"
+						aria-label="New session"
 					onclick={handleNewSession}
 					disabled={sessionCreation.value.phase === "creating"}
 					class="flex items-center justify-center w-6 h-6 border-none rounded-md bg-transparent text-text-dimmer cursor-pointer disabled:cursor-default transition-[background,color] duration-100 p-0 hover:bg-[rgba(var(--overlay-rgb),0.04)] hover:text-text"
@@ -337,6 +338,7 @@
 						id="search-session-btn"
 						type="button"
 						title="Search sessions"
+						aria-label="Search sessions"
 					class="flex items-center justify-center w-6 h-6 border-none rounded-md bg-transparent text-text-dimmer cursor-pointer transition-[background,color] duration-100 p-0 hover:bg-[rgba(var(--overlay-rgb),0.04)] hover:text-text"
 					onclick={handleToggleSearch}
 					>
@@ -346,6 +348,7 @@
 					type="button"
 					data-testid="subagent-toggle"
 					title={uiState.hideSubagentSessions ? "Show subagent sessions" : "Hide subagent sessions"}
+					aria-label={uiState.hideSubagentSessions ? "Show subagent sessions" : "Hide subagent sessions"}
 					class="flex items-center justify-center w-6 h-6 border-none rounded-md bg-transparent cursor-pointer transition-[background,color] duration-100 p-0 hover:bg-[rgba(var(--overlay-rgb),0.04)] hover:text-text {uiState.hideSubagentSessions ? 'text-text-dimmer' : 'text-accent'}"
 					onclick={toggleHideSubagentSessions}
 					>
@@ -354,6 +357,7 @@
 					<button
 						type="button"
 						title="Cleanup sessions"
+						aria-label="Cleanup sessions"
 					class="flex items-center justify-center w-6 h-6 border-none rounded-md bg-transparent text-text-dimmer cursor-pointer transition-[background,color] duration-100 p-0 hover:bg-[rgba(var(--overlay-rgb),0.04)] hover:text-text"
 					onclick={handleEnterCleanup}
 					>

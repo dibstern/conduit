@@ -387,7 +387,7 @@
 {#snippet cmdBlock(cmd: string, key: string)}
 	<div class="group/cmd flex items-start gap-1.5 bg-black/[0.04] dark:bg-white/[0.06] rounded px-2.5 py-1.5 font-mono text-xs text-text leading-relaxed">
 		<span class="flex-1 whitespace-pre-wrap break-all select-all">{cmd}</span>
-		<button type="button" class="shrink-0 p-0.5 text-text-muted hover:text-text opacity-0 group-hover/cmd:opacity-100 transition-opacity cursor-pointer" title="Copy" onclick={() => handleCopy(cmd, key)}>
+		<button type="button" class="shrink-0 p-0.5 text-text-muted hover:text-text opacity-0 group-hover/cmd:opacity-100 transition-opacity cursor-pointer" title="Copy" aria-label="Copy" onclick={() => handleCopy(cmd, key)}>
 			{#if copiedKey === key}<Icon name="check" size={13} class="text-green-500" />{:else}<Icon name="copy" size={13} />{/if}
 		</button>
 	</div>

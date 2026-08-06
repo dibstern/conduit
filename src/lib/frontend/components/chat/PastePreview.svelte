@@ -43,6 +43,7 @@
 					<button
 						class="paste-remove-btn absolute top-0.5 right-0.5 w-[18px] h-[18px] border-none rounded-full bg-[rgba(0,0,0,0.6)] text-white text-sm leading-none flex items-center justify-center cursor-pointer opacity-0 transition-opacity duration-150 group-hover:opacity-100"
 						title="Remove image"
+						aria-label="Remove image"
 						onclick={(e: MouseEvent) => {
 							e.preventDefault();
 							e.stopPropagation();

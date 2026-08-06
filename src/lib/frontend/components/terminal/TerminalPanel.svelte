@@ -214,6 +214,7 @@
 					<button
 						class="term-tab-close shrink-0 w-[18px] h-[18px] border-none rounded bg-transparent text-text-muted text-sm leading-none cursor-pointer flex items-center justify-center transition-[color] duration-100 hover:text-error hover:bg-error/[0.08]"
 						title="Close terminal"
+						aria-label="Close terminal"
 						onclick={(e) => handleCloseTab(e, tab.ptyId)}
 					>
 						&times;
@@ -237,6 +238,7 @@
 				<button
 					class="term-font-btn shrink-0 py-0.5 px-1.5 border-none rounded bg-transparent text-text-dimmer font-mono text-sm cursor-pointer transition-[color,background] duration-100 hover:text-text hover:bg-bg-alt disabled:opacity-30 disabled:cursor-default"
 					title="Decrease font size"
+					aria-label="Decrease font size"
 					disabled={termFontSize <= FONT_SIZE_MIN}
 					onclick={decreaseFontSize}
 				>
@@ -246,6 +248,7 @@
 				<button
 					class="term-font-btn shrink-0 py-0.5 px-1.5 border-none rounded bg-transparent text-text-dimmer font-mono text-sm cursor-pointer transition-[color,background] duration-100 hover:text-text hover:bg-bg-alt disabled:opacity-30 disabled:cursor-default"
 					title="Increase font size"
+					aria-label="Increase font size"
 					disabled={termFontSize >= FONT_SIZE_MAX}
 					onclick={increaseFontSize}
 				>
@@ -257,6 +260,7 @@
 			<button
 				class="term-close-panel-btn shrink-0 py-1 px-2 border-none rounded bg-transparent text-text-dimmer text-sm cursor-pointer transition-[color] duration-100 hover:text-text"
 				title="Close terminal panel"
+				aria-label="Close terminal panel"
 				onclick={handleClosePanel}
 			>
 				&#215;

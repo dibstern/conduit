@@ -85,6 +85,7 @@
 						class="text-text-muted hover:text-text text-sm leading-none cursor-pointer bg-transparent border-none p-0"
 						onclick={() => closePanel("usage-panel")}
 						title="Close usage panel"
+						aria-label="Close usage panel"
 					>
 						&times;
 					</button>
@@ -139,6 +140,7 @@
 						class="text-text-muted hover:text-text text-sm leading-none cursor-pointer bg-transparent border-none p-0"
 						onclick={() => closePanel("status-panel")}
 						title="Close status panel"
+						aria-label="Close status panel"
 					>
 						&times;
 					</button>
@@ -205,6 +207,7 @@
 						class="text-text-muted hover:text-text text-sm leading-none cursor-pointer bg-transparent border-none p-0"
 						onclick={() => closePanel("context-panel")}
 						title="Close context panel"
+						aria-label="Close context panel"
 					>
 						&times;
 					</button>

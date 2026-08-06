@@ -98,6 +98,7 @@
 			<button
 				class="plan-card-copy"
 				title="Copy plan"
+				aria-label="Copy plan"
 				onclick={handleCopy}
 			>
 				<Icon name={copyIcon} size={14} />

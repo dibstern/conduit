@@ -407,6 +407,7 @@
 							<button
 								class="proj-more-btn shrink-0 w-5 h-5 border-none rounded p-0 bg-transparent cursor-pointer flex items-center justify-center text-text-dimmer hover:text-text hover:bg-bg-alt transition-colors duration-100"
 								title="More options"
+								aria-label="More options"
 								onclick={(e) => {
 									e.preventDefault();
 									e.stopPropagation();
@@ -475,6 +476,7 @@
 							<button
 								class="proj-more-btn shrink-0 w-5 h-5 border-none rounded p-0 bg-transparent cursor-pointer flex items-center justify-center text-text-dimmer hover:text-text hover:bg-bg-alt transition-colors duration-100"
 								title="More options"
+								aria-label="More options"
 								onclick={(e) => {
 									e.preventDefault();
 									e.stopPropagation();

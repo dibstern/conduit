@@ -146,6 +146,7 @@
 				id="file-panel-refresh"
 				type="button"
 				title="Refresh file tree"
+				aria-label="Refresh file tree"
 			class="flex items-center justify-center w-6 h-6 border-none rounded-md bg-transparent text-text-dimmer cursor-pointer transition-[background,color] duration-100 p-0 hover:bg-[rgba(var(--overlay-rgb),0.04)] hover:text-text"
 			onclick={refresh}
 			>
@@ -155,6 +156,7 @@
 				id="file-panel-close"
 				type="button"
 				title="Close file browser"
+				aria-label="Close file browser"
 			class="flex items-center justify-center w-6 h-6 border-none rounded-md bg-transparent text-text-dimmer cursor-pointer transition-[background,color] duration-100 p-0 hover:bg-[rgba(var(--overlay-rgb),0.04)] hover:text-text"
 			onclick={closePanel}
 			>

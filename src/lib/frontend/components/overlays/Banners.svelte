@@ -103,6 +103,7 @@
 					<button
 						class="banner-dismiss shrink-0 text-current opacity-60 hover:opacity-100 cursor-pointer bg-transparent border-none p-0 leading-none"
 						title="Dismiss"
+						aria-label="Dismiss"
 						onclick={() => removeBanner(banner.id)}
 					>
 						<Icon name="x" size={14} />

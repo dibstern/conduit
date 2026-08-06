@@ -335,6 +335,7 @@
 									<button
 										class="shrink-0 px-1.5 py-1 mr-1 text-xs text-text-dimmer bg-transparent border-none cursor-pointer rounded hover:bg-bg hover:text-text-secondary transition-colors duration-100"
 										title="Set as default model"
+										aria-label="Set as default model"
 										onclick={(e) => handleSetDefault(model, e)}
 									>
 										<Icon name="star" size={12} />

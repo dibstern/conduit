@@ -139,6 +139,7 @@
 			class="header-icon-btn"
 			class:hidden={!uiState.sidebarCollapsed}
 			title="Open sidebar"
+			aria-label="Open sidebar"
 			onclick={handleExpandSidebar}
 		>
 			<Icon name="panel-left-open" size={15} />
@@ -147,6 +148,7 @@
 			id="hamburger-btn"
 			class="header-icon-btn hidden"
 			title="Menu"
+			aria-label="Menu"
 			onclick={handleHamburger}
 		>
 			<Icon name="menu" size={15} />
@@ -224,6 +226,7 @@
 					id="debug-btn"
 					class="header-icon-btn"
 					title="Toggle debug panel"
+					aria-label="Toggle debug panel"
 					onclick={() => window.dispatchEvent(new CustomEvent("debug:toggle"))}
 				>
 					<Icon name="bug" size={15} />
@@ -236,6 +239,7 @@
 			id="header-terminal-btn"
 			class="header-icon-btn"
 			title="Toggle terminal"
+			aria-label="Toggle terminal"
 			onclick={handleTerminalToggle}
 		>
 			<Icon name="square-terminal" size={15} />
@@ -246,6 +250,7 @@
 			id="header-settings-btn"
 			class="header-icon-btn"
 			title="Settings"
+			aria-label="Settings"
 			onclick={() => window.dispatchEvent(new CustomEvent("settings:open"))}
 		>
 			<Icon name="settings" size={15} />
@@ -256,6 +261,7 @@
 			id="qr-btn"
 			class="header-icon-btn"
 			title="Share"
+			aria-label="Share"
 			onclick={handleQrShare}
 		>
 			<Icon name="share" size={15} />

@@ -187,6 +187,7 @@
 			class="fv-btn flex lg:hidden items-center justify-center w-7 h-7 rounded-md border-none bg-transparent text-text-muted cursor-pointer shrink-0 transition-[background,color] duration-150 hover:bg-[rgba(var(--overlay-rgb),0.04)] hover:text-text"
 			onclick={handleOpenFileBrowser}
 				title="File browser"
+				aria-label="File browser"
 			>
 				<Icon name="folder-tree" size={16} />
 			</button>
@@ -198,6 +199,7 @@
 				<button
 					class="shrink-0 flex items-center justify-center w-[44px] h-[44px] border-none rounded bg-transparent text-text-dimmer font-mono text-base cursor-pointer transition-[color,background] duration-100 hover:text-text hover:bg-bg-alt disabled:opacity-30 disabled:cursor-default"
 					title="Decrease font size"
+					aria-label="Decrease font size"
 					disabled={fontSize <= FONT_SIZE_MIN}
 					onclick={decreaseFontSize}
 				>
@@ -207,6 +209,7 @@
 				<button
 					class="shrink-0 flex items-center justify-center w-[44px] h-[44px] border-none rounded bg-transparent text-text-dimmer font-mono text-base cursor-pointer transition-[color,background] duration-100 hover:text-text hover:bg-bg-alt disabled:opacity-30 disabled:cursor-default"
 					title="Increase font size"
+					aria-label="Increase font size"
 					disabled={fontSize >= FONT_SIZE_MAX}
 					onclick={increaseFontSize}
 				>
@@ -218,6 +221,7 @@
 			class="fv-btn flex items-center justify-center w-7 h-7 rounded-md border-none bg-transparent text-text-muted cursor-pointer shrink-0 transition-[background,color] duration-150 hover:bg-[rgba(var(--overlay-rgb),0.04)] hover:text-text"
 			onclick={handleCopy}
 				title="Copy contents"
+				aria-label="Copy contents"
 			>
 				<Icon name={copyIcon} size={16} />
 			</button>
@@ -225,6 +229,7 @@
 			class="fv-btn flex items-center justify-center w-7 h-7 rounded-md border-none bg-transparent text-text-muted cursor-pointer shrink-0 transition-[background,color] duration-150 hover:bg-[rgba(var(--overlay-rgb),0.04)] hover:text-text"
 			onclick={handleClose}
 				title="Close"
+				aria-label="Close"
 			>
 				<Icon name="x" size={16} />
 			</button>
