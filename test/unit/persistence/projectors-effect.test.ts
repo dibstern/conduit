@@ -983,6 +983,66 @@ describe("Effect Session Projector (via ProjectionRunner)", () => {
 			}),
 		));
 
+	it("duplicate session.created preserves the original provider binding through the Effect projector", () =>
+		runTest(
+			Effect.gen(function* () {
+				const sql = yield* SqlClient.SqlClient;
+				const store = yield* EventStoreEffectTag;
+				const runner = yield* ProjectionRunnerEffectTag;
+				yield* runner.markRecovered();
+				yield* sql`
+					INSERT INTO sessions (
+						id,
+						provider,
+						title,
+						status,
+						created_at,
+						updated_at
+					)
+					VALUES (
+						${"s-named"},
+						${"work-oc"},
+						${"Untitled"},
+						${"idle"},
+						${FIXED_TS},
+						${FIXED_TS}
+					)`;
+
+				const original = yield* store.append(
+					makeSessionCreated("s-named", {
+						provider: "work-oc",
+						title: "Untitled",
+						createdAt: FIXED_TS,
+					}),
+				);
+				yield* runner.projectEvent(original);
+				const duplicate = yield* store.append(
+					makeSessionCreated("s-named", {
+						provider: "opencode",
+						title: "Recovered title",
+						createdAt: FIXED_TS + 1,
+					}),
+				);
+				yield* runner.projectEvent(duplicate);
+
+				const rows = yield* sql<{
+					provider: string;
+					title: string;
+					updated_at: number;
+				}>`
+					SELECT provider, title, updated_at
+					FROM sessions
+					WHERE id = ${"s-named"}`;
+				expect(rows).toEqual([
+					{
+						provider: "work-oc",
+						title: "Recovered title",
+						updated_at: FIXED_TS + 1,
+					},
+				]);
+			}),
+		));
+
 	it("session.created writes parent and provider session ids, then preserves them when omitted", () =>
 		runTest(
 			Effect.gen(function* () {

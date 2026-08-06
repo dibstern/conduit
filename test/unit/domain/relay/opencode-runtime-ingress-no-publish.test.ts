@@ -86,7 +86,7 @@ describe("OpenCode runtime ingress does not publish to relay/browser", () => {
 		event: Parameters<EffectOpenCodeRuntimeIngress["onSSEEventEffect"]>[0],
 	) {
 		const result = await Effect.runPromise(
-			hook.onSSEEventEffect(event, SESSION_ID),
+			hook.onSSEEventEffect(event, SESSION_ID, "opencode"),
 		);
 		if (!result.ok) {
 			throw new Error(`ingress failed for ${event.type}: ${result.reason}`);

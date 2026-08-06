@@ -152,6 +152,7 @@ export type EffectSSEWiringDeps = Omit<
 	| "getSessionStatuses"
 	| "statusPoller"
 > & {
+	readonly providerInstanceId: string;
 	/** Optional: current session statuses for processing flags. */
 	getSessionStatuses?: () => Effect.Effect<
 		Record<string, import("../instance/sdk-types.js").SessionStatus>
@@ -172,6 +173,7 @@ export type EffectSSEWiringDeps = Omit<
 		onSSEEventEffect(
 			event: SSEEvent,
 			sessionId: string | undefined,
+			providerInstanceId: string,
 		): Effect.Effect<OpenCodeRuntimeIngressResult>;
 		onReconnect(): void;
 	};
@@ -269,6 +271,7 @@ const recordSSEEventStartEffect = (
 			yield* deps.opencodeRuntimeIngress.onSSEEventEffect(
 				event,
 				eventSessionId,
+				deps.providerInstanceId,
 			);
 		}
 

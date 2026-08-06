@@ -50,13 +50,13 @@ function createEffectDeps(
 		getSessionParentMap: _getSessionParentMap,
 		getSessionStatuses: _getSessionStatuses,
 		statusPoller: _statusPoller,
-		...effectDeps
+		...baseEffectDeps
 	} = deps;
-	effectDeps satisfies EffectSSEWiringDeps;
-	return {
-		...effectDeps,
-		...overrides,
-	};
+	const effectDeps = {
+		...baseEffectDeps,
+		providerInstanceId: "opencode",
+	} satisfies EffectSSEWiringDeps;
+	return { ...effectDeps, ...overrides };
 }
 
 function createServicesLayer() {
@@ -113,7 +113,11 @@ describe("OpenCode Runtime Ingress Integration (Effect SSE wiring)", () => {
 
 		await runSSEEvent(deps, event);
 
-		expect(runtimeIngress.onSSEEventEffect).toHaveBeenCalledWith(event, "s1");
+		expect(runtimeIngress.onSSEEventEffect).toHaveBeenCalledWith(
+			event,
+			"s1",
+			"opencode",
+		);
 		expect(order).toEqual(["ingress-effect", "translator"]);
 		expect(deps.wsHandler.broadcastPerSessionEvent).toHaveBeenCalledWith(
 			"s1",
@@ -139,7 +143,11 @@ describe("OpenCode Runtime Ingress Integration (Effect SSE wiring)", () => {
 
 		await runSSEEvent(deps, event);
 
-		expect(runtimeIngress.onSSEEventEffect).toHaveBeenCalledWith(event, "s1");
+		expect(runtimeIngress.onSSEEventEffect).toHaveBeenCalledWith(
+			event,
+			"s1",
+			"opencode",
+		);
 		expect(deps.wsHandler.broadcastPerSessionEvent).not.toHaveBeenCalled();
 	});
 
@@ -157,7 +165,11 @@ describe("OpenCode Runtime Ingress Integration (Effect SSE wiring)", () => {
 
 		await runSSEEvent(deps, event);
 
-		expect(runtimeIngress.onSSEEventEffect).toHaveBeenCalledWith(event, "s1");
+		expect(runtimeIngress.onSSEEventEffect).toHaveBeenCalledWith(
+			event,
+			"s1",
+			"opencode",
+		);
 		expect(deps.translator.translate).not.toHaveBeenCalled();
 		expect(deps.wsHandler.broadcast).toHaveBeenCalledWith(
 			expect.objectContaining({
@@ -200,7 +212,11 @@ describe("OpenCode Runtime Ingress Integration (Effect SSE wiring)", () => {
 
 		await runSSEEvent(deps, event);
 
-		expect(runtimeIngress.onSSEEventEffect).toHaveBeenCalledWith(event, "s1");
+		expect(runtimeIngress.onSSEEventEffect).toHaveBeenCalledWith(
+			event,
+			"s1",
+			"opencode",
+		);
 		expect(deps.wsHandler.broadcastPerSessionEvent).toHaveBeenCalledWith(
 			"s1",
 			translated,
@@ -213,6 +229,7 @@ describe("OpenCode Runtime Ingress Integration (Effect SSE wiring)", () => {
 		);
 		const deps = createEffectDeps({
 			opencodeRuntimeIngress: runtimeIngress,
+			providerInstanceId: "work-oc",
 		});
 
 		const event = makeSSEEvent("message.created", {
@@ -234,7 +251,11 @@ describe("OpenCode Runtime Ingress Integration (Effect SSE wiring)", () => {
 			expect(defects[0]).toEqual(expect.any(Error));
 			expect((defects[0] as Error).message).toBe("ingress defect");
 		}
-		expect(runtimeIngress.onSSEEventEffect).toHaveBeenCalledWith(event, "s1");
+		expect(runtimeIngress.onSSEEventEffect).toHaveBeenCalledWith(
+			event,
+			"s1",
+			"work-oc",
+		);
 		expect(deps.translator.translate).not.toHaveBeenCalled();
 		expect(deps.wsHandler.broadcastPerSessionEvent).not.toHaveBeenCalled();
 	});

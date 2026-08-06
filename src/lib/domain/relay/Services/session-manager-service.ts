@@ -23,6 +23,7 @@ import {
 	Schema,
 } from "effect";
 import {
+	defaultInstanceIdForDriver,
 	isKnownDriverKind,
 	type ProviderDriverKind,
 	type ProviderInstanceId,
@@ -1607,7 +1608,10 @@ export const SessionManagerServiceLive: Layer.Layer<
 							engineOption.value.bindSession(session.id, providerId);
 						}
 					});
-				const seedOpenCodeSession = (session: SessionDetail) => {
+				const seedOpenCodeSession = (
+					session: SessionDetail,
+					providerInstanceId: ProviderInstanceId,
+				) => {
 					if (sqlOption._tag === "None") {
 						return Effect.sync(() => {
 							log.warn(
@@ -1622,7 +1626,7 @@ export const SessionManagerServiceLive: Layer.Layer<
 						INSERT OR IGNORE INTO sessions (
 							id, provider, provider_sid, title, status, created_at, updated_at
 						) VALUES (
-							${session.id}, 'opencode', ${session.id}, ${sessionTitle}, 'idle', ${now}, ${now}
+							${session.id}, ${providerInstanceId}, ${session.id}, ${sessionTitle}, 'idle', ${now}, ${now}
 						)`.pipe(
 						Effect.asVoid,
 						Effect.catchAll((cause) =>
@@ -1754,7 +1758,10 @@ export const SessionManagerServiceLive: Layer.Layer<
 							const session = yield* createSession(title).pipe(
 								Effect.provideService(OpenCodeAPITag, instanceApi ?? api),
 							);
-							yield* seedOpenCodeSession(session);
+							yield* seedOpenCodeSession(
+								session,
+								instanceId ?? defaultInstanceIdForDriver("opencode"),
+							);
 							if (instanceId !== undefined) {
 								yield* persistOpenCodeInstanceBinding(session, instanceId);
 							}

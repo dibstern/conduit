@@ -60,6 +60,7 @@ const makeEffectDeps = (
 	} = deps;
 	const effectDeps = {
 		...baseEffectDeps,
+		providerInstanceId: "opencode",
 		...(replyPermission ? { replyPermission } : {}),
 	};
 	effectDeps satisfies EffectSSEWiringDeps;
@@ -76,8 +77,12 @@ describe("handleSSEEventEffect", () => {
 			getSessionParentMap: _getSessionParentMap,
 			getSessionStatuses: _getSessionStatuses,
 			statusPoller: _statusPoller,
-			...effectDeps
+			...baseEffectDeps
 		} = deps;
+		const effectDeps = {
+			...baseEffectDeps,
+			providerInstanceId: "opencode",
+		};
 		effectDeps satisfies EffectSSEWiringDeps;
 		const translated: RelayMessage = {
 			type: "done",
@@ -137,8 +142,12 @@ describe("handleSSEEventEffect", () => {
 			getSessionParentMap: _getSessionParentMap,
 			getSessionStatuses: _getSessionStatuses,
 			statusPoller: _statusPoller,
-			...effectDeps
+			...baseEffectDeps
 		} = deps;
+		const effectDeps = {
+			...baseEffectDeps,
+			providerInstanceId: "opencode",
+		};
 		effectDeps satisfies EffectSSEWiringDeps;
 		const recordMessageActivity = vi.fn(() => Effect.void);
 		const translated: RelayMessage = {

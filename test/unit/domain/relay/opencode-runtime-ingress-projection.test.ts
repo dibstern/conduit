@@ -8,12 +8,16 @@ import { join } from "node:path";
 import { SqlClient } from "@effect/sql";
 import { Effect, Layer, ManagedRuntime } from "effect";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { ProviderRuntimeEvent } from "../../../../src/lib/contracts/providers/provider-runtime-event.js";
 import {
 	type EffectOpenCodeRuntimeIngress,
 	makeEffectOpenCodeRuntimeIngress,
 	type OpenCodeRuntimeIngressLog,
 } from "../../../../src/lib/domain/relay/Services/opencode-runtime-ingress-service.js";
-import { ProviderRuntimeIngestionLive } from "../../../../src/lib/domain/relay/Services/provider-runtime-ingestion-service.js";
+import {
+	ProviderRuntimeIngestionLive,
+	ProviderRuntimeIngestionTag,
+} from "../../../../src/lib/domain/relay/Services/provider-runtime-ingestion-service.js";
 import { EventStoreEffectTag } from "../../../../src/lib/persistence/effect/event-store-effect.js";
 import { makePersistenceEffectLayer } from "../../../../src/lib/persistence/effect/live.js";
 import { ProjectorCursorEffectTag } from "../../../../src/lib/persistence/effect/projector-cursor-effect.js";
@@ -22,6 +26,7 @@ import {
 	type EffectProjector,
 	ProjectionError,
 } from "../../../../src/lib/persistence/effect/projectors-effect.js";
+import { createEventId } from "../../../../src/lib/persistence/events.js";
 import { makeSSEEvent } from "../../../helpers/sse-factories.js";
 
 const SESSION_ID = "sess-proj-001";
@@ -109,15 +114,19 @@ describe("OpenCode Runtime Ingress Projection (SSE → append → project → re
 	async function ingest(
 		event: Parameters<EffectOpenCodeRuntimeIngress["onSSEEventEffect"]>[0],
 		sessionId = SESSION_ID,
+		providerInstanceId = "opencode",
 	) {
-		return Effect.runPromise(currentHook().onSSEEventEffect(event, sessionId));
+		return Effect.runPromise(
+			currentHook().onSSEEventEffect(event, sessionId, providerInstanceId),
+		);
 	}
 
 	async function ingestOk(
 		event: Parameters<EffectOpenCodeRuntimeIngress["onSSEEventEffect"]>[0],
 		sessionId = SESSION_ID,
+		providerInstanceId = "opencode",
 	) {
-		const result = await ingest(event, sessionId);
+		const result = await ingest(event, sessionId, providerInstanceId);
 		if (!result.ok) {
 			throw new Error(
 				`ingress failed for ${event.type}: ${result.reason}${result.error ? ` (${result.error})` : ""}`,
@@ -131,6 +140,50 @@ describe("OpenCode Runtime Ingress Projection (SSE → append → project → re
 			Effect.gen(function* () {
 				const eventStore = yield* EventStoreEffectTag;
 				return yield* eventStore.readBySession(sessionId);
+			}),
+		);
+	}
+
+	async function persistSessionCreated(
+		sessionId: string,
+		providerInstanceId: string,
+	) {
+		await currentRuntime().runPromise(
+			Effect.gen(function* () {
+				const ingestion = yield* ProviderRuntimeIngestionTag;
+				yield* ingestion.ingest({
+					eventId: createEventId(),
+					type: "session.created",
+					providerId: "opencode",
+					sessionId,
+					providerRefs: { providerSessionId: sessionId },
+					rawSource: { kind: "test.named-session-created" },
+					createdAt: Date.now(),
+					data: {
+						sessionId,
+						title: "Named session",
+						provider: providerInstanceId,
+					},
+				} satisfies ProviderRuntimeEvent);
+			}),
+		);
+	}
+
+	async function readProviderBindings(sessionId: string) {
+		return currentRuntime().runPromise(
+			Effect.gen(function* () {
+				const sql = yield* SqlClient.SqlClient;
+				return yield* sql<{
+					session_provider: string;
+					binding_provider: string;
+				}>`
+					SELECT
+						sessions.provider AS session_provider,
+						session_providers.provider AS binding_provider
+					FROM sessions
+					JOIN session_providers ON session_providers.session_id = sessions.id
+					WHERE sessions.id = ${sessionId}
+						AND session_providers.status = 'active'`;
 			}),
 		);
 	}
@@ -219,6 +272,83 @@ describe("OpenCode Runtime Ingress Projection (SSE → append → project → re
 				id: SESSION_ID,
 				provider: "opencode",
 				session_provider: "opencode",
+			},
+		]);
+	});
+
+	it("does not let the ingress session seeder overwrite an existing named provider", async () => {
+		await persistSessionCreated(SESSION_ID, "work-oc");
+
+		await ingestOk(
+			makeSSEEvent("message.created", {
+				sessionID: SESSION_ID,
+				messageID: "msg-stale-seeder-001",
+				info: { role: "assistant", parts: [] },
+			}),
+			SESSION_ID,
+			"opencode",
+		);
+
+		expect(await readProviderBindings(SESSION_ID)).toEqual([
+			{
+				session_provider: "work-oc",
+				binding_provider: "work-oc",
+			},
+		]);
+	});
+
+	it("seeds a first-seen named child with its OpenCode instance id", async () => {
+		const childSessionId = "sess-proj-child-001";
+
+		const result = await ingestOk(
+			makeSSEEvent("message.created", {
+				sessionID: childSessionId,
+				messageID: "msg-child-001",
+				info: { role: "assistant", parts: [] },
+			}),
+			childSessionId,
+			"work-oc",
+		);
+
+		expect(result.sessionSeeded).toBe(true);
+		expect(await readProviderBindings(childSessionId)).toEqual([
+			{
+				session_provider: "work-oc",
+				binding_provider: "work-oc",
+			},
+		]);
+	});
+
+	it("retains a named provider when a fresh ingress re-seeds after restart", async () => {
+		await persistSessionCreated(SESSION_ID, "work-oc");
+		await ingestOk(
+			makeSSEEvent("message.created", {
+				sessionID: SESSION_ID,
+				messageID: "msg-before-restart-001",
+				info: { role: "assistant", parts: [] },
+			}),
+			SESSION_ID,
+			"work-oc",
+		);
+
+		await disposeRuntime();
+		await startRuntime();
+
+		const result = await ingestOk(
+			makeSSEEvent("message.created", {
+				sessionID: SESSION_ID,
+				messageID: "msg-after-restart-001",
+				info: { role: "assistant", parts: [] },
+			}),
+			SESSION_ID,
+			"work-oc",
+		);
+
+		expect(result.sessionSeeded).toBe(true);
+		expect(await readProviderBindings(SESSION_ID)).toEqual([
+			{
+				session_provider: "work-oc",
+				binding_provider: "work-oc",
 			},
 		]);
 	});

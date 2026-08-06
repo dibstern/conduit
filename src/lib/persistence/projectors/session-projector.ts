@@ -49,7 +49,6 @@ export class SessionProjector implements Projector {
 				`INSERT INTO sessions (id, provider, provider_sid, title, status, parent_id, created_at, updated_at)
 				 VALUES (?, ?, ?, ?, 'idle', ?, ?, ?)
 				 ON CONFLICT (id) DO UPDATE SET
-				     provider = excluded.provider,
 				     provider_sid = COALESCE(excluded.provider_sid, sessions.provider_sid),
 				     title = CASE
 				       WHEN sessions.title IS NULL

@@ -88,6 +88,92 @@ describe("OpenCodeInstanceClients", () => {
 		}
 	}, 8_000);
 
+	it("passes the named instance id to the registered stream wirer", async () => {
+		const configDir = mkdtempSync(join(tmpdir(), "opencode-instance-clients-"));
+		tempDirs.push(configDir);
+		const daemonConfig: DaemonConfig = {
+			pid: 1234,
+			port: 2633,
+			pinHash: null,
+			tls: false,
+			debug: false,
+			keepAwake: false,
+			dangerouslySkipPermissions: false,
+			projects: [],
+			instances: [
+				{
+					id: "work-oc",
+					name: "Work OpenCode",
+					port: 0,
+					managed: false,
+					driver: "opencode",
+					url: "http://named-instance.invalid",
+				},
+			],
+		};
+		writeFileSync(join(configDir, "daemon.json"), JSON.stringify(daemonConfig));
+		vi.stubGlobal(
+			"fetch",
+			vi.fn(async (input: RequestInfo | URL) => {
+				const url = String(input instanceof Request ? input.url : input);
+				if (url.includes("/event")) {
+					return new Response(
+						new ReadableStream<Uint8Array>({
+							start(controller) {
+								controller.enqueue(
+									new TextEncoder().encode(
+										`data: ${JSON.stringify({ type: "server.connected", properties: {} })}\n\n`,
+									),
+								);
+							},
+						}),
+						{ status: 200, headers: { "Content-Type": "text/event-stream" } },
+					);
+				}
+				return new Response(
+					JSON.stringify({
+						state: "/test/state",
+						config: "/test/config",
+						worktree: "/test",
+						directory: "/test",
+					}),
+					{ status: 200, headers: { "Content-Type": "application/json" } },
+				);
+			}),
+		);
+
+		const layer = OpenCodeInstanceClientsLive.pipe(
+			Layer.provide(
+				Layer.mergeAll(
+					Layer.succeed(
+						ConfigTag,
+						makeMockConfig({
+							configDir,
+							projectDir: "/test/project",
+						}),
+					),
+					Layer.succeed(LoggerTag, makeMockLogger()),
+				),
+			),
+		);
+		let wiredInstanceId: string | undefined;
+		await Effect.runPromise(
+			Effect.scoped(
+				Effect.gen(function* () {
+					const clients = yield* OpenCodeInstanceClientsTag;
+					yield* clients.registerStreamWirer((_stream, instanceId) =>
+						Effect.sync(() => {
+							wiredInstanceId = instanceId;
+						}),
+					);
+					yield* clients.clientFor("work-oc");
+				}).pipe(Effect.provide(layer)),
+			),
+		);
+
+		expect(wiredInstanceId).toBe("work-oc");
+	}, 8_000);
+
 	it("holds the connect window open across a transport error and connects on retry", async () => {
 		const configDir = mkdtempSync(join(tmpdir(), "opencode-instance-clients-"));
 		tempDirs.push(configDir);

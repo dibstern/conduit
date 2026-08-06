@@ -152,6 +152,44 @@ describe("SessionProjector", () => {
 			expect(rows).toHaveLength(1);
 		});
 
+		it("duplicate session.created preserves the original provider binding", () => {
+			projector.project(
+				makeStored(
+					"session.created",
+					"s1",
+					{
+						sessionId: "s1",
+						title: "Untitled",
+						provider: "work-oc",
+					} satisfies SessionCreatedPayload,
+					1,
+					now,
+				),
+				db,
+			);
+			projector.project(
+				makeStored(
+					"session.created",
+					"s1",
+					{
+						sessionId: "s1",
+						title: "Recovered title",
+						provider: "opencode",
+					} satisfies SessionCreatedPayload,
+					2,
+					now + 1,
+				),
+				db,
+			);
+
+			const rows = db.query<SessionRow>("SELECT * FROM sessions WHERE id = ?", [
+				"s1",
+			]);
+			expect(rows).toHaveLength(1);
+			expect(rows[0]?.provider).toBe("work-oc");
+			expect(rows[0]?.title).toBe("Recovered title");
+		});
+
 		it("writes parent and provider session ids, then preserves them when omitted", () => {
 			projector.project(
 				makeStored(

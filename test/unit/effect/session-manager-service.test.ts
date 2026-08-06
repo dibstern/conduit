@@ -494,8 +494,20 @@ describe("SessionManagerService", () => {
 					providerId: "opencode",
 				});
 				const sessions = yield* service.listSessions();
+				const persistedProvider = yield* Effect.sync(() => {
+					const db = SqliteClient.open(dbFile);
+					try {
+						return db.queryOne<{ readonly provider: string }>(
+							"SELECT provider FROM sessions WHERE id = ?",
+							[session.id],
+						)?.provider;
+					} finally {
+						db.close();
+					}
+				});
 
 				expect(session.id).toBe("opencode-session");
+				expect(persistedProvider).toBe("opencode");
 				expect(api.session.create).toHaveBeenCalledWith({
 					title: "OpenCode Session",
 				});
@@ -631,6 +643,102 @@ describe("SessionManagerService", () => {
 					},
 				});
 				expect(api.session.create).toHaveBeenCalledOnce();
+			}).pipe(
+				Effect.provide(Layer.fresh(layer)),
+				Effect.ensuring(
+					Effect.sync(() => rmSync(tmpDir, { recursive: true, force: true })),
+				),
+			);
+		},
+	);
+
+	it.scoped(
+		"persists named OpenCode creation in both the session row and initial provider binding",
+		() => {
+			const tmpDir = mkdtempSync(
+				join(tmpdir(), "conduit-session-manager-named-create-"),
+			);
+			const dbFile = join(tmpDir, "events.sqlite");
+			const api = makeMockOpenCodeAPI();
+			const namedApi = makeMockOpenCodeAPI();
+			vi.spyOn(namedApi.session, "create").mockResolvedValue({
+				id: "named-opencode-session",
+				projectID: "project-1",
+				directory: "/tmp/project",
+				title: "Named",
+				version: "1.0.0",
+				time: { created: 10, updated: 10 },
+			});
+			const clientFor = vi.fn(() => Effect.succeed(namedApi));
+			const instanceClients = {
+				clientFor,
+				registerStreamWirer: () => Effect.void,
+			} satisfies OpenCodeInstanceClients;
+			const engine = new OrchestrationEngine({
+				registry: new ProviderRegistry(),
+			});
+			const layer = Layer.provideMerge(
+				SessionManagerServiceLive,
+				Layer.mergeAll(
+					Layer.succeed(OpenCodeAPITag, api),
+					Layer.succeed(LoggerTag, makeMockLogger()),
+					Layer.succeed(ConfigTag, makeRelayConfig(tmpDir)),
+					makeSessionManagerStateLive(),
+					makeOverridesStateLive(),
+					DaemonEventBusLive,
+					makePersistenceEffectLayer(dbFile),
+					Layer.succeed(OpenCodeInstanceClientsTag, instanceClients),
+					Layer.succeed(OrchestrationEngineTag, engine),
+				),
+			);
+
+			return Effect.gen(function* () {
+				yield* Effect.tryPromise(() =>
+					saveDaemonConfig(makeNamedOpenCodeDaemonConfig(), tmpDir),
+				);
+				const service = yield* SessionManagerServiceTag;
+				const session = yield* service.createSession("Named", {
+					instanceId: ProviderInstanceIdSchema.make("work-oc"),
+				});
+				const bindings = yield* Effect.sync(() => {
+					const db = SqliteClient.open(dbFile);
+					try {
+						return db.query<{
+							readonly session_provider: string;
+							readonly binding_id: string;
+							readonly binding_provider: string;
+							readonly binding_status: string;
+						}>(
+							`SELECT
+								sessions.provider AS session_provider,
+								session_providers.id AS binding_id,
+								session_providers.provider AS binding_provider,
+								session_providers.status AS binding_status
+							 FROM sessions
+							 JOIN session_providers
+							   ON session_providers.session_id = sessions.id
+							 WHERE sessions.id = ?
+							   AND session_providers.status = 'active'`,
+							[session.id],
+						);
+					} finally {
+						db.close();
+					}
+				});
+
+				expect(clientFor).toHaveBeenCalledWith("work-oc");
+				expect(api.session.create).not.toHaveBeenCalled();
+				expect(namedApi.session.create).toHaveBeenCalledWith({
+					title: "Named",
+				});
+				expect(bindings).toEqual([
+					{
+						session_provider: "work-oc",
+						binding_id: `${session.id}:initial`,
+						binding_provider: "work-oc",
+						binding_status: "active",
+					},
+				]);
 			}).pipe(
 				Effect.provide(Layer.fresh(layer)),
 				Effect.ensuring(

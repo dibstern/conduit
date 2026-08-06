@@ -44,6 +44,7 @@ export interface EffectOpenCodeRuntimeIngressPort {
 	onSSEEventEffect(
 		event: SSEEvent,
 		sessionId: string | undefined,
+		providerInstanceId: string,
 	): Effect.Effect<OpenCodeRuntimeIngressResult>;
 	onReconnect(): void;
 	getStats(): Readonly<OpenCodeRuntimeIngressStats>;
@@ -111,6 +112,7 @@ export class EffectOpenCodeRuntimeIngress
 	onSSEEventEffect(
 		event: SSEEvent,
 		sessionId: string | undefined,
+		providerInstanceId: string,
 	): Effect.Effect<OpenCodeRuntimeIngressResult> {
 		return Effect.gen(this, function* () {
 			this.stats.eventsReceived++;
@@ -151,7 +153,10 @@ export class EffectOpenCodeRuntimeIngress
 
 			const sessionSeeded = !this.seenSessions.has(sessionId);
 			const runtimeEvents: ProviderRuntimeEvent[] = sessionSeeded
-				? [opencodeSessionCreatedRuntimeEvent(sessionId), ...translated]
+				? [
+						opencodeSessionCreatedRuntimeEvent(sessionId, providerInstanceId),
+						...translated,
+					]
 				: [...translated];
 			// Persist and signal committed events to SessionEventBus, but never
 			// publish to the relay. The legacy SSE translator (sse-wiring.ts) is

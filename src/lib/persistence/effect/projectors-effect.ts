@@ -95,7 +95,6 @@ export const makeSessionProjector = (): EffectProjector => ({
 					INSERT INTO sessions (id, provider, provider_sid, title, status, parent_id, created_at, updated_at)
 					VALUES (${event.data.sessionId}, ${event.data.provider}, ${event.data.providerSessionId ?? null}, ${event.data.title}, 'idle', ${event.data.parentId ?? null}, ${event.createdAt}, ${event.createdAt})
 					ON CONFLICT (id) DO UPDATE SET
-						provider = excluded.provider,
 						provider_sid = COALESCE(excluded.provider_sid, sessions.provider_sid),
 						title = CASE
 							WHEN sessions.title IS NULL

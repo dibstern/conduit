@@ -20,6 +20,7 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { Cause, Data, Effect, Layer, ManagedRuntime } from "effect";
 import { AuthManager } from "../auth.js";
+import { defaultInstanceIdForDriver } from "../contracts/provider-instance.js";
 import { makeMessagePollerManagerLive } from "../domain/relay/Layers/message-poller-manager-layer.js";
 import { makePtyRuntimeLive } from "../domain/relay/Layers/pty-manager-layer.js";
 import {
@@ -1067,6 +1068,7 @@ export async function createProjectRelay(
 						}),
 						log: sseLog,
 						pipelineLog,
+						providerInstanceId: defaultInstanceIdForDriver("opencode"),
 						getSessionStatuses: () => statusPoller.getCurrentStatuses(),
 						listPendingQuestions: () => api.question.list(),
 						listPendingPermissions: () => api.permission.list(),
@@ -1093,7 +1095,7 @@ export async function createProjectRelay(
 					// reconnects so a named stream's (re)connect cannot reset
 					// in-flight default-session ingestion state.
 					const instanceClients = yield* OpenCodeInstanceClientsTag;
-					yield* instanceClients.registerStreamWirer((stream) =>
+					yield* instanceClients.registerStreamWirer((stream, instanceId) =>
 						Effect.gen(function* () {
 							yield* Effect.sync(() =>
 								orchestration.wireSSEToInstance((event, handler) => {
@@ -1103,12 +1105,18 @@ export async function createProjectRelay(
 							yield* wireSSEConsumerEffect(
 								{
 									...sseConsumerDeps,
+									providerInstanceId: instanceId,
 									...(opencodeRuntimeIngress != null && {
 										opencodeRuntimeIngress: {
-											onSSEEventEffect: (event, sessionId) =>
+											onSSEEventEffect: (
+												event,
+												sessionId,
+												providerInstanceId,
+											) =>
 												opencodeRuntimeIngress.onSSEEventEffect(
 													event,
 													sessionId,
+													providerInstanceId,
 												),
 											onReconnect: () => {},
 										},
