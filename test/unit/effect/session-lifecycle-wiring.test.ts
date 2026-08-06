@@ -2,6 +2,7 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { SqlClient } from "@effect/sql";
 import { describe, it } from "@effect/vitest";
 import { Effect, Layer, PubSub } from "effect";
 import { expect, vi } from "vitest";
@@ -24,6 +25,7 @@ import {
 } from "../../../src/lib/domain/relay/Services/session-manager-service.js";
 import { makeSessionManagerStateLive } from "../../../src/lib/domain/relay/Services/session-manager-state.js";
 import { createSilentLogger } from "../../../src/lib/logger.js";
+import { ClaudeEventPersistEffectTag } from "../../../src/lib/persistence/effect/claude-event-persist-effect.js";
 import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
 import { SqliteClient } from "../../../src/lib/persistence/sqlite-client.js";
 import type { MonitoringState } from "../../../src/lib/relay/monitoring-types.js";
@@ -112,14 +114,12 @@ function makeTestLayer(
 	return Layer.provideMerge(wiringLayer, bridgeLayers);
 }
 
-function makeServiceLifecycleTestLayer(
+function makeServiceLifecycleLayers<ROut, E, RIn>(
 	services: ReturnType<typeof makeMockServices>,
 	deps: ReturnType<typeof makeMockDeps>,
-	api = makeMockOpenCodeAPI(),
-	dbFile?: string,
+	api: ReturnType<typeof makeMockOpenCodeAPI>,
+	persistenceLayer: Layer.Layer<ROut, E, RIn>,
 ) {
-	const persistenceLayer =
-		dbFile === undefined ? Layer.empty : makePersistenceEffectLayer(dbFile);
 	const wiringLayer = makeSessionLifecycleWiringLive({
 		translator: deps.translator as any,
 		sseTracker: deps.sseTracker as any,
@@ -138,9 +138,40 @@ function makeServiceLifecycleTestLayer(
 		persistenceLayer,
 	);
 
-	return Layer.mergeAll(wiringLayer, SessionManagerServiceLive).pipe(
-		Layer.provide(baseLayer),
+	const serviceLayer = Layer.mergeAll(wiringLayer, SessionManagerServiceLive);
+	return { baseLayer, serviceLayer };
+}
+
+function makeServiceLifecycleTestLayer(
+	services: ReturnType<typeof makeMockServices>,
+	deps: ReturnType<typeof makeMockDeps>,
+	api = makeMockOpenCodeAPI(),
+	dbFile?: string,
+) {
+	const persistenceLayer =
+		dbFile === undefined ? Layer.empty : makePersistenceEffectLayer(dbFile);
+	const { baseLayer, serviceLayer } = makeServiceLifecycleLayers(
+		services,
+		deps,
+		api,
+		persistenceLayer,
 	);
+	return serviceLayer.pipe(Layer.provide(baseLayer));
+}
+
+function makeDurableServiceLifecycleTestLayer(
+	services: ReturnType<typeof makeMockServices>,
+	deps: ReturnType<typeof makeMockDeps>,
+	api: ReturnType<typeof makeMockOpenCodeAPI>,
+	dbFile: string,
+) {
+	const { baseLayer, serviceLayer } = makeServiceLifecycleLayers(
+		services,
+		deps,
+		api,
+		makePersistenceEffectLayer(dbFile),
+	);
+	return Layer.provideMerge(serviceLayer, baseLayer);
 }
 
 function makePinoSpies() {
@@ -335,6 +366,55 @@ describe("SessionLifecycleWiringLive", () => {
 				Effect.provide(
 					Layer.fresh(
 						makeServiceLifecycleTestLayer(services, deps, api, dbFile),
+					),
+				),
+				Effect.ensuring(
+					Effect.sync(() => rmSync(tmpDir, { recursive: true, force: true })),
+				),
+			);
+		},
+	);
+
+	it.live(
+		"deletes a raw-seeded session through durable tombstone persistence",
+		() => {
+			const tmpDir = mkdtempSync(
+				join(tmpdir(), "conduit-session-lifecycle-legacy-delete-"),
+			);
+			const dbFile = join(tmpDir, "events.sqlite");
+			const sessionId = "legacy-raw-seeded-session";
+			const services = makeMockServices();
+			const deps = makeMockDeps();
+			const api = makeMockOpenCodeAPI();
+
+			return Effect.gen(function* () {
+				const persist = yield* ClaudeEventPersistEffectTag;
+				const sql = yield* SqlClient.SqlClient;
+				const service = yield* SessionManagerServiceTag;
+				yield* sql`
+					INSERT INTO sessions (
+						id, provider, provider_sid, title, status, created_at, updated_at
+					) VALUES (
+						${sessionId}, 'opencode', ${sessionId}, 'Legacy raw seed', 'idle', 1, 1
+					)`;
+				const didDelete = yield* service
+					.deleteSession(sessionId)
+					.pipe(Effect.provideService(ClaudeEventPersistEffectTag, persist));
+				const events = yield* sql<{ readonly type: string }>`
+					SELECT type FROM events
+					WHERE session_id = ${sessionId}
+					ORDER BY sequence ASC`;
+				const sessions = yield* sql<{ readonly count: number }>`
+					SELECT COUNT(*) AS count FROM sessions WHERE id = ${sessionId}`;
+
+				expect(didDelete).toBe(true);
+				expect(events.map((event) => event.type)).toContain("session.deleted");
+				expect(sessions[0]?.count).toBe(0);
+			}).pipe(
+				Effect.scoped,
+				Effect.provide(
+					Layer.fresh(
+						makeDurableServiceLifecycleTestLayer(services, deps, api, dbFile),
 					),
 				),
 				Effect.ensuring(

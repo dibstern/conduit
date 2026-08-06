@@ -81,6 +81,14 @@ type ExistingMessagePart = {
 	readonly status: string | null;
 };
 
+/**
+ * Terminal events that may act on an existing read-model session without a
+ * durable lifecycle root. Keep this list narrow: content events must prove
+ * canonical creation or an active provider binding before persistence.
+ */
+const LIFECYCLE_ROOT_OPTIONAL_EVENT_TYPES: ReadonlySet<CanonicalEvent["type"]> =
+	new Set(["session.deleted"]);
+
 function claudeSubagentSessionCreatedEventId(childSessionId: string): EventId {
 	return Schema.decodeSync(EventId)(
 		`evt_claude_subagent_session_created_${childSessionId}`,
@@ -159,6 +167,28 @@ export const makeClaudeEventPersistEffect = Effect.gen(function* () {
 			),
 		);
 
+	const requireReadModelSession = (
+		sessionId: string,
+		operation: ClaudeSessionLifecycleError["operation"],
+		role: ClaudeSessionLifecycleError["role"],
+	): Effect.Effect<void, SqlError | ClaudeSessionLifecycleError> =>
+		sql<{ readonly id: string }>`
+			SELECT id FROM sessions WHERE id = ${sessionId} LIMIT 1
+		`.pipe(
+			Effect.flatMap((rows) =>
+				rows.length > 0
+					? Effect.void
+					: Effect.fail(
+							new ClaudeSessionLifecycleError({
+								operation,
+								sessionId,
+								role,
+								reason: "missing-session",
+							}),
+						),
+			),
+		);
+
 	const projectEvent = (
 		stored: StoredEvent,
 	): Effect.Effect<void, ProjectionRunnerError | SqlError> =>
@@ -184,11 +214,13 @@ export const makeClaudeEventPersistEffect = Effect.gen(function* () {
 	): Effect.Effect<void, ClaudeEventPersistFailure> =>
 		Effect.gen(function* () {
 			yield* ensureRecovered();
-			yield* requireSession(
-				event.sessionId,
-				"persistEvent",
-				"existing-session",
-			);
+			yield* LIFECYCLE_ROOT_OPTIONAL_EVENT_TYPES.has(event.type)
+				? requireReadModelSession(
+						event.sessionId,
+						"persistEvent",
+						"existing-session",
+					)
+				: requireSession(event.sessionId, "persistEvent", "existing-session");
 			yield* commitAndSignal([event], options);
 		}).pipe(Effect.mapError(mapPersistError("persistEvent")));
 

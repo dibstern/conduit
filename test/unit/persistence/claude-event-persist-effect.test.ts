@@ -173,6 +173,61 @@ describe("ClaudeEventPersistEffect session lifecycle", () => {
 	);
 
 	it.scoped(
+		"rejects an ordinary content event for a raw-only session row",
+		() => {
+			const dir = mkdtempSync(join(tmpdir(), "conduit-claude-raw-content-"));
+			const filename = join(dir, "events.db");
+			const layer = makePersistenceEffectLayer(filename);
+			const sessionId = "legacy-raw-content-session";
+
+			return Effect.gen(function* () {
+				const sql = yield* SqlClient.SqlClient;
+				const persist = yield* ClaudeEventPersistEffectTag;
+				yield* sql`
+					INSERT INTO sessions (
+						id, provider, provider_sid, title, status, created_at, updated_at
+					) VALUES (
+						${sessionId}, 'opencode', ${sessionId}, 'Legacy raw seed', 'idle', 1, 1
+					)`;
+
+				const result = yield* Effect.either(
+					persist.persistEvent(
+						canonicalEvent(
+							"message.created",
+							sessionId,
+							{
+								messageId: "raw-content-message",
+								role: "user",
+								sessionId,
+							},
+							{ provider: "claude" },
+						),
+					),
+				);
+				const events = yield* sql<{ readonly count: number }>`
+					SELECT COUNT(*) AS count FROM events WHERE session_id = ${sessionId}`;
+
+				expect(result).toMatchObject({
+					_tag: "Left",
+					left: expect.objectContaining({
+						_tag: "ClaudeSessionLifecycleError",
+						operation: "persistEvent",
+						sessionId,
+						role: "existing-session",
+						reason: "missing-session",
+					}),
+				});
+				expect(events[0]?.count).toBe(0);
+			}).pipe(
+				Effect.provide(Layer.fresh(layer)),
+				Effect.ensuring(
+					Effect.sync(() => rmSync(dir, { recursive: true, force: true })),
+				),
+			);
+		},
+	);
+
+	it.scoped(
 		"deletes an existing session but rejects a missing compatibility delete",
 		() => {
 			const dir = mkdtempSync(
