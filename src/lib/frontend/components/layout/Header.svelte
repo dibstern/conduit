@@ -159,7 +159,7 @@
 				{#if currentInstance}
 					<div class="relative">
 						<button
-							class="inline-flex items-center gap-1 ml-1 px-1.5 py-0.5 rounded text-xs font-medium text-text-muted bg-black/[0.06] hover:bg-black/[0.1] cursor-pointer"
+							class="inline-flex items-center gap-1 ml-1 px-1.5 py-0.5 rounded text-xs font-medium text-text-muted bg-[rgba(var(--overlay-rgb),0.06)] hover:bg-[rgba(var(--overlay-rgb),0.1)] cursor-pointer"
 							title="{currentInstance.name} ({currentInstance.status})"
 							data-testid="instance-badge"
 							onclick={handleToggleInstanceSelector}
@@ -178,7 +178,7 @@
 							>
 								{#each instanceState.instances as inst}
 									<button
-										class="flex items-center gap-2 w-full px-3 py-1.5 text-left hover:bg-black/[0.06] text-text"
+										class="flex items-center gap-2 w-full px-3 py-1.5 text-left hover:bg-[rgba(var(--overlay-rgb),0.06)] text-text"
 										onclick={() => handleSelectInstance(inst.id)}
 									>
 										<span
@@ -191,7 +191,7 @@
 								{/each}
 								<div class="border-t border-border mt-1 pt-1">
 									<button
-										class="w-full px-3 py-1.5 text-left text-text-muted hover:bg-black/[0.06]"
+										class="w-full px-3 py-1.5 text-left text-text-muted hover:bg-[rgba(var(--overlay-rgb),0.06)]"
 										onclick={handleManageInstances}
 									>
 										Manage Instances

@@ -599,7 +599,7 @@
 					<div id="instance-settings-list" class="space-y-1 font-brand">
 							{#each instances as inst}
 								<div class="border border-border rounded-lg">
-									<button class="flex items-center justify-between w-full px-3 py-2 text-left text-sm hover:bg-white/[0.03] cursor-pointer bg-transparent border-none" onclick={() => handleToggleInstance(inst.id)}>
+									<button class="flex items-center justify-between w-full px-3 py-2 text-left text-sm hover:bg-[rgba(var(--overlay-rgb),0.03)] cursor-pointer bg-transparent border-none" onclick={() => handleToggleInstance(inst.id)}>
 										<div class="flex items-center gap-2 min-w-0">
 											<span class={"w-2 h-2 rounded-full shrink-0 " + instanceStatusColor(inst.status)}></span>
 											{#if renamingInstanceId === inst.id}
@@ -617,11 +617,11 @@
 									{#if expandedInstanceId === inst.id}
 										<div class="flex flex-wrap gap-2 px-3 py-2 border-t border-border">
 											{#if inst.managed}
-												<button class="px-3 py-1 text-xs rounded border border-border text-text hover:bg-white/[0.05] cursor-pointer bg-transparent" onclick={() => handleStart(inst.id)}>Start</button>
-												<button class="px-3 py-1 text-xs rounded border border-border text-text hover:bg-white/[0.05] cursor-pointer bg-transparent" onclick={() => handleStop(inst.id)}>Stop</button>
+												<button class="px-3 py-1 text-xs rounded border border-border text-text hover:bg-[rgba(var(--overlay-rgb),0.05)] cursor-pointer bg-transparent" onclick={() => handleStart(inst.id)}>Start</button>
+												<button class="px-3 py-1 text-xs rounded border border-border text-text hover:bg-[rgba(var(--overlay-rgb),0.05)] cursor-pointer bg-transparent" onclick={() => handleStop(inst.id)}>Stop</button>
 											{/if}
 											<button class="px-3 py-1 text-xs rounded border border-border text-accent hover:bg-accent/10 cursor-pointer bg-transparent" data-testid="rename-instance-btn" onclick={() => startRename(inst.id, inst.name)}>Rename</button>
-											<button class="px-3 py-1 text-xs rounded border border-red-700 text-red-500 hover:bg-red-500/10 cursor-pointer bg-transparent" onclick={() => handleRemove(inst.id, inst.name)}>Remove</button>
+											<button class="px-3 py-1 text-xs rounded border border-red-700 text-red-500 hover:bg-error/10 cursor-pointer bg-transparent" onclick={() => handleRemove(inst.id, inst.name)}>Remove</button>
 										</div>
 									{/if}
 								</div>
@@ -633,7 +633,7 @@
 					<div class="mt-2 space-y-2 font-brand">
 							<p class="text-sm text-text-muted mb-3">No OpenCode instances detected. Start one from your terminal and it will appear here automatically.</p>
 							<div class="border border-border rounded-lg overflow-hidden">
-								<button type="button" class="flex items-center gap-2 w-full px-3 py-2.5 text-left text-sm font-medium text-text hover:bg-white/[0.03] cursor-pointer bg-transparent border-none" onclick={() => toggleScenario("direct")}>
+								<button type="button" class="flex items-center gap-2 w-full px-3 py-2.5 text-left text-sm font-medium text-text hover:bg-[rgba(var(--overlay-rgb),0.03)] cursor-pointer bg-transparent border-none" onclick={() => toggleScenario("direct")}>
 									<Icon name={expandedScenario === "direct" ? "chevron-down" : "chevron-right"} size={14} class="text-text-muted shrink-0" />
 									<span>Quick Start — Direct API Key</span>
 								</button>
@@ -648,7 +648,7 @@
 								{/if}
 							</div>
 							<div class="border border-border rounded-lg overflow-hidden">
-								<button type="button" class="flex items-center gap-2 w-full px-3 py-2.5 text-left text-sm font-medium text-text hover:bg-white/[0.03] cursor-pointer bg-transparent border-none" onclick={() => toggleScenario("ccs")}>
+								<button type="button" class="flex items-center gap-2 w-full px-3 py-2.5 text-left text-sm font-medium text-text hover:bg-[rgba(var(--overlay-rgb),0.03)] cursor-pointer bg-transparent border-none" onclick={() => toggleScenario("ccs")}>
 									<Icon name={expandedScenario === "ccs" ? "chevron-down" : "chevron-right"} size={14} class="text-text-muted shrink-0" />
 									<span>Multi-Provider — Via CCS</span>
 									{#if ccsDetected}<Icon name="circle-check" size={14} class="text-green-500 ml-auto shrink-0" />{:else if proxyResult === null}<span class="text-xs text-text-muted animate-pulse ml-auto">detecting...</span>{/if}
@@ -671,7 +671,7 @@
 								{/if}
 							</div>
 							<div class="border border-border rounded-lg overflow-hidden">
-								<button type="button" class="flex items-center gap-2 w-full px-3 py-2.5 text-left text-sm font-medium text-text hover:bg-white/[0.03] cursor-pointer bg-transparent border-none" onclick={() => toggleScenario("custom")}>
+								<button type="button" class="flex items-center gap-2 w-full px-3 py-2.5 text-left text-sm font-medium text-text hover:bg-[rgba(var(--overlay-rgb),0.03)] cursor-pointer bg-transparent border-none" onclick={() => toggleScenario("custom")}>
 									<Icon name={expandedScenario === "custom" ? "chevron-down" : "chevron-right"} size={14} class="text-text-muted shrink-0" />
 									<span>Custom Setup</span>
 								</button>

@@ -364,6 +364,7 @@
 			onmousedown={handleResizeStart}
 			ontouchstart={handleResizeStart}
 		>
+		<!-- design-token-waiver: Fixed dark-terminal debug overlay (see file header); its palette is intentionally raw and theme-independent, not part of the themed UI surface. -->
 		<svg class="w-2.5 h-2.5 text-green-700/60 hover:text-green-500/80 transition-colors" viewBox="0 0 10 10" fill="none">
 			<line x1="1" y1="3" x2="3" y2="1" stroke="currentColor" stroke-width="1.5" />
 			<line x1="1" y1="7" x2="7" y2="1" stroke="currentColor" stroke-width="1.5" />
@@ -382,6 +383,7 @@
 			onmousedown={(e) => e.stopPropagation()}
 			ontouchstart={(e) => e.stopPropagation()}
 		>
+			<!-- design-token-waiver: Fixed dark-terminal debug overlay (see file header); its palette is intentionally raw and theme-independent, not part of the themed UI surface. -->
 			<button
 				class="cursor-pointer text-xs px-2 py-1.5 {wsDebugState.verboseMessages ? 'text-yellow-400' : 'text-gray-500 hover:text-gray-300'}"
 				onclick={toggleVerbose}
@@ -389,6 +391,7 @@
 			>
 				{wsDebugState.verboseMessages ? "verbose:on" : "verbose:off"}
 			</button>
+			<!-- design-token-waiver: Fixed dark-terminal debug overlay (see file header); its palette is intentionally raw and theme-independent, not part of the themed UI surface. -->
 			<button
 				class="cursor-pointer text-xs px-2 py-1.5 {copyFlash ? 'text-green-400' : 'text-gray-500 hover:text-gray-300'}"
 				onclick={copyLog}
@@ -396,6 +399,7 @@
 			>
 				{copyFlash ? "copied!" : "copy"}
 			</button>
+			<!-- design-token-waiver: Fixed dark-terminal debug overlay (see file header); its palette is intentionally raw and theme-independent, not part of the themed UI surface. -->
 			<button
 				class="text-gray-500 hover:text-gray-300 cursor-pointer text-xs px-2 py-1.5"
 				onclick={handleClear}
@@ -403,6 +407,7 @@
 			>
 				clear
 			</button>
+			<!-- design-token-waiver: Fixed dark-terminal debug overlay (see file header); its palette is intentionally raw and theme-independent, not part of the themed UI surface. -->
 			<button
 				class="text-gray-500 hover:text-gray-300 cursor-pointer text-xs leading-none px-2 py-1.5"
 				onclick={() => onClose?.()}
@@ -452,6 +457,7 @@
 								<span class="text-cyan-600 truncate text-[11px]">{summary}</span>
 							{/if}
 							{#if evt.payload}
+								<!-- design-token-waiver: Fixed dark-terminal debug overlay (see file header); its palette is intentionally raw and theme-independent, not part of the themed UI surface. -->
 								<button
 									class="text-gray-600 hover:text-gray-300 text-[10px] ml-auto shrink-0 cursor-pointer"
 									onclick={() => { evt._expanded = !evt._expanded; }}
