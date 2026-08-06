@@ -9,6 +9,7 @@
 			"!acceptance/visual/artifacts",
 			"!test-results",
 			"!.claude",
+			"!.scratch",
 			"!.worktrees",
 			"!docs/**/*.html",
 			"!.opencode",
