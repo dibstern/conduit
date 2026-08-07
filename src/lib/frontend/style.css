@@ -44,8 +44,8 @@
 
 	--color-thinking: #eab308;
 	--color-thinking-bg: rgba(234, 179, 8, 0.06);
-	--color-tool: #00e5ff;
-	--color-tool-bg: rgba(0, 229, 255, 0.04);
+	--color-tool: #4078f2;
+	--color-tool-bg: rgba(64, 120, 242, 0.04);
 	--color-warning: #eab308;
 	--color-warning-bg: rgba(234, 179, 8, 0.12);
 
@@ -59,12 +59,12 @@
 	--hl-keyword: #ff2d7b;
 	--hl-string: #22c55e;
 	--hl-number: #ff2d7b;
-	--hl-function: #00e5ff;
+	--hl-function: #4078f2;
 	--hl-variable: #ff4444;
 	--hl-type: #eab308;
 	--hl-constant: #ff2d7b;
 	--hl-tag: #ff4444;
-	--hl-attr: #00e5ff;
+	--hl-attr: #4078f2;
 	--hl-regexp: #00e5ff;
 	--hl-meta: #eab308;
 	--hl-builtin: #ff2d7b;

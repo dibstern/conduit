@@ -473,6 +473,35 @@ describe("loadThemeFiles → computeVars integration", () => {
 		}
 	});
 
+	it("every bundled theme has distinct ANSI source slots", async () => {
+		const { bundled } = await loadThemeFiles();
+		const ansiSlots = [
+			"base00",
+			"base03",
+			"base05",
+			"base07",
+			"base08",
+			"base0A",
+			"base0B",
+			"base0C",
+			"base0D",
+			"base0E",
+		] as const;
+
+		for (const [id, theme] of Object.entries(bundled)) {
+			const slotByColor = new Map<string, (typeof ansiSlots)[number]>();
+			for (const slot of ansiSlots) {
+				const color = theme[slot].toLowerCase();
+				const matchingSlot = slotByColor.get(color);
+				expect(
+					matchingSlot,
+					`${id}: ANSI source slots ${matchingSlot} and ${slot} both use #${color}`,
+				).toBeUndefined();
+				slotByColor.set(color, slot);
+			}
+		}
+	});
+
 	it("every bundled theme produces valid mermaid vars", async () => {
 		const { bundled } = await loadThemeFiles();
 
