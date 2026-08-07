@@ -24,6 +24,19 @@ describe("backgroundInert", () => {
 		expect(backgroundSvg.getAttribute("aria-hidden")).toBe("false");
 	});
 
+	it("preserves pre-existing inert and aria-hidden state on teardown", async () => {
+		const view = render(BackgroundInertHost);
+		const preexistingBackground = view.getByTestId("preexisting-background");
+
+		expect(preexistingBackground.hasAttribute("inert")).toBe(true);
+		expect(preexistingBackground.getAttribute("aria-hidden")).toBe("true");
+
+		await view.rerender({ enabled: false });
+
+		expect(preexistingBackground.hasAttribute("inert")).toBe(true);
+		expect(preexistingBackground.getAttribute("aria-hidden")).toBe("true");
+	});
+
 	it("restores outer modal controls when a nested modal closes", async () => {
 		const view = render(NestedModals);
 		const outerAction = view.getByTestId("outer-action");

@@ -30,22 +30,53 @@ export function dismiss(
 	update(options: DismissOptions): void;
 	destroy(): void;
 } {
+	let pointerDownTarget: EventTarget | null = null;
+
+	function isOutside(target: EventTarget | null) {
+		if (!(target instanceof Node) || node.contains(target)) return false;
+
+		return !options.ignore?.some((candidate) => {
+			const element = typeof candidate === "function" ? candidate() : candidate;
+			return element?.contains(target);
+		});
+	}
+
+	function handlePointerdown(event: PointerEvent) {
+		pointerDownTarget = event.target;
+	}
+
+	/**
+	 * The test is "did this interaction BEGIN inside?", not "did it begin
+	 * outside?" — the difference is the case where no pointerdown was recorded
+	 * at all, and getting it backwards silently breaks the keyboard.
+	 *
+	 * A click has no preceding pointerdown when it comes from keyboard
+	 * activation (Enter/Space on a focused control) or from a programmatic
+	 * `.click()`. Requiring a recorded outside pointerdown would make those
+	 * clicks stop dismissing, so tabbing out of an open dropdown and pressing
+	 * Enter would leave it hanging open over the action just taken. Only an
+	 * interaction we positively saw start inside is suppressed; anything else
+	 * dismisses as before.
+	 */
+	function beganInside() {
+		return (
+			pointerDownTarget instanceof Node && node.contains(pointerDownTarget)
+		);
+	}
+
 	function handleClick(event: MouseEvent) {
-		const target = event.target;
+		const startedInside = beganInside();
+		pointerDownTarget = null;
 		if (
 			options.enabled === false ||
 			options.outsideClick === false ||
-			!(target instanceof Node) ||
-			node.contains(target)
+			startedInside ||
+			!isOutside(event.target)
 		) {
 			return;
 		}
 
-		const ignored = options.ignore?.some((candidate) => {
-			const element = typeof candidate === "function" ? candidate() : candidate;
-			return element?.contains(target);
-		});
-		if (!ignored) options.onDismiss();
+		options.onDismiss();
 	}
 
 	function handleKeydown(event: KeyboardEvent) {
@@ -73,6 +104,7 @@ export function dismiss(
 		isEnabled: () => options.enabled !== false,
 	};
 	activeDismissers.push(stackEntry);
+	document.addEventListener("pointerdown", handlePointerdown, true);
 	document.addEventListener("click", handleClick, true);
 	document.addEventListener("keydown", handleKeydown);
 
@@ -83,6 +115,7 @@ export function dismiss(
 		destroy() {
 			const stackIndex = activeDismissers.lastIndexOf(stackEntry);
 			if (stackIndex !== -1) activeDismissers.splice(stackIndex, 1);
+			document.removeEventListener("pointerdown", handlePointerdown, true);
 			document.removeEventListener("click", handleClick, true);
 			document.removeEventListener("keydown", handleKeydown);
 		},

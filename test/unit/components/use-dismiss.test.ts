@@ -25,7 +25,34 @@ describe("dismiss", () => {
 		await fireEvent.click(getByTestId("dismiss-ignore"));
 		expect(onDismiss).not.toHaveBeenCalled();
 
+		await fireEvent.pointerDown(document.body);
 		await fireEvent.click(document.body);
+		expect(onDismiss).toHaveBeenCalledOnce();
+	});
+
+	it("does not dismiss when a text-selection drag starts inside and ends outside", async () => {
+		const onDismiss = vi.fn();
+		const { getByTestId } = render(DismissHost, {
+			props: { options: { onDismiss } },
+		});
+
+		await fireEvent.pointerDown(getByTestId("dismiss-host"));
+		await fireEvent.click(document.body);
+
+		expect(onDismiss).not.toHaveBeenCalled();
+	});
+
+	// Guards the inverse of the drag fix above. Keyboard activation (Enter on a
+	// focused outside control) and programmatic .click() emit a click with no
+	// preceding pointerdown, so a drag guard written as "require an outside
+	// pointerdown" rather than "reject an inside one" silently stops dismissing
+	// them — an open dropdown would hang over the action the user just took.
+	it("dismisses on an outside click that had no preceding pointerdown", async () => {
+		const onDismiss = vi.fn();
+		render(DismissHost, { props: { options: { onDismiss } } });
+
+		await fireEvent.click(document.body);
+
 		expect(onDismiss).toHaveBeenCalledOnce();
 	});
 
@@ -55,6 +82,7 @@ describe("dismiss", () => {
 			props: { options: { onDismiss, enabled: false } },
 		});
 
+		await fireEvent.pointerDown(document.body);
 		await fireEvent.click(document.body);
 		await fireEvent.keyDown(document, { key: "Escape" });
 
@@ -74,6 +102,7 @@ describe("dismiss", () => {
 				outsideClick: false,
 			},
 		});
+		await fireEvent.pointerDown(document.body);
 		await fireEvent.click(document.body);
 		await fireEvent.keyDown(document, { key: "Escape" });
 
@@ -97,6 +126,7 @@ describe("dismiss", () => {
 		});
 
 		unmount();
+		await fireEvent.pointerDown(document.body);
 		await fireEvent.click(document.body);
 		await fireEvent.keyDown(document, { key: "Escape" });
 

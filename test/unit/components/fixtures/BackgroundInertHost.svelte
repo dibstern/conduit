@@ -10,6 +10,9 @@
 <svg data-testid="background-svg" aria-hidden="false">
 	<a href="/help"><text>Help</text></a>
 </svg>
+<aside data-testid="preexisting-background" inert aria-hidden="true">
+	Already hidden
+</aside>
 <section data-testid="modal-content" use:backgroundInert={enabled}>
 	Modal content
 </section>
