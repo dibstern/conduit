@@ -118,7 +118,7 @@ async function pinRandomness(
 	});
 }
 
-/** Inject CSS to freeze all animations and transitions for deterministic screenshots. */
+/** Freeze animations and transitions at a deterministic capture frame. */
 async function freezeAnimations(
 	page: import("@playwright/test").Page,
 ): Promise<void> {
@@ -133,6 +133,13 @@ async function freezeAnimations(
 		}`,
 	});
 	await page.waitForTimeout(50);
+	await page.evaluate(() => {
+		for (const animation of document.getAnimations()) {
+			if (animation.effect?.getTiming().iterations !== Infinity) continue;
+			animation.pause();
+			animation.currentTime = 0;
+		}
+	});
 }
 
 /**
@@ -182,14 +189,16 @@ async function waitForStoryTerminalPhase(
 /** Require a quiet window long enough to cover delayed portalled DOM teardown. */
 const QUIET_MS = 150;
 
-/** Bound permanently animating stories while keeping their timeout non-fatal. */
+/** Bound quiescence detection while keeping its timeout non-fatal. */
 const QUIESCENCE_TIMEOUT_MS = 3_000;
 
 /**
- * Wait for running animations and then for a mutation-free DOM window.
+ * Wait for unfrozen animations and then for a mutation-free DOM window.
  *
  * Portalled content can outlive Storybook's terminal render phase. Observe the
  * document root so mutations outside #storybook-root also extend the settle.
+ * The capture freeze deliberately pauses intrinsic infinite animations before
+ * this runs; their `finished` promises never resolve, so do not await them.
  */
 async function waitForDomQuiescence(
 	page: import("@playwright/test").Page,
@@ -216,7 +225,10 @@ async function waitForDomQuiescence(
 					timeoutTimer = window.setTimeout(() => finish(false), timeoutMs);
 
 					void Promise.allSettled(
-						document.getAnimations().map((animation) => animation.finished),
+						document
+							.getAnimations()
+							.filter((animation) => animation.playState !== "paused")
+							.map((animation) => animation.finished),
 					).then(() => {
 						if (resolved) return;
 
@@ -435,9 +447,12 @@ if (stories.length > 0) {
 					// Keep the historical settle after the phase wait/fallback. Waiting may
 					// only increase; shortening it risks baseline churn across all stories.
 					await page.waitForTimeout(800);
+					// Freeze before quiescence: intrinsic infinite animations never resolve
+					// `animation.finished`, and freezing only after the timeout made the
+					// timeout frame decide the committed pixels.
+					await freezeAnimations(page);
 					await waitForDomQuiescence(page, story.id);
 					await assertStoryRenderSucceeded(page, story.id);
-					await freezeAnimations(page);
 
 					// Detect zero-height root (fixed-position content escapes flow)
 					const root = page.locator("#storybook-root");
