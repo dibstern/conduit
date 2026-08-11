@@ -117,6 +117,7 @@ describe("Migration Runner", () => {
 		const messagesContextWindowMigration = schemaMigrations[6];
 		const turnModelExecutionMigration = schemaMigrations[7];
 		const sessionsPermissionModeMigration = schemaMigrations[8];
+		const projectionFailuresMigration = schemaMigrations[9];
 		if (
 			!baseline ||
 			!metadataMigration ||
@@ -126,7 +127,8 @@ describe("Migration Runner", () => {
 			!messagePartsCompactionTypeMigration ||
 			!messagesContextWindowMigration ||
 			!turnModelExecutionMigration ||
-			!sessionsPermissionModeMigration
+			!sessionsPermissionModeMigration ||
+			!projectionFailuresMigration
 		) {
 			throw new Error("Expected all event-store schema migrations");
 		}
@@ -182,6 +184,11 @@ describe("Migration Runner", () => {
 				name: "sessions_permission_mode",
 				checksum: calculateMigrationChecksum(sessionsPermissionModeMigration),
 			},
+			{
+				id: 10,
+				name: "create_projection_failures",
+				checksum: calculateMigrationChecksum(projectionFailuresMigration),
+			},
 		]);
 		columns = client
 			.query<{ name: string }>("PRAGMA table_info(message_parts)")
@@ -207,12 +214,163 @@ describe("Migration Runner", () => {
 		);
 	});
 
+	it("upgrades a migration-9 database with durable projection failures once", () => {
+		client = SqliteClient.memory();
+		runMigrations(client, schemaMigrations.slice(0, 9));
+		const beforeTables = client
+			.query<{ name: string }>(
+				"SELECT name FROM sqlite_master WHERE type='table' AND name='projection_failures'",
+			)
+			.map((row) => row.name);
+
+		const applied = runMigrations(client, schemaMigrations).map(
+			({ id, name }) => ({ id, name }),
+		);
+		const columns = client.query<{
+			cid: number;
+			name: string;
+			type: string;
+			notnull: number;
+			dflt_value: string | null;
+			pk: number;
+		}>("PRAGMA table_info(projection_failures)");
+		const foreignKeys = client.query(
+			"PRAGMA foreign_key_list(projection_failures)",
+		);
+		const createTable = client.queryOne<{ sql: string }>(
+			"SELECT sql FROM sqlite_master WHERE type='table' AND name='projection_failures'",
+		);
+
+		client.execute(
+			"INSERT INTO sessions (id, provider, title, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
+			["session-deleted", "opencode", "Deleted", "idle", 1_000, 1_000],
+		);
+		client.execute(
+			"INSERT INTO events (sequence, event_id, session_id, stream_version, type, data, provider, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+			[
+				42,
+				"event-deleted",
+				"session-deleted",
+				0,
+				"session.created",
+				"{}",
+				"opencode",
+				1_000,
+			],
+		);
+		client.execute(
+			"INSERT INTO projection_failures (projector_name, event_sequence, event_type, session_id, error, failed_at) VALUES (?, ?, ?, ?, ?, ?)",
+			[
+				"session",
+				42,
+				"session.created",
+				"session-deleted",
+				"projection failed",
+				2_000,
+			],
+		);
+		client.execute("DELETE FROM events WHERE sequence = ?", [42]);
+		client.execute("DELETE FROM sessions WHERE id = ?", ["session-deleted"]);
+
+		expect({
+			beforeTables,
+			applied,
+			columns,
+			foreignKeys,
+			usesAutoincrement: createTable?.sql.includes("AUTOINCREMENT"),
+			remainingFailures: client.query(
+				"SELECT id, projector_name, event_sequence, event_type, session_id, error, failed_at FROM projection_failures",
+			),
+			secondRun: runMigrations(client, schemaMigrations),
+		}).toEqual({
+			beforeTables: [],
+			applied: [{ id: 10, name: "create_projection_failures" }],
+			columns: [
+				{
+					cid: 0,
+					name: "id",
+					type: "INTEGER",
+					notnull: 0,
+					dflt_value: null,
+					pk: 1,
+				},
+				{
+					cid: 1,
+					name: "projector_name",
+					type: "TEXT",
+					notnull: 1,
+					dflt_value: null,
+					pk: 0,
+				},
+				{
+					cid: 2,
+					name: "event_sequence",
+					type: "INTEGER",
+					notnull: 1,
+					dflt_value: null,
+					pk: 0,
+				},
+				{
+					cid: 3,
+					name: "event_type",
+					type: "TEXT",
+					notnull: 1,
+					dflt_value: null,
+					pk: 0,
+				},
+				{
+					cid: 4,
+					name: "session_id",
+					type: "TEXT",
+					notnull: 1,
+					dflt_value: null,
+					pk: 0,
+				},
+				{
+					cid: 5,
+					name: "error",
+					type: "TEXT",
+					notnull: 1,
+					dflt_value: null,
+					pk: 0,
+				},
+				{
+					cid: 6,
+					name: "failed_at",
+					type: "INTEGER",
+					notnull: 1,
+					dflt_value: null,
+					pk: 0,
+				},
+			],
+			foreignKeys: [],
+			usesAutoincrement: true,
+			remainingFailures: [
+				{
+					id: 1,
+					projector_name: "session",
+					event_sequence: 42,
+					event_type: "session.created",
+					session_id: "session-deleted",
+					error: "projection failed",
+					failed_at: 2_000,
+				},
+			],
+			secondRun: [],
+		});
+	});
+
 	it("upgrades a migration-7 database with turn model execution columns once", () => {
 		client = SqliteClient.memory();
 		const migrationsThrough7 = schemaMigrations.slice(0, 7);
 		const turnModelExecutionMigration = schemaMigrations[7];
 		const sessionsPermissionModeMigration = schemaMigrations[8];
-		if (!turnModelExecutionMigration || !sessionsPermissionModeMigration) {
+		const projectionFailuresMigration = schemaMigrations[9];
+		if (
+			!turnModelExecutionMigration ||
+			!sessionsPermissionModeMigration ||
+			!projectionFailuresMigration
+		) {
 			throw new Error("Expected remaining event-store migrations");
 		}
 		runMigrations(client, migrationsThrough7);
@@ -232,6 +390,11 @@ describe("Migration Runner", () => {
 				id: 9,
 				name: "sessions_permission_mode",
 				checksum: calculateMigrationChecksum(sessionsPermissionModeMigration),
+			},
+			{
+				id: 10,
+				name: "create_projection_failures",
+				checksum: calculateMigrationChecksum(projectionFailuresMigration),
 			},
 		]);
 		expect(runMigrations(client, schemaMigrations)).toEqual([]);

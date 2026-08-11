@@ -87,26 +87,102 @@ describe("Persistence Effect", () => {
 					AND name NOT LIKE 'sqlite_%'
 					AND name != 'effect_sql_migrations'
 				ORDER BY name`;
-			expect(tables.map((row) => row.name)).toEqual([
-				"activities",
-				"command_receipts",
-				"events",
-				"message_parts",
-				"messages",
-				"pending_approvals",
-				"projector_cursors",
-				"provider_command_interactions",
-				"provider_command_meta",
-				"provider_command_outbox",
-				"provider_command_sessions",
-				"provider_command_tombstones",
-				"provider_command_turns",
-				"provider_state",
-				"session_providers",
-				"sessions",
-				"tool_content",
-				"turns",
-			]);
+			const projectionFailureColumns = yield* sql<{
+				cid: number;
+				name: string;
+				type: string;
+				notnull: number;
+				dflt_value: string | null;
+				pk: number;
+			}>`PRAGMA table_info(projection_failures)`;
+			const projectionFailures = yield* sql<Record<string, unknown>>`
+				SELECT * FROM projection_failures`;
+			expect({
+				tables: tables.map((row) => row.name),
+				projectionFailureColumns,
+				projectionFailures,
+			}).toEqual({
+				tables: [
+					"activities",
+					"command_receipts",
+					"events",
+					"message_parts",
+					"messages",
+					"pending_approvals",
+					"projection_failures",
+					"projector_cursors",
+					"provider_command_interactions",
+					"provider_command_meta",
+					"provider_command_outbox",
+					"provider_command_sessions",
+					"provider_command_tombstones",
+					"provider_command_turns",
+					"provider_state",
+					"session_providers",
+					"sessions",
+					"tool_content",
+					"turns",
+				],
+				projectionFailureColumns: [
+					{
+						cid: 0,
+						name: "id",
+						type: "INTEGER",
+						notnull: 0,
+						dflt_value: null,
+						pk: 1,
+					},
+					{
+						cid: 1,
+						name: "projector_name",
+						type: "TEXT",
+						notnull: 1,
+						dflt_value: null,
+						pk: 0,
+					},
+					{
+						cid: 2,
+						name: "event_sequence",
+						type: "INTEGER",
+						notnull: 1,
+						dflt_value: null,
+						pk: 0,
+					},
+					{
+						cid: 3,
+						name: "event_type",
+						type: "TEXT",
+						notnull: 1,
+						dflt_value: null,
+						pk: 0,
+					},
+					{
+						cid: 4,
+						name: "session_id",
+						type: "TEXT",
+						notnull: 1,
+						dflt_value: null,
+						pk: 0,
+					},
+					{
+						cid: 5,
+						name: "error",
+						type: "TEXT",
+						notnull: 1,
+						dflt_value: null,
+						pk: 0,
+					},
+					{
+						cid: 6,
+						name: "failed_at",
+						type: "INTEGER",
+						notnull: 1,
+						dflt_value: null,
+						pk: 0,
+					},
+				],
+				projectionFailures: [],
+			});
 
 			const eventColumns = yield* sql<{
 				name: string;
@@ -146,6 +222,7 @@ describe("Persistence Effect", () => {
 				{ migration_id: 7, name: "messages_context_window" },
 				{ migration_id: 8, name: "turn_model_execution" },
 				{ migration_id: 9, name: "sessions_permission_mode" },
+				{ migration_id: 10, name: "create_projection_failures" },
 			]);
 
 			const legacyMigrationTable = yield* sql<{ name: string }>`

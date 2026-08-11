@@ -100,6 +100,7 @@ describe("Effect SQL migrations", () => {
 					{ migration_id: 7, name: "messages_context_window" },
 					{ migration_id: 8, name: "turn_model_execution" },
 					{ migration_id: 9, name: "sessions_permission_mode" },
+					{ migration_id: 10, name: "create_projection_failures" },
 				]);
 
 				const legacyRows = yield* sql<{ id: number; name: string }>`
@@ -114,6 +115,7 @@ describe("Effect SQL migrations", () => {
 					{ id: 7, name: "messages_context_window" },
 					{ id: 8, name: "turn_model_execution" },
 					{ id: 9, name: "sessions_permission_mode" },
+					{ id: 10, name: "create_projection_failures" },
 				]);
 			}).pipe(
 				Effect.provide(
@@ -139,6 +141,7 @@ describe("Effect SQL migrations", () => {
 					[7, "messages_context_window"],
 					[8, "turn_model_execution"],
 					[9, "sessions_permission_mode"],
+					[10, "create_projection_failures"],
 				]);
 
 				const sql = yield* SqlClient.SqlClient;
@@ -157,8 +160,8 @@ describe("Effect SQL migrations", () => {
 					name: string;
 				}>`SELECT migration_id, name FROM effect_sql_migrations ORDER BY migration_id`;
 				expect(effectHistory.at(-1)).toEqual({
-					migration_id: 9,
-					name: "sessions_permission_mode",
+					migration_id: 10,
+					name: "create_projection_failures",
 				});
 				const legacyHistory = yield* sql<{ id: number; name: string }>`
 					SELECT id, name FROM _migrations ORDER BY id`;
@@ -171,6 +174,141 @@ describe("Effect SQL migrations", () => {
 					makeFileSqlLayer((filename) =>
 						seedDatabase(filename, (db) =>
 							runMigrations(db, schemaMigrations.slice(0, 7)),
+						),
+					),
+				),
+			),
+	);
+
+	it.effect(
+		"adopts and upgrades a migration-9 database with projection failures",
+		() =>
+			Effect.gen(function* () {
+				const sql = yield* SqlClient.SqlClient;
+				const beforeTables = yield* sql<{ name: string }>`
+					SELECT name FROM sqlite_master
+					WHERE type='table' AND name='projection_failures'`;
+				const completed = yield* makeEffectSqlMigrator();
+				const columns = yield* sql<{
+					cid: number;
+					name: string;
+					type: string;
+					notnull: number;
+					dflt_value: string | null;
+					pk: number;
+				}>`PRAGMA table_info(projection_failures)`;
+				const foreignKeys = yield* sql<Record<string, unknown>>`
+					PRAGMA foreign_key_list(projection_failures)`;
+				const createTable = yield* sql<{ sql: string }>`
+					SELECT sql FROM sqlite_master
+					WHERE type='table' AND name='projection_failures'`;
+				const failures = yield* sql<Record<string, unknown>>`
+					SELECT * FROM projection_failures`;
+				const secondRun = yield* makeEffectSqlMigrator();
+				const effectHistory = yield* sql<{
+					migration_id: number;
+					name: string;
+				}>`SELECT migration_id, name FROM effect_sql_migrations ORDER BY migration_id`;
+				const legacyHistory = yield* sql<{ id: number; name: string }>`
+					SELECT id, name FROM _migrations ORDER BY id`;
+
+				expect({
+					beforeTables,
+					completed,
+					columns,
+					foreignKeys,
+					usesAutoincrement: createTable[0]?.sql.includes("AUTOINCREMENT"),
+					failures,
+					secondRun,
+					effectLatest: effectHistory.at(-1),
+					legacyLatest: legacyHistory.at(-1),
+				}).toEqual({
+					beforeTables: [],
+					completed: [
+						[1, "create_event_store_tables"],
+						[2, "add_message_part_metadata"],
+						[3, "add_durable_provider_commands"],
+						[4, "drop_events_session_fk"],
+						[5, "message_parts_file_type"],
+						[6, "message_parts_compaction_type"],
+						[7, "messages_context_window"],
+						[8, "turn_model_execution"],
+						[9, "sessions_permission_mode"],
+						[10, "create_projection_failures"],
+					],
+					columns: [
+						{
+							cid: 0,
+							name: "id",
+							type: "INTEGER",
+							notnull: 0,
+							dflt_value: null,
+							pk: 1,
+						},
+						{
+							cid: 1,
+							name: "projector_name",
+							type: "TEXT",
+							notnull: 1,
+							dflt_value: null,
+							pk: 0,
+						},
+						{
+							cid: 2,
+							name: "event_sequence",
+							type: "INTEGER",
+							notnull: 1,
+							dflt_value: null,
+							pk: 0,
+						},
+						{
+							cid: 3,
+							name: "event_type",
+							type: "TEXT",
+							notnull: 1,
+							dflt_value: null,
+							pk: 0,
+						},
+						{
+							cid: 4,
+							name: "session_id",
+							type: "TEXT",
+							notnull: 1,
+							dflt_value: null,
+							pk: 0,
+						},
+						{
+							cid: 5,
+							name: "error",
+							type: "TEXT",
+							notnull: 1,
+							dflt_value: null,
+							pk: 0,
+						},
+						{
+							cid: 6,
+							name: "failed_at",
+							type: "INTEGER",
+							notnull: 1,
+							dflt_value: null,
+							pk: 0,
+						},
+					],
+					foreignKeys: [],
+					usesAutoincrement: true,
+					failures: [],
+					secondRun: [],
+					effectLatest: {
+						migration_id: 10,
+						name: "create_projection_failures",
+					},
+					legacyLatest: { id: 9, name: "sessions_permission_mode" },
+				});
+			}).pipe(
+				Effect.provide(
+					makeFileSqlLayer((filename) =>
+						seedDatabase(filename, (db) =>
+							runMigrations(db, schemaMigrations.slice(0, 9)),
 						),
 					),
 				),
@@ -199,6 +337,7 @@ describe("Effect SQL migrations", () => {
 					{ migration_id: 7, name: "messages_context_window" },
 					{ migration_id: 8, name: "turn_model_execution" },
 					{ migration_id: 9, name: "sessions_permission_mode" },
+					{ migration_id: 10, name: "create_projection_failures" },
 				]);
 
 				const columns = yield* sql<{ name: string }>`
@@ -284,8 +423,8 @@ describe("Effect SQL migrations", () => {
 					FROM effect_sql_migrations
 					ORDER BY migration_id`;
 				expect(history.at(-1)).toEqual({
-					migration_id: 9,
-					name: "sessions_permission_mode",
+					migration_id: 10,
+					name: "create_projection_failures",
 				});
 			}).pipe(
 				Effect.provide(

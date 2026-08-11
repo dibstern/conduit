@@ -40,6 +40,8 @@ const SHIPPED_MIGRATION_HASHES: Record<string, string> = {
 		"533178028fca7bd02eb561be6ca068515a916e24aa24d268359e80755d2f8096",
 	"0009_sessions_permission_mode.sql":
 		"704698b5fbe61b4755833cde9fb4b8dfe1f0c33f77cc38b478baef49ac0f7909",
+	"0010_projection_failures.sql":
+		"ade689f16ce4c5a201fc872718f4f6c678923ca07e55a0774b5991fdd07ac173",
 };
 
 describe("shipped migrations are immutable", () => {

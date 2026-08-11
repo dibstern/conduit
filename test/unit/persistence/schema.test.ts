@@ -18,26 +18,100 @@ describe("Schema Migration", () => {
 				"SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE '\\_%' ESCAPE '\\' AND name NOT LIKE 'sqlite_%' ORDER BY name",
 			)
 			.map((r) => r.name);
-		expect(tables).toEqual([
-			"activities",
-			"command_receipts",
-			"events",
-			"message_parts",
-			"messages",
-			"pending_approvals",
-			"projector_cursors",
-			"provider_command_interactions",
-			"provider_command_meta",
-			"provider_command_outbox",
-			"provider_command_sessions",
-			"provider_command_tombstones",
-			"provider_command_turns",
-			"provider_state",
-			"session_providers",
-			"sessions",
-			"tool_content",
-			"turns",
-		]);
+		const projectionFailureColumns = client.query<{
+			cid: number;
+			name: string;
+			type: string;
+			notnull: number;
+			dflt_value: string | null;
+			pk: number;
+		}>("PRAGMA table_info(projection_failures)");
+		expect({
+			tables,
+			projectionFailureColumns,
+			projectionFailures: client.query("SELECT * FROM projection_failures"),
+		}).toEqual({
+			tables: [
+				"activities",
+				"command_receipts",
+				"events",
+				"message_parts",
+				"messages",
+				"pending_approvals",
+				"projection_failures",
+				"projector_cursors",
+				"provider_command_interactions",
+				"provider_command_meta",
+				"provider_command_outbox",
+				"provider_command_sessions",
+				"provider_command_tombstones",
+				"provider_command_turns",
+				"provider_state",
+				"session_providers",
+				"sessions",
+				"tool_content",
+				"turns",
+			],
+			projectionFailureColumns: [
+				{
+					cid: 0,
+					name: "id",
+					type: "INTEGER",
+					notnull: 0,
+					dflt_value: null,
+					pk: 1,
+				},
+				{
+					cid: 1,
+					name: "projector_name",
+					type: "TEXT",
+					notnull: 1,
+					dflt_value: null,
+					pk: 0,
+				},
+				{
+					cid: 2,
+					name: "event_sequence",
+					type: "INTEGER",
+					notnull: 1,
+					dflt_value: null,
+					pk: 0,
+				},
+				{
+					cid: 3,
+					name: "event_type",
+					type: "TEXT",
+					notnull: 1,
+					dflt_value: null,
+					pk: 0,
+				},
+				{
+					cid: 4,
+					name: "session_id",
+					type: "TEXT",
+					notnull: 1,
+					dflt_value: null,
+					pk: 0,
+				},
+				{
+					cid: 5,
+					name: "error",
+					type: "TEXT",
+					notnull: 1,
+					dflt_value: null,
+					pk: 0,
+				},
+				{
+					cid: 6,
+					name: "failed_at",
+					type: "INTEGER",
+					notnull: 1,
+					dflt_value: null,
+					pk: 0,
+				},
+			],
+			projectionFailures: [],
+		});
 	});
 
 	it("creates the full production index inventory", () => {

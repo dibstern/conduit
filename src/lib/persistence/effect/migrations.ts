@@ -10,6 +10,7 @@ import {
 	MESSAGE_PARTS_COMPACTION_TYPE_MIGRATION,
 	MESSAGE_PARTS_FILE_TYPE_MIGRATION,
 	MESSAGES_CONTEXT_WINDOW_MIGRATION,
+	PROJECTION_FAILURES_MIGRATION,
 	readMigrationSql,
 	SESSIONS_PERMISSION_MODE_MIGRATION,
 	TURN_MODEL_EXECUTION_MIGRATION,
@@ -41,6 +42,9 @@ const turnModelExecutionMigrationSql = readMigrationSql(
 );
 const sessionsPermissionModeMigrationSql = readMigrationSql(
 	SESSIONS_PERMISSION_MODE_MIGRATION,
+);
+const projectionFailuresMigrationSql = readMigrationSql(
+	PROJECTION_FAILURES_MIGRATION,
 );
 
 const expectedTableColumns = {
@@ -128,6 +132,15 @@ const expectedTableColumns = {
 		"always",
 		"created_at",
 		"resolved_at",
+	],
+	projection_failures: [
+		"id",
+		"projector_name",
+		"event_sequence",
+		"event_type",
+		"session_id",
+		"error",
+		"failed_at",
 	],
 	projector_cursors: ["projector_name", "last_applied_seq", "updated_at"],
 	provider_command_interactions: [
@@ -266,9 +279,13 @@ const durableProviderCommandTableNames = [
 const durableProviderCommandTableNameSet = new Set<string>(
 	durableProviderCommandTableNames,
 );
-const preDurableProviderCommandTableNames = expectedTableNames.filter(
-	(name) => !durableProviderCommandTableNameSet.has(name),
+const preProjectionFailuresTableNames = expectedTableNames.filter(
+	(name) => name !== "projection_failures",
 );
+const preDurableProviderCommandTableNames =
+	preProjectionFailuresTableNames.filter(
+		(name) => !durableProviderCommandTableNameSet.has(name),
+	);
 const preDurableCommandReceiptColumns =
 	expectedTableColumns.command_receipts.slice(0, 6);
 
@@ -366,6 +383,7 @@ const verifyExistingBaselineSchema: Effect.Effect<
 	const actualTableNames = tables.map((row) => row.name);
 	const knownTableShape =
 		sameStrings(actualTableNames, expectedTableNames) ||
+		sameStrings(actualTableNames, preProjectionFailuresTableNames) ||
 		sameStrings(actualTableNames, preDurableProviderCommandTableNames);
 	if (!knownTableShape) {
 		return yield* failSchemaMismatch(
@@ -391,7 +409,8 @@ const verifyExistingBaselineSchema: Effect.Effect<
 		expectedTableColumns,
 	)) {
 		if (
-			durableProviderCommandTableNameSet.has(tableName) &&
+			(durableProviderCommandTableNameSet.has(tableName) ||
+				tableName === "projection_failures") &&
 			!actualTableNames.includes(tableName)
 		) {
 			continue;
@@ -545,6 +564,20 @@ const runSessionsPermissionModeMigration: Effect.Effect<
 	yield* executeSqlStatements(sessionsPermissionModeMigrationSql);
 });
 
+const runProjectionFailuresMigration: Effect.Effect<
+	void,
+	unknown,
+	SqlClient.SqlClient
+> = Effect.gen(function* () {
+	const sql = yield* SqlClient.SqlClient;
+	const columns = yield* sql.unsafe<{ name: string }>(
+		"PRAGMA table_info(projection_failures)",
+	);
+	if (columns.length > 0) return;
+
+	yield* executeSqlStatements(projectionFailuresMigrationSql);
+});
+
 export const effectMigrationEntries = {
 	"0001_create_event_store_tables": runBaselineEventStoreMigration,
 	"0002_add_message_part_metadata": runMessagePartMetadataMigration,
@@ -555,6 +588,7 @@ export const effectMigrationEntries = {
 	"0007_messages_context_window": runMessagesContextWindowMigration,
 	"0008_turn_model_execution": runTurnModelExecutionMigration,
 	"0009_sessions_permission_mode": runSessionsPermissionModeMigration,
+	"0010_create_projection_failures": runProjectionFailuresMigration,
 } satisfies Record<string, Effect.Effect<void, unknown, SqlClient.SqlClient>>;
 
 export function makeEffectMigrationLoader(
