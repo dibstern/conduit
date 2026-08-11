@@ -60,6 +60,7 @@ describe("computeVars", () => {
 
 	it("computes derived colors with exact values", () => {
 		const vars = computeVars(claudeDark);
+		expect(vars["--color-error-bg"]).toBe("rgba(229, 83, 75, 0.12)");
 		// accent-hover is lighten(base09, 0.12) for dark themes
 		expect(vars["--color-accent-hover"]).toMatch(/^#[0-9a-f]{6}$/);
 		expect(vars["--color-accent-hover"]).not.toBe(vars["--color-accent"]);
@@ -158,6 +159,7 @@ describe("computeVars", () => {
 		const vars = computeVars(claudeDark);
 		const rgbaKeys = [
 			"--color-accent-bg",
+			"--color-error-bg",
 			"--color-thinking-bg",
 			"--color-tool-bg",
 			"--color-warning-bg",
@@ -257,6 +259,7 @@ describe("computeVars", () => {
 			"--color-input-bg",
 			"--color-user-bubble",
 			"--color-error",
+			"--color-error-bg",
 			"--color-success",
 			"--color-thinking",
 			"--color-thinking-bg",
@@ -435,6 +438,7 @@ describe("loadThemeFiles → computeVars integration", () => {
 			// Validate rgba-format variables
 			const rgbaKeys = [
 				"--color-accent-bg",
+				"--color-error-bg",
 				"--color-thinking-bg",
 				"--color-tool-bg",
 				"--color-warning-bg",

@@ -160,7 +160,9 @@
 			showToast("Copied to clipboard");
 			setTimeout(() => { copyIcon = "copy"; }, COPY_FEEDBACK_MS);
 		} else {
-			showToast("Failed to copy", { variant: "warn" });
+			// Same failure as SessionContextMenu's copy — identical semantics,
+			// identical variant, or the error treatment stops meaning anything.
+			showToast("Failed to copy", { variant: "error" });
 		}
 	}
 

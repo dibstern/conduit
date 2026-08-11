@@ -265,7 +265,7 @@
 		const sid = sessionState.currentId;
 		const projectSlug = getCurrentSlug();
 		if (!sid || !projectSlug) {
-			showToast("No active session", { variant: "warn" });
+			showToast("No active session", { variant: "error" });
 			return;
 		}
 		if (sid) {
@@ -281,7 +281,7 @@
 				...(imageUrls ? { images: imageUrls } : {}),
 				originId: getBrowserClientId(),
 			}).catch(() => {
-				showToast("Failed to send message", { variant: "warn" });
+				showToast("Failed to send message", { variant: "error" });
 			});
 		});
 
@@ -315,7 +315,7 @@
 			sessionId,
 			commandId: crypto.randomUUID(),
 		}).catch(() => {
-			showToast("Failed to stop session", { variant: "warn" });
+			showToast("Failed to stop session", { variant: "error" });
 		});
 	}
 
@@ -369,7 +369,7 @@
 					}
 			} catch (err) {
 				const msg = err instanceof Error ? err.message : "Image too large";
-				showToast(msg, { variant: "warn" });
+				showToast(msg, { variant: "error" });
 			}
 			};
 			reader.readAsDataURL(file);

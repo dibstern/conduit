@@ -243,7 +243,7 @@ export interface Turn {
 
 // ─── Toast Types ─────────────────────────────────────────────────────────────
 
-export type ToastVariant = "default" | "warn";
+export type ToastVariant = "default" | "warn" | "error";
 
 export interface Toast {
 	id: string;

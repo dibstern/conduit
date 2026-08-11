@@ -57,7 +57,7 @@
 		if (ok) {
 			showToast("Copied resume command");
 		} else {
-			showToast("Failed to copy \u2014 clipboard unavailable", { variant: "warn" });
+			showToast("Failed to copy \u2014 clipboard unavailable", { variant: "error" });
 		}
 		oncopyresume(session.id);
 		onclose();

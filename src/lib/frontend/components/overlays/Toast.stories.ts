@@ -53,6 +53,19 @@ export const WarnToast: Story = {
 	},
 };
 
+export const ErrorToast: Story = {
+	beforeEach: () => {
+		setToasts([
+			{
+				id: "story-error-1",
+				message: "Failed to send message",
+				variant: "error",
+				duration: 999999,
+			},
+		]);
+	},
+};
+
 export const MultipleToasts: Story = {
 	beforeEach: () => {
 		setToasts([
@@ -70,8 +83,8 @@ export const MultipleToasts: Story = {
 			},
 			{
 				id: "story-multi-3",
-				message: "Reconnected",
-				variant: "default",
+				message: "Failed to reconnect",
+				variant: "error",
 				duration: 999999,
 			},
 		]);

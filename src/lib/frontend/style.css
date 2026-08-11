@@ -36,6 +36,7 @@
 	--color-input-bg: #333338;
 	--color-user-bubble: #2c2c30;
 	--color-error: #ff4444;
+	--color-error-bg: rgba(255, 68, 68, 0.12);
 	--color-success: #22c55e;
 
 	--color-sidebar-bg: #141416;

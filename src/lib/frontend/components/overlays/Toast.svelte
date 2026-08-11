@@ -5,17 +5,27 @@
 -->
 <script lang="ts">
 	import { uiState } from "../../stores/ui.svelte.js";
+	import Icon from "../ui/Icon.svelte";
 </script>
 
 {#each uiState.toasts as toast (toast.id)}
 	<div
 		class="pointer-events-auto w-full px-4 py-2 rounded-lg text-sm font-medium shadow-lg notification-slide-in {toast.variant === 'warn'
 			? 'bg-warning-bg border border-warning text-warning'
-			: 'bg-bg-alt border border-border text-text'}"
-		role="status"
-		aria-live="polite"
+			: toast.variant === 'error'
+				? 'flex items-center gap-2 bg-error-bg border border-error text-error'
+				: 'bg-bg-alt border border-border text-text'}"
+		role={toast.variant === "error" ? "alert" : "status"}
+		aria-live={toast.variant === "error" ? "assertive" : "polite"}
 	>
-		{toast.message}
+		{#if toast.variant === "error"}
+			<span aria-hidden="true" class="shrink-0">
+				<Icon name="circle-x" size={16} />
+			</span>
+			<span>{toast.message}</span>
+		{:else}
+			{toast.message}
+		{/if}
 	</div>
 {/each}
 

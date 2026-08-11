@@ -40,6 +40,7 @@ export function computeVars(theme: Base16Theme): Record<string, string> {
 			? darken(b.base01, 0.03)
 			: mixColors(b.base01, b.base02, 0.3),
 		"--color-error": b.base08,
+		"--color-error-bg": hexToRgba(b.base08, 0.12),
 		"--color-success": b.base0B,
 		"--color-thinking": b.base0A,
 		"--color-thinking-bg": hexToRgba(b.base0A, 0.06),

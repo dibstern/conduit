@@ -349,7 +349,7 @@
 						for (const response of responses) applyListSessionsResponse(response);
 					})
 					.catch(() => {
-						showToast("Failed to load sessions", { variant: "warn" });
+						showToast("Failed to load sessions", { variant: "error" });
 					});
 				const routeSessionId = getCurrentSessionId();
 					void getAgentsRpc({
@@ -373,13 +373,13 @@
 				void getProjectsRpc({ projectSlug: slug })
 					.then(applyGetProjectsResponse)
 					.catch(() => {
-						showToast("Failed to load projects", { variant: "warn" });
+						showToast("Failed to load projects", { variant: "error" });
 					});
 				requestFileTree();
 				void getFileTreeRpc({ projectSlug: slug })
 					.then(applyGetFileTreeResponse)
 					.catch(() => {
-						showToast("Failed to load file tree", { variant: "warn" });
+						showToast("Failed to load file tree", { variant: "error" });
 					});
 				void listPtysRpc({
 					projectSlug: slug,

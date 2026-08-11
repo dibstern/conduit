@@ -71,6 +71,25 @@ export const ToastsOnly: Story = {
 				variant: "warn",
 				duration: 999999,
 			},
+			{
+				id: "t3",
+				message: "Failed to reconnect",
+				variant: "error",
+				duration: 999999,
+			},
+		]);
+	},
+};
+
+export const ErrorToast: Story = {
+	beforeEach: () => {
+		setToasts([
+			{
+				id: "error-toast",
+				message: "Failed to load sessions",
+				variant: "error",
+				duration: 999999,
+			},
 		]);
 	},
 };
@@ -112,6 +131,12 @@ export const Combined: Story = {
 				duration: 999999,
 			},
 			{ id: "t2", message: "Rate limited", variant: "warn", duration: 999999 },
+			{
+				id: "t3",
+				message: "Failed to send message",
+				variant: "error",
+				duration: 999999,
+			},
 		]);
 	},
 };
