@@ -207,7 +207,9 @@
 				Relay failed to start
 			</div>
 				{#if relayError}
-					<div class="text-xs text-text-dimmer max-w-xs text-center truncate" title={relayError}>
+					<div
+						class="text-xs text-text-dimmer max-w-xs max-h-[200px] overflow-y-auto break-words whitespace-pre-wrap text-left font-mono"
+					>
 						{relayError}
 					</div>
 				{/if}

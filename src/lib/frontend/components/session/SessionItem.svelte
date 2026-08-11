@@ -220,6 +220,7 @@
 			title="Forked session"
 		>
 			<Icon name="git-fork" size={11} class="inline-block align-[-1px]" />
+			<span class="sr-only">Forked session</span>
 		</span>
 	{/if}
 

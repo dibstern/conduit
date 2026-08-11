@@ -212,13 +212,6 @@
 		id="header-right"
 		class="flex items-center gap-1.5 shrink-0 text-xs text-text-muted"
 	>
-		<!-- Session select (hidden, managed by sidebar in vanilla — kept for compat) -->
-		<select
-			id="session-select"
-			style="display:none;position:absolute;pointer-events:none"
-			title="Switch session"
-		></select>
-
 		<!-- Debug panel toggle (visible when debug feature flag is on) -->
 		{#if featureFlags.debug}
 			<div id="debug-menu-wrap">
@@ -281,6 +274,9 @@
 			id="status"
 			class="status-dot w-[7px] h-[7px] rounded-full shrink-0 {statusClass}"
 			title={statusTitle}
-		></span>
+			role="status"
+		>
+			<span class="sr-only">{statusTitle}</span>
+		</span>
 	</div>
 </div>

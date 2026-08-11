@@ -301,13 +301,11 @@
 												>&#10003;</span
 											>
 										{/if}
-										{stripDateSuffix(formatModelName(model))}
-										{#if isDefaultModel(model)}
-											<span
-												class="ml-1 text-xs text-text-dimmer font-normal"
-												title="Default model">(default)</span
-											>
-										{/if}
+									{stripDateSuffix(formatModelName(model))}
+									{#if isDefaultModel(model)}
+										<span class="ml-1 text-xs text-text-dimmer font-normal"
+											>(default)</span>
+									{/if}
 									</span>
 									{#if cost}
 										<span
@@ -346,6 +344,7 @@
 										title="Default model"
 									>
 										<Icon name="star" size={12} />
+										<span class="sr-only">Default model</span>
 									</span>
 								{/if}
 							</div>

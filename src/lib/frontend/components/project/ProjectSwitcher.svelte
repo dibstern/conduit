@@ -304,6 +304,7 @@
 					title={currentProject?.directory ?? ""}
 				>
 					{displayName}
+					<span class="sr-only">{currentProject?.directory ?? ""}</span>
 				</span>
 				{#if countLabel}
 					<span
@@ -359,6 +360,7 @@
 							href="/p/{project.slug}/"
 							data-testid="project-item"
 							data-slug={project.slug}
+							title={project.directory}
 					class={"group/proj flex items-center gap-2.5 px-3 py-2.5 cursor-pointer transition-colors duration-100 hover:bg-[rgba(var(--overlay-rgb),0.04)] rounded-md no-underline text-inherit visited:text-inherit" +
 							(isActive
 								? " bg-bg-surface"
@@ -374,27 +376,32 @@
 							class={"w-1.5 h-1.5 rounded-full shrink-0" +
 								(isActive ? " bg-accent" : " bg-text-dimmer/40")}
 						></span>
-						<!-- Name -->
-						{#if isRenaming}
-							<input
-								type="text"
-								class="flex-1 min-w-0 bg-input-bg border border-accent rounded py-px px-1 text-xs text-text outline-none font-brand"
-								bind:value={renameValue}
-								onkeydown={(e) => handleRenameKeydown(e, project.slug)}
-								onblur={() => commitProjectRename(project.slug)}
-								onclick={(e) => { e.preventDefault(); e.stopPropagation(); }}
-								use:focusOnMount
-							/>
-						{:else}
-							<span
-								class={"flex-1 text-base truncate" +
-									(isActive
-										? " font-semibold text-text"
-										: " text-text-secondary")}
-							>
-								{project.title}
-							</span>
-						{/if}
+						<!-- Name and directory -->
+						<div class="flex-1 min-w-0 flex flex-col">
+								{#if isRenaming}
+									<input
+										type="text"
+										class="w-full min-w-0 bg-input-bg border border-accent rounded py-px px-1 text-xs text-text outline-none font-brand"
+										bind:value={renameValue}
+										onkeydown={(e) => handleRenameKeydown(e, project.slug)}
+										onblur={() => commitProjectRename(project.slug)}
+										onclick={(e) => { e.preventDefault(); e.stopPropagation(); }}
+										use:focusOnMount
+									/>
+								{:else}
+									<span
+										class={"text-base truncate" +
+											(isActive
+												? " font-semibold text-text"
+												: " text-text-secondary")}
+									>
+										{project.title}
+									</span>
+								{/if}
+								<span class="text-xs text-text-dimmer font-mono truncate">
+									{project.directory}
+								</span>
+						</div>
 						{#if !isRenaming}
 							<!-- Client count -->
 							{#if project.clientCount && project.clientCount > 0}
@@ -428,6 +435,7 @@
 						href="/p/{project.slug}/"
 						data-testid="project-item"
 						data-slug={project.slug}
+						title={project.directory}
 					class={"group/proj flex items-center gap-2.5 px-3 py-2.5 cursor-pointer transition-colors duration-100 hover:bg-[rgba(var(--overlay-rgb),0.04)] rounded-md no-underline text-inherit visited:text-inherit" +
 						(isActive
 							? " bg-bg-surface"
@@ -443,27 +451,32 @@
 							class={"w-1.5 h-1.5 rounded-full shrink-0" +
 								(isActive ? " bg-accent" : " bg-text-dimmer/40")}
 						></span>
-						<!-- Name -->
-						{#if isRenaming}
-							<input
-								type="text"
-								class="flex-1 min-w-0 bg-input-bg border border-accent rounded py-px px-1 text-xs text-text outline-none font-brand"
-								bind:value={renameValue}
-								onkeydown={(e) => handleRenameKeydown(e, project.slug)}
-								onblur={() => commitProjectRename(project.slug)}
-								onclick={(e) => { e.preventDefault(); e.stopPropagation(); }}
-								use:focusOnMount
-							/>
-						{:else}
-							<span
-								class={"flex-1 text-base truncate" +
-									(isActive
-										? " font-semibold text-text"
-										: " text-text-secondary")}
-							>
-								{project.title}
-							</span>
-						{/if}
+						<!-- Name and directory -->
+						<div class="flex-1 min-w-0 flex flex-col">
+								{#if isRenaming}
+									<input
+										type="text"
+										class="w-full min-w-0 bg-input-bg border border-accent rounded py-px px-1 text-xs text-text outline-none font-brand"
+										bind:value={renameValue}
+										onkeydown={(e) => handleRenameKeydown(e, project.slug)}
+										onblur={() => commitProjectRename(project.slug)}
+										onclick={(e) => { e.preventDefault(); e.stopPropagation(); }}
+										use:focusOnMount
+									/>
+								{:else}
+									<span
+										class={"text-base truncate" +
+											(isActive
+												? " font-semibold text-text"
+												: " text-text-secondary")}
+									>
+										{project.title}
+									</span>
+								{/if}
+								<span class="text-xs text-text-dimmer font-mono truncate">
+									{project.directory}
+								</span>
+						</div>
 						{#if !isRenaming}
 							<!-- Client count -->
 							{#if project.clientCount && project.clientCount > 0}

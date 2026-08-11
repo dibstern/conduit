@@ -213,6 +213,15 @@ describe("ModelSelector", () => {
 		expect(discoveryState.defaultProviderId).toBe("claude");
 	});
 
+	it("renders screen-reader text for the default model star", async () => {
+		const { getByText, getByTitle } = render(ModelSelector);
+		await fireEvent.click(getByTitle("Switch model"));
+
+		const defaultModelText = getByText("Default model");
+		expect(defaultModelText.classList.contains("sr-only")).toBe(true);
+		expect(getByText("(default)").hasAttribute("title")).toBe(false);
+	});
+
 	it("reloads provider session through RPC", async () => {
 		const { getByTitle } = render(ModelSelector);
 		await fireEvent.click(getByTitle("Switch model"));
