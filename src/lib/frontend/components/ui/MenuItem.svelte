@@ -2,6 +2,7 @@
 	import { DropdownMenu, type DropdownMenuItemProps } from "bits-ui";
 	import type { Snippet } from "svelte";
 	import type { HTMLAnchorAttributes, HTMLAttributes } from "svelte/elements";
+	import Icon from "./Icon.svelte";
 	import {
 		FLOATING_ITEM_CLASSES,
 		MENU_ITEM_VARIANT_CLASSES,
@@ -14,8 +15,17 @@
 	> &
 		HTMLAttributes<HTMLElement>;
 
-	type MenuItemOwnProps = {
-		variant?: MenuItemVariant | undefined;
+	type MenuItemVariantProps =
+		| {
+				variant?: Exclude<MenuItemVariant, "danger"> | undefined;
+				icon?: never;
+		  }
+		| {
+				variant: "danger";
+				icon?: string | undefined;
+		  };
+
+	type MenuItemOwnProps = MenuItemVariantProps & {
 		disabled?: boolean | undefined;
 		closeOnSelect?: boolean | undefined;
 		onselect?: ((event: Event) => void) | undefined;
@@ -49,6 +59,7 @@
 
 	let {
 		variant = "default",
+		icon = "trash-2",
 		disabled = false,
 		href,
 		id,
@@ -82,15 +93,24 @@
 	});
 </script>
 
+{#snippet itemContent()}
+	{#if variant === "danger"}
+		<span aria-hidden="true" data-menu-item-icon class="shrink-0">
+			<Icon name={icon} size={13} />
+		</span>
+	{/if}
+	{@render children()}
+{/snippet}
+
 <DropdownMenu.Item {...itemProps}>
 	{#snippet child({ props })}
 		{#if href !== undefined}
 			<a {...props} {href}>
-				{@render children()}
+				{@render itemContent()}
 			</a>
 		{:else}
 			<div {...props}>
-				{@render children()}
+				{@render itemContent()}
 			</div>
 		{/if}
 	{/snippet}

@@ -50,6 +50,10 @@ token-disciplined set of primitives that every feature component consumes.
 
 ## Accessibility (baked in, not bolted on)
 
+Destructive menu items always carry an icon; colour is never the only danger
+signal. `MenuItem` uses `trash-2` by default, and other danger actions pass a
+matching icon.
+
 - Correct roles/semantics by construction; keyboard operability by default.
 - **Suppress focus with `focus-visible:outline-hidden` (not `outline-none`)** so a
   transparent outline survives for forced-colors / high-contrast users when the

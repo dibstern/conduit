@@ -161,6 +161,33 @@ describe("Menu", () => {
 		expect(getByTestId("menu").getAttribute("role")).toBe("menu");
 	});
 
+	it("renders the default leading icon for danger items", () => {
+		const { getByRole } = render(MenuTestHarness);
+		const deleteItem = getByRole("menuitem", { name: "Delete" });
+
+		expect(
+			deleteItem.querySelector("[data-menu-item-icon] svg.lucide-trash-2"),
+		).not.toBeNull();
+	});
+
+	it("does not render an icon for default items", () => {
+		const { getByTestId } = render(MenuTestHarness);
+
+		expect(getByTestId("archive-item").querySelector("svg")).toBeNull();
+	});
+
+	it("renders a danger item's icon override", () => {
+		const { getByRole } = render(MenuTestHarness, {
+			props: { dangerIcon: "wifi-off" },
+		});
+		const deleteItem = getByRole("menuitem", { name: "Delete" });
+
+		expect(
+			deleteItem.querySelector("[data-menu-item-icon] svg.lucide-wifi-off"),
+		).not.toBeNull();
+		expect(deleteItem.querySelector("svg.lucide-trash-2")).toBeNull();
+	});
+
 	it("toggles bindable open state, selects an item, and reports open changes", async () => {
 		const onopenchange = vi.fn();
 		const onarchive = vi.fn();

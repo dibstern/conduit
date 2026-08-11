@@ -12,6 +12,7 @@
 		onopenchange,
 		onarchive,
 		onproject,
+		dangerIcon,
 		portalTo,
 		customAnchor,
 	}: {
@@ -20,6 +21,7 @@
 		onopenchange?: (open: boolean) => void;
 		onarchive?: () => void;
 		onproject?: () => void;
+		dangerIcon?: string | undefined;
 		portalTo?: HTMLElement | string;
 		customAnchor?: HTMLElement | null;
 	} = $props();
@@ -44,7 +46,7 @@
 		<MenuItem onselect={onarchive} data-testid="archive-item">
 			Archive
 		</MenuItem>
-		<MenuItem variant="danger">Delete</MenuItem>
+		<MenuItem variant="danger" icon={dangerIcon}>Delete</MenuItem>
 		<MenuItem href="#project-a" onselect={onproject}>Open project</MenuItem>
 	</MenuGroup>
 	<MenuSeparator />

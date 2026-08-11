@@ -6,12 +6,12 @@ const meta = {
 	title: "UI/Menu",
 	component: MenuDemo,
 	tags: ["autodocs", "viewport-capture"],
-	args: { open: true, selected: "compact" },
+	args: { open: true, selected: "shared" },
 	argTypes: {
 		open: { control: "boolean" },
 		selected: {
 			control: "inline-radio",
-			options: ["compact", "comfortable"],
+			options: ["private", "shared"],
 		},
 	},
 } satisfies Meta<typeof MenuDemo>;
@@ -118,7 +118,7 @@ export const SelectingItemRestoresFocus: Story = {
 };
 
 export const RadioSelection: Story = {
-	args: { open: false, selected: "compact" },
+	args: { open: false, selected: "shared" },
 	play: async ({ canvasElement }) => {
 		const canvas = within(canvasElement);
 		const body = within(canvasElement.ownerDocument.body);
@@ -126,16 +126,14 @@ export const RadioSelection: Story = {
 
 		await userEvent.click(trigger);
 		await expect(
-			body.getByRole("menuitemradio", { name: "Compact" }),
+			body.getByRole("menuitemradio", { name: "Shared" }),
 		).toHaveAttribute("aria-checked", "true");
 		await expect(canvas.getByTestId("selected-value")).toHaveTextContent(
-			"compact",
+			"shared",
 		);
-		await userEvent.click(
-			body.getByRole("menuitemradio", { name: "Comfortable" }),
-		);
+		await userEvent.click(body.getByRole("menuitemradio", { name: "Private" }));
 		await expect(canvas.getByTestId("selected-value")).toHaveTextContent(
-			"comfortable",
+			"private",
 		);
 		await waitFor(() => {
 			expect(canvas.getByRole("button", { name: "Open menu" })).toHaveFocus();
@@ -143,10 +141,10 @@ export const RadioSelection: Story = {
 
 		await userEvent.click(trigger);
 		await expect(
-			body.getByRole("menuitemradio", { name: "Compact" }),
+			body.getByRole("menuitemradio", { name: "Shared" }),
 		).toHaveAttribute("aria-checked", "false");
 		await expect(
-			body.getByRole("menuitemradio", { name: "Comfortable" }),
+			body.getByRole("menuitemradio", { name: "Private" }),
 		).toHaveAttribute("aria-checked", "true");
 	},
 };

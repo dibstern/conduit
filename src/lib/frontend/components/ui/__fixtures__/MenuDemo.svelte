@@ -8,7 +8,7 @@
 
 	let {
 		open = $bindable(true),
-		selected = $bindable("compact"),
+		selected = $bindable("shared"),
 	}: {
 		open?: boolean;
 		selected?: string;
@@ -27,16 +27,14 @@
 		</button>
 	{/snippet}
 
-	<MenuGroup label="Actions">
+	<MenuGroup label="Project">
 		<MenuItem>Archive</MenuItem>
 		<MenuItem>Duplicate</MenuItem>
-		<MenuItem variant="danger">Delete</MenuItem>
-	</MenuGroup>
-	<MenuSeparator />
-	<MenuGroup label="Density">
+		<MenuSeparator />
 		<MenuRadioGroup bind:value={selected}>
-			<MenuRadioItem value="compact">Compact</MenuRadioItem>
-			<MenuRadioItem value="comfortable">Comfortable</MenuRadioItem>
+			<MenuRadioItem value="private">Private</MenuRadioItem>
+			<MenuRadioItem value="shared">Shared</MenuRadioItem>
 		</MenuRadioGroup>
+		<MenuItem variant="danger">Delete</MenuItem>
 	</MenuGroup>
 </Menu>
