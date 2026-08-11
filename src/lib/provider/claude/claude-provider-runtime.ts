@@ -240,6 +240,8 @@ function validateUserMessage(message: SDKUserMessage): SDKUserMessage {
 	}
 }
 
+type EffortLevel = NonNullable<SDKOptions["effort"]>;
+
 function validateOptionsJsonShape(options: SDKOptions): SDKOptions {
 	try {
 		return decodeClaudeSDKOptionsJsonShape(options);
@@ -885,6 +887,7 @@ export class ClaudeProviderRuntime {
 					currentApiModelId: apiModelId,
 					...(expectedApiModelId ? { expectedApiModelId } : {}),
 					...(input.agent ? { currentAgent: input.agent } : {}),
+					...(input.variant ? { currentVariant: input.variant } : {}),
 					resumeSessionId,
 					lastAssistantUuid: undefined,
 					turnCount: 0,
@@ -1017,6 +1020,21 @@ export class ClaudeProviderRuntime {
 			}
 			if (input.model?.modelId) {
 				ctx.currentModel = input.model.modelId;
+			}
+			// `effort` is fixed at query creation, so a mid-session change only
+			// lands via the flag-settings layer. Empty/absent clears it back to
+			// the settings-file default.
+			if (input.variant !== ctx.currentVariant) {
+				const effortLevel = (input.variant || null) as EffortLevel | null;
+				yield* Effect.tryPromise({
+					try: () => ctx.query.applyFlagSettings({ effortLevel }),
+					catch: (cause) => cause,
+				});
+				if (input.variant) {
+					ctx.currentVariant = input.variant;
+				} else {
+					delete ctx.currentVariant;
+				}
 			}
 			const expectedApiModelId = yield* this.expectedApiModelIdEffect(
 				baseModelId,

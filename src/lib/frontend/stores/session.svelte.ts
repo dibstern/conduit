@@ -220,9 +220,14 @@ export function findSession(id: string): SessionInfo | undefined {
  *  Subagent sessions (those with a parentID) are excluded when the
  *  hideSubagentSessions UI toggle is active (default). */
 export function getFilteredSessions(): SessionInfo[] {
-	// Active search results take priority (already filtered by server)
+	// Active search results take priority (already filtered by server).
+	// Reconcile against the live session map: searchResults is a snapshot the
+	// removal paths never touch, so without this a session deleted during an
+	// active search keeps rendering until the query is cleared.
 	if (sessionState.searchResults !== null) {
-		return sessionState.searchResults;
+		return sessionState.searchResults.filter((s) =>
+			sessionState.sessions.has(s.id),
+		);
 	}
 	let sessions: SessionInfo[];
 	if (uiState.hideSubagentSessions) {

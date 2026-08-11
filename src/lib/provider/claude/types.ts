@@ -172,7 +172,12 @@ export interface ClaudeSessionContext {
 	currentApiModelId?: string;
 	/** Oracle-normalized model id expected from the SDK's system/init report. */
 	expectedApiModelId?: string;
+	/** Last model id reported as actually serving this session, so a mid-session
+	 *  switch re-reports instead of leaving the creation-time model standing. */
+	reportedApiModelId?: string;
 	currentAgent?: string;
+	/** Reasoning effort in force on the live query. Undefined means SDK default. */
+	currentVariant?: string;
 	resumeSessionId: string | undefined;
 	lastAssistantUuid: string | undefined;
 	turnCount: number;

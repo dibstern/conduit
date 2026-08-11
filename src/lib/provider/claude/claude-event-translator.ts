@@ -658,6 +658,7 @@ export class ClaudeEventTranslator {
 							modelEvidence,
 						),
 					);
+					ctx.reportedApiModelId = message.model;
 					if (
 						ctx.expectedApiModelId !== undefined &&
 						ctx.expectedApiModelId !== message.model
@@ -1268,6 +1269,27 @@ export class ClaudeEventTranslator {
 			// Capture this request's usage (main chain only — subagent
 			// messages carry parent_tool_use_id and live in their own context).
 			if (message.parent_tool_use_id == null) {
+				// `init` only arrives at query creation, so after a mid-session
+				// setModel the assistant message is the first honest report of
+				// which model actually served the turn.
+				const servedBy = message.message.model;
+				if (
+					typeof servedBy === "string" &&
+					servedBy !== ctx.reportedApiModelId
+				) {
+					ctx.reportedApiModelId = servedBy;
+					yield* this.push(
+						ctx,
+						makeProviderRuntimeEvent("turn.model_resolved", ctx.sessionId, {
+							...(ctx.currentModel ? { requestedModel: ctx.currentModel } : {}),
+							...(ctx.expectedApiModelId
+								? { expectedModel: ctx.expectedApiModelId }
+								: {}),
+							actualModel: servedBy,
+						}),
+					);
+				}
+
 				const usage = (message.message as { usage?: unknown }).usage;
 				if (isRecord(usage)) {
 					const num = (v: unknown): number | undefined =>
