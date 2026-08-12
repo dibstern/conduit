@@ -31,6 +31,7 @@ import type {
 import { createEventId } from "../../persistence/events.js";
 import { providerRefsFromRuntimeData } from "../provider-runtime-refs.js";
 import type { EventSink } from "../types.js";
+import { isSameModelIdentity } from "./claude-api-model-id.js";
 import { normalizeToolInput } from "./normalize-tool-input.js";
 import type {
 	ClaudeSessionContext,
@@ -685,7 +686,7 @@ export class ClaudeEventTranslator {
 					ctx.reportedApiModelId = message.model;
 					if (
 						ctx.expectedApiModelId !== undefined &&
-						ctx.expectedApiModelId !== message.model
+						!isSameModelIdentity(ctx.expectedApiModelId, message.model)
 					) {
 						(this.deps.logger ?? defaultLog).warn(
 							`Claude model drift: session=${ctx.sessionId} requested=${ctx.currentModel ?? "<none>"} expected=${ctx.expectedApiModelId} actual=${message.model}`,
@@ -1296,10 +1297,14 @@ export class ClaudeEventTranslator {
 				// `init` only arrives at query creation, so after a mid-session
 				// setModel the assistant message is the first honest report of
 				// which model actually served the turn.
+				// `init` echoes the outbound id (`claude-opus-5[1m]`); the API reports
+				// the bare one (`claude-opus-5`). Comparing identities keeps a 1M
+				// window from looking like a model change on every turn.
 				const servedBy = message.message.model;
 				if (
 					typeof servedBy === "string" &&
-					servedBy !== ctx.reportedApiModelId
+					(ctx.reportedApiModelId === undefined ||
+						!isSameModelIdentity(servedBy, ctx.reportedApiModelId))
 				) {
 					ctx.reportedApiModelId = servedBy;
 					yield* this.push(
