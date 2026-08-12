@@ -8,6 +8,7 @@
 	import { discoveryState } from "../../stores/discovery.svelte.js";
 	import { getCurrentSlug } from "../../stores/router.svelte.js";
 	import { sessionState } from "../../stores/session.svelte.js";
+	import { showToast } from "../../stores/ui.svelte.js";
 	import { switchPermissionModeRpc } from "../../transport/ws-rpc-client.js";
 	import type { SessionPermissionMode } from "../../types.js";
 
@@ -68,6 +69,15 @@
 					if (discoveryState.permissionMode === mode) {
 						discoveryState.permissionMode = previousMode;
 					}
+					// Without this the pill silently snaps back, which reads as a
+					// frontend bug instead of what it is: the server rejected the
+					// mode (typically a stale daemon that predates it).
+					const label =
+						MODES.find((m) => m.mode === mode)?.label ?? mode;
+					showToast(
+						`Couldn't switch approval mode to "${label}" — the daemon rejected it. It may be running an older version.`,
+						{ variant: "warn" },
+					);
 				},
 			);
 		} else {
