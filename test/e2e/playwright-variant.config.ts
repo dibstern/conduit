@@ -10,6 +10,7 @@ export default defineConfig({
 		"variant-selector.spec.ts",
 		"context-window-selector.spec.ts",
 		"permission-mode-selector.spec.ts",
+		"composer-drift-layout.spec.ts",
 	],
 	fullyParallel: true,
 	forbidOnly: !!process.env["CI"],

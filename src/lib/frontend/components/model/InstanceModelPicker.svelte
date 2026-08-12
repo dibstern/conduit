@@ -19,7 +19,6 @@
 		getActiveModel,
 		getAvailableInstances,
 		getEffectiveInstanceId,
-		getModelDisplayName,
 		getProviderGroupsForInstance,
 		formatModelName,
 		type InstanceOption,
@@ -92,15 +91,6 @@
 
 	const activeModel = $derived(getActiveModel());
 	const hasModel = $derived(!!discoveryState.currentModelId);
-	const currentDrift = $derived(
-		discoveryState.modelExecution?.drifted === true &&
-			discoveryState.modelExecution.requestedModel &&
-			discoveryState.modelExecution.expectedModel &&
-			discoveryState.modelExecution.actualModel
-			? discoveryState.modelExecution
-			: null,
-	);
-
 	$effect(() => {
 		const turnEpoch = currentChat().turnEpoch;
 		const projectSlug = getCurrentSlug();
@@ -400,15 +390,6 @@
 			variantRef?.close();
 		}}
 	/>
-
-	{#if currentDrift}
-		<span
-			data-testid="current-model-drift"
-			class="inline-flex items-center shrink-0 rounded-lg border border-warning/30 bg-warning-bg px-2 py-1 text-[11px] leading-[1.3] font-medium text-warning"
-		>
-			⚠ Running {getModelDisplayName(currentDrift.actualModel)} — you selected {getModelDisplayName(currentDrift.requestedModel)}
-		</span>
-	{/if}
 
 	<!-- Upward popover: instance rail + model list -->
 	{#if pickerOpen}

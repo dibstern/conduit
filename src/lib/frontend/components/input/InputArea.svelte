@@ -19,7 +19,7 @@
 	import SubagentBackBar from "../chat/SubagentBackBar.svelte";
 	import PastePreview from "../chat/PastePreview.svelte";
 	import { addUserMessage, currentChat, getOrCreateSessionSlot, inputSyncState, isProcessing } from "../../stores/chat.svelte.js";
-	import { discoveryState, extractSlashQuery, getEffectiveInstanceId } from "../../stores/discovery.svelte.js";
+	import { discoveryState, extractSlashQuery, getEffectiveInstanceId, getModelDisplayName } from "../../stores/discovery.svelte.js";
 	import { extractAtQuery, fileTreeState, filterFiles } from "../../stores/file-tree.svelte.js";
 	import { fetchFileContent, fetchDirectoryListing, resizeImageIfNeeded } from "./input-utils.js";
 	import { sessionState, switchToSession } from "../../stores/session.svelte.js";
@@ -114,6 +114,16 @@
 
 	const canSend = $derived(inputText.trim().length > 0 || pendingImages.length > 0);
 	const showContextMini = $derived(currentChat().contextPercent > 0);
+	/** Drift is only reportable with complete mismatch evidence. */
+	const modelDrift = $derived.by(() => {
+		const execution = discoveryState.modelExecution;
+		return execution?.drifted === true &&
+			execution.requestedModel &&
+			execution.expectedModel &&
+			execution.actualModel
+			? execution
+			: null;
+	});
 
 	// ─── Mobile detection ─────────────────────────────────────────────────────
 	// On mobile, Enter inserts a newline (default textarea behavior) and the
@@ -597,6 +607,16 @@
 						<!-- Pending image previews -->
 			{#if pendingImages.length > 0}
 				<PastePreview images={pendingImages} onRemove={removePendingImage} />
+			{/if}
+
+			<!-- Model drift notice: own row, so it never crowds the controls below -->
+			{#if modelDrift}
+				<div
+					data-testid="current-model-drift"
+					class="mx-1 mb-1 rounded-lg border border-warning/30 bg-warning-bg px-2 py-1 text-[11px] leading-[1.3] font-medium text-warning"
+				>
+					⚠ Running {getModelDisplayName(modelDrift.actualModel)} — you selected {getModelDisplayName(modelDrift.requestedModel)}
+				</div>
 			{/if}
 
 			<!-- Bottom row: attach + agent + model + send -->
