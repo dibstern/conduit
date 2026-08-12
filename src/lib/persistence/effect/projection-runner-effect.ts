@@ -114,16 +114,21 @@ export const makeProjectionRunnerEffect = (
 			projector: EffectProjector,
 			event: StoredEvent,
 			err: unknown,
-		): void => {
-			failures.push({
+		): ProjectionFailure => {
+			const failure: ProjectionFailure = {
 				projectorName: projector.name,
 				eventSequence: event.sequence,
 				eventType: event.type,
 				sessionId: event.sessionId,
-				error: err instanceof Error ? err.message : String(err),
+				error:
+					err instanceof Error && err.message.length > 0
+						? err.message
+						: String(err),
 				failedAt: Date.now(),
-			});
+			};
+			failures.push(failure);
 			if (failures.length > 100) failures.shift();
+			return failure;
 		};
 
 		const projectEvent = (
@@ -300,10 +305,34 @@ export const makeProjectionRunnerEffect = (
 									.pipe(
 										Effect.catchAll((err) =>
 											Effect.gen(function* () {
-												recordFailure(projector, storedEvent, err);
-												yield* cursorRepo.upsert(
-													projector.name,
-													eventRow.sequence,
+												const failure = recordFailure(
+													projector,
+													storedEvent,
+													err,
+												);
+												yield* Effect.logError(
+													"projection replay failed; event skipped",
+												).pipe(
+													Effect.annotateLogs({
+														projectorName: failure.projectorName,
+														eventSequence: failure.eventSequence,
+														eventType: failure.eventType,
+														sessionId: failure.sessionId,
+														error: failure.error,
+													}),
+												);
+												yield* sql.withTransaction(
+													Effect.gen(function* () {
+														yield* sql`
+															INSERT INTO projection_failures
+																(projector_name, event_sequence, event_type, session_id, error, failed_at)
+															VALUES
+																(${failure.projectorName}, ${failure.eventSequence}, ${failure.eventType}, ${failure.sessionId}, ${failure.error}, ${failure.failedAt})`;
+														yield* cursorRepo.upsert(
+															failure.projectorName,
+															failure.eventSequence,
+														);
+													}),
 												);
 											}),
 										),

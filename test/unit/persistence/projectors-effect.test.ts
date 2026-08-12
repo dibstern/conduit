@@ -8,7 +8,7 @@ import { join } from "node:path";
 import { Reactivity } from "@effect/experimental";
 import { SqlClient } from "@effect/sql";
 import * as SqliteNode from "@effect/sql-sqlite-node/SqliteClient";
-import { Effect, Layer } from "effect";
+import { Effect, HashMap, Layer, Logger } from "effect";
 import { describe, expect, it } from "vitest";
 import {
 	EventStoreEffectTag,
@@ -1755,6 +1755,342 @@ describe("Effect Approval Projector (via ProjectionRunner)", () => {
 // ──��� ProjectionRunner Tests ─────────────────────────────────────────────────
 
 describe("ProjectionRunnerEffect", () => {
+	it("records and logs a skipped replay failure", async () => {
+		const messageDeliveries: number[] = [];
+		const turnDeliveries: Array<{
+			sequence: number;
+			replaying: boolean | undefined;
+		}> = [];
+		const projectors = createAllEffectProjectors().map(
+			(projector): EffectProjector => {
+				if (projector.name === "message") {
+					return {
+						...projector,
+						project: (event, ctx) =>
+							Effect.gen(function* () {
+								const sql = yield* SqlClient.SqlClient;
+								messageDeliveries.push(event.sequence);
+								yield* sql`
+									INSERT INTO partial_projection_writes (event_sequence)
+									VALUES (${event.sequence})`;
+								yield* projector.project(event, ctx);
+							}),
+					};
+				}
+				if (projector.name === "turn") {
+					return {
+						...projector,
+						project: (event, ctx) =>
+							Effect.gen(function* () {
+								turnDeliveries.push({
+									sequence: event.sequence,
+									replaying: ctx?.replaying,
+								});
+								yield* projector.project(event, ctx);
+							}),
+					};
+				}
+				return projector;
+			},
+		);
+		const errorLogs: Array<{
+			message: string;
+			annotations: Record<string, unknown>;
+		}> = [];
+		const logger = Logger.make<unknown, void>((options) => {
+			if (options.logLevel._tag !== "Error") return;
+			errorLogs.push({
+				message: Array.isArray(options.message)
+					? options.message.map(String).join(" ")
+					: String(options.message),
+				annotations: Object.fromEntries(HashMap.toEntries(options.annotations)),
+			});
+		});
+
+		const result = await runTestWithProjectors(
+			projectors,
+			Effect.gen(function* () {
+				const store = yield* EventStoreEffectTag;
+				const runner = yield* ProjectionRunnerEffectTag;
+				const sql = yield* SqlClient.SqlClient;
+				yield* sql`
+					CREATE TEMP TABLE partial_projection_writes (
+						event_sequence INTEGER NOT NULL
+					)`;
+				const event = yield* store.append(
+					makeMessageCreated("missing-S", "orphan-M", {
+						role: "assistant",
+					}),
+				);
+
+				const recovery = yield* runner.recover();
+				const durableFailures = yield* sql<{
+					projector_name: string;
+					event_sequence: number;
+					event_type: string;
+					session_id: string;
+					error: string;
+					failed_at: number;
+				}>`SELECT projector_name, event_sequence, event_type, session_id, error, failed_at
+					FROM projection_failures`;
+				const recentFailures = yield* runner.getFailures();
+				const messageRows = yield* sql<{ id: string }>`
+					SELECT id FROM messages WHERE id = 'orphan-M'`;
+				const partialProjectionWrites = yield* sql<{
+					event_sequence: number;
+				}>`SELECT event_sequence FROM partial_projection_writes`;
+				const cursors = yield* sql<{
+					projector_name: string;
+					last_applied_seq: number;
+				}>`SELECT projector_name, last_applied_seq
+					FROM projector_cursors ORDER BY projector_name`;
+
+				return {
+					event,
+					recovery,
+					durableFailures,
+					recentFailures,
+					messageRows,
+					partialProjectionWrites,
+					cursors,
+				};
+			}).pipe(Effect.provide(Logger.replace(Logger.defaultLogger, logger))),
+		);
+
+		expect(result.recovery).toMatchObject({
+			startCursor: 0,
+			endCursor: 1,
+			totalReplayed: 3,
+		});
+		expect(result.durableFailures).toHaveLength(1);
+		const durableFailure = result.durableFailures[0];
+		expect(durableFailure).toMatchObject({
+			projector_name: "message",
+			event_sequence: result.event.sequence,
+			event_type: "message.created",
+			session_id: "missing-S",
+		});
+		expect(durableFailure?.error.length).toBeGreaterThan(0);
+		expect(durableFailure?.failed_at).toBeGreaterThan(0);
+		expect(result.recentFailures).toEqual([
+			{
+				projectorName: "message",
+				eventSequence: result.event.sequence,
+				eventType: "message.created",
+				sessionId: "missing-S",
+				error: durableFailure?.error,
+				failedAt: durableFailure?.failed_at,
+			},
+		]);
+		expect(errorLogs).toEqual([
+			{
+				message: "projection replay failed; event skipped",
+				annotations: {
+					projectorName: "message",
+					eventSequence: result.event.sequence,
+					eventType: "message.created",
+					sessionId: "missing-S",
+					error: durableFailure?.error,
+				},
+			},
+		]);
+		expect(turnDeliveries).toEqual([
+			{ sequence: result.event.sequence, replaying: true },
+		]);
+		expect(messageDeliveries).toEqual([result.event.sequence]);
+		expect(result.messageRows).toEqual([]);
+		expect(result.partialProjectionWrites).toEqual([]);
+		expect(result.cursors).toEqual([
+			{ projector_name: "activity", last_applied_seq: 1 },
+			{ projector_name: "approval", last_applied_seq: 1 },
+			{ projector_name: "message", last_applied_seq: 1 },
+			{ projector_name: "provider", last_applied_seq: 1 },
+			{ projector_name: "session", last_applied_seq: 1 },
+			{ projector_name: "turn", last_applied_seq: 1 },
+		]);
+	});
+
+	it("does not redeliver a skipped event after a later replay decode failure", async () => {
+		const messageDeliveries: number[] = [];
+		const projectors = createAllEffectProjectors().map(
+			(projector): EffectProjector =>
+				projector.name === "message"
+					? {
+							...projector,
+							project: (event, ctx) =>
+								Effect.gen(function* () {
+									messageDeliveries.push(event.sequence);
+									yield* projector.project(event, ctx);
+								}),
+						}
+					: projector,
+		);
+		const invalidEventId = createEventId();
+
+		const result = await runTestWithProjectors(
+			projectors,
+			Effect.gen(function* () {
+				const store = yield* EventStoreEffectTag;
+				const runner = yield* ProjectionRunnerEffectTag;
+				const sql = yield* SqlClient.SqlClient;
+				const poisonEvent = yield* store.append(
+					makeMessageCreated("missing-S", "orphan-M", {
+						role: "assistant",
+					}),
+				);
+				yield* insertRawEventRow({
+					sessionId: "invalid-S",
+					eventId: invalidEventId,
+					data: "{not json",
+				});
+
+				const firstRecovery = yield* Effect.either(runner.recover());
+				const failuresAfterFirst = yield* sql<{
+					count: number;
+				}>`SELECT COUNT(*) AS count FROM projection_failures`;
+
+				yield* sql`DELETE FROM events WHERE event_id = ${invalidEventId}`;
+				const secondRecovery = yield* runner.recover();
+				const failuresAfterSecond = yield* sql<{
+					projector_name: string;
+					event_sequence: number;
+				}>`SELECT projector_name, event_sequence FROM projection_failures`;
+
+				return {
+					poisonEvent,
+					firstRecovery,
+					failuresAfterFirst,
+					secondRecovery,
+					failuresAfterSecond,
+				};
+			}).pipe(
+				Effect.provide(
+					Logger.replace(
+						Logger.defaultLogger,
+						Logger.make<unknown, void>(() => undefined),
+					),
+				),
+			),
+		);
+
+		expect(result.firstRecovery._tag).toBe("Left");
+		if (result.firstRecovery._tag === "Left") {
+			expect(result.firstRecovery.left).toBeInstanceOf(ProjectionRunnerError);
+			if (result.firstRecovery.left instanceof ProjectionRunnerError) {
+				expect(result.firstRecovery.left.operation).toBe(
+					"decodeStoredEventRow",
+				);
+			}
+		}
+		expect(result.failuresAfterFirst).toEqual([{ count: 1 }]);
+		expect(result.secondRecovery).toMatchObject({
+			startCursor: 0,
+			endCursor: result.poisonEvent.sequence,
+			totalReplayed: 0,
+		});
+		expect(messageDeliveries).toEqual([result.poisonEvent.sequence]);
+		expect(result.failuresAfterSecond).toEqual([
+			{
+				projector_name: "message",
+				event_sequence: result.poisonEvent.sequence,
+			},
+		]);
+	});
+
+	it("does not advance when the durable failure transaction fails", async () => {
+		const result = await runTest(
+			Effect.gen(function* () {
+				const store = yield* EventStoreEffectTag;
+				const runner = yield* ProjectionRunnerEffectTag;
+				const sql = yield* SqlClient.SqlClient;
+				const emptyRecovery = yield* runner.recover();
+				const recoveredBeforeFailure = yield* runner.isRecovered();
+				yield* store.append(
+					makeMessageCreated("missing-S", "orphan-M", {
+						role: "assistant",
+					}),
+				);
+				yield* sql`
+					CREATE TEMP TRIGGER fail_message_cursor_upsert
+					BEFORE INSERT ON projector_cursors
+					WHEN NEW.projector_name = 'message'
+					BEGIN
+						SELECT RAISE(ABORT, 'simulated cursor persistence failure');
+					END`;
+
+				const failedRecovery = yield* Effect.either(runner.recover());
+				const durableFailuresAfterFailure = yield* sql<{
+					count: number;
+				}>`SELECT COUNT(*) AS count FROM projection_failures`;
+				const messageCursorAfterFailure = yield* sql<{
+					last_applied_seq: number;
+				}>`SELECT COALESCE(MAX(last_applied_seq), 0) AS last_applied_seq
+					FROM projector_cursors WHERE projector_name = 'message'`;
+				const recoveredAfterFailure = yield* runner.isRecovered();
+
+				yield* sql`DROP TRIGGER fail_message_cursor_upsert`;
+				const retryRecovery = yield* runner.recover();
+				const durableFailuresAfterRetry = yield* sql<{
+					projector_name: string;
+					event_sequence: number;
+				}>`SELECT projector_name, event_sequence FROM projection_failures`;
+				const cursorsAfterRetry = yield* sql<{
+					projector_name: string;
+					last_applied_seq: number;
+				}>`SELECT projector_name, last_applied_seq
+					FROM projector_cursors ORDER BY projector_name`;
+
+				return {
+					emptyRecovery,
+					recoveredBeforeFailure,
+					failedRecovery,
+					durableFailuresAfterFailure,
+					messageCursorAfterFailure,
+					recoveredAfterFailure,
+					retryRecovery,
+					durableFailuresAfterRetry,
+					cursorsAfterRetry,
+				};
+			}).pipe(
+				Effect.provide(
+					Logger.replace(
+						Logger.defaultLogger,
+						Logger.make<unknown, void>(() => undefined),
+					),
+				),
+			),
+		);
+
+		expect(result.emptyRecovery.totalReplayed).toBe(0);
+		expect(result.recoveredBeforeFailure).toBe(true);
+		expect(result.failedRecovery._tag).toBe("Left");
+		if (result.failedRecovery._tag === "Left") {
+			expect(result.failedRecovery.left).toBeInstanceOf(ProjectionRunnerError);
+			if (result.failedRecovery.left instanceof ProjectionRunnerError) {
+				expect(result.failedRecovery.left.operation).toBe("recover");
+			}
+		}
+		expect(result.durableFailuresAfterFailure).toEqual([{ count: 0 }]);
+		expect(result.messageCursorAfterFailure).toEqual([{ last_applied_seq: 0 }]);
+		expect(result.recoveredAfterFailure).toBe(false);
+		expect(result.retryRecovery).toMatchObject({
+			startCursor: 0,
+			endCursor: 1,
+			totalReplayed: 2,
+		});
+		expect(result.durableFailuresAfterRetry).toEqual([
+			{ projector_name: "message", event_sequence: 1 },
+		]);
+		expect(result.cursorsAfterRetry).toEqual([
+			{ projector_name: "activity", last_applied_seq: 1 },
+			{ projector_name: "approval", last_applied_seq: 1 },
+			{ projector_name: "message", last_applied_seq: 1 },
+			{ projector_name: "provider", last_applied_seq: 1 },
+			{ projector_name: "session", last_applied_seq: 1 },
+			{ projector_name: "turn", last_applied_seq: 1 },
+		]);
+	});
+
 	it("cold replay deletes a session without projection failures", async () => {
 		const sessionId = "s-cold-delete";
 		const messageId = "m-cold-delete";
