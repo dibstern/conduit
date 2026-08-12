@@ -229,6 +229,32 @@ function makeSessionStatus(
 	);
 }
 
+function makeSessionDeleted(sessionId: string): CanonicalEvent {
+	return canonicalEvent(
+		"session.deleted",
+		sessionId,
+		{ sessionId },
+		{
+			eventId: createEventId(),
+			metadata: {},
+			createdAt: FIXED_TS,
+		},
+	);
+}
+
+function makeSessionRenamed(sessionId: string, title: string): CanonicalEvent {
+	return canonicalEvent(
+		"session.renamed",
+		sessionId,
+		{ sessionId, title },
+		{
+			eventId: createEventId(),
+			metadata: {},
+			createdAt: FIXED_TS,
+		},
+	);
+}
+
 function makeTurnCompleted(
 	sessionId: string,
 	messageId: string,
@@ -435,6 +461,79 @@ function appendWithIndependentStore(filename: string, event: CanonicalEvent) {
 		}),
 		makeEventStoreLayerForFile(filename),
 	);
+}
+
+function readSessionProjectionSnapshot(sessionId: string) {
+	return Effect.gen(function* () {
+		const sql = yield* SqlClient.SqlClient;
+		const sessions = yield* sql<{
+			id: string;
+			provider: string;
+			provider_sid: string | null;
+			title: string;
+			status: string;
+			parent_id: string | null;
+			last_message_at: number | null;
+		}>`SELECT id, provider, provider_sid, title, status, parent_id, last_message_at
+			FROM sessions WHERE id = ${sessionId} ORDER BY id`;
+		const messages = yield* sql<{
+			id: string;
+			session_id: string;
+			role: string;
+			text: string;
+			last_applied_seq: number | null;
+		}>`SELECT id, session_id, role, text, last_applied_seq
+			FROM messages WHERE session_id = ${sessionId} ORDER BY id`;
+		const messageParts = yield* sql<{
+			id: string;
+			message_id: string;
+			type: string;
+			text: string;
+		}>`SELECT id, message_id, type, text
+			FROM message_parts ORDER BY id`;
+		const turns = yield* sql<{
+			id: string;
+			session_id: string;
+			state: string;
+		}>`SELECT id, session_id, state FROM turns WHERE session_id = ${sessionId} ORDER BY id`;
+		const sessionProviders = yield* sql<{
+			id: string;
+			session_id: string;
+			provider: string;
+			provider_sid: string | null;
+			status: string;
+		}>`SELECT id, session_id, provider, provider_sid, status
+			FROM session_providers WHERE session_id = ${sessionId} ORDER BY id`;
+		const pendingApprovals = yield* sql<{
+			id: string;
+			session_id: string;
+		}>`SELECT id, session_id FROM pending_approvals WHERE session_id = ${sessionId} ORDER BY id`;
+		const activities = yield* sql<{
+			id: string;
+			session_id: string;
+		}>`SELECT id, session_id FROM activities WHERE session_id = ${sessionId} ORDER BY id`;
+		const toolContent = yield* sql<{
+			tool_id: string;
+			session_id: string;
+		}>`SELECT tool_id, session_id FROM tool_content WHERE session_id = ${sessionId} ORDER BY tool_id`;
+		const providerState = yield* sql<{
+			session_id: string;
+			key: string;
+			value: string;
+		}>`SELECT session_id, key, value FROM provider_state WHERE session_id = ${sessionId} ORDER BY key`;
+
+		return {
+			sessions,
+			messages,
+			messageParts,
+			turns,
+			sessionProviders,
+			pendingApprovals,
+			activities,
+			toolContent,
+			providerState,
+		};
+	});
 }
 
 // Helper to seed a session row directly
@@ -1656,6 +1755,312 @@ describe("Effect Approval Projector (via ProjectionRunner)", () => {
 // ──��� ProjectionRunner Tests ─────────────────────────────────────────────────
 
 describe("ProjectionRunnerEffect", () => {
+	it("cold replay deletes a session without projection failures", async () => {
+		const sessionId = "s-cold-delete";
+		const messageId = "m-cold-delete";
+		const events = [
+			makeSessionCreated(sessionId),
+			makeMessageCreated(sessionId, messageId, { role: "user" }),
+			makeSessionDeleted(sessionId),
+		];
+
+		const cold = await runTest(
+			Effect.gen(function* () {
+				const store = yield* EventStoreEffectTag;
+				const runner = yield* ProjectionRunnerEffectTag;
+				const sql = yield* SqlClient.SqlClient;
+				for (const event of events) yield* store.append(event);
+
+				const recovery = yield* runner.recover();
+				const snapshot = yield* readSessionProjectionSnapshot(sessionId);
+				const failures = yield* runner.getFailures();
+				const durableFailures = yield* sql<{
+					count: number;
+				}>`SELECT COUNT(*) AS count FROM projection_failures`;
+				const cursors = yield* sql<{
+					projector_name: string;
+					last_applied_seq: number;
+				}>`SELECT projector_name, last_applied_seq FROM projector_cursors ORDER BY projector_name`;
+
+				return { recovery, snapshot, failures, durableFailures, cursors };
+			}),
+		);
+
+		const online = await runTest(
+			Effect.gen(function* () {
+				const store = yield* EventStoreEffectTag;
+				const runner = yield* ProjectionRunnerEffectTag;
+				yield* runner.markRecovered();
+				for (const event of events) {
+					const stored = yield* store.append(event);
+					yield* runner.projectEvent(stored);
+				}
+
+				return {
+					snapshot: yield* readSessionProjectionSnapshot(sessionId),
+					failures: yield* runner.getFailures(),
+				};
+			}),
+		);
+
+		expect(cold.recovery).toMatchObject({
+			startCursor: 0,
+			endCursor: 3,
+			totalReplayed: 6,
+		});
+		expect(cold.failures).toEqual([]);
+		expect(cold.durableFailures).toEqual([{ count: 0 }]);
+		expect(cold.snapshot).toEqual({
+			sessions: [],
+			messages: [],
+			messageParts: [],
+			turns: [],
+			sessionProviders: [],
+			pendingApprovals: [],
+			activities: [],
+			toolContent: [],
+			providerState: [],
+		});
+		expect(cold.snapshot).toEqual(online.snapshot);
+		expect(online.failures).toEqual([]);
+		expect(cold.cursors).toEqual([
+			{ projector_name: "activity", last_applied_seq: 3 },
+			{ projector_name: "approval", last_applied_seq: 3 },
+			{ projector_name: "message", last_applied_seq: 3 },
+			{ projector_name: "provider", last_applied_seq: 3 },
+			{ projector_name: "session", last_applied_seq: 3 },
+			{ projector_name: "turn", last_applied_seq: 3 },
+		]);
+	});
+
+	it("cold replay matches online ordering across delete and recreate", async () => {
+		const sessionId = "s-delete-recreate";
+		const messageId = "m-before-delete";
+		const events = [
+			makeSessionCreated(sessionId, { title: "First" }),
+			makeMessageCreated(sessionId, messageId, { role: "user" }),
+			makeSessionDeleted(sessionId),
+			makeSessionCreated(sessionId, { title: "Second" }),
+		];
+
+		const execute = (cold: boolean) =>
+			runTest(
+				Effect.gen(function* () {
+					const store = yield* EventStoreEffectTag;
+					const runner = yield* ProjectionRunnerEffectTag;
+					const sql = yield* SqlClient.SqlClient;
+					if (!cold) yield* runner.markRecovered();
+					for (const event of events) {
+						const stored = yield* store.append(event);
+						if (!cold) yield* runner.projectEvent(stored);
+					}
+					if (cold) yield* runner.recover();
+
+					return {
+						snapshot: yield* readSessionProjectionSnapshot(sessionId),
+						failures: yield* runner.getFailures(),
+						durableFailures: yield* sql<{
+							count: number;
+						}>`SELECT COUNT(*) AS count FROM projection_failures`,
+					};
+				}),
+			);
+
+		const [cold, online] = await Promise.all([execute(true), execute(false)]);
+		expect(cold.snapshot).toEqual(online.snapshot);
+		expect(cold.snapshot.sessions).toEqual([
+			{
+				id: sessionId,
+				provider: "opencode",
+				provider_sid: null,
+				title: "Second",
+				status: "idle",
+				parent_id: null,
+				last_message_at: null,
+			},
+		]);
+		expect(cold.snapshot.messages).toEqual([]);
+		expect(cold.snapshot.messageParts).toEqual([]);
+		expect(cold.snapshot.sessionProviders).toEqual([
+			{
+				id: `${sessionId}:initial`,
+				session_id: sessionId,
+				provider: "opencode",
+				provider_sid: null,
+				status: "active",
+			},
+		]);
+		expect(cold.failures).toEqual([]);
+		expect(online.failures).toEqual([]);
+		expect(cold.durableFailures).toEqual([{ count: 0 }]);
+		expect(online.durableFailures).toEqual([{ count: 0 }]);
+	});
+
+	it("routes mixed cursors strictly behind each event", () => {
+		const observations: Array<{
+			projectorName: string;
+			sequence: number;
+			replaying: boolean | undefined;
+		}> = [];
+		const projectors = createAllEffectProjectors().map(
+			(projector): EffectProjector => ({
+				...projector,
+				project: (event, ctx) =>
+					Effect.gen(function* () {
+						observations.push({
+							projectorName: projector.name,
+							sequence: event.sequence,
+							replaying: ctx?.replaying,
+						});
+						yield* projector.project(event, ctx);
+					}),
+			}),
+		);
+
+		return runTestWithProjectors(
+			projectors,
+			Effect.gen(function* () {
+				const store = yield* EventStoreEffectTag;
+				const runner = yield* ProjectionRunnerEffectTag;
+				const sql = yield* SqlClient.SqlClient;
+				yield* runner.markRecovered();
+
+				for (const event of [
+					makeSessionCreated("s-mixed"),
+					makeMessageCreated("s-mixed", "m-mixed", { role: "assistant" }),
+					makeTextDelta("s-mixed", "m-mixed", "A", { partId: "p-mixed" }),
+				]) {
+					const stored = yield* store.append(event);
+					yield* runner.projectEvent(stored);
+				}
+				observations.length = 0;
+				yield* store.append(makeSessionRenamed("s-mixed", "Renamed"));
+
+				yield* sql`
+					INSERT INTO projector_cursors (projector_name, last_applied_seq, updated_at)
+					VALUES
+						('session', 2, ${FIXED_TS}),
+						('message', 2, ${FIXED_TS}),
+						('provider', 0, ${FIXED_TS}),
+						('turn', 4, ${FIXED_TS}),
+						('approval', 1, ${FIXED_TS}),
+						('activity', 0, ${FIXED_TS})
+					ON CONFLICT (projector_name) DO UPDATE SET
+						last_applied_seq = excluded.last_applied_seq,
+						updated_at = excluded.updated_at`;
+
+				const recovery = yield* runner.recover();
+				const messageRows = yield* sql<{
+					text: string;
+				}>`SELECT text FROM messages WHERE id = 'm-mixed'`;
+				const partRows = yield* sql<{
+					text: string;
+				}>`SELECT text FROM message_parts WHERE id = 'p-mixed'`;
+				const cursors = yield* sql<{
+					projector_name: string;
+					last_applied_seq: number;
+				}>`SELECT projector_name, last_applied_seq FROM projector_cursors ORDER BY projector_name`;
+
+				expect(recovery).toMatchObject({
+					startCursor: 0,
+					endCursor: 4,
+					totalReplayed: 3,
+				});
+				expect(observations).toEqual([
+					{ projectorName: "provider", sequence: 1, replaying: true },
+					{ projectorName: "message", sequence: 3, replaying: true },
+					{ projectorName: "session", sequence: 4, replaying: true },
+				]);
+				expect(messageRows).toEqual([{ text: "A" }]);
+				expect(partRows).toEqual([{ text: "A" }]);
+				expect(cursors).toEqual([
+					{ projector_name: "activity", last_applied_seq: 4 },
+					{ projector_name: "approval", last_applied_seq: 4 },
+					{ projector_name: "message", last_applied_seq: 4 },
+					{ projector_name: "provider", last_applied_seq: 4 },
+					{ projector_name: "session", last_applied_seq: 4 },
+					{ projector_name: "turn", last_applied_seq: 4 },
+				]);
+			}),
+		);
+	});
+
+	it("pages a bounded 501-event snapshot", () =>
+		runTest(
+			Effect.gen(function* () {
+				const store = yield* EventStoreEffectTag;
+				const sql = yield* SqlClient.SqlClient;
+				let appendedMidReplay = false;
+				const projectors = createAllEffectProjectors().map(
+					(projector): EffectProjector =>
+						projector.name === "session"
+							? {
+									...projector,
+									project: (event, ctx) =>
+										Effect.gen(function* () {
+											if (ctx?.replaying && !appendedMidReplay) {
+												appendedMidReplay = true;
+												yield* store
+													.append(
+														makeSessionStatus("s-paged", "error", {
+															createdAt: FIXED_TS + 502,
+														}),
+													)
+													.pipe(Effect.orDie);
+											}
+											yield* projector.project(event, ctx);
+										}),
+								}
+							: projector,
+				);
+				const runner = yield* makeProjectionRunnerEffect(projectors);
+
+				yield* store.append(makeSessionCreated("s-paged"));
+				for (let index = 0; index < 500; index++) {
+					yield* store.append(
+						makeSessionStatus("s-paged", "busy", {
+							createdAt: FIXED_TS + index + 1,
+						}),
+					);
+				}
+
+				const first = yield* runner.recover();
+				const firstSession = yield* sql<{
+					status: string;
+				}>`SELECT status FROM sessions WHERE id = 's-paged'`;
+				const firstCursors = yield* sql<{
+					projector_name: string;
+					last_applied_seq: number;
+				}>`SELECT projector_name, last_applied_seq FROM projector_cursors ORDER BY projector_name`;
+
+				expect(first).toMatchObject({
+					startCursor: 0,
+					endCursor: 501,
+					totalReplayed: 1002,
+				});
+				expect(firstSession).toEqual([{ status: "busy" }]);
+				expect(firstCursors).toEqual([
+					{ projector_name: "activity", last_applied_seq: 501 },
+					{ projector_name: "approval", last_applied_seq: 501 },
+					{ projector_name: "message", last_applied_seq: 501 },
+					{ projector_name: "provider", last_applied_seq: 501 },
+					{ projector_name: "session", last_applied_seq: 501 },
+					{ projector_name: "turn", last_applied_seq: 501 },
+				]);
+
+				const second = yield* runner.recover();
+				const secondSession = yield* sql<{
+					status: string;
+				}>`SELECT status FROM sessions WHERE id = 's-paged'`;
+				expect(second).toMatchObject({
+					startCursor: 501,
+					endCursor: 502,
+					totalReplayed: 2,
+				});
+				expect(secondSession).toEqual([{ status: "error" }]);
+			}),
+		));
+
 	it("projectEvent throws before recovery", () =>
 		runTest(
 			Effect.gen(function* () {
@@ -1708,6 +2113,7 @@ describe("ProjectionRunnerEffect", () => {
 				const result = yield* Effect.either(runner.recover());
 
 				expect(result._tag).toBe("Left");
+				expect(yield* runner.isRecovered()).toBe(false);
 				if (result._tag === "Left") {
 					const error = result.left;
 					expect(error).toBeInstanceOf(ProjectionRunnerError);
@@ -1733,6 +2139,7 @@ describe("ProjectionRunnerEffect", () => {
 				const result = yield* Effect.either(runner.recover());
 
 				expect(result._tag).toBe("Left");
+				expect(yield* runner.isRecovered()).toBe(false);
 				if (result._tag === "Left") {
 					const error = result.left;
 					expect(error).toBeInstanceOf(ProjectionRunnerError);
@@ -1758,6 +2165,8 @@ describe("ProjectionRunnerEffect", () => {
 			[projector],
 			Effect.gen(function* () {
 				const runner = yield* ProjectionRunnerEffectTag;
+				yield* runner.recover();
+				expect(yield* runner.isRecovered()).toBe(true);
 				yield* seedSession("s-replaying-reset");
 				yield* insertRawEventRow({
 					sessionId: "s-replaying-reset",
@@ -1768,6 +2177,7 @@ describe("ProjectionRunnerEffect", () => {
 
 				const result = yield* Effect.either(runner.recover());
 				expect(result._tag).toBe("Left");
+				expect(yield* runner.isRecovered()).toBe(false);
 
 				yield* runner.markRecovered();
 				yield* runner.projectEvent({

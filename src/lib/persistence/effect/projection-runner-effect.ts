@@ -247,43 +247,44 @@ export const makeProjectionRunnerEffect = (
 					};
 				}
 
+				const projectorCursors = new Map<string, number>();
+				for (const projector of projectors) {
+					const cursor = allCursors.find(
+						(candidate) => candidate.projectorName === projector.name,
+					);
+					projectorCursors.set(projector.name, cursor?.lastAppliedSeq ?? 0);
+				}
+				const startingCursors = [...projectorCursors.values()];
+				const startCursor =
+					startingCursors.length === 0
+						? latestSeq
+						: Math.min(...startingCursors);
+
+				recovered = false;
 				replaying = true;
 				let totalReplayed = 0;
 
 				yield* Effect.gen(function* () {
-					for (const projector of projectors) {
-						const cursor =
-							(yield* cursorRepo.get(projector.name))?.lastAppliedSeq ?? 0;
-						if (cursor >= latestSeq) continue;
+					let scanCursor = startCursor;
+					const batchSize = 500;
 
-						// Build type filter for this projector
-						const handledTypes = projector.handles;
-						// We need to use the raw sql approach for IN clauses
-						// with dynamic lists, falling back to multiple OR conditions
-						let batchCursor = cursor;
-						const batchSize = 500;
+					while (true) {
+						const eventRows = yield* sql<StoredEventRow>`
+							SELECT sequence, event_id, session_id, stream_version, type, data, metadata, provider, created_at
+							FROM events
+							WHERE sequence > ${scanCursor} AND sequence <= ${latestSeq}
+							ORDER BY sequence ASC
+							LIMIT ${batchSize}`;
+						if (eventRows.length === 0) break;
 
-						while (true) {
-							// Use unsafe for the IN clause with dynamic types
-							const typePlaceholders = handledTypes.map(() => "?").join(", ");
-							const queryParams: unknown[] = [
-								batchCursor,
-								...handledTypes,
-								batchSize,
-							];
-							const events = yield* sql.unsafe<StoredEventRow>(
-								`SELECT sequence, event_id, session_id, stream_version, type, data, metadata, provider, created_at
-								 FROM events
-								 WHERE sequence > ? AND type IN (${typePlaceholders})
-								 ORDER BY sequence ASC
-								 LIMIT ?`,
-								queryParams,
-							);
+						for (const eventRow of eventRows) {
+							const storedEvent = yield* decodeProjectionEventRow(eventRow);
+							const matching =
+								projectorsByEventType.get(storedEvent.type) ?? [];
+							for (const projector of matching) {
+								const cursor = projectorCursors.get(projector.name) ?? 0;
+								if (eventRow.sequence <= cursor) continue;
 
-							if (events.length === 0) break;
-
-							for (const eventRow of events) {
-								const storedEvent = yield* decodeProjectionEventRow(eventRow);
 								yield* sql
 									.withTransaction(
 										Effect.gen(function* () {
@@ -298,33 +299,40 @@ export const makeProjectionRunnerEffect = (
 									)
 									.pipe(
 										Effect.catchAll((err) =>
-											Effect.sync(() =>
-												recordFailure(projector, storedEvent, err),
-											),
+											Effect.gen(function* () {
+												recordFailure(projector, storedEvent, err);
+												yield* cursorRepo.upsert(
+													projector.name,
+													eventRow.sequence,
+												);
+											}),
 										),
 									);
+
+								projectorCursors.set(projector.name, eventRow.sequence);
 								totalReplayed++;
 							}
-
-							const lastInBatch = events[events.length - 1];
-							if (lastInBatch) batchCursor = lastInBatch.sequence;
-							if (events.length < batchSize) break;
 						}
 
-						// Advance cursor to global max for non-matching events
+						const lastInBatch = eventRows[eventRows.length - 1];
+						if (lastInBatch) scanCursor = lastInBatch.sequence;
+						if (eventRows.length < batchSize) break;
+					}
+
+					for (const projector of projectors) {
 						yield* cursorRepo.upsert(projector.name, latestSeq);
 					}
+					recovered = true;
 				}).pipe(
 					Effect.ensuring(
 						Effect.sync(() => {
 							replaying = false;
-							recovered = true;
 						}),
 					),
 				);
 
 				return {
-					startCursor: 0,
+					startCursor,
 					endCursor: latestSeq,
 					totalReplayed,
 					durationMs: Date.now() - startTime,
