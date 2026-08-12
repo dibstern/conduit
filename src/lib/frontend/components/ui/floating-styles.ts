@@ -6,6 +6,8 @@ export const FLOATING_SURFACE_CLASSES =
 
 export const FLOATING_MENU_CONTENT_CLASSES = `${FLOATING_SURFACE_CLASSES} max-h-[var(--bits-dropdown-menu-content-available-height)] overflow-y-auto`;
 
+export const FLOATING_TOOLTIP_CLASSES = `${FLOATING_SURFACE_CLASSES} max-w-xs px-2 text-xs text-text`;
+
 export const FLOATING_ITEM_PADDING_CLASSES = "px-3 py-1.5";
 
 export const MENU_ITEM_VARIANT_CLASSES = {

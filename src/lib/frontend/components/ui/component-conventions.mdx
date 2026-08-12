@@ -67,11 +67,11 @@ matching icon.
   by a dev-time `console.warn` runtime backstop for callers that bypass the types.
 - Interactive overlay primitives delegate focus, dismissal, and roving focus to
   Bits UI. `use-background-inert` supplements the missing assistive-tech
-  background hiding and exempts live Dialog, Menu, and Popover portal branches.
+  background hiding and exempts live Dialog, Menu, Popover, and Tooltip portal branches.
 
 ## Floating overlays inside a Modal
 
-`Menu` and `Popover` portal to `body` by default and register themselves as live
+`Menu`, `Popover` and `Tooltip` portal to `body` by default and register themselves as live
 background-inert exemptions. Their canonical `--z-popover` layer is intentionally
 below `--z-modal`, though, so a floating surface triggered inside a Modal must pass
 `portalTo` targeting an element inside that Modal's content subtree. The local
