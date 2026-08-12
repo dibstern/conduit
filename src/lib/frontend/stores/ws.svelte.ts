@@ -57,7 +57,11 @@ export {
 	wsSend,
 } from "./ws-send.svelte.js";
 
-import { handleMessage } from "./ws-dispatch.js";
+import {
+	armProtocolVersionCheck,
+	disarmProtocolVersionCheck,
+	handleMessage,
+} from "./ws-dispatch.js";
 import { setWsGetter } from "./ws-send.svelte.js";
 
 const log = createFrontendLogger("ws");
@@ -255,6 +259,7 @@ function doConnect(slug: string | undefined, generation: number): void {
 		wsState.relayStatus = undefined;
 		wsState.relayError = undefined;
 		_reconnectDelay = RECONNECT_BASE_MS;
+		armProtocolVersionCheck();
 		_onConnectFn?.();
 	});
 
@@ -272,6 +277,7 @@ function doConnect(slug: string | undefined, generation: number): void {
 		setStatus("disconnected", "Disconnected");
 		wsDebugLog("ws:close", wsState.status);
 		_ws = null;
+		disarmProtocolVersionCheck();
 
 		// Reset chat streaming/processing state so UI isn't stuck
 		phaseToIdle();

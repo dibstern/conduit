@@ -1027,6 +1027,18 @@ const ClientCountSchema = Schema.Struct({
 	count: Schema.Number,
 });
 
+/** Relay wire-protocol version. Bump whenever a message's semantics change
+ *  incompatibly (e.g. a mode literal is reinterpreted), so a freshly-loaded
+ *  frontend can detect a stale daemon that predates the change. The daemon
+ *  sends this to each client on connect; the frontend warns on mismatch —
+ *  and on absence, which marks a daemon older than the handshake itself. */
+export const WS_PROTOCOL_VERSION = 1;
+
+const ProtocolVersionSchema = Schema.Struct({
+	type: Schema.Literal("protocol_version"),
+	version: Schema.Number,
+});
+
 const InputSyncSchema = Schema.Struct({
 	type: Schema.Literal("input_sync"),
 	text: Schema.String,
@@ -1179,6 +1191,7 @@ export const RelayMessageSchema = Schema.Union(
 	ErrorSchema,
 	SystemErrorSchema,
 	ClientCountSchema,
+	ProtocolVersionSchema,
 	InputSyncSchema,
 	UpdateAvailableSchema,
 	// Instance Management
@@ -1252,6 +1265,7 @@ export const RELAY_MESSAGE_TYPES = [
 	"error",
 	"system_error",
 	"client_count",
+	"protocol_version",
 	"input_sync",
 	"update_available",
 	"instance_list",
@@ -1515,6 +1529,7 @@ export type RelayMessage =
 			details?: Record<string, unknown>;
 	  }
 	| { type: "client_count"; count: number }
+	| { type: "protocol_version"; version: number }
 	| { type: "input_sync"; text: string; from?: string }
 	| { type: "update_available"; version?: string }
 	// ── Instance Management ──────────────────────────────────────────────

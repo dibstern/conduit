@@ -60,6 +60,8 @@ class MockWebSocket {
 
 vi.mock("../../../src/lib/frontend/stores/ws-dispatch.js", () => ({
 	handleMessage: handleMessageMock,
+	armProtocolVersionCheck: () => {},
+	disarmProtocolVersionCheck: () => {},
 }));
 
 import {
