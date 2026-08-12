@@ -442,6 +442,24 @@ export class ClaudeEventTranslator {
 		this.lastMainRequestUsage = undefined;
 	}
 
+	/** Close out a turn: release the busy lease, then reset in-flight state.
+	 *  The SDK never emits a "no operation" status of its own, so a terminal
+	 *  turn message (result / interrupt / error) is the ONLY authoritative
+	 *  signal that the session stopped working. Every terminal path must go
+	 *  through here or the session stays busy forever. */
+	private endTurn(ctx: ClaudeSessionContext): Effect.Effect<void, unknown> {
+		return Effect.gen(this, function* () {
+			yield* this.push(
+				ctx,
+				makeProviderRuntimeEvent("session.status", ctx.sessionId, {
+					sessionId: ctx.sessionId,
+					status: "idle",
+				}),
+			);
+			this.resetInFlightState();
+		});
+	}
+
 	constructor(private readonly deps: ClaudeEventTranslatorDeps) {}
 
 	translate(
@@ -499,7 +517,7 @@ export class ClaudeEventTranslator {
 						code: "provider_error",
 					}),
 				);
-				this.resetInFlightState();
+				yield* this.endTurn(ctx);
 			}),
 		);
 	}
@@ -539,11 +557,17 @@ export class ClaudeEventTranslator {
 						);
 						return;
 					}
+					// `requesting` means the SDK is issuing an API call — the
+					// busiest state there is. Mapping it to idle killed the
+					// composer bounce bar and the sidebar processing dot every
+					// time the main agent resumed after a subagent (this is the
+					// only status the main chain emits while blocked on a Task).
+					// Only an explicit null status means "no operation".
 					yield* this.push(
 						ctx,
 						makeProviderRuntimeEvent("session.status", ctx.sessionId, {
 							sessionId: ctx.sessionId,
-							status: "idle",
+							status: message.status === "requesting" ? "busy" : "idle",
 						}),
 					);
 					return;
@@ -1464,7 +1488,7 @@ export class ClaudeEventTranslator {
 							this.currentAssistantMessageId || ctx.lastAssistantUuid || "",
 					}),
 				);
-				this.resetInFlightState();
+				yield* this.endTurn(ctx);
 				return;
 			}
 
@@ -1478,7 +1502,7 @@ export class ClaudeEventTranslator {
 						error: errors,
 					}),
 				);
-				this.resetInFlightState();
+				yield* this.endTurn(ctx);
 				return;
 			}
 
@@ -1502,7 +1526,7 @@ export class ClaudeEventTranslator {
 						code: "provider_error",
 					}),
 				);
-				this.resetInFlightState();
+				yield* this.endTurn(ctx);
 				return;
 			}
 
@@ -1582,7 +1606,7 @@ export class ClaudeEventTranslator {
 					duration: result.duration_ms,
 				}),
 			);
-			this.resetInFlightState();
+			yield* this.endTurn(ctx);
 		});
 	}
 

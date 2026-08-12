@@ -308,10 +308,25 @@ describe("ClaudeEventTranslator", () => {
 
 		const statusEvent = sink.events.find((e) => e.type === "session.status");
 		expect(statusEvent).toBeDefined();
-		// Non-compaction statuses fall back to "idle" (compaction statuses are
-		// handled separately as session.compaction — see the compaction tests below)
+		// "requesting" means the SDK is issuing an API call — busy, not idle.
+		// (Compaction statuses are handled separately as session.compaction —
+		// see the compaction tests below.)
 		const data = dataOf(statusEvent);
 		expect(data["sessionId"]).toBe("sess-1");
+		expect(data["status"]).toBe("busy");
+	});
+
+	it("translates a null system/status to idle", async () => {
+		await runTranslate(translator, ctx, {
+			type: "system",
+			subtype: "status",
+			status: null,
+			uuid: "00000000-0000-0000-0000-000000000003",
+			session_id: "sdk-sess",
+		} as unknown as SDKMessage);
+
+		const statusEvent = sink.events.find((e) => e.type === "session.status");
+		expect(dataOf(statusEvent)["status"]).toBe("idle");
 	});
 
 	// ─── 3. system (subtype task_progress) ───────────────────────────────
@@ -2178,7 +2193,11 @@ describe("ClaudeEventTranslator", () => {
 		).toBeUndefined();
 
 		await runTranslateError(translator, ctx, new Error("after failure"));
-		expect(sink.events.map((event) => event.type)).toEqual(["turn.error"]);
+		// turn.error is terminal, so it also releases the busy lease.
+		expect(sink.events.map((event) => event.type)).toEqual([
+			"turn.error",
+			"session.status",
+		]);
 	});
 
 	it("resetInFlightState clears counters and message id", () => {
