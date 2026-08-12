@@ -44,3 +44,8 @@ export const SingleAgent: Story = {
 
 /** No agents — selector should be hidden. */
 export const NoAgents: Story = {};
+
+export const Hover: Story = {
+	...Default,
+	parameters: { pseudo: { hover: true } },
+};

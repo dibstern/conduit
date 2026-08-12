@@ -52,3 +52,8 @@ export const PermissionDenied: Story = {
 			"Notification permission was denied. Enable it in browser settings.",
 	},
 };
+
+export const Hover: Story = {
+	...Default,
+	parameters: { pseudo: { hover: true } },
+};

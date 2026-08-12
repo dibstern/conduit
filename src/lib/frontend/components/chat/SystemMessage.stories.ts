@@ -18,3 +18,8 @@ export const Info: Story = {
 export const ErrorState: Story = {
 	args: { message: mockSystemError },
 };
+
+export const Hover: Story = {
+	...Info,
+	parameters: { pseudo: { hover: true } },
+};

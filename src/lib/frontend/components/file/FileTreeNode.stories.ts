@@ -61,3 +61,8 @@ export const NestedDepth: Story = {
 		depth: 3,
 	},
 };
+
+export const Hover: Story = {
+	...FileNode,
+	parameters: { pseudo: { hover: true } },
+};

@@ -40,3 +40,8 @@ export const WithModal: Story = {
 
 /** Rewind mode off — nothing visible. */
 export const Inactive: Story = {};
+
+export const Hover: Story = {
+	...Active,
+	parameters: { pseudo: { hover: true } },
+};

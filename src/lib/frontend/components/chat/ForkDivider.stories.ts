@@ -21,3 +21,8 @@ export const Default: Story = {
 		parentId: mockSession.id,
 	},
 };
+
+export const Hover: Story = {
+	...Default,
+	parameters: { pseudo: { hover: true } },
+};

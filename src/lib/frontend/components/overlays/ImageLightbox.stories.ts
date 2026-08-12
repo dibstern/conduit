@@ -55,3 +55,8 @@ export const Hidden: Story = {
 		uiState.lightboxSrc = null;
 	},
 };
+
+export const Hover: Story = {
+	...WithImage,
+	parameters: { pseudo: { hover: true } },
+};

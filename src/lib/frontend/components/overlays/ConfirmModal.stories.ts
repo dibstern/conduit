@@ -44,3 +44,8 @@ export const WithCustomAction: Story = {
 };
 
 export const Hidden: Story = {};
+
+export const Hover: Story = {
+	...Visible,
+	parameters: { pseudo: { hover: true } },
+};

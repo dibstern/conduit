@@ -1,10 +1,6 @@
 import type { Meta, StoryObj } from "@storybook/svelte-vite";
 import { sessionState } from "../../stores/session.svelte.js";
-import {
-	mockForkSession,
-	mockSession,
-	mockSubagentSession,
-} from "../../stories/mocks.js";
+import { mockSession, mockSubagentSession } from "../../stories/mocks.js";
 import SubagentBackBar from "./SubagentBackBar.svelte";
 
 const resetSessions = () => {
@@ -42,4 +38,9 @@ export const MissingParent: Story = {
 		];
 		sessionState.currentId = "sess_story_missing_parent";
 	},
+};
+
+export const Hover: Story = {
+	...Default,
+	parameters: { pseudo: { hover: true } },
 };

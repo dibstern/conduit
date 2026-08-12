@@ -136,3 +136,8 @@ export const MixedSameSession: Story = {
 export const NoNotifications: Story = {
 	name: "Empty (hidden)",
 };
+
+export const Hover: Story = {
+	...SinglePermission,
+	parameters: { pseudo: { hover: true } },
+};

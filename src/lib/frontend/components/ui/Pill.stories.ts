@@ -63,3 +63,18 @@ export const DisabledInteraction: Story = {
 		await expect(args["onclick"]).not.toHaveBeenCalled();
 	},
 };
+
+export const Hover: Story = {
+	...Neutral,
+	parameters: { pseudo: { hover: true } },
+};
+
+export const FocusVisible: Story = {
+	...Neutral,
+	parameters: { pseudo: { focusVisible: true } },
+};
+
+export const Disabled: Story = {
+	...Neutral,
+	args: { ...Neutral.args, disabled: true },
+};

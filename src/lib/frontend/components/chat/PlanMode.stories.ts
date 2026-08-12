@@ -68,3 +68,8 @@ export const Collapsed: Story = {
 		content: mockPlanContent,
 	},
 };
+
+export const Hover: Story = {
+	...ContentCard,
+	parameters: { pseudo: { hover: true } },
+};

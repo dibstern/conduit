@@ -109,3 +109,8 @@ export const ContextCritical: Story = {
 		uiState.openPanels = new Set(["context-panel"]);
 	},
 };
+
+export const Hover: Story = {
+	...UsagePanel,
+	parameters: { pseudo: { hover: true } },
+};

@@ -69,3 +69,8 @@ export const ExpandedPayload: Story = {
 		);
 	},
 };
+
+export const Hover: Story = {
+	...Default,
+	parameters: { pseudo: { hover: true } },
+};

@@ -5,7 +5,11 @@ const config: StorybookConfig = {
 		"../src/lib/frontend/**/*.mdx",
 		"../src/lib/frontend/**/*.stories.ts",
 	],
-	addons: ["@storybook/addon-a11y", "@storybook/addon-docs"],
+	addons: [
+		"@storybook/addon-a11y",
+		"@storybook/addon-docs",
+		"storybook-addon-pseudo-states",
+	],
 	framework: {
 		name: "@storybook/svelte-vite",
 		options: {},

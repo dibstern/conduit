@@ -173,3 +173,8 @@ export const InstanceExpanded: Story = {
 export const Debug: Story = {
 	args: { initialTab: "debug" },
 };
+
+export const Hover: Story = {
+	...Default,
+	parameters: { pseudo: { hover: true } },
+};

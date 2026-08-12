@@ -82,3 +82,8 @@ export const CriticalContext: Story = {
 		getOrCreateSessionMessages(testId).contextPercent = 97;
 	},
 };
+
+export const Hover: Story = {
+	...Empty,
+	parameters: { pseudo: { hover: true } },
+};

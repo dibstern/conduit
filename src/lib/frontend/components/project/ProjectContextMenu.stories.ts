@@ -31,3 +31,8 @@ export const Default: Story = {
 };
 
 export const WithoutRename: Story = {};
+
+export const Hover: Story = {
+	...Default,
+	parameters: { pseudo: { hover: true } },
+};

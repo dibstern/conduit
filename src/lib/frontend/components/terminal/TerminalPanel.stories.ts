@@ -94,3 +94,17 @@ export const MaxTabs: Story = {
 		setTabs(entries, "pty-005");
 	},
 };
+
+export const Hover: Story = {
+	...SingleTab,
+	parameters: { pseudo: { hover: true } },
+};
+
+export const Disabled: Story = {
+	...SingleTab,
+	beforeEach: () => {
+		localStorage.setItem("terminal-font-size", "6");
+		setTabs([{ ptyId: "pty-001", title: "Terminal" }]);
+		return () => localStorage.removeItem("terminal-font-size");
+	},
+};

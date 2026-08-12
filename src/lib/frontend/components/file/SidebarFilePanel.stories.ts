@@ -77,3 +77,8 @@ export const ExpandedDirectoryLoading: Story = {
 		await within(canvasElement).findByText("Loading…");
 	},
 };
+
+export const Hover: Story = {
+	...Default,
+	parameters: { pseudo: { hover: true } },
+};

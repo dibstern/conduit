@@ -72,3 +72,8 @@ export const Open: Story = {
 		btn?.click();
 	},
 };
+
+export const Hover: Story = {
+	...StandardDefault,
+	parameters: { pseudo: { hover: true } },
+};

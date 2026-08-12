@@ -31,3 +31,8 @@ export const DropdownOpen: Story = {
 		await userEvent.click(within(canvasElement).getByTestId("variant-badge"));
 	},
 };
+
+export const Hover: Story = {
+	...Default,
+	parameters: { pseudo: { hover: true } },
+};

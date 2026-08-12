@@ -79,3 +79,8 @@ export const SidebarExpanded: Story = {
 		uiState.sidebarCollapsed = false;
 	},
 };
+
+export const Hover: Story = {
+	...Connected,
+	parameters: { pseudo: { hover: true } },
+};

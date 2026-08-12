@@ -108,3 +108,8 @@ export const WithClients: Story = {
 		currentSlug: "frontend",
 	},
 };
+
+export const Hover: Story = {
+	...SingleProject,
+	parameters: { pseudo: { hover: true } },
+};

@@ -96,3 +96,13 @@ export const DisabledInteraction: Story = {
 		await expect(args["onclick"]).not.toHaveBeenCalled();
 	},
 };
+
+export const Hover: Story = {
+	...Primary,
+	parameters: { pseudo: { hover: true } },
+};
+
+export const FocusVisible: Story = {
+	...Primary,
+	parameters: { pseudo: { focusVisible: true } },
+};

@@ -177,6 +177,9 @@ importers:
       storybook:
         specifier: ^10.2.13
         version: 10.2.13(@testing-library/dom@10.4.1)(react-dom@19.2.4(react@19.2.4))(react@19.2.4)
+      storybook-addon-pseudo-states:
+        specifier: 10.2.13
+        version: 10.2.13(storybook@10.2.13(@testing-library/dom@10.4.1)(react-dom@19.2.4(react@19.2.4))(react@19.2.4))
       svelte:
         specifier: ^5.53.3
         version: 5.53.3
@@ -3439,6 +3442,11 @@ packages:
 
   std-env@3.10.0:
     resolution: {integrity: sha512-5GS12FdOZNliM5mAOxFRg7Ir0pWz8MdpYm6AY6VPkGpbA7ZzmbzNcBJQ0GPvvyWgcY7QAhCgf9Uy89I03faLkg==}
+
+  storybook-addon-pseudo-states@10.2.13:
+    resolution: {integrity: sha512-Jx4ld3jwU5Vh5wX3oFVoSYrP76qj0DfljQNONB0cwKmbdiuKxyUyi41o011JMuJfTLNlTq0AeD1W4J4SwcY1ig==}
+    peerDependencies:
+      storybook: ^10.2.13
 
   storybook@10.2.13:
     resolution: {integrity: sha512-heMfJjOfbHvL+wlCAwFZlSxcakyJ5yQDam6e9k2RRArB1veJhRnsjO6lO1hOXjJYrqxfHA/ldIugbBVlCDqfvQ==}
@@ -6899,6 +6907,10 @@ snapshots:
   statuses@2.0.2: {}
 
   std-env@3.10.0: {}
+
+  storybook-addon-pseudo-states@10.2.13(storybook@10.2.13(@testing-library/dom@10.4.1)(react-dom@19.2.4(react@19.2.4))(react@19.2.4)):
+    dependencies:
+      storybook: 10.2.13(@testing-library/dom@10.4.1)(react-dom@19.2.4(react@19.2.4))(react@19.2.4)
 
   storybook@10.2.13(@testing-library/dom@10.4.1)(react-dom@19.2.4(react@19.2.4))(react@19.2.4):
     dependencies:

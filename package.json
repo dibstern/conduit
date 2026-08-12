@@ -133,6 +133,7 @@
 		"pngjs": "^7.0.0",
 		"sharp": "^0.34.5",
 		"storybook": "^10.2.13",
+		"storybook-addon-pseudo-states": "10.2.13",
 		"svelte": "^5.53.3",
 		"svelte-check": "^4.7.4",
 		"tailwindcss": "^4.2.0",

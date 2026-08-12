@@ -51,3 +51,8 @@ export const NotConnected: Story = {
 			"You are not on a Tailscale network. Install Tailscale and access the relay via your 100.x.x.x IP.",
 	},
 };
+
+export const Hover: Story = {
+	...Default,
+	parameters: { pseudo: { hover: true } },
+};

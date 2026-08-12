@@ -94,3 +94,8 @@ export const DismissibleBanner: Story = {
 		];
 	},
 };
+
+export const Hover: Story = {
+	...UpdateBanner,
+	parameters: { pseudo: { hover: true } },
+};

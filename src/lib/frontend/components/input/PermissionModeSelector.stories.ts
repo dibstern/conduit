@@ -39,3 +39,8 @@ export const DropdownOpen: Story = {
 		);
 	},
 };
+
+export const Hover: Story = {
+	...Default,
+	parameters: { pseudo: { hover: true } },
+};

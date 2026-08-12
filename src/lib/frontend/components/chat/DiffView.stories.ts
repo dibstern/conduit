@@ -64,3 +64,8 @@ export const SplitView: Story = {
 		filename: "src/greet.ts",
 	},
 };
+
+export const Hover: Story = {
+	...AddOnly,
+	parameters: { pseudo: { hover: true } },
+};

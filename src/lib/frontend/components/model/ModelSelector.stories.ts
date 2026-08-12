@@ -198,3 +198,8 @@ export const WithRoutingOptions: Story = {
 
 /** No models or providers — shows placeholder text. */
 export const NoModels: Story = {};
+
+export const Hover: Story = {
+	...Closed,
+	parameters: { pseudo: { hover: true } },
+};

@@ -64,3 +64,8 @@ export const ExpandedTruncatedResult: Story = {
 		await userEvent.click(within(canvasElement).getByRole("button"));
 	},
 };
+
+export const Hover: Story = {
+	...Default,
+	parameters: { pseudo: { hover: true } },
+};

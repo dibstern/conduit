@@ -55,3 +55,8 @@ export const Empty: Story = {
 export const CopyInteraction: Story = {
 	args: { message: mockAssistantMarkdown },
 };
+
+export const Hover: Story = {
+	...SimpleParagraph,
+	parameters: { pseudo: { hover: true } },
+};

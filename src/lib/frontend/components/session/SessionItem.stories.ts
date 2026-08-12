@@ -49,3 +49,8 @@ export const WithContextMenu: Story = {
 		active: false,
 	},
 };
+
+export const Hover: Story = {
+	...Inactive,
+	parameters: { pseudo: { hover: true } },
+};

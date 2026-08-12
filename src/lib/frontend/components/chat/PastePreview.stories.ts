@@ -64,3 +64,8 @@ export const Empty: Story = {
 		onRemove: (id: string) => console.log("Remove image:", id),
 	},
 };
+
+export const Hover: Story = {
+	...WithImages,
+	parameters: { pseudo: { hover: true } },
+};

@@ -24,3 +24,11 @@ export const Open: Story = {
 	tags: ["viewport-capture"],
 	args: { open: true },
 };
+
+export const Hover: Story = {
+	...Open,
+	// Storybook's indexer reads `tags` statically per export, so the spread above
+	// does not carry Open's tag into the built index. Repeat it explicitly.
+	tags: ["viewport-capture"],
+	parameters: { pseudo: { hover: true } },
+};

@@ -26,3 +26,8 @@ export const Completed: Story = {
 export const LongDuration: Story = {
 	args: { message: mockThinkingLong },
 };
+
+export const Hover: Story = {
+	...Completed,
+	parameters: { pseudo: { hover: true } },
+};

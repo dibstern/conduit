@@ -37,3 +37,8 @@ export const Hidden: Story = {
 		onClose: noop,
 	},
 };
+
+export const Hover: Story = {
+	...Visible,
+	parameters: { pseudo: { hover: true } },
+};

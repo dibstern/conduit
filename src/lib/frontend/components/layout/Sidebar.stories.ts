@@ -1,4 +1,8 @@
 import type { Meta, StoryObj } from "@storybook/svelte-vite";
+import {
+	requestNewSession,
+	resetSessionCreation,
+} from "../../stores/session.svelte.js";
 import { uiState } from "../../stores/ui.svelte.js";
 import Sidebar from "./Sidebar.svelte";
 
@@ -39,5 +43,19 @@ export const MobileOpen: Story = {
 	},
 	beforeEach: () => {
 		uiState.mobileSidebarOpen = true;
+	},
+};
+
+export const Hover: Story = {
+	...Default,
+	parameters: { pseudo: { hover: true } },
+};
+
+export const Loading: Story = {
+	...Default,
+	beforeEach: () => {
+		resetSessionCreation();
+		requestNewSession();
+		return resetSessionCreation;
 	},
 };

@@ -39,3 +39,8 @@ export const ExpandedResult: Story = {
 		await userEvent.click(within(canvasElement).getByRole("button"));
 	},
 };
+
+export const Hover: Story = {
+	...Default,
+	parameters: { pseudo: { hover: true } },
+};

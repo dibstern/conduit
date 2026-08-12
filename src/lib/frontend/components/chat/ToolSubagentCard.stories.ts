@@ -35,3 +35,8 @@ export const Running: Story = {
 export const ErrorState: Story = {
 	args: { message: mockToolSubagentError },
 };
+
+export const Hover: Story = {
+	...Default,
+	parameters: { pseudo: { hover: true } },
+};

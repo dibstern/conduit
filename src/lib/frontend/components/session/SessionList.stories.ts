@@ -1,5 +1,10 @@
 import type { Meta, StoryObj } from "@storybook/svelte-vite";
-import { sessionState, setSearchQuery } from "../../stores/session.svelte.js";
+import {
+	requestNewSession,
+	resetSessionCreation,
+	sessionState,
+	setSearchQuery,
+} from "../../stores/session.svelte.js";
 import { mockSessionsAllGroups } from "../../stories/mocks.js";
 import SessionList from "./SessionList.svelte";
 
@@ -41,5 +46,19 @@ export const Searching: Story = {
 		sessionState.rootSessions = [...mockSessionsAllGroups];
 		sessionState.allSessions = [...mockSessionsAllGroups];
 		setSearchQuery("dark");
+	},
+};
+
+export const Hover: Story = {
+	...Empty,
+	parameters: { pseudo: { hover: true } },
+};
+
+export const Loading: Story = {
+	...Empty,
+	beforeEach: () => {
+		resetSessionCreation();
+		requestNewSession();
+		return resetSessionCreation;
 	},
 };

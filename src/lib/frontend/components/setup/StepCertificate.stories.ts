@@ -49,3 +49,8 @@ export const Verified: Story = {
 		certMessage: "HTTPS connection verified. Certificate is trusted.",
 	},
 };
+
+export const Hover: Story = {
+	...Default,
+	parameters: { pseudo: { hover: true } },
+};
