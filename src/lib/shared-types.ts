@@ -430,11 +430,15 @@ const ModelExecutionSchema = Schema.Struct({
 		(execution) =>
 			execution.drifted === undefined ||
 			(execution.expectedModel !== undefined &&
-				execution.drifted ===
-					(execution.actualModel !== execution.expectedModel)),
+				(execution.drifted === false ||
+					execution.actualModel !== execution.expectedModel)),
 		{
+			// Not a biconditional: two ids that differ only by the `[1m]`
+			// context-window suffix name the same model, so equal-identity /
+			// unequal-string is a legitimate `drifted: false`. Claiming drift
+			// between two identical ids is still nonsense.
 			message: () =>
-				"drifted requires expectedModel and must equal actualModel !== expectedModel",
+				"drifted requires expectedModel, and drifted=true requires actualModel to differ from expectedModel",
 		},
 	),
 );

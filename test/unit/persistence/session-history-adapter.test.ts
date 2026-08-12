@@ -150,6 +150,26 @@ describe("messageRowsToHistory", () => {
 		expect(result.messages[1]).not.toHaveProperty("modelExecution");
 	});
 
+	it("does not call a context-window suffix drift", () => {
+		// `init` echoes conduit's outbound id, the assistant message reports the
+		// bare API model. Same model, so no drift.
+		const modelExecution = {
+			requestedModel: "opus[1m]",
+			expectedModel: "claude-opus-5[1m]",
+			actualModel: "claude-opus-5",
+		};
+		const rows = [
+			makeMessageWithParts("user", { role: "user", modelExecution }),
+		];
+
+		const result = messageRowsToHistory(rows, { pageSize: 50 });
+
+		expect(result.messages[0]?.modelExecution).toEqual({
+			...modelExecution,
+			drifted: false,
+		});
+	});
+
 	it("omits drift for historical and partial turn evidence", () => {
 		const historical = makeMessageWithParts("historical", { role: "user" });
 		const partial = makeMessageWithParts("partial", {

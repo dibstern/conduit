@@ -37,6 +37,7 @@ import {
 } from "../domain/relay/Services/session-overrides-state.js";
 import { formatErrorDetail } from "../errors.js";
 import { ReadQueryEffectTag } from "../persistence/effect/read-query-effect.js";
+import { isSameModelIdentity } from "../provider/claude/claude-api-model-id.js";
 import {
 	loadRelaySettings,
 	saveRelaySettings,
@@ -543,7 +544,10 @@ export const getModelsResponse = (
 							? {}
 							: {
 									expectedModel: row.expected_model,
-									drifted: row.actual_model !== row.expected_model,
+									drifted: !isSameModelIdentity(
+										row.actual_model,
+										row.expected_model,
+									),
 								}),
 						actualModel: row.actual_model,
 					};

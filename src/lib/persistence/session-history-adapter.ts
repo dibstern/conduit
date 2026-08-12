@@ -3,6 +3,7 @@
 // Converts SQLite MessageWithParts[] → HistoryMessage[] for session_switched messages.
 // Pure conversion with no I/O.
 
+import { isSameModelIdentity } from "../provider/claude/claude-api-model-id.js";
 import type {
 	HistoryMessage,
 	HistoryMessagePart,
@@ -152,9 +153,10 @@ export function messageRowsToHistory(
 							...(row.modelExecution.expectedModel === undefined
 								? {}
 								: {
-										drifted:
-											row.modelExecution.actualModel !==
+										drifted: !isSameModelIdentity(
+											row.modelExecution.actualModel,
 											row.modelExecution.expectedModel,
+										),
 									}),
 						},
 					}

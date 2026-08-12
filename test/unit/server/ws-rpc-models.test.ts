@@ -66,7 +66,7 @@ describe("WsRpcServerLayer GetModels", () => {
 					],
 				})),
 			});
-			for (const sessionId of ["drift", "match", "unknown"]) {
+			for (const sessionId of ["drift", "match", "window", "unknown"]) {
 				orchestrationEngine.bindSession(sessionId, "claude");
 			}
 			const readQuery = makeReadQuery((sessionId) =>
@@ -83,11 +83,21 @@ describe("WsRpcServerLayer GetModels", () => {
 									expected_model: "claude-sonnet-5",
 									actual_model: "claude-sonnet-5",
 								}
-							: {
-									requested_model: "agent-model",
-									expected_model: null,
-									actual_model: "claude-sonnet-5",
-								},
+							: sessionId === "window"
+								? {
+										// The two channels that report a served model
+										// disagree on the context-window suffix: the CLI's
+										// `init` echoes the outbound id, the API's assistant
+										// message reports the bare model. Same model.
+										requested_model: "opus[1m]",
+										expected_model: "claude-opus-5[1m]",
+										actual_model: "claude-opus-5",
+									}
+								: {
+										requested_model: "agent-model",
+										expected_model: null,
+										actual_model: "claude-sonnet-5",
+									},
 				),
 			);
 
@@ -100,6 +110,10 @@ describe("WsRpcServerLayer GetModels", () => {
 				const match = yield* client.GetModels({
 					projectSlug: "project-a",
 					sessionId: "match",
+				});
+				const window = yield* client.GetModels({
+					projectSlug: "project-a",
+					sessionId: "window",
 				});
 				const unknown = yield* client.GetModels({
 					projectSlug: "project-a",
@@ -116,6 +130,12 @@ describe("WsRpcServerLayer GetModels", () => {
 					requestedModel: "sonnet",
 					expectedModel: "claude-sonnet-5",
 					actualModel: "claude-sonnet-5",
+					drifted: false,
+				});
+				expect(window.modelExecution).toEqual({
+					requestedModel: "opus[1m]",
+					expectedModel: "claude-opus-5[1m]",
+					actualModel: "claude-opus-5",
 					drifted: false,
 				});
 				expect(unknown.modelExecution).toEqual({

@@ -438,6 +438,27 @@ describe("browser WebSocket RPC contract", () => {
 		});
 		expect(decoded.messages[1]).not.toHaveProperty("modelExecution");
 
+		// Two ids that differ only by the `[1m]` context-window suffix name the
+		// same model, so this is a legitimate `drifted: false`.
+		expect(() =>
+			decode({
+				projectSlug: "demo",
+				sessionId: "session-1",
+				messages: [
+					{
+						id: "user-1",
+						role: "user",
+						modelExecution: {
+							expectedModel: "claude-opus-5[1m]",
+							actualModel: "claude-opus-5",
+							drifted: false,
+						},
+					},
+				],
+				hasMore: false,
+			}),
+		).not.toThrow();
+
 		expect(() =>
 			decode({
 				projectSlug: "demo",
@@ -448,8 +469,8 @@ describe("browser WebSocket RPC contract", () => {
 						role: "user",
 						modelExecution: {
 							expectedModel: "claude-sonnet-5",
-							actualModel: "claude-fable-4-0",
-							drifted: false,
+							actualModel: "claude-sonnet-5",
+							drifted: true,
 						},
 					},
 				],
