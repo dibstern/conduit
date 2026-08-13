@@ -457,6 +457,7 @@ export class ClaudeEventTranslator {
 					status: "idle",
 				}),
 			);
+			ctx.turnInFlight = false;
 			this.resetInFlightState();
 		});
 	}
@@ -692,13 +693,20 @@ export class ClaudeEventTranslator {
 							`Claude model drift: session=${ctx.sessionId} requested=${ctx.currentModel ?? "<none>"} expected=${ctx.expectedApiModelId} actual=${message.model}`,
 						);
 					}
-					yield* this.push(
-						ctx,
-						makeProviderRuntimeEvent("session.status", ctx.sessionId, {
-							sessionId: ctx.sessionId,
-							status: "idle",
-						}),
-					);
+					// init lands ~1s after the prompt starts, so reporting idle
+					// unconditionally blanks the bounce bar and the sidebar dot at
+					// the top of every first turn. It is still the only thing that
+					// clears a busy status stranded by a crash mid-turn, so keep it
+					// for the case where no turn is actually running.
+					if (!ctx.turnInFlight) {
+						yield* this.push(
+							ctx,
+							makeProviderRuntimeEvent("session.status", ctx.sessionId, {
+								sessionId: ctx.sessionId,
+								status: "idle",
+							}),
+						);
+					}
 					return;
 				}
 

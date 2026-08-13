@@ -65,6 +65,7 @@ function makeCtx(): ClaudeSessionContext {
 		inFlightTools: new Map(),
 		eventSink: undefined,
 		currentTurnId: "turn-1",
+		turnInFlight: true,
 		currentModel: "claude-sonnet-5",
 		resumeSessionId: undefined,
 		lastAssistantUuid: undefined,
@@ -73,9 +74,10 @@ function makeCtx(): ClaudeSessionContext {
 	};
 }
 
-async function replay(): Promise<ProviderRuntimeEvent[]> {
+async function replay(
+	ctx: ClaudeSessionContext = makeCtx(),
+): Promise<ProviderRuntimeEvent[]> {
 	const sink = makeStubSink();
-	const ctx = makeCtx();
 	const translator = new ClaudeEventTranslator({ getSink: () => sink });
 	for (const line of readFileSync(TRACE, "utf8").split("\n")) {
 		if (!line.trim()) continue;
@@ -116,6 +118,29 @@ describe("subagent turn keeps the parent session busy", () => {
 			.slice(turnEnd)
 			.filter((e) => e.type === "session.status");
 		expect(after.map(statusOf)).toEqual(["idle"]);
+	});
+
+	it("stays quiet when init lands after the prompt has started", async () => {
+		const events = await replay();
+		const firstBusy = events.findIndex(
+			(e) => e.type === "session.status" && statusOf(e) === "busy",
+		);
+		expect(firstBusy).toBeGreaterThanOrEqual(0);
+		// system/init arrives ~1s AFTER the prompt is submitted. Conduit renders
+		// its idle as a synthetic `done`, which idles the composer and fires the
+		// completion notifications — at the top of every session's first turn.
+		const beforeBusy = events
+			.slice(0, firstBusy)
+			.filter((e) => e.type === "session.status");
+		expect(beforeBusy.map(statusOf), "init idled a live turn").toEqual([]);
+	});
+
+	it("still clears a stale busy when init lands with no turn running", async () => {
+		const events = await replay({ ...makeCtx(), turnInFlight: false });
+		// The mirror case: a crash mid-turn strands the session busy, and init
+		// on the next connect is the only thing that clears it.
+		const first = events.find((e) => e.type === "session.status");
+		expect(first && statusOf(first)).toBe("idle");
 	});
 
 	it("reports busy when the SDK says it is requesting", async () => {

@@ -66,6 +66,7 @@ function makeCtx(): ClaudeSessionContext {
 		inFlightTools: new Map(),
 		eventSink: undefined,
 		currentTurnId: "turn-1",
+		turnInFlight: true,
 		currentModel: "claude-sonnet-5",
 		resumeSessionId: undefined,
 		lastAssistantUuid: undefined,

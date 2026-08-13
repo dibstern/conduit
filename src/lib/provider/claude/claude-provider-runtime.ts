@@ -883,6 +883,7 @@ export class ClaudeProviderRuntime {
 					pendingSubagentMessages: new Map(),
 					eventSink: input.eventSink,
 					currentTurnId: input.turnId,
+					turnInFlight: input.turnId !== undefined,
 					currentModel: input.model?.modelId,
 					currentApiModelId: apiModelId,
 					...(expectedApiModelId ? { expectedApiModelId } : {}),
@@ -1053,6 +1054,7 @@ export class ClaudeProviderRuntime {
 
 			// Update turn id and event sink on context (latest sink wins).
 			ctx.currentTurnId = input.turnId;
+			ctx.turnInFlight = true;
 			ctx.eventSink = input.eventSink;
 
 			// Build and enqueue the user message. Mark the assistant-message
@@ -2052,6 +2054,8 @@ export class ClaudeProviderRuntime {
 					)
 					.pipe(Effect.ignore);
 			}
+
+			ctx.turnInFlight = false;
 
 			// 5. Close prompt queue.
 			yield* ctx.promptQueue.close().pipe(Effect.ignore);

@@ -166,6 +166,12 @@ export interface ClaudeSessionContext {
 	/** EventSink for this session — updated on each turn (latest sink wins). */
 	eventSink: EventSink | undefined;
 	currentTurnId: string | undefined;
+	/** True from prompt submit until a terminal turn message. The SDK's
+	 *  system/init reports idle to clear a busy status stranded by a crash
+	 *  mid-turn, but it arrives ~1s AFTER the prompt starts — so it needs to
+	 *  know whether a turn is actually running. currentTurnId cannot answer
+	 *  that: it is set at submit and never cleared. */
+	turnInFlight?: boolean;
 	/** Conduit's requested catalog/base model id for the current turn. */
 	currentModel: string | undefined;
 	/** Exact model id sent to the Claude SDK after context-window normalization. */
