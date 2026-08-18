@@ -157,6 +157,9 @@ export interface ClaudeSessionContext {
 	readonly startedAt: string;
 	readonly promptQueue: PromptQueueController;
 	readonly query: Query;
+	/** Serializes turn admission while each caller awaits the prior turn.
+	 *  Runtime-owned contexts always set this; translator-only test contexts may omit it. */
+	readonly turnAdmissionSemaphore?: Effect.Semaphore;
 	readonly pendingApprovals: Map<string, PendingApproval>;
 	readonly pendingQuestions: Map<string, PendingQuestion>;
 	readonly inFlightTools: Map<number, ToolInFlight>;
@@ -178,6 +181,9 @@ export interface ClaudeSessionContext {
 	currentAgent?: string;
 	/** Reasoning effort in force on the live query. Undefined means SDK default. */
 	currentVariant?: string;
+	/** A prior admission may have partially mutated the SDK query. The next
+	 *  admission must re-apply both model and effort before enqueueing. */
+	settingsOutOfSync?: boolean;
 	resumeSessionId: string | undefined;
 	lastAssistantUuid: string | undefined;
 	turnCount: number;
