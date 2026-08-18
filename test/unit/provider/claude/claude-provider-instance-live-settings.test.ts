@@ -121,6 +121,31 @@ function resolvedModels(sink: EventSink): string[] {
 		.map((event) => event.data.actualModel);
 }
 
+function resolvedTurns(sink: EventSink): Array<{
+	turnId?: string;
+	requestedModel?: string;
+	expectedModel?: string;
+	actualModel: string;
+}> {
+	const calls = (sink.push as unknown as { mock: { calls: unknown[][] } }).mock
+		.calls;
+	return calls
+		.map(
+			([event]) =>
+				event as {
+					type: string;
+					data: {
+						turnId?: string;
+						requestedModel?: string;
+						expectedModel?: string;
+						actualModel: string;
+					};
+				},
+		)
+		.filter((event) => event.type === "turn.model_resolved")
+		.map((event) => event.data);
+}
+
 async function waitForAssertion(assertion: () => void): Promise<void> {
 	const deadline = Date.now() + 500;
 	let lastError: unknown;
@@ -286,5 +311,175 @@ describe("ClaudeProviderInstance mid-session setting changes", () => {
 		releaseTurn2?.();
 		expect((await turn2Promise).status).toBe("completed");
 		expect(resolvedModels(sink)).toEqual([SONNET, OPUS]);
+	});
+
+	it("applies overlapping turn settings only at FIFO turn boundaries", async () => {
+		const release: Array<() => void> = [];
+		const gates = Array.from(
+			{ length: 5 },
+			() =>
+				new Promise<void>((resolve) => {
+					release.push(resolve);
+				}),
+		);
+		const gen = (async function* () {
+			yield initMessage(SONNET);
+			await gates[0];
+			yield makeSuccessResult({ session_id: "sdk-1" }) as unknown as SDKMessage;
+			await gates[1];
+			yield assistantMessage("a2", OPUS);
+			await gates[2];
+			yield makeSuccessResult({ session_id: "sdk-1" }) as unknown as SDKMessage;
+			await gates[3];
+			yield assistantMessage("a3", SONNET);
+			await gates[4];
+			yield makeSuccessResult({ session_id: "sdk-1" }) as unknown as SDKMessage;
+		})();
+		const { query, applyFlagSettings, setModel } = makeMockQuery(gen);
+		const instance = new ClaudeProviderInstance({
+			workspaceRoot: workspace,
+			queryFactory: vi.fn(() => query),
+			capabilitiesService: makeCapabilitiesService(),
+		});
+		const sink = createMockEventSink();
+		const turnInput = (turnId: string, modelId: string, variant?: string) =>
+			makeBaseSendTurnInput({
+				sessionId: "s-overlap",
+				turnId,
+				eventSink: sink,
+				model: { providerId: "claude", modelId },
+				...(variant ? { variant } : {}),
+			});
+
+		const turnA = Effect.runPromise(
+			instance.sendTurnEffect(turnInput("turn-a", SONNET)),
+		);
+		await waitForAssertion(() => {
+			expect(resolvedTurns(sink)).toHaveLength(1);
+		});
+
+		const turnB = Effect.runPromise(
+			instance.sendTurnEffect(turnInput("turn-b", OPUS, "high")),
+		);
+		const turnC = Effect.runPromise(
+			instance.sendTurnEffect(turnInput("turn-c", SONNET, "low")),
+		);
+		await Promise.resolve();
+		await Promise.resolve();
+		expect(setModel).not.toHaveBeenCalled();
+		expect(applyFlagSettings).not.toHaveBeenCalled();
+
+		release[0]?.();
+		expect((await turnA).status).toBe("completed");
+		await waitForAssertion(() => {
+			expect(setModel).toHaveBeenCalledTimes(1);
+			expect(setModel).toHaveBeenLastCalledWith(OPUS);
+			expect(applyFlagSettings).toHaveBeenCalledTimes(1);
+			expect(applyFlagSettings).toHaveBeenLastCalledWith({
+				effortLevel: "high",
+			});
+		});
+
+		release[1]?.();
+		await waitForAssertion(() => {
+			expect(resolvedTurns(sink)).toHaveLength(2);
+		});
+		expect(setModel).toHaveBeenCalledTimes(1);
+		expect(applyFlagSettings).toHaveBeenCalledTimes(1);
+		release[2]?.();
+		expect((await turnB).status).toBe("completed");
+		await waitForAssertion(() => {
+			expect(setModel).toHaveBeenCalledTimes(2);
+			expect(setModel).toHaveBeenLastCalledWith(SONNET);
+			expect(applyFlagSettings).toHaveBeenCalledTimes(2);
+			expect(applyFlagSettings).toHaveBeenLastCalledWith({
+				effortLevel: "low",
+			});
+		});
+
+		release[3]?.();
+		await waitForAssertion(() => {
+			expect(resolvedTurns(sink)).toHaveLength(3);
+		});
+		release[4]?.();
+		expect((await turnC).status).toBe("completed");
+		// The resolved-model sequence is the FIFO evidence: A ran on sonnet, B
+		// on opus, C back on sonnet, each applied at its own turn boundary.
+		expect(resolvedTurns(sink)).toEqual([
+			{
+				requestedModel: SONNET,
+				expectedModel: SONNET,
+				actualModel: SONNET,
+			},
+			{
+				requestedModel: OPUS,
+				expectedModel: OPUS,
+				actualModel: OPUS,
+			},
+			{
+				requestedModel: SONNET,
+				expectedModel: SONNET,
+				actualModel: SONNET,
+			},
+		]);
+	});
+
+	it("fully reapplies settings after a partially failed admission", async () => {
+		let releaseNextTurn: (() => void) | undefined;
+		const nextTurnGate = new Promise<void>((resolve) => {
+			releaseNextTurn = resolve;
+		});
+		const gen = (async function* () {
+			yield makeSuccessResult({ session_id: "sdk-1" }) as unknown as SDKMessage;
+			await nextTurnGate;
+			yield makeSuccessResult({ session_id: "sdk-1" }) as unknown as SDKMessage;
+		})();
+		const { query, applyFlagSettings, setModel } = makeMockQuery(gen);
+		applyFlagSettings.mockRejectedValueOnce(new Error("flag settings failed"));
+		const instance = new ClaudeProviderInstance({
+			workspaceRoot: workspace,
+			queryFactory: vi.fn(() => query),
+			capabilitiesService: makeCapabilitiesService(),
+		});
+		const sink = createMockEventSink();
+		const turnInput = (turnId: string, modelId: string, variant?: string) =>
+			makeBaseSendTurnInput({
+				sessionId: "s-dirty",
+				turnId,
+				eventSink: sink,
+				model: { providerId: "claude", modelId },
+				...(variant ? { variant } : {}),
+			});
+
+		expect(
+			(
+				await Effect.runPromise(
+					instance.sendTurnEffect(turnInput("turn-a", SONNET)),
+				)
+			).status,
+		).toBe("completed");
+		await expect(
+			Effect.runPromise(
+				instance.sendTurnEffect(turnInput("turn-b", OPUS, "high")),
+			),
+		).rejects.toThrow("flag settings failed");
+
+		const turnC = Effect.runPromise(
+			instance.sendTurnEffect(turnInput("turn-c", OPUS)),
+		);
+		await waitForAssertion(() => {
+			expect(setModel).toHaveBeenCalledTimes(2);
+			expect(setModel).toHaveBeenNthCalledWith(1, OPUS);
+			expect(setModel).toHaveBeenNthCalledWith(2, OPUS);
+			expect(applyFlagSettings).toHaveBeenCalledTimes(2);
+			expect(applyFlagSettings).toHaveBeenNthCalledWith(1, {
+				effortLevel: "high",
+			});
+			expect(applyFlagSettings).toHaveBeenNthCalledWith(2, {
+				effortLevel: null,
+			});
+		});
+		releaseNextTurn?.();
+		expect((await turnC).status).toBe("completed");
 	});
 });

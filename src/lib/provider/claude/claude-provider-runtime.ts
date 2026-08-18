@@ -837,6 +837,7 @@ export class ClaudeProviderRuntime {
 			const setup = Effect.gen(this, function* () {
 				// 1. Create prompt queue.
 				const queue = yield* makeEffectPromptQueue();
+				const turnAdmissionSemaphore = yield* Effect.makeSemaphore(1);
 				promptQueue = queue;
 
 				// 2. Build initial user message and enqueue.
@@ -873,6 +874,7 @@ export class ClaudeProviderRuntime {
 					workspaceRoot: input.workspaceRoot,
 					startedAt: new Date().toISOString(),
 					promptQueue: queue,
+					turnAdmissionSemaphore,
 					// Placeholder — immediately overwritten after query factory call.
 					query: undefined as unknown as ClaudeSessionContext["query"],
 					pendingApprovals: new Map(),
@@ -889,6 +891,7 @@ export class ClaudeProviderRuntime {
 					...(expectedApiModelId ? { expectedApiModelId } : {}),
 					...(input.agent ? { currentAgent: input.agent } : {}),
 					...(input.variant ? { currentVariant: input.variant } : {}),
+					settingsOutOfSync: false,
 					resumeSessionId,
 					lastAssistantUuid: undefined,
 					turnCount: 0,
@@ -1010,63 +1013,120 @@ export class ClaudeProviderRuntime {
 				return yield* this.restartSessionForAgentChangeEffect(ctx, input);
 			}
 
-			const baseModelId = input.model?.modelId ?? ctx.currentModel;
-			const apiModelId = claudeApiModelId(baseModelId, input.contextWindow);
-			if (apiModelId && apiModelId !== ctx.currentApiModelId) {
-				yield* Effect.tryPromise({
-					try: () => ctx.query.setModel(apiModelId),
-					catch: (cause) => cause,
-				});
-				ctx.currentApiModelId = apiModelId;
+			const turnAdmissionSemaphore = ctx.turnAdmissionSemaphore;
+			if (!turnAdmissionSemaphore) {
+				return yield* Effect.fail(
+					new Error(
+						`Claude runtime invariant violated: missing turn admission semaphore for ${ctx.sessionId}`,
+					),
+				);
 			}
-			if (input.model?.modelId) {
-				ctx.currentModel = input.model.modelId;
-			}
-			// `effort` is fixed at query creation, so a mid-session change only
-			// lands via the flag-settings layer. Empty/absent clears it back to
-			// the settings-file default.
-			if (input.variant !== ctx.currentVariant) {
-				const effortLevel = (input.variant || null) as EffortLevel | null;
-				yield* Effect.tryPromise({
-					try: () => ctx.query.applyFlagSettings({ effortLevel }),
-					catch: (cause) => cause,
-				});
-				if (input.variant) {
-					ctx.currentVariant = input.variant;
-				} else {
-					delete ctx.currentVariant;
-				}
-			}
-			const expectedApiModelId = yield* this.expectedApiModelIdEffect(
-				baseModelId,
-				input.contextWindow,
-				input.workspaceRoot,
-				input.agent,
+			const deferred = yield* turnAdmissionSemaphore.withPermits(1)(
+				Effect.gen(this, function* () {
+					const state = yield* this.getState();
+					const pendingTurns = getOrUndefined(
+						HashMap.get(state.turnWaiters, ctx.sessionId),
+					);
+					const priorTurn = pendingTurns?.[0];
+					if (priorTurn) {
+						// Wait for the prior turn to finish, but never inherit its
+						// failure: a rejected turn A must not reject turn B. The
+						// liveness checks below decide whether B may still proceed.
+						yield* Deferred.await(priorTurn).pipe(Effect.ignore);
+					}
+
+					if (
+						ctx.stopped ||
+						!(yield* this.isCurrentSession(ctx)) ||
+						(yield* this.isStreamEnded(ctx.sessionId))
+					) {
+						return yield* Effect.fail(
+							new Error(`Claude session is no longer active: ${ctx.sessionId}`),
+						);
+					}
+
+					const baseModelId = input.model?.modelId ?? ctx.currentModel;
+					const apiModelId = claudeApiModelId(baseModelId, input.contextWindow);
+					const expectedApiModelId = yield* this.expectedApiModelIdEffect(
+						baseModelId,
+						input.contextWindow,
+						input.workspaceRoot,
+						input.agent,
+					);
+					const userMessage = yield* Effect.try({
+						try: () => validateUserMessage(this.buildUserMessage(input)),
+						catch: (cause) => cause,
+					});
+					const forceSettingsSync = ctx.settingsOutOfSync;
+					const shouldSetModel =
+						apiModelId !== undefined &&
+						(forceSettingsSync || apiModelId !== ctx.currentApiModelId);
+					const shouldApplyFlagSettings =
+						forceSettingsSync || input.variant !== ctx.currentVariant;
+
+					if (shouldSetModel || shouldApplyFlagSettings) {
+						ctx.settingsOutOfSync = true;
+					}
+					if (shouldSetModel) {
+						yield* Effect.tryPromise({
+							try: () => ctx.query.setModel(apiModelId),
+							catch: (cause) => cause,
+						});
+						ctx.currentApiModelId = apiModelId;
+					}
+					if (input.model?.modelId) {
+						ctx.currentModel = input.model.modelId;
+					}
+					// `effort` is fixed at query creation, so a mid-session change only
+					// lands via the flag-settings layer. Empty/absent clears it back to
+					// the settings-file default.
+					if (shouldApplyFlagSettings) {
+						const effortLevel = (input.variant || null) as EffortLevel | null;
+						yield* Effect.tryPromise({
+							try: () => ctx.query.applyFlagSettings({ effortLevel }),
+							catch: (cause) => cause,
+						});
+						if (input.variant) {
+							ctx.currentVariant = input.variant;
+						} else {
+							delete ctx.currentVariant;
+						}
+					}
+					if (expectedApiModelId === undefined) {
+						delete ctx.expectedApiModelId;
+					} else {
+						ctx.expectedApiModelId = expectedApiModelId;
+					}
+
+					const turnDeferred = yield* Deferred.make<TurnResult, Error>();
+					yield* Effect.uninterruptible(
+						Effect.gen(this, function* () {
+							yield* this.pushTurnDeferred(ctx.sessionId, turnDeferred);
+							ctx.currentTurnId = input.turnId;
+							// Marks the turn as started so a system/init arriving before
+							// the first assistant chunk cannot report the session idle.
+							ctx.turnInFlight = true;
+							ctx.eventSink = input.eventSink;
+							// Marks the assistant-message boundary: if the SDK's streaming
+							// turn is still open, no `result` resets the translator, and
+							// this reply would otherwise merge into the previous message.
+							ctx.pendingAssistantBoundary = true;
+							yield* ctx.promptQueue.enqueue(userMessage).pipe(
+								Effect.catchAll((cause) =>
+									Effect.gen(this, function* () {
+										yield* this.shiftTurnDeferred(ctx.sessionId);
+										ctx.turnInFlight = false;
+										return yield* Effect.fail(cause);
+									}),
+								),
+							);
+							ctx.settingsOutOfSync = false;
+						}),
+					);
+
+					return turnDeferred;
+				}),
 			);
-			if (expectedApiModelId === undefined) {
-				delete ctx.expectedApiModelId;
-			} else {
-				ctx.expectedApiModelId = expectedApiModelId;
-			}
-
-			const deferred = yield* Deferred.make<TurnResult, Error>();
-			yield* this.pushTurnDeferred(ctx.sessionId, deferred);
-
-			// Update turn id and event sink on context (latest sink wins).
-			ctx.currentTurnId = input.turnId;
-			ctx.turnInFlight = true;
-			ctx.eventSink = input.eventSink;
-
-			// Build and enqueue the user message. Mark the assistant-message
-			// boundary: if the SDK's streaming turn is still open (queued send),
-			// no `result` will reset the translator, and without the marker the
-			// reply to this prompt would merge into the previous turn's message.
-			const userMessage = yield* Effect.try({
-				try: () => validateUserMessage(this.buildUserMessage(input)),
-				catch: (cause) => cause,
-			});
-			ctx.pendingAssistantBoundary = true;
-			yield* ctx.promptQueue.enqueue(userMessage);
 
 			return yield* Deferred.await(deferred);
 		});

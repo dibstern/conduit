@@ -33,6 +33,7 @@ vi.hoisted(() => {
 vi.mock("dompurify", () => ({ default: { sanitize: (h: string) => h } }));
 
 import {
+	clearSessionState,
 	getFilteredSessions,
 	sessionState,
 } from "../../../src/lib/frontend/stores/session.svelte.js";
@@ -96,6 +97,34 @@ describe("deleted sessions leave the sidebar", () => {
 			roots: true,
 		} as RelayMessage);
 		expect(sidebarIds()).toEqual(["keeper"]);
+	});
+
+	it("drops a stale searched session after an authoritative tagged refresh", () => {
+		sessionState.searchQuery = "s";
+		sessionState.searchResults = [VICTIM, KEEPER];
+		handleMessage({
+			type: "session_list",
+			sessions: [KEEPER],
+			roots: false,
+		} as RelayMessage);
+		expect(sidebarIds()).toEqual(["keeper"]);
+	});
+
+	it("returns the live renamed session object during an active search", () => {
+		const renamed = { ...VICTIM, title: "Renamed Session" };
+		sessionState.searchQuery = "session";
+		sessionState.searchResults = [VICTIM];
+		handleMessage({
+			type: "session_list",
+			sessions: [renamed, KEEPER],
+			roots: true,
+		} as RelayMessage);
+		expect(getFilteredSessions()).toEqual([renamed]);
+	});
+
+	it("clears the live session map with the rest of session state", () => {
+		clearSessionState();
+		expect(sessionState.sessions.size).toBe(0);
 	});
 
 	it("leaves a normal search untouched when nothing was deleted", () => {
