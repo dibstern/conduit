@@ -57,6 +57,7 @@ run "E2E visual tests"         pnpm exec playwright test --config test/e2e/playw
 
 # --- Storybook ---
 run "Storybook build"          pnpm storybook:build
+run "Storybook interaction and a11y tests" pnpm test:storybook
 run "Storybook visual tests"   pnpm exec playwright test --config test/visual/playwright.config.ts
 
 # --- Strict Darwin visual fidelity (local pre-release gate) ---

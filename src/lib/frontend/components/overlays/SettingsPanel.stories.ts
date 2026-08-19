@@ -1,5 +1,5 @@
 import type { Meta, StoryObj } from "@storybook/svelte-vite";
-import { fn, userEvent, within } from "storybook/test";
+import { expect, fn, userEvent, within } from "storybook/test";
 import conduitTheme from "../../../themes/conduit.json";
 import opencodeLightTheme from "../../../themes/opencode-light.json";
 import {
@@ -145,11 +145,13 @@ export const InstancesEmpty: Story = {
 export const QuickStartExpanded: Story = {
 	args: { initialTab: "instances" },
 	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
 		await userEvent.click(
-			within(canvasElement).getByRole("button", {
+			canvas.getByRole("button", {
 				name: /Quick Start — Direct API Key/,
 			}),
 		);
+		await expect(canvas.getByText("opencode serve --port 4098")).toBeVisible();
 	},
 };
 
@@ -162,11 +164,13 @@ export const InstanceExpanded: Story = {
 	args: { initialTab: "instances" },
 	beforeEach: populateInstances,
 	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
 		await userEvent.click(
-			within(canvasElement).getByRole("button", {
+			canvas.getByRole("button", {
 				name: /Local OpenCode/,
 			}),
 		);
+		await expect(canvas.getByRole("button", { name: "Rename" })).toBeVisible();
 	},
 };
 

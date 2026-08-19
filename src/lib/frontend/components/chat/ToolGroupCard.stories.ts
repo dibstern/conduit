@@ -1,5 +1,5 @@
 import type { Meta, StoryObj } from "@storybook/svelte-vite";
-import { userEvent, within } from "storybook/test";
+import { expect, userEvent, within } from "storybook/test";
 import {
 	mockToolGroupCompleted,
 	mockToolGroupError,
@@ -31,7 +31,9 @@ export const ErrorState: Story = {
 export const Expanded: Story = {
 	args: { group: mockToolGroupCompleted },
 	play: async ({ canvasElement }) => {
-		await userEvent.click(within(canvasElement).getByRole("button"));
+		const canvas = within(canvasElement);
+		await userEvent.click(canvas.getByRole("button"));
+		await expect(canvas.getAllByRole("button")).toHaveLength(3);
 	},
 };
 

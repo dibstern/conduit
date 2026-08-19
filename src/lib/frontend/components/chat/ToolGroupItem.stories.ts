@@ -1,5 +1,5 @@
 import type { Meta, StoryObj } from "@storybook/svelte-vite";
-import { userEvent, within } from "storybook/test";
+import { expect, userEvent, within } from "storybook/test";
 import {
 	mockToolBash,
 	mockToolCompleted,
@@ -32,28 +32,44 @@ export const LastInGroup: Story = {
 export const ExpandedResult: Story = {
 	args: { message: mockToolCompleted },
 	play: async ({ canvasElement }) => {
-		await userEvent.click(within(canvasElement).getByRole("button"));
+		const canvas = within(canvasElement);
+		await userEvent.click(canvas.getByRole("button"));
+		await expect(canvasElement.querySelector(".tool-result")).toHaveTextContent(
+			"authenticate(token: string)",
+		);
 	},
 };
 
 export const ExpandedBashCommand: Story = {
 	args: { message: mockToolBash },
 	play: async ({ canvasElement }) => {
-		await userEvent.click(within(canvasElement).getByRole("button"));
+		const canvas = within(canvasElement);
+		await userEvent.click(canvas.getByRole("button"));
+		await expect(canvasElement.querySelector(".tool-result")).toHaveTextContent(
+			"git rev-parse HEAD",
+		);
 	},
 };
 
 export const ExpandedError: Story = {
 	args: { message: mockToolError },
 	play: async ({ canvasElement }) => {
-		await userEvent.click(within(canvasElement).getByRole("button"));
+		const canvas = within(canvasElement);
+		await userEvent.click(canvas.getByRole("button"));
+		await expect(canvasElement.querySelector(".tool-result")).toHaveTextContent(
+			"ENOENT",
+		);
 	},
 };
 
 export const ExpandedTruncatedResult: Story = {
 	args: { message: mockToolTruncated, isLast: true },
 	play: async ({ canvasElement }) => {
-		await userEvent.click(within(canvasElement).getByRole("button"));
+		const canvas = within(canvasElement);
+		await userEvent.click(canvas.getByRole("button"));
+		await expect(
+			canvas.getByRole("button", { name: "Show full output" }),
+		).toBeVisible();
 	},
 };
 

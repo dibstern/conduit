@@ -30,7 +30,8 @@ export const EscapeRestoresFocus: Story = {
 		const body = within(canvasElement.ownerDocument.body);
 		const trigger = canvas.getByRole("button", { name: "Open modal" });
 
-		await userEvent.click(trigger);
+		trigger.focus();
+		await userEvent.keyboard("{Enter}");
 
 		const dialog = body.getByRole("dialog", { name: "Modal title" });
 		await expect(dialog).toBeVisible();

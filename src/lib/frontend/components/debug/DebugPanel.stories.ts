@@ -1,5 +1,5 @@
 import type { Meta, StoryObj } from "@storybook/svelte-vite";
-import { fn, userEvent, within } from "storybook/test";
+import { expect, fn, userEvent, within } from "storybook/test";
 import { wsState } from "../../stores/ws.svelte.js";
 import {
 	clearDebugLog,
@@ -64,8 +64,10 @@ export const ExpandedPayload: Story = {
 		});
 	},
 	play: async ({ canvasElement }) => {
-		await userEvent.click(
-			within(canvasElement).getByRole("button", { name: "[+]" }),
+		const canvas = within(canvasElement);
+		await userEvent.click(canvas.getByRole("button", { name: "[+]" }));
+		await expect(canvasElement.querySelector("pre")).toHaveTextContent(
+			"tool-storybook-001",
 		);
 	},
 };

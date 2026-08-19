@@ -1,4 +1,5 @@
 import type { Meta, StoryObj } from "@storybook/svelte-vite";
+import { expect, userEvent, within } from "storybook/test";
 import { discoveryState } from "../../stores/discovery.svelte.js";
 import ContextWindowSelectorHost from "./__fixtures__/ContextWindowSelectorHost.svelte";
 
@@ -65,11 +66,9 @@ export const Open: Story = {
 		discoveryState.currentContextWindow = "";
 	},
 	play: async ({ canvasElement }) => {
-		await new Promise((r) => setTimeout(r, 50));
-		const btn = canvasElement.querySelector(
-			"[data-testid='context-window-badge']",
-		) as HTMLElement;
-		btn?.click();
+		const canvas = within(canvasElement);
+		await userEvent.click(canvas.getByTestId("context-window-badge"));
+		await expect(canvas.getByTestId("context-window-dropdown")).toBeVisible();
 	},
 };
 

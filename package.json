@@ -73,7 +73,8 @@
 		"prepublishOnly": "pnpm test:all",
 		"preversion": "pnpm check && pnpm lint && pnpm test:unit",
 		"postversion": "git push origin main --follow-tags",
-		"prepare": "node scripts/install-git-hooks.mjs"
+		"prepare": "node scripts/install-git-hooks.mjs",
+		"test:storybook": "vitest run --config vitest.storybook.config.ts --project=storybook"
 	},
 	"dependencies": {
 		"@anthropic-ai/claude-agent-sdk": "0.3.207",
@@ -111,6 +112,7 @@
 		"@playwright/test": "^1.58.2",
 		"@storybook/addon-a11y": "^10.2.13",
 		"@storybook/addon-docs": "^10.2.13",
+		"@storybook/addon-vitest": "^10.2.13",
 		"@storybook/svelte": "^10.2.13",
 		"@storybook/svelte-vite": "^10.2.13",
 		"@sveltejs/vite-plugin-svelte": "^5.1.1",
@@ -122,6 +124,7 @@
 		"@types/pngjs": "^6.0.5",
 		"@types/ws": "^8.5.0",
 		"@typescript/native-preview": "7.0.0-dev.20260317.1",
+		"@vitest/browser": "3.2.4",
 		"@vitest/coverage-v8": "^3.2.4",
 		"@xterm/addon-fit": "^0.11.0",
 		"@xterm/xterm": "^6.0.0",

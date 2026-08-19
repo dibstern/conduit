@@ -1,5 +1,5 @@
 import type { Meta, StoryObj } from "@storybook/svelte-vite";
-import { userEvent, within } from "storybook/test";
+import { expect, userEvent, within } from "storybook/test";
 import { discoveryState } from "../../stores/discovery.svelte.js";
 import ModelVariant from "./ModelVariant.svelte";
 
@@ -28,7 +28,9 @@ export const High: Story = {
 export const DropdownOpen: Story = {
 	tags: ["viewport-capture"],
 	play: async ({ canvasElement }) => {
-		await userEvent.click(within(canvasElement).getByTestId("variant-badge"));
+		const canvas = within(canvasElement);
+		await userEvent.click(canvas.getByTestId("variant-badge"));
+		await expect(canvas.getByTestId("variant-dropdown")).toBeVisible();
 	},
 };
 

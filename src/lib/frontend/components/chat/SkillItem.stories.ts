@@ -1,5 +1,5 @@
 import type { Meta, StoryObj } from "@storybook/svelte-vite";
-import { userEvent, within } from "storybook/test";
+import { expect, userEvent, within } from "storybook/test";
 import {
 	mockToolSkillCompleted,
 	mockToolSkillError,
@@ -36,7 +36,9 @@ export const ErrorState: Story = {
 export const ExpandedResult: Story = {
 	args: { message: mockToolSkillCompleted },
 	play: async ({ canvasElement }) => {
-		await userEvent.click(within(canvasElement).getByRole("button"));
+		const canvas = within(canvasElement);
+		await userEvent.click(canvas.getByRole("button"));
+		await expect(canvas.getByText(/Reproduce the failure/)).toBeVisible();
 	},
 };
 

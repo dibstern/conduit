@@ -1,5 +1,5 @@
 import type { Meta, StoryObj } from "@storybook/svelte-vite";
-import { userEvent, within } from "storybook/test";
+import { expect, userEvent, within } from "storybook/test";
 import type { FileEntry } from "../../types.js";
 import FileTreeNode from "./FileTreeNode.svelte";
 
@@ -36,7 +36,9 @@ export const DirectoryNode: Story = {
 		getChildren: (path: string) => directoryChildren[path],
 	},
 	play: async ({ canvasElement }) => {
-		await userEvent.click(within(canvasElement).getByRole("button"));
+		const canvas = within(canvasElement);
+		await userEvent.click(canvas.getByRole("button"));
+		await expect(canvas.getByText("index.ts")).toBeVisible();
 	},
 };
 

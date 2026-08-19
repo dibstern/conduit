@@ -1,4 +1,5 @@
 import type { Meta, StoryObj } from "@storybook/svelte-vite";
+import { expect, userEvent, within } from "storybook/test";
 import { discoveryState } from "../../stores/discovery.svelte.js";
 import ModelSelectorHost from "./__fixtures__/ModelSelectorHost.svelte";
 
@@ -104,10 +105,9 @@ export const Open: Story = {
 		discoveryState.currentProviderId = "anthropic";
 	},
 	play: async ({ canvasElement }) => {
-		// Click the model button to open the dropdown
-		await new Promise((r) => setTimeout(r, 50));
-		const btn = canvasElement.querySelector(".model-btn") as HTMLElement;
-		btn?.click();
+		const canvas = within(canvasElement);
+		await userEvent.click(canvas.getByTitle("Switch model"));
+		await expect(canvas.getByText("Claude Haiku 3.5")).toBeVisible();
 	},
 };
 
@@ -122,10 +122,10 @@ export const WithGroups: Story = {
 		discoveryState.currentProviderId = "anthropic";
 	},
 	play: async ({ canvasElement }) => {
-		// Open dropdown
-		await new Promise((r) => setTimeout(r, 50));
-		const btn = canvasElement.querySelector(".model-btn") as HTMLElement;
-		btn?.click();
+		const canvas = within(canvasElement);
+		await userEvent.click(canvas.getByTitle("Switch model"));
+		await expect(canvas.getByText("OpenAI")).toBeVisible();
+		await expect(canvas.getByText("Google")).toBeVisible();
 	},
 };
 
@@ -189,10 +189,10 @@ export const WithRoutingOptions: Story = {
 		discoveryState.currentProviderId = "amazon-bedrock";
 	},
 	play: async ({ canvasElement }) => {
-		// Open dropdown to show the scope chips
-		await new Promise((r) => setTimeout(r, 50));
-		const btn = canvasElement.querySelector(".model-btn") as HTMLElement;
-		btn?.click();
+		const canvas = within(canvasElement);
+		await userEvent.click(canvas.getByTitle("Switch model"));
+		await expect(canvas.getByTitle("Route via Global (default)")).toBeVisible();
+		await expect(canvas.getByTitle("Route via In-region")).toBeVisible();
 	},
 };
 

@@ -1,5 +1,5 @@
 import type { Meta, StoryObj } from "@storybook/svelte-vite";
-import { userEvent, within } from "storybook/test";
+import { expect, userEvent, within } from "storybook/test";
 import { discoveryState } from "../../stores/discovery.svelte.js";
 import PermissionModeSelector from "./PermissionModeSelector.svelte";
 
@@ -34,9 +34,9 @@ export const AutoApprove: Story = {
 export const DropdownOpen: Story = {
 	tags: ["viewport-capture"],
 	play: async ({ canvasElement }) => {
-		await userEvent.click(
-			within(canvasElement).getByTestId("permission-mode-badge"),
-		);
+		const canvas = within(canvasElement);
+		await userEvent.click(canvas.getByTestId("permission-mode-badge"));
+		await expect(canvas.getByTestId("permission-mode-dropdown")).toBeVisible();
 	},
 };
 

@@ -1,5 +1,5 @@
 import type { Meta, StoryObj } from "@storybook/svelte-vite";
-import { userEvent, within } from "storybook/test";
+import { expect, userEvent, within } from "storybook/test";
 import { createRawSnippet } from "svelte";
 import { sessionState } from "../../stores/session.svelte.js";
 import ForkContextBlock from "./ForkContextBlock.svelte";
@@ -41,7 +41,9 @@ export const Default: Story = {};
 
 export const Expanded: Story = {
 	play: async ({ canvasElement }) => {
-		await userEvent.click(within(canvasElement).getByRole("button"));
+		const canvas = within(canvasElement);
+		await userEvent.click(canvas.getByRole("button"));
+		await expect(canvas.getByText(/Add a visual safety gate/)).toBeVisible();
 	},
 };
 
