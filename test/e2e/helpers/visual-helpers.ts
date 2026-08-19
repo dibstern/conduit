@@ -25,6 +25,13 @@ export async function freezeAnimations(page: Page): Promise<void> {
 	});
 	// Wait a frame for the style to apply
 	await page.waitForTimeout(50);
+	await page.evaluate(() => {
+		for (const animation of document.getAnimations()) {
+			if (animation.effect?.getTiming().iterations !== Infinity) continue;
+			animation.pause();
+			animation.currentTime = 0;
+		}
+	});
 }
 
 /**

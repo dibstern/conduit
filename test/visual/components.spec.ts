@@ -11,6 +11,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { errors, expect, test } from "@playwright/test";
+import { freezeAnimations } from "../e2e/helpers/visual-helpers.js";
 
 // ─── Story Discovery ─────────────────────────────────────────────────────────
 
@@ -115,30 +116,6 @@ async function pinRandomness(
 			t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
 			return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
 		};
-	});
-}
-
-/** Freeze animations and transitions at a deterministic capture frame. */
-async function freezeAnimations(
-	page: import("@playwright/test").Page,
-): Promise<void> {
-	await page.addStyleTag({
-		content: `*, *::before, *::after {
-			animation-delay: -0.0001s !important;
-			animation-duration: 0s !important;
-			animation-play-state: paused !important;
-			transition-duration: 0s !important;
-			transition-delay: 0s !important;
-			caret-color: transparent !important;
-		}`,
-	});
-	await page.waitForTimeout(50);
-	await page.evaluate(() => {
-		for (const animation of document.getAnimations()) {
-			if (animation.effect?.getTiming().iterations !== Infinity) continue;
-			animation.pause();
-			animation.currentTime = 0;
-		}
 	});
 }
 

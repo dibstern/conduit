@@ -41,6 +41,14 @@ import { defineConfig } from "@playwright/test";
 const strict = process.env["VISUAL_STRICT"] === "1";
 
 /**
+ * Overridable so two worktrees can run this suite at once. With a fixed port the
+ * second run either dies on a busy port or — before `reuseExistingServer: false`
+ * below — silently tested the first worktree's build. Snapshots do not depend on
+ * the port, so this is safe to vary per checkout.
+ */
+const PORT = Number(process.env["STORYBOOK_PORT"] ?? 6007);
+
+/**
  * Chromium's default compositing is not bit-reproducible, and zero-tolerance
  * mode is the only thing sensitive enough to notice.
  *
@@ -86,7 +94,7 @@ export default defineConfig({
 			: { maxDiffPixelRatio: 0.01 },
 	},
 	use: {
-		baseURL: "http://localhost:6007",
+		baseURL: `http://localhost:${PORT}`,
 		colorScheme: "dark",
 		launchOptions: { args: DETERMINISTIC_RASTER_ARGS },
 	},
@@ -103,9 +111,23 @@ export default defineConfig({
 		// both on the host (v14.1.1) and in the container. `--no-install` so a
 		// missing dependency fails loudly rather than being fetched from the
 		// network in the middle of a capture run.
-		command: "npx --no-install http-server dist/storybook -p 6007 -s",
-		port: 6007,
-		reuseExistingServer: !process.env["CI"],
+		command: `npx --no-install http-server dist/storybook -p ${PORT} -s`,
+		port: PORT,
+		// NEVER reuse. Measured 2026-08-20 (conduit-test-de3.32): a stale
+		// `python3 -m http.server 6007` rooted in *conduit-wt-de32*'s dist/storybook
+		// was still listening, and `reuseExistingServer: !CI` silently attached to
+		// it — so a full 451-test run in conduit-wt-harness, including a deliberate
+		// sentinel that broke a component, passed green against another worktree's
+		// build. This repo routinely has 5+ worktrees open, so that is the normal
+		// case, not a freak one.
+		//
+		// The failure is invisible by construction: every assertion still runs,
+		// every one passes, and the suite reports on a build nobody asked about.
+		// Reuse trades a few seconds of startup for the possibility that every
+		// green run in the repo means nothing. If the port is busy Playwright now
+		// fails loudly with "port 6007 is used", which is the correct outcome —
+		// stop the stale server and re-run.
+		reuseExistingServer: false,
 		cwd: process.cwd().replace(/\/test\/visual$/, ""),
 	},
 	projects: [

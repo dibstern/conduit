@@ -65,7 +65,7 @@
 		"test:storybook-visual:update-linux": "bash scripts/update-visual-snapshots.sh linux",
 		"generate:media": "tsx scripts/generate-media/index.ts",
 		"check:design-tokens": "node scripts/check-design-tokens.mjs",
-		"check:storybook": "node scripts/check-storybook-health.mjs",
+		"check:storybook": "pnpm test:storybook && pnpm storybook:build && pnpm exec playwright test --config test/visual/playwright.config.ts --project=desktop --grep 'Built Storybook render health'",
 		"test:all": "bash scripts/test-all.sh",
 		"test:e2e:expensive-real-prompts": "RUN_EXPENSIVE_E2E=1 vitest run --config vitest.e2e.config.ts",
 		"test:coverage": "vitest run --coverage",
