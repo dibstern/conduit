@@ -17,6 +17,7 @@
 		onSelect,
 		onClose,
 		loading = false,
+		dividerAt = 0,
 		activeIndex = $bindable(0),
 	}: {
 		listboxId: string;
@@ -26,8 +27,19 @@
 		onSelect: (path: string) => void;
 		onClose: () => void;
 		loading?: boolean | undefined;
+		/**
+		 * Index of the first entry that is *not* an immediate child of the query
+		 * directory — i.e. where the "in subfolders" divider is drawn. The divider is
+		 * rendered between two options rather than being an entry of its own, so
+		 * `activeIndex` arithmetic and the `-option-{i}` ids stay 1:1 with `entries`
+		 * and keyboard nav needs no skip logic. `0` and `entries.length` both mean
+		 * "no divider".
+		 */
+		dividerAt?: number | undefined;
 		activeIndex?: number | undefined;
 	} = $props();
+
+	const showDivider = $derived(dividerAt > 0 && dividerAt < entries.length);
 
 	// ─── Derived ────────────────────────────────────────────────────────────────
 
@@ -132,6 +144,20 @@
 			{:else}
 				{#each entries as entry, i}
 						{@const lastSlash = entry.lastIndexOf("/", entry.endsWith("/") ? entry.length - 2 : entry.length - 1)}
+						{#if showDivider && i === dividerAt}
+							<!-- A role="listbox" may own only `option` and `group`, so the divider
+							     is explicitly neither: presentation + aria-hidden keeps it out of
+							     the accessibility tree entirely. The immediate-children-first
+							     ordering already conveys the grouping to AT. -->
+							<div
+								role="presentation"
+								aria-hidden="true"
+								data-testid="file-menu-divider"
+								class="mt-1 border-t border-border py-1.5 px-3.5 text-text-muted text-xs max-sm:px-2.5"
+							>
+								in subfolders
+							</div>
+						{/if}
 						<div
 							class="file-item flex items-center gap-2 py-2 px-3.5 cursor-pointer transition-colors duration-100 max-sm:py-1.5 max-sm:px-2.5 max-sm:gap-1.5 {i === activeIndex ? 'file-item-active bg-accent-bg hover:bg-accent-bg' : 'hover:bg-bg-alt'}"
 							id="{listboxId}-option-{i}"

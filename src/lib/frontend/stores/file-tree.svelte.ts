@@ -12,6 +12,8 @@ export interface AtQuery {
 	end: number;
 }
 
+export type FilteredFiles = { entries: string[]; dividerAt: number };
+
 // ─── State ──────────────────────────────────────────────────────────────────
 
 export const fileTreeState = $state({
@@ -64,15 +66,18 @@ export function buildMentionInsertion(path: string): string {
  * Case-insensitive substring match on full path and basename.
  * Basename matches are prioritized. Limited to 20 results.
  */
-export function filterFiles(entries: string[], query: string): string[] {
-	if (!query) return entries.slice(0, 20);
+export function filterFiles(entries: string[], query: string): FilteredFiles {
+	if (!query) return { entries: entries.slice(0, 20), dividerAt: 0 };
 
 	const lower = query.toLowerCase();
+	const isDirectoryQuery = query.endsWith("/");
 
 	type Scored = { entry: string; basenameMatch: boolean };
 	const matches: Scored[] = [];
 
 	for (const entry of entries) {
+		if (isDirectoryQuery && entry === query) continue;
+
 		const entryLower = entry.toLowerCase();
 		if (!entryLower.includes(lower)) continue;
 
@@ -86,14 +91,53 @@ export function filterFiles(entries: string[], query: string): string[] {
 		matches.push({ entry, basenameMatch });
 	}
 
-	matches.sort((a, b) => {
+	const compareMatches = (a: Scored, b: Scored): number => {
 		if (a.basenameMatch !== b.basenameMatch) {
 			return a.basenameMatch ? -1 : 1;
 		}
 		return a.entry.localeCompare(b.entry);
-	});
+	};
 
-	return matches.slice(0, 20).map((m) => m.entry);
+	if (!isDirectoryQuery) {
+		matches.sort(compareMatches);
+		return {
+			entries: matches.slice(0, 20).map((match) => match.entry),
+			dividerAt: 0,
+		};
+	}
+
+	const immediateChildren: Scored[] = [];
+	const deeperDescendants: Scored[] = [];
+	for (const match of matches) {
+		const remainder = match.entry.slice(query.length);
+		const pathBelowQuery = remainder.endsWith("/")
+			? remainder.slice(0, -1)
+			: remainder;
+		const group =
+			match.entry.startsWith(query) && !pathBelowQuery.includes("/")
+				? immediateChildren
+				: deeperDescendants;
+		group.push(match);
+	}
+
+	immediateChildren.sort(compareMatches);
+	deeperDescendants.sort(compareMatches);
+
+	const reservedDeeperSlots = Math.min(deeperDescendants.length, 8);
+	const immediateCount = Math.min(
+		immediateChildren.length,
+		20 - reservedDeeperSlots,
+	);
+	const deeperCount = Math.min(deeperDescendants.length, 20 - immediateCount);
+	const groupedMatches = [
+		...immediateChildren.slice(0, immediateCount),
+		...deeperDescendants.slice(0, deeperCount),
+	];
+
+	return {
+		entries: groupedMatches.map((match) => match.entry),
+		dividerAt: immediateCount,
+	};
 }
 
 // ─── Message handlers ───────────────────────────────────────────────────────

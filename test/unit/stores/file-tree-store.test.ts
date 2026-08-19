@@ -79,37 +79,182 @@ describe("filterFiles", () => {
 	];
 
 	it("returns all entries for empty query (limited to 20)", () => {
-		expect(filterFiles(entries, "")).toEqual(entries);
+		expect(filterFiles(entries, "").entries).toEqual(entries);
 	});
 
 	it("filters by case-insensitive substring match on path", () => {
-		const result = filterFiles(entries, "handler");
+		const result = filterFiles(entries, "handler").entries;
 		expect(result).toContain("src/lib/handlers/files.ts");
 		expect(result).toContain("src/lib/handlers/");
 	});
 
 	it("matches basename (filename portion)", () => {
-		const result = filterFiles(entries, "format");
+		const result = filterFiles(entries, "format").entries;
 		expect(result).toContain("src/lib/frontend/utils/format.ts");
 	});
 
 	it("returns empty for no match", () => {
-		expect(filterFiles(entries, "zzzzzzz")).toHaveLength(0);
+		expect(filterFiles(entries, "zzzzzzz").entries).toHaveLength(0);
 	});
 
 	it("limits results to 20", () => {
 		const manyEntries = Array.from({ length: 50 }, (_, i) => `file${i}.ts`);
-		expect(filterFiles(manyEntries, "file").length).toBeLessThanOrEqual(20);
+		expect(filterFiles(manyEntries, "file").entries.length).toBeLessThanOrEqual(
+			20,
+		);
 	});
 
 	it("prioritizes basename matches over path-only matches", () => {
-		const result = filterFiles(entries, "files");
+		const result = filterFiles(entries, "files").entries;
 		expect(result[0]).toBe("src/lib/handlers/files.ts");
 	});
 
 	it("matches directories", () => {
-		const result = filterFiles(entries, "frontend/");
+		const result = filterFiles(entries, "frontend/").entries;
 		expect(result).toContain("src/lib/frontend/");
+	});
+
+	it("puts immediate children before deeper descendants and reports their boundary", () => {
+		const result = filterFiles(
+			["src/lib/util.ts", "src/main.ts", "src/lib/", "src/lib/nested/deep.ts"],
+			"src/",
+		);
+
+		expect(result).toEqual({
+			entries: [
+				"src/lib/",
+				"src/main.ts",
+				"src/lib/nested/deep.ts",
+				"src/lib/util.ts",
+			],
+			dividerAt: 2,
+		});
+	});
+
+	it("does not include the queried directory in its own listing", () => {
+		const result = filterFiles(["src/", "src/lib/", "src/main.ts"], "src/");
+
+		expect(result.entries).toEqual(["src/lib/", "src/main.ts"]);
+		expect(result.entries).not.toContain("src/");
+		expect(result.dividerAt).toBe(2);
+	});
+
+	it("ranks basename matches then locale order within each directory group", () => {
+		const result = filterFiles(
+			[
+				"src/zeta.ts",
+				"src/deep/zeta.ts",
+				"other/src/zeta.ts",
+				"src/alpha.ts",
+				"vendor/src/",
+				"src/deep/alpha.ts",
+			],
+			"src/",
+		);
+
+		expect(result).toEqual({
+			entries: [
+				"src/alpha.ts",
+				"src/zeta.ts",
+				"vendor/src/",
+				"other/src/zeta.ts",
+				"src/deep/alpha.ts",
+				"src/deep/zeta.ts",
+			],
+			dividerAt: 2,
+		});
+	});
+
+	it("uses the 12 immediate and 8 deeper cap when both groups are plentiful", () => {
+		const immediate = Array.from(
+			{ length: 15 },
+			(_, index) => `src/immediate-${index.toString().padStart(2, "0")}.ts`,
+		);
+		const deeper = Array.from(
+			{ length: 15 },
+			(_, index) =>
+				`src/deep/descendant-${index.toString().padStart(2, "0")}.ts`,
+		);
+
+		const exactBoundary = filterFiles(
+			[...immediate.slice(0, 12), ...deeper.slice(0, 8)],
+			"src/",
+		);
+		expect(exactBoundary.entries).toEqual([
+			...immediate.slice(0, 12),
+			...deeper.slice(0, 8),
+		]);
+		expect(exactBoundary.dividerAt).toBe(12);
+
+		const capped = filterFiles([...immediate, ...deeper], "src/");
+		expect(capped.entries).toEqual([
+			...immediate.slice(0, 12),
+			...deeper.slice(0, 8),
+		]);
+		expect(capped.dividerAt).toBe(12);
+	});
+
+	it("lets deeper descendants fill unused immediate-child slots", () => {
+		const immediate = Array.from(
+			{ length: 3 },
+			(_, index) => `src/immediate-${index}.ts`,
+		);
+		const deeper = Array.from(
+			{ length: 30 },
+			(_, index) =>
+				`src/deep/descendant-${index.toString().padStart(2, "0")}.ts`,
+		);
+
+		const result = filterFiles([...immediate, ...deeper], "src/");
+
+		expect(result.entries).toEqual([...immediate, ...deeper.slice(0, 17)]);
+		expect(result.dividerAt).toBe(3);
+	});
+
+	it("lets immediate children fill slots unavailable to deeper descendants", () => {
+		const immediate = Array.from(
+			{ length: 30 },
+			(_, index) => `src/immediate-${index.toString().padStart(2, "0")}.ts`,
+		);
+		const deeper = Array.from(
+			{ length: 3 },
+			(_, index) => `src/deep/descendant-${index}.ts`,
+		);
+
+		const result = filterFiles([...immediate, ...deeper], "src/");
+
+		expect(result.entries).toEqual([...immediate.slice(0, 17), ...deeper]);
+		expect(result.dividerAt).toBe(17);
+	});
+
+	// The 12/8 reservation only ever gives a group fewer slots than it wants when the
+	// *other* group is non-empty, so an empty group is the one case where the
+	// reservation must vanish entirely rather than merely shrink. Both outcomes also
+	// land on a `dividerAt` that suppresses the divider (`0` and `entries.length`),
+	// which is what makes getting them wrong quiet — a stray divider or a short list,
+	// with no error anywhere.
+	it("gives the whole cap to whichever group is the only one populated", () => {
+		const immediateOnly = Array.from(
+			{ length: 21 },
+			(_, index) => `src/immediate-${index.toString().padStart(2, "0")}.ts`,
+		);
+		const allImmediate = filterFiles(immediateOnly, "src/");
+		expect(allImmediate.entries).toEqual(immediateOnly.slice(0, 20));
+		expect(allImmediate.dividerAt).toBe(20);
+
+		const deeperOnly = Array.from(
+			{ length: 21 },
+			(_, index) =>
+				`src/deep/descendant-${index.toString().padStart(2, "0")}.ts`,
+		);
+		const allDeeper = filterFiles(deeperOnly, "src/");
+		expect(allDeeper.entries).toEqual(deeperOnly.slice(0, 20));
+		expect(allDeeper.dividerAt).toBe(0);
+	});
+
+	it("reports no grouping boundary for empty and non-directory queries", () => {
+		expect(filterFiles(entries, "").dividerAt).toBe(0);
+		expect(filterFiles(entries, "frontend").dividerAt).toBe(0);
 	});
 });
 

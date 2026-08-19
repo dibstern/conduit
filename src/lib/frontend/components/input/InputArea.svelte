@@ -122,10 +122,13 @@
 	);
 	const fileQuery = $derived(atQuery?.query ?? "");
 	const filteredFiles = $derived(
-		fileMenuVisible ? filterFiles(fileTreeState.entries, fileQuery) : [],
+		fileMenuVisible
+			? filterFiles(fileTreeState.entries, fileQuery)
+			: { entries: [], dividerAt: 0 },
 	);
 	const fileListboxVisible = $derived(
-		fileMenuVisible && (filteredFiles.length > 0 || fileTreeState.loading),
+		fileMenuVisible &&
+			(filteredFiles.entries.length > 0 || fileTreeState.loading),
 	);
 	const activeListboxId = $derived(
 		commandListboxVisible
@@ -137,7 +140,7 @@
 	const activeOptionId = $derived(
 		commandListboxVisible
 			? `${commandListboxId}-option-${commandMenuActiveIndex}`
-			: fileListboxVisible && filteredFiles.length > 0
+			: fileListboxVisible && filteredFiles.entries.length > 0
 				? `${fileListboxId}-option-${fileMenuActiveIndex}`
 				: undefined,
 	);
@@ -528,7 +531,8 @@
 			listboxId={fileListboxId}
 			query={fileQuery}
 			visible={fileMenuVisible}
-			entries={filteredFiles}
+			entries={filteredFiles.entries}
+			dividerAt={filteredFiles.dividerAt}
 			onSelect={handleFileSelect}
 			onClose={handleFileMenuClose}
 			loading={fileTreeState.loading}
