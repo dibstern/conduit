@@ -6,8 +6,12 @@
 <script lang="ts">
   import { uiState, closeLightbox } from "../../stores/ui.svelte.js";
 
-  function handleBackdropClick(): void {
-    closeLightbox();
+  // Only a click on the backdrop itself closes; clicks on the image fall through
+  // to here with a different target and are ignored.
+  function handleBackdropClick(e: MouseEvent): void {
+    if (e.target === e.currentTarget) {
+      closeLightbox();
+    }
   }
 
   function handleKeydown(e: KeyboardEvent): void {
@@ -38,8 +42,6 @@
       class="max-w-[92vw] max-h-[90vh] object-contain rounded"
       src={uiState.lightboxSrc}
       alt="Preview"
-      role="presentation"
-      onclick={(e: MouseEvent) => e.stopPropagation()}
     />
   </div>
 {/if}

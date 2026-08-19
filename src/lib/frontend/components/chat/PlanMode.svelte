@@ -34,8 +34,7 @@
 
 	// ─── Handlers ────────────────────────────────────────────────────────────
 
-	function handleCopy(e: MouseEvent) {
-		e.stopPropagation();
+	function handleCopy() {
 		if (!content) return;
 
 		copyToClipboard(content);
@@ -84,17 +83,21 @@
 {:else if mode === "content" && content}
 	<!-- Plan content card (collapsible) -->
 	<div class={cardClass}>
-		<div
-			class="plan-card-header"
-			onclick={toggleCollapse}
-			onkeydown={undefined}
-			role="button"
-			tabindex="0"
-		>
-			<span class="plan-card-icon">
-				<Icon name="file-text" size={16} />
-			</span>
-			<span class="plan-card-title">Implementation Plan</span>
+		<div class="plan-card-header">
+			<!--
+			  The header is a plain container: the collapse toggle has to be a real
+			  button, and the copy button cannot be nested inside it.
+			-->
+			<button
+				class="plan-card-toggle"
+				aria-expanded={!collapsed}
+				onclick={toggleCollapse}
+			>
+				<span class="plan-card-icon">
+					<Icon name="file-text" size={16} />
+				</span>
+				<span class="plan-card-title">Implementation Plan</span>
+			</button>
 			<button
 				class="plan-card-copy"
 				title="Copy plan"

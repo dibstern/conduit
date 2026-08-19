@@ -401,7 +401,7 @@
 			<!-- Header -->
 			<div class="flex items-center justify-between px-5 py-3 border-b border-border">
 				<h2 class="text-lg font-semibold text-text font-brand">Settings</h2>
-				<button class="text-text-muted hover:text-text p-1 cursor-pointer border-none bg-transparent" onclick={() => onClose?.()}>
+				<button class="text-text-muted hover:text-text p-1 cursor-pointer border-none bg-transparent" aria-label="Close settings" onclick={() => onClose?.()}>
 					<Icon name="x" size={16} />
 				</button>
 			</div>

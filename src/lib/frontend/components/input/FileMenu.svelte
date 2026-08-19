@@ -119,42 +119,50 @@
 					No files found
 				</div>
 			{:else}
-				{#each entries as entry, i}
-					{@const lastSlash = entry.lastIndexOf("/", entry.endsWith("/") ? entry.length - 2 : entry.length - 1)}
-					<div
-						class="file-item flex items-center gap-2 py-2 px-3.5 cursor-pointer transition-colors duration-100 max-sm:py-1.5 max-sm:px-2.5 max-sm:gap-1.5 {i === activeIndex ? 'file-item-active bg-accent-bg hover:bg-accent-bg' : 'hover:bg-bg-alt'}"
-						data-file-index={i}
-						role="option"
-						tabindex="-1"
-						aria-selected={i === activeIndex}
-						onmousedown={(e) => {
-							e.preventDefault();
-							onSelect(entry);
-						}}
-						onmouseenter={() => {
-							activeIndex = i;
-						}}
-					>
-						<Icon
-							name={isDirectory(entry) ? "folder" : "file"}
-							size={14}
-							class="shrink-0 {isDirectory(entry) ? 'text-warning' : 'text-text-muted'}"
-						/>
-						<span
-							class="file-path flex-1 min-w-0 overflow-hidden text-ellipsis whitespace-nowrap font-mono text-base max-sm:text-xs"
+				<div
+					role="listbox"
+					aria-label="File suggestions"
+					tabindex="0"
+					aria-activedescendant="file-option-{activeIndex}"
+				>
+					{#each entries as entry, i}
+						{@const lastSlash = entry.lastIndexOf("/", entry.endsWith("/") ? entry.length - 2 : entry.length - 1)}
+						<div
+							class="file-item flex items-center gap-2 py-2 px-3.5 cursor-pointer transition-colors duration-100 max-sm:py-1.5 max-sm:px-2.5 max-sm:gap-1.5 {i === activeIndex ? 'file-item-active bg-accent-bg hover:bg-accent-bg' : 'hover:bg-bg-alt'}"
+							id="file-option-{i}"
+							data-file-index={i}
+							role="option"
+							tabindex="-1"
+							aria-selected={i === activeIndex}
+							onmousedown={(e) => {
+								e.preventDefault();
+								onSelect(entry);
+							}}
+							onmouseenter={() => {
+								activeIndex = i;
+							}}
 						>
-							{#if lastSlash >= 0}
-								<span class="text-text-muted"
-									>{entry.slice(0, lastSlash + 1)}</span
-								><span class="text-text"
-									>{entry.slice(lastSlash + 1)}</span
-								>
-							{:else}
-								<span class="text-text">{entry}</span>
-							{/if}
-						</span>
-					</div>
-				{/each}
+							<Icon
+								name={isDirectory(entry) ? "folder" : "file"}
+								size={14}
+								class="shrink-0 {isDirectory(entry) ? 'text-warning' : 'text-text-muted'}"
+							/>
+							<span
+								class="file-path flex-1 min-w-0 overflow-hidden text-ellipsis whitespace-nowrap font-mono text-base max-sm:text-xs"
+							>
+								{#if lastSlash >= 0}
+									<span class="text-text-muted"
+										>{entry.slice(0, lastSlash + 1)}</span
+									><span class="text-text"
+										>{entry.slice(lastSlash + 1)}</span
+									>
+								{:else}
+									<span class="text-text">{entry}</span>
+								{/if}
+							</span>
+						</div>
+					{/each}
+				</div>
 			{/if}
 		</div>
 	{/if}

@@ -193,7 +193,11 @@
 			>
 				<Icon name="folder-tree" size={16} />
 			</button>
-			<span class="flex-1 font-mono text-base text-text-secondary truncate" dir="rtl">
+			<span
+				id="file-viewer-path"
+				class="flex-1 font-mono text-base text-text-secondary truncate"
+				dir="rtl"
+			>
 				{filePath ?? ""}
 			</span>
 			<!-- Font size controls -->
@@ -238,7 +242,12 @@
 		</div>
 
 		<!-- Body -->
-		<div class="flex-1 overflow-auto">
+		<!-- The region scrolls and its content is a static <pre>, so it has no tabbable
+		     descendant and must be focusable or a keyboard-only user cannot scroll it at
+		     all (axe scrollable-region-focusable); Svelte's non-interactive-tabindex
+		     heuristic does not model that case. -->
+		<!-- svelte-ignore a11y_no_noninteractive_tabindex -->
+		<div class="flex-1 overflow-auto" role="region" aria-labelledby="file-viewer-path" tabindex="0">
 			{#if loading}
 				<div class="flex items-center justify-center py-12 text-text-dimmer text-sm">
 					<BlockGrid cols={5} mode="fast" blockSize={1.5} gap={0.5} class="shrink-0" />

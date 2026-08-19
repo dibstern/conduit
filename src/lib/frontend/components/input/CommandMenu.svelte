@@ -114,9 +114,16 @@
 		<div
 			class="cmd-menu absolute bottom-full left-0 right-0 mb-1 bg-bg-surface border border-border rounded-xl shadow-menu max-h-[300px] overflow-y-auto z-[var(--z-dropdown)] py-1"
 		>
+			<div
+				role="listbox"
+				aria-label="Slash commands"
+				tabindex="0"
+				aria-activedescendant="cmd-option-{activeIndex}"
+			>
 			{#each filtered as cmd, i}
 				<div
 					class="cmd-item flex items-baseline gap-2 py-2 px-3.5 cursor-pointer transition-colors duration-100 max-sm:py-1.5 max-sm:px-2.5 max-sm:gap-1.5 {i === activeIndex ? 'cmd-item-active bg-accent-bg hover:bg-accent-bg' : 'hover:bg-bg-alt'}"
+					id="cmd-option-{i}"
 					data-cmd-index={i}
 					role="option"
 					tabindex="-1"
@@ -148,6 +155,7 @@
 					{/if}
 				</div>
 			{/each}
+			</div>
 		</div>
 	{/if}
 </div>
