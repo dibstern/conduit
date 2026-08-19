@@ -1,0 +1,32 @@
+import { Meta } from "@storybook/addon-docs/blocks";
+
+<Meta title="UI/Foundations/Iconography" />
+
+# Iconography
+
+Use `components/ui/Icon.svelte`, conduit's single Lucide renderer. Pass a kebab-case
+`name`, an optional numeric `size`, and additive classes:
+
+```svelte
+<script lang="ts">
+	import Icon from "../ui/Icon.svelte";
+</script>
+
+<Icon name="refresh-cw" size={14} class="text-text-muted" />
+```
+
+`size` is the rendered CSS-pixel width and height and defaults to 16. There is no
+icon-size token scale today. Match the owning primitive: compact controls commonly
+use 13 or 14, standard controls use 16, and prominent composer actions use 18.
+Avoid resizing an icon independently when the primitive already selects its size.
+Unknown names render no icon, so add a required Lucide name to `Icon.svelte` rather
+than bypassing the primitive.
+
+## Accessible names
+
+An icon does not supply the accessible name for an action. Treat an icon beside
+visible text as decorative; the text names the control. An icon-only control must
+put a meaningful accessible name on the control itself—for example, `Button`
+requires `ariaLabel` when `iconOnly` is true. Name the action ("Close settings"), not
+the picture ("X icon"). Never rely on colour or icon shape alone to communicate a
+destructive or status meaning.

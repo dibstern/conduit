@@ -1,0 +1,32 @@
+import { Meta } from "@storybook/addon-docs/blocks";
+
+<Meta title="UI/Foundations/Spacing" />
+
+# Spacing
+
+> **Conduit's root font size is 12px, not 16px.** Every Tailwind rem-based spacing
+> utility is therefore **0.75× its documented pixel value**. `p-4` is 12px here,
+> not 16px.
+
+Spacing is not tokenized in `style.css`; this is an open design-system gap. The
+current convention is Tailwind's spacing scale, where one step is `0.25rem`. At
+conduit's 12px root size, one step resolves to 3px.
+
+| Step | Conduit size | Current examples |
+| ---: | ---: | --- |
+| `0.5` | 1.5px | `gap-0.5`, `p-0.5` |
+| `1` | 3px | `gap-1`, `p-1` |
+| `1.5` | 4.5px | `px-1.5`, `py-1.5` |
+| `2` | 6px | `gap-2`, `p-2` |
+| `2.5` | 7.5px | `px-2.5`, `gap-2.5` |
+| `3` | 9px | `gap-3`, `p-3` |
+| `3.5` | 10.5px | `px-3.5` |
+| `4` | 12px | `gap-4`, `p-4` |
+| `5` | 15px | `px-5`, `py-5` |
+| `6` | 18px | `px-6`, `py-6` |
+| `8` | 24px | `py-8` |
+
+Prefer scale utilities for padding, margin, and gap. Use an arbitrary pixel value
+only when matching a physical control, boundary, or layout constraint that the
+scale cannot express; do not mistake Tailwind's 16px-root documentation for the
+rendered conduit size.

@@ -1,0 +1,38 @@
+import { Meta } from "@storybook/addon-docs/blocks";
+
+<Meta title="UI/Foundations/Contribution" />
+
+# Contribution
+
+Keep design-system changes small, semantic, and complete. Before opening the diff,
+check:
+
+- The root element has the correct native semantics and keyboard behavior.
+- Focus remains visible, including in forced-colors mode.
+- Icon-only controls have an action-oriented accessible name.
+- Busy and disabled states preserve the intended focus and announcement behavior.
+- Colour is not the only signal for status or danger.
+- Overlays manage focus, dismissal, inert background content, and stacking.
+- Motion has a `prefers-reduced-motion` fallback.
+
+## Tokens only
+
+Consume semantic colour, radius, z-index, shadow, font, and text tokens through the
+existing Tailwind utilities or a live value such as `var(--color-text)`. Never
+hardcode a hex or hand-write a replacement for an existing token. Do not introduce arbitrary
+`z-[…]`, shadow, radius, or palette values to work around a missing design-system
+decision; record the gap and resolve it centrally.
+
+## A primitive is an atomic contribution
+
+A new primitive ships in the same commit with:
+
+- its `.svelte` implementation;
+- a story covering every variant and state;
+- an asserting `play()` interaction test, not a render-only story; and
+- a green `addon-a11y` result.
+
+Follow the existing [Component API conventions](?path=/docs/ui-component-api-conventions--docs)
+for prop contracts, variants, class composition, accessibility behavior, and the
+primitive-versus-composition decision. Do not restate or fork those rules in a
+component-local convention.

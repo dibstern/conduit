@@ -1,0 +1,21 @@
+import { Meta } from "@storybook/addon-docs/blocks";
+
+<Meta title="UI/Foundations/Elevation" />
+
+# Elevation
+
+Every elevation token embeds `rgba(var(--shadow-rgb), …)`. `computeVars` supplies
+that channel for the active theme, so the shadow remains part of the runtime theme.
+A hand-written shadow string is always wrong: use the semantic shadow utility.
+
+<div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: "24px", padding: "24px", background: "var(--color-bg)" }}>
+  <div style={{ boxShadow: "var(--shadow-menu)", background: "var(--color-bg-alt)", color: "var(--color-text)", padding: "16px", borderRadius: "var(--radius-panel)" }}><code>--shadow-menu</code><br /><small>Compact upward-opening menus</small></div>
+  <div style={{ boxShadow: "var(--shadow-menu-lg)", background: "var(--color-bg-alt)", color: "var(--color-text)", padding: "16px", borderRadius: "var(--radius-panel)" }}><code>--shadow-menu-lg</code><br /><small>Larger, stronger menus</small></div>
+  <div style={{ boxShadow: "var(--shadow-panel)", background: "var(--color-bg-alt)", color: "var(--color-text)", padding: "16px", borderRadius: "var(--radius-panel)" }}><code>--shadow-panel</code><br /><small>Context and information panels</small></div>
+  <div style={{ boxShadow: "var(--shadow-modal)", background: "var(--color-bg-alt)", color: "var(--color-text)", padding: "16px", borderRadius: "var(--radius-panel)" }}><code>--shadow-modal</code><br /><small>Modal surfaces</small></div>
+  <div style={{ boxShadow: "var(--shadow-dropdown)", background: "var(--color-bg-alt)", color: "var(--color-text)", padding: "16px", borderRadius: "var(--radius-panel)" }}><code>--shadow-dropdown</code><br /><small>Dropdown surfaces below a trigger</small></div>
+</div>
+
+In Tailwind classes these are `shadow-menu`, `shadow-menu-lg`, `shadow-panel`,
+`shadow-modal`, and `shadow-dropdown`. Choose by surface role, not by which shadow
+looks strongest in one theme.

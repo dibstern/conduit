@@ -1,0 +1,62 @@
+import { Meta } from "@storybook/addon-docs/blocks";
+
+<Meta title="UI/Foundations/Colors" />
+
+# Colors
+
+Conduit has a **24-theme runtime theming system**. The theme-derived values in
+`style.css` are defaults: `computeVars` in `stores/theme-compute.ts` derives the
+active theme and `applyTheme` writes those CSS variables onto `:root` at runtime.
+Never hardcode a hex value. Consume the semantic token so the UI follows the active
+theme.
+
+The brand pair and its glow tokens are deliberately invariant across user-selected
+themes. `--color-backdrop` remains theme-aware through the runtime `--overlay-rgb`
+channel.
+
+## Canvas and content
+
+<div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(170px, 1fr))", gap: "12px" }}>
+  <div style={{ background: "var(--color-bg)", color: "var(--color-text)", border: "1px solid var(--color-border)", padding: "12px", borderRadius: "var(--radius-panel)" }}><code>--color-bg</code><br /><small>Application canvas</small></div>
+  <div style={{ background: "var(--color-bg-alt)", color: "var(--color-text)", border: "1px solid var(--color-border)", padding: "12px", borderRadius: "var(--radius-panel)" }}><code>--color-bg-alt</code><br /><small>Raised alternate surface</small></div>
+  <div style={{ background: "var(--color-bg-surface)", color: "var(--color-text)", border: "1px solid var(--color-border)", padding: "12px", borderRadius: "var(--radius-panel)" }}><code>--color-bg-surface</code><br /><small>Cards and message surfaces</small></div>
+  <div style={{ background: "var(--color-code-bg)", color: "var(--color-text)", border: "1px solid var(--color-border)", padding: "12px", borderRadius: "var(--radius-panel)" }}><code>--color-code-bg</code><br /><small>Code and inset surfaces</small></div>
+  <div style={{ background: "var(--color-input-bg)", color: "var(--color-text)", border: "1px solid var(--color-border)", padding: "12px", borderRadius: "var(--radius-panel)" }}><code>--color-input-bg</code><br /><small>Input surfaces</small></div>
+  <div style={{ background: "var(--color-user-bubble)", color: "var(--color-text)", border: "1px solid var(--color-border)", padding: "12px", borderRadius: "var(--radius-panel)" }}><code>--color-user-bubble</code><br /><small>User-message surface</small></div>
+</div>
+
+| Token | Meaning |
+| --- | --- |
+| `--color-text` | Primary content |
+| `--color-text-secondary` | Supporting content |
+| `--color-text-muted` | De-emphasized content |
+| `--color-text-dimmer` | Lowest-emphasis content |
+| `--color-border` | Standard boundary |
+| `--color-border-subtle` | Quiet boundary |
+| `--color-backdrop` | Modal and overlay scrim |
+
+## Accent, brand, and state
+
+<div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(170px, 1fr))", gap: "12px" }}>
+  <div style={{ background: "var(--color-accent)", color: "var(--color-bg)", padding: "12px", borderRadius: "var(--radius-panel)" }}><code>--color-accent</code><br /><small>Primary action and selection</small></div>
+  <div style={{ background: "var(--color-accent-hover)", color: "var(--color-bg)", padding: "12px", borderRadius: "var(--radius-panel)" }}><code>--color-accent-hover</code><br /><small>Accent hover state</small></div>
+  <div style={{ background: "var(--color-accent-bg)", color: "var(--color-accent)", border: "1px solid var(--color-accent)", padding: "12px", borderRadius: "var(--radius-panel)" }}><code>--color-accent-bg</code><br /><small>Quiet accent surface</small></div>
+  <div style={{ background: "var(--color-brand-a)", color: "var(--color-bg)", padding: "12px", borderRadius: "var(--radius-panel)" }}><code>--color-brand-a</code><br /><small>Invariant pink brand channel</small></div>
+  <div style={{ background: "var(--color-brand-b)", color: "var(--color-bg)", padding: "12px", borderRadius: "var(--radius-panel)" }}><code>--color-brand-b</code><br /><small>Invariant cyan brand channel</small></div>
+  <div style={{ background: "var(--color-error-bg)", color: "var(--color-error)", border: "1px solid var(--color-error)", padding: "12px", borderRadius: "var(--radius-panel)" }}><code>--color-error</code> / <code>--color-error-bg</code><br /><small>Failure and destructive state</small></div>
+  <div style={{ background: "var(--color-bg-alt)", color: "var(--color-success)", border: "1px solid var(--color-success)", padding: "12px", borderRadius: "var(--radius-panel)" }}><code>--color-success</code><br /><small>Successful state</small></div>
+  <div style={{ background: "var(--color-warning-bg)", color: "var(--color-warning)", border: "1px solid var(--color-warning)", padding: "12px", borderRadius: "var(--radius-panel)" }}><code>--color-warning</code> / <code>--color-warning-bg</code><br /><small>Warning state</small></div>
+  <div style={{ background: "var(--color-thinking-bg)", color: "var(--color-thinking)", border: "1px solid var(--color-thinking)", padding: "12px", borderRadius: "var(--radius-panel)" }}><code>--color-thinking</code> / <code>--color-thinking-bg</code><br /><small>Thinking state</small></div>
+  <div style={{ background: "var(--color-tool-bg)", color: "var(--color-tool)", border: "1px solid var(--color-tool)", padding: "12px", borderRadius: "var(--radius-panel)" }}><code>--color-tool</code> / <code>--color-tool-bg</code><br /><small>Tool state</small></div>
+</div>
+
+`--color-brand-a-glow` and `--color-brand-b-glow` are the quiet brand glow
+channels. Use the existing glow utilities rather than reconstructing their effects.
+
+## Sidebar
+
+<div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(170px, 1fr))", gap: "12px" }}>
+  <div style={{ background: "var(--color-sidebar-bg)", color: "var(--color-text)", padding: "12px" }}><code>--color-sidebar-bg</code><br /><small>Sidebar canvas</small></div>
+  <div style={{ background: "var(--color-sidebar-hover)", color: "var(--color-text)", padding: "12px" }}><code>--color-sidebar-hover</code><br /><small>Hovered row</small></div>
+  <div style={{ background: "var(--color-sidebar-active)", color: "var(--color-text)", padding: "12px" }}><code>--color-sidebar-active</code><br /><small>Active row</small></div>
+</div>
