@@ -17,7 +17,7 @@ const STORAGE_KEY_VARIANT = "conduit-theme-variant";
 /** All CSS variable keys that computeVars() can produce.
  *  Used when switching themes to remove stale vars from the previous theme
  *  or from the flash-prevention inline script. */
-const ALL_CSS_VAR_KEYS = [
+export const ALL_CSS_VAR_KEYS = [
 	"--color-bg",
 	"--color-bg-alt",
 	"--color-bg-surface",
