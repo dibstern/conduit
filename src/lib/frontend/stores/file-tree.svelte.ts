@@ -43,6 +43,23 @@ export function extractAtQuery(
 }
 
 /**
+ * Build the replacement text for an @-query once `path` is chosen.
+ *
+ * This is the inverse of `extractAtQuery`, and the trailing space is the whole
+ * contract between them. `extractAtQuery` ends the @-token at whitespace, so:
+ *
+ * - a file completes the mention and gets the space, closing the token;
+ * - a directory withholds it, keeping the token live so the menu stays open and
+ *   re-filters against the new prefix — one level of drill-down per selection.
+ *
+ * Typing a space is therefore how the user declares a path finished, with no
+ * separate handling: it terminates the token through the same regex.
+ */
+export function buildMentionInsertion(path: string): string {
+	return path.endsWith("/") ? `@${path}` : `@${path} `;
+}
+
+/**
  * Filter file entries by query string.
  * Case-insensitive substring match on full path and basename.
  * Basename matches are prioritized. Limited to 20 results.

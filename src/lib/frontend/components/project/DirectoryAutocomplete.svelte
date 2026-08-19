@@ -187,7 +187,10 @@
 					aria-selected={i === activeIndex}
 					onmousedown={(e) => {
 						e.preventDefault();
-						selectEntry(entry);
+						// Click behaves like Tab, not like Enter: fill the directory in
+						// (trailing slash included) and list its children, so the user can
+						// keep drilling. Enter remains the "this is the path I want" commit.
+						drillInto(entry);
 					}}
 					onmouseenter={() => {
 						activeIndex = i;

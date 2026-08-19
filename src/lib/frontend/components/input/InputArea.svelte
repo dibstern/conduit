@@ -20,7 +20,12 @@
 	import PastePreview from "../chat/PastePreview.svelte";
 	import { addUserMessage, currentChat, getOrCreateSessionSlot, inputSyncState, isProcessing } from "../../stores/chat.svelte.js";
 	import { discoveryState, extractSlashQuery } from "../../stores/discovery.svelte.js";
-	import { extractAtQuery, fileTreeState, filterFiles } from "../../stores/file-tree.svelte.js";
+	import {
+		buildMentionInsertion,
+		extractAtQuery,
+		fileTreeState,
+		filterFiles,
+	} from "../../stores/file-tree.svelte.js";
 	import { fetchFileContent, fetchDirectoryListing, resizeImageIfNeeded } from "./input-utils.js";
 	import { sessionState } from "../../stores/session.svelte.js";
 	import { getCurrentSlug } from "../../stores/router.svelte.js";
@@ -423,10 +428,9 @@
 	function handleFileSelect(path: string) {
 		if (!atQuery || !textareaEl) return;
 
-		// Replace @query with @path (with trailing space)
 		const before = inputText.slice(0, atQuery.start);
 		const after = inputText.slice(atQuery.end);
-		const insertion = `@${path} `;
+		const insertion = buildMentionInsertion(path);
 		inputText = before + insertion + after;
 
 		// Move cursor to after the inserted path
