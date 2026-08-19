@@ -73,6 +73,12 @@ const allowedPlainErrorThrows: readonly AllowedPlainThrow[] = [
 		reason: "storybook/mock fixture text, not executable production code",
 	},
 	{
+		path: "src/lib/frontend/components/project/ProjectSwitcher.stories.ts",
+		snippetPattern: /project-switcher trigger not found/,
+		reason:
+			"storybook play() query guard, not executable production code — same class as stories/mocks.ts above",
+	},
+	{
 		path: "src/lib/frontend/components/input/input-utils.ts",
 		snippetPattern: /GIF exceeds the 5 MB encoded size limit/,
 		reason: "browser attachment validation failure surfaced to UI caller",
