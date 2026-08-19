@@ -5,28 +5,29 @@
 <script lang="ts">
 	import Icon from "../ui/Icon.svelte";
 	import BlockGrid from "../ui/BlockGrid.svelte";
+	import DetachedListbox from "../ui/DetachedListbox.svelte";
 
 	// ─── Props ──────────────────────────────────────────────────────────────────
 
 	let {
+		listboxId,
 		query,
 		visible,
 		entries,
 		onSelect,
 		onClose,
 		loading = false,
+		activeIndex = $bindable(0),
 	}: {
+		listboxId: string;
 		query: string;
 		visible: boolean;
 		entries: string[];
 		onSelect: (path: string) => void;
 		onClose: () => void;
-		loading?: boolean;
+		loading?: boolean | undefined;
+		activeIndex?: number | undefined;
 	} = $props();
-
-	// ─── State ──────────────────────────────────────────────────────────────────
-
-	let activeIndex = $state(0);
 
 	// ─── Derived ────────────────────────────────────────────────────────────────
 
@@ -104,14 +105,24 @@
 
 <div id="file-menu" class:hidden={!isVisible}>
 	{#if isVisible}
-		<div
-			class="file-menu-list absolute bottom-full left-0 right-0 mb-1 bg-bg-surface border border-border rounded-xl shadow-menu max-h-[300px] overflow-y-auto z-[var(--z-dropdown)] py-1"
+		<DetachedListbox
+			id={listboxId}
+			ariaLabel="File suggestions"
+			aria-busy={loading}
+			class="file-menu-list absolute bottom-full left-0 right-0 mb-1 max-h-[300px] overflow-y-auto rounded-xl! z-[var(--z-dropdown)]!"
 		>
 			{#if loading && entries.length === 0}
 				<div
 					class="flex items-center gap-2 py-3 px-3.5 text-text-muted text-base"
 				>
-					<BlockGrid cols={5} mode="fast" blockSize={1.5} gap={0.5} class="shrink-0" />
+					<!-- A role="listbox" may own only options; BlockGrid hardcodes role="img" and
+					     takes no rest-spread, so aria-hidden has to come from the call site. The
+					     busy state is already carried by aria-busy on the listbox, making the
+					     spinner decorative to AT. `contents` generates no box, so BlockGrid stays
+					     the flex item and shrink-0 still applies — pixel-neutral by construction. -->
+					<span aria-hidden="true" class="contents">
+						<BlockGrid cols={5} mode="fast" blockSize={1.5} gap={0.5} class="shrink-0" />
+					</span>
 					<span>Loading files…</span>
 				</div>
 			{:else if entries.length === 0}
@@ -119,17 +130,11 @@
 					No files found
 				</div>
 			{:else}
-				<div
-					role="listbox"
-					aria-label="File suggestions"
-					tabindex="0"
-					aria-activedescendant="file-option-{activeIndex}"
-				>
-					{#each entries as entry, i}
+				{#each entries as entry, i}
 						{@const lastSlash = entry.lastIndexOf("/", entry.endsWith("/") ? entry.length - 2 : entry.length - 1)}
 						<div
 							class="file-item flex items-center gap-2 py-2 px-3.5 cursor-pointer transition-colors duration-100 max-sm:py-1.5 max-sm:px-2.5 max-sm:gap-1.5 {i === activeIndex ? 'file-item-active bg-accent-bg hover:bg-accent-bg' : 'hover:bg-bg-alt'}"
-							id="file-option-{i}"
+							id="{listboxId}-option-{i}"
 							data-file-index={i}
 							role="option"
 							tabindex="-1"
@@ -161,9 +166,8 @@
 								{/if}
 							</span>
 						</div>
-					{/each}
-				</div>
+				{/each}
 			{/if}
-		</div>
+		</DetachedListbox>
 	{/if}
 </div>

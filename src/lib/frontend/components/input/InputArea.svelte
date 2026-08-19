@@ -19,7 +19,7 @@
 	import SubagentBackBar from "../chat/SubagentBackBar.svelte";
 	import PastePreview from "../chat/PastePreview.svelte";
 	import { addUserMessage, currentChat, getOrCreateSessionSlot, inputSyncState, isProcessing } from "../../stores/chat.svelte.js";
-	import { discoveryState, extractSlashQuery } from "../../stores/discovery.svelte.js";
+	import { discoveryState, extractSlashQuery, filterCommands } from "../../stores/discovery.svelte.js";
 	import {
 		buildMentionInsertion,
 		extractAtQuery,
@@ -37,6 +37,10 @@
 	import type { FileAttachment } from "../../utils/file-attach.js";
 	import type { PendingImage } from "../../types.js";
 
+	const inputAreaId = $props.id();
+	const fileListboxId = `${inputAreaId}-file-listbox`;
+	const commandListboxId = `${inputAreaId}-command-listbox`;
+
 	// ─── State ─────────────────────────────────────────────────────────────────
 
 	let inputText = $state("");
@@ -45,6 +49,8 @@
 	let pendingImages = $state<PendingImage[]>([]);
 	let commandMenuRef: CommandMenu | undefined = $state();
 	let fileMenuRef: FileMenu | undefined = $state();
+	let commandMenuActiveIndex = $state(0);
+	let fileMenuActiveIndex = $state(0);
 	let subagentBackBarRef: SubagentBackBar | undefined = $state();
 	let cursorPos = $state(0);
 	let scrollTop = $state(0);
@@ -100,6 +106,10 @@
 	const slashQuery = $derived(extractSlashQuery(inputText, cursorPos));
 	const commandMenuVisible = $derived(slashQuery !== null);
 	const commandQuery = $derived(slashQuery?.query ?? "");
+	const commandListboxVisible = $derived(
+		commandMenuVisible &&
+			filterCommands(discoveryState.commands, commandQuery).length > 0,
+	);
 
 	/** Names of known slash commands/skills, for inline recognition in the composer. */
 	const commandNameSet = $derived(new Set(discoveryState.commands.map((c) => c.name)));
@@ -113,6 +123,23 @@
 	const fileQuery = $derived(atQuery?.query ?? "");
 	const filteredFiles = $derived(
 		fileMenuVisible ? filterFiles(fileTreeState.entries, fileQuery) : [],
+	);
+	const fileListboxVisible = $derived(
+		fileMenuVisible && (filteredFiles.length > 0 || fileTreeState.loading),
+	);
+	const activeListboxId = $derived(
+		commandListboxVisible
+			? commandListboxId
+			: fileListboxVisible
+				? fileListboxId
+				: undefined,
+	);
+	const activeOptionId = $derived(
+		commandListboxVisible
+			? `${commandListboxId}-option-${commandMenuActiveIndex}`
+			: fileListboxVisible && filteredFiles.length > 0
+				? `${fileListboxId}-option-${fileMenuActiveIndex}`
+				: undefined,
 	);
 
 	// ─── Derived ───────────────────────────────────────────────────────────────
@@ -497,6 +524,8 @@
 	<div id="file-menu-wrap" class="relative w-full max-w-[760px] mx-auto px-4">
 		<FileMenu
 			bind:this={fileMenuRef}
+			bind:activeIndex={fileMenuActiveIndex}
+			listboxId={fileListboxId}
 			query={fileQuery}
 			visible={fileMenuVisible}
 			entries={filteredFiles}
@@ -509,9 +538,11 @@
 
 <!-- Command Menu (above input when "/" is typed) -->
 {#if commandMenuVisible}
-	<div id="command-menu" class="relative w-full max-w-[760px] mx-auto px-4">
+	<div id="command-menu-wrap" class="relative w-full max-w-[760px] mx-auto px-4">
 		<CommandMenu
 			bind:this={commandMenuRef}
+			bind:activeIndex={commandMenuActiveIndex}
+			listboxId={commandListboxId}
 			query={commandQuery}
 			visible={commandMenuVisible}
 			commands={discoveryState.commands}
@@ -565,6 +596,13 @@
 				/>
 				<textarea
 					id="input"
+					aria-label="Message"
+					role="combobox"
+					aria-autocomplete="list"
+					aria-haspopup="listbox"
+					aria-expanded={activeListboxId !== undefined}
+					aria-controls={activeListboxId}
+					aria-activedescendant={activeOptionId}
 					rows="1"
 					placeholder="Ask anything. / to use skills, @ to mention files"
 					autocomplete="off"

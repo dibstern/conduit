@@ -24,6 +24,11 @@ const meta = {
 	parameters: {
 		layout: "padded",
 	},
+	// Standalone stories render without InputArea, which owns the textarea that
+	// points `aria-controls` here. A fixed id keeps the listbox named and stable.
+	args: {
+		listboxId: "file-menu-listbox",
+	},
 } satisfies Meta<typeof FileMenu>;
 
 export default meta;
