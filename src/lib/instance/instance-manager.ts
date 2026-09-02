@@ -628,14 +628,19 @@ export class InstanceManager {
 		});
 	}
 
-	/** Default health checker: GET http://localhost:{port}/health. */
+	/** Default health checker: GET http://localhost:{port}/global/health. */
 	private async defaultHealthChecker(
 		port: number,
 		_instance: OpenCodeInstance,
 	): Promise<boolean> {
 		try {
-			const res = await fetch(`http://localhost:${port}/health`);
-			return res.ok;
+			// /health belongs to the OpenCode web UI, and since 1.18.x the SPA
+			// answers 200 with HTML for any unknown path — so it reports healthy
+			// even when the API is gone. /global/health is the API's own probe.
+			const res = await fetch(`http://localhost:${port}/global/health`);
+			if (!res.ok) return false;
+			const body = (await res.json()) as { healthy?: boolean };
+			return body.healthy === true;
 		} catch {
 			return false;
 		}
