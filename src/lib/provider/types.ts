@@ -78,6 +78,12 @@ export interface EventSink {
 		answers: Record<string, unknown>,
 	): Effect.Effect<void, unknown>;
 	cancelSessionInteractions?(reason: string): Effect.Effect<void, unknown>;
+	/**
+	 * Relay liveness hook. Providers never call this; the orchestration reactor
+	 * calls it for every streamed event so the relay's processing timeout stays
+	 * alive on the path where provider output goes straight to ingestion.
+	 */
+	noteActivity?(): void;
 }
 
 // ─── Turn Types ─────────────────────────────────────────────────────────────

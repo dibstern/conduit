@@ -159,6 +159,21 @@ describe("createRelayEventSink — translation", () => {
 		expect(resetTimeout).toHaveBeenCalled();
 	});
 
+	// The orchestration reactor streams provider output straight to ingestion,
+	// bypassing this sink's push(); noteActivity is how it keeps the relay's
+	// processing timeout alive so long turns don't emit a false timeout error.
+	it("exposes noteActivity as a timeout reset", () => {
+		const resetTimeout = vi.fn();
+		const sink = createRelayEventSink({
+			sessionId: "ses-1",
+			send: vi.fn(),
+			clearTimeout: vi.fn(),
+			resetTimeout,
+		});
+		sink.noteActivity?.();
+		expect(resetTimeout).toHaveBeenCalledTimes(1);
+	});
+
 	it("clears timeout on non-RETRY errors", async () => {
 		const send = vi.fn();
 		const clearTimeout = vi.fn();

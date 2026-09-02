@@ -562,8 +562,13 @@ export class ProviderSideEffectReactor {
 	 * to answer them, so they remain unsupported.
 	 */
 	private makeReactorEventSink(interactions?: EventSink): EventSink {
+		// Streamed output bypasses the relay sink, so mark the session alive here
+		// or the relay's processing timeout fires mid-turn on long turns.
 		const push: EventSink["push"] = (event) =>
-			this.options.ingestion.ingest(event).pipe(Effect.asVoid);
+			Effect.suspend(() => {
+				interactions?.noteActivity?.();
+				return this.options.ingestion.ingest(event).pipe(Effect.asVoid);
+			});
 		if (!interactions) {
 			return {
 				push,

@@ -16,6 +16,7 @@ import { ProviderInstanceFailure } from "../../../src/lib/provider/errors.js";
 import { ProviderSideEffectReactor } from "../../../src/lib/provider/orchestration-side-effect-reactor.js";
 import { ProviderRegistry } from "../../../src/lib/provider/provider-registry.js";
 import type {
+	EventSink,
 	ProviderCapabilities,
 	ProviderInstance,
 	SendTurnInput,
@@ -185,6 +186,63 @@ describe("ProviderSideEffectReactor", () => {
 		await Effect.runPromise(reactor.drain());
 
 		expect(ingest).toHaveBeenCalledWith(runtimeEvent);
+	});
+
+	// Regression: streamed provider output must mark the session as alive on the
+	// same-process dispatch path. The reactor sink used to push straight to
+	// ingestion, so the relay's 120s processing timeout was only ever reset by a
+	// permission request — any longer Claude turn without one emitted a false
+	// "No response received" PROCESSING_TIMEOUT error mid-turn.
+	it("notes relay activity for streamed provider output", async () => {
+		const runtimeEvent = decodeProviderRuntimeEvent({
+			eventId: "runtime-text-2",
+			type: "text.delta",
+			providerId: "claude",
+			sessionId: "session-1",
+			turnId: "turn-1",
+			providerRefs: {},
+			rawSource: { kind: "test.provider-runtime" },
+			createdAt: 1000,
+			data: { messageId: "message-1", partId: "text-1", text: "streamed" },
+		});
+		const interactions = {
+			push: vi.fn(() => Effect.void),
+			requestPermission: vi.fn(() => Effect.succeed({ decision: "once" })),
+			requestQuestion: vi.fn(() => Effect.succeed({})),
+			resolvePermission: vi.fn(() => Effect.void),
+			resolveQuestion: vi.fn(() => Effect.void),
+			noteActivity: vi.fn(),
+		} as unknown as EventSink & { noteActivity: () => void };
+		const sendTurn = vi.fn(
+			(
+				input: SendTurnInput,
+			): Effect.Effect<TurnResult, ProviderInstanceFailure> =>
+				input.eventSink.push(runtimeEvent).pipe(
+					Effect.as(completedTurn),
+					Effect.mapError(
+						(cause) =>
+							new ProviderInstanceFailure({
+								providerId: "claude",
+								operation: "sendTurn",
+								cause,
+							}),
+					),
+				),
+		);
+		const ingest = vi.fn((_event: ProviderRuntimeEvent) => Effect.succeed(1));
+		seedSendTurnOutbox(db);
+		const reactor = new ProviderSideEffectReactor({
+			db,
+			registry: new ProviderRegistry([makeProvider(sendTurn)]),
+			ingestion: { ingest },
+		});
+
+		await Effect.runPromise(reactor.runCommand("cmd-1", interactions));
+
+		expect(interactions.noteActivity).toHaveBeenCalled();
+		// Output still streams only through the durable ingestion seam.
+		expect(ingest).toHaveBeenCalledWith(runtimeEvent);
+		expect(interactions.push).not.toHaveBeenCalled();
 	});
 
 	it.effect("backs off retryable provider failures without hot looping", () =>

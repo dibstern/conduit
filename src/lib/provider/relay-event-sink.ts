@@ -180,6 +180,7 @@ export function createRelayEventSink(deps: RelayEventSinkDeps): RelayEventSink {
 		});
 
 	const sink: RelayEventSink = {
+		noteActivity: reset,
 		push(event: ProviderRuntimeEvent): Effect.Effect<void, unknown> {
 			return Effect.gen(function* () {
 				yield* Effect.sync(reset);
