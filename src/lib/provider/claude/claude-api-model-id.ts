@@ -18,6 +18,7 @@ const OPTIONS_200K_DEFAULT: readonly ContextWindowOption[] = [
 const CONTEXT_WINDOW_OPTIONS_BY_MODEL: Readonly<
 	Record<string, readonly ContextWindowOption[] | undefined>
 > = {
+	"claude-fable-5-1": OPTIONS_1M_DEFAULT,
 	"claude-fable-5": OPTIONS_1M_DEFAULT,
 	"claude-opus-5": OPTIONS_1M_DEFAULT,
 	"claude-opus-4-8": undefined,

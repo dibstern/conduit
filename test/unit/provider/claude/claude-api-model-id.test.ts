@@ -94,6 +94,7 @@ describe("Claude context-window model capabilities", () => {
 	];
 
 	it.each([
+		"claude-fable-5-1",
 		"claude-fable-5",
 		"claude-opus-5",
 		"claude-opus-4-6",
@@ -103,7 +104,8 @@ describe("Claude context-window model capabilities", () => {
 		expect(contextWindowOptionsForModel(modelId)).toContainEqual({
 			value: "1m",
 			label: "1M",
-			...(modelId.startsWith("claude-opus") || modelId === "claude-fable-5"
+			...(modelId.startsWith("claude-opus") ||
+			modelId.startsWith("claude-fable")
 				? { isDefault: true }
 				: {}),
 		});
@@ -137,7 +139,7 @@ describe("Claude context-window model capabilities", () => {
 		["default", undefined, false],
 		["haiku", undefined, false],
 		["opus[1m]", options1mDefault, true],
-		["claude-fable-5[1m]", options1mDefault, true],
+		["claude-fable-5-1[1m]", options1mDefault, true],
 		["claude-haiku-4-5-20251001", undefined, false],
 		["claude-haiku-4-5-20251001[1m]", undefined, false],
 		["claude-sonnet-5-20260101", options200kDefault, true],
@@ -158,8 +160,8 @@ describe("Claude context-window model capabilities", () => {
 		["opus[1m]", undefined, "opus[1m]"],
 		["claude-sonnet-5", "1m", "claude-sonnet-5[1m]"],
 		["claude-sonnet-5[1m]", "200k", "claude-sonnet-5"],
-		["claude-fable-5[1m]", "1m", "claude-fable-5[1m]"],
-		["claude-fable-5[1m]", "200k", "claude-fable-5"],
+		["claude-fable-5-1[1m]", "1m", "claude-fable-5-1[1m]"],
+		["claude-fable-5-1[1m]", "200k", "claude-fable-5-1"],
 		["haiku", "1m", "haiku"],
 		["haiku[1m]", "1m", "haiku"],
 		["haiku[1m]", undefined, "haiku[1m]"],
@@ -174,7 +176,7 @@ describe("expectedClaudeReportedModelId", () => {
 	const probedCatalog = [
 		{ id: "default", resolvedModel: "claude-opus-5[1m]" },
 		{ id: "opus[1m]", resolvedModel: "claude-opus-5[1m]" },
-		{ id: "claude-fable-5[1m]", resolvedModel: "claude-fable-5" },
+		{ id: "claude-fable-5-1[1m]", resolvedModel: "claude-fable-5-1" },
 		{ id: "sonnet", resolvedModel: "claude-sonnet-5" },
 		{ id: "haiku", resolvedModel: "claude-haiku-4-5-20251001" },
 	] as const;
@@ -182,13 +184,13 @@ describe("expectedClaudeReportedModelId", () => {
 	it.each([
 		["default", undefined, "claude-opus-5[1m]"],
 		["opus[1m]", undefined, "claude-opus-5[1m]"],
-		["claude-fable-5[1m]", undefined, "claude-fable-5"],
+		["claude-fable-5-1[1m]", undefined, "claude-fable-5-1"],
 		["sonnet", undefined, "claude-sonnet-5"],
 		["haiku", undefined, "claude-haiku-4-5-20251001"],
 		["sonnet", "1m", "claude-sonnet-5[1m]"],
 		["opus", undefined, "claude-opus-5"],
 		["haiku[1m]", undefined, "claude-haiku-4-5-20251001[1m]"],
-		["claude-fable-5[1m]", undefined, "claude-fable-5"],
+		["claude-fable-5-1[1m]", undefined, "claude-fable-5-1"],
 	] as const)("maps requested %s with %s context to the probed report %s", (requestedModelId, contextWindow, expected) => {
 		expect(
 			expectedClaudeReportedModelId(

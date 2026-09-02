@@ -229,6 +229,7 @@ export const ClaudeSDKPermissionModeSchema = Schema.Literal(
 export const ClaudeSDKAssistantMessageErrorSchema = Schema.Literal(
 	"authentication_failed",
 	"oauth_org_not_allowed",
+	"account_on_hold",
 	"billing_error",
 	"rate_limit",
 	"overloaded",
