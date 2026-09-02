@@ -112,6 +112,13 @@
 
 	// ─── Derived ───────────────────────────────────────────────────────────────
 
+	// Pasting a log dump means the composer holds far more text than it can show.
+	// Past this size the highlight mirror stops earning its keep: it would lay the
+	// whole draft out a second time, which costs ~300ms per megabyte. Fall back to
+	// the textarea's own (unhighlighted) text, exactly as during IME composition.
+	const HIGHLIGHT_MAX_CHARS = 20_000;
+	const plainText = $derived(inputText.length > HIGHLIGHT_MAX_CHARS);
+
 	const canSend = $derived(inputText.trim().length > 0 || pendingImages.length > 0);
 	const showContextMini = $derived(currentChat().contextPercent > 0);
 	/** Drift is only reportable with complete mismatch evidence. */
@@ -138,10 +145,20 @@
 
 	// ─── Auto-resize textarea ──────────────────────────────────────────────────
 
+	/** Matches the textarea's `max-h-[120px]`. */
+	const MAX_TEXTAREA_HEIGHT_PX = 120;
+
 	function autoResize() {
 		if (!textareaEl) return;
+		// Reading scrollHeight forces a synchronous layout of the entire value, so a
+		// pasted log dump costs ~140ms per megabyte here. Anything this long is past
+		// the cap regardless of wrapping, so skip the measurement.
+		if (inputText.length > HIGHLIGHT_MAX_CHARS) {
+			textareaEl.style.height = `${MAX_TEXTAREA_HEIGHT_PX}px`;
+			return;
+		}
 		textareaEl.style.height = "auto";
-		textareaEl.style.height = `${Math.min(textareaEl.scrollHeight, 120)}px`;
+		textareaEl.style.height = `${Math.min(textareaEl.scrollHeight, MAX_TEXTAREA_HEIGHT_PX)}px`;
 	}
 
 	// ─── Handlers ──────────────────────────────────────────────────────────────
@@ -578,10 +595,10 @@
 			<!-- Textarea row -->
 			<div class="relative flex items-start">
 				<SkillHighlightBackdrop
-					text={inputText}
+					text={plainText ? "" : inputText}
 					commandNames={commandNameSet}
 					{scrollTop}
-					dimmed={composing}
+					dimmed={composing || plainText}
 				/>
 				<textarea
 					id="input"
@@ -590,8 +607,8 @@
 					autocomplete="off"
 					enterkeyhint={isMobile() ? "enter" : "send"}
 					class="relative z-10 flex-1 min-w-0 bg-transparent border-none caret-[var(--color-text)] text-base font-sans leading-[1.4] pt-2 pb-1 px-2.5 resize-none outline-none min-h-6 max-h-[120px] overflow-y-auto placeholder:text-text-muted"
-					class:text-transparent={!composing}
-					class:text-text={composing}
+					class:text-transparent={!composing && !plainText}
+					class:text-text={composing || plainText}
 					bind:value={inputText}
 					bind:this={textareaEl}
 					oninput={handleInput}
