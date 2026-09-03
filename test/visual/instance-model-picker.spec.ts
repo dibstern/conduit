@@ -1,4 +1,4 @@
-// ─── ModelSelector + ModelVariant Interaction Tests ──────────────────────────
+// ─── InstanceModelPicker + ModelVariant Interaction Tests ────────────────────
 // Tests dropdown open/close, keyboard handling, and mutual exclusion between
 // the model dropdown and the variant dropdown.
 
@@ -10,11 +10,11 @@ function storyUrl(storyId: string): string {
 	return `${STORYBOOK}/iframe.html?id=${storyId}&viewMode=story`;
 }
 
-// ─── ModelSelector ───────────────────────────────────────────────────────────
+// ─── InstanceModelPicker ─────────────────────────────────────────────────────
 
-test.describe("ModelSelector", () => {
+test.describe("InstanceModelPicker", () => {
 	test("displays current model name", async ({ page }) => {
-		await page.goto(storyUrl("model-modelselector--closed"), {
+		await page.goto(storyUrl("model-instancemodelpicker--closed"), {
 			waitUntil: "domcontentloaded",
 		});
 		await page.waitForSelector(".model-btn");
@@ -26,7 +26,7 @@ test.describe("ModelSelector", () => {
 	});
 
 	test("opens dropdown on click", async ({ page }) => {
-		await page.goto(storyUrl("model-modelselector--closed"), {
+		await page.goto(storyUrl("model-instancemodelpicker--closed"), {
 			waitUntil: "domcontentloaded",
 		});
 		await page.waitForSelector(".model-btn");
@@ -42,7 +42,7 @@ test.describe("ModelSelector", () => {
 
 	test("shows provider groups with models", async ({ page }) => {
 		// The "Open" story already has the dropdown open via its play function
-		await page.goto(storyUrl("model-modelselector--open"), {
+		await page.goto(storyUrl("model-instancemodelpicker--open"), {
 			waitUntil: "domcontentloaded",
 		});
 		await page.waitForSelector(".model-dropdown");
@@ -51,7 +51,8 @@ test.describe("ModelSelector", () => {
 		// Should show provider header
 		const providerHeader = page.locator(".model-provider-header");
 		await expect(providerHeader.first()).toBeVisible();
-		await expect(providerHeader.first()).toHaveText(/Anthropic/);
+		// Rendered uppercase via CSS, so match case-insensitively.
+		await expect(providerHeader.first()).toHaveText(/anthropic/i);
 
 		// Should show model items
 		const modelItems = page.locator(".model-item");
@@ -64,7 +65,7 @@ test.describe("ModelSelector", () => {
 	});
 
 	test("closes dropdown on Escape", async ({ page }) => {
-		await page.goto(storyUrl("model-modelselector--open"), {
+		await page.goto(storyUrl("model-instancemodelpicker--open"), {
 			waitUntil: "domcontentloaded",
 		});
 		await page.waitForSelector(".model-dropdown");
@@ -79,7 +80,7 @@ test.describe("ModelSelector", () => {
 	});
 
 	test("closes dropdown on outside click", async ({ page }) => {
-		await page.goto(storyUrl("model-modelselector--open"), {
+		await page.goto(storyUrl("model-instancemodelpicker--open"), {
 			waitUntil: "domcontentloaded",
 		});
 		await page.waitForSelector(".model-dropdown");
@@ -87,8 +88,9 @@ test.describe("ModelSelector", () => {
 
 		await expect(page.locator(".model-dropdown")).toBeVisible();
 
-		// Click outside the component
-		await page.locator("body").click({ position: { x: 10, y: 10 } });
+		// Click outside the component. Below the trigger, but above the top of
+		// the mobile popover (fixed to the bottom 70% of the viewport).
+		await page.locator("body").click({ position: { x: 10, y: 150 } });
 		await expect(page.locator(".model-dropdown")).toBeHidden();
 	});
 });
@@ -97,7 +99,7 @@ test.describe("ModelSelector", () => {
 
 test.describe("ModelVariant", () => {
 	test("shows variant badge when model has variants", async ({ page }) => {
-		await page.goto(storyUrl("model-modelselector--with-variants"), {
+		await page.goto(storyUrl("model-instancemodelpicker--with-variants"), {
 			waitUntil: "domcontentloaded",
 		});
 		await page.waitForSelector('[data-testid="variant-badge"]');
@@ -110,7 +112,7 @@ test.describe("ModelVariant", () => {
 	});
 
 	test("opens variant dropdown on badge click", async ({ page }) => {
-		await page.goto(storyUrl("model-modelselector--with-variants"), {
+		await page.goto(storyUrl("model-instancemodelpicker--with-variants"), {
 			waitUntil: "domcontentloaded",
 		});
 		await page.waitForSelector('[data-testid="variant-badge"]');
@@ -127,7 +129,7 @@ test.describe("ModelVariant", () => {
 	});
 
 	test("closes variant dropdown on Escape", async ({ page }) => {
-		await page.goto(storyUrl("model-modelselector--with-variants"), {
+		await page.goto(storyUrl("model-instancemodelpicker--with-variants"), {
 			waitUntil: "domcontentloaded",
 		});
 		await page.waitForSelector('[data-testid="variant-badge"]');
@@ -145,7 +147,7 @@ test.describe("ModelVariant", () => {
 	});
 
 	test("shows checkmark on current variant", async ({ page }) => {
-		await page.goto(storyUrl("model-modelselector--with-variants"), {
+		await page.goto(storyUrl("model-instancemodelpicker--with-variants"), {
 			waitUntil: "domcontentloaded",
 		});
 		await page.waitForSelector('[data-testid="variant-badge"]');
@@ -169,11 +171,11 @@ test.describe("ModelVariant", () => {
 	});
 });
 
-// ─── ModelSelector + ModelVariant coordination ──────────────────────────────
+// ─── InstanceModelPicker + ModelVariant coordination ─────────────────────────
 
-test.describe("ModelSelector + ModelVariant coordination", () => {
+test.describe("InstanceModelPicker + ModelVariant coordination", () => {
 	test("opening model dropdown closes variant dropdown", async ({ page }) => {
-		await page.goto(storyUrl("model-modelselector--with-variants"), {
+		await page.goto(storyUrl("model-instancemodelpicker--with-variants"), {
 			waitUntil: "domcontentloaded",
 		});
 		await page.waitForSelector('[data-testid="variant-badge"]');
@@ -194,7 +196,7 @@ test.describe("ModelSelector + ModelVariant coordination", () => {
 	});
 
 	test("opening variant dropdown closes model dropdown", async ({ page }) => {
-		await page.goto(storyUrl("model-modelselector--with-variants"), {
+		await page.goto(storyUrl("model-instancemodelpicker--with-variants"), {
 			waitUntil: "domcontentloaded",
 		});
 		await page.waitForSelector('[data-testid="variant-badge"]');
