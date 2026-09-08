@@ -39,7 +39,16 @@ build_storybook() {
 update_macos() {
   echo ""
   echo "━━━ Updating macOS (darwin) snapshots ━━━"
-  pnpm exec playwright test "$SCREENSHOT_SPEC" \
+  # VISUAL_STRICT=1 for the same reason the Linux leg sets it, and it is not
+  # optional here either: `--update-snapshots` defaults to mode `changed`, which
+  # respects the CONFIGURED tolerance (maxDiffPixelRatio 0.01 = ~13k pixels of a
+  # 1440x900 capture). Without strict, any existing darwin baseline whose drift
+  # is under that threshold is silently LEFT STALE while the run reports success.
+  # Observed for real: a palette-wide recapture rewrote 736 linux baselines and
+  # only 133 darwin ones, leaving ~600 darwin goldens frozen at the old colours
+  # with no error anywhere. Strict sets threshold 0, so "changed" means "differs
+  # at all" and the two platforms stay in lockstep.
+  VISUAL_STRICT=1 pnpm exec playwright test "$SCREENSHOT_SPEC" \
     --config "$VISUAL_CONFIG" \
     --update-snapshots
   echo "✓ macOS snapshots updated"
