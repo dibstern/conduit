@@ -7,10 +7,11 @@
 @theme {
 	/* === BRAND COLORS ===
 	   Change these two values to rebrand the entire app.
-	   They are constant across all user-selected themes. */
-	--color-brand-a: #ff2d7b; /* pink */
+	   Theme-scoped: Conduit Light redeclares both below with AA-passing
+	   light-surface counterparts. */
+	--color-brand-a: #ff72a6; /* pink */
 	--color-brand-b: #00e5ff; /* cyan */
-	--color-brand-a-glow: rgba(255, 45, 123, 0.15);
+	--color-brand-a-glow: rgba(255, 114, 166, 0.15);
 	--color-brand-b-glow: rgba(0, 229, 255, 0.15);
 
 	--animate-cascade-a: pixel-cascade-a 2.4s ease-in-out infinite;
@@ -24,29 +25,29 @@
 	--color-bg-alt: #27272a;
 	--color-bg-surface: #27272a;
 	--color-text: #e4e4e7;
-	--color-text-secondary: #a1a1aa;
-	--color-text-muted: #71717a;
-	--color-text-dimmer: #52525b;
-	--color-accent: #ff2d7b;
-	--color-accent-hover: #ff4d91;
-	--color-accent-bg: rgba(255, 45, 123, 0.12);
-	--color-code-bg: #131315;
+	--color-text-secondary: #ceced3;
+	--color-text-muted: #b8b8bd;
+	--color-text-dimmer: #a2a2a7;
+	--color-accent: #ff72a6;
+	--color-accent-hover: #ff83b1;
+	--color-accent-bg: rgba(255, 114, 166, 0.12);
+	--color-code-bg: #141417;
 	--color-border: #3f3f46;
-	--color-border-subtle: rgba(255, 255, 255, 0.06);
+	--color-border-subtle: #28282c;
 	--color-input-bg: #333338;
-	--color-user-bubble: #2c2c30;
-	--color-error: #ff4444;
-	--color-error-bg: rgba(255, 68, 68, 0.12);
+	--color-user-bubble: #38383e;
+	--color-error: #ff7878;
+	--color-error-bg: rgba(255, 120, 120, 0.12);
 	--color-success: #22c55e;
 
-	--color-sidebar-bg: #141416;
+	--color-sidebar-bg: #161618;
 	--color-sidebar-hover: #202023;
-	--color-sidebar-active: #2a2a2e;
+	--color-sidebar-active: #333338;
 
 	--color-thinking: #eab308;
 	--color-thinking-bg: rgba(234, 179, 8, 0.06);
-	--color-tool: #4078f2;
-	--color-tool-bg: rgba(64, 120, 242, 0.04);
+	--color-tool: #79a1f6;
+	--color-tool-bg: rgba(121, 161, 246, 0.04);
 	--color-warning: #eab308;
 	--color-warning-bg: rgba(234, 179, 8, 0.12);
 
@@ -56,22 +57,22 @@
 	--shadow-rgb: 0, 0, 0;
 
 	/* Syntax highlighting defaults (conduit dark theme) */
-	--hl-comment: #52525b;
-	--hl-keyword: #ff2d7b;
+	--hl-comment: #a2a2a7;
+	--hl-keyword: #ff72a6;
 	--hl-string: #22c55e;
-	--hl-number: #ff2d7b;
-	--hl-function: #4078f2;
-	--hl-variable: #ff4444;
+	--hl-number: #ff72a6;
+	--hl-function: #79a1f6;
+	--hl-variable: #ff7878;
 	--hl-type: #eab308;
-	--hl-constant: #ff2d7b;
-	--hl-tag: #ff4444;
-	--hl-attr: #4078f2;
+	--hl-constant: #ff72a6;
+	--hl-tag: #ff7878;
+	--hl-attr: #79a1f6;
 	--hl-regexp: #00e5ff;
 	--hl-meta: #eab308;
-	--hl-builtin: #ff2d7b;
+	--hl-builtin: #ff72a6;
 	--hl-symbol: #eab308;
 	--hl-addition: #22c55e;
-	--hl-deletion: #ff4444;
+	--hl-deletion: #ff7878;
 
 	--font-mono:
 		"JetBrains Mono", "Berkeley Mono", "IBM Plex Mono", ui-monospace,
@@ -115,7 +116,7 @@
 	--z-debug: 9999;
 
 	/* ── Elevation / Shadows ──────────────────────────────
-	   Compose with the runtime var(--shadow-rgb) produced by computeVars(). */
+	   Compose with var(--shadow-rgb), redeclared per theme. */
 	--shadow-menu: 0 -4px 16px rgba(var(--shadow-rgb), 0.3);
 	--shadow-menu-lg: 0 -4px 24px rgba(var(--shadow-rgb), 0.4);
 	--shadow-panel: 0 4px 16px rgba(var(--shadow-rgb), 0.3);
@@ -125,6 +126,63 @@
 	/* ── Radius ───────────────────────────────────────────
 	   Panel/card corner used across setup + settings surfaces. */
 	--radius-panel: 10px;
+}
+
+:root.light-theme {
+	--color-brand-a: #c6004a;
+	--color-brand-b: #006d7a;
+	--color-brand-a-glow: rgba(198, 0, 74, 0.15);
+	--color-brand-b-glow: rgba(0, 109, 122, 0.15);
+
+	--color-bg: #f7f7f8;
+	--color-bg-alt: #ffffff;
+	--color-bg-surface: #ffffff;
+	--color-text: #18181b;
+	--color-text-secondary: #2f2f34;
+	--color-text-muted: #48484d;
+	--color-text-dimmer: #626267;
+	--color-accent: #c6004a;
+	--color-accent-hover: #ae0041;
+	--color-accent-bg: rgba(198, 0, 74, 0.12);
+	--color-code-bg: #f0f0f2;
+	--color-border: #d4d4d8;
+	--color-border-subtle: #e9e9ed;
+	--color-input-bg: #ffffff;
+	--color-user-bubble: #ffffff;
+	--color-error: #c90000;
+	--color-error-bg: rgba(201, 0, 0, 0.12);
+	--color-success: #147237;
+
+	--color-sidebar-bg: #f1f1f3;
+	--color-sidebar-hover: #e9e9ed;
+	--color-sidebar-active: #e0e0e5;
+
+	--color-thinking: #7c5f04;
+	--color-thinking-bg: rgba(124, 95, 4, 0.06);
+	--color-tool: #1054ea;
+	--color-tool-bg: rgba(16, 84, 234, 0.04);
+	--color-warning: #7c5f04;
+	--color-warning-bg: rgba(124, 95, 4, 0.12);
+
+	--overlay-rgb: 0, 0, 0;
+	--shadow-rgb: 0, 0, 0;
+
+	--hl-comment: #626267;
+	--hl-keyword: #c6004a;
+	--hl-string: #147237;
+	--hl-number: #c6004a;
+	--hl-function: #1054ea;
+	--hl-variable: #c90000;
+	--hl-type: #7c5f04;
+	--hl-constant: #c6004a;
+	--hl-tag: #c90000;
+	--hl-attr: #1054ea;
+	--hl-regexp: #006d7a;
+	--hl-meta: #7c5f04;
+	--hl-builtin: #c6004a;
+	--hl-symbol: #7c5f04;
+	--hl-addition: #147237;
+	--hl-deletion: #c90000;
 }
 
 @utility glow-brand-a {
@@ -139,8 +197,8 @@
 }
 @utility glow-brand-a-strong {
 	box-shadow:
-		0 0 8px rgba(255, 45, 123, 0.4),
-		0 0 24px rgba(255, 45, 123, 0.15);
+		0 0 8px rgb(from var(--color-brand-a) r g b / 0.4),
+		0 0 24px rgb(from var(--color-brand-a) r g b / 0.15);
 }
 @utility glow-brand-b-strong {
 	box-shadow:
@@ -154,7 +212,7 @@
 }
 @utility glow-tool-completed {
 	box-shadow:
-		-4px 0 16px rgba(0, 229, 255, 0.12),
+		-4px 0 16px rgb(from var(--color-brand-b) r g b / 0.12),
 		-3px 0 0 var(--color-brand-b);
 }
 @utility glow-tool-error {

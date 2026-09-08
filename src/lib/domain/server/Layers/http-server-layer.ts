@@ -92,7 +92,7 @@ const makeServerFactory = (
  *
  * Requires: HttpServerConfigTag + all router dependencies
  * (ProjectsProvider, and optionally HealthProvider, PushProvider, CaCertProvider,
- * ThemeProvider, SetupInfoProvider).
+ * SetupInfoProvider).
  */
 export const HttpServerLive: Layer.Layer<
 	never,

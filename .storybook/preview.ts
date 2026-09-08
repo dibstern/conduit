@@ -1,23 +1,6 @@
 import type { Preview } from "@storybook/svelte-vite";
 import "../src/lib/frontend/style.css";
-import {
-	ALL_CSS_VAR_KEYS,
-	DEFAULT_THEME_ID,
-} from "../src/lib/frontend/stores/theme.svelte.js";
-import type { Base16Theme } from "../src/lib/frontend/stores/theme-compute.js";
-import { computeVars } from "../src/lib/frontend/stores/theme-compute.js";
-
-const themeModules = import.meta.glob<Base16Theme>("../src/lib/themes/*.json", {
-	eager: true,
-	import: "default",
-});
-
-const themes = Object.fromEntries(
-	Object.entries(themeModules).map(([path, theme]) => [
-		path.slice(path.lastIndexOf("/") + 1, -".json".length),
-		theme,
-	]),
-);
+import { setThemeMode } from "../src/lib/frontend/stores/theme.svelte.js";
 
 const preview: Preview = {
 	globalTypes: {
@@ -25,61 +8,30 @@ const preview: Preview = {
 			description: "Theme",
 			toolbar: {
 				icon: "paintbrush",
-				items: Object.entries(themes).map(([id, theme]) => ({
-					value: id,
-					title: theme.name,
-				})),
+				items: [
+					{ value: "dark", title: "Dark" },
+					{ value: "light", title: "Light" },
+				],
 			},
 		},
 	},
 
-	decorators: [
-		(Story, context) => {
-			const selectedTheme =
-				themes[context.globals.theme] ?? themes[DEFAULT_THEME_ID];
-			if (!selectedTheme) return Story();
-
-			const vars = computeVars(selectedTheme);
-			const root = document.documentElement;
-
-			for (const key of ALL_CSS_VAR_KEYS) {
-				if (!(key in vars)) root.style.removeProperty(key);
-			}
-			for (const [key, value] of Object.entries(vars)) {
-				root.style.setProperty(key, value);
-			}
-
-			const isLight = selectedTheme.variant === "light";
-			root.classList.toggle("light-theme", isLight);
-			root.classList.toggle("dark-theme", !isLight);
-
-			return Story();
-		},
-	],
+	// Runs before the story renders, so it is safe to mutate the theme store here.
+	// Doing this in a decorator instead throws state_unsafe_mutation: a decorator
+	// body executes *during* render, and setThemeMode() writes module-level $state.
+	// Going through the real store (rather than only toggling the class) keeps the
+	// JS-side consumers -- Mermaid in AssistantMessage, the xterm palette in
+	// TerminalTab, the Settings control -- in agreement with the CSS.
+	beforeEach: (context) => {
+		setThemeMode(context.globals["theme"] === "light" ? "light" : "dark");
+	},
 
 	parameters: {
 		// "todo" = axe runs and reports, but does not fail the run.
-		//
-		// This is NOT a permanent choice and NOT a silent suppression. Flipping this
-		// to "error" today fails 302 of 438 story tests across 69 of 92 files. The
-		// violations are real (verified: `button-name` is caught when injected) and
-		// are tracked in conduit-test-de3.28, whose burn-down is now decided:
-		//
-		//   1. de3.28.1 — the ~234 mechanical, non-contrast violations
-		//      (aria-required-parent, button-name, label, nested-interactive, …).
-		//   2. de3.28.2 — the ~1516 contrast violations, which are NOT a set of bad
-		//      hex values. `theme-compute.ts` maps conduit's four text tiers onto
-		//      base16 slots, and `--color-text-dimmer` lands on base03 — the slot the
-		//      spec reserves for "comments, invisibles, line highlighting". base16
-		//      offers only three usable foreground slots, so the fourth tier reached
-		//      into one that is *designed* to be illegible. That is a slot-mapping
-		//      bug across all 24 themes, not a visual-language change, so it is fixed
-		//      by enforcing a contrast floor in computeVars rather than by
-		//      redesigning anything.
-		//
-		// Flip to "error" as the last step of that burn-down — and note the toolbar
-		// theme selector above means "green" will finally mean green in every theme,
-		// not just the default dark one.
+		// The remaining non-contrast accessibility work is tracked in
+		// conduit-test-de3.28; palette contrast is handled by the first-party
+		// Light and Dark palettes; the palette step adds shipped-token assertions.
+		// Flip to "error" as the last step of that burn-down.
 		a11y: { test: "todo" },
 		layout: "fullscreen",
 		// Overlay/modal/toast stories set `parameters.docs.story.inline = false`
@@ -90,7 +42,7 @@ const preview: Preview = {
 	},
 
 	initialGlobals: {
-		theme: DEFAULT_THEME_ID,
+		theme: "dark",
 	},
 };
 

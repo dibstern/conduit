@@ -15,22 +15,15 @@
   <link href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/file-icons-js@1/css/style.css">
   <script>
-(()=> {
-  var v,o,root,keys,i,vt,meta;
-  try{
-    v=localStorage.getItem("conduit-theme-vars");
-    if(!v)return;
-    o=JSON.parse(v);root=document.documentElement;keys=Object.keys(o);
-    for(i=0;i<keys.length;i++)root.style.setProperty(keys[i],o[keys[i]]);
-    vt=localStorage.getItem("conduit-theme-variant");
-    if(vt==="light")root.classList.add("light-theme");
-    else if(vt==="dark")root.classList.add("dark-theme");
-    meta=document.querySelector('meta[name="theme-color"]');
-    if(meta&&o["--color-bg"])meta.setAttribute("content",o["--color-bg"]);
-  }catch(_e){}
-})();
+(()=>{var m,d;try{m=localStorage.getItem("conduit-theme");d=m!=="light"&&(m!=="system"||matchMedia("(prefers-color-scheme: dark)").matches);document.documentElement.classList.add(d?"dark-theme":"light-theme")}catch(_e){document.documentElement.classList.add("dark-theme")}})();
 </script>
   <link rel="stylesheet" href="/style.css">
+  <script>
+// Sync browser chrome to the resolved theme before the app module runs. Must sit
+// AFTER style.css: the class-applying script above runs before it, so --color-bg
+// is not readable there, and the meta tag would stay dark until initTheme() ran.
+(()=>{var b,m;try{b=getComputedStyle(document.documentElement).getPropertyValue("--color-bg").trim();m=document.querySelector('meta[name="theme-color"]');if(b&&m)m.content=b}catch(_e){}})();
+</script>
   <link rel="apple-touch-icon" sizes="180x180" href="/static/apple-touch-icon.png">
   <link rel="manifest" href="/static/manifest.webmanifest">
   <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">

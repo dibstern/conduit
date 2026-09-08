@@ -1,7 +1,5 @@
 import type { Meta, StoryObj } from "@storybook/svelte-vite";
 import { expect, fn, userEvent, within } from "storybook/test";
-import conduitTheme from "../../../themes/conduit.json";
-import opencodeLightTheme from "../../../themes/opencode-light.json";
 import {
 	clearDiscoveryState,
 	discoveryState,
@@ -9,8 +7,6 @@ import {
 import { featureFlags } from "../../stores/feature-flags.svelte.js";
 import { handleInstanceList } from "../../stores/instance.svelte.js";
 import { routerState, syncSlugState } from "../../stores/router.svelte.js";
-import { DEFAULT_THEME_ID, themeState } from "../../stores/theme.svelte.js";
-import type { Base16Theme } from "../../stores/theme-compute.js";
 import SettingsPanel from "./SettingsPanel.svelte";
 
 function resetState() {
@@ -23,12 +19,6 @@ function resetState() {
 		"notif-settings",
 		JSON.stringify({ push: false, browser: true, sound: false }),
 	);
-	themeState.currentThemeId = DEFAULT_THEME_ID;
-	themeState.themes = {
-		conduit: conduitTheme as Base16Theme,
-		"opencode-light": opencodeLightTheme as Base16Theme,
-	};
-	themeState.customThemeIds = [];
 }
 
 function populateInstances() {

@@ -106,7 +106,6 @@ import {
 } from "../provider/orchestration-wiring.js";
 import { getClientIp, parseCookies } from "../server/http-utils.js";
 import type { PushNotificationSender } from "../server/push.js";
-import { loadThemeFiles } from "../server/theme-loader.js";
 import type { WebSocketHandlerShape } from "../server/ws-handler-shape.js";
 import {
 	makeWsRpcWebSocketHandler,
@@ -297,7 +296,6 @@ export class EffectRelayServer {
 			removeProject: (slug) => this.removeProject(slug),
 			getPort: () => this.actualPort,
 			getIsTls: () => this.protocol === "https",
-			loadThemes: loadThemeFiles,
 			pushManager: this.options.pushManager,
 			caRootPath: this.options.tls?.caRoot,
 		});

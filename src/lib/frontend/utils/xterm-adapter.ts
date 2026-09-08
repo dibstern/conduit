@@ -4,21 +4,13 @@
 import { FitAddon } from "@xterm/addon-fit";
 import { Terminal } from "@xterm/xterm";
 import "@xterm/xterm/css/xterm.css";
-import conduitTheme from "../../themes/conduit.json" with { type: "json" };
-import type { Base16Theme } from "../stores/theme-compute.js";
-import { computeTerminalTheme } from "../stores/theme-compute.js";
 import type { TerminalAdapter } from "../types.js";
+import { XTERM_THEMES } from "./xterm-themes.js";
 
 // ─── Default Terminal Palette ───────────────────────────────────────────────
-// Derived from the bundled "conduit" theme (the app default) via
-// computeTerminalTheme — the same Base16→xterm hex mapping TerminalTab.svelte
-// uses for live theme switching. This is NOT a hand-picked palette; it is
-// only the value used before a runtime theme is resolved (initial
-// construction, or a startup race before the theme store finishes loading).
-// Every subsequent update is driven by TerminalTab.svelte's reactive effect.
-export const ANSI_THEME: Record<string, string> = computeTerminalTheme(
-	conduitTheme as Base16Theme,
-);
+// Construction defaults to Conduit Dark; TerminalTab applies the resolved
+// Light/Dark palette immediately and whenever the mode resolution changes.
+export const ANSI_THEME: Record<string, string> = XTERM_THEMES.dark;
 
 // ─── Options ────────────────────────────────────────────────────────────────
 

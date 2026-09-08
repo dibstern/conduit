@@ -10,7 +10,6 @@
 //   GET  /api/push/vapid-key      — VAPID public key
 //   POST /api/push/subscribe      — push subscription
 //   POST /api/push/unsubscribe    — push unsubscription
-//   GET  /api/themes              — theme list
 //   GET  /api/setup-info          — setup/onboarding info
 //   GET  /ca/download             — CA certificate download
 //   GET  /auth, /setup, /, /p/*   — SPA/static entry routes
@@ -39,7 +38,6 @@ import type {
 	ProjectsListResponse,
 	PushOkResponse,
 	SetupInfoResponse,
-	ThemesResponse,
 	VapidKeyResponse,
 } from "../shared-types.js";
 import { getVersion } from "../version.js";
@@ -87,14 +85,6 @@ export class CaCertProvider extends Context.Tag("CaCertProvider")<
 	{
 		readonly caCertDer: Buffer | undefined;
 		readonly caRootPath: string | undefined;
-	}
->() {}
-
-/** Theme loader provider — may not be available in test environments. */
-export class ThemeProvider extends Context.Tag("ThemeProvider")<
-	ThemeProvider,
-	{
-		readonly loadThemes: () => Effect.Effect<ThemesResponse, unknown>;
 	}
 >() {}
 
@@ -311,28 +301,6 @@ const pushUnsubscribeHandler = Effect.gen(function* () {
 	return yield* HttpServerResponse.json({ ok: true } satisfies PushOkResponse);
 });
 
-/** GET /api/themes */
-const themesHandler = Effect.gen(function* () {
-	const maybeThemes = yield* Effect.serviceOption(ThemeProvider);
-
-	if (Option.isNone(maybeThemes)) {
-		return yield* jsonError(
-			404,
-			"NOT_AVAILABLE",
-			"Theme loading not available",
-		);
-	}
-
-	const themes = yield* maybeThemes.value
-		.loadThemes()
-		.pipe(Effect.catchAll(() => Effect.succeed(null)));
-	if (themes === null) {
-		return yield* jsonError(500, "THEMES_ERROR", "Failed to load themes");
-	}
-
-	return yield* HttpServerResponse.json(themes);
-});
-
 /** GET /api/setup-info */
 const setupInfoHandler = Effect.gen(function* () {
 	const maybeSetup = yield* Effect.serviceOption(SetupInfoProvider);
@@ -456,7 +424,7 @@ const staticCatchAllHandler = Effect.gen(function* () {
  * Effect-based HTTP router with all JSON API routes.
  *
  * Requires: ProjectsProvider (always).
- * Optional: HealthProvider, PushProvider, CaCertProvider, ThemeProvider, SetupInfoProvider.
+ * Optional: HealthProvider, PushProvider, CaCertProvider, SetupInfoProvider.
  *
  * Apply CORS middleware via `effectRouterWithCors` for production use.
  */
@@ -467,9 +435,6 @@ const publicRoutes = HttpRouter.empty.pipe(
 
 	// Version info
 	HttpRouter.get("/info", infoHandler),
-
-	// Theme list
-	HttpRouter.get("/api/themes", themesHandler),
 
 	// Setup info (onboarding)
 	HttpRouter.get("/api/setup-info", setupInfoHandler),

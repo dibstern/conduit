@@ -101,37 +101,6 @@ export const ProviderPermissionUpdateSchema = Schema.Union(
 export type ProviderPermissionUpdate =
 	typeof ProviderPermissionUpdateSchema.Type;
 
-// ─── Base16 Theme ───────────────────────────────────────────────────────────
-
-export const BASE16_KEYS = [
-	"base00",
-	"base01",
-	"base02",
-	"base03",
-	"base04",
-	"base05",
-	"base06",
-	"base07",
-	"base08",
-	"base09",
-	"base0A",
-	"base0B",
-	"base0C",
-	"base0D",
-	"base0E",
-	"base0F",
-] as const;
-
-export type Base16Key = (typeof BASE16_KEYS)[number];
-
-export type Base16Theme = {
-	name: string;
-	author?: string;
-	variant: "dark" | "light";
-	/** Optional CSS variable overrides applied after Base16→CSS mapping. */
-	overrides?: Record<string, string>;
-} & Record<Base16Key, string>;
-
 // ─── Todo / Progress ────────────────────────────────────────────────────────
 
 export type TodoStatus = "pending" | "in_progress" | "completed" | "cancelled";
@@ -1647,13 +1616,6 @@ export interface HealthResponse {
 
 export interface InfoResponse {
 	version: string;
-}
-
-// ─── Themes ────────────────────────────────────────────────────────────────
-
-export interface ThemesResponse {
-	bundled: Record<string, Base16Theme>;
-	custom: Record<string, Base16Theme>;
 }
 
 // ─── Projects ──────────────────────────────────────────────────────────────

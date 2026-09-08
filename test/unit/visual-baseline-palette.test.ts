@@ -3,14 +3,7 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { PNG } from "pngjs";
 import { describe, expect, it } from "vitest";
-import {
-	type Base16Theme,
-	computeTerminalTheme,
-	computeVars,
-} from "../../src/lib/frontend/stores/theme-compute.js";
-import conduitThemeJson from "../../src/lib/themes/conduit.json" with {
-	type: "json",
-};
+import { XTERM_THEMES } from "../../src/lib/frontend/utils/xterm-themes.js";
 
 const DEFAULT_CHANNEL_TOLERANCE = 2;
 const PLATFORMS = ["darwin", "linux"] as const;
@@ -18,6 +11,14 @@ const BASELINE_DIRECTORY = resolve(
 	dirname(fileURLToPath(import.meta.url)),
 	"../visual/components.spec.ts-snapshots",
 );
+const STYLE_SOURCE = readFileSync(
+	resolve(
+		dirname(fileURLToPath(import.meta.url)),
+		"../../src/lib/frontend/style.css",
+	),
+	"utf8",
+);
+const DARK_THEME = /@theme\s*\{([^}]+)\}/.exec(STYLE_SOURCE)?.[1];
 
 interface ExpectedColor {
 	value: string;
@@ -25,45 +26,52 @@ interface ExpectedColor {
 	tolerance?: number;
 }
 
-const conduitTheme = conduitThemeJson as Base16Theme;
-const terminalTheme = computeTerminalTheme(conduitTheme);
-const themeVars = computeVars(conduitTheme);
-
 function requiredColor(palette: Record<string, string>, key: string): string {
 	const value = palette[key];
 	if (value === undefined) {
-		throw new Error(`Theme computation did not produce ${key}`);
+		throw new Error(`Palette does not define ${key}`);
 	}
+	return value;
+}
+
+function requiredCssColor(token: string): string {
+	if (!DARK_THEME)
+		throw new Error("style.css is missing the authored dark palette");
+	const value = new RegExp(`${token}:\\s*(#[0-9a-fA-F]{6})`).exec(
+		DARK_THEME,
+	)?.[1];
+	if (value === undefined)
+		throw new Error(`style.css does not define ${token}`);
 	return value;
 }
 
 const STORY_EXPECTATIONS: Record<string, ExpectedColor[]> = {
 	"terminal-terminaltab--with-output-desktop": [
 		{
-			value: requiredColor(terminalTheme, "green"),
-			source: "computeTerminalTheme(conduit.json).green (base0B)",
+			value: requiredColor(XTERM_THEMES.dark, "green"),
+			source: "XTERM_THEMES.dark.green",
 		},
 		{
-			value: requiredColor(terminalTheme, "background"),
-			source: "computeTerminalTheme(conduit.json).background (darkened base00)",
+			value: requiredColor(XTERM_THEMES.dark, "background"),
+			source: "XTERM_THEMES.dark.background",
 		},
 	],
 	"ui-menu--default-desktop": [
 		{
-			value: requiredColor(themeVars, "--color-accent"),
-			source: "computeVars(conduit.json)[--color-accent] (base09)",
+			value: requiredCssColor("--color-accent"),
+			source: "style.css --color-accent",
 		},
 		{
-			value: requiredColor(themeVars, "--color-error"),
-			source: "computeVars(conduit.json)[--color-error] (base08)",
+			value: requiredCssColor("--color-error"),
+			source: "style.css --color-error",
 			// Darwin's thin menu glyphs reach 3/1/1 from the source RGB at best.
 			tolerance: 3,
 		},
 	],
 	"overlays-toast--error-toast-desktop": [
 		{
-			value: requiredColor(themeVars, "--color-error"),
-			source: "computeVars(conduit.json)[--color-error] (base08)",
+			value: requiredCssColor("--color-error"),
+			source: "style.css --color-error",
 		},
 	],
 };

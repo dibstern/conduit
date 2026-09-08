@@ -26,11 +26,7 @@
 	// Consistent with FileViewer's mapExtToLanguage mapping (svelte/vue → xml).
 	hljs.registerAliases(["svelte", "vue"], { languageName: "xml" });
 	import mermaid from "mermaid";
-	import {
-		themeState,
-		getCurrentTheme,
-	} from "../../stores/theme.svelte.js";
-	import { computeMermaidVars } from "../../stores/theme-compute.js";
+	import { themeState } from "../../stores/theme.svelte.js";
 
 	let { message }: { message: AssistantMessage } = $props();
 	let containerEl: HTMLDivElement | undefined = $state();
@@ -43,31 +39,33 @@
 	// ─── Mermaid init (once globally) ──────────────────────────────────────────
 
 	function initializeMermaid(): void {
-		const theme = getCurrentTheme();
-		let vars: ReturnType<typeof computeMermaidVars>;
-		if (theme) {
-			vars = computeMermaidVars(theme);
-		} else {
-			// Read fallback values from the active CSS custom properties
-			const s = getComputedStyle(document.documentElement);
-			const get = (name: string, fallback: string) => s.getPropertyValue(name).trim() || fallback;
-			vars = {
-				darkMode: false,
-				background: get("--color-code-bg", "#f5f4f3"),
-				primaryColor: get("--color-accent", "#1d1b1b"),
-				primaryTextColor: get("--color-text", "#1d1b1b"),
-				primaryBorderColor: get("--color-border", "#e0dfde"),
-				lineColor: get("--color-text-muted", "#999999"),
-				secondaryColor: get("--color-bg-alt", "#f7f6f5"),
-				tertiaryColor: get("--color-bg", "#fdfdfc"),
-				fontFamily:
-					"'Berkeley Mono', 'IBM Plex Mono', ui-monospace, monospace",
-			};
-		}
+		const styles = getComputedStyle(document.documentElement);
+		const get = (name: string, fallback: string) =>
+			styles.getPropertyValue(name).trim() || fallback;
+		const vars = {
+			darkMode: themeState.resolved === "dark",
+			background: get("--color-code-bg", "#141417"),
+			// Under theme "base", primaryColor IS the node fill, so it must be a
+			// surface token. Pointing it at --color-accent turned every node brand
+			// pink; nodes should read as panels, with the accent reserved for
+			// emphasis elsewhere.
+			primaryColor: get("--color-bg-alt", "#27272a"),
+			primaryTextColor: get("--color-text", "#e4e4e7"),
+			primaryBorderColor: get("--color-border", "#3f3f46"),
+			lineColor: get("--color-text-muted", "#71717a"),
+			secondaryColor: get("--color-bg-surface", "#1f1f23"),
+			tertiaryColor: get("--color-bg", "#18181b"),
+			fontFamily:
+				"'Berkeley Mono', 'IBM Plex Mono', ui-monospace, monospace",
+		};
 
 		mermaid.initialize({
 			startOnLoad: false,
-			theme: vars.darkMode ? "dark" : "default",
+			// "base" is the only mermaid theme that honours themeVariables. The prebuilt
+			// "default"/"dark" themes recompute their own palette and discard most of
+			// what we pass, which left light-mode diagrams rendering mermaid's stock
+			// lavender (#ECECFF) instead of conduit's tokens.
+			theme: "base",
 			themeVariables: vars,
 		});
 	}
@@ -80,7 +78,7 @@
 
 	// Re-initialize mermaid when theme changes and re-render existing diagrams
 	$effect(() => {
-		const _themeId = themeState.currentThemeId;
+		const _resolvedTheme = themeState.resolved;
 		initializeMermaid();
 		// Re-render already-rendered mermaid diagrams with the new theme
 		if (containerEl) {

@@ -231,30 +231,6 @@ describe("makeDaemonHttpRouterLive", () => {
 		}),
 	);
 
-	it.scoped("serves daemon themes from the production theme loader", () =>
-		Effect.gen(function* () {
-			const staticDir = yield* makeStaticDir;
-			const routerLayer = makeDaemonRouterLayer(staticDir, { projects: [] });
-
-			yield* Effect.gen(function* () {
-				const handler = yield* DaemonHttpRequestHandlerTag;
-				const { port } = yield* startServer(handler);
-
-				const response = yield* Effect.tryPromise(() =>
-					fetch(`http://127.0.0.1:${port}/api/themes`),
-				);
-				expect(response.status).toBe(200);
-				const body = (yield* Effect.tryPromise(() =>
-					response.json(),
-				)) as unknown;
-				expect(body).toMatchObject({
-					bundled: expect.any(Object),
-					custom: expect.any(Object),
-				});
-			}).pipe(Effect.provide(Layer.fresh(routerLayer)));
-		}),
-	);
-
 	it.scoped(
 		"serves daemon project list from Effect-owned registry and relay snapshots",
 		() =>

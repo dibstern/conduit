@@ -14,12 +14,9 @@
 	import { getCurrentSlug } from "../../stores/router.svelte.js";
 	import { wsSend } from "../../stores/ws.svelte.js";
 	import { resizePtyRpc } from "../../transport/ws-rpc-client.js";
-	import { XtermAdapter, ANSI_THEME } from "../../utils/xterm-adapter.js";
-	import {
-		themeState,
-		getCurrentTheme,
-		computeTerminalTheme,
-	} from "../../stores/theme.svelte.js";
+	import { XtermAdapter } from "../../utils/xterm-adapter.js";
+	import { XTERM_THEMES } from "../../utils/xterm-themes.js";
+	import { themeState } from "../../stores/theme.svelte.js";
 
 	let {
 		ptyId,
@@ -53,11 +50,8 @@
 		adapter = xterm;
 		xterm.mount(containerEl);
 
-		// Apply current theme immediately on mount (before any data is written)
-		const currentTheme = getCurrentTheme();
-		if (currentTheme) {
-			xterm.setTheme(computeTerminalTheme(currentTheme));
-		}
+		// Apply the resolved theme immediately, before any data is written.
+		xterm.setTheme(XTERM_THEMES[themeState.resolved]);
 
 		// Wire user input → server
 		xterm.onData((data: string) => {
@@ -166,16 +160,8 @@
 
 	// When theme changes, update the terminal theme
 	$effect(() => {
-		const _themeId = themeState.currentThemeId;
 		if (!adapter) return;
-		const currentTheme = getCurrentTheme();
-		if (currentTheme) {
-			adapter.setTheme(computeTerminalTheme(currentTheme));
-		} else {
-			// No runtime theme resolved yet — fall back to ANSI_THEME, which is
-			// itself derived from the default (conduit) theme, not hardcoded.
-			adapter.setTheme(ANSI_THEME);
-		}
+		adapter.setTheme(XTERM_THEMES[themeState.resolved]);
 	});
 </script>
 

@@ -6,9 +6,9 @@
 <script lang="ts">
 	import { untrack } from "svelte";
 	import Icon from "../ui/Icon.svelte";
+	import Select from "../ui/Select.svelte";
 	import Toggle from "../ui/Toggle.svelte";
 	import { createFrontendLogger } from "../../utils/logger.js";
-	import type { Base16Theme } from "../../stores/theme-compute.js";
 
 	const log = createFrontendLogger("push");
 	import {
@@ -34,8 +34,8 @@
 	import { featureFlags, toggleFeature } from "../../stores/feature-flags.svelte.js";
 	import {
 		themeState,
-		getThemeLists,
-		applyTheme,
+		setThemeMode,
+		type ThemeMode,
 	} from "../../stores/theme.svelte.js";
 	import {
 		type NotifSettings,
@@ -99,10 +99,6 @@
 	const scanResult = $derived(getScanResult());
 	const proxyResult = $derived(getProxyDetection());
 	const ccsDetected = $derived(proxyResult?.found ?? false);
-	const themeLists = $derived(getThemeLists());
-
-	const SWATCH_KEYS = ["base00", "base01", "base09", "base0B", "base0D"] as const;
-
 	// ─── Effects ────────────────────────────────────────────────────────────
 
 	$effect(() => {
@@ -470,38 +466,26 @@
 
 				<!-- ═══ Appearance ═══ -->
 				{:else if activeTab === "appearance"}
-					<div class="space-y-4">
-						{#each [
-							{ key: "dark", label: "Dark", items: themeLists.dark },
-							{ key: "light", label: "Light", items: themeLists.light },
-							{ key: "custom", label: "Custom", items: themeLists.custom },
-						] as section}
-							{#if section.items.length > 0}
-								<div>
-									<div class="text-xs font-semibold uppercase tracking-widest text-text-muted px-1 mb-2 font-brand">{section.label}</div>
-									<div class="space-y-1">
-										{#each section.items as { id, theme }}
-											<button
-												class="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg border transition-colors cursor-pointer bg-transparent {themeState.currentThemeId === id ? 'border-brand-a bg-brand-a/5' : 'border-transparent hover:bg-bg-surface'}"
-												onclick={() => applyTheme(id)}
-											>
-												<div class="flex gap-[2px] shrink-0">
-													{#each SWATCH_KEYS as key}
-														<span class="w-3 h-3 rounded-sm border border-white/10" style="background: #{theme[key]};"></span>
-													{/each}
-												</div>
-												<span class="flex-1 text-left text-base font-brand {themeState.currentThemeId === id ? 'text-text font-medium' : 'text-text-secondary'}">
-													{theme.name}
-												</span>
-												{#if themeState.currentThemeId === id}
-													<Icon name="check" size={14} class="text-success shrink-0" />
-												{/if}
-											</button>
-										{/each}
-									</div>
-								</div>
-							{/if}
-						{/each}
+					<div class="bg-bg-surface border border-border rounded-panel px-5 py-4 font-brand">
+						<label for="theme-mode" class="block text-base font-medium text-text">
+							Theme
+						</label>
+						<p class="mt-1 text-xs text-text-muted">
+							Choose a fixed appearance or follow your system setting.
+						</p>
+						<Select
+							id="theme-mode"
+							value={themeState.mode}
+							class="mt-3 w-full"
+							onchange={(event) =>
+								setThemeMode(
+									(event.currentTarget as HTMLSelectElement).value as ThemeMode,
+								)}
+						>
+							<option value="light">Light</option>
+							<option value="dark">Dark</option>
+							<option value="system">System</option>
+						</Select>
 					</div>
 
 				<!-- ═══ Agents & Models ═══ -->

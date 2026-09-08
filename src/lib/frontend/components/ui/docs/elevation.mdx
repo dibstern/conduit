@@ -4,8 +4,8 @@ import { Meta } from "@storybook/addon-docs/blocks";
 
 # Elevation
 
-Every elevation token embeds `rgba(var(--shadow-rgb), …)`. `computeVars` supplies
-that channel for the active theme, so the shadow remains part of the runtime theme.
+Every elevation token embeds `rgba(var(--shadow-rgb), …)`. The active CSS theme
+supplies that channel, so the shadow remains part of the resolved theme.
 A hand-written shadow string is always wrong: use the semantic shadow utility.
 
 <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: "24px", padding: "24px", background: "var(--color-bg)" }}>
