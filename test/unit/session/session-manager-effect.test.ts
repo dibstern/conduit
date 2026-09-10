@@ -449,6 +449,40 @@ describe("SessionManager Effect", () => {
 	);
 
 	it.effect(
+		"records an OpenCode-created session as a canonical event, not just a row",
+		() => {
+			const mockApi = makeMockApi();
+			const dir = mkdtempSync(join(tmpdir(), "conduit-create-event-"));
+			const filename = join(dir, "events.db");
+			const layer = makeLiveServiceLayer(mockApi, filename);
+
+			return Effect.gen(function* () {
+				const store = yield* EventStoreEffectTag;
+				const readQuery = yield* ReadQueryEffectTag;
+				const service = yield* SessionManagerServiceTag;
+
+				const session = yield* service.createSession("New", {
+					providerId: "opencode",
+				});
+
+				// conduit-test-48mo.1: create used to INSERT the sessions row directly
+				// and append nothing, so a read model rebuilt from the event store lost
+				// every OpenCode-backed session.
+				const events = yield* store.readBySession(session.id);
+				expect(events.map((e) => e.type)).toEqual(["session.created"]);
+				expect((yield* readQuery.getSession(session.id))?.provider).toBe(
+					"opencode",
+				);
+			}).pipe(
+				Effect.provide(layer),
+				Effect.ensuring(
+					Effect.sync(() => rmSync(dir, { recursive: true, force: true })),
+				),
+			);
+		},
+	);
+
+	it.effect(
 		"renames an OpenCode-backed session in the read model and upstream",
 		() => {
 			const mockApi = makeMockApi();

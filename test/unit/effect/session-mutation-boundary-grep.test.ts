@@ -12,7 +12,10 @@ interface AllowedSessionMutation {
 
 // Stopgap: once session mutations flow through one command seam, this allowlist collapses to one sync-adapter rule.
 const allowedSessionMutations: readonly AllowedSessionMutation[] = [
-	// SessionManager owns provider creation while it coordinates the new session state.
+	// Create is id-generating, so it cannot be expressed as a command: the
+	// session id has to exist before session.created can reference it. The call
+	// site applies the command immediately afterwards. conduit-test-48mo.8 decides
+	// whether this entry can go away.
 	{
 		path: "src/lib/domain/relay/Services/session-manager-service.ts",
 		linePattern: /api\.session\.create\(title \? \{ title \} : undefined\),/,

@@ -124,7 +124,10 @@ export const isClaudeSessionRow = (
  */
 export const applySessionCommand = (command: SessionCommand) =>
 	Effect.gen(function* () {
-		const api = yield* OpenCodeAPITag;
+		// Optional: a Claude-only relay never wires the OpenCode API, and a
+		// mutation on a Claude-backed session has no upstream to reach anyway.
+		// Requiring it here would put OpenCode in the type of every local create.
+		const apiOption = yield* Effect.serviceOption(OpenCodeAPITag);
 		const logOption = yield* Effect.serviceOption(LoggerTag);
 		const configOption = yield* Effect.serviceOption(ConfigTag);
 		const readQueryOption = yield* Effect.serviceOption(ReadQueryEffectTag);
@@ -175,13 +178,21 @@ export const applySessionCommand = (command: SessionCommand) =>
 				),
 			);
 
-			// A command for a session with no row is not an error: the row may
-			// already be gone, and upstream may still hold it. Sync still runs.
-			if (row) {
+			// session.created is the one command that does not require an existing
+			// row — it is what brings the row into being, and its payload names the
+			// provider. Every other command describes a change to a row that must
+			// already be there: no row is not an error (it may already be gone, and
+			// upstream may still hold it), there is simply nothing to record.
+			const appendProvider =
+				command.type === "session.created"
+					? command.data.provider
+					: row?.provider;
+
+			if (appendProvider !== undefined) {
 				const stored = yield* eventStore
 					.append(
 						canonicalEvent(command.type, sessionId, command.data, {
-							provider: row.provider,
+							provider: appendProvider,
 							createdAt: Date.now(),
 							metadata: { source: "relay" },
 						}),
@@ -208,6 +219,9 @@ export const applySessionCommand = (command: SessionCommand) =>
 			}
 		}
 
+		// No adapter means no upstream to sync: the relay has no OpenCode API
+		// wired at all, so there is no session registry anywhere to fall out of
+		// step with.
 		const adapter =
 			row !== undefined &&
 			isClaudeSessionRow(
@@ -215,21 +229,25 @@ export const applySessionCommand = (command: SessionCommand) =>
 				configOption._tag === "Some" ? configOption.value.configDir : undefined,
 			)
 				? claudeUpstreamAdapter
-				: openCodeUpstreamAdapter(api);
+				: apiOption._tag === "Some"
+					? openCodeUpstreamAdapter(apiOption.value)
+					: undefined;
 
-		yield* adapter.sync(command).pipe(
-			Effect.catchAll((cause) =>
-				Effect.sync(() => {
-					if (logOption._tag === "Some") {
-						logOption.value.warn("Upstream session sync failed", {
-							operation: command.type,
-							sessionId,
-							cause,
-						});
-					}
-				}),
-			),
-		);
+		if (adapter !== undefined) {
+			yield* adapter.sync(command).pipe(
+				Effect.catchAll((cause) =>
+					Effect.sync(() => {
+						if (logOption._tag === "Some") {
+							logOption.value.warn("Upstream session sync failed", {
+								operation: command.type,
+								sessionId,
+								cause,
+							});
+						}
+					}),
+				),
+			);
+		}
 	}).pipe(
 		Effect.annotateLogs("sessionId", command.data.sessionId),
 		Effect.withSpan("session.applySessionCommand", {

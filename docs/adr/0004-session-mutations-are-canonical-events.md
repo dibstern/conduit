@@ -78,6 +78,17 @@ shrinks to the sync adapter as each mutation migrates.
   the rest — so `session.created` has no upstream sync to perform. The event is
   still appended, which is what closes the parity gap.
 - Migration is incremental. Delete moved onto the seam first as a tracer bullet
-  (conduit-test-48mo.6); rename and create follow (conduit-test-48mo.7). Until
-  then the allowlist carries the un-migrated call sites explicitly, so the gap
-  is visible rather than assumed.
+  (conduit-test-48mo.6); rename and create followed (conduit-test-48mo.7). The
+  allowlist carries whatever has not migrated, so the gap is visible rather than
+  assumed.
+- `api.session.create` stays a direct call and stays on the allowlist. It is
+  id-generating, and `sync: (command) => Effect<void>` cannot express "return
+  the id the provider chose" — a command needs the session id before it can be
+  built. The create path therefore calls OpenCode first and applies
+  `session.created` second, which is the same asymmetry as above rather than a
+  second exception. Whether the allowlist should shrink to the sync adapter
+  alone is conduit-test-48mo.8's problem.
+- Upstream sync is skipped entirely when no OpenCode API is wired. The seam
+  takes `OpenCodeAPITag` as an optional service: a Claude-only relay has no
+  session registry anywhere, and requiring the tag would put OpenCode in the
+  type of every local session create.
