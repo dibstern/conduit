@@ -4,6 +4,7 @@
 
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import type { ClaudeSettingsOverrides } from "../contracts/claude-settings.js";
 import type { ModelOverride } from "../domain/relay/Services/session-overrides-state.js";
 import { DEFAULT_CONFIG_DIR } from "../env.js";
 
@@ -16,6 +17,8 @@ export interface RelaySettings {
 	hiddenModels?: string[];
 	/** Agent keys ("<scopeId>/<agentId>") hidden from the agent dropdown. */
 	hiddenAgents?: string[];
+	/** Global Claude SDK flag-layer overrides. */
+	claudeSettings?: ClaudeSettingsOverrides;
 }
 
 // ─── Constants ──────────────────────────────────────────────────────────────
@@ -84,6 +87,11 @@ export function saveRelaySettings(
 	}
 	if (settings.hiddenAgents !== undefined) {
 		merged.hiddenAgents = [...settings.hiddenAgents];
+	}
+
+	// Claude settings use replace semantics so removing a key unpins it.
+	if (settings.claudeSettings !== undefined) {
+		merged.claudeSettings = { ...settings.claudeSettings };
 	}
 
 	const tmpPath = join(dir, `.${SETTINGS_FILE}.tmp`);

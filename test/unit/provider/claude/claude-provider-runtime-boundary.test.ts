@@ -1,4 +1,5 @@
-import { readFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Deferred, Effect, Exit, Fiber, Scope } from "effect";
 import { describe, expect, it, vi } from "vitest";
@@ -9,6 +10,10 @@ import type {
 	SDKMessage,
 	Options as SDKOptions,
 } from "../../../../src/lib/provider/claude/types.js";
+import {
+	loadRelaySettings,
+	saveRelaySettings,
+} from "../../../../src/lib/relay/relay-settings.js";
 import { getClaudeRuntimeSessionCountForTest } from "../../../helpers/claude-runtime-state.js";
 import {
 	createMockQuery,
@@ -78,6 +83,15 @@ function makeBlockingQuery(
 }
 
 describe("Claude provider runtime boundary", () => {
+	it("wires the persisted override getter into both production constructors", () => {
+		const wiring = source("src/lib/provider/orchestration-wiring.ts");
+		const getters = wiring.match(
+			/claudeSettingsOverrides: \(\) =>\s*loadRelaySettings\(options\.configDir\)\.claudeSettings/g,
+		);
+
+		expect(getters).toHaveLength(2);
+	});
+
 	it("keeps live Claude turn state out of the provider instance facade", () => {
 		const providerInstance = source(
 			`${CLAUDE_PROVIDER_DIR}/claude-provider-instance.ts`,
@@ -130,10 +144,14 @@ describe("Claude provider runtime boundary", () => {
 
 	it("reads and merges SDK settings overrides at each session start", async () => {
 		const capturedSettings: SDKOptions["settings"][] = [];
-		const claudeSettingsOverrides = vi
-			.fn()
-			.mockReturnValueOnce({ autoCompactEnabled: false })
-			.mockReturnValueOnce({ autoCompactEnabled: true });
+		const configDir = mkdtempSync(join(tmpdir(), "conduit-claude-settings-"));
+		saveRelaySettings(
+			{ claudeSettings: { autoCompactEnabled: false } },
+			configDir,
+		);
+		const claudeSettingsOverrides = vi.fn(
+			() => loadRelaySettings(configDir).claudeSettings,
+		);
 		const instance = new ClaudeProviderInstance({
 			workspaceRoot: "/tmp/ws",
 			queryFactory: ({ options }: { options?: SDKOptions }) => {
@@ -151,6 +169,10 @@ describe("Claude provider runtime boundary", () => {
 				}),
 			),
 		);
+		saveRelaySettings(
+			{ claudeSettings: { autoCompactEnabled: true } },
+			configDir,
+		);
 		await Effect.runPromise(
 			instance.sendTurnEffect(
 				makeBaseSendTurnInput({
@@ -165,6 +187,7 @@ describe("Claude provider runtime boundary", () => {
 			{ showThinkingSummaries: true, autoCompactEnabled: true },
 		]);
 		expect(claudeSettingsOverrides).toHaveBeenCalledTimes(2);
+		rmSync(configDir, { recursive: true, force: true });
 	});
 
 	it("removes trust-tiered keys from SDK settings overrides", async () => {

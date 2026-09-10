@@ -1,6 +1,12 @@
 import { Rpc, RpcGroup } from "@effect/rpc";
 import { Schema } from "effect";
 import { SessionPermissionModeSchema } from "../shared-types.js";
+import {
+	ClaudeSettingsOverridesSchema,
+	ClaudeSettingsResolveError,
+	ClaudeSettingsTrustBoundaryError,
+	ResolvedClaudeSettingsSchema,
+} from "./claude-settings.js";
 import { ProviderDriverKindSchema } from "./provider-instance.js";
 
 const NonEmptyString = Schema.NonEmptyString;
@@ -223,6 +229,17 @@ export const SetHiddenEntriesResponseSchema = Schema.Struct({
 	hiddenAgents: Schema.Array(Schema.String),
 });
 
+export const ClaudeSettingsResponseSchema = Schema.Struct({
+	projectSlug: Schema.String,
+	overrides: ClaudeSettingsOverridesSchema,
+});
+
+export const ResolveClaudeSettingsResponseSchema = Schema.Struct({
+	projectSlug: Schema.String,
+	instanceId: Schema.String,
+	resolved: ResolvedClaudeSettingsSchema,
+});
+
 export const ReloadProviderSessionResponseSchema = Schema.Struct({
 	projectSlug: Schema.String,
 	sessionId: Schema.String,
@@ -420,6 +437,9 @@ export type SwitchModelResponse = typeof SwitchModelResponseSchema.Type;
 export type SetDefaultModelResponse = typeof SetDefaultModelResponseSchema.Type;
 export type SetHiddenEntriesResponse =
 	typeof SetHiddenEntriesResponseSchema.Type;
+export type ClaudeSettingsResponse = typeof ClaudeSettingsResponseSchema.Type;
+export type ResolveClaudeSettingsResponse =
+	typeof ResolveClaudeSettingsResponseSchema.Type;
 export type ReloadProviderSessionResponse =
 	typeof ReloadProviderSessionResponseSchema.Type;
 export type SwitchVariantResponse = typeof SwitchVariantResponseSchema.Type;
@@ -760,6 +780,40 @@ export class SetHiddenEntries extends Schema.TaggedRequest<SetHiddenEntries>()(
 	},
 ) {}
 
+export class GetClaudeSettings extends Schema.TaggedRequest<GetClaudeSettings>()(
+	"GetClaudeSettings",
+	{
+		failure: WsRpcError,
+		success: ClaudeSettingsResponseSchema,
+		payload: { projectSlug: NonEmptyString },
+	},
+) {}
+
+export class SetClaudeSettings extends Schema.TaggedRequest<SetClaudeSettings>()(
+	"SetClaudeSettings",
+	{
+		failure: Schema.Union(WsRpcError, ClaudeSettingsTrustBoundaryError),
+		success: ClaudeSettingsResponseSchema,
+		payload: {
+			projectSlug: NonEmptyString,
+			overrides: ClaudeSettingsOverridesSchema,
+			originId: Schema.optional(NonEmptyString),
+		},
+	},
+) {}
+
+export class ResolveClaudeSettings extends Schema.TaggedRequest<ResolveClaudeSettings>()(
+	"ResolveClaudeSettings",
+	{
+		failure: Schema.Union(WsRpcError, ClaudeSettingsResolveError),
+		success: ResolveClaudeSettingsResponseSchema,
+		payload: {
+			projectSlug: NonEmptyString,
+			instanceId: NonEmptyString,
+		},
+	},
+) {}
+
 export class ReloadProviderSession extends Schema.TaggedRequest<ReloadProviderSession>()(
 	"ReloadProviderSession",
 	{
@@ -1083,6 +1137,9 @@ export const WsRpcRequest = Schema.Union(
 	SwitchModel,
 	SetDefaultModel,
 	SetHiddenEntries,
+	GetClaudeSettings,
+	SetClaudeSettings,
+	ResolveClaudeSettings,
 	ReloadProviderSession,
 	RenameSession,
 	SwitchVariant,
@@ -1137,6 +1194,9 @@ export const WsRpcGroup = RpcGroup.make(
 	Rpc.fromTaggedRequest(SwitchModel),
 	Rpc.fromTaggedRequest(SetDefaultModel),
 	Rpc.fromTaggedRequest(SetHiddenEntries),
+	Rpc.fromTaggedRequest(GetClaudeSettings),
+	Rpc.fromTaggedRequest(SetClaudeSettings),
+	Rpc.fromTaggedRequest(ResolveClaudeSettings),
 	Rpc.fromTaggedRequest(ReloadProviderSession),
 	Rpc.fromTaggedRequest(RenameSession),
 	Rpc.fromTaggedRequest(SwitchVariant),

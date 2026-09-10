@@ -13,6 +13,7 @@ import {
 	DetectProxy,
 	ForkSession,
 	GetAgents,
+	GetClaudeSettings,
 	GetCommands,
 	GetFileContent,
 	GetFileList,
@@ -37,10 +38,12 @@ import {
 	RenameProject,
 	RenameSession,
 	ResizePty,
+	ResolveClaudeSettings,
 	RespondPermission,
 	RewindSession,
 	ScanNow,
 	SendMessage,
+	SetClaudeSettings,
 	SetDefaultModel,
 	SetLogLevel,
 	SetProjectInstance,
@@ -58,6 +61,7 @@ import {
 	WsRpcRequest,
 } from "../../../src/lib/contracts/ws-rpc.js";
 import { WsRpcGroup as FrontendWsRpcGroup } from "../../../src/lib/frontend/transport/ws-rpc.js";
+import { resolveClaudeSettingsFromDisk } from "../../../src/lib/provider/claude/claude-settings-resolver.js";
 import { WsRpcGroup as ServerWsRpcGroup } from "../../../src/lib/server/ws-rpc.js";
 
 type WsRpcTestEnv =
@@ -332,6 +336,48 @@ const provideRpc = <A, E>(effect: Effect.Effect<A, E, WsRpcTestEnv>) =>
 						hiddenModels: request.hiddenModels ?? [],
 						hiddenAgents: request.hiddenAgents ?? [],
 					}),
+				GetClaudeSettings: (request) =>
+					Effect.succeed({
+						projectSlug: request.projectSlug,
+						overrides: { autoCompactEnabled: false },
+					}),
+				SetClaudeSettings: (request) =>
+					Effect.succeed({
+						projectSlug: request.projectSlug,
+						overrides: request.overrides,
+					}),
+				ResolveClaudeSettings: (request) =>
+					resolveClaudeSettingsFromDisk(
+						{ workspaceRoot: "/workspace/project" },
+						async () => ({
+							stdout: JSON.stringify({
+								autoCompactEnabled: {
+									value: false,
+									source: "user",
+									env: { TOKEN: "rpc-secret-canary" },
+								},
+								autoCompactWindow: {},
+								env: { TOKEN: "rpc-secret-canary" },
+								sources: [
+									{
+										settings: {
+											plugins: { example: { apiKey: "rpc-secret-canary" } },
+										},
+									},
+								],
+							}),
+							stderr: "",
+							exitCode: 0,
+							timedOut: false,
+							outputTooLarge: false,
+						}),
+					).pipe(
+						Effect.map((resolved) => ({
+							projectSlug: request.projectSlug,
+							instanceId: request.instanceId,
+							resolved,
+						})),
+					),
 				ReloadProviderSession: (request) =>
 					Effect.succeed({
 						projectSlug: request.projectSlug,
@@ -406,6 +452,27 @@ const provideRpc = <A, E>(effect: Effect.Effect<A, E, WsRpcTestEnv>) =>
 	);
 
 describe("browser WebSocket RPC contract", () => {
+	it.effect(
+		"never returns secret-bearing extra fields from a stubbed resolver child",
+		() =>
+			provideRpc(
+				Effect.gen(function* () {
+					const client = yield* RpcTest.makeClient(WsRpcGroup);
+					const result = yield* client.ResolveClaudeSettings({
+						projectSlug: "demo",
+						instanceId: "claude",
+					});
+					expect(result.resolved).toEqual({
+						autoCompactEnabled: { value: false, source: "user" },
+						autoCompactWindow: {},
+					});
+					const json = JSON.stringify(result);
+					expect(json).not.toContain("rpc-secret-canary");
+					expect(json).not.toContain('"env"');
+					expect(json).not.toContain('"sources"');
+				}),
+			),
+	);
 	it("decodes per-turn model execution in history responses", () => {
 		const decode = Schema.decodeUnknownSync(LoadMoreHistoryResponseSchema);
 		const decoded = decode({
@@ -600,6 +667,9 @@ describe("browser WebSocket RPC contract", () => {
 		expect(WsRpcGroup.requests.has("SwitchContextWindow")).toBe(true);
 		expect(WsRpcGroup.requests.has("SwitchModel")).toBe(true);
 		expect(WsRpcGroup.requests.has("SetDefaultModel")).toBe(true);
+		expect(WsRpcGroup.requests.has("GetClaudeSettings")).toBe(true);
+		expect(WsRpcGroup.requests.has("SetClaudeSettings")).toBe(true);
+		expect(WsRpcGroup.requests.has("ResolveClaudeSettings")).toBe(true);
 		expect(WsRpcGroup.requests.has("ReloadProviderSession")).toBe(true);
 		expect(WsRpcGroup.requests.has("RenameSession")).toBe(true);
 		expect(WsRpcGroup.requests.has("SwitchVariant")).toBe(true);
@@ -650,6 +720,27 @@ describe("browser WebSocket RPC contract", () => {
 					projectSlug: "demo",
 					commands: [{ name: "init", description: "Initialize" }],
 				});
+
+				expect(
+					yield* client.GetClaudeSettings({ projectSlug: "demo" }),
+				).toEqual({
+					projectSlug: "demo",
+					overrides: { autoCompactEnabled: false },
+				});
+				expect(
+					yield* client.SetClaudeSettings({
+						projectSlug: "demo",
+						overrides: { alwaysThinkingEnabled: true },
+					}),
+				).toEqual({
+					projectSlug: "demo",
+					overrides: { alwaysThinkingEnabled: true },
+				});
+				const resolved = yield* client.ResolveClaudeSettings({
+					projectSlug: "demo",
+					instanceId: "claude",
+				});
+				expect(resolved.resolved.autoCompactEnabled.source).toBe("user");
 
 				const projects = yield* client.GetProjects({ projectSlug: "demo" });
 				expect(projects).toEqual({
@@ -1208,6 +1299,21 @@ describe("browser WebSocket RPC contract", () => {
 				provider: "opencode",
 			})._tag,
 		).toBe("SetDefaultModel");
+		expect(new GetClaudeSettings({ projectSlug: "demo" })._tag).toBe(
+			"GetClaudeSettings",
+		);
+		expect(
+			new SetClaudeSettings({
+				projectSlug: "demo",
+				overrides: { autoCompactEnabled: false },
+			})._tag,
+		).toBe("SetClaudeSettings");
+		expect(
+			new ResolveClaudeSettings({
+				projectSlug: "demo",
+				instanceId: "claude",
+			})._tag,
+		).toBe("ResolveClaudeSettings");
 		expect(
 			new ReloadProviderSession({
 				projectSlug: "demo",

@@ -1,4 +1,8 @@
 import { Effect } from "effect";
+import {
+	ClaudeSettingsResolveError,
+	ClaudeSettingsTrustBoundaryError,
+} from "../contracts/claude-settings.js";
 import { ProviderInstanceIdSchema } from "../contracts/provider-instance.js";
 import {
 	loadDaemonConfig,
@@ -24,6 +28,11 @@ import {
 	setPermissionMode,
 } from "../domain/relay/Services/session-overrides-state.js";
 import { OpenCodeTerminalServiceTag } from "../domain/relay/Services/terminal-service.js";
+import {
+	getClaudeSettingsOverrides,
+	resolveClaudeSettingsForInstance,
+	setClaudeSettingsForRelay,
+} from "../handlers/claude-settings.js";
 import { switchContextWindowForSession } from "../handlers/context-window.js";
 import {
 	getModelsResponse,
@@ -67,6 +76,7 @@ export {
 	AddProject,
 	AnswerQuestion,
 	CancelSession,
+	type ClaudeSettingsResponse,
 	ClosePty,
 	CreatePty,
 	CreateSession,
@@ -78,6 +88,7 @@ export {
 	type ForkSessionResponse,
 	GetAgents,
 	type GetAgentsResponse,
+	GetClaudeSettings,
 	GetCommands,
 	type GetCommandsResponse,
 	GetFileContent,
@@ -116,12 +127,15 @@ export {
 	RenameProject,
 	RenameSession,
 	ResizePty,
+	ResolveClaudeSettings,
+	type ResolveClaudeSettingsResponse,
 	RespondPermission,
 	RewindSession,
 	ScanNow,
 	type ScanNowResponse,
 	SendMessage,
 	type SessionInfo,
+	SetClaudeSettings,
 	SetDefaultModel,
 	type SetDefaultModelResponse,
 	SetLogLevel,
@@ -653,6 +667,46 @@ export const WsRpcServerLayer = WsRpcGroup.toLayer({
 						message: `SetHiddenEntries failed: ${String(error)}`,
 					}),
 				),
+			),
+		),
+	GetClaudeSettings: (request) =>
+		Effect.gen(function* () {
+			const config = yield* ConfigTag;
+			return {
+				projectSlug: request.projectSlug,
+				overrides: getClaudeSettingsOverrides(config.configDir),
+			};
+		}),
+	SetClaudeSettings: (request) =>
+		setClaudeSettingsForRelay({
+			clientId: request.originId ?? "rpc",
+			overrides: request.overrides,
+		}).pipe(
+			Effect.map((overrides) => ({
+				projectSlug: request.projectSlug,
+				overrides,
+			})),
+			Effect.mapError((error) =>
+				error instanceof ClaudeSettingsTrustBoundaryError
+					? error
+					: new WsRpcError({
+							message: `SetClaudeSettings failed: ${String(error)}`,
+						}),
+			),
+		),
+	ResolveClaudeSettings: (request) =>
+		resolveClaudeSettingsForInstance({ instanceId: request.instanceId }).pipe(
+			Effect.map((resolved) => ({
+				projectSlug: request.projectSlug,
+				instanceId: request.instanceId,
+				resolved,
+			})),
+			Effect.mapError((error) =>
+				error instanceof ClaudeSettingsResolveError
+					? error
+					: new WsRpcError({
+							message: `ResolveClaudeSettings failed: ${String(error)}`,
+						}),
 			),
 		),
 	ReloadProviderSession: (request) =>

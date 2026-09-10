@@ -2,6 +2,10 @@
 // Types shared between server and frontend.
 // Imported by src/lib/types.ts (server) and frontend code.
 
+import {
+	type ClaudeSettingsOverrides,
+	ClaudeSettingsOverridesSchema,
+} from "./contracts/claude-settings.js";
 import type { ProviderDriverKind } from "./contracts/provider-instance.js";
 // SDK-derived type aliases (Task 10) — single source of truth for Part/Tool enums.
 // Imported for local use; re-exported below for downstream consumers.
@@ -852,6 +856,11 @@ const VisibilityInfoSchema = Schema.Struct({
 	hiddenAgents: Schema.Array(Schema.String),
 });
 
+const ClaudeSettingsInfoSchema = Schema.Struct({
+	type: Schema.Literal("claude_settings_info"),
+	overrides: ClaudeSettingsOverridesSchema,
+});
+
 const CommandListSchema = Schema.Struct({
 	type: Schema.Literal("command_list"),
 	commands: Schema.Array(CommandInfoSchema),
@@ -1155,6 +1164,7 @@ export const RelayMessageSchema = Schema.Union(
 	ModelListSchema,
 	AgentListSchema,
 	VisibilityInfoSchema,
+	ClaudeSettingsInfoSchema,
 	CommandListSchema,
 	// Projects
 	ProjectListSchema,
@@ -1241,6 +1251,7 @@ export const RELAY_MESSAGE_TYPES = [
 	"model_list",
 	"agent_list",
 	"visibility_info",
+	"claude_settings_info",
 	"command_list",
 	"project_list",
 	"file_list",
@@ -1458,6 +1469,7 @@ export type RelayMessage =
 			activeAgentId?: string;
 	  }
 	| { type: "visibility_info"; hiddenModels: string[]; hiddenAgents: string[] }
+	| { type: "claude_settings_info"; overrides: ClaudeSettingsOverrides }
 	| { type: "command_list"; commands: CommandInfo[] }
 	// ── Projects ───────────────────────────────────────────────────────────
 	| {

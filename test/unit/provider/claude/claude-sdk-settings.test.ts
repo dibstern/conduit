@@ -1,10 +1,8 @@
 import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { describe, expect, it } from "vitest";
-import {
-	buildClaudeFlagSettings,
-	CLAUDE_TRUST_TIERED_SETTINGS_KEYS,
-} from "../../../../src/lib/provider/claude/claude-sdk-settings.js";
+import { CLAUDE_TRUST_TIERED_SETTINGS_KEYS } from "../../../../src/lib/contracts/claude-settings.js";
+import { buildClaudeFlagSettings } from "../../../../src/lib/provider/claude/claude-sdk-settings.js";
 
 describe("buildClaudeFlagSettings", () => {
 	it("returns the default flag-layer settings without overrides", () => {
