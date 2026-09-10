@@ -74,6 +74,10 @@ export const Closed: Story = {
 
 /** Popover open, showing the instance rail and the provider's models. */
 export const Open: Story = {
+	// The dropdown is `absolute` on desktop but `max-sm:fixed`, so at mobile width it
+	// escapes #storybook-root — which is the element this suite screenshots. Without
+	// this tag the mobile baseline would capture the trigger and no menu at all.
+	tags: ["viewport-capture"],
 	beforeEach: () => {
 		seedClaude();
 		return bottomRightFrame();
