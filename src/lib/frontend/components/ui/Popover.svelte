@@ -7,6 +7,7 @@
 	import type { Snippet } from "svelte";
 	import {
 		exemptFromBackgroundInert,
+		registerOpenSurface,
 	} from "./actions/use-background-inert.svelte.js";
 	import {
 		FLOATING_POSITIONING_DEFAULTS,
@@ -74,8 +75,14 @@
 	);
 
 	function handleOpenChange(nextOpen: boolean) {
+		open = nextOpen;
 		onopenchange?.(nextOpen);
 	}
+
+	$effect(() => {
+		if (open) return registerOpenSurface(() => handleOpenChange(false));
+		return undefined;
+	});
 
 	const portalProps: PopoverPortalProps = $derived(
 		portalTo === undefined ? {} : { to: portalTo },

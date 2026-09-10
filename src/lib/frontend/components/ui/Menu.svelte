@@ -7,6 +7,7 @@
 	import type { Snippet } from "svelte";
 	import {
 		exemptFromBackgroundInert,
+		registerOpenSurface,
 	} from "./actions/use-background-inert.svelte.js";
 	import {
 		FLOATING_MENU_CONTENT_CLASSES,
@@ -81,8 +82,14 @@
 	let contentNode = $state<HTMLElement | null>(null);
 
 	function handleOpenChange(nextOpen: boolean) {
+		open = nextOpen;
 		onopenchange?.(nextOpen);
 	}
+
+	$effect(() => {
+		if (open) return registerOpenSurface(() => handleOpenChange(false));
+		return undefined;
+	});
 
 	/**
 	 * bits-ui mounts the content's focus scope twice per open, so its

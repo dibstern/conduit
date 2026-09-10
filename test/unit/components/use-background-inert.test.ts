@@ -1,6 +1,8 @@
 import { cleanup, render, waitFor } from "@testing-library/svelte";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import BackgroundInertHost from "./fixtures/BackgroundInertHost.svelte";
+import BackgroundOverlayHost from "./fixtures/BackgroundOverlayHost.svelte";
+import ModalSurfaceHost from "./fixtures/ModalSurfaceHost.svelte";
 import NestedModals from "./fixtures/NestedModals.svelte";
 
 describe("backgroundInert", () => {
@@ -58,5 +60,142 @@ describe("backgroundInert", () => {
 			expect(outerAction.hasAttribute("inert")).toBe(false);
 			expect(outerAction.hasAttribute("aria-hidden")).toBe(false);
 		});
+	});
+	it("keeps a later overlay live but inerts it when a subsequent boundary activates", async () => {
+		const view = render(BackgroundOverlayHost, { enabled: true });
+		await view.rerender({ overlay: true });
+		const branch = view.getByTestId("background-branch");
+		expect(branch.hasAttribute("inert")).toBe(false);
+		expect(branch.hasAttribute("aria-hidden")).toBe(false);
+		expect(
+			view.getByTestId("overlay").closest("[inert], [aria-hidden='true']"),
+		).toBeNull();
+
+		await view.rerender({ enabled: false });
+		await view.rerender({ enabled: true });
+		expect(branch.hasAttribute("inert")).toBe(true);
+		expect(branch.getAttribute("aria-hidden")).toBe("true");
+	});
+
+	it("inerts controls off a live overlay's path inside a background branch", async () => {
+		const view = render(BackgroundOverlayHost, { enabled: true });
+		await view.rerender({ overlay: true });
+		expect(view.getByTestId("unrelated-control").hasAttribute("inert")).toBe(
+			true,
+		);
+		expect(
+			view.getByTestId("unrelated-control").getAttribute("aria-hidden"),
+		).toBe("true");
+		for (const id of [
+			"background-branch",
+			"overlay-path",
+			"overlay",
+			"boundary",
+			"modal-control",
+		]) {
+			expect(
+				view.getByTestId(id).closest("[inert], [aria-hidden='true']"),
+			).toBeNull();
+		}
+	});
+
+	it("keeps sibling modal content live when an overlay opens inline", async () => {
+		const view = render(BackgroundOverlayHost, { enabled: true, inline: true });
+		await view.rerender({ overlay: true });
+		for (const id of ["boundary", "modal-control", "overlay"]) {
+			expect(
+				view.getByTestId(id).closest("[inert], [aria-hidden='true']"),
+			).toBeNull();
+		}
+		expect(view.getByTestId("background-branch").hasAttribute("inert")).toBe(
+			true,
+		);
+	});
+
+	it("closes an earlier Menu on modal open and keeps a later Menu inside the modal open", async () => {
+		const onopenchange = vi.fn();
+		const view = render(ModalSurfaceHost, { surfaceOpen: true, onopenchange });
+		await waitFor(() =>
+			expect(view.queryByTestId("surface-content")).not.toBeNull(),
+		);
+		await view.rerender({ modalOpen: true });
+		await waitFor(() =>
+			expect(view.getByTestId("surface-open").textContent).toBe("false"),
+		);
+		expect(view.queryByTestId("surface-content")).toBeNull();
+		expect(onopenchange).toHaveBeenCalledWith(false);
+		view.unmount();
+
+		const innerChange = vi.fn();
+		const inner = render(ModalSurfaceHost, {
+			modalOpen: true,
+			inside: true,
+			onopenchange: innerChange,
+		});
+		await inner.rerender({ surfaceOpen: true });
+		await waitFor(() =>
+			expect(inner.queryByTestId("surface-content")).not.toBeNull(),
+		);
+		expect(inner.getByTestId("surface-open").textContent).toBe("true");
+		expect(innerChange).not.toHaveBeenCalledWith(false);
+		for (const id of ["modal-action", "surface-content"]) {
+			expect(
+				inner.getByTestId(id).closest("[inert], [aria-hidden='true']"),
+			).toBeNull();
+		}
+		expect(
+			inner
+				.getByRole("dialog", { name: "Host modal" })
+				.closest("[inert], [aria-hidden='true']"),
+		).toBeNull();
+		const overlay = document.querySelector("[data-dialog-overlay]");
+		expect(overlay).not.toBeNull();
+		expect(overlay?.closest("[inert], [aria-hidden='true']")).toBeNull();
+	});
+
+	it("closes an earlier Popover on modal open and keeps a later Popover inside the modal open", async () => {
+		const onopenchange = vi.fn();
+		const view = render(ModalSurfaceHost, {
+			surfaceOpen: true,
+			popover: true,
+			onopenchange,
+		});
+		await waitFor(() =>
+			expect(view.queryByTestId("surface-content")).not.toBeNull(),
+		);
+		await view.rerender({ modalOpen: true });
+		await waitFor(() =>
+			expect(view.getByTestId("surface-open").textContent).toBe("false"),
+		);
+		expect(view.queryByTestId("surface-content")).toBeNull();
+		expect(onopenchange).toHaveBeenCalledWith(false);
+		view.unmount();
+
+		const innerChange = vi.fn();
+		const inner = render(ModalSurfaceHost, {
+			modalOpen: true,
+			inside: true,
+			popover: true,
+			onopenchange: innerChange,
+		});
+		await inner.rerender({ surfaceOpen: true });
+		await waitFor(() =>
+			expect(inner.queryByTestId("surface-content")).not.toBeNull(),
+		);
+		expect(inner.getByTestId("surface-open").textContent).toBe("true");
+		expect(innerChange).not.toHaveBeenCalledWith(false);
+		for (const id of ["modal-action", "surface-content"]) {
+			expect(
+				inner.getByTestId(id).closest("[inert], [aria-hidden='true']"),
+			).toBeNull();
+		}
+		expect(
+			inner
+				.getByRole("dialog", { name: "Host modal" })
+				.closest("[inert], [aria-hidden='true']"),
+		).toBeNull();
+		const overlay = document.querySelector("[data-dialog-overlay]");
+		expect(overlay).not.toBeNull();
+		expect(overlay?.closest("[inert], [aria-hidden='true']")).toBeNull();
 	});
 });
