@@ -26,6 +26,7 @@ const driver = new PlaywrightDriver();
 const relayControls = new WeakMap<Page, WsMockControl>();
 const rpcControls = new WeakMap<Page, RpcMockControl>();
 const composerMessages = new WeakMap<Page, string>();
+const mockClaudeSettings = new WeakMap<Page, Record<string, unknown>>();
 /** Per-page mock instance list — mutated by the Add/Update/Remove RPC handlers
  *  so the SettingsPanel editor and the composer rail see consistent state. */
 const mockInstances = new WeakMap<Page, Array<Record<string, unknown>>>();
@@ -139,12 +140,49 @@ export const conduitVisualHandlers: StepHandler[] = [
 			relayControls.set(world.page, relayControl);
 			const page = world.page;
 			mockInstances.set(page, []);
+			mockClaudeSettings.set(page, { autoCompactEnabled: true });
 			/** Instance bound by the composer's CreateSession — session-scoped
 			 *  GetAgents afterwards returns that harness's agents (mirrors the
 			 *  real server, where the created session is bound to the instance). */
 			let createdSessionInstance: string | undefined;
 			const rpcControl = await mockWsRpc(world.page, {
 				handlers: {
+					GetClaudeSettings: async () => ({
+						projectSlug: "myapp",
+						overrides: mockClaudeSettings.get(page) ?? {},
+					}),
+					SetClaudeSettings: async (payload) => {
+						const overrides =
+							typeof payload["overrides"] === "object" &&
+							payload["overrides"] !== null
+								? (payload["overrides"] as Record<string, unknown>)
+								: {};
+						mockClaudeSettings.set(page, overrides);
+						relayControl.sendMessage({
+							type: "claude_settings_info",
+							overrides,
+						});
+						return { projectSlug: "myapp", overrides };
+					},
+					ResolveClaudeSettings: async (payload) => ({
+						projectSlug: "myapp",
+						instanceId:
+							typeof payload["instanceId"] === "string"
+								? payload["instanceId"]
+								: "claude",
+						resolved: {
+							autoCompactEnabled: {
+								value: true,
+								source: "user",
+								path: "/profiles/work/settings.json",
+							},
+							autoCompactWindow: {
+								value: 12_000,
+								source: "managed",
+								path: "/Library/Application Support/ClaudeCode/managed-settings.json",
+							},
+						},
+					}),
 					AddInstance: async (payload) => {
 						const list = mockInstances.get(page) ?? [];
 						const name =
@@ -674,6 +712,111 @@ export const conduitVisualHandlers: StepHandler[] = [
 					`Visual match failed for ${baseline}: ${(result.diffRatio * 100).toFixed(2)}% of pixels differ. Artifacts: ${world.artifacts.join(", ")}`,
 				);
 			}
+		},
+	},
+	{
+		name: "open settings to claude tab",
+		match: /^I open settings to the Claude tab$/,
+		run: async ({ world }) => {
+			const page = world.page;
+			await page.evaluate(() =>
+				window.dispatchEvent(
+					new CustomEvent("settings:open", { detail: { tab: "claude" } }),
+				),
+			);
+			await page
+				.locator("#settings-panel")
+				.waitFor({ state: "visible", timeout: 5_000 });
+			await page.getByTestId("settings-tab-claude").click();
+			await page
+				.getByTestId("claude-setting-autoCompactEnabled")
+				.waitFor({ state: "visible", timeout: 5_000 });
+			const rpcControl = requireRpcControl(page);
+			await rpcControl.waitForRequest(
+				(request) => request.tag === "GetClaudeSettings",
+			);
+			await rpcControl.waitForRequest(
+				(request) => request.tag === "ResolveClaudeSettings",
+			);
+		},
+	},
+	{
+		name: "claude settings shown",
+		match: /^the Claude settings are shown$/,
+		run: async ({ world }) => {
+			await world.page
+				.getByText(
+					"Claude reads these when a session starts. Changes apply to new sessions — they don't change a session that's already running.",
+					{ exact: true },
+				)
+				.waitFor({ state: "visible", timeout: 5_000 });
+			await world.page
+				.getByTestId("claude-setting-autoCompactWindow")
+				.waitFor({ state: "visible", timeout: 5_000 });
+		},
+	},
+	{
+		name: "toggle claude auto compact",
+		match: /^I toggle Claude auto-compact$/,
+		run: async ({ world }) => {
+			await world.page
+				.getByTestId("claude-setting-autoCompactEnabled")
+				.getByRole("switch")
+				.click();
+			await requireRpcControl(world.page).waitForRequest(
+				(request) =>
+					request.tag === "SetClaudeSettings" &&
+					(
+						request.payload["overrides"] as Record<string, unknown> | undefined
+					)?.["autoCompactEnabled"] === false,
+			);
+		},
+	},
+	{
+		name: "auto compact provenance text",
+		match: /^the auto-compact provenance reads (.+)$/,
+		run: async ({ world, match }) => {
+			await world.page
+				.getByTestId("claude-setting-autoCompactEnabled-provenance")
+				.getByText(match[1] ?? "", { exact: true })
+				.waitFor({ state: "visible", timeout: 5_000 });
+		},
+	},
+	{
+		name: "reset claude auto compact",
+		match: /^I reset the Claude auto-compact setting$/,
+		run: async ({ world }) => {
+			await world.page
+				.getByTestId("claude-setting-autoCompactEnabled-reset")
+				.click();
+			await requireRpcControl(world.page).waitForRequest(
+				(request) =>
+					request.tag === "SetClaudeSettings" &&
+					!(
+						"autoCompactEnabled" in
+						((request.payload["overrides"] as Record<string, unknown>) ?? {})
+					),
+			);
+		},
+	},
+	{
+		name: "managed claude threshold disabled",
+		match: /^the managed auto-compact threshold is disabled$/,
+		run: async ({ world }) => {
+			await world.page
+				.getByTestId("claude-setting-autoCompactWindow-input")
+				.waitFor({ state: "visible", timeout: 5_000 });
+			if (
+				!(await world.page
+					.getByTestId("claude-setting-autoCompactWindow-input")
+					.isDisabled())
+			) {
+				throw new Error("Managed auto-compact threshold remained editable");
+			}
+			await world.page
+				.getByTestId("claude-setting-autoCompactWindow-provenance")
+				.getByText("Locked by managed policy", { exact: true })
+				.waitFor({ state: "visible", timeout: 5_000 });
 		},
 	},
 	{

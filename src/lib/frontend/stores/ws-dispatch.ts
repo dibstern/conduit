@@ -70,6 +70,7 @@ import {
 	sessionActivity,
 	setMessages,
 } from "./chat.svelte.js";
+import { handleClaudeSettingsInfo } from "./claude-settings.svelte.js";
 import { isOwnBrowserClientId } from "./client-identity.js";
 import {
 	handleAgentList,
@@ -886,6 +887,9 @@ export function handleMessage(msg: RelayMessage): void {
 			break;
 		case "visibility_info":
 			handleVisibilityInfo(msg);
+			break;
+		case "claude_settings_info":
+			handleClaudeSettingsInfo(msg);
 			break;
 		case "model_info":
 			handleModelInfo(msg);

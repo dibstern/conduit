@@ -23,4 +23,19 @@ describe("frontend WebSocket RPC client", () => {
 		expect(source).not.toContain("getRuntime");
 		expect(source).not.toContain(".runPromise(");
 	});
+
+	it("exposes Promise wrappers for the Claude settings RPCs", () => {
+		const source = readFileSync(
+			join(process.cwd(), "src/lib/frontend/transport/ws-rpc-client.ts"),
+			"utf8",
+		);
+
+		for (const rpc of [
+			"getClaudeSettingsRpc",
+			"setClaudeSettingsRpc",
+			"resolveClaudeSettingsRpc",
+		]) {
+			expect(source).toContain(`export async function ${rpc}`);
+		}
+	});
 });

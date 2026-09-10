@@ -1,12 +1,13 @@
 <!-- ─── Settings Panel ────────────────────────────────────────────────────── -->
 <!-- Modal settings panel with tabbed navigation. Uses the 68-mockup card   -->
-<!-- design. Tabs: Notifications, Appearance, Agents & Models, Instances,   -->
-<!-- Debug.                                                                 -->
+<!-- design. Tabs: Notifications, Appearance, Agents & Models, Claude,      -->
+<!-- Instances, Debug.                                                      -->
 
 <script lang="ts">
 	import { untrack } from "svelte";
 	import Icon from "../shared/Icon.svelte";
 	import ToggleSetting from "../shared/ToggleSetting.svelte";
+	import ClaudeSettingsTab from "./ClaudeSettingsTab.svelte";
 	import { createFrontendLogger } from "../../utils/logger.js";
 	import type { Base16Theme } from "../../stores/theme-compute.js";
 
@@ -43,6 +44,7 @@
 		saveNotifSettings,
 	} from "../../utils/notif-settings.js";
 	import { setPushActive } from "../../stores/ws.svelte.js";
+	import { clearClaudeSettingEdits } from "../../stores/claude-settings.svelte.js";
 	import { getCurrentSlug } from "../../stores/router.svelte.js";
 	import {
 		addInstanceRpc,
@@ -122,6 +124,7 @@
 
 	$effect(() => {
 		if (visible) {
+			clearClaudeSettingEdits();
 			activeTab = initialTab;
 			expandedInstanceId = null;
 			renamingInstanceId = null;
@@ -147,6 +150,8 @@
 						}),
 					);
 			}
+		} else {
+			clearClaudeSettingEdits();
 		}
 	});
 
@@ -533,17 +538,18 @@
 			</div>
 
 			<!-- Tabs -->
-			<div class="flex border-b border-border px-5 gap-1 font-brand">
+			<div class="flex border-b border-border px-5 gap-1 font-brand overflow-x-auto">
 				{#each [
 					{ id: "notifications", label: "Alerts" },
 					{ id: "appearance", label: "Theme" },
 					{ id: "visibility", label: "Agents & Models" },
+					{ id: "claude", label: "Claude" },
 					{ id: "instances", label: "Instances" },
 					{ id: "debug", label: "Debug" },
 				] as tab}
 					<button
 						data-testid="settings-tab-{tab.id}"
-						class="px-3 py-2 text-sm font-medium border-b-2 -mb-px transition-colors cursor-pointer border-none bg-transparent {activeTab === tab.id ? 'border-brand-a text-text' : 'border-transparent text-text-muted hover:text-text'}"
+						class="px-2 py-2 text-sm font-medium whitespace-nowrap border-b-2 -mb-px transition-colors cursor-pointer border-none bg-transparent {activeTab === tab.id ? 'border-brand-a text-text' : 'border-transparent text-text-muted hover:text-text'}"
 						style="border-bottom: 2px solid {activeTab === tab.id ? 'var(--color-brand-a)' : 'transparent'};"
 						onclick={() => (activeTab = tab.id)}
 					>
@@ -689,6 +695,10 @@
 							</div>
 						{/if}
 					</div>
+
+				<!-- ═══ Claude ═══ -->
+				{:else if activeTab === "claude"}
+					<ClaudeSettingsTab />
 
 				<!-- ═══ Instances ═══ -->
 				{:else if activeTab === "instances"}
