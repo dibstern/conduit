@@ -171,6 +171,7 @@ export const conduitVisualHandlers: StepHandler[] = [
 								? payload["instanceId"]
 								: "claude",
 						resolved: {
+							alwaysThinkingEnabled: {},
 							autoCompactEnabled: {
 								value: true,
 								source: "user",
@@ -180,6 +181,12 @@ export const conduitVisualHandlers: StepHandler[] = [
 								value: 12_000,
 								source: "managed",
 								path: "/Library/Application Support/ClaudeCode/managed-settings.json",
+							},
+							cleanupPeriodDays: {},
+							disableAllHooks: {
+								value: false,
+								source: "user",
+								path: "/profiles/work/settings.json",
 							},
 						},
 					}),
@@ -817,6 +824,41 @@ export const conduitVisualHandlers: StepHandler[] = [
 				.getByTestId("claude-setting-autoCompactWindow-provenance")
 				.getByText("Locked by managed policy", { exact: true })
 				.waitFor({ state: "visible", timeout: 5_000 });
+		},
+	},
+	{
+		name: "turn off claude hooks and status line",
+		match: /^I turn off Claude hooks and status line$/,
+		run: async ({ world }) => {
+			await world.page
+				.getByTestId("claude-setting-disableAllHooks")
+				.getByRole("switch")
+				.click();
+		},
+	},
+	{
+		name: "disable all hooks stored as true",
+		match: /^disableAllHooks is stored as true$/,
+		run: async ({ world }) => {
+			await requireRpcControl(world.page).waitForRequest(
+				(request) =>
+					request.tag === "SetClaudeSettings" &&
+					(
+						request.payload["overrides"] as Record<string, unknown> | undefined
+					)?.["disableAllHooks"] === true,
+			);
+		},
+	},
+	{
+		name: "claude hooks and status line toggle reads off",
+		match: /^the Claude hooks and status line toggle reads off$/,
+		run: async ({ world }) => {
+			const toggle = world.page
+				.getByTestId("claude-setting-disableAllHooks")
+				.getByRole("switch");
+			if ((await toggle.getAttribute("aria-checked")) !== "false") {
+				throw new Error("Hooks and status line toggle did not read as off");
+			}
 		},
 	},
 	{

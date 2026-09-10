@@ -145,8 +145,10 @@ const isDisplayableSource = (
 ): source is DisplayableSource =>
 	source !== undefined && Object.hasOwn(SOURCE_LABELS, source);
 
-const formatValue = (value: JsonValue): string =>
-	typeof value === "string" ? value : JSON.stringify(value);
+const formatValue = (value: JsonValue): string => {
+	if (typeof value === "boolean") return value ? "on" : "off";
+	return typeof value === "string" ? value : JSON.stringify(value);
+};
 
 export function getClaudeSettingValue(
 	key: ClaudeSettingKey,
@@ -165,6 +167,7 @@ export function getClaudeSettingValue(
 export function describeClaudeSettingProvenance(
 	key: ClaudeSettingKey,
 	edited: boolean,
+	options?: { invertBoolean?: boolean },
 ): ClaudeSettingProvenance {
 	const resolved = claudeSettingsState.resolved[key];
 	const resettable = hasOverride(key);
@@ -217,7 +220,11 @@ export function describeClaudeSettingProvenance(
 	if (resettable) {
 		if (resolved?.value !== undefined && isDisplayableSource(resolved.source)) {
 			const sourceLabel = SOURCE_LABELS[resolved.source];
-			const afterSource = ` had ${formatValue(resolved.value)}`;
+			const displayValue =
+				options?.invertBoolean === true && typeof resolved.value === "boolean"
+					? !resolved.value
+					: resolved.value;
+			const afterSource = ` had ${formatValue(displayValue)}`;
 			return {
 				kind: "set-here",
 				beforeSource: "Set here · ",

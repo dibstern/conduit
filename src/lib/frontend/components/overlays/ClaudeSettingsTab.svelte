@@ -12,7 +12,6 @@
 		setClaudeSettingEdited,
 		setClaudeSettingsOverridesOptimistically,
 		type ClaudeSettingKey,
-		type ClaudeSettingProvenance,
 	} from "../../stores/claude-settings.svelte.js";
 	import { getAvailableInstances } from "../../stores/discovery.svelte.js";
 	import { getCachedInstanceById } from "../../stores/instance.svelte.js";
@@ -26,6 +25,7 @@
 	} from "../../transport/ws-rpc-client.js";
 	import { createFrontendLogger } from "../../utils/logger.js";
 	import ToggleSetting from "../shared/ToggleSetting.svelte";
+	import ClaudeSettingRow from "./ClaudeSettingRow.svelte";
 
 	const log = createFrontendLogger("claude-settings");
 
@@ -34,6 +34,13 @@
 	);
 	const autoCompactWindow = $derived(
 		getClaudeSettingValue("autoCompactWindow"),
+	);
+	const alwaysThinkingEnabled = $derived(
+		getClaudeSettingValue("alwaysThinkingEnabled"),
+	);
+	const disableAllHooks = $derived(getClaudeSettingValue("disableAllHooks"));
+	const cleanupPeriodDays = $derived(
+		getClaudeSettingValue("cleanupPeriodDays"),
 	);
 	const autoCompactEnabledProvenance = $derived(
 		describeClaudeSettingProvenance(
@@ -45,6 +52,25 @@
 		describeClaudeSettingProvenance(
 			"autoCompactWindow",
 			claudeSettingsState.editedKeys.includes("autoCompactWindow"),
+		),
+	);
+	const alwaysThinkingEnabledProvenance = $derived(
+		describeClaudeSettingProvenance(
+			"alwaysThinkingEnabled",
+			claudeSettingsState.editedKeys.includes("alwaysThinkingEnabled"),
+		),
+	);
+	const disableAllHooksProvenance = $derived(
+		describeClaudeSettingProvenance(
+			"disableAllHooks",
+			claudeSettingsState.editedKeys.includes("disableAllHooks"),
+			{ invertBoolean: true },
+		),
+	);
+	const cleanupPeriodDaysProvenance = $derived(
+		describeClaudeSettingProvenance(
+			"cleanupPeriodDays",
+			claudeSettingsState.editedKeys.includes("cleanupPeriodDays"),
 		),
 	);
 
@@ -148,29 +174,107 @@
 			void setOverride("autoCompactWindow", value);
 		}
 	}
+
+	function updateCleanupPeriodDays(event: Event): void {
+		const input = event.currentTarget;
+		if (!(input instanceof HTMLInputElement) || input.value === "") return;
+		const value = input.valueAsNumber;
+		if (Number.isFinite(value)) {
+			void setOverride("cleanupPeriodDays", value);
+		}
+	}
 </script>
 
-{#snippet provenance(
-	key: ClaudeSettingKey,
-	description: ClaudeSettingProvenance,
-)}
-	<div
-		class="flex items-center justify-between gap-3 text-xs text-text-dimmer"
-		data-testid="claude-setting-{key}-provenance"
-	>
-		<span>
-			{description.beforeSource ?? ""}{#if description.sourceLabel}<span title={description.sourcePath}>{description.sourceLabel}</span>{/if}{description.afterSource ?? (description.sourceLabel ? "" : description.text)}
-		</span>
-		{#if description.canReset}
-			<button
-				type="button"
-				class="shrink-0 border-none bg-transparent text-xs text-text-muted hover:text-text cursor-pointer font-brand"
-				data-testid="claude-setting-{key}-reset"
-				onclick={() => void resetOverride(key)}
+{#snippet autoCompactEnabledControl(label: string, description: string)}
+	<ToggleSetting
+		{label}
+		{description}
+		checked={autoCompactEnabled === true}
+		disabled={autoCompactEnabledProvenance.locked}
+		dimmed={autoCompactEnabledProvenance.locked}
+		onchange={() =>
+			void setOverride("autoCompactEnabled", autoCompactEnabled !== true)}
+		class="border-none bg-transparent p-0 gap-4 font-brand"
+	/>
+{/snippet}
+
+{#snippet autoCompactWindowControl(label: string, description: string)}
+	<div class="flex items-center gap-4">
+		<div class="flex-1 min-w-0">
+			<label
+				for="claude-auto-compact-window"
+				class="text-sm text-text font-medium"
 			>
-				Reset
-			</button>
-		{/if}
+				{label}
+			</label>
+			<div class="text-xs text-text-muted mt-0.5">{description}</div>
+		</div>
+		<input
+			id="claude-auto-compact-window"
+			type="number"
+			value={typeof autoCompactWindow === "number" ? autoCompactWindow : ""}
+			disabled={autoCompactEnabled === false ||
+				autoCompactWindowProvenance.locked}
+			class="w-24 rounded border border-border bg-bg px-2 py-1.5 text-sm text-text font-brand disabled:cursor-not-allowed disabled:opacity-40"
+			data-testid="claude-setting-autoCompactWindow-input"
+			onchange={updateAutoCompactWindow}
+		/>
+	</div>
+{/snippet}
+
+{#snippet alwaysThinkingEnabledControl(label: string, description: string)}
+	<ToggleSetting
+		{label}
+		{description}
+		checked={alwaysThinkingEnabled !== false}
+		disabled={alwaysThinkingEnabledProvenance.locked}
+		dimmed={alwaysThinkingEnabledProvenance.locked}
+		onchange={() =>
+			void setOverride(
+				"alwaysThinkingEnabled",
+				alwaysThinkingEnabled === false,
+			)}
+		class="border-none bg-transparent p-0 gap-4 font-brand"
+	/>
+{/snippet}
+
+{#snippet disableAllHooksControl(label: string, description: string)}
+	<ToggleSetting
+		{label}
+		{description}
+		checked={disableAllHooks !== true}
+		disabled={disableAllHooksProvenance.locked}
+		dimmed={disableAllHooksProvenance.locked}
+		onchange={() =>
+			void setOverride("disableAllHooks", disableAllHooks !== true)}
+		class="border-none bg-transparent p-0 gap-4 font-brand"
+	/>
+{/snippet}
+
+{#snippet cleanupPeriodDaysControl(label: string, description: string)}
+	<div class="flex items-center gap-4">
+		<div class="flex-1 min-w-0">
+			<label
+				for="claude-cleanup-period-days"
+				class="text-sm text-text font-medium"
+			>
+				{label}
+			</label>
+			<div class="text-xs text-text-muted mt-0.5">{description}</div>
+		</div>
+		<div class="flex items-center gap-2">
+			<input
+				id="claude-cleanup-period-days"
+				type="number"
+				min="1"
+				value={typeof cleanupPeriodDays === "number" ? cleanupPeriodDays : 30}
+				disabled={cleanupPeriodDaysProvenance.locked}
+				class="w-24 rounded border border-border bg-bg px-2 py-1.5 text-sm text-text font-brand disabled:cursor-not-allowed disabled:opacity-40"
+				data-testid="claude-setting-cleanupPeriodDays-input"
+				onchange={updateCleanupPeriodDays}
+			/>
+			<span class="text-sm text-text-muted">days</span>
+		</div>
 	</div>
 {/snippet}
 
@@ -180,55 +284,50 @@
 		they don't change a session that's already running.
 	</p>
 
-	<div
-		class="bg-bg-surface border border-border rounded-panel px-5 py-4 gap-4 font-brand flex flex-col"
-		data-testid="claude-setting-autoCompactEnabled"
-	>
-		<ToggleSetting
-			label="Auto-compact"
-			description="Compacts the conversation automatically when the context window fills up."
-			checked={autoCompactEnabled === true}
-			disabled={autoCompactEnabledProvenance.locked}
-			dimmed={autoCompactEnabledProvenance.locked}
-			onchange={() =>
-				void setOverride("autoCompactEnabled", autoCompactEnabled !== true)}
-			class="border-none bg-transparent p-0 gap-4 font-brand"
-		/>
-		{@render provenance(
-			"autoCompactEnabled",
-			autoCompactEnabledProvenance,
-		)}
-	</div>
+	<ClaudeSettingRow
+		key="autoCompactEnabled"
+		label="Auto-compact"
+		description="Compacts the conversation automatically when the context window fills up."
+		provenance={autoCompactEnabledProvenance}
+		onreset={() => resetOverride("autoCompactEnabled")}
+		control={autoCompactEnabledControl}
+	/>
 
-	<div
-		class="bg-bg-surface border border-border rounded-panel px-5 py-4 gap-4 font-brand flex flex-col"
-		data-testid="claude-setting-autoCompactWindow"
-	>
-		<div class="flex items-center gap-4">
-			<div class="flex-1 min-w-0">
-				<label
-					for="claude-auto-compact-window"
-					class="text-sm text-text font-medium"
-				>
-					Auto-compact threshold
-				</label>
-				<div class="text-xs text-text-muted mt-0.5">
-					How much of the context window to leave before compacting.
-				</div>
-			</div>
-			<input
-				id="claude-auto-compact-window"
-				type="number"
-				value={typeof autoCompactWindow === "number" ? autoCompactWindow : ""}
-				disabled={autoCompactEnabled === false ||
-					autoCompactWindowProvenance.locked}
-				class="w-24 rounded border border-border bg-bg px-2 py-1.5 text-sm text-text font-brand disabled:cursor-not-allowed disabled:opacity-40"
-				data-testid="claude-setting-autoCompactWindow-input"
-				onchange={updateAutoCompactWindow}
-			/>
-		</div>
-		{@render provenance("autoCompactWindow", autoCompactWindowProvenance)}
-	</div>
+	<ClaudeSettingRow
+		key="autoCompactWindow"
+		label="Auto-compact threshold"
+		description="How much of the context window to leave before compacting."
+		provenance={autoCompactWindowProvenance}
+		onreset={() => resetOverride("autoCompactWindow")}
+		control={autoCompactWindowControl}
+	/>
+
+	<ClaudeSettingRow
+		key="alwaysThinkingEnabled"
+		label="Extended thinking"
+		description="Claude thinks before answering on models that support it. Turning this off disables thinking entirely."
+		provenance={alwaysThinkingEnabledProvenance}
+		onreset={() => resetOverride("alwaysThinkingEnabled")}
+		control={alwaysThinkingEnabledControl}
+	/>
+
+	<ClaudeSettingRow
+		key="disableAllHooks"
+		label="Hooks and status line"
+		description="Run your configured hooks and status line. Turning this off disables every hook, including any you rely on to block unsafe commands."
+		provenance={disableAllHooksProvenance}
+		onreset={() => resetOverride("disableAllHooks")}
+		control={disableAllHooksControl}
+	/>
+
+	<ClaudeSettingRow
+		key="cleanupPeriodDays"
+		label="Keep transcripts for"
+		description="How long Claude keeps chat transcripts on disk before deleting them."
+		provenance={cleanupPeriodDaysProvenance}
+		onreset={() => resetOverride("cleanupPeriodDays")}
+		control={cleanupPeriodDaysControl}
+	/>
 
 	<p class="px-1 text-xs text-text-dimmer">
 		Permission rules aren't editable here. Conduit runs its own approval prompts,

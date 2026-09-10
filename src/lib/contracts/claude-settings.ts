@@ -30,6 +30,9 @@ export const CLAUDE_TRUST_TIERED_SETTINGS_KEYS: readonly string[] = [
 export const CLAUDE_DISPLAYABLE_SETTINGS_KEYS = [
 	"autoCompactEnabled",
 	"autoCompactWindow",
+	"alwaysThinkingEnabled",
+	"disableAllHooks",
+	"cleanupPeriodDays",
 ] as const;
 
 export type JsonValue =

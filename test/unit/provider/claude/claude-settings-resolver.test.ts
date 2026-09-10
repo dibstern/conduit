@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Effect } from "effect";
 import { describe, expect, it, vi } from "vitest";
+import { CLAUDE_DISPLAYABLE_SETTINGS_KEYS } from "../../../../src/lib/contracts/claude-settings.js";
 import { ConfigTag } from "../../../../src/lib/domain/relay/Services/services.js";
 import { resolveClaudeSettingsForInstance } from "../../../../src/lib/handlers/claude-settings.js";
 import {
@@ -15,14 +16,18 @@ vi.mock("node:child_process", async (importOriginal) => ({
 	...(await importOriginal<typeof import("node:child_process")>()),
 }));
 
+/** Every displayable key, unset — the shape the child always emits. */
+const unsetDisplaySettings = (): Record<string, unknown> =>
+	Object.fromEntries(CLAUDE_DISPLAYABLE_SETTINGS_KEYS.map((key) => [key, {}]));
+
 const successResult = {
 	stdout: JSON.stringify({
+		...unsetDisplaySettings(),
 		autoCompactEnabled: {
 			value: false,
 			source: "user",
 			path: "/profiles/work/settings.json",
 		},
-		autoCompactWindow: {},
 	}),
 	stderr: "",
 	exitCode: 0,
@@ -65,10 +70,9 @@ describe("resolveClaudeSettingsFromDisk", () => {
 				source: "user",
 				path: join(configDir, "settings.json"),
 			});
-			expect(Object.keys(JSON.parse(stdout)).sort()).toEqual([
-				"autoCompactEnabled",
-				"autoCompactWindow",
-			]);
+			expect(Object.keys(JSON.parse(stdout)).sort()).toEqual(
+				[...CLAUDE_DISPLAYABLE_SETTINGS_KEYS].sort(),
+			);
 			expect(stdout).not.toContain("child-secret-canary");
 			expect(stdout).not.toContain('"env"');
 		} finally {

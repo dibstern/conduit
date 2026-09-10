@@ -2,6 +2,7 @@ import { type Rpc, RpcClient, type RpcGroup, RpcTest } from "@effect/rpc";
 import { describe, it } from "@effect/vitest";
 import { Effect, Schema, type Scope } from "effect";
 import { expect } from "vitest";
+import { CLAUDE_DISPLAYABLE_SETTINGS_KEYS } from "../../../src/lib/contracts/claude-settings.js";
 import {
 	AddProject,
 	AnswerQuestion,
@@ -351,12 +352,14 @@ const provideRpc = <A, E>(effect: Effect.Effect<A, E, WsRpcTestEnv>) =>
 						{ workspaceRoot: "/workspace/project" },
 						async () => ({
 							stdout: JSON.stringify({
+								...Object.fromEntries(
+									CLAUDE_DISPLAYABLE_SETTINGS_KEYS.map((key) => [key, {}]),
+								),
 								autoCompactEnabled: {
 									value: false,
 									source: "user",
 									env: { TOKEN: "rpc-secret-canary" },
 								},
-								autoCompactWindow: {},
 								env: { TOKEN: "rpc-secret-canary" },
 								sources: [
 									{
@@ -463,8 +466,10 @@ describe("browser WebSocket RPC contract", () => {
 						instanceId: "claude",
 					});
 					expect(result.resolved).toEqual({
+						...Object.fromEntries(
+							CLAUDE_DISPLAYABLE_SETTINGS_KEYS.map((key) => [key, {}]),
+						),
 						autoCompactEnabled: { value: false, source: "user" },
-						autoCompactWindow: {},
 					});
 					const json = JSON.stringify(result);
 					expect(json).not.toContain("rpc-secret-canary");

@@ -49,12 +49,15 @@ describe("Claude settings store", () => {
 			projectSlug: "project-a",
 			instanceId: "claude",
 			resolved: {
+				alwaysThinkingEnabled: {},
 				autoCompactEnabled: {
 					value: true,
 					source: "project",
 					path: "/workspace/.claude/settings.json",
 				},
 				autoCompactWindow: {},
+				cleanupPeriodDays: {},
+				disableAllHooks: {},
 			},
 		});
 		expect(claudeSettingsState.resolutionStatus).toBe("ready");
@@ -74,11 +77,14 @@ describe("Claude settings store", () => {
 });
 
 describe("Claude setting provenance", () => {
-	it("describes a Conduit override with the underlying source and path", () => {
+	it.each([
+		[true, "on"],
+		[false, "off"],
+	] as const)("formats an underlying boolean value of %s as %s", (value, formattedValue) => {
 		claudeSettingsState.overrides = { autoCompactEnabled: false };
 		claudeSettingsState.resolved = {
 			autoCompactEnabled: {
-				value: true,
+				value,
 				source: "user",
 				path: "/profiles/work/settings.json",
 			},
@@ -91,12 +97,34 @@ describe("Claude setting provenance", () => {
 			kind: "set-here",
 			beforeSource: "Set here · ",
 			sourceLabel: "your user settings",
-			afterSource: " had true",
+			afterSource: ` had ${formattedValue}`,
 			sourcePath: "/profiles/work/settings.json",
-			text: "Set here · your user settings had true",
+			text: `Set here · your user settings had ${formattedValue}`,
 			canReset: true,
 			locked: false,
 		});
+	});
+
+	it("inverts a displayed boolean without changing the stored value", () => {
+		claudeSettingsState.overrides = { disableAllHooks: false };
+		claudeSettingsState.resolved = {
+			disableAllHooks: {
+				value: true,
+				source: "user",
+			},
+		};
+		claudeSettingsState.resolutionStatus = "ready";
+
+		expect(
+			describeClaudeSettingProvenance("disableAllHooks", false, {
+				invertBoolean: true,
+			}),
+		).toMatchObject({
+			afterSource: " had off",
+			text: "Set here · your user settings had off",
+		});
+		expect(claudeSettingsState.overrides["disableAllHooks"]).toBe(false);
+		expect(claudeSettingsState.resolved.disableAllHooks?.value).toBe(true);
 	});
 
 	it("describes an override with nothing underneath", () => {
