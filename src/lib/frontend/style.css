@@ -164,6 +164,18 @@
 		-3px 0 0 var(--color-error);
 }
 
+/* Recognised `/skill` token. Shared by the composer backdrop and sent user
+   messages so both surfaces read identically. Plain inline (not inline-block)
+   so the token stays on the text baseline at its neighbours' size. */
+@utility skill-pill {
+	color: var(--color-accent);
+	background: var(--color-accent-bg);
+	border-radius: 6px;
+	padding: 2px 4px;
+	-webkit-box-decoration-break: clone;
+	box-decoration-break: clone;
+}
+
 @keyframes pixel-cascade-a {
 	0% {
 		opacity: 0.15;

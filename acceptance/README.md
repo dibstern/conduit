@@ -63,6 +63,8 @@ step screenshots one DOM region:
 - `composer` — the composer/input area (`#input-area`).
 - `model-picker` — the harness instance-rail model-picker popover
   (`#model-picker`); it must be open when the step runs.
+- `last-user-message` — the most recent sent user message card in the
+  transcript (`#messages .msg-user`, last match).
 
 Other region ids resolve to `#<region>` directly.
 

@@ -118,6 +118,7 @@ export class PlaywrightDriver {
 	async matchRegion(
 		page: Page,
 		regionId: string,
+		selector: string,
 		baseline: string,
 		threshold: number,
 		mode: VisualMode,
@@ -138,7 +139,7 @@ export class PlaywrightDriver {
 		await waitForIcons(page);
 		await freezeAnimations(page);
 
-		const locator = page.locator(`#${regionId}`);
+		const locator = page.locator(selector);
 		await locator.waitFor({ state: "visible", timeout: 10_000 });
 		const actual = await screenshotLocator(locator);
 		const projectRoot = process.cwd();

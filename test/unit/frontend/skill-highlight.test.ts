@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
 	type SkillSegment,
 	tokenizeSkills,
-} from "../../../src/lib/frontend/components/input/skill-highlight.js";
+} from "../../../src/lib/frontend/utils/skill-highlight.js";
 
 const known = new Set(["effect-ts", "code-review", "commit", "rn-eng:verify"]);
 

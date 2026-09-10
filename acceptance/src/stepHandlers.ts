@@ -26,6 +26,13 @@ const driver = new PlaywrightDriver();
 const relayControls = new WeakMap<Page, WsMockControl>();
 const rpcControls = new WeakMap<Page, RpcMockControl>();
 const composerMessages = new WeakMap<Page, string>();
+
+/** Visual regions that aren't addressed by a bare element id. Any other region
+ *  name resolves to `#<name>`. */
+const REGION_SELECTORS: Record<string, string> = {
+	composer: "#input-area",
+	"last-user-message": "#messages .msg-user >> nth=-1",
+};
 /** Per-page mock instance list — mutated by the Add/Update/Remove RPC handlers
  *  so the SettingsPanel editor and the composer rail see consistent state. */
 const mockInstances = new WeakMap<Page, Array<Record<string, unknown>>>();
@@ -651,18 +658,17 @@ export const conduitVisualHandlers: StepHandler[] = [
 		},
 	},
 	{
-		name: "visually match composer region",
+		name: "visually match region",
 		match:
 			/^the ([a-z0-9-]+) region visually matches ([a-z0-9-]+) at ([0-9]+(?:\.[0-9]+)?) percent$/,
 		run: async ({ world, match, example }) => {
-			const requestedRegion = match[1] ?? "";
-			const regionId =
-				requestedRegion === "composer" ? "input-area" : requestedRegion;
+			const regionId = match[1] ?? "";
 			const baseline = exampleValue(example, "baseline");
 			const threshold = thresholdExampleValue(example, "threshold");
 			const result = await world.driver.matchRegion(
 				world.page,
 				regionId,
+				REGION_SELECTORS[regionId] ?? `#${regionId}`,
 				baseline,
 				threshold,
 				currentVisualMode(),
