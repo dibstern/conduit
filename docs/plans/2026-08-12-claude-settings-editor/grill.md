@@ -320,3 +320,21 @@ conduit.
 
 **Closing argument approved** (user moved to `/to-spec`). ADR recorded at
 `docs/adr/0003-claude-settings-overrides-use-the-sdk-flag-layer.md`.
+
+## Amendment, 2026-09-10 — F8 superseded during implementation
+
+The record above resolves F8 as "full snapshot, excluding permissions". Implementation of
+ticket `.1` found the snapshot half of that unbuildable as specified: the SDK's
+`resolveSettings()` has no config-dir parameter and reads `CLAUDE_CONFIG_DIR` from the calling
+process, which in the daemon is a single value fixed at startup while each Claude instance may
+carry its own. In-process resolution would silently read the wrong user tier, and the flag tier
+is trusted, so the wrong values would win.
+
+The exclusion half of F8 stands unchanged and is the part that was load-bearing. The snapshot
+half was in service of "what the panel shows is what runs", which the overrides-only design
+still delivers — the subprocess resolves the lower tiers itself with the right config dir, so
+overrides-on-subprocess-resolution and overrides-on-conduit-resolution are the same object.
+Resolving for *display* remains necessary and moves to the panel path, where it is off the
+session hot path and can afford correct per-instance environment.
+
+ADR-0003 amended accordingly. Tickets `.1` and `.2` rescoped.
