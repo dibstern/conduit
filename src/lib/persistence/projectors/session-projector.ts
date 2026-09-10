@@ -115,41 +115,12 @@ export class SessionProjector implements Projector {
 		}
 
 		if (isEventType(event, "session.deleted")) {
-			// Subagent sessions reference their parent through sessions.parent_id with
-			// no ON DELETE rule, so descendants must go first — otherwise the parent
-			// DELETE trips the foreign key, the projection runner swallows the
-			// failure, and the session stays in the sidebar.
-			const descendants = db.query<{ id: string }>(
-				`WITH RECURSIVE tree(id) AS (
-					SELECT ?
-					UNION ALL
-					SELECT s.id FROM sessions s JOIN tree t ON s.parent_id = t.id
-				)
-				SELECT id FROM tree`,
-				[event.data.sessionId],
-			);
-			for (const sessionId of descendants.map((r) => r.id).reverse()) {
-				db.execute("DELETE FROM activities WHERE session_id = ?", [sessionId]);
-				db.execute("DELETE FROM pending_approvals WHERE session_id = ?", [
-					sessionId,
-				]);
-				db.execute(
-					"DELETE FROM message_parts WHERE message_id IN (SELECT id FROM messages WHERE session_id = ?)",
-					[sessionId],
-				);
-				db.execute("DELETE FROM messages WHERE session_id = ?", [sessionId]);
-				db.execute("DELETE FROM turns WHERE session_id = ?", [sessionId]);
-				db.execute("DELETE FROM session_providers WHERE session_id = ?", [
-					sessionId,
-				]);
-				db.execute("DELETE FROM tool_content WHERE session_id = ?", [
-					sessionId,
-				]);
-				db.execute("DELETE FROM provider_state WHERE session_id = ?", [
-					sessionId,
-				]);
-				db.execute("DELETE FROM sessions WHERE id = ?", [sessionId]);
-			}
+			// sessions.parent_id, turns.session_id, messages.session_id/turn_id,
+			// message_parts.message_id, and every other FK into sessions/turns carry
+			// ON DELETE CASCADE (see 0010_session_cascade_deletes.sql), so deleting
+			// the session row alone removes every dependent row, including subagent
+			// children reachable through parent_id.
+			db.execute("DELETE FROM sessions WHERE id = ?", [event.data.sessionId]);
 			return;
 		}
 

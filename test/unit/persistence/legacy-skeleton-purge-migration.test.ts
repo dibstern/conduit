@@ -17,6 +17,13 @@ import { runMigrations } from "../../../src/lib/persistence/migrations.js";
 import { schemaMigrations } from "../../../src/lib/persistence/schema.js";
 import { SqliteClient as SyncSqliteClient } from "../../../src/lib/persistence/sqlite-client.js";
 
+// Keep the purge regression fixtures on the schema that shipped with migration 10.
+const migrationsThroughPurge = Object.fromEntries(
+	Object.entries(effectMigrationEntries).filter(
+		([key]) => Number(key.slice(0, 4)) <= 10,
+	),
+);
+
 function makeFileSqlLayer(setup: (filename: string) => void) {
 	const dir = mkdtempSync(join(tmpdir(), "conduit-legacy-skeleton-purge-"));
 	const filename = join(dir, "events.db");
@@ -57,7 +64,7 @@ function seedMatchingSessions(
 function seedDatabase(filename: string, seed: (db: SyncSqliteClient) => void) {
 	const db = SyncSqliteClient.open(filename);
 	try {
-		runMigrations(db, schemaMigrations);
+		runMigrations(db, schemaMigrations.slice(0, 9));
 		seed(db);
 	} finally {
 		db.close();
@@ -67,7 +74,7 @@ function seedDatabase(filename: string, seed: (db: SyncSqliteClient) => void) {
 describe("legacy skeleton purge migration", () => {
 	it.effect("preserves a pre-cutoff OpenCode session that has messages", () =>
 		Effect.gen(function* () {
-			yield* makeEffectSqlMigrator();
+			yield* makeEffectSqlMigrator(migrationsThroughPurge);
 			const sql = yield* SqlClient.SqlClient;
 
 			const sessions =
@@ -137,7 +144,7 @@ describe("legacy skeleton purge migration", () => {
 
 	it.effect("preserves an empty post-cutoff OpenCode session", () =>
 		Effect.gen(function* () {
-			yield* makeEffectSqlMigrator();
+			yield* makeEffectSqlMigrator(migrationsThroughPurge);
 			const sql = yield* SqlClient.SqlClient;
 			const sessions =
 				yield* sql`SELECT id FROM sessions WHERE id = 'post-cutoff'`;
@@ -155,7 +162,7 @@ describe("legacy skeleton purge migration", () => {
 
 	it.effect("preserves an empty pre-cutoff non-OpenCode session", () =>
 		Effect.gen(function* () {
-			yield* makeEffectSqlMigrator();
+			yield* makeEffectSqlMigrator(migrationsThroughPurge);
 			const sql = yield* SqlClient.SqlClient;
 			const sessions =
 				yield* sql`SELECT id FROM sessions WHERE id = 'claude-session'`;
@@ -180,7 +187,7 @@ describe("legacy skeleton purge migration", () => {
 		"purges the exact legacy skeleton cohort and all associated rows",
 		() =>
 			Effect.gen(function* () {
-				yield* makeEffectSqlMigrator();
+				yield* makeEffectSqlMigrator(migrationsThroughPurge);
 				const sql = yield* SqlClient.SqlClient;
 				const tables = [
 					["sessions", "id"],
@@ -333,7 +340,7 @@ describe("legacy skeleton purge migration", () => {
 
 	it.effect("purges a forked parent and child in child-first order", () =>
 		Effect.gen(function* () {
-			yield* makeEffectSqlMigrator();
+			yield* makeEffectSqlMigrator(migrationsThroughPurge);
 			const sql = yield* SqlClient.SqlClient;
 			const remaining = yield* sql<{
 				id: string;
@@ -380,10 +387,13 @@ describe("legacy skeleton purge migration", () => {
 					`
 							import { SqliteClient } from "@effect/sql-sqlite-node";
 							import { Effect } from "effect";
-							import { makeEffectSqlMigrator } from "./src/lib/persistence/effect/migrations.ts";
+							import { makeEffectSqlMigrator, effectMigrationEntries } from "./src/lib/persistence/effect/migrations.ts";
+							const migrationsThroughPurge = Object.fromEntries(
+								Object.entries(effectMigrationEntries).filter(([key]) => Number(key.slice(0, 4)) <= 10),
+							);
 
 							await Effect.runPromise(
-								makeEffectSqlMigrator().pipe(
+								makeEffectSqlMigrator(migrationsThroughPurge).pipe(
 									Effect.provide(SqliteClient.layer({ filename: process.argv[1] })),
 								),
 							);
@@ -399,8 +409,8 @@ describe("legacy skeleton purge migration", () => {
 
 	it.effect("is idempotent", () =>
 		Effect.gen(function* () {
-			yield* makeEffectSqlMigrator();
-			expect(yield* makeEffectSqlMigrator()).toEqual([]);
+			yield* makeEffectSqlMigrator(migrationsThroughPurge);
+			expect(yield* makeEffectSqlMigrator(migrationsThroughPurge)).toEqual([]);
 			const sql = yield* SqlClient.SqlClient;
 			const remaining = yield* sql<{
 				id: string;
@@ -444,7 +454,7 @@ describe("legacy skeleton purge migration", () => {
 
 	it.effect("trips above the safety threshold without deleting sessions", () =>
 		Effect.gen(function* () {
-			yield* makeEffectSqlMigrator();
+			yield* makeEffectSqlMigrator(migrationsThroughPurge);
 			const sql = yield* SqlClient.SqlClient;
 			const rows = yield* sql<{
 				count: number;
@@ -463,7 +473,7 @@ describe("legacy skeleton purge migration", () => {
 
 	it.effect("purges exactly the safety threshold", () =>
 		Effect.gen(function* () {
-			yield* makeEffectSqlMigrator();
+			yield* makeEffectSqlMigrator(migrationsThroughPurge);
 			const sql = yield* SqlClient.SqlClient;
 			const rows = yield* sql<{
 				count: number;
@@ -482,7 +492,7 @@ describe("legacy skeleton purge migration", () => {
 
 	it.effect("records migration 10 when the circuit breaker trips", () =>
 		Effect.gen(function* () {
-			yield* makeEffectSqlMigrator();
+			yield* makeEffectSqlMigrator(migrationsThroughPurge);
 			const sql = yield* SqlClient.SqlClient;
 			const rows = yield* sql<{ migration_id: number }>`
 				SELECT migration_id FROM effect_sql_migrations ORDER BY migration_id`;
@@ -504,9 +514,9 @@ describe("legacy skeleton purge migration", () => {
 				const sql = yield* SqlClient.SqlClient;
 				yield* sql`CREATE TABLE purge_probe (id INTEGER PRIMARY KEY)`;
 			});
-			yield* makeEffectSqlMigrator();
+			yield* makeEffectSqlMigrator(migrationsThroughPurge);
 			yield* makeEffectSqlMigrator({
-				...effectMigrationEntries,
+				...migrationsThroughPurge,
 				"0011_probe": probeMigration,
 			});
 

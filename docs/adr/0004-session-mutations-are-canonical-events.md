@@ -83,6 +83,20 @@ the adapter cannot make the rule pass vacuously.
   bullet (conduit-test-48mo.6), rename and create followed
   (conduit-test-48mo.7), and the per-call-site allowlist collapsed into the
   single path rule once nothing was left on it (conduit-test-48mo.8).
+- The delete cascade belongs to the schema, not the handler. Every foreign key
+  into `sessions` and `turns` carries `ON DELETE CASCADE`, so the
+  `session.deleted` handler is one `DELETE FROM sessions`. It used to resolve
+  descendants with a recursive CTE and issue nine deletes per descendant,
+  deepest-first, because `sessions.parent_id` had no `ON DELETE` rule: get the
+  order wrong and the parent delete trips the foreign key, the projection
+  runner swallows the failure, and the session stays in the sidebar. Ordering
+  that must be correct in two projectors and an eviction path is ordering that
+  will eventually be wrong in one of them (conduit-test-48mo.5, which also
+  closed conduit-test-wxwn, where the eviction path iterated a flat session-id
+  list and never resolved descendants at all).
+- `events` deliberately has no foreign key to `sessions`, so no cascade can
+  reach it. The event log outlives the read-model rows projected from it; that
+  is what makes a rebuild possible, and it is why 0004 dropped that key.
 - `api.session.create` stays a direct call, but it lives in the seam module
   rather than at a call site. It is id-generating, and
   `sync: (command) => Effect<void>` cannot express "return the id the provider
