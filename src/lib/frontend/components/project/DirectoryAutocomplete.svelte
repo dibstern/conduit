@@ -7,19 +7,44 @@
 	import { onDestroy } from "svelte";
 	import { getCurrentSlug } from "../../stores/router.svelte.js";
 	import { listDirectoriesRpc } from "../../transport/ws-rpc-client.js";
+	import DetachedListbox from "../ui/DetachedListbox.svelte";
 	import Icon from "../ui/Icon.svelte";
 
 	// ─── Props ──────────────────────────────────────────────────────────────────
+
+	type DirectoryLoadResult = {
+		readonly path: string;
+		readonly entries: readonly string[];
+	};
+
+	/** Returns `null` synchronously when no listing can be requested at all. */
+	type DirectoryLoader = (path: string) => Promise<DirectoryLoadResult> | null;
 
 	let {
 		value = $bindable(""),
 		placeholder = "/path/to/project",
 		onsubmit,
+		loadDirectories,
 	}: {
 		value?: string;
 		placeholder?: string;
 		onsubmit?: () => void;
+		loadDirectories?: DirectoryLoader | undefined;
 	} = $props();
+
+	const defaultLoader: DirectoryLoader = (path) => {
+		const projectSlug = getCurrentSlug();
+		if (!projectSlug) return null;
+		return listDirectoriesRpc({ projectSlug, path });
+	};
+
+	// ─── Identity ───────────────────────────────────────────────────────────────
+
+	// This component owns both halves of the combobox relationship, so it derives
+	// the ids locally instead of taking a `listboxId` prop.
+	const uid = $props.id();
+	const listboxId = `${uid}-listbox`;
+	const optionId = (index: number) => `${listboxId}-option-${index}`;
 
 	// ─── State ──────────────────────────────────────────────────────────────────
 
@@ -30,6 +55,9 @@
 	let debounceTimer: ReturnType<typeof setTimeout> | undefined;
 	let inputEl: HTMLInputElement | undefined = $state(undefined);
 	let lastRequestPath = "";
+
+	const expanded = $derived(visible && entries.length > 0);
+	const activeOptionId = $derived(expanded ? optionId(activeIndex) : undefined);
 
 	// ─── Lifecycle ──────────────────────────────────────────────────────────────
 
@@ -52,8 +80,10 @@
 			loading = false;
 			return;
 		}
-		const projectSlug = getCurrentSlug();
-		if (!projectSlug) {
+		// Resolve the loader before touching `loading`/`lastRequestPath` so the
+		// no-request path stays exactly as inert as the old slug guard was.
+		const pending = (loadDirectories ?? defaultLoader)(path);
+		if (!pending) {
 			entries = [];
 			visible = false;
 			loading = false;
@@ -62,7 +92,7 @@
 		loading = true;
 		lastRequestPath = path;
 		try {
-			const response = await listDirectoriesRpc({ projectSlug, path });
+			const response = await pending;
 			if (response.path !== lastRequestPath) return;
 			entries = [...response.entries];
 			loading = false;
@@ -164,9 +194,11 @@
 
 <div class="relative">
 	<!-- Drop-up popup -->
-	{#if visible && entries.length > 0}
-		<div
-			class="dir-autocomplete-list absolute bottom-full left-0 right-0 mb-1 bg-bg-surface border border-border rounded-lg shadow-menu max-h-[200px] overflow-y-auto z-[var(--z-dropdown)] py-1"
+	{#if expanded}
+		<DetachedListbox
+			id={listboxId}
+			ariaLabel="Directory suggestions"
+			class="dir-autocomplete-list absolute bottom-full left-0 right-0 mb-1 max-h-[200px] overflow-y-auto z-[var(--z-dropdown)]!"
 		>
 			{#each entries as entry, i}
 				{@const lastSlash = entry.lastIndexOf(
@@ -182,6 +214,7 @@
 						{i === activeIndex
 						? 'dir-item-active bg-accent-bg'
 						: 'hover:bg-bg-alt'}"
+					id={optionId(i)}
 					role="option"
 					tabindex="-1"
 					aria-selected={i === activeIndex}
@@ -209,7 +242,7 @@
 					</span>
 				</div>
 			{/each}
-		</div>
+		</DetachedListbox>
 	{/if}
 
 	<!-- Input -->
@@ -219,6 +252,13 @@
 		{placeholder}
 		autocomplete="off"
 		spellcheck="false"
+		role="combobox"
+		aria-label="Project directory"
+		aria-autocomplete="list"
+		aria-haspopup="listbox"
+		aria-expanded={expanded}
+		aria-controls={expanded ? listboxId : undefined}
+		aria-activedescendant={activeOptionId}
 		class="w-full bg-input-bg border border-border rounded-md py-1.5 px-2 text-[12px] text-text font-mono outline-none focus:border-accent placeholder:text-text-dimmer"
 		bind:value
 		oninput={handleInput}

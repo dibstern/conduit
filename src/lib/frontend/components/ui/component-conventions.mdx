@@ -47,6 +47,13 @@ token-disciplined set of primitives that every feature component consumes.
   for a genuine one-off override use Tailwind's important modifier (`px-2!`), which
   raises specificity and wins regardless of order. (We deliberately avoid a
   `tailwind-merge` dependency.)
+- **Prove an override; don't assert its class.** Concatenating a conflicting
+  utility is not evidence that it won. A consumer that must differ from a base
+  property needs either an explicitly authoritative utility (`rounded-xl!`) backed
+  by a `getComputedStyle` assertion in a browser-rendered story, or a collision-free,
+  semantically justified component prop. `toHaveClass("rounded-xl")` proves only
+  that the string is in the attribute — it passes just as happily when the base
+  radius is what actually paints.
 
 ## Accessibility (baked in, not bolted on)
 
@@ -79,6 +86,29 @@ portal target resolves both stacking and inert containment without speculative
 global overlay coordination.
 
 Menu typeahead is not currently functional; tracked as `conduit-test-de3.3.11`.
+
+## Listboxes owned by an external input
+
+`DetachedListbox` is the surface for a combobox whose input lives outside the
+list — FileMenu, CommandMenu and DirectoryAutocomplete all keep DOM focus on
+their own input and move a highlight with `aria-activedescendant`.
+
+- **The input owns the relationship; the surface owns the semantics.** The
+  primitive applies `role="listbox"`, a required `id`, and `aria-label`. The
+  caller owns `role="combobox"`, `aria-expanded`, `aria-controls`,
+  `aria-activedescendant` on its input, and `role="option"` / `aria-selected` /
+  stable ids on its rows — because the caller already owns the row loop, the
+  active index, and the keys.
+- **Not focusable.** `aria-activedescendant` navigation means the input never
+  loses focus, so the listbox carries no `tabindex`: a tabbable list would be a
+  second, wrong tab stop. This is the reason the primitive omits `tabindex` from
+  its prop type rather than defaulting it.
+- **Never portaled.** These surfaces are absolutely positioned drop-ups inside
+  their consumer, and each consumer scrolls the active row with a descendant
+  query (`.file-menu-list .file-item-active`, …). Portaling would silently break
+  those selectors, so the primitive renders inline and pins `data-side="top"`.
+- **Derive ids from `$props.id()`** in the owning component, not from a shared
+  registry, so a second mounted instance cannot collide.
 
 ## Every primitive ships together
 
