@@ -7,9 +7,14 @@ import { makeClaudeProviderRuntime } from "../../../../src/lib/provider/claude/c
 import type {
 	Query,
 	SDKMessage,
+	Options as SDKOptions,
 } from "../../../../src/lib/provider/claude/types.js";
 import { getClaudeRuntimeSessionCountForTest } from "../../../helpers/claude-runtime-state.js";
-import { makeBaseSendTurnInput } from "../../../helpers/mock-sdk.js";
+import {
+	createMockQuery,
+	makeBaseSendTurnInput,
+	makeSuccessResult,
+} from "../../../helpers/mock-sdk.js";
 
 const REPO_ROOT = process.cwd();
 const CLAUDE_PROVIDER_DIR = "src/lib/provider/claude";
@@ -99,6 +104,95 @@ describe("Claude provider runtime boundary", () => {
 		const types = source(`${CLAUDE_PROVIDER_DIR}/types.ts`);
 
 		expect(types).not.toContain("streamConsumer");
+	});
+
+	it("uses only the default SDK settings without an overrides getter", async () => {
+		const capturedSettings: SDKOptions["settings"][] = [];
+		const instance = new ClaudeProviderInstance({
+			workspaceRoot: "/tmp/ws",
+			queryFactory: ({ options }: { options?: SDKOptions }) => {
+				capturedSettings.push(options?.settings);
+				return createMockQuery([makeSuccessResult()]);
+			},
+		});
+
+		await Effect.runPromise(
+			instance.sendTurnEffect(
+				makeBaseSendTurnInput({
+					sessionId: "session-default-settings",
+					model: { providerId: "claude", modelId: "sonnet" },
+				}),
+			),
+		);
+
+		expect(capturedSettings).toEqual([{ showThinkingSummaries: true }]);
+	});
+
+	it("reads and merges SDK settings overrides at each session start", async () => {
+		const capturedSettings: SDKOptions["settings"][] = [];
+		const claudeSettingsOverrides = vi
+			.fn()
+			.mockReturnValueOnce({ autoCompactEnabled: false })
+			.mockReturnValueOnce({ autoCompactEnabled: true });
+		const instance = new ClaudeProviderInstance({
+			workspaceRoot: "/tmp/ws",
+			queryFactory: ({ options }: { options?: SDKOptions }) => {
+				capturedSettings.push(options?.settings);
+				return createMockQuery([makeSuccessResult()]);
+			},
+			claudeSettingsOverrides,
+		});
+
+		await Effect.runPromise(
+			instance.sendTurnEffect(
+				makeBaseSendTurnInput({
+					sessionId: "session-overrides-one",
+					model: { providerId: "claude", modelId: "sonnet" },
+				}),
+			),
+		);
+		await Effect.runPromise(
+			instance.sendTurnEffect(
+				makeBaseSendTurnInput({
+					sessionId: "session-overrides-two",
+					model: { providerId: "claude", modelId: "sonnet" },
+				}),
+			),
+		);
+
+		expect(capturedSettings).toEqual([
+			{ showThinkingSummaries: true, autoCompactEnabled: false },
+			{ showThinkingSummaries: true, autoCompactEnabled: true },
+		]);
+		expect(claudeSettingsOverrides).toHaveBeenCalledTimes(2);
+	});
+
+	it("removes trust-tiered keys from SDK settings overrides", async () => {
+		const capturedSettings: SDKOptions["settings"][] = [];
+		const instance = new ClaudeProviderInstance({
+			workspaceRoot: "/tmp/ws",
+			queryFactory: ({ options }: { options?: SDKOptions }) => {
+				capturedSettings.push(options?.settings);
+				return createMockQuery([makeSuccessResult()]);
+			},
+			claudeSettingsOverrides: () => ({
+				permissions: { allow: ["Bash(*)"] },
+				autoMode: true,
+			}),
+		});
+
+		await Effect.runPromise(
+			instance.sendTurnEffect(
+				makeBaseSendTurnInput({
+					sessionId: "session-trust-settings",
+					model: { providerId: "claude", modelId: "sonnet" },
+				}),
+			),
+		);
+
+		expect(capturedSettings[0]).not.toHaveProperty("permissions");
+		expect(capturedSettings[0]).not.toHaveProperty("autoMode");
+		expect(capturedSettings).toEqual([{ showThinkingSummaries: true }]);
 	});
 
 	it("closes active SDK sessions from the scoped runtime finalizer", async () => {

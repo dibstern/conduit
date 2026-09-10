@@ -21,7 +21,10 @@ import { randomUUID } from "node:crypto";
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { query as sdkQuery } from "@anthropic-ai/claude-agent-sdk";
+import {
+	type Settings,
+	query as sdkQuery,
+} from "@anthropic-ai/claude-agent-sdk";
 import {
 	Context,
 	Data,
@@ -77,6 +80,7 @@ import {
 import { isInterruptedResult } from "./claude-event-translator.js";
 import { ClaudePermissionBridge } from "./claude-permission-bridge.js";
 import { makeClaudeSdkEnv } from "./claude-sdk-env.js";
+import { buildClaudeFlagSettings } from "./claude-sdk-settings.js";
 import type {
 	ClaudeSubagentSdk,
 	MaterializeClaudeSubagentsInput,
@@ -378,6 +382,7 @@ function enumerateSkills(
 
 export interface ClaudeProviderInstanceDeps {
 	readonly workspaceRoot: string;
+	readonly claudeSettingsOverrides?: () => Settings | undefined;
 	/** Injectable factory for the SDK's query() function. Defaults to the real SDK. */
 	readonly queryFactory?: (params: {
 		prompt: AsyncIterable<SDKUserMessage>;
@@ -521,6 +526,7 @@ export class ClaudeProviderRuntime {
 	private readonly queryFactory: NonNullable<
 		ClaudeProviderInstanceDeps["queryFactory"]
 	>;
+	private readonly claudeSettingsOverrides: ClaudeProviderInstanceDeps["claudeSettingsOverrides"];
 
 	constructor(
 		private readonly deps: ClaudeProviderInstanceDeps,
@@ -535,6 +541,7 @@ export class ClaudeProviderRuntime {
 		this.queryFactory =
 			deps.queryFactory ??
 			(sdkQuery as NonNullable<ClaudeProviderInstanceDeps["queryFactory"]>);
+		this.claudeSettingsOverrides = deps.claudeSettingsOverrides;
 	}
 
 	private mapProviderFailure<A>(
@@ -911,7 +918,9 @@ export class ClaudeProviderRuntime {
 							),
 							includePartialMessages: true,
 							forwardSubagentText: true,
-							settings: { showThinkingSummaries: true },
+							settings: buildClaudeFlagSettings(
+								this.claudeSettingsOverrides?.(),
+							),
 							settingSources: ["user", "project", "local"],
 							canUseTool: bridge.createCanUseTool(ctx),
 							model: apiModelId,
