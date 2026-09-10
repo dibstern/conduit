@@ -33,6 +33,7 @@ import {
 	getContextWindow,
 	getDefaultContextWindow,
 	getDefaultModel,
+	getDefaultPermissionMode,
 	getDefaultVariant,
 	getModel,
 	getPermissionMode,
@@ -711,6 +712,10 @@ export const handleClientConnectedEffect = (
 						provider: defaultModel.providerID,
 					});
 				}
+				wsHandler.sendTo(clientId, {
+					type: "default_permission_mode_info",
+					mode: yield* getDefaultPermissionMode(),
+				});
 
 				if (!defaultModel && openCodeProviderResult._tag === "Right") {
 					for (const providerId of openCodeProviderResult.right.connected) {

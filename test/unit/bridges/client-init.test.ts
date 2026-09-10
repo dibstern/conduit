@@ -6,6 +6,10 @@ import {
 	handleClientConnectedEffect,
 } from "../../../src/lib/bridges/client-init.js";
 import {
+	setDefaultPermissionMode,
+	setPermissionMode,
+} from "../../../src/lib/domain/relay/Services/session-overrides-state.js";
+import {
 	type ReadQueryEffect,
 	ReadQueryEffectTag,
 } from "../../../src/lib/persistence/effect/read-query-effect.js";
@@ -135,7 +139,7 @@ function makeClientInitEffectLayer(
 }
 
 describe("handleClientConnectedEffect — empty projected history", () => {
-	it("falls back to OpenCode history for a requested session", async () => {
+	it("sends distinct session and default permission modes", async () => {
 		const loadPreRenderedHistory = vi.fn(() =>
 			Effect.succeed({
 				messages: [
@@ -150,9 +154,11 @@ describe("handleClientConnectedEffect — empty projected history", () => {
 		);
 
 		await Effect.runPromise(
-			handleClientConnectedEffect("client-1", "requested-session").pipe(
-				Effect.provide(layer),
-			),
+			Effect.gen(function* () {
+				yield* setDefaultPermissionMode("auto");
+				yield* setPermissionMode("requested-session", "full");
+				yield* handleClientConnectedEffect("client-1", "requested-session");
+			}).pipe(Effect.provide(layer)),
 		);
 
 		expect(loadPreRenderedHistory).toHaveBeenCalledWith("requested-session");
@@ -168,7 +174,11 @@ describe("handleClientConnectedEffect — empty projected history", () => {
 		});
 		expect(wsHandler.sendTo).toHaveBeenCalledWith("client-1", {
 			type: "permission_mode_info",
-			mode: "ask",
+			mode: "full",
+		});
+		expect(wsHandler.sendTo).toHaveBeenCalledWith("client-1", {
+			type: "default_permission_mode_info",
+			mode: "auto",
 		});
 	});
 

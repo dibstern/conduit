@@ -836,6 +836,11 @@ const DefaultModelInfoSchema = Schema.Struct({
 	provider: Schema.String,
 });
 
+const DefaultPermissionModeInfoSchema = Schema.Struct({
+	type: Schema.Literal("default_permission_mode_info"),
+	mode: SessionPermissionModeSchema,
+});
+
 const ModelListSchema = Schema.Struct({
 	type: Schema.Literal("model_list"),
 	instanceId: Schema.optional(Schema.String),
@@ -1161,6 +1166,7 @@ export const RelayMessageSchema = Schema.Union(
 	// Model / Agent / Commands
 	ModelInfoMsgSchema,
 	DefaultModelInfoSchema,
+	DefaultPermissionModeInfoSchema,
 	ModelListSchema,
 	AgentListSchema,
 	VisibilityInfoSchema,
@@ -1248,6 +1254,7 @@ export const RELAY_MESSAGE_TYPES = [
 	"history_page",
 	"model_info",
 	"default_model_info",
+	"default_permission_mode_info",
 	"model_list",
 	"agent_list",
 	"visibility_info",
@@ -1460,6 +1467,7 @@ export type RelayMessage =
 	// ── Model / Agent / Commands ───────────────────────────────────────────
 	| { type: "model_info"; model: string; provider: string }
 	| { type: "default_model_info"; model: string; provider: string }
+	| { type: "default_permission_mode_info"; mode: SessionPermissionMode }
 	| { type: "model_list"; instanceId?: string; providers: ProviderInfo[] }
 	| {
 			type: "agent_list";

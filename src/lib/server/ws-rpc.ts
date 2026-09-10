@@ -44,6 +44,7 @@ import {
 	handleAskUserResponse,
 	handlePermissionResponse,
 	handleQuestionReject,
+	setDefaultPermissionModeForRelay,
 } from "../handlers/permissions.js";
 import {
 	cancelSessionById,
@@ -138,6 +139,8 @@ export {
 	SetClaudeSettings,
 	SetDefaultModel,
 	type SetDefaultModelResponse,
+	SetDefaultPermissionMode,
+	type SetDefaultPermissionModeResponse,
 	SetLogLevel,
 	SetProjectInstance,
 	StartInstance,
@@ -646,6 +649,23 @@ export const WsRpcServerLayer = WsRpcGroup.toLayer({
 				Effect.fail(
 					new WsRpcError({
 						message: `SetDefaultModel failed: ${String(error)}`,
+					}),
+				),
+			),
+		),
+	SetDefaultPermissionMode: (request) =>
+		setDefaultPermissionModeForRelay({
+			clientId: request.originId ?? "rpc",
+			mode: request.mode,
+		}).pipe(
+			Effect.map((mode) => ({
+				projectSlug: request.projectSlug,
+				mode,
+			})),
+			Effect.catchAll((error) =>
+				Effect.fail(
+					new WsRpcError({
+						message: `SetDefaultPermissionMode failed: ${String(error)}`,
 					}),
 				),
 			),

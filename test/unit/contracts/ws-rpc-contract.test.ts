@@ -46,6 +46,7 @@ import {
 	SendMessage,
 	SetClaudeSettings,
 	SetDefaultModel,
+	SetDefaultPermissionMode,
 	SetLogLevel,
 	SetProjectInstance,
 	StartInstance,
@@ -330,6 +331,11 @@ const provideRpc = <A, E>(effect: Effect.Effect<A, E, WsRpcTestEnv>) =>
 						provider: request.provider,
 						variant: "",
 						variants: [],
+					}),
+				SetDefaultPermissionMode: (request) =>
+					Effect.succeed({
+						projectSlug: request.projectSlug,
+						mode: request.mode,
 					}),
 				SetHiddenEntries: (request) =>
 					Effect.succeed({
@@ -672,6 +678,7 @@ describe("browser WebSocket RPC contract", () => {
 		expect(WsRpcGroup.requests.has("SwitchContextWindow")).toBe(true);
 		expect(WsRpcGroup.requests.has("SwitchModel")).toBe(true);
 		expect(WsRpcGroup.requests.has("SetDefaultModel")).toBe(true);
+		expect(WsRpcGroup.requests.has("SetDefaultPermissionMode")).toBe(true);
 		expect(WsRpcGroup.requests.has("GetClaudeSettings")).toBe(true);
 		expect(WsRpcGroup.requests.has("SetClaudeSettings")).toBe(true);
 		expect(WsRpcGroup.requests.has("ResolveClaudeSettings")).toBe(true);
@@ -935,6 +942,15 @@ describe("browser WebSocket RPC contract", () => {
 					provider: "opencode",
 					variant: "",
 					variants: [],
+				});
+
+				const defaultPermissionMode = yield* client.SetDefaultPermissionMode({
+					projectSlug: "demo",
+					mode: "auto",
+				});
+				expect(defaultPermissionMode).toEqual({
+					projectSlug: "demo",
+					mode: "auto",
 				});
 
 				const reload = yield* client.ReloadProviderSession({
@@ -1304,6 +1320,12 @@ describe("browser WebSocket RPC contract", () => {
 				provider: "opencode",
 			})._tag,
 		).toBe("SetDefaultModel");
+		expect(
+			new SetDefaultPermissionMode({
+				projectSlug: "demo",
+				mode: "auto",
+			})._tag,
+		).toBe("SetDefaultPermissionMode");
 		expect(new GetClaudeSettings({ projectSlug: "demo" })._tag).toBe(
 			"GetClaudeSettings",
 		);
@@ -1417,6 +1439,16 @@ describe("browser WebSocket RPC contract", () => {
 			mode: "yolo",
 		});
 		expect(decoded._tag).toBe("Left");
+	});
+
+	it("includes SetDefaultPermissionMode in the request union", () => {
+		const decoded = Schema.decodeUnknownEither(WsRpcRequest)({
+			_tag: "SetDefaultPermissionMode",
+			projectSlug: "demo",
+			mode: "acceptEdits",
+		});
+
+		expect(decoded._tag).toBe("Right");
 	});
 
 	it("requires commandId on mutating provider command RPCs", () => {

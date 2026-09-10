@@ -197,6 +197,55 @@ describe("relay-settings", () => {
 		});
 	});
 
+	describe("defaultPermissionMode persistence", () => {
+		it("drops a hand-edited mode the rest of the system cannot interpret", () => {
+			writeFileSync(
+				join(tempDir, "settings.jsonc"),
+				JSON.stringify({
+					defaultModel: "openai/gpt-4o",
+					defaultPermissionMode: "Full access",
+				}),
+			);
+
+			const settings = loadRelaySettings(tempDir);
+
+			expect(settings.defaultPermissionMode).toBeUndefined();
+			expect(settings.defaultModel).toBe("openai/gpt-4o");
+		});
+
+		it("keeps every mode the approvals picker offers", () => {
+			for (const mode of ["ask", "acceptEdits", "auto", "full"] as const) {
+				writeFileSync(
+					join(tempDir, "settings.jsonc"),
+					JSON.stringify({ defaultPermissionMode: mode }),
+				);
+				expect(loadRelaySettings(tempDir).defaultPermissionMode).toBe(mode);
+			}
+		});
+
+		it("round-trips without replacing other persisted fields", () => {
+			saveRelaySettings(
+				{
+					defaultModel: "claude/claude-sonnet-4-7",
+					defaultVariants: { "claude/claude-sonnet-4-7": "high" },
+					hiddenModels: ["openai/gpt-4o"],
+					claudeSettings: { autoCompactEnabled: false },
+				},
+				tempDir,
+			);
+
+			saveRelaySettings({ defaultPermissionMode: "auto" }, tempDir);
+
+			expect(loadRelaySettings(tempDir)).toEqual({
+				defaultModel: "claude/claude-sonnet-4-7",
+				defaultPermissionMode: "auto",
+				defaultVariants: { "claude/claude-sonnet-4-7": "high" },
+				hiddenModels: ["openai/gpt-4o"],
+				claudeSettings: { autoCompactEnabled: false },
+			});
+		});
+	});
+
 	describe("round-trip: save → load → parse", () => {
 		it("persisted default model survives restart", () => {
 			saveRelaySettings({ defaultModel: "anthropic/claude-opus-4-6" }, tempDir);

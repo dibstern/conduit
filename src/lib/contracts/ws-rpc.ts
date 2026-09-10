@@ -223,6 +223,11 @@ export const SwitchModelResponseSchema = Schema.Struct({
 
 export const SetDefaultModelResponseSchema = SwitchModelResponseSchema;
 
+export const SetDefaultPermissionModeResponseSchema = Schema.Struct({
+	projectSlug: Schema.String,
+	mode: SessionPermissionModeSchema,
+});
+
 export const SetHiddenEntriesResponseSchema = Schema.Struct({
 	projectSlug: Schema.String,
 	hiddenModels: Schema.Array(Schema.String),
@@ -435,6 +440,8 @@ export type SwitchContextWindowResponse =
 	typeof SwitchContextWindowResponseSchema.Type;
 export type SwitchModelResponse = typeof SwitchModelResponseSchema.Type;
 export type SetDefaultModelResponse = typeof SetDefaultModelResponseSchema.Type;
+export type SetDefaultPermissionModeResponse =
+	typeof SetDefaultPermissionModeResponseSchema.Type;
 export type SetHiddenEntriesResponse =
 	typeof SetHiddenEntriesResponseSchema.Type;
 export type ClaudeSettingsResponse = typeof ClaudeSettingsResponseSchema.Type;
@@ -761,6 +768,19 @@ export class SetDefaultModel extends Schema.TaggedRequest<SetDefaultModel>()(
 			projectSlug: NonEmptyString,
 			model: NonEmptyString,
 			provider: NonEmptyString,
+			originId: Schema.optional(NonEmptyString),
+		},
+	},
+) {}
+
+export class SetDefaultPermissionMode extends Schema.TaggedRequest<SetDefaultPermissionMode>()(
+	"SetDefaultPermissionMode",
+	{
+		failure: WsRpcError,
+		success: SetDefaultPermissionModeResponseSchema,
+		payload: {
+			projectSlug: NonEmptyString,
+			mode: SessionPermissionModeSchema,
 			originId: Schema.optional(NonEmptyString),
 		},
 	},
@@ -1136,6 +1156,7 @@ export const WsRpcRequest = Schema.Union(
 	SwitchContextWindow,
 	SwitchModel,
 	SetDefaultModel,
+	SetDefaultPermissionMode,
 	SetHiddenEntries,
 	GetClaudeSettings,
 	SetClaudeSettings,
@@ -1193,6 +1214,7 @@ export const WsRpcGroup = RpcGroup.make(
 	Rpc.fromTaggedRequest(SwitchContextWindow),
 	Rpc.fromTaggedRequest(SwitchModel),
 	Rpc.fromTaggedRequest(SetDefaultModel),
+	Rpc.fromTaggedRequest(SetDefaultPermissionMode),
 	Rpc.fromTaggedRequest(SetHiddenEntries),
 	Rpc.fromTaggedRequest(GetClaudeSettings),
 	Rpc.fromTaggedRequest(SetClaudeSettings),

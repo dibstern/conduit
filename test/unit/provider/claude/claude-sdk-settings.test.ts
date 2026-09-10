@@ -1,8 +1,14 @@
-import { readFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { createRequire } from "node:module";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { CLAUDE_TRUST_TIERED_SETTINGS_KEYS } from "../../../../src/lib/contracts/claude-settings.js";
 import { buildClaudeFlagSettings } from "../../../../src/lib/provider/claude/claude-sdk-settings.js";
+import {
+	loadRelaySettings,
+	saveRelaySettings,
+} from "../../../../src/lib/relay/relay-settings.js";
 
 describe("buildClaudeFlagSettings", () => {
 	it("returns the default flag-layer settings without overrides", () => {
@@ -38,6 +44,40 @@ describe("buildClaudeFlagSettings", () => {
 			expect(settings).not.toHaveProperty(key);
 		}
 		expect(settings).toEqual({ showThinkingSummaries: true });
+	});
+
+	it("keeps the Conduit permission default outside Claude flag settings", () => {
+		const configDir = mkdtempSync(
+			join(tmpdir(), "conduit-claude-permission-boundary-"),
+		);
+		try {
+			saveRelaySettings(
+				{
+					defaultPermissionMode: "auto",
+					claudeSettings: { autoCompactEnabled: false },
+				},
+				configDir,
+			);
+
+			const relaySettings = loadRelaySettings(configDir);
+			expect(relaySettings.claudeSettings).not.toHaveProperty(
+				"defaultPermissionMode",
+			);
+			expect(
+				buildClaudeFlagSettings(relaySettings.claudeSettings),
+			).not.toHaveProperty("defaultPermissionMode");
+
+			const contractSource = readFileSync(
+				new URL(
+					"../../../../src/lib/contracts/claude-settings.ts",
+					import.meta.url,
+				),
+				"utf8",
+			);
+			expect(contractSource).not.toContain("defaultPermissionMode");
+		} finally {
+			rmSync(configDir, { recursive: true, force: true });
+		}
 	});
 });
 
