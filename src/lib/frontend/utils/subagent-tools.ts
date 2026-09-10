@@ -5,8 +5,9 @@
 // emits `done` (backgrounded or long-running subagents). Several call sites must
 // treat them specially — skip turn finalization (tool-registry), preserve a
 // cached terminal status across navigate-in/out reloads (ws-dispatch), keep live
-// status when loaded from history (history-logic), never group them (group-tools),
-// and render the subagent card (ToolItem). Keep the name check in ONE place so a
+// status when loaded from history (history-logic), keep their full card inside the
+// activity log rather than a compact row (turns), and render the subagent card
+// (ToolItem). Keep the name check in ONE place so a
 // new call site can't forget a variant.
 
 /** Canonical ("Task"/"Agent") plus the legacy lowercase ("task") names the

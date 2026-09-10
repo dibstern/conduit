@@ -1,0 +1,90 @@
+<!-- ─── Activity Strip ──────────────────────────────────────────────────────── -->
+<!-- One segment per step: colour is the kind of work, width is how long it took. -->
+<!-- Hovering reports the step up so the header can caption it; clicking jumps to  -->
+<!-- it in the expanded log. Supplementary — every segment is also a row below.    -->
+<!--                                                                              -->
+<!-- Touch only gets the tap: it opens the log at the step you hit, which is the   -->
+<!-- useful half of the interaction anyway. Captioning is deliberately gated to a  -->
+<!-- mouse — a tap fires `pointerenter` with no matching leave, so an ungated      -->
+<!-- caption would replace the summary sentence and stay there.                    -->
+<script lang="ts">
+	import {
+		type ActivityPart,
+		fmtDuration,
+		partLabel,
+		stepDurations,
+		stepWeights,
+		type Turn,
+	} from "../../utils/turns.js";
+	import { segmentClass } from "./activity-style.js";
+
+	let {
+		turn,
+		now,
+		active = null,
+		height = "h-1.5",
+		onhover,
+		onjump,
+	}: {
+		turn: Turn;
+		now: number;
+		/** Segment to highlight — owned by the parent so the caption can't drift. */
+		active?: number | null;
+		height?: string;
+		onhover?: (i: number | null) => void;
+		onjump?: (i: number) => void;
+	} = $props();
+
+	const weights = $derived(stepWeights(turn, now));
+	const durations = $derived(stepDurations(turn, now));
+
+	/** Roving tabindex: the strip is one tab stop, arrows scrub within it. */
+	let cursor = $state(0);
+
+	function title(part: ActivityPart, i: number): string {
+		const d = durations?.[i];
+		return d === undefined ? partLabel(part) : `${partLabel(part)} · ${fmtDuration(d)}`;
+	}
+
+	function onKeyDown(e: KeyboardEvent & { currentTarget: HTMLElement }, i: number) {
+		if (e.key !== "ArrowRight" && e.key !== "ArrowLeft") return;
+		// Don't let the transcript scroll while scrubbing.
+		e.preventDefault();
+		e.stopPropagation();
+		const n = turn.activity.length;
+		cursor = (i + (e.key === "ArrowRight" ? 1 : -1) + n) % n;
+		onhover?.(cursor);
+		const next = e.currentTarget.parentElement?.children[cursor];
+		if (next instanceof HTMLElement) next.focus();
+	}
+</script>
+
+<div
+	class="flex {height} gap-px rounded-full overflow-hidden bg-bg-surface"
+	role="group"
+	aria-label="Activity timeline — {turn.activity.length} steps"
+	onpointerleave={() => onhover?.(null)}
+	onfocusout={() => onhover?.(null)}
+>
+	{#each turn.activity as part, i (part.uuid)}
+		<button
+			type="button"
+			class="h-full min-w-0.5 cursor-pointer touch-manipulation transition-opacity outline-none focus-visible:ring-1 focus-visible:ring-brand-b {segmentClass(part)} {active === i ? 'opacity-100' : 'opacity-60 hover:opacity-100'}"
+			style="flex-grow: {weights[i] ?? 1}"
+			title={title(part, i)}
+			aria-label={title(part, i)}
+			tabindex={i === Math.min(cursor, turn.activity.length - 1) ? 0 : -1}
+			onkeydown={(e) => onKeyDown(e, i)}
+			onfocus={() => {
+				// Keep the tab stop where focus actually is, so leaving and returning
+				// to the strip resumes from the last segment rather than the first.
+				cursor = i;
+				onhover?.(i);
+			}}
+			onpointerenter={(e) => {
+				if (e.pointerType === "mouse") onhover?.(i);
+			}}
+			onclick={() => onjump?.(i)}
+		></button>
+	{/each}
+</div>
