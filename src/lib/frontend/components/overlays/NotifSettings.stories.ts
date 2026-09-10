@@ -1,4 +1,5 @@
 import type { Meta, StoryObj } from "@storybook/svelte-vite";
+import { expect, within } from "storybook/test";
 import NotifSettings from "./NotifSettings.svelte";
 
 const meta = {
@@ -8,6 +9,11 @@ const meta = {
 	parameters: {
 		// Dropdown uses fixed positioning; needs own iframe viewport.
 		docs: { story: { inline: false, height: "300px" } },
+	},
+	// The component reads localStorage at init, so seeded state must be written
+	// before render and cleared between stories or it leaks across the file.
+	beforeEach: () => {
+		localStorage.removeItem("notif-settings");
 	},
 } satisfies Meta<typeof NotifSettings>;
 
@@ -28,12 +34,18 @@ export const AllEnabled: Story = {
 		visible: true,
 		onClose: () => console.log("NotifSettings closed"),
 	},
-	play: () => {
-		// Set all toggles on via localStorage before render
+	beforeEach: () => {
 		localStorage.setItem(
 			"notif-settings",
 			JSON.stringify({ push: true, browser: true, sound: true }),
 		);
+	},
+	play: async ({ canvasElement }) => {
+		const switches = await within(canvasElement).findAllByRole("switch");
+		expect(switches).toHaveLength(3);
+		for (const toggle of switches) {
+			expect(toggle).toHaveAttribute("aria-checked", "true");
+		}
 	},
 };
 

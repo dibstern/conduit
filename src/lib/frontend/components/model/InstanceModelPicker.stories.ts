@@ -1,4 +1,5 @@
 import type { Meta, StoryObj } from "@storybook/svelte-vite";
+import { userEvent, within } from "storybook/test";
 import { discoveryState } from "../../stores/discovery.svelte.js";
 import type { ProviderInfo } from "../../types.js";
 import InstanceModelPicker from "./InstanceModelPicker.svelte";
@@ -83,9 +84,17 @@ export const Open: Story = {
 		return bottomRightFrame();
 	},
 	play: async ({ canvasElement }) => {
-		await new Promise((r) => setTimeout(r, 50));
-		const btn = canvasElement.querySelector(".model-btn") as HTMLElement | null;
-		btn?.click();
+		const canvas = within(canvasElement);
+		const trigger = await canvas.findByTestId("model-picker-trigger");
+		await userEvent.click(trigger);
+		// Assert the dropdown is actually open: the capture below is of the open
+		// picker, and a silent no-op click would bless a baseline of a closed one.
+		await canvas.findByTestId("model-picker");
+		await canvas.findByTestId("model-picker-list");
+		// userEvent.click leaves the pointer on the trigger. Its background has a
+		// 150ms transition, so a hovered trigger is a flaky thing to bake into a
+		// baseline — and the hover is incidental to what this story documents.
+		await userEvent.unhover(trigger);
 	},
 };
 
