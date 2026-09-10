@@ -12,6 +12,20 @@ const meta = {
 		// Modal uses fixed inset-0; needs own iframe viewport.
 		docs: { story: { inline: false, height: "400px" } },
 	},
+	// QrModal fetches /health when it becomes visible to discover a LAN address,
+	// and rewrites the QR code's URL if one comes back — so an unstubbed request
+	// makes the rendered QR depend on what the story server happens to answer.
+	// The component swallows the failure (`catch {}`), so this was invisible.
+	// Rejecting keeps networkHost null and the QR on window.location.href, which
+	// is what these baselines have always actually shown. See conduit-test-de3.33.
+	beforeEach: () => {
+		const realFetch = globalThis.fetch;
+		globalThis.fetch = (_input: RequestInfo | URL, _init?: RequestInit) =>
+			Promise.reject(new TypeError("Failed to fetch"));
+		return () => {
+			globalThis.fetch = realFetch;
+		};
+	},
 } satisfies Meta<typeof QrModal>;
 
 export default meta;
