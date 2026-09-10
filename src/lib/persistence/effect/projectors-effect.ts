@@ -11,6 +11,11 @@ import type {
 	StoredEvent,
 } from "../events.js";
 
+import {
+	getSessionStatements,
+	SESSION_HANDLED_TYPES,
+} from "../projectors/session-handlers.js";
+
 // ─── Error type ─────────────────────────────────────────────────────────────
 
 export class ProjectionError extends Data.TaggedError("ProjectionError")<{
@@ -48,10 +53,6 @@ function encodeJson(value: unknown): string {
 	return JSON.stringify(value);
 }
 
-function isAutoTitleRename(event: StoredEvent): boolean {
-	return event.metadata.source === "auto-title";
-}
-
 function mergeMetadata(
 	current: string | null,
 	next: Record<string, unknown> | undefined,
@@ -75,109 +76,13 @@ function mergeMetadata(
 
 export const makeSessionProjector = (): EffectProjector => ({
 	name: "session",
-	handles: [
-		"session.created",
-		"session.renamed",
-		"session.deleted",
-		"session.status",
-		"session.provider_changed",
-		"session.permission_mode_changed",
-		"turn.completed",
-		"turn.error",
-		"message.created",
-	],
+	handles: SESSION_HANDLED_TYPES,
 	project: (event: StoredEvent) =>
 		Effect.gen(function* () {
 			const sql = yield* SqlClient.SqlClient;
 
-			if (isEventType(event, "session.created")) {
-				yield* sql`
-					INSERT INTO sessions (id, provider, provider_sid, title, status, parent_id, created_at, updated_at)
-					VALUES (${event.data.sessionId}, ${event.data.provider}, ${event.data.providerSessionId ?? null}, ${event.data.title}, 'idle', ${event.data.parentId ?? null}, ${event.createdAt}, ${event.createdAt})
-					ON CONFLICT (id) DO UPDATE SET
-						provider = excluded.provider,
-						provider_sid = COALESCE(excluded.provider_sid, sessions.provider_sid),
-						title = CASE
-							WHEN sessions.title IS NULL
-								OR sessions.title = ''
-								OR sessions.title IN ('Untitled', 'Claude Session', 'Test Session')
-								OR sessions.title LIKE 'New session%'
-								OR sessions.parent_id IS NOT NULL
-								OR excluded.parent_id IS NOT NULL
-							THEN excluded.title
-							ELSE sessions.title
-						END,
-						parent_id = COALESCE(excluded.parent_id, sessions.parent_id),
-						updated_at = excluded.updated_at`;
-				return;
-			}
-
-			if (isEventType(event, "session.renamed")) {
-				if (isAutoTitleRename(event)) {
-					yield* sql`
-						UPDATE sessions SET title = ${event.data.title}, updated_at = ${event.createdAt}
-						WHERE id = ${event.data.sessionId}
-							AND provider IN ('claude', 'claude-sdk')
-							AND NOT EXISTS (
-								SELECT 1
-								FROM events prior
-								WHERE prior.session_id = ${event.data.sessionId}
-									AND prior.type = 'session.renamed'
-									AND prior.sequence < ${event.sequence}
-									AND COALESCE(json_extract(prior.metadata, '$.source'), '') <> 'auto-title'
-							)
-							AND (
-								title IS NULL
-								OR TRIM(title) = ''
-								OR LOWER(TRIM(title)) IN ('claude session', 'untitled', 'new session')
-								OR LOWER(TRIM(title)) LIKE 'new session %'
-							)`;
-					return;
-				}
-				yield* sql`UPDATE sessions SET title = ${event.data.title}, updated_at = ${event.createdAt} WHERE id = ${event.data.sessionId}`;
-				return;
-			}
-
-			if (isEventType(event, "session.deleted")) {
-				// sessions.parent_id, turns.session_id, messages.session_id/turn_id,
-				// message_parts.message_id, and every other FK into sessions/turns carry
-				// ON DELETE CASCADE (see 0010_session_cascade_deletes.sql), so deleting
-				// the session row alone removes every dependent row, including subagent
-				// children reachable through parent_id.
-				yield* sql`DELETE FROM sessions WHERE id = ${event.data.sessionId}`;
-				return;
-			}
-
-			if (isEventType(event, "session.status")) {
-				yield* sql`UPDATE sessions SET status = ${event.data.status}, updated_at = ${event.createdAt} WHERE id = ${event.data.sessionId}`;
-				return;
-			}
-
-			if (isEventType(event, "session.provider_changed")) {
-				yield* sql`UPDATE sessions SET provider = ${event.data.newProvider}, updated_at = ${event.createdAt} WHERE id = ${event.data.sessionId}`;
-				return;
-			}
-
-			if (isEventType(event, "session.permission_mode_changed")) {
-				yield* sql`UPDATE sessions SET permission_mode = ${event.data.mode}, updated_at = ${event.createdAt} WHERE id = ${event.data.sessionId}`;
-				return;
-			}
-
-			if (
-				isEventType(event, "turn.completed") ||
-				isEventType(event, "turn.error")
-			) {
-				yield* sql`UPDATE sessions SET updated_at = ${event.createdAt} WHERE id = ${event.sessionId}`;
-				return;
-			}
-
-			if (isEventType(event, "message.created")) {
-				yield* sql`
-					UPDATE sessions SET
-						last_message_at = MAX(COALESCE(last_message_at, 0), ${event.createdAt}),
-						updated_at = ${event.createdAt}
-					WHERE id = ${event.data.sessionId}`;
-				return;
+			for (const stmt of getSessionStatements(event)) {
+				yield* sql.unsafe(stmt.sql, [...stmt.params]);
 			}
 		}).pipe(
 			Effect.mapError((e) =>

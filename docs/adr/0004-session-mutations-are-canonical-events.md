@@ -94,6 +94,23 @@ the adapter cannot make the rule pass vacuously.
   will eventually be wrong in one of them (conduit-test-48mo.5, which also
   closed conduit-test-wxwn, where the eviction path iterated a flat session-id
   list and never resolved descendants at all).
+- The two session projectors are one handler table. `sessions` is written by a
+  sync projector and an Effect projector that implemented the same nine event
+  types twice as parallel if-chains, kept in step by hand and checked only at
+  runtime by `assertHandledOrIgnored` plus a snapshot. Adding `session.deleted`
+  meant editing four places, none of which the compiler checked. They now share
+  `Record<SessionHandledType, Handler>`, so a missing handler is a type error
+  and `handles` is derived from the table rather than maintained alongside it
+  (conduit-test-48mo.4).
+- The handlers return statements instead of executing them. A handler is
+  `(event) => readonly SessionStatement[]`, a pure function; each runtime then
+  runs the list its own way. Sharing the *execution* instead would have meant
+  abstracting over `void` and `Effect<void>`, which TypeScript cannot express
+  without higher-kinded types — the reason an earlier attempt at this stalled.
+  Nothing effectful crosses the interface, so the problem does not arise, and
+  the two projectors collapse to a three-line loop each. `assertHandledOrIgnored`
+  stays where it is still earning its keep: the projectors that remain
+  imperative if-chains.
 - `events` deliberately has no foreign key to `sessions`, so no cascade can
   reach it. The event log outlives the read-model rows projected from it; that
   is what makes a rebuild possible, and it is why 0004 dropped that key.
