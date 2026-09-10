@@ -45,6 +45,12 @@ Scenario: changing the default approval mode elevates new sessions
   Then a SetDefaultPermissionMode RPC is sent with mode full
   And the default approval mode row shows the elevated-permissions warning
 
+Scenario: reloading applies Claude settings to the active session
+  Given the Claude settings session is active
+  When I open settings to the Claude tab
+  And I press Reload this session
+  Then a ReloadProviderSession RPC is sent for the active session
+
 Scenario Outline: the Claude tab matches the approved layout
   When I open settings to the Claude tab
   Then the settings-panel region visually matches <baseline> at <threshold> percent

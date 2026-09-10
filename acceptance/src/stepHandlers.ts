@@ -28,6 +28,7 @@ const rpcControls = new WeakMap<Page, RpcMockControl>();
 const composerMessages = new WeakMap<Page, string>();
 const mockClaudeSettings = new WeakMap<Page, Record<string, unknown>>();
 const inheritedClaudeCommitAttribution = "Inherited commit attribution";
+const claudeSettingsSessionId = "sess-claude-settings";
 /** Per-page mock instance list — mutated by the Add/Update/Remove RPC handlers
  *  so the SettingsPanel editor and the composer rail see consistent state. */
 const mockInstances = new WeakMap<Page, Array<Record<string, unknown>>>();
@@ -168,6 +169,10 @@ export const conduitVisualHandlers: StepHandler[] = [
 					SetDefaultPermissionMode: async (payload) => ({
 						projectSlug: "myapp",
 						mode: payload["mode"],
+					}),
+					ReloadProviderSession: async (payload) => ({
+						projectSlug: "myapp",
+						sessionId: payload["sessionId"],
 					}),
 					ResolveClaudeSettings: async (payload) => ({
 						projectSlug: "myapp",
@@ -741,6 +746,16 @@ export const conduitVisualHandlers: StepHandler[] = [
 		},
 	},
 	{
+		name: "set claude settings session active",
+		match: /^the Claude settings session is active$/,
+		run: ({ world }) => {
+			requireRelayControl(world.page).sendMessage({
+				type: "session_switched",
+				id: claudeSettingsSessionId,
+			});
+		},
+	},
+	{
 		name: "set default approval mode to ask",
 		match: /^the default approval mode is Ask$/,
 		run: async ({ world }) => {
@@ -803,6 +818,24 @@ export const conduitVisualHandlers: StepHandler[] = [
 		},
 	},
 	{
+		name: "press reload this session",
+		match: /^I press Reload this session$/,
+		run: async ({ world }) => {
+			await world.page.getByTestId("claude-settings-reload-session").click();
+		},
+	},
+	{
+		name: "assert reload provider session rpc",
+		match: /^a ReloadProviderSession RPC is sent for the active session$/,
+		run: async ({ world }) => {
+			await requireRpcControl(world.page).waitForRequest(
+				(request) =>
+					request.tag === "ReloadProviderSession" &&
+					request.payload["sessionId"] === claudeSettingsSessionId,
+			);
+		},
+	},
+	{
 		name: "assert default model display name",
 		match: /^the default model row shows Claude Sonnet 4$/,
 		run: async ({ world }) => {
@@ -861,7 +894,7 @@ export const conduitVisualHandlers: StepHandler[] = [
 		run: async ({ world }) => {
 			await world.page
 				.getByText(
-					"Claude reads these when a session starts. Changes apply to new sessions — they don't change a session that's already running.",
+					"Claude reads these when a session starts. A session that's already running keeps the settings it started with until you reload it.",
 					{ exact: true },
 				)
 				.waitFor({ state: "visible", timeout: 5_000 });

@@ -25,9 +25,11 @@
 	import { getCachedInstanceById } from "../../stores/instance.svelte.js";
 	import { projectState } from "../../stores/project.svelte.js";
 	import { getCurrentSlug } from "../../stores/router.svelte.js";
+	import { sessionState } from "../../stores/session.svelte.js";
 	import { showToast } from "../../stores/ui.svelte.js";
 	import {
 		getClaudeSettingsRpc,
+		reloadProviderSessionRpc,
 		resolveClaudeSettingsRpc,
 		setClaudeSettingsRpc,
 		setDefaultPermissionModeRpc,
@@ -37,6 +39,7 @@
 	import ClaudeSettingRow from "./ClaudeSettingRow.svelte";
 
 	const log = createFrontendLogger("claude-settings");
+	let reloadInFlight = $state(false);
 
 	const autoCompactEnabled = $derived(
 		getClaudeSettingValue("autoCompactEnabled"),
@@ -279,6 +282,26 @@
 		const input = event.currentTarget;
 		if (!(input instanceof HTMLInputElement)) return;
 		void setAttributionField("pr", input.value);
+	}
+
+	async function reloadSession(): Promise<void> {
+		const sessionId = sessionState.currentId;
+		const projectSlug = getCurrentSlug();
+		if (!sessionId || !projectSlug || reloadInFlight) return;
+
+		reloadInFlight = true;
+		try {
+			await reloadProviderSessionRpc({
+				projectSlug,
+				sessionId,
+				commandId: crypto.randomUUID(),
+			});
+			showToast("Session reloaded");
+		} catch {
+			showToast("Failed to reload the session", { variant: "warn" });
+		} finally {
+			reloadInFlight = false;
+		}
 	}
 </script>
 
@@ -532,8 +555,7 @@
 		</div>
 		<div class="space-y-4">
 			<p class="px-1 text-xs text-text-dimmer">
-				Claude reads these when a session starts. Changes apply to new sessions —
-				they don't change a session that's already running.
+				Claude reads these when a session starts. A session that's already running keeps the settings it started with until you reload it.
 			</p>
 
 			<ClaudeSettingRow
@@ -589,6 +611,21 @@
 				onreset={() => resetOverride("attribution")}
 				control={attributionControl}
 			/>
+
+			<div class="flex items-center gap-4 px-1">
+				<p class="flex-1 text-xs text-text-dimmer">
+					Restarts Claude on the current settings. Your conversation is kept.
+				</p>
+				<button
+					type="button"
+					data-testid="claude-settings-reload-session"
+					disabled={!sessionState.currentId || reloadInFlight}
+					class="shrink-0 px-3 py-1 text-xs rounded border border-border text-text-muted hover:text-text cursor-pointer bg-transparent disabled:opacity-50 disabled:cursor-not-allowed font-brand"
+					onclick={reloadSession}
+				>
+					Reload this session
+				</button>
+			</div>
 		</div>
 	</div>
 </div>
