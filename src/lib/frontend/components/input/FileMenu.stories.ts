@@ -1,4 +1,6 @@
 import type { Meta, StoryObj } from "@storybook/svelte-vite";
+import { expect } from "storybook/test";
+import { menuOpensUpwardFrame } from "../../stories/frames";
 import FileMenu from "./FileMenu.svelte";
 
 const sampleEntries = [
@@ -29,6 +31,10 @@ const meta = {
 	args: {
 		listboxId: "file-menu-listbox",
 	},
+	// This menu opens upward (`absolute bottom-full`), so without a positioned
+	// ancestor it renders above the viewport and the capture is a blank page.
+	// See conduit-test-7jv.
+	beforeEach: () => menuOpensUpwardFrame(),
 } satisfies Meta<typeof FileMenu>;
 
 export default meta;
@@ -64,6 +70,16 @@ export const NoResults: Story = {
 		onSelect: noopSelect,
 		onClose: noopClose,
 		loading: false,
+	},
+	// This baseline is a BLANK image, and that is the assertion: `isVisible` is
+	// `visible && entries.length > 0`, so with no matches the menu renders
+	// nothing at all. A blank PNG compares equal to any other blank PNG, so the
+	// pixels alone would still pass if the component started rendering the wrong
+	// thing off-screen — this play() is what makes the emptiness meaningful.
+	// (The component does contain "no results" markup, but it is unreachable in
+	// every state; see conduit-test-7jv.)
+	play: ({ canvasElement }) => {
+		expect(canvasElement.querySelector('[role="listbox"]')).toBeNull();
 	},
 };
 
