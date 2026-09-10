@@ -27,6 +27,7 @@ const relayControls = new WeakMap<Page, WsMockControl>();
 const rpcControls = new WeakMap<Page, RpcMockControl>();
 const composerMessages = new WeakMap<Page, string>();
 const mockClaudeSettings = new WeakMap<Page, Record<string, unknown>>();
+const inheritedClaudeCommitAttribution = "Inherited commit attribution";
 /** Per-page mock instance list — mutated by the Add/Update/Remove RPC handlers
  *  so the SettingsPanel editor and the composer rail see consistent state. */
 const mockInstances = new WeakMap<Page, Array<Record<string, unknown>>>();
@@ -172,6 +173,11 @@ export const conduitVisualHandlers: StepHandler[] = [
 								: "claude",
 						resolved: {
 							alwaysThinkingEnabled: {},
+							attribution: {
+								value: { commit: inheritedClaudeCommitAttribution },
+								source: "user",
+								path: "/profiles/work/settings.json",
+							},
 							autoCompactEnabled: {
 								value: true,
 								source: "user",
@@ -722,6 +728,15 @@ export const conduitVisualHandlers: StepHandler[] = [
 		},
 	},
 	{
+		name: "scroll claude settings to the attribution row",
+		match: /^I scroll the Claude settings to the Attribution row$/,
+		run: async ({ world }) => {
+			await world.page
+				.getByTestId("claude-setting-attribution")
+				.scrollIntoViewIfNeeded();
+		},
+	},
+	{
 		name: "open settings to claude tab",
 		match: /^I open settings to the Claude tab$/,
 		run: async ({ world }) => {
@@ -859,6 +874,43 @@ export const conduitVisualHandlers: StepHandler[] = [
 			if ((await toggle.getAttribute("aria-checked")) !== "false") {
 				throw new Error("Hooks and status line toggle did not read as off");
 			}
+		},
+	},
+	{
+		name: "turn off claude attribution session link",
+		match: /^I turn off the Claude attribution session link$/,
+		run: async ({ world }) => {
+			await world.page
+				.getByTestId("claude-setting-attribution")
+				.getByRole("switch")
+				.click();
+		},
+	},
+	{
+		name: "attribution override preserves inherited commit text",
+		match:
+			/^the attribution override keeps the inherited commit text with the session link off$/,
+		run: async ({ world }) => {
+			await requireRpcControl(world.page).waitForRequest((request) => {
+				if (request.tag !== "SetClaudeSettings") return false;
+				const overrides = request.payload["overrides"];
+				if (typeof overrides !== "object" || overrides === null) return false;
+				const attribution = (overrides as Record<string, unknown>)[
+					"attribution"
+				];
+				if (
+					typeof attribution !== "object" ||
+					attribution === null ||
+					Array.isArray(attribution)
+				) {
+					return false;
+				}
+				const fields = attribution as Record<string, unknown>;
+				return (
+					fields["commit"] === inheritedClaudeCommitAttribution &&
+					fields["sessionUrl"] === false
+				);
+			});
 		},
 	},
 	{

@@ -224,6 +224,17 @@ export function describeClaudeSettingProvenance(
 				options?.invertBoolean === true && typeof resolved.value === "boolean"
 					? !resolved.value
 					: resolved.value;
+			if (typeof displayValue === "object" && displayValue !== null) {
+				return {
+					kind: "set-here",
+					beforeSource: "Set here · overrides ",
+					sourceLabel,
+					...(resolved.path !== undefined ? { sourcePath: resolved.path } : {}),
+					text: `Set here · overrides ${sourceLabel}`,
+					canReset: true,
+					locked: false,
+				};
+			}
 			const afterSource = ` had ${formatValue(displayValue)}`;
 			return {
 				kind: "set-here",

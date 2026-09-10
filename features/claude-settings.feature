@@ -27,6 +27,11 @@ Scenario: turning hooks off stores the inverted setting truthfully
   Then disableAllHooks is stored as true
   And the Claude hooks and status line toggle reads off
 
+Scenario: changing the session link preserves inherited attribution
+  When I open settings to the Claude tab
+  And I turn off the Claude attribution session link
+  Then the attribution override keeps the inherited commit text with the session link off
+
 Scenario Outline: the Claude tab matches the approved layout
   When I open settings to the Claude tab
   Then the settings-panel region visually matches <baseline> at <threshold> percent
@@ -34,3 +39,12 @@ Scenario Outline: the Claude tab matches the approved layout
 Examples:
   | baseline           | threshold |
   | claude-settings-dark | 98        |
+
+Scenario Outline: the Claude tab attribution controls match the approved layout
+  When I open settings to the Claude tab
+  And I scroll the Claude settings to the Attribution row
+  Then the settings-panel region visually matches <baseline> at <threshold> percent
+
+Examples:
+  | baseline                         | threshold |
+  | claude-settings-attribution-dark | 98        |

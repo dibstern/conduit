@@ -1,5 +1,8 @@
 <script lang="ts">
-	import type { ClaudeSettingsOverrides } from "../../../contracts/claude-settings.js";
+	import type {
+		ClaudeSettingsOverrides,
+		JsonValue,
+	} from "../../../contracts/claude-settings.js";
 	import {
 		applyClaudeSettingsResponse,
 		applyResolvedClaudeSettingsResponse,
@@ -42,6 +45,23 @@
 	const cleanupPeriodDays = $derived(
 		getClaudeSettingValue("cleanupPeriodDays"),
 	);
+	const attribution = $derived(getClaudeSettingValue("attribution"));
+	const attributionCommit = $derived(
+		isAttributionObject(attribution) && typeof attribution.commit === "string"
+			? attribution.commit
+			: "",
+	);
+	const attributionPr = $derived(
+		isAttributionObject(attribution) && typeof attribution.pr === "string"
+			? attribution.pr
+			: "",
+	);
+	const attributionSessionUrl = $derived(
+		isAttributionObject(attribution) &&
+			typeof attribution.sessionUrl === "boolean"
+			? attribution.sessionUrl
+			: undefined,
+	);
 	const autoCompactEnabledProvenance = $derived(
 		describeClaudeSettingProvenance(
 			"autoCompactEnabled",
@@ -71,6 +91,12 @@
 		describeClaudeSettingProvenance(
 			"cleanupPeriodDays",
 			claudeSettingsState.editedKeys.includes("cleanupPeriodDays"),
+		),
+	);
+	const attributionProvenance = $derived(
+		describeClaudeSettingProvenance(
+			"attribution",
+			claudeSettingsState.editedKeys.includes("attribution"),
 		),
 	);
 
@@ -161,6 +187,33 @@
 			true,
 		);
 
+	function isAttributionObject(
+		value: JsonValue | undefined,
+	): value is { readonly [key: string]: JsonValue } {
+		return typeof value === "object" && value !== null && !Array.isArray(value);
+	}
+
+	function getEffectiveAttribution(): { [key: string]: JsonValue } {
+		const value = Object.hasOwn(claudeSettingsState.overrides, "attribution")
+			? claudeSettingsState.overrides.attribution
+			: claudeSettingsState.resolved.attribution?.value;
+		return isAttributionObject(value) ? { ...value } : {};
+	}
+
+	function setAttributionField(
+		field: "commit" | "pr" | "sessionUrl",
+		value: string | boolean,
+	): Promise<void> {
+		return persistOverrides(
+			"attribution",
+			{
+				...claudeSettingsState.overrides,
+				attribution: { ...getEffectiveAttribution(), [field]: value },
+			},
+			true,
+		);
+	}
+
 	const resetOverride = (key: ClaudeSettingKey) => {
 		const { [key]: _removed, ...overrides } = claudeSettingsState.overrides;
 		return persistOverrides(key, overrides, false);
@@ -182,6 +235,18 @@
 		if (Number.isFinite(value)) {
 			void setOverride("cleanupPeriodDays", value);
 		}
+	}
+
+	function updateCommitAttribution(event: Event): void {
+		const input = event.currentTarget;
+		if (!(input instanceof HTMLInputElement)) return;
+		void setAttributionField("commit", input.value);
+	}
+
+	function updatePrAttribution(event: Event): void {
+		const input = event.currentTarget;
+		if (!(input instanceof HTMLInputElement)) return;
+		void setAttributionField("pr", input.value);
 	}
 </script>
 
@@ -278,6 +343,61 @@
 	</div>
 {/snippet}
 
+{#snippet attributionControl(label: string, description: string)}
+	<div class="flex flex-col gap-4">
+		<div>
+			<div class="text-sm text-text font-medium">{label}</div>
+			<div class="text-xs text-text-muted mt-0.5">{description}</div>
+		</div>
+		<div class="flex flex-col gap-1.5">
+			<label for="claude-attribution-commit" class="text-sm text-text font-medium">
+				Commit attribution
+			</label>
+			<input
+				id="claude-attribution-commit"
+				type="text"
+				value={attributionCommit}
+				placeholder="Claude Code default"
+				disabled={attributionProvenance.locked}
+				class="w-full rounded border border-border bg-bg px-2 py-1.5 text-sm text-text font-brand disabled:cursor-not-allowed disabled:opacity-40"
+				data-testid="claude-setting-attribution-commit-input"
+				onchange={updateCommitAttribution}
+			/>
+		</div>
+		<div class="flex flex-col gap-1.5">
+			<label for="claude-attribution-pr" class="text-sm text-text font-medium">
+				Pull request attribution
+			</label>
+			<input
+				id="claude-attribution-pr"
+				type="text"
+				value={attributionPr}
+				placeholder="Claude Code default"
+				disabled={attributionProvenance.locked}
+				class="w-full rounded border border-border bg-bg px-2 py-1.5 text-sm text-text font-brand disabled:cursor-not-allowed disabled:opacity-40"
+				data-testid="claude-setting-attribution-pr-input"
+				onchange={updatePrAttribution}
+			/>
+		</div>
+		<p class="text-xs text-text-dimmer">
+			Leave a box empty to add no attribution at all. Reset restores the default.
+		</p>
+		<ToggleSetting
+			label="Session link"
+			description="Append the claude.ai session link to commits and pull requests created from web sessions."
+			checked={attributionSessionUrl !== false}
+			disabled={attributionProvenance.locked}
+			dimmed={attributionProvenance.locked}
+			onchange={() =>
+				void setAttributionField(
+					"sessionUrl",
+					attributionSessionUrl === false,
+				)}
+			class="border-none bg-transparent p-0 gap-4 font-brand"
+		/>
+	</div>
+{/snippet}
+
 <div class="space-y-4 font-brand">
 	<p class="px-1 text-xs text-text-dimmer">
 		Claude reads these when a session starts. Changes apply to new sessions —
@@ -327,6 +447,15 @@
 		provenance={cleanupPeriodDaysProvenance}
 		onreset={() => resetOverride("cleanupPeriodDays")}
 		control={cleanupPeriodDaysControl}
+	/>
+
+	<ClaudeSettingRow
+		key="attribution"
+		label="Attribution"
+		description="What Claude adds to commits and pull requests it creates."
+		provenance={attributionProvenance}
+		onreset={() => resetOverride("attribution")}
+		control={attributionControl}
 	/>
 
 	<p class="px-1 text-xs text-text-dimmer">

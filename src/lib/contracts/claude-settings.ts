@@ -33,6 +33,7 @@ export const CLAUDE_DISPLAYABLE_SETTINGS_KEYS = [
 	"alwaysThinkingEnabled",
 	"disableAllHooks",
 	"cleanupPeriodDays",
+	"attribution",
 ] as const;
 
 export type JsonValue =

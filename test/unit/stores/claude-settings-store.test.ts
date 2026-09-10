@@ -50,6 +50,7 @@ describe("Claude settings store", () => {
 			instanceId: "claude",
 			resolved: {
 				alwaysThinkingEnabled: {},
+				attribution: {},
 				autoCompactEnabled: {
 					value: true,
 					source: "project",
@@ -125,6 +126,33 @@ describe("Claude setting provenance", () => {
 		});
 		expect(claudeSettingsState.overrides["disableAllHooks"]).toBe(false);
 		expect(claudeSettingsState.resolved.disableAllHooks?.value).toBe(true);
+	});
+
+	it("describes an object override without rendering its resolved value", () => {
+		claudeSettingsState.overrides = {
+			attribution: { sessionUrl: false },
+		};
+		claudeSettingsState.resolved = {
+			attribution: {
+				value: { commit: "Inherited commit attribution" },
+				source: "user",
+				path: "/profiles/work/settings.json",
+			},
+		};
+		claudeSettingsState.resolutionStatus = "ready";
+
+		const provenance = describeClaudeSettingProvenance("attribution", false);
+
+		expect(provenance).toEqual({
+			kind: "set-here",
+			beforeSource: "Set here · overrides ",
+			sourceLabel: "your user settings",
+			sourcePath: "/profiles/work/settings.json",
+			text: "Set here · overrides your user settings",
+			canReset: true,
+			locked: false,
+		});
+		expect(provenance.text).not.toMatch(/[{}[\]]/);
 	});
 
 	it("describes an override with nothing underneath", () => {
