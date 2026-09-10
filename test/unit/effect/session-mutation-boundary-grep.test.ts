@@ -5,33 +5,11 @@ import { describe, expect, it } from "vitest";
 const REPO_ROOT = process.cwd();
 const SRC_ROOT = join(REPO_ROOT, "src");
 
-interface AllowedSessionMutation {
-	readonly path: string;
-	readonly linePattern: RegExp;
-}
-
-// Stopgap: once session mutations flow through one command seam, this allowlist collapses to one sync-adapter rule.
-const allowedSessionMutations: readonly AllowedSessionMutation[] = [
-	// Create is id-generating, so it cannot be expressed as a command: the
-	// session id has to exist before session.created can reference it. The call
-	// site applies the command immediately afterwards. conduit-test-48mo.8 decides
-	// whether this entry can go away.
-	{
-		path: "src/lib/domain/relay/Services/session-manager-service.ts",
-		linePattern: /api\.session\.create\(title \? \{ title \} : undefined\),/,
-	},
-	// The OpenCode upstream adapter is where a direct mutation is supposed to
-	// live: it is reached only from applySessionCommand, after the canonical
-	// event has been appended and projected.
-	{
-		path: "src/lib/domain/relay/Services/session-command.ts",
-		linePattern: /api\.session\.delete\(command\.data\.sessionId\),/,
-	},
-	{
-		path: "src/lib/domain/relay/Services/session-command.ts",
-		linePattern: /api\.session\.update\(command\.data\.sessionId, \{/,
-	},
-];
+// The session command seam. Every direct provider session mutation lives here:
+// the upstream sync adapter, which is reached only after the canonical event
+// has been appended and projected, and the create call, which is id-generating
+// and so cannot be expressed as a command on its own.
+const SESSION_COMMAND_SEAM = "src/lib/domain/relay/Services/session-command.ts";
 
 function productionSourceFiles(dir: string): string[] {
 	const files: string[] = [];
@@ -48,36 +26,41 @@ function productionSourceFiles(dir: string): string[] {
 }
 
 describe("session mutation boundary grep", () => {
-	it("keeps direct provider session mutations on an explicit allowlist", () => {
-		const hits = productionSourceFiles(SRC_ROOT).flatMap((file) => {
-			const path = relative(REPO_ROOT, file);
-			return readFileSync(file, "utf8")
-				.split("\n")
-				.flatMap((line, index) =>
-					/api\.session\.(?:create|update|delete)\s*\(/.test(line)
-						? [{ path, line: index + 1, source: line.trim() }]
-						: [],
-				);
-		});
-
-		const missingAllowedSites = [...allowedSessionMutations];
-		const unexpected = hits.filter((hit) => {
-			const allowedIndex = missingAllowedSites.findIndex(
-				(allowed) =>
-					allowed.path === hit.path && allowed.linePattern.test(hit.source),
+	it("confines direct provider session mutations to the command seam", () => {
+		const outsideTheSeam = productionSourceFiles(SRC_ROOT)
+			.map((file) => ({ file, path: relative(REPO_ROOT, file) }))
+			.filter(({ path }) => path !== SESSION_COMMAND_SEAM)
+			.flatMap(({ file, path }) =>
+				readFileSync(file, "utf8")
+					.split("\n")
+					.flatMap((line, index) =>
+						/api\.session\.(?:create|update|delete)\s*\(/.test(line)
+							? [{ path, line: index + 1, source: line.trim() }]
+							: [],
+					),
 			);
-			if (allowedIndex === -1) return true;
 
-			missingAllowedSites.splice(allowedIndex, 1);
-			return false;
-		});
+		const parityRequirement = `A direct api.session mutation can update the provider without updating Conduit's durable state. listSessions reads the SQLite read model, so a mutation that skips the event store never reaches the UI — that is bug conduit-test-42k7, where deleted sessions reappeared in the sidebar.
 
-		const parityRequirement =
-			"A direct api.session mutation can update the provider without updating Conduit's durable state. Every session create, update, or delete must reach the SQLite read model, not just the provider. Route new mutations through the session command seam or add a reviewed temporary allowlist entry.";
+Every session create, rename, or delete goes through applySessionCommand in ${SESSION_COMMAND_SEAM}, which appends the canonical event, projects it, and only then tells the provider. Route the mutation through the seam rather than adding an exception here.
 
-		expect({ unexpected, missingAllowedSites }, parityRequirement).toEqual({
-			unexpected: [],
-			missingAllowedSites: [],
-		});
+See docs/adr/0004-session-mutations-are-canonical-events.md.`;
+
+		expect(outsideTheSeam, parityRequirement).toEqual([]);
+	});
+
+	it("keeps the seam itself honest: the mutations are still there to confine", () => {
+		// Without this, deleting the adapter would make the rule above pass
+		// vacuously — a guard that cannot fail is not a guard.
+		const seam = readFileSync(join(REPO_ROOT, SESSION_COMMAND_SEAM), "utf8");
+		const mutations = seam.match(
+			/api\.session\.(?:create|update|delete)\s*\(/g,
+		);
+
+		expect(mutations).toEqual([
+			"api.session.delete(",
+			"api.session.update(",
+			"api.session.create(",
+		]);
 	});
 });

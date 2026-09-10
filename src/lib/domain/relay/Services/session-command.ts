@@ -254,3 +254,59 @@ export const applySessionCommand = (command: SessionCommand) =>
 			attributes: { sessionId: command.data.sessionId, type: command.type },
 		}),
 	);
+
+// ─── Creation ───────────────────────────────────────────────────────────────
+
+export const normalizeSessionTitle = (title?: string): string => {
+	const trimmed = title?.trim();
+	return trimmed ? trimmed : "Untitled";
+};
+
+/**
+ * Create a session on an OpenCode server and record it locally.
+ *
+ * The one mutation that cannot be expressed as a command on its own: OpenCode
+ * chooses the session id, and a command needs that id before it can be built.
+ * So the direct `api.session.create` call lives here, next to the sync adapter,
+ * and applying `session.created` is folded into the same function rather than
+ * left to the caller.
+ *
+ * That folding is the point. A caller who creates the session upstream and
+ * forgets to record it locally is how conduit-test-42k7 happened; there is no
+ * longer a way to express it from outside this module.
+ */
+export const createOpenCodeSession = (
+	title: string | undefined,
+	provider: string,
+) =>
+	Effect.gen(function* () {
+		const api = yield* OpenCodeAPITag;
+
+		// No retry: create is not idempotent — retrying could produce duplicates.
+		const session = yield* Effect.tryPromise(() =>
+			api.session.create(title ? { title } : undefined),
+		).pipe(
+			Effect.mapError(
+				(cause) =>
+					new SessionCommandError({
+						operation: "session.created.upstream",
+						cause,
+					}),
+			),
+		);
+
+		yield* applySessionCommand({
+			type: "session.created",
+			data: {
+				sessionId: session.id,
+				title: normalizeSessionTitle(session.title),
+				provider,
+				providerSessionId: session.id,
+			},
+		});
+
+		return session;
+	}).pipe(
+		Effect.annotateLogs("operation", "createOpenCodeSession"),
+		Effect.withSpan("session.createOpenCodeSession"),
+	);

@@ -13,7 +13,6 @@ import {
 } from "../../../src/lib/domain/relay/Services/services.js";
 import { SessionCommandError } from "../../../src/lib/domain/relay/Services/session-command.js";
 import {
-	createSession,
 	deleteSession,
 	listSessions,
 	persistSessionPermissionMode,
@@ -125,17 +124,6 @@ describe("SessionManager Effect", () => {
 				Option.getOrNull,
 			);
 			expect(parentId).toBe("parent1");
-		}).pipe(Effect.provide(Layer.fresh(makeTestLayer(mockApi))));
-	});
-
-	it.effect("createSession calls API and returns session", () => {
-		const mockApi = makeMockApi();
-
-		return Effect.gen(function* () {
-			const result = yield* createSession("My session");
-
-			expect(result.id).toBe("s-new");
-			expect(mockApi.session.create).toHaveBeenCalled();
 		}).pipe(Effect.provide(Layer.fresh(makeTestLayer(mockApi))));
 	});
 

@@ -12,6 +12,7 @@ import {
 } from "../../../src/lib/domain/relay/Services/services.js";
 import {
 	applySessionCommand,
+	createOpenCodeSession,
 	SessionCommandError,
 } from "../../../src/lib/domain/relay/Services/session-command.js";
 import type { OpenCodeAPI } from "../../../src/lib/instance/opencode-api.js";
@@ -208,6 +209,24 @@ describe("applySessionCommand", () => {
 			[failingProjector],
 		);
 	});
+
+	it.effect("records the session it creates upstream", () =>
+		withHarness(({ api }) =>
+			Effect.gen(function* () {
+				const runner = yield* ProjectionRunnerEffectTag;
+				yield* runner.markRecovered();
+
+				const session = yield* createOpenCodeSession("New", "opencode");
+
+				expect(api.session.create).toHaveBeenCalledWith({ title: "New" });
+				// Creating a session upstream and recording nothing locally is the
+				// shape of conduit-test-42k7. Folding the command into the same
+				// function is what makes it unrepresentable from outside the seam.
+				expect(yield* eventTypes).toEqual(["session.created"]);
+				expect(yield* sessionIds).toEqual([session.id]);
+			}),
+		),
+	);
 
 	it.effect("still syncs upstream for a session with no local row", () =>
 		withHarness(({ api }) =>

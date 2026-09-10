@@ -61,9 +61,11 @@ and cause, and the command still succeeds — Conduit's durable state is the
 source of truth, and the provider is a cache of it.
 
 `test/unit/effect/session-mutation-boundary-grep.test.ts` enforces the second
-half of this: a direct `api.session.create|update|delete` call anywhere in
-`src/` fails the build unless it is on a reviewed allowlist. The allowlist
-shrinks to the sync adapter as each mutation migrates.
+half of this structurally: a direct `api.session.create|update|delete` call
+anywhere in `src/` outside `session-command.ts` fails the build. There is no
+allowlist to curate — the rule is the architecture, stated once. A companion
+assertion pins the calls that are supposed to be inside the seam, so deleting
+the adapter cannot make the rule pass vacuously.
 
 ## Consequences
 
@@ -77,17 +79,18 @@ shrinks to the sync adapter as each mutation migrates.
   reference it — chosen by OpenCode for OpenCode-backed sessions, locally for
   the rest — so `session.created` has no upstream sync to perform. The event is
   still appended, which is what closes the parity gap.
-- Migration is incremental. Delete moved onto the seam first as a tracer bullet
-  (conduit-test-48mo.6); rename and create followed (conduit-test-48mo.7). The
-  allowlist carries whatever has not migrated, so the gap is visible rather than
-  assumed.
-- `api.session.create` stays a direct call and stays on the allowlist. It is
-  id-generating, and `sync: (command) => Effect<void>` cannot express "return
-  the id the provider chose" — a command needs the session id before it can be
-  built. The create path therefore calls OpenCode first and applies
-  `session.created` second, which is the same asymmetry as above rather than a
-  second exception. Whether the allowlist should shrink to the sync adapter
-  alone is conduit-test-48mo.8's problem.
+- Migration was incremental. Delete moved onto the seam first as a tracer
+  bullet (conduit-test-48mo.6), rename and create followed
+  (conduit-test-48mo.7), and the per-call-site allowlist collapsed into the
+  single path rule once nothing was left on it (conduit-test-48mo.8).
+- `api.session.create` stays a direct call, but it lives in the seam module
+  rather than at a call site. It is id-generating, and
+  `sync: (command) => Effect<void>` cannot express "return the id the provider
+  chose" — a command needs the session id before it can be built. So
+  `createOpenCodeSession` calls OpenCode and applies `session.created` in the
+  same function. Folding the two together is what matters: creating a session
+  upstream and forgetting to record it locally is no longer expressible from
+  outside this module, which is precisely the bug that started this.
 - Upstream sync is skipped entirely when no OpenCode API is wired. The seam
   takes `OpenCodeAPITag` as an optional service: a Claude-only relay has no
   session registry anywhere, and requiring the tag would put OpenCode in the

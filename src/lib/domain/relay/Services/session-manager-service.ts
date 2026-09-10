@@ -65,7 +65,11 @@ import {
 	OrchestrationEngineTag,
 	StatusPollerTag,
 } from "./services.js";
-import { applySessionCommand } from "./session-command.js";
+import {
+	applySessionCommand,
+	createOpenCodeSession,
+	normalizeSessionTitle,
+} from "./session-command.js";
 import { SessionManagerStateTag } from "./session-manager-state.js";
 import {
 	OverridesStateTag,
@@ -315,8 +319,15 @@ export const initialize = (title?: string) =>
 			return sorted[0]?.id ?? "";
 		}
 
-		const session = yield* createSession(title).pipe(
+		// Same seam as every other create: this path used to call the provider
+		// and record nothing, so the session it returned was invisible to
+		// listSessions until a poller happened to pick it up.
+		const session = yield* createOpenCodeSession(title, "opencode").pipe(
 			Effect.provideService(OpenCodeAPITag, api),
+			Effect.mapError(
+				(cause) =>
+					new SessionManagerError({ operation: "getDefaultSessionId", cause }),
+			),
 		);
 		yield* Ref.update(stateRef, (s) => ({
 			...s,
@@ -329,29 +340,6 @@ export const initialize = (title?: string) =>
 /**
  * Create a new session via the API.
  */
-export const createSession = (title?: string) =>
-	Effect.gen(function* () {
-		const api = yield* OpenCodeAPITag;
-		// No retry: create is not idempotent — retrying could produce duplicates.
-		const session = yield* Effect.tryPromise(() =>
-			api.session.create(title ? { title } : undefined),
-		).pipe(
-			Effect.mapError(
-				(cause) =>
-					new SessionManagerError({ operation: "createSession", cause }),
-			),
-		);
-		return session;
-	}).pipe(
-		Effect.annotateLogs("operation", "createSession"),
-		Effect.withSpan("session.createSession"),
-	);
-
-const normalizeSessionTitle = (title?: string): string => {
-	const trimmed = title?.trim();
-	return trimmed ? trimmed : "Untitled";
-};
-
 const createLocalSessionId = (): string =>
 	`ses_${randomUUID().replaceAll("-", "")}`;
 
@@ -1177,30 +1165,19 @@ export const SessionManagerServiceLive: Layer.Layer<
 												),
 											)
 									: undefined;
-							const session = yield* createSession(title).pipe(
+							return yield* createOpenCodeSession(
+								title,
+								instanceId ?? "opencode",
+							).pipe(
 								Effect.provideService(OpenCodeAPITag, instanceApi ?? api),
-							);
-							// OpenCode picks the id, so the event can only be appended once
-							// the session exists upstream — the one asymmetry in the seam.
-							// See docs/adr/0004-session-mutations-are-canonical-events.md.
-							yield* applySessionCommand({
-								type: "session.created",
-								data: {
-									sessionId: session.id,
-									title: normalizeSessionTitle(session.title),
-									provider: instanceId ?? "opencode",
-									providerSessionId: session.id,
-								},
-							}).pipe(
 								Effect.mapError(
 									(cause) =>
 										new SessionManagerError({
-											operation: "createSession.persistSession",
+											operation: "createSession",
 											cause,
 										}),
 								),
 							);
-							return session;
 						}),
 					);
 				const createViaLocal = (instanceId?: ProviderInstanceId) =>
