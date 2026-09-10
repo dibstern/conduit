@@ -106,10 +106,10 @@
 	const slashQuery = $derived(extractSlashQuery(inputText, cursorPos));
 	const commandMenuVisible = $derived(slashQuery !== null);
 	const commandQuery = $derived(slashQuery?.query ?? "");
-	const commandListboxVisible = $derived(
-		commandMenuVisible &&
-			filterCommands(discoveryState.commands, commandQuery).length > 0,
+	const filteredCommands = $derived(
+		commandMenuVisible ? filterCommands(discoveryState.commands, commandQuery) : [],
 	);
+	const commandListboxVisible = $derived(filteredCommands.length > 0);
 
 	/** Names of known slash commands/skills, for inline recognition in the composer. */
 	const commandNameSet = $derived(new Set(discoveryState.commands.map((c) => c.name)));
@@ -141,6 +141,25 @@
 				? `${fileListboxId}-option-${fileMenuActiveIndex}`
 				: undefined,
 	);
+
+	/**
+	 * Spoken announcement for the mention menus. The composer is a plain textarea,
+	 * not a combobox (conduit-test-n9s, option 3C), so there is no `aria-expanded`
+	 * for a screen reader to read the opened state off. This live region carries
+	 * that signal instead. Empty string when nothing is open, so closing is silent.
+	 */
+	const listboxStatusText = $derived.by(() => {
+		if (commandListboxVisible) {
+			const n = filteredCommands.length;
+			return `${n} command${n === 1 ? "" : "s"} available`;
+		}
+		if (fileListboxVisible) {
+			if (filteredFiles.length === 0) return "Loading files";
+			const n = filteredFiles.length;
+			return `${n} file${n === 1 ? "" : "s"} available`;
+		}
+		return "";
+	});
 
 	// ─── Derived ───────────────────────────────────────────────────────────────
 
@@ -597,10 +616,8 @@
 				<textarea
 					id="input"
 					aria-label="Message"
-					role="combobox"
 					aria-autocomplete="list"
 					aria-haspopup="listbox"
-					aria-expanded={activeListboxId !== undefined}
 					aria-controls={activeListboxId}
 					aria-activedescendant={activeOptionId}
 					rows="1"
@@ -620,6 +637,9 @@
 					oncompositionstart={handleCompositionStart}
 					oncompositionend={handleCompositionEnd}
 				></textarea>
+				<div class="sr-only" role="status" data-testid="composer-menu-status">
+					{listboxStatusText}
+				</div>
 			</div>
 
 						<!-- Pending image previews -->

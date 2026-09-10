@@ -10,7 +10,7 @@ import { discoveryState } from "../../../src/lib/frontend/stores/discovery.svelt
 import { fileTreeState } from "../../../src/lib/frontend/stores/file-tree.svelte.js";
 import { sessionState } from "../../../src/lib/frontend/stores/session.svelte.js";
 
-const testSessionId = "input-area-combobox-test";
+const testSessionId = "input-area-mention-menus-test";
 
 async function enterText(textarea: HTMLTextAreaElement, text: string) {
 	textarea.value = text;
@@ -60,19 +60,26 @@ describe("InputArea detached listboxes", () => {
 	});
 
 	it("keeps FileMenu ownership on the textarea and commits Tab", async () => {
-		const { getByRole, getAllByRole, queryByRole } = render(InputArea);
-		const textarea = getByRole("combobox", {
+		const { getByRole, getAllByRole, getByTestId, queryByRole } =
+			render(InputArea);
+		const textarea = getByRole("textbox", {
 			name: "Message",
 		}) as HTMLTextAreaElement;
 		textarea.focus();
 		await enterText(textarea, "@");
 
 		const listbox = getByRole("listbox", { name: "File suggestions" });
-		expect(textarea.getAttribute("aria-expanded")).toBe("true");
+		const status = getByTestId("composer-menu-status");
 		expect(
 			document.getElementById(textarea.getAttribute("aria-controls") ?? ""),
 		).toBe(listbox);
 		let options = getAllByRole("option");
+		// The composer is a plain textbox (conduit-test-n9s option 3C): the opened
+		// state is spoken by this live region, not exposed as a state attribute.
+		// Tied to the real option count so a stale message fails here.
+		expect(status.textContent?.trim()).toBe(
+			`${options.length} files available`,
+		);
 		expect(
 			document.getElementById(
 				textarea.getAttribute("aria-activedescendant") ?? "",
@@ -96,27 +103,35 @@ describe("InputArea detached listboxes", () => {
 		await waitFor(() => {
 			expect(textarea.value).toBe("@src/index.ts ");
 			expect(queryByRole("listbox", { name: "File suggestions" })).toBeNull();
-			expect(textarea.getAttribute("aria-expanded")).toBe("false");
+			expect(textarea.hasAttribute("aria-controls")).toBe(false);
+			expect(status.textContent?.trim()).toBe("");
 			expect(document.activeElement).toBe(textarea);
 		});
 	});
 
 	it("keeps CommandMenu ownership on the textarea and commits Tab", async () => {
-		const { getByRole, getAllByRole, queryByRole } = render(InputArea);
-		const textarea = getByRole("combobox", {
+		const { getByRole, getAllByRole, getByTestId, queryByRole } =
+			render(InputArea);
+		const textarea = getByRole("textbox", {
 			name: "Message",
 		}) as HTMLTextAreaElement;
 		textarea.focus();
 		await enterText(textarea, "/");
 
 		const listbox = getByRole("listbox", { name: "Slash commands" });
-		expect(textarea.getAttribute("aria-expanded")).toBe("true");
+		const status = getByTestId("composer-menu-status");
 		expect(
 			document.getElementById(textarea.getAttribute("aria-controls") ?? ""),
 		).toBe(listbox);
 		expect(document.querySelectorAll("#command-menu")).toHaveLength(1);
 		expect(document.querySelectorAll("#command-menu-wrap")).toHaveLength(1);
 		let options = getAllByRole("option");
+		// The composer is a plain textbox (conduit-test-n9s option 3C): the opened
+		// state is spoken by this live region, not exposed as a state attribute.
+		// Tied to the real option count so a stale message fails here.
+		expect(status.textContent?.trim()).toBe(
+			`${options.length} commands available`,
+		);
 		expect(
 			document.getElementById(
 				textarea.getAttribute("aria-activedescendant") ?? "",
@@ -140,7 +155,8 @@ describe("InputArea detached listboxes", () => {
 		await waitFor(() => {
 			expect(textarea.value).toBe("/config ");
 			expect(queryByRole("listbox", { name: "Slash commands" })).toBeNull();
-			expect(textarea.getAttribute("aria-expanded")).toBe("false");
+			expect(textarea.hasAttribute("aria-controls")).toBe(false);
+			expect(status.textContent?.trim()).toBe("");
 			expect(document.activeElement).toBe(textarea);
 		});
 	});
@@ -148,15 +164,17 @@ describe("InputArea detached listboxes", () => {
 	it("keeps the loading FileMenu expanded without an active descendant", async () => {
 		fileTreeState.entries = [];
 		fileTreeState.loading = true;
-		const { getByRole, queryByRole } = render(InputArea);
-		const textarea = getByRole("combobox", {
+		const { getByRole, getByTestId, queryByRole } = render(InputArea);
+		const textarea = getByRole("textbox", {
 			name: "Message",
 		}) as HTMLTextAreaElement;
 		textarea.focus();
 		await enterText(textarea, "@");
 
 		const listbox = getByRole("listbox", { name: "File suggestions" });
-		expect(textarea.getAttribute("aria-expanded")).toBe("true");
+		expect(getByTestId("composer-menu-status").textContent?.trim()).toBe(
+			"Loading files",
+		);
 		expect(
 			document.getElementById(textarea.getAttribute("aria-controls") ?? ""),
 		).toBe(listbox);

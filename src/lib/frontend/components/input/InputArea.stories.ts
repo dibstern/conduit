@@ -100,28 +100,40 @@ const meta = {
 export default meta;
 type Story = StoryObj<typeof meta>;
 
-// The composer stories opt into a strict axe gate for the combobox/listbox ARIA this ticket
-// adds. Two rules are excluded, and neither exclusion is a judgement about the rule — each
-// one names a decision that is open elsewhere, so that enabling it here would silently make
-// that decision. Everything else stays strict, and both rules remain live repo-wide.
+// The composer stories opt into a strict axe gate for the mention-menu ARIA. One rule is
+// excluded, and the exclusion is not a judgement about the rule — it names a decision that
+// is open elsewhere, so enabling it here would silently make that decision. Everything else
+// stays strict, and the rule remains live repo-wide.
 //
 //   color-contrast    The composer chrome (.model-label, the variant and permission badges)
 //                     already fails at #71717a on #27272a/#333338 today, independently of
 //                     this change — verified: the diff contains zero references to those
 //                     selectors. That is conduit-test-de3.28.2's contrast floor, which is
 //                     gated on a pending colour decision. Expires when de3.28.2 lands.
-//   aria-allowed-role `role="combobox"` on a <textarea> is non-conforming per ARIA in HTML,
-//                     yet is exactly what google.com and Ariakit ship. Open fork, with the
-//                     full evidence and six options: conduit-test-n9s. Scoped to this
-//                     element only — DirectoryAutocomplete drives a real <input>, where the
-//                     role is permitted and this rule genuinely protects it.
+//   scrollable-region-focusable
+//                     Direct, measured consequence of dropping the role — not a pre-existing
+//                     failure. axe exempts a scrollable listbox from this rule only when it
+//                     is a *combobox popup*, and its `isComboboxPopup` helper decides that by
+//                     looking for a `[role~="combobox"][aria-controls~=<id>]` owner. With the
+//                     role gone the exemption goes with it, and the menus are `max-h-[300px]
+//                     overflow-y-auto`. The two available fixes are both worse: restoring the
+//                     role reinstates `aria-allowed-role`, and `tabindex="0"` on the listbox
+//                     is the second, wrong tab stop DetachedListbox forbids by construction.
+//                     SC 2.1.1 is met by the route axe cannot see — ArrowUp/ArrowDown scroll
+//                     the active row from the textarea, asserted below via scrollIntoView.
+//                     Tracked: conduit-test-n9s.
+//
+// `aria-allowed-role` was excluded here until conduit-test-n9s settled. It no longer is:
+// n9s.1 measured both candidate markups in a real browser and found `role="combobox"` on a
+// <textarea> to be the sole violation, so the composer dropped the role (option 3C) rather
+// than keep the exclusion. The rule is live below, and it is the gate that keeps it dropped.
 const STRICT_ARIA = {
 	a11y: {
 		test: "error",
 		config: {
 			rules: [
 				{ id: "color-contrast", enabled: false },
-				{ id: "aria-allowed-role", enabled: false },
+				{ id: "scrollable-region-focusable", enabled: false },
 			],
 		},
 	},
@@ -165,7 +177,8 @@ export const FileMenuInteraction: Story = {
 	parameters: STRICT_ARIA,
 	play: async ({ canvasElement }) => {
 		const canvas = within(canvasElement);
-		const textarea = canvas.getByRole("combobox", { name: "Message" });
+		const textarea = canvas.getByRole("textbox", { name: "Message" });
+		const status = canvas.getByTestId("composer-menu-status");
 		const originalScrollIntoView = Element.prototype.scrollIntoView;
 		const scrollIntoView = fn();
 		Element.prototype.scrollIntoView = scrollIntoView;
@@ -177,12 +190,18 @@ export const FileMenuInteraction: Story = {
 				name: "File suggestions",
 			});
 			await expect(textarea).toHaveFocus();
-			await expect(textarea).toHaveAttribute("aria-expanded", "true");
 			await expect(
 				document.getElementById(textarea.getAttribute("aria-controls") ?? ""),
 			).toBe(listbox);
 
 			let options = canvas.getAllByRole("option");
+			// The composer is a plain textbox (option 3C), so "a menu opened" is spoken by
+			// a live region rather than read off aria-expanded. Asserted against the real
+			// option count, so a stale or stuck message fails here rather than passing on
+			// the mere presence of text.
+			await expect(status).toHaveTextContent(
+				`${options.length} files available`,
+			);
 			await expect(options[0]).toHaveAttribute("aria-selected", "true");
 			await expect(
 				document.getElementById(
@@ -203,7 +222,8 @@ export const FileMenuInteraction: Story = {
 			await userEvent.keyboard("{Tab}");
 			await expect(textarea).toHaveValue("@src/index.ts ");
 			await expect(textarea).toHaveFocus();
-			await expect(textarea).toHaveAttribute("aria-expanded", "false");
+			await expect(textarea).not.toHaveAttribute("aria-controls");
+			await expect(status.textContent?.trim()).toBe("");
 			await expect(
 				canvas.queryByRole("listbox", { name: "File suggestions" }),
 			).toBeNull();
@@ -248,14 +268,15 @@ export const FileMenuLoading: Story = {
 	},
 	play: async ({ canvasElement }) => {
 		const canvas = within(canvasElement);
-		const textarea = canvas.getByRole("combobox", { name: "Message" });
+		const textarea = canvas.getByRole("textbox", { name: "Message" });
+		const status = canvas.getByTestId("composer-menu-status");
 		await userEvent.click(textarea);
 		await userEvent.type(textarea, "@");
 		const listbox = await canvas.findByRole("listbox", {
 			name: "File suggestions",
 		});
 		await expect(listbox).toHaveAttribute("aria-busy", "true");
-		await expect(textarea).toHaveAttribute("aria-expanded", "true");
+		await expect(status).toHaveTextContent("Loading files");
 		await expect(textarea).not.toHaveAttribute("aria-activedescendant");
 		await expect(canvas.queryByRole("option")).toBeNull();
 	},
@@ -265,7 +286,8 @@ export const CommandMenuInteraction: Story = {
 	parameters: STRICT_ARIA,
 	play: async ({ canvasElement }) => {
 		const canvas = within(canvasElement);
-		const textarea = canvas.getByRole("combobox", { name: "Message" });
+		const textarea = canvas.getByRole("textbox", { name: "Message" });
+		const status = canvas.getByTestId("composer-menu-status");
 		const originalScrollIntoView = Element.prototype.scrollIntoView;
 		const scrollIntoView = fn();
 		Element.prototype.scrollIntoView = scrollIntoView;
@@ -277,7 +299,6 @@ export const CommandMenuInteraction: Story = {
 				name: "Slash commands",
 			});
 			await expect(textarea).toHaveFocus();
-			await expect(textarea).toHaveAttribute("aria-expanded", "true");
 			await expect(
 				document.getElementById(textarea.getAttribute("aria-controls") ?? ""),
 			).toBe(listbox);
@@ -287,6 +308,9 @@ export const CommandMenuInteraction: Story = {
 			).toHaveLength(1);
 
 			let options = canvas.getAllByRole("option");
+			await expect(status).toHaveTextContent(
+				`${options.length} commands available`,
+			);
 			await expect(options[0]).toHaveAttribute("aria-selected", "true");
 			await expect(
 				document.getElementById(
@@ -307,7 +331,8 @@ export const CommandMenuInteraction: Story = {
 			await userEvent.keyboard("{Tab}");
 			await expect(textarea).toHaveValue("/config ");
 			await expect(textarea).toHaveFocus();
-			await expect(textarea).toHaveAttribute("aria-expanded", "false");
+			await expect(textarea).not.toHaveAttribute("aria-controls");
+			await expect(status.textContent?.trim()).toBe("");
 			await expect(
 				canvas.queryByRole("listbox", { name: "Slash commands" }),
 			).toBeNull();
