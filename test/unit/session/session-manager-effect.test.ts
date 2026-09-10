@@ -511,4 +511,69 @@ describe("SessionManager Effect", () => {
 			);
 		},
 	);
+
+	it.effect(
+		"deleteSession removes a SQLite-backed session from the list",
+		() => {
+			const dir = mkdtempSync(join(tmpdir(), "conduit-delete-sqlite-"));
+			const filename = join(dir, "events.db");
+			const mockApi = makeMockApi();
+
+			return Effect.gen(function* () {
+				const sql = yield* SqlClient.SqlClient;
+				const runner = yield* ProjectionRunnerEffectTag;
+				yield* runner.markRecovered();
+				yield* sql`
+					INSERT INTO sessions (
+						id, provider, title, status, created_at, updated_at
+					) VALUES ('ses-doomed', 'claude', 'Doomed', 'idle', 1000, 1000)`;
+
+				const before = yield* listSessions();
+				expect(before.map((s) => s.id)).toContain("ses-doomed");
+
+				yield* deleteSession("ses-doomed");
+
+				const after = yield* listSessions();
+				expect(after.map((s) => s.id)).not.toContain("ses-doomed");
+			}).pipe(
+				Effect.provide(makeLiveServiceLayer(mockApi, filename)),
+				Effect.ensuring(
+					Effect.sync(() => rmSync(dir, { recursive: true, force: true })),
+				),
+			);
+		},
+	);
+
+	it.effect(
+		"deleteSession removes a session that has subagent children",
+		() => {
+			const dir = mkdtempSync(join(tmpdir(), "conduit-delete-children-"));
+			const filename = join(dir, "events.db");
+			const mockApi = makeMockApi();
+
+			return Effect.gen(function* () {
+				const sql = yield* SqlClient.SqlClient;
+				const runner = yield* ProjectionRunnerEffectTag;
+				yield* runner.markRecovered();
+				yield* sql`
+				INSERT INTO sessions (
+					id, provider, title, status, parent_id, created_at, updated_at
+				) VALUES
+					('ses-parent', 'claude', 'Parent', 'idle', NULL, 1000, 1000),
+					('ses-child', 'claude', 'Subagent', 'idle', 'ses-parent', 1000, 1000)`;
+
+				yield* deleteSession("ses-parent");
+
+				const after = yield* listSessions();
+				const ids = after.map((s) => s.id);
+				expect(ids).not.toContain("ses-parent");
+				expect(ids).not.toContain("ses-child");
+			}).pipe(
+				Effect.provide(makeLiveServiceLayer(mockApi, filename)),
+				Effect.ensuring(
+					Effect.sync(() => rmSync(dir, { recursive: true, force: true })),
+				),
+			);
+		},
+	);
 });

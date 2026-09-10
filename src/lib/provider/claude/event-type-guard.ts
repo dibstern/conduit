@@ -42,6 +42,7 @@ const CLAUDE_NOT_APPLICABLE_TYPES = [
 	"tool.input_updated", // Historical event — no longer emitted after Phase 2 (buffered tool.started replaces it)
 	"session.created", // Emitted directly in prompt.ts via eventStore.append(), not via translator
 	"session.renamed", // Title changes handled by auto-rename in prompt.ts
+	"session.deleted", // Relay-owned lifecycle event appended directly by SessionManager
 	"session.provider_changed", // Provider switching is a relay-level concept
 	"session.permission_mode_changed", // Relay-level concept appended directly by SwitchPermissionMode, never emitted by the translator
 	"permission.asked", // Interactive asks use requestPermission(); auto-approved asks persist via synthetic sink push (audit)

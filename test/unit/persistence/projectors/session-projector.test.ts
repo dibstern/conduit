@@ -69,6 +69,7 @@ describe("SessionProjector", () => {
 		expect(projector.handles).toEqual([
 			"session.created",
 			"session.renamed",
+			"session.deleted",
 			"session.status",
 			"session.provider_changed",
 			"session.permission_mode_changed",

@@ -63,6 +63,7 @@ export const CANONICAL_EVENT_TYPES = [
 	"turn.model_resolved",
 	"session.created",
 	"session.renamed",
+	"session.deleted",
 	"session.status",
 	"session.compaction",
 	"session.provider_changed",
@@ -227,6 +228,10 @@ export interface SessionRenamedPayload {
 	readonly title: string;
 }
 
+export interface SessionDeletedPayload {
+	readonly sessionId: string;
+}
+
 export interface SessionStatusPayload {
 	readonly sessionId: string;
 	readonly status: SessionStatusValue;
@@ -300,6 +305,7 @@ export interface EventPayloadMap {
 	"turn.model_resolved": TurnModelResolvedPayload;
 	"session.created": SessionCreatedPayload;
 	"session.renamed": SessionRenamedPayload;
+	"session.deleted": SessionDeletedPayload;
 	"session.status": SessionStatusPayload;
 	"session.compaction": SessionCompactionPayload;
 	"session.provider_changed": SessionProviderChangedPayload;
@@ -616,6 +622,10 @@ const SessionRenamedPayloadSchema = Schema.Struct({
 	title: Schema.String,
 });
 
+const SessionDeletedPayloadSchema = Schema.Struct({
+	sessionId: Schema.String,
+});
+
 const SessionStatusPayloadSchema = Schema.Struct({
 	sessionId: Schema.String,
 	status: SessionStatusSchema,
@@ -746,6 +756,10 @@ const SessionRenamedEventSchema = eventEnvelope(
 	"session.renamed",
 	SessionRenamedPayloadSchema,
 );
+const SessionDeletedEventSchema = eventEnvelope(
+	"session.deleted",
+	SessionDeletedPayloadSchema,
+);
 const SessionStatusEventSchema = eventEnvelope(
 	"session.status",
 	SessionStatusPayloadSchema,
@@ -779,7 +793,7 @@ const QuestionResolvedEventSchema = eventEnvelope(
 	QuestionResolvedPayloadSchema,
 );
 
-// ─── Canonical Event Schema (Union of all 24 event types) ──────────────────
+// ─── Canonical Event Schema (Union of all 25 event types) ──────────────────
 
 export const CanonicalEventSchema = Schema.Union(
 	MessageCreatedEventSchema,
@@ -798,6 +812,7 @@ export const CanonicalEventSchema = Schema.Union(
 	TurnModelResolvedEventSchema,
 	SessionCreatedEventSchema,
 	SessionRenamedEventSchema,
+	SessionDeletedEventSchema,
 	SessionStatusEventSchema,
 	SessionCompactionEventSchema,
 	SessionProviderChangedEventSchema,
@@ -825,6 +840,7 @@ import { PersistenceError } from "./errors.js";
 const PAYLOAD_REQUIRED_FIELDS: Record<CanonicalEventType, readonly string[]> = {
 	"session.created": ["sessionId", "title", "provider"],
 	"session.renamed": ["sessionId", "title"],
+	"session.deleted": ["sessionId"],
 	"session.status": ["sessionId", "status"],
 	"session.compaction": ["sessionId", "state", "detail"],
 	"session.provider_changed": ["sessionId", "oldProvider", "newProvider"],

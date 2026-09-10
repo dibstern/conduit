@@ -27,6 +27,7 @@ describe("domain-event relay translation exhaustiveness", () => {
 		"message.created",
 		"session.created",
 		"session.renamed",
+		"session.deleted",
 		"session.provider_changed",
 		"session.permission_mode_changed",
 		"permission.asked",
