@@ -326,6 +326,38 @@ export class ClaudeEventTranslator {
 		return best;
 	}
 
+	/** True when a snapshot block is a rewritten copy of one that already
+	 *  streamed, rather than new content.
+	 *
+	 *  A MessageDisplay hook may rewrite assistant text before it reaches us —
+	 *  the message-timestamps plugin PREPENDS a "[HH:MM:SS]" marker. Prefix
+	 *  matching fails in both directions once text is prepended, so the
+	 *  snapshot stopped recognising its own block and minted a second part:
+	 *  every paragraph was rendered, and persisted, twice. Where the indexes
+	 *  happened to collide it was worse — the suffix slice suture-spliced a
+	 *  fragment into the live part.
+	 *
+	 *  The stream is authoritative: it is what the model actually produced,
+	 *  and it is already rendered. So a snapshot block that merely re-states
+	 *  streamed text under a rewrite contributes nothing and is dropped.
+	 *  Matching on `endsWith` targets prepending specifically; appended
+	 *  rewrites already reconcile through the prefix path above. A rewrite we
+	 *  fail to recognise degrades to the old duplicate — never to lost text.
+	 *  See conduit-test-r5xu. */
+	private isRewrittenStreamedBlock(
+		messageId: string,
+		type: ReadableContentBlockType,
+		text: string,
+	): boolean {
+		const prefix = `${messageId}:`;
+		for (const [key, state] of this.contentBlockStates) {
+			if (!key.startsWith(prefix) || state.type !== type) continue;
+			if (state.text.length === 0) continue;
+			if (text.endsWith(state.text)) return true;
+		}
+		return false;
+	}
+
 	private assistantSnapshotMessageId(message: SDKAssistantMessage): string {
 		const id = message.message.id;
 		return typeof id === "string" && id.length > 0 ? id : message.uuid;
@@ -1383,13 +1415,25 @@ export class ClaudeEventTranslator {
 			// indexes (per-block snapshots restart at 0), so resolve each block
 			// to its streamed state by type + text prefix. Only when nothing
 			// streamed (partial messages off or missed) does the snapshot mint
-			// its own part.
+			// its own part — and never when the block streamed but a hook
+			// rewrote it on the way here (see isRewrittenStreamedBlock).
 			for (const [index, block] of content.entries()) {
 				if (!isRecord(block)) continue;
 				if (block["type"] === "text" && typeof block["text"] === "string") {
 					if (block["text"].length === 0) continue;
+					const streamed = this.findSnapshotBlockState(
+						messageId,
+						"text",
+						block["text"],
+					);
+					if (
+						!streamed &&
+						this.isRewrittenStreamedBlock(messageId, "text", block["text"])
+					) {
+						continue;
+					}
 					const state =
-						this.findSnapshotBlockState(messageId, "text", block["text"]) ??
+						streamed ??
 						this.getOrCreateContentBlockState(
 							messageId,
 							index,
@@ -1413,6 +1457,16 @@ export class ClaudeEventTranslator {
 						block["thinking"],
 					);
 					if (block["thinking"].length === 0 && !existing) continue;
+					if (
+						!existing &&
+						this.isRewrittenStreamedBlock(
+							messageId,
+							"thinking",
+							block["thinking"],
+						)
+					) {
+						continue;
+					}
 					const state =
 						existing ??
 						this.getOrCreateContentBlockState(

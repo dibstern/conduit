@@ -237,4 +237,93 @@ describe("assistant snapshot vs stream dedupe", () => {
 		const partsA = textPartsOf("msg_A");
 		expect([...partsA.values()]).toEqual([TEXT]);
 	});
+
+	// ── conduit-test-r5xu ───────────────────────────────────────────────
+	// A MessageDisplay hook (the message-timestamps plugin) rewrites assistant
+	// text before it reaches the SDK consumer, PREPENDING a "[HH:MM:SS]"
+	// marker. Reconciliation matches on a bidirectional prefix, which a
+	// prepended marker defeats in both directions, so the snapshot stopped
+	// recognising its own streamed block.
+	//
+	// Two distinct corruptions followed, one per index alignment. Both are
+	// covered here because they fail in visibly different ways.
+
+	// Snapshot index == wire index: the mint fell through to the EXISTING
+	// streamed state and emitTextSuffixForState sliced at its textLength,
+	// splicing a fragment into the live part ("…discipline.discipline.").
+	it("emits streamed text once when a display hook prepends a marker to the snapshot", async () => {
+		const messageId = "msg_HOOK";
+		await feed(
+			streamEvent({ type: "message_start", message: { id: messageId } }),
+			streamEvent({
+				type: "content_block_start",
+				index: 0,
+				content_block: { type: "text", text: "" },
+			}),
+			streamEvent({
+				type: "content_block_delta",
+				index: 0,
+				delta: { type: "text_delta", text: TEXT },
+			}),
+			streamEvent({ type: "content_block_stop", index: 0 }),
+			assistantSnapshot(messageId, [
+				{ type: "text", text: `[12:11:38] ${TEXT}` },
+			]),
+		);
+
+		const parts = textPartsOf(messageId);
+		expect([...parts.values()]).toEqual([TEXT]);
+	});
+
+	// Snapshot index != wire index (the production shape, captured in
+	// .conduit/events.db): a separate `<messageId>-0` part was minted and the
+	// whole paragraph was emitted — and persisted — twice.
+	it("emits streamed text once when a marked snapshot also indexes blocks differently", async () => {
+		const messageId = "msg_HOOK2";
+		await feed(
+			streamEvent({ type: "message_start", message: { id: messageId } }),
+			streamEvent({
+				type: "content_block_start",
+				index: 0,
+				content_block: { type: "thinking", thinking: "" },
+			}),
+			streamEvent({
+				type: "content_block_delta",
+				index: 0,
+				delta: { type: "thinking_delta", thinking: THINKING },
+			}),
+			streamEvent({ type: "content_block_stop", index: 0 }),
+			streamEvent({
+				type: "content_block_start",
+				index: 1,
+				content_block: { type: "text", text: "" },
+			}),
+			streamEvent({
+				type: "content_block_delta",
+				index: 1,
+				delta: { type: "text_delta", text: TEXT },
+			}),
+			streamEvent({ type: "content_block_stop", index: 1 }),
+			assistantSnapshot(messageId, [
+				{ type: "text", text: `[12:11:38] ${TEXT}` },
+			]),
+		);
+
+		const parts = textPartsOf(messageId);
+		expect([...parts.values()]).toEqual([TEXT]);
+	});
+
+	// The healing path must survive the fix: when a block never streamed at
+	// all (partial messages off, or a dropped content_block_start), the
+	// snapshot is the only source and must still mint its own part.
+	it("still mints a part for a snapshot block that never streamed", async () => {
+		const messageId = "msg_NOSTREAM";
+		await feed(
+			streamEvent({ type: "message_start", message: { id: messageId } }),
+			assistantSnapshot(messageId, [{ type: "text", text: TEXT }]),
+		);
+
+		const parts = textPartsOf(messageId);
+		expect([...parts.values()]).toEqual([TEXT]);
+	});
 });
