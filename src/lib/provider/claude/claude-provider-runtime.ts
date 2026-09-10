@@ -39,6 +39,7 @@ import {
 	Ref,
 	type Scope,
 } from "effect";
+import type { ClaudeSDKPermissionMode } from "../../contracts/providers/claude-agent-sdk.js";
 import {
 	decodeClaudeSDKMessage,
 	decodeClaudeSDKOptionsJsonShape,
@@ -95,6 +96,10 @@ import {
 } from "./claude-translation-service.js";
 import { makeEffectPromptQueue } from "./effect-prompt-queue.js";
 import { serializePriorConversation } from "./history-transcript.js";
+import {
+	requiresDangerousSkip,
+	toSdkPermissionMode,
+} from "./permission-mode-map.js";
 import { captureClaudeSdkMessage } from "./sdk-trace-capture.js";
 import type {
 	ClaudeSessionContext,
@@ -915,8 +920,15 @@ export class ClaudeProviderRuntime {
 							settingSources: ["user", "project", "local"],
 							canUseTool: bridge.createCanUseTool(ctx),
 							model: apiModelId,
-							...(input.permissionMode === "auto"
-								? { permissionMode: "auto" }
+							...(input.permissionMode
+								? {
+										permissionMode: toSdkPermissionMode(input.permissionMode),
+										// The SDK rejects bypassPermissions unless the
+										// caller opts in explicitly.
+										...(requiresDangerousSkip(input.permissionMode)
+											? { allowDangerouslySkipPermissions: true }
+											: {}),
+									}
 								: {}),
 							...(resumeSessionId ? { resume: resumeSessionId } : {}),
 							...(input.agent ? { agent: input.agent } : {}),
@@ -980,9 +992,97 @@ export class ClaudeProviderRuntime {
 
 	// ─── enqueueTurn ──────────────────────────────────────────────────────
 
+	/**
+	 * Push the settings the user picked onto the live query. `setModel` and the
+	 * flag layer are the only mid-session channels: `model` (with the context
+	 * window folded into the API model id) goes through the former, `effort`
+	 * through the latter because it is fixed at query creation.
+	 *
+	 * Leaves `ctx.settingsOutOfSync` latched on failure so the next turn
+	 * re-issues whatever did not land; the caller clears it once the settings
+	 * are known to have reached the query.
+	 */
+	private syncQuerySettingsEffect(
+		ctx: ClaudeSessionContext,
+		settings: {
+			readonly modelId?: string | undefined;
+			readonly contextWindow?: string | undefined;
+			readonly variant?: string | undefined;
+		},
+	): Effect.Effect<void, unknown> {
+		return Effect.gen(this, function* () {
+			const baseModelId = settings.modelId ?? ctx.currentModel;
+			const apiModelId = claudeApiModelId(baseModelId, settings.contextWindow);
+			const forceSettingsSync = ctx.settingsOutOfSync;
+			const shouldSetModel =
+				apiModelId !== undefined &&
+				(forceSettingsSync || apiModelId !== ctx.currentApiModelId);
+			const shouldApplyFlagSettings =
+				forceSettingsSync || settings.variant !== ctx.currentVariant;
+
+			if (shouldSetModel || shouldApplyFlagSettings) {
+				ctx.settingsOutOfSync = true;
+			}
+			if (shouldSetModel) {
+				yield* Effect.tryPromise({
+					try: () => ctx.query.setModel(apiModelId),
+					catch: (cause) => cause,
+				});
+				ctx.currentApiModelId = apiModelId;
+			}
+			if (settings.modelId) {
+				ctx.currentModel = settings.modelId;
+			}
+			// `effort` is fixed at query creation, so a mid-session change only
+			// lands via the flag-settings layer. Empty/absent clears it back to
+			// the settings-file default.
+			if (shouldApplyFlagSettings) {
+				const effortLevel = (settings.variant || null) as EffortLevel | null;
+				yield* Effect.tryPromise({
+					try: () => ctx.query.applyFlagSettings({ effortLevel }),
+					catch: (cause) => cause,
+				});
+				if (settings.variant) {
+					ctx.currentVariant = settings.variant;
+				} else {
+					delete ctx.currentVariant;
+				}
+			}
+		});
+	}
+
+	/**
+	 * Apply a picker change to the live query immediately, rather than letting
+	 * it wait for the next turn's admission path. A session with no live query
+	 * yet is a no-op: query creation reads these from its options.
+	 */
+	applyLiveSettingsEffect(
+		sessionId: string,
+		settings: {
+			readonly modelId?: string | undefined;
+			readonly contextWindow?: string | undefined;
+			readonly variant?: string | undefined;
+		},
+	): Effect.Effect<void, ProviderInstanceFailure> {
+		return this.mapProviderFailure(
+			"apply live settings",
+			Effect.gen(this, function* () {
+				const pending = yield* this.getSetupLock(sessionId);
+				if (pending) {
+					yield* Deferred.await(pending);
+				}
+				const ctx = yield* this.getSession(sessionId);
+				if (!ctx) return;
+				yield* this.syncQuerySettingsEffect(ctx, settings);
+				// Both calls landed, so the next turn has nothing to re-issue.
+				ctx.settingsOutOfSync = false;
+			}),
+		);
+	}
+
 	setPermissionModeEffect(
 		sessionId: string,
-		mode: "auto" | "default",
+		mode: ClaudeSDKPermissionMode,
 	): Effect.Effect<void, ProviderInstanceFailure> {
 		return this.mapProviderFailure(
 			"set permission mode",
@@ -1046,7 +1146,6 @@ export class ClaudeProviderRuntime {
 					}
 
 					const baseModelId = input.model?.modelId ?? ctx.currentModel;
-					const apiModelId = claudeApiModelId(baseModelId, input.contextWindow);
 					const expectedApiModelId = yield* this.expectedApiModelIdEffect(
 						baseModelId,
 						input.contextWindow,
@@ -1057,41 +1156,11 @@ export class ClaudeProviderRuntime {
 						try: () => validateUserMessage(this.buildUserMessage(input)),
 						catch: (cause) => cause,
 					});
-					const forceSettingsSync = ctx.settingsOutOfSync;
-					const shouldSetModel =
-						apiModelId !== undefined &&
-						(forceSettingsSync || apiModelId !== ctx.currentApiModelId);
-					const shouldApplyFlagSettings =
-						forceSettingsSync || input.variant !== ctx.currentVariant;
-
-					if (shouldSetModel || shouldApplyFlagSettings) {
-						ctx.settingsOutOfSync = true;
-					}
-					if (shouldSetModel) {
-						yield* Effect.tryPromise({
-							try: () => ctx.query.setModel(apiModelId),
-							catch: (cause) => cause,
-						});
-						ctx.currentApiModelId = apiModelId;
-					}
-					if (input.model?.modelId) {
-						ctx.currentModel = input.model.modelId;
-					}
-					// `effort` is fixed at query creation, so a mid-session change only
-					// lands via the flag-settings layer. Empty/absent clears it back to
-					// the settings-file default.
-					if (shouldApplyFlagSettings) {
-						const effortLevel = (input.variant || null) as EffortLevel | null;
-						yield* Effect.tryPromise({
-							try: () => ctx.query.applyFlagSettings({ effortLevel }),
-							catch: (cause) => cause,
-						});
-						if (input.variant) {
-							ctx.currentVariant = input.variant;
-						} else {
-							delete ctx.currentVariant;
-						}
-					}
+					yield* this.syncQuerySettingsEffect(ctx, {
+						modelId: input.model?.modelId,
+						contextWindow: input.contextWindow,
+						variant: input.variant,
+					});
 					if (expectedApiModelId === undefined) {
 						delete ctx.expectedApiModelId;
 					} else {

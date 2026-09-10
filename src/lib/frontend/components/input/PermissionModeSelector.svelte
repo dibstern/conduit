@@ -12,14 +12,22 @@
 	import { switchPermissionModeRpc } from "../../transport/ws-rpc-client.js";
 	import type { SessionPermissionMode } from "../../types.js";
 
+	/** `claudeOnly` marks modes backed by a Claude Agent SDK permission mode
+	 *  with no OpenCode equivalent. All six of the SDK's modes are offered; the
+	 *  session runs whichever one the SDK reports, which is what keeps this pill
+	 *  honest when plan mode exits itself on approval. */
 	const MODES: ReadonlyArray<{
 		mode: SessionPermissionMode;
 		label: string;
+		claudeOnly?: boolean;
+		elevated?: boolean;
 	}> = [
+		{ mode: "plan", label: "Plan", claudeOnly: true },
 		{ mode: "ask", label: "Ask" },
-		{ mode: "acceptEdits", label: "Edits" },
-		{ mode: "auto", label: "Auto" },
-		{ mode: "full", label: "Full access" },
+		{ mode: "acceptEdits", label: "Edits", elevated: true },
+		{ mode: "auto", label: "Auto", claudeOnly: true, elevated: true },
+		{ mode: "full", label: "Full access", elevated: true },
+		{ mode: "dontAsk", label: "Never ask", claudeOnly: true },
 	];
 
 	// ─── State ──────────────────────────────────────────────────────────────
@@ -35,12 +43,16 @@
 	);
 	const availableModes = $derived(
 		MODES.filter(
-			({ mode }) =>
-				mode !== "auto" || discoveryState.currentProviderId === "claude",
+			({ claudeOnly }) =>
+				!claudeOnly || discoveryState.currentProviderId === "claude",
 		),
 	);
-	/** Non-default mode: elevated permission handling is active, tint the pill. */
-	const isElevated = $derived(currentMode !== "ask");
+	/** Tint the pill only when approvals are *relaxed*. "Never ask" is more
+	 *  restrictive than "Ask", so flagging it as elevated would invert the
+	 *  signal the amber tint exists to give. */
+	const isElevated = $derived(
+		MODES.find((m) => m.mode === currentMode)?.elevated === true,
+	);
 
 	// ─── Handlers ───────────────────────────────────────────────────────────
 

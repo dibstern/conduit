@@ -33,6 +33,7 @@ import { providerRefsFromRuntimeData } from "../provider-runtime-refs.js";
 import type { EventSink } from "../types.js";
 import { isSameModelIdentity } from "./claude-api-model-id.js";
 import { normalizeToolInput } from "./normalize-tool-input.js";
+import { fromSdkPermissionMode } from "./permission-mode-map.js";
 import type {
 	ClaudeSessionContext,
 	SDKAssistantMessage,
@@ -565,6 +566,9 @@ export class ClaudeEventTranslator {
 		return Effect.gen(this, function* () {
 			switch (message.subtype) {
 				case "status": {
+					// Carries the mode only when it changed, and several of the
+					// branches below return early, so report before any of them.
+					yield* this.reportPermissionMode(ctx, message.permissionMode);
 					if (message.compact_result === "failed") {
 						const detail = message.compact_error
 							? `Compaction failed: ${message.compact_error}`
@@ -717,6 +721,7 @@ export class ClaudeEventTranslator {
 						),
 					);
 					ctx.reportedApiModelId = message.model;
+					yield* this.reportPermissionMode(ctx, message.permissionMode);
 					if (
 						ctx.expectedApiModelId !== undefined &&
 						!isSameModelIdentity(ctx.expectedApiModelId, message.model)
@@ -746,6 +751,41 @@ export class ClaudeEventTranslator {
 					// Ignore other system subtypes (hook_*, etc.)
 					return;
 			}
+		});
+	}
+
+	/**
+	 * The SDK owns the live permission mode and echoes it on every turn's
+	 * system/init and on a system/status whenever it changes. Conduit's stored
+	 * mode is only the request, so this report is what the store and the picker
+	 * follow.
+	 */
+	private reportPermissionMode(
+		ctx: ClaudeSessionContext,
+		sdkMode: string | undefined,
+	): Effect.Effect<void, unknown> {
+		return Effect.gen(this, function* () {
+			if (sdkMode === undefined) return;
+			const mode = fromSdkPermissionMode(sdkMode);
+			// A mode outside the pinned SDK's set is left alone rather than
+			// coerced onto one conduit does model -- guessing here would write a
+			// mode the session is not in straight into the store.
+			if (mode === undefined) {
+				(this.deps.logger ?? defaultLog).warn(
+					`Claude reported an unmodelled permission mode: session=${ctx.sessionId} mode=${sdkMode}`,
+				);
+				return;
+			}
+			if (mode === ctx.reportedPermissionMode) return;
+			ctx.reportedPermissionMode = mode;
+			yield* this.push(
+				ctx,
+				makeProviderRuntimeEvent(
+					"session.permission_mode_changed",
+					ctx.sessionId,
+					{ sessionId: ctx.sessionId, mode },
+				),
+			);
 		});
 	}
 

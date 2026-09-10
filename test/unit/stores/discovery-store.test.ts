@@ -7,6 +7,7 @@ import {
 	discoveryState,
 	extractSlashQuery,
 	filterCommands,
+	flushPendingPermissionMode,
 	formatAgentLabel,
 	formatModelName,
 	getActiveContextWindowOptions,
@@ -30,6 +31,7 @@ import type {
 	ProviderInfo,
 	RelayMessage,
 } from "../../../src/lib/frontend/types.js";
+import type { SessionPermissionMode } from "../../../src/lib/shared-types.js";
 
 // ─── Helper: cast incomplete test data to the expected type ─────────────────
 // Tests deliberately pass incomplete objects to verify defensive handling.
@@ -316,6 +318,39 @@ describe("handlePermissionModeInfo", () => {
 			msg({ type: "permission_mode_info", mode: "auto" }),
 		);
 		expect(discoveryState.permissionMode).toBe("auto");
+	});
+});
+
+// ─── flushPendingPermissionMode ─────────────────────────────────────────────
+
+describe("flushPendingPermissionMode", () => {
+	it("sends the pre-bind selection to the server", async () => {
+		const sent: SessionPermissionMode[] = [];
+		discoveryState.pendingPermissionMode = "acceptEdits";
+
+		flushPendingPermissionMode("proj", "ses-1", async ({ mode }) => {
+			sent.push(mode);
+		});
+
+		expect(sent).toEqual(["acceptEdits"]);
+		expect(discoveryState.permissionMode).toBe("acceptEdits");
+		expect(discoveryState.pendingPermissionMode).toBeNull();
+	});
+
+	// "ask" used to be skipped as "the server default". It is only the default
+	// for a brand-new session, and this runs on binding to any session -- so
+	// binding to one already on "full" left the server on full access while the
+	// pill read "Ask". Restricting a session must never be the silent case.
+	it("sends a pre-bind selection of ask rather than assuming the server default", () => {
+		const sent: SessionPermissionMode[] = [];
+		discoveryState.permissionMode = "full";
+		discoveryState.pendingPermissionMode = "ask";
+
+		flushPendingPermissionMode("proj", "ses-1", async ({ mode }) => {
+			sent.push(mode);
+		});
+
+		expect(sent).toEqual(["ask"]);
 	});
 });
 

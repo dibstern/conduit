@@ -34,6 +34,8 @@ export const SESSION_PERMISSION_MODES = [
 	"acceptEdits",
 	"auto",
 	"full",
+	"plan",
+	"dontAsk",
 ] as const;
 export type SessionPermissionModeValue =
 	(typeof SESSION_PERMISSION_MODES)[number];

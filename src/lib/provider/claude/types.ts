@@ -14,6 +14,7 @@
  */
 
 import type { Effect } from "effect";
+import type { SessionPermissionMode } from "../../shared-types.js";
 import type { EventSink, PermissionDecision } from "../types.js";
 import type { ClaudeSubagentTranscriptCursor } from "./claude-subagent-materializer.js";
 
@@ -184,6 +185,11 @@ export interface ClaudeSessionContext {
 	/** Last model id reported as actually serving this session, so a mid-session
 	 *  switch re-reports instead of leaving the creation-time model standing. */
 	reportedApiModelId?: string;
+	/** Last permission mode the SDK reported for this session. The SDK owns the
+	 *  live mode, so this -- not conduit's stored request -- is what conduit has
+	 *  been told is in force. Undefined until the first system/init lands, which
+	 *  is why the first report always fires. */
+	reportedPermissionMode?: SessionPermissionMode;
 	currentAgent?: string;
 	/** Reasoning effort in force on the live query. Undefined means SDK default. */
 	currentVariant?: string;

@@ -15,6 +15,7 @@ import {
 	makeClaudeProviderRuntime,
 	makeUnsafeClaudeProviderRuntime,
 } from "./claude-provider-runtime.js";
+import { toSdkPermissionMode } from "./permission-mode-map.js";
 
 export type { ClaudeProviderInstanceDeps } from "./claude-provider-runtime.js";
 
@@ -66,13 +67,24 @@ export class ClaudeProviderInstance implements ProviderInstance {
 		return this.runtime.resolveQuestionEffect(sessionId, requestId, answers);
 	}
 
+	applyLiveSettingsEffect(
+		sessionId: string,
+		settings: {
+			readonly modelId?: string | undefined;
+			readonly contextWindow?: string | undefined;
+			readonly variant?: string | undefined;
+		},
+	): Effect.Effect<void, ProviderInstanceFailure> {
+		return this.runtime.applyLiveSettingsEffect(sessionId, settings);
+	}
+
 	setPermissionModeEffect(
 		sessionId: string,
 		mode: SessionPermissionMode,
 	): Effect.Effect<void, ProviderInstanceFailure> {
 		return this.runtime.setPermissionModeEffect(
 			sessionId,
-			mode === "auto" ? "auto" : "default",
+			toSdkPermissionMode(mode),
 		);
 	}
 

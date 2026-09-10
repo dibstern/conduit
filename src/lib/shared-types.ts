@@ -56,12 +56,19 @@ const ProviderPermissionModeSchema = Schema.Literal(
 	"auto",
 );
 
-/** Conduit-level per-session approval mode (distinct from provider-native permission modes). */
+/**
+ * Conduit-level per-session approval mode. Corresponds 1:1 to the Claude Agent
+ * SDK's six permission modes -- see provider/claude/permission-mode-map.ts.
+ * "ask" and "full" keep conduit's original spellings (SDK "default" and
+ * "bypassPermissions") so persisted rows stay valid without a migration.
+ */
 export const SessionPermissionModeSchema = Schema.Literal(
 	"ask",
 	"acceptEdits",
 	"auto",
 	"full",
+	"plan",
+	"dontAsk",
 );
 export type SessionPermissionMode = typeof SessionPermissionModeSchema.Type;
 
@@ -1492,7 +1499,11 @@ export type RelayMessage =
 			type: "connection_status";
 			status: "disconnected" | "reconnecting" | "connected";
 	  }
-	// ── Plan mode (future feature) ────────────────────────────────────────
+	// ── Plan mode (unused) ────────────────────────────────────────────────
+	// Plan approval rides the permission channel: the SDK asks for its
+	// `ExitPlanMode` tool through canUseTool, so it arrives as a normal
+	// permission_request and inherits that path's durable audit and reload
+	// survival. These four have no server-side emitter.
 	| { type: "plan_enter" }
 	| { type: "plan_exit" }
 	| { type: "plan_content"; content: string }

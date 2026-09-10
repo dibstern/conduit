@@ -8,6 +8,7 @@
 		ProviderPermissionUpdateDestination,
 	} from "../../types.js";
 	import { getBrowserClientId } from "../../stores/client-identity.js";
+	import { renderMarkdown } from "../../utils/markdown.js";
 	import { getCurrentSlug } from "../../stores/router.svelte.js";
 	import {
 		respondPermissionRpc,
@@ -44,7 +45,20 @@
 		},
 	};
 
-	const heading = $derived(request.permissionTitle ?? "Permission Required");
+	/** Plan mode's approval arrives as an ordinary permission ask for the SDK's
+	 *  `ExitPlanMode` tool, which is what gives it a durable audit trail and lets
+	 *  it survive a reload. Only the presentation differs: a plan is prose to be
+	 *  read, not a tool argument to be glanced at. */
+	const isPlanApproval = $derived(request.toolName === "ExitPlanMode");
+	const planMarkdown = $derived.by(() => {
+		if (!isPlanApproval) return "";
+		const plan = request.toolInput?.plan;
+		return typeof plan === "string" ? plan : "";
+	});
+	const heading = $derived(
+		request.permissionTitle ??
+			(isPlanApproval ? "Plan ready for review" : "Permission Required"),
+	);
 	const toolLabel = $derived(request.permissionDisplayName ?? request.toolName);
 	const claudeRememberOptions = $derived.by(() => {
 		const suggestions = request.permissionSuggestions ?? [];
@@ -61,6 +75,7 @@
 
 	// Format tool input for display (unchanged logic)
 	const inputDisplay = $derived.by(() => {
+		if (isPlanApproval) return "";
 		if (!request.toolInput) return "";
 		const toolInput = request.toolInput;
 		const toolName = request.toolName.toLowerCase();
@@ -89,6 +104,11 @@
 
 	const resolvedText = $derived.by(() => {
 		if (!resolved) return "";
+		if (isPlanApproval) {
+			// "Denied" reads as a refusal; rejecting a plan just sends Claude back
+			// to planning, which is the whole point of staying in plan mode.
+			return resolved === "deny" ? "Still planning" : "Plan approved \u2713";
+		}
 		if (resolved === "deny") return "Denied \u2717";
 		if (resolved === "allow_always") return "Approved \u2713 (always)";
 		return "Approved \u2713";
@@ -199,9 +219,18 @@
 			</div>
 		{/if}
 
-		<div class="font-mono text-xs text-accent mb-1 break-all select-text">
-			{toolLabel}
-		</div>
+		{#if !isPlanApproval}
+			<div class="font-mono text-xs text-accent mb-1 break-all select-text">
+				{toolLabel}
+			</div>
+		{:else if planMarkdown}
+			<div
+				data-testid="plan-approval-content"
+				class="md-content text-sm leading-[1.7] mb-2.5 bg-code-bg rounded-md p-3 max-h-[420px] overflow-y-auto select-text"
+			>
+				{@html renderMarkdown(planMarkdown)}
+			</div>
+		{/if}
 
 		{#if inputDisplay}
 			<div
@@ -211,7 +240,24 @@
 			</div>
 		{/if}
 
-		{#if !resolved}
+		{#if !resolved && isPlanApproval}
+			<!-- No "always" affordance: remembering an ExitPlanMode approval would
+			     auto-exit every future plan, permanently defeating plan mode. -->
+			<div class="perm-actions flex gap-2 max-sm:flex-col">
+				<button
+					class="min-h-[48px] flex-1 px-4 py-2 rounded-lg border cursor-pointer font-sans text-sm font-medium bg-success/10 border-success/20 text-success hover:bg-success/15"
+					onclick={handleAllow}
+				>
+					Approve Plan
+				</button>
+				<button
+					class="min-h-[48px] flex-1 px-4 py-2 rounded-lg border border-border cursor-pointer font-sans text-sm font-medium text-text-secondary hover:bg-bg"
+					onclick={handleDeny}
+				>
+					Keep Planning
+				</button>
+			</div>
+		{:else if !resolved}
 			<div class="perm-actions flex gap-2 max-sm:flex-col">
 				<button
 					class="min-h-[48px] flex-1 px-4 py-2 rounded-lg border cursor-pointer font-sans text-sm font-medium bg-success/10 border-success/20 text-success hover:bg-success/15"

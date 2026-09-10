@@ -51,6 +51,43 @@ function toSdkPermissionUpdates(
 	});
 }
 
+/**
+ * The SDK asks for `ExitPlanMode` through the ordinary permission callback, so
+ * conduit's permission card is already the plan-approval UI. But approving it
+ * is not merely "run the tool" -- it is the moment the session leaves plan
+ * mode, and that only happens if a `setMode` rides back on the allow. Without
+ * one the SDK stays read-only and Claude keeps planning against a plan the
+ * user just accepted.
+ *
+ * Conduit's own fallback is `default` ("ask"), not `acceptEdits`: approving a
+ * plan is approving the plan, not pre-approving every edit it implies. The
+ * SDK's suggestion wins when it has one, since it knows where it wants the
+ * session to land.
+ */
+const EXIT_PLAN_MODE_TOOL = "ExitPlanMode";
+
+function withPlanModeExit(
+	toolName: string,
+	suggestions: CanUseToolOptions["suggestions"],
+	chosen: PermissionUpdate[] | undefined,
+): PermissionUpdate[] | undefined {
+	if (toolName !== EXIT_PLAN_MODE_TOOL) return chosen;
+	const updates = chosen ?? [];
+	// A mode the user explicitly picked outranks both.
+	if (updates.some((update) => update.type === "setMode")) return updates;
+	const suggested = suggestions?.find(
+		(update) => update.type === "setMode" && update.mode !== "plan",
+	);
+	return [
+		...updates,
+		suggested ?? {
+			type: "setMode",
+			mode: "default",
+			destination: "session",
+		},
+	];
+}
+
 function toQuestionRequestQuestions(
 	toolInput: Record<string, unknown>,
 ): QuestionRequest["questions"] {
@@ -255,8 +292,10 @@ export class ClaudePermissionService {
 					: "reject";
 
 			if (decision === "once" || decision === "always") {
-				const updatedPermissions = toSdkPermissionUpdates(
-					response.permissionUpdates,
+				const updatedPermissions = withPlanModeExit(
+					toolName,
+					options.suggestions,
+					toSdkPermissionUpdates(response.permissionUpdates),
 				);
 				return {
 					behavior: "allow" as const,

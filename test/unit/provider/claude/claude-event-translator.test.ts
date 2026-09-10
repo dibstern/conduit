@@ -246,8 +246,11 @@ describe("ClaudeEventTranslator", () => {
 		ctx.expectedApiModelId = "claude-sonnet-5";
 		await runTranslate(translator, ctx, makeInitMessage("claude-sonnet-5"));
 
+		// init also carries the permission mode the SDK is actually running in,
+		// and this is the session's first, so it reports alongside the model.
 		expect(sink.events.map((event) => event.type)).toEqual([
 			"turn.model_resolved",
+			"session.permission_mode_changed",
 			"session.status",
 		]);
 		expect(dataOf(sink.events[0])).toEqual({

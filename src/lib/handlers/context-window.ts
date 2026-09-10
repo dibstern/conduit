@@ -15,7 +15,7 @@ import {
 	setDefaultContextWindow,
 } from "../domain/relay/Services/session-overrides-state.js";
 import type { ContextWindowOption } from "../shared-types.js";
-import { isClaudeProvider } from "./model.js";
+import { applyLiveSessionSettings, isClaudeProvider } from "./model.js";
 
 const loadContextWindowOptions = (modelId: string) =>
 	Effect.gen(function* () {
@@ -92,6 +92,7 @@ export const switchContextWindowForSession = (
 		if (supported) {
 			if (sessionId) {
 				yield* setContextWindow(sessionId, requested);
+				yield* applyLiveSessionSettings(sessionId);
 			} else {
 				yield* setDefaultContextWindow(requested);
 			}
