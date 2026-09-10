@@ -8,10 +8,15 @@ import {
 	claudeSettingsState,
 	clearClaudeSettingsState,
 } from "../../../src/lib/frontend/stores/claude-settings.svelte.js";
+import {
+	clearDiscoveryState,
+	discoveryState,
+} from "../../../src/lib/frontend/stores/discovery.svelte.js";
 import { handleMessage } from "../../../src/lib/frontend/stores/ws-dispatch.js";
 
 beforeEach(() => {
 	clearClaudeSettingsState();
+	clearDiscoveryState();
 });
 
 describe("Claude settings broadcast dispatch", () => {
@@ -28,5 +33,17 @@ describe("Claude settings broadcast dispatch", () => {
 			autoCompactEnabled: false,
 			autoCompactWindow: 16_000,
 		});
+	});
+
+	it("applies default_permission_mode_info without changing the session mode", () => {
+		discoveryState.permissionMode = "acceptEdits";
+
+		handleMessage({
+			type: "default_permission_mode_info",
+			mode: "full",
+		});
+
+		expect(discoveryState.defaultPermissionMode).toBe("full");
+		expect(discoveryState.permissionMode).toBe("acceptEdits");
 	});
 });

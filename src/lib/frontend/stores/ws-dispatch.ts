@@ -73,6 +73,7 @@ import {
 import { handleClaudeSettingsInfo } from "./claude-settings.svelte.js";
 import { isOwnBrowserClientId } from "./client-identity.js";
 import {
+	discoveryState,
 	handleAgentList,
 	handleCommandList,
 	handleContextWindowInfo,
@@ -896,6 +897,9 @@ export function handleMessage(msg: RelayMessage): void {
 			break;
 		case "default_model_info":
 			handleDefaultModelInfo(msg);
+			break;
+		case "default_permission_mode_info":
+			discoveryState.defaultPermissionMode = msg.mode;
 			break;
 		case "permission_mode_info":
 			handlePermissionModeInfo(msg);

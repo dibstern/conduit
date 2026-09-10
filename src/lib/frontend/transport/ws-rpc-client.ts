@@ -33,6 +33,7 @@ import {
 	type RpcLogLevel,
 	type ScanNowResponse,
 	type SetDefaultModelResponse,
+	type SetDefaultPermissionModeResponse,
 	type SetHiddenEntriesResponse,
 	type SwitchContextWindowResponse,
 	type SwitchModelResponse,
@@ -262,6 +263,12 @@ export interface SetDefaultModelRpcInput {
 	readonly projectSlug: string;
 	readonly model: string;
 	readonly provider: string;
+	readonly originId?: string;
+}
+
+export interface SetDefaultPermissionModeRpcInput {
+	readonly projectSlug: string;
+	readonly mode: SessionPermissionMode;
 	readonly originId?: string;
 }
 
@@ -936,6 +943,25 @@ const callSetDefaultModel = (input: SetDefaultModelRpcInput) =>
 		Effect.provide(RpcSerialization.layerJson),
 	);
 
+const callSetDefaultPermissionMode = (
+	input: SetDefaultPermissionModeRpcInput,
+) =>
+	Effect.scoped(
+		Effect.gen(function* () {
+			const client = yield* RpcClient.make(WsRpcGroup);
+			return yield* client.SetDefaultPermissionMode({
+				projectSlug: input.projectSlug,
+				mode: input.mode,
+				...(input.originId ? { originId: input.originId } : {}),
+			});
+		}),
+	).pipe(
+		Effect.provide(RpcClient.layerProtocolSocket()),
+		Effect.provide(Socket.layerWebSocket(makeWsRpcUrl(input.projectSlug))),
+		Effect.provide(Socket.layerWebSocketConstructorGlobal),
+		Effect.provide(RpcSerialization.layerJson),
+	);
+
 const callSetHiddenEntries = (input: SetHiddenEntriesRpcInput) =>
 	Effect.scoped(
 		Effect.gen(function* () {
@@ -1379,6 +1405,12 @@ export async function setDefaultModelRpc(
 	input: SetDefaultModelRpcInput,
 ): Promise<SetDefaultModelResponse> {
 	return await runTransportEffect(callSetDefaultModel(input));
+}
+
+export async function setDefaultPermissionModeRpc(
+	input: SetDefaultPermissionModeRpcInput,
+): Promise<SetDefaultPermissionModeResponse> {
+	return await runTransportEffect(callSetDefaultPermissionMode(input));
 }
 
 export async function setHiddenEntriesRpc(

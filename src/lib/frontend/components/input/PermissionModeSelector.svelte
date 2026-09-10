@@ -11,16 +11,7 @@
 	import { showToast } from "../../stores/ui.svelte.js";
 	import { switchPermissionModeRpc } from "../../transport/ws-rpc-client.js";
 	import type { SessionPermissionMode } from "../../types.js";
-
-	const MODES: ReadonlyArray<{
-		mode: SessionPermissionMode;
-		label: string;
-	}> = [
-		{ mode: "ask", label: "Ask" },
-		{ mode: "acceptEdits", label: "Edits" },
-		{ mode: "auto", label: "Auto" },
-		{ mode: "full", label: "Full access" },
-	];
+	import { PERMISSION_MODES } from "../../permission-modes.js";
 
 	// ─── State ──────────────────────────────────────────────────────────────
 
@@ -31,10 +22,10 @@
 
 	const currentMode = $derived(discoveryState.permissionMode);
 	const currentLabel = $derived(
-		MODES.find((m) => m.mode === currentMode)?.label ?? "Ask",
+		PERMISSION_MODES.find((m) => m.mode === currentMode)?.label ?? "Ask",
 	);
 	const availableModes = $derived(
-		MODES.filter(
+		PERMISSION_MODES.filter(
 			({ mode }) =>
 				mode !== "auto" || discoveryState.currentProviderId === "claude",
 		),
@@ -73,7 +64,7 @@
 					// frontend bug instead of what it is: the server rejected the
 					// mode (typically a stale daemon that predates it).
 					const label =
-						MODES.find((m) => m.mode === mode)?.label ?? mode;
+						PERMISSION_MODES.find((m) => m.mode === mode)?.label ?? mode;
 					showToast(
 						`Couldn't switch approval mode to "${label}" — the daemon rejected it. It may be running an older version.`,
 						{ variant: "warn" },

@@ -32,6 +32,13 @@ Scenario: changing the session link preserves inherited attribution
   And I turn off the Claude attribution session link
   Then the attribution override keeps the inherited commit text with the session link off
 
+Scenario: changing the default approval mode elevates new sessions
+  Given the default approval mode is Ask
+  When I open settings to the Claude tab
+  And I choose Full access as the default approval mode
+  Then a SetDefaultPermissionMode RPC is sent with mode full
+  And the default approval mode row shows the elevated-permissions warning
+
 Scenario Outline: the Claude tab matches the approved layout
   When I open settings to the Claude tab
   Then the settings-panel region visually matches <baseline> at <threshold> percent

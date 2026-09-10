@@ -165,6 +165,10 @@ export const conduitVisualHandlers: StepHandler[] = [
 						});
 						return { projectSlug: "myapp", overrides };
 					},
+					SetDefaultPermissionMode: async (payload) => ({
+						projectSlug: "myapp",
+						mode: payload["mode"],
+					}),
 					ResolveClaudeSettings: async (payload) => ({
 						projectSlug: "myapp",
 						instanceId:
@@ -737,6 +741,16 @@ export const conduitVisualHandlers: StepHandler[] = [
 		},
 	},
 	{
+		name: "set default approval mode to ask",
+		match: /^the default approval mode is Ask$/,
+		run: async ({ world }) => {
+			requireRelayControl(world.page).sendMessage({
+				type: "default_permission_mode_info",
+				mode: "ask",
+			});
+		},
+	},
+	{
 		name: "open settings to claude tab",
 		match: /^I open settings to the Claude tab$/,
 		run: async ({ world }) => {
@@ -760,6 +774,39 @@ export const conduitVisualHandlers: StepHandler[] = [
 			await rpcControl.waitForRequest(
 				(request) => request.tag === "ResolveClaudeSettings",
 			);
+		},
+	},
+	{
+		name: "choose full access as default approval mode",
+		match: /^I choose Full access as the default approval mode$/,
+		run: async ({ world }) => {
+			await world.page
+				.getByTestId("claude-setting-defaultPermissionMode-select")
+				.selectOption({ label: "Full access" });
+		},
+	},
+	{
+		name: "assert set default permission mode rpc",
+		match: /^a SetDefaultPermissionMode RPC is sent with mode full$/,
+		run: async ({ world }) => {
+			await requireRpcControl(world.page).waitForRequest(
+				(request) =>
+					request.tag === "SetDefaultPermissionMode" &&
+					request.payload["mode"] === "full",
+			);
+		},
+	},
+	{
+		name: "assert default approval warning",
+		match:
+			/^the default approval mode row shows the elevated-permissions warning$/,
+		run: async ({ world }) => {
+			await world.page
+				.getByTestId("claude-setting-defaultPermissionMode")
+				.getByText("New sessions will start with elevated permissions.", {
+					exact: true,
+				})
+				.waitFor({ state: "visible", timeout: 5_000 });
 		},
 	},
 	{

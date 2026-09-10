@@ -69,6 +69,8 @@ export {
 	SetClaudeSettings,
 	SetDefaultModel,
 	type SetDefaultModelResponse,
+	SetDefaultPermissionMode,
+	type SetDefaultPermissionModeResponse,
 	SetHiddenEntries,
 	type SetHiddenEntriesResponse,
 	SetLogLevel,

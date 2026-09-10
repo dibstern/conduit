@@ -141,6 +141,7 @@ export const discoveryState = $state({
 	availableContextWindowOptions: [] as ReadonlyArray<ContextWindowOption>,
 	modelExecution: null as GetModelsResponse["modelExecution"] | null,
 	permissionMode: "ask" as SessionPermissionMode,
+	defaultPermissionMode: "ask" as SessionPermissionMode,
 	/** Mode selected while no session was bound — flushed on session bind. */
 	pendingPermissionMode: null as SessionPermissionMode | null,
 	/** Global hide-list keys: model `<providerId>/<modelId>`. */
@@ -623,6 +624,7 @@ export function clearDiscoveryState(): void {
 	discoveryState.availableContextWindowOptions = [];
 	discoveryState.modelExecution = null;
 	discoveryState.permissionMode = "ask";
+	discoveryState.defaultPermissionMode = "ask";
 	discoveryState.pendingPermissionMode = null;
 	discoveryState.hiddenModels = [];
 	discoveryState.hiddenAgents = [];
