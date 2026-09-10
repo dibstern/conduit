@@ -43,8 +43,15 @@ const strict = process.env["VISUAL_STRICT"] === "1";
 /**
  * Overridable so two worktrees can run this suite at once. With a fixed port the
  * second run either dies on a busy port or — before `reuseExistingServer: false`
- * below — silently tested the first worktree's build. Snapshots do not depend on
- * the port, so this is safe to vary per checkout.
+ * below — silently tested the first worktree's build.
+ *
+ * This is only safe while no story renders its own URL, and that is an invariant
+ * to defend rather than a fact to assume: Overlays/QrModal encodes
+ * window.location.href into a QR code, so it DID depend on the port, and running
+ * the suite on any non-default port rewrote ~16,700 pixels and failed. The story
+ * now pins the encoded origin to a fixed LAN address and asserts it, so the
+ * dependence fails in the story's own play() rather than as an unexplained
+ * pixel diff in whichever worktree drew the second port. See conduit-test-afp.
  */
 const PORT = Number(process.env["STORYBOOK_PORT"] ?? 6007);
 
