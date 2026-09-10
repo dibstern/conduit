@@ -11,6 +11,7 @@ import {
 	ConfigTag,
 	LoggerTag,
 } from "../../../src/lib/domain/relay/Services/services.js";
+import { SessionCommandError } from "../../../src/lib/domain/relay/Services/session-command.js";
 import {
 	createSession,
 	deleteSession,
@@ -319,12 +320,20 @@ describe("SessionManager Effect", () => {
 			expect(result._tag).toBe("Left");
 			if (result._tag === "Left") {
 				expect(result.left).toBeInstanceOf(SessionManagerError);
-				expect(result.left.operation).toBe("renameSession.project");
-				expect(result.left.cause).toBeInstanceOf(ProjectionRunnerError);
-				if (result.left.cause instanceof ProjectionRunnerError) {
-					expect(result.left.cause.cause).toBeInstanceOf(ProjectionError);
-					if (result.left.cause.cause instanceof ProjectionError) {
-						expect(result.left.cause.cause.cause).toBe(rootCause);
+				// Rename now runs through the command seam, so the projector failure
+				// arrives wrapped in the seam's error rather than a rename-specific one.
+				expect(result.left.operation).toBe("renameSession");
+				expect(result.left.cause).toBeInstanceOf(SessionCommandError);
+				if (result.left.cause instanceof SessionCommandError) {
+					expect(result.left.cause.operation).toBe("session.renamed.project");
+					expect(result.left.cause.cause).toBeInstanceOf(ProjectionRunnerError);
+					if (result.left.cause.cause instanceof ProjectionRunnerError) {
+						expect(result.left.cause.cause.cause).toBeInstanceOf(
+							ProjectionError,
+						);
+						if (result.left.cause.cause.cause instanceof ProjectionError) {
+							expect(result.left.cause.cause.cause.cause).toBe(rootCause);
+						}
 					}
 				}
 			}
@@ -423,11 +432,13 @@ describe("SessionManager Effect", () => {
 
 				yield* service.renameSession(sessionId, "API title");
 
+				// No row to mutate, so nothing is appended — but upstream may still
+				// know the session, so the rename is still forwarded.
 				const events = yield* store.readBySession(sessionId);
+				expect(events).toEqual([]);
 				expect(mockApi.session.update).toHaveBeenCalledWith(sessionId, {
 					title: "API title",
 				});
-				expect(events).toEqual([]);
 			}).pipe(
 				Effect.provide(layer),
 				Effect.ensuring(
@@ -438,7 +449,7 @@ describe("SessionManager Effect", () => {
 	);
 
 	it.effect(
-		"falls back to API rename when the persisted session provider is not Claude",
+		"renames an OpenCode-backed session in the read model and upstream",
 		() => {
 			const mockApi = makeMockApi();
 			const dir = mkdtempSync(join(tmpdir(), "conduit-rename-opencode-"));
@@ -456,11 +467,14 @@ describe("SessionManager Effect", () => {
 
 				yield* service.renameSession(sessionId, "API title");
 
+				// conduit-test-xy29: this used to reach OpenCode only, so a SQLite
+				// reader kept serving the old title. Rename now appends its event
+				// like every other mutation, and upstream is synced from it.
 				const events = yield* store.readBySession(sessionId);
+				expect(events.map((event) => event.type)).toEqual(["session.renamed"]);
 				expect(mockApi.session.update).toHaveBeenCalledWith(sessionId, {
 					title: "API title",
 				});
-				expect(events).toEqual([]);
 			}).pipe(
 				Effect.provide(layer),
 				Effect.ensuring(

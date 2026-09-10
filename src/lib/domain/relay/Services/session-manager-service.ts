@@ -66,7 +66,7 @@ import {
 	OrchestrationEngineTag,
 	StatusPollerTag,
 } from "./services.js";
-import { applySessionCommand, isClaudeSessionRow } from "./session-command.js";
+import { applySessionCommand } from "./session-command.js";
 import { SessionManagerStateTag } from "./session-manager-state.js";
 import {
 	OverridesStateTag,
@@ -534,109 +534,6 @@ export const deleteSession = (sessionId: string) =>
 		Effect.withSpan("session.deleteSession", { attributes: { sessionId } }),
 	);
 
-const renameSQLiteBackedClaudeSession = (sessionId: string, title: string) =>
-	Effect.gen(function* () {
-		const readQueryOption = yield* Effect.serviceOption(ReadQueryEffectTag);
-		const eventStoreOption = yield* Effect.serviceOption(EventStoreEffectTag);
-		const projectionRunnerOption = yield* Effect.serviceOption(
-			ProjectionRunnerEffectTag,
-		);
-		const sqlOption = yield* Effect.serviceOption(SqlClient.SqlClient);
-		const configOption = yield* Effect.serviceOption(ConfigTag);
-
-		if (
-			readQueryOption._tag === "None" ||
-			eventStoreOption._tag === "None" ||
-			projectionRunnerOption._tag === "None" ||
-			sqlOption._tag === "None"
-		) {
-			return false;
-		}
-
-		const eventStore = eventStoreOption.value;
-		const projectionRunner = projectionRunnerOption.value;
-		const sql = sqlOption.value;
-
-		const withSql = <A, E>(
-			effect: Effect.Effect<A, E, SqlClient.SqlClient>,
-		): Effect.Effect<A, E> =>
-			effect.pipe(Effect.provideService(SqlClient.SqlClient, sql));
-
-		const recovered = yield* projectionRunner.isRecovered();
-		if (!recovered) {
-			yield* withSql(projectionRunner.recover()).pipe(
-				Effect.mapError(
-					(cause) =>
-						new SessionManagerError({
-							operation: "renameSession.recover",
-							cause,
-						}),
-				),
-				Effect.asVoid,
-			);
-		}
-
-		const readQuery = readQueryOption.value;
-		const row = yield* readQuery.getSession(sessionId).pipe(
-			Effect.mapError(
-				(cause) =>
-					new SessionManagerError({
-						operation: "renameSession.getSession",
-						cause,
-					}),
-			),
-		);
-		if (
-			!row ||
-			!isClaudeSessionRow(
-				row,
-				configOption._tag === "Some" ? configOption.value.configDir : undefined,
-			)
-		) {
-			return false;
-		}
-
-		const now = Date.now();
-
-		const stored = yield* eventStore
-			.append(
-				canonicalEvent(
-					"session.renamed",
-					sessionId,
-					{
-						sessionId,
-						title,
-					},
-					{
-						provider: row.provider,
-						createdAt: now,
-						metadata: { source: "relay" },
-					},
-				),
-			)
-			.pipe(
-				Effect.mapError(
-					(cause) =>
-						new SessionManagerError({
-							operation: "renameSession.append",
-							cause,
-						}),
-				),
-			);
-
-		yield* withSql(projectionRunner.projectEvent(stored)).pipe(
-			Effect.mapError(
-				(cause) =>
-					new SessionManagerError({
-						operation: "renameSession.project",
-						cause,
-					}),
-			),
-		);
-
-		return true;
-	});
-
 export const persistSessionPermissionMode = (
 	sessionId: string,
 	mode: SessionPermissionMode,
@@ -776,23 +673,13 @@ export const restoreSessionPermissionModes = () =>
  * Rename a session through Conduit's event store for Claude rows, otherwise via the API.
  */
 export const renameSession = (sessionId: string, title: string) =>
-	Effect.gen(function* () {
-		const renamedLocally = yield* renameSQLiteBackedClaudeSession(
-			sessionId,
-			title,
-		);
-		if (renamedLocally) return;
-
-		const api = yield* OpenCodeAPITag;
-		yield* Effect.tryPromise(() =>
-			api.session.update(sessionId, { title }),
-		).pipe(
-			Effect.mapError(
-				(cause) =>
-					new SessionManagerError({ operation: "renameSession", cause }),
-			),
-		);
+	applySessionCommand({
+		type: "session.renamed",
+		data: { sessionId, title },
 	}).pipe(
+		Effect.mapError(
+			(cause) => new SessionManagerError({ operation: "renameSession", cause }),
+		),
 		Effect.annotateLogs("sessionId", sessionId),
 		Effect.withSpan("session.renameSession", { attributes: { sessionId } }),
 	);

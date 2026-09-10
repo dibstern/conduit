@@ -28,12 +28,6 @@ const allowedSessionMutations: readonly AllowedSessionMutation[] = [
 		path: "src/lib/domain/relay/Services/session-command.ts",
 		linePattern: /api\.session\.update\(command\.data\.sessionId, \{/,
 	},
-	// SessionManager owns provider renaming after checking for a SQLite-backed
-	// session. Removed when rename moves onto the seam.
-	{
-		path: "src/lib/domain/relay/Services/session-manager-service.ts",
-		linePattern: /api\.session\.update\(sessionId, \{ title \}\),/,
-	},
 ];
 
 function productionSourceFiles(dir: string): string[] {

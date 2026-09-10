@@ -115,10 +115,6 @@ const READ_MODEL_PARITY_CASES: Record<ReadModelMutation, ParityCase> = {
 			}),
 	},
 	renameSession: {
-		// Expected failure under the parity contract: OpenCode rename updates only
-		// the provider, so SQLite readers retain the previous title.
-		// Tracked as conduit-test-xy29. Delete this marker when that lands.
-		expectedFailure: "OpenCode rename does not update the SQLite session row",
 		run: ({ service, readQuery, seedSession }) =>
 			Effect.gen(function* () {
 				const sessionId = "ses-renamed";
