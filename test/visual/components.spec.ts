@@ -361,6 +361,15 @@ if (stories.length > 0) {
 	// through check:storybook and by modal-focus.spec.ts in a real browser,
 	// including focus restoration. This is NOT a blessed-away regression.
 	const SKIP_STORIES = new Set([
+		// Input/ComposerVariant -- the conduit-test-n9s 3G test article. Behaviour-only
+		// fixtures with deliberately throwaway scaffolding styles: they carry no design
+		// information, so a committed baseline would assert nothing. Their play() bodies
+		// also end mid-interaction with a path committed into the textarea. Their real
+		// value is the axe differential asserted in their own play() functions, and
+		// serving as the page 3G.2 points a screen reader at.
+		"input-composervariant--variant-a",
+		"input-composervariant--variant-b",
+		"input-composervariant--side-by-side",
 		"fixtures-modalfocus--default",
 		"ui-modal--escape-restores-focus",
 		"model-agentselector--single-agent",
