@@ -701,7 +701,11 @@ export const handleClientConnectedEffect = (
 				});
 				wsHandler.sendTo(clientId, {
 					type: "permission_mode_info",
-					mode: activeId ? yield* getPermissionMode(activeId) : "ask",
+					// No session yet: report the mode one would start in, not "ask".
+					// getPermissionMode already falls back to the default itself.
+					mode: activeId
+						? yield* getPermissionMode(activeId)
+						: yield* getDefaultPermissionMode(),
 				});
 
 				const defaultModel = yield* getDefaultModel();

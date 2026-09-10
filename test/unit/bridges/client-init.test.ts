@@ -6,6 +6,10 @@ import {
 	handleClientConnectedEffect,
 } from "../../../src/lib/bridges/client-init.js";
 import {
+	SessionManagerError,
+	type SessionManagerService,
+} from "../../../src/lib/domain/relay/Services/session-manager-service.js";
+import {
 	setDefaultPermissionMode,
 	setPermissionMode,
 } from "../../../src/lib/domain/relay/Services/session-overrides-state.js";
@@ -115,10 +119,12 @@ function makeEmptyHistoryReadQuery(
 function makeClientInitEffectLayer(
 	readQuery: ReadQueryEffect,
 	loadPreRenderedHistory: ReturnType<typeof vi.fn>,
+	sessionManagerOverrides: Partial<SessionManagerService> = {},
 ) {
 	const wsHandler = makeMockWebSocketHandler();
 	const sessionManagerService = makeMockSessionManagerService({
 		loadPreRenderedHistory,
+		...sessionManagerOverrides,
 	});
 	const orchestrationEngine = {
 		getProviderForSession: vi.fn(() => undefined),
@@ -179,6 +185,36 @@ describe("handleClientConnectedEffect — empty projected history", () => {
 		expect(wsHandler.sendTo).toHaveBeenCalledWith("client-1", {
 			type: "default_permission_mode_info",
 			mode: "auto",
+		});
+	});
+
+	it("reports the configured default when no session is bound", async () => {
+		const { wsHandler, layer } = makeClientInitEffectLayer(
+			makeEmptyHistoryReadQuery("claude-sdk"),
+			vi.fn(() => Effect.succeed({ messages: [], hasMore: false })),
+			{
+				getDefaultSessionId: vi.fn(() =>
+					Effect.fail(
+						new SessionManagerError({
+							operation: "getDefaultSessionId",
+							cause: "no sessions",
+						}),
+					),
+				),
+			},
+		);
+
+		await Effect.runPromise(
+			Effect.gen(function* () {
+				yield* setDefaultPermissionMode("full");
+				yield* handleClientConnectedEffect("client-1");
+			}).pipe(Effect.provide(layer)),
+		);
+
+		// The pill must show the mode a new session would start in, not "ask".
+		expect(wsHandler.sendTo).toHaveBeenCalledWith("client-1", {
+			type: "permission_mode_info",
+			mode: "full",
 		});
 	});
 
