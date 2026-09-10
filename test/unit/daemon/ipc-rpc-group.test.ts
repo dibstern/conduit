@@ -40,7 +40,10 @@ import {
 	makeProjectRegistryLive,
 	ProjectRegistryTag,
 } from "../../../src/lib/domain/daemon/Services/project-registry-service.js";
-import { RelayCacheTag } from "../../../src/lib/domain/daemon/Services/relay-cache.js";
+import {
+	RelayCacheTag,
+	type RelayStatusSnapshot,
+} from "../../../src/lib/domain/daemon/Services/relay-cache.js";
 
 const makeMockKeepAwake = () =>
 	Layer.effect(
@@ -78,7 +81,7 @@ const makeMockConfigRef = () => {
 const makeMockShutdownSignal = () =>
 	Layer.effect(ShutdownSignalTag, Deferred.make<void>());
 
-const makeBaseTestLayer = () =>
+const makeBaseTestLayer = (relaySnapshot?: RelayStatusSnapshot) =>
 	Layer.mergeAll(
 		makeDaemonStateLive({ projects: [] }),
 		makeProjectRegistryLive(),
@@ -93,7 +96,18 @@ const makeBaseTestLayer = () =>
 		]),
 		Layer.succeed(RelayCacheTag, {
 			get: () => Effect.fail(new Error("Relay cache not expected in test")),
-			peek: () => Effect.succeed(Option.none()),
+			peek: (slug: string) =>
+				Effect.succeed(
+					relaySnapshot === undefined || slug === "uncached"
+						? Option.none()
+						: Option.some({
+								slug,
+								wsHandler: { handleUpgrade: () => {} },
+								rpcWsHandler: { handleUpgrade: () => {} },
+								getStatusSnapshot: () => relaySnapshot,
+								stop: () => {},
+							}),
+				),
 			invalidate: () => Effect.void,
 		}),
 		Layer.succeed(DaemonLifecycleContextTag, {
@@ -115,18 +129,21 @@ const makeBaseTestLayer = () =>
 		}),
 	);
 
-const makeTestLayer = () => {
-	const base = makeBaseTestLayer();
+const makeTestLayer = (relaySnapshot?: RelayStatusSnapshot) => {
+	const base = makeBaseTestLayer(relaySnapshot);
 	return Layer.merge(base, DaemonHandleLive.pipe(Layer.provide(base)));
 };
 
-const makeRpcTestLayer = () => {
-	const deps = makeTestLayer();
+const makeRpcTestLayer = (relaySnapshot?: RelayStatusSnapshot) => {
+	const deps = makeTestLayer(relaySnapshot);
 	return Layer.merge(deps, IpcHandlersLayer.pipe(Layer.provide(deps)));
 };
 
-const provideRpc = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
-	Effect.scoped(effect).pipe(Effect.provide(makeRpcTestLayer()));
+const provideRpc = <A, E, R>(
+	effect: Effect.Effect<A, E, R>,
+	relaySnapshot?: RelayStatusSnapshot,
+) =>
+	Effect.scoped(effect).pipe(Effect.provide(makeRpcTestLayer(relaySnapshot)));
 
 describe("IPC RPC request group", () => {
 	it("uses installed @effect/rpc group/client APIs", () => {
@@ -186,6 +203,7 @@ describe("IPC RPC request group", () => {
 
 					expect(result.ok).toBe(true);
 					expect(result.instances).toHaveLength(1);
+					expect(result.instances[0]?.driver).toBe("opencode");
 				}),
 			),
 	);
@@ -270,8 +288,183 @@ describe("IPC RPC request group", () => {
 						title: "Project",
 						status: "ready",
 						lastUsed: addedAt,
+						sse: {
+							connected: true,
+							lastEventAt: 1_234,
+							reconnectCount: 2,
+							stale: false,
+						},
 					},
 				]);
+			}),
+			{
+				sessionCount: 3,
+				clients: 0,
+				isProcessing: false,
+				sse: {
+					connected: true,
+					lastEventAt: 1_234,
+					reconnectCount: 2,
+					stale: false,
+				},
+			},
+		),
+	);
+
+	it.effect(
+		"preserves absent SSE health across the GetStatus RPC boundary",
+		() =>
+			provideRpc(
+				Effect.gen(function* () {
+					const registryRef = yield* ProjectRegistryTag;
+					yield* Ref.update(registryRef, (registry) =>
+						HashMap.set(
+							HashMap.set(registry, "project", {
+								_tag: "Ready" as const,
+								project: {
+									slug: "project",
+									directory: "/tmp/project",
+									title: "Project",
+									lastUsed: 1_000,
+								},
+							}),
+							"uncached",
+							{
+								_tag: "Ready" as const,
+								project: {
+									slug: "uncached",
+									directory: "/tmp/uncached",
+									title: "Uncached",
+									lastUsed: 2_000,
+								},
+							},
+						),
+					);
+
+					const client = yield* RpcTest.makeClient(IpcRpcGroup);
+					const result = yield* client.GetStatus({});
+					const cached = result.projects.find(
+						(project) => project.slug === "project",
+					);
+					const uncached = result.projects.find(
+						(project) => project.slug === "uncached",
+					);
+
+					expect(cached).toEqual({
+						slug: "project",
+						directory: "/tmp/project",
+						title: "Project",
+						status: "ready",
+						lastUsed: 1_000,
+						sse: {
+							connected: true,
+							lastEventAt: 1_234,
+							reconnectCount: 2,
+							stale: false,
+						},
+					});
+					expect(Object.hasOwn(cached ?? {}, "sse")).toBe(true);
+					expect(uncached).toEqual({
+						slug: "uncached",
+						directory: "/tmp/uncached",
+						title: "Uncached",
+						status: "ready",
+						lastUsed: 2_000,
+					});
+					expect(Object.hasOwn(uncached ?? {}, "sse")).toBe(false);
+				}),
+				{
+					sessionCount: 3,
+					clients: 0,
+					isProcessing: false,
+					sse: {
+						connected: true,
+						lastEventAt: 1_234,
+						reconnectCount: 2,
+						stale: false,
+					},
+				},
+			),
+	);
+
+	it.effect("lists unmanaged OpenCode instances with driver and status", () =>
+		provideRpc(
+			Effect.gen(function* () {
+				const client = yield* RpcTest.makeClient(IpcRpcGroup);
+				const added = yield* client.InstanceAdd({
+					name: "Remote OpenCode",
+					managed: false,
+					url: "https://opencode.example.test",
+				});
+
+				expect(added.instance).toMatchObject({
+					id: "remote-opencode",
+					driver: "opencode",
+					managed: false,
+					status: "starting",
+					url: "https://opencode.example.test",
+				});
+
+				const listed = yield* client.InstanceList({});
+				expect(
+					listed.instances.find(
+						(instance) => instance.id === "remote-opencode",
+					),
+				).toMatchObject({
+					driver: "opencode",
+					managed: false,
+					status: "starting",
+					url: "https://opencode.example.test",
+				});
+			}),
+		),
+	);
+
+	it.effect("lists Claude instances and treats start and stop as no-ops", () =>
+		provideRpc(
+			Effect.gen(function* () {
+				const client = yield* RpcTest.makeClient(IpcRpcGroup);
+				const added = yield* client.InstanceAdd({
+					name: "Work Claude",
+					managed: false,
+					driver: "claude",
+					configDir: "/profiles/work",
+				});
+
+				expect(added.instance).toMatchObject({
+					id: "work-claude",
+					name: "Work Claude",
+					driver: "claude",
+					configDir: "/profiles/work",
+					managed: false,
+					status: "healthy",
+				});
+
+				expect(yield* client.InstanceStart({ id: "work-claude" })).toEqual({
+					ok: true,
+				});
+				expect(yield* client.InstanceStop({ id: "work-claude" })).toEqual({
+					ok: true,
+				});
+				const updated = yield* client.InstanceUpdate({
+					id: "work-claude",
+					driver: "claude",
+					configDir: "/profiles/personal",
+				});
+				expect(updated.instance).toMatchObject({
+					driver: "claude",
+					configDir: "/profiles/personal",
+					status: "healthy",
+				});
+
+				const listed = yield* client.InstanceList({});
+				expect(
+					listed.instances.find((instance) => instance.id === "work-claude"),
+				).toMatchObject({
+					driver: "claude",
+					configDir: "/profiles/personal",
+					status: "healthy",
+				});
 			}),
 		),
 	);
@@ -370,6 +563,81 @@ describe("IPC RPC request group", () => {
 			);
 			expect(Either.isLeft(result)).toBe(true);
 		}
+	});
+
+	it("validates Claude InstanceAdd payloads without changing OpenCode rules", () => {
+		const claude = Schema.decodeUnknownEither(IpcTaggedRequestSchema)({
+			_tag: "InstanceAdd",
+			name: "Work Claude",
+			managed: false,
+			driver: "claude",
+			configDir: "/profiles/work",
+		});
+		expect(Either.isRight(claude)).toBe(true);
+
+		const invalidClaudeRequests = [
+			{
+				request: {
+					_tag: "InstanceAdd",
+					name: "Claude With Port",
+					managed: false,
+					driver: "claude",
+					port: 4096,
+				},
+				error: "Claude instances must not include 'port'",
+			},
+			{
+				request: {
+					_tag: "InstanceAdd",
+					name: "Managed Claude",
+					managed: true,
+					driver: "claude",
+				},
+				error: "Claude instances must not be managed",
+			},
+			{
+				request: {
+					_tag: "InstanceAdd",
+					name: "Claude With URL",
+					managed: false,
+					driver: "claude",
+					url: "http://localhost:4096",
+				},
+				error: "Claude instances must not include 'url'",
+			},
+		];
+
+		for (const { request, error } of invalidClaudeRequests) {
+			const result = Schema.decodeUnknownEither(IpcTaggedRequestSchema)(
+				request,
+			);
+			expect(Either.isLeft(result)).toBe(true);
+			if (Either.isLeft(result)) {
+				expect(String(result.left)).toContain(error);
+			}
+		}
+
+		expect(
+			Either.isLeft(
+				Schema.decodeUnknownEither(IpcTaggedRequestSchema)({
+					_tag: "InstanceAdd",
+					name: "Managed OpenCode Missing Port",
+					managed: true,
+					driver: "opencode",
+				}),
+			),
+		).toBe(true);
+		expect(
+			Either.isRight(
+				Schema.decodeUnknownEither(IpcTaggedRequestSchema)({
+					_tag: "InstanceAdd",
+					name: "Managed OpenCode",
+					managed: true,
+					driver: "opencode",
+					port: 4096,
+				}),
+			),
+		).toBe(true);
 	});
 
 	it("encodes legacy add_project commands to _tag request payloads", () => {

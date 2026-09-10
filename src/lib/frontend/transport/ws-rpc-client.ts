@@ -1,6 +1,7 @@
 import { Socket } from "@effect/platform";
 import { RpcClient, RpcSerialization } from "@effect/rpc";
 import { Effect } from "effect";
+import { ProviderInstanceIdSchema } from "../../contracts/provider-instance.js";
 import type { SessionPermissionMode } from "../../shared-types.js";
 import { runTransportEffect } from "./runtime.js";
 import {
@@ -46,11 +47,13 @@ export interface CancelSessionRpcInput {
 export interface GetModelsRpcInput {
 	readonly projectSlug: string;
 	readonly sessionId?: string;
+	readonly instanceId?: string;
 }
 
 export interface GetAgentsRpcInput {
 	readonly projectSlug: string;
 	readonly sessionId?: string;
+	readonly instanceId?: string;
 }
 
 export interface GetCommandsRpcInput {
@@ -96,6 +99,26 @@ export interface RenameInstanceRpcInput {
 	readonly name: string;
 }
 
+export interface AddInstanceRpcInput {
+	readonly projectSlug: string;
+	readonly name: string;
+	readonly driver?: string;
+	readonly managed?: boolean;
+	readonly port?: number;
+	readonly url?: string;
+	readonly env?: Record<string, string>;
+	readonly configDir?: string;
+}
+
+export interface UpdateInstanceRpcInput {
+	readonly projectSlug: string;
+	readonly instanceId: string;
+	readonly name?: string;
+	readonly port?: number;
+	readonly env?: Record<string, string>;
+	readonly configDir?: string;
+}
+
 export interface ScanNowRpcInput {
 	readonly projectSlug: string;
 }
@@ -132,6 +155,8 @@ export interface CreateSessionRpcInput {
 	readonly originId: string;
 	readonly title?: string;
 	readonly requestId?: string;
+	/** Harness instance to bind the session to (preferred over providerId). */
+	readonly instanceId?: string;
 	readonly providerId?: string;
 }
 
@@ -497,6 +522,32 @@ const callRenameInstance = (input: RenameInstanceRpcInput) =>
 		Effect.provide(RpcSerialization.layerJson),
 	);
 
+const callAddInstance = (input: AddInstanceRpcInput) =>
+	Effect.scoped(
+		Effect.gen(function* () {
+			const client = yield* RpcClient.make(WsRpcGroup);
+			return yield* client.AddInstance(input);
+		}),
+	).pipe(
+		Effect.provide(RpcClient.layerProtocolSocket()),
+		Effect.provide(Socket.layerWebSocket(makeWsRpcUrl(input.projectSlug))),
+		Effect.provide(Socket.layerWebSocketConstructorGlobal),
+		Effect.provide(RpcSerialization.layerJson),
+	);
+
+const callUpdateInstance = (input: UpdateInstanceRpcInput) =>
+	Effect.scoped(
+		Effect.gen(function* () {
+			const client = yield* RpcClient.make(WsRpcGroup);
+			return yield* client.UpdateInstance(input);
+		}),
+	).pipe(
+		Effect.provide(RpcClient.layerProtocolSocket()),
+		Effect.provide(Socket.layerWebSocket(makeWsRpcUrl(input.projectSlug))),
+		Effect.provide(Socket.layerWebSocketConstructorGlobal),
+		Effect.provide(RpcSerialization.layerJson),
+	);
+
 const callScanNow = (input: ScanNowRpcInput) =>
 	Effect.scoped(
 		Effect.gen(function* () {
@@ -590,6 +641,9 @@ const callCreateSession = (input: CreateSessionRpcInput) =>
 				originId: input.originId,
 				...(input.title != null ? { title: input.title } : {}),
 				...(input.requestId != null ? { requestId: input.requestId } : {}),
+				...(input.instanceId != null
+					? { instanceId: ProviderInstanceIdSchema.make(input.instanceId) }
+					: {}),
 				...(input.providerId != null ? { providerId: input.providerId } : {}),
 			});
 		}),
@@ -1120,6 +1174,18 @@ export async function renameInstanceRpc(
 	input: RenameInstanceRpcInput,
 ): Promise<InstanceListResponse> {
 	return await runTransportEffect(callRenameInstance(input));
+}
+
+export async function addInstanceRpc(
+	input: AddInstanceRpcInput,
+): Promise<InstanceListResponse> {
+	return await runTransportEffect(callAddInstance(input));
+}
+
+export async function updateInstanceRpc(
+	input: UpdateInstanceRpcInput,
+): Promise<InstanceListResponse> {
+	return await runTransportEffect(callUpdateInstance(input));
 }
 
 export async function scanNowRpc(

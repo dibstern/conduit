@@ -3,6 +3,7 @@
 // Converts SQLite MessageWithParts[] → HistoryMessage[] for session_switched messages.
 // Pure conversion with no I/O.
 
+import { isSameModelIdentity } from "../provider/claude/claude-api-model-id.js";
 import type {
 	HistoryMessage,
 	HistoryMessagePart,
@@ -36,6 +37,22 @@ function parseObjectJson(value: string): Record<string, unknown> | undefined {
 }
 
 function partRowToHistoryPart(row: MessagePartRow): HistoryMessagePart {
+	if (row.type === "compaction") {
+		const metadata =
+			row.metadata != null ? parseObjectJson(row.metadata) : undefined;
+		return {
+			id: row.id,
+			type: "compaction",
+			...(row.text ? { text: row.text } : {}),
+			...(typeof metadata?.["preTokens"] === "number"
+				? { preTokens: metadata["preTokens"] }
+				: {}),
+			...(typeof metadata?.["postTokens"] === "number"
+				? { postTokens: metadata["postTokens"] }
+				: {}),
+		};
+	}
+
 	if (row.type === "file") {
 		const metadata =
 			row.metadata != null ? parseObjectJson(row.metadata) : undefined;
@@ -129,11 +146,31 @@ export function messageRowsToHistory(
 			...(row.text ? { text: row.text } : {}),
 			parts,
 			...(row.cost != null ? { cost: row.cost } : {}),
-			...(row.tokens_in != null || row.tokens_out != null
+			...(row.role === "user" && row.modelExecution
+				? {
+						modelExecution: {
+							...row.modelExecution,
+							...(row.modelExecution.expectedModel === undefined
+								? {}
+								: {
+										drifted: !isSameModelIdentity(
+											row.modelExecution.actualModel,
+											row.modelExecution.expectedModel,
+										),
+									}),
+						},
+					}
+				: {}),
+			...(row.tokens_in != null ||
+			row.tokens_out != null ||
+			row.context_window != null
 				? {
 						tokens: {
 							...(row.tokens_in != null ? { input: row.tokens_in } : {}),
 							...(row.tokens_out != null ? { output: row.tokens_out } : {}),
+							...(row.context_window != null
+								? { context_window: row.context_window }
+								: {}),
 							...(row.tokens_cache_read != null ||
 							row.tokens_cache_write != null
 								? {

@@ -236,6 +236,26 @@ describe("DaemonHandleTag", () => {
 		() => {
 			const lifecycleContext = makeDaemonLifecycleContext("/tmp/relay.sock");
 			lifecycleContext.clientCount = 7;
+			const relayHealthBySlug = new Map([
+				[
+					"existing",
+					{
+						connected: true,
+						lastEventAt: 101,
+						reconnectCount: 1,
+						stale: false,
+					},
+				],
+				[
+					"second",
+					{
+						connected: false,
+						lastEventAt: 202,
+						reconnectCount: 3,
+						stale: false,
+					},
+				],
+			]);
 			const relayCacheStub = Layer.succeed(RelayCacheTag, {
 				get: (slug: string) =>
 					Effect.succeed({
@@ -243,28 +263,37 @@ describe("DaemonHandleTag", () => {
 						wsHandler: { handleUpgrade: () => {} },
 						rpcWsHandler: { handleUpgrade: () => {} },
 						getStatusSnapshot: () => ({
-							sessionCount: slug === "existing" ? 5 : 0,
+							sessionCount: slug === "existing" ? 5 : 4,
 							clients: 0,
 							isProcessing: false,
+							sse: relayHealthBySlug.get(slug) ?? {
+								connected: false,
+								lastEventAt: null,
+								reconnectCount: 0,
+								stale: false,
+							},
 						}),
 						stop: () => {},
 					}),
-				peek: (slug: string) =>
-					slug === "existing"
-						? Effect.succeed(
+				peek: (slug: string) => {
+					const sse = relayHealthBySlug.get(slug);
+					return sse === undefined
+						? Effect.succeed(Option.none())
+						: Effect.succeed(
 								Option.some({
 									slug,
 									wsHandler: { handleUpgrade: () => {} },
 									rpcWsHandler: { handleUpgrade: () => {} },
 									getStatusSnapshot: () => ({
-										sessionCount: 5,
+										sessionCount: slug === "existing" ? 5 : 4,
 										clients: 0,
 										isProcessing: false,
+										sse,
 									}),
 									stop: () => {},
 								}),
-							)
-						: Effect.succeed(Option.none()),
+							);
+				},
 				invalidate: () => Effect.void,
 			});
 			const handleDeps = Layer.mergeAll(
@@ -292,6 +321,18 @@ describe("DaemonHandleTag", () => {
 						title: "Existing",
 						lastUsed: 100,
 					},
+					{
+						slug: "second",
+						directory: "/tmp/second",
+						title: "Second",
+						lastUsed: 90,
+					},
+					{
+						slug: "uncached",
+						directory: "/tmp/uncached",
+						title: "Uncached",
+						lastUsed: 80,
+					},
 				]),
 				relayCacheStub,
 				Layer.succeed(DaemonLifecycleContextTag, lifecycleContext),
@@ -316,12 +357,23 @@ describe("DaemonHandleTag", () => {
 				const instances = yield* handle.getInstances();
 				expect(initialStatus.port).toBe(49876);
 				expect(initialStatus.host).toBe("127.0.0.1");
-				expect(initialStatus.projectCount).toBe(1);
-				expect(initialStatus.sessionCount).toBe(5);
+				expect(initialStatus.projectCount).toBe(3);
+				expect(initialStatus.sessionCount).toBe(9);
 				expect(initialStatus.clientCount).toBe(7);
 				expect(initialStatus.pinEnabled).toBe(true);
 				expect(initialStatus.tlsEnabled).toBe(true);
 				expect(initialStatus.keepAwake).toBe(true);
+				expect(
+					initialStatus.projects.find((project) => project.slug === "existing")
+						?.sse,
+				).toEqual(relayHealthBySlug.get("existing"));
+				expect(
+					initialStatus.projects.find((project) => project.slug === "second")
+						?.sse,
+				).toEqual(relayHealthBySlug.get("second"));
+				expect(
+					initialStatus.projects.find((project) => project.slug === "uncached"),
+				).not.toHaveProperty("sse");
 				expect(initialOnboardingPort).toBeNull();
 				expect(instances.map((instance) => instance.id)).toEqual(["default"]);
 				expect(typeof handle.discoverProjects).toBe("function");
@@ -337,6 +389,8 @@ describe("DaemonHandleTag", () => {
 				expect(projects.map((project) => project.slug).sort()).toEqual([
 					"custom-slug",
 					"existing",
+					"second",
+					"uncached",
 				]);
 				const configAfterAdd = yield* Ref.get(configRef);
 				expect(configAfterAdd.dismissedPaths.has("/tmp/new-project")).toBe(
@@ -345,9 +399,11 @@ describe("DaemonHandleTag", () => {
 
 				yield* handle.removeProject("existing");
 				const afterRemove = yield* handle.getStatus();
-				expect(afterRemove.projectCount).toBe(1);
+				expect(afterRemove.projectCount).toBe(3);
 				expect(afterRemove.projects.map((project) => project.slug)).toEqual([
 					"custom-slug",
+					"second",
+					"uncached",
 				]);
 				const configAfterRemove = yield* Ref.get(configRef);
 				expect(configAfterRemove.dismissedPaths.has("/tmp/existing")).toBe(

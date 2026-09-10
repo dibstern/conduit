@@ -10,6 +10,7 @@ const SESSION_HANDLES = [
 	"session.renamed",
 	"session.status",
 	"session.provider_changed",
+	"session.permission_mode_changed",
 	"turn.completed",
 	"turn.error",
 	"message.created",
@@ -123,6 +124,14 @@ export class SessionProjector implements Projector {
 			db.execute(
 				"UPDATE sessions SET provider = ?, updated_at = ? WHERE id = ?",
 				[event.data.newProvider, event.createdAt, event.data.sessionId],
+			);
+			return;
+		}
+
+		if (isEventType(event, "session.permission_mode_changed")) {
+			db.execute(
+				"UPDATE sessions SET permission_mode = ?, updated_at = ? WHERE id = ?",
+				[event.data.mode, event.createdAt, event.data.sessionId],
 			);
 			return;
 		}

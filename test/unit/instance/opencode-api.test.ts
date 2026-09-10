@@ -436,6 +436,31 @@ describe("OpenCodeAPI", () => {
 		]);
 	});
 
+	it("event.subscribe() forwards SSE retry-ownership options to the SDK", async () => {
+		const sdk = makeStubSdk();
+		const gaps = makeStubGaps();
+		const api = new OpenCodeAPI({
+			sdk,
+			gapEndpoints: gaps,
+			baseUrl: "http://localhost:4096",
+			authHeaders: {},
+		});
+		const controller = new AbortController();
+		const onSseError = vi.fn();
+		await api.event.subscribe({
+			signal: controller.signal,
+			sseMaxRetryAttempts: 1,
+			onSseError,
+		});
+		// If the wrapper stops forwarding these, the SDK silently retries
+		// forever again and transport errors never surface (bd n2x).
+		expect(sdk.event.subscribe).toHaveBeenCalledWith({
+			signal: controller.signal,
+			sseMaxRetryAttempts: 1,
+			onSseError,
+		});
+	});
+
 	it("session.get() delegates to sdk.session.get()", async () => {
 		const sdk = makeStubSdk();
 		const gaps = makeStubGaps();

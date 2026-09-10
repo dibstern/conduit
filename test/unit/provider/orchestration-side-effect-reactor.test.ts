@@ -5,6 +5,10 @@ import {
 	decodeProviderRuntimeEvent,
 	type ProviderRuntimeEvent,
 } from "../../../src/lib/contracts/providers/provider-runtime-event.js";
+import {
+	type DaemonConfig,
+	resolveProviderRoutingDriver,
+} from "../../../src/lib/daemon/config-persistence.js";
 import { runMigrations } from "../../../src/lib/persistence/migrations.js";
 import { schemaMigrations } from "../../../src/lib/persistence/schema.js";
 import { SqliteClient } from "../../../src/lib/persistence/sqlite-client.js";
@@ -12,6 +16,7 @@ import { ProviderInstanceFailure } from "../../../src/lib/provider/errors.js";
 import { ProviderSideEffectReactor } from "../../../src/lib/provider/orchestration-side-effect-reactor.js";
 import { ProviderRegistry } from "../../../src/lib/provider/provider-registry.js";
 import type {
+	EventSink,
 	ProviderCapabilities,
 	ProviderInstance,
 	SendTurnInput,
@@ -101,6 +106,43 @@ describe("ProviderSideEffectReactor", () => {
 		).toEqual({ status: "side_effect_completed" });
 	});
 
+	it("routes a durable named-instance command through its driver runtime", async () => {
+		const config: DaemonConfig = {
+			pid: 1234,
+			port: 2633,
+			pinHash: null,
+			tls: false,
+			debug: false,
+			keepAwake: false,
+			dangerouslySkipPermissions: false,
+			projects: [],
+			instances: [
+				{
+					id: "work-claude",
+					name: "Work Claude",
+					port: 0,
+					managed: false,
+					driver: "claude",
+				},
+			],
+		};
+		const sendTurn = vi.fn((_input: SendTurnInput) =>
+			Effect.succeed(completedTurn),
+		);
+		seedSendTurnOutbox(db, { providerId: "work-claude" });
+		const reactor = new ProviderSideEffectReactor({
+			db,
+			registry: new ProviderRegistry([makeProvider(sendTurn)]),
+			ingestion: { ingest: vi.fn(() => Effect.succeed(1)) },
+			resolveProviderDriver: (providerId) =>
+				resolveProviderRoutingDriver(config, providerId),
+		});
+
+		await Effect.runPromise(reactor.drain());
+
+		expect(sendTurn).toHaveBeenCalledTimes(1);
+	});
+
 	it("hands provider output to provider runtime ingestion", async () => {
 		const runtimeEvent = decodeProviderRuntimeEvent({
 			eventId: "runtime-text-1",
@@ -144,6 +186,63 @@ describe("ProviderSideEffectReactor", () => {
 		await Effect.runPromise(reactor.drain());
 
 		expect(ingest).toHaveBeenCalledWith(runtimeEvent);
+	});
+
+	// Regression: streamed provider output must mark the session as alive on the
+	// same-process dispatch path. The reactor sink used to push straight to
+	// ingestion, so the relay's 120s processing timeout was only ever reset by a
+	// permission request — any longer Claude turn without one emitted a false
+	// "No response received" PROCESSING_TIMEOUT error mid-turn.
+	it("notes relay activity for streamed provider output", async () => {
+		const runtimeEvent = decodeProviderRuntimeEvent({
+			eventId: "runtime-text-2",
+			type: "text.delta",
+			providerId: "claude",
+			sessionId: "session-1",
+			turnId: "turn-1",
+			providerRefs: {},
+			rawSource: { kind: "test.provider-runtime" },
+			createdAt: 1000,
+			data: { messageId: "message-1", partId: "text-1", text: "streamed" },
+		});
+		const interactions = {
+			push: vi.fn(() => Effect.void),
+			requestPermission: vi.fn(() => Effect.succeed({ decision: "once" })),
+			requestQuestion: vi.fn(() => Effect.succeed({})),
+			resolvePermission: vi.fn(() => Effect.void),
+			resolveQuestion: vi.fn(() => Effect.void),
+			noteActivity: vi.fn(),
+		} as unknown as EventSink & { noteActivity: () => void };
+		const sendTurn = vi.fn(
+			(
+				input: SendTurnInput,
+			): Effect.Effect<TurnResult, ProviderInstanceFailure> =>
+				input.eventSink.push(runtimeEvent).pipe(
+					Effect.as(completedTurn),
+					Effect.mapError(
+						(cause) =>
+							new ProviderInstanceFailure({
+								providerId: "claude",
+								operation: "sendTurn",
+								cause,
+							}),
+					),
+				),
+		);
+		const ingest = vi.fn((_event: ProviderRuntimeEvent) => Effect.succeed(1));
+		seedSendTurnOutbox(db);
+		const reactor = new ProviderSideEffectReactor({
+			db,
+			registry: new ProviderRegistry([makeProvider(sendTurn)]),
+			ingestion: { ingest },
+		});
+
+		await Effect.runPromise(reactor.runCommand("cmd-1", interactions));
+
+		expect(interactions.noteActivity).toHaveBeenCalled();
+		// Output still streams only through the durable ingestion seam.
+		expect(ingest).toHaveBeenCalledWith(runtimeEvent);
+		expect(interactions.push).not.toHaveBeenCalled();
 	});
 
 	it.effect("backs off retryable provider failures without hot looping", () =>
@@ -625,6 +724,7 @@ function seedSendTurnOutbox(
 	options: {
 		readonly commandId?: string;
 		readonly payloadJson?: string;
+		readonly providerId?: string;
 		readonly requestSequence?: number;
 	} = {},
 ): void {
@@ -658,7 +758,7 @@ function seedSendTurnOutbox(
 			commandId,
 			"project-1",
 			"session-1",
-			"claude",
+			options.providerId ?? "claude",
 			"send_turn",
 			options.payloadJson ??
 				JSON.stringify({

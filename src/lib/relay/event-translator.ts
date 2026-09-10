@@ -444,6 +444,9 @@ export function translateMessageUpdated(
 			output: msg.tokens?.output ?? 0,
 			cache_read: msg.tokens?.cache?.read ?? 0,
 			cache_creation: msg.tokens?.cache?.write ?? 0,
+			...(msg.tokens?.contextWindow
+				? { context_window: msg.tokens.contextWindow }
+				: {}),
 		},
 		cost: msg.cost ?? 0,
 		duration:

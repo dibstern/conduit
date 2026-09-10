@@ -230,6 +230,8 @@ export const RelayFactoryLive = (
 					readonly name?: string;
 					readonly env?: Record<string, string>;
 					readonly port?: number;
+					readonly driver?: import("../../../contracts/provider-instance.js").ProviderDriverKind;
+					readonly configDir?: string;
 				},
 			) =>
 				runCallback(

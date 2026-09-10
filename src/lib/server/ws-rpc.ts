@@ -1,4 +1,9 @@
 import { Effect } from "effect";
+import { ProviderInstanceIdSchema } from "../contracts/provider-instance.js";
+import {
+	loadDaemonConfig,
+	resolveInstanceDriver,
+} from "../daemon/config-persistence.js";
 import { RateLimiterTag } from "../domain/relay/Layers/rate-limiter-layer.js";
 import { AgentServiceTag } from "../domain/relay/Services/agent-service.js";
 import { DirectoryListingServiceTag } from "../domain/relay/Services/directory-listing-service.js";
@@ -10,8 +15,14 @@ import {
 	LoggerTag,
 	WebSocketHandlerTag,
 } from "../domain/relay/Services/services.js";
-import { SessionManagerServiceTag } from "../domain/relay/Services/session-manager-service.js";
-import { setPermissionMode } from "../domain/relay/Services/session-overrides-state.js";
+import {
+	persistSessionPermissionMode,
+	SessionManagerServiceTag,
+} from "../domain/relay/Services/session-manager-service.js";
+import {
+	getPermissionMode,
+	setPermissionMode,
+} from "../domain/relay/Services/session-overrides-state.js";
 import { OpenCodeTerminalServiceTag } from "../domain/relay/Services/terminal-service.js";
 import { switchContextWindowForSession } from "../handlers/context-window.js";
 import {
@@ -49,6 +60,7 @@ import {
 	getHiddenEntries,
 	setHiddenEntriesForRelay,
 } from "../handlers/visibility.js";
+import { ProviderRegistryTag } from "../provider/provider-registry.js";
 import type { OpenCodeInstance, PermissionId } from "../shared-types.js";
 
 export {
@@ -180,9 +192,26 @@ export const WsRpcServerLayer = WsRpcGroup.toLayer({
 		Effect.gen(function* () {
 			const config = yield* ConfigTag;
 			const agentService = yield* AgentServiceTag;
-			const result = yield* agentService.listAgents(request.sessionId);
+			const instanceId =
+				request.instanceId === undefined
+					? undefined
+					: ProviderInstanceIdSchema.make(request.instanceId);
+			const daemonConfig =
+				instanceId === undefined ? null : loadDaemonConfig(config.configDir);
+			const instanceDriver =
+				instanceId === undefined || daemonConfig === null
+					? undefined
+					: resolveInstanceDriver(daemonConfig, instanceId);
+			const result = yield* agentService.listAgents(
+				request.sessionId,
+				instanceId,
+				instanceDriver,
+			);
 			return {
 				projectSlug: request.projectSlug,
+				...(result.instanceId === undefined
+					? {}
+					: { instanceId: result.instanceId }),
 				providerScope: result.providerScope,
 				agents: result.agents,
 				...(result.activeAgentId != null
@@ -394,6 +423,49 @@ export const WsRpcServerLayer = WsRpcGroup.toLayer({
 				instances,
 			};
 		}).pipe(Effect.catchAll(mapRpcFailure("RenameInstance"))),
+	AddInstance: (request) =>
+		Effect.gen(function* () {
+			const instanceService = yield* instanceServiceOrFail("AddInstance");
+			const name = request.name.trim();
+			if (!name) {
+				return yield* Effect.fail(
+					new WsRpcError({ message: "AddInstance failed: name is required" }),
+				);
+			}
+			const instances = yield* instanceService.add({
+				name,
+				...(request.driver !== undefined && { driver: request.driver }),
+				...(request.managed !== undefined && { managed: request.managed }),
+				...(request.port !== undefined && { port: request.port }),
+				...(request.url !== undefined && { url: request.url }),
+				...(request.env !== undefined && { env: { ...request.env } }),
+				...(request.configDir !== undefined && {
+					configDir: request.configDir,
+				}),
+			});
+			yield* broadcastInstanceList(instances);
+			return {
+				projectSlug: request.projectSlug,
+				instances,
+			};
+		}).pipe(Effect.catchAll(mapRpcFailure("AddInstance"))),
+	UpdateInstance: (request) =>
+		Effect.gen(function* () {
+			const instanceService = yield* instanceServiceOrFail("UpdateInstance");
+			const instances = yield* instanceService.update(request.instanceId, {
+				...(request.name !== undefined && { name: request.name }),
+				...(request.port !== undefined && { port: request.port }),
+				...(request.env !== undefined && { env: { ...request.env } }),
+				...(request.configDir !== undefined && {
+					configDir: request.configDir,
+				}),
+			});
+			yield* broadcastInstanceList(instances);
+			return {
+				projectSlug: request.projectSlug,
+				instances,
+			};
+		}).pipe(Effect.catchAll(mapRpcFailure("UpdateInstance"))),
 	ScanNow: (request) =>
 		Effect.gen(function* () {
 			const scanService = yield* ScanServiceTag;
@@ -637,18 +709,46 @@ export const WsRpcServerLayer = WsRpcGroup.toLayer({
 		),
 	SwitchPermissionMode: (request) =>
 		Effect.gen(function* () {
-			const wsHandler = yield* WebSocketHandlerTag;
+			const previousMode = yield* getPermissionMode(request.sessionId);
 			const log = yield* LoggerTag;
-			yield* setPermissionMode(request.sessionId, request.mode);
-			wsHandler.sendToSession(request.sessionId, {
-				type: "permission_mode_info",
-				mode: request.mode,
-			});
-			log.info(
-				`client=${request.originId ?? "rpc"} session=${request.sessionId} Switched permission mode to: ${request.mode}`,
+			yield* persistSessionPermissionMode(request.sessionId, request.mode);
+
+			return yield* Effect.gen(function* () {
+				const wsHandler = yield* WebSocketHandlerTag;
+				const registryOption = yield* Effect.serviceOption(ProviderRegistryTag);
+				if (registryOption._tag === "Some") {
+					const providerInstance = registryOption.value.getInstance("claude");
+					if (providerInstance?.setPermissionModeEffect) {
+						yield* providerInstance.setPermissionModeEffect(
+							request.sessionId,
+							request.mode,
+						);
+					}
+				}
+				yield* setPermissionMode(request.sessionId, request.mode);
+				wsHandler.sendToSession(request.sessionId, {
+					type: "permission_mode_info",
+					mode: request.mode,
+				});
+				log.info(
+					`client=${request.originId ?? "rpc"} session=${request.sessionId} Switched permission mode to: ${request.mode}`,
+				);
+				return { projectSlug: request.projectSlug, mode: request.mode };
+			}).pipe(
+				Effect.tapError(() =>
+					persistSessionPermissionMode(request.sessionId, previousMode).pipe(
+						Effect.catchAll((compensationError) =>
+							Effect.sync(() => {
+								log.error(
+									`session=${request.sessionId} Failed to restore permission mode to ${previousMode} after SwitchPermissionMode failure`,
+									compensationError,
+								);
+							}),
+						),
+					),
+				),
 			);
-			return { projectSlug: request.projectSlug, mode: request.mode };
-		}),
+		}).pipe(Effect.catchAll(mapRpcFailure("SwitchPermissionMode"))),
 	GetFileTree: (request) =>
 		getFileTreeEntries().pipe(
 			Effect.map((entries) => ({
@@ -725,6 +825,9 @@ export const WsRpcServerLayer = WsRpcGroup.toLayer({
 			const response = yield* getModelsResponse({
 				projectSlug: request.projectSlug,
 				...(request.sessionId != null ? { sessionId: request.sessionId } : {}),
+				...(request.instanceId != null
+					? { instanceId: request.instanceId }
+					: {}),
 			});
 			return {
 				...response,
@@ -774,6 +877,7 @@ export const WsRpcServerLayer = WsRpcGroup.toLayer({
 			clientId: request.originId,
 			...(request.title != null ? { title: request.title } : {}),
 			...(request.requestId != null ? { requestId: request.requestId } : {}),
+			...(request.instanceId != null ? { instanceId: request.instanceId } : {}),
 			...(request.providerId != null ? { providerId: request.providerId } : {}),
 		}).pipe(
 			Effect.map((session) => ({

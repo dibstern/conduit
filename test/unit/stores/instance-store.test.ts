@@ -1,6 +1,7 @@
 // ─── Instance Store Tests ────────────────────────────────────────────────────
 import { beforeEach, describe, expect, it } from "vitest";
 import {
+	applyInstanceListResponse,
 	clearInstanceState,
 	getHealthyInstances,
 	getInstanceById,
@@ -77,6 +78,45 @@ describe("Instance Store", () => {
 
 		// Should remain unchanged
 		expect(instanceState.instances).toHaveLength(1);
+	});
+
+	it("carries driver and configDir through an RPC instance list", () => {
+		applyInstanceListResponse({
+			projectSlug: "demo",
+			instances: [
+				{
+					id: "work-claude",
+					name: "Work Claude",
+					port: 0,
+					managed: false,
+					status: "healthy",
+					driver: "claude",
+					configDir: "/profiles/work",
+					restartCount: 0,
+					createdAt: 1,
+				},
+				{
+					id: "remote-opencode",
+					name: "Remote OpenCode",
+					port: 0,
+					managed: false,
+					status: "healthy",
+					driver: "opencode",
+					url: "https://opencode.example.test",
+					restartCount: 0,
+					createdAt: 1,
+				},
+			],
+		});
+
+		expect(getInstanceById("work-claude")).toMatchObject({
+			driver: "claude",
+			configDir: "/profiles/work",
+		});
+		expect(getInstanceById("remote-opencode")).toMatchObject({
+			driver: "opencode",
+			url: "https://opencode.example.test",
+		});
 	});
 
 	it("handleInstanceStatus updates a single instance status", () => {

@@ -548,6 +548,33 @@ describe("translateProviderRuntimeEventToDomain", () => {
 		);
 	});
 
+	it("maps all model resolution ids without normalization", () => {
+		const { events } = translateProviderRuntimeEventToDomain(
+			runtimeEvent({
+				eventId: "model-resolved",
+				type: "turn.model_resolved",
+				turnId: "turn-1",
+				data: {
+					requestedModel: "sonnet",
+					expectedModel: "claude-sonnet-5[1m]",
+					actualModel: "claude-fable-5",
+				},
+			}),
+		);
+
+		expect(events).toEqual([
+			expect.objectContaining({
+				eventId: "model-resolved",
+				type: "turn.model_resolved",
+				data: {
+					requestedModel: "sonnet",
+					expectedModel: "claude-sonnet-5[1m]",
+					actualModel: "claude-fable-5",
+				},
+			}),
+		]);
+	});
+
 	it("maps session, permission, and question events without provider-specific payload fields", () => {
 		const sequence = [
 			runtimeEvent({

@@ -10,6 +10,14 @@ import { join } from "node:path";
 
 import { Context, Effect, Layer, Option, Schema } from "effect";
 
+import {
+	defaultInstanceIdForDriver,
+	isKnownDriverKind,
+	migrateLegacyDefaultOpencodeInstanceId,
+	type ProviderDriverKind,
+	type ProviderInstanceId,
+	ProviderInstanceIdSchema,
+} from "../contracts/provider-instance.js";
 import { DEFAULT_CONFIG_DIR } from "../env.js";
 import type { RecentProject } from "../types.js";
 import {
@@ -53,6 +61,8 @@ export interface DaemonConfig {
 		managed: boolean;
 		env?: Record<string, string>;
 		url?: string;
+		driver?: ProviderDriverKind;
+		configDir?: string;
 	}>;
 	/** Directories the user explicitly removed — skip in auto-discovery. */
 	dismissedPaths?: string[];
@@ -83,6 +93,8 @@ const DaemonInstanceSchema = Schema.Struct({
 		Schema.Record({ key: Schema.String, value: Schema.String }),
 	),
 	url: Schema.optional(Schema.String),
+	driver: Schema.optional(Schema.String),
+	configDir: Schema.optional(Schema.String),
 });
 
 export const DaemonConfigSchema = Schema.Struct({
@@ -107,6 +119,113 @@ export class DaemonConfigTag extends Context.Tag("DaemonConfig")<
 	DaemonConfigTag,
 	DaemonConfig
 >() {}
+
+export interface ResolvedProviderInstance {
+	id: ProviderInstanceId;
+	driver: ProviderDriverKind;
+	configDir?: string;
+}
+
+export function resolveConfiguredInstances(
+	config: DaemonConfig,
+): ReadonlyArray<ResolvedProviderInstance> {
+	const explicitInstances = (config.instances ?? []).map((instance) => ({
+		id: ProviderInstanceIdSchema.make(instance.id),
+		driver: instance.driver ?? "opencode",
+		...(instance.configDir === undefined
+			? {}
+			: { configDir: instance.configDir }),
+	}));
+	const explicitIds = new Set(explicitInstances.map(({ id }) => id));
+	const defaults: ReadonlyArray<ResolvedProviderInstance> = [
+		{
+			id: defaultInstanceIdForDriver("opencode"),
+			driver: "opencode",
+		},
+		{
+			id: defaultInstanceIdForDriver("claude"),
+			driver: "claude",
+			...(config.claudeConfigDir === undefined
+				? {}
+				: { configDir: config.claudeConfigDir }),
+		},
+	];
+
+	return [
+		...explicitInstances,
+		...defaults.filter(({ id }) => !explicitIds.has(id)),
+	];
+}
+
+export function resolveInstanceDriver(
+	config: DaemonConfig,
+	instanceId: string,
+): ProviderDriverKind {
+	const configuredInstance = resolveConfiguredInstances(config).find(
+		({ id }) => id === instanceId,
+	);
+	if (configuredInstance !== undefined) {
+		return configuredInstance.driver;
+	}
+	if (isKnownDriverKind(instanceId)) {
+		return instanceId;
+	}
+	return "opencode";
+}
+
+export function resolveProviderRoutingDriver(
+	config: DaemonConfig | null,
+	instanceId: string,
+): ProviderDriverKind | undefined {
+	const configuredInstance = config
+		? resolveConfiguredInstances(config).find(({ id }) => id === instanceId)
+		: undefined;
+	if (configuredInstance !== undefined) {
+		return configuredInstance.driver;
+	}
+	return isKnownDriverKind(instanceId) ? instanceId : undefined;
+}
+
+/**
+ * Resolve the server base URL for a NAMED opencode-driver instance.
+ * Returns undefined for the default "opencode" id (callers fall back to the
+ * project-default client), for non-opencode drivers, and for unknown ids.
+ * Managed instances are spawned locally by the daemon; unmanaged instances
+ * point at a user-provided external URL.
+ */
+export function resolveOpenCodeInstanceUrl(
+	config: DaemonConfig | null,
+	instanceId: string,
+): string | undefined {
+	if (instanceId === defaultInstanceIdForDriver("opencode")) {
+		return undefined;
+	}
+	const configuredInstance = config
+		? config.instances?.find(({ id }) => id === instanceId)
+		: undefined;
+	if (
+		configuredInstance === undefined ||
+		(configuredInstance.driver ?? "opencode") !== "opencode"
+	) {
+		return undefined;
+	}
+	if (configuredInstance.managed === true) {
+		return `http://localhost:${configuredInstance.port}`;
+	}
+	return configuredInstance.url;
+}
+
+export function resolveClaudeInstanceConfigDir(
+	config: DaemonConfig | null,
+	instanceId: string,
+): string | undefined {
+	const configuredInstance = config
+		? resolveConfiguredInstances(config).find(({ id }) => id === instanceId)
+		: undefined;
+	return configuredInstance?.driver === "claude"
+		? configuredInstance.configDir
+		: undefined;
+}
 
 /** Default config for first-startup when no daemon.json exists. */
 function defaultDaemonConfig(): DaemonConfig {
@@ -152,7 +271,7 @@ export const ServerConfigLive = (configDir?: string) =>
 			// DaemonConfig uses exact optional properties (key absent, never
 			// undefined). The schema guarantees structural correctness.
 			const decoded = yield* Schema.decodeUnknown(DaemonConfigSchema)(json);
-			return decoded as unknown as DaemonConfig;
+			return migrateLegacyInstanceIds(decoded as unknown as DaemonConfig);
 		}),
 	);
 
@@ -185,12 +304,40 @@ export function getConfigDir(): string {
 
 // ─── Daemon Config ──────────────────────────────────────────────────────────
 
+/**
+ * Normalize the legacy default OpenCode instance id to the canonical one.
+ *
+ * Pre-driver-model installs stored the sole OpenCode server as instance id
+ * `"default"`; the driver+instance model canonicalizes the default OpenCode
+ * instance as `defaultInstanceIdForDriver("opencode") === "opencode"`. A
+ * lingering `"default"` id desyncs the config (and every project binding) from
+ * the composer rail, which keys OpenCode providers to `"opencode"` — leaving
+ * the OpenCode harness unpickable and duplicated. Rewriting the id to the
+ * canonical value on load makes the existing code correct end-to-end. URL
+ * resolution is preserved: the canonical `"opencode"` instance falls back to
+ * the project-default client (`config.opencodeUrl`, which defaults to probing
+ * localhost:4096 — the same server the legacy `"default"` instance pointed at).
+ *
+ * Idempotent; a no-op when there is no legacy OpenCode `"default"` instance or
+ * an `"opencode"` instance already exists (never creates a duplicate id).
+ */
+export function migrateLegacyInstanceIds(config: DaemonConfig): DaemonConfig {
+	if (config.instances === undefined) return config;
+	const migrated = migrateLegacyDefaultOpencodeInstanceId(
+		config.instances,
+		config.projects,
+	);
+	return migrated === null
+		? config
+		: { ...config, instances: migrated.instances, projects: migrated.projects };
+}
+
 /** Read and parse daemon.json. Returns null if missing or corrupt. */
 export function loadDaemonConfig(configDir?: string): DaemonConfig | null {
 	try {
 		const dir = resolveDir(configDir);
 		const data = readFileSync(join(dir, "daemon.json"), "utf-8");
-		return JSON.parse(data) as DaemonConfig;
+		return migrateLegacyInstanceIds(JSON.parse(data) as DaemonConfig);
 	} catch {
 		return null;
 	}

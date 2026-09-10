@@ -133,12 +133,14 @@ function makeEmptySessionReadQuery(provider: string): ReadQueryEffect {
 				parent_id: null,
 				fork_point_event: null,
 				last_message_at: null,
+				permission_mode: null,
 				created_at: 1,
 				updated_at: 1,
 			}),
 		),
 		getAllSessionStatuses: vi.fn(() => Effect.succeed({})),
 		listSessions: vi.fn(() => Effect.succeed([])),
+		getLatestTurnModelExecution: vi.fn(() => Effect.succeed(undefined)),
 		getSessionMessagesWithParts: vi.fn(() => Effect.succeed([])),
 	};
 }
@@ -223,12 +225,14 @@ describe("session handlers with Effect-native model service", () => {
 						parent_id: "parent-session",
 						fork_point_event: null,
 						last_message_at: 11,
+						permission_mode: null,
 						created_at: 10,
 						updated_at: 11,
 					}),
 				),
 				getAllSessionStatuses: vi.fn(() => Effect.succeed({})),
 				listSessions: vi.fn(() => Effect.succeed([])),
+				getLatestTurnModelExecution: vi.fn(() => Effect.succeed(undefined)),
 				getSessionMessagesWithParts: vi.fn(() =>
 					Effect.succeed([
 						{
@@ -242,6 +246,7 @@ describe("session handlers with Effect-native model service", () => {
 							tokens_out: null,
 							tokens_cache_read: null,
 							tokens_cache_write: null,
+							context_window: null,
 							is_streaming: 0,
 							created_at: 10,
 							updated_at: 11,
@@ -370,12 +375,14 @@ describe("session handlers with Effect-native model service", () => {
 					parent_id: null,
 					fork_point_event: null,
 					last_message_at: 11,
+					permission_mode: null,
 					created_at: 10,
 					updated_at: 11,
 				}),
 			),
 			getAllSessionStatuses: vi.fn(() => Effect.succeed({})),
 			listSessions: vi.fn(() => Effect.succeed([])),
+			getLatestTurnModelExecution: vi.fn(() => Effect.succeed(undefined)),
 			// Rows exist but carry no text — the shape the OpenCode runtime
 			// projection produces today (structure without content).
 			getSessionMessagesWithParts: vi.fn(() =>
@@ -391,6 +398,7 @@ describe("session handlers with Effect-native model service", () => {
 						tokens_out: null,
 						tokens_cache_read: null,
 						tokens_cache_write: null,
+						context_window: null,
 						is_streaming: 0,
 						created_at: 10,
 						updated_at: 11,

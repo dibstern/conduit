@@ -55,6 +55,17 @@ pnpm acceptance:mutation:visual     # mutate example values to measure test stre
 `:4173`, mocks the relay WebSocket (`test/e2e/helpers/ws-mock.ts`), and drives
 the live page with Playwright — no OpenCode/relay backend required.
 
+## Visual regions
+
+The `the <region> region visually matches <baseline> at <threshold> percent`
+step screenshots one DOM region:
+
+- `composer` — the composer/input area (`#input-area`).
+- `model-picker` — the harness instance-rail model-picker popover
+  (`#model-picker`); it must be open when the step runs.
+
+Other region ids resolve to `#<region>` directly.
+
 ## Baselines
 
 Baselines live at `acceptance/visual/baselines/<viewport>/<name>.png` and are

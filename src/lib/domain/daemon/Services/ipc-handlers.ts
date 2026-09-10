@@ -399,6 +399,8 @@ export const handleInstanceAdd = (
 		};
 		if (cmd.env !== undefined) config.env = cmd.env as Record<string, string>;
 		if (cmd.url !== undefined) config.url = cmd.url;
+		if (cmd.driver !== undefined) config.driver = cmd.driver;
+		if (cmd.configDir !== undefined) config.configDir = cmd.configDir;
 		return yield* tryInstanceMgmtOperation("addInstance", () => {
 			const instance = mgmt.addInstance(id, config);
 			mgmt.persistConfig();
@@ -510,11 +512,15 @@ export const handleInstanceUpdate = (
 				name?: string;
 				env?: Record<string, string>;
 				port?: number;
+				driver?: string;
+				configDir?: string;
 			} = {};
 			if (cmd.name !== undefined) updates.name = cmd.name;
 			if (cmd.env !== undefined)
 				updates.env = cmd.env as Record<string, string>;
 			if (cmd.port !== undefined) updates.port = cmd.port;
+			if (cmd.driver !== undefined) updates.driver = cmd.driver;
+			if (cmd.configDir !== undefined) updates.configDir = cmd.configDir;
 			const instance = mgmt.updateInstance(cmd.id, updates);
 			mgmt.persistConfig();
 			return { ok: true, instance } as IPCResponse;

@@ -159,6 +159,8 @@ export const rehydrateInstances: Effect.Effect<
 						managed: inst.managed,
 						...(inst.env != null && { env: inst.env }),
 						...(inst.url != null && { url: inst.url }),
+						...(inst.driver != null && { driver: inst.driver }),
+						...(inst.configDir != null && { configDir: inst.configDir }),
 					};
 					mgmt.addInstance(inst.id, config);
 				},
@@ -234,7 +236,9 @@ export const autoStartManagedDefault: Effect.Effect<
 	const mgmt = yield* InstanceMgmtTag;
 
 	yield* Effect.forEach(
-		state.instances.filter((i) => i.managed),
+		state.instances.filter(
+			(i) => i.managed && (i.driver ?? "opencode") === "opencode",
+		),
 		(inst: DaemonInstanceConfig) =>
 			Effect.tryPromise({
 				try: () => mgmt.startInstance(inst.id),

@@ -6,6 +6,7 @@ import { Effect } from "effect";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ClaudeEventPersistEffectError } from "../../../../src/lib/persistence/effect/claude-event-persist-effect.js";
 import type { CanonicalEvent } from "../../../../src/lib/persistence/events.js";
+import type { ClaudeCapabilitiesService } from "../../../../src/lib/provider/claude/claude-capabilities-service.js";
 import { ClaudeProviderInstance } from "../../../../src/lib/provider/claude/claude-provider-instance.js";
 import {
 	type ClaudeSubagentSdk,
@@ -21,14 +22,27 @@ import type {
 	SDKUserMessage,
 	SessionMessage,
 } from "../../../../src/lib/provider/claude/types.js";
+import type {
+	ModelInfo,
+	SendTurnInput,
+} from "../../../../src/lib/provider/types.js";
 import { getClaudeRuntimeSessionForTest } from "../../../helpers/claude-runtime-state.js";
 import {
 	createMockEventSink,
 	createMockQuery,
-	makeBaseSendTurnInput,
 	makeErrorResult,
+	makeBaseSendTurnInput as makeRawBaseSendTurnInput,
 	makeSuccessResult,
 } from "../../../helpers/mock-sdk.js";
+
+function makeBaseSendTurnInput(
+	overrides: Partial<SendTurnInput> = {},
+): SendTurnInput {
+	return makeRawBaseSendTurnInput({
+		model: { providerId: "claude", modelId: "claude-sonnet-4-5" },
+		...overrides,
+	});
+}
 
 async function readFirstPromptText(callArgs: unknown): Promise<string> {
 	const prompt = (callArgs as { prompt: AsyncIterable<SDKUserMessage> }).prompt;
@@ -72,6 +86,19 @@ function createQueryFromGenerator(
 		throw: gen.throw.bind(gen),
 		[Symbol.asyncIterator]: () => gen,
 	}) as unknown as Query;
+}
+
+function makeCapabilitiesService(
+	models: readonly ModelInfo[],
+	failure?: Error,
+): ClaudeCapabilitiesService & { get: ReturnType<typeof vi.fn> } {
+	return {
+		get: vi.fn(() =>
+			failure
+				? Effect.fail(failure)
+				: Effect.succeed({ models, commands: [], agents: [] }),
+		),
+	};
 }
 
 function delay(ms: number): Promise<void> {
@@ -153,6 +180,121 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 		expect(result.tokens.input).toBe(100);
 		expect(result.tokens.output).toBe(50);
 		expect(result.durationMs).toBe(1500);
+	});
+
+	it.each([
+		{ mode: "ask" as const, expectedPermissionMode: undefined },
+		{ mode: "acceptEdits" as const, expectedPermissionMode: undefined },
+		{ mode: "auto" as const, expectedPermissionMode: "auto" },
+		{ mode: "full" as const, expectedPermissionMode: undefined },
+	])("passes SDK permissionMode only for conduit $mode mode", async ({
+		mode,
+		expectedPermissionMode,
+	}) => {
+		queryFactorySpy = vi.fn(() => createMockQuery([makeSuccessResult()]));
+		const instance = new ClaudeProviderInstance({
+			workspaceRoot: workspace,
+			queryFactory: queryFactorySpy,
+		});
+
+		await Effect.runPromise(
+			instance.sendTurnEffect(
+				makeBaseSendTurnInput({
+					sessionId: `session-permission-${mode}`,
+					permissionMode: mode,
+				}),
+			),
+		);
+
+		const call = queryFactorySpy.mock.calls[0]?.[0] as {
+			readonly options: { readonly permissionMode?: string };
+		};
+		expect(call.options.permissionMode).toBe(expectedPermissionMode);
+		if (expectedPermissionMode === undefined) {
+			expect(call.options).not.toHaveProperty("permissionMode");
+		}
+	});
+
+	it("applies a permission-mode update that arrives during query construction", async () => {
+		const query = createMockQuery([makeSuccessResult()]);
+		let modeUpdate: Promise<void> | undefined;
+		let instance: ClaudeProviderInstance;
+		queryFactorySpy = vi.fn(() => {
+			modeUpdate = Effect.runPromise(
+				instance.setPermissionModeEffect("session-permission-race", "auto"),
+			);
+			return query;
+		});
+		instance = new ClaudeProviderInstance({
+			workspaceRoot: workspace,
+			queryFactory: queryFactorySpy,
+		});
+
+		await Effect.runPromise(
+			instance.sendTurnEffect(
+				makeBaseSendTurnInput({
+					sessionId: "session-permission-race",
+					permissionMode: "ask",
+				}),
+			),
+		);
+		if (!modeUpdate) {
+			throw new Error("query factory did not start the permission-mode update");
+		}
+		await modeUpdate;
+
+		expect(query.setPermissionMode).toHaveBeenCalledWith("auto");
+	});
+
+	it("rejects a model-less direct Claude call before query creation", async () => {
+		queryFactorySpy = vi.fn(() => createMockQuery([makeSuccessResult()]));
+		const instance = new ClaudeProviderInstance({
+			workspaceRoot: workspace,
+			queryFactory: queryFactorySpy,
+		});
+
+		const outcome = await Effect.runPromise(
+			Effect.either(
+				instance.sendTurnEffect(
+					makeRawBaseSendTurnInput({
+						sessionId: "session-model-required",
+					}),
+				),
+			),
+		);
+
+		expect(outcome._tag).toBe("Left");
+		if (outcome._tag === "Left") {
+			expect(outcome.left.message).toContain("model");
+		}
+		expect(queryFactorySpy).not.toHaveBeenCalled();
+	});
+
+	it("uses the turn's Claude config dir when creating the SDK query", async () => {
+		const mockQuery = createMockQuery([makeSuccessResult()]);
+		queryFactorySpy = vi.fn(() => mockQuery);
+		const instance = new ClaudeProviderInstance({
+			workspaceRoot: workspace,
+			queryFactory: queryFactorySpy,
+		});
+
+		await Effect.runPromise(
+			instance.sendTurnEffect(
+				makeBaseSendTurnInput({
+					sessionId: "session-named-instance",
+					configDir: "/instances/work-claude",
+				}),
+			),
+		);
+
+		const call = queryFactorySpy.mock.calls[0]?.[0] as {
+			readonly options: {
+				readonly env?: Record<string, string | undefined>;
+			};
+		};
+		expect(call.options.env?.["CLAUDE_CONFIG_DIR"]).toBe(
+			"/instances/work-claude",
+		);
 	});
 
 	it("uses the current session event sink for Claude permission callbacks", async () => {
@@ -2143,7 +2285,7 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 			instance.sendTurnEffect(
 				makeBaseSendTurnInput({
 					sessionId: "session-sonnet-1m",
-					model: { providerId: "claude", modelId: "claude-sonnet-4-5" },
+					model: { providerId: "claude", modelId: "claude-sonnet-4-6" },
 					contextWindow: "1m",
 				}),
 			),
@@ -2154,8 +2296,133 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 			unknown
 		>;
 		expect((callArgs["options"] as Record<string, unknown>)["model"]).toBe(
-			"claude-sonnet-4-5[1m]",
+			"claude-sonnet-4-6[1m]",
 		);
+	});
+
+	it("stores requested, outbound, and expected model ids before init is translated", async () => {
+		let releaseInit: (() => void) | undefined;
+		const initReady = new Promise<void>((resolve) => {
+			releaseInit = resolve;
+		});
+		const initMessage = {
+			type: "system",
+			subtype: "init",
+			model: "claude-sonnet-5[1m]",
+			session_id: "sdk-oracle-session",
+		} as unknown as SDKMessage;
+		const query = createQueryFromGenerator(
+			(async function* () {
+				await initReady;
+				yield initMessage;
+				yield makeSuccessResult() as SDKMessage;
+			})(),
+		);
+		const capabilitiesService = makeCapabilitiesService([
+			{
+				id: "sonnet",
+				name: "Sonnet",
+				providerId: "claude",
+				resolvedModel: "claude-sonnet-5",
+			},
+		]);
+		const instance = new ClaudeProviderInstance({
+			workspaceRoot: workspace,
+			queryFactory: vi.fn(() => query),
+			capabilitiesService,
+		});
+
+		const resultPromise = Effect.runPromise(
+			instance.sendTurnEffect(
+				makeBaseSendTurnInput({
+					sessionId: "session-oracle-before-init",
+					model: { providerId: "claude", modelId: "sonnet" },
+					contextWindow: "1m",
+				}),
+			),
+		);
+
+		await waitForAssertion(() => {
+			const ctx = getClaudeRuntimeSessionForTest<ClaudeSessionContext>(
+				instance,
+				"session-oracle-before-init",
+			);
+			expect(ctx).toMatchObject({
+				currentModel: "sonnet",
+				currentApiModelId: "sonnet[1m]",
+				expectedApiModelId: "claude-sonnet-5[1m]",
+			});
+		});
+		expect(capabilitiesService.get).toHaveBeenCalledWith("/tmp/ws");
+
+		releaseInit?.();
+		await resultPromise;
+	});
+
+	it("suppresses the expected model for a named agent", async () => {
+		const capabilitiesService = makeCapabilitiesService([
+			{
+				id: "sonnet",
+				name: "Sonnet",
+				providerId: "claude",
+				resolvedModel: "claude-sonnet-5",
+			},
+		]);
+		const instance = new ClaudeProviderInstance({
+			workspaceRoot: workspace,
+			queryFactory: vi.fn(() => createMockQuery([makeSuccessResult()])),
+			capabilitiesService,
+		});
+
+		await Effect.runPromise(
+			instance.sendTurnEffect(
+				makeBaseSendTurnInput({
+					sessionId: "session-agent-oracle",
+					model: { providerId: "claude", modelId: "sonnet" },
+					agent: "reviewer",
+				}),
+			),
+		);
+
+		const ctx = getClaudeRuntimeSessionForTest<ClaudeSessionContext>(
+			instance,
+			"session-agent-oracle",
+		);
+		expect(capabilitiesService.get).not.toHaveBeenCalled();
+		expect(ctx?.currentModel).toBe("sonnet");
+		expect(ctx?.currentApiModelId).toBe("sonnet");
+		expect(ctx?.expectedApiModelId).toBeUndefined();
+	});
+
+	it("degrades capability lookup failure without failing a modeled turn", async () => {
+		const capabilitiesService = makeCapabilitiesService(
+			[],
+			new Error("catalog unavailable"),
+		);
+		const instance = new ClaudeProviderInstance({
+			workspaceRoot: workspace,
+			queryFactory: vi.fn(() => createMockQuery([makeSuccessResult()])),
+			capabilitiesService,
+		});
+
+		const result = await Effect.runPromise(
+			instance.sendTurnEffect(
+				makeBaseSendTurnInput({
+					sessionId: "session-oracle-degraded",
+					model: { providerId: "claude", modelId: "sonnet" },
+				}),
+			),
+		);
+
+		const ctx = getClaudeRuntimeSessionForTest<ClaudeSessionContext>(
+			instance,
+			"session-oracle-degraded",
+		);
+		expect(result.status).toBe("completed");
+		expect(capabilitiesService.get).toHaveBeenCalledWith("/tmp/ws");
+		expect(ctx?.currentModel).toBe("sonnet");
+		expect(ctx?.currentApiModelId).toBe("sonnet");
+		expect(ctx?.expectedApiModelId).toBeUndefined();
 	});
 
 	it("uses the base SDK model id when contextWindow is 200k or absent", async () => {
@@ -2176,7 +2443,7 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 				instance.sendTurnEffect(
 					makeBaseSendTurnInput({
 						sessionId,
-						model: { providerId: "claude", modelId: "claude-sonnet-4-5" },
+						model: { providerId: "claude", modelId: "claude-sonnet-4-6" },
 						...(contextWindow ? { contextWindow } : {}),
 					}),
 				),
@@ -2187,13 +2454,17 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 				unknown
 			>;
 			expect((callArgs["options"] as Record<string, unknown>)["model"]).toBe(
-				"claude-sonnet-4-5",
+				"claude-sonnet-4-6",
 			);
 		}
 	});
 
-	it("does not apply the [1m] suffix to non-Sonnet models", async () => {
-		for (const modelId of ["claude-opus-4-5", "claude-haiku-4-5"]) {
+	it("does not apply the [1m] suffix to models without a selectable 1M option", async () => {
+		for (const modelId of [
+			"claude-opus-4-8",
+			"claude-opus-4-7",
+			"claude-haiku-4-5",
+		]) {
 			const resultMsg = makeSuccessResult();
 			const mockQuery = createMockQuery([resultMsg]);
 			queryFactorySpy = vi.fn(() => mockQuery);
@@ -2286,6 +2557,14 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 		const instance = new ClaudeProviderInstance({
 			workspaceRoot: workspace,
 			queryFactory: queryFactorySpy,
+			capabilitiesService: makeCapabilitiesService([
+				{
+					id: "claude-sonnet-4-6",
+					name: "Sonnet 4.6",
+					providerId: "claude",
+					resolvedModel: "claude-sonnet-4-6",
+				},
+			]),
 		});
 		const sink = createMockEventSink();
 
@@ -2295,13 +2574,23 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 					sessionId: "session-context-switch",
 					turnId: "turn-1",
 					eventSink: sink,
-					model: { providerId: "claude", modelId: "claude-sonnet-4-5" },
+					model: { providerId: "claude", modelId: "claude-sonnet-4-6" },
 					contextWindow: "200k",
 				}),
 			),
 		);
 		expect(turn1.status).toBe("completed");
 		expect(setModel).not.toHaveBeenCalled();
+		expect(
+			getClaudeRuntimeSessionForTest<ClaudeSessionContext>(
+				instance,
+				"session-context-switch",
+			),
+		).toMatchObject({
+			currentModel: "claude-sonnet-4-6",
+			currentApiModelId: "claude-sonnet-4-6",
+			expectedApiModelId: "claude-sonnet-4-6",
+		});
 
 		const turn2Promise = Effect.runPromise(
 			instance.sendTurnEffect(
@@ -2309,22 +2598,34 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 					sessionId: "session-context-switch",
 					turnId: "turn-2",
 					eventSink: sink,
-					model: { providerId: "claude", modelId: "claude-sonnet-4-5" },
+					model: { providerId: "claude", modelId: "claude-sonnet-4-6" },
 					contextWindow: "1m",
 				}),
 			),
 		);
+		await waitForAssertion(() => {
+			expect(setModel).toHaveBeenCalledWith("claude-sonnet-4-6[1m]");
+			expect(
+				getClaudeRuntimeSessionForTest<ClaudeSessionContext>(
+					instance,
+					"session-context-switch",
+				),
+			).toMatchObject({
+				currentModel: "claude-sonnet-4-6",
+				currentApiModelId: "claude-sonnet-4-6[1m]",
+				expectedApiModelId: "claude-sonnet-4-6[1m]",
+			});
+		});
 		resolveSecond?.();
 		const turn2 = await turn2Promise;
 		expect(turn2.status).toBe("completed");
 
 		const turn3Promise = Effect.runPromise(
 			instance.sendTurnEffect(
-				makeBaseSendTurnInput({
+				makeRawBaseSendTurnInput({
 					sessionId: "session-context-switch",
 					turnId: "turn-3",
 					eventSink: sink,
-					model: { providerId: "claude", modelId: "claude-sonnet-4-5" },
 					contextWindow: "200k",
 				}),
 			),
@@ -2333,8 +2634,18 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 		const turn3 = await turn3Promise;
 		expect(turn3.status).toBe("completed");
 
-		expect(setModel).toHaveBeenNthCalledWith(1, "claude-sonnet-4-5[1m]");
-		expect(setModel).toHaveBeenNthCalledWith(2, "claude-sonnet-4-5");
+		expect(setModel).toHaveBeenNthCalledWith(1, "claude-sonnet-4-6[1m]");
+		expect(setModel).toHaveBeenNthCalledWith(2, "claude-sonnet-4-6");
+		expect(
+			getClaudeRuntimeSessionForTest<ClaudeSessionContext>(
+				instance,
+				"session-context-switch",
+			),
+		).toMatchObject({
+			currentModel: "claude-sonnet-4-6",
+			currentApiModelId: "claude-sonnet-4-6",
+			expectedApiModelId: "claude-sonnet-4-6",
+		});
 	});
 
 	// ── Test 5: Stream consumer translates all messages ───────────────────

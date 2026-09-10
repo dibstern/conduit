@@ -968,6 +968,9 @@ export function handleResult(
 				outputTokens: usage?.output ?? lastMsg.outputTokens,
 				cacheRead: usage?.cache_read ?? lastMsg.cacheRead,
 				cacheWrite: usage?.cache_creation ?? lastMsg.cacheWrite,
+				...(usage?.context_window != null
+					? { context_window: usage.context_window }
+					: {}),
 				...(messageId != null && { messageId }),
 			};
 			setMessages(messages, msgs);
@@ -987,6 +990,9 @@ export function handleResult(
 		outputTokens: usage?.output,
 		cacheRead: usage?.cache_read,
 		cacheWrite: usage?.cache_creation,
+		...(usage?.context_window != null
+			? { context_window: usage.context_window }
+			: {}),
 		...(messageId != null && { messageId }),
 	};
 	setMessages(messages, [...getMessages(messages), resultMsg]);
@@ -994,7 +1000,8 @@ export function handleResult(
 	updateContextFromTokens(messages, usage);
 }
 
-/** Compute context window usage from token counts and current model's limit. */
+/** Compute context usage from token counts and the turn's effective window,
+ *  falling back to the current model limit for legacy result messages. */
 function updateContextFromTokens(
 	messages: SessionMessages,
 	usage:
@@ -1003,6 +1010,7 @@ function updateContextFromTokens(
 				output?: number;
 				cache_read?: number;
 				cache_creation?: number;
+				context_window?: number;
 		  }
 		| undefined,
 ): void {
@@ -1013,7 +1021,12 @@ function updateContextFromTokens(
 		(usage.cache_read ?? 0) +
 		(usage.cache_creation ?? 0);
 	if (total <= 0) return;
-	const limit = currentContextLimit();
+	const limit =
+		typeof usage.context_window === "number" &&
+		Number.isFinite(usage.context_window) &&
+		usage.context_window > 0
+			? usage.context_window
+			: currentContextLimit();
 	if (limit) {
 		// Clamp: context occupancy can never exceed the window; >100 means
 		// stale aggregate token data (pre-fix history rows).
@@ -1043,12 +1056,34 @@ export function restoreContextFromMessages(messages: SessionMessages): void {
 	const msgs = getMessages(messages);
 	for (let i = msgs.length - 1; i >= 0; i--) {
 		const m = msgs[i];
+		// A compaction divider defines context size when it is the most recent
+		// context-defining event (i.e. no real turn ran after `/compact`). The
+		// `/compact` turn itself reports 0 tokens, so its result is skipped below.
+		if (m?.type === "system" && typeof m.postTokens === "number") {
+			const limit = currentContextLimit();
+			if (limit !== undefined) {
+				messages.contextPercent = Math.min(
+					100,
+					Math.round((m.postTokens / limit) * 100),
+				);
+			}
+			return;
+		}
 		if (m?.type !== "result") continue;
+		const total =
+			(m.inputTokens ?? 0) +
+			(m.outputTokens ?? 0) +
+			(m.cacheRead ?? 0) +
+			(m.cacheWrite ?? 0);
+		// Skip zero-token results (e.g. the `/compact` turn) so the walk falls
+		// through to the compaction divider that carries the true post size.
+		if (total <= 0) continue;
 		updateContextFromTokens(messages, {
 			...(m.inputTokens != null && { input: m.inputTokens }),
 			...(m.outputTokens != null && { output: m.outputTokens }),
 			...(m.cacheRead != null && { cache_read: m.cacheRead }),
 			...(m.cacheWrite != null && { cache_creation: m.cacheWrite }),
+			...(m.context_window != null && { context_window: m.context_window }),
 		});
 		return;
 	}
@@ -1220,10 +1255,21 @@ function ensureSentDuringEpochOnLastUnrespondedUser(
 		if (m.type === "user") {
 			// Already has sentDuringEpoch — write-once, don't touch
 			if (m.sentDuringEpoch != null) return;
-			// Has an assistant response after it — not queued
+			// Any assistant-side content after it means the turn was answered.
+			// historyToChatMessages emits type:"assistant" only for TEXT parts,
+			// so a turn answered with only tool calls / thinking / a result bar
+			// has no "assistant" message. Checking for "assistant" alone would
+			// mistake those answered turns for queued ones and shimmer "Queued"
+			// on reload (rest-history is the only reload path for Claude sessions).
 			const hasResponse = msgs
 				.slice(i + 1)
-				.some((msg) => msg.type === "assistant");
+				.some(
+					(msg) =>
+						msg.type === "assistant" ||
+						msg.type === "tool" ||
+						msg.type === "thinking" ||
+						msg.type === "result",
+				);
 			if (hasResponse) return;
 			// No sentDuringEpoch and no response — set it
 			setMessages(
@@ -1291,6 +1337,34 @@ export function handleError(
 		addSystemMessage(activity, messages, message, "error", errorMeta);
 		// The turn is over — a non-RETRY error terminates it just like done.
 		finalizeTurn(activity, "error");
+	}
+}
+
+export function handleCompaction(
+	activity: SessionActivity,
+	messages: SessionMessages,
+	msg: Extract<RelayMessage, { type: "compaction" }>,
+): void {
+	requestScrollOnNextContent();
+	addSystemMessage(
+		activity,
+		messages,
+		msg.detail,
+		msg.state === "failed" ? "error" : "info",
+	);
+
+	if (
+		msg.state === "completed" &&
+		typeof msg.postTokens === "number" &&
+		msg.postTokens > 0
+	) {
+		const limit = currentContextLimit();
+		if (limit !== undefined) {
+			messages.contextPercent = Math.min(
+				100,
+				Math.round((msg.postTokens / limit) * 100),
+			);
+		}
 	}
 }
 

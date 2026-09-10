@@ -77,7 +77,7 @@
 		"test:storybook": "vitest run --config vitest.storybook.config.ts --project=storybook"
 	},
 	"dependencies": {
-		"@anthropic-ai/claude-agent-sdk": "0.3.207",
+		"@anthropic-ai/claude-agent-sdk": "0.3.258",
 		"@effect/experimental": "0.60.0",
 		"@effect/opentelemetry": "^0.63.0",
 		"@effect/platform": "^0.96.1",
@@ -85,7 +85,7 @@
 		"@effect/rpc": "0.75.1",
 		"@effect/sql": "0.51.1",
 		"@effect/sql-sqlite-node": "0.52.0",
-		"@opencode-ai/sdk": "1.17.18",
+		"@opencode-ai/sdk": "1.18.16",
 		"@opentelemetry/exporter-trace-otlp-http": "^0.215.0",
 		"@opentelemetry/sdk-trace-node": "^2.7.0",
 		"better-sqlite3": "^12.9.0",

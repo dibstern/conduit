@@ -35,7 +35,7 @@ const log = createLogger("relay-event-sink");
 const EDIT_TOOL_NAMES = new Set(["Edit", "Write", "NotebookEdit"]);
 
 function modeCoversAsk(mode: SessionPermissionMode, toolName: string): boolean {
-	if (mode === "auto") return true;
+	if (mode === "full") return true;
 	if (mode === "acceptEdits") return EDIT_TOOL_NAMES.has(toolName);
 	return false;
 }
@@ -180,6 +180,7 @@ export function createRelayEventSink(deps: RelayEventSinkDeps): RelayEventSink {
 		});
 
 	const sink: RelayEventSink = {
+		noteActivity: reset,
 		push(event: ProviderRuntimeEvent): Effect.Effect<void, unknown> {
 			return Effect.gen(function* () {
 				yield* Effect.sync(reset);
@@ -199,10 +200,19 @@ export function createRelayEventSink(deps: RelayEventSinkDeps): RelayEventSink {
 				// Persist to SQLite when available (before WS send for durability).
 				// Real persistence implements persistEvents for atomic multi-event mappings;
 				// older tests and adapters can still provide persistEvent.
-				if (persist && result.events.length > 0) {
+				// Compaction notices are UI-only EXCEPT the terminal "completed"
+				// boundary, which persists as a synthetic marker so the "Context
+				// compacted" divider survives a page reload. All states still go on
+				// the wire below (the send loop iterates the unfiltered result.events).
+				const persistentEvents = result.events.filter(
+					(domainEvent) =>
+						domainEvent.type !== "session.compaction" ||
+						domainEvent.data.state === "completed",
+				);
+				if (persist && persistentEvents.length > 0) {
 					if (persist.persistEvents) {
 						const persistResult = yield* Effect.either(
-							persist.persistEvents(result.events),
+							persist.persistEvents(persistentEvents),
 						);
 						if (persistResult._tag === "Left") {
 							yield* Effect.sync(() => {
@@ -213,7 +223,7 @@ export function createRelayEventSink(deps: RelayEventSinkDeps): RelayEventSink {
 							});
 						}
 					} else {
-						for (const domainEvent of result.events) {
+						for (const domainEvent of persistentEvents) {
 							const persistResult = yield* Effect.either(
 								persist.persistEvent(domainEvent),
 							);

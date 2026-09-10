@@ -11,6 +11,7 @@ import {
 	formatModelName,
 	getActiveContextWindowOptions,
 	getActiveModel,
+	getModelDisplayName,
 	handleAgentList,
 	handleCommandList,
 	handleContextWindowInfo,
@@ -57,6 +58,7 @@ beforeEach(() => {
 	discoveryState.currentContextWindow = "";
 	discoveryState.availableContextWindowOptions = [];
 	discoveryState.permissionMode = "ask";
+	discoveryState.modelExecution = null;
 });
 
 // ─── Pure helper: formatAgentLabel ──────────────────────────────────────────
@@ -93,6 +95,22 @@ describe("formatModelName", () => {
 	it("falls back to id when name is empty", () => {
 		const model: ModelInfo = { id: "m1", name: "", provider: "openai" };
 		expect(formatModelName(model)).toBe("m1");
+	});
+});
+
+describe("getModelDisplayName", () => {
+	it("resolves catalog names and falls back to the raw id", () => {
+		discoveryState.providers = [
+			{
+				id: "claude",
+				name: "Claude",
+				configured: true,
+				models: [{ id: "sonnet", name: "Sonnet 5", provider: "claude" }],
+			},
+		];
+
+		expect(getModelDisplayName("sonnet")).toBe("Sonnet 5");
+		expect(getModelDisplayName("claude-sonnet-5")).toBe("claude-sonnet-5");
 	});
 });
 
@@ -263,6 +281,12 @@ describe("applyGetModelsResponse", () => {
 				options: [{ value: "200k", label: "200K", isDefault: true }],
 			},
 			permissionMode: "acceptEdits",
+			modelExecution: {
+				requestedModel: "claude-sonnet",
+				expectedModel: "claude-sonnet-5",
+				actualModel: "claude-fable-4-0",
+				drifted: true,
+			},
 		};
 
 		applyGetModelsResponse(response);
@@ -277,6 +301,10 @@ describe("applyGetModelsResponse", () => {
 			{ value: "200k", label: "200K", isDefault: true },
 		]);
 		expect(discoveryState.permissionMode).toBe("acceptEdits");
+		expect(discoveryState.modelExecution).toEqual(response.modelExecution);
+
+		applyGetModelsResponse({ projectSlug: "project-a", providers: [] });
+		expect(discoveryState.modelExecution).toBeNull();
 	});
 });
 
@@ -474,6 +502,66 @@ describe("getActiveContextWindowOptions", () => {
 			{ value: "1m", label: "1M (beta)" },
 		]);
 	});
+
+	it("prefers the selected model's own options over the server list", () => {
+		const modelOptions = [
+			{ value: "200k", label: "200k" },
+			{ value: "1m", label: "1M", isDefault: true },
+		];
+		handleModelList(
+			msg({
+				type: "model_list",
+				providers: [
+					{
+						id: "claude",
+						name: "Claude",
+						configured: true,
+						models: [
+							{
+								id: "claude-opus-5",
+								name: "Opus 5",
+								provider: "claude",
+								contextWindowOptions: modelOptions,
+							},
+						],
+					},
+				],
+			}),
+		);
+		discoveryState.currentModelId = "claude-opus-5";
+		// Stale server list from a previously-selected model must not win.
+		discoveryState.availableContextWindowOptions = [
+			{ value: "200k", label: "200K", isDefault: true },
+		];
+
+		expect(getActiveContextWindowOptions()).toEqual(modelOptions);
+	});
+
+	it("falls back to the server list when the active model has no options", () => {
+		handleModelList(
+			msg({
+				type: "model_list",
+				providers: [
+					{
+						id: "claude",
+						name: "Claude",
+						configured: true,
+						models: [
+							{ id: "claude-haiku-4-5", name: "Haiku", provider: "claude" },
+						],
+					},
+				],
+			}),
+		);
+		discoveryState.currentModelId = "claude-haiku-4-5";
+		discoveryState.availableContextWindowOptions = [
+			{ value: "200k", label: "200K", isDefault: true },
+		];
+
+		expect(getActiveContextWindowOptions()).toEqual([
+			{ value: "200k", label: "200K", isDefault: true },
+		]);
+	});
 });
 
 describe("clearDiscoveryState", () => {
@@ -481,11 +569,17 @@ describe("clearDiscoveryState", () => {
 		discoveryState.agentProviderScope = { id: "claude", name: "Claude" };
 		discoveryState.agents = [{ id: "Explore", name: "Explore" }];
 		discoveryState.activeAgentId = "Explore";
+		discoveryState.modelExecution = {
+			expectedModel: "claude-sonnet-5",
+			actualModel: "claude-fable-4-0",
+			drifted: true,
+		};
 
 		clearDiscoveryState();
 
 		expect(discoveryState.agentProviderScope).toBeNull();
 		expect(discoveryState.agents).toEqual([]);
 		expect(discoveryState.activeAgentId).toBeNull();
+		expect(discoveryState.modelExecution).toBeNull();
 	});
 });

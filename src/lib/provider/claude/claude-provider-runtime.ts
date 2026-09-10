@@ -51,7 +51,6 @@ import {
 	ClaudeEventPersistEffectTag,
 } from "../../persistence/effect/claude-event-persist-effect.js";
 import {
-	type CanonicalEventType,
 	createEventId,
 	type EventPayloadMap,
 } from "../../persistence/events.js";
@@ -65,7 +64,10 @@ import type {
 	SendTurnInput,
 	TurnResult,
 } from "../types.js";
-import { claudeApiModelId } from "./claude-api-model-id.js";
+import {
+	claudeApiModelId,
+	expectedClaudeReportedModelId,
+} from "./claude-api-model-id.js";
 import type { ProbeResult } from "./claude-capabilities-probe.js";
 import {
 	type ClaudeCapabilitiesService,
@@ -112,7 +114,7 @@ const SUBAGENT_POLL_TIMEOUT_MS = 2000;
 const MAX_DECODE_ERROR_LENGTH = 800;
 const MAX_DECODE_PAYLOAD_LOG_LENGTH = 1200;
 
-function claudeRuntimeEvent<K extends CanonicalEventType>(
+function claudeRuntimeEvent<K extends ProviderRuntimeEvent["type"]>(
 	type: K,
 	sessionId: string,
 	data: EventPayloadMap[K],
@@ -237,6 +239,8 @@ function validateUserMessage(message: SDKUserMessage): SDKUserMessage {
 		});
 	}
 }
+
+type EffortLevel = NonNullable<SDKOptions["effort"]>;
 
 function validateOptionsJsonShape(options: SDKOptions): SDKOptions {
 	try {
@@ -484,8 +488,13 @@ export const makeUnsafeClaudeProviderRuntime = (
 	new ClaudeProviderRuntime(
 		{
 			...deps,
-			capabilitiesService:
-				deps.capabilitiesService ?? makeUnsafeClaudeCapabilitiesService(),
+			// A custom queryFactory is an unsafe-constructor test seam only.
+			// Production callers must use ClaudeDriver/makeClaudeProviderRuntime so
+			// the default capabilities oracle remains wired. Tests that need drift
+			// observability must inject capabilitiesService with their queryFactory.
+			...(!deps.capabilitiesService && !deps.queryFactory
+				? { capabilitiesService: makeUnsafeClaudeCapabilitiesService() }
+				: {}),
 		},
 		Ref.unsafeMake<ClaudeProviderRuntimeState>(
 			emptyClaudeProviderRuntimeState(),
@@ -697,6 +706,27 @@ export class ClaudeProviderRuntime {
 			: Effect.fail(new Error("Claude capabilities service unavailable"));
 	}
 
+	private expectedApiModelIdEffect(
+		requestedModelId: string | undefined,
+		contextWindow: string | undefined,
+		workspaceRoot: string,
+		agent: string | undefined,
+	): Effect.Effect<string | undefined> {
+		if (agent !== undefined) return Effect.succeed(undefined);
+		const service = this.deps.capabilitiesService;
+		if (!service) return Effect.succeed(undefined);
+		return service.get(workspaceRoot).pipe(
+			Effect.map((probe) =>
+				expectedClaudeReportedModelId(
+					requestedModelId,
+					contextWindow,
+					probe.models,
+				),
+			),
+			Effect.catchAll(() => Effect.succeed(undefined)),
+		);
+	}
+
 	// ─── sendTurn ─────────────────────────────────────────────────────────
 
 	sendTurnEffect(
@@ -777,6 +807,23 @@ export class ClaudeProviderRuntime {
 	): Effect.Effect<TurnResult, unknown> {
 		return Effect.gen(this, function* () {
 			const { sessionId } = input;
+			const apiModelId = claudeApiModelId(
+				input.model?.modelId,
+				input.contextWindow,
+			);
+			if (apiModelId === undefined) {
+				return yield* Effect.fail(
+					new Error(
+						"Claude runtime invariant violated: model is required before query creation",
+					),
+				);
+			}
+			const expectedApiModelId = yield* this.expectedApiModelIdEffect(
+				input.model?.modelId,
+				input.contextWindow,
+				input.workspaceRoot,
+				input.agent,
+			);
 			yield* this.markStreamLive(sessionId);
 
 			const deferred = yield* Deferred.make<TurnResult, Error>();
@@ -790,6 +837,7 @@ export class ClaudeProviderRuntime {
 			const setup = Effect.gen(this, function* () {
 				// 1. Create prompt queue.
 				const queue = yield* makeEffectPromptQueue();
+				const turnAdmissionSemaphore = yield* Effect.makeSemaphore(1);
 				promptQueue = queue;
 
 				// 2. Build initial user message and enqueue.
@@ -820,17 +868,13 @@ export class ClaudeProviderRuntime {
 					typeof input.providerState["resumeSessionId"] === "string"
 						? input.providerState["resumeSessionId"]
 						: undefined;
-				const apiModelId = claudeApiModelId(
-					input.model?.modelId,
-					input.contextWindow,
-				);
-
 				// 4. Create session context (query assigned after creation below).
 				const ctx: ClaudeSessionContext = {
 					sessionId,
 					workspaceRoot: input.workspaceRoot,
 					startedAt: new Date().toISOString(),
 					promptQueue: queue,
+					turnAdmissionSemaphore,
 					// Placeholder — immediately overwritten after query factory call.
 					query: undefined as unknown as ClaudeSessionContext["query"],
 					pendingApprovals: new Map(),
@@ -841,9 +885,13 @@ export class ClaudeProviderRuntime {
 					pendingSubagentMessages: new Map(),
 					eventSink: input.eventSink,
 					currentTurnId: input.turnId,
+					turnInFlight: input.turnId !== undefined,
 					currentModel: input.model?.modelId,
-					...(apiModelId ? { currentApiModelId: apiModelId } : {}),
+					currentApiModelId: apiModelId,
+					...(expectedApiModelId ? { expectedApiModelId } : {}),
 					...(input.agent ? { currentAgent: input.agent } : {}),
+					...(input.variant ? { currentVariant: input.variant } : {}),
+					settingsOutOfSync: false,
 					resumeSessionId,
 					lastAssistantUuid: undefined,
 					turnCount: 0,
@@ -856,13 +904,20 @@ export class ClaudeProviderRuntime {
 						validateOptionsJsonShape({
 							cwd: input.workspaceRoot,
 							abortController,
-							env: makeClaudeSdkEnv(),
+							env: makeClaudeSdkEnv(
+								input.configDir !== undefined
+									? { configDir: input.configDir }
+									: undefined,
+							),
 							includePartialMessages: true,
 							forwardSubagentText: true,
 							settings: { showThinkingSummaries: true },
 							settingSources: ["user", "project", "local"],
 							canUseTool: bridge.createCanUseTool(ctx),
-							...(apiModelId ? { model: apiModelId } : {}),
+							model: apiModelId,
+							...(input.permissionMode === "auto"
+								? { permissionMode: "auto" }
+								: {}),
 							...(resumeSessionId ? { resume: resumeSessionId } : {}),
 							...(input.agent ? { agent: input.agent } : {}),
 							...(input.variant
@@ -925,6 +980,27 @@ export class ClaudeProviderRuntime {
 
 	// ─── enqueueTurn ──────────────────────────────────────────────────────
 
+	setPermissionModeEffect(
+		sessionId: string,
+		mode: "auto" | "default",
+	): Effect.Effect<void, ProviderInstanceFailure> {
+		return this.mapProviderFailure(
+			"set permission mode",
+			Effect.gen(this, function* () {
+				const pending = yield* this.getSetupLock(sessionId);
+				if (pending) {
+					yield* Deferred.await(pending);
+				}
+				const ctx = yield* this.getSession(sessionId);
+				if (!ctx) return;
+				yield* Effect.tryPromise({
+					try: () => ctx.query.setPermissionMode(mode),
+					catch: (cause) => cause,
+				});
+			}),
+		);
+	}
+
 	private enqueueTurnEffect(
 		ctx: ClaudeSessionContext,
 		input: SendTurnInput,
@@ -937,36 +1013,120 @@ export class ClaudeProviderRuntime {
 				return yield* this.restartSessionForAgentChangeEffect(ctx, input);
 			}
 
-			const baseModelId = input.model?.modelId ?? ctx.currentModel;
-			const apiModelId = claudeApiModelId(baseModelId, input.contextWindow);
-			if (apiModelId && apiModelId !== ctx.currentApiModelId) {
-				yield* Effect.tryPromise({
-					try: () => ctx.query.setModel(apiModelId),
-					catch: (cause) => cause,
-				});
-				ctx.currentApiModelId = apiModelId;
+			const turnAdmissionSemaphore = ctx.turnAdmissionSemaphore;
+			if (!turnAdmissionSemaphore) {
+				return yield* Effect.fail(
+					new Error(
+						`Claude runtime invariant violated: missing turn admission semaphore for ${ctx.sessionId}`,
+					),
+				);
 			}
-			if (input.model?.modelId) {
-				ctx.currentModel = input.model.modelId;
-			}
+			const deferred = yield* turnAdmissionSemaphore.withPermits(1)(
+				Effect.gen(this, function* () {
+					const state = yield* this.getState();
+					const pendingTurns = getOrUndefined(
+						HashMap.get(state.turnWaiters, ctx.sessionId),
+					);
+					const priorTurn = pendingTurns?.[0];
+					if (priorTurn) {
+						// Wait for the prior turn to finish, but never inherit its
+						// failure: a rejected turn A must not reject turn B. The
+						// liveness checks below decide whether B may still proceed.
+						yield* Deferred.await(priorTurn).pipe(Effect.ignore);
+					}
 
-			const deferred = yield* Deferred.make<TurnResult, Error>();
-			yield* this.pushTurnDeferred(ctx.sessionId, deferred);
+					if (
+						ctx.stopped ||
+						!(yield* this.isCurrentSession(ctx)) ||
+						(yield* this.isStreamEnded(ctx.sessionId))
+					) {
+						return yield* Effect.fail(
+							new Error(`Claude session is no longer active: ${ctx.sessionId}`),
+						);
+					}
 
-			// Update turn id and event sink on context (latest sink wins).
-			ctx.currentTurnId = input.turnId;
-			ctx.eventSink = input.eventSink;
+					const baseModelId = input.model?.modelId ?? ctx.currentModel;
+					const apiModelId = claudeApiModelId(baseModelId, input.contextWindow);
+					const expectedApiModelId = yield* this.expectedApiModelIdEffect(
+						baseModelId,
+						input.contextWindow,
+						input.workspaceRoot,
+						input.agent,
+					);
+					const userMessage = yield* Effect.try({
+						try: () => validateUserMessage(this.buildUserMessage(input)),
+						catch: (cause) => cause,
+					});
+					const forceSettingsSync = ctx.settingsOutOfSync;
+					const shouldSetModel =
+						apiModelId !== undefined &&
+						(forceSettingsSync || apiModelId !== ctx.currentApiModelId);
+					const shouldApplyFlagSettings =
+						forceSettingsSync || input.variant !== ctx.currentVariant;
 
-			// Build and enqueue the user message. Mark the assistant-message
-			// boundary: if the SDK's streaming turn is still open (queued send),
-			// no `result` will reset the translator, and without the marker the
-			// reply to this prompt would merge into the previous turn's message.
-			const userMessage = yield* Effect.try({
-				try: () => validateUserMessage(this.buildUserMessage(input)),
-				catch: (cause) => cause,
-			});
-			ctx.pendingAssistantBoundary = true;
-			yield* ctx.promptQueue.enqueue(userMessage);
+					if (shouldSetModel || shouldApplyFlagSettings) {
+						ctx.settingsOutOfSync = true;
+					}
+					if (shouldSetModel) {
+						yield* Effect.tryPromise({
+							try: () => ctx.query.setModel(apiModelId),
+							catch: (cause) => cause,
+						});
+						ctx.currentApiModelId = apiModelId;
+					}
+					if (input.model?.modelId) {
+						ctx.currentModel = input.model.modelId;
+					}
+					// `effort` is fixed at query creation, so a mid-session change only
+					// lands via the flag-settings layer. Empty/absent clears it back to
+					// the settings-file default.
+					if (shouldApplyFlagSettings) {
+						const effortLevel = (input.variant || null) as EffortLevel | null;
+						yield* Effect.tryPromise({
+							try: () => ctx.query.applyFlagSettings({ effortLevel }),
+							catch: (cause) => cause,
+						});
+						if (input.variant) {
+							ctx.currentVariant = input.variant;
+						} else {
+							delete ctx.currentVariant;
+						}
+					}
+					if (expectedApiModelId === undefined) {
+						delete ctx.expectedApiModelId;
+					} else {
+						ctx.expectedApiModelId = expectedApiModelId;
+					}
+
+					const turnDeferred = yield* Deferred.make<TurnResult, Error>();
+					yield* Effect.uninterruptible(
+						Effect.gen(this, function* () {
+							yield* this.pushTurnDeferred(ctx.sessionId, turnDeferred);
+							ctx.currentTurnId = input.turnId;
+							// Marks the turn as started so a system/init arriving before
+							// the first assistant chunk cannot report the session idle.
+							ctx.turnInFlight = true;
+							ctx.eventSink = input.eventSink;
+							// Marks the assistant-message boundary: if the SDK's streaming
+							// turn is still open, no `result` resets the translator, and
+							// this reply would otherwise merge into the previous message.
+							ctx.pendingAssistantBoundary = true;
+							yield* ctx.promptQueue.enqueue(userMessage).pipe(
+								Effect.catchAll((cause) =>
+									Effect.gen(this, function* () {
+										yield* this.shiftTurnDeferred(ctx.sessionId);
+										ctx.turnInFlight = false;
+										return yield* Effect.fail(cause);
+									}),
+								),
+							);
+							ctx.settingsOutOfSync = false;
+						}),
+					);
+
+					return turnDeferred;
+				}),
+			);
 
 			return yield* Deferred.await(deferred);
 		});
@@ -1954,6 +2114,8 @@ export class ClaudeProviderRuntime {
 					)
 					.pipe(Effect.ignore);
 			}
+
+			ctx.turnInFlight = false;
 
 			// 5. Close prompt queue.
 			yield* ctx.promptQueue.close().pipe(Effect.ignore);

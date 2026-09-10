@@ -433,6 +433,7 @@ export class OpenCodeRuntimeEventTranslator {
 			output?: number;
 			cacheRead?: number;
 			cacheWrite?: number;
+			contextWindow?: number;
 		} = {};
 		if (msg.tokens?.input != null) tokens.input = msg.tokens.input;
 		if (msg.tokens?.output != null) tokens.output = msg.tokens.output;
@@ -440,6 +441,8 @@ export class OpenCodeRuntimeEventTranslator {
 			tokens.cacheRead = msg.tokens.cache.read;
 		if (msg.tokens?.cache?.write != null)
 			tokens.cacheWrite = msg.tokens.cache.write;
+		if (msg.tokens?.contextWindow != null)
+			tokens.contextWindow = msg.tokens.contextWindow;
 
 		const duration =
 			msg.time?.completed && msg.time?.created

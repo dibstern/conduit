@@ -31,13 +31,42 @@ describe("tokenizeSkills", () => {
 		expect(joined(segs)).toBe("Refactor with /effect-ts please");
 	});
 
-	it("marks an unknown slash token as `unknown`", () => {
-		const segs = tokenizeSkills("try /nonsense here", known);
-		expect(kinds(segs)).toEqual([
-			["try ", "text"],
-			["/nonsense", "unknown"],
-			[" here", "text"],
+	it.each([
+		"/comit",
+		"/commti",
+		"/Commit",
+	])("marks the near-miss slash token %s as `unknown`", (token) => {
+		expect(kinds(tokenizeSkills(token, known))).toEqual([[token, "unknown"]]);
+	});
+
+	it.each([
+		"/tmp",
+		"/usr",
+		"/opt",
+		"/etc",
+		"/Users",
+	])("treats the absolute-path root %s as text in command positions", (root) => {
+		expect(kinds(tokenizeSkills(root, known))).toEqual([[root, "text"]]);
+		expect(kinds(tokenizeSkills(`open ${root}`, known))).toEqual([
+			["open ", "text"],
+			[root, "text"],
 		]);
+	});
+
+	it.each([
+		"/bogus",
+		"/nonsense",
+		"/qwerty",
+	])("treats the arbitrary slash token %s as text", (token) => {
+		expect(kinds(tokenizeSkills(token, known))).toEqual([[token, "text"]]);
+	});
+
+	it.each([
+		"/commi",
+		"/comm",
+		"/effect-t",
+	])("treats the proper command prefix %s as text", (token) => {
+		expect(kinds(tokenizeSkills(token, known))).toEqual([[token, "text"]]);
 	});
 
 	it("recognises a token at the very start of the input", () => {
@@ -85,10 +114,10 @@ describe("tokenizeSkills", () => {
 		expect(skillKeys).toEqual(["skill:commit:0", "skill:commit:1"]);
 	});
 
-	it("keys change when a token transitions from unknown to skill (drives shimmer)", () => {
+	it("keys change when a token transitions from text to skill (drives shimmer)", () => {
 		const partial = tokenizeSkills("/comm", known)[0];
 		const complete = tokenizeSkills("/commit", known)[0];
-		expect(partial?.key).toBe("unknown:comm:0");
+		expect(partial?.key).toBe("text:comm:0");
 		expect(complete?.key).toBe("skill:commit:0");
 	});
 });

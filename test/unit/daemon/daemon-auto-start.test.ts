@@ -1,5 +1,5 @@
 // ─── Tests: Daemon Auto-Start (probe-and-convert) ───────────────────────────
-// Tests the behavior where the daemon probes an unmanaged "default" instance
+// Tests the behavior where the daemon probes an unmanaged "opencode" instance
 // and converts it to managed when OpenCode is not reachable.
 
 import { mkdtempSync, rmSync } from "node:fs";
@@ -91,7 +91,7 @@ describe("daemon auto-start (probe-and-convert)", () => {
 		});
 
 		const instances = daemon.getInstances();
-		const inst = instances.find((i: { id: string }) => i.id === "default");
+		const inst = instances.find((i: { id: string }) => i.id === "opencode");
 		expect(inst).toBeDefined();
 		expect(inst?.managed).toBe(false);
 		expect(mockInstalled).not.toHaveBeenCalled();
@@ -102,14 +102,14 @@ describe("daemon auto-start (probe-and-convert)", () => {
 
 		const instances = await Effect.runPromise(
 			resolveSmartDefaultInstances(
-				[{ id: "default", name: "opencode", port: 4096, managed: true }],
+				[{ id: "opencode", name: "opencode", port: 4096, managed: true }],
 				{ smartDefault: true },
 			),
 		);
 
 		expect(instances).toEqual([
 			{
-				id: "default",
+				id: "opencode",
 				name: "opencode",
 				port: 4096,
 				managed: false,
@@ -130,7 +130,7 @@ describe("daemon auto-start (probe-and-convert)", () => {
 		});
 
 		const instances = daemon.getInstances();
-		const inst = instances.find((i: { id: string }) => i.id === "default");
+		const inst = instances.find((i: { id: string }) => i.id === "opencode");
 		expect(inst).toBeDefined();
 		expect(inst?.managed).toBe(true);
 	});
@@ -152,7 +152,7 @@ describe("daemon auto-start (probe-and-convert)", () => {
 			}),
 		);
 		const instances = daemon.getInstances();
-		const inst = instances.find((i: { id: string }) => i.id === "default");
+		const inst = instances.find((i: { id: string }) => i.id === "opencode");
 		expect(inst?.status).toBe("healthy");
 	});
 
@@ -188,7 +188,7 @@ describe("daemon auto-start (probe-and-convert)", () => {
 		expect(mockProbe).not.toHaveBeenCalled();
 
 		const instances = daemon.getInstances();
-		const inst = instances.find((i: { id: string }) => i.id === "default");
+		const inst = instances.find((i: { id: string }) => i.id === "opencode");
 		// Stays unmanaged because smart default is disabled
 		expect(inst?.managed).toBe(false);
 	});
@@ -223,7 +223,7 @@ describe("daemon auto-start (probe-and-convert)", () => {
 		});
 
 		const instances = daemon.getInstances();
-		const inst = instances.find((i: { id: string }) => i.id === "default");
+		const inst = instances.find((i: { id: string }) => i.id === "opencode");
 		expect(inst?.name).toBe("Default");
 	});
 });

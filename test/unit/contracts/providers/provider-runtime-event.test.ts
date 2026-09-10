@@ -76,7 +76,9 @@ describe("ProviderRuntimeEvent contracts", () => {
 	});
 
 	it("covers every canonical event type or explicit reclassification", () => {
-		const explicitlyReclassified: readonly string[] = [];
+		const explicitlyReclassified: readonly string[] = [
+			"session.permission_mode_changed",
+		];
 		const missingRuntimeTypes = CANONICAL_EVENT_TYPES.filter(
 			(type) =>
 				!explicitlyReclassified.includes(type) &&
@@ -86,6 +88,24 @@ describe("ProviderRuntimeEvent contracts", () => {
 		);
 
 		expect(missingRuntimeTypes).toEqual([]);
+	});
+
+	it("decodes turn.model_resolved evidence without changing its ids", () => {
+		const event = Schema.decodeUnknownSync(ProviderRuntimeEventSchema)({
+			...baseEvent,
+			type: "turn.model_resolved",
+			data: {
+				requestedModel: "sonnet",
+				expectedModel: "claude-sonnet-5[1m]",
+				actualModel: "claude-sonnet-5[1m]",
+			},
+		});
+
+		expect(event.data).toEqual({
+			requestedModel: "sonnet",
+			expectedModel: "claude-sonnet-5[1m]",
+			actualModel: "claude-sonnet-5[1m]",
+		});
 	});
 
 	it("decodes raw-source metadata fields", () => {

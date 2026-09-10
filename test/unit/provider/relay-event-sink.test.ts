@@ -3,7 +3,6 @@ import { describe, expect, it, vi } from "vitest";
 import type { ProviderRuntimeEvent } from "../../../src/lib/contracts/providers/provider-runtime-event.js";
 import type {
 	CanonicalEvent,
-	CanonicalEventType,
 	EventPayloadMap,
 } from "../../../src/lib/persistence/events.js";
 import type { MissingPendingInteractions } from "../../../src/lib/provider/errors.js";
@@ -12,7 +11,7 @@ import type { RelayMessage } from "../../../src/lib/types.js";
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
-function makeEvent<T extends CanonicalEventType>(
+function makeEvent<T extends ProviderRuntimeEvent["type"]>(
 	type: T,
 	data: EventPayloadMap[T],
 	metadata: Record<string, unknown> = {},
@@ -158,6 +157,21 @@ describe("createRelayEventSink — translation", () => {
 		expect(clearTimeout).not.toHaveBeenCalled();
 		// It DOES reset the timeout (activity observed).
 		expect(resetTimeout).toHaveBeenCalled();
+	});
+
+	// The orchestration reactor streams provider output straight to ingestion,
+	// bypassing this sink's push(); noteActivity is how it keeps the relay's
+	// processing timeout alive so long turns don't emit a false timeout error.
+	it("exposes noteActivity as a timeout reset", () => {
+		const resetTimeout = vi.fn();
+		const sink = createRelayEventSink({
+			sessionId: "ses-1",
+			send: vi.fn(),
+			clearTimeout: vi.fn(),
+			resetTimeout,
+		});
+		sink.noteActivity?.();
+		expect(resetTimeout).toHaveBeenCalledTimes(1);
 	});
 
 	it("clears timeout on non-RETRY errors", async () => {
@@ -727,8 +741,10 @@ describe("createRelayEventSink — permission mode short-circuit", () => {
 	};
 
 	it.each([
-		{ mode: "auto" as const, toolName: "Bash", shortCircuits: true },
-		{ mode: "auto" as const, toolName: "Edit", shortCircuits: true },
+		{ mode: "full" as const, toolName: "Bash", shortCircuits: true },
+		{ mode: "full" as const, toolName: "Edit", shortCircuits: true },
+		{ mode: "auto" as const, toolName: "Bash", shortCircuits: false },
+		{ mode: "auto" as const, toolName: "Edit", shortCircuits: false },
 		{ mode: "acceptEdits" as const, toolName: "Edit", shortCircuits: true },
 		{ mode: "acceptEdits" as const, toolName: "Write", shortCircuits: true },
 		{
@@ -791,7 +807,7 @@ describe("createRelayEventSink — permission mode short-circuit", () => {
 			providerId: "claude",
 			send,
 			persist: { persistEvent, persistEvents },
-			getPermissionMode: () => Effect.succeed("auto" as const),
+			getPermissionMode: () => Effect.succeed("full" as const),
 		});
 
 		await expect(
@@ -829,7 +845,7 @@ describe("createRelayEventSink — permission mode short-circuit", () => {
 			providerId: "claude",
 			send,
 			ingestion: { ingest },
-			getPermissionMode: () => Effect.succeed("auto" as const),
+			getPermissionMode: () => Effect.succeed("full" as const),
 		});
 
 		await expect(
@@ -862,7 +878,7 @@ describe("createRelayEventSink — permission mode short-circuit", () => {
 			sessionId: "ses-1",
 			send: vi.fn(),
 			persist: { persistEvent, persistEvents },
-			getPermissionMode: () => Effect.succeed("auto" as const),
+			getPermissionMode: () => Effect.succeed("full" as const),
 		});
 
 		await expect(
@@ -874,7 +890,7 @@ describe("createRelayEventSink — permission mode short-circuit", () => {
 		const sink = createRelayEventSink({
 			sessionId: "ses-1",
 			send: vi.fn(),
-			getPermissionMode: () => Effect.succeed("auto" as const),
+			getPermissionMode: () => Effect.succeed("full" as const),
 		});
 
 		await expect(

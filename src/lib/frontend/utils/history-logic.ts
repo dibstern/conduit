@@ -9,12 +9,14 @@ import type {
 	HistoryMessage,
 	HistoryMessagePart,
 	ResultMessage,
+	SystemMessage,
 	ThinkingMessage,
 	ToolMessage,
 	Turn,
 	UserMessage,
 } from "../types.js";
 import { extractDisplayText, generateUuid } from "./format.js";
+import { SUBAGENT_TOOL_NAMES } from "./subagent-tools.js";
 import { createToolMessage } from "./tool-message-factory.js";
 
 // Re-export types for convenience
@@ -111,14 +113,12 @@ export function getAssistantText(msg: HistoryMessage | undefined): string {
 /** Tool names that should preserve their live status in history.
  *  Question tools may still be awaiting a user response even when loaded
  *  from the REST API, so we must not force them to "completed".
- *  Task (subagent) tools may still be running — forcing them to "completed"
- *  would show "Done" while the subagent session is still active. */
+ *  Subagent (Task/Agent) tools may still be running — forcing them to
+ *  "completed" would show "Done" while the subagent session is still active. */
 const LIVE_STATUS_TOOLS = new Set([
 	"question",
 	"AskUserQuestion",
-	"task",
-	"Task",
-	"Agent",
+	...SUBAGENT_TOOL_NAMES,
 ]);
 
 /**
@@ -237,6 +237,21 @@ function convertAssistantParts(
 				);
 				break;
 			}
+			case "compaction": {
+				// Persisted `/compact` boundary → the same "Context compacted"
+				// divider the live path renders via addSystemMessage. postTokens
+				// lets restoreContextFromMessages recover the reduced context bar.
+				result.push({
+					type: "system",
+					uuid: generateUuid(),
+					text: part.text ?? "",
+					variant: "info",
+					...(typeof part.postTokens === "number" && part.postTokens > 0
+						? { postTokens: part.postTokens }
+						: {}),
+				} satisfies SystemMessage);
+				break;
+			}
 			default:
 				// Intentionally skipped structural part types:
 				// step_start, step_finish, snapshot, agent
@@ -279,6 +294,9 @@ export function historyToChatMessages(
 				uuid: generateUuid(),
 				text: extractDisplayText(text),
 				...(msg.time?.created != null && { createdAt: msg.time.created }),
+				...(msg.modelExecution != null
+					? { modelExecution: msg.modelExecution }
+					: {}),
 			} satisfies UserMessage);
 		} else if (msg.role === "assistant") {
 			// Assistant messages: convert each part to the appropriate ChatMessage
@@ -296,7 +314,9 @@ export function historyToChatMessages(
 			// Append a ResultMessage if cost/token metadata is present
 			const hasCost = msg.cost !== undefined && msg.cost > 0;
 			const hasTokens =
-				msg.tokens?.input !== undefined || msg.tokens?.output !== undefined;
+				msg.tokens?.input !== undefined ||
+				msg.tokens?.output !== undefined ||
+				msg.tokens?.context_window !== undefined;
 			const hasDuration =
 				msg.time?.created !== undefined && msg.time?.completed !== undefined;
 
@@ -319,6 +339,9 @@ export function historyToChatMessages(
 					}),
 					...(msg.tokens?.cache?.write != null && {
 						cacheWrite: msg.tokens.cache.write,
+					}),
+					...(msg.tokens?.context_window != null && {
+						context_window: msg.tokens.context_window,
 					}),
 					...(msg.time?.created != null && { createdAt: msg.time.created }),
 				} satisfies ResultMessage);

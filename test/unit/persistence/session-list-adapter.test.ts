@@ -15,6 +15,7 @@ function makeRow(id: string, overrides?: Partial<SessionRow>): SessionRow {
 		parent_id: null,
 		fork_point_event: null,
 		last_message_at: null,
+		permission_mode: null,
 		created_at: 1000,
 		updated_at: 2000,
 		...overrides,

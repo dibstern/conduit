@@ -8,6 +8,7 @@ import {
 	type TurnCompletedPayload,
 	type TurnErrorPayload,
 	type TurnInterruptedPayload,
+	type TurnModelResolvedPayload,
 } from "../../../../src/lib/persistence/events.js";
 import { runMigrations } from "../../../../src/lib/persistence/migrations.js";
 import { TurnProjector } from "../../../../src/lib/persistence/projectors/turn-projector.js";
@@ -46,6 +47,9 @@ interface TurnRow {
 	requested_at: number;
 	started_at: number | null;
 	completed_at: number | null;
+	requested_model: string | null;
+	expected_model: string | null;
+	actual_model: string | null;
 }
 
 describe("TurnProjector", () => {
@@ -77,6 +81,7 @@ describe("TurnProjector", () => {
 			"turn.completed",
 			"turn.error",
 			"turn.interrupted",
+			"turn.model_resolved",
 		]);
 	});
 
@@ -717,6 +722,120 @@ describe("TurnProjector", () => {
 			expect(rows[0]?.state).toBe("completed");
 			expect(rows[1]?.id).toBe("user_m2");
 			expect(rows[1]?.state).toBe("completed");
+		});
+	});
+
+	describe("turn.model_resolved", () => {
+		it("updates only the newest open turn and is replay-idempotent", () => {
+			db.execute(
+				`INSERT INTO turns
+				 (id, session_id, state, user_message_id, requested_at)
+				 VALUES
+				 ('completed', 's1', 'completed', 'completed', ?),
+				 ('running', 's1', 'running', 'running', ?),
+				 ('pending', 's1', 'pending', 'pending', ?)`,
+				[now, now + 1, now + 2],
+			);
+			const event = makeStored("turn.model_resolved", "s1", {
+				requestedModel: "sonnet",
+				expectedModel: "claude-sonnet-5[1m]",
+				actualModel: "claude-sonnet-5[1m]",
+			} satisfies TurnModelResolvedPayload);
+
+			projector.project(event, db);
+			projector.project(event, db);
+
+			const rows = db.query<TurnRow>(
+				"SELECT * FROM turns WHERE session_id = ? ORDER BY requested_at",
+				["s1"],
+			);
+			expect(rows[0]?.actual_model).toBeNull();
+			expect(rows[1]?.actual_model).toBeNull();
+			expect(rows[2]).toMatchObject({
+				requested_model: "sonnet",
+				expected_model: "claude-sonnet-5[1m]",
+				actual_model: "claude-sonnet-5[1m]",
+			});
+		});
+
+		it("preserves nullable evidence", () => {
+			db.execute(
+				`INSERT INTO turns
+				 (id, session_id, state, user_message_id, requested_at)
+				 VALUES ('pending', 's1', 'pending', 'pending', ?)`,
+				[now],
+			);
+
+			projector.project(
+				makeStored("turn.model_resolved", "s1", {
+					actualModel: "claude-opus-4-6",
+				} satisfies TurnModelResolvedPayload),
+				db,
+			);
+
+			const row = db.queryOne<TurnRow>(
+				"SELECT * FROM turns WHERE id = 'pending'",
+			);
+			expect(row).toMatchObject({
+				requested_model: null,
+				expected_model: null,
+				actual_model: "claude-opus-4-6",
+			});
+		});
+
+		it("updates the newest running turn", () => {
+			db.execute(
+				`INSERT INTO turns
+				 (id, session_id, state, user_message_id, requested_at)
+				 VALUES
+				 ('older-running', 's1', 'running', 'older-running', ?),
+				 ('newest-running', 's1', 'running', 'newest-running', ?)`,
+				[now, now + 1],
+			);
+
+			projector.project(
+				makeStored("turn.model_resolved", "s1", {
+					requestedModel: "sonnet",
+					expectedModel: "claude-sonnet-5",
+					actualModel: "claude-sonnet-5",
+				} satisfies TurnModelResolvedPayload),
+				db,
+			);
+
+			const rows = db.query<TurnRow>(
+				"SELECT * FROM turns WHERE session_id = ? ORDER BY requested_at",
+				["s1"],
+			);
+			expect(rows[0]?.actual_model).toBeNull();
+			expect(rows[1]).toMatchObject({
+				id: "newest-running",
+				requested_model: "sonnet",
+				expected_model: "claude-sonnet-5",
+				actual_model: "claude-sonnet-5",
+			});
+		});
+
+		it("does not attach evidence when no open turn exists", () => {
+			db.execute(
+				`INSERT INTO turns
+				 (id, session_id, state, user_message_id, requested_at)
+				 VALUES ('completed', 's1', 'completed', 'completed', ?)`,
+				[now],
+			);
+
+			projector.project(
+				makeStored("turn.model_resolved", "s1", {
+					requestedModel: "sonnet",
+					expectedModel: "claude-sonnet-5",
+					actualModel: "claude-sonnet-5",
+				} satisfies TurnModelResolvedPayload),
+				db,
+			);
+
+			const row = db.queryOne<TurnRow>(
+				"SELECT * FROM turns WHERE id = 'completed'",
+			);
+			expect(row?.actual_model).toBeNull();
 		});
 	});
 });

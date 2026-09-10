@@ -50,6 +50,7 @@ function makeMessageWithParts(
 		tokens_out: null,
 		tokens_cache_read: null,
 		tokens_cache_write: null,
+		context_window: null,
 		is_streaming: 0,
 		created_at: 1_000_000_000_000,
 		updated_at: 1_000_000_000_000,
@@ -79,6 +80,7 @@ describe("messageRowsToHistory", () => {
 				cost: 0.01,
 				tokens_in: 10,
 				tokens_out: 20,
+				context_window: 1_000_000,
 			}),
 		];
 
@@ -90,6 +92,7 @@ describe("messageRowsToHistory", () => {
 		expect(first?.role).toBe("user");
 		expect(second?.id).toBe("m2");
 		expect(second?.role).toBe("assistant");
+		expect(second?.tokens?.context_window).toBe(1_000_000);
 		expect(result.hasMore).toBe(false);
 	});
 
@@ -119,6 +122,73 @@ describe("messageRowsToHistory", () => {
 		const result = messageRowsToHistory([], { pageSize: 50 });
 		expect(result.messages).toEqual([]);
 		expect(result.hasMore).toBe(false);
+	});
+
+	it("exposes model drift only on the turn's user message", () => {
+		const modelExecution = {
+			requestedModel: "sonnet",
+			expectedModel: "claude-sonnet-5",
+			actualModel: "claude-fable-4-0",
+		};
+		const rows = [
+			makeMessageWithParts("user", {
+				role: "user",
+				modelExecution,
+			}),
+			makeMessageWithParts("assistant", {
+				role: "assistant",
+				modelExecution,
+			}),
+		];
+
+		const result = messageRowsToHistory(rows, { pageSize: 50 });
+
+		expect(result.messages[0]?.modelExecution).toEqual({
+			...modelExecution,
+			drifted: true,
+		});
+		expect(result.messages[1]).not.toHaveProperty("modelExecution");
+	});
+
+	it("does not call a context-window suffix drift", () => {
+		// `init` echoes conduit's outbound id, the assistant message reports the
+		// bare API model. Same model, so no drift.
+		const modelExecution = {
+			requestedModel: "opus[1m]",
+			expectedModel: "claude-opus-5[1m]",
+			actualModel: "claude-opus-5",
+		};
+		const rows = [
+			makeMessageWithParts("user", { role: "user", modelExecution }),
+		];
+
+		const result = messageRowsToHistory(rows, { pageSize: 50 });
+
+		expect(result.messages[0]?.modelExecution).toEqual({
+			...modelExecution,
+			drifted: false,
+		});
+	});
+
+	it("omits drift for historical and partial turn evidence", () => {
+		const historical = makeMessageWithParts("historical", { role: "user" });
+		const partial = makeMessageWithParts("partial", {
+			role: "user",
+			modelExecution: {
+				requestedModel: "sonnet",
+				actualModel: "claude-sonnet-5",
+			},
+		});
+
+		const result = messageRowsToHistory([historical, partial], {
+			pageSize: 50,
+		});
+
+		expect(result.messages[0]).not.toHaveProperty("modelExecution");
+		expect(result.messages[1]?.modelExecution).toEqual({
+			requestedModel: "sonnet",
+			actualModel: "claude-sonnet-5",
+		});
 	});
 
 	it("maps parts from MessagePartRow to HistoryMessagePart", () => {
@@ -293,6 +363,33 @@ describe("messageRowsToHistory", () => {
 		const result = messageRowsToHistory(rows, { pageSize: 50 });
 		const [msg] = result.messages;
 		expect(msg?.time).toEqual({ created: 1000, completed: 2000 });
+	});
+
+	it("lifts compaction token metadata to top-level part fields", () => {
+		const rows: MessageWithParts[] = [
+			makeMessageWithParts("compaction-7", {
+				role: "assistant",
+				parts: [
+					makePartRow("compaction-part-7", "compaction-7", {
+						type: "compaction",
+						text: "Context compacted · 195k → 96k",
+						metadata: JSON.stringify({ preTokens: 194925, postTokens: 96000 }),
+					}),
+				],
+			}),
+		];
+
+		const result = messageRowsToHistory(rows, { pageSize: 50 });
+		const part = result.messages[0]?.parts?.[0];
+
+		expect(part).toEqual({
+			id: "compaction-part-7",
+			type: "compaction",
+			text: "Context compacted · 195k → 96k",
+			preTokens: 194925,
+			postTokens: 96000,
+		});
+		expect(part).not.toHaveProperty("state");
 	});
 
 	it("does not set state on text parts with no status/input/result", () => {

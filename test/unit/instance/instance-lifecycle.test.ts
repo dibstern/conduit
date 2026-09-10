@@ -41,7 +41,7 @@ describe("instance lifecycle integration", () => {
 		});
 		expect(daemon.getInstances()).toHaveLength(1);
 		// biome-ignore lint/style/noNonNullAssertion: safe — guarded by length check
-		expect(daemon.getInstances()[0]!.id).toBe("default");
+		expect(daemon.getInstances()[0]!.id).toBe("opencode");
 	});
 
 	it("daemon without opencodeUrl has no instances (smartDefault=false)", async () => {
@@ -97,6 +97,6 @@ describe("instance lifecycle integration", () => {
 			smartDefault: false,
 		});
 		const project = await daemon.addProject("/tmp/lifecycle-test");
-		expect(project.instanceId).toBe("default");
+		expect(project.instanceId).toBe("opencode");
 	});
 });

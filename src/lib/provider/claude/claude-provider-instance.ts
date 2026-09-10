@@ -1,4 +1,5 @@
 import { Effect } from "effect";
+import type { SessionPermissionMode } from "../../shared-types.js";
 import type { ProviderInstanceFailure } from "../errors.js";
 import type {
 	PermissionDecision,
@@ -63,6 +64,16 @@ export class ClaudeProviderInstance implements ProviderInstance {
 		answers: Record<string, unknown>,
 	): Effect.Effect<void, ProviderInstanceFailure> {
 		return this.runtime.resolveQuestionEffect(sessionId, requestId, answers);
+	}
+
+	setPermissionModeEffect(
+		sessionId: string,
+		mode: SessionPermissionMode,
+	): Effect.Effect<void, ProviderInstanceFailure> {
+		return this.runtime.setPermissionModeEffect(
+			sessionId,
+			mode === "auto" ? "auto" : "default",
+		);
 	}
 
 	shutdownEffect(): Effect.Effect<void, ProviderInstanceFailure> {

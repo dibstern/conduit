@@ -16,7 +16,7 @@ import { createFrontendLogger } from "../utils/logger.js";
 import { phaseToIdle } from "./chat.svelte.js";
 import { getBrowserClientId } from "./client-identity.js";
 import { clearInstanceState } from "./instance.svelte.js";
-import { getCurrentSessionId } from "./router.svelte.js";
+import { getCurrentSessionId, replaceRoute } from "./router.svelte.js";
 import {
 	wsDebugLog,
 	wsDebugLogMessage,
@@ -57,7 +57,11 @@ export {
 	wsSend,
 } from "./ws-send.svelte.js";
 
-import { handleMessage } from "./ws-dispatch.js";
+import {
+	armProtocolVersionCheck,
+	disarmProtocolVersionCheck,
+	handleMessage,
+} from "./ws-dispatch.js";
 import { setWsGetter } from "./ws-send.svelte.js";
 
 const log = createFrontendLogger("ws");
@@ -120,18 +124,31 @@ export function onConnect(fn: () => void): void {
 let _currentSlug: string | undefined;
 
 /**
- * Non-blocking relay status fetch — for UI enrichment only.
- * Does NOT block connection. Updates wsState.relayStatus/relayError
- * so the ConnectOverlay can show "Starting relay..." or error details.
+ * Non-blocking relay status fetch for UI enrichment and auth recovery.
+ * Does not block connection. Updates wsState.relayStatus/relayError so the
+ * ConnectOverlay can show relay progress, or routes a stale auth session to PIN entry.
  */
-function fetchRelayStatus(slug: string): void {
+function fetchRelayStatus(slug: string, generation: number): void {
 	fetch(`/p/${slug}/api/status`)
 		.then((res) => {
-			if (!res.ok || _currentSlug !== slug) return null;
+			if (_currentSlug !== slug || generation !== _connectionGeneration) {
+				return null;
+			}
+			if (res.status === 401) {
+				replaceRoute("/auth");
+				return null;
+			}
+			if (!res.ok) return null;
 			return res.json();
 		})
 		.then((data: { status?: string; error?: string } | null) => {
-			if (!data || _currentSlug !== slug) return;
+			if (
+				!data ||
+				_currentSlug !== slug ||
+				generation !== _connectionGeneration
+			) {
+				return;
+			}
 			if (data.status === "registering") {
 				wsState.relayStatus = "registering";
 			} else if (data.status === "error") {
@@ -152,7 +169,7 @@ function fetchRelayStatus(slug: string): void {
  *
  * Creates the WebSocket synchronously. The server's waitForRelay() handles
  * relay readiness on the upgrade path.
- * A non-blocking relay status fetch runs in parallel for UI display only.
+ * A non-blocking relay status fetch runs in parallel for UI display and auth recovery.
  */
 export function connect(slug?: string): void {
 	_currentSlug = slug;
@@ -190,10 +207,9 @@ export function connect(slug?: string): void {
 
 	doConnect(slug, generation);
 
-	// Non-blocking relay status check for UI enrichment (shows
-	// "Starting relay..." or error details in the ConnectOverlay).
+	// Non-blocking relay status check for auth recovery and UI enrichment.
 	if (slug) {
-		fetchRelayStatus(slug);
+		fetchRelayStatus(slug, generation);
 	}
 }
 
@@ -243,6 +259,7 @@ function doConnect(slug: string | undefined, generation: number): void {
 		wsState.relayStatus = undefined;
 		wsState.relayError = undefined;
 		_reconnectDelay = RECONNECT_BASE_MS;
+		armProtocolVersionCheck();
 		_onConnectFn?.();
 	});
 
@@ -260,6 +277,7 @@ function doConnect(slug: string | undefined, generation: number): void {
 		setStatus("disconnected", "Disconnected");
 		wsDebugLog("ws:close", wsState.status);
 		_ws = null;
+		disarmProtocolVersionCheck();
 
 		// Reset chat streaming/processing state so UI isn't stuck
 		phaseToIdle();

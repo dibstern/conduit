@@ -21,9 +21,9 @@ describe("SkillHighlightBackdrop", () => {
 	});
 
 	it("renders an unknown slash token as an error span", () => {
-		const c = mount("run /bogus now");
+		const c = mount("run /comit now");
 		expect(c.querySelector(".skill-pill")).toBeNull();
-		expect(c.querySelector(".skill-unknown")?.textContent).toBe("/bogus");
+		expect(c.querySelector(".skill-unknown")?.textContent).toBe("/comit");
 	});
 
 	it("does not highlight file paths", () => {
@@ -33,7 +33,7 @@ describe("SkillHighlightBackdrop", () => {
 	});
 
 	it("renders the text losslessly (no stray whitespace) so the caret stays aligned", () => {
-		const text = "a /commit and /effect-ts and /bogus end";
+		const text = "a /commit and /effect-ts and /comit end";
 		const c = mount(text);
 		// The mirror's textContent must equal the raw input exactly, or the
 		// transparent textarea's caret would drift from the visible glyphs.

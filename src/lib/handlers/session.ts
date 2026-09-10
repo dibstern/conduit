@@ -3,6 +3,7 @@ import { OpenCodeAPITag } from "../domain/provider/Services/opencode-api-service
 
 import { Effect } from "effect";
 import { mapQuestionFields } from "../bridges/question-bridge.js";
+import type { ProviderInstanceId } from "../contracts/provider-instance.js";
 import { PendingInteractionServiceTag } from "../domain/relay/Services/pending-interaction-service.js";
 import {
 	LoggerTag,
@@ -17,6 +18,7 @@ import {
 	hasActiveProcessingTimeout,
 } from "../domain/relay/Services/session-overrides-state.js";
 import { ReadQueryEffectTag } from "../persistence/effect/read-query-effect.js";
+import { messageRowsToHistory } from "../persistence/session-history-adapter.js";
 import {
 	buildSessionSwitchedMessage,
 	extractOldestMessageId,
@@ -25,7 +27,12 @@ import {
 	type SessionHistorySource,
 	type SwitchClientOptions,
 } from "../session/session-switch.js";
-import type { PermissionId, RelayMessage, RequestId } from "../shared-types.js";
+import type {
+	HistoryMessage,
+	PermissionId,
+	RelayMessage,
+	RequestId,
+} from "../shared-types.js";
 import { getSessionInputDraft } from "./prompt.js";
 
 const SESSION_METADATA_FANOUT = 4;
@@ -37,6 +44,7 @@ interface ViewSessionPayload {
 interface NewSessionPayload {
 	readonly title?: string;
 	readonly requestId?: RequestId;
+	readonly instanceId?: ProviderInstanceId;
 	readonly providerId?: string;
 }
 
@@ -47,6 +55,25 @@ interface DeleteSessionPayload {
 interface ForkSessionPayload {
 	readonly sessionId?: string;
 	readonly messageId?: string;
+}
+
+function addProjectedModelExecution(
+	messages: readonly HistoryMessage[],
+	projectedMessages: readonly HistoryMessage[],
+): HistoryMessage[] {
+	const executionByMessageId = new Map(
+		projectedMessages.flatMap((message) =>
+			message.role === "user" && message.modelExecution
+				? [[message.id, message.modelExecution] as const]
+				: [],
+		),
+	);
+	return messages.map((message) => {
+		const modelExecution = executionByMessageId.get(message.id);
+		return message.role === "user" && modelExecution
+			? { ...message, modelExecution }
+			: message;
+	});
 }
 
 /**
@@ -223,10 +250,14 @@ const resolveSessionHistory = (sessionId: string) =>
 		const log = yield* LoggerTag;
 
 		let projectedSource: SessionHistorySource = { kind: "empty" };
+		let projectedMessages: readonly HistoryMessage[] = [];
 		if (readQueryOption._tag === "Some") {
 			const rows =
 				yield* readQueryOption.value.getSessionMessagesWithParts(sessionId);
 			projectedSource = resolveSessionHistoryFromRows(rows, { pageSize: 50 });
+			if (projectedSource.kind === "rest-history") {
+				projectedMessages = projectedSource.history.messages;
+			}
 
 			// The projection is authoritative only for relay-local (claude)
 			// sessions. OpenCode projections currently persist structure without
@@ -250,7 +281,13 @@ const resolveSessionHistory = (sessionId: string) =>
 		if (historyResult._tag === "Right") {
 			return {
 				kind: "rest-history",
-				history: historyResult.right,
+				history: {
+					...historyResult.right,
+					messages: addProjectedModelExecution(
+						historyResult.right.messages,
+						projectedMessages,
+					),
+				},
 			} satisfies SessionHistorySource;
 		}
 
@@ -409,11 +446,13 @@ export const createSessionForClient = ({
 	clientId,
 	title,
 	requestId,
+	instanceId,
 	providerId,
 }: {
 	readonly clientId: string;
 	readonly title?: string;
 	readonly requestId?: string;
+	readonly instanceId?: ProviderInstanceId;
 	readonly providerId?: string;
 }) =>
 	Effect.gen(function* () {
@@ -422,8 +461,11 @@ export const createSessionForClient = ({
 		const log = yield* LoggerTag;
 
 		const session =
-			providerId != null
-				? yield* sessionManagerService.createSession(title, { providerId })
+			instanceId != null || providerId != null
+				? yield* sessionManagerService.createSession(title, {
+						...(instanceId != null ? { instanceId } : {}),
+						...(providerId != null ? { providerId } : {}),
+					})
 				: yield* sessionManagerService.createSession(title);
 
 		yield* switchClientToSession(clientId, session.id, {
@@ -458,6 +500,7 @@ export const handleNewSession = (
 		clientId,
 		...(payload.title != null ? { title: payload.title } : {}),
 		...(payload.requestId != null ? { requestId: payload.requestId } : {}),
+		...(payload.instanceId != null ? { instanceId: payload.instanceId } : {}),
 		...(payload.providerId != null ? { providerId: payload.providerId } : {}),
 	}).pipe(Effect.asVoid);
 
@@ -556,6 +599,38 @@ export const loadMoreHistoryForSession = ({
 }) =>
 	Effect.gen(function* () {
 		const sessionManagerService = yield* SessionManagerServiceTag;
+		const readQueryOption = yield* Effect.serviceOption(ReadQueryEffectTag);
+		let projectedMessages: readonly HistoryMessage[] = [];
+
+		if (readQueryOption._tag === "Some") {
+			const sessionResult = yield* Effect.either(
+				readQueryOption.value.getSession(sessionId),
+			);
+			if (sessionResult._tag === "Right" && sessionResult.right != null) {
+				const rowsResult = yield* Effect.either(
+					readQueryOption.value.getSessionMessagesWithParts(sessionId),
+				);
+				if (rowsResult._tag === "Right") {
+					const rows = rowsResult.right;
+					const end = Math.max(0, rows.length - Math.max(0, offset));
+					const start = Math.max(0, end - 50);
+					const page = messageRowsToHistory(rows.slice(start, end), {
+						pageSize: 50,
+					});
+					if (sessionResult.right.provider !== "opencode") {
+						return {
+							sessionId,
+							messages: page.messages,
+							hasMore: start > 0,
+							total: rows.length,
+						};
+					}
+					projectedMessages = messageRowsToHistory(rows, {
+						pageSize: Number.MAX_SAFE_INTEGER,
+					}).messages;
+				}
+			}
+		}
 
 		const page = yield* sessionManagerService.loadPreRenderedHistory(
 			sessionId,
@@ -563,7 +638,7 @@ export const loadMoreHistoryForSession = ({
 		);
 		return {
 			sessionId,
-			messages: page.messages,
+			messages: addProjectedModelExecution(page.messages, projectedMessages),
 			hasMore: page.hasMore,
 			...(page.total != null && { total: page.total }),
 		};

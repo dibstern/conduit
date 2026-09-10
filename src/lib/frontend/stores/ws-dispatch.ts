@@ -6,9 +6,10 @@
 // via routePerSession. Global events handled by handleMessage directly.
 
 import { notificationContent } from "../../notification-content.js";
-import type {
-	PerSessionEvent,
-	PerSessionEventType,
+import {
+	type PerSessionEvent,
+	type PerSessionEventType,
+	WS_PROTOCOL_VERSION,
 } from "../../shared-types.js";
 import type {
 	GetFileContentResponse,
@@ -23,6 +24,7 @@ import type {
 import { historyToChatMessages } from "../utils/history-logic.js";
 import { createFrontendLogger } from "../utils/logger.js";
 import { renderMarkdown } from "../utils/markdown.js";
+import { isSubagentToolName } from "../utils/subagent-tools.js";
 import {
 	abortSessionReplay,
 	activateSessionChatState,
@@ -38,6 +40,7 @@ import {
 	flushPendingRender,
 	getMessages,
 	getOrCreateSessionSlot,
+	handleCompaction,
 	handleDelta,
 	handleDone,
 	handleError,
@@ -157,6 +160,7 @@ const PER_SESSION_EVENT_TYPES: ReadonlySet<string> =
 		"done",
 		"error",
 		"status",
+		"compaction",
 		"user_message",
 		"part_removed",
 		"message_removed",
@@ -278,6 +282,9 @@ function routePerSession(event: PerSessionEvent): void {
 		case "status":
 			handleStatus(activity, messages, event);
 			break;
+		case "compaction":
+			handleCompaction(activity, messages, event);
+			break;
 		case "error":
 			handleChatError(activity, messages, event);
 			triggerNotifications(event);
@@ -389,6 +396,7 @@ const CHAT_EVENT_TYPES: ReadonlySet<string> = new Set([
 	"result",
 	"done",
 	"status",
+	"compaction",
 	"error",
 ]);
 
@@ -460,12 +468,7 @@ async function convertHistoryAsync(
 }
 
 function isSubagentToolMessage(message: ChatMessage): message is ToolMessage {
-	return (
-		message.type === "tool" &&
-		(message.name === "Task" ||
-			message.name === "task" ||
-			message.name === "Agent")
-	);
+	return message.type === "tool" && isSubagentToolName(message.name);
 }
 
 function hasSubagentSessionLink(message: ToolMessage): boolean {
@@ -649,6 +652,9 @@ function dispatchChatEvent(event: RelayMessage, ctx: DispatchContext): boolean {
 		}
 		case "status":
 			handleStatus(activity, messages, event);
+			return true;
+		case "compaction":
+			handleCompaction(activity, messages, event);
 			return true;
 		case "error":
 			if (ctx.isReplay) {
@@ -906,6 +912,9 @@ export function handleMessage(msg: RelayMessage): void {
 		// ─── UI ──────────────────────────────────────────────────────────
 		case "client_count":
 			setClientCount(msg.count ?? 0);
+			break;
+		case "protocol_version":
+			handleProtocolVersion(msg.version);
 			break;
 		case "connection_status":
 			handleConnectionStatus(msg);
@@ -1321,6 +1330,50 @@ function handleConnectionStatus(
 			text,
 			dismissible: false,
 		});
+	}
+}
+
+/** Stale-daemon detection: the daemon sends protocol_version on connect.
+ *  A different version — or none at all, which marks a daemon predating the
+ *  handshake — means the daemon and this frontend disagree on wire semantics
+ *  (e.g. what a permission-mode literal grants), so warn until it restarts. */
+const STALE_DAEMON_BANNER_ID = "stale-daemon";
+const PROTOCOL_VERSION_GRACE_MS = 10_000;
+let protocolVersionTimer: ReturnType<typeof setTimeout> | null = null;
+
+function showStaleDaemonBanner(): void {
+	showBanner({
+		id: STALE_DAEMON_BANNER_ID,
+		variant: "warning",
+		icon: "alert-triangle",
+		text: "The conduit daemon is running an older version than this page — restart the daemon to avoid inconsistent behavior.",
+		dismissible: true,
+	});
+}
+
+/** Called on socket open: expect a protocol_version within the grace window. */
+export function armProtocolVersionCheck(): void {
+	disarmProtocolVersionCheck();
+	protocolVersionTimer = setTimeout(() => {
+		protocolVersionTimer = null;
+		showStaleDaemonBanner();
+	}, PROTOCOL_VERSION_GRACE_MS);
+}
+
+/** Called on socket close so a dead connection can't trigger the banner. */
+export function disarmProtocolVersionCheck(): void {
+	if (protocolVersionTimer) {
+		clearTimeout(protocolVersionTimer);
+		protocolVersionTimer = null;
+	}
+}
+
+function handleProtocolVersion(version: number): void {
+	disarmProtocolVersionCheck();
+	if (version === WS_PROTOCOL_VERSION) {
+		removeBanner(STALE_DAEMON_BANNER_ID);
+	} else {
+		showStaleDaemonBanner();
 	}
 }
 

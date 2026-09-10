@@ -4,6 +4,7 @@
 // interface. Translates OpenCode SSE events into canonical events via EventSink.
 
 import { Deferred, Effect } from "effect";
+import { OpenCodeApiError } from "../errors.js";
 import type { OpenCodeAPI } from "../instance/opencode-api.js";
 import type { PromptOptions } from "../instance/sdk-types.js";
 import { createLogger } from "../logger.js";
@@ -47,6 +48,17 @@ function sendFailedTurnResult(message: string): TurnResult {
 export interface OpenCodeProviderInstanceOptions {
 	readonly client: OpenCodeAPI;
 	readonly workspaceRoot?: string;
+	/**
+	 * Phase 4.4: resolve the API client for a session bound to a NAMED
+	 * OpenCode instance (a real second server). Resolves to undefined when the
+	 * session runs on the project-default instance, and fails when a named
+	 * instance cannot be resolved — the caller surfaces that as a send
+	 * failure instead of silently using the default server. Absent in wirings
+	 * without named-instance support.
+	 */
+	readonly clientForSession?: (
+		sessionId: string,
+	) => Effect.Effect<OpenCodeAPI | undefined, Error>;
 }
 
 // ─── OpenCodeProviderInstance ──────────────────────────────────────────────
@@ -56,14 +68,35 @@ export class OpenCodeProviderInstance implements ProviderInstance {
 
 	private readonly client: OpenCodeAPI;
 	private readonly workspaceRoot: string | undefined;
+	private readonly clientForSession:
+		| ((sessionId: string) => Effect.Effect<OpenCodeAPI | undefined, Error>)
+		| undefined;
 	private readonly pendingTurns = new Map<
 		string,
-		Deferred.Deferred<TurnResult, Error>
+		{
+			readonly deferred: Deferred.Deferred<TurnResult, Error>;
+			inFlight: number;
+		}
 	>();
 
 	constructor(options: OpenCodeProviderInstanceOptions) {
 		this.client = options.client;
 		this.workspaceRoot = options.workspaceRoot;
+		this.clientForSession = options.clientForSession;
+	}
+
+	/**
+	 * Resolve the client that owns this session: the named instance's client
+	 * when the session is bound to one, otherwise the project-default client.
+	 */
+	private resolveClientEffect(
+		sessionId: string,
+	): Effect.Effect<OpenCodeAPI, Error> {
+		const resolve = this.clientForSession;
+		if (resolve === undefined) return Effect.succeed(this.client);
+		return resolve(sessionId).pipe(
+			Effect.map((client) => client ?? this.client),
+		);
 	}
 
 	private providerFailure(
@@ -158,12 +191,35 @@ export class OpenCodeProviderInstance implements ProviderInstance {
 		};
 
 		return Effect.gen(this, function* () {
-			const deferred = yield* Deferred.make<TurnResult, Error>();
-			this.pendingTurns.set(sessionId, deferred);
+			// Resolve the owning client first: a session bound to a NAMED
+			// OpenCode instance must be prompted on THAT instance's server. A
+			// resolution failure (unknown/unconfigured instance) becomes a clean
+			// send failure — never a hang or a silent fall-through to the
+			// default server.
+			const clientResult = yield* Effect.either(
+				this.resolveClientEffect(sessionId),
+			);
+			if (clientResult._tag === "Left") {
+				const message = clientResult.left.message;
+				log.error(
+					`sendTurn client resolution failed for session ${sessionId}: ${message}`,
+				);
+				return sendFailedTurnResult(message);
+			}
+			const client = clientResult.right;
+
+			let pendingTurn = this.pendingTurns.get(sessionId);
+			if (pendingTurn) {
+				pendingTurn.inFlight += 1;
+			} else {
+				const deferred = yield* Deferred.make<TurnResult, Error>();
+				pendingTurn = { deferred, inFlight: 1 };
+				this.pendingTurns.set(sessionId, pendingTurn);
+			}
 
 			const onAbort = () => {
 				log.info(`Turn aborted for session ${sessionId}`);
-				this.client.session.abort(sessionId).catch((err) => {
+				client.session.abort(sessionId).catch((err) => {
 					log.warn(`Failed to abort session ${sessionId}: ${err}`);
 				});
 			};
@@ -171,7 +227,13 @@ export class OpenCodeProviderInstance implements ProviderInstance {
 
 			const cleanup = Effect.sync(() => {
 				abortSignal.removeEventListener("abort", onAbort);
-				this.pendingTurns.delete(sessionId);
+				pendingTurn.inFlight -= 1;
+				if (
+					pendingTurn.inFlight === 0 &&
+					this.pendingTurns.get(sessionId) === pendingTurn
+				) {
+					this.pendingTurns.delete(sessionId);
+				}
 			});
 
 			return yield* Effect.gen(this, function* () {
@@ -179,20 +241,30 @@ export class OpenCodeProviderInstance implements ProviderInstance {
 
 				const promptResult = yield* Effect.either(
 					Effect.tryPromise({
-						try: () => this.client.session.prompt(sessionId, promptOptions),
+						try: () => client.session.prompt(sessionId, promptOptions),
 						catch: (cause) => cause,
 					}),
 				);
 				if (promptResult._tag === "Left") {
+					const cause = promptResult.left;
+					const baseMessage =
+						cause instanceof Error ? cause.message : String(cause);
+					// Migration guard (Phase 4.4): a session bound to a named
+					// OpenCode instance BEFORE per-instance routing physically
+					// lives on the project-default server, so the named server
+					// 404s the prompt. Surface that clearly instead of silently
+					// re-routing to the default server.
 					const message =
-						promptResult.left instanceof Error
-							? promptResult.left.message
-							: String(promptResult.left);
+						client !== this.client &&
+						cause instanceof OpenCodeApiError &&
+						cause.responseStatus === 404
+							? `${baseMessage} — this session does not exist on its bound OpenCode instance (it may predate named-instance routing); create a new session on that instance`
+							: baseMessage;
 					log.error(`sendTurn failed for session ${sessionId}: ${message}`);
 					return sendFailedTurnResult(message);
 				}
 
-				return yield* Deferred.await(deferred);
+				return yield* Deferred.await(pendingTurn.deferred);
 			}).pipe(Effect.ensuring(cleanup));
 		});
 	}
@@ -206,12 +278,12 @@ export class OpenCodeProviderInstance implements ProviderInstance {
 	 * connection; the provider instance just waits for notification.
 	 */
 	notifyTurnCompleted(sessionId: string, result: TurnResult): void {
-		const deferred = this.pendingTurns.get(sessionId);
-		if (deferred) {
+		const pendingTurn = this.pendingTurns.get(sessionId);
+		if (pendingTurn && this.pendingTurns.get(sessionId) === pendingTurn) {
 			this.pendingTurns.delete(sessionId);
 			// SSE callbacks are synchronous; complete the Effect Deferred directly
 			// instead of adding an app-internal runtime bridge.
-			Deferred.unsafeDone(deferred, Effect.succeed(result));
+			Deferred.unsafeDone(pendingTurn.deferred, Effect.succeed(result));
 		} else {
 			log.debug(
 				`notifyTurnCompleted: no pending turn for session ${sessionId} -- may have already completed`,
@@ -224,10 +296,16 @@ export class OpenCodeProviderInstance implements ProviderInstance {
 	interruptTurnEffect(
 		sessionId: string,
 	): Effect.Effect<void, ProviderInstanceFailure> {
-		return Effect.tryPromise({
-			try: () => this.client.session.abort(sessionId),
-			catch: (cause) => this.providerFailure("interruptTurn", cause),
-		});
+		return this.resolveClientEffect(sessionId).pipe(
+			Effect.flatMap((client) =>
+				Effect.tryPromise({
+					try: () => client.session.abort(sessionId),
+					catch: (cause) => cause,
+				}),
+			),
+			Effect.mapError((cause) => this.providerFailure("interruptTurn", cause)),
+			Effect.asVoid,
+		);
 	}
 
 	// ─── resolvePermission ────────────────────────────────────────────────
@@ -237,41 +315,42 @@ export class OpenCodeProviderInstance implements ProviderInstance {
 		requestId: string,
 		decision: PermissionDecision,
 	): Effect.Effect<void, ProviderInstanceFailure> {
-		return Effect.tryPromise({
-			try: () => this.resolvePermissionLocal(sessionId, requestId, decision),
-			catch: (cause) => this.providerFailure("resolvePermission", cause),
-		});
-	}
-
-	private async resolvePermissionLocal(
-		sessionId: string,
-		requestId: string,
-		decision: PermissionDecision,
-	): Promise<void> {
-		await this.client.permission.reply(sessionId, requestId, decision);
+		return this.resolveClientEffect(sessionId).pipe(
+			Effect.flatMap((client) =>
+				Effect.tryPromise({
+					try: () => client.permission.reply(sessionId, requestId, decision),
+					catch: (cause) => cause,
+				}),
+			),
+			Effect.mapError((cause) =>
+				this.providerFailure("resolvePermission", cause),
+			),
+			Effect.asVoid,
+		);
 	}
 
 	// ─── resolveQuestion ──────────────────────────────────────────────────
 
 	resolveQuestionEffect(
-		_sessionId: string,
+		sessionId: string,
 		requestId: string,
 		answers: Record<string, unknown>,
 	): Effect.Effect<void, ProviderInstanceFailure> {
-		return Effect.tryPromise({
-			try: () => this.resolveQuestionLocal(requestId, answers),
-			catch: (cause) => this.providerFailure("resolveQuestion", cause),
-		});
-	}
-
-	private async resolveQuestionLocal(
-		requestId: string,
-		answers: Record<string, unknown>,
-	): Promise<void> {
 		const answerArrays = Object.values(answers).map((v) =>
 			Array.isArray(v) ? v.map(String) : [String(v)],
 		);
-		await this.client.question.reply(requestId, answerArrays);
+		return this.resolveClientEffect(sessionId).pipe(
+			Effect.flatMap((client) =>
+				Effect.tryPromise({
+					try: () => client.question.reply(requestId, answerArrays),
+					catch: (cause) => cause,
+				}),
+			),
+			Effect.mapError((cause) =>
+				this.providerFailure("resolveQuestion", cause),
+			),
+			Effect.asVoid,
+		);
 	}
 
 	// ─── endSession ──────────────────────────────────────────────────────
@@ -287,11 +366,11 @@ export class OpenCodeProviderInstance implements ProviderInstance {
 		// per-session state is the pending turn Deferred; fail it so the caller
 		// unblocks. We do not call client.session.abort: reload is a provider
 		// instance reset, while interruptTurn/cancel is a provider cancellation.
-		const deferred = this.pendingTurns.get(sessionId);
-		if (deferred) {
+		const pendingTurn = this.pendingTurns.get(sessionId);
+		if (pendingTurn && this.pendingTurns.get(sessionId) === pendingTurn) {
 			this.pendingTurns.delete(sessionId);
 			Deferred.unsafeDone(
-				deferred,
+				pendingTurn.deferred,
 				Effect.fail(new Error("Session ended (reload)")),
 			);
 		}
@@ -303,9 +382,11 @@ export class OpenCodeProviderInstance implements ProviderInstance {
 		return Effect.sync(() => {
 			log.info("OpenCodeProviderInstance shutting down");
 
-			for (const [sessionId, deferred] of this.pendingTurns) {
+			for (const [sessionId, pendingTurn] of this.pendingTurns) {
+				if (this.pendingTurns.get(sessionId) !== pendingTurn) continue;
+				this.pendingTurns.delete(sessionId);
 				Deferred.unsafeDone(
-					deferred,
+					pendingTurn.deferred,
 					Effect.fail(
 						new Error(
 							`Provider instance shutdown -- turn for session ${sessionId} cancelled`,

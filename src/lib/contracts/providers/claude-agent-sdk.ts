@@ -229,6 +229,7 @@ export const ClaudeSDKPermissionModeSchema = Schema.Literal(
 export const ClaudeSDKAssistantMessageErrorSchema = Schema.Literal(
 	"authentication_failed",
 	"oauth_org_not_allowed",
+	"account_on_hold",
 	"billing_error",
 	"rate_limit",
 	"overloaded",
@@ -1135,6 +1136,7 @@ export const ClaudeSDKInitializationResultSubsetSchema = Schema.Struct({
 		Schema.Struct({
 			value: Schema.String,
 			displayName: Schema.String,
+			resolvedModel: Schema.optional(Schema.String),
 			supportedEffortLevels: Schema.optional(Schema.Array(Schema.String)),
 		}),
 	),

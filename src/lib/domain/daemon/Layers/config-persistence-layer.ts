@@ -18,6 +18,7 @@ import {
 } from "effect";
 import {
 	type DaemonConfig,
+	loadDaemonConfig,
 	saveDaemonConfig,
 } from "../../../daemon/config-persistence.js";
 import {
@@ -127,11 +128,63 @@ export class ConfigWriterTag extends Context.Tag("ConfigWriter")<
 	ConfigWriter
 >() {}
 
+type PersistedInstanceConfig = NonNullable<DaemonConfig["instances"]>[number];
+
+const mergePersistedInstanceConfigs = (
+	runtimeInstances: ReadonlyArray<PersistedInstanceConfig>,
+	persistedInstances: ReadonlyArray<PersistedInstanceConfig>,
+): PersistedInstanceConfig[] => {
+	const persistedById = new Map(
+		persistedInstances.map((instance) => [instance.id, instance]),
+	);
+	const runtimeById = new Map(
+		runtimeInstances.map((instance) => [instance.id, instance]),
+	);
+
+	const mergeInstance = (runtimeInstance: PersistedInstanceConfig) => {
+		const persistedInstance = persistedById.get(runtimeInstance.id);
+		return {
+			...persistedInstance,
+			...runtimeInstance,
+			driver: runtimeInstance.driver ?? persistedInstance?.driver ?? "opencode",
+			...(runtimeInstance.configDir !== undefined
+				? { configDir: runtimeInstance.configDir }
+				: persistedInstance?.configDir !== undefined
+					? { configDir: persistedInstance.configDir }
+					: {}),
+		};
+	};
+
+	return [
+		...persistedInstances.flatMap((persistedInstance) => {
+			const runtimeInstance = runtimeById.get(persistedInstance.id);
+			return runtimeInstance === undefined
+				? []
+				: [mergeInstance(runtimeInstance)];
+		}),
+		...runtimeInstances
+			.filter((instance) => !persistedById.has(instance.id))
+			.map(mergeInstance),
+	];
+};
+
 export const makeConfigWriterLive = (configDir: string) =>
 	Layer.succeed(ConfigWriterTag, {
 		write: (config: DaemonConfig) =>
 			Effect.tryPromise({
-				try: () => saveDaemonConfig(config, configDir),
+				try: () => {
+					const persisted = loadDaemonConfig(configDir);
+					return saveDaemonConfig(
+						{
+							...config,
+							instances: mergePersistedInstanceConfigs(
+								config.instances ?? [],
+								persisted?.instances ?? [],
+							),
+						},
+						configDir,
+					);
+				},
 				catch: (cause) =>
 					new ConfigPersistenceWriteError({
 						operation: "saveDaemonConfig",

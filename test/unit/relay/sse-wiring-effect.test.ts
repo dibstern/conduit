@@ -178,13 +178,13 @@ describe("handleSSEEventEffect", () => {
 		expect(deps.sessionService.recordMessageActivity).not.toHaveBeenCalled();
 	});
 
-	it("auto mode replies once without broadcasting or recording a pending permission", async () => {
+	it("full mode replies once without broadcasting or recording a pending permission", async () => {
 		const replyPermission = vi.fn(async () => {});
 		const { deps, effectDeps } = makeEffectDeps(replyPermission);
 
 		await Effect.runPromise(
 			Effect.gen(function* () {
-				yield* setPermissionMode("session-1", "auto");
+				yield* setPermissionMode("session-1", "full");
 				yield* handleSSEEventEffect(effectDeps, permissionAskedEvent());
 				const pendingInteractions = yield* PendingInteractionServiceTag;
 				expect(
@@ -240,6 +240,27 @@ describe("handleSSEEventEffect", () => {
 		);
 	});
 
+	it("auto mode falls back to a card for OpenCode permissions", async () => {
+		const replyPermission = vi.fn(async () => {});
+		const { deps, effectDeps } = makeEffectDeps(replyPermission);
+
+		await Effect.runPromise(
+			Effect.gen(function* () {
+				yield* setPermissionMode("session-1", "auto");
+				yield* handleSSEEventEffect(effectDeps, permissionAskedEvent());
+				const pendingInteractions = yield* PendingInteractionServiceTag;
+				expect(
+					yield* pendingInteractions.listPendingPermissions("session-1"),
+				).toHaveLength(1);
+			}).pipe(Effect.provide(makeEffectLayer())),
+		);
+
+		expect(replyPermission).not.toHaveBeenCalled();
+		expect(deps.wsHandler.broadcast).toHaveBeenCalledWith(
+			expect.objectContaining({ type: "permission_request" }),
+		);
+	});
+
 	it("defaults to ask mode and preserves the card path", async () => {
 		const replyPermission = vi.fn(async () => {});
 		const { deps, effectDeps } = makeEffectDeps(replyPermission);
@@ -268,7 +289,7 @@ describe("handleSSEEventEffect", () => {
 
 		await Effect.runPromise(
 			Effect.gen(function* () {
-				yield* setPermissionMode("session-1", "auto");
+				yield* setPermissionMode("session-1", "full");
 				yield* handleSSEEventEffect(effectDeps, permissionAskedEvent());
 				const pendingInteractions = yield* PendingInteractionServiceTag;
 				expect(
@@ -287,7 +308,7 @@ describe("handleSSEEventEffect", () => {
 
 		await Effect.runPromise(
 			Effect.gen(function* () {
-				yield* setPermissionMode("session-1", "auto");
+				yield* setPermissionMode("session-1", "full");
 				yield* handleSSEEventEffect(effectDeps, permissionAskedEvent());
 				const pendingInteractions = yield* PendingInteractionServiceTag;
 				expect(

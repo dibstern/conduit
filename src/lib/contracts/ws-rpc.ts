@@ -1,6 +1,7 @@
 import { Rpc, RpcGroup } from "@effect/rpc";
 import { Schema } from "effect";
 import { SessionPermissionModeSchema } from "../shared-types.js";
+import { ProviderDriverKindSchema } from "./provider-instance.js";
 
 const NonEmptyString = Schema.NonEmptyString;
 
@@ -35,6 +36,7 @@ export const ModelInfoSchema = Schema.Struct({
 
 export const ProviderInfoSchema = Schema.Struct({
 	id: Schema.String,
+	instanceId: Schema.optional(Schema.String),
 	name: Schema.String,
 	configured: Schema.Boolean,
 	models: Schema.Array(ModelInfoSchema),
@@ -54,6 +56,29 @@ export const ContextWindowInfoSchema = Schema.Struct({
 	contextWindow: Schema.String,
 	options: Schema.Array(ContextWindowOptionSchema),
 });
+
+export const ModelExecutionSchema = Schema.Struct({
+	requestedModel: Schema.optional(Schema.String),
+	expectedModel: Schema.optional(Schema.String),
+	actualModel: Schema.String,
+	drifted: Schema.optional(Schema.Boolean),
+}).pipe(
+	Schema.filter(
+		(execution) =>
+			execution.drifted === undefined ||
+			(execution.expectedModel !== undefined &&
+				(execution.drifted === false ||
+					execution.actualModel !== execution.expectedModel)),
+		{
+			// Not a biconditional: two ids that differ only by the `[1m]`
+			// context-window suffix name the same model, so equal-identity /
+			// unequal-string is a legitimate `drifted: false`. Claiming drift
+			// between two identical ids is still nonsense.
+			message: () =>
+				"drifted requires expectedModel, and drifted=true requires actualModel to differ from expectedModel",
+		},
+	),
+);
 
 export const AgentInfoSchema = Schema.Struct({
 	id: Schema.String,
@@ -93,6 +118,9 @@ export const OpenCodeInstanceSchema = Schema.Struct({
 	name: Schema.String,
 	port: Schema.Number,
 	managed: Schema.Boolean,
+	driver: Schema.optional(Schema.suspend(() => ProviderDriverKindSchema)),
+	configDir: Schema.optional(Schema.String),
+	url: Schema.optional(Schema.String),
 	status: InstanceStatusSchema,
 	pid: Schema.optional(Schema.Number),
 	env: Schema.optional(
@@ -156,18 +184,21 @@ const HistoryMessageSchema = Schema.Struct({
 	tokens: Schema.optional(
 		Schema.Record({ key: Schema.String, value: Schema.Unknown }),
 	),
+	modelExecution: Schema.optional(ModelExecutionSchema),
 }).pipe(
 	Schema.extend(Schema.Record({ key: Schema.String, value: Schema.Unknown })),
 );
 
 export const GetModelsResponseSchema = Schema.Struct({
 	projectSlug: Schema.String,
+	instanceId: Schema.optional(Schema.String),
 	providers: Schema.Array(ProviderInfoSchema),
 	active: Schema.optional(ModelSelectionSchema),
 	variant: Schema.optional(VariantInfoSchema),
 	contextWindow: Schema.optional(ContextWindowInfoSchema),
 	permissionMode: Schema.optional(SessionPermissionModeSchema),
 	hiddenModels: Schema.optional(Schema.Array(Schema.String)),
+	modelExecution: Schema.optional(ModelExecutionSchema),
 });
 
 export const SwitchContextWindowResponseSchema = Schema.Struct({
@@ -274,6 +305,7 @@ export const ForkSessionResponseSchema = Schema.Struct({
 
 export const GetAgentsResponseSchema = Schema.Struct({
 	projectSlug: Schema.String,
+	instanceId: Schema.optional(Schema.String),
 	providerScope: AgentProviderScopeSchema,
 	agents: Schema.Array(AgentInfoSchema),
 	activeAgentId: Schema.optional(Schema.String),
@@ -414,6 +446,7 @@ export class GetAgents extends Schema.TaggedRequest<GetAgents>()("GetAgents", {
 	payload: {
 		projectSlug: NonEmptyString,
 		sessionId: Schema.optional(Schema.String),
+		instanceId: Schema.optional(Schema.String),
 	},
 }) {}
 
@@ -536,6 +569,44 @@ export class RenameInstance extends Schema.TaggedRequest<RenameInstance>()(
 			projectSlug: NonEmptyString,
 			instanceId: NonEmptyString,
 			name: NonEmptyString,
+		},
+	},
+) {}
+
+export class AddInstance extends Schema.TaggedRequest<AddInstance>()(
+	"AddInstance",
+	{
+		failure: WsRpcError,
+		success: InstanceListResponseSchema,
+		payload: {
+			projectSlug: NonEmptyString,
+			name: NonEmptyString,
+			driver: Schema.optional(Schema.suspend(() => ProviderDriverKindSchema)),
+			managed: Schema.optional(Schema.Boolean),
+			port: Schema.optional(Schema.Number),
+			url: Schema.optional(Schema.String),
+			env: Schema.optional(
+				Schema.Record({ key: Schema.String, value: Schema.String }),
+			),
+			configDir: Schema.optional(Schema.String),
+		},
+	},
+) {}
+
+export class UpdateInstance extends Schema.TaggedRequest<UpdateInstance>()(
+	"UpdateInstance",
+	{
+		failure: WsRpcError,
+		success: InstanceListResponseSchema,
+		payload: {
+			projectSlug: NonEmptyString,
+			instanceId: NonEmptyString,
+			name: Schema.optional(Schema.String),
+			port: Schema.optional(Schema.Number),
+			env: Schema.optional(
+				Schema.Record({ key: Schema.String, value: Schema.String }),
+			),
+			configDir: Schema.optional(Schema.String),
 		},
 	},
 ) {}
@@ -798,6 +869,7 @@ export class GetModels extends Schema.TaggedRequest<GetModels>()("GetModels", {
 	payload: {
 		projectSlug: NonEmptyString,
 		sessionId: Schema.optional(Schema.String),
+		instanceId: Schema.optional(Schema.String),
 	},
 }) {}
 
@@ -824,6 +896,9 @@ export class CreateSession extends Schema.TaggedRequest<CreateSession>()(
 			originId: NonEmptyString,
 			title: Schema.optional(Schema.String),
 			requestId: Schema.optional(NonEmptyString),
+			instanceId: Schema.optional(
+				Schema.String.pipe(Schema.brand("ProviderInstanceId")),
+			),
 			providerId: Schema.optional(Schema.String),
 		},
 	},
@@ -1025,6 +1100,8 @@ export const WsRpcRequest = Schema.Union(
 	StopInstance,
 	RemoveInstance,
 	RenameInstance,
+	AddInstance,
+	UpdateInstance,
 	ScanNow,
 	DetectProxy,
 	ListPtys,
@@ -1077,6 +1154,8 @@ export const WsRpcGroup = RpcGroup.make(
 	Rpc.fromTaggedRequest(StopInstance),
 	Rpc.fromTaggedRequest(RemoveInstance),
 	Rpc.fromTaggedRequest(RenameInstance),
+	Rpc.fromTaggedRequest(AddInstance),
+	Rpc.fromTaggedRequest(UpdateInstance),
 	Rpc.fromTaggedRequest(ScanNow),
 	Rpc.fromTaggedRequest(DetectProxy),
 	Rpc.fromTaggedRequest(ListPtys),

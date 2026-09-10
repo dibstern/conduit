@@ -29,6 +29,7 @@ import {
 	phaseToProcessing,
 	phaseToStreaming,
 	prependMessages,
+	restoreContextFromMessages,
 	type SessionActivity,
 	type SessionMessages,
 } from "../../../src/lib/frontend/stores/chat.svelte.js";
@@ -463,6 +464,25 @@ describe("handleResult", () => {
 		expect(m.cacheWrite).toBe(10);
 	});
 
+	it("uses the result context window for the context usage percentage", () => {
+		handleResult(ta, tm, {
+			type: "result",
+			cost: 0.05,
+			duration: 1200,
+			usage: {
+				input: 10_000,
+				output: 0,
+				cache_read: 320_000,
+				cache_creation: 0,
+				context_window: 1_000_000,
+			},
+			sessionId: "s1",
+		});
+
+		expect(tm.contextPercent).toBe(33);
+		expect((tm.messages[0] as ResultMessage).context_window).toBe(1_000_000);
+	});
+
 	it("handles missing usage object gracefully", () => {
 		handleResult(
 			ta,
@@ -529,6 +549,24 @@ describe("handleResult", () => {
 			(m: { type: string }) => m.type === "result",
 		);
 		expect(results).toHaveLength(2);
+	});
+
+	it("restores the context usage percentage from a persisted result window", () => {
+		tm.messages = [
+			{
+				type: "result",
+				uuid: "result-1",
+				inputTokens: 10_000,
+				outputTokens: 0,
+				cacheRead: 320_000,
+				cacheWrite: 0,
+				context_window: 1_000_000,
+			} as ResultMessage & { context_window: number },
+		];
+
+		restoreContextFromMessages(tm);
+
+		expect(tm.contextPercent).toBe(33);
 	});
 });
 

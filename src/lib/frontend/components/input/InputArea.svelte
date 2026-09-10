@@ -12,14 +12,20 @@
 	import ContextBar from "./ContextBar.svelte";
 	// biome-ignore lint/style/useImportType: FileMenu is used as a value for bind:this
 	import FileMenu from "./FileMenu.svelte";
-	import ModelSelector from "../model/ModelSelector.svelte";
+	import InstanceModelPicker from "../model/InstanceModelPicker.svelte";
 	import PermissionModeSelector from "./PermissionModeSelector.svelte";
 	import SkillHighlightBackdrop from "./SkillHighlightBackdrop.svelte";
 	// biome-ignore lint/style/useImportType: SubagentBackBar is used as a value for bind:this
 	import SubagentBackBar from "../chat/SubagentBackBar.svelte";
 	import PastePreview from "../chat/PastePreview.svelte";
 	import { addUserMessage, currentChat, getOrCreateSessionSlot, inputSyncState, isProcessing } from "../../stores/chat.svelte.js";
-	import { discoveryState, extractSlashQuery, filterCommands } from "../../stores/discovery.svelte.js";
+	import {
+		discoveryState,
+		extractSlashQuery,
+		filterCommands,
+		getEffectiveInstanceId,
+		getModelDisplayName,
+	} from "../../stores/discovery.svelte.js";
 	import {
 		buildMentionInsertion,
 		extractAtQuery,
@@ -27,12 +33,12 @@
 		filterFiles,
 	} from "../../stores/file-tree.svelte.js";
 	import { fetchFileContent, fetchDirectoryListing, resizeImageIfNeeded } from "./input-utils.js";
-	import { sessionState } from "../../stores/session.svelte.js";
+	import { sessionState, switchToSession } from "../../stores/session.svelte.js";
 	import { getCurrentSlug } from "../../stores/router.svelte.js";
 	import { showToast } from "../../stores/ui.svelte.js";
 	import { rateLimitChatSend } from "../../stores/ws.svelte.js";
 	import { getBrowserClientId } from "../../stores/client-identity.js";
-	import { cancelSessionRpc, sendMessageRpc, syncInputDraftRpc } from "../../transport/ws-rpc-client.js";
+	import { cancelSessionRpc, createSessionRpc, sendMessageRpc, syncInputDraftRpc } from "../../transport/ws-rpc-client.js";
 	import { buildAttachedMessage, parseAtReferences } from "../../utils/file-attach.js";
 	import type { FileAttachment } from "../../utils/file-attach.js";
 	import type { PendingImage } from "../../types.js";
@@ -163,8 +169,28 @@
 
 	// ─── Derived ───────────────────────────────────────────────────────────────
 
+	// Pasting a log dump means the composer holds far more text than it can show.
+	// Past this size the highlight mirror stops earning its keep: it would lay the
+	// whole draft out a second time, which costs ~300ms per megabyte. Fall back to
+	// the textarea's own (unhighlighted) text, exactly as during IME composition.
+	const HIGHLIGHT_MAX_CHARS = 20_000;
+	const plainText = $derived(inputText.length > HIGHLIGHT_MAX_CHARS);
+
 	const canSend = $derived(inputText.trim().length > 0 || pendingImages.length > 0);
 	const showContextMini = $derived(currentChat().contextPercent > 0);
+	/** Drift is only reportable with complete mismatch evidence. */
+	const modelDrift = $derived.by(() => {
+		const execution = discoveryState.modelExecution;
+		return execution?.drifted === true &&
+			execution.requestedModel &&
+			execution.expectedModel &&
+			execution.actualModel
+			? {
+					actualModel: execution.actualModel,
+					requestedModel: execution.requestedModel,
+				}
+			: null;
+	});
 
 	// ─── Mobile detection ─────────────────────────────────────────────────────
 	// On mobile, Enter inserts a newline (default textarea behavior) and the
@@ -179,10 +205,20 @@
 
 	// ─── Auto-resize textarea ──────────────────────────────────────────────────
 
+	/** Matches the textarea's `max-h-[120px]`. */
+	const MAX_TEXTAREA_HEIGHT_PX = 120;
+
 	function autoResize() {
 		if (!textareaEl) return;
+		// Reading scrollHeight forces a synchronous layout of the entire value, so a
+		// pasted log dump costs ~140ms per megabyte here. Anything this long is past
+		// the cap regardless of wrapping, so skip the measurement.
+		if (inputText.length > HIGHLIGHT_MAX_CHARS) {
+			textareaEl.style.height = `${MAX_TEXTAREA_HEIGHT_PX}px`;
+			return;
+		}
 		textareaEl.style.height = "auto";
-		textareaEl.style.height = `${Math.min(textareaEl.scrollHeight, 120)}px`;
+		textareaEl.style.height = `${Math.min(textareaEl.scrollHeight, MAX_TEXTAREA_HEIGHT_PX)}px`;
 	}
 
 	// ─── Handlers ──────────────────────────────────────────────────────────────
@@ -313,16 +349,30 @@
 		// Always send immediately — OpenCode queues server-side when busy.
 		// When the LLM is processing, `sentDuringEpoch` is recorded so the
 		// UI can derive the "Queued" shimmer reactively.
-		const sid = sessionState.currentId;
 		const projectSlug = getCurrentSlug();
-		if (!sid || !projectSlug) {
-			showToast("No active session", { variant: "error" });
+		if (!projectSlug) {
+			showToast("No active project", { variant: "error" });
 			return;
 		}
-		if (sid) {
-			const { activity, messages } = getOrCreateSessionSlot(sid);
-			addUserMessage(activity, messages, messageText, imageUrls, isProcessing());
+		let sid = sessionState.currentId;
+		if (!sid) {
+			// First send with no active session: create one bound to the selected
+			// harness instance (the picker's pre-creation draft), then send into it.
+			try {
+				const created = await createSessionRpc({
+					projectSlug,
+					originId: getBrowserClientId(),
+					instanceId: getEffectiveInstanceId(),
+				});
+				sid = created.sessionId;
+				switchToSession(sid);
+			} catch {
+				showToast("Failed to create session", { variant: "error" });
+				return;
+			}
 		}
+		const { activity, messages } = getOrCreateSessionSlot(sid);
+		addUserMessage(activity, messages, messageText, imageUrls, isProcessing());
 		rateLimitChatSend(() => {
 			void sendMessageRpc({
 				projectSlug,
@@ -608,10 +658,10 @@
 			<!-- Textarea row -->
 			<div class="relative flex items-start">
 				<SkillHighlightBackdrop
-					text={inputText}
+					text={plainText ? "" : inputText}
 					commandNames={commandNameSet}
 					{scrollTop}
-					dimmed={composing}
+					dimmed={composing || plainText}
 				/>
 				<textarea
 					id="input"
@@ -625,8 +675,8 @@
 					autocomplete="off"
 					enterkeyhint={isMobile() ? "enter" : "send"}
 					class="relative z-10 flex-1 min-w-0 bg-transparent border-none caret-[var(--color-text)] text-base font-sans leading-[1.4] pt-2 pb-1 px-2.5 resize-none outline-none min-h-6 max-h-[120px] overflow-y-auto placeholder:text-text-muted"
-					class:text-transparent={!composing}
-					class:text-text={composing}
+					class:text-transparent={!composing && !plainText}
+					class:text-text={composing || plainText}
 					bind:value={inputText}
 					bind:this={textareaEl}
 					oninput={handleInput}
@@ -647,6 +697,16 @@
 				<PastePreview images={pendingImages} onRemove={removePendingImage} />
 			{/if}
 
+			<!-- Model drift notice: own row, so it never crowds the controls below -->
+			{#if modelDrift}
+				<div
+					data-testid="current-model-drift"
+					class="mx-1 mb-1 rounded-lg border border-warning/30 bg-warning-bg px-2 py-1 text-[11px] leading-[1.3] font-medium text-warning"
+				>
+					⚠ Running {getModelDisplayName(modelDrift.actualModel)} — you selected {getModelDisplayName(modelDrift.requestedModel)}
+				</div>
+			{/if}
+
 			<!-- Bottom row: attach + agent + model + send -->
 			<div id="input-bottom" class="flex items-center justify-between gap-1">
 				<div
@@ -660,19 +720,18 @@
 					<div id="agent-selector-wrap">
 						<AgentSelector />
 					</div>
-
-				<!-- Model selector -->
-				<ModelSelector />
-
-				<!-- Approvals (permission mode) selector -->
-				<PermissionModeSelector />
-
-			</div>
+				</div>
 
 				<div
 					id="input-bottom-right"
-					class="flex items-center gap-1 shrink-0"
+					class="flex items-center gap-1 min-w-0"
 				>
+					<!-- Harness instance + model picker -->
+					<InstanceModelPicker />
+
+					<!-- Approvals (permission mode) selector -->
+					<PermissionModeSelector />
+
 					<!-- Send / Stop buttons -->
 					<button
 						id="send"

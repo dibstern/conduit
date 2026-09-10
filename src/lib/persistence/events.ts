@@ -28,6 +28,16 @@ export type ProviderType = (typeof PROVIDER_TYPES)[number];
 export const SESSION_STATUSES = ["idle", "busy", "retry", "error"] as const;
 export type SessionStatusValue = (typeof SESSION_STATUSES)[number];
 
+// Keep in sync with SessionPermissionModeSchema in src/lib/shared-types.ts.
+export const SESSION_PERMISSION_MODES = [
+	"ask",
+	"acceptEdits",
+	"auto",
+	"full",
+] as const;
+export type SessionPermissionModeValue =
+	(typeof SESSION_PERMISSION_MODES)[number];
+
 export const PERMISSION_DECISIONS = ["once", "always", "reject"] as const;
 export type PermissionDecision = (typeof PERMISSION_DECISIONS)[number];
 
@@ -50,10 +60,13 @@ export const CANONICAL_EVENT_TYPES = [
 	"turn.completed",
 	"turn.error",
 	"turn.interrupted",
+	"turn.model_resolved",
 	"session.created",
 	"session.renamed",
 	"session.status",
+	"session.compaction",
 	"session.provider_changed",
+	"session.permission_mode_changed",
 	"permission.asked",
 	"permission.resolved",
 	"question.asked",
@@ -180,6 +193,7 @@ export interface TurnCompletedPayload {
 		readonly output?: number;
 		readonly cacheRead?: number;
 		readonly cacheWrite?: number;
+		readonly contextWindow?: number;
 	};
 	readonly duration?: number;
 }
@@ -192,6 +206,12 @@ export interface TurnErrorPayload {
 
 export interface TurnInterruptedPayload {
 	readonly messageId: string;
+}
+
+export interface TurnModelResolvedPayload {
+	readonly requestedModel?: string;
+	readonly expectedModel?: string;
+	readonly actualModel: string;
 }
 
 export interface SessionCreatedPayload {
@@ -213,10 +233,23 @@ export interface SessionStatusPayload {
 	readonly turnId?: string;
 }
 
+export interface SessionCompactionPayload {
+	readonly sessionId: string;
+	readonly state: "started" | "completed" | "failed";
+	readonly detail: string;
+	readonly preTokens?: number;
+	readonly postTokens?: number;
+}
+
 export interface SessionProviderChangedPayload {
 	readonly sessionId: string;
 	readonly oldProvider: string;
 	readonly newProvider: string;
+}
+
+export interface SessionPermissionModeChangedPayload {
+	readonly sessionId: string;
+	readonly mode: SessionPermissionModeValue;
 }
 
 export interface PermissionAskedPayload {
@@ -264,10 +297,13 @@ export interface EventPayloadMap {
 	"turn.completed": TurnCompletedPayload;
 	"turn.error": TurnErrorPayload;
 	"turn.interrupted": TurnInterruptedPayload;
+	"turn.model_resolved": TurnModelResolvedPayload;
 	"session.created": SessionCreatedPayload;
 	"session.renamed": SessionRenamedPayload;
 	"session.status": SessionStatusPayload;
+	"session.compaction": SessionCompactionPayload;
 	"session.provider_changed": SessionProviderChangedPayload;
+	"session.permission_mode_changed": SessionPermissionModeChangedPayload;
 	"permission.asked": PermissionAskedPayload;
 	"permission.resolved": PermissionResolvedPayload;
 	"question.asked": QuestionAskedPayload;
@@ -390,6 +426,7 @@ const TokensSchema = Schema.Struct({
 	output: Schema.optionalWith(Schema.Number, { exact: true }),
 	cacheRead: Schema.optionalWith(Schema.Number, { exact: true }),
 	cacheWrite: Schema.optionalWith(Schema.Number, { exact: true }),
+	contextWindow: Schema.optionalWith(Schema.Number, { exact: true }),
 });
 
 const MessageCreatedPayloadSchema = Schema.Struct({
@@ -558,6 +595,14 @@ const TurnInterruptedPayloadSchema = Schema.Struct({
 	messageId: Schema.String,
 });
 
+const NonEmptyStringSchema = Schema.String.pipe(Schema.minLength(1));
+
+const TurnModelResolvedPayloadSchema = Schema.Struct({
+	requestedModel: Schema.optionalWith(NonEmptyStringSchema, { exact: true }),
+	expectedModel: Schema.optionalWith(NonEmptyStringSchema, { exact: true }),
+	actualModel: NonEmptyStringSchema,
+});
+
 const SessionCreatedPayloadSchema = Schema.Struct({
 	sessionId: Schema.String,
 	title: Schema.String,
@@ -577,10 +622,23 @@ const SessionStatusPayloadSchema = Schema.Struct({
 	turnId: Schema.optionalWith(Schema.String, { exact: true }),
 });
 
+const SessionCompactionPayloadSchema = Schema.Struct({
+	sessionId: Schema.String,
+	state: Schema.Literal("started", "completed", "failed"),
+	detail: Schema.String,
+	preTokens: Schema.optionalWith(Schema.Number, { exact: true }),
+	postTokens: Schema.optionalWith(Schema.Number, { exact: true }),
+});
+
 const SessionProviderChangedPayloadSchema = Schema.Struct({
 	sessionId: Schema.String,
 	oldProvider: Schema.String,
 	newProvider: Schema.String,
+});
+
+const SessionPermissionModeChangedPayloadSchema = Schema.Struct({
+	sessionId: Schema.String,
+	mode: Schema.Literal(...SESSION_PERMISSION_MODES),
 });
 
 const PermissionAskedPayloadSchema = Schema.Struct({
@@ -676,6 +734,10 @@ const TurnInterruptedEventSchema = eventEnvelope(
 	"turn.interrupted",
 	TurnInterruptedPayloadSchema,
 );
+const TurnModelResolvedEventSchema = eventEnvelope(
+	"turn.model_resolved",
+	TurnModelResolvedPayloadSchema,
+);
 const SessionCreatedEventSchema = eventEnvelope(
 	"session.created",
 	SessionCreatedPayloadSchema,
@@ -688,9 +750,17 @@ const SessionStatusEventSchema = eventEnvelope(
 	"session.status",
 	SessionStatusPayloadSchema,
 );
+const SessionCompactionEventSchema = eventEnvelope(
+	"session.compaction",
+	SessionCompactionPayloadSchema,
+);
 const SessionProviderChangedEventSchema = eventEnvelope(
 	"session.provider_changed",
 	SessionProviderChangedPayloadSchema,
+);
+const SessionPermissionModeChangedEventSchema = eventEnvelope(
+	"session.permission_mode_changed",
+	SessionPermissionModeChangedPayloadSchema,
 );
 const PermissionAskedEventSchema = eventEnvelope(
 	"permission.asked",
@@ -709,7 +779,7 @@ const QuestionResolvedEventSchema = eventEnvelope(
 	QuestionResolvedPayloadSchema,
 );
 
-// ─── Canonical Event Schema (Union of all 21 event types) ──────────────────
+// ─── Canonical Event Schema (Union of all 24 event types) ──────────────────
 
 export const CanonicalEventSchema = Schema.Union(
 	MessageCreatedEventSchema,
@@ -725,10 +795,13 @@ export const CanonicalEventSchema = Schema.Union(
 	TurnCompletedEventSchema,
 	TurnErrorEventSchema,
 	TurnInterruptedEventSchema,
+	TurnModelResolvedEventSchema,
 	SessionCreatedEventSchema,
 	SessionRenamedEventSchema,
 	SessionStatusEventSchema,
+	SessionCompactionEventSchema,
 	SessionProviderChangedEventSchema,
+	SessionPermissionModeChangedEventSchema,
 	PermissionAskedEventSchema,
 	PermissionResolvedEventSchema,
 	QuestionAskedEventSchema,
@@ -753,7 +826,9 @@ const PAYLOAD_REQUIRED_FIELDS: Record<CanonicalEventType, readonly string[]> = {
 	"session.created": ["sessionId", "title", "provider"],
 	"session.renamed": ["sessionId", "title"],
 	"session.status": ["sessionId", "status"],
+	"session.compaction": ["sessionId", "state", "detail"],
 	"session.provider_changed": ["sessionId", "oldProvider", "newProvider"],
+	"session.permission_mode_changed": ["sessionId", "mode"],
 	"message.created": ["messageId", "role", "sessionId"],
 	"text.delta": ["messageId", "partId", "text"],
 	"thinking.start": ["messageId", "partId"],
@@ -767,6 +842,7 @@ const PAYLOAD_REQUIRED_FIELDS: Record<CanonicalEventType, readonly string[]> = {
 	"turn.completed": ["messageId"],
 	"turn.error": ["messageId", "error"],
 	"turn.interrupted": ["messageId"],
+	"turn.model_resolved": ["actualModel"],
 	"permission.asked": ["id", "sessionId", "toolName"],
 	"permission.resolved": ["id", "decision"],
 	"question.asked": ["id", "sessionId", "questions"],

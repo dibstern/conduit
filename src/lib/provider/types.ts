@@ -6,7 +6,10 @@
 
 import type { Effect, Scope } from "effect";
 import type { ProviderRuntimeEvent } from "../contracts/providers/provider-runtime-event.js";
-import type { ProviderPermissionUpdate } from "../shared-types.js";
+import type {
+	ProviderPermissionUpdate,
+	SessionPermissionMode,
+} from "../shared-types.js";
 import type { ProviderInstanceFailure } from "./errors.js";
 
 // ─── Permission / Question Decisions ────────────────────────────────────────
@@ -75,6 +78,12 @@ export interface EventSink {
 		answers: Record<string, unknown>,
 	): Effect.Effect<void, unknown>;
 	cancelSessionInteractions?(reason: string): Effect.Effect<void, unknown>;
+	/**
+	 * Relay liveness hook. Providers never call this; the orchestration reactor
+	 * calls it for every streamed event so the relay's processing timeout stays
+	 * alive on the path where provider output goes straight to ingestion.
+	 */
+	noteActivity?(): void;
 }
 
 // ─── Turn Types ─────────────────────────────────────────────────────────────
@@ -87,6 +96,7 @@ export interface TurnTokens {
 	readonly cacheRead?: number;
 	readonly cacheWrite?: number;
 	readonly reasoning?: number;
+	readonly contextWindow?: number;
 }
 
 export type TurnErrorCode =
@@ -134,6 +144,8 @@ export interface ModelInfo {
 	readonly id: string;
 	readonly name: string;
 	readonly providerId: string;
+	/** Backend-only SDK oracle for the exact model id reported at runtime. */
+	readonly resolvedModel?: string;
 	readonly limit?: { context?: number; output?: number };
 	readonly variants?: Record<string, Record<string, unknown>>;
 	/**
@@ -167,13 +179,16 @@ export interface SendTurnInput {
 	readonly history: readonly HistoryMessage[];
 	readonly providerState: Readonly<Record<string, unknown>>;
 	/**
-	 * Optional model selection. If absent, the provider uses its default.
-	 * OpenCodeProviderInstance skips the model field in the REST call when absent.
+	 * Optional shared model selection. OpenCode may omit the model from its
+	 * provider request. Claude's relay path infers a catalog model, and its
+	 * runtime rejects direct model-less dispatches.
 	 */
 	readonly model?: ModelSelection;
 	readonly workspaceRoot: string;
+	readonly configDir?: string;
 	readonly eventSink: EventSink;
 	readonly abortSignal: AbortSignal;
+	readonly permissionMode?: SessionPermissionMode;
 	readonly variant?: string;
 	readonly contextWindow?: string;
 	readonly images?: readonly string[];
@@ -266,6 +281,12 @@ export interface ProviderInstance {
 		requestId: string,
 		answers: Record<string, unknown>,
 	): Effect.Effect<void, ProviderInstanceFailure>;
+
+	/** Update a live provider query's classifier mode when supported. */
+	readonly setPermissionModeEffect?: (
+		sessionId: string,
+		mode: SessionPermissionMode,
+	) => Effect.Effect<void, ProviderInstanceFailure>;
 
 	/** Graceful shutdown -- clean up connections, abort pending turns */
 	shutdownEffect(): Effect.Effect<void, ProviderInstanceFailure>;

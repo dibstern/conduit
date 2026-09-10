@@ -2,6 +2,7 @@
 // Types shared between server and frontend.
 // Imported by src/lib/types.ts (server) and frontend code.
 
+import type { ProviderDriverKind } from "./contracts/provider-instance.js";
 // SDK-derived type aliases (Task 10) — single source of truth for Part/Tool enums.
 // Imported for local use; re-exported below for downstream consumers.
 import type { PartType, ToolStatus } from "./instance/sdk-types.js";
@@ -60,6 +61,7 @@ export const SessionPermissionModeSchema = Schema.Literal(
 	"ask",
 	"acceptEdits",
 	"auto",
+	"full",
 );
 export type SessionPermissionMode = typeof SessionPermissionModeSchema.Type;
 
@@ -147,6 +149,7 @@ export interface AgentProviderScope {
 
 export interface ProviderInfo {
 	id: string;
+	instanceId?: string;
 	name: string;
 	configured: boolean;
 	models: ModelInfo[];
@@ -222,6 +225,7 @@ export interface UsageInfo {
 	output: number;
 	cache_read: number;
 	cache_creation: number;
+	context_window?: number;
 }
 
 // ─── PTY / Terminal ─────────────────────────────────────────────────────────
@@ -278,7 +282,18 @@ export interface HistoryMessagePart {
 	callID?: string;
 	tool?: string;
 	time?: unknown;
+	/** Context size before/after a compaction boundary — present on `compaction`
+	 *  parts so the divider and context-% bar can be reconstructed on reload. */
+	preTokens?: number;
+	postTokens?: number;
 	[key: string]: unknown;
+}
+
+export interface ModelExecution {
+	requestedModel?: string;
+	expectedModel?: string;
+	actualModel: string;
+	drifted?: boolean;
 }
 
 /**
@@ -299,7 +314,9 @@ export interface HistoryMessage {
 		input?: number;
 		output?: number;
 		cache?: { read?: number; write?: number };
+		context_window?: number;
 	};
+	modelExecution?: ModelExecution;
 	[key: string]: unknown;
 }
 
@@ -368,7 +385,32 @@ const HistoryMessagePartSchema = Schema.Struct({
 	callID: Schema.optional(Schema.String),
 	tool: Schema.optional(Schema.String),
 	time: Schema.optional(Schema.Unknown),
+	preTokens: Schema.optional(Schema.Number),
+	postTokens: Schema.optional(Schema.Number),
 });
+
+const ModelExecutionSchema = Schema.Struct({
+	requestedModel: Schema.optional(Schema.String),
+	expectedModel: Schema.optional(Schema.String),
+	actualModel: Schema.String,
+	drifted: Schema.optional(Schema.Boolean),
+}).pipe(
+	Schema.filter(
+		(execution) =>
+			execution.drifted === undefined ||
+			(execution.expectedModel !== undefined &&
+				(execution.drifted === false ||
+					execution.actualModel !== execution.expectedModel)),
+		{
+			// Not a biconditional: two ids that differ only by the `[1m]`
+			// context-window suffix name the same model, so equal-identity /
+			// unequal-string is a legitimate `drifted: false`. Claiming drift
+			// between two identical ids is still nonsense.
+			message: () =>
+				"drifted requires expectedModel, and drifted=true requires actualModel to differ from expectedModel",
+		},
+	),
+);
 
 const HistoryMessageSchema = Schema.Struct({
 	id: Schema.String,
@@ -393,6 +435,7 @@ const HistoryMessageSchema = Schema.Struct({
 			),
 		}),
 	),
+	modelExecution: Schema.optional(ModelExecutionSchema),
 });
 
 const AskUserQuestionSchema = Schema.Struct({
@@ -413,6 +456,7 @@ const UsageInfoSchema = Schema.Struct({
 	output: Schema.Number,
 	cache_read: Schema.Number,
 	cache_creation: Schema.Number,
+	context_window: Schema.optional(Schema.Number),
 });
 
 const SessionInfoSchema = Schema.Struct({
@@ -436,6 +480,7 @@ const ContextWindowOptionSchema = Schema.Struct({
 
 const ProviderInfoSchema = Schema.Struct({
 	id: Schema.String,
+	instanceId: Schema.optional(Schema.String),
 	name: Schema.String,
 	configured: Schema.Boolean,
 	models: Schema.Array(
@@ -535,6 +580,9 @@ const OpenCodeInstanceSchema = Schema.Struct({
 	name: Schema.String,
 	port: Schema.Number,
 	managed: Schema.Boolean,
+	driver: Schema.optional(Schema.String),
+	configDir: Schema.optional(Schema.String),
+	url: Schema.optional(Schema.String),
 	status: InstanceStatusSchema,
 	pid: Schema.optional(Schema.Number),
 	env: Schema.optional(
@@ -680,6 +728,15 @@ const StatusSchema = Schema.Struct({
 	status: Schema.String,
 });
 
+const CompactionSchema = Schema.Struct({
+	type: Schema.Literal("compaction"),
+	sessionId: Schema.String,
+	state: Schema.Literal("started", "completed", "failed"),
+	detail: Schema.String,
+	preTokens: Schema.optional(Schema.Number),
+	postTokens: Schema.optional(Schema.Number),
+});
+
 const DoneSchema = Schema.Struct({
 	type: Schema.Literal("done"),
 	sessionId: Schema.String,
@@ -746,11 +803,13 @@ const DefaultModelInfoSchema = Schema.Struct({
 
 const ModelListSchema = Schema.Struct({
 	type: Schema.Literal("model_list"),
+	instanceId: Schema.optional(Schema.String),
 	providers: Schema.Array(ProviderInfoSchema),
 });
 
 const AgentListSchema = Schema.Struct({
 	type: Schema.Literal("agent_list"),
+	instanceId: Schema.optional(Schema.String),
 	providerScope: AgentProviderScopeSchema,
 	agents: Schema.Array(AgentInfoSchema),
 	activeAgentId: Schema.optional(Schema.String),
@@ -941,6 +1000,18 @@ const ClientCountSchema = Schema.Struct({
 	count: Schema.Number,
 });
 
+/** Relay wire-protocol version. Bump whenever a message's semantics change
+ *  incompatibly (e.g. a mode literal is reinterpreted), so a freshly-loaded
+ *  frontend can detect a stale daemon that predates the change. The daemon
+ *  sends this to each client on connect; the frontend warns on mismatch —
+ *  and on absence, which marks a daemon older than the handshake itself. */
+export const WS_PROTOCOL_VERSION = 1;
+
+const ProtocolVersionSchema = Schema.Struct({
+	type: Schema.Literal("protocol_version"),
+	version: Schema.Number,
+});
+
 const InputSyncSchema = Schema.Struct({
 	type: Schema.Literal("input_sync"),
 	text: Schema.String,
@@ -1041,6 +1112,7 @@ export const RelayMessageSchema = Schema.Union(
 	// Session lifecycle
 	ResultSchema,
 	StatusSchema,
+	CompactionSchema,
 	DoneSchema,
 	SessionSwitchedSchema,
 	SessionListSchema,
@@ -1092,6 +1164,7 @@ export const RelayMessageSchema = Schema.Union(
 	ErrorSchema,
 	SystemErrorSchema,
 	ClientCountSchema,
+	ProtocolVersionSchema,
 	InputSyncSchema,
 	UpdateAvailableSchema,
 	// Instance Management
@@ -1126,6 +1199,7 @@ export const RELAY_MESSAGE_TYPES = [
 	"ask_user_error",
 	"result",
 	"status",
+	"compaction",
 	"done",
 	"session_switched",
 	"session_list",
@@ -1164,6 +1238,7 @@ export const RELAY_MESSAGE_TYPES = [
 	"error",
 	"system_error",
 	"client_count",
+	"protocol_version",
 	"input_sync",
 	"update_available",
 	"instance_list",
@@ -1286,6 +1361,14 @@ export type RelayMessage =
 			messageId?: string;
 	  }
 	| { type: "status"; sessionId: string; status: string }
+	| {
+			type: "compaction";
+			sessionId: string;
+			state: "started" | "completed" | "failed";
+			detail: string;
+			preTokens?: number;
+			postTokens?: number;
+	  }
 	| { type: "done"; sessionId: string; code: number }
 	| {
 			type: "session_switched";
@@ -1335,9 +1418,10 @@ export type RelayMessage =
 	// ── Model / Agent / Commands ───────────────────────────────────────────
 	| { type: "model_info"; model: string; provider: string }
 	| { type: "default_model_info"; model: string; provider: string }
-	| { type: "model_list"; providers: ProviderInfo[] }
+	| { type: "model_list"; instanceId?: string; providers: ProviderInfo[] }
 	| {
 			type: "agent_list";
+			instanceId?: string;
 			providerScope: AgentProviderScope;
 			agents: AgentInfo[];
 			activeAgentId?: string;
@@ -1418,6 +1502,7 @@ export type RelayMessage =
 			details?: Record<string, unknown>;
 	  }
 	| { type: "client_count"; count: number }
+	| { type: "protocol_version"; version: number }
 	| { type: "input_sync"; text: string; from?: string }
 	| { type: "update_available"; version?: string }
 	// ── Instance Management ──────────────────────────────────────────────
@@ -1483,6 +1568,7 @@ export type PerSessionEventType =
 	| "done"
 	| "error"
 	| "status"
+	| "compaction"
 	| "user_message"
 	| "part_removed"
 	| "message_removed"
@@ -1551,6 +1637,9 @@ export interface OpenCodeInstance {
 	name: string;
 	port: number;
 	managed: boolean;
+	driver?: ProviderDriverKind;
+	configDir?: string;
+	url?: string;
 	status: InstanceStatus;
 	pid?: number;
 	env?: Record<string, string>;
@@ -1565,6 +1654,8 @@ export interface InstanceConfig {
 	name: string;
 	port: number;
 	managed: boolean;
+	driver?: ProviderDriverKind;
+	configDir?: string;
 	env?: Record<string, string>;
 	/** For external (unmanaged) instances: the full URL */
 	url?: string;

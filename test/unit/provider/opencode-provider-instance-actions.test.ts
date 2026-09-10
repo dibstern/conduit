@@ -214,6 +214,70 @@ describe("OpenCodeProviderInstance action methods", () => {
 		});
 	});
 
+	describe("named-instance client routing (Phase 4.4)", () => {
+		let namedClient: OpenCodeAPI;
+
+		beforeEach(() => {
+			namedClient = makeStubClient();
+			instance = new OpenCodeProviderInstance({
+				client,
+				clientForSession: (sessionId) =>
+					Effect.succeed(sessionId === "bound-s" ? namedClient : undefined),
+			});
+		});
+
+		it("routes interrupt to the session's named instance client", async () => {
+			await Effect.runPromise(instance.interruptTurnEffect("bound-s"));
+
+			expect(namedClient.session.abort).toHaveBeenCalledWith("bound-s");
+			expect(client.session.abort).not.toHaveBeenCalled();
+		});
+
+		it("routes permission replies to the session's named instance client", async () => {
+			await Effect.runPromise(
+				instance.resolvePermissionEffect("bound-s", "perm-1", "once"),
+			);
+
+			expect(namedClient.permission.reply).toHaveBeenCalledWith(
+				"bound-s",
+				"perm-1",
+				"once",
+			);
+			expect(client.permission.reply).not.toHaveBeenCalled();
+		});
+
+		it("routes question replies to the session's named instance client", async () => {
+			await Effect.runPromise(
+				instance.resolveQuestionEffect("bound-s", "q-1", { choice: "yes" }),
+			);
+
+			expect(namedClient.question.reply).toHaveBeenCalledWith("q-1", [["yes"]]);
+			expect(client.question.reply).not.toHaveBeenCalled();
+		});
+
+		it("fails with a typed error when the named instance cannot be resolved", async () => {
+			instance = new OpenCodeProviderInstance({
+				client,
+				clientForSession: () =>
+					Effect.fail(new Error("instance oc-b unavailable")),
+			});
+
+			const result = await Effect.runPromise(
+				Effect.either(instance.interruptTurnEffect("bound-s")),
+			);
+
+			expect(result._tag).toBe("Left");
+			if (result._tag === "Left") {
+				expect(result.left).toMatchObject({
+					_tag: "ProviderInstanceFailure",
+					operation: "interruptTurn",
+				});
+				expect(result.left.message).toContain("oc-b unavailable");
+			}
+			expect(client.session.abort).not.toHaveBeenCalled();
+		});
+	});
+
 	describe("shutdown", () => {
 		it("resolves cleanly when no pending turns", async () => {
 			await expect(

@@ -151,6 +151,9 @@ export function applyInstanceListResponse(
 			status: instance.status,
 			restartCount: instance.restartCount,
 			createdAt: instance.createdAt,
+			...(instance.driver != null ? { driver: instance.driver } : {}),
+			...(instance.configDir != null ? { configDir: instance.configDir } : {}),
+			...(instance.url != null ? { url: instance.url } : {}),
 			...(instance.pid != null ? { pid: instance.pid } : {}),
 			...(instance.env != null ? { env: { ...instance.env } } : {}),
 			...(instance.needsRestart != null

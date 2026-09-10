@@ -72,7 +72,15 @@ export class EventSinkImpl implements EventSink {
 				event,
 				this.mapperState,
 			);
-			const storedEvents = this.eventStore.appendBatch(result.events);
+			// Compaction notices are UI-only EXCEPT the terminal "completed"
+			// boundary, which persists as a synthetic marker so the "Context
+			// compacted" divider survives a page reload.
+			const persistentEvents = result.events.filter(
+				(domainEvent) =>
+					domainEvent.type !== "session.compaction" ||
+					domainEvent.data.state === "completed",
+			);
+			const storedEvents = this.eventStore.appendBatch(persistentEvents);
 			this.mapperState = result.state;
 			if (storedEvents.length === 1 && storedEvents[0]) {
 				this.projectionRunner.projectEvent(storedEvents[0]);

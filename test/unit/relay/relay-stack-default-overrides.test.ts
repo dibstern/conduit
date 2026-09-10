@@ -8,7 +8,7 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Effect } from "effect";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
 	getDefaultAgent,
 	getDefaultModel,
@@ -134,6 +134,15 @@ describe("createProjectRelay override-state defaults", () => {
 			configDir,
 			log: createSilentLogger(),
 		});
+		const sseHealth = {
+			connected: true,
+			lastEventAt: 1_234,
+			reconnectCount: 2,
+			stale: false,
+		};
+		const getHealth = vi
+			.spyOn(relay.sseStream, "getHealth")
+			.mockReturnValue(sseHealth);
 
 		const seeded = await relay.effectRuntime.runtime.runPromise(
 			Effect.gen(function* () {
@@ -151,6 +160,16 @@ describe("createProjectRelay override-state defaults", () => {
 			},
 			defaultVariant: "thinking",
 		});
+		// This relay is created with no sessions and no websocket clients, so the
+		// three pre-existing fields are all at their zero values; the point of the
+		// exact-equality assertion is that `sse` is populated from getHealth().
+		expect(relay.getStatusSnapshot()).toEqual({
+			sessionCount: 0,
+			clients: 0,
+			isProcessing: false,
+			sse: sseHealth,
+		});
+		expect(getHealth).toHaveBeenCalledOnce();
 	});
 
 	it("applies public default-agent commands through the relay-owned command path", async () => {

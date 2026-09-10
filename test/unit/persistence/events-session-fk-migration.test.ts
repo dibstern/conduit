@@ -65,6 +65,11 @@ function seedLegacyDatabase(filename: string): void {
 			 VALUES (?, 'opencode', 'Legacy', 'idle', 100, 100)`,
 			[EXISTING_SESSION_ID],
 		);
+		db.execute(
+			`INSERT INTO messages (id, session_id, role, text, created_at, updated_at)
+			 VALUES ('legacy-message', ?, 'user', 'hello', 100, 100)`,
+			[EXISTING_SESSION_ID],
+		);
 		for (const [sequence, eventId, streamVersion] of [
 			[4, "legacy-event-4", 0],
 			[9, "legacy-event-9", 1],

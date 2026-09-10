@@ -4,9 +4,6 @@
 // P1: Backoff delay is always in [baseDelay, maxDelay] (AC3)
 // P2: Backoff delay is monotonically non-decreasing until cap (AC3)
 // P3: Backoff reaches maxDelay eventually (AC3)
-// P4: Connection health shape is always valid (AC7)
-// P5: Stale detection: no event in staleThreshold -> stale (AC7)
-// P6: Reconnect count is monotonically increasing (AC3)
 // P7: Default config matches spec: 1s, 2s, 4s, 8s, max 30s (AC3)
 
 import fc from "fast-check";
@@ -14,7 +11,6 @@ import { describe, expect, it } from "vitest";
 import {
 	type BackoffConfig,
 	calculateBackoffDelay,
-	createHealthTracker,
 } from "../../../src/lib/relay/sse-backoff.js";
 
 const SEED = 42;
@@ -106,175 +102,6 @@ describe("Ticket 1.2 — SSE Reconnection & Backoff PBT", () => {
 					const delay = calculateBackoffDelay(attempt, config);
 					expect(delay).toBe(config.maxDelay);
 				}),
-				{ seed: SEED, numRuns: NUM_RUNS, endOnFailure: true },
-			);
-		});
-	});
-
-	// ─── P4: Health shape ──────────────────────────────────────────────────
-
-	describe("P4: Connection health shape is always valid (AC7)", () => {
-		it("property: getHealth returns all required fields", () => {
-			fc.assert(
-				fc.property(
-					fc.array(
-						fc.constantFrom("connect", "disconnect", "event", "reconnect"),
-						{ minLength: 0, maxLength: 20 },
-					),
-					(actions) => {
-						const tracker = createHealthTracker({
-							staleThreshold: 60_000,
-							now: () => 1_000_000,
-						});
-
-						for (const action of actions) {
-							switch (action) {
-								case "connect":
-									tracker.onConnected();
-									break;
-								case "disconnect":
-									tracker.onDisconnected();
-									break;
-								case "event":
-									tracker.onEvent();
-									break;
-								case "reconnect":
-									tracker.onReconnect();
-									break;
-							}
-						}
-
-						const health = tracker.getHealth();
-						expect(typeof health.connected).toBe("boolean");
-						expect(
-							health.lastEventAt === null ||
-								typeof health.lastEventAt === "number",
-						).toBe(true);
-						expect(typeof health.reconnectCount).toBe("number");
-						expect(health.reconnectCount).toBeGreaterThanOrEqual(0);
-						expect(typeof health.stale).toBe("boolean");
-					},
-				),
-				{ seed: SEED, numRuns: NUM_RUNS, endOnFailure: true },
-			);
-		});
-	});
-
-	// ─── P5: Stale detection ───────────────────────────────────────────────
-
-	describe("P5: Stale detection triggers when no events received (AC7)", () => {
-		it("property: event within threshold -> not stale", () => {
-			fc.assert(
-				fc.property(fc.integer({ min: 1000, max: 100_000 }), (threshold) => {
-					let currentTime = 0;
-					const tracker = createHealthTracker({
-						staleThreshold: threshold,
-						now: () => currentTime,
-					});
-
-					tracker.onConnected();
-					tracker.onEvent();
-
-					expect(tracker.isStale()).toBe(false);
-
-					currentTime = threshold - 1;
-					expect(tracker.isStale()).toBe(false);
-				}),
-				{ seed: SEED, numRuns: NUM_RUNS, endOnFailure: true },
-			);
-		});
-
-		it("property: event beyond threshold -> stale", () => {
-			fc.assert(
-				fc.property(fc.integer({ min: 1000, max: 100_000 }), (threshold) => {
-					let currentTime = 0;
-					const tracker = createHealthTracker({
-						staleThreshold: threshold,
-						now: () => currentTime,
-					});
-
-					tracker.onConnected();
-					tracker.onEvent();
-
-					currentTime = threshold + 1;
-					expect(tracker.isStale()).toBe(true);
-				}),
-				{ seed: SEED, numRuns: NUM_RUNS, endOnFailure: true },
-			);
-		});
-
-		it("property: disconnected -> never stale (even with old event)", () => {
-			fc.assert(
-				fc.property(fc.integer({ min: 1000, max: 100_000 }), (threshold) => {
-					let currentTime = 0;
-					const tracker = createHealthTracker({
-						staleThreshold: threshold,
-						now: () => currentTime,
-					});
-
-					tracker.onConnected();
-					tracker.onEvent();
-					tracker.onDisconnected();
-
-					currentTime = threshold * 10;
-					expect(tracker.isStale()).toBe(false);
-				}),
-				{ seed: SEED, numRuns: NUM_RUNS, endOnFailure: true },
-			);
-		});
-	});
-
-	// ─── P6: Reconnect count monotonic ─────────────────────────────────────
-
-	describe("P6: Reconnect count is monotonically increasing (AC3)", () => {
-		it("property: each onReconnect increments count by 1", () => {
-			fc.assert(
-				fc.property(fc.nat({ max: 50 }), (n) => {
-					const tracker = createHealthTracker({
-						staleThreshold: 60_000,
-						now: () => 0,
-					});
-
-					for (let i = 0; i < n; i++) {
-						tracker.onReconnect();
-					}
-
-					expect(tracker.getReconnectCount()).toBe(n);
-				}),
-				{ seed: SEED, numRuns: NUM_RUNS, endOnFailure: true },
-			);
-		});
-
-		it("property: other actions don't affect reconnect count", () => {
-			fc.assert(
-				fc.property(
-					fc.array(fc.constantFrom("connect", "disconnect", "event"), {
-						minLength: 0,
-						maxLength: 20,
-					}),
-					(actions) => {
-						const tracker = createHealthTracker({
-							staleThreshold: 60_000,
-							now: () => 0,
-						});
-
-						for (const action of actions) {
-							switch (action) {
-								case "connect":
-									tracker.onConnected();
-									break;
-								case "disconnect":
-									tracker.onDisconnected();
-									break;
-								case "event":
-									tracker.onEvent();
-									break;
-							}
-						}
-
-						expect(tracker.getReconnectCount()).toBe(0);
-					},
-				),
 				{ seed: SEED, numRuns: NUM_RUNS, endOnFailure: true },
 			);
 		});

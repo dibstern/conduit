@@ -842,13 +842,26 @@ class EventNamespace {
 	 * @param options.signal - AbortSignal to cancel the SSE connection.
 	 *   When aborted, the SDK's internal ReadableStream reader is cancelled
 	 *   and the async generator terminates.
+	 * @param options.sseMaxRetryAttempts - Cap on the SDK's internal SSE retry
+	 *   loop. SSEStream passes 1 so conduit owns reconnection; without it the
+	 *   SDK retries forever and transport errors never surface.
+	 * @param options.onSseError - Fired when the SSE transport errors, letting
+	 *   the caller distinguish error-exit from clean EOF.
 	 */
-	async subscribe(options?: { signal?: AbortSignal }): Promise<{
+	async subscribe(options?: {
+		signal?: AbortSignal;
+		sseMaxRetryAttempts?: number;
+		onSseError?: (error: unknown) => void;
+	}): Promise<{
 		stream: AsyncGenerator<OpenCodeEvent, void, unknown>;
 	}> {
-		return this.api._sdk.event.subscribe(
-			options?.signal ? { signal: options.signal } : undefined,
-		) as Promise<{
+		return this.api._sdk.event.subscribe({
+			...(options?.signal ? { signal: options.signal } : {}),
+			...(options?.sseMaxRetryAttempts !== undefined
+				? { sseMaxRetryAttempts: options.sseMaxRetryAttempts }
+				: {}),
+			...(options?.onSseError ? { onSseError: options.onSseError } : {}),
+		}) as Promise<{
 			stream: AsyncGenerator<OpenCodeEvent, void, unknown>;
 		}>;
 	}

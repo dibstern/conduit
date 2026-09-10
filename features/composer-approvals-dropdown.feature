@@ -1,4 +1,3 @@
-
 Feature: Composer approvals dropdown sets the session permission mode
 
 Background:
@@ -9,10 +8,19 @@ Scenario Outline: selecting an approvals option updates the pill
   Then the approvals pill shows <label>
 
 Examples:
-  | mode        | label |
-  | auto        | All   |
-  | acceptEdits | Edits |
-  | ask         | Ask   |
+  | mode        | label       |
+  | full        | Full access |
+  | acceptEdits | Edits       |
+  | ask         | Ask         |
+
+# The connected mockup binds the "anthropic" provider, which runs through
+# OpenCode. Auto delegates to the Claude Agent SDK's own model classifier, so
+# it is only offered on Claude sessions — offering it here would be a control
+# that silently does nothing. Auto's positive path is covered in
+# test/e2e/specs/permission-mode-selector.spec.ts, which can bind a Claude
+# session directly.
+Scenario: Auto is not offered on a session the classifier cannot serve
+  Then the approvals dropdown does not offer auto
 
 Scenario Outline: an auto-approving session is visibly flagged
   When I set approvals to <mode>
@@ -20,4 +28,4 @@ Scenario Outline: an auto-approving session is visibly flagged
 
 Examples:
   | mode | baseline                    | threshold |
-  | auto | composer-approvals-all-dark | 98        |
+  | full | composer-approvals-full-dark | 98        |

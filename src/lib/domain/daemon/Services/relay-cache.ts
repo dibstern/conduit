@@ -24,6 +24,7 @@ import {
 	Scope,
 	ScopedRef,
 } from "effect";
+import type { ConnectionHealth } from "../../../types.js";
 
 // ─── Relay interface ────────────────────────────────────────────────────────
 
@@ -32,6 +33,7 @@ export interface RelayStatusSnapshot {
 	readonly sessionCount: number;
 	readonly clients: number;
 	readonly isProcessing: boolean;
+	readonly sse: ConnectionHealth;
 }
 
 export interface Relay {

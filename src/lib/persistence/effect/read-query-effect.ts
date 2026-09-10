@@ -6,6 +6,7 @@ import type {
 	MessageRow,
 	MessageWithParts,
 	SessionRow,
+	TurnModelExecutionRow,
 } from "../read-model-types.js";
 
 export class ReadQueryEffectError extends Data.TaggedError(
@@ -40,6 +41,13 @@ export interface ReadQueryEffect {
 	readonly getSessionMessagesWithParts: (
 		sessionId: string,
 	) => Effect.Effect<MessageWithParts[], ReadQueryEffectError | SqlError>;
+
+	readonly getLatestTurnModelExecution: (
+		sessionId: string,
+	) => Effect.Effect<
+		TurnModelExecutionRow | undefined,
+		ReadQueryEffectError | SqlError
+	>;
 }
 
 export class ReadQueryEffectTag extends Context.Tag("ReadQueryEffect")<
@@ -152,10 +160,21 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 		sessionId: string,
 	): Effect.Effect<MessageWithParts[], ReadQueryEffectError | SqlError> =>
 		Effect.gen(function* () {
-			const messages = yield* sql<MessageRow>`
-				SELECT * FROM messages
-				WHERE session_id = ${sessionId}
-				ORDER BY created_at ASC, id ASC`;
+			const messages = yield* sql<
+				MessageRow & {
+					turn_requested_model: string | null;
+					turn_expected_model: string | null;
+					turn_actual_model: string | null;
+				}
+			>`
+				SELECT messages.*,
+					turns.requested_model AS turn_requested_model,
+					turns.expected_model AS turn_expected_model,
+					turns.actual_model AS turn_actual_model
+				FROM messages
+				LEFT JOIN turns ON turns.id = messages.turn_id
+				WHERE messages.session_id = ${sessionId}
+				ORDER BY messages.created_at ASC, messages.id ASC`;
 			if (messages.length === 0) return [];
 
 			const parts = yield* sql<MessagePartRow>`
@@ -178,16 +197,63 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 				existing.push(part);
 			}
 
-			return messages.map((message) => ({
-				...message,
-				parts: partsByMessage.get(message.id) ?? [],
-			}));
+			return messages.map((message) => {
+				const {
+					turn_requested_model,
+					turn_expected_model,
+					turn_actual_model,
+					...messageRow
+				} = message;
+				return {
+					...messageRow,
+					parts: partsByMessage.get(message.id) ?? [],
+					...(turn_actual_model === null
+						? {}
+						: {
+								modelExecution: {
+									...(turn_requested_model === null
+										? {}
+										: { requestedModel: turn_requested_model }),
+									...(turn_expected_model === null
+										? {}
+										: { expectedModel: turn_expected_model }),
+									actualModel: turn_actual_model,
+								},
+							}),
+				};
+			});
 		}).pipe(
 			Effect.mapError((e) =>
 				e instanceof ReadQueryEffectError
 					? e
 					: new ReadQueryEffectError({
 							operation: "getSessionMessagesWithParts",
+							cause: e,
+						}),
+			),
+		);
+
+	const getLatestTurnModelExecution = (
+		sessionId: string,
+	): Effect.Effect<
+		TurnModelExecutionRow | undefined,
+		ReadQueryEffectError | SqlError
+	> =>
+		Effect.gen(function* () {
+			const rows = yield* sql<TurnModelExecutionRow>`
+				SELECT requested_model, expected_model, actual_model
+				FROM turns
+				WHERE session_id = ${sessionId}
+					AND actual_model IS NOT NULL
+				ORDER BY requested_at DESC
+				LIMIT 1`;
+			return rows[0];
+		}).pipe(
+			Effect.mapError((e) =>
+				e instanceof ReadQueryEffectError
+					? e
+					: new ReadQueryEffectError({
+							operation: "getLatestTurnModelExecution",
 							cause: e,
 						}),
 			),
@@ -200,5 +266,6 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 		getAllSessionStatuses,
 		listSessions,
 		getSessionMessagesWithParts,
+		getLatestTurnModelExecution,
 	} satisfies ReadQueryEffect;
 });

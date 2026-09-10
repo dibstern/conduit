@@ -15,6 +15,7 @@
  *   tool.completed (block stop, tool result)
  *   turn.error (SDK errors)
  *   session.status (system init, status updates)
+ *   session.compaction (compaction progress and results)
  *   turn.completed (result)
  *
  * All payloads match the EventPayloadMap interfaces from Phase 1 Task 4.
@@ -22,14 +23,15 @@
 import { randomUUID } from "node:crypto";
 import { Effect } from "effect";
 import type { ProviderRuntimeEvent } from "../../contracts/providers/provider-runtime-event.js";
+import { createLogger, type Logger } from "../../logger.js";
 import type {
-	CanonicalEventType,
 	CanonicalToolInput,
 	EventPayloadMap,
 } from "../../persistence/events.js";
 import { createEventId } from "../../persistence/events.js";
 import { providerRefsFromRuntimeData } from "../provider-runtime-refs.js";
 import type { EventSink } from "../types.js";
+import { isSameModelIdentity } from "./claude-api-model-id.js";
 import { normalizeToolInput } from "./normalize-tool-input.js";
 import type {
 	ClaudeSessionContext,
@@ -44,12 +46,13 @@ import type {
 } from "./types.js";
 
 const PROVIDER = "claude" as const;
+const defaultLog = createLogger("claude-event-translator");
 
 // ─── Typed event construction helper ───────────────────────────────────────
 // Events are provider ingress envelopes. The EventSink owns conversion to
 // durable domain events before append/projection.
 
-function makeProviderRuntimeEvent<K extends CanonicalEventType>(
+function makeProviderRuntimeEvent<K extends ProviderRuntimeEvent["type"]>(
 	type: K,
 	sessionId: string,
 	data: EventPayloadMap[K],
@@ -161,6 +164,10 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 	return value != null && typeof value === "object" && !Array.isArray(value);
 }
 
+function fmtTokens(tokens: number): string {
+	return tokens >= 1_000 ? `${Math.round(tokens / 1_000)}k` : `${tokens}`;
+}
+
 function canonicalToolName(
 	toolName: string,
 	input: CanonicalToolInput | unknown,
@@ -226,6 +233,7 @@ interface ContentBlockState {
 
 export interface ClaudeEventTranslatorDeps {
 	readonly getSink: (ctx: ClaudeSessionContext) => EventSink | undefined;
+	readonly logger?: Logger;
 }
 
 export class ClaudeEventTranslator {
@@ -435,6 +443,25 @@ export class ClaudeEventTranslator {
 		this.lastMainRequestUsage = undefined;
 	}
 
+	/** Close out a turn: release the busy lease, then reset in-flight state.
+	 *  The SDK never emits a "no operation" status of its own, so a terminal
+	 *  turn message (result / interrupt / error) is the ONLY authoritative
+	 *  signal that the session stopped working. Every terminal path must go
+	 *  through here or the session stays busy forever. */
+	private endTurn(ctx: ClaudeSessionContext): Effect.Effect<void, unknown> {
+		return Effect.gen(this, function* () {
+			yield* this.push(
+				ctx,
+				makeProviderRuntimeEvent("session.status", ctx.sessionId, {
+					sessionId: ctx.sessionId,
+					status: "idle",
+				}),
+			);
+			ctx.turnInFlight = false;
+			this.resetInFlightState();
+		});
+	}
+
 	constructor(private readonly deps: ClaudeEventTranslatorDeps) {}
 
 	translate(
@@ -492,7 +519,7 @@ export class ClaudeEventTranslator {
 						code: "provider_error",
 					}),
 				);
-				this.resetInFlightState();
+				yield* this.endTurn(ctx);
 			}),
 		);
 	}
@@ -506,11 +533,77 @@ export class ClaudeEventTranslator {
 		return Effect.gen(this, function* () {
 			switch (message.subtype) {
 				case "status": {
+					if (message.compact_result === "failed") {
+						const detail = message.compact_error
+							? `Compaction failed: ${message.compact_error}`
+							: "Compaction failed";
+						yield* this.push(
+							ctx,
+							makeProviderRuntimeEvent("session.compaction", ctx.sessionId, {
+								sessionId: ctx.sessionId,
+								state: "failed",
+								detail,
+							}),
+						);
+						return;
+					}
+					if (message.compact_result === "success") return;
+					if (message.status === "compacting") {
+						yield* this.push(
+							ctx,
+							makeProviderRuntimeEvent("session.compaction", ctx.sessionId, {
+								sessionId: ctx.sessionId,
+								state: "started",
+								detail: "Compacting conversation…",
+							}),
+						);
+						return;
+					}
+					// `requesting` means the SDK is issuing an API call — the
+					// busiest state there is. Mapping it to idle killed the
+					// composer bounce bar and the sidebar processing dot every
+					// time the main agent resumed after a subagent (this is the
+					// only status the main chain emits while blocked on a Task).
+					// Only an explicit null status means "no operation".
 					yield* this.push(
 						ctx,
 						makeProviderRuntimeEvent("session.status", ctx.sessionId, {
 							sessionId: ctx.sessionId,
-							status: "idle",
+							status: message.status === "requesting" ? "busy" : "idle",
+						}),
+					);
+					return;
+				}
+
+				case "compact_boundary": {
+					const metadata: Record<string, unknown> = isRecord(
+						message.compact_metadata,
+					)
+						? message.compact_metadata
+						: {};
+					const preTokens =
+						typeof metadata["pre_tokens"] === "number"
+							? metadata["pre_tokens"]
+							: undefined;
+					const postTokens =
+						typeof metadata["post_tokens"] === "number"
+							? metadata["post_tokens"]
+							: undefined;
+					let detail = "Context compacted";
+					if (metadata["trigger"] === "auto") detail += " (auto)";
+					if (preTokens !== undefined && postTokens !== undefined) {
+						detail += ` · ${fmtTokens(preTokens)} → ${fmtTokens(postTokens)}`;
+					} else if (preTokens !== undefined) {
+						detail += ` · from ${fmtTokens(preTokens)}`;
+					}
+					yield* this.push(
+						ctx,
+						makeProviderRuntimeEvent("session.compaction", ctx.sessionId, {
+							sessionId: ctx.sessionId,
+							state: "completed",
+							detail,
+							...(preTokens !== undefined ? { preTokens } : {}),
+							...(postTokens !== undefined ? { postTokens } : {}),
 						}),
 					);
 					return;
@@ -576,20 +669,49 @@ export class ClaudeEventTranslator {
 				}
 
 				case "init": {
-					// Store model info on context
-					ctx.currentModel = message.model;
+					const modelEvidence = {
+						...(ctx.currentModel ? { requestedModel: ctx.currentModel } : {}),
+						...(ctx.expectedApiModelId
+							? { expectedModel: ctx.expectedApiModelId }
+							: {}),
+						actualModel: message.model,
+					};
 					yield* this.push(
 						ctx,
-						makeProviderRuntimeEvent("session.status", ctx.sessionId, {
-							sessionId: ctx.sessionId,
-							status: "idle",
-						}),
+						makeProviderRuntimeEvent(
+							"turn.model_resolved",
+							ctx.sessionId,
+							modelEvidence,
+						),
 					);
+					ctx.reportedApiModelId = message.model;
+					if (
+						ctx.expectedApiModelId !== undefined &&
+						!isSameModelIdentity(ctx.expectedApiModelId, message.model)
+					) {
+						(this.deps.logger ?? defaultLog).warn(
+							`Claude model drift: session=${ctx.sessionId} requested=${ctx.currentModel ?? "<none>"} expected=${ctx.expectedApiModelId} actual=${message.model}`,
+						);
+					}
+					// init lands ~1s after the prompt starts, so reporting idle
+					// unconditionally blanks the bounce bar and the sidebar dot at
+					// the top of every first turn. It is still the only thing that
+					// clears a busy status stranded by a crash mid-turn, so keep it
+					// for the case where no turn is actually running.
+					if (!ctx.turnInFlight) {
+						yield* this.push(
+							ctx,
+							makeProviderRuntimeEvent("session.status", ctx.sessionId, {
+								sessionId: ctx.sessionId,
+								status: "idle",
+							}),
+						);
+					}
 					return;
 				}
 
 				default:
-					// Ignore other system subtypes (compact_boundary, hook_*, etc.)
+					// Ignore other system subtypes (hook_*, etc.)
 					return;
 			}
 		});
@@ -1180,6 +1302,31 @@ export class ClaudeEventTranslator {
 			// Capture this request's usage (main chain only — subagent
 			// messages carry parent_tool_use_id and live in their own context).
 			if (message.parent_tool_use_id == null) {
+				// `init` only arrives at query creation, so after a mid-session
+				// setModel the assistant message is the first honest report of
+				// which model actually served the turn.
+				// `init` echoes the outbound id (`claude-opus-5[1m]`); the API reports
+				// the bare one (`claude-opus-5`). Comparing identities keeps a 1M
+				// window from looking like a model change on every turn.
+				const servedBy = message.message.model;
+				if (
+					typeof servedBy === "string" &&
+					(ctx.reportedApiModelId === undefined ||
+						!isSameModelIdentity(servedBy, ctx.reportedApiModelId))
+				) {
+					ctx.reportedApiModelId = servedBy;
+					yield* this.push(
+						ctx,
+						makeProviderRuntimeEvent("turn.model_resolved", ctx.sessionId, {
+							...(ctx.currentModel ? { requestedModel: ctx.currentModel } : {}),
+							...(ctx.expectedApiModelId
+								? { expectedModel: ctx.expectedApiModelId }
+								: {}),
+							actualModel: servedBy,
+						}),
+					);
+				}
+
 				const usage = (message.message as { usage?: unknown }).usage;
 				if (isRecord(usage)) {
 					const num = (v: unknown): number | undefined =>
@@ -1354,7 +1501,7 @@ export class ClaudeEventTranslator {
 							this.currentAssistantMessageId || ctx.lastAssistantUuid || "",
 					}),
 				);
-				this.resetInFlightState();
+				yield* this.endTurn(ctx);
 				return;
 			}
 
@@ -1368,7 +1515,7 @@ export class ClaudeEventTranslator {
 						error: errors,
 					}),
 				);
-				this.resetInFlightState();
+				yield* this.endTurn(ctx);
 				return;
 			}
 
@@ -1392,7 +1539,7 @@ export class ClaudeEventTranslator {
 						code: "provider_error",
 					}),
 				);
-				this.resetInFlightState();
+				yield* this.endTurn(ctx);
 				return;
 			}
 
@@ -1429,7 +1576,7 @@ export class ClaudeEventTranslator {
 			// back to result.usage when no assistant message was seen (e.g.
 			// non-streaming slash-command turns).
 			const usage = result.usage;
-			const tokens: {
+			const usageTokens: {
 				readonly input?: number;
 				readonly output?: number;
 				readonly cacheRead?: number;
@@ -1444,6 +1591,23 @@ export class ClaudeEventTranslator {
 					? { cacheWrite: usage.cache_creation_input_tokens }
 					: {}),
 			};
+			let effectiveWindow: number | undefined;
+			for (const modelUsage of Object.values(result.modelUsage ?? {})) {
+				const contextWindow = modelUsage.contextWindow;
+				if (Number.isFinite(contextWindow) && contextWindow > 0) {
+					effectiveWindow = Math.max(effectiveWindow ?? 0, contextWindow);
+				}
+			}
+			if (
+				effectiveWindow === undefined &&
+				(ctx.currentApiModelId ?? ctx.currentModel)?.endsWith("[1m]")
+			) {
+				effectiveWindow = 1_000_000;
+			}
+			const tokens = {
+				...usageTokens,
+				...(effectiveWindow ? { contextWindow: effectiveWindow } : {}),
+			};
 
 			yield* this.push(
 				ctx,
@@ -1455,7 +1619,7 @@ export class ClaudeEventTranslator {
 					duration: result.duration_ms,
 				}),
 			);
-			this.resetInFlightState();
+			yield* this.endTurn(ctx);
 		});
 	}
 

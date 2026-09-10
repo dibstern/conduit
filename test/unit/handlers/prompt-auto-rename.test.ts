@@ -2,6 +2,7 @@ import { describe, it } from "@effect/vitest";
 import { Effect, Layer } from "effect";
 import { expect, vi } from "vitest";
 import { SessionManagerError } from "../../../src/lib/domain/relay/Services/session-manager-service.js";
+import { setModel } from "../../../src/lib/domain/relay/Services/session-overrides-state.js";
 import type { SessionTitleService } from "../../../src/lib/domain/relay/Services/session-title-service.js";
 import { handleMessage } from "../../../src/lib/handlers/prompt.js";
 import {
@@ -135,6 +136,10 @@ describe("Claude prompt title generation", () => {
 			);
 
 			return Effect.gen(function* () {
+				yield* setModel("session-1", {
+					providerID: "claude",
+					modelID: "sonnet",
+				});
 				yield* handleMessage("client-1", {
 					text: "current prompt",
 					commandId: "cmd-auto-rename-current",
@@ -167,6 +172,10 @@ describe("Claude prompt title generation", () => {
 		});
 
 		return Effect.gen(function* () {
+			yield* setModel("session-1", {
+				providerID: "claude",
+				modelID: "sonnet",
+			});
 			yield* handleMessage("client-1", {
 				text: "follow up",
 				commandId: "cmd-auto-rename-follow-up",
@@ -235,6 +244,10 @@ describe("Claude prompt title generation", () => {
 			});
 
 			return Effect.gen(function* () {
+				yield* setModel("session-1", {
+					providerID: "claude",
+					modelID: "sonnet",
+				});
 				yield* handleMessage("client-1", {
 					text: "first prompt",
 					commandId: "cmd-auto-rename-first",
@@ -286,6 +299,10 @@ describe("Claude prompt title generation", () => {
 			);
 
 			return Effect.gen(function* () {
+				yield* setModel("session-1", {
+					providerID: "claude",
+					modelID: "sonnet",
+				});
 				yield* handleMessage("client-1", {
 					text: "maybe first prompt",
 					commandId: "cmd-auto-rename-maybe-first",

@@ -178,6 +178,7 @@ describe("Provider wiring with Claude provider instance", () => {
 					turnId: "e2e-turn-1",
 					prompt: "End-to-end wiring test",
 					workspaceRoot: workspace,
+					model: { providerId: "claude", modelId: "sonnet" },
 					eventSink: sink,
 				}),
 			}),

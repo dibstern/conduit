@@ -637,6 +637,7 @@ describe("sendNewSession", () => {
 	beforeEach(() => {
 		sent = [];
 		resetSessionCreation();
+		discoveryState.selectedInstanceId = null;
 	});
 
 	it("sends CreateSession input with requestId and returns requestId", () => {
@@ -647,12 +648,14 @@ describe("sendNewSession", () => {
 			projectSlug: "project-a",
 			requestId,
 			originId: expect.any(String),
+			instanceId: expect.any(String),
 		});
 	});
 
-	it("sends the active provider with CreateSession input", () => {
-		discoveryState.currentProviderId = "opencode";
-		discoveryState.currentModelId = "big-pickle";
+	it("binds the session to the harness derived from the active provider", () => {
+		discoveryState.selectedInstanceId = null;
+		discoveryState.currentProviderId = "claude";
+		discoveryState.currentModelId = "claude-sonnet-4-5";
 
 		const requestId = sendNewSession(mockStart);
 
@@ -662,7 +665,24 @@ describe("sendNewSession", () => {
 				projectSlug: "project-a",
 				requestId,
 				originId: expect.any(String),
-				providerId: "opencode",
+				instanceId: "claude",
+			},
+		]);
+	});
+
+	it("binds the session to the selected harness instance draft", () => {
+		discoveryState.selectedInstanceId = "opencode";
+		discoveryState.currentProviderId = "claude";
+
+		const requestId = sendNewSession(mockStart);
+
+		expect(requestId).not.toBeNull();
+		expect(sent).toEqual([
+			{
+				projectSlug: "project-a",
+				requestId,
+				originId: expect.any(String),
+				instanceId: "opencode",
 			},
 		]);
 	});

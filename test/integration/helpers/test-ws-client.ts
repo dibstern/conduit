@@ -8,6 +8,7 @@ import { Socket } from "@effect/platform";
 import { RpcClient, RpcSerialization } from "@effect/rpc";
 import { Effect } from "effect";
 import WebSocket from "ws";
+import { ProviderInstanceIdSchema } from "../../../src/lib/contracts/provider-instance.js";
 import {
 	type GetAgentsResponse,
 	type GetCommandsResponse,
@@ -183,7 +184,7 @@ export class TestWsClient {
 
 	async createSession(
 		title?: string,
-		opts: { readonly providerId?: string } = {},
+		opts: { readonly providerId?: string; readonly instanceId?: string } = {},
 	): Promise<ReceivedMessage> {
 		const previousWebSocket = globalThis.WebSocket;
 		const clientId = this.clientId;
@@ -198,6 +199,9 @@ export class TestWsClient {
 							originId: clientId,
 							...(title != null ? { title } : {}),
 							...(opts.providerId ? { providerId: opts.providerId } : {}),
+							...(opts.instanceId
+								? { instanceId: ProviderInstanceIdSchema.make(opts.instanceId) }
+								: {}),
 						});
 					}),
 				).pipe(

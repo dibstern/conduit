@@ -918,12 +918,14 @@ describe("switchModelForSession", () => {
 						parent_id: null,
 						fork_point_event: null,
 						last_message_at: null,
+						permission_mode: null,
 						created_at: 1,
 						updated_at: 1,
 					}),
 				),
 				getAllSessionStatuses: vi.fn(() => Effect.succeed({})),
 				listSessions: vi.fn(() => Effect.succeed([])),
+				getLatestTurnModelExecution: vi.fn(() => Effect.succeed(undefined)),
 				getSessionMessagesWithParts: vi.fn(() => Effect.succeed([])),
 			} satisfies ReadQueryEffect;
 
@@ -1402,6 +1404,7 @@ describe("handleGetToolContent", () => {
 				getSession: vi.fn(() => Effect.succeed(undefined)),
 				getAllSessionStatuses: vi.fn(() => Effect.succeed({})),
 				listSessions: vi.fn(() => Effect.succeed([])),
+				getLatestTurnModelExecution: vi.fn(() => Effect.succeed(undefined)),
 				getSessionMessagesWithParts: vi.fn(() => Effect.succeed([])),
 			} satisfies ReadQueryEffect;
 
@@ -2517,12 +2520,14 @@ describe("handleNewSession", () => {
 						parent_id: null,
 						fork_point_event: null,
 						last_message_at: null,
+						permission_mode: null,
 						created_at: 1,
 						updated_at: 1,
 					}),
 				),
 				getAllSessionStatuses: vi.fn(() => Effect.succeed({})),
 				listSessions: vi.fn(() => Effect.succeed([])),
+				getLatestTurnModelExecution: vi.fn(() => Effect.succeed(undefined)),
 				getSessionMessagesWithParts: vi.fn(() => Effect.succeed([])),
 			} satisfies ReadQueryEffect;
 			const layer = Layer.mergeAll(
@@ -2567,6 +2572,136 @@ describe("handleNewSession", () => {
 	);
 
 	it.effect(
+		"adds projected model execution to OpenCode history on session view",
+		() => {
+			const ws = mockWsHandler();
+			const log = mockLogger();
+			const client = {
+				session: { get: vi.fn(async () => ({})) },
+				provider: { list: vi.fn(async () => ({ providers: [] })) },
+				permission: { list: vi.fn(async () => []) },
+				question: { list: vi.fn(async () => []) },
+			} as unknown as OpenCodeAPI;
+			const sessionManagerService = makeMockSessionManagerService({
+				loadPreRenderedHistory: vi.fn(() =>
+					Effect.succeed({
+						messages: [
+							{
+								id: "user-1",
+								role: "user" as const,
+								text: "Earlier prompt",
+								parts: [],
+							},
+						],
+						hasMore: false,
+					}),
+				),
+			});
+			const readQuery = {
+				getToolContent: vi.fn(() => Effect.succeed(undefined)),
+				getSessionStatus: vi.fn(() => Effect.succeed("idle")),
+				getSession: vi.fn(() =>
+					Effect.succeed({
+						id: "session-1",
+						provider: "opencode",
+						provider_sid: "provider-session-1",
+						title: "OpenCode",
+						status: "idle",
+						parent_id: null,
+						fork_point_event: null,
+						last_message_at: 1,
+						permission_mode: null,
+						created_at: 1,
+						updated_at: 1,
+					}),
+				),
+				getAllSessionStatuses: vi.fn(() => Effect.succeed({})),
+				listSessions: vi.fn(() => Effect.succeed([])),
+				getLatestTurnModelExecution: vi.fn(() => Effect.succeed(undefined)),
+				getSessionMessagesWithParts: vi.fn(() =>
+					Effect.succeed([
+						{
+							id: "user-1",
+							session_id: "session-1",
+							turn_id: "turn-1",
+							role: "user",
+							text: "",
+							cost: null,
+							tokens_in: null,
+							tokens_out: null,
+							tokens_cache_read: null,
+							tokens_cache_write: null,
+							context_window: null,
+							is_streaming: 0,
+							created_at: 1,
+							updated_at: 1,
+							parts: [],
+							modelExecution: {
+								requestedModel: "sonnet",
+								expectedModel: "claude-sonnet-5",
+								actualModel: "claude-fable-4-0",
+							},
+						},
+					]),
+				),
+			} satisfies ReadQueryEffect;
+			const layer = Layer.mergeAll(
+				openCodeModelLayer(client),
+				Layer.succeed(WebSocketHandlerTag, ws),
+				Layer.succeed(LoggerTag, log),
+				Layer.succeed(SessionManagerServiceTag, sessionManagerService),
+				Layer.succeed(ReadQueryEffectTag, readQuery),
+				PendingInteractionServiceLive,
+				Layer.succeed(
+					StatusPollerTag,
+					makeMockStatusPoller({
+						isProcessing: vi.fn(() => Effect.succeed(false)),
+					}),
+				),
+				Layer.succeed(PollerManagerTag, {
+					on: vi.fn(),
+					isPolling: vi.fn(() => true),
+					startPolling: vi.fn(),
+					stopPolling: vi.fn(),
+					notifySSEEvent: vi.fn(),
+				}),
+				makeOverridesStateLive(),
+			);
+
+			return viewSessionForClient({
+				clientId: "client-1",
+				sessionId: "session-1",
+				skipMetadata: true,
+			}).pipe(
+				Effect.provide(layer),
+				Effect.tap(() => {
+					expect(ws.sendTo).toHaveBeenCalledWith(
+						"client-1",
+						expect.objectContaining({
+							type: "session_switched",
+							history: {
+								messages: [
+									expect.objectContaining({
+										id: "user-1",
+										text: "Earlier prompt",
+										modelExecution: {
+											requestedModel: "sonnet",
+											expectedModel: "claude-sonnet-5",
+											actualModel: "claude-fable-4-0",
+											drifted: true,
+										},
+									}),
+								],
+								hasMore: false,
+							},
+						}),
+					);
+				}),
+			);
+		},
+	);
+
+	it.effect(
 		"reconnect replays durable command state without redispatching provider command",
 		() => {
 			const ws = mockWsHandler();
@@ -2592,12 +2727,14 @@ describe("handleNewSession", () => {
 						parent_id: null,
 						fork_point_event: null,
 						last_message_at: null,
+						permission_mode: null,
 						created_at: 1,
 						updated_at: 1,
 					}),
 				),
 				getAllSessionStatuses: vi.fn(() => Effect.succeed({})),
 				listSessions: vi.fn(() => Effect.succeed([])),
+				getLatestTurnModelExecution: vi.fn(() => Effect.succeed(undefined)),
 				getSessionMessagesWithParts: vi.fn(() => Effect.succeed([])),
 			} satisfies ReadQueryEffect;
 			const sessionManagerService = makeMockSessionManagerService({
@@ -3053,6 +3190,176 @@ describe("renameSessionForClient", () => {
 });
 
 describe("loadMoreHistoryForSession", () => {
+	it.effect("loads Claude model execution from projected history", () => {
+		const loadPreRenderedHistory = vi.fn(() =>
+			Effect.succeed({ messages: [], hasMore: false }),
+		);
+		const sessionManagerService = makeMockSessionManagerService({
+			loadPreRenderedHistory,
+		});
+		const readQuery = {
+			getToolContent: vi.fn(() => Effect.succeed(undefined)),
+			getSessionStatus: vi.fn(() => Effect.succeed(undefined)),
+			getSession: vi.fn(() =>
+				Effect.succeed({
+					id: "session-1",
+					provider: "claude",
+					provider_sid: null,
+					title: "Claude",
+					status: "idle",
+					parent_id: null,
+					fork_point_event: null,
+					last_message_at: 1,
+					permission_mode: null,
+					created_at: 1,
+					updated_at: 1,
+				}),
+			),
+			getAllSessionStatuses: vi.fn(() => Effect.succeed({})),
+			listSessions: vi.fn(() => Effect.succeed([])),
+			getLatestTurnModelExecution: vi.fn(() => Effect.succeed(undefined)),
+			getSessionMessagesWithParts: vi.fn(() =>
+				Effect.succeed([
+					{
+						id: "user-1",
+						session_id: "session-1",
+						turn_id: "turn-1",
+						role: "user",
+						text: "Earlier prompt",
+						cost: null,
+						tokens_in: null,
+						tokens_out: null,
+						tokens_cache_read: null,
+						tokens_cache_write: null,
+						context_window: null,
+						is_streaming: 0,
+						created_at: 1,
+						updated_at: 1,
+						parts: [],
+						modelExecution: {
+							requestedModel: "sonnet",
+							expectedModel: "claude-sonnet-5",
+							actualModel: "claude-fable-4-0",
+						},
+					},
+				]),
+			),
+		} satisfies ReadQueryEffect;
+		const layer = Layer.merge(
+			Layer.succeed(SessionManagerServiceTag, sessionManagerService),
+			Layer.succeed(ReadQueryEffectTag, readQuery),
+		);
+
+		return loadMoreHistoryForSession({
+			sessionId: "session-1",
+			offset: 0,
+		}).pipe(
+			Effect.provide(layer),
+			Effect.tap((result) => {
+				expect(result.messages[0]?.modelExecution).toEqual({
+					requestedModel: "sonnet",
+					expectedModel: "claude-sonnet-5",
+					actualModel: "claude-fable-4-0",
+					drifted: true,
+				});
+				expect(result).toMatchObject({ hasMore: false, total: 1 });
+				expect(loadPreRenderedHistory).not.toHaveBeenCalled();
+			}),
+		);
+	});
+
+	it.effect("adds projected model execution to OpenCode history", () => {
+		const loadPreRenderedHistory = vi.fn(() =>
+			Effect.succeed({
+				messages: [
+					{
+						id: "user-1",
+						role: "user" as const,
+						text: "Earlier prompt",
+						parts: [],
+					},
+				],
+				hasMore: false,
+				total: 1,
+			}),
+		);
+		const sessionManagerService = makeMockSessionManagerService({
+			loadPreRenderedHistory,
+		});
+		const readQuery = {
+			getToolContent: vi.fn(() => Effect.succeed(undefined)),
+			getSessionStatus: vi.fn(() => Effect.succeed(undefined)),
+			getSession: vi.fn(() =>
+				Effect.succeed({
+					id: "session-1",
+					provider: "opencode",
+					provider_sid: "provider-session-1",
+					title: "OpenCode",
+					status: "idle",
+					parent_id: null,
+					fork_point_event: null,
+					last_message_at: 1,
+					permission_mode: null,
+					created_at: 1,
+					updated_at: 1,
+				}),
+			),
+			getAllSessionStatuses: vi.fn(() => Effect.succeed({})),
+			listSessions: vi.fn(() => Effect.succeed([])),
+			getLatestTurnModelExecution: vi.fn(() => Effect.succeed(undefined)),
+			getSessionMessagesWithParts: vi.fn(() =>
+				Effect.succeed([
+					{
+						id: "user-1",
+						session_id: "session-1",
+						turn_id: "turn-1",
+						role: "user",
+						text: "",
+						cost: null,
+						tokens_in: null,
+						tokens_out: null,
+						tokens_cache_read: null,
+						tokens_cache_write: null,
+						context_window: null,
+						is_streaming: 0,
+						created_at: 1,
+						updated_at: 1,
+						parts: [],
+						modelExecution: {
+							requestedModel: "sonnet",
+							expectedModel: "claude-sonnet-5",
+							actualModel: "claude-fable-4-0",
+						},
+					},
+				]),
+			),
+		} satisfies ReadQueryEffect;
+		const layer = Layer.merge(
+			Layer.succeed(SessionManagerServiceTag, sessionManagerService),
+			Layer.succeed(ReadQueryEffectTag, readQuery),
+		);
+
+		return loadMoreHistoryForSession({
+			sessionId: "session-1",
+			offset: 0,
+		}).pipe(
+			Effect.provide(layer),
+			Effect.tap((result) => {
+				expect(result.messages[0]).toMatchObject({
+					id: "user-1",
+					text: "Earlier prompt",
+					modelExecution: {
+						requestedModel: "sonnet",
+						expectedModel: "claude-sonnet-5",
+						actualModel: "claude-fable-4-0",
+						drifted: true,
+					},
+				});
+				expect(loadPreRenderedHistory).toHaveBeenCalledWith("session-1", 0);
+			}),
+		);
+	});
+
 	it.effect("loads history page through SessionManagerService", () => {
 		const page = {
 			messages: [
@@ -3395,6 +3702,10 @@ describe("handleMessage", () => {
 		);
 
 		return Effect.gen(function* () {
+			yield* setModel("session-1", {
+				providerID: "claude",
+				modelID: "sonnet",
+			});
 			yield* setContextWindow("session-1", "1m");
 			yield* handleMessage("client-1", {
 				text: "hello world",
@@ -3480,6 +3791,10 @@ describe("handleMessage", () => {
 			);
 
 			return Effect.gen(function* () {
+				yield* setModel("session-1", {
+					providerID: "claude",
+					modelID: "sonnet",
+				});
 				yield* handleMessage("client-1", {
 					text: "hello world",
 					commandId: "cmd-pending-question",
@@ -3529,6 +3844,7 @@ describe("handleMessage", () => {
 				getSession: vi.fn(() => Effect.succeed(undefined)),
 				getAllSessionStatuses: vi.fn(() => Effect.succeed({})),
 				listSessions: vi.fn(() => Effect.succeed([])),
+				getLatestTurnModelExecution: vi.fn(() => Effect.succeed(undefined)),
 				getSessionMessagesWithParts: vi.fn(() =>
 					Effect.succeed([
 						{
@@ -3542,6 +3858,7 @@ describe("handleMessage", () => {
 							tokens_out: null,
 							tokens_cache_read: null,
 							tokens_cache_write: null,
+							context_window: null,
 							is_streaming: 0,
 							created_at: 1,
 							updated_at: 1,
@@ -3580,36 +3897,38 @@ describe("handleMessage", () => {
 				makeOverridesStateLive(),
 			);
 
-			return handleMessage("client-1", {
-				text: "new prompt",
-				commandId: "cmd-sqlite-history",
-			}).pipe(
-				Effect.provide(layer),
-				Effect.tap(() => {
-					expect(readQuery.getSessionMessagesWithParts).toHaveBeenCalledWith(
-						"session-1",
-					);
-					expect(engine.dispatchEffect).toHaveBeenCalledWith(
-						expect.objectContaining({
-							type: "send_turn",
-							providerId: "claude",
-							input: expect.objectContaining({
-								history: [
-									expect.objectContaining({
-										role: "user",
-										parts: [
-											expect.objectContaining({
-												type: "text",
-												text: "Earlier question",
-											}),
-										],
-									}),
-								],
-							}),
+			return Effect.gen(function* () {
+				yield* setModel("session-1", {
+					providerID: "claude",
+					modelID: "sonnet",
+				});
+				yield* handleMessage("client-1", {
+					text: "new prompt",
+					commandId: "cmd-sqlite-history",
+				});
+				expect(readQuery.getSessionMessagesWithParts).toHaveBeenCalledWith(
+					"session-1",
+				);
+				expect(engine.dispatchEffect).toHaveBeenCalledWith(
+					expect.objectContaining({
+						type: "send_turn",
+						providerId: "claude",
+						input: expect.objectContaining({
+							history: [
+								expect.objectContaining({
+									role: "user",
+									parts: [
+										expect.objectContaining({
+											type: "text",
+											text: "Earlier question",
+										}),
+									],
+								}),
+							],
 						}),
-					);
-				}),
-			);
+					}),
+				);
+			}).pipe(Effect.provide(layer));
 		},
 	);
 
@@ -3671,35 +3990,37 @@ describe("handleMessage", () => {
 				makeOverridesStateLive(),
 			);
 
-			return handleMessage("client-1", {
-				text: "new prompt",
-				commandId: "cmd-prerendered-history",
-			}).pipe(
-				Effect.provide(layer),
-				Effect.tap(() => {
-					expect(loadPreRenderedHistory).toHaveBeenCalledWith("session-1");
-					expect(legacyLoadPreRenderedHistory).not.toHaveBeenCalled();
-					expect(engine.dispatchEffect).toHaveBeenCalledWith(
-						expect.objectContaining({
-							type: "send_turn",
-							providerId: "claude",
-							input: expect.objectContaining({
-								history: [
-									expect.objectContaining({
-										role: "user",
-										parts: [
-											expect.objectContaining({
-												type: "text",
-												text: "Earlier fallback question",
-											}),
-										],
-									}),
-								],
-							}),
+			return Effect.gen(function* () {
+				yield* setModel("session-1", {
+					providerID: "claude",
+					modelID: "sonnet",
+				});
+				yield* handleMessage("client-1", {
+					text: "new prompt",
+					commandId: "cmd-prerendered-history",
+				});
+				expect(loadPreRenderedHistory).toHaveBeenCalledWith("session-1");
+				expect(legacyLoadPreRenderedHistory).not.toHaveBeenCalled();
+				expect(engine.dispatchEffect).toHaveBeenCalledWith(
+					expect.objectContaining({
+						type: "send_turn",
+						providerId: "claude",
+						input: expect.objectContaining({
+							history: [
+								expect.objectContaining({
+									role: "user",
+									parts: [
+										expect.objectContaining({
+											type: "text",
+											text: "Earlier fallback question",
+										}),
+									],
+								}),
+							],
 						}),
-					);
-				}),
-			);
+					}),
+				);
+			}).pipe(Effect.provide(layer));
 		},
 	);
 
@@ -3893,12 +4214,14 @@ describe("handleMessage", () => {
 						parent_id: null,
 						fork_point_event: null,
 						last_message_at: null,
+						permission_mode: null,
 						created_at: 1,
 						updated_at: 1,
 					}),
 				),
 				getAllSessionStatuses: vi.fn(() => Effect.succeed({})),
 				listSessions: vi.fn(() => Effect.succeed([])),
+				getLatestTurnModelExecution: vi.fn(() => Effect.succeed(undefined)),
 				getSessionMessagesWithParts: vi.fn(() => Effect.succeed([])),
 			} satisfies ReadQueryEffect;
 			const engine = {
@@ -3993,7 +4316,12 @@ describe("handleMessage", () => {
 			const dispatchError = new Error("dispatch failed");
 			const engine = {
 				getProviderForSession: vi.fn(() => "claude"),
-				dispatch: vi.fn(async () => {
+				dispatch: vi.fn(async (command: { readonly type: string }) => {
+					if (command.type === "discover") {
+						return {
+							models: [{ id: "opus", name: "Opus", providerId: "claude" }],
+						};
+					}
 					throw dispatchError;
 				}),
 			} as unknown as OrchestrationEngine;

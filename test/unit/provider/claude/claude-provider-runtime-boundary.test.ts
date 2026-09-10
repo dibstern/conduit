@@ -117,7 +117,10 @@ describe("Claude provider runtime boundary", () => {
 				const turnFiber = yield* Effect.fork(
 					instance
 						.sendTurnEffect(
-							makeBaseSendTurnInput({ sessionId: "scoped-shutdown" }),
+							makeBaseSendTurnInput({
+								sessionId: "scoped-shutdown",
+								model: { providerId: "claude", modelId: "sonnet" },
+							}),
 						)
 						.pipe(Effect.either),
 				);
