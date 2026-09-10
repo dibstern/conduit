@@ -17,12 +17,19 @@ const allowedSessionMutations: readonly AllowedSessionMutation[] = [
 		path: "src/lib/domain/relay/Services/session-manager-service.ts",
 		linePattern: /api\.session\.create\(title \? \{ title \} : undefined\),/,
 	},
-	// SessionManager owns provider deletion while it clears the matching session state.
+	// The OpenCode upstream adapter is where a direct mutation is supposed to
+	// live: it is reached only from applySessionCommand, after the canonical
+	// event has been appended and projected.
 	{
-		path: "src/lib/domain/relay/Services/session-manager-service.ts",
-		linePattern: /api\.session\.delete\(sessionId\)/,
+		path: "src/lib/domain/relay/Services/session-command.ts",
+		linePattern: /api\.session\.delete\(command\.data\.sessionId\),/,
 	},
-	// SessionManager owns provider renaming after checking for a SQLite-backed session.
+	{
+		path: "src/lib/domain/relay/Services/session-command.ts",
+		linePattern: /api\.session\.update\(command\.data\.sessionId, \{/,
+	},
+	// SessionManager owns provider renaming after checking for a SQLite-backed
+	// session. Removed when rename moves onto the seam.
 	{
 		path: "src/lib/domain/relay/Services/session-manager-service.ts",
 		linePattern: /api\.session\.update\(sessionId, \{ title \}\),/,

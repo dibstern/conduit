@@ -66,6 +66,7 @@ import {
 	OrchestrationEngineTag,
 	StatusPollerTag,
 } from "./services.js";
+import { applySessionCommand, isClaudeSessionRow } from "./session-command.js";
 import { SessionManagerStateTag } from "./session-manager-state.js";
 import {
 	OverridesStateTag,
@@ -352,11 +353,6 @@ const normalizeSessionTitle = (title?: string): string => {
 	return trimmed ? trimmed : "Untitled";
 };
 
-const isClaudeSessionRow = (row: SessionRow, configDir?: string): boolean =>
-	row.provider === CLAUDE_SDK_PROVIDER_ID ||
-	resolveProviderRoutingDriver(loadDaemonConfig(configDir), row.provider) ===
-		CLAUDE_PROVIDER_ID;
-
 const createLocalSessionId = (): string =>
 	`ses_${randomUUID().replaceAll("-", "")}`;
 
@@ -494,114 +490,17 @@ const createLocalSession = (
 /** Delete a session locally, then best-effort upstream, and clear associated state. */
 export const deleteSession = (sessionId: string) =>
 	Effect.gen(function* () {
-		const api = yield* OpenCodeAPITag;
 		const stateRef = yield* SessionManagerStateTag;
-		const logOption = yield* Effect.serviceOption(LoggerTag);
-		const readQueryOption = yield* Effect.serviceOption(ReadQueryEffectTag);
-		const eventStoreOption = yield* Effect.serviceOption(EventStoreEffectTag);
-		const projectionRunnerOption = yield* Effect.serviceOption(
-			ProjectionRunnerEffectTag,
+
+		yield* applySessionCommand({
+			type: "session.deleted",
+			data: { sessionId },
+		}).pipe(
+			Effect.mapError(
+				(cause) =>
+					new SessionManagerError({ operation: "deleteSession", cause }),
+			),
 		);
-		const sqlOption = yield* Effect.serviceOption(SqlClient.SqlClient);
-		const configOption = yield* Effect.serviceOption(ConfigTag);
-
-		let row: SessionRow | undefined;
-		if (
-			readQueryOption._tag === "Some" &&
-			eventStoreOption._tag === "Some" &&
-			projectionRunnerOption._tag === "Some" &&
-			sqlOption._tag === "Some"
-		) {
-			const eventStore = eventStoreOption.value;
-			const projectionRunner = projectionRunnerOption.value;
-			const sql = sqlOption.value;
-			const withSql = <A, E>(
-				effect: Effect.Effect<A, E, SqlClient.SqlClient>,
-			): Effect.Effect<A, E> =>
-				effect.pipe(Effect.provideService(SqlClient.SqlClient, sql));
-
-			const recovered = yield* projectionRunner.isRecovered();
-			if (!recovered) {
-				yield* withSql(projectionRunner.recover()).pipe(
-					Effect.mapError(
-						(cause) =>
-							new SessionManagerError({
-								operation: "deleteSession.recover",
-								cause,
-							}),
-					),
-					Effect.asVoid,
-				);
-			}
-
-			row = yield* readQueryOption.value.getSession(sessionId).pipe(
-				Effect.mapError(
-					(cause) =>
-						new SessionManagerError({
-							operation: "deleteSession.getSession",
-							cause,
-						}),
-				),
-			);
-
-			if (row) {
-				const stored = yield* eventStore
-					.append(
-						canonicalEvent(
-							"session.deleted",
-							sessionId,
-							{ sessionId },
-							{
-								provider: row.provider,
-								createdAt: Date.now(),
-								metadata: { source: "relay" },
-							},
-						),
-					)
-					.pipe(
-						Effect.mapError(
-							(cause) =>
-								new SessionManagerError({
-									operation: "deleteSession.append",
-									cause,
-								}),
-						),
-					);
-
-				yield* withSql(projectionRunner.projectEvent(stored)).pipe(
-					Effect.mapError(
-						(cause) =>
-							new SessionManagerError({
-								operation: "deleteSession.project",
-								cause,
-							}),
-					),
-				);
-			}
-		}
-
-		const isClaudeSession =
-			row !== undefined &&
-			isClaudeSessionRow(
-				row,
-				configOption._tag === "Some" ? configOption.value.configDir : undefined,
-			);
-		if (!isClaudeSession) {
-			// No retry: delete is not idempotent, and upstream cleanup is best-effort.
-			yield* Effect.tryPromise(() => api.session.delete(sessionId)).pipe(
-				Effect.catchAll((cause) =>
-					Effect.sync(() => {
-						if (logOption._tag === "Some") {
-							logOption.value.warn("OpenCode session delete failed", {
-								operation: "deleteSession",
-								sessionId,
-								cause,
-							});
-						}
-					}),
-				),
-			);
-		}
 
 		yield* Ref.update(stateRef, (s) => {
 			let cachedParentMap = HashMap.remove(s.cachedParentMap, sessionId);
