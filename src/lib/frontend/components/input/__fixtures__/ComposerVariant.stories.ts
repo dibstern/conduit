@@ -89,6 +89,14 @@ export const VariantA: Story = {
 		await waitFor(() => expect(canvas.queryByTestId("listbox-A")).toBeNull());
 		await expect(input.value).toContain("FileMenu.svelte");
 		await expect(input).toHaveAttribute("aria-expanded", "false");
+
+		// Escape dismisses the menu WITHOUT discarding what the user typed.
+		await userEvent.type(input, "@Command");
+		await canvas.findByTestId("listbox-A");
+		await userEvent.keyboard("{Escape}");
+		await waitFor(() => expect(canvas.queryByTestId("listbox-A")).toBeNull());
+		await expect(input).toHaveAttribute("aria-expanded", "false");
+		await expect(input.value).toContain("@Command");
 	},
 };
 
@@ -134,6 +142,14 @@ export const VariantB: Story = {
 		await userEvent.keyboard("{Enter}");
 		await waitFor(() => expect(canvas.queryByTestId("listbox-B")).toBeNull());
 		await expect(input.value).toContain("FileMenu.svelte");
+
+		// Escape dismisses the menu WITHOUT discarding what the user typed.
+		await userEvent.type(input, "@Command");
+		await canvas.findByTestId("listbox-B");
+		await userEvent.keyboard("{Escape}");
+		await waitFor(() => expect(canvas.queryByTestId("listbox-B")).toBeNull());
+		await expect(canvas.getByTestId("status-B")).toHaveTextContent("");
+		await expect(input.value).toContain("@Command");
 	},
 };
 

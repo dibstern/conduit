@@ -49,10 +49,12 @@
 
 	/** The `@`-token between the nearest `@` and the caret, or undefined. */
 	let token = $state<string | undefined>(undefined);
+	/** Token the user explicitly dismissed with Escape. See handleKeydown. */
+	let dismissed = $state<string | undefined>(undefined);
 
 	const matches = $derived.by(() => {
 		const t = token;
-		if (t === undefined) return [];
+		if (t === undefined || t === dismissed) return [];
 		return FILES.filter((f) => f.toLowerCase().includes(t.toLowerCase()));
 	});
 
@@ -92,6 +94,7 @@
 		if (at === -1) return;
 		value = `${value.slice(0, at)}${file} ${value.slice(caret)}`;
 		token = undefined;
+		dismissed = undefined;
 		const next = at + file.length + 1;
 		await tick();
 		el.setSelectionRange(next, next);
@@ -112,7 +115,11 @@
 			if (file !== undefined) void commit(file);
 		} else if (e.key === "Escape") {
 			e.preventDefault();
-			token = undefined;
+			// Suppress THIS token rather than clearing it. Clearing does not work:
+			// syncToken also runs on keyup to follow the caret, so Escape's own keyup
+			// recomputes the identical token from an unchanged caret and reopens the
+			// menu instantly. Escape looked implemented and did nothing.
+			dismissed = token;
 		}
 	}
 
