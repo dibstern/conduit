@@ -18,6 +18,7 @@ import {
 	persistSessionPermissionMode,
 	recordMessageActivity,
 	restoreSessionPermissionModes,
+	SessionManagerError,
 	SessionManagerServiceLive,
 	SessionManagerServiceTag,
 } from "../../../src/lib/domain/relay/Services/session-manager-service.js";
@@ -32,7 +33,15 @@ import {
 import type { OpenCodeAPI } from "../../../src/lib/instance/opencode-api.js";
 import { EventStoreEffectTag } from "../../../src/lib/persistence/effect/event-store-effect.js";
 import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
-import { ProjectionRunnerEffectTag } from "../../../src/lib/persistence/effect/projection-runner-effect.js";
+import {
+	makeProjectionRunnerEffect,
+	ProjectionRunnerEffectTag,
+	ProjectionRunnerError,
+} from "../../../src/lib/persistence/effect/projection-runner-effect.js";
+import {
+	type EffectProjector,
+	ProjectionError,
+} from "../../../src/lib/persistence/effect/projectors-effect.js";
 import {
 	type ReadQueryEffect,
 	ReadQueryEffectError,
@@ -65,22 +74,33 @@ describe("SessionManager Effect", () => {
 		filename: string,
 		readQueryOverride?: ReadQueryEffect,
 		configDir?: string,
-	) =>
-		Layer.provideMerge(
+		projectors?: readonly EffectProjector[],
+	) => {
+		const persistenceLayer = makePersistenceEffectLayer(filename);
+		const projectionRunnerOverride = projectors
+			? Layer.effect(
+					ProjectionRunnerEffectTag,
+					makeProjectionRunnerEffect(projectors),
+				).pipe(Layer.provide(persistenceLayer))
+			: undefined;
+
+		return Layer.provideMerge(
 			SessionManagerServiceLive,
 			Layer.mergeAll(
 				Layer.fresh(makeTestLayer(mockApi)),
 				Layer.succeed(LoggerTag, makeMockLogger()),
 				DaemonEventBusLive,
-				makePersistenceEffectLayer(filename),
+				persistenceLayer,
 				...(readQueryOverride
 					? [Layer.succeed(ReadQueryEffectTag, readQueryOverride)]
 					: []),
 				...(configDir
 					? [Layer.succeed(ConfigTag, makeMockConfig({ configDir }))]
 					: []),
+				...(projectionRunnerOverride ? [projectionRunnerOverride] : []),
 			),
 		);
+	};
 
 	it.effect("listSessions fetches from API and caches parent map", () => {
 		const mockApi = makeMockApi();
@@ -256,6 +276,66 @@ describe("SessionManager Effect", () => {
 			);
 		},
 	);
+
+	it.effect("rename surfaces a projector failure with its cause intact", () => {
+		const mockApi = makeMockApi();
+		const dir = mkdtempSync(join(tmpdir(), "conduit-rename-failure-"));
+		const filename = join(dir, "events.db");
+		const sessionId = "ses-claude-rename-failure";
+		const rootCause = new Error("rename projection exploded");
+		const failingProjector: EffectProjector = {
+			name: "failing-rename-projector",
+			handles: ["session.renamed"],
+			project: () =>
+				Effect.fail(
+					new ProjectionError({
+						projector: "failing-rename-projector",
+						operation: "project",
+						cause: rootCause,
+					}),
+				),
+		};
+		const layer = makeLiveServiceLayer(
+			mockApi,
+			filename,
+			undefined,
+			undefined,
+			[failingProjector],
+		);
+
+		return Effect.gen(function* () {
+			const runner = yield* ProjectionRunnerEffectTag;
+			const service = yield* SessionManagerServiceTag;
+			const sql = yield* SqlClient.SqlClient;
+			yield* runner.markRecovered();
+			yield* sql`
+				INSERT INTO sessions (id, provider, title, status, created_at, updated_at)
+				VALUES (${sessionId}, 'claude', 'Claude Session', 'idle', 1000, 1000)`;
+
+			const result = yield* Effect.either(
+				service.renameSession(sessionId, "Useful title"),
+			);
+
+			expect(result._tag).toBe("Left");
+			if (result._tag === "Left") {
+				expect(result.left).toBeInstanceOf(SessionManagerError);
+				expect(result.left.operation).toBe("renameSession.project");
+				expect(result.left.cause).toBeInstanceOf(ProjectionRunnerError);
+				if (result.left.cause instanceof ProjectionRunnerError) {
+					expect(result.left.cause.cause).toBeInstanceOf(ProjectionError);
+					if (result.left.cause.cause instanceof ProjectionError) {
+						expect(result.left.cause.cause.cause).toBe(rootCause);
+					}
+				}
+			}
+			expect(mockApi.session.update).not.toHaveBeenCalled();
+		}).pipe(
+			Effect.provide(layer),
+			Effect.ensuring(
+				Effect.sync(() => rmSync(dir, { recursive: true, force: true })),
+			),
+		);
+	});
 
 	it.effect(
 		"renames a named Claude instance session through the event store",

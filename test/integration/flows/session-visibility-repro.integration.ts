@@ -170,6 +170,36 @@ function paginationSse(
 	return interactions;
 }
 
+/**
+ * Wait until the projection has ingested a given message id.
+ *
+ * These synthetic streams deliver text as settled `message.part.updated`
+ * parts, never `message.part.delta`, so no `delta` frame is ever broadcast —
+ * waiting for one just burns the timeout. What each differential actually
+ * needs is "the projection has caught up", so ask the projection directly.
+ */
+async function waitForProjectedMessage(
+	dbPath: string,
+	sessionId: string,
+	messageId: string,
+	timeoutMs = 20_000,
+): Promise<void> {
+	const deadline = Date.now() + timeoutMs;
+	for (;;) {
+		const projected = projectedHistory(dbPath, sessionId, 200);
+		if (
+			projected.kind === "rest-history" &&
+			(projected.history as DifferentialHistory).messages.some(
+				(message) => message.id === messageId,
+			)
+		)
+			return;
+		if (Date.now() > deadline)
+			throw new Error(`projection never ingested ${messageId}`);
+		await new Promise((resolve) => setTimeout(resolve, 100));
+	}
+}
+
 function projectedHistory(dbPath: string, sessionId: string, pageSize = 50) {
 	const db = SqliteClient.open(dbPath);
 	try {
@@ -255,10 +285,7 @@ async function runPaginationDifferential(count: number) {
 			synthetic.prompt,
 		);
 		const lastMessageId = `msg-${String(count).padStart(3, "0")}`;
-		await client1.waitFor("delta", {
-			timeout: 20_000,
-			predicate: (message) => message["messageId"] === lastMessageId,
-		});
+		await waitForProjectedMessage(dbPath, sessionId, lastMessageId);
 		await new Promise((resolve) => setTimeout(resolve, 1_000));
 
 		client2 = new TestWsClient(
@@ -868,11 +895,8 @@ describe("Integration: Session Visibility Repros", () => {
 				synthetic.prompt,
 			);
 			// The synthetic stream has no done marker (the base recording's SSE
-			// was stripped) — wait for the assistant's text delta, then drain.
-			await client1.waitFor("delta", {
-				timeout: 15_000,
-				predicate: (message) => message["messageId"] === "msg-assistant-h",
-			});
+			// was stripped) — wait for the projection to settle, then drain.
+			await waitForProjectedMessage(dbPath, sessionId, "msg-assistant-h");
 			await new Promise((resolve) => setTimeout(resolve, 1_500));
 
 			client2 = new TestWsClient(
