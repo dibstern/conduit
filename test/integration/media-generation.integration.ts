@@ -1,15 +1,37 @@
 import { execSync } from "node:child_process";
 import { existsSync, mkdirSync, readdirSync, rmSync, statSync } from "node:fs";
+import { homedir } from "node:os";
 import path from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 
+/** The scene runner needs two different ffmpeg binaries, and missing either
+ *  one fails the same way. `ffmpeg` on PATH converts the WebM to a GIF; the
+ *  copy Playwright downloads for itself backs recordVideo, and only a full
+ *  `playwright install` fetches it — `playwright install chromium` does not.
+ *  Checking just the first one is how this test came to fail on a machine
+ *  that had ffmpeg installed, which reads as a product failure and is not. */
 function hasFfmpeg(): boolean {
 	try {
 		execSync("ffmpeg -version", { stdio: "pipe" });
-		return true;
 	} catch {
 		return false;
 	}
+	return (
+		existsSync(playwrightBrowsersDir()) &&
+		readdirSync(playwrightBrowsersDir()).some((entry) =>
+			entry.startsWith("ffmpeg-"),
+		)
+	);
+}
+
+function playwrightBrowsersDir(): string {
+	const override = process.env["PLAYWRIGHT_BROWSERS_PATH"];
+	if (override) return override;
+	if (process.platform === "darwin")
+		return path.join(homedir(), "Library", "Caches", "ms-playwright");
+	if (process.platform === "win32")
+		return path.join(process.env["LOCALAPPDATA"] ?? homedir(), "ms-playwright");
+	return path.join(homedir(), ".cache", "ms-playwright");
 }
 
 const ROOT = path.resolve(import.meta.dirname, "../..");
