@@ -10,7 +10,9 @@ import {
 	type SessionManagerService,
 } from "../../../src/lib/domain/relay/Services/session-manager-service.js";
 import {
+	setDefaultModel,
 	setDefaultPermissionMode,
+	setDefaultVariant,
 	setPermissionMode,
 } from "../../../src/lib/domain/relay/Services/session-overrides-state.js";
 import {
@@ -206,6 +208,11 @@ describe("handleClientConnectedEffect — empty projected history", () => {
 
 		await Effect.runPromise(
 			Effect.gen(function* () {
+				yield* setDefaultModel({
+					providerID: "claude",
+					modelID: "claude-sonnet-4-7",
+				});
+				yield* setDefaultVariant("high");
 				yield* setDefaultPermissionMode("full");
 				yield* handleClientConnectedEffect("client-1");
 			}).pipe(Effect.provide(layer)),
@@ -215,6 +222,12 @@ describe("handleClientConnectedEffect — empty projected history", () => {
 		expect(wsHandler.sendTo).toHaveBeenCalledWith("client-1", {
 			type: "permission_mode_info",
 			mode: "full",
+		});
+		expect(wsHandler.sendTo).toHaveBeenCalledWith("client-1", {
+			type: "default_model_info",
+			model: "claude-sonnet-4-7",
+			provider: "claude",
+			variant: "high",
 		});
 	});
 
@@ -953,6 +966,7 @@ describe("handleClientConnected — defaultModel priority", () => {
 						providerID: "openai",
 						modelID: "gpt-4-turbo",
 					}),
+					getDefaultVariant: vi.fn().mockResolvedValue("high"),
 					setDefaultModel: vi.fn().mockResolvedValue(undefined),
 				},
 			}),
@@ -967,6 +981,7 @@ describe("handleClientConnected — defaultModel priority", () => {
 			type: "default_model_info",
 			model: "gpt-4-turbo",
 			provider: "openai",
+			variant: "high",
 		});
 	});
 

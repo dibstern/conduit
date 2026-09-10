@@ -135,6 +135,7 @@ export const discoveryState = $state({
 	commandsFetched: false,
 	defaultModelId: "" as string,
 	defaultProviderId: "" as string,
+	defaultVariant: "" as string,
 	currentVariant: "" as string,
 	availableVariants: [] as string[],
 	currentContextWindow: "" as string,
@@ -514,6 +515,7 @@ export function handleDefaultModelInfo(
 ): void {
 	discoveryState.defaultModelId = msg.model ?? "";
 	discoveryState.defaultProviderId = msg.provider ?? "";
+	discoveryState.defaultVariant = msg.variant ?? "";
 }
 
 // ─── Actions ────────────────────────────────────────────────────────────────
@@ -618,6 +620,7 @@ export function clearDiscoveryState(): void {
 	discoveryState.commandsFetched = false;
 	discoveryState.defaultModelId = "";
 	discoveryState.defaultProviderId = "";
+	discoveryState.defaultVariant = "";
 	discoveryState.currentVariant = "";
 	discoveryState.availableVariants = [];
 	discoveryState.currentContextWindow = "";

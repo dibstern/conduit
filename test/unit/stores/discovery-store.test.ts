@@ -416,23 +416,28 @@ describe("handleDefaultModelInfo", () => {
 			type: "default_model_info",
 			model: "claude-4",
 			provider: "anthropic",
+			variant: "high",
 		});
 		expect(discoveryState.defaultModelId).toBe("claude-4");
 		expect(discoveryState.defaultProviderId).toBe("anthropic");
+		expect(discoveryState.defaultVariant).toBe("high");
 	});
 
 	it("clears to empty string when fields are missing", () => {
 		discoveryState.defaultModelId = "existing";
 		discoveryState.defaultProviderId = "existing-provider";
+		discoveryState.defaultVariant = "existing-variant";
 		handleDefaultModelInfo(
 			msg({
 				type: "default_model_info",
 				model: undefined,
 				provider: undefined,
+				variant: undefined,
 			}),
 		);
 		expect(discoveryState.defaultModelId).toBe("");
 		expect(discoveryState.defaultProviderId).toBe("");
+		expect(discoveryState.defaultVariant).toBe("");
 	});
 
 	it("updates when called with new values", () => {
@@ -440,14 +445,17 @@ describe("handleDefaultModelInfo", () => {
 			type: "default_model_info",
 			model: "model-a",
 			provider: "provider-a",
+			variant: "low",
 		});
 		handleDefaultModelInfo({
 			type: "default_model_info",
 			model: "model-b",
 			provider: "provider-b",
+			variant: "high",
 		});
 		expect(discoveryState.defaultModelId).toBe("model-b");
 		expect(discoveryState.defaultProviderId).toBe("provider-b");
+		expect(discoveryState.defaultVariant).toBe("high");
 	});
 });
 

@@ -748,16 +748,6 @@ export const setDefaultModelForRelay = (input: SetDefaultModelInput) =>
 			log.warn("Failed to persist default model to OpenCode config");
 		}
 
-		const modelMessage = { type: "model_info" as const, model, provider };
-		const defaultModelMessage = {
-			type: "default_model_info" as const,
-			model,
-			provider,
-		};
-		wsHandler.broadcast(modelMessage);
-		wsHandler.broadcast(defaultModelMessage);
-		log.info(`client=${input.clientId} Set default: ${model} (${provider})`);
-
 		const availableVariants = yield* loadVariantsForModel({
 			providerID: provider,
 			modelID: model,
@@ -770,6 +760,18 @@ export const setDefaultModelForRelay = (input: SetDefaultModelInput) =>
 				? persistedVariant
 				: "";
 		yield* setDefaultVariant(validVariant);
+
+		const modelMessage = { type: "model_info" as const, model, provider };
+		const defaultModelMessage = {
+			type: "default_model_info" as const,
+			model,
+			provider,
+			variant: validVariant,
+		};
+		wsHandler.broadcast(modelMessage);
+		wsHandler.broadcast(defaultModelMessage);
+		log.info(`client=${input.clientId} Set default: ${model} (${provider})`);
+
 		const variantMessage = {
 			type: "variant_info",
 			variant: validVariant,

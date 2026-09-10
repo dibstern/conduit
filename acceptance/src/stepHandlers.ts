@@ -751,6 +751,32 @@ export const conduitVisualHandlers: StepHandler[] = [
 		},
 	},
 	{
+		name: "set default model and thinking level",
+		match:
+			/^the default model is Claude Sonnet 4 with a thinking level of high$/,
+		run: async ({ world }) => {
+			await requireRelayControl(world.page).sendMessages([
+				{
+					type: "model_list",
+					providers: dualDriverProviders.map((provider) => ({
+						...provider,
+						models: provider.models.map((model) =>
+							model.id === "claude-sonnet-4"
+								? { ...model, name: "Claude Sonnet 4" }
+								: model,
+						),
+					})),
+				},
+				{
+					type: "default_model_info",
+					model: "claude-sonnet-4",
+					provider: "anthropic",
+					variant: "high",
+				},
+			]);
+		},
+	},
+	{
 		name: "open settings to claude tab",
 		match: /^I open settings to the Claude tab$/,
 		run: async ({ world }) => {
@@ -774,6 +800,26 @@ export const conduitVisualHandlers: StepHandler[] = [
 			await rpcControl.waitForRequest(
 				(request) => request.tag === "ResolveClaudeSettings",
 			);
+		},
+	},
+	{
+		name: "assert default model display name",
+		match: /^the default model row shows Claude Sonnet 4$/,
+		run: async ({ world }) => {
+			await world.page
+				.getByTestId("claude-setting-defaultModel-value")
+				.getByText("Claude Sonnet 4", { exact: true })
+				.waitFor({ state: "visible", timeout: 5_000 });
+		},
+	},
+	{
+		name: "assert default model thinking level",
+		match: /^the default model row shows Thinking level: high$/,
+		run: async ({ world }) => {
+			await world.page
+				.getByTestId("claude-setting-defaultModel-thinking")
+				.getByText("Thinking level: high", { exact: true })
+				.waitFor({ state: "visible", timeout: 5_000 });
 		},
 	},
 	{

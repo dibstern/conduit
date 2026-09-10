@@ -834,6 +834,7 @@ const DefaultModelInfoSchema = Schema.Struct({
 	type: Schema.Literal("default_model_info"),
 	model: Schema.String,
 	provider: Schema.String,
+	variant: Schema.String,
 });
 
 const DefaultPermissionModeInfoSchema = Schema.Struct({
@@ -1466,7 +1467,12 @@ export type RelayMessage =
 	  }
 	// ── Model / Agent / Commands ───────────────────────────────────────────
 	| { type: "model_info"; model: string; provider: string }
-	| { type: "default_model_info"; model: string; provider: string }
+	| {
+			type: "default_model_info";
+			model: string;
+			provider: string;
+			variant: string;
+	  }
 	| { type: "default_permission_mode_info"; mode: SessionPermissionMode }
 	| { type: "model_list"; instanceId?: string; providers: ProviderInfo[] }
 	| {

@@ -13,7 +13,7 @@
 		onreset,
 		control,
 	}: {
-		key: ClaudeSettingKey | "defaultPermissionMode";
+		key: ClaudeSettingKey | "defaultModel" | "defaultPermissionMode";
 		label: string;
 		description: string;
 		provenance?: ClaudeSettingProvenance;

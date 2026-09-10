@@ -714,6 +714,7 @@ export const handleClientConnectedEffect = (
 						type: "default_model_info",
 						model: defaultModel.modelID,
 						provider: defaultModel.providerID,
+						variant: yield* getDefaultVariant(),
 					});
 				}
 				wsHandler.sendTo(clientId, {
@@ -1166,6 +1167,7 @@ export async function handleClientConnected(
 				type: "default_model_info",
 				model: defaultModel.modelID,
 				provider: defaultModel.providerID,
+				variant: await overrideState.getDefaultVariant(),
 			});
 		}
 

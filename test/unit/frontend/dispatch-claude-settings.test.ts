@@ -46,4 +46,20 @@ describe("Claude settings broadcast dispatch", () => {
 		expect(discoveryState.defaultPermissionMode).toBe("full");
 		expect(discoveryState.permissionMode).toBe("acceptEdits");
 	});
+
+	it("applies default_model_info without changing the session variant", () => {
+		discoveryState.currentVariant = "low";
+
+		handleMessage({
+			type: "default_model_info",
+			model: "claude-sonnet-4",
+			provider: "anthropic",
+			variant: "high",
+		});
+
+		expect(discoveryState.defaultModelId).toBe("claude-sonnet-4");
+		expect(discoveryState.defaultProviderId).toBe("anthropic");
+		expect(discoveryState.defaultVariant).toBe("high");
+		expect(discoveryState.currentVariant).toBe("low");
+	});
 });

@@ -19,6 +19,7 @@
 	import { PERMISSION_MODES } from "../../permission-modes.js";
 	import {
 		discoveryState,
+		getAllModels,
 		getAvailableInstances,
 	} from "../../stores/discovery.svelte.js";
 	import { getCachedInstanceById } from "../../stores/instance.svelte.js";
@@ -104,6 +105,16 @@
 			claudeSettingsState.editedKeys.includes("attribution"),
 		),
 	);
+	const defaultModelName = $derived.by(() => {
+		if (!discoveryState.defaultModelId) return "Not set";
+		return (
+			getAllModels().find(
+				(model) =>
+					model.id === discoveryState.defaultModelId &&
+					model.provider === discoveryState.defaultProviderId,
+			)?.name ?? discoveryState.defaultModelId
+		);
+	});
 
 	const claudeInstanceId = $derived.by(() => {
 		const projectSlug = getCurrentSlug();
@@ -282,6 +293,36 @@
 			void setOverride("autoCompactEnabled", autoCompactEnabled !== true)}
 		class="border-none bg-transparent p-0 gap-4 font-brand"
 	/>
+{/snippet}
+
+{#snippet defaultModelControl(label: string, description: string)}
+	<div class="flex flex-col gap-4">
+		<div class="flex items-center gap-4">
+			<div class="flex-1 min-w-0">
+				<div class="text-sm text-text font-medium">{label}</div>
+				<div class="text-xs text-text-muted mt-0.5">{description}</div>
+			</div>
+			<div class="shrink-0 text-right">
+				<div
+					class="text-sm {discoveryState.defaultModelId ? 'text-text' : 'text-text-dimmer'}"
+					data-testid="claude-setting-defaultModel-value"
+				>
+					{defaultModelName}
+				</div>
+				{#if discoveryState.defaultVariant}
+					<div
+						class="text-xs text-text-muted"
+						data-testid="claude-setting-defaultModel-thinking"
+					>
+						Thinking level: {discoveryState.defaultVariant}
+					</div>
+				{/if}
+			</div>
+		</div>
+		<p class="text-xs text-text-dimmer">
+			Set it in the model picker, with the star next to a model.
+		</p>
+	</div>
 {/snippet}
 
 {#snippet defaultPermissionModeControl(label: string, description: string)}
@@ -463,6 +504,13 @@
 			<p class="px-1 text-xs text-text-dimmer">
 				Conduit applies these when it starts a session.
 			</p>
+
+			<ClaudeSettingRow
+				key="defaultModel"
+				label="Default model"
+				description="The model Conduit starts a new session with."
+				control={defaultModelControl}
+			/>
 
 			<ClaudeSettingRow
 				key="defaultPermissionMode"

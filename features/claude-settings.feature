@@ -7,6 +7,12 @@ Scenario: opening the Claude tab shows the available settings
   When I open settings to the Claude tab
   Then the Claude settings are shown
 
+Scenario: the Claude tab shows the default model and thinking level
+  Given the default model is Claude Sonnet 4 with a thinking level of high
+  When I open settings to the Claude tab
+  Then the default model row shows Claude Sonnet 4
+  And the default model row shows Thinking level: high
+
 Scenario: changing auto-compact identifies when the change applies
   When I open settings to the Claude tab
   And I toggle Claude auto-compact
