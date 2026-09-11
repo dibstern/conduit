@@ -33,21 +33,17 @@ type Story = StoryObj<typeof meta>;
 
 // ─── Shared setup info ──────────────────────────────────────────────────────
 
-const defaultSetupInfo = {
-	httpsUrl: "https://100.64.0.1:7080",
-	httpUrl: "http://100.64.0.1:7080",
-	hasCert: true,
-	lanMode: false,
-};
+// There is deliberately NO "Tailscale step" story here (conduit-test-de3.34,
+// owner decision 4A). buildStepList() only includes the "tailscale" step when
+// `!platform.isTailscale && !isLocal && !lanMode`, and Storybook serves from
+// localhost, so `isLocal` is always true and the step can never be reached from
+// this page no matter what args a story passes. The story that used to claim
+// otherwise rendered the certificate step under a Tailscale name, and its
+// baseline was byte-identical to CertificateStep's. The step's own UI is covered
+// six ways over in Setup/StepTailscale; what is not covered is the wizard chrome
+// around it, which is a known and accepted gap.
 
 // ─── Stories ────────────────────────────────────────────────────────────────
-
-/** Tailscale step with warn status (not on Tailscale network). */
-export const TailscaleStep: Story = {
-	args: {
-		initialSetupInfo: defaultSetupInfo,
-	},
-};
 
 /** Certificate step (has cert, not on HTTPS). */
 export const CertificateStep: Story = {

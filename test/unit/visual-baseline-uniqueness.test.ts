@@ -32,11 +32,8 @@ const ALLOWED_DUPLICATE_GROUPS: Record<string, string> = {
 		"escape story re-opens the popover as its last step",
 
 	// Verified legitimate: these components render nothing in the state shown.
-	// The emptiness is asserted in play(); see conduit-test-qf3s.
-	"input-commandmenu--empty | input-filemenu--no-results | layout-sidebar--default | layout-sidebar--file-browser-panel | layout-sidebar--hover | layout-sidebar--loading | overlays-attentionbanner--no-notifications":
-		"all render nothing: menus hide without results, mobile sidebar is off-canvas",
-	"input-commandmenu--empty | input-filemenu--no-results | overlays-attentionbanner--no-notifications":
-		"all render nothing in this state",
+	"layout-sidebar--default | layout-sidebar--file-browser-panel | layout-sidebar--hover | layout-sidebar--loading | overlays-attentionbanner--no-notifications":
+		"all render nothing: mobile sidebar is off-canvas (conduit-test-7jv)",
 
 	// CONFIRMED BUG, tracked in conduit-test-732b. Kept here only so the gate can
 	// be switched on; ChatLayout's baselines are the ConnectOverlay, not the
@@ -70,8 +67,6 @@ const ALLOWED_DUPLICATE_GROUPS: Record<string, string> = {
 		"unverified (conduit-test-732b)",
 	"todo-todooverlay--collapsed | todo-todooverlay--mixed-progress":
 		"unverified (conduit-test-732b)",
-	"pages-setuppage--certificate-step | pages-setuppage--tailscale-step":
-		"unverified, filed separately as conduit-test-de3.34",
 	"pages-setuppage--done-step | pages-setuppage--pwa-step":
 		"unverified (conduit-test-732b)",
 	"ui-modal--default | ui-modal--non-dismissible":

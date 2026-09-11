@@ -125,10 +125,6 @@
 					</span>
 					<span>Loading files…</span>
 				</div>
-			{:else if entries.length === 0}
-				<div class="py-3 px-3.5 text-text-muted text-base">
-					No files found
-				</div>
 			{:else}
 				{#each entries as entry, i}
 						{@const lastSlash = entry.lastIndexOf("/", entry.endsWith("/") ? entry.length - 2 : entry.length - 1)}

@@ -62,7 +62,18 @@ export const Loading: Story = {
 	},
 };
 
-export const NoResults: Story = {
+/**
+ * Typing a query with no matches dismisses the menu silently. That is the
+ * intended behaviour, ratified as decision 3B on conduit-test-qf3s: there is no
+ * "no results" empty state, and the markup that used to imply one was
+ * unreachable in every state and has been deleted.
+ *
+ * Excluded from visual capture (SKIP_STORIES in test/visual/components.spec.ts)
+ * because the render is empty: the baseline was a blank PNG, and a blank PNG
+ * compares equal to any other blank PNG, so the pixels could never have caught a
+ * regression. The behaviour is asserted in play() instead, where it is real.
+ */
+export const HidesWhenNoMatches: Story = {
 	args: {
 		query: "zzzzz",
 		visible: true,
@@ -71,13 +82,6 @@ export const NoResults: Story = {
 		onClose: noopClose,
 		loading: false,
 	},
-	// This baseline is a BLANK image, and that is the assertion: `isVisible` is
-	// `visible && entries.length > 0`, so with no matches the menu renders
-	// nothing at all. A blank PNG compares equal to any other blank PNG, so the
-	// pixels alone would still pass if the component started rendering the wrong
-	// thing off-screen — this play() is what makes the emptiness meaningful.
-	// (The component does contain "no results" markup, but it is unreachable in
-	// every state; see conduit-test-7jv.)
 	play: ({ canvasElement }) => {
 		expect(canvasElement.querySelector('[role="listbox"]')).toBeNull();
 	},

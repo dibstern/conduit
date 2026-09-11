@@ -366,6 +366,8 @@ if (stories.length > 0) {
 		"model-agentselector--single-agent",
 		"model-agentselector--no-agents",
 		"chat-pastepreview--empty",
+		"input-filemenu--hides-when-no-matches",
+		"input-commandmenu--hides-when-no-matches",
 		"overlays-confirmmodal--hidden",
 		"overlays-imagelightbox--hidden",
 		"overlays-qrmodal--hidden",
