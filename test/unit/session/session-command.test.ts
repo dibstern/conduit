@@ -13,6 +13,7 @@ import {
 import {
 	applySessionCommand,
 	createOpenCodeSession,
+	forkOpenCodeSession,
 	SessionCommandError,
 } from "../../../src/lib/domain/relay/Services/session-command.js";
 import type { OpenCodeAPI } from "../../../src/lib/instance/opencode-api.js";
@@ -41,6 +42,7 @@ describe("applySessionCommand", () => {
 			create: vi.fn(async () => ({ id: "s-new", title: "New" })),
 			delete: vi.fn(async () => undefined),
 			update: vi.fn(async () => undefined),
+			fork: vi.fn(async () => ({ id: "ses-fork", title: "Forked" })),
 		},
 	});
 
@@ -224,6 +226,52 @@ describe("applySessionCommand", () => {
 				// function is what makes it unrepresentable from outside the seam.
 				expect(yield* eventTypes).toEqual(["session.created"]);
 				expect(yield* sessionIds).toEqual([session.id]);
+			}),
+		),
+	);
+
+	it.effect("gives a forked session a row to carry its lineage", () =>
+		withHarness(({ api }) =>
+			Effect.gen(function* () {
+				const sql = yield* SqlClient.SqlClient;
+				yield* seedSession("ses-parent", "opencode");
+
+				const forked = yield* forkOpenCodeSession("ses-parent", "msg-7");
+
+				expect(api.session.fork).toHaveBeenCalledWith("ses-parent", {
+					messageID: "msg-7",
+				});
+
+				// The row has to exist before lineage can land on it: session.forked
+				// projects as an UPDATE, and an UPDATE that matches nothing reports
+				// success. That is conduit-test-o5vp — the fork was recorded upstream
+				// and in the sidecar, and showed up in the sidebar as a root session.
+				yield* applySessionCommand({
+					type: "session.forked",
+					data: {
+						sessionId: forked.id,
+						parentId: "ses-parent",
+						forkPointEvent: "msg-7",
+					},
+				});
+
+				expect(
+					yield* sql<{
+						id: string;
+						provider: string;
+						parent_id: string | null;
+						fork_point_event: string | null;
+					}>`SELECT id, provider, parent_id, fork_point_event
+					   FROM sessions WHERE id = ${forked.id}`,
+				).toEqual([
+					{
+						id: "ses-fork",
+						// Inherited from the parent, not assumed.
+						provider: "opencode",
+						parent_id: "ses-parent",
+						fork_point_event: "msg-7",
+					},
+				]);
 			}),
 		),
 	);

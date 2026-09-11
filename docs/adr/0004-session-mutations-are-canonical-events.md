@@ -122,6 +122,27 @@ the adapter cannot make the rule pass vacuously.
   same function. Folding the two together is what matters: creating a session
   upstream and forgetting to record it locally is no longer expressible from
   outside this module, which is precisely the bug that started this.
+- Fork lineage is a canonical event too, and a separate one. `setForkEntry`
+  wrote relay state and `fork-metadata.json` and nothing else, so
+  `sessions.parent_id` stayed null for every fork — and the root-session query
+  filters on exactly that column, so a fork surfaced in the sidebar as a
+  top-level session (conduit-test-o5vp). The alternative the ticket raised,
+  making the sidecar the acknowledged source of truth and dropping the columns,
+  is not available: `getSession` and `client-init` read `parent_id` with no
+  fallback. So lineage is `session.forked`, distinct from `session.created`
+  because Conduit learns the two facts from different places — the forked
+  session's existence off the provider event stream, its fork point from the
+  fork call — and because a lineage-only payload is all `setForkEntry` has.
+  The sidecar survives as a cache, and as the only home for the display-only
+  fork-point timestamp, which has no column.
+- `api.session.fork` moved into the seam for the same reason `api.session.create`
+  is there: it is id-generating. It also had to. `session.forked` projects as an
+  `UPDATE`, and nothing appended `session.created` for a forked session — the
+  row appeared only if the provider event stream happened to mention it — so the
+  lineage write would have found no row and reported success. `forkOpenCodeSession`
+  applies `session.created` in the same function as the fork call, and the
+  boundary rule now matches `fork` alongside `create|update|delete`; it did not,
+  which is how this call site sat outside the seam unnoticed.
 - Upstream sync is skipped entirely when no OpenCode API is wired. The seam
   takes `OpenCodeAPITag` as an optional service: a Claude-only relay has no
   session registry anywhere, and requiring the tag would put OpenCode in the

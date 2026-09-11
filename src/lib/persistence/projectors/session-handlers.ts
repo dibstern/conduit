@@ -13,6 +13,7 @@ type SessionHandledType =
 	| "session.created"
 	| "session.renamed"
 	| "session.deleted"
+	| "session.forked"
 	| "session.status"
 	| "session.provider_changed"
 	| "session.permission_mode_changed"
@@ -118,6 +119,27 @@ export const sessionHandlers: {
 			{
 				sql: "DELETE FROM sessions WHERE id = ?",
 				params: [event.data.sessionId],
+			},
+		];
+	},
+
+	// Lineage only. The row itself is brought into being by session.created —
+	// upstream for OpenCode forks, which is why this is an UPDATE and not an
+	// upsert: this handler has no title or provider to insert with.
+	"session.forked": (event) => {
+		return [
+			{
+				sql: `UPDATE sessions SET
+					parent_id = ?,
+					fork_point_event = COALESCE(?, fork_point_event),
+					updated_at = ?
+				 WHERE id = ?`,
+				params: [
+					event.data.parentId,
+					event.data.forkPointEvent ?? null,
+					event.createdAt,
+					event.data.sessionId,
+				],
 			},
 		];
 	},

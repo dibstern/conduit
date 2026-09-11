@@ -66,6 +66,7 @@ export const CANONICAL_EVENT_TYPES = [
 	"session.created",
 	"session.renamed",
 	"session.deleted",
+	"session.forked",
 	"session.status",
 	"session.compaction",
 	"session.provider_changed",
@@ -234,6 +235,26 @@ export interface SessionDeletedPayload {
 	readonly sessionId: string;
 }
 
+/**
+ * Lineage for a session that was forked from another.
+ *
+ * Separate from `session.created` because Conduit learns the two facts from
+ * different places: the forked session's existence arrives on the provider
+ * event stream, its fork point comes back from the fork call. Keeping lineage
+ * its own event is what lets `setForkEntry` record it without having to know
+ * the session's title or provider.
+ *
+ * `forkPointTimestamp` has no column in `sessions` — it is display-only and
+ * still served from the fork-metadata sidecar. It is recorded here anyway so
+ * the sidecar stays reconstructible from the log.
+ */
+export interface SessionForkedPayload {
+	readonly sessionId: string;
+	readonly parentId: string;
+	readonly forkPointEvent?: string;
+	readonly forkPointTimestamp?: number;
+}
+
 export interface SessionStatusPayload {
 	readonly sessionId: string;
 	readonly status: SessionStatusValue;
@@ -308,6 +329,7 @@ export interface EventPayloadMap {
 	"session.created": SessionCreatedPayload;
 	"session.renamed": SessionRenamedPayload;
 	"session.deleted": SessionDeletedPayload;
+	"session.forked": SessionForkedPayload;
 	"session.status": SessionStatusPayload;
 	"session.compaction": SessionCompactionPayload;
 	"session.provider_changed": SessionProviderChangedPayload;
@@ -628,6 +650,13 @@ const SessionDeletedPayloadSchema = Schema.Struct({
 	sessionId: Schema.String,
 });
 
+const SessionForkedPayloadSchema = Schema.Struct({
+	sessionId: Schema.String,
+	parentId: Schema.String,
+	forkPointEvent: Schema.optionalWith(Schema.String, { exact: true }),
+	forkPointTimestamp: Schema.optionalWith(Schema.Number, { exact: true }),
+});
+
 const SessionStatusPayloadSchema = Schema.Struct({
 	sessionId: Schema.String,
 	status: SessionStatusSchema,
@@ -762,6 +791,10 @@ const SessionDeletedEventSchema = eventEnvelope(
 	"session.deleted",
 	SessionDeletedPayloadSchema,
 );
+const SessionForkedEventSchema = eventEnvelope(
+	"session.forked",
+	SessionForkedPayloadSchema,
+);
 const SessionStatusEventSchema = eventEnvelope(
 	"session.status",
 	SessionStatusPayloadSchema,
@@ -795,7 +828,7 @@ const QuestionResolvedEventSchema = eventEnvelope(
 	QuestionResolvedPayloadSchema,
 );
 
-// ─── Canonical Event Schema (Union of all 25 event types) ──────────────────
+// ─── Canonical Event Schema (Union of all 26 event types) ──────────────────
 
 export const CanonicalEventSchema = Schema.Union(
 	MessageCreatedEventSchema,
@@ -815,6 +848,7 @@ export const CanonicalEventSchema = Schema.Union(
 	SessionCreatedEventSchema,
 	SessionRenamedEventSchema,
 	SessionDeletedEventSchema,
+	SessionForkedEventSchema,
 	SessionStatusEventSchema,
 	SessionCompactionEventSchema,
 	SessionProviderChangedEventSchema,
@@ -843,6 +877,7 @@ const PAYLOAD_REQUIRED_FIELDS: Record<CanonicalEventType, readonly string[]> = {
 	"session.created": ["sessionId", "title", "provider"],
 	"session.renamed": ["sessionId", "title"],
 	"session.deleted": ["sessionId"],
+	"session.forked": ["sessionId", "parentId"],
 	"session.status": ["sessionId", "status"],
 	"session.compaction": ["sessionId", "state", "detail"],
 	"session.provider_changed": ["sessionId", "oldProvider", "newProvider"],

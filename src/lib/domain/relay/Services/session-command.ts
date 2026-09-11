@@ -46,12 +46,18 @@ export class SessionCommandError extends Data.TaggedError(
  * with no `session.*` event cannot be expressed as a command, and the read
  * model is projected from those events, so it cannot drift from them either.
  */
+type SessionCommandType =
+	| "session.created"
+	| "session.renamed"
+	| "session.deleted"
+	| "session.forked";
+
 export type SessionCommand = {
-	[K in "session.created" | "session.renamed" | "session.deleted"]: {
+	[K in SessionCommandType]: {
 		readonly type: K;
 		readonly data: EventPayloadMap[K];
 	};
-}["session.created" | "session.renamed" | "session.deleted"];
+}[SessionCommandType];
 
 // ─── Upstream sync adapters ─────────────────────────────────────────────────
 
@@ -90,6 +96,10 @@ export const openCodeUpstreamAdapter = (
 				// Whoever created the session chose its id — upstream for
 				// OpenCode-backed sessions, locally for the rest — so by the time this
 				// event exists upstream already has it. Nothing to replicate.
+				return Effect.void;
+			case "session.forked":
+				// Same: the fork happened upstream first, which is where the forked
+				// session's id came from. This event records its lineage locally.
 				return Effect.void;
 		}
 	},
@@ -183,6 +193,9 @@ export const applySessionCommand = (command: SessionCommand) =>
 			// provider. Every other command describes a change to a row that must
 			// already be there: no row is not an error (it may already be gone, and
 			// upstream may still hold it), there is simply nothing to record.
+			// This is why forkOpenCodeSession applies session.created before any
+			// session.forked can land: an UPDATE onto a row that is not there yet
+			// writes nothing and reports success.
 			const appendProvider =
 				command.type === "session.created"
 					? command.data.provider
@@ -309,4 +322,66 @@ export const createOpenCodeSession = (
 	}).pipe(
 		Effect.annotateLogs("operation", "createOpenCodeSession"),
 		Effect.withSpan("session.createOpenCodeSession"),
+	);
+
+/**
+ * Fork a session on an OpenCode server and record the forked session locally.
+ *
+ * Creation's asymmetry again: OpenCode chooses the forked session's id, so the
+ * direct `api.session.fork` call lives here and `session.created` is applied in
+ * the same function. Before this, the forked session reached the read model
+ * only if the provider event stream happened to mention it — with no parent, so
+ * it surfaced as a root session in the sidebar (conduit-test-o5vp).
+ *
+ * The fork point itself follows as `session.forked`, once the caller has
+ * resolved which message it was.
+ */
+export const forkOpenCodeSession = (
+	parentSessionId: string,
+	messageId?: string,
+) =>
+	Effect.gen(function* () {
+		const api = yield* OpenCodeAPITag;
+		const readQueryOption = yield* Effect.serviceOption(ReadQueryEffectTag);
+
+		// No retry: fork is not idempotent — retrying could produce duplicates.
+		const session = yield* Effect.tryPromise(() =>
+			api.session.fork(parentSessionId, {
+				...(messageId != null && { messageID: messageId }),
+			}),
+		).pipe(
+			Effect.mapError(
+				(cause) =>
+					new SessionCommandError({
+						operation: "session.forked.upstream",
+						cause,
+					}),
+			),
+		);
+
+		// A fork inherits its parent's provider. Forking is an OpenCode
+		// operation, so an unreadable parent can only mean the read model is not
+		// wired here at all — in which case nothing is projected anyway.
+		const parent =
+			readQueryOption._tag === "Some"
+				? yield* readQueryOption.value
+						.getSession(parentSessionId)
+						.pipe(Effect.orElseSucceed(() => undefined))
+				: undefined;
+
+		yield* applySessionCommand({
+			type: "session.created",
+			data: {
+				sessionId: session.id,
+				title: normalizeSessionTitle(session.title),
+				provider: parent?.provider ?? "opencode",
+				parentId: parentSessionId,
+				providerSessionId: session.id,
+			},
+		});
+
+		return session;
+	}).pipe(
+		Effect.annotateLogs("operation", "forkOpenCodeSession"),
+		Effect.withSpan("session.forkOpenCodeSession"),
 	);

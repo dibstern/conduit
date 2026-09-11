@@ -919,13 +919,43 @@ export const setPendingQuestionCounts = (counts: ReadonlyMap<string, number>) =>
 		}));
 	}).pipe(Effect.withSpan("session.setPendingQuestionCounts"));
 
-/** Record fork-point metadata for a forked session and persist it to disk. */
+/**
+ * Record fork-point metadata for a forked session: lineage into the event
+ * store, the whole entry into relay state and the on-disk sidecar.
+ *
+ * The canonical event leads. `sessions.parent_id` is what the root-session
+ * query filters on, so lineage that reaches only the sidecar leaves the fork
+ * looking like a top-level session to every reader that does not consult it
+ * (conduit-test-o5vp). The sidecar is now a cache of the same fact, plus the
+ * fork-point timestamp, which has no column.
+ */
 export const setForkEntry = (
 	sessionId: string,
 	entry: ForkEntry,
 	configDir?: string,
 ) =>
 	Effect.gen(function* () {
+		if (entry.parentID) {
+			yield* applySessionCommand({
+				type: "session.forked",
+				data: {
+					sessionId,
+					parentId: entry.parentID,
+					...(entry.forkMessageId
+						? { forkPointEvent: entry.forkMessageId }
+						: {}),
+					...(entry.forkPointTimestamp != null
+						? { forkPointTimestamp: entry.forkPointTimestamp }
+						: {}),
+				},
+			}).pipe(
+				Effect.mapError(
+					(cause) =>
+						new SessionManagerError({ operation: "setForkEntry", cause }),
+				),
+			);
+		}
+
 		const ref = yield* SessionManagerStateTag;
 		const forkMeta = yield* Ref.modify(ref, (s) => {
 			const nextForkMeta = HashMap.set(s.forkMeta, sessionId, entry);

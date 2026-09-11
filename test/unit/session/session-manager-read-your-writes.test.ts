@@ -128,10 +128,6 @@ const READ_MODEL_PARITY_CASES: Record<ReadModelMutation, ParityCase> = {
 			}),
 	},
 	setForkEntry: {
-		// Expected failure under the parity contract: fork metadata is written to
-		// relay state and fork-metadata.json, not the SQLite session projection.
-		// Tracked as conduit-test-o5vp. Delete this marker when that lands.
-		expectedFailure: "fork metadata does not update the SQLite session row",
 		run: ({ api, service, readQuery, seedSession }) =>
 			Effect.gen(function* () {
 				const parentId = "ses-parent";

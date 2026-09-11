@@ -11,6 +11,7 @@ exports[`Exhaustiveness guards > EventPayloadMap key snapshot > snapshot of all 
   "session.compaction",
   "session.created",
   "session.deleted",
+  "session.forked",
   "session.permission_mode_changed",
   "session.provider_changed",
   "session.renamed",
