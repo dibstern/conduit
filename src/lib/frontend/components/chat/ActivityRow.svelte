@@ -10,6 +10,7 @@
 		firstLine,
 		fmtDuration,
 		isSoloTool,
+		thinkingVerb,
 		toolCommand,
 		toolSubject,
 		toolVerb,
@@ -44,7 +45,9 @@
 	{@const running = part.status === "running" || part.status === "pending"}
 	{@const failed = part.status === "error" || part.isError}
 	{@const command = toolCommand(part)}
-	<div data-part={part.uuid} data-tool-id={part.id}>
+	<!-- A compact row is still this tool's rendering, so it answers to the same
+	     .tool-item / data-tool-status hooks the expanded card does. -->
+	<div class="tool-item" data-part={part.uuid} data-tool-id={part.id} data-tool-status={part.status}>
 		<button
 			type="button"
 			class="{rowClass} {highlight ? 'bg-[rgba(var(--overlay-rgb),0.06)]' : ''}"
@@ -75,14 +78,16 @@
 		{/if}
 	</div>
 {:else if part.type === "thinking"}
-	<div data-part={part.uuid}>
+	<!-- .thinking-* and .done are E2E hooks: the visual-mockup spec rewrites the
+	     verb and the duration through them to keep screenshots deterministic. -->
+	<div class="thinking-block thinking-item" class:done={part.done} data-part={part.uuid}>
 		<button type="button" class={rowClass} onclick={() => (expanded = !expanded)}>
 			<span class="shrink-0 {style.text} [&_.lucide]:w-3.5 [&_.lucide]:h-3.5">
 				<Icon name={style.icon} size={14} />
 			</span>
-			<span class="shrink-0 font-medium text-text-secondary">{part.done ? "Thought" : "Thinking"}</span>
+			<span class="thinking-label shrink-0 font-medium text-text-secondary">{part.done ? "Thought" : thinkingVerb(part)}</span>
 			<span class="flex-1 truncate text-text-dimmer italic">{firstLine(part.text, 80)}</span>
-			{#if meta}<span class="shrink-0 font-mono text-text-dimmer">{meta}</span>{/if}
+			{#if meta}<span class="thinking-duration shrink-0 font-mono text-text-dimmer">{meta}</span>{/if}
 			{#if !part.done}<BlockGrid cols={4} mode="fast" blockSize={1.5} gap={0.5} class="shrink-0" />{/if}
 		</button>
 		{#if expanded && part.text}

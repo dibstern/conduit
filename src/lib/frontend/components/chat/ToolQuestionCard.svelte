@@ -10,9 +10,8 @@
 	import BlockGrid from '../shared/BlockGrid.svelte';
 	import QuestionCard from "./QuestionCard.svelte";
 
-	let { message, groupRadius }: {
+	let { message }: {
 		message: ToolMessage;
-		groupRadius: string;
 	} = $props();
 
 	// ─── Question detection ─────────────────────────────────────────────────
@@ -170,7 +169,7 @@
 	<QuestionCard request={questionRequest} inline synthetic />
 {:else}
 	<!-- Completed/historical question: show read-only summary -->
-	<div class="{message.status === 'completed' ? '' : 'bg-bg-surface'} {groupRadius} relative overflow-hidden {message.status === 'error' ? 'glow-tool-error' : message.status === 'completed' ? 'glow-brand-b' : message.status === 'running' ? 'glow-tool-running' : ''}">
+	<div class="{message.status === 'completed' ? '' : 'bg-bg-surface'} rounded-panel relative overflow-hidden {message.status === 'error' ? 'glow-tool-error' : message.status === 'completed' ? 'glow-brand-b' : message.status === 'running' ? 'glow-tool-running' : ''}">
 		{#if message.status === 'running'}
 			<div class="absolute inset-0 pointer-events-none" style="background: linear-gradient(90deg, transparent 0%, rgba(234,179,8,0.04) 50%, transparent 100%); animation: tool-shimmer-slide 2s ease-in-out infinite;"></div>
 		{/if}

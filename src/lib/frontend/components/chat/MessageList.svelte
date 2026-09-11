@@ -16,11 +16,11 @@
 	} from "../../stores/ui.svelte.js";
 	import { permissionsState, getLocalPermissions } from "../../stores/permissions.svelte.js";
 	import { createScrollController } from "../../stores/scroll-controller.svelte.js";
-	import { segmentTurns, type Turn } from "../../utils/turns.js";
+	import { economics, segmentTurns, type Turn } from "../../utils/turns.js";
 	import UserMessage from "./UserMessage.svelte";
 	import AssistantMessage from "./AssistantMessage.svelte";
 	import TurnActivity from "./TurnActivity.svelte";
-	import ResultBar from "./ResultBar.svelte";
+	import TurnEconomics from "./TurnEconomics.svelte";
 	import SystemMessage from "./SystemMessage.svelte";
 	import PermissionCard from "../permissions/PermissionCard.svelte";
 	import QuestionCard from "./QuestionCard.svelte";
@@ -248,11 +248,19 @@
 				<AssistantMessage message={turn.reply} />
 			</div>
 		{/if}
-		<!-- A turn that did work carries its bill on the strip; only a tool-less
-		     question-and-answer still needs the standalone result bar. -->
+		<!-- A turn that did work carries its bill on the strip. A tool-less question
+		     and answer has no ledger, so it renders the same bill on its own line —
+		     one formatter for both, rather than a second dialect of the same facts.
+		     .result-bar is an E2E selector; .turn-meta rides on TurnEconomics. -->
 		{#if turn.result && turn.activity.length === 0}
+			<!-- `now` only matters for a live turn, and this branch needs a result. -->
+			{@const bill = economics(turn, Date.now())}
 			<div class="msg-container">
-				<ResultBar message={turn.result} />
+				<!-- Same query container as the ledger, so the bill sheds the gauge and
+				     the token counts in the same order rather than overflowing. -->
+				<div class="result-bar @container max-w-[760px] mx-auto mt-1 mb-5 px-5">
+					<TurnEconomics economics={bill} showDuration />
+				</div>
 			</div>
 		{/if}
 	{/snippet}

@@ -63,7 +63,7 @@
 <div class="max-w-[760px] mx-auto px-5 my-1.5">
 	<div
 		bind:this={panelEl}
-		class="rounded-panel {turn.live ? 'bg-bg-surface glow-tool-running' : 'border border-border-subtle'}"
+		class="turn-activity rounded-panel {turn.live ? 'bg-bg-surface glow-tool-running' : 'border border-border-subtle'}"
 	>
 		<!-- The two summary lines are their own query container so the ledger sheds
 		     detail against its own width, not the viewport's — a sidebar narrows the
@@ -73,7 +73,7 @@
 			<div class="flex items-center gap-3 py-1.5 pl-2 pr-3 text-xs">
 				<button
 					type="button"
-					class="flex items-center gap-2.5 min-w-0 flex-1 text-left cursor-pointer"
+					class="turn-activity-toggle flex items-center gap-2.5 min-w-0 flex-1 text-left cursor-pointer"
 					aria-expanded={expanded}
 					onclick={() => (expanded = !expanded)}
 				>
@@ -89,16 +89,16 @@
 						<BlockGrid cols={5} mode="fast" blockSize={1.5} gap={0.5} class="shrink-0" />
 						<span class="shrink-0 font-medium text-text-secondary @max-[336px]:hidden">Working</span>
 						{#if duration !== undefined}
-							<span class="shrink-0 font-mono text-text-dimmer">{fmtDuration(duration)}</span>
+							<span class="turn-duration shrink-0 font-mono text-text-dimmer">{fmtDuration(duration)}</span>
 						{/if}
 						<span class="flex-1 truncate text-text-muted">— {currentStepLabel(turn)}</span>
 					{:else}
 						<!-- Duration leads, so truncation eats the step counts from the right
 						     and the one number that is always true survives. -->
 						<span class="flex-1 truncate text-text-dimmer">
-							<span class="font-medium text-text-secondary">
-								Worked{duration !== undefined ? ` for ${fmtDuration(duration)}` : ""}
-							</span>
+							<span class="font-medium text-text-secondary"
+								>Worked{#if duration !== undefined}&nbsp;for <span class="turn-duration">{fmtDuration(duration)}</span>{/if}</span
+							>
 							· {countsPhrase(stats)}
 						</span>
 					{/if}

@@ -10,6 +10,7 @@ export class ChatPage {
 	readonly codeCopyBtns: Locator;
 	readonly toolBlocks: Locator;
 	readonly resultBars: Locator;
+	readonly turnActivityToggles: Locator;
 	readonly stopBtn: Locator;
 	readonly subagentBackBar: Locator;
 	readonly subagentBackBtn: Locator;
@@ -26,6 +27,7 @@ export class ChatPage {
 		this.codeCopyBtns = page.locator(".code-copy-btn");
 		this.toolBlocks = page.locator(".tool-item");
 		this.resultBars = page.locator(".result-bar");
+		this.turnActivityToggles = page.locator(".turn-activity-toggle");
 		this.stopBtn = page.locator("#stop");
 		this.subagentBackBar = page.locator(".subagent-back-bar");
 		this.subagentBackBtn = page.locator(".subagent-back-btn");
@@ -111,6 +113,18 @@ export class ChatPage {
 		const bar = this.resultBars.last();
 		await bar.waitFor({ state: "visible", timeout: 30_000 });
 		return bar.innerText();
+	}
+
+	/**
+	 * Open the most recent turn's activity ledger. A settled turn collapses every
+	 * tool and thinking step behind it, so steps are only in the DOM once opened.
+	 */
+	async expandTurnActivity(timeout = 30_000): Promise<void> {
+		const toggle = this.turnActivityToggles.last();
+		await toggle.waitFor({ state: "visible", timeout });
+		if ((await toggle.getAttribute("aria-expanded")) !== "true") {
+			await toggle.click();
+		}
 	}
 
 	/** Wait for a thinking block to appear */

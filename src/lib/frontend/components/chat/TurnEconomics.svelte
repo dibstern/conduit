@@ -10,9 +10,14 @@
 <!-- ledger, not the viewport, because a sidebar narrows the transcript on a wide  -->
 <!-- screen just as a phone does.                                                  -->
 <script lang="ts">
-	import { fmtTokens, type TurnEconomics } from "../../utils/turns.js";
+	import { fmtDuration, fmtTokens, type TurnEconomics } from "../../utils/turns.js";
 
-	let { economics }: { economics: TurnEconomics } = $props();
+	// A turn with tools already counts its duration in the ledger header; a
+	// tool-less question and answer has no header, so it carries it here.
+	let {
+		economics,
+		showDuration = false,
+	}: { economics: TurnEconomics; showDuration?: boolean } = $props();
 
 	const ctx = $derived(economics.context);
 	const gaugeClass = $derived(
@@ -20,9 +25,14 @@
 	);
 </script>
 
+<!-- .turn-meta / .turn-duration are E2E hooks: the turn's bill wherever it lands,
+     with the one figure that moves between runs isolated so it can be frozen. -->
 <span
-	class="inline-flex items-center gap-2 font-mono text-xs text-text-dimmer whitespace-nowrap [&>span+span]:before:content-['·'] [&>span+span]:before:mr-2"
+	class="turn-meta inline-flex items-center gap-2 font-mono text-xs text-text-dimmer whitespace-nowrap [&>span+span]:before:content-['·'] [&>span+span]:before:mr-2"
 >
+	{#if showDuration && economics.duration !== undefined}
+		<span class="turn-duration text-text-secondary">{fmtDuration(economics.duration)}</span>
+	{/if}
 	{#if economics.cost !== undefined}<span>${economics.cost.toFixed(4)}</span>{/if}
 	<!-- Each counter stands on its own: a provider that reports one and not the
 	     other must not have a zero invented for the missing half. -->

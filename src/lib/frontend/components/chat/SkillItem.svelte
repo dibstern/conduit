@@ -112,7 +112,7 @@
 			</div>
 		</button>
 
-		<!-- Subtitle row (hidden when completed, like ThinkingBlock) -->
+		<!-- Subtitle row, hidden once the skill completes. -->
 		{#if message.status !== 'completed'}
 		<div
 			class="tool-subtitle flex items-center gap-1.5 py-0.5 px-3 pl-4 text-xs italic text-text-dimmer"

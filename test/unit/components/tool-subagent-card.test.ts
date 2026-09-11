@@ -33,7 +33,6 @@ describe("ToolSubagentCard", () => {
 		render(ToolSubagentCard, {
 			props: {
 				message,
-				groupRadius: "",
 			},
 		});
 
@@ -59,7 +58,6 @@ describe("ToolSubagentCard", () => {
 		render(ToolSubagentCard, {
 			props: {
 				message,
-				groupRadius: "",
 			},
 		});
 

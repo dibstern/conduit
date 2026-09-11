@@ -50,30 +50,6 @@ export const LongResult: Story = {
 	args: { message: mockToolLongResult },
 };
 
-export const FirstInGroup: Story = {
-	args: {
-		message: mockToolCompleted,
-		isFirstInGroup: true,
-		isLastInGroup: false,
-	},
-};
-
-export const MiddleOfGroup: Story = {
-	args: {
-		message: mockToolRunning,
-		isFirstInGroup: false,
-		isLastInGroup: false,
-	},
-};
-
-export const LastInGroup: Story = {
-	args: {
-		message: mockToolCompleted,
-		isFirstInGroup: false,
-		isLastInGroup: true,
-	},
-};
-
 export const BashWithDescription: Story = {
 	args: { message: mockToolBash },
 };

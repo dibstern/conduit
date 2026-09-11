@@ -143,6 +143,79 @@ export function firstLine(text: string, max = 90): string {
 	return line.length > max ? `${line.slice(0, max - 1)}…` : line;
 }
 
+const THINKING_VERBS = [
+	"Contemplating",
+	"Architecting",
+	"Brewing",
+	"Calibrating",
+	"Channeling",
+	"Composing",
+	"Computing",
+	"Conjuring",
+	"Constructing",
+	"Crafting",
+	"Crystallizing",
+	"Debugging",
+	"Deciphering",
+	"Designing",
+	"Distilling",
+	"Drafting",
+	"Engineering",
+	"Evaluating",
+	"Evolving",
+	"Exploring",
+	"Fabricating",
+	"Formulating",
+	"Generating",
+	"Ideating",
+	"Imagining",
+	"Innovating",
+	"Integrating",
+	"Iterating",
+	"Manifesting",
+	"Mapping",
+	"Materializing",
+	"Modeling",
+	"Navigating",
+	"Optimizing",
+	"Orchestrating",
+	"Parsing",
+	"Pondering",
+	"Processing",
+	"Projecting",
+	"Prototyping",
+	"Reasoning",
+	"Refining",
+	"Resolving",
+	"Sculpting",
+	"Shaping",
+	"Simulating",
+	"Sketching",
+	"Solving",
+	"Strategizing",
+	"Structuring",
+	"Synthesizing",
+	"Theorizing",
+	"Thinking",
+	"Transforming",
+	"Unraveling",
+	"Visualizing",
+	"Weaving",
+];
+
+/**
+ * A verb with some personality for a thinking step. Drawn from the step's own
+ * uuid rather than at random, so it stays put across re-renders instead of
+ * flickering on every streamed token.
+ */
+export function thinkingVerb(part: ThinkingMessage): string {
+	let hash = 0;
+	for (let i = 0; i < part.uuid.length; i++) {
+		hash = (hash * 31 + part.uuid.charCodeAt(i)) | 0;
+	}
+	return THINKING_VERBS[Math.abs(hash) % THINKING_VERBS.length] ?? "Thinking";
+}
+
 export function partLabel(part: ActivityPart): string {
 	switch (part.type) {
 		case "tool":
@@ -150,7 +223,7 @@ export function partLabel(part: ActivityPart): string {
 		case "thinking":
 			return part.done
 				? `Thought${part.duration ? ` for ${fmtDuration(part.duration)}` : ""}`
-				: "Thinking…";
+				: `${thinkingVerb(part)}…`;
 		case "assistant":
 			return firstLine(part.rawText);
 	}
