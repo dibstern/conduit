@@ -61,16 +61,13 @@ export const WithMultipleClients: Story = {
 	},
 };
 
-export const WithTerminalBadge: Story = {
-	beforeEach: () => {
-		wsState.status = "connected";
-		wsState.statusText = "Connected";
-		const tabs = new Map();
-		tabs.set("pty-1", { ptyId: "pty-1", title: "Terminal", exited: false });
-		tabs.set("pty-2", { ptyId: "pty-2", title: "Terminal 2", exited: false });
-		terminalState.tabs = tabs;
-	},
-};
+// There is deliberately NO "terminal badge" story here (conduit-test-732b). The
+// header's terminal button renders an unconditional icon and nothing else —
+// `terminalState.tabs` is read by the click handler, never by any count or badge
+// markup. The story that used to sit here seeded two tabs and captured a header
+// identical to Connected's, so its baseline was byte-identical and it asserted
+// nothing. Seeding the store harder would not have helped; there is no badge to
+// render. If a badge is ever designed, this is where its story goes.
 
 export const SidebarExpanded: Story = {
 	beforeEach: () => {

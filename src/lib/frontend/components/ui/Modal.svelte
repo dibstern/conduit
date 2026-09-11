@@ -1,7 +1,6 @@
 <script lang="ts">
 	import { Dialog } from "bits-ui";
 	import type { Snippet } from "svelte";
-	import Icon from "./Icon.svelte";
 	import Button from "./Button.svelte";
 	import {
 		backgroundInert,
@@ -154,15 +153,20 @@
 						{/if}
 						{#if showClose}
 							<div class="absolute top-3 right-3">
+								<!-- `icon`, not a child <Icon>: Button suppresses children
+								     entirely when `iconOnly` is set, so passing the glyph as a
+								     child rendered an empty ghost button — no background, no
+								     border, nothing. Every ui-modal baseline was captured
+								     without a visible close button. See conduit-test-uv4b; the Button trap
+								     itself is conduit-test-arl1. -->
 								<Button
 									variant="ghost"
 									size="sm"
 									iconOnly
+									icon="x"
 									ariaLabel="Close"
 									onclick={onclose}
-								>
-									<Icon name="x" size={16} />
-								</Button>
+								/>
 							</div>
 						{/if}
 					</div>

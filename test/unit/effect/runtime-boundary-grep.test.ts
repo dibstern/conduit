@@ -74,9 +74,18 @@ const allowedPlainErrorThrows: readonly AllowedPlainThrow[] = [
 	},
 	{
 		path: "src/lib/frontend/components/project/ProjectSwitcher.stories.ts",
-		snippetPattern: /project-switcher trigger not found/,
+		// Matches the wording loosely on purpose: the previous pattern pinned the
+		// exact sentence, so rephrasing the guard message in conduit-test-732b broke
+		// this gate for a change that did not alter its meaning at all.
+		snippetPattern: /project-switcher trigger/,
 		reason:
 			"storybook play() query guard, not executable production code — same class as stories/mocks.ts above",
+	},
+	{
+		path: "src/lib/frontend/components/overlays/NotifSettings.stories.ts",
+		snippetPattern: /pushUnavailable takes precedence/,
+		reason:
+			"storybook beforeEach environment guard, not executable production code — same class as stories/mocks.ts above",
 	},
 	{
 		path: "src/lib/frontend/components/input/input-utils.ts",

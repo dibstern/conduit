@@ -1,4 +1,5 @@
 import type { Meta, StoryObj } from "@storybook/svelte-vite";
+import { expect, userEvent, within } from "storybook/test";
 import type { TodoItem } from "../../types.js";
 import TodoOverlay from "./TodoOverlay.svelte";
 
@@ -106,5 +107,14 @@ export const AllComplete: Story = {
 export const Collapsed: Story = {
 	args: {
 		items: mixedItems,
+	},
+	// conduit-test-732b: the shared items rendered expanded until the header was clicked.
+	play: async ({ canvasElement }) => {
+		const toggle = within(canvasElement).getByRole("button", { name: /Tasks/ });
+		await userEvent.click(toggle);
+		await expect(
+			toggle,
+			"Clicking Tasks must collapse the task list before capture",
+		).toHaveAttribute("aria-expanded", "false");
 	},
 };

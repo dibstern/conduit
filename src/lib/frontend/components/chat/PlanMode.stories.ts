@@ -1,4 +1,5 @@
 import type { Meta, StoryObj } from "@storybook/svelte-vite";
+import { expect, userEvent, within } from "storybook/test";
 import PlanMode from "./PlanMode.svelte";
 
 const meta = {
@@ -66,6 +67,17 @@ export const Collapsed: Story = {
 	args: {
 		mode: "content",
 		content: mockPlanContent,
+	},
+	// conduit-test-732b: local state starts expanded; args alone never collapsed it.
+	play: async ({ canvasElement }) => {
+		const toggle = within(canvasElement).getByRole("button", {
+			name: "Implementation Plan",
+		});
+		await userEvent.click(toggle);
+		await expect(
+			toggle,
+			"Clicking the plan header must collapse the plan before capture",
+		).toHaveAttribute("aria-expanded", "false");
 	},
 };
 

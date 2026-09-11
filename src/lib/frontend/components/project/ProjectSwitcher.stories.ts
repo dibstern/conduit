@@ -84,6 +84,28 @@ export const NoProjects: Story = {
 };
 
 export const WithClients: Story = {
+	// conduit-test-732b: counts were hidden in the unopened dropdown.
+	tags: ["viewport-capture"],
+	play: async ({ canvasElement }) => {
+		const trigger = canvasElement.querySelector<HTMLElement>(
+			"#project-switcher-btn",
+		);
+		if (!trigger)
+			throw new Error("WithClients requires the project-switcher trigger");
+		await userEvent.click(trigger);
+		const body = within(canvasElement.ownerDocument.body);
+		await waitFor(() => {
+			const dropdown = body.getByTestId("project-switcher-dropdown");
+			expect(
+				dropdown,
+				"WithClients must open the project dropdown",
+			).toBeVisible();
+			expect(
+				within(dropdown).getByText("3"),
+				"The open dropdown must show Frontend App's three clients",
+			).toBeVisible();
+		});
+	},
 	args: {
 		projects: [
 			{

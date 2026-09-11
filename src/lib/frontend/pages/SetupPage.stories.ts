@@ -76,14 +76,12 @@ export const PWAStep: Story = {
 	},
 };
 
-/** Completion screen with checkmark and "All set!" message. */
-export const DoneStep: Story = {
-	args: {
-		initialSetupInfo: {
-			httpsUrl: "https://100.64.0.1:7080",
-			httpUrl: "http://100.64.0.1:7080",
-			hasCert: false,
-			lanMode: true,
-		},
-	},
-};
+// There is deliberately NO "done step" story here either (conduit-test-732b).
+// SetupPage always starts at step index 0, and the story that used to sit here
+// passed args byte-identical to PWAStep's, so it captured the PWA step under the
+// name "Done" — a baseline identical to PWAStep's and an assertion of nothing.
+// Reaching the real Done screen from this page needs three scripted clicks and a
+// stubbed service-worker failure, which would make the story a test of the
+// wizard's navigation rather than a picture of its completion screen. The
+// completion UI itself is covered by Setup/StepDone; the wizard chrome around it
+// is the same known, accepted gap recorded above for Tailscale.

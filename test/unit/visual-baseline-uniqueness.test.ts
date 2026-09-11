@@ -35,38 +35,27 @@ const ALLOWED_DUPLICATE_GROUPS: Record<string, string> = {
 	"layout-sidebar--default | layout-sidebar--file-browser-panel | layout-sidebar--hover | layout-sidebar--loading | overlays-attentionbanner--no-notifications":
 		"all render nothing: mobile sidebar is off-canvas (conduit-test-7jv)",
 
-	// Unverified pre-existing groups. Each is either a story whose distinguishing
-	// state is not rendered, or a pair that legitimately looks identical. Being
-	// listed here is not a claim that it is correct — see conduit-test-732b.
-	"layout-header--connected | layout-header--processing | layout-header--sidebar-expanded | layout-header--with-terminal-badge":
-		"unverified (conduit-test-732b)",
-	"layout-header--connected | layout-header--processing | layout-header--with-terminal-badge":
-		"unverified (conduit-test-732b)",
-	"ui-toggle--default | ui-toggle--disabled": "unverified (conduit-test-732b)",
-	"chat-systemmessage--hover | chat-systemmessage--info":
-		"unverified (conduit-test-732b)",
-	"session-sessionitem--inactive | session-sessionitem--with-context-menu":
-		"unverified (conduit-test-732b)",
+	// Verified legitimate (conduit-test-732b). Each of these was traced to the
+	// source; the two stories genuinely produce the same frame.
+	"layout-header--connected | layout-header--processing":
+		"connected and processing share the same green dot once capture freezes the processing pulse at opacity 1; the difference is title and screen-reader text",
+	"layout-header--connected | layout-header--processing | layout-header--sidebar-expanded":
+		"as above, plus: on mobile the desktop expand button is hidden and both sidebar states render the same hamburger",
 	"model-contextwindowselector--premium-default | model-contextwindowselector--selected-1-m":
-		"unverified (conduit-test-732b)",
-	"chat-planmode--collapsed | chat-planmode--content-card":
-		"unverified (conduit-test-732b)",
-	"chat-assistantmessage--copy-interaction | chat-assistantmessage--rich-markdown":
-		"unverified (conduit-test-732b)",
-	"overlays-notifsettings--open | overlays-notifsettings--push-blocked":
-		"unverified (conduit-test-732b)",
-	"project-projectswitcher--multiple-projects | project-projectswitcher--with-clients":
-		"unverified (conduit-test-732b)",
-	"todo-todooverlay--collapsed | todo-todooverlay--mixed-progress":
-		"unverified (conduit-test-732b)",
-	"pages-setuppage--done-step | pages-setuppage--pwa-step":
-		"unverified (conduit-test-732b)",
-	"ui-modal--default | ui-modal--non-dismissible":
-		"unverified (conduit-test-732b); may differ only in behaviour",
+		"premium default and an explicit 1M override both resolve to the same closed '1M (beta)' badge; they differ only inside the open dropdown",
 	"overlays-attentionbanner--permissions-and-questions | overlays-notificationstack--attention-only":
-		"unverified (conduit-test-732b); the stack may simply render the banner",
+		"both stories render NotificationStack with the same permission and question fixtures and no toasts",
 	"overlays-notificationstack--toasts-only | overlays-toast--multiple-toasts":
-		"unverified (conduit-test-732b); the stack may simply render the toast",
+		"both stories render NotificationStack with the same three toast messages and variants; only the toast ids differ, and those are iteration keys",
+
+	// MISSING VISUAL DESIGN, not a broken story (conduit-test-732b). The state IS
+	// applied; the component simply has no visual treatment for it, so the two
+	// frames are identical by omission. These are design decisions, not test bugs,
+	// and they are listed here so the gate stays honest until they are made.
+	"ui-toggle--default | ui-toggle--disabled":
+		"disabled only adds `disabled:cursor-not-allowed` and the DOM attribute, neither of which contributes pixels; the component already has a `dimmed` opacity-40 treatment that disabled does not use (conduit-test-wzat)",
+	"chat-systemmessage--hover | chat-systemmessage--info":
+		"the info card has no hover treatment at all; the only hover style in the component belongs to a 'Show details' button the fixture does not render (conduit-test-wzat)",
 };
 
 const BASELINE_DIRECTORY = resolve(
