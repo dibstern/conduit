@@ -35,14 +35,6 @@ const ALLOWED_DUPLICATE_GROUPS: Record<string, string> = {
 	"layout-sidebar--default | layout-sidebar--file-browser-panel | layout-sidebar--hover | layout-sidebar--loading | overlays-attentionbanner--no-notifications":
 		"all render nothing: mobile sidebar is off-canvas (conduit-test-7jv)",
 
-	// CONFIRMED BUG, tracked in conduit-test-732b. Kept here only so the gate can
-	// be switched on; ChatLayout's baselines are the ConnectOverlay, not the
-	// layout.
-	"layout-chatlayout--default | layout-chatlayout--sidebar-collapsed | layout-chatlayout--with-rewind-banner | overlays-connectoverlay--connecting":
-		"BUG: ChatLayout stories never leave the connecting state (conduit-test-732b)",
-	"layout-chatlayout--default | layout-chatlayout--with-rewind-banner | overlays-connectoverlay--connecting":
-		"BUG: ChatLayout stories never leave the connecting state (conduit-test-732b)",
-
 	// Unverified pre-existing groups. Each is either a story whose distinguishing
 	// state is not rendered, or a pair that legitimately looks identical. Being
 	// listed here is not a claim that it is correct — see conduit-test-732b.
