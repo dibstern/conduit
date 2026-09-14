@@ -530,7 +530,7 @@
 	<div class="fixed inset-0 z-[var(--z-popover)] flex items-center justify-center bg-[rgba(var(--overlay-rgb),0.15)] backdrop-blur-sm" onclick={handleBackdropClick}>
 		<div id="settings-panel" class="bg-bg border border-border rounded-xl shadow-2xl max-w-lg w-full mx-4 flex flex-col max-h-[80vh]">
 			<!-- Header -->
-			<div class="flex items-center justify-between px-5 py-3 border-b border-border">
+			<div class="shrink-0 flex items-center justify-between px-5 py-3 border-b border-border">
 				<h2 class="text-lg font-semibold text-text font-brand">Settings</h2>
 				<button data-testid="settings-close-btn" class="text-text-muted hover:text-text p-1 cursor-pointer border-none bg-transparent" onclick={() => onClose?.()}>
 					<Icon name="x" size={16} />
@@ -538,7 +538,10 @@
 			</div>
 
 			<!-- Tabs -->
-			<div class="flex border-b border-border px-5 gap-1 font-brand overflow-x-auto">
+			<!-- shrink-0 is load-bearing: overflow-x-auto makes this flex item's
+			     automatic minimum height zero rather than content height, so without
+			     it a tall tab squeezes the tab bar down to a sliver. -->
+			<div class="shrink-0 flex border-b border-border px-5 gap-1 font-brand overflow-x-auto">
 				{#each [
 					{ id: "notifications", label: "Alerts" },
 					{ id: "appearance", label: "Theme" },
