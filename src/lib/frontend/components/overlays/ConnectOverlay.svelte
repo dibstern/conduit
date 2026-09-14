@@ -17,6 +17,7 @@
 	import type { InstanceStatus } from "../../types.js";
 	import { CONNECT_FADEOUT_MS } from "../../ui-constants.js";
 	import ConduitLogo from '../ui/ConduitLogo.svelte';
+	import Button from '../ui/Button.svelte';
 
 	// ─── State ──────────────────────────────────────────────────────────────────
 
@@ -233,18 +234,22 @@
 		<!-- Instance action buttons (shown when instance is down in multi-instance mode) -->
 		{#if showInstanceActions}
 			<div class="flex gap-3 mt-2">
-				<button
-					class="px-4 py-1.5 text-sm rounded-lg border border-border text-text hover:bg-bg-alt font-medium"
+				<Button
+					variant="secondary"
+					size="content"
+					class="px-4 py-1.5 text-sm rounded-lg font-medium hover:bg-bg-alt!"
 					onclick={handleStartInstance}
 				>
 					Start Instance
-				</button>
-				<button
-					class="px-4 py-1.5 text-sm rounded-lg border border-border text-text hover:bg-bg-alt font-medium"
+				</Button>
+				<Button
+					variant="secondary"
+					size="content"
+					class="px-4 py-1.5 text-sm rounded-lg font-medium hover:bg-bg-alt!"
 					onclick={handleSwitchInstance}
 				>
 					Switch Instance
-				</button>
+				</Button>
 			</div>
 		{/if}
 		</div>
