@@ -14,4 +14,4 @@ When a skill mentions a role (e.g. "apply the AFK-ready triage label"), use the 
 
 Edit the right-hand column to match whatever vocabulary you actually use.
 
-> **Note**: Only `wontfix` currently exists in `dibstern/conduit`. The first time the `triage` skill needs to apply one of the other four, it should create the label via `gh label create <name>` rather than fail silently.
+> **Note**: Beads labels are free-form strings; `bd label add <id> <label>` creates them on first use. No pre-registration needed.
