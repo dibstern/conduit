@@ -15,9 +15,18 @@ const meta = {
 	argTypes: {
 		variant: {
 			control: "select",
-			options: ["primary", "secondary", "ghost", "ghost-accent", "danger"],
+			options: [
+				"primary",
+				"secondary",
+				"ghost",
+				"ghost-accent",
+				"danger",
+				"success-soft",
+				"danger-outline",
+				"accent-soft",
+			],
 		},
-		size: { control: "inline-radio", options: ["sm", "md"] },
+		size: { control: "inline-radio", options: ["sm", "md", "content"] },
 		icon: { control: "text" },
 		iconOnly: { control: "boolean" },
 		loading: { control: "boolean" },
@@ -48,6 +57,43 @@ export const Small: Story = {
 	args: { variant: "primary", size: "sm", children: label("Small") },
 };
 
+export const SuccessSoft: Story = {
+	args: { variant: "success-soft", children: label("Allow") },
+};
+export const DangerOutline: Story = {
+	args: { variant: "danger-outline", children: label("Deny") },
+};
+export const AccentSoft: Story = {
+	args: { variant: "accent-soft", children: label("Show full output") },
+};
+
+/**
+ * `size="content"` emits no padding, radius, weight or type scale — the call
+ * site brings its own, additively. Without a baseline this story would be an
+ * unstyled box, which is the point: it proves the size really is an opt-out
+ * rather than quietly leaking `sm`/`md` geometry. The class below is what a
+ * real migrated call site looks like (conduit-test-de3.5).
+ */
+export const ContentSize: Story = {
+	args: {
+		variant: "ghost",
+		size: "content",
+		class: "px-2 py-0.5 rounded text-xs font-normal",
+		children: label("Content-sized"),
+	},
+	play: ({ canvasElement }) => {
+		const button = canvasElement.querySelector("button");
+		expect(button, "ContentSize story rendered no button").not.toBeNull();
+		const classes = button?.className.split(/\s+/) ?? [];
+		for (const leaked of ["h-8", "h-9", "px-3", "px-4", "text-sm", "gap-2"]) {
+			expect(
+				classes,
+				`size="content" must emit no ${leaked} — a call site cannot override it without "!"`,
+			).not.toContain(leaked);
+		}
+	},
+};
+
 export const WithIcon: Story = {
 	args: { variant: "primary", icon: "save", children: label("Save") },
 };
@@ -58,6 +104,20 @@ export const IconOnly: Story = {
 		iconOnly: true,
 		icon: "settings",
 		ariaLabel: "Settings",
+		// Explicitly cleared, not redundant: the meta above sets a default
+		// `children` for every story, and this one inherited it. Button used to
+		// discard children whenever `iconOnly` was set, so the stray label was
+		// invisible and this baseline looked correct. Removing that silent
+		// discard (conduit-test-arl1) is what surfaced it. Storybook merges meta
+		// args at runtime, so the props union cannot catch this — the assertion
+		// below is the guard instead.
+		children: undefined,
+	},
+	play: ({ canvasElement }) => {
+		expect(
+			canvasElement.querySelector("button")?.textContent?.trim(),
+			"An icon-only Button must render no text; a stray label here means meta args leaked in",
+		).toBe("");
 	},
 };
 
