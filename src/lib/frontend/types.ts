@@ -99,6 +99,7 @@ export interface AssistantMessage {
 	html: string;
 	finalized: boolean;
 	messageId?: string;
+	partId?: string;
 	needsRender?: boolean;
 	/** Unix-ms timestamp from the source HistoryMessage. Used for timestamp-based fork splitting. */
 	createdAt?: number;

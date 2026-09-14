@@ -32,6 +32,7 @@ export type SessionActivity = {
 	phase: ChatPhase;
 	turnEpoch: number;
 	currentMessageId: string | null;
+	currentPartId: string | null;
 	replayGeneration: number;
 	doneMessageIds: SvelteSet<string>;
 	seenMessageIds: SvelteSet<string>;
@@ -70,6 +71,7 @@ export function createEmptySessionActivity(): SessionActivity {
 		phase: "idle",
 		turnEpoch: 0,
 		currentMessageId: null,
+		currentPartId: null,
 		replayGeneration: 0,
 		doneMessageIds: new SvelteSet(),
 		seenMessageIds: new SvelteSet(),
@@ -513,7 +515,8 @@ export function updateLastMessage<T extends ChatMessage["type"]>(
 }
 
 /** Flush the debounced render timer, render pending markdown, finalize the
- *  last unfinalized assistant message, and reset streaming state.
+ *  current assistant part (or the last unfinalized assistant when partless),
+ *  and reset streaming state.
  *  Returns the finalized message's `messageId` (if any) for dedup tracking.
  *
  *  Consolidates the pattern previously duplicated in handleDone,
@@ -535,10 +538,12 @@ function flushAndFinalizeAssistant(
 	}
 
 	let finalizedMessageId: string | undefined;
+	const currentPartId = _activity.currentPartId;
 	const { messages, found } = updateLastMessage(
 		getMessages(_messages),
 		"assistant",
-		(m) => !m.finalized,
+		(m) =>
+			!m.finalized && (currentPartId == null || m.partId === currentPartId),
 		(m) => {
 			finalizedMessageId = m.messageId;
 			return { ...m, finalized: true };
@@ -550,6 +555,7 @@ function flushAndFinalizeAssistant(
 	// (handleDone → phaseToIdle, handleToolStart → phaseToProcessing, etc.)
 	_messages.currentAssistantText = "";
 	chatState.currentAssistantText = "";
+	_activity.currentPartId = null;
 	return finalizedMessageId;
 }
 
@@ -716,8 +722,21 @@ export function advanceTurnIfNewMessage(
 	activity: SessionActivity,
 	messages: SessionMessages,
 	messageId: string | undefined,
+	partId?: string,
 ): void {
 	if (messageId == null) return;
+
+	if (partId != null) {
+		const currentMessages = getMessages(messages);
+		for (let i = currentMessages.length - 1; i >= 0; i--) {
+			// biome-ignore lint/style/noNonNullAssertion: safe — loop bounded by array length
+			const message = currentMessages[i]!;
+			if (message.type === "assistant" && message.partId === partId) {
+				activity.seenMessageIds.add(messageId);
+				break;
+			}
+		}
+	}
 
 	// Already seen this messageId — just update currentMessageId (it may
 	// have changed back from a different message) but don't bump epoch.
@@ -772,7 +791,7 @@ export function handleDelta(
 	messages: SessionMessages,
 	msg: Extract<RelayMessage, { type: "delta" }>,
 ): void {
-	const { text, messageId } = msg;
+	const { text, messageId, partId } = msg;
 
 	// ── Deduplicate: skip deltas for a messageId that was already finalized ──
 	// This prevents the message poller from creating a second AssistantMessage
@@ -782,13 +801,63 @@ export function handleDelta(
 		return;
 	}
 
-	// advanceTurnIfNewMessage (called at the dispatch level) already
-	// finalized streaming and transitioned to "processing" if this delta
-	// belongs to a new turn.  We just need to check the phase.
-	const needsNewMessage = activity.phase !== "streaming";
+	if (partId != null) {
+		const isContinuingCurrentPart =
+			activity.phase === "streaming" && activity.currentPartId === partId;
+		if (activity.phase === "streaming" && !isContinuingCurrentPart) {
+			flushAndFinalizeAssistant(activity, messages);
+		}
 
-	// If no current assistant message, create one.
-	if (needsNewMessage) {
+		const currentMessages = getMessages(messages);
+		let matchingIndex = -1;
+		let matchingMessage: AssistantMessage | undefined;
+		for (let i = currentMessages.length - 1; i >= 0; i--) {
+			// biome-ignore lint/style/noNonNullAssertion: safe — loop bounded by array length
+			const message = currentMessages[i]!;
+			if (message.type === "assistant" && message.partId === partId) {
+				matchingIndex = i;
+				matchingMessage = message;
+				break;
+			}
+		}
+
+		if (matchingIndex >= 0 && matchingMessage) {
+			const updated = [...currentMessages];
+			updated[matchingIndex] = {
+				...matchingMessage,
+				finalized: false,
+				...(messageId != null && { messageId }),
+			};
+			setMessages(messages, updated);
+			if (!isContinuingCurrentPart || matchingMessage.finalized) {
+				messages.currentAssistantText = matchingMessage.rawText;
+				chatState.currentAssistantText = matchingMessage.rawText;
+			}
+			activity.currentPartId = partId;
+			if (messageId != null) {
+				activity.seenMessageIds.add(messageId);
+				activity.currentMessageId = messageId;
+				chatState.currentMessageId = messageId;
+			}
+			phaseToStreaming(activity);
+		} else {
+			const assistantMsg: AssistantMessage = {
+				type: "assistant",
+				uuid: generateUuid(),
+				rawText: "",
+				html: "",
+				finalized: false,
+				createdAt: Date.now(),
+				partId,
+				...(messageId != null && { messageId }),
+			};
+			setMessages(messages, [...currentMessages, assistantMsg]);
+			phaseToStreaming(activity);
+			activity.currentPartId = partId;
+			messages.currentAssistantText = "";
+			chatState.currentAssistantText = "";
+		}
+	} else if (activity.phase !== "streaming") {
 		const uuid = generateUuid();
 		const assistantMsg: AssistantMessage = {
 			type: "assistant",
@@ -801,8 +870,11 @@ export function handleDelta(
 		};
 		setMessages(messages, [...getMessages(messages), assistantMsg]);
 		phaseToStreaming(activity);
+		activity.currentPartId = null;
 		messages.currentAssistantText = "";
 		chatState.currentAssistantText = "";
+	} else {
+		activity.currentPartId = null;
 	}
 
 	messages.currentAssistantText += text;
@@ -1561,6 +1633,7 @@ export function clearMessages(): void {
 			activity.phase = "idle";
 			activity.turnEpoch = 0;
 			activity.currentMessageId = null;
+			activity.currentPartId = null;
 			activity.doneMessageIds.clear();
 			activity.seenMessageIds.clear();
 			activity.liveEventBuffer = null;
@@ -1618,7 +1691,7 @@ export function handleMessageRemoved(
 
 // ─── Internal helpers ───────────────────────────────────────────────────────
 
-/** Flush the current assistant text to the last assistant message's HTML. */
+/** Flush the current assistant text to the current assistant part's HTML. */
 function flushAssistantRender(
 	_activity: SessionActivity,
 	_messages: SessionMessages,
@@ -1629,10 +1702,12 @@ function flushAssistantRender(
 	const isReplay = _messages.loadLifecycle === "loading";
 	const html = isReplay ? rawText : renderMarkdown(rawText);
 
+	const currentPartId = _activity.currentPartId;
 	const { messages: updated, found } = updateLastMessage(
 		getMessages(_messages),
 		"assistant",
-		(m) => !m.finalized,
+		(m) =>
+			!m.finalized && (currentPartId == null || m.partId === currentPartId),
 		(m) => ({
 			...m,
 			rawText,

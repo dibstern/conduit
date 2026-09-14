@@ -18,6 +18,7 @@ export function translateDomainEventToRelay(
 				type: "delta",
 				text: event.data.text,
 				messageId: event.data.messageId,
+				partId: event.data.partId,
 			});
 
 		case "thinking.start":

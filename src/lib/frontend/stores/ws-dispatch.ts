@@ -234,7 +234,12 @@ function routePerSession(event: PerSessionEvent): void {
 
 	// ── Turn boundary detection ─────────────────────────────────────────
 	if ("messageId" in event && event.messageId != null) {
-		advanceTurnIfNewMessage(activity, messages, event.messageId as string);
+		advanceTurnIfNewMessage(
+			activity,
+			messages,
+			event.messageId as string,
+			event.type === "delta" ? event.partId : undefined,
+		);
 	}
 
 	switch (event.type) {
@@ -561,7 +566,12 @@ function dispatchChatEvent(event: RelayMessage, ctx: DispatchContext): boolean {
 		? (event as Record<string, unknown>)["messageId"]
 		: undefined;
 	if (hasMessageId && msgId != null && activity && messages) {
-		advanceTurnIfNewMessage(activity, messages, msgId as string);
+		advanceTurnIfNewMessage(
+			activity,
+			messages,
+			msgId as string,
+			event.type === "delta" ? event.partId : undefined,
+		);
 	} else if (hasMessageId && msgId != null) {
 		// Fallback: no slot yet — just log
 		log.debug(

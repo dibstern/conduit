@@ -121,6 +121,7 @@ describe("historyToChatMessages: assistant text", () => {
 		expect(assistantMsgs).toHaveLength(1);
 		expect(assistantMsgs[0]).toMatchObject({
 			type: "assistant",
+			partId: "p1",
 			rawText: "Hello! How can I help?",
 			finalized: true,
 		});
@@ -145,9 +146,13 @@ describe("historyToChatMessages: assistant text", () => {
 		const assistantMsgs = result.filter((m) => m.type === "assistant");
 		expect(assistantMsgs).toHaveLength(2);
 		expect(assistantMsgs[0]).toMatchObject({
+			partId: "p1",
 			rawText: "Let me read that file.",
 		});
-		expect(assistantMsgs[1]).toMatchObject({ rawText: "Here is the content." });
+		expect(assistantMsgs[1]).toMatchObject({
+			partId: "p3",
+			rawText: "Here is the content.",
+		});
 	});
 });
 

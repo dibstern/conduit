@@ -49,6 +49,7 @@ describe("createRelayEventSink — translation", () => {
 			sessionId: "ses-1",
 			text: "Hello",
 			messageId: "msg_1",
+			partId: "part_1",
 		});
 	});
 
@@ -71,6 +72,7 @@ describe("createRelayEventSink — translation", () => {
 			sessionId: "child",
 			text: "Child text",
 			messageId: "msg_child",
+			partId: "part_child",
 		});
 	});
 
@@ -350,6 +352,7 @@ describe("createRelayEventSink — persistence", () => {
 			sessionId: "ses-1",
 			text: "Hello",
 			messageId: "msg_1",
+			partId: "part_1",
 		});
 	});
 
@@ -372,6 +375,7 @@ describe("createRelayEventSink — persistence", () => {
 			sessionId: "ses-1",
 			text: "Hello",
 			messageId: "msg_1",
+			partId: "part_1",
 		});
 	});
 
@@ -400,6 +404,7 @@ describe("createRelayEventSink — persistence", () => {
 			sessionId: "ses-1",
 			text: "Hello",
 			messageId: "msg_1",
+			partId: "part_1",
 		});
 	});
 
@@ -438,6 +443,7 @@ describe("createRelayEventSink — persistence", () => {
 			sessionId: "ses-1",
 			text: "Hello",
 			messageId: "msg_1",
+			partId: "part_1",
 		});
 	});
 

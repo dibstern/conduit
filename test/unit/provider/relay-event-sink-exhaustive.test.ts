@@ -57,6 +57,28 @@ describe("domain-event relay translation exhaustiveness", () => {
 		});
 	});
 
+	it("keeps text part identity on relay deltas", () => {
+		const result = translateDomainEventToRelay(
+			canonicalEvent("text.delta", "session-1", {
+				messageId: "message-1",
+				partId: "part-1",
+				text: "hello",
+			}),
+		);
+
+		expect(result).toEqual({
+			kind: "emit",
+			messages: [
+				{
+					type: "delta",
+					messageId: "message-1",
+					partId: "part-1",
+					text: "hello",
+				},
+			],
+		});
+	});
+
 	it("HANDLED_TYPES does not contain stale entries", () => {
 		const stale = [...HANDLED_TYPES].filter(
 			(t) =>

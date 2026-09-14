@@ -172,6 +172,7 @@ describe("ProviderRuntimeIngestion", () => {
 				sessionId: "session-123",
 				text: "hello",
 				messageId: "message-1",
+				partId: "text-1",
 			},
 		]);
 	});

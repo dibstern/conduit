@@ -187,7 +187,10 @@ describe("translator returns TranslateResult", () => {
 		expect(result.ok).toBe(true);
 		if (result.ok) {
 			expect(result.messages).toHaveLength(1);
-			expect(result.messages[0]?.type).toBe("delta");
+			expect(result.messages[0]).toMatchObject({
+				type: "delta",
+				partId: "p1",
+			});
 		}
 	});
 });

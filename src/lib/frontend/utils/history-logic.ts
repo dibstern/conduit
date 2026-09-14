@@ -177,6 +177,7 @@ function convertAssistantParts(
 					rawText,
 					html,
 					finalized: true,
+					partId: part.id,
 					...(messageId != null && !firstTextSeen && { messageId }),
 					...(createdAt != null && { createdAt }),
 				} satisfies AssistantMessage);

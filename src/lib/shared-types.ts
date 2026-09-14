@@ -645,6 +645,7 @@ const DeltaSchema = Schema.Struct({
 	sessionId: Schema.String,
 	text: Schema.String,
 	messageId: Schema.optional(Schema.String),
+	partId: Schema.optional(Schema.String),
 });
 
 const ThinkingStartSchema = Schema.Struct({
@@ -1335,7 +1336,13 @@ export const KNOWN_RELAY_MESSAGE_TYPES: ReadonlySet<string> = new Set(
 
 export type RelayMessage =
 	// ── Streaming ──────────────────────────────────────────────────────────
-	| { type: "delta"; sessionId: string; text: string; messageId?: string }
+	| {
+			type: "delta";
+			sessionId: string;
+			text: string;
+			messageId?: string;
+			partId?: string;
+	  }
 	| { type: "thinking_start"; sessionId: string; messageId?: string }
 	| {
 			type: "thinking_delta";
