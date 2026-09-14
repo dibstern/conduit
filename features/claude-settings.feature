@@ -45,6 +45,19 @@ Scenario: changing the default approval mode elevates new sessions
   Then a SetDefaultPermissionMode RPC is sent with mode full
   And the default approval mode row shows the elevated-permissions warning
 
+Scenario: the default model is selectable from the Claude tab
+  Given the default model is Claude Sonnet 4 with a thinking level of high
+  When I open settings to the Claude tab
+  And I choose claude-opus-4-1 as the default model
+  Then a SetDefaultModel RPC is sent for claude-opus-4-1
+
+Scenario: Auto is available as a default approval mode
+  Given the default approval mode is Ask
+  When I open settings to the Claude tab
+  And I choose Auto as the default approval mode
+  Then a SetDefaultPermissionMode RPC is sent with mode auto
+  And the default approval mode is Auto
+
 Scenario: reloading applies Claude settings to the active session
   Given the Claude settings session is active
   When I open settings to the Claude tab

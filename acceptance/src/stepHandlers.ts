@@ -177,6 +177,11 @@ export const conduitVisualHandlers: StepHandler[] = [
 						projectSlug: "myapp",
 						mode: payload["mode"],
 					}),
+					SetDefaultModel: async (payload) => ({
+						projectSlug: "myapp",
+						model: payload["model"],
+						provider: payload["provider"],
+					}),
 					ReloadProviderSession: async (payload) => ({
 						projectSlug: "myapp",
 						sessionId: payload["sessionId"],
@@ -846,9 +851,54 @@ export const conduitVisualHandlers: StepHandler[] = [
 		match: /^the default model row shows Claude Sonnet 4$/,
 		run: async ({ world }) => {
 			await world.page
-				.getByTestId("claude-setting-defaultModel-value")
-				.getByText("Claude Sonnet 4", { exact: true })
+				.getByTestId("claude-setting-defaultModel-select")
 				.waitFor({ state: "visible", timeout: 5_000 });
+			await world.page.waitForFunction(
+				`document.querySelector('[data-testid="claude-setting-defaultModel-select"]')?.selectedOptions[0]?.textContent?.trim() === "Claude Sonnet 4"`,
+				undefined,
+				{ timeout: 5_000 },
+			);
+		},
+	},
+	{
+		name: "choose a default model",
+		match: /^I choose claude-opus-4-1 as the default model$/,
+		run: async ({ world }) => {
+			await world.page
+				.getByTestId("claude-setting-defaultModel-select")
+				.selectOption("claude/claude-opus-4-1");
+		},
+	},
+	{
+		name: "assert set default model rpc",
+		match: /^a SetDefaultModel RPC is sent for claude-opus-4-1$/,
+		run: async ({ world }) => {
+			await requireRpcControl(world.page).waitForRequest(
+				(request) =>
+					request.tag === "SetDefaultModel" &&
+					request.payload["model"] === "claude-opus-4-1" &&
+					request.payload["provider"] === "claude",
+			);
+		},
+	},
+	{
+		name: "choose auto as default approval mode",
+		match: /^I choose Auto as the default approval mode$/,
+		run: async ({ world }) => {
+			await world.page
+				.getByTestId("claude-setting-defaultPermissionMode-select")
+				.selectOption({ label: "Auto" });
+		},
+	},
+	{
+		name: "assert default approval mode is auto",
+		match: /^the default approval mode is Auto$/,
+		run: async ({ world }) => {
+			await world.page.waitForFunction(
+				`document.querySelector('[data-testid="claude-setting-defaultPermissionMode-select"]')?.value === "auto"`,
+				undefined,
+				{ timeout: 5_000 },
+			);
 		},
 	},
 	{
@@ -872,12 +922,13 @@ export const conduitVisualHandlers: StepHandler[] = [
 	},
 	{
 		name: "assert set default permission mode rpc",
-		match: /^a SetDefaultPermissionMode RPC is sent with mode full$/,
-		run: async ({ world }) => {
+		match: /^a SetDefaultPermissionMode RPC is sent with mode (\w+)$/,
+		run: async ({ world, match }) => {
+			const mode = match[1] ?? "";
 			await requireRpcControl(world.page).waitForRequest(
 				(request) =>
 					request.tag === "SetDefaultPermissionMode" &&
-					request.payload["mode"] === "full",
+					request.payload["mode"] === mode,
 			);
 		},
 	},

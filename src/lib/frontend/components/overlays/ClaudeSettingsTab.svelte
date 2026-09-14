@@ -21,6 +21,7 @@
 		discoveryState,
 		getAllModels,
 		getAvailableInstances,
+		getProviderGroups,
 	} from "../../stores/discovery.svelte.js";
 	import { getCachedInstanceById } from "../../stores/instance.svelte.js";
 	import { projectState } from "../../stores/project.svelte.js";
@@ -32,6 +33,7 @@
 		reloadProviderSessionRpc,
 		resolveClaudeSettingsRpc,
 		setClaudeSettingsRpc,
+		setDefaultModelRpc,
 		setDefaultPermissionModeRpc,
 	} from "../../transport/ws-rpc-client.js";
 	import { createFrontendLogger } from "../../utils/logger.js";
@@ -108,16 +110,24 @@
 			claudeSettingsState.editedKeys.includes("attribution"),
 		),
 	);
-	const defaultModelName = $derived.by(() => {
-		if (!discoveryState.defaultModelId) return "Not set";
-		return (
-			getAllModels().find(
+	/** Provider and model travel as one <option> value, split on the first
+	 *  slash — provider ids have none, model ids often do. */
+	const defaultModelValue = $derived(
+		discoveryState.defaultModelId
+			? `${discoveryState.defaultProviderId}/${discoveryState.defaultModelId}`
+			: "",
+	);
+	/** A default can be persisted for a provider that is not connected right
+	 *  now. Carry it as its own option so the select shows what is actually
+	 *  stored instead of silently snapping to the first model in the list. */
+	const defaultModelMissing = $derived(
+		Boolean(discoveryState.defaultModelId) &&
+			!getAllModels().some(
 				(model) =>
 					model.id === discoveryState.defaultModelId &&
 					model.provider === discoveryState.defaultProviderId,
-			)?.name ?? discoveryState.defaultModelId
-		);
-	});
+			),
+	);
 
 	const claudeInstanceId = $derived.by(() => {
 		const projectSlug = getCurrentSlug();
@@ -256,12 +266,28 @@
 		}
 	}
 
-	/** A Conduit-wide default is inherited by sessions of every provider, so it
-	 *  can only offer modes every provider implements. The Claude-only modes
-	 *  stay available per session on the approvals pill. */
 	const DEFAULT_MODE_OPTIONS = PERMISSION_MODES.filter(
-		({ claudeOnly }) => !claudeOnly,
+		({ sessionOnly }) => !sessionOnly,
 	);
+
+	function updateDefaultModel(event: Event): void {
+		const select = event.currentTarget;
+		if (!(select instanceof HTMLSelectElement)) return;
+		const separator = select.value.indexOf("/");
+		const projectSlug = getCurrentSlug();
+		if (!projectSlug || separator < 0) return;
+		const provider = select.value.slice(0, separator);
+		const model = select.value.slice(separator + 1);
+		const previousModel = discoveryState.defaultModelId;
+		const previousProvider = discoveryState.defaultProviderId;
+		discoveryState.defaultModelId = model;
+		discoveryState.defaultProviderId = provider;
+		void setDefaultModelRpc({ projectSlug, model, provider }).catch(() => {
+			discoveryState.defaultModelId = previousModel;
+			discoveryState.defaultProviderId = previousProvider;
+			showToast("Failed to save default model", { variant: "warn" });
+		});
+	}
 
 	function updateDefaultPermissionMode(event: Event): void {
 		const select = event.currentTarget;
@@ -329,28 +355,47 @@
 	<div class="flex flex-col gap-4">
 		<div class="flex items-center gap-4">
 			<div class="flex-1 min-w-0">
-				<div class="text-sm text-text font-medium">{label}</div>
+				<label for="claude-default-model" class="text-sm text-text font-medium">
+					{label}
+				</label>
 				<div class="text-xs text-text-muted mt-0.5">{description}</div>
 			</div>
-			<div class="shrink-0 text-right">
-				<div
-					class="text-sm {discoveryState.defaultModelId ? 'text-text' : 'text-text-dimmer'}"
-					data-testid="claude-setting-defaultModel-value"
-				>
-					{defaultModelName}
-				</div>
-				{#if discoveryState.defaultVariant}
-					<div
-						class="text-xs text-text-muted"
-						data-testid="claude-setting-defaultModel-thinking"
-					>
-						Thinking level: {discoveryState.defaultVariant}
-					</div>
+			<select
+				id="claude-default-model"
+				value={defaultModelValue}
+				onchange={updateDefaultModel}
+				class="shrink-0 max-w-[50%] rounded border border-border bg-bg px-2 py-1.5 text-sm text-text font-brand"
+				data-testid="claude-setting-defaultModel-select"
+			>
+				{#if !discoveryState.defaultModelId}
+					<option value="" disabled>Not set</option>
 				{/if}
-			</div>
+				{#if defaultModelMissing}
+					<option value={defaultModelValue}>
+						{discoveryState.defaultModelId}
+					</option>
+				{/if}
+				{#each getProviderGroups() as group (group.provider.id)}
+					<optgroup label={group.provider.name || group.provider.id}>
+						{#each group.models as model (model.id)}
+							<option value="{group.provider.id}/{model.id}">
+								{model.name || model.id}
+							</option>
+						{/each}
+					</optgroup>
+				{/each}
+			</select>
 		</div>
+		{#if discoveryState.defaultVariant}
+			<p
+				class="text-xs text-text-muted"
+				data-testid="claude-setting-defaultModel-thinking"
+			>
+				Thinking level: {discoveryState.defaultVariant}
+			</p>
+		{/if}
 		<p class="text-xs text-text-dimmer">
-			Set it in the model picker, with the star next to a model.
+			The thinking level follows the badge beside the model picker.
 		</p>
 	</div>
 {/snippet}
