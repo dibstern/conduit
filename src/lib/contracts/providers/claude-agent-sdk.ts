@@ -225,6 +225,7 @@ export const ClaudeSDKPermissionModeSchema = Schema.Literal(
 	"dontAsk",
 	"auto",
 );
+export type ClaudeSDKPermissionMode = typeof ClaudeSDKPermissionModeSchema.Type;
 
 export const ClaudeSDKAssistantMessageErrorSchema = Schema.Literal(
 	"authentication_failed",

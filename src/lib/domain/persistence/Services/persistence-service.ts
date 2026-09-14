@@ -47,7 +47,18 @@ export const makePersistenceServiceLive: Layer.Layer<
 			Effect.withSpan("persistence.migrate"),
 		);
 
-		yield* migrate;
+		yield* sql
+			.unsafe("PRAGMA foreign_keys = OFF")
+			.pipe(
+				Effect.mapError(
+					(e) => new PersistenceError({ operation: "migrate", cause: e }),
+				),
+			);
+		yield* migrate.pipe(
+			Effect.ensuring(
+				sql.unsafe("PRAGMA foreign_keys = ON").pipe(Effect.ignore),
+			),
+		);
 
 		// Boot diagnostic: if the 0010 purge circuit breaker tripped, the cohort is still
 		// present and must stay noticeable on every boot, not just the boot that tripped it.

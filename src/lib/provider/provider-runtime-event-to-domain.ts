@@ -8,7 +8,9 @@ import {
 	type EventMetadata,
 	type MessageRole,
 	type PermissionDecision,
+	SESSION_PERMISSION_MODES,
 	type SessionCreatedPayload,
+	type SessionPermissionModeValue,
 	type SessionStatusValue,
 	type TurnCompletedPayload,
 	type TurnErrorPayload,
@@ -279,6 +281,17 @@ export function translateProviderRuntimeEventToDomain(
 		return singleEvent(event, state, "turn.model_resolved", payload);
 	}
 
+	if (event.type === "session.permission_mode_changed") {
+		const mode = stringField(data["mode"]);
+		// Drop rather than coerce: the append would fail schema decode anyway,
+		// and a coerced mode would misreport what the session is actually in.
+		if (!isSessionPermissionMode(mode)) return { events: [], state };
+		return singleEvent(event, state, "session.permission_mode_changed", {
+			sessionId: stringField(data["sessionId"]) ?? event.sessionId,
+			mode,
+		});
+	}
+
 	if (event.type === "session.created") {
 		const parentId = stringField(data["parentId"]);
 		const providerSessionId =
@@ -388,6 +401,14 @@ export function translateProviderRuntimeEventToDomain(
 	}
 
 	return { events: [], state };
+}
+
+const sessionPermissionModes = new Set<string>(SESSION_PERMISSION_MODES);
+
+function isSessionPermissionMode(
+	value: string | undefined,
+): value is SessionPermissionModeValue {
+	return value != null && sessionPermissionModes.has(value);
 }
 
 function singleEvent<K extends CanonicalEventType>(

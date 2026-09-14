@@ -162,6 +162,34 @@ test.describe("Permission mode with a bound session", () => {
 		).toHaveCount(0);
 	});
 
+	test("offers Plan for Claude", async ({ page }) => {
+		await setup(page, claudeBoundInit);
+		await page
+			.locator(".connect-overlay")
+			.waitFor({ state: "hidden", timeout: 10_000 });
+		await pill(page).click();
+		await expect(
+			page.locator("[data-testid='permission-mode-option-plan']"),
+		).toBeVisible();
+	});
+
+	test("an approved plan drops the pill back off Plan", async ({ page }) => {
+		const { relay } = await setup(page, claudeBoundInit);
+		await page
+			.locator(".connect-overlay")
+			.waitFor({ state: "hidden", timeout: 10_000 });
+
+		relay.sendMessage({ type: "permission_mode_info", mode: "plan" });
+		await expect(pill(page)).toContainText("Plan");
+
+		// Approving ExitPlanMode makes the SDK leave plan mode, which conduit
+		// learns from the SDK's own report rather than from its stored request.
+		// A pill still reading "Plan" after that is the difference between "read
+		// only" on screen and a session that is now editing files.
+		relay.sendMessage({ type: "permission_mode_info", mode: "ask" });
+		await expect(pill(page)).toContainText("Ask");
+	});
+
 	test("switching an Auto session to an OpenCode model resets it to Ask", async ({
 		page,
 	}) => {

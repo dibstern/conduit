@@ -20,6 +20,7 @@
 	import { forkSessionRpc } from "../../transport/ws-rpc-client.js";
 	import { assertNever } from "../../../utils.js";
 	import Icon from "../shared/Icon.svelte";
+	import MessageTime from "./MessageTime.svelte";
 	import { initTableScrollShadows } from "../../utils/table-scroll.js";
 	import hljs from "highlight.js";
 	// Register aliases for template languages not natively supported by highlight.js.
@@ -409,7 +410,10 @@
 			</div>
 		{/if}
 
-		<div class="text-sm font-mono font-semibold uppercase tracking-[1.5px] text-brand-b mb-2">Assistant</div>
+		<div class="flex items-baseline gap-2.5 mb-2">
+			<span class="text-sm font-mono font-semibold uppercase tracking-[1.5px] text-brand-b">Assistant</span>
+			<MessageTime createdAt={message.createdAt} />
+		</div>
 		<div class="md-content text-base leading-[1.7]">
 			{@html message.html}
 		</div>

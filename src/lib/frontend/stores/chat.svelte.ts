@@ -796,6 +796,7 @@ export function handleDelta(
 			rawText: "",
 			html: "",
 			finalized: false,
+			createdAt: Date.now(),
 			...(messageId != null && { messageId }),
 		};
 		setMessages(messages, [...getMessages(messages), assistantMsg]);
@@ -1410,6 +1411,7 @@ export function addUserMessage(
 		type: "user",
 		uuid,
 		text,
+		createdAt: Date.now(),
 		...(images != null && { images }),
 		...(sentWhileProcessing ? { sentDuringEpoch: activity.turnEpoch } : {}),
 	};

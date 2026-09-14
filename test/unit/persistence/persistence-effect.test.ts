@@ -179,6 +179,7 @@ describe("Persistence Effect", () => {
 				{ migration_id: 8, name: "turn_model_execution" },
 				{ migration_id: 9, name: "sessions_permission_mode" },
 				{ migration_id: 10, name: "purge_legacy_skeleton_sessions" },
+				{ migration_id: 11, name: "session_cascade_deletes" },
 			]);
 
 			const legacyMigrationTable = yield* sql<{ name: string }>`
@@ -296,7 +297,7 @@ describe("Persistence Effect", () => {
 								name VARCHAR(255) NOT NULL
 							);
 							INSERT INTO effect_sql_migrations (migration_id, name)
-							VALUES (10, 'purge_legacy_skeleton_sessions');
+							VALUES (11, 'session_cascade_deletes');
 							DROP TABLE message_parts;
 							DROP TABLE messages;
 						`);

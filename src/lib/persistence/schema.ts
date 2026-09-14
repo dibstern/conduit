@@ -18,6 +18,8 @@ export const MESSAGES_CONTEXT_WINDOW_MIGRATION =
 export const TURN_MODEL_EXECUTION_MIGRATION = "0008_turn_model_execution.sql";
 export const SESSIONS_PERMISSION_MODE_MIGRATION =
 	"0009_sessions_permission_mode.sql";
+export const SESSION_CASCADE_DELETES_MIGRATION =
+	"0010_session_cascade_deletes.sql";
 
 export function readMigrationSql(filename: string): string {
 	return readFileSync(
@@ -71,5 +73,11 @@ export const schemaMigrations: readonly Migration[] = [
 		id: 9,
 		name: "sessions_permission_mode",
 		sql: readMigrationSql(SESSIONS_PERMISSION_MODE_MIGRATION),
+	},
+	{
+		id: 10,
+		name: "session_cascade_deletes",
+		sql: readMigrationSql(SESSION_CASCADE_DELETES_MIGRATION),
+		rebuildsForeignKeys: true,
 	},
 ];

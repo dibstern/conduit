@@ -495,11 +495,10 @@ describe("OpenCode Runtime Ingress Projection (SSE → append → project → re
 			}),
 		);
 
-		expect(retryResult).toMatchObject({
-			ok: true,
-			eventsWritten: 1,
-			sessionSeeded: false,
-		});
+		// The retry carries a single event, so it takes projectEvent rather than
+		// projectBatch. Both surface a projector failure now: the ingress result
+		// must not depend on how many events a translation happened to produce.
+		expect(retryResult).toMatchObject({ ok: false, reason: "error" });
 
 		const storedAfterRetry = await readStored();
 		expect(

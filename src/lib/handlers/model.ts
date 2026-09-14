@@ -38,6 +38,7 @@ import {
 import { formatErrorDetail } from "../errors.js";
 import { ReadQueryEffectTag } from "../persistence/effect/read-query-effect.js";
 import { isSameModelIdentity } from "../provider/claude/claude-api-model-id.js";
+import { ProviderRegistryTag } from "../provider/provider-registry.js";
 import {
 	loadRelaySettings,
 	saveRelaySettings,
@@ -640,6 +641,44 @@ export interface SwitchModelInput {
 	readonly providerId: string;
 }
 
+/**
+ * Push the session's current model / context window / effort onto the live
+ * provider query so a picker change applies now instead of at the next turn.
+ *
+ * Reads all three from the overrides map rather than taking the one that
+ * changed: the provider compares against what the query already has, so a
+ * partial set would read as "cleared" and reset the other two to their
+ * defaults. Best-effort -- on failure the provider stays latched out-of-sync
+ * and the next turn re-applies, which is the pre-existing behaviour.
+ */
+export const applyLiveSessionSettings = (sessionId: string) =>
+	Effect.gen(function* () {
+		const registryOption = yield* Effect.serviceOption(ProviderRegistryTag);
+		if (registryOption._tag === "None") return;
+		const instance = registryOption.value.getInstance("claude");
+		if (!instance?.applyLiveSettingsEffect) return;
+
+		const model = yield* getModel(sessionId);
+		const variant = yield* getVariant(sessionId);
+		const contextWindow = yield* getContextWindow(sessionId);
+		if (model && !isClaudeProvider(model.providerID)) return;
+
+		const result = yield* Effect.either(
+			instance.applyLiveSettingsEffect(sessionId, {
+				modelId: model?.modelID,
+				contextWindow,
+				variant,
+			}),
+		);
+		if (result._tag === "Left") {
+			const log = yield* LoggerTag;
+			log.warn(
+				`session=${sessionId} Live settings apply failed; next turn will re-sync`,
+				result.left,
+			);
+		}
+	});
+
 export const switchModelForSession = (input: SwitchModelInput) =>
 	Effect.gen(function* () {
 		const wsHandler = yield* WebSocketHandlerTag;
@@ -666,6 +705,7 @@ export const switchModelForSession = (input: SwitchModelInput) =>
 					engineOption.value.unbindSession(sessionId);
 				}
 			}
+			yield* applyLiveSessionSettings(sessionId);
 		} else {
 			log.warn(
 				`client=${input.clientId} model switch with no session; sending client-local state only`,
@@ -701,6 +741,7 @@ export const switchModelForSession = (input: SwitchModelInput) =>
 
 		if (sessionId) {
 			yield* setVariant(sessionId, validVariant);
+			yield* applyLiveSessionSettings(sessionId);
 		}
 
 		const variantMessage = {
@@ -802,6 +843,7 @@ export const switchVariantForSession = (input: SwitchVariantInput) =>
 		const sessionId = input.sessionId;
 		if (sessionId) {
 			yield* setVariant(sessionId, variant);
+			yield* applyLiveSessionSettings(sessionId);
 		} else {
 			yield* setDefaultVariant(variant);
 		}

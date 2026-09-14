@@ -282,6 +282,19 @@ export interface ProviderInstance {
 		answers: Record<string, unknown>,
 	): Effect.Effect<void, ProviderInstanceFailure>;
 
+	/**
+	 * Push a mid-session model / context-window / effort change onto the live
+	 * query, when the provider can apply settings outside a turn.
+	 */
+	readonly applyLiveSettingsEffect?: (
+		sessionId: string,
+		settings: {
+			readonly modelId?: string | undefined;
+			readonly contextWindow?: string | undefined;
+			readonly variant?: string | undefined;
+		},
+	) => Effect.Effect<void, ProviderInstanceFailure>;
+
 	/** Update a live provider query's classifier mode when supported. */
 	readonly setPermissionModeEffect?: (
 		sessionId: string,

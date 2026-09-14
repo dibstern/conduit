@@ -26,12 +26,16 @@
 	);
 	const availableModes = $derived(
 		PERMISSION_MODES.filter(
-			({ mode }) =>
-				mode !== "auto" || discoveryState.currentProviderId === "claude",
+			({ claudeOnly }) =>
+				!claudeOnly || discoveryState.currentProviderId === "claude",
 		),
 	);
-	/** Non-default mode: elevated permission handling is active, tint the pill. */
-	const isElevated = $derived(currentMode !== "ask");
+	/** Tint the pill only when approvals are *relaxed*. "Never ask" is more
+	 *  restrictive than "Ask", so flagging it as elevated would invert the
+	 *  signal the amber tint exists to give. */
+	const isElevated = $derived(
+		PERMISSION_MODES.find((m) => m.mode === currentMode)?.elevated === true,
+	);
 
 	// ─── Handlers ───────────────────────────────────────────────────────────
 

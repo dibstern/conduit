@@ -11,13 +11,14 @@ import {
 	ConfigTag,
 	LoggerTag,
 } from "../../../src/lib/domain/relay/Services/services.js";
+import { SessionCommandError } from "../../../src/lib/domain/relay/Services/session-command.js";
 import {
-	createSession,
 	deleteSession,
 	listSessions,
 	persistSessionPermissionMode,
 	recordMessageActivity,
 	restoreSessionPermissionModes,
+	SessionManagerError,
 	SessionManagerServiceLive,
 	SessionManagerServiceTag,
 } from "../../../src/lib/domain/relay/Services/session-manager-service.js";
@@ -32,7 +33,15 @@ import {
 import type { OpenCodeAPI } from "../../../src/lib/instance/opencode-api.js";
 import { EventStoreEffectTag } from "../../../src/lib/persistence/effect/event-store-effect.js";
 import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
-import { ProjectionRunnerEffectTag } from "../../../src/lib/persistence/effect/projection-runner-effect.js";
+import {
+	makeProjectionRunnerEffect,
+	ProjectionRunnerEffectTag,
+	ProjectionRunnerError,
+} from "../../../src/lib/persistence/effect/projection-runner-effect.js";
+import {
+	type EffectProjector,
+	ProjectionError,
+} from "../../../src/lib/persistence/effect/projectors-effect.js";
 import {
 	type ReadQueryEffect,
 	ReadQueryEffectError,
@@ -65,22 +74,33 @@ describe("SessionManager Effect", () => {
 		filename: string,
 		readQueryOverride?: ReadQueryEffect,
 		configDir?: string,
-	) =>
-		Layer.provideMerge(
+		projectors?: readonly EffectProjector[],
+	) => {
+		const persistenceLayer = makePersistenceEffectLayer(filename);
+		const projectionRunnerOverride = projectors
+			? Layer.effect(
+					ProjectionRunnerEffectTag,
+					makeProjectionRunnerEffect(projectors),
+				).pipe(Layer.provide(persistenceLayer))
+			: undefined;
+
+		return Layer.provideMerge(
 			SessionManagerServiceLive,
 			Layer.mergeAll(
 				Layer.fresh(makeTestLayer(mockApi)),
 				Layer.succeed(LoggerTag, makeMockLogger()),
 				DaemonEventBusLive,
-				makePersistenceEffectLayer(filename),
+				persistenceLayer,
 				...(readQueryOverride
 					? [Layer.succeed(ReadQueryEffectTag, readQueryOverride)]
 					: []),
 				...(configDir
 					? [Layer.succeed(ConfigTag, makeMockConfig({ configDir }))]
 					: []),
+				...(projectionRunnerOverride ? [projectionRunnerOverride] : []),
 			),
 		);
+	};
 
 	it.effect("listSessions fetches from API and caches parent map", () => {
 		const mockApi = makeMockApi();
@@ -104,17 +124,6 @@ describe("SessionManager Effect", () => {
 				Option.getOrNull,
 			);
 			expect(parentId).toBe("parent1");
-		}).pipe(Effect.provide(Layer.fresh(makeTestLayer(mockApi))));
-	});
-
-	it.effect("createSession calls API and returns session", () => {
-		const mockApi = makeMockApi();
-
-		return Effect.gen(function* () {
-			const result = yield* createSession("My session");
-
-			expect(result.id).toBe("s-new");
-			expect(mockApi.session.create).toHaveBeenCalled();
 		}).pipe(Effect.provide(Layer.fresh(makeTestLayer(mockApi))));
 	});
 
@@ -257,6 +266,74 @@ describe("SessionManager Effect", () => {
 		},
 	);
 
+	it.effect("rename surfaces a projector failure with its cause intact", () => {
+		const mockApi = makeMockApi();
+		const dir = mkdtempSync(join(tmpdir(), "conduit-rename-failure-"));
+		const filename = join(dir, "events.db");
+		const sessionId = "ses-claude-rename-failure";
+		const rootCause = new Error("rename projection exploded");
+		const failingProjector: EffectProjector = {
+			name: "failing-rename-projector",
+			handles: ["session.renamed"],
+			project: () =>
+				Effect.fail(
+					new ProjectionError({
+						projector: "failing-rename-projector",
+						operation: "project",
+						cause: rootCause,
+					}),
+				),
+		};
+		const layer = makeLiveServiceLayer(
+			mockApi,
+			filename,
+			undefined,
+			undefined,
+			[failingProjector],
+		);
+
+		return Effect.gen(function* () {
+			const runner = yield* ProjectionRunnerEffectTag;
+			const service = yield* SessionManagerServiceTag;
+			const sql = yield* SqlClient.SqlClient;
+			yield* runner.markRecovered();
+			yield* sql`
+				INSERT INTO sessions (id, provider, title, status, created_at, updated_at)
+				VALUES (${sessionId}, 'claude', 'Claude Session', 'idle', 1000, 1000)`;
+
+			const result = yield* Effect.either(
+				service.renameSession(sessionId, "Useful title"),
+			);
+
+			expect(result._tag).toBe("Left");
+			if (result._tag === "Left") {
+				expect(result.left).toBeInstanceOf(SessionManagerError);
+				// Rename now runs through the command seam, so the projector failure
+				// arrives wrapped in the seam's error rather than a rename-specific one.
+				expect(result.left.operation).toBe("renameSession");
+				expect(result.left.cause).toBeInstanceOf(SessionCommandError);
+				if (result.left.cause instanceof SessionCommandError) {
+					expect(result.left.cause.operation).toBe("session.renamed.project");
+					expect(result.left.cause.cause).toBeInstanceOf(ProjectionRunnerError);
+					if (result.left.cause.cause instanceof ProjectionRunnerError) {
+						expect(result.left.cause.cause.cause).toBeInstanceOf(
+							ProjectionError,
+						);
+						if (result.left.cause.cause.cause instanceof ProjectionError) {
+							expect(result.left.cause.cause.cause.cause).toBe(rootCause);
+						}
+					}
+				}
+			}
+			expect(mockApi.session.update).not.toHaveBeenCalled();
+		}).pipe(
+			Effect.provide(layer),
+			Effect.ensuring(
+				Effect.sync(() => rmSync(dir, { recursive: true, force: true })),
+			),
+		);
+	});
+
 	it.effect(
 		"renames a named Claude instance session through the event store",
 		() => {
@@ -343,11 +420,13 @@ describe("SessionManager Effect", () => {
 
 				yield* service.renameSession(sessionId, "API title");
 
+				// No row to mutate, so nothing is appended — but upstream may still
+				// know the session, so the rename is still forwarded.
 				const events = yield* store.readBySession(sessionId);
+				expect(events).toEqual([]);
 				expect(mockApi.session.update).toHaveBeenCalledWith(sessionId, {
 					title: "API title",
 				});
-				expect(events).toEqual([]);
 			}).pipe(
 				Effect.provide(layer),
 				Effect.ensuring(
@@ -358,7 +437,41 @@ describe("SessionManager Effect", () => {
 	);
 
 	it.effect(
-		"falls back to API rename when the persisted session provider is not Claude",
+		"records an OpenCode-created session as a canonical event, not just a row",
+		() => {
+			const mockApi = makeMockApi();
+			const dir = mkdtempSync(join(tmpdir(), "conduit-create-event-"));
+			const filename = join(dir, "events.db");
+			const layer = makeLiveServiceLayer(mockApi, filename);
+
+			return Effect.gen(function* () {
+				const store = yield* EventStoreEffectTag;
+				const readQuery = yield* ReadQueryEffectTag;
+				const service = yield* SessionManagerServiceTag;
+
+				const session = yield* service.createSession("New", {
+					providerId: "opencode",
+				});
+
+				// conduit-test-48mo.1: create used to INSERT the sessions row directly
+				// and append nothing, so a read model rebuilt from the event store lost
+				// every OpenCode-backed session.
+				const events = yield* store.readBySession(session.id);
+				expect(events.map((e) => e.type)).toEqual(["session.created"]);
+				expect((yield* readQuery.getSession(session.id))?.provider).toBe(
+					"opencode",
+				);
+			}).pipe(
+				Effect.provide(layer),
+				Effect.ensuring(
+					Effect.sync(() => rmSync(dir, { recursive: true, force: true })),
+				),
+			);
+		},
+	);
+
+	it.effect(
+		"renames an OpenCode-backed session in the read model and upstream",
 		() => {
 			const mockApi = makeMockApi();
 			const dir = mkdtempSync(join(tmpdir(), "conduit-rename-opencode-"));
@@ -376,11 +489,14 @@ describe("SessionManager Effect", () => {
 
 				yield* service.renameSession(sessionId, "API title");
 
+				// conduit-test-xy29: this used to reach OpenCode only, so a SQLite
+				// reader kept serving the old title. Rename now appends its event
+				// like every other mutation, and upstream is synced from it.
 				const events = yield* store.readBySession(sessionId);
+				expect(events.map((event) => event.type)).toEqual(["session.renamed"]);
 				expect(mockApi.session.update).toHaveBeenCalledWith(sessionId, {
 					title: "API title",
 				});
-				expect(events).toEqual([]);
 			}).pipe(
 				Effect.provide(layer),
 				Effect.ensuring(
@@ -505,6 +621,71 @@ describe("SessionManager Effect", () => {
 						Layer.fresh(makeOverridesStateLive()),
 					),
 				),
+				Effect.ensuring(
+					Effect.sync(() => rmSync(dir, { recursive: true, force: true })),
+				),
+			);
+		},
+	);
+
+	it.effect(
+		"deleteSession removes a SQLite-backed session from the list",
+		() => {
+			const dir = mkdtempSync(join(tmpdir(), "conduit-delete-sqlite-"));
+			const filename = join(dir, "events.db");
+			const mockApi = makeMockApi();
+
+			return Effect.gen(function* () {
+				const sql = yield* SqlClient.SqlClient;
+				const runner = yield* ProjectionRunnerEffectTag;
+				yield* runner.markRecovered();
+				yield* sql`
+					INSERT INTO sessions (
+						id, provider, title, status, created_at, updated_at
+					) VALUES ('ses-doomed', 'claude', 'Doomed', 'idle', 1000, 1000)`;
+
+				const before = yield* listSessions();
+				expect(before.map((s) => s.id)).toContain("ses-doomed");
+
+				yield* deleteSession("ses-doomed");
+
+				const after = yield* listSessions();
+				expect(after.map((s) => s.id)).not.toContain("ses-doomed");
+			}).pipe(
+				Effect.provide(makeLiveServiceLayer(mockApi, filename)),
+				Effect.ensuring(
+					Effect.sync(() => rmSync(dir, { recursive: true, force: true })),
+				),
+			);
+		},
+	);
+
+	it.effect(
+		"deleteSession removes a session that has subagent children",
+		() => {
+			const dir = mkdtempSync(join(tmpdir(), "conduit-delete-children-"));
+			const filename = join(dir, "events.db");
+			const mockApi = makeMockApi();
+
+			return Effect.gen(function* () {
+				const sql = yield* SqlClient.SqlClient;
+				const runner = yield* ProjectionRunnerEffectTag;
+				yield* runner.markRecovered();
+				yield* sql`
+				INSERT INTO sessions (
+					id, provider, title, status, parent_id, created_at, updated_at
+				) VALUES
+					('ses-parent', 'claude', 'Parent', 'idle', NULL, 1000, 1000),
+					('ses-child', 'claude', 'Subagent', 'idle', 'ses-parent', 1000, 1000)`;
+
+				yield* deleteSession("ses-parent");
+
+				const after = yield* listSessions();
+				const ids = after.map((s) => s.id);
+				expect(ids).not.toContain("ses-parent");
+				expect(ids).not.toContain("ses-child");
+			}).pipe(
+				Effect.provide(makeLiveServiceLayer(mockApi, filename)),
 				Effect.ensuring(
 					Effect.sync(() => rmSync(dir, { recursive: true, force: true })),
 				),

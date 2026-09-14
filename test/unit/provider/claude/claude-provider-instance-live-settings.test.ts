@@ -482,4 +482,76 @@ describe("ClaudeProviderInstance mid-session setting changes", () => {
 		releaseNextTurn?.();
 		expect((await turnC).status).toBe("completed");
 	});
+	// Item 3: settings the user picks mid-session must reach the live query at
+	// selection time. Today they are deferred to the next turn's admission path,
+	// so a user who changes model/effort/context window and then just watches
+	// the session sees the old settings until they send something.
+	it("applies model, context window, and effort changes to the live query without a turn", async () => {
+		let releaseTurn2: (() => void) | undefined;
+		const gate = new Promise<void>((resolve) => {
+			releaseTurn2 = resolve;
+		});
+		const gen = (async function* () {
+			yield initMessage(SONNET) as unknown as SDKMessage;
+			yield makeSuccessResult({ session_id: "sdk-1" }) as unknown as SDKMessage;
+			await gate;
+			yield makeSuccessResult({
+				session_id: "sdk-1",
+				total_cost_usd: 0.1,
+			}) as unknown as SDKMessage;
+		})();
+		const { query, applyFlagSettings, setModel } = makeMockQuery(gen);
+		const instance = new ClaudeProviderInstance({
+			workspaceRoot: workspace,
+			queryFactory: vi.fn(() => query),
+			capabilitiesService: makeCapabilitiesService(),
+		});
+		const sink = createMockEventSink();
+
+		// Turn 1 establishes the live query. Nothing to re-apply yet.
+		const turn1 = await Effect.runPromise(
+			instance.sendTurnEffect(
+				makeBaseSendTurnInput({
+					sessionId: "s1",
+					turnId: "turn-1",
+					eventSink: sink,
+					model: { providerId: "claude", modelId: SONNET },
+				}),
+			),
+		);
+		expect(turn1.status).toBe("completed");
+		expect(setModel).not.toHaveBeenCalled();
+		expect(applyFlagSettings).not.toHaveBeenCalled();
+
+		// The user changes all three in the picker. No turn is sent.
+		await Effect.runPromise(
+			instance.applyLiveSettingsEffect("s1", {
+				modelId: OPUS,
+				contextWindow: "1m",
+				variant: "high",
+			}),
+		);
+
+		expect(setModel).toHaveBeenCalledWith(`${OPUS}[1m]`);
+		expect(applyFlagSettings).toHaveBeenCalledWith({ effortLevel: "high" });
+
+		// The next turn carries the same settings, so admission must not
+		// re-issue them -- that would prove the work moved rather than doubled.
+		const turn2 = Effect.runPromise(
+			instance.sendTurnEffect(
+				makeBaseSendTurnInput({
+					sessionId: "s1",
+					turnId: "turn-2",
+					eventSink: sink,
+					model: { providerId: "claude", modelId: OPUS },
+					contextWindow: "1m",
+					variant: "high",
+				}),
+			),
+		);
+		releaseTurn2?.();
+		expect((await turn2).status).toBe("completed");
+		expect(setModel).toHaveBeenCalledTimes(1);
+		expect(applyFlagSettings).toHaveBeenCalledTimes(1);
+	});
 });

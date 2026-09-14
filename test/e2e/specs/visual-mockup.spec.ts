@@ -52,6 +52,7 @@ async function preparePageForScreenshot(page: Page) {
  * Normalizes:
  * - Thinking labels: random verb → "Thinking" (in-progress) or "Thought" (completed)
  * - Thinking duration: elapsed time → " 0.0s" (completed) or "" (in-progress)
+ * - Turn duration: measured wall-clock → "0.0s"
  * - Session meta: relative timestamps → fixed text
  */
 async function normalizeDynamicContent(page: Page) {
@@ -63,6 +64,13 @@ async function normalizeDynamicContent(page: Page) {
 			if (label) label.textContent = isDone ? "Thought" : "Thinking";
 			const duration = item.querySelector(".thinking-duration");
 			if (duration) duration.textContent = isDone ? " 0.0s" : "";
+		});
+
+		// ─ Turn durations ─ measured against the wall clock, so they drift by a
+		// millisecond or two between runs and occasionally tip over a rounding
+		// boundary. Everything else in the bill comes from the canned result.
+		document.querySelectorAll(".turn-duration").forEach((el) => {
+			el.textContent = "0.0s";
 		});
 
 		// ─ Session meta text (timestamps + message counts) ─
@@ -127,9 +135,17 @@ async function driveToMockupState(page: Page) {
 	await sendUserMessage(page, userMessage1);
 
 	// Wait for Turn 1 to fully complete:
-	// 1. turn-meta element appears (from "result" message)
+	// 1. The turn's bill carries a cost, which only the "result" message supplies.
+	//    The bill line itself renders as soon as the turn starts working, so its
+	//    mere presence would resolve immediately and prove nothing.
 	// 2. Send button exits "stop" mode (from "done" message resetting processing)
-	await page.waitForSelector("[class*='turn-meta']", { timeout: 10_000 });
+	await page.waitForFunction(
+		() =>
+			[...document.querySelectorAll(".turn-meta")].some((el) =>
+				el.textContent?.includes("$"),
+			),
+		{ timeout: 10_000 },
+	);
 	await page.waitForFunction(
 		() => !document.getElementById("send")?.classList.contains("stop"),
 		{ timeout: 5_000 },

@@ -12,7 +12,7 @@
 	must show its own (pre-commit) text instead.
 -->
 <script lang="ts">
-	import { tokenizeSkills } from "./skill-highlight.js";
+	import { tokenizeSkills } from "../../utils/skill-highlight.js";
 
 	interface Props {
 		text: string;
@@ -36,16 +36,15 @@
 	aria-hidden="true"
 	class="pointer-events-none absolute inset-0 z-0 overflow-hidden whitespace-pre-wrap break-words text-text text-base font-sans leading-[1.4] pt-2 pb-1 px-2.5"
 	class:opacity-0={dimmed}
->{#each segments as seg (seg.key)}{#if seg.kind === "skill"}<span class="skill-pill">{seg.text}</span>{:else if seg.kind === "unknown"}<span class="skill-unknown">{seg.text}</span>{:else}{seg.text}{/if}{/each}</div>
+>{#each segments as seg (seg.key)}{#if seg.kind === "skill"}<span class="skill-pill composer-pill">{seg.text}</span>{:else if seg.kind === "unknown"}<span class="skill-unknown">{seg.text}</span>{:else}{seg.text}{/if}{/each}</div>
 
 <style>
-	/* Plain inline (not inline-block) so the token stays on the text baseline at the
-	   same size as its neighbours. Vertical padding only extends the tint — inline
-	   boxes ignore it for line layout — while horizontal padding is cancelled by an
-	   equal negative margin so the pill takes zero net width and the transparent
-	   textarea caret stays glyph-aligned. No font-weight change, for the same reason. */
-	.skill-pill {
-		color: var(--color-accent);
+	/* Composer-only additions to the shared `skill-pill` utility. The pill's
+	   horizontal padding is cancelled by an equal negative margin so it takes zero
+	   net width and the transparent textarea caret stays glyph-aligned (vertical
+	   padding only extends the tint — inline boxes ignore it for line layout). No
+	   font-weight change, for the same reason. */
+	.composer-pill {
 		/* Layer 1: the shimmer light (moves on recognition). Layer 2: the soft tint.
 		   Backgrounds are auto-clipped to the box, so no overflow/inline-block needed. */
 		background:
@@ -59,11 +58,7 @@
 			var(--color-accent-bg);
 		background-size: 250% 100%, auto;
 		background-position: 0% 0%, 0% 0%;
-		border-radius: 6px;
-		padding: 2px 4px;
 		margin: 0 -4px;
-		-webkit-box-decoration-break: clone;
-		box-decoration-break: clone;
 		animation: skill-shimmer 0.7s ease-out 1;
 	}
 
@@ -85,7 +80,7 @@
 	}
 
 	@media (prefers-reduced-motion: reduce) {
-		.skill-pill {
+		.composer-pill {
 			animation: none;
 		}
 	}

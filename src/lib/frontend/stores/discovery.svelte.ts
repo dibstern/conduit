@@ -598,12 +598,16 @@ export function flushPendingPermissionMode(
 	const mode = discoveryState.pendingPermissionMode;
 	if (mode == null) return;
 	discoveryState.pendingPermissionMode = null;
+	const previousMode = discoveryState.permissionMode;
 	discoveryState.permissionMode = mode;
-	if (mode === "ask") return; // server default — nothing to persist
+	// Send even for "ask". It is only the server's default for a *brand-new*
+	// session, and this runs on binding to any session -- skipping it left a
+	// session already on "full" running with full access while the pill read
+	// "Ask". Restricting a session must never be the silent case.
 	void send({ projectSlug, sessionId, mode }).catch(() => {
-		// Server never got it: reflect the truthful default.
+		// Server never got it: stop claiming a mode it is not in.
 		if (discoveryState.permissionMode === mode) {
-			discoveryState.permissionMode = "ask";
+			discoveryState.permissionMode = previousMode;
 		}
 	});
 }

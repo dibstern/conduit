@@ -1,4 +1,5 @@
 import type { ProviderRuntimeEvent } from "../../contracts/providers/provider-runtime-event.js";
+import { createLogger, type Logger } from "../../logger.js";
 import {
 	createEventId,
 	type SessionStatusValue,
@@ -17,20 +18,28 @@ import {
 	isSessionStatusEvent,
 	sessionErrorText,
 } from "../../relay/opencode-events.js";
+import { MonotoneText } from "../monotone-text.js";
 import { normalizeToolInput } from "./normalize-tool-input.js";
 
 interface TrackedPart {
 	readonly type: string;
 	readonly status?: string;
 	readonly thinkingStarted?: boolean;
-	readonly emittedCharacters?: number;
 	/** Tool parts only: the input delivered downstream so far was empty (args stream late, e.g. skill). */
 	readonly toolInputEmpty?: boolean;
 }
 
+const defaultLog = createLogger("opencode-runtime-event-translator");
+
 export class OpenCodeRuntimeEventTranslator {
 	private readonly sessions = new Map<string, Map<string, TrackedPart>>();
 	private readonly seenMessages = new Map<string, Set<string>>();
+	/** Text already emitted per part, one ledger per session. Owns what used to
+	 *  be an emitted-character count: a count can only answer "is there more?",
+	 *  and answering it by length is what let a rewritten part splice. */
+	private readonly emitted = new Map<string, MonotoneText>();
+
+	constructor(private readonly log: Logger = defaultLog) {}
 
 	translate(
 		event: SSEEvent,
@@ -76,9 +85,11 @@ export class OpenCodeRuntimeEventTranslator {
 		if (sessionId != null) {
 			this.sessions.delete(sessionId);
 			this.seenMessages.delete(sessionId);
+			this.emitted.delete(sessionId);
 		} else {
 			this.sessions.clear();
 			this.seenMessages.clear();
+			this.emitted.clear();
 		}
 	}
 
@@ -95,6 +106,41 @@ export class OpenCodeRuntimeEventTranslator {
 			this.sessions.set(sessionId, parts);
 		}
 		return parts;
+	}
+
+	private getOrCreateEmitted(sessionId: string): MonotoneText {
+		let emitted = this.emitted.get(sessionId);
+		if (!emitted) {
+			emitted = new MonotoneText();
+			this.emitted.set(sessionId, emitted);
+		}
+		return emitted;
+	}
+
+	/** What a refreshed part may still emit, or null when it may emit nothing.
+	 *  A part whose text no longer extends what was already sent was rewritten
+	 *  upstream: report it and send nothing, because slicing it at the old
+	 *  length is what splices the tail of one text onto another. */
+	private emittableSuffix(
+		sessionId: string,
+		partId: string,
+		partText: string,
+		kind: "text" | "reasoning",
+	): string | null {
+		const offer = this.getOrCreateEmitted(sessionId).offer(partId, partText);
+		if (offer.kind === "emit") return offer.suffix;
+		if (offer.kind === "diverged") {
+			this.log.warn(
+				`opencode ${kind} part no longer extends the text already sent; dropping it`,
+				{
+					sessionId,
+					partId,
+					emittedCharacters: offer.accepted.length,
+					receivedCharacters: partText.length,
+				},
+			);
+		}
+		return null;
 	}
 
 	private markMessageSeen(sessionId: string, messageId: string): boolean {
@@ -139,24 +185,17 @@ export class OpenCodeRuntimeEventTranslator {
 		const partId = props.partID;
 		const parts = this.getOrCreateParts(sessionId);
 		const tracked = parts.get(partId);
-		const emittedCharacters =
-			(tracked?.emittedCharacters ?? 0) + props.delta.length;
 
 		if (tracked?.type === "reasoning") {
 			parts.set(
 				partId,
-				trackedPart(
-					tracked.type,
-					tracked.status,
-					tracked.thinkingStarted,
-					emittedCharacters,
-				),
+				trackedPart(tracked.type, tracked.status, tracked.thinkingStarted),
 			);
 			return [
 				opencodeRuntimeEvent("thinking.delta", sessionId, event, {
 					messageId,
 					partId,
-					text: props.delta,
+					text: this.getOrCreateEmitted(sessionId).append(partId, props.delta),
 				}),
 			];
 		}
@@ -168,14 +207,13 @@ export class OpenCodeRuntimeEventTranslator {
 					tracked?.type ?? props.field,
 					tracked?.status,
 					tracked?.thinkingStarted,
-					emittedCharacters,
 				),
 			);
 			return [
 				opencodeRuntimeEvent("text.delta", sessionId, event, {
 					messageId,
 					partId,
-					text: props.delta,
+					text: this.getOrCreateEmitted(sessionId).append(partId, props.delta),
 				}),
 			];
 		}
@@ -198,7 +236,6 @@ export class OpenCodeRuntimeEventTranslator {
 		const messageId = rawPart.messageID ?? props.messageID ?? "";
 		const parts = this.getOrCreateParts(sessionId);
 		const existing = parts.get(partId);
-		const emittedCharacters = existing?.emittedCharacters ?? 0;
 		const partText =
 			"text" in rawPart && typeof rawPart.text === "string"
 				? rawPart.text
@@ -210,7 +247,6 @@ export class OpenCodeRuntimeEventTranslator {
 				rawPart.type,
 				rawPart.state?.status,
 				existing?.thinkingStarted,
-				emittedCharacters,
 				existing?.toolInputEmpty,
 			),
 		);
@@ -220,12 +256,7 @@ export class OpenCodeRuntimeEventTranslator {
 			if (!existing?.thinkingStarted) {
 				parts.set(
 					partId,
-					trackedPart(
-						rawPart.type,
-						rawPart.state?.status,
-						true,
-						emittedCharacters,
-					),
+					trackedPart(rawPart.type, rawPart.state?.status, true),
 				);
 				events.push(
 					opencodeRuntimeEvent("thinking.start", sessionId, event, {
@@ -234,21 +265,16 @@ export class OpenCodeRuntimeEventTranslator {
 					}),
 				);
 			}
-			if (partText != null && partText.length > emittedCharacters) {
-				parts.set(
-					partId,
-					trackedPart(
-						rawPart.type,
-						rawPart.state?.status,
-						true,
-						partText.length,
-					),
-				);
+			const suffix =
+				partText == null
+					? null
+					: this.emittableSuffix(sessionId, partId, partText, "reasoning");
+			if (suffix != null) {
 				events.push(
 					opencodeRuntimeEvent("thinking.delta", sessionId, event, {
 						messageId,
 						partId,
-						text: partText.slice(emittedCharacters),
+						text: suffix,
 					}),
 				);
 			}
@@ -263,27 +289,17 @@ export class OpenCodeRuntimeEventTranslator {
 			return events.length > 0 ? events : null;
 		}
 
-		if (
-			rawPart.type === "text" &&
-			partText != null &&
-			partText.length > emittedCharacters
-		) {
-			parts.set(
-				partId,
-				trackedPart(
-					rawPart.type,
-					rawPart.state?.status,
-					existing?.thinkingStarted,
-					partText.length,
-				),
-			);
-			return [
-				opencodeRuntimeEvent("text.delta", sessionId, event, {
-					messageId,
-					partId,
-					text: partText.slice(emittedCharacters),
-				}),
-			];
+		if (rawPart.type === "text" && partText != null) {
+			const suffix = this.emittableSuffix(sessionId, partId, partText, "text");
+			if (suffix != null) {
+				return [
+					opencodeRuntimeEvent("text.delta", sessionId, event, {
+						messageId,
+						partId,
+						text: suffix,
+					}),
+				];
+			}
 		}
 
 		if (rawPart.type === "tool") {
@@ -311,7 +327,6 @@ export class OpenCodeRuntimeEventTranslator {
 						"tool",
 						rawPart.state?.status,
 						existing?.thinkingStarted,
-						emittedCharacters,
 						toolInputEmpty,
 					),
 				);
@@ -641,14 +656,12 @@ function trackedPart(
 	type: string,
 	status?: string,
 	thinkingStarted?: boolean,
-	emittedCharacters?: number,
 	toolInputEmpty?: boolean,
 ): TrackedPart {
 	return {
 		type,
 		...(status != null ? { status } : {}),
 		...(thinkingStarted != null ? { thinkingStarted } : {}),
-		...(emittedCharacters != null ? { emittedCharacters } : {}),
 		...(toolInputEmpty != null ? { toolInputEmpty } : {}),
 	};
 }

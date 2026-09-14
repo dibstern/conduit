@@ -114,6 +114,7 @@ export const mockUserMessage: UserMessage = {
 	type: "user",
 	uuid: "msg-user-001",
 	text: "How do I fix the authentication bug?",
+	createdAt: Date.UTC(2026, 1, 25, 10, 14, 0),
 };
 
 export const mockUserMessageLong: UserMessage = {
@@ -136,6 +137,7 @@ export const mockAssistantSimple: AssistantMessage = {
 	rawText: "I can help with that. Let me look at the authentication module.",
 	html: "<p>I can help with that. Let me look at the authentication module.</p>",
 	finalized: true,
+	createdAt: Date.UTC(2026, 1, 25, 10, 14, 12),
 };
 
 export const mockAssistantWithCode: AssistantMessage = {

@@ -256,10 +256,17 @@
 		}
 	}
 
+	/** A Conduit-wide default is inherited by sessions of every provider, so it
+	 *  can only offer modes every provider implements. The Claude-only modes
+	 *  stay available per session on the approvals pill. */
+	const DEFAULT_MODE_OPTIONS = PERMISSION_MODES.filter(
+		({ claudeOnly }) => !claudeOnly,
+	);
+
 	function updateDefaultPermissionMode(event: Event): void {
 		const select = event.currentTarget;
 		if (!(select instanceof HTMLSelectElement)) return;
-		const mode = PERMISSION_MODES.find(
+		const mode = DEFAULT_MODE_OPTIONS.find(
 			(candidate) => candidate.mode === select.value,
 		)?.mode;
 		const projectSlug = getCurrentSlug();
@@ -367,7 +374,7 @@
 				class="rounded border border-border bg-bg px-2 py-1.5 text-sm text-text font-brand"
 				data-testid="claude-setting-defaultPermissionMode-select"
 			>
-				{#each PERMISSION_MODES as { mode, label: modeLabel } (mode)}
+				{#each DEFAULT_MODE_OPTIONS as { mode, label: modeLabel } (mode)}
 					<option value={mode}>{modeLabel}</option>
 				{/each}
 			</select>
@@ -375,7 +382,7 @@
 		<p class="text-xs text-text-dimmer">
 			New sessions start in this mode; the approvals pill still overrides it for the session you're in. Claude Code ignores a default mode set in a project's settings files, so Conduit applies this one itself.
 		</p>
-		{#if discoveryState.defaultPermissionMode !== "ask"}
+		{#if DEFAULT_MODE_OPTIONS.find((m) => m.mode === discoveryState.defaultPermissionMode)?.elevated}
 			<p class="text-xs text-warning">
 				New sessions will start with elevated permissions.
 			</p>

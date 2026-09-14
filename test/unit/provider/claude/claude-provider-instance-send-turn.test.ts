@@ -183,11 +183,13 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 	});
 
 	it.each([
-		{ mode: "ask" as const, expectedPermissionMode: undefined },
-		{ mode: "acceptEdits" as const, expectedPermissionMode: undefined },
+		{ mode: "ask" as const, expectedPermissionMode: "default" },
+		{ mode: "acceptEdits" as const, expectedPermissionMode: "acceptEdits" },
 		{ mode: "auto" as const, expectedPermissionMode: "auto" },
-		{ mode: "full" as const, expectedPermissionMode: undefined },
-	])("passes SDK permissionMode only for conduit $mode mode", async ({
+		{ mode: "full" as const, expectedPermissionMode: "bypassPermissions" },
+		{ mode: "plan" as const, expectedPermissionMode: "plan" },
+		{ mode: "dontAsk" as const, expectedPermissionMode: "dontAsk" },
+	])("maps conduit $mode onto the SDK permission mode", async ({
 		mode,
 		expectedPermissionMode,
 	}) => {
@@ -210,9 +212,6 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 			readonly options: { readonly permissionMode?: string };
 		};
 		expect(call.options.permissionMode).toBe(expectedPermissionMode);
-		if (expectedPermissionMode === undefined) {
-			expect(call.options).not.toHaveProperty("permissionMode");
-		}
 	});
 
 	it("applies a permission-mode update that arrives during query construction", async () => {
