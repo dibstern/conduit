@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import type { Logger } from "../../../src/lib/logger.js";
 import { CanonicalEventTranslator } from "../../../src/lib/persistence/canonical-event-translator.js";
 import type { CanonicalEvent } from "../../../src/lib/persistence/events.js";
 import { OpenCodeRuntimeEventTranslator } from "../../../src/lib/provider/opencode/opencode-runtime-event-translator.js";
@@ -207,6 +208,50 @@ describe("OpenCodeRuntimeEventTranslator", () => {
 				data: { text: "lo" },
 			},
 		]);
+	});
+
+	it("emits nothing when a refreshed text part no longer extends what was sent", () => {
+		const warnings: unknown[][] = [];
+		const log: Logger = {
+			debug: () => {},
+			verbose: () => {},
+			info: () => {},
+			warn: (...args: unknown[]) => {
+				warnings.push(args);
+			},
+			error: () => {},
+			child: () => log,
+		};
+		const translator = new OpenCodeRuntimeEventTranslator(log);
+		const sessionId = "ses-opencode";
+		translator.translate(
+			makeSSEEvent("message.part.delta", {
+				sessionID: sessionId,
+				messageID: "msg-assistant-1",
+				partID: "part-text-1",
+				field: "text",
+				delta: "hello world",
+			}),
+			sessionId,
+		);
+
+		const result = translator.translate(
+			makeSSEEvent("message.part.updated", {
+				sessionID: sessionId,
+				part: {
+					id: "part-text-1",
+					messageID: "msg-assistant-1",
+					type: "text",
+					// A rewritten text: slicing it at 11 characters would have
+					// spliced "ld, again" onto the tail of "hello world".
+					text: "[12:00] hello world, again",
+				},
+			}),
+			sessionId,
+		);
+
+		expect(result).toBeNull();
+		expect(warnings).toHaveLength(1);
 	});
 
 	it("emits a thinking.delta for the unseen suffix in a reasoning final", () => {

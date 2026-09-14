@@ -24,6 +24,7 @@ import { Effect } from "effect";
 import { describe, expect, it, vi } from "vitest";
 import { decodeClaudeSDKMessage } from "../../../../src/lib/contracts/providers/claude-agent-sdk.js";
 import type { ProviderRuntimeEvent } from "../../../../src/lib/contracts/providers/provider-runtime-event.js";
+import type { Logger } from "../../../../src/lib/logger.js";
 import { ClaudeEventTranslator } from "../../../../src/lib/provider/claude/claude-event-translator.js";
 import type {
 	ClaudeSessionContext,
@@ -89,6 +90,110 @@ function makeCtx(): ClaudeSessionContext {
 	};
 }
 
+function makeStubLogger(warnings: string[]): Logger {
+	const logger: Logger = {
+		debug: () => {},
+		verbose: () => {},
+		info: () => {},
+		warn: (...args: unknown[]) => {
+			warnings.push(String(args[0]));
+		},
+		error: () => {},
+		child: () => logger,
+	};
+	return logger;
+}
+
+type Part = { readonly kind: "text" | "thinking"; readonly text: string };
+
+/** The assistant text the translator actually emitted, one entry per part in
+ *  the order the parts first produced text. */
+function emittedParts(events: readonly ProviderRuntimeEvent[]): Part[] {
+	const byPart = new Map<string, { kind: Part["kind"]; text: string }>();
+	for (const event of events) {
+		if (event.type !== "text.delta" && event.type !== "thinking.delta") {
+			continue;
+		}
+		const data = event.data as { partId: string; text: string };
+		const existing = byPart.get(data.partId);
+		if (existing) {
+			existing.text += data.text;
+			continue;
+		}
+		byPart.set(data.partId, {
+			kind: event.type === "text.delta" ? "text" : "thinking",
+			text: data.text,
+		});
+	}
+	return [...byPart.values()];
+}
+
+/** The assistant text the SDK itself reported, read straight off the trace:
+ *  content_block_deltas for the main chain, and snapshot text for frames that
+ *  only ever arrive as snapshots (subagents carry a parent_tool_use_id). */
+function streamedParts(rawLines: readonly unknown[]): Part[] {
+	const parts: { kind: Part["kind"]; text: string }[] = [];
+	let open = new Map<number, { kind: Part["kind"]; text: string }>();
+	for (const raw of rawLines) {
+		if (!isRecord(raw)) continue;
+		if (raw["type"] === "assistant" && raw["parent_tool_use_id"] != null) {
+			const message = isRecord(raw["message"]) ? raw["message"] : undefined;
+			const content = message?.["content"];
+			if (!Array.isArray(content)) continue;
+			for (const block of content) {
+				if (!isRecord(block)) continue;
+				const kind: Part["kind"] =
+					block["type"] === "text" ? "text" : "thinking";
+				const text = block[kind === "text" ? "text" : "thinking"];
+				if (typeof text === "string" && text.length > 0) {
+					parts.push({ kind, text });
+				}
+			}
+			continue;
+		}
+		if (raw["type"] !== "stream_event" || !isRecord(raw["event"])) continue;
+		const event = raw["event"];
+		if (event["type"] === "message_start") {
+			open = new Map();
+			continue;
+		}
+		if (event["type"] === "content_block_start") {
+			const block = isRecord(event["content_block"])
+				? event["content_block"]
+				: undefined;
+			if (block?.["type"] !== "text" && block?.["type"] !== "thinking") {
+				continue;
+			}
+			const kind: Part["kind"] = block["type"] === "text" ? "text" : "thinking";
+			const initial = block[kind === "text" ? "text" : "thinking"];
+			const part = {
+				kind,
+				text: typeof initial === "string" ? initial : "",
+			};
+			parts.push(part);
+			open.set(Number(event["index"]), part);
+			continue;
+		}
+		if (event["type"] === "content_block_delta") {
+			const part = open.get(Number(event["index"]));
+			const delta = isRecord(event["delta"]) ? event["delta"] : undefined;
+			if (!part || !delta) continue;
+			const chunk =
+				delta["type"] === "text_delta"
+					? delta["text"]
+					: delta["type"] === "thinking_delta"
+						? delta["thinking"]
+						: undefined;
+			if (typeof chunk === "string") part.text += chunk;
+		}
+	}
+	return parts.filter((part) => part.text.length > 0);
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+	return value != null && typeof value === "object" && !Array.isArray(value);
+}
+
 describe("Claude SDK captured-trace replay", () => {
 	it("has at least one committed trace fixture", () => {
 		expect(traceFiles.length).toBeGreaterThan(0);
@@ -115,7 +220,12 @@ describe("Claude SDK captured-trace replay", () => {
 		it("replays through the translator without violating stream invariants", async () => {
 			const sink = makeStubSink();
 			const ctx = makeCtx();
-			const translator = new ClaudeEventTranslator({ getSink: () => sink });
+			const warnings: string[] = [];
+			const logger = makeStubLogger(warnings);
+			const translator = new ClaudeEventTranslator({
+				getSink: () => sink,
+				logger,
+			});
 
 			for (const raw of rawLines) {
 				const message = decodeClaudeSDKMessage(raw) as SDKMessage;
@@ -124,21 +234,24 @@ describe("Claude SDK captured-trace replay", () => {
 
 			assertProviderRuntimeStreamInvariants(sink.events);
 
-			// Each streamed text must surface exactly once per part — the
-			// per-block snapshot following it must dedupe, not duplicate
-			// (2026-07-15: every assistant paragraph rendered twice).
-			const textByPart = new Map<string, string>();
-			for (const event of sink.events) {
-				if (event.type !== "text.delta") continue;
-				const data = event.data as { partId: string; text: string };
-				textByPart.set(
-					data.partId,
-					(textByPart.get(data.partId) ?? "") + data.text,
-				);
+			// The trace is its own oracle. Whatever the SDK streamed as
+			// content_block_deltas is what the model actually produced, so the
+			// parts we emit must reproduce it byte for byte, in order — not
+			// merely "no two parts are equal", which a rewritten snapshot
+			// passes by minting a second, differently-worded part (2026-07-15:
+			// every paragraph rendered twice; where indexes collided, spliced).
+			expect(emittedParts(sink.events)).toEqual(streamedParts(rawLines));
+
+			// A snapshot that does not extend the stream is dropped, never
+			// re-sliced — and says so. The committed subagent trace carries one
+			// such block: a MessageDisplay hook prepended a "[HH:MM:SS]" marker
+			// to the final assistant text on its way through the SDK.
+			for (const warning of warnings) {
+				expect(warning).toContain("(prepended)");
 			}
-			const texts = [...textByPart.values()];
-			const uniqueTexts = new Set(texts);
-			expect(uniqueTexts.size).toBe(texts.length);
+			expect(warnings).toHaveLength(
+				file === "subagent-task-turn.jsonl" ? 1 : 0,
+			);
 		});
 	});
 });
