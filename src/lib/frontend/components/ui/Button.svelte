@@ -141,8 +141,12 @@
 	}: ButtonProps = $props();
 
 	const sizeClasses = $derived.by(() => {
-		// No geometry at all, by design — see the ButtonSize doc comment.
-		if (size === "content") return "h-auto";
+		// Literally no classes, by design — see the ButtonSize doc comment. Not
+		// even `h-auto`: that is a button's default height anyway, so emitting it
+		// buys nothing and costs a `!` at every call site that wants an explicit
+		// height (RewindBanner's `w-6 h-6` exit control, for one), which is the
+		// exact tax this size exists to avoid.
+		if (size === "content") return "";
 		if (iconOnly) {
 			return `${size === "sm" ? "h-8 w-8" : "h-9 w-9"} ${SHARED_SIZE_CLASSES}`;
 		}

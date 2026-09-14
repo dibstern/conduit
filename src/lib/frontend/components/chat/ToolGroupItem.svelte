@@ -10,6 +10,7 @@
 	import { getCurrentSlug } from "../../stores/router.svelte.js";
 	import { applyToolContentResponse } from "../../stores/ws-dispatch.js";
 	import { getToolContentRpc } from "../../transport/ws-rpc-client.js";
+	import Button from "../ui/Button.svelte";
 
 	let { message, isLast = false }: {
 		message: ToolMessage;
@@ -129,8 +130,10 @@
 					<span class="font-mono">
 						Showing {formatKB(message.result.length)} of {formatKB(message.fullContentLength ?? message.result.length)}
 					</span>
-					<button
-						class="px-2 py-0.5 rounded bg-accent/10 text-accent hover:bg-accent/20 transition-colors duration-150 text-xs font-medium disabled:opacity-50 disabled:cursor-not-allowed"
+					<Button
+						variant="accent-soft"
+						size="content"
+						class="px-2 py-0.5 rounded text-xs font-medium"
 						onclick={requestFullContent}
 						disabled={loadingFullContent}
 					>
@@ -139,7 +142,7 @@
 						{:else}
 							Show full output
 						{/if}
-					</button>
+					</Button>
 				</div>
 			{/if}
 		</div>

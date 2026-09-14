@@ -6,6 +6,7 @@
 -->
 <script lang="ts">
 	import Icon from "../ui/Icon.svelte";
+	import Button from "../ui/Button.svelte";
 	import {
 		uiState,
 		exitRewindMode,
@@ -87,14 +88,16 @@
 		class="rewind-banner flex items-center justify-between gap-3 px-4 py-2.5 bg-accent-bg border-b border-[rgba(var(--overlay-rgb),0.15)] text-accent text-sm font-medium"
 	>
 		<span class="rewind-banner-text">Select a message to rewind to</span>
-		<button
-			class="rewind-banner-exit flex items-center justify-center w-6 h-6 rounded bg-transparent border-none text-accent cursor-pointer hover:bg-[rgba(var(--overlay-rgb),0.06)]"
+		<Button
+			iconOnly
+			icon="x"
+			ariaLabel="Exit rewind mode"
+			variant="ghost-accent"
+			size="content"
+			class="rewind-banner-exit w-6 h-6 rounded hover:bg-[rgba(var(--overlay-rgb),0.06)]!"
 			title="Exit rewind mode"
-			aria-label="Exit rewind mode"
 			onclick={handleExit}
-		>
-			<Icon name="x" size={16} />
-		</button>
+		/>
 	</div>
 {/if}
 
@@ -158,18 +161,22 @@
 
 			<!-- Action buttons -->
 			<div class="flex gap-2 justify-end">
-				<button
-					class="bg-transparent border border-border text-text-muted rounded-lg py-1.5 px-4 text-base cursor-pointer hover:bg-[rgba(var(--overlay-rgb),0.05)]"
+				<Button
+					variant="secondary"
+					size="content"
+					class="rounded-lg py-1.5 px-4 text-base text-text-muted! hover:bg-[rgba(var(--overlay-rgb),0.05)]!"
 					onclick={handleCancel}
 				>
 					Cancel
-				</button>
-				<button
-					class="bg-accent border-none text-bg rounded-lg py-1.5 px-4 text-base font-medium cursor-pointer hover:bg-accent-hover"
+				</Button>
+				<Button
+					variant="primary"
+					size="content"
+					class="rounded-lg py-1.5 px-4 text-base font-medium text-bg!"
 					onclick={handleConfirm}
 				>
 					Rewind
-				</button>
+				</Button>
 			</div>
 		</div>
 	</div>

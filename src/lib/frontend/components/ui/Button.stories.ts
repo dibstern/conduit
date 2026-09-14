@@ -85,7 +85,20 @@ export const ContentSize: Story = {
 		const button = canvasElement.querySelector("button");
 		expect(button, "ContentSize story rendered no button").not.toBeNull();
 		const classes = button?.className.split(/\s+/) ?? [];
-		for (const leaked of ["h-8", "h-9", "px-3", "px-4", "text-sm", "gap-2"]) {
+		// `h-auto` is in this list on purpose: it is not a leak of `sm`/`md`
+		// geometry, but emitting it would still force a `!` on any call site
+		// that sets its own height. "content emits nothing" is the contract.
+		for (const leaked of [
+			"h-8",
+			"h-9",
+			"h-auto",
+			"px-3",
+			"px-4",
+			"text-sm",
+			"gap-2",
+			"rounded-lg",
+			"font-medium",
+		]) {
 			expect(
 				classes,
 				`size="content" must emit no ${leaked} — a call site cannot override it without "!"`,
