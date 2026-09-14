@@ -43,7 +43,7 @@ export default defineConfig({
 		// Tests use `relayUrl` fixture or `page.goto(harness.relayBaseUrl + path)`.
 		trace: "on-first-retry",
 		screenshot: "only-on-failure",
-		video: "retain-on-failure",
+		video: "off",
 	},
 
 	projects: [

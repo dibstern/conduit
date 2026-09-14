@@ -1,4 +1,4 @@
-import { execSync } from "node:child_process";
+import { execFileSync, execSync } from "node:child_process";
 import { existsSync, mkdirSync, readdirSync, rmSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
@@ -9,19 +9,40 @@ import { afterAll, describe, expect, it } from "vitest";
  *  copy Playwright downloads for itself backs recordVideo, and only a full
  *  `playwright install` fetches it — `playwright install chromium` does not.
  *  Checking just the first one is how this test came to fail on a machine
- *  that had ffmpeg installed, which reads as a product failure and is not. */
+ *  that had ffmpeg installed, which reads as a product failure and is not.
+ *
+ *  Both are checked by running them rather than by looking for the file:
+ *  Playwright's published macOS build is SIGKILLed on macOS 26 for failing
+ *  code-signature validation, so the copy can be present and still unusable
+ *  (conduit-test-tj4q). */
 function hasFfmpeg(): boolean {
+	return runs("ffmpeg") && runs(playwrightFfmpeg());
+}
+
+function runs(binary: string | null): boolean {
+	if (binary == null) return false;
 	try {
-		execSync("ffmpeg -version", { stdio: "pipe" });
+		execFileSync(binary, ["-version"], { stdio: "pipe", timeout: 10_000 });
+		return true;
 	} catch {
 		return false;
 	}
-	return (
-		existsSync(playwrightBrowsersDir()) &&
-		readdirSync(playwrightBrowsersDir()).some((entry) =>
-			entry.startsWith("ffmpeg-"),
-		)
+}
+
+/** The ffmpeg Playwright downloaded for itself, whose revision directory and
+ *  filename are both platform-dependent, or null when no full
+ *  `playwright install` has fetched one. */
+function playwrightFfmpeg(): string | null {
+	const browsers = playwrightBrowsersDir();
+	if (!existsSync(browsers)) return null;
+	const revision = readdirSync(browsers).find((entry) =>
+		entry.startsWith("ffmpeg-"),
 	);
+	if (revision == null) return null;
+	const binary = readdirSync(path.join(browsers, revision)).find((entry) =>
+		entry.startsWith("ffmpeg"),
+	);
+	return binary == null ? null : path.join(browsers, revision, binary);
 }
 
 function playwrightBrowsersDir(): string {
