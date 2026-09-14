@@ -360,20 +360,43 @@ if (stories.length > 0) {
 	// Its real value is behavioral and remains asserted by the story's own play()
 	// through check:storybook and by modal-focus.spec.ts in a real browser,
 	// including focus restoration. This is NOT a blessed-away regression.
-	const SKIP_STORIES = new Set([
-		"fixtures-modalfocus--default",
-		"ui-modal--escape-restores-focus",
-		"model-agentselector--single-agent",
-		"model-agentselector--no-agents",
-		"chat-pastepreview--empty",
-		"input-filemenu--hides-when-no-matches",
-		"input-commandmenu--hides-when-no-matches",
-		"overlays-confirmmodal--hidden",
-		"overlays-imagelightbox--hidden",
-		"overlays-qrmodal--hidden",
-		"overlays-notifsettings--closed",
-		"overlays-rewindbanner--inactive",
-		"overlays-connectoverlay--connected",
+	// The value is WHICH viewports to skip. Most exclusions are a property of the
+	// story ("all"), but some are a property of the layout at one width only: the
+	// sidebar is correctly off-canvas on mobile, so its mobile captures are blank
+	// while its desktop captures carry 457-486 distinct colours. Skipping those by
+	// story id would throw away the desktop coverage to fix a mobile problem.
+	// See conduit-test-7jv.
+	const SKIP_STORIES = new Map<string, "all" | "desktop" | "mobile">([
+		["fixtures-modalfocus--default", "all"],
+		["ui-modal--escape-restores-focus", "all"],
+		["model-agentselector--single-agent", "all"],
+		["model-agentselector--no-agents", "all"],
+		["chat-pastepreview--empty", "all"],
+		["input-filemenu--hides-when-no-matches", "all"],
+		["input-commandmenu--hides-when-no-matches", "all"],
+		["overlays-confirmmodal--hidden", "all"],
+		["overlays-imagelightbox--hidden", "all"],
+		["overlays-qrmodal--hidden", "all"],
+		["overlays-notifsettings--closed", "all"],
+		["overlays-rewindbanner--inactive", "all"],
+		["overlays-connectoverlay--connected", "all"],
+
+		// Renders no pixels at either width, so both captures were blank. Note it
+		// is deliberately NOT added to build-health's EXPECTED_EMPTY_ROOT: it does
+		// render child elements, they just have no visible extent, so that check
+		// still earns its keep here.
+		["overlays-attentionbanner--no-notifications", "all"],
+
+		// Three of the four blank mobile sidebar captures. The fourth,
+		// layout-sidebar--default, is deliberately still captured on mobile as the
+		// sentinel for "off-canvas stays off-canvas" — a regression that let the
+		// closed sidebar render at mobile width would turn that baseline red, and
+		// nothing else in the suite would catch it (layout-sidebar--mobile-open
+		// covers the OPEN state only). Skipping all four would have quietly traded
+		// that check away to silence a duplicate-baseline warning.
+		["layout-sidebar--hover", "mobile"],
+		["layout-sidebar--loading", "mobile"],
+		["layout-sidebar--file-browser-panel", "mobile"],
 	]);
 
 	// Stories whose element dimensions vary across platforms (e.g. Mermaid SVGs
@@ -399,8 +422,9 @@ if (stories.length > 0) {
 	for (const [title, componentStories] of byTitle) {
 		test.describe(title, () => {
 			for (const story of componentStories) {
-				test(story.name, async ({ page }) => {
-					if (SKIP_STORIES.has(story.id)) {
+				test(story.name, async ({ page }, testInfo) => {
+					const skipScope = SKIP_STORIES.get(story.id);
+					if (skipScope === "all" || skipScope === testInfo.project.name) {
 						test.skip(true, "Intentionally excluded from visual capture");
 						return;
 					}

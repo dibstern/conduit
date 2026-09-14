@@ -31,10 +31,6 @@ const ALLOWED_DUPLICATE_GROUPS: Record<string, string> = {
 	"ui-popover--default | ui-popover--escape-restores-focus":
 		"escape story re-opens the popover as its last step",
 
-	// Verified legitimate: these components render nothing in the state shown.
-	"layout-sidebar--default | layout-sidebar--file-browser-panel | layout-sidebar--hover | layout-sidebar--loading | overlays-attentionbanner--no-notifications":
-		"all render nothing: mobile sidebar is off-canvas (conduit-test-7jv)",
-
 	// Verified legitimate (conduit-test-732b). Each of these was traced to the
 	// source; the two stories genuinely produce the same frame.
 	"layout-header--connected | layout-header--processing":
