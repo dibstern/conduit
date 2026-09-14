@@ -7,6 +7,7 @@
 		PermissionRequest,
 		ProviderPermissionUpdateDestination,
 	} from "../../types.js";
+	import Button from "../ui/Button.svelte";
 	import { getBrowserClientId } from "../../stores/client-identity.js";
 	import { getCurrentSlug } from "../../stores/router.svelte.js";
 	import {
@@ -215,27 +216,39 @@
 
 		{#if !resolved}
 			<div class="perm-actions flex gap-2 max-sm:flex-col">
-				<button
-					class="min-h-[48px] flex-1 px-4 py-2 rounded-lg border cursor-pointer font-sans text-sm font-medium bg-success/10 border-success/20 text-success hover:bg-success/15"
+				<Button
+					variant="success-soft"
+					size="content"
+					class="min-h-[48px] flex-1 px-4 py-2 rounded-lg font-sans text-sm font-medium"
 					onclick={handleAllow}
 				>
 					Allow
-				</button>
-				<button
-					class="min-h-[48px] flex-1 px-4 py-2 rounded-lg border cursor-pointer font-sans text-sm font-medium bg-success/[0.08] border-success/15 text-success/70 hover:bg-success/15"
+				</Button>
+				<!-- Four `!` because this button is a drifted `success-soft`: every one
+				     of its three colours sits one notch softer than the variant, and
+				     once those are important the variant's hover tint has to be too or
+				     it loses to them. The count is the point — this is the single most
+				     drifted site in batch A, and the normalize pass either aligns it to
+				     `success-soft` or earns it a de-emphasised variant of its own. -->
+				<Button
+					variant="success-soft"
+					size="content"
+					class="min-h-[48px] flex-1 px-4 py-2 rounded-lg font-sans text-sm font-medium bg-success/[0.08]! border-success/15! text-success/70! hover:bg-success/15!"
 					onclick={handleAlwaysAllow}
 				>
 					{hasClaudeRememberOptions ? "Remember" : "Always Allow"}{hasClaudeRememberOptions ||
 					hasPatterns
 						? " \u25BE"
 						: ""}
-				</button>
-				<button
-					class="min-h-[48px] flex-1 px-4 py-2 rounded-lg border border-border cursor-pointer font-sans text-sm font-medium text-error hover:bg-error/[0.08]"
+				</Button>
+				<Button
+					variant="danger-outline"
+					size="content"
+					class="min-h-[48px] flex-1 px-4 py-2 rounded-lg font-sans text-sm font-medium"
 					onclick={handleDeny}
 				>
 					Deny
-				</button>
+				</Button>
 			</div>
 
 			{#if showAlwaysOptions}

@@ -4,6 +4,7 @@
 
 <script lang="ts">
 	import type { QuestionRequest } from "../../types.js";
+	import Button from "../ui/Button.svelte";
 	import { getBrowserClientId } from "../../stores/client-identity.js";
 	import { getCurrentSlug } from "../../stores/router.svelte.js";
 	import {
@@ -427,20 +428,29 @@
 
 		{#if !resolved}
 			<div class="question-actions flex gap-2 mt-2 max-sm:flex-col">
-				<button
-					class="question-submit-btn min-h-12 flex-1 px-4 py-2 rounded-lg border cursor-pointer text-sm font-medium font-sans border-success/20 bg-success/10 text-success transition-[background] duration-150 hover:enabled:bg-success/15 disabled:opacity-40 disabled:cursor-not-allowed"
+				<!-- The two `!` are this call site's disagreement with `success-soft`,
+				     not decoration: it dims further when disabled (40% vs the
+				     primitive's 50%), and it refuses the hover tint while disabled.
+				     Both are same-property collisions, which consumer `class` cannot
+				     win additively. See conduit-test-de3.5's normalize pass. -->
+				<Button
+					variant="success-soft"
+					size="content"
+					class="question-submit-btn min-h-12 flex-1 px-4 py-2 rounded-lg text-sm font-medium font-sans disabled:opacity-40! disabled:hover:bg-success/10!"
 					disabled={!canSubmit}
 					onclick={handleSubmit}
 				>
 					Submit
-				</button>
+				</Button>
 				{#if canSkip}
-					<button
-						class="question-skip-btn min-h-12 flex-1 px-4 py-2 rounded-lg border cursor-pointer text-sm font-medium font-sans border-border text-error bg-transparent transition-[background] duration-150 hover:bg-error/[0.08]"
+					<Button
+						variant="danger-outline"
+						size="content"
+						class="question-skip-btn min-h-12 flex-1 px-4 py-2 rounded-lg text-sm font-medium font-sans"
 						onclick={handleSkip}
 					>
 						Skip
-					</button>
+					</Button>
 				{/if}
 			</div>
 		{:else if resolved === "submitting"}
