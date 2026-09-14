@@ -112,21 +112,6 @@
 		};
 	});
 
-	/** True when the question was reconstructed from tool input data rather
-	 *  than received via a live ask_user event. This indicates the question
-	 *  likely originated in a different process (e.g. terminal/TUI) and the
-	 *  answer may not be deliverable. */
-	const isSyntheticQuestion = $derived(
-		isQuestionActive && pendingQuestionRequest === null
-	);
-
-	/** Whether this active question is deferred to the bottom of MessageList
-	 *  (i.e. not synthetic and has a pending question in the permissions store).
-	 *  Note: ToolItem computes this independently to avoid circular mount deps. */
-	const isDeferredQuestion = $derived(
-		isQuestionActive && questionRequest !== null && !isSyntheticQuestion
-	);
-
 	/** Extract question data for read-only display.
 	 *  Prefers the pending question request (accurate), falls back to tool input. */
 	const questionData = $derived.by(() => {
@@ -164,9 +149,7 @@
 </script>
 
 {#if isQuestionActive && questionRequest}
-	<!-- Synthetic question (cross-process): keep inline since it's not in
-		 pendingQuestions and won't appear at the bottom of MessageList. -->
-	<QuestionCard request={questionRequest} inline synthetic />
+	<QuestionCard request={questionRequest} inline synthetic={pendingQuestionRequest === null} />
 {:else}
 	<!-- Completed/historical question: show read-only summary -->
 	<div class="{message.status === 'completed' ? '' : 'bg-bg-surface'} rounded-panel relative overflow-hidden {message.status === 'error' ? 'glow-tool-error' : message.status === 'completed' ? 'glow-brand-b' : message.status === 'running' ? 'glow-tool-running' : ''}">

@@ -1,7 +1,7 @@
 // ─── Turns — Utility Functions ────────────────────────────────────────────────
 // A turn is one user prompt, everything the model did in response, and its
-// trailing reply. The transcript renders one collapsed activity line per turn
-// (summary sentence + duration strip + the turn's bill), expandable to the log.
+// reply segments. The transcript renders one collapsed activity line per segment
+// (summary sentence + duration strip), expandable to the log.
 
 import type {
 	AssistantMessage,
@@ -19,13 +19,20 @@ import { lookupSummarizer } from "./tool-summarizers/index.js";
 /** Anything that can appear between a prompt and the model's trailing reply. */
 export type ActivityPart = ToolMessage | ThinkingMessage | AssistantMessage;
 
+export interface Segment {
+	/** Everything between the segment's start and its trailing reply, in order. */
+	activity: ActivityPart[];
+	/** Trailing run of assistant text: streaming while live, the reply once done. */
+	reply: AssistantMessage[];
+	/** The tool call that handed control to the user and closed this segment. */
+	handBack?: ToolMessage;
+}
+
 export interface Turn {
 	id: string;
 	user?: UserMessage;
-	/** Everything between the prompt and the trailing reply, in order. */
-	activity: ActivityPart[];
-	/** Trailing assistant text: streaming while live, the final reply once done. */
-	reply?: AssistantMessage;
+	/** Always at least one. */
+	segments: Segment[];
 	result?: ResultMessage;
 	/**
 	 * Transcript-level notices — errors and compaction dividers. Kept out of the
@@ -37,14 +44,18 @@ export interface Turn {
 
 // ─── Segmentation ────────────────────────────────────────────────────────────
 
+/** AskUserQuestion or ExitPlanMode: the model stops and waits for the user. */
+export function isHandBack(tool: ToolMessage): boolean {
+	return tool.name === "AskUserQuestion" || tool.name === "ExitPlanMode";
+}
+
 /**
  * Split a flat transcript into turns.
  *
- * A user message opens a turn; everything else appends to the open turn. Once
- * the whole transcript is walked, a turn whose LAST activity entry is assistant
- * text moves that entry to `reply`. That single rule is why no "final reply"
- * flag is needed: streaming text at the tail shows in flow, and the moment a
- * tool call follows it, it folds back into the activity on its own.
+ * A user message opens a turn and its first segment. A hand-back tool closes the
+ * current segment and opens another. Once the transcript is walked, every
+ * segment's trailing run of assistant text moves to `reply`; a later non-text
+ * part is the only thing that folds narration back into activity.
  *
  * @param processing whether the session is currently producing output — only
  *   the last turn can be live, and only when it has no result yet.
@@ -59,7 +70,7 @@ export function segmentTurns(
 			turns.push({
 				id: msg.uuid,
 				user: msg,
-				activity: [],
+				segments: [{ activity: [], reply: [] }],
 				notices: [],
 				live: false,
 			});
@@ -70,7 +81,7 @@ export function segmentTurns(
 			// Transcript opens mid-turn (history trimmed above the prompt).
 			turn = {
 				id: `turn-${msg.uuid}`,
-				activity: [],
+				segments: [{ activity: [], reply: [] }],
 				notices: [],
 				live: false,
 			};
@@ -78,13 +89,22 @@ export function segmentTurns(
 		}
 		if (msg.type === "result") turn.result = msg;
 		else if (msg.type === "system") turn.notices.push(msg);
-		else turn.activity.push(msg);
+		else if (msg.type === "tool" && isHandBack(msg)) {
+			turn.segments.at(-1)!.handBack = msg;
+			turn.segments.push({ activity: [], reply: [] });
+		} else turn.segments.at(-1)!.activity.push(msg);
 	}
 	for (const turn of turns) {
-		const tail = turn.activity.at(-1);
-		if (tail?.type === "assistant") {
-			turn.reply = tail;
-			turn.activity = turn.activity.slice(0, -1);
+		for (const segment of turn.segments) {
+			let replyStart = segment.activity.length;
+			while (segment.activity[replyStart - 1]?.type === "assistant") {
+				replyStart--;
+			}
+			if (replyStart < segment.activity.length) {
+				segment.reply = segment.activity.splice(
+					replyStart,
+				) as AssistantMessage[];
+			}
 		}
 	}
 	const last = turns.at(-1);
@@ -230,9 +250,9 @@ export function partLabel(part: ActivityPart): string {
 }
 
 /** What the model is doing right now, for the live header. */
-export function currentStepLabel(turn: Turn): string {
-	if (turn.reply) return "Replying…";
-	const tail = turn.activity.at(-1);
+export function currentStepLabel(segment: Segment): string {
+	if (segment.reply.length > 0) return "Replying…";
+	const tail = segment.activity.at(-1);
 	if (
 		tail?.type === "tool" &&
 		(tail.status === "running" || tail.status === "pending")
@@ -243,15 +263,11 @@ export function currentStepLabel(turn: Turn): string {
 }
 
 /**
- * Tools that own an interactive card (question prompt, subagent navigation,
- * skill detail) keep it inside the expanded log instead of degrading to a row.
+ * Tools that own an interactive card (subagent navigation or skill detail) keep
+ * it inside the expanded log instead of degrading to a row.
  */
 export function isSoloTool(tool: ToolMessage): boolean {
-	return (
-		tool.name === "AskUserQuestion" ||
-		tool.name === "Skill" ||
-		isSubagentToolName(tool.name)
-	);
+	return tool.name === "Skill" || isSubagentToolName(tool.name);
 }
 
 // ─── Stats ───────────────────────────────────────────────────────────────────
@@ -270,7 +286,7 @@ export interface TurnStats {
 	others: number;
 }
 
-export function turnStats(activity: ActivityPart[]): TurnStats {
+export function turnStats(segment: Segment): TurnStats {
 	const read = new Set<string>();
 	const edited = new Set<string>();
 	const s: TurnStats = {
@@ -285,7 +301,7 @@ export function turnStats(activity: ActivityPart[]): TurnStats {
 		subagents: 0,
 		others: 0,
 	};
-	for (const part of activity) {
+	for (const part of segment.activity) {
 		if (part.type === "thinking") {
 			s.thinking++;
 			continue;
@@ -359,13 +375,28 @@ export function fmtDuration(ms: number): string {
 export function turnDuration(turn: Turn, now: number): number | undefined {
 	// `!== undefined`, not truthiness: a provider-reported 0 is a measurement.
 	if (turn.result?.duration !== undefined) return turn.result.duration;
-	const start = turn.user?.createdAt ?? turn.activity[0]?.createdAt;
+	let start = turn.user?.createdAt;
+	if (start === undefined) {
+		for (const segment of turn.segments) {
+			start =
+				segment.activity[0]?.createdAt ??
+				segment.reply[0]?.createdAt ??
+				segment.handBack?.createdAt;
+			if (start !== undefined) break;
+		}
+	}
 	if (start === undefined) return undefined;
-	const end = turn.live
-		? now
-		: (turn.result?.createdAt ??
-			turn.reply?.createdAt ??
-			turn.activity.at(-1)?.createdAt);
+	let end = turn.live ? now : turn.result?.createdAt;
+	if (end === undefined) {
+		for (let i = turn.segments.length - 1; i >= 0; i--) {
+			const segment = turn.segments[i]!;
+			end =
+				segment.handBack?.createdAt ??
+				segment.reply.at(-1)?.createdAt ??
+				segment.activity.at(-1)?.createdAt;
+			if (end !== undefined) break;
+		}
+	}
 	if (end === undefined) return undefined;
 	// Stamps can arrive out of order across a provider boundary. A negative span
 	// is not a measurement, so show nothing rather than "-1.0s".
@@ -374,12 +405,17 @@ export function turnDuration(turn: Turn, now: number): number | undefined {
 
 /**
  * Wall-clock ms per step: each runs until the next one starts, the last until
- * the reply or result lands. `undefined` when any step lacks a timestamp —
- * durations are never guessed.
+ * the reply, hand-back, or result lands. `undefined` when any step lacks a
+ * timestamp — durations are never guessed.
  */
-export function stepDurations(turn: Turn, now: number): number[] | undefined {
+export function stepDurations(
+	segment: Segment,
+	turn: Turn,
+	final: boolean,
+	now: number,
+): number[] | undefined {
 	const stamps: number[] = [];
-	for (const part of turn.activity) {
+	for (const part of segment.activity) {
 		if (part.createdAt === undefined) return undefined;
 		stamps.push(part.createdAt);
 	}
@@ -388,9 +424,10 @@ export function stepDurations(turn: Turn, now: number): number[] | undefined {
 	// which case the work is already over and the step must stop there. Without
 	// that boundary the last segment grows for as long as the reply streams and
 	// then snaps back when the result lands.
-	const end = turn.live
-		? (turn.reply?.createdAt ?? now)
-		: (turn.reply?.createdAt ?? turn.result?.createdAt ?? lastStamp);
+	const end =
+		segment.reply[0]?.createdAt ??
+		segment.handBack?.createdAt ??
+		(final && turn.live ? now : (turn.result?.createdAt ?? lastStamp));
 	return stamps.map((t, i) => Math.max(0, (stamps[i + 1] ?? end) - t));
 }
 
@@ -398,18 +435,29 @@ export function stepDurations(turn: Turn, now: number): number[] | undefined {
  * Relative segment widths for the strip. Falls back to equal widths when
  * durations are unknown, so the strip still shows the shape of the work.
  */
-export function stepWeights(turn: Turn, now: number): number[] {
+export function stepWeights(
+	segment: Segment,
+	turn: Turn,
+	final: boolean,
+	now: number,
+): number[] {
 	return (
-		stepDurations(turn, now)?.map((d) => Math.max(300, d)) ??
-		turn.activity.map(() => 1)
+		stepDurations(segment, turn, final, now)?.map((d) => Math.max(300, d)) ??
+		segment.activity.map(() => 1)
 	);
 }
 
 /** "Edited src/auth.ts · 1s" for the i-th step, for the hover caption. */
-export function stepCaption(turn: Turn, i: number, now: number): string {
-	const part = turn.activity[i];
+export function stepCaption(
+	segment: Segment,
+	turn: Turn,
+	final: boolean,
+	i: number,
+	now: number,
+): string {
+	const part = segment.activity[i];
 	if (!part) return "";
-	const d = stepDurations(turn, now)?.[i];
+	const d = stepDurations(segment, turn, final, now)?.[i];
 	return d === undefined
 		? partLabel(part)
 		: `${partLabel(part)} · ${fmtDuration(d)}`;

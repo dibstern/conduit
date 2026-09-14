@@ -17,15 +17,15 @@
 		fmtDuration,
 		stepCaption,
 		stepDurations,
+		type Segment,
 		type Turn,
-		turnDuration,
 		turnStats,
 	} from "../../utils/turns.js";
 	import ActivityRow from "./ActivityRow.svelte";
 	import ActivityStrip from "./ActivityStrip.svelte";
 	import TurnEconomics from "./TurnEconomics.svelte";
 
-	let { turn }: { turn: Turn } = $props();
+	let { turn, segment, final }: { turn: Turn; segment: Segment; final: boolean } = $props();
 
 	let expanded = $state(false);
 	let hovered = $state<number | null>(null);
@@ -35,7 +35,7 @@
 	/** Only a live turn needs a clock; a settled one reads its stamps. */
 	let now = $state(Date.now());
 	$effect(() => {
-		if (!turn.live) return;
+		if (!final || !turn.live) return;
 		now = Date.now();
 		const id = setInterval(() => {
 			now = Date.now();
@@ -43,15 +43,15 @@
 		return () => clearInterval(id);
 	});
 
-	const stats = $derived(turnStats(turn.activity));
-	const duration = $derived(turnDuration(turn, now));
-	const durations = $derived(stepDurations(turn, now));
+	const stats = $derived(turnStats(segment));
+	const durations = $derived(stepDurations(segment, turn, final, now));
+	const duration = $derived(durations?.reduce((total, step) => total + step, 0));
 	const bill = $derived(economics(turn, now));
 	const TICKER_ROWS = 3;
-	const ticker = $derived(turn.activity.slice(-TICKER_ROWS));
+	const ticker = $derived(segment.activity.slice(-TICKER_ROWS));
 
 	async function jumpTo(i: number) {
-		const part = turn.activity[i];
+		const part = segment.activity[i];
 		if (!part) return;
 		expanded = true;
 		focusUuid = part.uuid;
@@ -63,7 +63,7 @@
 <div class="max-w-[760px] mx-auto px-5 my-1.5">
 	<div
 		bind:this={panelEl}
-		class="turn-activity rounded-panel {turn.live ? 'bg-bg-surface glow-tool-running' : 'border border-border-subtle'}"
+		class="turn-activity rounded-panel {final && turn.live ? 'bg-bg-surface glow-tool-running' : 'border border-border-subtle'}"
 	>
 		<!-- The two summary lines are their own query container so the ledger sheds
 		     detail against its own width, not the viewport's — a sidebar narrows the
@@ -84,14 +84,14 @@
 						<Icon name="chevron-right" size={14} />
 					</span>
 					{#if hovered !== null}
-						<span class="flex-1 truncate font-mono text-text-secondary">{stepCaption(turn, hovered, now)}</span>
-					{:else if turn.live}
+						<span class="flex-1 truncate font-mono text-text-secondary">{stepCaption(segment, turn, final, hovered, now)}</span>
+					{:else if final && turn.live}
 						<BlockGrid cols={5} mode="fast" blockSize={1.5} gap={0.5} class="shrink-0" />
 						<span class="shrink-0 font-medium text-text-secondary @max-[336px]:hidden">Working</span>
 						{#if duration !== undefined}
 							<span class="turn-duration shrink-0 font-mono text-text-dimmer">{fmtDuration(duration)}</span>
 						{/if}
-						<span class="flex-1 truncate text-text-muted">— {currentStepLabel(turn)}</span>
+						<span class="flex-1 truncate text-text-muted">— {currentStepLabel(segment)}</span>
 					{:else}
 						<!-- Duration leads, so truncation eats the step counts from the right
 						     and the one number that is always true survives. -->
@@ -110,24 +110,26 @@
 
 			<div class="flex items-center gap-3 px-3 pb-2">
 				<div class="flex-1 min-w-0">
-					<ActivityStrip {turn} {now} active={hovered} onhover={(i) => (hovered = i)} onjump={jumpTo} />
+					<ActivityStrip {turn} {segment} {final} {now} active={hovered} onhover={(i) => (hovered = i)} onjump={jumpTo} />
 				</div>
-				<TurnEconomics economics={bill} />
+				{#if final}
+					<TurnEconomics economics={bill} />
+				{/if}
 			</div>
 		</div>
 
 		{#if expanded}
 			<div class="px-1 pb-1 border-t border-border-subtle">
-				{#each turn.activity as part, i (part.uuid)}
+				{#each segment.activity as part, i (part.uuid)}
 					<ActivityRow {part} duration={durations?.[i]} highlight={part.uuid === focusUuid} />
 				{/each}
 			</div>
-		{:else if turn.live && !turn.reply}
+		{:else if final && turn.live && segment.reply.length === 0 && !segment.handBack}
 			<!-- The ticker folds away the moment the reply starts streaming, so the
 			     turn reaches its settled height once rather than twice. -->
 			<div class="px-1 pb-1 border-t border-border-subtle">
 				{#each ticker as part, i (part.uuid)}
-					{@const idx = turn.activity.length - ticker.length + i}
+					{@const idx = segment.activity.length - ticker.length + i}
 					<div style="opacity: {(0.35 + (0.65 * (i + 1)) / ticker.length).toFixed(2)}">
 						<ActivityRow {part} duration={durations?.[idx]} />
 					</div>

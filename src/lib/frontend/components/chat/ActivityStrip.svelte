@@ -14,12 +14,15 @@
 		partLabel,
 		stepDurations,
 		stepWeights,
+		type Segment,
 		type Turn,
 	} from "../../utils/turns.js";
 	import { segmentClass } from "./activity-style.js";
 
 	let {
 		turn,
+		segment,
+		final,
 		now,
 		active = null,
 		height = "h-1.5",
@@ -27,6 +30,8 @@
 		onjump,
 	}: {
 		turn: Turn;
+		segment: Segment;
+		final: boolean;
 		now: number;
 		/** Segment to highlight — owned by the parent so the caption can't drift. */
 		active?: number | null;
@@ -35,8 +40,8 @@
 		onjump?: (i: number) => void;
 	} = $props();
 
-	const weights = $derived(stepWeights(turn, now));
-	const durations = $derived(stepDurations(turn, now));
+	const weights = $derived(stepWeights(segment, turn, final, now));
+	const durations = $derived(stepDurations(segment, turn, final, now));
 
 	/** Roving tabindex: the strip is one tab stop, arrows scrub within it. */
 	let cursor = $state(0);
@@ -51,7 +56,7 @@
 		// Don't let the transcript scroll while scrubbing.
 		e.preventDefault();
 		e.stopPropagation();
-		const n = turn.activity.length;
+		const n = segment.activity.length;
 		cursor = (i + (e.key === "ArrowRight" ? 1 : -1) + n) % n;
 		onhover?.(cursor);
 		const next = e.currentTarget.parentElement?.children[cursor];
@@ -62,18 +67,18 @@
 <div
 	class="flex {height} gap-px rounded-full overflow-hidden bg-bg-surface"
 	role="group"
-	aria-label="Activity timeline — {turn.activity.length} steps"
+	aria-label="Activity timeline — {segment.activity.length} steps"
 	onpointerleave={() => onhover?.(null)}
 	onfocusout={() => onhover?.(null)}
 >
-	{#each turn.activity as part, i (part.uuid)}
+	{#each segment.activity as part, i (part.uuid)}
 		<button
 			type="button"
 			class="h-full min-w-0.5 cursor-pointer touch-manipulation transition-opacity outline-none focus-visible:ring-1 focus-visible:ring-brand-b {segmentClass(part)} {active === i ? 'opacity-100' : 'opacity-60 hover:opacity-100'}"
 			style="flex-grow: {weights[i] ?? 1}"
 			title={title(part, i)}
 			aria-label={title(part, i)}
-			tabindex={i === Math.min(cursor, turn.activity.length - 1) ? 0 : -1}
+			tabindex={i === Math.min(cursor, segment.activity.length - 1) ? 0 : -1}
 			onkeydown={(e) => onKeyDown(e, i)}
 			onfocus={() => {
 				// Keep the tab stop where focus actually is, so leaving and returning
