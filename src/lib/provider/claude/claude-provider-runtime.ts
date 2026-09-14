@@ -711,6 +711,22 @@ export class ClaudeProviderRuntime {
 			: Effect.fail(new Error("Claude capabilities service unavailable"));
 	}
 
+	/**
+	 * `undefined` means "no expectation" -- under exactOptionalPropertyTypes that
+	 * has to clear the field rather than store an undefined in it, or the drift
+	 * check would compare against a value nobody stands behind.
+	 */
+	private setExpectedApiModelId(
+		ctx: ClaudeSessionContext,
+		expected: string | undefined,
+	): void {
+		if (expected === undefined) {
+			delete ctx.expectedApiModelId;
+		} else {
+			ctx.expectedApiModelId = expected;
+		}
+	}
+
 	private expectedApiModelIdEffect(
 		requestedModelId: string | undefined,
 		contextWindow: string | undefined,
@@ -1074,6 +1090,21 @@ export class ClaudeProviderRuntime {
 				const ctx = yield* this.getSession(sessionId);
 				if (!ctx) return;
 				yield* this.syncQuerySettingsEffect(ctx, settings);
+				// `init` arrives only at query creation, so for the rest of the
+				// session the drift check reads this. Left at the pre-switch model,
+				// a switch the user just made reads back as the SDK ignoring them
+				// the moment an assistant message reports what actually served it.
+				// The live query's own workspace and agent are the right frame: an
+				// agent change restarts the session instead of reaching this path.
+				this.setExpectedApiModelId(
+					ctx,
+					yield* this.expectedApiModelIdEffect(
+						settings.modelId ?? ctx.currentModel,
+						settings.contextWindow,
+						ctx.workspaceRoot,
+						ctx.currentAgent,
+					),
+				);
 				// Both calls landed, so the next turn has nothing to re-issue.
 				ctx.settingsOutOfSync = false;
 			}),
@@ -1161,11 +1192,7 @@ export class ClaudeProviderRuntime {
 						contextWindow: input.contextWindow,
 						variant: input.variant,
 					});
-					if (expectedApiModelId === undefined) {
-						delete ctx.expectedApiModelId;
-					} else {
-						ctx.expectedApiModelId = expectedApiModelId;
-					}
+					this.setExpectedApiModelId(ctx, expectedApiModelId);
 
 					const turnDeferred = yield* Deferred.make<TurnResult, Error>();
 					yield* Effect.uninterruptible(

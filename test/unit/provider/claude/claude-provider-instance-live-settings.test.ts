@@ -554,4 +554,63 @@ describe("ClaudeProviderInstance mid-session setting changes", () => {
 		expect(setModel).toHaveBeenCalledTimes(1);
 		expect(applyFlagSettings).toHaveBeenCalledTimes(1);
 	});
+
+	it("reports no drift when a model switch lands mid-turn", async () => {
+		let releaseTurn: (() => void) | undefined;
+		const gate = new Promise<void>((resolve) => {
+			releaseTurn = resolve;
+		});
+		const gen = (async function* () {
+			yield initMessage(SONNET) as unknown as SDKMessage;
+			await gate;
+			// The SDK honours the mid-turn setModel, so the rest of the turn is
+			// served by the new model and the next assistant message says so.
+			yield assistantMessage("asst-opus", OPUS) as unknown as SDKMessage;
+			yield makeSuccessResult({ session_id: "sdk-1" }) as unknown as SDKMessage;
+		})();
+		const { query, setModel } = makeMockQuery(gen);
+		const instance = new ClaudeProviderInstance({
+			workspaceRoot: workspace,
+			queryFactory: vi.fn(() => query),
+			capabilitiesService: makeCapabilitiesService(),
+		});
+		const sink = createMockEventSink();
+
+		const turn = Effect.runPromise(
+			instance.sendTurnEffect(
+				makeBaseSendTurnInput({
+					sessionId: "s1",
+					turnId: "turn-1",
+					eventSink: sink,
+					model: { providerId: "claude", modelId: SONNET },
+				}),
+			),
+		);
+		// init has landed but the result has not: the turn is open.
+		await waitForAssertion(() => {
+			expect(resolvedModels(sink)).toEqual([SONNET]);
+		});
+
+		// The picker change arrives while the turn is still streaming --
+		// applyLiveSettingsEffect waits on the setup lock, not on a turn.
+		await Effect.runPromise(
+			instance.applyLiveSettingsEffect("s1", { modelId: OPUS }),
+		);
+		expect(setModel).toHaveBeenCalledWith(OPUS);
+
+		releaseTurn?.();
+		expect((await turn).status).toBe("completed");
+
+		// `expectedModel` is what the drift check compares the served model
+		// against. Left at the pre-switch model it accuses the session of
+		// serving something the user never asked for -- at the exact moment
+		// the user asked for it.
+		const reports = resolvedTurns(sink);
+		expect(reports).toHaveLength(2);
+		expect(reports[1]).toMatchObject({
+			requestedModel: OPUS,
+			expectedModel: OPUS,
+			actualModel: OPUS,
+		});
+	});
 });
