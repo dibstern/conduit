@@ -47,6 +47,14 @@ token-disciplined set of primitives that every feature component consumes.
   for a genuine one-off override use Tailwind's important modifier (`px-2!`), which
   raises specificity and wins regardless of order. (We deliberately avoid a
   `tailwind-merge` dependency.)
+- **An important override kills the variant's hover too.** `text-text-muted!` is
+  `!important` at every state, so it also beats the variant's `hover:text-text` —
+  the call site keeps its resting colour and silently loses the hover change. If
+  you make a property important, make its hover form important as well
+  (`text-text-muted! hover:text-text!`). Measured during the SettingsPanel swap:
+  the close control's hovered icon sat 17/255 darker than before, 52 pixels, which
+  is comfortably invisible to the eye and to the default 1% tolerance
+  (conduit-test-de3.5).
 - **Prove an override; don't assert its class.** Concatenating a conflicting
   utility is not evidence that it won. A consumer that must differ from a base
   property needs either an explicitly authoritative utility (`rounded-xl!`) backed

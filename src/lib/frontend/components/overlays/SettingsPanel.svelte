@@ -5,6 +5,7 @@
 
 <script lang="ts">
 	import { untrack } from "svelte";
+	import Button from "../ui/Button.svelte";
 	import Icon from "../ui/Icon.svelte";
 	import Select from "../ui/Select.svelte";
 	import Toggle from "../ui/Toggle.svelte";
@@ -529,9 +530,20 @@
 			<!-- Header -->
 			<div class="flex items-center justify-between px-5 py-3 border-b border-border">
 				<h2 class="text-lg font-semibold text-text font-brand">Settings</h2>
-				<button data-testid="settings-close-btn" class="text-text-muted hover:text-text p-1 cursor-pointer border-none bg-transparent" aria-label="Close settings" onclick={() => onClose?.()}>
-					<Icon name="x" size={16} />
-				</button>
+				<!-- `ghost` is a shade darker than this control and carries a hover
+				     fill it has never had. `hover:text-text!` is needed because
+				     `text-text-muted!` is important at EVERY state, so it also beat
+				     ghost's own `hover:text-text` — see component-conventions.mdx. -->
+				<Button
+					iconOnly
+					ariaLabel="Close settings"
+					icon="x"
+					variant="ghost"
+					size="content"
+					class="p-1 text-text-muted! hover:bg-transparent! hover:text-text!"
+					data-testid="settings-close-btn"
+					onclick={() => onClose?.()}
+				/>
 			</div>
 
 			<!-- Tabs -->
@@ -688,25 +700,29 @@
 							{instances.length} instance{instances.length !== 1 ? "s" : ""}
 						</span>
 						<div class="flex items-center gap-2">
-						<button
-							type="button"
-							class="flex items-center gap-1.5 px-2.5 py-1 text-xs rounded border border-border text-text-muted hover:text-text hover:border-text-muted transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed font-brand"
+						<!-- Icon stays a child rather than `icon=`: Button renders it at
+						     16, this is 12, and only a child can carry the spin class. -->
+						<Button
+							variant="secondary"
+							size="content"
+							class="gap-1.5 px-2.5 py-1 text-xs rounded text-text-muted! hover:text-text! hover:border-text-muted hover:bg-transparent! font-brand"
 							data-testid="scan-now-btn"
 							disabled={scanInFlight}
 							onclick={handleScanNow}
 						>
 							<Icon name="refresh-cw" size={12} class={scanInFlight ? "animate-spin" : ""} />
 							{scanInFlight ? "Scanning..." : "Scan Now"}
-						</button>
-						<button
-							type="button"
-							class="flex items-center gap-1.5 px-2.5 py-1 text-xs rounded border border-brand-a text-brand-a hover:bg-brand-a/10 transition-colors cursor-pointer font-brand"
+						</Button>
+						<Button
+							variant="ghost-accent"
+							size="content"
+							class="gap-1.5 px-2.5 py-1 text-xs rounded border border-accent font-brand"
 							data-testid="add-instance-btn"
 							onclick={() => openAddInstance()}
 						>
 							<Icon name="plus" size={12} />
 							Add
-						</button>
+						</Button>
 						</div>
 					</div>
 
@@ -779,8 +795,8 @@
 								</label>
 							{/if}
 							<div class="flex justify-end gap-2 pt-1">
-								<button type="button" data-testid="instance-form-cancel" class="px-3 py-1 text-xs rounded border border-border text-text-muted hover:text-text cursor-pointer bg-transparent" onclick={closeInstanceForm}>Cancel</button>
-								<button type="button" data-testid="instance-form-save" disabled={formSaving} class="px-3 py-1 text-xs rounded border border-brand-a text-brand-a hover:bg-brand-a/10 cursor-pointer bg-transparent disabled:opacity-50 disabled:cursor-not-allowed" onclick={submitInstanceForm}>{formSaving ? "Saving..." : "Save"}</button>
+								<Button variant="secondary" size="content" class="px-3 py-1 text-xs rounded text-text-muted! hover:text-text! hover:bg-transparent!" data-testid="instance-form-cancel" onclick={closeInstanceForm}>Cancel</Button>
+								<Button variant="ghost-accent" size="content" class="px-3 py-1 text-xs rounded border border-accent" data-testid="instance-form-save" disabled={formSaving} onclick={submitInstanceForm}>{formSaving ? "Saving..." : "Save"}</Button>
 							</div>
 						</div>
 					{/if}
@@ -827,12 +843,15 @@
 									{#if expandedInstanceId === inst.id}
 										<div class="flex flex-wrap gap-2 px-3 py-2 border-t border-border">
 										{#if driver === "opencode" && inst.managed}
-											<button class="px-3 py-1 text-xs rounded border border-border text-text hover:bg-[rgba(var(--overlay-rgb),0.05)] cursor-pointer bg-transparent" onclick={() => handleStart(inst.id)}>Start</button>
-											<button class="px-3 py-1 text-xs rounded border border-border text-text hover:bg-[rgba(var(--overlay-rgb),0.05)] cursor-pointer bg-transparent" onclick={() => handleStop(inst.id)}>Stop</button>
+											<Button variant="secondary" size="content" class="px-3 py-1 text-xs rounded hover:bg-[rgba(var(--overlay-rgb),0.05)]!" onclick={() => handleStart(inst.id)}>Start</Button>
+											<Button variant="secondary" size="content" class="px-3 py-1 text-xs rounded hover:bg-[rgba(var(--overlay-rgb),0.05)]!" onclick={() => handleStop(inst.id)}>Stop</Button>
 											{/if}
-											<button class="px-3 py-1 text-xs rounded border border-border text-accent hover:bg-accent/10 cursor-pointer bg-transparent" data-testid="edit-instance-btn" onclick={() => openEditInstance(inst)}>Edit</button>
-											<button class="px-3 py-1 text-xs rounded border border-border text-accent hover:bg-accent/10 cursor-pointer bg-transparent" data-testid="rename-instance-btn" onclick={() => startRename(inst.id, inst.name)}>Rename</button>
-										<button class="px-3 py-1 text-xs rounded border border-red-700 text-red-500 hover:bg-error/10 cursor-pointer bg-transparent" data-testid="remove-instance-btn" onclick={() => handleRemove(inst.id, inst.name)}>Remove</button>
+											<Button variant="ghost-accent" size="content" class="px-3 py-1 text-xs rounded border border-border" data-testid="edit-instance-btn" onclick={() => openEditInstance(inst)}>Edit</Button>
+											<Button variant="ghost-accent" size="content" class="px-3 py-1 text-xs rounded border border-border" data-testid="rename-instance-btn" onclick={() => startRename(inst.id, inst.name)}>Rename</Button>
+										<!-- Three `!` and every one of them is raw Tailwind palette, not a
+										     token: border-red-700 / text-red-500 are the headline drift item
+										     for the de3.5 NORMALIZE pass. -->
+										<Button variant="danger-outline" size="content" class="px-3 py-1 text-xs rounded border-red-700! text-red-500! hover:bg-error/10!" data-testid="remove-instance-btn" onclick={() => handleRemove(inst.id, inst.name)}>Remove</Button>
 										</div>
 									{/if}
 								</div>
