@@ -1,5 +1,14 @@
-import { FileSystem, HttpServerResponse, Path } from "@effect/platform";
+import { promisify } from "node:util";
+import { gzip } from "node:zlib";
+import {
+	FileSystem,
+	HttpServerRequest,
+	HttpServerResponse,
+	Path,
+} from "@effect/platform";
 import { Context, Data, Effect, Layer } from "effect";
+
+const gzipAsync = promisify(gzip);
 
 export const MIME_TYPES: Record<string, string> = {
 	".html": "text/html; charset=utf-8",
@@ -21,11 +30,35 @@ export const MIME_TYPES: Record<string, string> = {
 	".map": "application/json",
 };
 
+const HASH_SEGMENT = /[.-]([A-Za-z0-9_-]{8,})\.[A-Za-z0-9]+$/;
+
+/**
+ * Vite emits `name-HASH.ext` with a base64url hash — mixed case, `-`/`_` — which
+ * the old lowercase-hex pattern never matched, leaving every asset uncacheable.
+ * Requiring a digit or mixed case keeps real words (`my-components.js`) out.
+ */
+function isContentHashed(filePath: string): boolean {
+	const hash = HASH_SEGMENT.exec(filePath)?.[1];
+	if (hash === undefined) return false;
+	return /\d/.test(hash) || (/[a-z]/.test(hash) && /[A-Z]/.test(hash));
+}
+
 export function getCacheControl(filePath: string): string {
-	return filePath.includes(".") && /\.[a-f0-9]{8,}\./.test(filePath)
+	return isContentHashed(filePath)
 		? "public, max-age=31536000, immutable"
 		: "public, max-age=0, must-revalidate";
 }
+
+const COMPRESSIBLE =
+	/^(?:text\/|application\/(?:javascript|json|manifest\+json)|image\/svg\+xml)/;
+const COMPRESS_MIN_BYTES = 1024;
+
+/**
+ * Gzipped bytes for content-hashed assets, which by definition never change.
+ * Bounded because the built asset set is small and fixed per build.
+ */
+const gzipCache = new Map<string, Uint8Array>();
+const GZIP_CACHE_MAX = 64;
 
 export class StaticDirTag extends Context.Tag("StaticDir")<
 	StaticDirTag,
@@ -72,11 +105,37 @@ const serveFileContent = (
 	Effect.gen(function* () {
 		const content = yield* fs.readFile(resolved);
 		const ext = pathModule.extname(resolved).toLowerCase();
-		return HttpServerResponse.uint8Array(content, {
-			headers: {
-				"Content-Type": MIME_TYPES[ext] ?? "application/octet-stream",
-				"Cache-Control": getCacheControl(cachePath),
-			},
+		const contentType = MIME_TYPES[ext] ?? "application/octet-stream";
+		const cacheControl = getCacheControl(cachePath);
+
+		const headers: Record<string, string> = {
+			"Content-Type": contentType,
+			"Cache-Control": cacheControl,
+			Vary: "Accept-Encoding",
+		};
+
+		const request = yield* HttpServerRequest.HttpServerRequest;
+		const acceptsGzip = (request.headers["accept-encoding"] ?? "").includes(
+			"gzip",
+		);
+		if (
+			!acceptsGzip ||
+			content.length < COMPRESS_MIN_BYTES ||
+			!COMPRESSIBLE.test(contentType)
+		) {
+			return HttpServerResponse.uint8Array(content, { headers });
+		}
+
+		const immutable = cacheControl.includes("immutable");
+		const cached = immutable ? gzipCache.get(resolved) : undefined;
+		const compressed =
+			cached ?? (yield* Effect.promise(() => gzipAsync(content)));
+		if (immutable && !cached && gzipCache.size < GZIP_CACHE_MAX) {
+			gzipCache.set(resolved, compressed);
+		}
+
+		return HttpServerResponse.uint8Array(compressed, {
+			headers: { ...headers, "Content-Encoding": "gzip" },
 		});
 	});
 

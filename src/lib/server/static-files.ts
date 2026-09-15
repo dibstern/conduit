@@ -5,16 +5,16 @@
 import { readFile, stat } from "node:fs/promises";
 import type { ServerResponse } from "node:http";
 import { extname, join, resolve } from "node:path";
-import { MIME_TYPES } from "../domain/server/Services/static-file-handler.js";
+import {
+	getCacheControl,
+	MIME_TYPES,
+} from "../domain/server/Services/static-file-handler.js";
 
 // ─── Cache Control ──────────────────────────────────────────────────────────
 
-/** Cache-control header value based on whether the file path contains a content hash. */
-export function getCacheControl(filePath: string): string {
-	return filePath.includes(".") && /\.[a-f0-9]{8,}\./.test(filePath)
-		? "public, max-age=31536000, immutable"
-		: "public, max-age=0, must-revalidate";
-}
+// One source of truth — the hash pattern is subtle enough that a second copy
+// silently drifts, which is how every asset ended up uncacheable.
+export { getCacheControl };
 
 // ─── File Serving ───────────────────────────────────────────────────────────
 
