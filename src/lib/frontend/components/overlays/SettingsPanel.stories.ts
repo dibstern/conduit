@@ -172,3 +172,79 @@ export const Hover: Story = {
 	...Default,
 	parameters: { pseudo: { hover: true } },
 };
+
+/**
+ * The add/edit instance form. Its Cancel and Save buttons appeared in no
+ * baseline of any kind, so the de3.5 swap would have had nothing holding them
+ * to zero pixel diff. Captured deliberately BEFORE that migration: a fidelity
+ * gate can only prove "nothing moved" against an image of the old markup.
+ */
+export const InstanceForm: Story = {
+	args: { initialTab: "instances" },
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		await userEvent.click(canvas.getByTestId("add-instance-btn"));
+		await expect(canvas.getByTestId("instance-form-save")).toBeVisible();
+		// Park focus on the Name field, NOT on Add. Storybook's click ends in a
+		// programmatic .focus(), which Chromium treats as keyboard focus, so the
+		// baseline would otherwise bake in Add's focus ring — and that ring is
+		// exactly what changes when Add moves onto Button. A fidelity baseline
+		// has to be blind to the migration it is about to police.
+		await userEvent.click(canvas.getByTestId("instance-form-name"));
+	},
+};
+
+/**
+ * Hover on the instances tab. The existing Hover story sits on the Alerts tab,
+ * so every hover style in the instances list — Scan Now, Add, and the per-row
+ * actions — was uncaptured. That matters more than usual here: the de3.5 swap
+ * of this panel needs `!` overrides mostly to hold HOVER colours that differ
+ * from the Button variants, and an override no baseline can see is an override
+ * no gate can prove.
+ */
+export const InstancesHover: Story = {
+	args: { initialTab: "instances" },
+	beforeEach: populateInstances,
+	parameters: { pseudo: { hover: true } },
+};
+
+/**
+ * Hover on an EXPANDED instance row, where Start / Stop / Edit / Rename /
+ * Remove live. Those five buttons are the densest cluster of hover colours in
+ * the panel, and the de3.5 swap needs `!` overrides to hold them.
+ *
+ * The hover state is applied by hand instead of through `parameters.pseudo`,
+ * and it is applied to `document.body`. Neither is a style preference; both are
+ * scars.
+ *
+ * `parameters.pseudo` cannot be used at all here. The addon's decorator emits
+ * UPDATE_GLOBALS on first render, Storybook re-renders the story from scratch,
+ * the Svelte component remounts, and `expandedInstanceId` goes back to null.
+ * `play` does NOT run again on a globals-driven re-render, so the row silently
+ * collapses after `play` expanded it. Writing `play` idempotently does not
+ * help: nothing runs it a second time.
+ *
+ * `document.body` rather than the canvas, because the addon's other effect
+ * calls `applyParameter` on `#storybook-root`, and that REMOVES every
+ * `pseudo-*` class before adding back the ones the story asked for. It fires
+ * after `play` finishes, so a class `play` put on the canvas is stripped by the
+ * time the screenshot is taken. Body is outside its reach, and the rewritten
+ * rules are descendant selectors, so they match from there just as well.
+ *
+ * Both mistakes captured a green baseline showing the wrong thing — first a
+ * collapsed panel, then an expanded one with no hover. Nothing asserts that a
+ * story shows what its name claims, so the only proof is to delete the line and
+ * watch the gate go red.
+ */
+export const InstanceExpandedHover: Story = {
+	args: { initialTab: "instances" },
+	beforeEach: populateInstances,
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		await userEvent.click(
+			canvas.getByRole("button", { name: /Local OpenCode/ }),
+		);
+		await expect(canvas.getByRole("button", { name: "Rename" })).toBeVisible();
+		canvasElement.ownerDocument.body.classList.add("pseudo-hover-all");
+	},
+};
