@@ -65,6 +65,12 @@ matching icon.
 - **Suppress focus with `focus-visible:outline-hidden` (not `outline-none`)** so a
   transparent outline survives for forced-colors / high-contrast users when the
   box-shadow ring is stripped.
+- **The house focus ring is `focus-visible:ring-2 focus-visible:ring-text`** — a
+  neutral ring, deliberately not the accent. An accent ring on an accent-filled
+  control is the same colour as the control, which made it invisible on Button's
+  `primary` variant, the one that most needed it. `ring-text` reads against every
+  surface in both themes. `focus-visible` is keyboard-only by definition, so this
+  never appears on a mouse click.
 - **Busy ≠ disabled.** A `loading` control stays focusable (`aria-disabled` +
   `aria-busy`, not the native `disabled` attribute) and guards its handler, so
   keyboard/screen-reader context is not lost mid-action. Reserve native `disabled`

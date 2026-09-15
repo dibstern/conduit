@@ -46,3 +46,11 @@ export const Typing: Story = {
 		await expect((input as HTMLInputElement).value).toBe("hello");
 	},
 };
+
+// The house focus ring is the only thing that marks the keyboard-focused
+// field, and it is a box-shadow painted outside the border box — so without a
+// story that forces the state, nothing in the suite would notice it vanishing.
+// The visual spec pads the capture root for any story whose id says "focus".
+export const FocusVisible: Story = {
+	parameters: { pseudo: { focusVisible: true } },
+};

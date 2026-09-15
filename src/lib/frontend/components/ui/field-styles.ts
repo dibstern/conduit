@@ -5,7 +5,10 @@ export type FieldSize = "sm" | "md";
 export const FIELD_BASE_CLASSES =
 	"block w-full rounded-md border border-border bg-input-bg text-text " +
 	"placeholder:text-text-muted transition-colors " +
-	"focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent/70 focus-visible:border-accent " +
+	// Tracks Button deliberately (see the comment above) — a neutral ring, not
+	// accent. `border-accent` stays: on a field the accent border is the
+	// "this one is live" signal, and the ring is the keyboard-focus signal.
+	"focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-text focus-visible:border-accent " +
 	"disabled:opacity-50 disabled:cursor-not-allowed " +
 	"aria-invalid:border-error";
 

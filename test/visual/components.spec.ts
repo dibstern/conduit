@@ -461,6 +461,18 @@ if (stories.length > 0) {
 					const root = page.locator("#storybook-root");
 					const box = await root.boundingBox();
 
+					// A story whose id says "focus" is understood to be showing the house
+					// focus ring, which needs two things no other story does — see the
+					// padding and the zero tolerance below. Keyed off the id rather than a
+					// registry so a new focus story is covered the day it is written.
+					// Viewport captures are excluded: they already frame the whole page,
+					// so nothing is cropped and padding would only churn their baselines.
+					const capturesFocusRing =
+						/focus/i.test(story.id) &&
+						!story.tags?.includes(VIEWPORT_CAPTURE_TAG) &&
+						!!box &&
+						box.height > 0;
+
 					// Pin element height for size-variable stories so screenshots
 					// have identical dimensions across platforms.
 					const sizeNorm = SIZE_NORMALIZED_STORIES[story.id];
@@ -482,10 +494,19 @@ if (stories.length > 0) {
 							`[visual:strict] ignoring the ${sizeNorm.maxDiffPixelRatio} tolerance for "${story.id}"; it is held to zero-diff like every other story.`,
 						);
 					}
-					const screenshotOpts =
-						sizeNorm && !STRICT
-							? { maxDiffPixelRatio: sizeNorm.maxDiffPixelRatio }
-							: {};
+					const screenshotOpts: { maxDiffPixelRatio?: number } = {};
+					if (sizeNorm && !STRICT) {
+						screenshotOpts.maxDiffPixelRatio = sizeNorm.maxDiffPixelRatio;
+					}
+					if (capturesFocusRing) {
+						// The default 1% tolerance is wider than the ring. A focus ring is
+						// a 2px outline on one small subject in a viewport-wide image, so
+						// on desktop it is ~0.7% of the pixels — deleting it outright still
+						// came in under the threshold even after the padding fix below let
+						// it into frame at all. Zero tolerance is what makes the ring
+						// something this gate can actually fail on.
+						screenshotOpts.maxDiffPixelRatio = 0;
+					}
 					// A zero-height root already falls back to the viewport, so it is
 					// as safe as an explicit tag. The guard below only needs to police
 					// the element-capture path — the one that can silently crop
@@ -494,6 +515,22 @@ if (stories.length > 0) {
 						story.tags?.includes(VIEWPORT_CAPTURE_TAG) ||
 						!box ||
 						box.height <= 0;
+
+					// A focus ring is a box-shadow, so it paints OUTSIDE the border box,
+					// and an element capture is cropped tight to that box — the whole
+					// ring lands outside the image. Measured before this fix:
+					// ui-button--focus-visible contained ZERO ring pixels, so deleting
+					// the ring from Button outright would still have passed the gate.
+					// Only the element path needs the room; a viewport capture already
+					// includes everything around the subject. Keyed off the story id
+					// rather than a registry so a new focus story is covered the day it
+					// is written. See conduit-test-de3.19.
+					if (capturesFocusRing) {
+						await page.addStyleTag({
+							content: "#storybook-root { padding: 8px; }",
+						});
+						await page.waitForTimeout(50);
+					}
 
 					if (!usesViewportCapture) {
 						const escapedElement = await page.evaluate(() => {

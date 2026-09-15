@@ -20,7 +20,12 @@
 	const BASE_CLASSES =
 		"inline-flex items-center gap-1 h-6 px-2 rounded-full border text-xs font-medium " +
 		"whitespace-nowrap cursor-pointer select-none transition-colors font-brand " +
-		"focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent/70 " +
+		// Neutral, not accent. An accent ring against an accent-filled button
+		// (`primary`) is the same colour as the button, so the old
+		// `ring-accent/70` was invisible on the one variant that most needed it.
+		// `ring-text` contrasts with every surface in both themes. Keyboard only:
+		// `focus-visible` never fires on a mouse click. See conduit-test-de3.19.
+		"focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-text " +
 		"disabled:opacity-50 disabled:cursor-not-allowed";
 </script>
 
