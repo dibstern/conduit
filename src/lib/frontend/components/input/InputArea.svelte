@@ -42,7 +42,6 @@
 	let fileMenuRef: FileMenu | undefined = $state();
 	let subagentBackBarRef: SubagentBackBar | undefined = $state();
 	let cursorPos = $state(0);
-	let scrollTop = $state(0);
 	let composing = $state(false);
 
 	// ─── Per-session input drafts ─────────────────────────────────────────────
@@ -68,8 +67,6 @@
 					clearTimeout(inputSyncTimer);
 					inputSyncTimer = null;
 				}
-				// Resize textarea to fit restored content
-				requestAnimationFrame(() => autoResize());
 			}
 		});
 	});
@@ -143,24 +140,6 @@
 		);
 	}
 
-	// ─── Auto-resize textarea ──────────────────────────────────────────────────
-
-	/** Matches the textarea's `max-h-[120px]`. */
-	const MAX_TEXTAREA_HEIGHT_PX = 120;
-
-	function autoResize() {
-		if (!textareaEl) return;
-		// Reading scrollHeight forces a synchronous layout of the entire value, so a
-		// pasted log dump costs ~140ms per megabyte here. Anything this long is past
-		// the cap regardless of wrapping, so skip the measurement.
-		if (inputText.length > HIGHLIGHT_MAX_CHARS) {
-			textareaEl.style.height = `${MAX_TEXTAREA_HEIGHT_PX}px`;
-			return;
-		}
-		textareaEl.style.height = "auto";
-		textareaEl.style.height = `${Math.min(textareaEl.scrollHeight, MAX_TEXTAREA_HEIGHT_PX)}px`;
-	}
-
 	// ─── Handlers ──────────────────────────────────────────────────────────────
 
 	function syncInputDraft(text: string) {
@@ -179,7 +158,6 @@
 		if (textareaEl) {
 			cursorPos = textareaEl.selectionStart ?? 0;
 		}
-		autoResize();
 
 		// Debounced outgoing input sync to other tabs
 		if (inputSyncTimer) clearTimeout(inputSyncTimer);
@@ -199,11 +177,6 @@
 		if (textareaEl) {
 			cursorPos = textareaEl.selectionStart ?? 0;
 		}
-	}
-
-	/** Keep the highlight backdrop's scroll aligned with the textarea. */
-	function handleScroll() {
-		if (textareaEl) scrollTop = textareaEl.scrollTop;
 	}
 
 	// During IME composition the textarea must show its own pre-commit text, so we
@@ -342,9 +315,6 @@
 			inputSyncTimer = null;
 		}
 		syncInputDraft("");
-		if (textareaEl) {
-			textareaEl.style.height = "auto";
-		}
 	}
 
 	function handleStop() {
@@ -592,33 +562,44 @@
 			class="flex flex-col bg-input-bg border border-border rounded-3xl py-1.5 px-1.5 transition-[border-color,box-shadow] duration-200 max-md:rounded-[20px] focus-within:border-text-dimmer focus-within:shadow-[0_0_0_1px_var(--color-border)]"
 		>
 
-			<!-- Textarea row -->
-			<div class="relative flex items-start">
-				<SkillHighlightBackdrop
-					text={plainText ? "" : inputText}
-					commandNames={commandNameSet}
-					{scrollTop}
-					dimmed={composing || plainText}
-				/>
-				<textarea
-					id="input"
-					rows="1"
-					placeholder="Ask anything. / to use skills, @ to mention files"
-					autocomplete="off"
-					enterkeyhint={isMobile() ? "enter" : "send"}
-					class="relative z-10 flex-1 min-w-0 bg-transparent border-none caret-[var(--color-text)] text-base font-sans leading-[1.4] pt-2 pb-1 px-2.5 resize-none outline-none min-h-6 max-h-[120px] overflow-y-auto placeholder:text-text-muted"
-					class:text-transparent={!composing && !plainText}
-					class:text-text={composing || plainText}
-					bind:value={inputText}
-					bind:this={textareaEl}
-					oninput={handleInput}
-					onkeydown={handleKeydown}
-					onkeyup={handleKeyup}
-					onclick={handleClick}
-					onscroll={handleScroll}
-					oncompositionstart={handleCompositionStart}
-					oncompositionend={handleCompositionEnd}
-				></textarea>
+			<!-- Textarea row.
+			     The composer grows with its text and then scrolls, and both of those
+			     are CSS here rather than JS: the mirror sizes the row, this container
+			     caps and scrolls it, and the textarea is stretched over the mirror at
+			     the full content height so it never scrolls on its own. One scroll
+			     position for the whole composer means the caret cannot end up on a
+			     different line from the text it sits in.
+			     `scrollbar-gutter: stable` keeps a scrollbar appearing from narrowing
+			     the textarea but not the mirror, which would wrap them differently. -->
+			<div class="max-h-[120px] overflow-y-auto [scrollbar-gutter:stable]">
+				<!-- Past HIGHLIGHT_MAX_CHARS the mirror renders nothing, so it can no
+				     longer size the row: pin the row to the cap and let the textarea
+				     scroll itself. Safe only because the mirror is blank in that mode,
+				     so there is still just one scroll position in play. -->
+				<div class="relative min-h-6 {plainText ? 'h-[120px]' : ''}">
+					<SkillHighlightBackdrop
+						text={plainText ? "" : inputText}
+						commandNames={commandNameSet}
+						dimmed={composing || plainText}
+					/>
+					<textarea
+						id="input"
+						placeholder="Ask anything. / to use skills, @ to mention files"
+						autocomplete="off"
+						enterkeyhint={isMobile() ? "enter" : "send"}
+						class="composer-text-metrics absolute inset-0 z-10 bg-transparent border-none caret-[var(--color-text)] resize-none outline-none placeholder:text-text-muted {plainText ? 'overflow-y-auto' : 'overflow-hidden'}"
+						class:text-transparent={!composing && !plainText}
+						class:text-text={composing || plainText}
+						bind:value={inputText}
+						bind:this={textareaEl}
+						oninput={handleInput}
+						onkeydown={handleKeydown}
+						onkeyup={handleKeyup}
+						onclick={handleClick}
+						oncompositionstart={handleCompositionStart}
+						oncompositionend={handleCompositionEnd}
+					></textarea>
+				</div>
 			</div>
 
 						<!-- Pending image previews -->

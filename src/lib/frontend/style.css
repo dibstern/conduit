@@ -175,6 +175,19 @@
 		-3px 0 0 var(--color-error);
 }
 
+/* Every layout property that decides where a glyph lands in the composer. The
+   textarea and its highlight mirror must agree on all of them or the caret
+   drifts off the text it is supposed to sit in, so they live here once rather
+   than as two copies of the same Tailwind class list. */
+@utility composer-text-metrics {
+	font-family: var(--font-sans);
+	font-size: 1rem;
+	line-height: 1.4;
+	padding: 0.5rem 0.625rem 0.25rem;
+	white-space: pre-wrap;
+	overflow-wrap: break-word;
+}
+
 /* Recognised `/skill` token. Shared by the composer backdrop and sent user
    messages so both surfaces read identically. Plain inline (not inline-block)
    so the token stays on the text baseline at its neighbours' size. */
