@@ -26,6 +26,7 @@ export default defineConfig({
 		"notification-session-nav-replay.spec.ts",
 		"fork-session.spec.ts",
 		"fork-session-messages.spec.ts",
+		"pwa-background-resume.spec.ts",
 	],
 	fullyParallel: true,
 	forbidOnly: !!process.env["CI"],

@@ -76,12 +76,20 @@
 	/** Track which sync we last applied to avoid re-applying our own. */
 	let lastSyncApplied = 0;
 
+	/** When the local user last typed, so stale syncs can be told apart. */
+	let lastLocalEditAt = 0;
+
+	// A sync is already behind by our own 300ms debounce plus a round trip, so
+	// one that lands right after a keystroke describes text older than what is
+	// on screen. Applying it deletes what the user just typed.
+	const SYNC_GRACE_MS = 1_000;
+
 	/** Receive input sync from another tab viewing the same session. */
 	$effect(() => {
-		if (inputSyncState.lastUpdated > lastSyncApplied) {
-			lastSyncApplied = inputSyncState.lastUpdated;
-			inputText = inputSyncState.text;
-		}
+		if (inputSyncState.lastUpdated <= lastSyncApplied) return;
+		lastSyncApplied = inputSyncState.lastUpdated;
+		if (Date.now() - lastLocalEditAt < SYNC_GRACE_MS) return;
+		inputText = inputSyncState.text;
 	});
 
 	/** Timer for debounced outgoing input sync. */
@@ -158,6 +166,7 @@
 		if (textareaEl) {
 			cursorPos = textareaEl.selectionStart ?? 0;
 		}
+		lastLocalEditAt = Date.now();
 
 		// Debounced outgoing input sync to other tabs
 		if (inputSyncTimer) clearTimeout(inputSyncTimer);
