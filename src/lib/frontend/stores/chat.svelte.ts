@@ -904,6 +904,7 @@ export function handleThinkingStart(
 		uuid,
 		text: "",
 		done: false,
+		createdAt: now,
 		...(msg.messageId != null && { messageId: msg.messageId }),
 	};
 	setMessages(messages, [...getMessages(messages), thinkingMsg]);

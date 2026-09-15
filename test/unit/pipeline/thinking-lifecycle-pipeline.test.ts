@@ -217,10 +217,10 @@ describe("Thinking lifecycle — full pipeline", () => {
 		expect(thinking!.done).toBe(true);
 		// biome-ignore lint/style/noNonNullAssertion: asserted above
 		expect(thinking!.text).toBe("Deep reasoning about the problem...");
-		// Duration is undefined — MessageProjector doesn't store timing on parts,
-		// and partRowToHistoryPart doesn't produce a time field. Known gap.
+		// Part rows carry their own created_at/updated_at, so the thinking block's
+		// span survives the round-trip instead of collapsing to nothing.
 		// biome-ignore lint/style/noNonNullAssertion: asserted above
-		expect(thinking!.duration).toBeUndefined();
+		expect(thinking!.duration).toBe(100);
 	});
 
 	it("documents divergence: SQLite has partial thinking, frontend marks done via safety net", () => {

@@ -110,6 +110,9 @@ function partRowToHistoryPart(row: MessagePartRow): HistoryMessagePart {
 	return {
 		id: row.id,
 		type: row.type as HistoryMessagePart["type"],
+		// Per-part stamps, not the message's: a whole turn's tools share one
+		// message row, so the message stamp would make every step 0ms long.
+		time: { start: row.created_at, end: row.updated_at },
 		...(row.text ? { text: row.text } : {}),
 		...(row.tool_name != null ? { tool: row.tool_name } : {}),
 		...(row.call_id != null ? { callID: row.call_id } : {}),

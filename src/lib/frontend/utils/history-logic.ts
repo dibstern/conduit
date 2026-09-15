@@ -164,6 +164,10 @@ function convertAssistantParts(
 	let firstTextSeen = false;
 
 	for (const part of parts) {
+		// A turn's parts all live under one message, so the message stamp would
+		// make every step 0ms. Use the part's own stamp when the store has one.
+		const partCreatedAt = part.time?.start ?? createdAt;
+		const partEndedAt = part.time?.end;
 		switch (part.type) {
 			case "text": {
 				const rawText = part.text ?? "";
@@ -179,7 +183,8 @@ function convertAssistantParts(
 					finalized: true,
 					partId: part.id,
 					...(messageId != null && !firstTextSeen && { messageId }),
-					...(createdAt != null && { createdAt }),
+					...(partCreatedAt != null && { createdAt: partCreatedAt }),
+					...(partEndedAt != null && { endedAt: partEndedAt }),
 				} satisfies AssistantMessage);
 				firstTextSeen = true;
 				break;
@@ -187,7 +192,7 @@ function convertAssistantParts(
 			case "thinking":
 			case "reasoning": {
 				const text = part.text ?? "";
-				const time = part.time as { start?: number; end?: number } | undefined;
+				const time = part.time;
 				const duration =
 					time?.start !== undefined && time?.end !== undefined
 						? time.end - time.start
@@ -198,7 +203,8 @@ function convertAssistantParts(
 					text,
 					done: true,
 					...(duration != null && { duration }),
-					...(createdAt != null && { createdAt }),
+					...(partCreatedAt != null && { createdAt: partCreatedAt }),
+					...(partEndedAt != null && { endedAt: partEndedAt }),
 				} satisfies ThinkingMessage);
 				break;
 			}
@@ -233,7 +239,8 @@ function convertAssistantParts(
 						isError,
 						...(toolInput !== undefined && { input: toolInput }),
 						...(toolMetadata !== undefined && { metadata: toolMetadata }),
-						...(createdAt != null && { createdAt }),
+						...(partCreatedAt != null && { createdAt: partCreatedAt }),
+						...(partEndedAt != null && { endedAt: partEndedAt }),
 					}),
 				);
 				break;
@@ -344,7 +351,11 @@ export function historyToChatMessages(
 					...(msg.tokens?.context_window != null && {
 						context_window: msg.tokens.context_window,
 					}),
-					...(msg.time?.created != null && { createdAt: msg.time.created }),
+					// The bill lands when the turn finishes. Stamping it with the
+					// message's start would put it before the turn's own last step.
+					...((msg.time?.completed ?? msg.time?.created) != null && {
+						createdAt: (msg.time?.completed ?? msg.time?.created) as number,
+					}),
 				} satisfies ResultMessage);
 			}
 		}

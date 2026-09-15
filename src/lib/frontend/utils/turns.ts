@@ -419,7 +419,12 @@ export function stepDurations(
 		if (part.createdAt === undefined) return undefined;
 		stamps.push(part.createdAt);
 	}
-	const lastStamp = stamps.at(-1) ?? now;
+	// The last step has no following step to end it, so fall back to its own
+	// completion stamp before giving up and reporting zero.
+	const lastStamp = Math.max(
+		stamps.at(-1) ?? now,
+		segment.activity.at(-1)?.endedAt ?? 0,
+	);
 	// A live turn's last step is still running — unless the reply has started, in
 	// which case the work is already over and the step must stop there. Without
 	// that boundary the last segment grows for as long as the reply streams and
@@ -427,7 +432,9 @@ export function stepDurations(
 	const end =
 		segment.reply[0]?.createdAt ??
 		segment.handBack?.createdAt ??
-		(final && turn.live ? now : (turn.result?.createdAt ?? lastStamp));
+		(final && turn.live
+			? now
+			: Math.max(turn.result?.createdAt ?? 0, lastStamp));
 	return stamps.map((t, i) => Math.max(0, (stamps[i + 1] ?? end) - t));
 }
 

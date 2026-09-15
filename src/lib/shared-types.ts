@@ -323,7 +323,8 @@ export interface HistoryMessagePart {
 	};
 	callID?: string;
 	tool?: string;
-	time?: unknown;
+	/** Wall-clock span of this part. `start` is what activity timings measure. */
+	time?: { start?: number; end?: number };
 	/** Context size before/after a compaction boundary — present on `compaction`
 	 *  parts so the divider and context-% bar can be reconstructed on reload. */
 	preTokens?: number;
