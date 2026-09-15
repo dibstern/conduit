@@ -43,15 +43,6 @@ const ALLOWED_DUPLICATE_GROUPS: Record<string, string> = {
 		"both stories render NotificationStack with the same permission and question fixtures and no toasts",
 	"overlays-notificationstack--toasts-only | overlays-toast--multiple-toasts":
 		"both stories render NotificationStack with the same three toast messages and variants; only the toast ids differ, and those are iteration keys",
-
-	// MISSING VISUAL DESIGN, not a broken story (conduit-test-732b). The state IS
-	// applied; the component simply has no visual treatment for it, so the two
-	// frames are identical by omission. These are design decisions, not test bugs,
-	// and they are listed here so the gate stays honest until they are made.
-	"ui-toggle--default | ui-toggle--disabled":
-		"disabled only adds `disabled:cursor-not-allowed` and the DOM attribute, neither of which contributes pixels; the component already has a `dimmed` opacity-40 treatment that disabled does not use (conduit-test-wzat)",
-	"chat-systemmessage--hover | chat-systemmessage--info":
-		"the info card has no hover treatment at all; the only hover style in the component belongs to a 'Show details' button the fixture does not render (conduit-test-wzat)",
 };
 
 const BASELINE_DIRECTORY = resolve(

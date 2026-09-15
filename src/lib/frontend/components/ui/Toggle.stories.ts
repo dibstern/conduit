@@ -12,12 +12,10 @@ const meta = {
 		checked: false,
 		onchange: fn(),
 		disabled: false,
-		dimmed: false,
 	},
 	argTypes: {
 		checked: { control: "boolean" },
 		disabled: { control: "boolean" },
-		dimmed: { control: "boolean" },
 	},
 } satisfies Meta<typeof Toggle>;
 
@@ -41,6 +39,6 @@ export const Disabled: Story = {
 	args: { disabled: true },
 };
 
-export const Dimmed: Story = {
-	args: { checked: true, dimmed: true },
+export const DisabledChecked: Story = {
+	args: { checked: true, disabled: true },
 };

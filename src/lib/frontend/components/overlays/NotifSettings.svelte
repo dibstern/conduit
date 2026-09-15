@@ -207,7 +207,6 @@
 			checked={settings.push}
 			onchange={togglePush}
 			disabled={pushBusy || pushUnavailable}
-			dimmed={pushUnavailable}
 		/>
 
 		<Toggle

@@ -579,8 +579,7 @@
 							checked={notifSettings.push}
 							onchange={togglePush}
 							disabled={pushBusy || pushUnavailable}
-							dimmed={pushUnavailable}
-							class="bg-bg-surface border border-border rounded-panel px-5 py-4 gap-4 font-brand {pushBusy || pushUnavailable ? 'opacity-60' : ''}"
+							class="bg-bg-surface border border-border rounded-panel px-5 py-4 gap-4 font-brand"
 						/>
 						<Toggle
 							icon="bell"

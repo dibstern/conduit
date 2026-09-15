@@ -633,6 +633,20 @@ export const mockSystemError: SystemMessage = {
 	variant: "error",
 };
 
+/** The only fixture that renders SystemMessage's "Show details" affordance. */
+export const mockSystemErrorWithDetails: SystemMessage = {
+	type: "system",
+	uuid: "msg-sys-003",
+	text: "Provider rejected the request.",
+	variant: "error",
+	errorCode: "provider_error",
+	statusCode: 429,
+	details: {
+		provider: "opencode",
+		retryAfter: "30s",
+	},
+};
+
 // ─── Todos ──────────────────────────────────────────────────────────────────
 
 export const mockTodoPending: TodoItem = {

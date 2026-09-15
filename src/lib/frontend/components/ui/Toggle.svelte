@@ -3,6 +3,12 @@
   Renders: [icon?] [label + description?] .............. [switch]
   The entire row is a single <button> — no nested interactive elements,
   proper semantics, and the full row is the touch target on mobile.
+
+  `disabled` dims the whole row, matching ui/Button's disabled convention.
+  There used to be a separate `dimmed` prop that faded only the switch, and
+  every call site passed it alongside `disabled` — so a call site that forgot
+  it got a disabled toggle indistinguishable from an enabled one
+  (conduit-test-wzat).
 -->
 <script lang="ts">
 	import Icon from "./Icon.svelte";
@@ -14,7 +20,6 @@
 		checked = false,
 		onchange,
 		disabled = false,
-		dimmed = false,
 		ariaLabel,
 		class: className,
 	}: {
@@ -24,7 +29,6 @@
 		checked?: boolean;
 		onchange?: () => void;
 		disabled?: boolean;
-		dimmed?: boolean;
 		ariaLabel?: string;
 		class?: string;
 	} = $props();
@@ -35,7 +39,7 @@
 	role="switch"
 	aria-checked={checked}
 	aria-label={ariaLabel ?? `Toggle ${label.toLowerCase()}`}
-	class="flex items-center w-full text-left select-none touch-manipulation cursor-pointer disabled:cursor-not-allowed {className ?? 'gap-3 px-3.5 py-2.5 border-none bg-transparent'}"
+	class="flex items-center w-full text-left select-none touch-manipulation cursor-pointer disabled:cursor-not-allowed disabled:opacity-50 {className ?? 'gap-3 px-3.5 py-2.5 border-none bg-transparent'}"
 	{disabled}
 	onclick={onchange}
 >
@@ -51,7 +55,7 @@
 		{/if}
 	</div>
 	<span
-		class="relative w-9 h-5 rounded-full shrink-0 transition-[background,box-shadow] {checked ? 'bg-brand-a' : 'bg-text-dimmer'} {dimmed ? 'opacity-40' : ''}"
+		class="relative w-9 h-5 rounded-full shrink-0 transition-[background,box-shadow] {checked ? 'bg-brand-a' : 'bg-text-dimmer'}"
 		style={checked ? "box-shadow: 0 0 8px rgba(255,45,123,0.4);" : ""}
 	>
 		<span class="absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-white shadow-sm pointer-events-none transition-transform {checked ? 'translate-x-4' : ''}"></span>

@@ -19,11 +19,17 @@
 			? "glow-tool-error text-error bg-bg-surface"
 			: "bg-bg-surface text-text-muted",
 	);
+
+	// Hover is an affordance, so the card only gets one when it actually holds
+	// something to click. A card with no details is inert, and a hover response on
+	// an inert card promises an interaction that does not exist. Ring rather than
+	// border so nothing reflows (conduit-test-wzat).
+	const hoverClasses = $derived(hasDetails ? "hover:ring-1 hover:ring-border" : "");
 </script>
 
 <div class="max-w-[760px] mx-auto my-2 px-5">
 	<div
-		class="flex flex-col gap-1 py-2 px-3 text-base rounded-panel {containerClasses}"
+		class="flex flex-col gap-1 py-2 px-3 text-base rounded-panel {containerClasses} {hoverClasses}"
 	>
 		<div class="flex items-start gap-2">
 			<span class="shrink-0 mt-0.5 [&_.lucide]:w-3 [&_.lucide]:h-3">

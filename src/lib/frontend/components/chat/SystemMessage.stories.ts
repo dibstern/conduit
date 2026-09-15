@@ -1,5 +1,9 @@
 import type { Meta, StoryObj } from "@storybook/svelte-vite";
-import { mockSystemError, mockSystemInfo } from "../../stories/mocks.js";
+import {
+	mockSystemError,
+	mockSystemErrorWithDetails,
+	mockSystemInfo,
+} from "../../stories/mocks.js";
 import SystemMessage from "./SystemMessage.svelte";
 
 const meta = {
@@ -19,7 +23,16 @@ export const ErrorState: Story = {
 	args: { message: mockSystemError },
 };
 
+export const WithDetails: Story = {
+	args: { message: mockSystemErrorWithDetails },
+};
+
+/**
+ * Hovers the details-bearing card, not the plain info card. The info card has no
+ * hover treatment by design — it is inert — so a hover story over it captured a
+ * frame byte-identical to Info and asserted nothing (conduit-test-wzat).
+ */
 export const Hover: Story = {
-	...Info,
+	...WithDetails,
 	parameters: { pseudo: { hover: true } },
 };
