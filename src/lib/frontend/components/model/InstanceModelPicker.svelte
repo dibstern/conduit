@@ -574,7 +574,7 @@
 <!-- Rail hover tooltip — opens toward the rail (fixed, outside the popover clip) -->
 {#if pickerOpen && railTooltip}
 	<div
-		class="fixed z-[var(--z-modal)] pointer-events-none bg-black text-white text-[11px] leading-[1.3] py-1.5 px-2 rounded-md border border-border whitespace-nowrap shadow-panel before:content-[''] before:absolute before:-left-[5px] before:top-[9px] before:border-y-[5px] before:border-y-transparent before:border-r-[5px] before:border-r-black"
+		class="fixed z-[var(--z-popover-raised)] pointer-events-none bg-black text-white text-[11px] leading-[1.3] py-1.5 px-2 rounded-md border border-border whitespace-nowrap shadow-panel before:content-[''] before:absolute before:-left-[5px] before:top-[9px] before:border-y-[5px] before:border-y-transparent before:border-r-[5px] before:border-r-black"
 		style="top:{railTooltip.top}px;left:{railTooltip.left}px"
 	>
 		{railTooltip.label}

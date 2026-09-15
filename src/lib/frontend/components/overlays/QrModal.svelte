@@ -5,6 +5,7 @@
 
 <script lang="ts">
 	import QRCode from "@castlenine/svelte-qrcode";
+	import Modal from "./Modal.svelte";
 
 	// ─── Props ──────────────────────────────────────────────────────────────────
 
@@ -105,29 +106,6 @@
 		}, 1500);
 	}
 
-	// ─── Backdrop click ─────────────────────────────────────────────────────────
-
-	function handleBackdropClick(e: MouseEvent): void {
-		if (e.target === e.currentTarget) {
-			onClose?.();
-		}
-	}
-
-	// ─── Escape key handler ─────────────────────────────────────────────────────
-
-	$effect(() => {
-		if (!visible) return;
-
-		function handleKeydown(e: KeyboardEvent): void {
-			if (e.key === "Escape") {
-				onClose?.();
-			}
-		}
-
-		document.addEventListener("keydown", handleKeydown);
-		return () => document.removeEventListener("keydown", handleKeydown);
-	});
-
 	// ─── Reset copied state when closing ────────────────────────────────────────
 
 	$effect(() => {
@@ -141,30 +119,22 @@
 	});
 </script>
 
-{#if visible}
-	<div
-		class="modal-backdrop fixed inset-0 z-50 flex items-center justify-center bg-[rgba(var(--overlay-rgb),0.6)] backdrop-blur-sm"
-		role="dialog"
-		aria-modal="true"
-		aria-label="Share Session"
-		tabindex="-1"
-		onclick={handleBackdropClick}
-		onkeydown={(e) => { if (e.key === "Escape") onClose?.(); }}
-	>
+<Modal open={visible} onclose={() => onClose?.()} labelledBy="qr-modal-title">
 		<!-- Dialog card -->
 		<div
-			class="bg-bg-surface border border-border rounded-xl p-6 shadow-2xl max-w-xs w-full mx-4 flex flex-col items-center gap-4"
+			id="qr-overlay"
+			class="bg-bg-surface border border-border rounded-xl p-6 shadow-2xl max-w-xs w-[calc(100vw-2rem)] mx-4 flex flex-col items-center gap-4"
 		>
 			<!-- Title -->
-			<h2 class="text-text font-semibold text-base">Share Session</h2>
+			<h2 id="qr-modal-title" class="text-text font-semibold text-base">Share Session</h2>
 
 			<!-- QR Code -->
 			{#if fetchingHost}
-				<div class="bg-white rounded-lg p-3 flex items-center justify-center" style="width: 224px; height: 224px;">
+				<div id="qr-modal" class="bg-white rounded-lg p-3 flex items-center justify-center" style="width: 224px; height: 224px;">
 					<span class="text-text-dimmer text-xs">Detecting network...</span>
 				</div>
 			{:else}
-				<div class="bg-white rounded-lg p-3">
+				<div id="qr-modal" class="bg-white rounded-lg p-3">
 					<QRCode
 						data={shareUrl}
 						size={200}
@@ -192,5 +162,5 @@
 				Scan to open on another device
 			</p>
 		</div>
-	</div>
-{/if}
+</Modal>
+
