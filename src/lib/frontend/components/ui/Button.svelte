@@ -30,12 +30,18 @@
 	 */
 	type ButtonSize = "sm" | "md" | "content";
 
+	// `text-bg`, not `text-white`, on the two filled variants. In the dark theme
+	// (the default) the accent and error fills are both light pinks, so a white
+	// label on either measures 2.56:1 — under AA's 3:1 large-text floor, on the
+	// app's most prominent call to action. `text-bg` measures 6.93:1 dark and
+	// 5.60:1 light, so it passes in BOTH themes where white passes in only one
+	// (conduit-test-tpdw).
 	const VARIANT_CLASSES: Record<ButtonVariant, string> = {
-		primary: "bg-accent text-white hover:bg-accent-hover",
+		primary: "bg-accent text-bg hover:bg-accent-hover",
 		secondary: "border border-border text-text hover:bg-text/10",
 		ghost: "text-text-secondary hover:bg-text/10 hover:text-text",
 		"ghost-accent": "text-accent hover:bg-accent/10",
-		danger: "bg-error text-white hover:bg-error/90",
+		danger: "bg-error text-bg hover:bg-error/90",
 		// The three below are the approve / deny / tool-action language already
 		// duplicated across QuestionCard, PermissionCard, ToolGenericCard and
 		// ToolGroupItem. Added on cross-file evidence only; single-file recipes
