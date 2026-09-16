@@ -266,7 +266,9 @@ describe("Button colour axes", () => {
 				}
 			}
 		}
-	});
+		// 3564 renders. It lands near 10s alone and over it under parallel
+		// load, so the default timeout makes this flaky rather than strict.
+	}, 60_000);
 
 	// conduit-test-or29: `:hover` keeps matching a disabled button, so a dead
 	// control used to light up under the cursor. The drop now has to survive

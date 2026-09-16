@@ -7,6 +7,7 @@
 	import { computeDiff, buildSplitRows, diffStats } from "../../utils/diff.js";
 	import { escapeHtml } from "../../utils/format.js";
 	import type { DiffOp, SplitRow } from "../../types.js";
+	import Tabs from "../ui/Tabs.svelte";
 
 	// ─── Props ──────────────────────────────────────────────────────────────────
 
@@ -104,22 +105,15 @@
 	</div>
 
 	<!-- Toggle bar -->
-	<div
-		class="diff-toggle-bar flex items-center gap-1 px-3 py-1 mb-1"
-	>
-		<button
-			class={"text-xs px-2 py-1 rounded border cursor-pointer font-sans transition-colors duration-100 " + (viewMode === "unified" ? "bg-accent/20 border-accent/40 text-accent font-medium" : "bg-transparent border-border text-text-dimmer hover:text-text hover:border-border-subtle")}
-			onclick={() => (viewMode = "unified")}
-		>
-			Unified
-		</button>
-		<button
-			class={"text-xs px-2 py-1 rounded border cursor-pointer font-sans transition-colors duration-100 " + (viewMode === "split" ? "bg-accent/20 border-accent/40 text-accent font-medium" : "bg-transparent border-border text-text-dimmer hover:text-text hover:border-border-subtle")}
-			onclick={() => (viewMode = "split")}
-		>
-			Split
-		</button>
-	</div>
+	<Tabs
+		bind:value={viewMode}
+		variant="pill"
+		label="Diff view mode"
+		options={[
+			{ value: "unified", label: "Unified" },
+			{ value: "split", label: "Split" },
+		]}
+	/>
 
 	<!-- Unified view -->
 	{#if viewMode === "unified"}

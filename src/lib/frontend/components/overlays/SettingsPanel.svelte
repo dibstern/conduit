@@ -14,6 +14,8 @@
 	import TextInput from "../ui/TextInput.svelte";
 	import Toggle from "../ui/Toggle.svelte";
 	import Surface from "../ui/Surface.svelte";
+	import Tabs from "../ui/Tabs.svelte";
+	import SegmentedControl from "../ui/SegmentedControl.svelte";
 	import { createFrontendLogger } from "../../utils/logger.js";
 
 	const log = createFrontendLogger("push");
@@ -98,6 +100,25 @@
 	let formEnv = $state("");
 	let formSaving = $state(false);
 	const DRIVER_OPTIONS = ["opencode", "claude"] as const;
+
+	/**
+	 * Hoisted out of the template so the array identity is stable across
+	 * renders; an inline literal would be a new array every time `activeTab`
+	 * changed, re-keying the whole strip on every tab click.
+	 */
+	const SETTINGS_TABS = [
+		{ value: "notifications", label: "Alerts", testId: "settings-tab-notifications" },
+		{ value: "appearance", label: "Theme", testId: "settings-tab-appearance" },
+		{ value: "visibility", label: "Agents & Models", testId: "settings-tab-visibility" },
+		{ value: "instances", label: "Instances", testId: "settings-tab-instances" },
+		{ value: "debug", label: "Debug", testId: "settings-tab-debug" },
+	];
+
+	const DRIVER_TAB_OPTIONS = DRIVER_OPTIONS.map((driver) => ({
+		value: driver,
+		label: driver === "claude" ? "Claude" : "OpenCode",
+		testId: `instance-form-driver-${driver}`,
+	}));
 
 	// Notification settings
 	let notifSettings: NotifSettings = $state(getNotifSettings());
@@ -553,24 +574,12 @@
 			</div>
 
 			<!-- Tabs -->
-			<div class="flex border-b border-border px-5 gap-1 font-brand">
-				{#each [
-					{ id: "notifications", label: "Alerts" },
-					{ id: "appearance", label: "Theme" },
-					{ id: "visibility", label: "Agents & Models" },
-					{ id: "instances", label: "Instances" },
-					{ id: "debug", label: "Debug" },
-				] as tab}
-					<button
-						data-testid="settings-tab-{tab.id}"
-						class="px-3 py-2 text-sm font-medium border-b-2 -mb-px transition-colors cursor-pointer border-none bg-transparent {activeTab === tab.id ? 'border-brand-a text-text' : 'border-transparent text-text-muted hover:text-text'}"
-						style="border-bottom: 2px solid {activeTab === tab.id ? 'var(--color-brand-a)' : 'transparent'};"
-						onclick={() => (activeTab = tab.id)}
-					>
-						{tab.label}
-					</button>
-				{/each}
-			</div>
+			<Tabs
+				bind:value={activeTab}
+				variant="underline"
+				label="Settings sections"
+				options={SETTINGS_TABS}
+			/>
 
 			<!-- Tab content -->
 			<div class="flex-1 overflow-y-auto p-5">
@@ -739,19 +748,11 @@
 								</span>
 							</div>
 							{#if instanceFormMode === "add"}
-								<div class="flex gap-1.5" role="group" aria-label="Driver">
-									{#each DRIVER_OPTIONS as driverOption}
-										<button
-											type="button"
-											data-testid="instance-form-driver-{driverOption}"
-											aria-pressed={formDriver === driverOption}
-											class="flex-1 px-3 py-1.5 text-xs rounded border transition-colors cursor-pointer {formDriver === driverOption ? 'border-brand-a text-text bg-brand-a/10' : 'border-border text-text-muted hover:text-text'}"
-											onclick={() => (formDriver = driverOption)}
-										>
-											{driverOption === "claude" ? "Claude" : "OpenCode"}
-										</button>
-									{/each}
-								</div>
+								<SegmentedControl
+									bind:value={formDriver}
+									label="Driver"
+									options={DRIVER_TAB_OPTIONS}
+								/>
 							{/if}
 							<label class="block space-y-1">
 								<span class="text-xs text-text-muted">Name</span>
