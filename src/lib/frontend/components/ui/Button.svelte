@@ -45,11 +45,21 @@
 	// app's most prominent call to action. `text-bg` measures 6.93:1 dark and
 	// 5.60:1 light, so it passes in BOTH themes where white passes in only one
 	// (conduit-test-tpdw).
+	//
+	// The three transparent-base hover washes sit at 5%, not 10%. Five call
+	// sites across three files had each dialled the 10% down by hand -- to 5%,
+	// 6% or 0% -- and not one had dialled it up (conduit-test-d5nv). When every
+	// consumer corrects a default in the same direction the default is wrong, so
+	// the correction moved here and those overrides are gone. `bg-text/5` rather
+	// than the `rgba(var(--overlay-rgb),0.05)` four of them used: same kind of
+	// theme-flipping neutral scrim, but it stays in the token language, so only
+	// the alpha changed. The resting TEXT colour those sites also override is a
+	// separate question and deliberately still open.
 	const VARIANT_CLASSES: Record<ButtonVariant, string> = {
 		primary: "bg-accent text-bg hover:bg-accent-hover",
-		secondary: "border border-border text-text hover:bg-text/10",
-		ghost: "text-text-secondary hover:bg-text/10 hover:text-text",
-		"ghost-accent": "text-accent hover:bg-accent/10",
+		secondary: "border border-border text-text hover:bg-text/5",
+		ghost: "text-text-secondary hover:bg-text/5 hover:text-text",
+		"ghost-accent": "text-accent hover:bg-accent/5",
 		danger: "bg-error text-bg hover:bg-error/90",
 		// The three below are the approve / deny / tool-action language already
 		// duplicated across QuestionCard, PermissionCard, ToolGenericCard and
@@ -284,8 +294,39 @@
 		} ${SHARED_SIZE_CLASSES}`;
 	});
 
+	/**
+	 * Every variant declares a `hover:bg-*`, and `:hover` keeps matching while a
+	 * button is disabled, so until conduit-test-or29 a dead button still lit up
+	 * under the cursor -- in every variant, everywhere in the app. It read as
+	 * interactive at the exact moment it is not.
+	 *
+	 * Dropped in JS rather than fixed in CSS because the primitive already knows.
+	 * The two CSS routes both cost something: `disabled:pointer-events-none`
+	 * takes `cursor-not-allowed` with it (no pointer events, no cursor style),
+	 * and chaining `not-disabled:not-aria-disabled:hover:` across eleven variants
+	 * writes the inert condition a second time, in a second language, where it
+	 * can drift from the one `handleClick` already guards on. This reuses that
+	 * single flag.
+	 *
+	 * The variant strings above stay literal, so Tailwind's scanner still emits
+	 * every hover class it always did; only whether they are APPLIED is dynamic.
+	 *
+	 * Scope is the variant. A consumer `class` that brings its own `hover:` is
+	 * left alone -- it is the call site's string, and silently editing a
+	 * prop we were handed is a worse surprise than the one being fixed.
+	 */
+	const inert = $derived(disabled || loading || ariaDisabled);
+	const variantClass = $derived(
+		inert
+			? VARIANT_CLASSES[variant]
+					.split(" ")
+					.filter((cls) => !cls.startsWith("hover:"))
+					.join(" ")
+			: VARIANT_CLASSES[variant],
+	);
+
 	const buttonClass = $derived(
-		[BASE_CLASSES, VARIANT_CLASSES[variant], sizeClasses, className]
+		[BASE_CLASSES, variantClass, sizeClasses, className]
 			.filter(Boolean)
 			.join(" "),
 	);

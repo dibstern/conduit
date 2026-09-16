@@ -427,20 +427,16 @@
 
 		{#if !resolved}
 			<div class="question-actions flex gap-2 mt-2 max-sm:flex-col">
-				<!-- One `!` left, and it is a workaround for a primitive gap rather
-				     than a preference. Every Button variant declares a `hover:bg-*`
-				     that keeps applying while the button is disabled, so a disabled
-				     button still lights up under the cursor. This sets the disabled
-				     hover to `success-soft`'s own resting colour, which cancels it.
-				     The real fix belongs in Button and affects every variant, so it
-				     is tracked in conduit-test-or29 — delete this line when that lands.
-				     The `disabled:opacity-40!` that used to sit beside it is gone;
-				     it disagreed with the primitive's 50% for no stated reason
-				     (de3.35.2). -->
+				<!-- No `!` overrides left. Two are gone rather than moved: a
+				     `disabled:opacity-40!` that disagreed with the primitive's 50%
+				     for no stated reason (de3.35.2), and a `disabled:hover:bg-success/10!`
+				     that cancelled the disabled hover tint one call site at a time.
+				     Button now drops every variant hover while the button is inert
+				     (conduit-test-or29), so the whole app gets what this file had. -->
 				<Button
 					variant="success-soft"
 					size="content"
-					class="question-submit-btn min-h-12 flex-1 px-4 py-2 rounded-lg text-sm font-medium font-sans disabled:hover:bg-success/10!"
+					class="question-submit-btn min-h-12 flex-1 px-4 py-2 rounded-lg text-sm font-medium font-sans"
 					disabled={!canSubmit}
 					onclick={handleSubmit}
 				>

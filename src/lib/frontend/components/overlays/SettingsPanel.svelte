@@ -849,8 +849,8 @@
 									{#if expandedInstanceId === inst.id}
 										<div class="flex flex-wrap gap-2 px-3 py-2 border-t border-border">
 										{#if driver === "opencode" && inst.managed}
-											<Button variant="secondary" size="content" class="px-3 py-1 text-xs rounded hover:bg-[rgba(var(--overlay-rgb),0.05)]!" onclick={() => handleStart(inst.id)}>Start</Button>
-											<Button variant="secondary" size="content" class="px-3 py-1 text-xs rounded hover:bg-[rgba(var(--overlay-rgb),0.05)]!" onclick={() => handleStop(inst.id)}>Stop</Button>
+											<Button variant="secondary" size="content" class="px-3 py-1 text-xs rounded" onclick={() => handleStart(inst.id)}>Start</Button>
+											<Button variant="secondary" size="content" class="px-3 py-1 text-xs rounded" onclick={() => handleStop(inst.id)}>Stop</Button>
 											{/if}
 											<Button variant="ghost-accent" size="content" class="px-3 py-1 text-xs rounded border border-border" data-testid="edit-instance-btn" onclick={() => openEditInstance(inst)}>Edit</Button>
 											<Button variant="ghost-accent" size="content" class="px-3 py-1 text-xs rounded border border-border" data-testid="rename-instance-btn" onclick={() => startRename(inst.id, inst.name)}>Rename</Button>

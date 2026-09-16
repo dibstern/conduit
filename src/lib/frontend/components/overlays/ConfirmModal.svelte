@@ -53,7 +53,7 @@
           variant="secondary"
           size="content"
           data-testid="confirm-modal-cancel"
-          class="rounded-lg py-1.5 px-4 text-base text-text-muted! hover:bg-[rgba(var(--overlay-rgb),0.05)]!"
+          class="rounded-lg py-1.5 px-4 text-base text-text-muted!"
           onclick={handleCancel}
         >
           Cancel

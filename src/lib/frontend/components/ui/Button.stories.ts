@@ -218,6 +218,29 @@ export const Hover: Story = {
 	parameters: { pseudo: { hover: true } },
 };
 
+/**
+ * The hover wash that five call sites had each dialled down by hand before
+ * conduit-test-d5nv moved the correction into the variant. `Hover` above is
+ * `primary`, whose hover swaps one solid fill for another, so it never covered
+ * this: a translucent scrim over whatever the button is sitting on.
+ */
+export const SecondaryHover: Story = {
+	...Secondary,
+	parameters: { pseudo: { hover: true } },
+};
+
+/**
+ * A disabled button under the cursor, which must look exactly like `Disabled`.
+ * `:hover` goes on matching while a button is disabled, so every variant used
+ * to light up at the one moment it must not (conduit-test-or29). Nothing else
+ * in this file could have caught it -- `Disabled` is not hovered and `Hover`
+ * is not disabled.
+ */
+export const DisabledHover: Story = {
+	...Disabled,
+	parameters: { pseudo: { hover: true } },
+};
+
 export const FocusVisible: Story = {
 	...Primary,
 	// Scoped to the button rather than `focusVisible: true`.

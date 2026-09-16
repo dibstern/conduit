@@ -96,7 +96,7 @@
 			ariaLabel="Exit rewind mode"
 			variant="ghost-accent"
 			size="content"
-			class="rewind-banner-exit w-6 h-6 rounded hover:bg-[rgba(var(--overlay-rgb),0.06)]!"
+			class="rewind-banner-exit w-6 h-6 rounded"
 			title="Exit rewind mode"
 			onclick={handleExit}
 		/>
@@ -166,7 +166,7 @@
 				<Button
 					variant="secondary"
 					size="content"
-					class="rounded-lg py-1.5 px-4 text-base text-text-muted! hover:bg-[rgba(var(--overlay-rgb),0.05)]!"
+					class="rounded-lg py-1.5 px-4 text-base text-text-muted!"
 					onclick={handleCancel}
 				>
 					Cancel
