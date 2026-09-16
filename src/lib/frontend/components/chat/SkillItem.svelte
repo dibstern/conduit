@@ -7,6 +7,7 @@
 	import Icon from "../ui/Icon.svelte";
 	import Disclosure from "../ui/Disclosure.svelte";
 	import BlockGrid from '../ui/BlockGrid.svelte';
+	import Surface from "../ui/Surface.svelte";
 
 	let { message }: { message: ToolMessage } = $props();
 	let expanded = $state(false);
@@ -127,11 +128,13 @@
 		{/if}
 
 		{#if expanded && message.result}
-			<div
-				class="tool-result font-mono text-xs whitespace-pre-wrap break-all my-0.5 mx-2.5 py-2 px-2.5 bg-code-bg border border-border-subtle rounded-lg text-text-secondary max-h-[300px] overflow-y-auto select-text"
+			<Surface
+				variant="inset"
+				radius="md"
+				class="tool-result font-mono text-xs whitespace-pre-wrap break-all my-0.5 mx-2.5 py-2 px-2.5 text-text-secondary max-h-[300px] overflow-y-auto select-text"
 			>
 				{message.result.replace(/^<skill_content[^>]*>\n?/, "").replace(/\n?<\/skill_content>\s*$/, "")}
-			</div>
+			</Surface>
 		{/if}
 	</div>
 </div>

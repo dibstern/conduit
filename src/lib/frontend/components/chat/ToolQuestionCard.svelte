@@ -9,6 +9,7 @@
 	import Icon from "../ui/Icon.svelte";
 	import BlockGrid from '../ui/BlockGrid.svelte';
 	import QuestionCard from "./QuestionCard.svelte";
+	import Surface from "../ui/Surface.svelte";
 
 	let { message, groupRadius }: {
 		message: ToolMessage;
@@ -247,11 +248,13 @@
 
 		<!-- Show answer when completed -->
 		{#if message.status === "completed" && questionAnswer}
-			<div
-				class="font-mono text-xs whitespace-pre-wrap break-all my-0.5 mx-2.5 py-2 px-2.5 bg-code-bg border border-border-subtle rounded-lg text-text-secondary max-h-[200px] overflow-y-auto mb-2"
+			<Surface
+				variant="inset"
+				radius="md"
+				class="font-mono text-xs whitespace-pre-wrap break-all my-0.5 mx-2.5 py-2 px-2.5 text-text-secondary max-h-[200px] overflow-y-auto mb-2"
 			>
 				{questionAnswer}
-			</div>
+			</Surface>
 		{/if}
 	</div>
 {/if}

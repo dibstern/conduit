@@ -16,6 +16,7 @@
 	import Disclosure from "../ui/Disclosure.svelte";
 	import Button from "../ui/Button.svelte";
 	import BlockGrid from '../ui/BlockGrid.svelte';
+	import Surface from "../ui/Surface.svelte";
 
 	let { message, groupRadius }: {
 		message: ToolMessage;
@@ -177,12 +178,14 @@
 	{/if}
 
 	{#if expanded && (message.result || bashCommand)}
-		<div
-			class="tool-result font-mono text-xs whitespace-pre-wrap break-all my-0.5 mx-2.5 py-3 px-4 bg-code-bg border border-border-subtle rounded-lg text-text-secondary max-h-[200px] overflow-y-auto select-text {resultErrorClass}"
-			class:is-error={message.isError}
+		<Surface
+			variant="inset"
+			padding="md"
+			radius="md"
+			class="tool-result font-mono text-xs whitespace-pre-wrap break-all my-0.5 mx-2.5 text-text-secondary max-h-[200px] overflow-y-auto select-text {resultErrorClass}"
 		>
 			{#if bashCommand}<span class="text-text-muted">$ {bashCommand}</span>{#if message.result}{"\n\n"}{/if}{/if}{#if message.result}{message.result}{/if}
-		</div>
+		</Surface>
 
 		{#if message.isTruncated && message.result}
 			<div class="flex items-center gap-2 mx-2.5 mt-1 mb-1 text-xs text-text-dimmer">
