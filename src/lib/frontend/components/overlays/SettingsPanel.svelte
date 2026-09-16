@@ -50,6 +50,7 @@
 	} from "../../utils/notif-settings.js";
 	import { setPushActive } from "../../stores/ws.svelte.js";
 	import { getCurrentSlug } from "../../stores/router.svelte.js";
+	import TextButton from "../ui/TextButton.svelte";
 	import {
 		addInstanceRpc,
 		detectProxyRpc,
@@ -521,9 +522,9 @@
 {#snippet cmdBlock(cmd: string, key: string)}
 	<div class="group/cmd flex items-start gap-1.5 bg-black/[0.04] dark:bg-white/[0.06] rounded px-2.5 py-1.5 font-mono text-xs text-text leading-relaxed">
 		<span class="flex-1 whitespace-pre-wrap break-all select-all">{cmd}</span>
-		<button type="button" class="shrink-0 p-0.5 text-text-muted hover:text-text opacity-0 group-hover/cmd:opacity-100 transition-opacity cursor-pointer" title="Copy" aria-label="Copy" onclick={() => handleCopy(cmd, key)}>
+		<TextButton type="button" class="shrink-0 p-0.5 opacity-0 group-hover/cmd:opacity-100 transition-opacity" title="Copy" aria-label="Copy" onclick={() => handleCopy(cmd, key)}>
 			{#if copiedKey === key}<Icon name="check" size={13} class="text-green-500" />{:else}<Icon name="copy" size={13} />{/if}
-		</button>
+		</TextButton>
 	</div>
 {/snippet}
 
@@ -656,12 +657,12 @@
 							<div>
 								<div class="flex items-center justify-between px-1 mb-2">
 									<div class="text-xs font-semibold uppercase tracking-widest text-text-muted font-brand">{provider.name}</div>
-									<button
-										class="text-xs text-text-muted hover:text-text cursor-pointer border-none bg-transparent font-brand"
+									<TextButton
+										class="text-xs font-brand"
 										onclick={() => toggleProviderAll(provider.id, !allHidden)}
 									>
 										{allHidden ? "Show all" : "Hide all"}
-									</button>
+									</TextButton>
 								</div>
 								<Surface variant="card" radius="panel" class="space-y-1 px-4 py-2">
 									{#each provider.models as model (model.id)}
@@ -920,7 +921,7 @@
 							</div>
 							<div class="flex items-center justify-center gap-2 pt-2 text-xs text-text-muted">
 								<span>Already started?</span>
-								<button type="button" class="text-accent hover:text-accent font-medium cursor-pointer border-none bg-transparent" data-testid="scan-now-link" onclick={handleScanNow}>{scanInFlight ? "Scanning..." : "Scan Now"}</button>
+								<TextButton type="button" tone="accent" class="font-medium" data-testid="scan-now-link" onclick={handleScanNow}>{scanInFlight ? "Scanning..." : "Scan Now"}</TextButton>
 							</div>
 						</div>
 					{/if}

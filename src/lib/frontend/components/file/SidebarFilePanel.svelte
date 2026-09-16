@@ -12,6 +12,7 @@
 	import FileTreeNode from "./FileTreeNode.svelte";
 	import Icon from "../ui/Icon.svelte";
 	import BlockGrid from "../ui/BlockGrid.svelte";
+	import TextButton from "../ui/TextButton.svelte";
 
 	// ─── State ─────────────────────────────────────────────────────────────────
 
@@ -174,12 +175,12 @@
 			{#if i === breadcrumbs.length - 1}
 				<span class="fb-crumb-active text-text font-medium">{crumb.label}</span>
 			{:else}
-				<button
-					class="fb-crumb hover:text-text hover:underline cursor-pointer bg-transparent border-none text-text-muted text-xs p-0"
+				<TextButton
+					underline="hover" class="fb-crumb text-xs"
 					onclick={() => navigateTo(crumb.path)}
 				>
 					{crumb.label}
-				</button>
+				</TextButton>
 			{/if}
 		{/each}
 	</div>

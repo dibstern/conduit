@@ -30,6 +30,7 @@
 	import BlockGrid from "../ui/BlockGrid.svelte";
 	import Button from "../ui/Button.svelte";
 	import TextInput from "../ui/TextInput.svelte";
+	import TextButton from "../ui/TextButton.svelte";
 
 	// The box only; ui/Button `toolbar` owns the colours and the hover fill.
 	// `size="content"` emits no geometry precisely so a call site can supply
@@ -302,23 +303,23 @@
 	{#if cleanupMode}
 		<div class="shrink-0 px-2 pb-1 bg-bg-surface">
 			<div class="session-list-header flex items-center justify-between px-2 py-1">
-				<button
+				<TextButton
 					type="button"
 					title={allSelected ? "Deselect all sessions" : "Select all sessions"}
-				class="flex items-center gap-1.5 border-none bg-transparent text-sm font-semibold text-text-dimmer cursor-pointer p-0 hover:text-text transition-colors duration-100 font-brand"
+				tone="dimmer" class="flex items-center gap-1.5 text-sm font-semibold transition-colors duration-100 font-brand"
 				onclick={handleToggleSelectAll}
 				>
 					<Icon name={allSelected ? "circle-check" : "circle"} size={14} />
 					<span>{allSelected ? "Deselect all" : "Select all"}</span>
-				</button>
-				<button
+				</TextButton>
+				<TextButton
 					type="button"
 					title="Exit cleanup mode"
-				class="border-none bg-transparent text-sm font-semibold text-text-dimmer cursor-pointer p-0 hover:text-text transition-colors duration-100 font-brand"
+				tone="dimmer" class="text-sm font-semibold transition-colors duration-100 font-brand"
 				onclick={handleExitCleanup}
 				>
 					Cancel
-				</button>
+				</TextButton>
 			</div>
 			<div class="px-2">
 				<button

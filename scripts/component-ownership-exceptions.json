@@ -44,7 +44,7 @@
 			"native-control-bypass": 5
 		},
 		"src/lib/frontend/components/file/SidebarFilePanel.svelte": {
-			"native-control-bypass": 3
+			"native-control-bypass": 2
 		},
 		"src/lib/frontend/components/input/AttachMenu.svelte": {
 			"native-control-bypass": 3
@@ -79,9 +79,6 @@
 		"src/lib/frontend/components/overlays/ImageLightbox.svelte": {
 			"native-control-bypass": 1
 		},
-		"src/lib/frontend/components/overlays/InfoPanels.svelte": {
-			"native-control-bypass": 3
-		},
 		"src/lib/frontend/components/overlays/QrModal.svelte": {
 			"native-control-bypass": 1
 		},
@@ -89,11 +86,11 @@
 			"appearance-override": 1
 		},
 		"src/lib/frontend/components/overlays/SettingsPanel.svelte": {
-			"native-control-bypass": 9,
+			"native-control-bypass": 6,
 			"appearance-override": 9
 		},
 		"src/lib/frontend/components/permissions/AttentionBanner.svelte": {
-			"native-control-bypass": 2
+			"native-control-bypass": 1
 		},
 		"src/lib/frontend/components/permissions/PermissionCard.svelte": {
 			"native-control-bypass": 3
@@ -108,13 +105,13 @@
 			"native-control-bypass": 2
 		},
 		"src/lib/frontend/components/session/SessionList.svelte": {
-			"native-control-bypass": 3
+			"native-control-bypass": 1
 		},
 		"src/lib/frontend/components/setup/StepPwa.svelte": {
 			"native-control-bypass": 1
 		},
 		"src/lib/frontend/components/terminal/TerminalPanel.svelte": {
-			"native-control-bypass": 5
+			"native-control-bypass": 4
 		},
 		"src/lib/frontend/style.css": {
 			"component-class-recipe": 3

@@ -22,6 +22,7 @@
 	import { closePtyRpc, createPtyRpc, resizePtyRpc } from "../../transport/ws-rpc-client.js";
 	import TerminalTab from "./TerminalTab.svelte";
 	import Surface from "../ui/Surface.svelte";
+	import TextButton from "../ui/TextButton.svelte";
 
 	// ─── Props ────────────────────────────────────────────────────────────────
 
@@ -301,14 +302,14 @@
 			</div>
 
 			<!-- Close panel button -->
-			<button
-				class="term-close-panel-btn shrink-0 py-1 px-2 border-none rounded bg-transparent text-text-dimmer text-sm cursor-pointer transition-[color] duration-100 hover:text-text"
+			<TextButton
+				tone="dimmer" class="term-close-panel-btn shrink-0 py-1 px-2 rounded text-sm transition-[color] duration-100"
 				title="Close terminal panel"
 				aria-label="Close terminal panel"
 				onclick={handleClosePanel}
 			>
 				&#215;
-			</button>
+			</TextButton>
 		</div>
 
 		<!-- Terminal body area -->

@@ -7,6 +7,7 @@
 	import type { UsageData, StatusData, ContextData } from "../../types.js";
 	import { uiState, closePanel } from "../../stores/ui.svelte.js";
 	import Surface from "../ui/Surface.svelte";
+	import TextButton from "../ui/TextButton.svelte";
 
 	// ─── Props ──────────────────────────────────────────────────────────────────
 
@@ -85,14 +86,14 @@
 					class="info-panel-header flex items-center justify-between px-3 py-2 border-b border-border"
 				>
 					<span class="text-xs font-semibold text-text">Usage</span>
-					<button
-						class="text-text-muted hover:text-text text-sm leading-none cursor-pointer bg-transparent border-none p-0"
+					<TextButton
+						class="text-sm leading-none"
 						onclick={() => closePanel("usage-panel")}
 						title="Close usage panel"
 						aria-label="Close usage panel"
 					>
 						&times;
-					</button>
+					</TextButton>
 				</div>
 				<div class="info-panel-body px-3 py-2 flex flex-col gap-1">
 					<div class="flex justify-between text-xs">
@@ -143,14 +144,14 @@
 					class="info-panel-header flex items-center justify-between px-3 py-2 border-b border-border"
 				>
 					<span class="text-xs font-semibold text-text">Status</span>
-					<button
-						class="text-text-muted hover:text-text text-sm leading-none cursor-pointer bg-transparent border-none p-0"
+					<TextButton
+						class="text-sm leading-none"
 						onclick={() => closePanel("status-panel")}
 						title="Close status panel"
 						aria-label="Close status panel"
 					>
 						&times;
-					</button>
+					</TextButton>
 				</div>
 				<div class="info-panel-body px-3 py-2 flex flex-col gap-1">
 					<div class="flex justify-between text-xs">
@@ -213,14 +214,14 @@
 					class="info-panel-header flex items-center justify-between px-3 py-2 border-b border-border"
 				>
 					<span class="text-xs font-semibold text-text">Context</span>
-					<button
-						class="text-text-muted hover:text-text text-sm leading-none cursor-pointer bg-transparent border-none p-0"
+					<TextButton
+						class="text-sm leading-none"
 						onclick={() => closePanel("context-panel")}
 						title="Close context panel"
 						aria-label="Close context panel"
 					>
 						&times;
-					</button>
+					</TextButton>
 				</div>
 				<div class="info-panel-body px-3 py-2 flex flex-col gap-1">
 					<!-- Progress bar -->

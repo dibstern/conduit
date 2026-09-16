@@ -9,6 +9,7 @@
 	import { findSession, sessionState, switchToSession } from "../../stores/session.svelte.js";
 	import { wsSend } from "../../stores/ws.svelte.js";
 	import Surface from "../ui/Surface.svelte";
+	import TextButton from "../ui/TextButton.svelte";
 
 	const remotePermissions = $derived(getRemotePermissions(sessionState.currentId));
 	const attentionSessions = $derived(getAttentionSessions(sessionState.currentId, getDescendantSessionIds));
@@ -96,12 +97,12 @@
 			</div>
 			<div class="flex flex-col gap-1.5">
 				{#each [...sessionGroups] as [sessionId, entry] (sessionId)}
-					<button
-						class="text-left text-xs text-accent hover:text-accent/80 hover:underline cursor-pointer truncate px-1 py-0.5 rounded transition-colors"
+					<TextButton
+						tone="accent" underline="hover" class="text-left text-xs truncate px-1 py-0.5 rounded transition-colors"
 						onclick={() => goToSession(sessionId)}
 					>
 						{getSessionTitle(sessionId)} ({itemLabel(entry)})
-					</button>
+					</TextButton>
 				{/each}
 			</div>
 		</Surface>
