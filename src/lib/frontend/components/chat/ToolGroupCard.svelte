@@ -6,6 +6,7 @@
 	import type { ToolGroup } from "../../utils/group-tools.js";
 	import ToolGroupItem from "./ToolGroupItem.svelte";
 	import Icon from "../ui/Icon.svelte";
+	import Disclosure from "../ui/Disclosure.svelte";
 	import BlockGrid from '../ui/BlockGrid.svelte';
 
 	let { group }: { group: ToolGroup } = $props();
@@ -43,18 +44,8 @@
 		{#if group.status === 'running'}
 			<div class="absolute inset-0 pointer-events-none rounded-panel" style="background: linear-gradient(90deg, transparent 0%, rgba(234,179,8,0.04) 50%, transparent 100%); animation: tool-shimmer-slide 2s ease-in-out infinite;"></div>
 		{/if}
-		<!-- Header button -->
-		<button
-			class="flex items-center gap-2.5 w-full py-2 px-3 cursor-pointer select-none text-xs text-text-dimmer hover:bg-bg-surface transition-colors duration-150 border-none text-left"
-			onclick={handleToggle}
-		>
-			<span
-				class="text-text-dimmer transition-transform duration-200 [&_.lucide]:w-3.5 [&_.lucide]:h-3.5"
-				class:rotate-90={expanded}
-			>
-				<Icon name="chevron-right" size={14} />
-			</span>
-
+		<!-- Header row -->
+		<Disclosure {expanded} onToggle={handleToggle}>
 		{#if group.status === 'running'}
 			<BlockGrid cols={5} mode="fast" blockSize={1.5} gap={0.5} class="shrink-0 self-center" />
 		{:else}
@@ -72,7 +63,7 @@
 			</span>
 
 			<span class="flex-1"></span>
-		</button>
+		</Disclosure>
 
 		<!-- Expanded tool list -->
 		{#if expanded}

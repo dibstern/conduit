@@ -26,25 +26,10 @@
 			"native-control-bypass": 6,
 			"appearance-override": 1
 		},
-		"src/lib/frontend/components/chat/SkillItem.svelte": {
-			"native-control-bypass": 1
-		},
 		"src/lib/frontend/components/chat/SubagentBackBar.svelte": {
 			"native-control-bypass": 1
 		},
 		"src/lib/frontend/components/chat/SystemMessage.svelte": {
-			"native-control-bypass": 1
-		},
-		"src/lib/frontend/components/chat/ThinkingBlock.svelte": {
-			"native-control-bypass": 1
-		},
-		"src/lib/frontend/components/chat/ToolGenericCard.svelte": {
-			"native-control-bypass": 1
-		},
-		"src/lib/frontend/components/chat/ToolGroupCard.svelte": {
-			"native-control-bypass": 1
-		},
-		"src/lib/frontend/components/chat/ToolGroupItem.svelte": {
 			"native-control-bypass": 1
 		},
 		"src/lib/frontend/components/chat/ToolSubagentCard.svelte": {

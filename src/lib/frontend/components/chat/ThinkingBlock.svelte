@@ -5,8 +5,8 @@
 
 <script lang="ts">
 	import type { ThinkingMessage } from "../../types.js";
-	import Icon from "../ui/Icon.svelte";
 	import BlockGrid from '../ui/BlockGrid.svelte';
+	import Disclosure from "../ui/Disclosure.svelte";
 
 	let { message }: { message: ThinkingMessage } = $props();
 	let expanded = $state(false);
@@ -67,24 +67,19 @@
 		</div>
 	{:else}
 		<!-- Done: compact collapsible bar -->
-		<button
-			class="thinking-header flex items-center gap-1.5 cursor-pointer py-2 px-3 select-none glow-brand-b rounded-panel text-xs text-text-dimmer hover:bg-bg-surface transition-colors duration-150 w-full text-left"
-			onclick={handleToggle}
+		<Disclosure
+			{expanded}
+			onToggle={handleToggle}
+			density="tight"
+			class="thinking-header glow-brand-b rounded-panel"
 		>
-			<span
-				class="thinking-chevron text-text-dimmer transition-transform duration-200 [&_.lucide]:w-3.5 [&_.lucide]:h-3.5"
-				class:rotate-90={expanded}
-			>
-				<Icon name="chevron-right" size={14} />
-			</span>
-
 			<span class="thinking-label">{label}</span>
 			{#if durationText}
 				<span class="thinking-duration text-sm text-text-dimmer font-normal">
 					{durationText}
 				</span>
 			{/if}
-		</button>
+		</Disclosure>
 
 		{#if expanded && message.text}
 			<div

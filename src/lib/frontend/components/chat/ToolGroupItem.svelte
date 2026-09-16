@@ -11,6 +11,7 @@
 	import { applyToolContentResponse } from "../../stores/ws-dispatch.js";
 	import { getToolContentRpc } from "../../transport/ws-rpc-client.js";
 	import Button from "../ui/Button.svelte";
+	import Disclosure from "../ui/Disclosure.svelte";
 
 	let { message, isLast = false }: {
 		message: ToolMessage;
@@ -80,10 +81,7 @@
 
 <div class="tool-group-item" data-tool-id={message.id}>
 	<!-- Compact row -->
-	<button
-		class="flex items-center gap-2 w-full py-1 px-3 cursor-pointer select-none text-xs text-text-dimmer hover:bg-bg-surface transition-colors duration-150 border-none text-left"
-		onclick={handleToggle}
-	>
+	<Disclosure {expanded} onToggle={handleToggle} chevron={false} density="compact">
 		<!-- Tree connector -->
 		<span class="font-mono text-border text-xs shrink-0 w-3 text-center">
 			{isLast ? "└" : "├"}
@@ -113,7 +111,7 @@
 		{/if}
 
 
-	</button>
+	</Disclosure>
 
 	<!-- Expanded result -->
 	{#if expanded && (message.result || bashCommand)}

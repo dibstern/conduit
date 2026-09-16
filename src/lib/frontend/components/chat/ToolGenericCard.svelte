@@ -12,6 +12,7 @@
 	import { getToolContentRpc } from "../../transport/ws-rpc-client.js";
 
 	import Icon from "../ui/Icon.svelte";
+	import Disclosure from "../ui/Disclosure.svelte";
 	import Button from "../ui/Button.svelte";
 	import BlockGrid from '../ui/BlockGrid.svelte';
 
@@ -138,17 +139,8 @@
 	{#if message.status === 'running'}
 		<div class="absolute inset-0 pointer-events-none" style="background: linear-gradient(90deg, transparent 0%, rgba(234,179,8,0.04) 50%, transparent 100%); animation: tool-shimmer-slide 2s ease-in-out infinite;"></div>
 	{/if}
-	<button
-		class="tool-header flex items-center gap-2.5 w-full py-2 px-3 cursor-pointer select-text text-xs text-text-dimmer hover:bg-bg-surface transition-colors duration-150 border-none text-left"
-		onclick={handleToggle}
-	>
-	<span
-		class="tool-chevron text-text-dimmer transition-transform duration-200 [&_.lucide]:w-3.5 [&_.lucide]:h-3.5"
-		class:rotate-90={expanded}
-	>
-		<Icon name="chevron-right" size={14} />
-	</span>
-
+	<!-- `tool-header` is load-bearing: test/visual/tool-item.spec.ts clicks it. -->
+	<Disclosure {expanded} onToggle={handleToggle} selectable class="tool-header">
 	{#if message.status === 'running'}
 		<BlockGrid cols={5} mode="fast" blockSize={1.5} gap={0.5} class="shrink-0 self-center" />
 	{:else}
@@ -174,7 +166,7 @@
 			</span>
 		{/each}
 	{/if}
-	</button>
+	</Disclosure>
 
 	{#if message.status !== 'completed'}
 	<div

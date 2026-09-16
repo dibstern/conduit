@@ -5,6 +5,7 @@
 <script lang="ts">
 	import type { ToolMessage } from "../../types.js";
 	import Icon from "../ui/Icon.svelte";
+	import Disclosure from "../ui/Disclosure.svelte";
 	import BlockGrid from '../ui/BlockGrid.svelte';
 
 	let { message }: { message: ToolMessage } = $props();
@@ -81,9 +82,12 @@
 	data-tool-id={message.id}
 >
 	<div class="{message.status === 'completed' ? '' : 'bg-bg-surface'} rounded-panel {message.status === 'error' ? 'glow-tool-error' : message.status === 'completed' ? 'glow-brand-b' : message.status === 'running' ? 'glow-tool-running' : ''}">
-		<button
-			class="skill-header flex items-center gap-2.5 w-full py-2 px-3 cursor-pointer select-text text-xs text-text-dimmer hover:bg-bg-surface transition-colors duration-150 border-none text-left rounded-t-[10px]"
-			onclick={handleToggle}
+		<Disclosure
+			{expanded}
+			onToggle={handleToggle}
+			chevron={false}
+			selectable
+			class="rounded-t-[10px]"
 		>
 			<!-- Status icon -->
 			{#if message.status === 'running'}
@@ -110,7 +114,7 @@
 					</span>
 				{/if}
 			</div>
-		</button>
+		</Disclosure>
 
 		<!-- Subtitle row (hidden when completed, like ThinkingBlock) -->
 		{#if message.status !== 'completed'}
