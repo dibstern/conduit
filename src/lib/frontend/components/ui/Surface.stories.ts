@@ -17,15 +17,19 @@ const meta = {
 	argTypes: {
 		variant: {
 			control: "select",
-			options: ["card", "inset", "floating", "plain"],
+			options: ["card", "quiet", "plain", "bare", "raised", "inset"],
 		},
 		padding: {
 			control: "inline-radio",
 			options: ["none", "sm", "md", "lg"],
 		},
-		elevation: {
+		radius: {
 			control: "inline-radio",
-			options: ["none", "menu", "panel", "modal"],
+			options: ["none", "sm", "md", "lg", "panel"],
+		},
+		elevation: {
+			control: "select",
+			options: ["none", "menu", "menu-lg", "panel", "modal", "dropdown"],
 		},
 	},
 } satisfies Meta<typeof Surface>;
@@ -49,6 +53,14 @@ export const PaddingAndElevation: Story = {
 			axis: "padding-elevation",
 			children: content("Surface"),
 		},
+	}),
+};
+
+/** Every radius step, including `none` where the call site owns the corner. */
+export const Radius: Story = {
+	render: () => ({
+		Component: SurfaceStoryGallery,
+		props: { axis: "radius", children: content("Surface") },
 	}),
 };
 
