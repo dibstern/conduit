@@ -4,6 +4,13 @@
 
 <script lang="ts">
 	import Icon from "../ui/Icon.svelte";
+	import Button from "../ui/Button.svelte";
+
+	// The box only; ui/Button `toolbar` owns the colours and the 4% hover fill.
+	// A 23px square (4px padding around a 15px glyph at the 12px root), which is
+	// deliberately NOT SessionList's 18px -- see Button.svelte::toolbar.
+	const HEADER_ICON_BOX =
+		"p-[4px] rounded-lg border border-transparent hover:border-border shrink-0";
 	import {
 		uiState,
 		toggleSidebar,
@@ -134,25 +141,41 @@
 >
 	<!-- Left section: hamburger/expand + project name (scrollable on mobile) -->
 	<div id="header-left" class="flex items-center gap-2 min-w-0 flex-1">
-		<button
-			id="sidebar-expand-btn"
-			class="header-icon-btn"
-			class:hidden={!uiState.sidebarCollapsed}
-			title="Open sidebar"
-			aria-label="Open sidebar"
-			onclick={handleExpandSidebar}
-		>
-			<Icon name="panel-left-open" size={15} />
-		</button>
-		<button
+		<!-- `{#if}` rather than `class:hidden`: Button's base sets `inline-flex`,
+		     and Tailwind emits display utilities alphabetically, so `.hidden`
+		     lands BEFORE `.inline-flex` and loses. The old markup got away with
+		     it because `.header-icon-btn` set display from @layer components,
+		     which utilities outrank. That class is now gone. -->
+		{#if uiState.sidebarCollapsed}
+			<Button
+				id="sidebar-expand-btn"
+				variant="toolbar"
+				size="content"
+				class={HEADER_ICON_BOX}
+				iconOnly
+				icon="panel-left-open"
+				iconSize={15}
+				title="Open sidebar"
+				ariaLabel="Open sidebar"
+				onclick={handleExpandSidebar}
+			/>
+		{/if}
+		<!-- Visibility is purely viewport-driven and always was: the `hidden`
+		     class here only ever mattered until the mobile media query in
+		     style.css overrode it. That is now stated once, as a pair of
+		     ID rules, instead of split between markup and a media query. -->
+		<Button
 			id="hamburger-btn"
-			class="header-icon-btn hidden"
+			variant="toolbar"
+			size="content"
+			class={HEADER_ICON_BOX}
+			iconOnly
+			icon="menu"
+			iconSize={15}
 			title="Menu"
-			aria-label="Menu"
+			ariaLabel="Menu"
 			onclick={handleHamburger}
-		>
-			<Icon name="menu" size={15} />
-		</button>
+		/>
 		<div id="header-project-scroll" class="min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap max-md:flex max-md:items-center">
 			<div class="flex items-center gap-2 whitespace-nowrap">
 			<h1 id="project-name" class="text-lg font-semibold tracking-[0.08em] font-brand">
@@ -215,50 +238,62 @@
 		<!-- Debug panel toggle (visible when debug feature flag is on) -->
 		{#if featureFlags.debug}
 			<div id="debug-menu-wrap">
-				<button
+				<Button
 					id="debug-btn"
-					class="header-icon-btn"
+					variant="toolbar"
+					size="content"
+					class={HEADER_ICON_BOX}
+					iconOnly
+					icon="bug"
+					iconSize={15}
 					title="Toggle debug panel"
-					aria-label="Toggle debug panel"
+					ariaLabel="Toggle debug panel"
 					onclick={() => window.dispatchEvent(new CustomEvent("debug:toggle"))}
-				>
-					<Icon name="bug" size={15} />
-				</button>
+				/>
 			</div>
 		{/if}
 
 		<!-- Terminal -->
-		<button
+		<Button
 			id="header-terminal-btn"
-			class="header-icon-btn"
+			variant="toolbar"
+			size="content"
+			class={HEADER_ICON_BOX}
+			iconOnly
+			icon="square-terminal"
+			iconSize={15}
 			title="Toggle terminal"
-			aria-label="Toggle terminal"
+			ariaLabel="Toggle terminal"
 			onclick={handleTerminalToggle}
-		>
-			<Icon name="square-terminal" size={15} />
-		</button>
+		/>
 
 		<!-- Settings -->
-		<button
+		<Button
 			id="header-settings-btn"
-			class="header-icon-btn"
+			variant="toolbar"
+			size="content"
+			class={HEADER_ICON_BOX}
+			iconOnly
+			icon="settings"
+			iconSize={15}
 			title="Settings"
-			aria-label="Settings"
+			ariaLabel="Settings"
 			onclick={() => window.dispatchEvent(new CustomEvent("settings:open"))}
-		>
-			<Icon name="settings" size={15} />
-		</button>
+		/>
 
 		<!-- QR share button -->
-		<button
+		<Button
 			id="qr-btn"
-			class="header-icon-btn"
+			variant="toolbar"
+			size="content"
+			class={HEADER_ICON_BOX}
+			iconOnly
+			icon="share"
+			iconSize={15}
 			title="Share"
-			aria-label="Share"
+			ariaLabel="Share"
 			onclick={handleQrShare}
-		>
-			<Icon name="share" size={15} />
-		</button>
+		/>
 
 		<!-- Client count badge -->
 		<span

@@ -64,7 +64,7 @@
 			"private-recipe-import": 1
 		},
 		"src/lib/frontend/components/layout/Header.svelte": {
-			"native-control-bypass": 9
+			"native-control-bypass": 3
 		},
 		"src/lib/frontend/components/layout/Sidebar.svelte": {
 			"native-control-bypass": 5
@@ -135,7 +135,7 @@
 			"native-control-bypass": 5
 		},
 		"src/lib/frontend/style.css": {
-			"component-class-recipe": 6
+			"component-class-recipe": 5
 		}
 	}
 }

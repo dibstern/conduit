@@ -449,24 +449,13 @@
 
 /* ─── Header ───────────────────────────────────────────────────────────────── */
 
-/* Header icon button component (6+ instances — keep as @apply).
-   MUST be inside @layer components so Tailwind utilities like `hidden`
-   (display:none) properly override the `display:flex` set here. */
-@layer components {
-	.header-icon-btn {
-		@apply flex items-center justify-center rounded-lg bg-transparent cursor-pointer transition-[background,color,border-color] duration-150 shrink-0;
-		border: 1px solid transparent;
-		color: var(--color-text-dimmer);
-		padding: 4px;
-	}
-	.header-icon-btn:hover {
-		color: var(--color-text-secondary);
-		background: rgba(var(--overlay-rgb), 0.04);
-		border-color: var(--color-border);
-	}
-	.header-icon-btn .lucide {
-		@apply w-[15px] h-[15px];
-	}
+/* The hamburger is viewport-only: hidden on desktop, shown by the mobile media
+   query below. Stated as an ID rule rather than a `hidden` class on the element
+   because ui/Button's base sets `inline-flex`, and Tailwind emits display
+   utilities alphabetically, so `.hidden` sorts before `.inline-flex` and loses.
+   ID specificity sidesteps the ordering question entirely. (conduit-test-de3.35.3) */
+#hamburger-btn {
+	display: none;
 }
 
 /* Badge hidden state overrides */
