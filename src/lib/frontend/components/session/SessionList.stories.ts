@@ -1,4 +1,5 @@
 import type { Meta, StoryObj } from "@storybook/svelte-vite";
+import { expect, userEvent, within } from "storybook/test";
 import {
 	requestNewSession,
 	resetSessionCreation,
@@ -60,5 +61,26 @@ export const Loading: Story = {
 		resetSessionCreation();
 		requestNewSession();
 		return resetSessionCreation;
+	},
+};
+
+// Searching (above) seeds the query but never opens the field -- `searchVisible`
+// is internal and only the toolbar button flips it, so the search box itself had
+// no baseline at all before conduit-test-de3.35.7.
+export const SearchOpen: Story = {
+	beforeEach: () => {
+		sessionState.rootSessions = [...mockSessionsAllGroups];
+		sessionState.allSessions = [...mockSessionsAllGroups];
+	},
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		await userEvent.click(
+			canvas.getByRole("button", { name: "Search sessions" }),
+		);
+		const search = await canvas.findByPlaceholderText("Search sessions...");
+		// Opening search must land the caret in the field. This is the assertion,
+		// not a setup step: the focus used to come from a `use:focusOnMount`
+		// action, and an action cannot cross a component boundary.
+		await expect(search).toHaveFocus();
 	},
 };

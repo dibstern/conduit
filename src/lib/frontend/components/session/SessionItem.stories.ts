@@ -71,3 +71,13 @@ export const Hover: Story = {
 	...Inactive,
 	parameters: { pseudo: { hover: true } },
 };
+
+// The inline rename field had no baseline before conduit-test-de3.35.7, which
+// is how it kept a bespoke recipe through three migration batches unnoticed.
+export const Renaming: Story = {
+	args: {
+		session: mockSession,
+		active: false,
+		renaming: true,
+	},
+};

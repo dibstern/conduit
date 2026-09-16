@@ -14,10 +14,20 @@
 		size?: FieldSize;
 		/** Standalone invalid flag; a wrapping <Field> also forces it. */
 		invalid?: boolean;
+		/**
+		 * Focus on mount. Handled here rather than passed through, because the
+		 * HTML attribute only means anything while the document is first parsed:
+		 * spread onto this input at runtime it sets a property nothing reads, and
+		 * the field silently never takes focus. Three call sites had each worked
+		 * around that with an identical one-line `use:focusOnMount` action, which
+		 * is the other thing that cannot cross a component boundary
+		 * (conduit-test-de3.35.7).
+		 */
+		autofocus?: boolean;
 		class?: string;
 	} & Omit<
 		HTMLInputAttributes,
-		"class" | "size" | "type" | "value" | "aria-invalid"
+		"class" | "size" | "type" | "value" | "aria-invalid" | "autofocus"
 	>;
 
 	let {
@@ -25,6 +35,7 @@
 		type = "text",
 		size = "md",
 		invalid = false,
+		autofocus = false,
 		class: className,
 		...rest
 	}: TextInputProps = $props();
@@ -42,6 +53,14 @@
 		(field?.required ?? false) || Boolean(rest.required),
 	);
 
+	// Deliberately not rendered as an `autofocus` attribute: it would do nothing
+	// (see the prop doc) and would trip svelte-check's a11y_autofocus rule for
+	// the trouble.
+	let element: HTMLInputElement;
+	$effect(() => {
+		if (autofocus) element.focus();
+	});
+
 	const inputClass = $derived(
 		[FIELD_BASE_CLASSES, CONTROL_SIZE_CLASSES[size], className]
 			.filter(Boolean)
@@ -51,6 +70,7 @@
 
 <input
 	{...rest}
+	bind:this={element}
 	{type}
 	id={inputId}
 	class={inputClass}

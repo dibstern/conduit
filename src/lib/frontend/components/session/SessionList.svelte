@@ -29,6 +29,7 @@
 	import Icon from "../ui/Icon.svelte";
 	import BlockGrid from "../ui/BlockGrid.svelte";
 	import Button from "../ui/Button.svelte";
+	import TextInput from "../ui/TextInput.svelte";
 
 	// The box only; ui/Button `toolbar` owns the colours and the hover fill.
 	// `size="content"` emits no geometry precisely so a call site can supply
@@ -294,12 +295,6 @@
 		if (!projectSlug) return;
 		void renameSessionRpc({ projectSlug, sessionId: id, title });
 	}
-
-	// ─── Actions ────────────────────────────────────────────────────────────────
-
-	function focusOnMount(node: HTMLElement) {
-		node.focus();
-	}
 </script>
 
 <div id="session-list" class="flex-1 flex flex-col overflow-hidden">
@@ -404,17 +399,20 @@
 
 	{#if searchVisible}
 		<div class="shrink-0 px-2.5 py-1 pb-1.5">
-			<input
+			<!-- `autofocus` replaces a hand-rolled one-line `use:focusOnMount`
+			     action: an action is a DOM directive and cannot cross a component
+			     boundary, and the action did nothing `autofocus` does not. -->
+			<TextInput
 				id="session-search-input"
-				type="text"
+				size="sm"
+				class="font-brand"
 				placeholder="Search sessions..."
 				autocomplete="off"
-				spellcheck="false"
-			class="w-full bg-input-bg border border-border rounded-lg py-1.5 px-2.5 text-xs text-text outline-none focus:border-accent placeholder:text-text-dimmer font-brand"
+				spellcheck={false}
 				value={localSearchValue}
 				oninput={handleSearchInput}
 				onkeydown={handleSearchKeydown}
-				use:focusOnMount
+				autofocus
 			/>
 		</div>
 	{/if}

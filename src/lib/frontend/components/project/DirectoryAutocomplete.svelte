@@ -9,6 +9,7 @@
 	import { listDirectoriesRpc } from "../../transport/ws-rpc-client.js";
 	import DetachedListbox from "../ui/DetachedListbox.svelte";
 	import Icon from "../ui/Icon.svelte";
+	import TextInput from "../ui/TextInput.svelte";
 
 	// ─── Props ──────────────────────────────────────────────────────────────────
 
@@ -52,7 +53,6 @@
 	let activeIndex = $state(0);
 	let visible = $state(false);
 	let debounceTimer: ReturnType<typeof setTimeout> | undefined;
-	let inputEl: HTMLInputElement | undefined = $state(undefined);
 	let lastRequestPath = "";
 
 	const expanded = $derived(visible && entries.length > 0);
@@ -242,12 +242,16 @@
 	{/if}
 
 	<!-- Input -->
-	<input
-		bind:this={inputEl}
-		type="text"
+	<!-- `text-[12px]` overrides the sm scale on purpose. conduit's root font-size
+	     is 12px, so `text-xs` resolves to 9px, and a monospace filesystem path at
+	     9px is not readable. Tracked as conduit-test-gpeu (the field type
+	     scale) rather than settled per call site. -->
+	<TextInput
+		size="sm"
+		class="font-mono text-[12px]"
 		{placeholder}
 		autocomplete="off"
-		spellcheck="false"
+		spellcheck={false}
 		role="combobox"
 		aria-label="Project directory"
 		aria-autocomplete="list"
@@ -255,7 +259,6 @@
 		aria-expanded={expanded}
 		aria-controls={expanded ? listboxId : undefined}
 		aria-activedescendant={activeOptionId}
-		class="w-full bg-input-bg border border-border rounded-md py-1.5 px-2 text-[12px] text-text font-mono outline-none focus:border-accent placeholder:text-text-dimmer"
 		bind:value
 		oninput={handleInput}
 		onkeydown={handleKeydown}

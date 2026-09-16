@@ -9,6 +9,7 @@
 	import { sessionState } from "../../stores/session.svelte.js";
 	import { formatTimeAgo } from "../../utils/format.js";
 	import Icon from "../ui/Icon.svelte";
+	import TextInput from "../ui/TextInput.svelte";
 
 	// ─── Props ──────────────────────────────────────────────────────────────────
 
@@ -153,12 +154,6 @@
 		e.preventDefault();
 		e.stopPropagation();
 	}
-
-	// ─── Actions ────────────────────────────────────────────────────────────────
-
-	function focusOnMount(node: HTMLElement) {
-		node.focus();
-	}
 </script>
 
 <!-- svelte-ignore a11y_click_events_have_key_events -->
@@ -199,14 +194,20 @@
 		ondblclick={handleDblClick}
 	>
 		{#if isRenaming}
-			<input
-				type="text"
-			class="session-rename-input w-full bg-input-bg border border-accent rounded py-px px-1 text-xs text-text outline-none font-brand"
+			<!-- The bespoke version hard-coded `border-accent` to say "this row is
+			     being edited". TextInput says that on focus and the field is
+			     autofocused, so the signal survives -- which matters, because an
+			     additive `border-accent` here would silently lose to the base
+			     `border-border` (Tailwind emits border-colour utilities
+			     alphabetically). -->
+			<TextInput
+				size="sm"
+				class="font-brand"
 				bind:value={renameValue}
 				onkeydown={handleRenameKeydown}
 				onblur={handleRenameBlur}
 				onclick={handleRenameClick}
-				use:focusOnMount
+				autofocus
 			/>
 		{:else}
 			<span class="session-title-inner inline-block pr-[3em]">{displayTitle}</span>

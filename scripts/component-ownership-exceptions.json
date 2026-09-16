@@ -111,7 +111,6 @@
 			"native-control-bypass": 3
 		},
 		"src/lib/frontend/components/project/DirectoryAutocomplete.svelte": {
-			"native-control-bypass": 1,
 			"appearance-override": 1
 		},
 		"src/lib/frontend/components/project/ProjectContextMenu.svelte": {
@@ -122,10 +121,10 @@
 			"private-recipe-import": 1
 		},
 		"src/lib/frontend/components/session/SessionItem.svelte": {
-			"native-control-bypass": 3
+			"native-control-bypass": 2
 		},
 		"src/lib/frontend/components/session/SessionList.svelte": {
-			"native-control-bypass": 4
+			"native-control-bypass": 3
 		},
 		"src/lib/frontend/components/setup/StepPwa.svelte": {
 			"native-control-bypass": 1
