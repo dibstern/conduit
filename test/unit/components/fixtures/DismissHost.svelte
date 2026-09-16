@@ -2,7 +2,7 @@
 	import {
 		dismiss,
 		type DismissOptions,
-	} from "../../../../src/lib/frontend/components/ui/actions/use-dismiss.svelte.js";
+	} from "../../../../src/lib/frontend/actions/use-dismiss.svelte.js";
 
 	let { options }: { options: DismissOptions } = $props();
 </script>

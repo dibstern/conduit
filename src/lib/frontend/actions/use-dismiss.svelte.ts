@@ -1,7 +1,17 @@
 /**
- * Legacy dismissal action retained for the six feature consumers
- * ModelVariant, ContextWindowSelector, ModelSelector, ProjectSwitcher,
- * ThemePicker, and PermissionModeSelector until de3.3.4 migrates them to Bits.
+ * Outside-click / Escape dismissal for surfaces that are NOT built on a Bits
+ * primitive. Three consumers remain: PermissionModeSelector,
+ * InstanceModelPicker and ProjectSwitcher.
+ *
+ * Deliberately here rather than in `components/ui/actions/`, where it used to
+ * live. Every consumer is a feature component, so importing it tripped
+ * ADR-0003's `private-recipe-import` rule three times over -- and that rule is
+ * right: a feature has no business reaching into the design system's internals.
+ * What was wrong was the location. This is behaviour, not a style recipe, so it
+ * is not part of the design system at all (conduit-test-de3.35.6).
+ *
+ * `use-background-inert` stays in `components/ui/actions/`: its only consumers
+ * are the overlay primitives themselves (Modal, Menu, Popover, Tooltip).
  */
 export interface DismissOptions {
 	/** Fired on a dismiss gesture (outside-click or Escape). */

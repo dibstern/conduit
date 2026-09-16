@@ -23,7 +23,10 @@
 		instanceStatusColor,
 	} from "../../stores/instance.svelte.js";
 	import Icon from "../ui/Icon.svelte";
-	import { dismiss } from "../ui/actions/use-dismiss.svelte.js";
+	import Button from "../ui/Button.svelte";
+	import TextInput from "../ui/TextInput.svelte";
+	import Select from "../ui/Select.svelte";
+	import { dismiss } from "../../actions/use-dismiss.svelte.js";
 	import DirectoryAutocomplete from "./DirectoryAutocomplete.svelte";
 	import ProjectContextMenu from "./ProjectContextMenu.svelte";
 	import { confirm } from "../../stores/ui.svelte.js";
@@ -232,10 +235,6 @@
 		}
 	}
 
-	function focusOnMount(node: HTMLElement) {
-		node.focus();
-	}
-
 	function handleKeydown(e: KeyboardEvent) {
 		if (e.key === "Escape") {
 			if (showAddForm) {
@@ -274,8 +273,13 @@
 	});
 </script>
 
+<!-- `flex flex-col` so the trigger below, which ui/Button renders as an
+     inline-flex <button>, is a flex ITEM rather than an inline-level box on a
+     line box -- otherwise line-height adds a few px of descender space under
+     it. The absolutely-positioned dropdown and context menu are out of flow, so
+     this does not reach them. -->
 <div
-	class="proj-switcher relative"
+	class="proj-switcher relative flex flex-col"
 	use:dismiss={{
 		onDismiss: () => {
 			if (document.getElementById("confirm-modal")) return;
@@ -285,15 +289,29 @@
 		},
 	}}
 >
-	<!-- Main button — always rendered -->
-	<!-- svelte-ignore a11y_click_events_have_key_events -->
-	<!-- svelte-ignore a11y_no_static_element_interactions -->
-	<div
+	<!-- Was a <div onclick> carrying two svelte-ignore comments: not reachable
+	     by keyboard at all, and silent about the dropdown it opens. `toolbar` is
+	     the variant whose recipe this already was, down to the 4% overlay hover
+	     fill (conduit-test-de3.35.6).
+
+	     `justify-between` is deliberately NOT passed here even though that is
+	     the layout. Tailwind emits colliding properties in its own order and
+	     `.justify-center`, which Button's BASE_CLASSES sets, is emitted AFTER
+	     `.justify-between` in the built stylesheet -- the override would lose
+	     silently. `flex-1` on the name block pushes the chevron right instead,
+	     which needs no precedence at all. (`justify-start` and `justify-end`
+	     happen to be emitted after and DO win; do not generalise from them.) -->
+	<Button
 		id="project-switcher-btn"
-		class="flex items-center justify-between gap-2 cursor-pointer rounded-lg px-2 py-1.5 hover:bg-[rgba(var(--overlay-rgb),0.04)] transition-colors duration-150 font-brand"
+		variant="toolbar"
+		size="content"
+		class="w-full gap-2 rounded-lg px-2 py-1.5 duration-150 font-brand"
+		aria-haspopup="true"
+		aria-expanded={open}
+		aria-controls={open ? "project-switcher-dropdown" : undefined}
 		onclick={toggleDropdown}
 	>
-		<div class="flex flex-col min-w-0">
+		<div class="flex-1 flex flex-col min-w-0 text-left">
 			<span
 				class="text-sm font-semibold uppercase tracking-[0.5px] text-text-dimmer leading-tight"
 				>Projects</span
@@ -321,11 +339,12 @@
 		>
 			<Icon name="chevron-down" size={14} />
 		</span>
-	</div>
+	</Button>
 
 	<!-- Dropdown menu -->
 	{#if open}
 		<div
+			id="project-switcher-dropdown"
 			class="absolute top-full left-0 right-0 z-[var(--z-dropdown)] mt-0.5 min-w-[240px] max-w-[320px] bg-bg-surface border border-border rounded-panel shadow-dropdown p-1 overflow-hidden font-brand"
 			data-testid="project-switcher-dropdown"
 		>
@@ -379,14 +398,15 @@
 						<!-- Name and directory -->
 						<div class="flex-1 min-w-0 flex flex-col">
 								{#if isRenaming}
-									<input
-										type="text"
-										class="w-full min-w-0 bg-input-bg border border-accent rounded py-px px-1 text-xs text-text outline-none font-brand"
+									<TextInput
+										size="sm"
+										class="min-w-0 font-brand"
+										autofocus
+										aria-label="Rename project"
 										bind:value={renameValue}
 										onkeydown={(e) => handleRenameKeydown(e, project.slug)}
 										onblur={() => commitProjectRename(project.slug)}
 										onclick={(e) => { e.preventDefault(); e.stopPropagation(); }}
-										use:focusOnMount
 									/>
 								{:else}
 									<span
@@ -411,18 +431,23 @@
 									{project.clientCount}
 								</span>
 							{/if}
-							<button
-								class="proj-more-btn shrink-0 w-5 h-5 border-none rounded p-0 bg-transparent cursor-pointer flex items-center justify-center text-text-dimmer hover:text-text hover:bg-bg-alt transition-colors duration-100"
+							<!-- `proj-more-btn` is kept as a plain hook: two e2e specs
+							     locate this control by it. -->
+							<Button
+								variant="toolbar"
+								size="content"
+								iconOnly
+								icon="ellipsis"
+								iconSize={13}
+								ariaLabel="More options"
+								class="proj-more-btn shrink-0 w-5 h-5 rounded duration-100"
 								title="More options"
-								aria-label="More options"
 								onclick={(e) => {
 									e.preventDefault();
 									e.stopPropagation();
 									handleProjectContextMenu(project, e.currentTarget as HTMLElement);
 								}}
-							>
-								<Icon name="ellipsis" size={13} />
-							</button>
+							/>
 						{/if}
 					</a>
 				{/each}
@@ -454,14 +479,15 @@
 						<!-- Name and directory -->
 						<div class="flex-1 min-w-0 flex flex-col">
 								{#if isRenaming}
-									<input
-										type="text"
-										class="w-full min-w-0 bg-input-bg border border-accent rounded py-px px-1 text-xs text-text outline-none font-brand"
+									<TextInput
+										size="sm"
+										class="min-w-0 font-brand"
+										autofocus
+										aria-label="Rename project"
 										bind:value={renameValue}
 										onkeydown={(e) => handleRenameKeydown(e, project.slug)}
 										onblur={() => commitProjectRename(project.slug)}
 										onclick={(e) => { e.preventDefault(); e.stopPropagation(); }}
-										use:focusOnMount
 									/>
 								{:else}
 									<span
@@ -486,18 +512,23 @@
 									{project.clientCount}
 								</span>
 							{/if}
-							<button
-								class="proj-more-btn shrink-0 w-5 h-5 border-none rounded p-0 bg-transparent cursor-pointer flex items-center justify-center text-text-dimmer hover:text-text hover:bg-bg-alt transition-colors duration-100"
+							<!-- `proj-more-btn` is kept as a plain hook: two e2e specs
+							     locate this control by it. -->
+							<Button
+								variant="toolbar"
+								size="content"
+								iconOnly
+								icon="ellipsis"
+								iconSize={13}
+								ariaLabel="More options"
+								class="proj-more-btn shrink-0 w-5 h-5 rounded duration-100"
 								title="More options"
-								aria-label="More options"
 								onclick={(e) => {
 									e.preventDefault();
 									e.stopPropagation();
 									handleProjectContextMenu(project, e.currentTarget as HTMLElement);
 								}}
-							>
-								<Icon name="ellipsis" size={13} />
-							</button>
+							/>
 						{/if}
 					</a>
 				{/each}
@@ -514,52 +545,65 @@
 							onsubmit={handleSubmitAdd}
 						/>
 						{#if hasMultipleInstances}
-							<select
+							<!-- `sm` to match the DirectoryAutocomplete field directly
+							     above it; the two were a size apart before. -->
+							<Select
 								name="instance"
 								id="instance-selector"
-								class="w-full bg-input-bg border border-border rounded-md py-1.5 px-2 text-base text-text outline-none focus:border-accent"
+								size="sm"
+								aria-label="Instance"
 								bind:value={addInstanceId}
 							>
 								{#each instanceState.instances as inst}
 									<option value={inst.id}>{inst.name}</option>
 								{/each}
-							</select>
+							</Select>
 						{/if}
 						{#if addError}
 							<span class="text-sm text-error">{addError}</span>
 						{/if}
 						<div class="flex items-center gap-1.5 justify-end">
-							<!-- svelte-ignore a11y_click_events_have_key_events -->
-							<!-- svelte-ignore a11y_no_static_element_interactions -->
-							<span
-								class="text-sm text-text-dimmer cursor-pointer hover:text-text-secondary px-1.5 py-0.5"
+							<!-- Both were <span onclick>. A project could not be added
+							     from the keyboard at all (conduit-test-de3.35.6). -->
+							<Button
+								variant="ghost"
+								size="content"
+								class="text-sm px-1.5 py-0.5 rounded"
 								onclick={handleCancelAdd}
 							>
 								Cancel
-							</span>
-							<!-- svelte-ignore a11y_click_events_have_key_events -->
-							<!-- svelte-ignore a11y_no_static_element_interactions -->
-							<span
-								class="text-sm font-medium text-accent cursor-pointer hover:text-accent/80 px-1.5 py-0.5 rounded bg-accent/10 hover:bg-accent/15 transition-colors"
-								class:opacity-50={adding}
+							</Button>
+							<!-- `disabled` rather than the old `class:opacity-50`: the
+							     dimming was decorative, so a second click while a slow
+							     add was in flight sent a second request. -->
+							<Button
+								variant="accent-soft"
+								size="content"
+								class="text-sm font-medium px-1.5 py-0.5 rounded"
+								disabled={adding}
 								onclick={handleSubmitAdd}
 							>
 								{adding ? "Adding..." : "Add"}
-							</span>
+							</Button>
 						</div>
 					</div>
 				{:else}
 					<!-- Add project button -->
 					<div class="py-1">
-						<!-- svelte-ignore a11y_click_events_have_key_events -->
-						<!-- svelte-ignore a11y_no_static_element_interactions -->
-						<div
-							class="flex items-center gap-2 w-full px-3 py-2 text-xs text-text-muted cursor-pointer transition-colors duration-150 hover:bg-[rgba(var(--overlay-rgb),0.04)] hover:text-text-secondary"
+						<!-- `justify-start` DOES override Button's base `justify-center`
+						     (it is emitted later in the built stylesheet). Unlike
+						     `justify-between` on the trigger above -- same rule, opposite
+						     outcome, which is why both are verified rather than reasoned
+						     about. -->
+						<Button
+							variant="toolbar"
+							size="content"
+							class="w-full justify-start gap-2 px-3 py-2 text-xs duration-150"
 							onclick={handleShowAddForm}
 						>
 							<Icon name="plus" size={13} />
 							<span>Add project</span>
-						</div>
+						</Button>
 					</div>
 				{/if}
 			</div>

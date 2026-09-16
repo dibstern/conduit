@@ -11,7 +11,7 @@
 	import ContextWindowSelector from "./ContextWindowSelector.svelte";
 	// biome-ignore lint/style/useImportType: ModelVariant is used as a value for bind:this
 	import ModelVariant from "./ModelVariant.svelte";
-	import { dismiss } from "../ui/actions/use-dismiss.svelte.js";
+	import { dismiss } from "../../actions/use-dismiss.svelte.js";
 	import {
 		applyGetModelsResponse,
 		applyGetAgentsResponse,

@@ -60,8 +60,7 @@
 			"native-control-bypass": 3
 		},
 		"src/lib/frontend/components/input/PermissionModeSelector.svelte": {
-			"native-control-bypass": 2,
-			"private-recipe-import": 1
+			"native-control-bypass": 2
 		},
 		"src/lib/frontend/components/layout/Sidebar.svelte": {
 			"native-control-bypass": 5
@@ -70,8 +69,7 @@
 			"native-control-bypass": 2
 		},
 		"src/lib/frontend/components/model/InstanceModelPicker.svelte": {
-			"native-control-bypass": 8,
-			"private-recipe-import": 1
+			"native-control-bypass": 8
 		},
 		"src/lib/frontend/components/overlays/Banners.svelte": {
 			"native-control-bypass": 1
@@ -106,10 +104,6 @@
 		},
 		"src/lib/frontend/components/project/ProjectContextMenu.svelte": {
 			"native-control-bypass": 2
-		},
-		"src/lib/frontend/components/project/ProjectSwitcher.svelte": {
-			"native-control-bypass": 5,
-			"private-recipe-import": 1
 		},
 		"src/lib/frontend/components/session/SessionItem.svelte": {
 			"native-control-bypass": 2

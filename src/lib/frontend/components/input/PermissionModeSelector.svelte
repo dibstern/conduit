@@ -4,7 +4,7 @@
 
 <script lang="ts">
 	import Icon from "../ui/Icon.svelte";
-	import { dismiss } from "../ui/actions/use-dismiss.svelte.js";
+	import { dismiss } from "../../actions/use-dismiss.svelte.js";
 	import { discoveryState } from "../../stores/discovery.svelte.js";
 	import { getCurrentSlug } from "../../stores/router.svelte.js";
 	import { sessionState } from "../../stores/session.svelte.js";
