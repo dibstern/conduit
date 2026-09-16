@@ -19,7 +19,11 @@ type Story = StoryObj<typeof meta>;
 
 export const Default: Story = {};
 
+// `rootSelector: "body"` is load-bearing. Since conduit-test-de3.35.4 the menu
+// portals out of #storybook-root, which is where the pseudo-states addon starts
+// walking -- so a plain `hover: true` reached nothing and this story rendered a
+// frame byte-identical to Default for several commits.
 export const Hover: Story = {
 	...Default,
-	parameters: { pseudo: { hover: true } },
+	parameters: { pseudo: { rootSelector: "body", hover: true } },
 };

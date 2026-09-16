@@ -7,6 +7,7 @@
 <script lang="ts">
 	import Icon from "../ui/Icon.svelte";
 	import Button from "../ui/Button.svelte";
+	import Radio from "../ui/Radio.svelte";
 	import {
 		uiState,
 		exitRewindMode,
@@ -121,12 +122,11 @@
 				<label
 					class="flex items-center gap-2.5 text-sm text-text cursor-pointer"
 				>
-					<input
-						type="radio"
+					<Radio
 						name="rewind-mode"
 						value="both"
-						bind:group={selectedMode}
-						class="rewind-radio accent-[var(--accent)]"
+						checked={selectedMode === "both"}
+						onchange={() => (selectedMode = "both")}
 					/>
 					<span>Both</span>
 					<span class="text-xs text-text-muted"
@@ -136,24 +136,22 @@
 				<label
 					class="flex items-center gap-2.5 text-sm text-text cursor-pointer"
 				>
-					<input
-						type="radio"
+					<Radio
 						name="rewind-mode"
 						value="conversation"
-						bind:group={selectedMode}
-						class="rewind-radio accent-[var(--accent)]"
+						checked={selectedMode === "conversation"}
+						onchange={() => (selectedMode = "conversation")}
 					/>
 					<span>Conversation only</span>
 				</label>
 				<label
 					class="flex items-center gap-2.5 text-sm text-text cursor-pointer"
 				>
-					<input
-						type="radio"
+					<Radio
 						name="rewind-mode"
 						value="files"
-						bind:group={selectedMode}
-						class="rewind-radio accent-[var(--accent)]"
+						checked={selectedMode === "files"}
+						onchange={() => (selectedMode = "files")}
 					/>
 					<span>Files only</span>
 				</label>

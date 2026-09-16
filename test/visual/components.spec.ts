@@ -461,14 +461,17 @@ if (stories.length > 0) {
 					const root = page.locator("#storybook-root");
 					const box = await root.boundingBox();
 
-					// A story whose id says "focus" is understood to be showing the house
-					// focus ring, which needs two things no other story does — see the
-					// padding and the zero tolerance below. Keyed off the id rather than a
-					// registry so a new focus story is covered the day it is written.
-					// Viewport captures are excluded: they already frame the whole page,
-					// so nothing is cropped and padding would only churn their baselines.
-					const capturesFocusRing =
-						/focus/i.test(story.id) &&
+					// A story whose id says "focus" or "invalid" is understood to be
+					// showing an affordance painted OUTSIDE the subject's border box --
+					// the house focus ring (a box-shadow) or, on a UA-painted checkbox
+					// where `border` is ignored, the error outline. Both need the two
+					// things no other story does: see the padding and the zero tolerance
+					// below. Keyed off the id rather than a registry so a new one is
+					// covered the day it is written. Viewport captures are excluded:
+					// they already frame the whole page, so nothing is cropped and
+					// padding would only churn their baselines.
+					const capturesOutsideBorderBox =
+						/focus|invalid/i.test(story.id) &&
 						!story.tags?.includes(VIEWPORT_CAPTURE_TAG) &&
 						!!box &&
 						box.height > 0;
@@ -498,7 +501,7 @@ if (stories.length > 0) {
 					if (sizeNorm && !STRICT) {
 						screenshotOpts.maxDiffPixelRatio = sizeNorm.maxDiffPixelRatio;
 					}
-					if (capturesFocusRing) {
+					if (capturesOutsideBorderBox) {
 						// The default 1% tolerance is wider than the ring. A focus ring is
 						// a 2px outline on one small subject in a viewport-wide image, so
 						// on desktop it is ~0.7% of the pixels — deleting it outright still
@@ -522,10 +525,10 @@ if (stories.length > 0) {
 					// ui-button--focus-visible contained ZERO ring pixels, so deleting
 					// the ring from Button outright would still have passed the gate.
 					// Only the element path needs the room; a viewport capture already
-					// includes everything around the subject. Keyed off the story id
-					// rather than a registry so a new focus story is covered the day it
-					// is written. See conduit-test-de3.19.
-					if (capturesFocusRing) {
+					// includes everything around the subject. An error outline on a
+					// UA-painted checkbox has the same problem for the same reason.
+					// See conduit-test-de3.19.
+					if (capturesOutsideBorderBox) {
 						await page.addStyleTag({
 							content: "#storybook-root { padding: 8px; }",
 						});

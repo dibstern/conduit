@@ -23,7 +23,7 @@
 			"native-control-bypass": 4
 		},
 		"src/lib/frontend/components/chat/QuestionCard.svelte": {
-			"native-control-bypass": 6,
+			"native-control-bypass": 1,
 			"appearance-override": 1
 		},
 		"src/lib/frontend/components/chat/SubagentBackBar.svelte": {
@@ -98,11 +98,10 @@
 			"native-control-bypass": 1
 		},
 		"src/lib/frontend/components/overlays/RewindBanner.svelte": {
-			"native-control-bypass": 3,
 			"appearance-override": 3
 		},
 		"src/lib/frontend/components/overlays/SettingsPanel.svelte": {
-			"native-control-bypass": 17,
+			"native-control-bypass": 9,
 			"appearance-override": 11
 		},
 		"src/lib/frontend/components/permissions/AttentionBanner.svelte": {

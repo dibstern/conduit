@@ -5,6 +5,9 @@
 <script lang="ts">
 	import type { QuestionRequest } from "../../types.js";
 	import Button from "../ui/Button.svelte";
+	import Checkbox from "../ui/Checkbox.svelte";
+	import Radio from "../ui/Radio.svelte";
+	import TextInput from "../ui/TextInput.svelte";
 	import { getBrowserClientId } from "../../stores/client-identity.js";
 	import { getCurrentSlug } from "../../stores/router.svelte.js";
 	import {
@@ -254,8 +257,7 @@
 									class="question-option flex items-start gap-2 px-2.5 py-2 rounded-lg cursor-pointer text-sm bg-bg-surface border border-border-subtle transition-[background,border-color] duration-150 hover:border-border hover:bg-bg {isCheckboxChecked(qIdx, opt.label) ? 'border-accent bg-accent-bg' : ''}"
 									for={optId}
 								>
-									<input
-										type="checkbox"
+									<Checkbox
 										id={optId}
 										name={inputName}
 										value={opt.label}
@@ -271,7 +273,7 @@
 												(e.target as HTMLInputElement)
 													.checked,
 											)}
-										class="mt-0.5 shrink-0 accent-accent"
+										class="mt-0.5"
 									/>
 									<span
 										class="question-option-content flex flex-col gap-0.5"
@@ -293,8 +295,7 @@
 									class="question-option flex items-start gap-2 px-2.5 py-2 rounded-lg cursor-pointer text-sm bg-bg-surface border border-border-subtle transition-[background,border-color] duration-150 hover:border-border hover:bg-bg {isRadioChecked(qIdx, opt.label) ? 'border-accent bg-accent-bg' : ''}"
 									for={optId}
 								>
-									<input
-										type="radio"
+									<Radio
 										id={optId}
 										name={inputName}
 										value={opt.label}
@@ -308,7 +309,7 @@
 												qIdx,
 												opt.label,
 											)}
-										class="mt-0.5 shrink-0 accent-accent"
+										class="mt-0.5"
 									/>
 									<span
 										class="question-option-content flex flex-col gap-0.5"
@@ -339,8 +340,7 @@
 									class="question-option flex items-start gap-2 px-2.5 py-2 rounded-lg cursor-pointer text-sm bg-bg-surface border border-border-subtle transition-[background,border-color] duration-150 hover:border-border hover:bg-bg {isCheckboxChecked(qIdx, '__custom__') ? 'border-accent bg-accent-bg' : ''}"
 									for={customOptId}
 								>
-									<input
-										type="checkbox"
+									<Checkbox
 										id={customOptId}
 										name={inputName}
 										value="__custom__"
@@ -356,7 +356,7 @@
 												(e.target as HTMLInputElement)
 													.checked,
 											)}
-										class="mt-0.5 shrink-0 accent-accent"
+										class="mt-0.5"
 									/>
 									<span
 										class="question-option-content flex flex-col gap-0.5"
@@ -372,8 +372,7 @@
 									class="question-option flex items-start gap-2 px-2.5 py-2 rounded-lg cursor-pointer text-sm bg-bg-surface border border-border-subtle transition-[background,border-color] duration-150 hover:border-border hover:bg-bg {isRadioChecked(qIdx, '__custom__') ? 'border-accent bg-accent-bg' : ''}"
 									for={customOptId}
 								>
-									<input
-										type="radio"
+									<Radio
 										id={customOptId}
 										name={inputName}
 										value="__custom__"
@@ -387,7 +386,7 @@
 												qIdx,
 												"__custom__",
 											)}
-										class="mt-0.5 shrink-0 accent-accent"
+										class="mt-0.5"
 									/>
 									<span
 										class="question-option-content flex flex-col gap-0.5"
@@ -400,10 +399,9 @@
 								</label>
 							{/if}
 						{/if}
-						<input
-							type="text"
+						<TextInput
 							id={`${inputName}-custom`}
-							class="question-custom-input w-full mt-1 px-2.5 py-2 rounded-lg text-sm bg-input-bg border border-border text-text font-sans outline-none transition-[border-color] duration-150 focus:border-accent disabled:opacity-50 disabled:cursor-not-allowed"
+							class="mt-1"
 							placeholder="Type your answer"
 							disabled={!!resolved}
 							value={customTexts.get(qIdx) ?? ""}

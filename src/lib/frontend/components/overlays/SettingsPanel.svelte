@@ -7,7 +7,10 @@
 	import { untrack } from "svelte";
 	import Button from "../ui/Button.svelte";
 	import Icon from "../ui/Icon.svelte";
+	import Checkbox from "../ui/Checkbox.svelte";
 	import Select from "../ui/Select.svelte";
+	import Textarea from "../ui/Textarea.svelte";
+	import TextInput from "../ui/TextInput.svelte";
 	import Toggle from "../ui/Toggle.svelte";
 	import { createFrontendLogger } from "../../utils/logger.js";
 
@@ -749,10 +752,8 @@
 							{/if}
 							<label class="block space-y-1">
 								<span class="text-xs text-text-muted">Name</span>
-								<input
-									type="text"
+								<TextInput
 									data-testid="instance-form-name"
-									class="w-full px-2 py-1.5 text-sm border border-border rounded bg-bg text-text focus:border-brand-a outline-none"
 									placeholder={formDriver === "claude" ? "Work Claude" : "Staging OC"}
 									bind:value={formName}
 								/>
@@ -760,37 +761,35 @@
 							{#if formDriver === "claude"}
 								<label class="block space-y-1">
 									<span class="text-xs text-text-muted">Config directory <span class="opacity-60">(optional)</span></span>
-									<input
-										type="text"
+									<TextInput
 										data-testid="instance-form-configdir"
-										class="w-full px-2 py-1.5 text-sm border border-border rounded bg-bg text-text focus:border-brand-a outline-none"
 										placeholder="~/.config/claude/work"
 										bind:value={formConfigDir}
 									/>
 								</label>
 							{:else}
 								<label class="flex items-center gap-2 text-sm text-text cursor-pointer">
-									<input type="checkbox" data-testid="instance-form-managed" bind:checked={formManaged} />
+									<Checkbox data-testid="instance-form-managed" bind:checked={formManaged} />
 									<span>Managed <span class="text-xs text-text-muted">(conduit starts the server)</span></span>
 								</label>
 								{#if formManaged}
 									<label class="block space-y-1">
 										<span class="text-xs text-text-muted">Port</span>
-										<input type="text" inputmode="numeric" data-testid="instance-form-port" class="w-full px-2 py-1.5 text-sm border border-border rounded bg-bg text-text focus:border-brand-a outline-none" placeholder="4098" bind:value={formPort} />
+										<TextInput inputmode="numeric" data-testid="instance-form-port" placeholder="4098" bind:value={formPort} />
 									</label>
 								{:else}
 									<label class="block space-y-1">
 										<span class="text-xs text-text-muted">URL <span class="opacity-60">(or port)</span></span>
-										<input type="text" data-testid="instance-form-url" class="w-full px-2 py-1.5 text-sm border border-border rounded bg-bg text-text focus:border-brand-a outline-none" placeholder="http://127.0.0.1:4098" bind:value={formUrl} />
+										<TextInput data-testid="instance-form-url" placeholder="http://127.0.0.1:4098" bind:value={formUrl} />
 									</label>
 									<label class="block space-y-1">
 										<span class="text-xs text-text-muted">Port <span class="opacity-60">(optional)</span></span>
-										<input type="text" inputmode="numeric" data-testid="instance-form-port" class="w-full px-2 py-1.5 text-sm border border-border rounded bg-bg text-text focus:border-brand-a outline-none" placeholder="4098" bind:value={formPort} />
+										<TextInput inputmode="numeric" data-testid="instance-form-port" placeholder="4098" bind:value={formPort} />
 									</label>
 								{/if}
 								<label class="block space-y-1">
 									<span class="text-xs text-text-muted">Environment <span class="opacity-60">(KEY=VALUE per line, optional)</span></span>
-									<textarea data-testid="instance-form-env" rows="2" class="w-full px-2 py-1.5 text-sm border border-border rounded bg-bg text-text focus:border-brand-a outline-none resize-y font-mono" placeholder="ANTHROPIC_API_KEY=sk-ant-..." bind:value={formEnv}></textarea>
+									<Textarea data-testid="instance-form-env" rows={2} class="resize-y font-mono" placeholder="ANTHROPIC_API_KEY=sk-ant-..." bind:value={formEnv} />
 								</label>
 							{/if}
 							<div class="flex justify-end gap-2 pt-1">
@@ -824,7 +823,13 @@
 											<span class={"w-2 h-2 rounded-full shrink-0 " + instanceStatusColor(inst.status)}></span>
 											{#if renamingInstanceId === inst.id}
 												<!-- svelte-ignore a11y_autofocus -->
-												<input type="text" class="px-1.5 py-0.5 text-sm border border-accent rounded bg-bg text-text w-36" bind:value={renameValue} onkeydown={handleRenameKeydown} onclick={(e) => e.stopPropagation()} onfocusout={submitRename} autofocus />
+												<!-- The bespoke version hard-coded `border-accent` to say "this
+												     one is live". TextInput already says that on focus, and the
+												     row is autofocused, so the signal survives the migration --
+												     which matters, because an additive `border-accent` here would
+												     silently lose to the base `border-border` (Tailwind emits
+												     border-colour utilities alphabetically). -->
+												<TextInput size="sm" class="w-36" bind:value={renameValue} onkeydown={handleRenameKeydown} onclick={(e) => e.stopPropagation()} onfocusout={submitRename} autofocus />
 											{:else}
 												<span class="font-medium text-text truncate">{inst.name}</span>
 											{/if}
