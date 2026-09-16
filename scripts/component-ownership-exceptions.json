@@ -24,7 +24,7 @@
 		},
 		"src/lib/frontend/components/chat/QuestionCard.svelte": {
 			"native-control-bypass": 6,
-			"appearance-override": 2
+			"appearance-override": 1
 		},
 		"src/lib/frontend/components/chat/SkillItem.svelte": {
 			"native-control-bypass": 1
@@ -103,9 +103,6 @@
 			"native-control-bypass": 1
 		},
 		"src/lib/frontend/components/overlays/ConfirmModal.svelte": {
-			"appearance-override": 3
-		},
-		"src/lib/frontend/components/overlays/ConnectOverlay.svelte": {
 			"appearance-override": 2
 		},
 		"src/lib/frontend/components/overlays/ImageLightbox.svelte": {
@@ -119,18 +116,17 @@
 		},
 		"src/lib/frontend/components/overlays/RewindBanner.svelte": {
 			"native-control-bypass": 3,
-			"appearance-override": 4
+			"appearance-override": 3
 		},
 		"src/lib/frontend/components/overlays/SettingsPanel.svelte": {
 			"native-control-bypass": 17,
-			"appearance-override": 14
+			"appearance-override": 11
 		},
 		"src/lib/frontend/components/permissions/AttentionBanner.svelte": {
 			"native-control-bypass": 2
 		},
 		"src/lib/frontend/components/permissions/PermissionCard.svelte": {
-			"native-control-bypass": 3,
-			"appearance-override": 4
+			"native-control-bypass": 3
 		},
 		"src/lib/frontend/components/project/DirectoryAutocomplete.svelte": {
 			"native-control-bypass": 1,

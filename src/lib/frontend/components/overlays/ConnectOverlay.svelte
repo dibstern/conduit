@@ -237,7 +237,7 @@
 				<Button
 					variant="secondary"
 					size="content"
-					class="px-4 py-1.5 text-sm rounded-lg font-medium hover:bg-bg-alt!"
+					class="px-4 py-1.5 text-sm rounded-lg font-medium"
 					onclick={handleStartInstance}
 				>
 					Start Instance
@@ -245,7 +245,7 @@
 				<Button
 					variant="secondary"
 					size="content"
-					class="px-4 py-1.5 text-sm rounded-lg font-medium hover:bg-bg-alt!"
+					class="px-4 py-1.5 text-sm rounded-lg font-medium"
 					onclick={handleSwitchInstance}
 				>
 					Switch Instance

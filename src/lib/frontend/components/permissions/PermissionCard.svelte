@@ -224,16 +224,20 @@
 				>
 					Allow
 				</Button>
-				<!-- Four `!` because this button is a drifted `success-soft`: every one
-				     of its three colours sits one notch softer than the variant, and
-				     once those are important the variant's hover tint has to be too or
-				     it loses to them. The count is the point — this is the single most
-				     drifted site in batch A, and the normalize pass either aligns it to
-				     `success-soft` or earns it a de-emphasised variant of its own. -->
+				<!-- Normalized onto plain `success-soft` (de3.35.2). This used to sit
+				     one notch softer than its Allow sibling on all three colours, to
+				     de-emphasise the more consequential choice. Aligned rather than
+				     given a variant of its own, on two grounds: it was a single-file
+				     recipe, which Button.svelte:39-42 says stays local, and the dimming
+				     ran the wrong way for contrast — `text-success/70` over a
+				     `bg-success/[0.08]` surface was the least readable label on the
+				     card. If Always Allow genuinely needs de-emphasis, that is a
+				     hierarchy question for the card, not an opacity nudge on one
+				     button. -->
 				<Button
 					variant="success-soft"
 					size="content"
-					class="min-h-[48px] flex-1 px-4 py-2 rounded-lg font-sans text-sm font-medium bg-success/[0.08]! border-success/15! text-success/70! hover:bg-success/15!"
+					class="min-h-[48px] flex-1 px-4 py-2 rounded-lg font-sans text-sm font-medium"
 					onclick={handleAlwaysAllow}
 				>
 					{hasClaudeRememberOptions ? "Remember" : "Always Allow"}{hasClaudeRememberOptions ||

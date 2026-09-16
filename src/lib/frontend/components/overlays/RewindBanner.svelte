@@ -172,7 +172,7 @@
 				<Button
 					variant="primary"
 					size="content"
-					class="rounded-lg py-1.5 px-4 text-base font-medium text-bg!"
+					class="rounded-lg py-1.5 px-4 text-base font-medium"
 					onclick={handleConfirm}
 				>
 					Rewind

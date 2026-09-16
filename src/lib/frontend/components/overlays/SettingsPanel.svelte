@@ -850,7 +850,7 @@
 										<!-- Three `!` and every one of them is raw Tailwind palette, not a
 										     token: border-red-700 / text-red-500 are the headline drift item
 										     for the de3.5 NORMALIZE pass. -->
-										<Button variant="danger-outline" size="content" class="px-3 py-1 text-xs rounded border-red-700! text-red-500! hover:bg-error/10!" data-testid="remove-instance-btn" onclick={() => handleRemove(inst.id, inst.name)}>Remove</Button>
+										<Button variant="danger-outline" size="content" class="px-3 py-1 text-xs rounded" data-testid="remove-instance-btn" onclick={() => handleRemove(inst.id, inst.name)}>Remove</Button>
 										</div>
 									{/if}
 								</div>
