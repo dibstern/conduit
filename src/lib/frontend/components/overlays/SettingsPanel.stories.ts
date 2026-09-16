@@ -132,16 +132,25 @@ export const InstancesEmpty: Story = {
 	args: { initialTab: "instances" },
 };
 
+/**
+ * Also the a11y gate for the setup-scenario rows. They were bare `<button>`s
+ * that announced nothing about the region they opened; on ui/Disclosure they
+ * always carry `aria-expanded`, and this asserts the value actually tracks the
+ * state rather than being a constant (conduit-test-jeji).
+ */
 export const QuickStartExpanded: Story = {
 	args: { initialTab: "instances" },
 	play: async ({ canvasElement }) => {
 		const canvas = within(canvasElement);
-		await userEvent.click(
-			canvas.getByRole("button", {
-				name: /Quick Start — Direct API Key/,
-			}),
-		);
+		const row = canvas.getByRole("button", {
+			name: /Quick Start — Direct API Key/,
+		});
+
+		await expect(row).toHaveAttribute("aria-expanded", "false");
+		await userEvent.click(row);
+
 		await expect(canvas.getByText("opencode serve --port 4098")).toBeVisible();
+		await expect(row).toHaveAttribute("aria-expanded", "true");
 	},
 };
 
@@ -155,12 +164,15 @@ export const InstanceExpanded: Story = {
 	beforeEach: populateInstances,
 	play: async ({ canvasElement }) => {
 		const canvas = within(canvasElement);
-		await userEvent.click(
-			canvas.getByRole("button", {
-				name: /Local OpenCode/,
-			}),
-		);
+		const row = canvas.getByRole("button", {
+			name: /Local OpenCode/,
+		});
+
+		await expect(row).toHaveAttribute("aria-expanded", "false");
+		await userEvent.click(row);
+
 		await expect(canvas.getByRole("button", { name: "Rename" })).toBeVisible();
+		await expect(row).toHaveAttribute("aria-expanded", "true");
 	},
 };
 

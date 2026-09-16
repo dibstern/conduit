@@ -13,7 +13,15 @@
 		..._disclosureProps
 	}: DisclosureStoryGalleryProps = $props();
 
-	const densities = ["default", "compact", "tight"] as const;
+	const densities = [
+		"default",
+		"compact",
+		"tight",
+		"roomy",
+		"split",
+	] as const;
+
+	const looks = ["card", "section", "row"] as const;
 
 	// Rows are rendered in both states side by side so the chevron rotation and
 	// the three vertical rhythms are all comparable in one baseline.
@@ -21,7 +29,10 @@
 		"default-open": true,
 		"compact-open": true,
 		"tight-open": true,
+		"roomy-open": true,
+		"split-open": true,
 		"nochevron-open": true,
+		"look-section": true,
 	});
 </script>
 
@@ -53,4 +64,18 @@
 		<span class="font-medium">chevron={false}</span>
 		<span class="flex-1"></span>
 	</Disclosure>
+
+	<!-- `look` replaces the type scale, resting colour and hover wash as one
+	     unit, so the three are only comparable side by side. -->
+	{#each looks as look}
+		<Disclosure
+			expanded={expanded[`look-${look}`] ?? false}
+			onToggle={() =>
+				(expanded[`look-${look}`] = !expanded[`look-${look}`])}
+			{look}
+		>
+			<span class="font-medium">look={look}</span>
+			<span class="flex-1"></span>
+		</Disclosure>
+	{/each}
 </div>

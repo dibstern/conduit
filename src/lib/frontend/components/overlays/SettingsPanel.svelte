@@ -16,6 +16,7 @@
 	import Surface from "../ui/Surface.svelte";
 	import Tabs from "../ui/Tabs.svelte";
 	import SegmentedControl from "../ui/SegmentedControl.svelte";
+	import Disclosure from "../ui/Disclosure.svelte";
 	import { createFrontendLogger } from "../../utils/logger.js";
 
 	const log = createFrontendLogger("push");
@@ -558,16 +559,18 @@
 			<div class="flex items-center justify-between px-5 py-3 border-b border-border">
 				<h2 class="text-lg font-semibold text-text font-brand">Settings</h2>
 				<!-- `ghost` is a shade darker than this control and carries a hover
-				     fill it has never had. `hover:text-text!` is needed because
-				     `text-text-muted!` is important at EVERY state, so it also beat
-				     ghost's own `hover:text-text` — see component-conventions.mdx. -->
+				     fill it has never had. Both are REPLACED rather than overridden:
+				     the `!` triple this used to carry was important at every state,
+				     so it also had to beat ghost's own `hover:text-text`. -->
 				<Button
 					iconOnly
 					ariaLabel="Close settings"
 					icon="x"
 					variant="ghost"
+					tone="muted"
+					hoverFill="none"
 					size="content"
-					class="p-1 text-text-muted! hover:bg-transparent! hover:text-text!"
+					class="p-1"
 					data-testid="settings-close-btn"
 					onclick={() => onClose?.()}
 				/>
@@ -718,8 +721,10 @@
 						     16, this is 12, and only a child can carry the spin class. -->
 						<Button
 							variant="secondary"
+							tone="muted"
+							hoverFill="none"
 							size="content"
-							class="gap-1.5 px-2.5 py-1 text-xs rounded text-text-muted! hover:text-text! hover:border-text-muted hover:bg-transparent! font-brand"
+							class="gap-1.5 px-2.5 py-1 text-xs rounded hover:border-text-muted font-brand"
 							data-testid="scan-now-btn"
 							disabled={scanInFlight}
 							onclick={handleScanNow}
@@ -797,7 +802,7 @@
 								</label>
 							{/if}
 							<div class="flex justify-end gap-2 pt-1">
-								<Button variant="secondary" size="content" class="px-3 py-1 text-xs rounded text-text-muted! hover:text-text! hover:bg-transparent!" data-testid="instance-form-cancel" onclick={closeInstanceForm}>Cancel</Button>
+								<Button variant="secondary" tone="muted" hoverFill="none" size="content" class="px-3 py-1 text-xs rounded" data-testid="instance-form-cancel" onclick={closeInstanceForm}>Cancel</Button>
 								<Button variant="ghost-accent" size="content" class="px-3 py-1 text-xs rounded border border-accent" data-testid="instance-form-save" disabled={formSaving} onclick={submitInstanceForm}>{formSaving ? "Saving..." : "Save"}</Button>
 							</div>
 						</div>
@@ -822,7 +827,7 @@
 							{#each instances as inst}
 								{@const driver = instanceDriver(inst)}
 								<div class="border border-border rounded-lg" data-testid="instance-row-{inst.id}" data-driver={driver}>
-									<button class="flex items-center justify-between w-full px-3 py-2 text-left text-sm hover:bg-[rgba(var(--overlay-rgb),0.03)] cursor-pointer bg-transparent border-none" onclick={() => handleToggleInstance(inst.id)}>
+									<Disclosure expanded={expandedInstanceId === inst.id} onToggle={() => handleToggleInstance(inst.id)} chevron={false} look="row" density="split" class="justify-between">
 										<div class="flex items-center gap-2 min-w-0">
 											<span class={"w-2 h-2 rounded-full shrink-0 " + instanceStatusColor(inst.status)}></span>
 											{#if renamingInstanceId === inst.id}
@@ -847,7 +852,7 @@
 										{:else}
 											<span class="text-text-muted text-xs shrink-0 ml-2">:{inst.port}</span>
 										{/if}
-									</button>
+									</Disclosure>
 									{#if expandedInstanceId === inst.id}
 										<div class="flex flex-wrap gap-2 px-3 py-2 border-t border-border">
 										{#if driver === "opencode" && inst.managed}
@@ -871,10 +876,10 @@
 					<div class="mt-2 space-y-2 font-brand">
 							<p class="text-sm text-text-muted mb-3">No OpenCode instances detected. Start one from your terminal and it will appear here automatically.</p>
 							<div class="border border-border rounded-lg overflow-hidden">
-								<button type="button" class="flex items-center gap-2 w-full px-3 py-2.5 text-left text-sm font-medium text-text hover:bg-[rgba(var(--overlay-rgb),0.03)] cursor-pointer bg-transparent border-none" onclick={() => toggleScenario("direct")}>
+								<Disclosure expanded={expandedScenario === "direct"} onToggle={() => toggleScenario("direct")} chevron={false} look="section" density="roomy">
 									<Icon name={expandedScenario === "direct" ? "chevron-down" : "chevron-right"} size={14} class="text-text-muted shrink-0" />
 									<span>Quick Start — Direct API Key</span>
-								</button>
+								</Disclosure>
 								{#if expandedScenario === "direct"}
 									<div class="px-3 pb-3 space-y-2 border-t border-border pt-2.5">
 										<p class="text-xs text-text-muted">1. Start an OpenCode server:</p>
@@ -886,11 +891,11 @@
 								{/if}
 							</div>
 							<div class="border border-border rounded-lg overflow-hidden">
-								<button type="button" class="flex items-center gap-2 w-full px-3 py-2.5 text-left text-sm font-medium text-text hover:bg-[rgba(var(--overlay-rgb),0.03)] cursor-pointer bg-transparent border-none" onclick={() => toggleScenario("ccs")}>
+								<Disclosure expanded={expandedScenario === "ccs"} onToggle={() => toggleScenario("ccs")} chevron={false} look="section" density="roomy">
 									<Icon name={expandedScenario === "ccs" ? "chevron-down" : "chevron-right"} size={14} class="text-text-muted shrink-0" />
 									<span>Multi-Provider — Via CCS</span>
 									{#if ccsDetected}<Icon name="circle-check" size={14} class="text-green-500 ml-auto shrink-0" />{:else if proxyResult === null}<span class="text-xs text-text-muted animate-pulse ml-auto">detecting...</span>{/if}
-								</button>
+								</Disclosure>
 								{#if expandedScenario === "ccs"}
 									<div class="px-3 pb-3 space-y-2 border-t border-border pt-2.5">
 										<p class="text-xs text-text-muted">CCS manages OAuth tokens and API keys for 20+ providers.</p>
@@ -909,10 +914,10 @@
 								{/if}
 							</div>
 							<div class="border border-border rounded-lg overflow-hidden">
-								<button type="button" class="flex items-center gap-2 w-full px-3 py-2.5 text-left text-sm font-medium text-text hover:bg-[rgba(var(--overlay-rgb),0.03)] cursor-pointer bg-transparent border-none" onclick={() => toggleScenario("custom")}>
+								<Disclosure expanded={expandedScenario === "custom"} onToggle={() => toggleScenario("custom")} chevron={false} look="section" density="roomy">
 									<Icon name={expandedScenario === "custom" ? "chevron-down" : "chevron-right"} size={14} class="text-text-muted shrink-0" />
 									<span>Custom Setup</span>
-								</button>
+								</Disclosure>
 								{#if expandedScenario === "custom"}
 									<div class="px-3 pb-3 space-y-2 border-t border-border pt-2.5">
 										<p class="text-xs text-text-muted">Configure with environment variables:</p>

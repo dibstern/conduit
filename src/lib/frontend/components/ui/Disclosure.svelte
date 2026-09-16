@@ -30,17 +30,59 @@
   in the DOM; otherwise `aria-expanded` is doing the real work.
 -->
 <script module lang="ts">
-	// Shared with every consumer; the hover/transition/duration triple is the
-	// part all five copies already agreed on, so it is genuinely invariant.
+	import { HOVER_FILL_CLASSES } from "./button-recipes.js";
+
+	/**
+	 * What every disclosure row is, regardless of where it lives: a full-width
+	 * clickable strip whose contents sit on one line, indented to the card
+	 * gutter. All nine consumers agree on every token here.
+	 *
+	 * `border-none` and `bg-transparent` used to be in this list and are gone.
+	 * Tailwind v4's preflight already sets `border: 0 solid` and a transparent
+	 * background on every `<button>`, so both emitted nothing -- while squatting
+	 * on two groups a consumer might legitimately need. `border-none` is the
+	 * more dangerous of the pair: it sets border-STYLE to none, so any
+	 * `border-b-2` a call site added would render as a 2px-wide nothing. That
+	 * exact bug shipped in SettingsPanel's tab strip (conduit-test-mkah).
+	 *
+	 * `transition-colors duration-150` stays invariant even though the four
+	 * SettingsPanel rows had no transition: a 150ms hover fade is invisible to
+	 * a screenshot and is the behaviour the other five already chose.
+	 */
 	const BASE_CLASSES =
-		"flex items-center w-full px-3 text-left border-none bg-transparent " +
-		"text-xs text-text-dimmer cursor-pointer " +
-		"hover:bg-bg-surface transition-colors duration-150";
+		"flex items-center w-full px-3 text-left cursor-pointer " +
+		"transition-colors duration-150";
+
+	/**
+	 * Type scale, resting colour and hover wash as ONE closed union that
+	 * REPLACES the lot, on the same contract as ui/Button's `tone`: a consumer
+	 * `class` can only append, and two utilities from one Tailwind group
+	 * collide on stylesheet order rather than class order, so an additive
+	 * override's outcome depends on a byte offset nobody can see from the call
+	 * site. Replacing means exactly one of each is ever emitted.
+	 *
+	 * These are two real families rather than a scale. `card` is the chat
+	 * cards' dim-small row; the other two are SettingsPanel's, which sit on a
+	 * bordered panel and so are a step larger and a step brighter.
+	 */
+	const LOOK_CLASSES = {
+		/** The five chat cards (ToolGroupCard, ToolGenericCard, SkillItem, ToolGroupItem, ThinkingBlock). */
+		card: `text-xs text-text-dimmer ${HOVER_FILL_CLASSES.surface}`,
+		/** SettingsPanel's setup-scenario headers: a titled section you open. */
+		section: `text-sm font-medium text-text ${HOVER_FILL_CLASSES["overlay-soft"]}`,
+		/** SettingsPanel's instance rows: colour is inherited, because the row's
+		 *  own children (name, badges, port) each carry their own. */
+		row: `text-sm ${HOVER_FILL_CLASSES["overlay-soft"]}`,
+	} as const;
 
 	const DENSITY_CLASSES = {
 		default: "gap-2.5 py-2",
 		compact: "gap-2 py-1",
 		tight: "gap-1.5 py-2",
+		roomy: "gap-2 py-2.5",
+		/** No gap on purpose: a row that pushes its children apart with
+		 *  `justify-between` only gets a minimum-separation fight from one. */
+		split: "py-2",
 	} as const;
 </script>
 
@@ -55,6 +97,7 @@
 		chevron = true,
 		selectable = false,
 		density = "default",
+		look = "card",
 		class: className,
 		children,
 	}: {
@@ -73,16 +116,23 @@
 		/** `select-text` instead of `select-none`, for rows whose text is worth copying. */
 		selectable?: boolean;
 		/**
-		 * Vertical rhythm. These are the three as-found pairings, not a scale:
+		 * Vertical rhythm. These are the as-found pairings, not a scale:
 		 *
 		 *   default  gap-2.5 py-2   top-level card headers (ToolGroupCard,
 		 *                           ToolGenericCard, SkillItem)
 		 *   compact  gap-2   py-1   ToolGroupItem, a row nested inside a group
 		 *   tight    gap-1.5 py-2   ThinkingBlock's collapsed bar
+		 *   roomy    gap-2   py-2.5 SettingsPanel's setup-scenario headers
+		 *   split    (none)  py-2   SettingsPanel's instance rows
 		 *
 		 * `tight` has MORE padding than `compact`; they vary on different axes.
 		 */
-		density?: "default" | "compact" | "tight";
+		density?: keyof typeof DENSITY_CLASSES;
+		/**
+		 * Type scale + colour + hover wash, REPLACING the default rather than
+		 * adding to it. See LOOK_CLASSES above for why that is a replacement.
+		 */
+		look?: keyof typeof LOOK_CLASSES;
 		class?: string;
 		children: Snippet;
 	} = $props();
@@ -90,6 +140,7 @@
 	const rowClass = $derived(
 		[
 			BASE_CLASSES,
+			LOOK_CLASSES[look],
 			DENSITY_CLASSES[density],
 			selectable ? "select-text" : "select-none",
 			className,

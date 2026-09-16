@@ -76,10 +76,6 @@
 		"src/lib/frontend/components/overlays/RewindBanner.svelte": {
 			"appearance-override": 1
 		},
-		"src/lib/frontend/components/overlays/SettingsPanel.svelte": {
-			"native-control-bypass": 4,
-			"appearance-override": 9
-		},
 		"src/lib/frontend/components/permissions/AttentionBanner.svelte": {
 			"native-control-bypass": 1
 		},

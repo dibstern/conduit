@@ -21,7 +21,11 @@ const meta = {
 	argTypes: {
 		density: {
 			control: "inline-radio",
-			options: ["default", "compact", "tight"],
+			options: ["default", "compact", "tight", "roomy", "split"],
+		},
+		look: {
+			control: "inline-radio",
+			options: ["card", "section", "row"],
 		},
 		chevron: { control: "boolean" },
 		selectable: { control: "boolean" },
@@ -31,7 +35,7 @@ const meta = {
 export default meta;
 type Story = StoryObj<typeof meta>;
 
-/** Every density in both states, plus the chevron-less variant. */
+/** Every density in both states, the chevron-less variant, and every `look`. */
 export const Densities: Story = {
 	render: () => ({ Component: DisclosureStoryGallery }),
 };
