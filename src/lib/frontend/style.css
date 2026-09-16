@@ -266,6 +266,32 @@
 /* ─── Base ──────────────────────────────────────────────────────────────────── */
 
 @layer base {
+	/* The house focus ring as a floor, not a rollout.
+	   de3.19 planned to hand components the ring as they migrated onto
+	   ui/Button and ui/Pill, but roughly a third of the focusable surface is
+	   structural — disclosure headers, file-tree rows, session-list rows — and
+	   never migrates, so it would never have been reached. Those elements were
+	   not ringless before this: they showed Chromium's default blue ring, which
+	   is a fixed colour that belongs to neither theme. This replaces it with a
+	   token-driven one. Neutral text colour, not accent: an accent ring on an
+	   accent-filled button is the same colour as the button.
+
+	   Wrapped in :where() so it has ZERO specificity. Layer order alone would
+	   be enough in the app — focus-visible:outline-hidden is a utility, and
+	   utilities outrank @layer base — but storybook-addon-pseudo-states
+	   rewrites every :focus-visible rule into a .pseudo-focus-visible clone in
+	   its own unlayered sheet, and unlayered CSS beats every layer. That put
+	   this outline on top of Button's and Pill's own rings in exactly the two
+	   stories whose job is to depict the ring. At zero specificity the
+	   primitives' (0,2,0) selectors win with or without the layer, so the
+	   picture matches the product. Verified by keyboard-Tabbing the real build:
+	   both primitives report outline-style none and keep their box-shadow ring
+	   (conduit-test-j7ny). */
+	:where(:focus-visible) {
+		outline: 2px solid var(--color-text);
+		outline-offset: 0;
+	}
+
 	*,
 	*::before,
 	*::after {

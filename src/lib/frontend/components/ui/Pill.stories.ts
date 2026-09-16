@@ -71,7 +71,19 @@ export const Hover: Story = {
 
 export const FocusVisible: Story = {
 	...Neutral,
-	parameters: { pseudo: { focusVisible: true } },
+	// Scoped to the button rather than `focusVisible: true`.
+	//
+	// storybook-addon-pseudo-states implements the boolean form by putting
+	// `.pseudo-focus-visible-all` on the story container and rewriting every
+	// `:focus-visible` rule to also match `.pseudo-focus-visible-all :where(*)`.
+	// For a rule written against a bare `:focus-visible` — the house focus ring
+	// in style.css — that means EVERY descendant matches, so the wrapper div
+	// around the subject drew its own square outline on top of the subject's
+	// own ring. The product never does this: Tab to a real Pill or Button and
+	// the computed outline-style is `none`, the ring is the box-shadow.
+	// The array form applies the class to the matched element only, so the
+	// story depicts one ring, the one being tested (conduit-test-j7ny).
+	parameters: { pseudo: { focusVisible: ["button"] } },
 };
 
 export const Disabled: Story = {
