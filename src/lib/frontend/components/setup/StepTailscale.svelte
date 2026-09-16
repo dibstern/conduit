@@ -5,6 +5,7 @@
 	import type { StatusVariant } from "../../utils/setup-utils.js";
 	import StepHeader from "./StepHeader.svelte";
 	import StatusBox from "./StatusBox.svelte";
+	import Button from "../ui/Button.svelte";
 
 	let {
 		totalSteps,
@@ -114,11 +115,13 @@
 
 	<!-- Actions -->
 	<div class="flex gap-2 mt-5">
-		<button
-			class="flex-1 inline-flex items-center justify-center gap-2 bg-accent text-bg px-6 py-3 rounded-xl font-semibold text-sm border-none cursor-pointer font-sans hover:opacity-90 transition-opacity"
+		<Button
+			variant="primary"
+			size="content"
+			class="flex-1 gap-2 px-6 py-3 rounded-xl font-semibold text-sm font-sans hover:opacity-90 transition-opacity! hover:bg-accent!"
 			onclick={onnextstep}
 		>
 			Next
-		</button>
+		</Button>
 	</div>
 </div>

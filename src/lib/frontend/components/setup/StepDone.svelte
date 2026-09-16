@@ -2,6 +2,8 @@
 <!-- Final setup step showing success message.                                -->
 
 <script lang="ts">
+	import Button from "../ui/Button.svelte";
+
 	let {
 		ongotodone,
 	}: {
@@ -16,10 +18,12 @@
 		Your device is configured. You can change these settings anytime from
 		the app.
 	</div>
-	<button
-		class="inline-flex items-center justify-center gap-2 bg-accent text-bg no-underline px-6 py-3 rounded-xl font-semibold text-sm border-none cursor-pointer font-sans hover:opacity-90 transition-opacity"
+	<Button
+		variant="primary"
+		size="content"
+		class="gap-2 no-underline px-6 py-3 rounded-xl font-semibold text-sm font-sans hover:opacity-90 transition-opacity! hover:bg-accent!"
 		onclick={ongotodone}
 	>
 		Open Conduit
-	</button>
+	</Button>
 </div>

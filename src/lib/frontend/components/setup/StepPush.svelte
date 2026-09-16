@@ -4,6 +4,7 @@
 <script lang="ts">
 	import type { StatusVariant } from "../../utils/setup-utils.js";
 	import StepHeader from "./StepHeader.svelte";
+	import Button from "../ui/Button.svelte";
 
 	let {
 		totalSteps,
@@ -44,23 +45,27 @@
 			first.
 		</div>
 		<div class="flex gap-2 mt-5">
-			<button
-				class="w-full inline-flex items-center justify-center gap-2 bg-accent text-bg px-6 py-3 rounded-xl font-semibold text-sm border-none cursor-pointer font-sans hover:opacity-90 transition-opacity"
+			<Button
+				variant="primary"
+				size="content"
+				class="w-full gap-2 px-6 py-3 rounded-xl font-semibold text-sm font-sans hover:opacity-90 transition-opacity! hover:bg-accent!"
 				onclick={onnextstep}
 			>
 				Finish anyway
-			</button>
+			</Button>
 		</div>
 	{:else if !pushEnabled}
-		<button
-			class="w-full inline-flex items-center justify-center gap-2 bg-accent text-bg px-6 py-3 rounded-xl font-semibold text-sm border-none cursor-pointer font-sans hover:opacity-90 transition-opacity disabled:opacity-40 disabled:cursor-default"
+		<Button
+			variant="primary"
+			size="content"
+			class="w-full gap-2 px-6 py-3 rounded-xl font-semibold text-sm font-sans hover:opacity-90 transition-opacity! hover:bg-accent! disabled:opacity-40! disabled:cursor-default!"
 			onclick={onenablepush}
 			disabled={pushBusy}
 		>
 			{pushBusy
 				? "Requesting permission..."
 				: "Enable Push Notifications"}
-		</button>
+		</Button>
 	{/if}
 
 	{#if pushStatus}
@@ -78,12 +83,14 @@
 
 	{#if pushStatus === "warn"}
 		<div class="flex gap-2 mt-5">
-			<button
-				class="w-full inline-flex items-center justify-center gap-2 bg-accent text-bg px-6 py-3 rounded-xl font-semibold text-sm border-none cursor-pointer font-sans hover:opacity-90 transition-opacity"
+			<Button
+				variant="primary"
+				size="content"
+				class="w-full gap-2 px-6 py-3 rounded-xl font-semibold text-sm font-sans hover:opacity-90 transition-opacity! hover:bg-accent!"
 				onclick={onnextstep}
 			>
 				Finish anyway
-			</button>
+			</Button>
 		</div>
 	{/if}
 </div>

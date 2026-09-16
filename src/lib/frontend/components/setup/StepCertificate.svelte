@@ -5,6 +5,7 @@
 	import type { StatusVariant } from "../../utils/setup-utils.js";
 	import StepHeader from "./StepHeader.svelte";
 	import StatusBox from "./StatusBox.svelte";
+	import Button from "../ui/Button.svelte";
 
 	let {
 		totalSteps,
@@ -109,15 +110,19 @@
 	<!-- Actions -->
 	<div class="flex gap-2 mt-5">
 		{#if certStatus === "warn"}
-			<button
-				class="flex-1 inline-flex items-center justify-center gap-2 bg-transparent text-text px-6 py-3 rounded-xl font-semibold text-sm cursor-pointer font-sans border-[1.5px] border-border hover:border-text-muted transition-colors"
+			<Button
+				variant="secondary"
+				size="content"
+				class="flex-1 gap-2 px-6 py-3 rounded-xl font-semibold text-sm font-sans border-[1.5px]! hover:border-text-muted hover:bg-transparent!"
 				onclick={onretryhttps}
 			>
 				Retry
-			</button>
+			</Button>
 		{/if}
-		<button
-			class="flex-1 inline-flex items-center justify-center gap-2 bg-accent text-bg px-6 py-3 rounded-xl font-semibold text-sm border-none cursor-pointer font-sans hover:opacity-90 transition-opacity disabled:opacity-40 disabled:cursor-default"
+		<Button
+			variant="primary"
+			size="content"
+			class="flex-1 gap-2 px-6 py-3 rounded-xl font-semibold text-sm font-sans hover:opacity-90 transition-opacity! hover:bg-accent! disabled:opacity-40! disabled:cursor-default!"
 			onclick={onnextstep}
 			disabled={certStatus !== "ok"}
 		>
@@ -126,6 +131,6 @@
 				: certStatus === "pending"
 					? "Verifying..."
 					: "Waiting for HTTPS..."}
-		</button>
+		</Button>
 	</div>
 </div>
