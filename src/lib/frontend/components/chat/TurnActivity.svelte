@@ -16,6 +16,7 @@
 		economics,
 		fmtDuration,
 		stepCaption,
+		segmentDuration,
 		stepDurations,
 		type Segment,
 		type Turn,
@@ -45,7 +46,9 @@
 
 	const stats = $derived(turnStats(segment));
 	const durations = $derived(stepDurations(segment, turn, final, now));
-	const duration = $derived(durations?.reduce((total, step) => total + step, 0));
+	// Steps overlap when tools are dispatched in parallel, so the header reads
+	// the segment's wall clock rather than the sum of its steps.
+	const duration = $derived(segmentDuration(segment, turn, final, now));
 	const bill = $derived(economics(turn, now));
 	const TICKER_ROWS = 3;
 	const ticker = $derived(segment.activity.slice(-TICKER_ROWS));

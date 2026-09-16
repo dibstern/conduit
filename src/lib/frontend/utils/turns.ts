@@ -371,7 +371,9 @@ export function countsPhrase(s: TurnStats): string {
 // ─── Timing ──────────────────────────────────────────────────────────────────
 
 export function fmtDuration(ms: number): string {
-	if (ms < 1000) return `${(ms / 1000).toFixed(1)}s`;
+	// Fast tools really do finish in single-digit milliseconds. Rendering those
+	// as "0.0s" reads like a broken clock, so sub-second spans keep their unit.
+	if (ms < 1000) return `${Math.round(ms)}ms`;
 	if (ms < 60_000) return `${Math.round(ms / 1000)}s`;
 	const m = Math.floor(ms / 60_000);
 	const sec = Math.round((ms % 60_000) / 1000);
@@ -410,9 +412,55 @@ export function turnDuration(turn: Turn, now: number): number | undefined {
 }
 
 /**
- * Wall-clock ms per step: each runs until the next one starts, the last until
- * the reply, hand-back, or result lands. `undefined` when any step lacks a
- * timestamp — durations are never guessed.
+ * Where the segment's work ends: the reply, a hand-back, or — while live — now.
+ * A settled turn falls back to the last thing that carries a stamp.
+ */
+function segmentEnd(
+	segment: Segment,
+	turn: Turn,
+	final: boolean,
+	now: number,
+): number {
+	const last = segment.activity.at(-1);
+	const lastStamp = Math.max(last?.endedAt ?? 0, last?.createdAt ?? now);
+	// A live turn's work is still running — unless the reply has started, in
+	// which case it is already over and must stop there. Without that boundary
+	// the segment grows for as long as the reply streams and then snaps back
+	// when the result lands.
+	return (
+		segment.reply[0]?.createdAt ??
+		segment.handBack?.createdAt ??
+		(final && turn.live
+			? now
+			: Math.max(turn.result?.createdAt ?? 0, lastStamp))
+	);
+}
+
+/**
+ * Wall-clock ms for the whole segment. Steps can overlap, so this is the span
+ * from the first step to the end of the work — never the sum of the steps.
+ */
+export function segmentDuration(
+	segment: Segment,
+	turn: Turn,
+	final: boolean,
+	now: number,
+): number | undefined {
+	const start = segment.activity[0]?.createdAt;
+	if (start === undefined) return undefined;
+	return Math.max(0, segmentEnd(segment, turn, final, now) - start);
+}
+
+/**
+ * How long each step itself took. A step that reports its own completion is
+ * measured by that; the rest run until the next step starts, which is the only
+ * signal available for thinking and for anything still in flight.
+ *
+ * Own-span first matters because tools dispatched together start milliseconds
+ * apart and then run concurrently — charging each one only the gap to its
+ * sibling reports 0.0s for work that took seconds.
+ *
+ * `undefined` when any step lacks a timestamp: durations are never guessed.
  */
 export function stepDurations(
 	segment: Segment,
@@ -425,23 +473,12 @@ export function stepDurations(
 		if (part.createdAt === undefined) return undefined;
 		stamps.push(part.createdAt);
 	}
-	// The last step has no following step to end it, so fall back to its own
-	// completion stamp before giving up and reporting zero.
-	const lastStamp = Math.max(
-		stamps.at(-1) ?? now,
-		segment.activity.at(-1)?.endedAt ?? 0,
-	);
-	// A live turn's last step is still running — unless the reply has started, in
-	// which case the work is already over and the step must stop there. Without
-	// that boundary the last segment grows for as long as the reply streams and
-	// then snaps back when the result lands.
-	const end =
-		segment.reply[0]?.createdAt ??
-		segment.handBack?.createdAt ??
-		(final && turn.live
-			? now
-			: Math.max(turn.result?.createdAt ?? 0, lastStamp));
-	return stamps.map((t, i) => Math.max(0, (stamps[i + 1] ?? end) - t));
+	const end = segmentEnd(segment, turn, final, now);
+	return stamps.map((t, i) => {
+		const own = segment.activity[i]?.endedAt;
+		if (own !== undefined && own > t) return own - t;
+		return Math.max(0, (stamps[i + 1] ?? end) - t);
+	});
 }
 
 /**
