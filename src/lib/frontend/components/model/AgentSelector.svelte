@@ -5,6 +5,7 @@
 	import { tick } from "svelte";
 	import Icon from "../ui/Icon.svelte";
 	import Badge from "../ui/Badge.svelte";
+	import Surface from "../ui/Surface.svelte";
 	import {
 		buildAgentTooltip,
 		discoveryState,
@@ -116,13 +117,23 @@
 		portalStyle = `position:fixed;left:${left}px;${verticalPosition}width:${width}px;max-height:${maxHeight}px;overflow-y:auto;z-index:9999;`;
 	}
 
-	function portal(node: HTMLElement) {
-		if (typeof document === "undefined") return {};
+	// An attachment, not a `use:` action, and that is the whole point of
+	// conduit-test-p4kj. Actions and `bind:this` cannot be applied to a
+	// component tag, so as long as the portal was an action the dropdown was
+	// physically unable to become a `ui/Surface`. Attachments forward through a
+	// component's `{...rest}` spread, so the primitive never has to know.
+	//
+	// It also owns `portalEl` now. The old code nulled that ref by hand in
+	// `close()`, which was correct only as long as `close()` stayed the single
+	// path out; the attachment's teardown runs on every unmount, including ones
+	// nobody remembers to route through `close()`.
+	function portal(node: HTMLDivElement) {
+		if (typeof document === "undefined") return;
+		portalEl = node;
 		document.body.appendChild(node);
-		return {
-			destroy() {
-				node.remove();
-			},
+		return () => {
+			node.remove();
+			portalEl = undefined;
 		};
 	}
 
@@ -151,7 +162,6 @@
 
 	function close() {
 		dropdownOpen = false;
-		portalEl = undefined;
 	}
 
 	function toggleDropdown(e: MouseEvent) {
@@ -258,11 +268,13 @@
 </div>
 
 {#if dropdownOpen}
-	<div
-		bind:this={portalEl}
-		use:portal
+	<Surface
+		{@attach portal}
+		variant="raised"
+		radius="md"
+		elevation="menu-lg"
 		data-testid="agent-dropdown"
-		class="agent-dropdown-panel max-w-[calc(100vw-16px)] bg-bg-alt border border-border rounded-lg shadow-menu-lg py-1.5 font-brand"
+		class="agent-dropdown-panel max-w-[calc(100vw-16px)] py-1.5 font-brand"
 		style={portalStyle}
 		role="listbox"
 		aria-label={providerHeading}
@@ -307,5 +319,5 @@
 				</button>
 			{/each}
 		{/if}
-	</div>
+	</Surface>
 {/if}
