@@ -4,6 +4,7 @@
 <script lang="ts">
 	import type { SystemMessage } from "../../types.js";
 	import Icon from "../ui/Icon.svelte";
+	import Surface from "../ui/Surface.svelte";
 
 	let { message }: { message: SystemMessage } = $props();
 
@@ -14,10 +15,10 @@
 
 	let showDetails = $state(false);
 
+	// The background is no longer here: both branches were bg-bg-surface, so it
+	// is Surface's `plain` variant and only the foreground actually varies.
 	const containerClasses = $derived(
-		isError
-			? "glow-tool-error text-error bg-bg-surface"
-			: "bg-bg-surface text-text-muted",
+		isError ? "glow-tool-error text-error" : "text-text-muted",
 	);
 
 	// Hover is an affordance, so the card only gets one when it actually holds
@@ -28,8 +29,10 @@
 </script>
 
 <div class="max-w-[760px] mx-auto my-2 px-5">
-	<div
-		class="flex flex-col gap-1 py-2 px-3 text-base rounded-panel {containerClasses} {hoverClasses}"
+	<Surface
+		variant="plain"
+		padding="sm"
+		class="flex flex-col gap-1 text-base {containerClasses} {hoverClasses}"
 	>
 		<div class="flex items-start gap-2">
 			<span class="shrink-0 mt-0.5 [&_.lucide]:w-3 [&_.lucide]:h-3">
@@ -72,5 +75,5 @@
 				{/if}
 			</div>
 		{/if}
-	</div>
+	</Surface>
 </div>

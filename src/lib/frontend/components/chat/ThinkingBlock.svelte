@@ -7,6 +7,7 @@
 	import type { ThinkingMessage } from "../../types.js";
 	import BlockGrid from '../ui/BlockGrid.svelte';
 	import Disclosure from "../ui/Disclosure.svelte";
+	import Surface from "../ui/Surface.svelte";
 
 	let { message }: { message: ThinkingMessage } = $props();
 	let expanded = $state(false);
@@ -54,7 +55,11 @@
 >
 	{#if !message.done}
 		<!-- Streaming: inline thinking display -->
-		<div class="glow-brand-b bg-bg-surface/80 rounded-panel py-2 px-3">
+		<!-- `bare` plus an explicit background: the 80% translucency is not in
+		     Surface's variant map and has exactly one consumer, so it stays at the
+		     call site where it is visible. Whether it is design or drift is
+		     conduit-test-1hgt's open question. -->
+		<Surface variant="bare" padding="sm" class="glow-brand-b bg-bg-surface/80">
 			<div class="flex items-center gap-1.5 mb-1.5">
 				<BlockGrid cols={5} mode="fast" blockSize={2} gap={0.75} class="self-center" />
 				<span class="text-xs text-brand-b font-medium">{label}…</span>
@@ -64,7 +69,7 @@
 					{message.text}
 				</div>
 			{/if}
-		</div>
+		</Surface>
 	{:else}
 		<!-- Done: compact collapsible bar -->
 		<Disclosure

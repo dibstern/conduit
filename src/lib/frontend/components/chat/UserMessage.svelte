@@ -9,6 +9,7 @@
 	import { currentChat } from "../../stores/chat.svelte.js";
 	import { getModelDisplayName } from "../../stores/discovery.svelte.js";
 	import { escapeHtml, extractDisplayText } from "../../utils/format.js";
+	import Surface from "../ui/Surface.svelte";
 
 	let { message }: { message: UserMessage } = $props();
 
@@ -26,11 +27,15 @@
 	class:opacity-50={isQueued}
 	data-uuid={message.uuid}
 >
-	<div
-		class="bg-bg-surface rounded-panel py-4 px-5 relative glow-brand-a"
-		class:border={isQueued}
-		class:border-dashed={isQueued}
-		class:border-border={isQueued}
+	<!-- The queued outline rides in `class` rather than on three `class:`
+	     directives: Svelte has no `class:` on a component, and a dashed border
+	     is one idea, not three. -->
+	<Surface
+		variant="plain"
+		padding="lg"
+		class="relative glow-brand-a {isQueued
+			? 'border border-dashed border-border'
+			: ''}"
 	>
 		<div class="text-sm font-mono font-semibold uppercase tracking-[1.5px] text-brand-a mb-2">You</div>
 		<div class="text-base leading-[1.7] break-words whitespace-pre-wrap text-text">
@@ -49,7 +54,7 @@
 				<span class="queued-shimmer text-text-muted text-xs font-mono">Queued</span>
 			</div>
 		{/if}
-	</div>
+	</Surface>
 </div>
 
 <style>
