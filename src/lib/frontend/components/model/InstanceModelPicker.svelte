@@ -8,6 +8,7 @@
 <script lang="ts">
 	import Icon from "../ui/Icon.svelte";
 	import Button from "../ui/Button.svelte";
+	import Tooltip from "../ui/Tooltip.svelte";
 	// biome-ignore lint/style/useImportType: ContextWindowSelector is used as a value for bind:this
 	import ContextWindowSelector from "./ContextWindowSelector.svelte";
 	// biome-ignore lint/style/useImportType: ModelVariant is used as a value for bind:this
@@ -46,9 +47,6 @@
 	let pickerOpen = $state(false);
 	let searchQuery = $state("");
 	let favoritesOnly = $state(false);
-	let railTooltip = $state<{ label: string; top: number; left: number } | null>(
-		null,
-	);
 	let variantRef: ModelVariant | undefined = $state();
 	let searchEl: HTMLInputElement | undefined = $state();
 	let contextWindowRef: ContextWindowSelector | undefined = $state();
@@ -228,12 +226,10 @@
 
 	function closePicker() {
 		pickerOpen = false;
-		railTooltip = null;
 	}
 
 	function handleInstanceSelect(instance: InstanceOption, e: MouseEvent) {
 		e.stopPropagation();
-		railTooltip = null;
 		if (isInstanceDisabled(instance) || instance.id === selectedId) return;
 		selectInstance(instance.id);
 		searchQuery = "";
@@ -244,19 +240,6 @@
 				.then(applyGetAgentsResponse)
 				.catch(() => undefined);
 		}
-	}
-
-	function showRailTooltip(e: MouseEvent, instance: InstanceOption) {
-		const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
-		railTooltip = {
-			label: instanceTooltip(instance),
-			top: rect.top + 8,
-			left: rect.right + 10,
-		};
-	}
-
-	function hideRailTooltip() {
-		railTooltip = null;
 	}
 
 	function handleModelClick(model: ModelInfo, e: MouseEvent, modelId?: string) {
@@ -477,32 +460,42 @@
 					     primitive own it moves locked-mode instances from Material's 0.38 to the
 					     design system's own disabled step.
 
-					     `ariaLabel` is the string the hover tooltip already shows. The button's
-					     only content is a one-letter harness glyph, so its accessible name was
-					     "C". -->
-					<Button
-						variant="toolbar"
-						size="content"
-						ariaLabel={instanceTooltip(instance)}
-						data-testid="picker-instance-{instance.id}"
-						data-driver={instance.driver}
-						aria-pressed={selected}
-						ariaDisabled={disabled}
-						class="relative h-10 flex-none rounded-lg {disabled ? '' : 'hover:bg-bg-alt'}"
-						onclick={(e) => handleInstanceSelect(instance, e)}
-						onmouseenter={(e) => showRailTooltip(e, instance)}
-						onmouseleave={hideRailTooltip}
-					>
-						{@render driverIcon(instance.driver, 26, instance.isCustom)}
-						{#if instance.isNew && !locked}
-							<span class="absolute top-0 right-0 text-warning">
-								<Icon name="sparkles" size={9} />
-							</span>
-						{/if}
-						<span
-							class="absolute -right-1 top-1/2 -translate-y-1/2 w-[3px] h-[22px] rounded-l-[3px] bg-accent transition-opacity duration-150 {selected ? 'opacity-100' : 'opacity-0'}"
-						></span>
-					</Button>
+					     `ariaLabel` is the same string the tooltip shows, and the repetition
+					     is deliberate. The button's only content is a one-letter harness
+					     glyph, so without it the accessible name is "C". The tooltip is an
+					     `aria-describedby` DESCRIPTION, which never substitutes for a name --
+					     drop the label and a screen reader announces the button as "C". -->
+					<!-- ui/Tooltip renders no wrapper element of its own -- Bits'
+					     Provider and Root are context-only and the Trigger uses the
+					     `child` snippet -- so the Button stays a direct flex child of
+					     the rail and the layout is untouched. -->
+					<Tooltip side="right">
+						{#snippet trigger({ props })}
+							<Button
+								{...props}
+								variant="toolbar"
+								size="content"
+								ariaLabel={instanceTooltip(instance)}
+								data-testid="picker-instance-{instance.id}"
+								data-driver={instance.driver}
+								aria-pressed={selected}
+								ariaDisabled={disabled}
+								class="relative h-10 flex-none rounded-lg {disabled ? '' : 'hover:bg-bg-alt'}"
+								onclick={(e) => handleInstanceSelect(instance, e)}
+							>
+								{@render driverIcon(instance.driver, 26, instance.isCustom)}
+								{#if instance.isNew && !locked}
+									<span class="absolute top-0 right-0 text-warning">
+										<Icon name="sparkles" size={9} />
+									</span>
+								{/if}
+								<span
+									class="absolute -right-1 top-1/2 -translate-y-1/2 w-[3px] h-[22px] rounded-l-[3px] bg-accent transition-opacity duration-150 {selected ? 'opacity-100' : 'opacity-0'}"
+								></span>
+							</Button>
+						{/snippet}
+						{instanceTooltip(instance)}
+					</Tooltip>
 				{/each}
 			</div>
 
@@ -661,13 +654,3 @@
 		</Surface>
 	{/if}
 </div>
-
-<!-- Rail hover tooltip — opens toward the rail (fixed, outside the popover clip) -->
-{#if pickerOpen && railTooltip}
-	<div
-		class="fixed z-[var(--z-modal)] pointer-events-none bg-black text-white text-[11px] leading-[1.3] py-1.5 px-2 rounded-md border border-border whitespace-nowrap shadow-panel before:content-[''] before:absolute before:-left-[5px] before:top-[9px] before:border-y-[5px] before:border-y-transparent before:border-r-[5px] before:border-r-black"
-		style="top:{railTooltip.top}px;left:{railTooltip.left}px"
-	>
-		{railTooltip.label}
-	</div>
-{/if}

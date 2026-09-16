@@ -223,3 +223,42 @@ export const Locked: Story = {
 		await expect(other).toHaveAttribute("aria-disabled", "true");
 	},
 };
+
+/**
+ * The rail's hover tooltip, which had no visual coverage before
+ * conduit-test-ee6y replaced the hand-written one with `ui/Tooltip`.
+ *
+ * This is the first real consumer of that primitive -- until now only a
+ * fixture used it -- and it is the story that proves two things the unit
+ * tests cannot: that the tooltip escapes the picker's clip by portalling to
+ * <body>, and that a `side="right"` surface actually casts a shadow. It did
+ * not before; nothing had ever asked for a side-anchored one.
+ *
+ * The explicit timeout is not padding. `ui/Tooltip` keeps Bits' 700ms open
+ * delay on purpose, and testing-library's default `findBy` timeout is 1000ms,
+ * which leaves 300ms of slack on a loaded CI box. A flaky gate teaches people
+ * to rerun until green, which is worse than no gate.
+ */
+export const RailTooltip: Story = {
+	tags: ["viewport-capture"],
+	beforeEach: () => {
+		seedClaude();
+		return bottomRightFrame();
+	},
+	play: async ({ canvasElement }) => {
+		await openPicker(canvasElement);
+		const body = canvasElement.ownerDocument.body;
+		const rail = body.querySelector<HTMLElement>(
+			'[data-testid^="picker-instance-"]',
+		);
+		await expect(rail).not.toBeNull();
+		await userEvent.hover(rail as HTMLElement);
+		const tip = await within(body).findByRole("tooltip", undefined, {
+			timeout: 3000,
+		});
+		// Parent, not visibility: a body-scoped query finds the tooltip whether
+		// or not it portalled, so only the parent distinguishes the two.
+		await expect(tip.closest("body")).toBe(body);
+		await expect(tip).toBeVisible();
+	},
+};
