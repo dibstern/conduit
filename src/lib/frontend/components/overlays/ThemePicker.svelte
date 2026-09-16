@@ -119,7 +119,7 @@
 		border: 1px solid var(--color-border);
 		border-radius: 8px;
 		padding: 4px;
-		z-index: 1000;
+		z-index: var(--z-top);
 		box-shadow: 0 4px 24px rgba(var(--shadow-rgb, 0, 0, 0), 0.15);
 		animation: theme-picker-in 0.15s ease-out;
 	}

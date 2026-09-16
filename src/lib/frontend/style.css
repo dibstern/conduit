@@ -104,14 +104,25 @@
 
 	/* ── Z-Index Layers (theme-invariant) ────────────────
 	   Referenced as z-[var(--z-name)] (Tailwind v4 has no z-index theme namespace).
-	   Values preserve the current stacking order — do not reorder. */
+	   Listed in paint order, lowest first. Never write a bare z-index number;
+	   a literal here is how the mobile drawer ended up painting over modals.
+
+	   Modals are deliberately absent. They use <dialog>.showModal() and live in
+	   the browser's top layer, above every z-index on the page. Anything that
+	   must cover a modal has to join them there — raising a number will not do
+	   it. See components/overlays/Modal.svelte.
+
+	   Scrims pair with the layer they dim, one step below it. */
 	--z-raised: 1;
 	--z-dropdown: 60;
+	--z-sheet: 80;
 	--z-popover: 200;
 	--z-popover-raised: 210;
-	--z-modal: 300;
-	--z-overlay: 350;
+	--z-pane: 300;
+	--z-drawer-scrim: 340;
+	--z-drawer: 350;
 	--z-toast: 400;
+	--z-top-scrim: 990;
 	--z-top: 1000;
 	--z-debug: 9999;
 
@@ -162,6 +173,31 @@
 	box-shadow:
 		-4px 0 16px rgba(255, 68, 68, 0.15),
 		-3px 0 0 var(--color-error);
+}
+
+/* Every layout property that decides where a glyph lands in the composer. The
+   textarea and its highlight mirror must agree on all of them or the caret
+   drifts off the text it is supposed to sit in, so they live here once rather
+   than as two copies of the same Tailwind class list. */
+@utility composer-text-metrics {
+	font-family: var(--font-sans);
+	font-size: 1rem;
+	line-height: 1.4;
+	padding: 0.5rem 0.625rem 0.25rem;
+	white-space: pre-wrap;
+	overflow-wrap: break-word;
+}
+
+/* Recognised `/skill` token. Shared by the composer backdrop and sent user
+   messages so both surfaces read identically. Plain inline (not inline-block)
+   so the token stays on the text baseline at its neighbours' size. */
+@utility skill-pill {
+	color: var(--color-accent);
+	background: var(--color-accent-bg);
+	border-radius: 6px;
+	padding: 2px 4px;
+	-webkit-box-decoration-break: clone;
+	box-decoration-break: clone;
 }
 
 @keyframes pixel-cascade-a {
@@ -332,8 +368,10 @@
 
 /* ─── Modal System (7.10) ──────────────────────────────────────────────────── */
 
-.modal-backdrop.hidden {
-	display: none;
+/* showModal() makes the page inert but does not stop it scrolling behind the
+   dialog, which on mobile reads as the modal drifting off-screen. */
+body:has(dialog:modal) {
+	overflow: hidden;
 }
 
 /* ─── Sidebar ──────────────────────────────────────────────────────────────── */
@@ -420,7 +458,7 @@
 		left: 0;
 		top: 0;
 		bottom: 0;
-		z-index: 400;
+		z-index: var(--z-drawer);
 		transform: translateX(-100%);
 		transition: transform 0.25s ease;
 		/* Mobile sidebar width driven by --sidebar-w custom property */
@@ -793,7 +831,7 @@
 		position: fixed;
 		inset: 0;
 		background: var(--color-bg);
-		z-index: 300;
+		z-index: var(--z-pane);
 		display: flex;
 		flex-direction: column;
 		overflow: hidden;
@@ -900,7 +938,7 @@
 		border-left: none;
 		border-top: 1px solid var(--color-border);
 		border-radius: 12px 12px 0 0;
-		z-index: 80;
+		z-index: var(--z-sheet);
 	}
 
 	.term-drag-handle {

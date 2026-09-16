@@ -1,10 +1,12 @@
 import { Socket } from "@effect/platform";
 import { RpcClient, RpcSerialization } from "@effect/rpc";
 import { Effect } from "effect";
+import type { ClaudeSettingsOverrides } from "../../contracts/claude-settings.js";
 import { ProviderInstanceIdSchema } from "../../contracts/provider-instance.js";
 import type { SessionPermissionMode } from "../../shared-types.js";
 import { runTransportEffect } from "./runtime.js";
 import {
+	type ClaudeSettingsResponse,
 	type CreateSessionResponse,
 	type DetectProxyResponse,
 	type ForkSessionResponse,
@@ -27,9 +29,11 @@ import {
 	type ProjectMutationResponse,
 	type PtyListResponse,
 	type ReloadProviderSessionResponse,
+	type ResolveClaudeSettingsResponse,
 	type RpcLogLevel,
 	type ScanNowResponse,
 	type SetDefaultModelResponse,
+	type SetDefaultPermissionModeResponse,
 	type SetHiddenEntriesResponse,
 	type SwitchContextWindowResponse,
 	type SwitchModelResponse,
@@ -262,11 +266,32 @@ export interface SetDefaultModelRpcInput {
 	readonly originId?: string;
 }
 
+export interface SetDefaultPermissionModeRpcInput {
+	readonly projectSlug: string;
+	readonly mode: SessionPermissionMode;
+	readonly originId?: string;
+}
+
 export interface SetHiddenEntriesRpcInput {
 	readonly projectSlug: string;
 	readonly hiddenModels?: readonly string[];
 	readonly hiddenAgents?: readonly string[];
 	readonly originId?: string;
+}
+
+export interface GetClaudeSettingsRpcInput {
+	readonly projectSlug: string;
+}
+
+export interface SetClaudeSettingsRpcInput {
+	readonly projectSlug: string;
+	readonly overrides: ClaudeSettingsOverrides;
+	readonly originId?: string;
+}
+
+export interface ResolveClaudeSettingsRpcInput {
+	readonly projectSlug: string;
+	readonly instanceId: string;
 }
 
 export interface ReloadProviderSessionRpcInput {
@@ -918,6 +943,25 @@ const callSetDefaultModel = (input: SetDefaultModelRpcInput) =>
 		Effect.provide(RpcSerialization.layerJson),
 	);
 
+const callSetDefaultPermissionMode = (
+	input: SetDefaultPermissionModeRpcInput,
+) =>
+	Effect.scoped(
+		Effect.gen(function* () {
+			const client = yield* RpcClient.make(WsRpcGroup);
+			return yield* client.SetDefaultPermissionMode({
+				projectSlug: input.projectSlug,
+				mode: input.mode,
+				...(input.originId ? { originId: input.originId } : {}),
+			});
+		}),
+	).pipe(
+		Effect.provide(RpcClient.layerProtocolSocket()),
+		Effect.provide(Socket.layerWebSocket(makeWsRpcUrl(input.projectSlug))),
+		Effect.provide(Socket.layerWebSocketConstructorGlobal),
+		Effect.provide(RpcSerialization.layerJson),
+	);
+
 const callSetHiddenEntries = (input: SetHiddenEntriesRpcInput) =>
 	Effect.scoped(
 		Effect.gen(function* () {
@@ -928,6 +972,49 @@ const callSetHiddenEntries = (input: SetHiddenEntriesRpcInput) =>
 				...(input.hiddenAgents ? { hiddenAgents: input.hiddenAgents } : {}),
 				...(input.originId ? { originId: input.originId } : {}),
 			});
+		}),
+	).pipe(
+		Effect.provide(RpcClient.layerProtocolSocket()),
+		Effect.provide(Socket.layerWebSocket(makeWsRpcUrl(input.projectSlug))),
+		Effect.provide(Socket.layerWebSocketConstructorGlobal),
+		Effect.provide(RpcSerialization.layerJson),
+	);
+
+const callGetClaudeSettings = (input: GetClaudeSettingsRpcInput) =>
+	Effect.scoped(
+		Effect.gen(function* () {
+			const client = yield* RpcClient.make(WsRpcGroup);
+			return yield* client.GetClaudeSettings(input);
+		}),
+	).pipe(
+		Effect.provide(RpcClient.layerProtocolSocket()),
+		Effect.provide(Socket.layerWebSocket(makeWsRpcUrl(input.projectSlug))),
+		Effect.provide(Socket.layerWebSocketConstructorGlobal),
+		Effect.provide(RpcSerialization.layerJson),
+	);
+
+const callSetClaudeSettings = (input: SetClaudeSettingsRpcInput) =>
+	Effect.scoped(
+		Effect.gen(function* () {
+			const client = yield* RpcClient.make(WsRpcGroup);
+			return yield* client.SetClaudeSettings({
+				projectSlug: input.projectSlug,
+				overrides: input.overrides,
+				...(input.originId ? { originId: input.originId } : {}),
+			});
+		}),
+	).pipe(
+		Effect.provide(RpcClient.layerProtocolSocket()),
+		Effect.provide(Socket.layerWebSocket(makeWsRpcUrl(input.projectSlug))),
+		Effect.provide(Socket.layerWebSocketConstructorGlobal),
+		Effect.provide(RpcSerialization.layerJson),
+	);
+
+const callResolveClaudeSettings = (input: ResolveClaudeSettingsRpcInput) =>
+	Effect.scoped(
+		Effect.gen(function* () {
+			const client = yield* RpcClient.make(WsRpcGroup);
+			return yield* client.ResolveClaudeSettings(input);
 		}),
 	).pipe(
 		Effect.provide(RpcClient.layerProtocolSocket()),
@@ -1320,10 +1407,34 @@ export async function setDefaultModelRpc(
 	return await runTransportEffect(callSetDefaultModel(input));
 }
 
+export async function setDefaultPermissionModeRpc(
+	input: SetDefaultPermissionModeRpcInput,
+): Promise<SetDefaultPermissionModeResponse> {
+	return await runTransportEffect(callSetDefaultPermissionMode(input));
+}
+
 export async function setHiddenEntriesRpc(
 	input: SetHiddenEntriesRpcInput,
 ): Promise<SetHiddenEntriesResponse> {
 	return await runTransportEffect(callSetHiddenEntries(input));
+}
+
+export async function getClaudeSettingsRpc(
+	input: GetClaudeSettingsRpcInput,
+): Promise<ClaudeSettingsResponse> {
+	return await runTransportEffect(callGetClaudeSettings(input));
+}
+
+export async function setClaudeSettingsRpc(
+	input: SetClaudeSettingsRpcInput,
+): Promise<ClaudeSettingsResponse> {
+	return await runTransportEffect(callSetClaudeSettings(input));
+}
+
+export async function resolveClaudeSettingsRpc(
+	input: ResolveClaudeSettingsRpcInput,
+): Promise<ResolveClaudeSettingsResponse> {
+	return await runTransportEffect(callResolveClaudeSettings(input));
 }
 
 export async function reloadProviderSessionRpc(

@@ -234,6 +234,7 @@ describe("probeClaudeCapabilities", () => {
 		const queryFactory = makeFakeQuery({
 			initResult: {
 				models: [
+					{ value: "claude-fable-5-1", displayName: "Fable 5.1" },
 					{ value: "claude-fable-5", displayName: "Fable 5" },
 					{ value: "claude-opus-5", displayName: "Opus 5" },
 					{ value: "claude-opus-4-8", displayName: "Opus 4.8" },
@@ -261,6 +262,7 @@ describe("probeClaudeCapabilities", () => {
 			{ value: "1m", label: "1M" },
 		];
 
+		expect(optionsFor("claude-fable-5-1")).toEqual(default1mOptions);
 		expect(optionsFor("claude-fable-5")).toEqual(default1mOptions);
 		expect(optionsFor("claude-opus-5")).toEqual(default1mOptions);
 		expect(optionsFor("claude-opus-4-6")).toEqual(default1mOptions);
@@ -353,9 +355,9 @@ describe("probeClaudeCapabilities", () => {
 					{
 						// The CLI drops the suffix for models that do not take it,
 						// so this entry is NOT running a 1M window despite asking.
-						value: "claude-fable-5[1m]",
-						displayName: "Fable 5 (1M context)",
-						resolvedModel: "claude-fable-5",
+						value: "claude-fable-5-1[1m]",
+						displayName: "Fable",
+						resolvedModel: "claude-fable-5-1",
 					},
 					{
 						value: "sonnet",

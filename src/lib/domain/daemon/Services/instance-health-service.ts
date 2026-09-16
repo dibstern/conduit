@@ -16,9 +16,12 @@ export class InstanceHealthCheckTag extends Context.Tag("InstanceHealthCheck")<
 	InstanceHealthCheckService
 >() {}
 
+// /health belongs to the OpenCode web UI, and since 1.18.x the SPA answers 200
+// with HTML for any unknown path — so it reports healthy even when the API is
+// gone. /global/health is the API's own probe.
 const healthUrl = (baseUrl: string): string =>
 	new URL(
-		"/health",
+		"/global/health",
 		baseUrl.endsWith("/") ? baseUrl : `${baseUrl}/`,
 	).toString();
 
@@ -49,7 +52,9 @@ export const InstanceHealthCheckLiveService: InstanceHealthCheckService = {
 					healthUrl(url),
 					headers === undefined ? undefined : { headers },
 				);
-				return res.ok;
+				if (!res.ok) return false;
+				const body = (await res.json()) as { healthy?: boolean };
+				return body.healthy === true;
 			},
 			catch: () => false,
 		}).pipe(Effect.catchAll(() => Effect.succeed(false))),

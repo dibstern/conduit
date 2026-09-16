@@ -29,6 +29,17 @@ export type VisualMatchResult = {
 	diffPath?: string;
 };
 
+/** Wall-clock every acceptance run sees.
+ *
+ *  Message cards render their send time, so a live clock would drift the
+ *  baselines every minute. Pinning it — together with a fixed timezone and
+ *  locale on the context — makes that surface deterministic, and portable
+ *  across machines. Same family of guarantee as `freezeAnimations`.
+ *  Only `Date.now` is overridden: it is what the app stamps messages with,
+ *  and leaving the `Date` constructor alone keeps everything that reads real
+ *  time working normally. */
+const PINNED_CLOCK_MS = Date.UTC(2026, 0, 1, 9, 41, 0);
+
 const DEFAULT_VIEWPORT: Viewport = {
 	name: "desktop",
 	width: 1440,
@@ -98,7 +109,12 @@ export class PlaywrightDriver {
 				height: this.viewport.height,
 			},
 			colorScheme: "dark",
+			timezoneId: "UTC",
+			locale: "en-US",
 		});
+		await this.context.addInitScript((pinned: number) => {
+			Date.now = () => pinned;
+		}, PINNED_CLOCK_MS);
 		return this.context.newPage();
 	}
 
@@ -118,6 +134,7 @@ export class PlaywrightDriver {
 	async matchRegion(
 		page: Page,
 		regionId: string,
+		selector: string,
 		baseline: string,
 		threshold: number,
 		mode: VisualMode,
@@ -138,7 +155,7 @@ export class PlaywrightDriver {
 		await waitForIcons(page);
 		await freezeAnimations(page);
 
-		const locator = page.locator(`#${regionId}`);
+		const locator = page.locator(selector);
 		await locator.waitFor({ state: "visible", timeout: 10_000 });
 		const actual = await screenshotLocator(locator);
 		const projectRoot = process.cwd();

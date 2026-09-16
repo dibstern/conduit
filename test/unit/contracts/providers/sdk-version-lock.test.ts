@@ -41,10 +41,11 @@ describe("provider SDK version locks", () => {
 		).version;
 
 		expect(installedVersion).toBe(pinnedVersion);
-		// Bumped from 0.3.207: its vendored CLI resolved the "opus" alias — the
-		// value its own model catalog advertises — to claude-opus-4-8, so picking
-		// "Opus" in conduit silently ran the previous generation.
-		expect(pinnedVersion).toBe("0.3.220");
+		// Bumped from 0.3.220: 0.3.257 is the first version whose vendored CLI
+		// knows Fable 5.1, and its catalog replaced `claude-fable-5[1m]` with
+		// `claude-fable-5-1[1m]`. Below this floor, conduit cannot offer Fable at
+		// all — the alias it would send no longer exists upstream.
+		expect(pinnedVersion).toBe("0.3.258");
 	});
 
 	it("locks the installed OpenCode SDK to the pinned dependency version", () => {
@@ -55,7 +56,7 @@ describe("provider SDK version locks", () => {
 		).version;
 
 		expect(installedVersion).toBe(pinnedVersion);
-		expect(pinnedVersion).toBe("1.17.18");
+		expect(pinnedVersion).toBe("1.18.16");
 	});
 
 	// conduit-test-o6r: @anthropic-ai/sdk is a transitive dep (via the Claude

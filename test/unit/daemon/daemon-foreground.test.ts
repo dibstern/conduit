@@ -79,7 +79,7 @@ describe("startForegroundDaemon", () => {
 	it("starts health polling for an opencodeUrl default instance", async () => {
 		const healthServer = createServer((_req, res) => {
 			res.writeHead(200, { "content-type": "application/json" });
-			res.end(JSON.stringify({ ok: true }));
+			res.end(JSON.stringify({ healthy: true }));
 		});
 		const opencodePort = await listen(healthServer);
 		const root = mkdtempSync(join(tmpdir(), "conduit-foreground-health-"));
@@ -137,7 +137,7 @@ describe("startForegroundDaemon", () => {
 				return;
 			}
 			res.writeHead(200, { "content-type": "application/json" });
-			res.end(JSON.stringify({ ok: true }));
+			res.end(JSON.stringify({ healthy: true }));
 		});
 		const opencodePort = await listen(healthServer);
 		const root = mkdtempSync(join(tmpdir(), "conduit-foreground-auth-health-"));

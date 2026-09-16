@@ -1,9 +1,11 @@
 // ─── Svelte Format Utilities — Unit Tests ────────────────────────────────────
-// Tests escapeHtml, formatFileSize, formatTimeAgo, generateUuid.
+// Tests escapeHtml, formatFileSize, formatTimeAgo, formatClockTime,
+// generateUuid.
 
 import { describe, expect, test } from "vitest";
 import {
 	escapeHtml,
+	formatClockTime,
 	formatFileSize,
 	formatTimeAgo,
 	generateUuid,
@@ -166,6 +168,25 @@ describe("formatTimeAgo", () => {
 		// Recent timestamp should be "just now"
 		const result = formatTimeAgo(new Date().toISOString());
 		expect(result).toBe("just now");
+	});
+});
+
+// ─── formatClockTime ─────────────────────────────────────────────────────────
+
+describe("formatClockTime", () => {
+	test("renders the hour and minute of the given instant", () => {
+		const at = new Date(2026, 0, 1, 14, 32, 7).getTime();
+		// Locale decides 12- vs 24-hour, so assert the parts, not the shape.
+		const result = formatClockTime(at);
+		expect(result).toMatch(/\b(14|02|2):32\b/);
+	});
+
+	test("returns an empty string when the message carries no timestamp", () => {
+		expect(formatClockTime(undefined)).toBe("");
+	});
+
+	test("renders the epoch rather than treating 0 as absent", () => {
+		expect(formatClockTime(0)).not.toBe("");
 	});
 });
 

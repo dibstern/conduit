@@ -225,10 +225,12 @@ export const ClaudeSDKPermissionModeSchema = Schema.Literal(
 	"dontAsk",
 	"auto",
 );
+export type ClaudeSDKPermissionMode = typeof ClaudeSDKPermissionModeSchema.Type;
 
 export const ClaudeSDKAssistantMessageErrorSchema = Schema.Literal(
 	"authentication_failed",
 	"oauth_org_not_allowed",
+	"account_on_hold",
 	"billing_error",
 	"rate_limit",
 	"overloaded",

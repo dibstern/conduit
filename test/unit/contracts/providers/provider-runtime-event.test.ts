@@ -81,6 +81,7 @@ describe("ProviderRuntimeEvent contracts", () => {
 		const explicitlyReclassified: readonly string[] = [
 			"session.deleted",
 			"session.provider_cleanup_failed",
+			"session.forked",
 			"session.permission_mode_changed",
 		];
 		const missingRuntimeTypes = CANONICAL_EVENT_TYPES.filter(

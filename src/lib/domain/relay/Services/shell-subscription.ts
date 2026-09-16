@@ -98,10 +98,10 @@ const foldMaxSequenceBySession = (
 	for (const event of events) {
 		if (!SHELL_RELEVANT_TYPES.has(event.type)) continue;
 		mark(event.sessionId, event.sequence);
-		// A parent tombstone also nulls each child's `parent_id` via the projector
-		// cascade, so those rows changed too. The ids ride IN the payload (stamped
+		// A parent tombstone also deletes every descendant via the schema cascade,
+		// so those rows changed too. The ids ride IN the payload (stamped
 		// pre-cascade by deleteSession) because replay folds stored payloads —
-		// post-cascade the children can no longer be found by parent. Defensive:
+		// post-cascade the descendants can no longer be found by parent. Defensive:
 		// historical tombstones without the field behave exactly as before.
 		if (event.type === "session.deleted") {
 			const childIds = event.data.childSessionIds;

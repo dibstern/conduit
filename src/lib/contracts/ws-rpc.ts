@@ -1,6 +1,12 @@
 import { Rpc, RpcGroup } from "@effect/rpc";
 import { Schema } from "effect";
 import { SessionPermissionModeSchema } from "../shared-types.js";
+import {
+	ClaudeSettingsOverridesSchema,
+	ClaudeSettingsResolveError,
+	ClaudeSettingsTrustBoundaryError,
+	ResolvedClaudeSettingsSchema,
+} from "./claude-settings.js";
 import { ProviderDriverKindSchema } from "./provider-instance.js";
 
 const NonEmptyString = Schema.NonEmptyString;
@@ -67,11 +73,15 @@ export const ModelExecutionSchema = Schema.Struct({
 		(execution) =>
 			execution.drifted === undefined ||
 			(execution.expectedModel !== undefined &&
-				execution.drifted ===
-					(execution.actualModel !== execution.expectedModel)),
+				(execution.drifted === false ||
+					execution.actualModel !== execution.expectedModel)),
 		{
+			// Not a biconditional: two ids that differ only by the `[1m]`
+			// context-window suffix name the same model, so equal-identity /
+			// unequal-string is a legitimate `drifted: false`. Claiming drift
+			// between two identical ids is still nonsense.
 			message: () =>
-				"drifted requires expectedModel and must equal actualModel !== expectedModel",
+				"drifted requires expectedModel, and drifted=true requires actualModel to differ from expectedModel",
 		},
 	),
 );
@@ -213,10 +223,26 @@ export const SwitchModelResponseSchema = Schema.Struct({
 
 export const SetDefaultModelResponseSchema = SwitchModelResponseSchema;
 
+export const SetDefaultPermissionModeResponseSchema = Schema.Struct({
+	projectSlug: Schema.String,
+	mode: SessionPermissionModeSchema,
+});
+
 export const SetHiddenEntriesResponseSchema = Schema.Struct({
 	projectSlug: Schema.String,
 	hiddenModels: Schema.Array(Schema.String),
 	hiddenAgents: Schema.Array(Schema.String),
+});
+
+export const ClaudeSettingsResponseSchema = Schema.Struct({
+	projectSlug: Schema.String,
+	overrides: ClaudeSettingsOverridesSchema,
+});
+
+export const ResolveClaudeSettingsResponseSchema = Schema.Struct({
+	projectSlug: Schema.String,
+	instanceId: Schema.String,
+	resolved: ResolvedClaudeSettingsSchema,
 });
 
 export const ReloadProviderSessionResponseSchema = Schema.Struct({
@@ -414,8 +440,13 @@ export type SwitchContextWindowResponse =
 	typeof SwitchContextWindowResponseSchema.Type;
 export type SwitchModelResponse = typeof SwitchModelResponseSchema.Type;
 export type SetDefaultModelResponse = typeof SetDefaultModelResponseSchema.Type;
+export type SetDefaultPermissionModeResponse =
+	typeof SetDefaultPermissionModeResponseSchema.Type;
 export type SetHiddenEntriesResponse =
 	typeof SetHiddenEntriesResponseSchema.Type;
+export type ClaudeSettingsResponse = typeof ClaudeSettingsResponseSchema.Type;
+export type ResolveClaudeSettingsResponse =
+	typeof ResolveClaudeSettingsResponseSchema.Type;
 export type ReloadProviderSessionResponse =
 	typeof ReloadProviderSessionResponseSchema.Type;
 export type SwitchVariantResponse = typeof SwitchVariantResponseSchema.Type;
@@ -742,6 +773,19 @@ export class SetDefaultModel extends Schema.TaggedRequest<SetDefaultModel>()(
 	},
 ) {}
 
+export class SetDefaultPermissionMode extends Schema.TaggedRequest<SetDefaultPermissionMode>()(
+	"SetDefaultPermissionMode",
+	{
+		failure: WsRpcError,
+		success: SetDefaultPermissionModeResponseSchema,
+		payload: {
+			projectSlug: NonEmptyString,
+			mode: SessionPermissionModeSchema,
+			originId: Schema.optional(NonEmptyString),
+		},
+	},
+) {}
+
 export class SetHiddenEntries extends Schema.TaggedRequest<SetHiddenEntries>()(
 	"SetHiddenEntries",
 	{
@@ -752,6 +796,40 @@ export class SetHiddenEntries extends Schema.TaggedRequest<SetHiddenEntries>()(
 			hiddenModels: Schema.optional(Schema.Array(Schema.String)),
 			hiddenAgents: Schema.optional(Schema.Array(Schema.String)),
 			originId: Schema.optional(NonEmptyString),
+		},
+	},
+) {}
+
+export class GetClaudeSettings extends Schema.TaggedRequest<GetClaudeSettings>()(
+	"GetClaudeSettings",
+	{
+		failure: WsRpcError,
+		success: ClaudeSettingsResponseSchema,
+		payload: { projectSlug: NonEmptyString },
+	},
+) {}
+
+export class SetClaudeSettings extends Schema.TaggedRequest<SetClaudeSettings>()(
+	"SetClaudeSettings",
+	{
+		failure: Schema.Union(WsRpcError, ClaudeSettingsTrustBoundaryError),
+		success: ClaudeSettingsResponseSchema,
+		payload: {
+			projectSlug: NonEmptyString,
+			overrides: ClaudeSettingsOverridesSchema,
+			originId: Schema.optional(NonEmptyString),
+		},
+	},
+) {}
+
+export class ResolveClaudeSettings extends Schema.TaggedRequest<ResolveClaudeSettings>()(
+	"ResolveClaudeSettings",
+	{
+		failure: Schema.Union(WsRpcError, ClaudeSettingsResolveError),
+		success: ResolveClaudeSettingsResponseSchema,
+		payload: {
+			projectSlug: NonEmptyString,
+			instanceId: NonEmptyString,
 		},
 	},
 ) {}
@@ -1078,7 +1156,11 @@ export const WsRpcRequest = Schema.Union(
 	SwitchContextWindow,
 	SwitchModel,
 	SetDefaultModel,
+	SetDefaultPermissionMode,
 	SetHiddenEntries,
+	GetClaudeSettings,
+	SetClaudeSettings,
+	ResolveClaudeSettings,
 	ReloadProviderSession,
 	RenameSession,
 	SwitchVariant,
@@ -1132,7 +1214,11 @@ export const WsRpcGroup = RpcGroup.make(
 	Rpc.fromTaggedRequest(SwitchContextWindow),
 	Rpc.fromTaggedRequest(SwitchModel),
 	Rpc.fromTaggedRequest(SetDefaultModel),
+	Rpc.fromTaggedRequest(SetDefaultPermissionMode),
 	Rpc.fromTaggedRequest(SetHiddenEntries),
+	Rpc.fromTaggedRequest(GetClaudeSettings),
+	Rpc.fromTaggedRequest(SetClaudeSettings),
+	Rpc.fromTaggedRequest(ResolveClaudeSettings),
 	Rpc.fromTaggedRequest(ReloadProviderSession),
 	Rpc.fromTaggedRequest(RenameSession),
 	Rpc.fromTaggedRequest(SwitchVariant),

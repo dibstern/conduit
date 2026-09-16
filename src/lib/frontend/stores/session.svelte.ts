@@ -220,9 +220,15 @@ export function findSession(id: string): SessionInfo | undefined {
  *  Subagent sessions (those with a parentID) are excluded when the
  *  hideSubagentSessions UI toggle is active (default). */
 export function getFilteredSessions(): SessionInfo[] {
-	// Active search results take priority (already filtered by server)
+	// Active search results take priority (already filtered by server).
+	// Reconcile against the live session map: searchResults is a snapshot the
+	// removal paths never touch, so without this a session deleted during an
+	// active search keeps rendering until the query is cleared.
 	if (sessionState.searchResults !== null) {
-		return sessionState.searchResults;
+		return sessionState.searchResults.flatMap((session) => {
+			const liveSession = sessionState.sessions.get(session.id);
+			return liveSession ? [liveSession] : [];
+		});
 	}
 	let sessions: SessionInfo[];
 	if (uiState.hideSubagentSessions) {
@@ -328,9 +334,10 @@ export function handleSessionList(
 	}
 
 	// Clean up chat state for sessions that were removed from the list.
-	// Only run diff for full (non-search) lists where roots is undefined
-	// (backward-compat untagged lists contain all sessions).
-	if (roots === undefined) {
+	// roots:false and legacy untagged lists both carry every session, so they
+	// are authoritative for removals. roots:true lists only carry roots, and a
+	// child may not have learned its parentID yet, so they never reap.
+	if (roots !== true) {
 		for (const id of previousIds) {
 			if (!incomingIds.has(id)) {
 				clearSessionChatState(id);
@@ -501,6 +508,10 @@ export function switchToSession(
 /** Clear all session state (for project switch). */
 export function clearSessionState(): void {
 	resetSessionCreation(); // Cancel any in-flight creation (project switch safety)
+	for (const id of sessionState.sessions.keys()) {
+		clearSessionChatState(id);
+	}
+	sessionState.sessions.clear();
 	sessionState.rootSessions = [];
 	sessionState.allSessions = [];
 	sessionState.searchResults = null;

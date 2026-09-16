@@ -16,28 +16,17 @@
 	} from "../../stores/ui.svelte.js";
 	import { permissionsState, getLocalPermissions } from "../../stores/permissions.svelte.js";
 	import { createScrollController } from "../../stores/scroll-controller.svelte.js";
-	import type {
-		AssistantMessage as AssistantMsg,
-		ThinkingMessage,
-		ToolMessage,
-		UserMessage as UserMsg,
-		ResultMessage,
-		SystemMessage as SystemMsg,
-	} from "../../types.js";
+	import { economics, segmentTurns, type Turn } from "../../utils/turns.js";
 	import UserMessage from "./UserMessage.svelte";
 	import AssistantMessage from "./AssistantMessage.svelte";
-	import ThinkingBlock from "./ThinkingBlock.svelte";
+	import TurnActivity from "./TurnActivity.svelte";
+	import TurnEconomics from "./TurnEconomics.svelte";
 	import ToolItem from "./ToolItem.svelte";
-	import SkillItem from "./SkillItem.svelte";
-	import ToolGroupCard from "./ToolGroupCard.svelte";
-	import { groupMessages, type GroupedMessage, type ToolGroup } from "../../utils/group-tools.js";
-	import ResultBar from "./ResultBar.svelte";
 	import SystemMessage from "./SystemMessage.svelte";
 	import PermissionCard from "../permissions/PermissionCard.svelte";
 	import QuestionCard from "./QuestionCard.svelte";
 	import HistoryLoader from "./HistoryLoader.svelte";
 	import BlockGrid from "../shared/BlockGrid.svelte";
-
 
 	let messagesEl: HTMLDivElement | undefined = $state();
 	let sentinelEl: HTMLElement | undefined = $state();
@@ -72,7 +61,7 @@
 		}
 	});
 
-	// Auto-scroll when content changes (messages, permissions, questions).
+	// Auto-scroll when content changes (messages, permissions).
 	// Guards:
 	// - Skip during prepend (scroll preservation handles that case).
 	// - Only auto-scroll when session is actively producing content
@@ -88,7 +77,6 @@
 	$effect(() => {
 		const _len = currentChat().messages.length;
 		const _permLen = permissionsState.pendingPermissions.length;
-		const _qLen = permissionsState.pendingQuestions.length;
 		const isActive = untrack(() => isProcessing());
 		const isSettling = untrack(() => scrollCtrl.state === "settling");
 		const scrollRequested = untrack(() => consumeScrollRequest());
@@ -177,8 +165,22 @@
 		isProcessing() ? "↓ New activity" : "↓ Latest",
 	);
 
-	const groupedMessages: GroupedMessage[] = $derived(groupMessages(currentChat().messages));
+	const turns = $derived(segmentTurns(currentChat().messages, isProcessing()));
 	const localPermissions = $derived(getLocalPermissions(sessionState.currentId));
+	const transcriptToolIds = $derived.by(() => {
+		const ids = new Set<string>();
+		for (const message of currentChat().messages) {
+			if (message.type === "tool") ids.add(message.id);
+		}
+		return ids;
+	});
+	const orphanQuestions = $derived(
+		permissionsState.pendingQuestions.filter(
+			(question) =>
+				!transcriptToolIds.has(question.toolId) &&
+				(!question.toolUseId || !transcriptToolIds.has(question.toolUseId)),
+		),
+	);
 
 	// Fork context: detect if current session is a user fork
 	const activeSession = $derived(findSession(sessionState.currentId ?? ""));
@@ -195,18 +197,14 @@
 	const parentSession = $derived(
 		activeSession?.parentID ? findSession(activeSession.parentID) : null,
 	);
-	// Memoize grouped messages for fork rendering
-	const inheritedGrouped = $derived(
-		forkSplit ? groupMessages(forkSplit.inherited) : [],
+	// A fork renders two transcripts; only the current half can be live.
+	const inheritedTurns = $derived(
+		forkSplit ? segmentTurns(forkSplit.inherited, false) : [],
 	);
-	const currentGrouped = $derived(
-		forkSplit ? groupMessages(forkSplit.current) : [],
+	const currentTurns = $derived(
+		forkSplit ? segmentTurns(forkSplit.current, isProcessing()) : [],
 	);
 
-	/** All pending questions are rendered at the bottom of the message list.
-	 *  Active questions are NOT rendered inline by ToolItem (to prevent them from
-	 *  appearing between text segments when the LLM calls the question tool mid-stream).
-	 *  Once resolved, the read-only summary renders inline at the tool's position. */
 </script>
 
 <div
@@ -237,39 +235,51 @@
 		</div>
 	{/if}
 
-	<!-- Message rendering snippet (shared between fork and normal paths) -->
-	{#snippet messageItem(msg: GroupedMessage)}
-		{#if msg.type === "user"}
+	<!-- Turn rendering snippet (shared between fork and normal paths) -->
+	{#snippet turnItem(turn: Turn)}
+		{#if turn.user}
 			<div class="msg-container" class:rewind-point={uiState.rewindActive}>
-				<UserMessage message={msg as UserMsg} />
+				<UserMessage message={turn.user} />
 			</div>
-		{:else if msg.type === "assistant"}
-			<div class="msg-container" class:rewind-point={uiState.rewindActive}>
-				<AssistantMessage message={msg as AssistantMsg} />
-			</div>
-		{:else if msg.type === "thinking"}
+		{/if}
+		{#each turn.segments as segment, i}
+			{@const final = i === turn.segments.length - 1}
+			{#if segment.activity.length > 0}
+				<TurnActivity {turn} {segment} {final} />
+			{/if}
+			<!-- Notices sit between the final work and reply: they are lifted out of
+			     the activity log so a failure is never hidden behind a collapsed panel. -->
+			{#if final}
+				{#each turn.notices as notice (notice.uuid)}
+					<div class="msg-container">
+						<SystemMessage message={notice} />
+					</div>
+				{/each}
+			{/if}
+			{#each segment.reply as reply (reply.uuid)}
+				<div class="msg-container" class:rewind-point={uiState.rewindActive}>
+					<AssistantMessage message={reply} />
+				</div>
+			{/each}
+			{#if segment.handBack}
+				<div class="max-w-[760px] mx-auto px-5">
+					<ToolItem message={segment.handBack} />
+				</div>
+			{/if}
+		{/each}
+		<!-- A turn that did work carries its bill on the strip. A tool-less question
+		     and answer has no ledger, so it renders the same bill on its own line —
+		     one formatter for both, rather than a second dialect of the same facts.
+		     .result-bar is an E2E selector; .turn-meta rides on TurnEconomics. -->
+		{#if turn.result && turn.segments.every((segment) => segment.activity.length === 0)}
+			<!-- `now` only matters for a live turn, and this branch needs a result. -->
+			{@const bill = economics(turn, Date.now())}
 			<div class="msg-container">
-				<ThinkingBlock message={msg as ThinkingMessage} />
-			</div>
-		{:else if msg.type === "tool-group"}
-			<div class="msg-container">
-				<ToolGroupCard group={msg as ToolGroup} />
-			</div>
-		{:else if msg.type === "tool" && (msg as ToolMessage).name === "Skill"}
-			<div class="msg-container">
-				<SkillItem message={msg as ToolMessage} />
-			</div>
-		{:else if msg.type === "tool"}
-			<div class="msg-container">
-				<ToolItem message={msg as ToolMessage} />
-			</div>
-		{:else if msg.type === "result"}
-			<div class="msg-container">
-				<ResultBar message={msg as ResultMessage} />
-			</div>
-		{:else if msg.type === "system"}
-			<div class="msg-container">
-				<SystemMessage message={msg as SystemMsg} />
+				<!-- Same query container as the ledger, so the bill sheds the gauge and
+				     the token counts in the same order rather than overflowing. -->
+				<div class="result-bar @container max-w-[760px] mx-auto mt-1 mb-5 px-5">
+					<TurnEconomics economics={bill} showDuration />
+				</div>
 			</div>
 		{/if}
 	{/snippet}
@@ -280,8 +290,8 @@
 	<div onclick={uiState.rewindActive ? handleRewindClick : undefined}>
 	{#if forkSplit && forkSplit.inherited.length > 0}
 		<ForkContextBlock>
-			{#each inheritedGrouped as msg (msg.uuid)}
-				{@render messageItem(msg)}
+			{#each inheritedTurns as turn (turn.id)}
+				{@render turnItem(turn)}
 			{/each}
 		</ForkContextBlock>
 
@@ -290,12 +300,12 @@
 			parentId={activeSession?.parentID ?? ""}
 		/>
 
-		{#each currentGrouped as msg, i (msg.uuid)}
-			{@render messageItem(msg)}
+		{#each currentTurns as turn (turn.id)}
+			{@render turnItem(turn)}
 		{/each}
 	{:else}
-		{#each groupedMessages as msg, i (msg.uuid)}
-			{@render messageItem(msg)}
+		{#each turns as turn (turn.id)}
+			{@render turnItem(turn)}
 		{/each}
 	{/if}
 	</div>
@@ -307,8 +317,8 @@
 		</div>
 	{/each}
 
-	<!-- Pending user questions (always rendered at bottom, not inline) -->
-	{#each permissionsState.pendingQuestions as question (question.toolId)}
+	<!-- Keep questions answerable when their tool message has not reached the transcript. -->
+	{#each orphanQuestions as question (question.toolId)}
 		<div class="max-w-[760px] mx-auto mb-3 px-5">
 			<QuestionCard request={question} />
 		</div>

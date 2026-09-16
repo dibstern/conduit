@@ -26,7 +26,9 @@ async function waitForHealth(port: number, timeoutMs = 30_000): Promise<void> {
 	const start = Date.now();
 	while (Date.now() - start < timeoutMs) {
 		try {
-			const res = await fetch(`http://localhost:${port}/health`);
+			// /global/health is the API probe; /health is the web UI, which
+			// answers 200 for any path and so is ready before the API is.
+			const res = await fetch(`http://localhost:${port}/global/health`);
 			if (res.ok) return;
 		} catch {
 			// Not ready yet

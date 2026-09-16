@@ -19,7 +19,6 @@
 		getActiveModel,
 		getAvailableInstances,
 		getEffectiveInstanceId,
-		getModelDisplayName,
 		getProviderGroupsForInstance,
 		formatModelName,
 		type InstanceOption,
@@ -92,15 +91,6 @@
 
 	const activeModel = $derived(getActiveModel());
 	const hasModel = $derived(!!discoveryState.currentModelId);
-	const currentDrift = $derived(
-		discoveryState.modelExecution?.drifted === true &&
-			discoveryState.modelExecution.requestedModel &&
-			discoveryState.modelExecution.expectedModel &&
-			discoveryState.modelExecution.actualModel
-			? discoveryState.modelExecution
-			: null,
-	);
-
 	$effect(() => {
 		const turnEpoch = currentChat().turnEpoch;
 		const projectSlug = getCurrentSlug();
@@ -401,15 +391,6 @@
 		}}
 	/>
 
-	{#if currentDrift}
-		<span
-			data-testid="current-model-drift"
-			class="inline-flex items-center shrink-0 rounded-lg border border-warning/30 bg-warning-bg px-2 py-1 text-[11px] leading-[1.3] font-medium text-warning"
-		>
-			⚠ Running {getModelDisplayName(currentDrift.actualModel)} — you selected {getModelDisplayName(currentDrift.requestedModel)}
-		</span>
-	{/if}
-
 	<!-- Upward popover: instance rail + model list -->
 	{#if pickerOpen}
 		<div
@@ -593,7 +574,7 @@
 <!-- Rail hover tooltip — opens toward the rail (fixed, outside the popover clip) -->
 {#if pickerOpen && railTooltip}
 	<div
-		class="fixed z-[var(--z-modal)] pointer-events-none bg-black text-white text-[11px] leading-[1.3] py-1.5 px-2 rounded-md border border-border whitespace-nowrap shadow-panel before:content-[''] before:absolute before:-left-[5px] before:top-[9px] before:border-y-[5px] before:border-y-transparent before:border-r-[5px] before:border-r-black"
+		class="fixed z-[var(--z-popover-raised)] pointer-events-none bg-black text-white text-[11px] leading-[1.3] py-1.5 px-2 rounded-md border border-border whitespace-nowrap shadow-panel before:content-[''] before:absolute before:-left-[5px] before:top-[9px] before:border-y-[5px] before:border-y-transparent before:border-r-[5px] before:border-r-black"
 		style="top:{railTooltip.top}px;left:{railTooltip.left}px"
 	>
 		{railTooltip.label}

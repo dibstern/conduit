@@ -19,6 +19,7 @@ import { createLogger } from "../logger.js";
 import { ClaudeEventPersistEffectTag } from "../persistence/effect/claude-event-persist-effect.js";
 import { SqliteClient } from "../persistence/sqlite-client.js";
 import type { SSEEvent } from "../relay/opencode-events.js";
+import { loadRelaySettings } from "../relay/relay-settings.js";
 import {
 	defaultClaudeSubagentSdk,
 	makeClaudeSubagentMaterializer,
@@ -113,6 +114,8 @@ function createOrchestrationComponents(
 
 	const claudeInstance = new ClaudeProviderInstance({
 		workspaceRoot: options.workspaceRoot ?? process.cwd(),
+		claudeSettingsOverrides: () =>
+			loadRelaySettings(options.configDir).claudeSettings,
 	});
 	registry.registerInstance(claudeInstance);
 
@@ -193,6 +196,8 @@ const createOrchestrationComponentsEffect = (
 				: undefined;
 		const claudeInstance = yield* ClaudeDriver.create({
 			workspaceRoot: options.workspaceRoot ?? process.cwd(),
+			claudeSettingsOverrides: () =>
+				loadRelaySettings(options.configDir).claudeSettings,
 			...(materializeSubagents ? { materializeSubagents } : {}),
 		});
 		registry.registerInstance(claudeInstance);

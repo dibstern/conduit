@@ -3,6 +3,7 @@
 // Converts SQLite MessageWithParts[] → HistoryMessage[] for session_switched messages.
 // Pure conversion with no I/O.
 
+import { isSameModelIdentity } from "../provider/claude/claude-api-model-id.js";
 import type {
 	HistoryMessage,
 	HistoryMessagePart,
@@ -109,6 +110,9 @@ function partRowToHistoryPart(row: MessagePartRow): HistoryMessagePart {
 	return {
 		id: row.id,
 		type: row.type as HistoryMessagePart["type"],
+		// Per-part stamps, not the message's: a whole turn's tools share one
+		// message row, so the message stamp would make every step 0ms long.
+		time: { start: row.created_at, end: row.updated_at },
 		...(row.text ? { text: row.text } : {}),
 		...(row.tool_name != null ? { tool: row.tool_name } : {}),
 		...(row.call_id != null ? { callID: row.call_id } : {}),
@@ -152,9 +156,10 @@ export function messageRowsToHistory(
 							...(row.modelExecution.expectedModel === undefined
 								? {}
 								: {
-										drifted:
-											row.modelExecution.actualModel !==
+										drifted: !isSameModelIdentity(
+											row.modelExecution.actualModel,
 											row.modelExecution.expectedModel,
+										),
 									}),
 						},
 					}

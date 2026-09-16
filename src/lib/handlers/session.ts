@@ -3,10 +3,7 @@ import { OpenCodeAPITag } from "../domain/provider/Services/opencode-api-service
 
 import { Effect } from "effect";
 import { mapQuestionFields } from "../bridges/question-bridge.js";
-import {
-	defaultInstanceIdForDriver,
-	type ProviderInstanceId,
-} from "../contracts/provider-instance.js";
+import type { ProviderInstanceId } from "../contracts/provider-instance.js";
 import { PendingInteractionServiceTag } from "../domain/relay/Services/pending-interaction-service.js";
 import {
 	LoggerTag,
@@ -15,6 +12,7 @@ import {
 	StatusPollerTag,
 	WebSocketHandlerTag,
 } from "../domain/relay/Services/services.js";
+import { forkOpenCodeSession } from "../domain/relay/Services/session-command.js";
 import { SessionManagerServiceTag } from "../domain/relay/Services/session-manager-service.js";
 import {
 	clearSession as clearEffectOverrideSession,
@@ -667,15 +665,9 @@ export const forkSessionForClient = ({
 			requestedSessionId || wsHandler.getClientSession(clientId) || "";
 		if (!sessionId) return undefined;
 
-		const forked = yield* Effect.tryPromise(() =>
-			client.session.fork(sessionId, {
-				...(messageId != null && { messageID: messageId }),
-			}),
-		);
-		yield* sessionManagerService.establishOpenCodeSession(
-			forked,
-			defaultInstanceIdForDriver("opencode"),
-		);
+		// Through the seam: forking upstream and forgetting to record the forked
+		// session locally is the same parity gap as creating one and forgetting.
+		const forked = yield* forkOpenCodeSession(sessionId, messageId);
 
 		yield* clearEffectOverrideSession(sessionId);
 		yield* sessionManagerService.clearPaginationCursor(sessionId);

@@ -117,7 +117,8 @@ describe("Migration Runner", () => {
 		const messagesContextWindowMigration = schemaMigrations[6];
 		const turnModelExecutionMigration = schemaMigrations[7];
 		const sessionsPermissionModeMigration = schemaMigrations[8];
-		const projectionFailuresMigration = schemaMigrations[9];
+		const sessionCascadeDeletesMigration = schemaMigrations[9];
+		const projectionFailuresMigration = schemaMigrations[10];
 		if (
 			!baseline ||
 			!metadataMigration ||
@@ -128,6 +129,7 @@ describe("Migration Runner", () => {
 			!messagesContextWindowMigration ||
 			!turnModelExecutionMigration ||
 			!sessionsPermissionModeMigration ||
+			!sessionCascadeDeletesMigration ||
 			!projectionFailuresMigration
 		) {
 			throw new Error("Expected all event-store schema migrations");
@@ -186,6 +188,11 @@ describe("Migration Runner", () => {
 			},
 			{
 				id: 10,
+				name: "session_cascade_deletes",
+				checksum: calculateMigrationChecksum(sessionCascadeDeletesMigration),
+			},
+			{
+				id: 11,
 				name: "create_projection_failures",
 				checksum: calculateMigrationChecksum(projectionFailuresMigration),
 			},
@@ -214,7 +221,7 @@ describe("Migration Runner", () => {
 		);
 	});
 
-	it("upgrades a migration-9 database with durable projection failures once", () => {
+	it("upgrades a migration-9 database with cascade deletes and durable projection failures once", () => {
 		client = SqliteClient.memory();
 		runMigrations(client, schemaMigrations.slice(0, 9));
 		const beforeTables = client
@@ -284,7 +291,10 @@ describe("Migration Runner", () => {
 			secondRun: runMigrations(client, schemaMigrations),
 		}).toEqual({
 			beforeTables: [],
-			applied: [{ id: 10, name: "create_projection_failures" }],
+			applied: [
+				{ id: 10, name: "session_cascade_deletes" },
+				{ id: 11, name: "create_projection_failures" },
+			],
 			columns: [
 				{
 					cid: 0,
@@ -365,10 +375,12 @@ describe("Migration Runner", () => {
 		const migrationsThrough7 = schemaMigrations.slice(0, 7);
 		const turnModelExecutionMigration = schemaMigrations[7];
 		const sessionsPermissionModeMigration = schemaMigrations[8];
-		const projectionFailuresMigration = schemaMigrations[9];
+		const sessionCascadeDeletesMigration = schemaMigrations[9];
+		const projectionFailuresMigration = schemaMigrations[10];
 		if (
 			!turnModelExecutionMigration ||
 			!sessionsPermissionModeMigration ||
+			!sessionCascadeDeletesMigration ||
 			!projectionFailuresMigration
 		) {
 			throw new Error("Expected remaining event-store migrations");
@@ -393,6 +405,11 @@ describe("Migration Runner", () => {
 			},
 			{
 				id: 10,
+				name: "session_cascade_deletes",
+				checksum: calculateMigrationChecksum(sessionCascadeDeletesMigration),
+			},
+			{
+				id: 11,
 				name: "create_projection_failures",
 				checksum: calculateMigrationChecksum(projectionFailuresMigration),
 			},

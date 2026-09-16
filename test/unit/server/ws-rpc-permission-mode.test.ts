@@ -1,3 +1,6 @@
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { RpcTest } from "@effect/rpc";
 import { SqlClient } from "@effect/sql";
 import { describe, it } from "@effect/vitest";
@@ -7,6 +10,7 @@ import { WsRpcGroup } from "../../../src/lib/contracts/ws-rpc.js";
 import { LoggerTag } from "../../../src/lib/domain/relay/Services/services.js";
 import { restoreSessionPermissionModes } from "../../../src/lib/domain/relay/Services/session-manager-service.js";
 import {
+	getDefaultPermissionMode,
 	getPermissionMode,
 	makeOverridesStateLive,
 } from "../../../src/lib/domain/relay/Services/session-overrides-state.js";
@@ -17,12 +21,56 @@ import {
 	ProviderRegistry,
 	ProviderRegistryTag,
 } from "../../../src/lib/provider/provider-registry.js";
+import { loadRelaySettings } from "../../../src/lib/relay/relay-settings.js";
 import { WsRpcServerLayer } from "../../../src/lib/server/ws-rpc.js";
 import {
+	makeMockConfig,
 	makeMockLogger,
 	makeMockWebSocketHandler,
 	makeTestHandlerLayer,
 } from "../../helpers/mock-factories.js";
+
+describe("WsRpcServerLayer SetDefaultPermissionMode", () => {
+	it.effect("sets and persists the relay default permission mode", () => {
+		const configDir = mkdtempSync(
+			join(tmpdir(), "conduit-rpc-default-permission-mode-"),
+		);
+		const wsHandler = makeMockWebSocketHandler();
+
+		return Effect.gen(function* () {
+			const client = yield* RpcTest.makeClient(WsRpcGroup);
+			const result = yield* client.SetDefaultPermissionMode({
+				projectSlug: "project-a",
+				mode: "auto",
+				originId: "browser-1",
+			});
+
+			expect(result).toEqual({ projectSlug: "project-a", mode: "auto" });
+			expect(yield* getDefaultPermissionMode()).toBe("auto");
+			expect(loadRelaySettings(configDir).defaultPermissionMode).toBe("auto");
+			expect(wsHandler.broadcast).toHaveBeenCalledWith({
+				type: "default_permission_mode_info",
+				mode: "auto",
+			});
+		}).pipe(
+			Effect.scoped,
+			Effect.provide(
+				WsRpcServerLayer.pipe(
+					Layer.provideMerge(
+						makeTestHandlerLayer({
+							wsHandler,
+							log: makeMockLogger(),
+							config: makeMockConfig({ configDir }),
+						}),
+					),
+				),
+			),
+			Effect.ensuring(
+				Effect.sync(() => rmSync(configDir, { recursive: true, force: true })),
+			),
+		);
+	});
+});
 
 describe("WsRpcServerLayer SwitchPermissionMode", () => {
 	it.effect("sets, broadcasts, and hydrates the permission mode", () => {

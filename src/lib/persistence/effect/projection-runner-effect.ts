@@ -66,7 +66,7 @@ export interface ProjectionRunnerEffect {
 
 	readonly recover: () => Effect.Effect<
 		RecoveryResult,
-		ProjectionRunnerError | SqlError,
+		ProjectionRunnerError,
 		SqlClient.SqlClient
 	>;
 
@@ -149,28 +149,29 @@ export const makeProjectionRunnerEffect = (
 				const matching = projectorsByEventType.get(event.type) ?? [];
 				const ctx: ProjectionContext = { replaying };
 
-				// Each projector runs in its own transaction for fault isolation
+				// Failures propagate. A caller here is applying one known event and can
+				// act on the result — a user deleting a session must not be told it
+				// worked when the row is still there. Replay is the one path that
+				// swallows projector failures, and it does so in recover().
+				//
+				// Each projector still gets its own transaction, so a failure leaves
+				// earlier projectors committed and stops the rest; getFailures() is not
+				// involved, because the error reaches the caller instead.
 				for (const projector of matching) {
-					yield* sql
-						.withTransaction(
-							Effect.gen(function* () {
-								yield* projector.project(event, ctx);
-								yield* cursorRepo.upsert(projector.name, event.sequence);
-							}).pipe(
-								Effect.mapError(
-									(e) =>
-										new ProjectionRunnerError({
-											operation: "projectEvent",
-											cause: e,
-										}),
-								),
+					yield* sql.withTransaction(
+						Effect.gen(function* () {
+							yield* projector.project(event, ctx);
+							yield* cursorRepo.upsert(projector.name, event.sequence);
+						}).pipe(
+							Effect.mapError(
+								(cause) =>
+									new ProjectionRunnerError({
+										operation: "projectEvent",
+										cause,
+									}),
 							),
-						)
-						.pipe(
-							Effect.catchAll((err) =>
-								Effect.sync(() => recordFailure(projector, event, err)),
-							),
-						);
+						),
+					);
 				}
 			});
 
@@ -193,6 +194,10 @@ export const makeProjectionRunnerEffect = (
 
 				const ctx: ProjectionContext = { replaying };
 
+				// One transaction for the whole batch (S9): a translation that produced
+				// several events lands all-or-nothing, so the read model never shows a
+				// half-applied translation. Failures propagate for the same reason they
+				// do in projectEvent — see the policy note there.
 				yield* sql.withTransaction(
 					Effect.gen(function* () {
 						for (const event of events) {
@@ -224,7 +229,7 @@ export const makeProjectionRunnerEffect = (
 
 		const recover = (): Effect.Effect<
 			RecoveryResult,
-			ProjectionRunnerError | SqlError,
+			ProjectionRunnerError,
 			SqlClient.SqlClient
 		> =>
 			Effect.gen(function* () {

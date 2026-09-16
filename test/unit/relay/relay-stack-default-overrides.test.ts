@@ -12,6 +12,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
 	getDefaultAgent,
 	getDefaultModel,
+	getDefaultPermissionMode,
 	getDefaultVariant,
 } from "../../../src/lib/domain/relay/Services/session-overrides-state.js";
 import { createSilentLogger } from "../../../src/lib/logger.js";
@@ -117,6 +118,7 @@ describe("createProjectRelay override-state defaults", () => {
 				defaultVariants: {
 					"claude/claude-sonnet-4-7": "thinking",
 				},
+				defaultPermissionMode: "auto",
 			},
 			configDir,
 		);
@@ -149,6 +151,7 @@ describe("createProjectRelay override-state defaults", () => {
 				return {
 					defaultModel: yield* getDefaultModel(),
 					defaultVariant: yield* getDefaultVariant(),
+					defaultPermissionMode: yield* getDefaultPermissionMode(),
 				};
 			}),
 		);
@@ -159,6 +162,7 @@ describe("createProjectRelay override-state defaults", () => {
 				modelID: "claude-sonnet-4-7",
 			},
 			defaultVariant: "thinking",
+			defaultPermissionMode: "auto",
 		});
 		// This relay is created with no sessions and no websocket clients, so the
 		// three pre-existing fields are all at their zero values; the point of the

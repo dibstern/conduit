@@ -12,6 +12,7 @@ import {
 	type TurnErrorPayload,
 } from "../../../../src/lib/persistence/events.js";
 import { runMigrations } from "../../../../src/lib/persistence/migrations.js";
+import { SESSION_HANDLED_TYPES } from "../../../../src/lib/persistence/projectors/session-handlers.js";
 import { SessionProjector } from "../../../../src/lib/persistence/projectors/session-projector.js";
 import { schemaMigrations } from "../../../../src/lib/persistence/schema.js";
 import { SqliteClient } from "../../../../src/lib/persistence/sqlite-client.js";
@@ -66,17 +67,7 @@ describe("SessionProjector", () => {
 
 	it("has the correct name and handles list", () => {
 		expect(projector.name).toBe("session");
-		expect(projector.handles).toEqual([
-			"session.created",
-			"session.renamed",
-			"session.status",
-			"session.provider_changed",
-			"session.deleted",
-			"session.permission_mode_changed",
-			"turn.completed",
-			"turn.error",
-			"message.created",
-		]);
+		expect(projector.handles).toBe(SESSION_HANDLED_TYPES);
 	});
 
 	describe("session.deleted", () => {

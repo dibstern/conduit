@@ -205,6 +205,8 @@ describe("Integration: ClaudeProviderInstance full lifecycle", () => {
 			prompt: "Read the file",
 			eventSink: sink,
 			workspaceRoot: workspace,
+			// Matches initMessage()'s model, so drift detection stays quiet.
+			model: { providerId: "claude", modelId: "claude-sonnet-4" },
 		});
 
 		const result = await Effect.runPromise(instance.sendTurnEffect(input));
@@ -221,7 +223,9 @@ describe("Integration: ClaudeProviderInstance full lifecycle", () => {
 			.calls as Array<[CanonicalEvent]>;
 		const eventTypes = pushCalls.map((call) => call[0].type);
 
-		// Must contain session.status from system/init
+		// Must contain session.status — the busy lease released at turn end.
+		// (system/init no longer emits one while a turn is in flight; it would
+		// idle the composer and the sidebar dot a second into every first turn.)
 		expect(eventTypes).toContain("session.status");
 
 		// Must contain text.delta events from the text content block
@@ -265,8 +269,7 @@ describe("Integration: ClaudeProviderInstance full lifecycle", () => {
 		);
 		expect(turnCompleted.length).toBe(1);
 
-		// ── Verify ordering: session.status before text.delta before tool ──
-		const statusIdx = eventTypes.indexOf("session.status");
+		// ── Verify ordering: text.delta before tool before turn end ──
 		const firstTextDeltaIdx = eventTypes.indexOf("text.delta");
 		const firstToolStartIdx = eventTypes.findIndex(
 			(t, i) =>
@@ -275,9 +278,18 @@ describe("Integration: ClaudeProviderInstance full lifecycle", () => {
 		);
 		const turnCompletedIdx = eventTypes.lastIndexOf("turn.completed");
 
-		expect(statusIdx).toBeLessThan(firstTextDeltaIdx);
 		expect(firstTextDeltaIdx).toBeLessThan(firstToolStartIdx);
 		expect(firstToolStartIdx).toBeLessThan(turnCompletedIdx);
+
+		// Nothing may report idle mid-turn: the lease is released once, after
+		// the turn terminates. Both activity indicators read this status.
+		const statuses = pushCalls
+			.map((c, i) => ({ i, event: c[0] }))
+			.filter(({ event }) => event.type === "session.status");
+		expect(
+			statuses.map(({ event }) => (event.data as { status?: unknown }).status),
+		).toEqual(["idle"]);
+		expect(statuses[0]?.i).toBeGreaterThan(turnCompletedIdx);
 	});
 
 	// ── Test 2: Permission flow round-trip ──────────────────────────────────
@@ -434,6 +446,7 @@ describe("Integration: ClaudeProviderInstance full lifecycle", () => {
 			prompt: "Run the command",
 			eventSink: sink,
 			workspaceRoot: workspace,
+			model: { providerId: "claude", modelId: "claude-sonnet-4" },
 		});
 
 		// Start the turn (non-blocking; the query will pause at permission phase)

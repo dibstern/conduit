@@ -14,6 +14,7 @@
  */
 
 import type { Effect } from "effect";
+import type { SessionPermissionMode } from "../../shared-types.js";
 import type { EventSink, PermissionDecision } from "../types.js";
 import type { ClaudeSubagentTranscriptCursor } from "./claude-subagent-materializer.js";
 
@@ -157,6 +158,9 @@ export interface ClaudeSessionContext {
 	readonly startedAt: string;
 	readonly promptQueue: PromptQueueController;
 	readonly query: Query;
+	/** Serializes turn admission while each caller awaits the prior turn.
+	 *  Runtime-owned contexts always set this; translator-only test contexts may omit it. */
+	readonly turnAdmissionSemaphore?: Effect.Semaphore;
 	readonly pendingApprovals: Map<string, PendingApproval>;
 	readonly pendingQuestions: Map<string, PendingQuestion>;
 	readonly inFlightTools: Map<number, ToolInFlight>;
@@ -166,13 +170,32 @@ export interface ClaudeSessionContext {
 	/** EventSink for this session — updated on each turn (latest sink wins). */
 	eventSink: EventSink | undefined;
 	currentTurnId: string | undefined;
+	/** True from prompt submit until a terminal turn message. The SDK's
+	 *  system/init reports idle to clear a busy status stranded by a crash
+	 *  mid-turn, but it arrives ~1s AFTER the prompt starts — so it needs to
+	 *  know whether a turn is actually running. currentTurnId cannot answer
+	 *  that: it is set at submit and never cleared. */
+	turnInFlight?: boolean;
 	/** Conduit's requested catalog/base model id for the current turn. */
 	currentModel: string | undefined;
 	/** Exact model id sent to the Claude SDK after context-window normalization. */
 	currentApiModelId?: string;
 	/** Oracle-normalized model id expected from the SDK's system/init report. */
 	expectedApiModelId?: string;
+	/** Last model id reported as actually serving this session, so a mid-session
+	 *  switch re-reports instead of leaving the creation-time model standing. */
+	reportedApiModelId?: string;
+	/** Last permission mode the SDK reported for this session. The SDK owns the
+	 *  live mode, so this -- not conduit's stored request -- is what conduit has
+	 *  been told is in force. Undefined until the first system/init lands, which
+	 *  is why the first report always fires. */
+	reportedPermissionMode?: SessionPermissionMode;
 	currentAgent?: string;
+	/** Reasoning effort in force on the live query. Undefined means SDK default. */
+	currentVariant?: string;
+	/** A prior admission may have partially mutated the SDK query. The next
+	 *  admission must re-apply both model and effort before enqueueing. */
+	settingsOutOfSync?: boolean;
 	resumeSessionId: string | undefined;
 	lastAssistantUuid: string | undefined;
 	turnCount: number;

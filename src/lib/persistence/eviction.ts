@@ -204,36 +204,13 @@ export class EventStoreEviction {
 
 			this.db.runInTransaction(() => {
 				for (const sessionId of ids) {
-					// FK-safe cascade order:
-					this.db.execute("DELETE FROM activities WHERE session_id = ?", [
-						sessionId,
-					]);
-					this.db.execute(
-						"DELETE FROM pending_approvals WHERE session_id = ?",
-						[sessionId],
-					);
-					this.db.execute(
-						"DELETE FROM message_parts WHERE message_id IN (SELECT id FROM messages WHERE session_id = ?)",
-						[sessionId],
-					);
-					this.db.execute("DELETE FROM messages WHERE session_id = ?", [
-						sessionId,
-					]);
-					this.db.execute("DELETE FROM turns WHERE session_id = ?", [
-						sessionId,
-					]);
-					this.db.execute(
-						"DELETE FROM session_providers WHERE session_id = ?",
-						[sessionId],
-					);
-					this.db.execute("DELETE FROM tool_content WHERE session_id = ?", [
-						sessionId,
-					]);
-					this.db.execute("DELETE FROM provider_state WHERE session_id = ?", [
-						sessionId,
-					]);
+					// sessions.parent_id, turns.session_id, messages.session_id/turn_id,
+					// message_parts.message_id, and every other FK into sessions/turns carry
+					// ON DELETE CASCADE (see 0010_session_cascade_deletes.sql), so deleting
+					// the session row alone removes every dependent row, including subagent
+					// children -- closing the gap where this cascade previously iterated a
+					// flat session-id list without resolving parent_id descendants first.
 					this.db.execute("DELETE FROM sessions WHERE id = ?", [sessionId]);
-
 					totalCascaded++;
 				}
 			});

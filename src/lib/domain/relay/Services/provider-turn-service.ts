@@ -65,6 +65,7 @@ import {
 	resetProcessingTimeout,
 	setModel,
 	setModelDefault,
+	setPermissionMode,
 } from "./session-overrides-state.js";
 import { SessionTitleServiceTag } from "./session-title-service.js";
 
@@ -379,8 +380,8 @@ export const makeProviderTurnService = Effect.gen(function* () {
 					resetProcessingTimeout(sessionId, PROCESSING_TIMEOUT_DURATION),
 				);
 			},
-			getPermissionMode: () =>
-				getPermissionMode(sessionId).pipe(
+			applyReportedPermissionMode: (mode) =>
+				setPermissionMode(sessionId, mode).pipe(
 					Effect.provideService(OverridesStateTag, overridesRef),
 				),
 			...(eventSinkPersist ? { persist: eventSinkPersist } : {}),

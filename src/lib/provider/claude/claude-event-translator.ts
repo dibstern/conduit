@@ -34,7 +34,10 @@ import type {
 import { createEventId } from "../../persistence/events.js";
 import { providerRefsFromRuntimeData } from "../provider-runtime-refs.js";
 import type { EventSink } from "../types.js";
+import { AssistantTextLedger, type Emission } from "./assistant-text-ledger.js";
+import { isSameModelIdentity } from "./claude-api-model-id.js";
 import { normalizeToolInput } from "./normalize-tool-input.js";
+import { fromSdkPermissionMode } from "./permission-mode-map.js";
 import type {
 	ClaudeSessionContext,
 	SDKAssistantMessage,
@@ -220,17 +223,6 @@ function taskCompletionResult(
 	return null;
 }
 
-type ReadableContentBlockType = "text" | "thinking";
-
-interface ContentBlockState {
-	readonly type: ReadableContentBlockType;
-	readonly partId: string;
-	text: string;
-	textLength: number;
-	started: boolean;
-	ended: boolean;
-}
-
 // ─── Translator ────────────────────────────────────────────────────────────
 
 export interface ClaudeEventTranslatorDeps {
@@ -242,17 +234,10 @@ export class ClaudeEventTranslator {
 	// State tracker for mapping Claude content blocks to messageId/partId.
 	private currentAssistantMessageId = "";
 	private partIdCounter = 0;
-	// A single agentic turn spans multiple SDK assistant messages (one per
-	// tool round). Each round's stream restarts content_block index at 0, but
-	// currentAssistantMessageId stays pinned to the first round's id. Without a
-	// per-round discriminator the content-block key `msg:index:type` collides
-	// across rounds, merging every text segment into ONE part created before
-	// any tool — so all narration renders clumped ahead of every tool call.
-	// stepIndex advances per round to keep restarted indexes on distinct parts.
-	private stepIndex = 0;
-	private lastStreamStepId: string | undefined;
+	// Who each block of assistant text is, and what of it has already been
+	// sent. Identity is positional, so no rewrite of the text can change it.
+	private readonly ledger = new AssistantTextLedger();
 	private bufferedWrites: Effect.Effect<void, unknown>[] | undefined;
-	private contentBlockStates = new Map<string, ContentBlockState>();
 	private announcedMessageIds = new Set<string>();
 	// Per-request usage of the LAST main-chain assistant message. The SDK's
 	// result.usage is cumulative across every API request in the turn (cache
@@ -269,63 +254,6 @@ export class ClaudeEventTranslator {
 
 	private nextPartId(): string {
 		return `claude-part-${this.partIdCounter++}`;
-	}
-
-	private contentBlockKey(
-		messageId: string,
-		index: number,
-		type: ReadableContentBlockType,
-	): string {
-		// Step-scoped + type-scoped: (1) each tool round is its own SDK message
-		// whose content_block indexes restart at 0, so stepIndex keeps a later
-		// round's text/tool blocks off the earlier round's parts; (2) the SDK's
-		// per-block assistant snapshots index their content array independently
-		// of the wire content_block index, so a text block can land on an index
-		// the stream used for thinking.
-		return `${messageId}:${this.stepIndex}:${index}:${type}`;
-	}
-
-	private getOrCreateContentBlockState(
-		messageId: string,
-		index: number,
-		type: ReadableContentBlockType,
-		partId: string,
-	): ContentBlockState {
-		const key = this.contentBlockKey(messageId, index, type);
-		const existing = this.contentBlockStates.get(key);
-		if (existing) return existing;
-
-		const state: ContentBlockState = {
-			type,
-			partId,
-			text: "",
-			textLength: 0,
-			started: false,
-			ended: false,
-		};
-		this.contentBlockStates.set(key, state);
-		return state;
-	}
-
-	/** Find the streamed state an assistant-snapshot block corresponds to.
-	 *  Snapshot content-array indexes don't line up with wire content_block
-	 *  indexes (per-block snapshots restart at 0), so match by message, type,
-	 *  and text prefix instead — the snapshot text extends what streamed. */
-	private findSnapshotBlockState(
-		messageId: string,
-		type: ReadableContentBlockType,
-		text: string,
-	): ContentBlockState | undefined {
-		const prefix = `${messageId}:`;
-		let best: ContentBlockState | undefined;
-		for (const [key, state] of this.contentBlockStates) {
-			if (!key.startsWith(prefix) || state.type !== type) continue;
-			if (!text.startsWith(state.text) && !state.text.startsWith(text)) {
-				continue;
-			}
-			if (!best || state.text.length > best.text.length) best = state;
-		}
-		return best;
 	}
 
 	private assistantSnapshotMessageId(message: SDKAssistantMessage): string {
@@ -358,77 +286,55 @@ export class ClaudeEventTranslator {
 		});
 	}
 
-	private emitTextSuffix(
+	/** Turn the ledger's emissions into Provider Runtime Events, announcing
+	 *  the assistant message first so no content is ever attributed to an id
+	 *  the projector has not seen. Divergences carry no text by design — they
+	 *  are the record that a snapshot was dropped, not an event. */
+	private emitLedger(
 		ctx: ClaudeSessionContext,
-		input: {
-			readonly messageId: string;
-			readonly index: number;
-			readonly type: ReadableContentBlockType;
-			readonly partId: string;
-			readonly text: string;
-			readonly complete?: boolean;
-		},
-	): Effect.Effect<void, unknown> {
-		const state = this.getOrCreateContentBlockState(
-			input.messageId,
-			input.index,
-			input.type,
-			input.partId,
-		);
-		return this.emitTextSuffixForState(ctx, state, input);
-	}
-
-	private emitTextSuffixForState(
-		ctx: ClaudeSessionContext,
-		state: ContentBlockState,
-		input: {
-			readonly messageId: string;
-			readonly type: ReadableContentBlockType;
-			readonly text: string;
-			readonly complete?: boolean;
-		},
+		messageId: string,
+		emissions: readonly Emission[],
 	): Effect.Effect<void, unknown> {
 		return Effect.gen(this, function* () {
-			yield* this.pushMessageCreated(ctx, input.messageId);
-
-			if (input.type === "thinking" && !state.started) {
-				yield* this.push(
-					ctx,
-					makeProviderRuntimeEvent("thinking.start", ctx.sessionId, {
-						messageId: input.messageId,
-						partId: state.partId,
-					}),
-				);
-				state.started = true;
+			if (emissions.length === 0) return;
+			if (emissions.some((emission) => emission.kind !== "divergence")) {
+				yield* this.pushMessageCreated(ctx, messageId);
 			}
-
-			if (input.text.length > state.textLength) {
-				const suffix = input.text.slice(state.textLength);
-				yield* this.push(
-					ctx,
-					makeProviderRuntimeEvent(
-						input.type === "text" ? "text.delta" : "thinking.delta",
-						ctx.sessionId,
-						{
-							messageId: input.messageId,
-							partId: state.partId,
-							text: suffix,
-						},
-					),
-				);
-				state.text = input.text;
-				state.textLength = input.text.length;
-			}
-
-			if (input.type === "thinking" && input.complete && !state.ended) {
-				yield* this.push(
-					ctx,
-					makeProviderRuntimeEvent("thinking.end", ctx.sessionId, {
-						messageId: input.messageId,
-						partId: state.partId,
-					}),
-				);
-				state.ended = true;
+			for (const emission of emissions) {
+				switch (emission.kind) {
+					case "delta":
+						yield* this.push(
+							ctx,
+							makeProviderRuntimeEvent(
+								emission.type === "text" ? "text.delta" : "thinking.delta",
+								ctx.sessionId,
+								{ messageId, partId: emission.partId, text: emission.text },
+							),
+						);
+						break;
+					case "thinking.start":
+					case "thinking.end":
+						yield* this.push(
+							ctx,
+							makeProviderRuntimeEvent(emission.kind, ctx.sessionId, {
+								messageId,
+								partId: emission.partId,
+							}),
+						);
+						break;
+					case "divergence":
+						(this.deps.logger ?? defaultLog).warn(
+							`assistant ${emission.type} snapshot does not extend the streamed text (${emission.relation}); keeping the stream`,
+							{
+								sessionId: ctx.sessionId,
+								messageId,
+								partId: emission.partId,
+								streamedCharacters: emission.streamed,
+								snapshotCharacters: emission.snapshot,
+							},
+						);
+						break;
+				}
 			}
 		});
 	}
@@ -437,12 +343,29 @@ export class ClaudeEventTranslator {
 	 *  stale entries from a previous turn or reconnect. */
 	resetInFlightState(): void {
 		this.partIdCounter = 0;
-		this.stepIndex = 0;
-		this.lastStreamStepId = undefined;
 		this.currentAssistantMessageId = "";
-		this.contentBlockStates.clear();
+		this.ledger.endTurn();
 		this.announcedMessageIds.clear();
 		this.lastMainRequestUsage = undefined;
+	}
+
+	/** Close out a turn: release the busy lease, then reset in-flight state.
+	 *  The SDK never emits a "no operation" status of its own, so a terminal
+	 *  turn message (result / interrupt / error) is the ONLY authoritative
+	 *  signal that the session stopped working. Every terminal path must go
+	 *  through here or the session stays busy forever. */
+	private endTurn(ctx: ClaudeSessionContext): Effect.Effect<void, unknown> {
+		return Effect.gen(this, function* () {
+			yield* this.push(
+				ctx,
+				makeProviderRuntimeEvent("session.status", ctx.sessionId, {
+					sessionId: ctx.sessionId,
+					status: "idle",
+				}),
+			);
+			ctx.turnInFlight = false;
+			this.resetInFlightState();
+		});
 	}
 
 	constructor(private readonly deps: ClaudeEventTranslatorDeps) {}
@@ -502,7 +425,7 @@ export class ClaudeEventTranslator {
 						code: "provider_error",
 					}),
 				);
-				this.resetInFlightState();
+				yield* this.endTurn(ctx);
 			}),
 		);
 	}
@@ -516,6 +439,9 @@ export class ClaudeEventTranslator {
 		return Effect.gen(this, function* () {
 			switch (message.subtype) {
 				case "status": {
+					// Carries the mode only when it changed, and several of the
+					// branches below return early, so report before any of them.
+					yield* this.reportPermissionMode(ctx, message.permissionMode);
 					if (message.compact_result === "failed") {
 						const detail = message.compact_error
 							? `Compaction failed: ${message.compact_error}`
@@ -542,11 +468,17 @@ export class ClaudeEventTranslator {
 						);
 						return;
 					}
+					// `requesting` means the SDK is issuing an API call — the
+					// busiest state there is. Mapping it to idle killed the
+					// composer bounce bar and the sidebar processing dot every
+					// time the main agent resumed after a subagent (this is the
+					// only status the main chain emits while blocked on a Task).
+					// Only an explicit null status means "no operation".
 					yield* this.push(
 						ctx,
 						makeProviderRuntimeEvent("session.status", ctx.sessionId, {
 							sessionId: ctx.sessionId,
-							status: "idle",
+							status: message.status === "requesting" ? "busy" : "idle",
 						}),
 					);
 					return;
@@ -661,21 +593,30 @@ export class ClaudeEventTranslator {
 							modelEvidence,
 						),
 					);
+					ctx.reportedApiModelId = message.model;
+					yield* this.reportPermissionMode(ctx, message.permissionMode);
 					if (
 						ctx.expectedApiModelId !== undefined &&
-						ctx.expectedApiModelId !== message.model
+						!isSameModelIdentity(ctx.expectedApiModelId, message.model)
 					) {
 						(this.deps.logger ?? defaultLog).warn(
 							`Claude model drift: session=${ctx.sessionId} requested=${ctx.currentModel ?? "<none>"} expected=${ctx.expectedApiModelId} actual=${message.model}`,
 						);
 					}
-					yield* this.push(
-						ctx,
-						makeProviderRuntimeEvent("session.status", ctx.sessionId, {
-							sessionId: ctx.sessionId,
-							status: "idle",
-						}),
-					);
+					// init lands ~1s after the prompt starts, so reporting idle
+					// unconditionally blanks the bounce bar and the sidebar dot at
+					// the top of every first turn. It is still the only thing that
+					// clears a busy status stranded by a crash mid-turn, so keep it
+					// for the case where no turn is actually running.
+					if (!ctx.turnInFlight) {
+						yield* this.push(
+							ctx,
+							makeProviderRuntimeEvent("session.status", ctx.sessionId, {
+								sessionId: ctx.sessionId,
+								status: "idle",
+							}),
+						);
+					}
 					return;
 				}
 
@@ -683,6 +624,41 @@ export class ClaudeEventTranslator {
 					// Ignore other system subtypes (hook_*, etc.)
 					return;
 			}
+		});
+	}
+
+	/**
+	 * The SDK owns the live permission mode and echoes it on every turn's
+	 * system/init and on a system/status whenever it changes. Conduit's stored
+	 * mode is only the request, so this report is what the store and the picker
+	 * follow.
+	 */
+	private reportPermissionMode(
+		ctx: ClaudeSessionContext,
+		sdkMode: string | undefined,
+	): Effect.Effect<void, unknown> {
+		return Effect.gen(this, function* () {
+			if (sdkMode === undefined) return;
+			const mode = fromSdkPermissionMode(sdkMode);
+			// A mode outside the pinned SDK's set is left alone rather than
+			// coerced onto one conduit does model -- guessing here would write a
+			// mode the session is not in straight into the store.
+			if (mode === undefined) {
+				(this.deps.logger ?? defaultLog).warn(
+					`Claude reported an unmodelled permission mode: session=${ctx.sessionId} mode=${sdkMode}`,
+				);
+				return;
+			}
+			if (mode === ctx.reportedPermissionMode) return;
+			ctx.reportedPermissionMode = mode;
+			yield* this.push(
+				ctx,
+				makeProviderRuntimeEvent(
+					"session.permission_mode_changed",
+					ctx.sessionId,
+					{ sessionId: ctx.sessionId, mode },
+				),
+			);
 		});
 	}
 
@@ -994,22 +970,7 @@ export class ClaudeEventTranslator {
 				ctx.pendingAssistantBoundary === true &&
 				Boolean(msgId) &&
 				msgId !== this.currentAssistantMessageId;
-			if (boundary) {
-				ctx.pendingAssistantBoundary = false;
-				this.contentBlockStates.clear();
-				// Fresh assistant message: restart step numbering.
-				this.stepIndex = 0;
-				this.lastStreamStepId = msgId;
-			} else if (msgId && msgId !== this.lastStreamStepId) {
-				// A new SDK assistant message within the same turn (each tool
-				// round is its own message whose content_block indexes restart at
-				// 0). Advance the step so restarted indexes map to fresh parts
-				// instead of colliding with the previous round — which merged all
-				// narration into one part rendered ahead of every tool call.
-				// The first round (lastStreamStepId undefined) stays at step 0.
-				if (this.lastStreamStepId !== undefined) this.stepIndex++;
-				this.lastStreamStepId = msgId;
-			}
+			if (boundary) ctx.pendingAssistantBoundary = false;
 			if (msgId && (boundary || !this.currentAssistantMessageId)) {
 				this.currentAssistantMessageId = msgId;
 				// Emit message.created so MessageProjector creates the row
@@ -1023,6 +984,15 @@ export class ClaudeEventTranslator {
 						sessionId: ctx.sessionId,
 						status: "busy",
 					}),
+				);
+			}
+			// Each tool round is its own SDK message whose content_block indexes
+			// restart at 0; the ledger opens a step per round so a later round's
+			// blocks never land on an earlier round's parts.
+			if (msgId) {
+				this.ledger.messageStart(
+					this.currentAssistantMessageId || msgId,
+					msgId,
 				);
 			}
 		});
@@ -1041,22 +1011,11 @@ export class ClaudeEventTranslator {
 			// complete when their tool_result arrives.
 			if (tool.toolName === "__thinking") {
 				ctx.inFlightTools.delete(index);
-				const state = this.currentAssistantMessageId
-					? this.getOrCreateContentBlockState(
-							this.currentAssistantMessageId,
-							index,
-							"thinking",
-							tool.itemId,
-						)
-					: undefined;
-				yield* this.push(
+				yield* this.emitLedger(
 					ctx,
-					makeProviderRuntimeEvent("thinking.end", ctx.sessionId, {
-						messageId: this.currentAssistantMessageId,
-						partId: tool.itemId,
-					}),
+					this.currentAssistantMessageId,
+					this.ledger.blockStop(index),
 				);
-				if (state) state.ended = true;
 				return;
 			}
 
@@ -1129,29 +1088,12 @@ export class ClaudeEventTranslator {
 						partialInputJson: "",
 					};
 					ctx.inFlightTools.set(index, tool);
-					this.getOrCreateContentBlockState(
-						messageId,
-						index,
-						block.type,
-						tool.itemId,
-					);
-					if (block.type === "thinking") {
-						yield* this.emitTextSuffix(ctx, {
-							messageId,
-							index,
-							type: "thinking",
-							partId: tool.itemId,
-							text: block.thinking,
-						});
-					} else if (block.text.length > 0) {
-						yield* this.emitTextSuffix(ctx, {
-							messageId,
-							index,
-							type: "text",
-							partId: tool.itemId,
-							text: block.text,
-						});
-					}
+					const initial =
+						block.type === "thinking" ? block.thinking : block.text;
+					yield* this.emitLedger(ctx, messageId, [
+						...this.ledger.blockStart(index, block.type, tool.itemId),
+						...this.ledger.blockDelta(index, initial),
+					]);
 					return;
 				}
 
@@ -1210,19 +1152,10 @@ export class ClaudeEventTranslator {
 					const partId = tool ? tool.itemId : this.nextPartId();
 					const messageId =
 						this.currentAssistantMessageId || tool?.itemId || randomUUID();
-					const state = this.getOrCreateContentBlockState(
-						messageId,
-						index,
-						type,
-						partId,
-					);
-					yield* this.emitTextSuffix(ctx, {
-						messageId,
-						index,
-						type,
-						partId: state.partId,
-						text: state.text + text,
-					});
+					yield* this.emitLedger(ctx, messageId, [
+						...this.ledger.blockStart(index, type, partId),
+						...this.ledger.blockDelta(index, text),
+					]);
 					return;
 				}
 
@@ -1271,6 +1204,31 @@ export class ClaudeEventTranslator {
 			// Capture this request's usage (main chain only — subagent
 			// messages carry parent_tool_use_id and live in their own context).
 			if (message.parent_tool_use_id == null) {
+				// `init` only arrives at query creation, so after a mid-session
+				// setModel the assistant message is the first honest report of
+				// which model actually served the turn.
+				// `init` echoes the outbound id (`claude-opus-5[1m]`); the API reports
+				// the bare one (`claude-opus-5`). Comparing identities keeps a 1M
+				// window from looking like a model change on every turn.
+				const servedBy = message.message.model;
+				if (
+					typeof servedBy === "string" &&
+					(ctx.reportedApiModelId === undefined ||
+						!isSameModelIdentity(servedBy, ctx.reportedApiModelId))
+				) {
+					ctx.reportedApiModelId = servedBy;
+					yield* this.push(
+						ctx,
+						makeProviderRuntimeEvent("turn.model_resolved", ctx.sessionId, {
+							...(ctx.currentModel ? { requestedModel: ctx.currentModel } : {}),
+							...(ctx.expectedApiModelId
+								? { expectedModel: ctx.expectedApiModelId }
+								: {}),
+							actualModel: servedBy,
+						}),
+					);
+				}
+
 				const usage = (message.message as { usage?: unknown }).usage;
 				if (isRecord(usage)) {
 					const num = (v: unknown): number | undefined =>
@@ -1302,12 +1260,18 @@ export class ClaudeEventTranslator {
 				snapshotId !== this.currentAssistantMessageId
 			) {
 				ctx.pendingAssistantBoundary = false;
-				this.contentBlockStates.clear();
 				messageId = snapshotId;
 			} else {
 				messageId = this.currentAssistantMessageId || snapshotId;
 			}
 			this.currentAssistantMessageId = messageId;
+			// A turn with partial messages has already opened this scope from
+			// `message_start`, so this is a no-op there; a turn without them
+			// opens it here. Subagent frames carry their own API message id and
+			// must never advance the main chain's step.
+			if (message.parent_tool_use_id == null) {
+				this.ledger.messageStart(messageId, snapshotId);
+			}
 
 			const content = message.message.content;
 			if (!Array.isArray(content)) return;
@@ -1321,57 +1285,27 @@ export class ClaudeEventTranslator {
 			);
 			if (readableBlocks.length === 0) return;
 
-			yield* this.pushMessageCreated(ctx, messageId);
-
-			// Snapshot content-array indexes are NOT the wire content_block
-			// indexes (per-block snapshots restart at 0), so resolve each block
-			// to its streamed state by type + text prefix. Only when nothing
-			// streamed (partial messages off or missed) does the snapshot mint
-			// its own part.
-			for (const [index, block] of content.entries()) {
+			// A snapshot block is the earliest block of its kind in this scope
+			// that no snapshot has claimed yet — order, never index (per-block
+			// snapshots restart their content array at 0) and never text (a
+			// MessageDisplay hook may have rewritten it on the way here).
+			const parentToolUseId = message.parent_tool_use_id ?? null;
+			for (const block of content) {
 				if (!isRecord(block)) continue;
-				if (block["type"] === "text" && typeof block["text"] === "string") {
-					if (block["text"].length === 0) continue;
-					const state =
-						this.findSnapshotBlockState(messageId, "text", block["text"]) ??
-						this.getOrCreateContentBlockState(
-							messageId,
-							index,
-							"text",
-							`${messageId}-${index}`,
-						);
-					yield* this.emitTextSuffixForState(ctx, state, {
-						messageId,
-						type: "text",
-						text: block["text"],
-					});
-					continue;
-				}
-				if (
-					block["type"] === "thinking" &&
-					typeof block["thinking"] === "string"
-				) {
-					const existing = this.findSnapshotBlockState(
-						messageId,
-						"thinking",
-						block["thinking"],
-					);
-					if (block["thinking"].length === 0 && !existing) continue;
-					const state =
-						existing ??
-						this.getOrCreateContentBlockState(
-							messageId,
-							index,
-							"thinking",
-							`${messageId}-${index}`,
-						);
-					yield* this.emitTextSuffixForState(ctx, state, {
-						messageId,
-						type: "thinking",
-						text: block["thinking"],
-						complete: true,
-					});
-				}
+				const type =
+					block["type"] === "text"
+						? "text"
+						: block["type"] === "thinking"
+							? "thinking"
+							: undefined;
+				if (type === undefined) continue;
+				const text = block[type === "text" ? "text" : "thinking"];
+				if (typeof text !== "string") continue;
+				yield* this.emitLedger(
+					ctx,
+					messageId,
+					this.ledger.snapshot({ parentToolUseId, type, text }),
+				);
 			}
 		});
 	}
@@ -1445,7 +1379,7 @@ export class ClaudeEventTranslator {
 							this.currentAssistantMessageId || ctx.lastAssistantUuid || "",
 					}),
 				);
-				this.resetInFlightState();
+				yield* this.endTurn(ctx);
 				return;
 			}
 
@@ -1459,7 +1393,7 @@ export class ClaudeEventTranslator {
 						error: errors,
 					}),
 				);
-				this.resetInFlightState();
+				yield* this.endTurn(ctx);
 				return;
 			}
 
@@ -1483,7 +1417,7 @@ export class ClaudeEventTranslator {
 						code: "provider_error",
 					}),
 				);
-				this.resetInFlightState();
+				yield* this.endTurn(ctx);
 				return;
 			}
 
@@ -1563,7 +1497,7 @@ export class ClaudeEventTranslator {
 					duration: result.duration_ms,
 				}),
 			);
-			this.resetInFlightState();
+			yield* this.endTurn(ctx);
 		});
 	}
 

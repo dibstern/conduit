@@ -23,7 +23,7 @@ import {
 	sendToSession,
 	type WsHandlerStateTag,
 } from "../domain/relay/Services/ws-handler-service.js";
-import type { RelayMessage } from "../shared-types.js";
+import { type RelayMessage, WS_PROTOCOL_VERSION } from "../shared-types.js";
 import type {
 	WebSocketHandlerShape,
 	WsClientConnectedEvent,
@@ -228,6 +228,14 @@ export class EffectWsHandler implements WebSocketHandlerShape {
 		this.forkLogged(
 			"addClient",
 			addClient(clientId, ws).pipe(
+				// Version first: client_connected listeners start the session-init
+				// flood, and the mismatch check must not trail it.
+				Effect.tap(() =>
+					sendTo(clientId, {
+						type: "protocol_version",
+						version: WS_PROTOCOL_VERSION,
+					}),
+				),
 				Effect.tap((clientCount) =>
 					Effect.sync(() => {
 						this.recordClientConnected(clientId);

@@ -5,6 +5,9 @@ import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/openco
 // Layer. Each test provides minimal mock services via Layer.succeed, runs
 // the Effect to completion, and asserts on captured calls.
 
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, it } from "@effect/vitest";
 import { Deferred, Duration, Effect, Exit, Fiber, Layer } from "effect";
 import { expect, vi } from "vitest";
@@ -42,7 +45,9 @@ import {
 import {
 	getAgent,
 	getContextWindow,
+	getDefaultPermissionMode,
 	getModel,
+	getPermissionMode,
 	getVariant,
 	hasActiveProcessingTimeout,
 	makeOverridesStateLive,
@@ -51,6 +56,7 @@ import {
 	setDefaultContextWindow,
 	setDefaultModel,
 	setModel,
+	setPermissionMode,
 	setVariant,
 } from "../../../src/lib/domain/relay/Services/session-overrides-state.js";
 import {
@@ -79,6 +85,7 @@ import {
 	handleAskUserResponse,
 	handlePermissionResponse,
 	handleQuestionReject,
+	setDefaultPermissionModeForRelay,
 } from "../../../src/lib/handlers/permissions.js";
 import {
 	cancelSessionById,
@@ -111,6 +118,7 @@ import {
 import { OrchestrationEngine } from "../../../src/lib/provider/orchestration-engine.js";
 import { ProviderRegistry } from "../../../src/lib/provider/provider-registry.js";
 import type { ProviderInstance } from "../../../src/lib/provider/types.js";
+import { loadRelaySettings } from "../../../src/lib/relay/relay-settings.js";
 import type { PermissionId, RequestId } from "../../../src/lib/shared-types.js";
 import type { ProjectRelayConfig } from "../../../src/lib/types.js";
 import {
@@ -1470,48 +1478,45 @@ describe("handleGetToolContent", () => {
 
 describe("handleForkSession", () => {
 	it.effect(
-		"waits for durable OpenCode establishment before exposing a fork",
-		() =>
-			Effect.gen(function* () {
-				const started = yield* Deferred.make<void>();
-				const gate = yield* Deferred.make<void>();
-				const establishOpenCodeSession = vi.fn(() =>
-					Deferred.succeed(started, undefined).pipe(
-						Effect.zipRight(Deferred.await(gate)),
-					),
-				);
-				const setForkEntry = vi.fn(() => Effect.void);
-				const sendDualSessionLists = vi.fn(() => Effect.void);
-				const ws = mockWsHandler();
-				const layer = makeForkSessionLayer({
-					ws,
-					sessionManagerService: makeMockSessionManagerService({
-						establishOpenCodeSession,
-						setForkEntry,
-						sendDualSessionLists,
-					}),
+		"uses the canonical fork seam without duplicate establishment",
+		() => {
+			const establishOpenCodeSession = vi.fn(() => Effect.void);
+			const setForkEntry = vi.fn(() => Effect.void);
+			const sendDualSessionLists = vi.fn(() => Effect.void);
+			const ws = mockWsHandler();
+			const client = {
+				session: {
+					fork: vi.fn(async () => ({
+						id: "ses-child",
+						title: "Forked Session",
+						time: { created: 200, updated: 201 },
+					})),
+					message: vi.fn(async () => ({ time: { created: 123 } })),
+					messagesPage: vi.fn(async () => [{ id: "msg-last" }]),
+					get: vi.fn(async () => ({})),
+				},
+				permission: { list: vi.fn(async () => []) },
+			} as unknown as OpenCodeAPI;
+			const layer = makeForkSessionLayer({
+				client,
+				ws,
+				sessionManagerService: makeMockSessionManagerService({
+					establishOpenCodeSession,
+					setForkEntry,
+					sendDualSessionLists,
+				}),
+			});
+
+			return Effect.gen(function* () {
+				yield* handleForkSession("client-1", {
+					sessionId: "ses-parent",
+					messageId: "msg-1",
+				}).pipe(Effect.provide(layer));
+
+				expect(client.session.fork).toHaveBeenCalledWith("ses-parent", {
+					messageID: "msg-1",
 				});
-
-				const fiber = yield* Effect.fork(
-					handleForkSession("client-1", {
-						sessionId: "ses-parent",
-						messageId: "msg-1",
-					}).pipe(Effect.provide(layer)),
-				);
-				yield* Deferred.await(started);
-
-				expect(establishOpenCodeSession).toHaveBeenCalledWith(
-					expect.objectContaining({ id: "ses-child" }),
-					"opencode",
-				);
-				expect(setForkEntry).not.toHaveBeenCalled();
-				expect(ws.broadcast).not.toHaveBeenCalled();
-				expect(ws.sendTo).not.toHaveBeenCalled();
-				expect(sendDualSessionLists).not.toHaveBeenCalled();
-
-				yield* Deferred.succeed(gate, undefined);
-				yield* Fiber.join(fiber);
-
+				expect(establishOpenCodeSession).not.toHaveBeenCalled();
 				expect(setForkEntry).toHaveBeenCalledOnce();
 				expect(ws.broadcast).toHaveBeenCalledWith(
 					expect.objectContaining({ type: "session_forked" }),
@@ -1521,44 +1526,52 @@ describe("handleForkSession", () => {
 					expect.objectContaining({ type: "session_switched" }),
 				);
 				expect(sendDualSessionLists).toHaveBeenCalled();
-			}),
+			});
+		},
 	);
 
-	it.effect("does not expose a fork when durable establishment fails", () => {
-		const setForkEntry = vi.fn(() => Effect.void);
-		const sendDualSessionLists = vi.fn(() => Effect.void);
-		const ws = mockWsHandler();
-		const layer = makeForkSessionLayer({
-			ws,
-			sessionManagerService: makeMockSessionManagerService({
-				establishOpenCodeSession: vi.fn(() =>
-					Effect.fail(
-						new SessionManagerError({
-							operation: "establishOpenCodeSession.append",
-							cause: "event store unavailable",
-						}),
-					),
-				),
-				setForkEntry,
-				sendDualSessionLists,
-			}),
-		});
+	it.effect(
+		"does not expose a fork when the canonical upstream fork fails",
+		() => {
+			const setForkEntry = vi.fn(() => Effect.void);
+			const sendDualSessionLists = vi.fn(() => Effect.void);
+			const ws = mockWsHandler();
+			const client = {
+				session: {
+					fork: vi.fn(async () => {
+						throw new Error("fork unavailable");
+					}),
+					message: vi.fn(async () => ({ time: { created: 123 } })),
+					messagesPage: vi.fn(async () => []),
+					get: vi.fn(async () => ({})),
+				},
+				permission: { list: vi.fn(async () => []) },
+			} as unknown as OpenCodeAPI;
+			const layer = makeForkSessionLayer({
+				client,
+				ws,
+				sessionManagerService: makeMockSessionManagerService({
+					setForkEntry,
+					sendDualSessionLists,
+				}),
+			});
 
-		return Effect.exit(
-			handleForkSession("client-1", {
-				sessionId: "ses-parent",
-				messageId: "msg-1",
-			}).pipe(Effect.provide(layer)),
-		).pipe(
-			Effect.tap((exit) => {
-				expect(Exit.isFailure(exit)).toBe(true);
-				expect(setForkEntry).not.toHaveBeenCalled();
-				expect(ws.broadcast).not.toHaveBeenCalled();
-				expect(ws.sendTo).not.toHaveBeenCalled();
-				expect(sendDualSessionLists).not.toHaveBeenCalled();
-			}),
-		);
-	});
+			return Effect.exit(
+				handleForkSession("client-1", {
+					sessionId: "ses-parent",
+					messageId: "msg-1",
+				}).pipe(Effect.provide(layer)),
+			).pipe(
+				Effect.tap((exit) => {
+					expect(Exit.isFailure(exit)).toBe(true);
+					expect(setForkEntry).not.toHaveBeenCalled();
+					expect(ws.broadcast).not.toHaveBeenCalled();
+					expect(ws.sendTo).not.toHaveBeenCalled();
+					expect(sendDualSessionLists).not.toHaveBeenCalled();
+				}),
+			);
+		},
+	);
 
 	it.effect(
 		"clears Effect override state for the forked source session",
@@ -1823,6 +1836,53 @@ describe("handlePtyInput", () => {
 });
 
 // ─── Permissions handler tests ────────────────────────────────────────────
+
+describe("setDefaultPermissionModeForRelay", () => {
+	it.effect(
+		"persists, updates the default, and broadcasts without changing a session",
+		() => {
+			const configDir = mkdtempSync(
+				join(tmpdir(), "conduit-default-permission-mode-"),
+			);
+			const ws = mockWsHandler();
+			const log = mockLogger();
+			const layer = Layer.mergeAll(
+				Layer.succeed(WebSocketHandlerTag, ws),
+				Layer.succeed(LoggerTag, log),
+				Layer.succeed(ConfigTag, mockConfig({ configDir })),
+				makeOverridesStateLive(),
+			);
+
+			return Effect.gen(function* () {
+				yield* setPermissionMode("session-1", "full");
+
+				const mode = yield* setDefaultPermissionModeForRelay({
+					clientId: "client-1",
+					mode: "auto",
+				});
+
+				expect(mode).toBe("auto");
+				expect(loadRelaySettings(configDir).defaultPermissionMode).toBe("auto");
+				expect(yield* getDefaultPermissionMode()).toBe("auto");
+				expect(yield* getPermissionMode("session-1")).toBe("full");
+				expect(ws.broadcast).toHaveBeenCalledWith({
+					type: "default_permission_mode_info",
+					mode: "auto",
+				});
+				expect(log.info).toHaveBeenCalledWith(
+					"client=client-1 Set default permission mode to: auto",
+				);
+			}).pipe(
+				Effect.provide(layer),
+				Effect.ensuring(
+					Effect.sync(() =>
+						rmSync(configDir, { recursive: true, force: true }),
+					),
+				),
+			);
+		},
+	);
+});
 
 describe("handlePermissionResponse", () => {
 	it.effect(

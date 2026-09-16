@@ -40,6 +40,9 @@ export function providerRuntimeEventFromCanonical(
 	} = {},
 ): ProviderRuntimeEvent {
 	const metadata = metadataRecord(event.metadata);
+	if (event.type === "session.permission_mode_changed") {
+		throw new Error(`${event.type} is not a provider runtime event`);
+	}
 	return {
 		eventId: event.eventId,
 		type: event.type,

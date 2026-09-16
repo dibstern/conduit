@@ -257,6 +257,7 @@ vi.mock("../../../src/lib/frontend/transport/ws-rpc-client.js", () => ({
 
 import ChatLayout from "../../../src/lib/frontend/components/layout/ChatLayout.svelte";
 import {
+	replaceRoute,
 	routerState,
 	syncSlugState,
 } from "../../../src/lib/frontend/stores/router.svelte.js";
@@ -368,5 +369,17 @@ describe("ChatLayout WS lifecycle", () => {
 		expect(disconnect).toHaveBeenCalledTimes(1);
 		expect(connect).toHaveBeenCalledTimes(2);
 		expect(connect).toHaveBeenLastCalledWith("other-project");
+	});
+
+	it("disconnects without reconnecting when routed to authentication", async () => {
+		render(ChatLayout);
+		expect(connect).toHaveBeenCalledTimes(1);
+
+		replaceRoute("/auth");
+		flushSync();
+		await tick();
+
+		expect(disconnect).toHaveBeenCalledTimes(1);
+		expect(connect).toHaveBeenCalledTimes(1);
 	});
 });

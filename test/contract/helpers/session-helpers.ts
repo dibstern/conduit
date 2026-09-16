@@ -61,6 +61,12 @@ export async function sendPrompt(
 	text: string,
 ): Promise<void> {
 	await apiPost(`/session/${sessionId}/prompt_async`, {
+		// Ephemeral contract instances run with isolated XDG dirs and no
+		// credentials, so the prompt has to name a model the server can serve
+		// unauthenticated. Since 1.18.x a prompt with no model is dropped
+		// silently — the turn simply never runs, which surfaces downstream as
+		// "zero tool events" rather than as an error.
+		model: { providerID: "opencode", modelID: "mimo-v2.5-free" },
 		parts: [{ type: "text", text }],
 	});
 }

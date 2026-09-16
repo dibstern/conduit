@@ -10,6 +10,8 @@ export default defineConfig({
 		"variant-selector.spec.ts",
 		"context-window-selector.spec.ts",
 		"permission-mode-selector.spec.ts",
+		"composer-drift-layout.spec.ts",
+		"composer-large-paste.spec.ts",
 	],
 	fullyParallel: true,
 	forbidOnly: !!process.env["CI"],
@@ -26,7 +28,7 @@ export default defineConfig({
 		baseURL: "http://localhost:4173",
 		trace: "on-first-retry",
 		screenshot: "only-on-failure",
-		video: "retain-on-failure",
+		video: "off",
 	},
 
 	projects: [

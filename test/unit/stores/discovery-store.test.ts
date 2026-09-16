@@ -7,6 +7,7 @@ import {
 	discoveryState,
 	extractSlashQuery,
 	filterCommands,
+	flushPendingPermissionMode,
 	formatAgentLabel,
 	formatModelName,
 	getActiveContextWindowOptions,
@@ -30,6 +31,7 @@ import type {
 	ProviderInfo,
 	RelayMessage,
 } from "../../../src/lib/frontend/types.js";
+import type { SessionPermissionMode } from "../../../src/lib/shared-types.js";
 
 // ─── Helper: cast incomplete test data to the expected type ─────────────────
 // Tests deliberately pass incomplete objects to verify defensive handling.
@@ -319,6 +321,39 @@ describe("handlePermissionModeInfo", () => {
 	});
 });
 
+// ─── flushPendingPermissionMode ─────────────────────────────────────────────
+
+describe("flushPendingPermissionMode", () => {
+	it("sends the pre-bind selection to the server", async () => {
+		const sent: SessionPermissionMode[] = [];
+		discoveryState.pendingPermissionMode = "acceptEdits";
+
+		flushPendingPermissionMode("proj", "ses-1", async ({ mode }) => {
+			sent.push(mode);
+		});
+
+		expect(sent).toEqual(["acceptEdits"]);
+		expect(discoveryState.permissionMode).toBe("acceptEdits");
+		expect(discoveryState.pendingPermissionMode).toBeNull();
+	});
+
+	// "ask" used to be skipped as "the server default". It is only the default
+	// for a brand-new session, and this runs on binding to any session -- so
+	// binding to one already on "full" left the server on full access while the
+	// pill read "Ask". Restricting a session must never be the silent case.
+	it("sends a pre-bind selection of ask rather than assuming the server default", () => {
+		const sent: SessionPermissionMode[] = [];
+		discoveryState.permissionMode = "full";
+		discoveryState.pendingPermissionMode = "ask";
+
+		flushPendingPermissionMode("proj", "ses-1", async ({ mode }) => {
+			sent.push(mode);
+		});
+
+		expect(sent).toEqual(["ask"]);
+	});
+});
+
 // ─── handleModelInfo ────────────────────────────────────────────────────────
 
 describe("handleModelInfo", () => {
@@ -416,23 +451,28 @@ describe("handleDefaultModelInfo", () => {
 			type: "default_model_info",
 			model: "claude-4",
 			provider: "anthropic",
+			variant: "high",
 		});
 		expect(discoveryState.defaultModelId).toBe("claude-4");
 		expect(discoveryState.defaultProviderId).toBe("anthropic");
+		expect(discoveryState.defaultVariant).toBe("high");
 	});
 
 	it("clears to empty string when fields are missing", () => {
 		discoveryState.defaultModelId = "existing";
 		discoveryState.defaultProviderId = "existing-provider";
+		discoveryState.defaultVariant = "existing-variant";
 		handleDefaultModelInfo(
 			msg({
 				type: "default_model_info",
 				model: undefined,
 				provider: undefined,
+				variant: undefined,
 			}),
 		);
 		expect(discoveryState.defaultModelId).toBe("");
 		expect(discoveryState.defaultProviderId).toBe("");
+		expect(discoveryState.defaultVariant).toBe("");
 	});
 
 	it("updates when called with new values", () => {
@@ -440,14 +480,17 @@ describe("handleDefaultModelInfo", () => {
 			type: "default_model_info",
 			model: "model-a",
 			provider: "provider-a",
+			variant: "low",
 		});
 		handleDefaultModelInfo({
 			type: "default_model_info",
 			model: "model-b",
 			provider: "provider-b",
+			variant: "high",
 		});
 		expect(discoveryState.defaultModelId).toBe("model-b");
 		expect(discoveryState.defaultProviderId).toBe("provider-b");
+		expect(discoveryState.defaultVariant).toBe("high");
 	});
 });
 

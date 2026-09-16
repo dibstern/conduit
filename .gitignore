@@ -36,3 +36,9 @@ media/_test_output/
 
 # Session scratch scripts
 /.scratch/
+
+# Debug captures from bug investigations (multi-MB provider event logs)
+/docs/bugs-logs/
+
+# pnpm content-addressable store created by local installs
+/.pnpm-store/

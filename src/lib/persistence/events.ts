@@ -34,6 +34,8 @@ export const SESSION_PERMISSION_MODES = [
 	"acceptEdits",
 	"auto",
 	"full",
+	"plan",
+	"dontAsk",
 ] as const;
 export type SessionPermissionModeValue =
 	(typeof SESSION_PERMISSION_MODES)[number];
@@ -63,10 +65,11 @@ export const CANONICAL_EVENT_TYPES = [
 	"turn.model_resolved",
 	"session.created",
 	"session.renamed",
+	"session.deleted",
+	"session.forked",
 	"session.status",
 	"session.compaction",
 	"session.provider_changed",
-	"session.deleted",
 	"session.provider_cleanup_failed",
 	"session.permission_mode_changed",
 	"permission.asked",
@@ -229,6 +232,30 @@ export interface SessionRenamedPayload {
 	readonly title: string;
 }
 
+export interface SessionDeletedPayload {
+	readonly sessionId: string;
+}
+
+/**
+ * Lineage for a session that was forked from another.
+ *
+ * Separate from `session.created` because Conduit learns the two facts from
+ * different places: the forked session's existence arrives on the provider
+ * event stream, its fork point comes back from the fork call. Keeping lineage
+ * its own event is what lets `setForkEntry` record it without having to know
+ * the session's title or provider.
+ *
+ * `forkPointTimestamp` has no column in `sessions` — it is display-only and
+ * still served from the fork-metadata sidecar. It is recorded here anyway so
+ * the sidecar stays reconstructible from the log.
+ */
+export interface SessionForkedPayload {
+	readonly sessionId: string;
+	readonly parentId: string;
+	readonly forkPointEvent?: string;
+	readonly forkPointTimestamp?: number;
+}
+
 export interface SessionStatusPayload {
 	readonly sessionId: string;
 	readonly status: SessionStatusValue;
@@ -252,9 +279,9 @@ export interface SessionProviderChangedPayload {
 export interface SessionDeletedPayload {
 	readonly sessionId: string;
 	/**
-	 * Sessions whose `parent_id` the projector cascade nulls when this session
-	 * is deleted, captured BEFORE the tombstone persists (afterwards the
-	 * children can no longer be found by parent). Optional: historical
+	 * Descendant sessions deleted by the schema cascade, captured BEFORE the
+	 * tombstone persists (afterwards they can no longer be found by parent).
+	 * Optional: historical
 	 * tombstones lack it, and it is omitted when the session has no children.
 	 */
 	readonly childSessionIds?: readonly string[];
@@ -320,10 +347,11 @@ export interface EventPayloadMap {
 	"turn.model_resolved": TurnModelResolvedPayload;
 	"session.created": SessionCreatedPayload;
 	"session.renamed": SessionRenamedPayload;
+	"session.deleted": SessionDeletedPayload;
+	"session.forked": SessionForkedPayload;
 	"session.status": SessionStatusPayload;
 	"session.compaction": SessionCompactionPayload;
 	"session.provider_changed": SessionProviderChangedPayload;
-	"session.deleted": SessionDeletedPayload;
 	"session.provider_cleanup_failed": SessionProviderCleanupFailedPayload;
 	"session.permission_mode_changed": SessionPermissionModeChangedPayload;
 	"permission.asked": PermissionAskedPayload;
@@ -638,6 +666,13 @@ const SessionRenamedPayloadSchema = Schema.Struct({
 	title: Schema.String,
 });
 
+const SessionForkedPayloadSchema = Schema.Struct({
+	sessionId: Schema.String,
+	parentId: Schema.String,
+	forkPointEvent: Schema.optionalWith(Schema.String, { exact: true }),
+	forkPointTimestamp: Schema.optionalWith(Schema.Number, { exact: true }),
+});
+
 const SessionStatusPayloadSchema = Schema.Struct({
 	sessionId: Schema.String,
 	status: SessionStatusSchema,
@@ -782,6 +817,14 @@ const SessionRenamedEventSchema = eventEnvelope(
 	"session.renamed",
 	SessionRenamedPayloadSchema,
 );
+const SessionDeletedEventSchema = eventEnvelope(
+	"session.deleted",
+	SessionDeletedPayloadSchema,
+);
+const SessionForkedEventSchema = eventEnvelope(
+	"session.forked",
+	SessionForkedPayloadSchema,
+);
 const SessionStatusEventSchema = eventEnvelope(
 	"session.status",
 	SessionStatusPayloadSchema,
@@ -793,10 +836,6 @@ const SessionCompactionEventSchema = eventEnvelope(
 const SessionProviderChangedEventSchema = eventEnvelope(
 	"session.provider_changed",
 	SessionProviderChangedPayloadSchema,
-);
-const SessionDeletedEventSchema = eventEnvelope(
-	"session.deleted",
-	SessionDeletedPayloadSchema,
 );
 const SessionProviderCleanupFailedEventSchema = eventEnvelope(
 	"session.provider_cleanup_failed",
@@ -823,7 +862,7 @@ const QuestionResolvedEventSchema = eventEnvelope(
 	QuestionResolvedPayloadSchema,
 );
 
-// ─── Canonical Event Schema (Union of all 26 event types) ──────────────────
+// ─── Canonical Event Schema (Union of all 27 event types) ──────────────────
 
 export const CanonicalEventSchema = Schema.Union(
 	MessageCreatedEventSchema,
@@ -842,10 +881,11 @@ export const CanonicalEventSchema = Schema.Union(
 	TurnModelResolvedEventSchema,
 	SessionCreatedEventSchema,
 	SessionRenamedEventSchema,
+	SessionDeletedEventSchema,
+	SessionForkedEventSchema,
 	SessionStatusEventSchema,
 	SessionCompactionEventSchema,
 	SessionProviderChangedEventSchema,
-	SessionDeletedEventSchema,
 	SessionProviderCleanupFailedEventSchema,
 	SessionPermissionModeChangedEventSchema,
 	PermissionAskedEventSchema,
@@ -871,10 +911,11 @@ import { PersistenceError } from "./errors.js";
 const PAYLOAD_REQUIRED_FIELDS: Record<CanonicalEventType, readonly string[]> = {
 	"session.created": ["sessionId", "title", "provider"],
 	"session.renamed": ["sessionId", "title"],
+	"session.deleted": ["sessionId"],
+	"session.forked": ["sessionId", "parentId"],
 	"session.status": ["sessionId", "status"],
 	"session.compaction": ["sessionId", "state", "detail"],
 	"session.provider_changed": ["sessionId", "oldProvider", "newProvider"],
-	"session.deleted": ["sessionId"],
 	"session.provider_cleanup_failed": ["sessionId", "provider", "reason"],
 	"session.permission_mode_changed": ["sessionId", "mode"],
 	"message.created": ["messageId", "role", "sessionId"],

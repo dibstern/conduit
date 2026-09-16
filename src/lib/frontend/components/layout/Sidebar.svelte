@@ -142,7 +142,7 @@
 <!-- Sidebar overlay (mobile backdrop) -->
 <div
 	id="sidebar-overlay"
-	class="fixed inset-0 bg-[rgba(var(--overlay-rgb),0.45)] backdrop-blur-[2px] z-[var(--z-overlay)] transition-opacity duration-[250ms] ease-linear"
+	class="fixed inset-0 bg-[rgba(var(--overlay-rgb),0.45)] backdrop-blur-[2px] z-[var(--z-drawer-scrim)] transition-opacity duration-[250ms] ease-linear"
 	class:hidden={!uiState.mobileSidebarOpen}
 	onclick={handleOverlayClick}
 	onkeydown={undefined}

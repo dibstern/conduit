@@ -11,6 +11,11 @@ import type {
 	StoredEvent,
 } from "../events.js";
 
+import {
+	getSessionStatements,
+	SESSION_HANDLED_TYPES,
+} from "../projectors/session-handlers.js";
+
 // ─── Error type ─────────────────────────────────────────────────────────────
 
 export class ProjectionError extends Data.TaggedError("ProjectionError")<{
@@ -48,10 +53,6 @@ function encodeJson(value: unknown): string {
 	return JSON.stringify(value);
 }
 
-function isAutoTitleRename(event: StoredEvent): boolean {
-	return event.metadata.source === "auto-title";
-}
-
 function mergeMetadata(
 	current: string | null,
 	next: Record<string, unknown> | undefined,
@@ -75,116 +76,13 @@ function mergeMetadata(
 
 export const makeSessionProjector = (): EffectProjector => ({
 	name: "session",
-	handles: [
-		"session.created",
-		"session.renamed",
-		"session.status",
-		"session.provider_changed",
-		"session.deleted",
-		"session.permission_mode_changed",
-		"turn.completed",
-		"turn.error",
-		"message.created",
-	],
+	handles: SESSION_HANDLED_TYPES,
 	project: (event: StoredEvent) =>
 		Effect.gen(function* () {
 			const sql = yield* SqlClient.SqlClient;
 
-			if (isEventType(event, "session.created")) {
-				yield* sql`
-					INSERT INTO sessions (id, provider, provider_sid, title, status, parent_id, created_at, updated_at)
-					VALUES (${event.data.sessionId}, ${event.data.provider}, ${event.data.providerSessionId ?? null}, ${event.data.title}, 'idle', ${event.data.parentId ?? null}, ${event.createdAt}, ${event.createdAt})
-					ON CONFLICT (id) DO UPDATE SET
-						provider_sid = COALESCE(excluded.provider_sid, sessions.provider_sid),
-						title = CASE
-							WHEN sessions.title IS NULL
-								OR sessions.title = ''
-								OR sessions.title IN ('Untitled', 'Claude Session', 'Test Session')
-								OR sessions.title LIKE 'New session%'
-								OR sessions.parent_id IS NOT NULL
-								OR excluded.parent_id IS NOT NULL
-							THEN excluded.title
-							ELSE sessions.title
-						END,
-						parent_id = COALESCE(excluded.parent_id, sessions.parent_id),
-						updated_at = excluded.updated_at`;
-				return;
-			}
-
-			if (isEventType(event, "session.renamed")) {
-				if (isAutoTitleRename(event)) {
-					yield* sql`
-						UPDATE sessions SET title = ${event.data.title}, updated_at = ${event.createdAt}
-						WHERE id = ${event.data.sessionId}
-							AND provider IN ('claude', 'claude-sdk')
-							AND NOT EXISTS (
-								SELECT 1
-								FROM events prior
-								WHERE prior.session_id = ${event.data.sessionId}
-									AND prior.type = 'session.renamed'
-									AND prior.sequence < ${event.sequence}
-									AND COALESCE(json_extract(prior.metadata, '$.source'), '') <> 'auto-title'
-							)
-							AND (
-								title IS NULL
-								OR TRIM(title) = ''
-								OR LOWER(TRIM(title)) IN ('claude session', 'untitled', 'new session')
-								OR LOWER(TRIM(title)) LIKE 'new session %'
-							)`;
-					return;
-				}
-				yield* sql`UPDATE sessions SET title = ${event.data.title}, updated_at = ${event.createdAt} WHERE id = ${event.data.sessionId}`;
-				return;
-			}
-
-			if (isEventType(event, "session.status")) {
-				yield* sql`UPDATE sessions SET status = ${event.data.status}, updated_at = ${event.createdAt} WHERE id = ${event.data.sessionId}`;
-				return;
-			}
-
-			if (isEventType(event, "session.provider_changed")) {
-				yield* sql`UPDATE sessions SET provider = ${event.data.newProvider}, updated_at = ${event.createdAt} WHERE id = ${event.data.sessionId}`;
-				return;
-			}
-
-			if (isEventType(event, "session.deleted")) {
-				// Read-model cascade (events stay durable): clear every table with
-				// an FK to sessions — child tables first, mirroring eviction's
-				// order — then orphan child sessions and drop the row itself.
-				const sessionId = event.data.sessionId;
-				yield* sql`DELETE FROM message_parts WHERE message_id IN (SELECT id FROM messages WHERE session_id = ${sessionId})`;
-				yield* sql`DELETE FROM pending_approvals WHERE session_id = ${sessionId}`;
-				yield* sql`DELETE FROM activities WHERE session_id = ${sessionId}`;
-				yield* sql`DELETE FROM messages WHERE session_id = ${sessionId}`;
-				yield* sql`DELETE FROM turns WHERE session_id = ${sessionId}`;
-				yield* sql`DELETE FROM session_providers WHERE session_id = ${sessionId}`;
-				yield* sql`DELETE FROM tool_content WHERE session_id = ${sessionId}`;
-				yield* sql`DELETE FROM provider_state WHERE session_id = ${sessionId}`;
-				yield* sql`UPDATE sessions SET parent_id = NULL WHERE parent_id = ${sessionId}`;
-				yield* sql`DELETE FROM sessions WHERE id = ${sessionId}`;
-				return;
-			}
-
-			if (isEventType(event, "session.permission_mode_changed")) {
-				yield* sql`UPDATE sessions SET permission_mode = ${event.data.mode}, updated_at = ${event.createdAt} WHERE id = ${event.data.sessionId}`;
-				return;
-			}
-
-			if (
-				isEventType(event, "turn.completed") ||
-				isEventType(event, "turn.error")
-			) {
-				yield* sql`UPDATE sessions SET updated_at = ${event.createdAt} WHERE id = ${event.sessionId}`;
-				return;
-			}
-
-			if (isEventType(event, "message.created")) {
-				yield* sql`
-					UPDATE sessions SET
-						last_message_at = MAX(COALESCE(last_message_at, 0), ${event.createdAt}),
-						updated_at = ${event.createdAt}
-					WHERE id = ${event.data.sessionId}`;
-				return;
+			for (const stmt of getSessionStatements(event)) {
+				yield* sql.unsafe(stmt.sql, [...stmt.params]);
 			}
 		}).pipe(
 			Effect.mapError((e) =>
@@ -511,6 +409,14 @@ export const makeTurnProjector = (): EffectProjector => ({
 				return;
 			}
 
+			// Attributed to the newest open turn rather than by id, because the
+			// event carries no key that reaches a turns row: turns.id is the user
+			// message id, while the provider's turnId is a per-send uuid. This is
+			// exact only while a session has at most one turn in flight. The
+			// Claude translator is the sole emitter and its runtime serializes
+			// turn admission, so a turn's model_resolved always lands before the
+			// next turn's row exists. A second emitter, or concurrent turns,
+			// needs a real key first — see conduit-test-7i3.
 			if (isEventType(event, "turn.model_resolved")) {
 				yield* sql`
 					UPDATE turns

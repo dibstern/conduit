@@ -19,7 +19,7 @@
 	import SubagentBackBar from "../chat/SubagentBackBar.svelte";
 	import PastePreview from "../chat/PastePreview.svelte";
 	import { addUserMessage, currentChat, getOrCreateSessionSlot, inputSyncState, isProcessing } from "../../stores/chat.svelte.js";
-	import { discoveryState, extractSlashQuery, getEffectiveInstanceId } from "../../stores/discovery.svelte.js";
+	import { discoveryState, extractSlashQuery, getEffectiveInstanceId, getModelDisplayName } from "../../stores/discovery.svelte.js";
 	import { extractAtQuery, fileTreeState, filterFiles } from "../../stores/file-tree.svelte.js";
 	import { fetchFileContent, fetchDirectoryListing, resizeImageIfNeeded } from "./input-utils.js";
 	import { sessionState, switchToSession } from "../../stores/session.svelte.js";
@@ -42,7 +42,6 @@
 	let fileMenuRef: FileMenu | undefined = $state();
 	let subagentBackBarRef: SubagentBackBar | undefined = $state();
 	let cursorPos = $state(0);
-	let scrollTop = $state(0);
 	let composing = $state(false);
 
 	// ─── Per-session input drafts ─────────────────────────────────────────────
@@ -68,8 +67,6 @@
 					clearTimeout(inputSyncTimer);
 					inputSyncTimer = null;
 				}
-				// Resize textarea to fit restored content
-				requestAnimationFrame(() => autoResize());
 			}
 		});
 	});
@@ -79,12 +76,20 @@
 	/** Track which sync we last applied to avoid re-applying our own. */
 	let lastSyncApplied = 0;
 
+	/** When the local user last typed, so stale syncs can be told apart. */
+	let lastLocalEditAt = 0;
+
+	// A sync is already behind by our own 300ms debounce plus a round trip, so
+	// one that lands right after a keystroke describes text older than what is
+	// on screen. Applying it deletes what the user just typed.
+	const SYNC_GRACE_MS = 1_000;
+
 	/** Receive input sync from another tab viewing the same session. */
 	$effect(() => {
-		if (inputSyncState.lastUpdated > lastSyncApplied) {
-			lastSyncApplied = inputSyncState.lastUpdated;
-			inputText = inputSyncState.text;
-		}
+		if (inputSyncState.lastUpdated <= lastSyncApplied) return;
+		lastSyncApplied = inputSyncState.lastUpdated;
+		if (Date.now() - lastLocalEditAt < SYNC_GRACE_MS) return;
+		inputText = inputSyncState.text;
 	});
 
 	/** Timer for debounced outgoing input sync. */
@@ -112,8 +117,25 @@
 
 	// ─── Derived ───────────────────────────────────────────────────────────────
 
+	// Pasting a log dump means the composer holds far more text than it can show.
+	// Past this size the highlight mirror stops earning its keep: it would lay the
+	// whole draft out a second time, which costs ~300ms per megabyte. Fall back to
+	// the textarea's own (unhighlighted) text, exactly as during IME composition.
+	const HIGHLIGHT_MAX_CHARS = 20_000;
+	const plainText = $derived(inputText.length > HIGHLIGHT_MAX_CHARS);
+
 	const canSend = $derived(inputText.trim().length > 0 || pendingImages.length > 0);
 	const showContextMini = $derived(currentChat().contextPercent > 0);
+	/** Drift is only reportable with complete mismatch evidence. */
+	const modelDrift = $derived.by(() => {
+		const execution = discoveryState.modelExecution;
+		return execution?.drifted === true &&
+			execution.requestedModel &&
+			execution.expectedModel &&
+			execution.actualModel
+			? execution
+			: null;
+	});
 
 	// ─── Mobile detection ─────────────────────────────────────────────────────
 	// On mobile, Enter inserts a newline (default textarea behavior) and the
@@ -124,14 +146,6 @@
 			/Android|iPhone|iPad|iPod/i.test(navigator.userAgent) ||
 			(navigator.maxTouchPoints > 0 && window.innerWidth < 768)
 		);
-	}
-
-	// ─── Auto-resize textarea ──────────────────────────────────────────────────
-
-	function autoResize() {
-		if (!textareaEl) return;
-		textareaEl.style.height = "auto";
-		textareaEl.style.height = `${Math.min(textareaEl.scrollHeight, 120)}px`;
 	}
 
 	// ─── Handlers ──────────────────────────────────────────────────────────────
@@ -152,7 +166,7 @@
 		if (textareaEl) {
 			cursorPos = textareaEl.selectionStart ?? 0;
 		}
-		autoResize();
+		lastLocalEditAt = Date.now();
 
 		// Debounced outgoing input sync to other tabs
 		if (inputSyncTimer) clearTimeout(inputSyncTimer);
@@ -172,11 +186,6 @@
 		if (textareaEl) {
 			cursorPos = textareaEl.selectionStart ?? 0;
 		}
-	}
-
-	/** Keep the highlight backdrop's scroll aligned with the textarea. */
-	function handleScroll() {
-		if (textareaEl) scrollTop = textareaEl.scrollTop;
 	}
 
 	// During IME composition the textarea must show its own pre-commit text, so we
@@ -315,9 +324,6 @@
 			inputSyncTimer = null;
 		}
 		syncInputDraft("");
-		if (textareaEl) {
-			textareaEl.style.height = "auto";
-		}
 	}
 
 	function handleStop() {
@@ -565,38 +571,59 @@
 			class="flex flex-col bg-input-bg border border-border rounded-3xl py-1.5 px-1.5 transition-[border-color,box-shadow] duration-200 max-md:rounded-[20px] focus-within:border-text-dimmer focus-within:shadow-[0_0_0_1px_var(--color-border)]"
 		>
 
-			<!-- Textarea row -->
-			<div class="relative flex items-start">
-				<SkillHighlightBackdrop
-					text={inputText}
-					commandNames={commandNameSet}
-					{scrollTop}
-					dimmed={composing}
-				/>
-				<textarea
-					id="input"
-					rows="1"
-					placeholder="Ask anything. / to use skills, @ to mention files"
-					autocomplete="off"
-					enterkeyhint={isMobile() ? "enter" : "send"}
-					class="relative z-10 flex-1 min-w-0 bg-transparent border-none caret-[var(--color-text)] text-base font-sans leading-[1.4] pt-2 pb-1 px-2.5 resize-none outline-none min-h-6 max-h-[120px] overflow-y-auto placeholder:text-text-muted"
-					class:text-transparent={!composing}
-					class:text-text={composing}
-					bind:value={inputText}
-					bind:this={textareaEl}
-					oninput={handleInput}
-					onkeydown={handleKeydown}
-					onkeyup={handleKeyup}
-					onclick={handleClick}
-					onscroll={handleScroll}
-					oncompositionstart={handleCompositionStart}
-					oncompositionend={handleCompositionEnd}
-				></textarea>
+			<!-- Textarea row.
+			     The composer grows with its text and then scrolls, and both of those
+			     are CSS here rather than JS: the mirror sizes the row, this container
+			     caps and scrolls it, and the textarea is stretched over the mirror at
+			     the full content height so it never scrolls on its own. One scroll
+			     position for the whole composer means the caret cannot end up on a
+			     different line from the text it sits in.
+			     `scrollbar-gutter: stable` keeps a scrollbar appearing from narrowing
+			     the textarea but not the mirror, which would wrap them differently. -->
+			<div class="max-h-[120px] overflow-y-auto [scrollbar-gutter:stable]">
+				<!-- Past HIGHLIGHT_MAX_CHARS the mirror renders nothing, so it can no
+				     longer size the row: pin the row to the cap and let the textarea
+				     scroll itself. Safe only because the mirror is blank in that mode,
+				     so there is still just one scroll position in play. -->
+				<div class="relative min-h-6 {plainText ? 'h-[120px]' : ''}">
+					<SkillHighlightBackdrop
+						text={plainText ? "" : inputText}
+						commandNames={commandNameSet}
+						dimmed={composing || plainText}
+					/>
+					<textarea
+						id="input"
+						placeholder="Ask anything. / to use skills, @ to mention files"
+						autocomplete="off"
+						enterkeyhint={isMobile() ? "enter" : "send"}
+						class="composer-text-metrics absolute inset-0 z-10 bg-transparent border-none caret-[var(--color-text)] resize-none outline-none placeholder:text-text-muted {plainText ? 'overflow-y-auto' : 'overflow-hidden'}"
+						class:text-transparent={!composing && !plainText}
+						class:text-text={composing || plainText}
+						bind:value={inputText}
+						bind:this={textareaEl}
+						oninput={handleInput}
+						onkeydown={handleKeydown}
+						onkeyup={handleKeyup}
+						onclick={handleClick}
+						oncompositionstart={handleCompositionStart}
+						oncompositionend={handleCompositionEnd}
+					></textarea>
+				</div>
 			</div>
 
 						<!-- Pending image previews -->
 			{#if pendingImages.length > 0}
 				<PastePreview images={pendingImages} onRemove={removePendingImage} />
+			{/if}
+
+			<!-- Model drift notice: own row, so it never crowds the controls below -->
+			{#if modelDrift}
+				<div
+					data-testid="current-model-drift"
+					class="mx-1 mb-1 rounded-lg border border-warning/30 bg-warning-bg px-2 py-1 text-[11px] leading-[1.3] font-medium text-warning"
+				>
+					⚠ Running {getModelDisplayName(modelDrift.actualModel)} — you selected {getModelDisplayName(modelDrift.requestedModel)}
+				</div>
 			{/if}
 
 			<!-- Bottom row: attach + agent + model + send -->

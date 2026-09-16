@@ -7,7 +7,7 @@ import { defineConfig } from "@playwright/test";
 
 export default defineConfig({
 	testDir: "./specs",
-	testMatch: "visual-mockup.spec.ts",
+	testMatch: ["visual-mockup.spec.ts", "composer-layout.spec.ts"],
 	fullyParallel: true,
 	forbidOnly: !!process.env["CI"],
 	retries: 1,
@@ -30,7 +30,7 @@ export default defineConfig({
 		baseURL: "http://localhost:4173",
 		trace: "on-first-retry",
 		screenshot: "only-on-failure",
-		video: "retain-on-failure",
+		video: "off",
 	},
 
 	// Desktop-only for visual tests (consistent viewport for comparison)

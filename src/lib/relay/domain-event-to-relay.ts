@@ -18,6 +18,7 @@ export function translateDomainEventToRelay(
 				type: "delta",
 				text: event.data.text,
 				messageId: event.data.messageId,
+				partId: event.data.partId,
 			});
 
 		case "thinking.start":
@@ -155,11 +156,21 @@ export function translateDomainEventToRelay(
 		case "file.attached":
 		case "session.created":
 		case "session.renamed":
-		case "session.provider_changed":
 		case "session.deleted":
+		case "session.forked":
+		case "session.provider_changed":
 		case "session.provider_cleanup_failed":
-		case "session.permission_mode_changed":
 			return silent("persistence-only event; no UI surface in relay");
+
+		// The SDK owns the live mode, so a change reported mid-session has to
+		// reach the picker; a stale picker is the difference between "Full
+		// access" on screen and an ask the user did not expect.
+		case "session.permission_mode_changed":
+			return emit({
+				type: "permission_mode_info",
+				sessionId: event.sessionId,
+				mode: event.data.mode,
+			});
 
 		case "permission.asked":
 		case "permission.resolved":

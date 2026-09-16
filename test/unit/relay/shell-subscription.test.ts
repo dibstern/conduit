@@ -384,7 +384,7 @@ describe("subscribeShell", () => {
 	);
 
 	it.scoped(
-		"deleting a parent emits remove(parent) AND upsert(child) with parent_id nulled, live",
+		"deleting a parent emits remove(parent) AND remove(child) through the schema cascade, live",
 		() =>
 			Effect.gen(function* () {
 				yield* recoverProjections;
@@ -400,20 +400,19 @@ describe("subscribeShell", () => {
 				const before = yield* readQuery.getSession("shell-child");
 				expect(before?.parent_id).toBe("shell-parent");
 
-				// The real service-level delete: the tombstone captures the child ids
-				// BEFORE the projector cascade nulls their parent_id, so the fold can
-				// signal each child alongside the parent's remove.
+				// The real service-level delete: the tombstone captures descendant ids
+				// BEFORE the schema cascade deletes them, so the fold can signal every
+				// removed row alongside the parent.
 				yield* deleteSession("shell-parent");
 
 				yield* TestClock.adjust(SHELL_COALESCE_WINDOW);
 				expect(yield* Queue.size(q)).toBe(2);
 				const [first, second] = yield* takeN(q, 2);
 				if (first?._tag !== "remove") throw new Error("expected remove first");
-				if (second?._tag !== "upsert")
-					throw new Error("expected upsert second");
+				if (second?._tag !== "remove")
+					throw new Error("expected remove second");
 				expect(first.id).toBe("shell-parent");
-				expect(second.item.id).toBe("shell-child");
-				expect(second.item.parent_id).toBeNull();
+				expect(second.id).toBe("shell-child");
 				// Both deltas ride the tombstone's sequence — ascending order holds.
 				expect(second.sequence).toBe(first.sequence);
 			}).pipe(
@@ -428,7 +427,7 @@ describe("subscribeShell", () => {
 	);
 
 	it.scoped(
-		"replaying a stored parent tombstone emits remove(parent) AND upsert(child) with parent_id nulled",
+		"replaying a stored parent tombstone emits remove(parent) AND remove(child)",
 		() =>
 			Effect.gen(function* () {
 				yield* recoverProjections;
@@ -447,11 +446,10 @@ describe("subscribeShell", () => {
 				const boundary = yield* Queue.take(q);
 				expect(boundary).toEqual({ _tag: "synchronized" });
 				if (first?._tag !== "remove") throw new Error("expected remove first");
-				if (second?._tag !== "upsert")
-					throw new Error("expected upsert second");
+				if (second?._tag !== "remove")
+					throw new Error("expected remove second");
 				expect(first.id).toBe("shell-parent");
-				expect(second.item.id).toBe("shell-child");
-				expect(second.item.parent_id).toBeNull();
+				expect(second.id).toBe("shell-child");
 				expect(second.sequence).toBe(first.sequence);
 				expect(first.sequence).toBeGreaterThan(cursor);
 			}).pipe(

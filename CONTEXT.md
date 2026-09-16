@@ -57,6 +57,26 @@ _Avoid_: always allow, if the persistence scope is unclear
 A provider runtime's proposed permission update, including the destination it is able to persist to.
 _Avoid_: Conduit-invented permission scope
 
+**Claude Settings Override**:
+A single setting value the user has chosen in Conduit that wins over whatever the provider's settings files say, for every Conduit-run Claude session, until cleared.
+_Avoid_: settings.json edit, persisted snapshot
+
+**Inherited Setting**:
+A Claude setting Conduit has no override for; its effective value is re-resolved from the provider's settings files at every session start, so file edits still reach it.
+_Avoid_: default, unset
+
+**Pinned Setting**:
+A Claude setting that has a Claude Settings Override; file edits no longer reach it until the override is cleared.
+_Avoid_: locked, frozen
+
+**Effective Settings Snapshot**:
+The complete Claude settings object a session actually runs with: the provider's resolved files with Conduit's overrides layered on top, computed at session start and fixed for that session's life. Never persisted.
+_Avoid_: stored settings, cached config
+
+**Trust-Tiered Key**:
+A Claude settings key whose acceptance depends on which settings tier supplied it (`permissions.defaultMode`, `autoMode`). Conduit never forwards these through the flag layer.
+_Avoid_: permissions setting
+
 ## Relationships
 
 - A **Provider Runtime** may request a **Session Approval** during a turn.

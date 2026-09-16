@@ -38,6 +38,7 @@ export function testActivity(sessionId?: string): SessionActivity {
 		phase: "idle",
 		turnEpoch: 0,
 		currentMessageId: null,
+		currentPartId: null,
 		replayGeneration: 0,
 		doneMessageIds: new SvelteSet(),
 		seenMessageIds: new SvelteSet(),

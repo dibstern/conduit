@@ -29,6 +29,7 @@ import {
 	createAllEffectProjectors,
 	type EffectProjector,
 	type ProjectionContext,
+	ProjectionError,
 } from "../../../src/lib/persistence/effect/projectors-effect.js";
 import {
 	type CanonicalEvent,
@@ -253,29 +254,6 @@ function makeSessionRenamed(sessionId: string, title: string): CanonicalEvent {
 			createdAt: FIXED_TS,
 		},
 	);
-}
-
-function makeTurnCompleted(
-	sessionId: string,
-	messageId: string,
-	opts?: {
-		cost?: number;
-		tokens?: { input?: number; output?: number };
-		createdAt?: number;
-	},
-): CanonicalEvent {
-	const data: {
-		messageId: string;
-		cost?: number;
-		tokens?: { input?: number; output?: number };
-	} = { messageId };
-	if (opts?.cost !== undefined) data.cost = opts.cost;
-	if (opts?.tokens !== undefined) data.tokens = opts.tokens;
-	return canonicalEvent("turn.completed", sessionId, data, {
-		eventId: createEventId(),
-		metadata: {},
-		createdAt: opts?.createdAt ?? FIXED_TS,
-	});
 }
 
 function makeTurnModelResolved(
@@ -2321,6 +2299,48 @@ describe("ProjectionRunnerEffect", () => {
 		);
 	});
 
+	it("projectEvent surfaces a projector failure with its cause intact", () => {
+		const rootCause = new Error("projector explosion");
+		const projector: EffectProjector = {
+			name: "failing-command-projector",
+			handles: ["session.created"],
+			project: () =>
+				Effect.fail(
+					new ProjectionError({
+						projector: "failing-command-projector",
+						operation: "project",
+						cause: rootCause,
+					}),
+				),
+		};
+
+		return runTestWithProjectors(
+			[projector],
+			Effect.gen(function* () {
+				const store = yield* EventStoreEffectTag;
+				const runner = yield* ProjectionRunnerEffectTag;
+				yield* runner.markRecovered();
+				yield* seedSession("s-command-failure");
+				const event = yield* store.append(
+					makeSessionCreated("s-command-failure"),
+				);
+
+				const result = yield* Effect.either(runner.projectEvent(event));
+
+				expect(result._tag).toBe("Left");
+				if (result._tag === "Left") {
+					expect(result.left).toBeInstanceOf(ProjectionRunnerError);
+					if (result.left instanceof ProjectionRunnerError) {
+						expect(result.left.cause).toBeInstanceOf(ProjectionError);
+						if (result.left.cause instanceof ProjectionError) {
+							expect(result.left.cause.cause).toBe(rootCause);
+						}
+					}
+				}
+			}),
+		);
+	});
+
 	it("pages a bounded 501-event snapshot", () =>
 		runTest(
 			Effect.gen(function* () {
@@ -2570,33 +2590,101 @@ describe("ProjectionRunnerEffect", () => {
 			}),
 		));
 
-	it("failures are recorded but do not block other projectors", () =>
-		runTest(
+	it("recover records a bad event and continues replay", () => {
+		let successfulProjectorRan = false;
+		const failingProjector: EffectProjector = {
+			name: "failing-replay-projector",
+			handles: ["session.created"],
+			project: () =>
+				Effect.fail(
+					new ProjectionError({
+						projector: "failing-replay-projector",
+						operation: "project",
+						cause: new Error("replay projector explosion"),
+					}),
+				),
+		};
+		const successfulProjector: EffectProjector = {
+			name: "successful-replay-projector",
+			handles: ["session.created"],
+			project: () =>
+				Effect.sync(() => {
+					successfulProjectorRan = true;
+				}),
+		};
+
+		return runTestWithProjectors(
+			[failingProjector, successfulProjector],
 			Effect.gen(function* () {
 				const store = yield* EventStoreEffectTag;
 				const runner = yield* ProjectionRunnerEffectTag;
-				yield* runner.markRecovered();
+				yield* seedSession("s-resilient-replay");
+				yield* store.append(makeSessionCreated("s-resilient-replay"));
 
-				// Append a turn.completed without a session -- will fail FK constraints
-				// but should record failure, not throw
-				yield* seedSession("s1");
-				const e1 = yield* store.append(makeSessionCreated("s1"));
-				yield* runner.projectEvent(e1);
+				const result = yield* runner.recover();
 
-				// turn.completed referencing a message that doesn't exist --
-				// not a hard error, just a no-op UPDATE
-				const e2 = yield* store.append(
-					makeTurnCompleted("s1", "nonexistent-msg"),
-				);
-				yield* runner.projectEvent(e2);
-
-				// Should succeed without throwing
-				const _failures = yield* runner.getFailures();
-				// Failures may or may not exist depending on FK constraints
-				// The key assertion is that it didn't throw
-				expect(true).toBe(true);
+				expect(result.totalReplayed).toBe(2);
+				expect(successfulProjectorRan).toBe(true);
+				const failures = yield* runner.getFailures();
+				expect(failures).toHaveLength(1);
+				expect(failures[0]?.projectorName).toBe("failing-replay-projector");
 			}),
-		));
+		);
+	});
+
+	it("projectBatch applies the whole batch or none of it", async () => {
+		// The batch is one transaction (S9). A translation that produced several
+		// events must not land half-applied, so a failure on any event rolls back
+		// the writes the earlier events already made.
+		const halfWritingProjector: EffectProjector = {
+			name: "half-writing-batch-projector",
+			handles: ["session.created"],
+			project: (event) =>
+				event.sessionId === "s-batch-second"
+					? Effect.fail(
+							new ProjectionError({
+								projector: "half-writing-batch-projector",
+								operation: "project",
+								cause: new Error("second event of the batch explodes"),
+							}),
+						)
+					: Effect.gen(function* () {
+							const sql = yield* SqlClient.SqlClient;
+							yield* sql`UPDATE sessions SET title = 'batch-applied' WHERE id = ${event.sessionId}`;
+						}),
+		};
+
+		const outcome = await runTestWithProjectors(
+			[halfWritingProjector],
+			Effect.gen(function* () {
+				const sql = yield* SqlClient.SqlClient;
+				const store = yield* EventStoreEffectTag;
+				const runner = yield* ProjectionRunnerEffectTag;
+				yield* runner.markRecovered();
+				yield* seedSession("s-batch-first");
+				yield* seedSession("s-batch-second");
+				const first = yield* store.append(makeSessionCreated("s-batch-first"));
+				const second = yield* store.append(
+					makeSessionCreated("s-batch-second"),
+				);
+
+				const failure = yield* runner.projectBatch([first, second]).pipe(
+					Effect.match({
+						onFailure: (error) => error,
+						onSuccess: () => undefined,
+					}),
+				);
+
+				const rows = yield* sql<{
+					title: string;
+				}>`SELECT title FROM sessions WHERE id = 's-batch-first'`;
+				return { failure, title: rows[0]?.title };
+			}),
+		);
+
+		expect(outcome.failure).toBeInstanceOf(ProjectionRunnerError);
+		expect(outcome.title).toBe("Test Session");
+	});
 });
 
 // ─── Provider Projector Tests ───────────────────────────────────────────────

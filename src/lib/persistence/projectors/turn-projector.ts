@@ -149,6 +149,14 @@ export class TurnProjector implements Projector {
 			return;
 		}
 
+		// Attributed to the newest open turn rather than by id, because the event
+		// carries no key that reaches a turns row: turns.id is the user message
+		// id, while the provider's turnId is a per-send uuid. This is exact only
+		// while a session has at most one turn in flight. The Claude translator
+		// is the sole emitter and its runtime serializes turn admission, so a
+		// turn's model_resolved always lands before the next turn's row exists.
+		// A second emitter, or concurrent turns, needs a real key first — see
+		// conduit-test-7i3.
 		if (isEventType(event, "turn.model_resolved")) {
 			db.execute(
 				`UPDATE turns

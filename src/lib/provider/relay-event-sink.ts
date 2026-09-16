@@ -31,15 +31,6 @@ import type {
 
 const log = createLogger("relay-event-sink");
 
-/** Claude tool names auto-approved under "acceptEdits". Anything else falls back to ask. */
-const EDIT_TOOL_NAMES = new Set(["Edit", "Write", "NotebookEdit"]);
-
-function modeCoversAsk(mode: SessionPermissionMode, toolName: string): boolean {
-	if (mode === "full") return true;
-	if (mode === "acceptEdits") return EDIT_TOOL_NAMES.has(toolName);
-	return false;
-}
-
 // ─── Deps ───────────────────────────────────────────────────────────────────
 
 export interface EffectRelayEventSinkPersist {
@@ -62,10 +53,14 @@ export interface RelayEventSinkDeps {
 	/** Optional: reset processing timeout on any activity. */
 	readonly resetTimeout?: () => void;
 	/**
-	 * Optional live per-session approval mode lookup. Absent → "ask" (flow unchanged).
-	 * Read per request so a mid-turn toggle applies to the next ask.
+	 * Optional hook for a permission mode the SDK reported as actually in force.
+	 * The durable event and the client message both ride the normal translation
+	 * path; this is the third place conduit keeps a mode -- the relay's live
+	 * per-session override, which the next turn reads.
 	 */
-	readonly getPermissionMode?: () => Effect.Effect<SessionPermissionMode>;
+	readonly applyReportedPermissionMode?: (
+		mode: SessionPermissionMode,
+	) => Effect.Effect<void, unknown>;
 	/** Optional: persist events to SQLite for session history survival. */
 	readonly persist?: RelayEventSinkPersist;
 	/** Optional durable runtime ingestion owner. When present, push() delegates provider output to this path. */
@@ -136,53 +131,33 @@ export function createRelayEventSink(deps: RelayEventSinkDeps): RelayEventSink {
 		});
 	}
 
-	const recordAutoApproval = (
-		request: PermissionRequest,
+	const applyReportedPermissionMode = (
+		event: ProviderRuntimeEvent,
 	): Effect.Effect<void> =>
 		Effect.gen(function* () {
-			const providerId = deps.providerId ?? "unknown";
-			const base = {
-				providerId,
-				sessionId,
-				rawSource: { kind: "conduit.relay-event-sink.auto-permission" },
-				createdAt: Date.now(),
-			};
-			const asked: ProviderRuntimeEvent = {
-				...base,
-				eventId: `${request.requestId}:permission.asked`,
-				type: "permission.asked",
-				turnId: request.turnId,
-				providerRefs: {
-					providerRequestId: request.requestId,
-					providerToolUseId: request.providerItemId,
-				},
-				data: {
-					id: request.requestId,
-					toolName: request.toolName,
-					input: request.toolInput,
-				},
-			};
-			const resolved: ProviderRuntimeEvent = {
-				...base,
-				eventId: `${request.requestId}:permission.resolved`,
-				type: "permission.resolved",
-				providerRefs: { providerRequestId: request.requestId },
-				data: { id: request.requestId, decision: "once", resolvedBy: "auto" },
-			};
-			const result = yield* Effect.either(
-				sink.push(asked).pipe(Effect.andThen(sink.push(resolved))),
-			);
+			const apply = deps.applyReportedPermissionMode;
+			if (!apply) return;
+			const mode = (event.data as { mode?: unknown }).mode;
+			if (typeof mode !== "string") return;
+			const result = yield* Effect.either(apply(mode as SessionPermissionMode));
 			if (result._tag === "Left") {
 				log.warn(
-					`auto-approval audit persist failed (session=${sessionId}, request=${request.requestId}): ${result.left instanceof Error ? result.left.message : result.left}`,
+					`Failed to apply SDK-reported permission mode ${mode} (session=${sessionId}): ${result.left instanceof Error ? result.left.message : result.left}`,
 				);
 			}
 		});
 
 	const sink: RelayEventSink = {
+		noteActivity: reset,
 		push(event: ProviderRuntimeEvent): Effect.Effect<void, unknown> {
 			return Effect.gen(function* () {
 				yield* Effect.sync(reset);
+				// Ahead of the ingestion short-circuit: the live override has to
+				// track the SDK on the durable path too, and it is relay state
+				// rather than an event, so ingestion never sees it.
+				if (event.type === "session.permission_mode_changed") {
+					yield* applyReportedPermissionMode(event);
+				}
 				if (deps.ingestion) {
 					yield* deps.ingestion.ingest(event);
 					if (isTerminalRuntimeEvent(event)) {
@@ -264,18 +239,11 @@ export function createRelayEventSink(deps: RelayEventSinkDeps): RelayEventSink {
 		): Effect.Effect<PermissionResponse, unknown> {
 			return Effect.gen(function* () {
 				yield* Effect.sync(reset);
-				const mode = deps.getPermissionMode
-					? yield* deps.getPermissionMode()
-					: "ask";
-				if (modeCoversAsk(mode, request.toolName)) {
-					yield* recordAutoApproval(request);
-					yield* Effect.sync(() =>
-						log.info(
-							`auto-approved ${request.toolName} (mode=${mode}, session=${sessionId}, request=${request.requestId})`,
-						),
-					);
-					return { decision: "once" } as const;
-				}
+				// Approval policy is delegated to the Claude Agent SDK via
+				// `permissionMode` at query creation, so an ask reaching here has
+				// already survived the SDK's own auto-approval. Re-deciding it
+				// locally would be a second enforcement point guessing at a tool
+				// taxonomy the SDK owns.
 				const pendingInteractions = deps.pendingInteractions;
 				if (!pendingInteractions) {
 					return yield* Effect.fail(

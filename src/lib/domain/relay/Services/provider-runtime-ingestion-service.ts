@@ -1,4 +1,4 @@
-import type { SqlClient } from "@effect/sql";
+import { SqlClient } from "@effect/sql";
 import { Context, Effect, Layer, Ref } from "effect";
 import type { ProviderRuntimeEvent } from "../../../contracts/providers/provider-runtime-event.js";
 import { makeCommitAndSignal } from "../../../persistence/effect/commit-and-signal.js";
@@ -50,6 +50,7 @@ export const makeProviderRuntimeIngestionLive = (
 		ProviderRuntimeIngestionTag,
 		Effect.gen(function* () {
 			const commitAndSignal = yield* makeCommitAndSignal;
+			const sql = yield* SqlClient.SqlClient;
 			const mapperStateRef = yield* Ref.make(
 				emptyProviderRuntimeDomainMapperState,
 			);
@@ -106,6 +107,36 @@ export const makeProviderRuntimeIngestionLive = (
 								event.type !== "session.compaction" ||
 								event.data.state === "completed",
 						);
+
+						// Projectors write rows that reference sessions(id), and a
+						// provider can stream events for a session Conduit never created
+						// — Claude subagents arrive mid-turn under their own id. The FK
+						// then rejects the projection, which used to be swallowed, so
+						// subagent messages rendered live and were gone after a reload.
+						// ClaudeEventPersistEffect.persistEvent already guards its own
+						// path with ensureSession; this is the same guard on this one.
+						// session.created is left to the session projector, which owns
+						// the row and upserts it.
+						const createdHere = new Set(
+							persistentEvents
+								.filter((event) => event.type === "session.created")
+								.map((event) => event.sessionId),
+						);
+						const needsSessionRow = new Map<string, string>();
+						for (const event of persistentEvents) {
+							if (createdHere.has(event.sessionId)) continue;
+							if (!needsSessionRow.has(event.sessionId)) {
+								needsSessionRow.set(event.sessionId, event.provider);
+							}
+						}
+						for (const [sessionId, provider] of needsSessionRow) {
+							const seededAt = Date.now();
+							yield* sql`
+									INSERT OR IGNORE INTO sessions
+									(id, provider, title, status, created_at, updated_at)
+									VALUES (${sessionId}, ${provider}, 'Untitled', 'idle', ${seededAt}, ${seededAt})`;
+						}
+
 						yield* commitAndSignal(persistentEvents, {
 							publish: ingestOptions.publishToBus ?? true,
 							afterAppend: Ref.set(mapperStateRef, nextState),

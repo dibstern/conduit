@@ -18,6 +18,7 @@ const OPTIONS_200K_DEFAULT: readonly ContextWindowOption[] = [
 const CONTEXT_WINDOW_OPTIONS_BY_MODEL: Readonly<
 	Record<string, readonly ContextWindowOption[] | undefined>
 > = {
+	"claude-fable-5-1": OPTIONS_1M_DEFAULT,
 	"claude-fable-5": OPTIONS_1M_DEFAULT,
 	"claude-opus-5": OPTIONS_1M_DEFAULT,
 	"claude-opus-4-8": undefined,
@@ -43,6 +44,19 @@ function normalizeModelId(modelId: string): string {
 		.toLowerCase()
 		.replace(/\[1m\]$/, "")
 		.replace(/-\d{8}$/, "");
+}
+
+/**
+ * Whether two reported model ids name the same model.
+ *
+ * `[1m]` is a request-side context-window marker, not part of a model's
+ * identity, and the two channels that report what served a turn disagree about
+ * it: the CLI's `init` echoes conduit's outbound id (suffix included) while the
+ * API's assistant message reports the bare model id. Comparing raw strings
+ * therefore calls every 1M-window turn drift.
+ */
+export function isSameModelIdentity(a: string, b: string): boolean {
+	return a.replace(HAS_1M_SUFFIX, "") === b.replace(HAS_1M_SUFFIX, "");
 }
 
 export function contextWindowOptionsForModel(

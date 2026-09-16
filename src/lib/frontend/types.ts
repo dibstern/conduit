@@ -99,9 +99,13 @@ export interface AssistantMessage {
 	html: string;
 	finalized: boolean;
 	messageId?: string;
+	partId?: string;
 	needsRender?: boolean;
 	/** Unix-ms timestamp from the source HistoryMessage. Used for timestamp-based fork splitting. */
 	createdAt?: number;
+	/** Unix-ms stamp for when this part finished. Bounds the last activity step,
+	 *  which has no following step to end it. */
+	endedAt?: number;
 }
 
 export interface ThinkingMessage {
@@ -113,6 +117,9 @@ export interface ThinkingMessage {
 	messageId?: string;
 	/** Unix-ms timestamp from the source HistoryMessage. Used for timestamp-based fork splitting. */
 	createdAt?: number;
+	/** Unix-ms stamp for when this part finished. Bounds the last activity step,
+	 *  which has no following step to end it. */
+	endedAt?: number;
 }
 
 export interface ToolMessage {
@@ -132,6 +139,9 @@ export interface ToolMessage {
 	messageId?: string;
 	/** Unix-ms timestamp from the source HistoryMessage. Used for timestamp-based fork splitting. */
 	createdAt?: number;
+	/** Unix-ms stamp for when this part finished. Bounds the last activity step,
+	 *  which has no following step to end it. */
+	endedAt?: number;
 }
 
 export interface ResultMessage {

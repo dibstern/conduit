@@ -83,13 +83,15 @@ async function createAuthHealthServer(): Promise<AuthHealthServer> {
 	const authHeader = `Basic ${Buffer.from(`${username}:${password}`).toString("base64")}`;
 
 	const server = createServer((req, res) => {
-		if (req.url !== "/health") {
+		if (req.url !== "/global/health") {
 			res.writeHead(404).end();
 			return;
 		}
 
 		if (req.headers.authorization === authHeader) {
-			res.writeHead(200).end("ok");
+			res
+				.writeHead(200, { "content-type": "application/json" })
+				.end(JSON.stringify({ healthy: true, version: "1.18.16" }));
 			return;
 		}
 
@@ -2150,7 +2152,7 @@ describe("InstanceManager", () => {
 			});
 
 			try {
-				const noAuthRes = await fetch(`${server.url}/health`);
+				const noAuthRes = await fetch(`${server.url}/global/health`);
 				expect(noAuthRes.status).toBe(401);
 
 				// Use defaultHealthChecker (no injection) — should get 401 → unhealthy
@@ -2182,7 +2184,7 @@ describe("InstanceManager", () => {
 			});
 
 			try {
-				const noAuthRes = await fetch(`${server.url}/health`);
+				const noAuthRes = await fetch(`${server.url}/global/health`);
 				expect(noAuthRes.status).toBe(401);
 
 				const sdkClient = Effect.runSync(
@@ -2196,7 +2198,7 @@ describe("InstanceManager", () => {
 				mgr.setHealthChecker(async (port: number) => {
 					try {
 						const res = await sdkClient.fetch(
-							`http://localhost:${port}/health`,
+							`http://localhost:${port}/global/health`,
 						);
 						return res.ok;
 					} catch {

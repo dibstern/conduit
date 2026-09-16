@@ -78,6 +78,12 @@ export interface EventSink {
 		answers: Record<string, unknown>,
 	): Effect.Effect<void, unknown>;
 	cancelSessionInteractions?(reason: string): Effect.Effect<void, unknown>;
+	/**
+	 * Relay liveness hook. Providers never call this; the orchestration reactor
+	 * calls it for every streamed event so the relay's processing timeout stays
+	 * alive on the path where provider output goes straight to ingestion.
+	 */
+	noteActivity?(): void;
 }
 
 // ─── Turn Types ─────────────────────────────────────────────────────────────
@@ -275,6 +281,19 @@ export interface ProviderInstance {
 		requestId: string,
 		answers: Record<string, unknown>,
 	): Effect.Effect<void, ProviderInstanceFailure>;
+
+	/**
+	 * Push a mid-session model / context-window / effort change onto the live
+	 * query, when the provider can apply settings outside a turn.
+	 */
+	readonly applyLiveSettingsEffect?: (
+		sessionId: string,
+		settings: {
+			readonly modelId?: string | undefined;
+			readonly contextWindow?: string | undefined;
+			readonly variant?: string | undefined;
+		},
+	) => Effect.Effect<void, ProviderInstanceFailure>;
 
 	/** Update a live provider query's classifier mode when supported. */
 	readonly setPermissionModeEffect?: (

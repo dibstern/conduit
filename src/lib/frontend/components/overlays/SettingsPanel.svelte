@@ -1,12 +1,14 @@
 <!-- ─── Settings Panel ────────────────────────────────────────────────────── -->
 <!-- Modal settings panel with tabbed navigation. Uses the 68-mockup card   -->
-<!-- design. Tabs: Notifications, Appearance, Agents & Models, Instances,   -->
-<!-- Debug.                                                                 -->
+<!-- design. Tabs: Notifications, Appearance, Agents & Models, Claude,      -->
+<!-- Instances, Debug.                                                      -->
 
 <script lang="ts">
+	import Modal from "./Modal.svelte";
 	import { untrack } from "svelte";
 	import Icon from "../shared/Icon.svelte";
 	import ToggleSetting from "../shared/ToggleSetting.svelte";
+	import ClaudeSettingsTab from "./ClaudeSettingsTab.svelte";
 	import { createFrontendLogger } from "../../utils/logger.js";
 	import type { Base16Theme } from "../../stores/theme-compute.js";
 
@@ -43,6 +45,7 @@
 		saveNotifSettings,
 	} from "../../utils/notif-settings.js";
 	import { setPushActive } from "../../stores/ws.svelte.js";
+	import { clearClaudeSettingEdits } from "../../stores/claude-settings.svelte.js";
 	import { getCurrentSlug } from "../../stores/router.svelte.js";
 	import {
 		addInstanceRpc,
@@ -122,6 +125,7 @@
 
 	$effect(() => {
 		if (visible) {
+			clearClaudeSettingEdits();
 			activeTab = initialTab;
 			expandedInstanceId = null;
 			renamingInstanceId = null;
@@ -147,6 +151,8 @@
 						}),
 					);
 			}
+		} else {
+			clearClaudeSettingEdits();
 		}
 	});
 
@@ -496,17 +502,6 @@
 		void persistHidden({ hiddenAgents: [...next] });
 	}
 
-	// ─── Backdrop / escape ──────────────────────────────────────────────────
-
-	function handleBackdropClick(e: MouseEvent) {
-		if (e.target === e.currentTarget) onClose?.();
-	}
-	$effect(() => {
-		if (!visible) return;
-		function handleKeydown(e: KeyboardEvent) { if (e.key === "Escape") onClose?.(); }
-		document.addEventListener("keydown", handleKeydown);
-		return () => document.removeEventListener("keydown", handleKeydown);
-	});
 </script>
 
 <!-- ─── Copyable command block snippet ────────────────────────────────────── -->
@@ -519,31 +514,32 @@
 	</div>
 {/snippet}
 
-{#if visible}
-	<!-- svelte-ignore a11y_click_events_have_key_events -->
-	<!-- svelte-ignore a11y_no_static_element_interactions -->
-	<div class="fixed inset-0 z-[var(--z-popover)] flex items-center justify-center bg-[rgba(var(--overlay-rgb),0.15)] backdrop-blur-sm" onclick={handleBackdropClick}>
-		<div id="settings-panel" class="bg-bg border border-border rounded-xl shadow-2xl max-w-lg w-full mx-4 flex flex-col max-h-[80vh]">
+<Modal open={visible} onclose={() => onClose?.()} labelledBy="settings-panel-title" backdrop="subtle">
+		<div id="settings-panel" class="bg-bg border border-border rounded-xl shadow-2xl max-w-lg w-[calc(100vw-2rem)] mx-4 flex flex-col max-h-[80vh]">
 			<!-- Header -->
-			<div class="flex items-center justify-between px-5 py-3 border-b border-border">
-				<h2 class="text-lg font-semibold text-text font-brand">Settings</h2>
+			<div class="shrink-0 flex items-center justify-between px-5 py-3 border-b border-border">
+				<h2 id="settings-panel-title" class="text-lg font-semibold text-text font-brand">Settings</h2>
 				<button data-testid="settings-close-btn" class="text-text-muted hover:text-text p-1 cursor-pointer border-none bg-transparent" onclick={() => onClose?.()}>
 					<Icon name="x" size={16} />
 				</button>
 			</div>
 
 			<!-- Tabs -->
-			<div class="flex border-b border-border px-5 gap-1 font-brand">
+			<!-- shrink-0 is load-bearing: overflow-x-auto makes this flex item's
+			     automatic minimum height zero rather than content height, so without
+			     it a tall tab squeezes the tab bar down to a sliver. -->
+			<div class="shrink-0 flex border-b border-border px-5 gap-1 font-brand overflow-x-auto">
 				{#each [
 					{ id: "notifications", label: "Alerts" },
 					{ id: "appearance", label: "Theme" },
 					{ id: "visibility", label: "Agents & Models" },
+					{ id: "claude", label: "Claude" },
 					{ id: "instances", label: "Instances" },
 					{ id: "debug", label: "Debug" },
 				] as tab}
 					<button
 						data-testid="settings-tab-{tab.id}"
-						class="px-3 py-2 text-sm font-medium border-b-2 -mb-px transition-colors cursor-pointer border-none bg-transparent {activeTab === tab.id ? 'border-brand-a text-text' : 'border-transparent text-text-muted hover:text-text'}"
+						class="px-2 py-2 text-sm font-medium whitespace-nowrap border-b-2 -mb-px transition-colors cursor-pointer border-none bg-transparent {activeTab === tab.id ? 'border-brand-a text-text' : 'border-transparent text-text-muted hover:text-text'}"
 						style="border-bottom: 2px solid {activeTab === tab.id ? 'var(--color-brand-a)' : 'transparent'};"
 						onclick={() => (activeTab = tab.id)}
 					>
@@ -689,6 +685,10 @@
 							</div>
 						{/if}
 					</div>
+
+				<!-- ═══ Claude ═══ -->
+				{:else if activeTab === "claude"}
+					<ClaudeSettingsTab />
 
 				<!-- ═══ Instances ═══ -->
 				{:else if activeTab === "instances"}
@@ -929,5 +929,5 @@
 				{/if}
 			</div>
 		</div>
-	</div>
-{/if}
+</Modal>
+

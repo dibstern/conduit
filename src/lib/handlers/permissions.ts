@@ -6,7 +6,7 @@ import { OpenCodeAPITag } from "../domain/provider/Services/opencode-api-service
 // answer. The handler calls the OpenCode REST API directly — no in-memory
 // bridge state is needed, so questions survive relay restarts.
 
-import { Effect, Option } from "effect";
+import { Data, Effect, Option } from "effect";
 import { PendingInteractionServiceTag } from "../domain/relay/Services/pending-interaction-service.js";
 import {
 	ConfigTag,
@@ -17,14 +17,49 @@ import {
 import { SessionManagerServiceTag } from "../domain/relay/Services/session-manager-service.js";
 import {
 	PROCESSING_TIMEOUT_DURATION,
+	setDefaultPermissionMode,
 	startProcessingTimeout,
 } from "../domain/relay/Services/session-overrides-state.js";
 import { RelayError } from "../errors.js";
 import { fixupConfigFile } from "../instance/opencode-config-fixup.js";
+import { saveRelaySettings } from "../relay/relay-settings.js";
 import type {
 	PermissionId,
 	ProviderPermissionUpdateDestination,
+	SessionPermissionMode,
 } from "../shared-types.js";
+
+class RelaySettingsSaveError extends Data.TaggedError(
+	"RelaySettingsSaveError",
+)<{ readonly cause: unknown }> {}
+
+export const setDefaultPermissionModeForRelay = (input: {
+	readonly clientId: string;
+	readonly mode: SessionPermissionMode;
+}) =>
+	Effect.gen(function* () {
+		const config = yield* ConfigTag;
+		const wsHandler = yield* WebSocketHandlerTag;
+		const log = yield* LoggerTag;
+
+		yield* Effect.try({
+			try: () =>
+				saveRelaySettings(
+					{ defaultPermissionMode: input.mode },
+					config.configDir,
+				),
+			catch: (cause) => new RelaySettingsSaveError({ cause }),
+		});
+		yield* setDefaultPermissionMode(input.mode);
+		wsHandler.broadcast({
+			type: "default_permission_mode_info",
+			mode: input.mode,
+		});
+		log.info(
+			`client=${input.clientId} Set default permission mode to: ${input.mode}`,
+		);
+		return input.mode;
+	});
 
 interface PermissionResponsePayload {
 	readonly requestId: PermissionId;

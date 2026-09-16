@@ -406,8 +406,14 @@
 	});
 
 	// ─── Effect runtime disposal on page unload ──────────────────────────────
+	// iOS fires pagehide every time a standalone PWA is backgrounded, not only
+	// on unload, and `persisted` is how the two are told apart. Disposing on a
+	// background left the app mute on return: the message fiber was gone but the
+	// socket was still open, so no close event fired and nothing reconnected.
 	if (typeof window !== "undefined") {
-		window.addEventListener("pagehide", () => disposeRuntime());
+		window.addEventListener("pagehide", (event) => {
+			if (!event.persisted) void disposeRuntime();
+		});
 	}
 
 	// ─── Plan mode subscription ───────────────────────────────────────────────

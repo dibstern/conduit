@@ -23,7 +23,7 @@
 		listSessionsRpc,
 		renameSessionRpc,
 	} from "../../transport/ws-rpc-client.js";
-	import { closeMobileSidebar, confirm, toggleHideSubagentSessions, uiState } from "../../stores/ui.svelte.js";
+	import { closeMobileSidebar, confirm, showToast, toggleHideSubagentSessions, uiState } from "../../stores/ui.svelte.js";
 	import SessionItem from "./SessionItem.svelte";
 	import SessionContextMenu from "./SessionContextMenu.svelte";
 	import Icon from "../shared/Icon.svelte";
@@ -193,10 +193,14 @@
 		if (confirmed) {
 			const projectSlug = getCurrentSlug();
 			if (!projectSlug) return;
-			void deleteSessionRpc({
+			// Surface failures: a rejected delete used to vanish into an
+			// unhandled rejection, leaving the row in place with no feedback.
+			deleteSessionRpc({
 				projectSlug,
 				sessionId: id,
 				originId: getBrowserClientId(),
+			}).catch(() => {
+				showToast(`Couldn't delete "${title}"`, { variant: "warn" });
 			});
 		}
 	}
@@ -260,14 +264,27 @@
 		if (confirmed) {
 			const projectSlug = getCurrentSlug();
 			if (!projectSlug) return;
-			for (const id of selectedForDeletion) {
-				void deleteSessionRpc({
-					projectSlug,
-					sessionId: id,
-					originId: getBrowserClientId(),
-				});
-			}
+			// Snapshot the ids, then clear selection so the UI responds at once.
+			const ids = [...selectedForDeletion];
 			resetCleanupMode();
+			const results = await Promise.allSettled(
+				ids.map((id) =>
+					deleteSessionRpc({
+						projectSlug,
+						sessionId: id,
+						originId: getBrowserClientId(),
+					}),
+				),
+			);
+			const failed = results.filter((r) => r.status === "rejected").length;
+			if (failed > 0) {
+				showToast(
+					failed === 1
+						? "Couldn't delete 1 session"
+						: `Couldn't delete ${failed} sessions`,
+					{ variant: "warn" },
+				);
+			}
 		}
 	}
 

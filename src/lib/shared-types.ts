@@ -2,6 +2,10 @@
 // Types shared between server and frontend.
 // Imported by src/lib/types.ts (server) and frontend code.
 
+import {
+	type ClaudeSettingsOverrides,
+	ClaudeSettingsOverridesSchema,
+} from "./contracts/claude-settings.js";
 import type { ProviderDriverKind } from "./contracts/provider-instance.js";
 // SDK-derived type aliases (Task 10) — single source of truth for Part/Tool enums.
 // Imported for local use; re-exported below for downstream consumers.
@@ -56,12 +60,19 @@ const ProviderPermissionModeSchema = Schema.Literal(
 	"auto",
 );
 
-/** Conduit-level per-session approval mode (distinct from provider-native permission modes). */
+/**
+ * Conduit-level per-session approval mode. Corresponds 1:1 to the Claude Agent
+ * SDK's six permission modes -- see provider/claude/permission-mode-map.ts.
+ * "ask" and "full" keep conduit's original spellings (SDK "default" and
+ * "bypassPermissions") so persisted rows stay valid without a migration.
+ */
 export const SessionPermissionModeSchema = Schema.Literal(
 	"ask",
 	"acceptEdits",
 	"auto",
 	"full",
+	"plan",
+	"dontAsk",
 );
 export type SessionPermissionMode = typeof SessionPermissionModeSchema.Type;
 
@@ -312,7 +323,8 @@ export interface HistoryMessagePart {
 	};
 	callID?: string;
 	tool?: string;
-	time?: unknown;
+	/** Wall-clock span of this part. `start` is what activity timings measure. */
+	time?: { start?: number; end?: number };
 	/** Context size before/after a compaction boundary — present on `compaction`
 	 *  parts so the divider and context-% bar can be reconstructed on reload. */
 	preTokens?: number;
@@ -430,11 +442,15 @@ const ModelExecutionSchema = Schema.Struct({
 		(execution) =>
 			execution.drifted === undefined ||
 			(execution.expectedModel !== undefined &&
-				execution.drifted ===
-					(execution.actualModel !== execution.expectedModel)),
+				(execution.drifted === false ||
+					execution.actualModel !== execution.expectedModel)),
 		{
+			// Not a biconditional: two ids that differ only by the `[1m]`
+			// context-window suffix name the same model, so equal-identity /
+			// unequal-string is a legitimate `drifted: false`. Claiming drift
+			// between two identical ids is still nonsense.
 			message: () =>
-				"drifted requires expectedModel and must equal actualModel !== expectedModel",
+				"drifted requires expectedModel, and drifted=true requires actualModel to differ from expectedModel",
 		},
 	),
 );
@@ -630,6 +646,7 @@ const DeltaSchema = Schema.Struct({
 	sessionId: Schema.String,
 	text: Schema.String,
 	messageId: Schema.optional(Schema.String),
+	partId: Schema.optional(Schema.String),
 });
 
 const ThinkingStartSchema = Schema.Struct({
@@ -826,6 +843,12 @@ const DefaultModelInfoSchema = Schema.Struct({
 	type: Schema.Literal("default_model_info"),
 	model: Schema.String,
 	provider: Schema.String,
+	variant: Schema.String,
+});
+
+const DefaultPermissionModeInfoSchema = Schema.Struct({
+	type: Schema.Literal("default_permission_mode_info"),
+	mode: SessionPermissionModeSchema,
 });
 
 const ModelListSchema = Schema.Struct({
@@ -846,6 +869,11 @@ const VisibilityInfoSchema = Schema.Struct({
 	type: Schema.Literal("visibility_info"),
 	hiddenModels: Schema.Array(Schema.String),
 	hiddenAgents: Schema.Array(Schema.String),
+});
+
+const ClaudeSettingsInfoSchema = Schema.Struct({
+	type: Schema.Literal("claude_settings_info"),
+	overrides: ClaudeSettingsOverridesSchema,
 });
 
 const CommandListSchema = Schema.Struct({
@@ -1027,6 +1055,18 @@ const ClientCountSchema = Schema.Struct({
 	count: Schema.Number,
 });
 
+/** Relay wire-protocol version. Bump whenever a message's semantics change
+ *  incompatibly (e.g. a mode literal is reinterpreted), so a freshly-loaded
+ *  frontend can detect a stale daemon that predates the change. The daemon
+ *  sends this to each client on connect; the frontend warns on mismatch —
+ *  and on absence, which marks a daemon older than the handshake itself. */
+export const WS_PROTOCOL_VERSION = 1;
+
+const ProtocolVersionSchema = Schema.Struct({
+	type: Schema.Literal("protocol_version"),
+	version: Schema.Number,
+});
+
 const InputSyncSchema = Schema.Struct({
 	type: Schema.Literal("input_sync"),
 	text: Schema.String,
@@ -1136,9 +1176,11 @@ export const RelayMessageSchema = Schema.Union(
 	// Model / Agent / Commands
 	ModelInfoMsgSchema,
 	DefaultModelInfoSchema,
+	DefaultPermissionModeInfoSchema,
 	ModelListSchema,
 	AgentListSchema,
 	VisibilityInfoSchema,
+	ClaudeSettingsInfoSchema,
 	CommandListSchema,
 	// Projects
 	ProjectListSchema,
@@ -1179,6 +1221,7 @@ export const RelayMessageSchema = Schema.Union(
 	ErrorSchema,
 	SystemErrorSchema,
 	ClientCountSchema,
+	ProtocolVersionSchema,
 	InputSyncSchema,
 	UpdateAvailableSchema,
 	// Instance Management
@@ -1221,9 +1264,11 @@ export const RELAY_MESSAGE_TYPES = [
 	"history_page",
 	"model_info",
 	"default_model_info",
+	"default_permission_mode_info",
 	"model_list",
 	"agent_list",
 	"visibility_info",
+	"claude_settings_info",
 	"command_list",
 	"project_list",
 	"file_list",
@@ -1252,6 +1297,7 @@ export const RELAY_MESSAGE_TYPES = [
 	"error",
 	"system_error",
 	"client_count",
+	"protocol_version",
 	"input_sync",
 	"update_available",
 	"instance_list",
@@ -1291,7 +1337,13 @@ export const KNOWN_RELAY_MESSAGE_TYPES: ReadonlySet<string> = new Set(
 
 export type RelayMessage =
 	// ── Streaming ──────────────────────────────────────────────────────────
-	| { type: "delta"; sessionId: string; text: string; messageId?: string }
+	| {
+			type: "delta";
+			sessionId: string;
+			text: string;
+			messageId?: string;
+			partId?: string;
+	  }
 	| { type: "thinking_start"; sessionId: string; messageId?: string }
 	| {
 			type: "thinking_delta";
@@ -1430,7 +1482,13 @@ export type RelayMessage =
 	  }
 	// ── Model / Agent / Commands ───────────────────────────────────────────
 	| { type: "model_info"; model: string; provider: string }
-	| { type: "default_model_info"; model: string; provider: string }
+	| {
+			type: "default_model_info";
+			model: string;
+			provider: string;
+			variant: string;
+	  }
+	| { type: "default_permission_mode_info"; mode: SessionPermissionMode }
 	| { type: "model_list"; instanceId?: string; providers: ProviderInfo[] }
 	| {
 			type: "agent_list";
@@ -1440,6 +1498,7 @@ export type RelayMessage =
 			activeAgentId?: string;
 	  }
 	| { type: "visibility_info"; hiddenModels: string[]; hiddenAgents: string[] }
+	| { type: "claude_settings_info"; overrides: ClaudeSettingsOverrides }
 	| { type: "command_list"; commands: CommandInfo[] }
 	// ── Projects ───────────────────────────────────────────────────────────
 	| {
@@ -1474,7 +1533,11 @@ export type RelayMessage =
 			type: "connection_status";
 			status: "disconnected" | "reconnecting" | "connected";
 	  }
-	// ── Plan mode (future feature) ────────────────────────────────────────
+	// ── Plan mode (unused) ────────────────────────────────────────────────
+	// Plan approval rides the permission channel: the SDK asks for its
+	// `ExitPlanMode` tool through canUseTool, so it arrives as a normal
+	// permission_request and inherits that path's durable audit and reload
+	// survival. These four have no server-side emitter.
 	| { type: "plan_enter" }
 	| { type: "plan_exit" }
 	| { type: "plan_content"; content: string }
@@ -1515,6 +1578,7 @@ export type RelayMessage =
 			details?: Record<string, unknown>;
 	  }
 	| { type: "client_count"; count: number }
+	| { type: "protocol_version"; version: number }
 	| { type: "input_sync"; text: string; from?: string }
 	| { type: "update_available"; version?: string }
 	// ── Instance Management ──────────────────────────────────────────────

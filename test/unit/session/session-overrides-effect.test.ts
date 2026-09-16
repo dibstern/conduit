@@ -21,6 +21,7 @@ import {
 	getDefaultAgent,
 	getDefaultContextWindow,
 	getDefaultModel,
+	getDefaultPermissionMode,
 	getDefaultVariant,
 	getModel,
 	getOverrides,
@@ -36,6 +37,7 @@ import {
 	setDefaultAgent,
 	setDefaultContextWindow,
 	setDefaultModel,
+	setDefaultPermissionMode,
 	setDefaultVariant,
 	setModel,
 	setModelDefault,
@@ -235,6 +237,21 @@ describe("SessionOverrides Effect", () => {
 		Effect.gen(function* () {
 			expect(yield* getPermissionMode("unknown")).toBe("ask");
 		}).pipe(Effect.provide(Layer.fresh(makeOverridesStateLive()))),
+	);
+
+	it.effect(
+		"getPermissionMode uses the configured default unless the session chose a mode",
+		() =>
+			Effect.gen(function* () {
+				yield* setDefaultPermissionMode("auto");
+
+				expect(yield* getDefaultPermissionMode()).toBe("auto");
+				expect(yield* getPermissionMode("sess-1")).toBe("auto");
+
+				yield* setPermissionMode("sess-1", "full");
+				expect(yield* getPermissionMode("sess-1")).toBe("full");
+				expect(yield* getPermissionMode("sess-2")).toBe("auto");
+			}).pipe(Effect.provide(Layer.fresh(makeOverridesStateLive()))),
 	);
 
 	it.effect("setPermissionMode stores the mode", () =>
@@ -585,6 +602,7 @@ describe("SessionOverrides Effect", () => {
 			expect(state.sessions.size).toBe(0);
 			expect(state.defaultModel).toBeUndefined();
 			expect(state.defaultVariant).toBe("");
+			expect(state.defaultPermissionMode).toBe("ask");
 		}).pipe(Effect.provide(Layer.fresh(makeOverridesStateLive()))),
 	);
 });

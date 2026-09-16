@@ -52,6 +52,7 @@ describe("createRelayEventSink — translation", () => {
 			sessionId: "ses-1",
 			text: "Hello",
 			messageId: "msg_1",
+			partId: "part_1",
 		});
 	});
 
@@ -74,6 +75,7 @@ describe("createRelayEventSink — translation", () => {
 			sessionId: "child",
 			text: "Child text",
 			messageId: "msg_child",
+			partId: "part_child",
 		});
 	});
 
@@ -160,6 +162,21 @@ describe("createRelayEventSink — translation", () => {
 		expect(clearTimeout).not.toHaveBeenCalled();
 		// It DOES reset the timeout (activity observed).
 		expect(resetTimeout).toHaveBeenCalled();
+	});
+
+	// The orchestration reactor streams provider output straight to ingestion,
+	// bypassing this sink's push(); noteActivity is how it keeps the relay's
+	// processing timeout alive so long turns don't emit a false timeout error.
+	it("exposes noteActivity as a timeout reset", () => {
+		const resetTimeout = vi.fn();
+		const sink = createRelayEventSink({
+			sessionId: "ses-1",
+			send: vi.fn(),
+			clearTimeout: vi.fn(),
+			resetTimeout,
+		});
+		sink.noteActivity?.();
+		expect(resetTimeout).toHaveBeenCalledTimes(1);
 	});
 
 	it("clears timeout on non-RETRY errors", async () => {
@@ -338,6 +355,7 @@ describe("createRelayEventSink — persistence", () => {
 			sessionId: "ses-1",
 			text: "Hello",
 			messageId: "msg_1",
+			partId: "part_1",
 		});
 	});
 
@@ -360,6 +378,7 @@ describe("createRelayEventSink — persistence", () => {
 			sessionId: "ses-1",
 			text: "Hello",
 			messageId: "msg_1",
+			partId: "part_1",
 		});
 	});
 
@@ -388,6 +407,7 @@ describe("createRelayEventSink — persistence", () => {
 			sessionId: "ses-1",
 			text: "Hello",
 			messageId: "msg_1",
+			partId: "part_1",
 		});
 	});
 
@@ -426,6 +446,7 @@ describe("createRelayEventSink — persistence", () => {
 			sessionId: "ses-1",
 			text: "Hello",
 			messageId: "msg_1",
+			partId: "part_1",
 		});
 	});
 
@@ -699,7 +720,13 @@ describe("createRelayEventSink — permission/question", () => {
 	});
 });
 
-describe("createRelayEventSink — permission mode short-circuit", () => {
+describe("createRelayEventSink — permission delegation", () => {
+	// Conduit passes the real permissionMode to the SDK, which resolves the
+	// escalating modes (acceptEdits / bypassPermissions / auto / dontAsk) before
+	// canUseTool is reached. So anything arriving here is a genuine ask, whatever
+	// the session's mode -- conduit no longer re-decides it with a tool taxonomy
+	// of its own, which is what used to make "acceptEdits" disagree with the SDK
+	// about which tools count as edits.
 	const request = {
 		requestId: "req_auto",
 		toolName: "Edit",
@@ -728,74 +755,51 @@ describe("createRelayEventSink — permission mode short-circuit", () => {
 		};
 	};
 
+	// The sink takes no permission-mode input at all any more, so there is no
+	// mode axis left to vary -- that absence IS the delegation. What remains is
+	// the tool axis, which is where conduit's own taxonomy used to disagree with
+	// the SDK's: "Edit"/"Write"/"NotebookEdit" were auto-approved under
+	// acceptEdits and everything else was not.
 	it.each([
-		{ mode: "full" as const, toolName: "Bash", shortCircuits: true },
-		{ mode: "full" as const, toolName: "Edit", shortCircuits: true },
-		{ mode: "auto" as const, toolName: "Bash", shortCircuits: false },
-		{ mode: "auto" as const, toolName: "Edit", shortCircuits: false },
-		{ mode: "acceptEdits" as const, toolName: "Edit", shortCircuits: true },
-		{ mode: "acceptEdits" as const, toolName: "Write", shortCircuits: true },
-		{
-			mode: "acceptEdits" as const,
-			toolName: "NotebookEdit",
-			shortCircuits: true,
-		},
-		{ mode: "acceptEdits" as const, toolName: "Bash", shortCircuits: false },
-		{
-			mode: "acceptEdits" as const,
-			toolName: "mcp__foo__bar",
-			shortCircuits: false,
-		},
-		{ mode: "ask" as const, toolName: "Edit", shortCircuits: false },
-		{ mode: undefined, toolName: "Edit", shortCircuits: false },
-	])("mode=$mode tool=$toolName shortCircuits=$shortCircuits", async ({
-		mode,
-		toolName,
-		shortCircuits,
-	}) => {
+		{ toolName: "Edit" },
+		{ toolName: "Write" },
+		{ toolName: "NotebookEdit" },
+		{ toolName: "Bash" },
+		{ toolName: "mcp__foo__bar" },
+	])("surfaces the ask for tool=$toolName", async ({ toolName }) => {
 		const send = vi.fn();
 		const { beginPermissionRequest, port } = makePendingInteractions();
 		const sink = createRelayEventSink({
 			sessionId: "ses-1",
 			send,
 			pendingInteractions: port,
-			...(mode == null
-				? {}
-				: { getPermissionMode: () => Effect.succeed(mode) }),
 		});
 
 		await expect(
 			Effect.runPromise(sink.requestPermission({ ...request, toolName })),
 		).resolves.toEqual({ decision: "once" });
 
-		if (shortCircuits) {
-			expect(beginPermissionRequest).not.toHaveBeenCalled();
-			expect(send).not.toHaveBeenCalledWith(
-				expect.objectContaining({ type: "permission_request" }),
-			);
-		} else {
-			expect(beginPermissionRequest).toHaveBeenCalledOnce();
-			expect(send).toHaveBeenCalledWith(
-				expect.objectContaining({
-					type: "permission_request",
-					toolName,
-				}),
-			);
-		}
+		expect(beginPermissionRequest).toHaveBeenCalledOnce();
+		expect(send).toHaveBeenCalledWith(
+			expect.objectContaining({ type: "permission_request", toolName }),
+		);
 	});
 
-	it("persists canonical asked and auto-resolved audit events", async () => {
-		const send = vi.fn();
+	it("no longer fabricates auto-approval audit events", async () => {
+		// Accepted consequence of delegating: the SDK emits no auto-allow event,
+		// so an approval conduit never made is no longer recorded as if it had.
+		// What ran is still durable via the tool-call stream.
 		const persistEvent = vi.fn((_event: CanonicalEvent) => Effect.void);
 		const persistEvents = vi.fn(
 			(_events: readonly CanonicalEvent[]) => Effect.void,
 		);
+		const { port } = makePendingInteractions();
 		const sink = createRelayEventSink({
 			sessionId: "ses-1",
 			providerId: "claude",
-			send,
+			send: vi.fn(),
 			persist: { persistEvent, persistEvents },
-			getPermissionMode: () => Effect.succeed("full" as const),
+			pendingInteractions: port,
 		});
 
 		await expect(
@@ -803,87 +807,23 @@ describe("createRelayEventSink — permission mode short-circuit", () => {
 		).resolves.toEqual({ decision: "once" });
 
 		const persisted = persistEvents.mock.calls.flatMap(([events]) => events);
-		expect(persisted).toEqual([
-			expect.objectContaining({
-				type: "permission.asked",
-				data: expect.objectContaining({
-					id: "req_auto",
-					toolName: "Edit",
-				}),
-			}),
-			expect.objectContaining({
-				type: "permission.resolved",
-				data: expect.objectContaining({
-					id: "req_auto",
-					decision: "once",
-					resolvedBy: "auto",
-				}),
-			}),
-		]);
-		expect(send).not.toHaveBeenCalledWith(
-			expect.objectContaining({ type: "permission_request" }),
-		);
+		expect(
+			persisted.filter((event) => String(event.type).startsWith("permission.")),
+		).toEqual([]);
 	});
 
-	it("ingests asked and resolved runtime audit events", async () => {
-		const send = vi.fn();
-		const ingest = vi.fn((_event: ProviderRuntimeEvent) => Effect.succeed(1));
-		const sink = createRelayEventSink({
-			sessionId: "ses-1",
-			providerId: "claude",
-			send,
-			ingestion: { ingest },
-			getPermissionMode: () => Effect.succeed("full" as const),
-		});
-
-		await expect(
-			Effect.runPromise(sink.requestPermission(request)),
-		).resolves.toEqual({ decision: "once" });
-
-		expect(ingest).toHaveBeenCalledTimes(2);
-		expect(ingest).toHaveBeenNthCalledWith(
-			1,
-			expect.objectContaining({ type: "permission.asked" }),
-		);
-		expect(ingest).toHaveBeenNthCalledWith(
-			2,
-			expect.objectContaining({
-				type: "permission.resolved",
-				data: expect.objectContaining({ resolvedBy: "auto" }),
-			}),
-		);
-		expect(send).not.toHaveBeenCalledWith(
-			expect.objectContaining({ type: "permission_request" }),
-		);
-	});
-
-	it("keeps an auto-approval non-fatal when audit persistence fails", async () => {
-		const persistEvent = vi.fn((_event: CanonicalEvent) => Effect.void);
-		const persistEvents = vi.fn((_events: readonly CanonicalEvent[]) =>
-			Effect.fail(new Error("audit failed")),
-		);
+	it("fails closed when an ask arrives with no interaction port", async () => {
 		const sink = createRelayEventSink({
 			sessionId: "ses-1",
 			send: vi.fn(),
-			persist: { persistEvent, persistEvents },
-			getPermissionMode: () => Effect.succeed("full" as const),
 		});
 
+		// Previously "full" short-circuited to allow here. With the SDK owning
+		// the mode, reaching this point with nowhere to ask must not silently
+		// approve.
 		await expect(
 			Effect.runPromise(sink.requestPermission(request)),
-		).resolves.toEqual({ decision: "once" });
-	});
-
-	it("auto-approves without a pending interaction port", async () => {
-		const sink = createRelayEventSink({
-			sessionId: "ses-1",
-			send: vi.fn(),
-			getPermissionMode: () => Effect.succeed("full" as const),
-		});
-
-		await expect(
-			Effect.runPromise(sink.requestPermission(request)),
-		).resolves.toEqual({ decision: "once" });
+		).rejects.toThrow();
 	});
 });
 

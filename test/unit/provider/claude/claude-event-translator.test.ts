@@ -120,6 +120,25 @@ function makeInitMessage(model: string): SDKMessage {
 	} as unknown as SDKMessage;
 }
 
+function makeAssistantMessage(model: string): SDKMessage {
+	return {
+		type: "assistant",
+		message: {
+			id: "msg-served-by",
+			type: "message",
+			role: "assistant",
+			content: [{ type: "text", text: "ok" }],
+			model,
+			stop_reason: "end_turn",
+			stop_sequence: null,
+			usage: { input_tokens: 10, output_tokens: 5 },
+		},
+		parent_tool_use_id: null,
+		uuid: "00000000-0000-0000-0000-000000000002",
+		session_id: "sdk-sess-new",
+	} as unknown as SDKMessage;
+}
+
 // Tools seeded into ctx.inFlightTools before the first translate call opened
 // mid-turn — their tool.started happened "before the test window". Snapshot
 // them so the afterEach invariant check doesn't flag their running/completed
@@ -227,8 +246,11 @@ describe("ClaudeEventTranslator", () => {
 		ctx.expectedApiModelId = "claude-sonnet-5";
 		await runTranslate(translator, ctx, makeInitMessage("claude-sonnet-5"));
 
+		// init also carries the permission mode the SDK is actually running in,
+		// and this is the session's first, so it reports alongside the model.
 		expect(sink.events.map((event) => event.type)).toEqual([
 			"turn.model_resolved",
+			"session.permission_mode_changed",
 			"session.status",
 		]);
 		expect(dataOf(sink.events[0])).toEqual({
@@ -272,6 +294,58 @@ describe("ClaudeEventTranslator", () => {
 		);
 	});
 
+	it("treats a context-window suffix as the same model across both reports", async () => {
+		// The two channels disagree about `[1m]`: `init` echoes conduit's
+		// outbound id, the assistant message reports the bare API id. Same
+		// model, so the turn resolves once and nothing warns.
+		ctx.currentModel = "opus[1m]";
+		ctx.expectedApiModelId = "claude-opus-5[1m]";
+
+		await runTranslate(translator, ctx, makeInitMessage("claude-opus-5[1m]"));
+		await runTranslate(translator, ctx, makeAssistantMessage("claude-opus-5"));
+
+		expect(
+			sink.events.filter((event) => event.type === "turn.model_resolved"),
+		).toHaveLength(1);
+		expect(dataOf(sink.events[0])).toEqual({
+			requestedModel: "opus[1m]",
+			expectedModel: "claude-opus-5[1m]",
+			actualModel: "claude-opus-5[1m]",
+		});
+		expect(logger.warn).not.toHaveBeenCalled();
+	});
+
+	it("still resolves again when the served model genuinely changes", async () => {
+		ctx.currentModel = "opus[1m]";
+		ctx.expectedApiModelId = "claude-opus-5[1m]";
+
+		await runTranslate(translator, ctx, makeInitMessage("claude-opus-5[1m]"));
+		await runTranslate(
+			translator,
+			ctx,
+			makeAssistantMessage("claude-sonnet-5"),
+		);
+
+		const resolved = sink.events.filter(
+			(event) => event.type === "turn.model_resolved",
+		);
+		expect(resolved).toHaveLength(2);
+		expect(dataOf(resolved[1])).toEqual({
+			requestedModel: "opus[1m]",
+			expectedModel: "claude-opus-5[1m]",
+			actualModel: "claude-sonnet-5",
+		});
+	});
+
+	it("warns when init reports a different model than expected", async () => {
+		ctx.currentModel = "opus[1m]";
+		ctx.expectedApiModelId = "claude-opus-5[1m]";
+
+		await runTranslate(translator, ctx, makeInitMessage("claude-sonnet-5"));
+
+		expect(logger.warn).toHaveBeenCalledTimes(1);
+	});
+
 	it.each([
 		[
 			"requested without expected",
@@ -308,10 +382,25 @@ describe("ClaudeEventTranslator", () => {
 
 		const statusEvent = sink.events.find((e) => e.type === "session.status");
 		expect(statusEvent).toBeDefined();
-		// Non-compaction statuses fall back to "idle" (compaction statuses are
-		// handled separately as session.compaction — see the compaction tests below)
+		// "requesting" means the SDK is issuing an API call — busy, not idle.
+		// (Compaction statuses are handled separately as session.compaction —
+		// see the compaction tests below.)
 		const data = dataOf(statusEvent);
 		expect(data["sessionId"]).toBe("sess-1");
+		expect(data["status"]).toBe("busy");
+	});
+
+	it("translates a null system/status to idle", async () => {
+		await runTranslate(translator, ctx, {
+			type: "system",
+			subtype: "status",
+			status: null,
+			uuid: "00000000-0000-0000-0000-000000000003",
+			session_id: "sdk-sess",
+		} as unknown as SDKMessage);
+
+		const statusEvent = sink.events.find((e) => e.type === "session.status");
+		expect(dataOf(statusEvent)["status"]).toBe("idle");
 	});
 
 	// ─── 3. system (subtype task_progress) ───────────────────────────────
@@ -2178,7 +2267,11 @@ describe("ClaudeEventTranslator", () => {
 		).toBeUndefined();
 
 		await runTranslateError(translator, ctx, new Error("after failure"));
-		expect(sink.events.map((event) => event.type)).toEqual(["turn.error"]);
+		// turn.error is terminal, so it also releases the busy lease.
+		expect(sink.events.map((event) => event.type)).toEqual([
+			"turn.error",
+			"session.status",
+		]);
 	});
 
 	it("resetInFlightState clears counters and message id", () => {

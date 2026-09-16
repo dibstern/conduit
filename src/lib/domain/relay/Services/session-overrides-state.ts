@@ -45,6 +45,7 @@ export interface OverridesState {
 	defaultModel: ModelOverride | undefined;
 	defaultAgent: string | undefined;
 	defaultVariant: string;
+	defaultPermissionMode: SessionPermissionMode;
 	defaultContextWindow: string;
 }
 
@@ -71,6 +72,7 @@ export const makeOverridesStateLive = (): Layer.Layer<OverridesStateTag> =>
 				defaultModel: undefined,
 				defaultAgent: undefined,
 				defaultVariant: "",
+				defaultPermissionMode: "ask",
 				defaultContextWindow: "",
 			});
 		}),
@@ -189,6 +191,21 @@ export const getDefaultVariant = () =>
 		const ref = yield* OverridesStateTag;
 		const state = yield* Ref.get(ref);
 		return state.defaultVariant;
+	});
+
+/** Set the global default permission mode. */
+export const setDefaultPermissionMode = (mode: SessionPermissionMode) =>
+	Effect.gen(function* () {
+		const ref = yield* OverridesStateTag;
+		yield* Ref.update(ref, (s) => ({ ...s, defaultPermissionMode: mode }));
+	});
+
+/** Get the global default permission mode. */
+export const getDefaultPermissionMode = () =>
+	Effect.gen(function* () {
+		const ref = yield* OverridesStateTag;
+		const state = yield* Ref.get(ref);
+		return state.defaultPermissionMode;
 	});
 
 /** Set the global default context window. */
@@ -326,14 +343,20 @@ export const setPermissionMode = (
 		});
 	});
 
-/** Get the approval mode for a session. Defaults to "ask". */
+/**
+ * Get the approval mode for a session. A session that has never chosen a mode
+ * uses the configured default, which is "ask" until it is set.
+ */
 export const getPermissionMode = (
 	sessionId: string,
 ): Effect.Effect<SessionPermissionMode, never, OverridesStateTag> =>
 	Effect.gen(function* () {
 		const ref = yield* OverridesStateTag;
 		const state = yield* Ref.get(ref);
-		return state.sessions.get(sessionId)?.permissionMode ?? "ask";
+		return (
+			state.sessions.get(sessionId)?.permissionMode ??
+			state.defaultPermissionMode
+		);
 	});
 
 // ─── Per-Session Context Window ─────────────────────────────────────────────

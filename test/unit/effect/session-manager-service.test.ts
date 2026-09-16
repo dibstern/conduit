@@ -177,7 +177,9 @@ function seedProjectedSessionBinding(
 	const db = SqliteClient.open(dbFile);
 	try {
 		runMigrations(db, schemaMigrations);
-		const now = 1_735_689_600_000;
+		// Keep this fixture newer than the one-time legacy-skeleton purge cutoff.
+		// These tests exercise deletion, not cleanup of pre-event-store rows.
+		const now = 1_800_000_000_000;
 		db.execute(
 			"INSERT INTO sessions (id, provider, title, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
 			[sessionId, providerId, "Persisted session", "idle", now, now],

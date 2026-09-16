@@ -123,40 +123,8 @@ describe("InstanceModelPicker", () => {
 		sessionState.currentId = null;
 	});
 
-	it("shows the exact current drift warning with catalog display names", () => {
-		discoveryState.modelExecution = {
-			requestedModel: "claude-sonnet-4-7",
-			expectedModel: "claude-sonnet-4-7",
-			actualModel: "claude-opus-4-7",
-			drifted: true,
-		};
-
-		const { getByText } = render(InstanceModelPicker);
-
-		expect(
-			getByText("⚠ Running Claude Opus 4.7 — you selected Claude Sonnet 4.7"),
-		).toBeTruthy();
-	});
-
-	it("hides the current drift warning unless drift is exactly true with a requested model", () => {
-		discoveryState.modelExecution = {
-			requestedModel: "claude-sonnet-4-7",
-			expectedModel: "claude-sonnet-4-7",
-			actualModel: "claude-opus-4-7",
-			drifted: false,
-		};
-		const matching = render(InstanceModelPicker);
-		expect(matching.queryByText(/⚠ Running/)).toBeNull();
-		matching.unmount();
-
-		discoveryState.modelExecution = {
-			expectedModel: "claude-sonnet-4-7",
-			actualModel: "claude-opus-4-7",
-			drifted: true,
-		};
-		const partial = render(InstanceModelPicker);
-		expect(partial.queryByText(/⚠ Running/)).toBeNull();
-	});
+	// The drift indicator moved to InputArea (it is a status line, not a
+	// control); its copy and gating are covered by features/model-drift.feature.
 
 	it("refreshes active-provider agents after switching model", async () => {
 		const { container, getByTitle } = render(InstanceModelPicker);

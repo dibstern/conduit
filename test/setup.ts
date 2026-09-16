@@ -13,3 +13,25 @@ const noop = () => {};
 console.debug = noop;
 console.info = noop;
 console.warn = noop;
+
+// 3. jsdom ships HTMLDialogElement but not showModal/show/close, so any
+//    component rendering a <dialog> throws on mount. Shim just enough for the
+//    open/closed state machine and the close event.
+if (
+	typeof HTMLDialogElement !== "undefined" &&
+	!HTMLDialogElement.prototype.showModal
+) {
+	function open(this: HTMLDialogElement): void {
+		this.open = true;
+	}
+	HTMLDialogElement.prototype.showModal = open;
+	HTMLDialogElement.prototype.show = open;
+	HTMLDialogElement.prototype.close = function close(
+		this: HTMLDialogElement,
+		returnValue?: string,
+	): void {
+		this.open = false;
+		if (returnValue !== undefined) this.returnValue = returnValue;
+		this.dispatchEvent(new Event("close"));
+	};
+}

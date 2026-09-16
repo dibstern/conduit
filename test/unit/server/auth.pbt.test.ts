@@ -5,7 +5,7 @@
 // P2: Incorrect PIN always fails → AC3
 // P3: Rate limit: N+1th attempt locks, even correct PIN → AC4
 // P4: Lockout expires after timeout → AC4
-// P5: Valid cookies validate, expired cookies don't → AC2, AC5
+// P5: Valid cookies validate, expired cookies don't; cookies survive restart → AC2, AC5
 // P6: setPin accepts 4-8 digit PINs, rejects others → AC6
 // P7: No PIN mode always grants access → AC7
 // P8: Different IPs have independent lockout states → AC4
@@ -192,6 +192,31 @@ describe("Ticket 2.4 — PIN Auth & Rate Limiting PBT", () => {
 				),
 				{ seed: SEED, numRuns: NUM_RUNS, endOnFailure: true },
 			);
+		});
+
+		it("cookies survive a daemon restart (fresh manager, same pin hash)", () => {
+			const before = new AuthManager();
+			before.setPin("1234");
+			const cookie = before.authenticate("1234", "10.0.0.1").cookie;
+			expect(cookie).toBeDefined();
+
+			// A restart builds a new AuthManager and reloads pinHash from config.
+			const after = new AuthManager();
+			after.setPinHash(before.getPinHash());
+
+			// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
+			expect(after.validateCookie(cookie!)).toBe(true);
+		});
+
+		it("changing the PIN invalidates cookies issued under the old one", () => {
+			const auth = new AuthManager();
+			auth.setPin("1234");
+			const cookie = auth.authenticate("1234", "10.0.0.1").cookie;
+
+			auth.setPin("5678");
+
+			// biome-ignore lint/style/noNonNullAssertion: safe — issued above
+			expect(auth.validateCookie(cookie!)).toBe(false);
 		});
 
 		it("property: random strings are never valid cookies", () => {

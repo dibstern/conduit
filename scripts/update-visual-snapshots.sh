@@ -62,8 +62,9 @@ update_linux() {
     -v "$ROOT_DIR":/work \
     -w /work \
     --platform linux/amd64 \
+    -e COREPACK_ENABLE_DOWNLOAD_PROMPT=0 \
     "$DOCKER_IMAGE" \
-    bash -c "npx playwright test $SCREENSHOT_SPEC --config $VISUAL_CONFIG --update-snapshots"
+    bash -c "corepack enable pnpm && npx playwright test $SCREENSHOT_SPEC --config $VISUAL_CONFIG --update-snapshots"
 
   echo "✓ Linux snapshots updated"
 }

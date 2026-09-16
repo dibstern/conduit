@@ -21,7 +21,10 @@ import { randomUUID } from "node:crypto";
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { query as sdkQuery } from "@anthropic-ai/claude-agent-sdk";
+import {
+	type Settings,
+	query as sdkQuery,
+} from "@anthropic-ai/claude-agent-sdk";
 import {
 	Context,
 	Data,
@@ -39,6 +42,7 @@ import {
 	Ref,
 	type Scope,
 } from "effect";
+import type { ClaudeSDKPermissionMode } from "../../contracts/providers/claude-agent-sdk.js";
 import {
 	decodeClaudeSDKMessage,
 	decodeClaudeSDKOptionsJsonShape,
@@ -80,6 +84,7 @@ import {
 import { isInterruptedResult } from "./claude-event-translator.js";
 import { ClaudePermissionBridge } from "./claude-permission-bridge.js";
 import { makeClaudeSdkEnv } from "./claude-sdk-env.js";
+import { buildClaudeFlagSettings } from "./claude-sdk-settings.js";
 import type {
 	ClaudeSubagentSdk,
 	MaterializeClaudeSubagentsInput,
@@ -98,6 +103,10 @@ import {
 } from "./claude-translation-service.js";
 import { makeEffectPromptQueue } from "./effect-prompt-queue.js";
 import { serializePriorConversation } from "./history-transcript.js";
+import {
+	requiresDangerousSkip,
+	toSdkPermissionMode,
+} from "./permission-mode-map.js";
 import { captureClaudeSdkMessage } from "./sdk-trace-capture.js";
 import type {
 	ClaudeSessionContext,
@@ -243,6 +252,8 @@ function validateUserMessage(message: SDKUserMessage): SDKUserMessage {
 	}
 }
 
+type EffortLevel = NonNullable<SDKOptions["effort"]>;
+
 function validateOptionsJsonShape(options: SDKOptions): SDKOptions {
 	try {
 		return decodeClaudeSDKOptionsJsonShape(options);
@@ -379,6 +390,7 @@ function enumerateSkills(
 
 export interface ClaudeProviderInstanceDeps {
 	readonly workspaceRoot: string;
+	readonly claudeSettingsOverrides?: () => Settings | undefined;
 	/** Injectable factory for the SDK's query() function. Defaults to the real SDK. */
 	readonly queryFactory?: (params: {
 		prompt: AsyncIterable<SDKUserMessage>;
@@ -522,6 +534,7 @@ export class ClaudeProviderRuntime {
 	private readonly queryFactory: NonNullable<
 		ClaudeProviderInstanceDeps["queryFactory"]
 	>;
+	private readonly claudeSettingsOverrides: ClaudeProviderInstanceDeps["claudeSettingsOverrides"];
 
 	constructor(
 		private readonly deps: ClaudeProviderInstanceDeps,
@@ -536,6 +549,7 @@ export class ClaudeProviderRuntime {
 		this.queryFactory =
 			deps.queryFactory ??
 			(sdkQuery as NonNullable<ClaudeProviderInstanceDeps["queryFactory"]>);
+		this.claudeSettingsOverrides = deps.claudeSettingsOverrides;
 	}
 
 	private mapProviderFailure<A>(
@@ -707,6 +721,22 @@ export class ClaudeProviderRuntime {
 			: Effect.fail(new Error("Claude capabilities service unavailable"));
 	}
 
+	/**
+	 * `undefined` means "no expectation" -- under exactOptionalPropertyTypes that
+	 * has to clear the field rather than store an undefined in it, or the drift
+	 * check would compare against a value nobody stands behind.
+	 */
+	private setExpectedApiModelId(
+		ctx: ClaudeSessionContext,
+		expected: string | undefined,
+	): void {
+		if (expected === undefined) {
+			delete ctx.expectedApiModelId;
+		} else {
+			ctx.expectedApiModelId = expected;
+		}
+	}
+
 	private expectedApiModelIdEffect(
 		requestedModelId: string | undefined,
 		contextWindow: string | undefined,
@@ -838,6 +868,7 @@ export class ClaudeProviderRuntime {
 			const setup = Effect.gen(this, function* () {
 				// 1. Create prompt queue.
 				const queue = yield* makeEffectPromptQueue();
+				const turnAdmissionSemaphore = yield* Effect.makeSemaphore(1);
 				promptQueue = queue;
 
 				// 2. Build initial user message and enqueue.
@@ -874,6 +905,7 @@ export class ClaudeProviderRuntime {
 					workspaceRoot: input.workspaceRoot,
 					startedAt: new Date().toISOString(),
 					promptQueue: queue,
+					turnAdmissionSemaphore,
 					// Placeholder — immediately overwritten after query factory call.
 					query: undefined as unknown as ClaudeSessionContext["query"],
 					pendingApprovals: new Map(),
@@ -884,10 +916,13 @@ export class ClaudeProviderRuntime {
 					pendingSubagentMessages: new Map(),
 					eventSink: input.eventSink,
 					currentTurnId: input.turnId,
+					turnInFlight: input.turnId !== undefined,
 					currentModel: input.model?.modelId,
 					currentApiModelId: apiModelId,
 					...(expectedApiModelId ? { expectedApiModelId } : {}),
 					...(input.agent ? { currentAgent: input.agent } : {}),
+					...(input.variant ? { currentVariant: input.variant } : {}),
+					settingsOutOfSync: false,
 					resumeSessionId,
 					lastAssistantUuid: undefined,
 					turnCount: 0,
@@ -907,12 +942,21 @@ export class ClaudeProviderRuntime {
 							),
 							includePartialMessages: true,
 							forwardSubagentText: true,
-							settings: { showThinkingSummaries: true },
+							settings: buildClaudeFlagSettings(
+								this.claudeSettingsOverrides?.(),
+							),
 							settingSources: ["user", "project", "local"],
 							canUseTool: bridge.createCanUseTool(ctx),
 							model: apiModelId,
-							...(input.permissionMode === "auto"
-								? { permissionMode: "auto" }
+							...(input.permissionMode
+								? {
+										permissionMode: toSdkPermissionMode(input.permissionMode),
+										// The SDK rejects bypassPermissions unless the
+										// caller opts in explicitly.
+										...(requiresDangerousSkip(input.permissionMode)
+											? { allowDangerouslySkipPermissions: true }
+											: {}),
+									}
 								: {}),
 							...(resumeSessionId ? { resume: resumeSessionId } : {}),
 							...(input.agent ? { agent: input.agent } : {}),
@@ -976,9 +1020,112 @@ export class ClaudeProviderRuntime {
 
 	// ─── enqueueTurn ──────────────────────────────────────────────────────
 
+	/**
+	 * Push the settings the user picked onto the live query. `setModel` and the
+	 * flag layer are the only mid-session channels: `model` (with the context
+	 * window folded into the API model id) goes through the former, `effort`
+	 * through the latter because it is fixed at query creation.
+	 *
+	 * Leaves `ctx.settingsOutOfSync` latched on failure so the next turn
+	 * re-issues whatever did not land; the caller clears it once the settings
+	 * are known to have reached the query.
+	 */
+	private syncQuerySettingsEffect(
+		ctx: ClaudeSessionContext,
+		settings: {
+			readonly modelId?: string | undefined;
+			readonly contextWindow?: string | undefined;
+			readonly variant?: string | undefined;
+		},
+	): Effect.Effect<void, unknown> {
+		return Effect.gen(this, function* () {
+			const baseModelId = settings.modelId ?? ctx.currentModel;
+			const apiModelId = claudeApiModelId(baseModelId, settings.contextWindow);
+			const forceSettingsSync = ctx.settingsOutOfSync;
+			const shouldSetModel =
+				apiModelId !== undefined &&
+				(forceSettingsSync || apiModelId !== ctx.currentApiModelId);
+			const shouldApplyFlagSettings =
+				forceSettingsSync || settings.variant !== ctx.currentVariant;
+
+			if (shouldSetModel || shouldApplyFlagSettings) {
+				ctx.settingsOutOfSync = true;
+			}
+			if (shouldSetModel) {
+				yield* Effect.tryPromise({
+					try: () => ctx.query.setModel(apiModelId),
+					catch: (cause) => cause,
+				});
+				ctx.currentApiModelId = apiModelId;
+			}
+			if (settings.modelId) {
+				ctx.currentModel = settings.modelId;
+			}
+			// `effort` is fixed at query creation, so a mid-session change only
+			// lands via the flag-settings layer. Empty/absent clears it back to
+			// the settings-file default.
+			if (shouldApplyFlagSettings) {
+				const effortLevel = (settings.variant || null) as EffortLevel | null;
+				yield* Effect.tryPromise({
+					try: () => ctx.query.applyFlagSettings({ effortLevel }),
+					catch: (cause) => cause,
+				});
+				if (settings.variant) {
+					ctx.currentVariant = settings.variant;
+				} else {
+					delete ctx.currentVariant;
+				}
+			}
+		});
+	}
+
+	/**
+	 * Apply a picker change to the live query immediately, rather than letting
+	 * it wait for the next turn's admission path. A session with no live query
+	 * yet is a no-op: query creation reads these from its options.
+	 */
+	applyLiveSettingsEffect(
+		sessionId: string,
+		settings: {
+			readonly modelId?: string | undefined;
+			readonly contextWindow?: string | undefined;
+			readonly variant?: string | undefined;
+		},
+	): Effect.Effect<void, ProviderInstanceFailure> {
+		return this.mapProviderFailure(
+			"apply live settings",
+			Effect.gen(this, function* () {
+				const pending = yield* this.getSetupLock(sessionId);
+				if (pending) {
+					yield* Deferred.await(pending);
+				}
+				const ctx = yield* this.getSession(sessionId);
+				if (!ctx) return;
+				yield* this.syncQuerySettingsEffect(ctx, settings);
+				// `init` arrives only at query creation, so for the rest of the
+				// session the drift check reads this. Left at the pre-switch model,
+				// a switch the user just made reads back as the SDK ignoring them
+				// the moment an assistant message reports what actually served it.
+				// The live query's own workspace and agent are the right frame: an
+				// agent change restarts the session instead of reaching this path.
+				this.setExpectedApiModelId(
+					ctx,
+					yield* this.expectedApiModelIdEffect(
+						settings.modelId ?? ctx.currentModel,
+						settings.contextWindow,
+						ctx.workspaceRoot,
+						ctx.currentAgent,
+					),
+				);
+				// Both calls landed, so the next turn has nothing to re-issue.
+				ctx.settingsOutOfSync = false;
+			}),
+		);
+	}
+
 	setPermissionModeEffect(
 		sessionId: string,
-		mode: "auto" | "default",
+		mode: ClaudeSDKPermissionMode,
 	): Effect.Effect<void, ProviderInstanceFailure> {
 		return this.mapProviderFailure(
 			"set permission mode",
@@ -1009,47 +1156,85 @@ export class ClaudeProviderRuntime {
 				return yield* this.restartSessionForAgentChangeEffect(ctx, input);
 			}
 
-			const baseModelId = input.model?.modelId ?? ctx.currentModel;
-			const apiModelId = claudeApiModelId(baseModelId, input.contextWindow);
-			if (apiModelId && apiModelId !== ctx.currentApiModelId) {
-				yield* Effect.tryPromise({
-					try: () => ctx.query.setModel(apiModelId),
-					catch: (cause) => cause,
-				});
-				ctx.currentApiModelId = apiModelId;
+			const turnAdmissionSemaphore = ctx.turnAdmissionSemaphore;
+			if (!turnAdmissionSemaphore) {
+				return yield* Effect.fail(
+					new Error(
+						`Claude runtime invariant violated: missing turn admission semaphore for ${ctx.sessionId}`,
+					),
+				);
 			}
-			if (input.model?.modelId) {
-				ctx.currentModel = input.model.modelId;
-			}
-			const expectedApiModelId = yield* this.expectedApiModelIdEffect(
-				baseModelId,
-				input.contextWindow,
-				input.workspaceRoot,
-				input.agent,
+			const deferred = yield* turnAdmissionSemaphore.withPermits(1)(
+				Effect.gen(this, function* () {
+					const state = yield* this.getState();
+					const pendingTurns = getOrUndefined(
+						HashMap.get(state.turnWaiters, ctx.sessionId),
+					);
+					const priorTurn = pendingTurns?.[0];
+					if (priorTurn) {
+						// Wait for the prior turn to finish, but never inherit its
+						// failure: a rejected turn A must not reject turn B. The
+						// liveness checks below decide whether B may still proceed.
+						yield* Deferred.await(priorTurn).pipe(Effect.ignore);
+					}
+
+					if (
+						ctx.stopped ||
+						!(yield* this.isCurrentSession(ctx)) ||
+						(yield* this.isStreamEnded(ctx.sessionId))
+					) {
+						return yield* Effect.fail(
+							new Error(`Claude session is no longer active: ${ctx.sessionId}`),
+						);
+					}
+
+					const baseModelId = input.model?.modelId ?? ctx.currentModel;
+					const expectedApiModelId = yield* this.expectedApiModelIdEffect(
+						baseModelId,
+						input.contextWindow,
+						input.workspaceRoot,
+						input.agent,
+					);
+					const userMessage = yield* Effect.try({
+						try: () => validateUserMessage(this.buildUserMessage(input)),
+						catch: (cause) => cause,
+					});
+					yield* this.syncQuerySettingsEffect(ctx, {
+						modelId: input.model?.modelId,
+						contextWindow: input.contextWindow,
+						variant: input.variant,
+					});
+					this.setExpectedApiModelId(ctx, expectedApiModelId);
+
+					const turnDeferred = yield* Deferred.make<TurnResult, Error>();
+					yield* Effect.uninterruptible(
+						Effect.gen(this, function* () {
+							yield* this.pushTurnDeferred(ctx.sessionId, turnDeferred);
+							ctx.currentTurnId = input.turnId;
+							// Marks the turn as started so a system/init arriving before
+							// the first assistant chunk cannot report the session idle.
+							ctx.turnInFlight = true;
+							ctx.eventSink = input.eventSink;
+							// Marks the assistant-message boundary: if the SDK's streaming
+							// turn is still open, no `result` resets the translator, and
+							// this reply would otherwise merge into the previous message.
+							ctx.pendingAssistantBoundary = true;
+							yield* ctx.promptQueue.enqueue(userMessage).pipe(
+								Effect.catchAll((cause) =>
+									Effect.gen(this, function* () {
+										yield* this.shiftTurnDeferred(ctx.sessionId);
+										ctx.turnInFlight = false;
+										return yield* Effect.fail(cause);
+									}),
+								),
+							);
+							ctx.settingsOutOfSync = false;
+						}),
+					);
+
+					return turnDeferred;
+				}),
 			);
-			if (expectedApiModelId === undefined) {
-				delete ctx.expectedApiModelId;
-			} else {
-				ctx.expectedApiModelId = expectedApiModelId;
-			}
-
-			const deferred = yield* Deferred.make<TurnResult, Error>();
-			yield* this.pushTurnDeferred(ctx.sessionId, deferred);
-
-			// Update turn id and event sink on context (latest sink wins).
-			ctx.currentTurnId = input.turnId;
-			ctx.eventSink = input.eventSink;
-
-			// Build and enqueue the user message. Mark the assistant-message
-			// boundary: if the SDK's streaming turn is still open (queued send),
-			// no `result` will reset the translator, and without the marker the
-			// reply to this prompt would merge into the previous turn's message.
-			const userMessage = yield* Effect.try({
-				try: () => validateUserMessage(this.buildUserMessage(input)),
-				catch: (cause) => cause,
-			});
-			ctx.pendingAssistantBoundary = true;
-			yield* ctx.promptQueue.enqueue(userMessage);
 
 			return yield* Deferred.await(deferred);
 		});
@@ -2039,6 +2224,8 @@ export class ClaudeProviderRuntime {
 					)
 					.pipe(Effect.ignore);
 			}
+
+			ctx.turnInFlight = false;
 
 			// 5. Close prompt queue.
 			yield* ctx.promptQueue.close().pipe(Effect.ignore);

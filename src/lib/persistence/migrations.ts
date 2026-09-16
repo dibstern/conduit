@@ -5,6 +5,7 @@ export interface Migration {
 	readonly id: number;
 	readonly name: string;
 	readonly sql: string;
+	readonly rebuildsForeignKeys?: boolean;
 }
 
 export interface AppliedMigration {
@@ -287,8 +288,29 @@ export function runMigrations(
 
 	for (const migration of pending) {
 		const checksum = calculateMigrationChecksum(migration);
+		if (migration.rebuildsForeignKeys) {
+			db.exec("PRAGMA foreign_keys = OFF");
+			try {
+				db.exec("BEGIN");
+				try {
+					db.exec(migration.sql);
+					const violations = db.query("PRAGMA foreign_key_check");
+					if (violations.length > 0) {
+						throw new MigrationError({
+							reason: `Migration ${migration.id} (${migration.name}) has foreign key violations: ${JSON.stringify(violations)}`,
+						});
+					}
+					db.exec("COMMIT");
+				} catch (error) {
+					db.exec("ROLLBACK");
+					throw error;
+				}
+			} finally {
+				db.exec("PRAGMA foreign_keys = ON");
+			}
+		}
 		db.runInTransaction(() => {
-			db.exec(migration.sql);
+			if (!migration.rebuildsForeignKeys) db.exec(migration.sql);
 			db.execute(
 				`INSERT INTO ${MIGRATIONS_TABLE} (id, name, checksum, applied_at)
 				 VALUES (?, ?, ?, ?)`,
