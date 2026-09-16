@@ -152,6 +152,22 @@
 		loading?: boolean;
 		disabled?: boolean;
 		/**
+		 * Soft-disable: announced as unavailable and swallows clicks, but stays
+		 * focusable AND still fires pointer events.
+		 *
+		 * `disabled` is right when a control is simply off. This one is for a
+		 * control that has to stay hoverable in order to EXPLAIN why it is off:
+		 * InstanceModelPicker's rail dims every instance the current session is
+		 * not bound to, and a hover tooltip is the only place that says so. A
+		 * real `disabled` button fires no `mouseenter`, so the explanation would
+		 * be unreachable exactly when it is needed (conduit-test-de3.35.6).
+		 *
+		 * Not reachable through `rest`: `aria-disabled` is omitted from the base
+		 * attributes below because the primitive owns that attribute, and a
+		 * spread value would be clobbered by `loading`'s.
+		 */
+		ariaDisabled?: boolean;
+		/**
 		 * Renders an <a> instead of a <button>, wearing the same variant/size.
 		 *
 		 * Deliberately a plain optional prop rather than a discriminated union
@@ -227,6 +243,7 @@
 		iconOnly = false,
 		loading = false,
 		disabled = false,
+		ariaDisabled = false,
 		ariaLabel,
 		onclick,
 		class: className,
@@ -271,7 +288,7 @@
 	const anchorRest = $derived(rest as unknown as HTMLAnchorAttributes);
 
 	const handleClick = (event: MouseEvent) => {
-		if (disabled || loading) return;
+		if (disabled || loading || ariaDisabled) return;
 		onclick?.(event);
 	};
 
@@ -315,7 +332,7 @@
 		{...anchorRest}
 		{href}
 		class={buttonClass}
-		aria-disabled={loading || undefined}
+		aria-disabled={loading || ariaDisabled || undefined}
 		aria-busy={loading || undefined}
 		aria-label={ariaLabel}
 		onclick={handleClick}
@@ -328,7 +345,7 @@
 		{type}
 		class={buttonClass}
 		{disabled}
-		aria-disabled={loading || undefined}
+		aria-disabled={loading || ariaDisabled || undefined}
 		aria-busy={loading || undefined}
 		aria-label={ariaLabel}
 		onclick={handleClick}

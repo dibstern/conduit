@@ -7,6 +7,7 @@
 
 <script lang="ts">
 	import Icon from "../ui/Icon.svelte";
+	import Button from "../ui/Button.svelte";
 	// biome-ignore lint/style/useImportType: ContextWindowSelector is used as a value for bind:this
 	import ContextWindowSelector from "./ContextWindowSelector.svelte";
 	// biome-ignore lint/style/useImportType: ModelVariant is used as a value for bind:this
@@ -48,6 +49,7 @@
 		null,
 	);
 	let variantRef: ModelVariant | undefined = $state();
+	let searchEl: HTMLInputElement | undefined = $state();
 	let contextWindowRef: ContextWindowSelector | undefined = $state();
 
 	// ─── Derived ────────────────────────────────────────────────────────────────
@@ -191,6 +193,19 @@
 		return base;
 	}
 
+	/**
+	 * The one control in this file still hand-rolling its own recipe, and
+	 * deliberately so. `ui/Button`'s only borderless-dim variant is `toolbar`,
+	 * which hard-sets `text-text-dimmer` -- and a call-site `text-text` loses to
+	 * it on stylesheet order, so the primary label of a menu row would come out
+	 * dimmed. `items-baseline` loses to the base `items-center` the same way, and
+	 * the cost column is a smaller type size that is baseline-aligned on purpose.
+	 *
+	 * What this actually wants is `ui/MenuItem`, which cannot be used here: it
+	 * renders a Bits `DropdownMenu.Item` and needs a menu context this
+	 * hand-rolled popover does not provide. Tracked as a design-system gap
+	 * rather than papered over with `!` overrides (conduit-test-de3.35.6).
+	 */
 	function modelItemClass(model: ModelInfo): string {
 		const base =
 			"model-item flex items-baseline justify-between gap-2 w-full py-1.5 px-3.5 m-0 border-none bg-transparent text-text text-base text-left cursor-pointer transition-colors duration-100 leading-[1.4] hover:bg-bg";
@@ -339,6 +354,12 @@
 			document.removeEventListener("keydown", handleKeydown);
 		};
 	});
+
+	// Replaces the `autofocus` attribute the search input used to carry; see the
+	// comment on that input for why the attribute is inert here.
+	$effect(() => {
+		if (pickerOpen) searchEl?.focus();
+	});
 </script>
 
 {#snippet driverIcon(driver: "claude" | "opencode", size: number, badge: boolean)}
@@ -358,12 +379,27 @@
 
 <div id="model-display" class="relative inline-flex items-center" use:dismiss={{ onDismiss: closePicker, escape: false, enabled: pickerOpen }}>
 	<!-- Trigger: selected instance icon + current model name -->
-	<button
+	<!-- `toolbar` is the variant whose recipe this already was: borderless,
+	     transparent, dim, with a hover step. Its own `text-text-dimmer` and
+	     `hover:text-text` are overridden additively here, which works only
+	     because `.text-text-muted` and `.hover:text-text-secondary` are both
+	     emitted AFTER them in the built stylesheet. Every override in this file
+	     was checked that way rather than assumed: Tailwind's emission order is
+	     not alphabetical, and collisions within one family resolve in opposite
+	     directions (conduit-test-de3.35.6).
+
+	     Button's base `justify-center` is harmless despite `max-w-[200px]`: the
+	     label span shrinks and ellipsises before the button reaches its cap, so
+	     the free space justify would distribute is never non-zero. -->
+	<Button
+		variant="toolbar"
+		size="content"
 		data-testid="model-picker-trigger"
 		data-instance-id={selectedId}
-		class="model-btn inline-flex items-center gap-1.5 h-9 px-2 border-none bg-transparent text-text-muted text-xs font-medium cursor-pointer whitespace-nowrap transition-[background,color] duration-150 rounded-[10px] max-w-[200px] max-sm:max-w-[130px] hover:bg-bg-alt hover:text-text-secondary font-brand {hasModel ? '' : 'opacity-50'}"
+		class="model-btn gap-1.5 h-9 px-2 text-text-muted text-xs font-medium duration-150 rounded-[10px] max-w-[200px] max-sm:max-w-[130px] hover:bg-bg-alt hover:text-text-secondary font-brand {hasModel ? '' : 'opacity-50'}"
 		title="Switch model"
 		aria-expanded={pickerOpen}
+		aria-controls={pickerOpen ? "model-picker" : undefined}
 		onclick={togglePicker}
 	>
 		{@render driverIcon(selectedDriver, 18, selectedInstance?.isCustom ?? false)}
@@ -371,7 +407,7 @@
 			{displayName}
 		</span>
 		<Icon name="chevron-down" size={10} class="shrink-0 opacity-50" />
-	</button>
+	</Button>
 
 	<!-- Variant badge (extracted component) -->
 	<ModelVariant
@@ -403,27 +439,52 @@
 				data-testid="model-picker-rail"
 				class="w-12 flex-none border-r border-border bg-bg flex flex-col gap-1 p-1 overflow-y-auto"
 			>
-				<button
+				<!-- `data-active` rather than a conditional `text-accent` class: the variant
+				     has to own both colour states, because a call-site `text-accent` LOSES to
+				     `toolbar`'s own `text-text-dimmer` on stylesheet order. The unlit
+				     `text-text-secondary` is passed additively because that one WINS. Same
+				     rule, opposite outcome.
+
+				     It carried `aria-pressed` but no accessible name: the only label was a
+				     `title`, which is not reliably announced. -->
+				<Button
+					variant="toolbar"
+					size="content"
+					iconOnly
+					icon="star"
+					iconSize={14}
+					ariaLabel="Favorites"
 					data-testid="picker-favorites"
-					class="h-10 flex-none flex items-center justify-center border-0 border-b border-solid border-border mb-0.5 rounded-lg bg-transparent cursor-pointer hover:bg-bg-alt {favoritesOnly ? 'text-accent' : 'text-text-secondary'}"
+					data-active={favoritesOnly ? "" : undefined}
+					class="h-10 flex-none border-0 border-b border-solid border-border mb-0.5 rounded-lg hover:bg-bg-alt {favoritesOnly ? '' : 'text-text-secondary'}"
 					title="Favorites"
 					aria-pressed={favoritesOnly}
 					onclick={(e) => {
 						e.stopPropagation();
 						favoritesOnly = !favoritesOnly;
 					}}
-				>
-					<Icon name="star" size={14} />
-				</button>
+				/>
 				{#each instances as instance (instance.id)}
 					{@const disabled = isInstanceDisabled(instance)}
 					{@const selected = instance.id === selectedId}
-					<button
+					<!-- The disabled dimming is deliberately NOT passed on. Button's base already
+					     carries `aria-disabled:opacity-50`, and a variant utility beats the call
+					     site, so the old `opacity-[0.38]` would have lost silently. Letting the
+					     primitive own it moves locked-mode instances from Material's 0.38 to the
+					     design system's own disabled step.
+
+					     `ariaLabel` is the string the hover tooltip already shows. The button's
+					     only content is a one-letter harness glyph, so its accessible name was
+					     "C". -->
+					<Button
+						variant="toolbar"
+						size="content"
+						ariaLabel={instanceTooltip(instance)}
 						data-testid="picker-instance-{instance.id}"
 						data-driver={instance.driver}
 						aria-pressed={selected}
-						aria-disabled={disabled}
-						class="relative h-10 flex-none rounded-lg border-none bg-transparent flex items-center justify-center {disabled ? 'opacity-[0.38] cursor-not-allowed' : 'cursor-pointer hover:bg-bg-alt'}"
+						ariaDisabled={disabled}
+						class="relative h-10 flex-none rounded-lg {disabled ? '' : 'hover:bg-bg-alt'}"
 						onclick={(e) => handleInstanceSelect(instance, e)}
 						onmouseenter={(e) => showRailTooltip(e, instance)}
 						onmouseleave={hideRailTooltip}
@@ -437,7 +498,7 @@
 						<span
 							class="absolute -right-1 top-1/2 -translate-y-1/2 w-[3px] h-[22px] rounded-l-[3px] bg-accent transition-opacity duration-150 {selected ? 'opacity-100' : 'opacity-0'}"
 						></span>
-					</button>
+					</Button>
 				{/each}
 			</div>
 
@@ -447,12 +508,25 @@
 					class="flex items-center gap-2 py-2.5 px-3.5 border-b border-border text-text-dimmer"
 				>
 					<Icon name="search" size={13} class="shrink-0" />
-					<!-- svelte-ignore a11y_autofocus -->
+					<!-- Stays a native <input> rather than ui/TextInput, and here that is the
+					     right call: the field is chromeless (transparent, borderless, no ring)
+					     because the bordered row around it is the affordance, so adopting the
+					     primitive would mean overriding essentially all of FIELD_BASE_CLASSES. A
+					     `bare` option on ui/TextInput is the real fix and has three candidate
+					     consumers; it is tracked separately.
+
+					     Focus is taken in an effect rather than with an `autofocus` attribute,
+					     which is what this was and which never worked. Per the HTML spec an
+					     autofocus candidate is ignored once the top document's
+					     autofocus-processed flag is set, i.e. for anything inserted after load,
+					     and this input lives inside an `if` block. Svelte does not special-case
+					     the attribute the way React does, so opening the picker and typing did
+					     nothing. The Open story now asserts focus, so it cannot regress. -->
 					<input
+						bind:this={searchEl}
 						data-testid="model-picker-search"
 						bind:value={searchQuery}
 						placeholder="Search {selectedLabel} models…"
-						autofocus
 						class="flex-1 min-w-0 bg-transparent border-none outline-none text-text text-[13px] font-brand placeholder:text-text-dimmer"
 						onclick={(e) => e.stopPropagation()}
 					/>
@@ -520,25 +594,33 @@
 										{#if model.routingOptions}
 											<span class="model-routing flex items-center gap-0.5 shrink-0 mr-1">
 												{#each model.routingOptions as option (option.value)}
-													<button
-														class="px-1.5 py-0.5 text-xs border-none rounded cursor-pointer transition-colors duration-100 {option.value === discoveryState.currentModelId ? 'bg-bg text-accent font-semibold' : 'bg-transparent text-text-dimmer hover:bg-bg hover:text-text-secondary'}"
+													{@const routed = option.value === discoveryState.currentModelId}
+													<Button
+														variant="toolbar"
+														size="content"
+														class="px-1.5 py-0.5 text-xs rounded duration-100 {routed ? 'bg-bg font-semibold' : 'hover:bg-bg hover:text-text-secondary'}"
 														title="Route via {option.label}{option.isDefault ? ' (default)' : ''}"
 														data-routing-value={option.value}
+														data-active={routed ? "" : undefined}
 														onclick={(e) => handleModelClick(model, e, option.value)}
 													>
 														{option.label}
-													</button>
+													</Button>
 												{/each}
 											</span>
 										{/if}
 										{#if !isDefaultModel(model)}
-											<button
-												class="shrink-0 px-1.5 py-1 mr-1 text-xs text-text-dimmer bg-transparent border-none cursor-pointer rounded hover:bg-bg hover:text-text-secondary transition-colors duration-100"
+											<Button
+												variant="toolbar"
+												size="content"
+												iconOnly
+												icon="star"
+												iconSize={12}
+												ariaLabel="Set as default model"
+												class="shrink-0 px-1.5 py-1 mr-1 text-xs rounded duration-100 hover:bg-bg hover:text-text-secondary"
 												title="Set as default model"
 												onclick={(e) => handleSetDefault(model, e)}
-											>
-												<Icon name="star" size={12} />
-											</button>
+											/>
 										{:else}
 											<span
 												class="shrink-0 px-1.5 py-1 mr-1 text-text [&>svg]:fill-current"
@@ -556,14 +638,19 @@
 
 					<!-- Reload footer -->
 					<div class="model-reload-footer border-t border-border mt-1 pt-1">
-						<button
-							class="reload-btn w-full flex items-center gap-2 py-1.5 px-3.5 m-0 border-none bg-transparent text-text-dimmer text-sm text-left cursor-pointer transition-colors duration-100 hover:bg-bg hover:text-text-secondary"
+						<!-- `justify-start` DOES beat Button's base `justify-center`; it is emitted
+						     later in the stylesheet. `justify-between` on the model row above does
+						     not. Measured, not reasoned. -->
+						<Button
+							variant="toolbar"
+							size="content"
+							class="reload-btn w-full justify-start gap-2 py-1.5 px-3.5 text-sm text-left duration-100 hover:bg-bg hover:text-text-secondary"
 							title="Reload skills and commands from disk"
 							onclick={handleReload}
 						>
 							<Icon name="refresh-cw" size={12} />
 							<span>Reload skills &amp; commands</span>
-						</button>
+						</Button>
 					</div>
 				</div>
 			</div>

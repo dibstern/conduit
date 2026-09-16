@@ -69,7 +69,7 @@
 			"native-control-bypass": 2
 		},
 		"src/lib/frontend/components/model/InstanceModelPicker.svelte": {
-			"native-control-bypass": 8
+			"native-control-bypass": 2
 		},
 		"src/lib/frontend/components/overlays/Banners.svelte": {
 			"native-control-bypass": 1
