@@ -4,6 +4,7 @@
 <script lang="ts">
 	import { tick } from "svelte";
 	import Icon from "../ui/Icon.svelte";
+	import Badge from "../ui/Badge.svelte";
 	import {
 		buildAgentTooltip,
 		discoveryState,
@@ -299,12 +300,9 @@
 						{displayLabel(agent)}
 					</span>
 					{#if agent.model}
-						<span
+						<Badge
 							data-testid="agent-model-badge"
-							class="ml-auto shrink-0 rounded border border-border bg-bg px-1.5 py-0.5 text-[10px] leading-none text-text-dimmer"
-						>
-							{agent.model}
-						</span>
+							class="ml-auto">{agent.model}</Badge>
 					{/if}
 				</button>
 			{/each}

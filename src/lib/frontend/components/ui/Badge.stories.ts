@@ -17,16 +17,17 @@ const meta = {
 	argTypes: {
 		variant: {
 			control: "inline-radio",
-			options: ["neutral", "accent", "success"],
+			options: ["neutral", "accent", "accent-solid", "tag"],
 		},
-		size: { control: "inline-radio", options: ["xs", "sm"] },
+		size: { control: "inline-radio", options: ["xs", "sm", "count"] },
+		shape: { control: "inline-radio", options: ["rounded", "pill"] },
 	},
 } satisfies Meta<typeof Badge>;
 
 export default meta;
 type Story = StoryObj<typeof meta>;
 
-/** Every variant and size combination, rendered in flow. */
+/** Every variant, shape and size the seven real badge sites need. */
 export const VariantsAndSizes: Story = {
 	render: () => ({ Component: BadgeStoryGallery }),
 };

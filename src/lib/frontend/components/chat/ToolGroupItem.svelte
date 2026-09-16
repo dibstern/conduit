@@ -11,6 +11,7 @@
 	import { applyToolContentResponse } from "../../stores/ws-dispatch.js";
 	import { getToolContentRpc } from "../../transport/ws-rpc-client.js";
 	import Button from "../ui/Button.svelte";
+	import Badge from "../ui/Badge.svelte";
 	import Disclosure from "../ui/Disclosure.svelte";
 
 	let { message, isLast = false }: {
@@ -104,9 +105,7 @@
 		<!-- Tags -->
 		{#if summary.tags}
 			{#each summary.tags as tag}
-				<span class="px-1.5 py-0.5 rounded bg-[rgba(var(--overlay-rgb),0.05)] font-mono text-sm text-text-dimmer shrink-0">
-					{tag}
-				</span>
+				<Badge variant="tag" size="sm" class="font-mono select-text">{tag}</Badge>
 			{/each}
 		{/if}
 

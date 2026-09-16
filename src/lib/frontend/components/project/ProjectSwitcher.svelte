@@ -23,6 +23,7 @@
 		instanceStatusColor,
 	} from "../../stores/instance.svelte.js";
 	import Icon from "../ui/Icon.svelte";
+	import Badge from "../ui/Badge.svelte";
 	import Button from "../ui/Button.svelte";
 	import TextInput from "../ui/TextInput.svelte";
 	import Select from "../ui/Select.svelte";
@@ -325,11 +326,7 @@
 					<span class="sr-only">{currentProject?.directory ?? ""}</span>
 				</span>
 				{#if countLabel}
-					<span
-						class="shrink-0 text-sm font-bold px-2 py-[1px] rounded-panel bg-accent/15 text-accent leading-normal"
-					>
-						{countLabel}
-					</span>
+					<Badge variant="accent" size="sm" shape="pill">{countLabel}</Badge>
 				{/if}
 			</div>
 		</div>

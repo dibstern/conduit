@@ -4,6 +4,7 @@
 
 <script lang="ts">
 	import Icon from "../ui/Icon.svelte";
+	import Badge from "../ui/Badge.svelte";
 	import Button from "../ui/Button.svelte";
 	import Menu from "../ui/Menu.svelte";
 	import MenuItem from "../ui/MenuItem.svelte";
@@ -310,14 +311,17 @@
 			onclick={handleQrShare}
 		/>
 
-		<!-- Client count badge -->
-		<span
-			id="client-count-badge"
-			class="client-count-badge inline-flex items-center justify-center min-w-[18px] h-[18px] px-[5px] rounded-[9px] bg-accent text-bg text-xs font-semibold leading-none shrink-0"
-			class:hidden={!showClientBadge}
-		>
-			{uiState.clientCount}
-		</span>
+		<!-- Client count badge. `{#if}` rather than `class:hidden`: Tailwind
+		     emits .hidden BEFORE .inline-flex, so the utility always lost and
+		     needed a style.css rule to win it back. Not rendering wins for
+		     free. -->
+		{#if showClientBadge}
+			<Badge
+				id="client-count-badge"
+				variant="accent-solid"
+				size="count"
+				shape="pill">{uiState.clientCount}</Badge>
+		{/if}
 
 		<!-- Status dot -->
 		<span

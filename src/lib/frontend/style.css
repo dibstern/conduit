@@ -458,15 +458,6 @@
 	display: none;
 }
 
-/* Badge hidden state overrides */
-.client-count-badge.hidden {
-	display: none;
-}
-
-.terminal-badge.hidden {
-	display: none;
-}
-
 /* Parent-state: sidebar expand button only visible when sidebar collapsed */
 #layout.sidebar-collapsed #sidebar-expand-btn {
 	display: flex;

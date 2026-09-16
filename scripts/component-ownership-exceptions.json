@@ -118,7 +118,7 @@
 			"native-control-bypass": 5
 		},
 		"src/lib/frontend/style.css": {
-			"component-class-recipe": 5
+			"component-class-recipe": 3
 		}
 	}
 }

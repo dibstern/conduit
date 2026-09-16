@@ -40,9 +40,10 @@ describe("Badge", () => {
 	});
 
 	it.each([
-		["neutral", "bg-bg-alt"],
+		["neutral", "bg-bg"],
 		["accent", "bg-accent-bg"],
-		["success", "bg-success/10"],
+		["accent-solid", "bg-accent"],
+		["tag", "bg-[rgba(var(--overlay-rgb),0.05)]"],
 	] as const)("applies the %s variant", (variant, expectedClass) => {
 		const { getByTestId } = render(Badge, {
 			props: {
@@ -56,14 +57,30 @@ describe("Badge", () => {
 	});
 
 	it.each([
-		["xs", "h-6"],
-		["sm", "h-8"],
+		["xs", "text-xs"],
+		["sm", "text-sm"],
+		["count", "h-[18px]"],
 	] as const)("applies the %s size", (size, expectedClass) => {
 		const { getByTestId } = render(Badge, {
 			props: {
 				size,
 				"data-testid": "badge",
 				children: label(size),
+			},
+		});
+
+		expect(getByTestId("badge").classList.contains(expectedClass)).toBe(true);
+	});
+
+	it.each([
+		["rounded", "rounded"],
+		["pill", "rounded-full"],
+	] as const)("applies the %s shape", (shape, expectedClass) => {
+		const { getByTestId } = render(Badge, {
+			props: {
+				shape,
+				"data-testid": "badge",
+				children: label(shape),
 			},
 		});
 

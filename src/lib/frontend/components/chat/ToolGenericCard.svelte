@@ -12,6 +12,7 @@
 	import { getToolContentRpc } from "../../transport/ws-rpc-client.js";
 
 	import Icon from "../ui/Icon.svelte";
+	import Badge from "../ui/Badge.svelte";
 	import Disclosure from "../ui/Disclosure.svelte";
 	import Button from "../ui/Button.svelte";
 	import BlockGrid from '../ui/BlockGrid.svelte';
@@ -161,9 +162,7 @@
 
 	{#if toolSummary.tags}
 		{#each toolSummary.tags as tag}
-			<span class="px-1.5 py-0.5 rounded bg-[rgba(var(--overlay-rgb),0.05)] font-mono text-sm text-text-dimmer shrink-0 select-text">
-				{tag}
-			</span>
+			<Badge variant="tag" size="sm" class="font-mono select-text">{tag}</Badge>
 		{/each}
 	{/if}
 	</Disclosure>

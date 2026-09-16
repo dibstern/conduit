@@ -6,6 +6,7 @@
 <script lang="ts">
 	import { untrack } from "svelte";
 	import Button from "../ui/Button.svelte";
+	import Badge from "../ui/Badge.svelte";
 	import Icon from "../ui/Icon.svelte";
 	import Checkbox from "../ui/Checkbox.svelte";
 	import Select from "../ui/Select.svelte";
@@ -833,9 +834,9 @@
 											{:else}
 												<span class="font-medium text-text truncate">{inst.name}</span>
 											{/if}
-											<span class="text-xs text-text-muted bg-white/[0.08] px-1.5 py-0.5 rounded-full shrink-0">{driver === "claude" ? "Claude" : "OpenCode"}</span>
+											<Badge variant="tag" shape="pill">{driver === "claude" ? "Claude" : "OpenCode"}</Badge>
 											{#if driver === "opencode" && !inst.managed}
-												<span class="text-xs text-text-muted bg-white/[0.08] px-1.5 py-0.5 rounded-full">discovered</span>
+												<Badge variant="tag" shape="pill">discovered</Badge>
 											{/if}
 										</div>
 										{#if driver === "claude"}
