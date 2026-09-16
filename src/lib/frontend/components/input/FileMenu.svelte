@@ -112,7 +112,8 @@
 			id={listboxId}
 			ariaLabel="File suggestions"
 			aria-busy={loading}
-			class="file-menu-list absolute bottom-full left-0 right-0 mb-1 max-h-[300px] overflow-y-auto rounded-xl! z-[var(--z-dropdown)]!"
+			radius="xl"
+			class="file-menu-list absolute bottom-full left-0 right-0 mb-1 max-h-[300px] overflow-y-auto"
 		>
 			{#if loading && entries.length === 0}
 				<div

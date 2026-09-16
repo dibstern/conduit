@@ -165,8 +165,9 @@
 			<div class="flex gap-2 justify-end">
 				<Button
 					variant="secondary"
+					tone="muted"
 					size="content"
-					class="rounded-lg py-1.5 px-4 text-base text-text-muted!"
+					class="rounded-lg py-1.5 px-4 text-base"
 					onclick={handleCancel}
 				>
 					Cancel

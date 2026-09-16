@@ -45,3 +45,19 @@ export const Hover: Story = {
 	...Active,
 	parameters: { pseudo: { hover: true } },
 };
+
+/**
+ * The modal's own hover state. `Hover` above spreads `Active`, which renders
+ * the banner alone — so the confirm/cancel pair had no hovered baseline at
+ * all, and a change to the Cancel button's hover colour passed this file green
+ * while the identical change to ConfirmModal's Cancel correctly churned. Green
+ * meant "not covered", not "unchanged" (conduit-test-llxm).
+ */
+export const WithModalHover: Story = {
+	...WithModal,
+	// Repeated literally rather than inherited from the spread: Storybook's
+	// indexer parses CSF statically, so a spread `tags` never reaches
+	// index.json and the capture-mode tag is silently lost.
+	tags: ["viewport-capture"],
+	parameters: { pseudo: { hover: true } },
+};

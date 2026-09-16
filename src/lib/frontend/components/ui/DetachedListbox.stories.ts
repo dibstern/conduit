@@ -1,7 +1,7 @@
 import type { Meta, StoryObj } from "@storybook/svelte-vite";
 import { expect, within } from "storybook/test";
 import DetachedListboxDemo from "./__fixtures__/DetachedListboxDemo.svelte";
-import { FLOATING_SURFACE_CLASSES } from "./floating-styles.js";
+import { DETACHED_LISTBOX_SURFACE_CLASSES } from "./floating-styles.js";
 
 /**
  * `DetachedListbox` only makes sense next to the input that owns it, so — like
@@ -90,8 +90,37 @@ export const Ownership: Story = {
 		}
 
 		await expect(listbox).toHaveAttribute("data-side", "top");
-		for (const canonicalClass of FLOATING_SURFACE_CLASSES.split(/\s+/)) {
+		for (const canonicalClass of DETACHED_LISTBOX_SURFACE_CLASSES.split(
+			/\s+/,
+		)) {
 			await expect(listbox).toHaveClass(canonicalClass);
+		}
+
+		// Radius and stacking tier are measured, not matched as class names: both
+		// used to be consumer `!` overrides, and a class string proves nothing
+		// about which declaration wins without `tailwind-merge`. Probing the
+		// popover tier too is the point — that is the value this surface must
+		// NOT have (conduit-test-llxm).
+		const radiusProbe = document.createElement("div");
+		radiusProbe.className = "rounded-lg";
+		const dropdownProbe = document.createElement("div");
+		dropdownProbe.className = "z-[var(--z-dropdown)]";
+		const popoverProbe = document.createElement("div");
+		popoverProbe.className = "z-[var(--z-popover)]";
+		canvasElement.append(radiusProbe, dropdownProbe, popoverProbe);
+		try {
+			const surface = getComputedStyle(listbox);
+			await expect(surface.borderRadius).toBe(
+				getComputedStyle(radiusProbe).borderRadius,
+			);
+			await expect(surface.zIndex).toBe(getComputedStyle(dropdownProbe).zIndex);
+			await expect(surface.zIndex).not.toBe(
+				getComputedStyle(popoverProbe).zIndex,
+			);
+		} finally {
+			radiusProbe.remove();
+			dropdownProbe.remove();
+			popoverProbe.remove();
 		}
 	},
 };

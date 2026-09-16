@@ -20,11 +20,21 @@
 <script lang="ts">
 	import type { Snippet } from "svelte";
 	import type { HTMLAttributes } from "svelte/elements";
-	import { FLOATING_SURFACE_CLASSES } from "./floating-styles.js";
+	import {
+		DETACHED_LISTBOX_SURFACE_CLASSES,
+		FLOATING_SURFACE_RADIUS_CLASSES,
+		type FloatingSurfaceRadius,
+	} from "./floating-styles.js";
 
 	type DetachedListboxProps = {
 		id: string;
 		ariaLabel: string;
+		/**
+		 * REPLACES the surface's corner radius rather than adding to it, so a
+		 * consumer can pick one without an authoritative (`!`) utility. Two of
+		 * the three consumers wear `xl`; `lg` is the canonical floating radius.
+		 */
+		radius?: FloatingSurfaceRadius;
 		class?: string | undefined;
 		children: Snippet;
 	} & Omit<
@@ -46,6 +56,7 @@
 	let {
 		id,
 		ariaLabel,
+		radius = "lg",
 		class: className,
 		children,
 		...rest
@@ -53,10 +64,18 @@
 
 	// `class` is additive, never an override: a consumer utility that conflicts
 	// with a canonical one is resolved by stylesheet order, not by this order.
-	// See component-conventions.mdx — such a consumer needs an authoritative
-	// (`!`) utility plus a computed-style assertion.
+	// See component-conventions.mdx. The fix for a conflict is a prop that
+	// REPLACES the canonical utility (as `radius` does) rather than an
+	// authoritative (`!`) one that beats it — the surface emits exactly one
+	// `rounded-*` and one `z-*`, so neither group is ever contested.
 	const surfaceClass = $derived(
-		[FLOATING_SURFACE_CLASSES, className].filter(Boolean).join(" "),
+		[
+			DETACHED_LISTBOX_SURFACE_CLASSES,
+			FLOATING_SURFACE_RADIUS_CLASSES[radius],
+			className,
+		]
+			.filter(Boolean)
+			.join(" "),
 	);
 </script>
 

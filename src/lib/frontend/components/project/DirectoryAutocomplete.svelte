@@ -194,7 +194,7 @@
 		<DetachedListbox
 			id={listboxId}
 			ariaLabel="Directory suggestions"
-			class="dir-autocomplete-list absolute bottom-full left-0 right-0 mb-1 max-h-[200px] overflow-y-auto z-[var(--z-dropdown)]!"
+			class="dir-autocomplete-list absolute bottom-full left-0 right-0 mb-1 max-h-[200px] overflow-y-auto"
 		>
 			{#each entries as entry, i}
 				{@const lastSlash = entry.lastIndexOf(

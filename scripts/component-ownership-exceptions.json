@@ -40,12 +40,6 @@
 		"src/lib/frontend/components/input/AttachMenu.svelte": {
 			"native-control-bypass": 3
 		},
-		"src/lib/frontend/components/input/CommandMenu.svelte": {
-			"appearance-override": 2
-		},
-		"src/lib/frontend/components/input/FileMenu.svelte": {
-			"appearance-override": 2
-		},
 		"src/lib/frontend/components/input/InputArea.svelte": {
 			"native-control-bypass": 3
 		},
@@ -64,26 +58,17 @@
 		"src/lib/frontend/components/overlays/Banners.svelte": {
 			"native-control-bypass": 1
 		},
-		"src/lib/frontend/components/overlays/ConfirmModal.svelte": {
-			"appearance-override": 1
-		},
 		"src/lib/frontend/components/overlays/ImageLightbox.svelte": {
 			"native-control-bypass": 1
 		},
 		"src/lib/frontend/components/overlays/QrModal.svelte": {
 			"native-control-bypass": 1
 		},
-		"src/lib/frontend/components/overlays/RewindBanner.svelte": {
-			"appearance-override": 1
-		},
 		"src/lib/frontend/components/permissions/AttentionBanner.svelte": {
 			"native-control-bypass": 1
 		},
 		"src/lib/frontend/components/permissions/PermissionCard.svelte": {
 			"native-control-bypass": 3
-		},
-		"src/lib/frontend/components/project/DirectoryAutocomplete.svelte": {
-			"appearance-override": 1
 		},
 		"src/lib/frontend/components/project/ProjectContextMenu.svelte": {
 			"native-control-bypass": 2
