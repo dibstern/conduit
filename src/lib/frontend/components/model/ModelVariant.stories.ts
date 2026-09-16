@@ -29,8 +29,10 @@ export const DropdownOpen: Story = {
 	tags: ["viewport-capture"],
 	play: async ({ canvasElement }) => {
 		const canvas = within(canvasElement);
+		// The menu portals to <body>, so it is outside canvasElement.
+		const body = within(canvasElement.ownerDocument.body);
 		await userEvent.click(canvas.getByTestId("variant-badge"));
-		await expect(canvas.getByTestId("variant-dropdown")).toBeVisible();
+		await expect(body.getByTestId("variant-dropdown")).toBeVisible();
 	},
 };
 

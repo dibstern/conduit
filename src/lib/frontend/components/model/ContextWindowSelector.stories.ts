@@ -67,8 +67,10 @@ export const Open: Story = {
 	},
 	play: async ({ canvasElement }) => {
 		const canvas = within(canvasElement);
+		// The menu portals to <body>, so it is outside canvasElement.
+		const body = within(canvasElement.ownerDocument.body);
 		await userEvent.click(canvas.getByTestId("context-window-badge"));
-		await expect(canvas.getByTestId("context-window-dropdown")).toBeVisible();
+		await expect(body.getByTestId("context-window-dropdown")).toBeVisible();
 	},
 };
 

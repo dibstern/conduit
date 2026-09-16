@@ -1,10 +1,12 @@
 <!-- ─── Model Variant Picker ─────────────────────────────────────────────── -->
 <!-- Thinking level badge + dropdown for cycling model variants. -->
-<!-- Manages its own dropdown state, outside-click, and Ctrl+T shortcut. -->
+<!-- Uses the shared menu and keeps the Ctrl+T shortcut. -->
 
 <script lang="ts">
 	import Icon from "../ui/Icon.svelte";
-	import { dismiss } from "../ui/actions/use-dismiss.svelte.js";
+	import Menu from "../ui/Menu.svelte";
+	import MenuRadioGroup from "../ui/MenuRadioGroup.svelte";
+	import MenuRadioItem from "../ui/MenuRadioItem.svelte";
 	import {
 		discoveryState,
 		getActiveModelVariants,
@@ -21,7 +23,7 @@
 
 	// ─── State ──────────────────────────────────────────────────────────────────
 
-	let variantDropdownOpen = $state(false);
+	let open = $state(false);
 
 	// ─── Derived ────────────────────────────────────────────────────────────────
 
@@ -35,18 +37,6 @@
 	const variantLabel = $derived(currentVariant || "default");
 
 	// ─── Handlers ───────────────────────────────────────────────────────────────
-
-	function toggleVariantDropdown(e: MouseEvent) {
-		e.stopPropagation();
-		onOpen?.();
-		variantDropdownOpen = !variantDropdownOpen;
-	}
-
-	function selectVariant(variant: string, e: MouseEvent) {
-		e.stopPropagation();
-		switchVariant(variant);
-		variantDropdownOpen = false;
-	}
 
 	function switchVariant(variant: string) {
 		const previousVariant = discoveryState.currentVariant;
@@ -80,10 +70,6 @@
 	}
 
 	function handleKeydown(e: KeyboardEvent) {
-		if (e.key === "Escape" && variantDropdownOpen) {
-			variantDropdownOpen = false;
-			return;
-		}
 		if (e.key === "t" && e.ctrlKey && variants.length > 0) {
 			e.preventDefault();
 			cycleVariant();
@@ -103,70 +89,51 @@
 
 	/** Close the dropdown (called by parent for mutual exclusion). */
 	export function close() {
-		variantDropdownOpen = false;
+		open = false;
 	}
 </script>
 
 {#if variants.length > 0}
-	<div
-		class="relative"
-		use:dismiss={{
-			onDismiss: () => {
-				variantDropdownOpen = false;
-			},
-		}}
+	<Menu
+		bind:open
+		onopenchange={(nextOpen) => { if (nextOpen) onOpen?.(); }}
+		side="top"
+		align="end"
+		data-testid="variant-dropdown"
 	>
-		<button
-			data-testid="variant-badge"
-		class="inline-flex items-center gap-1 h-6 px-2 ml-0.5 border border-border bg-bg-alt text-text-muted text-xs font-medium cursor-pointer whitespace-nowrap rounded-full transition-colors duration-100 hover:bg-bg hover:text-text-secondary font-brand"
-			title="Thinking level ({variantLabel}) — Ctrl+T to cycle"
-			onclick={toggleVariantDropdown}
-		>
-			{variantLabel}
-			<Icon name="chevron-down" size={8} class="shrink-0 opacity-50" />
-		</button>
-
-		<!-- Variant dropdown -->
-		{#if variantDropdownOpen}
-			<div
-				data-testid="variant-dropdown"
-			class="absolute bottom-[calc(100%+4px)] right-0 w-40 bg-bg-alt border border-border rounded-lg shadow-menu z-[var(--z-popover-raised)] py-1 font-brand"
+		{#snippet trigger({ props })}
+			<button
+				{...props}
+				data-testid="variant-badge"
+				class="inline-flex items-center gap-1 h-6 px-2 ml-0.5 border border-border bg-bg-alt text-text-muted text-xs font-medium cursor-pointer whitespace-nowrap rounded-full transition-colors duration-100 hover:bg-bg hover:text-text-secondary font-brand"
+				title="Thinking level ({variantLabel}) — Ctrl+T to cycle"
 			>
-				<!-- Default option (clears variant) -->
-				<button
-					data-testid="variant-option-default"
-					class="flex items-center gap-2 w-full py-1.5 px-3 border-none bg-transparent text-text text-base text-left cursor-pointer transition-colors duration-100 hover:bg-bg {currentVariant === '' ? 'text-accent' : ''}"
-					onclick={(e) => selectVariant("", e)}
+				{variantLabel}
+				<Icon name="chevron-down" size={8} class="shrink-0 opacity-50" />
+			</button>
+		{/snippet}
+
+		<MenuRadioGroup value={currentVariant}>
+			<MenuRadioItem
+				value=""
+				data-testid="variant-option-default"
+				onselect={() => switchVariant("")}
+			>
+				default
+			</MenuRadioItem>
+			{#each variants as v (v)}
+				<MenuRadioItem
+					value={v}
+					data-testid="variant-option-{v}"
+					onselect={() => switchVariant(v)}
 				>
-					{#if currentVariant === ""}
-						<span class="text-accent font-bold text-xs">&#10003;</span>
-					{:else}
-						<span class="w-[10px]"></span>
-					{/if}
-					default
-				</button>
+					{v}
+				</MenuRadioItem>
+			{/each}
+		</MenuRadioGroup>
 
-				<!-- Variant options -->
-				{#each variants as v (v)}
-					<button
-						data-testid="variant-option-{v}"
-						class="flex items-center gap-2 w-full py-1.5 px-3 border-none bg-transparent text-text text-base text-left cursor-pointer transition-colors duration-100 hover:bg-bg {currentVariant === v ? 'text-accent' : ''}"
-						onclick={(e) => selectVariant(v, e)}
-					>
-						{#if currentVariant === v}
-							<span class="text-accent font-bold text-xs">&#10003;</span>
-						{:else}
-							<span class="w-[10px]"></span>
-						{/if}
-						{v}
-					</button>
-				{/each}
-
-				<!-- Footer hint -->
-				<div class="border-t border-border mt-1 pt-1 px-3 pb-1 text-xs text-text-dimmer">
-					Ctrl+T to cycle
-				</div>
-			</div>
-		{/if}
-	</div>
+		<div class="border-t border-border mt-1 pt-1 px-3 pb-1 text-xs text-text-dimmer">
+			Ctrl+T to cycle
+		</div>
+	</Menu>
 {/if}

@@ -4,7 +4,9 @@
 <script lang="ts">
 	import type { ContextWindowOption } from "../../types.js";
 	import Icon from "../ui/Icon.svelte";
-	import { dismiss } from "../ui/actions/use-dismiss.svelte.js";
+	import Menu from "../ui/Menu.svelte";
+	import MenuRadioGroup from "../ui/MenuRadioGroup.svelte";
+	import MenuRadioItem from "../ui/MenuRadioItem.svelte";
 	import {
 		discoveryState,
 		getActiveContextWindowOptions,
@@ -20,7 +22,7 @@
 		>["options"];
 	} = discoveryState;
 
-	let dropdownOpen = $state(false);
+	let open = $state(false);
 
 	const options = $derived(getActiveContextWindowOptions());
 	const selectedValue = $derived(
@@ -44,26 +46,16 @@
 		);
 	}
 
-	function toggleDropdown(e: MouseEvent) {
-		e.stopPropagation();
-		onOpen?.();
-		dropdownOpen = !dropdownOpen;
-	}
-
-	function selectContextWindow(
-		option: ContextWindowOption,
-		e: MouseEvent,
-	) {
-		e.stopPropagation();
+	function selectContextWindow(value: string) {
 		const previousContextWindow = discoveryState.currentContextWindow;
-		discoveryState.currentContextWindow = option.value;
+		discoveryState.currentContextWindow = value;
 		const projectSlug = getCurrentSlug();
 		const sessionId = sessionState.currentId;
 		if (projectSlug && sessionId) {
 			void switchContextWindowRpc({
 				projectSlug,
 				sessionId,
-				contextWindow: option.value,
+				contextWindow: value,
 			})
 				.then((response) => {
 					discoveryState.currentContextWindow = response.contextWindow;
@@ -73,79 +65,50 @@
 					discoveryState.currentContextWindow = previousContextWindow;
 				});
 		}
-		dropdownOpen = false;
 	}
-
-	function handleKeydown(e: KeyboardEvent) {
-		if (e.key === "Escape" && dropdownOpen) {
-			dropdownOpen = false;
-		}
-	}
-
-	$effect(() => {
-		document.addEventListener("keydown", handleKeydown);
-		return () => {
-			document.removeEventListener("keydown", handleKeydown);
-		};
-	});
 
 	export function close() {
-		dropdownOpen = false;
+		open = false;
 	}
 </script>
 
 {#if options.length > 0}
-	<div
-		class="relative"
-		use:dismiss={{
-			onDismiss: () => {
-				dropdownOpen = false;
-			},
-		}}
+	<Menu
+		bind:open
+		onopenchange={(nextOpen) => { if (nextOpen) onOpen?.(); }}
+		side="top"
+		align="end"
+		data-testid="context-window-dropdown"
 	>
-		<button
-			data-testid="context-window-badge"
-			class="inline-flex items-center gap-1 h-6 px-2 ml-0.5 border border-border bg-bg-alt text-text-muted text-xs font-medium cursor-pointer whitespace-nowrap rounded-full transition-colors duration-100 hover:bg-bg hover:text-text-secondary font-brand"
-			title="Context window ({currentLabel})"
-			onclick={toggleDropdown}
-		>
-			{currentLabel}
-			<Icon name="chevron-down" size={8} class="shrink-0 opacity-50" />
-		</button>
-
-		{#if dropdownOpen}
-			<div
-				data-testid="context-window-dropdown"
-				class="absolute bottom-[calc(100%+4px)] right-0 w-44 bg-bg-alt border border-border rounded-lg shadow-menu z-[var(--z-popover-raised)] py-1 font-brand"
+		{#snippet trigger({ props })}
+			<button
+				{...props}
+				data-testid="context-window-badge"
+				class="inline-flex items-center gap-1 h-6 px-2 ml-0.5 border border-border bg-bg-alt text-text-muted text-xs font-medium cursor-pointer whitespace-nowrap rounded-full transition-colors duration-100 hover:bg-bg hover:text-text-secondary font-brand"
+				title="Context window ({currentLabel})"
 			>
-				<button
-					data-testid="context-window-option-default"
-					class="flex items-center gap-2 w-full py-1.5 px-3 border-none bg-transparent text-text text-base text-left cursor-pointer transition-colors duration-100 hover:bg-bg {currentOverride === '' ? 'text-accent' : ''}"
-					onclick={(e) => selectContextWindow({ value: "", label: "default" }, e)}
-				>
-					{#if currentOverride === ""}
-						<span class="text-accent font-bold text-xs">&#10003;</span>
-					{:else}
-						<span class="w-[10px]"></span>
-					{/if}
-					default
-				</button>
+				{currentLabel}
+				<Icon name="chevron-down" size={8} class="shrink-0 opacity-50" />
+			</button>
+		{/snippet}
 
-				{#each options as option (option.value)}
-					<button
-						data-testid="context-window-option-{option.value}"
-						class="flex items-center gap-2 w-full py-1.5 px-3 border-none bg-transparent text-text text-base text-left cursor-pointer transition-colors duration-100 hover:bg-bg {currentOverride === option.value ? 'text-accent' : ''}"
-						onclick={(e) => selectContextWindow(option, e)}
-					>
-						{#if currentOverride === option.value}
-							<span class="text-accent font-bold text-xs">&#10003;</span>
-						{:else}
-							<span class="w-[10px]"></span>
-						{/if}
-						{option.label}
-					</button>
-				{/each}
-			</div>
-		{/if}
-	</div>
+		<MenuRadioGroup value={currentOverride}>
+			<MenuRadioItem
+				value=""
+				data-testid="context-window-option-default"
+				onselect={() => selectContextWindow("")}
+			>
+				default
+			</MenuRadioItem>
+			{#each options as option (option.value)}
+				<MenuRadioItem
+					value={option.value}
+					data-testid="context-window-option-{option.value}"
+					onselect={() => selectContextWindow(option.value)}
+				>
+					{option.label}
+				</MenuRadioItem>
+			{/each}
+		</MenuRadioGroup>
+	</Menu>
 {/if}

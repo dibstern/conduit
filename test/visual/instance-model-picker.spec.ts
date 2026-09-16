@@ -162,15 +162,16 @@ test.describe("ModelVariant", () => {
 			page.locator('[data-testid="variant-dropdown"]'),
 		).toBeVisible();
 
-		// The current variant is "high" — its option should have a checkmark (✓)
+		// The current variant is "high". Since conduit-test-de3.35.4 the check is
+		// ui/MenuRadioItem's `data-menu-radio-check` icon, not a literal ✓ glyph.
 		const highOption = page.locator('[data-testid="variant-option-high"]');
 		await expect(highOption).toBeVisible();
-		await expect(highOption).toHaveText(/✓/);
+		await expect(highOption.locator("[data-menu-radio-check]")).toBeVisible();
 
 		// Other options should NOT have a checkmark
 		const lowOption = page.locator('[data-testid="variant-option-low"]');
 		await expect(lowOption).toBeVisible();
-		await expect(lowOption).not.toHaveText(/✓/);
+		await expect(lowOption.locator("[data-menu-radio-check]")).toHaveCount(0);
 	});
 });
 
