@@ -372,9 +372,9 @@
 	     not alphabetical, and collisions within one family resolve in opposite
 	     directions (conduit-test-de3.35.6).
 
-	     Button's base `justify-center` is harmless despite `max-w-[200px]`: the
-	     label span shrinks and ellipsises before the button reaches its cap, so
-	     the free space justify would distribute is never non-zero. -->
+	     Button's default `align="center"` is harmless despite `max-w-[200px]`:
+	     the label span shrinks and ellipsises before the button reaches its cap,
+	     so the free space justify would distribute is never non-zero. -->
 	<Button
 		variant="toolbar"
 		size="content"
@@ -635,13 +635,11 @@
 
 					<!-- Reload footer -->
 					<div class="model-reload-footer border-t border-border mt-1 pt-1">
-						<!-- `justify-start` DOES beat Button's base `justify-center`; it is emitted
-						     later in the stylesheet. `justify-between` on the model row above does
-						     not. Measured, not reasoned. -->
 						<Button
 							variant="toolbar"
 							size="content"
-							class="reload-btn w-full justify-start gap-2 py-1.5 px-3.5 text-sm text-left duration-100 hover:bg-bg hover:text-text-secondary"
+							align="start"
+							class="reload-btn w-full gap-2 py-1.5 px-3.5 text-sm text-left duration-100 hover:bg-bg hover:text-text-secondary"
 							title="Reload skills and commands from disk"
 							onclick={handleReload}
 						>

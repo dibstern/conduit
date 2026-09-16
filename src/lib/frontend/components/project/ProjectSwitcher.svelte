@@ -296,13 +296,13 @@
 	     the variant whose recipe this already was, down to the 4% overlay hover
 	     fill (conduit-test-de3.35.6).
 
-	     `justify-between` is deliberately NOT passed here even though that is
-	     the layout. Tailwind emits colliding properties in its own order and
-	     `.justify-center`, which Button's BASE_CLASSES sets, is emitted AFTER
-	     `.justify-between` in the built stylesheet -- the override would lose
-	     silently. `flex-1` on the name block pushes the chevron right instead,
-	     which needs no precedence at all. (`justify-start` and `justify-end`
-	     happen to be emitted after and DO win; do not generalise from them.) -->
+	     `flex-1` on the name block is what pushes the chevron right, not a
+	     `justify-between` on the button. That began as a workaround: Button used
+	     to hard-code `justify-center` in BASE_CLASSES, and `.justify-between` is
+	     emitted BEFORE `.justify-center` in the built stylesheet, so passing it
+	     would have lost silently. `align="between"` would work now
+	     (conduit-test-ixfu), but `flex-1` already leaves no free space for it to
+	     distribute, so changing it would be churn for an identical render. -->
 	<Button
 		id="project-switcher-btn"
 		variant="toolbar"
@@ -591,15 +591,11 @@
 				{:else}
 					<!-- Add project button -->
 					<div class="py-1">
-						<!-- `justify-start` DOES override Button's base `justify-center`
-						     (it is emitted later in the built stylesheet). Unlike
-						     `justify-between` on the trigger above -- same rule, opposite
-						     outcome, which is why both are verified rather than reasoned
-						     about. -->
 						<Button
 							variant="toolbar"
 							size="content"
-							class="w-full justify-start gap-2 px-3 py-2 text-xs duration-150"
+							align="start"
+							class="w-full gap-2 px-3 py-2 text-xs duration-150"
 							onclick={handleShowAddForm}
 						>
 							<Icon name="plus" size={13} />

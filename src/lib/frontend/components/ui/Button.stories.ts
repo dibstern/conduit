@@ -150,6 +150,63 @@ export const ContentSize: Story = {
 	},
 };
 
+/**
+ * `align` exists because the thing it replaced was a coin flip (conduit-test-ixfu).
+ * Button used to hard-code `justify-center` in BASE_CLASSES, and beating it from
+ * a call site depended on which side of it Tailwind happened to emit your class:
+ * `justify-start` wins, `justify-between` loses, and nothing at the call site
+ * says which. The `play` test below is the guard that keeps it that way -- it
+ * asserts EXACTLY ONE `justify-*` is emitted, so a second one can never be
+ * re-added to BASE without this failing.
+ *
+ * `w-64` is what makes any of it visible: alignment only does anything when the
+ * button is wider than its content.
+ */
+export const AlignStart: Story = {
+	args: {
+		variant: "secondary",
+		align: "start",
+		icon: "save",
+		class: "w-64",
+		children: label("Left-aligned row"),
+	},
+	play: ({ canvasElement }) => {
+		const button = canvasElement.querySelector("button");
+		const justify = (button?.className.split(/\s+/) ?? []).filter((c) =>
+			c.startsWith("justify-"),
+		);
+		expect(
+			justify,
+			"Button must emit exactly one justify-* — two collide on stylesheet order, which is unknowable from the call site",
+		).toEqual(["justify-start"]);
+	},
+};
+
+/**
+ * The alignment that USED to be unreachable. `.justify-between` is emitted
+ * before `.justify-center` in the built stylesheet, so passing it as a class
+ * lost silently; ProjectSwitcher's trigger worked around it with `flex-1` on a
+ * child and a comment explaining why.
+ */
+export const AlignBetween: Story = {
+	args: {
+		variant: "secondary",
+		align: "between",
+		icon: "save",
+		class: "w-64",
+		children: label("Pushed apart"),
+	},
+	play: ({ canvasElement }) => {
+		const button = canvasElement.querySelector("button");
+		const justify = (button?.className.split(/\s+/) ?? []).filter((c) =>
+			c.startsWith("justify-"),
+		);
+		expect(justify, "align=between must reach the DOM intact").toEqual([
+			"justify-between",
+		]);
+	},
+};
+
 export const WithIcon: Story = {
 	args: { variant: "primary", icon: "save", children: label("Save") },
 };

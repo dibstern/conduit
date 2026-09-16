@@ -39,6 +39,8 @@
 	 */
 	type ButtonSize = "sm" | "md" | "content";
 
+	type ButtonAlign = keyof typeof ALIGN_CLASSES;
+
 	// `text-bg`, not `text-white`, on the two filled variants. In the dark theme
 	// (the default) the accent and error fills are both light pinks, so a white
 	// label on either measures 2.56:1 — under AA's 3:1 large-text floor, on the
@@ -142,8 +144,13 @@
 	// utilities setting the same property collide on stylesheet order, not class
 	// order, so a size (or a consumer) could not override a base radius without
 	// `!`. Anything in BASE is therefore genuinely invariant.
+	//
+	// `justify-*` is not here either, for the same reason, but it could not just
+	// move to the size map: unlike radius, a `content`-sized button still needs
+	// SOME alignment, and every fixed-size icon box in the app was relying on
+	// the base one. It became `align` instead — see ALIGN_CLASSES below.
 	const BASE_CLASSES =
-		"inline-flex items-center justify-center whitespace-nowrap no-underline " +
+		"inline-flex items-center whitespace-nowrap no-underline " +
 		"select-none cursor-pointer transition-colors " +
 		// Neutral, not accent. An accent ring against an accent-filled button
 		// (`primary`) is the same colour as the button, so the old
@@ -155,6 +162,34 @@
 		"aria-disabled:opacity-50 aria-disabled:cursor-not-allowed";
 
 	const SHARED_SIZE_CLASSES = "rounded-lg font-medium";
+
+	/**
+	 * Main-axis alignment, as a prop rather than a base class, because the base
+	 * class was a coin flip nobody could see (conduit-test-ixfu).
+	 *
+	 * BASE_CLASSES used to hard-code `justify-center`, so a call site wanting
+	 * something else had to append a competing utility and hope. Whether it won
+	 * depended on Tailwind's emission order, which is not alphabetical across
+	 * groups: `justify-start` is emitted AFTER `justify-center` and wins,
+	 * `justify-between` is emitted BEFORE it and silently loses. Identical-
+	 * looking call sites, opposite outcomes, and the only way to tell was to
+	 * probe byte offsets in the built stylesheet.
+	 *
+	 * Exactly one of these is ever emitted, so there is no collision to resolve
+	 * and no order to know. `center` is the default, which is what BASE already
+	 * did, so every existing call site is unchanged to the pixel.
+	 *
+	 * This matters well beyond tidiness: an audit of the 79 native controls
+	 * still outside the design system found 34 of them are `w-full text-left`
+	 * rows. No Button VARIANT could ever have reached them — a variant appends,
+	 * and BASE had already emitted the conflict — so the largest single group in
+	 * the migration backlog was unreachable until this moved.
+	 */
+	const ALIGN_CLASSES = {
+		center: "justify-center",
+		start: "justify-start",
+		between: "justify-between",
+	} as const;
 </script>
 
 <script lang="ts">
@@ -165,6 +200,12 @@
 	type ButtonOwnProps = {
 		variant?: ButtonVariant;
 		size?: ButtonSize;
+		/**
+		 * Main-axis alignment. Only matters when the button is wider than its
+		 * content -- a fixed icon box, `w-full`, `flex-1`, or a stretched child
+		 * of a column flex/grid parent. See ALIGN_CLASSES.
+		 */
+		align?: ButtonAlign;
 		type?: "button" | "submit" | "reset";
 		/** Leading lucide icon name (see Icon.svelte). */
 		icon?: string;
@@ -264,6 +305,7 @@
 	let {
 		variant = "secondary",
 		size = "md",
+		align = "center",
 		href,
 		type = "button",
 		icon,
@@ -326,7 +368,7 @@
 	);
 
 	const buttonClass = $derived(
-		[BASE_CLASSES, variantClass, sizeClasses, className]
+		[BASE_CLASSES, ALIGN_CLASSES[align], variantClass, sizeClasses, className]
 			.filter(Boolean)
 			.join(" "),
 	);
