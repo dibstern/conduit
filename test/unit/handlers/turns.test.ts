@@ -345,6 +345,18 @@ describe("turnStats", () => {
 		expect(s.tools).toBe(8);
 	});
 
+	it("names skills instead of lumping them into 'other'", () => {
+		const s = turnStats({
+			activity: [
+				tool("Skill", { tool: "Skill", name: "brainstorm" }),
+				tool("Skill", { tool: "Skill", name: "tdd" }),
+			],
+			reply: [],
+		});
+		expect(s.skills).toBe(2);
+		expect(s.others).toBe(0);
+	});
+
 	it("counts failures from either the status or the error flag", () => {
 		const s = turnStats({
 			activity: [
@@ -378,6 +390,21 @@ describe("countsPhrase", () => {
 			}),
 		);
 		expect(phrase).toBe("2 reads · 1 search · 1 edit · 1 command");
+	});
+
+	it("places skills between fetches and subagents", () => {
+		expect(
+			countsPhrase(
+				turnStats({
+					activity: [
+						tool("WebFetch", { tool: "WebFetch", url: "https://example.com" }),
+						tool("Skill", { tool: "Skill", name: "tdd" }),
+						tool("Task", { tool: "Task", description: "go", prompt: "p" }),
+					],
+					reply: [],
+				}),
+			),
+		).toBe("1 fetch · 1 skill · 1 subagent");
 	});
 
 	it("falls back to thoughts, then to 'no tools'", () => {

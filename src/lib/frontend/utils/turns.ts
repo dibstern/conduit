@@ -282,6 +282,7 @@ export interface TurnStats {
 	searches: number;
 	commands: number;
 	fetches: number;
+	skills: number;
 	subagents: number;
 	others: number;
 }
@@ -298,6 +299,7 @@ export function turnStats(segment: Segment): TurnStats {
 		searches: 0,
 		commands: 0,
 		fetches: 0,
+		skills: 0,
 		subagents: 0,
 		others: 0,
 	};
@@ -330,6 +332,9 @@ export function turnStats(segment: Segment): TurnStats {
 			case "WebSearch":
 				s.fetches++;
 				break;
+			case "Skill":
+				s.skills++;
+				break;
 			case "Task":
 				s.subagents++;
 				break;
@@ -355,6 +360,7 @@ export function countsPhrase(s: TurnStats): string {
 		plural(s.edits, "edit"),
 		plural(s.commands, "command"),
 		plural(s.fetches, "fetch", "fetches"),
+		plural(s.skills, "skill"),
 		plural(s.subagents, "subagent"),
 		plural(s.others, "other"),
 	].filter(Boolean);

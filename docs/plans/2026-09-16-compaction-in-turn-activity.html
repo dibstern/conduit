@@ -1,0 +1,663 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Compaction in the turn activity ledger — conduit</title>
+<style>
+  /* Conduit's real tokens, so these mocks read at the weight they will ship at.
+     Note the 12px root: every rem below is 0.75x its Tailwind-documented pixel value. */
+  :root {
+    --brand-a: #ff2d7b;
+    --brand-b: #00e5ff;
+    --brand-a-glow: rgba(255, 45, 123, 0.15);
+    --bg: #18181b;
+    --bg-alt: #27272a;
+    --bg-surface: #27272a;
+    --text: #e4e4e7;
+    --text-secondary: #a1a1aa;
+    --text-muted: #71717a;
+    --text-dimmer: #52525b;
+    --border: #3f3f46;
+    --border-subtle: rgba(255, 255, 255, 0.06);
+    --error: #ff4444;
+    --success: #22c55e;
+    --thinking: #eab308;
+    --radius-panel: 10px;
+    --harness-claude: #d97757;
+    font-size: 12px;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: ui-sans-serif, -apple-system, "Segoe UI", system-ui, sans-serif;
+    font-size: 1rem;
+    line-height: 1.55;
+  }
+  .page { max-width: 1040px; margin: 0 auto; padding: 3rem 1.5rem 8rem; }
+
+  /* ── Prose ──────────────────────────────────────────────────────────── */
+  h1 { font-size: 2rem; line-height: 1.2; margin: 0 0 .5rem; letter-spacing: -0.01em; }
+  h2 {
+    font-size: 1.3rem; margin: 4rem 0 .35rem; letter-spacing: -0.01em;
+    padding-top: 1.5rem; border-top: 1px solid var(--border-subtle);
+  }
+  h3 { font-size: 1.05rem; margin: 2rem 0 .35rem; color: var(--text); }
+  p { margin: .6rem 0; color: var(--text-secondary); max-width: 68ch; }
+  .lede { font-size: 1.15rem; color: var(--text-secondary); max-width: 68ch; }
+  code {
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: .92em; background: var(--bg-alt); padding: .1em .35em;
+    border-radius: 4px; color: var(--text);
+  }
+  a { color: var(--brand-b); }
+  .muted { color: var(--text-muted); }
+  .kicker {
+    font-size: .85rem; text-transform: uppercase; letter-spacing: .09em;
+    color: var(--text-dimmer); margin: 0 0 .25rem; font-weight: 600;
+  }
+  .verdict {
+    display: inline-block; font-size: .8rem; font-weight: 700; letter-spacing: .07em;
+    text-transform: uppercase; padding: .2em .6em; border-radius: 4px; vertical-align: .18em;
+    margin-left: .6rem;
+  }
+  .verdict.yes { color: var(--success); background: color-mix(in srgb, var(--success) 12%, transparent); }
+  .verdict.no  { color: var(--error);   background: color-mix(in srgb, var(--error) 12%, transparent); }
+  .verdict.meh { color: var(--text-muted); background: rgba(255,255,255,.05); }
+
+  /* ── Mock chrome ────────────────────────────────────────────────────── */
+  .stage {
+    background: var(--bg); border: 1px solid var(--border);
+    border-radius: 12px; padding: 1.25rem 0; margin: 1.25rem 0;
+    overflow: hidden;
+  }
+  .stage-label {
+    font-size: .85rem; color: var(--text-dimmer); padding: 0 1.5rem .75rem;
+    text-transform: uppercase; letter-spacing: .08em; font-weight: 600;
+  }
+  .msg-container { max-width: 760px; margin: 0 auto; padding: 0 1.25rem; }
+
+  /* user + assistant bubbles, roughly as the transcript renders them */
+  .user-msg {
+    background: var(--bg-alt); border-radius: var(--radius-panel);
+    padding: .5rem .75rem; margin: .5rem 0; color: var(--text);
+  }
+  .assistant-msg { padding: .25rem 0 .75rem; color: var(--text); }
+  .assistant-msg p { color: var(--text); margin: .35rem 0; }
+
+  /* ── Turn activity panel ────────────────────────────────────────────── */
+  .turn-activity {
+    border-radius: var(--radius-panel); border: 1px solid var(--border-subtle);
+    margin: .375rem 0;
+  }
+  .ta-live { border-color: transparent; background: var(--bg-surface);
+    box-shadow: 0 0 0 1px rgba(0,229,255,.18), 0 0 18px rgba(0,229,255,.07); }
+  .ta-summary {
+    display: flex; align-items: center; gap: .75rem;
+    padding: .375rem .75rem .375rem .5rem; font-size: .834rem;
+  }
+  .ta-toggle {
+    display: flex; align-items: center; gap: .625rem; min-width: 0; flex: 1;
+    background: none; border: 0; padding: 0; color: inherit; font: inherit;
+    text-align: left; cursor: pointer;
+  }
+  .chev { flex-shrink: 0; color: var(--text-dimmer); transition: transform .2s; display: flex; }
+  .ta-open .chev { transform: rotate(90deg); }
+  .ta-sentence { flex: 1; min-width: 0; color: var(--text-dimmer);
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .ta-sentence strong { color: var(--text-secondary); font-weight: 500; }
+  .ta-failed { flex-shrink: 0; color: var(--error); }
+
+  .ta-striprow { display: flex; align-items: center; gap: .75rem; padding: 0 .75rem .5rem; }
+  .strip {
+    display: flex; height: .375rem; gap: 1px; border-radius: 999px;
+    overflow: hidden; background: var(--bg-surface); flex: 1; min-width: 0;
+  }
+  .strip i { display: block; height: 100%; min-width: 2px; opacity: .6; }
+  .s-explore { background: var(--brand-b); }
+  .s-edit    { background: var(--brand-a); }
+  .s-shell   { background: var(--text-secondary); }
+  .s-think   { background: var(--thinking); }
+  .s-text    { background: var(--text-dimmer); }
+  .s-task    { background: var(--harness-claude); }
+  .s-other   { background: var(--text-muted); }
+  .s-error   { background: var(--error); }
+
+  /* the compaction seam: fixed width, never duration-weighted */
+  .s-seam {
+    flex: 0 0 3px !important; min-width: 3px; opacity: 1;
+    background: repeating-linear-gradient(
+      135deg, var(--brand-a) 0 2px, rgba(255,45,123,.35) 2px 4px);
+    box-shadow: 0 0 6px var(--brand-a-glow);
+  }
+
+  .econ { flex-shrink: 0; display: flex; align-items: center; gap: .5rem;
+    font-size: .834rem; color: var(--text-dimmer); font-family: ui-monospace, monospace; }
+
+  /* expanded log */
+  .ta-log { padding: .25rem .25rem .25rem; border-top: 1px solid var(--border-subtle); }
+  .ta-row {
+    display: flex; align-items: center; gap: .5rem;
+    padding: .25rem .5rem; border-radius: 4px; font-size: .834rem;
+  }
+  .ta-row:hover { background: rgba(255,255,255,.04); }
+  .ta-row .ic { flex-shrink: 0; display: flex; width: 14px; }
+  .ta-row .lbl { color: var(--text); flex-shrink: 0; }
+  .ta-row .sub { color: var(--text-muted); font-family: ui-monospace, monospace;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; min-width: 0; }
+  .ta-row .dur { color: var(--text-dimmer); font-family: ui-monospace, monospace; flex-shrink: 0; }
+  .i-explore { color: var(--brand-b); }
+  .i-edit    { color: var(--brand-a); }
+  .i-shell   { color: var(--text); }
+  .i-think   { color: var(--thinking); }
+  .i-text    { color: var(--text-secondary); }
+  .i-seam    { color: var(--brand-a); }
+
+  /* the compaction divider row — a rule across the log, not an indented step */
+  .ta-seam {
+    display: flex; align-items: center; gap: .625rem;
+    padding: .5rem .5rem; margin: .125rem 0;
+  }
+  .ta-seam .rule { flex: 1; height: 1px; background: linear-gradient(
+      to right, transparent, color-mix(in srgb, var(--brand-a) 45%, transparent)); }
+  .ta-seam .rule.r { background: linear-gradient(
+      to left, transparent, color-mix(in srgb, var(--brand-a) 45%, transparent)); }
+  .ta-seam .seam-label {
+    display: flex; align-items: center; gap: .4rem; flex-shrink: 0;
+    font-size: .834rem; color: var(--brand-a); white-space: nowrap;
+  }
+  .ta-seam .seam-nums { color: var(--text-muted); font-family: ui-monospace, monospace; }
+
+  /* summary-line compaction badge, sibling of the "N failed" badge */
+  .ta-badge {
+    flex-shrink: 0; display: inline-flex; align-items: center; gap: .3rem;
+    font-size: .834rem; color: var(--brand-a);
+    font-family: ui-monospace, monospace;
+    padding: .05rem .4rem; border-radius: 4px;
+    background: color-mix(in srgb, var(--brand-a) 10%, transparent);
+  }
+
+  /* ── System notice, as the thread renders it today ──────────────────── */
+  .sys {
+    display: flex; gap: .5rem; align-items: flex-start;
+    background: var(--bg-surface); color: var(--text-muted);
+    border-radius: var(--radius-panel); padding: .5rem .75rem; margin: .5rem 0;
+    font-size: 1rem;
+  }
+  .sys.err { color: var(--error); box-shadow: -4px 0 16px rgba(255,68,68,.15), -3px 0 0 var(--error); }
+  .sys .ic { flex-shrink: 0; margin-top: .15rem; display: flex; }
+
+  /* ── Tables / callouts ──────────────────────────────────────────────── */
+  table { border-collapse: collapse; margin: 1rem 0; font-size: .95rem; width: 100%; max-width: 68ch; }
+  th, td { text-align: left; padding: .45rem .75rem; border-bottom: 1px solid var(--border-subtle); vertical-align: top; }
+  th { color: var(--text-dimmer); font-weight: 600; font-size: .85rem;
+    text-transform: uppercase; letter-spacing: .06em; }
+  td { color: var(--text-secondary); }
+  td strong { color: var(--text); font-weight: 600; }
+
+  .note {
+    border-left: 2px solid var(--brand-b); padding: .35rem 0 .35rem .875rem;
+    margin: 1.25rem 0; max-width: 68ch;
+  }
+  .note.warn { border-left-color: var(--brand-a); }
+  .note p { margin: .25rem 0; }
+
+  ul { color: var(--text-secondary); max-width: 68ch; padding-left: 1.1rem; }
+  li { margin: .3rem 0; }
+
+  .toc { display: flex; flex-wrap: wrap; gap: .4rem 1.25rem; margin: 1.5rem 0 0;
+    font-size: .95rem; }
+  .toc a { color: var(--text-muted); text-decoration: none; }
+  .toc a:hover { color: var(--brand-b); }
+</style>
+</head>
+<body>
+<div class="page">
+
+<p class="kicker">conduit · turn activity</p>
+<h1>Where a compaction belongs</h1>
+<p class="lede">
+  A compaction is currently a system notice in the main thread. It should be a seam in the
+  turn's ledger: visible without being loud, and impossible to miss once the log is open.
+  Four options below; I recommend the first.
+</p>
+
+<div class="toc">
+  <a href="#today">1 · What happens today</a>
+  <a href="#matrix">2 · Three states, three homes</a>
+  <a href="#a">3 · Option A — seam</a>
+  <a href="#b">4 · Option B — log only</a>
+  <a href="#c">5 · Option C — badge only</a>
+  <a href="#d">6 · Option D — split the panel</a>
+  <a href="#build">7 · What we build</a>
+</div>
+
+<!-- ════════════════════════════════════════════════════════════════════ -->
+<h2 id="today">1 · What happens today</h2>
+
+<p>
+  <code>segmentTurns</code> routes every <code>system</code> message into <code>turn.notices</code>,
+  and <code>MessageList</code> renders notices in the main thread between the activity and the reply.
+  The comment on that field states the reason: <em>"Kept out of the activity log so a failure is
+  never hidden behind a collapsed panel."</em>
+</p>
+<p>
+  That rule is right for an error and wrong for a finished compaction. The result is a full-width
+  info panel wedged between the work and the reply, at the same visual weight as a crash:
+</p>
+
+<div class="stage">
+  <div class="stage-label">Today — completed compaction, mid-turn</div>
+
+  <div class="msg-container">
+    <div class="user-msg">Refactor the event translator and get the tests green.</div>
+  </div>
+
+  <div class="msg-container">
+    <div class="turn-activity">
+      <div class="ta-summary">
+        <button class="ta-toggle">
+          <span class="chev">&#9656;</span>
+          <span class="ta-sentence"><strong>Worked&nbsp;for 6m 21s</strong> · 14 reads · 4 edits · 9 commands</span>
+        </button>
+      </div>
+      <div class="ta-striprow">
+        <div class="strip">
+          <i class="s-think" style="flex-grow:8"></i><i class="s-explore" style="flex-grow:22"></i>
+          <i class="s-explore" style="flex-grow:9"></i><i class="s-shell" style="flex-grow:31"></i>
+          <i class="s-edit" style="flex-grow:17"></i><i class="s-shell" style="flex-grow:44"></i>
+          <i class="s-explore" style="flex-grow:12"></i><i class="s-edit" style="flex-grow:20"></i>
+          <i class="s-shell" style="flex-grow:26"></i><i class="s-text" style="flex-grow:14"></i>
+        </div>
+        <div class="econ">$0.42 · 118k</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="msg-container">
+    <div class="sys">
+      <span class="ic">&#9432;</span>
+      <span>Context compacted (auto) · 142k &rarr; 38k</span>
+    </div>
+  </div>
+
+  <div class="msg-container">
+    <div class="assistant-msg"><p>Tests are green. The translator now folds the snapshot
+      comparison into one pass.</p></div>
+  </div>
+</div>
+
+<div class="note warn">
+  <p><strong>The real cost isn't ugliness.</strong> The notice sits at error weight, so the eye
+  reads it as "something went wrong" every single time. Meanwhile the fact that actually matters
+  later, that the model's memory was cut at this point in the turn, is invisible once you scroll
+  past it. It is loud in the moment and gone when you need it.</p>
+</div>
+
+<!-- ════════════════════════════════════════════════════════════════════ -->
+<h2 id="matrix">2 · Three states, three homes</h2>
+
+<p>
+  The wire carries three compaction states from <code>claude-event-translator.ts</code>.
+  They are not the same kind of event and should not share a renderer.
+</p>
+
+<table>
+  <tr><th>State</th><th>Detail on the wire</th><th>Home</th><th>Why</th></tr>
+  <tr>
+    <td><strong>started</strong></td>
+    <td><code>Compacting conversation&hellip;</code></td>
+    <td>Main thread</td>
+    <td>Live status. You are waiting on it, so it belongs where you are already looking. Unchanged.</td>
+  </tr>
+  <tr>
+    <td><strong>completed</strong></td>
+    <td><code>Context compacted (auto) · 142k &rarr; 38k</code></td>
+    <td>Turn activity</td>
+    <td>History, not news. It is one more thing that happened during the turn, and its position in
+      the sequence is the whole point.</td>
+  </tr>
+  <tr>
+    <td><strong>failed</strong></td>
+    <td><code>Compaction failed: &hellip;</code></td>
+    <td>Main thread</td>
+    <td>Stays a notice. The existing rule holds: a failure is never hidden behind a collapsed panel.</td>
+  </tr>
+</table>
+
+<div class="stage">
+  <div class="stage-label">In progress and failed — unchanged</div>
+  <div class="msg-container">
+    <div class="sys">
+      <span class="ic">&#9432;</span>
+      <span>Compacting conversation&hellip;</span>
+    </div>
+  </div>
+  <div class="msg-container">
+    <div class="sys err">
+      <span class="ic">&#9888;</span>
+      <span>Compaction failed: context window exceeded while summarising</span>
+    </div>
+  </div>
+</div>
+
+<!-- ════════════════════════════════════════════════════════════════════ -->
+<h2 id="a">3 · Option A — the seam <span class="verdict yes">recommended</span></h2>
+
+<p>
+  A completed compaction becomes a first-class activity part, and shows up in all three places the
+  ledger already talks: the strip, the expanded log, and the summary line. Each one says a different
+  amount, so the cost scales with how much you are looking.
+</p>
+
+<h3>Collapsed</h3>
+<p>
+  A badge on the right of the summary row, the same slot and weight as the existing
+  <code>N&nbsp;failed</code> badge. Pink, because that is conduit's "this changed the state of
+  things" colour, and because the compaction is the one event in the ledger that explains a later
+  answer being worse.
+</p>
+
+<div class="stage">
+  <div class="stage-label">Option A — collapsed</div>
+  <div class="msg-container">
+    <div class="turn-activity">
+      <div class="ta-summary">
+        <button class="ta-toggle">
+          <span class="chev">&#9656;</span>
+          <span class="ta-sentence"><strong>Worked&nbsp;for 6m 21s</strong> · 14 reads · 4 edits · 9 commands</span>
+        </button>
+        <span class="ta-badge">&#8676; 142k&#8594;38k</span>
+      </div>
+      <div class="ta-striprow">
+        <div class="strip">
+          <i class="s-think" style="flex-grow:8"></i><i class="s-explore" style="flex-grow:22"></i>
+          <i class="s-explore" style="flex-grow:9"></i><i class="s-shell" style="flex-grow:31"></i>
+          <i class="s-edit" style="flex-grow:17"></i>
+          <i class="s-seam" title="Context compacted · 142k → 38k"></i>
+          <i class="s-shell" style="flex-grow:44"></i>
+          <i class="s-explore" style="flex-grow:12"></i><i class="s-edit" style="flex-grow:20"></i>
+          <i class="s-shell" style="flex-grow:26"></i><i class="s-text" style="flex-grow:14"></i>
+        </div>
+        <div class="econ">$0.42 · 118k</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="note">
+  <p><strong>The seam is fixed-width on purpose.</strong> Every other strip segment is weighted by
+  duration, because width means "how long". A compaction takes 10 to 30 seconds of wall clock but
+  it is not work, and weighting it would draw a fat bar that reads as progress. Three pixels of
+  hatched pink reads as what it is: the timeline was cut here.</p>
+</div>
+
+<h3>Expanded</h3>
+<p>
+  In the log it is a rule across the full width, not an indented tool row. Tool rows are things the
+  model did; this is a boundary between two stretches of them. The shape should say so before you
+  read the words.
+</p>
+
+<div class="stage">
+  <div class="stage-label">Option A — expanded</div>
+  <div class="msg-container">
+    <div class="turn-activity ta-open">
+      <div class="ta-summary">
+        <button class="ta-toggle">
+          <span class="chev">&#9656;</span>
+          <span class="ta-sentence"><strong>Worked&nbsp;for 6m 21s</strong> · 14 reads · 4 edits · 9 commands</span>
+        </button>
+        <span class="ta-badge">&#8676; 142k&#8594;38k</span>
+      </div>
+      <div class="ta-striprow">
+        <div class="strip">
+          <i class="s-think" style="flex-grow:8"></i><i class="s-explore" style="flex-grow:22"></i>
+          <i class="s-explore" style="flex-grow:9"></i><i class="s-shell" style="flex-grow:31"></i>
+          <i class="s-edit" style="flex-grow:17"></i>
+          <i class="s-seam"></i>
+          <i class="s-shell" style="flex-grow:44"></i>
+          <i class="s-explore" style="flex-grow:12"></i><i class="s-edit" style="flex-grow:20"></i>
+          <i class="s-shell" style="flex-grow:26"></i><i class="s-text" style="flex-grow:14"></i>
+        </div>
+        <div class="econ">$0.42 · 118k</div>
+      </div>
+      <div class="ta-log">
+        <div class="ta-row"><span class="ic i-think">&#10022;</span><span class="lbl">Thought</span><span class="sub">about the translator seam</span><span class="dur">3s</span></div>
+        <div class="ta-row"><span class="ic i-explore">&#9635;</span><span class="lbl">Read</span><span class="sub">src/lib/provider/claude/claude-event-translator.ts</span><span class="dur">1.2s</span></div>
+        <div class="ta-row"><span class="ic i-explore">&#9635;</span><span class="lbl">Read</span><span class="sub">src/lib/provider/claude/assistant-text-ledger.ts</span><span class="dur">0.9s</span></div>
+        <div class="ta-row"><span class="ic i-shell">&#9002;</span><span class="lbl">Ran</span><span class="sub">pnpm vitest run test/unit/provider</span><span class="dur">14s</span></div>
+        <div class="ta-row"><span class="ic i-edit">&#9998;</span><span class="lbl">Edited</span><span class="sub">src/lib/provider/claude/claude-event-translator.ts</span><span class="dur">2.1s</span></div>
+
+        <div class="ta-seam">
+          <span class="rule"></span>
+          <span class="seam-label">&#8676; Context compacted <span class="seam-nums">142k &rarr; 38k · auto</span></span>
+          <span class="rule r"></span>
+        </div>
+
+        <div class="ta-row"><span class="ic i-shell">&#9002;</span><span class="lbl">Ran</span><span class="sub">pnpm vitest run test/unit/provider</span><span class="dur">18s</span></div>
+        <div class="ta-row"><span class="ic i-explore">&#9635;</span><span class="lbl">Read</span><span class="sub">test/unit/provider/event-translator-result.test.ts</span><span class="dur">1.1s</span></div>
+        <div class="ta-row"><span class="ic i-edit">&#9998;</span><span class="lbl">Edited</span><span class="sub">test/unit/provider/event-translator-result.test.ts</span><span class="dur">1.8s</span></div>
+        <div class="ta-row"><span class="ic i-shell">&#9002;</span><span class="lbl">Ran</span><span class="sub">pnpm check &amp;&amp; pnpm lint</span><span class="dur">22s</span></div>
+        <div class="ta-row"><span class="ic i-text">&#9998;</span><span class="lbl">Wrote</span><span class="sub">the reply</span><span class="dur">6s</span></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="note">
+  <p><strong>What the rule buys you.</strong> Scrolling the log, the rows above the seam and the
+  rows below it are different epochs. When the model re-reads a file it had already read, the
+  seam three rows up is the answer. No other placement makes that legible.</p>
+</div>
+
+<h3>Two compactions in one turn</h3>
+<p>Long turns get more than one. The pattern holds without a new idea, and the badge collapses to a count.</p>
+
+<div class="stage">
+  <div class="stage-label">Option A — two seams</div>
+  <div class="msg-container">
+    <div class="turn-activity">
+      <div class="ta-summary">
+        <button class="ta-toggle">
+          <span class="chev">&#9656;</span>
+          <span class="ta-sentence"><strong>Worked&nbsp;for 41m 8s</strong> · 62 reads · 19 edits · 80 commands · 3 subagents</span>
+        </button>
+        <span class="ta-badge">&#8676; 2</span>
+      </div>
+      <div class="ta-striprow">
+        <div class="strip">
+          <i class="s-think" style="flex-grow:6"></i><i class="s-explore" style="flex-grow:18"></i>
+          <i class="s-shell" style="flex-grow:24"></i><i class="s-edit" style="flex-grow:11"></i>
+          <i class="s-seam"></i>
+          <i class="s-shell" style="flex-grow:33"></i><i class="s-task" style="flex-grow:40"></i>
+          <i class="s-explore" style="flex-grow:14"></i><i class="s-error" style="flex-grow:7"></i>
+          <i class="s-seam"></i>
+          <i class="s-shell" style="flex-grow:28"></i><i class="s-edit" style="flex-grow:16"></i>
+          <i class="s-text" style="flex-grow:12"></i>
+        </div>
+        <div class="econ">$3.18 · 61k</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ════════════════════════════════════════════════════════════════════ -->
+<h2 id="b">4 · Option B — log only <span class="verdict meh">cheaper</span></h2>
+
+<p>
+  The seam appears in the expanded log and nowhere else. No strip segment, no badge. Simplest
+  possible change and it satisfies the literal ask.
+</p>
+
+<div class="stage">
+  <div class="stage-label">Option B — collapsed (nothing to see)</div>
+  <div class="msg-container">
+    <div class="turn-activity">
+      <div class="ta-summary">
+        <button class="ta-toggle">
+          <span class="chev">&#9656;</span>
+          <span class="ta-sentence"><strong>Worked&nbsp;for 6m 21s</strong> · 14 reads · 4 edits · 9 commands</span>
+        </button>
+      </div>
+      <div class="ta-striprow">
+        <div class="strip">
+          <i class="s-think" style="flex-grow:8"></i><i class="s-explore" style="flex-grow:22"></i>
+          <i class="s-explore" style="flex-grow:9"></i><i class="s-shell" style="flex-grow:31"></i>
+          <i class="s-edit" style="flex-grow:17"></i><i class="s-shell" style="flex-grow:44"></i>
+          <i class="s-explore" style="flex-grow:12"></i><i class="s-edit" style="flex-grow:20"></i>
+          <i class="s-shell" style="flex-grow:26"></i><i class="s-text" style="flex-grow:14"></i>
+        </div>
+        <div class="econ">$0.42 · 118k</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<p class="muted">
+  Why I would not ship this alone: a compaction you have to open a panel to discover is a
+  compaction you find only when you already suspect it. The badge is the cheap part of option A
+  and it is the part that earns its keep.
+</p>
+
+<!-- ════════════════════════════════════════════════════════════════════ -->
+<h2 id="c">5 · Option C — badge only <span class="verdict meh">cheapest</span></h2>
+
+<p>
+  The inverse: a badge on the summary line, and the compaction never becomes an activity part at
+  all. Cheapest of the four, no changes to <code>segmentTurns</code>'s part model.
+</p>
+
+<div class="stage">
+  <div class="stage-label">Option C — collapsed</div>
+  <div class="msg-container">
+    <div class="turn-activity">
+      <div class="ta-summary">
+        <button class="ta-toggle">
+          <span class="chev">&#9656;</span>
+          <span class="ta-sentence"><strong>Worked&nbsp;for 6m 21s</strong> · 14 reads · 4 edits · 9 commands</span>
+        </button>
+        <span class="ta-badge">&#8676; 142k&#8594;38k</span>
+      </div>
+      <div class="ta-striprow">
+        <div class="strip">
+          <i class="s-think" style="flex-grow:8"></i><i class="s-explore" style="flex-grow:22"></i>
+          <i class="s-explore" style="flex-grow:9"></i><i class="s-shell" style="flex-grow:31"></i>
+          <i class="s-edit" style="flex-grow:17"></i><i class="s-shell" style="flex-grow:44"></i>
+          <i class="s-explore" style="flex-grow:12"></i><i class="s-edit" style="flex-grow:20"></i>
+          <i class="s-shell" style="flex-grow:26"></i><i class="s-text" style="flex-grow:14"></i>
+        </div>
+        <div class="econ">$0.42 · 118k</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<p class="muted">
+  Loses the one thing worth having: <em>where</em> in the turn it happened. A turn that compacted
+  before any work and a turn that compacted after forty commands look identical here.
+</p>
+
+<!-- ════════════════════════════════════════════════════════════════════ -->
+<h2 id="d">6 · Option D — split the panel <span class="verdict no">rejected</span></h2>
+
+<p>
+  The purist reading: a compaction is a context boundary, so treat it exactly like a hand-back.
+  Close the segment, render a divider in the thread, open a new ledger.
+</p>
+
+<div class="stage">
+  <div class="stage-label">Option D — two panels</div>
+  <div class="msg-container">
+    <div class="turn-activity">
+      <div class="ta-summary">
+        <button class="ta-toggle">
+          <span class="chev">&#9656;</span>
+          <span class="ta-sentence"><strong>Worked&nbsp;for 2m 4s</strong> · 6 reads · 1 edit · 2 commands</span>
+        </button>
+      </div>
+      <div class="ta-striprow">
+        <div class="strip">
+          <i class="s-think" style="flex-grow:8"></i><i class="s-explore" style="flex-grow:22"></i>
+          <i class="s-explore" style="flex-grow:9"></i><i class="s-shell" style="flex-grow:31"></i>
+          <i class="s-edit" style="flex-grow:17"></i>
+        </div>
+        <div class="econ">$0.14 · 142k</div>
+      </div>
+    </div>
+  </div>
+  <div class="msg-container">
+    <div class="ta-seam" style="padding:.5rem 0">
+      <span class="rule"></span>
+      <span class="seam-label">&#8676; Context compacted <span class="seam-nums">142k &rarr; 38k</span></span>
+      <span class="rule r"></span>
+    </div>
+  </div>
+  <div class="msg-container">
+    <div class="turn-activity">
+      <div class="ta-summary">
+        <button class="ta-toggle">
+          <span class="chev">&#9656;</span>
+          <span class="ta-sentence"><strong>Worked&nbsp;for 4m 17s</strong> · 8 reads · 3 edits · 7 commands</span>
+        </button>
+      </div>
+      <div class="ta-striprow">
+        <div class="strip">
+          <i class="s-shell" style="flex-grow:44"></i><i class="s-explore" style="flex-grow:12"></i>
+          <i class="s-edit" style="flex-grow:20"></i><i class="s-shell" style="flex-grow:26"></i>
+          <i class="s-text" style="flex-grow:14"></i>
+        </div>
+        <div class="econ">$0.28 · 118k</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="note warn">
+  <p><strong>Why I reject it.</strong> A hand-back splits the ledger because control genuinely
+  returned to you: there is a card to read and a decision to make between the halves. A compaction
+  hands control to nobody. Splitting here fragments one continuous stretch of work into two panels
+  you now have to expand separately, and it doubles the panel count on exactly the longest turns,
+  the ones already hardest to scan. It also puts a divider back in the main thread, which is the
+  thing we set out to remove.</p>
+</div>
+
+<!-- ════════════════════════════════════════════════════════════════════ -->
+<h2 id="build">7 · What we build</h2>
+
+<p>Option A. Four changes, none of them structural.</p>
+
+<ul>
+  <li><strong><code>types.ts</code></strong> — a <code>CompactionMessage</code> chat message
+    carrying <code>preTokens</code>, <code>postTokens</code>, <code>trigger</code> and
+    <code>createdAt</code>, rather than flattening the numbers into prose the UI then has to
+    re-parse. The wire already has them; only the frontend type throws them away.</li>
+
+  <li><strong><code>turns.ts</code></strong> — <code>ActivityPart</code> gains the new type, and
+    <code>segmentTurns</code> routes it into <code>segment.activity</code> when the compaction
+    completed and into <code>turn.notices</code> when it failed. That is the one-line change that
+    replaces "all system messages are notices" with a rule that distinguishes an event from a
+    failure. <code>TurnStats</code> gains a <code>compactions</code> count for the badge.</li>
+
+  <li><strong><code>stepWeights</code></strong> — a compaction part contributes a fixed weight so
+    the seam stays 3px. Everything else in the strip keeps its duration weighting.</li>
+
+  <li><strong><code>ActivityRow</code> / <code>TurnActivity</code></strong> — the seam renderer
+    and the badge. Both are presentational and neither touches the existing tool paths.</li>
+</ul>
+
+<div class="note">
+  <p><strong>One thing to confirm before building.</strong> The compaction's position in
+  <code>segment.activity</code> depends on its <code>createdAt</code> landing between the
+  surrounding parts. The live path appends in arrival order, which is right. The
+  <code>message_parts</code> table has a <code>compaction</code> type in its CHECK constraint but
+  zero rows in this project's store, so the persisted path is unexercised. That needs a real
+  compaction captured and reloaded before we call it done, otherwise history renders the seam in
+  the wrong place and nothing will have caught it.</p>
+</div>
+
+</div>
+</body>
+</html>
