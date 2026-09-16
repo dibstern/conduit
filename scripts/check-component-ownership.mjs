@@ -6,6 +6,18 @@ import { dirname, relative, resolve, sep } from "node:path";
 const ROOT = resolve("src/lib/frontend/components");
 const STYLE = resolve("src/lib/frontend/style.css");
 const MANIFEST = resolve("scripts/component-ownership-exceptions.json");
+// `ui` and `__fixtures__` are the design system itself and its scaffolding.
+//
+// `debug` is a different kind of exemption and the only one of its kind: a
+// dev-only overlay that deliberately opts OUT of the theme, wearing a fixed
+// terminal palette so it reads the same whichever theme is being debugged.
+// The design-token check already conceded that ground -- DebugPanel carries
+// six inline `design-token-waiver` comments -- and `ui/Surface.svelte` names
+// it by hand as "deliberately exceptional styling". Counting its five raw
+// <button>s as migration backlog was claiming work that will never be done.
+//
+// The cost is real and accepted: a themed control added under `debug/` now
+// goes unnoticed. That is the right trade for a surface no user sees.
 const SKIPPED_DIRECTORIES = new Set([
 	"node_modules",
 	".svelte-kit",
@@ -13,6 +25,7 @@ const SKIPPED_DIRECTORIES = new Set([
 	"build",
 	"ui",
 	"__fixtures__",
+	"debug",
 ]);
 
 const HARD_RULES = [

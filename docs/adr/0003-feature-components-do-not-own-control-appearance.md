@@ -44,6 +44,17 @@ kinds of violation across `src/lib/frontend/components/**` and
 `components/ui/`, `__fixtures__/` and `*.stories.ts` are exempt: those are
 the design system itself, and its test scaffolding.
 
+`components/debug/` is exempt for a different reason, and is the only
+member of its category: it is a dev-only overlay that deliberately opts
+OUT of the theme, wearing a fixed terminal palette so it reads the same
+whichever theme is being debugged. The design-token check had already
+conceded that ground (DebugPanel carries six inline `design-token-waiver`
+comments) and `ui/Surface.svelte` names it by hand as "deliberately
+exceptional styling", so counting its five raw `<button>`s as migration
+backlog was claiming work nobody intends to do. The cost is real and
+accepted: a genuinely themed control added under `debug/` now goes
+unnoticed.
+
 ### The ratchet is the load-bearing part
 
 Every violation that existed when the check landed is recorded in

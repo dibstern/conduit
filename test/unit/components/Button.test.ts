@@ -2,6 +2,11 @@ import { cleanup, fireEvent, render } from "@testing-library/svelte";
 import { createRawSnippet } from "svelte";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import Button from "../../../src/lib/frontend/components/ui/Button.svelte";
+import {
+	BUTTON_HOVER_FILLS,
+	BUTTON_TONES,
+	BUTTON_VARIANTS,
+} from "../../../src/lib/frontend/components/ui/button-recipes.js";
 
 const label = (text: string) =>
 	createRawSnippet(() => ({ render: () => `<span>${text}</span>` }));
@@ -115,5 +120,111 @@ describe("Button", () => {
 
 		expect(warn).toHaveBeenCalledWith(expect.stringContaining("iconOnly"));
 		warn.mockRestore();
+	});
+});
+
+/**
+ * The one rule the whole `tone` / `hoverFill` design exists to keep.
+ *
+ * Two utilities from the same Tailwind group in one class list do not resolve
+ * by class order; they resolve by which one Tailwind emitted LATER in the
+ * built stylesheet, which is not alphabetical across groups and is invisible
+ * from the call site. A primitive that emits two `text-*` colours has not made
+ * a choice, it has made a coin flip -- and the only honest fix is to emit
+ * exactly one. These tests assert that property across the FULL cross product
+ * rather than for the handful of pairings the app happens to use today, so a
+ * new variant or a new tone cannot quietly reintroduce the collision.
+ */
+describe("Button colour axes", () => {
+	afterEach(cleanup);
+
+	const emitted = (props: Record<string, unknown>) => {
+		const { getByRole } = render(Button, {
+			props: { children: label("x"), ...props },
+		});
+		return getByRole("button").className.split(/\s+/).filter(Boolean);
+	};
+
+	// Unprefixed only. `data-[active]:text-accent` and `hover:text-*` are
+	// variant-prefixed, so they never compete with the resting colour.
+	const restingText = (classes: string[]) =>
+		classes.filter((c) =>
+			/^text-(?!xs$|sm$|base$|lg$|left$|center$|right$)/.test(c),
+		);
+	const hoverFill = (classes: string[]) =>
+		classes.filter((c) => c.startsWith("hover:bg-"));
+
+	for (const variant of BUTTON_VARIANTS) {
+		it(`variant ${variant} emits one resting text colour and at most one hover fill`, () => {
+			const classes = emitted({ variant, size: "content" });
+			expect(restingText(classes)).toHaveLength(1);
+			expect(hoverFill(classes).length).toBeLessThanOrEqual(1);
+		});
+	}
+
+	it("replaces the variant's tone rather than adding to it", () => {
+		const classes = emitted({ variant: "secondary", tone: "muted" });
+
+		expect(restingText(classes)).toEqual(["text-text-muted"]);
+		expect(classes).toContain("hover:text-text");
+		// `secondary`'s own `text-text` is gone, not merely outranked.
+		expect(classes).not.toContain("text-text");
+		// Non-colour parts of the variant survive.
+		expect(classes).toContain("border-border");
+	});
+
+	it("replaces the variant's hover fill rather than adding to it", () => {
+		const classes = emitted({ variant: "ghost", hoverFill: "sidebar" });
+
+		expect(hoverFill(classes)).toEqual(["hover:bg-sidebar-hover"]);
+		expect(restingText(classes)).toEqual(["text-text-secondary"]);
+	});
+
+	it('hoverFill="none" removes the wash entirely', () => {
+		expect(
+			hoverFill(emitted({ variant: "secondary", hoverFill: "none" })),
+		).toEqual([]);
+	});
+
+	it('tone="inherit" emits no resting colour, leaving it to the call site', () => {
+		const classes = emitted({ variant: "ghost", tone: "inherit" });
+
+		expect(restingText(classes)).toEqual([]);
+		expect(hoverFill(classes)).toEqual(["hover:bg-text/5"]);
+	});
+
+	it("holds across every variant x tone x hoverFill combination", () => {
+		for (const variant of BUTTON_VARIANTS) {
+			for (const tone of BUTTON_TONES) {
+				for (const fill of BUTTON_HOVER_FILLS) {
+					const classes = emitted({
+						variant,
+						tone,
+						hoverFill: fill,
+						size: "content",
+					});
+					const where = `${variant}/${tone}/${fill}`;
+
+					expect(restingText(classes).length, where).toBeLessThanOrEqual(1);
+					expect(hoverFill(classes).length, where).toBeLessThanOrEqual(1);
+					cleanup();
+				}
+			}
+		}
+	});
+
+	// conduit-test-or29: `:hover` keeps matching a disabled button, so a dead
+	// control used to light up under the cursor. The drop now has to survive
+	// the recipe being assembled from three slots instead of one string.
+	it("drops the hover step when inert, whichever slot supplied it", () => {
+		const classes = emitted({
+			variant: "toolbar",
+			tone: "muted",
+			hoverFill: "alt",
+			disabled: true,
+		});
+
+		expect(classes.filter((c) => c.startsWith("hover:"))).toEqual([]);
+		expect(classes).toContain("text-text-muted");
 	});
 });

@@ -15,18 +15,14 @@
   a link", not two.
 -->
 <script module lang="ts">
-	type ButtonVariant =
-		| "primary"
-		| "secondary"
-		| "ghost"
-		| "ghost-accent"
-		| "danger"
-		| "success-soft"
-		| "danger-outline"
-		| "accent-soft"
-		| "toolbar"
-		| "pill"
-		| "pill-warning";
+	import {
+		HOVER_FILL_CLASSES,
+		TONE_CLASSES,
+		VARIANT_RECIPES,
+		type ButtonHoverFill,
+		type ButtonTone,
+		type ButtonVariant,
+	} from "./button-recipes.js";
 
 	/**
 	 * `content` is an opt-out, not a third size: it emits no padding, radius,
@@ -40,101 +36,6 @@
 	type ButtonSize = "sm" | "md" | "content";
 
 	type ButtonAlign = keyof typeof ALIGN_CLASSES;
-
-	// `text-bg`, not `text-white`, on the two filled variants. In the dark theme
-	// (the default) the accent and error fills are both light pinks, so a white
-	// label on either measures 2.56:1 — under AA's 3:1 large-text floor, on the
-	// app's most prominent call to action. `text-bg` measures 6.93:1 dark and
-	// 5.60:1 light, so it passes in BOTH themes where white passes in only one
-	// (conduit-test-tpdw).
-	//
-	// The three transparent-base hover washes sit at 5%, not 10%. Five call
-	// sites across three files had each dialled the 10% down by hand -- to 5%,
-	// 6% or 0% -- and not one had dialled it up (conduit-test-d5nv). When every
-	// consumer corrects a default in the same direction the default is wrong, so
-	// the correction moved here and those overrides are gone. `bg-text/5` rather
-	// than the `rgba(var(--overlay-rgb),0.05)` four of them used: same kind of
-	// theme-flipping neutral scrim, but it stays in the token language, so only
-	// the alpha changed. The resting TEXT colour those sites also override is a
-	// separate question and deliberately still open.
-	const VARIANT_CLASSES: Record<ButtonVariant, string> = {
-		primary: "bg-accent text-bg hover:bg-accent-hover",
-		secondary: "border border-border text-text hover:bg-text/5",
-		ghost: "text-text-secondary hover:bg-text/5 hover:text-text",
-		"ghost-accent": "text-accent hover:bg-accent/5",
-		danger: "bg-error text-bg hover:bg-error/90",
-		// The three below are the approve / deny / tool-action language already
-		// duplicated across QuestionCard, PermissionCard, ToolGenericCard and
-		// ToolGroupItem. Added on cross-file evidence only.
-		"success-soft":
-			"border border-success/20 bg-success/10 text-success hover:bg-success/15",
-		"danger-outline":
-			"border border-border bg-transparent text-error hover:bg-error/[0.08]",
-		"accent-soft": "text-accent bg-accent/10 hover:bg-accent/20",
-		/**
-		 * The badge-shaped trigger of a dropdown that reports a current value:
-		 * thinking level, context window, active instance. Three of them sit
-		 * within ~200px of each other in the header strip.
-		 *
-		 * This is the one variant that carries GEOMETRY as well as colour, and
-		 * the exception is deliberate. `toolbar` is colour-only because its two
-		 * consumers genuinely use different boxes (Header 23px with a border,
-		 * SessionList an 18px square), so forcing one on both would be a taste
-		 * call. The opposite is true here: ModelVariant and
-		 * ContextWindowSelector had hand-written BYTE-IDENTICAL 17-utility
-		 * copies of this recipe, and being a pill is what the affordance IS.
-		 * Splitting it across a variant and a size would mean every call site
-		 * has to remember to pair them, and a half-applied pill is worse than
-		 * no pill at all (conduit-test-de3.35.6).
-		 *
-		 * Pair with `size="content"`; `sm`/`md` would add a conflicting
-		 * `rounded-lg`.
-		 */
-		pill:
-			"gap-1 h-6 px-2 rounded-full text-xs font-medium font-brand " +
-			"border border-border bg-bg-alt text-text-muted " +
-			"duration-100 hover:bg-bg hover:text-text-secondary",
-		/**
-		 * `pill`'s elevated state. PermissionModeSelector wears it when the
-		 * session is on a permissive approval mode, where the warning colour is
-		 * the whole message.
-		 *
-		 * Deliberately carries no hover step, matching the recipe as found: the
-		 * neutral pill's hover says "this opens something", and a warning
-		 * surface that lightens under the cursor reads as a warning being
-		 * dismissed.
-		 *
-		 * A second variant string rather than a `warning` boolean on `pill`:
-		 * every other colour choice here is a variant, and one boolean modifier
-		 * invites the next one.
-		 */
-		"pill-warning":
-			"gap-1 h-6 px-2 rounded-full text-xs font-medium font-brand " +
-			"border border-warning/30 bg-warning-bg text-warning duration-100",
-		/**
-		 * Dim icon affordances in a dense toolbar. The 4% overlay fill is the
-		 * distinctive part and appears in no other variant.
-		 *
-		 * Header's `.header-icon-btn` was why the note above said single-file
-		 * recipes stay local. It was never single-file: SessionList had
-		 * independently hand-written four near-identical copies, agreeing on the
-		 * base colour and the hover fill and disagreeing only on the hover text
-		 * step (conduit-test-de3.35.3). Ten instances across two files.
-		 *
-		 * Deliberately colour-only. The two toolbars use different geometry --
-		 * Header a 23px box with a border, SessionList an 18px square -- so the
-		 * box comes from the call site via `size="content"`. Forcing one size on
-		 * both would be a taste call smuggled in as a refactor.
-		 *
-		 * `data-active` rather than an additive `text-accent` at the call site:
-		 * consumer `class` is additive and cannot reliably beat a variant
-		 * utility, so a toggle that lights up when on needs the variant to own
-		 * both states. Pass `data-active=""` when lit, `undefined` when not.
-		 */
-		toolbar:
-			"text-text-dimmer data-[active]:text-accent " +
-			"hover:bg-[rgba(var(--overlay-rgb),0.04)] hover:text-text",
-	};
 
 	// `focus-visible:outline-hidden` (not `outline-none`) keeps a transparent
 	// outline that forced-colors mode renders visibly, so the focus indicator
@@ -206,6 +107,17 @@
 		 * of a column flex/grid parent. See ALIGN_CLASSES.
 		 */
 		align?: ButtonAlign;
+		/**
+		 * Resting label colour and its hover step, REPLACING the variant's.
+		 * Omit to keep the variant's own. See TONE_CLASSES.
+		 */
+		tone?: ButtonTone;
+		/**
+		 * Hover background wash, REPLACING the variant's. Omit to keep the
+		 * variant's own; pass `"none"` to remove it entirely. See
+		 * HOVER_FILL_CLASSES.
+		 */
+		hoverFill?: ButtonHoverFill;
 		type?: "button" | "submit" | "reset";
 		/** Leading lucide icon name (see Icon.svelte). */
 		icon?: string;
@@ -306,6 +218,8 @@
 		variant = "secondary",
 		size = "md",
 		align = "center",
+		tone,
+		hoverFill,
 		href,
 		type = "button",
 		icon,
@@ -337,7 +251,7 @@
 	});
 
 	/**
-	 * Every variant declares a `hover:bg-*`, and `:hover` keeps matching while a
+	 * Nearly every variant declares a `hover:bg-*`, and `:hover` keeps matching while a
 	 * button is disabled, so until conduit-test-or29 a dead button still lit up
 	 * under the cursor -- in every variant, everywhere in the app. It read as
 	 * interactive at the exact moment it is not.
@@ -350,22 +264,36 @@
 	 * can drift from the one `handleClick` already guards on. This reuses that
 	 * single flag.
 	 *
-	 * The variant strings above stay literal, so Tailwind's scanner still emits
+	 * The recipe strings above stay literal, so Tailwind's scanner still emits
 	 * every hover class it always did; only whether they are APPLIED is dynamic.
+	 * That holds for the `tone` / `hoverFill` unions too -- the utilities live
+	 * as literals in TONE_CLASSES and HOVER_FILL_CLASSES, which the scanner
+	 * reads, so a wash keeps being emitted after the last hand-written call
+	 * site that spelled it out is migrated away.
 	 *
 	 * Scope is the variant. A consumer `class` that brings its own `hover:` is
 	 * left alone -- it is the call site's string, and silently editing a
 	 * prop we were handed is a worse surprise than the one being fixed.
 	 */
 	const inert = $derived(disabled || loading || ariaDisabled);
-	const variantClass = $derived(
-		inert
-			? VARIANT_CLASSES[variant]
+	const variantClass = $derived.by(() => {
+		const recipe = VARIANT_RECIPES[variant];
+		const assembled = [
+			recipe.chrome,
+			tone === undefined ? recipe.tone : TONE_CLASSES[tone],
+			hoverFill === undefined
+				? recipe.hoverFill
+				: HOVER_FILL_CLASSES[hoverFill],
+		]
+			.filter(Boolean)
+			.join(" ");
+		return inert
+			? assembled
 					.split(" ")
 					.filter((cls) => !cls.startsWith("hover:"))
 					.join(" ")
-			: VARIANT_CLASSES[variant],
-	);
+			: assembled;
+	});
 
 	const buttonClass = $derived(
 		[BASE_CLASSES, ALIGN_CLASSES[align], variantClass, sizeClasses, className]

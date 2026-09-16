@@ -2,6 +2,11 @@ import type { Meta, StoryObj } from "@storybook/svelte-vite";
 import { expect, fn, userEvent, within } from "storybook/test";
 import { createRawSnippet } from "svelte";
 import Button from "./Button.svelte";
+import {
+	BUTTON_HOVER_FILLS,
+	BUTTON_TONES,
+	BUTTON_VARIANTS,
+} from "./button-recipes.js";
 
 /** Pass a plain text label as Button's `children` snippet from a .stories.ts. */
 const label = (text: string) =>
@@ -13,21 +18,11 @@ const meta = {
 	tags: ["autodocs"],
 	args: { children: label("Button") },
 	argTypes: {
-		variant: {
-			control: "select",
-			options: [
-				"primary",
-				"secondary",
-				"ghost",
-				"ghost-accent",
-				"danger",
-				"success-soft",
-				"danger-outline",
-				"accent-soft",
-				"toolbar",
-				"pill",
-			],
-		},
+		// Enumerated from the component, not hand-copied. The list that used to
+		// live here had already gone stale -- it was missing `pill-warning`.
+		variant: { control: "select", options: BUTTON_VARIANTS },
+		tone: { control: "select", options: BUTTON_TONES },
+		hoverFill: { control: "select", options: BUTTON_HOVER_FILLS },
 		size: { control: "inline-radio", options: ["sm", "md", "content"] },
 		icon: { control: "text" },
 		iconOnly: { control: "boolean" },
@@ -340,5 +335,60 @@ export const Link: Story = {
 		// Not a <button>: no `type`, and nothing that would submit a form.
 		await expect(anchor).not.toHaveAttribute("type");
 		await expect(getComputedStyle(anchor).textDecorationLine).toBe("none");
+	},
+};
+
+/**
+ * `tone` REPLACES the variant's label colour instead of competing with it.
+ *
+ * The distinction is invisible in a rendered frame and decisive in the source:
+ * a consumer `class="text-text-muted"` on a `secondary` button emits TWO
+ * `text-*` utilities, and which one wins is decided by their byte offsets in
+ * the built stylesheet -- not by the order they appear in the class attribute.
+ * Here `secondary`'s own `text-text` is never emitted at all.
+ *
+ * The baseline is worth having anyway: it is the visible proof that the colour
+ * actually changed, which an assertion on class names alone cannot give.
+ */
+export const ToneReplacesVariant: Story = {
+	args: {
+		variant: "secondary",
+		tone: "muted",
+		children: label("Dismiss"),
+	},
+	play: ({ canvasElement }) => {
+		const classes = (
+			canvasElement.querySelector("button")?.className ?? ""
+		).split(/\s+/);
+
+		expect(
+			classes.filter((c) => /^text-(?!xs$|sm$)/.test(c)),
+			"exactly one resting colour, or the cascade is deciding for us",
+		).toEqual(["text-text-muted"]);
+		// The border is the variant's; only its colour slot was replaced.
+		expect(classes).toContain("border-border");
+	},
+};
+
+/**
+ * `hoverFill` changes nothing at rest, which is exactly what its baseline is
+ * for: this frame must be pixel-identical to a plain `ghost` button, proving
+ * the replacement touched only the `:hover` state. The class assertion carries
+ * the other half, since no screenshot can show a hover wash.
+ */
+export const HoverFillReplacesVariant: Story = {
+	args: {
+		variant: "ghost",
+		hoverFill: "sidebar",
+		children: label("Open"),
+	},
+	play: ({ canvasElement }) => {
+		const classes = (
+			canvasElement.querySelector("button")?.className ?? ""
+		).split(/\s+/);
+
+		expect(classes.filter((c) => c.startsWith("hover:bg-"))).toEqual([
+			"hover:bg-sidebar-hover",
+		]);
 	},
 };

@@ -34,17 +34,11 @@
 		"src/lib/frontend/components/chat/ToolSubagentCard.svelte": {
 			"native-control-bypass": 1
 		},
-		"src/lib/frontend/components/debug/DebugPanel.svelte": {
-			"native-control-bypass": 5
-		},
 		"src/lib/frontend/components/file/FileTreeNode.svelte": {
 			"native-control-bypass": 1
 		},
 		"src/lib/frontend/components/file/FileViewer.svelte": {
 			"native-control-bypass": 5
-		},
-		"src/lib/frontend/components/file/SidebarFilePanel.svelte": {
-			"native-control-bypass": 2
 		},
 		"src/lib/frontend/components/input/AttachMenu.svelte": {
 			"native-control-bypass": 3
