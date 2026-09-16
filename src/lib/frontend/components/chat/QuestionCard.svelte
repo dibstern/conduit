@@ -3,6 +3,7 @@
 <!-- Preserves .question-card class and [data-question-tool-id] for E2E. -->
 
 <script lang="ts">
+	import Surface from "../ui/Surface.svelte";
 	import type { QuestionRequest } from "../../types.js";
 	import Button from "../ui/Button.svelte";
 	import Checkbox from "../ui/Checkbox.svelte";
@@ -223,7 +224,7 @@
 	class={inline ? '' : 'my-2 mx-auto max-w-[760px] px-4'}
 	data-question-tool-id={request.toolId}
 >
-	<div class="question-card bg-bg-alt border border-border rounded-xl p-3">
+	<Surface variant="raised" radius="lg" class="question-card p-3">
 		<div class="question-title text-base font-medium mb-2 text-text">
 			Input Required
 		</div>
@@ -478,5 +479,5 @@
 				{/if}
 			</div>
 		{/if}
-	</div>
+	</Surface>
 </div>

@@ -13,6 +13,7 @@
 	import Textarea from "../ui/Textarea.svelte";
 	import TextInput from "../ui/TextInput.svelte";
 	import Toggle from "../ui/Toggle.svelte";
+	import Surface from "../ui/Surface.svelte";
 	import { createFrontendLogger } from "../../utils/logger.js";
 
 	const log = createFrontendLogger("push");
@@ -614,7 +615,7 @@
 
 				<!-- ═══ Appearance ═══ -->
 				{:else if activeTab === "appearance"}
-					<div class="bg-bg-surface border border-border rounded-panel px-5 py-4 font-brand">
+					<Surface variant="card" padding="lg" radius="panel" class="font-brand">
 						<label for="theme-mode" class="block text-base font-medium text-text">
 							Theme
 						</label>
@@ -634,7 +635,7 @@
 							<option value="dark">Dark</option>
 							<option value="system">System</option>
 						</Select>
-					</div>
+					</Surface>
 
 				<!-- ═══ Agents & Models ═══ -->
 				{:else if activeTab === "visibility"}
@@ -662,7 +663,7 @@
 										{allHidden ? "Show all" : "Hide all"}
 									</button>
 								</div>
-								<div class="space-y-1 bg-bg-surface border border-border rounded-panel px-4 py-2">
+								<Surface variant="card" radius="panel" class="space-y-1 px-4 py-2">
 									{#each provider.models as model (model.id)}
 										<Toggle
 											label={model.name || model.id}
@@ -671,7 +672,7 @@
 											class="py-1.5 gap-3 font-brand border-none bg-transparent"
 										/>
 									{/each}
-								</div>
+								</Surface>
 							</div>
 						{/each}
 
@@ -681,7 +682,7 @@
 								<div class="text-xs font-semibold uppercase tracking-widest text-text-muted px-1 mb-2 font-brand">
 									{discoveryState.agentProviderScope?.name} agents
 								</div>
-								<div class="space-y-1 bg-bg-surface border border-border rounded-panel px-4 py-2">
+								<Surface variant="card" radius="panel" class="space-y-1 px-4 py-2">
 									{#each discoveryState.agents as agent (agent.id)}
 										<Toggle
 											label={agent.name || agent.id}
@@ -690,7 +691,7 @@
 											class="py-1.5 gap-3 font-brand border-none bg-transparent"
 										/>
 									{/each}
-								</div>
+								</Surface>
 							</div>
 						{/if}
 					</div>

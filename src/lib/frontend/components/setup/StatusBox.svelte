@@ -1,15 +1,28 @@
-<!-- ─── Status Box ────────────────────────────────────────────────────────── -->
-<!-- Colored status indicator box used across setup steps.                   -->
+<!--
+  StatusBox — the tinted result strip the setup steps print under each action.
+
+  Five hand-written copies of this exact recipe lived in StepPwa and StepPush
+  (conduit-test-m8ww). They were not there by accident: the content is
+  sometimes markup or a conditional, and the old `message: string` prop could
+  only take text, so anything richer than a sentence had to fork the markup.
+  Content is a snippet now, which is what lets those five come home.
+
+  The `style="border-width: 1px"` hack is gone with them. The class list
+  carried a border COLOUR and no width, so the width had to be forced inline;
+  `border` says the same thing in the same place as everything else.
+-->
 
 <script lang="ts">
+	import type { Snippet } from "svelte";
 	import type { StatusVariant } from "../../utils/setup-utils.js";
+	import Surface from "../ui/Surface.svelte";
 
 	let {
 		status,
-		message,
+		children,
 	}: {
 		status: StatusVariant;
-		message: string;
+		children: Snippet;
 	} = $props();
 
 	const statusClasses = $derived.by(() => {
@@ -20,9 +33,13 @@
 	});
 </script>
 
-<div
-	class="flex items-center gap-2 px-4 py-3 rounded-panel text-base my-4 {statusClasses}"
-	style="border-width: 1px;"
+<!-- `bare` with the default `padding="none"`: the tone is per-status and
+     px-4 py-3 is off Surface's scale, so both stay here and Surface emits
+     nothing that could collide with either. -->
+<Surface
+	variant="bare"
+	radius="panel"
+	class="flex items-center gap-2 px-4 py-3 text-base my-4 border {statusClasses}"
 >
-	{message}
-</div>
+	{@render children()}
+</Surface>

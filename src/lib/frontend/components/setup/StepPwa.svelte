@@ -3,6 +3,7 @@
 
 <script lang="ts">
 	import StepHeader from "./StepHeader.svelte";
+	import StatusBox from "./StatusBox.svelte";
 
 	let {
 		totalSteps,
@@ -34,20 +35,16 @@
 	/>
 
 	{#if isIOS}
-		<div
-		class="flex items-center gap-2 px-4 py-3 rounded-panel text-base my-4 bg-bg-alt text-text border border-border"
-		>
+		<StatusBox status="warn">
 			On iOS, push notifications only work from the installed app. This
 			step is required.
-		</div>
+		</StatusBox>
 
 		{#if !isSafari}
-			<div
-				class="flex items-center gap-2 px-4 py-3 rounded-panel text-base my-4 bg-bg-alt text-text border border-border"
-			>
+			<StatusBox status="warn">
 				You must use <b>Safari</b> to install. Open this page in Safari
 				first.
-			</div>
+			</StatusBox>
 		{:else}
 			<div class="flex gap-3 mb-4">
 				<div
@@ -202,16 +199,14 @@
 	{/if}
 
 	<!-- Status -->
-	<div
-		class="flex items-center gap-2 px-4 py-3 rounded-panel text-base my-4 bg-bg-alt text-text-muted border border-border"
-	>
+	<StatusBox status="pending">
 		{#if isAndroid}
 			Optional: install for quick access and full-screen experience.
 		{:else}
 			After installing, open Conduit from your home screen to
 			continue setup.
 		{/if}
-	</div>
+	</StatusBox>
 
 	<!-- Skip button (Android or desktop) -->
 	{#if isAndroid || isDesktop}

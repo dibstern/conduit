@@ -123,7 +123,7 @@
 		</div>
 	</div>
 
-	<StatusBox status={tsStatus} message={tsMessage} />
+	<StatusBox status={tsStatus}>{tsMessage}</StatusBox>
 
 	<!-- Actions -->
 	<div class="flex gap-2 mt-5">

@@ -4,6 +4,7 @@
 
 <script lang="ts">
 	import { findSession, sessionState, switchToSession } from "../../stores/session.svelte.js";
+	import Surface from "../ui/Surface.svelte";
 
 	// Find the active session and check if it has a parent
 	const activeSession = $derived(findSession(sessionState.currentId ?? ""));
@@ -38,7 +39,7 @@
 
 {#if visible}
 	<div class="subagent-back-bar mb-1.5">
-		<div class="flex items-center gap-2 py-1.5 px-3.5 bg-bg-surface border border-border rounded-panel max-md:gap-1.5 max-md:py-1 max-md:px-3">
+		<Surface variant="card" radius="panel" class="flex items-center gap-2 py-1.5 px-3.5 max-md:gap-1.5 max-md:py-1 max-md:px-3">
 			<span class="w-1.5 h-1.5 rounded-full bg-brand-b shrink-0"></span>
 			<span class="flex-1 min-w-0 text-sm font-mono text-text-muted truncate max-md:text-xs">
 				Subagent of <strong class="text-text-secondary font-semibold">{parentTitle}</strong>
@@ -53,6 +54,6 @@
 				PARENT
 				<span class="hidden md:inline-flex items-center py-px px-1 rounded-sm bg-white/20 text-xs font-bold tracking-wider ml-0.5">ESC</span>
 			</button>
-		</div>
+		</Surface>
 	</div>
 {/if}

@@ -1,5 +1,10 @@
 import type { Meta, StoryObj } from "@storybook/svelte-vite";
+import { createRawSnippet } from "svelte";
 import StatusBox from "./StatusBox.svelte";
+
+/** Pass plain text as StatusBox's `children` snippet from a .stories.ts. */
+const content = (text: string) =>
+	createRawSnippet(() => ({ render: () => `<span>${text}</span>` }));
 
 const meta = {
 	title: "Setup/StatusBox",
@@ -8,7 +13,13 @@ const meta = {
 	parameters: { layout: "centered" },
 	args: {
 		status: "pending",
-		message: "Checking HTTPS connection...",
+		children: content("Checking HTTPS connection..."),
+	},
+	argTypes: {
+		status: {
+			control: "inline-radio",
+			options: ["ok", "warn", "pending"],
+		},
 	},
 } satisfies Meta<typeof StatusBox>;
 
@@ -20,13 +31,15 @@ export const Default: Story = {};
 export const Success: Story = {
 	args: {
 		status: "ok",
-		message: "HTTPS connection verified. Certificate is trusted.",
+		children: content("HTTPS connection verified. Certificate is trusted."),
 	},
 };
 
 export const Warning: Story = {
 	args: {
 		status: "warn",
-		message: "Certificate not trusted yet. Install it above, then retry.",
+		children: content(
+			"Certificate not trusted yet. Install it above, then retry.",
+		),
 	},
 };

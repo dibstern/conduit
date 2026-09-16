@@ -10,6 +10,7 @@
 	import Button from "../ui/Button.svelte";
 	import { getBrowserClientId } from "../../stores/client-identity.js";
 	import { getCurrentSlug } from "../../stores/router.svelte.js";
+	import Surface from "../ui/Surface.svelte";
 	import {
 		respondPermissionRpc,
 		type RespondPermissionRpcInput,
@@ -189,8 +190,10 @@
 	class="my-2 mx-auto max-w-[760px] px-4"
 	data-request-id={request.requestId}
 >
-		<div
-			class="permission-card bg-bg-alt border border-border rounded-xl p-3"
+		<Surface
+			variant="raised"
+			radius="lg"
+			class="permission-card p-3"
 	>
 		<div class="text-base font-medium mb-2 text-text">
 			{heading}
@@ -296,5 +299,5 @@
 				<span class={resolvedClass}>{resolvedText}</span>
 			</div>
 		{/if}
-	</div>
+	</Surface>
 </div>

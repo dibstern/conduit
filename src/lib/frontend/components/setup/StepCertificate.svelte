@@ -109,7 +109,7 @@
 		</div>
 	{/if}
 
-	<StatusBox status={certStatus} message={certMessage} />
+	<StatusBox status={certStatus}>{certMessage}</StatusBox>
 
 	<!-- Actions -->
 	<div class="flex gap-2 mt-5">

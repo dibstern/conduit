@@ -21,6 +21,7 @@
 	import { getCurrentSlug } from "../../stores/router.svelte.js";
 	import { closePtyRpc, createPtyRpc, resizePtyRpc } from "../../transport/ws-rpc-client.js";
 	import TerminalTab from "./TerminalTab.svelte";
+	import Surface from "../ui/Surface.svelte";
 
 	// ─── Props ────────────────────────────────────────────────────────────────
 
@@ -199,9 +200,11 @@
 </script>
 
 {#if panelOpen}
-	<div
+	<Surface
+		variant="card"
+		radius="md"
 		id="terminal-panel"
-		class="term-panel flex flex-col h-full bg-bg-surface border border-border rounded-lg overflow-hidden"
+		class="term-panel flex flex-col h-full overflow-hidden"
 	>
 		<!-- Tab bar -->
 		<!-- svelte-ignore a11y_no_static_element_interactions -->
@@ -328,5 +331,5 @@
 				{statusMessage}
 			</div>
 		{/if}
-	</div>
+	</Surface>
 {/if}

@@ -4,6 +4,7 @@
 <script lang="ts">
 	import type { StatusVariant } from "../../utils/setup-utils.js";
 	import StepHeader from "./StepHeader.svelte";
+	import StatusBox from "./StatusBox.svelte";
 	import Button from "../ui/Button.svelte";
 
 	let {
@@ -38,12 +39,10 @@
 	/>
 
 	{#if pushNeedsHttps}
-		<div
-		class="flex items-center gap-2 px-4 py-3 rounded-panel text-base my-4 bg-bg-alt text-text border border-border"
-		>
+		<StatusBox status="warn">
 			Push notifications require HTTPS. Complete the certificate step
 			first.
-		</div>
+		</StatusBox>
 		<div class="flex gap-2 mt-5">
 			<Button
 				variant="primary"
@@ -69,16 +68,7 @@
 	{/if}
 
 	{#if pushStatus}
-		{@const statusClasses =
-			pushStatus === "ok"
-				? "bg-success/10 text-success border-success/15"
-				: "bg-bg-alt text-text border-border"}
-		<div
-			class="flex items-center gap-2 px-4 py-3 rounded-panel text-base my-4 {statusClasses}"
-			style="border-width: 1px;"
-		>
-			{pushMessage}
-		</div>
+		<StatusBox status={pushStatus}>{pushMessage}</StatusBox>
 	{/if}
 
 	{#if pushStatus === "warn"}

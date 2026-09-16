@@ -5,6 +5,7 @@
 
 <script lang="ts">
 	import QRCode from "@castlenine/svelte-qrcode";
+	import Surface from "../ui/Surface.svelte";
 
 	// ─── Props ──────────────────────────────────────────────────────────────────
 
@@ -152,8 +153,10 @@
 		onkeydown={(e) => { if (e.key === "Escape") onClose?.(); }}
 	>
 		<!-- Dialog card -->
-		<div
-			class="bg-bg-surface border border-border rounded-xl p-6 shadow-2xl max-w-xs w-full mx-4 flex flex-col items-center gap-4"
+		<Surface
+			variant="card"
+			radius="lg"
+			class="p-6 shadow-2xl max-w-xs w-full mx-4 flex flex-col items-center gap-4"
 		>
 			<!-- Title -->
 			<h2 class="text-text font-semibold text-base">Share Session</h2>
@@ -191,6 +194,6 @@
 			<p class="text-xs text-text-dimmer">
 				Scan to open on another device
 			</p>
-		</div>
+		</Surface>
 	</div>
 {/if}
