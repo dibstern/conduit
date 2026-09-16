@@ -51,7 +51,6 @@
 	let entries: string[] = $state([]);
 	let activeIndex = $state(0);
 	let visible = $state(false);
-	let loading = $state(false);
 	let debounceTimer: ReturnType<typeof setTimeout> | undefined;
 	let inputEl: HTMLInputElement | undefined = $state(undefined);
 	let lastRequestPath = "";
@@ -77,30 +76,25 @@
 		if (!path || path.length < 1) {
 			entries = [];
 			visible = false;
-			loading = false;
 			return;
 		}
-		// Resolve the loader before touching `loading`/`lastRequestPath` so the
-		// no-request path stays exactly as inert as the old slug guard was.
+		// Resolve the loader before touching `lastRequestPath` so the no-request
+		// path stays exactly as inert as the old slug guard was.
 		const pending = (loadDirectories ?? defaultLoader)(path);
 		if (!pending) {
 			entries = [];
 			visible = false;
-			loading = false;
 			return;
 		}
-		loading = true;
 		lastRequestPath = path;
 		try {
 			const response = await pending;
 			if (response.path !== lastRequestPath) return;
 			entries = [...response.entries];
-			loading = false;
 			visible = entries.length > 0;
 		} catch {
 			if (path !== lastRequestPath) return;
 			entries = [];
-			loading = false;
 			visible = false;
 		}
 	}
@@ -181,13 +175,15 @@
 		}
 	}
 
+	// Resolved by option id rather than a descendant class query: the old lookup
+	// started at `document` and matched the first `.dir-autocomplete-list` in the
+	// page, which is the wrong list once two instances are mounted
+	// (conduit-test-9kov).
 	function scrollActiveIntoView() {
 		requestAnimationFrame(() => {
-			const menu = document.querySelector(".dir-autocomplete-list");
-			const activeItem = menu?.querySelector(".dir-item-active");
-			if (activeItem) {
-				activeItem.scrollIntoView({ block: "nearest" });
-			}
+			document
+				.getElementById(optionId(activeIndex))
+				?.scrollIntoView({ block: "nearest" });
 		});
 	}
 </script>
@@ -212,12 +208,12 @@
 				<div
 					class="dir-item flex items-center gap-2 py-1.5 px-3 cursor-pointer transition-colors duration-100 text-[12px] font-mono
 						{i === activeIndex
-						? 'dir-item-active bg-accent-bg'
+						? 'bg-accent-bg'
 						: 'hover:bg-bg-alt'}"
 					id={optionId(i)}
 					role="option"
-					tabindex="-1"
 					aria-selected={i === activeIndex}
+					tabindex="-1"
 					onmousedown={(e) => {
 						e.preventDefault();
 						// Click behaves like Tab, not like Enter: fill the directory in

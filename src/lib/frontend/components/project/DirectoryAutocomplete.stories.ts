@@ -22,23 +22,45 @@ async function assertSwapStyles(
 	dropdownProbe.className = "z-[var(--z-dropdown)]";
 	const popoverProbe = document.createElement("div");
 	popoverProbe.className = "z-[var(--z-popover)]";
-	canvasElement.append(radiusProbe, dropdownProbe, popoverProbe);
+	// The swap dropped the consumer's own `bg-bg-surface` in favour of
+	// FLOATING_SURFACE_CLASSES' `bg-bg-alt`. Those two tokens resolve identically
+	// on every path today, so it was a no-op — but nothing asserted it. Probing
+	// BOTH is the point: the second assertion goes red the day someone gives the
+	// tokens different values, which is when this stops being a no-op
+	// (conduit-test-9kov).
+	const surfaceBgProbe = document.createElement("div");
+	surfaceBgProbe.className = "bg-bg-alt";
+	const legacyBgProbe = document.createElement("div");
+	legacyBgProbe.className = "bg-bg-surface";
+	canvasElement.append(
+		radiusProbe,
+		dropdownProbe,
+		popoverProbe,
+		surfaceBgProbe,
+		legacyBgProbe,
+	);
 
 	try {
 		const surfaceStyle = getComputedStyle(surface);
 		const radius = getComputedStyle(radiusProbe).borderRadius;
 		const dropdownZIndex = getComputedStyle(dropdownProbe).zIndex;
 		const popoverZIndex = getComputedStyle(popoverProbe).zIndex;
+		const surfaceBg = getComputedStyle(surfaceBgProbe).backgroundColor;
+		const legacyBg = getComputedStyle(legacyBgProbe).backgroundColor;
 		console.log(
-			`[swap-style] DirectoryAutocomplete borderRadius=${surfaceStyle.borderRadius} reference=${radius}; zIndex=${surfaceStyle.zIndex} dropdownReference=${dropdownZIndex} popoverReference=${popoverZIndex}`,
+			`[swap-style] DirectoryAutocomplete borderRadius=${surfaceStyle.borderRadius} reference=${radius}; zIndex=${surfaceStyle.zIndex} dropdownReference=${dropdownZIndex} popoverReference=${popoverZIndex}; backgroundColor=${surfaceStyle.backgroundColor} bgAltReference=${surfaceBg} bgSurfaceReference=${legacyBg}`,
 		);
 		await expect(surfaceStyle.borderRadius).toBe(radius);
 		await expect(surfaceStyle.zIndex).toBe(dropdownZIndex);
 		await expect(surfaceStyle.zIndex).not.toBe(popoverZIndex);
+		await expect(surfaceStyle.backgroundColor).toBe(surfaceBg);
+		await expect(surfaceBg).toBe(legacyBg);
 	} finally {
 		radiusProbe.remove();
 		dropdownProbe.remove();
 		popoverProbe.remove();
+		surfaceBgProbe.remove();
+		legacyBgProbe.remove();
 	}
 }
 

@@ -92,13 +92,16 @@
 		return path.endsWith("/");
 	}
 
+	// Resolved by option id, not by a descendant class query. The old lookup
+	// started at `document` and matched the FIRST `#file-menu .file-menu-list` in
+	// the page, so a second mounted instance scrolled the wrong list. The option
+	// ids are already derived from the caller-supplied `listboxId`, which is where
+	// uniqueness belongs (conduit-test-9kov).
 	function scrollActiveIntoView(): void {
 		requestAnimationFrame(() => {
-			const menu = document.querySelector("#file-menu .file-menu-list");
-			const activeItem = menu?.querySelector(".file-item-active");
-			if (activeItem) {
-				activeItem.scrollIntoView({ block: "nearest" });
-			}
+			document
+				.getElementById(`${listboxId}-option-${activeIndex}`)
+				?.scrollIntoView({ block: "nearest" });
 		});
 	}
 </script>
@@ -129,12 +132,12 @@
 				{#each entries as entry, i}
 						{@const lastSlash = entry.lastIndexOf("/", entry.endsWith("/") ? entry.length - 2 : entry.length - 1)}
 						<div
-							class="file-item flex items-center gap-2 py-2 px-3.5 cursor-pointer transition-colors duration-100 max-sm:py-1.5 max-sm:px-2.5 max-sm:gap-1.5 {i === activeIndex ? 'file-item-active bg-accent-bg hover:bg-accent-bg' : 'hover:bg-bg-alt'}"
+							class="file-item flex items-center gap-2 py-2 px-3.5 cursor-pointer transition-colors duration-100 max-sm:py-1.5 max-sm:px-2.5 max-sm:gap-1.5 {i === activeIndex ? 'bg-accent-bg hover:bg-accent-bg' : 'hover:bg-bg-alt'}"
 							id="{listboxId}-option-{i}"
 							data-file-index={i}
 							role="option"
-							tabindex="-1"
 							aria-selected={i === activeIndex}
+							tabindex="-1"
 							onmousedown={(e) => {
 								e.preventDefault();
 								onSelect(entry);

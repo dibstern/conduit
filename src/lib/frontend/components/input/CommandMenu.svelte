@@ -98,14 +98,15 @@
 		onSelect(`/${cmd.name} `);
 	}
 
+	// Resolved by option id rather than a descendant class query: the old lookup
+	// started at `document` and matched the first `#command-menu .cmd-menu` in the
+	// page, which is the wrong list once two instances are mounted
+	// (conduit-test-9kov). rAF still waits for the DOM update.
 	function scrollActiveIntoView(): void {
-		// Use tick-like scheduling to wait for DOM update
 		requestAnimationFrame(() => {
-			const menu = document.querySelector("#command-menu .cmd-menu");
-			const activeItem = menu?.querySelector(".cmd-item-active");
-			if (activeItem) {
-				activeItem.scrollIntoView({ block: "nearest" });
-			}
+			document
+				.getElementById(`${listboxId}-option-${activeIndex}`)
+				?.scrollIntoView({ block: "nearest" });
 		});
 	}
 </script>
@@ -119,12 +120,12 @@
 		>
 			{#each filtered as cmd, i}
 				<div
-					class="cmd-item flex items-baseline gap-2 py-2 px-3.5 cursor-pointer transition-colors duration-100 max-sm:py-1.5 max-sm:px-2.5 max-sm:gap-1.5 {i === activeIndex ? 'cmd-item-active bg-accent-bg hover:bg-accent-bg' : 'hover:bg-bg-alt'}"
+					class="cmd-item flex items-baseline gap-2 py-2 px-3.5 cursor-pointer transition-colors duration-100 max-sm:py-1.5 max-sm:px-2.5 max-sm:gap-1.5 {i === activeIndex ? 'bg-accent-bg hover:bg-accent-bg' : 'hover:bg-bg-alt'}"
 					id="{listboxId}-option-{i}"
 					data-cmd-index={i}
 					role="option"
-					tabindex="-1"
 					aria-selected={i === activeIndex}
+					tabindex="-1"
 					onmousedown={(e) => {
 						e.preventDefault();
 						selectCommand(cmd);
