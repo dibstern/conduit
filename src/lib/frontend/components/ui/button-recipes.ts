@@ -103,6 +103,50 @@ export type ButtonTone = keyof typeof TONE_CLASSES;
 export type ButtonHoverFill = keyof typeof HOVER_FILL_CLASSES;
 
 /**
+ * How a button looks when it is off.
+ *
+ * This lived in BASE_CLASSES, which is reserved for things that are genuinely
+ * invariant, and it was not one: nine hand-written controls dissented, and a
+ * consumer class cannot beat a BASE utility in the same group, so each of them
+ * was blocked from migrating onto Button by exactly that one string
+ * (conduit-test-8lxm).
+ *
+ * Both `disabled:` and `aria-disabled:` are emitted for every member because
+ * Button sets `aria-disabled` for the `loading` and "explain why" cases, where
+ * a real `disabled` attribute would suppress the hover that carries the
+ * explanation.
+ *
+ * The cursor tracks the member rather than being a second axis: nobody in the
+ * codebase mixes them independently, and a second prop here would double the
+ * surface for no evidenced gain.
+ *
+ * `undimmed` is not called `none` on purpose. Elsewhere in this file `none`
+ * means "emits nothing, the group is yours"; this member emits `opacity-100`,
+ * which is an active refusal to dim (ToolSubagentCard's as-found behaviour),
+ * not an absence.
+ */
+export const DISABLED_CLASSES = {
+	/** Today's universal default. */
+	dim:
+		"disabled:opacity-50 disabled:cursor-not-allowed " +
+		"aria-disabled:opacity-50 aria-disabled:cursor-not-allowed",
+	/** chat/FileViewer, terminal/TerminalPanel. */
+	faint:
+		"disabled:opacity-30 disabled:cursor-default " +
+		"aria-disabled:opacity-30 aria-disabled:cursor-default",
+	/** input/InputArea's send button. */
+	ghosted:
+		"disabled:opacity-25 disabled:cursor-default " +
+		"aria-disabled:opacity-25 aria-disabled:cursor-default",
+	/** chat/ToolSubagentCard: stays fully lit, only the cursor changes. */
+	undimmed:
+		"disabled:opacity-100 disabled:cursor-default " +
+		"aria-disabled:opacity-100 aria-disabled:cursor-default",
+} as const;
+
+export type ButtonDisabledStyle = keyof typeof DISABLED_CLASSES;
+
+/**
  * A variant is three separable slots, not one string, so that `tone` and
  * `hoverFill` have something to replace. The split is exact: concatenating
  * a recipe's three fields reproduces the single string this map used to
@@ -267,3 +311,6 @@ export const BUTTON_TONES = Object.keys(TONE_CLASSES) as ButtonTone[];
 export const BUTTON_HOVER_FILLS = Object.keys(
 	HOVER_FILL_CLASSES,
 ) as ButtonHoverFill[];
+export const BUTTON_DISABLED_STYLES = Object.keys(
+	DISABLED_CLASSES,
+) as ButtonDisabledStyle[];

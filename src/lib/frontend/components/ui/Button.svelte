@@ -17,8 +17,10 @@
 <script module lang="ts">
 	import {
 		HOVER_FILL_CLASSES,
+		DISABLED_CLASSES,
 		TONE_CLASSES,
 		VARIANT_RECIPES,
+		type ButtonDisabledStyle,
 		type ButtonHoverFill,
 		type ButtonTone,
 		type ButtonVariant,
@@ -50,6 +52,11 @@
 	// move to the size map: unlike radius, a `content`-sized button still needs
 	// SOME alignment, and every fixed-size icon box in the app was relying on
 	// the base one. It became `align` instead — see ALIGN_CLASSES below.
+	//
+	// The disabled appearance left for the same reason and by the same route:
+	// nine controls dissented on how far a dead button should dim, and none of
+	// them could win against a BASE utility. It is now `disabledStyle` — see
+	// DISABLED_CLASSES in button-recipes.ts (conduit-test-8lxm).
 	const BASE_CLASSES =
 		"inline-flex items-center whitespace-nowrap no-underline " +
 		"select-none cursor-pointer transition-colors " +
@@ -58,9 +65,7 @@
 		// `ring-accent/70` was invisible on the one variant that most needed it.
 		// `ring-text` contrasts with every surface in both themes. Keyboard only:
 		// `focus-visible` never fires on a mouse click. See conduit-test-de3.19.
-		"focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-text " +
-		"disabled:opacity-50 disabled:cursor-not-allowed " +
-		"aria-disabled:opacity-50 aria-disabled:cursor-not-allowed";
+		"focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-text";
 
 	const SHARED_SIZE_CLASSES = "rounded-lg font-medium";
 
@@ -118,6 +123,12 @@
 		 * HOVER_FILL_CLASSES.
 		 */
 		hoverFill?: ButtonHoverFill;
+		/**
+		 * How the button looks when it is off. REPLACES the default pair rather
+		 * than adding to it, so there is never more than one `opacity` and one
+		 * `cursor` in the disabled state. See DISABLED_CLASSES.
+		 */
+		disabledStyle?: ButtonDisabledStyle;
 		type?: "button" | "submit" | "reset";
 		/** Leading lucide icon name (see Icon.svelte). */
 		icon?: string;
@@ -220,6 +231,7 @@
 		align = "center",
 		tone,
 		hoverFill,
+		disabledStyle = "dim",
 		href,
 		type = "button",
 		icon,
@@ -296,7 +308,14 @@
 	});
 
 	const buttonClass = $derived(
-		[BASE_CLASSES, ALIGN_CLASSES[align], variantClass, sizeClasses, className]
+		[
+			BASE_CLASSES,
+			DISABLED_CLASSES[disabledStyle],
+			ALIGN_CLASSES[align],
+			variantClass,
+			sizeClasses,
+			className,
+		]
 			.filter(Boolean)
 			.join(" "),
 	);

@@ -3,6 +3,7 @@ import { expect, fn, userEvent, within } from "storybook/test";
 import { createRawSnippet } from "svelte";
 import Button from "./Button.svelte";
 import {
+	BUTTON_DISABLED_STYLES,
 	BUTTON_HOVER_FILLS,
 	BUTTON_TONES,
 	BUTTON_VARIANTS,
@@ -23,6 +24,7 @@ const meta = {
 		variant: { control: "select", options: BUTTON_VARIANTS },
 		tone: { control: "select", options: BUTTON_TONES },
 		hoverFill: { control: "select", options: BUTTON_HOVER_FILLS },
+		disabledStyle: { control: "select", options: BUTTON_DISABLED_STYLES },
 		size: { control: "inline-radio", options: ["sm", "md", "content"] },
 		icon: { control: "text" },
 		iconOnly: { control: "boolean" },

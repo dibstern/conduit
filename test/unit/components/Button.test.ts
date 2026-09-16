@@ -3,6 +3,7 @@ import { createRawSnippet } from "svelte";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import Button from "../../../src/lib/frontend/components/ui/Button.svelte";
 import {
+	BUTTON_DISABLED_STYLES,
 	BUTTON_HOVER_FILLS,
 	BUTTON_TONES,
 	BUTTON_VARIANTS,
@@ -153,6 +154,13 @@ describe("Button colour axes", () => {
 		);
 	const hoverFill = (classes: string[]) =>
 		classes.filter((c) => c.startsWith("hover:bg-"));
+	// Both prefixes, because Button sets `aria-disabled` for `loading` and for
+	// the explain-why case, where a real `disabled` would kill the hover that
+	// carries the explanation.
+	const offState = (classes: string[], prop: "opacity" | "cursor") =>
+		classes.filter((c) =>
+			new RegExp(`^(disabled|aria-disabled):${prop}-`).test(c),
+		);
 
 	for (const variant of BUTTON_VARIANTS) {
 		it(`variant ${variant} emits one resting text colour and at most one hover fill`, () => {
@@ -193,21 +201,68 @@ describe("Button colour axes", () => {
 		expect(hoverFill(classes)).toEqual(["hover:bg-text/5"]);
 	});
 
-	it("holds across every variant x tone x hoverFill combination", () => {
+	it("defaults the off state to the pair that used to live in BASE_CLASSES", () => {
+		const classes = emitted({ variant: "ghost" });
+
+		expect(offState(classes, "opacity")).toEqual([
+			"disabled:opacity-50",
+			"aria-disabled:opacity-50",
+		]);
+		expect(offState(classes, "cursor")).toEqual([
+			"disabled:cursor-not-allowed",
+			"aria-disabled:cursor-not-allowed",
+		]);
+	});
+
+	it("replaces the off state rather than adding to it", () => {
+		const classes = emitted({ variant: "ghost", disabledStyle: "faint" });
+
+		expect(offState(classes, "opacity")).toEqual([
+			"disabled:opacity-30",
+			"aria-disabled:opacity-30",
+		]);
+		// The old BASE pair is gone, not merely outranked.
+		expect(classes).not.toContain("disabled:opacity-50");
+		expect(classes).not.toContain("disabled:cursor-not-allowed");
+	});
+
+	it('disabledStyle="undimmed" refuses to dim but still changes the cursor', () => {
+		const classes = emitted({
+			variant: "ghost",
+			disabledStyle: "undimmed",
+		});
+
+		expect(offState(classes, "opacity")).toEqual([
+			"disabled:opacity-100",
+			"aria-disabled:opacity-100",
+		]);
+		expect(offState(classes, "cursor")).toEqual([
+			"disabled:cursor-default",
+			"aria-disabled:cursor-default",
+		]);
+	});
+
+	it("holds across every variant x tone x hoverFill x disabledStyle combination", () => {
 		for (const variant of BUTTON_VARIANTS) {
 			for (const tone of BUTTON_TONES) {
 				for (const fill of BUTTON_HOVER_FILLS) {
-					const classes = emitted({
-						variant,
-						tone,
-						hoverFill: fill,
-						size: "content",
-					});
-					const where = `${variant}/${tone}/${fill}`;
+					for (const off of BUTTON_DISABLED_STYLES) {
+						const classes = emitted({
+							variant,
+							tone,
+							hoverFill: fill,
+							disabledStyle: off,
+							size: "content",
+						});
+						const where = `${variant}/${tone}/${fill}/${off}`;
 
-					expect(restingText(classes).length, where).toBeLessThanOrEqual(1);
-					expect(hoverFill(classes).length, where).toBeLessThanOrEqual(1);
-					cleanup();
+						expect(restingText(classes).length, where).toBeLessThanOrEqual(1);
+						expect(hoverFill(classes).length, where).toBeLessThanOrEqual(1);
+						// One per prefix, never two competing opacities.
+						expect(offState(classes, "opacity"), where).toHaveLength(2);
+						expect(offState(classes, "cursor"), where).toHaveLength(2);
+						cleanup();
+					}
 				}
 			}
 		}
