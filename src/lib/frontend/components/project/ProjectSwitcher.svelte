@@ -31,6 +31,7 @@
 	import DirectoryAutocomplete from "./DirectoryAutocomplete.svelte";
 	import ProjectContextMenu from "./ProjectContextMenu.svelte";
 	import { confirm } from "../../stores/ui.svelte.js";
+	import Surface from "../ui/Surface.svelte";
 
 	// ─── Props ──────────────────────────────────────────────────────────────────
 
@@ -340,10 +341,13 @@
 
 	<!-- Dropdown menu -->
 	{#if open}
-		<div
+		<Surface
+			variant="card"
+			radius="panel"
+			elevation="dropdown"
 			id="project-switcher-dropdown"
-			class="absolute top-full left-0 right-0 z-[var(--z-dropdown)] mt-0.5 min-w-[240px] max-w-[320px] bg-bg-surface border border-border rounded-panel shadow-dropdown p-1 overflow-hidden font-brand"
 			data-testid="project-switcher-dropdown"
+			class="absolute top-full left-0 right-0 z-[var(--z-dropdown)] mt-0.5 min-w-[240px] max-w-[320px] p-1 overflow-hidden font-brand"
 		>
 			<!-- Header -->
 			<div
@@ -604,7 +608,7 @@
 					</div>
 				{/if}
 			</div>
-		</div>
+		</Surface>
 	{/if}
 
 	{#if ctxMenuProject && ctxMenuAnchor}

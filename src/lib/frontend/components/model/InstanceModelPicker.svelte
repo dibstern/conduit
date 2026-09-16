@@ -39,6 +39,7 @@
 		switchModelRpc,
 	} from "../../transport/ws-rpc-client.js";
 	import type { ModelCost, ModelInfo, ProviderGroup } from "../../types.js";
+	import Surface from "../ui/Surface.svelte";
 
 	// ─── State ──────────────────────────────────────────────────────────────────
 
@@ -429,10 +430,13 @@
 
 	<!-- Upward popover: instance rail + model list -->
 	{#if pickerOpen}
-		<div
+		<Surface
+			variant="raised"
+			radius="none"
+			elevation="menu-lg"
 			id="model-picker"
 			data-testid="model-picker"
-			class="model-dropdown absolute bottom-[calc(100%+8px)] right-0 w-[404px] max-w-[90vw] h-[376px] max-sm:fixed max-sm:inset-x-2 max-sm:bottom-2 max-sm:w-auto max-sm:max-w-none max-sm:h-[70vh] flex flex-row overflow-hidden bg-bg-alt border border-border rounded-[14px] shadow-menu-lg z-[var(--z-popover)] font-brand"
+			class="model-dropdown absolute bottom-[calc(100%+8px)] right-0 w-[404px] max-w-[90vw] h-[376px] max-sm:fixed max-sm:inset-x-2 max-sm:bottom-2 max-sm:w-auto max-sm:max-w-none max-sm:h-[70vh] flex flex-row overflow-hidden rounded-[14px] z-[var(--z-popover)] font-brand"
 		>
 			<!-- 48px instance rail -->
 			<div
@@ -654,7 +658,7 @@
 					</div>
 				</div>
 			</div>
-		</div>
+		</Surface>
 	{/if}
 </div>
 

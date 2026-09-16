@@ -14,6 +14,7 @@
 	} from "../../utils/notif-settings.js";
 	import { createFrontendLogger } from "../../utils/logger.js";
 	import { setPushActive } from "../../stores/ws.svelte.js";
+	import Surface from "../ui/Surface.svelte";
 
 	const pushLog = createFrontendLogger("push");
 	const notifLog = createFrontendLogger("notif");
@@ -198,8 +199,10 @@
 	<div class="fixed inset-0 z-40" onclick={handleBackdropClick}></div>
 
 	<!-- Dropdown menu (opens upward, fixed to sidebar bottom-left like ThemePicker) -->
-	<div
-		class="fixed bottom-[56px] left-2 w-[240px] bg-bg-alt border border-border rounded-lg shadow-xl z-[var(--z-top)] py-1.5 overflow-hidden"
+	<Surface
+		variant="raised"
+		radius="md"
+		class="fixed bottom-[56px] left-2 w-[240px] shadow-xl z-[var(--z-top)] py-1.5 overflow-hidden"
 	>
 		<Toggle
 			icon="smartphone"
@@ -252,5 +255,5 @@
 				notifications.
 			</div>
 		{/if}
-	</div>
+	</Surface>
 {/if}

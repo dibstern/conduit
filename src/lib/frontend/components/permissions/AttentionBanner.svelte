@@ -8,6 +8,7 @@
 	import { getDescendantSessionIds, getRemotePermissions } from "../../stores/permissions.svelte.js";
 	import { findSession, sessionState, switchToSession } from "../../stores/session.svelte.js";
 	import { wsSend } from "../../stores/ws.svelte.js";
+	import Surface from "../ui/Surface.svelte";
 
 	const remotePermissions = $derived(getRemotePermissions(sessionState.currentId));
 	const attentionSessions = $derived(getAttentionSessions(sessionState.currentId, getDescendantSessionIds));
@@ -78,7 +79,7 @@
 		role="status"
 		aria-live="polite"
 	>
-		<div class="bg-bg-alt border border-border rounded-xl p-3 shadow-lg">
+		<Surface variant="raised" radius="lg" class="p-3 shadow-lg">
 			<div class="flex items-start justify-between gap-2 mb-2">
 				<div class="text-base font-medium text-text">
 					{sessionCount === 1 ? "1 session" : `${sessionCount} sessions`} need{sessionCount === 1 ? "s" : ""} attention
@@ -103,7 +104,7 @@
 					</button>
 				{/each}
 			</div>
-		</div>
+		</Surface>
 	</div>
 {/if}
 

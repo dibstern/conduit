@@ -3,6 +3,7 @@
 
 <script lang="ts">
 	import Icon from "../ui/Icon.svelte";
+	import Surface from "../ui/Surface.svelte";
 
 	let { open, onToggle, onCamera, onPhotos }: {
 		open: boolean;
@@ -22,10 +23,14 @@
 	>
 		<Icon name="plus" size={18} />
 	</button>
-	<div
+	<Surface
+		variant="card"
+		radius="panel"
+		elevation="menu-lg"
 		id="attach-menu"
-		class="absolute bottom-[calc(100%+8px)] left-0 min-w-[170px] bg-bg-surface border border-border rounded-panel p-1 shadow-menu-lg z-10 overflow-hidden"
-		class:hidden={!open}
+		class="absolute bottom-[calc(100%+8px)] left-0 min-w-[170px] p-1 z-10 overflow-hidden {open
+			? ''
+			: 'hidden'}"
 	>
 		<button
 		class="attach-menu-item flex items-center gap-2.5 w-full py-3 px-4 border-none bg-none text-text-secondary text-sm cursor-pointer transition-[background,color] duration-150 not-last:border-b not-last:border-border-subtle hover:bg-[rgba(var(--overlay-rgb),0.04)] hover:text-text font-brand"
@@ -45,5 +50,5 @@
 			<Icon name="image" size={18} class="shrink-0" />
 			<span>Add Photos</span>
 		</button>
-	</div>
+	</Surface>
 </div>

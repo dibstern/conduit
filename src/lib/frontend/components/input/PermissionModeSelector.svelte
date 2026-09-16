@@ -12,6 +12,7 @@
 	import { showToast } from "../../stores/ui.svelte.js";
 	import { switchPermissionModeRpc } from "../../transport/ws-rpc-client.js";
 	import type { SessionPermissionMode } from "../../types.js";
+	import Surface from "../ui/Surface.svelte";
 
 	const MODES: ReadonlyArray<{
 		mode: SessionPermissionMode;
@@ -144,9 +145,12 @@
 	</Button>
 
 	{#if dropdownOpen}
-		<div
+		<Surface
+			variant="raised"
+			radius="md"
+			elevation="menu"
 			data-testid="permission-mode-dropdown"
-			class="absolute bottom-[calc(100%+4px)] right-0 w-40 bg-bg-alt border border-border rounded-lg shadow-menu z-[var(--z-popover-raised)] py-1 font-brand"
+			class="absolute bottom-[calc(100%+4px)] right-0 w-40 z-[var(--z-popover-raised)] py-1 font-brand"
 		>
 			{#each availableModes as { mode, label } (mode)}
 				<button
@@ -162,6 +166,6 @@
 					{label}
 				</button>
 			{/each}
-		</div>
+		</Surface>
 	{/if}
 </div>

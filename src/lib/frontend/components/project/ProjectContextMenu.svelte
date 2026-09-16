@@ -5,6 +5,7 @@
 <script lang="ts">
 	import type { ProjectInfo } from "../../types.js";
 	import Icon from "../ui/Icon.svelte";
+	import Surface from "../ui/Surface.svelte";
 
 	// ─── Props ──────────────────────────────────────────────────────────────────
 
@@ -64,10 +65,13 @@
 <!-- svelte-ignore a11y_no_static_element_interactions -->
 <div class="fixed inset-0 z-[var(--z-popover)]" onclick={handleBackdropClick}>
 	<!-- Menu dropdown -->
-	<div
-		class="fixed z-[var(--z-popover-raised)] min-w-[160px] bg-bg-alt border border-border rounded-lg py-1 shadow-panel"
+	<Surface
+		variant="raised"
+		radius="md"
+		elevation="panel"
+		class="fixed z-[var(--z-popover-raised)] min-w-[160px] py-1"
 		style={menuStyle}
-		onclick={(e) => e.stopPropagation()}
+		onclick={(e: MouseEvent) => e.stopPropagation()}
 	>
 		<!-- Rename -->
 		{#if onrename}
@@ -88,5 +92,5 @@
 			<Icon name="trash-2" size={14} />
 			<span>Remove</span>
 		</button>
-	</div>
+	</Surface>
 </div>

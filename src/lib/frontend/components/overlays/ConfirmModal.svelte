@@ -6,6 +6,7 @@
 <script lang="ts">
   import { uiState, resolveConfirm } from "../../stores/ui.svelte.js";
   import Button from "../ui/Button.svelte";
+  import Surface from "../ui/Surface.svelte";
 
   function handleCancel(): void {
     resolveConfirm(false);
@@ -38,8 +39,11 @@
     class="modal-backdrop fixed inset-0 bg-[rgba(var(--overlay-rgb),0.5)] backdrop-blur-[2px] flex items-center justify-center z-[var(--z-modal)] transition-opacity duration-200 ease-linear"
     onclick={handleBackdropClick}
   >
-    <div
-      class="modal-dialog bg-bg-alt border border-border rounded-xl py-5 px-6 max-w-80 w-[90%] shadow-modal"
+    <Surface
+      variant="raised"
+      radius="lg"
+      elevation="modal"
+      class="modal-dialog py-5 px-6 max-w-80 w-[90%]"
     >
       <p class="text-sm text-text leading-normal mb-4">
         {uiState.confirmDialog.text}
@@ -64,6 +68,6 @@
           {uiState.confirmDialog.actionLabel}
         </Button>
       </div>
-    </div>
+    </Surface>
   </div>
 {/if}

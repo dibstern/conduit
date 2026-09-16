@@ -6,6 +6,7 @@
 <script lang="ts">
 	import type { UsageData, StatusData, ContextData } from "../../types.js";
 	import { uiState, closePanel } from "../../stores/ui.svelte.js";
+	import Surface from "../ui/Surface.svelte";
 
 	// ─── Props ──────────────────────────────────────────────────────────────────
 
@@ -74,8 +75,11 @@
 	<div class="absolute top-12 right-4 z-50 flex flex-col gap-2">
 		<!-- Usage Panel -->
 		{#if showUsage}
-			<div
-				class="info-panel bg-bg-alt border border-border rounded-lg shadow-panel min-w-[220px] max-w-[280px]"
+			<Surface
+				variant="raised"
+				radius="md"
+				elevation="panel"
+				class="info-panel min-w-[220px] max-w-[280px]"
 			>
 				<div
 					class="info-panel-header flex items-center justify-between px-3 py-2 border-b border-border"
@@ -124,13 +128,16 @@
 						<span class="text-text">{usageData?.turns ?? "--"}</span>
 					</div>
 				</div>
-			</div>
+			</Surface>
 		{/if}
 
 		<!-- Status Panel -->
 		{#if showStatus}
-			<div
-				class="info-panel bg-bg-alt border border-border rounded-lg shadow-panel min-w-[220px] max-w-[280px]"
+			<Surface
+				variant="raised"
+				radius="md"
+				elevation="panel"
+				class="info-panel min-w-[220px] max-w-[280px]"
 			>
 				<div
 					class="info-panel-header flex items-center justify-between px-3 py-2 border-b border-border"
@@ -191,13 +198,16 @@
 						>
 					</div>
 				</div>
-			</div>
+			</Surface>
 		{/if}
 
 		<!-- Context Panel -->
 		{#if showContext}
-			<div
-				class="info-panel bg-bg-alt border border-border rounded-lg shadow-panel min-w-[220px] max-w-[280px]"
+			<Surface
+				variant="raised"
+				radius="md"
+				elevation="panel"
+				class="info-panel min-w-[220px] max-w-[280px]"
 			>
 				<div
 					class="info-panel-header flex items-center justify-between px-3 py-2 border-b border-border"
@@ -269,7 +279,7 @@
 						</div>
 					{/if}
 				</div>
-			</div>
+			</Surface>
 		{/if}
 	</div>
 {/if}

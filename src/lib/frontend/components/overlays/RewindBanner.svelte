@@ -16,6 +16,7 @@
 	import { sessionState } from "../../stores/session.svelte.js";
 	import { getCurrentSlug } from "../../stores/router.svelte.js";
 	import { rewindSessionRpc } from "../../transport/ws-rpc-client.js";
+	import Surface from "../ui/Surface.svelte";
 
 	// ─── Props ──────────────────────────────────────────────────────────────────
 
@@ -110,8 +111,11 @@
 		class="modal-backdrop fixed inset-0 bg-[rgba(var(--overlay-rgb),0.5)] backdrop-blur-[2px] flex items-center justify-center z-[var(--z-modal)] transition-opacity duration-200 ease-linear"
 		onclick={handleBackdropClick}
 	>
-		<div
-			class="modal-dialog bg-bg-alt border border-border rounded-xl py-5 px-6 max-w-80 w-[90%] shadow-modal"
+		<Surface
+			variant="raised"
+			radius="lg"
+			elevation="modal"
+			class="modal-dialog py-5 px-6 max-w-80 w-[90%]"
 		>
 			<h3 class="text-sm font-semibold text-text mb-4">
 				Rewind to this point?
@@ -176,6 +180,6 @@
 					Rewind
 				</Button>
 			</div>
-		</div>
+		</Surface>
 	</div>
 {/if}
