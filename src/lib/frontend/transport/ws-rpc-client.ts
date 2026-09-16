@@ -3,6 +3,7 @@ import { RpcClient, RpcSerialization } from "@effect/rpc";
 import { Effect } from "effect";
 import type { ClaudeSettingsOverrides } from "../../contracts/claude-settings.js";
 import { ProviderInstanceIdSchema } from "../../contracts/provider-instance.js";
+import type { GetSkillContentResponse } from "../../contracts/ws-rpc.js";
 import type { SessionPermissionMode } from "../../shared-types.js";
 import { runTransportEffect } from "./runtime.js";
 import {
@@ -230,6 +231,11 @@ export interface GetFileContentRpcInput {
 export interface GetToolContentRpcInput {
 	readonly projectSlug: string;
 	readonly toolId: string;
+}
+
+export interface GetSkillContentRpcInput {
+	readonly projectSlug: string;
+	readonly name: string;
 }
 
 export interface ListDirectoriesRpcInput {
@@ -857,6 +863,19 @@ const callGetToolContent = (input: GetToolContentRpcInput) =>
 		Effect.provide(RpcSerialization.layerJson),
 	);
 
+const callGetSkillContent = (input: GetSkillContentRpcInput) =>
+	Effect.scoped(
+		Effect.gen(function* () {
+			const client = yield* RpcClient.make(WsRpcGroup);
+			return yield* client.GetSkillContent(input);
+		}),
+	).pipe(
+		Effect.provide(RpcClient.layerProtocolSocket()),
+		Effect.provide(Socket.layerWebSocket(makeWsRpcUrl(input.projectSlug))),
+		Effect.provide(Socket.layerWebSocketConstructorGlobal),
+		Effect.provide(RpcSerialization.layerJson),
+	);
+
 const callListDirectories = (input: ListDirectoriesRpcInput) =>
 	Effect.scoped(
 		Effect.gen(function* () {
@@ -1375,6 +1394,12 @@ export async function getToolContentRpc(
 	input: GetToolContentRpcInput,
 ): Promise<GetToolContentResponse> {
 	return await runTransportEffect(callGetToolContent(input));
+}
+
+export async function getSkillContentRpc(
+	input: GetSkillContentRpcInput,
+): Promise<GetSkillContentResponse> {
+	return await runTransportEffect(callGetSkillContent(input));
 }
 
 export async function listDirectoriesRpc(

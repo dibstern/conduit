@@ -148,6 +148,17 @@ export function toolSubject(tool: ToolMessage): string {
 	);
 }
 
+/** Short qualifiers a tool carries alongside its subject, such as which kind of
+ *  subagent ran. Empty for most tools. */
+export function toolTags(tool: ToolMessage): readonly string[] {
+	return (
+		lookupSummarizer(tool.name).summarize(
+			ensureCanonical(tool.name, tool.input),
+			{},
+		).tags ?? []
+	);
+}
+
 export function toolCommand(tool: ToolMessage): string | undefined {
 	const c = ensureCanonical(tool.name, tool.input);
 	return c.tool === "Bash" ? c.command : undefined;
@@ -263,8 +274,10 @@ export function currentStepLabel(segment: Segment): string {
 }
 
 /**
- * Tools that own an interactive card (subagent navigation or skill detail) keep
- * it inside the expanded log instead of degrading to a row.
+ * Tools whose row in the expanded log carries a coloured rail. Loading a skill
+ * or handing work to a subagent is a different kind of step than reading a file,
+ * and the rail says so without breaking the log's rhythm the way the old
+ * full-width cards did.
  */
 export function isSoloTool(tool: ToolMessage): boolean {
 	return tool.name === "Skill" || isSubagentToolName(tool.name);

@@ -410,6 +410,13 @@ export const GetToolContentResponseSchema = Schema.Struct({
 	content: Schema.String,
 });
 
+export const GetSkillContentResponseSchema = Schema.Struct({
+	projectSlug: Schema.String,
+	name: Schema.String,
+	path: Schema.String,
+	content: Schema.String,
+});
+
 export type AgentInfo = typeof AgentInfoSchema.Type;
 export type AgentProviderScope = typeof AgentProviderScopeSchema.Type;
 export type GetAgentsResponse = typeof GetAgentsResponseSchema.Type;
@@ -432,6 +439,7 @@ export type FileEntry = typeof FileEntrySchema.Type;
 export type GetFileListResponse = typeof GetFileListResponseSchema.Type;
 export type GetFileContentResponse = typeof GetFileContentResponseSchema.Type;
 export type GetToolContentResponse = typeof GetToolContentResponseSchema.Type;
+export type GetSkillContentResponse = typeof GetSkillContentResponseSchema.Type;
 export type ContextWindowOption = typeof ContextWindowOptionSchema.Type;
 export type ModelInfo = typeof ModelInfoSchema.Type;
 export type ProviderInfo = typeof ProviderInfoSchema.Type;
@@ -937,6 +945,18 @@ export class GetToolContent extends Schema.TaggedRequest<GetToolContent>()(
 	},
 ) {}
 
+export class GetSkillContent extends Schema.TaggedRequest<GetSkillContent>()(
+	"GetSkillContent",
+	{
+		failure: WsRpcError,
+		success: GetSkillContentResponseSchema,
+		payload: {
+			projectSlug: NonEmptyString,
+			name: NonEmptyString,
+		},
+	},
+) {}
+
 export class GetModels extends Schema.TaggedRequest<GetModels>()("GetModels", {
 	failure: WsRpcError,
 	success: GetModelsResponseSchema,
@@ -1169,6 +1189,7 @@ export const WsRpcRequest = Schema.Union(
 	GetFileList,
 	GetFileContent,
 	GetToolContent,
+	GetSkillContent,
 	GetModels,
 	AddProject,
 	RemoveProject,
@@ -1227,6 +1248,7 @@ export const WsRpcGroup = RpcGroup.make(
 	Rpc.fromTaggedRequest(GetFileList),
 	Rpc.fromTaggedRequest(GetFileContent),
 	Rpc.fromTaggedRequest(GetToolContent),
+	Rpc.fromTaggedRequest(GetSkillContent),
 	Rpc.fromTaggedRequest(GetModels),
 	Rpc.fromTaggedRequest(AddProject),
 	Rpc.fromTaggedRequest(RemoveProject),

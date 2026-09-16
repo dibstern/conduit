@@ -4,6 +4,7 @@
 <script lang="ts">
 	import type { ToolMessage } from "../../types.js";
 	import { switchToSession } from "../../stores/session.svelte.js";
+	import { subagentSessionId as findSubagentSessionId } from "../../utils/subagent-tools.js";
 
 	import Icon from "../shared/Icon.svelte";
 	import BlockGrid from '../shared/BlockGrid.svelte';
@@ -51,26 +52,7 @@
 
 	const taskInput = $derived(readTaskInput(message.input));
 
-	/** Extract the spawned session ID from the task tool result, metadata,
-	 *  or the tool input's task_id field. Each strategy correlates a specific
-	 *  tool call to its session — generic session-list matching is intentionally
-	 *  omitted because it cannot distinguish between multiple child sessions
-	 *  and would return a stale/wrong session. */
-	const subagentSessionId = $derived.by(() => {
-		const metadata = message.metadata as Record<string, unknown> | undefined;
-		const childSessionId = metadata?.["childSessionId"];
-		if (typeof childSessionId === "string" && childSessionId) {
-			return childSessionId;
-		}
-		const metaSessionId = metadata?.["sessionId"];
-		if (typeof metaSessionId === "string" && metaSessionId) return metaSessionId;
-		if (taskInput?.taskId) return taskInput.taskId;
-		if (message.result) {
-			const match = message.result.match(/task_id:\s*(\S+)/);
-			if (match?.[1]) return match[1];
-		}
-		return null;
-	});
+	const subagentSessionId = $derived(findSubagentSessionId(message));
 
 	const agentLabel = $derived(
 		taskInput

@@ -32,7 +32,7 @@ const CATEGORY_STYLE: Record<ToolCategory, PartStyle> = {
 };
 
 const THINKING_STYLE: PartStyle = {
-	icon: "sparkles",
+	icon: "brain",
 	text: "text-thinking",
 	bg: "bg-thinking",
 };
@@ -47,7 +47,7 @@ const TEXT_STYLE: PartStyle = {
 const TOOL_ICONS: Record<string, string> = {
 	Read: "file-text",
 	Write: "file-code",
-	Skill: "zap",
+	Skill: "sparkles",
 };
 
 export function toolStyle(tool: ToolMessage): PartStyle {

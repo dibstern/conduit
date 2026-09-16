@@ -102,6 +102,8 @@ export {
 	type GetModelsResponse,
 	GetProjects,
 	type GetProjectsResponse,
+	GetSkillContent,
+	type GetSkillContentResponse,
 	GetTodo,
 	type GetTodoResponse,
 	GetToolContent,
@@ -167,6 +169,7 @@ import {
 	getFileListResponse,
 	getFileTreeEntries,
 } from "../handlers/files.js";
+import { getSkillContentValue } from "../handlers/skill-content.js";
 import { getToolContentValue } from "../handlers/tool-content.js";
 import { setLogLevel } from "../logger.js";
 
@@ -893,6 +896,24 @@ export const WsRpcServerLayer = WsRpcGroup.toLayer({
 						),
 			),
 		),
+	GetSkillContent: (request) =>
+		Effect.gen(function* () {
+			const config = yield* ConfigTag;
+			const result = yield* getSkillContentValue(
+				request.name,
+				config.slug === request.projectSlug ? config.projectDir : undefined,
+			);
+			if (result === undefined) {
+				return yield* Effect.fail(
+					new WsRpcError({ message: "Skill content not available" }),
+				);
+			}
+			return {
+				projectSlug: request.projectSlug,
+				name: request.name,
+				...result,
+			};
+		}).pipe(Effect.catchAll(mapRpcFailure("GetSkillContent"))),
 	GetModels: (request) =>
 		Effect.gen(function* () {
 			const config = yield* ConfigTag;
