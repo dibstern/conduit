@@ -28,6 +28,12 @@
 	import SessionContextMenu from "./SessionContextMenu.svelte";
 	import Icon from "../ui/Icon.svelte";
 	import BlockGrid from "../ui/BlockGrid.svelte";
+	import Button from "../ui/Button.svelte";
+
+	// The box only; ui/Button `toolbar` owns the colours and the hover fill.
+	// `size="content"` emits no geometry precisely so a call site can supply
+	// its own without a `!` override (see Button.svelte::ButtonSize).
+	const TOOLBAR_ICON_BOX = "h-6 w-6 rounded-md";
 
 	// ─── Local state ────────────────────────────────────────────────────────────
 
@@ -337,49 +343,60 @@
 			<div class="session-list-header flex items-center justify-between px-2 py-1">
 				<span class="text-sm font-semibold uppercase tracking-[0.5px] text-text-dimmer font-brand">Sessions</span>
 				<div class="session-list-header-actions flex items-center gap-0.5">
-					<button
-						type="button"
+					<!-- The one control here that is not `iconOnly`: its busy glyph is a
+					     BlockGrid, the app-wide in-progress affordance. Button's `loading`
+					     would swap it for a loader-circle, which appears nowhere else. -->
+					<Button
+						variant="toolbar"
+						size="content"
+						class={TOOLBAR_ICON_BOX}
 						title="New session"
-						aria-label="New session"
-					onclick={handleNewSession}
-					disabled={sessionCreation.value.phase === "creating"}
-					class="flex items-center justify-center w-6 h-6 border-none rounded-md bg-transparent text-text-dimmer cursor-pointer disabled:cursor-default transition-[background,color] duration-100 p-0 hover:bg-[rgba(var(--overlay-rgb),0.04)] hover:text-text"
+						ariaLabel="New session"
+						onclick={handleNewSession}
+						disabled={sessionCreation.value.phase === "creating"}
 					>
 						{#if sessionCreation.value.phase === "creating"}
 							<BlockGrid cols={5} mode="fast" blockSize={1.5} gap={0.5} class="shrink-0" />
 						{:else}
 							<Icon name="plus" size={14} />
 						{/if}
-					</button>
-					<button
+					</Button>
+					<Button
 						id="search-session-btn"
-						type="button"
+						variant="toolbar"
+						size="content"
+						class={TOOLBAR_ICON_BOX}
+						iconOnly
+						iconSize={14}
+						icon="search"
 						title="Search sessions"
-						aria-label="Search sessions"
-					class="flex items-center justify-center w-6 h-6 border-none rounded-md bg-transparent text-text-dimmer cursor-pointer transition-[background,color] duration-100 p-0 hover:bg-[rgba(var(--overlay-rgb),0.04)] hover:text-text"
-					onclick={handleToggleSearch}
-					>
-						<Icon name="search" size={14} />
-					</button>
-				<button
-					type="button"
-					data-testid="subagent-toggle"
-					title={uiState.hideSubagentSessions ? "Show subagent sessions" : "Hide subagent sessions"}
-					aria-label={uiState.hideSubagentSessions ? "Show subagent sessions" : "Hide subagent sessions"}
-					class="flex items-center justify-center w-6 h-6 border-none rounded-md bg-transparent cursor-pointer transition-[background,color] duration-100 p-0 hover:bg-[rgba(var(--overlay-rgb),0.04)] hover:text-text {uiState.hideSubagentSessions ? 'text-text-dimmer' : 'text-accent'}"
-					onclick={toggleHideSubagentSessions}
-					>
-						<Icon name="git-fork" size={14} />
-					</button>
-					<button
-						type="button"
+						ariaLabel="Search sessions"
+						onclick={handleToggleSearch}
+					/>
+					<Button
+						variant="toolbar"
+						size="content"
+						class={TOOLBAR_ICON_BOX}
+						iconOnly
+						iconSize={14}
+						icon="git-fork"
+						data-testid="subagent-toggle"
+						data-active={uiState.hideSubagentSessions ? undefined : ""}
+						title={uiState.hideSubagentSessions ? "Show subagent sessions" : "Hide subagent sessions"}
+						ariaLabel={uiState.hideSubagentSessions ? "Show subagent sessions" : "Hide subagent sessions"}
+						onclick={toggleHideSubagentSessions}
+					/>
+					<Button
+						variant="toolbar"
+						size="content"
+						class={TOOLBAR_ICON_BOX}
+						iconOnly
+						iconSize={14}
+						icon="trash-2"
 						title="Cleanup sessions"
-						aria-label="Cleanup sessions"
-					class="flex items-center justify-center w-6 h-6 border-none rounded-md bg-transparent text-text-dimmer cursor-pointer transition-[background,color] duration-100 p-0 hover:bg-[rgba(var(--overlay-rgb),0.04)] hover:text-text"
-					onclick={handleEnterCleanup}
-					>
-						<Icon name="trash-2" size={14} />
-					</button>
+						ariaLabel="Cleanup sessions"
+						onclick={handleEnterCleanup}
+					/>
 				</div>
 			</div>
 		</div>

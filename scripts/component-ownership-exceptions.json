@@ -126,7 +126,7 @@
 			"native-control-bypass": 3
 		},
 		"src/lib/frontend/components/session/SessionList.svelte": {
-			"native-control-bypass": 8
+			"native-control-bypass": 4
 		},
 		"src/lib/frontend/components/setup/StepPwa.svelte": {
 			"native-control-bypass": 1
@@ -135,7 +135,7 @@
 			"native-control-bypass": 5
 		},
 		"src/lib/frontend/style.css": {
-			"component-class-recipe": 10
+			"component-class-recipe": 6
 		}
 	}
 }

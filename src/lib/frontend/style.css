@@ -467,10 +467,6 @@
 	.header-icon-btn .lucide {
 		@apply w-[15px] h-[15px];
 	}
-	.header-icon-btn.active {
-		background: rgba(var(--overlay-rgb), 0.06);
-		@apply text-accent;
-	}
 }
 
 /* Badge hidden state overrides */
@@ -937,13 +933,6 @@
 	}
 }
 
-/* Sticky Ctrl toggle — active state (toggled via JS) */
-.term-touch-toggle.active {
-	background: var(--color-accent-bg);
-	color: var(--color-accent);
-	border-color: var(--color-accent);
-}
-
 /* ─── Terminal Side Panel ──────────────────────────────────────────────────── */
 
 /* When visible, terminal-container is a flex column */
@@ -1253,24 +1242,6 @@
 	gap: 0.25rem;
 	margin-bottom: 0.5rem;
 }
-.diff-toggle-btn {
-	padding: 0.25rem 0.75rem;
-	font-size: 10px;
-	border: 1px solid var(--color-border-subtle);
-	background: transparent;
-	color: var(--color-text-secondary);
-	border-radius: 0.25rem;
-	cursor: pointer;
-}
-.diff-toggle-btn.active {
-	background: var(--color-accent);
-	color: var(--color-bg);
-	border-color: var(--color-accent);
-}
-.diff-toggle-btn:hover:not(.active) {
-	background: var(--color-bg-alt);
-}
-
 /* ─── File Edit History & Compare (8.23) ──────────────────────────────────── */
 
 .file-history-panel {
@@ -1289,16 +1260,6 @@
 	border-color: var(--color-border-subtle);
 }
 
-.file-history-badge {
-	display: inline-block;
-	font-size: 10px;
-	font-weight: 600;
-	text-transform: uppercase;
-	padding: 0.125rem 0.375rem;
-	border-radius: 3px;
-	line-height: 1.4;
-}
-
 .file-history-compare-bar {
 	display: flex;
 	align-items: center;
@@ -1308,21 +1269,6 @@
 	background: var(--color-bg-alt);
 	border: 1px solid var(--color-border-subtle);
 	border-radius: 0.375rem;
-}
-
-.file-history-compare-btn {
-	padding: 0.25rem 0.75rem;
-	font-size: 10px;
-	font-weight: 500;
-	border-radius: 0.375rem;
-	background: var(--color-success);
-	color: var(--color-bg);
-	border: none;
-	cursor: pointer;
-	transition: opacity 0.15s;
-}
-.file-history-compare-btn:hover {
-	opacity: 0.85;
 }
 
 .file-history-view {

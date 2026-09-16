@@ -108,13 +108,13 @@
 		class="diff-toggle-bar flex items-center gap-1 px-3 py-1 mb-1"
 	>
 		<button
-			class={"diff-toggle-btn text-xs px-2 py-1 rounded border cursor-pointer font-sans transition-colors duration-100 " + (viewMode === "unified" ? "bg-accent/20 border-accent/40 text-accent font-medium" : "bg-transparent border-border text-text-dimmer hover:text-text hover:border-border-subtle")}
+			class={"text-xs px-2 py-1 rounded border cursor-pointer font-sans transition-colors duration-100 " + (viewMode === "unified" ? "bg-accent/20 border-accent/40 text-accent font-medium" : "bg-transparent border-border text-text-dimmer hover:text-text hover:border-border-subtle")}
 			onclick={() => (viewMode = "unified")}
 		>
 			Unified
 		</button>
 		<button
-			class={"diff-toggle-btn text-xs px-2 py-1 rounded border cursor-pointer font-sans transition-colors duration-100 " + (viewMode === "split" ? "bg-accent/20 border-accent/40 text-accent font-medium" : "bg-transparent border-border text-text-dimmer hover:text-text hover:border-border-subtle")}
+			class={"text-xs px-2 py-1 rounded border cursor-pointer font-sans transition-colors duration-100 " + (viewMode === "split" ? "bg-accent/20 border-accent/40 text-accent font-medium" : "bg-transparent border-border text-text-dimmer hover:text-text hover:border-border-subtle")}
 			onclick={() => (viewMode = "split")}
 		>
 			Split

@@ -23,7 +23,8 @@
 		| "danger"
 		| "success-soft"
 		| "danger-outline"
-		| "accent-soft";
+		| "accent-soft"
+		| "toolbar";
 
 	/**
 	 * `content` is an opt-out, not a third size: it emits no padding, radius,
@@ -50,13 +51,35 @@
 		danger: "bg-error text-bg hover:bg-error/90",
 		// The three below are the approve / deny / tool-action language already
 		// duplicated across QuestionCard, PermissionCard, ToolGenericCard and
-		// ToolGroupItem. Added on cross-file evidence only; single-file recipes
-		// (e.g. Header's toolbar buttons) deliberately stay local.
+		// ToolGroupItem. Added on cross-file evidence only.
 		"success-soft":
 			"border border-success/20 bg-success/10 text-success hover:bg-success/15",
 		"danger-outline":
 			"border border-border bg-transparent text-error hover:bg-error/[0.08]",
 		"accent-soft": "text-accent bg-accent/10 hover:bg-accent/20",
+		/**
+		 * Dim icon affordances in a dense toolbar. The 4% overlay fill is the
+		 * distinctive part and appears in no other variant.
+		 *
+		 * Header's `.header-icon-btn` was why the note above said single-file
+		 * recipes stay local. It was never single-file: SessionList had
+		 * independently hand-written four near-identical copies, agreeing on the
+		 * base colour and the hover fill and disagreeing only on the hover text
+		 * step (conduit-test-de3.35.3). Ten instances across two files.
+		 *
+		 * Deliberately colour-only. The two toolbars use different geometry --
+		 * Header a 23px box with a border, SessionList an 18px square -- so the
+		 * box comes from the call site via `size="content"`. Forcing one size on
+		 * both would be a taste call smuggled in as a refactor.
+		 *
+		 * `data-active` rather than an additive `text-accent` at the call site:
+		 * consumer `class` is additive and cannot reliably beat a variant
+		 * utility, so a toggle that lights up when on needs the variant to own
+		 * both states. Pass `data-active=""` when lit, `undefined` when not.
+		 */
+		toolbar:
+			"text-text-dimmer data-[active]:text-accent " +
+			"hover:bg-[rgba(var(--overlay-rgb),0.04)] hover:text-text",
 	};
 
 	// `focus-visible:outline-hidden` (not `outline-none`) keeps a transparent
@@ -93,6 +116,14 @@
 		type?: "button" | "submit" | "reset";
 		/** Leading lucide icon name (see Icon.svelte). */
 		icon?: string;
+		/**
+		 * Glyph px, overriding the size-derived default (14 for `sm`, 16 for the
+		 * rest). `size="content"` emits no geometry by design, so without this a
+		 * call site that supplies its own box has no way to scale the glyph to
+		 * match -- it silently gets the 16px default. That cost SessionList a
+		 * 2px-too-large icon in four toolbar buttons (conduit-test-de3.35.3).
+		 */
+		iconSize?: number;
 		/** Spinner + `aria-busy`; stays focusable and swallows clicks. */
 		loading?: boolean;
 		disabled?: boolean;
@@ -168,6 +199,7 @@
 		href,
 		type = "button",
 		icon,
+	iconSize: iconSizeProp,
 		iconOnly = false,
 		loading = false,
 		disabled = false,
@@ -199,7 +231,7 @@
 			.join(" "),
 	);
 
-	const iconSize = $derived(size === "sm" ? 14 : 16);
+	const iconSize = $derived(iconSizeProp ?? (size === "sm" ? 14 : 16));
 
 	// `loading` is a soft-disable: the button stays focusable (so keyboard/SR
 	// context is not lost mid-action), so the handler must guard it explicitly.
