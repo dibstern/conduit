@@ -45,10 +45,14 @@
 		</div>
 		<div class="text-sm leading-relaxed">
 			Download the certificate.<br />
-			<a
-				class="inline-flex items-center justify-center gap-2 bg-accent text-bg no-underline px-6 py-3 rounded-xl font-semibold text-sm mt-2 hover:opacity-90 transition-opacity"
-				href="/ca/download">Download Certificate</a
+			<Button
+				variant="primary"
+				size="content"
+				href="/ca/download"
+				class="gap-2 px-6 py-3 rounded-xl font-semibold text-sm mt-2 font-sans"
 			>
+				Download Certificate
+			</Button>
 		</div>
 	</div>
 

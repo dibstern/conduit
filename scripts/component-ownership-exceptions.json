@@ -148,14 +148,8 @@
 		"src/lib/frontend/components/session/SessionList.svelte": {
 			"native-control-bypass": 8
 		},
-		"src/lib/frontend/components/setup/StepCertificate.svelte": {
-			"anchor-wearing-button-recipe": 1
-		},
 		"src/lib/frontend/components/setup/StepPwa.svelte": {
 			"native-control-bypass": 1
-		},
-		"src/lib/frontend/components/setup/StepTailscale.svelte": {
-			"anchor-wearing-button-recipe": 3
 		},
 		"src/lib/frontend/components/terminal/TerminalPanel.svelte": {
 			"native-control-bypass": 5

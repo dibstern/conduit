@@ -191,3 +191,31 @@ export const FocusVisible: Story = {
 	// story depicts one ring, the one being tested (conduit-test-j7ny).
 	parameters: { pseudo: { focusVisible: ["button"] } },
 };
+
+/**
+ * The anchor branch. Without a story the `href` path has no visual baseline at
+ * all, and the failure it would hide is a quiet one: an <a> that stopped
+ * looking like the <button> beside it (conduit-test-75iq).
+ *
+ * The play() assertion is the load-bearing half. `no-underline` lives in
+ * BASE_CLASSES precisely because the UA stylesheet underlines anchors and no
+ * variant wants that, so a regression here is one deleted utility away and
+ * would read as "slightly different text" in a diff rather than as a bug.
+ */
+export const Link: Story = {
+	args: {
+		variant: "primary",
+		href: "https://example.com/install",
+		children: label("Download"),
+	},
+	play: async ({ canvasElement }) => {
+		const anchor = within(canvasElement).getByRole("link", {
+			name: "Download",
+		});
+		await expect(anchor.tagName).toBe("A");
+		await expect(anchor).toHaveAttribute("href", "https://example.com/install");
+		// Not a <button>: no `type`, and nothing that would submit a form.
+		await expect(anchor).not.toHaveAttribute("type");
+		await expect(getComputedStyle(anchor).textDecorationLine).toBe("none");
+	},
+};

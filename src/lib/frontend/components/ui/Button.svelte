@@ -6,7 +6,13 @@
   consumer `class` is appended for ADDITIVE utilities (layout/spacing); it does
   NOT reliably override a variant/size utility — see ./component-conventions.mdx.
 
-  Strictly renders a <button>; link-styled buttons are out of scope by design.
+  Renders a <button>, or an <a> when `href` is set. The anchor branch exists
+  because "link-styled buttons are out of scope" did not stop anyone needing
+  one: it just moved the recipe into feature components, where four <a> tags
+  ended up hand-copying `bg-accent text-bg ...` (conduit-test-75iq). The shape
+  mirrors ui/MenuItem.svelte, which has resolved the same question the same way
+  since conduit-test-de3.3.4 -- one idiom for "styled control that is sometimes
+  a link", not two.
 -->
 <script module lang="ts">
 	type ButtonVariant =
@@ -62,7 +68,7 @@
 	// order, so a size (or a consumer) could not override a base radius without
 	// `!`. Anything in BASE is therefore genuinely invariant.
 	const BASE_CLASSES =
-		"inline-flex items-center justify-center whitespace-nowrap " +
+		"inline-flex items-center justify-center whitespace-nowrap no-underline " +
 		"select-none cursor-pointer transition-colors " +
 		// Neutral, not accent. An accent ring against an accent-filled button
 		// (`primary`) is the same colour as the button, so the old
@@ -77,7 +83,7 @@
 </script>
 
 <script lang="ts">
-	import type { HTMLButtonAttributes } from "svelte/elements";
+	import type { HTMLAnchorAttributes, HTMLButtonAttributes } from "svelte/elements";
 	import type { Snippet } from "svelte";
 	import Icon from "./Icon.svelte";
 
@@ -90,7 +96,27 @@
 		/** Spinner + `aria-busy`; stays focusable and swallows clicks. */
 		loading?: boolean;
 		disabled?: boolean;
-		onclick?: HTMLButtonAttributes["onclick"];
+		/**
+		 * Renders an <a> instead of a <button>, wearing the same variant/size.
+		 *
+		 * Deliberately a plain optional prop rather than a discriminated union
+		 * forbidding `type`/`disabled`, which is what ui/MenuItem.svelte does
+		 * and what this file tried first. It does not survive here: `iconOnly`
+		 * is ALREADY a union, and intersecting a second two-branch union with
+		 * it over a base as wide as `HTMLButtonAttributes` makes tsc give up
+		 * with "Expression produces a union type that is too complex to
+		 * represent" at the call sites that spread meta args (Button.stories.ts).
+		 * MenuItem gets away with it because its base type is small.
+		 *
+		 * So the `href` + `type`/`disabled` conflict is caught by the DEV
+		 * warning below instead — the same mechanism this file already uses for
+		 * `iconOnly` without an `ariaLabel`, for the same reason.
+		 */
+		href?: string;
+		target?: HTMLAnchorAttributes["target"];
+		rel?: HTMLAnchorAttributes["rel"];
+		download?: HTMLAnchorAttributes["download"];
+		onclick?: (event: MouseEvent) => void;
 		class?: string;
 	} & Omit<
 		HTMLButtonAttributes,
@@ -139,6 +165,7 @@
 	let {
 		variant = "secondary",
 		size = "md",
+		href,
 		type = "button",
 		icon,
 		iconOnly = false,
@@ -176,7 +203,18 @@
 
 	// `loading` is a soft-disable: the button stays focusable (so keyboard/SR
 	// context is not lost mid-action), so the handler must guard it explicitly.
-	const handleClick: NonNullable<HTMLButtonAttributes["onclick"]> = (event) => {
+	/**
+	 * `rest` is typed against `HTMLButtonAttributes`, so every element-generic
+	 * event handler it carries is parameterised on `HTMLButtonElement`. Spread
+	 * onto an <a> those are structurally wrong even though no caller can
+	 * actually hit it — you cannot pass `onsubmit` to a Button and also read it
+	 * back off the anchor. Narrowing the props type per branch to make this
+	 * precise is exactly what exceeded tsc's union budget (see `href` above), so
+	 * this is the one place the two shapes are reconciled by hand.
+	 */
+	const anchorRest = $derived(rest as unknown as HTMLAnchorAttributes);
+
+	const handleClick = (event: MouseEvent) => {
 		if (disabled || loading) return;
 		onclick?.(event);
 	};
@@ -188,20 +226,18 @@
 					"[ui/Button] `iconOnly` buttons require an `ariaLabel` for screen readers.",
 				);
 			}
+			// A <a> has no `disabled` and no `type`. Silently dropping either is
+			// how "this link ignores its disabled state" ships unnoticed.
+			if (href !== undefined && disabled) {
+				console.warn(
+					"[ui/Button] `disabled` has no effect with `href` — an anchor cannot be disabled. Render a real <button>, or omit the href while the action is unavailable.",
+				);
+			}
 		});
 	}
 </script>
 
-<button
-	{...rest}
-	{type}
-	class={buttonClass}
-	{disabled}
-	aria-disabled={loading || undefined}
-	aria-busy={loading || undefined}
-	aria-label={ariaLabel}
-	onclick={handleClick}
->
+{#snippet content()}
 	{#if loading}
 		<Icon name="loader-circle" size={iconSize} class="animate-spin" />
 	{:else if icon}
@@ -212,4 +248,35 @@
 	     had already bypassed the compiler — and silently swallowing its content
 	     is the worse of the two failures. See conduit-test-arl1. -->
 	{@render children?.()}
-</button>
+{/snippet}
+
+{#if href !== undefined}
+	<!-- `{#if}` rather than <svelte:element>, matching ui/MenuItem.svelte. It
+	     also keeps the two attribute sets honestly separate: an <a> takes no
+	     `type` and no `disabled`, so there is nothing here to conditionally
+	     suppress. -->
+	<a
+		{...anchorRest}
+		{href}
+		class={buttonClass}
+		aria-disabled={loading || undefined}
+		aria-busy={loading || undefined}
+		aria-label={ariaLabel}
+		onclick={handleClick}
+	>
+		{@render content()}
+	</a>
+{:else}
+	<button
+		{...rest}
+		{type}
+		class={buttonClass}
+		{disabled}
+		aria-disabled={loading || undefined}
+		aria-busy={loading || undefined}
+		aria-label={ariaLabel}
+		onclick={handleClick}
+	>
+		{@render content()}
+	</button>
+{/if}
