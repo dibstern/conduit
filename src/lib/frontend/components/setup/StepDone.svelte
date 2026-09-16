@@ -21,7 +21,7 @@
 	<Button
 		variant="primary"
 		size="content"
-		class="gap-2 no-underline px-6 py-3 rounded-xl font-semibold text-sm font-sans hover:opacity-90 transition-opacity! hover:bg-accent!"
+		class="gap-2 no-underline px-6 py-3 rounded-xl font-semibold text-sm font-sans"
 		onclick={ongotodone}
 	>
 		Open Conduit

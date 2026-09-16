@@ -48,7 +48,7 @@
 			<Button
 				variant="primary"
 				size="content"
-				class="w-full gap-2 px-6 py-3 rounded-xl font-semibold text-sm font-sans hover:opacity-90 transition-opacity! hover:bg-accent!"
+				class="w-full gap-2 px-6 py-3 rounded-xl font-semibold text-sm font-sans"
 				onclick={onnextstep}
 			>
 				Finish anyway
@@ -58,7 +58,7 @@
 		<Button
 			variant="primary"
 			size="content"
-			class="w-full gap-2 px-6 py-3 rounded-xl font-semibold text-sm font-sans hover:opacity-90 transition-opacity! hover:bg-accent! disabled:opacity-40! disabled:cursor-default!"
+			class="w-full gap-2 px-6 py-3 rounded-xl font-semibold text-sm font-sans"
 			onclick={onenablepush}
 			disabled={pushBusy}
 		>
@@ -86,7 +86,7 @@
 			<Button
 				variant="primary"
 				size="content"
-				class="w-full gap-2 px-6 py-3 rounded-xl font-semibold text-sm font-sans hover:opacity-90 transition-opacity! hover:bg-accent!"
+				class="w-full gap-2 px-6 py-3 rounded-xl font-semibold text-sm font-sans"
 				onclick={onnextstep}
 			>
 				Finish anyway

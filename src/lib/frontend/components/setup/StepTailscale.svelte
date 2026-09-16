@@ -118,7 +118,7 @@
 		<Button
 			variant="primary"
 			size="content"
-			class="flex-1 gap-2 px-6 py-3 rounded-xl font-semibold text-sm font-sans hover:opacity-90 transition-opacity! hover:bg-accent!"
+			class="flex-1 gap-2 px-6 py-3 rounded-xl font-semibold text-sm font-sans"
 			onclick={onnextstep}
 		>
 			Next

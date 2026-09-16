@@ -113,7 +113,7 @@
 			<Button
 				variant="secondary"
 				size="content"
-				class="flex-1 gap-2 px-6 py-3 rounded-xl font-semibold text-sm font-sans border-[1.5px]! hover:border-text-muted hover:bg-transparent!"
+				class="flex-1 gap-2 px-6 py-3 rounded-xl font-semibold text-sm font-sans"
 				onclick={onretryhttps}
 			>
 				Retry
@@ -122,7 +122,7 @@
 		<Button
 			variant="primary"
 			size="content"
-			class="flex-1 gap-2 px-6 py-3 rounded-xl font-semibold text-sm font-sans hover:opacity-90 transition-opacity! hover:bg-accent! disabled:opacity-40! disabled:cursor-default!"
+			class="flex-1 gap-2 px-6 py-3 rounded-xl font-semibold text-sm font-sans"
 			onclick={onnextstep}
 			disabled={certStatus !== "ok"}
 		>
