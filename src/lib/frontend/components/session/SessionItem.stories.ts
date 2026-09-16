@@ -55,7 +55,9 @@ export const WithContextMenu: Story = {
 		);
 		const body = within(canvasElement.ownerDocument.body);
 		await expect(
-			await body.findByRole("button", { name: "Copy resume command" }),
+			// menuitem, not button: since conduit-test-de3.35.4 the menu is
+			// ui/Menu + ui/MenuItem, which render real menu roles.
+			await body.findByRole("menuitem", { name: "Copy resume command" }),
 			"More options must render the session context menu before capture",
 		).toBeVisible();
 	},

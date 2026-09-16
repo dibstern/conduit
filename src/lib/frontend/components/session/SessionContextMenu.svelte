@@ -1,12 +1,28 @@
 <!-- ─── SessionContextMenu ──────────────────────────────────────────────────── -->
-<!-- Dropdown menu for session actions: Rename, Copy Resume Command, Delete. -->
-<!-- Positioned relative to the anchor element (the "..." button). -->
+<!-- Session actions: Rename, Fork, Copy Resume Command, Delete.              -->
+<!--                                                                         -->
+<!-- Anchored to the "..." button its consumer already owns. Two consumers    -->
+<!-- mount it that way (SessionList and ProjectSwitcher), which is why the    -->
+<!-- `anchor` prop survived the move onto ui/Menu rather than the trigger     -->
+<!-- moving into the row: changing the shape would have restructured both.    -->
+<!--                                                                         -->
+<!-- The consumer mounts this only while the menu should be open, so `open`   -->
+<!-- starts true and `onclose` unmounts us. That is also why the empty        -->
+<!-- trigger snippet is safe: bits-ui has no trigger element to return focus  -->
+<!-- to on close, but by then this component no longer exists.                -->
+<!--                                                                         -->
+<!-- What this replaced (conduit-test-de3.35.4): a fixed full-screen backdrop -->
+<!-- for outside clicks, manual getBoundingClientRect positioning with no     -->
+<!-- collision handling, a window-level Escape listener, and four <button>s   -->
+<!-- with no role="menu", no role="menuitem" and no arrow-key navigation.     -->
 
 <script lang="ts">
 	import type { SessionInfo } from "../../types.js";
 	import { copyToClipboard } from "../../utils/clipboard.js";
 	import { showToast } from "../../stores/ui.svelte.js";
 	import Icon from "../ui/Icon.svelte";
+	import Menu from "../ui/Menu.svelte";
+	import MenuItem from "../ui/MenuItem.svelte";
 
 	// ─── Props ──────────────────────────────────────────────────────────────────
 
@@ -28,115 +44,62 @@
 		onclose: () => void;
 	} = $props();
 
-	// ─── Local state ────────────────────────────────────────────────────────────
-
-	let menuEl: HTMLDivElement | undefined = $state(undefined);
-
-	// ─── Positioning ─────────────────────────────────────────────────────────────
-
-	const menuStyle = $derived.by(() => {
-		if (!anchor) return "";
-		const rect = anchor.getBoundingClientRect();
-		// Position below the anchor, aligned to the right
-		return `top: ${rect.bottom + 4}px; left: ${rect.right}px; transform: translateX(-100%);`;
-	});
+	let open = $state(true);
 
 	// ─── Handlers ───────────────────────────────────────────────────────────────
 
-	function handleRename(e: MouseEvent) {
-		e.stopPropagation();
-		// Action first, then close — onclose unmounts this component
-		onrename(session.id);
-		onclose();
-	}
-
-	async function handleCopyResume(e: MouseEvent) {
-		e.stopPropagation();
-		const cmd = `opencode --session ${session.id}`;
-		const ok = await copyToClipboard(cmd);
+	async function handleCopyResume() {
+		const ok = await copyToClipboard(`opencode --session ${session.id}`);
 		if (ok) {
 			showToast("Copied resume command");
 		} else {
-			showToast("Failed to copy \u2014 clipboard unavailable", { variant: "error" });
+			showToast("Failed to copy — clipboard unavailable", {
+				variant: "error",
+			});
 		}
 		oncopyresume(session.id);
-		onclose();
-	}
-
-	function handleDelete(e: MouseEvent) {
-		e.stopPropagation();
-		// Action first, then close — onclose unmounts this component
-		ondelete(session.id, session.title || "New Session");
-		onclose();
-	}
-
-	function handleBackdropClick(e: MouseEvent) {
-		if (e.target === e.currentTarget) {
-			onclose();
-		}
-	}
-
-	function handleKeydown(e: KeyboardEvent) {
-		if (e.key === "Escape") {
-			onclose();
-		}
 	}
 </script>
 
-<svelte:window onkeydown={handleKeydown} />
-
-<!-- Invisible backdrop to catch clicks outside -->
-<!-- svelte-ignore a11y_click_events_have_key_events -->
-<!-- svelte-ignore a11y_no_static_element_interactions -->
-<div
-	class="fixed inset-0 z-[var(--z-popover)]"
-	onclick={handleBackdropClick}
+<Menu
+	bind:open
+	onopenchange={(nextOpen) => {
+		if (!nextOpen) onclose();
+	}}
+	customAnchor={anchor}
+	ariaLabel="Session actions"
+	side="bottom"
+	align="end"
+	class="min-w-[180px]"
+	data-testid="session-ctx-menu"
 >
-	<!-- Menu dropdown -->
-	<div
-		bind:this={menuEl}
-		class="session-ctx-menu fixed z-[var(--z-popover-raised)] min-w-[180px] bg-bg-alt border border-border rounded-lg py-1 shadow-panel"
-		style={menuStyle}
-		onclick={(e) => e.stopPropagation()}
+	<!-- Intentionally empty: the anchor is an element the consumer owns, so
+	     there is nothing for us to render. `customAnchor` does the pointing. -->
+	{#snippet trigger()}{/snippet}
+
+	<MenuItem
+		data-testid="session-ctx-rename"
+		onselect={() => onrename(session.id)}
 	>
-		<!-- Rename -->
-		<button
-		class="session-ctx-item flex items-center gap-2 w-full py-2 px-3 border-none bg-transparent text-text-secondary text-base font-mono cursor-pointer text-left transition-colors duration-100 hover:bg-[rgba(var(--overlay-rgb),0.04)] hover:text-text"
-		onclick={handleRename}
-		>
-			<Icon name="pencil" size={14} />
-			<span>Rename</span>
-		</button>
+		<Icon name="pencil" size={13} />
+		<span>Rename</span>
+	</MenuItem>
 
-		<!-- Fork -->
-		<button
-		class="session-ctx-item flex items-center gap-2 w-full py-2 px-3 border-none bg-transparent text-text-secondary text-base font-mono cursor-pointer text-left transition-colors duration-100 hover:bg-[rgba(var(--overlay-rgb),0.04)] hover:text-text"
-		onclick={(e) => {
-				e.stopPropagation();
-				onfork(session.id);
-				onclose();
-			}}
-		>
-			<Icon name="git-fork" size={14} />
-			<span>Fork</span>
-		</button>
+	<MenuItem data-testid="session-ctx-fork" onselect={() => onfork(session.id)}>
+		<Icon name="git-fork" size={13} />
+		<span>Fork</span>
+	</MenuItem>
 
-		<!-- Copy resume command -->
-		<button
-		class="session-ctx-item flex items-center gap-2 w-full py-2 px-3 border-none bg-transparent text-text-secondary text-base font-mono cursor-pointer text-left transition-colors duration-100 hover:bg-[rgba(var(--overlay-rgb),0.04)] hover:text-text"
-		onclick={handleCopyResume}
-		>
-			<Icon name="copy" size={14} />
-			<span>Copy resume command</span>
-		</button>
+	<MenuItem data-testid="session-ctx-copy-resume" onselect={handleCopyResume}>
+		<Icon name="copy" size={13} />
+		<span>Copy resume command</span>
+	</MenuItem>
 
-		<!-- Delete -->
-		<button
-			class="session-ctx-item session-ctx-delete flex items-center gap-2 w-full py-2 px-3 border-none bg-transparent text-base font-mono cursor-pointer text-left transition-colors duration-100 text-error hover:bg-error/10 hover:text-error"
-			onclick={handleDelete}
-		>
-			<Icon name="trash-2" size={14} />
-			<span>Delete</span>
-		</button>
-	</div>
-</div>
+	<MenuItem
+		variant="danger"
+		data-testid="session-ctx-delete"
+		onselect={() => ondelete(session.id, session.title || "New Session")}
+	>
+		<span>Delete</span>
+	</MenuItem>
+</Menu>

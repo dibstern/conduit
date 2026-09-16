@@ -122,9 +122,6 @@
 			"native-control-bypass": 5,
 			"private-recipe-import": 1
 		},
-		"src/lib/frontend/components/session/SessionContextMenu.svelte": {
-			"native-control-bypass": 4
-		},
 		"src/lib/frontend/components/session/SessionItem.svelte": {
 			"native-control-bypass": 3
 		},
