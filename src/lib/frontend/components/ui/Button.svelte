@@ -25,7 +25,8 @@
 		| "danger-outline"
 		| "accent-soft"
 		| "toolbar"
-		| "pill";
+		| "pill"
+		| "pill-warning";
 
 	/**
 	 * `content` is an opt-out, not a third size: it emits no padding, radius,
@@ -81,6 +82,23 @@
 			"gap-1 h-6 px-2 rounded-full text-xs font-medium font-brand " +
 			"border border-border bg-bg-alt text-text-muted " +
 			"duration-100 hover:bg-bg hover:text-text-secondary",
+		/**
+		 * `pill`'s elevated state. PermissionModeSelector wears it when the
+		 * session is on a permissive approval mode, where the warning colour is
+		 * the whole message.
+		 *
+		 * Deliberately carries no hover step, matching the recipe as found: the
+		 * neutral pill's hover says "this opens something", and a warning
+		 * surface that lightens under the cursor reads as a warning being
+		 * dismissed.
+		 *
+		 * A second variant string rather than a `warning` boolean on `pill`:
+		 * every other colour choice here is a variant, and one boolean modifier
+		 * invites the next one.
+		 */
+		"pill-warning":
+			"gap-1 h-6 px-2 rounded-full text-xs font-medium font-brand " +
+			"border border-warning/30 bg-warning-bg text-warning duration-100",
 		/**
 		 * Dim icon affordances in a dense toolbar. The 4% overlay fill is the
 		 * distinctive part and appears in no other variant.

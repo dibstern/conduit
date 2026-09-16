@@ -84,6 +84,33 @@ export const Pill: Story = {
 };
 
 /**
+ * The pill's hover step, which no other Button story covers: `pill` is the
+ * only variant whose hover moves BOTH the fill and the text colour, and
+ * `Hover` above depicts `primary`.
+ */
+export const PillHover: Story = {
+	...Pill,
+	parameters: { pseudo: { hover: true } },
+};
+
+/**
+ * `pill`'s elevated state, worn by PermissionModeSelector when the session is
+ * on a permissive approval mode.
+ *
+ * It replaces a standalone `ui/Pill` component that duplicated the whole pill
+ * recipe and had no consumers -- both of its variants now live here, so the
+ * neutral and warning pills cannot drift apart (conduit-test-de3.35.8).
+ * Deliberately no PillWarningHover companion: the variant has no hover step.
+ */
+export const PillWarning: Story = {
+	args: {
+		variant: "pill-warning",
+		size: "content",
+		children: label("Edits"),
+	},
+};
+
+/**
  * `size="content"` emits no padding, radius, weight or type scale — the call
  * site brings its own, additively. Without a baseline this story would be an
  * unstyled box, which is the point: it proves the size really is an opt-out

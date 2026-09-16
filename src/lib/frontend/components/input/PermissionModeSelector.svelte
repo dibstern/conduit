@@ -3,6 +3,7 @@
 <!-- Amber tint when not "ask" so elevated permissions are visibly active.    -->
 
 <script lang="ts">
+	import Button from "../ui/Button.svelte";
 	import Icon from "../ui/Icon.svelte";
 	import { dismiss } from "../../actions/use-dismiss.svelte.js";
 	import { discoveryState } from "../../stores/discovery.svelte.js";
@@ -121,17 +122,26 @@
 		},
 	}}
 >
-	<button
+	<!-- The elevated state is a whole variant rather than a conditional class
+	     list, because a call-site colour cannot be trusted to beat a variant's:
+	     consumer `class` is additive, and Tailwind's emission order decides the
+	     winner rather than the order you wrote them in. Both pill recipes now
+	     live in ui/Button, so the two states cannot drift apart.
+
+	     `ml-0.5` is the only thing left here: it is this pill's position in the
+	     composer strip, which is the feature's business, not the pill's. -->
+	<Button
+		variant={isElevated ? "pill-warning" : "pill"}
+		size="content"
 		data-testid="permission-mode-badge"
-		class="inline-flex items-center gap-1 h-6 px-2 ml-0.5 border text-xs font-medium cursor-pointer whitespace-nowrap rounded-full transition-colors duration-100 font-brand {isElevated
-			? 'border-warning/30 bg-warning-bg text-warning'
-			: 'border-border bg-bg-alt text-text-muted hover:bg-bg hover:text-text-secondary'}"
+		class="ml-0.5"
 		title="Approvals ({currentLabel})"
+		aria-expanded={dropdownOpen}
 		onclick={toggleDropdown}
 	>
 		{currentLabel}
 		<Icon name="chevron-down" size={8} class="shrink-0 opacity-50" />
-	</button>
+	</Button>
 
 	{#if dropdownOpen}
 		<div
