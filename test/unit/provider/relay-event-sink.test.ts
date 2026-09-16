@@ -1,4 +1,4 @@
-import { Effect } from "effect";
+import { Effect, Fiber } from "effect";
 import { describe, expect, it, vi } from "vitest";
 import type { ProviderRuntimeEvent } from "../../../src/lib/contracts/providers/provider-runtime-event.js";
 import type {
@@ -714,6 +714,53 @@ describe("createRelayEventSink — permission/question", () => {
 			"que_1",
 			{ "0": "Yes" },
 		);
+	});
+
+	it("clears the processing timeout while a question awaits the user", async () => {
+		// The turn is blocked on the human, so the 2-minute no-activity timeout
+		// must not be running: restarting it fires a bogus PROCESSING_TIMEOUT
+		// while the question is still on screen.
+		const send = vi.fn();
+		const clearTimeout = vi.fn();
+		const resetTimeout = vi.fn();
+		const pendingInteractions = {
+			beginPermissionRequest: vi.fn(() =>
+				Effect.sync(() => ({ awaitResponse: Effect.never })),
+			),
+			resolvePermissionRequest: vi.fn(() => Effect.succeed(true)),
+			beginQuestionRequest: vi.fn(() =>
+				Effect.sync(() => ({ awaitAnswers: Effect.never })),
+			),
+			resolveQuestionRequest: vi.fn(() => Effect.succeed(true)),
+		};
+		const sink = createRelayEventSink({
+			sessionId: "ses-1",
+			send,
+			clearTimeout,
+			resetTimeout,
+			pendingInteractions,
+		});
+
+		const fiber = Effect.runFork(
+			sink.requestQuestion({
+				requestId: "que_1",
+				questions: [
+					{
+						question: "Continue?",
+						header: "Confirm",
+						options: [{ label: "Yes", description: "Continue" }],
+						multiSelect: false,
+						custom: true,
+					},
+				],
+			}),
+		);
+		await vi.waitFor(() => expect(send).toHaveBeenCalled());
+
+		expect(clearTimeout).toHaveBeenCalled();
+		expect(resetTimeout).not.toHaveBeenCalled();
+
+		await Effect.runPromise(Fiber.interrupt(fiber));
 	});
 });
 
