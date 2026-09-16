@@ -5,6 +5,11 @@
 <script lang="ts">
 	import Icon from "../ui/Icon.svelte";
 	import Button from "../ui/Button.svelte";
+	import Menu from "../ui/Menu.svelte";
+	import MenuItem from "../ui/MenuItem.svelte";
+	import MenuRadioGroup from "../ui/MenuRadioGroup.svelte";
+	import MenuRadioItem from "../ui/MenuRadioItem.svelte";
+	import MenuSeparator from "../ui/MenuSeparator.svelte";
 
 	// The box only; ui/Button `toolbar` owns the colours and the 4% hover fill.
 	// A 23px square (4px padding around a 15px glyph at the 12px root), which is
@@ -87,12 +92,7 @@
 		togglePanel("usage-panel");
 	}
 
-	function handleToggleInstanceSelector() {
-		instanceSelectorOpen = !instanceSelectorOpen;
-	}
-
 	function handleSelectInstance(instanceId: string) {
-		instanceSelectorOpen = false;
 		// Rebind the current project to the selected instance
 		const slug = getCurrentSlug();
 		if (slug) {
@@ -107,7 +107,6 @@
 	}
 
 	function handleManageInstances() {
-		instanceSelectorOpen = false;
 		window.dispatchEvent(new CustomEvent("settings:open", { detail: { tab: "instances" } }));
 	}
 
@@ -182,49 +181,65 @@
 				<span class="header-project-inner inline-block pr-[3em]">{getCurrentSlug() ?? "conduit"}</span>
 			</h1>
 				{#if currentInstance}
-					<div class="relative">
-						<button
-							class="inline-flex items-center gap-1 ml-1 px-1.5 py-0.5 rounded text-xs font-medium text-text-muted bg-[rgba(var(--overlay-rgb),0.06)] hover:bg-[rgba(var(--overlay-rgb),0.1)] cursor-pointer"
-							title="{currentInstance.name} ({currentInstance.status})"
-							data-testid="instance-badge"
-							onclick={handleToggleInstanceSelector}
-						>
-							<span
-								class={"w-1.5 h-1.5 rounded-full shrink-0 " +
-									instanceStatusColor(currentInstance.status)}
-								data-testid="instance-status-dot"
-							></span>
-							{currentInstance.name}
-						</button>
-						{#if instanceSelectorOpen}
-							<div
-								id="instance-selector-dropdown"
-								class="absolute top-full left-0 mt-1 min-w-[180px] rounded-md border border-border bg-bg shadow-lg z-50 py-1 text-xs"
+					<!-- Was a hand-rolled dropdown: a bare <button> toggling an
+					     absolutely-positioned <div> of bare <button>s. It had no
+					     aria-expanded, no aria-haspopup, no role, no arrow-key
+					     navigation, no Escape, and no dismiss on outside click --
+					     the whole menu contract, absent. ui/Menu brings all of it
+					     (conduit-test-de3.35.6).
+
+					     MenuRadioGroup rather than plain items because exactly one
+					     instance is current, which the old markup knew and never
+					     said: the list rendered every instance identically, so the
+					     active one was indistinguishable once the badge was covered
+					     by the menu itself. -->
+					<Menu
+						bind:open={instanceSelectorOpen}
+						ariaLabel="Select instance"
+						align="start"
+						data-testid="instance-selector-dropdown"
+					>
+						{#snippet trigger({ props })}
+							<Button
+								{...props}
+								variant="pill"
+								size="content"
+								class="ml-1"
+								title="{currentInstance.name} ({currentInstance.status})"
+								data-testid="instance-badge"
 							>
-								{#each instanceState.instances as inst}
-									<button
-										class="flex items-center gap-2 w-full px-3 py-1.5 text-left hover:bg-[rgba(var(--overlay-rgb),0.06)] text-text"
-										onclick={() => handleSelectInstance(inst.id)}
-									>
+								<span
+									class={"w-1.5 h-1.5 rounded-full shrink-0 " +
+										instanceStatusColor(currentInstance.status)}
+									data-testid="instance-status-dot"
+								></span>
+								{currentInstance.name}
+							</Button>
+						{/snippet}
+
+						<MenuRadioGroup value={currentInstance.id}>
+							{#each instanceState.instances as inst (inst.id)}
+								<MenuRadioItem
+									value={inst.id}
+									onselect={() => handleSelectInstance(inst.id)}
+								>
+									<span class="flex items-center gap-2">
 										<span
 											class={"w-1.5 h-1.5 rounded-full shrink-0 " +
 												instanceStatusColor(inst.status)}
 											data-testid="instance-status-dot"
 										></span>
 										{inst.name}
-									</button>
-								{/each}
-								<div class="border-t border-border mt-1 pt-1">
-									<button
-										class="w-full px-3 py-1.5 text-left text-text-muted hover:bg-[rgba(var(--overlay-rgb),0.06)]"
-										onclick={handleManageInstances}
-									>
-										Manage Instances
-									</button>
-								</div>
-							</div>
-						{/if}
-					</div>
+									</span>
+								</MenuRadioItem>
+							{/each}
+						</MenuRadioGroup>
+
+						<MenuSeparator />
+						<MenuItem onselect={handleManageInstances}>
+							Manage Instances
+						</MenuItem>
+					</Menu>
 				{/if}
 			</div>
 		</div>

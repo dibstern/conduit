@@ -24,7 +24,8 @@
 		| "success-soft"
 		| "danger-outline"
 		| "accent-soft"
-		| "toolbar";
+		| "toolbar"
+		| "pill";
 
 	/**
 	 * `content` is an opt-out, not a third size: it emits no padding, radius,
@@ -57,6 +58,29 @@
 		"danger-outline":
 			"border border-border bg-transparent text-error hover:bg-error/[0.08]",
 		"accent-soft": "text-accent bg-accent/10 hover:bg-accent/20",
+		/**
+		 * The badge-shaped trigger of a dropdown that reports a current value:
+		 * thinking level, context window, active instance. Three of them sit
+		 * within ~200px of each other in the header strip.
+		 *
+		 * This is the one variant that carries GEOMETRY as well as colour, and
+		 * the exception is deliberate. `toolbar` is colour-only because its two
+		 * consumers genuinely use different boxes (Header 23px with a border,
+		 * SessionList an 18px square), so forcing one on both would be a taste
+		 * call. The opposite is true here: ModelVariant and
+		 * ContextWindowSelector had hand-written BYTE-IDENTICAL 17-utility
+		 * copies of this recipe, and being a pill is what the affordance IS.
+		 * Splitting it across a variant and a size would mean every call site
+		 * has to remember to pair them, and a half-applied pill is worse than
+		 * no pill at all (conduit-test-de3.35.6).
+		 *
+		 * Pair with `size="content"`; `sm`/`md` would add a conflicting
+		 * `rounded-lg`.
+		 */
+		pill:
+			"gap-1 h-6 px-2 rounded-full text-xs font-medium font-brand " +
+			"border border-border bg-bg-alt text-text-muted " +
+			"duration-100 hover:bg-bg hover:text-text-secondary",
 		/**
 		 * Dim icon affordances in a dense toolbar. The 4% overlay fill is the
 		 * distinctive part and appears in no other variant.

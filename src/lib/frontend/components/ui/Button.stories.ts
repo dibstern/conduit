@@ -24,6 +24,8 @@ const meta = {
 				"success-soft",
 				"danger-outline",
 				"accent-soft",
+				"toolbar",
+				"pill",
 			],
 		},
 		size: { control: "inline-radio", options: ["sm", "md", "content"] },
@@ -65,6 +67,20 @@ export const DangerOutline: Story = {
 };
 export const AccentSoft: Story = {
 	args: { variant: "accent-soft", children: label("Show full output") },
+};
+
+/**
+ * The only variant that carries geometry (see Button.svelte::pill). It is
+ * always paired with `size="content"`, so the story pairs them too -- a `Pill`
+ * on `sm`/`md` would pick up a conflicting `rounded-lg` and this baseline is
+ * what would catch someone "simplifying" that pairing away.
+ */
+export const Pill: Story = {
+	args: {
+		variant: "pill",
+		size: "content",
+		children: label("Personal"),
+	},
 };
 
 /**

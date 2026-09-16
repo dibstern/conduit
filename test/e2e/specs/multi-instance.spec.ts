@@ -462,7 +462,7 @@ test.describe("Instance Selector Dropdown", () => {
 		await setupMultiInstance(page, baseURL);
 		const badge = page.locator("[data-testid='instance-badge']");
 		await badge.click();
-		const dropdown = page.locator("#instance-selector-dropdown");
+		const dropdown = page.locator("[data-testid='instance-selector-dropdown']");
 		await expect(dropdown).toBeVisible();
 	});
 
@@ -473,7 +473,7 @@ test.describe("Instance Selector Dropdown", () => {
 		await setupMultiInstance(page, baseURL);
 		const badge = page.locator("[data-testid='instance-badge']");
 		await badge.click();
-		const dropdown = page.locator("#instance-selector-dropdown");
+		const dropdown = page.locator("[data-testid='instance-selector-dropdown']");
 		await expect(dropdown).toContainText("Personal");
 		await expect(dropdown).toContainText("Work");
 		const dots = dropdown.locator("[data-testid='instance-status-dot']");
@@ -493,7 +493,7 @@ test.describe("Instance Selector Dropdown", () => {
 		const badge = page.locator("[data-testid='instance-badge']");
 		await badge.click();
 		const manageLink = page
-			.locator("#instance-selector-dropdown")
+			.locator("[data-testid='instance-selector-dropdown']")
 			.getByText("Manage Instances");
 		await expect(manageLink).toBeVisible();
 	});
@@ -946,7 +946,7 @@ test.describe("Instance Selector: Rebind Project", () => {
 
 		// Click badge to open dropdown
 		await badge.click();
-		const dropdown = page.locator("#instance-selector-dropdown");
+		const dropdown = page.locator("[data-testid='instance-selector-dropdown']");
 		await expect(dropdown).toBeVisible();
 
 		// Click "Work" in the dropdown

@@ -3,6 +3,7 @@
 
 <script lang="ts">
 	import type { ContextWindowOption } from "../../types.js";
+	import Button from "../ui/Button.svelte";
 	import Icon from "../ui/Icon.svelte";
 	import Menu from "../ui/Menu.svelte";
 	import MenuRadioGroup from "../ui/MenuRadioGroup.svelte";
@@ -81,15 +82,17 @@
 		data-testid="context-window-dropdown"
 	>
 		{#snippet trigger({ props })}
-			<button
+			<Button
 				{...props}
+				variant="pill"
+				size="content"
+				class="ml-0.5"
 				data-testid="context-window-badge"
-				class="inline-flex items-center gap-1 h-6 px-2 ml-0.5 border border-border bg-bg-alt text-text-muted text-xs font-medium cursor-pointer whitespace-nowrap rounded-full transition-colors duration-100 hover:bg-bg hover:text-text-secondary font-brand"
 				title="Context window ({currentLabel})"
 			>
 				{currentLabel}
 				<Icon name="chevron-down" size={8} class="shrink-0 opacity-50" />
-			</button>
+			</Button>
 		{/snippet}
 
 		<MenuRadioGroup value={currentOverride}>

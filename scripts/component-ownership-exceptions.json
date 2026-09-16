@@ -63,24 +63,15 @@
 			"native-control-bypass": 2,
 			"private-recipe-import": 1
 		},
-		"src/lib/frontend/components/layout/Header.svelte": {
-			"native-control-bypass": 3
-		},
 		"src/lib/frontend/components/layout/Sidebar.svelte": {
 			"native-control-bypass": 5
 		},
 		"src/lib/frontend/components/model/AgentSelector.svelte": {
 			"native-control-bypass": 2
 		},
-		"src/lib/frontend/components/model/ContextWindowSelector.svelte": {
-			"native-control-bypass": 1
-		},
 		"src/lib/frontend/components/model/InstanceModelPicker.svelte": {
 			"native-control-bypass": 8,
 			"private-recipe-import": 1
-		},
-		"src/lib/frontend/components/model/ModelVariant.svelte": {
-			"native-control-bypass": 1
 		},
 		"src/lib/frontend/components/overlays/Banners.svelte": {
 			"native-control-bypass": 1
