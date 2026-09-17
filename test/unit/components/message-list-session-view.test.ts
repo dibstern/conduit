@@ -2,7 +2,10 @@ import { cleanup, render } from "@testing-library/svelte";
 import { flushSync } from "svelte";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import MessageList from "../../../src/lib/frontend/components/chat/MessageList.svelte";
-import { getOrCreateSessionSlot } from "../../../src/lib/frontend/stores/chat.svelte.js";
+import {
+	chatState,
+	getOrCreateSessionSlot,
+} from "../../../src/lib/frontend/stores/chat.svelte.js";
 import { sessionState } from "../../../src/lib/frontend/stores/session.svelte.js";
 import { sessionViewState } from "../../../src/lib/frontend/stores/session-view.svelte.js";
 
@@ -97,5 +100,70 @@ describe("MessageList session-view publication", () => {
 		sessionState.currentId = "session-view-next";
 		flushSync();
 		expect(sessionViewState.atBottom).toBe(true);
+	});
+
+	it.each([
+		"assistant",
+		"tool",
+	])("renders resumed %s activity as working after a result", (kind) => {
+		const slot = getOrCreateSessionSlot("session-view-first");
+		chatState.phase = "processing";
+		slot.activity.phase = "processing";
+		slot.messages.messages = [
+			{ type: "user", uuid: "prompt", text: "Check the files" },
+			{
+				type: "tool",
+				uuid: "first-tool",
+				id: "first-tool",
+				name: "Read",
+				input: { tool: "Read", filePath: "/a.ts" },
+				status: "completed",
+			},
+			{ type: "result", uuid: "first-result", cost: 0.01 },
+		];
+		const { container } = mountTranscript();
+		expect(container.querySelectorAll(".turn-activity")).toHaveLength(1);
+		expect(container.textContent).toContain("Worked");
+		expect(container.textContent).not.toContain("Working");
+
+		slot.messages.messages = [
+			...slot.messages.messages,
+			kind === "assistant"
+				? {
+						type: "assistant",
+						uuid: "continued",
+						rawText: "One more check",
+						html: "<p>One more check</p>",
+						finalized: false,
+					}
+				: {
+						type: "tool",
+						uuid: "next-tool",
+						id: "next-tool",
+						name: "Read",
+						input: { tool: "Read", filePath: "/b.ts" },
+						status: "running",
+					},
+		];
+		flushSync();
+		expect(container.querySelectorAll(".turn-activity")).toHaveLength(2);
+		expect(container.querySelectorAll(".glow-tool-running")).toHaveLength(1);
+		expect(container.textContent).toContain("Working");
+		expect(container.textContent).toContain(
+			kind === "assistant" ? "Replying" : "Reading",
+		);
+
+		slot.messages.messages = [
+			...slot.messages.messages,
+			{ type: "result", uuid: "last-result", cost: 0.02 },
+		];
+		flushSync();
+		expect(container.querySelector(".glow-tool-running")).toBeNull();
+		expect(container.textContent).not.toContain("Working");
+		if (kind === "assistant")
+			expect(container.querySelector(".result-bar")).not.toBeNull();
+		slot.messages.messages = [];
+		chatState.phase = "idle";
+		slot.activity.phase = "idle";
 	});
 });

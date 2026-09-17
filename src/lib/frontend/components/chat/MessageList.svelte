@@ -18,7 +18,7 @@
 	import { permissionsState, getLocalPermissions } from "../../stores/permissions.svelte.js";
 	import { createScrollController } from "../../stores/scroll-controller.svelte.js";
 	import { sessionViewState } from "../../stores/session-view.svelte.js";
-	import { economics, segmentTurns, type Turn } from "../../utils/turns.js";
+	import { economics, lastResult, segmentTurns, type Turn } from "../../utils/turns.js";
 	import UserMessage from "./UserMessage.svelte";
 	import AssistantMessage from "./AssistantMessage.svelte";
 	import TurnActivity from "./TurnActivity.svelte";
@@ -254,7 +254,7 @@
 		{/if}
 		{#each turn.segments as segment, i}
 			{@const final = i === turn.segments.length - 1}
-			{#if segment.activity.length > 0}
+			{#if segment.activity.length > 0 || (i > 0 && final && turn.live)}
 				<TurnActivity {turn} {segment} {final} />
 			{/if}
 			<!-- Notices sit between the final work and reply: they are lifted out of
@@ -277,11 +277,11 @@
 				</div>
 			{/if}
 		{/each}
-		<!-- A turn that did work carries its bill on the strip. A tool-less question
-		     and answer has no ledger, so it renders the same bill on its own line —
+		<!-- A final segment that did work carries its bill on the strip. A text-only
+		     final segment has no ledger, so it renders the same bill on its own line —
 		     one formatter for both, rather than a second dialect of the same facts.
 		     .result-bar is an E2E selector; .turn-meta rides on TurnEconomics. -->
-		{#if turn.result && turn.segments.every((segment) => segment.activity.length === 0)}
+		{#if lastResult(turn) && turn.segments.at(-1)?.activity.length === 0 && (turn.segments.length === 1 || !turn.live)}
 			<!-- `now` only matters for a live turn, and this branch needs a result. -->
 			{@const bill = economics(turn, Date.now())}
 			<div class="msg-container">

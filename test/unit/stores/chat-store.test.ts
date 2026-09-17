@@ -42,6 +42,7 @@ import type {
 	ToolMessage,
 	UserMessage as UserMsg,
 } from "../../../src/lib/frontend/types.js";
+import { segmentTurns } from "../../../src/lib/frontend/utils/turns.js";
 import { testActivity, testMessages } from "../../helpers/test-session-slot.js";
 
 // ─── Per-session tiers for handler calls ────────────────────────────────────
@@ -154,6 +155,63 @@ describe("thinking lifecycle", () => {
 // ─── handleToolStart / handleToolExecuting / handleToolResult ───────────────
 
 describe("tool lifecycle", () => {
+	it("keeps late output and metadata on a completed tool inside its closed segment", () => {
+		handleToolStart(ta, tm, {
+			type: "tool_start",
+			sessionId: "s1",
+			id: "t1",
+			name: "Read",
+		});
+		handleToolResult(ta, tm, {
+			type: "tool_result",
+			sessionId: "s1",
+			id: "t1",
+			content: "initial",
+			is_error: false,
+		});
+		handleResult(ta, tm, {
+			type: "result",
+			sessionId: "s1",
+			cost: 0.01,
+			duration: 100,
+			usage: { input: 1, output: 1, cache_read: 0, cache_creation: 0 },
+		});
+		const before = segmentTurns(chatState.messages, true)[0]!;
+		expect(before.live).toBe(false);
+		handleToolResult(ta, tm, {
+			type: "tool_result",
+			sessionId: "s1",
+			id: "t1",
+			content: "late output",
+			is_error: false,
+		});
+		handleToolExecuting(ta, tm, {
+			type: "tool_executing",
+			sessionId: "s1",
+			id: "t1",
+			name: "Read",
+			input: undefined,
+			metadata: { duration: 500 },
+		});
+		const after = segmentTurns(chatState.messages, true)[0]!;
+		expect(after.live).toBe(false);
+		expect(after.segments).toHaveLength(1);
+		expect(after.segments[0]?.activity[0]).toMatchObject({
+			result: "late output",
+			metadata: { duration: 500 },
+		});
+		expect(after.segments[0]?.end).toBe(before.segments[0]?.end);
+		handleToolStart(ta, tm, {
+			type: "tool_start",
+			sessionId: "s1",
+			id: "t2",
+			name: "Read",
+		});
+		const resumed = segmentTurns(chatState.messages, true)[0]!;
+		expect(resumed.live).toBe(true);
+		expect(resumed.segments).toHaveLength(2);
+	});
+
 	it("creates a tool message on start", () => {
 		handleToolStart(ta, tm, {
 			type: "tool_start",
