@@ -37,7 +37,11 @@ import {
 	createEventId,
 	type EventId,
 	type EventMetadata,
+	type StoredEvent,
 } from "../../../src/lib/persistence/events.js";
+import resumedTurnEvents from "../../fixtures/claude-resumed-turn.json" with {
+	type: "json",
+};
 
 // ─── Test helpers ───────────────────────────────────────────────────────────
 
@@ -1306,6 +1310,51 @@ describe("Effect Message Projector (via ProjectionRunner)", () => {
 // ─── Turn Projector Tests ───────────────────────────────────────────────────
 
 describe("Effect Turn Projector (via ProjectionRunner)", () => {
+	it("keeps one production turn running when Claude resumes after successive results", () =>
+		runTest(
+			Effect.gen(function* () {
+				const sql = yield* SqlClient.SqlClient;
+				const runner = yield* ProjectionRunnerEffectTag;
+				const sessionId = "ses_c2d8cd521bc14f9f8f7700096bbf1d23";
+				yield* seedSession(sessionId);
+				yield* runner.markRecovered();
+				for (const [index, recorded] of resumedTurnEvents.entries()) {
+					// The export omits envelope fields unrelated to the regression.
+					const event = {
+						...recorded,
+						eventId: `recorded-${recorded.sequence}`,
+						sessionId,
+						streamVersion: index,
+						metadata: {},
+					} as StoredEvent;
+					yield* runner.projectEvent(event);
+					const turns = yield* sql<{
+						id: string;
+					}>`SELECT id, state, assistant_message_id, completed_at, cost, tokens_in, tokens_out FROM turns`;
+					expect(turns).toHaveLength(1);
+					expect(turns[0]?.id).toBe("52feab57-ed40-4885-b23b-71dcd78209a8");
+					if (event.type === "turn.completed") {
+						expect(turns[0]).toMatchObject({
+							state: "completed",
+							assistant_message_id: event.data.messageId,
+							completed_at: event.createdAt,
+							cost: event.data.cost,
+							tokens_in: index === 3 ? 2 : 4,
+							tokens_out: index === 3 ? 2 : 3,
+						});
+					} else if (index === 5 || index === 6 || index >= 11) {
+						expect(turns[0], `after event ${index + 1}`).toMatchObject({
+							state: "running",
+							completed_at: null,
+							assistant_message_id:
+								"messageId" in event.data ? event.data.messageId : null,
+						});
+					}
+				}
+				expect(yield* runner.getFailures()).toEqual([]);
+			}),
+		));
+
 	it("preserves known accounting when a later execution omits usage", () =>
 		runTest(
 			Effect.gen(function* () {
@@ -1465,6 +1514,8 @@ describe("Effect Turn Projector (via ProjectionRunner)", () => {
 					makeSessionCreated("s1"),
 					makeMessageCreated("s1", "u1", { role: "user" }),
 					makeMessageCreated("s1", "a1"),
+					makeToolStarted("s1", "a1", "tool1"),
+					makeToolCompleted("s1", "a1", "tool1"),
 					canonicalEvent(
 						"turn.completed",
 						"s1",
@@ -1476,6 +1527,11 @@ describe("Effect Turn Projector (via ProjectionRunner)", () => {
 				}
 				// A late flush of text for work that already finished is not new
 				// work. Treating it as new would leave the turn permanently running.
+				yield* runner.projectEvent(
+					yield* store.append(
+						makeToolRunning("s1", "a1", "tool1", { duration: 500 }),
+					),
+				);
 				yield* runner.projectEvent(
 					yield* store.append(makeTextDelta("s1", "a1", "trailing")),
 				);

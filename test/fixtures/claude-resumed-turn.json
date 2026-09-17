@@ -1,0 +1,158 @@
+[
+	{
+		"sequence": 609186,
+		"type": "message.created",
+		"createdAt": 1789508753985,
+		"provider": "claude",
+		"data": {
+			"messageId": "52feab57-ed40-4885-b23b-71dcd78209a8",
+			"role": "user",
+			"sessionId": "ses_c2d8cd521bc14f9f8f7700096bbf1d23"
+		}
+	},
+	{
+		"sequence": 609189,
+		"type": "session.status",
+		"createdAt": 1789508754212,
+		"provider": "claude",
+		"data": {
+			"sessionId": "ses_c2d8cd521bc14f9f8f7700096bbf1d23",
+			"status": "busy"
+		}
+	},
+	{
+		"sequence": 609190,
+		"type": "message.created",
+		"createdAt": 1789508756034,
+		"provider": "claude",
+		"data": {
+			"messageId": "msg_011Cf5xXKUsoCy42NPVLadL7",
+			"role": "assistant",
+			"sessionId": "ses_c2d8cd521bc14f9f8f7700096bbf1d23"
+		}
+	},
+	{
+		"sequence": 618377,
+		"type": "turn.completed",
+		"createdAt": 1789523099007,
+		"provider": "claude",
+		"data": {
+			"messageId": "msg_011Cf5xXKUsoCy42NPVLadL7",
+			"cost": 38.53352824999996,
+			"tokens": {
+				"input": 2,
+				"output": 2,
+				"cacheRead": 98991,
+				"cacheWrite": 551,
+				"contextWindow": 1000000
+			},
+			"duration": 14344789
+		}
+	},
+	{
+		"sequence": 618378,
+		"type": "session.status",
+		"createdAt": 1789523099007,
+		"provider": "claude",
+		"data": {
+			"sessionId": "ses_c2d8cd521bc14f9f8f7700096bbf1d23",
+			"status": "idle"
+		}
+	},
+	{
+		"sequence": 618381,
+		"type": "session.status",
+		"createdAt": 1789523099075,
+		"provider": "claude",
+		"data": {
+			"sessionId": "ses_c2d8cd521bc14f9f8f7700096bbf1d23",
+			"status": "busy"
+		}
+	},
+	{
+		"sequence": 620139,
+		"type": "message.created",
+		"createdAt": 1789523100019,
+		"provider": "claude",
+		"data": {
+			"messageId": "msg_011Cf6GkkAtjRv8gwmBLLfEv",
+			"role": "assistant",
+			"sessionId": "ses_c2d8cd521bc14f9f8f7700096bbf1d23"
+		}
+	},
+	{
+		"sequence": 620141,
+		"type": "thinking.start",
+		"createdAt": 1789523100021,
+		"provider": "claude",
+		"data": {
+			"messageId": "msg_011Cf6GkkAtjRv8gwmBLLfEv",
+			"partId": "b317a104-a8cc-4b16-ad62-851aac27cb3b"
+		}
+	},
+	{
+		"sequence": 620143,
+		"type": "tool.started",
+		"createdAt": 1789523102022,
+		"provider": "claude",
+		"data": {
+			"messageId": "msg_011Cf6GkkAtjRv8gwmBLLfEv",
+			"partId": "toolu_01SbJvkue5vWuYHa1kJjp14w",
+			"toolName": "Bash",
+			"callId": "toolu_01SbJvkue5vWuYHa1kJjp14w"
+		}
+	},
+	{
+		"sequence": 620146,
+		"type": "tool.completed",
+		"createdAt": 1789523102063,
+		"provider": "claude",
+		"data": {
+			"messageId": "msg_011Cf6GkkAtjRv8gwmBLLfEv",
+			"partId": "toolu_01SbJvkue5vWuYHa1kJjp14w",
+			"result": "[WARN] The \"pnpm\" field in package.json is no longer read by pnpm. The following keys were ignored: \"pnpm.onlyBuiltDependencies\". See https://pnpm.io/settings for the new home of each setting.\nError: http://localhost:6007 is already used, make sure that nothing is running on the port/url or set reuseExistingServer:true in config.webServer.\n\n---\n0",
+			"duration": 0
+		}
+	},
+	{
+		"sequence": 620377,
+		"type": "turn.completed",
+		"createdAt": 1789524324664,
+		"provider": "claude",
+		"data": {
+			"messageId": "msg_011Cf6GkkAtjRv8gwmBLLfEv",
+			"cost": 39.84541674999996,
+			"tokens": {
+				"input": 2,
+				"output": 1,
+				"cacheRead": 114390,
+				"cacheWrite": 807,
+				"contextWindow": 1000000
+			},
+			"duration": 1225673
+		}
+	},
+	{
+		"sequence": 622224,
+		"type": "message.created",
+		"createdAt": 1789525211224,
+		"provider": "claude",
+		"data": {
+			"messageId": "msg_011Cf6KSN1V7VPjvDmrjhvug",
+			"role": "assistant",
+			"sessionId": "ses_c2d8cd521bc14f9f8f7700096bbf1d23"
+		}
+	},
+	{
+		"sequence": 624452,
+		"type": "tool.started",
+		"createdAt": 1789525745828,
+		"provider": "claude",
+		"data": {
+			"messageId": "msg_011Cf6KSN1V7VPjvDmrjhvug",
+			"partId": "toolu_01LWbZBDotLb1mndjBZs6S8U",
+			"toolName": "Bash",
+			"callId": "toolu_01LWbZBDotLb1mndjBZs6S8U"
+		}
+	}
+]

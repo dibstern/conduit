@@ -43,6 +43,11 @@ import type {
 	UserMessage as UserMsg,
 } from "../../../src/lib/frontend/types.js";
 import { segmentTurns } from "../../../src/lib/frontend/utils/turns.js";
+import type { StoredEvent } from "../../../src/lib/persistence/events.js";
+import { translateDomainEventToRelay } from "../../../src/lib/relay/domain-event-to-relay.js";
+import resumedTurnEvents from "../../fixtures/claude-resumed-turn.json" with {
+	type: "json",
+};
 import { testActivity, testMessages } from "../../helpers/test-session-slot.js";
 
 // ─── Per-session tiers for handler calls ────────────────────────────────────
@@ -70,6 +75,61 @@ beforeEach(() => {
 
 afterEach(() => {
 	vi.useRealTimers();
+});
+
+it("keeps one production turn live when Claude resumes after successive results", () => {
+	const sessionId = "ses_c2d8cd521bc14f9f8f7700096bbf1d23";
+	for (const [index, recorded] of resumedTurnEvents.entries()) {
+		const event = {
+			...recorded,
+			eventId: `recorded-${recorded.sequence}`,
+			sessionId,
+			streamVersion: index,
+			metadata: {},
+		} as StoredEvent;
+		vi.setSystemTime(event.createdAt);
+		if (event.type === "message.created" && event.data.role === "user") {
+			// The prompt is already in the UI when sending; its text is not exported.
+			addUserMessage(ta, tm, "");
+		}
+		const translated = translateDomainEventToRelay(event);
+		if (translated.kind === "emit") {
+			for (const message of translated.messages) {
+				const relay = { ...message, sessionId } as RelayMessage;
+				switch (relay.type) {
+					case "thinking_start":
+						handleThinkingStart(ta, tm, relay);
+						break;
+					case "tool_start":
+						handleToolStart(ta, tm, relay);
+						break;
+					case "tool_executing":
+						handleToolExecuting(ta, tm, relay);
+						break;
+					case "tool_result":
+						handleToolResult(ta, tm, relay);
+						break;
+					case "result":
+						handleResult(ta, tm, relay);
+						break;
+					case "done":
+						handleDone(ta, tm, relay);
+						break;
+					default:
+						throw new Error(`Unexpected fixture relay event: ${relay.type}`);
+				}
+			}
+		}
+		// Keep processing true so only the transcript's own results settle it.
+		const turns = segmentTurns(chatState.messages, true);
+		expect(turns).toHaveLength(1);
+		if (event.type === "turn.completed") {
+			expect(turns[0]?.live).toBe(false);
+		} else if ((index >= 7 && index <= 9) || index === 12) {
+			expect(turns[0]?.live, `after event ${index + 1}`).toBe(true);
+			expect(turns[0]?.segments).toHaveLength(index === 12 ? 3 : 2);
+		}
+	}
 });
 
 // ─── handleDelta (streaming text) ───────────────────────────────────────────
