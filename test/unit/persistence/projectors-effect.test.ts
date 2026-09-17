@@ -1347,8 +1347,7 @@ describe("Effect Turn Projector (via ProjectionRunner)", () => {
 		"busy",
 		"assistant",
 		"tool",
-		"text",
-	] as const)("reopens on %s, attaches the next execution, and accumulates accounting through replay", (resume) =>
+	] as const)("reopens on %s, attaches the next execution, and keeps accounting straight through replay", (resume) =>
 		runTest(
 			Effect.gen(function* () {
 				const sql = yield* SqlClient.SqlClient;
@@ -1389,9 +1388,7 @@ describe("Effect Turn Projector (via ProjectionRunner)", () => {
 							})
 						: resume === "assistant"
 							? makeMessageCreated("s1", "a2")
-							: resume === "tool"
-								? makeToolStarted("s1", "a1", "tool2")
-								: makeTextDelta("s1", "a1", "Continuing");
+							: makeToolStarted("s1", "a1", "tool2");
 				yield* runner.projectEvent(yield* store.append(activity));
 				expect(
 					yield* sql`SELECT state, assistant_message_id, started_at, completed_at FROM turns`,
@@ -1436,7 +1433,7 @@ describe("Effect Turn Projector (via ProjectionRunner)", () => {
 						id: "u1",
 						state: "completed",
 						assistant_message_id: "a2",
-						cost: 0.75,
+						cost: 0.5,
 						tokens_in: 300,
 						tokens_out: 50,
 						completed_at: FIXED_TS + 5,
@@ -1454,6 +1451,37 @@ describe("Effect Turn Projector (via ProjectionRunner)", () => {
 				expect(
 					yield* sql`SELECT id, state, assistant_message_id, cost, tokens_in, tokens_out, completed_at FROM turns`,
 				).toEqual(expected);
+			}),
+		));
+
+	it("streamed output and tool progress do not reopen a settled turn", () =>
+		runTest(
+			Effect.gen(function* () {
+				const sql = yield* SqlClient.SqlClient;
+				const store = yield* EventStoreEffectTag;
+				const runner = yield* ProjectionRunnerEffectTag;
+				yield* runner.markRecovered();
+				for (const event of [
+					makeSessionCreated("s1"),
+					makeMessageCreated("s1", "u1", { role: "user" }),
+					makeMessageCreated("s1", "a1"),
+					canonicalEvent(
+						"turn.completed",
+						"s1",
+						{ messageId: "a1" },
+						{ createdAt: FIXED_TS + 2 },
+					),
+				]) {
+					yield* runner.projectEvent(yield* store.append(event));
+				}
+				// A late flush of text for work that already finished is not new
+				// work. Treating it as new would leave the turn permanently running.
+				yield* runner.projectEvent(
+					yield* store.append(makeTextDelta("s1", "a1", "trailing")),
+				);
+				expect(yield* sql`SELECT state, completed_at FROM turns`).toEqual([
+					{ state: "completed", completed_at: FIXED_TS + 2 },
+				]);
 			}),
 		));
 

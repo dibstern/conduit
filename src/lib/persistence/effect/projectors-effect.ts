@@ -296,6 +296,11 @@ export const makeMessageProjector = (): EffectProjector => ({
 			}
 
 			if (isEventType(event, "turn.completed")) {
+				// Cost and tokens are counted differently by the provider, which
+				// reads like a bug and is not: cost is cumulative for the whole
+				// SDK session (two completions in one turn read 38.53 then 39.84),
+				// so the latest value wins. Tokens are per-execution, so a turn
+				// that ran twice sums them.
 				const tokens = event.data.tokens;
 				yield* sql`
 					UPDATE messages SET
@@ -345,13 +350,7 @@ export const makeTurnProjector = (): EffectProjector => ({
 	name: "turn",
 	handles: [
 		"message.created",
-		"text.delta",
-		"thinking.start",
-		"thinking.delta",
 		"tool.started",
-		"tool.running",
-		"tool.completed",
-		"tool.input_updated",
 		"session.status",
 		"turn.completed",
 		"turn.error",
@@ -370,17 +369,16 @@ export const makeTurnProjector = (): EffectProjector => ({
 				return;
 			}
 
+			// Unambiguous new work: a provider can report a result and keep going,
+			// so any of these after a settle means the turn is running again.
+			// Deltas and tool progress/metadata updates are deliberately absent —
+			// they add nothing the signals below miss, they fire on every token,
+			// and a late update to an already-closed tool must not reopen a turn.
 			if (
 				(isEventType(event, "session.status") &&
 					event.data.status === "busy") ||
 				isEventType(event, "message.created") ||
-				isEventType(event, "text.delta") ||
-				isEventType(event, "thinking.start") ||
-				isEventType(event, "thinking.delta") ||
-				isEventType(event, "tool.started") ||
-				isEventType(event, "tool.running") ||
-				isEventType(event, "tool.completed") ||
-				isEventType(event, "tool.input_updated")
+				isEventType(event, "tool.started")
 			) {
 				const [turn] = yield* sql<{
 					id: string;
@@ -404,11 +402,16 @@ export const makeTurnProjector = (): EffectProjector => ({
 			}
 
 			if (isEventType(event, "turn.completed")) {
+				// Cost and tokens are counted differently by the provider, which
+				// reads like a bug and is not: cost is cumulative for the whole
+				// SDK session (two completions in one turn read 38.53 then 39.84),
+				// so the latest value wins. Tokens are per-execution, so a turn
+				// that ran twice sums them.
 				const tokens = event.data.tokens;
 				yield* sql`
 					UPDATE turns
 					SET state = ${persistedTurnState("result")},
-						cost = COALESCE(cost + ${event.data.cost ?? null}, cost, ${event.data.cost ?? null}),
+						cost = COALESCE(${event.data.cost ?? null}, cost),
 						tokens_in = COALESCE(tokens_in + ${tokens?.input ?? null}, tokens_in, ${tokens?.input ?? null}),
 						tokens_out = COALESCE(tokens_out + ${tokens?.output ?? null}, tokens_out, ${tokens?.output ?? null}),
 						completed_at = ${event.createdAt}
