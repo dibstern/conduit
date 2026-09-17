@@ -258,9 +258,11 @@ describe("Button colour axes", () => {
 
 						expect(restingText(classes).length, where).toBeLessThanOrEqual(1);
 						expect(hoverFill(classes).length, where).toBeLessThanOrEqual(1);
-						// One per prefix, never two competing opacities.
-						expect(offState(classes, "opacity"), where).toHaveLength(2);
-						expect(offState(classes, "cursor"), where).toHaveLength(2);
+						// One per prefix, never two competing opacities -- or none
+						// at all, which is what `disabledStyle="none"` is for.
+						const expected = off === "none" ? 0 : 2;
+						expect(offState(classes, "opacity"), where).toHaveLength(expected);
+						expect(offState(classes, "cursor"), where).toHaveLength(expected);
 						cleanup();
 					}
 				}
@@ -283,5 +285,60 @@ describe("Button colour axes", () => {
 
 		expect(classes.filter((c) => c.startsWith("hover:"))).toEqual([]);
 		expect(classes).toContain("text-text-muted");
+	});
+});
+
+// The box slot. Before conduit-test-87oi these four utilities were welded into
+// BASE_CLASSES, and because a consumer cannot out-rank any of them (`.hidden`
+// is emitted at byte 22357, before `.inline-flex` at 22436; `.items-baseline`
+// at 29708, before `.items-center` at 29745) a whole category of control could
+// not adopt the primitive at all.
+describe("Button layout axis", () => {
+	afterEach(cleanup);
+
+	const emitted = (props: Record<string, unknown>) => {
+		const { getByRole } = render(Button, {
+			props: { children: label("x"), ...props },
+		});
+		return getByRole("button").className.split(/\s+/).filter(Boolean);
+	};
+
+	const BOX = ["inline-flex", "whitespace-nowrap", "select-none"];
+
+	it("defaults to the box that used to live in BASE_CLASSES", () => {
+		const classes = emitted({ variant: "ghost", size: "content" });
+
+		for (const c of [...BOX, "items-center", "justify-center"]) {
+			expect(classes).toContain(c);
+		}
+	});
+
+	it('layout="baseline" swaps only the cross-axis alignment', () => {
+		const classes = emitted({ variant: "ghost", layout: "baseline" });
+
+		expect(classes).toContain("items-baseline");
+		expect(classes).not.toContain("items-center");
+		for (const c of BOX) expect(classes).toContain(c);
+	});
+
+	it('layout="flow" hands the whole box back to the call site', () => {
+		const classes = emitted({ variant: "ghost", layout: "flow" });
+
+		for (const c of [...BOX, "items-center", "items-baseline", "flex"]) {
+			expect(classes).not.toContain(c);
+		}
+	});
+
+	// `justify-content` does nothing outside a flex or grid container, so
+	// emitting it under `flow` would be dead-token theatre -- and it would beat
+	// a call site that wanted its own.
+	it('layout="flow" suppresses align even when one is asked for', () => {
+		const classes = emitted({
+			variant: "ghost",
+			layout: "flow",
+			align: "between",
+		});
+
+		expect(classes.filter((c) => c.startsWith("justify-"))).toEqual([]);
 	});
 });

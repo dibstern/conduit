@@ -58,8 +58,7 @@
 	// them could win against a BASE utility. It is now `disabledStyle` — see
 	// DISABLED_CLASSES in button-recipes.ts (conduit-test-8lxm).
 	const BASE_CLASSES =
-		"inline-flex items-center whitespace-nowrap no-underline " +
-		"select-none cursor-pointer transition-colors " +
+		"no-underline cursor-pointer transition-colors " +
 		// Neutral, not accent. An accent ring against an accent-filled button
 		// (`primary`) is the same colour as the button, so the old
 		// `ring-accent/70` was invisible on the one variant that most needed it.
@@ -91,6 +90,38 @@
 	 * and BASE had already emitted the conflict — so the largest single group in
 	 * the migration backlog was unreachable until this moved.
 	 */
+	/**
+	 * The box itself: display, cross-axis alignment, wrapping and selectability.
+	 * These four travelled together in BASE_CLASSES, and together they are the
+	 * reason a whole category of control could not migrate at all.
+	 *
+	 * A consumer cannot out-rank any of them. Measured in the built stylesheet:
+	 * `.hidden` at 22357 loses to `.inline-flex` at 22436, so a
+	 * `class:hidden` toggle silently stops working; `.items-baseline` at 29708
+	 * loses to `.items-center` at 29745. And `whitespace-nowrap` plus
+	 * `select-none` quietly redefine any button whose content is prose rather
+	 * than a label — a URL that should ellipsize, a path that should break, a
+	 * sentence the user should be able to copy.
+	 *
+	 * `flow` emits NOTHING, which hands the box back to the call site: a
+	 * `<button>` is `inline-block` by default, wraps, and is selectable, so
+	 * "emits nothing" is exactly the as-found behaviour of every control that
+	 * needs this. It is the same opt-out shape as `size="content"` and
+	 * `chrome="bare"` on the field primitives.
+	 *
+	 * `ALIGN_CLASSES` is suppressed under `flow` on purpose: `justify-content`
+	 * does nothing outside a flex or grid container, so emitting it would be
+	 * the dead-token theatre this epic keeps deleting. Under `flow` the call
+	 * site owns the box, alignment included.
+	 */
+	const LAYOUT_CLASSES = {
+		center: "inline-flex items-center whitespace-nowrap select-none",
+		baseline: "inline-flex items-baseline whitespace-nowrap select-none",
+		flow: "",
+	} as const;
+
+	type ButtonLayout = keyof typeof LAYOUT_CLASSES;
+
 	const ALIGN_CLASSES = {
 		center: "justify-center",
 		start: "justify-start",
@@ -112,6 +143,8 @@
 		 * of a column flex/grid parent. See ALIGN_CLASSES.
 		 */
 		align?: ButtonAlign;
+		/** See LAYOUT_CLASSES. */
+		layout?: ButtonLayout;
 		/**
 		 * Resting label colour and its hover step, REPLACING the variant's.
 		 * Omit to keep the variant's own. See TONE_CLASSES.
@@ -180,6 +213,16 @@
 		rel?: HTMLAnchorAttributes["rel"];
 		download?: HTMLAnchorAttributes["download"];
 		onclick?: (event: MouseEvent) => void;
+		/**
+		 * Svelte 5 does not let `bind:this` reach through a component tag, so a
+		 * caller that needs the real element (session/SessionItem anchors its
+		 * overflow menu off `getBoundingClientRect`) has no way to ask for it
+		 * unless the primitive hands it back. Typed as the union rather than made
+		 * generic: both branches answer `getBoundingClientRect` and `focus`, which
+		 * is the whole reason anyone reaches for this, and a type parameter would
+		 * tax every call site to serve none of them.
+		 */
+		element?: HTMLButtonElement | HTMLAnchorElement | undefined;
 		class?: string;
 	} & Omit<
 		HTMLButtonAttributes,
@@ -229,6 +272,7 @@
 		variant = "secondary",
 		size = "md",
 		align = "center",
+		layout = "center",
 		tone,
 		hoverFill,
 		disabledStyle = "dim",
@@ -242,6 +286,7 @@
 		ariaDisabled = false,
 		ariaLabel,
 		onclick,
+		element = $bindable(),
 		class: className,
 		children,
 		...rest
@@ -310,8 +355,9 @@
 	const buttonClass = $derived(
 		[
 			BASE_CLASSES,
+			LAYOUT_CLASSES[layout],
 			DISABLED_CLASSES[disabledStyle],
-			ALIGN_CLASSES[align],
+			layout === "flow" ? "" : ALIGN_CLASSES[align],
 			variantClass,
 			sizeClasses,
 			className,
@@ -377,6 +423,7 @@
 	     `type` and no `disabled`, so there is nothing here to conditionally
 	     suppress. -->
 	<a
+		bind:this={element}
 		{...anchorRest}
 		{href}
 		class={buttonClass}
@@ -389,6 +436,7 @@
 	</a>
 {:else}
 	<button
+		bind:this={element}
 		{...rest}
 		{type}
 		class={buttonClass}

@@ -149,6 +149,15 @@ export const DISABLED_CLASSES = {
 	undimmed:
 		"disabled:opacity-100 disabled:cursor-default " +
 		"aria-disabled:opacity-100 aria-disabled:cursor-default",
+	/**
+	 * Emits nothing, so a call site that already spells its own dead state out
+	 * in plain (unprefixed) classes keeps it. chat/QuestionCard's "Submitting…"
+	 * button is the case: it is `disabled` and carries `opacity-60
+	 * cursor-not-allowed` unconditionally, and a `disabled:`-prefixed utility
+	 * is emitted after an unprefixed one, so ANY other member here would win
+	 * the fight and restyle it.
+	 */
+	none: "",
 } as const;
 
 export type ButtonDisabledStyle = keyof typeof DISABLED_CLASSES;
