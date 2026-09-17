@@ -23,6 +23,10 @@ test.describe("Tool Call", () => {
 		// Send prompt — the mock will serve the first prompt_async response
 		await app.sendMessage("Show me a tool call");
 
+		// Tool steps live inside the turn's activity ledger, which collapses once
+		// the turn settles. Open it first so the wait doesn't race the reply.
+		await chat.expandTurnActivity();
+
 		// A tool block should appear (the recording includes tool events)
 		await chat.waitForToolBlock();
 
@@ -164,17 +168,14 @@ test.describe("Thinking Block", () => {
 
 		await app.sendMessage("Think about this");
 
-		// The recorded fixture should include thinking events
-		await chat.waitForThinkingBlock(10_000);
-		const thinkingBlock = chat.thinkingBlocks.first();
-		await expect(thinkingBlock).toBeVisible();
-
 		// Wait for the full response to complete
 		await chat.waitForAssistantMessage();
 		await chat.waitForStreamingComplete();
 
-		// After completion, the thinking block should still be visible (collapsed)
-		const thinkingCount = await chat.thinkingBlocks.count();
-		expect(thinkingCount).toBeGreaterThan(0);
+		// A settled turn folds every step away behind its activity ledger, so the
+		// thinking step is reachable by expanding it rather than always on screen.
+		await chat.expandTurnActivity();
+		const thinkingBlock = await chat.waitForThinkingBlock(10_000);
+		await expect(thinkingBlock).toBeVisible();
 	});
 });

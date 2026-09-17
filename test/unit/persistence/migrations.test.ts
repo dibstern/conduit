@@ -117,6 +117,7 @@ describe("Migration Runner", () => {
 		const messagesContextWindowMigration = schemaMigrations[6];
 		const turnModelExecutionMigration = schemaMigrations[7];
 		const sessionsPermissionModeMigration = schemaMigrations[8];
+		const sessionCascadeDeletesMigration = schemaMigrations[9];
 		if (
 			!baseline ||
 			!metadataMigration ||
@@ -126,7 +127,8 @@ describe("Migration Runner", () => {
 			!messagePartsCompactionTypeMigration ||
 			!messagesContextWindowMigration ||
 			!turnModelExecutionMigration ||
-			!sessionsPermissionModeMigration
+			!sessionsPermissionModeMigration ||
+			!sessionCascadeDeletesMigration
 		) {
 			throw new Error("Expected all event-store schema migrations");
 		}
@@ -182,6 +184,11 @@ describe("Migration Runner", () => {
 				name: "sessions_permission_mode",
 				checksum: calculateMigrationChecksum(sessionsPermissionModeMigration),
 			},
+			{
+				id: 10,
+				name: "session_cascade_deletes",
+				checksum: calculateMigrationChecksum(sessionCascadeDeletesMigration),
+			},
 		]);
 		columns = client
 			.query<{ name: string }>("PRAGMA table_info(message_parts)")
@@ -212,7 +219,12 @@ describe("Migration Runner", () => {
 		const migrationsThrough7 = schemaMigrations.slice(0, 7);
 		const turnModelExecutionMigration = schemaMigrations[7];
 		const sessionsPermissionModeMigration = schemaMigrations[8];
-		if (!turnModelExecutionMigration || !sessionsPermissionModeMigration) {
+		const sessionCascadeDeletesMigration = schemaMigrations[9];
+		if (
+			!turnModelExecutionMigration ||
+			!sessionsPermissionModeMigration ||
+			!sessionCascadeDeletesMigration
+		) {
 			throw new Error("Expected remaining event-store migrations");
 		}
 		runMigrations(client, migrationsThrough7);
@@ -232,6 +244,11 @@ describe("Migration Runner", () => {
 				id: 9,
 				name: "sessions_permission_mode",
 				checksum: calculateMigrationChecksum(sessionsPermissionModeMigration),
+			},
+			{
+				id: 10,
+				name: "session_cascade_deletes",
+				checksum: calculateMigrationChecksum(sessionCascadeDeletesMigration),
 			},
 		]);
 		expect(runMigrations(client, schemaMigrations)).toEqual([]);

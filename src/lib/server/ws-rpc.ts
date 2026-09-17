@@ -1,4 +1,8 @@
 import { Effect } from "effect";
+import {
+	ClaudeSettingsResolveError,
+	ClaudeSettingsTrustBoundaryError,
+} from "../contracts/claude-settings.js";
 import { ProviderInstanceIdSchema } from "../contracts/provider-instance.js";
 import {
 	loadDaemonConfig,
@@ -24,6 +28,11 @@ import {
 	setPermissionMode,
 } from "../domain/relay/Services/session-overrides-state.js";
 import { OpenCodeTerminalServiceTag } from "../domain/relay/Services/terminal-service.js";
+import {
+	getClaudeSettingsOverrides,
+	resolveClaudeSettingsForInstance,
+	setClaudeSettingsForRelay,
+} from "../handlers/claude-settings.js";
 import { switchContextWindowForSession } from "../handlers/context-window.js";
 import {
 	getModelsResponse,
@@ -35,6 +44,7 @@ import {
 	handleAskUserResponse,
 	handlePermissionResponse,
 	handleQuestionReject,
+	setDefaultPermissionModeForRelay,
 } from "../handlers/permissions.js";
 import {
 	cancelSessionById,
@@ -67,6 +77,7 @@ export {
 	AddProject,
 	AnswerQuestion,
 	CancelSession,
+	type ClaudeSettingsResponse,
 	ClosePty,
 	CreatePty,
 	CreateSession,
@@ -78,6 +89,7 @@ export {
 	type ForkSessionResponse,
 	GetAgents,
 	type GetAgentsResponse,
+	GetClaudeSettings,
 	GetCommands,
 	type GetCommandsResponse,
 	GetFileContent,
@@ -90,6 +102,8 @@ export {
 	type GetModelsResponse,
 	GetProjects,
 	type GetProjectsResponse,
+	GetSkillContent,
+	type GetSkillContentResponse,
 	GetTodo,
 	type GetTodoResponse,
 	GetToolContent,
@@ -116,14 +130,19 @@ export {
 	RenameProject,
 	RenameSession,
 	ResizePty,
+	ResolveClaudeSettings,
+	type ResolveClaudeSettingsResponse,
 	RespondPermission,
 	RewindSession,
 	ScanNow,
 	type ScanNowResponse,
 	SendMessage,
 	type SessionInfo,
+	SetClaudeSettings,
 	SetDefaultModel,
 	type SetDefaultModelResponse,
+	SetDefaultPermissionMode,
+	type SetDefaultPermissionModeResponse,
 	SetLogLevel,
 	SetProjectInstance,
 	StartInstance,
@@ -150,6 +169,7 @@ import {
 	getFileListResponse,
 	getFileTreeEntries,
 } from "../handlers/files.js";
+import { getSkillContentValue } from "../handlers/skill-content.js";
 import { getToolContentValue } from "../handlers/tool-content.js";
 import { setLogLevel } from "../logger.js";
 
@@ -636,6 +656,23 @@ export const WsRpcServerLayer = WsRpcGroup.toLayer({
 				),
 			),
 		),
+	SetDefaultPermissionMode: (request) =>
+		setDefaultPermissionModeForRelay({
+			clientId: request.originId ?? "rpc",
+			mode: request.mode,
+		}).pipe(
+			Effect.map((mode) => ({
+				projectSlug: request.projectSlug,
+				mode,
+			})),
+			Effect.catchAll((error) =>
+				Effect.fail(
+					new WsRpcError({
+						message: `SetDefaultPermissionMode failed: ${String(error)}`,
+					}),
+				),
+			),
+		),
 	SetHiddenEntries: (request) =>
 		setHiddenEntriesForRelay({
 			clientId: request.originId ?? "rpc",
@@ -653,6 +690,46 @@ export const WsRpcServerLayer = WsRpcGroup.toLayer({
 						message: `SetHiddenEntries failed: ${String(error)}`,
 					}),
 				),
+			),
+		),
+	GetClaudeSettings: (request) =>
+		Effect.gen(function* () {
+			const config = yield* ConfigTag;
+			return {
+				projectSlug: request.projectSlug,
+				overrides: getClaudeSettingsOverrides(config.configDir),
+			};
+		}),
+	SetClaudeSettings: (request) =>
+		setClaudeSettingsForRelay({
+			clientId: request.originId ?? "rpc",
+			overrides: request.overrides,
+		}).pipe(
+			Effect.map((overrides) => ({
+				projectSlug: request.projectSlug,
+				overrides,
+			})),
+			Effect.mapError((error) =>
+				error instanceof ClaudeSettingsTrustBoundaryError
+					? error
+					: new WsRpcError({
+							message: `SetClaudeSettings failed: ${String(error)}`,
+						}),
+			),
+		),
+	ResolveClaudeSettings: (request) =>
+		resolveClaudeSettingsForInstance({ instanceId: request.instanceId }).pipe(
+			Effect.map((resolved) => ({
+				projectSlug: request.projectSlug,
+				instanceId: request.instanceId,
+				resolved,
+			})),
+			Effect.mapError((error) =>
+				error instanceof ClaudeSettingsResolveError
+					? error
+					: new WsRpcError({
+							message: `ResolveClaudeSettings failed: ${String(error)}`,
+						}),
 			),
 		),
 	ReloadProviderSession: (request) =>
@@ -819,6 +896,24 @@ export const WsRpcServerLayer = WsRpcGroup.toLayer({
 						),
 			),
 		),
+	GetSkillContent: (request) =>
+		Effect.gen(function* () {
+			const config = yield* ConfigTag;
+			const result = yield* getSkillContentValue(
+				request.name,
+				config.slug === request.projectSlug ? config.projectDir : undefined,
+			);
+			if (result === undefined) {
+				return yield* Effect.fail(
+					new WsRpcError({ message: "Skill content not available" }),
+				);
+			}
+			return {
+				projectSlug: request.projectSlug,
+				name: request.name,
+				...result,
+			};
+		}).pipe(Effect.catchAll(mapRpcFailure("GetSkillContent"))),
 	GetModels: (request) =>
 		Effect.gen(function* () {
 			const config = yield* ConfigTag;

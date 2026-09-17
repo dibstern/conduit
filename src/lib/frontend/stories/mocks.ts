@@ -14,7 +14,6 @@ import type {
 	ToolMessage,
 	UserMessage,
 } from "../types.js";
-import type { ToolGroup } from "../utils/group-tools.js";
 
 // ─── Projects ────────────────────────────────────────────────────────────────
 
@@ -148,6 +147,7 @@ export const mockUserMessage: UserMessage = {
 	type: "user",
 	uuid: "msg-user-001",
 	text: "How do I fix the authentication bug?",
+	createdAt: Date.UTC(2026, 1, 25, 10, 14, 0),
 };
 
 export const mockUserMessageLong: UserMessage = {
@@ -170,6 +170,7 @@ export const mockAssistantSimple: AssistantMessage = {
 	rawText: "I can help with that. Let me look at the authentication module.",
 	html: "<p>I can help with that. Let me look at the authentication module.</p>",
 	finalized: true,
+	createdAt: Date.UTC(2026, 1, 25, 10, 14, 12),
 };
 
 export const mockAssistantWithCode: AssistantMessage = {
@@ -463,36 +464,6 @@ export const mockToolTruncated: ToolMessage = {
 	isError: false,
 	isTruncated: true,
 	fullContentLength: 24576,
-};
-
-export const mockToolGroupCompleted: ToolGroup = {
-	type: "tool-group",
-	uuid: "group-msg-tool-003",
-	category: "explore",
-	label: "Explored",
-	summary: "2 reads",
-	tools: [mockToolCompleted, mockToolReadWithOffset],
-	status: "completed",
-};
-
-export const mockToolGroupRunning: ToolGroup = {
-	type: "tool-group",
-	uuid: "group-msg-tool-002",
-	category: "edit",
-	label: "Edited",
-	summary: "2 edits",
-	tools: [mockToolRunning, mockToolWithDiff],
-	status: "running",
-};
-
-export const mockToolGroupError: ToolGroup = {
-	type: "tool-group",
-	uuid: "group-msg-tool-004",
-	category: "shell",
-	label: "Shell",
-	summary: "2 bashs",
-	tools: [mockToolBash, mockToolError],
-	status: "error",
 };
 
 // ─── Question Tool Messages ──────────────────────────────────────────────────

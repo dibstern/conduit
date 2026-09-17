@@ -1,9 +1,10 @@
 <!-- ─── Settings Panel ────────────────────────────────────────────────────── -->
 <!-- Modal settings panel with tabbed navigation. Uses the 68-mockup card   -->
-<!-- design. Tabs: Notifications, Appearance, Agents & Models, Instances,   -->
-<!-- Debug.                                                                 -->
+<!-- design. Tabs: Notifications, Appearance, Agents & Models, Claude,      -->
+<!-- Instances, Debug.                                                      -->
 
 <script lang="ts">
+	import Modal from "./Modal.svelte";
 	import { untrack } from "svelte";
 	import Button from "../ui/Button.svelte";
 	import Badge from "../ui/Badge.svelte";
@@ -17,6 +18,7 @@
 	import Tabs from "../ui/Tabs.svelte";
 	import SegmentedControl from "../ui/SegmentedControl.svelte";
 	import Disclosure from "../ui/Disclosure.svelte";
+	import ClaudeSettingsTab from "./ClaudeSettingsTab.svelte";
 	import { createFrontendLogger } from "../../utils/logger.js";
 
 	const log = createFrontendLogger("push");
@@ -52,6 +54,7 @@
 		saveNotifSettings,
 	} from "../../utils/notif-settings.js";
 	import { setPushActive } from "../../stores/ws.svelte.js";
+	import { clearClaudeSettingEdits } from "../../stores/claude-settings.svelte.js";
 	import { getCurrentSlug } from "../../stores/router.svelte.js";
 	import TextButton from "../ui/TextButton.svelte";
 	import {
@@ -111,6 +114,7 @@
 		{ value: "notifications", label: "Alerts", testId: "settings-tab-notifications" },
 		{ value: "appearance", label: "Theme", testId: "settings-tab-appearance" },
 		{ value: "visibility", label: "Agents & Models", testId: "settings-tab-visibility" },
+		{ value: "claude", label: "Claude", testId: "settings-tab-claude" },
 		{ value: "instances", label: "Instances", testId: "settings-tab-instances" },
 		{ value: "debug", label: "Debug", testId: "settings-tab-debug" },
 	];
@@ -147,6 +151,7 @@
 
 	$effect(() => {
 		if (visible) {
+			clearClaudeSettingEdits();
 			activeTab = initialTab;
 			expandedInstanceId = null;
 			renamingInstanceId = null;
@@ -172,6 +177,8 @@
 						}),
 					);
 			}
+		} else {
+			clearClaudeSettingEdits();
 		}
 	});
 
@@ -527,17 +534,6 @@
 		void persistHidden({ hiddenAgents: [...next] });
 	}
 
-	// ─── Backdrop / escape ──────────────────────────────────────────────────
-
-	function handleBackdropClick(e: MouseEvent) {
-		if (e.target === e.currentTarget) onClose?.();
-	}
-	$effect(() => {
-		if (!visible) return;
-		function handleKeydown(e: KeyboardEvent) { if (e.key === "Escape") onClose?.(); }
-		document.addEventListener("keydown", handleKeydown);
-		return () => document.removeEventListener("keydown", handleKeydown);
-	});
 </script>
 
 <!-- ─── Copyable command block snippet ────────────────────────────────────── -->
@@ -550,14 +546,11 @@
 	</div>
 {/snippet}
 
-{#if visible}
-	<!-- svelte-ignore a11y_click_events_have_key_events -->
-	<!-- svelte-ignore a11y_no_static_element_interactions -->
-	<div class="fixed inset-0 z-[var(--z-popover)] flex items-center justify-center bg-[rgba(var(--overlay-rgb),0.15)] backdrop-blur-sm" onclick={handleBackdropClick}>
-		<div id="settings-panel" class="bg-bg border border-border rounded-xl shadow-2xl max-w-lg w-full mx-4 flex flex-col max-h-[80vh]">
+<Modal open={visible} onclose={() => onClose?.()} labelledBy="settings-panel-title" backdrop="subtle">
+		<div id="settings-panel" class="bg-bg border border-border rounded-xl shadow-2xl max-w-lg w-[calc(100vw-2rem)] mx-4 flex flex-col max-h-[80vh]">
 			<!-- Header -->
-			<div class="flex items-center justify-between px-5 py-3 border-b border-border">
-				<h2 class="text-lg font-semibold text-text font-brand">Settings</h2>
+			<div class="shrink-0 flex items-center justify-between px-5 py-3 border-b border-border">
+				<h2 id="settings-panel-title" class="text-lg font-semibold text-text font-brand">Settings</h2>
 				<!-- `ghost` is a shade darker than this control and carries a hover
 				     fill it has never had. Both are REPLACED rather than overridden:
 				     the `!` triple this used to carry was important at every state,
@@ -576,12 +569,16 @@
 				/>
 			</div>
 
-			<!-- Tabs -->
+			<!-- Tabs.
+			     shrink-0 is load-bearing: the strip scrolls horizontally, which makes
+			     this flex item's automatic minimum height zero rather than content
+			     height, so without it a tall tab squeezes the bar down to a sliver. -->
 			<Tabs
 				bind:value={activeTab}
 				variant="underline"
 				label="Settings sections"
 				options={SETTINGS_TABS}
+				class="shrink-0"
 			/>
 
 			<!-- Tab content -->
@@ -708,6 +705,10 @@
 							</div>
 						{/if}
 					</div>
+
+				<!-- ═══ Claude ═══ -->
+				{:else if activeTab === "claude"}
+					<ClaudeSettingsTab />
 
 				<!-- ═══ Instances ═══ -->
 				{:else if activeTab === "instances"}
@@ -951,5 +952,5 @@
 				{/if}
 			</div>
 		</div>
-	</div>
-{/if}
+</Modal>
+

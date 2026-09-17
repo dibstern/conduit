@@ -14,16 +14,7 @@
 	import { showToast } from "../../stores/ui.svelte.js";
 	import { switchPermissionModeRpc } from "../../transport/ws-rpc-client.js";
 	import type { SessionPermissionMode } from "../../types.js";
-
-	const MODES: ReadonlyArray<{
-		mode: SessionPermissionMode;
-		label: string;
-	}> = [
-		{ mode: "ask", label: "Ask" },
-		{ mode: "acceptEdits", label: "Edits" },
-		{ mode: "auto", label: "Auto" },
-		{ mode: "full", label: "Full access" },
-	];
+	import { PERMISSION_MODES } from "../../permission-modes.js";
 
 	// ─── State ──────────────────────────────────────────────────────────────
 
@@ -33,16 +24,20 @@
 
 	const currentMode = $derived(discoveryState.permissionMode);
 	const currentLabel = $derived(
-		MODES.find((m) => m.mode === currentMode)?.label ?? "Ask",
+		PERMISSION_MODES.find((m) => m.mode === currentMode)?.label ?? "Ask",
 	);
 	const availableModes = $derived(
-		MODES.filter(
-			({ mode }) =>
-				mode !== "auto" || discoveryState.currentProviderId === "claude",
+		PERMISSION_MODES.filter(
+			({ claudeOnly }) =>
+				!claudeOnly || discoveryState.currentProviderId === "claude",
 		),
 	);
-	/** Non-default mode: elevated permission handling is active, tint the pill. */
-	const isElevated = $derived(currentMode !== "ask");
+	/** Tint the pill only when approvals are *relaxed*. "Never ask" is more
+	 *  restrictive than "Ask", so flagging it as elevated would invert the
+	 *  signal the amber tint exists to give. */
+	const isElevated = $derived(
+		PERMISSION_MODES.find((m) => m.mode === currentMode)?.elevated === true,
+	);
 
 	// ─── Handlers ───────────────────────────────────────────────────────────
 
@@ -67,7 +62,8 @@
 					// Without this the pill silently snaps back, which reads as a
 					// frontend bug instead of what it is: the server rejected the
 					// mode (typically a stale daemon that predates it).
-					const label = MODES.find((m) => m.mode === mode)?.label ?? mode;
+					const label =
+						PERMISSION_MODES.find((m) => m.mode === mode)?.label ?? mode;
 					showToast(
 						`Couldn't switch approval mode to "${label}" — the daemon rejected it. It may be running an older version.`,
 						{ variant: "warn" },

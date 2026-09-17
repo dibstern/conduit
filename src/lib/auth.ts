@@ -1,6 +1,6 @@
 // ─── PIN Authentication & Rate Limiting (Ticket 2.4, 8.4) ───────────────────
 
-import { createHash, randomBytes } from "node:crypto";
+import { createHash, createHmac, timingSafeEqual } from "node:crypto";
 import { Data, Effect } from "effect";
 
 // ─── Effect Error Types ───────────────────────────────────────────────────────
@@ -98,7 +98,6 @@ export class AuthManager {
 	private pin: string | null = null;
 	private readonly getPinHashFn: (() => string | null) | null;
 	private attempts: Map<string, AttemptRecord> = new Map();
-	private cookies: Map<string, number> = new Map(); // cookie → expiry timestamp
 	private readonly maxAttempts: number;
 	private readonly lockoutMs: number;
 	private readonly cookieExpiryMs: number;
@@ -211,13 +210,18 @@ export class AuthManager {
 
 	/** Validate a session cookie */
 	validateCookie(cookie: string): boolean {
-		const expiry = this.cookies.get(cookie);
-		if (expiry === undefined) return false;
-		if (this.now() >= expiry) {
-			this.cookies.delete(cookie);
+		const separator = cookie.indexOf(".");
+		if (separator <= 0) return false;
+
+		const expiresAt = Number(cookie.slice(0, separator));
+		if (!Number.isSafeInteger(expiresAt) || this.now() >= expiresAt) {
 			return false;
 		}
-		return true;
+
+		const presented = Buffer.from(cookie.slice(separator + 1), "hex");
+		const expected = Buffer.from(this.signExpiry(expiresAt), "hex");
+		if (presented.length !== expected.length) return false;
+		return timingSafeEqual(presented, expected);
 	}
 
 	/** Check if an IP is currently locked out */
@@ -238,9 +242,21 @@ export class AuthManager {
 		return Math.max(0, this.maxAttempts - record.count);
 	}
 
+	/**
+	 * Mint a stateless session cookie: `<expiry>.<signature>`.
+	 *
+	 * Keyed off the persisted PIN hash rather than per-process state, so sessions
+	 * survive a daemon restart and every AuthManager instance agrees on validity.
+	 * Changing the PIN rotates the key, which logs existing sessions out.
+	 */
 	private createCookie(): string {
-		const cookie = randomBytes(32).toString("hex");
-		this.cookies.set(cookie, this.now() + this.cookieExpiryMs);
-		return cookie;
+		const expiresAt = this.now() + this.cookieExpiryMs;
+		return `${expiresAt}.${this.signExpiry(expiresAt)}`;
+	}
+
+	private signExpiry(expiresAt: number): string {
+		return createHmac("sha256", `conduit:session:${this.currentPin ?? ""}`)
+			.update(String(expiresAt))
+			.digest("hex");
 	}
 }

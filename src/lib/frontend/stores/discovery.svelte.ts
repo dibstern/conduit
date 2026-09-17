@@ -135,12 +135,14 @@ export const discoveryState = $state({
 	commandsFetched: false,
 	defaultModelId: "" as string,
 	defaultProviderId: "" as string,
+	defaultVariant: "" as string,
 	currentVariant: "" as string,
 	availableVariants: [] as string[],
 	currentContextWindow: "" as string,
 	availableContextWindowOptions: [] as ReadonlyArray<ContextWindowOption>,
 	modelExecution: null as GetModelsResponse["modelExecution"] | null,
 	permissionMode: "ask" as SessionPermissionMode,
+	defaultPermissionMode: "ask" as SessionPermissionMode,
 	/** Mode selected while no session was bound — flushed on session bind. */
 	pendingPermissionMode: null as SessionPermissionMode | null,
 	/** Global hide-list keys: model `<providerId>/<modelId>`. */
@@ -513,6 +515,7 @@ export function handleDefaultModelInfo(
 ): void {
 	discoveryState.defaultModelId = msg.model ?? "";
 	discoveryState.defaultProviderId = msg.provider ?? "";
+	discoveryState.defaultVariant = msg.variant ?? "";
 }
 
 // ─── Actions ────────────────────────────────────────────────────────────────
@@ -595,12 +598,16 @@ export function flushPendingPermissionMode(
 	const mode = discoveryState.pendingPermissionMode;
 	if (mode == null) return;
 	discoveryState.pendingPermissionMode = null;
+	const previousMode = discoveryState.permissionMode;
 	discoveryState.permissionMode = mode;
-	if (mode === "ask") return; // server default — nothing to persist
+	// Send even for "ask". It is only the server's default for a *brand-new*
+	// session, and this runs on binding to any session -- skipping it left a
+	// session already on "full" running with full access while the pill read
+	// "Ask". Restricting a session must never be the silent case.
 	void send({ projectSlug, sessionId, mode }).catch(() => {
-		// Server never got it: reflect the truthful default.
+		// Server never got it: stop claiming a mode it is not in.
 		if (discoveryState.permissionMode === mode) {
-			discoveryState.permissionMode = "ask";
+			discoveryState.permissionMode = previousMode;
 		}
 	});
 }
@@ -617,12 +624,14 @@ export function clearDiscoveryState(): void {
 	discoveryState.commandsFetched = false;
 	discoveryState.defaultModelId = "";
 	discoveryState.defaultProviderId = "";
+	discoveryState.defaultVariant = "";
 	discoveryState.currentVariant = "";
 	discoveryState.availableVariants = [];
 	discoveryState.currentContextWindow = "";
 	discoveryState.availableContextWindowOptions = [];
 	discoveryState.modelExecution = null;
 	discoveryState.permissionMode = "ask";
+	discoveryState.defaultPermissionMode = "ask";
 	discoveryState.pendingPermissionMode = null;
 	discoveryState.hiddenModels = [];
 	discoveryState.hiddenAgents = [];

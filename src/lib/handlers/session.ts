@@ -12,6 +12,7 @@ import {
 	StatusPollerTag,
 	WebSocketHandlerTag,
 } from "../domain/relay/Services/services.js";
+import { forkOpenCodeSession } from "../domain/relay/Services/session-command.js";
 import { SessionManagerServiceTag } from "../domain/relay/Services/session-manager-service.js";
 import {
 	clearSession as clearEffectOverrideSession,
@@ -663,11 +664,9 @@ export const forkSessionForClient = ({
 			requestedSessionId || wsHandler.getClientSession(clientId) || "";
 		if (!sessionId) return undefined;
 
-		const forked = yield* Effect.tryPromise(() =>
-			client.session.fork(sessionId, {
-				...(messageId != null && { messageID: messageId }),
-			}),
-		);
+		// Through the seam: forking upstream and forgetting to record the forked
+		// session locally is the same parity gap as creating one and forgetting.
+		const forked = yield* forkOpenCodeSession(sessionId, messageId);
 
 		yield* clearEffectOverrideSession(sessionId);
 		yield* sessionManagerService.clearPaginationCursor(sessionId);

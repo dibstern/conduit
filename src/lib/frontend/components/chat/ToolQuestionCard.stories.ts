@@ -12,10 +12,6 @@ const meta = {
 	title: "Chat/ToolQuestionCard",
 	component: ToolQuestionCard,
 	tags: ["autodocs"],
-	args: { groupRadius: "rounded-panel" },
-	argTypes: {
-		groupRadius: { control: "text" },
-	},
 	beforeEach: () => {
 		permissionsState.pendingQuestions = [];
 		permissionsState.questionErrors.clear();

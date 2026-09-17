@@ -27,6 +27,8 @@ describe("domain-event relay translation exhaustiveness", () => {
 		"message.created",
 		"session.created",
 		"session.renamed",
+		"session.deleted",
+		"session.forked",
 		"session.provider_changed",
 		"session.permission_mode_changed",
 		"permission.asked",
@@ -52,6 +54,28 @@ describe("domain-event relay translation exhaustiveness", () => {
 		expect(result).toEqual({
 			kind: "silent",
 			reason: "persistence/ws-rpc-only event",
+		});
+	});
+
+	it("keeps text part identity on relay deltas", () => {
+		const result = translateDomainEventToRelay(
+			canonicalEvent("text.delta", "session-1", {
+				messageId: "message-1",
+				partId: "part-1",
+				text: "hello",
+			}),
+		);
+
+		expect(result).toEqual({
+			kind: "emit",
+			messages: [
+				{
+					type: "delta",
+					messageId: "message-1",
+					partId: "part-1",
+					text: "hello",
+				},
+			],
 		});
 	});
 

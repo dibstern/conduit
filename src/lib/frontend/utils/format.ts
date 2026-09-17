@@ -47,6 +47,18 @@ export function formatTimeAgo(
 }
 
 /**
+ * Format a Unix-ms timestamp as a short local clock time, e.g. "14:32".
+ * The locale decides the 12- or 24-hour form.
+ */
+export function formatClockTime(timestamp: number | undefined): string {
+	if (timestamp === undefined) return "";
+	return new Date(timestamp).toLocaleTimeString(undefined, {
+		hour: "2-digit",
+		minute: "2-digit",
+	});
+}
+
+/**
  * Generate a unique ID for messages, tools, etc.
  * Uses crypto.randomUUID if available, falls back to timestamp + random.
  */

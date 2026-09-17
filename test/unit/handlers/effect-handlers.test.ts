@@ -5,6 +5,9 @@ import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/openco
 // Layer. Each test provides minimal mock services via Layer.succeed, runs
 // the Effect to completion, and asserts on captured calls.
 
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, it } from "@effect/vitest";
 import { Deferred, Duration, Effect, Fiber, Layer } from "effect";
 import { expect, vi } from "vitest";
@@ -42,7 +45,9 @@ import {
 import {
 	getAgent,
 	getContextWindow,
+	getDefaultPermissionMode,
 	getModel,
+	getPermissionMode,
 	getVariant,
 	hasActiveProcessingTimeout,
 	makeOverridesStateLive,
@@ -51,6 +56,7 @@ import {
 	setDefaultContextWindow,
 	setDefaultModel,
 	setModel,
+	setPermissionMode,
 	setVariant,
 } from "../../../src/lib/domain/relay/Services/session-overrides-state.js";
 import {
@@ -79,6 +85,7 @@ import {
 	handleAskUserResponse,
 	handlePermissionResponse,
 	handleQuestionReject,
+	setDefaultPermissionModeForRelay,
 } from "../../../src/lib/handlers/permissions.js";
 import {
 	cancelSessionById,
@@ -111,6 +118,7 @@ import {
 import { OrchestrationEngine } from "../../../src/lib/provider/orchestration-engine.js";
 import { ProviderRegistry } from "../../../src/lib/provider/provider-registry.js";
 import type { ProviderInstance } from "../../../src/lib/provider/types.js";
+import { loadRelaySettings } from "../../../src/lib/relay/relay-settings.js";
 import type { PermissionId, RequestId } from "../../../src/lib/shared-types.js";
 import type { ProjectRelayConfig } from "../../../src/lib/types.js";
 import {
@@ -1720,6 +1728,53 @@ describe("handlePtyInput", () => {
 });
 
 // ─── Permissions handler tests ────────────────────────────────────────────
+
+describe("setDefaultPermissionModeForRelay", () => {
+	it.effect(
+		"persists, updates the default, and broadcasts without changing a session",
+		() => {
+			const configDir = mkdtempSync(
+				join(tmpdir(), "conduit-default-permission-mode-"),
+			);
+			const ws = mockWsHandler();
+			const log = mockLogger();
+			const layer = Layer.mergeAll(
+				Layer.succeed(WebSocketHandlerTag, ws),
+				Layer.succeed(LoggerTag, log),
+				Layer.succeed(ConfigTag, mockConfig({ configDir })),
+				makeOverridesStateLive(),
+			);
+
+			return Effect.gen(function* () {
+				yield* setPermissionMode("session-1", "full");
+
+				const mode = yield* setDefaultPermissionModeForRelay({
+					clientId: "client-1",
+					mode: "auto",
+				});
+
+				expect(mode).toBe("auto");
+				expect(loadRelaySettings(configDir).defaultPermissionMode).toBe("auto");
+				expect(yield* getDefaultPermissionMode()).toBe("auto");
+				expect(yield* getPermissionMode("session-1")).toBe("full");
+				expect(ws.broadcast).toHaveBeenCalledWith({
+					type: "default_permission_mode_info",
+					mode: "auto",
+				});
+				expect(log.info).toHaveBeenCalledWith(
+					"client=client-1 Set default permission mode to: auto",
+				);
+			}).pipe(
+				Effect.provide(layer),
+				Effect.ensuring(
+					Effect.sync(() =>
+						rmSync(configDir, { recursive: true, force: true }),
+					),
+				),
+			);
+		},
+	);
+});
 
 describe("handlePermissionResponse", () => {
 	it.effect(

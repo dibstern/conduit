@@ -8,6 +8,7 @@
 	import Icon from "../ui/Icon.svelte";
 	import Button from "../ui/Button.svelte";
 	import Radio from "../ui/Radio.svelte";
+	import Modal from "./Modal.svelte";
 	import {
 		uiState,
 		exitRewindMode,
@@ -65,24 +66,14 @@
 		selectedMode = "both";
 	}
 
-	function handleBackdropClick(e: MouseEvent): void {
-		if (e.target === e.currentTarget) {
-			handleCancel();
-		}
-	}
-
 	function handleKeydown(e: KeyboardEvent): void {
 		if (e.key === "Escape") {
-			if (showModal) {
-				handleCancel();
-			} else if (showBanner) {
-				handleExit();
-			}
+			handleExit();
 		}
 	}
 </script>
 
-<svelte:window onkeydown={showBanner ? handleKeydown : undefined} />
+<svelte:window onkeydown={showBanner && !showModal ? handleKeydown : undefined} />
 
 {#if showBanner}
 	<!-- Rewind mode banner -->
@@ -103,21 +94,15 @@
 	</div>
 {/if}
 
-{#if showModal}
-	<!-- Rewind confirmation modal -->
-	<!-- svelte-ignore a11y_click_events_have_key_events -->
-	<!-- svelte-ignore a11y_no_static_element_interactions -->
-	<div
-		class="modal-backdrop fixed inset-0 bg-[rgba(var(--overlay-rgb),0.5)] backdrop-blur-[2px] flex items-center justify-center z-[var(--z-modal)] transition-opacity duration-200 ease-linear"
-		onclick={handleBackdropClick}
-	>
+<Modal open={showModal} onclose={handleCancel} labelledBy="rewind-modal-title">
 		<Surface
 			variant="raised"
 			radius="lg"
 			elevation="modal"
-			class="modal-dialog py-5 px-6 max-w-80 w-[90%]"
+			id="rewind-modal"
+			class="modal-dialog py-5 px-6 max-w-80 w-[90vw]"
 		>
-			<h3 class="text-sm font-semibold text-text mb-4">
+			<h3 id="rewind-modal-title" class="text-sm font-semibold text-text mb-4">
 				Rewind to this point?
 			</h3>
 
@@ -182,5 +167,5 @@
 				</Button>
 			</div>
 		</Surface>
-	</div>
-{/if}
+</Modal>
+

@@ -308,6 +308,7 @@ describe("session handlers with Effect-native model service", () => {
 										{
 											id: "part-sqlite-1",
 											type: "text",
+											time: { start: 10, end: 11 },
 											text: "Earlier prompt",
 										},
 									],

@@ -70,8 +70,10 @@ import {
 	sessionActivity,
 	setMessages,
 } from "./chat.svelte.js";
+import { handleClaudeSettingsInfo } from "./claude-settings.svelte.js";
 import { isOwnBrowserClientId } from "./client-identity.js";
 import {
+	discoveryState,
 	handleAgentList,
 	handleCommandList,
 	handleContextWindowInfo,
@@ -232,7 +234,12 @@ function routePerSession(event: PerSessionEvent): void {
 
 	// ── Turn boundary detection ─────────────────────────────────────────
 	if ("messageId" in event && event.messageId != null) {
-		advanceTurnIfNewMessage(activity, messages, event.messageId as string);
+		advanceTurnIfNewMessage(
+			activity,
+			messages,
+			event.messageId as string,
+			event.type === "delta" ? event.partId : undefined,
+		);
 	}
 
 	switch (event.type) {
@@ -559,7 +566,12 @@ function dispatchChatEvent(event: RelayMessage, ctx: DispatchContext): boolean {
 		? (event as Record<string, unknown>)["messageId"]
 		: undefined;
 	if (hasMessageId && msgId != null && activity && messages) {
-		advanceTurnIfNewMessage(activity, messages, msgId as string);
+		advanceTurnIfNewMessage(
+			activity,
+			messages,
+			msgId as string,
+			event.type === "delta" ? event.partId : undefined,
+		);
 	} else if (hasMessageId && msgId != null) {
 		// Fallback: no slot yet — just log
 		log.debug(
@@ -887,11 +899,17 @@ export function handleMessage(msg: RelayMessage): void {
 		case "visibility_info":
 			handleVisibilityInfo(msg);
 			break;
+		case "claude_settings_info":
+			handleClaudeSettingsInfo(msg);
+			break;
 		case "model_info":
 			handleModelInfo(msg);
 			break;
 		case "default_model_info":
 			handleDefaultModelInfo(msg);
+			break;
+		case "default_permission_mode_info":
+			discoveryState.defaultPermissionMode = msg.mode;
 			break;
 		case "permission_mode_info":
 			handlePermissionModeInfo(msg);

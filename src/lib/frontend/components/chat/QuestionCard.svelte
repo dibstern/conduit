@@ -229,7 +229,7 @@
 			Input Required
 		</div>
 
-		{#if synthetic}
+		{#if synthetic && !resolved}
 			<div class="question-synthetic-warning text-xs text-text-muted bg-bg-surface border border-border-subtle rounded-lg px-3 py-2 mb-3 leading-relaxed">
 				This question was asked in a terminal session. You can try answering here,
 				but if it doesn't work, answer in the terminal or send a follow-up message

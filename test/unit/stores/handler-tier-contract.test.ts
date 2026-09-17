@@ -37,6 +37,7 @@ function snapActivity(a: SessionActivity) {
 		phase: a.phase,
 		turnEpoch: a.turnEpoch,
 		currentMessageId: a.currentMessageId,
+		currentPartId: a.currentPartId,
 		replayGeneration: a.replayGeneration,
 		doneMessageIds: [...a.doneMessageIds],
 		seenMessageIds: [...a.seenMessageIds],

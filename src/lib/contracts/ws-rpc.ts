@@ -1,6 +1,12 @@
 import { Rpc, RpcGroup } from "@effect/rpc";
 import { Schema } from "effect";
 import { SessionPermissionModeSchema } from "../shared-types.js";
+import {
+	ClaudeSettingsOverridesSchema,
+	ClaudeSettingsResolveError,
+	ClaudeSettingsTrustBoundaryError,
+	ResolvedClaudeSettingsSchema,
+} from "./claude-settings.js";
 import { ProviderDriverKindSchema } from "./provider-instance.js";
 
 const NonEmptyString = Schema.NonEmptyString;
@@ -217,10 +223,26 @@ export const SwitchModelResponseSchema = Schema.Struct({
 
 export const SetDefaultModelResponseSchema = SwitchModelResponseSchema;
 
+export const SetDefaultPermissionModeResponseSchema = Schema.Struct({
+	projectSlug: Schema.String,
+	mode: SessionPermissionModeSchema,
+});
+
 export const SetHiddenEntriesResponseSchema = Schema.Struct({
 	projectSlug: Schema.String,
 	hiddenModels: Schema.Array(Schema.String),
 	hiddenAgents: Schema.Array(Schema.String),
+});
+
+export const ClaudeSettingsResponseSchema = Schema.Struct({
+	projectSlug: Schema.String,
+	overrides: ClaudeSettingsOverridesSchema,
+});
+
+export const ResolveClaudeSettingsResponseSchema = Schema.Struct({
+	projectSlug: Schema.String,
+	instanceId: Schema.String,
+	resolved: ResolvedClaudeSettingsSchema,
 });
 
 export const ReloadProviderSessionResponseSchema = Schema.Struct({
@@ -388,6 +410,13 @@ export const GetToolContentResponseSchema = Schema.Struct({
 	content: Schema.String,
 });
 
+export const GetSkillContentResponseSchema = Schema.Struct({
+	projectSlug: Schema.String,
+	name: Schema.String,
+	path: Schema.String,
+	content: Schema.String,
+});
+
 export type AgentInfo = typeof AgentInfoSchema.Type;
 export type AgentProviderScope = typeof AgentProviderScopeSchema.Type;
 export type GetAgentsResponse = typeof GetAgentsResponseSchema.Type;
@@ -410,6 +439,7 @@ export type FileEntry = typeof FileEntrySchema.Type;
 export type GetFileListResponse = typeof GetFileListResponseSchema.Type;
 export type GetFileContentResponse = typeof GetFileContentResponseSchema.Type;
 export type GetToolContentResponse = typeof GetToolContentResponseSchema.Type;
+export type GetSkillContentResponse = typeof GetSkillContentResponseSchema.Type;
 export type ContextWindowOption = typeof ContextWindowOptionSchema.Type;
 export type ModelInfo = typeof ModelInfoSchema.Type;
 export type ProviderInfo = typeof ProviderInfoSchema.Type;
@@ -418,8 +448,13 @@ export type SwitchContextWindowResponse =
 	typeof SwitchContextWindowResponseSchema.Type;
 export type SwitchModelResponse = typeof SwitchModelResponseSchema.Type;
 export type SetDefaultModelResponse = typeof SetDefaultModelResponseSchema.Type;
+export type SetDefaultPermissionModeResponse =
+	typeof SetDefaultPermissionModeResponseSchema.Type;
 export type SetHiddenEntriesResponse =
 	typeof SetHiddenEntriesResponseSchema.Type;
+export type ClaudeSettingsResponse = typeof ClaudeSettingsResponseSchema.Type;
+export type ResolveClaudeSettingsResponse =
+	typeof ResolveClaudeSettingsResponseSchema.Type;
 export type ReloadProviderSessionResponse =
 	typeof ReloadProviderSessionResponseSchema.Type;
 export type SwitchVariantResponse = typeof SwitchVariantResponseSchema.Type;
@@ -746,6 +781,19 @@ export class SetDefaultModel extends Schema.TaggedRequest<SetDefaultModel>()(
 	},
 ) {}
 
+export class SetDefaultPermissionMode extends Schema.TaggedRequest<SetDefaultPermissionMode>()(
+	"SetDefaultPermissionMode",
+	{
+		failure: WsRpcError,
+		success: SetDefaultPermissionModeResponseSchema,
+		payload: {
+			projectSlug: NonEmptyString,
+			mode: SessionPermissionModeSchema,
+			originId: Schema.optional(NonEmptyString),
+		},
+	},
+) {}
+
 export class SetHiddenEntries extends Schema.TaggedRequest<SetHiddenEntries>()(
 	"SetHiddenEntries",
 	{
@@ -756,6 +804,40 @@ export class SetHiddenEntries extends Schema.TaggedRequest<SetHiddenEntries>()(
 			hiddenModels: Schema.optional(Schema.Array(Schema.String)),
 			hiddenAgents: Schema.optional(Schema.Array(Schema.String)),
 			originId: Schema.optional(NonEmptyString),
+		},
+	},
+) {}
+
+export class GetClaudeSettings extends Schema.TaggedRequest<GetClaudeSettings>()(
+	"GetClaudeSettings",
+	{
+		failure: WsRpcError,
+		success: ClaudeSettingsResponseSchema,
+		payload: { projectSlug: NonEmptyString },
+	},
+) {}
+
+export class SetClaudeSettings extends Schema.TaggedRequest<SetClaudeSettings>()(
+	"SetClaudeSettings",
+	{
+		failure: Schema.Union(WsRpcError, ClaudeSettingsTrustBoundaryError),
+		success: ClaudeSettingsResponseSchema,
+		payload: {
+			projectSlug: NonEmptyString,
+			overrides: ClaudeSettingsOverridesSchema,
+			originId: Schema.optional(NonEmptyString),
+		},
+	},
+) {}
+
+export class ResolveClaudeSettings extends Schema.TaggedRequest<ResolveClaudeSettings>()(
+	"ResolveClaudeSettings",
+	{
+		failure: Schema.Union(WsRpcError, ClaudeSettingsResolveError),
+		success: ResolveClaudeSettingsResponseSchema,
+		payload: {
+			projectSlug: NonEmptyString,
+			instanceId: NonEmptyString,
 		},
 	},
 ) {}
@@ -859,6 +941,18 @@ export class GetToolContent extends Schema.TaggedRequest<GetToolContent>()(
 		payload: {
 			projectSlug: NonEmptyString,
 			toolId: NonEmptyString,
+		},
+	},
+) {}
+
+export class GetSkillContent extends Schema.TaggedRequest<GetSkillContent>()(
+	"GetSkillContent",
+	{
+		failure: WsRpcError,
+		success: GetSkillContentResponseSchema,
+		payload: {
+			projectSlug: NonEmptyString,
+			name: NonEmptyString,
 		},
 	},
 ) {}
@@ -1082,7 +1176,11 @@ export const WsRpcRequest = Schema.Union(
 	SwitchContextWindow,
 	SwitchModel,
 	SetDefaultModel,
+	SetDefaultPermissionMode,
 	SetHiddenEntries,
+	GetClaudeSettings,
+	SetClaudeSettings,
+	ResolveClaudeSettings,
 	ReloadProviderSession,
 	RenameSession,
 	SwitchVariant,
@@ -1091,6 +1189,7 @@ export const WsRpcRequest = Schema.Union(
 	GetFileList,
 	GetFileContent,
 	GetToolContent,
+	GetSkillContent,
 	GetModels,
 	AddProject,
 	RemoveProject,
@@ -1136,7 +1235,11 @@ export const WsRpcGroup = RpcGroup.make(
 	Rpc.fromTaggedRequest(SwitchContextWindow),
 	Rpc.fromTaggedRequest(SwitchModel),
 	Rpc.fromTaggedRequest(SetDefaultModel),
+	Rpc.fromTaggedRequest(SetDefaultPermissionMode),
 	Rpc.fromTaggedRequest(SetHiddenEntries),
+	Rpc.fromTaggedRequest(GetClaudeSettings),
+	Rpc.fromTaggedRequest(SetClaudeSettings),
+	Rpc.fromTaggedRequest(ResolveClaudeSettings),
 	Rpc.fromTaggedRequest(ReloadProviderSession),
 	Rpc.fromTaggedRequest(RenameSession),
 	Rpc.fromTaggedRequest(SwitchVariant),
@@ -1145,6 +1248,7 @@ export const WsRpcGroup = RpcGroup.make(
 	Rpc.fromTaggedRequest(GetFileList),
 	Rpc.fromTaggedRequest(GetFileContent),
 	Rpc.fromTaggedRequest(GetToolContent),
+	Rpc.fromTaggedRequest(GetSkillContent),
 	Rpc.fromTaggedRequest(GetModels),
 	Rpc.fromTaggedRequest(AddProject),
 	Rpc.fromTaggedRequest(RemoveProject),

@@ -564,7 +564,7 @@ describe("historyToChatMessages — createdAt propagation", () => {
 		expect(toolMsg).toHaveProperty("createdAt", 4000);
 	});
 
-	test("result messages carry createdAt", () => {
+	test("result messages are stamped when the turn completed, not when it started", () => {
 		const history: HistoryMessage[] = [
 			{
 				id: "msg_a1",
@@ -577,7 +577,9 @@ describe("historyToChatMessages — createdAt propagation", () => {
 		];
 		const result = historyToChatMessages(history);
 		const resultMsg = result.find((m) => m.type === "result");
-		expect(resultMsg).toHaveProperty("createdAt", 5000);
+		// The bill lands at the end of the turn. Using `created` would place it
+		// before the turn's own last step and collapse activity timings to 0s.
+		expect(resultMsg).toHaveProperty("createdAt", 5500);
 	});
 
 	test("messages without time.created do not have createdAt", () => {

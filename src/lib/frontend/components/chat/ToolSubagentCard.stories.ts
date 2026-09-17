@@ -11,10 +11,6 @@ const meta = {
 	title: "Chat/ToolSubagentCard",
 	component: ToolSubagentCard,
 	tags: ["autodocs"],
-	args: { groupRadius: "rounded-panel" },
-	argTypes: {
-		groupRadius: { control: "text" },
-	},
 } satisfies Meta<typeof ToolSubagentCard>;
 
 export default meta;

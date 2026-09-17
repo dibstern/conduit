@@ -1,4 +1,5 @@
 import type { Meta, StoryObj } from "@storybook/svelte-vite";
+import { discoveryState } from "../../stores/discovery.svelte.js";
 import {
 	mockUserMessage,
 	mockUserMessageLong,
@@ -25,4 +26,22 @@ export const ShortText: Story = {
 
 export const LongText: Story = {
 	args: { message: mockUserMessageLong },
+};
+
+/** `/commit` is a known command and renders as a pill; `/comit` (a typo the
+ *  composer would have underlined) and `/qwerty` stay plain once sent. */
+export const WithSkills: Story = {
+	beforeEach: () => {
+		discoveryState.commands = [
+			{ name: "commit", description: "Create a git commit" },
+			{ name: "code-review", description: "Review the current diff" },
+		];
+	},
+	args: {
+		message: {
+			type: "user",
+			uuid: "msg-user-004",
+			text: "run /commit then /comit and /qwerty",
+		},
+	},
 };

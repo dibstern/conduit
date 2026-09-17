@@ -6,6 +6,7 @@
 import { Effect, Fiber, Stream } from "effect";
 import {
 	getRuntime,
+	hasActiveStreamFiber,
 	interruptStream,
 	setActiveStreamFiber,
 	type WsProtocolError,
@@ -366,6 +367,34 @@ function scheduleReconnect(): void {
 		connect(_currentSlug);
 	}, _reconnectDelay);
 	_reconnectDelay = Math.min(_reconnectDelay * 1.5, RECONNECT_MAX_MS);
+}
+
+/**
+ * Re-establish the connection when the tab comes back to the foreground.
+ *
+ * A suspended mobile PWA routinely wakes with a socket that is open on paper
+ * but dead in practice, so no close event ever arrives to trigger the backoff
+ * timer, and the app sits there silently ignoring the relay. Checking on resume
+ * also skips a backoff wait of up to RECONNECT_MAX_MS after a real drop.
+ */
+function reconnectIfStale(): void {
+	if (document.visibilityState !== "visible" || _currentSlug === undefined) {
+		return;
+	}
+	if (_ws?.readyState === WebSocket.OPEN && hasActiveStreamFiber()) return;
+
+	wsDebugLog("resume:reconnect", wsState.status);
+	if (_reconnectTimer) {
+		clearTimeout(_reconnectTimer);
+		_reconnectTimer = null;
+	}
+	_reconnectDelay = RECONNECT_BASE_MS;
+	connect(_currentSlug);
+}
+
+if (typeof document !== "undefined") {
+	document.addEventListener("visibilitychange", reconnectIfStale);
+	window.addEventListener("pageshow", reconnectIfStale);
 }
 
 /** Disconnect and stop reconnecting. */

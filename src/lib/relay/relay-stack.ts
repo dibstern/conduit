@@ -74,6 +74,7 @@ import {
 	type OverridesStateTag,
 	setDefaultAgent,
 	setDefaultModel,
+	setDefaultPermissionMode,
 	setDefaultVariant,
 } from "../domain/relay/Services/session-overrides-state.js";
 import {
@@ -977,6 +978,9 @@ export async function createProjectRelay(
 				}
 				if (initialDefaultVariant) {
 					yield* setDefaultVariant(initialDefaultVariant);
+				}
+				if (relaySettings.defaultPermissionMode !== undefined) {
+					yield* setDefaultPermissionMode(relaySettings.defaultPermissionMode);
 				}
 				const statusPoller = yield* StatusPollerTag;
 				const pollerManager = yield* PollerManagerTag;

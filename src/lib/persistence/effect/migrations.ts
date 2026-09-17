@@ -11,6 +11,7 @@ import {
 	MESSAGE_PARTS_FILE_TYPE_MIGRATION,
 	MESSAGES_CONTEXT_WINDOW_MIGRATION,
 	readMigrationSql,
+	SESSION_CASCADE_DELETES_MIGRATION,
 	SESSIONS_PERMISSION_MODE_MIGRATION,
 	TURN_MODEL_EXECUTION_MIGRATION,
 } from "../schema.js";
@@ -41,6 +42,9 @@ const turnModelExecutionMigrationSql = readMigrationSql(
 );
 const sessionsPermissionModeMigrationSql = readMigrationSql(
 	SESSIONS_PERMISSION_MODE_MIGRATION,
+);
+const sessionCascadeDeletesMigrationSql = readMigrationSql(
+	SESSION_CASCADE_DELETES_MIGRATION,
 );
 
 const expectedTableColumns = {
@@ -489,6 +493,9 @@ const runDurableProviderCommandsMigration: Effect.Effect<
 const runDropEventsSessionFkMigration = executeSqlStatements(
 	dropEventsSessionFkMigrationSql,
 );
+const runSessionCascadeDeletesMigration = executeSqlStatements(
+	sessionCascadeDeletesMigrationSql,
+);
 
 const runMessagePartsFileTypeMigration = executeSqlStatements(
 	messagePartsFileTypeMigrationSql,
@@ -668,6 +675,7 @@ export const effectMigrationEntries = {
 	"0009_sessions_permission_mode": runSessionsPermissionModeMigration,
 	"0010_purge_legacy_skeleton_sessions":
 		runPurgeLegacySkeletonSessionsMigration,
+	"0011_session_cascade_deletes": runSessionCascadeDeletesMigration,
 } satisfies Record<string, Effect.Effect<void, unknown, SqlClient.SqlClient>>;
 
 export function makeEffectMigrationLoader(

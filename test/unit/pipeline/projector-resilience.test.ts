@@ -107,7 +107,7 @@ describe("MessageProjector resilience", () => {
 			expect(row?.title).toBe("Useful title");
 		});
 
-		it("deleting session with dependent messages throws FK error at DELETE", () => {
+		it("deleting session with dependent messages cascades via ON DELETE CASCADE", () => {
 			project(
 				makeStored(
 					"message.created",
@@ -121,15 +121,26 @@ describe("MessageProjector resilience", () => {
 				),
 			);
 
-			// DELETE itself throws because messages.session_id FK has no CASCADE
-			// and foreign_keys pragma is ON. This prevents orphan messages.
+			// messages.session_id carries ON DELETE CASCADE (see
+			// 0010_session_cascade_deletes.sql), so deleting the session removes
+			// its dependent messages in the same statement instead of throwing.
 			expect(() =>
 				harness.db.execute("DELETE FROM sessions WHERE id = ?", [SESSION_A]),
-			).toThrow(/FOREIGN KEY|constraint/i);
+			).not.toThrow();
 
-			// Session + message still exist — pipeline state preserved
+			const session = harness.db.queryOne(
+				"SELECT id FROM sessions WHERE id = ?",
+				[SESSION_A],
+			);
+			expect(session).toBeUndefined();
+			const message = harness.db.queryOne(
+				"SELECT id FROM messages WHERE session_id = ?",
+				[SESSION_A],
+			);
+			expect(message).toBeUndefined();
+
+			// Pipeline read on the deleted session returns empty — no orphan data
 			const chat = readPipeline(SESSION_A);
-			// Empty turn (only message.created projected) — no thinking or text
 			expect(chat.filter((m) => m.type === "thinking")).toHaveLength(0);
 			expect(chat.filter((m) => m.type === "assistant")).toHaveLength(0);
 		});

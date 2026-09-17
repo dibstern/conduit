@@ -390,6 +390,12 @@ describe("model handlers with Effect-native model service", () => {
 				);
 				expect(modelService.listProviders).toHaveBeenCalledOnce();
 				expect(wsHandler.broadcast).toHaveBeenCalledWith({
+					type: "default_model_info",
+					model: "gpt-4",
+					provider: "openai",
+					variant: "",
+				});
+				expect(wsHandler.broadcast).toHaveBeenCalledWith({
 					type: "variant_info",
 					variant: "",
 					variants: ["standard", "fast"],

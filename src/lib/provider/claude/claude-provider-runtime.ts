@@ -21,7 +21,10 @@ import { randomUUID } from "node:crypto";
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { query as sdkQuery } from "@anthropic-ai/claude-agent-sdk";
+import {
+	type Settings,
+	query as sdkQuery,
+} from "@anthropic-ai/claude-agent-sdk";
 import {
 	Context,
 	Data,
@@ -39,6 +42,7 @@ import {
 	Ref,
 	type Scope,
 } from "effect";
+import type { ClaudeSDKPermissionMode } from "../../contracts/providers/claude-agent-sdk.js";
 import {
 	decodeClaudeSDKMessage,
 	decodeClaudeSDKOptionsJsonShape,
@@ -77,6 +81,7 @@ import {
 import { isInterruptedResult } from "./claude-event-translator.js";
 import { ClaudePermissionBridge } from "./claude-permission-bridge.js";
 import { makeClaudeSdkEnv } from "./claude-sdk-env.js";
+import { buildClaudeFlagSettings } from "./claude-sdk-settings.js";
 import type {
 	ClaudeSubagentSdk,
 	MaterializeClaudeSubagentsInput,
@@ -95,6 +100,10 @@ import {
 } from "./claude-translation-service.js";
 import { makeEffectPromptQueue } from "./effect-prompt-queue.js";
 import { serializePriorConversation } from "./history-transcript.js";
+import {
+	requiresDangerousSkip,
+	toSdkPermissionMode,
+} from "./permission-mode-map.js";
 import { captureClaudeSdkMessage } from "./sdk-trace-capture.js";
 import type {
 	ClaudeSessionContext,
@@ -378,6 +387,7 @@ function enumerateSkills(
 
 export interface ClaudeProviderInstanceDeps {
 	readonly workspaceRoot: string;
+	readonly claudeSettingsOverrides?: () => Settings | undefined;
 	/** Injectable factory for the SDK's query() function. Defaults to the real SDK. */
 	readonly queryFactory?: (params: {
 		prompt: AsyncIterable<SDKUserMessage>;
@@ -521,6 +531,7 @@ export class ClaudeProviderRuntime {
 	private readonly queryFactory: NonNullable<
 		ClaudeProviderInstanceDeps["queryFactory"]
 	>;
+	private readonly claudeSettingsOverrides: ClaudeProviderInstanceDeps["claudeSettingsOverrides"];
 
 	constructor(
 		private readonly deps: ClaudeProviderInstanceDeps,
@@ -535,6 +546,7 @@ export class ClaudeProviderRuntime {
 		this.queryFactory =
 			deps.queryFactory ??
 			(sdkQuery as NonNullable<ClaudeProviderInstanceDeps["queryFactory"]>);
+		this.claudeSettingsOverrides = deps.claudeSettingsOverrides;
 	}
 
 	private mapProviderFailure<A>(
@@ -704,6 +716,22 @@ export class ClaudeProviderRuntime {
 		return service
 			? service.get(this.deps.workspaceRoot)
 			: Effect.fail(new Error("Claude capabilities service unavailable"));
+	}
+
+	/**
+	 * `undefined` means "no expectation" -- under exactOptionalPropertyTypes that
+	 * has to clear the field rather than store an undefined in it, or the drift
+	 * check would compare against a value nobody stands behind.
+	 */
+	private setExpectedApiModelId(
+		ctx: ClaudeSessionContext,
+		expected: string | undefined,
+	): void {
+		if (expected === undefined) {
+			delete ctx.expectedApiModelId;
+		} else {
+			ctx.expectedApiModelId = expected;
+		}
 	}
 
 	private expectedApiModelIdEffect(
@@ -911,12 +939,21 @@ export class ClaudeProviderRuntime {
 							),
 							includePartialMessages: true,
 							forwardSubagentText: true,
-							settings: { showThinkingSummaries: true },
+							settings: buildClaudeFlagSettings(
+								this.claudeSettingsOverrides?.(),
+							),
 							settingSources: ["user", "project", "local"],
 							canUseTool: bridge.createCanUseTool(ctx),
 							model: apiModelId,
-							...(input.permissionMode === "auto"
-								? { permissionMode: "auto" }
+							...(input.permissionMode
+								? {
+										permissionMode: toSdkPermissionMode(input.permissionMode),
+										// The SDK rejects bypassPermissions unless the
+										// caller opts in explicitly.
+										...(requiresDangerousSkip(input.permissionMode)
+											? { allowDangerouslySkipPermissions: true }
+											: {}),
+									}
 								: {}),
 							...(resumeSessionId ? { resume: resumeSessionId } : {}),
 							...(input.agent ? { agent: input.agent } : {}),
@@ -980,9 +1017,112 @@ export class ClaudeProviderRuntime {
 
 	// ─── enqueueTurn ──────────────────────────────────────────────────────
 
+	/**
+	 * Push the settings the user picked onto the live query. `setModel` and the
+	 * flag layer are the only mid-session channels: `model` (with the context
+	 * window folded into the API model id) goes through the former, `effort`
+	 * through the latter because it is fixed at query creation.
+	 *
+	 * Leaves `ctx.settingsOutOfSync` latched on failure so the next turn
+	 * re-issues whatever did not land; the caller clears it once the settings
+	 * are known to have reached the query.
+	 */
+	private syncQuerySettingsEffect(
+		ctx: ClaudeSessionContext,
+		settings: {
+			readonly modelId?: string | undefined;
+			readonly contextWindow?: string | undefined;
+			readonly variant?: string | undefined;
+		},
+	): Effect.Effect<void, unknown> {
+		return Effect.gen(this, function* () {
+			const baseModelId = settings.modelId ?? ctx.currentModel;
+			const apiModelId = claudeApiModelId(baseModelId, settings.contextWindow);
+			const forceSettingsSync = ctx.settingsOutOfSync;
+			const shouldSetModel =
+				apiModelId !== undefined &&
+				(forceSettingsSync || apiModelId !== ctx.currentApiModelId);
+			const shouldApplyFlagSettings =
+				forceSettingsSync || settings.variant !== ctx.currentVariant;
+
+			if (shouldSetModel || shouldApplyFlagSettings) {
+				ctx.settingsOutOfSync = true;
+			}
+			if (shouldSetModel) {
+				yield* Effect.tryPromise({
+					try: () => ctx.query.setModel(apiModelId),
+					catch: (cause) => cause,
+				});
+				ctx.currentApiModelId = apiModelId;
+			}
+			if (settings.modelId) {
+				ctx.currentModel = settings.modelId;
+			}
+			// `effort` is fixed at query creation, so a mid-session change only
+			// lands via the flag-settings layer. Empty/absent clears it back to
+			// the settings-file default.
+			if (shouldApplyFlagSettings) {
+				const effortLevel = (settings.variant || null) as EffortLevel | null;
+				yield* Effect.tryPromise({
+					try: () => ctx.query.applyFlagSettings({ effortLevel }),
+					catch: (cause) => cause,
+				});
+				if (settings.variant) {
+					ctx.currentVariant = settings.variant;
+				} else {
+					delete ctx.currentVariant;
+				}
+			}
+		});
+	}
+
+	/**
+	 * Apply a picker change to the live query immediately, rather than letting
+	 * it wait for the next turn's admission path. A session with no live query
+	 * yet is a no-op: query creation reads these from its options.
+	 */
+	applyLiveSettingsEffect(
+		sessionId: string,
+		settings: {
+			readonly modelId?: string | undefined;
+			readonly contextWindow?: string | undefined;
+			readonly variant?: string | undefined;
+		},
+	): Effect.Effect<void, ProviderInstanceFailure> {
+		return this.mapProviderFailure(
+			"apply live settings",
+			Effect.gen(this, function* () {
+				const pending = yield* this.getSetupLock(sessionId);
+				if (pending) {
+					yield* Deferred.await(pending);
+				}
+				const ctx = yield* this.getSession(sessionId);
+				if (!ctx) return;
+				yield* this.syncQuerySettingsEffect(ctx, settings);
+				// `init` arrives only at query creation, so for the rest of the
+				// session the drift check reads this. Left at the pre-switch model,
+				// a switch the user just made reads back as the SDK ignoring them
+				// the moment an assistant message reports what actually served it.
+				// The live query's own workspace and agent are the right frame: an
+				// agent change restarts the session instead of reaching this path.
+				this.setExpectedApiModelId(
+					ctx,
+					yield* this.expectedApiModelIdEffect(
+						settings.modelId ?? ctx.currentModel,
+						settings.contextWindow,
+						ctx.workspaceRoot,
+						ctx.currentAgent,
+					),
+				);
+				// Both calls landed, so the next turn has nothing to re-issue.
+				ctx.settingsOutOfSync = false;
+			}),
+		);
+	}
+
 	setPermissionModeEffect(
 		sessionId: string,
-		mode: "auto" | "default",
+		mode: ClaudeSDKPermissionMode,
 	): Effect.Effect<void, ProviderInstanceFailure> {
 		return this.mapProviderFailure(
 			"set permission mode",
@@ -1046,7 +1186,6 @@ export class ClaudeProviderRuntime {
 					}
 
 					const baseModelId = input.model?.modelId ?? ctx.currentModel;
-					const apiModelId = claudeApiModelId(baseModelId, input.contextWindow);
 					const expectedApiModelId = yield* this.expectedApiModelIdEffect(
 						baseModelId,
 						input.contextWindow,
@@ -1057,46 +1196,12 @@ export class ClaudeProviderRuntime {
 						try: () => validateUserMessage(this.buildUserMessage(input)),
 						catch: (cause) => cause,
 					});
-					const forceSettingsSync = ctx.settingsOutOfSync;
-					const shouldSetModel =
-						apiModelId !== undefined &&
-						(forceSettingsSync || apiModelId !== ctx.currentApiModelId);
-					const shouldApplyFlagSettings =
-						forceSettingsSync || input.variant !== ctx.currentVariant;
-
-					if (shouldSetModel || shouldApplyFlagSettings) {
-						ctx.settingsOutOfSync = true;
-					}
-					if (shouldSetModel) {
-						yield* Effect.tryPromise({
-							try: () => ctx.query.setModel(apiModelId),
-							catch: (cause) => cause,
-						});
-						ctx.currentApiModelId = apiModelId;
-					}
-					if (input.model?.modelId) {
-						ctx.currentModel = input.model.modelId;
-					}
-					// `effort` is fixed at query creation, so a mid-session change only
-					// lands via the flag-settings layer. Empty/absent clears it back to
-					// the settings-file default.
-					if (shouldApplyFlagSettings) {
-						const effortLevel = (input.variant || null) as EffortLevel | null;
-						yield* Effect.tryPromise({
-							try: () => ctx.query.applyFlagSettings({ effortLevel }),
-							catch: (cause) => cause,
-						});
-						if (input.variant) {
-							ctx.currentVariant = input.variant;
-						} else {
-							delete ctx.currentVariant;
-						}
-					}
-					if (expectedApiModelId === undefined) {
-						delete ctx.expectedApiModelId;
-					} else {
-						ctx.expectedApiModelId = expectedApiModelId;
-					}
+					yield* this.syncQuerySettingsEffect(ctx, {
+						modelId: input.model?.modelId,
+						contextWindow: input.contextWindow,
+						variant: input.variant,
+					});
+					this.setExpectedApiModelId(ctx, expectedApiModelId);
 
 					const turnDeferred = yield* Deferred.make<TurnResult, Error>();
 					yield* Effect.uninterruptible(

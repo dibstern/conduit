@@ -15,10 +15,6 @@ const meta = {
 	title: "Chat/ToolGenericCard",
 	component: ToolGenericCard,
 	tags: ["autodocs"],
-	args: { groupRadius: "rounded-panel" },
-	argTypes: {
-		groupRadius: { control: "text" },
-	},
 } satisfies Meta<typeof ToolGenericCard>;
 
 export default meta;

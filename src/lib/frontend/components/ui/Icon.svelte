@@ -84,6 +84,7 @@
     Palette,
     Sparkles,
     Star,
+    Brain,
   } from '@lucide/svelte';
 
   // Map of kebab-case icon name to Svelte component.
@@ -181,6 +182,7 @@
     'palette': Palette,
     'sparkles': Sparkles,
     'star': Star,
+    'brain': Brain,
   };
 
   let {

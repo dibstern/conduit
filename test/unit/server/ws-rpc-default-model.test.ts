@@ -83,6 +83,7 @@ describe("WsRpcServerLayer SetDefaultModel", () => {
 					type: "default_model_info",
 					model: "gpt-4",
 					provider: "openai",
+					variant: "fast",
 				});
 				expect(wsHandler.broadcast).toHaveBeenCalledWith({
 					type: "variant_info",

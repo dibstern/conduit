@@ -196,9 +196,9 @@
 	<!-- Invisible backdrop for outside-click detection -->
 	<!-- svelte-ignore a11y_click_events_have_key_events -->
 	<!-- svelte-ignore a11y_no_static_element_interactions -->
-	<div class="fixed inset-0 z-40" onclick={handleBackdropClick}></div>
+	<div class="fixed inset-0 z-[var(--z-top-scrim)]" onclick={handleBackdropClick}></div>
 
-	<!-- Dropdown menu (opens upward, fixed to sidebar bottom-left like ThemePicker) -->
+	<!-- Dropdown menu (opens upward, fixed to the sidebar bottom-left) -->
 	<Surface
 		variant="raised"
 		radius="md"

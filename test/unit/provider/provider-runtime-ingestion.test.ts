@@ -172,6 +172,7 @@ describe("ProviderRuntimeIngestion", () => {
 				sessionId: "session-123",
 				text: "hello",
 				messageId: "message-1",
+				partId: "text-1",
 			},
 		]);
 	});
@@ -248,6 +249,42 @@ describe("ProviderRuntimeIngestion", () => {
 			expect.objectContaining({ type: "session.created" }),
 		]);
 		expect(harness.executeSql).not.toHaveBeenCalled();
+	});
+
+	it("seeds a session row for a session it never saw created", async () => {
+		const harness = makeHarness();
+
+		await Effect.runPromise(
+			Effect.gen(function* () {
+				const ingestion = yield* ProviderRuntimeIngestionTag;
+				yield* ingestion.ingest(
+					runtimeEvent({
+						eventId: "runtime-subagent-message",
+						sessionId: "subagent-session",
+						type: "message.created",
+						turnId: "turn-1",
+						data: {
+							messageId: "message-1",
+							role: "assistant",
+						},
+					}),
+				);
+				yield* ingestion.drain();
+			}).pipe(Effect.provide(harness.layer)),
+		);
+
+		// Claude subagents stream under an id Conduit never created. Without the
+		// row the message projector trips sessions(id) and the message is lost.
+		expect(harness.executeSql).toHaveBeenCalledTimes(1);
+		const [fragment, ...values] = harness.executeSql.mock
+			.calls[0] as unknown as [TemplateStringsArray, ...unknown[]];
+		expect(fragment.join("?")).toContain("INSERT OR IGNORE INTO sessions");
+		expect(values).toEqual(
+			expect.arrayContaining(["subagent-session", "claude"]),
+		);
+		expect(harness.executeSql.mock.invocationCallOrder[0]).toBeLessThan(
+			harness.projectEvent.mock.invocationCallOrder[0] as number,
+		);
 	});
 
 	it("appends mapped domain events and projects the stored events eagerly", async () => {

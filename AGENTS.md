@@ -107,7 +107,7 @@ actually run and is green against a real baseline.
 
 ### Issue tracker
 
-GitHub Issues at `dibstern/conduit`, via the `gh` CLI. See `docs/agents/issue-tracker.md`.
+Beads (`bd` CLI): epics for specs, child beads for tickets, `bd dep` for blocking edges. Not GitHub Issues. See `docs/agents/issue-tracker.md`.
 
 ### Triage labels
 

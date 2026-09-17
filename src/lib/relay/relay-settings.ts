@@ -4,18 +4,27 @@
 
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { Schema } from "effect";
+import type { ClaudeSettingsOverrides } from "../contracts/claude-settings.js";
 import type { ModelOverride } from "../domain/relay/Services/session-overrides-state.js";
 import { DEFAULT_CONFIG_DIR } from "../env.js";
+import {
+	type SessionPermissionMode,
+	SessionPermissionModeSchema,
+} from "../shared-types.js";
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
 export interface RelaySettings {
 	defaultModel?: string;
+	defaultPermissionMode?: SessionPermissionMode;
 	defaultVariants?: Record<string, string>;
 	/** Model keys ("<providerId>/<modelId>") hidden from the model dropdown. */
 	hiddenModels?: string[];
 	/** Agent keys ("<scopeId>/<agentId>") hidden from the agent dropdown. */
 	hiddenAgents?: string[];
+	/** Global Claude SDK flag-layer overrides. */
+	claudeSettings?: ClaudeSettingsOverrides;
 }
 
 // ─── Constants ──────────────────────────────────────────────────────────────
@@ -35,6 +44,13 @@ function stripComments(text: string): string {
 
 // ─── Public API ─────────────────────────────────────────────────────────────
 
+const isSessionPermissionMode = Schema.is(SessionPermissionModeSchema);
+
+const isPermissionMode = (
+	value: unknown,
+): value is SessionPermissionMode | undefined =>
+	value === undefined || isSessionPermissionMode(value);
+
 /**
  * Load relay settings from the config directory.
  * Returns empty object if file doesn't exist or is corrupt.
@@ -43,7 +59,13 @@ export function loadRelaySettings(configDir?: string): RelaySettings {
 	try {
 		const dir = resolveDir(configDir);
 		const raw = readFileSync(join(dir, SETTINGS_FILE), "utf-8");
-		return JSON.parse(stripComments(raw)) as RelaySettings;
+		const settings = JSON.parse(stripComments(raw)) as RelaySettings;
+		// The file is hand-editable, so an unknown mode reaches getPermissionMode
+		// as a value no caller can interpret — the pill would fall back to "Ask"
+		// while the session ran under something else. Drop it and use the default.
+		if (isPermissionMode(settings.defaultPermissionMode)) return settings;
+		const { defaultPermissionMode: _unusable, ...rest } = settings;
+		return rest;
 	} catch {
 		return {};
 	}
@@ -68,6 +90,9 @@ export function saveRelaySettings(
 	if (settings.defaultModel !== undefined) {
 		merged.defaultModel = settings.defaultModel;
 	}
+	if (settings.defaultPermissionMode !== undefined) {
+		merged.defaultPermissionMode = settings.defaultPermissionMode;
+	}
 
 	// Merge defaultVariants map (shallow merge of entries)
 	if (settings.defaultVariants) {
@@ -84,6 +109,11 @@ export function saveRelaySettings(
 	}
 	if (settings.hiddenAgents !== undefined) {
 		merged.hiddenAgents = [...settings.hiddenAgents];
+	}
+
+	// Claude settings use replace semantics so removing a key unpins it.
+	if (settings.claudeSettings !== undefined) {
+		merged.claudeSettings = { ...settings.claudeSettings };
 	}
 
 	const tmpPath = join(dir, `.${SETTINGS_FILE}.tmp`);

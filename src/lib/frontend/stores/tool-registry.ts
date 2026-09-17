@@ -116,6 +116,7 @@ export function createToolRegistry(
 			id,
 			name,
 			status: "pending",
+			createdAt: Date.now(),
 			...(messageId !== undefined && { messageId }),
 		});
 		entries.set(id, { uuid, status: "pending", tool });

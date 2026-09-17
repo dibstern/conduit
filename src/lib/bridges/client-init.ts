@@ -33,6 +33,7 @@ import {
 	getContextWindow,
 	getDefaultContextWindow,
 	getDefaultModel,
+	getDefaultPermissionMode,
 	getDefaultVariant,
 	getModel,
 	getPermissionMode,
@@ -700,7 +701,11 @@ export const handleClientConnectedEffect = (
 				});
 				wsHandler.sendTo(clientId, {
 					type: "permission_mode_info",
-					mode: activeId ? yield* getPermissionMode(activeId) : "ask",
+					// No session yet: report the mode one would start in, not "ask".
+					// getPermissionMode already falls back to the default itself.
+					mode: activeId
+						? yield* getPermissionMode(activeId)
+						: yield* getDefaultPermissionMode(),
 				});
 
 				const defaultModel = yield* getDefaultModel();
@@ -709,8 +714,13 @@ export const handleClientConnectedEffect = (
 						type: "default_model_info",
 						model: defaultModel.modelID,
 						provider: defaultModel.providerID,
+						variant: yield* getDefaultVariant(),
 					});
 				}
+				wsHandler.sendTo(clientId, {
+					type: "default_permission_mode_info",
+					mode: yield* getDefaultPermissionMode(),
+				});
 
 				if (!defaultModel && openCodeProviderResult._tag === "Right") {
 					for (const providerId of openCodeProviderResult.right.connected) {
@@ -1157,6 +1167,7 @@ export async function handleClientConnected(
 				type: "default_model_info",
 				model: defaultModel.modelID,
 				provider: defaultModel.providerID,
+				variant: await overrideState.getDefaultVariant(),
 			});
 		}
 

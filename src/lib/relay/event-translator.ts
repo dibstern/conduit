@@ -114,6 +114,7 @@ export function translatePartDelta(
 			return {
 				type: "delta",
 				text: props.delta,
+				partId: props.partID,
 				...(messageId != null && { messageId }),
 			};
 		}
@@ -131,6 +132,7 @@ export function translatePartDelta(
 	return {
 		type: "delta",
 		text: props.delta,
+		partId: props.partID,
 		...(messageId != null && { messageId }),
 	};
 }

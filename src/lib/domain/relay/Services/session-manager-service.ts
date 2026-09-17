@@ -28,7 +28,6 @@ import {
 import {
 	loadDaemonConfig,
 	resolveInstanceDriver,
-	resolveProviderRoutingDriver,
 } from "../../../daemon/config-persistence.js";
 import {
 	type ForkEntry,
@@ -66,6 +65,11 @@ import {
 	OrchestrationEngineTag,
 	StatusPollerTag,
 } from "./services.js";
+import {
+	applySessionCommand,
+	createOpenCodeSession,
+	normalizeSessionTitle,
+} from "./session-command.js";
 import { SessionManagerStateTag } from "./session-manager-state.js";
 import {
 	OverridesStateTag,
@@ -315,8 +319,15 @@ export const initialize = (title?: string) =>
 			return sorted[0]?.id ?? "";
 		}
 
-		const session = yield* createSession(title).pipe(
+		// Same seam as every other create: this path used to call the provider
+		// and record nothing, so the session it returned was invisible to
+		// listSessions until a poller happened to pick it up.
+		const session = yield* createOpenCodeSession(title, "opencode").pipe(
 			Effect.provideService(OpenCodeAPITag, api),
+			Effect.mapError(
+				(cause) =>
+					new SessionManagerError({ operation: "getDefaultSessionId", cause }),
+			),
 		);
 		yield* Ref.update(stateRef, (s) => ({
 			...s,
@@ -329,34 +340,6 @@ export const initialize = (title?: string) =>
 /**
  * Create a new session via the API.
  */
-export const createSession = (title?: string) =>
-	Effect.gen(function* () {
-		const api = yield* OpenCodeAPITag;
-		// No retry: create is not idempotent — retrying could produce duplicates.
-		const session = yield* Effect.tryPromise(() =>
-			api.session.create(title ? { title } : undefined),
-		).pipe(
-			Effect.mapError(
-				(cause) =>
-					new SessionManagerError({ operation: "createSession", cause }),
-			),
-		);
-		return session;
-	}).pipe(
-		Effect.annotateLogs("operation", "createSession"),
-		Effect.withSpan("session.createSession"),
-	);
-
-const normalizeSessionTitle = (title?: string): string => {
-	const trimmed = title?.trim();
-	return trimmed ? trimmed : "Untitled";
-};
-
-const isClaudeSessionRow = (row: SessionRow, configDir?: string): boolean =>
-	row.provider === CLAUDE_SDK_PROVIDER_ID ||
-	resolveProviderRoutingDriver(loadDaemonConfig(configDir), row.provider) ===
-		CLAUDE_PROVIDER_ID;
-
 const createLocalSessionId = (): string =>
 	`ses_${randomUUID().replaceAll("-", "")}`;
 
@@ -386,11 +369,16 @@ const createLocalSession = (
 			ProjectionRunnerEffectTag,
 		);
 		const sqlOption = yield* Effect.serviceOption(SqlClient.SqlClient);
+		const readQueryOption = yield* Effect.serviceOption(ReadQueryEffectTag);
 		const configOption = yield* Effect.serviceOption(ConfigTag);
 
+		// applySessionCommand skips the local write when any of these is missing.
+		// A locally-created session that is never recorded exists nowhere, so the
+		// precondition is checked here instead of failing silently.
 		if (
 			eventStoreOption._tag === "None" ||
 			projectionRunnerOption._tag === "None" ||
+			readQueryOption._tag === "None" ||
 			sqlOption._tag === "None"
 		) {
 			return yield* new SessionManagerError({
@@ -399,9 +387,6 @@ const createLocalSession = (
 			});
 		}
 
-		const eventStore = eventStoreOption.value;
-		const projectionRunner = projectionRunnerOption.value;
-		const sql = sqlOption.value;
 		const provider =
 			selectedInstanceId === undefined
 				? yield* getLocalSessionProvider()
@@ -410,72 +395,16 @@ const createLocalSession = (
 		const now = Date.now();
 		const sessionTitle = normalizeSessionTitle(title);
 
-		const withSql = <A, E>(
-			effect: Effect.Effect<A, E, SqlClient.SqlClient>,
-		): Effect.Effect<A, E> =>
-			effect.pipe(Effect.provideService(SqlClient.SqlClient, sql));
-
-		const recovered = yield* projectionRunner.isRecovered();
-		if (!recovered) {
-			yield* withSql(projectionRunner.recover()).pipe(
-				Effect.mapError(
-					(cause) =>
-						new SessionManagerError({
-							operation: "createLocalSession.recover",
-							cause,
-						}),
-				),
-				Effect.asVoid,
-			);
-		}
-
-		yield* sql`
-			INSERT OR IGNORE INTO sessions (id, provider, title, status, created_at, updated_at)
-			VALUES (${sessionId}, ${provider}, ${sessionTitle}, 'idle', ${now}, ${now})`.pipe(
+		// The id is chosen here rather than upstream, so creation is one command:
+		// the seam appends session.created and the projector's upsert is what
+		// brings the sessions row into being.
+		yield* applySessionCommand({
+			type: "session.created",
+			data: { sessionId, title: sessionTitle, provider },
+		}).pipe(
 			Effect.mapError(
 				(cause) =>
-					new SessionManagerError({
-						operation: "createLocalSession.seed",
-						cause,
-					}),
-			),
-			Effect.asVoid,
-		);
-
-		const stored = yield* eventStore
-			.append(
-				canonicalEvent(
-					"session.created",
-					sessionId,
-					{
-						sessionId,
-						title: sessionTitle,
-						provider,
-					},
-					{
-						provider,
-						createdAt: now,
-						metadata: { source: "relay", synthetic: true },
-					},
-				),
-			)
-			.pipe(
-				Effect.mapError(
-					(cause) =>
-						new SessionManagerError({
-							operation: "createLocalSession.append",
-							cause,
-						}),
-				),
-			);
-
-		yield* withSql(projectionRunner.projectEvent(stored)).pipe(
-			Effect.mapError(
-				(cause) =>
-					new SessionManagerError({
-						operation: "createLocalSession.project",
-						cause,
-					}),
+					new SessionManagerError({ operation: "createLocalSession", cause }),
 			),
 		);
 
@@ -491,16 +420,15 @@ const createLocalSession = (
 		} satisfies SessionDetail;
 	}).pipe(Effect.withSpan("session.createLocalSession"));
 
-/**
- * Delete a session via the API and clear all associated state.
- */
+/** Delete a session locally, then best-effort upstream, and clear associated state. */
 export const deleteSession = (sessionId: string) =>
 	Effect.gen(function* () {
-		const api = yield* OpenCodeAPITag;
 		const stateRef = yield* SessionManagerStateTag;
 
-		// No retry: delete is not idempotent — retrying a 404 would fail unnecessarily.
-		yield* Effect.tryPromise(() => api.session.delete(sessionId)).pipe(
+		yield* applySessionCommand({
+			type: "session.deleted",
+			data: { sessionId },
+		}).pipe(
 			Effect.mapError(
 				(cause) =>
 					new SessionManagerError({ operation: "deleteSession", cause }),
@@ -538,109 +466,6 @@ export const deleteSession = (sessionId: string) =>
 		Effect.annotateLogs("sessionId", sessionId),
 		Effect.withSpan("session.deleteSession", { attributes: { sessionId } }),
 	);
-
-const renameSQLiteBackedClaudeSession = (sessionId: string, title: string) =>
-	Effect.gen(function* () {
-		const readQueryOption = yield* Effect.serviceOption(ReadQueryEffectTag);
-		const eventStoreOption = yield* Effect.serviceOption(EventStoreEffectTag);
-		const projectionRunnerOption = yield* Effect.serviceOption(
-			ProjectionRunnerEffectTag,
-		);
-		const sqlOption = yield* Effect.serviceOption(SqlClient.SqlClient);
-		const configOption = yield* Effect.serviceOption(ConfigTag);
-
-		if (
-			readQueryOption._tag === "None" ||
-			eventStoreOption._tag === "None" ||
-			projectionRunnerOption._tag === "None" ||
-			sqlOption._tag === "None"
-		) {
-			return false;
-		}
-
-		const eventStore = eventStoreOption.value;
-		const projectionRunner = projectionRunnerOption.value;
-		const sql = sqlOption.value;
-
-		const withSql = <A, E>(
-			effect: Effect.Effect<A, E, SqlClient.SqlClient>,
-		): Effect.Effect<A, E> =>
-			effect.pipe(Effect.provideService(SqlClient.SqlClient, sql));
-
-		const recovered = yield* projectionRunner.isRecovered();
-		if (!recovered) {
-			yield* withSql(projectionRunner.recover()).pipe(
-				Effect.mapError(
-					(cause) =>
-						new SessionManagerError({
-							operation: "renameSession.recover",
-							cause,
-						}),
-				),
-				Effect.asVoid,
-			);
-		}
-
-		const readQuery = readQueryOption.value;
-		const row = yield* readQuery.getSession(sessionId).pipe(
-			Effect.mapError(
-				(cause) =>
-					new SessionManagerError({
-						operation: "renameSession.getSession",
-						cause,
-					}),
-			),
-		);
-		if (
-			!row ||
-			!isClaudeSessionRow(
-				row,
-				configOption._tag === "Some" ? configOption.value.configDir : undefined,
-			)
-		) {
-			return false;
-		}
-
-		const now = Date.now();
-
-		const stored = yield* eventStore
-			.append(
-				canonicalEvent(
-					"session.renamed",
-					sessionId,
-					{
-						sessionId,
-						title,
-					},
-					{
-						provider: row.provider,
-						createdAt: now,
-						metadata: { source: "relay" },
-					},
-				),
-			)
-			.pipe(
-				Effect.mapError(
-					(cause) =>
-						new SessionManagerError({
-							operation: "renameSession.append",
-							cause,
-						}),
-				),
-			);
-
-		yield* withSql(projectionRunner.projectEvent(stored)).pipe(
-			Effect.mapError(
-				(cause) =>
-					new SessionManagerError({
-						operation: "renameSession.project",
-						cause,
-					}),
-			),
-		);
-
-		return true;
-	});
 
 export const persistSessionPermissionMode = (
 	sessionId: string,
@@ -781,23 +606,13 @@ export const restoreSessionPermissionModes = () =>
  * Rename a session through Conduit's event store for Claude rows, otherwise via the API.
  */
 export const renameSession = (sessionId: string, title: string) =>
-	Effect.gen(function* () {
-		const renamedLocally = yield* renameSQLiteBackedClaudeSession(
-			sessionId,
-			title,
-		);
-		if (renamedLocally) return;
-
-		const api = yield* OpenCodeAPITag;
-		yield* Effect.tryPromise(() =>
-			api.session.update(sessionId, { title }),
-		).pipe(
-			Effect.mapError(
-				(cause) =>
-					new SessionManagerError({ operation: "renameSession", cause }),
-			),
-		);
+	applySessionCommand({
+		type: "session.renamed",
+		data: { sessionId, title },
 	}).pipe(
+		Effect.mapError(
+			(cause) => new SessionManagerError({ operation: "renameSession", cause }),
+		),
 		Effect.annotateLogs("sessionId", sessionId),
 		Effect.withSpan("session.renameSession", { attributes: { sessionId } }),
 	);
@@ -1104,13 +919,43 @@ export const setPendingQuestionCounts = (counts: ReadonlyMap<string, number>) =>
 		}));
 	}).pipe(Effect.withSpan("session.setPendingQuestionCounts"));
 
-/** Record fork-point metadata for a forked session and persist it to disk. */
+/**
+ * Record fork-point metadata for a forked session: lineage into the event
+ * store, the whole entry into relay state and the on-disk sidecar.
+ *
+ * The canonical event leads. `sessions.parent_id` is what the root-session
+ * query filters on, so lineage that reaches only the sidecar leaves the fork
+ * looking like a top-level session to every reader that does not consult it
+ * (conduit-test-o5vp). The sidecar is now a cache of the same fact, plus the
+ * fork-point timestamp, which has no column.
+ */
 export const setForkEntry = (
 	sessionId: string,
 	entry: ForkEntry,
 	configDir?: string,
 ) =>
 	Effect.gen(function* () {
+		if (entry.parentID) {
+			yield* applySessionCommand({
+				type: "session.forked",
+				data: {
+					sessionId,
+					parentId: entry.parentID,
+					...(entry.forkMessageId
+						? { forkPointEvent: entry.forkMessageId }
+						: {}),
+					...(entry.forkPointTimestamp != null
+						? { forkPointTimestamp: entry.forkPointTimestamp }
+						: {}),
+				},
+			}).pipe(
+				Effect.mapError(
+					(cause) =>
+						new SessionManagerError({ operation: "setForkEntry", cause }),
+				),
+			);
+		}
+
 		const ref = yield* SessionManagerStateTag;
 		const forkMeta = yield* Ref.modify(ref, (s) => {
 			const nextForkMeta = HashMap.set(s.forkMeta, sessionId, entry);
@@ -1310,110 +1155,6 @@ export const SessionManagerServiceLive: Layer.Layer<
 							engineOption.value.bindSession(session.id, providerId);
 						}
 					});
-				const seedOpenCodeSession = (session: SessionDetail) => {
-					if (sqlOption._tag === "None") {
-						return Effect.sync(() => {
-							log.warn(
-								`OpenCode session ${session.id} was created without persistence services; session list seeding skipped`,
-							);
-						});
-					}
-
-					const now = Date.now();
-					const sessionTitle = normalizeSessionTitle(session.title);
-					return sqlOption.value`
-						INSERT OR IGNORE INTO sessions (
-							id, provider, provider_sid, title, status, created_at, updated_at
-						) VALUES (
-							${session.id}, 'opencode', ${session.id}, ${sessionTitle}, 'idle', ${now}, ${now}
-						)`.pipe(
-						Effect.asVoid,
-						Effect.catchAll((cause) =>
-							Effect.sync(() => {
-								log.warn(
-									`Failed to seed OpenCode session ${session.id} in the read model: ${String(cause)}`,
-								);
-							}),
-						),
-					);
-				};
-				const persistOpenCodeInstanceBinding = (
-					session: SessionDetail,
-					instanceId: ProviderInstanceId,
-				) =>
-					Effect.gen(function* () {
-						if (
-							eventStoreEffectOption._tag === "None" ||
-							projectionRunnerEffectOption._tag === "None" ||
-							sqlOption._tag === "None"
-						) {
-							return yield* new SessionManagerError({
-								operation: "createSession.persistInstanceBinding",
-								cause: "SQLite event-store services are unavailable",
-							});
-						}
-
-						const eventStore = eventStoreEffectOption.value;
-						const projectionRunner = projectionRunnerEffectOption.value;
-						const sql = sqlOption.value;
-						const withSql = <A, E>(
-							effect: Effect.Effect<A, E, SqlClient.SqlClient>,
-						): Effect.Effect<A, E> =>
-							effect.pipe(Effect.provideService(SqlClient.SqlClient, sql));
-
-						const recovered = yield* projectionRunner.isRecovered();
-						if (!recovered) {
-							yield* withSql(projectionRunner.recover()).pipe(
-								Effect.mapError(
-									(cause) =>
-										new SessionManagerError({
-											operation: "createSession.persistInstanceBinding.recover",
-											cause,
-										}),
-								),
-								Effect.asVoid,
-							);
-						}
-
-						const now = Date.now();
-						const stored = yield* eventStore
-							.append(
-								canonicalEvent(
-									"session.created",
-									session.id,
-									{
-										sessionId: session.id,
-										title: normalizeSessionTitle(session.title),
-										provider: instanceId,
-										providerSessionId: session.id,
-									},
-									{
-										provider: instanceId,
-										createdAt: now,
-										metadata: { source: "relay", synthetic: true },
-									},
-								),
-							)
-							.pipe(
-								Effect.mapError(
-									(cause) =>
-										new SessionManagerError({
-											operation: "createSession.persistInstanceBinding.append",
-											cause,
-										}),
-								),
-							);
-
-						yield* withSql(projectionRunner.projectEvent(stored)).pipe(
-							Effect.mapError(
-								(cause) =>
-									new SessionManagerError({
-										operation: "createSession.persistInstanceBinding.project",
-										cause,
-									}),
-							),
-						);
-					});
 				const resolveSelectedDriver = (
 					instanceId: ProviderInstanceId,
 				): Effect.Effect<ProviderDriverKind, SessionManagerError> =>
@@ -1454,14 +1195,19 @@ export const SessionManagerServiceLive: Layer.Layer<
 												),
 											)
 									: undefined;
-							const session = yield* createSession(title).pipe(
+							return yield* createOpenCodeSession(
+								title,
+								instanceId ?? "opencode",
+							).pipe(
 								Effect.provideService(OpenCodeAPITag, instanceApi ?? api),
+								Effect.mapError(
+									(cause) =>
+										new SessionManagerError({
+											operation: "createSession",
+											cause,
+										}),
+								),
 							);
-							yield* seedOpenCodeSession(session);
-							if (instanceId !== undefined) {
-								yield* persistOpenCodeInstanceBinding(session, instanceId);
-							}
-							return session;
 						}),
 					);
 				const createViaLocal = (instanceId?: ProviderInstanceId) =>

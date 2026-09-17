@@ -460,7 +460,8 @@
     {
       "type": "default_model_info",
       "model": "claude-opus-4-6",
-      "provider": "anthropic"
+      "provider": "anthropic",
+      "variant": ""
     },
     {
       "type": "model_info",

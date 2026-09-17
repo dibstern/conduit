@@ -121,7 +121,8 @@
 			"message": {
 				"type": "default_model_info",
 				"model": "gpt-4",
-				"provider": "openai"
+				"provider": "openai",
+				"variant": ""
 			}
 		},
 		{
