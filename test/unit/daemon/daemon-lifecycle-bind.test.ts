@@ -1,5 +1,5 @@
 import { request as httpRequest } from "node:http";
-import { request as httpsRequest } from "node:https";
+import { Agent as HttpsAgent, request as httpsRequest } from "node:https";
 import type { AddressInfo } from "node:net";
 import { describe, expect, it } from "vitest";
 import type { DaemonLifecycleContext } from "../../../src/lib/daemon/daemon-lifecycle.js";
@@ -40,6 +40,7 @@ function boundAddress(ctx: DaemonLifecycleContext): AddressInfo {
 function httpsGet(
 	port: number,
 	path: string,
+	agent?: HttpsAgent,
 ): Promise<{ status: number; body: string }> {
 	return new Promise((resolve, reject) => {
 		const req = httpsRequest(
@@ -49,6 +50,7 @@ function httpsGet(
 				path,
 				method: "GET",
 				rejectUnauthorized: false,
+				agent,
 			},
 			(res) => {
 				let body = "";
@@ -175,5 +177,31 @@ describe("startHttpServer bind config", () => {
 
 		expect(ctx.httpServer).toBeNull();
 		expect(ctx.upgradeServer).toBeNull();
+	});
+
+	it("closes idle keep-alive TLS connections instead of waiting for the shutdown timeout", async () => {
+		const ctx = makeContext();
+		await startHttpServer(ctx, {
+			port: 0,
+			host: "127.0.0.1",
+			tls: {
+				key: fixtureCerts.key,
+				cert: fixtureCerts.cert,
+			},
+		});
+		const agent = new HttpsAgent({
+			keepAlive: true,
+			rejectUnauthorized: false,
+		});
+		try {
+			const response = await httpsGet(boundAddress(ctx).port, "/keep", agent);
+			expect(response.status).toBe(200);
+
+			const startedAt = Date.now();
+			await closeHttpServer(ctx);
+			expect(Date.now() - startedAt).toBeLessThan(2_000);
+		} finally {
+			agent.destroy();
+		}
 	});
 });

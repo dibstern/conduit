@@ -4,7 +4,7 @@
 //
 // This module provides the STATE and OPERATIONS layer — the actual `ws`
 // library integration and HTTP upgrade handling remain in the imperative
-// ws-handler.ts (still used by daemon-main.ts).
+// ws-handler.ts.
 //
 // Key conversions from old ws-handler.ts:
 //   clients: Map<string, WSType>          → Ref<HashMap<string, ClientState>>
