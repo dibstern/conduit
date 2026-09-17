@@ -1,0 +1,48 @@
+{
+	"src/lib/frontend/components/input/AttachMenu.svelte :: attach-menu-item": "Dead hook. No `.attach-menu-item` rule has existed in style.css for as long as git remembers, so the class styled nothing.",
+	"src/lib/frontend/components/input/AttachMenu.svelte :: bg-none": "`background-image: none` on an element that never had a background image.",
+	"src/lib/frontend/components/input/PermissionModeSelector.svelte :: bottom-[calc(100%+4px)]": "Hand-rolled positioning, replaced by ui/Menu's `side=\"top\"` + `sideOffset={4}`, which is the same 4px gap computed by the positioning engine instead of by CSS.",
+	"src/lib/frontend/components/input/PermissionModeSelector.svelte :: w-[10px]": "The spacer that reserved room for the hand-drawn checkmark on unselected rows. MenuRadioItem draws the check itself, so nothing needs reserving.",
+	"src/lib/frontend/components/input/PermissionModeSelector.svelte :: z-[var(--z-popover-raised)]": "Deliberate tier drop, 210 -> 200. The raised tier existed so an absolutely-positioned panel could clear its own composer; the menu is now portaled to <body> and painted after every inline surface, so the popover tier is sufficient. Verified by the Dropdown Open story, where the panel renders above the composer.",
+	"src/lib/frontend/components/project/ProjectContextMenu.svelte :: z-[var(--z-popover-raised)]": "As above. This menu opens from inside ProjectSwitcher's inline dropdown, which sits below the popover tier, so 200 clears it.",
+	"src/lib/frontend/components/project/ProjectContextMenu.svelte :: text-[13px]": "Converged to the shared `text-sm` (11px) that every other menu row in the app already wore. 13px was this one menu's private value and nothing referenced it.",
+	"src/lib/frontend/components/project/ProjectContextMenu.svelte :: hover:bg-error/10": "The Remove row is now MenuItem `variant=\"danger\"`, whose hover is the neutral menu hover with error-coloured text. That is the house treatment, already worn by SessionContextMenu's delete row; the red wash was this menu's private one.",
+	"src/lib/frontend/components/project/ProjectContextMenu.svelte :: hover:text-error": "As above: `variant=\"danger\"` sets `text-error` at rest, so the hover no longer has to introduce it.",
+	"src/lib/frontend/components/input/AttachMenu.svelte :: gap-2.5,px-4,py-3": {
+		"movedTo": "src/lib/frontend/components/ui/floating-styles.ts",
+		"requires": "density=\"touch\"",
+		"reason": "The composer's attach rows are thumb targets on a phone and were ~40% taller than a pointer menu's. The three tokens are now MENU_ITEM_DENSITY_CLASSES.touch, selected by the density prop. This waiver is conditional on that prop: delete it and the drop is reported again, which is exactly how this regression escaped the first time."
+	},
+	"src/lib/frontend/components/input/AttachMenu.svelte :: text-sm": {
+		"movedTo": "src/lib/frontend/components/ui/floating-styles.ts",
+		"reason": "FLOATING_ITEM_BASE_CLASSES sets text-sm on every menu row. Same 11px, now stated once."
+	},
+	"src/lib/frontend/components/input/AttachMenu.svelte :: flex,flex-col": "Was on #attach-wrap, a wrapper holding one 28x28 button. Column-stacking a single child is inert; the panel it used to lay out is portaled now and never was its child.",
+	"src/lib/frontend/components/input/PermissionModeSelector.svelte :: flex,items-center,gap-2,px-3,py-1.5": {
+		"movedTo": "src/lib/frontend/components/ui/floating-styles.ts",
+		"requires": "<MenuRadioItem",
+		"reason": "The row's whole geometry, token for token, is FLOATING_ITEM_BASE_CLASSES plus MENU_ITEM_DENSITY_CLASSES.default. Conditional on the call site still being a MenuRadioItem rather than a hand-rolled button that happens to sit in a menu."
+	},
+	"src/lib/frontend/components/input/PermissionModeSelector.svelte :: py-1": {
+		"movedTo": "src/lib/frontend/components/ui/floating-styles.ts",
+		"reason": "Panel vertical padding; FLOATING_SURFACE_BASE_CLASSES carries the same py-1."
+	},
+	"src/lib/frontend/components/input/PermissionModeSelector.svelte :: right-0": "Absolute positioning replaced by the floating engine's align=\"end\". bits-ui computes the same right-edge alignment, and unlike right-0 it flips when the trigger is near the viewport edge.",
+	"src/lib/frontend/components/input/PermissionModeSelector.svelte :: text-base": "Deliberate: 12px -> 11px, converging on the text-sm every other menu row in the app already wore. text-base was this one menu's private size.",
+	"src/lib/frontend/components/input/PermissionModeSelector.svelte :: duration-100": "Dead as-found. No transition-property was declared on the element, so a duration alone animated nothing.",
+	"src/lib/frontend/components/input/PermissionModeSelector.svelte :: text-accent,font-bold,text-xs": "The hand-rolled &#10003; span is gone; MenuRadioItem draws the selected state from its own indicator. These three styled a character that no longer exists.",
+	"src/lib/frontend/components/project/ProjectContextMenu.svelte :: flex,flex-col": "Panel layout. A bits-ui menu content stacks its items already, so a column flexbox around them restates the default.",
+	"src/lib/frontend/components/project/ProjectContextMenu.svelte :: py-1": {
+		"movedTo": "src/lib/frontend/components/ui/floating-styles.ts",
+		"reason": "Panel vertical padding; FLOATING_SURFACE_BASE_CLASSES carries the same py-1."
+	},
+	"src/lib/frontend/components/project/ProjectContextMenu.svelte :: z-[var(--z-popover)]": "Was on the full-screen backdrop div that caught outside clicks. The backdrop is gone: bits-ui dismisses on outside pointerdown without painting an element over the page, which also stops the backdrop swallowing the first click elsewhere.",
+	"src/lib/frontend/components/project/ProjectContextMenu.svelte :: font-mono": "No-op as-found. --font-sans in style.css IS JetBrains Mono, so the ambient font was already this one.",
+	"src/lib/frontend/components/project/ProjectContextMenu.svelte :: duration-100": "Dead as-found. No transition-property was declared, so a duration alone animated nothing.",
+	"src/lib/frontend/components/project/ProjectContextMenu.svelte :: gap-2,px-3": {
+		"movedTo": "src/lib/frontend/components/ui/floating-styles.ts",
+		"requires": "<MenuItem",
+		"reason": "MENU_ITEM_DENSITY_CLASSES.default verbatim. Conditional on the rows still being MenuItem rather than hand-rolled buttons that happen to sit in a menu."
+	},
+	"src/lib/frontend/components/project/ProjectContextMenu.svelte :: py-2": "Deliberate: 6px -> 4.5px. py-1.5 is the row height every other menu in the app already used, and this menu's extra 1.5px was unexplained. The checker refuses to take this as a move, correctly, because py-2 is in no recipe."
+}
