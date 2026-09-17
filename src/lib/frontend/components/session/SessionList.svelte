@@ -322,16 +322,34 @@
 				</TextButton>
 			</div>
 			<div class="px-2">
-				<button
-					type="button"
+				<!--
+					The parent stays a plain block on purpose. A raw button element is
+					`inline-block` by default, so this control already sits on a line box
+					and already carries the descender gap below it; BASE's `inline-flex`
+					is inline-level too, so nothing moves. (Contrast file/FileTreeNode,
+					where the as-found class list said `flex` -- block-level -- and the
+					swap DID need a `flex flex-col` wrapper.) Making this parent a flex
+					column would close a gap that is currently there, which is a diff.
+					`disabledStyle="undimmed"` because the as-found disabled state does
+					not dim: it only swaps the colour set through the expression below.
+				-->
+				<Button
+					variant="ghost"
+					size="content"
+					tone="inherit"
+					hoverFill="none"
+					disabledStyle="undimmed"
 					disabled={selectionCount === 0}
-				class="w-full py-1.5 px-4 rounded-lg text-xs font-medium border cursor-pointer transition-colors duration-100 font-brand {selectionCount > 0 ? 'bg-error/10 text-error border-error/20 hover:bg-error/20' : 'bg-transparent text-text-dimmer border-border-subtle cursor-default'}"
-				onclick={handleBulkDelete}
+					class="w-full py-1.5 px-4 rounded-lg text-xs font-medium border duration-100 font-brand {selectionCount >
+					0
+						? 'bg-error/10 text-error border-error/20 hover:bg-error/20'
+						: 'bg-transparent text-text-dimmer border-border-subtle cursor-default'}"
+					onclick={handleBulkDelete}
 				>
 					{selectionCount > 0
 						? `Delete ${selectionCount === 1 ? "1 session" : `${selectionCount} sessions`}`
 						: "Select sessions to delete"}
-				</button>
+				</Button>
 			</div>
 		</div>
 	{:else}

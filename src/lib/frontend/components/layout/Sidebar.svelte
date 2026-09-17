@@ -5,6 +5,7 @@
 <script lang="ts">
 	import Icon from "../ui/Icon.svelte";
 	import BlockGrid from "../ui/BlockGrid.svelte";
+	import Button from "../ui/Button.svelte";
 	import SessionList from "../session/SessionList.svelte";
 	import ProjectSwitcher from "../project/ProjectSwitcher.svelte";
 	import SidebarFilePanel from "../file/SidebarFilePanel.svelte";
@@ -170,15 +171,28 @@
 			<span class="text-sm font-medium tracking-[0.14em] text-text font-brand">conduit</span>
 			<BlockGrid cols={10} mode="static" blockSize={2} gap={1} />
 		</a>
-		<button
+		<!--
+			`tone="muted"` and `hoverFill="alt"` reproduce this button's two colour
+			pairs token for token. Dropped: `bg-none` (background-image is already
+			none), `border-none` and `cursor-pointer` (preflight and BASE do those on
+			a button), `transition-[color,background]` (BASE's `transition-colors`
+			has always outranked it, since arbitrary values sort first) and
+			`duration-150`, which only restated the default.
+		-->
+		<Button
 			id="sidebar-toggle-btn"
-			class="flex items-center justify-center bg-none border-none text-text-muted cursor-pointer p-1 rounded-md transition-[color,background] duration-150 hover:text-text hover:bg-bg-alt"
+			variant="ghost"
+			size="content"
+			tone="muted"
+			hoverFill="alt"
+			iconOnly
+			icon="panel-left-close"
+			iconSize={18}
+			class="p-1 rounded-md"
 			title="Close sidebar"
-			aria-label="Close sidebar"
+			ariaLabel="Close sidebar"
 			onclick={handleCloseSidebar}
-		>
-			<Icon name="panel-left-close" size={18} />
-		</button>
+		/>
 	</div>
 
 	<!-- Project switcher -->
@@ -193,11 +207,24 @@
 			id="session-actions"
 			class="flex flex-col gap-px px-2.5 py-2 shrink-0"
 		>
-			<button
+			<!--
+				`align="start"` because BASE has no `justify-*` and ALIGN's default
+				`center` would emit one: a plain flex row already starts its items,
+				so `justify-start` is what "unchanged" looks like here.
+				`disabledStyle="undimmed"` matches the as-found `disabled:cursor-default`
+				with no dimming; the default `dim` would have faded the button to 50%.
+			-->
+			<Button
 				id="new-session-btn"
-			class="session-action-btn flex items-center gap-2 w-full py-1.5 px-2.5 border-none rounded-md bg-transparent text-text-secondary text-base cursor-pointer disabled:cursor-default transition-[background,color] duration-100 text-left hover:bg-sidebar-hover hover:text-text font-brand"
-			onclick={handleNewSession}
+				variant="ghost"
+				size="content"
+				align="start"
+				tone="secondary"
+				hoverFill="sidebar"
+				class="session-action-btn gap-2 w-full py-1.5 px-2.5 rounded-md text-base duration-100 text-left font-brand"
+				disabledStyle="undimmed"
 				disabled={sessionCreation.value.phase === "creating"}
+				onclick={handleNewSession}
 			>
 				{#if sessionCreation.value.phase === "creating"}
 					<BlockGrid cols={5} mode="fast" blockSize={1.5} gap={0.5} class="shrink-0" />
@@ -207,37 +234,52 @@
 				<span class="overflow-hidden text-ellipsis whitespace-nowrap"
 					>New session</span
 				>
-			</button>
-			<button
+			</Button>
+			<Button
 				id="resume-session-btn"
-			class="session-action-btn flex items-center gap-2 w-full py-1.5 px-2.5 border-none rounded-md bg-transparent text-text-secondary text-base cursor-pointer transition-[background,color] duration-100 text-left hover:bg-sidebar-hover hover:text-text font-brand"
-			onclick={handleResumeSession}
+				variant="ghost"
+				size="content"
+				align="start"
+				tone="secondary"
+				hoverFill="sidebar"
+				class="session-action-btn gap-2 w-full py-1.5 px-2.5 rounded-md text-base duration-100 text-left font-brand"
+				onclick={handleResumeSession}
 			>
 				<Icon name="link" size={16} class="shrink-0" />
 				<span class="overflow-hidden text-ellipsis whitespace-nowrap"
 					>Resume with ID</span
 				>
-			</button>
-			<button
+			</Button>
+			<Button
 				id="file-browser-btn"
-			class="session-action-btn flex items-center gap-2 w-full py-1.5 px-2.5 border-none rounded-md bg-transparent text-text-secondary text-base cursor-pointer transition-[background,color] duration-100 text-left hover:bg-sidebar-hover hover:text-text font-brand"
-			onclick={handleFileBrowser}
+				variant="ghost"
+				size="content"
+				align="start"
+				tone="secondary"
+				hoverFill="sidebar"
+				class="session-action-btn gap-2 w-full py-1.5 px-2.5 rounded-md text-base duration-100 text-left font-brand"
+				onclick={handleFileBrowser}
 			>
 				<Icon name="folder-tree" size={16} class="shrink-0" />
 				<span class="overflow-hidden text-ellipsis whitespace-nowrap"
 					>File browser</span
 				>
-			</button>
-			<button
+			</Button>
+			<Button
 				id="terminal-sidebar-btn"
-			class="session-action-btn flex items-center gap-2 w-full py-1.5 px-2.5 border-none rounded-md bg-transparent text-text-secondary text-base cursor-pointer transition-[background,color] duration-100 text-left hover:bg-sidebar-hover hover:text-text font-brand"
-			onclick={handleTerminalSidebar}
+				variant="ghost"
+				size="content"
+				align="start"
+				tone="secondary"
+				hoverFill="sidebar"
+				class="session-action-btn gap-2 w-full py-1.5 px-2.5 rounded-md text-base duration-100 text-left font-brand"
+				onclick={handleTerminalSidebar}
 			>
 				<Icon name="square-terminal" size={16} class="shrink-0" />
 				<span class="overflow-hidden text-ellipsis whitespace-nowrap"
 					>Terminal</span
 				>
-			</button>
+			</Button>
 		</div>
 
 	{#if uiState.sidebarPanel === "sessions"}

@@ -9,6 +9,7 @@
 	import { sessionState } from "../../stores/session.svelte.js";
 	import { formatTimeAgo } from "../../utils/format.js";
 	import Icon from "../ui/Icon.svelte";
+	import Button from "../ui/Button.svelte";
 	import TextInput from "../ui/TextInput.svelte";
 
 	// ─── Props ──────────────────────────────────────────────────────────────────
@@ -43,7 +44,8 @@
 
 	let localRenaming = $state(false);
 	let renameValue = $state("");
-	let moreBtnEl: HTMLButtonElement | undefined = $state(undefined);
+	let moreBtnEl: HTMLButtonElement | HTMLAnchorElement | undefined =
+		$state(undefined);
 
 	// Combined rename state: local (double-click) OR external (context menu)
 	const isRenaming = $derived(localRenaming || renamingProp);
@@ -167,13 +169,27 @@
 >
 	<!-- Selection circle (cleanup mode) -->
 	{#if cleanupMode}
-		<button
-			type="button"
-			class="shrink-0 w-6 h-6 border-none rounded p-0 bg-transparent cursor-pointer flex items-center justify-center transition-colors duration-100 {active ? (selected ? 'text-brand-a' : 'text-text-muted') : (selected ? 'text-accent' : 'text-text-dimmer')}"
+		<!--
+			No `tone`/`hoverFill` member fits: the colour is a four-way expression on
+			two booleans and there is no hover change at all, so both axes emit
+			nothing and the expression below owns the group uncontested.
+		-->
+		<Button
+			variant="ghost"
+			size="content"
+			tone="inherit"
+			hoverFill="none"
+			class="shrink-0 w-6 h-6 rounded duration-100 {active
+				? selected
+					? 'text-brand-a'
+					: 'text-text-muted'
+				: selected
+					? 'text-accent'
+					: 'text-text-dimmer'}"
 			onclick={handleSelectionToggle}
 		>
 			<Icon name={selected ? "circle-check" : "circle"} size={16} />
-		</button>
+		</Button>
 	{/if}
 
 	<!-- Session indicator dot: attention > done-unviewed > processing -->
@@ -236,17 +252,29 @@
 
 	<!-- Three-dot more button -->
 	{#if !isRenaming && !cleanupMode}
-		<button
-			bind:this={moreBtnEl}
-			class="session-more-btn shrink-0 w-5 h-5 border-none rounded p-0 bg-transparent cursor-pointer flex items-center justify-center transition-[opacity,color] duration-100
-			{active
+		<!--
+			`bind:element`, not `bind:this`: Svelte 5 does not forward `bind:this`
+			through a component tag, so ui/Button hands the element back by prop.
+			The hover pair stays in `class` because it is `group-hover:` driven off
+			the row, which no `hoverFill` member expresses. Dropped
+			`transition-[opacity,color]`: BASE's `transition-colors` already outranked
+			it, and nothing here animates `opacity` -- the fade is an alpha channel on
+			the text colour.
+		-->
+		<Button
+			bind:element={moreBtnEl}
+			variant="ghost"
+			size="content"
+			tone="inherit"
+			hoverFill="none"
+			class="session-more-btn shrink-0 w-5 h-5 rounded duration-100 {active
 				? 'text-text-muted group-hover:text-text-secondary hover:text-text hover:bg-bg-alt'
 				: 'text-text-dimmer/50 group-hover:text-text-dimmer hover:text-text hover:bg-bg-alt'}"
 			title="More options"
-			aria-label="More options"
+			ariaLabel="More options"
 			onclick={handleMoreClick}
 		>
 			<Icon name="ellipsis" size={13} />
-		</button>
+		</Button>
 	{/if}
 </a>
