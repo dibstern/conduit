@@ -65,8 +65,27 @@ step screenshots one DOM region:
   (`#model-picker`); it must be open when the step runs.
 - `last-user-message` — the most recent sent user message card in the
   transcript (`#messages .msg-user`, last match).
+- `messages` — the real transcript scroll container (`#messages`).
+- `layout` — the app layout (`#layout`), including the transcript and composer.
 
 Other region ids resolve to `#<region>` directly.
+
+## Step vocabulary
+
+Steps are matched in `src/stepHandlers.ts`. Alongside the existing
+`the conduit app is served with the <name> mockup` and visual-match steps:
+
+- `the viewport is a phone` sets the current scenario to 393x852. Put it before
+  the app setup step to load at phone size.
+- `I scroll the transcript up by <N> pixels` hovers `#messages` and scrolls
+  with the mouse wheel.
+- `I scroll the transcript back to the bottom` scrolls that same container
+  to its full scroll height.
+- `the jump-to-latest control is visible` / `the jump-to-latest control is not visible`
+  waits for the sticky transcript button to show or hide.
+
+Scroll steps do not sleep; the following assertion waits for the UI to respond.
+The `long-transcript` mockup supplies enough history to scroll on a phone.
 
 ## Baselines
 
@@ -75,6 +94,12 @@ compared with pixelmatch. This is a **local** gate — run it on your machine
 before claiming a frontend change is done (see the "Visual Acceptance Gate" in
 `AGENTS.md`); it is not run in CI. Recapture with `pnpm acceptance:visual:capture`
 and commit the PNGs only after visual review of an intentional UI change.
+
+The run defaults to `desktop` (1440x900); `VIEWPORT=phone` selects `phone`
+(393x852), and `VIEWPORT=<width>x<height>` remains supported. Each scenario
+starts with the run's default viewport. A phone step changes only that scenario,
+with baselines in `acceptance/visual/baselines/phone/`. Scenarios without a
+viewport step keep the run default and normally use `baselines/desktop/`.
 
 Baselines are inherently platform-sensitive (fonts, sub-pixel AA). Capture and
 compare on the same platform; if contributors run on different OSes, recapture

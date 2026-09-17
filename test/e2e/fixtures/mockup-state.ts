@@ -288,7 +288,21 @@ function modelExecutionInitMessages(
 	];
 }
 
+const longTranscriptText = Array.from(
+	{ length: 12 },
+	(_, index) =>
+		`Review item ${index + 1}: Check the transcript on a phone, scroll through earlier messages, and return to the latest activity.`,
+).join("\n\n");
+
 export const modelExecutionMockups = {
+	"long-transcript": {
+		transcriptText: longTranscriptText,
+		modelExecution: matchingModelExecution,
+		initMessages: modelExecutionInitMessages(
+			longTranscriptText,
+			matchingModelExecution,
+		),
+	},
 	"drifted-model": {
 		transcriptText: "Run this turn with Opus",
 		modelExecution: driftedModelExecution,

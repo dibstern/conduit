@@ -45,7 +45,7 @@ until curl --fail --silent --output /dev/null "$CONDUIT_BASE_URL"; do
   sleep 0.1
 done
 
-for feature in composer-send-button composer-approvals-dropdown session-visibility harness-selection agent-harness-filter composer-skill-highlight transcript-skill-highlight provider-instances-settings claude-settings model-drift; do
+for feature in composer-send-button composer-approvals-dropdown session-visibility harness-selection agent-harness-filter composer-skill-highlight transcript-skill-highlight provider-instances-settings claude-settings model-drift phone-transcript-scrolling; do
   gherkin-parser \
     "features/$feature.feature" \
     "build/acceptance/ir/$feature.json"

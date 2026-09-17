@@ -18,7 +18,7 @@ import {
 	type WsMockControl,
 } from "../../test/e2e/helpers/ws-mock.js";
 import { InputPage } from "../../test/e2e/page-objects/input.page.js";
-import { PlaywrightDriver } from "./playwrightDriver.js";
+import { PHONE_VIEWPORT, PlaywrightDriver } from "./playwrightDriver.js";
 import type { AcceptanceLifecycle, StepHandler } from "./runtime.js";
 import { currentVisualMode } from "./visualMode.js";
 
@@ -127,6 +127,41 @@ function thresholdExampleValue(
 }
 
 export const conduitVisualHandlers: StepHandler[] = [
+	{
+		name: "set phone viewport",
+		match: /^the viewport is a phone$/,
+		run: async ({ world }) => {
+			await world.driver.setViewport(world.page, PHONE_VIEWPORT);
+		},
+	},
+	{
+		name: "scroll transcript up",
+		match: /^I scroll the transcript up by ([0-9]+) pixels$/,
+		run: async ({ world, match }) => {
+			await world.page.locator("#messages").hover();
+			await world.page.mouse.wheel(0, -Number(match[1]));
+		},
+	},
+	{
+		name: "scroll transcript to bottom",
+		match: /^I scroll the transcript back to the bottom$/,
+		run: async ({ world }) => {
+			await world.page.locator("#messages").evaluate((el) => {
+				el.scrollTo({ top: el.scrollHeight });
+			});
+		},
+	},
+	{
+		name: "assert jump-to-latest visibility",
+		match: /^the jump-to-latest control is (visible|not visible)$/,
+		run: async ({ world, match }) => {
+			const button = world.page.locator("#messages #scroll-btn");
+			await button.waitFor({ state: "attached" });
+			await button.waitFor({
+				state: match[1] === "visible" ? "visible" : "hidden",
+			});
+		},
+	},
 	{
 		name: "serve conduit with mockup state",
 		match: /^the conduit app is served with the ([a-z0-9-]+) mockup$/,
