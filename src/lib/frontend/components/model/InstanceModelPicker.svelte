@@ -564,7 +564,17 @@
 								<div
 									class="model-provider-header py-2 px-3.5 pt-2 text-sm font-semibold uppercase tracking-[0.5px] text-text-dimmer"
 								>
-									{group.provider.name || group.provider.id}
+									{group.provider.name || group.provider.id}<!--
+										Was a `.model-provider-disabled .model-provider-header::after`
+										recipe in style.css. Pseudo-element `content` is invisible to
+										text selection and to translation, and screen-reader support
+										for it is inconsistent, so the string belongs in the markup.
+										The span restates the three declarations the rule used to
+										reset, so it renders identically.
+									-->{#if !isProviderConfigured(group.provider)}<span
+											class="font-normal normal-case tracking-normal"
+											>{" (not configured)"}</span
+										>{/if}
 								</div>
 								{#each group.models as model (model.id)}
 									{@const cost = formatCost(model.cost)}

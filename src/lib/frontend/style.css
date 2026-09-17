@@ -563,10 +563,12 @@
 /* ─── Session title marquee on hover ────────────────────────────────────────── */
 /* The .session-item-title clips overflow. On hover, the inner span scrolls left
    in a continuous loop so long titles are fully readable. */
-.session-item:hover .session-item-title {
-	text-overflow: clip;
-}
-.session-item:hover .session-item-title .session-title-inner {
+/* Applied by SessionItem as `group-hover:session-title-marquee`. A descendant
+   selector keyed off `.session-item:hover` would be the component owning its
+   own recipe from outside itself; an @utility is the same animation as a
+   Tailwind utility the markup opts into, and `text-overflow: clip` is just
+   `group-hover:text-clip` at the call site. */
+@utility session-title-marquee {
 	animation: marquee-scroll var(--marquee-dur, 6s) linear 0.4s infinite;
 }
 
@@ -780,14 +782,6 @@
 	to {
 		opacity: 1;
 	}
-}
-
-/* Pseudo-element: cannot be expressed as Tailwind utility */
-.model-provider-disabled .model-provider-header::after {
-	content: " (not configured)";
-	font-weight: 400;
-	text-transform: none;
-	letter-spacing: 0;
 }
 
 /* ─── Progressive History Loading (4.8) — keyframes only ───────────────────── */
@@ -1022,11 +1016,14 @@
 	border-radius: 8px;
 	cursor: pointer;
 	transition: outline-color 0.15s;
-}
 
-.rewind-point:hover {
-	outline-color: var(--color-accent-hover);
-	background: var(--color-accent-bg);
+	/* Nested rather than a sibling `.rewind-point:hover` rule: a loose global
+	   selector outranks the utility it is modifying, which is the whole reason
+	   the ownership check flags one. */
+	&:hover {
+		outline-color: var(--color-accent-hover);
+		background: var(--color-accent-bg);
+	}
 }
 
 /* ─── Content Visibility Optimization ──────────────────────────────────────── */

@@ -206,7 +206,7 @@
 	<!-- Title -->
 	<!-- svelte-ignore a11y_no_static_element_interactions -->
 	<span
-		class="session-item-title flex-1 min-w-0 overflow-hidden text-ellipsis whitespace-nowrap font-brand"
+		class="session-item-title flex-1 min-w-0 overflow-hidden text-ellipsis whitespace-nowrap font-brand group-hover:text-clip"
 		ondblclick={handleDblClick}
 	>
 		{#if isRenaming}
@@ -226,7 +226,10 @@
 				autofocus
 			/>
 		{:else}
-			<span class="session-title-inner inline-block pr-[3em]">{displayTitle}</span>
+			<span
+				class="session-title-inner inline-block pr-[3em] group-hover:session-title-marquee"
+				>{displayTitle}</span
+			>
 		{/if}
 	</span>
 

@@ -262,3 +262,55 @@ export const RailTooltip: Story = {
 		await expect(tip).toBeVisible();
 	},
 };
+
+/**
+ * A provider the user has not set up yet. This state ships and had no visual
+ * coverage at all, which is how conduit-test-40k4 found it: the "(not
+ * configured)" suffix was a `::after` recipe in style.css, and moving it into
+ * the markup would have been unverifiable against a suite that never renders
+ * an unconfigured provider.
+ *
+ * The suffix is asserted as real text rather than by screenshot alone. That
+ * is the point of moving it: pseudo-element `content` cannot be selected,
+ * cannot be translated, and is announced inconsistently, so a query that
+ * finds it in the accessibility tree is proof the fix did what it claimed.
+ */
+export const UnconfiguredProvider: Story = {
+	tags: ["viewport-capture"],
+	beforeEach: () => {
+		seedClaude();
+		// Every non-claude provider maps to the `opencode` instance
+		// (instanceIdForProviderId is a two-way split), and the picker lists only
+		// the selected instance's groups -- so selecting opencode is what puts a
+		// configured and an unconfigured group side by side. That pairing is the
+		// real shape: an OpenCode instance exposes whatever providers it knows
+		// about, set up or not.
+		discoveryState.providers = [
+			anthropic,
+			{
+				id: "google",
+				name: "Google",
+				configured: true,
+				models: [{ id: "gemini-3", name: "Gemini 3", provider: "google" }],
+			},
+			{
+				id: "openai",
+				name: "OpenAI",
+				configured: false,
+				models: [{ id: "gpt-5", name: "GPT-5", provider: "openai" }],
+			},
+		];
+		discoveryState.selectedInstanceId = "opencode";
+		return bottomRightFrame();
+	},
+	play: async ({ canvasElement }) => {
+		const picker = await openPicker(canvasElement);
+		// Queried by class rather than by text: the provider name also appears
+		// on the instance rail, so a text query would match two elements and
+		// fail for a reason that has nothing to do with what is being proved.
+		const headers = [
+			...picker.querySelectorAll<HTMLElement>(".model-provider-header"),
+		].map((node) => node.textContent?.trim());
+		await expect(headers.sort()).toEqual(["Google", "OpenAI (not configured)"]);
+	},
+};
