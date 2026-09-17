@@ -17,6 +17,7 @@
 	} from "../../stores/ui.svelte.js";
 	import { permissionsState, getLocalPermissions } from "../../stores/permissions.svelte.js";
 	import { createScrollController } from "../../stores/scroll-controller.svelte.js";
+	import { sessionViewState } from "../../stores/session-view.svelte.js";
 	import { economics, segmentTurns, type Turn } from "../../utils/turns.js";
 	import UserMessage from "./UserMessage.svelte";
 	import AssistantMessage from "./AssistantMessage.svelte";
@@ -51,6 +52,15 @@
 	$effect(() => {
 		const _sid = sessionState.currentId; // track session changes
 		scrollCtrl.resetForSession();
+	});
+
+	// Publish for chrome outside the transcript (e.g. the session bar) so the app
+	// never grows a second, differently-tuned definition of "at the bottom".
+	// Hydration states count as pinned, otherwise the bar flaps on session open.
+	$effect(() => {
+		const state = scrollCtrl.state;
+		sessionViewState.atBottom =
+			state === "following" || state === "settling" || state === "loading";
 	});
 
 	// Scroll to bottom when loadLifecycle transitions to "ready" after settling.
