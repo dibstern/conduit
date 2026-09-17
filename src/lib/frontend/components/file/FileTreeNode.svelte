@@ -72,6 +72,10 @@
 		transition-colors` (all in BASE) and `bg-transparent border-none`, both of
 		which Tailwind v4's preflight already does on a button. `duration-100`
 		stays — it beats BASE's default 150ms.
+
+		`aria-expanded` is conditional: a file row is not expandable, and
+		`aria-expanded="false"` on one announces a collapsed disclosure that can
+		never open.
 	-->
 	<Button
 		variant="ghost"
@@ -81,11 +85,15 @@
 		hoverFill="overlay-soft"
 		class="fb-entry gap-1.5 w-full py-1 px-2 text-left text-base text-text-secondary rounded duration-100 {hiddenClass}"
 		style="padding-left: {depth * 16 + 8}px"
+		aria-expanded={isDir ? expanded : undefined}
 		onclick={handleClick}
 	>
 		{#if isDir}
-			<!-- Chevron indicator — rotates when expanded -->
+			<!-- Chevron indicator — rotates when expanded. Decorative: the rotation
+			     is what a sighted user reads, `aria-expanded` above is what a screen
+			     reader reads. -->
 			<svg
+				aria-hidden="true"
 				class="fb-chevron shrink-0 transition-transform duration-100"
 				class:rotate-90={expanded}
 				width="12" height="12" viewBox="0 0 20 20" fill="none"

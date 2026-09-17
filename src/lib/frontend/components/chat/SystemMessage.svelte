@@ -15,6 +15,9 @@
 	);
 
 	let showDetails = $state(false);
+	// Wired to the toggle's aria-controls: the details region is a sibling of the
+	// button rather than a child, so nothing but an id connects the two.
+	const detailsId = $props.id();
 
 	// The background is no longer here: both branches were bg-bg-surface, so it
 	// is Surface's `plain` variant and only the foreground actually varies.
@@ -58,6 +61,8 @@
 						tone="inherit"
 						hoverFill="none"
 						class="ml-2 text-xs opacity-60 hover:opacity-100 underline"
+						aria-expanded={showDetails}
+						aria-controls={detailsId}
 						onclick={() => showDetails = !showDetails}
 					>
 						{showDetails ? "Hide details" : "Show details"}
@@ -67,7 +72,10 @@
 		</div>
 
 		{#if showDetails && hasDetails}
-			<div class="ml-5 mt-1 p-2 rounded bg-black/20 text-xs font-mono space-y-0.5 overflow-x-auto">
+			<div
+				id={detailsId}
+				class="ml-5 mt-1 p-2 rounded bg-black/20 text-xs font-mono space-y-0.5 overflow-x-auto"
+			>
 				{#if message.statusCode}
 					<div><span class="opacity-60">status:</span> {message.statusCode}</div>
 				{/if}

@@ -52,7 +52,6 @@
 
 	let inputText = $state("");
 	let textareaEl: HTMLTextAreaElement | undefined = $state();
-	let attachMenuOpen = $state(false);
 	let pendingImages = $state<PendingImage[]>([]);
 	let commandMenuRef: CommandMenu | undefined = $state();
 	let fileMenuRef: FileMenu | undefined = $state();
@@ -425,12 +424,7 @@
 		sendMessage();
 	}
 
-	function toggleAttachMenu() {
-		attachMenuOpen = !attachMenuOpen;
-	}
-
 	function handleAttachCamera() {
-		attachMenuOpen = false;
 		const fileInput = document.createElement("input");
 		fileInput.type = "file";
 		fileInput.accept = "image/*";
@@ -440,7 +434,6 @@
 	}
 
 	function handleAttachPhotos() {
-		attachMenuOpen = false;
 		const fileInput = document.createElement("input");
 		fileInput.type = "file";
 		fileInput.accept = "image/*";
@@ -551,22 +544,7 @@
 		}
 	}
 
-	// Close attach menu on outside click
-	function handleDocumentClick(e: MouseEvent) {
-		if (attachMenuOpen) {
-			const target = e.target as HTMLElement;
-			if (!target.closest("#attach-wrap")) {
-				attachMenuOpen = false;
-			}
-		}
-	}
-
 	// ─── Lifecycle ─────────────────────────────────────────────────────────────
-
-	$effect(() => {
-		document.addEventListener("click", handleDocumentClick);
-		return () => document.removeEventListener("click", handleDocumentClick);
-	});
 
 	// Navigate to parent session on ESC — works regardless of focus
 	$effect(() => {
@@ -734,7 +712,7 @@
 					class="flex items-center gap-1 min-w-0"
 				>
 					<!-- Attach button + menu -->
-					<AttachMenu open={attachMenuOpen} onToggle={toggleAttachMenu} onCamera={handleAttachCamera} onPhotos={handleAttachPhotos} />
+					<AttachMenu onCamera={handleAttachCamera} onPhotos={handleAttachPhotos} />
 
 					<!-- Agent selector -->
 					<div id="agent-selector-wrap">

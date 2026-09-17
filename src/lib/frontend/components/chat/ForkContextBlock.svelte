@@ -28,6 +28,10 @@
 		}
 	});
 
+	// Wired to the toggle's aria-controls; the region is a sibling, so only an id
+	// links them.
+	const messagesId = $props.id();
+
 	function toggle() {
 		collapsed = !collapsed;
 		const key = storageKey;
@@ -51,6 +55,8 @@
 		tone="inherit"
 		hoverFill="surface"
 		class="fork-context-toggle flex items-center gap-2 w-full py-2 px-3 rounded-lg bg-bg-surface/50 border border-border/50 text-text-dimmer text-xs font-mono"
+		aria-expanded={!collapsed}
+		aria-controls={messagesId}
 		onclick={toggle}
 	>
 		<Icon
@@ -62,7 +68,10 @@
 	</Button>
 
 	{#if !collapsed}
-		<div class="fork-context-messages mt-2 pl-3 border-l-2 border-border/40 opacity-75">
+		<div
+			id={messagesId}
+			class="fork-context-messages mt-2 pl-3 border-l-2 border-border/40 opacity-75"
+		>
 			{@render children()}
 		</div>
 	{/if}

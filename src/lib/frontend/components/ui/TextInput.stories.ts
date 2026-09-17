@@ -9,7 +9,10 @@ const meta = {
 	args: { "aria-label": "Text input" },
 	argTypes: {
 		size: { control: "inline-radio", options: ["sm", "md", "content"] },
-		chrome: { control: "inline-radio", options: ["bordered", "bare"] },
+		chrome: {
+			control: "inline-radio",
+			options: ["bordered", "bare", "focus-only"],
+		},
 		invalid: { control: "boolean" },
 		disabled: { control: "boolean" },
 	},
@@ -101,6 +104,61 @@ export const Bare: Story = {
 		} finally {
 			bgProbe.remove();
 			radiusProbe.remove();
+		}
+	},
+};
+
+/**
+ * `chrome="focus-only"` is `bare` plus the one thing `bare` cannot have: a
+ * keyboard focus indicator. It exists for the two chromeless fields that are
+ * NOT wrapped in a focus-within row -- the terminal tab-rename box and the
+ * model picker's search -- where `bare` alone left focus completely invisible
+ * (conduit-test-de3.35.9.3).
+ *
+ * The indicator is an outline drawn INSIDE the border box rather than a ring,
+ * because both call sites sit flush against something (a tab strip, a popover
+ * edge) that a ring would bleed over. `-outline-offset-2` is the whole reason
+ * this is not just the `bordered` ring, so it is asserted rather than assumed.
+ *
+ * Measured, not class-matched: `outline-2` compiles to
+ * `outline-style: var(--tw-outline-style)`, and the `outline-none` on the same
+ * element sets that variable to `none`. Without the `outline-solid` in the
+ * recipe the width and colour would still be present in the class list and the
+ * outline would not render at all, which is exactly the failure a class-name
+ * assertion cannot see.
+ */
+export const BareFocusOnly: Story = {
+	args: {
+		chrome: "focus-only",
+		size: "content",
+		value: "rename me",
+		class: "w-[100px] px-2 text-xs",
+	},
+	// Real focus, not the pseudo-states addon: a text input always matches
+	// :focus-visible while focused, so focusing it is both the honest trigger and
+	// the one the capture needs -- the addon's class rewrite does not reach a
+	// Tailwind focus-visible variant here, which is how the first version of this
+	// story passed while proving nothing.
+	play: async ({ canvasElement }) => {
+		const input = within(canvasElement).getByRole("textbox");
+		input.focus();
+		await expect(input).toHaveFocus();
+		const style = getComputedStyle(input);
+
+		await expect(style.outlineStyle).toBe("solid");
+		await expect(style.outlineWidth).toBe("2px");
+		// Negative offset is what keeps the affordance inside the field.
+		await expect(style.outlineOffset).toBe("-2px");
+
+		// Neutral, matching every other keyboard-focus signal in the system.
+		// Accent means "this field is live", which is a different statement.
+		const textProbe = document.createElement("div");
+		textProbe.className = "text-text";
+		canvasElement.append(textProbe);
+		try {
+			await expect(style.outlineColor).toBe(getComputedStyle(textProbe).color);
+		} finally {
+			textProbe.remove();
 		}
 	},
 };

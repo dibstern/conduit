@@ -9,7 +9,6 @@ const meta = {
 	parameters: { layout: "centered" },
 	args: {
 		open: false,
-		onToggle: fn(),
 		onCamera: fn(),
 		onPhotos: fn(),
 	},
@@ -30,5 +29,9 @@ export const Hover: Story = {
 	// Storybook's indexer reads `tags` statically per export, so the spread above
 	// does not carry Open's tag into the built index. Repeat it explicitly.
 	tags: ["viewport-capture"],
-	parameters: { pseudo: { hover: true } },
+	// `rootSelector: "body"` is load-bearing: since the move onto ui/Menu the
+	// content portals out of #storybook-root, which is where the pseudo-states
+	// addon starts walking, so a plain `hover: true` would reach nothing and this
+	// frame would come out byte-identical to Open.
+	parameters: { pseudo: { rootSelector: "body", hover: true } },
 };

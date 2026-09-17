@@ -387,6 +387,7 @@
 			<button
 				class="cursor-pointer text-xs px-2 py-1.5 {wsDebugState.verboseMessages ? 'text-yellow-400' : 'text-gray-500 hover:text-gray-300'}"
 				onclick={toggleVerbose}
+				aria-pressed={wsDebugState.verboseMessages}
 				title={wsDebugState.verboseMessages ? "Verbose: showing all messages + server verbose logging" : "Normal: sampled messages + server info logging"}
 			>
 				{wsDebugState.verboseMessages ? "verbose:on" : "verbose:off"}
@@ -462,6 +463,8 @@
 								<button
 									class="text-gray-600 hover:text-gray-300 text-[10px] ml-auto shrink-0 cursor-pointer"
 									onclick={() => { evt._expanded = !evt._expanded; }}
+									aria-expanded={!!evt._expanded}
+									aria-label="Toggle raw payload"
 								>
 									{evt._expanded ? '[-]' : '[+]'}
 								</button>

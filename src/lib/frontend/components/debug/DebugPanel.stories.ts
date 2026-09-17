@@ -65,7 +65,12 @@ export const ExpandedPayload: Story = {
 	},
 	play: async ({ canvasElement }) => {
 		const canvas = within(canvasElement);
-		await userEvent.click(canvas.getByRole("button", { name: "[+]" }));
+		// The name is the aria-label, not the "[+]"/"[-]" glyph, since
+		// conduit-test-de3.35.9.3: the glyph flips with state, so a name built from
+		// it renamed the control every time you pressed it.
+		await userEvent.click(
+			canvas.getByRole("button", { name: "Toggle raw payload" }),
+		);
 		await expect(canvasElement.querySelector("pre")).toHaveTextContent(
 			"tool-storybook-001",
 		);

@@ -67,7 +67,7 @@ test.describe("AttachMenu", () => {
 	test("opens attach menu on click", async ({ page }) => {
 		await navigateToStory(page, "input-inputarea--empty");
 		const attachBtn = page.locator("#attach-btn");
-		const attachMenu = page.locator("#attach-menu");
+		const attachMenu = page.locator("[data-testid='attach-menu']");
 
 		// Menu starts hidden
 		await expect(attachMenu).toBeHidden();
@@ -92,7 +92,7 @@ test.describe("AttachMenu", () => {
 	test("closes attach menu on outside click", async ({ page }) => {
 		await navigateToStory(page, "input-inputarea--empty");
 		const attachBtn = page.locator("#attach-btn");
-		const attachMenu = page.locator("#attach-menu");
+		const attachMenu = page.locator("[data-testid='attach-menu']");
 
 		// Open the menu
 		await attachBtn.click();

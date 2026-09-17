@@ -43,6 +43,15 @@ const ALLOWED_DUPLICATE_GROUPS: Record<string, string> = {
 		"both stories render NotificationStack with the same permission and question fixtures and no toasts",
 	"overlays-notificationstack--toasts-only | overlays-toast--multiple-toasts":
 		"both stories render NotificationStack with the same three toast messages and variants; only the toast ids differ, and those are iteration keys",
+
+	// Verified legitimate (conduit-test-de3.35.9.3). For these three the
+	// identical bytes are the assertion, not a hole in one.
+	"ui-button--disabled | ui-button--disabled-hover":
+		"DisabledHover IS Disabled plus the hover pseudo-state; a disabled button ignoring hover is precisely what the pair proves, so a pixel difference here would be the bug",
+	"ui-segmentedcontrol--announces-radio-group-semantics | ui-segmentedcontrol--default":
+		"the a11y story takes the default args untouched and asserts radiogroup/radio/aria-checked in play(); the control looks the same because the roles are invisible, which is the point",
+	"ui-tabs--announces-tab-semantics | ui-tabs--underline | ui-tabs--underline-is-drawn-by-classes":
+		"all three render the default tab strip: one asserts tablist/tab/aria-selected in play(), and one asserts the selected tab has no inline `style` attribute -- the underline it draws from `border-b-2` alone must be identical to the one the inline style used to draw, so byte equality is the proof that the dead-class fix was zero-diff",
 };
 
 const BASELINE_DIRECTORY = resolve(

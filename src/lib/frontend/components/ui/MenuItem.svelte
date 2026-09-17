@@ -4,8 +4,10 @@
 	import type { HTMLAnchorAttributes, HTMLAttributes } from "svelte/elements";
 	import Icon from "./Icon.svelte";
 	import {
-		FLOATING_ITEM_CLASSES,
+		FLOATING_ITEM_BASE_CLASSES,
+		MENU_ITEM_DENSITY_CLASSES,
 		MENU_ITEM_VARIANT_CLASSES,
+		type MenuItemDensity,
 	} from "./floating-styles.js";
 
 	type MenuItemVariant = keyof typeof MENU_ITEM_VARIANT_CLASSES;
@@ -26,6 +28,7 @@
 		  };
 
 	type MenuItemOwnProps = MenuItemVariantProps & {
+		density?: MenuItemDensity | undefined;
 		disabled?: boolean | undefined;
 		closeOnSelect?: boolean | undefined;
 		onselect?: ((event: Event) => void) | undefined;
@@ -59,6 +62,7 @@
 
 	let {
 		variant = "default",
+		density = "default",
 		icon = "trash-2",
 		disabled = false,
 		href,
@@ -71,7 +75,12 @@
 	}: MenuItemProps = $props();
 
 	const itemClass = $derived(
-		[FLOATING_ITEM_CLASSES, MENU_ITEM_VARIANT_CLASSES[variant], className]
+		[
+			FLOATING_ITEM_BASE_CLASSES,
+			MENU_ITEM_DENSITY_CLASSES[density],
+			MENU_ITEM_VARIANT_CLASSES[variant],
+			className,
+		]
 			.filter(Boolean)
 			.join(" "),
 	);

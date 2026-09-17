@@ -39,10 +39,25 @@ export const FIELD_BASE_CLASSES =
  * ring. It emits nothing except `outline-none`, deliberately not even a text
  * colour, so all three state their own and none of them is ever contested.
  *
- * Emitting nothing also means no focus indicator. `outline-none` is preserved
- * from all three call sites as-found and is a real accessibility defect on the
- * two that are not wrapped in a focus-within row, filed rather than fixed here
- * because fixing it is a visible design change (conduit-test-de3.35.9.3).
+ * Emitting nothing also means no focus indicator, which is a real accessibility
+ * defect on the two call sites that are NOT wrapped in a focus-within row: the
+ * terminal tab-rename input and the model picker's search box. Both now use
+ * `focus-only` below. The composer stays `bare` -- `#input-row` draws the ring
+ * around it, and a second indicator inside that ring is noise.
+ *
+ * `focus-only` is a third member rather than a change to `bare` because two of
+ * `bare`'s properties (no border, no background) are what make it useful and
+ * neither is negotiable. The affordance is an OUTLINE drawn INSIDE the field's
+ * own box (`-outline-offset-2`), not a ring: a ring is painted outside the
+ * border box, and on a field that is flush with a tab strip or a popover edge
+ * it would bleed over the neighbour. `outline-solid` is not redundant for the
+ * reason spelled out on CHOICE_BASE_CLASSES -- `outline-none` above sets
+ * `--tw-outline-style: none`, and `outline-2` only reads that variable.
+ *
+ * The colour is `text`, not `accent`, so it matches the keyboard-focus signal
+ * on ui/Button and on `bordered` above. Accent means "this field is live" in
+ * this design system; keyboard focus is deliberately neutral everywhere else
+ * and there is no reason for a chromeless field to be the exception.
  *
  * `placeholder:text-text-muted` is chrome rather than base because the model
  * picker uses `text-text-dimmer` and would have collided with it.
@@ -65,6 +80,10 @@ export const FIELD_CHROME_CLASSES = {
 		"focus-visible:border-accent " +
 		"aria-invalid:border-error",
 	bare: "outline-none",
+	"focus-only":
+		"outline-none " +
+		"focus-visible:outline-solid focus-visible:outline-2 " +
+		"focus-visible:-outline-offset-2 focus-visible:outline-text",
 } as const;
 
 export type FieldChrome = keyof typeof FIELD_CHROME_CLASSES;

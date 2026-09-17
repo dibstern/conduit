@@ -985,10 +985,6 @@
 }
 
 /* Hidden overrides */
-#attach-menu.hidden {
-	display: none;
-}
-
 #context-mini.hidden {
 	display: none;
 }

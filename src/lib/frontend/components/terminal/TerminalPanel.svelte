@@ -246,13 +246,20 @@
 								class list: `bg-transparent`, `border-none` and `p-0`,
 								all three of which Tailwind v4's preflight already does
 								on an input and which only squatted on their utility
-								group. `outline-none` is load-bearing and now comes
-								from `bare`.
+								group.
+
+								`focus-only` rather than `bare`: this field is only
+								reachable by double-clicking a tab and is autofocused on
+								appear, so with no focus indicator a keyboard user had no
+								way to tell the edit box was live. A text input always
+								matches `:focus-visible` while focused, so the inset
+								outline shows the moment the field appears -- which is the
+								point (conduit-test-de3.35.9.3).
 							-->
 							<TextInput
 								bind:element={renameInputEl}
 								bind:value={renameValue}
-								chrome="bare"
+								chrome="focus-only"
 								size="content"
 								class="term-rename-input text-xs text-text font-sans w-[100px]"
 								aria-label="Rename terminal"

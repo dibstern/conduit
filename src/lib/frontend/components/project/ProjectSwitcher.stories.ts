@@ -234,13 +234,19 @@ export const RenamingProject: Story = {
 	play: async ({ canvasElement }) => {
 		const dropdown = await openDropdown(canvasElement);
 		const body = within(canvasElement.ownerDocument.body);
+		// Regex: since conduit-test-de3.35.9.3 the name carries the project title,
+		// because this control repeats once per row.
 		const [moreBtn] = within(dropdown).getAllByRole("button", {
-			name: "More options",
+			name: /^More options for /,
 		});
 		if (!moreBtn)
 			throw new Error("RenamingProject needs a More options button");
 		await userEvent.click(moreBtn);
-		await userEvent.click(await body.findByRole("button", { name: "Rename" }));
+		// menuitem, not button: since conduit-test-de3.35.9.3 ProjectContextMenu is
+		// ui/Menu + ui/MenuItem, which render real menu roles.
+		await userEvent.click(
+			await body.findByRole("menuitem", { name: "Rename" }),
+		);
 		// Focus is the assertion, not setup. It used to come from a one-line
 		// `use:focusOnMount` action, and an action cannot cross a component
 		// boundary -- ui/TextInput absorbs `autofocus` instead.

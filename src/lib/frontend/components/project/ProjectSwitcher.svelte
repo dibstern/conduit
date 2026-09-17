@@ -283,6 +283,14 @@
 <div
 	class="proj-switcher relative flex flex-col"
 	use:dismiss={{
+		// Disabled while the per-project context menu is up. That menu is
+		// ui/Menu since conduit-test-de3.35.9.3, which portals to <body>, so
+		// clicking one of its items reads as an outside click here and used to
+		// close the whole switcher out from under the row the click was acting
+		// on -- "Rename" opened the rename field in a panel that had just
+		// unmounted. The menu owns dismissal while it is open and clears
+		// `ctxMenuProject` on close, which re-arms this.
+		enabled: ctxMenuProject === null,
 		onDismiss: () => {
 			if (document.getElementById("confirm-modal")) return;
 			open = false;
@@ -433,14 +441,20 @@
 								</span>
 							{/if}
 							<!-- `proj-more-btn` is kept as a plain hook: two e2e specs
-							     locate this control by it. -->
+							     locate this control by it.
+
+							     The name carries the project title because this control repeats
+							     once per row, and a screen reader reading out "More options"
+							     eight times over identifies nothing (conduit-test-de3.35.9.3).
+							     `title` stays generic: sighted users have the row in front of
+							     them, so the tooltip would just be noise. -->
 							<Button
 								variant="toolbar"
 								size="content"
 								iconOnly
 								icon="ellipsis"
 								iconSize={13}
-								ariaLabel="More options"
+								ariaLabel="More options for {project.title}"
 								class="proj-more-btn shrink-0 w-5 h-5 rounded duration-100"
 								title="More options"
 								onclick={(e) => {
@@ -514,14 +528,20 @@
 								</span>
 							{/if}
 							<!-- `proj-more-btn` is kept as a plain hook: two e2e specs
-							     locate this control by it. -->
+							     locate this control by it.
+
+							     The name carries the project title because this control repeats
+							     once per row, and a screen reader reading out "More options"
+							     eight times over identifies nothing (conduit-test-de3.35.9.3).
+							     `title` stays generic: sighted users have the row in front of
+							     them, so the tooltip would just be noise. -->
 							<Button
 								variant="toolbar"
 								size="content"
 								iconOnly
 								icon="ellipsis"
 								iconSize={13}
-								ariaLabel="More options"
+								ariaLabel="More options for {project.title}"
 								class="proj-more-btn shrink-0 w-5 h-5 rounded duration-100"
 								title="More options"
 								onclick={(e) => {

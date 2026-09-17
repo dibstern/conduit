@@ -52,6 +52,11 @@
 	let searchEl: HTMLInputElement | undefined = $state();
 	let contextWindowRef: ContextWindowSelector | undefined = $state();
 
+	// Prefix for the per-provider heading ids that each group's
+	// `aria-labelledby` points at. One base id per component instance, suffixed
+	// with the provider id, because the picker can mount more than once.
+	const groupHeadingId = $props.id();
+
 	// ─── Derived ────────────────────────────────────────────────────────────────
 
 	const instances = $derived(getAvailableInstances());
@@ -511,12 +516,16 @@
 					class="flex items-center gap-2 py-2.5 px-3.5 border-b border-border text-text-dimmer"
 				>
 					<Icon name="search" size={13} class="shrink-0" />
-					<!-- Stays a native <input> rather than ui/TextInput, and here that is the
-					     right call: the field is chromeless (transparent, borderless, no ring)
-					     because the bordered row around it is the affordance, so adopting the
-					     primitive would mean overriding essentially all of FIELD_BASE_CLASSES. A
-					     `bare` option on ui/TextInput is the real fix and has three candidate
-					     consumers; it is tracked separately.
+					<!-- `chrome="focus-only"` rather than `bare`: the bordered row around
+					     this field is the affordance for where it sits, but it says nothing
+					     about whether the field has focus, and this input is the first thing
+					     the popover focuses. A keyboard user Tabbing back to it from the model
+					     rows had no way to tell the search box was live
+					     (conduit-test-de3.35.9.3). `focus-only` keeps the chromeless rest state
+					     and adds an inset outline only under :focus-visible.
+
+					     `aria-label` because the only name this field has is its placeholder,
+					     which disappears the moment anyone types.
 
 					     Focus is taken in an effect rather than with an `autofocus` attribute,
 					     which is what this was and which never worked. Per the HTML spec an
@@ -529,8 +538,9 @@
 						bind:element={searchEl}
 						data-testid="model-picker-search"
 						bind:value={searchQuery}
-						chrome="bare"
+						chrome="focus-only"
 						size="content"
+						aria-label="Search {selectedLabel} models"
 						placeholder="Search {selectedLabel} models…"
 						class="flex-1 min-w-0 text-text text-[13px] font-brand placeholder:text-text-dimmer"
 						onclick={(e) => e.stopPropagation()}
@@ -560,8 +570,20 @@
 						</div>
 					{:else}
 						{#each filteredGroups as group (group.provider.id)}
-							<div class={providerSectionClass(group)}>
+							<!-- `role="group"` + `aria-labelledby`, not `role="listbox"`: these rows
+							     are Tab-focusable buttons and some carry sibling routing buttons
+							     inside the row, both of which are illegal inside a listbox option.
+							     A group is what this genuinely is -- a run of controls under a
+							     heading -- and it makes the provider name part of every row's
+							     announced context rather than a visual-only divider
+							     (conduit-test-de3.35.9.3). -->
+							<div
+								class={providerSectionClass(group)}
+								role="group"
+								aria-labelledby="{groupHeadingId}-{group.provider.id}"
+							>
 								<div
+									id="{groupHeadingId}-{group.provider.id}"
 									class="model-provider-header py-2 px-3.5 pt-2 text-sm font-semibold uppercase tracking-[0.5px] text-text-dimmer"
 								>
 									{group.provider.name || group.provider.id}<!--
@@ -596,12 +618,17 @@
 											class={modelItemClass(model)}
 											data-model-id={model.id}
 											data-provider-id={model.provider}
+											aria-current={isActiveModel(model) ? "true" : undefined}
 											onclick={(e) => handleModelClick(model, e)}
 										>
 											<span class="model-item-name flex-1 whitespace-nowrap">
 												{#if isActiveModel(model)}
-													<span class="model-check text-accent font-bold mr-0.5"
-														>&#10003;</span
+													<!-- aria-hidden: `aria-current` on the button carries the state.
+													     Audible, this reads as a literal check character or, in some
+													     screen readers, as nothing at all. -->
+													<span
+														class="model-check text-accent font-bold mr-0.5"
+														aria-hidden="true">&#10003;</span
 													>
 												{/if}
 												{stripDateSuffix(formatModelName(model))}

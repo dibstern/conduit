@@ -15,7 +15,10 @@ export class InputPage {
 		this.textarea = page.locator("#input");
 		this.sendBtn = page.locator("#send");
 		this.attachBtn = page.locator("#attach-btn");
-		this.attachMenu = page.locator("#attach-menu");
+		// Portaled and mounted only while open since conduit-test-de3.35.9.3, so
+		// presence is the state. It used to be a permanently mounted element
+		// toggled by a `hidden` class.
+		this.attachMenu = page.locator("[data-testid='attach-menu']");
 		this.contextMini = page.locator("#context-mini");
 		this.contextFill = page.locator("#context-mini-fill");
 		this.contextLabel = page.locator("#context-mini-label");
@@ -36,12 +39,6 @@ export class InputPage {
 
 	async openAttachMenu(): Promise<void> {
 		await this.attachBtn.click();
-	}
-
-	async isAttachMenuVisible(): Promise<boolean> {
-		return !(await this.attachMenu.evaluate((el) =>
-			el.classList.contains("hidden"),
-		));
 	}
 
 	async pressEnter(): Promise<void> {

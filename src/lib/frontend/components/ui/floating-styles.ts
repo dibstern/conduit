@@ -60,10 +60,29 @@ export const MENU_ITEM_VARIANT_CLASSES = {
 export const MENU_RADIO_ITEM_COLOR_CLASSES =
 	"data-[state=unchecked]:text-text data-[state=checked]:text-accent";
 
-export const FLOATING_ITEM_CLASSES =
-	`flex cursor-default select-none items-center gap-2 ${FLOATING_ITEM_PADDING_CLASSES} text-sm ` +
+// Everything a menu row is regardless of how tightly it is packed. Emits no
+// `gap-*` and no padding, so the density recipe below owns that group outright.
+export const FLOATING_ITEM_BASE_CLASSES =
+	"flex cursor-default select-none items-center text-sm " +
 	"hover:bg-bg focus:bg-bg focus:outline-hidden " +
 	"data-[disabled]:pointer-events-none data-[disabled]:opacity-50";
+
+// A closed union that REPLACES a row's gap and padding rather than appending
+// to them, so exactly one of each group is ever emitted.
+//
+// `touch` exists for exactly one call site: the composer's attach menu, whose
+// rows are thumb targets on a phone and were ~40% taller than a pointer menu's
+// before the migration. Shrinking a touch target is a product decision, not a
+// side effect of moving onto the shared primitive, so it stays a member here
+// and conduit-test-de3.6 owns whether the two looks should converge.
+export const MENU_ITEM_DENSITY_CLASSES = {
+	default: `gap-2 ${FLOATING_ITEM_PADDING_CLASSES}`,
+	touch: "gap-2.5 px-4 py-3",
+} as const;
+
+export type MenuItemDensity = keyof typeof MENU_ITEM_DENSITY_CLASSES;
+
+export const FLOATING_ITEM_CLASSES = `${FLOATING_ITEM_BASE_CLASSES} ${MENU_ITEM_DENSITY_CLASSES.default}`;
 
 export const FLOATING_POSITIONING_DEFAULTS = {
 	align: "start",

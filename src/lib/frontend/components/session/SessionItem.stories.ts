@@ -50,8 +50,11 @@ export const WithContextMenu: Story = {
 	render: (args) => ({ Component: SessionItemWithContextMenu, props: args }),
 	tags: ["viewport-capture"],
 	play: async ({ canvasElement }) => {
+		// Regex, not an exact string: since conduit-test-de3.35.9.3 the name
+		// carries the session title, because a screen reader hears this same
+		// control once per row and "More options" alone identifies nothing.
 		await userEvent.click(
-			within(canvasElement).getByRole("button", { name: "More options" }),
+			within(canvasElement).getByRole("button", { name: /^More options for / }),
 		);
 		const body = within(canvasElement.ownerDocument.body);
 		await expect(
@@ -79,5 +82,37 @@ export const Renaming: Story = {
 		session: mockSession,
 		active: false,
 		renaming: true,
+	},
+};
+
+// Cleanup mode is the only state that renders the selection control, and it had
+// no story at all -- which is how it kept a checkbox drawn entirely in glyphs,
+// with no role and no checked state, through the whole migration
+// (conduit-test-de3.35.9.3).
+export const CleanupMode: Story = {
+	args: {
+		session: mockSession,
+		active: false,
+		cleanupMode: true,
+	},
+	play: async ({ canvasElement }) => {
+		const box = within(canvasElement).getByRole("checkbox");
+		await expect(box).toHaveAttribute("aria-checked", "false");
+		await expect(box).toHaveAccessibleName(`Select ${mockSession.title}`);
+	},
+};
+
+export const CleanupModeSelected: Story = {
+	args: {
+		session: mockSession,
+		active: false,
+		cleanupMode: true,
+		selected: true,
+	},
+	play: async ({ canvasElement }) => {
+		await expect(within(canvasElement).getByRole("checkbox")).toHaveAttribute(
+			"aria-checked",
+			"true",
+		);
 	},
 };

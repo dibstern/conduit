@@ -173,12 +173,21 @@
 			No `tone`/`hoverFill` member fits: the colour is a four-way expression on
 			two booleans and there is no hover change at all, so both axes emit
 			nothing and the expression below owns the group uncontested.
+
+			`role="checkbox"` rather than `aria-pressed`: this is one row's membership
+			in a multi-select, which is what a checkbox means, and the circle/
+			circle-check glyph is already drawing a checkbox. The name carries the
+			title because a screen reader hears this control twenty times in a list
+			and "Select session" twenty times over identifies nothing.
 		-->
 		<Button
 			variant="ghost"
 			size="content"
 			tone="inherit"
 			hoverFill="none"
+			role="checkbox"
+			aria-checked={selected}
+			ariaLabel="Select {displayTitle}"
 			class="shrink-0 w-6 h-6 rounded duration-100 {active
 				? selected
 					? 'text-brand-a'
@@ -274,7 +283,8 @@
 				? 'text-text-muted group-hover:text-text-secondary hover:text-text hover:bg-bg-alt'
 				: 'text-text-dimmer/50 group-hover:text-text-dimmer hover:text-text hover:bg-bg-alt'}"
 			title="More options"
-			ariaLabel="More options"
+			ariaLabel="More options for {displayTitle}"
+			aria-haspopup="menu"
 			onclick={handleMoreClick}
 		>
 			<Icon name="ellipsis" size={13} />
