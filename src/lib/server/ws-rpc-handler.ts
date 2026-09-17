@@ -49,12 +49,25 @@ const runRpcWebSocketConnection = (ws: WebSocket) =>
 					handler(socket).pipe(Effect.orDie, Effect.zipRight(Effect.never)),
 			});
 
+			// RpcServer.make runs the protocol loop until interrupted, so it has
+			// to be forked. The scope then stays open only while the client is
+			// connected; closing it tears the RPC server down. Before this the
+			// fiber lived forever and every reconnect leaked one.
 			yield* RpcServer.make(WsRpcGroup, { concurrency: 32 }).pipe(
 				Effect.provide(RpcServer.layerProtocolSocketServer),
 				Effect.provideService(SocketServer.SocketServer, socketServer),
 				Effect.provide(WsRpcServerLayer),
 				Effect.provide(RpcSerialization.layerJson),
+				Effect.interruptible,
+				Effect.forkScoped,
 			);
+			yield* Effect.async<void>((resume) => {
+				if (ws.readyState === ws.CLOSED) {
+					resume(Effect.void);
+					return;
+				}
+				ws.once("close", () => resume(Effect.void));
+			});
 		}),
 	);
 
