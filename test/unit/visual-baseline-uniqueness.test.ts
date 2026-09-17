@@ -52,6 +52,27 @@ const ALLOWED_DUPLICATE_GROUPS: Record<string, string> = {
 		"the a11y story takes the default args untouched and asserts radiogroup/radio/aria-checked in play(); the control looks the same because the roles are invisible, which is the point",
 	"ui-tabs--announces-tab-semantics | ui-tabs--underline | ui-tabs--underline-is-drawn-by-classes":
 		"all three render the default tab strip: one asserts tablist/tab/aria-selected in play(), and one asserts the selected tab has no inline `style` attribute -- the underline it draws from `border-b-2` alone must be identical to the one the inline style used to draw, so byte equality is the proof that the dead-class fix was zero-diff",
+
+	// Verified legitimate (conduit-test-6owk). ToolItem is a pure dispatcher
+	// that passes each message unchanged to its selected card, and each pair uses
+	// the same fixture in both stories. Once fa0f1041 pinned the visual suite's
+	// clock, the identical bytes became proof of the expected dispatch.
+	"chat-toolgenericcard--default | chat-toolitem--completed":
+		"Both stories use mockToolCompleted, which ToolItem dispatches to ToolGenericCard.",
+	"chat-toolgenericcard--error-state | chat-toolitem--error-state":
+		"Both stories use mockToolError, which ToolItem dispatches to ToolGenericCard.",
+	"chat-toolgenericcard--pending | chat-toolitem--pending":
+		"Both stories use mockToolPending, which ToolItem dispatches to ToolGenericCard.",
+	"chat-toolgenericcard--with-tags | chat-toolitem--read-with-offset-limit":
+		"Both stories use mockToolReadWithOffset, which ToolItem dispatches to ToolGenericCard.",
+	"chat-toolitem--question-answered | chat-toolquestioncard--default":
+		"Both stories use mockQuestionAnswered, which ToolItem dispatches to ToolQuestionCard.",
+	"chat-toolitem--question-pending | chat-toolquestioncard--waiting-without-question-data":
+		"Both stories use mockQuestionPending, which ToolItem dispatches to ToolQuestionCard.",
+	"chat-toolitem--question-skipped | chat-toolquestioncard--skipped":
+		"Both stories use mockQuestionSkipped, which ToolItem dispatches to ToolQuestionCard.",
+	"chat-toolitem--subagent-completed | chat-toolsubagentcard--default":
+		"Both stories use mockToolSubagentCompleted, which ToolItem dispatches to ToolSubagentCard.",
 };
 
 const BASELINE_DIRECTORY = resolve(
