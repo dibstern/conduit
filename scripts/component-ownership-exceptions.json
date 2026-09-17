@@ -41,7 +41,7 @@
 			"native-control-bypass": 3
 		},
 		"src/lib/frontend/components/input/InputArea.svelte": {
-			"native-control-bypass": 3
+			"native-control-bypass": 2
 		},
 		"src/lib/frontend/components/input/PermissionModeSelector.svelte": {
 			"native-control-bypass": 1

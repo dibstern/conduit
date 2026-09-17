@@ -527,7 +527,7 @@
 						chrome="bare"
 						size="content"
 						placeholder="Search {selectedLabel} models…"
-						class="flex-1 min-w-0 text-[13px] font-brand placeholder:text-text-dimmer"
+						class="flex-1 min-w-0 text-text text-[13px] font-brand placeholder:text-text-dimmer"
 						onclick={(e) => e.stopPropagation()}
 					/>
 				</div>

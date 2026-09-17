@@ -5,6 +5,7 @@
 <script lang="ts">
 	import { untrack } from "svelte";
 	import Icon from "../ui/Icon.svelte";
+	import Textarea from "../ui/Textarea.svelte";
 	import AgentSelector from "../model/AgentSelector.svelte";
 	import AttachMenu from "./AttachMenu.svelte";
 	// biome-ignore lint/style/useImportType: CommandMenu is used as a value for bind:this
@@ -663,22 +664,41 @@
 					{scrollTop}
 					dimmed={composing || plainText}
 				/>
-				<textarea
+				<!--
+					`chrome="bare"` + `size="content"`: the affordance is
+					`#input-row` above, which owns the border and the focus ring,
+					so the field itself paints nothing and sizes itself. Dropped
+					from the class list: `bg-transparent` and `border-none`, both
+					of which Tailwind v4's preflight already does on a textarea
+					and which only squatted on their utility group.
+					`outline-none` is load-bearing and now comes from `bare`.
+
+					The text colour moved from two `class:` directives into the
+					class string because Svelte has no `class:` directive on a
+					COMPONENT tag. That is also why `bare` emits no text colour:
+					this swap and a primitive `text-text` would be two utilities
+					in one Tailwind group, resolved by stylesheet order, and the
+					call site would lose.
+				-->
+				<Textarea
 					id="input"
 					aria-label="Message"
 					aria-autocomplete="list"
 					aria-haspopup="listbox"
 					aria-controls={activeListboxId}
 					aria-activedescendant={activeOptionId}
-					rows="1"
+					rows={1}
+					chrome="bare"
+					size="content"
 					placeholder="Ask anything. / to use skills, @ to mention files"
 					autocomplete="off"
 					enterkeyhint={isMobile() ? "enter" : "send"}
-					class="relative z-10 flex-1 min-w-0 bg-transparent border-none caret-[var(--color-text)] text-base font-sans leading-[1.4] pt-2 pb-1 px-2.5 resize-none outline-none min-h-6 max-h-[120px] overflow-y-auto placeholder:text-text-muted"
-					class:text-transparent={!composing && !plainText}
-					class:text-text={composing || plainText}
+					class="relative z-10 flex-1 min-w-0 caret-[var(--color-text)] text-base font-sans leading-[1.4] pt-2 pb-1 px-2.5 resize-none min-h-6 max-h-[120px] overflow-y-auto placeholder:text-text-muted {composing ||
+					plainText
+						? 'text-text'
+						: 'text-transparent'}"
 					bind:value={inputText}
-					bind:this={textareaEl}
+					bind:element={textareaEl}
 					oninput={handleInput}
 					onkeydown={handleKeydown}
 					onkeyup={handleKeyup}
@@ -686,7 +706,7 @@
 					onscroll={handleScroll}
 					oncompositionstart={handleCompositionStart}
 					oncompositionend={handleCompositionEnd}
-				></textarea>
+				/>
 				<div class="sr-only" role="status" data-testid="composer-menu-status">
 					{listboxStatusText}
 				</div>

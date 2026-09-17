@@ -253,7 +253,7 @@
 								bind:value={renameValue}
 								chrome="bare"
 								size="content"
-								class="term-rename-input text-xs font-sans w-[100px]"
+								class="term-rename-input text-xs text-text font-sans w-[100px]"
 								aria-label="Rename terminal"
 								onblur={commitRename}
 								onkeydown={handleRenameKeydown}
