@@ -1306,6 +1306,227 @@ describe("Effect Message Projector (via ProjectionRunner)", () => {
 // ─── Turn Projector Tests ───────────────────────────────────────────────────
 
 describe("Effect Turn Projector (via ProjectionRunner)", () => {
+	it("preserves known accounting when a later execution omits usage", () =>
+		runTest(
+			Effect.gen(function* () {
+				const sql = yield* SqlClient.SqlClient;
+				const store = yield* EventStoreEffectTag;
+				const runner = yield* ProjectionRunnerEffectTag;
+				yield* runner.markRecovered();
+				for (const event of [
+					makeSessionCreated("s1"),
+					makeMessageCreated("s1", "u1", { role: "user" }),
+					makeMessageCreated("s1", "a1"),
+					canonicalEvent("turn.completed", "s1", { messageId: "a1" }),
+				])
+					yield* runner.projectEvent(yield* store.append(event));
+				expect(
+					yield* sql`SELECT cost, tokens_in, tokens_out FROM turns`,
+				).toEqual([{ cost: null, tokens_in: null, tokens_out: null }]);
+				for (const event of [
+					makeMessageCreated("s1", "a2"),
+					canonicalEvent("turn.completed", "s1", {
+						messageId: "a2",
+						cost: 0.5,
+						tokens: { input: 100, output: 20 },
+					}),
+					makeMessageCreated("s1", "a3"),
+					canonicalEvent("turn.completed", "s1", {
+						messageId: "a3",
+						tokens: { output: 0 },
+					}),
+				])
+					yield* runner.projectEvent(yield* store.append(event));
+				expect(
+					yield* sql`SELECT cost, tokens_in, tokens_out FROM turns`,
+				).toEqual([{ cost: 0.5, tokens_in: 100, tokens_out: 20 }]);
+			}),
+		));
+
+	it.each([
+		"busy",
+		"assistant",
+		"tool",
+		"text",
+	] as const)("reopens on %s, attaches the next execution, and accumulates accounting through replay", (resume) =>
+		runTest(
+			Effect.gen(function* () {
+				const sql = yield* SqlClient.SqlClient;
+				const store = yield* EventStoreEffectTag;
+				const runner = yield* ProjectionRunnerEffectTag;
+				yield* runner.markRecovered();
+				const events = [
+					makeSessionCreated("s1"),
+					makeMessageCreated("s1", "u1", { role: "user" }),
+					makeMessageCreated("s1", "a1", { createdAt: FIXED_TS + 1 }),
+					canonicalEvent(
+						"turn.completed",
+						"s1",
+						{
+							messageId: "a1",
+							cost: 0.25,
+							tokens: { input: 100, output: 20 },
+						},
+						{ createdAt: FIXED_TS + 2 },
+					),
+					canonicalEvent("session.status", "s1", {
+						sessionId: "s1",
+						status: "idle",
+					}),
+				];
+				for (const event of events) {
+					yield* runner.projectEvent(yield* store.append(event));
+				}
+				expect(yield* sql`SELECT state, completed_at FROM turns`).toEqual([
+					{ state: "completed", completed_at: FIXED_TS + 2 },
+				]);
+
+				const activity =
+					resume === "busy"
+						? canonicalEvent("session.status", "s1", {
+								sessionId: "s1",
+								status: "busy",
+							})
+						: resume === "assistant"
+							? makeMessageCreated("s1", "a2")
+							: resume === "tool"
+								? makeToolStarted("s1", "a1", "tool2")
+								: makeTextDelta("s1", "a1", "Continuing");
+				yield* runner.projectEvent(yield* store.append(activity));
+				expect(
+					yield* sql`SELECT state, assistant_message_id, started_at, completed_at FROM turns`,
+				).toEqual([
+					{
+						state: "running",
+						assistant_message_id: resume === "assistant" ? "a2" : null,
+						started_at: FIXED_TS + 1,
+						completed_at: null,
+					},
+				]);
+				if (resume !== "assistant") {
+					yield* runner.projectEvent(
+						yield* store.append(makeMessageCreated("s1", "a2")),
+					);
+				}
+				// Repeated busy signals must preserve the new attachment.
+				yield* runner.projectEvent(
+					yield* store.append(
+						canonicalEvent("session.status", "s1", {
+							sessionId: "s1",
+							status: "busy",
+						}),
+					),
+				);
+				yield* runner.projectEvent(
+					yield* store.append(
+						canonicalEvent(
+							"turn.completed",
+							"s1",
+							{
+								messageId: "a2",
+								cost: 0.5,
+								tokens: { input: 200, output: 30 },
+							},
+							{ createdAt: FIXED_TS + 5 },
+						),
+					),
+				);
+				const expected = [
+					{
+						id: "u1",
+						state: "completed",
+						assistant_message_id: "a2",
+						cost: 0.75,
+						tokens_in: 300,
+						tokens_out: 50,
+						completed_at: FIXED_TS + 5,
+					},
+				];
+				expect(
+					yield* sql`SELECT id, state, assistant_message_id, cost, tokens_in, tokens_out, completed_at FROM turns`,
+				).toEqual(expected);
+
+				// Rebuild the turn projection from its durable events.
+				yield* sql`DELETE FROM turns`;
+				yield* sql`DELETE FROM projector_cursors WHERE projector_name = 'turn'`;
+				yield* runner.recover();
+				expect(yield* runner.getFailures()).toEqual([]);
+				expect(
+					yield* sql`SELECT id, state, assistant_message_id, cost, tokens_in, tokens_out, completed_at FROM turns`,
+				).toEqual(expected);
+			}),
+		));
+
+	it("a new prompt opens a separate turn, including when prompt timestamps tie", () =>
+		runTest(
+			Effect.gen(function* () {
+				const sql = yield* SqlClient.SqlClient;
+				const store = yield* EventStoreEffectTag;
+				const runner = yield* ProjectionRunnerEffectTag;
+				yield* runner.markRecovered();
+				for (const event of [
+					makeSessionCreated("s1"),
+					makeMessageCreated("s1", "u1", { role: "user" }),
+					makeMessageCreated("s1", "a1"),
+					canonicalEvent("turn.completed", "s1", { messageId: "a1", cost: 1 }),
+					makeMessageCreated("s1", "u2", { role: "user" }),
+				])
+					yield* runner.projectEvent(yield* store.append(event));
+				expect(yield* sql`SELECT id, state FROM turns ORDER BY rowid`).toEqual([
+					{ id: "u1", state: "completed" },
+					{ id: "u2", state: "pending" },
+				]);
+				for (const event of [
+					canonicalEvent("session.status", "s1", {
+						sessionId: "s1",
+						status: "busy",
+					}),
+					makeMessageCreated("s1", "a2"),
+					canonicalEvent("turn.completed", "s1", { messageId: "a2", cost: 2 }),
+				])
+					yield* runner.projectEvent(yield* store.append(event));
+				expect(
+					yield* sql`SELECT id, state, assistant_message_id, cost FROM turns ORDER BY rowid`,
+				).toEqual([
+					{ id: "u1", state: "completed", assistant_message_id: "a1", cost: 1 },
+					{ id: "u2", state: "completed", assistant_message_id: "a2", cost: 2 },
+				]);
+			}),
+		));
+
+	it.each([
+		"turn.error",
+		"turn.interrupted",
+	] as const)("preserves the %s settlement reason and permits more work", (type) =>
+		runTest(
+			Effect.gen(function* () {
+				const sql = yield* SqlClient.SqlClient;
+				const store = yield* EventStoreEffectTag;
+				const runner = yield* ProjectionRunnerEffectTag;
+				yield* runner.markRecovered();
+				for (const event of [
+					makeSessionCreated("s1"),
+					makeMessageCreated("s1", "u1", { role: "user" }),
+					makeMessageCreated("s1", "a1"),
+					type === "turn.error"
+						? canonicalEvent(type, "s1", { messageId: "a1", error: "Failed" })
+						: canonicalEvent(type, "s1", { messageId: "a1" }),
+				])
+					yield* runner.projectEvent(yield* store.append(event));
+				expect(yield* sql`SELECT state FROM turns`).toEqual([
+					{ state: type === "turn.error" ? "error" : "interrupted" },
+				]);
+				yield* runner.projectEvent(
+					yield* store.append(makeMessageCreated("s1", "a2")),
+				);
+				expect(
+					yield* sql`SELECT state, assistant_message_id, completed_at FROM turns`,
+				).toEqual([
+					{ state: "running", assistant_message_id: "a2", completed_at: null },
+				]);
+			}),
+		));
+
 	it("updates only the newest open turn and is replay-idempotent", () =>
 		runTest(
 			Effect.gen(function* () {

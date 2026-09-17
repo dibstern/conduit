@@ -5,6 +5,7 @@
 import { SqlClient } from "@effect/sql";
 import type { SqlError } from "@effect/sql/SqlError";
 import { Data, Effect } from "effect";
+import { phaseAfter, type TurnSignal } from "../../contracts/turn-phase.js";
 import type {
 	CanonicalEventType,
 	EventPayloadMap,
@@ -329,10 +330,28 @@ export const makeMessageProjector = (): EffectProjector => ({
 
 // ─── Turn Projector ─────────────────────────────────────────────────────────
 
+function persistedTurnState(signal: TurnSignal) {
+	const phase = phaseAfter(signal);
+	if (phase !== "settled") return phase;
+	// Preserve the settlement reason in the existing read-model vocabulary.
+	return signal === "error"
+		? "error"
+		: signal === "interrupt"
+			? "interrupted"
+			: "completed";
+}
+
 export const makeTurnProjector = (): EffectProjector => ({
 	name: "turn",
 	handles: [
 		"message.created",
+		"text.delta",
+		"thinking.start",
+		"thinking.delta",
+		"tool.started",
+		"tool.running",
+		"tool.completed",
+		"tool.input_updated",
 		"session.status",
 		"turn.completed",
 		"turn.error",
@@ -343,40 +362,44 @@ export const makeTurnProjector = (): EffectProjector => ({
 		Effect.gen(function* () {
 			const sql = yield* SqlClient.SqlClient;
 
-			if (isEventType(event, "message.created")) {
-				if (event.data.role === "user") {
-					yield* sql`
+			if (isEventType(event, "message.created") && event.data.role === "user") {
+				yield* sql`
 						INSERT OR REPLACE INTO turns
 						(id, session_id, state, user_message_id, requested_at)
-						VALUES (${event.data.messageId}, ${event.data.sessionId}, 'pending', ${event.data.messageId}, ${event.createdAt})`;
-				} else {
-					yield* sql`
-						UPDATE turns
-						SET assistant_message_id = ${event.data.messageId}
-						WHERE id = (
-							SELECT id FROM turns
-							WHERE session_id = ${event.data.sessionId}
-								AND assistant_message_id IS NULL
-								AND state IN ('pending', 'running')
-							ORDER BY requested_at DESC
-							LIMIT 1
-						)`;
-				}
+						VALUES (${event.data.messageId}, ${event.data.sessionId}, ${persistedTurnState("prompt")}, ${event.data.messageId}, ${event.createdAt})`;
 				return;
 			}
 
-			if (isEventType(event, "session.status")) {
-				if (event.data.status !== "busy") return;
+			if (
+				(isEventType(event, "session.status") &&
+					event.data.status === "busy") ||
+				isEventType(event, "message.created") ||
+				isEventType(event, "text.delta") ||
+				isEventType(event, "thinking.start") ||
+				isEventType(event, "thinking.delta") ||
+				isEventType(event, "tool.started") ||
+				isEventType(event, "tool.running") ||
+				isEventType(event, "tool.completed") ||
+				isEventType(event, "tool.input_updated")
+			) {
+				const [turn] = yield* sql<{
+					id: string;
+					state: string;
+					assistant_message_id: string | null;
+				}>`
+					SELECT id, state, assistant_message_id FROM turns
+					WHERE session_id = ${event.sessionId}
+					ORDER BY requested_at DESC, rowid DESC LIMIT 1`;
+				if (!turn) return;
+				const reopening = turn.state !== "pending" && turn.state !== "running";
+				const assistantMessageId = reopening ? null : turn.assistant_message_id;
 				yield* sql`
 					UPDATE turns
-					SET state = 'running', started_at = ${event.createdAt}
-					WHERE id = (
-						SELECT id FROM turns
-						WHERE session_id = ${event.data.sessionId}
-							AND state = 'pending'
-						ORDER BY requested_at DESC
-						LIMIT 1
-					)`;
+					SET state = ${persistedTurnState(event.type === "session.status" ? "busy" : "activity")},
+						started_at = COALESCE(started_at, ${event.createdAt}),
+						completed_at = NULL,
+						assistant_message_id = ${isEventType(event, "message.created") ? (assistantMessageId ?? event.data.messageId) : assistantMessageId}
+					WHERE id = ${turn.id}`;
 				return;
 			}
 
@@ -384,10 +407,10 @@ export const makeTurnProjector = (): EffectProjector => ({
 				const tokens = event.data.tokens;
 				yield* sql`
 					UPDATE turns
-					SET state = 'completed',
-						cost = ${event.data.cost ?? null},
-						tokens_in = ${tokens?.input ?? null},
-						tokens_out = ${tokens?.output ?? null},
+					SET state = ${persistedTurnState("result")},
+						cost = COALESCE(cost + ${event.data.cost ?? null}, cost, ${event.data.cost ?? null}),
+						tokens_in = COALESCE(tokens_in + ${tokens?.input ?? null}, tokens_in, ${tokens?.input ?? null}),
+						tokens_out = COALESCE(tokens_out + ${tokens?.output ?? null}, tokens_out, ${tokens?.output ?? null}),
 						completed_at = ${event.createdAt}
 					WHERE assistant_message_id = ${event.data.messageId}`;
 				return;
@@ -396,7 +419,7 @@ export const makeTurnProjector = (): EffectProjector => ({
 			if (isEventType(event, "turn.error")) {
 				yield* sql`
 					UPDATE turns
-					SET state = 'error', completed_at = ${event.createdAt}
+					SET state = ${persistedTurnState("error")}, completed_at = ${event.createdAt}
 					WHERE assistant_message_id = ${event.data.messageId}`;
 				return;
 			}
@@ -404,7 +427,7 @@ export const makeTurnProjector = (): EffectProjector => ({
 			if (isEventType(event, "turn.interrupted")) {
 				yield* sql`
 					UPDATE turns
-					SET state = 'interrupted', completed_at = ${event.createdAt}
+					SET state = ${persistedTurnState("interrupt")}, completed_at = ${event.createdAt}
 					WHERE assistant_message_id = ${event.data.messageId}`;
 				return;
 			}
