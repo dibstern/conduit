@@ -12,10 +12,13 @@ import type {
 	UserMessage,
 } from "../../../src/lib/frontend/types.js";
 import {
+	appendActivity,
+	type ClosedSegment,
 	countsPhrase,
 	economics,
 	fmtTokens,
 	isSoloTool,
+	lastResult,
 	segmentTurns,
 	stepDurations,
 	stepWeights,
@@ -100,6 +103,78 @@ const read = (path: string, createdAt?: number) =>
 // ─── segmentTurns ────────────────────────────────────────────────────────────
 
 describe("segmentTurns", () => {
+	it.each([
+		"assistant",
+		"tool",
+		"thinking",
+	])("reopens liveness for new %s activity after a result", (kind) => {
+		const next =
+			kind === "assistant" ? say() : kind === "tool" ? read("/b.ts") : think();
+		const turn = segmentTurns(
+			[user(), read("/a.ts"), result(), next],
+			true,
+		)[0]!;
+		expect(turn.live).toBe(true);
+		expect(turn.segments).toHaveLength(2);
+	});
+
+	it("keeps a finished segment closed without an empty trailing segment", () => {
+		const end = result();
+		const turn = segmentTurns(
+			[user(), read("/a.ts"), say(), end, system()],
+			true,
+		)[0]!;
+		expect(turn.live).toBe(false);
+		expect(turn.segments).toHaveLength(1);
+		expect(turn.segments[0]?.end).toBe(end);
+	});
+
+	it("keeps a closed segment's reply separate from later work", () => {
+		const reply = say();
+		const end = result({ cost: 0.02, duration: 100, createdAt: 200 });
+		const next = read("/b.ts", 300);
+		const turn = segmentTurns([user(undefined, 0), reply, end, next], true)[0]!;
+		expect(turn.segments[0]?.reply).toEqual([reply]);
+		expect(turn.segments[1]?.activity).toEqual([next]);
+		expect(lastResult(turn)).toBe(end);
+		expect(economics(turn, 500).cost).toBe(0.02);
+		expect(turnDuration(turn, 500)).toBe(500);
+	});
+
+	it("settles again after resumed work finishes", () => {
+		const end = result();
+		const turn = segmentTurns(
+			[user(), read("/a.ts"), result(), read("/b.ts"), end],
+			true,
+		)[0]!;
+		expect(turn.live).toBe(false);
+		expect(turn.segments).toHaveLength(2);
+		expect(turn.segments[1]?.end).toBe(end);
+	});
+
+	it("does not open a segment for consecutive result metadata", () => {
+		const end = result({ duration: 100 });
+		const turn = segmentTurns([user(), read("/a.ts"), result(), end], true)[0]!;
+		expect(turn.segments).toHaveLength(1);
+		expect(lastResult(turn)).toBe(end);
+		expect(turn.live).toBe(false);
+	});
+
+	it("refuses to append activity to a closed segment at compile time", () => {
+		const segment: ClosedSegment = { activity: [], reply: [], end: result() };
+		// This branch is checked by pnpm check, but never mutates the fixture.
+		// biome-ignore lint/correctness/noConstantCondition: compile-fail assertions must not execute.
+		if (false) {
+			// @ts-expect-error A closed segment cannot enter the append path.
+			appendActivity(segment, read("/a.ts"));
+			// @ts-expect-error Closed activity cannot be appended directly either.
+			segment.activity.push(read("/a.ts"));
+			// @ts-expect-error Closing a segment cannot be undone by replacing activity.
+			segment.activity = [];
+		}
+		expect(segment.activity).toEqual([]);
+	});
+
 	it("closes a live segment at a pending question", () => {
 		const text = say("Which option?");
 		const question = tool(
@@ -110,10 +185,9 @@ describe("segmentTurns", () => {
 		const turn = segmentTurns([user(), text, question], true)[0];
 
 		expect(turn?.segments).toEqual([
-			{ activity: [], reply: [text], handBack: question },
-			{ activity: [], reply: [] },
+			{ activity: [], reply: [text], handBack: question, end: question },
 		]);
-		expect(turn?.live).toBe(true);
+		expect(turn?.live).toBe(false);
 	});
 
 	it("keeps system messages out of the activity log, as turn notices", () => {
@@ -135,7 +209,7 @@ describe("segmentTurns", () => {
 		expect(turns[0]?.user).toBe(u);
 		expect(turns[0]?.segments[0]?.activity).toEqual([r]);
 		expect(turns[0]?.segments[0]?.reply).toEqual([reply]);
-		expect(turns[0]?.result).toBe(res);
+		expect(turns[0]?.segments[0]?.end).toBe(res);
 	});
 
 	it("starts a new turn at every user message", () => {
@@ -191,8 +265,7 @@ describe("segmentTurns", () => {
 		const turn = segmentTurns([user(), text, question], false)[0];
 
 		expect(turn?.segments).toEqual([
-			{ activity: [], reply: [text], handBack: question },
-			{ activity: [], reply: [] },
+			{ activity: [], reply: [text], handBack: question, end: question },
 		]);
 		expect(turn?.live).toBe(false);
 	});
@@ -205,7 +278,7 @@ describe("segmentTurns", () => {
 		const turn = segmentTurns([user(), a, question, file, b], false)[0];
 
 		expect(turn?.segments).toEqual([
-			{ activity: [], reply: [a], handBack: question },
+			{ activity: [], reply: [a], handBack: question, end: question },
 			{ activity: [file], reply: [b] },
 		]);
 	});
@@ -220,6 +293,7 @@ describe("segmentTurns", () => {
 			activity: [text, file],
 			reply: [],
 			handBack: question,
+			end: question,
 		});
 	});
 
@@ -234,6 +308,7 @@ describe("segmentTurns", () => {
 			activity: [text, thought],
 			reply: [],
 			handBack: question,
+			end: question,
 		});
 	});
 
@@ -251,8 +326,7 @@ describe("segmentTurns", () => {
 		const turn = segmentTurns([user(), text, exit], false)[0];
 
 		expect(turn?.segments).toEqual([
-			{ activity: [], reply: [text], handBack: exit },
-			{ activity: [], reply: [] },
+			{ activity: [], reply: [text], handBack: exit, end: exit },
 		]);
 	});
 
@@ -264,9 +338,8 @@ describe("segmentTurns", () => {
 		const turn = segmentTurns([user(), a, first, b, second], false)[0];
 
 		expect(turn?.segments).toEqual([
-			{ activity: [], reply: [a], handBack: first },
-			{ activity: [], reply: [b], handBack: second },
-			{ activity: [], reply: [] },
+			{ activity: [], reply: [a], handBack: first, end: first },
+			{ activity: [], reply: [b], handBack: second, end: second },
 		]);
 	});
 
@@ -279,10 +352,10 @@ describe("segmentTurns", () => {
 		expect(turns[0]?.segments[0]?.activity).toEqual([r]);
 	});
 
-	it("routes result messages to the turn's result, not its activity", () => {
+	it("closes the segment with its result, not activity", () => {
 		const res = result({ cost: 0.02 });
 		const turns = segmentTurns([user(), read("/a.ts"), res], false);
-		expect(turns[0]?.result).toBe(res);
+		expect(turns[0]?.segments[0]?.end).toBe(res);
 		expect(turns[0]?.segments[0]?.activity).toHaveLength(1);
 	});
 

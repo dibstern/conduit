@@ -51,8 +51,15 @@ export const Short: Story = {
 	},
 };
 
-/** No result message, so cost, tokens and the context gauge are absent rather than zeroed. */
-const { result: _result, ...billless } = settled;
+/** No usage reported, so cost, tokens and the context gauge are absent rather than zeroed. */
+const billless: Turn = {
+	...settled,
+	segments: settled.segments.map((segment) =>
+		segment.end?.type === "result"
+			? { ...segment, end: { type: "result", uuid: segment.end.uuid } }
+			: segment,
+	),
+};
 export const NoBill: Story = {
 	args: { turn: billless, segment: billless.segments[0]!, final: true },
 };

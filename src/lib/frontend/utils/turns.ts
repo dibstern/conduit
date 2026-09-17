@@ -19,21 +19,30 @@ import { lookupSummarizer } from "./tool-summarizers/index.js";
 /** Anything that can appear between a prompt and the model's trailing reply. */
 export type ActivityPart = ToolMessage | ThinkingMessage | AssistantMessage;
 
-export interface Segment {
+export interface OpenSegment {
 	/** Everything between the segment's start and its trailing reply, in order. */
 	activity: ActivityPart[];
 	/** Trailing run of assistant text: streaming while live, the reply once done. */
 	reply: AssistantMessage[];
-	/** The tool call that handed control to the user and closed this segment. */
-	handBack?: ToolMessage;
+	end?: never;
+	handBack?: never;
 }
+
+export interface ClosedSegment {
+	readonly activity: readonly ActivityPart[];
+	readonly reply: readonly AssistantMessage[];
+	readonly end: ResultMessage | ToolMessage;
+	/** The tool call that handed control to the user and closed this segment. */
+	readonly handBack?: ToolMessage;
+}
+
+export type Segment = OpenSegment | ClosedSegment;
 
 export interface Turn {
 	id: string;
 	user?: UserMessage;
 	/** Always at least one. */
 	segments: Segment[];
-	result?: ResultMessage;
 	/**
 	 * Transcript-level notices — errors and compaction dividers. Kept out of the
 	 * activity log so a failure is never hidden behind a collapsed panel.
@@ -49,16 +58,25 @@ export function isHandBack(tool: ToolMessage): boolean {
 	return tool.name === "AskUserQuestion" || tool.name === "ExitPlanMode";
 }
 
+/** Only an open segment can receive new work. */
+export function appendActivity(segment: OpenSegment, part: ActivityPart): void {
+	if (part.type === "assistant") segment.reply.push(part);
+	else {
+		segment.activity.push(...segment.reply, part);
+		segment.reply = [];
+	}
+}
+
 /**
  * Split a flat transcript into turns.
  *
  * A user message opens a turn and its first segment. A hand-back tool closes the
- * current segment and opens another. Once the transcript is walked, every
- * segment's trailing run of assistant text moves to `reply`; a later non-text
- * part is the only thing that folds narration back into activity.
+ * current segment, as does a result. Later activity opens another lazily.
+ * Trailing assistant text stays in `reply`; a later non-text part folds it
+ * back into activity, but only within the same open segment.
  *
  * @param processing whether the session is currently producing output — only
- *   the last turn can be live, and only when it has no result yet.
+ *   the last turn can be live, according to its last segment's signal.
  */
 export function segmentTurns(
 	messages: ChatMessage[],
@@ -87,29 +105,43 @@ export function segmentTurns(
 			};
 			turns.push(turn);
 		}
-		if (msg.type === "result") turn.result = msg;
-		else if (msg.type === "system") turn.notices.push(msg);
-		else if (msg.type === "tool" && isHandBack(msg)) {
-			turn.segments.at(-1)!.handBack = msg;
-			turn.segments.push({ activity: [], reply: [] });
-		} else turn.segments.at(-1)!.activity.push(msg);
-	}
-	for (const turn of turns) {
-		for (const segment of turn.segments) {
-			let replyStart = segment.activity.length;
-			while (segment.activity[replyStart - 1]?.type === "assistant") {
-				replyStart--;
-			}
-			if (replyStart < segment.activity.length) {
-				segment.reply = segment.activity.splice(
-					replyStart,
-				) as AssistantMessage[];
-			}
+		let segment = turn.segments.at(-1)!;
+		if (msg.type === "system") {
+			turn.notices.push(msg);
+			continue;
 		}
+		if (msg.type === "result") {
+			turn.segments[turn.segments.length - 1] = { ...segment, end: msg };
+			continue;
+		}
+		if (segment.end !== undefined) {
+			segment = { activity: [], reply: [] };
+			turn.segments.push(segment);
+		}
+		if (msg.type === "tool" && isHandBack(msg)) {
+			turn.segments[turn.segments.length - 1] = {
+				...segment,
+				end: msg,
+				handBack: msg,
+			};
+		} else appendActivity(segment, msg);
 	}
 	const last = turns.at(-1);
-	if (last && processing && !last.result) last.live = true;
+	// A closed segment is the only thing that settles a turn, and a closed
+	// segment can never receive more work — the types see to that. So a result
+	// mid-turn no longer strands the transcript: the next part opens a fresh
+	// segment and the turn reads as live again.
+	if (last) last.live = processing && last.segments.at(-1)!.end === undefined;
 	return turns;
+}
+
+/** Latest reported usage remains available even when later work is running. */
+export function lastResult(turn: Turn): ResultMessage | undefined {
+	for (let i = turn.segments.length - 1; i >= 0; i--) {
+		const end = turn.segments[i]!.end;
+		if (end?.type === "result") return end;
+	}
+	return undefined;
 }
 
 // ─── Labels ──────────────────────────────────────────────────────────────────
@@ -394,8 +426,10 @@ export function fmtDuration(ms: number): string {
 }
 
 export function turnDuration(turn: Turn, now: number): number | undefined {
+	const result = turn.segments.at(-1)?.end;
 	// `!== undefined`, not truthiness: a provider-reported 0 is a measurement.
-	if (turn.result?.duration !== undefined) return turn.result.duration;
+	if (result?.type === "result" && result.duration !== undefined)
+		return result.duration;
 	let start = turn.user?.createdAt;
 	if (start === undefined) {
 		for (const segment of turn.segments) {
@@ -407,7 +441,7 @@ export function turnDuration(turn: Turn, now: number): number | undefined {
 		}
 	}
 	if (start === undefined) return undefined;
-	let end = turn.live ? now : turn.result?.createdAt;
+	let end = turn.live ? now : result?.createdAt;
 	if (end === undefined) {
 		for (let i = turn.segments.length - 1; i >= 0; i--) {
 			const segment = turn.segments[i]!;
@@ -445,7 +479,7 @@ function segmentEnd(
 		segment.handBack?.createdAt ??
 		(final && turn.live
 			? now
-			: Math.max(turn.result?.createdAt ?? 0, lastStamp))
+			: Math.max(segment.end?.createdAt ?? 0, lastStamp))
 	);
 }
 
@@ -543,7 +577,7 @@ export interface TurnEconomics {
  * cache; a provider that reports no window gets no context reading at all.
  */
 export function economics(turn: Turn, now: number): TurnEconomics {
-	const r = turn.result;
+	const r = lastResult(turn);
 	const duration = turnDuration(turn, now);
 	const window = r?.context_window;
 	const used =
