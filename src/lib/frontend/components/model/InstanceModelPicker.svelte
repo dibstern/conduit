@@ -41,6 +41,7 @@
 	} from "../../transport/ws-rpc-client.js";
 	import type { ModelCost, ModelInfo, ProviderGroup } from "../../types.js";
 	import Surface from "../ui/Surface.svelte";
+	import TextInput from "../ui/TextInput.svelte";
 
 	// ─── State ──────────────────────────────────────────────────────────────────
 
@@ -519,12 +520,14 @@
 					     and this input lives inside an `if` block. Svelte does not special-case
 					     the attribute the way React does, so opening the picker and typing did
 					     nothing. The Open story now asserts focus, so it cannot regress. -->
-					<input
-						bind:this={searchEl}
+					<TextInput
+						bind:element={searchEl}
 						data-testid="model-picker-search"
 						bind:value={searchQuery}
+						chrome="bare"
+						size="content"
 						placeholder="Search {selectedLabel} models…"
-						class="flex-1 min-w-0 bg-transparent border-none outline-none text-text text-[13px] font-brand placeholder:text-text-dimmer"
+						class="flex-1 min-w-0 text-[13px] font-brand placeholder:text-text-dimmer"
 						onclick={(e) => e.stopPropagation()}
 					/>
 				</div>

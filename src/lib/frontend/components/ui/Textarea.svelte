@@ -2,6 +2,7 @@
 	import type { HTMLTextareaAttributes } from "svelte/elements";
 	import {
 		FIELD_BASE_CLASSES,
+		FIELD_CHROME_CLASSES,
 		TEXTAREA_SIZE_CLASSES,
 		type FieldSize,
 	} from "./field-styles";
@@ -37,7 +38,12 @@
 	);
 
 	const textareaClass = $derived(
-		[FIELD_BASE_CLASSES, TEXTAREA_SIZE_CLASSES[size], className]
+		[
+			FIELD_BASE_CLASSES,
+			FIELD_CHROME_CLASSES.bordered,
+			TEXTAREA_SIZE_CLASSES[size],
+			className,
+		]
 			.filter(Boolean)
 			.join(" "),
 	);

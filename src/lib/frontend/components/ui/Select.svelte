@@ -4,6 +4,7 @@
 	import {
 		CONTROL_SIZE_CLASSES,
 		FIELD_BASE_CLASSES,
+		FIELD_CHROME_CLASSES,
 		type FieldSize,
 	} from "./field-styles";
 	import { getFieldContext } from "./field-context";
@@ -45,7 +46,12 @@
 	);
 
 	const selectClass = $derived(
-		[FIELD_BASE_CLASSES, CONTROL_SIZE_CLASSES[size], className]
+		[
+			FIELD_BASE_CLASSES,
+			FIELD_CHROME_CLASSES.bordered,
+			CONTROL_SIZE_CLASSES[size],
+			className,
+		]
 			.filter(Boolean)
 			.join(" "),
 	);

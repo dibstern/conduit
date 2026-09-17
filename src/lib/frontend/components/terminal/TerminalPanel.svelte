@@ -23,6 +23,7 @@
 	import TerminalTab from "./TerminalTab.svelte";
 	import Surface from "../ui/Surface.svelte";
 	import TextButton from "../ui/TextButton.svelte";
+	import TextInput from "../ui/TextInput.svelte";
 
 	// ─── Props ────────────────────────────────────────────────────────────────
 
@@ -40,7 +41,7 @@
 
 	let renamingPtyId: string | null = $state(null);
 	let renameValue: string = $state("");
-	let renameInputEl: HTMLInputElement | null = $state(null);
+	let renameInputEl = $state<HTMLInputElement>();
 	let tabListEl: HTMLDivElement | null = $state(null);
 
 	// ─── Font size state ──────────────────────────────────────────────────────
@@ -237,11 +238,22 @@
 					>
 						<!-- Label (editable on double-click) -->
 						{#if renamingPtyId === tab.ptyId}
-							<input
-								bind:this={renameInputEl}
+							<!--
+								`chrome="bare"` and `size="content"` go together: the
+								affordance here is the tab around the field, so the
+								field paints nothing and sizes itself. Dropped from the
+								class list: `bg-transparent`, `border-none` and `p-0`,
+								all three of which Tailwind v4's preflight already does
+								on an input and which only squatted on their utility
+								group. `outline-none` is load-bearing and now comes
+								from `bare`.
+							-->
+							<TextInput
+								bind:element={renameInputEl}
 								bind:value={renameValue}
-								class="term-rename-input bg-transparent border-none outline-none text-xs text-text font-sans w-[100px] p-0"
-								type="text"
+								chrome="bare"
+								size="content"
+								class="term-rename-input text-xs font-sans w-[100px]"
 								aria-label="Rename terminal"
 								onblur={commitRename}
 								onkeydown={handleRenameKeydown}

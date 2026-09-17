@@ -53,7 +53,7 @@
 			"native-control-bypass": 2
 		},
 		"src/lib/frontend/components/model/InstanceModelPicker.svelte": {
-			"native-control-bypass": 2
+			"native-control-bypass": 1
 		},
 		"src/lib/frontend/components/overlays/Banners.svelte": {
 			"native-control-bypass": 1
@@ -83,7 +83,7 @@
 			"native-control-bypass": 1
 		},
 		"src/lib/frontend/components/terminal/TerminalPanel.svelte": {
-			"native-control-bypass": 4
+			"native-control-bypass": 3
 		},
 		"src/lib/frontend/style.css": {
 			"component-class-recipe": 3
