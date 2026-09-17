@@ -175,13 +175,49 @@ async function mockInstanceRpc(page: Page): Promise<RpcMockControl> {
 	});
 }
 
-/** Open the ProjectSwitcher dropdown. On mobile, opens hamburger first. */
-async function openProjectSwitcher(page: Page): Promise<void> {
-	const hamburger = page.locator("#hamburger-btn");
-	if (await hamburger.isVisible()) {
-		await hamburger.click();
-		await page.locator("#project-switcher-btn").waitFor({ state: "visible" });
+/**
+ * Open the ProjectSwitcher dropdown, opening the off-canvas sidebar first when
+ * the viewport is a phone.
+ *
+ * Two routes in, because the phone no longer has the first one: the session
+ * owns the top bar at this width and the global header is not rendered at all,
+ * so the way in is the bar's back control (conduit-test-17xt.3). Neither
+ * control is visible on desktop, where this is a no-op.
+ */
+async function openSidebarOnMobile(page: Page): Promise<void> {
+	// Guard on the mobile control, never on the sidebar's own contents: the
+	// closed off-canvas sidebar is translated out of view rather than hidden, so
+	// Playwright still reports everything inside it as visible.
+	for (const selector of [
+		"#hamburger-btn",
+		"[data-testid='session-bar-back']",
+	]) {
+		const control = page.locator(selector);
+		if (await control.isVisible()) {
+			await control.click();
+			await page.locator("#project-switcher-btn").waitFor({ state: "visible" });
+			return;
+		}
 	}
+}
+
+/**
+ * The gear. On a phone it lives in the session bar's overflow menu, because the
+ * global header that used to hold it is replaced at this width.
+ */
+async function openSettingsPanel(page: Page): Promise<void> {
+	const overflow = page.locator("[data-testid='session-bar-overflow']");
+	if (await overflow.isVisible()) {
+		await overflow.click();
+		await page.locator("[data-testid='overflow-settings']").click();
+		return;
+	}
+	await page.locator("#settings-btn, [title='Settings']").click();
+}
+
+/** Open the ProjectSwitcher dropdown. On mobile, opens the sidebar first. */
+async function openProjectSwitcher(page: Page): Promise<void> {
+	await openSidebarOnMobile(page);
 	const switcherBtn = page.locator("#project-switcher-btn");
 	await switcherBtn.click();
 	// Wait for the dropdown container to appear
@@ -507,8 +543,7 @@ test.describe("Instance Management Settings", () => {
 		baseURL,
 	}) => {
 		await setupMultiInstance(page, baseURL);
-		const gearBtn = page.locator("#settings-btn, [title='Settings']");
-		await gearBtn.click();
+		await openSettingsPanel(page);
 		const settingsPanel = page.locator("#settings-panel");
 		await expect(settingsPanel).toBeVisible();
 		const instancesTab = settingsPanel.getByText("Instances");
@@ -520,8 +555,7 @@ test.describe("Instance Management Settings", () => {
 		baseURL,
 	}) => {
 		await setupMultiInstance(page, baseURL);
-		const gearBtn = page.locator("#settings-btn, [title='Settings']");
-		await gearBtn.click();
+		await openSettingsPanel(page);
 		await page.locator("#settings-panel").getByText("Instances").click();
 		const instanceList = page.locator("#instance-settings-list");
 		await expect(instanceList).toContainText("Personal");
@@ -535,8 +569,7 @@ test.describe("Instance Management Settings", () => {
 		baseURL,
 	}) => {
 		await setupMultiInstance(page, baseURL);
-		const gearBtn = page.locator("#settings-btn, [title='Settings']");
-		await gearBtn.click();
+		await openSettingsPanel(page);
 		await page.locator("#settings-panel").getByText("Instances").click();
 		await page.locator("#instance-settings-list").getByText("Personal").click();
 		await expect(page.getByText("Start")).toBeVisible();
@@ -549,8 +582,7 @@ test.describe("Instance Management Settings", () => {
 
 	test("start button sends StartInstance RPC", async ({ page, baseURL }) => {
 		const control = await setupMultiInstance(page, baseURL);
-		const gearBtn = page.locator("#settings-btn, [title='Settings']");
-		await gearBtn.click();
+		await openSettingsPanel(page);
 		await page.locator("#settings-panel").getByText("Instances").click();
 		await page.locator("#instance-settings-list").getByText("Work").click();
 		await page.click("button:has-text('Start')");
@@ -564,8 +596,7 @@ test.describe("Instance Management Settings", () => {
 
 	test("stop button sends StopInstance RPC", async ({ page, baseURL }) => {
 		const control = await setupMultiInstance(page, baseURL);
-		const gearBtn = page.locator("#settings-btn, [title='Settings']");
-		await gearBtn.click();
+		await openSettingsPanel(page);
 		await page.locator("#settings-panel").getByText("Instances").click();
 		await page.locator("#instance-settings-list").getByText("Personal").click();
 		await page.click("button:has-text('Stop')");
@@ -582,8 +613,7 @@ test.describe("Instance Management Settings", () => {
 		baseURL,
 	}) => {
 		const control = await setupMultiInstance(page, baseURL);
-		const gearBtn = page.locator("#settings-btn, [title='Settings']");
-		await gearBtn.click();
+		await openSettingsPanel(page);
 		await page.locator("#settings-panel").getByText("Instances").click();
 		await page.locator("#instance-settings-list").getByText("Work").click();
 		await page.click("button:has-text('Remove')");
@@ -604,8 +634,7 @@ test.describe("Instance Management Settings", () => {
 		baseURL,
 	}) => {
 		const control = await setupMultiInstance(page, baseURL);
-		const gearBtn = page.locator("#settings-btn, [title='Settings']");
-		await gearBtn.click();
+		await openSettingsPanel(page);
 		await page.locator("#settings-panel").getByText("Instances").click();
 
 		// Verify only 2 instances initially
@@ -656,8 +685,7 @@ test.describe("Instance Management Settings", () => {
 
 	test("Scan Now button sends ScanNow RPC", async ({ page, baseURL }) => {
 		const control = await setupMultiInstance(page, baseURL);
-		const gearBtn = page.locator("#settings-btn, [title='Settings']");
-		await gearBtn.click();
+		await openSettingsPanel(page);
 		await page.locator("#settings-panel").getByText("Instances").click();
 
 		const scanBtn = page.locator("[data-testid='scan-now-btn']");
@@ -669,8 +697,7 @@ test.describe("Instance Management Settings", () => {
 
 	test("inline rename sends RenameInstance RPC", async ({ page, baseURL }) => {
 		const control = await setupMultiInstance(page, baseURL);
-		const gearBtn = page.locator("#settings-btn, [title='Settings']");
-		await gearBtn.click();
+		await openSettingsPanel(page);
 		await page.locator("#settings-panel").getByText("Instances").click();
 
 		// Expand instance and click Rename
@@ -1001,8 +1028,7 @@ test.describe("Settings: Instance Status Updates", () => {
 		const control = await setupMultiInstance(page, baseURL);
 
 		// Open settings and navigate to Instances tab
-		const gearBtn = page.locator("#settings-btn, [title='Settings']");
-		await gearBtn.click();
+		await openSettingsPanel(page);
 		const settingsPanel = page.locator("#settings-panel");
 		await expect(settingsPanel).toBeVisible();
 		await settingsPanel.getByText("Instances").click();
@@ -1048,8 +1074,7 @@ test.describe("Auto-Discovery: Getting Started Panel", () => {
 		baseURL,
 	}) => {
 		await setupNoInstances(page, baseURL);
-		const gearBtn = page.locator("#settings-btn, [title='Settings']");
-		await gearBtn.click();
+		await openSettingsPanel(page);
 		await page.locator("#settings-panel").getByText("Instances").click();
 
 		// Should show "No OpenCode instances detected" message
@@ -1068,8 +1093,7 @@ test.describe("Auto-Discovery: Getting Started Panel", () => {
 		baseURL,
 	}) => {
 		await setupNoInstances(page, baseURL);
-		const gearBtn = page.locator("#settings-btn, [title='Settings']");
-		await gearBtn.click();
+		await openSettingsPanel(page);
 		await page.locator("#settings-panel").getByText("Instances").click();
 
 		// Click "Quick Start" to expand
@@ -1087,8 +1111,7 @@ test.describe("Auto-Discovery: Getting Started Panel", () => {
 		baseURL,
 	}) => {
 		const control = await setupNoInstances(page, baseURL);
-		const gearBtn = page.locator("#settings-btn, [title='Settings']");
-		await gearBtn.click();
+		await openSettingsPanel(page);
 		await page.locator("#settings-panel").getByText("Instances").click();
 
 		// Getting Started panel should be visible
@@ -1128,8 +1151,7 @@ test.describe("Auto-Discovery: Getting Started Panel", () => {
 		baseURL,
 	}) => {
 		const control = await setupNoInstances(page, baseURL);
-		const gearBtn = page.locator("#settings-btn, [title='Settings']");
-		await gearBtn.click();
+		await openSettingsPanel(page);
 		await page.locator("#settings-panel").getByText("Instances").click();
 
 		// Click "Scan Now" link at bottom of Getting Started
@@ -1145,8 +1167,7 @@ test.describe("Auto-Discovery: Getting Started Panel", () => {
 		baseURL,
 	}) => {
 		const control = await setupMultiInstance(page, baseURL);
-		const gearBtn = page.locator("#settings-btn, [title='Settings']");
-		await gearBtn.click();
+		await openSettingsPanel(page);
 		await page.locator("#settings-panel").getByText("Instances").click();
 
 		// Send an instance_list with a discovered (unmanaged) instance

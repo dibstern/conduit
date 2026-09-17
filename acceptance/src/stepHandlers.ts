@@ -163,6 +163,67 @@ export const conduitVisualHandlers: StepHandler[] = [
 		},
 	},
 	{
+		// Geometry, not class names: the point of bar 18 is that a phone can see
+		// which session it is in without scrolling, and only the rendered boxes
+		// can say whether that is true.
+		name: "session bar title sits above the transcript",
+		match: /^the session bar title is above the transcript$/,
+		run: async ({ world }) => {
+			const title = world.page.locator("[data-testid='session-bar-title']");
+			await title.waitFor({ state: "visible" });
+			const titleBox = await title.boundingBox();
+			const transcriptBox = await world.page.locator("#messages").boundingBox();
+			if (!titleBox || !transcriptBox) {
+				throw new Error("session bar title or transcript has no layout box");
+			}
+			if (titleBox.y + titleBox.height > transcriptBox.y + 1) {
+				throw new Error(
+					`session bar title overlaps the transcript: title ends at ${
+						titleBox.y + titleBox.height
+					}, transcript starts at ${transcriptBox.y}`,
+				);
+			}
+		},
+	},
+	{
+		// The session bar REPLACES the header at this width rather than stacking
+		// under it, so the header must be absent from the DOM, not merely hidden:
+		// two stacked bars was the bug bar 18 exists to fix.
+		name: "global header is not rendered",
+		match: /^the global header is not rendered$/,
+		run: async ({ world }) => {
+			const count = await world.page.locator("#header").count();
+			if (count !== 0) {
+				throw new Error(`expected no #header on a phone, found ${count}`);
+			}
+		},
+	},
+	{
+		name: "tap back to the session list",
+		match: /^I tap back to the session list$/,
+		run: async ({ world }) => {
+			await world.page.locator("[data-testid='session-bar-back']").click();
+		},
+	},
+	{
+		name: "session list is open",
+		match: /^the session list is open$/,
+		run: async ({ world }) => {
+			// Openness is read off the overlay, never off the sidebar's contents:
+			// the closed off-canvas sidebar is translated out of view rather than
+			// hidden, so Playwright reports everything inside it as visible even
+			// while it is shut. The overlay is genuinely display:none when closed.
+			await world.page
+				.locator("#sidebar-overlay")
+				.waitFor({ state: "visible" });
+			// And that it landed on sessions rather than projects. This one is a
+			// presence check by nature, for the reason just given.
+			await world.page
+				.locator("#sidebar-panel-sessions")
+				.waitFor({ state: "attached" });
+		},
+	},
+	{
 		name: "serve conduit with mockup state",
 		match: /^the conduit app is served with the ([a-z0-9-]+) mockup$/,
 		run: async ({ world, match }) => {
