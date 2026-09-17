@@ -516,9 +516,20 @@ Ship the split (bar 17, carried into 18 and 19). Revisit the dock, drawn as bar 
 
 - **Not taking:** 11 and 12 (translucency and unlabelled corners cost more than the pixels they save), 13 (a session name should not look like an input), 6 (the bottom strip belongs to the composer).
 
-## 13. Settled is never counted
+## 13. Nothing counts the sets that grow without bound
 
-Removed from the design, and from anything built from it: every count of settled sessions.
+Removed from the design, and from anything built from it: every count of settled sessions, and every count
+of archived ones.
+
+**The reason is the data model, not the layout.** A number next to Settled or Archived can only come from
+one of two places: a scan of every session that ever existed, or a client that is holding them all. Today
+the sidebar does the second — `ni8.5` S-10 has the subscription delivering the whole session set and the
+search filtering client-side — and that is precisely what stops working after a year of use. Drop those two
+counts and the subscription can be bounded to the *live* set, which is bounded in turn by how much work one
+person can have in flight. The settled and archived shelves then load only when opened, a page at a time,
+and there is no aggregate to maintain or invalidate on every settle, un-settle or scope change.
+
+That is the whole point of the removal. Everything below is the product argument arriving at the same place.
 
 Counts in this sidebar answer one question, *how much is waiting for me*. Needs you, Running, Done unread
 and Snoozed all qualify, snoozed included because it wakes up on its own, so its count is a promise about
@@ -530,16 +541,11 @@ trailing count, "Include settled" is a checkbox with no total, and no badge, chi
 settled sessions. If you want to know how many are parked, open the shelf and scroll, which is the same
 cost as caring.
 
-It pays on the engineering side as well. An always-visible count over an unbounded set is an aggregate to
-maintain and invalidate on every settle, every un-settle and every scope change, per project and per device.
-Not having it means the settled shelf can stay unloaded until it is opened, which is what its collapsed
-default already assumes.
+**Archived** goes the same way, for both reasons. Its count is gone too: `Include archived` is now a
+checkbox and nothing else. That leaves one rule rather than two exceptions to remember.
 
-**Archived** goes the same way. The argument applied to it word for word, so its count is gone too:
-`Include archived` is now a checkbox and nothing else. That leaves one rule rather than two exceptions to
-remember.
-
-The consequence worth stating plainly: **every aggregate in the sidebar is a live count.** `All 18` is
+The consequence worth stating plainly: **every aggregate in the sidebar is a live count, and bounded by
+construction.** `All 18` is
 eighteen sessions you can act on across four projects, not the forty-odd rows in the database. Project chips,
 scope rows and group-by-project headers all count the same way, so the number on a control always equals the
 number of rows tapping it produces. Any number that disagrees with its own list is a bug.
