@@ -8,7 +8,7 @@
 <!-- capability or handing work to another agent is a different kind of step than  -->
 <!-- reading a file.                                                               -->
 <script lang="ts">
-	import BlockGrid from "../shared/BlockGrid.svelte";
+	import BlockGrid from "../ui/BlockGrid.svelte";
 	import Icon from "../ui/Icon.svelte";
 	import {
 		type ActivityPart,

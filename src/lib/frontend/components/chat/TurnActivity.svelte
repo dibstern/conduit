@@ -8,7 +8,7 @@
 <!-- steps show as a ticker, so the work is visible without expanding anything.    -->
 <script lang="ts">
 	import { tick } from "svelte";
-	import BlockGrid from "../shared/BlockGrid.svelte";
+	import BlockGrid from "../ui/BlockGrid.svelte";
 	import Icon from "../ui/Icon.svelte";
 	import {
 		countsPhrase,

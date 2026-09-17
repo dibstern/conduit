@@ -38,8 +38,16 @@
 	$effect(() => {
 		const el = dialogEl;
 		if (!el) return;
-		if (open && !el.open) el.showModal();
-		else if (!open && el.open) el.close();
+		if (open && !el.open) {
+			el.showModal();
+			// showModal() otherwise focuses the first focusable descendant, which
+			// lands a focus ring on whichever control happens to be first — the
+			// close X in SettingsPanel, the copy-URL button in QrModal — making
+			// them look pre-selected the instant the modal appears. Focusing the
+			// dialog itself also puts a screen reader at the start of the dialog,
+			// so `aria-labelledby` is announced before any content.
+			el.focus();
+		} else if (!open && el.open) el.close();
 	});
 
 	// Escape closes the dialog at the browser level without touching caller
@@ -65,7 +73,8 @@
 	bind:this={dialogEl}
 	aria-labelledby={labelledBy}
 	data-backdrop={backdrop}
-	class="m-auto max-w-[100vw] overflow-visible border-none bg-transparent p-0 text-text"
+	tabindex="-1"
+	class="m-auto max-w-[100vw] overflow-visible border-none bg-transparent p-0 text-text focus:outline-none"
 	oncancel={handleCancel}
 	onclick={handleClick}
 >

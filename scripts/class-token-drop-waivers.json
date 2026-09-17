@@ -53,5 +53,6 @@
 	"src/lib/frontend/components/ui/segmented-styles.ts :: bg-brand-a/10": {
 		"renamedTo": "bg-accent/10",
 		"reason": "brand-a and accent hold the same value in both canonical themes, so the swap is zero-diff. accent won because selection is an interactive state and accent is the token family that models one. The underlying token duplication is tracked on conduit-test-57oe."
-	}
+	},
+	"src/lib/frontend/components/model/__fixtures__/ModelSelectorHost.svelte :: flex,h-80,items-end": "File deleted. It was a Storybook fixture importing components/model/ModelSelector.svelte, which no longer exists on this branch, so the fixture could not render and nothing referenced it. The tokens reserved drop-up space for a menu that is portaled now."
 }

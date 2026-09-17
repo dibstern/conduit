@@ -121,7 +121,7 @@
 	});
 </script>
 
-<Modal open={visible} onclose={() => onClose?.()} labelledBy="qr-modal-title" backdrop="subtle">
+<Modal open={visible} onclose={() => onClose?.()} labelledBy="qr-modal-title">
 		<!-- Dialog card -->
 		<Surface
 			variant="card"

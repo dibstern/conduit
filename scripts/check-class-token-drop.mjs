@@ -159,10 +159,20 @@ if (diff.trim() === "") {
 
 const perFile = new Map();
 let current = null;
+// A deleted file's `+++` header is `/dev/null`, so its path only appears on the
+// `---` side. Without this the deletion's removed lines get charged to whichever
+// file the diff happened to list before it.
+let previousPath = null;
 for (const line of diff.split("\n")) {
-	const header = line.match(/^\+\+\+ b\/(.+)$/);
+	const from = line.match(/^--- a\/(.+)$/);
+	if (from) {
+		previousPath = from[1];
+		continue;
+	}
+	const header = line.match(/^\+\+\+ (?:b\/(.+)|\/dev\/null)$/);
 	if (header) {
-		current = header[1];
+		current = header[1] ?? previousPath;
+		if (!current) continue;
 		if (!perFile.has(current)) perFile.set(current, { removed: [], added: [] });
 		continue;
 	}
