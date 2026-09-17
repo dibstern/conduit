@@ -2,6 +2,7 @@
 <!-- Displays system info/error messages with left-border accent. -->
 
 <script lang="ts">
+	import Button from "../ui/Button.svelte";
 	import type { SystemMessage } from "../../types.js";
 	import Icon from "../ui/Icon.svelte";
 	import Surface from "../ui/Surface.svelte";
@@ -50,12 +51,17 @@
 					{message.text}
 				</span>
 				{#if hasDetails}
-					<button
-						class="ml-2 text-xs opacity-60 hover:opacity-100 cursor-pointer underline"
+					<Button
+						variant="ghost"
+						size="content"
+						layout="flow"
+						tone="inherit"
+						hoverFill="none"
+						class="ml-2 text-xs opacity-60 hover:opacity-100 underline"
 						onclick={() => showDetails = !showDetails}
 					>
 						{showDetails ? "Hide details" : "Show details"}
-					</button>
+					</Button>
 				{/if}
 			</div>
 		</div>

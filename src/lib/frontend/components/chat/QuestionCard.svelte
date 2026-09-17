@@ -455,12 +455,17 @@
 			</div>
 		{:else if resolved === "submitting"}
 			<div class="question-actions flex gap-2 mt-2 max-sm:flex-col">
-				<button
-					class="question-submit-btn min-h-12 flex-1 px-4 py-2 rounded-lg border text-sm font-medium font-sans border-success/20 bg-success/10 text-success opacity-60 cursor-not-allowed"
+				<Button
+					variant="success-soft"
+					size="content"
+					layout="flow"
+					hoverFill="none"
+					disabledStyle="none"
+					class="question-submit-btn min-h-12 flex-1 px-4 py-2 rounded-lg text-sm font-medium font-sans opacity-60 cursor-not-allowed"
 					disabled
 				>
 					Submitting&hellip;
-				</button>
+				</Button>
 			</div>
 		{:else}
 			<div class="question-resolved text-sm py-2">

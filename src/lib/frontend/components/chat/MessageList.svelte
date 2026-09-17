@@ -4,6 +4,7 @@
 <!-- Preserves #messages ID for E2E. -->
 
 <script lang="ts">
+	import Button from "../ui/Button.svelte";
 	import { untrack } from "svelte";
 	import { currentChat, isProcessing, consumeScrollRequest } from "../../stores/chat.svelte.js";
 	import { findSession, sessionState } from "../../stores/session.svelte.js";
@@ -314,13 +315,17 @@
 	{/each}
 
 	<!-- Scroll-to-bottom button -->
-	<button
+	<Button
+		variant="ghost"
+		size="content"
+		layout="flow"
+		tone="inherit"
+		hoverFill="surface"
 		id="scroll-btn"
-		class="sticky bottom-3 left-1/2 -translate-x-1/2 bg-bg-alt border border-border rounded-full px-4 py-1.5 text-xs text-text-secondary cursor-pointer z-5 font-sans hover:bg-bg-surface"
-		class:hidden={!scrollCtrl.isDetached}
+		class="sticky bottom-3 left-1/2 -translate-x-1/2 bg-bg-alt border border-border rounded-full px-4 py-1.5 text-xs text-text-secondary z-5 font-sans {scrollCtrl.isDetached ? '' : 'hidden'}"
 		title="Scroll to bottom"
 		onclick={() => scrollCtrl.requestFollow()}
 	>
 		{scrollButtonText}
-	</button>
+	</Button>
 </div>

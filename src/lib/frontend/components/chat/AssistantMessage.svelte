@@ -19,7 +19,7 @@
 	import { getBrowserClientId } from "../../stores/client-identity.js";
 	import { forkSessionRpc } from "../../transport/ws-rpc-client.js";
 	import { assertNever } from "../../../utils.js";
-	import Icon from "../ui/Icon.svelte";
+	import Button from "../ui/Button.svelte";
 	import { initTableScrollShadows } from "../../utils/table-scroll.js";
 	import hljs from "highlight.js";
 	// Register aliases for template languages not natively supported by highlight.js.
@@ -383,27 +383,34 @@
 				class="msg-actions absolute top-2 right-2 flex gap-1 opacity-0 group-hover:opacity-100 touch:opacity-100 transition-opacity duration-150 z-10"
 				class:opacity-100={copyState !== "idle"}
 			>
-				<button
-					class="flex items-center justify-center w-7 h-7 rounded-md border cursor-pointer transition-colors duration-150 backdrop-blur-sm {copyState === 'done' ? 'border-success/30 bg-success/10 text-success' : copyState === 'primed' ? 'border-brand-b/30 bg-brand-b/10 text-brand-b' : 'border-border-subtle/50 bg-bg-surface/80 text-text-muted hover:text-text-secondary'}"
+				<!-- No tone pairs all three copy states; inherit leaves their exact colours here. -->
+				<Button
+					variant="ghost"
+					size="content"
+					tone="inherit"
+					hoverFill="none"
+					iconOnly
+					icon={copyState === 'done' ? 'check' : 'copy'}
+					iconSize={14}
+					class="w-7 h-7 rounded-md border backdrop-blur-sm {copyState === 'done' ? 'border-success/30 bg-success/10 text-success' : copyState === 'primed' ? 'border-brand-b/30 bg-brand-b/10 text-brand-b' : 'border-border-subtle/50 bg-bg-surface/80 text-text-muted hover:text-text-secondary'}"
 					title={copyState === 'done' ? 'Copied!' : copyState === 'primed' ? 'Click to confirm copy' : 'Copy message'}
-					aria-label={copyState === 'done' ? 'Copied!' : copyState === 'primed' ? 'Click to confirm copy' : 'Copy message'}
+					ariaLabel={copyState === 'done' ? 'Copied!' : copyState === 'primed' ? 'Click to confirm copy' : 'Copy message'}
 					onclick={handleClick}
-				>
-					{#if copyState === 'done'}
-						<Icon name="check" size={14} />
-					{:else}
-						<Icon name="copy" size={14} />
-					{/if}
-				</button>
+				/>
 				{#if message.messageId}
-					<button
-						class="flex items-center justify-center w-7 h-7 rounded-md border border-border-subtle/50 bg-bg-surface/80 text-text-muted hover:text-text-secondary cursor-pointer transition-colors duration-150 backdrop-blur-sm"
+					<Button
+						variant="ghost"
+						size="content"
+						tone="muted-soft"
+						hoverFill="none"
+						iconOnly
+						icon="git-fork"
+						iconSize={14}
+						class="w-7 h-7 rounded-md border border-border-subtle/50 bg-bg-surface/80 backdrop-blur-sm"
 						title="Fork from here"
-						aria-label="Fork from here"
+						ariaLabel="Fork from here"
 						onclick={handleFork}
-					>
-						<Icon name="git-fork" size={14} />
-					</button>
+					/>
 				{/if}
 			</div>
 		{/if}

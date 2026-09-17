@@ -5,6 +5,7 @@
 <script lang="ts">
 	import { sessionState } from "../../stores/session.svelte.js";
 	import Icon from "../ui/Icon.svelte";
+	import Button from "../ui/Button.svelte";
 
 	interface Props {
 		children: import("svelte").Snippet;
@@ -37,9 +38,19 @@
 </script>
 
 <div class="fork-context-block max-w-[760px] mx-auto px-5 mt-2">
-	<button
-		type="button"
-		class="fork-context-toggle flex items-center gap-2 w-full py-2 px-3 rounded-lg bg-bg-surface/50 border border-border/50 text-text-dimmer text-xs font-mono cursor-pointer hover:bg-bg-surface transition-colors"
+	<!--
+		`layout="flow"` keeps the as-found `flex items-center` on the call site.
+		The default `center` would swap it for `inline-flex` and add
+		`whitespace-nowrap`, which this label must not have: "Prior conversation"
+		sits above a variable-width column and is meant to wrap.
+	-->
+	<Button
+		variant="ghost"
+		size="content"
+		layout="flow"
+		tone="inherit"
+		hoverFill="surface"
+		class="fork-context-toggle flex items-center gap-2 w-full py-2 px-3 rounded-lg bg-bg-surface/50 border border-border/50 text-text-dimmer text-xs font-mono"
 		onclick={toggle}
 	>
 		<Icon
@@ -48,7 +59,7 @@
 			class="transition-transform duration-200 {collapsed ? '' : 'rotate-90'}"
 		/>
 		<span>Prior conversation</span>
-	</button>
+	</Button>
 
 	{#if !collapsed}
 		<div class="fork-context-messages mt-2 pl-3 border-l-2 border-border/40 opacity-75">

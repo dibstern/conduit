@@ -3,6 +3,7 @@
 <!-- Clicking the parent title navigates to the parent session. -->
 
 <script lang="ts">
+	import Button from "../ui/Button.svelte";
 	import { switchToSession } from "../../stores/session.svelte.js";
 
 	interface Props {
@@ -21,14 +22,19 @@
 	<div class="flex-1 h-px bg-border"></div>
 	<span class="text-[11px] text-text-dimmer font-mono whitespace-nowrap">
 		Forked from
-		<button
+		<Button
+			variant="ghost"
+			size="content"
+			layout="flow"
+			tone="muted-soft"
+			hoverFill="none"
 			type="button"
-			class="text-text-muted hover:text-text-secondary underline decoration-dotted cursor-pointer bg-transparent border-none p-0 font-mono text-[11px] transition-colors"
+			class="underline decoration-dotted p-0 font-mono text-[11px]"
 			onclick={navigateToParent}
 			title="Go to parent session"
 		>
 			{parentTitle}
-		</button>
+		</Button>
 	</span>
 	<div class="flex-1 h-px bg-border"></div>
 </div>

@@ -6,6 +6,7 @@
 	import { switchToSession } from "../../stores/session.svelte.js";
 
 	import Icon from "../ui/Icon.svelte";
+	import Button from "../ui/Button.svelte";
 	import BlockGrid from '../ui/BlockGrid.svelte';
 
 	let { message, groupRadius }: {
@@ -133,8 +134,25 @@
 	{#if message.status === 'running'}
 		<div class="absolute inset-0 pointer-events-none" style="background: linear-gradient(90deg, transparent 0%, rgba(234,179,8,0.04) 50%, transparent 100%); animation: tool-shimmer-slide 2s ease-in-out infinite;"></div>
 	{/if}
-	<button
-		class="subagent-header flex items-center gap-2.5 w-full py-2.5 px-3 text-xs text-text-dimmer transition-colors duration-150 border-none text-left select-none bg-transparent disabled:opacity-100 disabled:cursor-default {subagentSessionId ? 'cursor-pointer hover:bg-bg-surface' : ''}"
+	<!--
+		`layout="flow"` keeps the as-found `flex items-center`, which the
+		`self-center` on the BlockGrid child depends on, and keeps the header
+		title wrapping rather than taking BASE's `whitespace-nowrap`.
+
+		`hoverFill` is unconditional where the original gated it on
+		`subagentSessionId`, because that is exactly when the button is disabled
+		and Button already drops every `hover:` step when inert
+		(conduit-test-or29). `disabledStyle="undimmed"` reproduces the as-found
+		`disabled:opacity-100 disabled:cursor-default` pair.
+	-->
+	<Button
+		variant="ghost"
+		size="content"
+		layout="flow"
+		tone="inherit"
+		hoverFill="surface"
+		disabledStyle="undimmed"
+		class="subagent-header flex items-center gap-2.5 w-full py-2.5 px-3 text-xs text-text-dimmer text-left select-none"
 		onclick={navigateToSubagent}
 		disabled={!subagentSessionId}
 		title={subagentSessionId ? "Open subagent session" : undefined}
@@ -175,7 +193,7 @@
 				<Icon name="arrow-right" size={14} />
 			</span>
 		{/if}
-	</button>
+	</Button>
 
 	<!-- Subtitle row -->
 	<div

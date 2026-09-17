@@ -263,8 +263,13 @@
 					{#if hasClaudeRememberOptions}
 						<div class="text-xs text-text-secondary mb-0.5">Remember for:</div>
 						{#each claudeRememberOptions as option}
-							<button
-								class="w-full text-left px-3 py-2 rounded-lg border border-border cursor-pointer font-sans text-xs hover:bg-success/[0.06] hover:border-success/15"
+							<Button
+								variant="ghost"
+								size="content"
+								layout="flow"
+								tone="inherit"
+								hoverFill="success-faint"
+								class="w-full text-left px-3 py-2 rounded-lg border border-border font-sans text-xs hover:border-success/15"
 								onclick={() => handleRememberDestination(option.destination)}
 							>
 								<span class="block font-medium text-success/80">
@@ -273,23 +278,33 @@
 								<span class="block text-text-secondary mt-0.5">
 									{option.description}
 								</span>
-							</button>
+							</Button>
 						{/each}
 					{:else}
 						<div class="text-xs text-text-secondary mb-0.5">Always allow:</div>
-						<button
-							class="w-full text-left px-3 py-2 rounded-lg border border-success/15 cursor-pointer font-sans text-xs font-medium text-success/80 hover:bg-success/[0.06]"
+						<Button
+							variant="ghost"
+							size="content"
+							layout="flow"
+							tone="inherit"
+							hoverFill="success-faint"
+							class="w-full text-left px-3 py-2 rounded-lg border border-success/15 font-sans text-xs font-medium text-success/80"
 							onclick={handleAlwaysAllowTool}
 						>
 							All <span class="font-mono">{request.toolName}</span> operations
-						</button>
+						</Button>
 						{#each alwaysPatterns as pattern}
-							<button
-								class="w-full text-left px-3 py-2 rounded-lg border border-border cursor-pointer font-mono text-xs text-text-secondary hover:bg-success/[0.06] hover:text-success/80 hover:border-success/15 break-all select-text"
+							<Button
+								variant="ghost"
+								size="content"
+								layout="flow"
+								tone="inherit"
+								hoverFill="success-faint"
+								class="w-full text-left px-3 py-2 rounded-lg border border-border font-mono text-xs text-text-secondary hover:text-success/80 hover:border-success/15 break-all select-text"
 								onclick={() => handleAlwaysAllowPattern(pattern)}
 							>
 								{pattern}
-							</button>
+							</Button>
 						{/each}
 					{/if}
 				</div>

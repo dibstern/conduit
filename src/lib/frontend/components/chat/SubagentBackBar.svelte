@@ -3,6 +3,7 @@
 <!-- Shows parent session title and a "← PARENT" button to navigate back. -->
 
 <script lang="ts">
+	import Button from "../ui/Button.svelte";
 	import { findSession, sessionState, switchToSession } from "../../stores/session.svelte.js";
 	import Surface from "../ui/Surface.svelte";
 
@@ -44,16 +45,20 @@
 			<span class="flex-1 min-w-0 text-sm font-mono text-text-muted truncate max-md:text-xs">
 				Subagent of <strong class="text-text-secondary font-semibold">{parentTitle}</strong>
 			</span>
-			<button
+			<Button
+				variant="ghost"
+				size="content"
+				tone="inherit"
+				hoverFill="none"
 				type="button"
-				class="subagent-back-btn inline-flex items-center gap-1 py-0.5 px-2.5 rounded border-none bg-brand-a text-white font-mono text-sm font-semibold cursor-pointer whitespace-nowrap transition-opacity duration-150 tracking-wide hover:opacity-85 max-md:text-xs max-md:px-2"
+				class="subagent-back-btn gap-1 py-0.5 px-2.5 rounded bg-brand-a text-white font-mono text-sm font-semibold transition-opacity tracking-wide hover:opacity-85 max-md:text-xs max-md:px-2"
 				onclick={navigateBack}
 				title="Back to {parentTitle}"
 			>
 				<span class="text-base leading-none">&#8592;</span>
 				PARENT
 				<span class="hidden md:inline-flex items-center py-px px-1 rounded-sm bg-white/20 text-xs font-bold tracking-wider ml-0.5">ESC</span>
-			</button>
+			</Button>
 		</Surface>
 	</div>
 {/if}
