@@ -3,7 +3,6 @@
 // reply segments. The transcript renders one collapsed activity line per segment
 // (summary sentence + duration strip), expandable to the log.
 
-import { phaseAfter } from "../../contracts/turn-phase.js";
 import type {
 	AssistantMessage,
 	ChatMessage,
@@ -128,19 +127,11 @@ export function segmentTurns(
 		} else appendActivity(segment, msg);
 	}
 	const last = turns.at(-1);
-	if (last) {
-		const segment = last.segments.at(-1)!;
-		const signal = segment.end
-			? segment.end.type === "result"
-				? "result"
-				: "interrupt"
-			: segment.activity.length > 0 || segment.reply.length > 0
-				? "activity"
-				: processing
-					? "busy"
-					: "prompt";
-		last.live = processing && phaseAfter(signal) === "running";
-	}
+	// A closed segment is the only thing that settles a turn, and a closed
+	// segment can never receive more work — the types see to that. So a result
+	// mid-turn no longer strands the transcript: the next part opens a fresh
+	// segment and the turn reads as live again.
+	if (last) last.live = processing && last.segments.at(-1)!.end === undefined;
 	return turns;
 }
 
