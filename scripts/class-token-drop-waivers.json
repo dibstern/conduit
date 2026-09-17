@@ -45,5 +45,13 @@
 	"src/lib/frontend/components/project/ProjectContextMenu.svelte :: py-2": "Deliberate: 6px -> 4.5px. py-1.5 is the row height every other menu in the app already used, and this menu's extra 1.5px was unexplained. The checker refuses to take this as a move, correctly, because py-2 is in no recipe.",
 	"src/lib/frontend/components/project/ProjectContextMenu.svelte :: text-[13px]": "Converged to the shared `text-sm` (11px) that every other menu row in the app already wore. 13px was this one menu's private value and nothing referenced it.",
 	"src/lib/frontend/components/project/ProjectContextMenu.svelte :: z-[var(--z-popover)]": "Was on the full-screen backdrop div that caught outside clicks. The backdrop is gone: bits-ui dismisses on outside pointerdown without painting an element over the page, which also stops the backdrop swallowing the first click elsewhere.",
-	"src/lib/frontend/components/project/ProjectContextMenu.svelte :: z-[var(--z-popover-raised)]": "As above. This menu opens from inside ProjectSwitcher's inline dropdown, which sits below the popover tier, so 200 clears it."
+	"src/lib/frontend/components/project/ProjectContextMenu.svelte :: z-[var(--z-popover-raised)]": "As above. This menu opens from inside ProjectSwitcher's inline dropdown, which sits below the popover tier, so 200 clears it.",
+	"src/lib/frontend/components/ui/segmented-styles.ts :: border-brand-a": {
+		"renamedTo": "border-accent",
+		"reason": "brand-a and accent hold the same value in both canonical themes, so the swap is zero-diff. accent won because selection is an interactive state and accent is the token family that models one. The underlying token duplication is tracked on conduit-test-57oe."
+	},
+	"src/lib/frontend/components/ui/segmented-styles.ts :: bg-brand-a/10": {
+		"renamedTo": "bg-accent/10",
+		"reason": "brand-a and accent hold the same value in both canonical themes, so the swap is zero-diff. accent won because selection is an interactive state and accent is the token family that models one. The underlying token duplication is tracked on conduit-test-57oe."
+	}
 }

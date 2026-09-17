@@ -189,7 +189,14 @@
 </script>
 
 <div class="relative">
-	<!-- Drop-up popup -->
+	<!-- Drop-up popup.
+
+	     200px, where FileMenu and CommandMenu use 300px. That is a real
+	     constraint, not drift: this listbox is not portaled, and it opens
+	     upward inside the ProjectSwitcher dropdown, whose root is
+	     `overflow-hidden` around a project list capped at 280px. A 300px
+	     drop-up would be clipped by that ancestor; the composer, where the
+	     other two live, has no such ceiling (conduit-test-9kov). -->
 	{#if expanded}
 		<DetachedListbox
 			id={listboxId}

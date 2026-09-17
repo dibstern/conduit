@@ -12,9 +12,25 @@
  * contract, which is why they are two components rather than one with a
  * `semantics` prop — see the header of ui/Tabs.svelte.
  *
- * Every recipe below is the as-found class list of a real call site, token for
- * token, so the migration is zero-diff by construction. None of these is a
- * design proposal; converging them is conduit-test-de3.6's problem.
+ * Every recipe below started as the as-found class list of a real call site,
+ * token for token, so the migration was zero-diff by construction.
+ *
+ * One convergence has since landed (conduit-test-de3.6). The three strips
+ * marked their selected option in two different colours: `pill` used `accent`
+ * while `underline` and `field` used `brand-a`. Those two tokens hold the same
+ * value in both canonical themes (#ff72a6 dark, #c6004a light), so the split
+ * was invisible on screen and the swap below is zero-diff -- but they are
+ * separate names that the queued palette work may give separate values, and
+ * then the split would become a real inconsistency nobody chose. `accent` wins
+ * because selection is an interactive state and `accent` is the token family
+ * that models one (it has `--color-accent-hover` and `--color-accent-bg`;
+ * `brand-a` is a bare swatch for glows and identity marks). The token
+ * duplication itself is conduit-test-57oe's problem, not this file's.
+ *
+ * What is NOT converged, deliberately: `pill` stays content-width with a
+ * border-colour hover and `field` stays `flex-1` with none, because one is a
+ * compact toolbar switch and the other fills a form row. Different containers,
+ * different geometry.
  */
 
 type SegmentedRecipe = {
@@ -44,7 +60,7 @@ export const SEGMENTED_VARIANTS = {
 	underline: {
 		list: "flex border-b border-border px-5 gap-1 font-brand",
 		item: "px-3 py-2 text-sm font-medium border-b-2 -mb-px transition-colors cursor-pointer bg-transparent",
-		selected: "border-brand-a text-text",
+		selected: "border-accent text-text",
 		unselected: "border-transparent text-text-muted hover:text-text",
 	},
 	/**
@@ -67,7 +83,7 @@ export const SEGMENTED_VARIANTS = {
 	field: {
 		list: "flex gap-1.5",
 		item: "flex-1 px-3 py-1.5 text-xs rounded border transition-colors cursor-pointer",
-		selected: "border-brand-a text-text bg-brand-a/10",
+		selected: "border-accent text-text bg-accent/10",
 		unselected: "border-border text-text-muted hover:text-text",
 	},
 } as const satisfies Record<string, SegmentedRecipe>;

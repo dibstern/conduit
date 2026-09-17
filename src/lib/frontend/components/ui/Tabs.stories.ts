@@ -92,12 +92,16 @@ export const ArrowKeysMoveSelection: Story = {
 };
 
 /**
- * The underline is drawn by `border-b-2` + `border-brand-a`, not by an inline
+ * The underline is drawn by `border-b-2` + `border-accent`, not by an inline
  * style. The as-found SettingsPanel markup carried `border-none`, which sets
  * border-style to none and so killed `border-b-2` outright; the underline was
  * being drawn entirely by an inline `style="border-bottom: ..."` while the
- * conditional `border-brand-a` class sat there as dead code contradicting it.
+ * conditional border-colour class sat there as dead code contradicting it.
  * This asserts the classes are load-bearing again and no inline style remains.
+ *
+ * The colour was `brand-a` until conduit-test-de3.6 converged all three strips
+ * onto `accent` -- same value in both themes, so this assertion moved one word
+ * and no pixel.
  */
 export const UnderlineIsDrawnByClasses: Story = {
 	play: async ({ canvasElement }) => {
@@ -107,7 +111,7 @@ export const UnderlineIsDrawnByClasses: Story = {
 
 		await expect(selected).toBeDefined();
 		await expect(selected?.getAttribute("style")).toBeNull();
-		await expect(selected?.className).toContain("border-brand-a");
+		await expect(selected?.className).toContain("border-accent");
 		await expect(selected?.className).not.toContain("border-none");
 	},
 };

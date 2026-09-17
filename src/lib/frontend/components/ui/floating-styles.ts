@@ -37,7 +37,8 @@ export const FLOATING_SURFACE_CLASSES =
 // The inline detached listboxes: CommandMenu, FileMenu, DirectoryAutocomplete.
 // All three are anchored inside the composer or a form rather than portaled,
 // and all three independently chose the dropdown tier, so it is the default
-// here rather than something each one re-states. Radius is the caller's.
+// here rather than something each one re-states. Radius is no longer the
+// caller's: it collapsed into the shared base above.
 export const DETACHED_LISTBOX_SURFACE_CLASSES = `${FLOATING_SURFACE_BASE_CLASSES} z-[var(--z-dropdown)]`;
 
 export const FLOATING_MENU_CONTENT_CLASSES = `${FLOATING_SURFACE_CLASSES} max-h-[var(--bits-dropdown-menu-content-available-height)] overflow-y-auto`;
@@ -67,8 +68,15 @@ export const FLOATING_ITEM_BASE_CLASSES =
 // `touch` exists for exactly one call site: the composer's attach menu, whose
 // rows are thumb targets on a phone and were ~40% taller than a pointer menu's
 // before the migration. Shrinking a touch target is a product decision, not a
-// side effect of moving onto the shared primitive, so it stays a member here
-// and conduit-test-de3.6 owns whether the two looks should converge.
+// side effect of moving onto the shared primitive.
+//
+// conduit-test-de3.6 asked whether the two looks should converge, and the
+// answer is no. Every other convergence in this file collapsed a split that
+// ran along which feature owned the file; this one runs along which input
+// device the row is for, which is a distinction a reader can see and a user
+// can feel. Converging would mean either shrinking a thumb target or making
+// every pointer menu thumb-sized. The union member is the cheap way to say
+// "these are two things".
 export const MENU_ITEM_DENSITY_CLASSES = {
 	default: `gap-2 ${FLOATING_ITEM_PADDING_CLASSES}`,
 	touch: "gap-2.5 px-4 py-3",

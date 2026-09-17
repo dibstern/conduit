@@ -72,9 +72,31 @@ function git(args) {
 	return execFileSync("git", args, { encoding: "utf8", maxBuffer: 64 << 20 });
 }
 
-// Only tokens inside a `class` attribute or a `*_CLASSES` string constant.
+// A keyed property value counts as a class list only in a file that actually
+// declares class recipes. `selected: "border-accent text-text"` and
+// `testId: "diff-view-toggle"` are the same shape to a regex, and a gate that
+// reports a renamed label or test id as a dropped utility is a gate people
+// learn to waive without reading -- which is the failure this check exists to
+// prevent, arriving by the other door.
+const RECIPE_PATH = /-(?:styles|recipes)\.ts$/;
+const RECIPE_DECLARATION =
+	/\bconst\s+[A-Z][A-Z0-9_]*_(?:CLASSES|VARIANTS|RECIPES)\b|Record<[^>]*,\s*string>/;
+const recipeFileCache = new Map();
+function declaresRecipes(file) {
+	if (RECIPE_PATH.test(file)) return true;
+	let known = recipeFileCache.get(file);
+	if (known === undefined) {
+		known =
+			existsSync(file) && RECIPE_DECLARATION.test(readFileSync(file, "utf8"));
+		recipeFileCache.set(file, known);
+	}
+	return known;
+}
+
+// Only tokens inside a `class` attribute, recipe string, or -- in a recipe
+// file -- a keyed recipe value.
 // Scanning whole lines would pull in prop names, ids and prose.
-function classStrings(line) {
+function classStrings(line, keyedValues = false) {
 	const out = [];
 	const attr =
 		/class(?:Name)?\s*=\s*(?:"([^"]*)"|'([^']*)'|\{`([^`]*)`\}|\{"([^"]*)"\})/g;
@@ -86,6 +108,13 @@ function classStrings(line) {
 		const quoted = line.match(/"([^"]*)"|`([^`]*)`/);
 		if (quoted) out.push(quoted[1] ?? quoted[2]);
 	}
+	// A whole keyed recipe property, never an inline prop or surrounding prose.
+	const property =
+		keyedValues &&
+		line.match(
+			/^[+-]\s*(?:[A-Za-z_$][\w$]*|"[^"]*"|'[^']*')\s*:\s*(?:"([^"]*)"|'([^']*)'|`([^`]*)`)\s*,?\s*$/,
+		);
+	if (property) out.push(property[1] ?? property[2] ?? property[3]);
 	return out;
 }
 
@@ -106,10 +135,10 @@ function stripComments(text) {
 const classTokens = (value) =>
 	value.replace(/\$\{[^}]*\}/g, " ").match(TOKEN_PATTERN) ?? [];
 
-function tokensOf(lines) {
+function tokensOf(lines, keyedValues = false) {
 	const set = new Set();
 	for (const line of lines) {
-		for (const value of classStrings(line)) {
+		for (const value of classStrings(line, keyedValues)) {
 			for (const token of classTokens(value)) set.add(token);
 		}
 	}
@@ -169,10 +198,12 @@ function recipeTokens(path) {
 	return set;
 }
 
-function isWaived(file, token, afterText) {
+function isWaived(file, token, afterText, after) {
 	const waiver = waiverIndex.get(`${file} :: ${token}`);
 	if (waiver === undefined) return false;
 	if (typeof waiver === "string") return true;
+	// A rename holds only while this file still carries the replacement token.
+	if (waiver.renamedTo !== undefined) return after.has(waiver.renamedTo);
 	// Whole-token: the destination must really carry this class, not merely
 	// mention the characters somewhere. `requires` is a literal source snippet
 	// the author wrote, so that one is a substring on purpose.
@@ -184,18 +215,19 @@ function isWaived(file, token, afterText) {
 const findings = [];
 for (const [file, { removed, added }] of perFile) {
 	if (!file.endsWith(".svelte") && !file.endsWith(".ts")) continue;
-	const gone = tokensOf(removed);
-	const kept = tokensOf(added);
+	const keyedValues = declaresRecipes(file);
+	const gone = tokensOf(removed, keyedValues);
+	const kept = tokensOf(added, keyedValues);
 	const afterText = existsSync(file) ? readFileSync(file, "utf8") : "";
 	// Only what the file still puts on an element, extracted exactly the way the
 	// diff side is. A raw text search would match prose and be whole-token by
 	// accident rather than by construction.
-	const after = tokensOf(stripComments(afterText).split("\n"));
+	const after = tokensOf(stripComments(afterText).split("\n"), keyedValues);
 	for (const token of recipeTokens(file)) after.add(token);
 	for (const token of gone) {
 		if (kept.has(token) || PLUMBING.has(token)) continue;
 		if (after.has(token)) continue;
-		if (isWaived(file, token, afterText)) continue;
+		if (isWaived(file, token, afterText, after)) continue;
 		findings.push(`${file} :: ${token}`);
 	}
 }
