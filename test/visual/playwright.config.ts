@@ -92,8 +92,32 @@ const DETERMINISTIC_RASTER_ARGS = [
 export default defineConfig({
 	testDir: ".",
 	testMatch: "**/*.spec.ts",
+	// Without this Playwright parallelises per FILE, and this suite is one file
+	// across two projects — so it ran on exactly 2 workers no matter what the
+	// `workers` count below said. Measured 2026-09-17: 966 tests took 17.3m at
+	// `workers: 4` and 17.4m at `workers: 8`, because neither was ever reachable.
+	fullyParallel: true,
 	timeout: 10_000,
-	workers: 4,
+	// 8, because the Docker leg is the binding constraint and it is memory-bound,
+	// not CPU-bound: Docker Desktop is allotted ~8GB here and a Chromium worker
+	// wants roughly 500MB. Measured 2026-09-17 with `fullyParallel` on:
+	//   darwin  8 workers -> 4.3m, zero-diff;  12 -> 2.9m, zero-diff
+	//   linux   8 workers -> 7.9m, zero-diff;  12 -> 25.7m and 817 FAILED
+	// Every linux failure at 12 was `Test timeout of 10000ms exceeded` or
+	// `browser has been closed` — starvation, not a real pixel change. Raising
+	// Docker's memory allocation is what would unlock 12; the worker count is the
+	// wrong knob for it. Use VISUAL_WORKERS=12 for a host-only run if you want it.
+	//
+	// A fixed count, not Playwright's `'50%'`, because that scales to the machine
+	// rather than to what else is running on it. For a pixel-diff suite a capture
+	// environment that varies per host buys failures nobody else can reproduce,
+	// which is what the rest of this file exists to prevent. Each story waits a
+	// fixed 800ms to settle, so a starved machine screenshots mid-render: raise
+	// this only with a strict zero-diff run to back it up. Concurrent native runs
+	// are already impossible (the Storybook port below is fixed and
+	// `reuseExistingServer: false`), so the override is for the one case that does
+	// overlap: a host run alongside the emulated Docker leg.
+	workers: Number(process.env["VISUAL_WORKERS"] ?? 8),
 	retries: strict ? 0 : 1,
 	expect: {
 		toHaveScreenshot: strict
@@ -103,6 +127,14 @@ export default defineConfig({
 	use: {
 		baseURL: `http://localhost:${PORT}`,
 		colorScheme: "dark",
+		// Message cards render a clock time, so the browser's timezone and locale
+		// are baseline inputs. Unpinned, the darwin goldens bake in whatever the
+		// capturing machine sits in and the linux ones bake in the container's
+		// UTC, which makes the two platforms disagree by a fixed offset forever
+		// and rewrites every message baseline the first time a capture runs from
+		// a different chair. UTC because that is what the container already had.
+		timezoneId: "UTC",
+		locale: "en-US",
 		launchOptions: { args: DETERMINISTIC_RASTER_ARGS },
 	},
 	webServer: {

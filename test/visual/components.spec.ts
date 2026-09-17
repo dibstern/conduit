@@ -82,6 +82,28 @@ function loadStories(): StoryEntry[] {
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
 /**
+ * Freeze the page's wall clock so a story cannot bake the capture time into its
+ * baseline.
+ *
+ * Found 2026-09-17: `stories/turn-fixtures.ts` anchors its stamps to
+ * `Date.now()` so a live turn keeps ticking while you browse Storybook by hand.
+ * That is the right call for the dev experience and fatal for a baseline: the
+ * turn ledger renders absolute clock times (08:07 AM vs 08:36 AM across two
+ * runs half an hour apart) and TurnActivity sizes its progress rail from
+ * `now - start`, so five stories could never match themselves twice.
+ *
+ * `setFixedTime` pins `Date.now()`/`new Date()` and leaves timers running, so
+ * the existing settle waits still work. The instant matches the `createdAt` in
+ * `stories/mocks.ts`, which keeps the message-timestamp baselines where they
+ * already are.
+ */
+const FIXED_CLOCK = new Date("2026-02-25T10:14:00Z");
+
+async function pinClock(page: import("@playwright/test").Page): Promise<void> {
+	await page.clock.setFixedTime(FIXED_CLOCK);
+}
+
+/**
  * Pin `Math.random` so a story cannot bake a coin flip into its baseline.
  *
  * Found 2026-08-06 (conduit-test-de3.20): ThinkingBlock.svelte:29 picks its
@@ -443,6 +465,7 @@ if (stories.length > 0) {
 					}
 
 					await pinRandomness(page);
+					await pinClock(page);
 					await page.goto(`/iframe.html?id=${story.id}&viewMode=story`, {
 						waitUntil: "domcontentloaded",
 					});
