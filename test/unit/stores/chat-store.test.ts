@@ -77,6 +77,26 @@ afterEach(() => {
 	vi.useRealTimers();
 });
 
+// Whether the turn reads as live, and how many segments it has, after each
+// recorded event. A result closes a segment; the next visible part opens a
+// fresh one and the turn is live again. The false rows right after a result
+// are not the bug: work has resumed but has produced nothing to show yet.
+const EXPECTED_TRANSCRIPT: [live: boolean, segments: number][] = [
+	[true, 1], // 1. the user prompt opens the turn
+	[true, 1], // 2. the session goes busy
+	[true, 1], // 3. the first assistant message, nothing rendered yet
+	[false, 1], // 4. a result arrives, but Claude is not done
+	[false, 1], // 5. idle
+	[false, 1], // 6. busy again, 68ms later
+	[false, 1], // 7. a second assistant message, still nothing to show
+	[true, 2], // 8. thinking opens a fresh segment: live again
+	[true, 2], // 9. a tool starts
+	[true, 2], // 10. the tool finishes
+	[false, 2], // 11. the second execution reports its own result
+	[false, 2], // 12. a third assistant message, 15 minutes later
+	[true, 3], // 13. a tool starts 45 minutes after the first "completion"
+];
+
 it("keeps one production turn live when Claude resumes after successive results", () => {
 	const sessionId = "ses_c2d8cd521bc14f9f8f7700096bbf1d23";
 	for (const [index, recorded] of resumedTurnEvents.entries()) {
@@ -120,15 +140,14 @@ it("keeps one production turn live when Claude resumes after successive results"
 				}
 			}
 		}
-		// Keep processing true so only the transcript's own results settle it.
+		// Keep processing true so only the transcript itself settles the turn.
 		const turns = segmentTurns(chatState.messages, true);
+		// No user message follows, so all thirteen events are one turn group.
 		expect(turns).toHaveLength(1);
-		if (event.type === "turn.completed") {
-			expect(turns[0]?.live).toBe(false);
-		} else if ((index >= 7 && index <= 9) || index === 12) {
-			expect(turns[0]?.live, `after event ${index + 1}`).toBe(true);
-			expect(turns[0]?.segments).toHaveLength(index === 12 ? 3 : 2);
-		}
+		expect(
+			[turns[0]?.live, turns[0]?.segments.length],
+			`after event ${index + 1}`,
+		).toEqual(EXPECTED_TRANSCRIPT[index]);
 	}
 });
 

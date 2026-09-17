@@ -1310,6 +1310,24 @@ describe("Effect Message Projector (via ProjectionRunner)", () => {
 // ─── Turn Projector Tests ───────────────────────────────────────────────────
 
 describe("Effect Turn Projector (via ProjectionRunner)", () => {
+	// The persisted state after each recorded event, in fixture order. Only the
+	// turn's own results finish it; anything that follows puts it back to work.
+	const EXPECTED_STATE = [
+		"pending", // 1. the user prompt opens the turn
+		"running", // 2. the session goes busy
+		"running", // 3. the first assistant message
+		"completed", // 4. a result arrives, but Claude is not done
+		"completed", // 5. idle
+		"running", // 6. busy again, 68ms later
+		"running", // 7. a second assistant message, same turn
+		"running", // 8. thinking
+		"running", // 9. a tool starts
+		"running", // 10. the tool finishes
+		"completed", // 11. the second execution reports its own result
+		"running", // 12. a third assistant message, 15 minutes later
+		"running", // 13. still working 45 minutes after the first "completion"
+	];
+
 	it("keeps one production turn running when Claude resumes after successive results", () =>
 		runTest(
 			Effect.gen(function* () {
@@ -1331,23 +1349,28 @@ describe("Effect Turn Projector (via ProjectionRunner)", () => {
 					const turns = yield* sql<{
 						id: string;
 					}>`SELECT id, state, assistant_message_id, completed_at, cost, tokens_in, tokens_out FROM turns`;
+					// No user message follows, so all thirteen events are one turn.
 					expect(turns).toHaveLength(1);
-					expect(turns[0]?.id).toBe("52feab57-ed40-4885-b23b-71dcd78209a8");
+					expect(turns[0], `after event ${index + 1}`).toMatchObject({
+						id: "52feab57-ed40-4885-b23b-71dcd78209a8",
+						state: EXPECTED_STATE[index],
+					});
+					if (EXPECTED_STATE[index] === "running") {
+						// Reopening has to clear the finish too, or every reader that
+						// asks "when did this end" still sees a finished turn.
+						expect(turns[0], `after event ${index + 1}`).toMatchObject({
+							completed_at: null,
+						});
+					}
 					if (event.type === "turn.completed") {
 						expect(turns[0]).toMatchObject({
-							state: "completed",
 							assistant_message_id: event.data.messageId,
 							completed_at: event.createdAt,
+							// Cost is cumulative for the whole SDK session, so the latest
+							// wins; tokens are per-execution, so the second result adds.
 							cost: event.data.cost,
 							tokens_in: index === 3 ? 2 : 4,
 							tokens_out: index === 3 ? 2 : 3,
-						});
-					} else if (index === 5 || index === 6 || index >= 11) {
-						expect(turns[0], `after event ${index + 1}`).toMatchObject({
-							state: "running",
-							completed_at: null,
-							assistant_message_id:
-								"messageId" in event.data ? event.data.messageId : null,
 						});
 					}
 				}
