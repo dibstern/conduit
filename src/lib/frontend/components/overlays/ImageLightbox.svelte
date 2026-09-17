@@ -5,6 +5,7 @@
 -->
 <script lang="ts">
   import { uiState, closeLightbox } from "../../stores/ui.svelte.js";
+  import Button from "../ui/Button.svelte";
 
   // Only a click on the backdrop itself closes; clicks on the image fall through
   // to here with a different target and are ignored.
@@ -30,14 +31,19 @@
     class="modal-backdrop fixed inset-0 bg-black/85 flex items-center justify-center z-[var(--z-modal)] transition-opacity duration-200 ease-linear"
     onclick={handleBackdropClick}
   >
+    <!-- Empty colour axes keep the fixed white scrim colours without a theme hover wash. -->
     <!-- design-token-waiver: Close button sits on the lightbox's fixed bg-black/85 backdrop, which does not follow the runtime theme; --overlay-rgb flips to black in light themes and would invert this hover tint to near-invisible against a black backdrop. -->
-    <button
-      class="absolute top-4 right-4 bg-white/15 border-none text-white w-9 h-9 rounded-full text-xl cursor-pointer z-[var(--z-raised)] hover:bg-white/25"
+    <Button
+      variant="ghost"
+      size="content"
+      tone="inherit"
+      hoverFill="none"
+      class="absolute top-4 right-4 bg-white/15 text-white w-9 h-9 rounded-full text-xl z-[var(--z-raised)] hover:bg-white/25"
       onclick={closeLightbox}
-      aria-label="Close lightbox"
+      ariaLabel="Close lightbox"
     >
       &times;
-    </button>
+    </Button>
     <img
       class="max-w-[92vw] max-h-[90vh] object-contain rounded"
       src={uiState.lightboxSrc}

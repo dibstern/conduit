@@ -4,7 +4,7 @@
 
 <script lang="ts">
 	import { untrack } from "svelte";
-	import Icon from "../ui/Icon.svelte";
+	import Button from "../ui/Button.svelte";
 	import Textarea from "../ui/Textarea.svelte";
 	import AgentSelector from "../model/AgentSelector.svelte";
 	import AttachMenu from "./AttachMenu.svelte";
@@ -753,28 +753,42 @@
 					<PermissionModeSelector />
 
 					<!-- Send / Stop buttons -->
-					<button
+					<!-- No tone supplies text-white without a hover step; inherit leaves that colour local.
+					     transition-colors replaces the arbitrary transition; 150ms is its default. -->
+					<Button
+						variant="ghost"
+						size="content"
+						tone="inherit"
+						hoverFill="none"
+						disabledStyle="ghosted"
+						iconOnly
+						icon="arrow-up"
+						iconSize={18}
 						id="send"
 						type="button"
-						class="send-btn shrink-0 w-8 h-8 rounded-[10px] border-none bg-brand-a text-white cursor-pointer flex items-center justify-center transition-[background,opacity] duration-150 touch-manipulation hover:not-disabled:opacity-90 disabled:opacity-25 disabled:cursor-default active:not-disabled:opacity-70"
+						class="send-btn shrink-0 w-8 h-8 rounded-[10px] bg-brand-a text-white touch-manipulation hover:not-disabled:opacity-90 active:not-disabled:opacity-70"
 						disabled={!canSend}
 						title={isProcessing() ? "Queue message" : "Send message"}
-						aria-label={isProcessing() ? "Queue message" : "Send message"}
+						ariaLabel={isProcessing() ? "Queue message" : "Send message"}
 						onclick={handleSendClick}
-					>
-						<Icon name="arrow-up" size={18} />
-					</button>
+					/>
 					{#if isProcessing()}
-						<button
+						<!-- The arbitrary transition yields to Button's transition-colors; duration-150 restates its default. -->
+						<Button
+							variant="secondary"
+							size="content"
+							tone="muted"
+							hoverFill="alt"
+							iconOnly
+							icon="square"
+							iconSize={18}
 							id="stop"
 							type="button"
-							class="shrink-0 w-8 h-8 rounded-[10px] bg-transparent border border-border text-text-muted cursor-pointer flex items-center justify-center transition-[background,color,opacity] duration-150 touch-manipulation hover:bg-bg-alt hover:text-text active:opacity-70"
+							class="shrink-0 w-8 h-8 rounded-[10px] touch-manipulation active:opacity-70"
 							title="Stop generating"
-							aria-label="Stop generating"
+							ariaLabel="Stop generating"
 							onclick={handleStop}
-						>
-							<Icon name="square" size={18} />
-						</button>
+						/>
 					{/if}
 				</div>
 			</div>

@@ -153,9 +153,26 @@
 			class="absolute bottom-[calc(100%+4px)] right-0 w-40 z-[var(--z-popover-raised)] py-1 font-brand"
 		>
 			{#each availableModes as { mode, label } (mode)}
-				<button
+				<!--
+					`layout="flow"` keeps the as-found `flex` on the call site. The
+					default `center` would swap it for `inline-flex`, and these rows
+					stack inside a plain block Surface, so going inline-level would
+					open a line-box gap between every option.
+
+					The conditional `text-accent` is deleted rather than ported: it
+					never rendered. `.text-text` is emitted at byte 59336 and
+					`.text-accent` at 57412, so `tone="default"`'s `text-text` wins
+					and always has. Selection is still marked by the checkmark span
+					below, which is a separate element and does render.
+				-->
+				<Button
+					variant="ghost"
+					size="content"
+					layout="flow"
+					tone="default"
+					hoverFill="base"
 					data-testid="permission-mode-option-{mode}"
-					class="flex items-center gap-2 w-full py-1.5 px-3 border-none bg-transparent text-text text-base text-left cursor-pointer transition-colors duration-100 hover:bg-bg {currentMode === mode ? 'text-accent' : ''}"
+					class="flex items-center gap-2 w-full py-1.5 px-3 text-base duration-100 text-left"
 					onclick={(e) => selectMode(mode, e)}
 				>
 					{#if currentMode === mode}
@@ -164,7 +181,7 @@
 						<span class="w-[10px]"></span>
 					{/if}
 					{label}
-				</button>
+				</Button>
 			{/each}
 		</Surface>
 	{/if}

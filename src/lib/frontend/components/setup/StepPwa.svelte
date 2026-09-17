@@ -2,6 +2,7 @@
 <!-- Setup step for adding the app to the home screen.                       -->
 
 <script lang="ts">
+	import Button from "../ui/Button.svelte";
 	import StepHeader from "./StepHeader.svelte";
 	import StatusBox from "./StatusBox.svelte";
 
@@ -210,11 +211,16 @@
 
 	<!-- Skip button (Android or desktop) -->
 	{#if isAndroid || isDesktop}
-		<button
-			class="block w-full text-center text-text-muted text-base no-underline mt-3 cursor-pointer border-none bg-transparent font-sans hover:text-text-dimmer"
+		<Button
+			variant="ghost"
+			size="content"
+			layout="flow"
+			tone="inherit"
+			hoverFill="none"
+			class="block w-full text-center text-text-muted text-base mt-3 font-sans hover:text-text-dimmer"
 			onclick={onnextstep}
 		>
 			Skip for now
-		</button>
+		</Button>
 	{/if}
 </div>

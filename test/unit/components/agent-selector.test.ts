@@ -97,7 +97,14 @@ describe("AgentSelector", () => {
 		expect(
 			rows[1]?.querySelector("[data-testid='agent-model-badge']")?.textContent,
 		).toContain("opus");
-		expect(rows[0]?.className).toContain("text-accent");
+		// This used to assert `text-accent` on the active row, which is exactly
+		// the trap a class-name assertion sets: the class WAS emitted and never
+		// rendered, because `.text-text` is emitted at byte 59336 in the built
+		// stylesheet and `.text-accent` at 57412. The row was only ever marked
+		// by `aria-selected` and the checkmark, so that is what is asserted now.
+		expect(rows[0]?.getAttribute("aria-selected")).toBe("true");
+		expect(rows[0]?.textContent).toContain("\u2713");
+		expect(rows[1]?.getAttribute("aria-selected")).toBe("false");
 	});
 
 	it("uses provider scope in the empty state", async () => {

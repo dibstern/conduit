@@ -4,7 +4,7 @@
 
 <script lang="ts">
 	import type { ProjectInfo } from "../../types.js";
-	import Icon from "../ui/Icon.svelte";
+	import Button from "../ui/Button.svelte";
 	import Surface from "../ui/Surface.svelte";
 
 	// ─── Props ──────────────────────────────────────────────────────────────────
@@ -69,28 +69,42 @@
 		variant="raised"
 		radius="md"
 		elevation="panel"
-		class="fixed z-[var(--z-popover-raised)] min-w-[160px] py-1"
+		class="fixed z-[var(--z-popover-raised)] min-w-[160px] py-1 flex flex-col"
 		style={menuStyle}
 		onclick={(e: MouseEvent) => e.stopPropagation()}
 	>
 		<!-- Rename -->
 		{#if onrename}
-		<button
-			class="flex items-center gap-2 w-full py-2 px-3 border-none bg-transparent text-text-secondary text-[13px] font-mono cursor-pointer text-left transition-colors duration-100 hover:bg-[rgba(var(--overlay-rgb),0.04)] hover:text-text"
+		<!-- The menu is a flex column so Button's inline-flex cannot add a descender gap. -->
+		<Button
+			variant="ghost"
+			size="content"
+			align="start"
+			tone="secondary"
+			hoverFill="overlay"
+			icon="pencil"
+			iconSize={14}
+			class="gap-2 w-full py-2 px-3 text-[13px] font-mono text-left duration-100"
 			onclick={handleRename}
 		>
-			<Icon name="pencil" size={14} />
 			<span>Rename</span>
-		</button>
+		</Button>
 		{/if}
 
 		<!-- Remove -->
-		<button
-			class="flex items-center gap-2 w-full py-2 px-3 border-none bg-transparent text-[13px] font-mono cursor-pointer text-left transition-colors duration-100 text-error hover:bg-error/10 hover:text-error"
+		<!-- No error/10 hover-fill member exists; none leaves that exact wash to the class. -->
+		<Button
+			variant="ghost"
+			size="content"
+			align="start"
+			tone="error"
+			hoverFill="none"
+			icon="trash-2"
+			iconSize={14}
+			class="gap-2 w-full py-2 px-3 text-[13px] font-mono text-left duration-100 hover:bg-error/10 hover:text-error"
 			onclick={handleDelete}
 		>
-			<Icon name="trash-2" size={14} />
 			<span>Remove</span>
-		</button>
+		</Button>
 	</Surface>
 </div>

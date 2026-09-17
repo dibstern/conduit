@@ -10,6 +10,7 @@
 	import { discoveryState } from "../../stores/discovery.svelte.js";
 	import { instanceState } from "../../stores/instance.svelte.js";
 	import Icon from "../ui/Icon.svelte";
+	import Button from "../ui/Button.svelte";
 	import { assertNever } from "../../../utils.js";
 
 	// ─── Instance health check ─────────────────────────────────────────────────
@@ -100,14 +101,20 @@
 					</a>
 				{/if}
 				{#if banner.dismissible}
-					<button
-						class="banner-dismiss shrink-0 text-current opacity-60 hover:opacity-100 cursor-pointer bg-transparent border-none p-0 leading-none"
+					<!-- Inherit keeps the banner's own colour without adding a hover colour. -->
+					<Button
+						variant="ghost"
+						size="content"
+						tone="inherit"
+						hoverFill="none"
+						iconOnly
+						icon="x"
+						iconSize={14}
+						class="banner-dismiss shrink-0 text-current opacity-60 hover:opacity-100 leading-none"
 						title="Dismiss"
-						aria-label="Dismiss"
+						ariaLabel="Dismiss"
 						onclick={() => removeBanner(banner.id)}
-					>
-						<Icon name="x" size={14} />
-					</button>
+					/>
 				{/if}
 			</div>
 		{/each}

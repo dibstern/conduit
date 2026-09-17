@@ -206,13 +206,18 @@
 	 * hand-rolled popover does not provide. Tracked as a design-system gap
 	 * rather than papered over with `!` overrides (conduit-test-de3.35.6).
 	 */
+	/**
+	 * `text-accent` on the active row is deleted, not ported: `.text-text` is
+	 * emitted at byte 59336 and `.text-accent` at 57412, so `tone="default"`
+	 * has always won and the row has never been accent-coloured. The
+	 * `.model-item-active` hook stays -- test/visual/instance-model-picker
+	 * locates the active row through it -- and the accent checkmark inside the
+	 * row is a separate element that does render.
+	 */
 	function modelItemClass(model: ModelInfo): string {
 		const base =
-			"model-item flex items-baseline justify-between gap-2 w-full py-1.5 px-3.5 m-0 border-none bg-transparent text-text text-base text-left cursor-pointer transition-colors duration-100 leading-[1.4] hover:bg-bg";
-		if (isActiveModel(model)) {
-			return `${base} model-item-active text-accent`;
-		}
-		return base;
+			"model-item flex items-baseline justify-between gap-2 w-full py-1.5 px-3.5 m-0 text-base text-left duration-100 leading-[1.4]";
+		return isActiveModel(model) ? `${base} model-item-active` : base;
 	}
 
 	// ─── Handlers ───────────────────────────────────────────────────────────────
@@ -564,7 +569,20 @@
 								{#each group.models as model (model.id)}
 									{@const cost = formatCost(model.cost)}
 									<div class="flex items-center">
-										<button
+										<!--
+											`layout="flow"` because this row aligns on the text
+											baseline, not the box centre: the default `center`
+											emits `items-center` at byte 29745, which outranks a
+											consumer `items-baseline` at 29708. Under `flow` the
+											call site keeps the whole box, `justify-between`
+											included.
+										-->
+										<Button
+											variant="ghost"
+											size="content"
+											layout="flow"
+											tone="default"
+											hoverFill="base"
 											class={modelItemClass(model)}
 											data-model-id={model.id}
 											data-provider-id={model.provider}
@@ -590,7 +608,7 @@
 													{cost}
 												</span>
 											{/if}
-										</button>
+										</Button>
 										{#if model.routingOptions}
 											<span class="model-routing flex items-center gap-0.5 shrink-0 mr-1">
 												{#each model.routingOptions as option (option.value)}

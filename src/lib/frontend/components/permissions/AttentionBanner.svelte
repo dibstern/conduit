@@ -9,6 +9,7 @@
 	import { findSession, sessionState, switchToSession } from "../../stores/session.svelte.js";
 	import { wsSend } from "../../stores/ws.svelte.js";
 	import Surface from "../ui/Surface.svelte";
+	import Button from "../ui/Button.svelte";
 	import TextButton from "../ui/TextButton.svelte";
 
 	const remotePermissions = $derived(getRemotePermissions(sessionState.currentId));
@@ -85,15 +86,19 @@
 				<div class="text-base font-medium text-text">
 					{sessionCount === 1 ? "1 session" : `${sessionCount} sessions`} need{sessionCount === 1 ? "s" : ""} attention
 				</div>
-				<button
-					class="shrink-0 text-text-secondary hover:text-text cursor-pointer p-0.5 -m-0.5 rounded transition-colors"
+				<Button
+					variant="ghost"
+					size="content"
+					tone="secondary"
+					hoverFill="none"
+					class="shrink-0 p-0.5 -m-0.5 rounded"
 					onclick={dismiss}
-					aria-label="Dismiss notification"
+					ariaLabel="Dismiss notification"
 				>
 					<svg width="14" height="14" viewBox="0 0 14 14" fill="none" xmlns="http://www.w3.org/2000/svg">
 						<path d="M3.5 3.5L10.5 10.5M10.5 3.5L3.5 10.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
 					</svg>
-				</button>
+				</Button>
 			</div>
 			<div class="flex flex-col gap-1.5">
 				{#each [...sessionGroups] as [sessionId, entry] (sessionId)}
