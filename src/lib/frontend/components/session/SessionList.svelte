@@ -423,6 +423,7 @@
 			     boundary, and the action did nothing `autofocus` does not. -->
 			<TextInput
 				id="session-search-input"
+				aria-label="Search sessions"
 				size="sm"
 				class="font-brand"
 				placeholder="Search sessions..."

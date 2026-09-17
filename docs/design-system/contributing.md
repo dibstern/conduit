@@ -53,9 +53,13 @@ uses `border-border bg-bg-alt py-1` and `z-[var(--z-popover)]`, rather than a
 new literal colour or layer number. Existing literal exceptions are not a new
 design vocabulary.
 
-The root font-size is **12px**. A rem-based utility renders at 0.75 times the
-pixel value documented for a 16px root; 1rem is 12px here. This does not scale
-px-valued tokens: `--text-sm` is explicitly 11px. Both `--font-sans` and
+The root font-size is **12px**, so 1rem is 12px and a rem-based utility renders
+at 0.75 times the pixel value Tailwind's docs quote for a 16px root. The split
+that matters: **spacing and radius are rem-based and do scale** (`py-2` is 6px,
+`rounded-lg` is 6px, `rounded-xl` is 9px), while **the whole text scale is
+declared in literal pixels and does not** (`--text-sm` is 11px, `--text-base` is
+12px, `--text-2xl` is 24px, not 18px). Halving a documented text size because
+you remembered the root is the mistake this paragraph exists to prevent. Both `--font-sans` and
 `--font-mono` use the same JetBrains Mono stack. Adding `font-mono` to content
 already inheriting the default font changes nothing. It can still change
 content inheriting `font-brand`, which is Chakra Petch.

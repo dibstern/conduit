@@ -9,36 +9,30 @@
 // casts down (8px) for surfaces opening below, and panel's mild 4px is the
 // neutral one. That is also, independently, what the hand-written rail tooltip
 // had been using, which is the kind of agreement worth taking as an answer.
-// Everything every floating surface agrees on. Deliberately emits NO
-// border-radius and NO z-index, because neither is invariant: the portaled
-// overlays sit at the popover tier, the inline detached listboxes sit two
-// tiers below at the dropdown tier, and two of those listboxes wear a wider
-// radius than the rest. Baking either in made the shared constant emit a
-// utility half its consumers had to beat with a Tailwind `!`, which is the
-// primitive losing an argument it started (conduit-test-llxm).
+// Everything every floating surface agrees on. Emits NO z-index, because that
+// one genuinely is not invariant: the portaled overlays sit at the popover
+// tier and the inline detached listboxes sit two tiers below at the dropdown
+// tier. Baking it in made the shared constant emit a utility half its
+// consumers had to beat with a Tailwind `!`, which is the primitive losing an
+// argument it started (conduit-test-llxm).
+//
+// Radius WAS a second such axis, and turned out not to be one. CommandMenu and
+// FileMenu wore `rounded-xl` while DirectoryAutocomplete and every portaled
+// overlay wore `rounded-lg`; the split ran along which feature owned the file,
+// not along anything a reader could see. At this app's 12px root that is 9px
+// against 6px. So the union collapsed to the canonical `rounded-lg` and the
+// `radius` prop came off DetachedListbox: every floating surface in conduit,
+// portaled or inline, now has one corner (conduit-test-de3.6).
 const FLOATING_SURFACE_BASE_CLASSES =
-	"border border-border bg-bg-alt py-1 " +
+	"border border-border bg-bg-alt rounded-lg py-1 " +
 	"focus-visible:outline-hidden " +
 	"data-[side=top]:shadow-menu data-[side=bottom]:shadow-dropdown " +
 	"data-[side=left]:shadow-panel data-[side=right]:shadow-panel";
 
-// A closed union that REPLACES the surface's radius rather than appending to
-// it, so exactly one `rounded-*` is ever emitted. `xl` exists because
-// CommandMenu and FileMenu both wear it; whether they should is
-// conduit-test-de3.6's question, not this constant's.
-export const FLOATING_SURFACE_RADIUS_CLASSES = {
-	lg: "rounded-lg",
-	xl: "rounded-xl",
-} as const;
-
-export type FloatingSurfaceRadius =
-	keyof typeof FLOATING_SURFACE_RADIUS_CLASSES;
-
 // The portaled overlays: Popover, Menu, Tooltip. They float above everything,
 // including the dropdowns.
 export const FLOATING_SURFACE_CLASSES =
-	`${FLOATING_SURFACE_BASE_CLASSES} ${FLOATING_SURFACE_RADIUS_CLASSES.lg} ` +
-	"z-[var(--z-popover)]";
+	`${FLOATING_SURFACE_BASE_CLASSES} ` + "z-[var(--z-popover)]";
 
 // The inline detached listboxes: CommandMenu, FileMenu, DirectoryAutocomplete.
 // All three are anchored inside the composer or a form rather than portaled,

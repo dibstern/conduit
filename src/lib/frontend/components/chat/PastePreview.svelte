@@ -48,7 +48,7 @@
 						hoverFill="none"
 						class="paste-remove-btn absolute top-0.5 right-0.5 w-[18px] h-[18px] rounded-full bg-[rgba(0,0,0,0.6)] text-white text-sm leading-none opacity-0 transition-opacity group-hover:opacity-100"
 						title="Remove image"
-						ariaLabel="Remove image"
+						ariaLabel={`Remove image ${image.name}`}
 						onclick={(e: MouseEvent) => {
 							e.preventDefault();
 							e.stopPropagation();

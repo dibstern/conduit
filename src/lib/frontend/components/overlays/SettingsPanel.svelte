@@ -838,7 +838,7 @@
 												     which matters, because an additive `border-accent` here would
 												     silently lose to the base `border-border` (Tailwind emits
 												     border-colour utilities alphabetically). -->
-												<TextInput size="sm" class="w-36" bind:value={renameValue} onkeydown={handleRenameKeydown} onclick={(e) => e.stopPropagation()} onfocusout={submitRename} autofocus />
+												<TextInput aria-label="Instance name" size="sm" class="w-36" bind:value={renameValue} onkeydown={handleRenameKeydown} onclick={(e) => e.stopPropagation()} onfocusout={submitRename} autofocus />
 											{:else}
 												<span class="font-medium text-text truncate">{inst.name}</span>
 											{/if}

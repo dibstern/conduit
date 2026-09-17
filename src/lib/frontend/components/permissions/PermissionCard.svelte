@@ -242,6 +242,7 @@
 					size="content"
 					class="min-h-[48px] flex-1 px-4 py-2 rounded-lg font-sans text-sm font-medium"
 					onclick={handleAlwaysAllow}
+					aria-expanded={hasClaudeRememberOptions || hasPatterns ? showAlwaysOptions : undefined}
 				>
 					{hasClaudeRememberOptions ? "Remember" : "Always Allow"}{hasClaudeRememberOptions ||
 					hasPatterns

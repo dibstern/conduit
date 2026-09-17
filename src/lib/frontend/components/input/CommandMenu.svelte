@@ -116,7 +116,6 @@
 		<DetachedListbox
 			id={listboxId}
 			ariaLabel="Slash commands"
-			radius="xl"
 			class="cmd-menu absolute bottom-full left-0 right-0 mb-1 max-h-[300px] overflow-y-auto"
 		>
 			{#each filtered as cmd, i}

@@ -671,7 +671,7 @@
 												iconOnly
 												icon="star"
 												iconSize={12}
-												ariaLabel="Set as default model"
+												ariaLabel={`Set ${formatModelName(model)} as default model`}
 												class="shrink-0 px-1.5 py-1 mr-1 text-xs rounded duration-100 hover:bg-bg hover:text-text-secondary"
 												title="Set as default model"
 												onclick={(e) => handleSetDefault(model, e)}

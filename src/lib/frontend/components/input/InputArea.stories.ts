@@ -24,7 +24,7 @@ async function assertSwapStyles(
 	consumer: "FileMenu" | "CommandMenu",
 ) {
 	const radiusProbe = document.createElement("div");
-	radiusProbe.className = "rounded-xl";
+	radiusProbe.className = "rounded-lg";
 	const dropdownProbe = document.createElement("div");
 	dropdownProbe.className = "z-[var(--z-dropdown)]";
 	const popoverProbe = document.createElement("div");

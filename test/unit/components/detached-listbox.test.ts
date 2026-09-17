@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import DetachedListbox from "../../../src/lib/frontend/components/ui/DetachedListbox.svelte";
 import {
 	DETACHED_LISTBOX_SURFACE_CLASSES,
-	FLOATING_SURFACE_RADIUS_CLASSES,
+	FLOATING_SURFACE_CLASSES,
 } from "../../../src/lib/frontend/components/ui/floating-styles.js";
 
 const option = (text: string, id: string) =>
@@ -61,33 +61,30 @@ describe("DetachedListbox", () => {
 		expect(listbox.getAttribute("data-side")).toBe("top");
 
 		// Exactly one radius and one stacking tier, which is what lets a consumer
-		// pick either without a Tailwind `!` (conduit-test-llxm). The popover tier
+		// add a class without a Tailwind `!` (conduit-test-llxm). The popover tier
 		// is the value this surface must NOT carry: it sits under the portaled
 		// overlays, not above them.
 		const emitted = listbox.getAttribute("class")?.split(/\s+/) ?? [];
 		expect(emitted.filter((token) => token.startsWith("rounded-"))).toEqual([
-			FLOATING_SURFACE_RADIUS_CLASSES.lg,
+			"rounded-lg",
 		]);
 		expect(emitted.filter((token) => token.startsWith("z-"))).toEqual([
 			"z-[var(--z-dropdown)]",
 		]);
 	});
 
-	it("replaces the radius rather than appending to it", () => {
-		const { getByRole } = render(DetachedListbox, {
-			props: {
-				id: "dir-suggestions",
-				ariaLabel: "Directory suggestions",
-				radius: "xl",
-				children: option("src/", "dir-suggestions-option-0"),
-			},
-		});
-		const listbox = getByRole("listbox", { name: "Directory suggestions" });
+	// CommandMenu and FileMenu used to wear `rounded-xl` here while
+	// DirectoryAutocomplete and every portaled overlay wore `rounded-lg`, so the
+	// primitive carried a `radius` prop to let them. The split ran along file
+	// ownership rather than anything a reader could see, so it collapsed
+	// (conduit-test-de3.6). This asserts the collapse: one corner for every
+	// floating surface in the app, whether it is portaled or anchored inline.
+	it("shares its corner radius with the portaled surfaces", () => {
+		const radiusOf = (classes: string) =>
+			classes.split(/\s+/).filter((token) => token.startsWith("rounded-"));
 
-		const emitted = listbox.getAttribute("class")?.split(/\s+/) ?? [];
-		expect(emitted.filter((token) => token.startsWith("rounded-"))).toEqual([
-			FLOATING_SURFACE_RADIUS_CLASSES.xl,
-		]);
+		expect(radiusOf(DETACHED_LISTBOX_SURFACE_CLASSES)).toEqual(["rounded-lg"]);
+		expect(radiusOf(FLOATING_SURFACE_CLASSES)).toEqual(["rounded-lg"]);
 	});
 
 	it("appends the consumer class after the canonical classes", () => {
@@ -104,9 +101,7 @@ describe("DetachedListbox", () => {
 		expect(
 			listbox
 				.getAttribute("class")
-				?.startsWith(
-					`${DETACHED_LISTBOX_SURFACE_CLASSES} ${FLOATING_SURFACE_RADIUS_CLASSES.lg} `,
-				),
+				?.startsWith(`${DETACHED_LISTBOX_SURFACE_CLASSES} `),
 		).toBe(true);
 		expect(listbox.classList.contains("dir-autocomplete-list")).toBe(true);
 		expect(listbox.classList.contains("absolute")).toBe(true);

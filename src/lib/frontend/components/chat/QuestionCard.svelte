@@ -402,6 +402,7 @@
 						{/if}
 						<TextInput
 							id={`${inputName}-custom`}
+							aria-label="Type your answer"
 							class="mt-1"
 							placeholder="Type your answer"
 							disabled={!!resolved}

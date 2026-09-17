@@ -226,6 +226,7 @@
 			     `border-border` (Tailwind emits border-colour utilities
 			     alphabetically). -->
 			<TextInput
+				aria-label="Session name"
 				size="sm"
 				class="font-brand"
 				bind:value={renameValue}
