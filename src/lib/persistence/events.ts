@@ -189,6 +189,20 @@ export type CanonicalToolInput =
 	| { tool: "AskUserQuestion"; questions: unknown }
 	| { tool: "Unknown"; name: string; raw: Record<string, unknown> };
 
+/**
+ * One assistant message finished. The turn may well not be.
+ *
+ * The name is a misnomer we keep because the string is persisted in every
+ * project's events.db. A provider reports a result per execution, then is free
+ * to keep working on the same prompt: the session goes busy again, a second
+ * assistant message arrives, tools run. Nothing here says the turn is over, so
+ * never latch a turn to finished on this event. See `phaseAfter` in
+ * `src/lib/contracts/turn-phase.ts` for the rule both surfaces follow, and
+ * conduit-test-siq2 for the bug that came from believing the name.
+ *
+ * `cost` is cumulative for the whole provider session, not for this execution;
+ * `tokens` are per-execution. Take the latest cost, sum the tokens.
+ */
 export interface TurnCompletedPayload {
 	readonly messageId: string;
 	readonly cost?: number;
