@@ -1,6 +1,6 @@
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
-import { Cause, Effect, Exit, ManagedRuntime } from "effect";
+import { Cause, Deferred, Effect, Exit, ManagedRuntime } from "effect";
 import {
 	type DaemonConfig,
 	loadDaemonConfig,
@@ -26,7 +26,11 @@ import {
 } from "../Services/daemon-handle.js";
 import { resolveDefaultStaticDir } from "../Services/daemon-static-dir.js";
 import { OpenCodeUnavailableError } from "../Services/opencode-smart-default.js";
-import { type DaemonLiveOptions, makeDaemonLive } from "./daemon-layers.js";
+import {
+	type DaemonLiveOptions,
+	makeDaemonLive,
+	ShutdownSignalTag,
+} from "./daemon-layers.js";
 
 export { OpenCodeUnavailableError };
 
@@ -44,6 +48,8 @@ export interface ForegroundDaemonHandle {
 	getInstances(): ReadonlyArray<Readonly<OpenCodeInstance>>;
 	removeProject(slug: string): Promise<void>;
 	stop(): Promise<void>;
+	/** Settles with stop()'s outcome, whether stop was triggered by a signal, IPC shutdown, or a direct call. */
+	readonly stopped: Promise<void>;
 }
 
 class ForegroundIpcUnsupportedError extends Error {
@@ -133,7 +139,8 @@ const makeInitialStatus = (options: DaemonOptions): DaemonStatus => ({
 type ForegroundRuntimeRequirements =
 	| DaemonHandleTag
 	| ConfigPersistenceTag
-	| DaemonConfigRefTag;
+	| DaemonConfigRefTag
+	| ShutdownSignalTag;
 
 export async function startForegroundDaemon(
 	options: DaemonOptions,
@@ -156,6 +163,12 @@ export async function startForegroundDaemon(
 	let stopped = false;
 	let refreshInFlight: Promise<void> | null = null;
 	let stopInFlight: Promise<void> | null = null;
+	let settleStopped!: { resolve: () => void; reject: (error: unknown) => void };
+	const stopSettled = new Promise<void>((resolve, reject) => {
+		settleStopped = { resolve, reject };
+	});
+	// A failed stop is reported through `stopped`; don't also surface it as an unhandled rejection.
+	stopSettled.catch(() => {});
 
 	const requireRuntime = () => {
 		if (runtime == null || handle == null || stopped) {
@@ -237,6 +250,7 @@ export async function startForegroundDaemon(
 		})().finally(() => {
 			stopInFlight = null;
 		});
+		stopInFlight.then(settleStopped.resolve, settleStopped.reject);
 		return stopInFlight;
 	};
 
@@ -298,6 +312,13 @@ export async function startForegroundDaemon(
 		handle = null;
 		throw error;
 	}
+	// SignalHandlerLayer swallows SIGTERM/SIGINT and only completes this Deferred,
+	// so without a consumer the daemon would ignore both signals.
+	runRuntimeEffect(runtime, Effect.flatMap(ShutdownSignalTag, Deferred.await))
+		.then(() => stop())
+		.catch(() => {
+			// Runtime disposed before a signal arrived, or stop failed (reported via `stopped`).
+		});
 
 	return {
 		get port() {
@@ -324,11 +345,20 @@ export async function startForegroundDaemon(
 		},
 		removeProject: (slug) => runHandleEffect((h) => h.removeProject(slug)),
 		stop,
+		stopped: stopSettled,
 	};
 }
 
 export async function startDaemonChildProcess(
 	options: DaemonOptions,
 ): Promise<void> {
-	await startForegroundDaemon(options);
+	const daemon = await startForegroundDaemon(options);
+	// Disposing the runtime leaves timers behind that keep the event loop alive,
+	// so the process would otherwise linger as a zombie after shutdown.
+	try {
+		await daemon.stopped;
+	} catch {
+		process.exit(1);
+	}
+	process.exit(0);
 }

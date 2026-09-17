@@ -1,10 +1,19 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import {
+	existsSync,
+	mkdirSync,
+	mkdtempSync,
+	rmSync,
+	writeFileSync,
+} from "node:fs";
 import { createServer, type Server } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import { sendIPCCommand } from "../../../src/bin/cli-utils.js";
-import { startForegroundDaemon } from "../../../src/lib/domain/daemon/Layers/daemon-foreground.js";
+import {
+	startDaemonChildProcess,
+	startForegroundDaemon,
+} from "../../../src/lib/domain/daemon/Layers/daemon-foreground.js";
 import type { OpenCodeInstance } from "../../../src/lib/types.js";
 
 async function listen(server: Server): Promise<number> {
@@ -72,6 +81,71 @@ describe("startForegroundDaemon", () => {
 			]);
 		} finally {
 			await daemon.stop();
+			rmSync(root, { recursive: true, force: true });
+		}
+	});
+
+	it("a SIGTERM stops the daemon and settles `stopped`", async () => {
+		const root = mkdtempSync(join(tmpdir(), "conduit-foreground-"));
+		const staticDir = join(root, "static");
+		const pidPath = join(root, "daemon.pid");
+		mkdirSync(staticDir);
+		writeFileSync(join(staticDir, "index.html"), "<html>ok</html>");
+		const daemon = await startForegroundDaemon({
+			port: 0,
+			configDir: join(root, "config"),
+			socketPath: join(root, "relay.sock"),
+			pidPath,
+			staticDir,
+			tlsEnabled: false,
+			smartDefault: false,
+			logLevel: "error",
+			logFormat: "json",
+		});
+		try {
+			// Invokes the installed SIGTERM listeners without the default action.
+			process.emit("SIGTERM");
+			await daemon.stopped;
+			expect(existsSync(pidPath)).toBe(false);
+		} finally {
+			await daemon.stop();
+			rmSync(root, { recursive: true, force: true });
+		}
+	});
+
+	it("the daemon child process exits once it has stopped", async () => {
+		const root = mkdtempSync(join(tmpdir(), "conduit-foreground-"));
+		const staticDir = join(root, "static");
+		mkdirSync(staticDir);
+		writeFileSync(join(staticDir, "index.html"), "<html>ok</html>");
+		const exited = new Promise<number | string | null | undefined>(
+			(resolve) => {
+				vi.spyOn(process, "exit").mockImplementation((code) => {
+					resolve(code);
+					return undefined as never;
+				});
+			},
+		);
+		try {
+			const started = startDaemonChildProcess({
+				port: 0,
+				configDir: join(root, "config"),
+				socketPath: join(root, "relay.sock"),
+				pidPath: join(root, "daemon.pid"),
+				staticDir,
+				tlsEnabled: false,
+				smartDefault: false,
+				logLevel: "error",
+				logFormat: "json",
+			});
+			await vi.waitFor(() =>
+				expect(existsSync(join(root, "daemon.pid"))).toBe(true),
+			);
+			process.emit("SIGTERM");
+			expect(await exited).toBe(0);
+			await started;
+		} finally {
+			vi.restoreAllMocks();
 			rmSync(root, { recursive: true, force: true });
 		}
 	});

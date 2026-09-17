@@ -154,8 +154,7 @@ export async function run(argv: string[], options?: CLIOptions): Promise<void> {
 			logLevel: args.logLevel,
 			logFormat: args.logFormat ?? "json",
 		});
-		// Daemon keeps the process alive via its HTTP + IPC servers.
-		// Signal handlers installed by daemon.start() will call daemon.stop().
+		// Resolves only after shutdown (signal or IPC), then exits the process.
 		return;
 	}
 
@@ -204,6 +203,10 @@ export async function run(argv: string[], options?: CLIOptions): Promise<void> {
 		stdout.write(`  Relay:    ${fgScheme}://${fgHost}:${daemon.port}\n`);
 		stdout.write(`  Project:  ${cwd}\n`);
 		stdout.write(`  Ready.\n\n`);
+		void daemon.stopped.then(
+			() => exit(0),
+			() => exit(1),
+		);
 		return;
 	}
 
