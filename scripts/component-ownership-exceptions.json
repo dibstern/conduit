@@ -31,12 +31,6 @@
 		"src/lib/frontend/components/chat/ToolSubagentCard.svelte": {
 			"native-control-bypass": 1
 		},
-		"src/lib/frontend/components/file/FileTreeNode.svelte": {
-			"native-control-bypass": 1
-		},
-		"src/lib/frontend/components/file/FileViewer.svelte": {
-			"native-control-bypass": 5
-		},
 		"src/lib/frontend/components/input/AttachMenu.svelte": {
 			"native-control-bypass": 3
 		},
@@ -81,9 +75,6 @@
 		},
 		"src/lib/frontend/components/setup/StepPwa.svelte": {
 			"native-control-bypass": 1
-		},
-		"src/lib/frontend/components/terminal/TerminalPanel.svelte": {
-			"native-control-bypass": 3
 		},
 		"src/lib/frontend/style.css": {
 			"component-class-recipe": 3

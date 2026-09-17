@@ -9,7 +9,7 @@
 	import { copyToClipboard } from "../../utils/clipboard.js";
 	import { showToast, openMobileSidebar, setSidebarPanel, uiState } from "../../stores/ui.svelte.js";
 	import hljs from "highlight.js";
-	import Icon from "../ui/Icon.svelte";
+	import Button from "../ui/Button.svelte";
 	import BlockGrid from "../ui/BlockGrid.svelte";
 
 	let {
@@ -185,14 +185,30 @@
 		<!-- Header -->
 		<div class="flex items-center gap-2 px-4 py-2.5 border-b border-border-subtle shrink-0 min-h-[44px]">
 			<!-- Mobile: file browser button (opens sidebar to files panel) -->
-			<button
-			class="fv-btn flex lg:hidden items-center justify-center w-7 h-7 rounded-md border-none bg-transparent text-text-muted cursor-pointer shrink-0 transition-[background,color] duration-150 hover:bg-[rgba(var(--overlay-rgb),0.04)] hover:text-text"
-			onclick={handleOpenFileBrowser}
+			<!--
+				`lg:hidden` survives migration because it is a RESPONSIVE variant:
+				Tailwind emits variants after the unprefixed utilities, so it still
+				beats BASE's `inline-flex` at the breakpoint. The unprefixed `flex`
+				did not, and was already a no-op here anyway.
+
+				Dropped throughout this header: `transition-[background,color]`,
+				which BASE's `transition-colors` already outranked (arbitrary values
+				sort BEFORE named ones), and `duration-150`, which only restates
+				Tailwind's default.
+			-->
+			<Button
+				variant="ghost"
+				size="content"
+				tone="muted"
+				hoverFill="overlay"
+				iconOnly
+				icon="folder-tree"
+				iconSize={16}
+				ariaLabel="File browser"
 				title="File browser"
-				aria-label="File browser"
-			>
-				<Icon name="folder-tree" size={16} />
-			</button>
+				class="fv-btn lg:hidden w-7 h-7 rounded-md shrink-0"
+				onclick={handleOpenFileBrowser}
+			/>
 			<span
 				id="file-viewer-path"
 				class="flex-1 font-mono text-base text-text-secondary truncate"
@@ -202,43 +218,63 @@
 			</span>
 			<!-- Font size controls -->
 			<div class="flex items-center gap-0 shrink-0">
-				<button
-					class="shrink-0 flex items-center justify-center w-[44px] h-[44px] border-none rounded bg-transparent text-text-dimmer font-mono text-base cursor-pointer transition-[color,background] duration-100 hover:text-text hover:bg-bg-alt disabled:opacity-30 disabled:cursor-default"
+				<Button
+					variant="ghost"
+					size="content"
+					tone="dimmer"
+					hoverFill="alt"
+					disabledStyle="faint"
+					class="shrink-0 w-[44px] h-[44px] rounded font-mono text-base duration-100"
 					title="Decrease font size"
-					aria-label="Decrease font size"
+					ariaLabel="Decrease font size"
 					disabled={fontSize <= FONT_SIZE_MIN}
 					onclick={decreaseFontSize}
 				>
 					&#8722;
-				</button>
+				</Button>
 				<span class="text-sm text-text-dimmer font-mono tabular-nums min-w-[2ch] text-center select-none">{fontSize}</span>
-				<button
-					class="shrink-0 flex items-center justify-center w-[44px] h-[44px] border-none rounded bg-transparent text-text-dimmer font-mono text-base cursor-pointer transition-[color,background] duration-100 hover:text-text hover:bg-bg-alt disabled:opacity-30 disabled:cursor-default"
+				<Button
+					variant="ghost"
+					size="content"
+					tone="dimmer"
+					hoverFill="alt"
+					disabledStyle="faint"
+					class="shrink-0 w-[44px] h-[44px] rounded font-mono text-base duration-100"
 					title="Increase font size"
-					aria-label="Increase font size"
+					ariaLabel="Increase font size"
 					disabled={fontSize >= FONT_SIZE_MAX}
 					onclick={increaseFontSize}
 				>
 					+
-				</button>
+				</Button>
 			</div>
 
-			<button
-			class="fv-btn flex items-center justify-center w-7 h-7 rounded-md border-none bg-transparent text-text-muted cursor-pointer shrink-0 transition-[background,color] duration-150 hover:bg-[rgba(var(--overlay-rgb),0.04)] hover:text-text"
-			onclick={handleCopy}
+			<Button
+				variant="ghost"
+				size="content"
+				tone="muted"
+				hoverFill="overlay"
+				iconOnly
+				icon={copyIcon}
+				iconSize={16}
+				ariaLabel="Copy contents"
 				title="Copy contents"
-				aria-label="Copy contents"
-			>
-				<Icon name={copyIcon} size={16} />
-			</button>
-			<button
-			class="fv-btn flex items-center justify-center w-7 h-7 rounded-md border-none bg-transparent text-text-muted cursor-pointer shrink-0 transition-[background,color] duration-150 hover:bg-[rgba(var(--overlay-rgb),0.04)] hover:text-text"
-			onclick={handleClose}
+				class="fv-btn w-7 h-7 rounded-md shrink-0"
+				onclick={handleCopy}
+			/>
+			<Button
+				variant="ghost"
+				size="content"
+				tone="muted"
+				hoverFill="overlay"
+				iconOnly
+				icon="x"
+				iconSize={16}
+				ariaLabel="Close"
 				title="Close"
-				aria-label="Close"
-			>
-				<Icon name="x" size={16} />
-			</button>
+				class="fv-btn w-7 h-7 rounded-md shrink-0"
+				onclick={handleClose}
+			/>
 		</div>
 
 		<!-- Body -->

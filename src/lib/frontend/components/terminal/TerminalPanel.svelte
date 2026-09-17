@@ -21,6 +21,7 @@
 	import { getCurrentSlug } from "../../stores/router.svelte.js";
 	import { closePtyRpc, createPtyRpc, resizePtyRpc } from "../../transport/ws-rpc-client.js";
 	import TerminalTab from "./TerminalTab.svelte";
+	import Button from "../ui/Button.svelte";
 	import Surface from "../ui/Surface.svelte";
 	import TextButton from "../ui/TextButton.svelte";
 	import TextInput from "../ui/TextInput.svelte";
@@ -281,36 +282,58 @@
 
 			<!-- New Terminal button -->
 			{#if canCreate}
-				<button
-					class="term-new-btn shrink-0 py-1 px-2.5 ml-0.5 border-none rounded bg-transparent text-accent font-sans text-xs font-medium cursor-pointer whitespace-nowrap transition-[background,color] duration-100 hover:bg-accent-bg hover:text-accent-hover max-[480px]:py-[3px] max-[480px]:px-2 max-[480px]:text-sm"
+				<!--
+					`hoverFill="accent-bg"` is new to the union (conduit-test-4ors):
+					the label is already accent-coloured, so a neutral wash reads as
+					the label dimming rather than the row lighting up.
+					`hover:text-accent-hover` stays in `class` because no tone member
+					pairs a hover colour with `text-accent`, and a `hover:` variant
+					outranks the unprefixed `text-accent` it comes from anyway.
+				-->
+				<Button
+					variant="ghost"
+					size="content"
+					tone="accent"
+					hoverFill="accent-bg"
+					class="term-new-btn shrink-0 py-1 px-2.5 ml-0.5 rounded font-sans text-xs font-medium duration-100 hover:text-accent-hover max-[480px]:py-[3px] max-[480px]:px-2 max-[480px]:text-sm"
 					title="New terminal"
 					onclick={handleNewTab}
 				>
 					+ Terminal
-				</button>
+				</Button>
 			{/if}
 
 			<!-- Font size controls (right-aligned) -->
 			<div class="flex items-center gap-0 ml-auto shrink-0">
-				<button
-					class="term-font-btn shrink-0 py-0.5 px-1.5 border-none rounded bg-transparent text-text-dimmer font-mono text-sm cursor-pointer transition-[color,background] duration-100 hover:text-text hover:bg-bg-alt disabled:opacity-30 disabled:cursor-default"
+				<Button
+					variant="ghost"
+					size="content"
+					tone="dimmer"
+					hoverFill="alt"
+					disabledStyle="faint"
+					class="term-font-btn shrink-0 py-0.5 px-1.5 rounded font-mono text-sm duration-100"
 					title="Decrease font size"
-					aria-label="Decrease font size"
+					ariaLabel="Decrease font size"
 					disabled={termFontSize <= FONT_SIZE_MIN}
 					onclick={decreaseFontSize}
 				>
 					&#8722;
-				</button>
+				</Button>
 				<span class="text-xs text-text-dimmer font-mono tabular-nums min-w-[2ch] text-center select-none">{termFontSize}</span>
-				<button
-					class="term-font-btn shrink-0 py-0.5 px-1.5 border-none rounded bg-transparent text-text-dimmer font-mono text-sm cursor-pointer transition-[color,background] duration-100 hover:text-text hover:bg-bg-alt disabled:opacity-30 disabled:cursor-default"
+				<Button
+					variant="ghost"
+					size="content"
+					tone="dimmer"
+					hoverFill="alt"
+					disabledStyle="faint"
+					class="term-font-btn shrink-0 py-0.5 px-1.5 rounded font-mono text-sm duration-100"
 					title="Increase font size"
-					aria-label="Increase font size"
+					ariaLabel="Increase font size"
 					disabled={termFontSize >= FONT_SIZE_MAX}
 					onclick={increaseFontSize}
 				>
 					+
-				</button>
+				</Button>
 			</div>
 
 			<!-- Close panel button -->

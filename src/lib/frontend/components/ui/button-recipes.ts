@@ -97,6 +97,13 @@ export const HOVER_FILL_CLASSES = {
 	sidebar: "hover:bg-sidebar-hover",
 	base: "hover:bg-bg",
 	"success-faint": "hover:bg-success/[0.06]",
+	/**
+	 * The accent tint, for a control whose LABEL is already accent-coloured, so
+	 * a neutral wash would read as the label dimming rather than the row
+	 * lighting up. TerminalPanel's "+ Terminal" is the first; FileMenu and
+	 * CommandMenu use the same pair for their active row (conduit-test-4ors).
+	 */
+	"accent-bg": "hover:bg-accent-bg",
 } as const;
 
 export type ButtonTone = keyof typeof TONE_CLASSES;
