@@ -224,6 +224,68 @@ export const conduitVisualHandlers: StepHandler[] = [
 		},
 	},
 	{
+		// Geometry as well as the attribute. `data-collapsed` is what the CSS keys
+		// on, so checking it alone would pass a regression where the attribute
+		// flips correctly and the grid template does not — which is exactly the
+		// failure this ticket's whole layout is one edit away from.
+		name: "session bar collapse state",
+		match: /^the session bar is (collapsed|expanded)$/,
+		run: async ({ world, match }) => {
+			const want = match[1] === "collapsed";
+			const bar = world.page.locator("#session-bar");
+			await bar.waitFor({ state: "attached" });
+			// Polled by hand rather than through waitForFunction so the failure can
+			// name the state it actually found. A bare timeout here says only "the
+			// bar was wrong", which is the least useful half of the answer.
+			const read = () =>
+				bar.evaluate((el) => ({
+					collapsed: el.getAttribute("data-collapsed") === "true",
+					height: el.getBoundingClientRect().height,
+					compact: matchMedia("(max-width: 767px)").matches,
+				}));
+			// The collapsed row is 46px in the design; expanded is two bands and
+			// necessarily taller. 50 separates them with room for the border and
+			// subpixel rounding without being a second definition of the number.
+			const ok = (s: { collapsed: boolean; height: number }) =>
+				s.collapsed === want && (want ? s.height <= 50 : s.height > 50);
+			let state = await read();
+			for (let i = 0; i < 50 && !ok(state); i++) {
+				await world.page.waitForTimeout(100);
+				state = await read();
+			}
+			if (!ok(state)) {
+				throw new Error(
+					`expected the session bar to be ${match[1]}, found data-collapsed=${state.collapsed} height=${state.height} compact=${state.compact}`,
+				);
+			}
+		},
+	},
+	{
+		name: "tap the chevron to show the bar",
+		match: /^I tap the chevron to show the bar$/,
+		run: async ({ world }) => {
+			await world.page.locator("[data-testid='session-bar-expand']").click();
+		},
+	},
+	{
+		// The chevron expands the bar, which shrinks the scroll container. If the
+		// transcript is not re-pinned the newest message slides off the bottom —
+		// pressing a control to see more chrome must not cost you your place.
+		name: "transcript is pinned to the bottom",
+		match: /^the transcript is pinned to the bottom$/,
+		run: async ({ world }) => {
+			await world.page.waitForFunction(
+				() => {
+					const el = document.querySelector("#messages");
+					if (!el) return false;
+					return el.scrollHeight - el.scrollTop - el.clientHeight < 5;
+				},
+				undefined,
+				{ timeout: 5_000 },
+			);
+		},
+	},
+	{
 		name: "serve conduit with mockup state",
 		match: /^the conduit app is served with the ([a-z0-9-]+) mockup$/,
 		run: async ({ world, match }) => {

@@ -53,14 +53,104 @@ vi.hoisted(() => {
 	});
 });
 
-const { sessionViewState, watchCompactViewport } = await import(
-	"../../../src/lib/frontend/stores/session-view.svelte.js"
-);
+const {
+	forceBarOpen,
+	isBarCollapsed,
+	noteSessionChanged,
+	noteUserScroll,
+	publishAtBottom,
+	sessionViewState,
+	watchCompactViewport,
+} = await import("../../../src/lib/frontend/stores/session-view.svelte.js");
 
 beforeEach(() => {
 	matchMediaState.reset();
 	sessionViewState.compact = false;
+	publishAtBottom(true);
+	noteSessionChanged();
 	vi.clearAllMocks();
+});
+
+describe("session bar collapse", () => {
+	beforeEach(() => {
+		sessionViewState.compact = true;
+		noteUserScroll();
+	});
+
+	it("collapses when compact, at the bottom, and not forced open", () => {
+		expect(isBarCollapsed()).toBe(true);
+	});
+
+	it("desktop never collapses, even at the bottom with no force", () => {
+		sessionViewState.compact = false;
+		expect(sessionViewState.atBottom).toBe(true);
+		expect(sessionViewState.forcedOpen).toBe(false);
+		expect(isBarCollapsed()).toBe(false);
+	});
+
+	it("does not collapse when not at the bottom", () => {
+		publishAtBottom(false);
+		expect(isBarCollapsed()).toBe(false);
+	});
+
+	it("does not collapse when forced open", () => {
+		forceBarOpen();
+		expect(isBarCollapsed()).toBe(false);
+	});
+
+	it("forceBarOpen expands the bar while atBottom stays true for the chevron", () => {
+		expect(isBarCollapsed()).toBe(true);
+		forceBarOpen();
+		expect(isBarCollapsed()).toBe(false);
+		expect(sessionViewState.atBottom).toBe(true);
+	});
+
+	it("publishAtBottom(true) from false clears forcedOpen", () => {
+		publishAtBottom(false);
+		forceBarOpen();
+		publishAtBottom(true);
+		expect(sessionViewState.atBottom).toBe(true);
+		expect(sessionViewState.forcedOpen).toBe(false);
+		expect(isBarCollapsed()).toBe(true);
+	});
+
+	it("publishAtBottom(true) when already at the bottom does not clear forcedOpen", () => {
+		forceBarOpen();
+		publishAtBottom(true);
+		expect(sessionViewState.forcedOpen).toBe(true);
+		expect(isBarCollapsed()).toBe(false);
+	});
+
+	it("publishAtBottom(false) leaves forcedOpen alone", () => {
+		forceBarOpen();
+		publishAtBottom(false);
+		expect(sessionViewState.atBottom).toBe(false);
+		expect(sessionViewState.forcedOpen).toBe(true);
+		noteUserScroll();
+		publishAtBottom(false);
+		expect(sessionViewState.forcedOpen).toBe(false);
+	});
+
+	it("noteUserScroll clears forcedOpen", () => {
+		forceBarOpen();
+		noteUserScroll();
+		expect(sessionViewState.forcedOpen).toBe(false);
+	});
+
+	it("noteSessionChanged sets forcedOpen so a session switch arrives expanded", () => {
+		expect(isBarCollapsed()).toBe(true);
+		noteSessionChanged();
+		expect(sessionViewState.forcedOpen).toBe(true);
+		expect(isBarCollapsed()).toBe(false);
+	});
+
+	it("collapses after arrival and a sub-threshold user scroll while still at the bottom", () => {
+		noteSessionChanged();
+		expect(isBarCollapsed()).toBe(false);
+		noteUserScroll();
+		expect(sessionViewState.atBottom).toBe(true);
+		expect(isBarCollapsed()).toBe(true);
+	});
 });
 
 describe("watchCompactViewport", () => {

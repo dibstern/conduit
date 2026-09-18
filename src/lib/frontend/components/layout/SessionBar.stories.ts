@@ -8,6 +8,7 @@ import {
 import { projectState } from "../../stores/project.svelte.js";
 import { routerState } from "../../stores/router.svelte.js";
 import { sessionState } from "../../stores/session.svelte.js";
+import { sessionViewState } from "../../stores/session-view.svelte.js";
 import { uiState } from "../../stores/ui.svelte.js";
 import { mockSession, mockSessionLongTitle } from "../../stories/mocks.js";
 import type { OpenCodeInstance } from "../../types.js";
@@ -36,6 +37,12 @@ const meta = {
 		sessionState.allSessions = [mockSession, mockSessionLongTitle];
 		sessionState.rootSessions = sessionState.allSessions;
 		sessionState.currentId = mockSession.id;
+		// The bar reads its collapse rule from this store, and Storybook shares
+		// module-level state across story files. Pin the expanded state so only
+		// the story that wants the collapse gets it.
+		sessionViewState.compact = false;
+		sessionViewState.atBottom = true;
+		sessionViewState.forcedOpen = true;
 	},
 } satisfies Meta<typeof SessionBarPhoneFrame>;
 
@@ -194,5 +201,74 @@ export const OverflowMenuOpen: Story = {
 		}
 		// Debug is behind its feature flag, as it is in the header.
 		expect(within(menu).queryByTestId("overflow-debug")).toBeNull();
+	},
+};
+
+/**
+ * The bar at the bottom of the transcript: one 46px row carrying back, the
+ * name, the way to get the bar back, and the overflow. Mode glyphs are exactly
+ * what you should not have to decode at the moment the bar is smallest, so the
+ * view switcher is not duplicated here.
+ */
+export const Collapsed: Story = {
+	beforeEach: () => {
+		sessionViewState.compact = true;
+		sessionViewState.atBottom = true;
+		sessionViewState.forcedOpen = false;
+	},
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		const bar = canvas.getByTestId("session-bar");
+
+		// The collapsed row's height and its touch targets are literal geometry
+		// from the design, so they are measured rather than inferred from class
+		// names: `min-h-[44px]` and a 46px row are both claims about pixels.
+		expect(bar.getBoundingClientRect().height).toBe(46);
+		for (const id of ["session-bar-expand", "session-bar-overflow"]) {
+			const box = canvas.getByTestId(id).getBoundingClientRect();
+			expect(box.height).toBeGreaterThanOrEqual(44);
+			expect(box.width).toBeGreaterThanOrEqual(44);
+		}
+
+		// The title moved up into the row rather than being replaced: same
+		// heading element, so there is still exactly one h1 across the collapse.
+		const heading = canvas.getByRole("heading", { level: 1 });
+		expect(heading).toHaveTextContent("Test Session");
+		expect(heading.getBoundingClientRect().top).toBeLessThan(
+			bar.getBoundingClientRect().bottom,
+		);
+
+		// Where you are shrinks to the name alone: the identity, the instance
+		// badge and the title's own menu chevron are all out of the smallest row.
+		expect(canvas.queryByTestId("session-bar-identity")).not.toBeVisible();
+
+		// The word goes but the accessible name does not — this is the only way
+		// off the screen.
+		const back = canvas.getByRole("button", { name: /Sessions/ });
+		expect(back.getBoundingClientRect().width).toBeLessThan(44);
+	},
+};
+
+/**
+ * Pressing the chevron expands the bar. It also unmounts the chevron, so this
+ * pins where focus lands: on the named region, which announces as a state
+ * change rather than as the control the user just pressed disappearing.
+ */
+export const ExpandedByChevron: Story = {
+	beforeEach: () => {
+		sessionViewState.compact = true;
+		sessionViewState.atBottom = true;
+		sessionViewState.forcedOpen = false;
+	},
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		await userEvent.click(canvas.getByTestId("session-bar-expand"));
+
+		expect(canvas.queryByTestId("session-bar-expand")).toBeNull();
+		expect(canvas.getByTestId("session-bar-identity")).toBeVisible();
+		expect(canvas.getByTestId("session-bar")).toHaveFocus();
+		// Still at the bottom: the chevron overrides the rule, it does not move
+		// the transcript.
+		expect(sessionViewState.atBottom).toBe(true);
 	},
 };

@@ -513,6 +513,66 @@ body:has(dialog:modal) {
 	animation: marquee-scroll var(--marquee-dur, 6s) linear 0.4s infinite;
 }
 
+/* ─── Session bar (design bar 18) ──────────────────────────────────────────── */
+
+/* Two layouts, one DOM tree. Collapsed, the title moves out of its own row and
+   up beside the back control; expanded, it drops back down. A grid can do that
+   without re-parenting anything, which is the whole point: the <h1> never
+   unmounts, so collapsing is a state change rather than the heading vanishing
+   and a different one appearing.
+
+   Child order in the markup is back, meta, title, chevron, more — chosen so the
+   focus order matches the visual order in BOTH layouts, since grid areas move
+   boxes around without moving the DOM.
+
+   `minmax(0, 1fr)` rather than `1fr`: a bare `1fr` floors at its content's
+   width, and the title and the project identity both have to be allowed to
+   truncate instead of pushing the back control off the edge. */
+#session-bar {
+	display: grid;
+	grid-template-columns: auto minmax(0, 1fr) auto auto;
+	grid-template-areas:
+		"back  meta  meta  more"
+		"title title title title";
+	align-items: center;
+	column-gap: 6px;
+	padding: 3px 12px 6px;
+}
+
+#session-bar[data-collapsed="true"] {
+	grid-template-areas: "back title chev more";
+	min-height: 46px;
+	padding: 0 12px;
+}
+
+/* The meta area does not exist in the collapsed template, and a grid item
+   naming a missing area gets auto-placed into a phantom row. */
+#session-bar[data-collapsed="true"] #session-bar-meta {
+	display: none;
+}
+
+#session-bar-back {
+	grid-area: back;
+}
+#session-bar-meta {
+	grid-area: meta;
+	justify-self: end;
+}
+/* Size is a `class:` directive on the element, not a rule here. `font-size:
+   var(--text-lg)` was tried and is a trap: Tailwind v4 emits a theme variable
+   only when some generated utility references it, so dropping `text-lg` from
+   the markup pruned `--text-lg` from the stylesheet and the title silently
+   rendered at the inherited 12px. */
+#session-bar-title {
+	grid-area: title;
+}
+#session-bar-chevron {
+	grid-area: chev;
+}
+#session-bar-more {
+	grid-area: more;
+}
+
 /* ─── Mobile responsive ────────────────────────────────────────────────────── */
 
 @media (max-width: 768px) {

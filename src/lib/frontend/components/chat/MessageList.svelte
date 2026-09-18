@@ -17,7 +17,12 @@
 	} from "../../stores/ui.svelte.js";
 	import { permissionsState, getLocalPermissions } from "../../stores/permissions.svelte.js";
 	import { createScrollController } from "../../stores/scroll-controller.svelte.js";
-	import { sessionViewState } from "../../stores/session-view.svelte.js";
+	import {
+		isBarCollapsed,
+		noteSessionChanged,
+		noteUserScroll,
+		publishAtBottom,
+	} from "../../stores/session-view.svelte.js";
 	import { economics, lastResult, segmentTurns, type Turn } from "../../utils/turns.js";
 	import UserMessage from "./UserMessage.svelte";
 	import AssistantMessage from "./AssistantMessage.svelte";
@@ -37,6 +42,7 @@
 
 	const scrollCtrl = createScrollController(
 		() => currentChat().loadLifecycle,
+		noteUserScroll,
 	);
 
 	// Attach/detach the controller to the scroll container
@@ -52,6 +58,7 @@
 	$effect(() => {
 		const _sid = sessionState.currentId; // track session changes
 		scrollCtrl.resetForSession();
+		noteSessionChanged();
 	});
 
 	// Publish for chrome outside the transcript (e.g. the session bar) so the app
@@ -59,8 +66,16 @@
 	// Hydration states count as pinned, otherwise the bar flaps on session open.
 	$effect(() => {
 		const state = scrollCtrl.state;
-		sessionViewState.atBottom =
-			state === "following" || state === "settling" || state === "loading";
+		publishAtBottom(
+			state === "following" || state === "settling" || state === "loading",
+		);
+	});
+
+	// A Svelte $effect runs after the DOM is committed but before paint, so the
+	// bar's new height is already applied when we re-pin the transcript.
+	$effect(() => {
+		isBarCollapsed(); // track the bar's state
+		scrollCtrl.onContainerResize();
 	});
 
 	// Scroll to bottom when loadLifecycle transitions to "ready" after settling.
