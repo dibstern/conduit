@@ -5,6 +5,12 @@ import type { ClaudeSettingsOverrides } from "../../contracts/claude-settings.js
 import { ProviderInstanceIdSchema } from "../../contracts/provider-instance.js";
 import type { SessionPermissionMode } from "../../shared-types.js";
 import { runTransportEffect } from "./runtime.js";
+import { makeWsRpcUrl } from "./shared-client.js";
+
+// The url and the socket policy live with the shared client (ni8.5 T-2); the
+// 49 helpers below still open their own socket per call until ni8.5.8 (S-6).
+export { makeWsRpcUrl, type WsRpcLocation } from "./shared-client.js";
+
 import {
 	type ClaudeSettingsResponse,
 	type CreateSessionResponse,
@@ -361,19 +367,6 @@ export interface SetLogLevelRpcInput {
 	readonly projectSlug: string;
 	readonly level: RpcLogLevel;
 }
-
-export interface WsRpcLocation {
-	readonly protocol: string;
-	readonly host: string;
-}
-
-export const makeWsRpcUrl = (
-	projectSlug: string,
-	location: WsRpcLocation = window.location,
-): string => {
-	const protocol = location.protocol === "https:" ? "wss:" : "ws:";
-	return `${protocol}//${location.host}/p/${encodeURIComponent(projectSlug)}/rpc`;
-};
 
 const callCancelSession = (input: CancelSessionRpcInput) =>
 	Effect.scoped(
