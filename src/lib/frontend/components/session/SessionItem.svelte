@@ -71,9 +71,11 @@
 		return parts.join(" \u00B7 ");
 	});
 
-	// Processing state: server flag OR per-session phase check
+	// Processing state: the session's own status OR per-session phase check
 	const isProcessing = $derived(
-		session.processing || getSessionPhase(session.id) !== "idle",
+		session.status === "busy" ||
+			session.status === "retry" ||
+			getSessionPhase(session.id) !== "idle",
 	);
 
 	// Sidebar indicator: attention > done-unviewed > processing

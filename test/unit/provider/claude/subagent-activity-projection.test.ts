@@ -3,7 +3,7 @@
 // proves the right ProviderRuntimeEvents come out. This one carries a real
 // captured subagent turn all the way to the surface the user complained about:
 //   translator → domain mapper → event store → session projector
-//   → sessions.status → session list adapter → SessionInfo.processing
+//   → sessions.status → the session list read → SessionInfo.status
 // Two failures live on this path and only this test sees both:
 //   1. reporting idle mid-turn (dot goes dark while the subagent works)
 //   2. never releasing busy (dot sticks on forever after the turn ends)
@@ -12,7 +12,6 @@ import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Reactivity } from "@effect/experimental";
-import { SqlClient } from "@effect/sql";
 import * as SqliteNode from "@effect/sql-sqlite-node/SqliteClient";
 import { Effect, Layer } from "effect";
 import { describe, expect, it, vi } from "vitest";
@@ -32,9 +31,8 @@ import {
 	ProjectorCursorEffectTag,
 } from "../../../../src/lib/persistence/effect/projector-cursor-effect.js";
 import { createAllEffectProjectors } from "../../../../src/lib/persistence/effect/projectors-effect.js";
+import { makeReadQueryEffect } from "../../../../src/lib/persistence/effect/read-query-effect.js";
 import { canonicalEvent } from "../../../../src/lib/persistence/events.js";
-import type { SessionRow } from "../../../../src/lib/persistence/read-query-service.js";
-import { sessionRowsToSessionInfoList } from "../../../../src/lib/persistence/session-list-adapter.js";
 import { ClaudeEventTranslator } from "../../../../src/lib/provider/claude/claude-event-translator.js";
 import type {
 	ClaudeSessionContext,
@@ -132,16 +130,11 @@ function makeTestLayer() {
 	return Layer.mergeAll(base, eventStore, cursor, runner);
 }
 
-/** Exactly what the status poller reads and hands the sidebar adapter. */
+/** Exactly the session the sidebar subscription streams, read the same way. */
 const readProcessing = Effect.gen(function* () {
-	const sql = yield* SqlClient.SqlClient;
-	const rows =
-		yield* sql<SessionRow>`SELECT * FROM sessions WHERE id = ${SESSION_ID}`;
-	const statuses = Object.fromEntries(
-		rows.map((row) => [row.id, { type: String(row.status) }]),
-	);
-	const [info] = sessionRowsToSessionInfoList(Array.from(rows), { statuses });
-	return info?.processing === true;
+	const readQuery = yield* makeReadQueryEffect;
+	const session = yield* readQuery.getSessionListEntry(SESSION_ID);
+	return session?.status === "busy" || session?.status === "retry";
 });
 
 /** Replay the turn, sampling the sidebar's processing flag after every event. */

@@ -22,7 +22,7 @@ describe("Frontend Effect boundary", () => {
 		);
 		const raw = {
 			type: "session_list",
-			sessions: [{ id: "s1", title: "test" }],
+			sessions: [{ id: "s1", title: "test", status: "idle" }],
 			roots: true,
 		};
 		const result = await validateIncomingMessage(raw);

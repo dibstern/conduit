@@ -435,7 +435,9 @@ const provideRpc = <A, E>(effect: Effect.Effect<A, E, WsRpcTestEnv>) =>
 				ListSessions: (request) =>
 					Effect.succeed({
 						projectSlug: request.projectSlug,
-						sessions: [{ id: "session-1", title: "Session 1" }],
+						sessions: [
+							{ id: "session-1", title: "Session 1", status: "idle" as const },
+						],
 						roots: request.roots ?? false,
 					}),
 				LoadMoreHistory: (request) =>
@@ -1035,7 +1037,7 @@ describe("browser WebSocket RPC contract", () => {
 
 				const sessions = yield* client.ListSessions({ projectSlug: "demo" });
 				expect(sessions.sessions).toEqual([
-					{ id: "session-1", title: "Session 1" },
+					{ id: "session-1", title: "Session 1", status: "idle" },
 				]);
 
 				const created = yield* client.CreateSession({

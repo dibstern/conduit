@@ -2,12 +2,14 @@
 	"parentSession": {
 		"id": "ses_parent001",
 		"title": "Synthesis UI rendering bug",
+		"status": "idle",
 		"updatedAt": 1710000000000,
 		"messageCount": 176
 	},
 	"childSession": {
 		"id": "ses_child001",
 		"title": "Explore synthesis pipeline code (@explore subagent)",
+		"status": "idle",
 		"updatedAt": 1710000060000,
 		"messageCount": 12,
 		"parentID": "ses_parent001"

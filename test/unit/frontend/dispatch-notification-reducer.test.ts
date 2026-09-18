@@ -161,15 +161,19 @@ describe("notification_event -> notification reducer dispatch", () => {
 	});
 });
 
+// Pending question counts are notification state, not session state: they ride
+// the `session_list` message itself rather than the session type (ni8.5 §5),
+// until conduit-test-ni8.23 gives them a home of their own.
 describe("session_list -> reconcile dispatch", () => {
-	it("dispatches reconcile with question counts from session_list", () => {
+	it("dispatches reconcile with the message's question counts", () => {
 		handleMessage({
 			type: "session_list",
 			sessions: [
-				{ id: "sess-a", title: "Session A", pendingQuestionCount: 2 },
-				{ id: "sess-b", title: "Session B", pendingQuestionCount: 1 },
+				{ id: "sess-a", title: "Session A", status: "idle" },
+				{ id: "sess-b", title: "Session B", status: "idle" },
 			],
 			roots: true,
+			pendingQuestionCounts: { "sess-a": 2, "sess-b": 1 },
 		} as RelayMessage);
 		expect(dispatchMock).toHaveBeenCalledWith({
 			type: "reconcile",
@@ -180,12 +184,12 @@ describe("session_list -> reconcile dispatch", () => {
 		});
 	});
 
-	it("dispatches reconcile with empty counts when no sessions have pendingQuestionCount", () => {
+	it("dispatches reconcile with empty counts when the message carries none", () => {
 		handleMessage({
 			type: "session_list",
 			sessions: [
-				{ id: "sess-a", title: "Session A" },
-				{ id: "sess-b", title: "Session B" },
+				{ id: "sess-a", title: "Session A", status: "idle" },
+				{ id: "sess-b", title: "Session B", status: "idle" },
 			],
 			roots: true,
 		} as RelayMessage);
@@ -195,14 +199,15 @@ describe("session_list -> reconcile dispatch", () => {
 		});
 	});
 
-	it("skips sessions with pendingQuestionCount of 0", () => {
+	it("skips sessions counted at 0", () => {
 		handleMessage({
 			type: "session_list",
 			sessions: [
-				{ id: "sess-a", title: "Session A", pendingQuestionCount: 0 },
-				{ id: "sess-b", title: "Session B", pendingQuestionCount: 3 },
+				{ id: "sess-a", title: "Session A", status: "idle" },
+				{ id: "sess-b", title: "Session B", status: "idle" },
 			],
 			roots: true,
+			pendingQuestionCounts: { "sess-a": 0, "sess-b": 3 },
 		} as RelayMessage);
 		expect(dispatchMock).toHaveBeenCalledWith({
 			type: "reconcile",

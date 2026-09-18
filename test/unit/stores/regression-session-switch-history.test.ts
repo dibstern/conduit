@@ -109,7 +109,7 @@ beforeEach(() => {
 	];
 	for (const id of knownSessionIds) {
 		clearSessionChatState(id);
-		sessionState.sessions.set(id, { id, title: "" });
+		sessionState.sessions.set(id, { id, title: "", status: "idle" });
 	}
 	vi.useFakeTimers();
 });

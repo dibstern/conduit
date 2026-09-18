@@ -67,7 +67,11 @@ let tm: SessionMessages;
 
 beforeEach(() => {
 	sessionState.currentId = "test-session";
-	sessionState.sessions.set("test-session", { id: "test-session", title: "" });
+	sessionState.sessions.set("test-session", {
+		id: "test-session",
+		title: "",
+		status: "idle",
+	});
 	clearMessages();
 	ta = testActivity();
 	tm = testMessages();

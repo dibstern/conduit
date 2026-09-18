@@ -36,7 +36,11 @@ const SESSION_ID = "assistant-part-identity";
 beforeEach(() => {
 	vi.useFakeTimers();
 	clearSessionChatState(SESSION_ID);
-	sessionState.sessions.set(SESSION_ID, { id: SESSION_ID, title: "" });
+	sessionState.sessions.set(SESSION_ID, {
+		id: SESSION_ID,
+		title: "",
+		status: "idle",
+	});
 	sessionState.currentId = SESSION_ID;
 });
 

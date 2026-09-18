@@ -143,6 +143,7 @@ function makeEmptySessionReadQuery(provider: string): ReadQueryEffect {
 		getSessionDetailSnapshot: vi.fn(() =>
 			Effect.succeed({ messages: [], sequence: 0 }),
 		),
+		getSessionListEntry: vi.fn(() => Effect.succeed(undefined)),
 		getSessionListSnapshot: vi.fn(() =>
 			Effect.succeed({ rows: [], sequence: 0 }),
 		),
@@ -241,6 +242,7 @@ describe("session handlers with Effect-native model service", () => {
 				getSessionDetailSnapshot: vi.fn(() =>
 					Effect.succeed({ messages: [], sequence: 0 }),
 				),
+				getSessionListEntry: vi.fn(() => Effect.succeed(undefined)),
 				getSessionListSnapshot: vi.fn(() =>
 					Effect.succeed({ rows: [], sequence: 0 }),
 				),
@@ -401,6 +403,7 @@ describe("session handlers with Effect-native model service", () => {
 			getSessionDetailSnapshot: vi.fn(() =>
 				Effect.succeed({ messages: [], sequence: 0 }),
 			),
+			getSessionListEntry: vi.fn(() => Effect.succeed(undefined)),
 			getSessionListSnapshot: vi.fn(() =>
 				Effect.succeed({ rows: [], sequence: 0 }),
 			),

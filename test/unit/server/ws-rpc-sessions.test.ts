@@ -229,7 +229,13 @@ describe("WsRpcServerLayer ListSessions", () => {
 		const wsHandler = makeMockWebSocketHandler();
 		const sessionManagerService = makeMockSessionManagerService({
 			listSessions: vi.fn(() =>
-				Effect.succeed([{ id: "session-1", title: "Original Session" }]),
+				Effect.succeed([
+					{
+						id: "session-1",
+						title: "Original Session",
+						status: "idle" as const,
+					},
+				]),
 			),
 			clearPaginationCursor,
 			setForkEntry,

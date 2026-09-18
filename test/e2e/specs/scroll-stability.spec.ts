@@ -199,6 +199,7 @@ function createInitMessages(turnCount: number): MockMessage[] {
 				{
 					id: "sess-scroll-001",
 					title: "Scroll stability test",
+					status: "idle",
 					updatedAt: Date.now(),
 					messageCount: turnCount * 2,
 				},
@@ -724,12 +725,14 @@ test.describe("Scroll Controller — Session Lifecycle", () => {
 							{
 								id: "sess-switch-A",
 								title: "Session A",
+								status: "idle",
 								updatedAt: Date.now(),
 								messageCount: TURN_COUNT * 2,
 							},
 							{
 								id: "sess-switch-B",
 								title: "Session B",
+								status: "idle",
 								updatedAt: Date.now() - 3600_000,
 								messageCount: 40,
 							},
@@ -892,6 +895,7 @@ test.describe("Scroll Controller — Session Lifecycle", () => {
 						{
 							id: "sess-empty-001",
 							title: "New session",
+							status: "idle",
 							updatedAt: Date.now(),
 							messageCount: 0,
 						},
@@ -1123,12 +1127,14 @@ test.describe("Scroll Controller — Session Lifecycle", () => {
 							{
 								id: "sess-scrollup-A",
 								title: "Session A (long)",
+								status: "idle",
 								updatedAt: Date.now(),
 								messageCount: TURN_COUNT * 2,
 							},
 							{
 								id: "sess-scrollup-B",
 								title: "Session B (short)",
+								status: "idle",
 								updatedAt: Date.now() - 3600_000,
 								messageCount: 30,
 							},

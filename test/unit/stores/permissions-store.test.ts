@@ -839,10 +839,22 @@ describe("getDescendantSessionIds", () => {
 
 	it("returns direct child sessions", () => {
 		sessionState.allSessions = [
-			{ id: "parent", title: "Parent", updatedAt: 0 },
-			{ id: "child-1", title: "Child 1", parentID: "parent", updatedAt: 0 },
-			{ id: "child-2", title: "Child 2", parentID: "parent", updatedAt: 0 },
-			{ id: "unrelated", title: "Unrelated", updatedAt: 0 },
+			{ id: "parent", title: "Parent", updatedAt: 0, status: "idle" },
+			{
+				id: "child-1",
+				title: "Child 1",
+				parentID: "parent",
+				updatedAt: 0,
+				status: "idle",
+			},
+			{
+				id: "child-2",
+				title: "Child 2",
+				parentID: "parent",
+				updatedAt: 0,
+				status: "idle",
+			},
+			{ id: "unrelated", title: "Unrelated", updatedAt: 0, status: "idle" },
 		];
 		const desc = getDescendantSessionIds("parent");
 		expect(desc).toEqual(new Set(["child-1", "child-2"]));
@@ -850,11 +862,18 @@ describe("getDescendantSessionIds", () => {
 
 	it("returns multi-level descendants (grandchildren)", () => {
 		sessionState.allSessions = [
-			{ id: "root", title: "Root", updatedAt: 0 },
-			{ id: "child", title: "Child", parentID: "root", updatedAt: 0 },
+			{ id: "root", title: "Root", updatedAt: 0, status: "idle" },
+			{
+				id: "child",
+				title: "Child",
+				parentID: "root",
+				updatedAt: 0,
+				status: "idle",
+			},
 			{
 				id: "grandchild",
 				title: "Grandchild",
+				status: "idle",
 				parentID: "child",
 				updatedAt: 0,
 			},
@@ -865,8 +884,14 @@ describe("getDescendantSessionIds", () => {
 
 	it("does not include the parent itself", () => {
 		sessionState.allSessions = [
-			{ id: "parent", title: "Parent", updatedAt: 0 },
-			{ id: "child", title: "Child", parentID: "parent", updatedAt: 0 },
+			{ id: "parent", title: "Parent", updatedAt: 0, status: "idle" },
+			{
+				id: "child",
+				title: "Child",
+				parentID: "parent",
+				updatedAt: 0,
+				status: "idle",
+			},
 		];
 		const desc = getDescendantSessionIds("parent");
 		expect(desc.has("parent")).toBe(false);
@@ -878,8 +903,14 @@ describe("getDescendantSessionIds", () => {
 describe("getLocalPermissions with subagent hierarchy", () => {
 	it("includes permissions from direct child (subagent) sessions", () => {
 		sessionState.allSessions = [
-			{ id: "parent", title: "Parent", updatedAt: 0 },
-			{ id: "child", title: "Child", parentID: "parent", updatedAt: 0 },
+			{ id: "parent", title: "Parent", updatedAt: 0, status: "idle" },
+			{
+				id: "child",
+				title: "Child",
+				parentID: "parent",
+				updatedAt: 0,
+				status: "idle",
+			},
 		];
 		handlePermissionRequest({
 			type: "permission_request",
@@ -897,9 +928,21 @@ describe("getLocalPermissions with subagent hierarchy", () => {
 
 	it("includes permissions from deeply nested subagent sessions", () => {
 		sessionState.allSessions = [
-			{ id: "root", title: "Root", updatedAt: 0 },
-			{ id: "child", title: "Child", parentID: "root", updatedAt: 0 },
-			{ id: "grandchild", title: "GC", parentID: "child", updatedAt: 0 },
+			{ id: "root", title: "Root", updatedAt: 0, status: "idle" },
+			{
+				id: "child",
+				title: "Child",
+				parentID: "root",
+				updatedAt: 0,
+				status: "idle",
+			},
+			{
+				id: "grandchild",
+				title: "GC",
+				parentID: "child",
+				updatedAt: 0,
+				status: "idle",
+			},
 		];
 		handlePermissionRequest({
 			type: "permission_request",
@@ -917,8 +960,14 @@ describe("getLocalPermissions with subagent hierarchy", () => {
 
 	it("includes own permissions alongside descendant permissions", () => {
 		sessionState.allSessions = [
-			{ id: "parent", title: "Parent", updatedAt: 0 },
-			{ id: "child", title: "Child", parentID: "parent", updatedAt: 0 },
+			{ id: "parent", title: "Parent", updatedAt: 0, status: "idle" },
+			{
+				id: "child",
+				title: "Child",
+				parentID: "parent",
+				updatedAt: 0,
+				status: "idle",
+			},
 		];
 		handlePermissionRequest({
 			type: "permission_request",
@@ -941,9 +990,15 @@ describe("getLocalPermissions with subagent hierarchy", () => {
 
 	it("does not include permissions from unrelated sessions", () => {
 		sessionState.allSessions = [
-			{ id: "parent", title: "Parent", updatedAt: 0 },
-			{ id: "child", title: "Child", parentID: "parent", updatedAt: 0 },
-			{ id: "other", title: "Other", updatedAt: 0 },
+			{ id: "parent", title: "Parent", updatedAt: 0, status: "idle" },
+			{
+				id: "child",
+				title: "Child",
+				parentID: "parent",
+				updatedAt: 0,
+				status: "idle",
+			},
+			{ id: "other", title: "Other", updatedAt: 0, status: "idle" },
 		];
 		handlePermissionRequest({
 			type: "permission_request",
@@ -1042,8 +1097,14 @@ describe("getRemotePermissions with unknown session (sessionId='')", () => {
 describe("getRemotePermissions with subagent hierarchy", () => {
 	it("excludes permissions from child (subagent) sessions", () => {
 		sessionState.allSessions = [
-			{ id: "parent", title: "Parent", updatedAt: 0 },
-			{ id: "child", title: "Child", parentID: "parent", updatedAt: 0 },
+			{ id: "parent", title: "Parent", updatedAt: 0, status: "idle" },
+			{
+				id: "child",
+				title: "Child",
+				parentID: "parent",
+				updatedAt: 0,
+				status: "idle",
+			},
 		];
 		handlePermissionRequest({
 			type: "permission_request",
@@ -1059,9 +1120,15 @@ describe("getRemotePermissions with subagent hierarchy", () => {
 
 	it("includes permissions from unrelated sessions", () => {
 		sessionState.allSessions = [
-			{ id: "parent", title: "Parent", updatedAt: 0 },
-			{ id: "child", title: "Child", parentID: "parent", updatedAt: 0 },
-			{ id: "other", title: "Other", updatedAt: 0 },
+			{ id: "parent", title: "Parent", updatedAt: 0, status: "idle" },
+			{
+				id: "child",
+				title: "Child",
+				parentID: "parent",
+				updatedAt: 0,
+				status: "idle",
+			},
+			{ id: "other", title: "Other", updatedAt: 0, status: "idle" },
 		];
 		handlePermissionRequest({
 			type: "permission_request",
@@ -1079,9 +1146,21 @@ describe("getRemotePermissions with subagent hierarchy", () => {
 
 	it("excludes deeply nested descendant permissions from remote", () => {
 		sessionState.allSessions = [
-			{ id: "root", title: "Root", updatedAt: 0 },
-			{ id: "child", title: "Child", parentID: "root", updatedAt: 0 },
-			{ id: "grandchild", title: "GC", parentID: "child", updatedAt: 0 },
+			{ id: "root", title: "Root", updatedAt: 0, status: "idle" },
+			{
+				id: "child",
+				title: "Child",
+				parentID: "root",
+				updatedAt: 0,
+				status: "idle",
+			},
+			{
+				id: "grandchild",
+				title: "GC",
+				parentID: "child",
+				updatedAt: 0,
+				status: "idle",
+			},
 		];
 		handlePermissionRequest({
 			type: "permission_request",

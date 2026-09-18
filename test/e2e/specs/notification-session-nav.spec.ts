@@ -41,12 +41,14 @@ const twoSessionInit: MockMessage[] = [
 			{
 				id: SESS_A,
 				title: "Session A — current",
+				status: "idle",
 				updatedAt: Date.now(),
 				messageCount: 2,
 			},
 			{
 				id: SESS_B,
 				title: "Session B — target",
+				status: "idle",
 				updatedAt: Date.now() - 3600_000,
 				messageCount: 5,
 			},

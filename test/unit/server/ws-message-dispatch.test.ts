@@ -97,7 +97,7 @@ beforeEach(() => {
 	clearMessages();
 	// Set currentId and register session BEFORE creating test slots,
 	// so testActivity()/testMessages() register under the correct key ("s1").
-	sessionState.sessions.set("s1", { id: "s1", title: "" });
+	sessionState.sessions.set("s1", { id: "s1", title: "", status: "idle" });
 	sessionState.currentId = "s1";
 	ta = testActivity();
 	tm = testMessages();

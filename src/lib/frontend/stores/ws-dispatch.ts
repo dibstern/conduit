@@ -752,24 +752,19 @@ export function handleMessage(msg: RelayMessage): void {
 		// ─── Sessions ────────────────────────────────────────────────────
 		case "session_list": {
 			handleSessionList(msg);
-			// Reconcile notification reducer with server-side question counts.
-			// session_list messages include pendingQuestionCount per session.
-			const sessions = msg.sessions;
-			if (Array.isArray(sessions)) {
-				const counts = new Map<
-					string,
-					{ questions: number; permissions: number }
-				>();
-				for (const s of sessions) {
-					if (s.pendingQuestionCount && s.pendingQuestionCount > 0) {
-						counts.set(s.id, {
-							questions: s.pendingQuestionCount,
-							permissions: 0,
-						});
-					}
-				}
-				dispatch({ type: "reconcile", counts });
+			// Reconcile the notification reducer with the server's question counts,
+			// which ride the message itself — they are notification state, not part
+			// of a session (ni8.5 §5).
+			const counts = new Map<
+				string,
+				{ questions: number; permissions: number }
+			>();
+			for (const [sessionId, questions] of Object.entries(
+				msg.pendingQuestionCounts ?? {},
+			)) {
+				if (questions > 0) counts.set(sessionId, { questions, permissions: 0 });
 			}
+			dispatch({ type: "reconcile", counts });
 			break;
 		}
 		case "session_forked": {

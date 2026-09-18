@@ -47,7 +47,11 @@ beforeEach(() => {
 	clearMessages();
 	sessionState.currentId = null;
 	clearSessionChatState("sub-parent");
-	sessionState.sessions.set("sub-parent", { id: "sub-parent", title: "" });
+	sessionState.sessions.set("sub-parent", {
+		id: "sub-parent",
+		title: "",
+		status: "idle",
+	});
 	vi.useFakeTimers();
 });
 afterEach(() => vi.useRealTimers());

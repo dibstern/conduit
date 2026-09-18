@@ -39,7 +39,7 @@ import type {
 	StoredEvent,
 } from "../../../persistence/events.js";
 import { SessionProjector } from "../../../persistence/projectors/session-projector.js";
-import type { SessionRow } from "../../../persistence/read-model-types.js";
+import type { SessionInfo } from "../../../shared-types.js";
 import {
 	type Delta,
 	type Envelope,
@@ -114,25 +114,25 @@ const foldMaxSequenceBySession = (
 };
 
 /**
- * Re-query each touched session's CURRENT row, emitting one whole-row upsert
- * per session — or a `remove` when the row is absent (the session left the
+ * Re-query each touched session's CURRENT state, emitting one whole-session
+ * upsert per session — or a `remove` when it is gone (the session left the
  * list) — ascending by sequence tag (t3code: re-sorted ascending).
  */
 const toCurrentRowDeltas = (
 	readQuery: ReadQueryEffect,
 	maxSequenceBySession: ReadonlyMap<string, number>,
-): Effect.Effect<readonly Delta<SessionRow>[], ShellSubscriptionError> =>
+): Effect.Effect<readonly Delta<SessionInfo>[], ShellSubscriptionError> =>
 	Effect.gen(function* () {
 		const ordered = [...maxSequenceBySession.entries()].sort(
 			(a, b) => a[1] - b[1],
 		);
-		const deltas: Delta<SessionRow>[] = [];
+		const deltas: Delta<SessionInfo>[] = [];
 		for (const [sessionId, sequence] of ordered) {
-			const row = yield* readQuery.getSession(sessionId);
+			const session = yield* readQuery.getSessionListEntry(sessionId);
 			deltas.push(
-				row === undefined
+				session === undefined
 					? { _tag: "remove", id: sessionId, sequence }
-					: { _tag: "upsert", item: row, sequence },
+					: { _tag: "upsert", item: session, sequence },
 			);
 		}
 		return deltas;
@@ -141,12 +141,13 @@ const toCurrentRowDeltas = (
 // ─── Replay ──────────────────────────────────────────────────────────────────
 
 /**
- * Fold the durable log strictly after `afterSequence` into one current-row
+ * Fold the durable log strictly after `afterSequence` into one current-state
  * delta per touched session, ascending. Pages until an EMPTY read — not merely
  * a short page — so an event committed while the previous page drained (whose
  * live signal the sliding bus may already have dropped) is still folded in.
  * A coalesced replay is complete for this source: upserts carry whole current
- * rows, so intermediate states are subsumed and resume is O(touched sessions).
+ * sessions, so intermediate states are subsumed and resume is O(touched
+ * sessions).
  */
 const replayDeltas = (
 	deps: {
@@ -154,7 +155,7 @@ const replayDeltas = (
 		readonly eventStore: EventStoreEffect;
 	},
 	afterSequence: number,
-): Stream.Stream<Delta<SessionRow>, ShellSubscriptionError> =>
+): Stream.Stream<Delta<SessionInfo>, ShellSubscriptionError> =>
 	Stream.fromIterableEffect(
 		Effect.gen(function* () {
 			const touched = new Map<string, number>();
@@ -179,7 +180,7 @@ export const makeShellSource = (deps: {
 	readonly readQuery: ReadQueryEffect;
 	readonly eventStore: EventStoreEffect;
 	readonly bus: SessionEventBus;
-}): SubscriptionSource<SessionRow, ShellSubscriptionError> => ({
+}): SubscriptionSource<SessionInfo, ShellSubscriptionError> => ({
 	snapshot: () => deps.readQuery.getSessionListSnapshot(),
 	replay: (afterSequence) => replayDeltas(deps, afterSequence),
 	// One shared 50ms window over the type-filtered bus stream, then per-session
@@ -209,7 +210,7 @@ export const makeShellSource = (deps: {
 /**
  * Subscribe to the shell (session-list) stream. Cold start emits the full
  * recency-ordered snapshot, a `synchronized` boundary, then coalesced
- * whole-row upserts (or removes); resume emits one current-row delta per
+ * whole-session upserts (or removes); resume emits one current-state delta per
  * session touched strictly after `resumeFromSequence`, then goes live.
  * Lifecycle is the ambient Scope: closing it releases the bus subscription
  * and the coalescing pipeline.
@@ -220,7 +221,7 @@ export const makeShellSource = (deps: {
 export const subscribeShell = (
 	options: { readonly resumeFromSequence?: number } = {},
 ): Stream.Stream<
-	Envelope<SessionRow>,
+	Envelope<SessionInfo>,
 	ShellSubscriptionError,
 	ReadQueryEffectTag | EventStoreEffectTag | SessionEventBusTag
 > =>
