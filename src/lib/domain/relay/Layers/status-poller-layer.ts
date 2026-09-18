@@ -1,5 +1,5 @@
 import { SqlClient } from "@effect/sql";
-import { Cause, Duration, Effect, HashMap, Layer, PubSub, Ref } from "effect";
+import { Cause, Duration, Effect, Layer, PubSub, Ref } from "effect";
 import type { SessionStatus } from "../../../instance/sdk-types.js";
 import { makeCommitAndSignal } from "../../../persistence/effect/commit-and-signal.js";
 import { EventStoreEffectTag } from "../../../persistence/effect/event-store-effect.js";
@@ -12,14 +12,10 @@ import {
 import { OpenCodeAPITag } from "../../provider/Services/opencode-api-service.js";
 import { RelayStatusSnapshotTag } from "../Services/relay-status-snapshot.js";
 import { ConfigTag, LoggerTag, StatusPollerTag } from "../Services/services.js";
-import { SessionManagerStateTag } from "../Services/session-manager-state.js";
 import {
-	clearMessageActivity,
 	DEFAULT_RECONCILIATION_INTERVAL_MS,
 	getCurrentStatuses,
 	isProcessing,
-	markMessageActivity,
-	notifySSEIdle,
 	PollerPubSubTag,
 	PollerStateTag,
 	poll,
@@ -51,7 +47,6 @@ export const StatusPollerLive: Layer.Layer<
 	| PollerPubSubTag
 	| PollerStateTag
 	| RelayStatusSnapshotTag
-	| SessionManagerStateTag
 > = Layer.scoped(
 	StatusPollerTag,
 	Effect.gen(function* () {
@@ -61,7 +56,6 @@ export const StatusPollerLive: Layer.Layer<
 		const stateRef = yield* PollerStateTag;
 		const pubsub = yield* PollerPubSubTag;
 		const statusSnapshot = yield* RelayStatusSnapshotTag;
-		const sessionManagerStateRef = yield* SessionManagerStateTag;
 		const readQueryOption = yield* Effect.serviceOption(ReadQueryEffectTag);
 		const eventStoreOption = yield* Effect.serviceOption(EventStoreEffectTag);
 		const projectionRunnerOption = yield* Effect.serviceOption(
@@ -110,28 +104,23 @@ export const StatusPollerLive: Layer.Layer<
 							]),
 					}
 				: undefined;
-		const readProjectedStatuses = () =>
+		const readProjectedStatuses = (): Effect.Effect<
+			Record<string, SessionStatus>,
+			unknown
+		> =>
 			persistenceReady
 				? readQueryOption.value
 						.getAllSessionStatuses()
 						.pipe(Effect.map(toStatusRecord))
 				: Effect.tryPromise(() => api.session.statuses());
-		const pollerState = <A, E>(effect: Effect.Effect<A, E, PollerStateTag>) =>
-			effect.pipe(Effect.provideService(PollerStateTag, stateRef));
-		const pollerPubSub = <A, E>(effect: Effect.Effect<A, E, PollerPubSubTag>) =>
-			effect.pipe(Effect.provideService(PollerPubSubTag, pubsub));
+		const pollerState = <A, E, R>(
+			effect: Effect.Effect<A, E, R | PollerStateTag>,
+		) => effect.pipe(Effect.provideService(PollerStateTag, stateRef));
+		const pollerPubSub = <A, E, R>(
+			effect: Effect.Effect<A, E, R | PollerPubSubTag>,
+		) => effect.pipe(Effect.provideService(PollerPubSubTag, pubsub));
 		const pollDeps = {
 			getRawStatuses: readProjectedStatuses,
-			getSessionParentMap: () =>
-				Effect.gen(function* () {
-					const state = yield* Ref.get(sessionManagerStateRef);
-					return new Map(HashMap.toEntries(state.cachedParentMap));
-				}),
-			resolveParent: (sessionId: string) =>
-				Effect.tryPromise(async () => {
-					const session = await api.session.get(sessionId);
-					return session.parentID;
-				}).pipe(Effect.catchAll(() => Effect.succeed(undefined))),
 			...(reconciliationDeps ? { reconciliation: reconciliationDeps } : {}),
 		};
 		const interval = Duration.millis(
@@ -235,14 +224,11 @@ export const StatusPollerLive: Layer.Layer<
 			drain: () => Ref.set(started, false),
 			getCurrentStatuses: () => pollerState(getCurrentStatuses),
 			isProcessing: (sessionId) => pollerState(isProcessing(sessionId)),
-			markMessageActivity: (sessionId) =>
-				pollerState(markMessageActivity(sessionId)).pipe(
-					Effect.zipRight(forkPoll),
-				),
-			clearMessageActivity: (sessionId) =>
-				pollerState(clearMessageActivity(sessionId)),
-			notifySSEIdle: (sessionId) =>
-				pollerState(notifySSEIdle(sessionId)).pipe(Effect.zipRight(forkPoll)),
+			// Compatibility hooks for remaining server callers. Busy augmentation
+			// belongs exclusively to the client session view.
+			markMessageActivity: () => Effect.void,
+			clearMessageActivity: () => Effect.void,
+			notifySSEIdle: () => forkPoll,
 			reconcileNow: () =>
 				reconciliationDeps != null
 					? reconcileNow(reconciliationDeps)

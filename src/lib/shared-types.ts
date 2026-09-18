@@ -246,8 +246,8 @@ export const SessionStatusSchema = Schema.Literal(
  * projection or — for the fork lineage — from the interim join that
  * conduit-test-ni8.24 deletes.
  *
- * Notably absent: `processing` (the status poller's derived flag; the client
- * now ORs the row's `status` with live chat phase) and `pendingQuestionCount`
+ * Notably absent: `processing` (derived by the client session view from row
+ * status, descendant status and pre-status activity) and `pendingQuestionCount`
  * (notification state, which rides the `session_list` message until
  * conduit-test-ni8.23 gives it a home of its own).
  */

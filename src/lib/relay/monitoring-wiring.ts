@@ -11,10 +11,6 @@ import {
 	clearProcessingTimeout,
 	type OverridesStateTag,
 } from "../domain/relay/Services/session-overrides-state.js";
-import {
-	clearMessageActivity,
-	type PollerStateTag,
-} from "../domain/relay/Services/session-status-poller.js";
 import type { Message } from "../instance/sdk-types.js";
 import type { Logger } from "../logger.js";
 import type { PushNotificationSender } from "../server/push.js";
@@ -265,7 +261,6 @@ const executeMonitoringEffectsEffect = (
 						deps.pollerManager.stopPolling(effect.sessionId),
 					);
 					yield* clearProcessingTimeout(effect.sessionId);
-					yield* clearMessageActivity(effect.sessionId);
 					break;
 
 				case "notify-busy":
@@ -286,7 +281,6 @@ const executeMonitoringEffectsEffect = (
 						pipelineDeps,
 					);
 					yield* clearProcessingTimeout(effect.sessionId);
-					yield* clearMessageActivity(effect.sessionId);
 					break;
 
 				default: {
@@ -493,15 +487,12 @@ export const wireMonitoringEffect = (
 ): Effect.Effect<
 	EffectMonitoringWiringResult,
 	never,
-	| SessionManagerServiceTag
-	| StatusPollerTag
-	| PollerStateTag
-	| OverridesStateTag
+	SessionManagerServiceTag | StatusPollerTag | OverridesStateTag
 > =>
 	Effect.gen(function* () {
 		const statusPoller = yield* StatusPollerTag;
 		const runtime = yield* Effect.runtime<
-			SessionManagerServiceTag | PollerStateTag | OverridesStateTag
+			SessionManagerServiceTag | OverridesStateTag
 		>();
 		const {
 			wsHandler,

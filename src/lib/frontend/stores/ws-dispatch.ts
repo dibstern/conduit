@@ -108,6 +108,7 @@ import {
 	handleSessionForked,
 	handleSessionList,
 	handleSessionSwitched,
+	observeSessionActivity,
 	sessionState,
 } from "./session.svelte.js";
 import {
@@ -691,6 +692,7 @@ function dispatchChatEvent(
  * Replaces the vanilla handler registry pattern.
  */
 export function handleMessage(msg: RelayMessage): void {
+	observeSessionActivity(msg);
 	// ── Two-tier routing: per-session events vs global events ────────────
 	// Per-session events are routed by event.sessionId to the correct
 	// session slot. notification_event is excluded by construction

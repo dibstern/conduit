@@ -4,9 +4,8 @@
 
 <script lang="ts">
 	import type { SessionInfo } from "../../types.js";
-	import { getSessionPhase } from "../../stores/chat.svelte.js";
 	import { getSessionIndicator } from "../../stores/notification-reducer.svelte.js";
-	import { sessionState } from "../../stores/session.svelte.js";
+	import { isSessionBusy, sessionState } from "../../stores/session.svelte.js";
 	import { formatTimeAgo } from "../../utils/format.js";
 	import Icon from "../shared/Icon.svelte";
 
@@ -71,12 +70,7 @@
 		return parts.join(" \u00B7 ");
 	});
 
-	// Processing state: the session's own status OR per-session phase check
-	const isProcessing = $derived(
-		session.status === "busy" ||
-			session.status === "retry" ||
-			getSessionPhase(session.id) !== "idle",
-	);
+	const isProcessing = $derived(isSessionBusy(session.id));
 
 	// Sidebar indicator: attention > done-unviewed > processing
 	const indicator = $derived(getSessionIndicator(session.id, sessionState.currentId));

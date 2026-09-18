@@ -8,6 +8,7 @@
 // notification reducer established.
 
 import type { Stream } from "effect";
+import { sessionActivityBridge } from "../stores/session-activity.svelte.js";
 import type { SessionInfo } from "../types.js";
 import type { WsRpcSubscriptions } from "./shared-client.js";
 import {
@@ -55,10 +56,21 @@ export const sessionSubscription = {
  * in one map through one applier.
  */
 export function applySessionChange(change: Change<SessionInfo>): void {
-	applied = reduce(applied, change, identify);
+	const next = reduce(applied, change, identify);
+	if (next === applied) return;
+	// Only accepted shell changes retire activity. A duplicate or stale
+	// envelope must not affect client state independently of the row applier.
+	if (change._tag === "upsert") sessionActivityBridge.retire(change.item.id);
+	if (change._tag === "remove") sessionActivityBridge.retire(change.id);
+	if (change._tag === "snapshot") {
+		for (const id of applied.rows.keys()) sessionActivityBridge.retire(id);
+		for (const id of next.rows.keys()) sessionActivityBridge.retire(id);
+	}
+	applied = next;
 }
 
 /** Forget the project we were watching. */
 export function resetSessionSubscription(): void {
+	sessionActivityBridge.clear();
 	applied = emptySubscription();
 }

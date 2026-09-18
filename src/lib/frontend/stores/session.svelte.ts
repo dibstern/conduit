@@ -39,6 +39,7 @@ import {
 	getEffectiveInstanceId,
 } from "./discovery.svelte.js";
 import { getCurrentSlug, navigate } from "./router.svelte.js";
+import { sessionActivityBridge } from "./session-activity.svelte.js";
 import { uiState } from "./ui.svelte.js";
 
 // ─── Server-owned state ─────────────────────────────────────────────────────
@@ -51,6 +52,47 @@ import { uiState } from "./ui.svelte.js";
 // `ReadonlyMap`.
 
 const serverSessions = $derived(sessionSubscription.rows);
+const busySessionIds = $derived.by(() => {
+	const busy = new Set<string>();
+	for (const row of serverSessions.values()) {
+		if (row.status === "busy" || row.status === "retry") busy.add(row.id);
+	}
+	for (const id of sessionActivityBridge.pending.keys()) {
+		if (!serverSessions.has(id)) busy.add(id);
+	}
+	// Set iteration visits newly added ancestors too. Each id is visited once,
+	// even with shared ancestors or malformed cyclic lineage: O(rows), cached
+	// for the whole sidebar rather than a tree walk per rendered session.
+	for (const id of busy) {
+		const parent = serverSessions.get(id)?.parentID;
+		if (parent && serverSessions.has(parent)) busy.add(parent);
+	}
+	return busy;
+});
+
+/** The session view's single busy decision, shared by every sidebar row. */
+export function isSessionBusy(id: string): boolean {
+	return busySessionIds.has(id);
+}
+
+/** Live content only. Replay must never create a new activity bridge. */
+export function observeSessionActivity(event: RelayMessage): void {
+	if (!("sessionId" in event) || !event.sessionId) return;
+	const id = event.sessionId;
+	if (id !== clientSession.currentId && !serverSessions.has(id)) return;
+	// Legacy `status` hints may come from the poller. Only the shell's
+	// accepted row can retire activity or supply a status for this view.
+	if (serverSessions.has(id)) return;
+	switch (event.type) {
+		case "delta":
+		case "thinking_start":
+		case "thinking_delta":
+		case "tool_start":
+		case "tool_executing":
+		case "tool_result":
+			sessionActivityBridge.mark(id);
+	}
+}
 
 // ─── Client-owned state ─────────────────────────────────────────────────────
 // What this tab is looking at. Applying server rows never touches it.
