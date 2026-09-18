@@ -170,6 +170,15 @@ function createRequestId(): RequestId {
 	return crypto.randomUUID() as RequestId;
 }
 
+let selectionGeneration = 0;
+let pendingSelectionRequestId: RequestId | undefined;
+
+export function acceptsSessionSwitch(
+	requestId: RequestId | undefined,
+): boolean {
+	return requestId === undefined || requestId === pendingSelectionRequestId;
+}
+
 /**
  * Transition idle -> creating. Returns the requestId, or null if not idle.
  * Starts a timeout that auto-fails after NEW_SESSION_TIMEOUT_MS.
@@ -177,6 +186,8 @@ function createRequestId(): RequestId {
 export function requestNewSession(): RequestId | null {
 	if (sessionCreation.value.phase !== "idle") return null;
 	const requestId = createRequestId();
+	selectionGeneration++;
+	pendingSelectionRequestId = requestId;
 	sessionCreation.value = {
 		phase: "creating",
 		requestId,
@@ -362,6 +373,8 @@ export function handleSessionSwitched(
 	msg: Extract<RelayMessage, { type: "session_switched" }>,
 ): void {
 	const { id, requestId } = msg;
+	if (requestId === undefined) selectionGeneration++;
+	pendingSelectionRequestId = undefined;
 	if (id) {
 		clientSession.currentId = id;
 		// `session_switched` can beat the list that contains the session, so it
@@ -560,6 +573,8 @@ export function switchToSession(
 	view?: (input: ViewSessionRpcInput) => void,
 ): void {
 	// Capture the outgoing session for permission cleanup in ws-dispatch.
+	const generation = ++selectionGeneration;
+	pendingSelectionRequestId = createRequestId();
 	_switchingFromId = clientSession.currentId;
 	if (_switchingFromId && _switchingFromId !== sessionId) {
 		abortSessionReplay(_switchingFromId);
@@ -575,6 +590,7 @@ export function switchToSession(
 			projectSlug: slug,
 			sessionId,
 			originId: getBrowserClientId(),
+			requestId: pendingSelectionRequestId,
 		};
 		if (view) {
 			view(input);
@@ -584,21 +600,45 @@ export function switchToSession(
 	}
 	if (slug) {
 		void getAgentsRpc({ projectSlug: slug, sessionId })
-			.then(applyGetAgentsResponse)
+			.then((response) => {
+				if (
+					generation === selectionGeneration &&
+					clientSession.currentId === sessionId &&
+					getCurrentSlug() === slug
+				)
+					applyGetAgentsResponse(response);
+			})
 			.catch(() => undefined);
 		void getCommandsRpc({ projectSlug: slug, sessionId })
-			.then(applyGetCommandsResponse)
+			.then((response) => {
+				if (
+					generation === selectionGeneration &&
+					clientSession.currentId === sessionId &&
+					getCurrentSlug() === slug
+				)
+					applyGetCommandsResponse(response);
+			})
 			.catch(() => undefined);
 		// Re-syncs per-session overrides (variant, context window, permission
 		// mode) that connect-time hydration cannot see for later switches.
 		void getModelsRpc({ projectSlug: slug, sessionId })
-			.then(applyGetModelsResponse)
+			.then((response) => {
+				if (
+					generation === selectionGeneration &&
+					clientSession.currentId === sessionId &&
+					getCurrentSlug() === slug
+				)
+					applyGetModelsResponse(response);
+			})
 			.catch(() => undefined);
 	}
 }
 
 /** Clear all session state (for project switch). */
 export function clearSessionState(): void {
+	selectionGeneration++;
+	pendingSelectionRequestId = undefined;
+	_switchingFromId = null;
 	resetSessionCreation(); // Cancel any in-flight creation (project switch safety)
 	const held = [...serverSessions.keys()];
 	resetSessionSubscription();

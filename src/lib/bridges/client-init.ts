@@ -433,6 +433,7 @@ export const handleClientConnectedEffect = (
 					};
 					wsHandler.sendTo(clientId, {
 						type: "model_info",
+						sessionId: activeId,
 						model: session.modelID,
 						provider: session.providerID ?? "",
 					});
@@ -441,6 +442,7 @@ export const handleClientConnectedEffect = (
 					if (fallbackModel) {
 						wsHandler.sendTo(clientId, {
 							type: "model_info",
+							sessionId: activeId,
 							model: fallbackModel.modelID,
 							provider: fallbackModel.providerID,
 						});
@@ -456,6 +458,7 @@ export const handleClientConnectedEffect = (
 				if (fallbackModel) {
 					wsHandler.sendTo(clientId, {
 						type: "model_info",
+						sessionId: activeId,
 						model: fallbackModel.modelID,
 						provider: fallbackModel.providerID,
 					});
@@ -896,6 +899,7 @@ export async function handleClientConnected(
 				};
 				wsHandler.sendTo(clientId, {
 					type: "model_info",
+					sessionId: activeId,
 					model: session.modelID,
 					provider: session.providerID ?? "",
 				});
@@ -905,6 +909,7 @@ export async function handleClientConnected(
 				if (fallbackModel) {
 					wsHandler.sendTo(clientId, {
 						type: "model_info",
+						sessionId: activeId,
 						model: fallbackModel.modelID,
 						provider: fallbackModel.providerID,
 					});
@@ -920,6 +925,7 @@ export async function handleClientConnected(
 			if (fallbackModel) {
 				wsHandler.sendTo(clientId, {
 					type: "model_info",
+					sessionId: activeId,
 					model: fallbackModel.modelID,
 					provider: fallbackModel.providerID,
 				});

@@ -1007,6 +1007,7 @@ export const WsRpcServerLayer = WsRpcGroup.toLayer({
 		viewSessionForClient({
 			clientId: request.originId,
 			sessionId: request.sessionId,
+			...(request.requestId != null ? { requestId: request.requestId } : {}),
 		}).pipe(
 			Effect.as({ ok: true as const }),
 			Effect.catchAll((error) =>

@@ -597,9 +597,10 @@ export const sendModelsStateToClient = (
 	| WebSocketHandlerTag
 > =>
 	Effect.gen(function* () {
+		const activeId = sessionId ?? (yield* resolveSessionFromContext(clientId));
 		const response = yield* getModelsResponse({
 			clientId,
-			...(sessionId ? { sessionId } : {}),
+			...(activeId ? { sessionId: activeId } : {}),
 			...(instanceId ? { instanceId } : {}),
 		});
 		const wsHandler = yield* WebSocketHandlerTag;
@@ -614,6 +615,7 @@ export const sendModelsStateToClient = (
 		if (response.active) {
 			wsHandler.sendTo(clientId, {
 				type: "model_info",
+				...(activeId ? { sessionId: activeId } : {}),
 				model: response.active.model,
 				provider: response.active.provider,
 			});
@@ -714,6 +716,7 @@ export const switchModelForSession = (input: SwitchModelInput) =>
 
 		const modelMessage = {
 			type: "model_info" as const,
+			...(sessionId ? { sessionId } : {}),
 			model: modelId,
 			provider: providerId,
 		};

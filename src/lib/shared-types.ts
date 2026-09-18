@@ -866,6 +866,7 @@ const HistoryPageSchema = Schema.Struct({
 // ── Model / Agent / Commands ───────────────────────────────────────────
 const ModelInfoMsgSchema = Schema.Struct({
 	type: Schema.Literal("model_info"),
+	sessionId: Schema.optional(Schema.String),
 	model: Schema.String,
 	provider: Schema.String,
 });
@@ -1467,7 +1468,7 @@ export type RelayMessage =
 			id: string;
 			sessionId: string;
 			parentID?: string;
-			/** Correlation ID echoed from CreateSession request. */
+			/** Correlation ID echoed from CreateSession or ViewSession request. */
 			requestId?: RequestId;
 			/** Raw events for client replay (cache hit). */
 			events?: RelayMessage[];
@@ -1508,7 +1509,7 @@ export type RelayMessage =
 			total?: number;
 	  }
 	// ── Model / Agent / Commands ───────────────────────────────────────────
-	| { type: "model_info"; model: string; provider: string }
+	| { type: "model_info"; sessionId?: string; model: string; provider: string }
 	| {
 			type: "default_model_info";
 			model: string;

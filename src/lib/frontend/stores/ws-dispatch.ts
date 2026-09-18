@@ -101,6 +101,7 @@ import {
 import { handleProjectList } from "./project.svelte.js";
 import { getCurrentSlug, replaceRoute } from "./router.svelte.js";
 import {
+	acceptsSessionSwitch,
 	applySessionRemoved,
 	consumeSwitchingFromId,
 	findSession,
@@ -691,6 +692,9 @@ function dispatchChatEvent(
  * Replaces the vanilla handler registry pattern.
  */
 export function handleMessage(msg: RelayMessage): void {
+	if (msg.type === "session_switched" && !acceptsSessionSwitch(msg.requestId)) {
+		return;
+	}
 	observeSessionActivity(msg);
 	// ── Two-tier routing: per-session events vs global events ────────────
 	// Per-session events are routed by event.sessionId to the correct
@@ -747,6 +751,7 @@ export function handleMessage(msg: RelayMessage): void {
 		}
 		case "session_switched": {
 			if (!msg.id) {
+				handleSessionSwitched(msg);
 				clearMessages();
 				break;
 			}
@@ -876,6 +881,12 @@ export function handleMessage(msg: RelayMessage): void {
 			handleClaudeSettingsInfo(msg);
 			break;
 		case "model_info":
+			// Unkeyed legacy/default metadata cannot identify the active session.
+			if (
+				msg.sessionId === undefined ||
+				msg.sessionId !== sessionState.currentId
+			)
+				return;
 			handleModelInfo(msg);
 			break;
 		case "default_model_info":

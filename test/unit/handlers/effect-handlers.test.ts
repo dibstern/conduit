@@ -832,6 +832,7 @@ describe("sendModelsStateToClient", () => {
 				});
 				expect(ws.sendTo).toHaveBeenCalledWith("client-1", {
 					type: "model_info",
+					sessionId: "session-1",
 					model: "claude-opus-4-7",
 					provider: "claude",
 				});
@@ -3277,11 +3278,13 @@ describe("handleDeleteSession", () => {
 					});
 					expect(ws.sendTo).toHaveBeenCalledWith("client-1", {
 						type: "model_info",
+						sessionId: "remaining-session",
 						model: "claude-sonnet-4-5",
 						provider: "anthropic",
 					});
 					expect(ws.sendTo).toHaveBeenCalledWith("client-2", {
 						type: "model_info",
+						sessionId: "remaining-session",
 						model: "claude-sonnet-4-5",
 						provider: "anthropic",
 					});
