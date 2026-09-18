@@ -27,6 +27,7 @@ import {
 	type EffectProjector,
 	ProjectionError,
 } from "../../../src/lib/persistence/effect/projectors-effect.js";
+import { makeReadQueryEffect } from "../../../src/lib/persistence/effect/read-query-effect.js";
 import {
 	makeMockConfig,
 	makeMockLogger,
@@ -43,6 +44,7 @@ describe("applySessionCommand", () => {
 			delete: vi.fn(async () => undefined),
 			update: vi.fn(async () => undefined),
 			fork: vi.fn(async () => ({ id: "ses-fork", title: "Forked" })),
+			message: vi.fn(async () => ({ id: "msg-7", time: { created: 123 } })),
 		},
 	});
 
@@ -239,6 +241,11 @@ describe("applySessionCommand", () => {
 				yield* seedSession("ses-parent", "opencode");
 
 				const forked = yield* forkOpenCodeSession("ses-parent", "msg-7");
+				const reads = yield* makeReadQueryEffect;
+				const snapshot = yield* reads.readSessionList();
+				expect(
+					snapshot.rows.find(({ item }) => item.id === forked.id)?.item,
+				).toMatchObject({ forkMessageId: "msg-7", forkPointTimestamp: 123 });
 
 				expect(api.session.fork).toHaveBeenCalledWith("ses-parent", {
 					messageID: "msg-7",
@@ -276,6 +283,20 @@ describe("applySessionCommand", () => {
 				]);
 			}),
 		),
+	);
+	it.effect(
+		"does not create an explicit OpenCode fork when its boundary key cannot be read",
+		() =>
+			withHarness(({ api }) =>
+				Effect.gen(function* () {
+					api.session.message.mockRejectedValueOnce(new Error("unavailable"));
+					const result = yield* Effect.either(
+						forkOpenCodeSession("ses-parent", "msg-7"),
+					);
+					expect(result._tag).toBe("Left");
+					expect(api.session.fork).not.toHaveBeenCalled();
+				}),
+			),
 	);
 
 	it.effect("still syncs upstream for a session with no local row", () =>

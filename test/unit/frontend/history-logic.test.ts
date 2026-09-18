@@ -618,6 +618,34 @@ describe("historyToChatMessages — createdAt propagation", () => {
 });
 
 describe("fork split with history-loaded messages", () => {
+	test("inherits every boundary message part using message order while preserving activity timestamps", () => {
+		const page = historyToChatMessages([
+			{
+				id: "boundary",
+				role: "assistant",
+				time: { created: 1000, completed: 1500 },
+				cost: 1,
+				parts: [
+					{ id: "text", type: "text", text: "answer", time: { start: 1100 } },
+					{ id: "tool", type: "tool", tool: "Bash", time: { start: 1200 } },
+				],
+			},
+			{
+				id: "next",
+				role: "user",
+				time: { created: 2000 },
+				parts: [{ id: "prompt", type: "text", text: "next" }],
+			},
+		]);
+		const split = splitAtForkPoint(page, "boundary", 1000);
+		expect(split.inherited.map((message) => message.type)).toEqual([
+			"assistant",
+			"tool",
+			"result",
+		]);
+		expect(split.current.map((message) => message.type)).toEqual(["user"]);
+		expect(split.inherited[0]).toHaveProperty("createdAt", 1100);
+	});
 	test("splitAtForkPoint finds fork point in history-converted messages", () => {
 		const history: HistoryMessage[] = [
 			{

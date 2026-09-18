@@ -16,10 +16,16 @@ import type {
  */
 type SessionSelection = Omit<
 	SessionInfo,
-	"parentID" | "forkMessageId" | "messageCount" | "forkPointTimestamp"
+	| "parentID"
+	| "forkMessageId"
+	| "messageCount"
+	| "forkPointTimestamp"
+	| "forkPointMessageId"
 > & {
 	readonly parentID: string | null;
 	readonly forkMessageId: string | null;
+	readonly forkPointTimestamp: number | null;
+	readonly forkPointMessageId: string | null;
 	readonly version: number;
 };
 
@@ -225,7 +231,8 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 	const sessionColumns = sql.literal(
 		`id, title, status, version,
 		 created_at AS createdAt, updated_at AS updatedAt,
-		 parent_id AS parentID, fork_point_event AS forkMessageId`,
+		 parent_id AS parentID, fork_point_event AS forkMessageId,
+		 fork_point_timestamp AS forkPointTimestamp, fork_point_message_id AS forkPointMessageId`,
 	);
 
 	// The version stays beside the session rather than on it: it is a fact about
@@ -234,12 +241,16 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 		version,
 		parentID,
 		forkMessageId,
+		forkPointTimestamp,
+		forkPointMessageId,
 		...session
 	}: SessionSelection): { item: SessionInfo; version: number } => ({
 		item: {
 			...session,
 			...(parentID !== null && { parentID }),
 			...(forkMessageId !== null && { forkMessageId }),
+			...(forkPointTimestamp !== null && { forkPointTimestamp }),
+			...(forkPointMessageId !== null && { forkPointMessageId }),
 		},
 		version,
 	});

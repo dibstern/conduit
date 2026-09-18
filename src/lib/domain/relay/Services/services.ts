@@ -8,7 +8,6 @@
 
 import { type Cause, Context, Effect, Layer } from "effect";
 
-import type { ForkEntry } from "../../../daemon/fork-metadata.js";
 import type {
 	HandlerDeps,
 	InstanceManagementDeps,
@@ -101,7 +100,6 @@ export interface SessionManagerShape {
 	getLastKnownSessionCount(): number;
 	getSessionParentMap(): Map<string, string>;
 	getLastMessageAtMap(): ReadonlyMap<string, number>;
-	getForkEntry(sessionId: string): ForkEntry | undefined;
 
 	// ── Mutations ──────────────────────────────────────────────────────
 	createSession(
@@ -113,7 +111,6 @@ export interface SessionManagerShape {
 	initialize(title?: string): Promise<string>;
 	recordMessageActivity(sessionId: string, timestamp?: number): void;
 	addToParentMap(childId: string, parentId: string): void;
-	setForkEntry(sessionId: string, entry: ForkEntry): void;
 
 	// ── Pagination ─────────────────────────────────────────────────────
 	clearPaginationCursor(sessionId: string): void;

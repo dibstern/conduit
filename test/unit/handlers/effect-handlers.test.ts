@@ -1522,7 +1522,7 @@ describe("handleForkSession", () => {
 					messageID: "msg-1",
 				});
 				expect(establishOpenCodeSession).not.toHaveBeenCalled();
-				expect(setForkEntry).toHaveBeenCalledOnce();
+				expect(setForkEntry).not.toHaveBeenCalled();
 				expect(ws.broadcast).toHaveBeenCalledWith(
 					expect.objectContaining({ type: "session_forked" }),
 				);
@@ -1606,7 +1606,7 @@ describe("handleForkSession", () => {
 	);
 
 	it.effect(
-		"stores explicit fork metadata through SessionManagerService",
+		"broadcasts the persisted fork boundary instead of recomputing metadata",
 		() => {
 			const legacySetForkEntry = vi.fn();
 			const legacySendDualSessionLists = vi.fn(async () => {
@@ -1623,6 +1623,15 @@ describe("handleForkSession", () => {
 						status: "idle" as const,
 						updatedAt: 100,
 						messageCount: 1,
+					},
+					{
+						id: "ses-child",
+						title: "Forked Session",
+						status: "idle" as const,
+						updatedAt: 201,
+						parentID: "ses-parent",
+						forkMessageId: "msg-1",
+						forkPointTimestamp: 456,
 					},
 				]),
 			);
@@ -1649,7 +1658,6 @@ describe("handleForkSession", () => {
 			);
 			const ws = mockWsHandler();
 			const sessionMgr = mockSessionManager({
-				setForkEntry: legacySetForkEntry,
 				sendDualSessionLists: legacySendDualSessionLists,
 				listSessions: legacyListSessions,
 				loadPreRenderedHistory: vi.fn(async () => ({
@@ -1674,11 +1682,7 @@ describe("handleForkSession", () => {
 			}).pipe(
 				Effect.provide(layer),
 				Effect.tap(() => {
-					expect(serviceSetForkEntry).toHaveBeenCalledWith("ses-child", {
-						forkMessageId: "msg-1",
-						parentID: "ses-parent",
-						forkPointTimestamp: 123,
-					});
+					expect(serviceSetForkEntry).not.toHaveBeenCalled();
 					expect(legacySetForkEntry).not.toHaveBeenCalled();
 					expect(serviceListSessions).toHaveBeenCalledWith();
 					expect(legacyListSessions).not.toHaveBeenCalled();
@@ -1692,7 +1696,7 @@ describe("handleForkSession", () => {
 							updatedAt: 201,
 							parentID: "ses-parent",
 							forkMessageId: "msg-1",
-							forkPointTimestamp: 123,
+							forkPointTimestamp: 456,
 						},
 						parentId: "ses-parent",
 						parentTitle: "Parent Session",
@@ -1751,7 +1755,6 @@ describe("handleForkSession", () => {
 			permission: { list: vi.fn(async () => []) },
 		} as unknown as OpenCodeAPI;
 		const sessionMgr = mockSessionManager({
-			setForkEntry: legacySetForkEntry,
 			listSessions: vi.fn(async () => []),
 			loadPreRenderedHistory: vi.fn(async () => ({
 				messages: [],
@@ -1773,11 +1776,7 @@ describe("handleForkSession", () => {
 			Effect.provide(layer),
 			Effect.tap(() => {
 				expect(messagesPage).toHaveBeenCalledWith("ses-child", { limit: 1 });
-				expect(serviceSetForkEntry).toHaveBeenCalledWith("ses-child", {
-					forkMessageId: "msg-last",
-					parentID: "ses-parent",
-					forkPointTimestamp: 200,
-				});
+				expect(serviceSetForkEntry).not.toHaveBeenCalled();
 				expect(legacySetForkEntry).not.toHaveBeenCalled();
 			}),
 		);
@@ -1797,7 +1796,7 @@ describe("handleForkSession", () => {
 			const ws = mockWsHandler({
 				getClientSession: vi.fn(() => undefined),
 			});
-			const sessionMgr = mockSessionManager({ setForkEntry });
+			const sessionMgr = mockSessionManager();
 			const layer = makeForkSessionLayer({ client, ws, sessionMgr });
 
 			return handleForkSession("client-1", {}).pipe(

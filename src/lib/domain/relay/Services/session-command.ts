@@ -14,12 +14,14 @@ import { SqlClient } from "@effect/sql";
 import { Data, Effect } from "effect";
 import {
 	loadDaemonConfig,
+	resolveClaudeInstanceConfigDir,
 	resolveProviderRoutingDriver,
 } from "../../../daemon/config-persistence.js";
 import type { OpenCodeAPI } from "../../../instance/opencode-api.js";
 import { makeCommitAndSignal } from "../../../persistence/effect/commit-and-signal.js";
 import { EventStoreEffectTag } from "../../../persistence/effect/event-store-effect.js";
 import { ProjectionRunnerEffectTag } from "../../../persistence/effect/projection-runner-effect.js";
+import { ProviderStateEffectTag } from "../../../persistence/effect/provider-state-effect.js";
 import { ReadQueryEffectTag } from "../../../persistence/effect/read-query-effect.js";
 import {
 	canonicalEvent,
@@ -334,8 +336,8 @@ export const createOpenCodeSession = (
  * only if the provider event stream happened to mention it — with no parent, so
  * it surfaced as a root session in the sidebar (conduit-test-o5vp).
  *
- * The fork point itself follows as `session.forked`, once the caller has
- * resolved which message it was.
+ * Resolve tip forks before publishing creation so the first subscription row
+ * already carries the fork point.
  */
 export const forkOpenCodeSession = (
 	parentSessionId: string,
@@ -344,6 +346,31 @@ export const forkOpenCodeSession = (
 	Effect.gen(function* () {
 		const api = yield* OpenCodeAPITag;
 		const readQueryOption = yield* Effect.serviceOption(ReadQueryEffectTag);
+		// An explicit fork must not succeed upstream before its ordering key is
+		// known. Otherwise a provider read failure creates a new legacy fallback.
+		const requestedBoundary =
+			messageId === undefined
+				? undefined
+				: yield* Effect.tryPromise(() =>
+						api.session.message(parentSessionId, messageId),
+					).pipe(
+						Effect.mapError(
+							(cause) =>
+								new SessionCommandError({
+									operation: "session.forked.boundary",
+									cause,
+								}),
+						),
+					);
+		if (
+			messageId !== undefined &&
+			requestedBoundary?.time?.created === undefined
+		) {
+			return yield* new SessionCommandError({
+				operation: "session.forked.boundary",
+				cause: "OpenCode fork boundary has no creation timestamp",
+			});
+		}
 
 		// No retry: fork is not idempotent — retrying could produce duplicates.
 		const session = yield* Effect.tryPromise(() =>
@@ -369,6 +396,32 @@ export const forkOpenCodeSession = (
 						.getSession(parentSessionId)
 						.pipe(Effect.orElseSucceed(() => undefined))
 				: undefined;
+		const forkPointEvent =
+			messageId ??
+			(yield* Effect.tryPromise(() =>
+				api.session.messagesPage(session.id, { limit: 1 }),
+			).pipe(
+				Effect.map((messages) => messages.at(-1)?.id),
+				Effect.catchAll((error) =>
+					Effect.logWarning(
+						`Could not determine fork point for ${session.id}: ${String(error)}`,
+					).pipe(Effect.as(undefined)),
+				),
+			));
+		const forkPointTimestamp =
+			requestedBoundary?.time?.created ??
+			(forkPointEvent === undefined
+				? undefined
+				: yield* Effect.tryPromise(() =>
+						api.session.message(parentSessionId, forkPointEvent),
+					).pipe(
+						Effect.map((message) => message.time?.created),
+						Effect.catchAll((error) =>
+							Effect.logWarning(
+								`Could not read fork boundary ${forkPointEvent}: ${String(error)}`,
+							).pipe(Effect.as(undefined)),
+						),
+					));
 
 		yield* applySessionCommand({
 			type: "session.created",
@@ -377,12 +430,206 @@ export const forkOpenCodeSession = (
 				title: normalizeSessionTitle(session.title),
 				provider: parent?.provider ?? "opencode",
 				parentId: parentSessionId,
+				...(forkPointEvent === undefined ? {} : { forkPointEvent }),
+				...(forkPointTimestamp === undefined ? {} : { forkPointTimestamp }),
 				providerSessionId: session.id,
 			},
 		});
 
-		return session;
+		return { ...session, forkMessageId: forkPointEvent, forkPointTimestamp };
 	}).pipe(
 		Effect.annotateLogs("operation", "forkOpenCodeSession"),
 		Effect.withSpan("session.forkOpenCodeSession"),
 	);
+
+/** Route forks by the persisted parent provider, before contacting a runtime. */
+export const forkSession = (parentSessionId: string, messageId?: string) =>
+	Effect.gen(function* () {
+		const readOption = yield* Effect.serviceOption(ReadQueryEffectTag);
+		const config = yield* Effect.serviceOption(ConfigTag);
+		const parent =
+			readOption._tag === "Some"
+				? yield* readOption.value.getSession(parentSessionId)
+				: undefined;
+		if (
+			!parent ||
+			!isClaudeSessionRow(
+				parent,
+				config._tag === "Some" ? config.value.configDir : undefined,
+			)
+		) {
+			const api = yield* Effect.serviceOption(OpenCodeAPITag);
+			if (api._tag === "None") {
+				return yield* new SessionCommandError({
+					operation: "session.forked.opencode",
+					cause: "OpenCode API is unavailable",
+				});
+			}
+			return {
+				...(yield* forkOpenCodeSession(parentSessionId, messageId).pipe(
+					Effect.provideService(OpenCodeAPITag, api.value),
+				)),
+				provider: "opencode" as const,
+			};
+		}
+		const stateOption = yield* Effect.serviceOption(ProviderStateEffectTag);
+		const eventStore = yield* Effect.serviceOption(EventStoreEffectTag);
+		const projections = yield* Effect.serviceOption(ProjectionRunnerEffectTag);
+		const sql = yield* Effect.serviceOption(SqlClient.SqlClient);
+		if (
+			stateOption._tag === "None" ||
+			eventStore._tag === "None" ||
+			projections._tag === "None" ||
+			sql._tag === "None"
+		) {
+			return yield* new SessionCommandError({
+				operation: "session.forked.claude",
+				cause: "Claude fork requires provider state persistence",
+			});
+		}
+		const state = stateOption.value;
+		const claudeConfigDir = resolveClaudeInstanceConfigDir(
+			loadDaemonConfig(
+				config._tag === "Some" ? config.value.configDir : undefined,
+			),
+			parent.provider,
+		);
+		if (
+			claudeConfigDir &&
+			claudeConfigDir !== process.env["CLAUDE_CONFIG_DIR"]
+		) {
+			return yield* new SessionCommandError({
+				operation: "session.forked.claude",
+				cause:
+					"Claude fork cannot access this instance's transcript store: the SDK fork API has no per-call config directory option",
+			});
+		}
+		const commitAndSignal = yield* makeCommitAndSignal.pipe(
+			Effect.provideService(EventStoreEffectTag, eventStore.value),
+			Effect.provideService(ProjectionRunnerEffectTag, projections.value),
+			Effect.provideService(SqlClient.SqlClient, sql.value),
+		);
+		const parentState = yield* state.getState(parentSessionId);
+		const providerSessionId = parentState["resumeSessionId"];
+		if (!providerSessionId) {
+			return yield* new SessionCommandError({
+				operation: "session.forked.claude",
+				cause: "Claude parent has no SDK resume session",
+			});
+		}
+		const sdk = yield* Effect.tryPromise(
+			() => import("@anthropic-ai/claude-agent-sdk"),
+		);
+		const directory =
+			config._tag === "Some" ? { dir: config.value.projectDir } : {};
+		const messages = yield* Effect.tryPromise(() =>
+			sdk.getSessionMessages(providerSessionId, directory),
+		);
+		const boundary =
+			messageId === undefined
+				? messages.at(-1)
+				: messages.find((message) => {
+						const body = message.message;
+						return (
+							message.uuid === messageId ||
+							(typeof body === "object" &&
+								body !== null &&
+								"id" in body &&
+								body.id === messageId)
+						);
+					});
+		if (!boundary) {
+			return yield* new SessionCommandError({
+				operation: "session.forked.claude",
+				cause: "Claude fork point cannot be resolved to an SDK transcript UUID",
+			});
+		}
+		if (messageId !== undefined && messageId !== boundary.uuid) {
+			const next = messages[messages.indexOf(boundary) + 1];
+			const nextBody = next?.message;
+			const continuesThroughTool =
+				typeof nextBody === "object" &&
+				nextBody !== null &&
+				"content" in nextBody &&
+				Array.isArray(nextBody.content) &&
+				nextBody.content.some(
+					(part: unknown) =>
+						typeof part === "object" &&
+						part !== null &&
+						"type" in part &&
+						part.type === "tool_result",
+				);
+			if (next?.type === "assistant" || continuesThroughTool) {
+				return yield* new SessionCommandError({
+					operation: "session.forked.claude",
+					cause:
+						"Claude UI message spans SDK rounds; its fork boundary is ambiguous. Fork at the conversation tip instead.",
+				});
+			}
+		}
+		// At tip, keep the SDK's exact parent boundary. The final API message
+		// id may belong to a round coalesced into a different UI message.
+		const forkPointEvent = messageId ?? boundary.uuid;
+		// SDK transcript UUIDs and coalesced UI message IDs are distinct at tip.
+		// Capture the UI ordering pair before the upstream fork can accept work.
+		const parentMessages =
+			readOption._tag === "Some"
+				? yield* readOption.value.getSessionMessagesWithParts(parentSessionId)
+				: [];
+		const forkPointMessage =
+			messageId === undefined
+				? parentMessages.at(-1)
+				: parentMessages.find((message) => message.id === messageId);
+		if (!forkPointMessage) {
+			return yield* new SessionCommandError({
+				operation: "session.forked.claude",
+				cause: "Claude fork boundary has no persisted message ordering key",
+			});
+		}
+		const forked = yield* Effect.tryPromise(() =>
+			sdk.forkSession(providerSessionId, {
+				...directory,
+				upToMessageId: boundary.uuid,
+			}),
+		);
+		const title = `${parent.title} (fork)`;
+		// Creation and the SDK resume cursor must commit before the first row
+		// is announced, or a prompt could start a fresh Claude conversation.
+		yield* commitAndSignal.write((project) =>
+			Effect.gen(function* () {
+				const stored = yield* eventStore.value.append(
+					canonicalEvent(
+						"session.created",
+						forked.sessionId,
+						{
+							sessionId: forked.sessionId,
+							title,
+							provider: parent.provider,
+							providerSessionId: forked.sessionId,
+							parentId: parentSessionId,
+							forkPointEvent,
+							forkPointTimestamp: forkPointMessage.created_at,
+							forkPointMessageId: forkPointMessage.id,
+						},
+						{
+							provider: parent.provider,
+							createdAt: Date.now(),
+							metadata: { source: "relay" },
+						},
+					),
+				);
+				yield* project([stored]);
+				yield* state.saveUpdates(forked.sessionId, [
+					{ key: "resumeSessionId", value: forked.sessionId },
+				]);
+			}),
+		);
+		const now = Date.now();
+		return {
+			id: forked.sessionId,
+			title,
+			time: { created: now, updated: now },
+			provider: "claude" as const,
+			forkMessageId: forkPointEvent,
+		};
+	});

@@ -13,6 +13,32 @@ describe("Migration Runner", () => {
 	afterEach(() => {
 		client?.close();
 	});
+	it("backfills existing fork ordering once and retains unresolved legacy lineage", () => {
+		client = SqliteClient.memory();
+		runMigrations(client, schemaMigrations.slice(0, 13));
+		client.exec(`
+			INSERT INTO sessions (id, provider, title, created_at, updated_at) VALUES ('parent', 'claude', 'Parent', 1, 1);
+			INSERT INTO messages (id, session_id, role, text, created_at, updated_at) VALUES ('boundary', 'parent', 'assistant', 'answer', 1000, 1000);
+			INSERT INTO sessions (id, provider, title, parent_id, fork_point_event, created_at, updated_at)
+			VALUES ('child', 'claude', 'Child', 'parent', 'boundary', 2000, 2000),
+			       ('legacy', 'claude', 'Legacy', 'parent', 'missing', 2000, 2000);
+		`);
+		runMigrations(client, schemaMigrations);
+		client.execute("DELETE FROM messages WHERE id = 'boundary'");
+		expect(runMigrations(client, schemaMigrations)).toEqual([]);
+		expect(
+			client.query(
+				"SELECT id, fork_point_timestamp, fork_point_message_id FROM sessions WHERE parent_id IS NOT NULL ORDER BY id",
+			),
+		).toEqual([
+			{
+				id: "child",
+				fork_point_timestamp: 1000,
+				fork_point_message_id: "boundary",
+			},
+			{ id: "legacy", fork_point_timestamp: null, fork_point_message_id: null },
+		]);
+	});
 
 	it("creates the _migrations table on first run", () => {
 		client = SqliteClient.memory();
@@ -121,6 +147,7 @@ describe("Migration Runner", () => {
 		const projectionFailuresMigration = schemaMigrations[10];
 		const readModelVersionMigration = schemaMigrations[11];
 		const readModelCounterMigration = schemaMigrations[12];
+		const forkPointMigration = schemaMigrations[13];
 		if (
 			!baseline ||
 			!metadataMigration ||
@@ -134,7 +161,8 @@ describe("Migration Runner", () => {
 			!sessionCascadeDeletesMigration ||
 			!projectionFailuresMigration ||
 			!readModelVersionMigration ||
-			!readModelCounterMigration
+			!readModelCounterMigration ||
+			!forkPointMigration
 		) {
 			throw new Error("Expected all event-store schema migrations");
 		}
@@ -209,6 +237,11 @@ describe("Migration Runner", () => {
 				id: 13,
 				name: "read_model_counter",
 				checksum: calculateMigrationChecksum(readModelCounterMigration),
+			},
+			{
+				id: 14,
+				name: "fork_point_timestamp",
+				checksum: calculateMigrationChecksum(forkPointMigration),
 			},
 		]);
 		columns = client
@@ -310,6 +343,7 @@ describe("Migration Runner", () => {
 				{ id: 11, name: "create_projection_failures" },
 				{ id: 12, name: "read_model_version" },
 				{ id: 13, name: "read_model_counter" },
+				{ id: 14, name: "fork_point_timestamp" },
 			],
 			columns: [
 				{
@@ -395,13 +429,15 @@ describe("Migration Runner", () => {
 		const projectionFailuresMigration = schemaMigrations[10];
 		const readModelVersionMigration = schemaMigrations[11];
 		const readModelCounterMigration = schemaMigrations[12];
+		const forkPointMigration = schemaMigrations[13];
 		if (
 			!turnModelExecutionMigration ||
 			!sessionsPermissionModeMigration ||
 			!sessionCascadeDeletesMigration ||
 			!projectionFailuresMigration ||
 			!readModelVersionMigration ||
-			!readModelCounterMigration
+			!readModelCounterMigration ||
+			!forkPointMigration
 		) {
 			throw new Error("Expected remaining event-store migrations");
 		}
@@ -442,6 +478,11 @@ describe("Migration Runner", () => {
 				id: 13,
 				name: "read_model_counter",
 				checksum: calculateMigrationChecksum(readModelCounterMigration),
+			},
+			{
+				id: 14,
+				name: "fork_point_timestamp",
+				checksum: calculateMigrationChecksum(forkPointMigration),
 			},
 		]);
 		expect(runMigrations(client, schemaMigrations)).toEqual([]);

@@ -11,6 +11,7 @@ import * as SqliteNode from "@effect/sql-sqlite-node/SqliteClient";
 import { Effect, HashMap, Layer, Logger } from "effect";
 import { describe, expect, it } from "vitest";
 import { applySessionCommand } from "../../../src/lib/domain/relay/Services/session-command.js";
+import { splitAtForkPoint } from "../../../src/lib/frontend/utils/fork-split.js";
 import { makeCommitAndSignal } from "../../../src/lib/persistence/effect/commit-and-signal.js";
 import {
 	EventStoreEffectTag,
@@ -1044,6 +1045,78 @@ describe("ProjectorCursorEffect", () => {
 // ─── Session Projector Tests ────────────────────────────────────────────────
 
 describe("Effect Session Projector (via ProjectionRunner)", () => {
+	it("captures the boundary on creation and preserves it across provider refreshes and parent message deletion", () =>
+		runTest(
+			Effect.gen(function* () {
+				const store = yield* EventStoreEffectTag;
+				const runner = yield* ProjectionRunnerEffectTag;
+				const reads = yield* makeReadQueryEffect;
+				const sql = yield* SqlClient.SqlClient;
+				yield* runner.markRecovered();
+				for (const event of [
+					makeSessionCreated("parent"),
+					makeMessageCreated("parent", "boundary", { createdAt: 1000 }),
+					canonicalEvent("session.created", "child", {
+						sessionId: "child",
+						title: "Fork",
+						provider: "claude",
+						parentId: "parent",
+						forkPointEvent: "boundary",
+					}),
+				])
+					yield* runner.projectEvent(yield* store.append(event));
+				yield* sql`DELETE FROM messages WHERE id = 'boundary'`;
+				yield* runner.projectEvent(
+					yield* store.append(makeSessionCreated("child")),
+				);
+				const { rows } = yield* reads.readSessionList();
+				expect(
+					rows.find(({ item }) => item.id === "child")?.item,
+				).toMatchObject({
+					forkMessageId: "boundary",
+					forkPointTimestamp: 1000,
+				});
+			}),
+		));
+	it("keeps post-fork messages current when the loaded page excludes the fork boundary", () =>
+		runTest(
+			Effect.gen(function* () {
+				const store = yield* EventStoreEffectTag;
+				const runner = yield* ProjectionRunnerEffectTag;
+				const reads = yield* makeReadQueryEffect;
+				yield* runner.markRecovered();
+				for (const event of [
+					makeSessionCreated("parent"),
+					makeSessionCreated("child"),
+					canonicalEvent("session.forked", "child", {
+						sessionId: "child",
+						parentId: "parent",
+						forkPointEvent: "boundary",
+						forkPointTimestamp: 1000,
+					}),
+				])
+					yield* runner.projectEvent(yield* store.append(event));
+				const { rows } = yield* reads.readSessionList();
+				const child = rows.find(({ item }) => item.id === "child")?.item;
+				const page = [
+					{
+						type: "user" as const,
+						uuid: "new",
+						text: "after fork",
+						messageId: "new",
+						createdAt: 2000,
+					},
+				];
+				expect(
+					splitAtForkPoint(
+						page,
+						child?.forkMessageId,
+						child?.forkPointTimestamp,
+					),
+				).toEqual({ inherited: [], current: page });
+			}),
+		));
+
 	it("session.created projects into sessions table", () =>
 		runTest(
 			Effect.gen(function* () {

@@ -263,9 +263,10 @@ export const SessionInfoSchema = Schema.Struct({
 	parentID: Schema.optional(Schema.String),
 	/** The message ID at the fork point — messages up to this ID are inherited context. */
 	forkMessageId: Schema.optional(Schema.String),
-	/** Unix-ms timestamp of the fork-point message. Messages created before
-	 *  this time are inherited context from the parent session. */
+	/** Inclusive boundary in transcript (created_at, id) order. */
 	forkPointTimestamp: Schema.optional(Schema.Number),
+	/** Ordering ID when the SDK lineage boundary differs from the UI message ID. */
+	forkPointMessageId: Schema.optional(Schema.String),
 });
 
 export type SessionInfo = typeof SessionInfoSchema.Type;
