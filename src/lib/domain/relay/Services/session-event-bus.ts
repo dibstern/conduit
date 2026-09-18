@@ -1,4 +1,5 @@
 import { Context, Effect, Layer, PubSub, type Scope, Stream } from "effect";
+import type { ReadModelAdvance } from "../../../contracts/read-model-advance.js";
 import type { StoredEvent } from "../../../persistence/events.js";
 
 export const SESSION_EVENT_BUS_CAPACITY = 256;
@@ -22,6 +23,12 @@ export interface SessionEventFilter {
 export interface SessionEventBus {
 	readonly publish: (events: readonly StoredEvent[]) => Effect.Effect<void>;
 	/**
+	 * Announce that the read model advanced. Published by the projection path
+	 * once its transaction has committed, so a subscriber that re-queries on the
+	 * signal is guaranteed to see the rows it names.
+	 */
+	readonly publishAdvance: (advance: ReadModelAdvance) => Effect.Effect<void>;
+	/**
 	 * Acquire a scoped subscription, then stream its events. Returning
 	 * `Effect<Stream>` lets a consumer acquire the subscription *before* reading a
 	 * snapshot, so live events are buffered across the snapshot query with no gap.
@@ -30,6 +37,12 @@ export interface SessionEventBus {
 	readonly subscribe: (
 		filter?: SessionEventFilter,
 	) => Effect.Effect<Stream.Stream<StoredEvent>, never, Scope.Scope>;
+	/** As {@link subscribe}, for read-model advances. */
+	readonly subscribeAdvances: () => Effect.Effect<
+		Stream.Stream<ReadModelAdvance>,
+		never,
+		Scope.Scope
+	>;
 }
 
 export class SessionEventBusTag extends Context.Tag("SessionEventBus")<
@@ -43,14 +56,16 @@ export const makeSessionEventBusLive = (
 	Layer.effect(
 		SessionEventBusTag,
 		Effect.gen(function* () {
-			const pubsub = yield* PubSub.sliding<StoredEvent>({
-				capacity: options.capacity ?? SESSION_EVENT_BUS_CAPACITY,
-			});
+			const capacity = options.capacity ?? SESSION_EVENT_BUS_CAPACITY;
+			const pubsub = yield* PubSub.sliding<StoredEvent>({ capacity });
+			const advances = yield* PubSub.sliding<ReadModelAdvance>({ capacity });
 			return {
 				publish: (events) =>
 					events.length === 0
 						? Effect.void
 						: Effect.asVoid(PubSub.publishAll(pubsub, events)),
+				publishAdvance: (advance) =>
+					Effect.asVoid(PubSub.publish(advances, advance)),
 				subscribe: (filter) =>
 					Effect.map(PubSub.subscribe(pubsub), (dequeue) => {
 						const stream = Stream.fromQueue(dequeue);
@@ -61,6 +76,10 @@ export const makeSessionEventBusLive = (
 									(event) => event.sessionId === filter.sessionId,
 								);
 					}),
+				subscribeAdvances: () =>
+					Effect.map(PubSub.subscribe(advances), (dequeue) =>
+						Stream.fromQueue(dequeue),
+					),
 			} satisfies SessionEventBus;
 		}),
 	);

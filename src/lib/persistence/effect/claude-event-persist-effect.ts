@@ -95,8 +95,6 @@ function claudeSubagentSessionCreatedEventId(childSessionId: string): EventId {
 
 export const makeClaudeEventPersistEffect = Effect.gen(function* () {
 	const sql = yield* SqlClient.SqlClient;
-	const eventStore = yield* EventStoreEffectTag;
-	const projectionRunner = yield* ProjectionRunnerEffectTag;
 
 	const withSql = <A, E>(
 		effect: Effect.Effect<A, E, SqlClient.SqlClient>,
@@ -179,15 +177,6 @@ export const makeClaudeEventPersistEffect = Effect.gen(function* () {
 			),
 		);
 
-	const projectEvent = (
-		stored: StoredEvent,
-	): Effect.Effect<void, ProjectionRunnerError | SqlError> =>
-		withSql(projectionRunner.projectEvent(stored));
-
-	const projectBatch = (
-		stored: readonly StoredEvent[],
-	): Effect.Effect<void, ProjectionRunnerError | SqlError> =>
-		withSql(projectionRunner.projectBatch(stored));
 	const commitAndSignal = yield* makeCommitAndSignal;
 
 	const mapPersistError =
@@ -269,8 +258,12 @@ export const makeClaudeEventPersistEffect = Effect.gen(function* () {
 
 	const ensureClaudeSubagentSession: ClaudeEventPersistEffect["ensureClaudeSubagentSession"] =
 		(input) =>
-			sql
-				.withTransaction(
+			// Through the seam rather than the runner: this append is an idempotent
+			// INSERT OR IGNORE, not an appendBatch, and it is reached directly from
+			// claude-provider-runtime — so without this it would project a new
+			// subagent session that nobody was told about.
+			commitAndSignal
+				.write((project) =>
 					Effect.gen(function* () {
 						yield* requireSession(
 							input.parentSessionId,
@@ -352,7 +345,7 @@ export const makeClaudeEventPersistEffect = Effect.gen(function* () {
 							sequence: row.sequence,
 							streamVersion: row.stream_version,
 						};
-						yield* projectEvent(stored);
+						yield* project([stored]);
 					}),
 				)
 				.pipe(Effect.mapError(mapPersistError("ensureClaudeSubagentSession")));
@@ -378,12 +371,7 @@ export const makeClaudeEventPersistEffect = Effect.gen(function* () {
 					existingMessageIds,
 					existingParts,
 				);
-				yield* sql.withTransaction(
-					Effect.gen(function* () {
-						const stored = yield* eventStore.appendBatch(events);
-						yield* projectBatch(stored);
-					}),
-				);
+				yield* commitAndSignal(events);
 			}).pipe(Effect.mapError(mapPersistError("persistClaudeSubagent")));
 
 	return {

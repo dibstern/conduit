@@ -47,6 +47,7 @@ describe("Schema Migration", () => {
 				"provider_command_tombstones",
 				"provider_command_turns",
 				"provider_state",
+				"read_model_counter",
 				"session_providers",
 				"sessions",
 				"tool_content",

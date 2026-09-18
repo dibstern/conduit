@@ -47,6 +47,7 @@ import type {
 	SessionDetail,
 	SessionStatus,
 } from "../../../instance/sdk-types.js";
+import { makeCommitAndSignal } from "../../../persistence/effect/commit-and-signal.js";
 import { EventStoreEffectTag } from "../../../persistence/effect/event-store-effect.js";
 import { ProjectionRunnerEffectTag } from "../../../persistence/effect/projection-runner-effect.js";
 import { ReadQueryEffectTag } from "../../../persistence/effect/read-query-effect.js";
@@ -795,63 +796,36 @@ export const persistSessionPermissionMode = (
 			return yield* Effect.void;
 		}
 
-		const eventStore = eventStoreOption.value;
-		const projectionRunner = projectionRunnerOption.value;
-		const sql = sqlOption.value;
-
-		const withSql = <A, E>(
-			effect: Effect.Effect<A, E, SqlClient.SqlClient>,
-		): Effect.Effect<A, E> =>
-			effect.pipe(Effect.provideService(SqlClient.SqlClient, sql));
+		// Append and projection are one transaction inside the seam, so the two
+		// used to be separately labelled failures are now one: the whole write
+		// either lands and is announced, or neither happened.
+		const commitAndSignal = yield* makeCommitAndSignal.pipe(
+			Effect.provideService(SqlClient.SqlClient, sqlOption.value),
+			Effect.provideService(EventStoreEffectTag, eventStoreOption.value),
+			Effect.provideService(
+				ProjectionRunnerEffectTag,
+				projectionRunnerOption.value,
+			),
+		);
 
 		const now = Date.now();
-		yield* sql
-			.withTransaction(
-				Effect.gen(function* () {
-					const stored = yield* eventStore
-						.append(
-							canonicalEvent(
-								"session.permission_mode_changed",
-								sessionId,
-								{ sessionId, mode },
-								{
-									createdAt: now,
-									metadata: { source: "relay" },
-								},
-							),
-						)
-						.pipe(
-							Effect.mapError(
-								(cause) =>
-									new SessionManagerError({
-										operation: "persistPermissionMode.append",
-										cause,
-									}),
-							),
-						);
-
-					yield* withSql(projectionRunner.projectEvent(stored)).pipe(
-						Effect.mapError(
-							(cause) =>
-								new SessionManagerError({
-									operation: "persistPermissionMode.project",
-									cause,
-								}),
-						),
-					);
-				}),
-			)
-			.pipe(
-				// BEGIN failures are typed; Effect SQL leaves COMMIT failures as defects.
-				Effect.catchTag("SqlError", (cause) =>
-					Effect.fail(
-						new SessionManagerError({
-							operation: "persistPermissionMode.transaction",
-							cause,
-						}),
-					),
-				),
-			);
+		yield* commitAndSignal([
+			canonicalEvent(
+				"session.permission_mode_changed",
+				sessionId,
+				{ sessionId, mode },
+				{ createdAt: now, metadata: { source: "relay" } },
+			),
+		]).pipe(
+			// BEGIN failures are typed; Effect SQL leaves COMMIT failures as defects.
+			Effect.mapError(
+				(cause) =>
+					new SessionManagerError({
+						operation: "persistPermissionMode.commit",
+						cause,
+					}),
+			),
+		);
 	});
 
 export const restoreSessionPermissionModes = () =>
@@ -1466,17 +1440,24 @@ export const SessionManagerServiceLive: Layer.Layer<
 				}
 
 				const eventStore = eventStoreEffectOption.value;
-				const projectionRunner = projectionRunnerEffectOption.value;
 				const sql = sqlOption.value;
-				const withSql = <A, E>(
-					effect: Effect.Effect<A, E, SqlClient.SqlClient>,
-				): Effect.Effect<A, E> =>
-					effect.pipe(Effect.provideService(SqlClient.SqlClient, sql));
+				// `write` rather than the plain form: the seed and the verification
+				// query belong in the same transaction as the append, and projecting
+				// through the handle it hands us is what makes the announcement
+				// unskippable.
+				const commitAndSignal = yield* makeCommitAndSignal.pipe(
+					Effect.provideService(SqlClient.SqlClient, sql),
+					Effect.provideService(EventStoreEffectTag, eventStore),
+					Effect.provideService(
+						ProjectionRunnerEffectTag,
+						projectionRunnerEffectOption.value,
+					),
+				);
 
 				const now = Date.now();
 				const normalizedTitle = normalizeSessionTitle(session.title);
-				yield* sql
-					.withTransaction(
+				yield* commitAndSignal
+					.write((project) =>
 						Effect.gen(function* () {
 							yield* sql`
 					INSERT OR IGNORE INTO sessions (
@@ -1521,7 +1502,7 @@ export const SessionManagerServiceLive: Layer.Layer<
 									),
 								);
 
-							yield* withSql(projectionRunner.projectEvent(stored)).pipe(
+							yield* project([stored]).pipe(
 								Effect.mapError(
 									(cause) =>
 										new SessionManagerError({
@@ -1561,13 +1542,13 @@ export const SessionManagerServiceLive: Layer.Layer<
 					)
 					.pipe(
 						// BEGIN failures are typed; Effect SQL leaves COMMIT failures as defects.
-						Effect.catchTag("SqlError", (cause) =>
-							Effect.fail(
-								new SessionManagerError({
-									operation: "establishOpenCodeSession.transaction",
-									cause,
-								}),
-							),
+						Effect.mapError((cause) =>
+							cause instanceof SessionManagerError
+								? cause
+								: new SessionManagerError({
+										operation: "establishOpenCodeSession.transaction",
+										cause,
+									}),
 						),
 					);
 			});
