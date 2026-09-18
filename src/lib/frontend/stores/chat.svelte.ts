@@ -32,9 +32,9 @@ import { createToolRegistry, type ToolRegistry } from "./tool-registry.js";
 export type SessionActivity = {
 	phase: ChatPhase;
 	turnEpoch: number;
-	terminalTurnKeys: ReadonlySet<string>;
-	legacyTurnKey: string;
-	legacyTurnGeneration: number;
+	turnGeneration: number;
+	endedGeneration: number;
+	terminalTurnIds: ReadonlySet<string>;
 	currentMessageId: string | null;
 	currentPartId: string | null;
 	replayGeneration: number;
@@ -74,9 +74,9 @@ export function createEmptySessionActivity(): SessionActivity {
 	return {
 		phase: "idle",
 		turnEpoch: 0,
-		terminalTurnKeys: new Set(),
-		legacyTurnKey: "local:0",
-		legacyTurnGeneration: 0,
+		turnGeneration: 0,
+		endedGeneration: -1,
+		terminalTurnIds: new Set(),
 		currentMessageId: null,
 		currentPartId: null,
 		replayGeneration: 0,
@@ -418,15 +418,15 @@ export function phaseToIdle(activity: SessionActivity): void {
 /** LLM is active, awaiting first delta. */
 export function phaseToProcessing(activity: SessionActivity): void {
 	if (activity.phase === "idle") {
-		activity.legacyTurnKey = `local:${++activity.legacyTurnGeneration}`;
+		activity.turnGeneration++;
 	}
 	activity.phase = "processing";
 }
 
 /** Receiving deltas — assistant message being built. */
 export function phaseToStreaming(activity: SessionActivity): void {
-	if (activity.phase === "idle" && activity.currentMessageId === null) {
-		activity.legacyTurnKey = `local:${++activity.legacyTurnGeneration}`;
+	if (activity.phase === "idle") {
+		activity.turnGeneration++;
 	}
 	activity.phase = "streaming";
 }
@@ -784,12 +784,14 @@ export function advanceTurnIfNewMessage(
 	// have changed back from a different message) but don't bump epoch.
 	if (activity.seenMessageIds.has(messageId)) {
 		activity.currentMessageId = messageId;
-		activity.legacyTurnKey = `assistant:${messageId}`;
 		return;
 	}
 
 	// ── First event of a genuinely new message ─────────────────────────
 	activity.seenMessageIds.add(messageId);
+	const previousTurnAlreadyEnded =
+		activity.endedGeneration === activity.turnGeneration;
+	activity.turnGeneration++;
 
 	// Finalize any in-progress assistant streaming from the previous turn.
 	if (activity.phase === "streaming") {
@@ -805,7 +807,7 @@ export function advanceTurnIfNewMessage(
 	// A terminal event may already have released the previous turn's queue.
 	// Only infer a missing boundary when it has not been applied yet.
 	const prevId = activity.currentMessageId;
-	if (prevId != null && !activity.terminalTurnKeys.has(`assistant:${prevId}`)) {
+	if (prevId != null && !previousTurnAlreadyEnded) {
 		activity.turnEpoch++;
 		log.debug(
 			"advanceTurn NEW messageId=%s prev=%s turnEpoch=%d phase=%s",
@@ -823,7 +825,6 @@ export function advanceTurnIfNewMessage(
 	}
 
 	activity.currentMessageId = messageId;
-	activity.legacyTurnKey = `assistant:${messageId}`;
 }
 
 // ─── Message handlers ───────────────────────────────────────────────────────
@@ -1210,8 +1211,8 @@ export function handleDone(
 
 /** Apply durable terminal state without delivering alerts. `turnId` must be
  * turns.id (the user message id), not the provider runtime's turnId.
- * Legacy push events lack that identity; their fallback only identifies the
- * observed assistant message or local processing cycle, not an old envelope.
+ * Legacy push events lack that identity; their fallback identifies the
+ * current monotone generation, not an old envelope.
  * The turn projection currently has no per-turn revision. */
 export function applyTerminalTurn(
 	activity: SessionActivity,
@@ -1221,11 +1222,17 @@ export function applyTerminalTurn(
 		readonly error?: Extract<RelayMessage, { type: "error" }>;
 	},
 ): boolean {
-	const key = terminal?.turnId
-		? `turn:${terminal.turnId}`
-		: activity.legacyTurnKey;
-	if (activity.terminalTurnKeys.has(key)) return false;
-	activity.terminalTurnKeys = new Set([...activity.terminalTurnKeys, key]);
+	if (terminal?.turnId !== undefined) {
+		if (activity.terminalTurnIds.has(terminal.turnId)) return false;
+		// Bound replay dedup to recent turns. An evicted id costs at worst one
+		// redundant idempotent re-finalize, never a stuck session.
+		activity.terminalTurnIds = new Set(
+			[...activity.terminalTurnIds, terminal.turnId].slice(-8),
+		);
+	} else if (activity.endedGeneration === activity.turnGeneration) {
+		return false;
+	}
+	activity.endedGeneration = activity.turnGeneration;
 
 	// Finalize the assistant message and record messageId for dedup
 	const finalizedId = flushAndFinalizeAssistant(activity, messages);
@@ -1680,9 +1687,9 @@ export function clearMessages(): void {
 		if (activity) {
 			activity.phase = "idle";
 			activity.turnEpoch = 0;
-			activity.terminalTurnKeys = new Set();
-			activity.legacyTurnKey = "local:0";
-			activity.legacyTurnGeneration = 0;
+			activity.turnGeneration = 0;
+			activity.endedGeneration = -1;
+			activity.terminalTurnIds = new Set();
 			activity.currentMessageId = null;
 			activity.currentPartId = null;
 			activity.doneMessageIds.clear();

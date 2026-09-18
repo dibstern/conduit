@@ -36,9 +36,9 @@ function snapActivity(a: SessionActivity) {
 	return {
 		phase: a.phase,
 		turnEpoch: a.turnEpoch,
-		terminalTurnKeys: [...a.terminalTurnKeys],
-		legacyTurnKey: a.legacyTurnKey,
-		legacyTurnGeneration: a.legacyTurnGeneration,
+		turnGeneration: a.turnGeneration,
+		endedGeneration: a.endedGeneration,
+		terminalTurnIds: [...a.terminalTurnIds],
 		currentMessageId: a.currentMessageId,
 		currentPartId: a.currentPartId,
 		replayGeneration: a.replayGeneration,

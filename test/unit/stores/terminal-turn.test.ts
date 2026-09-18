@@ -22,6 +22,107 @@ afterEach(() => {
 	chat.sessionMessages.clear();
 });
 
+it("a duplicate delta for A cannot swallow B's terminal without an assistant message", () => {
+	applySessionUpsert({ id: "s", title: "test", status: "idle" });
+	const { activity } = chat.getOrCreateSessionSlot("s");
+	const delta = {
+		type: "delta",
+		sessionId: "s",
+		messageId: "A",
+		text: "answer",
+	} as const;
+	handleMessage(delta);
+	handleMessage({ sessionId: "s", type: "done", code: 0 });
+	handleMessage({ sessionId: "s", type: "status", status: "processing" });
+	handleMessage(delta);
+	handleMessage({ sessionId: "s", type: "done", code: 0 });
+	expect(activity.phase).toBe("idle");
+	expect(activity.turnEpoch).toBe(2);
+});
+
+it("an anonymous delta after A ends begins a turn without status events", () => {
+	applySessionUpsert({ id: "s", title: "test", status: "idle" });
+	const { activity } = chat.getOrCreateSessionSlot("s");
+	handleMessage({
+		sessionId: "s",
+		type: "delta",
+		messageId: "A",
+		text: "first",
+	});
+	handleMessage({ sessionId: "s", type: "done", code: 0 });
+	handleMessage({ sessionId: "s", type: "delta", text: "second" });
+	expect(activity.phase).toBe("streaming");
+	handleMessage({ sessionId: "s", type: "done", code: 0 });
+	expect(activity.phase).toBe("idle");
+	expect(activity.turnEpoch).toBe(2);
+});
+
+it("durably ending A then receiving B advances the epoch exactly once", () => {
+	applySessionUpsert({ id: "s", title: "test", status: "idle" });
+	const { activity, messages } = chat.getOrCreateSessionSlot("s");
+	handleMessage({
+		sessionId: "s",
+		type: "delta",
+		messageId: "A",
+		text: "first",
+	});
+	expect(chat.applyTerminalTurn(activity, messages, { turnId: "user-A" })).toBe(
+		true,
+	);
+	handleMessage({
+		sessionId: "s",
+		type: "delta",
+		messageId: "B",
+		text: "second",
+	});
+	expect(activity.turnEpoch).toBe(1);
+});
+
+it("two terminal events with no new turn end it exactly once", () => {
+	const activity = chat.createEmptySessionActivity();
+	const messages = chat.createEmptySessionMessages();
+	chat.handleDelta(activity, messages, {
+		type: "delta",
+		sessionId: "s",
+		messageId: "A",
+		text: "answer",
+	});
+	expect(chat.applyTerminalTurn(activity, messages)).toBe(true);
+	const finalized = messages.messages;
+	expect(chat.applyTerminalTurn(activity, messages)).toBe(false);
+	expect(activity.turnEpoch).toBe(1);
+	expect(activity.phase).toBe("idle");
+	expect(messages.messages).toBe(finalized);
+});
+
+it("terminalTurnIds retains only the eight most recent durable turns", () => {
+	const activity = chat.createEmptySessionActivity();
+	const messages = chat.createEmptySessionMessages();
+	for (let i = 0; i < 32; i++) {
+		chat.phaseToProcessing(activity);
+		const previousIds = activity.terminalTurnIds;
+		expect(
+			chat.applyTerminalTurn(activity, messages, { turnId: `user-${i}` }),
+		).toBe(true);
+		expect(activity.terminalTurnIds).not.toBe(previousIds);
+		expect(activity.terminalTurnIds.size).toBeLessThanOrEqual(8);
+	}
+	expect([...activity.terminalTurnIds]).toEqual([
+		"user-24",
+		"user-25",
+		"user-26",
+		"user-27",
+		"user-28",
+		"user-29",
+		"user-30",
+		"user-31",
+	]);
+	expect(
+		chat.applyTerminalTurn(activity, messages, { turnId: "user-31" }),
+	).toBe(false);
+	expect(activity.turnEpoch).toBe(32);
+});
+
 it("two identified live turns advance the epoch twice in total", () => {
 	applySessionUpsert({ id: "s", title: "test", status: "idle" });
 	const { activity } = chat.getOrCreateSessionSlot("s");
