@@ -1,6 +1,9 @@
 import { randomUUID } from "node:crypto";
 import {
+	closeSync,
 	existsSync,
+	fsyncSync,
+	openSync,
 	readFileSync,
 	renameSync,
 	unlinkSync,
@@ -90,6 +93,9 @@ export const migrateForkLineage = (configDir: string) =>
 				const db = SqliteClient.open(filename);
 				try {
 					const imported = db.runInTransaction(() => {
+						const hasForkTimestamp = db
+							.query<{ name: string }>("PRAGMA table_info(sessions)")
+							.some((column) => column.name === "fork_point_timestamp");
 						const ids: string[] = [];
 						for (const [id, entry] of entries) {
 							const row = db.queryOne<{
@@ -111,7 +117,14 @@ export const migrateForkLineage = (configDir: string) =>
 								typeof entry === "string" ? entry : entry.forkMessageId;
 							const changesLineage =
 								(row.parent_id === null && parent !== null) ||
-								(row.fork_point_event === null && point !== "");
+								(row.fork_point_event === null && point !== "") ||
+								(hasForkTimestamp &&
+									db.queryOne(
+										`SELECT id FROM sessions WHERE id = ? AND fork_point_timestamp IS NULL
+									AND EXISTS (SELECT 1 FROM messages WHERE session_id = sessions.parent_id
+									AND id = sessions.fork_point_event)`,
+										[id],
+									) !== undefined);
 							if (!changesLineage) {
 								ids.push(id);
 								continue;
@@ -123,11 +136,7 @@ export const migrateForkLineage = (configDir: string) =>
 							);
 							// Stores already on the new schema need the key during import;
 							// older stores receive the same backfill in their schema migration.
-							if (
-								db
-									.query<{ name: string }>("PRAGMA table_info(sessions)")
-									.some((column) => column.name === "fork_point_timestamp")
-							) {
+							if (hasForkTimestamp) {
 								db.execute(
 									`UPDATE sessions SET fork_point_timestamp = COALESCE(
 									fork_point_timestamp, (SELECT created_at FROM messages
@@ -167,7 +176,13 @@ export const migrateForkLineage = (configDir: string) =>
 				);
 				const temporary = `${archive}.${randomUUID()}.tmp`;
 				try {
-					writeFileSync(temporary, text, { flag: "wx", mode: 0o600 });
+					const descriptor = openSync(temporary, "wx", 0o600);
+					try {
+						writeFileSync(descriptor, text);
+						fsyncSync(descriptor);
+					} finally {
+						closeSync(descriptor);
+					}
 					// Replace only the archive consumed above, never a different file
 					// that appeared while the databases were being imported.
 					const current = existsSync(archive)
@@ -189,6 +204,33 @@ export const migrateForkLineage = (configDir: string) =>
 					});
 				}
 				unlinkSync(archive);
+			}
+			// Make the archive rename or deletion durable before discarding the source.
+			if (remaining.size > 0 || archiveText !== undefined) {
+				let directory: number | undefined;
+				try {
+					directory = openSync(configDir, "r");
+					fsyncSync(directory);
+				} catch (error) {
+					// Windows may reject directory handles; some Unix filesystems do
+					// not support directory fsync. Degrade only for these limitations.
+					if (
+						!(
+							error instanceof Error &&
+							"code" in error &&
+							(error.code === "EINVAL" ||
+								error.code === "ENOTSUP" ||
+								(process.platform === "win32" &&
+									(error.code === "EPERM" ||
+										error.code === "EACCES" ||
+										error.code === "EISDIR")))
+						)
+					) {
+						throw error;
+					}
+				} finally {
+					if (directory !== undefined) closeSync(directory);
+				}
 			}
 			// All databases have committed and closed before removing the global source.
 			if (hasSidecar) unlinkSync(path);

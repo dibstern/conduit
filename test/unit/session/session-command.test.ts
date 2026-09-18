@@ -112,6 +112,37 @@ describe("applySessionCommand", () => {
 		return rows.map((row) => row.type);
 	});
 
+	for (const projection of ["lagging", "empty", "matching"] as const) {
+		it.effect(
+			`keeps the known provider boundary with a ${projection} projection`,
+			() =>
+				withHarness(({ api }) =>
+					Effect.gen(function* () {
+						const sql = yield* SqlClient.SqlClient;
+						yield* seedSession("ses-parent", "opencode");
+						if (projection !== "empty") {
+							yield* sql`INSERT INTO messages (id, session_id, role, created_at, updated_at)
+						VALUES ('a', 'ses-parent', 'user', 100, 100)`;
+						}
+						if (projection === "matching") {
+							yield* sql`INSERT INTO messages (id, session_id, role, created_at, updated_at)
+						VALUES ('b', 'ses-parent', 'assistant', 200, 200), ('c', 'ses-parent', 'user', 300, 300)`;
+						}
+						api.session.messagesPage.mockResolvedValue([{ id: "b" }]);
+						api.session.message.mockRejectedValue(
+							new Error("timestamp unavailable"),
+						);
+						const forked = yield* forkOpenCodeSession("ses-parent");
+						const reads = yield* makeReadQueryEffect;
+						expect(yield* reads.getSession(forked.id)).toMatchObject({
+							fork_point_event: "b",
+							fork_point_timestamp: projection === "matching" ? 200 : null,
+						});
+					}),
+				),
+		);
+	}
+
 	it.effect(
 		"persists the local parent tip when the OpenCode tip lookup fails",
 		() =>

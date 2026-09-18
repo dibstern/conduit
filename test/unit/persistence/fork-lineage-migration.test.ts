@@ -18,6 +18,118 @@ import { subscribeShell } from "../../../src/lib/domain/relay/Services/shell-sub
 import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
 import { migrateForkLineage } from "../../../src/lib/persistence/migrations/fork-lineage-import.js";
 
+it.each([
+	"publish",
+	"delete",
+	"file failure",
+	"directory failure",
+	"unsupported directory",
+])("makes archive changes durable before removing the source: %s", async (scenario) => {
+	const dir = mkdtempSync(join(tmpdir(), "fork-migration-durable-"));
+	const sidecar = join(dir, "fork-metadata.json");
+	const archive = join(dir, "fork-metadata-unresolved.json");
+	const operations: string[] = [];
+	const sync = fs.fsyncSync;
+	const rename = fs.renameSync;
+	const unlink = fs.unlinkSync;
+	try {
+		writeFileSync(
+			sidecar,
+			scenario === "delete" ? "{}" : '{"child":"message"}',
+		);
+		if (scenario === "delete") writeFileSync(archive, "{}");
+		vi.spyOn(fs, "fsyncSync").mockImplementation((fd) => {
+			const kind = fs.fstatSync(fd).isDirectory() ? "directory" : "file";
+			operations.push(`sync ${kind}`);
+			if (scenario === `${kind} failure`) throw new Error("disk failure");
+			if (kind === "directory" && scenario === "unsupported directory") {
+				throw Object.assign(new Error("unsupported"), { code: "EINVAL" });
+			}
+			sync(fd);
+		});
+		vi.spyOn(fs, "renameSync").mockImplementation((from, to) => {
+			operations.push("rename");
+			rename(from, to);
+		});
+		vi.spyOn(fs, "unlinkSync").mockImplementation((path) => {
+			if (path === sidecar) operations.push("remove source");
+			if (path === archive) operations.push("remove archive");
+			unlink(path);
+		});
+		syncBuiltinESMExports();
+		await Effect.runPromise(migrateForkLineage(dir));
+		const expected =
+			scenario === "delete"
+				? ["remove archive", "sync directory", "remove source"]
+				: scenario === "file failure"
+					? ["sync file"]
+					: scenario === "directory failure"
+						? ["sync file", "rename", "sync directory"]
+						: ["sync file", "rename", "sync directory", "remove source"];
+		expect(operations).toEqual(expected);
+		expect(existsSync(sidecar)).toBe(scenario.endsWith("failure"));
+	} finally {
+		vi.restoreAllMocks();
+		syncBuiltinESMExports();
+		rmSync(dir, { recursive: true, force: true });
+	}
+});
+
+it("repairs an archived boundary whose event is present but timestamp is missing", async () => {
+	const dir = mkdtempSync(join(tmpdir(), "fork-migration-repair-"));
+	const project = join(dir, "project");
+	const filename = join(project, ".conduit", "events.db");
+	const archive = join(dir, "fork-metadata-unresolved.json");
+	try {
+		mkdirSync(join(project, ".conduit"), { recursive: true });
+		writeFileSync(
+			join(dir, "recent.json"),
+			serializeRecent([{ directory: project, slug: "project", lastUsed: 1 }]),
+		);
+		writeFileSync(
+			archive,
+			JSON.stringify({
+				child: { parentID: "parent", forkMessageId: "boundary" },
+			}),
+		);
+		await Effect.runPromise(
+			Effect.gen(function* () {
+				const sql = yield* SqlClient.SqlClient;
+				yield* sql`INSERT INTO sessions (id, provider, created_at, updated_at) VALUES ('parent', 'opencode', 1, 1), ('child', 'opencode', 1, 1)`;
+				yield* sql`UPDATE sessions SET parent_id = 'parent', fork_point_event = 'boundary' WHERE id = 'child'`;
+				yield* sql`INSERT INTO messages (id, session_id, role, created_at, updated_at) VALUES ('boundary', 'parent', 'assistant', 200, 200)`;
+			}).pipe(Effect.provide(makePersistenceEffectLayer(filename))),
+		);
+		await Effect.runPromise(migrateForkLineage(dir));
+		await Effect.runPromise(
+			Effect.gen(function* () {
+				const envelope = yield* Stream.runHead(subscribeShell({}));
+				if (envelope._tag !== "Some" || envelope.value._tag !== "snapshot")
+					throw new Error("expected snapshot");
+				expect(envelope.value.rows).toContainEqual(
+					expect.objectContaining({
+						id: "child",
+						parentID: "parent",
+						forkMessageId: "boundary",
+						forkPointTimestamp: 200,
+						forkPointMessageId: "boundary",
+					}),
+				);
+			}).pipe(
+				Effect.provide(
+					Layer.merge(
+						makePersistenceEffectLayer(filename),
+						SessionEventBusLive,
+					),
+				),
+			),
+		);
+		expect(existsSync(archive)).toBe(false);
+	} finally {
+		rmSync(dir, { recursive: true, force: true });
+	}
+});
+
 it("an interrupted archive write leaves no partial archive and can be retried", async () => {
 	const dir = mkdtempSync(join(tmpdir(), "fork-migration-atomic-"));
 	const sidecar = join(dir, "fork-metadata.json");

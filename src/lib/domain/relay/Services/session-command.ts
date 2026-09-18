@@ -425,7 +425,6 @@ export const forkOpenCodeSession = (
 
 		let forkPointEvent = providerForkPointEvent;
 		if (
-			messageId === undefined &&
 			(forkPointEvent === undefined || forkPointTimestamp === undefined) &&
 			readQueryOption._tag === "Some"
 		) {
@@ -433,11 +432,13 @@ export const forkOpenCodeSession = (
 				yield* readQueryOption.value.getSessionMessagesWithParts(
 					parentSessionId,
 				);
-			const localTip = parentMessages.at(-1);
-			// The projection orders by created_at, then id. An empty parent has
-			// no inherited messages to split, so its boundary is explicitly empty.
-			forkPointEvent = localTip?.id;
-			forkPointTimestamp = localTip?.created_at;
+			// A lagging projection cannot replace a known provider boundary.
+			const localBoundary =
+				forkPointEvent === undefined
+					? parentMessages.at(-1)
+					: parentMessages.find((message) => message.id === forkPointEvent);
+			forkPointEvent ??= localBoundary?.id;
+			forkPointTimestamp ??= localBoundary?.created_at;
 		}
 
 		yield* applySessionCommand({
