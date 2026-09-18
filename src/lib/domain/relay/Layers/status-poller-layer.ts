@@ -94,16 +94,26 @@ export const StatusPollerLive: Layer.Layer<
 										},
 									},
 								);
-								const stored = yield* eventStoreOption.value
-									.append(event)
-									.pipe(
-										Effect.provideService(SqlClient.SqlClient, sqlOption.value),
-									);
-								yield* projectionRunnerOption.value
-									.projectEvent(stored)
-									.pipe(
-										Effect.provideService(SqlClient.SqlClient, sqlOption.value),
-									);
+								yield* sqlOption.value.withTransaction(
+									Effect.gen(function* () {
+										const stored = yield* eventStoreOption.value
+											.append(event)
+											.pipe(
+												Effect.provideService(
+													SqlClient.SqlClient,
+													sqlOption.value,
+												),
+											);
+										yield* projectionRunnerOption.value
+											.projectEvent(stored)
+											.pipe(
+												Effect.provideService(
+													SqlClient.SqlClient,
+													sqlOption.value,
+												),
+											);
+									}),
+								);
 							}),
 					}
 				: undefined;

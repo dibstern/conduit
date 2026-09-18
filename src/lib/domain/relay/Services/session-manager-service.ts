@@ -804,52 +804,54 @@ export const persistSessionPermissionMode = (
 		): Effect.Effect<A, E> =>
 			effect.pipe(Effect.provideService(SqlClient.SqlClient, sql));
 
-		const recovered = yield* projectionRunner.isRecovered();
-		if (!recovered) {
-			yield* withSql(projectionRunner.recover()).pipe(
-				Effect.mapError(
-					(cause) =>
-						new SessionManagerError({
-							operation: "persistPermissionMode.recover",
-							cause,
-						}),
-				),
-				Effect.asVoid,
-			);
-		}
-
 		const now = Date.now();
-		const stored = yield* eventStore
-			.append(
-				canonicalEvent(
-					"session.permission_mode_changed",
-					sessionId,
-					{ sessionId, mode },
-					{
-						createdAt: now,
-						metadata: { source: "relay" },
-					},
-				),
+		yield* sql
+			.withTransaction(
+				Effect.gen(function* () {
+					const stored = yield* eventStore
+						.append(
+							canonicalEvent(
+								"session.permission_mode_changed",
+								sessionId,
+								{ sessionId, mode },
+								{
+									createdAt: now,
+									metadata: { source: "relay" },
+								},
+							),
+						)
+						.pipe(
+							Effect.mapError(
+								(cause) =>
+									new SessionManagerError({
+										operation: "persistPermissionMode.append",
+										cause,
+									}),
+							),
+						);
+
+					yield* withSql(projectionRunner.projectEvent(stored)).pipe(
+						Effect.mapError(
+							(cause) =>
+								new SessionManagerError({
+									operation: "persistPermissionMode.project",
+									cause,
+								}),
+						),
+					);
+				}),
 			)
 			.pipe(
-				Effect.mapError(
-					(cause) =>
+				// BEGIN failures are typed; Effect SQL leaves COMMIT failures as defects.
+				Effect.catchTag("SqlError", (cause) =>
+					Effect.fail(
 						new SessionManagerError({
-							operation: "persistPermissionMode.append",
+							operation: "persistPermissionMode.transaction",
 							cause,
 						}),
+					),
 				),
 			);
-
-		yield* withSql(projectionRunner.projectEvent(stored)).pipe(
-			Effect.mapError(
-				(cause) =>
-					new SessionManagerError({
-						operation: "persistPermissionMode.project",
-						cause,
-					}),
-			),
-		);
 	});
 
 export const restoreSessionPermissionModes = () =>
@@ -1471,78 +1473,65 @@ export const SessionManagerServiceLive: Layer.Layer<
 				): Effect.Effect<A, E> =>
 					effect.pipe(Effect.provideService(SqlClient.SqlClient, sql));
 
-				const recovered = yield* projectionRunner.isRecovered();
-				if (!recovered) {
-					yield* withSql(projectionRunner.recover()).pipe(
-						Effect.mapError(
-							(cause) =>
-								new SessionManagerError({
-									operation: "establishOpenCodeSession.recover",
-									cause,
-								}),
-						),
-						Effect.asVoid,
-					);
-				}
-
 				const now = Date.now();
 				const normalizedTitle = normalizeSessionTitle(session.title);
-				const insertedRows = yield* sql<{ readonly id: string }>`
+				yield* sql
+					.withTransaction(
+						Effect.gen(function* () {
+							yield* sql`
 					INSERT OR IGNORE INTO sessions (
 						id, provider, provider_sid, title, status, created_at, updated_at
 					) VALUES (
 						${session.id}, ${providerInstanceId}, ${session.id}, ${normalizedTitle}, 'idle', ${now}, ${now}
 					)
-					RETURNING id`.pipe(
-					Effect.mapError(
-						(cause) =>
-							new SessionManagerError({
-								operation: "establishOpenCodeSession.seed",
-								cause,
-							}),
-					),
-				);
-				const insertedSeed = insertedRows.length > 0;
-				const establish = Effect.gen(function* () {
-					const stored = yield* eventStore
-						.append(
-							canonicalEvent(
-								"session.created",
-								session.id,
-								{
-									sessionId: session.id,
-									title: normalizedTitle,
-									provider: providerInstanceId,
-									providerSessionId: session.id,
-								},
-								{
-									provider: providerInstanceId,
-									createdAt: now,
-									metadata: { source: "relay", synthetic: true },
-								},
-							),
-						)
-						.pipe(
-							Effect.mapError(
-								(cause) =>
-									new SessionManagerError({
-										operation: "establishOpenCodeSession.append",
-										cause,
-									}),
-							),
-						);
+					`.pipe(
+								Effect.mapError(
+									(cause) =>
+										new SessionManagerError({
+											operation: "establishOpenCodeSession.seed",
+											cause,
+										}),
+								),
+							);
+							const stored = yield* eventStore
+								.append(
+									canonicalEvent(
+										"session.created",
+										session.id,
+										{
+											sessionId: session.id,
+											title: normalizedTitle,
+											provider: providerInstanceId,
+											providerSessionId: session.id,
+										},
+										{
+											provider: providerInstanceId,
+											createdAt: now,
+											metadata: { source: "relay", synthetic: true },
+										},
+									),
+								)
+								.pipe(
+									Effect.mapError(
+										(cause) =>
+											new SessionManagerError({
+												operation: "establishOpenCodeSession.append",
+												cause,
+											}),
+									),
+								);
 
-					yield* withSql(projectionRunner.projectEvent(stored)).pipe(
-						Effect.mapError(
-							(cause) =>
-								new SessionManagerError({
-									operation: "establishOpenCodeSession.project",
-									cause,
-								}),
-						),
-					);
+							yield* withSql(projectionRunner.projectEvent(stored)).pipe(
+								Effect.mapError(
+									(cause) =>
+										new SessionManagerError({
+											operation: "establishOpenCodeSession.project",
+											cause,
+										}),
+								),
+							);
 
-					const establishedRows = yield* sql<{ readonly id: string }>`
+							const establishedRows = yield* sql<{ readonly id: string }>`
 						SELECT sessions.id
 						FROM sessions
 						JOIN session_providers
@@ -1554,38 +1543,33 @@ export const SessionManagerServiceLive: Layer.Layer<
 							AND session_providers.provider = ${providerInstanceId}
 							AND session_providers.status = 'active'
 						LIMIT 1`.pipe(
-						Effect.mapError(
-							(cause) =>
-								new SessionManagerError({
+								Effect.mapError(
+									(cause) =>
+										new SessionManagerError({
+											operation: "establishOpenCodeSession.project",
+											cause,
+										}),
+								),
+							);
+							if (establishedRows.length === 0) {
+								return yield* new SessionManagerError({
 									operation: "establishOpenCodeSession.project",
+									cause: `Projected session ${session.id} has no matching active provider binding`,
+								});
+							}
+						}),
+					)
+					.pipe(
+						// BEGIN failures are typed; Effect SQL leaves COMMIT failures as defects.
+						Effect.catchTag("SqlError", (cause) =>
+							Effect.fail(
+								new SessionManagerError({
+									operation: "establishOpenCodeSession.transaction",
 									cause,
 								}),
+							),
 						),
 					);
-					if (establishedRows.length === 0) {
-						return yield* new SessionManagerError({
-							operation: "establishOpenCodeSession.project",
-							cause: `Projected session ${session.id} has no matching active provider binding`,
-						});
-					}
-				});
-
-				yield* establish.pipe(
-					Effect.catchAll((establishmentError) => {
-						if (!insertedSeed) return Effect.fail(establishmentError);
-						return sql`DELETE FROM sessions WHERE id = ${session.id}`.pipe(
-							Effect.asVoid,
-							Effect.mapError(
-								(cleanupError) =>
-									new SessionManagerError({
-										operation: "establishOpenCodeSession.project",
-										cause: { establishmentError, cleanupError },
-									}),
-							),
-							Effect.zipRight(Effect.fail(establishmentError)),
-						);
-					}),
-				);
 			});
 		const serviceListSessions = (options?: ListSessionsOptions) =>
 			Effect.gen(function* () {

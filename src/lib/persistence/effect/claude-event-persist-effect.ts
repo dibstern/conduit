@@ -8,7 +8,6 @@ import {
 	type StoredEvent,
 } from "../events.js";
 import { makeCommitAndSignal } from "./commit-and-signal.js";
-import type { EventStoreError } from "./event-store-effect.js";
 import { EventStoreEffectTag } from "./event-store-effect.js";
 import type { ProjectionRunnerError } from "./projection-runner-effect.js";
 import { ProjectionRunnerEffectTag } from "./projection-runner-effect.js";
@@ -74,7 +73,6 @@ export class ClaudeEventPersistEffectTag extends Context.Tag(
 	"ClaudeEventPersistEffect",
 )<ClaudeEventPersistEffectTag, ClaudeEventPersistEffect>() {}
 
-type PersistFailure = EventStoreError | ProjectionRunnerError | SqlError;
 type ExistingMessagePart = {
 	readonly id: string;
 	readonly text: string | null;
@@ -104,14 +102,6 @@ export const makeClaudeEventPersistEffect = Effect.gen(function* () {
 		effect: Effect.Effect<A, E, SqlClient.SqlClient>,
 	): Effect.Effect<A, E> =>
 		effect.pipe(Effect.provideService(SqlClient.SqlClient, sql));
-
-	const ensureRecovered = (): Effect.Effect<void, PersistFailure> =>
-		Effect.gen(function* () {
-			const recovered = yield* projectionRunner.isRecovered();
-			if (!recovered) {
-				yield* withSql(projectionRunner.recover()).pipe(Effect.asVoid);
-			}
-		});
 
 	const seedClaudeSubagentSession = (input: {
 		readonly childSessionId: string;
@@ -213,7 +203,6 @@ export const makeClaudeEventPersistEffect = Effect.gen(function* () {
 		options?: { readonly publish?: boolean },
 	): Effect.Effect<void, ClaudeEventPersistFailure> =>
 		Effect.gen(function* () {
-			yield* ensureRecovered();
 			yield* LIFECYCLE_ROOT_OPTIONAL_EVENT_TYPES.has(event.type)
 				? requireReadModelSession(
 						event.sessionId,
@@ -230,7 +219,7 @@ export const makeClaudeEventPersistEffect = Effect.gen(function* () {
 	): Effect.Effect<void, ClaudeEventPersistFailure> =>
 		Effect.gen(function* () {
 			if (events.length === 0) return;
-			yield* ensureRecovered();
+
 			for (const sessionId of new Set(events.map((event) => event.sessionId))) {
 				yield* requireSession(sessionId, "persistEvents", "existing-session");
 			}
@@ -243,7 +232,6 @@ export const makeClaudeEventPersistEffect = Effect.gen(function* () {
 		options?: { readonly publish?: boolean },
 	): Effect.Effect<void, ClaudeEventPersistFailure> =>
 		Effect.gen(function* () {
-			yield* ensureRecovered();
 			yield* requireSession(
 				sessionId,
 				"persistUserMessage",
@@ -284,7 +272,6 @@ export const makeClaudeEventPersistEffect = Effect.gen(function* () {
 			sql
 				.withTransaction(
 					Effect.gen(function* () {
-						yield* ensureRecovered();
 						yield* requireSession(
 							input.parentSessionId,
 							"ensureClaudeSubagentSession",
@@ -391,8 +378,12 @@ export const makeClaudeEventPersistEffect = Effect.gen(function* () {
 					existingMessageIds,
 					existingParts,
 				);
-				const stored = yield* eventStore.appendBatch(events);
-				yield* projectBatch(stored);
+				yield* sql.withTransaction(
+					Effect.gen(function* () {
+						const stored = yield* eventStore.appendBatch(events);
+						yield* projectBatch(stored);
+					}),
+				);
 			}).pipe(Effect.mapError(mapPersistError("persistClaudeSubagent")));
 
 	return {
