@@ -174,6 +174,7 @@ describe("Schema Migration", () => {
 				unique: false,
 			},
 			{ name: "idx_messages_turn", table: "messages", unique: false },
+			{ name: "idx_messages_version", table: "messages", unique: false },
 			{
 				name: "idx_pending_approvals_pending",
 				table: "pending_approvals",
@@ -216,6 +217,7 @@ describe("Schema Migration", () => {
 				unique: false,
 			},
 			{ name: "idx_sessions_updated", table: "sessions", unique: false },
+			{ name: "idx_sessions_version", table: "sessions", unique: false },
 			{
 				name: "idx_tool_content_session",
 				table: "tool_content",
