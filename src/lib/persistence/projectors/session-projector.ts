@@ -4,6 +4,8 @@ import type { SqliteClient } from "../sqlite-client.js";
 import type { Projector } from "./projector.js";
 import {
 	getSessionStatements,
+	isSessionRemoval,
+	REMOVE_SESSION_SQL,
 	SESSION_HANDLED_TYPES,
 } from "./session-handlers.js";
 
@@ -27,7 +29,13 @@ export class SessionProjector implements Projector {
 
 	project(event: StoredEvent, db: SqliteClient): void {
 		for (const stmt of getSessionStatements(event)) {
-			db.execute(stmt.sql, [...stmt.params]);
+			// This projector reports nothing — it predates the read-model version
+			// and nothing subscribes to it. The removal still runs the one
+			// sanctioned statement, so there is only ever one way to delete a
+			// session row.
+			if (isSessionRemoval(stmt))
+				db.execute(REMOVE_SESSION_SQL, [stmt.removeSession]);
+			else db.execute(stmt.sql, [...stmt.params]);
 		}
 	}
 }

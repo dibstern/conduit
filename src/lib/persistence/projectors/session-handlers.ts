@@ -1,13 +1,90 @@
+// How a session leaves the read model, and why that is not a rule anyone has to
+// remember.
+//
+// A row that moves announces itself by its version stamp. A row that is deleted
+// leaves nothing behind to stamp, and the `ON DELETE CASCADE` on
+// sessions.parent_id takes the subagent subtree *inside SQLite*, where no
+// statement names it and `RETURNING` never sees it — a recursive-CTE delete
+// still reports only the row it started from, because the cascade has already
+// taken the descendants by the time the statement reaches them. So the removal
+// has to be named before it happens. It is named here, once.
+//
+// The discipline cannot spread to callers, because there is no per-caller step
+// to spread:
+//
+//   - A handler declares `{ removeSession }` rather than writing DELETE SQL, and
+//     the Effect projector's removal arm reads the subtree, performs the
+//     delete, and reports every id. (The legacy projector executes the same
+//     statement but reports nothing; it has no advance to report into.) The
+//     cascade still does all the actual cleanup, in every dependent table; the
+//     pre-read exists only so the bus can be told.
+//   - Anything else that removes a session is reported anyway: the projector
+//     classifies a row a statement wrote but could not stamp afterwards as
+//     removed. Inside the projection path, "delete and say nothing" is not a
+//     thing a statement can do.
+//   - The one remaining way to remove a session silently is to write a second
+//     delete statement. That is what fails loudly:
+//     test/unit/persistence/session-removal-boundary-grep.test.ts allows
+//     exactly one `DELETE FROM sessions` in the whole of src — the
+//     REMOVE_SESSION_SQL declaration below — and allows it to be executed only
+//     by the two projectors. Being inside this file buys nothing: a raw delete
+//     here would be run as an ordinary write, with `RETURNING id` appended, and
+//     would report the row it deleted while the cascade took the subtree in
+//     silence. So a new delete path anywhere, inside the seam or outside it,
+//     breaks the suite the moment it is written, with the fix named in the
+//     failure message. The two deletes that legitimately sit outside —
+//     retention eviction and the legacy skeleton migration — are listed there
+//     with their reasons, and adding to that list is a deliberate act rather
+//     than a silent one.
+//
+// Bead conduit-test-ni8.5.12.
+
 import type {
 	CanonicalEventType,
 	EventPayloadMap,
 	StoredEvent,
 } from "../events.js";
 
-export interface SessionStatement {
+/** A write against `sessions`, executed with `RETURNING id` appended. */
+export interface SessionWrite {
 	readonly sql: string;
 	readonly params: readonly (string | number | null)[];
 }
+
+/**
+ * A session to remove, named rather than written as SQL. The projector owns the
+ * removal because reporting it needs a read the cascade would otherwise make
+ * impossible — see the note at the top of this file.
+ */
+export interface SessionRemoval {
+	readonly removeSession: string;
+}
+
+export type SessionStatement = SessionWrite | SessionRemoval;
+
+export const isSessionRemoval = (
+	statement: SessionStatement,
+): statement is SessionRemoval => "removeSession" in statement;
+
+/**
+ * The only statement in the source that removes session rows. Every projector
+ * that executes a removal runs this one, so the boundary grep has a single
+ * place to allow and a new delete path has nowhere quiet to live.
+ */
+export const REMOVE_SESSION_SQL = "DELETE FROM sessions WHERE id = ?";
+
+/**
+ * The session and every subagent beneath it, read before the removal — the
+ * cascade takes the descendants without naming them, and reports nothing once
+ * they are gone. It returns nothing for a session that is already absent, which
+ * is what keeps a replayed delete quiet.
+ */
+export const SESSION_SUBTREE_SQL = `WITH RECURSIVE subtree(id) AS (
+	SELECT id FROM sessions WHERE id = ?
+	UNION
+	SELECT child.id FROM sessions child JOIN subtree ON child.parent_id = subtree.id
+)
+SELECT id FROM subtree`;
 
 type SessionHandledType =
 	| "session.created"
@@ -123,13 +200,10 @@ export const sessionHandlers: {
 		// message_parts.message_id, and every other FK into sessions/turns carry
 		// ON DELETE CASCADE (see 0010_session_cascade_deletes.sql), so deleting
 		// the session row alone removes every dependent row, including subagent
-		// children reachable through parent_id.
-		return [
-			{
-				sql: "DELETE FROM sessions WHERE id = ?",
-				params: [event.data.sessionId],
-			},
-		];
+		// children reachable through parent_id. The cascade keeps doing that; the
+		// projector names the session subtree first so the removal can be
+		// announced. See the note at the top of this file.
+		return [{ removeSession: event.data.sessionId }];
 	},
 
 	// Lineage only. The row itself is brought into being by session.created —

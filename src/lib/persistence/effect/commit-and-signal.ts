@@ -8,6 +8,7 @@ import type { EventStoreError } from "./event-store-effect.js";
 import { EventStoreEffectTag } from "./event-store-effect.js";
 import type { ProjectionRunnerError } from "./projection-runner-effect.js";
 import { ProjectionRunnerEffectTag } from "./projection-runner-effect.js";
+import { mergeTouches } from "./projectors-effect.js";
 
 export type CommitAndSignalFailure =
 	| EventStoreError
@@ -161,13 +162,22 @@ export const makeCommitAndSignal = Effect.gen(function* () {
 					// Post-commit, so a subscriber that re-queries on the advance
 					// cannot read behind the rows it was told about.
 					if (stored.length > 0) yield* sessionEventBus.value.publish(stored);
-					const sessionIds = [
-						...new Set(advances.flatMap((advance) => advance.sessionIds)),
-					];
-					if (sessionIds.length > 0)
+					// Removals ride the same advance and stay out of `sessionIds`: one
+					// says re-query, the other says drop. Which list a session lands in
+					// is decided by the last projection that touched it, so a body that
+					// deletes and re-creates inside one commit announces the row it
+					// left behind, not the one it destroyed on the way.
+					const { stamped, removed } = mergeTouches(
+						advances.map((advance) => ({
+							stamped: advance.sessionIds,
+							removed: advance.removedSessionIds,
+						})),
+					);
+					if (stamped.length > 0 || removed.length > 0)
 						yield* sessionEventBus.value.publishAdvance({
 							version: Math.max(...advances.map((advance) => advance.version)),
-							sessionIds,
+							sessionIds: stamped,
+							removedSessionIds: removed,
 						});
 				}
 				return result;

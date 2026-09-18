@@ -17,12 +17,21 @@ import { Schema } from "effect";
  * the rows the handlers actually wrote — derived from those writes' RETURNING,
  * not from the event header — so a statement that declined to write (a guarded
  * rename, an ignored INSERT) reports nothing, and a write filed under one
- * session but landing on another reports the one that moved. Removals leave no
- * row to stamp and are reported separately.
+ * session but landing on another reports the one that moved.
+ *
+ * `removedSessionIds` is the same routing hint for sessions that are gone, and
+ * it is a separate field because it asks for the opposite action: a subscriber
+ * re-queries the first list and drops the second. Folding the two together
+ * would leave a removal indistinguishable from a row the subscriber is not
+ * allowed to see, and would send it to the database to find out — the "go look
+ * it up" round trip the subscription exists to remove. The two are disjoint,
+ * and routing is the union: a subscriber watching a session it is about to lose
+ * finds it in the second list.
  */
 export const ReadModelAdvanceSchema = Schema.Struct({
 	version: Schema.Number,
 	sessionIds: Schema.Array(Schema.String),
+	removedSessionIds: Schema.Array(Schema.String),
 });
 
 export type ReadModelAdvance = typeof ReadModelAdvanceSchema.Type;

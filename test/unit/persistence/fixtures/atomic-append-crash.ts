@@ -35,7 +35,7 @@ await Effect.runPromise(
 				project: () =>
 					Effect.sync(() => {
 						process.kill(process.pid, "SIGKILL");
-						return [];
+						return { stamped: [], removed: [] };
 					}),
 			},
 			...createAllEffectProjectors(),

@@ -76,7 +76,9 @@ it("a committed session write announces the session and stamps its row", async (
 				version: number;
 			}>`SELECT version FROM sessions WHERE id = 's1'`;
 
-			expect(advances).toEqual([{ version: 1, sessionIds: ["s1"] }]);
+			expect(advances).toEqual([
+				{ version: 1, sessionIds: ["s1"], removedSessionIds: [] },
+			]);
 			expect(rows).toEqual([{ version: 1 }]);
 		}),
 	);
@@ -107,7 +109,9 @@ it("applySessionCommand announces through the projection path, not its own", asy
 				version: number;
 			}>`SELECT version FROM sessions WHERE id = 's1'`;
 
-			expect(advances).toEqual([{ version: 2, sessionIds: ["s1"] }]);
+			expect(advances).toEqual([
+				{ version: 2, sessionIds: ["s1"], removedSessionIds: [] },
+			]);
 			expect(rows).toEqual([{ version: 2 }]);
 		}),
 	);
@@ -156,8 +160,9 @@ it("a subagent message announces the session that owns the row, not the event's"
 				advances.map((advance) => ({
 					version: advance.version,
 					sessionIds: [...advance.sessionIds].sort(),
+					removedSessionIds: [...advance.removedSessionIds],
 				})),
-			).toEqual([{ version: 3, sessionIds: ["sub"] }]);
+			).toEqual([{ version: 3, sessionIds: ["sub"], removedSessionIds: [] }]);
 		}),
 	);
 });
@@ -438,6 +443,170 @@ it("a write body cannot announce rows its own rollback took back", async () => {
 			const rows = yield* sql<{ title: string }>`
 				SELECT title FROM sessions WHERE id = 's1'`;
 			expect(rows).toEqual([{ title: "First" }]);
+		}),
+	);
+});
+
+const createdSession = (id: string, parentId?: string) =>
+	canonicalEvent(
+		"session.created",
+		id,
+		{
+			sessionId: id,
+			title: id,
+			provider: "claude",
+			...(parentId ? { parentId } : {}),
+		},
+		{ provider: "claude" },
+	);
+
+it("a delete announces the session it removed and the subagents it took with it", async () => {
+	await withPersistence((advances) =>
+		Effect.gen(function* () {
+			const sql = yield* SqlClient.SqlClient;
+			const commit = yield* makeCommitAndSignal;
+
+			yield* commit([createdSession("parent")]);
+			yield* commit([createdSession("sub", "parent")]);
+			yield* commit([createdSession("bystander")]);
+			advances.length = 0;
+
+			yield* applySessionCommand({
+				type: "session.deleted",
+				data: { sessionId: "parent" },
+			});
+
+			// The subagent row goes inside SQLite, through the parent_id cascade,
+			// where no statement names it — so "sub" can only have come from the
+			// handler reading the subtree before the delete.
+			expect(
+				yield* sql<{ id: string }>`SELECT id FROM sessions ORDER BY id`,
+			).toEqual([{ id: "bystander" }]);
+			expect(
+				advances.map((advance) => ({
+					version: advance.version,
+					sessionIds: [...advance.sessionIds].sort(),
+					removedSessionIds: [...advance.removedSessionIds].sort(),
+				})),
+			).toEqual([
+				{ version: 4, sessionIds: [], removedSessionIds: ["parent", "sub"] },
+			]);
+		}),
+	);
+});
+
+it("a delete of a session that is already gone announces nothing", async () => {
+	await withPersistence((advances) =>
+		Effect.gen(function* () {
+			const commit = yield* makeCommitAndSignal;
+
+			yield* commit([createdSession("s1")]);
+			yield* commit([
+				canonicalEvent(
+					"session.deleted",
+					"s1",
+					{ sessionId: "s1" },
+					{ provider: "claude" },
+				),
+			]);
+			advances.length = 0;
+
+			// Replay re-applies the delete. The row is already gone, so there is no
+			// removal to announce — the same rule that keeps a declined write quiet.
+			yield* commit([
+				canonicalEvent(
+					"session.deleted",
+					"s1",
+					{ sessionId: "s1" },
+					{ provider: "claude" },
+				),
+			]);
+
+			expect(advances).toEqual([]);
+		}),
+	);
+});
+
+const deletedSession = (id: string) =>
+	canonicalEvent(
+		"session.deleted",
+		id,
+		{ sessionId: id },
+		{ provider: "claude" },
+	);
+
+// A commit is a sequence, not a set. The advance has to describe the row the
+// commit left behind, so the last thing that happened to a session is the only
+// thing worth announcing about it — unioning the two lists, or letting removal
+// win, tells a subscriber to drop a session that is still there.
+it("a delete followed by a re-create in one commit announces the row that survived", async () => {
+	await withPersistence((advances) =>
+		Effect.gen(function* () {
+			const sql = yield* SqlClient.SqlClient;
+			const commit = yield* makeCommitAndSignal;
+
+			yield* commit([createdSession("s1")]);
+			advances.length = 0;
+
+			yield* commit([deletedSession("s1"), createdSession("s1")]);
+
+			expect(
+				yield* sql<{
+					id: string;
+					version: number;
+				}>`SELECT id, version FROM sessions`,
+			).toEqual([{ id: "s1", version: 2 }]);
+			expect(advances).toEqual([
+				{ version: 2, sessionIds: ["s1"], removedSessionIds: [] },
+			]);
+		}),
+	);
+});
+
+it("a re-create followed by a delete in one commit announces only the removal", async () => {
+	await withPersistence((advances) =>
+		Effect.gen(function* () {
+			const sql = yield* SqlClient.SqlClient;
+			const commit = yield* makeCommitAndSignal;
+
+			yield* commit([createdSession("s2"), deletedSession("s2")]);
+
+			expect(yield* sql<{ id: string }>`SELECT id FROM sessions`).toEqual([]);
+			expect(advances).toEqual([
+				{ version: 1, sessionIds: [], removedSessionIds: ["s2"] },
+			]);
+		}),
+	);
+});
+
+it("a body that projects twice is judged by its last projection, not the union", async () => {
+	await withPersistence((advances) =>
+		Effect.gen(function* () {
+			const sql = yield* SqlClient.SqlClient;
+			const commit = yield* makeCommitAndSignal;
+			const eventStore = yield* EventStoreEffectTag;
+
+			yield* commit([createdSession("s3")]);
+			advances.length = 0;
+
+			// Two projections, two versions, one advance. The seam folds across
+			// projection calls for the same reason the runner folds across events.
+			yield* commit.write((project) =>
+				Effect.gen(function* () {
+					yield* project(yield* eventStore.appendBatch([deletedSession("s3")]));
+					yield* project(yield* eventStore.appendBatch([createdSession("s3")]));
+				}),
+			);
+
+			expect(
+				yield* sql<{
+					id: string;
+					version: number;
+				}>`SELECT id, version FROM sessions`,
+			).toEqual([{ id: "s3", version: 3 }]);
+			expect(advances).toEqual([
+				{ version: 3, sessionIds: ["s3"], removedSessionIds: [] },
+			]);
 		}),
 	);
 });

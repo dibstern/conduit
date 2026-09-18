@@ -2585,7 +2585,7 @@ describe("ProjectionRunnerEffect", () => {
 			project: (_event, ctx) =>
 				Effect.sync(() => {
 					observedContext = ctx;
-					return [];
+					return { stamped: [], removed: [] };
 				}),
 		};
 
@@ -2682,7 +2682,7 @@ describe("ProjectionRunnerEffect", () => {
 			project: () =>
 				Effect.sync(() => {
 					successfulProjectorRan = true;
-					return [];
+					return { stamped: [], removed: [] };
 				}),
 		};
 
@@ -2724,7 +2724,7 @@ describe("ProjectionRunnerEffect", () => {
 					: Effect.gen(function* () {
 							const sql = yield* SqlClient.SqlClient;
 							yield* sql`UPDATE sessions SET title = 'batch-applied' WHERE id = ${event.sessionId}`;
-							return [];
+							return { stamped: [], removed: [] };
 						}),
 		};
 

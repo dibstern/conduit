@@ -51,8 +51,12 @@ function makeLogger(): OpenCodeRuntimeIngressLog & {
 
 function makeProjectionRunner(): ProjectionRunnerEffect {
 	return {
-		projectEvent: vi.fn(() => Effect.succeed({ version: 0, sessionIds: [] })),
-		projectBatch: vi.fn(() => Effect.succeed({ version: 0, sessionIds: [] })),
+		projectEvent: vi.fn(() =>
+			Effect.succeed({ version: 0, sessionIds: [], removedSessionIds: [] }),
+		),
+		projectBatch: vi.fn(() =>
+			Effect.succeed({ version: 0, sessionIds: [], removedSessionIds: [] }),
+		),
 		recover: vi.fn(() =>
 			Effect.succeed({
 				startCursor: 0,

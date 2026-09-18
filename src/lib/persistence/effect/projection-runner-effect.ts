@@ -8,9 +8,11 @@ import { Context, Data, Effect } from "effect";
 import type { ReadModelAdvance } from "../../contracts/read-model-advance.js";
 import type { StoredEvent } from "../events.js";
 import { ProjectorCursorEffectTag } from "./projector-cursor-effect.js";
-import type {
-	EffectProjector,
-	ProjectionContext,
+import {
+	type EffectProjector,
+	mergeTouches,
+	type ProjectionContext,
+	type ProjectionTouch,
 } from "./projectors-effect.js";
 import {
 	decodeStoredEventRow,
@@ -50,8 +52,8 @@ export interface RecoveryResult {
 
 export interface ProjectionRunnerEffect {
 	/**
-	 * Apply events and report how far the read model moved and which sessions
-	 * moved with it. The caller that owns the surrounding transaction publishes
+	 * Apply events and report how far the read model moved, which sessions moved
+	 * with it, and which sessions left. The caller that owns the transaction publishes
 	 * this once the commit lands; nothing below the projection announces, so a
 	 * new write path gets a change signal by projecting and nothing else.
 	 * `version` is the read-model counter this application stamped its rows with,
@@ -176,7 +178,10 @@ export const makeProjectionRunnerEffect = (
 					// the higher version would never query low enough to see them.
 					const version = yield* nextVersion;
 					const ctx: ProjectionContext = { version, replaying };
-					const sessionIds = new Set<string>();
+					// Kept in order, not unioned: a session this event removes and
+					// re-creates ends the projection alive, and the last touch is the
+					// only one that describes the row a subscriber will find.
+					const touches: ProjectionTouch[] = [];
 
 					// Failures propagate. A caller here is applying one known event and can
 					// act on the result — a user deleting a session must not be told it
@@ -203,10 +208,15 @@ export const makeProjectionRunnerEffect = (
 								),
 							),
 						);
-						for (const sessionId of changed) sessionIds.add(sessionId);
+						touches.push(changed);
 					}
 
-					return { version, sessionIds: [...sessionIds] };
+					const touched = mergeTouches(touches);
+					return {
+						version,
+						sessionIds: touched.stamped,
+						removedSessionIds: touched.removed,
+					};
 				}),
 			);
 
@@ -218,10 +228,16 @@ export const makeProjectionRunnerEffect = (
 			SqlClient.SqlClient
 		> => {
 			if (events.length === 0)
-				return Effect.succeed({ version: 0, sessionIds: [] });
+				return Effect.succeed({
+					version: 0,
+					sessionIds: [],
+					removedSessionIds: [],
+				});
 
 			return Effect.gen(function* () {
-				const sessionIds = new Set<string>();
+				// Event order decides the outcome, so the touches are folded, not
+				// unioned — see projectEvent.
+				const touches: ProjectionTouch[] = [];
 
 				// One transaction for the whole batch (S9): a translation that produced
 				// several events lands all-or-nothing, so the read model never shows a
@@ -238,8 +254,7 @@ export const makeProjectionRunnerEffect = (
 						for (const event of events) {
 							const matching = projectorsByEventType.get(event.type) ?? [];
 							for (const projector of matching) {
-								const touched = yield* projector.project(event, ctx);
-								for (const sessionId of touched) sessionIds.add(sessionId);
+								touches.push(yield* projector.project(event, ctx));
 							}
 						}
 
@@ -262,7 +277,12 @@ export const makeProjectionRunnerEffect = (
 					),
 				);
 
-				return { version, sessionIds: [...sessionIds] };
+				const touched = mergeTouches(touches);
+				return {
+					version,
+					sessionIds: touched.stamped,
+					removedSessionIds: touched.removed,
+				};
 			});
 		};
 
