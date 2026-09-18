@@ -1241,7 +1241,30 @@ export const WsRpcRequest = Schema.Union(
 
 export type WsRpcRequest = typeof WsRpcRequest.Type;
 
+export const SubscribeShell = Rpc.make("SubscribeShell", {
+	payload: {
+		projectSlug: NonEmptyString,
+		resumeFromSequence: Schema.optional(Schema.Number),
+	},
+	success: EnvelopeSchema(SessionInfoSchema),
+	error: WsRpcError,
+	stream: true,
+});
+
+export const SubscribeSessionDetail = Rpc.make("SubscribeSessionDetail", {
+	payload: {
+		projectSlug: NonEmptyString,
+		sessionId: NonEmptyString,
+		resumeFromSequence: Schema.optional(Schema.Number),
+	},
+	success: EnvelopeSchema(SessionDetailItemSchema),
+	error: WsRpcError,
+	stream: true,
+});
+
 export const WsRpcGroup = RpcGroup.make(
+	SubscribeShell,
+	SubscribeSessionDetail,
 	Rpc.fromTaggedRequest(GetAgents),
 	Rpc.fromTaggedRequest(GetCommands),
 	Rpc.fromTaggedRequest(GetProjects),
