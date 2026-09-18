@@ -25,6 +25,7 @@ import {
 	type SessionEventBus,
 	SessionEventBusTag,
 } from "../../../src/lib/domain/relay/Services/session-event-bus.js";
+import { makeSessionManagerStateLive } from "../../../src/lib/domain/relay/Services/session-manager-state.js";
 import { EventStoreEffectTag } from "../../../src/lib/persistence/effect/event-store-effect.js";
 import {
 	ReadQueryEffectError,
@@ -62,6 +63,7 @@ const makeLayer = (
 	WsRpcServerLayer.pipe(
 		Layer.provide(
 			Layer.mergeAll(
+				makeSessionManagerStateLive(),
 				Layer.succeed(ReadQueryEffectTag, {
 					getToolContent: () => Effect.succeed(undefined),
 					getSessionStatus: () => Effect.succeed(undefined),
@@ -162,11 +164,21 @@ const deltas = (member: "SubscribeShell" | "SubscribeSessionDetail") =>
 
 describe("RpcTest subscription stream semantics", () => {
 	for (const member of ["SubscribeShell", "SubscribeSessionDetail"] as const) {
+		// SubscribeShell's fork-lineage mapEffect emits singleton wire chunks.
+		// Client mailbox reads may combine them. Session detail keeps source chunks.
+		const handlerChunks =
+			member === "SubscribeShell"
+				? [...initial, ...deltas(member)].map((envelope) => [envelope])
+				: [initial, deltas(member)];
+		const chunkMessages = handlerChunks.map((values) => ({
+			_tag: "Chunk" as const,
+			values,
+		}));
 		const subscribe = (
 			client: RpcClient.RpcClient<RpcGroup.Rpcs<typeof WsRpcGroup>>,
 		): Stream.Stream<unknown, WsRpcError> =>
 			client[member]({ projectSlug: "project", sessionId: "session-1" });
-		it.scoped(`${member} preserves multi-element handler chunks`, () =>
+		it.scoped(`${member} preserves handler chunking`, () =>
 			Effect.gen(function* () {
 				const messages: Observation[] = [];
 				const rpcTest = yield* RpcTest.makeClient(WsRpcGroup);
@@ -178,8 +190,7 @@ describe("RpcTest subscription stream semantics", () => {
 					Stream.runCollect,
 				);
 				expect(messages).toEqual([
-					{ _tag: "Chunk", values: initial },
-					{ _tag: "Chunk", values: deltas(member) },
+					...chunkMessages,
 					{ _tag: "Exit", exit: Exit.void },
 				]);
 				expect(Array.from(chunks, Chunk.toReadonlyArray).flat()).toEqual([
@@ -197,23 +208,17 @@ describe("RpcTest subscription stream semantics", () => {
 					Stream.runDrain,
 					Effect.forkScoped,
 				);
-				const firstAck = yield* Queue.take(acknowledgements);
-				yield* TestClock.adjust("1 millis");
-				// The callback returned, but no Ack has reached the server. A run-ahead
-				// server emits the second Chunk (and Exit) here and fails this equality.
-				expect(messages).toEqual([{ _tag: "Chunk", values: initial }]);
-				yield* firstAck;
-				const secondAck = yield* Queue.take(acknowledgements);
-				yield* TestClock.adjust("1 millis");
-				expect(messages).toEqual([
-					{ _tag: "Chunk", values: initial },
-					{ _tag: "Chunk", values: deltas(member) },
-				]);
-				yield* secondAck;
+				for (let index = 0; index < chunkMessages.length; index++) {
+					const ack = yield* Queue.take(acknowledgements);
+					yield* TestClock.adjust("1 millis");
+					// The callback returned, but this Ack has not reached the server.
+					// Any next Chunk or terminal Exit must wait for its release.
+					expect(messages).toEqual(chunkMessages.slice(0, index + 1));
+					yield* ack;
+				}
 				yield* Fiber.join(consumer);
 				expect(messages).toEqual([
-					{ _tag: "Chunk", values: initial },
-					{ _tag: "Chunk", values: deltas(member) },
+					...chunkMessages,
 					{ _tag: "Exit", exit: Exit.void },
 				]);
 			}).pipe(Effect.provide(makeLayer())),
@@ -277,13 +282,27 @@ describe("RpcTest subscription stream semantics", () => {
 								Effect.provideService(Scope.Scope, consumerScope),
 							);
 							const [chunk] = yield* mailbox.takeAll;
-							expect(Array.from(chunk)).toEqual(initial);
+							// RpcTest buffers both initial envelopes before this read;
+							// the observed transport yields at its response queue.
+							expect(Array.from(chunk)).toEqual(
+								transport === "RpcTest" ? initial : handlerChunks[0],
+							);
+							if (transport === "observed" && member === "SubscribeShell") {
+								const [synchronized] = yield* mailbox.takeAll;
+								expect(Array.from(synchronized)).toEqual([initial[1]]);
+							}
 							expect(released).toEqual([]);
 							yield* Scope.close(consumerScope, Exit.void);
 							yield* TestClock.adjust("1 millis");
 							if (transport === "observed") {
+								expect(
+									messages.filter((message) => message._tag === "Chunk"),
+								).toEqual(
+									chunkMessages.slice(0, member === "SubscribeShell" ? 2 : 1),
+								);
 								expect(messages.map((message) => message._tag)).toEqual([
 									"Chunk",
+									...(member === "SubscribeShell" ? ["Chunk"] : []),
 									"Interrupt",
 									"Exit",
 								]);
