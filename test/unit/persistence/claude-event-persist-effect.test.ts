@@ -91,7 +91,9 @@ describe("ClaudeEventPersistEffect session lifecycle", () => {
 			const publish = vi.fn(() => Effect.void);
 			const busLayer = Layer.succeed(SessionEventBusTag, {
 				publish,
+				publishAdvance: () => Effect.void,
 				subscribe: () => Effect.dieMessage("unused test subscription"),
+				subscribeAdvances: () => Effect.dieMessage("unused test subscription"),
 			} satisfies SessionEventBus);
 			const layer = makePersistenceEffectLayer(filename, undefined, busLayer);
 

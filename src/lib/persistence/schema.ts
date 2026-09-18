@@ -22,6 +22,7 @@ export const SESSION_CASCADE_DELETES_MIGRATION =
 	"0010_session_cascade_deletes.sql";
 export const PROJECTION_FAILURES_MIGRATION = "0011_projection_failures.sql";
 export const READ_MODEL_VERSION_MIGRATION = "0012_read_model_version.sql";
+export const READ_MODEL_COUNTER_MIGRATION = "0013_read_model_counter.sql";
 
 export function readMigrationSql(filename: string): string {
 	return readFileSync(
@@ -91,5 +92,10 @@ export const schemaMigrations: readonly Migration[] = [
 		id: 12,
 		name: "read_model_version",
 		sql: readMigrationSql(READ_MODEL_VERSION_MIGRATION),
+	},
+	{
+		id: 13,
+		name: "read_model_counter",
+		sql: readMigrationSql(READ_MODEL_COUNTER_MIGRATION),
 	},
 ];

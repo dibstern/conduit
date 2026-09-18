@@ -315,7 +315,7 @@ describe("SessionManager Effect", () => {
 				expect(result.left.operation).toBe("renameSession");
 				expect(result.left.cause).toBeInstanceOf(SessionCommandError);
 				if (result.left.cause instanceof SessionCommandError) {
-					expect(result.left.cause.operation).toBe("session.renamed.project");
+					expect(result.left.cause.operation).toBe("session.renamed.commit");
 					expect(result.left.cause.cause).toBeInstanceOf(ProjectionRunnerError);
 					if (result.left.cause.cause instanceof ProjectionRunnerError) {
 						expect(result.left.cause.cause.cause).toBeInstanceOf(
