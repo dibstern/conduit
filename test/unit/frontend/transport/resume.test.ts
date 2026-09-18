@@ -333,6 +333,7 @@ describe("client-side resume at the shared client", () => {
 					expect(first.payload).toEqual({
 						projectSlug: "alpha",
 						sessionId: "s1",
+						textSuffixes: true,
 					});
 
 					yield* links.stream.emit({
@@ -354,6 +355,7 @@ describe("client-side resume at the shared client", () => {
 					expect(reissued.payload).toEqual({
 						projectSlug: "alpha",
 						sessionId: "s1",
+						textSuffixes: true,
 						resumeFromSequence: 12,
 					});
 				}),
@@ -415,6 +417,7 @@ describe("client-side resume at the shared client", () => {
 							expect((yield* links.stream.takeRequest).payload).toEqual({
 								projectSlug: "alpha",
 								sessionId: "s1",
+								textSuffixes: true,
 								resumeFromSequence: point.resumeFrom,
 							});
 
@@ -464,6 +467,7 @@ describe("client-side resume at the shared client", () => {
 						expect(first.payload).toEqual({
 							projectSlug: "alpha",
 							sessionId: "s1",
+							textSuffixes: true,
 							resumeFromSequence: 7,
 						});
 						expect(yield* Queue.take(received)).toEqual(synchronized);
@@ -641,6 +645,7 @@ describe("client-side resume at the shared client", () => {
 						expect((yield* links.stream.takeRequest).payload).toEqual({
 							projectSlug: "alpha",
 							sessionId: "s1",
+							textSuffixes: true,
 						});
 					}),
 				),

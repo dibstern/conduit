@@ -63,6 +63,8 @@
 // signal ni8.5 T-11 keys its switching state off. Resume and switch therefore
 // produce the same observable, which is what T-11 needs and what "one
 // uninterrupted stream" means for S-14.
+// A detail suffix length mismatch is different: its buffer is untrustworthy,
+// so it explicitly requests a cold snapshot and discards the resume cursor.
 //
 // **What is worth re-issuing.** `RpcClientError` — the transport's own error,
 // raised for a dead socket or an undecodable frame — is protocol class and is
@@ -102,6 +104,7 @@ import {
 	Stream,
 } from "effect";
 import type { WsRpcError } from "../../contracts/ws-rpc.js";
+import type { DetailLengthMismatch } from "./session-detail-wire.js";
 
 /**
  * How far the consumer has provably got. `open` is the sequence currently being
@@ -243,7 +246,7 @@ const unsubscribed = Effect.map(
 export const resumeStream = <A extends object>(
 	issue: (
 		resumeFromSequence: number | undefined,
-	) => Stream.Stream<A, WsRpcError | RpcClientError>,
+	) => Stream.Stream<A, WsRpcError | RpcClientError | DetailLengthMismatch>,
 	options: { readonly from?: number | undefined } = {},
 ): Stream.Stream<A, WsRpcError> =>
 	Stream.unwrap(
@@ -275,12 +278,29 @@ export const resumeStream = <A extends object>(
 						if (Chunk.isNonEmpty(Cause.defects(cause)))
 							return Stream.failCause(Cause.flatMap(cause, Cause.die));
 
+						// A suffix can only be decoded against the exact sent prefix.
+						// Ask the existing cold-start path for whole rows, even if the
+						// cursor claims they were delivered before the buffer was lost.
+						if (
+							Chunk.some(
+								Cause.failures(cause),
+								(failure) => failure._tag === "DetailLengthMismatch",
+							)
+						) {
+							return Stream.unwrap(
+								Ref.set(cursor, {
+									closed: undefined,
+									open: undefined,
+									seen: nothingSeen,
+								}).pipe(Effect.as(reissue())),
+							);
+						}
+
 						// The server declining to serve this subscription is a domain
 						// failure, deterministic, and re-issuing it would loop.
 						const domain = Chunk.findFirst(
 							Cause.failures(cause),
-							(failure): failure is WsRpcError =>
-								failure._tag !== "RpcClientError",
+							(failure): failure is WsRpcError => failure._tag === "WsRpcError",
 						);
 						if (Option.isSome(domain)) return Stream.fail(domain.value);
 

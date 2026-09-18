@@ -30,6 +30,7 @@ import {
 	Scope,
 } from "effect";
 import { resumeStream } from "./resume.js";
+import { decodeSessionDetail } from "./session-detail-wire.js";
 import { WsRpcGroup } from "./ws-rpc.js";
 
 export interface WsRpcLocation {
@@ -80,11 +81,14 @@ const makeSubscriptions = (
 	}) =>
 		resumeStream(
 			(resumeFromSequence) =>
-				sockets.stream.SubscribeSessionDetail({
-					projectSlug,
-					sessionId: options.sessionId,
-					...(resumeFromSequence === undefined ? {} : { resumeFromSequence }),
-				}),
+				sockets.stream
+					.SubscribeSessionDetail({
+						projectSlug,
+						sessionId: options.sessionId,
+						textSuffixes: true,
+						...(resumeFromSequence === undefined ? {} : { resumeFromSequence }),
+					})
+					.pipe(decodeSessionDetail),
 			{ from: options.resumeFromSequence },
 		),
 });

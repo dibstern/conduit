@@ -10,9 +10,11 @@ import {
 } from "@effect/rpc";
 import { SqlClient } from "@effect/sql";
 import { describe, it } from "@effect/vitest";
-import { Effect, Layer, Queue, type Scope, Stream } from "effect";
+import { Effect, Layer, Queue, Schema, type Scope, Stream } from "effect";
 import { expect, expectTypeOf } from "vitest";
 import {
+	type SessionDetailEnvelope,
+	SubscribeSessionDetail,
 	type WsRpcError,
 	WsRpcGroup,
 } from "../../../src/lib/contracts/ws-rpc.js";
@@ -20,6 +22,10 @@ import { DaemonEventBusLive } from "../../../src/lib/domain/daemon/Services/daem
 import { SessionEventBusLive } from "../../../src/lib/domain/relay/Services/session-event-bus.js";
 import { SessionManagerServiceLive } from "../../../src/lib/domain/relay/Services/session-manager-service.js";
 import { makeSessionManagerStateLive } from "../../../src/lib/domain/relay/Services/session-manager-state.js";
+import {
+	type DetailLengthMismatch,
+	decodeSessionDetail,
+} from "../../../src/lib/frontend/transport/session-detail-wire.js";
 import { makeCommitAndSignal } from "../../../src/lib/persistence/effect/commit-and-signal.js";
 import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
 import { ProjectionRunnerEffectTag } from "../../../src/lib/persistence/effect/projection-runner-effect.js";
@@ -81,6 +87,91 @@ const commit = (event: CanonicalEvent) =>
 	});
 
 describe("subscription RPC handlers", () => {
+	for (const textSuffixes of [undefined, false, true]) {
+		it.scoped(`negotiates suffixes only for capability ${textSuffixes}`, () =>
+			Effect.gen(function* () {
+				yield* (yield* ProjectionRunnerEffectTag).recover();
+				yield* commit(
+					canonicalEvent(
+						"session.created",
+						"s",
+						{ sessionId: "s", title: "Negotiation", provider: "claude" },
+						{ provider: "claude", createdAt: 1 },
+					),
+				);
+				yield* commit(
+					canonicalEvent(
+						"message.created",
+						"s",
+						{ sessionId: "s", messageId: "m", role: "assistant" },
+						{ provider: "claude", createdAt: 2 },
+					),
+				);
+				yield* commit(
+					canonicalEvent(
+						"text.delta",
+						"s",
+						{ messageId: "m", partId: "p", text: "Hello" },
+						{ provider: "claude", createdAt: 3 },
+					),
+				);
+				const client = yield* RpcTest.makeClient(WsRpcGroup);
+				const wire = yield* Queue.unbounded<SessionDetailEnvelope>();
+				const decoded = yield* Queue.unbounded<SessionDetailEnvelope>();
+				const request = Schema.decodeUnknownSync(
+					SubscribeSessionDetail.payloadSchema,
+				)({
+					projectSlug: "project-a",
+					sessionId: "s",
+					...(textSuffixes === undefined ? {} : { textSuffixes }),
+				});
+				yield* client.SubscribeSessionDetail(request).pipe(
+					Stream.tap((envelope) => Queue.offer(wire, envelope)),
+					decodeSessionDetail,
+					Stream.runForEach((envelope) => Queue.offer(decoded, envelope)),
+					Effect.forkScoped,
+				);
+				for (const tag of ["snapshot", "synchronized"]) {
+					expect((yield* Queue.take(decoded))._tag).toBe(tag);
+					expect(yield* Queue.take(wire)).not.toHaveProperty("textSuffixes");
+				}
+				// An empty delta moves the row version without changing its text.
+				for (const text of [" world", ""]) {
+					yield* commit(
+						canonicalEvent(
+							"text.delta",
+							"s",
+							{ messageId: "m", partId: "p", text },
+							{ provider: "claude", createdAt: 4 },
+						),
+					);
+					expect(yield* Queue.take(decoded)).toMatchObject({
+						item: {
+							message: {
+								text: "Hello world",
+								parts: [{ text: "Hello world" }],
+							},
+						},
+					});
+					const envelope = yield* Queue.take(wire);
+					if (textSuffixes === true) {
+						expect(envelope).toHaveProperty("textSuffixes");
+						expect(envelope).toMatchObject({ item: { message: { text } } });
+					} else {
+						expect(envelope).not.toHaveProperty("textSuffixes");
+						expect(envelope).toMatchObject({
+							item: {
+								message: {
+									text: "Hello world",
+									parts: [{ text: "Hello world" }],
+								},
+							},
+						});
+					}
+				}
+			}).pipe(Effect.provide(makeLayer())),
+		);
+	}
 	it("do not require a caller-owned Scope", () => {
 		expectTypeOf<
 			Extract<Layer.Layer.Context<typeof WsRpcServerLayer>, Scope.Scope>
@@ -231,19 +322,35 @@ describe("subscription RPC handlers", () => {
 						Effect.forkScoped,
 					);
 					const envelopes = yield* Queue.unbounded<unknown>();
+					const wireSubscriptions: Queue.Queue<SessionDetailEnvelope>[] = [];
 					const subscribe = (
 						resumeFromSequence?: number,
-					): Stream.Stream<unknown, WsRpcError> =>
-						client[member]({
+						wire?: Queue.Queue<SessionDetailEnvelope>,
+					): Stream.Stream<unknown, WsRpcError | DetailLengthMismatch> => {
+						const request = {
 							projectSlug: "project-a",
 							sessionId: "session-1",
 							...(resumeFromSequence === undefined
 								? {}
 								: { resumeFromSequence }),
-						});
+						};
+						return member === "SubscribeShell"
+							? client.SubscribeShell(request)
+							: client
+									.SubscribeSessionDetail({ ...request, textSuffixes: true })
+									.pipe(
+										Stream.tap((envelope) =>
+											wire ? Queue.offer(wire, envelope) : Effect.void,
+										),
+										decodeSessionDetail,
+									);
+					};
 					// Each consumer stays live after its boundary; the 33rd must not wait for a permit.
 					for (let i = 0; i < 33; i++) {
-						yield* subscribe().pipe(
+						const wire = yield* Queue.unbounded<SessionDetailEnvelope>();
+						if (member === "SubscribeSessionDetail")
+							wireSubscriptions.push(wire);
+						yield* subscribe(undefined, wire).pipe(
 							Stream.runForEach((envelope) => Queue.offer(envelopes, envelope)),
 							Effect.forkScoped,
 						);
@@ -296,12 +403,44 @@ describe("subscription RPC handlers", () => {
 										message: expect.objectContaining({
 											id: "message-1",
 											text: "Hello world",
+											parts: [
+												expect.objectContaining({
+													id: "part-1",
+													text: "Hello world",
+												}),
+											],
 										}),
 									},
 						),
 					};
 					for (let i = 0; i < 33; i++)
 						expect(yield* Queue.take(envelopes)).toMatchObject(expected);
+					// Check each encoder independently, including subscribers 2..33.
+					for (const wire of wireSubscriptions) {
+						expect(yield* Queue.take(wire)).toMatchObject({
+							_tag: "snapshot",
+							sequence: cursor,
+						});
+						expect(yield* Queue.take(wire)).toEqual({ _tag: "synchronized" });
+						expect(yield* Queue.take(wire)).toMatchObject({
+							_tag: "upsert",
+							sequence: liveVersion,
+							item: {
+								_tag: "transcriptMessage",
+								message: {
+									id: "message-1",
+									text: " world",
+									parts: [
+										expect.objectContaining({ id: "part-1", text: " world" }),
+									],
+								},
+							},
+							textSuffixes: [
+								{ from: 5, total: 11 },
+								{ partId: "part-1", from: 5, total: 11 },
+							],
+						});
+					}
 					const resumed = Array.from(
 						yield* subscribe(cursor).pipe(Stream.take(2), Stream.runCollect),
 					);
