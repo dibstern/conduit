@@ -92,7 +92,9 @@ it.each([
 					reader.close();
 				}
 			}),
+		publishAdvance: () => Effect.void,
 		subscribe: () => Effect.succeed(Stream.empty),
+		subscribeAdvances: () => Effect.succeed(Stream.empty),
 	});
 	const persistence = makePersistenceEffectLayer(
 		filename,

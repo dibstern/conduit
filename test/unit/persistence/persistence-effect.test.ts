@@ -150,6 +150,7 @@ describe("Persistence Effect", () => {
 					"provider_command_tombstones",
 					"provider_command_turns",
 					"provider_state",
+					"read_model_counter",
 					"session_providers",
 					"sessions",
 					"tool_content",
@@ -258,6 +259,7 @@ describe("Persistence Effect", () => {
 				{ migration_id: 11, name: "session_cascade_deletes" },
 				{ migration_id: 12, name: "create_projection_failures" },
 				{ migration_id: 13, name: "read_model_version" },
+				{ migration_id: 14, name: "read_model_counter" },
 			]);
 
 			const legacyMigrationTable = yield* sql<{ name: string }>`

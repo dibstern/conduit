@@ -120,6 +120,7 @@ describe("Migration Runner", () => {
 		const sessionCascadeDeletesMigration = schemaMigrations[9];
 		const projectionFailuresMigration = schemaMigrations[10];
 		const readModelVersionMigration = schemaMigrations[11];
+		const readModelCounterMigration = schemaMigrations[12];
 		if (
 			!baseline ||
 			!metadataMigration ||
@@ -132,7 +133,8 @@ describe("Migration Runner", () => {
 			!sessionsPermissionModeMigration ||
 			!sessionCascadeDeletesMigration ||
 			!projectionFailuresMigration ||
-			!readModelVersionMigration
+			!readModelVersionMigration ||
+			!readModelCounterMigration
 		) {
 			throw new Error("Expected all event-store schema migrations");
 		}
@@ -202,6 +204,11 @@ describe("Migration Runner", () => {
 				id: 12,
 				name: "read_model_version",
 				checksum: calculateMigrationChecksum(readModelVersionMigration),
+			},
+			{
+				id: 13,
+				name: "read_model_counter",
+				checksum: calculateMigrationChecksum(readModelCounterMigration),
 			},
 		]);
 		columns = client
@@ -302,6 +309,7 @@ describe("Migration Runner", () => {
 				{ id: 10, name: "session_cascade_deletes" },
 				{ id: 11, name: "create_projection_failures" },
 				{ id: 12, name: "read_model_version" },
+				{ id: 13, name: "read_model_counter" },
 			],
 			columns: [
 				{
@@ -386,12 +394,14 @@ describe("Migration Runner", () => {
 		const sessionCascadeDeletesMigration = schemaMigrations[9];
 		const projectionFailuresMigration = schemaMigrations[10];
 		const readModelVersionMigration = schemaMigrations[11];
+		const readModelCounterMigration = schemaMigrations[12];
 		if (
 			!turnModelExecutionMigration ||
 			!sessionsPermissionModeMigration ||
 			!sessionCascadeDeletesMigration ||
 			!projectionFailuresMigration ||
-			!readModelVersionMigration
+			!readModelVersionMigration ||
+			!readModelCounterMigration
 		) {
 			throw new Error("Expected remaining event-store migrations");
 		}
@@ -427,6 +437,11 @@ describe("Migration Runner", () => {
 				id: 12,
 				name: "read_model_version",
 				checksum: calculateMigrationChecksum(readModelVersionMigration),
+			},
+			{
+				id: 13,
+				name: "read_model_counter",
+				checksum: calculateMigrationChecksum(readModelCounterMigration),
 			},
 		]);
 		expect(runMigrations(client, schemaMigrations)).toEqual([]);
