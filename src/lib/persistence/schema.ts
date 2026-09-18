@@ -26,6 +26,7 @@ export const READ_MODEL_COUNTER_MIGRATION = "0013_read_model_counter.sql";
 export const SESSIONS_LAST_VIEWED_AT_MIGRATION =
 	"0014_sessions_last_viewed_at.sql";
 export const SENT_ALERTS_MIGRATION = "0015_sent_alerts.sql";
+export const FORK_POINT_TIMESTAMP_MIGRATION = "0016_fork_point_timestamp.sql";
 
 export function readMigrationSql(filename: string): string {
 	return readFileSync(
@@ -110,5 +111,10 @@ export const schemaMigrations: readonly Migration[] = [
 		id: 15,
 		name: "sent_alerts",
 		sql: readMigrationSql(SENT_ALERTS_MIGRATION),
+	},
+	{
+		id: 16,
+		name: "fork_point_timestamp",
+		sql: readMigrationSql(FORK_POINT_TIMESTAMP_MIGRATION),
 	},
 ];

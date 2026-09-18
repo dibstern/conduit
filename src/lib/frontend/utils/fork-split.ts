@@ -17,9 +17,8 @@ export interface ForkSplit {
 /**
  * Split messages at the fork boundary using the fork-point timestamp.
  *
- * Messages with `createdAt < forkPointTimestamp` are inherited from the parent.
- * Messages with `createdAt >= forkPointTimestamp` (or no `createdAt`, e.g. live
- * messages from SSE) are current (new in the fork).
+ * Compare the same (created_at, id) pair used to order persisted transcripts.
+ * The boundary itself is inherited. Messages without createdAt are live.
  *
  * Falls back to forkMessageId matching for sessions without forkPointTimestamp.
  */
@@ -30,24 +29,29 @@ export function splitAtForkPoint(
 ): ForkSplit {
 	// Primary: timestamp-based split (reliable — each message self-identifies).
 	if (forkPointTimestamp != null) {
-		// Find the last message that is inherited (createdAt < forkPointTimestamp).
-		// Messages without createdAt (live SSE messages) are always current.
-		let splitIndex = 0;
-		for (let i = 0; i < messages.length; i++) {
-			// biome-ignore lint/style/noNonNullAssertion: index within bounds
-			const msg = messages[i]!;
+		const inherited: ChatMessage[] = [];
+		const current: ChatMessage[] = [];
+		for (const msg of messages) {
+			const createdAt =
+				msg.messageOrder?.createdAt ??
+				("createdAt" in msg ? msg.createdAt : undefined);
+			const messageId =
+				msg.messageOrder?.id ??
+				("messageId" in msg ? msg.messageId : undefined);
 			if (
-				"createdAt" in msg &&
-				typeof msg.createdAt === "number" &&
-				msg.createdAt < forkPointTimestamp
+				typeof createdAt === "number" &&
+				(createdAt < forkPointTimestamp ||
+					(createdAt === forkPointTimestamp &&
+						forkMessageId !== undefined &&
+						typeof messageId === "string" &&
+						messageId <= forkMessageId))
 			) {
-				splitIndex = i + 1; // include this message in inherited
+				inherited.push(msg);
+			} else {
+				current.push(msg);
 			}
 		}
-		return {
-			inherited: messages.slice(0, splitIndex),
-			current: messages.slice(splitIndex),
-		};
+		return { inherited, current };
 	}
 
 	// Fallback: ID-based matching for sessions created before timestamp tracking.

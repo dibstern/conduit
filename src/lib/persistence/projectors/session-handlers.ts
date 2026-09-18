@@ -117,8 +117,8 @@ export const sessionHandlers: {
 		// other code paths.
 		return [
 			{
-				sql: `INSERT INTO sessions (id, provider, provider_sid, title, status, parent_id, created_at, updated_at)
-					 VALUES (?, ?, ?, ?, 'idle', ?, ?, ?)
+				sql: `INSERT INTO sessions (id, provider, provider_sid, title, status, parent_id, fork_point_event, created_at, updated_at)
+					 VALUES (?, ?, ?, ?, 'idle', ?, ?, ?, ?)
 					 ON CONFLICT (id) DO UPDATE SET
 					     provider = CASE
 					       WHEN EXISTS (
@@ -142,6 +142,7 @@ export const sessionHandlers: {
 				       ELSE sessions.title
 				     END,
 				     parent_id = COALESCE(excluded.parent_id, sessions.parent_id),
+				     fork_point_event = COALESCE(excluded.fork_point_event, sessions.fork_point_event),
 				     updated_at = excluded.updated_at`,
 				params: [
 					event.data.sessionId,
@@ -149,6 +150,7 @@ export const sessionHandlers: {
 					event.data.providerSessionId ?? null,
 					event.data.title,
 					event.data.parentId ?? null,
+					event.data.forkPointEvent ?? null,
 					event.createdAt,
 					event.createdAt,
 				],
@@ -301,5 +303,32 @@ export function getSessionStatements<K extends CanonicalEventType>(
 			event: StoredEvent & { type: T; data: EventPayloadMap[T] },
 		) => readonly SessionStatement[];
 	} = sessionHandlers;
-	return handlers[event.type]?.(event) ?? [];
+	const statements = handlers[event.type]?.(event) ?? [];
+	if (event.type !== "session.created" && event.type !== "session.forked") {
+		return statements;
+	}
+	// Both projector implementations execute this writer before publishing the
+	// session. Reads never need the parent message again.
+	return [
+		...statements,
+		{
+			sql: `UPDATE sessions SET fork_point_timestamp = COALESCE(
+			fork_point_timestamp, ?,
+			(SELECT created_at FROM messages
+			 WHERE session_id = sessions.parent_id AND id = sessions.fork_point_event)
+		), fork_point_message_id = COALESCE(fork_point_message_id, ?, fork_point_event)
+		WHERE id = ?`,
+			params: [
+				"forkPointTimestamp" in event.data &&
+				typeof event.data.forkPointTimestamp === "number"
+					? event.data.forkPointTimestamp
+					: null,
+				"forkPointMessageId" in event.data &&
+				typeof event.data.forkPointMessageId === "string"
+					? event.data.forkPointMessageId
+					: null,
+				event.sessionId,
+			],
+		},
+	];
 }

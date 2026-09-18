@@ -90,13 +90,17 @@ export interface FileTreeEntry extends FileEntry {
 
 // ─── Chat Message Types ──────────────────────────────────────────────────────
 
-export type ChatMessage =
+export type ChatMessage = (
 	| UserMessage
 	| AssistantMessage
 	| ThinkingMessage
 	| ToolMessage
 	| ResultMessage
-	| SystemMessage;
+	| SystemMessage
+) & {
+	/** Persisted message ordering, independent of each activity's display time. */
+	messageOrder?: { createdAt: number; id: string };
+};
 
 export interface UserMessage {
 	type: "user";

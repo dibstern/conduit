@@ -24,10 +24,6 @@ import {
 	saveDaemonConfig,
 } from "../../../src/lib/daemon/config-persistence.js";
 import {
-	loadForkMetadata,
-	saveForkMetadata,
-} from "../../../src/lib/daemon/fork-metadata.js";
-import {
 	DaemonEventBusLive,
 	subscribeToDaemonEvents,
 } from "../../../src/lib/domain/daemon/Services/daemon-pubsub.js";
@@ -63,7 +59,6 @@ import {
 	SessionManagerServiceTag,
 	seedPaginationCursor,
 	sendDualSessionLists,
-	setForkEntry,
 } from "../../../src/lib/domain/relay/Services/session-manager-service.js";
 import {
 	makeSessionManagerStateLive,
@@ -1163,10 +1158,6 @@ describe("SessionManagerService", () => {
 						sessionId,
 					),
 					lastMessageAt: HashMap.set(state.lastMessageAt, sessionId, 123),
-					forkMeta: HashMap.set(state.forkMeta, sessionId, {
-						forkMessageId: "message-1",
-						parentID: "parent",
-					}),
 					paginationCursors: HashMap.set(
 						state.paginationCursors,
 						sessionId,
@@ -1194,7 +1185,6 @@ describe("SessionManagerService", () => {
 						!HashMap.has(state.cachedParentMap, sessionId) &&
 						!HashMap.has(state.cachedParentMap, "child") &&
 						!HashMap.has(state.lastMessageAt, sessionId) &&
-						!HashMap.has(state.forkMeta, sessionId) &&
 						!HashMap.has(state.paginationCursors, sessionId),
 					sessionCount: state.lastKnownSessionCount,
 					daemonEvent: daemonEvent?._tag,
@@ -2198,16 +2188,6 @@ describe("SessionManagerService", () => {
 			Layer.succeed(OpenCodeAPITag, api),
 			makeSessionManagerStateLive({
 				lastMessageAt: HashMap.fromIterable([["child-1", 100]]),
-				forkMeta: HashMap.fromIterable([
-					[
-						"child-1",
-						{
-							parentID: "fallback-parent",
-							forkMessageId: "msg-1",
-							forkPointTimestamp: 90,
-						},
-					],
-				]),
 			}),
 		);
 
@@ -2227,8 +2207,6 @@ describe("SessionManagerService", () => {
 					updatedAt: 100,
 					status: "busy",
 					parentID: "root-1",
-					forkMessageId: "msg-1",
-					forkPointTimestamp: 90,
 				},
 				{
 					id: "root-1",
@@ -2243,59 +2221,6 @@ describe("SessionManagerService", () => {
 		}).pipe(Effect.provide(layer));
 	});
 
-	it.effect("stores fork metadata for subsequent service session lists", () => {
-		const tmpDir = mkdtempSync(join(tmpdir(), "conduit-fork-meta-"));
-		const api = makeMockOpenCodeAPI();
-		vi.spyOn(api.session, "list").mockResolvedValue([
-			{
-				id: "forked-1",
-				projectID: "project-1",
-				directory: "/tmp/project",
-				title: "Forked",
-				version: "1.0.0",
-				time: { created: 50, updated: 60 },
-			},
-		]);
-		const layer = Layer.mergeAll(
-			Layer.succeed(OpenCodeAPITag, api),
-			makeSessionManagerStateLive(),
-		);
-
-		return Effect.gen(function* () {
-			yield* setForkEntry(
-				"forked-1",
-				{
-					parentID: "parent-1",
-					forkMessageId: "msg-1",
-					forkPointTimestamp: 40,
-				},
-				tmpDir,
-			);
-
-			const sessions = yield* listSessions();
-
-			expect(sessions).toEqual([
-				{
-					id: "forked-1",
-					title: "Forked",
-					updatedAt: 50,
-					status: "idle",
-					parentID: "parent-1",
-					forkMessageId: "msg-1",
-					forkPointTimestamp: 40,
-				},
-			]);
-			expect(loadForkMetadata(tmpDir).get("forked-1")).toEqual({
-				parentID: "parent-1",
-				forkMessageId: "msg-1",
-				forkPointTimestamp: 40,
-			});
-		}).pipe(
-			Effect.provide(layer),
-			Effect.ensuring(Effect.sync(() => rmSync(tmpDir, { recursive: true }))),
-		);
-	});
-
 	it.effect("prefers the Effect SQLite read path when available", () => {
 		const api = makeMockOpenCodeAPI();
 		vi.spyOn(api.session, "list").mockRejectedValue(
@@ -2308,23 +2233,13 @@ describe("SessionManagerService", () => {
 				status: "idle",
 				createdAt: 100,
 				updatedAt: 300,
+				parentID: "parent-1",
 			},
 		]);
 		const layer = Layer.mergeAll(
 			Layer.succeed(OpenCodeAPITag, api),
 			Layer.succeed(ReadQueryEffectTag, readQuery),
-			makeSessionManagerStateLive({
-				forkMeta: HashMap.fromIterable([
-					[
-						"forked-1",
-						{
-							parentID: "parent-1",
-							forkMessageId: "msg-1",
-							forkPointTimestamp: 250,
-						},
-					],
-				]),
-			}),
+			makeSessionManagerStateLive({}),
 		);
 
 		return Effect.gen(function* () {
@@ -2332,8 +2247,7 @@ describe("SessionManagerService", () => {
 
 			expect(readQuery.readSessionList).toHaveBeenCalled();
 			expect(api.session.list).not.toHaveBeenCalled();
-			// The read hands back the single session type as-is; only fork lineage,
-			// which no column carries yet, is folded on (ni8.5 §6).
+			// The read hands back the projected session type as-is.
 			expect(sessions).toEqual([
 				{
 					id: "forked-1",
@@ -2342,8 +2256,6 @@ describe("SessionManagerService", () => {
 					createdAt: 100,
 					updatedAt: 300,
 					parentID: "parent-1",
-					forkMessageId: "msg-1",
-					forkPointTimestamp: 250,
 				},
 			]);
 		}).pipe(Effect.provide(layer));
@@ -2621,139 +2533,4 @@ describe("SessionManagerService", () => {
 			]);
 		}).pipe(Effect.provide(layer));
 	});
-
-	it.effect(
-		"live service loads persisted fork metadata into service state",
-		() => {
-			const tmpDir = mkdtempSync(join(tmpdir(), "conduit-fork-meta-live-"));
-			saveForkMetadata(
-				new Map([
-					[
-						"forked-1",
-						{
-							parentID: "parent-1",
-							forkMessageId: "msg-1",
-							forkPointTimestamp: 250,
-						},
-					],
-				]),
-				tmpDir,
-			);
-			const api = makeMockOpenCodeAPI();
-			vi.spyOn(api.session, "list").mockResolvedValue([
-				{
-					id: "forked-1",
-					projectID: "project-1",
-					directory: "/tmp/project",
-					title: "Forked",
-					version: "1.0.0",
-					time: { created: 50, updated: 60 },
-				},
-			]);
-			const config: ProjectRelayConfig = {
-				httpServer: createServer(),
-				opencodeUrl: "http://localhost:4096",
-				projectDir: "/tmp/project",
-				slug: "project",
-				configDir: tmpDir,
-			};
-			const layer = Layer.provideMerge(
-				SessionManagerServiceLive,
-				Layer.mergeAll(
-					Layer.succeed(OpenCodeAPITag, api),
-					Layer.succeed(LoggerTag, makeMockLogger()),
-					Layer.succeed(ConfigTag, config),
-					makeSessionManagerStateLive(),
-					DaemonEventBusLive,
-				),
-			);
-
-			return Effect.gen(function* () {
-				const service = yield* SessionManagerServiceTag;
-				const sessions = yield* service.listSessions();
-
-				expect(sessions).toEqual([
-					{
-						id: "forked-1",
-						title: "Forked",
-						updatedAt: 50,
-						status: "idle",
-						parentID: "parent-1",
-						forkMessageId: "msg-1",
-						forkPointTimestamp: 250,
-					},
-				]);
-			}).pipe(
-				Effect.provide(layer),
-				Effect.ensuring(Effect.sync(() => rmSync(tmpDir, { recursive: true }))),
-			);
-		},
-	);
-
-	it.effect(
-		"live service stores fork metadata in Effect state and disk",
-		() => {
-			const tmpDir = mkdtempSync(join(tmpdir(), "conduit-fork-meta-live-"));
-			const api = makeMockOpenCodeAPI();
-			vi.spyOn(api.session, "list").mockResolvedValue([
-				{
-					id: "forked-1",
-					projectID: "project-1",
-					directory: "/tmp/project",
-					title: "Forked",
-					version: "1.0.0",
-					time: { created: 50, updated: 60 },
-				},
-			]);
-			const config: ProjectRelayConfig = {
-				httpServer: createServer(),
-				opencodeUrl: "http://localhost:4096",
-				projectDir: "/tmp/project",
-				slug: "project",
-				configDir: tmpDir,
-			};
-			const layer = SessionManagerServiceLive.pipe(
-				Layer.provide(
-					Layer.mergeAll(
-						Layer.succeed(OpenCodeAPITag, api),
-						Layer.succeed(LoggerTag, makeMockLogger()),
-						Layer.succeed(ConfigTag, config),
-						makeSessionManagerStateLive(),
-						DaemonEventBusLive,
-					),
-				),
-			);
-			const entry = {
-				parentID: "parent-1",
-				forkMessageId: "msg-1",
-				forkPointTimestamp: 250,
-			};
-
-			return Effect.gen(function* () {
-				const service = yield* SessionManagerServiceTag;
-				yield* service.setForkEntry("forked-1", entry);
-				const sessions = yield* service.listSessions();
-				const parentMap = yield* service.getSessionParentMap();
-
-				expect(sessions).toEqual([
-					{
-						id: "forked-1",
-						title: "Forked",
-						updatedAt: 50,
-						status: "idle",
-						parentID: "parent-1",
-						forkMessageId: "msg-1",
-						forkPointTimestamp: 250,
-					},
-				]);
-				expect(Array.from(parentMap.entries())).toEqual([
-					["forked-1", "parent-1"],
-				]);
-				expect(loadForkMetadata(tmpDir).get("forked-1")).toEqual(entry);
-			}).pipe(
-				Effect.provide(layer),
-				Effect.ensuring(Effect.sync(() => rmSync(tmpDir, { recursive: true }))),
-			);
-		},
-	);
 });

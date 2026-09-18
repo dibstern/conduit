@@ -189,7 +189,7 @@
 		isFork
 			? splitAtForkPoint(
 					currentChat().messages,
-					activeSession?.forkMessageId,
+					activeSession?.forkPointMessageId ?? activeSession?.forkMessageId,
 					activeSession?.forkPointTimestamp,
 				)
 			: null,

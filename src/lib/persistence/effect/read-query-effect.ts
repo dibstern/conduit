@@ -20,12 +20,15 @@ type SessionSelection = Omit<
 	| "forkMessageId"
 	| "messageCount"
 	| "forkPointTimestamp"
+	| "forkPointMessageId"
 	| "pendingQuestions"
 	| "pendingPermissions"
 	| "unseenActivity"
 > & {
 	readonly parentID: string | null;
 	readonly forkMessageId: string | null;
+	readonly forkPointTimestamp: number | null;
+	readonly forkPointMessageId: string | null;
 	// Optional on the wire because `SessionInfo` has a producer with no row
 	// behind it; never optional here — a row read always derives all three.
 	readonly pendingQuestions: number;
@@ -245,6 +248,7 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 		`id, title, status, version,
 		 created_at AS createdAt, updated_at AS updatedAt,
 		 parent_id AS parentID, fork_point_event AS forkMessageId,
+		 fork_point_timestamp AS forkPointTimestamp, fork_point_message_id AS forkPointMessageId,
 		 (SELECT COUNT(*) FROM pending_approvals pa
 		   WHERE pa.session_id = sessions.id
 		     AND pa.status = 'pending' AND pa.type = 'question') AS pendingQuestions,
@@ -261,6 +265,8 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 		version,
 		parentID,
 		forkMessageId,
+		forkPointTimestamp,
+		forkPointMessageId,
 		unseenActivity,
 		...session
 	}: SessionSelection): { item: SessionInfo; version: number } => ({
@@ -269,6 +275,8 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 			unseenActivity: unseenActivity === 1,
 			...(parentID !== null && { parentID }),
 			...(forkMessageId !== null && { forkMessageId }),
+			...(forkPointTimestamp !== null && { forkPointTimestamp }),
+			...(forkPointMessageId !== null && { forkPointMessageId }),
 		},
 		version,
 	});

@@ -8,9 +8,6 @@ import {
 	type StoredEvent,
 } from "../events.js";
 import { makeCommitAndSignal } from "./commit-and-signal.js";
-import { EventStoreEffectTag } from "./event-store-effect.js";
-import type { ProjectionRunnerError } from "./projection-runner-effect.js";
-import { ProjectionRunnerEffectTag } from "./projection-runner-effect.js";
 
 export class ClaudeEventPersistEffectError extends Data.TaggedError(
 	"ClaudeEventPersistEffectError",
@@ -95,11 +92,6 @@ function claudeSubagentSessionCreatedEventId(childSessionId: string): EventId {
 
 export const makeClaudeEventPersistEffect = Effect.gen(function* () {
 	const sql = yield* SqlClient.SqlClient;
-
-	const withSql = <A, E>(
-		effect: Effect.Effect<A, E, SqlClient.SqlClient>,
-	): Effect.Effect<A, E> =>
-		effect.pipe(Effect.provideService(SqlClient.SqlClient, sql));
 
 	const seedClaudeSubagentSession = (input: {
 		readonly childSessionId: string;
