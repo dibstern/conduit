@@ -1,10 +1,11 @@
 import { Rpc } from "@effect/rpc";
-import { Effect, Stream } from "effect";
+import { Effect, HashMap, Ref, Stream } from "effect";
 import {
 	ClaudeSettingsResolveError,
 	ClaudeSettingsTrustBoundaryError,
 } from "../contracts/claude-settings.js";
 import { ProviderInstanceIdSchema } from "../contracts/provider-instance.js";
+import type { SessionInfo } from "../contracts/ws-rpc.js";
 import {
 	loadDaemonConfig,
 	resolveInstanceDriver,
@@ -25,6 +26,7 @@ import {
 	persistSessionPermissionMode,
 	SessionManagerServiceTag,
 } from "../domain/relay/Services/session-manager-service.js";
+import { SessionManagerStateTag } from "../domain/relay/Services/session-manager-state.js";
 import {
 	getPermissionMode,
 	setPermissionMode,
@@ -215,6 +217,32 @@ export const WsRpcServerLayer = WsRpcGroup.toLayer({
 					? {}
 					: { resumeFromSequence: request.resumeFromSequence },
 			).pipe(
+				Stream.mapEffect((envelope) =>
+					Effect.gen(function* () {
+						if (envelope._tag !== "snapshot" && envelope._tag !== "upsert")
+							return envelope;
+						const state = yield* SessionManagerStateTag;
+						const { forkMeta } = yield* Ref.get(state);
+						// This join violates the spec's safety rule: "a server-side join is
+						// safe iff the joined field only changes alongside an event on that
+						// session". Accepted only because conduit-test-ni8.24 deletes it.
+						const withForkLineage = (session: SessionInfo): SessionInfo => {
+							const entry = HashMap.get(forkMeta, session.id);
+							if (entry._tag === "None") return session;
+							const { parentID, forkMessageId, forkPointTimestamp } =
+								entry.value;
+							return {
+								...session,
+								...(session.parentID === undefined && { parentID }),
+								...(session.forkMessageId === undefined && { forkMessageId }),
+								...(forkPointTimestamp !== undefined && { forkPointTimestamp }),
+							};
+						};
+						return envelope._tag === "snapshot"
+							? { ...envelope, rows: envelope.rows.map(withForkLineage) }
+							: { ...envelope, item: withForkLineage(envelope.item) };
+					}),
+				),
 				Stream.mapError(
 					(error) =>
 						new WsRpcError({
