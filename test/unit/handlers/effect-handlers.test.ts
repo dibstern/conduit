@@ -3123,7 +3123,12 @@ describe("handleDeleteSession", () => {
 						model: "claude-sonnet-4-5",
 						provider: "anthropic",
 					});
-					expect(sendDualSessionLists).toHaveBeenCalledTimes(3);
+					// Two viewers get reassigned, and each reassignment goes through
+					// the same view path a human click does -- so each also records
+					// the session read and re-broadcasts the list, which is how the
+					// unread ring clears on other tabs. Three before this feature
+					// plus one per reassigned viewer.
+					expect(sendDualSessionLists).toHaveBeenCalledTimes(5);
 					expect(legacySendDualSessionLists).not.toHaveBeenCalled();
 					expect(ws.broadcast).toHaveBeenCalledWith({
 						type: "session_deleted",

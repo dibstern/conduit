@@ -112,10 +112,11 @@ function attentionDot(page: Page, sessionId: string) {
 }
 
 /**
- * Done-unviewed dot: an outlined circle inside the session item.
+ * Unread ring: an outlined circle inside the session item. Durable read state,
+ * so it arrives as `unread` on a broadcast session list, not as a notification.
  * SessionItem renders: `<span class="... border-brand-b bg-transparent"></span>`.
  */
-function doneUnviewedDot(page: Page, sessionId: string) {
+function unreadRing(page: Page, sessionId: string) {
 	return sessionItem(page, sessionId).locator(
 		"span.border-brand-b.bg-transparent",
 	);
@@ -226,7 +227,7 @@ test.describe("notification reducer indicators", () => {
 		await expect(attentionDot(page, SESS_B)).toHaveCount(0);
 	});
 
-	test("shows done-unviewed dot after done notification_event", async ({
+	test("shows unread ring when the session list says a session is unread", async ({
 		page,
 		baseURL,
 	}) => {
@@ -240,19 +241,33 @@ test.describe("notification reducer indicators", () => {
 		await page.goto(`${baseURL ?? "http://localhost:4173"}${PROJECT_URL}`);
 		await waitForChatReady(page);
 
-		// Verify session B visible, no done dot initially
+		// Verify session B visible, no unread ring initially
 		await expect(sessionItem(page, SESS_B)).toBeVisible({ timeout: 5_000 });
-		await expect(doneUnviewedDot(page, SESS_B)).toHaveCount(0);
+		await expect(unreadRing(page, SESS_B)).toHaveCount(0);
 
-		// Server sends done notification for session B
+		// Read state is durable and server-derived: it reaches the client as the
+		// `unread` field on a re-broadcast session list, never as a notification.
 		control.sendMessage({
-			type: "notification_event",
-			eventType: "done",
-			sessionId: SESS_B,
+			type: "session_list",
+			roots: true,
+			sessions: [
+				{
+					id: SESS_A,
+					title: "Session A — current",
+					updatedAt: Date.now(),
+					messageCount: 2,
+				},
+				{
+					id: SESS_B,
+					title: "Session B — other",
+					updatedAt: Date.now(),
+					messageCount: 6,
+					unread: true,
+				},
+			],
 		});
 
-		// Done-unviewed dot should appear on session B
-		await expect(doneUnviewedDot(page, SESS_B)).toBeVisible({ timeout: 5_000 });
+		await expect(unreadRing(page, SESS_B)).toBeVisible({ timeout: 5_000 });
 	});
 
 	test("AttentionBanner appears when another session has a question", async ({

@@ -13,10 +13,13 @@ const log = createFrontendLogger("notif");
 
 // ─── Per-Session State (discriminated union) ────────────────────────────────
 
+// Read state used to live here as a client-local `done-unviewed` kind. It is
+// now a durable per-session property, projected from session.read /
+// session.unread and delivered as SessionInfo.unread, so this map holds only
+// the live attention signals the server pushes.
 export type SessionNotifState =
 	| { kind: "none" }
-	| { kind: "attention"; questions: number; permissions: number }
-	| { kind: "done-unviewed" };
+	| { kind: "attention"; questions: number; permissions: number };
 
 // ─── State Map ──────────────────────────────────────────────────────────────
 
@@ -29,7 +32,6 @@ export type NotifAction =
 	| { type: "question_resolved"; sessionId: string }
 	| { type: "permission_appeared"; sessionId: string }
 	| { type: "permission_resolved"; sessionId: string }
-	| { type: "session_done"; sessionId: string }
 	| { type: "session_viewed"; sessionId: string }
 	| {
 			type: "reconcile";
@@ -106,32 +108,20 @@ export function reduce(state: NotifMap, action: NotifAction): NotifMap {
 			);
 			return next;
 		}
-		case "session_done": {
-			// Done session can't have pending questions — evict attention, add done-unviewed
-			const next = new Map(state);
-			next.set(action.sessionId, { kind: "done-unviewed" });
-			return next;
-		}
 		case "session_viewed": {
-			// Clear all indicators for the viewed session
+			// Clear the stale attention entry immediately rather than waiting for the
+			// next server list, so opening a session does not leave its dot lit.
 			const next = new Map(state);
 			next.delete(action.sessionId);
 			return next;
 		}
 		case "reconcile": {
-			// Server truth overwrites attention states.
-			// Preserve done-unviewed (client-local).
+			// Server truth, wholesale. Nothing is client-local any more, so there is
+			// no carry-over: anything absent from the server's counts has no
+			// attention state.
 			const next = new Map<string, SessionNotifState>();
-			// First, carry over done-unviewed entries
-			for (const [sid, entry] of state) {
-				if (entry.kind === "done-unviewed") {
-					next.set(sid, entry);
-				}
-			}
-			// Then apply server counts
 			for (const [sid, counts] of action.counts) {
 				if (counts.questions > 0 || counts.permissions > 0) {
-					// Server says this session needs attention — overwrite even if done-unviewed
 					next.set(sid, {
 						kind: "attention",
 						questions: counts.questions,
@@ -171,13 +161,9 @@ export function getNotifState(sessionId: string): SessionNotifState {
 export function getSessionIndicator(
 	sessionId: string,
 	currentSessionId: string | null,
-): "attention" | "done-unviewed" | null {
+): "attention" | null {
 	if (sessionId === currentSessionId) return null;
-	const entry = _state.get(sessionId);
-	if (!entry || entry.kind === "none") return null;
-	if (entry.kind === "attention") return "attention";
-	if (entry.kind === "done-unviewed") return "done-unviewed";
-	return null;
+	return _state.get(sessionId)?.kind === "attention" ? "attention" : null;
 }
 
 /** Get all sessions needing attention (for AttentionBanner). Excludes current session and descendants. */

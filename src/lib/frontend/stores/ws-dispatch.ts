@@ -1078,8 +1078,6 @@ export function handleMessage(msg: RelayMessage): void {
 					dispatch({ type: "question_appeared", sessionId: msg.sessionId });
 				} else if (msg.eventType === "ask_user_resolved") {
 					dispatch({ type: "question_resolved", sessionId: msg.sessionId });
-				} else if (msg.eventType === "done") {
-					dispatch({ type: "session_done", sessionId: msg.sessionId });
 				} else if (msg.eventType === "session_viewed") {
 					dispatch({ type: "session_viewed", sessionId: msg.sessionId });
 				}

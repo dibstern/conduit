@@ -83,8 +83,15 @@
 		session.processing || getSessionPhase(session.id) !== "idle",
 	);
 
-	// Sidebar indicator: attention > done-unviewed > processing
+	// Sidebar indicator: attention > unread > processing
 	const indicator = $derived(getSessionIndicator(session.id, sessionState.currentId));
+
+	// Durable, server-derived: activity this session has not been looked at since.
+	// Suppressed for the open session, which you are looking at by definition and
+	// which the server is about to mark read anyway.
+	const isUnread = $derived(
+		session.unread === true && session.id !== sessionState.currentId,
+	);
 
 	const itemClass = $derived(
 		"session-item group flex items-center gap-1 py-1.5 px-2.5 rounded-md cursor-pointer relative text-base transition-colors duration-100" +
@@ -204,10 +211,10 @@
 		</Button>
 	{/if}
 
-	<!-- Session indicator dot: attention > done-unviewed > processing -->
+	<!-- Session indicator dot: attention > unread > processing -->
 	{#if indicator === "attention"}
 		<span class="w-[7px] h-[7px] rounded-full shrink-0 bg-brand-b"></span>
-	{:else if indicator === "done-unviewed"}
+	{:else if isUnread}
 		<span class="w-[7px] h-[7px] rounded-full shrink-0 border-[1.5px] border-brand-b bg-transparent"></span>
 	{:else if isProcessing}
 		<span

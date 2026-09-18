@@ -131,16 +131,17 @@ describe("notification_event -> notification reducer dispatch", () => {
 		});
 	});
 
-	it("dispatches session_done for done notification_event with sessionId", () => {
+	it("does not dispatch to the reducer for a done notification_event", () => {
+		// Read state is durable now and arrives as SessionInfo.unread on the next
+		// session list, so `done` has nothing to tell this client-side map.
 		handleMessage({
 			type: "notification_event",
 			eventType: "done",
 			sessionId: "sess-3",
 		});
-		expect(dispatchMock).toHaveBeenCalledWith({
-			type: "session_done",
-			sessionId: "sess-3",
-		});
+		expect(dispatchMock).not.toHaveBeenCalledWith(
+			expect.objectContaining({ sessionId: "sess-3" }),
+		);
 	});
 
 	it("does NOT dispatch to reducer when notification_event has no sessionId", () => {

@@ -435,6 +435,24 @@ export const viewSessionForClient = ({
 			log.warn(
 				`client=${clientId} Failed to record read state for ${id}: ${String(readRecorded.left)}`,
 			);
+		} else {
+			// Re-broadcast so the unread ring clears everywhere, not just on the
+			// tab that opened the session: `unread` is derived server-side, so the
+			// only way any client learns it changed is a fresh session list.
+			// Forked, because opening a session must not wait on a fan-out.
+			yield* Effect.forkDaemon(
+				sessionManagerService
+					.sendDualSessionLists((msg) => wsHandler.broadcast(msg))
+					.pipe(
+						Effect.catchAll((err) =>
+							Effect.sync(() =>
+								log.warn(
+									`Failed to broadcast session list after marking ${id} read: ${err}`,
+								),
+							),
+						),
+					),
+			);
 		}
 
 		// Fire-and-forget metadata (unless skipMetadata is set)

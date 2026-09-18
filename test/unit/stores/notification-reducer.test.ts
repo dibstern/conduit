@@ -24,8 +24,6 @@ function attention(
 	return { kind: "attention", questions: q, permissions: p };
 }
 
-const DONE_UNVIEWED: SessionNotifState = { kind: "done-unviewed" };
-
 // ─── question_appeared ──────────────────────────────────────────────────────
 
 describe("question_appeared", () => {
@@ -45,17 +43,6 @@ describe("question_appeared", () => {
 			sessionId: "s1",
 		});
 		expect(result.get("s1")).toEqual(attention(3, 1));
-	});
-
-	it("transitions done-unviewed to attention", () => {
-		const state = mapOf(["s1", DONE_UNVIEWED]);
-		const result = reduce(state, {
-			type: "question_appeared",
-			sessionId: "s1",
-		});
-		// done-unviewed has no question/permission counts, so getAttention returns {0,0}
-		// then increments question to 1
-		expect(result.get("s1")).toEqual(attention(1, 0));
 	});
 
 	it("does not affect other sessions", () => {
@@ -128,15 +115,6 @@ describe("permission_appeared", () => {
 		});
 		expect(result.get("s1")).toEqual(attention(1, 3));
 	});
-
-	it("transitions done-unviewed to attention", () => {
-		const state = mapOf(["s1", DONE_UNVIEWED]);
-		const result = reduce(state, {
-			type: "permission_appeared",
-			sessionId: "s1",
-		});
-		expect(result.get("s1")).toEqual(attention(0, 1));
-	});
 });
 
 // ─── permission_resolved ────────────────────────────────────────────────────
@@ -179,42 +157,11 @@ describe("permission_resolved", () => {
 	});
 });
 
-// ─── session_done ───────────────────────────────────────────────────────────
-
-describe("session_done", () => {
-	it("overwrites attention with done-unviewed", () => {
-		const state = mapOf(["s1", attention(3, 2)]);
-		const result = reduce(state, {
-			type: "session_done",
-			sessionId: "s1",
-		});
-		expect(result.get("s1")).toEqual(DONE_UNVIEWED);
-	});
-
-	it("sets done-unviewed on session with no prior state", () => {
-		const result = reduce(EMPTY, {
-			type: "session_done",
-			sessionId: "s1",
-		});
-		expect(result.get("s1")).toEqual(DONE_UNVIEWED);
-	});
-
-	it("does not affect other sessions", () => {
-		const state = mapOf(["s1", attention(1, 0)], ["s2", attention(0, 1)]);
-		const result = reduce(state, {
-			type: "session_done",
-			sessionId: "s1",
-		});
-		expect(result.get("s1")).toEqual(DONE_UNVIEWED);
-		expect(result.get("s2")).toEqual(attention(0, 1));
-	});
-});
-
 // ─── session_viewed ─────────────────────────────────────────────────────────
 
 describe("session_viewed", () => {
 	it("deletes entry entirely", () => {
-		const state = mapOf(["s1", DONE_UNVIEWED], ["s2", attention(1, 0)]);
+		const state = mapOf(["s1", attention(0, 2)], ["s2", attention(1, 0)]);
 		const result = reduce(state, {
 			type: "session_viewed",
 			sessionId: "s1",
@@ -254,28 +201,9 @@ describe("reconcile", () => {
 		expect(result.get("s1")).toEqual(attention(3, 2));
 	});
 
-	it("preserves done-unviewed when server has no counts", () => {
-		const state = mapOf(["s1", DONE_UNVIEWED]);
-		const counts = new Map<
-			string,
-			{ questions: number; permissions: number }
-		>();
-		const result = reduce(state, { type: "reconcile", counts });
-		expect(result.get("s1")).toEqual(DONE_UNVIEWED);
-	});
-
-	it("overwrites done-unviewed when server says attention", () => {
-		const state = mapOf(["s1", DONE_UNVIEWED]);
-		const counts = new Map([["s1", { questions: 1, permissions: 0 }]]);
-		const result = reduce(state, { type: "reconcile", counts });
-		expect(result.get("s1")).toEqual(attention(1, 0));
-	});
-
 	it("adds new attention sessions from server", () => {
-		const state = mapOf(["s1", DONE_UNVIEWED]);
 		const counts = new Map([["s2", { questions: 0, permissions: 1 }]]);
-		const result = reduce(state, { type: "reconcile", counts });
-		expect(result.get("s1")).toEqual(DONE_UNVIEWED);
+		const result = reduce(EMPTY, { type: "reconcile", counts });
 		expect(result.get("s2")).toEqual(attention(0, 1));
 	});
 
@@ -298,21 +226,21 @@ describe("reconcile", () => {
 	});
 
 	it("handles complex reconcile with mixed state", () => {
+		// Reconcile is now wholesale server truth: nothing survives that the
+		// server did not send, because nothing in this map is client-local.
 		const state = mapOf(
-			["s1", attention(5, 0)], // old attention — will be dropped
-			["s2", DONE_UNVIEWED], // done-unviewed — preserved
-			["s3", DONE_UNVIEWED], // done-unviewed — overwritten by server
+			["s1", attention(5, 0)], // not in server counts — dropped
+			["s3", attention(9, 9)], // in server counts — overwritten
 		);
 		const counts = new Map([
-			["s3", { questions: 2, permissions: 0 }], // overwrite done-unviewed
+			["s3", { questions: 2, permissions: 0 }],
 			["s4", { questions: 0, permissions: 3 }], // new session
 		]);
 		const result = reduce(state, { type: "reconcile", counts });
-		expect(result.has("s1")).toBe(false); // dropped
-		expect(result.get("s2")).toEqual(DONE_UNVIEWED); // preserved
-		expect(result.get("s3")).toEqual(attention(2, 0)); // overwritten
-		expect(result.get("s4")).toEqual(attention(0, 3)); // added
-		expect(result.size).toBe(3);
+		expect(result.has("s1")).toBe(false);
+		expect(result.get("s3")).toEqual(attention(2, 0));
+		expect(result.get("s4")).toEqual(attention(0, 3));
+		expect(result.size).toBe(2);
 	});
 });
 
@@ -320,7 +248,7 @@ describe("reconcile", () => {
 
 describe("reset", () => {
 	it("returns empty map", () => {
-		const state = mapOf(["s1", attention(1, 2)], ["s2", DONE_UNVIEWED]);
+		const state = mapOf(["s1", attention(1, 2)], ["s2", attention(0, 1)]);
 		const result = reduce(state, { type: "reset" });
 		expect(result.size).toBe(0);
 	});
@@ -358,7 +286,6 @@ describe("exhaustive handling", () => {
 			{ type: "question_resolved", sessionId: "s1" },
 			{ type: "permission_appeared", sessionId: "s1" },
 			{ type: "permission_resolved", sessionId: "s1" },
-			{ type: "session_done", sessionId: "s1" },
 			{ type: "session_viewed", sessionId: "s1" },
 			{
 				type: "reconcile",

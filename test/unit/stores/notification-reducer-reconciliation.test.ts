@@ -15,8 +15,6 @@ function attention(q: number, p: number): SessionNotifState {
 	return { kind: "attention", questions: q, permissions: p };
 }
 
-const DONE_UNVIEWED: SessionNotifState = { kind: "done-unviewed" };
-
 /** Apply a sequence of actions to the reducer, returning final state. */
 function applySequence(initial: NotifMap, actions: NotifAction[]): NotifMap {
 	return actions.reduce((state, action) => reduce(state, action), initial);
@@ -42,23 +40,6 @@ describe("reconciliation race conditions", () => {
 				reconcileWith(["s1", { questions: 1, permissions: 0 }]),
 			]);
 			expect(result.get("s1")).toEqual(attention(1, 0));
-		});
-
-		it("reconcile preserves done-unviewed even after question_appeared", () => {
-			// Session goes done-unviewed, then a stale question_appeared overrides it
-			// to attention(1,0). Reconcile with 0 questions should restore done-unviewed.
-			// But reconcile only preserves done-unviewed if the session is currently
-			// done-unviewed in state. Here the question_appeared already overwrote it,
-			// so we need to test the opposite ordering: done after appear, then reconcile.
-			//
-			// Actually: appear transitions to attention, then done transitions to
-			// done-unviewed, then reconcile(0) should preserve done-unviewed.
-			const result = applySequence(EMPTY, [
-				{ type: "question_appeared", sessionId: "s1" },
-				{ type: "session_done", sessionId: "s1" },
-				reconcileWith(["s1", { questions: 0, permissions: 0 }]),
-			]);
-			expect(result.get("s1")).toEqual(DONE_UNVIEWED);
 		});
 
 		it("reconcile clears attention for sessions the server says have 0 questions", () => {
@@ -91,15 +72,6 @@ describe("reconciliation race conditions", () => {
 			// question_resolved force-evicts all questions, permissions preserved
 			expect(result.get("s1")).toEqual(attention(0, 1));
 		});
-
-		it("session_done after reconcile overwrites attention with done-unviewed", () => {
-			// Server says 3 questions, then session completes
-			const result = applySequence(EMPTY, [
-				reconcileWith(["s1", { questions: 3, permissions: 2 }]),
-				{ type: "session_done", sessionId: "s1" },
-			]);
-			expect(result.get("s1")).toEqual(DONE_UNVIEWED);
-		});
 	});
 
 	describe("interleaved sequences", () => {
@@ -125,38 +97,14 @@ describe("reconciliation race conditions", () => {
 			]);
 			expect(result.get("s1")).toEqual(attention(1, 0));
 		});
-
-		it("handles: appear -> done -> reconcile(0) correctly", () => {
-			// appear makes attention, done makes done-unviewed, reconcile(0) preserves done-unviewed
-			const result = applySequence(EMPTY, [
-				{ type: "question_appeared", sessionId: "s1" },
-				{ type: "session_done", sessionId: "s1" },
-				reconcileWith(["s1", { questions: 0, permissions: 0 }]),
-			]);
-			// reconcile preserves done-unviewed when server has zero counts
-			expect(result.get("s1")).toEqual(DONE_UNVIEWED);
-		});
-
-		it("handles: done -> reconcile(1) correctly", () => {
-			// done makes done-unviewed, reconcile says 1 question -> overwrites to attention(1,0)
-			const result = applySequence(EMPTY, [
-				{ type: "session_done", sessionId: "s1" },
-				reconcileWith(["s1", { questions: 1, permissions: 0 }]),
-			]);
-			// Server says there's a pending question, so attention overwrites done-unviewed
-			expect(result.get("s1")).toEqual(attention(1, 0));
-		});
 	});
 
 	describe("multi-session reconciliation", () => {
-		it("reconcile correctly handles mixed sessions: some with questions, some done-unviewed, some clean", () => {
-			// Set up a complex multi-session scenario
+		it("reconcile replaces the whole map with server truth", () => {
 			const state = applySequence(EMPTY, [
 				// s1: has questions from individual events
 				{ type: "question_appeared", sessionId: "s1" },
 				{ type: "question_appeared", sessionId: "s1" },
-				// s2: is done-unviewed
-				{ type: "session_done", sessionId: "s2" },
 				// s3: has permissions
 				{ type: "permission_appeared", sessionId: "s3" },
 				// s4: had questions but was resolved (clean)
@@ -166,13 +114,11 @@ describe("reconciliation race conditions", () => {
 
 			// Verify pre-reconcile state
 			expect(state.get("s1")).toEqual(attention(2, 0));
-			expect(state.get("s2")).toEqual(DONE_UNVIEWED);
 			expect(state.get("s3")).toEqual(attention(0, 1));
 			expect(state.has("s4")).toBe(false);
 
 			// Now reconcile with server truth:
 			// - s1: server says only 1 question (stale events)
-			// - s2: server has no counts (done-unviewed preserved)
 			// - s3: not in server counts (dropped — server says no pending permissions)
 			// - s5: new session server knows about
 			const result = reduce(state, {
@@ -184,11 +130,10 @@ describe("reconciliation race conditions", () => {
 			});
 
 			expect(result.get("s1")).toEqual(attention(1, 0)); // overwritten by server
-			expect(result.get("s2")).toEqual(DONE_UNVIEWED); // preserved (client-local)
 			expect(result.has("s3")).toBe(false); // dropped (not in server counts)
 			expect(result.has("s4")).toBe(false); // was already clean
 			expect(result.get("s5")).toEqual(attention(0, 2)); // new from server
-			expect(result.size).toBe(3); // s1, s2, s5
+			expect(result.size).toBe(2); // s1, s5
 		});
 	});
 });
