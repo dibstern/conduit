@@ -25,7 +25,10 @@ import {
 	removeQuestion,
 	shouldAutoSubmit,
 } from "../../../src/lib/frontend/stores/permissions.svelte.js";
-import { sessionState } from "../../../src/lib/frontend/stores/session.svelte.js";
+import {
+	applySessionSnapshot,
+	clearSessionState,
+} from "../../../src/lib/frontend/stores/session.svelte.js";
 import type {
 	AskUserQuestion,
 	PermissionId,
@@ -50,9 +53,7 @@ beforeEach(() => {
 	permissionsState.pendingPermissions = [];
 	permissionsState.pendingQuestions = [];
 	permissionsState.questionErrors = new Map();
-	sessionState.rootSessions = [];
-	sessionState.allSessions = [];
-	sessionState.searchResults = null;
+	clearSessionState();
 	resetNotifState();
 });
 
@@ -838,36 +839,45 @@ describe("getDescendantSessionIds", () => {
 	});
 
 	it("returns direct child sessions", () => {
-		sessionState.allSessions = [
-			{ id: "parent", title: "Parent", updatedAt: 0 },
-			{ id: "child-1", title: "Child 1", parentID: "parent", updatedAt: 0 },
-			{ id: "child-2", title: "Child 2", parentID: "parent", updatedAt: 0 },
-			{ id: "unrelated", title: "Unrelated", updatedAt: 0 },
-		];
+		applySessionSnapshot(
+			[
+				{ id: "parent", title: "Parent", updatedAt: 0 },
+				{ id: "child-1", title: "Child 1", parentID: "parent", updatedAt: 0 },
+				{ id: "child-2", title: "Child 2", parentID: "parent", updatedAt: 0 },
+				{ id: "unrelated", title: "Unrelated", updatedAt: 0 },
+			],
+			"complete",
+		);
 		const desc = getDescendantSessionIds("parent");
 		expect(desc).toEqual(new Set(["child-1", "child-2"]));
 	});
 
 	it("returns multi-level descendants (grandchildren)", () => {
-		sessionState.allSessions = [
-			{ id: "root", title: "Root", updatedAt: 0 },
-			{ id: "child", title: "Child", parentID: "root", updatedAt: 0 },
-			{
-				id: "grandchild",
-				title: "Grandchild",
-				parentID: "child",
-				updatedAt: 0,
-			},
-		];
+		applySessionSnapshot(
+			[
+				{ id: "root", title: "Root", updatedAt: 0 },
+				{ id: "child", title: "Child", parentID: "root", updatedAt: 0 },
+				{
+					id: "grandchild",
+					title: "Grandchild",
+					parentID: "child",
+					updatedAt: 0,
+				},
+			],
+			"complete",
+		);
 		const desc = getDescendantSessionIds("root");
 		expect(desc).toEqual(new Set(["child", "grandchild"]));
 	});
 
 	it("does not include the parent itself", () => {
-		sessionState.allSessions = [
-			{ id: "parent", title: "Parent", updatedAt: 0 },
-			{ id: "child", title: "Child", parentID: "parent", updatedAt: 0 },
-		];
+		applySessionSnapshot(
+			[
+				{ id: "parent", title: "Parent", updatedAt: 0 },
+				{ id: "child", title: "Child", parentID: "parent", updatedAt: 0 },
+			],
+			"complete",
+		);
 		const desc = getDescendantSessionIds("parent");
 		expect(desc.has("parent")).toBe(false);
 	});
@@ -877,10 +887,13 @@ describe("getDescendantSessionIds", () => {
 
 describe("getLocalPermissions with subagent hierarchy", () => {
 	it("includes permissions from direct child (subagent) sessions", () => {
-		sessionState.allSessions = [
-			{ id: "parent", title: "Parent", updatedAt: 0 },
-			{ id: "child", title: "Child", parentID: "parent", updatedAt: 0 },
-		];
+		applySessionSnapshot(
+			[
+				{ id: "parent", title: "Parent", updatedAt: 0 },
+				{ id: "child", title: "Child", parentID: "parent", updatedAt: 0 },
+			],
+			"complete",
+		);
 		handlePermissionRequest({
 			type: "permission_request",
 			requestId: pid("r1"),
@@ -896,11 +909,14 @@ describe("getLocalPermissions with subagent hierarchy", () => {
 	});
 
 	it("includes permissions from deeply nested subagent sessions", () => {
-		sessionState.allSessions = [
-			{ id: "root", title: "Root", updatedAt: 0 },
-			{ id: "child", title: "Child", parentID: "root", updatedAt: 0 },
-			{ id: "grandchild", title: "GC", parentID: "child", updatedAt: 0 },
-		];
+		applySessionSnapshot(
+			[
+				{ id: "root", title: "Root", updatedAt: 0 },
+				{ id: "child", title: "Child", parentID: "root", updatedAt: 0 },
+				{ id: "grandchild", title: "GC", parentID: "child", updatedAt: 0 },
+			],
+			"complete",
+		);
 		handlePermissionRequest({
 			type: "permission_request",
 			requestId: pid("r1"),
@@ -916,10 +932,13 @@ describe("getLocalPermissions with subagent hierarchy", () => {
 	});
 
 	it("includes own permissions alongside descendant permissions", () => {
-		sessionState.allSessions = [
-			{ id: "parent", title: "Parent", updatedAt: 0 },
-			{ id: "child", title: "Child", parentID: "parent", updatedAt: 0 },
-		];
+		applySessionSnapshot(
+			[
+				{ id: "parent", title: "Parent", updatedAt: 0 },
+				{ id: "child", title: "Child", parentID: "parent", updatedAt: 0 },
+			],
+			"complete",
+		);
 		handlePermissionRequest({
 			type: "permission_request",
 			requestId: pid("r1"),
@@ -940,11 +959,14 @@ describe("getLocalPermissions with subagent hierarchy", () => {
 	});
 
 	it("does not include permissions from unrelated sessions", () => {
-		sessionState.allSessions = [
-			{ id: "parent", title: "Parent", updatedAt: 0 },
-			{ id: "child", title: "Child", parentID: "parent", updatedAt: 0 },
-			{ id: "other", title: "Other", updatedAt: 0 },
-		];
+		applySessionSnapshot(
+			[
+				{ id: "parent", title: "Parent", updatedAt: 0 },
+				{ id: "child", title: "Child", parentID: "parent", updatedAt: 0 },
+				{ id: "other", title: "Other", updatedAt: 0 },
+			],
+			"complete",
+		);
 		handlePermissionRequest({
 			type: "permission_request",
 			requestId: pid("r1"),
@@ -1041,10 +1063,13 @@ describe("getRemotePermissions with unknown session (sessionId='')", () => {
 
 describe("getRemotePermissions with subagent hierarchy", () => {
 	it("excludes permissions from child (subagent) sessions", () => {
-		sessionState.allSessions = [
-			{ id: "parent", title: "Parent", updatedAt: 0 },
-			{ id: "child", title: "Child", parentID: "parent", updatedAt: 0 },
-		];
+		applySessionSnapshot(
+			[
+				{ id: "parent", title: "Parent", updatedAt: 0 },
+				{ id: "child", title: "Child", parentID: "parent", updatedAt: 0 },
+			],
+			"complete",
+		);
 		handlePermissionRequest({
 			type: "permission_request",
 			requestId: pid("r1"),
@@ -1058,11 +1083,14 @@ describe("getRemotePermissions with subagent hierarchy", () => {
 	});
 
 	it("includes permissions from unrelated sessions", () => {
-		sessionState.allSessions = [
-			{ id: "parent", title: "Parent", updatedAt: 0 },
-			{ id: "child", title: "Child", parentID: "parent", updatedAt: 0 },
-			{ id: "other", title: "Other", updatedAt: 0 },
-		];
+		applySessionSnapshot(
+			[
+				{ id: "parent", title: "Parent", updatedAt: 0 },
+				{ id: "child", title: "Child", parentID: "parent", updatedAt: 0 },
+				{ id: "other", title: "Other", updatedAt: 0 },
+			],
+			"complete",
+		);
 		handlePermissionRequest({
 			type: "permission_request",
 			requestId: pid("r1"),
@@ -1078,11 +1106,14 @@ describe("getRemotePermissions with subagent hierarchy", () => {
 	});
 
 	it("excludes deeply nested descendant permissions from remote", () => {
-		sessionState.allSessions = [
-			{ id: "root", title: "Root", updatedAt: 0 },
-			{ id: "child", title: "Child", parentID: "root", updatedAt: 0 },
-			{ id: "grandchild", title: "GC", parentID: "child", updatedAt: 0 },
-		];
+		applySessionSnapshot(
+			[
+				{ id: "root", title: "Root", updatedAt: 0 },
+				{ id: "child", title: "Child", parentID: "root", updatedAt: 0 },
+				{ id: "grandchild", title: "GC", parentID: "child", updatedAt: 0 },
+			],
+			"complete",
+		);
 		handlePermissionRequest({
 			type: "permission_request",
 			requestId: pid("r1"),

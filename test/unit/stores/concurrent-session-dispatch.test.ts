@@ -48,7 +48,11 @@ import {
 	setMessages,
 } from "../../../src/lib/frontend/stores/chat.svelte.js";
 import { getBrowserClientId } from "../../../src/lib/frontend/stores/client-identity.js";
-import { sessionState } from "../../../src/lib/frontend/stores/session.svelte.js";
+import {
+	applySessionUpsert,
+	clearSessionState,
+	sessionState,
+} from "../../../src/lib/frontend/stores/session.svelte.js";
 import {
 	handleMessage,
 	isPerSessionEvent,
@@ -61,7 +65,7 @@ beforeEach(() => {
 	clearMessages();
 	sessionState.currentId = "session-a";
 	for (const id of ["session-a", "session-b", "session-c"]) {
-		sessionState.sessions.set(id, { id, title: "" });
+		applySessionUpsert({ id, title: "" });
 	}
 	vi.useFakeTimers();
 });
@@ -71,7 +75,7 @@ afterEach(() => {
 	clearMessages();
 	sessionActivity.clear();
 	sessionMessages.clear();
-	sessionState.sessions.clear();
+	clearSessionState();
 });
 
 // ─── Tests ──────────────────────────────────────────────────────────────────
@@ -356,7 +360,7 @@ describe("Unknown-session guard — drops events silently", () => {
 
 	it("processes events after session is registered", () => {
 		// Register the session
-		sessionState.sessions.set("new-session", {
+		applySessionUpsert({
 			id: "new-session",
 			title: "",
 		});

@@ -81,7 +81,10 @@ import {
 	clearInstanceState,
 	instanceState,
 } from "../../../src/lib/frontend/stores/instance.svelte.js";
-import { sessionState } from "../../../src/lib/frontend/stores/session.svelte.js";
+import {
+	applySessionUpsert,
+	sessionState,
+} from "../../../src/lib/frontend/stores/session.svelte.js";
 import { handleMessage } from "../../../src/lib/frontend/stores/ws.svelte.js";
 import { applyToolContentResponse } from "../../../src/lib/frontend/stores/ws-dispatch.js";
 import type { ToolMessage } from "../../../src/lib/frontend/types.js";
@@ -97,7 +100,7 @@ beforeEach(() => {
 	clearMessages();
 	// Set currentId and register session BEFORE creating test slots,
 	// so testActivity()/testMessages() register under the correct key ("s1").
-	sessionState.sessions.set("s1", { id: "s1", title: "" });
+	applySessionUpsert({ id: "s1", title: "" });
 	sessionState.currentId = "s1";
 	ta = testActivity();
 	tm = testMessages();

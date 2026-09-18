@@ -11,6 +11,8 @@ import {
 import {
 	clearDiscoveryState,
 	discoveryState,
+	handlePermissionModeInfo,
+	handleVariantInfo,
 } from "../../../src/lib/frontend/stores/discovery.svelte.js";
 import { handleMessage } from "../../../src/lib/frontend/stores/ws-dispatch.js";
 
@@ -36,7 +38,10 @@ describe("Claude settings broadcast dispatch", () => {
 	});
 
 	it("applies default_permission_mode_info without changing the session mode", () => {
-		discoveryState.permissionMode = "acceptEdits";
+		handlePermissionModeInfo({
+			type: "permission_mode_info",
+			mode: "acceptEdits",
+		});
 
 		handleMessage({
 			type: "default_permission_mode_info",
@@ -48,7 +53,11 @@ describe("Claude settings broadcast dispatch", () => {
 	});
 
 	it("applies default_model_info without changing the session variant", () => {
-		discoveryState.currentVariant = "low";
+		handleVariantInfo({
+			type: "variant_info",
+			variant: "low",
+			variants: ["low", "high"],
+		});
 
 		handleMessage({
 			type: "default_model_info",

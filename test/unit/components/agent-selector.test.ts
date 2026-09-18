@@ -4,6 +4,7 @@ import AgentSelector from "../../../src/lib/frontend/components/model/AgentSelec
 import {
 	clearDiscoveryState,
 	discoveryState,
+	handleAgentList,
 } from "../../../src/lib/frontend/stores/discovery.svelte.js";
 import { sessionState } from "../../../src/lib/frontend/stores/session.svelte.js";
 
@@ -35,21 +36,24 @@ describe("AgentSelector", () => {
 	beforeEach(() => {
 		switchAgentRpcSpy.mockClear();
 		clearDiscoveryState();
-		discoveryState.agentProviderScope = { id: "claude", name: "Claude" };
-		discoveryState.agents = [
-			{
-				id: "code",
-				name: "Code",
-				description: "Writes code changes in the workspace",
-			},
-			{
-				id: "plan",
-				name: "Plan",
-				description: "Creates implementation plans without editing files",
-				model: "opus",
-			},
-		];
-		discoveryState.activeAgentId = "code";
+		handleAgentList({
+			type: "agent_list",
+			providerScope: { id: "claude", name: "Claude" },
+			agents: [
+				{
+					id: "code",
+					name: "Code",
+					description: "Writes code changes in the workspace",
+				},
+				{
+					id: "plan",
+					name: "Plan",
+					description: "Creates implementation plans without editing files",
+					model: "opus",
+				},
+			],
+			activeAgentId: "code",
+		});
 		sessionState.currentId = "session-1";
 		vi.stubGlobal("innerHeight", 768);
 		vi.stubGlobal("innerWidth", 1024);
@@ -104,9 +108,11 @@ describe("AgentSelector", () => {
 	});
 
 	it("uses provider scope in the empty state", async () => {
-		discoveryState.agentProviderScope = { id: "opencode", name: "OpenCode" };
-		discoveryState.agents = [];
-		discoveryState.activeAgentId = null;
+		handleAgentList({
+			type: "agent_list",
+			providerScope: { id: "opencode", name: "OpenCode" },
+			agents: [],
+		});
 		const { getByTitle } = render(AgentSelector);
 
 		await fireEvent.click(getByTitle("Switch agent"));
@@ -135,11 +141,15 @@ describe("AgentSelector", () => {
 	it("caps long lists and scrolls the highlighted row into view", async () => {
 		const scrollIntoView = vi.fn();
 		Element.prototype.scrollIntoView = scrollIntoView;
-		discoveryState.agents = Array.from({ length: 24 }, (_, index) => ({
-			id: `agent-${index}`,
-			name: `Agent ${index}`,
-		}));
-		discoveryState.activeAgentId = "agent-0";
+		handleAgentList({
+			type: "agent_list",
+			providerScope: { id: "claude", name: "Claude" },
+			agents: Array.from({ length: 24 }, (_, index) => ({
+				id: `agent-${index}`,
+				name: `Agent ${index}`,
+			})),
+			activeAgentId: "agent-0",
+		});
 		vi.stubGlobal("innerHeight", 220);
 		const { getByTitle } = render(AgentSelector);
 		const trigger = getByTitle("Switch agent") as HTMLButtonElement;

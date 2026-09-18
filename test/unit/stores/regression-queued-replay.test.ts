@@ -52,7 +52,10 @@ import {
 	phaseToProcessing,
 } from "../../../src/lib/frontend/stores/chat.svelte.js";
 import { getBrowserClientId } from "../../../src/lib/frontend/stores/client-identity.js";
-import { sessionState } from "../../../src/lib/frontend/stores/session.svelte.js";
+import {
+	applySessionUpsert,
+	sessionState,
+} from "../../../src/lib/frontend/stores/session.svelte.js";
 import {
 	handleMessage,
 	replayEvents,
@@ -66,8 +69,8 @@ import { assertCacheRealisticEvents } from "../../helpers/cache-events.js";
 beforeEach(() => {
 	sessionState.currentId = "test-session";
 	// Register sessions so routePerSession's unknown-session guard passes.
-	sessionState.sessions.set("test-session", { id: "test-session", title: "" });
-	sessionState.sessions.set("s1", { id: "s1", title: "" });
+	applySessionUpsert({ id: "test-session", title: "" });
+	applySessionUpsert({ id: "s1", title: "" });
 	clearMessages();
 	vi.useFakeTimers();
 });

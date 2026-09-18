@@ -3,7 +3,11 @@ import { flushSync, tick } from "svelte";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import Banners from "../../../src/lib/frontend/components/overlays/Banners.svelte";
-import { discoveryState } from "../../../src/lib/frontend/stores/discovery.svelte.js";
+import {
+	clearDiscoveryState,
+	handleModelInfo,
+	handleModelList,
+} from "../../../src/lib/frontend/stores/discovery.svelte.js";
 import { instanceState } from "../../../src/lib/frontend/stores/instance.svelte.js";
 import { uiState } from "../../../src/lib/frontend/stores/ui.svelte.js";
 import type {
@@ -56,8 +60,7 @@ async function renderBanners() {
 describe("Banners", () => {
 	beforeEach(() => {
 		instanceState.instances = [];
-		discoveryState.providers = [];
-		discoveryState.currentProviderId = "";
+		clearDiscoveryState();
 		uiState.banners = [];
 	});
 
@@ -67,8 +70,8 @@ describe("Banners", () => {
 
 	it("does not show the OpenCode health warning when Claude is available", async () => {
 		instanceState.instances = [unhealthyInstance];
-		discoveryState.providers = [claudeProvider];
-		discoveryState.currentProviderId = "claude";
+		handleModelList({ type: "model_list", providers: [claudeProvider] });
+		handleModelInfo({ type: "model_info", model: "", provider: "claude" });
 
 		await renderBanners();
 
@@ -77,8 +80,11 @@ describe("Banners", () => {
 
 	it("shows the OpenCode health warning when the active provider needs OpenCode", async () => {
 		instanceState.instances = [unhealthyInstance];
-		discoveryState.providers = [claudeProvider, opencodeProvider];
-		discoveryState.currentProviderId = "openai";
+		handleModelList({
+			type: "model_list",
+			providers: [claudeProvider, opencodeProvider],
+		});
+		handleModelInfo({ type: "model_info", model: "", provider: "openai" });
 
 		await renderBanners();
 

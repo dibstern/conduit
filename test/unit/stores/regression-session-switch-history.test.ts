@@ -65,7 +65,11 @@ import {
 	type SessionMessages,
 	setMessages,
 } from "../../../src/lib/frontend/stores/chat.svelte.js";
-import { sessionState } from "../../../src/lib/frontend/stores/session.svelte.js";
+import {
+	applySessionUpsert,
+	clearSessionState,
+	sessionState,
+} from "../../../src/lib/frontend/stores/session.svelte.js";
 import { handleMessage } from "../../../src/lib/frontend/stores/ws.svelte.js";
 import { createToolMessage } from "../../../src/lib/frontend/utils/tool-message-factory.js";
 import type { RelayMessage } from "../../../src/lib/shared-types.js";
@@ -82,12 +86,9 @@ beforeEach(() => {
 	clearMessages();
 	ta = testActivity();
 	tm = testMessages();
-	sessionState.rootSessions = [];
-	sessionState.allSessions = [];
-	sessionState.searchResults = null;
+	clearSessionState();
 	sessionState.currentId = null;
 	sessionState.searchQuery = "";
-	sessionState.hasMore = false;
 	// Register sessions so routePerSession's unknown-session guard passes.
 	const knownSessionIds = [
 		"test-session",
@@ -109,7 +110,7 @@ beforeEach(() => {
 	];
 	for (const id of knownSessionIds) {
 		clearSessionChatState(id);
-		sessionState.sessions.set(id, { id, title: "" });
+		applySessionUpsert({ id, title: "" });
 	}
 	vi.useFakeTimers();
 });

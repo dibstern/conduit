@@ -55,7 +55,11 @@ import {
 	type SessionActivity,
 	type SessionMessages,
 } from "../../../src/lib/frontend/stores/chat.svelte.js";
-import { sessionState } from "../../../src/lib/frontend/stores/session.svelte.js";
+import {
+	applySessionUpsert,
+	clearSessionState,
+	sessionState,
+} from "../../../src/lib/frontend/stores/session.svelte.js";
 import { handleMessage } from "../../../src/lib/frontend/stores/ws.svelte.js";
 import type {
 	AssistantMessage,
@@ -71,6 +75,9 @@ let ta: SessionActivity;
 let tm: SessionMessages;
 
 beforeEach(() => {
+	// Forget the sessions first: dropping a session drops its chat state, so
+	// this has to happen before the slots below are handed out.
+	clearSessionState();
 	clearMessages();
 	for (const id of ["session-a", "session-b"]) {
 		clearSessionChatState(id);
@@ -78,16 +85,12 @@ beforeEach(() => {
 	// Slots live under session-a: every test drives the mirror through it.
 	ta = testActivity("session-a");
 	tm = testMessages("session-a");
-	sessionState.rootSessions = [];
-	sessionState.allSessions = [];
-	sessionState.searchResults = null;
 	sessionState.currentId = null;
 	sessionState.searchQuery = "";
-	sessionState.hasMore = false;
 	// Register sessions so routePerSession's unknown-session guard passes.
-	sessionState.sessions.set("session-a", { id: "session-a", title: "" });
-	sessionState.sessions.set("session-b", { id: "session-b", title: "" });
-	sessionState.sessions.set("s1", { id: "s1", title: "" });
+	applySessionUpsert({ id: "session-a", title: "" });
+	applySessionUpsert({ id: "session-b", title: "" });
+	applySessionUpsert({ id: "s1", title: "" });
 	vi.useFakeTimers();
 });
 

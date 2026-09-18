@@ -46,7 +46,11 @@ import {
 	routerState,
 	syncSlugState,
 } from "../../../src/lib/frontend/stores/router.svelte.js";
-import { sessionState } from "../../../src/lib/frontend/stores/session.svelte.js";
+import {
+	applySessionSnapshot,
+	clearSessionState,
+	sessionState,
+} from "../../../src/lib/frontend/stores/session.svelte.js";
 import type { PermissionId } from "../../../src/lib/frontend/types.js";
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
@@ -64,11 +68,14 @@ function makePerm(id: string, sessionId: string) {
 
 /** Set up session titles so getSessionTitle() returns readable names. */
 function setSessionTitles(titles: Record<string, string>) {
-	sessionState.allSessions = Object.entries(titles).map(([id, title]) => ({
-		id,
-		title,
-		createdAt: Date.now(),
-	})) as typeof sessionState.allSessions;
+	applySessionSnapshot(
+		Object.entries(titles).map(([id, title]) => ({
+			id,
+			title,
+			createdAt: Date.now(),
+		})),
+		"complete",
+	);
 }
 
 /** Render component and flush reactive updates. */
@@ -87,9 +94,10 @@ describe("AttentionBanner merge logic", () => {
 		resetNotifState();
 		permissionsState.pendingPermissions = [];
 		permissionsState.pendingQuestions = [];
+		// Clear first: clearSessionState() resets the client half too, so
+		// selecting the session has to come after it.
+		clearSessionState();
 		sessionState.currentId = "ses_current";
-		sessionState.rootSessions = [];
-		sessionState.allSessions = [];
 		routerState.path = "/p/project-a/s/ses_current";
 		syncSlugState(routerState.path);
 	});
@@ -207,16 +215,19 @@ describe("AttentionBanner merge logic", () => {
 
 	it("excludes descendant sessions from display", async () => {
 		// Set up parent/child relationship: ses_current → ses_child1
-		sessionState.allSessions = [
-			{ id: "ses_current", title: "Parent", createdAt: Date.now() },
-			{
-				id: "ses_child1",
-				title: "Child session",
-				createdAt: Date.now(),
-				parentID: "ses_current",
-			},
-			{ id: "ses_other1", title: "Unrelated session", createdAt: Date.now() },
-		] as typeof sessionState.allSessions;
+		applySessionSnapshot(
+			[
+				{ id: "ses_current", title: "Parent", createdAt: Date.now() },
+				{
+					id: "ses_child1",
+					title: "Child session",
+					createdAt: Date.now(),
+					parentID: "ses_current",
+				},
+				{ id: "ses_other1", title: "Unrelated session", createdAt: Date.now() },
+			],
+			"complete",
+		);
 
 		// Permissions for child session should NOT appear (shown inline)
 		permissionsState.pendingPermissions = [

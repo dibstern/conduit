@@ -45,7 +45,11 @@ import {
 	sessionActivity,
 	sessionMessages,
 } from "../../../src/lib/frontend/stores/chat.svelte.js";
-import { sessionState } from "../../../src/lib/frontend/stores/session.svelte.js";
+import {
+	applySessionUpsert,
+	clearSessionState,
+	sessionState,
+} from "../../../src/lib/frontend/stores/session.svelte.js";
 import { handleMessage } from "../../../src/lib/frontend/stores/ws-dispatch.js";
 import type { RelayMessage } from "../../../src/lib/shared-types.js";
 
@@ -56,7 +60,7 @@ beforeEach(() => {
 	sessionState.currentId = "session-a";
 	// Register all sessions used in tests.
 	for (const id of ["session-a", "session-b", "session-c"]) {
-		sessionState.sessions.set(id, { id, title: "" });
+		applySessionUpsert({ id, title: "" });
 	}
 	vi.useFakeTimers();
 });
@@ -66,7 +70,7 @@ afterEach(() => {
 	clearMessages();
 	sessionActivity.clear();
 	sessionMessages.clear();
-	sessionState.sessions.clear();
+	clearSessionState();
 });
 
 // ─── Tests ──────────────────────────────────────────────────────────────────

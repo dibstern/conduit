@@ -1,5 +1,6 @@
 // ─── Session Store ───────────────────────────────────────────────────────────
-// Manages session list, active session, search, and date grouping.
+// Server-owned session rows on one side, this tab's selection and search on
+// the other. The two halves never write each other.
 
 import { SvelteMap } from "svelte/reactivity";
 import type { ListSessionsResponse } from "../transport/ws-rpc.js";
@@ -15,6 +16,7 @@ import {
 } from "../transport/ws-rpc-client.js";
 import type {
 	DateGroups,
+	Immutable,
 	RelayMessage,
 	RequestId,
 	SessionInfo,
@@ -35,20 +37,51 @@ import {
 import { getCurrentSlug, navigate } from "./router.svelte.js";
 import { uiState } from "./ui.svelte.js";
 
-// ─── State ──────────────────────────────────────────────────────────────────
+// ─── Server-owned state ─────────────────────────────────────────────────────
+// Every session the server has told us about, keyed by id — one representation,
+// not a map plus two arrays kept in step by hand. The `applySession*` functions
+// below are the only writers, and every row they store is a whole `SessionInfo`
+// straight off the wire. Nothing outside this module can write it: `sessionState`
+// hands it out as a `ReadonlyMap`.
 
-export const sessionState = $state({
-	rootSessions: [] as SessionInfo[],
-	allSessions: [] as SessionInfo[],
+const serverSessions = new SvelteMap<string, SessionInfo>();
+
+// ─── Client-owned state ─────────────────────────────────────────────────────
+// What this tab is looking at. Applying server rows never touches it.
+
+const clientSession = $state({
 	currentId: null as string | null,
 	searchQuery: "",
-	searchResults: null as SessionInfo[] | null,
-	hasMore: false,
-	/** Id-keyed map maintained alongside rootSessions/allSessions arrays.
-	 *  Used by the dispatcher's unknown-session guard (O(1) membership check)
-	 *  and by clearSessionChatState's diff path. */
-	sessions: new SvelteMap<string, SessionInfo>(),
+	/** Ids the last server search matched, or null when no search is running.
+	 *  Ids rather than rows, so a session renamed or deleted mid-search follows
+	 *  the server half instead of a snapshot that nothing updates. */
+	searchMatchIds: null as string[] | null,
 });
+
+/** Read view over both halves. The server half is read-only by type; the
+ *  client half is a plain setting. */
+export const sessionState = {
+	/** Server-owned. Write through `applySessionSnapshot`, `applySessionUpsert`
+	 *  or `applySessionRemoved`. */
+	get sessions(): ReadonlyMap<string, Immutable<SessionInfo>> {
+		return serverSessions;
+	},
+	get currentId(): string | null {
+		return clientSession.currentId;
+	},
+	set currentId(id: string | null) {
+		clientSession.currentId = id;
+	},
+	get searchQuery(): string {
+		return clientSession.searchQuery;
+	},
+	set searchQuery(query: string) {
+		setSearchQuery(query);
+	},
+	get searchMatchIds(): readonly string[] | null {
+		return clientSession.searchMatchIds;
+	},
+};
 
 // ─── Session Creation State Machine ──────────────────────────────────────────
 // Guards the new-session flow with typed phases. Prevents double-clicks,
@@ -202,91 +235,54 @@ export function sendNewSession(
 	return requestId;
 }
 
-// ─── Helpers ────────────────────────────────────────────────────────────────
+// ─── Applying server rows ───────────────────────────────────────────────────
+// The only door into the server half.
 
-/** Find a session by ID across both cached arrays.
- *  Prefers allSessions (more complete), falls back to rootSessions (available earlier). */
-export function findSession(id: string): SessionInfo | undefined {
-	return (
-		sessionState.allSessions.find((s) => s.id === id) ??
-		sessionState.rootSessions.find((s) => s.id === id)
-	);
-}
+/** What a snapshot of the session list covers. */
+export type SessionSnapshotScope =
+	/** Every session the server has: a row it omits has been removed. */
+	| "complete"
+	/** Part of the list: a row it omits says nothing. */
+	| "partial";
 
-// ─── Derived getters ────────────────────────────────────────────────────────
-// Components should wrap in $derived() for reactive caching.
-
-/** Get sessions filtered by search query (case-insensitive title match).
- *  Subagent sessions (those with a parentID) are excluded when the
- *  hideSubagentSessions UI toggle is active (default). */
-export function getFilteredSessions(): SessionInfo[] {
-	// Active search results take priority (already filtered by server).
-	// Reconcile against the live session map: searchResults is a snapshot the
-	// removal paths never touch, so without this a session deleted during an
-	// active search keeps rendering until the query is cleared.
-	if (sessionState.searchResults !== null) {
-		return sessionState.searchResults.flatMap((session) => {
-			const liveSession = sessionState.sessions.get(session.id);
-			return liveSession ? [liveSession] : [];
-		});
-	}
-	let sessions: SessionInfo[];
-	if (uiState.hideSubagentSessions) {
-		sessions = sessionState.rootSessions;
-	} else {
-		// Fall back to rootSessions while allSessions hasn't loaded yet
-		sessions =
-			sessionState.allSessions.length > 0
-				? sessionState.allSessions
-				: sessionState.rootSessions;
-	}
-	const query = sessionState.searchQuery.toLowerCase().trim();
-	if (!query) return sessions;
-	return sessions.filter((s) => s.title.toLowerCase().includes(query));
-}
-
-/** Get sessions grouped by date: today, yesterday, older. */
-export function getDateGroups(): DateGroups {
-	return groupSessionsByDate(getFilteredSessions());
-}
-
-/** Get the currently active session object (or undefined). */
-export function getActiveSession(): SessionInfo | undefined {
-	return findSession(sessionState.currentId ?? "");
-}
-
-// ─── Pure helpers ───────────────────────────────────────────────────────────
-
-/** Group sessions into today/yesterday/older buckets. */
-export function groupSessionsByDate(
-	sessions: SessionInfo[],
-	now?: Date,
-): DateGroups {
-	const ref = now ?? new Date();
-	const todayStart = new Date(ref);
-	todayStart.setHours(0, 0, 0, 0);
-	const yesterdayStart = new Date(todayStart);
-	yesterdayStart.setDate(yesterdayStart.getDate() - 1);
-
-	const groups: DateGroups = { today: [], yesterday: [], older: [] };
-
-	for (const s of sessions) {
-		const updated = s.updatedAt
-			? new Date(s.updatedAt)
-			: s.createdAt
-				? new Date(s.createdAt)
-				: new Date(0);
-
-		if (updated >= todayStart) {
-			groups.today.push(s);
-		} else if (updated >= yesterdayStart) {
-			groups.yesterday.push(s);
-		} else {
-			groups.older.push(s);
+/** Apply a snapshot of the session list.
+ *
+ *  Only a `"complete"` snapshot reaps. A roots-only or search snapshot does
+ *  not, because a session we hold may be a child that has not learned its
+ *  `parentID` yet, and its absence from a roots list is not a deletion. */
+export function applySessionSnapshot(
+	rows: readonly SessionInfo[],
+	scope: SessionSnapshotScope,
+): void {
+	if (scope === "complete") {
+		const incoming = new Set(rows.map((row) => row.id));
+		for (const id of [...serverSessions.keys()]) {
+			if (!incoming.has(id)) forgetSession(id);
 		}
 	}
+	for (const row of rows) serverSessions.set(row.id, row);
+}
 
-	return groups;
+/** Apply a single session row the server has created or changed. */
+export function applySessionUpsert(row: SessionInfo): void {
+	serverSessions.set(row.id, row);
+}
+
+/** Apply a session the server has deleted. */
+export function applySessionRemoved(id: string): void {
+	forgetSession(id);
+}
+
+/** Drop our copy of a session and the chat state hanging off it. */
+function forgetSession(id: string): void {
+	serverSessions.delete(id);
+	clearSessionChatState(id);
+	// A session that is gone cannot still be the one we are looking at. The
+	// selection is what makes a session routable before its row arrives, so
+	// leaving it behind lets a late event rebuild the chat state we just threw
+	// away — and deleting the last session leaves no other for the server to
+	// switch us to, so nothing else would clear it.
+	if (clientSession.currentId === id) clientSession.currentId = null;
 }
 
 // ─── Message handlers ───────────────────────────────────────────────────────
@@ -297,54 +293,14 @@ export function handleSessionList(
 	const { sessions, roots, search } = msg;
 	if (!Array.isArray(sessions)) return;
 
-	// Search results go to a separate field — never overwrite main arrays.
-	// Guard: skip diff if incoming list is a filtered/search payload.
 	if (search) {
-		sessionState.searchResults = sessions;
+		applySessionSnapshot(sessions, "partial");
+		clientSession.searchMatchIds = sessions.map((s) => s.id);
 		return;
 	}
-
-	// ── Diff logic: detect removed sessions and clean up chat state ────
-	// Snapshot current session IDs before applying incoming list.
-	const previousIds = new Set(sessionState.sessions.keys());
-
-	// Clear search results when a fresh full list arrives (not during active search)
-	if (!sessionState.searchQuery.trim()) {
-		sessionState.searchResults = null;
-	}
-
-	if (roots === true) {
-		sessionState.rootSessions = sessions;
-	} else if (roots === false) {
-		sessionState.allSessions = sessions;
-	} else {
-		// Backward-compat: untagged session_list (no `roots` field) contains
-		// a mixed bag of sessions. Populate both arrays so the sidebar works
-		// regardless of the subagent toggle state.
-		sessionState.rootSessions = sessions.filter((s) => !s.parentID);
-		sessionState.allSessions = sessions;
-	}
-
-	// Populate id-keyed sessions Map for O(1) membership checks.
-	// Used by routePerSession's unknown-session guard.
-	const incomingIds = new Set<string>();
-	for (const s of sessions) {
-		sessionState.sessions.set(s.id, s);
-		incomingIds.add(s.id);
-	}
-
-	// Clean up chat state for sessions that were removed from the list.
-	// roots:false and legacy untagged lists both carry every session, so they
-	// are authoritative for removals. roots:true lists only carry roots, and a
-	// child may not have learned its parentID yet, so they never reap.
-	if (roots !== true) {
-		for (const id of previousIds) {
-			if (!incomingIds.has(id)) {
-				clearSessionChatState(id);
-				sessionState.sessions.delete(id);
-			}
-		}
-	}
+	// An untagged list (legacy sources) carries a mixed bag of roots and
+	// children, so like a roots:false list it covers everything.
+	applySessionSnapshot(sessions, roots === true ? "partial" : "complete");
 }
 
 const sessionInfoFromRpc = (
@@ -386,18 +342,13 @@ export function handleSessionSwitched(
 ): void {
 	const { id, requestId } = msg;
 	if (id) {
-		sessionState.currentId = id;
-		if (msg.parentID) {
-			const session = { id, title: "", parentID: msg.parentID };
-			if (!sessionState.allSessions.some((candidate) => candidate.id === id)) {
-				sessionState.allSessions = [session, ...sessionState.allSessions];
-			}
-			sessionState.sessions.set(id, session);
-		}
-		// Ensure the session is in the id-keyed Map so routePerSession's
-		// unknown-session guard won't drop events for the active session.
-		if (!sessionState.sessions.has(id)) {
-			sessionState.sessions.set(id, { id, title: "" });
+		clientSession.currentId = id;
+		// `session_switched` can beat the list that contains the session, so it
+		// carries the parent itself. Patch the row if we hold one; never invent
+		// one — the list will carry the same lineage when it lands.
+		const known = msg.parentID ? serverSessions.get(id) : undefined;
+		if (known && msg.parentID) {
+			applySessionUpsert({ ...known, parentID: msg.parentID });
 		}
 		// A permission mode selected before any session was bound can only be
 		// delivered now that we know the session id.
@@ -415,29 +366,102 @@ export function handleSessionSwitched(
 	}
 }
 
-/** Handle a session_forked message — add the new session to the list. */
+/** Handle a session_forked message — the server created a new session. */
 export function handleSessionForked(
 	msg: Extract<RelayMessage, { type: "session_forked" }>,
 ): void {
-	const { session } = msg;
-	// Forked sessions always have parentID (the fork source), so they only
-	// go into allSessions. The next session_list broadcast will update both
-	// arrays authoritatively.
-	if (!sessionState.allSessions.some((s) => s.id === session.id)) {
-		sessionState.allSessions = [session, ...sessionState.allSessions];
+	applySessionUpsert(msg.session);
+}
+
+// ─── Reading the session list ───────────────────────────────────────────────
+// Components should wrap these in $derived() for reactive caching.
+
+/** Find a session by id. */
+export function findSession(id: string): Immutable<SessionInfo> | undefined {
+	return serverSessions.get(id);
+}
+
+/** When a session last changed, as the sidebar means it. */
+function lastChangedAt(session: Immutable<SessionInfo>): number {
+	// `||`, not `??`: a provider that has never touched a session sends `0` or
+	// `""` as readily as it omits the field, and all three mean the same thing
+	// — exactly as the line below reads a missing timestamp as 0.
+	const at = session.updatedAt || session.createdAt;
+	return at ? new Date(at).getTime() : 0;
+}
+
+/** The sessions the sidebar should show, most recently changed first.
+ *  Subagent sessions (those with a parentID) are excluded when the
+ *  hideSubagentSessions UI toggle is active (default). */
+export function getFilteredSessions(): readonly Immutable<SessionInfo>[] {
+	const matchIds = clientSession.searchMatchIds;
+	if (matchIds !== null) {
+		// Resolve against the server half so a session renamed or deleted while
+		// the search is up follows the server, in the order the server matched.
+		return matchIds.flatMap((id) => {
+			const session = serverSessions.get(id);
+			return session ? [session] : [];
+		});
 	}
-	// Ensure the forked session is in the id-keyed Map.
-	sessionState.sessions.set(session.id, session);
+
+	const query = clientSession.searchQuery.toLowerCase().trim();
+	return [...serverSessions.values()]
+		.filter(
+			(s) =>
+				!(uiState.hideSubagentSessions && s.parentID) &&
+				(!query || s.title.toLowerCase().includes(query)),
+		)
+		.sort((a, b) => lastChangedAt(b) - lastChangedAt(a));
+}
+
+/** Get sessions grouped by date: today, yesterday, older. */
+export function getDateGroups(): DateGroups {
+	return groupSessionsByDate(getFilteredSessions());
+}
+
+/** Get the currently active session object (or undefined). */
+export function getActiveSession(): Immutable<SessionInfo> | undefined {
+	return findSession(clientSession.currentId ?? "");
+}
+
+/** Group sessions into today/yesterday/older buckets. */
+export function groupSessionsByDate(
+	sessions: readonly Immutable<SessionInfo>[],
+	now?: Date,
+): DateGroups {
+	const ref = now ?? new Date();
+	const todayStart = new Date(ref);
+	todayStart.setHours(0, 0, 0, 0);
+	const yesterdayStart = new Date(todayStart);
+	yesterdayStart.setDate(yesterdayStart.getDate() - 1);
+
+	const groups: DateGroups = { today: [], yesterday: [], older: [] };
+
+	for (const s of sessions) {
+		const updated = lastChangedAt(s);
+		if (updated >= todayStart.getTime()) {
+			groups.today.push(s);
+		} else if (updated >= yesterdayStart.getTime()) {
+			groups.yesterday.push(s);
+		} else {
+			groups.older.push(s);
+		}
+	}
+
+	return groups;
 }
 
 // ─── Actions ────────────────────────────────────────────────────────────────
 
+/** Set the sidebar filter. Clearing it also drops any server search matches —
+ *  an empty query has nothing to match. */
 export function setSearchQuery(query: string): void {
-	sessionState.searchQuery = query;
+	clientSession.searchQuery = query;
+	if (!query.trim()) clientSession.searchMatchIds = null;
 }
 
 export function setCurrentSession(id: string | null): void {
-	sessionState.currentId = id;
+	clientSession.currentId = id;
 }
 
 /**
@@ -468,12 +492,12 @@ export function switchToSession(
 	view?: (input: ViewSessionRpcInput) => void,
 ): void {
 	// Capture the outgoing session for permission cleanup in ws-dispatch.
-	_switchingFromId = sessionState.currentId;
+	_switchingFromId = clientSession.currentId;
 	if (_switchingFromId && _switchingFromId !== sessionId) {
 		abortSessionReplay(_switchingFromId);
 	}
 
-	sessionState.currentId = sessionId;
+	clientSession.currentId = sessionId;
 	activateSessionChatState(sessionId);
 
 	const slug = getCurrentSlug();
@@ -508,14 +532,7 @@ export function switchToSession(
 /** Clear all session state (for project switch). */
 export function clearSessionState(): void {
 	resetSessionCreation(); // Cancel any in-flight creation (project switch safety)
-	for (const id of sessionState.sessions.keys()) {
-		clearSessionChatState(id);
-	}
-	sessionState.sessions.clear();
-	sessionState.rootSessions = [];
-	sessionState.allSessions = [];
-	sessionState.searchResults = null;
-	sessionState.currentId = null;
-	sessionState.searchQuery = "";
-	sessionState.hasMore = false;
+	for (const id of [...serverSessions.keys()]) forgetSession(id);
+	clientSession.currentId = null;
+	setSearchQuery("");
 }

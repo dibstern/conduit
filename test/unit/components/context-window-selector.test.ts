@@ -4,6 +4,7 @@ import ContextWindowSelector from "../../../src/lib/frontend/components/model/Co
 import {
 	clearDiscoveryState,
 	discoveryState,
+	handleContextWindowInfo,
 } from "../../../src/lib/frontend/stores/discovery.svelte.js";
 import { sessionState } from "../../../src/lib/frontend/stores/session.svelte.js";
 
@@ -49,11 +50,14 @@ describe("ContextWindowSelector", () => {
 	beforeEach(() => {
 		switchContextWindowRpcSpy.mockClear();
 		clearDiscoveryState();
-		discoveryState.availableContextWindowOptions = [
-			{ value: "200k", label: "200K", isDefault: true },
-			{ value: "1m", label: "1M (beta)" },
-		];
-		discoveryState.currentContextWindow = "";
+		handleContextWindowInfo({
+			type: "context_window_info",
+			contextWindow: "",
+			options: [
+				{ value: "200k", label: "200K", isDefault: true },
+				{ value: "1m", label: "1M (beta)" },
+			],
+		});
 		sessionState.currentId = "session-1";
 	});
 

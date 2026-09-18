@@ -32,7 +32,6 @@ import {
 	advanceTurnIfNewMessage,
 	beginReplayBatch,
 	clearMessages,
-	clearSessionChatState,
 	commitReplayFinal,
 	discardReplayBatch,
 	findMessage,
@@ -72,7 +71,7 @@ import {
 import { handleClaudeSettingsInfo } from "./claude-settings.svelte.js";
 import { isOwnBrowserClientId } from "./client-identity.js";
 import {
-	discoveryState,
+	applyDefaultPermissionMode,
 	handleAgentList,
 	handleCommandList,
 	handleContextWindowInfo,
@@ -103,6 +102,7 @@ import {
 import { handleProjectList } from "./project.svelte.js";
 import { getCurrentSlug, replaceRoute } from "./router.svelte.js";
 import {
+	applySessionRemoved,
 	consumeSwitchingFromId,
 	findSession,
 	handleSessionForked,
@@ -203,7 +203,8 @@ function shouldIgnoreOwnUserMessage(event: {
 
 /**
  * Route a per-session event to the correct session slot by event.sessionId.
- * Validates sessionId presence and membership in sessionState.sessions.
+ * Validates sessionId presence, and that the session is one we know about or
+ * the one being viewed.
  *
  * NOTE: notification_event is excluded from PerSessionEventType by
  * construction — it routes through handleMessage's global dispatch instead.
@@ -218,7 +219,12 @@ function routePerSession(event: PerSessionEvent): void {
 	}
 
 	// ── Unknown-session guard ──────────────────────────────────────────
-	if (!sessionState.sessions.has(event.sessionId)) {
+	// The session we are viewing is always routable — it is this tab's own
+	// selection, and its row can land after the switch that selected it.
+	if (
+		event.sessionId !== sessionState.currentId &&
+		!sessionState.sessions.has(event.sessionId)
+	) {
 		log.debug(
 			"routePerSession: unknown sessionId %s for event %s",
 			event.sessionId,
@@ -793,20 +799,10 @@ export function handleMessage(msg: RelayMessage): void {
 			break;
 		}
 		case "session_deleted": {
-			// Clean up per-session chat state for the deleted session.
 			const deletedId =
 				"sessionId" in msg ? (msg.sessionId as string) : undefined;
-			if (deletedId) {
-				clearSessionChatState(deletedId);
-				// Remove from session map
-				sessionState.sessions.delete(deletedId);
-				sessionState.rootSessions = sessionState.rootSessions.filter(
-					(s) => s.id !== deletedId,
-				);
-				sessionState.allSessions = sessionState.allSessions.filter(
-					(s) => s.id !== deletedId,
-				);
-			}
+			// Drops the row and the per-session chat state hanging off it.
+			if (deletedId) applySessionRemoved(deletedId);
 			break;
 		}
 		case "session_switched": {
@@ -947,7 +943,7 @@ export function handleMessage(msg: RelayMessage): void {
 			handleDefaultModelInfo(msg);
 			break;
 		case "default_permission_mode_info":
-			discoveryState.defaultPermissionMode = msg.mode;
+			applyDefaultPermissionMode(msg.mode);
 			break;
 		case "permission_mode_info":
 			handlePermissionModeInfo(msg);

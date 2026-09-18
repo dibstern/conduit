@@ -82,8 +82,7 @@ describe("handlePtyCreated", () => {
 	});
 
 	it("clears pending create state", () => {
-		terminalState.pendingCreate = true;
-		terminalState.statusMessage = "Creating terminal...";
+		beginCreateTab();
 		handlePtyCreated(ptyCreatedMsg("pty1"));
 		expect(terminalState.pendingCreate).toBe(false);
 		expect(terminalState.statusMessage).toBeNull();
@@ -221,7 +220,7 @@ describe("handlePtyDeleted", () => {
 
 describe("handlePtyError", () => {
 	it("clears pending create and shows server error message", () => {
-		terminalState.pendingCreate = true;
+		beginCreateTab();
 		handlePtyError({
 			type: "error",
 			sessionId: "s1",
@@ -233,7 +232,7 @@ describe("handlePtyError", () => {
 	});
 
 	it("falls back to default message when server message is empty", () => {
-		terminalState.pendingCreate = true;
+		beginCreateTab();
 		handlePtyError({ type: "error", sessionId: "s1", code: "", message: "" });
 		expect(terminalState.pendingCreate).toBe(false);
 		expect(terminalState.statusMessage).toBe("Terminal creation failed");
@@ -558,14 +557,14 @@ describe("togglePanel", () => {
 	});
 
 	it("closes the panel when already open", () => {
-		terminalState.panelOpen = true;
+		openPanel();
 		togglePanel();
 		expect(terminalState.panelOpen).toBe(false);
 	});
 
 	it("does not mutate tab create state when opening", () => {
 		handlePtyCreated(ptyCreatedMsg("pty1"));
-		terminalState.panelOpen = false; // simulate closed panel with existing tab
+		closePanel(); // simulate closed panel with existing tab
 		togglePanel();
 		expect(terminalState.panelOpen).toBe(true);
 		expect(terminalState.pendingCreate).toBe(false);
@@ -581,8 +580,56 @@ describe("openPanel / closePanel", () => {
 	});
 
 	it("closePanel sets panelOpen to false", () => {
-		terminalState.panelOpen = true;
+		openPanel();
 		closePanel();
 		expect(terminalState.panelOpen).toBe(false);
+	});
+});
+
+// ─── The split ──────────────────────────────────────────────────────────────
+
+/** A pty_list row as the server sends it. */
+function ptyRow(id: string, status: "running" | "exited" = "running") {
+	return { id, title: "bash", command: "bash", cwd: "/repo", status, pid: 1 };
+}
+
+describe("applying server rows never touches the client half", () => {
+	it("keeps the renamed label and the selected tab across a pty_list", () => {
+		handlePtyCreated(ptyCreatedMsg("pty1"));
+		handlePtyCreated(ptyCreatedMsg("pty2"));
+		renameTab("pty1", "build");
+		switchTab("pty1");
+
+		handlePtyList({
+			type: "pty_list",
+			ptys: [ptyRow("pty1"), ptyRow("pty2"), ptyRow("pty3")],
+		});
+
+		expect(terminalState.tabs.get("pty1")?.title).toBe("build");
+		expect(terminalState.tabs.get("pty2")?.title).toBe("Terminal 2");
+		expect(terminalState.activeTabId).toBe("pty1");
+	});
+
+	it("takes exit status from the server without disturbing the label", () => {
+		handlePtyCreated(ptyCreatedMsg("pty1"));
+		renameTab("pty1", "build");
+
+		handlePtyExited(msg({ type: "pty_exited", ptyId: "pty1" }));
+
+		expect(terminalState.tabs.get("pty1")).toEqual({
+			ptyId: "pty1",
+			title: "build",
+			exited: true,
+		});
+	});
+
+	it("drops the label when the server drops the pty, freeing its number", () => {
+		handlePtyCreated(ptyCreatedMsg("pty1"));
+		renameTab("pty1", "build");
+		handlePtyDeleted(msg({ type: "pty_deleted", ptyId: "pty1" }));
+
+		handlePtyCreated(ptyCreatedMsg("pty2"));
+
+		expect(terminalState.tabs.get("pty2")?.title).toBe("Terminal 1");
 	});
 });

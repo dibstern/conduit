@@ -52,7 +52,11 @@ import {
 	sessionActivity,
 	sessionMessages,
 } from "../../../src/lib/frontend/stores/chat.svelte.js";
-import { sessionState } from "../../../src/lib/frontend/stores/session.svelte.js";
+import {
+	applySessionUpsert,
+	clearSessionState,
+	sessionState,
+} from "../../../src/lib/frontend/stores/session.svelte.js";
 import { handleMessage } from "../../../src/lib/frontend/stores/ws-dispatch.js";
 import type {
 	AssistantMessage,
@@ -83,7 +87,7 @@ beforeEach(() => {
 	clearMessages();
 	sessionState.currentId = "session-a";
 	for (const id of ["session-a", "session-b"]) {
-		sessionState.sessions.set(id, { id, title: "" });
+		applySessionUpsert({ id, title: "" });
 	}
 	vi.useFakeTimers();
 });
@@ -93,7 +97,7 @@ afterEach(() => {
 	clearMessages();
 	sessionActivity.clear();
 	sessionMessages.clear();
-	sessionState.sessions.clear();
+	clearSessionState();
 });
 
 describe("queued state comes from the event's session, not the foreground", () => {

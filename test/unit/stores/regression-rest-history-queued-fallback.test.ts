@@ -54,7 +54,10 @@ import {
 	type SessionMessages,
 	setMessages,
 } from "../../../src/lib/frontend/stores/chat.svelte.js";
-import { sessionState } from "../../../src/lib/frontend/stores/session.svelte.js";
+import {
+	applySessionUpsert,
+	sessionState,
+} from "../../../src/lib/frontend/stores/session.svelte.js";
 import type {
 	HistoryMessage,
 	UserMessage,
@@ -67,7 +70,7 @@ let tm: SessionMessages;
 
 beforeEach(() => {
 	sessionState.currentId = "test-session";
-	sessionState.sessions.set("test-session", { id: "test-session", title: "" });
+	applySessionUpsert({ id: "test-session", title: "" });
 	clearMessages();
 	ta = testActivity();
 	tm = testMessages();
