@@ -52,8 +52,6 @@ import { EventStoreEffectTag } from "../../../persistence/effect/event-store-eff
 import { ProjectionRunnerEffectTag } from "../../../persistence/effect/projection-runner-effect.js";
 import { ReadQueryEffectTag } from "../../../persistence/effect/read-query-effect.js";
 import { canonicalEvent } from "../../../persistence/events.js";
-import type { SessionRow } from "../../../persistence/read-model-types.js";
-import { sessionRowsToSessionInfoList } from "../../../persistence/session-list-adapter.js";
 import { toSessionInfoList } from "../../../session/session-info-list.js";
 import {
 	type HistoryMessage,
@@ -167,18 +165,18 @@ export interface LoadHistoryOptions {
 const toReadonlyMap = <K, V>(map: HashMap.HashMap<K, V>): ReadonlyMap<K, V> =>
 	new Map(HashMap.toEntries(map));
 
-const sessionRowsParentMap = (
-	rows: readonly SessionRow[],
+const sessionsParentMap = (
+	sessions: readonly SessionInfo[],
 	forkMeta: HashMap.HashMap<string, ForkEntry>,
 ): HashMap.HashMap<string, string> => {
 	let parentMap = HashMap.empty<string, string>();
-	for (const row of rows) {
-		const forkEntry = HashMap.get(forkMeta, row.id);
+	for (const session of sessions) {
+		const forkEntry = HashMap.get(forkMeta, session.id);
 		const parentID =
-			row.parent_id ??
+			session.parentID ??
 			(forkEntry._tag === "Some" ? forkEntry.value.parentID : undefined);
 		if (parentID) {
-			parentMap = HashMap.set(parentMap, row.id, parentID);
+			parentMap = HashMap.set(parentMap, session.id, parentID);
 		}
 	}
 	return parentMap;
@@ -203,19 +201,43 @@ const sessionDetailsParentMap = (
 	return parentMap;
 };
 
-const sessionRowsToInfo = (
-	rows: readonly SessionRow[],
-	options: ListSessionsOptions | undefined,
-	state: {
-		forkMeta: HashMap.HashMap<string, ForkEntry>;
-		pendingQuestionCounts: HashMap.HashMap<string, number>;
-	},
+/**
+ * Fork lineage is the one session fact that still lives in daemon memory
+ * instead of the row (ni8.5 §6, until conduit-test-ni8.24 persists it), so it
+ * is folded onto the session on the way out. What the row knows wins.
+ */
+const withForkLineage = (
+	sessions: readonly SessionInfo[],
+	forkMeta: HashMap.HashMap<string, ForkEntry>,
 ): SessionInfo[] =>
-	sessionRowsToSessionInfoList(Array.from(rows), {
-		...(options?.statuses !== undefined ? { statuses: options.statuses } : {}),
-		forkMeta: toReadonlyMap(state.forkMeta),
-		pendingQuestionCounts: toReadonlyMap(state.pendingQuestionCounts),
+	sessions.map((session) => {
+		const entry = HashMap.get(forkMeta, session.id);
+		if (entry._tag === "None") return session;
+		const { parentID, forkMessageId, forkPointTimestamp } = entry.value;
+		return {
+			...session,
+			...(session.parentID === undefined && { parentID }),
+			...(session.forkMessageId === undefined && { forkMessageId }),
+			...(forkPointTimestamp !== undefined && { forkPointTimestamp }),
+		};
 	});
+
+/**
+ * Pending questions per session id for the `session_list` message, zero counts
+ * omitted and the field itself omitted when nothing is pending. Notification
+ * state travels beside the sessions, never inside one (ni8.5 §5), until
+ * conduit-test-ni8.23 gives it a channel of its own.
+ */
+const pendingQuestionCountsField = (
+	counts: HashMap.HashMap<string, number>,
+): { pendingQuestionCounts?: Record<string, number> } => {
+	const pending = Array.from(HashMap.toEntries(counts)).filter(
+		([, count]) => count > 0,
+	);
+	return pending.length > 0
+		? { pendingQuestionCounts: Object.fromEntries(pending) }
+		: {};
+};
 
 const updateRelaySessionCountSnapshot = (sessionCount: number) =>
 	Effect.serviceOption(RelayStatusSnapshotTag).pipe(
@@ -255,28 +277,32 @@ export const listSessions = (options?: ListSessionsOptions) =>
 		const stateRef = yield* SessionManagerStateTag;
 		const readQueryEffectOption =
 			yield* Effect.serviceOption(ReadQueryEffectTag);
-		const sqOpts =
-			options?.roots !== undefined ? { roots: options.roots } : undefined;
 		const state = yield* Ref.get(stateRef);
 
 		if (readQueryEffectOption._tag === "Some") {
-			const rows = yield* readQueryEffectOption.value
-				.listSessions(sqOpts)
+			const snapshot = yield* readQueryEffectOption.value
+				.getSessionListSnapshot()
 				.pipe(
 					Effect.mapError(
 						(cause) =>
 							new SessionManagerError({ operation: "listSessions", cause }),
 					),
 				);
+			// A root is a session the row gives no parent — the same test the
+			// `parent_id IS NULL` filter used to make, applied before fork lineage
+			// is folded on.
+			const sessions = options?.roots
+				? snapshot.rows.filter((session) => session.parentID === undefined)
+				: snapshot.rows;
 			if (!options?.roots) {
 				yield* Ref.update(stateRef, (s) => ({
 					...s,
-					cachedParentMap: sessionRowsParentMap(rows, s.forkMeta),
-					lastKnownSessionCount: rows.length,
+					cachedParentMap: sessionsParentMap(sessions, s.forkMeta),
+					lastKnownSessionCount: sessions.length,
 				}));
-				yield* updateRelaySessionCountSnapshot(rows.length);
+				yield* updateRelaySessionCountSnapshot(sessions.length);
 			}
-			return sessionRowsToInfo(rows, options, state);
+			return withForkLineage(sessions, state.forkMeta);
 		}
 
 		const clientOptions = {
@@ -312,7 +338,6 @@ export const listSessions = (options?: ListSessionsOptions) =>
 			options?.statuses,
 			toReadonlyMap(state.lastMessageAt),
 			toReadonlyMap(state.forkMeta),
-			toReadonlyMap(state.pendingQuestionCounts),
 		);
 	}).pipe(
 		Effect.annotateLogs("operation", "listSessions"),
@@ -479,7 +504,7 @@ export const deleteSession = (sessionId: string) =>
 		const readQueryOption = yield* Effect.serviceOption(ReadQueryEffectTag);
 		const configOption = yield* Effect.serviceOption(ConfigTag);
 
-		const rows =
+		const sessions =
 			readQueryOption._tag === "Some"
 				? (yield* readQueryOption.value.getSessionListSnapshot().pipe(
 						Effect.mapError(
@@ -491,13 +516,25 @@ export const deleteSession = (sessionId: string) =>
 						),
 					)).rows
 				: [];
-		const row = rows.find((candidate) => candidate.id === sessionId);
+		// The provider that owns the session is row-only state, never on the wire.
+		const row =
+			readQueryOption._tag === "Some"
+				? yield* readQueryOption.value.getSession(sessionId).pipe(
+						Effect.mapError(
+							(cause) =>
+								new SessionManagerError({
+									operation: "deleteSession.row",
+									cause,
+								}),
+						),
+					)
+				: undefined;
 		const childSessionIds: string[] = [];
 		const discovered = new Set([sessionId]);
 		const pendingParents = [sessionId];
 		for (const parentId of pendingParents) {
-			for (const candidate of rows) {
-				if (candidate.parent_id === parentId && !discovered.has(candidate.id)) {
+			for (const candidate of sessions) {
+				if (candidate.parentID === parentId && !discovered.has(candidate.id)) {
 					discovered.add(candidate.id);
 					childSessionIds.push(candidate.id);
 					pendingParents.push(candidate.id);
@@ -697,9 +734,12 @@ export const deleteSession = (sessionId: string) =>
 			let cachedParentMap = HashMap.remove(s.cachedParentMap, sessionId);
 			const lastMessageAt = HashMap.remove(s.lastMessageAt, sessionId);
 			const forkMeta = HashMap.remove(s.forkMeta, sessionId);
-			const pendingQuestionCounts = HashMap.remove(
+			// The whole lineage goes, so every count in it goes: counts ride the
+			// `session_list` message now, and one left behind rebuilds an attention
+			// badge for a session the browser can no longer show.
+			const pendingQuestionCounts = [sessionId, ...childSessionIds].reduce(
+				(counts, deletedId) => HashMap.remove(counts, deletedId),
 				s.pendingQuestionCounts,
-				sessionId,
 			);
 			const paginationCursors = HashMap.remove(s.paginationCursors, sessionId);
 
@@ -1276,17 +1316,31 @@ export const sendDualSessionLists = (
 ) =>
 	Effect.gen(function* () {
 		const log = yield* LoggerTag;
+		const stateRef = yield* SessionManagerStateTag;
+		const counts = (yield* Ref.get(stateRef)).pendingQuestionCounts;
 		const roots = yield* listSessions({
 			roots: true,
 			statuses: options?.statuses,
 		});
-		send({ type: "session_list", sessions: roots, roots: true });
+		send({
+			type: "session_list",
+			sessions: roots,
+			roots: true,
+			...pendingQuestionCountsField(counts),
+		});
 
 		yield* Effect.forkDaemon(
 			listSessions({ statuses: options?.statuses }).pipe(
 				Effect.tap((all) =>
-					Effect.sync(() =>
-						send({ type: "session_list", sessions: all, roots: false }),
+					Ref.get(stateRef).pipe(
+						Effect.map((state) =>
+							send({
+								type: "session_list",
+								sessions: all,
+								roots: false,
+								...pendingQuestionCountsField(state.pendingQuestionCounts),
+							}),
+						),
 					),
 				),
 				Effect.catchAll((err) =>
@@ -1976,21 +2030,32 @@ export const SessionManagerServiceLive: Layer.Layer<
 				}),
 			sendDualSessionLists: (send, options) =>
 				Effect.gen(function* () {
+					const counts = (yield* Ref.get(stateRef)).pendingQuestionCounts;
 					const roots = yield* serviceListSessions({
 						roots: true,
 						statuses: options?.statuses,
 					});
-					send({ type: "session_list", sessions: roots, roots: true });
+					send({
+						type: "session_list",
+						sessions: roots,
+						roots: true,
+						...pendingQuestionCountsField(counts),
+					});
 
 					yield* Effect.forkDaemon(
 						serviceListSessions({ statuses: options?.statuses }).pipe(
 							Effect.tap((all) =>
-								Effect.sync(() =>
-									send({
-										type: "session_list",
-										sessions: all,
-										roots: false,
-									}),
+								Ref.get(stateRef).pipe(
+									Effect.map((state) =>
+										send({
+											type: "session_list",
+											sessions: all,
+											roots: false,
+											...pendingQuestionCountsField(
+												state.pendingQuestionCounts,
+											),
+										}),
+									),
 								),
 							),
 							Effect.catchAll((err) =>

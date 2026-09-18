@@ -347,35 +347,14 @@ export function handleSessionList(
 	}
 }
 
-const sessionInfoFromRpc = (
-	session: ListSessionsResponse["sessions"][number],
-): SessionInfo => ({
-	id: session.id,
-	title: session.title,
-	...(session.createdAt != null ? { createdAt: session.createdAt } : {}),
-	...(session.updatedAt != null ? { updatedAt: session.updatedAt } : {}),
-	...(session.messageCount != null
-		? { messageCount: session.messageCount }
-		: {}),
-	...(session.processing != null ? { processing: session.processing } : {}),
-	...(session.parentID != null ? { parentID: session.parentID } : {}),
-	...(session.forkMessageId != null
-		? { forkMessageId: session.forkMessageId }
-		: {}),
-	...(session.forkPointTimestamp != null
-		? { forkPointTimestamp: session.forkPointTimestamp }
-		: {}),
-	...(session.pendingQuestionCount != null
-		? { pendingQuestionCount: session.pendingQuestionCount }
-		: {}),
-});
-
 export function applyListSessionsResponse(
 	response: ListSessionsResponse,
 ): void {
+	// The RPC decodes into the same session type the WebSocket message carries
+	// (ni8.5 T-1), so the sessions go straight through.
 	handleSessionList({
 		type: "session_list",
-		sessions: response.sessions.map(sessionInfoFromRpc),
+		sessions: [...response.sessions],
 		roots: response.roots,
 		...(response.search ? { search: true } : {}),
 	});
@@ -388,7 +367,12 @@ export function handleSessionSwitched(
 	if (id) {
 		sessionState.currentId = id;
 		if (msg.parentID) {
-			const session = { id, title: "", parentID: msg.parentID };
+			const session: SessionInfo = {
+				id,
+				title: "",
+				status: "idle",
+				parentID: msg.parentID,
+			};
 			if (!sessionState.allSessions.some((candidate) => candidate.id === id)) {
 				sessionState.allSessions = [session, ...sessionState.allSessions];
 			}
@@ -397,7 +381,7 @@ export function handleSessionSwitched(
 		// Ensure the session is in the id-keyed Map so routePerSession's
 		// unknown-session guard won't drop events for the active session.
 		if (!sessionState.sessions.has(id)) {
-			sessionState.sessions.set(id, { id, title: "" });
+			sessionState.sessions.set(id, { id, title: "", status: "idle" });
 		}
 		// A permission mode selected before any session was bound can only be
 		// delivered now that we know the session id.

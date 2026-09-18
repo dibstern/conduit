@@ -38,12 +38,14 @@ const twoSessionInit: MockMessage[] = [
 			{
 				id: SESS_A,
 				title: "Session A — current",
+				status: "idle",
 				updatedAt: Date.now(),
 				messageCount: 2,
 			},
 			{
 				id: SESS_B,
 				title: "Session B — other",
+				status: "idle",
 				updatedAt: Date.now() - 3600_000,
 				messageCount: 5,
 			},
@@ -307,14 +309,14 @@ test.describe("notification reducer indicators", () => {
 		await page.goto(`${baseURL ?? "http://localhost:4173"}${PROJECT_URL}`);
 		await waitForChatReady(page);
 
-		// No attention dot initially (initial session_list has no pendingQuestionCount)
+		// No attention dot initially (the initial session_list carries no counts)
 		await expect(sessionItem(page, SESS_B)).toBeVisible({ timeout: 5_000 });
 		await expect(attentionDot(page, SESS_B)).toHaveCount(0);
 
-		// Server sends a reconciliation session_list with pendingQuestionCount on B.
-		// This simulates the periodic session list refresh that corrects stale state.
-		// The ws-dispatch.ts handler extracts pendingQuestionCount and dispatches
-		// a "reconcile" action to the notification reducer.
+		// Server sends a reconciliation session_list whose pendingQuestionCounts
+		// name B. This simulates the periodic session list refresh that corrects
+		// stale state: the counts ride beside the sessions, and ws-dispatch.ts
+		// turns them into a "reconcile" action for the notification reducer.
 		control.sendMessage({
 			type: "session_list",
 			roots: true,
@@ -322,18 +324,19 @@ test.describe("notification reducer indicators", () => {
 				{
 					id: SESS_A,
 					title: "Session A — current",
+					status: "idle",
 					updatedAt: Date.now(),
 					messageCount: 2,
-					pendingQuestionCount: 0,
 				},
 				{
 					id: SESS_B,
 					title: "Session B — other",
+					status: "idle",
 					updatedAt: Date.now() - 3600_000,
 					messageCount: 5,
-					pendingQuestionCount: 2,
 				},
 			],
+			pendingQuestionCounts: { [SESS_B]: 2 },
 		});
 
 		// Session B should now show an attention dot (reconcile sets questions: 2)

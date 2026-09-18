@@ -10,6 +10,7 @@ import {
 	Layer,
 	Queue,
 	Ref,
+	Schema,
 	Scope,
 	Stream,
 	TestClock,
@@ -42,7 +43,10 @@ import {
 	canonicalEvent,
 	type StoredEvent,
 } from "../../../src/lib/persistence/events.js";
-import type { SessionRow } from "../../../src/lib/persistence/read-model-types.js";
+import {
+	type SessionInfo,
+	SessionInfoSchema,
+} from "../../../src/lib/shared-types.js";
 import { makeMockOpenCodeAPI } from "../../helpers/mock-factories.js";
 import { withDispatchEffect } from "../../helpers/orchestration-engine-test-double.js";
 
@@ -160,15 +164,15 @@ const commit = (events: readonly CanonicalEvent[]) =>
 const maxSequence = (stored: readonly StoredEvent[]): number =>
 	stored.reduce((max, event) => Math.max(max, event.sequence), 0);
 
-/** Wrap the real read side, counting row re-queries (`getSession` calls). */
+/** Wrap the real read side, counting session re-queries. */
 const countingReadQuery = (
 	real: ReadQueryEffect,
 	requeries: Ref.Ref<number>,
 ): ReadQueryEffect => ({
 	...real,
-	getSession: (sessionId) =>
+	getSessionListEntry: (sessionId) =>
 		Ref.update(requeries, (n) => n + 1).pipe(
-			Effect.zipRight(real.getSession(sessionId)),
+			Effect.zipRight(real.getSessionListEntry(sessionId)),
 		),
 });
 
@@ -180,7 +184,7 @@ const openShell = (options?: {
 	readonly readQuery?: ReadQueryEffect;
 }) =>
 	Effect.gen(function* () {
-		const q = yield* Queue.unbounded<Envelope<SessionRow>>();
+		const q = yield* Queue.unbounded<Envelope<SessionInfo>>();
 		const run = Stream.runForEach(
 			subscribeShell(
 				options?.resumeFromSequence === undefined
@@ -235,6 +239,12 @@ describe("subscribeShell", () => {
 				expect(delta.item.id).toBe(SID);
 				expect(delta.item.title).toBe("Renamed");
 				expect(delta.item.status).toBe("busy");
+				// The stream carries the single session type (ni8.5 T-1), not the
+				// projection row: everything on the item is in the contract and
+				// nothing outside it rides along.
+				expect(Schema.decodeUnknownSync(SessionInfoSchema)(delta.item)).toEqual(
+					delta.item,
+				);
 				expect(delta.sequence).toBe(maxSequence(last));
 				// One re-query for the whole burst, and nothing else queued.
 				expect(yield* Ref.get(requeries)).toBe(1);
@@ -592,7 +602,7 @@ describe("subscribeShell", () => {
 			yield* commit([sessionCreated(SID)]);
 
 			const scope = yield* Scope.make();
-			const q = yield* Queue.unbounded<Envelope<SessionRow>>();
+			const q = yield* Queue.unbounded<Envelope<SessionInfo>>();
 			const fiber = yield* Stream.runForEach(subscribeShell(), (env) =>
 				Queue.offer(q, env),
 			).pipe(Effect.forkIn(scope));

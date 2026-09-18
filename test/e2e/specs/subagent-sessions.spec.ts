@@ -28,12 +28,14 @@ const snapshot = JSON.parse(readFileSync(snapshotPath, "utf-8")) as {
 	parentSession: {
 		id: string;
 		title: string;
+		status: "idle";
 		updatedAt: number;
 		messageCount: number;
 	};
 	childSession: {
 		id: string;
 		title: string;
+		status: "idle";
 		updatedAt: number;
 		messageCount: number;
 		parentID: string;
@@ -59,6 +61,7 @@ const allSessions = [
 	{
 		id: "ses_other001",
 		title: "Unrelated session",
+		status: "idle",
 		updatedAt: snapshot.parentSession.updatedAt - 3600_000,
 		messageCount: 5,
 	},

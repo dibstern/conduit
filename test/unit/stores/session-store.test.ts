@@ -56,6 +56,7 @@ function makeSession(
 ): SessionInfo {
 	return {
 		title: `Session ${overrides.id}`,
+		status: "idle",
 		...overrides,
 	};
 }
@@ -154,7 +155,7 @@ describe("groupSessionsByDate", () => {
 
 	it("puts sessions updated today into the 'today' group", () => {
 		const sessions: SessionInfo[] = [
-			makeSession({ id: "1", updatedAt: todayAt(now, 10).toISOString() }),
+			makeSession({ id: "1", updatedAt: todayAt(now, 10).getTime() }),
 		];
 		const groups = groupSessionsByDate(sessions, now);
 		expect(groups.today).toHaveLength(1);
@@ -164,7 +165,7 @@ describe("groupSessionsByDate", () => {
 
 	it("puts sessions from yesterday into the 'yesterday' group", () => {
 		const sessions: SessionInfo[] = [
-			makeSession({ id: "1", updatedAt: yesterdayAt(now, 15).toISOString() }),
+			makeSession({ id: "1", updatedAt: yesterdayAt(now, 15).getTime() }),
 		];
 		const groups = groupSessionsByDate(sessions, now);
 		expect(groups.today).toHaveLength(0);
@@ -174,7 +175,7 @@ describe("groupSessionsByDate", () => {
 
 	it("puts older sessions into the 'older' group", () => {
 		const sessions: SessionInfo[] = [
-			makeSession({ id: "1", updatedAt: daysAgoAt(now, 5, 10).toISOString() }),
+			makeSession({ id: "1", updatedAt: daysAgoAt(now, 5, 10).getTime() }),
 		];
 		const groups = groupSessionsByDate(sessions, now);
 		expect(groups.today).toHaveLength(0);
@@ -184,7 +185,7 @@ describe("groupSessionsByDate", () => {
 
 	it("falls back to createdAt when updatedAt is missing", () => {
 		const sessions: SessionInfo[] = [
-			makeSession({ id: "1", createdAt: todayAt(now, 8).toISOString() }),
+			makeSession({ id: "1", createdAt: todayAt(now, 8).getTime() }),
 		];
 		const groups = groupSessionsByDate(sessions, now);
 		expect(groups.today).toHaveLength(1);
@@ -205,9 +206,9 @@ describe("groupSessionsByDate", () => {
 
 	it("distributes mixed timestamps correctly", () => {
 		const sessions: SessionInfo[] = [
-			makeSession({ id: "t", updatedAt: todayAt(now, 9).toISOString() }),
-			makeSession({ id: "y", updatedAt: yesterdayAt(now, 14).toISOString() }),
-			makeSession({ id: "o", updatedAt: daysAgoAt(now, 30, 10).toISOString() }),
+			makeSession({ id: "t", updatedAt: todayAt(now, 9).getTime() }),
+			makeSession({ id: "y", updatedAt: yesterdayAt(now, 14).getTime() }),
+			makeSession({ id: "o", updatedAt: daysAgoAt(now, 30, 10).getTime() }),
 		];
 		const groups = groupSessionsByDate(sessions, now);
 		expect(groups.today).toHaveLength(1);
@@ -236,27 +237,23 @@ describe("handleSessionList", () => {
 	});
 
 	it("applies ListSessions RPC responses through the same session-list path", () => {
+		const session = {
+			id: "rpc-root",
+			title: "RPC Root",
+			status: "busy",
+			updatedAt: 123,
+		} as const;
+
 		applyListSessionsResponse({
 			projectSlug: "project-a",
 			roots: true,
-			sessions: [
-				{
-					id: "rpc-root",
-					title: "RPC Root",
-					updatedAt: 123,
-					pendingQuestionCount: 2,
-				},
-			],
+			sessions: [session],
 		});
 
-		expect(sessionState.rootSessions).toEqual([
-			{
-				id: "rpc-root",
-				title: "RPC Root",
-				updatedAt: 123,
-				pendingQuestionCount: 2,
-			},
-		]);
+		// Server and browser share one session type (ni8.5 T-1), so what the RPC
+		// decoded is what the store holds — nothing is copied field by field.
+		expect(sessionState.rootSessions).toEqual([session]);
+		expect(sessionState.rootSessions[0]).toBe(session);
 		expect(sessionState.sessions.get("rpc-root")?.title).toBe("RPC Root");
 	});
 
@@ -306,6 +303,7 @@ describe("handleSessionSwitched", () => {
 		expect(sessionState.allSessions).toContainEqual({
 			id: "child-session",
 			title: "",
+			status: "idle",
 			parentID: "parent-session",
 		});
 		expect(findSession("child-session")?.parentID).toBe("parent-session");
@@ -363,7 +361,12 @@ describe("setCurrentSession", () => {
 describe("handleSessionForked (ticket 5.3)", () => {
 	it("adds the forked session to the session list", () => {
 		sessionState.allSessions = [
-			{ id: "ses_original", title: "Original", updatedAt: 1000 },
+			{
+				id: "ses_original",
+				title: "Original",
+				updatedAt: 1000,
+				status: "idle",
+			},
 		];
 
 		handleSessionForked({
@@ -372,6 +375,7 @@ describe("handleSessionForked (ticket 5.3)", () => {
 			session: {
 				id: "ses_forked",
 				title: "Forked from Original",
+				status: "idle",
 				updatedAt: 2000,
 				parentID: "ses_original",
 			},
@@ -390,7 +394,12 @@ describe("handleSessionForked (ticket 5.3)", () => {
 
 	it("does not duplicate if session already exists", () => {
 		sessionState.allSessions = [
-			{ id: "ses_forked", title: "Already Here", updatedAt: 1000 },
+			{
+				id: "ses_forked",
+				title: "Already Here",
+				updatedAt: 1000,
+				status: "idle",
+			},
 		];
 
 		handleSessionForked({
@@ -399,6 +408,7 @@ describe("handleSessionForked (ticket 5.3)", () => {
 			session: {
 				id: "ses_forked",
 				title: "Forked from Original",
+				status: "idle",
 				updatedAt: 2000,
 				parentID: "ses_original",
 			},
@@ -416,6 +426,7 @@ describe("handleSessionForked (ticket 5.3)", () => {
 			session: {
 				id: "fork-1",
 				title: "Forked",
+				status: "idle",
 				updatedAt: Date.now(),
 				parentID: "parent-1",
 				forkMessageId: "msg_42",

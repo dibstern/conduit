@@ -85,9 +85,17 @@ beforeEach(() => {
 	sessionState.searchQuery = "";
 	sessionState.hasMore = false;
 	// Register sessions so routePerSession's unknown-session guard passes.
-	sessionState.sessions.set("session-a", { id: "session-a", title: "" });
-	sessionState.sessions.set("session-b", { id: "session-b", title: "" });
-	sessionState.sessions.set("s1", { id: "s1", title: "" });
+	sessionState.sessions.set("session-a", {
+		id: "session-a",
+		title: "",
+		status: "idle",
+	});
+	sessionState.sessions.set("session-b", {
+		id: "session-b",
+		title: "",
+		status: "idle",
+	});
+	sessionState.sessions.set("s1", { id: "s1", title: "", status: "idle" });
 	vi.useFakeTimers();
 });
 

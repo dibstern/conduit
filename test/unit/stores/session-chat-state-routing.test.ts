@@ -56,7 +56,7 @@ beforeEach(() => {
 	sessionState.currentId = "session-a";
 	// Register all sessions used in tests.
 	for (const id of ["session-a", "session-b", "session-c"]) {
-		sessionState.sessions.set(id, { id, title: "" });
+		sessionState.sessions.set(id, { id, title: "", status: "idle" });
 	}
 	vi.useFakeTimers();
 });

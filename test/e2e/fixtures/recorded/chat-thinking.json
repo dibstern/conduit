@@ -36,6 +36,7 @@
         {
           "id": "ses_2d289ff2cffe6mD7ksB37sDVUa",
           "title": "New session - 2026-03-27T04:03:21.427Z",
+          "status": "idle",
           "updatedAt": 1774584201427,
           "messageCount": 0
         }
@@ -48,6 +49,7 @@
         {
           "id": "ses_2d289ff2cffe6mD7ksB37sDVUa",
           "title": "New session - 2026-03-27T04:03:21.427Z",
+          "status": "idle",
           "updatedAt": 1774584201427,
           "messageCount": 0
         }
@@ -494,6 +496,7 @@
             {
               "id": "ses_2d289ff2cffe6mD7ksB37sDVUa",
               "title": "New session - 2026-03-27T04:03:21.427Z",
+              "status": "idle",
               "updatedAt": 1774584203774,
               "messageCount": 0
             }
@@ -506,6 +509,7 @@
             {
               "id": "ses_2d289ff2cffe6mD7ksB37sDVUa",
               "title": "New session - 2026-03-27T04:03:21.427Z",
+              "status": "idle",
               "updatedAt": 1774584203774,
               "messageCount": 0
             }
@@ -518,6 +522,7 @@
             {
               "id": "ses_2d289ff2cffe6mD7ksB37sDVUa",
               "title": "New session - 2026-03-27T04:03:21.427Z",
+              "status": "idle",
               "updatedAt": 1774584203774,
               "messageCount": 0
             }
@@ -530,6 +535,7 @@
             {
               "id": "ses_2d289ff2cffe6mD7ksB37sDVUa",
               "title": "New session - 2026-03-27T04:03:21.427Z",
+              "status": "idle",
               "updatedAt": 1774584203774,
               "messageCount": 0
             }
@@ -542,6 +548,7 @@
             {
               "id": "ses_2d289ff2cffe6mD7ksB37sDVUa",
               "title": "New session - 2026-03-27T04:03:21.427Z",
+              "status": "busy",
               "updatedAt": 1774584203774,
               "messageCount": 0,
               "processing": true
@@ -560,6 +567,7 @@
             {
               "id": "ses_2d289ff2cffe6mD7ksB37sDVUa",
               "title": "New session - 2026-03-27T04:03:21.427Z",
+              "status": "busy",
               "updatedAt": 1774584203774,
               "messageCount": 0,
               "processing": true
@@ -573,6 +581,7 @@
             {
               "id": "ses_2d289ff2cffe6mD7ksB37sDVUa",
               "title": "Agentic AI context management essay planning",
+              "status": "busy",
               "updatedAt": 1774584203774,
               "messageCount": 0,
               "processing": true
@@ -586,6 +595,7 @@
             {
               "id": "ses_2d289ff2cffe6mD7ksB37sDVUa",
               "title": "Agentic AI context management essay planning",
+              "status": "busy",
               "updatedAt": 1774584203774,
               "messageCount": 0,
               "processing": true
@@ -660,6 +670,7 @@
             {
               "id": "ses_2d289ff2cffe6mD7ksB37sDVUa",
               "title": "Agentic AI context management essay planning",
+              "status": "idle",
               "updatedAt": 1774584229408,
               "messageCount": 0
             }
@@ -677,6 +688,7 @@
             {
               "id": "ses_2d289ff2cffe6mD7ksB37sDVUa",
               "title": "Agentic AI context management essay planning",
+              "status": "idle",
               "updatedAt": 1774584229419,
               "messageCount": 0
             }
@@ -689,6 +701,7 @@
             {
               "id": "ses_2d289ff2cffe6mD7ksB37sDVUa",
               "title": "Agentic AI context management essay planning",
+              "status": "idle",
               "updatedAt": 1774584229419,
               "messageCount": 0
             }
@@ -701,6 +714,7 @@
             {
               "id": "ses_2d289ff2cffe6mD7ksB37sDVUa",
               "title": "Agentic AI context management essay planning",
+              "status": "idle",
               "updatedAt": 1774584229419,
               "messageCount": 0
             }

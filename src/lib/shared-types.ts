@@ -232,23 +232,43 @@ export interface FileEntry {
 
 // ─── Session ────────────────────────────────────────────────────────────────
 
-export interface SessionInfo {
-	id: string;
-	title: string;
-	createdAt?: string | number;
-	updatedAt?: string | number;
-	messageCount?: number;
-	processing?: boolean;
+/** The `sessions` projection's lifecycle status, as the row stores it. */
+export const SessionStatusSchema = Schema.Literal(
+	"idle",
+	"busy",
+	"retry",
+	"error",
+);
+
+/**
+ * The single session type: one shape for the read-model row, the wire and the
+ * browser (ni8.5 §4). Everything here either comes straight off the `sessions`
+ * projection or — for the fork lineage — from the interim join that
+ * conduit-test-ni8.24 deletes.
+ *
+ * Notably absent: `processing` (the status poller's derived flag; the client
+ * now ORs the row's `status` with live chat phase) and `pendingQuestionCount`
+ * (notification state, which rides the `session_list` message until
+ * conduit-test-ni8.23 gives it a home of its own).
+ */
+export const SessionInfoSchema = Schema.Struct({
+	id: Schema.String,
+	title: Schema.String,
+	/** Lifecycle status straight off the row — the one source for "busy". */
+	status: SessionStatusSchema,
+	createdAt: Schema.optional(Schema.Number),
+	updatedAt: Schema.optional(Schema.Number),
+	messageCount: Schema.optional(Schema.Number),
 	/** Parent session ID — set when this session was forked from another. */
-	parentID?: string;
+	parentID: Schema.optional(Schema.String),
 	/** The message ID at the fork point — messages up to this ID are inherited context. */
-	forkMessageId?: string;
+	forkMessageId: Schema.optional(Schema.String),
 	/** Unix-ms timestamp of the fork-point message. Messages created before
 	 *  this time are inherited context from the parent session. */
-	forkPointTimestamp?: number;
-	/** Number of pending questions on this session (from server). */
-	pendingQuestionCount?: number;
-}
+	forkPointTimestamp: Schema.optional(Schema.Number),
+});
+
+export type SessionInfo = typeof SessionInfoSchema.Type;
 
 // ─── Ask User / Questions ───────────────────────────────────────────────────
 
@@ -500,19 +520,6 @@ const UsageInfoSchema = Schema.Struct({
 	cache_read: Schema.Number,
 	cache_creation: Schema.Number,
 	context_window: Schema.optional(Schema.Number),
-});
-
-const SessionInfoSchema = Schema.Struct({
-	id: Schema.String,
-	title: Schema.String,
-	createdAt: Schema.optional(Schema.Union(Schema.String, Schema.Number)),
-	updatedAt: Schema.optional(Schema.Union(Schema.String, Schema.Number)),
-	messageCount: Schema.optional(Schema.Number),
-	processing: Schema.optional(Schema.Boolean),
-	parentID: Schema.optional(Schema.String),
-	forkMessageId: Schema.optional(Schema.String),
-	forkPointTimestamp: Schema.optional(Schema.Number),
-	pendingQuestionCount: Schema.optional(Schema.Number),
 });
 
 const ContextWindowOptionSchema = Schema.Struct({
@@ -814,6 +821,14 @@ const SessionListSchema = Schema.Struct({
 	sessions: Schema.Array(SessionInfoSchema),
 	roots: Schema.Boolean,
 	search: Schema.optional(Schema.Boolean),
+	/**
+	 * Pending questions per session id, zero-count sessions omitted. Notification
+	 * state, not session state, so it rides the message rather than the session
+	 * (ni8.5 §5) until conduit-test-ni8.23 gives it a channel of its own.
+	 */
+	pendingQuestionCounts: Schema.optional(
+		Schema.Record({ key: Schema.String, value: Schema.Number }),
+	),
 });
 
 const SessionForkedSchema = Schema.Struct({
@@ -1456,6 +1471,8 @@ export type RelayMessage =
 			sessions: SessionInfo[];
 			roots: boolean;
 			search?: boolean;
+			/** Pending questions per session id; zero-count sessions omitted. */
+			pendingQuestionCounts?: Record<string, number>;
 	  }
 	| {
 			type: "session_forked";

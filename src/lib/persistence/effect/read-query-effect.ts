@@ -1,6 +1,7 @@
 import { SqlClient } from "@effect/sql";
 import type { SqlError } from "@effect/sql/SqlError";
 import { Context, Data, Effect } from "effect";
+import type { SessionInfo } from "../../shared-types.js";
 import type {
 	MessagePartRow,
 	MessageRow,
@@ -8,6 +9,18 @@ import type {
 	SessionRow,
 	TurnModelExecutionRow,
 } from "../read-model-types.js";
+
+/**
+ * What `sessionColumns` selects: the single session type with SQLite's NULLs
+ * still in place for the two nullable columns.
+ */
+type SessionSelection = Omit<
+	SessionInfo,
+	"parentID" | "forkMessageId" | "messageCount" | "forkPointTimestamp"
+> & {
+	readonly parentID: string | null;
+	readonly forkMessageId: string | null;
+};
 
 export class ReadQueryEffectError extends Data.TaggedError(
 	"ReadQueryEffectError",
@@ -37,6 +50,10 @@ export interface ReadQueryEffect {
 	readonly listSessions: (opts?: {
 		roots?: boolean;
 	}) => Effect.Effect<readonly SessionRow[], ReadQueryEffectError | SqlError>;
+
+	readonly getSessionListEntry: (
+		sessionId: string,
+	) => Effect.Effect<SessionInfo | undefined, ReadQueryEffectError | SqlError>;
 
 	readonly getSessionMessagesWithParts: (
 		sessionId: string,
@@ -69,7 +86,7 @@ export interface ReadQueryEffect {
 	 * upserts (idempotent re-emit); over-claiming would lose updates.
 	 */
 	readonly getSessionListSnapshot: () => Effect.Effect<
-		{ readonly rows: readonly SessionRow[]; readonly sequence: number },
+		{ readonly rows: readonly SessionInfo[]; readonly sequence: number },
 		ReadQueryEffectError | SqlError
 	>;
 
@@ -186,6 +203,30 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 			),
 		);
 
+	// ─── The session list reads ───────────────────────────────────────────
+	// `getSessionListSnapshot` and `getSessionListEntry` are the only producers
+	// of the single session type (ni8.5 T-1) — what the shell subscription
+	// streams and what the browser holds. These column aliases do the renaming,
+	// so no caller bridges a row into a session; the only step left in code is
+	// NULL-to-absent, which SQL cannot express. `listSessions` stays a row read
+	// for the server-internal callers that need columns the wire never carries
+	// (the status poller's `updated_at`, permission-mode restore).
+	const sessionColumns = sql.literal(
+		`id, title, status,
+		 created_at AS createdAt, updated_at AS updatedAt,
+		 parent_id AS parentID, fork_point_event AS forkMessageId`,
+	);
+
+	const toSession = ({
+		parentID,
+		forkMessageId,
+		...session
+	}: SessionSelection): SessionInfo => ({
+		...session,
+		...(parentID !== null && { parentID }),
+		...(forkMessageId !== null && { forkMessageId }),
+	});
+
 	const listSessions = (opts?: {
 		roots?: boolean;
 	}): Effect.Effect<readonly SessionRow[], ReadQueryEffectError | SqlError> =>
@@ -202,6 +243,25 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 					? e
 					: new ReadQueryEffectError({
 							operation: "listSessions",
+							cause: e,
+						}),
+			),
+		);
+
+	const getSessionListEntry = (
+		sessionId: string,
+	): Effect.Effect<SessionInfo | undefined, ReadQueryEffectError | SqlError> =>
+		Effect.gen(function* () {
+			const rows = yield* sql<SessionSelection>`
+				SELECT ${sessionColumns} FROM sessions WHERE id = ${sessionId}`;
+			const row = rows[0];
+			return row === undefined ? undefined : toSession(row);
+		}).pipe(
+			Effect.mapError((e) =>
+				e instanceof ReadQueryEffectError
+					? e
+					: new ReadQueryEffectError({
+							operation: "getSessionListEntry",
 							cause: e,
 						}),
 			),
@@ -333,7 +393,7 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 			);
 
 	const getSessionListSnapshot = (): Effect.Effect<
-		{ readonly rows: readonly SessionRow[]; readonly sequence: number },
+		{ readonly rows: readonly SessionInfo[]; readonly sequence: number },
 		ReadQueryEffectError | SqlError
 	> =>
 		sql
@@ -342,9 +402,12 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 					const cursorRows = yield* sql<{ hwm: number | null }>`
 						SELECT last_applied_seq AS hwm FROM projector_cursors
 						WHERE projector_name = 'session'`;
-					const rows = yield* sql<SessionRow>`
-						SELECT * FROM sessions ORDER BY updated_at DESC`;
-					return { rows, sequence: cursorRows[0]?.hwm ?? 0 };
+					const rows = yield* sql<SessionSelection>`
+						SELECT ${sessionColumns} FROM sessions ORDER BY updated_at DESC`;
+					return {
+						rows: rows.map(toSession),
+						sequence: cursorRows[0]?.hwm ?? 0,
+					};
 				}),
 			)
 			.pipe(
@@ -390,6 +453,7 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 		getSession,
 		getAllSessionStatuses,
 		listSessions,
+		getSessionListEntry,
 		getSessionMessagesWithParts,
 		getSessionDetailSnapshot,
 		getSessionListSnapshot,

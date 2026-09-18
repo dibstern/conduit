@@ -21,6 +21,7 @@ const initMessages = [
 			{
 				id: SESSION_ID,
 				title: "PWA session",
+				status: "idle",
 				updatedAt: Date.now(),
 				messageCount: 0,
 			},

@@ -36,6 +36,7 @@
         {
           "id": "ses_2d28a1da8ffetHB1Lk5YzNLvN0",
           "title": "New session - 2026-03-27T04:03:13.623Z",
+          "status": "idle",
           "updatedAt": 1774584193623,
           "messageCount": 0
         }
@@ -48,6 +49,7 @@
         {
           "id": "ses_2d28a1da8ffetHB1Lk5YzNLvN0",
           "title": "New session - 2026-03-27T04:03:13.623Z",
+          "status": "idle",
           "updatedAt": 1774584193623,
           "messageCount": 0
         }
@@ -494,6 +496,7 @@
             {
               "id": "ses_2d28a1da8ffetHB1Lk5YzNLvN0",
               "title": "New session - 2026-03-27T04:03:13.623Z",
+              "status": "idle",
               "updatedAt": 1774584195967,
               "messageCount": 0
             }
@@ -506,6 +509,7 @@
             {
               "id": "ses_2d28a1da8ffetHB1Lk5YzNLvN0",
               "title": "New session - 2026-03-27T04:03:13.623Z",
+              "status": "idle",
               "updatedAt": 1774584195967,
               "messageCount": 0
             }
@@ -518,6 +522,7 @@
             {
               "id": "ses_2d28a1da8ffetHB1Lk5YzNLvN0",
               "title": "New session - 2026-03-27T04:03:13.623Z",
+              "status": "idle",
               "updatedAt": 1774584195967,
               "messageCount": 0
             }
@@ -530,6 +535,7 @@
             {
               "id": "ses_2d28a1da8ffetHB1Lk5YzNLvN0",
               "title": "New session - 2026-03-27T04:03:13.623Z",
+              "status": "idle",
               "updatedAt": 1774584195967,
               "messageCount": 0
             }
@@ -542,6 +548,7 @@
             {
               "id": "ses_2d28a1da8ffetHB1Lk5YzNLvN0",
               "title": "New session - 2026-03-27T04:03:13.623Z",
+              "status": "busy",
               "updatedAt": 1774584195967,
               "messageCount": 0,
               "processing": true
@@ -560,6 +567,7 @@
             {
               "id": "ses_2d28a1da8ffetHB1Lk5YzNLvN0",
               "title": "New session - 2026-03-27T04:03:13.623Z",
+              "status": "busy",
               "updatedAt": 1774584195967,
               "messageCount": 0,
               "processing": true
@@ -573,6 +581,7 @@
             {
               "id": "ses_2d28a1da8ffetHB1Lk5YzNLvN0",
               "title": "Automated testing importance for software quality",
+              "status": "busy",
               "updatedAt": 1774584195967,
               "messageCount": 0,
               "processing": true
@@ -586,6 +595,7 @@
             {
               "id": "ses_2d28a1da8ffetHB1Lk5YzNLvN0",
               "title": "Automated testing importance for software quality",
+              "status": "busy",
               "updatedAt": 1774584195967,
               "messageCount": 0,
               "processing": true
@@ -684,6 +694,7 @@
             {
               "id": "ses_2d28a1da8ffetHB1Lk5YzNLvN0",
               "title": "Automated testing importance for software quality",
+              "status": "idle",
               "updatedAt": 1774584200361,
               "messageCount": 0
             }
@@ -701,6 +712,7 @@
             {
               "id": "ses_2d28a1da8ffetHB1Lk5YzNLvN0",
               "title": "Automated testing importance for software quality",
+              "status": "idle",
               "updatedAt": 1774584200374,
               "messageCount": 0
             }
@@ -713,6 +725,7 @@
             {
               "id": "ses_2d28a1da8ffetHB1Lk5YzNLvN0",
               "title": "Automated testing importance for software quality",
+              "status": "idle",
               "updatedAt": 1774584200374,
               "messageCount": 0
             }
@@ -725,6 +738,7 @@
             {
               "id": "ses_2d28a1da8ffetHB1Lk5YzNLvN0",
               "title": "Automated testing importance for software quality",
+              "status": "idle",
               "updatedAt": 1774584200374,
               "messageCount": 0
             }

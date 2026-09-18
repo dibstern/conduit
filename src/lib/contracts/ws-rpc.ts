@@ -1,6 +1,17 @@
 import { Rpc, RpcGroup } from "@effect/rpc";
 import { Schema } from "effect";
-import { SessionPermissionModeSchema } from "../shared-types.js";
+import {
+	type SessionInfo,
+	SessionInfoSchema,
+	SessionPermissionModeSchema,
+	SessionStatusSchema,
+} from "../shared-types.js";
+
+// The single session type (ni8.5 T-1) is declared once, in shared-types, and
+// re-exported here so contract consumers never reach past the contract module.
+export { SessionInfoSchema, SessionStatusSchema };
+export type { SessionInfo };
+
 import {
 	ClaudeSettingsOverridesSchema,
 	ClaudeSettingsResolveError,
@@ -319,19 +330,6 @@ export const RpcLogLevelSchema = Schema.Literal(
 	"error",
 );
 
-export const SessionInfoSchema = Schema.Struct({
-	id: Schema.String,
-	title: Schema.String,
-	createdAt: Schema.optional(Schema.Union(Schema.String, Schema.Number)),
-	updatedAt: Schema.optional(Schema.Union(Schema.String, Schema.Number)),
-	messageCount: Schema.optional(Schema.Number),
-	processing: Schema.optional(Schema.Boolean),
-	parentID: Schema.optional(Schema.String),
-	forkMessageId: Schema.optional(Schema.String),
-	forkPointTimestamp: Schema.optional(Schema.Number),
-	pendingQuestionCount: Schema.optional(Schema.Number),
-});
-
 export const ListSessionsResponseSchema = Schema.Struct({
 	projectSlug: Schema.String,
 	sessions: Schema.Array(SessionInfoSchema),
@@ -484,7 +482,6 @@ export type ReloadProviderSessionResponse =
 export type SwitchVariantResponse = typeof SwitchVariantResponseSchema.Type;
 export type SwitchPermissionModeResponse =
 	typeof SwitchPermissionModeResponseSchema.Type;
-export type SessionInfo = typeof SessionInfoSchema.Type;
 export type ListSessionsResponse = typeof ListSessionsResponseSchema.Type;
 export type CreateSessionResponse = typeof CreateSessionResponseSchema.Type;
 export type LoadMoreHistoryResponse = typeof LoadMoreHistoryResponseSchema.Type;
@@ -1244,7 +1241,30 @@ export const WsRpcRequest = Schema.Union(
 
 export type WsRpcRequest = typeof WsRpcRequest.Type;
 
+export const SubscribeShell = Rpc.make("SubscribeShell", {
+	payload: {
+		projectSlug: NonEmptyString,
+		resumeFromSequence: Schema.optional(Schema.Number),
+	},
+	success: EnvelopeSchema(SessionInfoSchema),
+	error: WsRpcError,
+	stream: true,
+});
+
+export const SubscribeSessionDetail = Rpc.make("SubscribeSessionDetail", {
+	payload: {
+		projectSlug: NonEmptyString,
+		sessionId: NonEmptyString,
+		resumeFromSequence: Schema.optional(Schema.Number),
+	},
+	success: EnvelopeSchema(SessionDetailItemSchema),
+	error: WsRpcError,
+	stream: true,
+});
+
 export const WsRpcGroup = RpcGroup.make(
+	SubscribeShell,
+	SubscribeSessionDetail,
 	Rpc.fromTaggedRequest(GetAgents),
 	Rpc.fromTaggedRequest(GetCommands),
 	Rpc.fromTaggedRequest(GetProjects),

@@ -45,42 +45,49 @@ export const initMessages: MockMessage[] = [
 			{
 				id: "sess-mockup-001",
 				title: "Fix model selector UI",
+				status: "idle",
 				updatedAt: Date.now(),
 				messageCount: 4,
 			},
 			{
 				id: "sess-mockup-002",
 				title: "Add dark mode support",
+				status: "idle",
 				updatedAt: Date.now() - 3600_000,
 				messageCount: 8,
 			},
 			{
 				id: "sess-mockup-003",
 				title: "Refactor WebSocket handler",
+				status: "idle",
 				updatedAt: Date.now() - 7200_000,
 				messageCount: 12,
 			},
 			{
 				id: "sess-mockup-004",
 				title: "Implement file browser panel",
+				status: "idle",
 				updatedAt: Date.now() - 86400_000,
 				messageCount: 6,
 			},
 			{
 				id: "sess-mockup-005",
 				title: "Add notification system",
+				status: "idle",
 				updatedAt: Date.now() - 100800_000,
 				messageCount: 3,
 			},
 			{
 				id: "sess-mockup-006",
 				title: "Set up project structure",
+				status: "idle",
 				updatedAt: Date.now() - 345600_000,
 				messageCount: 10,
 			},
 			{
 				id: "sess-mockup-007",
 				title: "Initial relay architecture",
+				status: "idle",
 				updatedAt: Date.now() - 432000_000,
 				messageCount: 15,
 			},
@@ -627,6 +634,7 @@ export const noInstanceInitMessages: MockMessage[] = [
 			{
 				id: "sess-ni-001",
 				title: "Test session",
+				status: "idle",
 				updatedAt: Date.now(),
 				messageCount: 0,
 			},
@@ -662,6 +670,7 @@ export const multiInstanceInitMessages: MockMessage[] = [
 			{
 				id: "sess-mi-001",
 				title: "Test session",
+				status: "idle",
 				updatedAt: Date.now(),
 				messageCount: 0,
 			},
@@ -697,6 +706,7 @@ export const singleInstanceInitMessages: MockMessage[] = [
 			{
 				id: "sess-si-001",
 				title: "Test session",
+				status: "idle",
 				updatedAt: Date.now(),
 				messageCount: 0,
 			},
@@ -772,6 +782,7 @@ export const variantInitMessages: MockMessage[] = [
 			{
 				id: "sess-var-001",
 				title: "Test session",
+				status: "idle",
 				updatedAt: Date.now(),
 				messageCount: 0,
 			},
@@ -819,6 +830,7 @@ export const noVariantInitMessages: MockMessage[] = [
 			{
 				id: "sess-novar-001",
 				title: "Test session",
+				status: "idle",
 				updatedAt: Date.now(),
 				messageCount: 0,
 			},
@@ -896,6 +908,7 @@ export const contextWindowInitMessages: MockMessage[] = [
 			{
 				id: "sess-context-001",
 				title: "Test session",
+				status: "idle",
 				updatedAt: Date.now(),
 				messageCount: 0,
 			},
@@ -946,6 +959,7 @@ export const noContextWindowInitMessages: MockMessage[] = [
 			{
 				id: "sess-context-none-001",
 				title: "Test session",
+				status: "idle",
 				updatedAt: Date.now(),
 				messageCount: 0,
 			},

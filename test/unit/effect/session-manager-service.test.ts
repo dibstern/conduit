@@ -89,7 +89,6 @@ import {
 import type { ReadQueryEffect } from "../../../src/lib/persistence/effect/read-query-effect.js";
 import { ReadQueryEffectTag } from "../../../src/lib/persistence/effect/read-query-effect.js";
 import { runMigrations } from "../../../src/lib/persistence/migrations.js";
-import type { SessionRow } from "../../../src/lib/persistence/read-model-types.js";
 import { schemaMigrations } from "../../../src/lib/persistence/schema.js";
 import { SqliteClient } from "../../../src/lib/persistence/sqlite-client.js";
 import { OrchestrationEngine } from "../../../src/lib/provider/orchestration-engine.js";
@@ -97,7 +96,11 @@ import { ProviderRegistry } from "../../../src/lib/provider/provider-registry.js
 import { SqliteProviderSessionBindingReadModel } from "../../../src/lib/provider/provider-session-binding-read-model.js";
 import type { ProviderInstance } from "../../../src/lib/provider/types.js";
 import { translateMessageCreated } from "../../../src/lib/relay/event-translator.js";
-import type { HistoryMessage } from "../../../src/lib/shared-types.js";
+import type {
+	HistoryMessage,
+	RelayMessage,
+	SessionInfo,
+} from "../../../src/lib/shared-types.js";
 import type { ProjectRelayConfig } from "../../../src/lib/types.js";
 import {
 	makeMockConfig,
@@ -108,38 +111,23 @@ import {
 } from "../../helpers/mock-factories.js";
 import { withDispatchEffect } from "../../helpers/orchestration-engine-test-double.js";
 
-function makeRow(id: string, overrides?: Partial<SessionRow>): SessionRow {
-	return {
-		id,
-		provider: "opencode",
-		provider_sid: null,
-		version: 0,
-		title: "Untitled",
-		status: "idle",
-		parent_id: null,
-		fork_point_event: null,
-		last_message_at: null,
-		permission_mode: null,
-		created_at: 1000,
-		updated_at: 2000,
-		...overrides,
-	};
-}
-
-function makeReadQueryEffect(rows: readonly SessionRow[]): ReadQueryEffect {
+function makeReadQueryEffect(
+	sessions: readonly SessionInfo[],
+): ReadQueryEffect {
 	return {
 		getToolContent: vi.fn(() => Effect.succeed(undefined)),
 		getSessionStatus: vi.fn(() => Effect.succeed(undefined)),
-		getSession: vi.fn((sessionId: string) =>
-			Effect.succeed(rows.find((row) => row.id === sessionId)),
-		),
+		getSession: vi.fn(() => Effect.succeed(undefined)),
 		getAllSessionStatuses: vi.fn(() => Effect.succeed({})),
-		listSessions: vi.fn(() => Effect.succeed(rows)),
+		listSessions: vi.fn(() => Effect.succeed([])),
+		getSessionListEntry: vi.fn((sessionId: string) =>
+			Effect.succeed(sessions.find((session) => session.id === sessionId)),
+		),
 		getSessionDetailSnapshot: vi.fn(() =>
 			Effect.succeed({ messages: [], sequence: 0 }),
 		),
 		getSessionListSnapshot: vi.fn(() =>
-			Effect.succeed({ rows: [], sequence: 0 }),
+			Effect.succeed({ rows: sessions, sequence: 0 }),
 		),
 		getLatestTurnModelExecution: vi.fn(() => Effect.succeed(undefined)),
 		getSessionMessagesWithParts: vi.fn(() => Effect.succeed([])),
@@ -182,6 +170,7 @@ function seedProjectedSessionBinding(
 	dbFile: string,
 	sessionId: string,
 	providerId: string,
+	parentId?: string,
 ): void {
 	const db = SqliteClient.open(dbFile);
 	try {
@@ -190,8 +179,16 @@ function seedProjectedSessionBinding(
 		// These tests exercise deletion, not cleanup of pre-event-store rows.
 		const now = 1_800_000_000_000;
 		db.execute(
-			"INSERT INTO sessions (id, provider, title, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
-			[sessionId, providerId, "Persisted session", "idle", now, now],
+			"INSERT INTO sessions (id, provider, title, status, created_at, updated_at, parent_id) VALUES (?, ?, ?, ?, ?, ?, ?)",
+			[
+				sessionId,
+				providerId,
+				"Persisted session",
+				"idle",
+				now,
+				now,
+				parentId ?? null,
+			],
 		);
 		db.execute(
 			"INSERT INTO session_providers (id, session_id, provider, status, activated_at) VALUES (?, ?, ?, 'active', ?)",
@@ -360,25 +357,79 @@ describe("SessionManagerService", () => {
 			return Effect.gen(function* () {
 				const service = yield* SessionManagerServiceTag;
 
+				const messages: Extract<RelayMessage, { type: "session_list" }>[] = [];
+
 				yield* service.incrementPendingQuestionCount("session-1");
 				yield* service.incrementPendingQuestionCount("session-1");
-				let sessions = yield* service.listSessions();
-				expect(sessions).toEqual([
-					expect.objectContaining({
-						id: "session-1",
-						pendingQuestionCount: 2,
-					}),
-				]);
+				yield* service.sendDualSessionLists((msg) => messages.push(msg));
+				expect(messages[0]?.pendingQuestionCounts).toEqual({
+					"session-1": 2,
+				});
+				// The count rides the message; the session itself stays clean.
+				expect(messages[0]?.sessions[0]).not.toHaveProperty(
+					"pendingQuestionCount",
+				);
 
 				yield* service.decrementPendingQuestionCount("session-1");
 				yield* service.decrementPendingQuestionCount("session-1");
-				sessions = yield* service.listSessions();
-				expect(sessions).toEqual([
-					expect.not.objectContaining({
-						pendingQuestionCount: expect.any(Number),
-					}),
-				]);
+				messages.length = 0;
+				yield* service.sendDualSessionLists((msg) => messages.push(msg));
+				expect(messages[0]).not.toHaveProperty("pendingQuestionCounts");
 			}).pipe(Effect.provide(layer));
+		},
+	);
+
+	it.scoped(
+		"cascade delete forgets pending questions for every descendant",
+		() => {
+			const tmpDir = mkdtempSync(
+				join(tmpdir(), "conduit-session-delete-lineage-"),
+			);
+			const dbFile = join(tmpDir, "events.sqlite");
+			seedProjectedSessionBinding(dbFile, "parent-1", "opencode");
+			seedProjectedSessionBinding(dbFile, "child-1", "opencode", "parent-1");
+			seedProjectedSessionBinding(
+				dbFile,
+				"grandchild-1",
+				"opencode",
+				"child-1",
+			);
+			const api = makeMockOpenCodeAPI();
+			vi.spyOn(api.session, "delete").mockResolvedValue(undefined);
+			vi.spyOn(api.session, "list").mockResolvedValue([]);
+			const layer = Layer.provideMerge(
+				SessionManagerServiceLive,
+				Layer.mergeAll(
+					Layer.succeed(OpenCodeAPITag, api),
+					Layer.succeed(LoggerTag, makeMockLogger()),
+					makeSessionManagerStateLive({
+						pendingQuestionCounts: HashMap.fromIterable([
+							["child-1", 1],
+							["grandchild-1", 2],
+						]),
+					}),
+					DaemonEventBusLive,
+					makePersistenceEffectLayer(dbFile),
+				),
+			);
+
+			return Effect.gen(function* () {
+				const service = yield* SessionManagerServiceTag;
+				const messages: Extract<RelayMessage, { type: "session_list" }>[] = [];
+
+				// Deleting the root takes the whole lineage with it, so no count may
+				// outlive it — a stray one rebuilds an attention badge for a session
+				// the browser can no longer show.
+				yield* service.deleteSession("parent-1");
+				yield* service.sendDualSessionLists((msg) => messages.push(msg));
+
+				expect(messages[0]).not.toHaveProperty("pendingQuestionCounts");
+			}).pipe(
+				Effect.provide(Layer.fresh(layer)),
+				Effect.ensuring(
+					Effect.sync(() => rmSync(tmpDir, { recursive: true, force: true })),
+				),
+			);
 		},
 	);
 
@@ -2311,18 +2362,16 @@ describe("SessionManagerService", () => {
 					id: "child-1",
 					title: "Untitled",
 					updatedAt: 100,
-					messageCount: 0,
+					status: "busy",
 					parentID: "root-1",
 					forkMessageId: "msg-1",
 					forkPointTimestamp: 90,
-					processing: true,
-					pendingQuestionCount: 2,
 				},
 				{
 					id: "root-1",
 					title: "Root",
 					updatedAt: 30,
-					messageCount: 0,
+					status: "idle",
 				},
 			]);
 			expect(Array.from(HashMap.toEntries(state.cachedParentMap))).toEqual([
@@ -2367,7 +2416,7 @@ describe("SessionManagerService", () => {
 					id: "forked-1",
 					title: "Forked",
 					updatedAt: 50,
-					messageCount: 0,
+					status: "idle",
 					parentID: "parent-1",
 					forkMessageId: "msg-1",
 					forkPointTimestamp: 40,
@@ -2390,12 +2439,13 @@ describe("SessionManagerService", () => {
 			new Error("provider API should not be called"),
 		);
 		const readQuery = makeReadQueryEffect([
-			makeRow("forked-1", {
+			{
+				id: "forked-1",
 				title: "Forked",
-				parent_id: null,
-				fork_point_event: null,
-				updated_at: 300,
-			}),
+				status: "idle",
+				createdAt: 100,
+				updatedAt: 300,
+			},
 		]);
 		const layer = Layer.mergeAll(
 			Layer.succeed(OpenCodeAPITag, api),
@@ -2417,14 +2467,17 @@ describe("SessionManagerService", () => {
 		return Effect.gen(function* () {
 			const sessions = yield* listSessions();
 
-			expect(readQuery.listSessions).toHaveBeenCalledWith(undefined);
+			expect(readQuery.getSessionListSnapshot).toHaveBeenCalled();
 			expect(api.session.list).not.toHaveBeenCalled();
+			// The read hands back the single session type as-is; only fork lineage,
+			// which no column carries yet, is folded on (ni8.5 §6).
 			expect(sessions).toEqual([
 				{
 					id: "forked-1",
 					title: "Forked",
+					status: "idle",
+					createdAt: 100,
 					updatedAt: 300,
-					messageCount: 0,
 					parentID: "parent-1",
 					forkMessageId: "msg-1",
 					forkPointTimestamp: 250,
@@ -2547,7 +2600,7 @@ describe("SessionManagerService", () => {
 								id: "root-1",
 								title: "Root",
 								updatedAt: 1,
-								messageCount: 0,
+								status: "idle",
 							},
 						],
 						roots: true,
@@ -2576,7 +2629,7 @@ describe("SessionManagerService", () => {
 								id: "root-1",
 								title: "Root",
 								updatedAt: 1,
-								messageCount: 0,
+								status: "idle",
 							},
 						],
 						roots: true,
@@ -2588,7 +2641,7 @@ describe("SessionManagerService", () => {
 								id: "child-1",
 								title: "Child",
 								updatedAt: 2,
-								messageCount: 0,
+								status: "idle",
 								parentID: "root-1",
 							},
 						],
@@ -2637,7 +2690,7 @@ describe("SessionManagerService", () => {
 								id: "root-1",
 								title: "Root",
 								updatedAt: 1,
-								messageCount: 0,
+								status: "idle",
 							},
 						],
 						roots: true,
@@ -2700,8 +2753,7 @@ describe("SessionManagerService", () => {
 					id: "session-1",
 					title: "Session 1",
 					updatedAt: 1,
-					messageCount: 0,
-					processing: true,
+					status: "busy",
 				},
 			]);
 		}).pipe(Effect.provide(layer));
@@ -2762,7 +2814,7 @@ describe("SessionManagerService", () => {
 						id: "forked-1",
 						title: "Forked",
 						updatedAt: 50,
-						messageCount: 0,
+						status: "idle",
 						parentID: "parent-1",
 						forkMessageId: "msg-1",
 						forkPointTimestamp: 250,
@@ -2825,7 +2877,7 @@ describe("SessionManagerService", () => {
 						id: "forked-1",
 						title: "Forked",
 						updatedAt: 50,
-						messageCount: 0,
+						status: "idle",
 						parentID: "parent-1",
 						forkMessageId: "msg-1",
 						forkPointTimestamp: 250,
