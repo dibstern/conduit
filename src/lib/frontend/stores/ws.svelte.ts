@@ -44,9 +44,10 @@ export {
 } from "./ws-listeners.js";
 export {
 	clearNavigateToSession,
-	initSWNavigationListener,
+	initSWMessageListener,
 	isPushActive,
 	onNavigateToSession,
+	reconcilePushActive,
 	setPushActive,
 	triggerNotifications,
 } from "./ws-notifications.js";

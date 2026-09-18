@@ -10,7 +10,7 @@ import {
 } from "@effect/rpc";
 import { SqlClient } from "@effect/sql";
 import { describe, it } from "@effect/vitest";
-import { Effect, HashMap, Layer, Queue, Ref, type Scope, Stream } from "effect";
+import { Effect, Layer, Queue, type Scope, Stream } from "effect";
 import { expect, expectTypeOf } from "vitest";
 import {
 	type WsRpcError,
@@ -19,10 +19,7 @@ import {
 import { DaemonEventBusLive } from "../../../src/lib/domain/daemon/Services/daemon-pubsub.js";
 import { SessionEventBusLive } from "../../../src/lib/domain/relay/Services/session-event-bus.js";
 import { SessionManagerServiceLive } from "../../../src/lib/domain/relay/Services/session-manager-service.js";
-import {
-	makeSessionManagerStateLive,
-	SessionManagerStateTag,
-} from "../../../src/lib/domain/relay/Services/session-manager-state.js";
+import { makeSessionManagerStateLive } from "../../../src/lib/domain/relay/Services/session-manager-state.js";
 import { makeCommitAndSignal } from "../../../src/lib/persistence/effect/commit-and-signal.js";
 import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
 import { ProjectionRunnerEffectTag } from "../../../src/lib/persistence/effect/projection-runner-effect.js";
@@ -91,31 +88,33 @@ describe("subscription RPC handlers", () => {
 	});
 
 	it.scoped(
-		"shell snapshot, live and replay preserve Ref-only fork lineage from ListSessions",
+		"shell snapshot, live and replay preserve projected fork lineage",
 		() =>
 			Effect.gen(function* () {
 				const runner = yield* ProjectionRunnerEffectTag;
 				yield* runner.recover();
+				yield* commit(
+					canonicalEvent(
+						"session.created",
+						"parent-1",
+						{ sessionId: "parent-1", title: "Parent", provider: "opencode" },
+						{ provider: "opencode", createdAt: 1 },
+					),
+				);
 				const createdVersion = yield* commit(
 					canonicalEvent(
 						"session.created",
 						"fork-1",
-						{ sessionId: "fork-1", title: "Fork", provider: "opencode" },
+						{
+							sessionId: "fork-1",
+							title: "Fork",
+							provider: "opencode",
+							parentId: "parent-1",
+							forkPointEvent: "message-1",
+						},
 						{ provider: "opencode", createdAt: 1 },
 					),
 				);
-				const state = yield* SessionManagerStateTag;
-				yield* Ref.update(state, (value) => ({
-					...value,
-					forkMeta: HashMap.make([
-						"fork-1",
-						{
-							parentID: "parent-1",
-							forkMessageId: "message-1",
-							forkPointTimestamp: 123456,
-						},
-					]),
-				}));
 				const readQuery = yield* ReadQueryEffectTag;
 				expect(
 					(yield* readQuery.readSessionList()).rows.find(
@@ -124,14 +123,15 @@ describe("subscription RPC handlers", () => {
 				).not.toHaveProperty("forkPointTimestamp");
 				const client = yield* RpcTest.makeClient(WsRpcGroup);
 				const listed = yield* client.ListSessions({ projectSlug: "project-a" });
-				expect(listed.sessions).toEqual([
-					expect.objectContaining({
-						id: "fork-1",
-						parentID: "parent-1",
-						forkMessageId: "message-1",
-						forkPointTimestamp: 123456,
-					}),
-				]);
+				expect(listed.sessions).toEqual(
+					expect.arrayContaining([
+						expect.objectContaining({
+							id: "fork-1",
+							parentID: "parent-1",
+							forkMessageId: "message-1",
+						}),
+					]),
+				);
 				const envelopes = yield* Queue.unbounded<unknown>();
 				yield* client.SubscribeShell({ projectSlug: "project-a" }).pipe(
 					Stream.runForEach((envelope) => Queue.offer(envelopes, envelope)),

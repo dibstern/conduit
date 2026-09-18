@@ -1,7 +1,8 @@
 import { OpenCodeAPITag } from "../domain/provider/Services/opencode-api-service.js";
 // ─── Session Handlers ────────────────────────────────────────────────────────
 
-import { Effect } from "effect";
+import { SqlClient } from "@effect/sql";
+import { Effect, Option } from "effect";
 import { mapQuestionFields } from "../bridges/question-bridge.js";
 import type { ProviderInstanceId } from "../contracts/provider-instance.js";
 import { PendingInteractionServiceTag } from "../domain/relay/Services/pending-interaction-service.js";
@@ -12,13 +13,16 @@ import {
 	StatusPollerTag,
 	WebSocketHandlerTag,
 } from "../domain/relay/Services/services.js";
-import { forkOpenCodeSession } from "../domain/relay/Services/session-command.js";
+import { forkSession } from "../domain/relay/Services/session-command.js";
 import { SessionManagerServiceTag } from "../domain/relay/Services/session-manager-service.js";
 import {
 	clearSession as clearEffectOverrideSession,
 	hasActiveProcessingTimeout,
 } from "../domain/relay/Services/session-overrides-state.js";
+import { EventStoreEffectTag } from "../persistence/effect/event-store-effect.js";
+import { ProjectionRunnerEffectTag } from "../persistence/effect/projection-runner-effect.js";
 import { ReadQueryEffectTag } from "../persistence/effect/read-query-effect.js";
+import { markSessionViewed } from "../persistence/effect/session-viewed.js";
 import { messageRowsToHistory } from "../persistence/session-history-adapter.js";
 import {
 	buildSessionSwitchedMessage,
@@ -31,7 +35,6 @@ import {
 import type {
 	HistoryMessage,
 	PermissionId,
-	RelayMessage,
 	RequestId,
 } from "../shared-types.js";
 import { getSessionInputDraft } from "./prompt.js";
@@ -399,6 +402,49 @@ const switchClientToSession = (
 		}
 	});
 
+/**
+ * Record a view on the session row, and complain out loud if it does not land.
+ *
+ * Everything here is a way of refusing to fail quietly. The services are taken
+ * as options because handler tests and the CLI's degenerate stacks run without
+ * persistence — but an unwired store is reported, not skipped in silence. A
+ * write that stamps no row (the session is gone) is reported too: to the caller
+ * it looks exactly like success, and the badge simply never clears.
+ */
+const recordSessionViewed = (sessionId: string, at: number) =>
+	Effect.gen(function* () {
+		const log = yield* LoggerTag;
+		const sql = yield* Effect.serviceOption(SqlClient.SqlClient);
+		const eventStore = yield* Effect.serviceOption(EventStoreEffectTag);
+		const projectionRunner = yield* Effect.serviceOption(
+			ProjectionRunnerEffectTag,
+		);
+		if (
+			Option.isNone(sql) ||
+			Option.isNone(eventStore) ||
+			Option.isNone(projectionRunner)
+		) {
+			log.warn(
+				`view not recorded for ${sessionId}: no read model is wired to write it to`,
+			);
+			return;
+		}
+
+		const stamped = yield* markSessionViewed(sessionId, at).pipe(
+			Effect.provideService(SqlClient.SqlClient, sql.value),
+			Effect.provideService(EventStoreEffectTag, eventStore.value),
+			Effect.provideService(ProjectionRunnerEffectTag, projectionRunner.value),
+			Effect.either,
+		);
+		if (stamped._tag === "Left") {
+			log.error(`view not recorded for ${sessionId}`, stamped.left);
+			return;
+		}
+		if (!stamped.right) {
+			log.warn(`view not recorded for ${sessionId}: no such session row`);
+		}
+	});
+
 export const viewSessionForClient = ({
 	clientId,
 	sessionId,
@@ -415,14 +461,39 @@ export const viewSessionForClient = ({
 		const id = sessionId;
 		if (!id) return;
 
+		// Read before the switch overwrites it: the session this client is leaving.
+		const departing = wsHandler.getClientSession(clientId);
+
 		yield* switchClientToSession(clientId, id);
 
-		// Broadcast session_viewed notification
-		wsHandler.broadcast({
-			type: "notification_event",
-			eventType: "session_viewed",
-			sessionId: id,
-		} as RelayMessage);
+		const now = Date.now();
+		yield* recordSessionViewed(id, now);
+		// Anything that arrived while the previous session was on screen was read
+		// there, so leaving it counts as seeing it. Without this, streaming into a
+		// session you are watching badges it the moment you navigate away.
+		if (departing !== undefined && departing !== id) {
+			yield* recordSessionViewed(departing, now);
+		}
+
+		// Interim delivery until conduit-test-ni8.5.20 installs the frontend
+		// SubscribeShell consumer. Remove this broadcast when that bead lands.
+		const readQuery = yield* Effect.serviceOption(ReadQueryEffectTag);
+		if (Option.isSome(readQuery)) {
+			yield* readQuery.value.readSessionList().pipe(
+				Effect.tap(({ rows }) =>
+					Effect.sync(() =>
+						wsHandler.broadcast({
+							type: "session_list",
+							sessions: rows.map(({ item }) => item),
+							roots: false,
+						}),
+					),
+				),
+				Effect.catchAll((error) =>
+					Effect.sync(() => log.warn("Viewed session broadcast failed", error)),
+				),
+			);
+		}
 
 		// Fire-and-forget metadata (unless skipMetadata is set)
 		if (!skipMetadata) {
@@ -657,61 +728,20 @@ export const forkSessionForClient = ({
 	readonly messageId?: string;
 }) =>
 	Effect.gen(function* () {
-		const client = yield* OpenCodeAPITag;
 		const wsHandler = yield* WebSocketHandlerTag;
 		const sessionManagerService = yield* SessionManagerServiceTag;
-		const log = yield* LoggerTag;
 
 		const sessionId =
 			requestedSessionId || wsHandler.getClientSession(clientId) || "";
 		if (!sessionId) return undefined;
+		const log = yield* LoggerTag;
 
 		// Through the seam: forking upstream and forgetting to record the forked
 		// session locally is the same parity gap as creating one and forgetting.
-		const forked = yield* forkOpenCodeSession(sessionId, messageId);
+		const forked = yield* forkSession(sessionId, messageId);
 
 		yield* clearEffectOverrideSession(sessionId);
 		yield* sessionManagerService.clearPaginationCursor(sessionId);
-
-		// Determine fork-point metadata
-		let forkMessageId: string | undefined = messageId;
-		let forkPointTimestamp: number | undefined;
-
-		if (messageId) {
-			const msgResult = yield* Effect.either(
-				Effect.tryPromise(() => client.session.message(sessionId, messageId)),
-			);
-			if (msgResult._tag === "Right" && msgResult.right?.time?.created) {
-				forkPointTimestamp = msgResult.right.time.created;
-			} else if (msgResult._tag === "Left") {
-				log.warn(
-					`Could not look up fork-point message ${messageId} in ${sessionId}`,
-				);
-			}
-		} else {
-			forkPointTimestamp = forked.time?.created ?? forked.time?.updated;
-
-			const msgsResult = yield* Effect.either(
-				Effect.tryPromise(() =>
-					client.session.messagesPage(forked.id, { limit: 1 }),
-				),
-			);
-			if (msgsResult._tag === "Right" && msgsResult.right.length > 0) {
-				// biome-ignore lint/style/noNonNullAssertion: safe — guarded by length check
-				forkMessageId = msgsResult.right[msgsResult.right.length - 1]!.id;
-			} else if (msgsResult._tag === "Left") {
-				log.warn(`Could not determine fork-point for ${forked.id}`);
-			}
-		}
-
-		// Persist fork-point metadata
-		if (forkMessageId || forkPointTimestamp) {
-			yield* sessionManagerService.setForkEntry(forked.id, {
-				forkMessageId: forkMessageId ?? "",
-				parentID: sessionId,
-				...(forkPointTimestamp != null && { forkPointTimestamp }),
-			});
-		}
 
 		// Find the parent title for the notification
 		const sessions = yield* sessionManagerService.listSessions();
@@ -721,15 +751,18 @@ export const forkSessionForClient = ({
 		wsHandler.broadcast({
 			type: "session_forked",
 			sessionId: forked.id,
-			session: {
+			session: sessions.find((session) => session.id === forked.id) ?? {
 				id: forked.id,
 				title: forked.title ?? "Forked Session",
 				// A fork starts life idle; the projection takes over from here.
 				status: "idle",
 				updatedAt: forked.time?.updated ?? forked.time?.created ?? 0,
 				parentID: sessionId,
-				...(forkMessageId && { forkMessageId }),
-				...(forkPointTimestamp != null && { forkPointTimestamp }),
+				...(forked.forkMessageId && { forkMessageId: forked.forkMessageId }),
+				...("forkPointTimestamp" in forked &&
+					forked.forkPointTimestamp != null && {
+						forkPointTimestamp: forked.forkPointTimestamp,
+					}),
 			},
 			parentId: sessionId,
 			parentTitle: parent?.title ?? "Unknown",

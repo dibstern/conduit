@@ -37,7 +37,7 @@ import type {
 import { DEFAULT_POLLER_GATING_CONFIG } from "./monitoring-types.js";
 import { resolveNotifications } from "./notification-policy.js";
 import { createSessionSSETracker } from "./session-sse-tracker.js";
-import { sendPushForEvent } from "./sse-wiring.js";
+import { sendPushForEvent, sendPushForEventEffect } from "./sse-wiring.js";
 
 /** Structural interface for the message poller manager's capabilities needed by monitoring wiring. */
 interface PollerManagerLike {
@@ -206,12 +206,10 @@ const processAndApplyDoneEffect = (
 		);
 		const pushManager = deps.config.pushManager;
 		if (notification.sendPush && pushManager) {
-			yield* Effect.sync(() =>
-				sendPushForEvent(pushManager, doneMsg, deps.sseLog, {
-					slug: deps.config.slug,
-					sessionId,
-				}),
-			);
+			yield* sendPushForEventEffect(pushManager, doneMsg, deps.sseLog, {
+				slug: deps.config.slug,
+				sessionId,
+			});
 		}
 		if (
 			notification.broadcastCrossSession &&

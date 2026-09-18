@@ -90,7 +90,6 @@ import {
 	handleProxyDetected,
 	handleScanResult,
 } from "./instance.svelte.js";
-import { dispatch } from "./notification-reducer.svelte.js";
 import {
 	clearSessionLocal,
 	handleAskUser,
@@ -728,20 +727,9 @@ export function handleMessage(msg: RelayMessage): void {
 	switch (msg.type) {
 		// ─── Sessions ────────────────────────────────────────────────────
 		case "session_list": {
+			// Notification counts ride the rows now (ni8.23), so there is nothing
+			// left to reconcile: applying the list applies the badges.
 			handleSessionList(msg);
-			// Reconcile the notification reducer with the server's question counts,
-			// which ride the message itself — they are notification state, not part
-			// of a session (ni8.5 §5).
-			const counts = new Map<
-				string,
-				{ questions: number; permissions: number }
-			>();
-			for (const [sessionId, questions] of Object.entries(
-				msg.pendingQuestionCounts ?? {},
-			)) {
-				if (questions > 0) counts.set(sessionId, { questions, permissions: 0 });
-			}
-			dispatch({ type: "reconcile", counts });
 			break;
 		}
 		case "session_forked": {
@@ -785,7 +773,6 @@ export function handleMessage(msg: RelayMessage): void {
 			updateContextPercent(0);
 			clearTodoState();
 			clearSessionLocal(previousSessionId);
-			dispatch({ type: "session_viewed", sessionId: msg.id });
 
 			if (msg.events) {
 				// Cache hit: replay raw events through existing chat handlers
@@ -1050,25 +1037,14 @@ export function handleMessage(msg: RelayMessage): void {
 		case "notification_event": {
 			const syntheticMsg = {
 				type: msg.eventType,
+				...(msg.alertId != null ? { alertId: msg.alertId } : {}),
 				...(msg.message != null ? { message: msg.message } : {}),
 				...(msg.sessionId != null ? { sessionId: msg.sessionId } : {}),
 			} as RelayMessage;
 
-			// Dispatch to notification reducer based on event type
-			if (msg.sessionId) {
-				if (msg.eventType === "ask_user") {
-					dispatch({ type: "question_appeared", sessionId: msg.sessionId });
-				} else if (msg.eventType === "ask_user_resolved") {
-					dispatch({ type: "question_resolved", sessionId: msg.sessionId });
-				} else if (msg.eventType === "done") {
-					dispatch({ type: "session_done", sessionId: msg.sessionId });
-				} else if (msg.eventType === "session_viewed") {
-					dispatch({ type: "session_viewed", sessionId: msg.sessionId });
-				}
-			}
-
-			// session_viewed is a silent indicator update — no notifications or toasts.
-			if (msg.eventType === "session_viewed") break;
+			// Nothing here touches badge state any more: this message exists only to
+			// fire the alert (ni8.23). What a session is waiting on, and whether it
+			// has been looked at, arrive on the session row.
 
 			// Suppress all frontend notifications for subagent done events.
 			// Server-side notification-policy.ts is the primary defense; this is belt-and-suspenders.

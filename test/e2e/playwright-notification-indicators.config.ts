@@ -1,12 +1,12 @@
-// ─── Playwright Config: Notification Reducer Indicators Tests ─────────────────
-// Tests notification reducer → sidebar dots + AttentionBanner via WS mock.
+// ─── Playwright Config: Notification Indicator Tests ─────────────────────────
+// Tests server-derived session rows → sidebar dots + AttentionBanner via WS mock.
 // No real OpenCode or relay needed — serves built frontend via Vite preview.
 
 import { defineConfig } from "@playwright/test";
 
 export default defineConfig({
 	testDir: "./specs",
-	testMatch: "notification-reducer-indicators.spec.ts",
+	testMatch: "notification-indicators.spec.ts",
 	fullyParallel: true,
 	forbidOnly: !!process.env["CI"],
 	retries: 1,

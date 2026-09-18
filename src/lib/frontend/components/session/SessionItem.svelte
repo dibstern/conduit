@@ -4,8 +4,11 @@
 
 <script lang="ts">
 	import type { SessionInfo } from "../../types.js";
-	import { getSessionIndicator } from "../../stores/notification-reducer.svelte.js";
-	import { isSessionBusy, sessionState } from "../../stores/session.svelte.js";
+	import {
+		getSessionIndicator,
+		isSessionBusy,
+		sessionState,
+	} from "../../stores/session.svelte.js";
 	import { formatTimeAgo } from "../../utils/format.js";
 	import Icon from "../shared/Icon.svelte";
 

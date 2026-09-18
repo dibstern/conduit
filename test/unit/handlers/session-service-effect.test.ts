@@ -1,3 +1,7 @@
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { SqlClient } from "@effect/sql";
 import { describe, it } from "@effect/vitest";
 import { Effect, Layer } from "effect";
 import { expect, vi } from "vitest";
@@ -29,11 +33,15 @@ import {
 } from "../../../src/lib/domain/relay/Services/session-overrides-state.js";
 import { handleViewSession } from "../../../src/lib/handlers/session.js";
 import type { OpenCodeAPI } from "../../../src/lib/instance/opencode-api.js";
+import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
 import {
 	type ReadQueryEffect,
 	ReadQueryEffectTag,
 } from "../../../src/lib/persistence/effect/read-query-effect.js";
-import type { PermissionId } from "../../../src/lib/shared-types.js";
+import type {
+	PermissionId,
+	RelayMessage,
+} from "../../../src/lib/shared-types.js";
 import {
 	makeMockLogger,
 	makeMockSessionManagerService,
@@ -48,6 +56,7 @@ function makeSessionMetadataLayer(options: {
 	readonly modelService?: OpenCodeModelService;
 	readonly sessionMgr?: SessionManagerShape;
 	readonly sessionManagerService?: SessionManagerService;
+	readonly clientSession?: string;
 }) {
 	const api =
 		options.api ??
@@ -80,7 +89,11 @@ function makeSessionMetadataLayer(options: {
 			),
 			persistDefaultModel: vi.fn(() => Effect.succeed(undefined)),
 		} satisfies OpenCodeModelService);
-	const wsHandler = makeMockWebSocketHandler();
+	const wsHandler = makeMockWebSocketHandler(
+		options.clientSession === undefined
+			? {}
+			: { getClientSession: vi.fn(() => options.clientSession) },
+	);
 	const _sessionMgr = options.sessionMgr ?? makeMockSessionManagerShape();
 	const sessionManagerService =
 		options.sessionManagerService ?? makeMockSessionManagerService();
@@ -753,6 +766,117 @@ describe("session handlers with Effect-native model service", () => {
 					provider: "openai",
 				});
 			}),
+		);
+	});
+});
+
+// ─── Viewing writes the read model (ni8.23) ─────────────────────────────────
+// Viewing used to be announced with a `notification_event` broadcast that every
+// client folded into its own badge state. The fact now lives on the row, so the
+// handler writes it and the subscription carries it; the broadcast is gone.
+
+describe("viewing a session", () => {
+	const withStore = <A, E, R>(effect: Effect.Effect<A, E, R>) => {
+		const dir = mkdtempSync(join(tmpdir(), "conduit-view-trigger-"));
+		return effect.pipe(
+			Effect.provide(makePersistenceEffectLayer(join(dir, "events.db"))),
+			Effect.ensuring(
+				Effect.sync(() => rmSync(dir, { recursive: true, force: true })),
+			),
+		);
+	};
+
+	const seedSession = (id: string) =>
+		Effect.flatMap(
+			SqlClient.SqlClient,
+			(sql) => sql`
+				INSERT INTO sessions (id, provider, title, status, created_at, updated_at)
+				VALUES (${id}, 'claude', ${id}, 'idle', 1, 1)`,
+		);
+
+	const lastViewedAt = (id: string) =>
+		Effect.flatMap(SqlClient.SqlClient, (sql) =>
+			sql<{
+				last_viewed_at: number | null;
+				version: number;
+			}>`SELECT last_viewed_at, version FROM sessions WHERE id = ${id}`.pipe(
+				Effect.map((rows) => rows[0]),
+			),
+		);
+
+	it.effect("stamps the row it opens, and the row it leaves", () => {
+		const { wsHandler, layer } = makeSessionMetadataLayer({
+			clientSession: "session-left",
+		});
+		return withStore(
+			Effect.gen(function* () {
+				yield* seedSession("session-1");
+				yield* seedSession("session-left");
+
+				yield* handleViewSession(
+					"client-1",
+					{ sessionId: "session-1" },
+					/* skipMetadata */ true,
+				);
+
+				// The session just opened is obviously seen.
+				const opened = yield* lastViewedAt("session-1");
+				expect(opened?.last_viewed_at).toBeGreaterThan(0);
+				// And so is the one being left: whatever streamed in while it was on
+				// screen was read there. Badging it on the way out would be a lie.
+				const left = yield* lastViewedAt("session-left");
+				expect(left?.last_viewed_at).toBeGreaterThan(0);
+				// Both rows moved their version with the column — the only thing a
+				// subscriber watches (ni8.23 C2).
+				expect(opened?.version).toBeGreaterThan(0);
+				expect(left?.version).toBeGreaterThan(0);
+				expect(left?.version).not.toBe(opened?.version);
+				expect(wsHandler.broadcast).toHaveBeenCalledWith(
+					expect.objectContaining({
+						type: "session_list",
+						sessions: expect.arrayContaining([
+							expect.objectContaining({
+								id: "session-1",
+								unseenActivity: false,
+							}),
+						]),
+					}),
+				);
+
+				// No side-channel announcement of a fact the row already carries.
+				const broadcasts = wsHandler.broadcast as unknown as {
+					mock: { calls: readonly (readonly RelayMessage[])[] };
+				};
+				expect(
+					broadcasts.mock.calls.filter(
+						(call) => call[0]?.type === "notification_event",
+					),
+				).toEqual([]);
+			}).pipe(Effect.provide(layer)),
+		);
+	});
+
+	it.effect("says so when the session it was told to view is not there", () => {
+		const logger = makeMockLogger();
+		const { layer } = makeSessionMetadataLayer({ logger });
+		return withStore(
+			Effect.gen(function* () {
+				yield* handleViewSession(
+					"client-1",
+					{ sessionId: "ghost-session" },
+					/* skipMetadata */ true,
+				);
+				// A view that writes nothing is indistinguishable from one that
+				// worked, unless somebody says so.
+				const warned = (
+					logger.warn as unknown as {
+						mock: { calls: readonly (readonly unknown[])[] };
+					}
+				).mock.calls.map((call) => String(call[0]));
+				expect(warned.some((line) => line.includes("ghost-session"))).toBe(
+					true,
+				);
+			}).pipe(Effect.provide(layer)),
 		);
 	});
 });

@@ -155,15 +155,6 @@ describe("SessionManager Effect", () => {
 				...s,
 				cachedParentMap: HashMap.make(["child1", "s1"]),
 				paginationCursors: HashMap.make(["s1", "cursor-1"]),
-				forkMeta: HashMap.make([
-					"s1",
-					{
-						forkMessageId: "m1",
-						parentID: "p1",
-						forkPointTimestamp: 100,
-					},
-				]),
-				pendingQuestionCounts: HashMap.make(["s1", 3]),
 			}));
 
 			// Delete
@@ -180,8 +171,6 @@ describe("SessionManager Effect", () => {
 			expect(result.hasActivity).toBe(false);
 			expect(result.hasCursor).toBe(false);
 			expect(result.hasChildInParentMap).toBe(false);
-			expect(HashMap.has(state.forkMeta, "s1")).toBe(false);
-			expect(HashMap.has(state.pendingQuestionCounts, "s1")).toBe(false);
 		}).pipe(Effect.provide(Layer.fresh(makeTestLayer(mockApi))));
 	});
 

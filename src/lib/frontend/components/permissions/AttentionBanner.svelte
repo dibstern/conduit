@@ -4,15 +4,14 @@
 <!-- Dismiss button hides until new remote items arrive.                       -->
 
 <script lang="ts">
-	import { getAttentionSessions, dispatch } from "../../stores/notification-reducer.svelte.js";
 	import { getDescendantSessionIds, getRemotePermissions } from "../../stores/permissions.svelte.js";
-	import { findSession, sessionState, switchToSession } from "../../stores/session.svelte.js";
+	import { findSession, getAttentionSessions, sessionState, switchToSession } from "../../stores/session.svelte.js";
 	import { wsSend } from "../../stores/ws.svelte.js";
 
 	const remotePermissions = $derived(getRemotePermissions(sessionState.currentId));
 	const attentionSessions = $derived(getAttentionSessions(sessionState.currentId, getDescendantSessionIds));
 
-	/** Merge permissions and reducer attention into a unified session → labels map. */
+	/** Merge live permission prompts with the server's per-session counts. */
 	const sessionGroups = $derived.by(() => {
 		const groups = new Map<string, { permissions: number; questions: number }>();
 
@@ -25,7 +24,8 @@
 		for (const [sid, counts] of attentionSessions) {
 			const entry = groups.get(sid) ?? { permissions: 0, questions: 0 };
 			entry.questions = counts.questions;
-			// Merge permission counts from reducer (server-reconciled) with local permissions
+			// The server's count and the prompts this tab happens to be holding are
+			// two views of the same thing; take the larger rather than adding them.
 			entry.permissions = Math.max(entry.permissions, counts.permissions);
 			groups.set(sid, entry);
 		}
@@ -62,8 +62,8 @@
 	}
 
 	function goToSession(sessionId: string) {
-		// Mark session as viewed in the reducer, then switch to it.
-		dispatch({ type: "session_viewed", sessionId });
+		// Switching is all there is to do: the server records the view and the
+		// session row comes back with its badge already cleared, for every client.
 		switchToSession(sessionId);
 	}
 

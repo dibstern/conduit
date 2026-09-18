@@ -8,8 +8,6 @@
 //   makeSessionManagerStateLive(initial?) → Layer providing the Tag
 
 import { Context, HashMap, Layer, Ref } from "effect";
-import type { ForkEntry } from "../../../daemon/fork-metadata.js";
-export type { ForkEntry };
 
 // ─── SessionManagerState ────────────────────────────────────────────────────
 
@@ -19,16 +17,12 @@ export type { ForkEntry };
  * Each field corresponds to a private Map on the old SessionManager class:
  * - cachedParentMap: child→parent session mapping from last list fetch
  * - lastMessageAt: per-session timestamp of last message activity
- * - forkMeta: per-session fork-point metadata
- * - pendingQuestionCounts: per-session count of pending questions
  * - paginationCursors: per-session cursor for paginated history loading
  * - lastKnownSessionCount: most recent unfiltered list/initialize count
  */
 export interface SessionManagerState {
 	cachedParentMap: HashMap.HashMap<string, string>;
 	lastMessageAt: HashMap.HashMap<string, number>;
-	forkMeta: HashMap.HashMap<string, ForkEntry>;
-	pendingQuestionCounts: HashMap.HashMap<string, number>;
 	paginationCursors: HashMap.HashMap<string, string>;
 	lastKnownSessionCount: number;
 }
@@ -39,8 +33,6 @@ export interface SessionManagerState {
 export const emptySessionManagerState = (): SessionManagerState => ({
 	cachedParentMap: HashMap.empty(),
 	lastMessageAt: HashMap.empty(),
-	forkMeta: HashMap.empty(),
-	pendingQuestionCounts: HashMap.empty(),
 	paginationCursors: HashMap.empty(),
 	lastKnownSessionCount: 0,
 });

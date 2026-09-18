@@ -4,11 +4,6 @@
 // storage. This layer proxies session CRUD and maintains in-memory active state.
 
 import { EventEmitter } from "node:events";
-import {
-	type ForkEntry,
-	loadForkMetadata,
-	saveForkMetadata,
-} from "../daemon/fork-metadata.js";
 import { OpenCodeApiError } from "../errors.js";
 import type { OpenCodeAPI } from "../instance/opencode-api.js";
 import type { SessionDetail, SessionStatus } from "../instance/sdk-types.js";
@@ -29,7 +24,7 @@ export interface SessionManagerOptions {
 	directory?: string;
 	/** Optional getter for current session statuses (for processing indicators) */
 	getStatuses?: () => Record<string, SessionStatus>;
-	/** Config directory for fork metadata persistence */
+	/** Retained for compatibility with legacy callers. */
 	configDir?: string;
 }
 
@@ -60,7 +55,6 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
 	private readonly log: Logger;
 	private readonly directory: string | undefined;
 	private readonly getStatuses: (() => Record<string, SessionStatus>) | null;
-	private readonly configDir: string | undefined;
 
 	/**
 	 * Cached child→parent map built from the most recent session list fetch.
@@ -77,23 +71,10 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
 	private lastMessageAt = new Map<string, number>();
 
 	/**
-	 * Fork-point metadata: maps forked sessionId → messageId at the fork point.
-	 * Loaded from disk on construction, updated on fork, saved on mutation.
-	 */
-	private forkMeta: Map<string, ForkEntry>;
-
-	/**
 	 * Session count from the most recent listSessions() call.
 	 * Used by the daemon to report session counts without an API call.
 	 */
 	private _lastKnownSessionCount = 0;
-
-	/**
-	 * Tracks the number of pending questions per session.
-	 * Updated from SSE events (question.asked, ask_user_resolved) and
-	 * bulk-set on SSE reconnect from listPendingQuestions.
-	 */
-	private pendingQuestionCounts = new Map<string, number>();
 
 	/**
 	 * Cursor for paginated history loading. Maps sessionId → oldest message ID
@@ -110,8 +91,6 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
 		this.log = options.log ?? createSilentLogger();
 		this.directory = options.directory;
 		this.getStatuses = options.getStatuses ?? null;
-		this.configDir = options.configDir;
-		this.forkMeta = loadForkMetadata(options.configDir);
 	}
 
 	// ─── Queries ──────────────────────────────────────────────────────────
@@ -178,12 +157,7 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
 				.map((s) => s.id.slice(0, 12))
 				.join(",")}${sessions.length > 5 ? "..." : ""}]`,
 		);
-		return toSessionInfoList(
-			sessions,
-			resolvedStatuses,
-			this.lastMessageAt,
-			this.forkMeta,
-		);
+		return toSessionInfoList(sessions, resolvedStatuses, this.lastMessageAt);
 	}
 
 	/**
@@ -382,7 +356,6 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
 		await this.client.session.delete(sessionId);
 
 		for (const deletedId of deleted) {
-			this.pendingQuestionCounts.delete(deletedId);
 			this.cachedParentMap.delete(deletedId);
 		}
 
@@ -415,12 +388,7 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
 				s.id.toLowerCase().includes(q)
 			);
 		});
-		return toSessionInfoList(
-			matches,
-			this.getStatuses?.(),
-			this.lastMessageAt,
-			this.forkMeta,
-		);
+		return toSessionInfoList(matches, this.getStatuses?.(), this.lastMessageAt);
 	}
 
 	/**
@@ -489,40 +457,6 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
 		return this.lastMessageAt;
 	}
 
-	/** Look up fork-point metadata for a session. Returns undefined if not a fork. */
-	getForkEntry(sessionId: string): ForkEntry | undefined {
-		return this.forkMeta.get(sessionId);
-	}
-
-	/** Record fork-point metadata for a forked session and persist to disk. */
-	setForkEntry(sessionId: string, entry: ForkEntry): void {
-		this.forkMeta.set(sessionId, entry);
-		saveForkMetadata(this.forkMeta, this.configDir);
-	}
-
-	// ─── Pending Question Counts ──────────────────────────────────────────
-
-	/** Increment pending question count (called from SSE wiring on question.asked). */
-	incrementPendingQuestionCount(sessionId: string): void {
-		const current = this.pendingQuestionCounts.get(sessionId) ?? 0;
-		this.pendingQuestionCounts.set(sessionId, current + 1);
-	}
-
-	/** Decrement pending question count (called from handlers on answer/reject). */
-	decrementPendingQuestionCount(sessionId: string): void {
-		const current = this.pendingQuestionCounts.get(sessionId) ?? 0;
-		if (current <= 1) {
-			this.pendingQuestionCounts.delete(sessionId);
-		} else {
-			this.pendingQuestionCounts.set(sessionId, current - 1);
-		}
-	}
-
-	/** Bulk-set pending question counts (called on SSE reconnect from listPendingQuestions). */
-	setPendingQuestionCounts(counts: Map<string, number>): void {
-		this.pendingQuestionCounts = counts;
-	}
-
 	/**
 	 * Send roots-only session list immediately, then all-sessions in background.
 	 * Used by all broadcast/unicast send points.
@@ -539,7 +473,6 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
 			type: "session_list",
 			sessions: roots,
 			roots: true,
-			...this.pendingQuestionCountsField(),
 		});
 
 		this.listSessions({ statuses: options?.statuses })
@@ -548,7 +481,6 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
 					type: "session_list",
 					sessions: all,
 					roots: false,
-					...this.pendingQuestionCountsField(),
 				});
 			})
 			.catch((err) => {
@@ -558,25 +490,12 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
 
 	// ─── Internal ──────────────────────────────────────────────────────────
 
-	/** Zero counts drop out, and nothing pending means no field at all. */
-	private pendingQuestionCountsField(): {
-		pendingQuestionCounts?: Record<string, number>;
-	} {
-		const pending = [...this.pendingQuestionCounts].filter(
-			([, count]) => count > 0,
-		);
-		return pending.length > 0
-			? { pendingQuestionCounts: Object.fromEntries(pending) }
-			: {};
-	}
-
 	private async broadcastSessionList(): Promise<void> {
 		const roots = await this.listSessions({ roots: true });
 		this.emit("broadcast", {
 			type: "session_list",
 			sessions: roots,
 			roots: true,
-			...this.pendingQuestionCountsField(),
 		});
 
 		this.listSessions()
@@ -585,7 +504,6 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
 					type: "session_list",
 					sessions: all,
 					roots: false,
-					...this.pendingQuestionCountsField(),
 				});
 			})
 			.catch((err) => {

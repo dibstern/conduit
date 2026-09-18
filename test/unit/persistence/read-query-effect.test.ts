@@ -279,6 +279,9 @@ describe("ReadQueryEffect session list reads", () => {
 					updatedAt: 9,
 					parentID: "root",
 					forkMessageId: "msg_9",
+					pendingQuestions: 0,
+					pendingPermissions: 0,
+					unseenActivity: false,
 				},
 				{
 					id: "root",
@@ -286,8 +289,80 @@ describe("ReadQueryEffect session list reads", () => {
 					status: "idle",
 					createdAt: 1,
 					updatedAt: 1,
+					pendingQuestions: 0,
+					pendingPermissions: 0,
+					unseenActivity: false,
 				},
 			]);
+		}).pipe(Effect.provide(testLayer)),
+	);
+
+	it.effect("derives the three notification facts onto the session row", () =>
+		Effect.gen(function* () {
+			yield* makeEffectSqlMigrator();
+			const sql = yield* SqlClient.SqlClient;
+			// `noisy` has been looked at since its last message; `quiet` never has.
+			yield* sql`
+				INSERT INTO sessions
+				(id, provider, title, status, created_at, updated_at,
+				 last_message_at, last_viewed_at)
+				VALUES
+				('noisy', 'claude', 'Noisy', 'idle', 1, 9, 9, 10),
+				('quiet', 'claude', 'Quiet', 'idle', 1, 9, 9, NULL)`;
+			yield* sql`
+				INSERT INTO pending_approvals
+				(id, session_id, type, status, created_at)
+				VALUES
+				('q1', 'noisy', 'question', 'pending', 1),
+				('q2', 'noisy', 'question', 'pending', 2),
+				('p1', 'noisy', 'permission', 'pending', 3),
+				('q3', 'noisy', 'question', 'resolved', 4)`;
+			const readQuery = yield* makeReadQueryEffect;
+
+			// Counts come off the same rows the approval projector writes — the
+			// server decides what a badge means, once, and the browser is told.
+			expect(
+				(yield* readQuery.readSessionList()).rows.find(
+					({ item }) => item.id === "noisy",
+				)?.item,
+			).toEqual({
+				id: "noisy",
+				title: "Noisy",
+				status: "idle",
+				createdAt: 1,
+				updatedAt: 9,
+				pendingQuestions: 2,
+				pendingPermissions: 1,
+				unseenActivity: false,
+			});
+			// Never looked at, and a message has landed: something is unread.
+			expect(
+				(yield* readQuery.readSessionList()).rows.find(
+					({ item }) => item.id === "quiet",
+				)?.item,
+			).toEqual({
+				id: "quiet",
+				title: "Quiet",
+				status: "idle",
+				createdAt: 1,
+				updatedAt: 9,
+				pendingQuestions: 0,
+				pendingPermissions: 0,
+				unseenActivity: true,
+			});
+		}).pipe(Effect.provide(testLayer)),
+	);
+
+	it.effect("a session with no messages is not unseen", () =>
+		Effect.gen(function* () {
+			yield* makeEffectSqlMigrator();
+			yield* seedSession("fresh");
+			const readQuery = yield* makeReadQueryEffect;
+
+			const entry = (yield* readQuery.readSessionList()).rows.find(
+				({ item }) => item.id === "fresh",
+			)?.item;
+			expect(entry?.unseenActivity).toBe(false);
 		}).pipe(Effect.provide(testLayer)),
 	);
 
@@ -327,6 +402,20 @@ describe("ReadQueryEffect session list reads", () => {
 				through: 6,
 			});
 			expect(bounded).toEqual({ rows: [], version: 7 });
+		}).pipe(Effect.provide(testLayer)),
+	);
+	it.effect("carries the same shape into the snapshot and the re-query", () =>
+		Effect.gen(function* () {
+			yield* makeEffectSqlMigrator();
+			yield* seedSession("root");
+			yield* seedForkedSession;
+			const readQuery = yield* makeReadQueryEffect;
+			const snapshot = yield* readQuery.readSessionList();
+			const queried = yield* readQuery.readSessionList({ after: -1 });
+			expect(queried.rows).toEqual(snapshot.rows);
+			expect(
+				queried.rows.find(({ item }) => item.id === "gone"),
+			).toBeUndefined();
 		}).pipe(Effect.provide(testLayer)),
 	);
 });

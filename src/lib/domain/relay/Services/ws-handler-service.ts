@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 // ─── WsHandlerState — Effect-native WebSocket handler service ───────────────
 // Replaces the imperative WebSocketHandler class's mutable Maps/Sets with
 // a single atomic Ref<HashMap<string, ClientState>> and pure Effect functions.
@@ -179,6 +180,15 @@ export const safeSend = (ws: WsConn, data: string) =>
 		catch: () => false,
 	}).pipe(Effect.orElseSucceed(() => false));
 
+// Legacy errors have no originating event ID. Give each observation an identity
+// rather than storing a permanent session-wide receipt that hides future errors.
+const serializeMessage = (message: RelayMessage): string =>
+	JSON.stringify(
+		message.type === "error" && !message.alertId
+			? { ...message, alertId: randomUUID() }
+			: message,
+	);
+
 /**
  * Broadcast a message to all connected clients.
  * Clients that fail to receive the message are silently skipped.
@@ -187,7 +197,7 @@ export const broadcast = (message: RelayMessage) =>
 	Effect.gen(function* () {
 		const ref = yield* WsHandlerStateTag;
 		const map = yield* Ref.get(ref);
-		const data = JSON.stringify(message);
+		const data = serializeMessage(message);
 		for (const [_clientId, state] of map) {
 			yield* safeSend(state.ws, data);
 		}
@@ -203,7 +213,7 @@ export const sendTo = (clientId: string, message: RelayMessage) =>
 		const map = yield* Ref.get(ref);
 		const entry = HashMap.get(map, clientId);
 		if (Option.isSome(entry)) {
-			yield* safeSend(entry.value.ws, JSON.stringify(message));
+			yield* safeSend(entry.value.ws, serializeMessage(message));
 		}
 	}).pipe(Effect.annotateLogs("clientId", clientId));
 
@@ -261,7 +271,7 @@ export const sendToSession = (sessionId: string, message: RelayMessage) =>
 	Effect.gen(function* () {
 		const ref = yield* WsHandlerStateTag;
 		const map = yield* Ref.get(ref);
-		const data = JSON.stringify(message);
+		const data = serializeMessage(message);
 		for (const [_clientId, state] of map) {
 			if (state.sessionId === sessionId) {
 				yield* safeSend(state.ws, data);
@@ -284,7 +294,7 @@ export const broadcastPerSessionEvent = (
 ) =>
 	Effect.gen(function* () {
 		const ref = yield* WsHandlerStateTag;
-		const data = JSON.stringify(message);
+		const data = serializeMessage(message);
 		// Snapshot the map, then update buffered clients and send to ready ones
 		const map = yield* Ref.get(ref);
 		// Collect clients that need buffering

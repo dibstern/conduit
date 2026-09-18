@@ -42,6 +42,7 @@ import {
 	writePidFile,
 } from "../../../daemon/pid-manager.js";
 import { resolveTraceConfig } from "../../../env.js";
+import { migrateForkLineage } from "../../../persistence/migrations/fork-lineage-import.js";
 import type { StoredProject } from "../../../types.js";
 import { generateSlug } from "../../../utils.js";
 import { AuthManagerFromConfigLive } from "../../server/Layers/auth-middleware.js";
@@ -776,6 +777,7 @@ export const makeDaemonLive = (options: DaemonLiveOptions) => {
 	// These Layers have zero dependencies on other Tags. They form the base
 	// of the Layer stack that all subsequent tiers build on.
 	const foundation = Layer.mergeAll(
+		Layer.effectDiscard(migrateForkLineage(configDir)),
 		DaemonEventBusLive,
 		PinoLoggerLive,
 		makeDaemonTracingLive(resolveTraceConfig(configDir)),

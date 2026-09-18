@@ -27,6 +27,7 @@ import {
 	type EffectProjector,
 	ProjectionError,
 } from "../../../src/lib/persistence/effect/projectors-effect.js";
+import { makeReadQueryEffect } from "../../../src/lib/persistence/effect/read-query-effect.js";
 import {
 	makeMockConfig,
 	makeMockLogger,
@@ -43,6 +44,8 @@ describe("applySessionCommand", () => {
 			delete: vi.fn(async () => undefined),
 			update: vi.fn(async () => undefined),
 			fork: vi.fn(async () => ({ id: "ses-fork", title: "Forked" })),
+			message: vi.fn(async () => ({ id: "msg-7", time: { created: 123 } })),
+			messagesPage: vi.fn(async () => [{ id: "msg-7" }]),
 		},
 	});
 
@@ -108,6 +111,87 @@ describe("applySessionCommand", () => {
 		const rows = yield* sql<{ type: string }>`SELECT type FROM events`;
 		return rows.map((row) => row.type);
 	});
+
+	for (const projection of ["lagging", "empty", "matching"] as const) {
+		it.effect(
+			`keeps the known provider boundary with a ${projection} projection`,
+			() =>
+				withHarness(({ api }) =>
+					Effect.gen(function* () {
+						const sql = yield* SqlClient.SqlClient;
+						yield* seedSession("ses-parent", "opencode");
+						if (projection !== "empty") {
+							yield* sql`INSERT INTO messages (id, session_id, role, created_at, updated_at)
+						VALUES ('a', 'ses-parent', 'user', 100, 100)`;
+						}
+						if (projection === "matching") {
+							yield* sql`INSERT INTO messages (id, session_id, role, created_at, updated_at)
+						VALUES ('b', 'ses-parent', 'assistant', 200, 200), ('c', 'ses-parent', 'user', 300, 300)`;
+						}
+						api.session.messagesPage.mockResolvedValue([{ id: "b" }]);
+						api.session.message.mockRejectedValue(
+							new Error("timestamp unavailable"),
+						);
+						const forked = yield* forkOpenCodeSession("ses-parent");
+						const reads = yield* makeReadQueryEffect;
+						expect(yield* reads.getSession(forked.id)).toMatchObject({
+							fork_point_event: "b",
+							fork_point_timestamp: projection === "matching" ? 200 : null,
+						});
+					}),
+				),
+		);
+	}
+
+	it.effect(
+		"persists the local parent tip when the OpenCode tip lookup fails",
+		() =>
+			withHarness(({ api }) =>
+				Effect.gen(function* () {
+					const sql = yield* SqlClient.SqlClient;
+					yield* seedSession("ses-parent", "opencode");
+					yield* seedSession("ses-other", "opencode");
+					yield* sql`INSERT INTO messages (id, session_id, role, created_at, updated_at)
+						VALUES ('msg-z-old', 'ses-parent', 'user', 100, 100),
+						       ('msg-b-tip', 'ses-parent', 'assistant', 200, 200),
+						       ('msg-a-tie', 'ses-parent', 'user', 200, 200),
+						       ('msg-other', 'ses-other', 'assistant', 300, 300)`;
+					api.session.messagesPage.mockRejectedValue(new Error("unavailable"));
+					api.session.message.mockRejectedValue(new Error("unavailable"));
+
+					const forked = yield* forkOpenCodeSession("ses-parent");
+					const reads = yield* makeReadQueryEffect;
+					expect(yield* reads.getSession(forked.id)).toMatchObject({
+						fork_point_event: "msg-b-tip",
+						fork_point_timestamp: 200,
+						fork_point_message_id: "msg-b-tip",
+					});
+					expect(api.session.fork).toHaveBeenCalledTimes(1);
+					expect(api.session.messagesPage).toHaveBeenCalledTimes(1);
+				}),
+			),
+	);
+
+	it.effect(
+		"leaves the tip boundary empty when the local parent has no messages",
+		() =>
+			withHarness(({ api }) =>
+				Effect.gen(function* () {
+					yield* seedSession("ses-parent", "opencode");
+					api.session.messagesPage.mockRejectedValue(new Error("unavailable"));
+
+					const forked = yield* forkOpenCodeSession("ses-parent");
+					const reads = yield* makeReadQueryEffect;
+					expect(yield* reads.getSession(forked.id)).toMatchObject({
+						fork_point_event: null,
+						fork_point_timestamp: null,
+						fork_point_message_id: null,
+					});
+					expect(api.session.fork).toHaveBeenCalledTimes(1);
+					expect(api.session.messagesPage).toHaveBeenCalledTimes(1);
+				}),
+			),
+	);
 
 	it.effect(
 		"tells OpenCode about a mutation to an OpenCode-backed session",
@@ -239,6 +323,11 @@ describe("applySessionCommand", () => {
 				yield* seedSession("ses-parent", "opencode");
 
 				const forked = yield* forkOpenCodeSession("ses-parent", "msg-7");
+				const reads = yield* makeReadQueryEffect;
+				const snapshot = yield* reads.readSessionList();
+				expect(
+					snapshot.rows.find(({ item }) => item.id === forked.id)?.item,
+				).toMatchObject({ forkMessageId: "msg-7", forkPointTimestamp: 123 });
 
 				expect(api.session.fork).toHaveBeenCalledWith("ses-parent", {
 					messageID: "msg-7",
@@ -276,6 +365,20 @@ describe("applySessionCommand", () => {
 				]);
 			}),
 		),
+	);
+	it.effect(
+		"does not create an explicit OpenCode fork when its boundary key cannot be read",
+		() =>
+			withHarness(({ api }) =>
+				Effect.gen(function* () {
+					api.session.message.mockRejectedValueOnce(new Error("unavailable"));
+					const result = yield* Effect.either(
+						forkOpenCodeSession("ses-parent", "msg-7"),
+					);
+					expect(result._tag).toBe("Left");
+					expect(api.session.fork).not.toHaveBeenCalled();
+				}),
+			),
 	);
 
 	it.effect("still syncs upstream for a session with no local row", () =>
