@@ -300,6 +300,7 @@ export function historyToChatMessages(
 			result.push({
 				type: "user",
 				uuid: generateUuid(),
+				messageId: msg.id,
 				text: extractDisplayText(text),
 				...(msg.time?.created != null && { createdAt: msg.time.created }),
 				...(msg.modelExecution != null

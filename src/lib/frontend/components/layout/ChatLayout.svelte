@@ -44,7 +44,6 @@
 		clearNavigateToSession,
 		initSWNavigationListener,
 		onPlanMode,
-		onRewind,
 		wsSend,
 	} from "../../stores/ws.svelte.js";
 	import { getCurrentSessionId, slugState } from "../../stores/router.svelte.js";
@@ -442,20 +441,6 @@
 						onReject: () => wsSend({ type: "plan_reject" }),
 					};
 					break;
-			}
-		});
-		return unsub;
-	});
-
-	// ─── Rewind result subscription ──────────────────────────────────────────
-
-	$effect(() => {
-		const unsub = onRewind((msg: RelayMessage) => {
-			if (msg.type === "rewind_result") {
-				// Rewind completed — clear messages and show feedback
-				clearMessages();
-				const mode = msg.mode ?? "both";
-				showToast(`Rewound ${mode === "both" ? "conversation & files" : mode}`);
 			}
 		});
 		return unsub;

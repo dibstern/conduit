@@ -453,6 +453,21 @@ describe("historyToChatMessages — tool status mapping", () => {
 // ─── messageId propagation (fork-split dependency) ───────────────────────────
 
 describe("historyToChatMessages — messageId propagation", () => {
+	test("preserves the provider user id across rehydration", () => {
+		const history: HistoryMessage[] = [
+			{
+				id: "provider-user-1",
+				role: "user",
+				parts: [{ id: "part-1", type: "text", text: "Hello" }],
+			},
+		];
+		for (let i = 0; i < 2; i++) {
+			expect(historyToChatMessages(history)[0]).toMatchObject({
+				type: "user",
+				messageId: "provider-user-1",
+			});
+		}
+	});
 	test("assistant messages carry the HistoryMessage id as messageId", () => {
 		const history: HistoryMessage[] = [
 			{

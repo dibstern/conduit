@@ -61,6 +61,7 @@ export {
 	type ResolveClaudeSettingsResponse,
 	RespondPermission,
 	RewindSession,
+	type RewindSessionResponse,
 	type RpcLogLevel,
 	ScanNow,
 	type ScanNowResponse,

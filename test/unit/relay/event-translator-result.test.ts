@@ -3,12 +3,70 @@
 // (ok: true with messages array, or ok: false with reason string)
 // instead of the old RelayMessage | RelayMessage[] | null.
 
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { TranslateResult } from "../../../src/lib/relay/event-translator.js";
 import { createTranslator } from "../../../src/lib/relay/event-translator.js";
 
 describe("translator returns TranslateResult", () => {
 	const translator = createTranslator();
+
+	it("skips id-less user messages without consulting ownership", () => {
+		const resolveOrigin = vi.fn(() => "owner");
+		const ownedTranslator = createTranslator(resolveOrigin);
+		expect(
+			ownedTranslator.translate({
+				type: "message.created",
+				properties: {
+					sessionID: "s1",
+					info: { role: "user", parts: [{ type: "text", text: "hello" }] },
+				},
+			}).ok,
+		).toBe(false);
+		expect(resolveOrigin).not.toHaveBeenCalled();
+		expect(
+			ownedTranslator.translate({
+				type: "message.created",
+				properties: {
+					sessionID: "s1",
+					messageID: "message-1",
+					info: { role: "user", parts: [{ type: "text", text: "hello" }] },
+				},
+			}),
+		).toEqual({
+			ok: true,
+			messages: [
+				{
+					type: "user_message",
+					text: "hello",
+					messageId: "message-1",
+					originId: "owner",
+				},
+			],
+		});
+		expect(resolveOrigin).toHaveBeenCalledExactlyOnceWith(
+			"s1",
+			"message-1",
+			"hello",
+		);
+	});
+
+	it("creates a user bubble when the provider id is present", () => {
+		expect(
+			translator.translate({
+				type: "message.created",
+				properties: {
+					sessionID: "s1",
+					messageID: "message-1",
+					info: { role: "user", parts: [{ type: "text", text: "hello" }] },
+				},
+			}),
+		).toEqual({
+			ok: true,
+			messages: [
+				{ type: "user_message", text: "hello", messageId: "message-1" },
+			],
+		});
+	});
 
 	it("returns ok: true with messages for known events", () => {
 		const result = translator.translate({

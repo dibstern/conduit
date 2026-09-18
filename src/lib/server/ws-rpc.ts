@@ -1101,7 +1101,11 @@ export const WsRpcServerLayer = WsRpcGroup.toLayer({
 			sessionId: request.sessionId,
 			messageId: request.messageId,
 		}).pipe(
-			Effect.as({ ok: true as const }),
+			Effect.as({
+				ok: true as const,
+				sessionId: request.sessionId,
+				messageId: request.messageId,
+			}),
 			Effect.catchAll((error) =>
 				Effect.fail(
 					new WsRpcError({

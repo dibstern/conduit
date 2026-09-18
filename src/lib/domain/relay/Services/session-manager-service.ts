@@ -1,6 +1,10 @@
 import { randomUUID } from "node:crypto";
 import { SqlClient } from "@effect/sql";
 import { OpenCodeAPITag } from "../../provider/Services/opencode-api-service.js";
+import {
+	PendingSendOwnershipLive,
+	PendingSendOwnershipTag,
+} from "./pending-send-ownership.js";
 // ─── SessionManager Service (Effect) ────────────────────────────────────────
 // Pure Effect functions that replace the imperative SessionManager methods.
 // State lives in SessionManagerStateTag (Ref<SessionManagerState>);
@@ -682,6 +686,11 @@ export const deleteSession = (sessionId: string) =>
 					new SessionManagerError({ operation: "deleteSession", cause }),
 			),
 		);
+
+		const ownership = yield* PendingSendOwnershipTag;
+		ownership.deleteSession(sessionId);
+		for (const childSessionId of childSessionIds)
+			ownership.deleteSession(childSessionId);
 
 		yield* Ref.update(stateRef, (s) => {
 			let cachedParentMap = HashMap.remove(s.cachedParentMap, sessionId);
@@ -1378,7 +1387,7 @@ export class SessionManagerServiceTag extends Context.Tag(
 // ─── Service Layer ──────────────────────────────────────────────────────────
 
 export const SessionManagerServiceLive: Layer.Layer<
-	SessionManagerServiceTag,
+	SessionManagerServiceTag | PendingSendOwnershipTag,
 	never,
 	OpenCodeAPITag | SessionManagerStateTag | LoggerTag | DaemonEventBusTag
 > = Layer.effect(
@@ -1388,6 +1397,7 @@ export const SessionManagerServiceLive: Layer.Layer<
 		const stateRef = yield* SessionManagerStateTag;
 		const log = yield* LoggerTag;
 		const eventBus = yield* DaemonEventBusTag;
+		const ownership = yield* PendingSendOwnershipTag;
 		const configOption = yield* Effect.serviceOption(ConfigTag);
 		const configDir =
 			configOption._tag === "Some" ? configOption.value.configDir : undefined;
@@ -1837,6 +1847,7 @@ export const SessionManagerServiceLive: Layer.Layer<
 
 					inFlightDeletes.set(sessionId, completion);
 					const base = deleteSession(sessionId).pipe(
+						Effect.provideService(PendingSendOwnershipTag, ownership),
 						Effect.provideService(OpenCodeAPITag, api),
 						Effect.provideService(SessionManagerStateTag, stateRef),
 						Effect.provideService(LoggerTag, log),
@@ -2027,4 +2038,4 @@ export const SessionManagerServiceLive: Layer.Layer<
 				}),
 		} satisfies SessionManagerService;
 	}),
-);
+).pipe(Layer.provideMerge(PendingSendOwnershipLive));

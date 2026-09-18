@@ -8,6 +8,10 @@ import type { DaemonConfig } from "../../../../src/lib/daemon/config-persistence
 import { OpenCodeAPITag } from "../../../../src/lib/domain/provider/Services/opencode-api-service.js";
 import { PendingInteractionServiceLive } from "../../../../src/lib/domain/relay/Services/pending-interaction-service.js";
 import {
+	PendingSendOwnershipLive,
+	PendingSendOwnershipTag,
+} from "../../../../src/lib/domain/relay/Services/pending-send-ownership.js";
+import {
 	type ProviderRuntimeIngestion,
 	ProviderRuntimeIngestionTag,
 } from "../../../../src/lib/domain/relay/Services/provider-runtime-ingestion-service.js";
@@ -49,6 +53,7 @@ import {
 	ReadQueryEffectError,
 	ReadQueryEffectTag,
 } from "../../../../src/lib/persistence/effect/read-query-effect.js";
+import { OpenCodeProviderInstance } from "../../../../src/lib/provider/opencode-provider-instance.js";
 import {
 	OrchestrationEngine,
 	type SendTurnCommand,
@@ -293,6 +298,7 @@ const serviceLayer = (input: {
 		),
 		Layer.succeed(SessionManagerServiceTag, sessionManagerService),
 		PendingInteractionServiceLive,
+		PendingSendOwnershipLive,
 		makeOverridesStateLive(),
 		Layer.succeed(
 			SessionTitleServiceTag,
@@ -1145,6 +1151,42 @@ describe("ProviderTurnService", () => {
 	);
 
 	it.effect(
+		"clears ownership when a thrown OpenCode prompt returns error status",
+		() => {
+			const api = makeMockOpenCodeAPI();
+			api.session.prompt = vi.fn(async () => {
+				throw new Error("prompt unavailable");
+			});
+			const registry = new ProviderRegistry();
+			registry.registerInstance(new OpenCodeProviderInstance({ client: api }));
+			const engine = new OrchestrationEngine({ registry });
+			engine.bindSession("session-1", "opencode");
+			const { layer, wsHandler } = serviceLayer({ engine, api });
+			return Effect.gen(function* () {
+				const ownership = yield* PendingSendOwnershipTag;
+				ownership.register("session-1", {
+					commandId: "cmd-error",
+					originId: "browser",
+					text: "ok",
+				});
+				yield* sendTurn({
+					commandId: "cmd-error",
+					text: "ok",
+					model: { providerID: "opencode", modelID: "test" },
+				});
+				expect(api.session.prompt).toHaveBeenCalledOnce();
+				expect(wsHandler.sendTo).toHaveBeenCalledWith(
+					"client-1",
+					expect.objectContaining({ code: "SEND_FAILED" }),
+				);
+				expect(
+					ownership.resolve("session-1", "later-message", "ok"),
+				).toBeUndefined();
+			}).pipe(Effect.provide(layer));
+		},
+	);
+
+	it.effect(
 		"finalizes an interrupted dispatch result by clearing the processing timeout and broadcasting done",
 		() => {
 			const engine = makeEngine({
@@ -1274,6 +1316,60 @@ describe("ProviderTurnService", () => {
 			).toBe(false);
 		}).pipe(Effect.provide(layer));
 	});
+
+	it.effect(
+		"interrupt clears pending sends without losing confirmed ownership or other sessions",
+		() => {
+			const { layer } = serviceLayer({});
+			return Effect.gen(function* () {
+				const ownership = yield* PendingSendOwnershipTag;
+				ownership.register("session-1", {
+					commandId: "cmd-confirmed",
+					originId: "confirmed-browser",
+					text: "confirmed",
+				});
+				expect(
+					ownership.resolve("session-1", "confirmed-message", "confirmed"),
+				).toBe("confirmed-browser");
+				ownership.register("session-2", {
+					commandId: "cmd-other",
+					originId: "other-browser",
+					text: "other",
+				});
+				for (const commandId of ["cmd-send-1", "cmd-send-2"]) {
+					ownership.register("session-1", {
+						commandId,
+						originId: "cancelled-browser",
+						text: "cancelled",
+					});
+					yield* sendTurn({ commandId, text: "cancelled" });
+				}
+				yield* interruptTurn();
+				expect(
+					ownership.resolve("session-1", "late-echo", "cancelled"),
+				).toBeUndefined();
+				ownership.register("session-1", {
+					commandId: "cmd-send-2",
+					originId: "duplicate-browser",
+					text: "cancelled",
+				});
+				ownership.register("session-1", {
+					commandId: "cmd-next",
+					originId: "next-browser",
+					text: "next",
+				});
+				expect(ownership.resolve("session-1", "next-message", "next")).toBe(
+					"next-browser",
+				);
+				expect(
+					ownership.resolve("session-1", "confirmed-message", "confirmed"),
+				).toBe("confirmed-browser");
+				expect(ownership.resolve("session-2", "other-message", "other")).toBe(
+					"other-browser",
+				);
+			}).pipe(Effect.provide(layer));
+		},
+	);
 
 	it.effect(
 		"falls back to OpenCode abort, clears processing timeout, and broadcasts done when no engine is present",

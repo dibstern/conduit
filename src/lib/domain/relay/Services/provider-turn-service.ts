@@ -44,6 +44,10 @@ import type {
 import { OpenCodeAPITag } from "../../provider/Services/opencode-api-service.js";
 import { PendingInteractionServiceTag } from "./pending-interaction-service.js";
 import {
+	PendingSendOwnershipLive,
+	PendingSendOwnershipTag,
+} from "./pending-send-ownership.js";
+import {
 	type ProviderRuntimeIngestion,
 	ProviderRuntimeIngestionTag,
 } from "./provider-runtime-ingestion-service.js";
@@ -253,6 +257,7 @@ function buildLegacyPrompt(input: ProviderTurnServiceSendInput): PromptOptions {
 
 export const makeProviderTurnService = Effect.gen(function* () {
 	const client = yield* OpenCodeAPITag;
+	const ownership = yield* PendingSendOwnershipTag;
 	const wsHandler = yield* WebSocketHandlerTag;
 	const log = yield* LoggerTag;
 	const sessionManagerService = yield* SessionManagerServiceTag;
@@ -412,6 +417,7 @@ export const makeProviderTurnService = Effect.gen(function* () {
 		sendErr: unknown,
 	) =>
 		Effect.gen(function* () {
+			ownership.remove(input.sessionId, input.commandId);
 			log.warn(
 				`client=${input.clientId} session=${input.sessionId} Failed to send message:`,
 				formatErrorDetail(sendErr),
@@ -444,6 +450,7 @@ export const makeProviderTurnService = Effect.gen(function* () {
 			// PROCESSING_TIMEOUT. Clear the timeout, broadcast `done`, and surface
 			// the reason.
 			if (result.status !== "completed") {
+				ownership.remove(input.sessionId, input.commandId);
 				const msg =
 					result.error?.message ??
 					(result.status === "error" ? "Send failed" : `Turn ${result.status}`);
@@ -508,6 +515,7 @@ export const makeProviderTurnService = Effect.gen(function* () {
 				const inferred =
 					models.find((model) => model.id === "default") ?? models[0];
 				if (inferred === undefined) {
+					ownership.remove(input.sessionId, input.commandId);
 					const reason =
 						discovery._tag === "Left"
 							? `discovery failed: ${formatErrorDetail(discovery.left)}`
@@ -808,6 +816,7 @@ export const makeProviderTurnService = Effect.gen(function* () {
 	const interruptTurn = (input: ProviderTurnServiceInterruptInput) =>
 		Effect.gen(function* () {
 			log.info(`client=${input.clientId} session=${input.sessionId} Aborting`);
+			ownership.clear(input.sessionId);
 			yield* clearProcessingTimeout(input.sessionId);
 
 			const engineOption = yield* Effect.serviceOption(OrchestrationEngineTag);
@@ -876,7 +885,7 @@ const ProviderTurnDispatchFibersLive = Layer.scoped(
 );
 
 export const ProviderTurnServiceLive: Layer.Layer<
-	ProviderTurnServiceTag,
+	ProviderTurnServiceTag | PendingSendOwnershipTag,
 	never,
 	| OpenCodeAPITag
 	| WebSocketHandlerTag
@@ -887,4 +896,5 @@ export const ProviderTurnServiceLive: Layer.Layer<
 	| OverridesStateTag
 > = Layer.effect(ProviderTurnServiceTag, makeProviderTurnService).pipe(
 	Layer.provide(ProviderTurnDispatchFibersLive),
+	Layer.provideMerge(PendingSendOwnershipLive),
 );

@@ -128,7 +128,6 @@ vi.mock("../../../src/lib/frontend/stores/ws.svelte.js", async () => {
 		clearNavigateToSession: vi.fn(),
 		initSWNavigationListener: vi.fn(),
 		onPlanMode: vi.fn(() => () => {}),
-		onRewind: vi.fn(() => () => {}),
 		wsSend: vi.fn(),
 		wsState: { status: "", statusText: "" },
 	};

@@ -1,5 +1,5 @@
-// ─── Message Poller Synthesis (Pure Functions) ───────────────────────────────
-// Pure diff/synthesize logic for converting REST message snapshots into relay
+// ─── Message Poller Synthesis ───────────────────────────────────────────────
+// Diff/synthesize logic for converting REST message snapshots into relay
 // events. These functions compare current messages against previous state and
 // emit synthetic RelayMessages (delta, tool_start, tool_executing, tool_result,
 // thinking_*, result, done, etc.).
@@ -275,12 +275,17 @@ function synthesizeResultEvent(msg: Message): UntaggedRelayMessage | null {
 
 /**
  * Compare current messages against previous snapshot, synthesize events
- * for any changes detected. Pure function — returns new snapshot instead
- * of mutating state.
+ * for any changes detected. Returns a new snapshot without mutating the old
+ * snapshot. New user messages also resolve their pending send's owner.
  */
 export function diffAndSynthesize(
 	previousSnapshot: Map<string, MessageSnapshot>,
 	messages: Message[],
+	resolveOrigin?: (
+		sessionId: string | undefined,
+		messageId: string | undefined,
+		text: string,
+	) => string | undefined,
 ): {
 	events: UntaggedRelayMessage[];
 	newSnapshot: Map<string, MessageSnapshot>;
@@ -303,7 +308,13 @@ export function diffAndSynthesize(
 		if (!prevMsg && msg.role === "user") {
 			const text = extractUserText(msg);
 			if (text) {
-				events.push({ type: "user_message", text });
+				const originId = resolveOrigin?.(msg.sessionID, msgId, text);
+				events.push({
+					type: "user_message",
+					text,
+					messageId: msgId,
+					...(originId != null ? { originId } : {}),
+				});
 			}
 		}
 

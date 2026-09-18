@@ -451,7 +451,12 @@ const provideRpc = <A, E>(effect: Effect.Effect<A, E, WsRpcTestEnv>) =>
 						],
 						hasMore: false,
 					}),
-				RewindSession: () => Effect.succeed({ ok: true as const }),
+				RewindSession: (request) =>
+					Effect.succeed({
+						ok: true as const,
+						sessionId: request.sessionId,
+						messageId: request.messageId,
+					}),
 				SendMessage: () => Effect.succeed({ ok: true as const }),
 				SyncInputDraft: () => Effect.succeed({ ok: true as const }),
 				CancelSession: () => Effect.succeed({ ok: true as const }),
@@ -1123,7 +1128,11 @@ describe("browser WebSocket RPC contract", () => {
 						sessionId: "session-1",
 						messageId: "message-1",
 					}),
-				).toEqual({ ok: true });
+				).toEqual({
+					ok: true,
+					sessionId: "session-1",
+					messageId: "message-1",
+				});
 
 				expect(
 					yield* client.SendMessage({

@@ -38,10 +38,8 @@ export {
 	onFileHistory,
 	onPlanMode,
 	onProject,
-	onRewind,
 	planModeListeners,
 	projectListeners,
-	rewindListeners,
 } from "./ws-listeners.js";
 export {
 	clearNavigateToSession,

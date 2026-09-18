@@ -35,6 +35,7 @@ const IDLE_TIMEOUT_MS = 5000;
 // ─── MessagePoller Types ────────────────────────────────────────────────────
 
 export interface MessagePollerOptions {
+	resolveOrigin?: Parameters<typeof diffAndSynthesize>[2];
 	client: Pick<OpenCodeAPI, "session">;
 	/** Polling interval in milliseconds (default: 750) */
 	interval?: number;
@@ -55,6 +56,7 @@ export type MessagePollerEventsCallback = (messages: RelayMessage[]) => void;
 
 export class MessagePoller {
 	private readonly client: Pick<OpenCodeAPI, "session">;
+	private readonly resolveOrigin: Parameters<typeof diffAndSynthesize>[2];
 	private readonly interval: number;
 	private readonly log: Logger;
 	private readonly hasViewers: (() => boolean) | undefined;
@@ -93,6 +95,7 @@ export class MessagePoller {
 
 	constructor(options: MessagePollerOptions) {
 		this.client = options.client;
+		this.resolveOrigin = options.resolveOrigin;
 		this.interval = options.interval ?? POLL_INTERVAL_MS;
 		this.log = options.log ?? createSilentLogger();
 		this.hasViewers = options.hasViewers;
@@ -313,6 +316,7 @@ export class MessagePoller {
 		const { events, newSnapshot } = diffAndSynthesize(
 			this.previousSnapshot,
 			messages,
+			this.resolveOrigin,
 		);
 		this.previousSnapshot = newSnapshot;
 		// Tag all synthesized events with the active session's ID
@@ -335,6 +339,7 @@ export type PollerManagerEventsCallback = (
 ) => void;
 
 export interface MessagePollerManagerOptions {
+	resolveOrigin?: Parameters<typeof diffAndSynthesize>[2];
 	client: Pick<OpenCodeAPI, "session">;
 	log?: Logger;
 	interval?: number;
@@ -347,6 +352,7 @@ export interface MessagePollerManagerOptions {
 export class MessagePollerManager {
 	private readonly pollers: Map<string, MessagePoller> = new Map();
 	private readonly client: Pick<OpenCodeAPI, "session">;
+	private readonly resolveOrigin: Parameters<typeof diffAndSynthesize>[2];
 	private readonly log: Logger;
 	private readonly interval?: number;
 
@@ -358,6 +364,7 @@ export class MessagePollerManager {
 
 	constructor(options: MessagePollerManagerOptions) {
 		this.client = options.client;
+		this.resolveOrigin = options.resolveOrigin;
 		this.log = options.log ?? createSilentLogger();
 		if (options.interval != null) this.interval = options.interval;
 		this._hasViewers = options.hasViewers;
@@ -387,6 +394,7 @@ export class MessagePollerManager {
 
 		const poller = new MessagePoller({
 			client: this.client,
+			resolveOrigin: this.resolveOrigin,
 			...(this.interval != null && { interval: this.interval }),
 			log: this.log,
 			hasViewers: () => this.hasViewers(sessionId),

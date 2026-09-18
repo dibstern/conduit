@@ -16,6 +16,7 @@ import {
 } from "effect";
 import { expect } from "vitest";
 import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
+import { PendingSendOwnershipLive } from "../../../src/lib/domain/relay/Services/pending-send-ownership.js";
 import type { Envelope } from "../../../src/lib/domain/relay/Services/read-model-subscription.js";
 import { OrchestrationEngineTag } from "../../../src/lib/domain/relay/Services/services.js";
 import {
@@ -64,6 +65,7 @@ const makeShellTestLayer = () => {
 		),
 	);
 	return Layer.mergeAll(
+		PendingSendOwnershipLive,
 		makePersistenceEffectLayer(filename, undefined, SessionEventBusLive),
 		SessionEventBusLive,
 		Layer.succeed(

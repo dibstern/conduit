@@ -8,6 +8,7 @@ import { Effect, Layer } from "effect";
 import { expect, vi } from "vitest";
 import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
 import { PendingInteractionServiceLive } from "../../../src/lib/domain/relay/Services/pending-interaction-service.js";
+import { PendingSendOwnershipLive } from "../../../src/lib/domain/relay/Services/pending-send-ownership.js";
 import { makeProviderRuntimeIngestionLive } from "../../../src/lib/domain/relay/Services/provider-runtime-ingestion-service.js";
 import {
 	ConfigTag,
@@ -147,6 +148,7 @@ describe("handleMessage with Effect provider state persistence", () => {
 					slug: "provider-state-test",
 				} satisfies ProjectRelayConfig),
 				PendingInteractionServiceLive,
+				PendingSendOwnershipLive,
 				Layer.succeed(OrchestrationEngineTag, withDispatchEffect(engine)),
 				makePersistenceEffectLayer(filename),
 				makeOverridesStateLive(),
@@ -232,6 +234,7 @@ describe("handleMessage with Effect provider state persistence", () => {
 				slug: "history-test",
 			} satisfies ProjectRelayConfig),
 			PendingInteractionServiceLive,
+			PendingSendOwnershipLive,
 			Layer.succeed(OrchestrationEngineTag, withDispatchEffect(engine)),
 			makePersistenceEffectLayer(filename),
 			makeOverridesStateLive(),
@@ -329,6 +332,7 @@ describe("handleMessage with Effect provider state persistence", () => {
 				slug: "claude-user-effect-test",
 			} satisfies ProjectRelayConfig),
 			PendingInteractionServiceLive,
+			PendingSendOwnershipLive,
 			Layer.succeed(OrchestrationEngineTag, withDispatchEffect(engine)),
 			makePersistenceEffectLayer(filename),
 			makeOverridesStateLive(),
@@ -436,6 +440,7 @@ describe("handleMessage with Effect provider state persistence", () => {
 					slug: "claude-sink-effect-test",
 				} satisfies ProjectRelayConfig),
 				PendingInteractionServiceLive,
+				PendingSendOwnershipLive,
 				Layer.succeed(OrchestrationEngineTag, withDispatchEffect(engine)),
 				persistence,
 				makeIngestionLayer(persistence, ws),
@@ -569,6 +574,7 @@ describe("handleMessage with Effect provider state persistence", () => {
 				slug: "claude-child-sink-test",
 			} satisfies ProjectRelayConfig),
 			PendingInteractionServiceLive,
+			PendingSendOwnershipLive,
 			Layer.succeed(OrchestrationEngineTag, withDispatchEffect(engine)),
 			persistence,
 			makeIngestionLayer(persistence, ws),

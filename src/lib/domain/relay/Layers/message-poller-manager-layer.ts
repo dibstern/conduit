@@ -3,6 +3,10 @@ import { formatErrorDetail } from "../../../errors.js";
 import { MessagePollerManager } from "../../../relay/message-poller-impl.js";
 import { OpenCodeAPITag } from "../../provider/Services/opencode-api-service.js";
 import {
+	PendingSendOwnershipLive,
+	PendingSendOwnershipTag,
+} from "../Services/pending-send-ownership.js";
+import {
 	ConfigTag,
 	LoggerTag,
 	PollerManagerTag,
@@ -23,11 +27,13 @@ export const makeMessagePollerManagerLive = (
 		PollerManagerTag,
 		Effect.gen(function* () {
 			const client = yield* OpenCodeAPITag;
+			const ownership = yield* PendingSendOwnershipTag;
 			const config = yield* ConfigTag;
 			const log = yield* LoggerTag;
 			const pollerLog = log.child("poller-mgr");
 			const manager = new MessagePollerManager({
 				client,
+				resolveOrigin: ownership.resolve,
 				log: pollerLog,
 				...(options.hasViewers != null && { hasViewers: options.hasViewers }),
 				...(config.messagePollerInterval != null && {
@@ -59,4 +65,4 @@ export const makeMessagePollerManagerLive = (
 
 			return manager;
 		}),
-	);
+	).pipe(Layer.provide(PendingSendOwnershipLive));

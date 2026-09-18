@@ -407,9 +407,20 @@ export function translateSessionStatus(
 /** Translate message.created event → user_message (for TUI-originated messages) */
 export function translateMessageCreated(
 	event: SSEEvent,
+	resolveOrigin?: (
+		sessionId: string | undefined,
+		messageId: string | undefined,
+		text: string,
+	) => string | undefined,
 ): UntaggedRelayMessage | null {
 	if (!isMessageCreatedEvent(event)) return null;
 	const { properties: props } = event;
+
+	// Like the other optional gap-event IDs, absence is tolerated but cannot create a bubble.
+	if (!props.messageID) {
+		console.debug("Skipping message.created without messageID");
+		return null;
+	}
 
 	// OpenCode wraps message data under "info" or "message"
 	const msg = props.info ?? props.message;
@@ -422,8 +433,14 @@ export function translateMessageCreated(
 		.join("\n");
 
 	if (!text) return null;
+	const originId = resolveOrigin?.(props.sessionID, props.messageID, text);
 
-	return { type: "user_message", text };
+	return {
+		type: "user_message",
+		text,
+		...(props.messageID != null ? { messageId: props.messageID } : {}),
+		...(originId != null ? { originId } : {}),
+	};
 }
 
 /** Translate message.updated event (usage/cost data) */
@@ -588,7 +605,13 @@ export interface Translator {
 	): void;
 }
 
-export function createTranslator(): Translator {
+export function createTranslator(
+	resolveOrigin?: (
+		sessionId: string | undefined,
+		messageId: string | undefined,
+		text: string,
+	) => string | undefined,
+): Translator {
 	const DEFAULT_SESSION = "__default__";
 	const sessionParts = new Map<
 		string,
@@ -642,8 +665,8 @@ export function createTranslator(): Translator {
 			// Message created (user messages from TUI)
 			if (eventType === "message.created") {
 				return wrapResult(
-					translateMessageCreated(event),
-					"message created: not a user message or no text",
+					translateMessageCreated(event, resolveOrigin),
+					"message created: missing id, not a user message, or no text",
 				);
 			}
 

@@ -137,7 +137,6 @@ import {
 	fileHistoryListeners,
 	planModeListeners,
 	projectListeners,
-	rewindListeners,
 } from "./ws-listeners.js";
 import { triggerNotifications } from "./ws-notifications.js";
 import { wsSend } from "./ws-send.svelte.js";
@@ -233,7 +232,11 @@ function routePerSession(event: PerSessionEvent): void {
 	const { activity, messages } = getOrCreateSessionSlot(event.sessionId);
 
 	// ── Turn boundary detection ─────────────────────────────────────────
-	if ("messageId" in event && event.messageId != null) {
+	if (
+		event.type !== "user_message" &&
+		"messageId" in event &&
+		event.messageId != null
+	) {
 		advanceTurnIfNewMessage(
 			activity,
 			messages,
@@ -297,8 +300,17 @@ function routePerSession(event: PerSessionEvent): void {
 			triggerNotifications(event);
 			break;
 		case "user_message":
-			if (shouldIgnoreOwnUserMessage(event)) break;
-			addUserMessage(activity, messages, event.text, undefined, isProcessing());
+			if (shouldIgnoreOwnUserMessage(event) && !event.messageId) break;
+			addUserMessage(
+				activity,
+				messages,
+				event.text,
+				undefined,
+				isProcessing(),
+				event.messageId,
+				shouldIgnoreOwnUserMessage(event),
+				event.originId,
+			);
 			break;
 		case "tool_content":
 			handleToolContentResponse(messages, event);
@@ -565,7 +577,13 @@ function dispatchChatEvent(event: RelayMessage, ctx: DispatchContext): boolean {
 	const msgId = hasMessageId
 		? (event as Record<string, unknown>)["messageId"]
 		: undefined;
-	if (hasMessageId && msgId != null && activity && messages) {
+	if (
+		event.type !== "user_message" &&
+		hasMessageId &&
+		msgId != null &&
+		activity &&
+		messages
+	) {
 		advanceTurnIfNewMessage(
 			activity,
 			messages,
@@ -612,8 +630,17 @@ function dispatchChatEvent(event: RelayMessage, ctx: DispatchContext): boolean {
 
 	switch (event.type) {
 		case "user_message":
-			if (shouldIgnoreOwnUserMessage(event)) return true;
-			addUserMessage(activity, messages, event.text, undefined, ctx.isQueued);
+			if (shouldIgnoreOwnUserMessage(event) && !event.messageId) return true;
+			addUserMessage(
+				activity,
+				messages,
+				event.text,
+				undefined,
+				ctx.isQueued,
+				event.messageId,
+				shouldIgnoreOwnUserMessage(event),
+				event.originId,
+			);
 			return true;
 		case "delta":
 			handleDelta(activity, messages, event);
@@ -1022,11 +1049,6 @@ export function handleMessage(msg: RelayMessage): void {
 			break;
 		case "file_history_result":
 			for (const fn of fileHistoryListeners) fn(msg);
-			break;
-
-		// ─── Rewind ──────────────────────────────────────────────────────
-		case "rewind_result":
-			for (const fn of rewindListeners) fn(msg);
 			break;
 
 		// ─── Project ─────────────────────────────────────────────────────

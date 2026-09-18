@@ -1009,16 +1009,12 @@ const FileHistoryResultSchema = Schema.Struct({
 	versions: Schema.Array(FileVersionSchema),
 });
 
-const RewindResultSchema = Schema.Struct({
-	type: Schema.Literal("rewind_result"),
-	mode: Schema.String,
-});
-
 // ── Cache / Replay ────────────────────────────────────────────────────
 const UserMessageSchema = Schema.Struct({
 	type: Schema.Literal("user_message"),
 	sessionId: Schema.String,
 	text: Schema.String,
+	messageId: Schema.optional(Schema.String),
 	originId: Schema.optional(Schema.String),
 });
 
@@ -1210,9 +1206,8 @@ export const RelayMessageSchema = Schema.Union(
 	// Banners
 	SkipPermissionsSchema,
 	BannerSchema,
-	// File history / Rewind
+	// File history
 	FileHistoryResultSchema,
-	RewindResultSchema,
 	// Cache / Replay
 	UserMessageSchema,
 	// Session deletion
@@ -1291,7 +1286,6 @@ export const RELAY_MESSAGE_TYPES = [
 	"skip_permissions",
 	"banner",
 	"file_history_result",
-	"rewind_result",
 	"user_message",
 	"session_deleted",
 	"error",
@@ -1554,11 +1548,16 @@ export type RelayMessage =
 				dismissible?: boolean;
 			};
 	  }
-	// ── File history / Rewind (future feature) ────────────────────────────
+	// ── File history (future feature) ─────────────────────────────────────
 	| { type: "file_history_result"; path: string; versions: FileVersion[] }
-	| { type: "rewind_result"; mode: string }
 	// ── Cache / Replay ────────────────────────────────────────────────────
-	| { type: "user_message"; sessionId: string; text: string; originId?: string }
+	| {
+			type: "user_message";
+			sessionId: string;
+			text: string;
+			originId?: string;
+			messageId?: string;
+	  }
 	// ── Session deletion ──────────────────────────────────────────────────
 	| { type: "session_deleted"; sessionId: string }
 	// ── Misc ────────────────────────────────────────────────────────────────

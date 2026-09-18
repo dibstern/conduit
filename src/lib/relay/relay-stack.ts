@@ -18,7 +18,7 @@ import { createServer as createHttpsServer } from "node:https";
 import { homedir, networkInterfaces } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { Cause, Data, Effect, Layer, ManagedRuntime } from "effect";
+import { Cause, Context, Data, Effect, Layer, ManagedRuntime } from "effect";
 import { AuthManager } from "../auth.js";
 import { defaultInstanceIdForDriver } from "../contracts/provider-instance.js";
 import { makeMessagePollerManagerLive } from "../domain/relay/Layers/message-poller-manager-layer.js";
@@ -44,6 +44,7 @@ import {
 } from "../domain/relay/Services/opencode-instance-clients.js";
 import { makeEffectOpenCodeRuntimeIngress } from "../domain/relay/Services/opencode-runtime-ingress-service.js";
 import { PendingInteractionServiceLive } from "../domain/relay/Services/pending-interaction-service.js";
+import { PendingSendOwnershipTag } from "../domain/relay/Services/pending-send-ownership.js";
 import { ProjectManagementServiceLive } from "../domain/relay/Services/project-management-service.js";
 import { makeProviderRuntimeIngestionLive } from "../domain/relay/Services/provider-runtime-ingestion-service.js";
 import { ProviderTurnServiceLive } from "../domain/relay/Services/provider-turn-service.js";
@@ -636,7 +637,14 @@ export async function createProjectRelay(
 		...(config.configDir != null ? { configDir: config.configDir } : {}),
 	});
 
-	const translator = createTranslator();
+	const TranslatorTag =
+		Context.GenericTag<ReturnType<typeof createTranslator>>("RelayTranslator");
+	const translatorLayer = Layer.effect(
+		TranslatorTag,
+		Effect.map(PendingSendOwnershipTag, (ownership) =>
+			createTranslator(ownership.resolve),
+		),
+	);
 	let relayManagedRuntime: ManagedRuntime.ManagedRuntime<
 		RelayRuntimeContext,
 		PersistenceEffectError
@@ -825,7 +833,10 @@ export async function createProjectRelay(
 		AgentServiceLive,
 		relayStateBridgesAndStatus,
 	);
-	const baseLayers = relayStateServicesAndBridges;
+	const baseLayers = Layer.provideMerge(
+		translatorLayer,
+		relayStateServicesAndBridges,
+	);
 	const fullBaseLayers = Layer.provideMerge(
 		ProviderTurnServiceLive,
 		Layer.merge(baseLayers, makeWsTransportLive({ noServer: true })),
@@ -844,12 +855,16 @@ export async function createProjectRelay(
 	// runtime-owned by MessagePollerManagerLive.
 	const monitoringStateAccess = createMonitoringWiringState();
 	const defaultCommandQueue = new RelayDefaultCommandQueue();
-	const sessionLifecycleWiringLayer = makeSessionLifecycleWiringLive({
-		translator,
-		sseTracker: monitoringStateAccess.sseTracker,
-		getMonitoringState: monitoringStateAccess.getMonitoringState,
-		setMonitoringState: monitoringStateAccess.setMonitoringState,
-	});
+	const sessionLifecycleWiringLayer = Layer.unwrapEffect(
+		Effect.map(TranslatorTag, (translator) =>
+			makeSessionLifecycleWiringLive({
+				translator,
+				sseTracker: monitoringStateAccess.sseTracker,
+				getMonitoringState: monitoringStateAccess.getMonitoringState,
+				setMonitoringState: monitoringStateAccess.setMonitoringState,
+			}),
+		),
+	);
 	const wiringLayers = Layer.mergeAll(
 		PermissionTimeoutLive,
 		sessionLifecycleWiringLayer,
@@ -867,6 +882,7 @@ export async function createProjectRelay(
 		sessionId: string;
 		orchestration: OrchestrationLayer;
 		statusSnapshot: RelayStatusSnapshotService;
+		translator: ReturnType<typeof createTranslator>;
 	};
 	try {
 		if (config.signal?.aborted) {
@@ -877,6 +893,7 @@ export async function createProjectRelay(
 		startup = await relayManagedRuntime.runPromise(
 			Effect.gen(function* () {
 				const api = yield* OpenCodeAPITag;
+				const translator = yield* TranslatorTag;
 				const wsHandler = yield* WebSocketHandlerTag;
 				const rpcWsHandler = yield* makeWsRpcWebSocketHandler({
 					runtime: relayManagedRuntime,
@@ -1141,6 +1158,7 @@ export async function createProjectRelay(
 					sessionId,
 					orchestration,
 					statusSnapshot,
+					translator,
 				};
 			}),
 		);
@@ -1151,8 +1169,14 @@ export async function createProjectRelay(
 	}
 	const api = startup.api;
 	wsHandler = startup.wsHandler;
-	const { rpcWsHandler, sessionId, orchestration, sseStream, statusSnapshot } =
-		startup;
+	const {
+		rpcWsHandler,
+		sessionId,
+		orchestration,
+		sseStream,
+		statusSnapshot,
+		translator,
+	} = startup;
 	log.info(`✓ Using session: ${sessionId}`);
 
 	// ── Timer wiring (G5: permission timeouts) ─────────────────────────────

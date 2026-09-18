@@ -1078,11 +1078,19 @@ export class LoadMoreHistory extends Schema.TaggedRequest<LoadMoreHistory>()(
 	},
 ) {}
 
+export const RewindSessionResponseSchema = Schema.Struct({
+	ok: Schema.Literal(true),
+	sessionId: NonEmptyString,
+	messageId: NonEmptyString,
+});
+
+export type RewindSessionResponse = typeof RewindSessionResponseSchema.Type;
+
 export class RewindSession extends Schema.TaggedRequest<RewindSession>()(
 	"RewindSession",
 	{
 		failure: WsRpcError,
-		success: OkResponseSchema,
+		success: RewindSessionResponseSchema,
 		payload: {
 			projectSlug: NonEmptyString,
 			sessionId: NonEmptyString,

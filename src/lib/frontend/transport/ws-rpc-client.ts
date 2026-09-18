@@ -30,6 +30,7 @@ import {
 	type PtyListResponse,
 	type ReloadProviderSessionResponse,
 	type ResolveClaudeSettingsResponse,
+	type RewindSessionResponse,
 	type RpcLogLevel,
 	type ScanNowResponse,
 	type SetDefaultModelResponse,
@@ -1125,7 +1126,7 @@ const callRewindSession = (input: RewindSessionRpcInput) =>
 	Effect.scoped(
 		Effect.gen(function* () {
 			const client = yield* RpcClient.make(WsRpcGroup);
-			yield* client.RewindSession(input);
+			return yield* client.RewindSession(input);
 		}),
 	).pipe(
 		Effect.provide(RpcClient.layerProtocolSocket()),
@@ -1475,8 +1476,8 @@ export async function loadMoreHistoryRpc(
 
 export async function rewindSessionRpc(
 	input: RewindSessionRpcInput,
-): Promise<void> {
-	await runTransportEffect(callRewindSession(input));
+): Promise<RewindSessionResponse> {
+	return await runTransportEffect(callRewindSession(input));
 }
 
 export async function sendMessageRpc(

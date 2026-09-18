@@ -11,7 +11,15 @@
 		uiState,
 		exitRewindMode,
 		selectRewindMessage,
+		showToast,
 	} from "../../stores/ui.svelte.js";
+	import {
+		chatState,
+		clearMessages,
+		getOrCreateSessionSlot,
+		setMessages,
+		seedRegistryFromMessages,
+	} from "../../stores/chat.svelte.js";
 	import { sessionState } from "../../stores/session.svelte.js";
 	import { getCurrentSlug } from "../../stores/router.svelte.js";
 	import { rewindSessionRpc } from "../../transport/ws-rpc-client.js";
@@ -51,13 +59,46 @@
 		const sessionId = sessionState.currentId;
 		const projectSlug = getCurrentSlug();
 		if (!uuid || !sessionId || !projectSlug) return;
+		const mode = selectedMode;
+		const message = chatState.messages.find((message) => message.uuid === uuid);
+		if (!message || !("messageId" in message) || !message.messageId) {
+			exitRewindMode();
+			selectedMode = "both";
+			showToast("This message cannot be rewound to yet. Its provider ID is not available.", { variant: "warn" });
+			return;
+		}
 
 		void rewindSessionRpc({
 			projectSlug,
 			sessionId,
-			messageId: uuid,
-		}).catch(() => undefined);
-		onRewind?.(uuid, selectedMode);
+			messageId: message.messageId,
+		})
+			.then((result) => {
+				if (
+					!result.ok ||
+					sessionState.currentId !== result.sessionId ||
+					getCurrentSlug() !== projectSlug
+				) {
+					return;
+				}
+				const targetIndex = chatState.messages.findIndex(
+					(message) => message.uuid === uuid,
+				);
+				if (targetIndex < 0) {
+					showToast("The transcript changed while rewinding. It has been kept; reload the session to sync with the provider.", { variant: "warn" });
+					return;
+				}
+				const retained = chatState.messages.slice(0, targetIndex);
+				clearMessages();
+				const { activity, messages } = getOrCreateSessionSlot(result.sessionId);
+				setMessages(messages, retained);
+				seedRegistryFromMessages(activity, messages, retained);
+				showToast(`Rewound ${mode === "both" ? "conversation & files" : mode}`);
+				onRewind?.(uuid, mode);
+			})
+			.catch(() => {
+				showToast("Could not rewind the conversation. The transcript has been kept.", { variant: "warn" });
+			});
 
 		exitRewindMode();
 		selectedMode = "both";
@@ -157,4 +198,3 @@
 			</div>
 		</div>
 </Modal>
-
