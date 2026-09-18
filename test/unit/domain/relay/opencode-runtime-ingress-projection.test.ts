@@ -581,7 +581,7 @@ describe("OpenCode Runtime Ingress Projection (SSE → append → project → re
 		).toHaveLength(1);
 	});
 
-	it("single-event retry continues surfacing projector errors while stored events remain durable", async () => {
+	it("persistent projector failure retains exactly one session.created across provider events", async () => {
 		await disposeRuntime();
 		await startRuntime([
 			...createAllEffectProjectors(),
@@ -617,27 +617,26 @@ describe("OpenCode Runtime Ingress Projection (SSE → append → project → re
 			"message.created",
 		]);
 
-		const retryResult = await ingest(
-			makeSSEEvent("message.created", {
-				sessionID: SESSION_ID,
-				messageID: "msg-002",
-				info: { role: "assistant", parts: [] },
-			}),
-		);
-
-		// The retry carries a single event, so it takes projectEvent rather than
-		// projectBatch. Both surface a projector failure now: the ingress result
-		// must not depend on how many events a translation happened to produce.
-		expect(retryResult).toMatchObject({
-			ok: false,
-			reason: "error",
-		});
-		expect(log.warn).toHaveBeenCalledTimes(2);
+		const providerEventCount = 10;
+		for (let index = 1; index < providerEventCount; index++) {
+			const retryResult = await ingest(
+				makeSSEEvent("message.created", {
+					sessionID: SESSION_ID,
+					messageID: `msg-retry-${index}`,
+					info: { role: "assistant", parts: [] },
+				}),
+			);
+			expect(retryResult).toMatchObject({
+				ok: false,
+				reason: "error",
+			});
+		}
+		expect(log.warn).toHaveBeenCalledTimes(providerEventCount);
 
 		const storedAfterRetry = await readStored();
 		expect(
 			storedAfterRetry.filter((event) => event.type === "session.created"),
-		).toHaveLength(2);
+		).toHaveLength(1);
 		const projectedMessages = await currentRuntime().runPromise(
 			Effect.gen(function* () {
 				const sql = yield* SqlClient.SqlClient;
