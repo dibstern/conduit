@@ -11,6 +11,7 @@ import {
 	Layer,
 	Ref,
 } from "effect";
+import { makeCommitAndSignal } from "../../../persistence/effect/commit-and-signal.js";
 import { EventStoreEffectTag } from "../../../persistence/effect/event-store-effect.js";
 import { ProjectionRunnerEffectTag } from "../../../persistence/effect/projection-runner-effect.js";
 import { ReadQueryEffectTag } from "../../../persistence/effect/read-query-effect.js";
@@ -202,13 +203,6 @@ function isClaudeSessionProvider(provider: string): boolean {
 	return provider === "claude" || provider === "claude-sdk";
 }
 
-function withSql<A, E>(
-	effect: Effect.Effect<A, E, SqlClient.SqlClient>,
-	sql: SqlClient.SqlClient,
-): Effect.Effect<A, E> {
-	return effect.pipe(Effect.provideService(SqlClient.SqlClient, sql));
-}
-
 export const makeSessionTitleServiceLive = (
 	options: SessionTitleServiceLiveOptions = {},
 ): Layer.Layer<
@@ -344,27 +338,25 @@ export const makeSessionTitleServiceLive = (
 					const sql = sqlOption.value;
 
 					const createdAt = Date.now();
-					yield* sql.withTransaction(
-						Effect.gen(function* () {
-							const stored = yield* eventStore.append(
-								canonicalEvent(
-									"session.renamed",
-									sessionId,
-									{
-										sessionId,
-										title,
-									},
-									{
-										provider: current.provider,
-										createdAt,
-										metadata: { source: AUTO_TITLE_SOURCE },
-									},
-								),
-							);
-
-							yield* withSql(projectionRunner.projectEvent(stored), sql);
-						}),
+					// The auto-title rename is a read-model change like any other, so it
+					// goes through the one seam that projects and announces together.
+					const commitAndSignal = yield* makeCommitAndSignal.pipe(
+						Effect.provideService(SqlClient.SqlClient, sql),
+						Effect.provideService(EventStoreEffectTag, eventStore),
+						Effect.provideService(ProjectionRunnerEffectTag, projectionRunner),
 					);
+					yield* commitAndSignal([
+						canonicalEvent(
+							"session.renamed",
+							sessionId,
+							{ sessionId, title },
+							{
+								provider: current.provider,
+								createdAt,
+								metadata: { source: AUTO_TITLE_SOURCE },
+							},
+						),
+					]);
 
 					const rows = yield* sql<{ title: string; provider: string }>`
 						SELECT title, provider FROM sessions WHERE id = ${sessionId}`;

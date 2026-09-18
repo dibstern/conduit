@@ -89,10 +89,20 @@ function makeHarness(options?: {
 	const appendBatch = vi.fn((events: readonly CanonicalEvent[]) =>
 		Effect.forEach(events, append),
 	);
-	const projectEvent = vi.fn((event: StoredEvent) => {
-		projected.push(event);
-		return options?.projectEffect?.(event, projected.length) ?? Effect.void;
-	});
+	const projectEvent = vi.fn((event: StoredEvent) =>
+		Effect.suspend(() => {
+			projected.push(event);
+			return (
+				options?.projectEffect?.(event, projected.length) ?? Effect.void
+			).pipe(
+				Effect.as({
+					version: event.sequence,
+					sessionIds: [event.sessionId],
+					removedSessionIds: [],
+				}),
+			);
+		}),
+	);
 	const projectBatch = vi.fn((events: readonly StoredEvent[]) => {
 		projectBatchCallIndex += 1;
 		projected.push(...events);
@@ -100,6 +110,12 @@ function makeHarness(options?: {
 		return (
 			options?.projectBatchEffect?.(events, projectBatchCallIndex) ??
 			Effect.void
+		).pipe(
+			Effect.as({
+				version: events[events.length - 1]?.sequence ?? 0,
+				sessionIds: [...new Set(events.map((event) => event.sessionId))],
+				removedSessionIds: [],
+			}),
 		);
 	});
 
@@ -256,7 +272,9 @@ describe("ProviderRuntimeIngestion", () => {
 		const relayPublish = vi.fn(() => Effect.void);
 		const busLayer = Layer.succeed(SessionEventBusTag, {
 			publish: busPublish,
+			publishAdvance: () => Effect.void,
 			subscribe: () => Effect.succeed(Stream.empty),
+			subscribeAdvances: () => Effect.succeed(Stream.empty),
 		} satisfies SessionEventBus);
 		const layer = makeProviderRuntimeIngestionLive({
 			relayPublisher: { publish: relayPublish },
@@ -301,7 +319,9 @@ describe("ProviderRuntimeIngestion", () => {
 		const relayPublish = vi.fn(() => Effect.void);
 		const busLayer = Layer.succeed(SessionEventBusTag, {
 			publish: busPublish,
+			publishAdvance: () => Effect.void,
 			subscribe: () => Effect.succeed(Stream.empty),
+			subscribeAdvances: () => Effect.succeed(Stream.empty),
 		} satisfies SessionEventBus);
 		const layer = makeProviderRuntimeIngestionLive({
 			relayPublisher: { publish: relayPublish },
@@ -352,7 +372,9 @@ describe("ProviderRuntimeIngestion", () => {
 					yield* Deferred.await(publishGate);
 					published.push(...events);
 				}),
+			publishAdvance: () => Effect.void,
 			subscribe: () => Effect.succeed(Stream.empty),
+			subscribeAdvances: () => Effect.succeed(Stream.empty),
 		} satisfies SessionEventBus);
 		const layer = ProviderRuntimeIngestionLive.pipe(
 			Layer.provide(harness.depsLayer),

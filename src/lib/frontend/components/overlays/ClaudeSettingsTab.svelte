@@ -13,11 +13,15 @@
 		getClaudeSettingValue,
 		markClaudeSettingsResolutionUnavailable,
 		setClaudeSettingEdited,
-		setClaudeSettingsOverridesOptimistically,
+		proposeClaudeSettingsOverrides,
 		type ClaudeSettingKey,
 	} from "../../stores/claude-settings.svelte.js";
 	import { PERMISSION_MODES } from "../../permission-modes.js";
 	import {
+		applyDefaultModelSet,
+		applyDefaultPermissionMode,
+		chooseDefaultModel,
+		chooseDefaultPermissionMode,
 		discoveryState,
 		getAllModels,
 		getAvailableInstances,
@@ -186,8 +190,8 @@
 
 	/**
 	 * Writes the whole overrides object — the relay stores it with replacement
-	 * semantics — showing the new value immediately and putting the panel back
-	 * the way it was if the relay rejects the write.
+	 * semantics — showing the new value immediately and dropping back to the
+	 * relay's if it rejects the write.
 	 */
 	async function persistOverrides(
 		key: ClaudeSettingKey,
@@ -196,14 +200,13 @@
 	): Promise<void> {
 		const projectSlug = getCurrentSlug();
 		if (!projectSlug) return;
-		const previousOverrides = { ...claudeSettingsState.overrides };
 		const wasEdited = claudeSettingsState.editedKeys.includes(key);
-		setClaudeSettingsOverridesOptimistically(overrides);
+		const undoWrite = proposeClaudeSettingsOverrides(overrides);
 		setClaudeSettingEdited(key, edited);
 		try {
 			await setClaudeSettingsRpc({ projectSlug, overrides });
 		} catch {
-			setClaudeSettingsOverridesOptimistically(previousOverrides);
+			undoWrite();
 			setClaudeSettingEdited(key, wasEdited);
 			showToast("Failed to save Claude settings", { variant: "warn" });
 		}
@@ -278,15 +281,16 @@
 		if (!projectSlug || separator < 0) return;
 		const provider = select.value.slice(0, separator);
 		const model = select.value.slice(separator + 1);
-		const previousModel = discoveryState.defaultModelId;
-		const previousProvider = discoveryState.defaultProviderId;
-		discoveryState.defaultModelId = model;
-		discoveryState.defaultProviderId = provider;
-		void setDefaultModelRpc({ projectSlug, model, provider }).catch(() => {
-			discoveryState.defaultModelId = previousModel;
-			discoveryState.defaultProviderId = previousProvider;
-			showToast("Failed to save default model", { variant: "warn" });
+		const undoDefaultModel = chooseDefaultModel({
+			modelId: model,
+			providerId: provider,
 		});
+		void setDefaultModelRpc({ projectSlug, model, provider })
+			.then(applyDefaultModelSet)
+			.catch(() => {
+				undoDefaultModel();
+				showToast("Failed to save default model", { variant: "warn" });
+			});
 	}
 
 	function updateDefaultPermissionMode(event: Event): void {
@@ -297,12 +301,13 @@
 		)?.mode;
 		const projectSlug = getCurrentSlug();
 		if (!mode || !projectSlug) return;
-		const previousMode = discoveryState.defaultPermissionMode;
-		discoveryState.defaultPermissionMode = mode;
-		void setDefaultPermissionModeRpc({ projectSlug, mode }).catch(() => {
-			discoveryState.defaultPermissionMode = previousMode;
-			showToast("Failed to save default approval mode", { variant: "warn" });
-		});
+		const undoDefaultMode = chooseDefaultPermissionMode(mode);
+		void setDefaultPermissionModeRpc({ projectSlug, mode })
+			.then((response) => applyDefaultPermissionMode(response.mode))
+			.catch(() => {
+				undoDefaultMode();
+				showToast("Failed to save default approval mode", { variant: "warn" });
+			});
 	}
 
 	function updateCommitAttribution(event: Event): void {

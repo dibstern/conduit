@@ -40,18 +40,17 @@ import {
 	clearMessages,
 	clearSessionChatState,
 } from "../../../src/lib/frontend/stores/chat.svelte.js";
-import { sessionState } from "../../../src/lib/frontend/stores/session.svelte.js";
+import {
+	applySessionUpsert,
+	sessionState,
+} from "../../../src/lib/frontend/stores/session.svelte.js";
 import { handleMessage } from "../../../src/lib/frontend/stores/ws.svelte.js";
 
 beforeEach(() => {
 	clearMessages();
 	sessionState.currentId = null;
 	clearSessionChatState("sub-parent");
-	sessionState.sessions.set("sub-parent", {
-		id: "sub-parent",
-		title: "",
-		status: "idle",
-	});
+	applySessionUpsert({ id: "sub-parent", title: "", status: "idle" });
 	vi.useFakeTimers();
 });
 afterEach(() => vi.useRealTimers());

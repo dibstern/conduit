@@ -1,30 +1,40 @@
 import type { Meta, StoryObj } from "@storybook/svelte-vite";
-import { destroyAll, terminalState } from "../../stores/terminal.svelte.js";
+import {
+	beginCreateTab,
+	destroyAll,
+	handlePtyList,
+	openPanel,
+	renameTab,
+	switchTab,
+} from "../../stores/terminal.svelte.js";
 import TerminalPanel from "./TerminalPanel.svelte";
 
 function resetTerminal() {
 	destroyAll();
 }
 
-/** Inject fake tab entries (bypasses XTerm.js for visual testing). */
+/** Inject fake tab entries (bypasses XTerm.js for visual testing).
+ *  Rows go in the way the server sends them; the labels are set the way the
+ *  user would set them. */
 function setTabs(
 	entries: Array<{ ptyId: string; title: string; exited?: boolean }>,
 	activeId?: string,
 ) {
-	const tabs = new Map<
-		string,
-		{ ptyId: string; title: string; exited: boolean }
-	>();
-	for (const e of entries) {
-		tabs.set(e.ptyId, {
-			ptyId: e.ptyId,
+	handlePtyList({
+		type: "pty_list",
+		ptys: entries.map((e) => ({
+			id: e.ptyId,
 			title: e.title,
-			exited: e.exited ?? false,
-		});
-	}
-	terminalState.tabs = tabs;
-	terminalState.activeTabId = activeId ?? entries[0]?.ptyId ?? null;
-	terminalState.panelOpen = true;
+			command: "bash",
+			cwd: "/repo",
+			status: e.exited ? ("exited" as const) : ("running" as const),
+			pid: 1000,
+		})),
+	});
+	for (const e of entries) renameTab(e.ptyId, e.title);
+	const active = activeId ?? entries[0]?.ptyId;
+	if (active) switchTab(active);
+	openPanel();
 }
 
 const meta = {
@@ -42,7 +52,7 @@ type Story = StoryObj<typeof meta>;
 
 export const Empty: Story = {
 	beforeEach: () => {
-		terminalState.panelOpen = true;
+		openPanel();
 	},
 };
 
@@ -79,9 +89,8 @@ export const TabExited: Story = {
 
 export const WithStatusMessage: Story = {
 	beforeEach: () => {
-		terminalState.panelOpen = true;
-		terminalState.statusMessage = "Creating terminal...";
-		terminalState.pendingCreate = true;
+		openPanel();
+		beginCreateTab();
 	},
 };
 

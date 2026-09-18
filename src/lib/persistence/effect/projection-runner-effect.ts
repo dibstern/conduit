@@ -5,11 +5,14 @@
 import { SqlClient } from "@effect/sql";
 import type { SqlError } from "@effect/sql/SqlError";
 import { Context, Data, Effect } from "effect";
+import type { ReadModelAdvance } from "../../contracts/read-model-advance.js";
 import type { StoredEvent } from "../events.js";
 import { ProjectorCursorEffectTag } from "./projector-cursor-effect.js";
-import type {
-	EffectProjector,
-	ProjectionContext,
+import {
+	type EffectProjector,
+	mergeTouches,
+	type ProjectionContext,
+	type ProjectionTouch,
 } from "./projectors-effect.js";
 import {
 	decodeStoredEventRow,
@@ -48,10 +51,20 @@ export interface RecoveryResult {
 // ─── Service interface ──────────────────────────────────────────────────────
 
 export interface ProjectionRunnerEffect {
+	/**
+	 * Apply events and report how far the read model moved, which sessions moved
+	 * with it, and which sessions left. The caller that owns the transaction publishes
+	 * this once the commit lands; nothing below the projection announces, so a
+	 * new write path gets a change signal by projecting and nothing else.
+	 * `version` is the read-model counter this application stamped its rows with,
+	 * and 0 when there was nothing to apply. It is not an event sequence: it comes
+	 * from a counter that only ever goes up, so a replayed write still lands above
+	 * whatever version a subscriber is holding.
+	 */
 	readonly projectEvent: (
 		event: StoredEvent,
 	) => Effect.Effect<
-		void,
+		ReadModelAdvance,
 		ProjectionRunnerError | SqlError,
 		SqlClient.SqlClient
 	>;
@@ -59,7 +72,7 @@ export interface ProjectionRunnerEffect {
 	readonly projectBatch: (
 		events: readonly StoredEvent[],
 	) => Effect.Effect<
-		void,
+		ReadModelAdvance,
 		ProjectionRunnerError | SqlError,
 		SqlClient.SqlClient
 	>;
@@ -110,6 +123,23 @@ export const makeProjectionRunnerEffect = (
 		let recovered = false;
 		let replaying = false;
 
+		// The read model's own clock. It is not the event sequence: replay re-applies
+		// an event whose sequence is below the row's current version, and a row that
+		// moves backwards is a row a subscriber never hears about again. This only
+		// ever goes up, so every write — first pass or replay — lands above whatever
+		// a subscriber last saw.
+		//
+		// The bump is an UPDATE, so it takes SQLite's write lock at that statement
+		// and holds it to COMMIT. Two batches on separate connections therefore
+		// serialize: the second blocks, then reads the first's committed value and
+		// cannot reissue it.
+		const nextVersion = Effect.gen(function* () {
+			const rows = yield* sql<{
+				value: number;
+			}>`UPDATE read_model_counter SET value = value + 1 WHERE id = 1 RETURNING value`;
+			return rows[0]?.value ?? 0;
+		});
+
 		const recordFailure = (
 			projector: EffectProjector,
 			event: StoredEvent,
@@ -134,63 +164,97 @@ export const makeProjectionRunnerEffect = (
 		const projectEvent = (
 			event: StoredEvent,
 		): Effect.Effect<
-			void,
+			ReadModelAdvance,
 			ProjectionRunnerError | SqlError,
 			SqlClient.SqlClient
 		> =>
-			Effect.gen(function* () {
-				const matching = projectorsByEventType.get(event.type) ?? [];
-				const ctx: ProjectionContext = { replaying };
+			sql.withTransaction(
+				Effect.gen(function* () {
+					const matching = projectorsByEventType.get(event.type) ?? [];
+					// Inside the transaction on purpose: the bump's write lock is only
+					// held to COMMIT, so a bump that auto-commits on its own would let a
+					// second connection stamp and announce a higher version while this
+					// one's rows are still uncommitted — and a subscriber that moved to
+					// the higher version would never query low enough to see them.
+					const version = yield* nextVersion;
+					const ctx: ProjectionContext = { version, replaying };
+					// Kept in order, not unioned: a session this event removes and
+					// re-creates ends the projection alive, and the last touch is the
+					// only one that describes the row a subscriber will find.
+					const touches: ProjectionTouch[] = [];
 
-				// Failures propagate. A caller here is applying one known event and can
-				// act on the result — a user deleting a session must not be told it
-				// worked when the row is still there. Replay is the one path that
-				// swallows projector failures, and it does so in recover().
-				//
-				// Live producers wrap append and projection in one transaction. These
-				// nested transactions are savepoints; failures roll back the whole write.
-				// Relay startup recovers historical events before enabling live producers.
-				// getFailures() is not involved because the error reaches the caller.
-				for (const projector of matching) {
-					yield* sql.withTransaction(
-						Effect.gen(function* () {
-							yield* projector.project(event, ctx);
-							yield* cursorRepo.upsert(projector.name, event.sequence);
-						}).pipe(
-							Effect.mapError(
-								(cause) =>
-									new ProjectionRunnerError({
-										operation: "projectEvent",
-										cause,
-									}),
+					// Failures propagate. A caller here is applying one known event and can
+					// act on the result — a user deleting a session must not be told it
+					// worked when the row is still there. Replay is the one path that
+					// swallows projector failures, and it does so in recover().
+					//
+					// Live producers wrap append and projection in one transaction. These
+					// nested transactions are savepoints; failures roll back the whole write.
+					// Relay startup recovers historical events before enabling live producers.
+					// getFailures() is not involved because the error reaches the caller.
+					for (const projector of matching) {
+						const changed = yield* sql.withTransaction(
+							Effect.gen(function* () {
+								const touched = yield* projector.project(event, ctx);
+								yield* cursorRepo.upsert(projector.name, event.sequence);
+								return touched;
+							}).pipe(
+								Effect.mapError(
+									(cause) =>
+										new ProjectionRunnerError({
+											operation: "projectEvent",
+											cause,
+										}),
+								),
 							),
-						),
-					);
-				}
-			});
+						);
+						touches.push(changed);
+					}
+
+					const touched = mergeTouches(touches);
+					return {
+						version,
+						sessionIds: touched.stamped,
+						removedSessionIds: touched.removed,
+					};
+				}),
+			);
 
 		const projectBatch = (
 			events: readonly StoredEvent[],
 		): Effect.Effect<
-			void,
+			ReadModelAdvance,
 			ProjectionRunnerError | SqlError,
 			SqlClient.SqlClient
 		> => {
-			if (events.length === 0) return Effect.void;
+			if (events.length === 0)
+				return Effect.succeed({
+					version: 0,
+					sessionIds: [],
+					removedSessionIds: [],
+				});
 
 			return Effect.gen(function* () {
-				const ctx: ProjectionContext = { replaying };
+				// Event order decides the outcome, so the touches are folded, not
+				// unioned — see projectEvent.
+				const touches: ProjectionTouch[] = [];
 
 				// One transaction for the whole batch (S9): a translation that produced
 				// several events lands all-or-nothing, so the read model never shows a
 				// half-applied translation. Failures propagate for the same reason they
 				// do in projectEvent — see the policy note there.
-				yield* sql.withTransaction(
+				//
+				// One counter bump for the batch, taken inside that transaction: every
+				// row the batch writes carries the same version, and the bump's write
+				// lock is held until the rows it stamps are committed.
+				const version = yield* sql.withTransaction(
 					Effect.gen(function* () {
+						const version = yield* nextVersion;
+						const ctx: ProjectionContext = { version, replaying };
 						for (const event of events) {
 							const matching = projectorsByEventType.get(event.type) ?? [];
 							for (const projector of matching) {
-								yield* projector.project(event, ctx);
+								touches.push(yield* projector.project(event, ctx));
 							}
 						}
 
@@ -201,6 +265,7 @@ export const makeProjectionRunnerEffect = (
 								yield* cursorRepo.upsert(projector.name, lastEvent.sequence);
 							}
 						}
+						return version;
 					}).pipe(
 						Effect.mapError(
 							(e) =>
@@ -211,6 +276,13 @@ export const makeProjectionRunnerEffect = (
 						),
 					),
 				);
+
+				const touched = mergeTouches(touches);
+				return {
+					version,
+					sessionIds: touched.stamped,
+					removedSessionIds: touched.removed,
+				};
 			});
 		};
 
@@ -286,6 +358,7 @@ export const makeProjectionRunnerEffect = (
 									.withTransaction(
 										Effect.gen(function* () {
 											yield* projector.project(storedEvent, {
+												version: yield* nextVersion,
 												replaying: true,
 											});
 											yield* cursorRepo.upsert(

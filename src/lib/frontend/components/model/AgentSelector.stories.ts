@@ -1,5 +1,8 @@
 import type { Meta, StoryObj } from "@storybook/svelte-vite";
-import { discoveryState } from "../../stores/discovery.svelte.js";
+import {
+	clearDiscoveryState,
+	handleAgentList,
+} from "../../stores/discovery.svelte.js";
 import AgentSelector from "./AgentSelector.svelte";
 
 const meta = {
@@ -8,8 +11,7 @@ const meta = {
 	tags: ["autodocs"],
 	beforeEach: () => {
 		// Reset state for each story
-		discoveryState.agents = [];
-		discoveryState.activeAgentId = null;
+		clearDiscoveryState();
 	},
 } satisfies Meta<typeof AgentSelector>;
 
@@ -19,26 +21,34 @@ type Story = StoryObj<typeof meta>;
 /** Multiple agents with one active — pills visible. */
 export const Default: Story = {
 	beforeEach: () => {
-		discoveryState.agents = [
-			{ id: "code", name: "code", description: "Write and edit code" },
-			{ id: "plan", name: "plan", description: "Plan tasks" },
-			{
-				id: "general",
-				name: "general",
-				description: "General assistant",
-			},
-		];
-		discoveryState.activeAgentId = "code";
+		handleAgentList({
+			type: "agent_list",
+			providerScope: { id: "claude", name: "Claude" },
+			agents: [
+				{ id: "code", name: "code", description: "Write and edit code" },
+				{ id: "plan", name: "plan", description: "Plan tasks" },
+				{
+					id: "general",
+					name: "general",
+					description: "General assistant",
+				},
+			],
+			activeAgentId: "code",
+		});
 	},
 };
 
 /** Single agent — selector should be hidden. */
 export const SingleAgent: Story = {
 	beforeEach: () => {
-		discoveryState.agents = [
-			{ id: "code", name: "code", description: "Write and edit code" },
-		];
-		discoveryState.activeAgentId = "code";
+		handleAgentList({
+			type: "agent_list",
+			providerScope: { id: "claude", name: "Claude" },
+			agents: [
+				{ id: "code", name: "code", description: "Write and edit code" },
+			],
+			activeAgentId: "code",
+		});
 	},
 };
 

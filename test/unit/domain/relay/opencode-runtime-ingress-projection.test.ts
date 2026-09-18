@@ -75,7 +75,9 @@ function makeFailFirstBusLayer(
 	let published = 0;
 	return Layer.succeed(SessionEventBusTag, {
 		publish: () => (published++ === 0 ? outcome : Effect.void),
+		publishAdvance: () => Effect.void,
 		subscribe: () => Effect.succeed(Stream.empty),
+		subscribeAdvances: () => Effect.succeed(Stream.empty),
 	} satisfies SessionEventBus);
 }
 
@@ -664,7 +666,9 @@ describe("OpenCode Runtime Ingress Projection (SSE → append → project → re
 		);
 		expect(projectedMessages).toEqual([]);
 
-		vi.spyOn(failingProjector, "project").mockReturnValue(Effect.void);
+		vi.spyOn(failingProjector, "project").mockReturnValue(
+			Effect.succeed({ stamped: [], removed: [] }),
+		);
 		const retryResult = await ingestOk(
 			makeSSEEvent("message.created", {
 				sessionID: SESSION_ID,
@@ -705,7 +709,7 @@ describe("OpenCode Runtime Ingress Projection (SSE → append → project → re
 									cause: new Error("simulated transient projection failure"),
 								}),
 							)
-						: Effect.void;
+						: Effect.succeed({ stamped: [], removed: [] });
 				},
 			},
 		]);
@@ -773,7 +777,7 @@ describe("OpenCode Runtime Ingress Projection (SSE → append → project → re
 									cause: new Error("simulated projection failure"),
 								}),
 							)
-						: Effect.void,
+						: Effect.succeed({ stamped: [], removed: [] }),
 			},
 		]);
 
@@ -847,7 +851,10 @@ describe("OpenCode Runtime Ingress Projection (SSE → append → project → re
 			{
 				name: "gated-text-projector",
 				handles: ["text.delta"],
-				project: () => Effect.promise(() => snapshotGate),
+				project: () =>
+					Effect.promise(() => snapshotGate).pipe(
+						Effect.as({ stamped: [], removed: [] }),
+					),
 			},
 		]);
 
@@ -979,7 +986,10 @@ describe("OpenCode Runtime Ingress Projection (SSE → append → project → re
 			{
 				name: "gated-text-projector",
 				handles: ["text.delta"],
-				project: () => Effect.promise(() => gatedText),
+				project: () =>
+					Effect.promise(() => gatedText).pipe(
+						Effect.as({ stamped: [], removed: [] }),
+					),
 			},
 		]);
 

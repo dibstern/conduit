@@ -6,6 +6,8 @@
 	import Icon from "../shared/Icon.svelte";
 	import { clickOutside } from "../shared/use-click-outside.svelte.js";
 	import {
+		applyVariantSwitched,
+		chooseVariant,
 		discoveryState,
 		getActiveModelVariants,
 	} from "../../stores/discovery.svelte.js";
@@ -47,23 +49,13 @@
 	}
 
 	function switchVariant(variant: string) {
-		const previousVariant = discoveryState.currentVariant;
-		discoveryState.currentVariant = variant;
+		const undoVariant = chooseVariant(variant);
 		const projectSlug = getCurrentSlug();
 		const sessionId = sessionState.currentId;
 		if (projectSlug && sessionId) {
-			void switchVariantRpc({
-				projectSlug,
-				sessionId,
-				variant,
-			})
-				.then((response) => {
-					discoveryState.currentVariant = response.variant;
-					discoveryState.availableVariants = response.variants;
-				})
-				.catch(() => {
-					discoveryState.currentVariant = previousVariant;
-				});
+			void switchVariantRpc({ projectSlug, sessionId, variant })
+				.then(applyVariantSwitched)
+				.catch(undoVariant);
 		}
 	}
 

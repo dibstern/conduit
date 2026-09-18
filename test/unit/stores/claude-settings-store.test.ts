@@ -1,4 +1,8 @@
 import { beforeEach, describe, expect, it } from "vitest";
+import type {
+	ClaudeSettingsOverrides,
+	ResolvedClaudeSettings,
+} from "../../../src/lib/contracts/claude-settings.js";
 import {
 	applyClaudeSettingsResponse,
 	applyResolvedClaudeSettingsResponse,
@@ -10,12 +14,38 @@ import {
 	getClaudeSettingValue,
 	handleClaudeSettingsInfo,
 	markClaudeSettingsResolutionUnavailable,
-	setClaudeSettingsOverridesOptimistically,
+	proposeClaudeSettingsOverrides,
+	setClaudeSettingEdited,
 } from "../../../src/lib/frontend/stores/claude-settings.svelte.js";
 
 beforeEach(() => {
 	clearClaudeSettingsState();
 });
+
+/** Every displayable key resolved to nothing — the base a test layers over. */
+const NOTHING_RESOLVED: ResolvedClaudeSettings = {
+	autoCompactEnabled: {},
+	autoCompactWindow: {},
+	alwaysThinkingEnabled: {},
+	disableAllHooks: {},
+	cleanupPeriodDays: {},
+	attribution: {},
+};
+
+/** Fill the store the way the relay does: the overrides broadcast, then the
+ *  resolution response for the project those overrides belong to. */
+function seedSettings(
+	overrides: ClaudeSettingsOverrides,
+	resolved: Partial<ResolvedClaudeSettings> = {},
+): void {
+	beginClaudeSettingsResolution("project-a");
+	handleClaudeSettingsInfo({ type: "claude_settings_info", overrides });
+	applyResolvedClaudeSettingsResponse({
+		projectSlug: "project-a",
+		instanceId: "claude",
+		resolved: { ...NOTHING_RESOLVED, ...resolved },
+	});
+}
 
 describe("Claude settings store", () => {
 	it("applies RPC reads, optimistic writes, and confirming broadcasts", () => {
@@ -27,7 +57,7 @@ describe("Claude settings store", () => {
 			autoCompactEnabled: true,
 		});
 
-		setClaudeSettingsOverridesOptimistically({ autoCompactWindow: 24_000 });
+		proposeClaudeSettingsOverrides({ autoCompactWindow: 24_000 });
 		expect(claudeSettingsState.overrides).toEqual({
 			autoCompactWindow: 24_000,
 		});
@@ -39,6 +69,49 @@ describe("Claude settings store", () => {
 		expect(claudeSettingsState.overrides).toEqual({
 			autoCompactEnabled: false,
 		});
+	});
+
+	it("keeps this user's edit marks when the relay broadcasts", () => {
+		setClaudeSettingEdited("autoCompactEnabled", true);
+
+		handleClaudeSettingsInfo({
+			type: "claude_settings_info",
+			overrides: { autoCompactWindow: 12_000 },
+		});
+
+		expect(claudeSettingsState.editedKeys).toEqual(["autoCompactEnabled"]);
+	});
+
+	it("reverts a failed write to the relay's value, not a remembered one", () => {
+		handleClaudeSettingsInfo({
+			type: "claude_settings_info",
+			overrides: { autoCompactEnabled: true },
+		});
+		const undo = proposeClaudeSettingsOverrides({ autoCompactEnabled: false });
+
+		// Someone else's change lands while our write is still in flight.
+		handleClaudeSettingsInfo({
+			type: "claude_settings_info",
+			overrides: { autoCompactWindow: 8_000 },
+		});
+		undo(); // ...and then ours is rejected.
+
+		expect(claudeSettingsState.overrides).toEqual({ autoCompactWindow: 8_000 });
+	});
+
+	it("lets a newer write stand when an older one is rejected", () => {
+		handleClaudeSettingsInfo({
+			type: "claude_settings_info",
+			overrides: { autoCompactEnabled: true },
+		});
+
+		const undoFirst = proposeClaudeSettingsOverrides({
+			autoCompactEnabled: false,
+		});
+		proposeClaudeSettingsOverrides({ autoCompactWindow: 8_000 });
+		undoFirst(); // the first write comes back rejected, the second is in flight
+
+		expect(claudeSettingsState.overrides).toEqual({ autoCompactWindow: 8_000 });
 	});
 
 	it("tracks successful, failed, and unavailable resolution", () => {
@@ -82,15 +155,16 @@ describe("Claude setting provenance", () => {
 		[true, "on"],
 		[false, "off"],
 	] as const)("formats an underlying boolean value of %s as %s", (value, formattedValue) => {
-		claudeSettingsState.overrides = { autoCompactEnabled: false };
-		claudeSettingsState.resolved = {
-			autoCompactEnabled: {
-				value,
-				source: "user",
-				path: "/profiles/work/settings.json",
+		seedSettings(
+			{ autoCompactEnabled: false },
+			{
+				autoCompactEnabled: {
+					value,
+					source: "user",
+					path: "/profiles/work/settings.json",
+				},
 			},
-		};
-		claudeSettingsState.resolutionStatus = "ready";
+		);
 
 		expect(
 			describeClaudeSettingProvenance("autoCompactEnabled", false),
@@ -107,14 +181,10 @@ describe("Claude setting provenance", () => {
 	});
 
 	it("inverts a displayed boolean without changing the stored value", () => {
-		claudeSettingsState.overrides = { disableAllHooks: false };
-		claudeSettingsState.resolved = {
-			disableAllHooks: {
-				value: true,
-				source: "user",
-			},
-		};
-		claudeSettingsState.resolutionStatus = "ready";
+		seedSettings(
+			{ disableAllHooks: false },
+			{ disableAllHooks: { value: true, source: "user" } },
+		);
 
 		expect(
 			describeClaudeSettingProvenance("disableAllHooks", false, {
@@ -129,17 +199,16 @@ describe("Claude setting provenance", () => {
 	});
 
 	it("describes an object override without rendering its resolved value", () => {
-		claudeSettingsState.overrides = {
-			attribution: { sessionUrl: false },
-		};
-		claudeSettingsState.resolved = {
-			attribution: {
-				value: { commit: "Inherited commit attribution" },
-				source: "user",
-				path: "/profiles/work/settings.json",
+		seedSettings(
+			{ attribution: { sessionUrl: false } },
+			{
+				attribution: {
+					value: { commit: "Inherited commit attribution" },
+					source: "user",
+					path: "/profiles/work/settings.json",
+				},
 			},
-		};
-		claudeSettingsState.resolutionStatus = "ready";
+		);
 
 		const provenance = describeClaudeSettingProvenance("attribution", false);
 
@@ -156,8 +225,7 @@ describe("Claude setting provenance", () => {
 	});
 
 	it("describes an override with nothing underneath", () => {
-		claudeSettingsState.overrides = { autoCompactEnabled: true };
-		claudeSettingsState.resolutionStatus = "ready";
+		seedSettings({ autoCompactEnabled: true });
 
 		expect(
 			describeClaudeSettingProvenance("autoCompactEnabled", false),
@@ -170,14 +238,16 @@ describe("Claude setting provenance", () => {
 	});
 
 	it("describes an inherited project-local setting", () => {
-		claudeSettingsState.resolved = {
-			autoCompactWindow: {
-				value: 12_000,
-				source: "local",
-				path: "/workspace/.claude/settings.local.json",
+		seedSettings(
+			{},
+			{
+				autoCompactWindow: {
+					value: 12_000,
+					source: "local",
+					path: "/workspace/.claude/settings.local.json",
+				},
 			},
-		};
-		claudeSettingsState.resolutionStatus = "ready";
+		);
 
 		expect(
 			describeClaudeSettingProvenance("autoCompactWindow", false),
@@ -192,15 +262,16 @@ describe("Claude setting provenance", () => {
 	});
 
 	it("locks managed policy even when Conduit has an override", () => {
-		claudeSettingsState.overrides = { autoCompactWindow: 24_000 };
-		claudeSettingsState.resolved = {
-			autoCompactWindow: {
-				value: 8_000,
-				source: "managed",
-				path: "/Library/Application Support/ClaudeCode/managed-settings.json",
+		seedSettings(
+			{ autoCompactWindow: 24_000 },
+			{
+				autoCompactWindow: {
+					value: 8_000,
+					source: "managed",
+					path: "/Library/Application Support/ClaudeCode/managed-settings.json",
+				},
 			},
-		};
-		claudeSettingsState.resolutionStatus = "ready";
+		);
 
 		expect(
 			describeClaudeSettingProvenance("autoCompactWindow", false),
@@ -216,7 +287,10 @@ describe("Claude setting provenance", () => {
 	});
 
 	it("shows the next-session notice after an edit unless policy locks the key", () => {
-		claudeSettingsState.overrides = { autoCompactEnabled: false };
+		handleClaudeSettingsInfo({
+			type: "claude_settings_info",
+			overrides: { autoCompactEnabled: false },
+		});
 
 		expect(
 			describeClaudeSettingProvenance("autoCompactEnabled", true),
@@ -229,11 +303,22 @@ describe("Claude setting provenance", () => {
 	});
 
 	it.each([
-		["loading", "Checking…"],
-		["error", "Couldn't read settings files"],
-		["unavailable", "Couldn't read settings files"],
-	] as const)("describes %s resolution", (resolutionStatus, text) => {
-		claudeSettingsState.resolutionStatus = resolutionStatus;
+		["loading", "Checking…", () => beginClaudeSettingsResolution("project-a")],
+		[
+			"error",
+			"Couldn't read settings files",
+			() => {
+				beginClaudeSettingsResolution("project-a");
+				failClaudeSettingsResolution("project-a");
+			},
+		],
+		[
+			"unavailable",
+			"Couldn't read settings files",
+			() => markClaudeSettingsResolutionUnavailable("project-a"),
+		],
+	] as const)("describes %s resolution", (_resolutionStatus, text, reach) => {
+		reach();
 
 		expect(
 			describeClaudeSettingProvenance("autoCompactEnabled", false),

@@ -721,7 +721,9 @@ describe("subscribeSessionDetail", () => {
 							yield* Deferred.await(publishGate);
 							yield* Ref.update(published, (all) => [...all, ...events]);
 						}),
+					publishAdvance: () => Effect.void,
 					subscribe: () => Effect.dieMessage("unused in this test"),
+					subscribeAdvances: () => Effect.dieMessage("unused in this test"),
 				};
 
 				yield* Effect.gen(function* () {

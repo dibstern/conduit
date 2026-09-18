@@ -1,6 +1,7 @@
 import { SqlClient } from "@effect/sql";
 import { Cause, Duration, Effect, HashMap, Layer, PubSub, Ref } from "effect";
 import type { SessionStatus } from "../../../instance/sdk-types.js";
+import { makeCommitAndSignal } from "../../../persistence/effect/commit-and-signal.js";
 import { EventStoreEffectTag } from "../../../persistence/effect/event-store-effect.js";
 import { ProjectionRunnerEffectTag } from "../../../persistence/effect/projection-runner-effect.js";
 import { ReadQueryEffectTag } from "../../../persistence/effect/read-query-effect.js";
@@ -69,18 +70,30 @@ export const StatusPollerLive: Layer.Layer<
 		const sqlOption = yield* Effect.serviceOption(SqlClient.SqlClient);
 		const persistenceReady =
 			config.persistenceDbPath != null && readQueryOption._tag === "Some";
-		const reconciliationDeps: ReconciliationDeps | undefined =
-			persistenceReady &&
+		// The corrective event is the poller's only write, and it moves the read
+		// model, so it goes through the seam that projects and announces together.
+		const commitAndSignalOption =
 			eventStoreOption._tag === "Some" &&
 			projectionRunnerOption._tag === "Some" &&
 			sqlOption._tag === "Some"
+				? yield* makeCommitAndSignal.pipe(
+						Effect.provideService(SqlClient.SqlClient, sqlOption.value),
+						Effect.provideService(EventStoreEffectTag, eventStoreOption.value),
+						Effect.provideService(
+							ProjectionRunnerEffectTag,
+							projectionRunnerOption.value,
+						),
+					)
+				: undefined;
+		const reconciliationDeps: ReconciliationDeps | undefined =
+			persistenceReady && commitAndSignalOption !== undefined
 				? {
 						getRestStatuses: () =>
 							Effect.tryPromise(() => api.session.statuses()),
 						getProjectedSessions: () => readQueryOption.value.listSessions(),
 						injectCorrectiveEvent: (sessionId: string, status: string) =>
-							Effect.gen(function* () {
-								const event = canonicalEvent(
+							commitAndSignalOption([
+								canonicalEvent(
 									"session.status",
 									sessionId,
 									{
@@ -93,28 +106,8 @@ export const StatusPollerLive: Layer.Layer<
 											source: "reconciliation-loop",
 										},
 									},
-								);
-								yield* sqlOption.value.withTransaction(
-									Effect.gen(function* () {
-										const stored = yield* eventStoreOption.value
-											.append(event)
-											.pipe(
-												Effect.provideService(
-													SqlClient.SqlClient,
-													sqlOption.value,
-												),
-											);
-										yield* projectionRunnerOption.value
-											.projectEvent(stored)
-											.pipe(
-												Effect.provideService(
-													SqlClient.SqlClient,
-													sqlOption.value,
-												),
-											);
-									}),
-								);
-							}),
+								),
+							]),
 					}
 				: undefined;
 		const readProjectedStatuses = () =>

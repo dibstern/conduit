@@ -5,12 +5,18 @@ import type {
 	GetAgentsResponse,
 	GetCommandsResponse,
 	GetModelsResponse,
+	SetDefaultModelResponse,
+	SetHiddenEntriesResponse,
+	SwitchContextWindowResponse,
+	SwitchModelResponse,
+	SwitchVariantResponse,
 } from "../transport/ws-rpc.js";
 import type {
 	AgentInfo,
 	AgentProviderScope,
 	CommandInfo,
 	ContextWindowOption,
+	Immutable,
 	InstanceStatus,
 	ModelInfo,
 	ProviderGroup,
@@ -124,7 +130,14 @@ export function instanceIdForProviderId(
 
 // ─── State ──────────────────────────────────────────────────────────────────
 
-export const discoveryState = $state({
+// ─── Server-owned state ─────────────────────────────────────────────────────
+// What the server has told us: the catalogue of providers, models, agents and
+// commands, the project's defaults, and the configuration the current session
+// is actually running with. Only the `handle*` and `apply*` functions in this
+// module write it; `discoveryState` hands it out with no setters, so nothing
+// outside can.
+
+const serverDiscovery = $state({
 	agents: [] as AgentInfo[],
 	agentProviderScope: null as AgentProviderScope | null,
 	activeAgentId: null as string | null,
@@ -143,35 +156,149 @@ export const discoveryState = $state({
 	modelExecution: null as GetModelsResponse["modelExecution"] | null,
 	permissionMode: "ask" as SessionPermissionMode,
 	defaultPermissionMode: "ask" as SessionPermissionMode,
-	/** Mode selected while no session was bound — flushed on session bind. */
-	pendingPermissionMode: null as SessionPermissionMode | null,
 	/** Global hide-list keys: model `<providerId>/<modelId>`. */
 	hiddenModels: [] as string[],
 	/** Global hide-list keys: agent `<scopeId>/<agentId>`. */
 	hiddenAgents: [] as string[],
+});
+
+// ─── Client-owned state ─────────────────────────────────────────────────────
+// This tab's own state. No server message writes it.
+//
+// `choice` is what the user has clicked but the server has not confirmed yet.
+// Reads fall through to the server's value while a field is null, so a picker
+// answers the click at once and the server's reply takes over the moment it
+// lands. Holding the click apart from the server's value is what makes
+// reverting safe: dropping our own choice cannot undo somebody else's change
+// that arrived in between — the trap the old per-component
+// `if (state.x === mine) state.x = previous` dance was written to dodge.
+
+const choice = $state({
+	agentId: null as string | null,
+	modelId: null as string | null,
+	providerId: null as string | null,
+	variant: null as string | null,
+	contextWindow: null as string | null,
+	permissionMode: null as SessionPermissionMode | null,
+	hiddenModels: null as string[] | null,
+	hiddenAgents: null as string[] | null,
+	defaultModelId: null as string | null,
+	defaultProviderId: null as string | null,
+	defaultPermissionMode: null as SessionPermissionMode | null,
+});
+
+const clientDiscovery = $state({
+	/** Mode selected while no session was bound — flushed on session bind. */
+	pendingPermissionMode: null as SessionPermissionMode | null,
 	/** Pre-creation harness choice (client-persisted draft). Survives reload;
 	 *  never authoritative once a session is bound (harness is fixed then). */
 	selectedInstanceId: loadInstanceDraft() as string | null,
 });
 
+/** Read view over both halves. Server-owned fields have no setter: write them
+ *  by applying a wire message or an RPC response. Fields the user can pick
+ *  ahead of the server read through `choice` first — see the `choose*`
+ *  actions. */
+export const discoveryState = {
+	// Server-owned.
+	get agents(): readonly Immutable<AgentInfo>[] {
+		return serverDiscovery.agents;
+	},
+	get agentProviderScope(): Immutable<AgentProviderScope> | null {
+		return serverDiscovery.agentProviderScope;
+	},
+	get activeAgentId(): string | null {
+		return choice.agentId ?? serverDiscovery.activeAgentId;
+	},
+	get providers(): readonly Immutable<ProviderInfo>[] {
+		return serverDiscovery.providers;
+	},
+	get commands(): readonly Immutable<CommandInfo>[] {
+		return serverDiscovery.commands;
+	},
+	get commandsFetched(): boolean {
+		return serverDiscovery.commandsFetched;
+	},
+	get defaultVariant(): string {
+		return serverDiscovery.defaultVariant;
+	},
+	get availableVariants(): readonly string[] {
+		return serverDiscovery.availableVariants;
+	},
+	get availableContextWindowOptions(): readonly Immutable<ContextWindowOption>[] {
+		return serverDiscovery.availableContextWindowOptions;
+	},
+	get modelExecution(): Immutable<GetModelsResponse["modelExecution"]> | null {
+		return serverDiscovery.modelExecution;
+	},
+
+	// Server-owned, with this tab's unconfirmed click read first.
+	get currentModelId(): string {
+		return choice.modelId ?? serverDiscovery.currentModelId;
+	},
+	get currentProviderId(): string {
+		return choice.providerId ?? serverDiscovery.currentProviderId;
+	},
+	get currentVariant(): string {
+		return choice.variant ?? serverDiscovery.currentVariant;
+	},
+	get currentContextWindow(): string {
+		return choice.contextWindow ?? serverDiscovery.currentContextWindow;
+	},
+	get permissionMode(): SessionPermissionMode {
+		return choice.permissionMode ?? serverDiscovery.permissionMode;
+	},
+	get defaultModelId(): string {
+		return choice.defaultModelId ?? serverDiscovery.defaultModelId;
+	},
+	get defaultProviderId(): string {
+		return choice.defaultProviderId ?? serverDiscovery.defaultProviderId;
+	},
+	get defaultPermissionMode(): SessionPermissionMode {
+		return (
+			choice.defaultPermissionMode ?? serverDiscovery.defaultPermissionMode
+		);
+	},
+	get hiddenModels(): readonly string[] {
+		return choice.hiddenModels ?? serverDiscovery.hiddenModels;
+	},
+	get hiddenAgents(): readonly string[] {
+		return choice.hiddenAgents ?? serverDiscovery.hiddenAgents;
+	},
+
+	// Client-owned.
+	get pendingPermissionMode(): SessionPermissionMode | null {
+		return clientDiscovery.pendingPermissionMode;
+	},
+	set pendingPermissionMode(mode: SessionPermissionMode | null) {
+		clientDiscovery.pendingPermissionMode = mode;
+	},
+	get selectedInstanceId(): string | null {
+		return clientDiscovery.selectedInstanceId;
+	},
+	set selectedInstanceId(id: string | null) {
+		clientDiscovery.selectedInstanceId = id;
+	},
+};
+
 // ─── Derived getters ────────────────────────────────────────────────────────
 // Components should wrap in $derived() for reactive caching.
 
 /** Get the currently active agent. */
-export function getActiveAgent(): AgentInfo | undefined {
+export function getActiveAgent(): Immutable<AgentInfo> | undefined {
 	return discoveryState.agents.find(
 		(a) => a.id === discoveryState.activeAgentId,
 	);
 }
 
 /** Get all models from all providers, flattened. */
-export function getAllModels(): ModelInfo[] {
+export function getAllModels(): readonly Immutable<ModelInfo>[] {
 	return discoveryState.providers.flatMap((p) => p.models);
 }
 
 /** Get the currently active model. Grouped models (Bedrock geo routing)
  *  match when the active id is any of their routing option values. */
-export function getActiveModel(): ModelInfo | undefined {
+export function getActiveModel(): Immutable<ModelInfo> | undefined {
 	const currentId = discoveryState.currentModelId;
 	return getAllModels().find(
 		(m) =>
@@ -181,7 +308,7 @@ export function getActiveModel(): ModelInfo | undefined {
 }
 
 /** Get models grouped by provider for dropdown rendering. */
-export function getProviderGroups(): ProviderGroup[] {
+export function getProviderGroups(): readonly Immutable<ProviderGroup>[] {
 	return discoveryState.providers
 		.filter((p) => p.models.length > 0)
 		.map((p) => ({ provider: p, models: p.models }));
@@ -189,7 +316,7 @@ export function getProviderGroups(): ProviderGroup[] {
 
 /** Agents visible in the dropdown after applying the global hide-list.
  *  Never-brick: if filtering would leave zero agents, show all. */
-export function getVisibleAgents(): AgentInfo[] {
+export function getVisibleAgents(): readonly Immutable<AgentInfo>[] {
 	const scopeId = discoveryState.agentProviderScope?.id;
 	if (!scopeId || discoveryState.hiddenAgents.length === 0) {
 		return discoveryState.agents;
@@ -204,7 +331,7 @@ export function getVisibleAgents(): AgentInfo[] {
 /** Provider groups visible in the dropdown after applying the global hide-list.
  *  Groups with zero visible models are dropped.
  *  Never-brick: if filtering would leave zero models overall, show all. */
-export function getVisibleProviderGroups(): ProviderGroup[] {
+export function getVisibleProviderGroups(): readonly Immutable<ProviderGroup>[] {
 	const all = getProviderGroups();
 	if (discoveryState.hiddenModels.length === 0) return all;
 	const hidden = new Set(discoveryState.hiddenModels);
@@ -267,7 +394,7 @@ export function getAvailableInstances(): InstanceOption[] {
 /** Visible provider groups scoped to one instance (the picker's right pane). */
 export function getProviderGroupsForInstance(
 	instanceId: string,
-): ProviderGroup[] {
+): readonly Immutable<ProviderGroup>[] {
 	return getVisibleProviderGroups().filter(
 		(g) =>
 			(g.provider.instanceId ?? instanceIdForProviderId(g.provider.id)) ===
@@ -296,7 +423,7 @@ export function getEffectiveInstanceId(): string {
  *  the active model falls outside the instance, re-aims the local model
  *  selection at the instance's default-or-first visible model. */
 export function selectInstance(instanceId: string): void {
-	discoveryState.selectedInstanceId = instanceId;
+	clientDiscovery.selectedInstanceId = instanceId;
 	try {
 		localStorage.setItem(INSTANCE_DRAFT_KEY, instanceId);
 	} catch {
@@ -319,25 +446,26 @@ export function selectInstance(instanceId: string): void {
 				m.provider === discoveryState.defaultProviderId,
 		) ?? models[0];
 	if (preferred) {
-		discoveryState.currentModelId = preferred.id;
-		discoveryState.currentProviderId = preferred.provider;
+		// A local re-aim, not a server fact: the harness switch has not been
+		// sent anywhere yet.
+		chooseModel({ modelId: preferred.id, providerId: preferred.provider });
 	}
 }
 
 // ─── Pure helpers ───────────────────────────────────────────────────────────
 
 /** Format agent label for display. */
-export function formatAgentLabel(agent: AgentInfo): string {
+export function formatAgentLabel(agent: Immutable<AgentInfo>): string {
 	return agent.name || agent.id;
 }
 
 /** Build tooltip text for an agent. */
-export function buildAgentTooltip(agent: AgentInfo): string {
+export function buildAgentTooltip(agent: Immutable<AgentInfo>): string {
 	return agent.description || agent.name || agent.id;
 }
 
 /** Format model name for display. */
-export function formatModelName(model: ModelInfo): string {
+export function formatModelName(model: Immutable<ModelInfo>): string {
 	return model.name || model.id;
 }
 
@@ -351,15 +479,17 @@ export function getModelDisplayName(modelId: string): string {
 }
 
 /** Check if a provider is configured. */
-export function isProviderConfigured(provider: ProviderInfo): boolean {
+export function isProviderConfigured(
+	provider: Immutable<ProviderInfo>,
+): boolean {
 	return provider.configured;
 }
 
 /** Filter commands by query (case-insensitive prefix match on name). */
 export function filterCommands(
-	commands: CommandInfo[],
+	commands: readonly Immutable<CommandInfo>[],
 	query: string,
-): CommandInfo[] {
+): readonly Immutable<CommandInfo>[] {
 	if (!query) return commands;
 	const lower = query.toLowerCase();
 	return commands.filter((c) => c.name.toLowerCase().startsWith(lower));
@@ -395,16 +525,17 @@ export function handleAgentList(
 ): void {
 	const { agents, activeAgentId, providerScope } = msg;
 	if (Array.isArray(agents)) {
-		discoveryState.agents = agents;
+		serverDiscovery.agents = agents;
 	}
 	if (providerScope) {
-		discoveryState.agentProviderScope = providerScope;
+		serverDiscovery.agentProviderScope = providerScope;
 	}
 	if (activeAgentId) {
-		discoveryState.activeAgentId = activeAgentId;
+		serverDiscovery.activeAgentId = activeAgentId;
 	} else {
-		discoveryState.activeAgentId = null;
+		serverDiscovery.activeAgentId = null;
 	}
+	choice.agentId = null;
 }
 
 export function applyGetAgentsResponse(response: GetAgentsResponse): void {
@@ -422,7 +553,7 @@ export function applyGetAgentsResponse(response: GetAgentsResponse): void {
 			: {}),
 	});
 	if (response.hiddenAgents) {
-		discoveryState.hiddenAgents = [...response.hiddenAgents];
+		serverDiscovery.hiddenAgents = [...response.hiddenAgents];
 	}
 }
 
@@ -431,7 +562,7 @@ export function handleModelList(
 ): void {
 	const { providers } = msg;
 	if (Array.isArray(providers)) {
-		discoveryState.providers = providers;
+		serverDiscovery.providers = providers;
 	}
 }
 
@@ -465,7 +596,7 @@ export function applyGetModelsResponse(response: GetModelsResponse): void {
 			options: cloneContextWindowOptions(response.contextWindow.options) ?? [],
 		});
 	}
-	discoveryState.modelExecution = response.modelExecution
+	serverDiscovery.modelExecution = response.modelExecution
 		? { ...response.modelExecution }
 		: null;
 	if (response.permissionMode) {
@@ -475,7 +606,7 @@ export function applyGetModelsResponse(response: GetModelsResponse): void {
 		});
 	}
 	if (response.hiddenModels) {
-		discoveryState.hiddenModels = [...response.hiddenModels];
+		serverDiscovery.hiddenModels = [...response.hiddenModels];
 	}
 }
 
@@ -483,8 +614,10 @@ export function handleModelInfo(
 	msg: Extract<RelayMessage, { type: "model_info" }>,
 ): void {
 	const { model, provider } = msg;
-	if (model) discoveryState.currentModelId = model;
-	if (provider) discoveryState.currentProviderId = provider;
+	if (model) serverDiscovery.currentModelId = model;
+	if (provider) serverDiscovery.currentProviderId = provider;
+	choice.modelId = null;
+	choice.providerId = null;
 }
 
 export function handleCommandList(
@@ -492,8 +625,8 @@ export function handleCommandList(
 ): void {
 	const { commands } = msg;
 	if (Array.isArray(commands)) {
-		discoveryState.commands = commands;
-		discoveryState.commandsFetched = true;
+		serverDiscovery.commands = commands;
+		serverDiscovery.commandsFetched = true;
 	}
 }
 
@@ -513,24 +646,17 @@ export function applyGetCommandsResponse(response: GetCommandsResponse): void {
 export function handleDefaultModelInfo(
 	msg: Extract<RelayMessage, { type: "default_model_info" }>,
 ): void {
-	discoveryState.defaultModelId = msg.model ?? "";
-	discoveryState.defaultProviderId = msg.provider ?? "";
-	discoveryState.defaultVariant = msg.variant ?? "";
+	serverDiscovery.defaultModelId = msg.model ?? "";
+	serverDiscovery.defaultProviderId = msg.provider ?? "";
+	serverDiscovery.defaultVariant = msg.variant ?? "";
+	choice.defaultModelId = null;
+	choice.defaultProviderId = null;
 }
 
 // ─── Actions ────────────────────────────────────────────────────────────────
 
-export function setActiveAgent(agentId: string): void {
-	discoveryState.activeAgentId = agentId;
-}
-
-export function setActiveModel(modelId: string, providerId: string): void {
-	discoveryState.currentModelId = modelId;
-	discoveryState.currentProviderId = providerId;
-}
-
 /** Get the available variants for the currently active model. */
-export function getActiveModelVariants(): string[] {
+export function getActiveModelVariants(): readonly string[] {
 	return discoveryState.availableVariants;
 }
 
@@ -538,7 +664,7 @@ export function getActiveModelVariants(): string[] {
  *  Prefer the selected model's own options so the dropdown appears the moment a
  *  supporting model is picked, without waiting for a server context_window_info
  *  round-trip; fall back to the last server-provided list otherwise. */
-export function getActiveContextWindowOptions(): ReadonlyArray<ContextWindowOption> {
+export function getActiveContextWindowOptions(): readonly Immutable<ContextWindowOption>[] {
 	const modelOptions = getActiveModel()?.contextWindowOptions;
 	if (modelOptions && modelOptions.length > 0) return modelOptions;
 	return discoveryState.availableContextWindowOptions;
@@ -549,8 +675,9 @@ export function getActiveContextWindowOptions(): ReadonlyArray<ContextWindowOpti
 export function handleVariantInfo(
 	msg: Extract<RelayMessage, { type: "variant_info" }>,
 ): void {
-	discoveryState.currentVariant = msg.variant ?? "";
-	discoveryState.availableVariants = msg.variants ?? [];
+	serverDiscovery.currentVariant = msg.variant ?? "";
+	serverDiscovery.availableVariants = msg.variants ?? [];
+	choice.variant = null;
 }
 
 // ─── Context-window handler ─────────────────────────────────────────────────
@@ -558,8 +685,9 @@ export function handleVariantInfo(
 export function handleContextWindowInfo(
 	msg: Extract<RelayMessage, { type: "context_window_info" }>,
 ): void {
-	discoveryState.currentContextWindow = msg.contextWindow ?? "";
-	discoveryState.availableContextWindowOptions = msg.options ?? [];
+	serverDiscovery.currentContextWindow = msg.contextWindow ?? "";
+	serverDiscovery.availableContextWindowOptions = msg.options ?? [];
+	choice.contextWindow = null;
 }
 
 // ─── Permission-mode handler ────────────────────────────────────────────────
@@ -567,7 +695,8 @@ export function handleContextWindowInfo(
 export function handlePermissionModeInfo(
 	msg: Extract<RelayMessage, { type: "permission_mode_info" }>,
 ): void {
-	discoveryState.permissionMode = msg.mode;
+	serverDiscovery.permissionMode = msg.mode;
+	choice.permissionMode = null;
 }
 
 // ─── Visibility handler ─────────────────────────────────────────────────────
@@ -575,8 +704,10 @@ export function handlePermissionModeInfo(
 export function handleVisibilityInfo(
 	msg: Extract<RelayMessage, { type: "visibility_info" }>,
 ): void {
-	discoveryState.hiddenModels = [...msg.hiddenModels];
-	discoveryState.hiddenAgents = [...msg.hiddenAgents];
+	serverDiscovery.hiddenModels = [...msg.hiddenModels];
+	serverDiscovery.hiddenAgents = [...msg.hiddenAgents];
+	choice.hiddenModels = null;
+	choice.hiddenAgents = null;
 }
 
 /**
@@ -597,44 +728,205 @@ export function flushPendingPermissionMode(
 ): void {
 	const mode = discoveryState.pendingPermissionMode;
 	if (mode == null) return;
-	discoveryState.pendingPermissionMode = null;
-	const previousMode = discoveryState.permissionMode;
-	discoveryState.permissionMode = mode;
+	clientDiscovery.pendingPermissionMode = null;
+	const undo = choosePermissionMode(mode);
 	// Send even for "ask". It is only the server's default for a *brand-new*
 	// session, and this runs on binding to any session -- skipping it left a
 	// session already on "full" running with full access while the pill read
 	// "Ask". Restricting a session must never be the silent case.
-	void send({ projectSlug, sessionId, mode }).catch(() => {
-		// Server never got it: stop claiming a mode it is not in.
-		if (discoveryState.permissionMode === mode) {
-			discoveryState.permissionMode = previousMode;
-		}
+	// On failure, stop claiming a mode the server is not in.
+	void send({ projectSlug, sessionId, mode }).catch(undo);
+}
+
+// ─── Choosing ahead of the server ───────────────────────────────────────────
+// A picker writes the user's click here, sends the RPC, and applies the
+// response. Each `choose*` hands back the undo for *that* click; call it when
+// the server refuses. No component keeps a `previous…` variable any more: the
+// server's value was never overwritten, so there is nothing to restore.
+
+/** Drops the click it came from, unless a later one has taken the field over. */
+type UndoChoice = () => void;
+
+type ChoiceField = keyof typeof choice;
+
+/** Which click each pending field belongs to. Identity, not value: clicking
+ *  "acceptEdits", then "ask", then "acceptEdits" again makes three distinct
+ *  claims on the field, and only the last one's undo may clear it. Plain, not
+ *  `$state`: nothing renders it. A field the server has since confirmed leaves
+ *  a stale entry here, which is harmless — its undo can only write the null
+ *  that applying the response already wrote. */
+const owner: Partial<Record<ChoiceField, symbol>> = {};
+
+/** Show one field's click ahead of the server, and return that click's undo. */
+function propose<K extends ChoiceField>(
+	field: K,
+	value: NonNullable<(typeof choice)[K]>,
+): UndoChoice {
+	const click = Symbol(field);
+	owner[field] = click;
+	choice[field] = value;
+	return () => {
+		if (owner[field] !== click) return;
+		delete owner[field];
+		choice[field] = null;
+	};
+}
+
+/** Undo several fields as one click — each still owning its own field, so a
+ *  refused model switch cannot revert a provider someone else's click set. */
+const undoAll =
+	(undos: readonly UndoChoice[]): UndoChoice =>
+	() => {
+		for (const undo of undos) undo();
+	};
+
+export function chooseAgent(agentId: string): UndoChoice {
+	return propose("agentId", agentId);
+}
+
+export function chooseModel(model: {
+	modelId: string;
+	providerId: string;
+}): UndoChoice {
+	return undoAll([
+		propose("modelId", model.modelId),
+		propose("providerId", model.providerId),
+	]);
+}
+
+export function chooseVariant(variant: string): UndoChoice {
+	return propose("variant", variant);
+}
+
+export function chooseContextWindow(contextWindow: string): UndoChoice {
+	return propose("contextWindow", contextWindow);
+}
+
+export function choosePermissionMode(mode: SessionPermissionMode): UndoChoice {
+	return propose("permissionMode", mode);
+}
+
+export function chooseDefaultModel(model: {
+	modelId: string;
+	providerId: string;
+}): UndoChoice {
+	return undoAll([
+		propose("defaultModelId", model.modelId),
+		propose("defaultProviderId", model.providerId),
+	]);
+}
+
+export function chooseDefaultPermissionMode(
+	mode: SessionPermissionMode,
+): UndoChoice {
+	return propose("defaultPermissionMode", mode);
+}
+
+export function chooseHiddenEntries(entries: {
+	hiddenModels?: string[];
+	hiddenAgents?: string[];
+}): UndoChoice {
+	const undos: UndoChoice[] = [];
+	if (entries.hiddenModels) {
+		undos.push(propose("hiddenModels", [...entries.hiddenModels]));
+	}
+	if (entries.hiddenAgents) {
+		undos.push(propose("hiddenAgents", [...entries.hiddenAgents]));
+	}
+	return undoAll(undos);
+}
+
+// ─── Applying RPC responses ─────────────────────────────────────────────────
+// The other half of a `choose*`: the server's answer, which lands in the
+// server half and clears the click it confirms.
+
+export function applyModelSwitched(response: SwitchModelResponse): void {
+	handleModelInfo({
+		type: "model_info",
+		model: response.model,
+		provider: response.provider,
 	});
+	handleVariantInfo({
+		type: "variant_info",
+		variant: response.variant,
+		variants: [...response.variants],
+	});
+}
+
+export function applyDefaultModelSet(response: SetDefaultModelResponse): void {
+	handleDefaultModelInfo({
+		type: "default_model_info",
+		model: response.model,
+		provider: response.provider,
+		variant: response.variant,
+	});
+	handleVariantInfo({
+		type: "variant_info",
+		variant: response.variant,
+		variants: [...response.variants],
+	});
+}
+
+export function applyVariantSwitched(response: SwitchVariantResponse): void {
+	handleVariantInfo({
+		type: "variant_info",
+		variant: response.variant,
+		variants: [...response.variants],
+	});
+}
+
+export function applyContextWindowSwitched(
+	response: SwitchContextWindowResponse,
+): void {
+	handleContextWindowInfo({
+		type: "context_window_info",
+		contextWindow: response.contextWindow,
+		options: cloneContextWindowOptions(response.options) ?? [],
+	});
+}
+
+export function applyHiddenEntriesSet(
+	response: SetHiddenEntriesResponse,
+): void {
+	handleVisibilityInfo({
+		type: "visibility_info",
+		hiddenModels: [...response.hiddenModels],
+		hiddenAgents: [...response.hiddenAgents],
+	});
+}
+
+export function applyDefaultPermissionMode(mode: SessionPermissionMode): void {
+	serverDiscovery.defaultPermissionMode = mode;
+	choice.defaultPermissionMode = null;
 }
 
 /** Clear all discovery state (for project switch). */
 export function clearDiscoveryState(): void {
-	discoveryState.agents = [];
-	discoveryState.agentProviderScope = null;
-	discoveryState.activeAgentId = null;
-	discoveryState.providers = [];
-	discoveryState.currentModelId = "";
-	discoveryState.currentProviderId = "";
-	discoveryState.commands = [];
-	discoveryState.commandsFetched = false;
-	discoveryState.defaultModelId = "";
-	discoveryState.defaultProviderId = "";
-	discoveryState.defaultVariant = "";
-	discoveryState.currentVariant = "";
-	discoveryState.availableVariants = [];
-	discoveryState.currentContextWindow = "";
-	discoveryState.availableContextWindowOptions = [];
-	discoveryState.modelExecution = null;
-	discoveryState.permissionMode = "ask";
-	discoveryState.defaultPermissionMode = "ask";
-	discoveryState.pendingPermissionMode = null;
-	discoveryState.hiddenModels = [];
-	discoveryState.hiddenAgents = [];
+	serverDiscovery.agents = [];
+	serverDiscovery.agentProviderScope = null;
+	serverDiscovery.activeAgentId = null;
+	serverDiscovery.providers = [];
+	serverDiscovery.currentModelId = "";
+	serverDiscovery.currentProviderId = "";
+	serverDiscovery.commands = [];
+	serverDiscovery.commandsFetched = false;
+	serverDiscovery.defaultModelId = "";
+	serverDiscovery.defaultProviderId = "";
+	serverDiscovery.defaultVariant = "";
+	serverDiscovery.currentVariant = "";
+	serverDiscovery.availableVariants = [];
+	serverDiscovery.currentContextWindow = "";
+	serverDiscovery.availableContextWindowOptions = [];
+	serverDiscovery.modelExecution = null;
+	serverDiscovery.permissionMode = "ask";
+	serverDiscovery.defaultPermissionMode = "ask";
+	serverDiscovery.hiddenModels = [];
+	serverDiscovery.hiddenAgents = [];
+	clientDiscovery.pendingPermissionMode = null;
+	for (const field of Object.keys(choice) as ChoiceField[]) {
+		choice[field] = null;
+		delete owner[field];
+	}
 	// selectedInstanceId is intentionally kept: it is a client-side draft
 	// preference (instances are daemon-global), not server discovery state.
 }

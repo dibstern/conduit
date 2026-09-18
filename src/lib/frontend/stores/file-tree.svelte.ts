@@ -12,7 +12,10 @@ export interface AtQuery {
 	end: number;
 }
 
-// ─── State ──────────────────────────────────────────────────────────────────
+// ─── Server-owned state ─────────────────────────────────────────────────────
+// This store has no client half: entries come from `file_list`, and the two
+// flags track the request that is fetching them. The @-mention query the user
+// is typing lives in the component, not here.
 
 export const fileTreeState = $state({
 	entries: [] as string[],

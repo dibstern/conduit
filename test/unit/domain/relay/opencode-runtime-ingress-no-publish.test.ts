@@ -69,7 +69,9 @@ describe("OpenCode runtime ingress does not publish to relay/browser", () => {
 			{ publish: publishToRelay },
 			{
 				publish: publishToBus,
+				publishAdvance: () => Effect.void,
 				subscribe: () => Effect.dieMessage("unused in this test"),
+				subscribeAdvances: () => Effect.dieMessage("unused in this test"),
 			},
 		);
 		runtime = rt;

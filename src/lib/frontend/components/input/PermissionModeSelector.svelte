@@ -5,7 +5,10 @@
 <script lang="ts">
 	import Icon from "../shared/Icon.svelte";
 	import { clickOutside } from "../shared/use-click-outside.svelte.js";
-	import { discoveryState } from "../../stores/discovery.svelte.js";
+	import {
+		choosePermissionMode,
+		discoveryState,
+	} from "../../stores/discovery.svelte.js";
 	import { getCurrentSlug } from "../../stores/router.svelte.js";
 	import { sessionState } from "../../stores/session.svelte.js";
 	import { showToast } from "../../stores/ui.svelte.js";
@@ -53,17 +56,14 @@
 	function selectMode(mode: SessionPermissionMode, e?: MouseEvent) {
 		e?.stopPropagation();
 		dropdownOpen = false;
-		const previousMode = discoveryState.permissionMode;
-		discoveryState.permissionMode = mode;
+		const undoMode = choosePermissionMode(mode);
 		const projectSlug = getCurrentSlug();
 		const sessionId = sessionState.currentId;
 		if (projectSlug && sessionId) {
 			discoveryState.pendingPermissionMode = null;
 			void switchPermissionModeRpc({ projectSlug, sessionId, mode }).catch(
 				() => {
-					if (discoveryState.permissionMode === mode) {
-						discoveryState.permissionMode = previousMode;
-					}
+					undoMode();
 					// Without this the pill silently snaps back, which reads as a
 					// frontend bug instead of what it is: the server rejected the
 					// mode (typically a stale daemon that predates it).

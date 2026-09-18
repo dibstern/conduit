@@ -44,7 +44,10 @@ import {
 	clearMessages,
 	historyState,
 } from "../../../src/lib/frontend/stores/chat.svelte.js";
-import { sessionState } from "../../../src/lib/frontend/stores/session.svelte.js";
+import {
+	clearSessionState,
+	sessionState,
+} from "../../../src/lib/frontend/stores/session.svelte.js";
 import { handleMessage } from "../../../src/lib/frontend/stores/ws.svelte.js";
 import type { HistoryMessage } from "../../../src/lib/shared-types.js";
 
@@ -66,12 +69,9 @@ function makeHistoryMessage(
 
 beforeEach(() => {
 	clearMessages();
-	sessionState.rootSessions = [];
-	sessionState.allSessions = [];
-	sessionState.searchResults = null;
+	clearSessionState();
 	sessionState.currentId = null;
 	sessionState.searchQuery = "";
-	sessionState.hasMore = false;
 	vi.useFakeTimers();
 });
 

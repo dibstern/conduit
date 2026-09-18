@@ -6,6 +6,7 @@
 	import Icon from "../shared/Icon.svelte";
 	import {
 		buildAgentTooltip,
+		chooseAgent,
 		discoveryState,
 		getActiveAgent,
 		getVisibleAgents,
@@ -164,8 +165,7 @@
 
 	function handleAgentClick(agent: AgentInfo) {
 		if (agent.id !== discoveryState.activeAgentId) {
-			const previousAgentId = discoveryState.activeAgentId;
-			discoveryState.activeAgentId = agent.id;
+			const undoAgent = chooseAgent(agent.id);
 			const projectSlug = getCurrentSlug();
 			const sessionId = sessionState.currentId;
 			if (projectSlug && sessionId) {
@@ -173,9 +173,7 @@
 					projectSlug,
 					sessionId,
 					agentId: agent.id,
-				}).catch(() => {
-					discoveryState.activeAgentId = previousAgentId;
-				});
+				}).catch(undoAgent);
 			}
 		}
 		close();
