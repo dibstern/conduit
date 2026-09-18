@@ -11,6 +11,26 @@ import { ProviderDriverKindSchema } from "./provider-instance.js";
 
 const NonEmptyString = Schema.NonEmptyString;
 
+export const EnvelopeSchema = <A, I, R>(itemSchema: Schema.Schema<A, I, R>) =>
+	Schema.Union(
+		Schema.Struct({
+			_tag: Schema.Literal("snapshot"),
+			rows: Schema.Array(itemSchema),
+			sequence: Schema.Number,
+		}),
+		Schema.Struct({ _tag: Schema.Literal("synchronized") }),
+		Schema.Struct({
+			_tag: Schema.Literal("upsert"),
+			item: itemSchema,
+			sequence: Schema.Number,
+		}),
+		Schema.Struct({
+			_tag: Schema.Literal("remove"),
+			id: Schema.String,
+			sequence: Schema.Number,
+		}),
+	);
+
 export const ContextWindowOptionSchema = Schema.Struct({
 	value: Schema.String,
 	label: Schema.String,
@@ -176,7 +196,7 @@ const HistoryMessagePartSchema = Schema.Struct({
 	Schema.extend(Schema.Record({ key: Schema.String, value: Schema.Unknown })),
 );
 
-const HistoryMessageSchema = Schema.Struct({
+export const HistoryMessageSchema = Schema.Struct({
 	id: Schema.String,
 	role: Schema.Literal("user", "assistant"),
 	parts: Schema.optional(Schema.Array(HistoryMessagePartSchema)),

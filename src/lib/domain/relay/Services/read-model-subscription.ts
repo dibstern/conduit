@@ -9,28 +9,25 @@
 //          the payload `T` or the `remove` id, and contains no coalescing —
 //          burst-smoothing is a delta-source concern.
 
-import { Effect, Ref, type Scope, Stream } from "effect";
+import { Effect, Ref, type Schema, type Scope, Stream } from "effect";
+import type { EnvelopeSchema } from "../../../contracts/ws-rpc.js";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
 /** A single read-model change, tagged with its store-global sequence. */
-export type Delta<T> =
-	| { readonly _tag: "upsert"; readonly item: T; readonly sequence: number }
-	| { readonly _tag: "remove"; readonly id: string; readonly sequence: number };
+export type Delta<T> = Extract<
+	Envelope<T>,
+	{ readonly _tag: "upsert" | "remove" }
+>;
 
 /**
  * What a subscriber receives: a snapshot base (cold start only), a
  * `synchronized` boundary once the base or catch-up is complete, then deltas.
  * The snapshot's `sequence` is the high-water mark its rows reflect.
  */
-export type Envelope<T> =
-	| {
-			readonly _tag: "snapshot";
-			readonly rows: readonly T[];
-			readonly sequence: number;
-	  }
-	| { readonly _tag: "synchronized" }
-	| Delta<T>;
+export type Envelope<T> = Schema.Schema.Type<
+	ReturnType<typeof EnvelopeSchema<T, T, never>>
+>;
 
 /**
  * The one adapter a concrete delta source implements (detail, shell, …).

@@ -11,6 +11,7 @@ export {
 	DeleteSession,
 	DetectProxy,
 	type DetectProxyResponse,
+	EnvelopeSchema,
 	ForkSession,
 	type ForkSessionResponse,
 	GetAgents,
