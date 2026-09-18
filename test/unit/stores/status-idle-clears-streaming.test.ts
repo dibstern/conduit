@@ -105,7 +105,6 @@ describe("F2 fix: status:idle full cleanup", () => {
 
 	it("clears currentMessageId on idle", () => {
 		ta.currentMessageId = "msg-123";
-		chatState.currentMessageId = "msg-123";
 		phaseToProcessing(ta);
 
 		handleStatus(ta, tm, statusMsg("idle"));
@@ -114,7 +113,7 @@ describe("F2 fix: status:idle full cleanup", () => {
 	});
 
 	it("clears currentAssistantText on idle", () => {
-		chatState.currentAssistantText = "partial text";
+		tm.currentAssistantText = "partial text";
 		phaseToProcessing(ta);
 
 		handleStatus(ta, tm, statusMsg("idle"));
@@ -162,7 +161,7 @@ describe("F2 fix: status:idle full cleanup", () => {
 
 	it("is a no-op when already idle", () => {
 		expect(chatState.phase).toBe("idle");
-		chatState.currentAssistantText = "";
+		tm.currentAssistantText = "";
 
 		handleStatus(ta, tm, statusMsg("idle"));
 

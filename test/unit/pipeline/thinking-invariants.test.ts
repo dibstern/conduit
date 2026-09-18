@@ -15,6 +15,7 @@ import {
 	type SessionActivity,
 	type SessionMessages,
 } from "../../../src/lib/frontend/stores/chat.svelte.js";
+import { sessionState } from "../../../src/lib/frontend/stores/session.svelte.js";
 import type {
 	AssistantMessage,
 	ChatMessage,
@@ -40,6 +41,7 @@ describe("Thinking block invariants", () => {
 	beforeEach(() => {
 		vi.useFakeTimers();
 		clearMessages();
+		sessionState.currentId = "test-session";
 		ta = testActivity();
 		tm = testMessages();
 	});
@@ -207,6 +209,7 @@ describe("Error → recovery cycle", () => {
 	beforeEach(() => {
 		vi.useFakeTimers();
 		clearMessages();
+		sessionState.currentId = "test-session";
 		ta = testActivity();
 		tm = testMessages();
 	});
@@ -282,6 +285,7 @@ describe("clearMessages + active thinking race", () => {
 	beforeEach(() => {
 		vi.useFakeTimers();
 		clearMessages();
+		sessionState.currentId = "test-session";
 		ta = testActivity();
 		tm = testMessages();
 	});
@@ -296,6 +300,7 @@ describe("clearMessages + active thinking race", () => {
 
 		// Mid-stream clear (simulates session switch)
 		clearMessages();
+		sessionState.currentId = "test-session";
 		ta = testActivity();
 		tm = testMessages();
 
@@ -311,6 +316,7 @@ describe("clearMessages + active thinking race", () => {
 		handleThinkingDelta(ta, tm, msg("thinking_delta", { text: "content" }));
 
 		clearMessages();
+		sessionState.currentId = "test-session";
 		ta = testActivity();
 		tm = testMessages();
 
@@ -325,6 +331,7 @@ describe("clearMessages + active thinking race", () => {
 		handleThinkingDelta(ta, tm, msg("thinking_delta", { text: "active" }));
 
 		clearMessages();
+		sessionState.currentId = "test-session";
 		ta = testActivity();
 		tm = testMessages();
 
@@ -344,6 +351,7 @@ describe("clearMessages + active thinking race", () => {
 		handleThinkingDelta(ta, tm, msg("thinking_delta", { text: "old" }));
 
 		clearMessages();
+		sessionState.currentId = "test-session";
 		ta = testActivity();
 		tm = testMessages();
 

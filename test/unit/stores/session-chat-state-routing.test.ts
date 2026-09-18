@@ -84,10 +84,12 @@ describe("Per-session routing: delta for B while currentId=A", () => {
 			text: "Hello from B",
 		} as RelayMessage);
 
-		// Session B should have a slot created by routePerSession.
-		// The delta creates a message in chatState (legacy) during transition.
-		// Note: during the transition, messages go to chatState.messages
-		expect(chatState.messages.length).toBeGreaterThan(0);
+		// Session B should have a slot created by routePerSession, and the delta
+		// must land there — not in the on-screen view, which is session A.
+		expect(
+			sessionMessages.get("session-b")?.messages.length ?? 0,
+		).toBeGreaterThan(0);
+		expect(chatState.messages).toHaveLength(0);
 
 		// Session A's slot should be untouched
 		expect(slotA.messages.messages.length).toBe(slotAMessagesBefore);
@@ -110,12 +112,17 @@ describe("Per-session routing: delta for B while currentId=A", () => {
 	});
 
 	it("routes done event to the correct session", () => {
+		const slotA = getOrCreateSessionSlot("session-a");
+		slotA.activity.phase = "streaming";
+
 		// Start streaming on B
 		handleMessage({
 			type: "delta",
 			sessionId: "session-b",
 			text: "streaming on B",
 		} as RelayMessage);
+		const slotB = getOrCreateSessionSlot("session-b");
+		expect(slotB.activity.phase).toBe("streaming");
 
 		// Done on B
 		handleMessage({
@@ -124,7 +131,16 @@ describe("Per-session routing: delta for B while currentId=A", () => {
 			code: 0,
 		} as RelayMessage);
 
-		// chatState.phase should reflect done (idle)
-		expect(chatState.phase).toBe("idle");
+		// B's own slot ends the turn: idle, one more epoch, assistant committed.
+		expect(slotB.activity.phase).toBe("idle");
+		expect(slotB.activity.turnEpoch).toBe(1);
+		expect(slotB.messages.currentAssistantText).toBe("");
+		expect(slotB.messages.messages.at(-1)?.type).toBe("assistant");
+
+		// A is on screen and untouched — done for B never reaches the mirror.
+		expect(slotA.activity.phase).toBe("streaming");
+		expect(slotA.activity.turnEpoch).toBe(0);
+		expect(chatState.phase).toBe("streaming");
+		expect(chatState.messages).toHaveLength(0);
 	});
 });

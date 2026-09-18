@@ -124,6 +124,9 @@ describe("Regression: session switch clears messages", () => {
 	it("session_switched via handleMessage clears all chat messages", () => {
 		// Simulate a conversation with agent output
 		sessionState.currentId = "session-a";
+		// The slots must live under the session on screen: the mirror reads it.
+		ta = testActivity();
+		tm = testMessages();
 		addUserMessage(ta, tm, "hello agent");
 		handleDelta(ta, tm, {
 			type: "delta",
@@ -149,9 +152,12 @@ describe("Regression: session switch clears messages", () => {
 		expect(sessionState.currentId).toBe("session-b");
 	});
 
-	it("switching back to a session also clears stale messages", () => {
+	it("switching back to a session shows its own messages, never the other's", () => {
 		// Start in session A
 		sessionState.currentId = "session-a";
+		// The slots must live under the session on screen: the mirror reads it.
+		ta = testActivity();
+		tm = testMessages();
 		addUserMessage(ta, tm, "first message in A");
 		handleDelta(ta, tm, {
 			type: "delta",
@@ -171,24 +177,31 @@ describe("Regression: session switch clears messages", () => {
 		});
 		expect(chatState.messages).toHaveLength(0);
 
-		// Add messages in session B
-		addUserMessage(ta, tm, "message in B");
-		handleDelta(ta, tm, {
+		// Add messages in session B — B is on screen now, so B's slot gets them.
+		const slotB = getOrCreateSessionSlot("session-b");
+		addUserMessage(slotB.activity, slotB.messages, "message in B");
+		handleDelta(slotB.activity, slotB.messages, {
 			type: "delta",
 			sessionId: "s1",
 			text: "response in B",
 		});
 		vi.advanceTimersByTime(100);
-		handleDone(ta, tm, { type: "done", sessionId: "s1", code: 0 });
+		handleDone(slotB.activity, slotB.messages, {
+			type: "done",
+			sessionId: "s1",
+			code: 0,
+		});
 		expect(chatState.messages.length).toBeGreaterThan(0);
 
-		// Switch back to session A — must clear B's messages
+		// Switch back to session A — B's messages must not follow it on screen.
 		handleMessage({
 			type: "session_switched",
 			id: "session-a",
 			sessionId: "session-a",
 		});
-		expect(chatState.messages).toHaveLength(0);
+		const texts = chatState.messages.map((m) => (m as { text?: string }).text);
+		expect(texts).toContain("first message in A");
+		expect(texts).not.toContain("message in B");
 		expect(sessionState.currentId).toBe("session-a");
 	});
 
@@ -244,6 +257,9 @@ describe("Regression: handleMessage session_switched dispatch", () => {
 describe("Combined protocol: session_switched with inline events", () => {
 	it("replays raw events through chat handlers (full fidelity)", async () => {
 		sessionState.currentId = "session-a";
+		// The slots must live under the session on screen: the mirror reads it.
+		ta = testActivity();
+		tm = testMessages();
 		addUserMessage(ta, tm, "message in A");
 
 		// Switch to session B with cached events
@@ -424,6 +440,9 @@ describe("Combined protocol: session_switched with inline events", () => {
 
 	it("session_switched without events or history just clears messages", () => {
 		sessionState.currentId = "session-a";
+		// The slots must live under the session on screen: the mirror reads it.
+		ta = testActivity();
+		tm = testMessages();
 		addUserMessage(ta, tm, "old message");
 
 		handleMessage({

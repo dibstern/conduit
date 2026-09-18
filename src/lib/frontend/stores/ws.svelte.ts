@@ -14,7 +14,7 @@ import {
 } from "../transport/runtime.js";
 import type { ConnectionStatus } from "../types.js";
 import { createFrontendLogger } from "../utils/logger.js";
-import { phaseToIdle } from "./chat.svelte.js";
+import { phaseCurrentSessionToIdle } from "./chat.svelte.js";
 import { getBrowserClientId } from "./client-identity.js";
 import { clearInstanceState } from "./instance.svelte.js";
 import { getCurrentSessionId, replaceRoute } from "./router.svelte.js";
@@ -278,8 +278,11 @@ function doConnect(slug: string | undefined, generation: number): void {
 		_ws = null;
 		disarmProtocolVersionCheck();
 
-		// Reset chat streaming/processing state so UI isn't stuck
-		phaseToIdle();
+		// End the on-screen turn so the UI isn't stuck mid-stream. This bumps
+		// turnEpoch, so a message queued during that turn stops rendering as
+		// queued; the status:idle after reconnect then finds an idle slot and
+		// correctly declines to end the turn a second time.
+		phaseCurrentSessionToIdle();
 
 		// Clear instance state — will be re-populated on reconnect
 		clearInstanceState();

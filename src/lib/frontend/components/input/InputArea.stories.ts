@@ -44,8 +44,7 @@ const meta = {
 	parameters: { layout: "fullscreen" },
 	beforeEach: () => {
 		sessionState.currentId = testId;
-		phaseToIdle();
-		getOrCreateSessionActivity(testId).phase = "idle";
+		phaseToIdle(getOrCreateSessionActivity(testId));
 		getOrCreateSessionMessages(testId).contextPercent = 0;
 		setupDiscovery();
 	},
@@ -58,8 +57,7 @@ export const Empty: Story = {};
 
 export const Processing: Story = {
 	beforeEach: () => {
-		phaseToProcessing();
-		getOrCreateSessionActivity(testId).phase = "processing";
+		phaseToProcessing(getOrCreateSessionActivity(testId));
 		// Ensure discovery state persists through processing state change
 		discoveryState.currentVariant = "high";
 	},

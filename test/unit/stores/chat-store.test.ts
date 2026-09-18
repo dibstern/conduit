@@ -626,7 +626,7 @@ describe("handleError", () => {
 	});
 
 	it("stops processing on non-RETRY error", () => {
-		phaseToStreaming();
+		phaseToStreaming(ta);
 		handleError(ta, tm, {
 			type: "error",
 			sessionId: "s1",
@@ -638,7 +638,7 @@ describe("handleError", () => {
 	});
 
 	it("does NOT stop processing on RETRY", () => {
-		phaseToProcessing();
+		phaseToProcessing(ta);
 		handleError(ta, tm, {
 			type: "error",
 			sessionId: "s1",
