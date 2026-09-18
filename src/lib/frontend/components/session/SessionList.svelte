@@ -258,7 +258,7 @@
 		if (confirmed) {
 			const projectSlug = getCurrentSlug();
 			if (!projectSlug) return;
-			// Snapshot the ids, then clear selection so the UI responds at once.
+			// Copy the ids, then clear selection so the UI responds at once.
 			const ids = [...selectedForDeletion];
 			resetCleanupMode();
 			const results = await Promise.allSettled(
