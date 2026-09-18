@@ -163,7 +163,14 @@ export function translateProviderRuntimeEventToDomain(
 							? { metadata: data["metadata"] }
 							: {}),
 						// Refreshed input for tools whose args stream after tool.started
-						...(isRecord(data["input"]) ? { input: data["input"] } : {}),
+						...(isRecord(data["input"])
+							? {
+									input: normalizeToolInput(
+										stringField(data["toolName"]) ?? "Unknown",
+										data["input"],
+									),
+								}
+							: {}),
 						...(typeof data["callId"] === "string"
 							? { callId: data["callId"] }
 							: {}),
@@ -208,7 +215,12 @@ export function translateProviderRuntimeEventToDomain(
 					// On an orphan completion the input belongs to the synthesized
 					// tool.started above instead.
 					...(toolWasStarted && isRecord(data["input"])
-						? { input: data["input"] }
+						? {
+								input: normalizeToolInput(
+									stringField(data["toolName"]) ?? "Unknown",
+									data["input"],
+								),
+							}
 						: {}),
 				},
 				eventOptions(event),

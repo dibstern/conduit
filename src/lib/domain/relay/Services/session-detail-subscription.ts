@@ -16,6 +16,7 @@
 
 import type { SqlError } from "@effect/sql/SqlError";
 import { Chunk, Effect, Option, Stream } from "effect";
+import type { SessionDetailItemSchema } from "../../../contracts/ws-rpc.js";
 import {
 	type EventStoreEffect,
 	EventStoreEffectTag,
@@ -28,7 +29,6 @@ import {
 } from "../../../persistence/effect/read-query-effect.js";
 import type { StoredEvent } from "../../../persistence/events.js";
 import { messageRowsToHistory } from "../../../persistence/session-history-adapter.js";
-import type { HistoryMessage } from "../../../shared-types.js";
 import {
 	type Delta,
 	type Envelope,
@@ -52,9 +52,7 @@ import {
  * (no re-query on the hot path) — and the orchestrator requires both to share
  * one `T`.
  */
-export type SessionDetailItem =
-	| { readonly _tag: "transcriptMessage"; readonly message: HistoryMessage }
-	| { readonly _tag: "event"; readonly event: StoredEvent };
+export type SessionDetailItem = typeof SessionDetailItemSchema.Type;
 
 export type SessionDetailSubscriptionError =
 	| ReadQueryEffectError

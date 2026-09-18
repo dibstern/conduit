@@ -242,7 +242,11 @@ describe("EventStore", () => {
 					partId: "p1",
 					toolName: "bash",
 					callId: "call-1",
-					input: { command: "ls -la", nested: { deep: true } },
+					input: {
+						tool: "Unknown",
+						name: "bash",
+						raw: { command: "ls -la", nested: { deep: true } },
+					},
 				},
 				{
 					metadata: { commandId: "cmd_abc", adapterKey: "oc-main" },
