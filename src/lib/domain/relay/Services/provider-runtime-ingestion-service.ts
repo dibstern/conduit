@@ -22,6 +22,12 @@ export interface ProviderRuntimeIngestion {
 		options?: {
 			readonly publishToBus?: boolean;
 			readonly publishToRelay?: boolean;
+			/** Run at the durable boundary: inside the same uninterruptible region
+			 *  as append+project, after COMMIT returns and before anything is
+			 *  published. This is where a caller records state that only makes
+			 *  sense because the batch is durable — a publication defect after it
+			 *  must not be able to undo it. */
+			readonly afterCommit?: Effect.Effect<void>;
 		},
 	) => Effect.Effect<number, unknown>;
 	readonly drain: () => Effect.Effect<void, unknown>;
@@ -61,6 +67,7 @@ export const makeProviderRuntimeIngestionLive = (
 				ingestOptions: {
 					readonly publishToBus?: boolean;
 					readonly publishToRelay?: boolean;
+					readonly afterCommit?: Effect.Effect<void>;
 				} = {},
 			): Effect.Effect<number, unknown> =>
 				ingestSemaphore.withPermits(1)(
@@ -139,7 +146,10 @@ export const makeProviderRuntimeIngestionLive = (
 
 						yield* commitAndSignal(persistentEvents, {
 							publish: ingestOptions.publishToBus ?? true,
-							afterAppend: Ref.set(mapperStateRef, nextState),
+							afterCommit: Effect.zipRight(
+								Ref.set(mapperStateRef, nextState),
+								ingestOptions.afterCommit ?? Effect.void,
+							),
 						});
 
 						if (

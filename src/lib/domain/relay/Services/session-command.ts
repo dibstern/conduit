@@ -180,20 +180,6 @@ export const applySessionCommand = (
 			): Effect.Effect<A, E> =>
 				effect.pipe(Effect.provideService(SqlClient.SqlClient, sql));
 
-			const recovered = yield* projectionRunner.isRecovered();
-			if (!recovered) {
-				yield* withSql(projectionRunner.recover()).pipe(
-					Effect.mapError(
-						(cause) =>
-							new SessionCommandError({
-								operation: `${command.type}.recover`,
-								cause,
-							}),
-					),
-					Effect.asVoid,
-				);
-			}
-
 			row = yield* readQueryOption.value.getSession(sessionId).pipe(
 				Effect.mapError(
 					(cause) =>
@@ -218,33 +204,51 @@ export const applySessionCommand = (
 					: row?.provider;
 
 			if (appendProvider !== undefined) {
-				const stored = yield* eventStore
-					.append(
-						canonicalEvent(command.type, sessionId, command.data, {
-							provider: appendProvider,
-							createdAt: Date.now(),
-							metadata: { source: "relay" },
+				const stored = yield* sql
+					.withTransaction(
+						Effect.gen(function* () {
+							const stored = yield* eventStore
+								.append(
+									canonicalEvent(command.type, sessionId, command.data, {
+										provider: appendProvider,
+										createdAt: Date.now(),
+										metadata: { source: "relay" },
+									}),
+								)
+								.pipe(
+									Effect.mapError(
+										(cause) =>
+											new SessionCommandError({
+												operation: `${command.type}.append`,
+												cause,
+											}),
+									),
+								);
+
+							yield* withSql(projectionRunner.projectEvent(stored)).pipe(
+								Effect.mapError(
+									(cause) =>
+										new SessionCommandError({
+											operation: `${command.type}.project`,
+											cause,
+										}),
+								),
+							);
+
+							return stored;
 						}),
 					)
 					.pipe(
-						Effect.mapError(
-							(cause) =>
+						// BEGIN failures are typed; Effect SQL leaves COMMIT failures as defects.
+						Effect.catchTag("SqlError", (cause) =>
+							Effect.fail(
 								new SessionCommandError({
-									operation: `${command.type}.append`,
+									operation: `${command.type}.transaction`,
 									cause,
 								}),
+							),
 						),
 					);
-
-				yield* withSql(projectionRunner.projectEvent(stored)).pipe(
-					Effect.mapError(
-						(cause) =>
-							new SessionCommandError({
-								operation: `${command.type}.project`,
-								cause,
-							}),
-					),
-				);
 
 				// Interim duplicate of commit-and-signal.ts's publish step, pending a
 				// decision on unifying this pipeline with commitAndSignal. Both

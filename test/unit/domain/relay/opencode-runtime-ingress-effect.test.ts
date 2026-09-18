@@ -75,8 +75,15 @@ function makeFakeIngress(options?: {
 	const ingestion = {
 		ingest: vi.fn((_event: ProviderRuntimeEvent) => Effect.succeed(1)),
 		ingestBatch: vi.fn(
-			(events: readonly ProviderRuntimeEvent[]) =>
-				options?.ingestBatch?.(events) ?? Effect.succeed(events.length),
+			(
+				events: readonly ProviderRuntimeEvent[],
+				ingestOptions?: { readonly afterCommit?: Effect.Effect<void> },
+			) =>
+				(options?.ingestBatch?.(events) ?? Effect.succeed(events.length)).pipe(
+					// Stand in for the durable boundary: only a batch that committed
+					// runs afterCommit.
+					Effect.tap(() => ingestOptions?.afterCommit ?? Effect.void),
+				),
 		),
 		drain: vi.fn(() => Effect.void),
 	} satisfies ProviderRuntimeIngestion;

@@ -10,6 +10,8 @@ import { SqlClient } from "@effect/sql";
 import * as SqliteNode from "@effect/sql-sqlite-node/SqliteClient";
 import { Effect, HashMap, Layer, Logger } from "effect";
 import { describe, expect, it } from "vitest";
+import { applySessionCommand } from "../../../src/lib/domain/relay/Services/session-command.js";
+import { makeCommitAndSignal } from "../../../src/lib/persistence/effect/commit-and-signal.js";
 import {
 	EventStoreEffectTag,
 	EventStoreError,
@@ -31,6 +33,10 @@ import {
 	type ProjectionContext,
 	ProjectionError,
 } from "../../../src/lib/persistence/effect/projectors-effect.js";
+import {
+	makeReadQueryEffect,
+	ReadQueryEffectTag,
+} from "../../../src/lib/persistence/effect/read-query-effect.js";
 import {
 	type CanonicalEvent,
 	canonicalEvent,
@@ -2417,17 +2423,80 @@ describe("ProjectionRunnerEffect", () => {
 			}),
 		));
 
-	it("projectEvent throws before recovery", () =>
+	it("a failed projection does not advance the producer state callback", () =>
 		runTest(
+			Effect.gen(function* () {
+				const sql = yield* SqlClient.SqlClient;
+				const commit = yield* makeCommitAndSignal;
+				yield* seedSession("s1");
+				yield* sql`CREATE TRIGGER reject_rename BEFORE UPDATE OF title ON sessions BEGIN SELECT RAISE(ABORT, 'rename rejected'); END`;
+				let updates = 0;
+				const result = yield* Effect.either(
+					commit([makeSessionRenamed("s1", "After")], {
+						afterCommit: Effect.sync(() => {
+							updates += 1;
+						}),
+					}),
+				);
+				expect(result._tag).toBe("Left");
+				expect(updates).toBe(0);
+			}),
+		));
+
+	it("a failed deletion rolls back its event and earlier projectors", () =>
+		runTestWithProjectors(
+			[
+				...createAllEffectProjectors(),
+				{
+					name: "reject-delete",
+					handles: ["session.deleted"],
+					project: () =>
+						Effect.fail(
+							new ProjectionError({
+								projector: "reject-delete",
+								operation: "project",
+								cause: "delete rejected",
+							}),
+						),
+				},
+			],
 			Effect.gen(function* () {
 				const store = yield* EventStoreEffectTag;
 				const runner = yield* ProjectionRunnerEffectTag;
+				const sql = yield* SqlClient.SqlClient;
+				const readQuery = yield* makeReadQueryEffect;
+				yield* runner.markRecovered();
+				yield* seedSession("s1");
+				const result = yield* Effect.either(
+					applySessionCommand({
+						type: "session.deleted",
+						data: { sessionId: "s1" },
+					}).pipe(Effect.provideService(ReadQueryEffectTag, readQuery)),
+				);
+				expect(result._tag).toBe("Left");
+				if (result._tag === "Left")
+					expect(result.left.operation).toBe("session.deleted.project");
+				expect(yield* store.readBySession("s1")).toEqual([]);
+				expect(yield* readQuery.getSession("s1")).toBeDefined();
+				expect(
+					yield* sql`SELECT last_applied_seq FROM projector_cursors`,
+				).toEqual([]);
+			}),
+		));
+
+	it("live append and projection do not require recovery", () =>
+		runTest(
+			Effect.gen(function* () {
+				const runner = yield* ProjectionRunnerEffectTag;
+				const sql = yield* SqlClient.SqlClient;
+				const commit = yield* makeCommitAndSignal;
 
 				yield* seedSession("s1");
-				const event = yield* store.append(makeSessionCreated("s1"));
-
-				const result = yield* Effect.either(runner.projectEvent(event));
-				expect(result._tag).toBe("Left");
+				yield* commit([makeSessionCreated("s1")]);
+				expect(yield* runner.isRecovered()).toBe(false);
+				expect(yield* sql`SELECT title FROM sessions WHERE id = 's1'`).toEqual([
+					{ title: "Test Session" },
+				]);
 			}),
 		));
 

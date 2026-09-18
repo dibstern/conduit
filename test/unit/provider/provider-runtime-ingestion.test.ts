@@ -754,7 +754,7 @@ describe("ProviderRuntimeIngestion", () => {
 		]);
 	});
 
-	it("advances mapper state after append even when eager projection fails", async () => {
+	it("does not advance mapper state when eager projection fails", async () => {
 		const harness = makeHarness({
 			projectBatchEffect: (_events, callIndex) =>
 				callIndex === 1
@@ -806,7 +806,7 @@ describe("ProviderRuntimeIngestion", () => {
 				eventId: "thinking-start",
 				type: "thinking.start",
 				data: {
-					messageId: "message-1",
+					messageId: "provider-message-123",
 					partId: "thinking-1",
 				},
 			}),

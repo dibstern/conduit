@@ -15,7 +15,7 @@ export type CommitAndSignalFailure =
 
 export interface CommitAndSignalOptions {
 	readonly publish?: boolean;
-	readonly afterAppend?: Effect.Effect<void>;
+	readonly afterCommit?: Effect.Effect<void>;
 }
 
 export type CommitAndSignal = (
@@ -32,11 +32,16 @@ export const makeCommitAndSignal = Effect.gen(function* () {
 	const commitAndSignal: CommitAndSignal = (events, options = {}) =>
 		Effect.uninterruptible(
 			Effect.gen(function* () {
-				const stored = yield* eventStore.appendBatch(events);
-				yield* options.afterAppend ?? Effect.void;
-				yield* projectionRunner
-					.projectBatch(stored)
-					.pipe(Effect.provideService(SqlClient.SqlClient, sql));
+				const stored = yield* sql.withTransaction(
+					Effect.gen(function* () {
+						const stored = yield* eventStore.appendBatch(events);
+						yield* projectionRunner
+							.projectBatch(stored)
+							.pipe(Effect.provideService(SqlClient.SqlClient, sql));
+						return stored;
+					}),
+				);
+				yield* options.afterCommit ?? Effect.void;
 
 				if (
 					Option.isSome(sessionEventBus) &&

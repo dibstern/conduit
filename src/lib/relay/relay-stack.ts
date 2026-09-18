@@ -960,6 +960,16 @@ export async function createProjectRelay(
 					}
 				}
 
+				// Recovery must finish before initialization can create a session and
+				// advance projector cursors past historical unprojected events.
+				const restoredPermissionModes = yield* restoreSessionPermissionModes();
+				if (restoredPermissionModes > 0) {
+					yield* Effect.sync(() =>
+						log.info(
+							`Restored permission modes for ${restoredPermissionModes} session(s)`,
+						),
+					);
+				}
 				const sessionManagerService = yield* SessionManagerServiceTag;
 				const sessionId = opencodeAvailable
 					? yield* sessionManagerService.initialize(config.sessionTitle)
@@ -993,14 +1003,6 @@ export async function createProjectRelay(
 							}
 							return "";
 						});
-				const restoredPermissionModes = yield* restoreSessionPermissionModes();
-				if (restoredPermissionModes > 0) {
-					yield* Effect.sync(() =>
-						log.info(
-							`Restored permission modes for ${restoredPermissionModes} session(s)`,
-						),
-					);
-				}
 				const orchestration = yield* getOrchestrationLayer;
 				yield* PollerStateTag;
 				yield* PollerPubSubTag;

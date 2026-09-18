@@ -6,7 +6,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { SqlClient } from "@effect/sql";
-import { Effect, Layer, ManagedRuntime } from "effect";
+import { Effect, Layer, ManagedRuntime, Stream } from "effect";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ProviderRuntimeEvent } from "../../../../src/lib/contracts/providers/provider-runtime-event.js";
 import {
@@ -18,6 +18,10 @@ import {
 	ProviderRuntimeIngestionLive,
 	ProviderRuntimeIngestionTag,
 } from "../../../../src/lib/domain/relay/Services/provider-runtime-ingestion-service.js";
+import {
+	type SessionEventBus,
+	SessionEventBusTag,
+} from "../../../../src/lib/domain/relay/Services/session-event-bus.js";
 import { EventStoreEffectTag } from "../../../../src/lib/persistence/effect/event-store-effect.js";
 import { makePersistenceEffectLayer } from "../../../../src/lib/persistence/effect/live.js";
 import { ProjectorCursorEffectTag } from "../../../../src/lib/persistence/effect/projector-cursor-effect.js";
@@ -48,14 +52,31 @@ function makeLogger(): OpenCodeRuntimeIngressLog & {
 function makeRuntime(
 	filename: string,
 	projectors: readonly EffectProjector[] = createAllEffectProjectors(),
+	sessionEventBusLayer?: Layer.Layer<SessionEventBusTag>,
 ) {
 	const persistenceLayer = makePersistenceEffectLayer(filename, projectors);
+	const ingestionDeps = sessionEventBusLayer
+		? Layer.merge(persistenceLayer, sessionEventBusLayer)
+		: persistenceLayer;
 	return ManagedRuntime.make(
 		Layer.mergeAll(
 			persistenceLayer,
-			ProviderRuntimeIngestionLive.pipe(Layer.provide(persistenceLayer)),
+			ProviderRuntimeIngestionLive.pipe(Layer.provide(ingestionDeps)),
 		),
 	);
+}
+
+/** A change-signal bus whose first publish fails the way `outcome` says, so a
+ *  test can prove that a post-commit publication defect cannot un-commit the
+ *  translation state that explains the already durable batch. */
+function makeFailFirstBusLayer(
+	outcome: Effect.Effect<never>,
+): Layer.Layer<SessionEventBusTag> {
+	let published = 0;
+	return Layer.succeed(SessionEventBusTag, {
+		publish: () => (published++ === 0 ? outcome : Effect.void),
+		subscribe: () => Effect.succeed(Stream.empty),
+	} satisfies SessionEventBus);
 }
 
 function makeFailingProjector(): EffectProjector {
@@ -89,6 +110,7 @@ describe("OpenCode Runtime Ingress Projection (SSE → append → project → re
 
 	async function startRuntime(
 		projectors: readonly EffectProjector[] = createAllEffectProjectors(),
+		sessionEventBusLayer?: Layer.Layer<SessionEventBusTag>,
 	) {
 		if (!dir) {
 			dir = mkdtempSync(join(tmpdir(), "conduit-runtime-ingress-projection-"));
@@ -96,7 +118,7 @@ describe("OpenCode Runtime Ingress Projection (SSE → append → project → re
 		}
 		if (!dbPath) throw new Error("test database path not initialized");
 		log = makeLogger();
-		const nextRuntime = makeRuntime(dbPath, projectors);
+		const nextRuntime = makeRuntime(dbPath, projectors, sessionEventBusLayer);
 		runtime = nextRuntime;
 		hook = await nextRuntime.runPromise(makeEffectOpenCodeRuntimeIngress(log));
 	}
@@ -581,12 +603,10 @@ describe("OpenCode Runtime Ingress Projection (SSE → append → project → re
 		).toHaveLength(1);
 	});
 
-	it("persistent projector failure retains exactly one session.created across provider events", async () => {
+	it("rolls back repeated projector failures and stores exactly one deterministic session seed on retry", async () => {
+		const failingProjector = makeFailingProjector();
 		await disposeRuntime();
-		await startRuntime([
-			...createAllEffectProjectors(),
-			makeFailingProjector(),
-		]);
+		await startRuntime([...createAllEffectProjectors(), failingProjector]);
 
 		const result = await ingest(
 			makeSSEEvent("message.created", {
@@ -599,6 +619,7 @@ describe("OpenCode Runtime Ingress Projection (SSE → append → project → re
 		expect(result).toMatchObject({
 			ok: false,
 			reason: "error",
+			error: "simulated projection failure",
 		});
 		expect(log.warn).toHaveBeenCalledTimes(1);
 		expect(log.warn).toHaveBeenCalledWith(
@@ -607,15 +628,11 @@ describe("OpenCode Runtime Ingress Projection (SSE → append → project → re
 				eventType: "message.created",
 				sessionId: SESSION_ID,
 				error: expect.any(String),
-				durableSession: true,
 			}),
 		);
 
-		const stored = await readStored();
-		expect(stored.map((event) => event.type)).toEqual([
-			"session.created",
-			"message.created",
-		]);
+		expect(await readStored()).toEqual([]);
+		expect(await readProviderBindings(SESSION_ID)).toEqual([]);
 
 		const providerEventCount = 10;
 		for (let index = 1; index < providerEventCount; index++) {
@@ -629,14 +646,13 @@ describe("OpenCode Runtime Ingress Projection (SSE → append → project → re
 			expect(retryResult).toMatchObject({
 				ok: false,
 				reason: "error",
+				error: "simulated projection failure",
 			});
+			expect(await readStored()).toEqual([]);
+			expect(await readProviderBindings(SESSION_ID)).toEqual([]);
 		}
 		expect(log.warn).toHaveBeenCalledTimes(providerEventCount);
 
-		const storedAfterRetry = await readStored();
-		expect(
-			storedAfterRetry.filter((event) => event.type === "session.created"),
-		).toHaveLength(1);
 		const projectedMessages = await currentRuntime().runPromise(
 			Effect.gen(function* () {
 				const sql = yield* SqlClient.SqlClient;
@@ -647,6 +663,28 @@ describe("OpenCode Runtime Ingress Projection (SSE → append → project → re
 			}),
 		);
 		expect(projectedMessages).toEqual([]);
+
+		vi.spyOn(failingProjector, "project").mockReturnValue(Effect.void);
+		const retryResult = await ingestOk(
+			makeSSEEvent("message.created", {
+				sessionID: SESSION_ID,
+				messageID: `msg-retry-${providerEventCount - 1}`,
+				info: { role: "assistant", parts: [] },
+			}),
+		);
+		expect(retryResult.sessionSeeded).toBe(true);
+		const storedAfterRetry = await readStored();
+		expect(storedAfterRetry.map((event) => event.type)).toEqual([
+			"session.created",
+			"message.created",
+		]);
+		expect(
+			storedAfterRetry.filter((event) => event.type === "session.created"),
+		).toEqual([
+			expect.objectContaining({
+				eventId: `evt_opencode_session_created_${SESSION_ID}`,
+			}),
+		]);
 	});
 
 	it("retries the session seed after a transient projector failure", async () => {
@@ -672,29 +710,33 @@ describe("OpenCode Runtime Ingress Projection (SSE → append → project → re
 			},
 		]);
 
-		const firstResult = await ingest(
-			makeSSEEvent("message.created", {
-				sessionID: SESSION_ID,
-				messageID: "msg-transient-001",
-				info: { role: "assistant", parts: [] },
-			}),
-		);
+		const providerEvent = makeSSEEvent("message.created", {
+			sessionID: SESSION_ID,
+			messageID: "msg-transient-001",
+			info: { role: "assistant", parts: [] },
+		});
+		const firstResult = await ingest(providerEvent);
 		expect(firstResult).toMatchObject({
 			ok: false,
 			reason: "error",
+			error: "simulated transient projection failure",
 		});
+		expect(await readStored()).toEqual([]);
+		expect(await readProviderBindings(SESSION_ID)).toEqual([]);
 
-		const recoveryResult = await ingest(
-			makeSSEEvent("message.created", {
-				sessionID: SESSION_ID,
-				messageID: "msg-transient-002",
-				info: { role: "assistant", parts: [] },
-			}),
-		);
+		const recoveryResult = await ingest(providerEvent);
 		expect(recoveryResult).toMatchObject({
 			ok: true,
 			sessionSeeded: true,
 		});
+		const stored = await readStored();
+		expect(stored.map((event) => event.type)).toEqual([
+			"session.created",
+			"message.created",
+		]);
+		expect(stored[0]?.eventId).toBe(
+			`evt_opencode_session_created_${SESSION_ID}`,
+		);
 
 		const projection = await currentRuntime().runPromise(
 			Effect.gen(function* () {
@@ -710,8 +752,289 @@ describe("OpenCode Runtime Ingress Projection (SSE → append → project → re
 		);
 		expect(projection).toEqual({
 			sessions: [{ id: SESSION_ID }],
-			messages: [{ id: "msg-transient-002" }],
+			messages: [{ id: "msg-transient-001" }],
 		});
+	});
+
+	it("retries an event for an already durable session after a projector failure", async () => {
+		let projectionFails = false;
+		await disposeRuntime();
+		await startRuntime([
+			...createAllEffectProjectors(),
+			{
+				name: "toggleable-message-projector",
+				handles: ["message.created"],
+				project: () =>
+					projectionFails
+						? Effect.fail(
+								new ProjectionError({
+									projector: "toggleable-message-projector",
+									operation: "project",
+									cause: new Error("simulated projection failure"),
+								}),
+							)
+						: Effect.void,
+			},
+		]);
+
+		await ingestOk(
+			makeSSEEvent("message.created", {
+				sessionID: SESSION_ID,
+				messageID: "msg-durable-001",
+				info: { role: "assistant", parts: [] },
+			}),
+		);
+
+		const blocked = makeSSEEvent("message.created", {
+			sessionID: SESSION_ID,
+			messageID: "msg-durable-002",
+			info: { role: "assistant", parts: [] },
+		});
+		projectionFails = true;
+		expect(await ingest(blocked)).toMatchObject({ ok: false, reason: "error" });
+		expect((await readStored()).map((event) => event.type)).toEqual([
+			"session.created",
+			"message.created",
+		]);
+
+		projectionFails = false;
+		expect(await ingest(blocked)).toMatchObject({ ok: true });
+
+		const messages = await currentRuntime().runPromise(
+			Effect.gen(function* () {
+				const sql = yield* SqlClient.SqlClient;
+				return yield* sql<{ id: string }>`
+					SELECT id FROM messages
+					WHERE session_id = ${SESSION_ID}
+					ORDER BY id`;
+			}),
+		);
+		expect(messages).toEqual([
+			{ id: "msg-durable-001" },
+			{ id: "msg-durable-002" },
+		]);
+	});
+
+	it("keeps text emitted by a concurrent event when a rolled-back event is in flight", async () => {
+		let releaseRollingBack = () => {};
+		const rollingBackGate = new Promise<void>((resolve) => {
+			releaseRollingBack = resolve;
+		});
+		let releaseSnapshot = () => {};
+		const snapshotGate = new Promise<void>((resolve) => {
+			releaseSnapshot = resolve;
+		});
+
+		await disposeRuntime();
+		await startRuntime([
+			...createAllEffectProjectors(),
+			{
+				name: "paused-failing-message-projector",
+				handles: ["message.created"],
+				project: () =>
+					Effect.promise(() => rollingBackGate).pipe(
+						Effect.andThen(
+							Effect.fail(
+								new ProjectionError({
+									projector: "paused-failing-message-projector",
+									operation: "project",
+									cause: new Error("simulated projection failure"),
+								}),
+							),
+						),
+					),
+			},
+			{
+				name: "gated-text-projector",
+				handles: ["text.delta"],
+				project: () => Effect.promise(() => snapshotGate),
+			},
+		]);
+
+		const rollingBack = ingest(
+			makeSSEEvent("message.created", {
+				sessionID: SESSION_ID,
+				messageID: "msg-concurrent",
+				info: { role: "assistant", parts: [] },
+			}),
+		);
+		await new Promise((resolve) => setTimeout(resolve, 25));
+
+		const snapshot = makeSSEEvent("message.part.updated", {
+			sessionID: SESSION_ID,
+			part: {
+				id: "part-concurrent",
+				sessionID: SESSION_ID,
+				messageID: "msg-concurrent",
+				type: "text",
+				text: "hello",
+			},
+		});
+		const snapshotRun = ingest(snapshot);
+		await new Promise((resolve) => setTimeout(resolve, 25));
+
+		releaseRollingBack();
+		expect(await rollingBack).toMatchObject({ ok: false, reason: "error" });
+		releaseSnapshot();
+		expect(await snapshotRun).toMatchObject({ ok: true });
+
+		await ingest(snapshot);
+
+		const parts = await currentRuntime().runPromise(
+			Effect.gen(function* () {
+				const sql = yield* SqlClient.SqlClient;
+				return yield* sql<{ text: string }>`
+					SELECT text FROM message_parts
+					WHERE id = ${"part-concurrent"}`;
+			}),
+		);
+		expect(parts).toEqual([{ text: "hello" }]);
+	});
+
+	function textSnapshot(partId: string, messageId: string, text: string) {
+		return makeSSEEvent("message.part.updated", {
+			sessionID: SESSION_ID,
+			part: {
+				id: partId,
+				sessionID: SESSION_ID,
+				messageID: messageId,
+				type: "text",
+				text,
+			},
+		});
+	}
+
+	async function readPartText(partId: string) {
+		return currentRuntime().runPromise(
+			Effect.gen(function* () {
+				const sql = yield* SqlClient.SqlClient;
+				return yield* sql<{ text: string }>`
+					SELECT text FROM message_parts WHERE id = ${partId}`;
+			}),
+		);
+	}
+
+	function pausedFailingMessageProjector(gate: Promise<void>): EffectProjector {
+		return {
+			name: "paused-failing-message-projector",
+			handles: ["message.created"],
+			project: () =>
+				Effect.promise(() => gate).pipe(
+					Effect.andThen(
+						Effect.fail(
+							new ProjectionError({
+								projector: "paused-failing-message-projector",
+								operation: "project",
+								cause: new Error("simulated projection failure"),
+							}),
+						),
+					),
+				),
+		};
+	}
+
+	it("keeps durable text out of a reconnect that lands while a rolled-back event holds the session gate", async () => {
+		let releaseRollingBack = () => {};
+		const rollingBackGate = new Promise<void>((resolve) => {
+			releaseRollingBack = resolve;
+		});
+
+		await disposeRuntime();
+		await startRuntime([
+			...createAllEffectProjectors(),
+			pausedFailingMessageProjector(rollingBackGate),
+		]);
+
+		const snapshot = textSnapshot("part-reconnect", "msg-reconnect", "hello");
+		await ingestOk(snapshot);
+
+		const rollingBack = ingest(
+			makeSSEEvent("message.created", {
+				sessionID: SESSION_ID,
+				messageID: "msg-reconnect-blocked",
+				info: { role: "assistant", parts: [] },
+			}),
+		);
+		await new Promise((resolve) => setTimeout(resolve, 25));
+
+		currentHook().onReconnect();
+
+		releaseRollingBack();
+		expect(await rollingBack).toMatchObject({ ok: false, reason: "error" });
+
+		await ingest(snapshot);
+
+		expect(await readPartText("part-reconnect")).toEqual([{ text: "hello" }]);
+	});
+
+	it("does not let an in-flight commit restore announcement state a reconnect discarded", async () => {
+		let releaseGatedText = () => {};
+		const gatedText = new Promise<void>((resolve) => {
+			releaseGatedText = resolve;
+		});
+
+		await disposeRuntime();
+		await startRuntime([
+			...createAllEffectProjectors(),
+			{
+				name: "gated-text-projector",
+				handles: ["text.delta"],
+				project: () => Effect.promise(() => gatedText),
+			},
+		]);
+
+		const created = makeSSEEvent("message.created", {
+			sessionID: SESSION_ID,
+			messageID: "msg-announced",
+			info: { role: "assistant", parts: [] },
+		});
+		await ingestOk(created);
+
+		const inFlight = ingest(
+			textSnapshot("part-announced", "msg-announced", "hi"),
+		);
+		await new Promise((resolve) => setTimeout(resolve, 25));
+
+		currentHook().onReconnect();
+
+		releaseGatedText();
+		expect(await inFlight).toMatchObject({ ok: true });
+
+		// The reconnect asked for every message to be announced again; a batch
+		// that was translated before it must not put the old answer back.
+		expect(await ingest(created)).toMatchObject({ ok: true });
+	});
+
+	it("keeps translation state committed when post-commit publication dies", async () => {
+		await disposeRuntime();
+		await startRuntime(
+			createAllEffectProjectors(),
+			makeFailFirstBusLayer(Effect.die(new Error("bus publish exploded"))),
+		);
+
+		const snapshot = textSnapshot("part-publish-die", "msg-publish", "hello");
+		await expect(ingest(snapshot)).rejects.toThrow();
+		expect(await readPartText("part-publish-die")).toEqual([{ text: "hello" }]);
+
+		await ingest(snapshot);
+
+		expect(await readPartText("part-publish-die")).toEqual([{ text: "hello" }]);
+	});
+
+	it("keeps translation state committed when post-commit publication is interrupted", async () => {
+		await disposeRuntime();
+		await startRuntime(
+			createAllEffectProjectors(),
+			makeFailFirstBusLayer(Effect.interrupt),
+		);
+
+		const snapshot = textSnapshot("part-publish-int", "msg-publish", "hello");
+		await expect(ingest(snapshot)).rejects.toThrow();
+		expect(await readPartText("part-publish-int")).toEqual([{ text: "hello" }]);
+
+		await ingest(snapshot);
+
+		expect(await readPartText("part-publish-int")).toEqual([{ text: "hello" }]);
 	});
 
 	it("projector cursors advance after successful projection", async () => {

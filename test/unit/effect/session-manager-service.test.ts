@@ -760,7 +760,7 @@ describe("SessionManagerService", () => {
 				});
 				expect(sessions).toEqual([]);
 				expect(bindings).toEqual([]);
-				expect(creations[0]?.count).toBe(1);
+				expect(creations[0]?.count).toBe(0);
 			}).pipe(
 				Effect.provide(Layer.fresh(layer)),
 				Effect.ensuring(Effect.sync(() => rmSync(dbFile, { force: true }))),
