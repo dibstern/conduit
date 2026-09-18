@@ -5,7 +5,10 @@ import {
 	resetNotifState,
 } from "../../stores/notification-reducer.svelte.js";
 import { permissionsState } from "../../stores/permissions.svelte.js";
-import { sessionState } from "../../stores/session.svelte.js";
+import {
+	applySessionSnapshot,
+	sessionState,
+} from "../../stores/session.svelte.js";
 import { uiState } from "../../stores/ui.svelte.js";
 import type { PermissionId } from "../../types.js";
 import NotificationStack from "../overlays/NotificationStack.svelte";
@@ -24,13 +27,15 @@ function setupState(opts: {
 }) {
 	flushSync(() => {
 		sessionState.currentId = opts.currentId ?? "ses_current";
-		sessionState.allSessions = Object.entries(opts.sessionTitles ?? {}).map(
-			([id, title]) => ({
+		applySessionSnapshot(
+			Object.entries(opts.sessionTitles ?? {}).map(([id, title]) => ({
 				id,
 				title,
+				status: "idle" as const,
 				createdAt: Date.now(),
-			}),
-		) as typeof sessionState.allSessions;
+			})),
+			"complete",
+		);
 
 		permissionsState.pendingPermissions = (opts.permissions ?? []).map((p) => ({
 			...p,

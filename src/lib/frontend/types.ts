@@ -53,6 +53,29 @@ export type {
 	UsageInfo,
 } from "../shared-types.js";
 
+// ─── Server-owned reads ──────────────────────────────────────────────────────
+
+/**
+ * A value the server owns, seen from the outside: read-only all the way down.
+ *
+ * The stores keep the server's rows and hand them out through getters. Marking
+ * the getter read-only stops `state.x = …` but not `state.rows[0].title = …`,
+ * which edits the shared copy every other component is reading. Wrap the read
+ * type in this and the whole shape — rows, their fields, nested lists — is
+ * closed to callers, while the `apply*` functions keep writing plain values.
+ */
+export type Immutable<T> = T extends (...args: never[]) => unknown
+	? T
+	: T extends ReadonlyMap<infer K, infer V>
+		? ReadonlyMap<K, Immutable<V>>
+		: T extends ReadonlySet<infer E>
+			? ReadonlySet<Immutable<E>>
+			: T extends ReadonlyArray<infer E>
+				? ReadonlyArray<Immutable<E>>
+				: T extends object
+					? { readonly [K in keyof T]: Immutable<T[K]> }
+					: T;
+
 // ─── Derived type aliases ────────────────────────────────────────────────────
 
 /** Cost breakdown for a model (derived from shared ModelInfo). */
@@ -180,9 +203,9 @@ export interface SystemMessage {
 // ─── Session Types (frontend-only) ──────────────────────────────────────────
 
 export interface DateGroups {
-	today: SessionInfo[];
-	yesterday: SessionInfo[];
-	older: SessionInfo[];
+	today: Immutable<SessionInfo>[];
+	yesterday: Immutable<SessionInfo>[];
+	older: Immutable<SessionInfo>[];
 }
 
 // ─── Terminal Types ──────────────────────────────────────────────────────────

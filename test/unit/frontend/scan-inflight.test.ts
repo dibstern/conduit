@@ -16,19 +16,18 @@ import {
 	handleScanResult,
 	isScanInFlight,
 } from "../../../src/lib/frontend/stores/instance.svelte.js";
-import { sessionState } from "../../../src/lib/frontend/stores/session.svelte.js";
+import {
+	applySessionUpsert,
+	sessionState,
+} from "../../../src/lib/frontend/stores/session.svelte.js";
 import { handleMessage } from "../../../src/lib/frontend/stores/ws-dispatch.js";
 import type { RelayMessage } from "../../../src/lib/shared-types.js";
 
 beforeEach(() => {
 	sessionState.currentId = "test-session";
 	// Register sessions so routePerSession's unknown-session guard passes.
-	sessionState.sessions.set("test-session", {
-		id: "test-session",
-		title: "",
-		status: "idle",
-	});
-	sessionState.sessions.set("s1", { id: "s1", title: "", status: "idle" });
+	applySessionUpsert({ id: "test-session", title: "", status: "idle" });
+	applySessionUpsert({ id: "s1", title: "", status: "idle" });
 });
 
 describe("scanInFlight state management", () => {

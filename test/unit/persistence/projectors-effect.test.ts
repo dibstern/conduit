@@ -1757,7 +1757,7 @@ describe("ProjectionRunnerEffect", () => {
 								yield* sql`
 									INSERT INTO partial_projection_writes (event_sequence)
 									VALUES (${event.sequence})`;
-								yield* projector.project(event, ctx);
+								return yield* projector.project(event, ctx);
 							}),
 					};
 				}
@@ -1770,7 +1770,7 @@ describe("ProjectionRunnerEffect", () => {
 									sequence: event.sequence,
 									replaying: ctx?.replaying,
 								});
-								yield* projector.project(event, ctx);
+								return yield* projector.project(event, ctx);
 							}),
 					};
 				}
@@ -1904,7 +1904,7 @@ describe("ProjectionRunnerEffect", () => {
 							project: (event, ctx) =>
 								Effect.gen(function* () {
 									messageDeliveries.push(event.sequence);
-									yield* projector.project(event, ctx);
+									return yield* projector.project(event, ctx);
 								}),
 						}
 					: projector,
@@ -2232,7 +2232,7 @@ describe("ProjectionRunnerEffect", () => {
 							sequence: event.sequence,
 							replaying: ctx?.replaying,
 						});
-						yield* projector.project(event, ctx);
+						return yield* projector.project(event, ctx);
 					}),
 			}),
 		);
@@ -2370,7 +2370,7 @@ describe("ProjectionRunnerEffect", () => {
 													)
 													.pipe(Effect.orDie);
 											}
-											yield* projector.project(event, ctx);
+											return yield* projector.project(event, ctx);
 										}),
 								}
 							: projector,
@@ -2475,7 +2475,9 @@ describe("ProjectionRunnerEffect", () => {
 				);
 				expect(result._tag).toBe("Left");
 				if (result._tag === "Left")
-					expect(result.left.operation).toBe("session.deleted.project");
+					// Append and project are one transaction now, so the failure is named
+					// for the commit that rolled back, not for a separate project step.
+					expect(result.left.operation).toBe("session.deleted.commit");
 				expect(yield* store.readBySession("s1")).toEqual([]);
 				expect(yield* readQuery.getSession("s1")).toBeDefined();
 				expect(
@@ -2583,6 +2585,7 @@ describe("ProjectionRunnerEffect", () => {
 			project: (_event, ctx) =>
 				Effect.sync(() => {
 					observedContext = ctx;
+					return [];
 				}),
 		};
 
@@ -2679,6 +2682,7 @@ describe("ProjectionRunnerEffect", () => {
 			project: () =>
 				Effect.sync(() => {
 					successfulProjectorRan = true;
+					return [];
 				}),
 		};
 
@@ -2720,6 +2724,7 @@ describe("ProjectionRunnerEffect", () => {
 					: Effect.gen(function* () {
 							const sql = yield* SqlClient.SqlClient;
 							yield* sql`UPDATE sessions SET title = 'batch-applied' WHERE id = ${event.sessionId}`;
+							return [];
 						}),
 		};
 

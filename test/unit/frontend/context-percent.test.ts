@@ -16,7 +16,12 @@ import {
 	type SessionMessages,
 	setMessages,
 } from "../../../src/lib/frontend/stores/chat.svelte.js";
-import { discoveryState } from "../../../src/lib/frontend/stores/discovery.svelte.js";
+import {
+	clearDiscoveryState,
+	handleContextWindowInfo,
+	handleModelInfo,
+	handleModelList,
+} from "../../../src/lib/frontend/stores/discovery.svelte.js";
 import type { RelayMessage } from "../../../src/lib/frontend/types.js";
 import { probeClaudeCapabilities } from "../../../src/lib/provider/claude/claude-capabilities-probe.js";
 import { testActivity, testMessages } from "../../helpers/test-session-slot.js";
@@ -31,9 +36,16 @@ function resultMsg(usage: {
 }
 
 function setClaudeProvider(models: unknown[]): void {
-	discoveryState.providers = [
-		{ id: "claude", name: "Claude", models },
-	] as typeof discoveryState.providers;
+	// The probe's model rows carry fields the frontend `ModelInfo` does not
+	// declare, so this goes in through the wire shape like the real thing does.
+	handleModelList({
+		type: "model_list",
+		providers: [{ id: "claude", name: "Claude", models }],
+	} as Extract<RelayMessage, { type: "model_list" }>);
+}
+
+function selectModel(model: string): void {
+	handleModelInfo({ type: "model_info", model, provider: "claude" });
 }
 
 describe("context percent computation", () => {
@@ -43,19 +55,15 @@ describe("context percent computation", () => {
 	beforeEach(() => {
 		activity = testActivity();
 		messages = testMessages();
-		discoveryState.currentModelId = "";
-		discoveryState.currentContextWindow = "";
-		discoveryState.providers = [];
+		clearDiscoveryState();
 	});
 
 	afterEach(() => {
-		discoveryState.providers = [];
-		discoveryState.currentModelId = "";
-		discoveryState.currentContextWindow = "";
+		clearDiscoveryState();
 	});
 
 	it("computes percent from model limit on result", () => {
-		discoveryState.currentModelId = "claude-fable-5";
+		selectModel("claude-fable-5");
 		setClaudeProvider([
 			{
 				id: "claude-fable-5",
@@ -69,8 +77,12 @@ describe("context percent computation", () => {
 	});
 
 	it("uses the selected 1m context-window override", () => {
-		discoveryState.currentModelId = "claude-fable-5";
-		discoveryState.currentContextWindow = "1m";
+		selectModel("claude-fable-5");
+		handleContextWindowInfo({
+			type: "context_window_info",
+			contextWindow: "1m",
+			options: [],
+		});
 		setClaudeProvider([
 			{
 				id: "claude-fable-5",
@@ -84,7 +96,7 @@ describe("context percent computation", () => {
 	});
 
 	it("restores percent from the last result message in history", () => {
-		discoveryState.currentModelId = "claude-fable-5";
+		selectModel("claude-fable-5");
 		setClaudeProvider([
 			{
 				id: "claude-fable-5",
@@ -102,7 +114,7 @@ describe("context percent computation", () => {
 	});
 
 	it("restores percent from a compaction divider's postTokens", () => {
-		discoveryState.currentModelId = "claude-fable-5";
+		selectModel("claude-fable-5");
 		setClaudeProvider([
 			{
 				id: "claude-fable-5",
@@ -125,7 +137,7 @@ describe("context percent computation", () => {
 	});
 
 	it("skips the zero-token /compact result and falls through to the divider", () => {
-		discoveryState.currentModelId = "claude-fable-5";
+		selectModel("claude-fable-5");
 		setClaudeProvider([
 			{
 				id: "claude-fable-5",
@@ -148,7 +160,7 @@ describe("context percent computation", () => {
 	});
 
 	it("prefers a real turn's result over an earlier compaction divider", () => {
-		discoveryState.currentModelId = "claude-fable-5";
+		selectModel("claude-fable-5");
 		setClaudeProvider([
 			{
 				id: "claude-fable-5",

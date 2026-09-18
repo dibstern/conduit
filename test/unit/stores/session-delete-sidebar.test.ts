@@ -1,8 +1,9 @@
 // ─── Sidebar removal on delete ────────────────────────────────────────────────
 // The sidebar (SessionList.svelte) renders getDateGroups() -> getFilteredSessions().
 // A deleted session must leave that list in every UI state, including during an
-// active search — searchResults is a snapshot no removal path writes to, so it
-// has to be reconciled against the live session map at read time.
+// active search. The store holds server search hits as ids, not rows, so the
+// search view reads through the one server-owned map and a removal there is
+// immediately visible — there is no second copy to prune.
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -33,6 +34,7 @@ vi.hoisted(() => {
 vi.mock("dompurify", () => ({ default: { sanitize: (h: string) => h } }));
 
 import {
+	applySessionSnapshot,
 	clearSessionState,
 	getFilteredSessions,
 	sessionState,
@@ -56,16 +58,22 @@ const KEEPER = {
 } satisfies SessionInfo;
 
 beforeEach(() => {
+	clearSessionState();
 	sessionState.currentId = "keeper";
-	sessionState.rootSessions = [VICTIM, KEEPER];
-	sessionState.allSessions = [VICTIM, KEEPER];
-	sessionState.searchResults = null;
-	sessionState.searchQuery = "";
-	sessionState.sessions.clear();
-	sessionState.sessions.set(VICTIM.id, VICTIM);
-	sessionState.sessions.set(KEEPER.id, KEEPER);
+	applySessionSnapshot([VICTIM, KEEPER], "complete");
 	uiState.hideSubagentSessions = true;
 });
+
+/** Seed an active server search the way SessionList does: the query is the
+ *  client's, the hits arrive as a searched session_list. */
+const searchFor = (query: string, hits: (typeof VICTIM)[]) => {
+	sessionState.searchQuery = query;
+	handleMessage({
+		type: "session_list",
+		sessions: hits,
+		search: true,
+	} as RelayMessage);
+};
 
 const deleteVictim = () =>
 	handleMessage({
@@ -81,26 +89,23 @@ describe("deleted sessions leave the sidebar", () => {
 		expect(sidebarIds()).toEqual(["keeper"]);
 	});
 
-	it("drops the session when subagents are shown (allSessions path)", () => {
+	it("drops the session when subagents are shown", () => {
 		uiState.hideSubagentSessions = false;
 		deleteVictim();
 		expect(sidebarIds()).toEqual(["keeper"]);
 	});
 
-	// Regression: searchResults took priority in getFilteredSessions but was
-	// never pruned by the delete path, so the row survived until the query
-	// was cleared. The server's follow-up session_list can't rescue it either,
-	// because handleSessionList only clears searchResults when the query is empty.
+	// Regression: search hits used to be a snapshot of rows that took priority in
+	// getFilteredSessions and that no removal path pruned, so the row survived
+	// until the query was cleared.
 	it("drops the session during an active search", () => {
-		sessionState.searchQuery = "s";
-		sessionState.searchResults = [VICTIM, KEEPER];
+		searchFor("s", [VICTIM, KEEPER]);
 		deleteVictim();
 		expect(sidebarIds()).toEqual(["keeper"]);
 	});
 
 	it("stays dropped after the server's follow-up session_list broadcast", () => {
-		sessionState.searchQuery = "s";
-		sessionState.searchResults = [VICTIM, KEEPER];
+		searchFor("s", [VICTIM, KEEPER]);
 		deleteVictim();
 		handleMessage({
 			type: "session_list",
@@ -111,8 +116,7 @@ describe("deleted sessions leave the sidebar", () => {
 	});
 
 	it("drops a stale searched session after an authoritative tagged refresh", () => {
-		sessionState.searchQuery = "s";
-		sessionState.searchResults = [VICTIM, KEEPER];
+		searchFor("s", [VICTIM, KEEPER]);
 		handleMessage({
 			type: "session_list",
 			sessions: [KEEPER],
@@ -123,8 +127,7 @@ describe("deleted sessions leave the sidebar", () => {
 
 	it("returns the live renamed session object during an active search", () => {
 		const renamed = { ...VICTIM, title: "Renamed Session" };
-		sessionState.searchQuery = "session";
-		sessionState.searchResults = [VICTIM];
+		searchFor("session", [VICTIM]);
 		handleMessage({
 			type: "session_list",
 			sessions: [renamed, KEEPER],
@@ -139,8 +142,7 @@ describe("deleted sessions leave the sidebar", () => {
 	});
 
 	it("leaves a normal search untouched when nothing was deleted", () => {
-		sessionState.searchQuery = "s";
-		sessionState.searchResults = [VICTIM, KEEPER];
+		searchFor("s", [VICTIM, KEEPER]);
 		expect(sidebarIds()).toEqual(["victim", "keeper"]);
 	});
 });

@@ -5,36 +5,56 @@ import {
 	phaseToIdle,
 	phaseToProcessing,
 } from "../../stores/chat.svelte.js";
-import { discoveryState } from "../../stores/discovery.svelte.js";
+import {
+	handleAgentList,
+	handleModelInfo,
+	handleModelList,
+	handleVariantInfo,
+} from "../../stores/discovery.svelte.js";
 import { sessionState } from "../../stores/session.svelte.js";
 import InputArea from "./InputArea.svelte";
 
 const testId = "story-input";
 
+function setHighVariant() {
+	handleVariantInfo({
+		type: "variant_info",
+		variant: "high",
+		variants: ["low", "medium", "high"],
+	});
+}
+
 function setupDiscovery() {
-	discoveryState.providers = [
-		{
-			id: "anthropic",
-			name: "Anthropic",
-			models: [
-				{
-					id: "claude-sonnet-4-20250514",
-					name: "Claude Sonnet 4",
-					provider: "anthropic",
-					variants: ["low", "medium", "high"],
-				},
-			],
-			configured: true,
-		},
-	];
-	discoveryState.currentModelId = "claude-sonnet-4-20250514";
-	discoveryState.currentProviderId = "anthropic";
-	discoveryState.currentVariant = "high";
-	discoveryState.availableVariants = ["low", "medium", "high"];
-	discoveryState.agents = [
-		{ id: "code", name: "code", description: "Write and edit code" },
-	];
-	discoveryState.activeAgentId = "code";
+	handleModelList({
+		type: "model_list",
+		providers: [
+			{
+				id: "anthropic",
+				name: "Anthropic",
+				models: [
+					{
+						id: "claude-sonnet-4-20250514",
+						name: "Claude Sonnet 4",
+						provider: "anthropic",
+						variants: ["low", "medium", "high"],
+					},
+				],
+				configured: true,
+			},
+		],
+	});
+	handleModelInfo({
+		type: "model_info",
+		model: "claude-sonnet-4-20250514",
+		provider: "anthropic",
+	});
+	setHighVariant();
+	handleAgentList({
+		type: "agent_list",
+		providerScope: { id: "anthropic", name: "Anthropic" },
+		agents: [{ id: "code", name: "code", description: "Write and edit code" }],
+		activeAgentId: "code",
+	});
 }
 
 const meta = {
@@ -59,7 +79,7 @@ export const Processing: Story = {
 	beforeEach: () => {
 		phaseToProcessing(getOrCreateSessionActivity(testId));
 		// Ensure discovery state persists through processing state change
-		discoveryState.currentVariant = "high";
+		setHighVariant();
 	},
 };
 
