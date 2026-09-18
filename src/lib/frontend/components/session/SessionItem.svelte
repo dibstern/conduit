@@ -1,12 +1,42 @@
 <!-- ─── SessionItem ─────────────────────────────────────────────────────────── -->
 <!-- Single session entry in the sidebar list. Shows title, time, message count, -->
-<!-- processing indicator, three-dot menu, and supports inline rename. -->
+<!-- the server's status word, three-dot menu, and supports inline rename. -->
+
+<script module lang="ts">
+	import type { SessionAttention } from "../../types.js";
+
+	// One word per tier, and nothing at all for idle, so a quiet list looks
+	// quiet. The word on screen is what the row wants from you; the spoken form
+	// is a state, because a screen reader reads a link's label as a description
+	// of the row rather than as a button.
+	const ATTENTION_DISPLAY: Record<
+		SessionAttention,
+		{ word: string; spoken: string; colour: string }
+	> = {
+		"needs-approval": {
+			word: "Approve",
+			spoken: "Needs approval",
+			colour: "text-warning",
+		},
+		"needs-reply": {
+			word: "Reply",
+			spoken: "Needs reply",
+			colour: "text-brand-b",
+		},
+		error: { word: "Failed", spoken: "Failed", colour: "text-error" },
+		working: { word: "Working", spoken: "Working", colour: "text-accent" },
+		"done-unread": {
+			word: "Done",
+			spoken: "Done, unread",
+			colour: "text-success",
+		},
+		idle: { word: "", spoken: "", colour: "" },
+	};
+</script>
 
 <script lang="ts">
 	import type { SessionInfo } from "../../types.js";
-	import { getSessionPhase } from "../../stores/chat.svelte.js";
-	import { getSessionIndicator } from "../../stores/notification-reducer.svelte.js";
-	import { sessionState } from "../../stores/session.svelte.js";
+	import { sessionAttention } from "../../stores/session.svelte.js";
 	import { formatTimeAgo } from "../../utils/format.js";
 	import Icon from "../ui/Icon.svelte";
 	import Button from "../ui/Button.svelte";
@@ -78,19 +108,26 @@
 		return parts.join(" \u00B7 ");
 	});
 
-	// Processing state: server flag OR per-session phase check
-	const isProcessing = $derived(
-		session.processing || getSessionPhase(session.id) !== "idle",
-	);
+	// The server derives the tier in one place and the row only reads it. It is
+	// deliberately not re-derived from `processing`, the local phase or the
+	// pending counts: a second derivation could disagree with the section this
+	// row is filed under, and two answers on one screen is worse than either.
+	const status = $derived(ATTENTION_DISPLAY[sessionAttention(session)]);
 
-	// Sidebar indicator: attention > unread > processing
-	const indicator = $derived(getSessionIndicator(session.id, sessionState.currentId));
-
-	// Durable, server-derived: activity this session has not been looked at since.
-	// Suppressed for the open session, which you are looking at by definition and
-	// which the server is about to mark read anyway.
-	const isUnread = $derived(
-		session.unread === true && session.id !== sessionState.currentId,
+	// Status first, per the design reference. A screen reader user scanning the
+	// list hears what a row wants before its title. This overrides the row's own
+	// text as the accessible name, which is why title, project and time are
+	// repeated here.
+	const ariaLabel = $derived(
+		[
+			status.spoken,
+			displayTitle,
+			projectLabel,
+			session.parentID ? "forked" : "",
+			timeAgo,
+		]
+			.filter((part) => part)
+			.join(", "),
 	);
 
 	const itemClass = $derived(
@@ -175,6 +212,7 @@
 	class="{itemClass} no-underline"
 	style={active ? "box-shadow: inset 3px 0 0 var(--color-brand-a), inset 3px 0 12px rgba(255,45,123,0.1);" : ""}
 	data-session-id={session.id}
+	aria-label={ariaLabel}
 	onclick={handleClick}
 >
 	<!-- Selection circle (cleanup mode) -->
@@ -209,17 +247,6 @@
 		>
 			<Icon name={selected ? "circle-check" : "circle"} size={16} />
 		</Button>
-	{/if}
-
-	<!-- Session indicator dot: attention > unread > processing -->
-	{#if indicator === "attention"}
-		<span class="w-[7px] h-[7px] rounded-full shrink-0 bg-brand-b"></span>
-	{:else if isUnread}
-		<span class="w-[7px] h-[7px] rounded-full shrink-0 border-[1.5px] border-brand-b bg-transparent"></span>
-	{:else if isProcessing}
-		<span
-			class="session-processing-dot w-[7px] h-[7px] rounded-full shrink-0 animate-pulse-dot {active ? 'bg-brand-a' : 'bg-accent'}"
-		></span>
 	{/if}
 
 	<!-- Title -->
@@ -266,6 +293,17 @@
 		>
 			<Icon name="git-fork" size={11} class="inline-block align-[-1px]" />
 			<span class="sr-only">Forked session</span>
+		</span>
+	{/if}
+
+	<!-- Status word. Hidden from the accessible name because aria-label above
+	     already leads with it; announcing it twice per row is noise. -->
+	{#if status.word && !isRenaming}
+		<span
+			class="session-item-status shrink-0 text-xs font-semibold whitespace-nowrap font-brand {status.colour}"
+			aria-hidden="true"
+		>
+			{status.word}
 		</span>
 	{/if}
 

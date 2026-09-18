@@ -2,7 +2,7 @@
 // Canned WebSocket messages that reproduce the exact state shown in mockup.html.
 //
 // The mockup shows:
-//   - Sidebar with sessions grouped by Today/Yesterday/This Week
+//   - Sidebar with sessions grouped by attention status
 //   - Turn 1 (completed): thinking → 3 tool calls → assistant markdown → metadata
 //   - Turn 2 (in-progress): active thinking → 1 completed tool + 1 running tool
 //   - Context info panel (35%, model claude-sonnet-4)

@@ -43,6 +43,9 @@ export const mockSessionProcessing: SessionInfo = {
 	updatedAt: "2026-02-25T08:05:00Z",
 	messageCount: 3,
 	processing: true,
+	// The row's word comes from the server's tier, never from `processing`, so
+	// the story has to say which tier this is to render as "Working".
+	attention: "working",
 };
 
 export const mockSessionLongTitle: SessionInfo = {

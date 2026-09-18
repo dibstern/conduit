@@ -21,7 +21,7 @@ import {
 	failNewSession,
 	findSession,
 	getFilteredSessions,
-	groupSessionsByDate,
+	groupSessionsByAttention,
 	handleSessionForked,
 	handleSessionList,
 	handleSessionSwitched,
@@ -60,29 +60,6 @@ function makeSession(
 		title: `Session ${overrides.id}`,
 		...overrides,
 	};
-}
-
-/** Create a Date for "today at hour H" relative to a reference date. */
-function todayAt(ref: Date, hour: number): Date {
-	const d = new Date(ref);
-	d.setHours(hour, 0, 0, 0);
-	return d;
-}
-
-/** Create a Date for "yesterday at hour H" relative to a reference date. */
-function yesterdayAt(ref: Date, hour: number): Date {
-	const d = new Date(ref);
-	d.setDate(d.getDate() - 1);
-	d.setHours(hour, 0, 0, 0);
-	return d;
-}
-
-/** Create a Date for N days ago at hour H relative to a reference date. */
-function daysAgoAt(ref: Date, days: number, hour: number): Date {
-	const d = new Date(ref);
-	d.setDate(d.getDate() - days);
-	d.setHours(hour, 0, 0, 0);
-	return d;
 }
 
 // ─── Reset state before each test ───────────────────────────────────────────
@@ -148,74 +125,68 @@ describe("switchToSession", () => {
 	});
 });
 
-// ─── groupSessionsByDate (pure function) ────────────────────────────────────
+// ─── groupSessionsByAttention (pure function) ───────────────────────────────
 
-describe("groupSessionsByDate", () => {
-	// Use a reference "now" at noon local time to avoid edge cases
-	const now = new Date();
-	now.setHours(12, 0, 0, 0);
+describe("groupSessionsByAttention", () => {
+	it("files each tier under its section", () => {
+		const groups = groupSessionsByAttention([
+			makeSession({ id: "approve", attention: "needs-approval" }),
+			makeSession({ id: "reply", attention: "needs-reply" }),
+			makeSession({ id: "failed", attention: "error" }),
+			makeSession({ id: "busy", attention: "working" }),
+			makeSession({ id: "unread", attention: "done-unread" }),
+			makeSession({ id: "quiet", attention: "idle" }),
+		]);
 
-	it("puts sessions updated today into the 'today' group", () => {
-		const sessions: SessionInfo[] = [
-			makeSession({ id: "1", updatedAt: todayAt(now, 10).toISOString() }),
-		];
-		const groups = groupSessionsByDate(sessions, now);
-		expect(groups.today).toHaveLength(1);
-		expect(groups.yesterday).toHaveLength(0);
-		expect(groups.older).toHaveLength(0);
+		expect(groups.needsYou.map((s) => s.id)).toEqual([
+			"approve",
+			"reply",
+			"failed",
+		]);
+		expect(groups.running.map((s) => s.id)).toEqual(["busy"]);
+		expect(groups.doneUnread.map((s) => s.id)).toEqual(["unread"]);
+		expect(groups.idle.map((s) => s.id)).toEqual(["quiet"]);
 	});
 
-	it("puts sessions from yesterday into the 'yesterday' group", () => {
-		const sessions: SessionInfo[] = [
-			makeSession({ id: "1", updatedAt: yesterdayAt(now, 15).toISOString() }),
-		];
-		const groups = groupSessionsByDate(sessions, now);
-		expect(groups.today).toHaveLength(0);
-		expect(groups.yesterday).toHaveLength(1);
-		expect(groups.older).toHaveLength(0);
+	it("orders 'Needs you' by tier, approvals first", () => {
+		const groups = groupSessionsByAttention([
+			makeSession({ id: "failed", attention: "error" }),
+			makeSession({ id: "reply", attention: "needs-reply" }),
+			makeSession({ id: "approve", attention: "needs-approval" }),
+		]);
+
+		expect(groups.needsYou.map((s) => s.id)).toEqual([
+			"approve",
+			"reply",
+			"failed",
+		]);
 	});
 
-	it("puts older sessions into the 'older' group", () => {
-		const sessions: SessionInfo[] = [
-			makeSession({ id: "1", updatedAt: daysAgoAt(now, 5, 10).toISOString() }),
-		];
-		const groups = groupSessionsByDate(sessions, now);
-		expect(groups.today).toHaveLength(0);
-		expect(groups.yesterday).toHaveLength(0);
-		expect(groups.older).toHaveLength(1);
+	// The list arrives sorted by recency and the tier sort must not disturb that
+	// within a tier, or the newest thing needing you could sink below the oldest.
+	it("keeps the incoming order between two sessions of the same tier", () => {
+		const groups = groupSessionsByAttention([
+			makeSession({ id: "newer", attention: "needs-reply" }),
+			makeSession({ id: "older", attention: "needs-reply" }),
+		]);
+
+		expect(groups.needsYou.map((s) => s.id)).toEqual(["newer", "older"]);
 	});
 
-	it("falls back to createdAt when updatedAt is missing", () => {
-		const sessions: SessionInfo[] = [
-			makeSession({ id: "1", createdAt: todayAt(now, 8).toISOString() }),
-		];
-		const groups = groupSessionsByDate(sessions, now);
-		expect(groups.today).toHaveLength(1);
-	});
+	it("treats a session with no attention field as idle", () => {
+		const groups = groupSessionsByAttention([makeSession({ id: "legacy" })]);
 
-	it("falls back to epoch 0 when both timestamps are missing", () => {
-		const sessions: SessionInfo[] = [makeSession({ id: "1" })];
-		const groups = groupSessionsByDate(sessions, now);
-		expect(groups.older).toHaveLength(1);
+		expect(groups.idle.map((s) => s.id)).toEqual(["legacy"]);
+		expect(groups.needsYou).toHaveLength(0);
 	});
 
 	it("handles empty array", () => {
-		const groups = groupSessionsByDate([]);
-		expect(groups.today).toHaveLength(0);
-		expect(groups.yesterday).toHaveLength(0);
-		expect(groups.older).toHaveLength(0);
-	});
+		const groups = groupSessionsByAttention([]);
 
-	it("distributes mixed timestamps correctly", () => {
-		const sessions: SessionInfo[] = [
-			makeSession({ id: "t", updatedAt: todayAt(now, 9).toISOString() }),
-			makeSession({ id: "y", updatedAt: yesterdayAt(now, 14).toISOString() }),
-			makeSession({ id: "o", updatedAt: daysAgoAt(now, 30, 10).toISOString() }),
-		];
-		const groups = groupSessionsByDate(sessions, now);
-		expect(groups.today).toHaveLength(1);
-		expect(groups.yesterday).toHaveLength(1);
-		expect(groups.older).toHaveLength(1);
+		expect(groups.needsYou).toHaveLength(0);
+		expect(groups.running).toHaveLength(0);
+		expect(groups.doneUnread).toHaveLength(0);
+		expect(groups.idle).toHaveLength(0);
 	});
 });
 

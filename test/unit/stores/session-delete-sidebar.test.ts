@@ -1,5 +1,5 @@
 // ─── Sidebar removal on delete ────────────────────────────────────────────────
-// The sidebar (SessionList.svelte) renders getDateGroups() -> getFilteredSessions().
+// The sidebar (SessionList.svelte) renders getAttentionGroups() -> getFilteredSessions().
 // A deleted session must leave that list in every UI state, including during an
 // active search — searchResults is a snapshot no removal path writes to, so it
 // has to be reconciled against the live session map at read time.

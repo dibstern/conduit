@@ -44,6 +44,7 @@ export type {
 	PtyStatus,
 	RelayMessage,
 	RequestId,
+	SessionAttention,
 	SessionInfo,
 	SessionPermissionMode,
 	TodoItem,
@@ -177,10 +178,14 @@ export interface SystemMessage {
 
 // ─── Session Types (frontend-only) ──────────────────────────────────────────
 
-export interface DateGroups {
-	today: SessionInfo[];
-	yesterday: SessionInfo[];
-	older: SessionInfo[];
+/** The sidebar's sections. Coarser than the server's six attention tiers: a
+ *  failure and a pending approval both mean "a human is needed", and one
+ *  heading for that reads faster than three. */
+export interface AttentionGroups {
+	needsYou: SessionInfo[];
+	running: SessionInfo[];
+	doneUnread: SessionInfo[];
+	idle: SessionInfo[];
 }
 
 // ─── Terminal Types ──────────────────────────────────────────────────────────

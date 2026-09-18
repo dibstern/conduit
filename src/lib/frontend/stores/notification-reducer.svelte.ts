@@ -157,15 +157,6 @@ export function getNotifState(sessionId: string): SessionNotifState {
 	return _state.get(sessionId) ?? NONE;
 }
 
-/** Get session indicator for sidebar dot rendering. Returns null for current session. */
-export function getSessionIndicator(
-	sessionId: string,
-	currentSessionId: string | null,
-): "attention" | null {
-	if (sessionId === currentSessionId) return null;
-	return _state.get(sessionId)?.kind === "attention" ? "attention" : null;
-}
-
 /** Get all sessions needing attention (for AttentionBanner). Excludes current session and descendants. */
 export function getAttentionSessions(
 	currentSessionId: string | null,

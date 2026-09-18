@@ -1,7 +1,16 @@
 // ─── Notification Reducer → Indicator E2E Tests ──────────────────────────────
-// Verifies the full pipeline: server sends notification_event via WebSocket →
-// frontend receives and dispatches to notification reducer → sidebar dots
-// and AttentionBanner update accordingly.
+// Two pipelines meet in the sidebar and this spec covers both.
+//
+// The row's status word is server-derived: the relay computes one attention
+// tier per session and sends it on the session list, so the word follows the
+// list and nothing else. It used to be a client-side dot assembled from
+// notification events, local phase and read state, which could disagree with
+// the server.
+//
+// The notification reducer still owns the live cross-session signal, whose
+// remaining surface is the AttentionBanner: server sends notification_event →
+// frontend dispatches to the reducer → banner appears, and clears when you
+// open the session or when a session list reconciles the counts away.
 //
 // Uses WS mock — no real OpenCode or relay needed.
 // Frontend served by Vite preview, WebSocket intercepted by page.routeWebSocket().
@@ -104,22 +113,11 @@ function sessionItem(page: Page, sessionId: string) {
 }
 
 /**
- * Attention dot: a filled circle inside the session item.
- * SessionItem renders: `<span class="... bg-brand-b"></span>` for "attention".
+ * The row's status word. One per row, or none at all when the session is idle.
+ * SessionItem renders: `<span class="session-item-status ...">Approve</span>`.
  */
-function attentionDot(page: Page, sessionId: string) {
-	return sessionItem(page, sessionId).locator("span.bg-brand-b");
-}
-
-/**
- * Unread ring: an outlined circle inside the session item. Durable read state,
- * so it arrives as `unread` on a broadcast session list, not as a notification.
- * SessionItem renders: `<span class="... border-brand-b bg-transparent"></span>`.
- */
-function unreadRing(page: Page, sessionId: string) {
-	return sessionItem(page, sessionId).locator(
-		"span.border-brand-b.bg-transparent",
-	);
+function statusWord(page: Page, sessionId: string) {
+	return sessionItem(page, sessionId).locator(".session-item-status");
 }
 
 /** The AttentionBanner component with role="status". */
@@ -157,7 +155,7 @@ async function mockRelayWithViewSessionRpc(
 // ─── Tests ──────────────────────────────────────────────────────────────────
 
 test.describe("notification reducer indicators", () => {
-	test("shows attention dot on sidebar session after ask_user notification_event", async ({
+	test("shows the status word the session list sends for a session", async ({
 		page,
 		baseURL,
 	}) => {
@@ -171,82 +169,11 @@ test.describe("notification reducer indicators", () => {
 		await page.goto(`${baseURL ?? "http://localhost:4173"}${PROJECT_URL}`);
 		await waitForChatReady(page);
 
-		// Verify session B is visible in sidebar
+		// The init list carries no attention, which reads as idle, and an idle
+		// row shows no word at all.
 		await expect(sessionItem(page, SESS_B)).toBeVisible({ timeout: 5_000 });
+		await expect(statusWord(page, SESS_B)).toHaveCount(0);
 
-		// No attention dot initially
-		await expect(attentionDot(page, SESS_B)).toHaveCount(0);
-
-		// Server sends ask_user notification for session B
-		control.sendMessage({
-			type: "notification_event",
-			eventType: "ask_user",
-			sessionId: SESS_B,
-		});
-
-		// Attention dot should appear on session B
-		await expect(attentionDot(page, SESS_B)).toBeVisible({ timeout: 5_000 });
-	});
-
-	test("clears attention dot when navigating to that session (session_viewed)", async ({
-		page,
-		baseURL,
-	}) => {
-		const control = await mockRelayWithViewSessionRpc(page, {
-			initMessages: twoSessionInit,
-			responses: new Map(),
-			initDelay: 0,
-			messageDelay: 0,
-		});
-
-		await page.goto(`${baseURL ?? "http://localhost:4173"}${PROJECT_URL}`);
-		await waitForChatReady(page);
-
-		// Inject ask_user notification on session B to create attention dot
-		control.sendMessage({
-			type: "notification_event",
-			eventType: "ask_user",
-			sessionId: SESS_B,
-		});
-
-		// Wait for attention dot to appear
-		await expect(attentionDot(page, SESS_B)).toBeVisible({ timeout: 5_000 });
-
-		// Navigate to session B by clicking it in the sidebar
-		await sessionItem(page, SESS_B).click({ timeout: 5_000 });
-
-		// Wait for the switch to complete (URL updates to include session B)
-		await page.waitForFunction(
-			(sessId) => window.location.pathname.includes(`/s/${sessId}`),
-			SESS_B,
-			{ timeout: 5_000 },
-		);
-
-		// Attention dot should be gone — the current session never shows a dot
-		// (getSessionIndicator returns null for currentSessionId)
-		await expect(attentionDot(page, SESS_B)).toHaveCount(0);
-	});
-
-	test("shows unread ring when the session list says a session is unread", async ({
-		page,
-		baseURL,
-	}) => {
-		const control = await mockRelayWithViewSessionRpc(page, {
-			initMessages: twoSessionInit,
-			responses: new Map(),
-			initDelay: 0,
-			messageDelay: 0,
-		});
-
-		await page.goto(`${baseURL ?? "http://localhost:4173"}${PROJECT_URL}`);
-		await waitForChatReady(page);
-
-		// Verify session B visible, no unread ring initially
-		await expect(sessionItem(page, SESS_B)).toBeVisible({ timeout: 5_000 });
-		await expect(unreadRing(page, SESS_B)).toHaveCount(0);
-
-		// Read state is durable and server-derived: it reaches the client as the
-		// `unread` field on a re-broadcast session list, never as a notification.
 		control.sendMessage({
 			type: "session_list",
 			roots: true,
@@ -256,6 +183,60 @@ test.describe("notification reducer indicators", () => {
 					title: "Session A — current",
 					updatedAt: Date.now(),
 					messageCount: 2,
+					attention: "idle",
+				},
+				{
+					id: SESS_B,
+					title: "Session B — other",
+					updatedAt: Date.now(),
+					messageCount: 5,
+					attention: "needs-reply",
+				},
+			],
+		});
+
+		await expect(statusWord(page, SESS_B)).toHaveText("Reply", {
+			timeout: 5_000,
+		});
+		// The word leads the accessible name, so the row announces what it wants
+		// before what it is called.
+		await expect(sessionItem(page, SESS_B)).toHaveAttribute(
+			"aria-label",
+			/^Needs reply, Session B/,
+			{ timeout: 5_000 },
+		);
+	});
+
+	test("shows Done for a session the list reports as done and unread", async ({
+		page,
+		baseURL,
+	}) => {
+		const control = await mockRelayWithViewSessionRpc(page, {
+			initMessages: twoSessionInit,
+			responses: new Map(),
+			initDelay: 0,
+			messageDelay: 0,
+		});
+
+		await page.goto(`${baseURL ?? "http://localhost:4173"}${PROJECT_URL}`);
+		await waitForChatReady(page);
+
+		await expect(sessionItem(page, SESS_B)).toBeVisible({ timeout: 5_000 });
+		await expect(statusWord(page, SESS_B)).toHaveCount(0);
+
+		// Read state is durable and server-derived: it reaches the client folded
+		// into the attention tier on a re-broadcast session list, never as a
+		// notification.
+		control.sendMessage({
+			type: "session_list",
+			roots: true,
+			sessions: [
+				{
+					id: SESS_A,
+					title: "Session A — current",
+					updatedAt: Date.now(),
+					messageCount: 2,
+					attention: "idle",
 				},
 				{
 					id: SESS_B,
@@ -263,11 +244,49 @@ test.describe("notification reducer indicators", () => {
 					updatedAt: Date.now(),
 					messageCount: 6,
 					unread: true,
+					attention: "done-unread",
 				},
 			],
 		});
 
-		await expect(unreadRing(page, SESS_B)).toBeVisible({ timeout: 5_000 });
+		await expect(statusWord(page, SESS_B)).toHaveText("Done", {
+			timeout: 5_000,
+		});
+	});
+
+	test("clears the attention banner when you open that session (session_viewed)", async ({
+		page,
+		baseURL,
+	}) => {
+		const control = await mockRelayWithViewSessionRpc(page, {
+			initMessages: twoSessionInit,
+			responses: new Map(),
+			initDelay: 0,
+			messageDelay: 0,
+		});
+
+		await page.goto(`${baseURL ?? "http://localhost:4173"}${PROJECT_URL}`);
+		await waitForChatReady(page);
+
+		control.sendMessage({
+			type: "notification_event",
+			eventType: "ask_user",
+			sessionId: SESS_B,
+		});
+
+		await expect(attentionBanner(page)).toBeVisible({ timeout: 5_000 });
+
+		await sessionItem(page, SESS_B).click({ timeout: 5_000 });
+
+		// Wait for the switch to complete (URL updates to include session B)
+		await page.waitForFunction(
+			(sessId) => window.location.pathname.includes(`/s/${sessId}`),
+			SESS_B,
+			{ timeout: 5_000 },
+		);
+
+		// The banner never points at the session you are already looking at.
+		await expect(attentionBanner(page)).toHaveCount(0);
 	});
 
 	test("AttentionBanner appears when another session has a question", async ({
@@ -308,7 +327,7 @@ test.describe("notification reducer indicators", () => {
 		});
 	});
 
-	test("reconcile via session_list corrects stale indicator state", async ({
+	test("reconcile via session_list corrects stale banner state", async ({
 		page,
 		baseURL,
 	}) => {
@@ -322,9 +341,9 @@ test.describe("notification reducer indicators", () => {
 		await page.goto(`${baseURL ?? "http://localhost:4173"}${PROJECT_URL}`);
 		await waitForChatReady(page);
 
-		// No attention dot initially (initial session_list has no pendingQuestionCount)
+		// No banner initially (initial session_list has no pendingQuestionCount)
 		await expect(sessionItem(page, SESS_B)).toBeVisible({ timeout: 5_000 });
-		await expect(attentionDot(page, SESS_B)).toHaveCount(0);
+		await expect(attentionBanner(page)).toHaveCount(0);
 
 		// Server sends a reconciliation session_list with pendingQuestionCount on B.
 		// This simulates the periodic session list refresh that corrects stale state.
@@ -351,7 +370,10 @@ test.describe("notification reducer indicators", () => {
 			],
 		});
 
-		// Session B should now show an attention dot (reconcile sets questions: 2)
-		await expect(attentionDot(page, SESS_B)).toBeVisible({ timeout: 5_000 });
+		// The banner should now point at session B (reconcile sets questions: 2)
+		await expect(attentionBanner(page)).toBeVisible({ timeout: 5_000 });
+		await expect(attentionBanner(page)).toContainText("Session B", {
+			timeout: 5_000,
+		});
 	});
 });

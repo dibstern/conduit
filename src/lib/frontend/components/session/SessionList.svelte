@@ -1,13 +1,13 @@
 <!-- ─── SessionList ─────────────────────────────────────────────────────────── -->
-<!-- Sidebar session list with search, date grouping, and new session button. -->
+<!-- Sidebar session list with search, status grouping, and new session button. -->
 <!-- Reads from sessionState store and renders SessionItem components. -->
 
 <script lang="ts">
-	import type { DateGroups, SessionInfo } from "../../types.js";
+	import type { AttentionGroups, SessionInfo } from "../../types.js";
 	import {
 		sessionState,
 		getFilteredSessions,
-		getDateGroups,
+		getAttentionGroups,
 		setSearchQuery,
 		setCurrentSession,
 		switchToSession,
@@ -67,7 +67,7 @@
 	const cleanupCandidates = $derived(
 		filtered.filter((session) => !isForeignSession(session)),
 	);
-	const groups: DateGroups = $derived(getDateGroups());
+	const groups: AttentionGroups = $derived(getAttentionGroups());
 	const isEmpty = $derived(filtered.length === 0);
 
 	const emptyMessage = $derived(
@@ -84,9 +84,14 @@
 		sessionState.daemonUnavailableProjects.map(projectDisplayName),
 	);
 
-	const hasToday = $derived(groups.today.length > 0);
-	const hasYesterday = $derived(groups.yesterday.length > 0);
-	const hasOlder = $derived(groups.older.length > 0);
+	// Rendered in this order, and an empty one is left out entirely: a heading
+	// over nothing costs a line of a phone's list and says nothing.
+	const sections = $derived([
+		{ label: "Needs you", sessions: groups.needsYou },
+		{ label: "Running", sessions: groups.running },
+		{ label: "Done, unread", sessions: groups.doneUnread },
+		{ label: "Idle", sessions: groups.idle },
+	]);
 
 	// Prune stale selections when the session list changes externally
 	$effect(() => {
@@ -493,11 +498,10 @@
 	     Svelte's non-interactive-tabindex heuristic does not model that case.
 	     Labelled by string rather than by the "Sessions" heading, which does not exist
 	     in cleanup mode and would leave the idref dangling. -->
-	<!-- One row, rendered by all three date groups. It is a snippet rather than
-	     three copies because the row is about to grow: the status word, the
-	     shelves and the per-row verbs each land in their own ticket, and three
-	     identical copies would mean three edits with any divergence between them
-	     invisible. -->
+	<!-- One row, rendered by every section. It is a snippet rather than a copy
+	     per section because the row is about to grow: the shelves and the
+	     per-row verbs each land in their own ticket, and copies would mean one
+	     edit each with any divergence between them invisible. -->
 	{#snippet sessionRow(s: SessionInfo)}
 		{#if isForeignSession(s)}
 			<!-- Navigate-only. Rename, the context menu and cleanup selection all
@@ -535,32 +539,16 @@
 				{emptyMessage}
 			</div>
 		{:else}
-			{#if hasToday}
-			<div class="session-group-label pt-1.5 pb-0.5 px-3 text-xs font-semibold text-text-dimmer tracking-[0.3px] font-brand">
-				Today
-			</div>
-			{#each groups.today as s (s.id)}
-				{@render sessionRow(s)}
+			{#each sections as section (section.label)}
+				{#if section.sessions.length > 0}
+					<div class="session-group-label pt-1.5 pb-0.5 px-3 text-xs font-semibold text-text-dimmer tracking-[0.3px] font-brand">
+						{section.label}
+					</div>
+					{#each section.sessions as s (s.id)}
+						{@render sessionRow(s)}
+					{/each}
+				{/if}
 			{/each}
-			{/if}
-
-			{#if hasYesterday}
-			<div class="session-group-label pt-1.5 pb-0.5 px-3 text-xs font-semibold text-text-dimmer tracking-[0.3px] font-brand">
-				Yesterday
-			</div>
-			{#each groups.yesterday as s (s.id)}
-				{@render sessionRow(s)}
-			{/each}
-			{/if}
-
-			{#if hasOlder}
-			<div class="session-group-label pt-1.5 pb-0.5 px-3 text-xs font-semibold text-text-dimmer tracking-[0.3px] font-brand">
-				Older
-			</div>
-			{#each groups.older as s (s.id)}
-				{@render sessionRow(s)}
-			{/each}
-			{/if}
 		{/if}
 
 		<!-- Outside the isEmpty branch on purpose. A project that cannot be read

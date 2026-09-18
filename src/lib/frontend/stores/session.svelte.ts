@@ -17,9 +17,10 @@ import {
 	viewSessionRpc,
 } from "../transport/ws-rpc-client.js";
 import type {
-	DateGroups,
+	AttentionGroups,
 	RelayMessage,
 	RequestId,
+	SessionAttention,
 	SessionInfo,
 } from "../types.js";
 import {
@@ -272,9 +273,9 @@ export function getFilteredSessions(): SessionInfo[] {
 	return sessions.filter((s) => s.title.toLowerCase().includes(query));
 }
 
-/** Get sessions grouped by date: today, yesterday, older. */
-export function getDateGroups(): DateGroups {
-	return groupSessionsByDate(getFilteredSessions());
+/** Get sessions grouped into the sidebar's four sections. */
+export function getAttentionGroups(): AttentionGroups {
+	return groupSessionsByAttention(getFilteredSessions());
 }
 
 /** Get the currently active session object (or undefined). */
@@ -284,30 +285,60 @@ export function getActiveSession(): SessionInfo | undefined {
 
 // ─── Pure helpers ───────────────────────────────────────────────────────────
 
-/** Group sessions into today/yesterday/older buckets. */
-export function groupSessionsByDate(
-	sessions: SessionInfo[],
-	now?: Date,
-): DateGroups {
-	const ref = now ?? new Date();
-	const todayStart = new Date(ref);
-	todayStart.setHours(0, 0, 0, 0);
-	const yesterdayStart = new Date(todayStart);
-	yesterdayStart.setDate(yesterdayStart.getDate() - 1);
+/**
+ * The row's attention tier. The server derives it in one place and sends it on
+ * every row, so the client only has to read it; a row arriving without one is
+ * from a daemon that predates the field, and idle is the honest reading of no
+ * signal rather than a guess assembled from processing flags and counts.
+ */
+export function sessionAttention(session: SessionInfo): SessionAttention {
+	return session.attention ?? "idle";
+}
 
-	const groups: DateGroups = { today: [], yesterday: [], older: [] };
+// Within "Needs you", an approval outranks a question outranks a failure: the
+// first two are blocking something right now, a failure has already stopped.
+const NEEDS_YOU_ORDER: readonly SessionAttention[] = [
+	"needs-approval",
+	"needs-reply",
+	"error",
+];
+
+/** Group sessions into the sidebar's four sections, in tier order. */
+export function groupSessionsByAttention(
+	sessions: SessionInfo[],
+): AttentionGroups {
+	const groups: AttentionGroups = {
+		needsYou: [],
+		running: [],
+		doneUnread: [],
+		idle: [],
+	};
 
 	for (const s of sessions) {
-		const updated = getSessionDate(s);
-
-		if (updated >= todayStart) {
-			groups.today.push(s);
-		} else if (updated >= yesterdayStart) {
-			groups.yesterday.push(s);
-		} else {
-			groups.older.push(s);
+		switch (sessionAttention(s)) {
+			case "needs-approval":
+			case "needs-reply":
+			case "error":
+				groups.needsYou.push(s);
+				break;
+			case "working":
+				groups.running.push(s);
+				break;
+			case "done-unread":
+				groups.doneUnread.push(s);
+				break;
+			case "idle":
+				groups.idle.push(s);
+				break;
 		}
 	}
+
+	// Stable, so recency still decides between two rows of the same tier.
+	groups.needsYou.sort(
+		(a, b) =>
+			NEEDS_YOU_ORDER.indexOf(sessionAttention(a)) -
+			NEEDS_YOU_ORDER.indexOf(sessionAttention(b)),
+	);
 
 	return groups;
 }

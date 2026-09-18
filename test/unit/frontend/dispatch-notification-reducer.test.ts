@@ -61,7 +61,6 @@ vi.mock(
 			...actual,
 			dispatch: dispatchMock,
 			getNotifState: vi.fn(() => ({ kind: "none" })),
-			getSessionIndicator: vi.fn(() => null),
 			getAttentionSessions: vi.fn(() => new Map()),
 			resetNotifState: vi.fn(),
 		};
