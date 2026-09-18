@@ -8,33 +8,22 @@ import {
 	RpcServer,
 	RpcTest,
 } from "@effect/rpc";
+import { SqlClient } from "@effect/sql";
 import { describe, it } from "@effect/vitest";
-import {
-	Effect,
-	HashMap,
-	Layer,
-	Queue,
-	Ref,
-	type Scope,
-	Stream,
-	TestClock,
-} from "effect";
+import { Effect, HashMap, Layer, Queue, Ref, type Scope, Stream } from "effect";
 import { expect, expectTypeOf } from "vitest";
 import {
 	type WsRpcError,
 	WsRpcGroup,
 } from "../../../src/lib/contracts/ws-rpc.js";
 import { DaemonEventBusLive } from "../../../src/lib/domain/daemon/Services/daemon-pubsub.js";
-import {
-	SessionEventBusLive,
-	SessionEventBusTag,
-} from "../../../src/lib/domain/relay/Services/session-event-bus.js";
+import { SessionEventBusLive } from "../../../src/lib/domain/relay/Services/session-event-bus.js";
 import { SessionManagerServiceLive } from "../../../src/lib/domain/relay/Services/session-manager-service.js";
 import {
 	makeSessionManagerStateLive,
 	SessionManagerStateTag,
 } from "../../../src/lib/domain/relay/Services/session-manager-state.js";
-import { EventStoreEffectTag } from "../../../src/lib/persistence/effect/event-store-effect.js";
+import { makeCommitAndSignal } from "../../../src/lib/persistence/effect/commit-and-signal.js";
 import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
 import { ProjectionRunnerEffectTag } from "../../../src/lib/persistence/effect/projection-runner-effect.js";
 import { ReadQueryEffectTag } from "../../../src/lib/persistence/effect/read-query-effect.js";
@@ -78,17 +67,20 @@ const makeLayer = () => {
 	);
 };
 
+// The real choke point: append → project → COMMIT → publish the advance. It
+// returns the read-model version the commit moved the counter to, which is the
+// number every envelope this commit causes will carry.
 const commit = (event: CanonicalEvent) =>
 	Effect.gen(function* () {
-		const store = yield* EventStoreEffectTag;
-		const runner = yield* ProjectionRunnerEffectTag;
-		const bus = yield* SessionEventBusTag;
-		const stored = yield* store.appendBatch([event]);
-		yield* runner.projectBatch(stored);
-		yield* bus.publish(stored);
-		const first = stored[0];
-		if (!first) return yield* Effect.die("Expected one stored fixture event");
-		return first;
+		const commitAndSignal = yield* makeCommitAndSignal;
+		yield* commitAndSignal([event]);
+		const sql = yield* SqlClient.SqlClient;
+		const rows = yield* sql<{ value: number }>`
+			SELECT value FROM read_model_counter WHERE id = 1`;
+		const version = rows[0]?.value;
+		if (version === undefined)
+			return yield* Effect.die("Expected a read-model counter row");
+		return version;
 	});
 
 describe("subscription RPC handlers", () => {
@@ -104,7 +96,7 @@ describe("subscription RPC handlers", () => {
 			Effect.gen(function* () {
 				const runner = yield* ProjectionRunnerEffectTag;
 				yield* runner.recover();
-				const created = yield* commit(
+				const createdVersion = yield* commit(
 					canonicalEvent(
 						"session.created",
 						"fork-1",
@@ -126,7 +118,9 @@ describe("subscription RPC handlers", () => {
 				}));
 				const readQuery = yield* ReadQueryEffectTag;
 				expect(
-					yield* readQuery.getSessionListEntry("fork-1"),
+					(yield* readQuery.readSessionList()).rows.find(
+						({ item }) => item.id === "fork-1",
+					)?.item,
 				).not.toHaveProperty("forkPointTimestamp");
 				const client = yield* RpcTest.makeClient(WsRpcGroup);
 				const listed = yield* client.ListSessions({ projectSlug: "project-a" });
@@ -145,11 +139,11 @@ describe("subscription RPC handlers", () => {
 				);
 				expect(yield* Queue.take(envelopes)).toEqual({
 					_tag: "snapshot",
-					sequence: created.sequence,
+					sequence: createdVersion,
 					rows: listed.sessions,
 				});
 				expect(yield* Queue.take(envelopes)).toEqual({ _tag: "synchronized" });
-				const renamed = yield* commit(
+				const renamedVersion = yield* commit(
 					canonicalEvent(
 						"session.renamed",
 						"fork-1",
@@ -157,24 +151,29 @@ describe("subscription RPC handlers", () => {
 						{ provider: "opencode", createdAt: 2 },
 					),
 				);
-				yield* TestClock.adjust("50 millis");
 				const updated = yield* client.ListSessions({
 					projectSlug: "project-a",
 				});
-				const expected = {
+				expect(yield* Queue.take(envelopes)).toEqual({
 					_tag: "upsert",
-					sequence: renamed.sequence,
+					sequence: renamedVersion,
 					item: updated.sessions[0],
-				};
-				expect(yield* Queue.take(envelopes)).toEqual(expected);
+				});
+				// The shell rebases on resume rather than catching up: a deleted row
+				// leaves no version behind (§8), so the only honest answer to "what
+				// did I miss" is the current set.
 				const replay = yield* client
 					.SubscribeShell({
 						projectSlug: "project-a",
-						resumeFromSequence: created.sequence,
+						resumeFromSequence: createdVersion,
 					})
 					.pipe(Stream.take(2), Stream.runCollect);
 				expect(Array.from(replay)).toEqual([
-					expected,
+					{
+						_tag: "snapshot",
+						sequence: renamedVersion,
+						rows: updated.sessions,
+					},
 					{ _tag: "synchronized" },
 				]);
 			}).pipe(Effect.provide(makeLayer())),
@@ -203,7 +202,7 @@ describe("subscription RPC handlers", () => {
 							{ provider: "claude", createdAt: 2 },
 						),
 					);
-					const textEvent = yield* commit(
+					const cursor = yield* commit(
 						canonicalEvent(
 							"text.delta",
 							"session-1",
@@ -211,7 +210,6 @@ describe("subscription RPC handlers", () => {
 							{ provider: "claude", createdAt: 3 },
 						),
 					);
-					const cursor = textEvent.sequence;
 					const responses =
 						yield* Queue.unbounded<
 							RpcMessage.FromServer<RpcGroup.Rpcs<typeof WsRpcGroup>>
@@ -269,34 +267,55 @@ describe("subscription RPC handlers", () => {
 							_tag: "synchronized",
 						});
 					}
-					const renamed = yield* commit(
-						canonicalEvent(
-							"session.renamed",
-							"session-1",
-							{ sessionId: "session-1", title: "Renamed" },
-							{ provider: "claude", createdAt: 4 },
-						),
+					// One commit, routed to the subscribers it touches: the shell re-reads
+					// the session row the rename moved, detail re-reads the message the
+					// part write moved. Each source asks its own `version > lastSeen`.
+					const liveVersion = yield* commit(
+						member === "SubscribeShell"
+							? canonicalEvent(
+									"session.renamed",
+									"session-1",
+									{ sessionId: "session-1", title: "Renamed" },
+									{ provider: "claude", createdAt: 4 },
+								)
+							: canonicalEvent(
+									"text.delta",
+									"session-1",
+									{ messageId: "message-1", partId: "part-1", text: " world" },
+									{ provider: "claude", createdAt: 4 },
+								),
 					);
-					yield* TestClock.adjust("50 millis");
 					const expected = {
 						_tag: "upsert",
-						sequence: renamed.sequence,
+						sequence: liveVersion,
 						item: expect.objectContaining(
 							member === "SubscribeShell"
 								? { id: "session-1", title: "Renamed" }
-								: { _tag: "event", event: renamed },
+								: {
+										_tag: "transcriptMessage",
+										message: expect.objectContaining({
+											id: "message-1",
+											text: "Hello world",
+										}),
+									},
 						),
 					};
 					for (let i = 0; i < 33; i++)
 						expect(yield* Queue.take(envelopes)).toMatchObject(expected);
-					const resumed = yield* subscribe(cursor).pipe(
-						Stream.take(2),
-						Stream.runCollect,
+					const resumed = Array.from(
+						yield* subscribe(cursor).pipe(Stream.take(2), Stream.runCollect),
 					);
-					expect(Array.from(resumed)).toEqual([
-						expected,
-						{ _tag: "synchronized" },
-					]);
+					expect(resumed[1]).toEqual({ _tag: "synchronized" });
+					// Detail catches up from the cursor; the shell rebases on it.
+					expect(resumed[0]).toMatchObject(
+						member === "SubscribeShell"
+							? {
+									_tag: "snapshot",
+									sequence: liveVersion,
+									rows: [expect.objectContaining({ title: "Renamed" })],
+								}
+							: expected,
+					);
 				}).pipe(Effect.provide(makeLayer())),
 			{ timeout: 10000 },
 		);

@@ -1,136 +1,56 @@
 // ─── Session-Detail Subscription (delta source #1) ───────────────────────────
 // The concrete SubscriptionSource for a session's detail view — the transcript
-// of messages, streamed text, thinking, and tool activity. It fulfils the ni8.2
-// ReadModelSubscription seam for the latency-sensitive, bursty tenant:
+// of messages, streamed text, thinking, and tool activity.
 //
-//   • snapshot — the projected transcript (durable; survives event eviction),
-//     read with its sequence high-water mark in ONE transaction.
-//   • replay   — the session's committed events strictly after a cursor, paged
-//     past the store's page limit, each passed through RAW.
-//   • live     — the SessionEventBus filtered by session, each event RAW.
+// Its rows are `messages`, which carry a read-model version, so the base read
+// and every live re-query are one query: `WHERE session_id = ? AND version > ?`,
+// the index 0012 created for exactly this. A message part carries no version of
+// its own, so a part write advances the message that owns it and the whole
+// current message comes back — which is why a delta here is a projected
+// transcript message and not the raw event that caused it. The transcript is
+// durable, so it also outlives event eviction.
 //
-// Detail is APPEND-ONLY: it emits `upsert` only, never `remove`. The client
-// reducer seeds from the transcript rows and folds the raw events, applying
-// set-type events (message/tool/turn lifecycle) idempotently — see the two-tier
-// completeness contract in .scratch/foreman-auto/ni8-sources/ni8.3/01-spec.md.
+// Detail is APPEND-ONLY: it emits `upsert` only, never `remove`. Its rows are
+// keyed by message id and an advance speaks in sessions, so a removal has no id
+// to name here; the session's own disappearance is the shell's to report.
+// Resume is therefore a catch-up — the version alone is enough, which is the
+// case the shell cannot make.
 
 import type { SqlError } from "@effect/sql/SqlError";
-import { Chunk, Effect, Option, Stream } from "effect";
+import { Effect, Stream } from "effect";
 import type { SessionDetailItemSchema } from "../../../contracts/ws-rpc.js";
 import {
-	type EventStoreEffect,
-	EventStoreEffectTag,
-	type EventStoreError,
-} from "../../../persistence/effect/event-store-effect.js";
-import {
-	type ReadQueryEffect,
 	type ReadQueryEffectError,
 	ReadQueryEffectTag,
 } from "../../../persistence/effect/read-query-effect.js";
-import type { StoredEvent } from "../../../persistence/events.js";
 import { messageRowsToHistory } from "../../../persistence/session-history-adapter.js";
-import {
-	type Delta,
-	type Envelope,
-	type SubscriptionSource,
-	stream,
-} from "./read-model-subscription.js";
-import {
-	type SessionEventBus,
-	SessionEventBusTag,
-} from "./session-event-bus.js";
+import { type Envelope, stream } from "./read-model-subscription.js";
+import { SessionEventBusTag } from "./session-event-bus.js";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
 /**
- * A single detail row shared by snapshot and deltas, as the seam requires.
- * - `transcriptMessage`: a projected transcript message (snapshot rows only).
- * - `event`: a raw committed event (replay + live deltas).
- *
- * The two variants coexist because the snapshot must be the durable projected
- * transcript (it outlives raw-event eviction) while deltas must be raw events
- * (no re-query on the hot path) — and the orchestrator requires both to share
- * one `T`.
+ * A single detail row shared by the base and the deltas, as the seam requires.
+ * - `transcriptMessage`: a projected transcript message — what this source
+ *   streams, base and delta alike.
+ * - `event`: a raw committed event. Still on the wire for the browser's legacy
+ *   delta arm, which conduit-test-ni8.5.20 retires; nothing produces it here.
  */
 export type SessionDetailItem = typeof SessionDetailItemSchema.Type;
 
-export type SessionDetailSubscriptionError =
-	| ReadQueryEffectError
-	| EventStoreError
-	| SqlError;
-
-// ─── Source adapter ──────────────────────────────────────────────────────────
-
-/** Store page size for replay — matches the event store's default read limit. */
-const REPLAY_PAGE_SIZE = 1000;
-
-const eventToUpsert = (event: StoredEvent): Delta<SessionDetailItem> => ({
-	_tag: "upsert",
-	item: { _tag: "event", event },
-	sequence: event.sequence,
-});
-
-/**
- * Replay ALL events strictly after `afterSequence`, ascending, paging past the
- * store's per-read limit. Pages until an EMPTY read — not merely a short page —
- * so an event committed while the previous page drained is still replayed from
- * the durable store. That matters because its live signal may already have been
- * dropped by the bus's sliding buffer; replay is the recovery path, so it must
- * chase the tail to the end. The final empty read terminates the stream.
- */
-const replayEvents = (
-	eventStore: EventStoreEffect,
-	sessionId: string,
-	afterSequence: number,
-): Stream.Stream<Delta<SessionDetailItem>, SessionDetailSubscriptionError> =>
-	Stream.paginateChunkEffect(afterSequence, (cursor) =>
-		eventStore.readBySession(sessionId, cursor, REPLAY_PAGE_SIZE).pipe(
-			Effect.map((events) => {
-				const last = events[events.length - 1];
-				const next = last ? Option.some(last.sequence) : Option.none<number>();
-				return [Chunk.fromIterable(events.map(eventToUpsert)), next] as const;
-			}),
-		),
-	);
-
-const makeSessionDetailSource = (deps: {
-	readonly sessionId: string;
-	readonly readQuery: ReadQueryEffect;
-	readonly eventStore: EventStoreEffect;
-	readonly bus: SessionEventBus;
-}): SubscriptionSource<SessionDetailItem, SessionDetailSubscriptionError> => ({
-	snapshot: () =>
-		deps.readQuery.getSessionDetailSnapshot(deps.sessionId).pipe(
-			Effect.map(({ messages, sequence }) => ({
-				rows: messageRowsToHistory(messages, {
-					pageSize: messages.length,
-				}).messages.map(
-					(message): SessionDetailItem => ({
-						_tag: "transcriptMessage",
-						message,
-					}),
-				),
-				sequence,
-			})),
-		),
-	replay: (afterSequence) =>
-		replayEvents(deps.eventStore, deps.sessionId, afterSequence),
-	live: () =>
-		deps.bus
-			.subscribe({ sessionId: deps.sessionId })
-			.pipe(Effect.map((events) => Stream.map(events, eventToUpsert))),
-});
+export type SessionDetailSubscriptionError = ReadQueryEffectError | SqlError;
 
 // ─── Public entry point ──────────────────────────────────────────────────────
 
 /**
  * Subscribe to a session's detail stream. Cold start emits the transcript
- * snapshot, a `synchronized` boundary, then raw event deltas; resume replays
- * missed events strictly after `resumeFromSequence`, then goes live. Lifecycle
- * is the ambient Scope: closing it releases the bus subscription.
+ * snapshot, a `synchronized` boundary, then the messages that move; resume
+ * replays only the messages that moved past `resumeFromSequence`, then goes
+ * live. Lifecycle is the ambient Scope: closing it releases the advance
+ * subscription.
  *
- * The event store, read-query service, and SessionEventBus are taken from
- * context so the transport (ni8.5) provides them once at the composition root.
+ * The read-query service and SessionEventBus are taken from context so the
+ * transport (ni8.5) provides them once at the composition root.
  */
 export const subscribeSessionDetail = (options: {
 	readonly sessionId: string;
@@ -138,23 +58,46 @@ export const subscribeSessionDetail = (options: {
 }): Stream.Stream<
 	Envelope<SessionDetailItem>,
 	SessionDetailSubscriptionError,
-	ReadQueryEffectTag | EventStoreEffectTag | SessionEventBusTag
+	ReadQueryEffectTag | SessionEventBusTag
 > =>
 	Stream.unwrap(
 		Effect.gen(function* () {
 			const readQuery = yield* ReadQueryEffectTag;
-			const eventStore = yield* EventStoreEffectTag;
 			const bus = yield* SessionEventBusTag;
-			const source = makeSessionDetailSource({
-				sessionId: options.sessionId,
-				readQuery,
-				eventStore,
+			return stream<SessionDetailItem, SessionDetailSubscriptionError>({
 				bus,
+				source: {
+					read: (range) =>
+						readQuery.readSessionTranscript(options.sessionId, range).pipe(
+							Effect.map(({ messages, version }) => ({
+								// A whole page: `hasMore` is false, so the adapter maps
+								// every row in order and index `i` is still row `i`.
+								// That is what lets each item keep the version its row
+								// carries instead of borrowing the read's counter.
+								rows: messageRowsToHistory(messages, {
+									pageSize: messages.length,
+								}).messages.map((message, index) => ({
+									item: {
+										_tag: "transcriptMessage" as const,
+										message,
+									} satisfies SessionDetailItem,
+									version: messages[index]?.version ?? version,
+								})),
+								version,
+							})),
+						),
+					// A message is stored against the session that owns it — a subagent
+					// message against the subagent session — and the projector reports
+					// that owner, so naming this session is the whole routing test.
+					route: (advance) => ({
+						moved: advance.sessionIds.includes(options.sessionId),
+						removed: [],
+					}),
+					resume: "catchUp",
+				},
+				...(options.resumeFromSequence === undefined
+					? {}
+					: { resumeFromSequence: options.resumeFromSequence }),
 			});
-			return stream(
-				options.resumeFromSequence === undefined
-					? { source }
-					: { source, resumeFromSequence: options.resumeFromSequence },
-			);
 		}),
 	);
