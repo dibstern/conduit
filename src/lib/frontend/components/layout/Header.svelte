@@ -3,14 +3,15 @@
 <!-- Settings, notification, and terminal buttons live in the sidebar footer. -->
 
 <script lang="ts">
-	import Icon from "../ui/Icon.svelte";
 	import Badge from "../ui/Badge.svelte";
 	import Button from "../ui/Button.svelte";
-	import Menu from "../ui/Menu.svelte";
-	import MenuItem from "../ui/MenuItem.svelte";
-	import MenuRadioGroup from "../ui/MenuRadioGroup.svelte";
-	import MenuRadioItem from "../ui/MenuRadioItem.svelte";
-	import MenuSeparator from "../ui/MenuSeparator.svelte";
+	import {
+		openSettings,
+		shareViaQr,
+		toggleDebugPanel,
+		toggleTerminal,
+	} from "./chrome-actions.js";
+	import InstanceBadgeMenu from "./InstanceBadgeMenu.svelte";
 
 	// The box only; ui/Button `toolbar` owns the colours and the 4% hover fill.
 	// A 23px square (4px padding around a 15px glyph at the 12px root), which is
@@ -25,19 +26,7 @@
 		togglePanel,
 	} from "../../stores/ui.svelte.js";
 	import { wsState } from "../../stores/ws.svelte.js";
-	import { beginCreateTab, failCreateTab, terminalState, togglePanel as toggleTerminalPanel } from "../../stores/terminal.svelte.js";
 	import { getCurrentSlug } from "../../stores/router.svelte.js";
-	import { getBrowserClientId } from "../../stores/client-identity.js";
-	import {
-		applyProjectMutationResponse,
-		projectState,
-	} from "../../stores/project.svelte.js";
-	import { createPtyRpc, setProjectInstanceRpc } from "../../transport/ws-rpc-client.js";
-	import {
-		instanceState,
-		getInstanceById,
-		instanceStatusColor,
-	} from "../../stores/instance.svelte.js";
 	import { featureFlags } from "../../stores/feature-flags.svelte.js";
 
 	// ─── Derived state ─────────────────────────────────────────────────────────
@@ -59,22 +48,6 @@
 	});
 	const showClientBadge = $derived(uiState.clientCount > 1);
 
-	const currentInstance = $derived.by(() => {
-		if (instanceState.instances.length <= 1) return undefined;
-		const slug = getCurrentSlug();
-		const project = slug
-			? projectState.projects.find((p) => p.slug === slug)
-			: undefined;
-		if (project?.instanceId) {
-			return getInstanceById(project.instanceId);
-		}
-		return undefined;
-	});
-
-	// ─── Local state ──────────────────────────────────────────────────────────
-
-	let instanceSelectorOpen = $state(false);
-
 	// ─── Handlers ──────────────────────────────────────────────────────────────
 
 	function handleHamburger() {
@@ -85,53 +58,8 @@
 		expandSidebar();
 	}
 
-	function handleQrShare() {
-		window.dispatchEvent(new CustomEvent("qr:show"));
-	}
-
 	function handleToggleUsage() {
 		togglePanel("usage-panel");
-	}
-
-	function handleSelectInstance(instanceId: string) {
-		// Rebind the current project to the selected instance
-		const slug = getCurrentSlug();
-		if (slug) {
-			void setProjectInstanceRpc({
-				projectSlug: slug,
-				slug,
-				instanceId,
-			})
-				.then(applyProjectMutationResponse)
-				.catch(() => undefined);
-		}
-	}
-
-	function handleManageInstances() {
-		window.dispatchEvent(new CustomEvent("settings:open", { detail: { tab: "instances" } }));
-	}
-
-	function requestTerminalCreate() {
-		const slug = getCurrentSlug();
-		if (!slug || !beginCreateTab()) return;
-		void createPtyRpc({
-			projectSlug: slug,
-			originId: getBrowserClientId(),
-		}).catch(() => {
-			failCreateTab("Failed to create terminal");
-		});
-	}
-
-	function handleTerminalToggle() {
-		const wasOpen = terminalState.panelOpen;
-		toggleTerminalPanel();
-		if (!wasOpen && terminalState.tabs.size === 0) {
-			requestTerminalCreate();
-		}
-		// On mobile: maximize terminal so it doesn't clash with chat content
-		if (!wasOpen && window.innerWidth <= 768) {
-			window.dispatchEvent(new CustomEvent("terminal:mobile-maximize"));
-		}
 	}
 </script>
 
@@ -181,67 +109,7 @@
 			<h1 id="project-name" class="text-lg font-semibold tracking-[0.08em] font-brand">
 				<span class="header-project-inner inline-block pr-[3em]">{getCurrentSlug() ?? "conduit"}</span>
 			</h1>
-				{#if currentInstance}
-					<!-- Was a hand-rolled dropdown: a bare <button> toggling an
-					     absolutely-positioned <div> of bare <button>s. It had no
-					     aria-expanded, no aria-haspopup, no role, no arrow-key
-					     navigation, no Escape, and no dismiss on outside click --
-					     the whole menu contract, absent. ui/Menu brings all of it
-					     (conduit-test-de3.35.6).
-
-					     MenuRadioGroup rather than plain items because exactly one
-					     instance is current, which the old markup knew and never
-					     said: the list rendered every instance identically, so the
-					     active one was indistinguishable once the badge was covered
-					     by the menu itself. -->
-					<Menu
-						bind:open={instanceSelectorOpen}
-						ariaLabel="Select instance"
-						align="start"
-						data-testid="instance-selector-dropdown"
-					>
-						{#snippet trigger({ props })}
-							<Button
-								{...props}
-								variant="pill"
-								size="content"
-								class="ml-1"
-								title="{currentInstance.name} ({currentInstance.status})"
-								data-testid="instance-badge"
-							>
-								<span
-									class={"w-1.5 h-1.5 rounded-full shrink-0 " +
-										instanceStatusColor(currentInstance.status)}
-									data-testid="instance-status-dot"
-								></span>
-								{currentInstance.name}
-							</Button>
-						{/snippet}
-
-						<MenuRadioGroup value={currentInstance.id}>
-							{#each instanceState.instances as inst (inst.id)}
-								<MenuRadioItem
-									value={inst.id}
-									onselect={() => handleSelectInstance(inst.id)}
-								>
-									<span class="flex items-center gap-2">
-										<span
-											class={"w-1.5 h-1.5 rounded-full shrink-0 " +
-												instanceStatusColor(inst.status)}
-											data-testid="instance-status-dot"
-										></span>
-										{inst.name}
-									</span>
-								</MenuRadioItem>
-							{/each}
-						</MenuRadioGroup>
-
-						<MenuSeparator />
-						<MenuItem onselect={handleManageInstances}>
-							Manage Instances
-						</MenuItem>
-					</Menu>
-				{/if}
+				<InstanceBadgeMenu class="ml-1" />
 			</div>
 		</div>
 	</div>
@@ -264,7 +132,7 @@
 					iconSize={15}
 					title="Toggle debug panel"
 					ariaLabel="Toggle debug panel"
-					onclick={() => window.dispatchEvent(new CustomEvent("debug:toggle"))}
+					onclick={toggleDebugPanel}
 				/>
 			</div>
 		{/if}
@@ -280,7 +148,7 @@
 			iconSize={15}
 			title="Toggle terminal"
 			ariaLabel="Toggle terminal"
-			onclick={handleTerminalToggle}
+			onclick={toggleTerminal}
 		/>
 
 		<!-- Settings -->
@@ -294,7 +162,7 @@
 			iconSize={15}
 			title="Settings"
 			ariaLabel="Settings"
-			onclick={() => window.dispatchEvent(new CustomEvent("settings:open"))}
+			onclick={() => openSettings()}
 		/>
 
 		<!-- QR share button -->
@@ -308,7 +176,7 @@
 			iconSize={15}
 			title="Share"
 			ariaLabel="Share"
-			onclick={handleQrShare}
+			onclick={shareViaQr}
 		/>
 
 		<!-- Client count badge. `{#if}` rather than `class:hidden`: Tailwind

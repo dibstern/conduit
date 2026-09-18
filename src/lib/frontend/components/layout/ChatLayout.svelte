@@ -8,6 +8,7 @@
 	import { interruptStream, disposeRuntime } from "../../transport/runtime.js";
 	import { getAgentsRpc, getCommandsRpc, getFileTreeRpc, getModelsRpc, getProjectsRpc, listPtysRpc, listSessionsRpc } from "../../transport/ws-rpc-client.js";
 	import Header from "./Header.svelte";
+	import SessionBar from "./SessionBar.svelte";
 	import Sidebar from "./Sidebar.svelte";
 	import InputArea from "../input/InputArea.svelte";
 	import MessageList from "../chat/MessageList.svelte";
@@ -56,6 +57,7 @@
 	import { todoState, clearTodoState } from "../../stores/todo.svelte.js";
 	import { applyGetFileTreeResponse, requestFileTree, clearFileTreeState } from "../../stores/file-tree.svelte.js";
 	import { applyGetProjectsResponse } from "../../stores/project.svelte.js";
+	import { sessionViewState, watchCompactViewport } from "../../stores/session-view.svelte.js";
 	import { getBrowserClientId } from "../../stores/client-identity.js";
 	import { featureFlags, initFeatureFlags, toggleFeature } from "../../stores/feature-flags.svelte.js";
 	import { fetchCurrentVersion } from "../../stores/version.svelte.js";
@@ -480,6 +482,11 @@
 		}
 	});
 
+	// One matchMedia listener for the whole app decides whether the session's
+	// own bar replaces the global header. Kept here rather than in each consumer
+	// so the chrome cannot disagree with itself about what "compact" means.
+	$effect(() => watchCompactViewport());
+
 	// ─── Visual viewport tracking (keyboard avoidance when terminal is open) ──
 	// CSS dvh does NOT account for the virtual keyboard. We listen to the
 	// visualViewport API and constrain #app height so the terminal stays above
@@ -584,8 +591,14 @@
 		class:select-none={isResizing || isSidebarResizing || isFileViewerResizing}
 		style={vvHeight ? `height: ${vvHeight}px;` : ""}
 	>
-		<!-- Header -->
-		<Header />
+		<!-- Chrome: on a phone the session owns the top bar, and the global
+		     header is replaced rather than stacked under. Exactly one of the two
+		     renders, so there is never a second row of chrome to scroll past. -->
+		{#if sessionViewState.compact}
+			<SessionBar />
+		{:else}
+			<Header />
+		{/if}
 
 		<!-- Connection Overlay -->
 		<ConnectOverlay />
