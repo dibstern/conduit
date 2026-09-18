@@ -11,12 +11,13 @@
 // See docs/adr/0004-session-mutations-are-canonical-events.md.
 
 import { SqlClient } from "@effect/sql";
-import { Data, Effect, Option } from "effect";
+import { Data, Effect } from "effect";
 import {
 	loadDaemonConfig,
 	resolveProviderRoutingDriver,
 } from "../../../daemon/config-persistence.js";
 import type { OpenCodeAPI } from "../../../instance/opencode-api.js";
+import { makeCommitAndSignal } from "../../../persistence/effect/commit-and-signal.js";
 import { EventStoreEffectTag } from "../../../persistence/effect/event-store-effect.js";
 import { ProjectionRunnerEffectTag } from "../../../persistence/effect/projection-runner-effect.js";
 import { ReadQueryEffectTag } from "../../../persistence/effect/read-query-effect.js";
@@ -27,7 +28,6 @@ import {
 import type { SessionRow } from "../../../persistence/read-model-types.js";
 import { OpenCodeAPITag } from "../../provider/Services/opencode-api-service.js";
 import { ConfigTag, LoggerTag } from "./services.js";
-import { SessionEventBusTag } from "./session-event-bus.js";
 
 const CLAUDE_PROVIDER_ID = "claude";
 const CLAUDE_SDK_PROVIDER_ID = "claude-sdk";
@@ -172,13 +172,18 @@ export const applySessionCommand = (
 			projectionRunnerOption._tag === "Some" &&
 			sqlOption._tag === "Some"
 		) {
-			const eventStore = eventStoreOption.value;
-			const projectionRunner = projectionRunnerOption.value;
-			const sql = sqlOption.value;
-			const withSql = <A, E>(
-				effect: Effect.Effect<A, E, SqlClient.SqlClient>,
-			): Effect.Effect<A, E> =>
-				effect.pipe(Effect.provideService(SqlClient.SqlClient, sql));
+			// One append+project+announce pipeline, shared with every other
+			// producer. The command path used to own a copy of it plus its own
+			// publish; the read model announces itself now, so there is nothing
+			// left here that could drift from the other pipeline.
+			const commitAndSignal = yield* makeCommitAndSignal.pipe(
+				Effect.provideService(SqlClient.SqlClient, sqlOption.value),
+				Effect.provideService(EventStoreEffectTag, eventStoreOption.value),
+				Effect.provideService(
+					ProjectionRunnerEffectTag,
+					projectionRunnerOption.value,
+				),
+			);
 
 			row = yield* readQueryOption.value.getSession(sessionId).pipe(
 				Effect.mapError(
@@ -204,62 +209,23 @@ export const applySessionCommand = (
 					: row?.provider;
 
 			if (appendProvider !== undefined) {
-				const stored = yield* sql
-					.withTransaction(
-						Effect.gen(function* () {
-							const stored = yield* eventStore
-								.append(
-									canonicalEvent(command.type, sessionId, command.data, {
-										provider: appendProvider,
-										createdAt: Date.now(),
-										metadata: { source: "relay" },
-									}),
-								)
-								.pipe(
-									Effect.mapError(
-										(cause) =>
-											new SessionCommandError({
-												operation: `${command.type}.append`,
-												cause,
-											}),
-									),
-								);
-
-							yield* withSql(projectionRunner.projectEvent(stored)).pipe(
-								Effect.mapError(
-									(cause) =>
-										new SessionCommandError({
-											operation: `${command.type}.project`,
-											cause,
-										}),
-								),
-							);
-
-							return stored;
-						}),
-					)
-					.pipe(
-						// BEGIN failures are typed; Effect SQL leaves COMMIT failures as defects.
-						Effect.catchTag("SqlError", (cause) =>
-							Effect.fail(
-								new SessionCommandError({
-									operation: `${command.type}.transaction`,
-									cause,
-								}),
-							),
-						),
-					);
-
-				// Interim duplicate of commit-and-signal.ts's publish step, pending a
-				// decision on unifying this pipeline with commitAndSignal. Both
-				// shell-subscription.ts and session-detail-subscription.ts read live
-				// session-lifecycle events (including session.deleted) off
-				// SessionEventBus, and this is now the only path that appends+projects
-				// session mutations.
-				const sessionEventBus = yield* Effect.serviceOption(SessionEventBusTag);
-				if (Option.isSome(sessionEventBus)) {
-					yield* sessionEventBus.value.publish([stored]);
-				}
+				yield* commitAndSignal([
+					canonicalEvent(command.type, sessionId, command.data, {
+						provider: appendProvider,
+						createdAt: Date.now(),
+						metadata: { source: "relay" },
+					}),
+				]).pipe(
+					// Projection failures still reach the caller: a user told the
+					// session was deleted must not find it still listed.
+					Effect.mapError(
+						(cause) =>
+							new SessionCommandError({
+								operation: `${command.type}.commit`,
+								cause,
+							}),
+					),
+				);
 			}
 		}
 

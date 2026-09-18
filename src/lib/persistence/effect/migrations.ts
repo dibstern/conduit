@@ -11,6 +11,7 @@ import {
 	MESSAGE_PARTS_FILE_TYPE_MIGRATION,
 	MESSAGES_CONTEXT_WINDOW_MIGRATION,
 	PROJECTION_FAILURES_MIGRATION,
+	READ_MODEL_COUNTER_MIGRATION,
 	READ_MODEL_VERSION_MIGRATION,
 	readMigrationSql,
 	SESSION_CASCADE_DELETES_MIGRATION,
@@ -291,6 +292,13 @@ const preDurableProviderCommandTableNames =
 	preProjectionFailuresTableNames.filter(
 		(name) => !durableProviderCommandTableNameSet.has(name),
 	);
+// 0014 adds one table, and the synchronous registry may have added it before the
+// migrator looks. Treated as an allowed extra rather than part of the baseline,
+// exactly as 0013's `version` columns and their indexes are.
+const readModelCounterTableNames = [
+	...expectedTableNames,
+	"read_model_counter",
+].sort();
 const preDurableCommandReceiptColumns =
 	expectedTableColumns.command_receipts.slice(0, 6);
 
@@ -388,6 +396,7 @@ const verifyExistingBaselineSchema: Effect.Effect<
 	const actualTableNames = tables.map((row) => row.name);
 	const knownTableShape =
 		sameStrings(actualTableNames, expectedTableNames) ||
+		sameStrings(actualTableNames, readModelCounterTableNames) ||
 		sameStrings(actualTableNames, preProjectionFailuresTableNames) ||
 		sameStrings(actualTableNames, preDurableProviderCommandTableNames);
 	if (!knownTableShape) {
@@ -613,6 +622,16 @@ const runReadModelVersionMigration = Effect.gen(function* () {
 	yield* executeSqlStatements(readMigrationSql(READ_MODEL_VERSION_MIGRATION));
 });
 
+const runReadModelCounterMigration = Effect.gen(function* () {
+	const sql = yield* SqlClient.SqlClient;
+	// A database may have applied this SQL through the synchronous registry.
+	const existing = yield* sql<{
+		name: string;
+	}>`SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'read_model_counter'`;
+	if (existing.length > 0) return;
+	yield* executeSqlStatements(readMigrationSql(READ_MODEL_COUNTER_MIGRATION));
+});
+
 /** 2026-07-15T00:00:00.000Z — midnight UTC of the day 0004_drop_events_session_fk shipped (b2b698c6). */
 export const LEGACY_SKELETON_CUTOFF_MS = 1_784_073_600_000;
 export const MAX_PURGEABLE_SKELETON_SESSIONS = 25;
@@ -739,6 +758,7 @@ export const effectMigrationEntries = {
 	"0011_session_cascade_deletes": runSessionCascadeDeletesMigration,
 	"0012_create_projection_failures": runProjectionFailuresMigration,
 	"0013_read_model_version": runReadModelVersionMigration,
+	"0014_read_model_counter": runReadModelCounterMigration,
 } satisfies Record<string, Effect.Effect<void, unknown, SqlClient.SqlClient>>;
 
 export function makeEffectMigrationLoader(

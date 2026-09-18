@@ -202,7 +202,9 @@ describe("applySessionCommand", () => {
 					expect(result._tag).toBe("Left");
 					if (result._tag === "Left") {
 						expect(result.left).toBeInstanceOf(SessionCommandError);
-						expect(result.left.operation).toBe("session.deleted.project");
+						// Append and project are one transaction, so the failure names the
+						// commit that rolled back, not a separate project step.
+						expect(result.left.operation).toBe("session.deleted.commit");
 						expect(result.left.cause).toBeInstanceOf(ProjectionRunnerError);
 					}
 					expect(yield* sessionIds).toEqual(["ses-opencode"]);
