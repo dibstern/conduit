@@ -90,7 +90,9 @@ const makeLayer = (
 				}),
 				Layer.succeed(SessionEventBusTag, {
 					publish: () => Effect.void,
+					publishAdvance: () => Effect.void,
 					subscribe: () => live,
+					subscribeAdvances: () => Effect.succeed(Stream.empty),
 				}),
 			),
 		),
