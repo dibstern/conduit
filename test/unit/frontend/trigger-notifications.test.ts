@@ -121,7 +121,12 @@ describe("triggerNotifications", () => {
 			"../../../src/lib/frontend/stores/ws-notifications.js"
 		);
 
-		await mod.triggerNotifications({ type: "done" } as RelayMessage);
+		await mod.triggerNotifications({
+			type: "done",
+			sessionId: "s1",
+			code: 0,
+			alertId: "turn-1:done",
+		});
 
 		expect(notificationInstances).toHaveLength(1);
 		expect(notificationInstances[0]?.title).toBe("Task Complete");
@@ -218,7 +223,12 @@ describe("triggerNotifications", () => {
 			"../../../src/lib/frontend/stores/ws-notifications.js"
 		);
 
-		await mod.triggerNotifications({ type: "done" } as RelayMessage);
+		await mod.triggerNotifications({
+			type: "done",
+			sessionId: "s1",
+			code: 0,
+			alertId: "turn-1:done",
+		});
 
 		expect(notificationInstances).toHaveLength(0);
 		expect(playDoneSoundMock).toHaveBeenCalledOnce();
@@ -237,7 +247,12 @@ describe("triggerNotifications", () => {
 			"../../../src/lib/frontend/stores/ws-notifications.js"
 		);
 
-		await mod.triggerNotifications({ type: "done" } as RelayMessage);
+		await mod.triggerNotifications({
+			type: "done",
+			sessionId: "s1",
+			code: 0,
+			alertId: "turn-1:done",
+		});
 
 		expect(playDoneSoundMock).toHaveBeenCalledOnce();
 	});
@@ -253,7 +268,12 @@ describe("triggerNotifications", () => {
 			"../../../src/lib/frontend/stores/ws-notifications.js"
 		);
 
-		await mod.triggerNotifications({ type: "done" } as RelayMessage);
+		await mod.triggerNotifications({
+			type: "done",
+			sessionId: "s1",
+			code: 0,
+			alertId: "turn-1:done",
+		});
 
 		expect(playDoneSoundMock).not.toHaveBeenCalled();
 	});
@@ -274,7 +294,12 @@ describe("triggerNotifications", () => {
 		// Activate push (simulates user enabling push notifications)
 		mod.setPushActive(true);
 
-		await mod.triggerNotifications({ type: "done" } as RelayMessage);
+		await mod.triggerNotifications({
+			type: "done",
+			sessionId: "s1",
+			code: 0,
+			alertId: "turn-1:done",
+		});
 
 		// Browser notification should NOT fire because push is active
 		expect(notificationInstances).toHaveLength(0);
@@ -293,7 +318,12 @@ describe("triggerNotifications", () => {
 
 		mod.setPushActive(false);
 
-		await mod.triggerNotifications({ type: "done" } as RelayMessage);
+		await mod.triggerNotifications({
+			type: "done",
+			sessionId: "s1",
+			code: 0,
+			alertId: "turn-1:done",
+		});
 
 		expect(notificationInstances).toHaveLength(1);
 	});
@@ -311,7 +341,12 @@ describe("triggerNotifications", () => {
 			"../../../src/lib/frontend/stores/ws-notifications.js"
 		);
 
-		await mod.triggerNotifications({ type: "done" } as RelayMessage);
+		await mod.triggerNotifications({
+			type: "done",
+			sessionId: "s1",
+			code: 0,
+			alertId: "turn-1:done",
+		});
 
 		expect(notificationInstances).toHaveLength(0);
 	});
@@ -329,7 +364,12 @@ describe("triggerNotifications", () => {
 			"../../../src/lib/frontend/stores/ws-notifications.js"
 		);
 
-		await mod.triggerNotifications({ type: "done" } as RelayMessage);
+		await mod.triggerNotifications({
+			type: "done",
+			sessionId: "s1",
+			code: 0,
+			alertId: "turn-1:done",
+		});
 
 		expect(notificationInstances).toHaveLength(0);
 	});
@@ -349,7 +389,12 @@ describe("triggerNotifications", () => {
 
 		mod.setPushActive(true);
 
-		await mod.triggerNotifications({ type: "done" } as RelayMessage);
+		await mod.triggerNotifications({
+			type: "done",
+			sessionId: "s1",
+			code: 0,
+			alertId: "turn-1:done",
+		});
 
 		// The service worker hands the alert back to this tab as an in_app_alert
 		// and dings there; a second ding from here is one alert heard twice.

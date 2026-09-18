@@ -290,6 +290,7 @@ describe("SessionManagerService", () => {
 			// Deleting the root takes the whole lineage with it, so nothing about
 			// a descendant may outlive it.
 			yield* service.deleteSession("parent-1");
+			expect([...(yield* service.getSessionParentMap())]).toEqual([]);
 			yield* service.sendDualSessionLists((msg) => messages.push(msg));
 
 			expect(messages[0]?.sessions).toEqual([]);

@@ -116,7 +116,12 @@ const seed = (sessionId: string, turnId: string) =>
 			VALUES (${turnId}, ${sessionId}, 'completed', 1000, 1001)`;
 	});
 
-const done: RelayMessage = { type: "done", sessionId: "s1", code: 0 };
+const done: RelayMessage = {
+	type: "done",
+	sessionId: "s1",
+	code: 0,
+	alertId: "turn-1",
+};
 const askUser = (toolId: string): RelayMessage => ({
 	type: "ask_user",
 	sessionId: "s1",
@@ -146,6 +151,41 @@ it("pushes one ding however many pipelines notice the same completed turn", asyn
 		}).pipe(Effect.provide(AlertLedgerLive)),
 	);
 	expect(r.pushed).toEqual(["opencode-done"]);
+});
+
+it("uses the originating alert identity after the next turn exists", async () => {
+	const payloads: Array<Record<string, unknown>> = [];
+	const pushManager = {
+		sendToAll: async (payload: Record<string, unknown>) => {
+			payloads.push(payload);
+			return reachedOneDevice;
+		},
+	};
+	await withStore(
+		Effect.gen(function* () {
+			yield* seed("s1", "turn-1");
+			const r = recorder();
+			yield* sendPushForEventEffect(pushManager, done, r.log, {
+				sessionId: "s1",
+			});
+			const sql = yield* SqlClient.SqlClient;
+			yield* sql`INSERT INTO turns (id, session_id, state, requested_at)
+			VALUES ('turn-2', 's1', 'running', 2000)`;
+			yield* sendPushForEventEffect(pushManager, done, r.log, {
+				sessionId: "s1",
+			});
+			yield* sendPushForEventEffect(
+				pushManager,
+				{ ...done, alertId: "turn-2" },
+				r.log,
+				{ sessionId: "s1" },
+			);
+		}).pipe(Effect.provide(AlertLedgerLive)),
+	);
+	expect(payloads.map((payload) => payload["alertId"])).toEqual([
+		"turn-1",
+		"turn-2",
+	]);
 });
 
 it("does not re-ask a question that reconnect recovery re-emits", async () => {
@@ -274,8 +314,8 @@ it("is reachable from the tag, so the relay can hand it in", async () => {
 		Effect.gen(function* () {
 			yield* seed("s1", "turn-1");
 			const ledger = yield* AlertLedgerTag;
-			return yield* ledger.fireOnce(
-				{ sessionId: "s1", kind: "done" },
+			return yield* ledger.deliver(
+				{ sessionId: "s1", kind: "done", originId: "turn-1" },
 				Effect.void,
 			);
 		}).pipe(Effect.provide(AlertLedgerLive)),

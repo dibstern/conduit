@@ -62,7 +62,7 @@ export interface PushPayload {
 /**
  * Who actually got the push (ni8.23).
  *
- * The fire-once ledger writes a row that says "the user was told". It can only
+ * The delivery ledger marks a receipt only after the push service accepts it. It can only
  * be honest if the send tells it whether anyone was: a `sendToAll` that caught
  * every per-device failure and resolved anyway made every outcome — delivered,
  * refused, no devices at all — look identical to the caller, and the ledger then
@@ -182,7 +182,7 @@ export class PushNotificationManager implements PushNotificationSender {
 	 *
 	 * Per-device failures are still not thrown — one dead phone must not stop the
 	 * laptop from being told — but they are no longer discarded. The report is
-	 * the whole point: it is what lets the fire-once ledger tell "everybody got
+	 * the whole point: it is what lets the delivery ledger tell "everybody got
 	 * it" apart from "nobody did".
 	 */
 	async sendToAll(payload: PushPayload): Promise<PushDeliveryReport> {

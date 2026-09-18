@@ -1,4 +1,6 @@
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
+import { handleSSEEvent } from "../../../src/lib/relay/sse-wiring.js";
+import { createMockSSEWiringDeps } from "../../helpers/mock-factories.js";
 
 const { emit, settings } = vi.hoisted(() => ({
 	emit: vi.fn(),
@@ -174,4 +176,58 @@ it("does not play without being able to retain a delivery receipt", async () => 
 	await page.triggerNotifications(question);
 	await page.triggerNotifications(question);
 	expect(emit).not.toHaveBeenCalled();
+});
+
+it("deduplicates full and lightweight questions without suppressing later questions", async () => {
+	const { handleMessage } = await import(
+		"../../../src/lib/frontend/stores/ws-dispatch.js"
+	);
+	const { applySessionUpsert, sessionState } = await import(
+		"../../../src/lib/frontend/stores/session.svelte.js"
+	);
+	applySessionUpsert({ id: "s1", title: "", status: "idle" });
+	sessionState.currentId = "s1";
+	const deps = createMockSSEWiringDeps();
+	const page = await import(
+		"../../../src/lib/frontend/stores/ws-notifications.js"
+	);
+	for (const [index, toolId] of ["q1", "q2", "q3"].entries()) {
+		const fullQuestion = { ...question, toolId };
+		vi.mocked(deps.translator.translate).mockReturnValue({
+			ok: true,
+			messages: [fullQuestion],
+		});
+		handleSSEEvent(deps, {
+			type: "question.asked",
+			properties: { id: toolId, sessionID: "s1", questions: [] },
+		});
+		const lightweight = vi
+			.mocked(deps.wsHandler.broadcast)
+			.mock.calls.at(-1)?.[0];
+		expect(lightweight?.type).toBe("notification_event");
+		if (!lightweight) throw new Error("Missing question broadcast");
+		if (toolId === "q1") await page.triggerNotifications(fullQuestion);
+		else sessionState.currentId = "other-session";
+		handleMessage(lightweight);
+		await vi.waitFor(() => expect(emit).toHaveBeenCalledTimes(index + 1));
+		// Drain the asynchronous subscription check and tab ownership lock.
+		await page.triggerNotifications(fullQuestion);
+		expect(emit).toHaveBeenCalledTimes(index + 1);
+	}
+});
+
+it("ignores anonymous idle hints without claiming completion receipts", async () => {
+	const page = await import(
+		"../../../src/lib/frontend/stores/ws-notifications.js"
+	);
+	const idle = { type: "done" as const, sessionId: "s1", code: 0 };
+	await page.triggerNotifications(idle);
+	expect(localStorage.getItem("conduit-alert:project:s1:done")).toBeNull();
+	expect(emit).not.toHaveBeenCalled();
+	await page.triggerNotifications({ ...idle, alertId: "turn-1:done" });
+	await page.triggerNotifications(idle);
+	await page.triggerNotifications({ ...idle, alertId: "turn-1:done" });
+	await page.triggerNotifications({ ...idle, alertId: "turn-2:done" });
+	expect(emit).toHaveBeenCalledTimes(2);
+	expect(localStorage.getItem("conduit-alert:project:s1:done")).toBeNull();
 });

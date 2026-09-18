@@ -16,4 +16,4 @@ ALTER TABLE sessions ADD COLUMN last_viewed_at INTEGER;
 -- Existing rows are treated as already seen. The alternative — NULL everywhere —
 -- would light up a badge on every session in the sidebar the first time the user
 -- loads the app after upgrading, for activity they have already read.
-UPDATE sessions SET last_viewed_at = updated_at;
+UPDATE sessions SET last_viewed_at = last_message_at;

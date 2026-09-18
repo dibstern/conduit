@@ -1,13 +1,15 @@
 /// <reference lib="webworker" />
 // ─── Service Worker ──────────────────────────────────────────────────────────
 // Handles push events to show notifications and manages notification clicks
-// to focus/open the relay. No caching — the relay requires a live server
-// connection, so offline caching adds no value and broken cache URLs
-// (hashed Vite assets) prevent the SW from installing.
+// to focus/open the relay. Only successful alert receipts are cached;
+// application assets still require a live server connection.
 
 import type { PermissionId } from "../shared-types.js";
 
 declare const self: ServiceWorkerGlobalScope;
+
+const ALERT_RECEIPT_CACHE = "conduit-alert-receipts-v1";
+const activeDeliveries = new Map<string, Promise<void>>();
 
 // ─── Install: activate immediately ───────────────────────────────────────
 
@@ -22,7 +24,13 @@ self.addEventListener("activate", (event: ExtendableEvent) => {
 	event.waitUntil(
 		caches
 			.keys()
-			.then((keys) => Promise.all(keys.map((key) => caches.delete(key))))
+			.then((keys) =>
+				Promise.all(
+					keys
+						.filter((key) => key !== ALERT_RECEIPT_CACHE)
+						.map((key) => caches.delete(key)),
+				),
+			)
 			.then(() => self.clients.claim()),
 	);
 });
@@ -30,6 +38,7 @@ self.addEventListener("activate", (event: ExtendableEvent) => {
 // ─── Push: show notification ─────────────────────────────────────────────
 
 interface PushPayload {
+	alertId?: string;
 	type?: string;
 	title?: string;
 	body?: string;
@@ -70,21 +79,62 @@ self.addEventListener("push", (event: PushEvent) => {
 
 	// Offer the alert to a focused tab first; show the OS notification unless
 	// that tab says, explicitly, that it dinged (ni8.23, decision 3.1 = F).
-	event.waitUntil(
-		dingInFocusedTab(data).then((handled) => {
-			if (handled) return;
-			return self.registration
-				.showNotification(data.title ?? "Conduit", options)
-				.catch((err: unknown) => {
-					console.warn("[sw] Failed to show notification:", err);
-				});
-		}),
-	);
+	event.waitUntil(deliverPush(data, options));
 });
 
-// Only preparation is timed out. After granting the page ownership, a delayed
-// playback acknowledgement cannot transfer that ownership back to the OS.
+function deliverPush(
+	data: PushPayload,
+	options: NotificationOptions,
+): Promise<void> {
+	const receiptKey = data.alertId
+		? `${self.location.origin}/__alert_receipts__/${encodeURIComponent(JSON.stringify([data.slug ?? "", data.sessionId ?? "", data.alertId]))}`
+		: undefined;
+	// A queued retry waits for the live delivery and then checks its receipt.
+	// Failed deliveries leave no receipt, so that retry remains eligible.
+	const previous = receiptKey ? activeDeliveries.get(receiptKey) : undefined;
+	const delivery = (previous ?? Promise.resolve()).then(async () => {
+		let receipts: Cache | undefined;
+		if (receiptKey) {
+			try {
+				receipts = await caches.open(ALERT_RECEIPT_CACHE);
+				if (await receipts.match(receiptKey)) return;
+			} catch {
+				// Storage failure permits a duplicate rather than suppressing an alert.
+			}
+		}
+		try {
+			if (!(await dingInFocusedTab(data))) {
+				await self.registration.showNotification(
+					data.title ?? "Conduit",
+					options,
+				);
+			}
+		} catch (err: unknown) {
+			console.warn("[sw] Failed to show notification:", err);
+			return;
+		}
+		if (receipts && receiptKey) {
+			try {
+				await receipts.put(receiptKey, new Response("delivered"));
+			} catch {
+				// Delivery succeeded; without a durable receipt replay may repeat it.
+			}
+		}
+	});
+	if (receiptKey) {
+		activeDeliveries.set(receiptKey, delivery);
+		void delivery.finally(() => {
+			if (activeDeliveries.get(receiptKey) === delivery)
+				activeDeliveries.delete(receiptKey);
+		});
+	}
+	return delivery;
+}
+
+// Readiness only prepares playback. Both preparation and delivery need bounded
+// acknowledgements so a disappearing tab cannot swallow the notification.
 const IN_APP_ACK_MS = 150;
+const IN_APP_HANDLED_MS = 100;
 
 async function dingInFocusedTab(data: PushPayload): Promise<boolean> {
 	let focused: WindowClient | undefined;
@@ -111,12 +161,13 @@ async function dingInFocusedTab(data: PushPayload): Promise<boolean> {
 			channel.port1.close();
 			resolve(handled);
 		};
-		const timer = setTimeout(() => settle(false), IN_APP_ACK_MS);
+		let timer = setTimeout(() => settle(false), IN_APP_ACK_MS);
 		channel.port1.onmessage = (event: MessageEvent) => {
 			if (state === "settled") return;
 			if (event.data?.ready === true && state === "offered") {
 				state = "granted";
 				clearTimeout(timer);
+				timer = setTimeout(() => settle(false), IN_APP_HANDLED_MS);
 				channel.port1.postMessage({ granted: true });
 			} else if (event.data?.handled === false) {
 				settle(false);

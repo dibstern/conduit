@@ -198,6 +198,8 @@ function showBrowserNotification(
 
 export async function triggerNotifications(msg: RelayMessage): Promise<void> {
 	if (!NOTIF_TYPES.has(msg.type)) return;
+	// Idle hints update the UI; only an identified terminal event proves completion.
+	if (msg.type === "done" && !msg.alertId) return;
 	// A subscription survives reload and can change in another tab. Resolve it
 	// before choosing a channel, including the first event after page load.
 	if (typeof navigator !== "undefined" && "serviceWorker" in navigator) {

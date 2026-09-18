@@ -14,6 +14,28 @@ describe("Migration Runner", () => {
 		client?.close();
 	});
 
+	it("treats existing sessions as seen when message time exceeds update time", () => {
+		client = SqliteClient.memory();
+		runMigrations(
+			client,
+			schemaMigrations.filter((migration) => migration.id < 14),
+		);
+		client.exec(`
+			INSERT INTO sessions (id, provider, created_at, updated_at, last_message_at)
+			VALUES ('out-of-order', 'opencode', 0, 1000, 2000),
+			       ('no-messages', 'opencode', 0, 1000, NULL)
+		`);
+
+		runMigrations(client, schemaMigrations);
+
+		expect(
+			client.query("SELECT id, last_viewed_at FROM sessions ORDER BY id"),
+		).toEqual([
+			{ id: "no-messages", last_viewed_at: null },
+			{ id: "out-of-order", last_viewed_at: 2000 },
+		]);
+	});
+
 	it("creates the _migrations table on first run", () => {
 		client = SqliteClient.memory();
 		runMigrations(client, []);

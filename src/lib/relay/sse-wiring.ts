@@ -231,7 +231,7 @@ function buildPushContext(slug?: string, sessionId?: string): PushEventContext {
  * Safe to call with any RelayMessage.
  *
  * Legacy/test-only: the live relay runs the Effect wirings, which go through
- * {@link sendPushForEventEffect}. This twin has no fire-once claim, so it can
+ * {@link sendPushForEventEffect}. This twin has no durable delivery claim, so it can
  * ding again on a reload or reconnect — see ni8.23. It survives only because
  * the sync wirings still exist; retire it with them.
  *
@@ -275,9 +275,9 @@ class PushSendFailure extends Data.TaggedError("PushSendFailure")<{
  *
  * Alerts that can be live several at a time carry their own stable id, so every
  * path that re-observes one — including SSE reconnect recovery, which re-emits
- * every pending question at once — computes the same alert. `done` has no id
- * because there is only ever one pending "this session finished" per turn.
- * Without a session id there is nothing to anchor to and no alert to claim.
+ * every pending question at once — computes the same alert. Terminal messages
+ * carry an originating identity supplied by the durable event translator.
+ * Anonymous idle hints cannot identify a completed turn and do not claim one.
  */
 const pushAlert = (
 	msg: RelayMessage,
@@ -286,15 +286,30 @@ const pushAlert = (
 	if (sessionId == null) return undefined;
 	switch (msg.type) {
 		case "done":
-			return { sessionId, kind: "done" };
+			return msg.alertId
+				? { sessionId, kind: "done", originId: msg.alertId }
+				: undefined;
 		case "error":
-			return { sessionId, kind: "error", detail: msg.message ?? "" };
+			return msg.alertId
+				? {
+						sessionId,
+						kind: "error",
+						originId: msg.alertId,
+						detail: msg.message ?? "",
+					}
+				: undefined;
 		case "ask_user":
-			return { sessionId, kind: "ask_user", detail: msg.toolId };
+			return {
+				sessionId,
+				kind: "ask_user",
+				originId: `${sessionId}:question:${msg.toolId}`,
+				detail: msg.toolId,
+			};
 		case "permission_request":
 			return {
 				sessionId,
 				kind: "permission_request",
+				originId: `${sessionId}:permission:${msg.requestId}`,
 				detail: msg.requestId,
 			};
 		default:
@@ -303,8 +318,9 @@ const pushAlert = (
 };
 
 /**
- * The ding: the same push as {@link sendPushForEvent}, but fired at most once
- * per alert and never again on a replay of the observation that produced it.
+ * At-least-once delivery of the same push as {@link sendPushForEvent}, deduplicated
+ * per successful receipt. Abandoned attempts may be retried and recipients
+ * deduplicate the immutable alert identity.
  *
  * This is the Effect-shaped path, and the only one the live relay uses. The
  * difference that matters is not the shape: it is that the send is a real
@@ -344,8 +360,10 @@ export const sendPushForEventEffect = (
 			}
 		}
 
+		const baseAlert = pushAlert(msg, context?.sessionId);
 		const payload = {
 			type: msg.type,
+			alertId: baseAlert?.originId,
 			...content,
 			...(context?.slug != null && { slug: context.slug }),
 			...(context?.sessionId != null && { sessionId: context.sessionId }),
@@ -374,7 +392,6 @@ export const sendPushForEventEffect = (
 			),
 		);
 
-		const baseAlert = pushAlert(msg, context?.sessionId);
 		const alert =
 			baseAlert && context?.recipientId !== undefined
 				? { ...baseAlert, recipientId: context.recipientId }
@@ -383,21 +400,21 @@ export const sendPushForEventEffect = (
 		if (alert === undefined || Option.isNone(ledger)) {
 			yield* Effect.sync(() =>
 				log.warn(
-					`Push (${msg.type}) deferred without a fire-once claim (` +
-						`${alert === undefined ? "no session id" : "alert ledger unwired"}` +
+					`Push (${msg.type}) deferred without a durable delivery claim (` +
+						`${alert === undefined ? "no immutable alert identity" : "alert ledger unwired"}` +
 						`) — delivery requires the alert ledger`,
 				),
 			);
 			return;
 		}
 
-		yield* ledger.value.fireOnce(alert, send).pipe(
+		yield* ledger.value.deliver(alert, send).pipe(
 			Effect.tap((fired) =>
 				fired
 					? Effect.void
 					: Effect.sync(() =>
 							log.verbose(
-								`Push (${msg.type}) already delivered for this turn — not dinging again`,
+								`Push (${msg.type}) already delivered or in flight for this origin`,
 							),
 						),
 			),
@@ -544,7 +561,7 @@ function broadcastRecoveredPermissions(
  *
  * Returning the message instead of pushing it is what lets the caller choose
  * the sender: the live relay is the Effect wiring, and only the Effect sender
- * takes a fire-once claim. While this function pushed on its own it always used
+ * takes a durable delivery claim. While this function pushed on its own it always used
  * the unguarded twin, so every approval and question re-dinged on reconnect —
  * the exact thing the ledger exists to stop (ni8.23 delta 1, P2-8).
  */
@@ -733,6 +750,11 @@ function handleSSEEventAfterPending(
 				wsHandler.broadcast({
 					type: "notification_event",
 					eventType: msg.type,
+					...(msg.type === "ask_user"
+						? {
+								alertId: `${targetSessionId}:question:${msg.toolId}`,
+							}
+						: {}),
 					...(targetSessionId != null ? { sessionId: targetSessionId } : {}),
 				});
 			} else {
@@ -904,6 +926,11 @@ const handleSSEEventAfterPendingEffect = (
 						wsHandler.broadcast({
 							type: "notification_event",
 							eventType: msg.type,
+							...(msg.type === "ask_user"
+								? {
+										alertId: `${targetSessionId}:question:${msg.toolId}`,
+									}
+								: {}),
 							...(targetSessionId != null
 								? { sessionId: targetSessionId }
 								: {}),

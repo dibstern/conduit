@@ -199,7 +199,12 @@ describe("handleSSEEvent", () => {
 
 	it("clears processing timeout when done event arrives for a session", () => {
 		const deps = createMockSSEWiringDeps();
-		const translated: RelayMessage = { type: "done", sessionId: "s1", code: 0 };
+		const translated: RelayMessage = {
+			type: "done",
+			sessionId: "s1",
+			code: 0,
+			alertId: "done-1",
+		};
 		vi.mocked(deps.translator.translate).mockReturnValue({
 			ok: true,
 			messages: [translated],
@@ -218,7 +223,12 @@ describe("handleSSEEvent", () => {
 
 	it("clears processing timeout for done on any session (not just active)", () => {
 		const deps = createMockSSEWiringDeps();
-		const translated: RelayMessage = { type: "done", sessionId: "s1", code: 0 };
+		const translated: RelayMessage = {
+			type: "done",
+			sessionId: "s1",
+			code: 0,
+			alertId: "done-1",
+		};
 		vi.mocked(deps.translator.translate).mockReturnValue({
 			ok: true,
 			messages: [translated],
@@ -704,7 +714,7 @@ describe("handleSSEEvent", () => {
 		});
 	});
 
-	it("sends push notification for done events", () => {
+	it("keeps anonymous done status hints on the UI channel", () => {
 		const mockPush = {
 			sendToAll: vi.fn().mockResolvedValue(undefined),
 		} as unknown as NonNullable<SSEWiringDeps["pushManager"]>;
@@ -721,10 +731,7 @@ describe("handleSSEEvent", () => {
 		};
 		handleSSEEvent(deps, event);
 
-		// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-		expect(mockPush!.sendToAll).toHaveBeenCalledWith(
-			expect.objectContaining({ type: "done", title: "Task Complete" }),
-		);
+		expect(mockPush?.sendToAll).not.toHaveBeenCalled();
 	});
 
 	it("sends push notification for error events", () => {
@@ -734,6 +741,7 @@ describe("handleSSEEvent", () => {
 		const deps = createMockSSEWiringDeps({ pushManager: mockPush });
 		const translated: RelayMessage = {
 			type: "error",
+			alertId: "error-1",
 			sessionId: "s1",
 			code: "SEND_FAILED",
 			message: "Something broke",
@@ -767,7 +775,12 @@ describe("handleSSEEvent", () => {
 			sendToAll: vi.fn().mockResolvedValue(undefined),
 		} as unknown as NonNullable<SSEWiringDeps["pushManager"]>;
 		const deps = createMockSSEWiringDeps({ pushManager: mockPush });
-		const translated: RelayMessage = { type: "done", sessionId: "s1", code: 0 };
+		const translated: RelayMessage = {
+			type: "done",
+			sessionId: "s1",
+			code: 0,
+			alertId: "done-1",
+		};
 		vi.mocked(deps.translator.translate).mockReturnValue({
 			ok: true,
 			messages: [translated],
@@ -1268,7 +1281,14 @@ describe("notification routing: push gating via resolveNotifications", () => {
 		vi.mocked(deps.wsHandler.getClientsForSession).mockReturnValue([]);
 		vi.mocked(deps.translator.translate).mockReturnValue({
 			ok: true,
-			messages: [{ type: "done", sessionId: "s1", code: 0 } as RelayMessage],
+			messages: [
+				{
+					type: "done",
+					sessionId: "s1",
+					code: 0,
+					alertId: "done-1",
+				} as RelayMessage,
+			],
 		});
 
 		const event: OpenCodeEvent = {
@@ -1291,7 +1311,14 @@ describe("notification routing: push gating via resolveNotifications", () => {
 		vi.mocked(deps.wsHandler.getClientsForSession).mockReturnValue([]);
 		vi.mocked(deps.translator.translate).mockReturnValue({
 			ok: true,
-			messages: [{ type: "done", sessionId: "s1", code: 0 } as RelayMessage],
+			messages: [
+				{
+					type: "done",
+					sessionId: "s1",
+					code: 0,
+					alertId: "done-1",
+				} as RelayMessage,
+			],
 		});
 
 		const event: OpenCodeEvent = {
@@ -1310,7 +1337,14 @@ describe("notification routing: push gating via resolveNotifications", () => {
 		vi.mocked(deps.wsHandler.getClientsForSession).mockReturnValue([]);
 		vi.mocked(deps.translator.translate).mockReturnValue({
 			ok: true,
-			messages: [{ type: "done", sessionId: "s1", code: 0 } as RelayMessage],
+			messages: [
+				{
+					type: "done",
+					sessionId: "s1",
+					code: 0,
+					alertId: "done-1",
+				} as RelayMessage,
+			],
 		});
 
 		const event: OpenCodeEvent = {
@@ -1340,6 +1374,7 @@ describe("notification routing: push gating via resolveNotifications", () => {
 			messages: [
 				{
 					type: "error",
+					alertId: "error-1",
 					sessionId: "s1",
 					code: "FATAL",
 					message: "crashed",
@@ -1361,7 +1396,12 @@ describe("notification_event broadcast for dropped notification-worthy events", 
 	it("broadcasts notification_event when done is dropped (no viewers)", () => {
 		const deps = createMockSSEWiringDeps();
 		vi.mocked(deps.wsHandler.getClientsForSession).mockReturnValue([]);
-		const translated: RelayMessage = { type: "done", sessionId: "s1", code: 0 };
+		const translated: RelayMessage = {
+			type: "done",
+			sessionId: "s1",
+			code: 0,
+			alertId: "done-1",
+		};
 		vi.mocked(deps.translator.translate).mockReturnValue({
 			ok: true,
 			messages: [translated],
@@ -1376,6 +1416,7 @@ describe("notification_event broadcast for dropped notification-worthy events", 
 		expect(deps.wsHandler.broadcast).toHaveBeenCalledWith({
 			type: "notification_event",
 			eventType: "done",
+			alertId: "done-1",
 			sessionId: "other-session",
 		});
 	});
@@ -1385,6 +1426,7 @@ describe("notification_event broadcast for dropped notification-worthy events", 
 		vi.mocked(deps.wsHandler.getClientsForSession).mockReturnValue([]);
 		const translated: RelayMessage = {
 			type: "error",
+			alertId: "error-1",
 			sessionId: "s1",
 			code: "FATAL",
 			message: "Something broke",
@@ -1403,6 +1445,7 @@ describe("notification_event broadcast for dropped notification-worthy events", 
 		expect(deps.wsHandler.broadcast).toHaveBeenCalledWith({
 			type: "notification_event",
 			eventType: "error",
+			alertId: "error-1",
 			message: "Something broke",
 			sessionId: "other-session",
 		});
@@ -1412,7 +1455,12 @@ describe("notification_event broadcast for dropped notification-worthy events", 
 		const deps = createMockSSEWiringDeps();
 		// Has viewers — event is sent normally
 		vi.mocked(deps.wsHandler.getClientsForSession).mockReturnValue(["c1"]);
-		const translated: RelayMessage = { type: "done", sessionId: "s1", code: 0 };
+		const translated: RelayMessage = {
+			type: "done",
+			sessionId: "s1",
+			code: 0,
+			alertId: "done-1",
+		};
 		vi.mocked(deps.translator.translate).mockReturnValue({
 			ok: true,
 			messages: [translated],

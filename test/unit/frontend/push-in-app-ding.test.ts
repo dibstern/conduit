@@ -46,6 +46,10 @@ let pushListener: ((event: unknown) => void) | null = null;
 let showNotification: ReturnType<typeof vi.fn>;
 let windowClients: FakeClient[] = [];
 let delivered: unknown[] = [];
+let receiptCache: Map<string, Response>;
+let activateListener: ((event: unknown) => void) | null = null;
+let deleteCache: ReturnType<typeof vi.fn>;
+let openCache: ReturnType<typeof vi.fn>;
 
 /** A tab. `reply` is what its in-app handler does when offered the alert. */
 function fakeClient(
@@ -82,6 +86,8 @@ async function push(data: unknown): Promise<void> {
 beforeEach(async () => {
 	vi.resetModules();
 	pushListener = null;
+	activateListener = null;
+	receiptCache = new Map();
 	windowClients = [];
 	delivered = [];
 	playDoneSoundMock.mockClear();
@@ -92,6 +98,8 @@ beforeEach(async () => {
 	vi.stubGlobal("self", {
 		addEventListener: vi.fn((type: string, handler: EventHandler) => {
 			if (type === "push") pushListener = handler as (event: unknown) => void;
+			if (type === "activate")
+				activateListener = handler as (event: unknown) => void;
 		}),
 		skipWaiting: vi.fn(),
 		clients: {
@@ -102,15 +110,24 @@ beforeEach(async () => {
 		registration: { showNotification, scope: "/" },
 		location: { origin: "http://localhost:2633" },
 	});
+	deleteCache = vi.fn();
+	openCache = vi.fn(async () => ({
+		match: async (key: string) => receiptCache.get(key),
+		put: async (key: string, response: Response) => {
+			receiptCache.set(key, response);
+		},
+	}));
 	vi.stubGlobal("caches", {
-		keys: vi.fn().mockResolvedValue([]),
-		delete: vi.fn(),
+		keys: vi.fn(async () => ["conduit-alert-receipts-v1", "old-assets"]),
+		delete: deleteCache,
+		open: openCache,
 	});
 
 	await import("../../../src/lib/frontend/sw.js");
 });
 
 afterEach(() => {
+	vi.useRealTimers();
 	vi.unstubAllGlobals();
 });
 
@@ -123,6 +140,98 @@ const doneAlert = {
 };
 
 describe("SW push: in-app ding vs OS notification", () => {
+	it.each([
+		"tab",
+		"OS",
+	])("deduplicates concurrent and restarted %s delivery", async (recipient) => {
+		if (recipient === "tab") windowClients = [fakeClient(true, "ack")];
+		const identified = {
+			...doneAlert,
+			slug: "project",
+			alertId: "turn-1:done",
+		};
+		await Promise.all([push(identified), push(identified)]);
+		expect(
+			recipient === "tab"
+				? delivered.length
+				: showNotification.mock.calls.length,
+		).toBe(1);
+		vi.resetModules();
+		await import("../../../src/lib/frontend/sw.js");
+		await push(identified);
+		expect(
+			recipient === "tab"
+				? delivered.length
+				: showNotification.mock.calls.length,
+		).toBe(1);
+		await push({ ...identified, alertId: "turn-2:done" });
+		expect(
+			recipient === "tab"
+				? delivered.length
+				: showNotification.mock.calls.length,
+		).toBe(2);
+	});
+
+	it("retains successful receipts when a new worker activates", async () => {
+		if (!activateListener) throw new Error("activate listener not registered");
+		const pending: Promise<unknown>[] = [];
+		activateListener({
+			waitUntil: (work: Promise<unknown>) => pending.push(work),
+		});
+		await Promise.all(pending);
+		expect(deleteCache).toHaveBeenCalledExactlyOnceWith("old-assets");
+	});
+
+	it("retries a failed OS delivery without retaining a receipt", async () => {
+		const identified = { ...doneAlert, alertId: "turn-1:done" };
+		showNotification.mockRejectedValueOnce(
+			new Error("notification unavailable"),
+		);
+		await push(identified);
+		expect(receiptCache.size).toBe(0);
+		await push(identified);
+		expect(showNotification).toHaveBeenCalledTimes(2);
+		expect(receiptCache.size).toBe(1);
+	});
+
+	it("waits for live delivery before deciding whether a retry is needed", async () => {
+		let finish: (() => void) | undefined;
+		showNotification.mockImplementationOnce(
+			() =>
+				new Promise<void>((resolve) => {
+					finish = resolve;
+				}),
+		);
+		const identified = { ...doneAlert, alertId: "turn-1:done" };
+		const first = push(identified);
+		await vi.waitFor(() => expect(showNotification).toHaveBeenCalledOnce());
+		const retry = push(identified);
+		expect(receiptCache.size).toBe(0);
+		finish?.();
+		await Promise.all([first, retry]);
+		expect(showNotification).toHaveBeenCalledOnce();
+		expect(receiptCache.size).toBe(1);
+	});
+
+	it.each([
+		"read",
+		"write",
+	])("delivers again when receipt %s fails", async (failure) => {
+		openCache.mockResolvedValue({
+			match: async () => {
+				if (failure === "read") throw new Error("storage unavailable");
+				return undefined;
+			},
+			put: async () => {
+				throw new Error("storage unavailable");
+			},
+		});
+		const identified = { ...doneAlert, alertId: "turn-1:done" };
+		await push(identified);
+		await push(identified);
+		expect(showNotification).toHaveBeenCalledTimes(2);
+	});
+
 	it("hands the alert to a focused tab instead of the OS", async () => {
 		windowClients = [fakeClient(true, "ack")];
 
@@ -137,7 +246,7 @@ describe("SW push: in-app ding vs OS notification", () => {
 		expect(showNotification).not.toHaveBeenCalled();
 	});
 
-	it("does not fall back while the playback acknowledgement is delayed", async () => {
+	it("accepts a delayed playback acknowledgement within the delivery deadline", async () => {
 		windowClients = [
 			{
 				focused: true,
@@ -145,13 +254,42 @@ describe("SW push: in-app ding vs OS notification", () => {
 				postMessage: (_message, ports) => {
 					const port = ports?.[0] as MessagePort;
 					port.onmessage = () =>
-						setTimeout(() => port.postMessage({ handled: true }), 220);
+						setTimeout(() => port.postMessage({ handled: true }), 50);
 					port.postMessage({ ready: true });
 				},
 			},
 		];
 		await push(doneAlert);
 		expect(showNotification).not.toHaveBeenCalled();
+	});
+
+	it("shows the OS notification when the tab vanishes after ownership is granted", async () => {
+		vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+		const granted = new Promise<void>((resolve) => {
+			windowClients = [
+				{
+					focused: true,
+					visibilityState: "visible",
+					postMessage: (_message, ports) => {
+						const port = ports?.[0] as MessagePort;
+						port.onmessage = () => {
+							port.close();
+							resolve();
+						};
+						port.postMessage({ ready: true });
+					},
+				},
+			];
+		});
+		const delivery = push(doneAlert);
+		await granted;
+		expect(showNotification).not.toHaveBeenCalled();
+		await vi.advanceTimersByTimeAsync(100);
+		expect(showNotification).toHaveBeenCalledWith(
+			"Task Complete",
+			expect.objectContaining({ tag: "opencode-done" }),
+		);
+		await delivery;
 	});
 
 	it("shows the OS notification when the focused tab never answers", async () => {

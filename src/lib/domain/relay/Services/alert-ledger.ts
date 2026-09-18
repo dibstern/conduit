@@ -1,54 +1,31 @@
-// ─── Alert Ledger ────────────────────────────────────────────────────────────
-// Fire-once for the ding (ni8.23, decision 3.1 = F).
-//
-// notification_event used to carry two things under one name: a BADGE, which is
-// state and must be re-derivable on every reload, and a DING, which is an alert
-// and must fire exactly once and never on replay. The badge became three derived
-// columns on the session row. This is the other half.
-//
-// Why it has to be durable. Three pipeline paths can observe the same completed
-// turn — the SSE stream, the message poller, and the status poller's safety-net
-// done — and the existing defence is an in-memory Set consumed per busy cycle.
-// That Set is empty after a restart, which is precisely when the SSE reconnect
-// reconciliation re-reads sessions that finished while the daemon was down. An
-// in-memory guard therefore protects against the duplicate that is merely
-// annoying and not against the replay that wakes someone up at 3am.
-//
-// The shape is deliberately narrow: `fireOnce` runs the send itself, so a caller
-// cannot claim without sending or send without claiming, and a send that fails
-// gives the claim back. A ledger row is a statement that the user was told;
-// leaving one behind for a push that never left the process would silence every
-// retry and leave nothing anywhere saying the alert was lost.
+// At-least-once delivery with recipient-side deduplication. A pending claim is
+// retryable after abandonment; only successful sends become delivered receipts.
+// The daemon is the single owner of each project store. Live attempts are tracked
+// process-wide, including across ledger instances sharing that store.
 
+import { randomUUID } from "node:crypto";
 import { SqlClient } from "@effect/sql";
 import type { SqlError } from "@effect/sql/SqlError";
 import { Context, Effect, Layer } from "effect";
 
-/**
- * What the ding is about.
- *
- * `kind` is the push-worthy message type. `detail` is the alert's own stable
- * identity where it has one — a permission's request id, a question's tool id,
- * an error's text — and is what keeps two questions live at the same time from
- * pushing each other out of the ledger. Alerts without a detail ("done") are
- * about the session as a whole and supersede each other by turn.
- */
+/** An immutable originating turn, message, question, or permission identity. */
 export interface SessionAlert {
 	readonly sessionId: string;
+	readonly originId: string;
 	readonly kind: "done" | "error" | "ask_user" | "permission_request";
 	readonly detail?: string;
 	readonly recipientId?: string;
 }
 
+const activeClaims = new Set<string>();
+
 export interface AlertLedger {
 	/**
-	 * Fire this alert if nobody has. Returns whether `send` ran.
-	 *
-	 * The claim is taken before `send` and released if `send` fails, is
-	 * interrupted, or dies — the ledger only keeps rows for alerts that were
-	 * actually delivered to the push layer.
+	 * Attempt delivery unless already delivered or currently in flight.
+	 * Abandoned pending claims are retried; a crash after sending but before
+	 * recording success can deliver twice. Recipients deduplicate the alert id.
 	 */
-	readonly fireOnce: <E, R>(
+	readonly deliver: <E, R>(
 		alert: SessionAlert,
 		send: Effect.Effect<void, E, R>,
 	) => Effect.Effect<boolean, E | SqlError, R>;
@@ -75,79 +52,69 @@ export const makeAlertLedger: Effect.Effect<
 			: JSON.stringify([key, alert.recipientId]);
 	};
 
-	/**
-	 * When the alert is about.
-	 *
-	 * The session's latest turn: every path that notices one completed turn
-	 * computes the same string, and the next turn computes a different one. A
-	 * session with no turn rows falls back to its last message time, and a
-	 * session with neither anchors on 0 — which fires, deliberately. A ding that
-	 * repeats is a nuisance; a ding that never arrives is the bug.
-	 */
-	const anchorOf = (alert: SessionAlert) =>
-		Effect.gen(function* () {
-			const rows = yield* sql<{
-				turnId: string | null;
-				lastMessageAt: number | null;
-			}>`
-				SELECT
-					(SELECT id FROM turns WHERE session_id = ${alert.sessionId}
-						ORDER BY requested_at DESC, rowid DESC LIMIT 1) AS turnId,
-					(SELECT last_message_at FROM sessions WHERE id = ${alert.sessionId})
-						AS lastMessageAt`;
-			const row = rows[0];
-			return row?.turnId ?? `m${row?.lastMessageAt ?? 0}`;
-		});
-
-	/**
-	 * Take the claim, atomically.
-	 *
-	 * The UPDATE's WHERE is what makes this a claim rather than an upsert: it
-	 * runs only when the stored anchor names a DIFFERENT alert, so re-observing
-	 * the alert already sent returns no row and the caller stays quiet.
-	 */
-	const claim = (alert: SessionAlert, anchor: string) =>
-		Effect.map(
-			sql<{ session_id: string }>`
-				INSERT INTO sent_alerts (session_id, alert_key, anchor, sent_at)
-				VALUES (${alert.sessionId}, ${keyOf(alert)}, ${anchor}, ${Date.now()})
-				ON CONFLICT (session_id, alert_key) DO UPDATE
-					SET anchor = excluded.anchor, sent_at = excluded.sent_at
-					WHERE sent_alerts.anchor <> excluded.anchor
-				RETURNING session_id`,
-			(rows) => rows.length > 0,
-		);
-
-	const release = (alert: SessionAlert, anchor: string) =>
-		sql`DELETE FROM sent_alerts
-			WHERE session_id = ${alert.sessionId} AND alert_key = ${keyOf(alert)}
-				AND anchor = ${anchor}`;
-
-	const fireOnce = <E, R>(
+	const deliver = <E, R>(
 		alert: SessionAlert,
 		send: Effect.Effect<void, E, R>,
 	): Effect.Effect<boolean, E | SqlError, R> =>
-		Effect.gen(function* () {
-			const anchor = yield* anchorOf(alert);
-			const claimed = yield* claim(alert, anchor);
-			if (!claimed) return false;
-			yield* send.pipe(
-				Effect.onError(() =>
-					release(alert, anchor).pipe(
-						// The retry is gone and the user was not told. Nothing else in
-						// the system will ever mention it, so say so here.
-						Effect.catchAll((cause) =>
-							Effect.logError(
-								`alert ledger could not release the ${alert.kind} claim for ${alert.sessionId}; this alert will not be retried: ${cause}`,
+		Effect.acquireUseRelease(
+			Effect.sync(() => {
+				const claimId = randomUUID();
+				activeClaims.add(claimId);
+				return claimId;
+			}),
+			(claimId) =>
+				Effect.gen(function* () {
+					const anchor = alert.originId;
+					const key = keyOf(alert);
+					const existing = yield* sql<{
+						state: string;
+						claim_id: string | null;
+					}>`
+					SELECT state, claim_id FROM sent_alerts
+					WHERE session_id = ${alert.sessionId} AND alert_key = ${key}
+						AND anchor = ${anchor}`;
+					const previous = existing[0];
+					if (
+						previous?.state === "delivered" ||
+						(previous?.claim_id && activeClaims.has(previous.claim_id))
+					)
+						return false;
+					const claimed = yield* sql<{ session_id: string }>`
+					INSERT INTO sent_alerts (session_id, alert_key, anchor, sent_at, state, claim_id)
+					VALUES (${alert.sessionId}, ${key}, ${anchor}, ${Date.now()}, 'pending', ${claimId})
+					ON CONFLICT (session_id, alert_key, anchor) DO UPDATE SET
+						anchor = excluded.anchor, sent_at = excluded.sent_at,
+						state = 'pending', claim_id = excluded.claim_id
+					WHERE (sent_alerts.state = 'pending' AND sent_alerts.claim_id IS ${previous?.claim_id ?? null})
+					RETURNING session_id`;
+					if (claimed.length === 0) return false;
+					// The push adapter cannot cancel its network promise. Keep ownership
+					// through settlement even if this fiber is interrupted.
+					yield* send.pipe(
+						Effect.onError(() =>
+							sql`DELETE FROM sent_alerts WHERE claim_id = ${claimId}`.pipe(
+								Effect.catchAll((cause) =>
+									Effect.logError(
+										`Could not release pending alert; replay can retry: ${cause}`,
+									),
+								),
 							),
 						),
-					),
-				),
-			);
-			return true;
-		});
+						Effect.zipRight(
+							sql`UPDATE sent_alerts SET state = 'delivered', sent_at = ${Date.now()}
+						WHERE claim_id = ${claimId}`,
+						),
+						Effect.uninterruptible,
+					);
+					return true;
+				}),
+			(claimId) =>
+				Effect.sync(() => {
+					activeClaims.delete(claimId);
+				}),
+		);
 
-	return { fireOnce } satisfies AlertLedger;
+	return { deliver } satisfies AlertLedger;
 });
 
 export const AlertLedgerLive: Layer.Layer<

@@ -26,7 +26,7 @@ describe("sendPushForEvent with context", () => {
 		const push = createMockPushManager();
 		sendPushForEvent(
 			push,
-			{ type: "done", sessionId: "s1", code: 0 },
+			{ type: "done", sessionId: "s1", code: 0, alertId: "turn-1:done" },
 			createSilentLogger(),
 			{
 				slug: "my-project",
@@ -48,7 +48,7 @@ describe("sendPushForEvent with context", () => {
 		const push = createMockPushManager();
 		sendPushForEvent(
 			push,
-			{ type: "done", sessionId: "s1", code: 0 },
+			{ type: "done", sessionId: "s1", code: 0, alertId: "turn-1:done" },
 			createSilentLogger(),
 			{
 				sessionId: "sess-123",
@@ -65,7 +65,7 @@ describe("sendPushForEvent with context", () => {
 		const push = createMockPushManager();
 		sendPushForEvent(
 			push,
-			{ type: "done", sessionId: "s1", code: 0 },
+			{ type: "done", sessionId: "s1", code: 0, alertId: "turn-1:done" },
 			createSilentLogger(),
 			{
 				slug: "my-project",
@@ -82,7 +82,7 @@ describe("sendPushForEvent with context", () => {
 		const push = createMockPushManager();
 		sendPushForEvent(
 			push,
-			{ type: "done", sessionId: "s1", code: 0 },
+			{ type: "done", sessionId: "s1", code: 0, alertId: "turn-1:done" },
 			createSilentLogger(),
 		);
 
@@ -104,7 +104,12 @@ describe("sendPushForEvent with context", () => {
 describe("resolveNotifications with sessionId", () => {
 	it("includes sessionId in crossSessionPayload when route drops", () => {
 		const result = resolveNotifications(
-			{ type: "done", sessionId: "s1", code: 0 } as RelayMessage,
+			{
+				type: "done",
+				sessionId: "s1",
+				code: 0,
+				alertId: "turn-1:done",
+			} as RelayMessage,
 			{ action: "drop", reason: "no viewers" },
 			false,
 			"sess-456",
@@ -117,7 +122,12 @@ describe("resolveNotifications with sessionId", () => {
 
 	it("omits sessionId from crossSessionPayload when not provided", () => {
 		const result = resolveNotifications(
-			{ type: "done", sessionId: "s1", code: 0 } as RelayMessage,
+			{
+				type: "done",
+				sessionId: "s1",
+				code: 0,
+				alertId: "turn-1:done",
+			} as RelayMessage,
 			{ action: "drop", reason: "no viewers" },
 			false,
 		);
@@ -129,7 +139,12 @@ describe("resolveNotifications with sessionId", () => {
 
 	it("does not include sessionId when route sends (no cross-session payload)", () => {
 		const result = resolveNotifications(
-			{ type: "done", sessionId: "s1", code: 0 } as RelayMessage,
+			{
+				type: "done",
+				sessionId: "s1",
+				code: 0,
+				alertId: "turn-1:done",
+			} as RelayMessage,
 			{ action: "send", sessionId: "s1" },
 			false,
 			"sess-789",

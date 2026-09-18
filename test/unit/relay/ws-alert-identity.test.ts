@@ -13,7 +13,7 @@ import {
 } from "../../../src/lib/domain/relay/Services/ws-handler-service.js";
 import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
 
-it("gives every WS delivery of one turn a stable identity, and the next turn a new identity", async () => {
+it("preserves originating identity across delivery shapes after the latest turn changes", async () => {
 	await Effect.runPromise(
 		Effect.gen(function* () {
 			const sql = yield* SqlClient.SqlClient;
@@ -29,7 +29,12 @@ it("gives every WS delivery of one turn a stable identity, and the next turn a n
 			});
 			yield* bindClientSession("c1", "s1");
 			yield* markClientBootstrapped("c1");
-			const done = { type: "done", sessionId: "s1", code: 0 } as const;
+			const done = {
+				type: "done",
+				sessionId: "s1",
+				code: 0,
+				alertId: "t1:done",
+			} as const;
 			yield* sendTo("c1", done);
 			yield* sendToSession("s1", done);
 			yield* broadcastPerSessionEvent("s1", done);
@@ -37,12 +42,15 @@ it("gives every WS delivery of one turn a stable identity, and the next turn a n
 				type: "notification_event",
 				sessionId: "s1",
 				eventType: "done",
+				alertId: done.alertId,
 			});
 			expect(sent[0]?.alertId).toBeTypeOf("string");
 			expect(new Set(sent.map((x) => x.alertId)).size).toBe(1);
 			yield* sql`INSERT INTO turns (id, session_id, requested_at) VALUES ('t2', 's1', 2)`;
 			yield* broadcast(done);
-			expect(sent[4]?.alertId).not.toBe(sent[0]?.alertId);
+			expect(sent[4]?.alertId).toBe(sent[0]?.alertId);
+			yield* broadcast({ ...done, alertId: "t2:done" });
+			expect(sent[5]?.alertId).not.toBe(sent[0]?.alertId);
 		}).pipe(
 			Effect.provide(
 				Layer.merge(
@@ -54,7 +62,7 @@ it("gives every WS delivery of one turn a stable identity, and the next turn a n
 	);
 });
 
-it("anchors alerts without turns on the last message and preserves error identity across paths", async () => {
+it("preserves explicit error identity across paths without reading mutable message timestamps", async () => {
 	await Effect.runPromise(
 		Effect.gen(function* () {
 			const sql = yield* SqlClient.SqlClient;
@@ -72,18 +80,21 @@ it("anchors alerts without turns on the last message and preserves error identit
 				sessionId: "s1",
 				code: "ERR",
 				message: "rate limited",
+				alertId: "rate-limit-1",
 			});
 			yield* broadcast({
 				type: "notification_event",
 				sessionId: "s1",
 				eventType: "error",
 				message: "rate limited",
+				alertId: "rate-limit-1",
 			});
 			yield* broadcast({
 				type: "error",
 				sessionId: "s1",
 				code: "ERR",
 				message: "disk full",
+				alertId: "disk-error-1",
 			});
 			expect(sent[0]?.alertId).toBeTypeOf("string");
 			expect(sent[1]?.alertId).toBe(sent[0]?.alertId);
@@ -94,8 +105,23 @@ it("anchors alerts without turns on the last message and preserves error identit
 				sessionId: "s1",
 				code: "ERR",
 				message: "rate limited",
+				alertId: "rate-limit-1",
 			});
-			expect(sent[3]?.alertId).not.toBe(sent[0]?.alertId);
+			expect(sent[3]?.alertId).toBe(sent[0]?.alertId);
+			yield* broadcast({
+				type: "error",
+				sessionId: "s1",
+				code: "ERR",
+				message: "legacy error",
+			});
+			yield* broadcast({
+				type: "error",
+				sessionId: "s1",
+				code: "ERR",
+				message: "legacy error",
+			});
+			expect(sent[4]?.alertId).toBeTypeOf("string");
+			expect(sent[5]?.alertId).not.toBe(sent[4]?.alertId);
 		}).pipe(
 			Effect.provide(
 				Layer.merge(
