@@ -355,6 +355,7 @@ const switchClientToSession = (
 		const source: SessionHistorySource = options?.skipHistory
 			? { kind: "empty" }
 			: yield* resolveSessionHistory(sessionId);
+		// Completion is subtree-aware even though the sidebar receives raw rows.
 		const pollerIsProcessing = yield* statusPoller.isProcessing(sessionId);
 		const patchedSource = patchMissingDoneForProcessingState(
 			source,

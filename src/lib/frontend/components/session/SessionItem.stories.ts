@@ -1,4 +1,5 @@
 import type { Meta, StoryObj } from "@storybook/svelte-vite";
+import { applySessionSnapshot } from "../../stores/session.svelte.js";
 import {
 	mockSession,
 	mockSessionLongTitle,
@@ -10,6 +11,12 @@ const meta = {
 	title: "Session/SessionItem",
 	component: SessionItem,
 	tags: ["autodocs"],
+	beforeEach: () => {
+		applySessionSnapshot(
+			[mockSession, mockSessionProcessing, mockSessionLongTitle],
+			"complete",
+		);
+	},
 } satisfies Meta<typeof SessionItem>;
 
 export default meta;

@@ -22,19 +22,13 @@ import {
 } from "effect";
 
 import type { SessionStatus } from "../../../instance/sdk-types.js";
-import { computeAugmentedStatuses } from "../../../session/status-augmentation.js";
+import { busySessionIds } from "../../../session-busy.js";
 
 // ─── Constants ──────────────────────────────────────────────────────────────
 
 export const DEFAULT_RECONCILIATION_INTERVAL_MS = 7_000;
 
 const STATUS_CORRECTION_CONCURRENCY = 8;
-
-/**
- * How long a message-activity busy flag stays valid after the last
- * markMessageActivity() call. 10s = ~13 polls at 750ms.
- */
-const MESSAGE_ACTIVITY_TTL_MS = 10_000;
 
 /**
  * If a session has been "busy" for longer than this with no events,
@@ -66,16 +60,10 @@ export interface SessionStatusInfo {
 // ─── PollerState ────────────────────────────────────────────────────────────
 
 export interface PollerState {
-	/** Last known statuses (augmented) — the primary read value. */
+	/** Last known source statuses — the primary read value. */
 	previousStatuses: Record<string, SessionStatus>;
 	/** Last known raw statuses — used for change detection. */
 	previousRaw: Record<string, SessionStatus>;
-	/** Message activity timestamps per session. */
-	activityTimestamps: HashMap.HashMap<string, number>;
-	/** Child-to-parent cache for subagent propagation. */
-	childToParentCache: HashMap.HashMap<string, string | undefined>;
-	/** Sessions that SSE has confirmed as idle. */
-	sseIdleSessions: ReadonlySet<string>;
 	/** Whether the first poll has completed (baseline established). */
 	initialized: boolean;
 	/** Guard against overlapping polls. */
@@ -86,9 +74,6 @@ export const PollerState = {
 	empty: (): PollerState => ({
 		previousStatuses: {},
 		previousRaw: {},
-		activityTimestamps: HashMap.empty(),
-		childToParentCache: HashMap.empty(),
-		sseIdleSessions: new Set(),
 		initialized: false,
 		polling: false,
 	}),
@@ -130,90 +115,33 @@ export class PollerError extends Data.TaggedError("PollerError")<{
 
 // ─── Status reading operations ──────────────────────────────────────────
 
-/** Get the most recently polled (augmented) statuses. */
+/** Get the most recently polled source statuses. */
 export const getCurrentStatuses = Effect.gen(function* () {
 	const ref = yield* PollerStateTag;
 	const state = yield* Ref.get(ref);
 	return { ...state.previousStatuses };
 }).pipe(Effect.withSpan("statusPoller.getCurrentStatuses"));
 
-/** Check if a specific session is currently processing (busy or retry). */
-export const isProcessing = (sessionId: string) =>
+/** Completion/history guard; source statuses themselves remain unaugmented. */
+export const isProcessing = (
+	sessionId: string,
+	parents: ReadonlyMap<string, string> = new Map(),
+) =>
 	Effect.gen(function* () {
 		const ref = yield* PollerStateTag;
 		const state = yield* Ref.get(ref);
-		const status = state.previousStatuses[sessionId];
-		if (!status) return false;
-		return status.type === "busy" || status.type === "retry";
-	}).pipe(Effect.withSpan("statusPoller.isProcessing"));
-
-// ─── Message activity operations ────────────────────────────────────────
-
-/** Mark a session as busy due to message-poller activity. */
-export const markMessageActivity = (sessionId: string) =>
-	Effect.gen(function* () {
-		const ref = yield* PollerStateTag;
-		const state = yield* Ref.get(ref);
-
-		// If SSE has confirmed this session is idle, ignore stale activity
-		if (state.sseIdleSessions.has(sessionId)) return;
-
-		const isNew = !HashMap.has(state.activityTimestamps, sessionId);
-		yield* Ref.update(ref, (s) => ({
-			...s,
-			activityTimestamps: HashMap.set(
-				s.activityTimestamps,
-				sessionId,
-				Date.now(),
+		return busySessionIds(
+			new Map(
+				Object.entries(state.previousStatuses).map(([id, status]) => [
+					id,
+					{
+						status: status.type,
+						parentID: parents.get(id),
+					},
+				]),
 			),
-		}));
-
-		if (isNew) {
-			yield* Effect.log(
-				`message-activity BUSY session=${sessionId.slice(0, 12)}`,
-			);
-		}
-	}).pipe(
-		Effect.annotateLogs("component", "status-poller"),
-		Effect.withSpan("statusPoller.markMessageActivity"),
-	);
-
-/** Clear the message-activity busy flag for a session. */
-export const clearMessageActivity = (sessionId: string) =>
-	Effect.gen(function* () {
-		const ref = yield* PollerStateTag;
-		const state = yield* Ref.get(ref);
-		if (HashMap.has(state.activityTimestamps, sessionId)) {
-			yield* Ref.update(ref, (s) => ({
-				...s,
-				activityTimestamps: HashMap.remove(s.activityTimestamps, sessionId),
-			}));
-			yield* Effect.log(
-				`message-activity CLEARED session=${sessionId.slice(0, 12)}`,
-			);
-		}
-	}).pipe(
-		Effect.annotateLogs("component", "status-poller"),
-		Effect.withSpan("statusPoller.clearMessageActivity"),
-	);
-
-/** Notify that SSE delivered a session.status:idle event. */
-export const notifySSEIdle = (sessionId: string) =>
-	Effect.gen(function* () {
-		const ref = yield* PollerStateTag;
-		yield* Ref.update(ref, (s) => ({
-			...s,
-			sseIdleSessions: new Set([...s.sseIdleSessions, sessionId]),
-			// Clear message activity for this session
-			activityTimestamps: HashMap.remove(s.activityTimestamps, sessionId),
-		}));
-		yield* Effect.log(
-			`SSE idle hint for session=${sessionId.slice(0, 12)} — cleared activity`,
-		);
-	}).pipe(
-		Effect.annotateLogs("component", "status-poller"),
-		Effect.withSpan("statusPoller.notifySSEIdle"),
-	);
+		).has(sessionId);
+	}).pipe(Effect.withSpan("statusPoller.isProcessing"));
 
 // ─── Status diff ────────────────────────────────────────────────────────
 
@@ -301,40 +229,22 @@ export const reconcile = (
 // ─── Poll (full cycle) ─────────────────────────────────────────────────────
 
 /** Dependencies for a poll cycle. */
-export interface PollDeps {
-	/** Read raw statuses (SQLite or REST). */
+export interface PollDeps<E = unknown, R = never> {
+	/** Read source statuses (SQLite or REST), without UI augmentation. */
 	readonly getRawStatuses: () => Effect.Effect<
 		Record<string, SessionStatus>,
-		// biome-ignore lint/suspicious/noExplicitAny: callers provide various error types; poll() handles all errors internally
-		any,
-		// biome-ignore lint/suspicious/noExplicitAny: Effect-backed readers may require services from the attached runtime
-		any
-	>;
-	/** Session parent map for subagent propagation. */
-	readonly getSessionParentMap: () => Effect.Effect<
-		Map<string, string>,
-		// biome-ignore lint/suspicious/noExplicitAny: callers provide various error types; poll() handles all errors internally
-		any,
-		// biome-ignore lint/suspicious/noExplicitAny: parent-map readers may require services from the attached runtime
-		any
-	>;
-	/** Resolve unknown parent for a busy session. */
-	readonly resolveParent: (sessionId: string) => Effect.Effect<
-		string | undefined,
-		// biome-ignore lint/suspicious/noExplicitAny: callers provide various error types; handled internally
-		any,
-		// biome-ignore lint/suspicious/noExplicitAny: callers may require services from the attached runtime
-		any
+		E,
+		R
 	>;
 	/** REST reconciliation deps (optional). */
 	readonly reconciliation?: ReconciliationDeps;
 }
 
 /**
- * Single poll cycle: fetch statuses, augment, detect changes, publish,
+ * Single poll cycle: fetch statuses, detect changes, publish,
  * and run reconciliation.
  */
-export const poll = (deps: PollDeps) =>
+export const poll = <E, R>(deps: PollDeps<E, R>) =>
 	Effect.gen(function* () {
 		const ref = yield* PollerStateTag;
 		const pubsub = yield* PollerPubSubTag;
@@ -347,92 +257,16 @@ export const poll = (deps: PollDeps) =>
 		const pollBody = Effect.gen(function* () {
 			const raw = yield* deps.getRawStatuses();
 
-			// Resolve unknown parents for busy sessions
-			const parentMap = yield* deps
-				.getSessionParentMap()
-				.pipe(Effect.catchAll(() => Effect.succeed(new Map<string, string>())));
-			const busyIds = Object.entries(raw)
-				.filter(([, s]) => s.type === "busy" || s.type === "retry")
-				.map(([id]) => id);
+			const current = raw;
+			const currentState = yield* Ref.get(ref);
 
-			const freshState = yield* Ref.get(ref);
-			let updatedCache = freshState.childToParentCache;
-
-			for (const busyId of busyIds) {
-				if (parentMap.has(busyId) || HashMap.has(updatedCache, busyId))
-					continue;
-				const parentId = yield* deps
-					.resolveParent(busyId)
-					.pipe(Effect.catchAll(() => Effect.succeed(undefined)));
-				updatedCache = HashMap.set(updatedCache, busyId, parentId);
-				if (parentId) {
-					yield* Effect.log(
-						`discovered child→parent: ${busyId.slice(0, 12)}→${parentId.slice(0, 12)}`,
-					);
-				}
-			}
-
-			if (updatedCache !== freshState.childToParentCache) {
-				yield* Ref.update(ref, (s) => ({
-					...s,
-					childToParentCache: updatedCache,
-				}));
-			}
-
-			// Augment statuses
-			const stateForAugment = yield* Ref.get(ref);
-			const childToParentResolved = new Map<string, string | undefined>();
-			for (const [k, v] of HashMap.toEntries(
-				stateForAugment.childToParentCache,
-			)) {
-				childToParentResolved.set(k, v);
-			}
-
-			const activityTimestamps = new Map<string, number>();
-			for (const [k, v] of HashMap.toEntries(
-				stateForAugment.activityTimestamps,
-			)) {
-				activityTimestamps.set(k, v);
-			}
-
-			const result = computeAugmentedStatuses({
-				raw,
-				parentMap,
-				childToParentResolved,
-				messageActivityTimestamps: activityTimestamps,
-				sseIdleSessions: stateForAugment.sseIdleSessions,
-				now: Date.now(),
-				messageActivityTtlMs: MESSAGE_ACTIVITY_TTL_MS,
-			});
-
-			const current = result.augmented;
-
-			// Apply side effects from augmentation
-			let updatedActivityTimestamps = stateForAugment.activityTimestamps;
-			for (const sessionId of result.expiredActivitySessions) {
-				updatedActivityTimestamps = HashMap.remove(
-					updatedActivityTimestamps,
-					sessionId,
-				);
-				yield* Effect.log(
-					`message-activity EXPIRED session=${sessionId.slice(0, 12)}`,
-				);
-			}
-
-			const updatedSseIdle = new Set(stateForAugment.sseIdleSessions);
-			for (const sessionId of result.sseIdleToRemove) {
-				updatedSseIdle.delete(sessionId);
-			}
-
-			if (!stateForAugment.initialized) {
+			if (!currentState.initialized) {
 				// First poll — establish baseline, no event emitted
 				yield* Ref.update(ref, (s) => ({
 					...s,
 					previousStatuses: current,
 					previousRaw: raw,
 					initialized: true,
-					activityTimestamps: updatedActivityTimestamps,
-					sseIdleSessions: updatedSseIdle,
 				}));
 
 				const busySessions = Object.entries(current)
@@ -454,7 +288,7 @@ export const poll = (deps: PollDeps) =>
 			}
 
 			// Compare RAW statuses for the statusesChanged flag
-			const statusesChanged = hasChanged(stateForAugment.previousRaw, raw);
+			const statusesChanged = hasChanged(currentState.previousRaw, raw);
 
 			if (statusesChanged) {
 				const busySessions = Object.entries(current)
@@ -470,8 +304,6 @@ export const poll = (deps: PollDeps) =>
 				...s,
 				previousStatuses: current,
 				previousRaw: raw,
-				activityTimestamps: updatedActivityTimestamps,
-				sseIdleSessions: updatedSseIdle,
 			}));
 
 			// Publish to PubSub — always notify so monitoring reducer gets periodic evaluation
@@ -584,8 +416,8 @@ export const reconcileNow = (deps: ReconciliationDeps) =>
  * - Logs a warning if all retries are exhausted
  * - Returns a Fiber handle via forkScoped for lifecycle management
  */
-export const startReconciliationLoop = (
-	pollDeps: PollDeps,
+export const startReconciliationLoop = <E, R>(
+	pollDeps: PollDeps<E, R>,
 	interval: Duration.DurationInput = Duration.millis(
 		DEFAULT_RECONCILIATION_INTERVAL_MS,
 	),
@@ -627,9 +459,9 @@ export interface SessionStatusPollerService {
 	getCurrentStatuses(): Effect.Effect<Record<string, SessionStatus>>;
 	/** Check if a specific session is currently processing (busy or retry). */
 	isProcessing(sessionId: string): Effect.Effect<boolean>;
-	/** Mark a session as busy due to message-poller activity. */
+	/** Retired compatibility hook; activity is derived by the client. */
 	markMessageActivity(sessionId: string): Effect.Effect<void>;
-	/** Clear the message-activity busy flag for a session. */
+	/** Retired compatibility hook; activity is derived by the client. */
 	clearMessageActivity(sessionId: string): Effect.Effect<void>;
 	/** Notify that SSE delivered a session.status:idle event. */
 	notifySSEIdle(sessionId: string): Effect.Effect<void>;

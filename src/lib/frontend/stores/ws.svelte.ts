@@ -18,6 +18,7 @@ import { phaseCurrentSessionToIdle } from "./chat.svelte.js";
 import { getBrowserClientId } from "./client-identity.js";
 import { clearInstanceState } from "./instance.svelte.js";
 import { getCurrentSessionId, replaceRoute } from "./router.svelte.js";
+import { sessionActivityBridge } from "./session-activity.svelte.js";
 import {
 	wsDebugLog,
 	wsDebugLogMessage,
@@ -277,6 +278,7 @@ function doConnect(slug: string | undefined, generation: number): void {
 		setStatus("disconnected", "Disconnected");
 		wsDebugLog("ws:close", wsState.status);
 		_ws = null;
+		sessionActivityBridge.clear();
 		disarmProtocolVersionCheck();
 
 		// End the on-screen turn so the UI isn't stuck mid-stream. This bumps
@@ -401,6 +403,7 @@ if (typeof document !== "undefined") {
 
 /** Disconnect and stop reconnecting. */
 export function disconnect(): void {
+	sessionActivityBridge.clear();
 	wsDebugLog("disconnect", wsState.status);
 	// Clear slug first — prevents any in-flight callbacks from interfering.
 	_currentSlug = undefined;

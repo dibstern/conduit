@@ -246,8 +246,11 @@ export const SessionStatusSchema = Schema.Literal(
  * projection or — for the fork lineage — from the interim join that
  * conduit-test-ni8.24 deletes.
  *
- * Notably absent: `processing` — the status poller's derived flag; the client
- * now ORs the row's `status` with live chat phase.
+ * Notably absent: `processing` — the status poller's derived flag. The client
+ * session view derives it from the row's `status`, descendant status and
+ * pre-status activity, which is a rendering question. The server keeps its own
+ * answer to the separate notification question (`src/lib/session-busy.ts` is
+ * the one ancestor walk both sides share).
  *
  * The three notification facts are here rather than riding a side message: a
  * badge is a fact about a session, the server is the only place that can decide

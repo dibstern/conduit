@@ -2,6 +2,7 @@
 // Server-owned session rows on one side, this tab's selection and search on
 // the other. The two halves never write each other.
 
+import { busySessionIds as propagateBusySessions } from "../../session-busy.js";
 import {
 	applySessionChange,
 	resetSessionSubscription,
@@ -39,6 +40,7 @@ import {
 	getEffectiveInstanceId,
 } from "./discovery.svelte.js";
 import { getCurrentSlug, navigate } from "./router.svelte.js";
+import { sessionActivityBridge } from "./session-activity.svelte.js";
 import { uiState } from "./ui.svelte.js";
 
 // ─── Server-owned state ─────────────────────────────────────────────────────
@@ -51,6 +53,35 @@ import { uiState } from "./ui.svelte.js";
 // `ReadonlyMap`.
 
 const serverSessions = $derived(sessionSubscription.rows);
+const busySessionIds = $derived.by(() => {
+	return propagateBusySessions(
+		serverSessions,
+		sessionActivityBridge.pending.keys(),
+	);
+});
+
+/** The session view's single busy decision, shared by every sidebar row. */
+export function isSessionBusy(id: string): boolean {
+	return busySessionIds.has(id);
+}
+
+/** Live content only. Replay must never create a new activity bridge. */
+export function observeSessionActivity(event: RelayMessage): void {
+	if (!("sessionId" in event) || !event.sessionId) return;
+	const id = event.sessionId;
+	if (id !== clientSession.currentId && !serverSessions.has(id)) return;
+	// Legacy `status` hints may come from the poller. Only the shell's
+	// accepted row can retire activity or supply a status for this view.
+	switch (event.type) {
+		case "delta":
+		case "thinking_start":
+		case "thinking_delta":
+		case "tool_start":
+		case "tool_executing":
+		case "tool_result":
+			sessionActivityBridge.mark(id);
+	}
+}
 
 // ─── Client-owned state ─────────────────────────────────────────────────────
 // What this tab is looking at. Applying server rows never touches it.
