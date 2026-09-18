@@ -162,7 +162,7 @@ it("does not deliver uncoordinated duplicate sounds without Web Locks", async ()
 	expect(emit).not.toHaveBeenCalled();
 });
 
-it("accepts duplicate playback when storage cannot retain a delivery receipt", async () => {
+it("retains a page receipt when storage cannot persist delivery", async () => {
 	vi.stubGlobal("localStorage", {
 		getItem: () => null,
 		setItem: () => {
@@ -175,7 +175,7 @@ it("accepts duplicate playback when storage cannot retain a delivery receipt", a
 	);
 	await page.triggerNotifications(question);
 	await page.triggerNotifications(question);
-	expect(emit).toHaveBeenCalledTimes(2);
+	expect(emit).toHaveBeenCalledOnce();
 });
 
 it("deduplicates full and lightweight questions without suppressing later questions", async () => {

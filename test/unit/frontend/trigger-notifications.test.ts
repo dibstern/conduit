@@ -158,25 +158,65 @@ describe("triggerNotifications", () => {
 		expect(playDoneSoundMock).toHaveBeenCalledOnce();
 	});
 
-	it("delivers even when storage cannot persist the successful receipt", async () => {
+	it("quota-full live tabs each sound once and retain page receipts", async () => {
 		getNotifSettingsMock.mockReturnValue({
 			push: false,
 			browser: false,
 			sound: true,
 		});
+		const quotaError = new DOMException("Storage full", "QuotaExceededError");
 		vi.spyOn(localStorage, "setItem").mockImplementation(() => {
-			throw new Error("QuotaExceededError");
+			throw quotaError;
 		});
-		const mod = await import(
+		const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+		let lock = Promise.resolve();
+		vi.stubGlobal("navigator", {
+			locks: {
+				request: (_key: string, callback: () => Promise<void>) => {
+					const attempt = lock.then(callback);
+					lock = attempt.catch(() => {});
+					return attempt;
+				},
+			},
+		});
+		const tabA = await import(
 			"../../../src/lib/frontend/stores/ws-notifications.js"
 		);
-		await mod.triggerNotifications({
+		vi.resetModules();
+		const tabB = await import(
+			"../../../src/lib/frontend/stores/ws-notifications.js"
+		);
+		const question: RelayMessage = {
 			type: "ask_user",
 			sessionId: "s1",
 			toolId: "q-quota",
 			questions: [],
-		});
-		expect(playDoneSoundMock).toHaveBeenCalledOnce();
+		};
+		try {
+			await Promise.all([
+				tabA.triggerNotifications(question),
+				tabB.triggerNotifications(question),
+			]);
+			expect(playDoneSoundMock).toHaveBeenCalledTimes(2);
+			await Promise.all([
+				tabA.triggerNotifications(question),
+				tabB.triggerNotifications(question),
+			]);
+			expect(playDoneSoundMock).toHaveBeenCalledTimes(2);
+			const nextQuestion = { ...question, toolId: "q-next" };
+			await Promise.all([
+				tabA.triggerNotifications(nextQuestion),
+				tabB.triggerNotifications(nextQuestion),
+			]);
+			expect(playDoneSoundMock).toHaveBeenCalledTimes(4);
+			expect(warn).toHaveBeenCalledTimes(2);
+			expect(warn).toHaveBeenCalledWith(
+				expect.stringContaining("receipt"),
+				quotaError,
+			);
+		} finally {
+			warn.mockRestore();
+		}
 	});
 
 	it("fires browser notification for 'done' message when tab is hidden", async () => {

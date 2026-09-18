@@ -254,6 +254,90 @@ it.each([
 	);
 });
 
+it("recovery skips a question answered while the preceding push is in flight", async () => {
+	let pending = ["q1", "q2"];
+	let finishFirst = () => {};
+	const firstPush = new Promise<void>((resolve) => {
+		finishFirst = resolve;
+	});
+	const pushed: string[] = [];
+	const deps = createMockSSEWiringDeps({
+		listPendingQuestions: async () =>
+			pending.map((id) => ({
+				id,
+				sessionID: "s1",
+				questions: [{ question: "Continue?" }],
+			})),
+		pushManager: {
+			getPublicKey: () => "pub",
+			addSubscription: () => {},
+			removeSubscription: () => {},
+			sendToAll: async (payload) => {
+				pushed.push(String(payload["alertId"]));
+				if (pushed.length === 1) await firstPush;
+				return reachedOneDevice;
+			},
+		},
+	});
+	const {
+		processingTimeouts: _timeouts,
+		pendingInteractions: _pending,
+		sessionService: _sessions,
+		getSessionParentMap: _parents,
+		getSessionStatuses: _statuses,
+		statusPoller: _poller,
+		...base
+	} = deps;
+	const callbacks: {
+		[K in keyof SSEStreamCallbacks]: SSEStreamCallbacks[K][];
+	} = {
+		connected: [],
+		disconnected: [],
+		reconnecting: [],
+		error: [],
+		event: [],
+		heartbeat: [],
+	};
+	await withStore(
+		Effect.gen(function* () {
+			yield* seed("s1", "turn-1");
+			yield* wireSSEConsumerEffect(
+				{ ...base, providerInstanceId: "opencode" },
+				{
+					on: (event, callback) => {
+						callbacks[event].push(callback);
+					},
+				},
+			);
+			for (const callback of callbacks.connected) callback();
+			yield* Effect.tryPromise(() =>
+				vi.waitFor(() => expect(pushed).toHaveLength(1)),
+			);
+			expect(deps.wsHandler.sendToSession).toHaveBeenCalledWith(
+				"s1",
+				expect.objectContaining({ toolId: "q2" }),
+			);
+			// The provider has accepted the other device's answer before Q1 finishes.
+			pending = ["q1"];
+			finishFirst();
+			yield* Effect.sleep("100 millis");
+			expect(pushed).toEqual(["s1:question:q1"]);
+		}).pipe(
+			Effect.provide(
+				Layer.mergeAll(
+					AlertLedgerLive,
+					PendingInteractionServiceLive,
+					makeOverridesStateLive(),
+					Layer.succeed(
+						SessionManagerServiceTag,
+						makeMockSessionManagerService(),
+					),
+				),
+			),
+		),
+	);
+});
+
 it("pushes one ding however many pipelines notice the same completed turn", async () => {
 	const r = recorder();
 	await withStore(

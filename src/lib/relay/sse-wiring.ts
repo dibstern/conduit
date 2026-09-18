@@ -1185,6 +1185,14 @@ const recoverPendingQuestionsEffect = (
 		);
 		if (deps.pushManager) {
 			for (const message of messages) {
+				// An earlier push may have waited while another device answered this
+				// question. Recheck the provider immediately before its own attempt.
+				const listPendingQuestions = deps.listPendingQuestions;
+				if (listPendingQuestions) {
+					const pending = yield* Effect.tryPromise(listPendingQuestions);
+					if (!pending.some((question) => question.id === message.toolId))
+						continue;
+				}
 				yield* sendPushForEventEffect(
 					deps.pushManager,
 					message,

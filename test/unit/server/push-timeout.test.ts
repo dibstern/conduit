@@ -20,10 +20,19 @@ import {
 it.each([
 	"sendTo",
 	"sendToAll",
-] as const)("%s reports an uncancellable transport as failed after the service deadline", async (method) => {
+] as const)("%s reports an aborted transport as failed after the service deadline", async (method) => {
 	const dir = mkdtempSync(join(tmpdir(), "conduit-push-timeout-"));
 	const sendNotification = vi.fn<WebPushModule["sendNotification"]>();
-	sendNotification.mockImplementationOnce(() => new Promise(() => {}));
+	sendNotification.mockImplementationOnce(
+		(_subscription, _payload, options) =>
+			new Promise((_, reject) => {
+				options?.signal?.addEventListener(
+					"abort",
+					() => reject(options.signal?.reason),
+					{ once: true },
+				);
+			}),
+	);
 	sendNotification.mockResolvedValue({ statusCode: 201 });
 	const manager = new PushNotificationManager({
 		configDir: dir,
@@ -71,10 +80,18 @@ it("releases a timed-out delivery claim so a later observation reaches the devic
 		signalStarted = resolve;
 	});
 	const sendNotification = vi.fn<WebPushModule["sendNotification"]>();
-	sendNotification.mockImplementationOnce(() => {
-		signalStarted();
-		return new Promise(() => {});
-	});
+	sendNotification.mockImplementationOnce(
+		(_subscription, _payload, options) => {
+			signalStarted();
+			return new Promise((_, reject) => {
+				options?.signal?.addEventListener(
+					"abort",
+					() => reject(options.signal?.reason),
+					{ once: true },
+				);
+			});
+		},
+	);
 	sendNotification.mockResolvedValue({ statusCode: 201 });
 	const manager = new PushNotificationManager({
 		configDir: dir,

@@ -3,6 +3,7 @@
 // Manages VAPID keys, browser subscriptions, and sending notifications.
 
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import https from "node:https";
 import { createRequire } from "node:module";
 import { join } from "node:path";
 
@@ -11,7 +12,69 @@ import { DEFAULT_CONFIG_DIR } from "../env.js";
 
 // web-push is CJS-only — use createRequire (same pattern as ws in ws-handler.ts)
 const require = createRequire(import.meta.url);
-const defaultWebpush = require("web-push") as WebPushModule;
+const webpush = require("web-push") as {
+	generateVAPIDKeys: WebPushModule["generateVAPIDKeys"];
+	generateRequestDetails(
+		subscription: PushSubscriptionData,
+		payload: string,
+		options?: { TTL?: number; vapidDetails?: VapidDetails; timeout?: number },
+	): {
+		endpoint: string;
+		method: string;
+		headers: Record<string, string | number>;
+		body?: Buffer;
+	};
+};
+
+const defaultWebpush: WebPushModule = {
+	generateVAPIDKeys: () => webpush.generateVAPIDKeys(),
+	async sendNotification(subscription, payload, options) {
+		const { signal, ...encodingOptions } = options ?? {};
+		const details = webpush.generateRequestDetails(
+			subscription,
+			payload,
+			encodingOptions,
+		);
+		signal?.throwIfAborted();
+		// web-push hides its request and only supports an inactivity timeout.
+		// Keep its encryption/signing, but own the request so abort stops the send.
+		let abort = () => {};
+		try {
+			return await new Promise<{ statusCode: number }>((resolve, reject) => {
+				const request = https.request(
+					new URL(details.endpoint),
+					{
+						method: details.method,
+						headers: details.headers,
+					},
+					(response) => {
+						response.on("error", reject);
+						response.on("end", () => {
+							const statusCode = response.statusCode ?? 0;
+							if (statusCode >= 200 && statusCode < 300)
+								resolve({ statusCode });
+							else
+								reject(
+									Object.assign(
+										new Error("Received unexpected response code"),
+										{ statusCode },
+									),
+								);
+						});
+						response.resume();
+					},
+				);
+				request.on("error", reject);
+				abort = () => request.destroy(signal?.reason);
+				signal?.addEventListener("abort", abort, { once: true });
+				if (details.body) request.write(details.body);
+				request.end();
+			});
+		} finally {
+			signal?.removeEventListener("abort", abort);
+		}
+	},
+};
 
 // FCM requires at least 10s because its internal RPCs use that timeout:
 // https://firebase.google.com/docs/cloud-messaging/scale-fcm#timeouts
@@ -25,7 +88,12 @@ export interface WebPushModule {
 	sendNotification(
 		subscription: PushSubscriptionData,
 		payload: string,
-		options?: { TTL?: number; vapidDetails?: VapidDetails; timeout?: number },
+		options?: {
+			TTL?: number;
+			vapidDetails?: VapidDetails;
+			timeout?: number;
+			signal?: AbortSignal;
+		},
 	): Promise<{ statusCode: number }>;
 }
 
@@ -186,22 +254,17 @@ export class PushNotificationManager implements PushNotificationSender {
 		payload: string,
 		options: { TTL?: number; vapidDetails: VapidDetails },
 	): Promise<void> {
-		let timer: ReturnType<typeof setTimeout> | undefined;
+		const controller = new AbortController();
+		const timer = setTimeout(() => {
+			controller.abort(new Error("Push send timed out after 10000ms"));
+		}, PUSH_SEND_TIMEOUT_MS);
 		try {
-			// web-push's timeout only bounds socket inactivity. Bound the whole
-			// attempt too, so an uncancellable transport cannot hold a ledger claim.
-			await Promise.race([
-				new Promise<never>((_, reject) => {
-					timer = setTimeout(
-						() => reject(new Error("Push send timed out after 10000ms")),
-						PUSH_SEND_TIMEOUT_MS,
-					);
-				}),
-				this.webpush.sendNotification(subscription, payload, {
-					...options,
-					timeout: PUSH_SEND_TIMEOUT_MS,
-				}),
-			]);
+			// Wait for transport cancellation before the caller releases its claim.
+			await this.webpush.sendNotification(subscription, payload, {
+				...options,
+				timeout: PUSH_SEND_TIMEOUT_MS,
+				signal: controller.signal,
+			});
 		} finally {
 			clearTimeout(timer);
 		}

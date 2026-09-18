@@ -196,6 +196,9 @@ function showBrowserNotification(
 	}
 }
 
+const unpersistedReceipts = new Set<string>();
+let receiptStorageWarningLogged = false;
+
 export async function triggerNotifications(msg: RelayMessage): Promise<void> {
 	if (!NOTIF_TYPES.has(msg.type)) return;
 	// Idle hints update the UI; only an identified terminal event proves completion.
@@ -249,10 +252,23 @@ export async function triggerNotifications(msg: RelayMessage): Promise<void> {
 			return;
 		}
 		await locks.request(key, async () => {
-			if (localStorage.getItem(key)) return;
+			if (unpersistedReceipts.has(key) || localStorage.getItem(key)) return;
 			// The lock serializes live attempts. Record only successful delivery:
 			// a crash or full quota may duplicate an alert, but must not lose it.
-			if (await deliver()) localStorage.setItem(key, "1");
+			if (await deliver()) {
+				try {
+					localStorage.setItem(key, "1");
+				} catch (error) {
+					unpersistedReceipts.add(key);
+					if (!receiptStorageWarningLogged) {
+						receiptStorageWarningLogged = true;
+						console.warn(
+							"Could not save notification receipt; other tabs may repeat alerts",
+							error,
+						);
+					}
+				}
+			}
 		});
 	} catch (error) {
 		console.warn("Notification delivery failed", error);
