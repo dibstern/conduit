@@ -1,22 +1,34 @@
-// The pre-status bridge owns one clock for the connection scope. Receiving
-// authority retires activity synchronously, including between ticker ticks.
-let pending = $state.raw<ReadonlyMap<string, number>>(new Map());
-const statusReceived = new Set<string>();
+// Arrival order is shared by activity and rows on this connection. Wall time
+// is used only for expiry, never to compare client activity with server rows.
+let sequence = 0;
+let pending = $state.raw<
+	ReadonlyMap<string, { sequence: number; observedAt: number }>
+>(new Map());
+const authority = new Map<string, number>();
+const removed = new Set<string>();
 let closeScope: (() => void) | undefined;
 
 export const sessionActivityBridge = {
-	get pending(): ReadonlyMap<string, number> {
+	get pending() {
 		return pending;
 	},
+	observe(): number {
+		return ++sequence;
+	},
 	mark(id: string): void {
-		if (statusReceived.has(id)) return;
-		pending = new Map(pending).set(id, Date.now());
+		const observedSequence = sessionActivityBridge.observe();
+		if (removed.has(id) || (authority.get(id) ?? 0) >= observedSequence) return;
+		pending = new Map(pending).set(id, {
+			sequence: observedSequence,
+			observedAt: Date.now(),
+		});
 		closeScope ??= $effect.root(() => {
 			const ticker = setInterval(() => {
 				const now = Date.now();
 				const remaining = new Map(pending);
-				for (const [sessionId, timestamp] of pending) {
-					if (now - timestamp >= 10_000) remaining.delete(sessionId);
+				for (const [sessionId, observation] of pending) {
+					if (now - observation.observedAt >= 10_000)
+						remaining.delete(sessionId);
 				}
 				if (remaining.size !== pending.size) pending = remaining;
 				if (pending.size === 0) {
@@ -27,9 +39,18 @@ export const sessionActivityBridge = {
 			return () => clearInterval(ticker);
 		});
 	},
-	retire(id: string): void {
-		statusReceived.add(id);
-		if (pending.has(id)) {
+	retire(
+		id: string,
+		receivedSequence: number,
+		kind: "row" | "omission" | "remove",
+	): void {
+		// Only an explicit removal blocks future activity. A received row
+		// restores that id; snapshot omission merely retires pending activity.
+		if (kind === "remove") removed.add(id);
+		if (kind === "row") removed.delete(id);
+		authority.set(id, receivedSequence);
+		const observation = pending.get(id);
+		if (observation !== undefined && receivedSequence > observation.sequence) {
 			const remaining = new Map(pending);
 			remaining.delete(id);
 			pending = remaining;
@@ -44,6 +65,8 @@ export const sessionActivityBridge = {
 		closeScope?.();
 		closeScope = undefined;
 		pending = new Map();
-		statusReceived.clear();
+		authority.clear();
+		removed.clear();
+		sequence = 0;
 	},
 };

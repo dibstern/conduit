@@ -277,6 +277,7 @@ function doConnect(slug: string | undefined, generation: number): void {
 		setStatus("disconnected", "Disconnected");
 		wsDebugLog("ws:close", wsState.status);
 		_ws = null;
+		sessionActivityBridge.clear();
 		disarmProtocolVersionCheck();
 
 		// End the on-screen turn so the UI isn't stuck mid-stream. This bumps

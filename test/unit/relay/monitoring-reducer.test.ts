@@ -79,6 +79,44 @@ function ctx(overrides: Partial<SessionEvalContext> = {}): SessionEvalContext {
 	};
 }
 
+it("notifies parent idle once, only after the last busy descendant finishes", () => {
+	const parents = new Map([
+		["child", "parent"],
+		["sibling", "parent"],
+	]);
+	const contexts = new Map([
+		["parent", ctx({ status: { type: "busy" } })],
+		["child", ctx({ status: { type: "busy" }, isSubagent: true })],
+		["sibling", ctx({ status: { type: "busy" }, isSubagent: true })],
+	]);
+	let result = evaluateAll(
+		initialMonitoringState(),
+		contexts,
+		DEFAULT_CONFIG,
+		parents,
+	);
+	contexts.set("parent", ctx());
+	result = evaluateAll(result.state, contexts, DEFAULT_CONFIG, parents);
+	expect(result.effects).not.toContainEqual(
+		expect.objectContaining({ effect: "notify-idle", sessionId: "parent" }),
+	);
+	contexts.set("child", ctx({ isSubagent: true }));
+	result = evaluateAll(result.state, contexts, DEFAULT_CONFIG, parents);
+	expect(result.effects).not.toContainEqual(
+		expect.objectContaining({ effect: "notify-idle", sessionId: "parent" }),
+	);
+	contexts.set("sibling", ctx({ isSubagent: true }));
+	result = evaluateAll(result.state, contexts, DEFAULT_CONFIG, parents);
+	expect(result.effects).toContainEqual({
+		effect: "notify-idle",
+		sessionId: "parent",
+		isSubagent: false,
+	});
+	expect(
+		evaluateAll(result.state, contexts, DEFAULT_CONFIG, parents).effects,
+	).toEqual([]);
+});
+
 describe("evaluateSession", () => {
 	// ── from idle ────────────────────────────────────────────────────────
 

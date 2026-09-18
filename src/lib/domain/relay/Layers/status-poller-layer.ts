@@ -1,5 +1,5 @@
 import { SqlClient } from "@effect/sql";
-import { Cause, Duration, Effect, Layer, PubSub, Ref } from "effect";
+import { Cause, Duration, Effect, HashMap, Layer, PubSub, Ref } from "effect";
 import type { SessionStatus } from "../../../instance/sdk-types.js";
 import { makeCommitAndSignal } from "../../../persistence/effect/commit-and-signal.js";
 import { EventStoreEffectTag } from "../../../persistence/effect/event-store-effect.js";
@@ -12,6 +12,7 @@ import {
 import { OpenCodeAPITag } from "../../provider/Services/opencode-api-service.js";
 import { RelayStatusSnapshotTag } from "../Services/relay-status-snapshot.js";
 import { ConfigTag, LoggerTag, StatusPollerTag } from "../Services/services.js";
+import { SessionManagerStateTag } from "../Services/session-manager-state.js";
 import {
 	DEFAULT_RECONCILIATION_INTERVAL_MS,
 	getCurrentStatuses,
@@ -56,6 +57,7 @@ export const StatusPollerLive: Layer.Layer<
 		const stateRef = yield* PollerStateTag;
 		const pubsub = yield* PollerPubSubTag;
 		const statusSnapshot = yield* RelayStatusSnapshotTag;
+		const sessionState = yield* Effect.serviceOption(SessionManagerStateTag);
 		const readQueryOption = yield* Effect.serviceOption(ReadQueryEffectTag);
 		const eventStoreOption = yield* Effect.serviceOption(EventStoreEffectTag);
 		const projectionRunnerOption = yield* Effect.serviceOption(
@@ -223,9 +225,19 @@ export const StatusPollerLive: Layer.Layer<
 			stop: () => Ref.set(started, false),
 			drain: () => Ref.set(started, false),
 			getCurrentStatuses: () => pollerState(getCurrentStatuses),
-			isProcessing: (sessionId) => pollerState(isProcessing(sessionId)),
-			// Compatibility hooks for remaining server callers. Busy augmentation
-			// belongs exclusively to the client session view.
+			isProcessing: (sessionId) =>
+				Effect.gen(function* () {
+					const parents =
+						sessionState._tag === "Some"
+							? new Map(
+									HashMap.toEntries(
+										(yield* Ref.get(sessionState.value)).cachedParentMap,
+									),
+								)
+							: new Map<string, string>();
+					return yield* pollerState(isProcessing(sessionId, parents));
+				}),
+			// Pre-status rendering activity belongs to the client session view.
 			markMessageActivity: () => Effect.void,
 			clearMessageActivity: () => Effect.void,
 			notifySSEIdle: () => forkPoll,

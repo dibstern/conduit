@@ -445,7 +445,7 @@ export function wireMonitoring(
 		}
 
 		const prevState = getMonitoringState();
-		const result = evaluateAll(prevState, contexts, pollerGatingCfg);
+		const result = evaluateAll(prevState, contexts, pollerGatingCfg, parentMap);
 		setMonitoringState(result.state);
 
 		if (result.effects.length > 0) {
@@ -560,7 +560,12 @@ export const wireMonitoringEffect = (
 					}
 
 					const prevState = getMonitoringState();
-					const result = evaluateAll(prevState, contexts, pollerGatingCfg);
+					const result = evaluateAll(
+						prevState,
+						contexts,
+						pollerGatingCfg,
+						parentMap,
+					);
 					setMonitoringState(result.state);
 
 					if (result.effects.length > 0) {

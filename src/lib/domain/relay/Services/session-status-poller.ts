@@ -22,6 +22,7 @@ import {
 } from "effect";
 
 import type { SessionStatus } from "../../../instance/sdk-types.js";
+import { busySessionIds } from "../../../session-busy.js";
 
 // ─── Constants ──────────────────────────────────────────────────────────────
 
@@ -121,14 +122,25 @@ export const getCurrentStatuses = Effect.gen(function* () {
 	return { ...state.previousStatuses };
 }).pipe(Effect.withSpan("statusPoller.getCurrentStatuses"));
 
-/** Check if a specific session is currently processing (busy or retry). */
-export const isProcessing = (sessionId: string) =>
+/** Completion/history guard; source statuses themselves remain unaugmented. */
+export const isProcessing = (
+	sessionId: string,
+	parents: ReadonlyMap<string, string> = new Map(),
+) =>
 	Effect.gen(function* () {
 		const ref = yield* PollerStateTag;
 		const state = yield* Ref.get(ref);
-		const status = state.previousStatuses[sessionId];
-		if (!status) return false;
-		return status.type === "busy" || status.type === "retry";
+		return busySessionIds(
+			new Map(
+				Object.entries(state.previousStatuses).map(([id, status]) => [
+					id,
+					{
+						status: status.type,
+						parentID: parents.get(id),
+					},
+				]),
+			),
+		).has(sessionId);
 	}).pipe(Effect.withSpan("statusPoller.isProcessing"));
 
 // ─── Status diff ────────────────────────────────────────────────────────

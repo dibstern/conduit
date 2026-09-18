@@ -2,6 +2,7 @@
 // Server-owned session rows on one side, this tab's selection and search on
 // the other. The two halves never write each other.
 
+import { busySessionIds as propagateBusySessions } from "../../session-busy.js";
 import {
 	applySessionChange,
 	resetSessionSubscription,
@@ -53,21 +54,10 @@ import { uiState } from "./ui.svelte.js";
 
 const serverSessions = $derived(sessionSubscription.rows);
 const busySessionIds = $derived.by(() => {
-	const busy = new Set<string>();
-	for (const row of serverSessions.values()) {
-		if (row.status === "busy" || row.status === "retry") busy.add(row.id);
-	}
-	for (const id of sessionActivityBridge.pending.keys()) {
-		if (!serverSessions.has(id)) busy.add(id);
-	}
-	// Set iteration visits newly added ancestors too. Each id is visited once,
-	// even with shared ancestors or malformed cyclic lineage: O(rows), cached
-	// for the whole sidebar rather than a tree walk per rendered session.
-	for (const id of busy) {
-		const parent = serverSessions.get(id)?.parentID;
-		if (parent && serverSessions.has(parent)) busy.add(parent);
-	}
-	return busy;
+	return propagateBusySessions(
+		serverSessions,
+		sessionActivityBridge.pending.keys(),
+	);
 });
 
 /** The session view's single busy decision, shared by every sidebar row. */
@@ -82,7 +72,6 @@ export function observeSessionActivity(event: RelayMessage): void {
 	if (id !== clientSession.currentId && !serverSessions.has(id)) return;
 	// Legacy `status` hints may come from the poller. Only the shell's
 	// accepted row can retire activity or supply a status for this view.
-	if (serverSessions.has(id)) return;
 	switch (event.type) {
 		case "delta":
 		case "thinking_start":
