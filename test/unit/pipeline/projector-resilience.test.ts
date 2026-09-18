@@ -1150,7 +1150,7 @@ describe("MessageProjector resilience", () => {
 						partId: "tool-1",
 						toolName: "bash",
 						callId: "call-1",
-						input: { command: "ls" },
+						input: { tool: "Bash", command: "ls" },
 					},
 					{ sequence: nextSeq(), createdAt: NOW + 300 },
 				),
