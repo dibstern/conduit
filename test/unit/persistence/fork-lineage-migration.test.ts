@@ -15,7 +15,7 @@ import { serializeRecent } from "../../../src/lib/daemon/recent-projects.js";
 import { SessionEventBusLive } from "../../../src/lib/domain/relay/Services/session-event-bus.js";
 import { subscribeShell } from "../../../src/lib/domain/relay/Services/shell-subscription.js";
 import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
-import { migrateForkLineage } from "../../../src/lib/persistence/migrations/0017_fork_lineage.js";
+import { migrateForkLineage } from "../../../src/lib/persistence/migrations/fork-lineage-import.js";
 
 it("imports all known projects before deleting the sidecar, without appending history", async () => {
 	const dir = mkdtempSync(join(tmpdir(), "fork-migration-"));
@@ -190,7 +190,7 @@ it("retires unmatched lineage to an unread archive instead of keeping the active
 		expect(existsSync(path)).toBe(false);
 		expect(
 			JSON.parse(
-				readFileSync(join(dir, "fork-metadata-0016-unresolved.json"), "utf8"),
+				readFileSync(join(dir, "fork-metadata-unresolved.json"), "utf8"),
 			),
 		).toEqual(contents);
 	} finally {

@@ -110,20 +110,54 @@ export function translateDomainEventToRelay(
 					duration: duration ?? 0,
 					sessionId: event.sessionId,
 				} satisfies RelayMessage,
-				{ type: "done", code: 0 },
+				{
+					type: "done",
+					code: 0,
+					alertId: JSON.stringify([
+						event.sessionId,
+						event.data.messageId || event.eventId,
+						"done",
+					]),
+				},
 			);
 		}
 
 		case "turn.error": {
 			const { error, code } = event.data;
 			return emit(
-				{ type: "error", code: code ?? "TURN_ERROR", message: error },
-				{ type: "done", code: 1 },
+				{
+					type: "error",
+					code: code ?? "TURN_ERROR",
+					message: error,
+					alertId: JSON.stringify([
+						event.sessionId,
+						event.data.messageId || event.eventId,
+						"error",
+						error,
+					]),
+				},
+				{
+					type: "done",
+					code: 1,
+					alertId: JSON.stringify([
+						event.sessionId,
+						event.data.messageId || event.eventId,
+						"done",
+					]),
+				},
 			);
 		}
 
 		case "turn.interrupted":
-			return emit({ type: "done", code: 1 });
+			return emit({
+				type: "done",
+				code: 1,
+				alertId: JSON.stringify([
+					event.sessionId,
+					event.data.messageId || event.eventId,
+					"done",
+				]),
+			});
 
 		case "turn.model_resolved":
 			return silent("persistence/ws-rpc-only event");
@@ -134,7 +168,12 @@ export function translateDomainEventToRelay(
 					typeof event.metadata.correlationId === "string"
 						? event.metadata.correlationId
 						: "Retrying";
-				return emit({ type: "error", code: "RETRY", message: reason });
+				return emit({
+					type: "error",
+					code: "RETRY",
+					message: reason,
+					alertId: JSON.stringify([event.sessionId, event.eventId, "error"]),
+				});
 			}
 			return silent(
 				"prompt handler owns lifecycle; terminal done/error covers completion",

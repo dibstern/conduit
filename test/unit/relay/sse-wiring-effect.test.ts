@@ -68,6 +68,36 @@ const makeEffectDeps = (
 };
 
 describe("handleSSEEventEffect", () => {
+	it("preserves question identity in the lightweight broadcast", async () => {
+		const { deps, effectDeps } = makeEffectDeps();
+		const question: RelayMessage = {
+			type: "ask_user",
+			sessionId: "session-1",
+			toolId: "q1",
+			questions: [],
+		};
+		vi.mocked(effectDeps.translator.translate).mockReturnValue({
+			ok: true,
+			messages: [question],
+		});
+		await Effect.runPromise(
+			handleSSEEventEffect(effectDeps, {
+				type: "question.asked",
+				properties: { id: "q1", sessionID: "session-1", questions: [] },
+			}).pipe(Effect.provide(makeEffectLayer())),
+		);
+		expect(deps.wsHandler.sendToSession).toHaveBeenCalledWith(
+			"session-1",
+			question,
+		);
+		expect(deps.wsHandler.broadcast).toHaveBeenCalledWith({
+			type: "notification_event",
+			eventType: "ask_user",
+			sessionId: "session-1",
+			alertId: "session-1:question:q1",
+		});
+	});
+
 	it("clears processing timeout through Effect state for done messages", async () => {
 		const deps = createMockSSEWiringDeps();
 		const {

@@ -18,7 +18,7 @@ const Sidecar = Schema.Record({
 });
 
 /**
- * Global data migration 0016. The source has no project key, so this runs before
+ * Global data import, not a numbered schema migration. The source has no project key, so this runs before
  * project relays open, across all known stores. It cannot run once per database:
  * the first project would delete the remaining projects' only copy of lineage.
  * Deleting the source is the completion marker; partial imports are idempotent.
@@ -130,7 +130,7 @@ export const migrateForkLineage = (configDir: string) =>
 				}
 			}
 			if (remaining.size > 0) {
-				const archive = join(configDir, "fork-metadata-0016-unresolved.json");
+				const archive = join(configDir, "fork-metadata-unresolved.json");
 				if (existsSync(archive)) {
 					// A crash after archiving but before unlinking is safe to retry.
 					if (readFileSync(archive, "utf8") !== text) {
@@ -145,7 +145,7 @@ export const migrateForkLineage = (configDir: string) =>
 			// All databases have committed and closed before removing the global source.
 			unlinkSync(path);
 			return remaining.size > 0
-				? `Fork lineage migration 0016 imported known sessions; ${remaining.size} unresolved session(s) retained for manual recovery in ${join(configDir, "fork-metadata-0016-unresolved.json")}. The archive is not a runtime data source.`
+				? `Fork lineage import imported known sessions; ${remaining.size} unresolved session(s) retained for manual recovery in ${join(configDir, "fork-metadata-unresolved.json")}. The archive is not a runtime data source.`
 				: undefined;
 		},
 		catch: (cause) => cause,
@@ -155,7 +155,7 @@ export const migrateForkLineage = (configDir: string) =>
 		),
 		Effect.catchAll((error) =>
 			Effect.logWarning(
-				`Fork lineage migration 0016 incomplete; startup continues and the source is retained. ${String(error)}`,
+				`Fork lineage import incomplete; startup continues and the source is retained. ${String(error)}`,
 			),
 		),
 	);

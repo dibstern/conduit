@@ -40,6 +40,28 @@ describe("Migration Runner", () => {
 		]);
 	});
 
+	it("treats existing sessions as seen when message time exceeds update time", () => {
+		client = SqliteClient.memory();
+		runMigrations(
+			client,
+			schemaMigrations.filter((migration) => migration.id < 14),
+		);
+		client.exec(`
+			INSERT INTO sessions (id, provider, created_at, updated_at, last_message_at)
+			VALUES ('out-of-order', 'opencode', 0, 1000, 2000),
+			       ('no-messages', 'opencode', 0, 1000, NULL)
+		`);
+
+		runMigrations(client, schemaMigrations);
+
+		expect(
+			client.query("SELECT id, last_viewed_at FROM sessions ORDER BY id"),
+		).toEqual([
+			{ id: "no-messages", last_viewed_at: null },
+			{ id: "out-of-order", last_viewed_at: 2000 },
+		]);
+	});
+
 	it("creates the _migrations table on first run", () => {
 		client = SqliteClient.memory();
 		runMigrations(client, []);
@@ -147,7 +169,9 @@ describe("Migration Runner", () => {
 		const projectionFailuresMigration = schemaMigrations[10];
 		const readModelVersionMigration = schemaMigrations[11];
 		const readModelCounterMigration = schemaMigrations[12];
-		const forkPointMigration = schemaMigrations[13];
+		const sessionsLastViewedAtMigration = schemaMigrations[13];
+		const sentAlertsMigration = schemaMigrations[14];
+		const forkPointMigration = schemaMigrations[15];
 		if (
 			!baseline ||
 			!metadataMigration ||
@@ -162,6 +186,8 @@ describe("Migration Runner", () => {
 			!projectionFailuresMigration ||
 			!readModelVersionMigration ||
 			!readModelCounterMigration ||
+			!sessionsLastViewedAtMigration ||
+			!sentAlertsMigration ||
 			!forkPointMigration
 		) {
 			throw new Error("Expected all event-store schema migrations");
@@ -240,6 +266,16 @@ describe("Migration Runner", () => {
 			},
 			{
 				id: 14,
+				name: "sessions_last_viewed_at",
+				checksum: calculateMigrationChecksum(sessionsLastViewedAtMigration),
+			},
+			{
+				id: 15,
+				name: "sent_alerts",
+				checksum: calculateMigrationChecksum(sentAlertsMigration),
+			},
+			{
+				id: 16,
 				name: "fork_point_timestamp",
 				checksum: calculateMigrationChecksum(forkPointMigration),
 			},
@@ -343,7 +379,9 @@ describe("Migration Runner", () => {
 				{ id: 11, name: "create_projection_failures" },
 				{ id: 12, name: "read_model_version" },
 				{ id: 13, name: "read_model_counter" },
-				{ id: 14, name: "fork_point_timestamp" },
+				{ id: 14, name: "sessions_last_viewed_at" },
+				{ id: 15, name: "sent_alerts" },
+				{ id: 16, name: "fork_point_timestamp" },
 			],
 			columns: [
 				{
@@ -429,7 +467,9 @@ describe("Migration Runner", () => {
 		const projectionFailuresMigration = schemaMigrations[10];
 		const readModelVersionMigration = schemaMigrations[11];
 		const readModelCounterMigration = schemaMigrations[12];
-		const forkPointMigration = schemaMigrations[13];
+		const sessionsLastViewedAtMigration = schemaMigrations[13];
+		const sentAlertsMigration = schemaMigrations[14];
+		const forkPointMigration = schemaMigrations[15];
 		if (
 			!turnModelExecutionMigration ||
 			!sessionsPermissionModeMigration ||
@@ -437,6 +477,8 @@ describe("Migration Runner", () => {
 			!projectionFailuresMigration ||
 			!readModelVersionMigration ||
 			!readModelCounterMigration ||
+			!sessionsLastViewedAtMigration ||
+			!sentAlertsMigration ||
 			!forkPointMigration
 		) {
 			throw new Error("Expected remaining event-store migrations");
@@ -481,6 +523,16 @@ describe("Migration Runner", () => {
 			},
 			{
 				id: 14,
+				name: "sessions_last_viewed_at",
+				checksum: calculateMigrationChecksum(sessionsLastViewedAtMigration),
+			},
+			{
+				id: 15,
+				name: "sent_alerts",
+				checksum: calculateMigrationChecksum(sentAlertsMigration),
+			},
+			{
+				id: 16,
 				name: "fork_point_timestamp",
 				checksum: calculateMigrationChecksum(forkPointMigration),
 			},

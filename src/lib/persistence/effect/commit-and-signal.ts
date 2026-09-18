@@ -68,6 +68,25 @@ export type CommitAndSignalProject = (
 	events: readonly StoredEvent[],
 ) => Effect.Effect<void, ProjectionRunnerError | SqlError>;
 
+/**
+ * Move read-model rows that no event produced, and announce the move.
+ *
+ * `apply` is handed the read-model version it must stamp onto every row it
+ * touches, and returns the ids of the session rows it actually stamped. Those
+ * ids are announced by the same post-COMMIT `publishAdvance` a projection would
+ * use — there is no second publish, and no way to reach this without one.
+ *
+ * The shape is deliberately awkward in one direction: a caller cannot take a
+ * version without also being asked which rows it stamped. `last_viewed_at` is
+ * the first read-model column not derived from the log, and a direct write that
+ * moved a row without moving its `version` would reach no subscriber and report
+ * success — the version column is what a subscription watches. Nothing about
+ * that failure is visible at runtime, so the type is where it gets caught.
+ */
+export type CommitAndSignalStamp = <E, R>(
+	apply: (version: number) => Effect.Effect<readonly string[], E, R>,
+) => Effect.Effect<readonly string[], E | SqlError, R>;
+
 export interface CommitAndSignal {
 	(
 		events: readonly CanonicalEvent[],
@@ -86,7 +105,10 @@ export interface CommitAndSignal {
 	 * anything; entering it inside another is a defect, not a nesting.
 	 */
 	readonly write: <A, E, R>(
-		body: (project: CommitAndSignalProject) => Effect.Effect<A, E, R>,
+		body: (
+			project: CommitAndSignalProject,
+			stamp: CommitAndSignalStamp,
+		) => Effect.Effect<A, E, R>,
 		options?: CommitAndSignalOptions,
 	) => Effect.Effect<A, E | CommitAndSignalFailure, R>;
 }
@@ -108,7 +130,10 @@ export const makeCommitAndSignal = Effect.gen(function* () {
 	const sessionEventBus = yield* Effect.serviceOption(SessionEventBusTag);
 
 	const write = <A, E, R>(
-		body: (project: CommitAndSignalProject) => Effect.Effect<A, E, R>,
+		body: (
+			project: CommitAndSignalProject,
+			stamp: CommitAndSignalStamp,
+		) => Effect.Effect<A, E, R>,
 		options: CommitAndSignalOptions = {},
 	): Effect.Effect<A, E | CommitAndSignalFailure, R> =>
 		Effect.uninterruptible(
@@ -138,27 +163,30 @@ export const makeCommitAndSignal = Effect.gen(function* () {
 									yield* Effect.serviceOption(SqlClient.TransactionConnection),
 								);
 
+								// The test is not "is a transaction open" but "is it the
+								// seam's own". Effect SQL reuses the connection for a nested
+								// `withTransaction` and only raises the depth, so the depth
+								// is what tells the seam's transaction apart from a savepoint
+								// the body opened inside it — and a savepoint rolls back on
+								// its own, after these arrays have been fed.
+								const requireSeamTransaction = Effect.gen(function* () {
+									const here = Option.getOrUndefined(
+										yield* Effect.serviceOption(
+											SqlClient.TransactionConnection,
+										),
+									);
+									if (here?.[0] !== seam?.[0] || here?.[1] !== seam?.[1])
+										return yield* Effect.die(
+											new ProjectOutsideSeamTransaction({
+												seamDepth: seam?.[1],
+												bodyDepth: here?.[1],
+											}),
+										);
+								});
+
 								const project: CommitAndSignalProject = (events) =>
 									Effect.gen(function* () {
-										// The test is not "is a transaction open" but "is it the
-										// seam's own". Effect SQL reuses the connection for a nested
-										// `withTransaction` and only raises the depth, so the depth
-										// is what tells the seam's transaction apart from a savepoint
-										// the body opened inside it — and a savepoint rolls back on
-										// its own, after these arrays have been fed.
-										const here = Option.getOrUndefined(
-											yield* Effect.serviceOption(
-												SqlClient.TransactionConnection,
-											),
-										);
-										if (here?.[0] !== seam?.[0] || here?.[1] !== seam?.[1])
-											return yield* Effect.die(
-												new ProjectOutsideSeamTransaction({
-													seamDepth: seam?.[1],
-													bodyDepth: here?.[1],
-												}),
-											);
-
+										yield* requireSeamTransaction;
 										if (events.length === 0) return;
 										const advance = yield* projectionRunner
 											.projectBatch(events)
@@ -167,7 +195,31 @@ export const makeCommitAndSignal = Effect.gen(function* () {
 										advances.push(advance);
 									});
 
-								return yield* body(project);
+								const stamp: CommitAndSignalStamp = (apply) =>
+									Effect.gen(function* () {
+										yield* requireSeamTransaction;
+										// Same counter as projection, taken in the same transaction:
+										// the version a direct write stamps has to be comparable with
+										// the ones the log produces, or "have I already seen this?"
+										// stops meaning anything.
+										const version = yield* projectionRunner.nextVersion.pipe(
+											Effect.provideService(SqlClient.SqlClient, sql),
+										);
+										const sessionIds = yield* apply(version);
+										// No rows, no announcement. An advance naming a row that was
+										// not touched sends every subscriber to re-query it for
+										// nothing; worse, it claims a version for rows that did not
+										// move.
+										if (sessionIds.length > 0)
+											advances.push({
+												version,
+												sessionIds: [...sessionIds],
+												removedSessionIds: [],
+											});
+										return sessionIds;
+									});
+
+								return yield* body(project, stamp);
 							}),
 						);
 						if (Option.isSome(sessionEventBus) && options.publish !== false) {

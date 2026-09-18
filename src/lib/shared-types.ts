@@ -246,10 +246,16 @@ export const SessionStatusSchema = Schema.Literal(
  * projection or — for the fork lineage — from the interim join that
  * conduit-test-ni8.24 deletes.
  *
- * Notably absent: `processing` (the status poller's derived flag; the client
- * now ORs the row's `status` with live chat phase) and `pendingQuestionCount`
- * (notification state, which rides the `session_list` message until
- * conduit-test-ni8.23 gives it a home of its own).
+ * Notably absent: `processing` — the status poller's derived flag; the client
+ * now ORs the row's `status` with live chat phase.
+ *
+ * The three notification facts are here rather than riding a side message: a
+ * badge is a fact about a session, the server is the only place that can decide
+ * it once for every client, and putting them anywhere else means two sources
+ * disagreeing about the same row. They are optional because `SessionInfo` has a
+ * second producer with no read-model row behind it
+ * (`src/lib/session/session-info-list.ts`); every read-model read fills all
+ * three. Absent means "not derived here", never "nothing pending".
  */
 export const SessionInfoSchema = Schema.Struct({
 	id: Schema.String,
@@ -267,6 +273,17 @@ export const SessionInfoSchema = Schema.Struct({
 	forkPointTimestamp: Schema.optional(Schema.Number),
 	/** Ordering ID when the SDK lineage boundary differs from the UI message ID. */
 	forkPointMessageId: Schema.optional(Schema.String),
+	/** Unanswered questions on this session — the count the badge shows. */
+	pendingQuestions: Schema.optional(Schema.Number),
+	/** Unanswered permission requests on this session. */
+	pendingPermissions: Schema.optional(Schema.Number),
+	/**
+	 * A message landed after the last time this session was looked at. Derived
+	 * from `last_message_at > last_viewed_at`; `last_viewed_at` itself never goes
+	 * on the wire, because no client has any use for the timestamp — only for the
+	 * comparison, and one server-side comparison cannot disagree with itself.
+	 */
+	unseenActivity: Schema.optional(Schema.Boolean),
 });
 
 export type SessionInfo = typeof SessionInfoSchema.Type;
@@ -791,6 +808,7 @@ const CompactionSchema = Schema.Struct({
 
 const DoneSchema = Schema.Struct({
 	type: Schema.Literal("done"),
+	alertId: Schema.optional(Schema.String),
 	sessionId: Schema.String,
 	code: Schema.Number,
 });
@@ -822,14 +840,8 @@ const SessionListSchema = Schema.Struct({
 	sessions: Schema.Array(SessionInfoSchema),
 	roots: Schema.Boolean,
 	search: Schema.optional(Schema.Boolean),
-	/**
-	 * Pending questions per session id, zero-count sessions omitted. Notification
-	 * state, not session state, so it rides the message rather than the session
-	 * (ni8.5 §5) until conduit-test-ni8.23 gives it a channel of its own.
-	 */
-	pendingQuestionCounts: Schema.optional(
-		Schema.Record({ key: Schema.String, value: Schema.Number }),
-	),
+	// No notification map beside the sessions: ni8.23 made the three badge facts
+	// columns on the session row itself, derived server-side.
 });
 
 const SessionForkedSchema = Schema.Struct({
@@ -1043,6 +1055,7 @@ const SessionDeletedSchema = Schema.Struct({
 // ── Misc ────────────────────────────────────────────────────────────────
 const ErrorSchema = Schema.Struct({
 	type: Schema.Literal("error"),
+	alertId: Schema.optional(Schema.String),
 	sessionId: Schema.String,
 	code: Schema.String,
 	message: Schema.String,
@@ -1152,6 +1165,7 @@ const ScanResultSchema = Schema.Struct({
 // ── Cross-session notifications ──────────────────────────────────────
 const NotificationEventSchema = Schema.Struct({
 	type: Schema.Literal("notification_event"),
+	alertId: Schema.optional(Schema.String),
 	eventType: Schema.String,
 	message: Schema.optional(Schema.String),
 	sessionId: Schema.optional(Schema.String),
@@ -1444,7 +1458,7 @@ export type RelayMessage =
 			preTokens?: number;
 			postTokens?: number;
 	  }
-	| { type: "done"; sessionId: string; code: number }
+	| { type: "done"; sessionId: string; code: number; alertId?: string }
 	| {
 			type: "session_switched";
 			id: string;
@@ -1472,8 +1486,6 @@ export type RelayMessage =
 			sessions: SessionInfo[];
 			roots: boolean;
 			search?: boolean;
-			/** Pending questions per session id; zero-count sessions omitted. */
-			pendingQuestionCounts?: Record<string, number>;
 	  }
 	| {
 			type: "session_forked";
@@ -1581,6 +1593,7 @@ export type RelayMessage =
 	// ── Misc ────────────────────────────────────────────────────────────────
 	| {
 			type: "error";
+			alertId?: string;
 			sessionId: string;
 			code: string;
 			message: string;
@@ -1636,6 +1649,7 @@ export type RelayMessage =
 	// chat state. See ws-dispatch.ts and event-pipeline.ts.
 	| {
 			type: "notification_event";
+			alertId?: string;
 			/** The original event type (done, error, etc.) */
 			eventType: string;
 			/** Error message (for error events) */

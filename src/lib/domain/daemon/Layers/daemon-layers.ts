@@ -42,7 +42,7 @@ import {
 	writePidFile,
 } from "../../../daemon/pid-manager.js";
 import { resolveTraceConfig } from "../../../env.js";
-import { migrateForkLineage } from "../../../persistence/migrations/0017_fork_lineage.js";
+import { migrateForkLineage } from "../../../persistence/migrations/fork-lineage-import.js";
 import type { StoredProject } from "../../../types.js";
 import { generateSlug } from "../../../utils.js";
 import { AuthManagerFromConfigLive } from "../../server/Layers/auth-middleware.js";

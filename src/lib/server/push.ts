@@ -3,6 +3,7 @@
 // Manages VAPID keys, browser subscriptions, and sending notifications.
 
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import https from "node:https";
 import { createRequire } from "node:module";
 import { join } from "node:path";
 
@@ -11,7 +12,78 @@ import { DEFAULT_CONFIG_DIR } from "../env.js";
 
 // web-push is CJS-only — use createRequire (same pattern as ws in ws-handler.ts)
 const require = createRequire(import.meta.url);
-const defaultWebpush = require("web-push") as WebPushModule;
+const webpush = require("web-push") as {
+	generateVAPIDKeys: WebPushModule["generateVAPIDKeys"];
+	generateRequestDetails(
+		subscription: PushSubscriptionData,
+		payload: string,
+		options?: { TTL?: number; vapidDetails?: VapidDetails; timeout?: number },
+	): {
+		endpoint: string;
+		method: string;
+		headers: Record<string, string | number>;
+		body?: Buffer;
+	};
+};
+
+const defaultWebpush: WebPushModule = {
+	generateVAPIDKeys: () => webpush.generateVAPIDKeys(),
+	async sendNotification(subscription, payload, options) {
+		const { signal, ...encodingOptions } = options ?? {};
+		const details = webpush.generateRequestDetails(
+			subscription,
+			payload,
+			encodingOptions,
+		);
+		signal?.throwIfAborted();
+		// web-push hides its request and only supports an inactivity timeout.
+		// Keep its encryption/signing, but own the request so abort stops the send.
+		let abort = () => {};
+		try {
+			return await new Promise<{ statusCode: number }>((resolve, reject) => {
+				const request = https.request(
+					new URL(details.endpoint),
+					{
+						method: details.method,
+						headers: details.headers,
+					},
+					(response) => {
+						response.on("error", reject);
+						response.on("end", () => {
+							const statusCode = response.statusCode ?? 0;
+							if (statusCode >= 200 && statusCode < 300)
+								resolve({ statusCode });
+							else
+								reject(
+									Object.assign(
+										new Error("Received unexpected response code"),
+										{ statusCode },
+									),
+								);
+						});
+						response.resume();
+					},
+				);
+				request.on("error", reject);
+				// An unhandled upgrade can close without a response or error.
+				// Promise settlement is idempotent if a prior outcome already won.
+				request.on("close", () =>
+					reject(new Error("Push request closed before response completed")),
+				);
+				abort = () => request.destroy(signal?.reason);
+				signal?.addEventListener("abort", abort, { once: true });
+				if (details.body) request.write(details.body);
+				request.end();
+			});
+		} finally {
+			signal?.removeEventListener("abort", abort);
+		}
+	},
+};
+
+// FCM requires at least 10s because its internal RPCs use that timeout:
+// https://firebase.google.com/docs/cloud-messaging/scale-fcm#timeouts
+const PUSH_SEND_TIMEOUT_MS = 10_000;
 
 // ─── web-push type shims (no @types/web-push available) ──────────────────────
 
@@ -21,7 +93,12 @@ export interface WebPushModule {
 	sendNotification(
 		subscription: PushSubscriptionData,
 		payload: string,
-		options?: { TTL?: number; vapidDetails?: VapidDetails },
+		options?: {
+			TTL?: number;
+			vapidDetails?: VapidDetails;
+			timeout?: number;
+			signal?: AbortSignal;
+		},
 	): Promise<{ statusCode: number }>;
 }
 
@@ -59,11 +136,46 @@ export interface PushPayload {
 	[key: string]: unknown;
 }
 
+/**
+ * Who actually got the push (ni8.23).
+ *
+ * The delivery ledger marks a receipt only after the push service accepts it. It can only
+ * be honest if the send tells it whether anyone was: a `sendToAll` that caught
+ * every per-device failure and resolved anyway made every outcome — delivered,
+ * refused, no devices at all — look identical to the caller, and the ledger then
+ * suppressed every retry of an alert nobody ever received.
+ *
+ * Three outcomes, because they mean three different things to a retry:
+ *  - `delivered`: the push service accepted it for this device.
+ *  - `expired`: 403/404/410. The subscription is gone and has been dropped;
+ *    retrying it is pointless, but it is also not a delivery.
+ *  - `failed`: anything else — a 503, a dead network. This device could still
+ *    be reached by a later attempt.
+ */
+export interface PushDeliveryReport {
+	readonly delivered: readonly string[];
+	readonly expired: readonly string[];
+	readonly failed: readonly {
+		readonly clientId: string;
+		readonly cause: unknown;
+	}[];
+}
+
+/** Human-readable outcome, for the log line that says a ding did not land. */
+export const describeDelivery = (report: PushDeliveryReport): string =>
+	`delivered=${report.delivered.length} expired=${report.expired.length} ` +
+	`failed=${report.failed.length}` +
+	(report.failed.length > 0
+		? ` (${report.failed.map((f) => `${f.clientId}: ${f.cause}`).join("; ")})`
+		: "");
+
 export interface PushNotificationSender {
 	getPublicKey(): string | null;
 	addSubscription(clientId: string, subscription: PushSubscriptionData): void;
 	removeSubscription(clientId: string): void;
-	sendToAll(payload: PushPayload): Promise<void>;
+	sendToAll(payload: PushPayload): Promise<PushDeliveryReport>;
+	getSubscriptionIds?(): readonly string[];
+	sendTo?(clientId: string, payload: PushPayload): Promise<PushDeliveryReport>;
 }
 
 export class PushNotificationManagerNotInitializedError extends Data.TaggedError(
@@ -136,10 +248,42 @@ export class PushNotificationManager implements PushNotificationSender {
 		return this.subscriptions.size;
 	}
 
+	getSubscriptionIds(): readonly string[] {
+		return [...this.subscriptions.keys()];
+	}
+
 	// ─── Push delivery ──────────────────────────────────────────────────
 
-	/** Send push notification to all subscribed clients. */
-	async sendToAll(payload: PushPayload): Promise<void> {
+	private async sendNotification(
+		subscription: PushSubscriptionData,
+		payload: string,
+		options: { TTL?: number; vapidDetails: VapidDetails },
+	): Promise<void> {
+		const controller = new AbortController();
+		const timer = setTimeout(() => {
+			controller.abort(new Error("Push send timed out after 10000ms"));
+		}, PUSH_SEND_TIMEOUT_MS);
+		try {
+			// Wait for transport cancellation before the caller releases its claim.
+			await this.webpush.sendNotification(subscription, payload, {
+				...options,
+				timeout: PUSH_SEND_TIMEOUT_MS,
+				signal: controller.signal,
+			});
+		} finally {
+			clearTimeout(timer);
+		}
+	}
+
+	/**
+	 * Send to every subscribed client and report what happened to each.
+	 *
+	 * Per-device failures are still not thrown — one dead phone must not stop the
+	 * laptop from being told — but they are no longer discarded. The report is
+	 * the whole point: it is what lets the delivery ledger tell "everybody got
+	 * it" apart from "nobody did".
+	 */
+	async sendToAll(payload: PushPayload): Promise<PushDeliveryReport> {
 		if (!this.vapidKeys) {
 			throw new PushNotificationManagerNotInitializedError({
 				operation: "sendToAll",
@@ -148,17 +292,22 @@ export class PushNotificationManager implements PushNotificationSender {
 
 		const json = JSON.stringify(payload);
 		const vapidDetails = this.getVapidDetails();
-		const toRemove: string[] = [];
+		const delivered: string[] = [];
+		const expired: string[] = [];
+		const failed: { clientId: string; cause: unknown }[] = [];
 
 		const promises = Array.from(this.subscriptions.entries()).map(
 			async ([clientId, sub]) => {
 				try {
-					await this.webpush.sendNotification(sub, json, { vapidDetails });
+					await this.sendNotification(sub, json, { vapidDetails });
+					delivered.push(clientId);
 				} catch (err: unknown) {
 					const statusCode = (err as { statusCode?: number }).statusCode;
 					// Remove invalid/expired subscriptions
 					if (statusCode === 403 || statusCode === 404 || statusCode === 410) {
-						toRemove.push(clientId);
+						expired.push(clientId);
+					} else {
+						failed.push({ clientId, cause: err });
 					}
 				}
 			},
@@ -167,36 +316,52 @@ export class PushNotificationManager implements PushNotificationSender {
 		await Promise.all(promises);
 
 		// Clean up invalid subscriptions
-		if (toRemove.length > 0) {
-			for (const clientId of toRemove) {
+		if (expired.length > 0) {
+			for (const clientId of expired) {
 				this.subscriptions.delete(clientId);
 			}
 			this.saveSubscriptions();
 		}
+
+		return { delivered, expired, failed };
 	}
 
-	/** Send push notification to a specific client. */
-	async sendTo(clientId: string, payload: PushPayload): Promise<void> {
+	/** Send push notification to a specific client, and report the outcome. */
+	async sendTo(
+		clientId: string,
+		payload: PushPayload,
+	): Promise<PushDeliveryReport> {
 		if (!this.vapidKeys) {
 			throw new PushNotificationManagerNotInitializedError({
 				operation: "sendTo",
 			});
 		}
 
+		const empty: PushDeliveryReport = {
+			delivered: [],
+			expired: [],
+			failed: [],
+		};
 		const sub = this.subscriptions.get(clientId);
-		if (!sub) return;
+		// No subscription is not a delivery, and saying so is the point: a caller
+		// that treats it as one claims the user was told by a device that is not
+		// there.
+		if (!sub) return empty;
 
 		const json = JSON.stringify(payload);
 		const vapidDetails = this.getVapidDetails();
 
 		try {
-			await this.webpush.sendNotification(sub, json, { vapidDetails });
+			await this.sendNotification(sub, json, { vapidDetails });
+			return { ...empty, delivered: [clientId] };
 		} catch (err: unknown) {
 			const statusCode = (err as { statusCode?: number }).statusCode;
 			if (statusCode === 403 || statusCode === 404 || statusCode === 410) {
 				this.subscriptions.delete(clientId);
 				this.saveSubscriptions();
+				return { ...empty, expired: [clientId] };
 			}
+			return { ...empty, failed: [{ clientId, cause: err }] };
 		}
 	}
 
@@ -261,7 +426,7 @@ export class PushNotificationManager implements PushNotificationSender {
 		const promises = Array.from(this.subscriptions.entries()).map(
 			async ([clientId, sub]) => {
 				try {
-					await this.webpush.sendNotification(sub, testPayload, {
+					await this.sendNotification(sub, testPayload, {
 						TTL: 0,
 						vapidDetails,
 					});

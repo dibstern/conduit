@@ -46,9 +46,6 @@ type OperationsOutsideReadModelParity = keyof Pick<
 	| "recordMessageActivity"
 	| "addToParentMap"
 	| "getSessionParentMap"
-	| "incrementPendingQuestionCount"
-	| "decrementPendingQuestionCount"
-	| "setPendingQuestionCounts"
 	| "sendDualSessionLists"
 >;
 

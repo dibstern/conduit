@@ -24,7 +24,7 @@ const routeDrop = (reason: string): RouteDecision => ({
 describe("notification parity contract", () => {
 	it("root done with viewers → push yes, cross-session no", () => {
 		const result = resolveNotifications(
-			{ type: "done", code: 0 } as RelayMessage,
+			{ type: "done", code: 0, alertId: "turn-1:done" } as RelayMessage,
 			routeSend("s1"),
 			false, // not subagent
 			"s1",
@@ -36,7 +36,7 @@ describe("notification parity contract", () => {
 
 	it("root done without viewers → push yes, cross-session yes with payload", () => {
 		const result = resolveNotifications(
-			{ type: "done", code: 0 } as RelayMessage,
+			{ type: "done", code: 0, alertId: "turn-1:done" } as RelayMessage,
 			routeDrop("no viewers for session s1"),
 			false,
 			"s1",
@@ -46,6 +46,7 @@ describe("notification parity contract", () => {
 		expect(result.crossSessionPayload).toEqual({
 			type: "notification_event",
 			eventType: "done",
+			alertId: "turn-1:done",
 			sessionId: "s1",
 		});
 	});
@@ -54,6 +55,7 @@ describe("notification parity contract", () => {
 		const result = resolveNotifications(
 			{
 				type: "error",
+				alertId: "turn-1:error",
 				code: "FATAL",
 				message: "Something broke",
 			} as RelayMessage,
@@ -66,6 +68,7 @@ describe("notification parity contract", () => {
 		expect(result.crossSessionPayload).toEqual({
 			type: "notification_event",
 			eventType: "error",
+			alertId: "turn-1:error",
 			message: "Something broke",
 			sessionId: "s1",
 		});
@@ -73,7 +76,7 @@ describe("notification parity contract", () => {
 
 	it("subagent done → completely suppressed (no push, no cross-session)", () => {
 		const result = resolveNotifications(
-			{ type: "done", code: 0 } as RelayMessage,
+			{ type: "done", code: 0, alertId: "turn-1:done" } as RelayMessage,
 			routeDrop("no viewers"),
 			true, // is subagent
 			"sub-1",
@@ -87,6 +90,7 @@ describe("notification parity contract", () => {
 		const result = resolveNotifications(
 			{
 				type: "error",
+				alertId: "turn-1:error",
 				code: "ERR",
 				message: "subagent failed",
 			} as RelayMessage,
@@ -99,6 +103,7 @@ describe("notification parity contract", () => {
 		expect(result.crossSessionPayload).toMatchObject({
 			type: "notification_event",
 			eventType: "error",
+			alertId: "turn-1:error",
 			message: "subagent failed",
 			sessionId: "sub-1",
 		});
@@ -120,6 +125,7 @@ describe("notification parity contract", () => {
 		const result = resolveNotifications(
 			{
 				type: "error",
+				alertId: "turn-1:error",
 				code: "ERR",
 				message: "oops",
 			} as RelayMessage,

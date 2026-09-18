@@ -42,7 +42,8 @@
 		onConnect,
 		onNavigateToSession,
 		clearNavigateToSession,
-		initSWNavigationListener,
+		initSWMessageListener,
+		reconcilePushActive,
 		onPlanMode,
 		wsSend,
 	} from "../../stores/ws.svelte.js";
@@ -334,7 +335,12 @@
 			});
 
 			// Listen for SW postMessage (push notification clicks)
-			initSWNavigationListener();
+			initSWMessageListener();
+
+			// A push subscription outlives the tab that made it, so a reload
+			// starts out not knowing whether push already owns the ding. Ask
+			// the browser rather than guess, or every alert lands twice.
+			void reconcilePushActive();
 
 			onConnect(() => {
 				// Fetch current version for sidebar footer

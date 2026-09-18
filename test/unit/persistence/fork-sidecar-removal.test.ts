@@ -24,6 +24,6 @@ it("has no runtime fork sidecar reader, cache, or subscription join", () => {
 			readFileSync(join(root, path), "utf8").includes("fork-metadata.json"),
 		);
 	expect(sidecarReaders).toEqual([
-		"lib/persistence/migrations/0017_fork_lineage.ts",
+		"lib/persistence/migrations/fork-lineage-import.ts",
 	]);
 });

@@ -1,7 +1,9 @@
-// ─── Notification Reducer → Indicator E2E Tests ──────────────────────────────
-// Verifies the full pipeline: server sends notification_event via WebSocket →
-// frontend receives and dispatches to notification reducer → sidebar dots
-// and AttentionBanner update accordingly.
+// ─── Server-Derived Notification Indicators E2E Tests ────────────────────────
+// Verifies the full pipeline: the server derives the notification facts onto the
+// session row (`pendingQuestions`, `pendingPermissions`, `unseenActivity`) →
+// the row reaches the frontend over the WebSocket → sidebar dots and the
+// AttentionBanner read them. There is no client-side badge state in between:
+// what the sidebar shows is what the server last said about the row.
 //
 // Uses WS mock — no real OpenCode or relay needed.
 // Frontend served by Vite preview, WebSocket intercepted by page.routeWebSocket().
@@ -156,190 +158,139 @@ async function mockRelayWithViewSessionRpc(
 }
 
 // ─── Tests ──────────────────────────────────────────────────────────────────
+/** A session_list carrying the notification facts the server derived per row. */
+function sessionListWith(
+	counts: Record<
+		string,
+		{ questions?: number; permissions?: number; unseen?: boolean }
+	>,
+): MockMessage {
+	return {
+		type: "session_list",
+		roots: true,
+		sessions: [
+			{
+				id: SESS_A,
+				title: "Session A — current",
+				status: "idle",
+				updatedAt: Date.now(),
+				messageCount: 2,
+				pendingQuestions: counts[SESS_A]?.questions ?? 0,
+				pendingPermissions: counts[SESS_A]?.permissions ?? 0,
+				unseenActivity: counts[SESS_A]?.unseen ?? false,
+			},
+			{
+				id: SESS_B,
+				title: "Session B — other",
+				status: "idle",
+				updatedAt: Date.now() - 3600_000,
+				messageCount: 5,
+				pendingQuestions: counts[SESS_B]?.questions ?? 0,
+				pendingPermissions: counts[SESS_B]?.permissions ?? 0,
+				unseenActivity: counts[SESS_B]?.unseen ?? false,
+			},
+		],
+	};
+}
 
-test.describe("notification reducer indicators", () => {
-	test("shows attention dot on sidebar session after ask_user notification_event", async ({
+async function openChat(page: Page, baseURL: string | undefined) {
+	const control = await mockRelayWithViewSessionRpc(page, {
+		initMessages: twoSessionInit,
+		responses: new Map(),
+		initDelay: 0,
+		messageDelay: 0,
+	});
+	await page.goto(`${baseURL ?? "http://localhost:4173"}${PROJECT_URL}`);
+	await waitForChatReady(page);
+	return control;
+}
+
+test.describe("server-derived notification indicators", () => {
+	test("shows the attention dot when the row says a question is waiting", async ({
 		page,
 		baseURL,
 	}) => {
-		const control = await mockRelayWithViewSessionRpc(page, {
-			initMessages: twoSessionInit,
-			responses: new Map(),
-			initDelay: 0,
-			messageDelay: 0,
-		});
+		const control = await openChat(page, baseURL);
 
-		await page.goto(`${baseURL ?? "http://localhost:4173"}${PROJECT_URL}`);
-		await waitForChatReady(page);
-
-		// Verify session B is visible in sidebar
 		await expect(sessionItem(page, SESS_B)).toBeVisible({ timeout: 5_000 });
-
-		// No attention dot initially
 		await expect(attentionDot(page, SESS_B)).toHaveCount(0);
 
-		// Server sends ask_user notification for session B
-		control.sendMessage({
-			type: "notification_event",
-			eventType: "ask_user",
-			sessionId: SESS_B,
-		});
+		control.sendMessage(sessionListWith({ [SESS_B]: { questions: 1 } }));
 
-		// Attention dot should appear on session B
 		await expect(attentionDot(page, SESS_B)).toBeVisible({ timeout: 5_000 });
 	});
 
-	test("clears attention dot when navigating to that session (session_viewed)", async ({
+	test("the session on screen never shows a dot, whatever the row says", async ({
 		page,
 		baseURL,
 	}) => {
-		const control = await mockRelayWithViewSessionRpc(page, {
-			initMessages: twoSessionInit,
-			responses: new Map(),
-			initDelay: 0,
-			messageDelay: 0,
-		});
+		const control = await openChat(page, baseURL);
 
-		await page.goto(`${baseURL ?? "http://localhost:4173"}${PROJECT_URL}`);
-		await waitForChatReady(page);
-
-		// Inject ask_user notification on session B to create attention dot
-		control.sendMessage({
-			type: "notification_event",
-			eventType: "ask_user",
-			sessionId: SESS_B,
-		});
-
-		// Wait for attention dot to appear
+		control.sendMessage(sessionListWith({ [SESS_B]: { questions: 1 } }));
 		await expect(attentionDot(page, SESS_B)).toBeVisible({ timeout: 5_000 });
 
-		// Navigate to session B by clicking it in the sidebar
 		await sessionItem(page, SESS_B).click({ timeout: 5_000 });
-
-		// Wait for the switch to complete (URL updates to include session B)
 		await page.waitForFunction(
 			(sessId) => window.location.pathname.includes(`/s/${sessId}`),
 			SESS_B,
 			{ timeout: 5_000 },
 		);
 
-		// Attention dot should be gone — the current session never shows a dot
-		// (getSessionIndicator returns null for currentSessionId)
+		// Which session is on screen is a per-tab fact the server cannot know
+		// (ni8.23 C3), so the suppression stays local even though the count does
+		// not: the row still says a question is pending, and no dot is drawn.
 		await expect(attentionDot(page, SESS_B)).toHaveCount(0);
 	});
 
-	test("shows done-unviewed dot after done notification_event", async ({
+	test("shows the done-unviewed dot when the row reports unseen activity", async ({
 		page,
 		baseURL,
 	}) => {
-		const control = await mockRelayWithViewSessionRpc(page, {
-			initMessages: twoSessionInit,
-			responses: new Map(),
-			initDelay: 0,
-			messageDelay: 0,
-		});
+		const control = await openChat(page, baseURL);
 
-		await page.goto(`${baseURL ?? "http://localhost:4173"}${PROJECT_URL}`);
-		await waitForChatReady(page);
-
-		// Verify session B visible, no done dot initially
 		await expect(sessionItem(page, SESS_B)).toBeVisible({ timeout: 5_000 });
 		await expect(doneUnviewedDot(page, SESS_B)).toHaveCount(0);
 
-		// Server sends done notification for session B
-		control.sendMessage({
-			type: "notification_event",
-			eventType: "done",
-			sessionId: SESS_B,
-		});
+		// `unseenActivity` is the server's comparison of last_message_at against
+		// last_viewed_at — the client is told the answer, not the inputs.
+		control.sendMessage(sessionListWith({ [SESS_B]: { unseen: true } }));
 
-		// Done-unviewed dot should appear on session B
 		await expect(doneUnviewedDot(page, SESS_B)).toBeVisible({ timeout: 5_000 });
 	});
 
-	test("AttentionBanner appears when another session has a question", async ({
+	test("AttentionBanner appears when another session's row has a question", async ({
 		page,
 		baseURL,
 	}) => {
-		const control = await mockRelayWithViewSessionRpc(page, {
-			initMessages: twoSessionInit,
-			responses: new Map(),
-			initDelay: 0,
-			messageDelay: 0,
-		});
+		const control = await openChat(page, baseURL);
 
-		await page.goto(`${baseURL ?? "http://localhost:4173"}${PROJECT_URL}`);
-		await waitForChatReady(page);
-
-		// No attention banner initially
 		await expect(attentionBanner(page)).toHaveCount(0);
 
-		// Server sends ask_user notification for session B
-		control.sendMessage({
-			type: "notification_event",
-			eventType: "ask_user",
-			sessionId: SESS_B,
-		});
+		control.sendMessage(sessionListWith({ [SESS_B]: { questions: 1 } }));
 
-		// AttentionBanner should appear with role="status"
 		await expect(attentionBanner(page)).toBeVisible({ timeout: 5_000 });
-
-		// Banner should mention session B's title
 		await expect(attentionBanner(page)).toContainText("Session B", {
 			timeout: 5_000,
 		});
-
-		// Banner should indicate something needs attention
 		await expect(attentionBanner(page)).toContainText("attention", {
 			timeout: 5_000,
 		});
 	});
 
-	test("reconcile via session_list corrects stale indicator state", async ({
+	test("a later row with the count cleared takes the dot away", async ({
 		page,
 		baseURL,
 	}) => {
-		const control = await mockRelayWithViewSessionRpc(page, {
-			initMessages: twoSessionInit,
-			responses: new Map(),
-			initDelay: 0,
-			messageDelay: 0,
-		});
+		const control = await openChat(page, baseURL);
 
-		await page.goto(`${baseURL ?? "http://localhost:4173"}${PROJECT_URL}`);
-		await waitForChatReady(page);
-
-		// No attention dot initially (the initial session_list carries no counts)
-		await expect(sessionItem(page, SESS_B)).toBeVisible({ timeout: 5_000 });
-		await expect(attentionDot(page, SESS_B)).toHaveCount(0);
-
-		// Server sends a reconciliation session_list whose pendingQuestionCounts
-		// name B. This simulates the periodic session list refresh that corrects
-		// stale state: the counts ride beside the sessions, and ws-dispatch.ts
-		// turns them into a "reconcile" action for the notification reducer.
-		control.sendMessage({
-			type: "session_list",
-			roots: true,
-			sessions: [
-				{
-					id: SESS_A,
-					title: "Session A — current",
-					status: "idle",
-					updatedAt: Date.now(),
-					messageCount: 2,
-				},
-				{
-					id: SESS_B,
-					title: "Session B — other",
-					status: "idle",
-					updatedAt: Date.now() - 3600_000,
-					messageCount: 5,
-				},
-			],
-			pendingQuestionCounts: { [SESS_B]: 2 },
-		});
-
-		// Session B should now show an attention dot (reconcile sets questions: 2)
+		control.sendMessage(sessionListWith({ [SESS_B]: { questions: 2 } }));
 		await expect(attentionDot(page, SESS_B)).toBeVisible({ timeout: 5_000 });
+
+		// Someone else answered the question. The next row the server sends is
+		// simply the truth again — there is no local state to reconcile, and no
+		// way for this tab to keep a badge the server has stopped reporting.
+		control.sendMessage(sessionListWith({}));
+
+		await expect(attentionDot(page, SESS_B)).toHaveCount(0);
 	});
 });

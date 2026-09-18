@@ -181,9 +181,14 @@ describe("handleMessage calls triggerNotifications for notification_event (cross
 			type: "notification_event",
 			eventType: "done",
 			sessionId: "sess-xyz",
+			alertId: "turn-1:done",
 		});
 		expect(triggerNotificationsMock).toHaveBeenCalledWith(
-			expect.objectContaining({ type: "done", sessionId: "sess-xyz" }),
+			expect.objectContaining({
+				type: "done",
+				sessionId: "sess-xyz",
+				alertId: "turn-1:done",
+			}),
 		);
 	});
 

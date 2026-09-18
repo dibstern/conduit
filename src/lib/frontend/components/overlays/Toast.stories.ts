@@ -1,6 +1,6 @@
 import type { Meta, StoryObj } from "@storybook/svelte-vite";
-import { resetNotifState } from "../../stores/notification-reducer.svelte.js";
 import { permissionsState } from "../../stores/permissions.svelte.js";
+import { clearSessionState } from "../../stores/session.svelte.js";
 import { uiState } from "../../stores/ui.svelte.js";
 import type { Toast as ToastType } from "../../types.js";
 import NotificationStack from "./NotificationStack.svelte";
@@ -15,7 +15,7 @@ const meta = {
 	beforeEach: () => {
 		uiState.toasts = [];
 		permissionsState.pendingPermissions = [];
-		resetNotifState();
+		clearSessionState();
 	},
 } satisfies Meta<typeof NotificationStack>;
 
