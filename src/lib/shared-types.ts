@@ -226,6 +226,7 @@ export interface SessionInfo {
 	 */
 	pendingQuestionCount?: number;
 	pendingPermissionCount?: number;
+	unread?: boolean;
 }
 
 export interface DaemonSessionQueryOptions {
@@ -513,6 +514,7 @@ const SessionInfoSchema = Schema.Struct({
 	forkPointTimestamp: Schema.optional(Schema.Number),
 	pendingQuestionCount: Schema.optional(Schema.Number),
 	pendingPermissionCount: Schema.optional(Schema.Number),
+	unread: Schema.optional(Schema.Boolean),
 });
 
 const ContextWindowOptionSchema = Schema.Struct({

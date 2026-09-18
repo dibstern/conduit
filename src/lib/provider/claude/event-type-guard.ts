@@ -46,6 +46,8 @@ const CLAUDE_NOT_APPLICABLE_TYPES = [
 	"session.deleted", // Relay-owned lifecycle event appended directly by SessionManager
 	"session.forked", // Forking is an OpenCode operation; the Claude SDK has no fork
 	"session.provider_changed", // Provider switching is a relay-level concept
+	"session.read", // Whether a human has looked at a session; no provider can know it
+	"session.unread", // Same — appended by the relay when someone marks a session unread
 	"permission.asked", // Interactive asks use requestPermission(); auto-approved asks persist via synthetic sink push (audit)
 	"permission.resolved", // Interactive resolutions use resolvePermission(); auto-approvals persist via synthetic sink push (audit)
 	"question.asked", // Routed through requestQuestion(), not push()

@@ -409,6 +409,7 @@ export const viewSessionForClient = ({
 }) =>
 	Effect.gen(function* () {
 		const wsHandler = yield* WebSocketHandlerTag;
+		const sessionManagerService = yield* SessionManagerServiceTag;
 		const log = yield* LoggerTag;
 
 		const id = sessionId;
@@ -422,6 +423,19 @@ export const viewSessionForClient = ({
 			eventType: "session_viewed",
 			sessionId: id,
 		} as RelayMessage);
+
+		// Read state is durable but best-effort: opening the session must still
+		// succeed if recording it is temporarily unavailable. Logged rather than
+		// swallowed, because the symptom of a persistent failure here is a session
+		// that will not stop looking unread, with nothing to explain why.
+		const readRecorded = yield* Effect.either(
+			sessionManagerService.markSessionRead(id),
+		);
+		if (readRecorded._tag === "Left") {
+			log.warn(
+				`client=${clientId} Failed to record read state for ${id}: ${String(readRecorded.left)}`,
+			);
+		}
 
 		// Fire-and-forget metadata (unless skipMetadata is set)
 		if (!skipMetadata) {
@@ -588,6 +602,27 @@ export const renameSessionForClient = ({
 				wsHandler.broadcast(msg),
 			);
 			log.info(`client=${clientId} Renamed: ${id} → ${title}`);
+		}
+	});
+
+export const markSessionUnreadForClient = ({
+	clientId,
+	sessionId,
+}: {
+	readonly clientId: string;
+	readonly sessionId: string;
+}) =>
+	Effect.gen(function* () {
+		const wsHandler = yield* WebSocketHandlerTag;
+		const sessionManagerService = yield* SessionManagerServiceTag;
+		const log = yield* LoggerTag;
+
+		if (sessionId) {
+			yield* sessionManagerService.markSessionUnread(sessionId);
+			yield* sessionManagerService.sendDualSessionLists((msg) =>
+				wsHandler.broadcast(msg),
+			);
+			log.info(`client=${clientId} Marked unread: ${sessionId}`);
 		}
 	});
 

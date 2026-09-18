@@ -300,6 +300,7 @@ export const SessionInfoSchema = Schema.Struct({
 	forkPointTimestamp: Schema.optional(Schema.Number),
 	pendingQuestionCount: Schema.optional(Schema.Number),
 	pendingPermissionCount: Schema.optional(Schema.Number),
+	unread: Schema.optional(Schema.Boolean),
 });
 
 export const ProjectSessionAvailabilitySchema = Schema.Union(
@@ -894,6 +895,19 @@ export class RenameSession extends Schema.TaggedRequest<RenameSession>()(
 	},
 ) {}
 
+export class MarkSessionUnread extends Schema.TaggedRequest<MarkSessionUnread>()(
+	"MarkSessionUnread",
+	{
+		failure: WsRpcError,
+		success: OkResponseSchema,
+		payload: {
+			projectSlug: NonEmptyString,
+			sessionId: NonEmptyString,
+			originId: Schema.optional(NonEmptyString),
+		},
+	},
+) {}
+
 export class SwitchVariant extends Schema.TaggedRequest<SwitchVariant>()(
 	"SwitchVariant",
 	{
@@ -1220,6 +1234,7 @@ export const WsRpcRequest = Schema.Union(
 	ResolveClaudeSettings,
 	ReloadProviderSession,
 	RenameSession,
+	MarkSessionUnread,
 	SwitchVariant,
 	SwitchPermissionMode,
 	GetFileTree,
@@ -1280,6 +1295,7 @@ export const WsRpcGroup = RpcGroup.make(
 	Rpc.fromTaggedRequest(ResolveClaudeSettings),
 	Rpc.fromTaggedRequest(ReloadProviderSession),
 	Rpc.fromTaggedRequest(RenameSession),
+	Rpc.fromTaggedRequest(MarkSessionUnread),
 	Rpc.fromTaggedRequest(SwitchVariant),
 	Rpc.fromTaggedRequest(SwitchPermissionMode),
 	Rpc.fromTaggedRequest(GetFileTree),

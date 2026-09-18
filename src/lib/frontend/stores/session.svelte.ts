@@ -402,6 +402,7 @@ const sessionInfoFromRpc = (
 	...(session.pendingPermissionCount != null
 		? { pendingPermissionCount: session.pendingPermissionCount }
 		: {}),
+	...(session.unread != null ? { unread: session.unread } : {}),
 	...(session.projectSlug != null ? { projectSlug: session.projectSlug } : {}),
 });
 

@@ -12,6 +12,8 @@ export interface SessionStatement {
 type SessionHandledType =
 	| "session.created"
 	| "session.renamed"
+	| "session.read"
+	| "session.unread"
 	| "session.deleted"
 	| "session.forked"
 	| "session.status"
@@ -108,6 +110,27 @@ export const sessionHandlers: {
 			},
 		];
 	},
+
+	// Last transition wins, and these need no guard against an earlier one
+	// overwriting a later one: every replay path is ORDER BY sequence ASC, so the
+	// events arrive in the order they happened. The lookahead subquery this
+	// briefly had was pure cost. Deliberately does NOT touch `updated_at` --
+	// that is the list's sort key, so reading a session must not reorder it.
+	"session.read": (event) => [
+		{
+			sql: "UPDATE sessions SET read_at = ? WHERE id = ?",
+			// The event's own timestamp, never Date.now(): the same log has to
+			// project to the same table every time.
+			params: [event.createdAt, event.data.sessionId],
+		},
+	],
+
+	"session.unread": (event) => [
+		{
+			sql: "UPDATE sessions SET read_at = NULL WHERE id = ?",
+			params: [event.data.sessionId],
+		},
+	],
 
 	"session.deleted": (event) => {
 		// sessions.parent_id, turns.session_id, messages.session_id/turn_id,

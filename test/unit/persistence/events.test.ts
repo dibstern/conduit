@@ -16,8 +16,8 @@ import {
 } from "../../../src/lib/persistence/events.js";
 
 describe("Canonical Event Types", () => {
-	it("exports all 25 canonical event types", () => {
-		expect(CANONICAL_EVENT_TYPES).toHaveLength(26);
+	it("exports all 28 canonical event types", () => {
+		expect(CANONICAL_EVENT_TYPES).toHaveLength(28);
 		expect(CANONICAL_EVENT_TYPES).toContain("message.created");
 		expect(CANONICAL_EVENT_TYPES).toContain("text.delta");
 		expect(CANONICAL_EVENT_TYPES).toContain("thinking.start");
@@ -34,6 +34,8 @@ describe("Canonical Event Types", () => {
 		expect(CANONICAL_EVENT_TYPES).toContain("turn.model_resolved");
 		expect(CANONICAL_EVENT_TYPES).toContain("session.created");
 		expect(CANONICAL_EVENT_TYPES).toContain("session.renamed");
+		expect(CANONICAL_EVENT_TYPES).toContain("session.read");
+		expect(CANONICAL_EVENT_TYPES).toContain("session.unread");
 		expect(CANONICAL_EVENT_TYPES).toContain("session.deleted");
 		expect(CANONICAL_EVENT_TYPES).toContain("session.forked");
 		expect(CANONICAL_EVENT_TYPES).toContain("session.status");

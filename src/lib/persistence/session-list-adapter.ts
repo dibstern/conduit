@@ -86,6 +86,15 @@ export function sessionRowsToSessionInfoList(
 			info.pendingPermissionCount = pCount;
 		}
 
+		// Comparing activity to the read timestamp makes new activity re-mark the
+		// session unread without writing another event for every message.
+		if (
+			row.last_message_at != null &&
+			(row.read_at == null || row.read_at < row.last_message_at)
+		) {
+			info.unread = true;
+		}
+
 		return info;
 	});
 }

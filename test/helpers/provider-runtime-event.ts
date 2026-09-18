@@ -39,7 +39,9 @@ export function providerRuntimeEventFromCanonical(
 	if (
 		event.type === "session.deleted" ||
 		event.type === "session.forked" ||
-		event.type === "session.permission_mode_changed"
+		event.type === "session.permission_mode_changed" ||
+		event.type === "session.read" ||
+		event.type === "session.unread"
 	) {
 		throw new Error(`${event.type} is not a provider runtime event`);
 	}

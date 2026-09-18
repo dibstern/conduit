@@ -127,6 +127,31 @@ const READ_MODEL_PARITY_CASES: Record<ReadModelMutation, ParityCase> = {
 				);
 			}),
 	},
+	markSessionRead: {
+		run: ({ service, readQuery, seedSession }) =>
+			Effect.gen(function* () {
+				const sessionId = "ses-read";
+				yield* seedSession(sessionId, "Read me");
+
+				yield* service.markSessionRead(sessionId);
+
+				expect(
+					(yield* readQuery.getSession(sessionId))?.read_at,
+				).not.toBeNull();
+			}),
+	},
+	markSessionUnread: {
+		run: ({ service, readQuery, seedSession }) =>
+			Effect.gen(function* () {
+				const sessionId = "ses-unread";
+				yield* seedSession(sessionId, "Unread me");
+				yield* service.markSessionRead(sessionId);
+
+				yield* service.markSessionUnread(sessionId);
+
+				expect((yield* readQuery.getSession(sessionId))?.read_at).toBeNull();
+			}),
+	},
 	setForkEntry: {
 		run: ({ api, service, readQuery, seedSession }) =>
 			Effect.gen(function* () {

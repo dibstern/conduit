@@ -32,6 +32,7 @@ import {
 	ListSessions,
 	LoadMoreHistory,
 	LoadMoreHistoryResponseSchema,
+	MarkSessionUnread,
 	ModelExecutionSchema,
 	RejectQuestion,
 	ReloadProviderSession,
@@ -407,6 +408,7 @@ const provideRpc = <A, E>(effect: Effect.Effect<A, E, WsRpcTestEnv>) =>
 						sessionId: request.sessionId,
 					}),
 				RenameSession: () => Effect.succeed({ ok: true as const }),
+				MarkSessionUnread: () => Effect.succeed({ ok: true as const }),
 				SwitchVariant: (request) =>
 					Effect.succeed({
 						projectSlug: request.projectSlug,
@@ -706,6 +708,7 @@ describe("browser WebSocket RPC contract", () => {
 		expect(WsRpcGroup.requests.has("ResolveClaudeSettings")).toBe(true);
 		expect(WsRpcGroup.requests.has("ReloadProviderSession")).toBe(true);
 		expect(WsRpcGroup.requests.has("RenameSession")).toBe(true);
+		expect(WsRpcGroup.requests.has("MarkSessionUnread")).toBe(true);
 		expect(WsRpcGroup.requests.has("SwitchVariant")).toBe(true);
 		expect(WsRpcGroup.requests.has("SwitchPermissionMode")).toBe(true);
 		expect(WsRpcGroup.requests.has("GetFileTree")).toBe(true);
@@ -1007,6 +1010,13 @@ describe("browser WebSocket RPC contract", () => {
 						projectSlug: "demo",
 						sessionId: "session-1",
 						title: "Renamed",
+					}),
+				).toEqual({ ok: true });
+
+				expect(
+					yield* client.MarkSessionUnread({
+						projectSlug: "demo",
+						sessionId: "session-1",
 					}),
 				).toEqual({ ok: true });
 
@@ -1408,6 +1418,12 @@ describe("browser WebSocket RPC contract", () => {
 				title: "Renamed",
 			})._tag,
 		).toBe("RenameSession");
+		expect(
+			new MarkSessionUnread({
+				projectSlug: "demo",
+				sessionId: "session-1",
+			})._tag,
+		).toBe("MarkSessionUnread");
 		expect(
 			new SwitchVariant({
 				projectSlug: "demo",

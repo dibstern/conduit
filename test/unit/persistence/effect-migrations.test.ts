@@ -102,6 +102,7 @@ describe("Effect SQL migrations", () => {
 					{ migration_id: 9, name: "sessions_permission_mode" },
 					{ migration_id: 10, name: "purge_legacy_skeleton_sessions" },
 					{ migration_id: 11, name: "session_cascade_deletes" },
+					{ migration_id: 12, name: "sessions_read_at" },
 				]);
 
 				const legacyRows = yield* sql<{ id: number; name: string }>`
@@ -117,6 +118,7 @@ describe("Effect SQL migrations", () => {
 					{ id: 8, name: "turn_model_execution" },
 					{ id: 9, name: "sessions_permission_mode" },
 					{ id: 10, name: "session_cascade_deletes" },
+					{ id: 11, name: "sessions_read_at" },
 				]);
 			}).pipe(
 				Effect.provide(
@@ -144,6 +146,7 @@ describe("Effect SQL migrations", () => {
 					[9, "sessions_permission_mode"],
 					[10, "purge_legacy_skeleton_sessions"],
 					[11, "session_cascade_deletes"],
+					[12, "sessions_read_at"],
 				]);
 
 				const sql = yield* SqlClient.SqlClient;
@@ -162,8 +165,8 @@ describe("Effect SQL migrations", () => {
 					name: string;
 				}>`SELECT migration_id, name FROM effect_sql_migrations ORDER BY migration_id`;
 				expect(effectHistory.at(-1)).toEqual({
-					migration_id: 11,
-					name: "session_cascade_deletes",
+					migration_id: 12,
+					name: "sessions_read_at",
 				});
 				const legacyHistory = yield* sql<{ id: number; name: string }>`
 					SELECT id, name FROM _migrations ORDER BY id`;
@@ -206,6 +209,7 @@ describe("Effect SQL migrations", () => {
 					{ migration_id: 9, name: "sessions_permission_mode" },
 					{ migration_id: 10, name: "purge_legacy_skeleton_sessions" },
 					{ migration_id: 11, name: "session_cascade_deletes" },
+					{ migration_id: 12, name: "sessions_read_at" },
 				]);
 
 				const columns = yield* sql<{ name: string }>`
@@ -291,8 +295,8 @@ describe("Effect SQL migrations", () => {
 					FROM effect_sql_migrations
 					ORDER BY migration_id`;
 				expect(history.at(-1)).toEqual({
-					migration_id: 11,
-					name: "session_cascade_deletes",
+					migration_id: 12,
+					name: "sessions_read_at",
 				});
 			}).pipe(
 				Effect.provide(
@@ -301,6 +305,47 @@ describe("Effect SQL migrations", () => {
 							runMigrations(db, schemaMigrations.slice(0, 8));
 							db.execute(
 								"ALTER TABLE sessions ADD COLUMN permission_mode TEXT",
+							);
+						}),
+					),
+				),
+			),
+	);
+
+	it.effect(
+		"adds read_at once and backfills existing sessions from updated_at",
+		() =>
+			Effect.gen(function* () {
+				yield* makeEffectSqlMigrator();
+
+				const sql = yield* SqlClient.SqlClient;
+				const columns = yield* sql<{
+					name: string;
+				}>`PRAGMA table_info(sessions)`;
+				expect(
+					columns.filter((column) => column.name === "read_at"),
+				).toHaveLength(1);
+				const rows = yield* sql<{ read_at: number | null }>`
+					SELECT read_at FROM sessions WHERE id = 'existing'`;
+				expect(rows[0]?.read_at).toBe(2_000_000_000_000);
+				expect(yield* makeEffectSqlMigrator()).toEqual([]);
+			}).pipe(
+				Effect.provide(
+					makeFileSqlLayer((filename) =>
+						seedDatabase(filename, (db) => {
+							runMigrations(db, schemaMigrations.slice(0, 10));
+							db.execute(
+								`INSERT INTO sessions
+								 (id, provider, title, status, created_at, updated_at)
+								 VALUES (?, ?, ?, ?, ?, ?)`,
+								[
+									"existing",
+									"opencode",
+									"Existing",
+									"idle",
+									2_000_000_000_000,
+									2_000_000_000_000,
+								],
 							);
 						}),
 					),

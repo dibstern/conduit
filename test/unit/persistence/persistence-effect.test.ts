@@ -180,6 +180,7 @@ describe("Persistence Effect", () => {
 				{ migration_id: 9, name: "sessions_permission_mode" },
 				{ migration_id: 10, name: "purge_legacy_skeleton_sessions" },
 				{ migration_id: 11, name: "session_cascade_deletes" },
+				{ migration_id: 12, name: "sessions_read_at" },
 			]);
 
 			const legacyMigrationTable = yield* sql<{ name: string }>`

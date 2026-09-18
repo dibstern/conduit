@@ -59,6 +59,7 @@ import {
 	deleteSessionForClient,
 	forkSessionForClient,
 	loadMoreHistoryForSession,
+	markSessionUnreadForClient,
 	renameSessionForClient,
 	viewSessionForClient,
 } from "../handlers/session.js";
@@ -119,6 +120,7 @@ export {
 	type ListSessionsResponse,
 	LoadMoreHistory,
 	type LoadMoreHistoryResponse,
+	MarkSessionUnread,
 	type ModelInfo,
 	type ProjectMutationResponse,
 	type ProviderInfo,
@@ -776,6 +778,20 @@ export const WsRpcServerLayer = WsRpcGroup.toLayer({
 				Effect.fail(
 					new WsRpcError({
 						message: `RenameSession failed: ${String(error)}`,
+					}),
+				),
+			),
+		),
+	MarkSessionUnread: (request) =>
+		markSessionUnreadForClient({
+			clientId: request.originId ?? "rpc",
+			sessionId: request.sessionId,
+		}).pipe(
+			Effect.as({ ok: true as const }),
+			Effect.catchAll((error) =>
+				Effect.fail(
+					new WsRpcError({
+						message: `MarkSessionUnread failed: ${String(error)}`,
 					}),
 				),
 			),

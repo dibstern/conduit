@@ -65,6 +65,8 @@ export const CANONICAL_EVENT_TYPES = [
 	"turn.model_resolved",
 	"session.created",
 	"session.renamed",
+	"session.read",
+	"session.unread",
 	"session.deleted",
 	"session.forked",
 	"session.status",
@@ -245,6 +247,14 @@ export interface SessionRenamedPayload {
 	readonly title: string;
 }
 
+export interface SessionReadPayload {
+	readonly sessionId: string;
+}
+
+export interface SessionUnreadPayload {
+	readonly sessionId: string;
+}
+
 export interface SessionDeletedPayload {
 	readonly sessionId: string;
 }
@@ -342,6 +352,8 @@ export interface EventPayloadMap {
 	"turn.model_resolved": TurnModelResolvedPayload;
 	"session.created": SessionCreatedPayload;
 	"session.renamed": SessionRenamedPayload;
+	"session.read": SessionReadPayload;
+	"session.unread": SessionUnreadPayload;
 	"session.deleted": SessionDeletedPayload;
 	"session.forked": SessionForkedPayload;
 	"session.status": SessionStatusPayload;
@@ -660,6 +672,14 @@ const SessionRenamedPayloadSchema = Schema.Struct({
 	title: Schema.String,
 });
 
+const SessionReadPayloadSchema = Schema.Struct({
+	sessionId: Schema.String,
+});
+
+const SessionUnreadPayloadSchema = Schema.Struct({
+	sessionId: Schema.String,
+});
+
 const SessionDeletedPayloadSchema = Schema.Struct({
 	sessionId: Schema.String,
 });
@@ -801,6 +821,14 @@ const SessionRenamedEventSchema = eventEnvelope(
 	"session.renamed",
 	SessionRenamedPayloadSchema,
 );
+const SessionReadEventSchema = eventEnvelope(
+	"session.read",
+	SessionReadPayloadSchema,
+);
+const SessionUnreadEventSchema = eventEnvelope(
+	"session.unread",
+	SessionUnreadPayloadSchema,
+);
 const SessionDeletedEventSchema = eventEnvelope(
 	"session.deleted",
 	SessionDeletedPayloadSchema,
@@ -842,7 +870,7 @@ const QuestionResolvedEventSchema = eventEnvelope(
 	QuestionResolvedPayloadSchema,
 );
 
-// ─── Canonical Event Schema (Union of all 26 event types) ──────────────────
+// ─── Canonical Event Schema (Union of all 28 event types) ──────────────────
 
 export const CanonicalEventSchema = Schema.Union(
 	MessageCreatedEventSchema,
@@ -861,6 +889,8 @@ export const CanonicalEventSchema = Schema.Union(
 	TurnModelResolvedEventSchema,
 	SessionCreatedEventSchema,
 	SessionRenamedEventSchema,
+	SessionReadEventSchema,
+	SessionUnreadEventSchema,
 	SessionDeletedEventSchema,
 	SessionForkedEventSchema,
 	SessionStatusEventSchema,
@@ -890,6 +920,8 @@ import { PersistenceError } from "./errors.js";
 const PAYLOAD_REQUIRED_FIELDS: Record<CanonicalEventType, readonly string[]> = {
 	"session.created": ["sessionId", "title", "provider"],
 	"session.renamed": ["sessionId", "title"],
+	"session.read": ["sessionId"],
+	"session.unread": ["sessionId"],
 	"session.deleted": ["sessionId"],
 	"session.forked": ["sessionId", "parentId"],
 	"session.status": ["sessionId", "status"],

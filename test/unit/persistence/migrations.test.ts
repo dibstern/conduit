@@ -4,7 +4,9 @@ import {
 	type Migration,
 	runMigrations,
 } from "../../../src/lib/persistence/migrations.js";
+import type { SessionRow } from "../../../src/lib/persistence/read-model-types.js";
 import { schemaMigrations } from "../../../src/lib/persistence/schema.js";
+import { sessionRowsToSessionInfoList } from "../../../src/lib/persistence/session-list-adapter.js";
 import { SqliteClient } from "../../../src/lib/persistence/sqlite-client.js";
 
 describe("Migration Runner", () => {
@@ -118,6 +120,7 @@ describe("Migration Runner", () => {
 		const turnModelExecutionMigration = schemaMigrations[7];
 		const sessionsPermissionModeMigration = schemaMigrations[8];
 		const sessionCascadeDeletesMigration = schemaMigrations[9];
+		const sessionsReadAtMigration = schemaMigrations[10];
 		if (
 			!baseline ||
 			!metadataMigration ||
@@ -128,7 +131,8 @@ describe("Migration Runner", () => {
 			!messagesContextWindowMigration ||
 			!turnModelExecutionMigration ||
 			!sessionsPermissionModeMigration ||
-			!sessionCascadeDeletesMigration
+			!sessionCascadeDeletesMigration ||
+			!sessionsReadAtMigration
 		) {
 			throw new Error("Expected all event-store schema migrations");
 		}
@@ -189,6 +193,11 @@ describe("Migration Runner", () => {
 				name: "session_cascade_deletes",
 				checksum: calculateMigrationChecksum(sessionCascadeDeletesMigration),
 			},
+			{
+				id: 11,
+				name: "sessions_read_at",
+				checksum: calculateMigrationChecksum(sessionsReadAtMigration),
+			},
 		]);
 		columns = client
 			.query<{ name: string }>("PRAGMA table_info(message_parts)")
@@ -220,10 +229,12 @@ describe("Migration Runner", () => {
 		const turnModelExecutionMigration = schemaMigrations[7];
 		const sessionsPermissionModeMigration = schemaMigrations[8];
 		const sessionCascadeDeletesMigration = schemaMigrations[9];
+		const sessionsReadAtMigration = schemaMigrations[10];
 		if (
 			!turnModelExecutionMigration ||
 			!sessionsPermissionModeMigration ||
-			!sessionCascadeDeletesMigration
+			!sessionCascadeDeletesMigration ||
+			!sessionsReadAtMigration
 		) {
 			throw new Error("Expected remaining event-store migrations");
 		}
@@ -250,6 +261,11 @@ describe("Migration Runner", () => {
 				name: "session_cascade_deletes",
 				checksum: calculateMigrationChecksum(sessionCascadeDeletesMigration),
 			},
+			{
+				id: 11,
+				name: "sessions_read_at",
+				checksum: calculateMigrationChecksum(sessionsReadAtMigration),
+			},
 		]);
 		expect(runMigrations(client, schemaMigrations)).toEqual([]);
 
@@ -263,6 +279,40 @@ describe("Migration Runner", () => {
 				"actual_model",
 			]),
 		);
+	});
+
+	it("adds read_at once and backfills existing sessions as already read", () => {
+		client = SqliteClient.memory();
+		const migrationsBeforeReadAt = schemaMigrations.slice(0, 10);
+		runMigrations(client, migrationsBeforeReadAt);
+		// last_message_at matters: without activity a session is never unread, so a
+		// row that has none cannot tell a working backfill from a missing one.
+		client.execute(
+			`INSERT INTO sessions (id, provider, title, status, last_message_at, created_at, updated_at)
+			 VALUES (?, ?, ?, ?, ?, ?, ?)`,
+			["existing", "opencode", "Existing", "idle", 456, 100, 456],
+		);
+
+		expect(
+			client
+				.query<{ name: string }>("PRAGMA table_info(sessions)")
+				.map((column) => column.name),
+		).not.toContain("read_at");
+
+		expect(runMigrations(client, schemaMigrations)).toHaveLength(1);
+
+		// The criterion is that upgrading does not invent a backlog, so assert on
+		// the derived flag the product actually shows rather than on read_at alone.
+		const rows = client.query<SessionRow>("SELECT * FROM sessions");
+		expect(rows[0]?.read_at).toBe(456);
+		expect(sessionRowsToSessionInfoList(rows)[0]).not.toHaveProperty("unread");
+
+		expect(runMigrations(client, schemaMigrations)).toEqual([]);
+		expect(
+			client
+				.query<{ name: string }>("PRAGMA table_info(sessions)")
+				.filter((column) => column.name === "read_at"),
+		).toHaveLength(1);
 	});
 
 	it("rolls back a failed migration without affecting prior ones", () => {

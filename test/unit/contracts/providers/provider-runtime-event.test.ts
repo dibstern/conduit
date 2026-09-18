@@ -76,10 +76,14 @@ describe("ProviderRuntimeEvent contracts", () => {
 	});
 
 	it("covers every canonical event type or explicit reclassification", () => {
+		// Conduit-originated events. No provider can produce them, so they are
+		// deliberately absent from the provider runtime event union.
 		const explicitlyReclassified: readonly string[] = [
 			"session.deleted",
 			"session.forked",
 			"session.permission_mode_changed",
+			"session.read",
+			"session.unread",
 		];
 		const missingRuntimeTypes = CANONICAL_EVENT_TYPES.filter(
 			(type) =>

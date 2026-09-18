@@ -91,6 +91,7 @@ function makeRow(id: string, overrides?: Partial<SessionRow>): SessionRow {
 		fork_point_event: null,
 		last_message_at: null,
 		permission_mode: null,
+		read_at: null,
 		created_at: 1000,
 		updated_at: 2000,
 		...overrides,
@@ -1122,6 +1123,66 @@ describe("SessionManagerService", () => {
 			);
 		},
 	);
+
+	it.effect("lists durable unread state from real projected events", () => {
+		const dbFile = join(
+			tmpdir(),
+			`conduit-session-manager-unread-${Date.now()}.sqlite`,
+		);
+		const layer = Layer.provideMerge(
+			SessionManagerServiceLive,
+			Layer.mergeAll(
+				Layer.succeed(OpenCodeAPITag, makeMockOpenCodeAPI()),
+				Layer.succeed(LoggerTag, makeMockLogger()),
+				makeSessionManagerStateLive(),
+				DaemonEventBusLive,
+				makePersistenceEffectLayer(dbFile),
+			),
+		);
+
+		return Effect.gen(function* () {
+			const store = yield* EventStoreEffectTag;
+			const projectionRunner = yield* ProjectionRunnerEffectTag;
+			const service = yield* SessionManagerServiceTag;
+			yield* projectionRunner.markRecovered();
+
+			for (const event of [
+				canonicalEvent(
+					"session.created",
+					"session-1",
+					{
+						sessionId: "session-1",
+						title: "Durable unread",
+						provider: "opencode",
+					},
+					{ provider: "opencode", createdAt: 10 },
+				),
+				canonicalEvent(
+					"message.created",
+					"session-1",
+					{
+						messageId: "message-1",
+						role: "assistant",
+						sessionId: "session-1",
+					},
+					{ provider: "opencode", createdAt: 20 },
+				),
+			]) {
+				const stored = yield* store.append(event);
+				yield* projectionRunner.projectEvent(stored);
+			}
+			expect((yield* service.listSessions())[0]?.unread).toBe(true);
+
+			yield* service.markSessionRead("session-1");
+			expect((yield* service.listSessions())[0]).not.toHaveProperty("unread");
+
+			yield* service.markSessionUnread("session-1");
+			expect((yield* service.listSessions())[0]?.unread).toBe(true);
+		}).pipe(
+			Effect.provide(Layer.fresh(layer)),
+			Effect.ensuring(Effect.sync(() => rmSync(dbFile, { force: true }))),
+		);
+	});
 
 	it.effect("prefers durable pending counts over warm in-memory state", () => {
 		const readQuery = makeReadQueryEffect(

@@ -805,6 +805,8 @@ export function makeMockSessionManagerService(
 		createSession: vi.fn(() => Effect.succeed({ id: "session-new" })),
 		deleteSession: vi.fn(() => Effect.void),
 		renameSession: vi.fn(() => Effect.void),
+		markSessionRead: vi.fn(() => Effect.void),
+		markSessionUnread: vi.fn(() => Effect.void),
 		clearPaginationCursor: vi.fn(() => Effect.void),
 		seedPaginationCursor: vi.fn(() => Effect.void),
 		loadPreRenderedHistory: vi.fn(() =>

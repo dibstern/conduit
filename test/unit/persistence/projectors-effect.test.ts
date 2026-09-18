@@ -1079,6 +1079,55 @@ describe("Effect Session Projector (via ProjectionRunner)", () => {
 				]);
 			}),
 		));
+
+	it("session read state is deterministic across replay", () =>
+		runTest(
+			Effect.gen(function* () {
+				const sql = yield* SqlClient.SqlClient;
+				const store = yield* EventStoreEffectTag;
+				const runner = yield* ProjectionRunnerEffectTag;
+				yield* runner.markRecovered();
+
+				yield* seedSession("s1");
+				const created = yield* store.append(makeSessionCreated("s1"));
+				yield* runner.projectEvent(created);
+				const read = yield* store.append(
+					canonicalEvent(
+						"session.read",
+						"s1",
+						{ sessionId: "s1" },
+						{ createdAt: FIXED_TS + 100 },
+					),
+				);
+				yield* runner.projectEvent(read);
+				const unread = yield* store.append(
+					canonicalEvent(
+						"session.unread",
+						"s1",
+						{ sessionId: "s1" },
+						{ createdAt: FIXED_TS + 200 },
+					),
+				);
+				yield* runner.projectEvent(unread);
+
+				const readAt = () =>
+					sql<{ read_at: number | null }>`
+						SELECT read_at FROM sessions WHERE id = 's1'`;
+				expect((yield* readAt())[0]?.read_at).toBeNull();
+
+				// Replaying the same log in the same order reaches the same state.
+				// Order is the only thing these handlers rely on, and every replay
+				// path is ORDER BY sequence ASC, so last transition wins.
+				yield* runner.projectEvent(read);
+				yield* runner.projectEvent(unread);
+				expect((yield* readAt())[0]?.read_at).toBeNull();
+
+				// Reading again after an unread is a real transition, not a stale
+				// replay, and must take effect.
+				yield* runner.projectEvent(read);
+				expect((yield* readAt())[0]?.read_at).toBe(FIXED_TS + 100);
+			}),
+		));
 });
 
 // ─── Message Projector Tests ────────────────────────────────────────────────

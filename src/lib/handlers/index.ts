@@ -29,6 +29,7 @@ export {
 export { reloadProviderSessionForClient } from "./reload.js";
 export {
 	loadMoreHistoryForSession,
+	markSessionUnreadForClient,
 	renameSessionForClient,
 } from "./session.js";
 export {

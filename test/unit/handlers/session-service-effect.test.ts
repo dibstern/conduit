@@ -134,6 +134,7 @@ function makeEmptySessionReadQuery(provider: string): ReadQueryEffect {
 				fork_point_event: null,
 				last_message_at: null,
 				permission_mode: null,
+				read_at: null,
 				created_at: 1,
 				updated_at: 1,
 			}),
@@ -204,6 +205,42 @@ describe("session handlers with Effect-native model service", () => {
 		},
 	);
 
+	it.effect("opening a session records read state best-effort", () => {
+		const markSessionRead = vi.fn(() =>
+			Effect.fail(
+				new SessionManagerError({
+					operation: "markSessionRead",
+					cause: "store unavailable",
+				}),
+			),
+		);
+		const sessionManagerService = makeMockSessionManagerService({
+			markSessionRead,
+			loadPreRenderedHistory: vi.fn(() =>
+				Effect.succeed({ messages: [], hasMore: false }),
+			),
+		});
+		const { wsHandler, layer } = makeSessionMetadataLayer({
+			sessionManagerService,
+		});
+
+		return handleViewSession(
+			"client-1",
+			{ sessionId: "session-1" },
+			/* skipMetadata */ true,
+		).pipe(
+			Effect.provide(layer),
+			Effect.tap(() => {
+				expect(markSessionRead).toHaveBeenCalledWith("session-1");
+				expect(wsHandler.broadcast).toHaveBeenCalledWith({
+					type: "notification_event",
+					eventType: "session_viewed",
+					sessionId: "session-1",
+				});
+			}),
+		);
+	});
+
 	it.effect(
 		"loads view-session SQLite history through ReadQueryEffectTag for relay-local sessions",
 		() => {
@@ -227,6 +264,7 @@ describe("session handlers with Effect-native model service", () => {
 						fork_point_event: null,
 						last_message_at: 11,
 						permission_mode: null,
+						read_at: null,
 						created_at: 10,
 						updated_at: 11,
 					}),
@@ -379,6 +417,7 @@ describe("session handlers with Effect-native model service", () => {
 					fork_point_event: null,
 					last_message_at: 11,
 					permission_mode: null,
+					read_at: null,
 					created_at: 10,
 					updated_at: 11,
 				}),

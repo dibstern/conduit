@@ -633,6 +633,32 @@ export const renameSession = (sessionId: string, title: string) =>
 		Effect.withSpan("session.renameSession", { attributes: { sessionId } }),
 	);
 
+export const markSessionRead = (sessionId: string) =>
+	applySessionCommand({
+		type: "session.read",
+		data: { sessionId },
+	}).pipe(
+		Effect.mapError(
+			(cause) =>
+				new SessionManagerError({ operation: "markSessionRead", cause }),
+		),
+		Effect.annotateLogs("sessionId", sessionId),
+		Effect.withSpan("session.markSessionRead", { attributes: { sessionId } }),
+	);
+
+export const markSessionUnread = (sessionId: string) =>
+	applySessionCommand({
+		type: "session.unread",
+		data: { sessionId },
+	}).pipe(
+		Effect.mapError(
+			(cause) =>
+				new SessionManagerError({ operation: "markSessionUnread", cause }),
+		),
+		Effect.annotateLogs("sessionId", sessionId),
+		Effect.withSpan("session.markSessionUnread", { attributes: { sessionId } }),
+	);
+
 /**
  * Clear the stored pagination cursor for a session.
  */
@@ -1050,6 +1076,10 @@ export interface SessionManagerService {
 		sessionId: string,
 		title: string,
 	): Effect.Effect<void, SessionManagerError>;
+	markSessionRead(sessionId: string): Effect.Effect<void, SessionManagerError>;
+	markSessionUnread(
+		sessionId: string,
+	): Effect.Effect<void, SessionManagerError>;
 	clearPaginationCursor(sessionId: string): Effect.Effect<void>;
 	seedPaginationCursor(
 		sessionId: string,
@@ -1335,6 +1365,54 @@ export const SessionManagerServiceLive: Layer.Layer<
 				});
 			});
 
+		/**
+		 * Hand a mutating session command whatever persistence services this relay
+		 * actually has.
+		 *
+		 * Every one is conditional because a provider-API-only relay, and most unit
+		 * harnesses, wire none of them. `applySessionCommand` reads them all through
+		 * `Effect.serviceOption`, so a service that is absent from the context
+		 * quietly disables the durable half instead of failing — which is exactly
+		 * why this has to be assembled by hand rather than declared as a
+		 * requirement, and exactly why it must not be duplicated: a copy that
+		 * forgot one service would look like a command that silently never persists.
+		 */
+		const withSessionCommandServices = <A, E>(
+			effect: Effect.Effect<A, E>,
+		): Effect.Effect<A, E> => {
+			let provided = effect.pipe(Effect.provideService(OpenCodeAPITag, api));
+			if (readQueryEffectOption._tag === "Some") {
+				provided = provided.pipe(
+					Effect.provideService(
+						ReadQueryEffectTag,
+						readQueryEffectOption.value,
+					),
+				);
+			}
+			if (eventStoreEffectOption._tag === "Some") {
+				provided = provided.pipe(
+					Effect.provideService(
+						EventStoreEffectTag,
+						eventStoreEffectOption.value,
+					),
+				);
+			}
+			if (projectionRunnerEffectOption._tag === "Some") {
+				provided = provided.pipe(
+					Effect.provideService(
+						ProjectionRunnerEffectTag,
+						projectionRunnerEffectOption.value,
+					),
+				);
+			}
+			if (sqlOption._tag === "Some") {
+				provided = provided.pipe(
+					Effect.provideService(SqlClient.SqlClient, sqlOption.value),
+				);
+			}
+			return provided;
+		};
+
 		return {
 			getDefaultSessionId: (title) =>
 				Effect.gen(function* () {
@@ -1395,43 +1473,11 @@ export const SessionManagerServiceLive: Layer.Layer<
 					);
 				}),
 			renameSession: (sessionId, title) =>
-				(() => {
-					const base = renameSession(sessionId, title).pipe(
-						Effect.provideService(OpenCodeAPITag, api),
-					);
-					const withReadQuery =
-						readQueryEffectOption._tag === "Some"
-							? base.pipe(
-									Effect.provideService(
-										ReadQueryEffectTag,
-										readQueryEffectOption.value,
-									),
-								)
-							: base;
-					const withEventStore =
-						eventStoreEffectOption._tag === "Some"
-							? withReadQuery.pipe(
-									Effect.provideService(
-										EventStoreEffectTag,
-										eventStoreEffectOption.value,
-									),
-								)
-							: withReadQuery;
-					const withProjectionRunner =
-						projectionRunnerEffectOption._tag === "Some"
-							? withEventStore.pipe(
-									Effect.provideService(
-										ProjectionRunnerEffectTag,
-										projectionRunnerEffectOption.value,
-									),
-								)
-							: withEventStore;
-					return sqlOption._tag === "Some"
-						? withProjectionRunner.pipe(
-								Effect.provideService(SqlClient.SqlClient, sqlOption.value),
-							)
-						: withProjectionRunner;
-				})(),
+				withSessionCommandServices(renameSession(sessionId, title)),
+			markSessionRead: (sessionId) =>
+				withSessionCommandServices(markSessionRead(sessionId)),
+			markSessionUnread: (sessionId) =>
+				withSessionCommandServices(markSessionUnread(sessionId)),
 			clearPaginationCursor: (sessionId) =>
 				clearPaginationCursor(sessionId).pipe(
 					Effect.provideService(SessionManagerStateTag, stateRef),

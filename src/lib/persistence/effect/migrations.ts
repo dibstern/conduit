@@ -13,6 +13,7 @@ import {
 	readMigrationSql,
 	SESSION_CASCADE_DELETES_MIGRATION,
 	SESSIONS_PERMISSION_MODE_MIGRATION,
+	SESSIONS_READ_AT_MIGRATION,
 	TURN_MODEL_EXECUTION_MIGRATION,
 } from "../schema.js";
 
@@ -46,6 +47,7 @@ const sessionsPermissionModeMigrationSql = readMigrationSql(
 const sessionCascadeDeletesMigrationSql = readMigrationSql(
 	SESSION_CASCADE_DELETES_MIGRATION,
 );
+const sessionsReadAtMigrationSql = readMigrationSql(SESSIONS_READ_AT_MIGRATION);
 
 const expectedTableColumns = {
 	activities: [
@@ -238,6 +240,7 @@ const expectedTableColumns = {
 		"created_at",
 		"updated_at",
 		"permission_mode",
+		"read_at",
 	],
 	tool_content: ["tool_id", "session_id", "content", "created_at"],
 	turns: [
@@ -332,6 +335,13 @@ function splitSqlStatements(sqlText: string): readonly string[] {
 		.filter((statement) => statement.length > 0);
 }
 
+/**
+ * Columns that post-baseline migrations append to `sessions`, in the order the
+ * migrations add them. Keep appending here; nothing else needs to change when a
+ * new one lands.
+ */
+const appendedSessionColumns = ["permission_mode", "read_at"] as const;
+
 function sameStrings(
 	actual: readonly string[],
 	expected: readonly string[],
@@ -418,11 +428,20 @@ const verifyExistingBaselineSchema: Effect.Effect<
 					actualColumns,
 					expectedColumns.filter((column) => column !== "context_window"),
 				)) ||
+			// A database at an older migration level is missing a SUFFIX of the
+			// expected columns, because ALTER TABLE ADD COLUMN always appends. So
+			// accept any prefix that is short by no more than the number of columns
+			// later migrations add. Enumerating which combination is absent instead
+			// doubles the branches here every time a column is added, and the
+			// non-prefix combinations it admits are unreachable anyway: migrations
+			// run in order, so `read_at` cannot exist without `permission_mode`.
 			(tableName === "sessions" &&
 				sameStrings(
 					actualColumns,
-					expectedColumns.filter((column) => column !== "permission_mode"),
-				)) ||
+					expectedColumns.slice(0, actualColumns.length),
+				) &&
+				expectedColumns.length - actualColumns.length <=
+					appendedSessionColumns.length) ||
 			(tableName === "turns" &&
 				sameStrings(
 					actualColumns,
@@ -552,6 +571,20 @@ const runSessionsPermissionModeMigration: Effect.Effect<
 	yield* executeSqlStatements(sessionsPermissionModeMigrationSql);
 });
 
+const runSessionsReadAtMigration: Effect.Effect<
+	void,
+	unknown,
+	SqlClient.SqlClient
+> = Effect.gen(function* () {
+	const sql = yield* SqlClient.SqlClient;
+	const columns = yield* sql.unsafe<{ name: string }>(
+		"PRAGMA table_info(sessions)",
+	);
+	if (columns.some((column) => column.name === "read_at")) return;
+
+	yield* executeSqlStatements(sessionsReadAtMigrationSql);
+});
+
 /** 2026-07-15T00:00:00.000Z — midnight UTC of the day 0004_drop_events_session_fk shipped (b2b698c6). */
 export const LEGACY_SKELETON_CUTOFF_MS = 1_784_073_600_000;
 export const MAX_PURGEABLE_SKELETON_SESSIONS = 25;
@@ -676,6 +709,7 @@ export const effectMigrationEntries = {
 	"0010_purge_legacy_skeleton_sessions":
 		runPurgeLegacySkeletonSessionsMigration,
 	"0011_session_cascade_deletes": runSessionCascadeDeletesMigration,
+	"0012_sessions_read_at": runSessionsReadAtMigration,
 } satisfies Record<string, Effect.Effect<void, unknown, SqlClient.SqlClient>>;
 
 export function makeEffectMigrationLoader(

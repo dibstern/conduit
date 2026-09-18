@@ -20,6 +20,7 @@ export const SESSIONS_PERMISSION_MODE_MIGRATION =
 	"0009_sessions_permission_mode.sql";
 export const SESSION_CASCADE_DELETES_MIGRATION =
 	"0010_session_cascade_deletes.sql";
+export const SESSIONS_READ_AT_MIGRATION = "0011_sessions_read_at.sql";
 
 export function readMigrationSql(filename: string): string {
 	return readFileSync(
@@ -79,5 +80,10 @@ export const schemaMigrations: readonly Migration[] = [
 		name: "session_cascade_deletes",
 		sql: readMigrationSql(SESSION_CASCADE_DELETES_MIGRATION),
 		rebuildsForeignKeys: true,
+	},
+	{
+		id: 11,
+		name: "sessions_read_at",
+		sql: readMigrationSql(SESSIONS_READ_AT_MIGRATION),
 	},
 ];

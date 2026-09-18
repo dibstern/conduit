@@ -99,4 +99,66 @@ describe("WsRpcServerLayer RenameSession", () => {
 			),
 		);
 	});
+
+	it.effect("marks a session unread and broadcasts refreshed lists", () => {
+		const { wsHandler, calls } = makeRecordingWebSocketHandler();
+		const sessionManagerService = makeMockSessionManagerService({
+			markSessionUnread: vi.fn(() => Effect.void),
+			sendDualSessionLists: vi.fn((send) =>
+				Effect.sync(() =>
+					send({
+						type: "session_list",
+						sessions: [
+							{
+								id: "root-1",
+								title: "Unread Root",
+								updatedAt: 100,
+								messageCount: 2,
+								unread: true,
+							},
+						],
+						roots: true,
+					}),
+				),
+			),
+		});
+
+		return Effect.gen(function* () {
+			const client = yield* RpcTest.makeClient(WsRpcGroup);
+			const result = yield* client.MarkSessionUnread({
+				projectSlug: "project-a",
+				sessionId: "root-1",
+				originId: "browser-1",
+			});
+
+			expect(result).toEqual({ ok: true });
+			expect(sessionManagerService.markSessionUnread).toHaveBeenCalledWith(
+				"root-1",
+			);
+			expect(calls.map((call) => call.message)).toEqual([
+				{
+					type: "session_list",
+					sessions: [
+						{
+							id: "root-1",
+							title: "Unread Root",
+							updatedAt: 100,
+							messageCount: 2,
+							unread: true,
+						},
+					],
+					roots: true,
+				},
+			]);
+		}).pipe(
+			Effect.scoped,
+			Effect.provide(
+				WsRpcServerLayer.pipe(
+					Layer.provideMerge(
+						makeTestHandlerLayer({ wsHandler, sessionManagerService }),
+					),
+				),
+			),
+		);
+	});
 });

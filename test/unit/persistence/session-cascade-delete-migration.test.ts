@@ -103,7 +103,7 @@ describe("session cascade delete migration", () => {
 		const db = SqliteClient.open(filename);
 		try {
 			expect(runMigrations(db, schemaMigrations).map(({ id }) => id)).toEqual([
-				10,
+				10, 11,
 			]);
 			expect(db.query("PRAGMA foreign_keys")).toEqual([{ foreign_keys: 1 }]);
 			const sessionsSchema = db.query<{ sql: string }>(

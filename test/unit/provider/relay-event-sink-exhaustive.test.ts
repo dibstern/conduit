@@ -31,6 +31,8 @@ describe("domain-event relay translation exhaustiveness", () => {
 		"session.forked",
 		"session.provider_changed",
 		"session.permission_mode_changed",
+		"session.read",
+		"session.unread",
 		"permission.asked",
 		"permission.resolved",
 		"question.asked",

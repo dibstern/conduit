@@ -25,6 +25,8 @@ const makeProjectStore = (
 		readonly title: string;
 		readonly updatedAt: number;
 		readonly parentId?: string;
+		readonly lastMessageAt?: number | null;
+		readonly readAt?: number | null;
 	}>,
 	pendingApprovals: ReadonlyArray<{
 		readonly id: string;
@@ -41,12 +43,15 @@ const makeProjectStore = (
 		for (const session of sessions) {
 			database.execute(
 				`INSERT INTO sessions (
-					id, provider, title, status, parent_id, created_at, updated_at
-				) VALUES (?, 'opencode', ?, 'idle', ?, ?, ?)`,
+					id, provider, title, status, parent_id, last_message_at,
+					read_at, created_at, updated_at
+				) VALUES (?, 'opencode', ?, 'idle', ?, ?, ?, ?, ?)`,
 				[
 					session.id,
 					session.title,
 					session.parentId ?? null,
+					session.lastMessageAt ?? null,
+					session.readAt ?? null,
 					session.updatedAt,
 					session.updatedAt,
 				],
@@ -78,6 +83,56 @@ afterEach(() => {
 });
 
 describe("listDaemonSessions", () => {
+	it.effect("reads unread state from a cold project store", () => {
+		const root = makeTemporaryRoot();
+		const project = join(root, "project");
+		mkdirSync(project);
+		makeProjectStore(project, [
+			{
+				id: "finished-away",
+				title: "Finished away",
+				updatedAt: 300,
+				lastMessageAt: 300,
+				readAt: 200,
+			},
+			{
+				id: "already-read",
+				title: "Already read",
+				updatedAt: 200,
+				lastMessageAt: 200,
+				readAt: 200,
+			},
+			{
+				id: "empty",
+				title: "Empty",
+				updatedAt: 100,
+				lastMessageAt: null,
+				readAt: null,
+			},
+		]);
+
+		return Effect.gen(function* () {
+			const result = yield* listDaemonSessions();
+			const sessions = new Map(
+				result.sessions.map((session) => [session.id, session]),
+			);
+
+			expect(sessions.get("finished-away")?.unread).toBe(true);
+			expect(sessions.get("already-read")).not.toHaveProperty("unread");
+			expect(sessions.get("empty")).not.toHaveProperty("unread");
+		}).pipe(
+			Effect.provide(
+				makeProjectRegistryLive([
+					{
+						slug: "project",
+						title: "Project",
+						directory: project,
+					},
+				]),
+			),
+		);
+	});
+
 	it.effect("reads pending attention counts from a cold project store", () => {
 		const root = makeTemporaryRoot();
 		const project = join(root, "project");

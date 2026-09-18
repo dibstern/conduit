@@ -16,6 +16,7 @@ function makeRow(id: string, overrides?: Partial<SessionRow>): SessionRow {
 		fork_point_event: null,
 		last_message_at: null,
 		permission_mode: null,
+		read_at: null,
 		created_at: 1000,
 		updated_at: 2000,
 		...overrides,
@@ -147,6 +148,20 @@ describe("sessionRowsToSessionInfoList", () => {
 		expect(result[0]?.pendingPermissionCount).toBe(2);
 		expect(result[1]?.pendingQuestionCount).toBeUndefined();
 		expect(result[1]?.pendingPermissionCount).toBeUndefined();
+	});
+
+	it("derives unread only when activity postdates the last read", () => {
+		const result = sessionRowsToSessionInfoList([
+			makeRow("never-read", { last_message_at: 200, read_at: null }),
+			makeRow("activity-after-read", { last_message_at: 300, read_at: 200 }),
+			makeRow("read-after-activity", { last_message_at: 300, read_at: 400 }),
+			makeRow("no-activity", { last_message_at: null, read_at: null }),
+		]);
+
+		expect(result[0]?.unread).toBe(true);
+		expect(result[1]?.unread).toBe(true);
+		expect(result[2]).not.toHaveProperty("unread");
+		expect(result[3]).not.toHaveProperty("unread");
 	});
 
 	it("returns empty array for empty input", () => {

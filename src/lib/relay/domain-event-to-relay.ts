@@ -159,6 +159,10 @@ export function translateDomainEventToRelay(
 		case "session.deleted":
 		case "session.forked":
 		case "session.provider_changed":
+		// Read state reaches the UI as the `unread` field on a broadcast session
+		// list, never as a relay event, so there is nothing to translate here.
+		case "session.read":
+		case "session.unread":
 			return silent("persistence-only event; no UI surface in relay");
 
 		// The SDK owns the live mode, so a change reported mid-session has to
