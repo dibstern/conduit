@@ -22,6 +22,7 @@ import {
 	WebSocketHandlerTag,
 } from "../domain/relay/Services/services.js";
 import { subscribeSessionDetail } from "../domain/relay/Services/session-detail-subscription.js";
+import { encodeSessionDetail } from "../domain/relay/Services/session-detail-wire.js";
 import {
 	persistSessionPermissionMode,
 	SessionManagerServiceTag,
@@ -259,6 +260,7 @@ export const WsRpcServerLayer = WsRpcGroup.toLayer({
 					? {}
 					: { resumeFromSequence: request.resumeFromSequence }),
 			}).pipe(
+				encodeSessionDetail,
 				Stream.mapError(
 					(error) =>
 						new WsRpcError({

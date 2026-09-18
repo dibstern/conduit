@@ -211,6 +211,7 @@ const HistoryMessagePartSchema = Schema.Struct({
 export const HistoryMessageSchema = Schema.Struct({
 	id: Schema.String,
 	role: Schema.Literal("user", "assistant"),
+	text: Schema.optional(Schema.String),
 	parts: Schema.optional(Schema.Array(HistoryMessagePartSchema)),
 	time: Schema.optional(
 		Schema.Struct({
@@ -237,6 +238,27 @@ export const SessionDetailItemSchema = Schema.Union(
 		event: StoredEventSchema,
 	}),
 );
+
+// Lengths are JavaScript string lengths (UTF-16 code units), not wire bytes.
+const TextSuffixSchema = Schema.Struct({
+	partId: Schema.optional(Schema.String),
+	from: Schema.NonNegativeInt,
+	total: Schema.NonNegativeInt,
+});
+const DetailEnvelope = EnvelopeSchema(SessionDetailItemSchema);
+export const SessionDetailEnvelopeSchema = Schema.Union(
+	DetailEnvelope.members[0],
+	DetailEnvelope.members[1],
+	DetailEnvelope.members[2].pipe(
+		Schema.extend(
+			Schema.Struct({
+				textSuffixes: Schema.optional(Schema.Array(TextSuffixSchema)),
+			}),
+		),
+	),
+	DetailEnvelope.members[3],
+);
+export type SessionDetailEnvelope = typeof SessionDetailEnvelopeSchema.Type;
 
 export const GetModelsResponseSchema = Schema.Struct({
 	projectSlug: Schema.String,
@@ -1257,7 +1279,7 @@ export const SubscribeSessionDetail = Rpc.make("SubscribeSessionDetail", {
 		sessionId: NonEmptyString,
 		resumeFromSequence: Schema.optional(Schema.Number),
 	},
-	success: EnvelopeSchema(SessionDetailItemSchema),
+	success: SessionDetailEnvelopeSchema,
 	error: WsRpcError,
 	stream: true,
 });

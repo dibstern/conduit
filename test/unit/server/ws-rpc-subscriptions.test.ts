@@ -13,6 +13,7 @@ import { describe, it } from "@effect/vitest";
 import { Effect, HashMap, Layer, Queue, Ref, type Scope, Stream } from "effect";
 import { expect, expectTypeOf } from "vitest";
 import {
+	type SessionDetailEnvelope,
 	type WsRpcError,
 	WsRpcGroup,
 } from "../../../src/lib/contracts/ws-rpc.js";
@@ -23,6 +24,10 @@ import {
 	makeSessionManagerStateLive,
 	SessionManagerStateTag,
 } from "../../../src/lib/domain/relay/Services/session-manager-state.js";
+import {
+	type DetailLengthMismatch,
+	decodeSessionDetail,
+} from "../../../src/lib/frontend/transport/session-detail-wire.js";
 import { makeCommitAndSignal } from "../../../src/lib/persistence/effect/commit-and-signal.js";
 import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
 import { ProjectionRunnerEffectTag } from "../../../src/lib/persistence/effect/projection-runner-effect.js";
@@ -231,19 +236,33 @@ describe("subscription RPC handlers", () => {
 						Effect.forkScoped,
 					);
 					const envelopes = yield* Queue.unbounded<unknown>();
+					const wireSubscriptions: Queue.Queue<SessionDetailEnvelope>[] = [];
 					const subscribe = (
 						resumeFromSequence?: number,
-					): Stream.Stream<unknown, WsRpcError> =>
-						client[member]({
+						wire?: Queue.Queue<SessionDetailEnvelope>,
+					): Stream.Stream<unknown, WsRpcError | DetailLengthMismatch> => {
+						const request = {
 							projectSlug: "project-a",
 							sessionId: "session-1",
 							...(resumeFromSequence === undefined
 								? {}
 								: { resumeFromSequence }),
-						});
+						};
+						return member === "SubscribeShell"
+							? client.SubscribeShell(request)
+							: client.SubscribeSessionDetail(request).pipe(
+									Stream.tap((envelope) =>
+										wire ? Queue.offer(wire, envelope) : Effect.void,
+									),
+									decodeSessionDetail,
+								);
+					};
 					// Each consumer stays live after its boundary; the 33rd must not wait for a permit.
 					for (let i = 0; i < 33; i++) {
-						yield* subscribe().pipe(
+						const wire = yield* Queue.unbounded<SessionDetailEnvelope>();
+						if (member === "SubscribeSessionDetail")
+							wireSubscriptions.push(wire);
+						yield* subscribe(undefined, wire).pipe(
 							Stream.runForEach((envelope) => Queue.offer(envelopes, envelope)),
 							Effect.forkScoped,
 						);
@@ -296,12 +315,44 @@ describe("subscription RPC handlers", () => {
 										message: expect.objectContaining({
 											id: "message-1",
 											text: "Hello world",
+											parts: [
+												expect.objectContaining({
+													id: "part-1",
+													text: "Hello world",
+												}),
+											],
 										}),
 									},
 						),
 					};
 					for (let i = 0; i < 33; i++)
 						expect(yield* Queue.take(envelopes)).toMatchObject(expected);
+					// Check each encoder independently, including subscribers 2..33.
+					for (const wire of wireSubscriptions) {
+						expect(yield* Queue.take(wire)).toMatchObject({
+							_tag: "snapshot",
+							sequence: cursor,
+						});
+						expect(yield* Queue.take(wire)).toEqual({ _tag: "synchronized" });
+						expect(yield* Queue.take(wire)).toMatchObject({
+							_tag: "upsert",
+							sequence: liveVersion,
+							item: {
+								_tag: "transcriptMessage",
+								message: {
+									id: "message-1",
+									text: " world",
+									parts: [
+										expect.objectContaining({ id: "part-1", text: " world" }),
+									],
+								},
+							},
+							textSuffixes: [
+								{ from: 5, total: 11 },
+								{ partId: "part-1", from: 5, total: 11 },
+							],
+						});
+					}
 					const resumed = Array.from(
 						yield* subscribe(cursor).pipe(Stream.take(2), Stream.runCollect),
 					);
