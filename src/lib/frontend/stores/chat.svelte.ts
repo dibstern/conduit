@@ -32,6 +32,9 @@ import { createToolRegistry, type ToolRegistry } from "./tool-registry.js";
 export type SessionActivity = {
 	phase: ChatPhase;
 	turnEpoch: number;
+	turnGeneration: number;
+	endedGeneration: number;
+	terminalTurnIds: ReadonlySet<string>;
 	currentMessageId: string | null;
 	currentPartId: string | null;
 	replayGeneration: number;
@@ -71,6 +74,9 @@ export function createEmptySessionActivity(): SessionActivity {
 	return {
 		phase: "idle",
 		turnEpoch: 0,
+		turnGeneration: 0,
+		endedGeneration: -1,
+		terminalTurnIds: new Set(),
 		currentMessageId: null,
 		currentPartId: null,
 		replayGeneration: 0,
@@ -411,31 +417,22 @@ export function phaseToIdle(activity: SessionActivity): void {
 
 /** LLM is active, awaiting first delta. */
 export function phaseToProcessing(activity: SessionActivity): void {
+	if (activity.phase === "idle") {
+		activity.turnGeneration++;
+	}
 	activity.phase = "processing";
 }
 
 /** Receiving deltas — assistant message being built. */
 export function phaseToStreaming(activity: SessionActivity): void {
+	if (activity.phase === "idle") {
+		activity.turnGeneration++;
+	}
 	activity.phase = "streaming";
 }
 
-/** The socket dropped mid-turn: end the on-screen session's turn so the UI
- *  isn't stuck streaming. Background sessions are left alone — the phase
- *  flags only ever reported the current session's activity.
- *
- *  This ends the *turn*, not just the phase. A dropped socket is a turn
- *  boundary exactly as `done` is: nothing more will arrive for it. Idling the
- *  phase alone left `turnEpoch` behind, and the `status:idle` that follows
- *  reconnection then saw an already-idle slot and skipped `finalizeTurn` —
- *  so a message queued during that turn stayed rendered as queued forever.
- *  Going through `finalizeTurn` keeps reconciliation intact: the later
- *  `status:idle` still sees idle and still declines to bump a second time.
- *
- *  The assistant in flight is committed *before* the phase moves, in the same
- *  order `handleDone` uses. `flushAndFinalizeAssistant` is a no-op once the
- *  phase is idle, so ending the turn without it would strand the assistant
- *  unfinalized (no Copy/Fork controls), keep `currentPartId`, and drop text
- *  that had not been rendered yet — no later event could recover it. */
+/** End the visible turn on socket close through the same idempotent reducer.
+ * Background sessions retain their phase until server reconciliation. */
 export function phaseCurrentSessionToIdle(): void {
 	const id = sessionState.currentId;
 	if (id === null) return;
@@ -443,8 +440,7 @@ export function phaseCurrentSessionToIdle(): void {
 	const messages = sessionMessages.get(id);
 	if (!activity || !messages) return;
 	if (activity.phase === "idle") return;
-	flushAndFinalizeAssistant(activity, messages);
-	finalizeTurn(activity, "socket-close");
+	applyTerminalTurn(activity, messages);
 }
 
 /** Start event replay. */
@@ -793,6 +789,9 @@ export function advanceTurnIfNewMessage(
 
 	// ── First event of a genuinely new message ─────────────────────────
 	activity.seenMessageIds.add(messageId);
+	const previousTurnAlreadyEnded =
+		activity.endedGeneration === activity.turnGeneration;
+	activity.turnGeneration++;
 
 	// Finalize any in-progress assistant streaming from the previous turn.
 	if (activity.phase === "streaming") {
@@ -805,9 +804,10 @@ export function advanceTurnIfNewMessage(
 
 	// Bump turnEpoch — clears "Queued" shimmer on user messages sent
 	// during the previous turn (sentDuringEpoch < turnEpoch).
-	// Only bump if this isn't the very first message in the session.
+	// A terminal event may already have released the previous turn's queue.
+	// Only infer a missing boundary when it has not been applied yet.
 	const prevId = activity.currentMessageId;
-	if (prevId != null) {
+	if (prevId != null && !previousTurnAlreadyEnded) {
 		activity.turnEpoch++;
 		log.debug(
 			"advanceTurn NEW messageId=%s prev=%s turnEpoch=%d phase=%s",
@@ -1206,6 +1206,34 @@ export function handleDone(
 	messages: SessionMessages,
 	_msg: Extract<RelayMessage, { type: "done" }>,
 ): void {
+	applyTerminalTurn(activity, messages);
+}
+
+/** Apply durable terminal state without delivering alerts. `turnId` must be
+ * turns.id (the user message id), not the provider runtime's turnId.
+ * Legacy push events lack that identity; their fallback identifies the
+ * current monotone generation, not an old envelope.
+ * The turn projection currently has no per-turn revision. */
+export function applyTerminalTurn(
+	activity: SessionActivity,
+	messages: SessionMessages,
+	terminal?: {
+		readonly turnId?: string;
+		readonly error?: Extract<RelayMessage, { type: "error" }>;
+	},
+): boolean {
+	if (terminal?.turnId !== undefined) {
+		if (activity.terminalTurnIds.has(terminal.turnId)) return false;
+		// Bound replay dedup to recent turns. An evicted id costs at worst one
+		// redundant idempotent re-finalize, never a stuck session.
+		activity.terminalTurnIds = new Set(
+			[...activity.terminalTurnIds, terminal.turnId].slice(-8),
+		);
+	} else if (activity.endedGeneration === activity.turnGeneration) {
+		return false;
+	}
+	activity.endedGeneration = activity.turnGeneration;
+
 	// Finalize the assistant message and record messageId for dedup
 	const finalizedId = flushAndFinalizeAssistant(activity, messages);
 	if (finalizedId) {
@@ -1243,6 +1271,15 @@ export function handleDone(
 		if (mutated) setMessages(messages, patched);
 	}
 
+	if (terminal?.error) {
+		const { code, message, statusCode, details } = terminal.error;
+		addSystemMessage(activity, messages, message, "error", {
+			code,
+			...(statusCode !== undefined ? { statusCode } : {}),
+			...(details !== undefined ? { details } : {}),
+		});
+	}
+
 	// NOTE: currentMessageId is intentionally NOT reset here. It must
 	// persist so that advanceTurnIfNewMessage can compare the next turn's
 	// messageId against it. Resetting to null makes every post-done turn
@@ -1254,26 +1291,9 @@ export function handleDone(
 	// phase to "idle" synchronously, so when the batched effect fires,
 	// isProcessing() is false and the guard skips the scroll.
 	requestScrollOnNextContent();
-	finalizeTurn(activity, "done");
-}
-
-/** The single turn-end choke point. EVERY path that ends a turn — done,
- *  non-RETRY error, server-authoritative idle — must funnel through here.
- *  The turnEpoch bump is what releases user messages from the "Queued"
- *  shimmer (`turnEpoch <= sentDuringEpoch`); a turn-ending path that skips
- *  it leaves queued messages shimmering forever (the 2026-07-15 bug, where
- *  only handleDone bumped). Do not bump the epoch or call phaseToIdle
- *  directly from a new turn-ending handler — call this. */
-function finalizeTurn(activity: SessionActivity, source: string): void {
 	activity.turnEpoch++;
-	log.debug(
-		"finalizeTurn source=%s turnEpoch=%d currentMessageId=%s phase=%s",
-		source,
-		activity.turnEpoch,
-		activity.currentMessageId,
-		activity.phase,
-	);
 	phaseToIdle(activity);
+	return true;
 }
 
 // ─── REST history queued-state fallback ──────────────────────────────────────
@@ -1313,25 +1333,8 @@ export function handleStatus(
 			ensureSentDuringEpochOnLastUnrespondedUser(activity, messages);
 		}
 	} else if (msg.status === "idle") {
-		// F2 fix: full cleanup when the server says idle.
-		// The server's status is authoritative — if it says idle, clean
-		// up all streaming/processing state for this session.
-		//
-		// 1. If a live in-flight message is pending, finalize it via handleDone
-		//    helper path (flushAndFinalizeAssistant).
-		if (activity.currentMessageId != null && activity.phase === "streaming") {
-			flushAndFinalizeAssistant(activity, messages);
-		}
-
-		// 2. End the turn. If a turn was live (processing/streaming), this is
-		// a turn-ending path like done/error — it must go through finalizeTurn
-		// or user messages queued into the dead turn shimmer forever (e.g. a
-		// turn that died without done/error, surfaced only by reconnect).
-		// A redundant idle while already idle is not a turn end — no bump.
 		if (activity.phase !== "idle") {
-			finalizeTurn(activity, "status-idle");
-		} else {
-			phaseToIdle(activity);
+			applyTerminalTurn(activity, messages);
 		}
 
 		// 3. Clear in-flight state
@@ -1427,25 +1430,11 @@ export function handleError(
 	messages: SessionMessages,
 	msg: Extract<RelayMessage, { type: "error" }>,
 ): void {
-	const { code, message, statusCode, details } = msg;
-	const errorMeta = {
-		code,
-		...(statusCode !== undefined ? { statusCode } : {}),
-		...(details !== undefined ? { details } : {}),
-	};
-
-	if (code === "RETRY") {
-		// Subtle retry message — request scroll before adding so the
-		// content-change effect scrolls even though phase stays unchanged.
+	if (msg.code === "RETRY") {
 		requestScrollOnNextContent();
-		addSystemMessage(activity, messages, message, "info");
+		addSystemMessage(activity, messages, msg.message, "info");
 	} else {
-		// Prominent error — request scroll before phaseToIdle kills the
-		// isProcessing guard that the content-change effect relies on.
-		requestScrollOnNextContent();
-		addSystemMessage(activity, messages, message, "error", errorMeta);
-		// The turn is over — a non-RETRY error terminates it just like done.
-		finalizeTurn(activity, "error");
+		applyTerminalTurn(activity, messages, { error: msg });
 	}
 }
 
@@ -1698,6 +1687,9 @@ export function clearMessages(): void {
 		if (activity) {
 			activity.phase = "idle";
 			activity.turnEpoch = 0;
+			activity.turnGeneration = 0;
+			activity.endedGeneration = -1;
+			activity.terminalTurnIds = new Set();
 			activity.currentMessageId = null;
 			activity.currentPartId = null;
 			activity.doneMessageIds.clear();
