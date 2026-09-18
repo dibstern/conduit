@@ -646,6 +646,46 @@ describe("ClaudeEventTranslator", () => {
 		expect(dataOf(completed)["result"]).toBe("Found architecture issues");
 	});
 
+	it("starts a real Bash tool for a backgrounded shell reported as a task", async () => {
+		// Claude reports `run_in_background` Bash shells through the same
+		// task_started/task_notification channel as subagents, with
+		// subagent_type "local_bash" and a tool_use_id conduit never saw as a
+		// streamed tool_use block. Emitting tool.completed for it leaves an
+		// orphan the ingress mapper renders as a phantom "Unknown {}" card.
+		await runTranslate(translator, ctx, {
+			type: "system",
+			subtype: "task_started",
+			task_id: "batefivs0",
+			tool_use_id: "toolu-local-bash",
+			description: "codex exec --color never review",
+			task_type: "local_bash",
+			uuid: "00000000-0000-0000-0000-000000000301",
+			session_id: "sdk-sess",
+		} as unknown as SDKMessage);
+
+		await runTranslate(translator, ctx, {
+			type: "system",
+			subtype: "task_notification",
+			task_id: "batefivs0",
+			tool_use_id: "toolu-local-bash",
+			status: "completed",
+			summary: "codex exec --color never review",
+			uuid: "00000000-0000-0000-0000-000000000302",
+			session_id: "sdk-sess",
+		} as unknown as SDKMessage);
+
+		const started = sink.events.filter((e) => e.type === "tool.started");
+		const completed = sink.events.filter((e) => e.type === "tool.completed");
+		expect(started).toHaveLength(1);
+		expect(dataOf(started[0])).toMatchObject({
+			partId: "toolu-local-bash",
+			toolName: "Bash",
+			input: { tool: "Bash", command: "codex exec --color never review" },
+		});
+		expect(completed).toHaveLength(1);
+		expect(dataOf(completed[0])["partId"]).toBe("toolu-local-bash");
+	});
+
 	it("maps Claude Task input from SDK events through relay, history, and frontend ToolMessage", async () => {
 		const harness = createTestHarness();
 		try {
