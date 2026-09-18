@@ -587,7 +587,7 @@ export function opencodeSessionCreatedRuntimeEvent(
 	providerInstanceId: string,
 ): ProviderRuntimeEvent {
 	return {
-		eventId: createEventId(),
+		eventId: `evt_opencode_session_created_${sessionId}`,
 		type: "session.created",
 		providerId: "opencode",
 		sessionId,
