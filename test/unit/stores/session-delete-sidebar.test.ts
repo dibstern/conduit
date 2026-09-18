@@ -42,9 +42,20 @@ import {
 import { uiState } from "../../../src/lib/frontend/stores/ui.svelte.js";
 import { handleMessage } from "../../../src/lib/frontend/stores/ws-dispatch.js";
 import type { RelayMessage } from "../../../src/lib/frontend/types.js";
+import type { SessionInfo } from "../../../src/lib/shared-types.js";
 
-const VICTIM = { id: "victim", title: "Doomed Session", updatedAt: Date.now() };
-const KEEPER = { id: "keeper", title: "Survivor", updatedAt: Date.now() };
+const VICTIM = {
+	id: "victim",
+	title: "Doomed Session",
+	status: "idle",
+	updatedAt: Date.now(),
+} satisfies SessionInfo;
+const KEEPER = {
+	id: "keeper",
+	title: "Survivor",
+	status: "idle",
+	updatedAt: Date.now(),
+} satisfies SessionInfo;
 
 beforeEach(() => {
 	clearSessionState();

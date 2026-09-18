@@ -72,6 +72,7 @@ function setSessionTitles(titles: Record<string, string>) {
 		Object.entries(titles).map(([id, title]) => ({
 			id,
 			title,
+			status: "idle" as const,
 			createdAt: Date.now(),
 		})),
 		"complete",
@@ -217,14 +218,25 @@ describe("AttentionBanner merge logic", () => {
 		// Set up parent/child relationship: ses_current → ses_child1
 		applySessionSnapshot(
 			[
-				{ id: "ses_current", title: "Parent", createdAt: Date.now() },
+				{
+					id: "ses_current",
+					title: "Parent",
+					status: "idle",
+					createdAt: Date.now(),
+				},
 				{
 					id: "ses_child1",
 					title: "Child session",
+					status: "idle",
 					createdAt: Date.now(),
 					parentID: "ses_current",
 				},
-				{ id: "ses_other1", title: "Unrelated session", createdAt: Date.now() },
+				{
+					id: "ses_other1",
+					title: "Unrelated session",
+					status: "idle",
+					createdAt: Date.now(),
+				},
 			],
 			"complete",
 		);

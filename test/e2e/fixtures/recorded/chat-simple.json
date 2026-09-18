@@ -36,6 +36,7 @@
         {
           "id": "ses_2d28b1bd2ffeSjhBHLSlb2SRue",
           "title": "New session - 2026-03-27T04:02:08.557Z",
+          "status": "idle",
           "updatedAt": 1774584128557,
           "messageCount": 0
         }
@@ -48,6 +49,7 @@
         {
           "id": "ses_2d28b1bd2ffeSjhBHLSlb2SRue",
           "title": "New session - 2026-03-27T04:02:08.557Z",
+          "status": "idle",
           "updatedAt": 1774584128557,
           "messageCount": 0
         }
@@ -496,6 +498,7 @@
             {
               "id": "ses_2d28b1bd2ffeSjhBHLSlb2SRue",
               "title": "New session - 2026-03-27T04:02:08.557Z",
+              "status": "idle",
               "updatedAt": 1774584130902,
               "messageCount": 0
             }
@@ -508,6 +511,7 @@
             {
               "id": "ses_2d28b1bd2ffeSjhBHLSlb2SRue",
               "title": "New session - 2026-03-27T04:02:08.557Z",
+              "status": "idle",
               "updatedAt": 1774584130902,
               "messageCount": 0
             }
@@ -520,6 +524,7 @@
             {
               "id": "ses_2d28b1bd2ffeSjhBHLSlb2SRue",
               "title": "New session - 2026-03-27T04:02:08.557Z",
+              "status": "idle",
               "updatedAt": 1774584130902,
               "messageCount": 0
             }
@@ -532,6 +537,7 @@
             {
               "id": "ses_2d28b1bd2ffeSjhBHLSlb2SRue",
               "title": "New session - 2026-03-27T04:02:08.557Z",
+              "status": "idle",
               "updatedAt": 1774584130902,
               "messageCount": 0
             }
@@ -544,6 +550,7 @@
             {
               "id": "ses_2d28b1bd2ffeSjhBHLSlb2SRue",
               "title": "New session - 2026-03-27T04:02:08.557Z",
+              "status": "busy",
               "updatedAt": 1774584130902,
               "messageCount": 0,
               "processing": true
@@ -562,6 +569,7 @@
             {
               "id": "ses_2d28b1bd2ffeSjhBHLSlb2SRue",
               "title": "New session - 2026-03-27T04:02:08.557Z",
+              "status": "busy",
               "updatedAt": 1774584130902,
               "messageCount": 0,
               "processing": true
@@ -575,6 +583,7 @@
             {
               "id": "ses_2d28b1bd2ffeSjhBHLSlb2SRue",
               "title": "Greeting",
+              "status": "busy",
               "updatedAt": 1774584130902,
               "messageCount": 0,
               "processing": true
@@ -588,6 +597,7 @@
             {
               "id": "ses_2d28b1bd2ffeSjhBHLSlb2SRue",
               "title": "Greeting",
+              "status": "busy",
               "updatedAt": 1774584130902,
               "messageCount": 0,
               "processing": true
@@ -642,6 +652,7 @@
             {
               "id": "ses_2d28b1bd2ffeSjhBHLSlb2SRue",
               "title": "Greeting",
+              "status": "idle",
               "updatedAt": 1774584134417,
               "messageCount": 0
             }
@@ -659,6 +670,7 @@
             {
               "id": "ses_2d28b1bd2ffeSjhBHLSlb2SRue",
               "title": "Greeting",
+              "status": "idle",
               "updatedAt": 1774584134431,
               "messageCount": 0
             }
@@ -671,6 +683,7 @@
             {
               "id": "ses_2d28b1bd2ffeSjhBHLSlb2SRue",
               "title": "Greeting",
+              "status": "idle",
               "updatedAt": 1774584134431,
               "messageCount": 0
             }
@@ -683,6 +696,7 @@
             {
               "id": "ses_2d28b1bd2ffeSjhBHLSlb2SRue",
               "title": "Greeting",
+              "status": "idle",
               "updatedAt": 1774584134431,
               "messageCount": 0
             }
@@ -717,12 +731,14 @@
             {
               "id": "ses_2d28b02f2ffePlT1fSGFbEmcqE",
               "title": "New session - 2026-03-27T04:02:14.925Z",
+              "status": "idle",
               "updatedAt": 1774584135965,
               "messageCount": 0
             },
             {
               "id": "ses_2d28b1bd2ffeSjhBHLSlb2SRue",
               "title": "Greeting",
+              "status": "idle",
               "updatedAt": 1774584134431,
               "messageCount": 0
             }
@@ -735,12 +751,14 @@
             {
               "id": "ses_2d28b02f2ffePlT1fSGFbEmcqE",
               "title": "New session - 2026-03-27T04:02:14.925Z",
+              "status": "idle",
               "updatedAt": 1774584135965,
               "messageCount": 0
             },
             {
               "id": "ses_2d28b1bd2ffeSjhBHLSlb2SRue",
               "title": "Greeting",
+              "status": "idle",
               "updatedAt": 1774584134431,
               "messageCount": 0
             }
@@ -753,12 +771,14 @@
             {
               "id": "ses_2d28b02f2ffePlT1fSGFbEmcqE",
               "title": "New session - 2026-03-27T04:02:14.925Z",
+              "status": "idle",
               "updatedAt": 1774584135965,
               "messageCount": 0
             },
             {
               "id": "ses_2d28b1bd2ffeSjhBHLSlb2SRue",
               "title": "Greeting",
+              "status": "idle",
               "updatedAt": 1774584134431,
               "messageCount": 0
             }
@@ -771,12 +791,14 @@
             {
               "id": "ses_2d28b02f2ffePlT1fSGFbEmcqE",
               "title": "New session - 2026-03-27T04:02:14.925Z",
+              "status": "idle",
               "updatedAt": 1774584135965,
               "messageCount": 0
             },
             {
               "id": "ses_2d28b1bd2ffeSjhBHLSlb2SRue",
               "title": "Greeting",
+              "status": "idle",
               "updatedAt": 1774584134431,
               "messageCount": 0
             }
@@ -789,6 +811,7 @@
             {
               "id": "ses_2d28b02f2ffePlT1fSGFbEmcqE",
               "title": "New session - 2026-03-27T04:02:14.925Z",
+              "status": "busy",
               "updatedAt": 1774584135965,
               "messageCount": 0,
               "processing": true
@@ -796,6 +819,7 @@
             {
               "id": "ses_2d28b1bd2ffeSjhBHLSlb2SRue",
               "title": "Greeting",
+              "status": "idle",
               "updatedAt": 1774584134431,
               "messageCount": 0
             }
@@ -813,6 +837,7 @@
             {
               "id": "ses_2d28b02f2ffePlT1fSGFbEmcqE",
               "title": "New session - 2026-03-27T04:02:14.925Z",
+              "status": "busy",
               "updatedAt": 1774584135965,
               "messageCount": 0,
               "processing": true
@@ -820,6 +845,7 @@
             {
               "id": "ses_2d28b1bd2ffeSjhBHLSlb2SRue",
               "title": "Greeting",
+              "status": "idle",
               "updatedAt": 1774584134431,
               "messageCount": 0
             }
@@ -832,6 +858,7 @@
             {
               "id": "ses_2d28b02f2ffePlT1fSGFbEmcqE",
               "title": "Pong reply",
+              "status": "busy",
               "updatedAt": 1774584135965,
               "messageCount": 0,
               "processing": true
@@ -839,6 +866,7 @@
             {
               "id": "ses_2d28b1bd2ffeSjhBHLSlb2SRue",
               "title": "Greeting",
+              "status": "idle",
               "updatedAt": 1774584134431,
               "messageCount": 0
             }
@@ -851,6 +879,7 @@
             {
               "id": "ses_2d28b02f2ffePlT1fSGFbEmcqE",
               "title": "Pong reply",
+              "status": "busy",
               "updatedAt": 1774584135965,
               "messageCount": 0,
               "processing": true
@@ -858,6 +887,7 @@
             {
               "id": "ses_2d28b1bd2ffeSjhBHLSlb2SRue",
               "title": "Greeting",
+              "status": "idle",
               "updatedAt": 1774584134431,
               "messageCount": 0
             }
@@ -911,12 +941,14 @@
             {
               "id": "ses_2d28b02f2ffePlT1fSGFbEmcqE",
               "title": "Pong reply",
+              "status": "idle",
               "updatedAt": 1774584138413,
               "messageCount": 0
             },
             {
               "id": "ses_2d28b1bd2ffeSjhBHLSlb2SRue",
               "title": "Greeting",
+              "status": "idle",
               "updatedAt": 1774584134431,
               "messageCount": 0
             }
@@ -934,12 +966,14 @@
             {
               "id": "ses_2d28b02f2ffePlT1fSGFbEmcqE",
               "title": "Pong reply",
+              "status": "idle",
               "updatedAt": 1774584138413,
               "messageCount": 0
             },
             {
               "id": "ses_2d28b1bd2ffeSjhBHLSlb2SRue",
               "title": "Greeting",
+              "status": "idle",
               "updatedAt": 1774584134431,
               "messageCount": 0
             }
@@ -952,12 +986,14 @@
             {
               "id": "ses_2d28b02f2ffePlT1fSGFbEmcqE",
               "title": "Pong reply",
+              "status": "idle",
               "updatedAt": 1774584138424,
               "messageCount": 0
             },
             {
               "id": "ses_2d28b1bd2ffeSjhBHLSlb2SRue",
               "title": "Greeting",
+              "status": "idle",
               "updatedAt": 1774584134431,
               "messageCount": 0
             }
@@ -970,12 +1006,14 @@
             {
               "id": "ses_2d28b02f2ffePlT1fSGFbEmcqE",
               "title": "Pong reply",
+              "status": "idle",
               "updatedAt": 1774584138424,
               "messageCount": 0
             },
             {
               "id": "ses_2d28b1bd2ffeSjhBHLSlb2SRue",
               "title": "Greeting",
+              "status": "idle",
               "updatedAt": 1774584134431,
               "messageCount": 0
             }
@@ -1010,18 +1048,21 @@
             {
               "id": "ses_2d28af358ffezdGhltIAXNz3VN",
               "title": "New session - 2026-03-27T04:02:18.919Z",
+              "status": "idle",
               "updatedAt": 1774584139930,
               "messageCount": 0
             },
             {
               "id": "ses_2d28b02f2ffePlT1fSGFbEmcqE",
               "title": "Pong reply",
+              "status": "idle",
               "updatedAt": 1774584138424,
               "messageCount": 0
             },
             {
               "id": "ses_2d28b1bd2ffeSjhBHLSlb2SRue",
               "title": "Greeting",
+              "status": "idle",
               "updatedAt": 1774584134431,
               "messageCount": 0
             }
@@ -1034,18 +1075,21 @@
             {
               "id": "ses_2d28af358ffezdGhltIAXNz3VN",
               "title": "New session - 2026-03-27T04:02:18.919Z",
+              "status": "idle",
               "updatedAt": 1774584139930,
               "messageCount": 0
             },
             {
               "id": "ses_2d28b02f2ffePlT1fSGFbEmcqE",
               "title": "Pong reply",
+              "status": "idle",
               "updatedAt": 1774584138424,
               "messageCount": 0
             },
             {
               "id": "ses_2d28b1bd2ffeSjhBHLSlb2SRue",
               "title": "Greeting",
+              "status": "idle",
               "updatedAt": 1774584134431,
               "messageCount": 0
             }
@@ -1058,18 +1102,21 @@
             {
               "id": "ses_2d28af358ffezdGhltIAXNz3VN",
               "title": "New session - 2026-03-27T04:02:18.919Z",
+              "status": "idle",
               "updatedAt": 1774584139930,
               "messageCount": 0
             },
             {
               "id": "ses_2d28b02f2ffePlT1fSGFbEmcqE",
               "title": "Pong reply",
+              "status": "idle",
               "updatedAt": 1774584138424,
               "messageCount": 0
             },
             {
               "id": "ses_2d28b1bd2ffeSjhBHLSlb2SRue",
               "title": "Greeting",
+              "status": "idle",
               "updatedAt": 1774584134431,
               "messageCount": 0
             }
@@ -1082,18 +1129,21 @@
             {
               "id": "ses_2d28af358ffezdGhltIAXNz3VN",
               "title": "New session - 2026-03-27T04:02:18.919Z",
+              "status": "idle",
               "updatedAt": 1774584139930,
               "messageCount": 0
             },
             {
               "id": "ses_2d28b02f2ffePlT1fSGFbEmcqE",
               "title": "Pong reply",
+              "status": "idle",
               "updatedAt": 1774584138424,
               "messageCount": 0
             },
             {
               "id": "ses_2d28b1bd2ffeSjhBHLSlb2SRue",
               "title": "Greeting",
+              "status": "idle",
               "updatedAt": 1774584134431,
               "messageCount": 0
             }
@@ -1106,6 +1156,7 @@
             {
               "id": "ses_2d28af358ffezdGhltIAXNz3VN",
               "title": "New session - 2026-03-27T04:02:18.919Z",
+              "status": "busy",
               "updatedAt": 1774584139930,
               "messageCount": 0,
               "processing": true
@@ -1113,12 +1164,14 @@
             {
               "id": "ses_2d28b02f2ffePlT1fSGFbEmcqE",
               "title": "Pong reply",
+              "status": "idle",
               "updatedAt": 1774584138424,
               "messageCount": 0
             },
             {
               "id": "ses_2d28b1bd2ffeSjhBHLSlb2SRue",
               "title": "Greeting",
+              "status": "idle",
               "updatedAt": 1774584134431,
               "messageCount": 0
             }
@@ -1136,6 +1189,7 @@
             {
               "id": "ses_2d28af358ffezdGhltIAXNz3VN",
               "title": "New session - 2026-03-27T04:02:18.919Z",
+              "status": "busy",
               "updatedAt": 1774584139930,
               "messageCount": 0,
               "processing": true
@@ -1143,12 +1197,14 @@
             {
               "id": "ses_2d28b02f2ffePlT1fSGFbEmcqE",
               "title": "Pong reply",
+              "status": "idle",
               "updatedAt": 1774584138424,
               "messageCount": 0
             },
             {
               "id": "ses_2d28b1bd2ffeSjhBHLSlb2SRue",
               "title": "Greeting",
+              "status": "idle",
               "updatedAt": 1774584134431,
               "messageCount": 0
             }
@@ -1161,6 +1217,7 @@
             {
               "id": "ses_2d28af358ffezdGhltIAXNz3VN",
               "title": "ok",
+              "status": "busy",
               "updatedAt": 1774584139930,
               "messageCount": 0,
               "processing": true
@@ -1168,12 +1225,14 @@
             {
               "id": "ses_2d28b02f2ffePlT1fSGFbEmcqE",
               "title": "Pong reply",
+              "status": "idle",
               "updatedAt": 1774584138424,
               "messageCount": 0
             },
             {
               "id": "ses_2d28b1bd2ffeSjhBHLSlb2SRue",
               "title": "Greeting",
+              "status": "idle",
               "updatedAt": 1774584134431,
               "messageCount": 0
             }
@@ -1186,6 +1245,7 @@
             {
               "id": "ses_2d28af358ffezdGhltIAXNz3VN",
               "title": "ok",
+              "status": "busy",
               "updatedAt": 1774584139930,
               "messageCount": 0,
               "processing": true
@@ -1193,12 +1253,14 @@
             {
               "id": "ses_2d28b02f2ffePlT1fSGFbEmcqE",
               "title": "Pong reply",
+              "status": "idle",
               "updatedAt": 1774584138424,
               "messageCount": 0
             },
             {
               "id": "ses_2d28b1bd2ffeSjhBHLSlb2SRue",
               "title": "Greeting",
+              "status": "idle",
               "updatedAt": 1774584134431,
               "messageCount": 0
             }
@@ -1246,18 +1308,21 @@
             {
               "id": "ses_2d28af358ffezdGhltIAXNz3VN",
               "title": "ok",
+              "status": "idle",
               "updatedAt": 1774584143538,
               "messageCount": 0
             },
             {
               "id": "ses_2d28b02f2ffePlT1fSGFbEmcqE",
               "title": "Pong reply",
+              "status": "idle",
               "updatedAt": 1774584138424,
               "messageCount": 0
             },
             {
               "id": "ses_2d28b1bd2ffeSjhBHLSlb2SRue",
               "title": "Greeting",
+              "status": "idle",
               "updatedAt": 1774584134431,
               "messageCount": 0
             }
@@ -1275,18 +1340,21 @@
             {
               "id": "ses_2d28af358ffezdGhltIAXNz3VN",
               "title": "ok",
+              "status": "idle",
               "updatedAt": 1774584143538,
               "messageCount": 0
             },
             {
               "id": "ses_2d28b02f2ffePlT1fSGFbEmcqE",
               "title": "Pong reply",
+              "status": "idle",
               "updatedAt": 1774584138424,
               "messageCount": 0
             },
             {
               "id": "ses_2d28b1bd2ffeSjhBHLSlb2SRue",
               "title": "Greeting",
+              "status": "idle",
               "updatedAt": 1774584134431,
               "messageCount": 0
             }
@@ -1299,18 +1367,21 @@
             {
               "id": "ses_2d28af358ffezdGhltIAXNz3VN",
               "title": "ok",
+              "status": "idle",
               "updatedAt": 1774584143553,
               "messageCount": 0
             },
             {
               "id": "ses_2d28b02f2ffePlT1fSGFbEmcqE",
               "title": "Pong reply",
+              "status": "idle",
               "updatedAt": 1774584138424,
               "messageCount": 0
             },
             {
               "id": "ses_2d28b1bd2ffeSjhBHLSlb2SRue",
               "title": "Greeting",
+              "status": "idle",
               "updatedAt": 1774584134431,
               "messageCount": 0
             }
@@ -1323,18 +1394,21 @@
             {
               "id": "ses_2d28af358ffezdGhltIAXNz3VN",
               "title": "ok",
+              "status": "idle",
               "updatedAt": 1774584143553,
               "messageCount": 0
             },
             {
               "id": "ses_2d28b02f2ffePlT1fSGFbEmcqE",
               "title": "Pong reply",
+              "status": "idle",
               "updatedAt": 1774584138424,
               "messageCount": 0
             },
             {
               "id": "ses_2d28b1bd2ffeSjhBHLSlb2SRue",
               "title": "Greeting",
+              "status": "idle",
               "updatedAt": 1774584134431,
               "messageCount": 0
             }
@@ -1369,24 +1443,28 @@
             {
               "id": "ses_2d28adf51ffeC106HfUge4x26Q",
               "title": "New session - 2026-03-27T04:02:24.046Z",
+              "status": "idle",
               "updatedAt": 1774584145086,
               "messageCount": 0
             },
             {
               "id": "ses_2d28af358ffezdGhltIAXNz3VN",
               "title": "ok",
+              "status": "idle",
               "updatedAt": 1774584143553,
               "messageCount": 0
             },
             {
               "id": "ses_2d28b02f2ffePlT1fSGFbEmcqE",
               "title": "Pong reply",
+              "status": "idle",
               "updatedAt": 1774584138424,
               "messageCount": 0
             },
             {
               "id": "ses_2d28b1bd2ffeSjhBHLSlb2SRue",
               "title": "Greeting",
+              "status": "idle",
               "updatedAt": 1774584134431,
               "messageCount": 0
             }
@@ -1399,24 +1477,28 @@
             {
               "id": "ses_2d28adf51ffeC106HfUge4x26Q",
               "title": "New session - 2026-03-27T04:02:24.046Z",
+              "status": "idle",
               "updatedAt": 1774584145086,
               "messageCount": 0
             },
             {
               "id": "ses_2d28af358ffezdGhltIAXNz3VN",
               "title": "ok",
+              "status": "idle",
               "updatedAt": 1774584143553,
               "messageCount": 0
             },
             {
               "id": "ses_2d28b02f2ffePlT1fSGFbEmcqE",
               "title": "Pong reply",
+              "status": "idle",
               "updatedAt": 1774584138424,
               "messageCount": 0
             },
             {
               "id": "ses_2d28b1bd2ffeSjhBHLSlb2SRue",
               "title": "Greeting",
+              "status": "idle",
               "updatedAt": 1774584134431,
               "messageCount": 0
             }
@@ -1429,24 +1511,28 @@
             {
               "id": "ses_2d28adf51ffeC106HfUge4x26Q",
               "title": "New session - 2026-03-27T04:02:24.046Z",
+              "status": "idle",
               "updatedAt": 1774584145086,
               "messageCount": 0
             },
             {
               "id": "ses_2d28af358ffezdGhltIAXNz3VN",
               "title": "ok",
+              "status": "idle",
               "updatedAt": 1774584143553,
               "messageCount": 0
             },
             {
               "id": "ses_2d28b02f2ffePlT1fSGFbEmcqE",
               "title": "Pong reply",
+              "status": "idle",
               "updatedAt": 1774584138424,
               "messageCount": 0
             },
             {
               "id": "ses_2d28b1bd2ffeSjhBHLSlb2SRue",
               "title": "Greeting",
+              "status": "idle",
               "updatedAt": 1774584134431,
               "messageCount": 0
             }
@@ -1459,24 +1545,28 @@
             {
               "id": "ses_2d28adf51ffeC106HfUge4x26Q",
               "title": "New session - 2026-03-27T04:02:24.046Z",
+              "status": "idle",
               "updatedAt": 1774584145086,
               "messageCount": 0
             },
             {
               "id": "ses_2d28af358ffezdGhltIAXNz3VN",
               "title": "ok",
+              "status": "idle",
               "updatedAt": 1774584143553,
               "messageCount": 0
             },
             {
               "id": "ses_2d28b02f2ffePlT1fSGFbEmcqE",
               "title": "Pong reply",
+              "status": "idle",
               "updatedAt": 1774584138424,
               "messageCount": 0
             },
             {
               "id": "ses_2d28b1bd2ffeSjhBHLSlb2SRue",
               "title": "Greeting",
+              "status": "idle",
               "updatedAt": 1774584134431,
               "messageCount": 0
             }
@@ -1489,6 +1579,7 @@
             {
               "id": "ses_2d28adf51ffeC106HfUge4x26Q",
               "title": "New session - 2026-03-27T04:02:24.046Z",
+              "status": "busy",
               "updatedAt": 1774584145086,
               "messageCount": 0,
               "processing": true
@@ -1496,18 +1587,21 @@
             {
               "id": "ses_2d28af358ffezdGhltIAXNz3VN",
               "title": "ok",
+              "status": "idle",
               "updatedAt": 1774584143553,
               "messageCount": 0
             },
             {
               "id": "ses_2d28b02f2ffePlT1fSGFbEmcqE",
               "title": "Pong reply",
+              "status": "idle",
               "updatedAt": 1774584138424,
               "messageCount": 0
             },
             {
               "id": "ses_2d28b1bd2ffeSjhBHLSlb2SRue",
               "title": "Greeting",
+              "status": "idle",
               "updatedAt": 1774584134431,
               "messageCount": 0
             }
@@ -1525,6 +1619,7 @@
             {
               "id": "ses_2d28adf51ffeC106HfUge4x26Q",
               "title": "New session - 2026-03-27T04:02:24.046Z",
+              "status": "busy",
               "updatedAt": 1774584145086,
               "messageCount": 0,
               "processing": true
@@ -1532,18 +1627,21 @@
             {
               "id": "ses_2d28af358ffezdGhltIAXNz3VN",
               "title": "ok",
+              "status": "idle",
               "updatedAt": 1774584143553,
               "messageCount": 0
             },
             {
               "id": "ses_2d28b02f2ffePlT1fSGFbEmcqE",
               "title": "Pong reply",
+              "status": "idle",
               "updatedAt": 1774584138424,
               "messageCount": 0
             },
             {
               "id": "ses_2d28b1bd2ffeSjhBHLSlb2SRue",
               "title": "Greeting",
+              "status": "idle",
               "updatedAt": 1774584134431,
               "messageCount": 0
             }
@@ -1556,6 +1654,7 @@
             {
               "id": "ses_2d28adf51ffeC106HfUge4x26Q",
               "title": "Greeting",
+              "status": "busy",
               "updatedAt": 1774584145086,
               "messageCount": 0,
               "processing": true
@@ -1563,18 +1662,21 @@
             {
               "id": "ses_2d28af358ffezdGhltIAXNz3VN",
               "title": "ok",
+              "status": "idle",
               "updatedAt": 1774584143553,
               "messageCount": 0
             },
             {
               "id": "ses_2d28b02f2ffePlT1fSGFbEmcqE",
               "title": "Pong reply",
+              "status": "idle",
               "updatedAt": 1774584138424,
               "messageCount": 0
             },
             {
               "id": "ses_2d28b1bd2ffeSjhBHLSlb2SRue",
               "title": "Greeting",
+              "status": "idle",
               "updatedAt": 1774584134431,
               "messageCount": 0
             }
@@ -1587,6 +1689,7 @@
             {
               "id": "ses_2d28adf51ffeC106HfUge4x26Q",
               "title": "Greeting",
+              "status": "busy",
               "updatedAt": 1774584145086,
               "messageCount": 0,
               "processing": true
@@ -1594,18 +1697,21 @@
             {
               "id": "ses_2d28af358ffezdGhltIAXNz3VN",
               "title": "ok",
+              "status": "idle",
               "updatedAt": 1774584143553,
               "messageCount": 0
             },
             {
               "id": "ses_2d28b02f2ffePlT1fSGFbEmcqE",
               "title": "Pong reply",
+              "status": "idle",
               "updatedAt": 1774584138424,
               "messageCount": 0
             },
             {
               "id": "ses_2d28b1bd2ffeSjhBHLSlb2SRue",
               "title": "Greeting",
+              "status": "idle",
               "updatedAt": 1774584134431,
               "messageCount": 0
             }
@@ -1653,24 +1759,28 @@
             {
               "id": "ses_2d28adf51ffeC106HfUge4x26Q",
               "title": "Greeting",
+              "status": "idle",
               "updatedAt": 1774584147828,
               "messageCount": 0
             },
             {
               "id": "ses_2d28af358ffezdGhltIAXNz3VN",
               "title": "ok",
+              "status": "idle",
               "updatedAt": 1774584143553,
               "messageCount": 0
             },
             {
               "id": "ses_2d28b02f2ffePlT1fSGFbEmcqE",
               "title": "Pong reply",
+              "status": "idle",
               "updatedAt": 1774584138424,
               "messageCount": 0
             },
             {
               "id": "ses_2d28b1bd2ffeSjhBHLSlb2SRue",
               "title": "Greeting",
+              "status": "idle",
               "updatedAt": 1774584134431,
               "messageCount": 0
             }
@@ -1688,24 +1798,28 @@
             {
               "id": "ses_2d28adf51ffeC106HfUge4x26Q",
               "title": "Greeting",
+              "status": "idle",
               "updatedAt": 1774584147828,
               "messageCount": 0
             },
             {
               "id": "ses_2d28af358ffezdGhltIAXNz3VN",
               "title": "ok",
+              "status": "idle",
               "updatedAt": 1774584143553,
               "messageCount": 0
             },
             {
               "id": "ses_2d28b02f2ffePlT1fSGFbEmcqE",
               "title": "Pong reply",
+              "status": "idle",
               "updatedAt": 1774584138424,
               "messageCount": 0
             },
             {
               "id": "ses_2d28b1bd2ffeSjhBHLSlb2SRue",
               "title": "Greeting",
+              "status": "idle",
               "updatedAt": 1774584134431,
               "messageCount": 0
             }
@@ -1718,24 +1832,28 @@
             {
               "id": "ses_2d28adf51ffeC106HfUge4x26Q",
               "title": "Greeting",
+              "status": "idle",
               "updatedAt": 1774584147839,
               "messageCount": 0
             },
             {
               "id": "ses_2d28af358ffezdGhltIAXNz3VN",
               "title": "ok",
+              "status": "idle",
               "updatedAt": 1774584143553,
               "messageCount": 0
             },
             {
               "id": "ses_2d28b02f2ffePlT1fSGFbEmcqE",
               "title": "Pong reply",
+              "status": "idle",
               "updatedAt": 1774584138424,
               "messageCount": 0
             },
             {
               "id": "ses_2d28b1bd2ffeSjhBHLSlb2SRue",
               "title": "Greeting",
+              "status": "idle",
               "updatedAt": 1774584134431,
               "messageCount": 0
             }
@@ -1748,24 +1866,28 @@
             {
               "id": "ses_2d28adf51ffeC106HfUge4x26Q",
               "title": "Greeting",
+              "status": "idle",
               "updatedAt": 1774584147839,
               "messageCount": 0
             },
             {
               "id": "ses_2d28af358ffezdGhltIAXNz3VN",
               "title": "ok",
+              "status": "idle",
               "updatedAt": 1774584143553,
               "messageCount": 0
             },
             {
               "id": "ses_2d28b02f2ffePlT1fSGFbEmcqE",
               "title": "Pong reply",
+              "status": "idle",
               "updatedAt": 1774584138424,
               "messageCount": 0
             },
             {
               "id": "ses_2d28b1bd2ffeSjhBHLSlb2SRue",
               "title": "Greeting",
+              "status": "idle",
               "updatedAt": 1774584134431,
               "messageCount": 0
             }
@@ -1800,30 +1922,35 @@
             {
               "id": "ses_2d28ace90ffeJ6ZKJjGaVRS4XN",
               "title": "New session - 2026-03-27T04:02:28.335Z",
+              "status": "idle",
               "updatedAt": 1774584149353,
               "messageCount": 0
             },
             {
               "id": "ses_2d28adf51ffeC106HfUge4x26Q",
               "title": "Greeting",
+              "status": "idle",
               "updatedAt": 1774584147839,
               "messageCount": 0
             },
             {
               "id": "ses_2d28af358ffezdGhltIAXNz3VN",
               "title": "ok",
+              "status": "idle",
               "updatedAt": 1774584143553,
               "messageCount": 0
             },
             {
               "id": "ses_2d28b02f2ffePlT1fSGFbEmcqE",
               "title": "Pong reply",
+              "status": "idle",
               "updatedAt": 1774584138424,
               "messageCount": 0
             },
             {
               "id": "ses_2d28b1bd2ffeSjhBHLSlb2SRue",
               "title": "Greeting",
+              "status": "idle",
               "updatedAt": 1774584134431,
               "messageCount": 0
             }
@@ -1836,30 +1963,35 @@
             {
               "id": "ses_2d28ace90ffeJ6ZKJjGaVRS4XN",
               "title": "New session - 2026-03-27T04:02:28.335Z",
+              "status": "idle",
               "updatedAt": 1774584149353,
               "messageCount": 0
             },
             {
               "id": "ses_2d28adf51ffeC106HfUge4x26Q",
               "title": "Greeting",
+              "status": "idle",
               "updatedAt": 1774584147839,
               "messageCount": 0
             },
             {
               "id": "ses_2d28af358ffezdGhltIAXNz3VN",
               "title": "ok",
+              "status": "idle",
               "updatedAt": 1774584143553,
               "messageCount": 0
             },
             {
               "id": "ses_2d28b02f2ffePlT1fSGFbEmcqE",
               "title": "Pong reply",
+              "status": "idle",
               "updatedAt": 1774584138424,
               "messageCount": 0
             },
             {
               "id": "ses_2d28b1bd2ffeSjhBHLSlb2SRue",
               "title": "Greeting",
+              "status": "idle",
               "updatedAt": 1774584134431,
               "messageCount": 0
             }
@@ -1872,30 +2004,35 @@
             {
               "id": "ses_2d28ace90ffeJ6ZKJjGaVRS4XN",
               "title": "New session - 2026-03-27T04:02:28.335Z",
+              "status": "idle",
               "updatedAt": 1774584149353,
               "messageCount": 0
             },
             {
               "id": "ses_2d28adf51ffeC106HfUge4x26Q",
               "title": "Greeting",
+              "status": "idle",
               "updatedAt": 1774584147839,
               "messageCount": 0
             },
             {
               "id": "ses_2d28af358ffezdGhltIAXNz3VN",
               "title": "ok",
+              "status": "idle",
               "updatedAt": 1774584143553,
               "messageCount": 0
             },
             {
               "id": "ses_2d28b02f2ffePlT1fSGFbEmcqE",
               "title": "Pong reply",
+              "status": "idle",
               "updatedAt": 1774584138424,
               "messageCount": 0
             },
             {
               "id": "ses_2d28b1bd2ffeSjhBHLSlb2SRue",
               "title": "Greeting",
+              "status": "idle",
               "updatedAt": 1774584134431,
               "messageCount": 0
             }
@@ -1908,30 +2045,35 @@
             {
               "id": "ses_2d28ace90ffeJ6ZKJjGaVRS4XN",
               "title": "New session - 2026-03-27T04:02:28.335Z",
+              "status": "idle",
               "updatedAt": 1774584149353,
               "messageCount": 0
             },
             {
               "id": "ses_2d28adf51ffeC106HfUge4x26Q",
               "title": "Greeting",
+              "status": "idle",
               "updatedAt": 1774584147839,
               "messageCount": 0
             },
             {
               "id": "ses_2d28af358ffezdGhltIAXNz3VN",
               "title": "ok",
+              "status": "idle",
               "updatedAt": 1774584143553,
               "messageCount": 0
             },
             {
               "id": "ses_2d28b02f2ffePlT1fSGFbEmcqE",
               "title": "Pong reply",
+              "status": "idle",
               "updatedAt": 1774584138424,
               "messageCount": 0
             },
             {
               "id": "ses_2d28b1bd2ffeSjhBHLSlb2SRue",
               "title": "Greeting",
+              "status": "idle",
               "updatedAt": 1774584134431,
               "messageCount": 0
             }
@@ -1944,6 +2086,7 @@
             {
               "id": "ses_2d28ace90ffeJ6ZKJjGaVRS4XN",
               "title": "New session - 2026-03-27T04:02:28.335Z",
+              "status": "busy",
               "updatedAt": 1774584149353,
               "messageCount": 0,
               "processing": true
@@ -1951,24 +2094,28 @@
             {
               "id": "ses_2d28adf51ffeC106HfUge4x26Q",
               "title": "Greeting",
+              "status": "idle",
               "updatedAt": 1774584147839,
               "messageCount": 0
             },
             {
               "id": "ses_2d28af358ffezdGhltIAXNz3VN",
               "title": "ok",
+              "status": "idle",
               "updatedAt": 1774584143553,
               "messageCount": 0
             },
             {
               "id": "ses_2d28b02f2ffePlT1fSGFbEmcqE",
               "title": "Pong reply",
+              "status": "idle",
               "updatedAt": 1774584138424,
               "messageCount": 0
             },
             {
               "id": "ses_2d28b1bd2ffeSjhBHLSlb2SRue",
               "title": "Greeting",
+              "status": "idle",
               "updatedAt": 1774584134431,
               "messageCount": 0
             }
@@ -1986,6 +2133,7 @@
             {
               "id": "ses_2d28ace90ffeJ6ZKJjGaVRS4XN",
               "title": "New session - 2026-03-27T04:02:28.335Z",
+              "status": "busy",
               "updatedAt": 1774584149353,
               "messageCount": 0,
               "processing": true
@@ -1993,24 +2141,28 @@
             {
               "id": "ses_2d28adf51ffeC106HfUge4x26Q",
               "title": "Greeting",
+              "status": "idle",
               "updatedAt": 1774584147839,
               "messageCount": 0
             },
             {
               "id": "ses_2d28af358ffezdGhltIAXNz3VN",
               "title": "ok",
+              "status": "idle",
               "updatedAt": 1774584143553,
               "messageCount": 0
             },
             {
               "id": "ses_2d28b02f2ffePlT1fSGFbEmcqE",
               "title": "Pong reply",
+              "status": "idle",
               "updatedAt": 1774584138424,
               "messageCount": 0
             },
             {
               "id": "ses_2d28b1bd2ffeSjhBHLSlb2SRue",
               "title": "Greeting",
+              "status": "idle",
               "updatedAt": 1774584134431,
               "messageCount": 0
             }
@@ -2023,6 +2175,7 @@
             {
               "id": "ses_2d28ace90ffeJ6ZKJjGaVRS4XN",
               "title": "Greet function implementation",
+              "status": "busy",
               "updatedAt": 1774584149353,
               "messageCount": 0,
               "processing": true
@@ -2030,24 +2183,28 @@
             {
               "id": "ses_2d28adf51ffeC106HfUge4x26Q",
               "title": "Greeting",
+              "status": "idle",
               "updatedAt": 1774584147839,
               "messageCount": 0
             },
             {
               "id": "ses_2d28af358ffezdGhltIAXNz3VN",
               "title": "ok",
+              "status": "idle",
               "updatedAt": 1774584143553,
               "messageCount": 0
             },
             {
               "id": "ses_2d28b02f2ffePlT1fSGFbEmcqE",
               "title": "Pong reply",
+              "status": "idle",
               "updatedAt": 1774584138424,
               "messageCount": 0
             },
             {
               "id": "ses_2d28b1bd2ffeSjhBHLSlb2SRue",
               "title": "Greeting",
+              "status": "idle",
               "updatedAt": 1774584134431,
               "messageCount": 0
             }
@@ -2060,6 +2217,7 @@
             {
               "id": "ses_2d28ace90ffeJ6ZKJjGaVRS4XN",
               "title": "Greet function implementation",
+              "status": "busy",
               "updatedAt": 1774584149353,
               "messageCount": 0,
               "processing": true
@@ -2067,24 +2225,28 @@
             {
               "id": "ses_2d28adf51ffeC106HfUge4x26Q",
               "title": "Greeting",
+              "status": "idle",
               "updatedAt": 1774584147839,
               "messageCount": 0
             },
             {
               "id": "ses_2d28af358ffezdGhltIAXNz3VN",
               "title": "ok",
+              "status": "idle",
               "updatedAt": 1774584143553,
               "messageCount": 0
             },
             {
               "id": "ses_2d28b02f2ffePlT1fSGFbEmcqE",
               "title": "Pong reply",
+              "status": "idle",
               "updatedAt": 1774584138424,
               "messageCount": 0
             },
             {
               "id": "ses_2d28b1bd2ffeSjhBHLSlb2SRue",
               "title": "Greeting",
+              "status": "idle",
               "updatedAt": 1774584134431,
               "messageCount": 0
             }
@@ -2138,30 +2300,35 @@
             {
               "id": "ses_2d28ace90ffeJ6ZKJjGaVRS4XN",
               "title": "Greet function implementation",
+              "status": "idle",
               "updatedAt": 1774584152909,
               "messageCount": 0
             },
             {
               "id": "ses_2d28adf51ffeC106HfUge4x26Q",
               "title": "Greeting",
+              "status": "idle",
               "updatedAt": 1774584147839,
               "messageCount": 0
             },
             {
               "id": "ses_2d28af358ffezdGhltIAXNz3VN",
               "title": "ok",
+              "status": "idle",
               "updatedAt": 1774584143553,
               "messageCount": 0
             },
             {
               "id": "ses_2d28b02f2ffePlT1fSGFbEmcqE",
               "title": "Pong reply",
+              "status": "idle",
               "updatedAt": 1774584138424,
               "messageCount": 0
             },
             {
               "id": "ses_2d28b1bd2ffeSjhBHLSlb2SRue",
               "title": "Greeting",
+              "status": "idle",
               "updatedAt": 1774584134431,
               "messageCount": 0
             }
@@ -2179,30 +2346,35 @@
             {
               "id": "ses_2d28ace90ffeJ6ZKJjGaVRS4XN",
               "title": "Greet function implementation",
+              "status": "idle",
               "updatedAt": 1774584152909,
               "messageCount": 0
             },
             {
               "id": "ses_2d28adf51ffeC106HfUge4x26Q",
               "title": "Greeting",
+              "status": "idle",
               "updatedAt": 1774584147839,
               "messageCount": 0
             },
             {
               "id": "ses_2d28af358ffezdGhltIAXNz3VN",
               "title": "ok",
+              "status": "idle",
               "updatedAt": 1774584143553,
               "messageCount": 0
             },
             {
               "id": "ses_2d28b02f2ffePlT1fSGFbEmcqE",
               "title": "Pong reply",
+              "status": "idle",
               "updatedAt": 1774584138424,
               "messageCount": 0
             },
             {
               "id": "ses_2d28b1bd2ffeSjhBHLSlb2SRue",
               "title": "Greeting",
+              "status": "idle",
               "updatedAt": 1774584134431,
               "messageCount": 0
             }
@@ -2215,30 +2387,35 @@
             {
               "id": "ses_2d28ace90ffeJ6ZKJjGaVRS4XN",
               "title": "Greet function implementation",
+              "status": "idle",
               "updatedAt": 1774584152921,
               "messageCount": 0
             },
             {
               "id": "ses_2d28adf51ffeC106HfUge4x26Q",
               "title": "Greeting",
+              "status": "idle",
               "updatedAt": 1774584147839,
               "messageCount": 0
             },
             {
               "id": "ses_2d28af358ffezdGhltIAXNz3VN",
               "title": "ok",
+              "status": "idle",
               "updatedAt": 1774584143553,
               "messageCount": 0
             },
             {
               "id": "ses_2d28b02f2ffePlT1fSGFbEmcqE",
               "title": "Pong reply",
+              "status": "idle",
               "updatedAt": 1774584138424,
               "messageCount": 0
             },
             {
               "id": "ses_2d28b1bd2ffeSjhBHLSlb2SRue",
               "title": "Greeting",
+              "status": "idle",
               "updatedAt": 1774584134431,
               "messageCount": 0
             }
@@ -2251,30 +2428,35 @@
             {
               "id": "ses_2d28ace90ffeJ6ZKJjGaVRS4XN",
               "title": "Greet function implementation",
+              "status": "idle",
               "updatedAt": 1774584152921,
               "messageCount": 0
             },
             {
               "id": "ses_2d28adf51ffeC106HfUge4x26Q",
               "title": "Greeting",
+              "status": "idle",
               "updatedAt": 1774584147839,
               "messageCount": 0
             },
             {
               "id": "ses_2d28af358ffezdGhltIAXNz3VN",
               "title": "ok",
+              "status": "idle",
               "updatedAt": 1774584143553,
               "messageCount": 0
             },
             {
               "id": "ses_2d28b02f2ffePlT1fSGFbEmcqE",
               "title": "Pong reply",
+              "status": "idle",
               "updatedAt": 1774584138424,
               "messageCount": 0
             },
             {
               "id": "ses_2d28b1bd2ffeSjhBHLSlb2SRue",
               "title": "Greeting",
+              "status": "idle",
               "updatedAt": 1774584134431,
               "messageCount": 0
             }

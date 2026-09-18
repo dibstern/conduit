@@ -841,10 +841,22 @@ describe("getDescendantSessionIds", () => {
 	it("returns direct child sessions", () => {
 		applySessionSnapshot(
 			[
-				{ id: "parent", title: "Parent", updatedAt: 0 },
-				{ id: "child-1", title: "Child 1", parentID: "parent", updatedAt: 0 },
-				{ id: "child-2", title: "Child 2", parentID: "parent", updatedAt: 0 },
-				{ id: "unrelated", title: "Unrelated", updatedAt: 0 },
+				{ id: "parent", title: "Parent", status: "idle", updatedAt: 0 },
+				{
+					id: "child-1",
+					title: "Child 1",
+					status: "idle",
+					parentID: "parent",
+					updatedAt: 0,
+				},
+				{
+					id: "child-2",
+					title: "Child 2",
+					status: "idle",
+					parentID: "parent",
+					updatedAt: 0,
+				},
+				{ id: "unrelated", title: "Unrelated", status: "idle", updatedAt: 0 },
 			],
 			"complete",
 		);
@@ -855,11 +867,18 @@ describe("getDescendantSessionIds", () => {
 	it("returns multi-level descendants (grandchildren)", () => {
 		applySessionSnapshot(
 			[
-				{ id: "root", title: "Root", updatedAt: 0 },
-				{ id: "child", title: "Child", parentID: "root", updatedAt: 0 },
+				{ id: "root", title: "Root", status: "idle", updatedAt: 0 },
+				{
+					id: "child",
+					title: "Child",
+					status: "idle",
+					parentID: "root",
+					updatedAt: 0,
+				},
 				{
 					id: "grandchild",
 					title: "Grandchild",
+					status: "idle",
 					parentID: "child",
 					updatedAt: 0,
 				},
@@ -873,8 +892,14 @@ describe("getDescendantSessionIds", () => {
 	it("does not include the parent itself", () => {
 		applySessionSnapshot(
 			[
-				{ id: "parent", title: "Parent", updatedAt: 0 },
-				{ id: "child", title: "Child", parentID: "parent", updatedAt: 0 },
+				{ id: "parent", title: "Parent", status: "idle", updatedAt: 0 },
+				{
+					id: "child",
+					title: "Child",
+					status: "idle",
+					parentID: "parent",
+					updatedAt: 0,
+				},
 			],
 			"complete",
 		);
@@ -889,8 +914,14 @@ describe("getLocalPermissions with subagent hierarchy", () => {
 	it("includes permissions from direct child (subagent) sessions", () => {
 		applySessionSnapshot(
 			[
-				{ id: "parent", title: "Parent", updatedAt: 0 },
-				{ id: "child", title: "Child", parentID: "parent", updatedAt: 0 },
+				{ id: "parent", title: "Parent", status: "idle", updatedAt: 0 },
+				{
+					id: "child",
+					title: "Child",
+					status: "idle",
+					parentID: "parent",
+					updatedAt: 0,
+				},
 			],
 			"complete",
 		);
@@ -911,9 +942,21 @@ describe("getLocalPermissions with subagent hierarchy", () => {
 	it("includes permissions from deeply nested subagent sessions", () => {
 		applySessionSnapshot(
 			[
-				{ id: "root", title: "Root", updatedAt: 0 },
-				{ id: "child", title: "Child", parentID: "root", updatedAt: 0 },
-				{ id: "grandchild", title: "GC", parentID: "child", updatedAt: 0 },
+				{ id: "root", title: "Root", status: "idle", updatedAt: 0 },
+				{
+					id: "child",
+					title: "Child",
+					status: "idle",
+					parentID: "root",
+					updatedAt: 0,
+				},
+				{
+					id: "grandchild",
+					title: "GC",
+					status: "idle",
+					parentID: "child",
+					updatedAt: 0,
+				},
 			],
 			"complete",
 		);
@@ -934,8 +977,14 @@ describe("getLocalPermissions with subagent hierarchy", () => {
 	it("includes own permissions alongside descendant permissions", () => {
 		applySessionSnapshot(
 			[
-				{ id: "parent", title: "Parent", updatedAt: 0 },
-				{ id: "child", title: "Child", parentID: "parent", updatedAt: 0 },
+				{ id: "parent", title: "Parent", status: "idle", updatedAt: 0 },
+				{
+					id: "child",
+					title: "Child",
+					status: "idle",
+					parentID: "parent",
+					updatedAt: 0,
+				},
 			],
 			"complete",
 		);
@@ -961,9 +1010,15 @@ describe("getLocalPermissions with subagent hierarchy", () => {
 	it("does not include permissions from unrelated sessions", () => {
 		applySessionSnapshot(
 			[
-				{ id: "parent", title: "Parent", updatedAt: 0 },
-				{ id: "child", title: "Child", parentID: "parent", updatedAt: 0 },
-				{ id: "other", title: "Other", updatedAt: 0 },
+				{ id: "parent", title: "Parent", status: "idle", updatedAt: 0 },
+				{
+					id: "child",
+					title: "Child",
+					status: "idle",
+					parentID: "parent",
+					updatedAt: 0,
+				},
+				{ id: "other", title: "Other", status: "idle", updatedAt: 0 },
 			],
 			"complete",
 		);
@@ -1065,8 +1120,14 @@ describe("getRemotePermissions with subagent hierarchy", () => {
 	it("excludes permissions from child (subagent) sessions", () => {
 		applySessionSnapshot(
 			[
-				{ id: "parent", title: "Parent", updatedAt: 0 },
-				{ id: "child", title: "Child", parentID: "parent", updatedAt: 0 },
+				{ id: "parent", title: "Parent", status: "idle", updatedAt: 0 },
+				{
+					id: "child",
+					title: "Child",
+					status: "idle",
+					parentID: "parent",
+					updatedAt: 0,
+				},
 			],
 			"complete",
 		);
@@ -1085,9 +1146,15 @@ describe("getRemotePermissions with subagent hierarchy", () => {
 	it("includes permissions from unrelated sessions", () => {
 		applySessionSnapshot(
 			[
-				{ id: "parent", title: "Parent", updatedAt: 0 },
-				{ id: "child", title: "Child", parentID: "parent", updatedAt: 0 },
-				{ id: "other", title: "Other", updatedAt: 0 },
+				{ id: "parent", title: "Parent", status: "idle", updatedAt: 0 },
+				{
+					id: "child",
+					title: "Child",
+					status: "idle",
+					parentID: "parent",
+					updatedAt: 0,
+				},
+				{ id: "other", title: "Other", status: "idle", updatedAt: 0 },
 			],
 			"complete",
 		);
@@ -1108,9 +1175,21 @@ describe("getRemotePermissions with subagent hierarchy", () => {
 	it("excludes deeply nested descendant permissions from remote", () => {
 		applySessionSnapshot(
 			[
-				{ id: "root", title: "Root", updatedAt: 0 },
-				{ id: "child", title: "Child", parentID: "root", updatedAt: 0 },
-				{ id: "grandchild", title: "GC", parentID: "child", updatedAt: 0 },
+				{ id: "root", title: "Root", status: "idle", updatedAt: 0 },
+				{
+					id: "child",
+					title: "Child",
+					status: "idle",
+					parentID: "root",
+					updatedAt: 0,
+				},
+				{
+					id: "grandchild",
+					title: "GC",
+					status: "idle",
+					parentID: "child",
+					updatedAt: 0,
+				},
 			],
 			"complete",
 		);

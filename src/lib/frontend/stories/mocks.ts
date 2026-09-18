@@ -18,29 +18,29 @@ import type {
 export const mockSession: SessionInfo = {
 	id: "sess_01JTEST000000000000000001",
 	title: "Test Session",
-	createdAt: "2026-02-24T10:00:00Z",
-	updatedAt: "2026-02-24T10:30:00Z",
+	createdAt: Date.parse("2026-02-24T10:00:00Z"),
+	updatedAt: Date.parse("2026-02-24T10:30:00Z"),
 	messageCount: 12,
-	processing: false,
+	status: "idle",
 };
 
 export const mockSessionProcessing: SessionInfo = {
 	id: "sess_01JTEST000000000000000004",
 	title: "Running CI pipeline checks",
-	createdAt: "2026-02-25T08:00:00Z",
-	updatedAt: "2026-02-25T08:05:00Z",
+	createdAt: Date.parse("2026-02-25T08:00:00Z"),
+	updatedAt: Date.parse("2026-02-25T08:05:00Z"),
 	messageCount: 3,
-	processing: true,
+	status: "busy",
 };
 
 export const mockSessionLongTitle: SessionInfo = {
 	id: "sess_01JTEST000000000000000005",
 	title:
 		"Investigate memory leak in production WebSocket connection handler that causes OOM after 48 hours",
-	createdAt: "2026-02-25T07:00:00Z",
-	updatedAt: "2026-02-25T07:30:00Z",
+	createdAt: Date.parse("2026-02-25T07:00:00Z"),
+	updatedAt: Date.parse("2026-02-25T07:30:00Z"),
 	messageCount: 45,
-	processing: false,
+	status: "idle",
 };
 
 export const mockSessions: SessionInfo[] = [
@@ -48,18 +48,18 @@ export const mockSessions: SessionInfo[] = [
 	{
 		id: "sess_01JTEST000000000000000002",
 		title: "Debug authentication flow",
-		createdAt: "2026-02-24T09:00:00Z",
-		updatedAt: "2026-02-24T09:45:00Z",
+		createdAt: Date.parse("2026-02-24T09:00:00Z"),
+		updatedAt: Date.parse("2026-02-24T09:45:00Z"),
 		messageCount: 8,
-		processing: false,
+		status: "idle",
 	},
 	{
 		id: "sess_01JTEST000000000000000003",
 		title: "Refactor database queries",
-		createdAt: "2026-02-23T14:00:00Z",
-		updatedAt: "2026-02-23T15:20:00Z",
+		createdAt: Date.parse("2026-02-23T14:00:00Z"),
+		updatedAt: Date.parse("2026-02-23T15:20:00Z"),
 		messageCount: 22,
-		processing: true,
+		status: "busy",
 	},
 ];
 
@@ -68,43 +68,43 @@ export const mockSessionsAllGroups: SessionInfo[] = [
 	{
 		id: "sess_01JTEST000000000000000010",
 		title: "Fix WebSocket reconnection",
-		createdAt: "2026-02-25T10:00:00Z",
-		updatedAt: "2026-02-25T10:30:00Z",
+		createdAt: Date.parse("2026-02-25T10:00:00Z"),
+		updatedAt: Date.parse("2026-02-25T10:30:00Z"),
 		messageCount: 5,
-		processing: false,
+		status: "idle",
 	},
 	mockSessionProcessing,
 	{
 		id: "sess_01JTEST000000000000000011",
 		title: "Add dark mode support",
-		createdAt: "2026-02-24T14:00:00Z",
-		updatedAt: "2026-02-24T15:00:00Z",
+		createdAt: Date.parse("2026-02-24T14:00:00Z"),
+		updatedAt: Date.parse("2026-02-24T15:00:00Z"),
 		messageCount: 18,
-		processing: false,
+		status: "idle",
 	},
 	{
 		id: "sess_01JTEST000000000000000012",
 		title: "Review PR #42",
-		createdAt: "2026-02-24T09:00:00Z",
-		updatedAt: "2026-02-24T09:30:00Z",
+		createdAt: Date.parse("2026-02-24T09:00:00Z"),
+		updatedAt: Date.parse("2026-02-24T09:30:00Z"),
 		messageCount: 6,
-		processing: false,
+		status: "idle",
 	},
 	{
 		id: "sess_01JTEST000000000000000013",
 		title: "Set up CI pipeline",
-		createdAt: "2026-02-20T10:00:00Z",
-		updatedAt: "2026-02-20T12:00:00Z",
+		createdAt: Date.parse("2026-02-20T10:00:00Z"),
+		updatedAt: Date.parse("2026-02-20T12:00:00Z"),
 		messageCount: 34,
-		processing: false,
+		status: "idle",
 	},
 	{
 		id: "sess_01JTEST000000000000000014",
 		title: "Initial project scaffolding",
-		createdAt: "2026-02-18T08:00:00Z",
-		updatedAt: "2026-02-18T11:00:00Z",
+		createdAt: Date.parse("2026-02-18T08:00:00Z"),
+		updatedAt: Date.parse("2026-02-18T11:00:00Z"),
 		messageCount: 15,
-		processing: false,
+		status: "idle",
 	},
 ];
 

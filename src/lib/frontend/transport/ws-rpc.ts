@@ -79,6 +79,8 @@ export {
 	SetProjectInstance,
 	StartInstance,
 	StopInstance,
+	SubscribeSessionDetail,
+	SubscribeShell,
 	SwitchAgent,
 	SwitchContextWindow,
 	type SwitchContextWindowResponse,

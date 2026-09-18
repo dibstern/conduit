@@ -88,9 +88,9 @@ beforeEach(() => {
 	sessionState.currentId = null;
 	sessionState.searchQuery = "";
 	// Register sessions so routePerSession's unknown-session guard passes.
-	applySessionUpsert({ id: "session-a", title: "" });
-	applySessionUpsert({ id: "session-b", title: "" });
-	applySessionUpsert({ id: "s1", title: "" });
+	applySessionUpsert({ id: "session-a", title: "", status: "idle" });
+	applySessionUpsert({ id: "session-b", title: "", status: "idle" });
+	applySessionUpsert({ id: "s1", title: "", status: "idle" });
 	vi.useFakeTimers();
 });
 

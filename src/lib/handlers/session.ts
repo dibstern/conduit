@@ -723,6 +723,8 @@ export const forkSessionForClient = ({
 			session: {
 				id: forked.id,
 				title: forked.title ?? "Forked Session",
+				// A fork starts life idle; the projection takes over from here.
+				status: "idle",
 				updatedAt: forked.time?.updated ?? forked.time?.created ?? 0,
 				parentID: sessionId,
 				...(forkMessageId && { forkMessageId }),

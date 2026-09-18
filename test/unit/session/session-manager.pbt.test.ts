@@ -400,7 +400,7 @@ describe("Ticket 2.3 — Session Manager PBT", () => {
 							expect(typeof s.id).toBe("string");
 							expect(typeof s.title).toBe("string");
 							expect(typeof s.updatedAt).toBe("number");
-							expect(typeof s.messageCount).toBe("number");
+							expect(s.status).toBe("idle");
 						}
 					},
 				),

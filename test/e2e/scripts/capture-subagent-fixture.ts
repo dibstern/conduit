@@ -180,12 +180,14 @@ interface SubagentSnapshot {
 	parentSession: {
 		id: string;
 		title: string;
+		status: "idle";
 		updatedAt: number;
 		messageCount: number;
 	};
 	childSession: {
 		id: string;
 		title: string;
+		status: "idle";
 		updatedAt: number;
 		messageCount: number;
 		parentID: string;
@@ -355,12 +357,14 @@ async function main(): Promise<void> {
 		parentSession: {
 			id: "ses_parent001",
 			title: parentRaw.title ?? "Parent Session",
+			status: "idle",
 			updatedAt: BASE_TS,
 			messageCount: parentMsgs.length,
 		},
 		childSession: {
 			id: "ses_child001",
 			title: childRaw.title ?? "Subagent Session",
+			status: "idle",
 			updatedAt: BASE_TS + 60_000,
 			messageCount: childMsgs.length,
 			parentID: "ses_parent001",

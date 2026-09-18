@@ -27,6 +27,7 @@ const sessionList: MockMessage = {
 		{
 			id: "sess-pm-001",
 			title: "Existing session",
+			status: "idle",
 			updatedAt: Date.now(),
 			messageCount: 4,
 		},

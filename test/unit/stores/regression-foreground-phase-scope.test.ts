@@ -87,7 +87,7 @@ beforeEach(() => {
 	clearMessages();
 	sessionState.currentId = "session-a";
 	for (const id of ["session-a", "session-b"]) {
-		applySessionUpsert({ id, title: "" });
+		applySessionUpsert({ id, title: "", status: "idle" });
 	}
 	vi.useFakeTimers();
 });

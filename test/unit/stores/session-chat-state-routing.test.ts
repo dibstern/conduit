@@ -60,7 +60,7 @@ beforeEach(() => {
 	sessionState.currentId = "session-a";
 	// Register all sessions used in tests.
 	for (const id of ["session-a", "session-b", "session-c"]) {
-		applySessionUpsert({ id, title: "" });
+		applySessionUpsert({ id, title: "", status: "idle" });
 	}
 	vi.useFakeTimers();
 });

@@ -303,35 +303,14 @@ export function handleSessionList(
 	applySessionSnapshot(sessions, roots === true ? "partial" : "complete");
 }
 
-const sessionInfoFromRpc = (
-	session: ListSessionsResponse["sessions"][number],
-): SessionInfo => ({
-	id: session.id,
-	title: session.title,
-	...(session.createdAt != null ? { createdAt: session.createdAt } : {}),
-	...(session.updatedAt != null ? { updatedAt: session.updatedAt } : {}),
-	...(session.messageCount != null
-		? { messageCount: session.messageCount }
-		: {}),
-	...(session.processing != null ? { processing: session.processing } : {}),
-	...(session.parentID != null ? { parentID: session.parentID } : {}),
-	...(session.forkMessageId != null
-		? { forkMessageId: session.forkMessageId }
-		: {}),
-	...(session.forkPointTimestamp != null
-		? { forkPointTimestamp: session.forkPointTimestamp }
-		: {}),
-	...(session.pendingQuestionCount != null
-		? { pendingQuestionCount: session.pendingQuestionCount }
-		: {}),
-});
-
 export function applyListSessionsResponse(
 	response: ListSessionsResponse,
 ): void {
+	// The RPC decodes into the same session type the WebSocket message carries
+	// (ni8.5 T-1), so the sessions go straight through.
 	handleSessionList({
 		type: "session_list",
-		sessions: response.sessions.map(sessionInfoFromRpc),
+		sessions: [...response.sessions],
 		roots: response.roots,
 		...(response.search ? { search: true } : {}),
 	});

@@ -85,6 +85,7 @@ describe("clearSessionChatState wired to session_deleted", () => {
 		applySessionUpsert({
 			id: "deleted-session",
 			title: "To Delete",
+			status: "idle",
 		});
 		getOrCreateSessionSlot("deleted-session");
 
@@ -124,14 +125,17 @@ describe("handleSessionList drop path", () => {
 		applySessionUpsert({
 			id: "session-A",
 			title: "A",
+			status: "idle",
 		});
 		applySessionUpsert({
 			id: "session-B",
 			title: "B",
+			status: "idle",
 		});
 		applySessionUpsert({
 			id: "session-C",
 			title: "C",
+			status: "idle",
 		});
 		getOrCreateSessionSlot("session-A");
 		getOrCreateSessionSlot("session-B");
@@ -162,10 +166,12 @@ describe("handleSessionList drop path", () => {
 		applySessionUpsert({
 			id: "session-A",
 			title: "A",
+			status: "idle",
 		});
 		applySessionUpsert({
 			id: "session-B",
 			title: "B",
+			status: "idle",
 		});
 		getOrCreateSessionSlot("session-A");
 		getOrCreateSessionSlot("session-B");
@@ -191,10 +197,12 @@ describe("handleSessionList drop path", () => {
 		applySessionUpsert({
 			id: "session-A",
 			title: "A",
+			status: "idle",
 		});
 		applySessionUpsert({
 			id: "session-B",
 			title: "B",
+			status: "idle",
 		});
 		getOrCreateSessionSlot("session-A");
 		getOrCreateSessionSlot("session-B");
@@ -217,7 +225,7 @@ describe("active-session teardown", () => {
 	it("session_deleted for the active session cleans up state", () => {
 		const activeId = "active-session";
 		sessionState.currentId = activeId;
-		applySessionUpsert({ id: activeId, title: "Active" });
+		applySessionUpsert({ id: activeId, title: "Active", status: "idle" });
 		getOrCreateSessionSlot(activeId);
 
 		handleMessage({

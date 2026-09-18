@@ -50,7 +50,7 @@ beforeEach(() => {
 	clearMessages();
 	sessionState.currentId = null;
 	clearSessionChatState("sub-parent");
-	applySessionUpsert({ id: "sub-parent", title: "" });
+	applySessionUpsert({ id: "sub-parent", title: "", status: "idle" });
 	vi.useFakeTimers();
 });
 afterEach(() => vi.useRealTimers());

@@ -59,7 +59,7 @@ beforeEach(() => {
 	sessionState.currentId = "session-a";
 	// Register sessions
 	for (const id of ["session-a", "session-b"]) {
-		applySessionUpsert({ id, title: "" });
+		applySessionUpsert({ id, title: "", status: "idle" });
 	}
 	vi.useFakeTimers();
 });

@@ -1,4 +1,5 @@
-import { Effect } from "effect";
+import { Rpc } from "@effect/rpc";
+import { Effect, Stream } from "effect";
 import {
 	ClaudeSettingsResolveError,
 	ClaudeSettingsTrustBoundaryError,
@@ -19,6 +20,7 @@ import {
 	LoggerTag,
 	WebSocketHandlerTag,
 } from "../domain/relay/Services/services.js";
+import { subscribeSessionDetail } from "../domain/relay/Services/session-detail-subscription.js";
 import {
 	persistSessionPermissionMode,
 	SessionManagerServiceTag,
@@ -27,6 +29,7 @@ import {
 	getPermissionMode,
 	setPermissionMode,
 } from "../domain/relay/Services/session-overrides-state.js";
+import { subscribeShell } from "../domain/relay/Services/shell-subscription.js";
 import { OpenCodeTerminalServiceTag } from "../domain/relay/Services/terminal-service.js";
 import {
 	getClaudeSettingsOverrides,
@@ -205,6 +208,37 @@ const broadcastInstanceList = (instances: ReadonlyArray<OpenCodeInstance>) =>
 	});
 
 export const WsRpcServerLayer = WsRpcGroup.toLayer({
+	SubscribeShell: (request) =>
+		Rpc.fork(
+			subscribeShell(
+				request.resumeFromSequence === undefined
+					? {}
+					: { resumeFromSequence: request.resumeFromSequence },
+			).pipe(
+				Stream.mapError(
+					(error) =>
+						new WsRpcError({
+							message: `SubscribeShell failed: ${String(error)}`,
+						}),
+				),
+			),
+		),
+	SubscribeSessionDetail: (request) =>
+		Rpc.fork(
+			subscribeSessionDetail({
+				sessionId: request.sessionId,
+				...(request.resumeFromSequence === undefined
+					? {}
+					: { resumeFromSequence: request.resumeFromSequence }),
+			}).pipe(
+				Stream.mapError(
+					(error) =>
+						new WsRpcError({
+							message: `SubscribeSessionDetail failed: ${String(error)}`,
+						}),
+				),
+			),
+		),
 	GetAgents: (request) =>
 		Effect.gen(function* () {
 			const config = yield* ConfigTag;

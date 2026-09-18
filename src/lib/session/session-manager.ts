@@ -183,7 +183,6 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
 			resolvedStatuses,
 			this.lastMessageAt,
 			this.forkMeta,
-			this.pendingQuestionCounts,
 		);
 	}
 
@@ -361,7 +360,31 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
 		sessionId: string,
 		opts?: { silent?: boolean },
 	): Promise<void> {
+		// The provider's delete takes the descendants too, and pending counts now
+		// ride the `session_list` message rather than the sessions in it, so the
+		// whole lineage has to be forgotten here — a count left behind rebuilds an
+		// attention badge for a session the browser can no longer show. Read the
+		// lineage from the provider before the delete rather than from
+		// `cachedParentMap`, which is only a by-product of the last listSessions()
+		// call and may be missing the child→parent edge that matters.
+		const sessions = await this.listSessions();
+		const deleted = new Set([sessionId]);
+		const pendingParents = [sessionId];
+		for (const parentId of pendingParents) {
+			for (const candidate of sessions) {
+				if (candidate.parentID === parentId && !deleted.has(candidate.id)) {
+					deleted.add(candidate.id);
+					pendingParents.push(candidate.id);
+				}
+			}
+		}
+
 		await this.client.session.delete(sessionId);
+
+		for (const deletedId of deleted) {
+			this.pendingQuestionCounts.delete(deletedId);
+			this.cachedParentMap.delete(deletedId);
+		}
 
 		this.emit("session_lifecycle", { type: "deleted", sessionId });
 
@@ -397,7 +420,6 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
 			this.getStatuses?.(),
 			this.lastMessageAt,
 			this.forkMeta,
-			this.pendingQuestionCounts,
 		);
 	}
 
@@ -513,11 +535,21 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
 			roots: true,
 			statuses: options?.statuses,
 		});
-		send({ type: "session_list", sessions: roots, roots: true });
+		send({
+			type: "session_list",
+			sessions: roots,
+			roots: true,
+			...this.pendingQuestionCountsField(),
+		});
 
 		this.listSessions({ statuses: options?.statuses })
 			.then((all) => {
-				send({ type: "session_list", sessions: all, roots: false });
+				send({
+					type: "session_list",
+					sessions: all,
+					roots: false,
+					...this.pendingQuestionCountsField(),
+				});
 			})
 			.catch((err) => {
 				this.log.warn(`Background all-sessions fetch failed: ${err}`);
@@ -526,12 +558,25 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
 
 	// ─── Internal ──────────────────────────────────────────────────────────
 
+	/** Zero counts drop out, and nothing pending means no field at all. */
+	private pendingQuestionCountsField(): {
+		pendingQuestionCounts?: Record<string, number>;
+	} {
+		const pending = [...this.pendingQuestionCounts].filter(
+			([, count]) => count > 0,
+		);
+		return pending.length > 0
+			? { pendingQuestionCounts: Object.fromEntries(pending) }
+			: {};
+	}
+
 	private async broadcastSessionList(): Promise<void> {
 		const roots = await this.listSessions({ roots: true });
 		this.emit("broadcast", {
 			type: "session_list",
 			sessions: roots,
 			roots: true,
+			...this.pendingQuestionCountsField(),
 		});
 
 		this.listSessions()
@@ -540,6 +585,7 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
 					type: "session_list",
 					sessions: all,
 					roots: false,
+					...this.pendingQuestionCountsField(),
 				});
 			})
 			.catch((err) => {

@@ -39,7 +39,7 @@ const SESSION_ID = "assistant-part-identity";
 beforeEach(() => {
 	vi.useFakeTimers();
 	clearSessionChatState(SESSION_ID);
-	applySessionUpsert({ id: SESSION_ID, title: "" });
+	applySessionUpsert({ id: SESSION_ID, title: "", status: "idle" });
 	sessionState.currentId = SESSION_ID;
 });
 

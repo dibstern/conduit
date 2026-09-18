@@ -173,3 +173,62 @@ describe("ReadQueryEffect.getSessionMessagesWithParts", () => {
 		}).pipe(Effect.provide(testLayer)),
 	);
 });
+
+// ─── The session list reads (ni8.5 T-1) ─────────────────────────────────────
+// These two reads are the only producers of the single session type, so the
+// `sessions` projection reaches the wire and the browser already shaped for
+// them. Nothing downstream holds a row, which is why the bridge could go.
+
+describe("ReadQueryEffect session list reads", () => {
+	const seedForkedSession = Effect.gen(function* () {
+		const sql = yield* SqlClient.SqlClient;
+		yield* sql`
+			INSERT INTO sessions
+			(id, provider, title, status, parent_id, fork_point_event,
+			 created_at, updated_at)
+			VALUES ('child', 'claude', 'Forked', 'busy', 'root', 'msg_9', 5, 9)`;
+	});
+
+	it.effect("reads sessions in the wire shape, not the row shape", () =>
+		Effect.gen(function* () {
+			yield* makeEffectSqlMigrator();
+			yield* seedSession("root");
+			yield* seedForkedSession;
+			const readQuery = yield* makeReadQueryEffect;
+
+			expect((yield* readQuery.getSessionListSnapshot()).rows).toEqual([
+				{
+					id: "child",
+					title: "Forked",
+					status: "busy",
+					createdAt: 5,
+					updatedAt: 9,
+					parentID: "root",
+					forkMessageId: "msg_9",
+				},
+				{
+					id: "root",
+					title: "Test",
+					status: "idle",
+					createdAt: 1,
+					updatedAt: 1,
+				},
+			]);
+		}).pipe(Effect.provide(testLayer)),
+	);
+
+	it.effect("carries the same shape into the snapshot and the re-query", () =>
+		Effect.gen(function* () {
+			yield* makeEffectSqlMigrator();
+			yield* seedSession("root");
+			yield* seedForkedSession;
+			const readQuery = yield* makeReadQueryEffect;
+
+			const snapshot = yield* readQuery.getSessionListSnapshot();
+			expect(snapshot.rows[0]).toEqual(
+				yield* readQuery.getSessionListEntry("child"),
+			);
+			expect(yield* readQuery.getSessionListEntry("gone")).toBeUndefined();
+		}).pipe(Effect.provide(testLayer)),
+	);
+});

@@ -90,8 +90,8 @@ beforeEach(() => {
 	sessionState.currentId = "test-session";
 	// Register sessions used in test events so routePerSession's
 	// unknown-session guard doesn't drop them.
-	applySessionUpsert({ id: "test-session", title: "" });
-	applySessionUpsert({ id: "s1", title: "" });
+	applySessionUpsert({ id: "test-session", title: "", status: "idle" });
+	applySessionUpsert({ id: "s1", title: "", status: "idle" });
 	clearMessages();
 	triggerNotificationsMock.mockClear();
 });

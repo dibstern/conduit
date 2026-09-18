@@ -110,7 +110,7 @@ beforeEach(() => {
 	];
 	for (const id of knownSessionIds) {
 		clearSessionChatState(id);
-		applySessionUpsert({ id, title: "" });
+		applySessionUpsert({ id, title: "", status: "idle" });
 	}
 	vi.useFakeTimers();
 });

@@ -31,6 +31,7 @@ function setupState(opts: {
 			Object.entries(opts.sessionTitles ?? {}).map(([id, title]) => ({
 				id,
 				title,
+				status: "idle" as const,
 				createdAt: Date.now(),
 			})),
 			"complete",

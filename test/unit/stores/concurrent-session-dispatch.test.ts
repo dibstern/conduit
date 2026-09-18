@@ -65,7 +65,7 @@ beforeEach(() => {
 	clearMessages();
 	sessionState.currentId = "session-a";
 	for (const id of ["session-a", "session-b", "session-c"]) {
-		applySessionUpsert({ id, title: "" });
+		applySessionUpsert({ id, title: "", status: "idle" });
 	}
 	vi.useFakeTimers();
 });
@@ -363,6 +363,7 @@ describe("Unknown-session guard — drops events silently", () => {
 		applySessionUpsert({
 			id: "new-session",
 			title: "",
+			status: "idle",
 		});
 
 		handleMessage({

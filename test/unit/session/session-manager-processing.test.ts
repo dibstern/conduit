@@ -3,7 +3,7 @@ import type { SessionStatus } from "../../../src/lib/instance/sdk-types.js";
 import { createSilentLogger } from "../../../src/lib/logger.js";
 import { SessionManager } from "../../../src/lib/session/session-manager.js";
 
-describe("SessionManager.listSessions — processing flag", () => {
+describe("SessionManager.listSessions — status", () => {
 	let mgr: SessionManager;
 	const mockSessions = [
 		{ id: "sess_1", title: "Session 1", time: { updated: 1000 } },
@@ -22,7 +22,7 @@ describe("SessionManager.listSessions — processing flag", () => {
 		});
 	});
 
-	it("sets processing=true for busy sessions when statuses provided", async () => {
+	it("carries the provider's busy status when statuses are provided", async () => {
 		const statuses: Record<string, SessionStatus> = {
 			sess_1: { type: "busy" },
 			sess_2: { type: "idle" },
@@ -33,11 +33,11 @@ describe("SessionManager.listSessions — processing flag", () => {
 
 		const s1 = sessions.find((s) => s.id === "sess_1");
 		const s2 = sessions.find((s) => s.id === "sess_2");
-		expect(s1?.processing).toBe(true);
-		expect(s2?.processing).toBeUndefined();
+		expect(s1?.status).toBe("busy");
+		expect(s2?.status).toBe("idle");
 	});
 
-	it("sets processing=true for retry sessions when statuses provided", async () => {
+	it("carries the provider's retry status when statuses are provided", async () => {
 		const statuses: Record<string, SessionStatus> = {
 			sess_1: {
 				type: "retry",
@@ -51,14 +51,14 @@ describe("SessionManager.listSessions — processing flag", () => {
 		const sessions = await mgr.listSessions({ statuses });
 
 		const s1 = sessions.find((s) => s.id === "sess_1");
-		expect(s1?.processing).toBe(true);
+		expect(s1?.status).toBe("retry");
 	});
 
-	it("does not set processing when statuses not provided", async () => {
+	it("reads as idle when no statuses are provided", async () => {
 		const sessions = await mgr.listSessions();
 
 		for (const s of sessions) {
-			expect(s.processing).toBeUndefined();
+			expect(s.status).toBe("idle");
 		}
 	});
 
@@ -73,6 +73,6 @@ describe("SessionManager.listSessions — processing flag", () => {
 		// sess_unknown is not in the list, should not crash
 		expect(sessions).toHaveLength(3);
 		const s1 = sessions.find((s) => s.id === "sess_1");
-		expect(s1?.processing).toBe(true);
+		expect(s1?.status).toBe("busy");
 	});
 });

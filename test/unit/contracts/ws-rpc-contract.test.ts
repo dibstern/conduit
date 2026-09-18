@@ -1,6 +1,6 @@
 import { type Rpc, RpcClient, type RpcGroup, RpcTest } from "@effect/rpc";
 import { describe, it } from "@effect/vitest";
-import { Effect, Schema, type Scope } from "effect";
+import { Effect, Schema, type Scope, Stream } from "effect";
 import { expect } from "vitest";
 import { CLAUDE_DISPLAYABLE_SETTINGS_KEYS } from "../../../src/lib/contracts/claude-settings.js";
 import {
@@ -74,6 +74,8 @@ const provideRpc = <A, E>(effect: Effect.Effect<A, E, WsRpcTestEnv>) =>
 	Effect.scoped(effect).pipe(
 		Effect.provide(
 			WsRpcGroup.toLayer({
+				SubscribeShell: () => Stream.empty,
+				SubscribeSessionDetail: () => Stream.empty,
 				GetModels: (request) =>
 					Effect.succeed({
 						projectSlug: request.projectSlug,
@@ -435,7 +437,9 @@ const provideRpc = <A, E>(effect: Effect.Effect<A, E, WsRpcTestEnv>) =>
 				ListSessions: (request) =>
 					Effect.succeed({
 						projectSlug: request.projectSlug,
-						sessions: [{ id: "session-1", title: "Session 1" }],
+						sessions: [
+							{ id: "session-1", title: "Session 1", status: "idle" as const },
+						],
 						roots: request.roots ?? false,
 					}),
 				LoadMoreHistory: (request) =>
@@ -1035,7 +1039,7 @@ describe("browser WebSocket RPC contract", () => {
 
 				const sessions = yield* client.ListSessions({ projectSlug: "demo" });
 				expect(sessions.sessions).toEqual([
-					{ id: "session-1", title: "Session 1" },
+					{ id: "session-1", title: "Session 1", status: "idle" },
 				]);
 
 				const created = yield* client.CreateSession({

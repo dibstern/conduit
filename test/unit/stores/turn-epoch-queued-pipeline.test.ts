@@ -81,8 +81,8 @@ let tm: SessionMessages;
 beforeEach(() => {
 	sessionState.currentId = "test-session";
 	// Register sessions so routePerSession's unknown-session guard passes.
-	applySessionUpsert({ id: "test-session", title: "" });
-	applySessionUpsert({ id: "s1", title: "" });
+	applySessionUpsert({ id: "test-session", title: "", status: "idle" });
+	applySessionUpsert({ id: "s1", title: "", status: "idle" });
 	clearMessages();
 	ta = testActivity();
 	tm = testMessages();

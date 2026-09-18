@@ -70,7 +70,7 @@ let tm: SessionMessages;
 
 beforeEach(() => {
 	sessionState.currentId = "test-session";
-	applySessionUpsert({ id: "test-session", title: "" });
+	applySessionUpsert({ id: "test-session", title: "", status: "idle" });
 	clearMessages();
 	ta = testActivity();
 	tm = testMessages();

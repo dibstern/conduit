@@ -943,6 +943,7 @@ describe("switchModelForSession", () => {
 				getSessionDetailSnapshot: vi.fn(() =>
 					Effect.succeed({ messages: [], sequence: 0 }),
 				),
+				getSessionListEntry: vi.fn(() => Effect.succeed(undefined)),
 				getSessionListSnapshot: vi.fn(() =>
 					Effect.succeed({ rows: [], sequence: 0 }),
 				),
@@ -1430,6 +1431,7 @@ describe("handleGetToolContent", () => {
 				getSessionDetailSnapshot: vi.fn(() =>
 					Effect.succeed({ messages: [], sequence: 0 }),
 				),
+				getSessionListEntry: vi.fn(() => Effect.succeed(undefined)),
 				getSessionListSnapshot: vi.fn(() =>
 					Effect.succeed({ rows: [], sequence: 0 }),
 				),
@@ -1624,6 +1626,7 @@ describe("handleForkSession", () => {
 					{
 						id: "ses-parent",
 						title: "Parent Session",
+						status: "idle" as const,
 						updatedAt: 100,
 						messageCount: 1,
 					},
@@ -1638,6 +1641,7 @@ describe("handleForkSession", () => {
 							{
 								id: "ses-child",
 								title: "Forked Session",
+								status: "idle" as const,
 								updatedAt: 201,
 								messageCount: 0,
 								parentID: "ses-parent",
@@ -1690,6 +1694,7 @@ describe("handleForkSession", () => {
 						session: {
 							id: "ses-child",
 							title: "Forked Session",
+							status: "idle" as const,
 							updatedAt: 201,
 							parentID: "ses-parent",
 							forkMessageId: "msg-1",
@@ -1720,6 +1725,7 @@ describe("handleForkSession", () => {
 							{
 								id: "ses-child",
 								title: "Forked Session",
+								status: "idle" as const,
 								updatedAt: 201,
 								messageCount: 0,
 								parentID: "ses-parent",
@@ -2525,6 +2531,7 @@ describe("handleNewSession", () => {
 							{
 								id: "new-session-1",
 								title: "New Session",
+								status: "idle" as const,
 								updatedAt: 200,
 								messageCount: 0,
 							},
@@ -2575,6 +2582,7 @@ describe("handleNewSession", () => {
 							{
 								id: "new-session-1",
 								title: "New Session",
+								status: "idle" as const,
 								updatedAt: 200,
 								messageCount: 0,
 							},
@@ -2711,6 +2719,7 @@ describe("handleNewSession", () => {
 				getSessionDetailSnapshot: vi.fn(() =>
 					Effect.succeed({ messages: [], sequence: 0 }),
 				),
+				getSessionListEntry: vi.fn(() => Effect.succeed(undefined)),
 				getSessionListSnapshot: vi.fn(() =>
 					Effect.succeed({ rows: [], sequence: 0 }),
 				),
@@ -2809,6 +2818,7 @@ describe("handleNewSession", () => {
 				getSessionDetailSnapshot: vi.fn(() =>
 					Effect.succeed({ messages: [], sequence: 0 }),
 				),
+				getSessionListEntry: vi.fn(() => Effect.succeed(undefined)),
 				getSessionListSnapshot: vi.fn(() =>
 					Effect.succeed({ rows: [], sequence: 0 }),
 				),
@@ -2935,6 +2945,7 @@ describe("handleNewSession", () => {
 				getSessionDetailSnapshot: vi.fn(() =>
 					Effect.succeed({ messages: [], sequence: 0 }),
 				),
+				getSessionListEntry: vi.fn(() => Effect.succeed(undefined)),
 				getSessionListSnapshot: vi.fn(() =>
 					Effect.succeed({ rows: [], sequence: 0 }),
 				),
@@ -3078,6 +3089,7 @@ describe("handleDeleteSession", () => {
 					{
 						id: "remaining-session",
 						title: "Remaining Session",
+						status: "idle" as const,
 						updatedAt: 200,
 						messageCount: 0,
 					},
@@ -3205,6 +3217,7 @@ describe("handleDeleteSession", () => {
 					{
 						id: "remaining-session",
 						title: "Remaining Session",
+						status: "idle" as const,
 						updatedAt: 200,
 						messageCount: 0,
 					},
@@ -3231,6 +3244,7 @@ describe("handleDeleteSession", () => {
 							{
 								id: "remaining-session",
 								title: "Remaining Session",
+								status: "idle" as const,
 								updatedAt: 200,
 								messageCount: 0,
 							},
@@ -3323,6 +3337,7 @@ describe("handleDeleteSession", () => {
 							{
 								id: "remaining-session",
 								title: "Remaining Session",
+								status: "idle" as const,
 								updatedAt: 200,
 								messageCount: 0,
 							},
@@ -3362,6 +3377,7 @@ describe("renameSessionForClient", () => {
 							{
 								id: "session-1",
 								title: "New Title",
+								status: "idle" as const,
 								updatedAt: 100,
 								messageCount: 0,
 							},
@@ -3398,6 +3414,7 @@ describe("renameSessionForClient", () => {
 							{
 								id: "session-1",
 								title: "New Title",
+								status: "idle" as const,
 								updatedAt: 100,
 								messageCount: 0,
 							},
@@ -3473,6 +3490,7 @@ describe("loadMoreHistoryForSession", () => {
 			getSessionDetailSnapshot: vi.fn(() =>
 				Effect.succeed({ messages: [], sequence: 0 }),
 			),
+			getSessionListEntry: vi.fn(() => Effect.succeed(undefined)),
 			getSessionListSnapshot: vi.fn(() =>
 				Effect.succeed({ rows: [], sequence: 0 }),
 			),
@@ -3570,6 +3588,7 @@ describe("loadMoreHistoryForSession", () => {
 			getSessionDetailSnapshot: vi.fn(() =>
 				Effect.succeed({ messages: [], sequence: 0 }),
 			),
+			getSessionListEntry: vi.fn(() => Effect.succeed(undefined)),
 			getSessionListSnapshot: vi.fn(() =>
 				Effect.succeed({ rows: [], sequence: 0 }),
 			),
@@ -4378,6 +4397,7 @@ describe("handleMessage", () => {
 				getSessionDetailSnapshot: vi.fn(() =>
 					Effect.succeed({ messages: [], sequence: 0 }),
 				),
+				getSessionListEntry: vi.fn(() => Effect.succeed(undefined)),
 				getSessionListSnapshot: vi.fn(() =>
 					Effect.succeed({ rows: [], sequence: 0 }),
 				),
@@ -4587,6 +4607,7 @@ describe("handleMessage", () => {
 					{
 						id: "session-1",
 						title: "Untitled",
+						status: "idle" as const,
 						updatedAt: 100,
 						messageCount: 0,
 					},
@@ -4601,6 +4622,7 @@ describe("handleMessage", () => {
 							{
 								id: "session-1",
 								title: "First prompt",
+								status: "idle" as const,
 								updatedAt: 200,
 								messageCount: 1,
 							},
@@ -4668,6 +4690,7 @@ describe("handleMessage", () => {
 				{
 					id: "session-1",
 					title: "User named this",
+					status: "idle" as const,
 					updatedAt: 100,
 					messageCount: 0,
 				},
@@ -4767,6 +4790,7 @@ describe("handleMessage", () => {
 				getSessionDetailSnapshot: vi.fn(() =>
 					Effect.succeed({ messages: [], sequence: 0 }),
 				),
+				getSessionListEntry: vi.fn(() => Effect.succeed(undefined)),
 				getSessionListSnapshot: vi.fn(() =>
 					Effect.succeed({ rows: [], sequence: 0 }),
 				),

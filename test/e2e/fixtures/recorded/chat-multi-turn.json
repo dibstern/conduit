@@ -36,6 +36,7 @@
         {
           "id": "ses_2d28a3f12ffePM9bfTFkvTa2y6",
           "title": "New session - 2026-03-27T04:03:05.069Z",
+          "status": "idle",
           "updatedAt": 1774584185069,
           "messageCount": 0
         }
@@ -48,6 +49,7 @@
         {
           "id": "ses_2d28a3f12ffePM9bfTFkvTa2y6",
           "title": "New session - 2026-03-27T04:03:05.069Z",
+          "status": "idle",
           "updatedAt": 1774584185069,
           "messageCount": 0
         }
@@ -494,6 +496,7 @@
             {
               "id": "ses_2d28a3f12ffePM9bfTFkvTa2y6",
               "title": "New session - 2026-03-27T04:03:05.069Z",
+              "status": "idle",
               "updatedAt": 1774584187403,
               "messageCount": 0
             }
@@ -506,6 +509,7 @@
             {
               "id": "ses_2d28a3f12ffePM9bfTFkvTa2y6",
               "title": "New session - 2026-03-27T04:03:05.069Z",
+              "status": "idle",
               "updatedAt": 1774584187403,
               "messageCount": 0
             }
@@ -518,6 +522,7 @@
             {
               "id": "ses_2d28a3f12ffePM9bfTFkvTa2y6",
               "title": "New session - 2026-03-27T04:03:05.069Z",
+              "status": "idle",
               "updatedAt": 1774584187403,
               "messageCount": 0
             }
@@ -530,6 +535,7 @@
             {
               "id": "ses_2d28a3f12ffePM9bfTFkvTa2y6",
               "title": "New session - 2026-03-27T04:03:05.069Z",
+              "status": "idle",
               "updatedAt": 1774584187403,
               "messageCount": 0
             }
@@ -542,6 +548,7 @@
             {
               "id": "ses_2d28a3f12ffePM9bfTFkvTa2y6",
               "title": "New session - 2026-03-27T04:03:05.069Z",
+              "status": "busy",
               "updatedAt": 1774584187403,
               "messageCount": 0,
               "processing": true
@@ -560,6 +567,7 @@
             {
               "id": "ses_2d28a3f12ffePM9bfTFkvTa2y6",
               "title": "New session - 2026-03-27T04:03:05.069Z",
+              "status": "busy",
               "updatedAt": 1774584187403,
               "messageCount": 0,
               "processing": true
@@ -573,6 +581,7 @@
             {
               "id": "ses_2d28a3f12ffePM9bfTFkvTa2y6",
               "title": "Task: Remember the word banana",
+              "status": "busy",
               "updatedAt": 1774584187403,
               "messageCount": 0,
               "processing": true
@@ -586,6 +595,7 @@
             {
               "id": "ses_2d28a3f12ffePM9bfTFkvTa2y6",
               "title": "Task: Remember the word banana",
+              "status": "busy",
               "updatedAt": 1774584187403,
               "messageCount": 0,
               "processing": true
@@ -666,6 +676,7 @@
             {
               "id": "ses_2d28a3f12ffePM9bfTFkvTa2y6",
               "title": "Task: Remember the word banana",
+              "status": "idle",
               "updatedAt": 1774584189718,
               "messageCount": 0
             }
@@ -683,6 +694,7 @@
             {
               "id": "ses_2d28a3f12ffePM9bfTFkvTa2y6",
               "title": "Task: Remember the word banana",
+              "status": "idle",
               "updatedAt": 1774584189732,
               "messageCount": 0
             }
@@ -695,6 +707,7 @@
             {
               "id": "ses_2d28a3f12ffePM9bfTFkvTa2y6",
               "title": "Task: Remember the word banana",
+              "status": "idle",
               "updatedAt": 1774584189732,
               "messageCount": 0
             }
@@ -707,6 +720,7 @@
             {
               "id": "ses_2d28a3f12ffePM9bfTFkvTa2y6",
               "title": "Task: Remember the word banana",
+              "status": "idle",
               "updatedAt": 1774584189732,
               "messageCount": 0
             }
@@ -741,6 +755,7 @@
             {
               "id": "ses_2d28a3f12ffePM9bfTFkvTa2y6",
               "title": "Task: Remember the word banana",
+              "status": "idle",
               "updatedAt": 1774584190258,
               "messageCount": 0
             }
@@ -753,6 +768,7 @@
             {
               "id": "ses_2d28a3f12ffePM9bfTFkvTa2y6",
               "title": "Task: Remember the word banana",
+              "status": "idle",
               "updatedAt": 1774584190258,
               "messageCount": 0
             }
@@ -765,6 +781,7 @@
             {
               "id": "ses_2d28a3f12ffePM9bfTFkvTa2y6",
               "title": "Task: Remember the word banana",
+              "status": "idle",
               "updatedAt": 1774584190258,
               "messageCount": 0
             }
@@ -777,6 +794,7 @@
             {
               "id": "ses_2d28a3f12ffePM9bfTFkvTa2y6",
               "title": "Task: Remember the word banana",
+              "status": "idle",
               "updatedAt": 1774584190258,
               "messageCount": 0
             }
@@ -789,6 +807,7 @@
             {
               "id": "ses_2d28a3f12ffePM9bfTFkvTa2y6",
               "title": "Task: Remember the word banana",
+              "status": "busy",
               "updatedAt": 1774584190258,
               "messageCount": 0,
               "processing": true
@@ -807,6 +826,7 @@
             {
               "id": "ses_2d28a3f12ffePM9bfTFkvTa2y6",
               "title": "Task: Remember the word banana",
+              "status": "busy",
               "updatedAt": 1774584190258,
               "messageCount": 0,
               "processing": true
@@ -881,6 +901,7 @@
             {
               "id": "ses_2d28a3f12ffePM9bfTFkvTa2y6",
               "title": "Task: Remember the word banana",
+              "status": "idle",
               "updatedAt": 1774584192791,
               "messageCount": 0
             }
@@ -898,6 +919,7 @@
             {
               "id": "ses_2d28a3f12ffePM9bfTFkvTa2y6",
               "title": "Task: Remember the word banana",
+              "status": "idle",
               "updatedAt": 1774584192791,
               "messageCount": 0
             }
@@ -910,6 +932,7 @@
             {
               "id": "ses_2d28a3f12ffePM9bfTFkvTa2y6",
               "title": "Task: Remember the word banana",
+              "status": "idle",
               "updatedAt": 1774584192801,
               "messageCount": 0
             }
@@ -922,6 +945,7 @@
             {
               "id": "ses_2d28a3f12ffePM9bfTFkvTa2y6",
               "title": "Task: Remember the word banana",
+              "status": "idle",
               "updatedAt": 1774584192801,
               "messageCount": 0
             }

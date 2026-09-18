@@ -93,7 +93,10 @@ describe("the server half holds only rows the server sent", () => {
 	});
 
 	it("records the parent on a row the server has already sent", () => {
-		applySessionSnapshot([{ id: "ses_child", title: "Child" }], "complete");
+		applySessionSnapshot(
+			[{ id: "ses_child", title: "Child", status: "idle" }],
+			"complete",
+		);
 		handleSessionSwitched({
 			type: "session_switched",
 			id: "ses_child",
@@ -104,6 +107,7 @@ describe("the server half holds only rows the server sent", () => {
 		expect(sessionState.sessions.get("ses_child")).toEqual({
 			id: "ses_child",
 			title: "Child",
+			status: "idle",
 			parentID: "ses_parent",
 		});
 	});
@@ -115,12 +119,12 @@ describe("the server half is one representation", () => {
 	it("shows a rename delivered by an all-sessions list in the roots view", () => {
 		handleSessionList({
 			type: "session_list",
-			sessions: [{ id: "a", title: "Old" }],
+			sessions: [{ id: "a", title: "Old", status: "idle" }],
 			roots: true,
 		});
 		handleSessionList({
 			type: "session_list",
-			sessions: [{ id: "a", title: "New" }],
+			sessions: [{ id: "a", title: "New", status: "idle" }],
 			roots: false,
 		});
 
@@ -131,11 +135,11 @@ describe("the server half is one representation", () => {
 	it("reads search hits through the server half, so a rename follows", () => {
 		handleSessionList({
 			type: "session_list",
-			sessions: [{ id: "a", title: "Old" }],
+			sessions: [{ id: "a", title: "Old", status: "idle" }],
 			roots: false,
 			search: true,
 		});
-		applySessionUpsert({ id: "a", title: "Renamed" });
+		applySessionUpsert({ id: "a", title: "Renamed", status: "idle" });
 
 		expect(getFilteredSessions().map((s) => s.title)).toEqual(["Renamed"]);
 	});
@@ -144,8 +148,8 @@ describe("the server half is one representation", () => {
 		handleSessionList({
 			type: "session_list",
 			sessions: [
-				{ id: "a", title: "A" },
-				{ id: "b", title: "B" },
+				{ id: "a", title: "A", status: "idle" },
+				{ id: "b", title: "B", status: "idle" },
 			],
 			roots: false,
 			search: true,
@@ -162,22 +166,27 @@ describe("sidebar order", () => {
 	it("moves a session to the top when the server reports it as newer", () => {
 		applySessionSnapshot(
 			[
-				{ id: "a", title: "A", updatedAt: 1000 },
-				{ id: "b", title: "B", updatedAt: 2000 },
+				{ id: "a", title: "A", status: "idle", updatedAt: 1000 },
+				{ id: "b", title: "B", status: "idle", updatedAt: 2000 },
 			],
 			"complete",
 		);
 		expect(getFilteredSessions().map((s) => s.id)).toEqual(["b", "a"]);
 
-		applySessionUpsert({ id: "a", title: "A", updatedAt: 3000 });
+		applySessionUpsert({
+			id: "a",
+			title: "A",
+			status: "idle",
+			updatedAt: 3000,
+		});
 		expect(getFilteredSessions().map((s) => s.id)).toEqual(["a", "b"]);
 	});
 
 	it("falls back to createdAt when the server sends no updatedAt", () => {
 		applySessionSnapshot(
 			[
-				{ id: "a", title: "A", createdAt: 1000 },
-				{ id: "b", title: "B", createdAt: 3000 },
+				{ id: "a", title: "A", status: "idle", createdAt: 1000 },
+				{ id: "b", title: "B", status: "idle", createdAt: 3000 },
 			],
 			"complete",
 		);
@@ -189,18 +198,17 @@ describe("sidebar order", () => {
 
 describe("every mutation path leaves the server half wire-valid", () => {
 	const ROWS: SessionInfo[] = [
-		{ id: "root", title: "Root", updatedAt: 3000 },
+		{ id: "root", title: "Root", status: "idle", updatedAt: 3000 },
 		{
 			id: "child",
 			title: "Child",
+			status: "busy",
 			parentID: "root",
 			updatedAt: 2000,
 			forkMessageId: "msg_7",
 			forkPointTimestamp: 1234,
-			pendingQuestionCount: 1,
 			messageCount: 12,
-			processing: true,
-			createdAt: "2026-01-01T00:00:00.000Z",
+			createdAt: 1767225600000,
 		},
 	];
 
@@ -268,6 +276,7 @@ describe("every mutation path leaves the server half wire-valid", () => {
 		const forked: SessionInfo = {
 			id: "forked",
 			title: "Forked",
+			status: "idle",
 			parentID: "root",
 			updatedAt: 4000,
 		};
@@ -309,8 +318,11 @@ describe("applying server rows never touches the client half", () => {
 		sessionState.currentId = "root";
 		sessionState.searchQuery = "roo";
 
-		applySessionSnapshot([{ id: "root", title: "Root" }], "complete");
-		applySessionUpsert({ id: "other", title: "Other" });
+		applySessionSnapshot(
+			[{ id: "root", title: "Root", status: "idle" }],
+			"complete",
+		);
+		applySessionUpsert({ id: "other", title: "Other", status: "idle" });
 		applySessionRemoved("other");
 
 		expect(sessionState.currentId).toBe("root");
@@ -324,7 +336,7 @@ describe("deleting the session being viewed", () => {
 	it("does not let a later event rebuild the chat state deletion threw away", async () => {
 		vi.useFakeTimers();
 		try {
-			applySessionUpsert({ id: "ses_doomed", title: "Doomed" });
+			applySessionUpsert({ id: "ses_doomed", title: "Doomed", status: "idle" });
 			sessionState.currentId = "ses_doomed";
 			handleMessage({
 				type: "status",
