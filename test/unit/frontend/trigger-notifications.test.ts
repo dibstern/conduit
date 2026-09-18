@@ -12,15 +12,17 @@ import type { RelayMessage } from "../../../src/lib/shared-types.js";
 
 // ─── Hoisted mocks (run before imports) ─────────────────────────────────────
 
-const { playDoneSoundMock, getNotifSettingsMock } = vi.hoisted(() => {
-	const playDoneSoundMock = vi.fn();
-	const getNotifSettingsMock = vi.fn();
-	return { playDoneSoundMock, getNotifSettingsMock };
-});
+const { playDoneSoundMock, readyDoneSoundMock, getNotifSettingsMock } =
+	vi.hoisted(() => {
+		const playDoneSoundMock = vi.fn();
+		const readyDoneSoundMock = vi.fn<() => Promise<void>>();
+		const getNotifSettingsMock = vi.fn();
+		return { playDoneSoundMock, readyDoneSoundMock, getNotifSettingsMock };
+	});
 
 vi.mock("../../../src/lib/frontend/utils/sound.js", () => ({
 	emitDoneSound: playDoneSoundMock,
-	readyDoneSound: vi.fn().mockResolvedValue(undefined),
+	readyDoneSound: readyDoneSoundMock,
 }));
 
 vi.mock("../../../src/lib/frontend/utils/notif-settings.js", () => ({
@@ -65,6 +67,7 @@ describe("triggerNotifications", () => {
 		vi.resetModules();
 		vi.unstubAllGlobals();
 		playDoneSoundMock.mockClear();
+		readyDoneSoundMock.mockReset().mockResolvedValue(undefined);
 		getNotifSettingsMock.mockClear();
 		notificationInstances = [];
 
@@ -115,6 +118,66 @@ describe("triggerNotifications", () => {
 	});
 
 	// ─── Core behavior: fires for notification-worthy types ─────────────
+
+	it("a new tab delivers after the previous tab vanishes during audio preparation", async () => {
+		getNotifSettingsMock.mockReturnValue({
+			push: false,
+			browser: false,
+			sound: true,
+		});
+		const question: RelayMessage = {
+			type: "ask_user",
+			sessionId: "s1",
+			toolId: "q-crash",
+			questions: [],
+		};
+		const oldTab = await import(
+			"../../../src/lib/frontend/stores/ws-notifications.js"
+		);
+		// Never settle: a destroyed tab runs neither the continuation nor finally.
+		readyDoneSoundMock.mockImplementationOnce(
+			() => new Promise<void>(() => {}),
+		);
+		void oldTab.triggerNotifications(question);
+		await vi.waitFor(() => expect(readyDoneSoundMock).toHaveBeenCalledOnce());
+		expect(playDoneSoundMock).not.toHaveBeenCalled();
+		// Browser teardown releases its Web Lock, while localStorage survives.
+		vi.resetModules();
+		vi.stubGlobal("navigator", {
+			locks: {
+				request: async (_key: string, callback: () => Promise<void>) =>
+					callback(),
+			},
+		});
+		const newTab = await import(
+			"../../../src/lib/frontend/stores/ws-notifications.js"
+		);
+		await newTab.triggerNotifications(question);
+		expect(playDoneSoundMock).toHaveBeenCalledOnce();
+		await newTab.triggerNotifications(question);
+		expect(playDoneSoundMock).toHaveBeenCalledOnce();
+	});
+
+	it("delivers even when storage cannot persist the successful receipt", async () => {
+		getNotifSettingsMock.mockReturnValue({
+			push: false,
+			browser: false,
+			sound: true,
+		});
+		vi.spyOn(localStorage, "setItem").mockImplementation(() => {
+			throw new Error("QuotaExceededError");
+		});
+		const mod = await import(
+			"../../../src/lib/frontend/stores/ws-notifications.js"
+		);
+		await mod.triggerNotifications({
+			type: "ask_user",
+			sessionId: "s1",
+			toolId: "q-quota",
+			questions: [],
+		});
+		expect(playDoneSoundMock).toHaveBeenCalledOnce();
+	});
 
 	it("fires browser notification for 'done' message when tab is hidden", async () => {
 		const mod = await import(

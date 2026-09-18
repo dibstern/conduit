@@ -543,17 +543,19 @@ function permissionRecoveryInputs(
 function broadcastRecoveredPermissions(
 	deps: SSEWiringDeps | EffectSSEWiringDeps,
 	recovered: readonly PendingPermission[],
-): void {
-	for (const perm of recovered) {
-		deps.wsHandler.broadcast({
+): Extract<RelayMessage, { type: "permission_request" }>[] {
+	return recovered.map((perm) => {
+		const message: RelayMessage = {
 			type: "permission_request",
 			sessionId: perm.sessionId,
 			requestId: perm.requestId,
 			toolName: perm.toolName,
 			toolInput: perm.toolInput,
 			always: perm.always ?? [],
-		});
-	}
+		};
+		deps.wsHandler.broadcast(message);
+		return message;
+	});
 }
 
 /**
@@ -1133,7 +1135,8 @@ interface SSEConsumerCallbacks {
 function broadcastRecoveredQuestions(
 	deps: SSEWiringDeps | EffectSSEWiringDeps,
 	pendingQuestions: Array<{ id: string; [key: string]: unknown }>,
-): void {
+): Extract<RelayMessage, { type: "ask_user" }>[] {
+	const messages: Extract<RelayMessage, { type: "ask_user" }>[] = [];
 	for (const pq of pendingQuestions) {
 		const rawQuestions = pq["questions"] as
 			| Array<{
@@ -1167,13 +1170,30 @@ function broadcastRecoveredQuestions(
 		} else {
 			deps.wsHandler.broadcast(askMsg);
 		}
+		messages.push(askMsg);
 	}
+	return messages;
 }
 
 const recoverPendingQuestionsEffect = (
 	deps: EffectSSEWiringDeps,
 	pendingQuestions: Array<{ id: string; [key: string]: unknown }>,
-) => Effect.sync(() => broadcastRecoveredQuestions(deps, pendingQuestions));
+) =>
+	Effect.gen(function* () {
+		const messages = yield* Effect.sync(() =>
+			broadcastRecoveredQuestions(deps, pendingQuestions),
+		);
+		if (deps.pushManager) {
+			for (const message of messages) {
+				yield* sendPushForEventEffect(
+					deps.pushManager,
+					message,
+					deps.log,
+					buildPushContext(deps.slug, message.sessionId),
+				);
+			}
+		}
+	});
 
 function wireSSEConsumerWithCallbacks(
 	deps: SSEWiringDeps | EffectSSEWiringDeps,
@@ -1367,9 +1387,19 @@ export const wireSSEConsumerEffect = (
 								yield* pendingInteractions.recoverPendingPermissions(
 									permissionRecoveryInputs(pendingPermissions),
 								);
-							yield* Effect.sync(() =>
+							const messages = yield* Effect.sync(() =>
 								broadcastRecoveredPermissions(deps, recovered),
 							);
+							if (deps.pushManager) {
+								for (const message of messages) {
+									yield* sendPushForEventEffect(
+										deps.pushManager,
+										message,
+										deps.log,
+										buildPushContext(deps.slug, message.sessionId),
+									);
+								}
+							}
 						}).pipe(
 							Effect.catchAllCause((cause) =>
 								Effect.sync(() =>

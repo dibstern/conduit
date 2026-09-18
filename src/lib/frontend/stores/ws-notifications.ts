@@ -250,15 +250,9 @@ export async function triggerNotifications(msg: RelayMessage): Promise<void> {
 		}
 		await locks.request(key, async () => {
 			if (localStorage.getItem(key)) return;
-			// Reserve storage before playback. A full storage quota must not let
-			// this tab sound without leaving a receipt for the next tab.
-			localStorage.setItem(key, "1");
-			let delivered = false;
-			try {
-				delivered = await deliver();
-			} finally {
-				if (!delivered) localStorage.removeItem(key);
-			}
+			// The lock serializes live attempts. Record only successful delivery:
+			// a crash or full quota may duplicate an alert, but must not lose it.
+			if (await deliver()) localStorage.setItem(key, "1");
 		});
 	} catch (error) {
 		console.warn("Notification delivery failed", error);

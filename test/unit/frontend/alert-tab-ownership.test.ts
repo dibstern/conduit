@@ -49,7 +49,7 @@ beforeEach(() => {
 						? optionsOrCallback
 						: callback;
 				const next = queue.then(() => work?.({}));
-				queue = next;
+				queue = next.catch(() => {});
 				return next;
 			},
 		},
@@ -162,7 +162,7 @@ it("does not deliver uncoordinated duplicate sounds without Web Locks", async ()
 	expect(emit).not.toHaveBeenCalled();
 });
 
-it("does not play without being able to retain a delivery receipt", async () => {
+it("accepts duplicate playback when storage cannot retain a delivery receipt", async () => {
 	vi.stubGlobal("localStorage", {
 		getItem: () => null,
 		setItem: () => {
@@ -175,7 +175,7 @@ it("does not play without being able to retain a delivery receipt", async () => 
 	);
 	await page.triggerNotifications(question);
 	await page.triggerNotifications(question);
-	expect(emit).not.toHaveBeenCalled();
+	expect(emit).toHaveBeenCalledTimes(2);
 });
 
 it("deduplicates full and lightweight questions without suppressing later questions", async () => {

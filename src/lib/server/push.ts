@@ -13,6 +13,10 @@ import { DEFAULT_CONFIG_DIR } from "../env.js";
 const require = createRequire(import.meta.url);
 const defaultWebpush = require("web-push") as WebPushModule;
 
+// FCM requires at least 10s because its internal RPCs use that timeout:
+// https://firebase.google.com/docs/cloud-messaging/scale-fcm#timeouts
+const PUSH_SEND_TIMEOUT_MS = 10_000;
+
 // ─── web-push type shims (no @types/web-push available) ──────────────────────
 
 /** Minimal interface matching web-push API surface */
@@ -21,7 +25,7 @@ export interface WebPushModule {
 	sendNotification(
 		subscription: PushSubscriptionData,
 		payload: string,
-		options?: { TTL?: number; vapidDetails?: VapidDetails },
+		options?: { TTL?: number; vapidDetails?: VapidDetails; timeout?: number },
 	): Promise<{ statusCode: number }>;
 }
 
@@ -177,6 +181,32 @@ export class PushNotificationManager implements PushNotificationSender {
 
 	// ─── Push delivery ──────────────────────────────────────────────────
 
+	private async sendNotification(
+		subscription: PushSubscriptionData,
+		payload: string,
+		options: { TTL?: number; vapidDetails: VapidDetails },
+	): Promise<void> {
+		let timer: ReturnType<typeof setTimeout> | undefined;
+		try {
+			// web-push's timeout only bounds socket inactivity. Bound the whole
+			// attempt too, so an uncancellable transport cannot hold a ledger claim.
+			await Promise.race([
+				new Promise<never>((_, reject) => {
+					timer = setTimeout(
+						() => reject(new Error("Push send timed out after 10000ms")),
+						PUSH_SEND_TIMEOUT_MS,
+					);
+				}),
+				this.webpush.sendNotification(subscription, payload, {
+					...options,
+					timeout: PUSH_SEND_TIMEOUT_MS,
+				}),
+			]);
+		} finally {
+			clearTimeout(timer);
+		}
+	}
+
 	/**
 	 * Send to every subscribed client and report what happened to each.
 	 *
@@ -201,7 +231,7 @@ export class PushNotificationManager implements PushNotificationSender {
 		const promises = Array.from(this.subscriptions.entries()).map(
 			async ([clientId, sub]) => {
 				try {
-					await this.webpush.sendNotification(sub, json, { vapidDetails });
+					await this.sendNotification(sub, json, { vapidDetails });
 					delivered.push(clientId);
 				} catch (err: unknown) {
 					const statusCode = (err as { statusCode?: number }).statusCode;
@@ -254,7 +284,7 @@ export class PushNotificationManager implements PushNotificationSender {
 		const vapidDetails = this.getVapidDetails();
 
 		try {
-			await this.webpush.sendNotification(sub, json, { vapidDetails });
+			await this.sendNotification(sub, json, { vapidDetails });
 			return { ...empty, delivered: [clientId] };
 		} catch (err: unknown) {
 			const statusCode = (err as { statusCode?: number }).statusCode;
@@ -328,7 +358,7 @@ export class PushNotificationManager implements PushNotificationSender {
 		const promises = Array.from(this.subscriptions.entries()).map(
 			async ([clientId, sub]) => {
 				try {
-					await this.webpush.sendNotification(sub, testPayload, {
+					await this.sendNotification(sub, testPayload, {
 						TTL: 0,
 						vapidDetails,
 					});

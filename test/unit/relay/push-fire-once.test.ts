@@ -14,15 +14,18 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { SqlClient } from "@effect/sql";
 import { Effect, Layer, Stream } from "effect";
-import { expect, it } from "vitest";
+import { expect, it, vi } from "vitest";
 import {
 	AlertLedgerLive,
 	AlertLedgerTag,
 } from "../../../src/lib/domain/relay/Services/alert-ledger.js";
+import { PendingInteractionServiceLive } from "../../../src/lib/domain/relay/Services/pending-interaction-service.js";
 import {
 	type SessionEventBus,
 	SessionEventBusTag,
 } from "../../../src/lib/domain/relay/Services/session-event-bus.js";
+import { SessionManagerServiceTag } from "../../../src/lib/domain/relay/Services/session-manager-service.js";
+import { makeOverridesStateLive } from "../../../src/lib/domain/relay/Services/session-overrides-state.js";
 import type { Logger } from "../../../src/lib/logger.js";
 import { makeCommitAndSignal } from "../../../src/lib/persistence/effect/commit-and-signal.js";
 import {
@@ -31,7 +34,14 @@ import {
 } from "../../../src/lib/persistence/effect/live.js";
 import { createAllEffectProjectors } from "../../../src/lib/persistence/effect/projectors-effect.js";
 import { canonicalEvent } from "../../../src/lib/persistence/events.js";
-import { sendPushForEventEffect } from "../../../src/lib/relay/sse-wiring.js";
+import type {
+	SSEStreamCallbacks,
+	SSEStreamEvents,
+} from "../../../src/lib/relay/sse-stream.js";
+import {
+	sendPushForEventEffect,
+	wireSSEConsumerEffect,
+} from "../../../src/lib/relay/sse-wiring.js";
 import type {
 	PushDeliveryReport,
 	PushSubscriptionData,
@@ -42,6 +52,10 @@ import {
 	PermissionId,
 	type RelayMessage,
 } from "../../../src/lib/shared-types.js";
+import {
+	createMockSSEWiringDeps,
+	makeMockSessionManagerService,
+} from "../../helpers/mock-factories.js";
 
 const silentBus = Layer.succeed(SessionEventBusTag, {
 	publish: () => Effect.void,
@@ -134,6 +148,110 @@ const permission = (requestId: string): RelayMessage => ({
 	requestId: PermissionId.make(requestId),
 	toolName: "bash",
 	toolInput: {},
+});
+
+it.each([
+	"question",
+	"permission",
+] as const)("recovery pushes an abandoned pending %s and suppresses delivered replay", async (kind) => {
+	const payloads: Array<Record<string, unknown>> = [];
+	const deps = createMockSSEWiringDeps({
+		pushManager: {
+			getPublicKey: () => "pub",
+			addSubscription: () => {},
+			removeSubscription: () => {},
+			sendToAll: async (payload) => {
+				payloads.push(payload);
+				return reachedOneDevice;
+			},
+		},
+		listPendingQuestions: async () =>
+			kind === "question"
+				? [
+						{
+							id: "q1",
+							sessionID: "s1",
+							questions: [{ question: "Continue?", header: "Approval" }],
+						},
+					]
+				: [],
+		listPendingPermissions: async () =>
+			kind === "permission"
+				? [{ id: "p1", sessionID: "s1", permission: "bash" }]
+				: [],
+	});
+	const {
+		processingTimeouts: _timeouts,
+		pendingInteractions: _pending,
+		sessionService: _sessions,
+		getSessionParentMap: _parents,
+		getSessionStatuses: _statuses,
+		statusPoller: _poller,
+		...base
+	} = deps;
+	const callbacks: {
+		[K in keyof SSEStreamCallbacks]: SSEStreamCallbacks[K][];
+	} = {
+		connected: [],
+		disconnected: [],
+		reconnecting: [],
+		error: [],
+		event: [],
+		heartbeat: [],
+	};
+	const consumer: SSEStreamEvents = {
+		on: (event, callback) => {
+			callbacks[event].push(callback);
+		},
+	};
+	await withStore(
+		Effect.gen(function* () {
+			yield* seed("s1", "turn-1");
+			const sql = yield* SqlClient.SqlClient;
+			const alertKey = kind === "question" ? "ask_user" : "permission_request";
+			const ledgerKey =
+				kind === "question" ? "ask_user:q1" : "permission_request:p1";
+			const anchor =
+				kind === "question" ? "s1:question:q1" : "s1:permission:p1";
+			yield* sql`INSERT INTO sent_alerts (session_id, alert_key, anchor, sent_at, state, claim_id)
+			VALUES ('s1', ${ledgerKey}, ${anchor}, 1, 'pending', 'dead-process')`;
+			yield* wireSSEConsumerEffect(
+				{ ...base, providerInstanceId: "opencode" },
+				consumer,
+			);
+			for (const callback of callbacks.connected) callback();
+			yield* Effect.tryPromise({
+				try: () => vi.waitFor(() => expect(payloads).toHaveLength(1)),
+				catch: (cause) => cause,
+			});
+			expect(payloads[0]).toMatchObject({
+				type: alertKey,
+				alertId: anchor,
+				sessionId: "s1",
+				slug: "test-project",
+			});
+			// Wait for the receipt, then simulate another connection returning stale pending data.
+			yield* sql`SELECT state FROM sent_alerts WHERE anchor = ${anchor} AND alert_key = ${ledgerKey}`.pipe(
+				Effect.repeat({ until: (rows) => rows[0]?.["state"] === "delivered" }),
+				Effect.timeout("1 second"),
+			);
+			for (const callback of callbacks.connected) callback();
+			yield* Effect.sleep("50 millis");
+			expect(payloads).toHaveLength(1);
+		}).pipe(
+			Effect.provide(
+				Layer.mergeAll(
+					AlertLedgerLive,
+					PendingInteractionServiceLive,
+					makeOverridesStateLive(),
+					Layer.succeed(
+						SessionManagerServiceTag,
+						makeMockSessionManagerService(),
+					),
+				),
+			),
+		),
+	);
 });
 
 it("pushes one ding however many pipelines notice the same completed turn", async () => {
