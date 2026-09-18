@@ -38,12 +38,12 @@ export const WebSocketHandlerLive: Layer.Layer<
 			const advances = yield* bus.value.subscribeAdvances();
 			yield* advances.pipe(
 				Stream.runForEach(() =>
-					readQuery.value.getSessionListSnapshot().pipe(
+					readQuery.value.readSessionList().pipe(
 						Effect.tap(({ rows }) =>
 							Effect.sync(() =>
 								handler.broadcast({
 									type: "session_list",
-									sessions: [...rows],
+									sessions: rows.map(({ item }) => item),
 									roots: false,
 								}),
 							),

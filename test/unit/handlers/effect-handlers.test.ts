@@ -940,14 +940,10 @@ describe("switchModelForSession", () => {
 				),
 				getAllSessionStatuses: vi.fn(() => Effect.succeed({})),
 				listSessions: vi.fn(() => Effect.succeed([])),
-				getSessionDetailSnapshot: vi.fn(() =>
-					Effect.succeed({ messages: [], sequence: 0 }),
+				readSessionTranscript: vi.fn(() =>
+					Effect.succeed({ messages: [], version: 0 }),
 				),
-				getSessionListEntry: vi.fn(() => Effect.succeed(undefined)),
-				getStampedSessionListEntry: vi.fn(() => Effect.succeed(undefined)),
-				getSessionListSnapshot: vi.fn(() =>
-					Effect.succeed({ rows: [], sequence: 0 }),
-				),
+				readSessionList: vi.fn(() => Effect.succeed({ rows: [], version: 0 })),
 				getLatestTurnModelExecution: vi.fn(() => Effect.succeed(undefined)),
 				getSessionMessagesWithParts: vi.fn(() => Effect.succeed([])),
 			} satisfies ReadQueryEffect;
@@ -1428,14 +1424,10 @@ describe("handleGetToolContent", () => {
 				getSession: vi.fn(() => Effect.succeed(undefined)),
 				getAllSessionStatuses: vi.fn(() => Effect.succeed({})),
 				listSessions: vi.fn(() => Effect.succeed([])),
-				getSessionDetailSnapshot: vi.fn(() =>
-					Effect.succeed({ messages: [], sequence: 0 }),
+				readSessionTranscript: vi.fn(() =>
+					Effect.succeed({ messages: [], version: 0 }),
 				),
-				getSessionListEntry: vi.fn(() => Effect.succeed(undefined)),
-				getStampedSessionListEntry: vi.fn(() => Effect.succeed(undefined)),
-				getSessionListSnapshot: vi.fn(() =>
-					Effect.succeed({ rows: [], sequence: 0 }),
-				),
+				readSessionList: vi.fn(() => Effect.succeed({ rows: [], version: 0 })),
 				getLatestTurnModelExecution: vi.fn(() => Effect.succeed(undefined)),
 				getSessionMessagesWithParts: vi.fn(() => Effect.succeed([])),
 			} satisfies ReadQueryEffect;
@@ -2694,14 +2686,10 @@ describe("handleNewSession", () => {
 				),
 				getAllSessionStatuses: vi.fn(() => Effect.succeed({})),
 				listSessions: vi.fn(() => Effect.succeed([])),
-				getSessionDetailSnapshot: vi.fn(() =>
-					Effect.succeed({ messages: [], sequence: 0 }),
+				readSessionTranscript: vi.fn(() =>
+					Effect.succeed({ messages: [], version: 0 }),
 				),
-				getSessionListEntry: vi.fn(() => Effect.succeed(undefined)),
-				getStampedSessionListEntry: vi.fn(() => Effect.succeed(undefined)),
-				getSessionListSnapshot: vi.fn(() =>
-					Effect.succeed({ rows: [], sequence: 0 }),
-				),
+				readSessionList: vi.fn(() => Effect.succeed({ rows: [], version: 0 })),
 				getLatestTurnModelExecution: vi.fn(() => Effect.succeed(undefined)),
 				getSessionMessagesWithParts: vi.fn(() => Effect.succeed([])),
 			} satisfies ReadQueryEffect;
@@ -2794,14 +2782,10 @@ describe("handleNewSession", () => {
 				),
 				getAllSessionStatuses: vi.fn(() => Effect.succeed({})),
 				listSessions: vi.fn(() => Effect.succeed([])),
-				getSessionDetailSnapshot: vi.fn(() =>
-					Effect.succeed({ messages: [], sequence: 0 }),
+				readSessionTranscript: vi.fn(() =>
+					Effect.succeed({ messages: [], version: 0 }),
 				),
-				getSessionListEntry: vi.fn(() => Effect.succeed(undefined)),
-				getStampedSessionListEntry: vi.fn(() => Effect.succeed(undefined)),
-				getSessionListSnapshot: vi.fn(() =>
-					Effect.succeed({ rows: [], sequence: 0 }),
-				),
+				readSessionList: vi.fn(() => Effect.succeed({ rows: [], version: 0 })),
 				getLatestTurnModelExecution: vi.fn(() => Effect.succeed(undefined)),
 				getSessionMessagesWithParts: vi.fn(() =>
 					Effect.succeed([
@@ -2922,14 +2906,10 @@ describe("handleNewSession", () => {
 				),
 				getAllSessionStatuses: vi.fn(() => Effect.succeed({})),
 				listSessions: vi.fn(() => Effect.succeed([])),
-				getSessionDetailSnapshot: vi.fn(() =>
-					Effect.succeed({ messages: [], sequence: 0 }),
+				readSessionTranscript: vi.fn(() =>
+					Effect.succeed({ messages: [], version: 0 }),
 				),
-				getSessionListEntry: vi.fn(() => Effect.succeed(undefined)),
-				getStampedSessionListEntry: vi.fn(() => Effect.succeed(undefined)),
-				getSessionListSnapshot: vi.fn(() =>
-					Effect.succeed({ rows: [], sequence: 0 }),
-				),
+				readSessionList: vi.fn(() => Effect.succeed({ rows: [], version: 0 })),
 				getLatestTurnModelExecution: vi.fn(() => Effect.succeed(undefined)),
 				getSessionMessagesWithParts: vi.fn(() => Effect.succeed([])),
 			} satisfies ReadQueryEffect;
@@ -3468,14 +3448,10 @@ describe("loadMoreHistoryForSession", () => {
 			),
 			getAllSessionStatuses: vi.fn(() => Effect.succeed({})),
 			listSessions: vi.fn(() => Effect.succeed([])),
-			getSessionDetailSnapshot: vi.fn(() =>
-				Effect.succeed({ messages: [], sequence: 0 }),
+			readSessionTranscript: vi.fn(() =>
+				Effect.succeed({ messages: [], version: 0 }),
 			),
-			getSessionListEntry: vi.fn(() => Effect.succeed(undefined)),
-			getStampedSessionListEntry: vi.fn(() => Effect.succeed(undefined)),
-			getSessionListSnapshot: vi.fn(() =>
-				Effect.succeed({ rows: [], sequence: 0 }),
-			),
+			readSessionList: vi.fn(() => Effect.succeed({ rows: [], version: 0 })),
 			getLatestTurnModelExecution: vi.fn(() => Effect.succeed(undefined)),
 			getSessionMessagesWithParts: vi.fn(() =>
 				Effect.succeed([
@@ -3567,14 +3543,10 @@ describe("loadMoreHistoryForSession", () => {
 			),
 			getAllSessionStatuses: vi.fn(() => Effect.succeed({})),
 			listSessions: vi.fn(() => Effect.succeed([])),
-			getSessionDetailSnapshot: vi.fn(() =>
-				Effect.succeed({ messages: [], sequence: 0 }),
+			readSessionTranscript: vi.fn(() =>
+				Effect.succeed({ messages: [], version: 0 }),
 			),
-			getSessionListEntry: vi.fn(() => Effect.succeed(undefined)),
-			getStampedSessionListEntry: vi.fn(() => Effect.succeed(undefined)),
-			getSessionListSnapshot: vi.fn(() =>
-				Effect.succeed({ rows: [], sequence: 0 }),
-			),
+			readSessionList: vi.fn(() => Effect.succeed({ rows: [], version: 0 })),
 			getLatestTurnModelExecution: vi.fn(() => Effect.succeed(undefined)),
 			getSessionMessagesWithParts: vi.fn(() =>
 				Effect.succeed([
@@ -4377,14 +4349,10 @@ describe("handleMessage", () => {
 				getSession: vi.fn(() => Effect.succeed(undefined)),
 				getAllSessionStatuses: vi.fn(() => Effect.succeed({})),
 				listSessions: vi.fn(() => Effect.succeed([])),
-				getSessionDetailSnapshot: vi.fn(() =>
-					Effect.succeed({ messages: [], sequence: 0 }),
+				readSessionTranscript: vi.fn(() =>
+					Effect.succeed({ messages: [], version: 0 }),
 				),
-				getSessionListEntry: vi.fn(() => Effect.succeed(undefined)),
-				getStampedSessionListEntry: vi.fn(() => Effect.succeed(undefined)),
-				getSessionListSnapshot: vi.fn(() =>
-					Effect.succeed({ rows: [], sequence: 0 }),
-				),
+				readSessionList: vi.fn(() => Effect.succeed({ rows: [], version: 0 })),
 				getLatestTurnModelExecution: vi.fn(() => Effect.succeed(undefined)),
 				getSessionMessagesWithParts: vi.fn(() =>
 					Effect.succeed([
@@ -4771,14 +4739,10 @@ describe("handleMessage", () => {
 				),
 				getAllSessionStatuses: vi.fn(() => Effect.succeed({})),
 				listSessions: vi.fn(() => Effect.succeed([])),
-				getSessionDetailSnapshot: vi.fn(() =>
-					Effect.succeed({ messages: [], sequence: 0 }),
+				readSessionTranscript: vi.fn(() =>
+					Effect.succeed({ messages: [], version: 0 }),
 				),
-				getSessionListEntry: vi.fn(() => Effect.succeed(undefined)),
-				getStampedSessionListEntry: vi.fn(() => Effect.succeed(undefined)),
-				getSessionListSnapshot: vi.fn(() =>
-					Effect.succeed({ rows: [], sequence: 0 }),
-				),
+				readSessionList: vi.fn(() => Effect.succeed({ rows: [], version: 0 })),
 				getLatestTurnModelExecution: vi.fn(() => Effect.succeed(undefined)),
 				getSessionMessagesWithParts: vi.fn(() => Effect.succeed([])),
 			} satisfies ReadQueryEffect;

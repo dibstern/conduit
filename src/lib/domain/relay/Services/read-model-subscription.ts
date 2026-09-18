@@ -1,162 +1,228 @@
 // ─── Read-Model Subscription (Effect) ────────────────────────────────────────
-// Generic snapshot+live orchestration for read-model subscriptions.
+// Generic base+live orchestration for read-model subscriptions.
 //
-// stream – merges a SubscriptionSource's snapshot (or resume replay) with its
-//          live delta stream into one ordered Stream<Envelope<T>>. Owns only
-//          the orchestration invariants: subscribe-to-live-first, sequence
-//          high-water-mark dedup, a single `synchronized` boundary marker,
-//          cold-start vs resume, and Scope-based teardown. It never inspects
-//          the payload `T` or the `remove` id, and contains no coalescing —
-//          burst-smoothing is a delta-source concern.
+// stream – turns a SubscriptionSource plus the read-model advance signal into
+//          one ordered Stream<Envelope<T>>. It owns every invariant that is not
+//          about rows: subscribe-before-read, cold start vs resume, the single
+//          `synchronized` boundary per base, dedup, and Scope-based teardown. It never
+//          inspects the payload `T`.
+//
+// The version column (ni8.5 §7) is why this is small. Change notification,
+// resume point and high-water mark are one number, so the orchestrator holds
+// one query window, and the source is asked the
+// same question — "what moved in this version window?" — for the cold-start
+// base, for a resume catch-up, and for every live advance. There is no second
+// notification path to keep in step with it, which is the whole point: a source
+// carrying its own would be a second producer.
+//
+// The commit seam publishes advances in commit order. Bounded reads cannot
+// retire queued removals; each upsert retains its row version for resume dedup.
+// A dropped bus publication forces a fresh snapshot because deleted rows cannot
+// be recovered from a version query.
 
-import { Effect, Ref, type Schema, type Scope, Stream } from "effect";
+import { Effect, Ref, type Schema, Stream } from "effect";
+import type { ReadModelAdvance } from "../../../contracts/read-model-advance.js";
 import type { EnvelopeSchema } from "../../../contracts/ws-rpc.js";
+import type { SessionEventBus } from "./session-event-bus.js";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
-/** A single read-model change, tagged with its store-global sequence. */
-export type Delta<T> = Extract<
-	Envelope<T>,
-	{ readonly _tag: "upsert" | "remove" }
->;
-
 /**
- * A live delta that carries no place in the log.
- *
- * Almost every read-model change is caused by an event, so its sequence answers
- * "have I already seen this?". A direct read-model write (ni8.23:
- * `last_viewed_at`) changes a row without moving the log at all, so there is no
- * sequence that distinguishes it from what the subscriber already holds — the
- * honest thing is to say so, rather than invent a number.
- *
- * The orchestrator forwards these past the high-water-mark filter unconditionally,
- * which is safe because the sources emit whole current rows: an upsert the
- * subscriber already has is idempotent, while dropping one is invisible. The
- * wrapped delta still carries a sequence, but only as resume advice — a log
- * position the row is known to reflect, never a claim to be at one.
- */
-export type LiveDelta<T> =
-	| Delta<T>
-	| { readonly _tag: "unsequenced"; readonly delta: Delta<T> };
-
-/**
- * What a subscriber receives: a snapshot base (cold start only), a
- * `synchronized` boundary once the base or catch-up is complete, then deltas.
- * The snapshot's `sequence` is the high-water mark its rows reflect.
+ * What a subscriber receives: a base (cold start, and any resume a source
+ * cannot serve incrementally), a `synchronized` boundary once that base is
+ * complete, then upserts and removes. Every `sequence` is a read-model version.
  */
 export type Envelope<T> = Schema.Schema.Type<
 	ReturnType<typeof EnvelopeSchema<T, T, never>>
 >;
 
-/**
- * The one adapter a concrete delta source implements (detail, shell, …).
- * The orchestrator depends on nothing else — no bus, no database.
- */
-export interface SubscriptionSource<T, E = never> {
-	/**
-	 * Cold start: full current rows + the sequence HWM they reflect. Must read
-	 * rows and sequence coherently (atomically with respect to appends).
-	 */
-	readonly snapshot: () => Effect.Effect<
-		{ readonly rows: readonly T[]; readonly sequence: number },
-		E
-	>;
-	/**
-	 * Resume catch-up: ALL deltas strictly after `afterSequence`, ascending
-	 * (adapters page internally). Extension point (not yet implemented): a
-	 * source may later fail with a cursor-too-old signal here — e.g. after
-	 * eviction hollows out old history — at which point the orchestrator would
-	 * fall back to a fresh snapshot.
-	 */
-	readonly replay: (afterSequence: number) => Stream.Stream<Delta<T>, E>;
-	/**
-	 * Live deltas from now on. Scoped: running this Effect subscribes, and the
-	 * subscription buffers from that instant; the enclosing Scope releases it.
-	 */
-	readonly live: () => Effect.Effect<
-		Stream.Stream<LiveDelta<T>, E>,
-		never,
-		Scope.Scope
-	>;
+/** A row and the read-model version it last moved at. */
+export interface VersionedRow<T> {
+	readonly item: T;
+	readonly version: number;
 }
 
 /**
- * Does this live delta still have something to say? Sequenced deltas are judged
- * against the mark the subscriber already holds; unsequenced ones are not
- * judgeable at all, and dropping them is exactly the silent failure they exist
- * to prevent.
+ * Half-open window of read-model versions: `after < version <= through`.
+ * Omitting `after` means from before the first version; omitting `through`
+ * means up to whatever the read-model currently holds.
  */
-const past = <T>(delta: LiveDelta<T>, mark: number): boolean =>
-	delta._tag === "unsequenced" || delta.sequence > mark;
+export interface VersionRange {
+	readonly after?: number;
+	readonly through?: number;
+}
 
-const unwrap = <T>(delta: LiveDelta<T>): Delta<T> =>
-	delta._tag === "unsequenced" ? delta.delta : delta;
+/** What an advance means to one subscription. */
+export interface AdvanceRoute {
+	/** Whether a row this subscription serves may have moved — so, re-query. */
+	readonly moved: boolean;
+	/**
+	 * Rows that are gone, named in the SUBSCRIPTION's own id space because a
+	 * `remove` id is what the client keys its collection by. A deleted row
+	 * leaves no version behind to find (§8), so this is the one thing a query
+	 * cannot answer and the advance has to carry.
+	 */
+	readonly removed: readonly string[];
+}
+
+/**
+ * The one adapter a concrete source implements (detail, shell, …).
+ *
+ * Two questions and a policy. The orchestrator builds every envelope from the
+ * answers; the source owns only its SQL and its id space.
+ */
+export interface SubscriptionSource<T, E = never> {
+	/**
+	 * The rows this subscription serves that moved inside `range`, each with the
+	 * version it moved at, and the read-model version the answer is current
+	 * through. Omit `range` for the full set. Rows and version must be read
+	 * coherently: the version is what the subscriber will resume from.
+	 */
+	readonly read: (
+		range?: VersionRange,
+	) => Effect.Effect<
+		{ readonly rows: readonly VersionedRow<T>[]; readonly version: number },
+		E
+	>;
+	/** Route one advance. Called for every advance; must not touch the store. */
+	readonly route: (advance: ReadModelAdvance) => AdvanceRoute;
+	/**
+	 * How a resume is served.
+	 *
+	 * `catchUp` — the rows that moved past the client's cursor are enough, each
+	 * replayed at its OWN version so it keeps the identity it had when it was
+	 * first delivered. Only an append-only source may say this: a removed row
+	 * leaves no version behind, so a source whose rows can disappear would
+	 * resume a client that still shows something that is gone.
+	 *
+	 * `rebase` — re-read the whole set and send it as a fresh base. Absence is
+	 * the removal, which is exactly the gap `catchUp` cannot close.
+	 */
+	readonly resume: "catchUp" | "rebase";
+}
 
 // ─── Orchestrator ────────────────────────────────────────────────────────────
 
 /**
  * Produce one ordered subscription stream from a {@link SubscriptionSource}.
  *
- * - Cold start (`resumeFromSequence` undefined):
- *   `snapshot` → `synchronized` → live deltas with `sequence > snapshot HWM`.
- * - Resume: replay deltas strictly after the cursor → `synchronized` → live
- *   deltas with `sequence > max(resumeFromSequence, last replayed sequence)`.
- *   No snapshot envelope — the client already holds a base.
+ * - Cold start (`resumeFromSequence` undefined): `snapshot` → `synchronized` →
+ *   live upserts and removes.
+ * - Resume, `catchUp` source: one upsert per row that moved past the cursor, in
+ *   version order and at its own version → `synchronized` → live. No base
+ *   envelope; the client already holds one.
+ * - Resume, `rebase` source: a fresh `snapshot` → `synchronized` → live.
  *
- * The live subscription is acquired BEFORE the snapshot/replay read, so a
- * delta committed during that read is buffered rather than lost; the HWM
- * filter then drops the copies the base already covers. Lifecycle is the
- * ambient Scope of the running stream: closing it releases the live
- * subscription and runs finalizers.
+ * The advance subscription is acquired BEFORE the base read, so an advance
+ * published during that read is buffered rather than lost. It does not need a
+ * filter afterwards: the base carries the version it was read at, and an
+ * advance at or below it is by definition already accounted for in the base —
+ * a row it moved is in the base, and a row it removed is absent from it.
+ * A bus overflow replaces the view with another snapshot and synchronized
+ * boundary. Lifecycle is the ambient Scope of the running stream.
  */
 export const stream = <T, E = never>(options: {
 	readonly source: SubscriptionSource<T, E>;
+	readonly bus: SessionEventBus;
 	readonly resumeFromSequence?: number;
 }): Stream.Stream<Envelope<T>, E> =>
 	Stream.unwrapScoped(
 		Effect.gen(function* () {
-			// Subscribe to live FIRST — it buffers from this instant.
-			const live = yield* options.source.live();
+			// Buffers from this instant.
+			const advances = yield* options.bus.subscribeAdvances();
 
-			if (options.resumeFromSequence === undefined) {
-				const snapshot = yield* options.source.snapshot();
-				return Stream.concat(
-					Stream.fromIterable<Envelope<T>>([
-						{
-							_tag: "snapshot",
-							rows: snapshot.rows,
-							sequence: snapshot.sequence,
-						},
-						{ _tag: "synchronized" },
-					]),
-					Stream.map(
-						Stream.filter(live, (delta) => past(delta, snapshot.sequence)),
-						unwrap,
-					),
-				);
-			}
-
-			// Resume: advance the HWM to the last replayed sequence as we drain
-			// replay, so a delta in the (cursor, lastReplayed] window — delivered
-			// by BOTH replay and live — is emitted once by replay, then dropped
-			// from live. `concat` drains replay fully before pulling live, so the
-			// Ref holds the final HWM by the time live is filtered.
-			const hwm = yield* Ref.make(options.resumeFromSequence);
-			return options.source.replay(options.resumeFromSequence).pipe(
-				Stream.tap((delta) =>
-					Ref.update(hwm, (current) => Math.max(current, delta.sequence)),
-				),
-				Stream.concat(
-					Stream.fromIterable<Envelope<T>>([{ _tag: "synchronized" }]),
-				),
-				Stream.concat(
-					Stream.map(
-						Stream.filterEffect(live, (delta) =>
-							Ref.get(hwm).pipe(Effect.map((mark) => past(delta, mark))),
-						),
-						unwrap,
-					),
-				),
+			const catchUp =
+				options.resumeFromSequence !== undefined &&
+				options.source.resume === "catchUp";
+			const base = yield* options.source.read(
+				catchUp ? { after: options.resumeFromSequence } : undefined,
 			);
+			// The counter the base was read at, not the newest row in it: what the
+			// live arm must not re-read, and what a resuming client resumes from.
+			const seen = yield* Ref.make(base.version);
+			const baseFloor = yield* Ref.make(base.version);
+
+			const opening: Envelope<T>[] = catchUp
+				? // Each replayed row keeps the sequence it was first delivered at, so
+					// a client that already saw it recognises it as the same envelope
+					// rather than a new one. Version order keeps the replay monotonic;
+					// the sort is stable, so rows sharing a version keep read order.
+					[...base.rows]
+						.sort((left, right) => left.version - right.version)
+						.map(({ item, version }) => ({
+							_tag: "upsert" as const,
+							item,
+							sequence: version,
+						}))
+				: [
+						{
+							_tag: "snapshot" as const,
+							rows: base.rows.map(({ item }) => item),
+							sequence: base.version,
+						},
+					];
+			opening.push({ _tag: "synchronized" as const });
+
+			const live = Stream.mapConcatEffect(
+				advances,
+				(advance): Effect.Effect<readonly Envelope<T>[], E> =>
+					Effect.gen(function* () {
+						// A publication gap can hide a deletion, which a range read
+						// cannot recover. Replace the entire view before routing again.
+						if (advance.dropped) {
+							const replacement = yield* options.source.read();
+							yield* Ref.set(seen, replacement.version);
+							yield* Ref.set(baseFloor, replacement.version);
+							return [
+								{
+									_tag: "snapshot",
+									rows: replacement.rows.map(({ item }) => item),
+									sequence: replacement.version,
+								},
+								{ _tag: "synchronized" },
+							];
+						}
+						// Already accounted for in a coherent base, removals included.
+						if (advance.version <= (yield* Ref.get(baseFloor))) return [];
+
+						const route = options.source.route(advance);
+						if (!route.moved && route.removed.length === 0) return [];
+
+						const lastSeen = yield* Ref.get(seen);
+						// The commit seam publishes in commit order. A routed advance
+						// closes only its own bounded window.
+						const sequence = advance.version;
+						// A removal also closes this window, so catch up every row before
+						// moving the watermark past it.
+						const rows = (yield* options.source.read({
+							after: lastSeen,
+							through: advance.version,
+						})).rows;
+						yield* Ref.set(seen, sequence);
+
+						// Removals first: within a group the client should drop before it
+						// adds, so a delete and a re-create that land together settle on
+						// the row that survived.
+						const envelopes = [
+							...route.removed.map((id) => ({
+								_tag: "remove" as const,
+								id,
+								sequence,
+							})),
+							...rows.map(({ item, version }) => ({
+								_tag: "upsert" as const,
+								item,
+								sequence: version,
+							})),
+						];
+						// Rows may span several projection batches in one commit. Keep
+						// their replay identity and version order; removals lead ties.
+						return envelopes.sort(
+							(left, right) => left.sequence - right.sequence,
+						);
+					}),
+			);
+
+			return Stream.concat(Stream.fromIterable(opening), live);
 		}),
 	);

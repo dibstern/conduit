@@ -264,7 +264,7 @@ export const listSessions = (options?: ListSessionsOptions) =>
 
 		if (readQueryEffectOption._tag === "Some") {
 			const snapshot = yield* readQueryEffectOption.value
-				.getSessionListSnapshot()
+				.readSessionList()
 				.pipe(
 					Effect.mapError(
 						(cause) =>
@@ -274,9 +274,10 @@ export const listSessions = (options?: ListSessionsOptions) =>
 			// A root is a session the row gives no parent — the same test the
 			// `parent_id IS NULL` filter used to make, applied before fork lineage
 			// is folded on.
+			const rows = snapshot.rows.map(({ item }) => item);
 			const sessions = options?.roots
-				? snapshot.rows.filter((session) => session.parentID === undefined)
-				: snapshot.rows;
+				? rows.filter((session) => session.parentID === undefined)
+				: rows;
 			if (!options?.roots) {
 				yield* Ref.update(stateRef, (s) => ({
 					...s,
@@ -489,7 +490,7 @@ export const deleteSession = (sessionId: string) =>
 
 		const sessions =
 			readQueryOption._tag === "Some"
-				? (yield* readQueryOption.value.getSessionListSnapshot().pipe(
+				? (yield* readQueryOption.value.readSessionList().pipe(
 						Effect.mapError(
 							(cause) =>
 								new SessionManagerError({
@@ -497,7 +498,7 @@ export const deleteSession = (sessionId: string) =>
 									cause,
 								}),
 						),
-					)).rows
+					)).rows.map(({ item }) => item)
 				: [];
 		// The provider that owns the session is row-only state, never on the wire.
 		const row =

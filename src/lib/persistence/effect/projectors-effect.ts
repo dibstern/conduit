@@ -13,7 +13,10 @@ import type {
 
 import {
 	getSessionStatements,
+	isSessionRemoval,
+	REMOVE_SESSION_SQL,
 	SESSION_HANDLED_TYPES,
+	SESSION_SUBTREE_SQL,
 } from "../projectors/session-handlers.js";
 
 // ─── Error type ─────────────────────────────────────────────────────────────
@@ -37,21 +40,60 @@ export interface ProjectionContext {
 	readonly replaying?: boolean;
 }
 
+/**
+ * What one projection did, in the only two terms a subscriber can act on:
+ * sessions to re-query, and sessions to drop.
+ *
+ * The split is decided by the database, not declared by the projector. Every
+ * statement names the rows it wrote through `RETURNING`; the stamp pass then
+ * separates them — a row still there takes the version and is `stamped`, and a
+ * row the statement wrote but that is no longer there was removed underneath
+ * it, by its own removal or by the cascade that followed one. So a projector
+ * can neither stamp a row it did not write, nor stay quiet about one it
+ * removed.
+ */
+export interface ProjectionTouch {
+	readonly stamped: readonly string[];
+	readonly removed: readonly string[];
+}
+
+/**
+ * Collapse touches into the outcome each session actually ended the commit
+ * with, later touches winning over earlier ones.
+ *
+ * Order is the whole point: a commit that deletes a session and recreates it
+ * leaves a live row, and one that creates then deletes leaves nothing. Taking
+ * the union and letting removal win would announce the surviving row as gone,
+ * and a subscriber would drop a session that is still there. Folding in order
+ * is also what keeps the two lists disjoint, so nobody downstream has to
+ * reconcile them.
+ */
+export const mergeTouches = (
+	touches: Iterable<ProjectionTouch>,
+): ProjectionTouch => {
+	const live = new Map<string, boolean>();
+	for (const touch of touches) {
+		for (const sessionId of touch.stamped) live.set(sessionId, true);
+		for (const sessionId of touch.removed) live.set(sessionId, false);
+	}
+	return {
+		stamped: [...live].filter(([, alive]) => alive).map(([id]) => id),
+		removed: [...live].filter(([, alive]) => !alive).map(([id]) => id),
+	};
+};
+
 export interface EffectProjector {
 	readonly name: string;
 	readonly handles: readonly CanonicalEventType[];
 	/**
-	 * Apply the event, then report the ids of the sessions whose read-model rows
-	 * it stamped. Every statement names the rows it wrote through `RETURNING`,
-	 * so a projector can neither stamp a row it did not write nor stay quiet
-	 * about one it did, and the projection runner needs nothing from the caller
-	 * to know what moved.
+	 * Apply the event, then report what moved and what is gone. The projection
+	 * runner needs nothing from the caller to know either.
 	 */
 	readonly project: (
 		event: StoredEvent,
 		ctx: ProjectionContext,
 	) => Effect.Effect<
-		readonly string[],
+		ProjectionTouch,
 		ProjectionError | SqlError,
 		SqlClient.SqlClient
 	>;
@@ -96,18 +138,23 @@ const ids = (rows: readonly { readonly id: string }[]): readonly string[] =>
 const stampSessions = (
 	sessionIds: readonly string[],
 	version: number,
-): Effect.Effect<readonly string[], SqlError, SqlClient.SqlClient> =>
+): Effect.Effect<ProjectionTouch, SqlError, SqlClient.SqlClient> =>
 	Effect.gen(function* () {
 		const sql = yield* SqlClient.SqlClient;
 		const stamped: string[] = [];
+		const removed: string[] = [];
 		for (const sessionId of new Set(sessionIds)) {
 			const rows = yield* sql<{ id: string }>`
 				UPDATE sessions SET version = ${version}
 				WHERE id = ${sessionId}
 				RETURNING id`;
-			stamped.push(...rows.map((row) => row.id));
+			// The row was written a moment ago and is not here now: it went under
+			// this same event, by a removal statement or by the cascade one set off.
+			// Nothing declares that — the UPDATE that matched nothing is the report.
+			if (rows.length === 0) removed.push(sessionId);
+			else stamped.push(...rows.map((row) => row.id));
 		}
-		return stamped;
+		return { stamped, removed };
 	});
 
 // Takes the messages the handler reported writing, not the id in the event
@@ -121,7 +168,7 @@ const stampSessions = (
 const stampMessage = (
 	messageIds: readonly string[],
 	version: number,
-): Effect.Effect<readonly string[], SqlError, SqlClient.SqlClient> =>
+): Effect.Effect<ProjectionTouch, SqlError, SqlClient.SqlClient> =>
 	Effect.gen(function* () {
 		const sql = yield* SqlClient.SqlClient;
 		const stamped: string[] = [];
@@ -132,7 +179,11 @@ const stampMessage = (
 				RETURNING session_id`;
 			stamped.push(...owners(rows));
 		}
-		return stamped;
+		// A message row that vanished under its own event went with the session
+		// that owned it, and the session projector reports that removal by name.
+		// Nothing to add here: the missing id is a message id, and the advance
+		// speaks in sessions.
+		return { stamped, removed: [] };
 	});
 
 function encodeJson(value: unknown): string {
@@ -173,7 +224,22 @@ export const makeSessionProjector = (): EffectProjector => ({
 			// keyed by id, so `RETURNING id` names exactly the rows it wrote: the
 			// subagent row for a message filed under its parent, and nothing at
 			// all when the auto-title guard declines the rename.
+			//
+			// A removal is named instead of written, because `RETURNING` cannot
+			// report what the cascade takes: the subtree is read first, then the
+			// session row goes and the cascade takes the rest. Both arms feed the
+			// same list — the stamp pass is what tells a row that moved from one
+			// that is gone.
 			for (const stmt of getSessionStatements(event)) {
+				if (isSessionRemoval(stmt)) {
+					const subtree = yield* sql.unsafe<{ id: string }>(
+						SESSION_SUBTREE_SQL,
+						[stmt.removeSession],
+					);
+					yield* sql.unsafe(REMOVE_SESSION_SQL, [stmt.removeSession]);
+					written.push(...subtree.map((row) => row.id));
+					continue;
+				}
 				const rows = yield* sql.unsafe<{ id: string }>(
 					`${stmt.sql} RETURNING id`,
 					[...stmt.params],

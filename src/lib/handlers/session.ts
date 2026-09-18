@@ -478,12 +478,12 @@ export const viewSessionForClient = ({
 		// SubscribeShell consumer. Remove this broadcast when that bead lands.
 		const readQuery = yield* Effect.serviceOption(ReadQueryEffectTag);
 		if (Option.isSome(readQuery)) {
-			yield* readQuery.value.getSessionListSnapshot().pipe(
+			yield* readQuery.value.readSessionList().pipe(
 				Effect.tap(({ rows }) =>
 					Effect.sync(() =>
 						wsHandler.broadcast({
 							type: "session_list",
-							sessions: [...rows],
+							sessions: rows.map(({ item }) => item),
 							roots: false,
 						}),
 					),

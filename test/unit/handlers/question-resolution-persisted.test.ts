@@ -174,6 +174,7 @@ it("answering an OpenCode question resolves the row and announces the advance", 
 			expect(advances.at(-1)).toEqual({
 				version: rows[0]?.version,
 				sessionIds: [SESSION],
+				removedSessionIds: [],
 			});
 		}),
 	);
@@ -197,6 +198,7 @@ it("skipping an OpenCode question resolves the row and announces the advance", a
 			expect(advances.at(-1)).toEqual({
 				version: rows[0]?.version,
 				sessionIds: [SESSION],
+				removedSessionIds: [],
 			});
 		}),
 	);

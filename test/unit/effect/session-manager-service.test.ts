@@ -117,15 +117,14 @@ function makeReadQueryEffect(
 		getSession: vi.fn(() => Effect.succeed(undefined)),
 		getAllSessionStatuses: vi.fn(() => Effect.succeed({})),
 		listSessions: vi.fn(() => Effect.succeed([])),
-		getSessionListEntry: vi.fn((sessionId: string) =>
-			Effect.succeed(sessions.find((session) => session.id === sessionId)),
+		readSessionTranscript: vi.fn(() =>
+			Effect.succeed({ messages: [], version: 0 }),
 		),
-		getStampedSessionListEntry: vi.fn(() => Effect.succeed(undefined)),
-		getSessionDetailSnapshot: vi.fn(() =>
-			Effect.succeed({ messages: [], sequence: 0 }),
-		),
-		getSessionListSnapshot: vi.fn(() =>
-			Effect.succeed({ rows: sessions, sequence: 0 }),
+		readSessionList: vi.fn(() =>
+			Effect.succeed({
+				rows: sessions.map((item) => ({ item, version: 0 })),
+				version: 0,
+			}),
 		),
 		getLatestTurnModelExecution: vi.fn(() => Effect.succeed(undefined)),
 		getSessionMessagesWithParts: vi.fn(() => Effect.succeed([])),
@@ -2330,7 +2329,7 @@ describe("SessionManagerService", () => {
 		return Effect.gen(function* () {
 			const sessions = yield* listSessions();
 
-			expect(readQuery.getSessionListSnapshot).toHaveBeenCalled();
+			expect(readQuery.readSessionList).toHaveBeenCalled();
 			expect(api.session.list).not.toHaveBeenCalled();
 			// The read hands back the single session type as-is; only fork lineage,
 			// which no column carries yet, is folded on (ni8.5 §6).

@@ -8,6 +8,7 @@ import type { EventStoreError } from "./event-store-effect.js";
 import { EventStoreEffectTag } from "./event-store-effect.js";
 import type { ProjectionRunnerError } from "./projection-runner-effect.js";
 import { ProjectionRunnerEffectTag } from "./projection-runner-effect.js";
+import { mergeTouches } from "./projectors-effect.js";
 
 export type CommitAndSignalFailure =
 	| EventStoreError
@@ -112,8 +113,18 @@ export interface CommitAndSignal {
 	) => Effect.Effect<A, E | CommitAndSignalFailure, R>;
 }
 
+// Factories are also created per command, so the permit belongs to the SQL
+// client, not an individual writer. Weak keys retain no closed persistence stack.
+const commitPermits = new WeakMap<SqlClient.SqlClient, Effect.Semaphore>();
+
 export const makeCommitAndSignal = Effect.gen(function* () {
 	const sql = yield* SqlClient.SqlClient;
+	let permit = commitPermits.get(sql);
+	if (permit === undefined) {
+		permit = Effect.unsafeMakeSemaphore(1);
+		commitPermits.set(sql, permit);
+	}
+	const withCommitPermit = permit.withPermits(1);
 	const eventStore = yield* EventStoreEffectTag;
 	const projectionRunner = yield* ProjectionRunnerEffectTag;
 	const sessionEventBus = yield* Effect.serviceOption(SessionEventBusTag);
@@ -144,80 +155,108 @@ export const makeCommitAndSignal = Effect.gen(function* () {
 				const stored: StoredEvent[] = [];
 				const advances: ReadModelAdvance[] = [];
 
-				const result = yield* sql.withTransaction(
+				const result = yield* withCommitPermit(
 					Effect.gen(function* () {
-						const seam = Option.getOrUndefined(
-							yield* Effect.serviceOption(SqlClient.TransactionConnection),
+						const result = yield* sql.withTransaction(
+							Effect.gen(function* () {
+								const seam = Option.getOrUndefined(
+									yield* Effect.serviceOption(SqlClient.TransactionConnection),
+								);
+
+								// The test is not "is a transaction open" but "is it the
+								// seam's own". Effect SQL reuses the connection for a nested
+								// `withTransaction` and only raises the depth, so the depth
+								// is what tells the seam's transaction apart from a savepoint
+								// the body opened inside it — and a savepoint rolls back on
+								// its own, after these arrays have been fed.
+								const requireSeamTransaction = Effect.gen(function* () {
+									const here = Option.getOrUndefined(
+										yield* Effect.serviceOption(
+											SqlClient.TransactionConnection,
+										),
+									);
+									if (here?.[0] !== seam?.[0] || here?.[1] !== seam?.[1])
+										return yield* Effect.die(
+											new ProjectOutsideSeamTransaction({
+												seamDepth: seam?.[1],
+												bodyDepth: here?.[1],
+											}),
+										);
+								});
+
+								const project: CommitAndSignalProject = (events) =>
+									Effect.gen(function* () {
+										yield* requireSeamTransaction;
+										if (events.length === 0) return;
+										const advance = yield* projectionRunner
+											.projectBatch(events)
+											.pipe(Effect.provideService(SqlClient.SqlClient, sql));
+										stored.push(...events);
+										advances.push(advance);
+									});
+
+								const stamp: CommitAndSignalStamp = (apply) =>
+									Effect.gen(function* () {
+										yield* requireSeamTransaction;
+										// Same counter as projection, taken in the same transaction:
+										// the version a direct write stamps has to be comparable with
+										// the ones the log produces, or "have I already seen this?"
+										// stops meaning anything.
+										const version = yield* projectionRunner.nextVersion.pipe(
+											Effect.provideService(SqlClient.SqlClient, sql),
+										);
+										const sessionIds = yield* apply(version);
+										// No rows, no announcement. An advance naming a row that was
+										// not touched sends every subscriber to re-query it for
+										// nothing; worse, it claims a version for rows that did not
+										// move.
+										if (sessionIds.length > 0)
+											advances.push({
+												version,
+												sessionIds: [...sessionIds],
+												removedSessionIds: [],
+											});
+										return sessionIds;
+									});
+
+								return yield* body(project, stamp);
+							}),
 						);
-
-						// The test is not "is a transaction open" but "is it the
-						// seam's own". Effect SQL reuses the connection for a nested
-						// `withTransaction` and only raises the depth, so the depth
-						// is what tells the seam's transaction apart from a savepoint
-						// the body opened inside it — and a savepoint rolls back on
-						// its own, after these arrays have been fed.
-						const requireSeamTransaction = Effect.gen(function* () {
-							const here = Option.getOrUndefined(
-								yield* Effect.serviceOption(SqlClient.TransactionConnection),
+						if (Option.isSome(sessionEventBus) && options.publish !== false) {
+							// Post-commit, so a subscriber that re-queries on the advance
+							// cannot read behind the rows it was told about. Keep the permit
+							// through publication so another writer cannot overtake this commit.
+							// Removals ride the same advance and stay out of `sessionIds`: one
+							// says re-query, the other says drop. Which list a session lands in
+							// is decided by the last projection that touched it, so a body that
+							// deletes and re-creates inside one commit announces the row it
+							// left behind, not the one it destroyed on the way.
+							const { stamped, removed } = mergeTouches(
+								advances.map((advance) => ({
+									stamped: advance.sessionIds,
+									removed: advance.removedSessionIds,
+								})),
 							);
-							if (here?.[0] !== seam?.[0] || here?.[1] !== seam?.[1])
-								return yield* Effect.die(
-									new ProjectOutsideSeamTransaction({
-										seamDepth: seam?.[1],
-										bodyDepth: here?.[1],
-									}),
-								);
-						});
-
-						const project: CommitAndSignalProject = (events) =>
-							Effect.gen(function* () {
-								yield* requireSeamTransaction;
-								if (events.length === 0) return;
-								const advance = yield* projectionRunner
-									.projectBatch(events)
-									.pipe(Effect.provideService(SqlClient.SqlClient, sql));
-								stored.push(...events);
-								advances.push(advance);
-							});
-
-						const stamp: CommitAndSignalStamp = (apply) =>
-							Effect.gen(function* () {
-								yield* requireSeamTransaction;
-								// Same counter as projection, taken in the same transaction:
-								// the version a direct write stamps has to be comparable with
-								// the ones the log produces, or "have I already seen this?"
-								// stops meaning anything.
-								const version = yield* projectionRunner.nextVersion.pipe(
-									Effect.provideService(SqlClient.SqlClient, sql),
-								);
-								const sessionIds = yield* apply(version);
-								// No rows, no announcement. An advance naming a row that was
-								// not touched sends every subscriber to re-query it for
-								// nothing; worse, it claims a version for rows that did not
-								// move.
-								if (sessionIds.length > 0)
-									advances.push({ version, sessionIds: [...sessionIds] });
-								return sessionIds;
-							});
-
-						return yield* body(project, stamp);
+							if (stamped.length > 0 || removed.length > 0)
+								yield* sessionEventBus.value.publishAdvance({
+									version: Math.max(
+										...advances.map((advance) => advance.version),
+									),
+									sessionIds: stamped,
+									removedSessionIds: removed,
+								});
+						}
+						return result;
 					}),
 				);
+				// Callbacks can stall or commit again; neither may hold up advances.
 				yield* options.afterCommit ?? Effect.void;
-
-				if (Option.isSome(sessionEventBus) && options.publish !== false) {
-					// Post-commit, so a subscriber that re-queries on the advance
-					// cannot read behind the rows it was told about.
-					if (stored.length > 0) yield* sessionEventBus.value.publish(stored);
-					const sessionIds = [
-						...new Set(advances.flatMap((advance) => advance.sessionIds)),
-					];
-					if (sessionIds.length > 0)
-						yield* sessionEventBus.value.publishAdvance({
-							version: Math.max(...advances.map((advance) => advance.version)),
-							sessionIds,
-						});
-				}
+				if (
+					Option.isSome(sessionEventBus) &&
+					options.publish !== false &&
+					stored.length > 0
+				)
+					yield* sessionEventBus.value.publish(stored);
 				return result;
 			}),
 		);

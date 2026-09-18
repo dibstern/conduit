@@ -17,7 +17,8 @@ export interface SessionEventFilter {
  * exposes its raw PubSub. A slow subscriber drops the oldest signals rather than
  * blocking the publisher; the durable, sequence-addressed event store is the
  * replay/resume source, so a subscriber that falls behind recovers missing
- * events by sequence gap + store replay (see ReadModelSubscription). This bus is
+ * events by store replay. Advance subscribers detect dropped publications and
+ * re-snapshot the read model, including deletions. This bus is
  * a live change-signal, never the backlog.
  */
 export interface SessionEventBus {
@@ -37,9 +38,13 @@ export interface SessionEventBus {
 	readonly subscribe: (
 		filter?: SessionEventFilter,
 	) => Effect.Effect<Stream.Stream<StoredEvent>, never, Scope.Scope>;
-	/** As {@link subscribe}, for read-model advances. */
+	/**
+	 * As {@link subscribe}, for read-model advances. `dropped` marks a gap in
+	 * this subscription's publications, independent of read-model version jumps.
+	 * It is internal bus metadata and never part of the RPC envelope.
+	 */
 	readonly subscribeAdvances: () => Effect.Effect<
-		Stream.Stream<ReadModelAdvance>,
+		Stream.Stream<ReadModelAdvance & { readonly dropped?: boolean }>,
 		never,
 		Scope.Scope
 	>;
@@ -58,14 +63,27 @@ export const makeSessionEventBusLive = (
 		Effect.gen(function* () {
 			const capacity = options.capacity ?? SESSION_EVENT_BUS_CAPACITY;
 			const pubsub = yield* PubSub.sliding<StoredEvent>({ capacity });
-			const advances = yield* PubSub.sliding<ReadModelAdvance>({ capacity });
+			const advances = yield* PubSub.sliding<{
+				readonly advance: ReadModelAdvance;
+				readonly ordinal: number;
+			}>({ capacity });
+			// Versions can skip within a commit; only a bus-local ordinal identifies
+			// a lost publication. Acquire and capture it under the same permit.
+			const publication = yield* Effect.makeSemaphore(1);
+			let ordinal = 0;
 			return {
 				publish: (events) =>
 					events.length === 0
 						? Effect.void
 						: Effect.asVoid(PubSub.publishAll(pubsub, events)),
 				publishAdvance: (advance) =>
-					Effect.asVoid(PubSub.publish(advances, advance)),
+					publication.withPermits(1)(
+						Effect.suspend(() =>
+							Effect.asVoid(
+								PubSub.publish(advances, { advance, ordinal: ++ordinal }),
+							),
+						),
+					),
 				subscribe: (filter) =>
 					Effect.map(PubSub.subscribe(pubsub), (dequeue) => {
 						const stream = Stream.fromQueue(dequeue);
@@ -77,8 +95,18 @@ export const makeSessionEventBusLive = (
 								);
 					}),
 				subscribeAdvances: () =>
-					Effect.map(PubSub.subscribe(advances), (dequeue) =>
-						Stream.fromQueue(dequeue),
+					publication.withPermits(1)(
+						Effect.gen(function* () {
+							const dequeue = yield* PubSub.subscribe(advances);
+							let previous = ordinal;
+							return Stream.map(Stream.fromQueue(dequeue), (entry) => {
+								const dropped = entry.ordinal !== previous + 1;
+								previous = entry.ordinal;
+								return dropped
+									? { ...entry.advance, dropped: true }
+									: entry.advance;
+							});
+						}),
 					),
 			} satisfies SessionEventBus;
 		}),

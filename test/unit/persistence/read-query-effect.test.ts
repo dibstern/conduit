@@ -1,12 +1,84 @@
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { SqlClient } from "@effect/sql";
 import { SqliteClient as EffectSqliteClient } from "@effect/sql-sqlite-node";
 import { describe, it } from "@effect/vitest";
+import Database from "better-sqlite3";
 import { Effect } from "effect";
 import { expect } from "vitest";
 import { makeEffectSqlMigrator } from "../../../src/lib/persistence/effect/migrations.js";
 import { makeReadQueryEffect } from "../../../src/lib/persistence/effect/read-query-effect.js";
 
 const testLayer = EffectSqliteClient.layer({ filename: ":memory:" });
+
+describe("ReadQueryEffect snapshot consistency", () => {
+	for (const source of ["session list", "transcript"] as const) {
+		it(`${source} keeps rows and counter at one committed version during a concurrent deletion`, async () => {
+			const dir = mkdtempSync(join(tmpdir(), "conduit-snapshot-"));
+			const filename = join(dir, "events.db");
+			const writer = new Database(filename);
+			writer.pragma("journal_mode = WAL");
+			let deleteAfterCounter = false;
+			const layer = EffectSqliteClient.layer({
+				filename,
+				transformResultNames: (name) => {
+					// Interleave a real second connection after the counter SELECT
+					// returns, before the read continues to its rows.
+					if (name === "value" && deleteAfterCounter) {
+						deleteAfterCounter = false;
+						writer.transaction(() => {
+							writer.exec("DELETE FROM messages; DELETE FROM sessions");
+							writer.exec(
+								"UPDATE read_model_counter SET value = 6 WHERE id = 1",
+							);
+						})();
+					}
+					return name;
+				},
+			});
+			try {
+				await Effect.runPromise(
+					Effect.gen(function* () {
+						yield* makeEffectSqlMigrator();
+						yield* seedSession("B");
+						const sql = yield* SqlClient.SqlClient;
+						yield* sql`UPDATE sessions SET version = 5 WHERE id = 'B'`;
+						yield* sql`INSERT INTO messages
+						(id, session_id, role, text, created_at, updated_at, version)
+						VALUES ('mB', 'B', 'user', 'Before deletion', 1, 1, 5)`;
+						yield* sql`UPDATE read_model_counter SET value = 5 WHERE id = 1`;
+						const readQuery = yield* makeReadQueryEffect;
+						const snapshot =
+							source === "session list"
+								? readQuery.readSessionList().pipe(
+										Effect.map(({ rows, version }) => ({
+											ids: rows.map(({ item }) => item.id),
+											version,
+										})),
+									)
+								: readQuery.readSessionTranscript("B").pipe(
+										Effect.map(({ messages, version }) => ({
+											ids: messages.map((message) => message.id),
+											version,
+										})),
+									);
+						deleteAfterCounter = true;
+						expect(yield* snapshot).toEqual({
+							ids: [source === "session list" ? "B" : "mB"],
+							version: 5,
+						});
+						expect(deleteAfterCounter).toBe(false);
+						expect(yield* snapshot).toEqual({ ids: [], version: 6 });
+					}).pipe(Effect.provide(layer)),
+				);
+			} finally {
+				writer.close();
+				rmSync(dir, { recursive: true, force: true });
+			}
+		});
+	}
+});
 
 function seedSession(sessionId: string) {
 	return Effect.gen(function* () {
@@ -196,7 +268,9 @@ describe("ReadQueryEffect session list reads", () => {
 			yield* seedForkedSession;
 			const readQuery = yield* makeReadQueryEffect;
 
-			expect((yield* readQuery.getSessionListSnapshot()).rows).toEqual([
+			expect(
+				(yield* readQuery.readSessionList()).rows.map(({ item }) => item),
+			).toEqual([
 				{
 					id: "child",
 					title: "Forked",
@@ -247,7 +321,11 @@ describe("ReadQueryEffect session list reads", () => {
 
 			// Counts come off the same rows the approval projector writes — the
 			// server decides what a badge means, once, and the browser is told.
-			expect(yield* readQuery.getSessionListEntry("noisy")).toEqual({
+			expect(
+				(yield* readQuery.readSessionList()).rows.find(
+					({ item }) => item.id === "noisy",
+				)?.item,
+			).toEqual({
 				id: "noisy",
 				title: "Noisy",
 				status: "idle",
@@ -258,7 +336,11 @@ describe("ReadQueryEffect session list reads", () => {
 				unseenActivity: false,
 			});
 			// Never looked at, and a message has landed: something is unread.
-			expect(yield* readQuery.getSessionListEntry("quiet")).toEqual({
+			expect(
+				(yield* readQuery.readSessionList()).rows.find(
+					({ item }) => item.id === "quiet",
+				)?.item,
+			).toEqual({
 				id: "quiet",
 				title: "Quiet",
 				status: "idle",
@@ -277,23 +359,63 @@ describe("ReadQueryEffect session list reads", () => {
 			yield* seedSession("fresh");
 			const readQuery = yield* makeReadQueryEffect;
 
-			const entry = yield* readQuery.getSessionListEntry("fresh");
+			const entry = (yield* readQuery.readSessionList()).rows.find(
+				({ item }) => item.id === "fresh",
+			)?.item;
 			expect(entry?.unseenActivity).toBe(false);
 		}).pipe(Effect.provide(testLayer)),
 	);
 
+	it.effect("serves the base read and the catch-up from one query", () =>
+		Effect.gen(function* () {
+			yield* makeEffectSqlMigrator();
+			yield* seedSession("root");
+			yield* seedForkedSession;
+			const sql = yield* SqlClient.SqlClient;
+			// What a commit leaves behind: the counter moved, and the row that
+			// commit wrote carries the number it moved to.
+			yield* sql`UPDATE read_model_counter SET value = 7 WHERE id = 1`;
+			yield* sql`UPDATE sessions SET version = 7 WHERE id = 'child'`;
+			const readQuery = yield* makeReadQueryEffect;
+
+			const base = yield* readQuery.readSessionList();
+			expect(base.version).toBe(7);
+			expect(base.rows.map(({ item }) => item.id)).toEqual(["child", "root"]);
+			// Each row carries the version it moved at, not the counter, so a
+			// replayed row keeps the identity it was first delivered under.
+			expect(base.rows.map(({ version }) => version)).toEqual([7, 0]);
+
+			// The live window is the same query bounded at both ends: the row that
+			// moved comes back identical to the base's, the one that did not is
+			// absent.
+			const moved = yield* readQuery.readSessionList({ after: 6 });
+			expect(moved).toEqual({ rows: [base.rows[0]], version: 7 });
+
+			// A subscriber current through the counter is caught up.
+			expect((yield* readQuery.readSessionList({ after: 7 })).rows).toEqual([]);
+
+			// `through` is the half that keeps a slow read honest: bounded below
+			// the commit that moved "child", it reports nothing even though the
+			// counter it returns is already past it.
+			const bounded = yield* readQuery.readSessionList({
+				after: 6,
+				through: 6,
+			});
+			expect(bounded).toEqual({ rows: [], version: 7 });
+		}).pipe(Effect.provide(testLayer)),
+	);
 	it.effect("carries the same shape into the snapshot and the re-query", () =>
 		Effect.gen(function* () {
 			yield* makeEffectSqlMigrator();
 			yield* seedSession("root");
 			yield* seedForkedSession;
 			const readQuery = yield* makeReadQueryEffect;
-
-			const snapshot = yield* readQuery.getSessionListSnapshot();
-			expect(snapshot.rows[0]).toEqual(
-				yield* readQuery.getSessionListEntry("child"),
-			);
-			expect(yield* readQuery.getSessionListEntry("gone")).toBeUndefined();
+			const snapshot = yield* readQuery.readSessionList();
+			const queried = yield* readQuery.readSessionList({ after: -1 });
+			expect(queried.rows).toEqual(snapshot.rows);
+			expect(
+				queried.rows.find(({ item }) => item.id === "gone"),
+			).toBeUndefined();
 		}).pipe(Effect.provide(testLayer)),
 	);
 });

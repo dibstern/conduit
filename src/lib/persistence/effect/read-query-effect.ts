@@ -32,6 +32,7 @@ type SessionSelection = Omit<
 	readonly pendingPermissions: number;
 	/** SQLite has no boolean type: the CASE expression selects 0 or 1. */
 	readonly unseenActivity: 0 | 1;
+	readonly version: number;
 };
 
 export class ReadQueryEffectError extends Data.TaggedError(
@@ -63,66 +64,50 @@ export interface ReadQueryEffect {
 		roots?: boolean;
 	}) => Effect.Effect<readonly SessionRow[], ReadQueryEffectError | SqlError>;
 
-	readonly getSessionListEntry: (
-		sessionId: string,
-	) => Effect.Effect<SessionInfo | undefined, ReadQueryEffectError | SqlError>;
-
-	/**
-	 * The session row as the shell streams it, but only if the row already
-	 * carries `minVersion` — plus the session projector's cursor, read in the
-	 * same transaction.
-	 *
-	 * This is the read behind a read-model advance that no event explains. An
-	 * advance names every session whose rows moved, including sessions whose
-	 * `messages` moved while the session row itself did not (per-token traffic),
-	 * so the version is the discriminator: below it, nothing about the shell row
-	 * changed and re-emitting it would undo coalescing.
-	 *
-	 * The cursor comes back because the caller has no sequence of its own to tag
-	 * the delta with — a direct write does not move the log. The cursor is a
-	 * position the row provably reflects, so a client that takes it as a resume
-	 * cursor is never carried past unseen history.
-	 */
-	readonly getStampedSessionListEntry: (
-		sessionId: string,
-		minVersion: number,
-	) => Effect.Effect<
-		{ readonly session: SessionInfo; readonly sequence: number } | undefined,
-		ReadQueryEffectError | SqlError
-	>;
-
 	readonly getSessionMessagesWithParts: (
 		sessionId: string,
 	) => Effect.Effect<MessageWithParts[], ReadQueryEffectError | SqlError>;
 
 	/**
-	 * Session-detail snapshot for a streaming subscription: the session's
-	 * projected transcript rows plus the sequence high-water mark those rows
-	 * reflect, read in ONE transaction so no append slips between the rows and
-	 * the mark. The mark is `MAX(messages.last_applied_seq)` — the per-message
-	 * watermark the message projector co-commits with every applied append-type
-	 * delta — not `MAX(events.sequence)`, so it never claims deltas that are
-	 * appended-but-not-yet-projected (which would gap live delivery).
+	 * The session-list rows that moved inside `range`, each with the version it
+	 * moved at, and the read-model version the answer is current through.
+	 *
+	 * `range` omitted is the same read over every version: a cold-start base and
+	 * a live window are one query, not two mechanisms that can disagree. Rows
+	 * and version are read in ONE transaction, so the version never claims a row
+	 * the read could not see.
+	 *
+	 * `through` is what keeps a slow read honest. Without it the answer is
+	 * whatever the read model holds when the query happens to run, which can be
+	 * a commit whose advance is still queued — and a subscriber that treats
+	 * those rows as seen will then discard that advance, taking its removals
+	 * with it. No later query can recover them (§8).
 	 */
-	readonly getSessionDetailSnapshot: (
-		sessionId: string,
-	) => Effect.Effect<
-		{ readonly messages: MessageWithParts[]; readonly sequence: number },
+	readonly readSessionList: (range?: {
+		readonly after?: number;
+		readonly through?: number;
+	}) => Effect.Effect<
+		{
+			readonly rows: readonly {
+				readonly item: SessionInfo;
+				readonly version: number;
+			}[];
+			readonly version: number;
+		},
 		ReadQueryEffectError | SqlError
 	>;
 
 	/**
-	 * Shell (session-list) snapshot for a streaming subscription: every session
-	 * row, recency-ordered, plus the sequence high-water mark those rows
-	 * reflect, read in ONE transaction so no append slips between the mark and
-	 * the rows. The mark is the session projector's cursor — the last sequence
-	 * whose projection COMMITTED — not `MAX(events.sequence)`, which could
-	 * claim an appended-but-not-yet-projected event and gap live delivery. The
-	 * cursor is read before the rows: under-claiming is safe for whole-row
-	 * upserts (idempotent re-emit); over-claiming would lose updates.
+	 * As {@link readSessionList}, for one session's projected transcript. A
+	 * message part carries no version of its own, so a part write advances the
+	 * message that owns it and the whole message comes back. Each row carries
+	 * its own `version`.
 	 */
-	readonly getSessionListSnapshot: () => Effect.Effect<
-		{ readonly rows: readonly SessionInfo[]; readonly sequence: number },
+	readonly readSessionTranscript: (
+		sessionId: string,
+		range?: { readonly after?: number; readonly through?: number },
+	) => Effect.Effect<
+		{ readonly messages: MessageWithParts[]; readonly version: number },
 		ReadQueryEffectError | SqlError
 	>;
 
@@ -240,9 +225,11 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 		);
 
 	// ─── The session list reads ───────────────────────────────────────────
-	// `getSessionListSnapshot` and `getSessionListEntry` are the only producers
-	// of the single session type (ni8.5 T-1) — what the shell subscription
-	// streams and what the browser holds. These column aliases do the renaming,
+	// `readSessionList` is the only producer of the single session type (ni8.5
+	// T-1) — what the shell subscription streams and what the browser holds.
+	// The per-row re-query it replaced is gone: a subscriber asks for what moved
+	// past a version, never for one row by id. These column aliases do the
+	// renaming,
 	// so no caller bridges a row into a session; the only step left in code is
 	// NULL-to-absent, which SQL cannot express. `listSessions` stays a row read
 	// for the server-internal callers that need columns the wire never carries
@@ -255,7 +242,7 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 	// projector owns those rows, and both question and permission requests land
 	// in it, so the counts cannot drift from what the app is actually blocked on.
 	const sessionColumns = sql.literal(
-		`id, title, status,
+		`id, title, status, version,
 		 created_at AS createdAt, updated_at AS updatedAt,
 		 parent_id AS parentID, fork_point_event AS forkMessageId,
 		 (SELECT COUNT(*) FROM pending_approvals pa
@@ -268,18 +255,22 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 		      THEN 1 ELSE 0 END AS unseenActivity`,
 	);
 
+	// The version stays beside the session rather than on it: it is a fact about
+	// the read model, not a field the wire carries.
 	const toSession = ({
+		version,
 		parentID,
 		forkMessageId,
 		unseenActivity,
 		...session
-	}: SessionSelection): SessionInfo => ({
-		...session,
-		...(parentID !== null && { parentID }),
-		...(forkMessageId !== null && { forkMessageId }),
-		// SQLite has no boolean; the wire type does, and the client should never
-		// be the one deciding what 1 means.
-		unseenActivity: unseenActivity === 1,
+	}: SessionSelection): { item: SessionInfo; version: number } => ({
+		item: {
+			...session,
+			unseenActivity: unseenActivity === 1,
+			...(parentID !== null && { parentID }),
+			...(forkMessageId !== null && { forkMessageId }),
+		},
+		version,
 	});
 
 	const listSessions = (opts?: {
@@ -302,57 +293,6 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 						}),
 			),
 		);
-
-	const getSessionListEntry = (
-		sessionId: string,
-	): Effect.Effect<SessionInfo | undefined, ReadQueryEffectError | SqlError> =>
-		Effect.gen(function* () {
-			const rows = yield* sql<SessionSelection>`
-				SELECT ${sessionColumns} FROM sessions WHERE id = ${sessionId}`;
-			const row = rows[0];
-			return row === undefined ? undefined : toSession(row);
-		}).pipe(
-			Effect.mapError((e) =>
-				e instanceof ReadQueryEffectError
-					? e
-					: new ReadQueryEffectError({
-							operation: "getSessionListEntry",
-							cause: e,
-						}),
-			),
-		);
-
-	const getStampedSessionListEntry = (
-		sessionId: string,
-		minVersion: number,
-	): Effect.Effect<
-		{ readonly session: SessionInfo; readonly sequence: number } | undefined,
-		ReadQueryEffectError | SqlError
-	> =>
-		sql
-			.withTransaction(
-				Effect.gen(function* () {
-					const rows = yield* sql<SessionSelection>`
-						SELECT ${sessionColumns} FROM sessions
-						WHERE id = ${sessionId} AND version >= ${minVersion}`;
-					const row = rows[0];
-					if (row === undefined) return undefined;
-					const cursorRows = yield* sql<{ hwm: number | null }>`
-						SELECT last_applied_seq AS hwm FROM projector_cursors
-						WHERE projector_name = 'session'`;
-					return { session: toSession(row), sequence: cursorRows[0]?.hwm ?? 0 };
-				}),
-			)
-			.pipe(
-				Effect.mapError((e) =>
-					e instanceof ReadQueryEffectError
-						? e
-						: new ReadQueryEffectError({
-								operation: "getStampedSessionListEntry",
-								cause: e,
-							}),
-				),
-			);
 
 	const getSessionMessagesWithParts = (
 		sessionId: string,
@@ -431,18 +371,79 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 			),
 		);
 
-	const getSessionDetailSnapshot = (
-		sessionId: string,
-	): Effect.Effect<
-		{ readonly messages: MessageWithParts[]; readonly sequence: number },
+	// ─── The versioned subscription reads ─────────────────────────────────
+	// One query per source serves cold start, resume catch-up and every live
+	// advance. `version` is the read-model counter, read FIRST inside the
+	// transaction so the rows that follow are from the same consistent state:
+	// the number handed to a subscriber never claims a row the read missed.
+	//
+	// A base read is a catch-up from before the first version. The 0012 backfill
+	// left undatable rows at 0, so the floor is -1 rather than 0 — otherwise a
+	// cold start would silently skip them.
+	const BEFORE_FIRST_VERSION = -1;
+	// An unbounded read is bounded by a number the counter cannot reach, which
+	// keeps one query shape for both the base and a windowed live read.
+	const AFTER_LAST_VERSION = Number.MAX_SAFE_INTEGER;
+
+	const readModelVersion = Effect.gen(function* () {
+		const rows = yield* sql<{ value: number }>`
+			SELECT value FROM read_model_counter WHERE id = 1`;
+		return rows[0]?.value ?? 0;
+	});
+
+	const readSessionList = (range?: {
+		readonly after?: number;
+		readonly through?: number;
+	}): Effect.Effect<
+		{
+			readonly rows: readonly {
+				readonly item: SessionInfo;
+				readonly version: number;
+			}[];
+			readonly version: number;
+		},
 		ReadQueryEffectError | SqlError
 	> =>
 		sql
 			.withTransaction(
 				Effect.gen(function* () {
+					const version = yield* readModelVersion;
+					const rows = yield* sql<SessionSelection>`
+						SELECT ${sessionColumns} FROM sessions
+						WHERE version > ${range?.after ?? BEFORE_FIRST_VERSION}
+							AND version <= ${range?.through ?? AFTER_LAST_VERSION}
+						ORDER BY updated_at DESC`;
+					return { rows: rows.map(toSession), version };
+				}),
+			)
+			.pipe(
+				Effect.mapError((e) =>
+					e instanceof ReadQueryEffectError
+						? e
+						: new ReadQueryEffectError({
+								operation: "readSessionList",
+								cause: e,
+							}),
+				),
+			);
+
+	const readSessionTranscript = (
+		sessionId: string,
+		range?: { readonly after?: number; readonly through?: number },
+	): Effect.Effect<
+		{ readonly messages: MessageWithParts[]; readonly version: number },
+		ReadQueryEffectError | SqlError
+	> =>
+		sql
+			.withTransaction(
+				Effect.gen(function* () {
+					const version = yield* readModelVersion;
+					const floor = range?.after ?? BEFORE_FIRST_VERSION;
+					const ceiling = range?.through ?? AFTER_LAST_VERSION;
 					const messages = yield* sql<MessageRow>`
 						SELECT * FROM messages
 						WHERE session_id = ${sessionId}
+							AND version > ${floor} AND version <= ${ceiling}
 						ORDER BY created_at ASC, id ASC`;
 
 					let parts: readonly MessagePartRow[] = [];
@@ -451,20 +452,16 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 							WITH target_messages AS (
 								SELECT id FROM messages
 								WHERE session_id = ${sessionId}
-								ORDER BY created_at ASC, id ASC
+									AND version > ${floor} AND version <= ${ceiling}
 							)
 							SELECT mp.* FROM message_parts mp
 							JOIN target_messages tm ON mp.message_id = tm.id
 							ORDER BY mp.message_id, mp.sort_order`;
 					}
 
-					const hwmRows = yield* sql<{ hwm: number | null }>`
-						SELECT MAX(last_applied_seq) AS hwm FROM messages
-						WHERE session_id = ${sessionId}`;
-
 					return {
 						messages: groupMessagesWithParts(messages, parts),
-						sequence: hwmRows[0]?.hwm ?? 0,
+						version,
 					};
 				}),
 			)
@@ -473,36 +470,7 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 					e instanceof ReadQueryEffectError
 						? e
 						: new ReadQueryEffectError({
-								operation: "getSessionDetailSnapshot",
-								cause: e,
-							}),
-				),
-			);
-
-	const getSessionListSnapshot = (): Effect.Effect<
-		{ readonly rows: readonly SessionInfo[]; readonly sequence: number },
-		ReadQueryEffectError | SqlError
-	> =>
-		sql
-			.withTransaction(
-				Effect.gen(function* () {
-					const cursorRows = yield* sql<{ hwm: number | null }>`
-						SELECT last_applied_seq AS hwm FROM projector_cursors
-						WHERE projector_name = 'session'`;
-					const rows = yield* sql<SessionSelection>`
-						SELECT ${sessionColumns} FROM sessions ORDER BY updated_at DESC`;
-					return {
-						rows: rows.map(toSession),
-						sequence: cursorRows[0]?.hwm ?? 0,
-					};
-				}),
-			)
-			.pipe(
-				Effect.mapError((e) =>
-					e instanceof ReadQueryEffectError
-						? e
-						: new ReadQueryEffectError({
-								operation: "getSessionListSnapshot",
+								operation: "readSessionTranscript",
 								cause: e,
 							}),
 				),
@@ -540,11 +508,9 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 		getSession,
 		getAllSessionStatuses,
 		listSessions,
-		getSessionListEntry,
-		getStampedSessionListEntry,
 		getSessionMessagesWithParts,
-		getSessionDetailSnapshot,
-		getSessionListSnapshot,
+		readSessionList,
+		readSessionTranscript,
 		getLatestTurnModelExecution,
 	} satisfies ReadQueryEffect;
 });

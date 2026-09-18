@@ -95,7 +95,11 @@ function makeHarness(options?: {
 			return (
 				options?.projectEffect?.(event, projected.length) ?? Effect.void
 			).pipe(
-				Effect.as({ version: event.sequence, sessionIds: [event.sessionId] }),
+				Effect.as({
+					version: event.sequence,
+					sessionIds: [event.sessionId],
+					removedSessionIds: [],
+				}),
 			);
 		}),
 	);
@@ -110,6 +114,7 @@ function makeHarness(options?: {
 			Effect.as({
 				version: events[events.length - 1]?.sequence ?? 0,
 				sessionIds: [...new Set(events.map((event) => event.sessionId))],
+				removedSessionIds: [],
 			}),
 		);
 	});

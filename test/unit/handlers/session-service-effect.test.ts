@@ -154,14 +154,10 @@ function makeEmptySessionReadQuery(provider: string): ReadQueryEffect {
 		),
 		getAllSessionStatuses: vi.fn(() => Effect.succeed({})),
 		listSessions: vi.fn(() => Effect.succeed([])),
-		getSessionDetailSnapshot: vi.fn(() =>
-			Effect.succeed({ messages: [], sequence: 0 }),
+		readSessionTranscript: vi.fn(() =>
+			Effect.succeed({ messages: [], version: 0 }),
 		),
-		getSessionListEntry: vi.fn(() => Effect.succeed(undefined)),
-		getStampedSessionListEntry: vi.fn(() => Effect.succeed(undefined)),
-		getSessionListSnapshot: vi.fn(() =>
-			Effect.succeed({ rows: [], sequence: 0 }),
-		),
+		readSessionList: vi.fn(() => Effect.succeed({ rows: [], version: 0 })),
 		getLatestTurnModelExecution: vi.fn(() => Effect.succeed(undefined)),
 		getSessionMessagesWithParts: vi.fn(() => Effect.succeed([])),
 	};
@@ -255,14 +251,10 @@ describe("session handlers with Effect-native model service", () => {
 				),
 				getAllSessionStatuses: vi.fn(() => Effect.succeed({})),
 				listSessions: vi.fn(() => Effect.succeed([])),
-				getSessionDetailSnapshot: vi.fn(() =>
-					Effect.succeed({ messages: [], sequence: 0 }),
+				readSessionTranscript: vi.fn(() =>
+					Effect.succeed({ messages: [], version: 0 }),
 				),
-				getSessionListEntry: vi.fn(() => Effect.succeed(undefined)),
-				getStampedSessionListEntry: vi.fn(() => Effect.succeed(undefined)),
-				getSessionListSnapshot: vi.fn(() =>
-					Effect.succeed({ rows: [], sequence: 0 }),
-				),
+				readSessionList: vi.fn(() => Effect.succeed({ rows: [], version: 0 })),
 				getLatestTurnModelExecution: vi.fn(() => Effect.succeed(undefined)),
 				getSessionMessagesWithParts: vi.fn(() =>
 					Effect.succeed([
@@ -419,14 +411,10 @@ describe("session handlers with Effect-native model service", () => {
 			getLatestTurnModelExecution: vi.fn(() => Effect.succeed(undefined)),
 			// Rows exist but carry no text — the shape the OpenCode runtime
 			// projection produces today (structure without content).
-			getSessionDetailSnapshot: vi.fn(() =>
-				Effect.succeed({ messages: [], sequence: 0 }),
+			readSessionTranscript: vi.fn(() =>
+				Effect.succeed({ messages: [], version: 0 }),
 			),
-			getSessionListEntry: vi.fn(() => Effect.succeed(undefined)),
-			getStampedSessionListEntry: vi.fn(() => Effect.succeed(undefined)),
-			getSessionListSnapshot: vi.fn(() =>
-				Effect.succeed({ rows: [], sequence: 0 }),
-			),
+			readSessionList: vi.fn(() => Effect.succeed({ rows: [], version: 0 })),
 			getSessionMessagesWithParts: vi.fn(() =>
 				Effect.succeed([
 					{

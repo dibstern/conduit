@@ -29,6 +29,7 @@ import {
 	Ref,
 	Scope,
 } from "effect";
+import { resumeStream } from "./resume.js";
 import { WsRpcGroup } from "./ws-rpc.js";
 
 export interface WsRpcLocation {
@@ -53,11 +54,51 @@ const wsRpcClient = RpcClient.make(WsRpcGroup);
 
 export type WsRpcClient = Effect.Effect.Success<typeof wsRpcClient>;
 
+// Subscriptions are handed out already resuming, and already on the right
+// socket, because both are transport decisions a consumer should not be able to
+// get wrong. A consumer that reached for `sockets.stream.SubscribeSessionDetail`
+// would get a stream that dies on the first drop; there is no reason to leave
+// that door open, so ni8.9/10/11/14 add a member here rather than a call site.
+const makeSubscriptions = (
+	projectSlug: string,
+	sockets: { readonly control: WsRpcClient; readonly stream: WsRpcClient },
+) => ({
+	/** The session list. Low-rate, so it rides the control socket. */
+	shell: (options: { readonly resumeFromSequence?: number } = {}) =>
+		resumeStream(
+			(resumeFromSequence) =>
+				sockets.control.SubscribeShell({
+					projectSlug,
+					...(resumeFromSequence === undefined ? {} : { resumeFromSequence }),
+				}),
+			{ from: options.resumeFromSequence },
+		),
+	/** One session's transcript. Hot, so it rides the stream socket. */
+	sessionDetail: (options: {
+		readonly sessionId: string;
+		readonly resumeFromSequence?: number;
+	}) =>
+		resumeStream(
+			(resumeFromSequence) =>
+				sockets.stream.SubscribeSessionDetail({
+					projectSlug,
+					sessionId: options.sessionId,
+					...(resumeFromSequence === undefined ? {} : { resumeFromSequence }),
+				}),
+			{ from: options.resumeFromSequence },
+		),
+});
+
+/** Every stream subscription the frontend has, resume already applied. */
+export type WsRpcSubscriptions = ReturnType<typeof makeSubscriptions>;
+
 export interface WsRpcSockets {
 	/** Unary calls and low-rate subscriptions. The 49 helpers move here in S-6. */
 	readonly control: WsRpcClient;
 	/** Hot per-session streams: session detail now, PTY in ni8.9. */
 	readonly stream: WsRpcClient;
+	/** Subscriptions over the pair, each resuming from its own high-water mark. */
+	readonly subscriptions: WsRpcSubscriptions;
 }
 
 /**
@@ -139,15 +180,16 @@ const make = (connect: WsRpcConnect) =>
 				]).pipe(Scope.extend(scope));
 				return {
 					projectSlug,
-					sockets: { control, stream },
+					sockets: {
+						control,
+						stream,
+						subscriptions: makeSubscriptions(projectSlug, { control, stream }),
+					},
 					close: Scope.close(scope, Exit.void),
 				};
 			});
 
 		return {
-			// ni8.5.9 (T-3) hangs client-side resume here: the high-water-mark ref
-			// belongs beside the pair opened above, so every subscription — now and
-			// in ni8.9/10/11/14 — inherits re-issue-on-protocol-error for free.
 			forProject: (projectSlug: string) =>
 				lock.withPermits(1)(
 					Effect.uninterruptibleMask((restore) =>

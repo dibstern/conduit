@@ -87,7 +87,9 @@ it("viewing a session writes the column and announces the version it stamped", a
 			// re-queries on the advance and compares must not find the row behind
 			// what it was told — that silence is C2.
 			expect(rows).toEqual([{ last_viewed_at: 1_700_000_000_000, version: 2 }]);
-			expect(advances).toEqual([{ version: 2, sessionIds: ["s1"] }]);
+			expect(advances).toEqual([
+				{ version: 2, sessionIds: ["s1"], removedSessionIds: [] },
+			]);
 		}),
 	);
 });
@@ -141,7 +143,9 @@ it("a later view moves the column and the version forward again", async () => {
 				version: number;
 			}>`SELECT last_viewed_at, version FROM sessions WHERE id = 's1'`;
 			expect(rows).toEqual([{ last_viewed_at: 1_700_000_005_000, version: 3 }]);
-			expect(advances).toEqual([{ version: 3, sessionIds: ["s1"] }]);
+			expect(advances).toEqual([
+				{ version: 3, sessionIds: ["s1"], removedSessionIds: [] },
+			]);
 		}),
 	);
 });
@@ -171,7 +175,9 @@ it("a direct write shares the counter with projection — no version is reused",
 				version: number;
 			}>`SELECT version FROM sessions WHERE id = 's1'`;
 			expect(rows).toEqual([{ version: 3 }]);
-			expect(advances).toEqual([{ version: 3, sessionIds: ["s1"] }]);
+			expect(advances).toEqual([
+				{ version: 3, sessionIds: ["s1"], removedSessionIds: [] },
+			]);
 		}),
 	);
 });
