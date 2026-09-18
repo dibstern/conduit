@@ -10,6 +10,7 @@ function makeRow(id: string, overrides?: Partial<SessionRow>): SessionRow {
 		id,
 		provider: "opencode",
 		provider_sid: null,
+		version: 0,
 		title: "Untitled",
 		status: "idle",
 		parent_id: null,

@@ -119,6 +119,7 @@ describe("Migration Runner", () => {
 		const sessionsPermissionModeMigration = schemaMigrations[8];
 		const sessionCascadeDeletesMigration = schemaMigrations[9];
 		const projectionFailuresMigration = schemaMigrations[10];
+		const readModelVersionMigration = schemaMigrations[11];
 		if (
 			!baseline ||
 			!metadataMigration ||
@@ -130,7 +131,8 @@ describe("Migration Runner", () => {
 			!turnModelExecutionMigration ||
 			!sessionsPermissionModeMigration ||
 			!sessionCascadeDeletesMigration ||
-			!projectionFailuresMigration
+			!projectionFailuresMigration ||
+			!readModelVersionMigration
 		) {
 			throw new Error("Expected all event-store schema migrations");
 		}
@@ -195,6 +197,11 @@ describe("Migration Runner", () => {
 				id: 11,
 				name: "create_projection_failures",
 				checksum: calculateMigrationChecksum(projectionFailuresMigration),
+			},
+			{
+				id: 12,
+				name: "read_model_version",
+				checksum: calculateMigrationChecksum(readModelVersionMigration),
 			},
 		]);
 		columns = client
@@ -294,6 +301,7 @@ describe("Migration Runner", () => {
 			applied: [
 				{ id: 10, name: "session_cascade_deletes" },
 				{ id: 11, name: "create_projection_failures" },
+				{ id: 12, name: "read_model_version" },
 			],
 			columns: [
 				{
@@ -377,11 +385,13 @@ describe("Migration Runner", () => {
 		const sessionsPermissionModeMigration = schemaMigrations[8];
 		const sessionCascadeDeletesMigration = schemaMigrations[9];
 		const projectionFailuresMigration = schemaMigrations[10];
+		const readModelVersionMigration = schemaMigrations[11];
 		if (
 			!turnModelExecutionMigration ||
 			!sessionsPermissionModeMigration ||
 			!sessionCascadeDeletesMigration ||
-			!projectionFailuresMigration
+			!projectionFailuresMigration ||
+			!readModelVersionMigration
 		) {
 			throw new Error("Expected remaining event-store migrations");
 		}
@@ -412,6 +422,11 @@ describe("Migration Runner", () => {
 				id: 11,
 				name: "create_projection_failures",
 				checksum: calculateMigrationChecksum(projectionFailuresMigration),
+			},
+			{
+				id: 12,
+				name: "read_model_version",
+				checksum: calculateMigrationChecksum(readModelVersionMigration),
 			},
 		]);
 		expect(runMigrations(client, schemaMigrations)).toEqual([]);
