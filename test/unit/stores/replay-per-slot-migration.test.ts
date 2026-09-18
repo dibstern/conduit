@@ -40,7 +40,6 @@ vi.mock("dompurify", () => ({
 }));
 
 import {
-	chatState,
 	clearMessages,
 	clearSessionChatState,
 	getOrCreateSessionSlot,
@@ -88,12 +87,11 @@ describe("Replay per-slot migration", () => {
 
 		await drainReplay(promise);
 
-		// Replay committed to chatState.messages (legacy path) and session-A's slot
+		// Replay committed to session-A's slot even though the view moved on.
 		const slotA = getOrCreateSessionSlot("session-A");
 		expect(slotA.activity).toBeDefined();
-		// chatState.messages should have the replayed messages
-		expect(chatState.messages.length).toBeGreaterThan(0);
-		const userMsg = chatState.messages.find((m) => m.type === "user");
+		expect(slotA.messages.messages.length).toBeGreaterThan(0);
+		const userMsg = slotA.messages.messages.find((m) => m.type === "user");
 		expect(userMsg).toBeDefined();
 		expect((userMsg as { text: string }).text).toBe("Hello from A");
 	});
@@ -135,8 +133,7 @@ describe("Replay per-slot migration", () => {
 
 		await drainReplay(promise);
 
-		// The replay should have been aborted — chatState should be empty or
-		// have minimal content (clearMessages may have run)
+		// The replay should have been aborted — the slot's replayGeneration moved on.
 		// The key assertion: no error was thrown and the replay gracefully aborted
 		expect(true).toBe(true); // reached without error
 	});

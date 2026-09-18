@@ -19,6 +19,7 @@ import {
 	type SessionActivity,
 	type SessionMessages,
 } from "../../../src/lib/frontend/stores/chat.svelte.js";
+import { sessionState } from "../../../src/lib/frontend/stores/session.svelte.js";
 import type {
 	RelayMessage,
 	ThinkingMessage,
@@ -41,6 +42,7 @@ let tm: SessionMessages;
 
 beforeEach(() => {
 	clearMessages();
+	sessionState.currentId = "test-session";
 	ta = testActivity();
 	tm = testMessages();
 	vi.useFakeTimers();

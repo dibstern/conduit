@@ -31,7 +31,6 @@ import {
 	addUserMessage,
 	advanceTurnIfNewMessage,
 	beginReplayBatch,
-	chatState,
 	clearMessages,
 	clearSessionChatState,
 	commitReplayFinal,
@@ -56,7 +55,7 @@ import {
 	handleToolResult,
 	handleToolStart,
 	historyState,
-	isProcessing,
+	isLlmActive,
 	markPendingHistoryQueuedFallback,
 	phaseEndReplay,
 	phaseStartReplay,
@@ -306,7 +305,9 @@ function routePerSession(event: PerSessionEvent): void {
 				messages,
 				event.text,
 				undefined,
-				isProcessing(),
+				// Queued-ness is a property of *this* event's session, not of
+				// whichever session happens to be on screen.
+				isLlmActive(activity.phase, messages.loadLifecycle),
 				event.messageId,
 				shouldIgnoreOwnUserMessage(event),
 				event.originId,
@@ -425,12 +426,24 @@ function startBufferingLiveEvents(activity?: SessionActivity): void {
 }
 
 /** Drain buffered live events through normal dispatch (called after replay commits). */
-function drainLiveEventBuffer(activity?: SessionActivity): void {
+function drainLiveEventBuffer(
+	activity?: SessionActivity,
+	messages?: SessionMessages,
+): void {
 	const buffer = activity?.liveEventBuffer ?? null;
 	if (activity) activity.liveEventBuffer = null;
 	if (!buffer || buffer.length === 0) return;
 	for (const event of buffer) {
-		const ctx: DispatchContext = { isReplay: false, isQueued: isProcessing() };
+		// Recomputed per event: draining a buffer replays the turn's own
+		// transitions, and the queued flag must follow the drained slot —
+		// not the session on screen, which may be a different one entirely.
+		const ctx: DispatchContext = {
+			isReplay: false,
+			isQueued:
+				activity !== undefined &&
+				messages !== undefined &&
+				isLlmActive(activity.phase, messages.loadLifecycle),
+		};
 		dispatchChatEvent(event, ctx);
 	}
 }
@@ -543,8 +556,9 @@ function preserveCachedSubagentToolState(
 export interface DispatchContext {
 	/** True when replaying cached events (suppresses notifications). */
 	isReplay: boolean;
-	/** Whether the LLM is currently active (sentDuringEpoch source).
-	 *  Live: `isProcessing()`. Replay: local `llmActive` tracker. */
+	/** Whether the LLM is active *on the event's own session*
+	 *  (sentDuringEpoch source).
+	 *  Live: `isLlmActive(slot)`. Replay: local `llmActive` tracker. */
 	isQueued: boolean;
 }
 
@@ -848,7 +862,6 @@ export function handleMessage(msg: RelayMessage): void {
 				const actGen = ++capturedSlot.activity.replayGeneration; // per-session snapshot
 				capturedSlot.messages.historyLoading = true;
 				capturedSlot.messages.loadLifecycle = "loading";
-				chatState.loadLifecycle = "loading";
 				convertHistoryAsync(historyMsgs, renderMarkdown, capturedSlot.activity)
 					.then((chatMsgs) => {
 						if (chatMsgs && capturedSlot.activity.replayGeneration === actGen) {
@@ -871,7 +884,6 @@ export function handleMessage(msg: RelayMessage): void {
 							// Transition loadLifecycle so the scroll controller
 							// exits "loading" state and scrolls to bottom.
 							capturedSlot.messages.loadLifecycle = "ready";
-							chatState.loadLifecycle = "ready";
 						}
 						capturedSlot.messages.historyLoading = false;
 					})
@@ -886,7 +898,6 @@ export function handleMessage(msg: RelayMessage): void {
 				// exits "loading" state and can handle live events normally.
 				const emptySlot = getOrCreateSessionSlot(msg.id);
 				emptySlot.messages.loadLifecycle = "ready";
-				chatState.loadLifecycle = "ready";
 			}
 
 			// Apply server-provided input draft for this session.
@@ -1233,7 +1244,7 @@ export async function replayEvents(
 		// Drain live events that arrived while the replay was in progress.
 		// These are post-cache events dispatched as normal live events,
 		// continuing the timeline where the cache left off.
-		drainLiveEventBuffer(slot.activity);
+		drainLiveEventBuffer(slot.activity, slot.messages);
 
 		renderDeferredMarkdown(slot.activity, slot.messages);
 	} finally {

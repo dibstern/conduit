@@ -306,7 +306,7 @@ describe("notification_event — non-routing (global dispatch)", () => {
 	});
 
 	it("notification_event does not update chat state", () => {
-		phaseToStreaming();
+		phaseToStreaming(getOrCreateSessionSlot("session-a").activity);
 		handleMessage({
 			type: "notification_event",
 			eventType: "done",
@@ -367,8 +367,10 @@ describe("Unknown-session guard — drops events silently", () => {
 			text: "now it works",
 		} as RelayMessage);
 
-		// Message should have been created
-		expect(chatState.messages.length).toBeGreaterThan(0);
+		// Message should have been created in the registered session's slot.
+		expect(
+			sessionMessages.get("new-session")?.messages.length ?? 0,
+		).toBeGreaterThan(0);
 	});
 });
 
