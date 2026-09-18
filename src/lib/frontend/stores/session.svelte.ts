@@ -2,7 +2,11 @@
 // Server-owned session rows on one side, this tab's selection and search on
 // the other. The two halves never write each other.
 
-import { SvelteMap } from "svelte/reactivity";
+import {
+	applySessionChange,
+	resetSessionSubscription,
+	sessionSubscription,
+} from "../transport/session-subscription.svelte.js";
 import type { ListSessionsResponse } from "../transport/ws-rpc.js";
 import {
 	type CreateSessionRpcInput,
@@ -39,12 +43,14 @@ import { uiState } from "./ui.svelte.js";
 
 // ─── Server-owned state ─────────────────────────────────────────────────────
 // Every session the server has told us about, keyed by id — one representation,
-// not a map plus two arrays kept in step by hand. The `applySession*` functions
-// below are the only writers, and every row they store is a whole `SessionInfo`
-// straight off the wire. Nothing outside this module can write it: `sessionState`
-// hands it out as a `ReadonlyMap`.
+// not a map plus two arrays kept in step by hand. The map itself belongs to the
+// subscription that fills it (ni8.5 T-9); this store is a view over it and
+// holds no copy. The `applySession*` functions below are this module's only
+// door into it, and every row they store is a whole `SessionInfo` straight off
+// the wire. Nothing outside can write it: `sessionState` hands it out as a
+// `ReadonlyMap`.
 
-const serverSessions = new SvelteMap<string, SessionInfo>();
+const serverSessions = $derived(sessionSubscription.rows);
 
 // ─── Client-owned state ─────────────────────────────────────────────────────
 // What this tab is looking at. Applying server rows never touches it.
@@ -65,6 +71,10 @@ export const sessionState = {
 	 *  or `applySessionRemoved`. */
 	get sessions(): ReadonlyMap<string, Immutable<SessionInfo>> {
 		return serverSessions;
+	},
+	/** Whether the subscription has finished delivering its initial rows. */
+	get settled(): boolean {
+		return sessionSubscription.settled;
 	},
 	get currentId(): string | null {
 		return clientSession.currentId;
@@ -254,28 +264,29 @@ export function applySessionSnapshot(
 	rows: readonly SessionInfo[],
 	scope: SessionSnapshotScope,
 ): void {
-	if (scope === "complete") {
-		const incoming = new Set(rows.map((row) => row.id));
-		for (const id of [...serverSessions.keys()]) {
-			if (!incoming.has(id)) forgetSession(id);
-		}
+	if (scope === "partial") {
+		for (const row of rows) applySessionChange({ _tag: "upsert", item: row });
+		return;
 	}
-	for (const row of rows) serverSessions.set(row.id, row);
+	const incoming = new Set(rows.map((row) => row.id));
+	const reaped = [...serverSessions.keys()].filter((id) => !incoming.has(id));
+	applySessionChange({ _tag: "snapshot", rows });
+	for (const id of reaped) forgetSession(id);
 }
 
 /** Apply a single session row the server has created or changed. */
 export function applySessionUpsert(row: SessionInfo): void {
-	serverSessions.set(row.id, row);
+	applySessionChange({ _tag: "upsert", item: row });
 }
 
 /** Apply a session the server has deleted. */
 export function applySessionRemoved(id: string): void {
+	applySessionChange({ _tag: "remove", id });
 	forgetSession(id);
 }
 
-/** Drop our copy of a session and the chat state hanging off it. */
+/** Drop the state this tab keeps for a session the map no longer holds. */
 function forgetSession(id: string): void {
-	serverSessions.delete(id);
 	clearSessionChatState(id);
 	// A session that is gone cannot still be the one we are looking at. The
 	// selection is what makes a session routable before its row arrives, so
@@ -511,7 +522,9 @@ export function switchToSession(
 /** Clear all session state (for project switch). */
 export function clearSessionState(): void {
 	resetSessionCreation(); // Cancel any in-flight creation (project switch safety)
-	for (const id of [...serverSessions.keys()]) forgetSession(id);
+	const held = [...serverSessions.keys()];
+	resetSessionSubscription();
+	for (const id of held) forgetSession(id);
 	clientSession.currentId = null;
 	setSearchQuery("");
 }
