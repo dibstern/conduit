@@ -1,6 +1,6 @@
 import type { Meta, StoryObj } from "@storybook/svelte-vite";
 import { routerState } from "../../stores/router.svelte.js";
-import { terminalState } from "../../stores/terminal.svelte.js";
+import { destroyAll, handlePtyList } from "../../stores/terminal.svelte.js";
 import { uiState } from "../../stores/ui.svelte.js";
 import { wsState } from "../../stores/ws.svelte.js";
 import Header from "./Header.svelte";
@@ -16,7 +16,7 @@ const meta = {
 		wsState.statusText = "";
 		uiState.sidebarCollapsed = true;
 		uiState.clientCount = 0;
-		terminalState.tabs = new Map();
+		destroyAll();
 		routerState.path = "/p/my-project/";
 	},
 } satisfies Meta<typeof Header>;
@@ -65,10 +65,27 @@ export const WithTerminalBadge: Story = {
 	beforeEach: () => {
 		wsState.status = "connected";
 		wsState.statusText = "Connected";
-		const tabs = new Map();
-		tabs.set("pty-1", { ptyId: "pty-1", title: "Terminal", exited: false });
-		tabs.set("pty-2", { ptyId: "pty-2", title: "Terminal 2", exited: false });
-		terminalState.tabs = tabs;
+		handlePtyList({
+			type: "pty_list",
+			ptys: [
+				{
+					id: "pty-1",
+					title: "bash",
+					command: "bash",
+					cwd: "/repo",
+					status: "running",
+					pid: 1001,
+				},
+				{
+					id: "pty-2",
+					title: "bash",
+					command: "bash",
+					cwd: "/repo",
+					status: "running",
+					pid: 1002,
+				},
+			],
+		});
 	},
 };
 

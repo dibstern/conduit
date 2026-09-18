@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 import {
 	applyGetAgentsResponse,
 	applyGetModelsResponse,
+	chooseHiddenEntries,
 	clearDiscoveryState,
 	discoveryState,
 	getVisibleAgents,
@@ -51,41 +52,45 @@ beforeEach(() => {
 describe("visibility filtering", () => {
 	// getVisibleAgents()
 	it("filters agents whose <scopeId>/<agentId> key is hidden", () => {
-		discoveryState.agentProviderScope = { id: "opencode", name: "OpenCode" };
-		discoveryState.agents = [...agents];
-		discoveryState.hiddenAgents = ["opencode/plan"];
+		applyGetAgentsResponse({
+			projectSlug: "project-a",
+			providerScope: { id: "opencode", name: "OpenCode" },
+			agents: [...agents],
+			hiddenAgents: ["opencode/plan"],
+		});
 
 		expect(getVisibleAgents()).toEqual([{ id: "build", name: "Build" }]);
 	});
 
 	it("never-brick: returns all agents when every agent is hidden", () => {
-		discoveryState.agentProviderScope = { id: "opencode", name: "OpenCode" };
-		discoveryState.agents = [...agents];
-		discoveryState.hiddenAgents = ["opencode/build", "opencode/plan"];
+		applyGetAgentsResponse({
+			projectSlug: "project-a",
+			providerScope: { id: "opencode", name: "OpenCode" },
+			agents: [...agents],
+			hiddenAgents: ["opencode/build", "opencode/plan"],
+		});
 
 		expect(getVisibleAgents()).toEqual(agents);
 	});
 
 	it("ignores hidden keys from a different scope", () => {
-		discoveryState.agentProviderScope = { id: "opencode", name: "OpenCode" };
-		discoveryState.agents = [...agents];
-		discoveryState.hiddenAgents = ["claude/plan"];
-
-		expect(getVisibleAgents()).toEqual(agents);
-	});
-
-	it("returns all agents when scope is null", () => {
-		discoveryState.agentProviderScope = null;
-		discoveryState.agents = [...agents];
-		discoveryState.hiddenAgents = ["opencode/plan"];
+		applyGetAgentsResponse({
+			projectSlug: "project-a",
+			providerScope: { id: "opencode", name: "OpenCode" },
+			agents: [...agents],
+			hiddenAgents: ["claude/plan"],
+		});
 
 		expect(getVisibleAgents()).toEqual(agents);
 	});
 
 	// getVisibleProviderGroups()
 	it("filters hidden models within a provider group", () => {
-		discoveryState.providers = [providerA];
-		discoveryState.hiddenModels = ["openai/gpt-4o-mini"];
+		applyGetModelsResponse({
+			projectSlug: "project-a",
+			providers: [providerA],
+			hiddenModels: ["openai/gpt-4o-mini"],
+		});
 
 		const groups = getVisibleProviderGroups();
 		expect(groups).toHaveLength(1);
@@ -96,8 +101,11 @@ describe("visibility filtering", () => {
 	});
 
 	it("drops a provider group whose models are all hidden", () => {
-		discoveryState.providers = [providerA, providerB];
-		discoveryState.hiddenModels = ["anthropic/claude-sonnet"];
+		applyGetModelsResponse({
+			projectSlug: "project-a",
+			providers: [providerA, providerB],
+			hiddenModels: ["anthropic/claude-sonnet"],
+		});
 
 		const groups = getVisibleProviderGroups();
 		expect(groups).toHaveLength(1);
@@ -106,12 +114,15 @@ describe("visibility filtering", () => {
 	});
 
 	it("never-brick: returns unfiltered groups when all models everywhere are hidden", () => {
-		discoveryState.providers = [providerA, providerB];
-		discoveryState.hiddenModels = [
-			"openai/gpt-4o",
-			"openai/gpt-4o-mini",
-			"anthropic/claude-sonnet",
-		];
+		applyGetModelsResponse({
+			projectSlug: "project-a",
+			providers: [providerA, providerB],
+			hiddenModels: [
+				"openai/gpt-4o",
+				"openai/gpt-4o-mini",
+				"anthropic/claude-sonnet",
+			],
+		});
 
 		const groups = getVisibleProviderGroups();
 		expect(groups).toHaveLength(2);
@@ -167,8 +178,11 @@ describe("visibility filtering", () => {
 	});
 
 	it("responses omitting hidden fields leave existing hidden state untouched", () => {
-		discoveryState.hiddenModels = ["openai/gpt-4o"];
-		discoveryState.hiddenAgents = ["opencode/plan"];
+		handleVisibilityInfo({
+			type: "visibility_info",
+			hiddenModels: ["openai/gpt-4o"],
+			hiddenAgents: ["opencode/plan"],
+		});
 
 		applyGetModelsResponse({
 			projectSlug: "project-a",
@@ -181,6 +195,38 @@ describe("visibility filtering", () => {
 		});
 
 		expect(discoveryState.hiddenModels).toEqual(["openai/gpt-4o"]);
+		expect(discoveryState.hiddenAgents).toEqual(["opencode/plan"]);
+	});
+});
+
+// ─── Undoing a hide that the server refused ─────────────────────────────────
+
+describe("an undo of a visibility change", () => {
+	beforeEach(() => {
+		handleVisibilityInfo({
+			type: "visibility_info",
+			hiddenModels: [],
+			hiddenAgents: [],
+		});
+	});
+
+	it("keeps a re-hidden model when the first request for it fails", () => {
+		const undoA = chooseHiddenEntries({ hiddenModels: ["openai/gpt-4o"] });
+		chooseHiddenEntries({ hiddenModels: [] }); // unhidden again
+		chooseHiddenEntries({ hiddenModels: ["openai/gpt-4o"] }); // and back
+		undoA();
+
+		expect(discoveryState.hiddenModels).toEqual(["openai/gpt-4o"]);
+	});
+
+	it("leaves a pending agent hide alone when a model hide fails", () => {
+		const undoModels = chooseHiddenEntries({
+			hiddenModels: ["openai/gpt-4o"],
+		});
+		chooseHiddenEntries({ hiddenAgents: ["opencode/plan"] });
+		undoModels();
+
+		expect(discoveryState.hiddenModels).toEqual([]);
 		expect(discoveryState.hiddenAgents).toEqual(["opencode/plan"]);
 	});
 });

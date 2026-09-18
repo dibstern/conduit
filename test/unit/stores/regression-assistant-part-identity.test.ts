@@ -28,7 +28,10 @@ import {
 	clearSessionChatState,
 	currentChat,
 } from "../../../src/lib/frontend/stores/chat.svelte.js";
-import { sessionState } from "../../../src/lib/frontend/stores/session.svelte.js";
+import {
+	applySessionUpsert,
+	sessionState,
+} from "../../../src/lib/frontend/stores/session.svelte.js";
 import { handleMessage } from "../../../src/lib/frontend/stores/ws.svelte.js";
 
 const SESSION_ID = "assistant-part-identity";
@@ -36,11 +39,7 @@ const SESSION_ID = "assistant-part-identity";
 beforeEach(() => {
 	vi.useFakeTimers();
 	clearSessionChatState(SESSION_ID);
-	sessionState.sessions.set(SESSION_ID, {
-		id: SESSION_ID,
-		title: "",
-		status: "idle",
-	});
+	applySessionUpsert({ id: SESSION_ID, title: "", status: "idle" });
 	sessionState.currentId = SESSION_ID;
 });
 

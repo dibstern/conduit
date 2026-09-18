@@ -13,8 +13,12 @@
 	import ModelVariant from "./ModelVariant.svelte";
 	import { clickOutside } from "../shared/use-click-outside.svelte.js";
 	import {
+		applyDefaultModelSet,
 		applyGetModelsResponse,
 		applyGetAgentsResponse,
+		applyModelSwitched,
+		chooseDefaultModel,
+		chooseModel,
 		discoveryState,
 		getActiveModel,
 		getAvailableInstances,
@@ -246,12 +250,10 @@
 	function handleModelClick(model: ModelInfo, e: MouseEvent, modelId?: string) {
 		e.stopPropagation();
 		const targetId = modelId ?? model.id;
-		const previousModelId = discoveryState.currentModelId;
-		const previousProviderId = discoveryState.currentProviderId;
-		const previousVariant = discoveryState.currentVariant;
-		const previousVariants = discoveryState.availableVariants;
-		discoveryState.currentModelId = targetId;
-		discoveryState.currentProviderId = model.provider;
+		const undoModel = chooseModel({
+			modelId: targetId,
+			providerId: model.provider,
+		});
 		const projectSlug = getCurrentSlug();
 		const sessionId = sessionState.currentId;
 		if (projectSlug && sessionId) {
@@ -262,32 +264,22 @@
 				providerId: model.provider,
 			})
 				.then((response) => {
-					discoveryState.currentModelId = response.model;
-					discoveryState.currentProviderId = response.provider;
-					discoveryState.currentVariant = response.variant;
-					discoveryState.availableVariants = response.variants;
+					applyModelSwitched(response);
 					void getAgentsRpc({ projectSlug, sessionId })
 						.then(applyGetAgentsResponse)
 						.catch(() => undefined);
 				})
-				.catch(() => {
-					discoveryState.currentModelId = previousModelId;
-					discoveryState.currentProviderId = previousProviderId;
-					discoveryState.currentVariant = previousVariant;
-					discoveryState.availableVariants = previousVariants;
-				});
+				.catch(undoModel);
 		}
 		closePicker();
 	}
 
 	function handleSetDefault(model: ModelInfo, e: MouseEvent) {
 		e.stopPropagation();
-		const previousDefaultModelId = discoveryState.defaultModelId;
-		const previousDefaultProviderId = discoveryState.defaultProviderId;
-		const previousVariant = discoveryState.currentVariant;
-		const previousVariants = discoveryState.availableVariants;
-		discoveryState.defaultModelId = model.id;
-		discoveryState.defaultProviderId = model.provider;
+		const undoDefault = chooseDefaultModel({
+			modelId: model.id,
+			providerId: model.provider,
+		});
 		const projectSlug = getCurrentSlug();
 		if (projectSlug) {
 			void setDefaultModelRpc({
@@ -295,18 +287,8 @@
 				model: model.id,
 				provider: model.provider,
 			})
-				.then((response) => {
-					discoveryState.defaultModelId = response.model;
-					discoveryState.defaultProviderId = response.provider;
-					discoveryState.currentVariant = response.variant;
-					discoveryState.availableVariants = response.variants;
-				})
-				.catch(() => {
-					discoveryState.defaultModelId = previousDefaultModelId;
-					discoveryState.defaultProviderId = previousDefaultProviderId;
-					discoveryState.currentVariant = previousVariant;
-					discoveryState.availableVariants = previousVariants;
-				});
+				.then(applyDefaultModelSet)
+				.catch(undoDefault);
 		}
 	}
 

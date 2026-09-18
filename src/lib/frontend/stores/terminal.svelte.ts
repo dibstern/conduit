@@ -2,8 +2,9 @@
 // Terminal tabs, PTY state, scrollback buffers.
 // Uses callback pattern for high-throughput PTY output (not reactive).
 
+import { SvelteMap } from "svelte/reactivity";
 import type { PtyListResponse } from "../transport/ws-rpc.js";
-import type { RelayMessage, TabEntry } from "../types.js";
+import type { Immutable, RelayMessage, TabEntry } from "../types.js";
 import { STATUS_MESSAGE_MS } from "../ui-constants.js";
 
 // ─── Constants ──────────────────────────────────────────────────────────────
@@ -12,16 +13,51 @@ const SCROLLBACK_MAX_BYTES = 50 * 1024; // 50 KB per tab
 const DEFAULT_MAX_TABS = 10;
 const PENDING_CREATE_TIMEOUT_MS = 15_000;
 
-// ─── State ──────────────────────────────────────────────────────────────────
+// ─── Server-owned state ─────────────────────────────────────────────────────
+// The PTYs the server has told us about, keyed by id. The `handlePty*`
+// functions below are the only writers.
 
-export const terminalState = $state({
-	tabs: new Map<string, TabEntry>(),
+const serverPtys = new SvelteMap<string, { ptyId: string; exited: boolean }>();
+
+// ─── Client-owned state ─────────────────────────────────────────────────────
+// Which terminal this browser tab is looking at, and what it calls each one.
+// The server does send a PTY title — the command it ran — but the label in the
+// tab strip has always been ours: "Terminal N", minted on first sight and
+// editable with `renameTab`. Applying a PTY row never touches a label or the
+// selection.
+
+const tabTitles = new SvelteMap<string, string>();
+
+const clientTerminal = $state({
 	activeTabId: null as string | null,
 	panelOpen: false,
 	pendingCreate: false,
 	statusMessage: null as string | null,
-	maxTabs: DEFAULT_MAX_TABS,
 });
+
+/** Read view over both halves. The server half is readable but has no setter:
+ *  write it by applying a `pty_*` message. */
+export const terminalState = {
+	/** Server rows joined to this tab's labels, keyed by pty id. */
+	get tabs(): ReadonlyMap<string, Immutable<TabEntry>> {
+		return new Map(getTabList().map((tab) => [tab.ptyId, tab]));
+	},
+	get activeTabId(): string | null {
+		return clientTerminal.activeTabId;
+	},
+	get panelOpen(): boolean {
+		return clientTerminal.panelOpen;
+	},
+	get pendingCreate(): boolean {
+		return clientTerminal.pendingCreate;
+	},
+	get statusMessage(): string | null {
+		return clientTerminal.statusMessage;
+	},
+	get maxTabs(): number {
+		return DEFAULT_MAX_TABS;
+	},
+};
 
 // ─── Non-reactive state (high-throughput PTY data) ──────────────────────────
 
@@ -30,23 +66,35 @@ const outputListeners = new Map<string, Set<(data: string) => void>>();
 let pendingCreateTimer: ReturnType<typeof setTimeout> | null = null;
 
 /**
- * Find the lowest available tab number by scanning tab titles.
- * Derives directly from tabs — no separate tracking needed.
- * Accepts an optional Map to scan (for use during batch updates like pty_list
- * where terminalState.tabs hasn't been committed yet).
- * E.g., if tabs "Terminal 1" and "Terminal 3" exist, returns 2.
+ * Mint the next tab label, reusing numbers freed by closed tabs.
+ * Derives from the labels in hand — no separate counter to keep in step.
+ * E.g. with "Terminal 1" and "Terminal 3" open, the next one is "Terminal 2".
  */
-function nextAvailableTabNumber(
-	tabs: Map<string, TabEntry> = terminalState.tabs,
-): number {
+function nextTabTitle(): string {
 	const used = new Set<number>();
-	for (const tab of tabs.values()) {
-		const match = /^Terminal (\d+)$/.exec(tab.title);
+	for (const title of tabTitles.values()) {
+		const match = /^Terminal (\d+)$/.exec(title);
 		if (match) used.add(Number(match[1]));
 	}
 	let n = 1;
 	while (used.has(n)) n++;
-	return n;
+	return `Terminal ${n}`;
+}
+
+/** Record a PTY the server reported, labelling it on first sight. */
+function rememberPty(ptyId: string, exited: boolean): void {
+	if (!tabTitles.has(ptyId)) tabTitles.set(ptyId, nextTabTitle());
+	serverPtys.set(ptyId, { ptyId, exited });
+	// Don't overwrite: output can arrive before the row does.
+	if (!scrollbackBuffers.has(ptyId)) scrollbackBuffers.set(ptyId, []);
+}
+
+/** Drop a PTY and everything this tab kept about it. */
+function forgetPty(ptyId: string): void {
+	serverPtys.delete(ptyId);
+	tabTitles.delete(ptyId);
+	scrollbackBuffers.delete(ptyId);
+	outputListeners.delete(ptyId);
 }
 
 // ─── Derived getters ────────────────────────────────────────────────────────
@@ -54,20 +102,21 @@ function nextAvailableTabNumber(
 
 /** Get the number of open terminal tabs. */
 export function getTabCount(): number {
-	return terminalState.tabs.size;
+	return serverPtys.size;
 }
 
 /** Get whether we can create more tabs. */
 export function getCanCreateTab(): boolean {
-	return (
-		!terminalState.pendingCreate &&
-		terminalState.tabs.size < terminalState.maxTabs
-	);
+	return !clientTerminal.pendingCreate && serverPtys.size < DEFAULT_MAX_TABS;
 }
 
-/** Get the ordered list of tabs for rendering. */
-export function getTabList(): TabEntry[] {
-	return Array.from(terminalState.tabs.values());
+/** Get the ordered list of tabs for rendering: a server row plus its label. */
+export function getTabList(): readonly Immutable<TabEntry>[] {
+	return [...serverPtys.values()].map((pty) => ({
+		ptyId: pty.ptyId,
+		title: tabTitles.get(pty.ptyId) ?? "",
+		exited: pty.exited,
+	}));
 }
 
 // ─── Output subscription (callback pattern) ─────────────────────────────────
@@ -98,18 +147,10 @@ export function onOutput(
 	};
 }
 
-/** Get scrollback buffer for replay on mount. */
-export function getScrollback(ptyId: string): string[] {
+/** Get scrollback buffer for replay on mount. This is the store's own array,
+ *  not a copy — the caller replays it, it does not get to edit it. */
+export function getScrollback(ptyId: string): readonly string[] {
 	return scrollbackBuffers.get(ptyId) ?? [];
-}
-
-// ─── Helpers ────────────────────────────────────────────────────────────────
-
-/** Generate a sequential tab title, reusing numbers from closed tabs. */
-function generateTabTitle(
-	tabs: Map<string, TabEntry> = terminalState.tabs,
-): string {
-	return `Terminal ${nextAvailableTabNumber(tabs)}`;
 }
 
 // ─── Message handlers ───────────────────────────────────────────────────────
@@ -122,41 +163,22 @@ export function handlePtyList(
 
 	if (ptys.length === 0) return;
 
-	const newTabs = new Map(terminalState.tabs);
 	const serverIds = new Set<string>();
-
 	for (const pty of ptys) {
 		const ptyId = pty.id;
 		if (!ptyId) continue;
 		serverIds.add(ptyId);
-
-		// Only add tabs we don't already have
-		if (!newTabs.has(ptyId)) {
-			const title = generateTabTitle(newTabs);
-			const exited = pty.status === "exited";
-			newTabs.set(ptyId, { ptyId, title, exited });
-			// Initialize scrollback for this tab
-			if (!scrollbackBuffers.has(ptyId)) {
-				scrollbackBuffers.set(ptyId, []);
-			}
-		}
+		if (!serverPtys.has(ptyId)) rememberPty(ptyId, pty.status === "exited");
 	}
 
-	// Remove tabs no longer on server
-	for (const [id] of newTabs) {
-		if (!serverIds.has(id)) {
-			newTabs.delete(id);
-			scrollbackBuffers.delete(id);
-			outputListeners.delete(id);
-		}
+	for (const id of [...serverPtys.keys()]) {
+		if (!serverIds.has(id)) forgetPty(id);
 	}
-
-	terminalState.tabs = newTabs;
 
 	// Set active tab if none set
-	if (!terminalState.activeTabId || !newTabs.has(terminalState.activeTabId)) {
-		const firstId = newTabs.keys().next().value;
-		terminalState.activeTabId = firstId ?? null;
+	const active = clientTerminal.activeTabId;
+	if (!active || !serverPtys.has(active)) {
+		clientTerminal.activeTabId = serverPtys.keys().next().value ?? null;
 	}
 }
 
@@ -186,30 +208,19 @@ export function handlePtyCreated(
 	// pty.created SSE event that also gets translated + broadcast. Without this
 	// guard the second arrival regenerates the title (e.g. "Terminal 1" → "Terminal 2")
 	// because generateTabTitle() sees the first title as already taken.
-	if (terminalState.tabs.has(ptyId)) return;
+	if (serverPtys.has(ptyId)) return;
 
 	// Clear pending state
-	terminalState.pendingCreate = false;
+	clientTerminal.pendingCreate = false;
 	if (pendingCreateTimer !== null) {
 		clearTimeout(pendingCreateTimer);
 		pendingCreateTimer = null;
 	}
-	terminalState.statusMessage = null;
+	clientTerminal.statusMessage = null;
 
-	// Generate sequential tab title
-	const title = generateTabTitle();
-
-	// Add tab
-	const newTabs = new Map(terminalState.tabs);
-	newTabs.set(ptyId, { ptyId, title, exited: false });
-	terminalState.tabs = newTabs;
-	terminalState.activeTabId = ptyId;
-	terminalState.panelOpen = true;
-
-	// Initialize scrollback (don't overwrite if output arrived before pty_created)
-	if (!scrollbackBuffers.has(ptyId)) {
-		scrollbackBuffers.set(ptyId, []);
-	}
+	rememberPty(ptyId, false);
+	clientTerminal.activeTabId = ptyId;
+	clientTerminal.panelOpen = true;
 }
 
 export function handlePtyOutput(
@@ -250,12 +261,7 @@ export function handlePtyExited(
 	const { ptyId } = msg;
 	if (!ptyId) return;
 
-	const newTabs = new Map(terminalState.tabs);
-	const tab = newTabs.get(ptyId);
-	if (tab) {
-		newTabs.set(ptyId, { ...tab, exited: true });
-		terminalState.tabs = newTabs;
-	}
+	if (serverPtys.has(ptyId)) serverPtys.set(ptyId, { ptyId, exited: true });
 }
 
 export function handlePtyDeleted(
@@ -264,58 +270,50 @@ export function handlePtyDeleted(
 	const { ptyId } = msg;
 	if (!ptyId) return;
 
-	const newTabs = new Map(terminalState.tabs);
-	newTabs.delete(ptyId);
-	terminalState.tabs = newTabs;
-
-	// Clean up scrollback and listeners
-	scrollbackBuffers.delete(ptyId);
-	outputListeners.delete(ptyId);
+	forgetPty(ptyId);
 
 	// Switch to another tab if the deleted one was active
-	if (terminalState.activeTabId === ptyId) {
-		const remaining = Array.from(newTabs.keys());
-		terminalState.activeTabId =
+	if (clientTerminal.activeTabId === ptyId) {
+		const remaining = [...serverPtys.keys()];
+		clientTerminal.activeTabId =
 			// biome-ignore lint/style/noNonNullAssertion: safe — guarded by length check
 			remaining.length > 0 ? remaining[remaining.length - 1]! : null;
 	}
 
 	// Close panel if no tabs left
-	if (newTabs.size === 0) {
-		terminalState.panelOpen = false;
+	if (serverPtys.size === 0) {
+		clientTerminal.panelOpen = false;
 	}
 }
 
 export function handlePtyError(
 	msg: Extract<RelayMessage, { type: "error" }>,
 ): void {
-	terminalState.pendingCreate = false;
+	clientTerminal.pendingCreate = false;
 	if (pendingCreateTimer !== null) {
 		clearTimeout(pendingCreateTimer);
 		pendingCreateTimer = null;
 	}
-	const errorText = msg.message || "Terminal creation failed";
-	terminalState.statusMessage = errorText;
+	clientTerminal.statusMessage = msg.message || "Terminal creation failed";
 	setTimeout(() => {
-		terminalState.statusMessage = null;
+		clientTerminal.statusMessage = null;
 	}, STATUS_MESSAGE_MS);
 }
 
 // ─── Actions ────────────────────────────────────────────────────────────────
 
 export function beginCreateTab(): boolean {
-	if (terminalState.pendingCreate) return false;
-	if (terminalState.tabs.size >= terminalState.maxTabs) return false;
+	if (!getCanCreateTab()) return false;
 
-	terminalState.pendingCreate = true;
-	terminalState.statusMessage = "Creating terminal...";
+	clientTerminal.pendingCreate = true;
+	clientTerminal.statusMessage = "Creating terminal...";
 
 	pendingCreateTimer = setTimeout(() => {
-		if (terminalState.pendingCreate) {
-			terminalState.pendingCreate = false;
-			terminalState.statusMessage = "Terminal creation timed out";
+		if (clientTerminal.pendingCreate) {
+			clientTerminal.pendingCreate = false;
+			clientTerminal.statusMessage = "Terminal creation timed out";
 			setTimeout(() => {
-				terminalState.statusMessage = null;
+				clientTerminal.statusMessage = null;
 			}, STATUS_MESSAGE_MS);
 		}
 	}, PENDING_CREATE_TIMEOUT_MS);
@@ -334,40 +332,29 @@ export function failCreateTab(message = "Terminal creation failed"): void {
 
 /** Switch to a different tab. */
 export function switchTab(ptyId: string): void {
-	if (terminalState.tabs.has(ptyId)) {
-		terminalState.activeTabId = ptyId;
-	}
+	if (serverPtys.has(ptyId)) clientTerminal.activeTabId = ptyId;
 }
 
-/** Rename a tab. */
+/** Rename a tab. The label is this tab's, so nothing is sent to the server. */
 export function renameTab(ptyId: string, title: string): void {
-	const newTabs = new Map(terminalState.tabs);
-	const tab = newTabs.get(ptyId);
-	if (tab) {
-		newTabs.set(ptyId, { ...tab, title });
-		terminalState.tabs = newTabs;
-	}
+	if (serverPtys.has(ptyId)) tabTitles.set(ptyId, title);
 }
 
 /**
  * Toggle terminal panel open/closed.
  */
 export function togglePanel(): void {
-	if (terminalState.panelOpen) {
-		terminalState.panelOpen = false;
-	} else {
-		terminalState.panelOpen = true;
-	}
+	clientTerminal.panelOpen = !clientTerminal.panelOpen;
 }
 
 /** Open the terminal panel. */
 export function openPanel(): void {
-	terminalState.panelOpen = true;
+	clientTerminal.panelOpen = true;
 }
 
 /** Close the terminal panel. */
 export function closePanel(): void {
-	terminalState.panelOpen = false;
+	clientTerminal.panelOpen = false;
 }
 
 /**
@@ -384,11 +371,11 @@ export function getScrollbackSize(ptyId: string): number {
 
 /** Clean up all terminal state (on disconnect or destroy). */
 export function destroyAll(): void {
-	terminalState.tabs = new Map();
-	terminalState.activeTabId = null;
-	terminalState.panelOpen = false;
-	terminalState.pendingCreate = false;
-	terminalState.statusMessage = null;
+	for (const id of [...serverPtys.keys()]) forgetPty(id);
+	clientTerminal.activeTabId = null;
+	clientTerminal.panelOpen = false;
+	clientTerminal.pendingCreate = false;
+	clientTerminal.statusMessage = null;
 	scrollbackBuffers.clear();
 	outputListeners.clear();
 	if (pendingCreateTimer !== null) {

@@ -45,7 +45,10 @@ import {
 	getOrCreateSessionSlot,
 	historyState,
 } from "../../../src/lib/frontend/stores/chat.svelte.js";
-import { sessionState } from "../../../src/lib/frontend/stores/session.svelte.js";
+import {
+	clearSessionState,
+	sessionState,
+} from "../../../src/lib/frontend/stores/session.svelte.js";
 import { handleMessage } from "../../../src/lib/frontend/stores/ws.svelte.js";
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
@@ -67,11 +70,8 @@ function makeHistoryMessages(count: number) {
 
 beforeEach(() => {
 	sessionState.currentId = null;
-	sessionState.rootSessions = [];
-	sessionState.allSessions = [];
-	sessionState.searchResults = null;
+	clearSessionState();
 	sessionState.searchQuery = "";
-	sessionState.hasMore = false;
 	clearMessages();
 	for (const id of ["session-A", "session-B", "session-C"]) {
 		clearSessionChatState(id);

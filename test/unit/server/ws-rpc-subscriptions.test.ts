@@ -6,21 +6,38 @@ import {
 	type RpcGroup,
 	type RpcMessage,
 	RpcServer,
+	RpcTest,
 } from "@effect/rpc";
 import { describe, it } from "@effect/vitest";
-import { Effect, Layer, Queue, type Scope, Stream, TestClock } from "effect";
+import {
+	Effect,
+	HashMap,
+	Layer,
+	Queue,
+	Ref,
+	type Scope,
+	Stream,
+	TestClock,
+} from "effect";
 import { expect, expectTypeOf } from "vitest";
 import {
 	type WsRpcError,
 	WsRpcGroup,
 } from "../../../src/lib/contracts/ws-rpc.js";
+import { DaemonEventBusLive } from "../../../src/lib/domain/daemon/Services/daemon-pubsub.js";
 import {
 	SessionEventBusLive,
 	SessionEventBusTag,
 } from "../../../src/lib/domain/relay/Services/session-event-bus.js";
+import { SessionManagerServiceLive } from "../../../src/lib/domain/relay/Services/session-manager-service.js";
+import {
+	makeSessionManagerStateLive,
+	SessionManagerStateTag,
+} from "../../../src/lib/domain/relay/Services/session-manager-state.js";
 import { EventStoreEffectTag } from "../../../src/lib/persistence/effect/event-store-effect.js";
 import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
 import { ProjectionRunnerEffectTag } from "../../../src/lib/persistence/effect/projection-runner-effect.js";
+import { ReadQueryEffectTag } from "../../../src/lib/persistence/effect/read-query-effect.js";
 import {
 	type CanonicalEvent,
 	canonicalEvent,
@@ -43,8 +60,21 @@ const makeLayer = () => {
 			),
 		),
 	);
+	const dependencies = Layer.mergeAll(
+		makeTestHandlerLayer(),
+		persistence,
+		makeSessionManagerStateLive(),
+		DaemonEventBusLive,
+	);
 	return WsRpcServerLayer.pipe(
-		Layer.provideMerge(Layer.merge(makeTestHandlerLayer(), persistence)),
+		Layer.provideMerge(
+			Layer.merge(
+				dependencies,
+				Layer.fresh(SessionManagerServiceLive).pipe(
+					Layer.provide(dependencies),
+				),
+			),
+		),
 	);
 };
 
@@ -67,6 +97,88 @@ describe("subscription RPC handlers", () => {
 			Extract<Layer.Layer.Context<typeof WsRpcServerLayer>, Scope.Scope>
 		>().toEqualTypeOf<never>();
 	});
+
+	it.scoped(
+		"shell snapshot, live and replay preserve Ref-only fork lineage from ListSessions",
+		() =>
+			Effect.gen(function* () {
+				const runner = yield* ProjectionRunnerEffectTag;
+				yield* runner.recover();
+				const created = yield* commit(
+					canonicalEvent(
+						"session.created",
+						"fork-1",
+						{ sessionId: "fork-1", title: "Fork", provider: "opencode" },
+						{ provider: "opencode", createdAt: 1 },
+					),
+				);
+				const state = yield* SessionManagerStateTag;
+				yield* Ref.update(state, (value) => ({
+					...value,
+					forkMeta: HashMap.make([
+						"fork-1",
+						{
+							parentID: "parent-1",
+							forkMessageId: "message-1",
+							forkPointTimestamp: 123456,
+						},
+					]),
+				}));
+				const readQuery = yield* ReadQueryEffectTag;
+				expect(
+					yield* readQuery.getSessionListEntry("fork-1"),
+				).not.toHaveProperty("forkPointTimestamp");
+				const client = yield* RpcTest.makeClient(WsRpcGroup);
+				const listed = yield* client.ListSessions({ projectSlug: "project-a" });
+				expect(listed.sessions).toEqual([
+					expect.objectContaining({
+						id: "fork-1",
+						parentID: "parent-1",
+						forkMessageId: "message-1",
+						forkPointTimestamp: 123456,
+					}),
+				]);
+				const envelopes = yield* Queue.unbounded<unknown>();
+				yield* client.SubscribeShell({ projectSlug: "project-a" }).pipe(
+					Stream.runForEach((envelope) => Queue.offer(envelopes, envelope)),
+					Effect.forkScoped,
+				);
+				expect(yield* Queue.take(envelopes)).toEqual({
+					_tag: "snapshot",
+					sequence: created.sequence,
+					rows: listed.sessions,
+				});
+				expect(yield* Queue.take(envelopes)).toEqual({ _tag: "synchronized" });
+				const renamed = yield* commit(
+					canonicalEvent(
+						"session.renamed",
+						"fork-1",
+						{ sessionId: "fork-1", title: "Renamed fork" },
+						{ provider: "opencode", createdAt: 2 },
+					),
+				);
+				yield* TestClock.adjust("50 millis");
+				const updated = yield* client.ListSessions({
+					projectSlug: "project-a",
+				});
+				const expected = {
+					_tag: "upsert",
+					sequence: renamed.sequence,
+					item: updated.sessions[0],
+				};
+				expect(yield* Queue.take(envelopes)).toEqual(expected);
+				const replay = yield* client
+					.SubscribeShell({
+						projectSlug: "project-a",
+						resumeFromSequence: created.sequence,
+					})
+					.pipe(Stream.take(2), Stream.runCollect);
+				expect(Array.from(replay)).toEqual([
+					expected,
+					{ _tag: "synchronized" },
+				]);
+			}).pipe(Effect.provide(makeLayer())),
+	);
 
 	for (const member of ["SubscribeShell", "SubscribeSessionDetail"] as const) {
 		it.scoped(
