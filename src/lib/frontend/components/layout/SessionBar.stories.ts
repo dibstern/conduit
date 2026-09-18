@@ -238,8 +238,8 @@ export const Collapsed: Story = {
 			bar.getBoundingClientRect().bottom,
 		);
 
-		// Where you are shrinks to the name alone: the identity, the instance
-		// badge and the title's own menu chevron are all out of the smallest row.
+		// Where you are shrinks to the name alone: the identity and the instance
+		// badge are both out of the smallest row.
 		expect(canvas.queryByTestId("session-bar-identity")).not.toBeVisible();
 
 		// The word goes but the accessible name does not — this is the only way

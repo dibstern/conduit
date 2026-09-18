@@ -35,7 +35,6 @@
 	import { openMobileSidebar, setSidebarPanel } from "../../stores/ui.svelte.js";
 	import Badge from "../ui/Badge.svelte";
 	import Button from "../ui/Button.svelte";
-	import Icon from "../ui/Icon.svelte";
 	import Menu from "../ui/Menu.svelte";
 	import MenuItem from "../ui/MenuItem.svelte";
 	import MenuSeparator from "../ui/MenuSeparator.svelte";
@@ -167,14 +166,13 @@
 	     one across the collapse, because this is the same element in both
 	     layouts.
 
-	     Collapsed it drops a size and loses its chevron: the row is sharing its
-	     width with two 44px controls, and the mock's smallest state carries the
-	     name alone.
+	     Collapsed it drops a size: the row is sharing its width with two 44px
+	     controls, and the mock's smallest state carries the name alone.
 
-	     The chevron is the session menu's affordance. It is drawn but inert, and
-	     the heading is deliberately not focusable: a focus stop that does
-	     nothing is worse than no focus stop. It becomes a real control when the
-	     session menu is wired up. -->
+	     The mock draws a chevron beside the name, the session menu's affordance.
+	     It is not here yet, because a control that does nothing is worse than no
+	     control -- it reads as broken rather than as coming. It arrives with the
+	     menu it opens, as one of that menu's two triggers. -->
 	<h1
 		id="session-bar-title"
 		data-testid="session-bar-title"
@@ -183,9 +181,6 @@
 		class:text-base={collapsed}
 	>
 		<span class="truncate">{title}</span>
-		{#if !collapsed}
-			<Icon name="chevron-down" size={12} class="shrink-0 text-text-muted" />
-		{/if}
 	</h1>
 
 	{#if collapsed}
