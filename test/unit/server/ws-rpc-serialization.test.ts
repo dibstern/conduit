@@ -61,6 +61,36 @@ const detailEnvelopes = [
 	},
 	{ _tag: "synchronized" },
 	{
+		// The delta ni8.5 §7 makes detail emit: the whole projected message the
+		// version re-query returned, stamped with the read-model version it was
+		// read at — the same number a resume cursor resolves against.
+		_tag: "upsert",
+		item: {
+			_tag: "transcriptMessage",
+			message: {
+				id: "message-1",
+				role: "assistant",
+				parts: [
+					{ id: "part-1", type: "text", text: 'Hello "world"\n雪' },
+					{
+						id: "part-2",
+						type: "tool",
+						text: "",
+						callID: "call-1",
+						tool: "Bash",
+						state: {
+							status: "completed",
+							input: { command: "pwd", nested: { flag: true } },
+							output: "/repo\n",
+						},
+					},
+				],
+				time: { created: 100, completed: 300 },
+			},
+		},
+		sequence: 44,
+	},
+	{
 		_tag: "upsert",
 		item: {
 			_tag: "event",
@@ -374,6 +404,20 @@ it("SubscribeSessionDetail preserves transcript, model identity and stored tool 
 					"session.forked",
 					"session.permission_mode_changed",
 				]);
+				// The delta variant detail actually produces now: a whole message,
+				// with its tool part's open-ended `state` intact through JSON.
+				const upserted = Array.from(result).flatMap((envelope) =>
+					envelope._tag === "upsert" &&
+					envelope.item._tag === "transcriptMessage"
+						? [envelope.item.message]
+						: [],
+				);
+				expect(upserted.map((message) => message.id)).toEqual(["message-1"]);
+				expect(upserted[0]?.parts?.[1]?.state).toEqual({
+					status: "completed",
+					input: { command: "pwd", nested: { flag: true } },
+					output: "/repo\n",
+				});
 				expect(Array.from(result)).toEqual(detailEnvelopes);
 				expect(serverFrames.map((frame) => JSON.parse(frame))).toContainEqual(
 					expect.objectContaining({ _tag: "Chunk", values: detailEnvelopes }),
