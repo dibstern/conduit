@@ -112,6 +112,7 @@ describe("switchToSession", () => {
 			projectSlug: "project-a",
 			sessionId: "new-session",
 			originId: expect.any(String),
+			requestId: expect.any(String),
 		});
 	});
 

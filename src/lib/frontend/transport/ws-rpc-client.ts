@@ -171,6 +171,7 @@ export interface ViewSessionRpcInput {
 	readonly projectSlug: string;
 	readonly sessionId: string;
 	readonly originId: string;
+	readonly requestId?: string;
 }
 
 export interface DeleteSessionRpcInput {

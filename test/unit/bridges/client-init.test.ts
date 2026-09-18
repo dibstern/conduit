@@ -401,6 +401,7 @@ describe("handleClientConnected — model info", () => {
 		expect(deps.client.provider.list).not.toHaveBeenCalled();
 		expect(deps.wsHandler.sendTo).toHaveBeenCalledWith("client-1", {
 			type: "model_info",
+			sessionId: "session-1",
 			model: "gpt-4",
 			provider: "openai",
 		});
@@ -430,6 +431,7 @@ describe("handleClientConnected — model info", () => {
 
 		expect(deps.wsHandler.sendTo).toHaveBeenCalledWith("client-1", {
 			type: "model_info",
+			sessionId: "session-1",
 			model: "gpt-4",
 			provider: "openai",
 		});
@@ -450,6 +452,7 @@ describe("handleClientConnected — model info", () => {
 
 		expect(deps.wsHandler.sendTo).toHaveBeenCalledWith("client-1", {
 			type: "model_info",
+			sessionId: "session-1",
 			model: "claude-3",
 			provider: "anthropic",
 		});
@@ -477,6 +480,7 @@ describe("handleClientConnected — model info", () => {
 		);
 		expect(deps.wsHandler.sendTo).toHaveBeenCalledWith("client-1", {
 			type: "model_info",
+			sessionId: "session-1",
 			model: "claude-3",
 			provider: "anthropic",
 		});
@@ -901,6 +905,7 @@ describe("handleClientConnected — model list", () => {
 
 		expect(deps.wsHandler.sendTo).toHaveBeenCalledWith("client-1", {
 			type: "model_info",
+			sessionId: "session-1",
 			model: "claude-sonnet-4-7",
 			provider: "claude",
 		});

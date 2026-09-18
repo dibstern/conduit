@@ -93,8 +93,13 @@
 			.filter((g) => g.models.length > 0);
 	});
 
-	const activeModel = $derived(getActiveModel());
-	const hasModel = $derived(!!discoveryState.currentModelId);
+	const activeModelId = $derived(
+		sessionState.currentId
+			? discoveryState.currentModelId
+			: discoveryState.defaultModelId,
+	);
+	const activeModel = $derived(getActiveModel(activeModelId));
+	const hasModel = $derived(!!activeModelId);
 	$effect(() => {
 		const turnEpoch = currentChat().turnEpoch;
 		const projectSlug = getCurrentSlug();
@@ -116,12 +121,12 @@
 		if (activeModel) {
 			const base = stripDateSuffix(formatModelName(activeModel));
 			const scope = activeModel.routingOptions?.find(
-				(option) => option.value === discoveryState.currentModelId,
+				(option) => option.value === activeModelId,
 			);
 			return scope ? `${base} · ${scope.label}` : base;
 		}
-		if (discoveryState.currentModelId) {
-			return stripDateSuffix(discoveryState.currentModelId);
+		if (activeModelId) {
+			return stripDateSuffix(activeModelId);
 		}
 		return "Select model";
 	});
@@ -157,9 +162,9 @@
 
 	function isActiveModel(model: ModelInfo): boolean {
 		return (
-			model.id === discoveryState.currentModelId ||
+			model.id === activeModelId ||
 			!!model.routingOptions?.some(
-				(option) => option.value === discoveryState.currentModelId,
+				(option) => option.value === activeModelId,
 			)
 		);
 	}
@@ -504,7 +509,7 @@
 											<span class="model-routing flex items-center gap-0.5 shrink-0 mr-1">
 												{#each model.routingOptions as option (option.value)}
 													<button
-														class="px-1.5 py-0.5 text-xs border-none rounded cursor-pointer transition-colors duration-100 {option.value === discoveryState.currentModelId ? 'bg-bg text-accent font-semibold' : 'bg-transparent text-text-dimmer hover:bg-bg hover:text-text-secondary'}"
+														class="px-1.5 py-0.5 text-xs border-none rounded cursor-pointer transition-colors duration-100 {option.value === activeModelId ? 'bg-bg text-accent font-semibold' : 'bg-transparent text-text-dimmer hover:bg-bg hover:text-text-secondary'}"
 														title="Route via {option.label}{option.isDefault ? ' (default)' : ''}"
 														data-routing-value={option.value}
 														onclick={(e) => handleModelClick(model, e, option.value)}

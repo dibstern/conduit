@@ -43,6 +43,7 @@ const SESSION_METADATA_FANOUT = 4;
 
 interface ViewSessionPayload {
 	readonly sessionId: string;
+	readonly requestId?: string;
 }
 
 interface NewSessionPayload {
@@ -102,6 +103,7 @@ const sendSessionMetadata = (clientId: string, id: string) =>
 					if (session.modelID) {
 						wsHandler.sendTo(clientId, {
 							type: "model_info",
+							sessionId: id,
 							model: session.modelID,
 							provider: session.providerID ?? "",
 						});
@@ -448,10 +450,12 @@ const recordSessionViewed = (sessionId: string, at: number) =>
 export const viewSessionForClient = ({
 	clientId,
 	sessionId,
+	requestId,
 	skipMetadata,
 }: {
 	readonly clientId: string;
 	readonly sessionId: string;
+	readonly requestId?: string;
 	readonly skipMetadata?: boolean;
 }) =>
 	Effect.gen(function* () {
@@ -464,7 +468,9 @@ export const viewSessionForClient = ({
 		// Read before the switch overwrites it: the session this client is leaving.
 		const departing = wsHandler.getClientSession(clientId);
 
-		yield* switchClientToSession(clientId, id);
+		yield* switchClientToSession(clientId, id, {
+			...(requestId != null && { requestId: requestId as RequestId }),
+		});
 
 		const now = Date.now();
 		yield* recordSessionViewed(id, now);
@@ -512,6 +518,7 @@ export const handleViewSession = (
 	viewSessionForClient({
 		clientId,
 		sessionId: payload.sessionId,
+		...(payload.requestId != null ? { requestId: payload.requestId } : {}),
 		...(skipMetadata != null ? { skipMetadata } : {}),
 	});
 

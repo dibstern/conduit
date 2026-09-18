@@ -1,4 +1,5 @@
 import { cleanup, fireEvent, render, waitFor } from "@testing-library/svelte";
+import { tick } from "svelte";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import InstanceModelPicker from "../../../src/lib/frontend/components/model/InstanceModelPicker.svelte";
 import {
@@ -139,6 +140,26 @@ describe("InstanceModelPicker", () => {
 
 	// The drift indicator moved to InputArea (it is a status line, not a
 	// control); its copy and gating are covered by features/model-drift.feature.
+	it.each([
+		null,
+		"session-1",
+	])("derives the displayed model from a default update only without a session (%s)", async (sessionId) => {
+		sessionState.currentId = sessionId;
+		const { getByTitle } = render(InstanceModelPicker);
+		expect(getByTitle("Switch model").textContent).toContain("Sonnet 4.7");
+		handleDefaultModelInfo({
+			type: "default_model_info",
+			model: "claude-opus-4-7",
+			provider: "claude",
+			variant: "",
+		});
+		await tick();
+		await waitFor(() => {
+			expect(getByTitle("Switch model").textContent).toContain(
+				sessionId ? "Sonnet 4.7" : "Opus 4.7",
+			);
+		});
+	});
 
 	it("refreshes active-provider agents after switching model", async () => {
 		const { container, getByTitle } = render(InstanceModelPicker);

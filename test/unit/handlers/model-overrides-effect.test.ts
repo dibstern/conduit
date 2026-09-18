@@ -118,6 +118,7 @@ describe("model handlers with Effect override state", () => {
 				expect(yield* getVariant("session-1")).toBe("fast");
 				expect(ws.sendToSession).toHaveBeenCalledWith("session-1", {
 					type: "model_info",
+					sessionId: "session-1",
 					model: "gpt-4",
 					provider: "openai",
 				});

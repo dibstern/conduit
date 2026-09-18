@@ -298,8 +298,9 @@ export function getAllModels(): readonly Immutable<ModelInfo>[] {
 
 /** Get the currently active model. Grouped models (Bedrock geo routing)
  *  match when the active id is any of their routing option values. */
-export function getActiveModel(): Immutable<ModelInfo> | undefined {
-	const currentId = discoveryState.currentModelId;
+export function getActiveModel(
+	currentId = discoveryState.currentModelId,
+): Immutable<ModelInfo> | undefined {
 	return getAllModels().find(
 		(m) =>
 			m.id === currentId ||

@@ -96,6 +96,7 @@ describe("model handlers with Effect-native model service", () => {
 					expect(modelService.getSession).toHaveBeenCalledWith("session-1");
 					expect(wsHandler.sendTo).toHaveBeenCalledWith("client-1", {
 						type: "model_info",
+						sessionId: "session-1",
 						model: "gpt-4",
 						provider: "openai",
 					});

@@ -1038,6 +1038,7 @@ export class ViewSession extends Schema.TaggedRequest<ViewSession>()(
 			projectSlug: NonEmptyString,
 			sessionId: NonEmptyString,
 			originId: NonEmptyString,
+			requestId: Schema.optional(NonEmptyString),
 		},
 	},
 ) {}

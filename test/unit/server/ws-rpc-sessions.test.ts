@@ -101,6 +101,7 @@ describe("WsRpcServerLayer ListSessions", () => {
 				projectSlug: "project-a",
 				sessionId: "session-1",
 				originId: "browser-tab-a",
+				requestId: "view-request-1",
 			});
 
 			expect(result).toEqual({ ok: true });
@@ -113,6 +114,7 @@ describe("WsRpcServerLayer ListSessions", () => {
 				expect.objectContaining({
 					type: "session_switched",
 					id: "session-1",
+					requestId: "view-request-1",
 				}),
 			);
 		}).pipe(
