@@ -58,6 +58,56 @@ export const mockSessionLongTitle: SessionInfo = {
 	processing: false,
 };
 
+export const mockSessionNeedsApproval: SessionInfo = {
+	id: "sess_01JTEST000000000000000020",
+	title: "Approve database migration",
+	createdAt: "2026-02-25T10:00:00Z",
+	updatedAt: "2026-02-25T10:05:00Z",
+	messageCount: 7,
+	processing: false,
+	attention: "needs-approval",
+};
+
+export const mockSessionNeedsReply: SessionInfo = {
+	id: "sess_01JTEST000000000000000021",
+	title: "Clarify deployment target",
+	createdAt: "2026-02-25T10:10:00Z",
+	updatedAt: "2026-02-25T10:15:00Z",
+	messageCount: 4,
+	processing: false,
+	attention: "needs-reply",
+};
+
+export const mockSessionFailed: SessionInfo = {
+	id: "sess_01JTEST000000000000000022",
+	title: "Repair failed release",
+	createdAt: "2026-02-25T10:20:00Z",
+	updatedAt: "2026-02-25T10:25:00Z",
+	messageCount: 9,
+	processing: false,
+	attention: "error",
+};
+
+export const mockSessionDoneUnread: SessionInfo = {
+	id: "sess_01JTEST000000000000000023",
+	title: "Review completed refactor",
+	createdAt: "2026-02-25T10:30:00Z",
+	updatedAt: "2026-02-25T10:35:00Z",
+	messageCount: 6,
+	processing: false,
+	attention: "done-unread",
+};
+
+export const mockSessionIdle: SessionInfo = {
+	id: "sess_01JTEST000000000000000024",
+	title: "Plan documentation cleanup",
+	createdAt: "2026-02-25T10:40:00Z",
+	updatedAt: "2026-02-25T10:45:00Z",
+	messageCount: 2,
+	processing: false,
+	attention: "idle",
+};
+
 export const mockSubagentSession: SessionInfo = {
 	id: "sess_01JTEST000000000000000006",
 	title: "Inspect the Storybook coverage gaps",

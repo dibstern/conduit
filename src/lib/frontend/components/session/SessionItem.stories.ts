@@ -1,8 +1,14 @@
 import type { Meta, StoryObj } from "@storybook/svelte-vite";
 import { expect, fn, userEvent, within } from "storybook/test";
 import {
+	mockForkSession,
 	mockSession,
+	mockSessionDoneUnread,
+	mockSessionFailed,
+	mockSessionIdle,
 	mockSessionLongTitle,
+	mockSessionNeedsApproval,
+	mockSessionNeedsReply,
 	mockSessionProcessing,
 } from "../../stories/mocks.js";
 import SessionItemWithContextMenu from "./__fixtures__/SessionItemWithContextMenu.svelte";
@@ -42,10 +48,146 @@ export const Processing: Story = {
 	},
 };
 
+// A blocked approval shows its word and leads the row name with the spoken state.
+export const NeedsApproval: Story = {
+	args: {
+		session: mockSessionNeedsApproval,
+		active: false,
+	},
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		await expect(canvas.getByText("Approve")).toBeVisible();
+		await expect(
+			canvas.getByLabelText(/^Needs approval,/),
+		).toHaveAccessibleName(/^Needs approval,/);
+	},
+};
+
+// A waiting question shows its reply word and leads the row name with the spoken state.
+export const NeedsReply: Story = {
+	args: {
+		session: mockSessionNeedsReply,
+		active: false,
+	},
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		await expect(canvas.getByText("Reply")).toBeVisible();
+		await expect(canvas.getByLabelText(/^Needs reply,/)).toHaveAccessibleName(
+			/^Needs reply,/,
+		);
+	},
+};
+
+// A failed session shows its failure word and leads the row name with the spoken state.
+export const Failed: Story = {
+	args: {
+		session: mockSessionFailed,
+		active: false,
+	},
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		await expect(canvas.getByText("Failed")).toBeVisible();
+		await expect(canvas.getByLabelText(/^Failed,/)).toHaveAccessibleName(
+			/^Failed,/,
+		);
+	},
+};
+
+// A completed unread session shows Done and leads the row name with the spoken state.
+export const DoneUnread: Story = {
+	args: {
+		session: mockSessionDoneUnread,
+		active: false,
+	},
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		await expect(canvas.getByText("Done")).toBeVisible();
+		await expect(canvas.getByLabelText(/^Done, unread,/)).toHaveAccessibleName(
+			/^Done, unread,/,
+		);
+	},
+};
+
+// A quiet idle session has no visible status pill.
+export const Idle: Story = {
+	args: {
+		session: mockSessionIdle,
+		active: false,
+	},
+	play: async ({ canvasElement }) => {
+		const row = within(canvasElement).getByLabelText(
+			/^Plan documentation cleanup,/,
+		);
+		await expect(row.querySelector(".session-item-status")).toBeNull();
+	},
+};
+
 export const LongTitle: Story = {
 	args: {
 		session: mockSessionLongTitle,
 		active: false,
+	},
+};
+
+// Project and branch share the second-line context slot.
+export const WithBranch: Story = {
+	args: {
+		session: mockSession,
+		active: false,
+		projectLabel: "Conduit",
+		branch: "main",
+	},
+};
+
+// A pinned row appends the star glyph after its title.
+export const Pinned: Story = {
+	args: {
+		session: mockSession,
+		active: false,
+		pinned: true,
+	},
+};
+
+// A pinned fork keeps star and fork glyphs in their declared order.
+export const PinnedAndForked: Story = {
+	args: {
+		session: mockForkSession,
+		active: false,
+		pinned: true,
+	},
+};
+
+// A settled shelf row collapses context and uses its verbatim settled time.
+export const Settled: Story = {
+	args: {
+		session: mockSession,
+		active: false,
+		projectLabel: "Conduit",
+		settled: true,
+		settledAt: "Mon 9:00",
+	},
+	play: async ({ canvasElement }) => {
+		await expect(within(canvasElement).getByText("Mon 9:00")).toBeVisible();
+	},
+};
+
+// A dense settled row uses the shortest declared shelf density.
+export const SettledDense: Story = {
+	args: {
+		session: mockSession,
+		active: false,
+		settled: true,
+		density: "dense",
+	},
+};
+
+// A dense row uses the compact two-line density.
+export const Dense: Story = {
+	args: {
+		session: mockSession,
+		active: false,
+		projectLabel: "Conduit",
+		density: "dense",
 	},
 };
 
