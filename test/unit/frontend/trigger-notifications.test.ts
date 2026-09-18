@@ -19,7 +19,8 @@ const { playDoneSoundMock, getNotifSettingsMock } = vi.hoisted(() => {
 });
 
 vi.mock("../../../src/lib/frontend/utils/sound.js", () => ({
-	playDoneSound: playDoneSoundMock,
+	emitDoneSound: playDoneSoundMock,
+	readyDoneSound: vi.fn().mockResolvedValue(undefined),
 }));
 
 vi.mock("../../../src/lib/frontend/utils/notif-settings.js", () => ({
@@ -67,6 +68,13 @@ describe("triggerNotifications", () => {
 		getNotifSettingsMock.mockClear();
 		notificationInstances = [];
 
+		vi.stubGlobal("navigator", {
+			locks: {
+				request: async (_name: string, callback: () => Promise<void>) =>
+					callback(),
+			},
+		});
+
 		// Stub document with hidden=true (tab is background)
 		vi.stubGlobal("document", { hidden: true });
 
@@ -113,7 +121,7 @@ describe("triggerNotifications", () => {
 			"../../../src/lib/frontend/stores/ws-notifications.js"
 		);
 
-		mod.triggerNotifications({ type: "done" } as RelayMessage);
+		await mod.triggerNotifications({ type: "done" } as RelayMessage);
 
 		expect(notificationInstances).toHaveLength(1);
 		expect(notificationInstances[0]?.title).toBe("Task Complete");
@@ -128,7 +136,7 @@ describe("triggerNotifications", () => {
 			"../../../src/lib/frontend/stores/ws-notifications.js"
 		);
 
-		mod.triggerNotifications({
+		await mod.triggerNotifications({
 			type: "error",
 			message: "Something broke",
 			code: "UNKNOWN",
@@ -144,7 +152,7 @@ describe("triggerNotifications", () => {
 			"../../../src/lib/frontend/stores/ws-notifications.js"
 		);
 
-		mod.triggerNotifications({
+		await mod.triggerNotifications({
 			type: "permission_request",
 			toolName: "bash",
 			requestId: "req-123",
@@ -161,7 +169,7 @@ describe("triggerNotifications", () => {
 			"../../../src/lib/frontend/stores/ws-notifications.js"
 		);
 
-		mod.triggerNotifications({
+		await mod.triggerNotifications({
 			type: "ask_user",
 			toolId: "q-456",
 			questions: [{ question: "What?", header: "" }],
@@ -178,12 +186,15 @@ describe("triggerNotifications", () => {
 			"../../../src/lib/frontend/stores/ws-notifications.js"
 		);
 
-		mod.triggerNotifications({ type: "delta", text: "hello" } as RelayMessage);
-		mod.triggerNotifications({
+		await mod.triggerNotifications({
+			type: "delta",
+			text: "hello",
+		} as RelayMessage);
+		await mod.triggerNotifications({
 			type: "status",
 			status: "processing",
 		} as RelayMessage);
-		mod.triggerNotifications({
+		await mod.triggerNotifications({
 			type: "tool_start",
 			id: "t1",
 			name: "bash",
@@ -195,7 +206,7 @@ describe("triggerNotifications", () => {
 
 	// ─── Tab visibility: notifications fire regardless ──────────────────
 
-	it("fires browser notification AND sound when tab is visible", async () => {
+	it("plays one in-app sound when tab is visible", async () => {
 		vi.stubGlobal("document", { hidden: false });
 		getNotifSettingsMock.mockReturnValue({
 			push: false,
@@ -207,9 +218,9 @@ describe("triggerNotifications", () => {
 			"../../../src/lib/frontend/stores/ws-notifications.js"
 		);
 
-		mod.triggerNotifications({ type: "done" } as RelayMessage);
+		await mod.triggerNotifications({ type: "done" } as RelayMessage);
 
-		expect(notificationInstances).toHaveLength(1);
+		expect(notificationInstances).toHaveLength(0);
 		expect(playDoneSoundMock).toHaveBeenCalledOnce();
 	});
 
@@ -226,7 +237,7 @@ describe("triggerNotifications", () => {
 			"../../../src/lib/frontend/stores/ws-notifications.js"
 		);
 
-		mod.triggerNotifications({ type: "done" } as RelayMessage);
+		await mod.triggerNotifications({ type: "done" } as RelayMessage);
 
 		expect(playDoneSoundMock).toHaveBeenCalledOnce();
 	});
@@ -242,7 +253,7 @@ describe("triggerNotifications", () => {
 			"../../../src/lib/frontend/stores/ws-notifications.js"
 		);
 
-		mod.triggerNotifications({ type: "done" } as RelayMessage);
+		await mod.triggerNotifications({ type: "done" } as RelayMessage);
 
 		expect(playDoneSoundMock).not.toHaveBeenCalled();
 	});
@@ -263,7 +274,7 @@ describe("triggerNotifications", () => {
 		// Activate push (simulates user enabling push notifications)
 		mod.setPushActive(true);
 
-		mod.triggerNotifications({ type: "done" } as RelayMessage);
+		await mod.triggerNotifications({ type: "done" } as RelayMessage);
 
 		// Browser notification should NOT fire because push is active
 		expect(notificationInstances).toHaveLength(0);
@@ -282,7 +293,7 @@ describe("triggerNotifications", () => {
 
 		mod.setPushActive(false);
 
-		mod.triggerNotifications({ type: "done" } as RelayMessage);
+		await mod.triggerNotifications({ type: "done" } as RelayMessage);
 
 		expect(notificationInstances).toHaveLength(1);
 	});
@@ -300,7 +311,7 @@ describe("triggerNotifications", () => {
 			"../../../src/lib/frontend/stores/ws-notifications.js"
 		);
 
-		mod.triggerNotifications({ type: "done" } as RelayMessage);
+		await mod.triggerNotifications({ type: "done" } as RelayMessage);
 
 		expect(notificationInstances).toHaveLength(0);
 	});
@@ -318,14 +329,14 @@ describe("triggerNotifications", () => {
 			"../../../src/lib/frontend/stores/ws-notifications.js"
 		);
 
-		mod.triggerNotifications({ type: "done" } as RelayMessage);
+		await mod.triggerNotifications({ type: "done" } as RelayMessage);
 
 		expect(notificationInstances).toHaveLength(0);
 	});
 
-	// ─── Sound is independent of push ───────────────────────────────────
+	// ─── Push owns the ding when it is active ───────────────────────────
 
-	it("plays sound even when push is active (sound is independent)", async () => {
+	it("leaves the ding to push when push is active (ni8.23)", async () => {
 		getNotifSettingsMock.mockReturnValue({
 			push: false,
 			browser: true,
@@ -338,11 +349,11 @@ describe("triggerNotifications", () => {
 
 		mod.setPushActive(true);
 
-		mod.triggerNotifications({ type: "done" } as RelayMessage);
+		await mod.triggerNotifications({ type: "done" } as RelayMessage);
 
-		// Sound should play regardless of push state
-		expect(playDoneSoundMock).toHaveBeenCalledOnce();
-		// But browser notification should be suppressed
+		// The service worker hands the alert back to this tab as an in_app_alert
+		// and dings there; a second ding from here is one alert heard twice.
+		expect(playDoneSoundMock).not.toHaveBeenCalled();
 		expect(notificationInstances).toHaveLength(0);
 	});
 });

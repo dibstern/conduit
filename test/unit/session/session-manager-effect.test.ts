@@ -163,7 +163,6 @@ describe("SessionManager Effect", () => {
 						forkPointTimestamp: 100,
 					},
 				]),
-				pendingQuestionCounts: HashMap.make(["s1", 3]),
 			}));
 
 			// Delete
@@ -181,7 +180,6 @@ describe("SessionManager Effect", () => {
 			expect(result.hasCursor).toBe(false);
 			expect(result.hasChildInParentMap).toBe(false);
 			expect(HashMap.has(state.forkMeta, "s1")).toBe(false);
-			expect(HashMap.has(state.pendingQuestionCounts, "s1")).toBe(false);
 		}).pipe(Effect.provide(Layer.fresh(makeTestLayer(mockApi))));
 	});
 
@@ -526,6 +524,7 @@ describe("SessionManager Effect", () => {
 				getAllSessionStatuses: vi.fn(() => Effect.succeed({})),
 				listSessions: vi.fn(() => Effect.succeed([])),
 				getSessionListEntry: vi.fn(() => Effect.succeed(undefined)),
+				getStampedSessionListEntry: vi.fn(() => Effect.succeed(undefined)),
 				getSessionDetailSnapshot: vi.fn(() =>
 					Effect.succeed({ messages: [], sequence: 0 }),
 				),

@@ -33,6 +33,7 @@ import { StatusPollerLive } from "../domain/relay/Layers/status-poller-layer.js"
 import { WebSocketHandlerLive } from "../domain/relay/Layers/websocket-handler-layer.js";
 import { makeWsTransportLive } from "../domain/relay/Layers/ws-transport-layer.js";
 import { AgentServiceLive } from "../domain/relay/Services/agent-service.js";
+import { AlertLedgerLive } from "../domain/relay/Services/alert-ledger.js";
 import { DirectoryListingServiceLive } from "../domain/relay/Services/directory-listing-service.js";
 import {
 	hasInstanceManagementConfig,
@@ -750,7 +751,14 @@ export async function createProjectRelay(
 	);
 	const scanServiceLayer = ScanServiceLive.pipe(Layer.provide(configLayer));
 	const webSocketHandlerLayer = WebSocketHandlerLive.pipe(
-		Layer.provide(Layer.mergeAll(configLayer, loggerLayer)),
+		Layer.provide(
+			Layer.mergeAll(
+				configLayer,
+				loggerLayer,
+				SessionEventBusLive,
+				persistenceEffectLayer ?? Layer.empty,
+			),
+		),
 	);
 	const messagePollerManagerLayer = makeMessagePollerManagerLive({
 		hasViewers: (sid) => wsHandler.getClientsForSession(sid).length > 0,
@@ -804,7 +812,15 @@ export async function createProjectRelay(
 		loggerLayer,
 		providerOrchestrationLayer,
 		openCodeInstanceClientsLayer,
-		...(persistenceEffectLayer != null ? [persistenceEffectLayer] : []),
+		// The alert ledger is where the ding's fire-once claim lives (ni8.23). It
+		// needs the store, so without persistence there is none — and the push
+		// path says so out loud rather than quietly dinging twice.
+		...(persistenceEffectLayer != null
+			? [
+					persistenceEffectLayer,
+					AlertLedgerLive.pipe(Layer.provide(persistenceEffectLayer)),
+				]
+			: []),
 		...(providerRuntimeIngestionLayer != null
 			? [providerRuntimeIngestionLayer]
 			: []),

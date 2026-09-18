@@ -105,6 +105,8 @@ describe("Effect SQL migrations", () => {
 					{ migration_id: 12, name: "create_projection_failures" },
 					{ migration_id: 13, name: "read_model_version" },
 					{ migration_id: 14, name: "read_model_counter" },
+					{ migration_id: 15, name: "sessions_last_viewed_at" },
+					{ migration_id: 16, name: "sent_alerts" },
 				]);
 
 				const legacyRows = yield* sql<{ id: number; name: string }>`
@@ -123,6 +125,8 @@ describe("Effect SQL migrations", () => {
 					{ id: 11, name: "create_projection_failures" },
 					{ id: 12, name: "read_model_version" },
 					{ id: 13, name: "read_model_counter" },
+					{ id: 14, name: "sessions_last_viewed_at" },
+					{ id: 15, name: "sent_alerts" },
 				]);
 			}).pipe(
 				Effect.provide(
@@ -153,6 +157,8 @@ describe("Effect SQL migrations", () => {
 					[12, "create_projection_failures"],
 					[13, "read_model_version"],
 					[14, "read_model_counter"],
+					[15, "sessions_last_viewed_at"],
+					[16, "sent_alerts"],
 				]);
 
 				const sql = yield* SqlClient.SqlClient;
@@ -171,8 +177,8 @@ describe("Effect SQL migrations", () => {
 					name: string;
 				}>`SELECT migration_id, name FROM effect_sql_migrations ORDER BY migration_id`;
 				expect(effectHistory.at(-1)).toEqual({
-					migration_id: 14,
-					name: "read_model_counter",
+					migration_id: 16,
+					name: "sent_alerts",
 				});
 				const legacyHistory = yield* sql<{ id: number; name: string }>`
 					SELECT id, name FROM _migrations ORDER BY id`;
@@ -250,6 +256,8 @@ describe("Effect SQL migrations", () => {
 						[12, "create_projection_failures"],
 						[13, "read_model_version"],
 						[14, "read_model_counter"],
+						[15, "sessions_last_viewed_at"],
+						[16, "sent_alerts"],
 					],
 					columns: [
 						{
@@ -314,8 +322,8 @@ describe("Effect SQL migrations", () => {
 					failures: [],
 					secondRun: [],
 					effectLatest: {
-						migration_id: 14,
-						name: "read_model_counter",
+						migration_id: 16,
+						name: "sent_alerts",
 					},
 					legacyLatest: { id: 9, name: "sessions_permission_mode" },
 				});
@@ -357,6 +365,8 @@ describe("Effect SQL migrations", () => {
 					{ migration_id: 12, name: "create_projection_failures" },
 					{ migration_id: 13, name: "read_model_version" },
 					{ migration_id: 14, name: "read_model_counter" },
+					{ migration_id: 15, name: "sessions_last_viewed_at" },
+					{ migration_id: 16, name: "sent_alerts" },
 				]);
 
 				const columns = yield* sql<{ name: string }>`
@@ -442,8 +452,8 @@ describe("Effect SQL migrations", () => {
 					FROM effect_sql_migrations
 					ORDER BY migration_id`;
 				expect(history.at(-1)).toEqual({
-					migration_id: 14,
-					name: "read_model_counter",
+					migration_id: 16,
+					name: "sent_alerts",
 				});
 			}).pipe(
 				Effect.provide(

@@ -59,11 +59,46 @@ export interface PushPayload {
 	[key: string]: unknown;
 }
 
+/**
+ * Who actually got the push (ni8.23).
+ *
+ * The fire-once ledger writes a row that says "the user was told". It can only
+ * be honest if the send tells it whether anyone was: a `sendToAll` that caught
+ * every per-device failure and resolved anyway made every outcome — delivered,
+ * refused, no devices at all — look identical to the caller, and the ledger then
+ * suppressed every retry of an alert nobody ever received.
+ *
+ * Three outcomes, because they mean three different things to a retry:
+ *  - `delivered`: the push service accepted it for this device.
+ *  - `expired`: 403/404/410. The subscription is gone and has been dropped;
+ *    retrying it is pointless, but it is also not a delivery.
+ *  - `failed`: anything else — a 503, a dead network. This device could still
+ *    be reached by a later attempt.
+ */
+export interface PushDeliveryReport {
+	readonly delivered: readonly string[];
+	readonly expired: readonly string[];
+	readonly failed: readonly {
+		readonly clientId: string;
+		readonly cause: unknown;
+	}[];
+}
+
+/** Human-readable outcome, for the log line that says a ding did not land. */
+export const describeDelivery = (report: PushDeliveryReport): string =>
+	`delivered=${report.delivered.length} expired=${report.expired.length} ` +
+	`failed=${report.failed.length}` +
+	(report.failed.length > 0
+		? ` (${report.failed.map((f) => `${f.clientId}: ${f.cause}`).join("; ")})`
+		: "");
+
 export interface PushNotificationSender {
 	getPublicKey(): string | null;
 	addSubscription(clientId: string, subscription: PushSubscriptionData): void;
 	removeSubscription(clientId: string): void;
-	sendToAll(payload: PushPayload): Promise<void>;
+	sendToAll(payload: PushPayload): Promise<PushDeliveryReport>;
+	getSubscriptionIds?(): readonly string[];
+	sendTo?(clientId: string, payload: PushPayload): Promise<PushDeliveryReport>;
 }
 
 export class PushNotificationManagerNotInitializedError extends Data.TaggedError(
@@ -136,10 +171,21 @@ export class PushNotificationManager implements PushNotificationSender {
 		return this.subscriptions.size;
 	}
 
+	getSubscriptionIds(): readonly string[] {
+		return [...this.subscriptions.keys()];
+	}
+
 	// ─── Push delivery ──────────────────────────────────────────────────
 
-	/** Send push notification to all subscribed clients. */
-	async sendToAll(payload: PushPayload): Promise<void> {
+	/**
+	 * Send to every subscribed client and report what happened to each.
+	 *
+	 * Per-device failures are still not thrown — one dead phone must not stop the
+	 * laptop from being told — but they are no longer discarded. The report is
+	 * the whole point: it is what lets the fire-once ledger tell "everybody got
+	 * it" apart from "nobody did".
+	 */
+	async sendToAll(payload: PushPayload): Promise<PushDeliveryReport> {
 		if (!this.vapidKeys) {
 			throw new PushNotificationManagerNotInitializedError({
 				operation: "sendToAll",
@@ -148,17 +194,22 @@ export class PushNotificationManager implements PushNotificationSender {
 
 		const json = JSON.stringify(payload);
 		const vapidDetails = this.getVapidDetails();
-		const toRemove: string[] = [];
+		const delivered: string[] = [];
+		const expired: string[] = [];
+		const failed: { clientId: string; cause: unknown }[] = [];
 
 		const promises = Array.from(this.subscriptions.entries()).map(
 			async ([clientId, sub]) => {
 				try {
 					await this.webpush.sendNotification(sub, json, { vapidDetails });
+					delivered.push(clientId);
 				} catch (err: unknown) {
 					const statusCode = (err as { statusCode?: number }).statusCode;
 					// Remove invalid/expired subscriptions
 					if (statusCode === 403 || statusCode === 404 || statusCode === 410) {
-						toRemove.push(clientId);
+						expired.push(clientId);
+					} else {
+						failed.push({ clientId, cause: err });
 					}
 				}
 			},
@@ -167,36 +218,52 @@ export class PushNotificationManager implements PushNotificationSender {
 		await Promise.all(promises);
 
 		// Clean up invalid subscriptions
-		if (toRemove.length > 0) {
-			for (const clientId of toRemove) {
+		if (expired.length > 0) {
+			for (const clientId of expired) {
 				this.subscriptions.delete(clientId);
 			}
 			this.saveSubscriptions();
 		}
+
+		return { delivered, expired, failed };
 	}
 
-	/** Send push notification to a specific client. */
-	async sendTo(clientId: string, payload: PushPayload): Promise<void> {
+	/** Send push notification to a specific client, and report the outcome. */
+	async sendTo(
+		clientId: string,
+		payload: PushPayload,
+	): Promise<PushDeliveryReport> {
 		if (!this.vapidKeys) {
 			throw new PushNotificationManagerNotInitializedError({
 				operation: "sendTo",
 			});
 		}
 
+		const empty: PushDeliveryReport = {
+			delivered: [],
+			expired: [],
+			failed: [],
+		};
 		const sub = this.subscriptions.get(clientId);
-		if (!sub) return;
+		// No subscription is not a delivery, and saying so is the point: a caller
+		// that treats it as one claims the user was told by a device that is not
+		// there.
+		if (!sub) return empty;
 
 		const json = JSON.stringify(payload);
 		const vapidDetails = this.getVapidDetails();
 
 		try {
 			await this.webpush.sendNotification(sub, json, { vapidDetails });
+			return { ...empty, delivered: [clientId] };
 		} catch (err: unknown) {
 			const statusCode = (err as { statusCode?: number }).statusCode;
 			if (statusCode === 403 || statusCode === 404 || statusCode === 410) {
 				this.subscriptions.delete(clientId);
 				this.saveSubscriptions();
+				return { ...empty, expired: [clientId] };
 			}
+			return { ...empty, failed: [{ clientId, cause: err }] };
 		}
 	}
 

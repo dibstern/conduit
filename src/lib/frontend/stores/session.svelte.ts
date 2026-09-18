@@ -360,6 +360,53 @@ export function findSession(id: string): Immutable<SessionInfo> | undefined {
 	return serverSessions.get(id);
 }
 
+// ─── Notification views (ni8.23) ────────────────────────────────────────────
+// Three facts the server derives onto the row: how many questions and
+// permissions are unanswered, and whether a message landed since the session was
+// last looked at. These are reads over the server-owned half — there is no
+// client-side notification state left to drift out of step with them, and a
+// client that reconnects gets the truth in its snapshot rather than rebuilding a
+// guess from events it may have missed.
+
+/** What the sidebar dot should show for a session, if anything. */
+export function getSessionIndicator(
+	sessionId: string,
+	currentSessionId: string | null,
+): "attention" | "done-unviewed" | null {
+	// Tab-local by design: a session cannot be waiting on you while it is the one
+	// on your screen, and which one that is differs per browser tab, so the
+	// server cannot answer it (ni8.23 C3).
+	if (sessionId === currentSessionId) return null;
+	const session = serverSessions.get(sessionId);
+	if (session === undefined) return null;
+	if (
+		(session.pendingQuestions ?? 0) > 0 ||
+		(session.pendingPermissions ?? 0) > 0
+	)
+		return "attention";
+	return session.unseenActivity === true ? "done-unviewed" : null;
+}
+
+/** Every session waiting on an answer, for the attention banner. Excludes the
+ *  session on screen and its descendants — their prompts are already visible. */
+export function getAttentionSessions(
+	currentSessionId: string | null,
+	getDescendantIds: (sessionId: string) => Set<string>,
+): Map<string, { questions: number; permissions: number }> {
+	const descendants = currentSessionId
+		? getDescendantIds(currentSessionId)
+		: new Set<string>();
+	const waiting = new Map<string, { questions: number; permissions: number }>();
+	for (const [sessionId, session] of serverSessions) {
+		if (sessionId === currentSessionId || descendants.has(sessionId)) continue;
+		const questions = session.pendingQuestions ?? 0;
+		const permissions = session.pendingPermissions ?? 0;
+		if (questions > 0 || permissions > 0)
+			waiting.set(sessionId, { questions, permissions });
+	}
+	return waiting;
+}
+
 /** When a session last changed, as the sidebar means it. */
 function lastChangedAt(session: Immutable<SessionInfo>): number {
 	// `||`, not `??`: a provider that has never touched a session sends `0` or

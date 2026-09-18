@@ -465,12 +465,6 @@ describe("handleSSEEvent", () => {
 			translated,
 		);
 		expect(deps.wsHandler.broadcast).not.toHaveBeenCalledWith(translated);
-		expect(
-			deps.sessionService.incrementPendingQuestionCount,
-		).toHaveBeenCalledWith("active-session");
-		expect(
-			deps.sessionService.incrementPendingQuestionCount,
-		).toHaveBeenCalledTimes(1);
 	});
 
 	it("routes permission.replied events to pending permission state", () => {
@@ -1076,7 +1070,7 @@ describe("wireSSEConsumer", () => {
 		).not.toHaveBeenCalled();
 	});
 
-	it("sets pending question counts from API on SSE connect", async () => {
+	it("re-announces pending questions from the API on SSE connect", async () => {
 		const listPendingQuestions = vi.fn().mockResolvedValue([
 			{ id: "que-1", sessionID: "sess-a", questions: [] },
 			{ id: "que-2", sessionID: "sess-a", questions: [] },
@@ -1096,12 +1090,13 @@ describe("wireSSEConsumer", () => {
 		// biome-ignore lint/style/noNonNullAssertion: safe — Map.get after set
 		listeners.get("connected")!();
 
+		// The badge for these comes from pending_approvals now (ni8.23); what
+		// recovery still owes the browser is the questions themselves.
 		await vi.waitFor(() => {
-			expect(deps.sessionService.setPendingQuestionCounts).toHaveBeenCalledWith(
-				new Map([
-					["sess-a", 2],
-					["sess-b", 1],
-				]),
+			expect(listPendingQuestions).toHaveBeenCalled();
+			expect(deps.wsHandler.sendToSession).toHaveBeenCalledWith(
+				"sess-a",
+				expect.objectContaining({ type: "ask_user", toolId: "que-1" }),
 			);
 		});
 	});

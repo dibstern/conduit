@@ -1,11 +1,13 @@
-import { Cause, Effect, Layer } from "effect";
+import { Cause, Effect, Layer, Option, Stream } from "effect";
 import { formatErrorDetail } from "../../../errors.js";
+import { ReadQueryEffectTag } from "../../../persistence/effect/read-query-effect.js";
 import { makeEffectWsHandler } from "../../../server/effect-ws-handler.js";
 import {
 	ConfigTag,
 	LoggerTag,
 	WebSocketHandlerTag,
 } from "../Services/services.js";
+import { SessionEventBusTag } from "../Services/session-event-bus.js";
 import { makeWsHandlerStateLive } from "../Services/ws-handler-service.js";
 import { makeWsTransportLive } from "./ws-transport-layer.js";
 
@@ -27,6 +29,35 @@ export const WebSocketHandlerLive: Layer.Layer<
 				}),
 			}),
 		});
+
+		// Interim session_list delivery expires with conduit-test-ni8.5.20,
+		// which installs the frontend SubscribeShell consumer.
+		const bus = yield* Effect.serviceOption(SessionEventBusTag);
+		const readQuery = yield* Effect.serviceOption(ReadQueryEffectTag);
+		if (Option.isSome(bus) && Option.isSome(readQuery)) {
+			const advances = yield* bus.value.subscribeAdvances();
+			yield* advances.pipe(
+				Stream.runForEach(() =>
+					readQuery.value.getSessionListSnapshot().pipe(
+						Effect.tap(({ rows }) =>
+							Effect.sync(() =>
+								handler.broadcast({
+									type: "session_list",
+									sessions: [...rows],
+									roots: false,
+								}),
+							),
+						),
+						Effect.catchAll((error) =>
+							Effect.sync(() =>
+								wsLog.warn("Interim session list broadcast failed", error),
+							),
+						),
+					),
+				),
+				Effect.forkScoped,
+			);
+		}
 
 		yield* Effect.addFinalizer(() =>
 			Effect.tryPromise({

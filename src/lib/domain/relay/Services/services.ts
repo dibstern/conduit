@@ -120,9 +120,6 @@ export interface SessionManagerShape {
 	seedPaginationCursor(sessionId: string, messageId: string): void;
 
 	// ── Pending questions ──────────────────────────────────────────────
-	incrementPendingQuestionCount(sessionId: string): void;
-	decrementPendingQuestionCount(sessionId: string): void;
-	setPendingQuestionCounts(counts: Map<string, number>): void;
 
 	// ── Broadcasts ─────────────────────────────────────────────────────
 	sendDualSessionLists(

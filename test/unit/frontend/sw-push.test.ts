@@ -29,10 +29,18 @@ type EventHandler = (...args: never[]) => unknown;
 let pushListener: PushListener | null = null;
 let showNotificationMock: ReturnType<typeof vi.fn>;
 
-/** Call pushListener, throwing if not registered (avoids non-null assertions). */
-function callPushListener(event: unknown): void {
+/**
+ * Call pushListener and wait for whatever it kept alive.
+ *
+ * The handler offers the alert to a focused tab before falling back to the OS
+ * notification (ni8.23), so nothing it does is synchronous any more.
+ */
+async function callPushListener(event: unknown): Promise<void> {
 	if (!pushListener) throw new Error("push listener not registered");
 	pushListener(event);
+	const waiting = (event as { _waitUntilPromises?: Promise<unknown>[] })
+		._waitUntilPromises;
+	if (waiting) await Promise.all(waiting);
 }
 
 function createPushEvent(data: unknown) {
@@ -123,13 +131,13 @@ afterEach(() => {
 // ─── Tests ──────────────────────────────────────────────────────────────────
 
 describe("SW push handler", () => {
-	it("registers a push event listener", () => {
+	it("registers a push event listener", async () => {
 		expect(pushListener).toBeTypeOf("function");
 	});
 
 	// ─── Core: always shows notification (no visibility suppression) ────
 
-	it("shows notification for 'done' event", () => {
+	it("shows notification for 'done' event", async () => {
 		const event = createPushEvent({
 			type: "done",
 			title: "Task Complete",
@@ -137,7 +145,7 @@ describe("SW push handler", () => {
 			tag: "opencode-done",
 		});
 
-		callPushListener(event);
+		await callPushListener(event);
 
 		const spy = getShowNotificationSpy();
 		expect(spy).toHaveBeenCalledWith("Task Complete", {
@@ -147,14 +155,14 @@ describe("SW push handler", () => {
 		});
 	});
 
-	it("shows notification for 'error' event with requireInteraction", () => {
+	it("shows notification for 'error' event with requireInteraction", async () => {
 		const event = createPushEvent({
 			type: "error",
 			title: "Error",
 			body: "Something broke",
 		});
 
-		callPushListener(event);
+		await callPushListener(event);
 
 		const spy = getShowNotificationSpy();
 		expect(spy).toHaveBeenCalledWith("Error", {
@@ -165,7 +173,7 @@ describe("SW push handler", () => {
 		});
 	});
 
-	it("shows notification for 'permission_request' with requireInteraction", () => {
+	it("shows notification for 'permission_request' with requireInteraction", async () => {
 		const event = createPushEvent({
 			type: "permission_request",
 			title: "Permission Needed",
@@ -173,7 +181,7 @@ describe("SW push handler", () => {
 			requestId: "req-42",
 		});
 
-		callPushListener(event);
+		await callPushListener(event);
 
 		const spy = getShowNotificationSpy();
 		expect(spy).toHaveBeenCalledWith("Permission Needed", {
@@ -189,7 +197,20 @@ describe("SW push handler", () => {
 	// "done" notifications when any client was visible. The fix removes
 	// this check entirely — the SW always shows notifications.
 
-	it("shows 'done' notification without checking client visibility", () => {
+	it("shows 'done' notification when a visible tab does not claim it", async () => {
+		// The SW does look at the clients now, but only to offer the ding to a
+		// focused tab (ni8.23). A visible tab that does not answer must not
+		// re-open the dead zone this test was written for.
+		const s = globalThis.self as unknown as {
+			clients: { matchAll: ReturnType<typeof vi.fn> };
+		};
+		s.clients.matchAll.mockResolvedValue([
+			{
+				focused: true,
+				visibilityState: "visible",
+				postMessage: vi.fn(),
+			},
+		]);
 		const event = createPushEvent({
 			type: "done",
 			title: "Task Complete",
@@ -197,23 +218,17 @@ describe("SW push handler", () => {
 			tag: "opencode-done",
 		});
 
-		callPushListener(event);
+		await callPushListener(event);
 
-		const spy = getShowNotificationSpy();
-		expect(spy).toHaveBeenCalledOnce();
-		// matchAll should NOT be called (visibility check removed)
-		const s = globalThis.self as unknown as {
-			clients: { matchAll: ReturnType<typeof vi.fn> };
-		};
-		expect(s.clients.matchAll).not.toHaveBeenCalled();
+		expect(getShowNotificationSpy()).toHaveBeenCalledOnce();
 	});
 
 	// ─── Silent test push ──────────────────────────────────────────────
 
-	it("does NOT show notification for type=test (silent validation)", () => {
+	it("does NOT show notification for type=test (silent validation)", async () => {
 		const event = createPushEvent({ type: "test" });
 
-		callPushListener(event);
+		await callPushListener(event);
 
 		const spy = getShowNotificationSpy();
 		expect(spy).not.toHaveBeenCalled();
@@ -222,10 +237,10 @@ describe("SW push handler", () => {
 
 	// ─── Bad data handling ─────────────────────────────────────────────
 
-	it("silently returns on invalid JSON data", () => {
+	it("silently returns on invalid JSON data", async () => {
 		const event = createPushEventWithBadData();
 
-		callPushListener(event);
+		await callPushListener(event);
 
 		const spy = getShowNotificationSpy();
 		expect(spy).not.toHaveBeenCalled();
@@ -233,10 +248,10 @@ describe("SW push handler", () => {
 
 	// ─── Fallback title ────────────────────────────────────────────────
 
-	it("uses fallback title when payload has no title", () => {
+	it("uses fallback title when payload has no title", async () => {
 		const event = createPushEvent({ type: "done", body: "Done!" });
 
-		callPushListener(event);
+		await callPushListener(event);
 
 		const spy = getShowNotificationSpy();
 		expect(spy).toHaveBeenCalledWith(
@@ -247,14 +262,14 @@ describe("SW push handler", () => {
 
 	// ─── Tag assignment ────────────────────────────────────────────────
 
-	it("uses payload tag for done events when provided", () => {
+	it("uses payload tag for done events when provided", async () => {
 		const event = createPushEvent({
 			type: "done",
 			title: "Done",
 			tag: "custom-tag-123",
 		});
 
-		callPushListener(event);
+		await callPushListener(event);
 
 		const spy = getShowNotificationSpy();
 		expect(spy).toHaveBeenCalledWith(
@@ -263,10 +278,10 @@ describe("SW push handler", () => {
 		);
 	});
 
-	it("defaults to opencode-done tag for done events without tag", () => {
+	it("defaults to opencode-done tag for done events without tag", async () => {
 		const event = createPushEvent({ type: "done", title: "Done" });
 
-		callPushListener(event);
+		await callPushListener(event);
 
 		const spy = getShowNotificationSpy();
 		expect(spy).toHaveBeenCalledWith(
@@ -275,13 +290,13 @@ describe("SW push handler", () => {
 		);
 	});
 
-	it("uses perm-unknown tag for permission_request without requestId", () => {
+	it("uses perm-unknown tag for permission_request without requestId", async () => {
 		const event = createPushEvent({
 			type: "permission_request",
 			title: "Permission",
 		});
 
-		callPushListener(event);
+		await callPushListener(event);
 
 		const spy = getShowNotificationSpy();
 		expect(spy).toHaveBeenCalledWith(
@@ -292,13 +307,13 @@ describe("SW push handler", () => {
 
 	// ─── waitUntil ─────────────────────────────────────────────────────
 
-	it("passes showNotification promise to event.waitUntil", () => {
+	it("passes showNotification promise to event.waitUntil", async () => {
 		const event = createPushEvent({
 			type: "done",
 			title: "Done",
 		});
 
-		callPushListener(event);
+		await callPushListener(event);
 
 		expect(event.waitUntil).toHaveBeenCalledOnce();
 	});
@@ -311,7 +326,7 @@ describe("SW push handler", () => {
 
 		const event = createPushEvent({ type: "done", title: "Done" });
 
-		callPushListener(event);
+		await callPushListener(event);
 
 		// Wait for the promise chain to resolve
 		await vi.waitFor(() => {

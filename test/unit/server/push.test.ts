@@ -433,7 +433,7 @@ describe("Ticket 4.6 — PushNotificationManager", () => {
 
 			await expect(
 				mgr.sendToAll({ title: "Test", body: "No clients" }),
-			).resolves.toBeUndefined();
+			).resolves.toEqual({ delivered: [], expired: [], failed: [] });
 			expect(sendNotification).not.toHaveBeenCalled();
 		});
 	});

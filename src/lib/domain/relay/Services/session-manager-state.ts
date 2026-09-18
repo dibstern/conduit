@@ -20,7 +20,6 @@ export type { ForkEntry };
  * - cachedParentMap: child→parent session mapping from last list fetch
  * - lastMessageAt: per-session timestamp of last message activity
  * - forkMeta: per-session fork-point metadata
- * - pendingQuestionCounts: per-session count of pending questions
  * - paginationCursors: per-session cursor for paginated history loading
  * - lastKnownSessionCount: most recent unfiltered list/initialize count
  */
@@ -28,7 +27,6 @@ export interface SessionManagerState {
 	cachedParentMap: HashMap.HashMap<string, string>;
 	lastMessageAt: HashMap.HashMap<string, number>;
 	forkMeta: HashMap.HashMap<string, ForkEntry>;
-	pendingQuestionCounts: HashMap.HashMap<string, number>;
 	paginationCursors: HashMap.HashMap<string, string>;
 	lastKnownSessionCount: number;
 }
@@ -40,7 +38,6 @@ export const emptySessionManagerState = (): SessionManagerState => ({
 	cachedParentMap: HashMap.empty(),
 	lastMessageAt: HashMap.empty(),
 	forkMeta: HashMap.empty(),
-	pendingQuestionCounts: HashMap.empty(),
 	paginationCursors: HashMap.empty(),
 	lastKnownSessionCount: 0,
 });

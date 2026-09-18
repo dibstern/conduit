@@ -121,6 +121,8 @@ describe("Migration Runner", () => {
 		const projectionFailuresMigration = schemaMigrations[10];
 		const readModelVersionMigration = schemaMigrations[11];
 		const readModelCounterMigration = schemaMigrations[12];
+		const sessionsLastViewedAtMigration = schemaMigrations[13];
+		const sentAlertsMigration = schemaMigrations[14];
 		if (
 			!baseline ||
 			!metadataMigration ||
@@ -134,7 +136,9 @@ describe("Migration Runner", () => {
 			!sessionCascadeDeletesMigration ||
 			!projectionFailuresMigration ||
 			!readModelVersionMigration ||
-			!readModelCounterMigration
+			!readModelCounterMigration ||
+			!sessionsLastViewedAtMigration ||
+			!sentAlertsMigration
 		) {
 			throw new Error("Expected all event-store schema migrations");
 		}
@@ -209,6 +213,16 @@ describe("Migration Runner", () => {
 				id: 13,
 				name: "read_model_counter",
 				checksum: calculateMigrationChecksum(readModelCounterMigration),
+			},
+			{
+				id: 14,
+				name: "sessions_last_viewed_at",
+				checksum: calculateMigrationChecksum(sessionsLastViewedAtMigration),
+			},
+			{
+				id: 15,
+				name: "sent_alerts",
+				checksum: calculateMigrationChecksum(sentAlertsMigration),
 			},
 		]);
 		columns = client
@@ -310,6 +324,8 @@ describe("Migration Runner", () => {
 				{ id: 11, name: "create_projection_failures" },
 				{ id: 12, name: "read_model_version" },
 				{ id: 13, name: "read_model_counter" },
+				{ id: 14, name: "sessions_last_viewed_at" },
+				{ id: 15, name: "sent_alerts" },
 			],
 			columns: [
 				{
@@ -395,13 +411,17 @@ describe("Migration Runner", () => {
 		const projectionFailuresMigration = schemaMigrations[10];
 		const readModelVersionMigration = schemaMigrations[11];
 		const readModelCounterMigration = schemaMigrations[12];
+		const sessionsLastViewedAtMigration = schemaMigrations[13];
+		const sentAlertsMigration = schemaMigrations[14];
 		if (
 			!turnModelExecutionMigration ||
 			!sessionsPermissionModeMigration ||
 			!sessionCascadeDeletesMigration ||
 			!projectionFailuresMigration ||
 			!readModelVersionMigration ||
-			!readModelCounterMigration
+			!readModelCounterMigration ||
+			!sessionsLastViewedAtMigration ||
+			!sentAlertsMigration
 		) {
 			throw new Error("Expected remaining event-store migrations");
 		}
@@ -442,6 +462,16 @@ describe("Migration Runner", () => {
 				id: 13,
 				name: "read_model_counter",
 				checksum: calculateMigrationChecksum(readModelCounterMigration),
+			},
+			{
+				id: 14,
+				name: "sessions_last_viewed_at",
+				checksum: calculateMigrationChecksum(sessionsLastViewedAtMigration),
+			},
+			{
+				id: 15,
+				name: "sent_alerts",
+				checksum: calculateMigrationChecksum(sentAlertsMigration),
 			},
 		]);
 		expect(runMigrations(client, schemaMigrations)).toEqual([]);

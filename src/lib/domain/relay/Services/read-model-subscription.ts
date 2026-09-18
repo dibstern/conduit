@@ -21,6 +21,25 @@ export type Delta<T> = Extract<
 >;
 
 /**
+ * A live delta that carries no place in the log.
+ *
+ * Almost every read-model change is caused by an event, so its sequence answers
+ * "have I already seen this?". A direct read-model write (ni8.23:
+ * `last_viewed_at`) changes a row without moving the log at all, so there is no
+ * sequence that distinguishes it from what the subscriber already holds — the
+ * honest thing is to say so, rather than invent a number.
+ *
+ * The orchestrator forwards these past the high-water-mark filter unconditionally,
+ * which is safe because the sources emit whole current rows: an upsert the
+ * subscriber already has is idempotent, while dropping one is invisible. The
+ * wrapped delta still carries a sequence, but only as resume advice — a log
+ * position the row is known to reflect, never a claim to be at one.
+ */
+export type LiveDelta<T> =
+	| Delta<T>
+	| { readonly _tag: "unsequenced"; readonly delta: Delta<T> };
+
+/**
  * What a subscriber receives: a snapshot base (cold start only), a
  * `synchronized` boundary once the base or catch-up is complete, then deltas.
  * The snapshot's `sequence` is the high-water mark its rows reflect.
@@ -55,11 +74,23 @@ export interface SubscriptionSource<T, E = never> {
 	 * subscription buffers from that instant; the enclosing Scope releases it.
 	 */
 	readonly live: () => Effect.Effect<
-		Stream.Stream<Delta<T>, E>,
+		Stream.Stream<LiveDelta<T>, E>,
 		never,
 		Scope.Scope
 	>;
 }
+
+/**
+ * Does this live delta still have something to say? Sequenced deltas are judged
+ * against the mark the subscriber already holds; unsequenced ones are not
+ * judgeable at all, and dropping them is exactly the silent failure they exist
+ * to prevent.
+ */
+const past = <T>(delta: LiveDelta<T>, mark: number): boolean =>
+	delta._tag === "unsequenced" || delta.sequence > mark;
+
+const unwrap = <T>(delta: LiveDelta<T>): Delta<T> =>
+	delta._tag === "unsequenced" ? delta.delta : delta;
 
 // ─── Orchestrator ────────────────────────────────────────────────────────────
 
@@ -98,7 +129,10 @@ export const stream = <T, E = never>(options: {
 						},
 						{ _tag: "synchronized" },
 					]),
-					Stream.filter(live, (delta) => delta.sequence > snapshot.sequence),
+					Stream.map(
+						Stream.filter(live, (delta) => past(delta, snapshot.sequence)),
+						unwrap,
+					),
 				);
 			}
 
@@ -116,8 +150,11 @@ export const stream = <T, E = never>(options: {
 					Stream.fromIterable<Envelope<T>>([{ _tag: "synchronized" }]),
 				),
 				Stream.concat(
-					Stream.filterEffect(live, (delta) =>
-						Ref.get(hwm).pipe(Effect.map((mark) => delta.sequence > mark)),
+					Stream.map(
+						Stream.filterEffect(live, (delta) =>
+							Ref.get(hwm).pipe(Effect.map((mark) => past(delta, mark))),
+						),
+						unwrap,
 					),
 				),
 			);

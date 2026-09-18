@@ -14,7 +14,9 @@ import {
 	READ_MODEL_COUNTER_MIGRATION,
 	READ_MODEL_VERSION_MIGRATION,
 	readMigrationSql,
+	SENT_ALERTS_MIGRATION,
 	SESSION_CASCADE_DELETES_MIGRATION,
+	SESSIONS_LAST_VIEWED_AT_MIGRATION,
 	SESSIONS_PERMISSION_MODE_MIGRATION,
 	TURN_MODEL_EXECUTION_MIGRATION,
 } from "../schema.js";
@@ -292,13 +294,14 @@ const preDurableProviderCommandTableNames =
 	preProjectionFailuresTableNames.filter(
 		(name) => !durableProviderCommandTableNameSet.has(name),
 	);
-// 0014 adds one table, and the synchronous registry may have added it before the
-// migrator looks. Treated as an allowed extra rather than part of the baseline,
-// exactly as 0013's `version` columns and their indexes are.
-const readModelCounterTableNames = [
-	...expectedTableNames,
-	"read_model_counter",
-].sort();
+// Tables added after the baseline, which the synchronous registry may have
+// created before the migrator looks. Treated as allowed extras rather than part
+// of any baseline shape, exactly as 0012's `version` columns and their indexes
+// are — otherwise every new table would need its own whole-schema variant.
+const postBaselineTableNames = new Set<string>([
+	"read_model_counter", // 0013
+	"sent_alerts", // 0015
+]);
 const preDurableCommandReceiptColumns =
 	expectedTableColumns.command_receipts.slice(0, 6);
 
@@ -394,11 +397,13 @@ const verifyExistingBaselineSchema: Effect.Effect<
 			AND name NOT IN ('_migrations', ${EFFECT_SQL_MIGRATIONS_TABLE})
 		ORDER BY name`;
 	const actualTableNames = tables.map((row) => row.name);
+	const baselineTableNames = actualTableNames.filter(
+		(name) => !postBaselineTableNames.has(name),
+	);
 	const knownTableShape =
-		sameStrings(actualTableNames, expectedTableNames) ||
-		sameStrings(actualTableNames, readModelCounterTableNames) ||
-		sameStrings(actualTableNames, preProjectionFailuresTableNames) ||
-		sameStrings(actualTableNames, preDurableProviderCommandTableNames);
+		sameStrings(baselineTableNames, expectedTableNames) ||
+		sameStrings(baselineTableNames, preProjectionFailuresTableNames) ||
+		sameStrings(baselineTableNames, preDurableProviderCommandTableNames);
 	if (!knownTableShape) {
 		return yield* failSchemaMismatch(
 			`Existing event-store tables differ from baseline migration. Expected ${expectedTableNames.join(", ")}, got ${actualTableNames.join(", ")}`,
@@ -445,6 +450,14 @@ const verifyExistingBaselineSchema: Effect.Effect<
 			sameStrings(actualColumns, expectedColumns) ||
 			((tableName === "sessions" || tableName === "messages") &&
 				sameStrings(actualColumns, [...expectedColumns, "version"])) ||
+			// 0014 appends last_viewed_at behind 0013's version, so a database can
+			// sit on either rung of that ladder.
+			(tableName === "sessions" &&
+				sameStrings(actualColumns, [
+					...expectedColumns,
+					"version",
+					"last_viewed_at",
+				])) ||
 			(tableName === "command_receipts" &&
 				sameStrings(actualColumns, preDurableCommandReceiptColumns)) ||
 			(tableName === "message_parts" &&
@@ -622,6 +635,28 @@ const runReadModelVersionMigration = Effect.gen(function* () {
 	yield* executeSqlStatements(readMigrationSql(READ_MODEL_VERSION_MIGRATION));
 });
 
+const runSessionsLastViewedAtMigration = Effect.gen(function* () {
+	const sql = yield* SqlClient.SqlClient;
+	// A database may have applied this SQL through the synchronous registry.
+	const columns = yield* sql<{
+		name: string;
+	}>`PRAGMA table_info(sessions)`;
+	if (columns.some((column) => column.name === "last_viewed_at")) return;
+	yield* executeSqlStatements(
+		readMigrationSql(SESSIONS_LAST_VIEWED_AT_MIGRATION),
+	);
+});
+
+const runSentAlertsMigration = Effect.gen(function* () {
+	const sql = yield* SqlClient.SqlClient;
+	// A database may have applied this SQL through the synchronous registry.
+	const existing = yield* sql<{
+		name: string;
+	}>`SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'sent_alerts'`;
+	if (existing.length > 0) return;
+	yield* executeSqlStatements(readMigrationSql(SENT_ALERTS_MIGRATION));
+});
+
 const runReadModelCounterMigration = Effect.gen(function* () {
 	const sql = yield* SqlClient.SqlClient;
 	// A database may have applied this SQL through the synchronous registry.
@@ -759,6 +794,8 @@ export const effectMigrationEntries = {
 	"0012_create_projection_failures": runProjectionFailuresMigration,
 	"0013_read_model_version": runReadModelVersionMigration,
 	"0014_read_model_counter": runReadModelCounterMigration,
+	"0015_sessions_last_viewed_at": runSessionsLastViewedAtMigration,
+	"0016_sent_alerts": runSentAlertsMigration,
 } satisfies Record<string, Effect.Effect<void, unknown, SqlClient.SqlClient>>;
 
 export function makeEffectMigrationLoader(

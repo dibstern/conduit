@@ -132,6 +132,24 @@ export class OpenCodeRuntimeEventTranslator {
 		if (isQuestionAskedEvent(event)) {
 			return this.translateQuestionAsked(event, sessionId);
 		}
+		if (
+			event.type === "question.replied" ||
+			event.type === "question.rejected"
+		) {
+			const requestId = event.properties["requestID"];
+			if (typeof requestId !== "string") return null;
+			const answers = event.properties["answers"];
+			return [
+				opencodeRuntimeEvent("question.resolved", sessionId, event, {
+					id: requestId,
+					answers: Array.isArray(answers)
+						? Object.fromEntries(
+								answers.map((answer, index) => [String(index), answer]),
+							)
+						: {},
+				}),
+			];
+		}
 		if (event.type === "session.updated") {
 			return this.translateSessionUpdated(event, sessionId);
 		}

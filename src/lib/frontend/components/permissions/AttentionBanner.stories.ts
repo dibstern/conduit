@@ -1,12 +1,9 @@
 import type { Meta, StoryObj } from "@storybook/svelte-vite";
 import { flushSync } from "svelte";
-import {
-	dispatch,
-	resetNotifState,
-} from "../../stores/notification-reducer.svelte.js";
 import { permissionsState } from "../../stores/permissions.svelte.js";
 import {
 	applySessionSnapshot,
+	clearSessionState,
 	sessionState,
 } from "../../stores/session.svelte.js";
 import { uiState } from "../../stores/ui.svelte.js";
@@ -27,12 +24,15 @@ function setupState(opts: {
 }) {
 	flushSync(() => {
 		sessionState.currentId = opts.currentId ?? "ses_current";
+		const questions = new Set(opts.questionSessions ?? []);
 		applySessionSnapshot(
 			Object.entries(opts.sessionTitles ?? {}).map(([id, title]) => ({
 				id,
 				title,
 				status: "idle" as const,
 				createdAt: Date.now(),
+				// The server derives this count onto the row; the banner just reads it.
+				pendingQuestions: questions.has(id) ? 1 : 0,
 			})),
 			"complete",
 		);
@@ -43,11 +43,6 @@ function setupState(opts: {
 			toolName: p.toolName,
 			toolInput: {},
 		}));
-
-		resetNotifState();
-		for (const sid of opts.questionSessions ?? []) {
-			dispatch({ type: "question_appeared", sessionId: sid });
-		}
 	});
 }
 
@@ -63,7 +58,7 @@ const meta = {
 	beforeEach: () => {
 		uiState.toasts = [];
 		permissionsState.pendingPermissions = [];
-		resetNotifState();
+		clearSessionState();
 	},
 } satisfies Meta<typeof NotificationStack>;
 

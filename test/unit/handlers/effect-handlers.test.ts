@@ -944,6 +944,7 @@ describe("switchModelForSession", () => {
 					Effect.succeed({ messages: [], sequence: 0 }),
 				),
 				getSessionListEntry: vi.fn(() => Effect.succeed(undefined)),
+				getStampedSessionListEntry: vi.fn(() => Effect.succeed(undefined)),
 				getSessionListSnapshot: vi.fn(() =>
 					Effect.succeed({ rows: [], sequence: 0 }),
 				),
@@ -1294,7 +1295,6 @@ function mockSessionManager(
 		sendDualSessionLists: vi.fn(async () => {}),
 		recordMessageActivity: vi.fn(),
 		clearPaginationCursor: vi.fn(),
-		decrementPendingQuestionCount: vi.fn(),
 		...overrides,
 	} as unknown as SessionManagerShape;
 }
@@ -1432,6 +1432,7 @@ describe("handleGetToolContent", () => {
 					Effect.succeed({ messages: [], sequence: 0 }),
 				),
 				getSessionListEntry: vi.fn(() => Effect.succeed(undefined)),
+				getStampedSessionListEntry: vi.fn(() => Effect.succeed(undefined)),
 				getSessionListSnapshot: vi.fn(() =>
 					Effect.succeed({ rows: [], sequence: 0 }),
 				),
@@ -2276,10 +2277,7 @@ describe("handleQuestionReject", () => {
 			getClientSession: vi.fn(() => "session-1"),
 		});
 		const log = mockLogger();
-		const decrementPendingQuestionCount = vi.fn(() => Effect.void);
-		const sessionManagerService = makeMockSessionManagerService({
-			decrementPendingQuestionCount,
-		});
+		const sessionManagerService = makeMockSessionManagerService();
 		const client = {
 			question: { reject: vi.fn(async () => {}) },
 		} as unknown as OpenCodeAPI;
@@ -2302,7 +2300,6 @@ describe("handleQuestionReject", () => {
 						toolId: "que-1",
 					}),
 				);
-				expect(decrementPendingQuestionCount).toHaveBeenCalledWith("session-1");
 			}),
 		);
 	});
@@ -2314,10 +2311,7 @@ describe("handleQuestionReject", () => {
 				getClientSession: vi.fn(() => "visible-session"),
 			});
 			const log = mockLogger();
-			const decrementPendingQuestionCount = vi.fn(() => Effect.void);
-			const sessionManagerService = makeMockSessionManagerService({
-				decrementPendingQuestionCount,
-			});
+			const sessionManagerService = makeMockSessionManagerService();
 			const client = {
 				question: {
 					reject: vi.fn(async () => {}),
@@ -2372,7 +2366,6 @@ describe("handleQuestionReject", () => {
 							toolId: "que-claude",
 						}),
 					);
-					expect(decrementPendingQuestionCount).not.toHaveBeenCalled();
 					expect(pending).toHaveLength(1);
 					expect(pending[0]?.requestId).toBe("que-claude");
 				}),
@@ -2382,52 +2375,43 @@ describe("handleQuestionReject", () => {
 });
 
 describe("handleAskUserResponse", () => {
-	it.effect(
-		"answers question via REST API and decrements through service",
-		() => {
-			const ws = mockWsHandler({
-				getClientSession: vi.fn(() => "session-1"),
-			});
-			const log = mockLogger();
-			const decrementPendingQuestionCount = vi.fn(() => Effect.void);
-			const sessionManagerService = makeMockSessionManagerService({
-				decrementPendingQuestionCount,
-			});
-			const client = {
-				question: { reply: vi.fn(async () => {}) },
-			} as unknown as OpenCodeAPI;
+	it.effect("answers question via REST API and broadcasts resolution", () => {
+		const ws = mockWsHandler({
+			getClientSession: vi.fn(() => "session-1"),
+		});
+		const log = mockLogger();
+		const sessionManagerService = makeMockSessionManagerService();
+		const client = {
+			question: { reply: vi.fn(async () => {}) },
+		} as unknown as OpenCodeAPI;
 
-			const layer = Layer.mergeAll(
-				Layer.succeed(OpenCodeAPITag, client),
-				Layer.succeed(WebSocketHandlerTag, ws),
-				Layer.succeed(LoggerTag, log),
-				Layer.succeed(SessionManagerServiceTag, sessionManagerService),
-				makeOverridesStateLive(),
-			);
+		const layer = Layer.mergeAll(
+			Layer.succeed(OpenCodeAPITag, client),
+			Layer.succeed(WebSocketHandlerTag, ws),
+			Layer.succeed(LoggerTag, log),
+			Layer.succeed(SessionManagerServiceTag, sessionManagerService),
+			makeOverridesStateLive(),
+		);
 
-			return handleAskUserResponse("client-1", {
-				toolId: "que-1",
-				answers: { "1": "Approve", "0": "Yes" },
-			}).pipe(
-				Effect.provide(layer),
-				Effect.tap(() => {
-					expect(client.question.reply).toHaveBeenCalledWith("que-1", [
-						["Yes"],
-						["Approve"],
-					]);
-					expect(ws.broadcast).toHaveBeenCalledWith(
-						expect.objectContaining({
-							type: "ask_user_resolved",
-							toolId: "que-1",
-						}),
-					);
-					expect(decrementPendingQuestionCount).toHaveBeenCalledWith(
-						"session-1",
-					);
-				}),
-			);
-		},
-	);
+		return handleAskUserResponse("client-1", {
+			toolId: "que-1",
+			answers: { "1": "Approve", "0": "Yes" },
+		}).pipe(
+			Effect.provide(layer),
+			Effect.tap(() => {
+				expect(client.question.reply).toHaveBeenCalledWith("que-1", [
+					["Yes"],
+					["Approve"],
+				]);
+				expect(ws.broadcast).toHaveBeenCalledWith(
+					expect.objectContaining({
+						type: "ask_user_resolved",
+						toolId: "que-1",
+					}),
+				);
+			}),
+		);
+	});
 
 	it.effect(
 		"uses the pending question session when answering a Claude question from another visible session",
@@ -2436,10 +2420,7 @@ describe("handleAskUserResponse", () => {
 				getClientSession: vi.fn(() => "visible-session"),
 			});
 			const log = mockLogger();
-			const decrementPendingQuestionCount = vi.fn(() => Effect.void);
-			const sessionManagerService = makeMockSessionManagerService({
-				decrementPendingQuestionCount,
-			});
+			const sessionManagerService = makeMockSessionManagerService();
 			const client = {
 				question: {
 					reply: vi.fn(async () => {}),
@@ -2487,9 +2468,6 @@ describe("handleAskUserResponse", () => {
 							toolId: "que-claude",
 							sessionId: "question-session",
 						}),
-					);
-					expect(decrementPendingQuestionCount).toHaveBeenCalledWith(
-						"question-session",
 					);
 				}),
 			);
@@ -2720,6 +2698,7 @@ describe("handleNewSession", () => {
 					Effect.succeed({ messages: [], sequence: 0 }),
 				),
 				getSessionListEntry: vi.fn(() => Effect.succeed(undefined)),
+				getStampedSessionListEntry: vi.fn(() => Effect.succeed(undefined)),
 				getSessionListSnapshot: vi.fn(() =>
 					Effect.succeed({ rows: [], sequence: 0 }),
 				),
@@ -2819,6 +2798,7 @@ describe("handleNewSession", () => {
 					Effect.succeed({ messages: [], sequence: 0 }),
 				),
 				getSessionListEntry: vi.fn(() => Effect.succeed(undefined)),
+				getStampedSessionListEntry: vi.fn(() => Effect.succeed(undefined)),
 				getSessionListSnapshot: vi.fn(() =>
 					Effect.succeed({ rows: [], sequence: 0 }),
 				),
@@ -2946,6 +2926,7 @@ describe("handleNewSession", () => {
 					Effect.succeed({ messages: [], sequence: 0 }),
 				),
 				getSessionListEntry: vi.fn(() => Effect.succeed(undefined)),
+				getStampedSessionListEntry: vi.fn(() => Effect.succeed(undefined)),
 				getSessionListSnapshot: vi.fn(() =>
 					Effect.succeed({ rows: [], sequence: 0 }),
 				),
@@ -3491,6 +3472,7 @@ describe("loadMoreHistoryForSession", () => {
 				Effect.succeed({ messages: [], sequence: 0 }),
 			),
 			getSessionListEntry: vi.fn(() => Effect.succeed(undefined)),
+			getStampedSessionListEntry: vi.fn(() => Effect.succeed(undefined)),
 			getSessionListSnapshot: vi.fn(() =>
 				Effect.succeed({ rows: [], sequence: 0 }),
 			),
@@ -3589,6 +3571,7 @@ describe("loadMoreHistoryForSession", () => {
 				Effect.succeed({ messages: [], sequence: 0 }),
 			),
 			getSessionListEntry: vi.fn(() => Effect.succeed(undefined)),
+			getStampedSessionListEntry: vi.fn(() => Effect.succeed(undefined)),
 			getSessionListSnapshot: vi.fn(() =>
 				Effect.succeed({ rows: [], sequence: 0 }),
 			),
@@ -4398,6 +4381,7 @@ describe("handleMessage", () => {
 					Effect.succeed({ messages: [], sequence: 0 }),
 				),
 				getSessionListEntry: vi.fn(() => Effect.succeed(undefined)),
+				getStampedSessionListEntry: vi.fn(() => Effect.succeed(undefined)),
 				getSessionListSnapshot: vi.fn(() =>
 					Effect.succeed({ rows: [], sequence: 0 }),
 				),
@@ -4791,6 +4775,7 @@ describe("handleMessage", () => {
 					Effect.succeed({ messages: [], sequence: 0 }),
 				),
 				getSessionListEntry: vi.fn(() => Effect.succeed(undefined)),
+				getStampedSessionListEntry: vi.fn(() => Effect.succeed(undefined)),
 				getSessionListSnapshot: vi.fn(() =>
 					Effect.succeed({ rows: [], sequence: 0 }),
 				),

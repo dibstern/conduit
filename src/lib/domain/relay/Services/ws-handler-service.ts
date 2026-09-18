@@ -18,6 +18,7 @@
 //   makeWsHandlerStateLive() → Layer providing the Tag
 //   Pure functions: addClient, removeClient, broadcast, sendTo, etc.
 
+import { SqlClient } from "@effect/sql";
 import { Context, Effect, HashMap, Layer, Option, Ref } from "effect";
 import type { RelayMessage } from "../../../shared-types.js";
 
@@ -179,6 +180,48 @@ export const safeSend = (ws: WsConn, data: string) =>
 		catch: () => false,
 	}).pipe(Effect.orElseSucceed(() => false));
 
+/** Persisted identity lets tabs and reloads recognize the same alert. */
+const serializeMessage = (message: RelayMessage) =>
+	Effect.gen(function* () {
+		if (
+			message.type !== "done" &&
+			message.type !== "error" &&
+			message.type !== "notification_event"
+		)
+			return JSON.stringify(message);
+		if (message.alertId || !message.sessionId) return JSON.stringify(message);
+		const kind =
+			message.type === "notification_event" ? message.eventType : message.type;
+		if (kind !== "done" && kind !== "error") return JSON.stringify(message);
+		const sql = yield* Effect.serviceOption(SqlClient.SqlClient);
+		if (Option.isNone(sql)) return JSON.stringify(message);
+		const rows = yield* sql.value<{
+			turnId: string | null;
+			lastMessageAt: number | null;
+		}>`
+   SELECT (SELECT id FROM turns WHERE session_id = ${message.sessionId}
+    ORDER BY requested_at DESC, rowid DESC LIMIT 1) AS turnId,
+    (SELECT last_message_at FROM sessions WHERE id = ${message.sessionId}) AS lastMessageAt`;
+		const anchor = rows[0]?.turnId ?? `m${rows[0]?.lastMessageAt ?? 0}`;
+		const detail =
+			kind === "error" && "message" in message ? message.message : undefined;
+		return JSON.stringify({
+			...message,
+			alertId: JSON.stringify([
+				message.sessionId,
+				anchor,
+				kind,
+				detail ?? null,
+			]),
+		});
+	}).pipe(
+		Effect.catchAll((cause) =>
+			Effect.logWarning("Could not identify WebSocket alert", cause).pipe(
+				Effect.as(JSON.stringify(message)),
+			),
+		),
+	);
+
 /**
  * Broadcast a message to all connected clients.
  * Clients that fail to receive the message are silently skipped.
@@ -187,7 +230,7 @@ export const broadcast = (message: RelayMessage) =>
 	Effect.gen(function* () {
 		const ref = yield* WsHandlerStateTag;
 		const map = yield* Ref.get(ref);
-		const data = JSON.stringify(message);
+		const data = yield* serializeMessage(message);
 		for (const [_clientId, state] of map) {
 			yield* safeSend(state.ws, data);
 		}
@@ -203,7 +246,7 @@ export const sendTo = (clientId: string, message: RelayMessage) =>
 		const map = yield* Ref.get(ref);
 		const entry = HashMap.get(map, clientId);
 		if (Option.isSome(entry)) {
-			yield* safeSend(entry.value.ws, JSON.stringify(message));
+			yield* safeSend(entry.value.ws, yield* serializeMessage(message));
 		}
 	}).pipe(Effect.annotateLogs("clientId", clientId));
 
@@ -261,7 +304,7 @@ export const sendToSession = (sessionId: string, message: RelayMessage) =>
 	Effect.gen(function* () {
 		const ref = yield* WsHandlerStateTag;
 		const map = yield* Ref.get(ref);
-		const data = JSON.stringify(message);
+		const data = yield* serializeMessage(message);
 		for (const [_clientId, state] of map) {
 			if (state.sessionId === sessionId) {
 				yield* safeSend(state.ws, data);
@@ -284,7 +327,7 @@ export const broadcastPerSessionEvent = (
 ) =>
 	Effect.gen(function* () {
 		const ref = yield* WsHandlerStateTag;
-		const data = JSON.stringify(message);
+		const data = yield* serializeMessage(message);
 		// Snapshot the map, then update buffered clients and send to ready ones
 		const map = yield* Ref.get(ref);
 		// Collect clients that need buffering

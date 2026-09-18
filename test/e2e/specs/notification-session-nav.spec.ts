@@ -160,7 +160,7 @@ test.describe("Notification → Session Navigation", () => {
 
 		// Simulate the notification click path: dispatch a navigate_to_session
 		// message on navigator.serviceWorker, which is where
-		// initSWNavigationListener() registers its handler.
+		// initSWMessageListener() registers its handler.
 		//
 		// In a real flow: push notification click → SW notificationclick →
 		// SW posts navigate_to_session → frontend listener → switchToSession()

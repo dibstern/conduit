@@ -115,6 +115,7 @@ function makeEmptyHistoryReadQuery(
 		getAllSessionStatuses: vi.fn(() => Effect.succeed({})),
 		listSessions: vi.fn(() => Effect.succeed([])),
 		getSessionListEntry: vi.fn(() => Effect.succeed(undefined)),
+		getStampedSessionListEntry: vi.fn(() => Effect.succeed(undefined)),
 		getSessionDetailSnapshot: vi.fn(() =>
 			Effect.succeed({ messages: [], sequence: 0 }),
 		),

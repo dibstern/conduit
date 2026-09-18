@@ -16,10 +16,22 @@ import type {
  */
 type SessionSelection = Omit<
 	SessionInfo,
-	"parentID" | "forkMessageId" | "messageCount" | "forkPointTimestamp"
+	| "parentID"
+	| "forkMessageId"
+	| "messageCount"
+	| "forkPointTimestamp"
+	| "pendingQuestions"
+	| "pendingPermissions"
+	| "unseenActivity"
 > & {
 	readonly parentID: string | null;
 	readonly forkMessageId: string | null;
+	// Optional on the wire because `SessionInfo` has a producer with no row
+	// behind it; never optional here — a row read always derives all three.
+	readonly pendingQuestions: number;
+	readonly pendingPermissions: number;
+	/** SQLite has no boolean type: the CASE expression selects 0 or 1. */
+	readonly unseenActivity: 0 | 1;
 };
 
 export class ReadQueryEffectError extends Data.TaggedError(
@@ -54,6 +66,30 @@ export interface ReadQueryEffect {
 	readonly getSessionListEntry: (
 		sessionId: string,
 	) => Effect.Effect<SessionInfo | undefined, ReadQueryEffectError | SqlError>;
+
+	/**
+	 * The session row as the shell streams it, but only if the row already
+	 * carries `minVersion` — plus the session projector's cursor, read in the
+	 * same transaction.
+	 *
+	 * This is the read behind a read-model advance that no event explains. An
+	 * advance names every session whose rows moved, including sessions whose
+	 * `messages` moved while the session row itself did not (per-token traffic),
+	 * so the version is the discriminator: below it, nothing about the shell row
+	 * changed and re-emitting it would undo coalescing.
+	 *
+	 * The cursor comes back because the caller has no sequence of its own to tag
+	 * the delta with — a direct write does not move the log. The cursor is a
+	 * position the row provably reflects, so a client that takes it as a resume
+	 * cursor is never carried past unseen history.
+	 */
+	readonly getStampedSessionListEntry: (
+		sessionId: string,
+		minVersion: number,
+	) => Effect.Effect<
+		{ readonly session: SessionInfo; readonly sequence: number } | undefined,
+		ReadQueryEffectError | SqlError
+	>;
 
 	readonly getSessionMessagesWithParts: (
 		sessionId: string,
@@ -211,20 +247,39 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 	// NULL-to-absent, which SQL cannot express. `listSessions` stays a row read
 	// for the server-internal callers that need columns the wire never carries
 	// (the status poller's `updated_at`, permission-mode restore).
+	//
+	// The last three are the notification facts (ni8.23), derived here so that
+	// "does this session want me?" is answered once, by the server, in the same
+	// read that produces the row — rather than by each client folding a stream of
+	// events into a guess. `pending_approvals` is read-only here: the approval
+	// projector owns those rows, and both question and permission requests land
+	// in it, so the counts cannot drift from what the app is actually blocked on.
 	const sessionColumns = sql.literal(
 		`id, title, status,
 		 created_at AS createdAt, updated_at AS updatedAt,
-		 parent_id AS parentID, fork_point_event AS forkMessageId`,
+		 parent_id AS parentID, fork_point_event AS forkMessageId,
+		 (SELECT COUNT(*) FROM pending_approvals pa
+		   WHERE pa.session_id = sessions.id
+		     AND pa.status = 'pending' AND pa.type = 'question') AS pendingQuestions,
+		 (SELECT COUNT(*) FROM pending_approvals pa
+		   WHERE pa.session_id = sessions.id
+		     AND pa.status = 'pending' AND pa.type = 'permission') AS pendingPermissions,
+		 CASE WHEN COALESCE(last_message_at, 0) > COALESCE(last_viewed_at, 0)
+		      THEN 1 ELSE 0 END AS unseenActivity`,
 	);
 
 	const toSession = ({
 		parentID,
 		forkMessageId,
+		unseenActivity,
 		...session
 	}: SessionSelection): SessionInfo => ({
 		...session,
 		...(parentID !== null && { parentID }),
 		...(forkMessageId !== null && { forkMessageId }),
+		// SQLite has no boolean; the wire type does, and the client should never
+		// be the one deciding what 1 means.
+		unseenActivity: unseenActivity === 1,
 	});
 
 	const listSessions = (opts?: {
@@ -266,6 +321,38 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 						}),
 			),
 		);
+
+	const getStampedSessionListEntry = (
+		sessionId: string,
+		minVersion: number,
+	): Effect.Effect<
+		{ readonly session: SessionInfo; readonly sequence: number } | undefined,
+		ReadQueryEffectError | SqlError
+	> =>
+		sql
+			.withTransaction(
+				Effect.gen(function* () {
+					const rows = yield* sql<SessionSelection>`
+						SELECT ${sessionColumns} FROM sessions
+						WHERE id = ${sessionId} AND version >= ${minVersion}`;
+					const row = rows[0];
+					if (row === undefined) return undefined;
+					const cursorRows = yield* sql<{ hwm: number | null }>`
+						SELECT last_applied_seq AS hwm FROM projector_cursors
+						WHERE projector_name = 'session'`;
+					return { session: toSession(row), sequence: cursorRows[0]?.hwm ?? 0 };
+				}),
+			)
+			.pipe(
+				Effect.mapError((e) =>
+					e instanceof ReadQueryEffectError
+						? e
+						: new ReadQueryEffectError({
+								operation: "getStampedSessionListEntry",
+								cause: e,
+							}),
+				),
+			);
 
 	const getSessionMessagesWithParts = (
 		sessionId: string,
@@ -454,6 +541,7 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 		getAllSessionStatuses,
 		listSessions,
 		getSessionListEntry,
+		getStampedSessionListEntry,
 		getSessionMessagesWithParts,
 		getSessionDetailSnapshot,
 		getSessionListSnapshot,

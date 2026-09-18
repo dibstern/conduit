@@ -31,6 +31,7 @@ import {
 	subscribeShell,
 } from "../../../src/lib/domain/relay/Services/shell-subscription.js";
 import { ClaudeEventPersistEffectTag } from "../../../src/lib/persistence/effect/claude-event-persist-effect.js";
+import { makeCommitAndSignal } from "../../../src/lib/persistence/effect/commit-and-signal.js";
 import { EventStoreEffectTag } from "../../../src/lib/persistence/effect/event-store-effect.js";
 import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
 import { ProjectionRunnerEffectTag } from "../../../src/lib/persistence/effect/projection-runner-effect.js";
@@ -38,6 +39,7 @@ import {
 	type ReadQueryEffect,
 	ReadQueryEffectTag,
 } from "../../../src/lib/persistence/effect/read-query-effect.js";
+import { markSessionViewed } from "../../../src/lib/persistence/effect/session-viewed.js";
 import {
 	type CanonicalEvent,
 	canonicalEvent,
@@ -160,6 +162,21 @@ const commit = (events: readonly CanonicalEvent[]) =>
 		yield* bus.publish(stored);
 		return stored;
 	});
+
+// The production choke point, for the tests that need the seam's own publish
+// rather than the hand-rolled one above: `commitAndSignal` appends, projects and
+// announces the read-model advance in one uninterruptible step.
+const commitThroughSeam = (events: readonly CanonicalEvent[]) =>
+	Effect.flatMap(makeCommitAndSignal, (commitAndSignal) =>
+		commitAndSignal.write((project) =>
+			Effect.gen(function* () {
+				const eventStore = yield* EventStoreEffectTag;
+				const stored = yield* eventStore.appendBatch(events);
+				yield* project(stored);
+				return stored;
+			}),
+		),
+	);
 
 const maxSequence = (stored: readonly StoredEvent[]): number =>
 	stored.reduce((max, event) => Math.max(max, event.sequence), 0);
@@ -614,5 +631,107 @@ describe("subscribeShell", () => {
 			// subscription and the coalescing pipeline are released with it.
 			expect(Exit.isInterrupted(yield* Fiber.await(fiber))).toBe(true);
 		}).pipe(Effect.provide(makeShellTestLayer())),
+	);
+	it.scoped(
+		"a direct read-model write reaches a live subscriber even though the log has not moved",
+		() =>
+			Effect.gen(function* () {
+				yield* recoverProjections;
+				const stored = yield* commitThroughSeam([
+					sessionCreated(SID),
+					messageCreated(SID, "m1"),
+				]);
+
+				const { q } = yield* openShell();
+				const [snapshot, synchronized] = yield* takeN(q, 2);
+				if (snapshot?._tag !== "snapshot") throw new Error("expected snapshot");
+				expect(synchronized).toEqual({ _tag: "synchronized" });
+				// A message has landed and nobody has looked: the badge is on.
+				expect(snapshot.rows[0]?.unseenActivity).toBe(true);
+				const logHwm = snapshot.sequence;
+
+				// Viewing appends nothing, so the log is exactly where it was. This is
+				// the ni8.23 C2 trap: the ONLY thing that can carry this to a
+				// subscriber is the row version the write stamped.
+				yield* markSessionViewed(SID, 9_999_999);
+				yield* TestClock.adjust(SHELL_COALESCE_WINDOW);
+
+				const delta = yield* Queue.take(q);
+				if (delta._tag !== "upsert") throw new Error("expected upsert");
+				expect(delta.item.id).toBe(SID);
+				expect(delta.item.unseenActivity).toBe(false);
+				// Tagged with a log position the row genuinely reflects — never
+				// beyond it, because no event was written. A client that resumes from
+				// this cursor is not skipped past anything.
+				expect(delta.sequence).toBe(logHwm);
+				expect(delta.sequence).toBeLessThanOrEqual(maxSequence(stored));
+				expect(yield* Queue.size(q)).toBe(0);
+			}).pipe(Effect.provide(makeShellTestLayer())),
+	);
+
+	it.scoped(
+		"a view of an unknown session announces nothing and emits nothing",
+		() =>
+			Effect.gen(function* () {
+				yield* recoverProjections;
+				yield* commitThroughSeam([sessionCreated(SID)]);
+
+				const { q } = yield* openShell();
+				yield* takeN(q, 2);
+
+				expect(yield* markSessionViewed("no-such-session", 9_999_999)).toBe(
+					false,
+				);
+				yield* TestClock.adjust(SHELL_COALESCE_WINDOW);
+				expect(yield* Queue.size(q)).toBe(0);
+			}).pipe(Effect.provide(makeShellTestLayer())),
+	);
+
+	it.scoped("a message-only advance does not re-emit the session row", () =>
+		Effect.gen(function* () {
+			yield* recoverProjections;
+			yield* commitThroughSeam([
+				sessionCreated(SID),
+				messageCreated(SID, "m1"),
+			]);
+
+			const { q } = yield* openShell();
+			yield* takeN(q, 2);
+
+			// A token advances `messages`, and its advance names the owning
+			// session — but the session ROW did not move. Re-emitting the shell
+			// row on every token would undo the whole point of coalescing.
+			yield* commitThroughSeam([textDelta(SID, "m1", "hello")]);
+			yield* TestClock.adjust(SHELL_COALESCE_WINDOW);
+
+			expect(yield* Queue.size(q)).toBe(0);
+		}).pipe(Effect.provide(makeShellTestLayer())),
+	);
+
+	it.scoped(
+		"a projection and its advance in one window still collapse to ONE upsert",
+		() =>
+			Effect.gen(function* () {
+				yield* recoverProjections;
+				yield* commitThroughSeam([sessionCreated(SID)]);
+
+				const requeries = yield* Ref.make(0);
+				const real = yield* ReadQueryEffectTag;
+				const { q } = yield* openShell({
+					readQuery: countingReadQuery(real, requeries),
+				});
+				yield* takeN(q, 2);
+
+				// The seam publishes the events AND the advance for the same commit.
+				// Both arms of the live stream see it; the subscriber must not.
+				yield* commitThroughSeam([sessionRenamed(SID, "Renamed")]);
+				yield* TestClock.adjust(SHELL_COALESCE_WINDOW);
+
+				const delta = yield* Queue.take(q);
+				if (delta._tag !== "upsert") throw new Error("expected upsert");
+				expect(delta.item.title).toBe("Renamed");
+				expect(yield* Ref.get(requeries)).toBe(1);
+				expect(yield* Queue.size(q)).toBe(0);
+			}).pipe(Effect.provide(makeShellTestLayer())),
 	);
 });

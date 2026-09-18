@@ -9,9 +9,10 @@
 //     transaction (replaces the legacy full-refetch session_list broadcast).
 //   • replay   — the durable log strictly after a cursor, paged past the
 //     store's read limit, folded to ONE current-row delta per touched session.
-//   • live     — the SessionEventBus (all sessions) filtered to the event
-//     types that mutate the sessions projection, coalesced per session in a
-//     50ms window, each flush re-querying the affected row.
+//   • live     — the SessionEventBus, on BOTH its arms: the events that mutate
+//     the sessions projection, and the read-model advances (which also cover
+//     the writes no event explains — ni8.23's `last_viewed_at`). One shared
+//     50ms window, coalesced per session, each flush re-querying the row.
 //
 // The shell CAN emit `remove`: a signalled session whose row is absent at
 // re-query time has left the list (`session.deleted` tombstone, eviction).
@@ -24,6 +25,7 @@
 
 import type { SqlError } from "@effect/sql/SqlError";
 import { Chunk, Duration, Effect, Stream } from "effect";
+import type { ReadModelAdvance } from "../../../contracts/read-model-advance.js";
 import {
 	type EventStoreEffect,
 	EventStoreEffectTag,
@@ -43,6 +45,7 @@ import type { SessionInfo } from "../../../shared-types.js";
 import {
 	type Delta,
 	type Envelope,
+	type LiveDelta,
 	type SubscriptionSource,
 	stream,
 } from "./read-model-subscription.js";
@@ -174,6 +177,79 @@ const replayDeltas = (
 		}),
 	);
 
+// ─── The advance arm ─────────────────────────────────────────────────────────
+//
+// An event says what happened; an advance says only which session rows moved and
+// to what version. Most advances are redundant with the events published beside
+// them — but not all: a direct read-model write (`last_viewed_at`) moves a row
+// with no event at all, and an advance is the ONLY notice a subscriber gets.
+// Ignoring it is the ni8.23 C2 trap — the badge quietly stops clearing and
+// nothing anywhere reports a problem.
+//
+// Two things keep it cheap. The version filter: an advance for per-token traffic
+// stamps `messages` and names the owning session, so the session row's own
+// version is what says whether the shell row changed. And the shared window: a
+// projection's events and its advance arrive together and collapse into one
+// re-query, because the event arm already claimed the session.
+
+type ShellSignal =
+	| { readonly _tag: "event"; readonly event: StoredEvent }
+	| { readonly _tag: "advance"; readonly advance: ReadModelAdvance };
+
+/**
+ * Turn one coalesce window into deltas: sequenced upserts/removes for the
+ * sessions an event touched, then unsequenced upserts for sessions only an
+ * advance touched and whose row actually moved.
+ *
+ * An advance-only session that fails the version check, or has no row at all,
+ * emits nothing. A missing row here is NOT a `remove`: a deleted row cannot be
+ * stamped, so its advance comes from the cascade that the tombstone EVENT
+ * already describes — and that arm can say `remove` with a sequence behind it.
+ */
+const toWindowDeltas = (
+	readQuery: ReadQueryEffect,
+	window: Iterable<ShellSignal>,
+): Effect.Effect<readonly LiveDelta<SessionInfo>[], ShellSubscriptionError> =>
+	Effect.gen(function* () {
+		const events: StoredEvent[] = [];
+		const advanced = new Map<string, number>();
+		for (const signal of window) {
+			if (signal._tag === "event") {
+				events.push(signal.event);
+				continue;
+			}
+			for (const sessionId of signal.advance.sessionIds) {
+				const previous = advanced.get(sessionId);
+				if (previous === undefined || signal.advance.version > previous)
+					advanced.set(sessionId, signal.advance.version);
+			}
+		}
+
+		const bySequence = foldMaxSequenceBySession(events);
+		const deltas: LiveDelta<SessionInfo>[] = [
+			...(yield* toCurrentRowDeltas(readQuery, bySequence)),
+		];
+		for (const [sessionId, version] of advanced) {
+			// The event arm already re-queried this row, and did it with a real
+			// sequence to its name. Re-emitting would be a duplicate.
+			if (bySequence.has(sessionId)) continue;
+			const stamped = yield* readQuery.getStampedSessionListEntry(
+				sessionId,
+				version,
+			);
+			if (stamped === undefined) continue;
+			deltas.push({
+				_tag: "unsequenced",
+				delta: {
+					_tag: "upsert",
+					item: stamped.session,
+					sequence: stamped.sequence,
+				},
+			});
+		}
+		return deltas;
+	});
+
 // ─── Source adapter ──────────────────────────────────────────────────────────
 
 export const makeShellSource = (deps: {
@@ -188,21 +264,28 @@ export const makeShellSource = (deps: {
 	// (same observable outcome, more machinery) and not debounce (starves under
 	// continuous activity). Idle windows emit nothing.
 	live: () =>
-		deps.bus.subscribe().pipe(
-			Effect.map((events) =>
+		Effect.gen(function* () {
+			// Both arms are subscribed before either is read, and before the
+			// orchestrator takes its snapshot, so nothing published between the two
+			// acquisitions falls between them.
+			const events = yield* deps.bus.subscribe();
+			const advances = yield* deps.bus.subscribeAdvances();
+			return Stream.merge(
 				events.pipe(
 					Stream.filter((event) => SHELL_RELEVANT_TYPES.has(event.type)),
-					Stream.groupedWithin(WINDOW_COUNT_BOUND, SHELL_COALESCE_WINDOW),
-					Stream.filter(Chunk.isNonEmpty),
-					Stream.mapConcatEffect((window) =>
-						toCurrentRowDeltas(
-							deps.readQuery,
-							foldMaxSequenceBySession(window),
-						),
-					),
+					Stream.map((event): ShellSignal => ({ _tag: "event", event })),
 				),
-			),
-		),
+				advances.pipe(
+					Stream.map((advance): ShellSignal => ({ _tag: "advance", advance })),
+				),
+			).pipe(
+				Stream.groupedWithin(WINDOW_COUNT_BOUND, SHELL_COALESCE_WINDOW),
+				Stream.filter(Chunk.isNonEmpty),
+				Stream.mapConcatEffect((window) =>
+					toWindowDeltas(deps.readQuery, window),
+				),
+			);
+		}),
 });
 
 // ─── Public entry point ──────────────────────────────────────────────────────

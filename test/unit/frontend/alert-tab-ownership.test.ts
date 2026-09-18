@@ -1,0 +1,177 @@
+import { afterEach, beforeEach, expect, it, vi } from "vitest";
+
+const { emit, settings } = vi.hoisted(() => ({
+	emit: vi.fn(),
+	settings: { sound: true, browser: true, push: true },
+}));
+vi.mock("../../../src/lib/frontend/utils/sound.js", () => ({
+	readyDoneSound: async () => {},
+	emitDoneSound: emit,
+}));
+vi.mock("../../../src/lib/frontend/utils/notif-settings.js", () => ({
+	getNotifSettings: () => settings,
+}));
+vi.mock("../../../src/lib/frontend/stores/router.svelte.js", () => ({
+	getCurrentSlug: () => "project",
+	navigate: vi.fn(),
+}));
+const question = {
+	type: "ask_user" as const,
+	sessionId: "s1",
+	toolId: "q1",
+	questions: [],
+};
+let subscribed: boolean;
+let releaseLookup: (() => void) | undefined;
+let lookup: Promise<void>;
+beforeEach(() => {
+	vi.resetModules();
+	emit.mockClear();
+	subscribed = false;
+	lookup = Promise.resolve();
+	const receipts = new Map<string, string>();
+	let queue = Promise.resolve();
+	vi.stubGlobal("localStorage", {
+		getItem: (key: string) => receipts.get(key) ?? null,
+		setItem: (key: string, value: string) => receipts.set(key, value),
+	});
+	vi.stubGlobal("navigator", {
+		locks: {
+			request: (
+				_key: string,
+				optionsOrCallback: unknown,
+				callback?: (lock: object) => Promise<void>,
+			) => {
+				const work =
+					typeof optionsOrCallback === "function"
+						? optionsOrCallback
+						: callback;
+				const next = queue.then(() => work?.({}));
+				queue = next;
+				return next;
+			},
+		},
+		serviceWorker: {
+			getRegistration: async () => {
+				await lookup;
+				return {
+					pushManager: {
+						getSubscription: async () => (subscribed ? {} : null),
+					},
+				};
+			},
+		},
+	});
+});
+afterEach(() => vi.unstubAllGlobals());
+
+it("waits for persisted push subscription on a freshly loaded tab", async () => {
+	subscribed = true;
+	lookup = new Promise<void>((resolve) => {
+		releaseLookup = resolve;
+	});
+	const page = await import(
+		"../../../src/lib/frontend/stores/ws-notifications.js"
+	);
+	const pending = page.triggerNotifications(question);
+	await Promise.resolve();
+	expect(emit).not.toHaveBeenCalled();
+	releaseLookup?.();
+	await pending;
+	expect(emit).not.toHaveBeenCalled();
+});
+
+it("suppresses the same no-push alert in a second tab and after reload", async () => {
+	const first = await import(
+		"../../../src/lib/frontend/stores/ws-notifications.js"
+	);
+	vi.resetModules();
+	const second = await import(
+		"../../../src/lib/frontend/stores/ws-notifications.js"
+	);
+	await Promise.all([
+		first.triggerNotifications(question),
+		second.triggerNotifications(question),
+	]);
+	expect(emit).toHaveBeenCalledOnce();
+	vi.resetModules();
+	const reloaded = await import(
+		"../../../src/lib/frontend/stores/ws-notifications.js"
+	);
+	await reloaded.triggerNotifications(question);
+	expect(emit).toHaveBeenCalledOnce();
+	await reloaded.triggerNotifications({ ...question, toolId: "q2" });
+	expect(emit).toHaveBeenCalledTimes(2);
+});
+
+it("rechecks subscription changes made in another tab", async () => {
+	const page = await import(
+		"../../../src/lib/frontend/stores/ws-notifications.js"
+	);
+	await page.triggerNotifications(question);
+	expect(emit).toHaveBeenCalledOnce();
+	subscribed = true;
+	await page.triggerNotifications({ ...question, toolId: "q2" });
+	expect(emit).toHaveBeenCalledOnce();
+	subscribed = false;
+	await page.triggerNotifications({ ...question, toolId: "q3" });
+	expect(emit).toHaveBeenCalledTimes(2);
+});
+
+it("distinguishes completed turns while suppressing repeated delivery of one turn", async () => {
+	const page = await import(
+		"../../../src/lib/frontend/stores/ws-notifications.js"
+	);
+	const done = {
+		type: "done" as const,
+		sessionId: "s1",
+		code: 0,
+		alertId: "turn-1:done",
+	};
+	await page.triggerNotifications(done);
+	await page.triggerNotifications(done);
+	expect(emit).toHaveBeenCalledOnce();
+	await page.triggerNotifications({ ...done, alertId: "turn-2:done" });
+	expect(emit).toHaveBeenCalledTimes(2);
+});
+
+it("does not guess in-app ownership when subscription lookup fails", async () => {
+	vi.stubGlobal("navigator", {
+		serviceWorker: {
+			getRegistration: async () => {
+				throw new Error("lookup failed");
+			},
+		},
+	});
+	const page = await import(
+		"../../../src/lib/frontend/stores/ws-notifications.js"
+	);
+	await page.triggerNotifications(question);
+	expect(emit).not.toHaveBeenCalled();
+});
+
+it("does not deliver uncoordinated duplicate sounds without Web Locks", async () => {
+	vi.stubGlobal("navigator", {});
+	const page = await import(
+		"../../../src/lib/frontend/stores/ws-notifications.js"
+	);
+	await page.triggerNotifications(question);
+	await page.triggerNotifications(question);
+	expect(emit).not.toHaveBeenCalled();
+});
+
+it("does not play without being able to retain a delivery receipt", async () => {
+	vi.stubGlobal("localStorage", {
+		getItem: () => null,
+		setItem: () => {
+			throw new Error("quota exceeded");
+		},
+		removeItem: vi.fn(),
+	});
+	const page = await import(
+		"../../../src/lib/frontend/stores/ws-notifications.js"
+	);
+	await page.triggerNotifications(question);
+	await page.triggerNotifications(question);
+	expect(emit).not.toHaveBeenCalled();
+});
