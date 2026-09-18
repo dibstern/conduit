@@ -254,6 +254,92 @@ it.each([
 	);
 });
 
+it.each([
+	"HTTP 500",
+	"ECONNRESET",
+])("recovery pushes the whole batch after a recheck fails with %s", async (reason) => {
+	const cause = new Error(reason);
+	const questions = ["q1", "q2"].map((id) => ({
+		id,
+		sessionID: "s1",
+		questions: [{ question: "Continue?" }],
+	}));
+	const listPendingQuestions = vi
+		.fn()
+		.mockResolvedValueOnce(questions)
+		.mockRejectedValueOnce(cause)
+		.mockResolvedValue(questions);
+	const pushed: string[] = [];
+	const deps = createMockSSEWiringDeps({
+		listPendingQuestions,
+		pushManager: {
+			getPublicKey: () => "pub",
+			addSubscription: () => {},
+			removeSubscription: () => {},
+			sendToAll: async (payload) => {
+				pushed.push(String(payload["alertId"]));
+				return reachedOneDevice;
+			},
+		},
+	});
+	const warn = vi.spyOn(deps.log, "warn");
+	const {
+		processingTimeouts: _timeouts,
+		pendingInteractions: _pending,
+		sessionService: _sessions,
+		getSessionParentMap: _parents,
+		getSessionStatuses: _statuses,
+		statusPoller: _poller,
+		...base
+	} = deps;
+	const callbacks: {
+		[K in keyof SSEStreamCallbacks]: SSEStreamCallbacks[K][];
+	} = {
+		connected: [],
+		disconnected: [],
+		reconnecting: [],
+		error: [],
+		event: [],
+		heartbeat: [],
+	};
+	await withStore(
+		Effect.gen(function* () {
+			yield* seed("s1", "turn-1");
+			yield* wireSSEConsumerEffect(
+				{ ...base, providerInstanceId: "opencode" },
+				{
+					on: (event, callback) => {
+						callbacks[event].push(callback);
+					},
+				},
+			);
+			for (const callback of callbacks.connected) callback();
+			yield* Effect.tryPromise({
+				try: () =>
+					vi.waitFor(() =>
+						expect(pushed).toEqual(["s1:question:q1", "s1:question:q2"]),
+					),
+				catch: (error) => error,
+			});
+			expect(listPendingQuestions).toHaveBeenCalledTimes(3);
+			expect(warn).toHaveBeenCalledOnce();
+			expect(warn).toHaveBeenCalledWith(expect.stringContaining("q1"), cause);
+		}).pipe(
+			Effect.provide(
+				Layer.mergeAll(
+					AlertLedgerLive,
+					PendingInteractionServiceLive,
+					makeOverridesStateLive(),
+					Layer.succeed(
+						SessionManagerServiceTag,
+						makeMockSessionManagerService(),
+					),
+				),
+			),
+		),
+	);
+});
+
 it("recovery skips a question answered while the preceding push is in flight", async () => {
 	let pending = ["q1", "q2"];
 	let finishFirst = () => {};

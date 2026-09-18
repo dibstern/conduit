@@ -1189,9 +1189,23 @@ const recoverPendingQuestionsEffect = (
 				// question. Recheck the provider immediately before its own attempt.
 				const listPendingQuestions = deps.listPendingQuestions;
 				if (listPendingQuestions) {
-					const pending = yield* Effect.tryPromise(listPendingQuestions);
-					if (!pending.some((question) => question.id === message.toolId))
-						continue;
+					const stillPending = yield* Effect.tryPromise(
+						listPendingQuestions,
+					).pipe(
+						Effect.map((pending) =>
+							pending.some((question) => question.id === message.toolId),
+						),
+						Effect.catchAll((error) =>
+							Effect.sync(() => {
+								deps.log.warn(
+									`Failed to recheck pending question ${message.toolId}; pushing anyway`,
+									error.cause,
+								);
+								return true;
+							}),
+						),
+					);
+					if (!stillPending) continue;
 				}
 				yield* sendPushForEventEffect(
 					deps.pushManager,

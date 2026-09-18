@@ -65,6 +65,11 @@ const defaultWebpush: WebPushModule = {
 					},
 				);
 				request.on("error", reject);
+				// An unhandled upgrade can close without a response or error.
+				// Promise settlement is idempotent if a prior outcome already won.
+				request.on("close", () =>
+					reject(new Error("Push request closed before response completed")),
+				);
 				abort = () => request.destroy(signal?.reason);
 				signal?.addEventListener("abort", abort, { once: true });
 				if (details.body) request.write(details.body);
