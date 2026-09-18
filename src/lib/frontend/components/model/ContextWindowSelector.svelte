@@ -6,6 +6,8 @@
 	import Icon from "../shared/Icon.svelte";
 	import { clickOutside } from "../shared/use-click-outside.svelte.js";
 	import {
+		applyContextWindowSwitched,
+		chooseContextWindow,
 		discoveryState,
 		getActiveContextWindowOptions,
 	} from "../../stores/discovery.svelte.js";
@@ -50,8 +52,7 @@
 		e: MouseEvent,
 	) {
 		e.stopPropagation();
-		const previousContextWindow = discoveryState.currentContextWindow;
-		discoveryState.currentContextWindow = option.value;
+		const undoContextWindow = chooseContextWindow(option.value);
 		const projectSlug = getCurrentSlug();
 		const sessionId = sessionState.currentId;
 		if (projectSlug && sessionId) {
@@ -60,13 +61,8 @@
 				sessionId,
 				contextWindow: option.value,
 			})
-				.then((response) => {
-					discoveryState.currentContextWindow = response.contextWindow;
-					discoveryState.availableContextWindowOptions = response.options;
-				})
-				.catch(() => {
-					discoveryState.currentContextWindow = previousContextWindow;
-				});
+				.then(applyContextWindowSwitched)
+				.catch(undoContextWindow);
 		}
 		dropdownOpen = false;
 	}

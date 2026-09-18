@@ -1,5 +1,12 @@
 import type { Meta, StoryObj } from "@storybook/svelte-vite";
-import { discoveryState } from "../../stores/discovery.svelte.js";
+import {
+	clearDiscoveryState,
+	discoveryState,
+	handleDefaultModelInfo,
+	handleModelInfo,
+	handleModelList,
+	handleVariantInfo,
+} from "../../stores/discovery.svelte.js";
 import type { ProviderInfo } from "../../types.js";
 import InstanceModelPicker from "./InstanceModelPicker.svelte";
 
@@ -35,11 +42,18 @@ function bottomRightFrame(): () => void {
 
 /** Seed a single configured Anthropic provider with Sonnet selected. */
 function seedClaude(): void {
-	discoveryState.providers = [anthropic];
-	discoveryState.currentProviderId = "claude";
-	discoveryState.currentModelId = "claude-sonnet-4-5";
-	discoveryState.defaultProviderId = "claude";
-	discoveryState.defaultModelId = "claude-sonnet-4-5";
+	handleModelList({ type: "model_list", providers: [anthropic] });
+	handleModelInfo({
+		type: "model_info",
+		model: "claude-sonnet-4-5",
+		provider: "claude",
+	});
+	handleDefaultModelInfo({
+		type: "default_model_info",
+		model: "claude-sonnet-4-5",
+		provider: "claude",
+		variant: "",
+	});
 }
 
 const meta = {
@@ -50,16 +64,7 @@ const meta = {
 	beforeEach: () => {
 		// Reset state for each story. `selectedInstanceId` is normally rehydrated
 		// from localStorage, so it has to be pinned or a stale draft leaks in.
-		discoveryState.providers = [];
-		discoveryState.currentProviderId = "";
-		discoveryState.currentModelId = "";
-		discoveryState.defaultProviderId = "";
-		discoveryState.defaultModelId = "";
-		discoveryState.currentVariant = "";
-		discoveryState.availableVariants = [];
-		discoveryState.currentContextWindow = "";
-		discoveryState.availableContextWindowOptions = [];
-		discoveryState.hiddenModels = [];
+		clearDiscoveryState();
 		discoveryState.selectedInstanceId = "claude";
 	},
 } satisfies Meta<typeof InstanceModelPicker>;
@@ -89,7 +94,10 @@ export const Open: Story = {
 export const WithVariants: Story = {
 	beforeEach: () => {
 		seedClaude();
-		discoveryState.availableVariants = ["low", "medium", "high"];
-		discoveryState.currentVariant = "high";
+		handleVariantInfo({
+			type: "variant_info",
+			variant: "high",
+			variants: ["low", "medium", "high"],
+		});
 	},
 };

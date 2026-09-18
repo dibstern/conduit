@@ -30,6 +30,8 @@
 	import {
 		applyGetAgentsResponse,
 		applyGetModelsResponse,
+		applyHiddenEntriesSet,
+		chooseHiddenEntries,
 		discoveryState,
 	} from "../../stores/discovery.svelte.js";
 	import { copyToClipboard } from "../../utils/clipboard.js";
@@ -459,16 +461,14 @@
 	}): Promise<void> {
 		const projectSlug = getRpcProjectSlug();
 		if (!projectSlug) return;
-		const prevModels = discoveryState.hiddenModels;
-		const prevAgents = discoveryState.hiddenAgents;
-		// Optimistic update; the visibility_info broadcast confirms it.
-		if (update.hiddenModels) discoveryState.hiddenModels = update.hiddenModels;
-		if (update.hiddenAgents) discoveryState.hiddenAgents = update.hiddenAgents;
+		// Optimistic; the response (and the visibility_info broadcast) confirms it.
+		const undoHidden = chooseHiddenEntries(update);
 		try {
-			await setHiddenEntriesRpc({ projectSlug, ...update });
+			applyHiddenEntriesSet(
+				await setHiddenEntriesRpc({ projectSlug, ...update }),
+			);
 		} catch {
-			discoveryState.hiddenModels = prevModels;
-			discoveryState.hiddenAgents = prevAgents;
+			undoHidden();
 			showToast("Failed to save visibility settings", { variant: "warn" });
 		}
 	}

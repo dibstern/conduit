@@ -48,6 +48,8 @@ import {
 	sessionMessages,
 } from "../../../src/lib/frontend/stores/chat.svelte.js";
 import {
+	applySessionUpsert,
+	clearSessionState,
 	handleSessionList,
 	sessionState,
 } from "../../../src/lib/frontend/stores/session.svelte.js";
@@ -61,11 +63,9 @@ beforeEach(() => {
 	sessionMessages.clear();
 	_resetLRU();
 	sessionState.currentId = "current-session";
-	sessionState.rootSessions = [];
-	sessionState.allSessions = [];
-	sessionState.searchResults = null;
+	clearSessionState();
 	sessionState.searchQuery = "";
-	sessionState.sessions.clear();
+	clearSessionState();
 	clearMessages();
 });
 
@@ -74,7 +74,7 @@ afterEach(() => {
 	sessionMessages.clear();
 	_resetLRU();
 	sessionState.currentId = null;
-	sessionState.sessions.clear();
+	clearSessionState();
 });
 
 // ─── Tests ──────────────────────────────────────────────────────────────────
@@ -82,7 +82,7 @@ afterEach(() => {
 describe("clearSessionChatState wired to session_deleted", () => {
 	it("session_deleted event cleans up per-session chat state", () => {
 		// Pre-populate a session slot
-		sessionState.sessions.set("deleted-session", {
+		applySessionUpsert({
 			id: "deleted-session",
 			title: "To Delete",
 			status: "idle",
@@ -122,17 +122,17 @@ describe("clearSessionChatState wired to session_deleted", () => {
 describe("handleSessionList drop path", () => {
 	it("cleans up chat state for sessions removed from session list", () => {
 		// Pre-populate sessions map with sessions A, B, C
-		sessionState.sessions.set("session-A", {
+		applySessionUpsert({
 			id: "session-A",
 			title: "A",
 			status: "idle",
 		});
-		sessionState.sessions.set("session-B", {
+		applySessionUpsert({
 			id: "session-B",
 			title: "B",
 			status: "idle",
 		});
-		sessionState.sessions.set("session-C", {
+		applySessionUpsert({
 			id: "session-C",
 			title: "C",
 			status: "idle",
@@ -163,12 +163,12 @@ describe("handleSessionList drop path", () => {
 
 	it("search-payload guard: search results do not trigger cleanup", () => {
 		// Pre-populate sessions map
-		sessionState.sessions.set("session-A", {
+		applySessionUpsert({
 			id: "session-A",
 			title: "A",
 			status: "idle",
 		});
-		sessionState.sessions.set("session-B", {
+		applySessionUpsert({
 			id: "session-B",
 			title: "B",
 			status: "idle",
@@ -188,18 +188,18 @@ describe("handleSessionList drop path", () => {
 		expect(sessionMessages.has("session-B")).toBe(true);
 		expect(sessionState.sessions.has("session-B")).toBe(true);
 
-		// Search results should be set
-		expect(sessionState.searchResults).toHaveLength(1);
+		// The search hits should be recorded
+		expect(sessionState.searchMatchIds).toEqual(["session-A"]);
 	});
 
 	it("roots=true session_list does not trigger diff cleanup", () => {
 		// Pre-populate
-		sessionState.sessions.set("session-A", {
+		applySessionUpsert({
 			id: "session-A",
 			title: "A",
 			status: "idle",
 		});
-		sessionState.sessions.set("session-B", {
+		applySessionUpsert({
 			id: "session-B",
 			title: "B",
 			status: "idle",
@@ -225,11 +225,7 @@ describe("active-session teardown", () => {
 	it("session_deleted for the active session cleans up state", () => {
 		const activeId = "active-session";
 		sessionState.currentId = activeId;
-		sessionState.sessions.set(activeId, {
-			id: activeId,
-			title: "Active",
-			status: "idle",
-		});
+		applySessionUpsert({ id: activeId, title: "Active", status: "idle" });
 		getOrCreateSessionSlot(activeId);
 
 		handleMessage({

@@ -1,16 +1,12 @@
 import type { Meta, StoryObj } from "@storybook/svelte-vite";
-import { sessionState, setSearchQuery } from "../../stores/session.svelte.js";
+import {
+	applySessionSnapshot,
+	clearSessionState,
+	sessionState,
+	setSearchQuery,
+} from "../../stores/session.svelte.js";
 import { mockSessionsAllGroups } from "../../stories/mocks.js";
 import SessionList from "./SessionList.svelte";
-
-function resetSessionState() {
-	sessionState.rootSessions = [];
-	sessionState.allSessions = [];
-	sessionState.searchResults = null;
-	sessionState.currentId = null;
-	sessionState.searchQuery = "";
-	sessionState.hasMore = false;
-}
 
 const meta = {
 	title: "Session/SessionList",
@@ -18,7 +14,7 @@ const meta = {
 	tags: ["autodocs"],
 	parameters: { layout: "centered" },
 	beforeEach: () => {
-		resetSessionState();
+		clearSessionState();
 	},
 } satisfies Meta<typeof SessionList>;
 
@@ -29,8 +25,7 @@ export const Empty: Story = {};
 
 export const WithItems: Story = {
 	beforeEach: () => {
-		sessionState.rootSessions = [...mockSessionsAllGroups];
-		sessionState.allSessions = [...mockSessionsAllGroups];
+		applySessionSnapshot(mockSessionsAllGroups, "complete");
 		// biome-ignore lint/style/noNonNullAssertion: safe — guarded by length check
 		sessionState.currentId = mockSessionsAllGroups[0]!.id;
 	},
@@ -38,8 +33,7 @@ export const WithItems: Story = {
 
 export const Searching: Story = {
 	beforeEach: () => {
-		sessionState.rootSessions = [...mockSessionsAllGroups];
-		sessionState.allSessions = [...mockSessionsAllGroups];
+		applySessionSnapshot(mockSessionsAllGroups, "complete");
 		setSearchQuery("dark");
 	},
 };

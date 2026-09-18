@@ -13,7 +13,10 @@ import { sessionState } from "./session.svelte.js";
 
 const log = createFrontendLogger("permissions");
 
-// ─── State ──────────────────────────────────────────────────────────────────
+// ─── Server-owned state ─────────────────────────────────────────────────────
+// This store has no client half: every entry is a request the server is waiting
+// on. Which option the user has highlighted lives in the card component until
+// it is submitted.
 
 export const permissionsState = $state({
 	pendingPermissions: [] as (PermissionRequest & { id: string })[],
@@ -40,8 +43,8 @@ export function getHasPending(): boolean {
 
 /**
  * Collect all descendant session IDs (children, grandchildren, etc.)
- * for a given session. Uses BFS over `sessionState.allSessions` which
- * includes `parentID` for subagent sessions.
+ * for a given session. Uses BFS over the known sessions, which carry
+ * `parentID` for subagent sessions.
  */
 export function getDescendantSessionIds(parentId: string): Set<string> {
 	const descendants = new Set<string>();
@@ -49,7 +52,7 @@ export function getDescendantSessionIds(parentId: string): Set<string> {
 	while (queue.length > 0) {
 		// biome-ignore lint/style/noNonNullAssertion: safe — queue.length > 0 guarantees shift returns a value
 		const id = queue.shift()!;
-		for (const s of sessionState.allSessions) {
+		for (const s of sessionState.sessions.values()) {
 			if (s.parentID === id && !descendants.has(s.id)) {
 				descendants.add(s.id);
 				queue.push(s.id);
