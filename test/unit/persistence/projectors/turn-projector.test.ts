@@ -14,6 +14,9 @@ import { runMigrations } from "../../../../src/lib/persistence/migrations.js";
 import { TurnProjector } from "../../../../src/lib/persistence/projectors/turn-projector.js";
 import { schemaMigrations } from "../../../../src/lib/persistence/schema.js";
 import { SqliteClient } from "../../../../src/lib/persistence/sqlite-client.js";
+import resumedTurnEvents from "../../../fixtures/claude-resumed-turn.json" with {
+	type: "json",
+};
 
 function makeStored<T extends StoredEvent["type"]>(
 	type: T,
@@ -73,10 +76,74 @@ describe("TurnProjector", () => {
 		db?.close();
 	});
 
+	// The persisted state after each recorded event, in fixture order. Only the
+	// turn's own results finish it; anything that follows puts it back to work.
+	const EXPECTED_STATE = [
+		"pending", // 1. the user prompt opens the turn
+		"running", // 2. the session goes busy
+		"running", // 3. the first assistant message
+		"completed", // 4. a result arrives, but Claude is not done
+		"completed", // 5. idle
+		"running", // 6. busy again, 68ms later
+		"running", // 7. a second assistant message, same turn
+		"running", // 8. thinking
+		"running", // 9. a tool starts
+		"running", // 10. the tool finishes
+		"completed", // 11. the second execution reports its own result
+		"running", // 12. a third assistant message, 15 minutes later
+		"running", // 13. still working 45 minutes after the first "completion"
+	];
+
+	it("agrees with the Effect turn projector on the production resumed-turn timeline", () => {
+		const sessionId = "ses_c2d8cd521bc14f9f8f7700096bbf1d23";
+		db.execute(
+			"INSERT INTO sessions (id, provider, title, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
+			[sessionId, "claude", "Resumed turn", "idle", now, now],
+		);
+		expect(resumedTurnEvents).toHaveLength(EXPECTED_STATE.length);
+		for (const [index, recorded] of resumedTurnEvents.entries()) {
+			// The export omits envelope fields unrelated to the regression.
+			const event = {
+				...recorded,
+				eventId: `recorded-${recorded.sequence}`,
+				sessionId,
+				streamVersion: index,
+				metadata: {},
+			} as StoredEvent;
+			projector.project(event, db);
+			const turns = db.query<TurnRow>("SELECT * FROM turns");
+			// No user message follows, so all thirteen events are one turn.
+			expect(turns).toHaveLength(1);
+			expect(turns[0], `after event ${index + 1}`).toMatchObject({
+				id: "52feab57-ed40-4885-b23b-71dcd78209a8",
+				state: EXPECTED_STATE[index],
+			});
+			if (EXPECTED_STATE[index] === "running") {
+				// Reopening has to clear the finish too, or every reader that
+				// asks "when did this end" still sees a finished turn.
+				expect(turns[0], `after event ${index + 1}`).toMatchObject({
+					completed_at: null,
+				});
+			}
+			if (event.type === "turn.completed") {
+				expect(turns[0]).toMatchObject({
+					assistant_message_id: event.data.messageId,
+					completed_at: event.createdAt,
+					// Cost is cumulative for the whole SDK session, so the latest
+					// wins; tokens are per-execution, so the second result adds.
+					cost: event.data.cost,
+					tokens_in: index === 3 ? 2 : 4,
+					tokens_out: index === 3 ? 2 : 3,
+				});
+			}
+		}
+	});
+
 	it("has the correct name and handles list", () => {
 		expect(projector.name).toBe("turn");
 		expect(projector.handles).toEqual([
 			"message.created",
+			"tool.started",
 			"session.status",
 			"turn.completed",
 			"turn.error",
@@ -117,7 +184,7 @@ describe("TurnProjector", () => {
 	});
 
 	describe("assistant message.created", () => {
-		it("updates the most recent pending/running turn with assistant_message_id", () => {
+		it("starts the most recent turn and attaches its assistant_message_id", () => {
 			// User message creates the turn
 			projector.project(
 				makeStored(
@@ -154,6 +221,8 @@ describe("TurnProjector", () => {
 				"user_m1",
 			]);
 			expect(row?.assistant_message_id).toBe("asst_m1");
+			expect(row?.state).toBe("running");
+			expect(row?.started_at).toBe(now + 100);
 		});
 
 		it("does not create a new turn for assistant messages", () => {
@@ -272,7 +341,7 @@ describe("TurnProjector", () => {
 	});
 
 	describe("turn.completed", () => {
-		it("finalizes the turn with cost, tokens, and completed_at", () => {
+		it("settles the turn with the latest cost, summed tokens, and completed_at", () => {
 			// Full lifecycle
 			projector.project(
 				makeStored(
@@ -327,6 +396,155 @@ describe("TurnProjector", () => {
 			expect(row?.tokens_in).toBe(3000);
 			expect(row?.tokens_out).toBe(800);
 			expect(row?.completed_at).toBe(now + 5000);
+
+			projector.project(
+				makeStored("message.created", "s1", {
+					messageId: "asst_m2",
+					role: "assistant",
+					sessionId: "s1",
+				}),
+				db,
+			);
+			projector.project(
+				makeStored(
+					"turn.completed",
+					"s1",
+					{
+						messageId: "asst_m2",
+						cost: 0.05,
+						tokens: { input: 100, output: 20 },
+					},
+					5,
+					now + 6000,
+				),
+				db,
+			);
+			expect(db.queryOne<TurnRow>("SELECT * FROM turns")).toMatchObject({
+				state: "completed",
+				assistant_message_id: "asst_m2",
+				cost: 0.05,
+				tokens_in: 3100,
+				tokens_out: 820,
+				started_at: now + 100,
+				completed_at: now + 6000,
+			});
+		});
+
+		it("preserves known accounting when usage is omitted and accepts zero values", () => {
+			projector.project(
+				makeStored("message.created", "s1", {
+					messageId: "u1",
+					role: "user",
+					sessionId: "s1",
+				}),
+				db,
+			);
+			for (const [index, usage] of [
+				{},
+				{ cost: 0.5, tokens: { input: 100, output: 20 } },
+				{ tokens: { output: 0 } },
+				{ cost: 0, tokens: { input: 0 } },
+			].entries()) {
+				const messageId = `a${index}`;
+				projector.project(
+					makeStored("message.created", "s1", {
+						messageId,
+						role: "assistant",
+						sessionId: "s1",
+					}),
+					db,
+				);
+				projector.project(
+					makeStored("turn.completed", "s1", { messageId, ...usage }),
+					db,
+				);
+				expect(db.queryOne<TurnRow>("SELECT * FROM turns")).toMatchObject({
+					state: "completed",
+					assistant_message_id: messageId,
+					cost: index === 0 ? null : index === 3 ? 0 : 0.5,
+					tokens_in: index === 0 ? null : 100,
+					tokens_out: index === 0 ? null : 20,
+				});
+			}
+		});
+	});
+
+	describe.each([
+		"completed",
+		"error",
+		"interrupted",
+	])("reopening a %s turn", (state) => {
+		it.each([
+			"busy",
+			"assistant",
+			"tool",
+		])("reopens on %s and preserves the original start and new attachment", (resume) => {
+			db.execute(
+				`INSERT INTO turns (id, session_id, state, requested_at, started_at, completed_at, assistant_message_id)
+				 VALUES ('older', 's1', 'pending', ?, NULL, NULL, NULL),
+				        ('latest', 's1', ?, ?, ?, ?, 'a1')`,
+				[now, state, now, now + 1, now + 2],
+			);
+			const activity =
+				resume === "busy"
+					? makeStored("session.status", "s1", {
+							sessionId: "s1",
+							status: "busy",
+						})
+					: resume === "assistant"
+						? makeStored("message.created", "s1", {
+								sessionId: "s1",
+								messageId: "a2",
+								role: "assistant",
+							})
+						: makeStored("tool.started", "s1", {
+								messageId: "a1",
+								partId: "p1",
+								toolName: "bash",
+								callId: "c1",
+								input: {},
+							});
+			projector.project(activity, db);
+			expect(
+				db.queryOne<TurnRow>("SELECT * FROM turns WHERE id = 'latest'"),
+			).toMatchObject({
+				state: "running",
+				started_at: now + 1,
+				completed_at: null,
+				assistant_message_id: resume === "assistant" ? "a2" : null,
+			});
+			projector.project(
+				makeStored("message.created", "s1", {
+					sessionId: "s1",
+					messageId: "a2",
+					role: "assistant",
+				}),
+				db,
+			);
+			projector.project(
+				makeStored("session.status", "s1", { sessionId: "s1", status: "busy" }),
+				db,
+			);
+			expect(
+				db.query<TurnRow>(
+					"SELECT id, state, assistant_message_id, started_at, completed_at FROM turns ORDER BY rowid",
+				),
+			).toEqual([
+				{
+					id: "older",
+					state: "pending",
+					assistant_message_id: null,
+					started_at: null,
+					completed_at: null,
+				},
+				{
+					id: "latest",
+					state: "running",
+					assistant_message_id: "a2",
+					started_at: now + 1,
+					completed_at: null,
+				},
+			]);
 		});
 	});
 

@@ -35,3 +35,22 @@ const PHASE_BY_SIGNAL = {
 export function phaseAfter(signal: TurnSignal): TurnPhase {
 	return PHASE_BY_SIGNAL[signal];
 }
+
+/**
+ * The same rule in the read-model's own words.
+ *
+ * The `turns.state` column predates `TurnPhase` and keeps the settlement
+ * reason, so `settled` splits three ways here. Both turn projectors write that
+ * column and both go through this function, so neither can drift into
+ * latching a turn on its own.
+ */
+export function persistedTurnState(signal: TurnSignal) {
+	const phase = phaseAfter(signal);
+	if (phase !== "settled") return phase;
+	// Preserve the settlement reason in the existing read-model vocabulary.
+	return signal === "error"
+		? "error"
+		: signal === "interrupt"
+			? "interrupted"
+			: "completed";
+}

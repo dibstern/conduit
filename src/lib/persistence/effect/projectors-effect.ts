@@ -5,7 +5,7 @@
 import { SqlClient } from "@effect/sql";
 import type { SqlError } from "@effect/sql/SqlError";
 import { Data, Effect } from "effect";
-import { phaseAfter, type TurnSignal } from "../../contracts/turn-phase.js";
+import { persistedTurnState } from "../../contracts/turn-phase.js";
 import type {
 	CanonicalEventType,
 	EventPayloadMap,
@@ -334,17 +334,6 @@ export const makeMessageProjector = (): EffectProjector => ({
 });
 
 // ─── Turn Projector ─────────────────────────────────────────────────────────
-
-function persistedTurnState(signal: TurnSignal) {
-	const phase = phaseAfter(signal);
-	if (phase !== "settled") return phase;
-	// Preserve the settlement reason in the existing read-model vocabulary.
-	return signal === "error"
-		? "error"
-		: signal === "interrupt"
-			? "interrupted"
-			: "completed";
-}
 
 export const makeTurnProjector = (): EffectProjector => ({
 	name: "turn",
