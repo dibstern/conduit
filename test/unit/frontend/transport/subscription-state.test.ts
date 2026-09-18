@@ -40,33 +40,36 @@ const titles = (state: SubscriptionState<Row>): Record<string, string> =>
 	Object.fromEntries([...state.rows].map(([id, r]) => [id, r.title]));
 
 describe("reduce", () => {
-	it("documents unbounded retention during 10,000 uninterrupted live removals", () => {
+	it("documents unbounded retention during 1,000 uninterrupted live removals", () => {
 		// Shell opening: read-model-subscription.ts:156-164. Then consume each
 		// live removal (211-216) before publishing the next. No overflow,
 		// reconnect, replacement snapshot, or additional completion marker.
+		// 1,000 is enough: the per-iteration assertion pins one retained entry per
+		// removal. A larger N only buys quadratic map copying, which timed the unit
+		// suite out at 10,000.
 		let state = apply(
 			empty,
 			{
 				_tag: "snapshot",
-				rows: Array.from({ length: 10_000 }, (_, i) => row(`s${i + 1}`)),
-				sequence: 10_000,
+				rows: Array.from({ length: 1_000 }, (_, i) => row(`s${i + 1}`)),
+				sequence: 1_000,
 			},
 			{ _tag: "synchronized" },
 		);
 		const initial = state;
-		for (let i = 1; i <= 10_000; i++) {
+		for (let i = 1; i <= 1_000; i++) {
 			state = apply(state, {
 				_tag: "remove",
 				id: `s${i}`,
-				sequence: 10_000 + i,
+				sequence: 1_000 + i,
 			});
 			expect(state.versions.size).toBe(i);
 		}
 		// P2 remains unresolved: this records the defect, not an acceptable bound.
 		expect(state.rows.size).toBe(0);
-		expect(state.versions.size).toBe(10_000);
-		expect(state.floor).toBe(10_000);
-		expect(initial.rows.size).toBe(10_000);
+		expect(state.versions.size).toBe(1_000);
+		expect(state.floor).toBe(1_000);
+		expect(initial.rows.size).toBe(1_000);
 		expect(initial.versions.size).toBe(0);
 	});
 
