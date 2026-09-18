@@ -9,6 +9,7 @@ export interface SessionRow {
 	parent_id: string | null;
 	fork_point_event: string | null;
 	last_message_at: number | null;
+	last_turn_error_at: number | null;
 	permission_mode: string | null;
 	read_at: number | null;
 	created_at: number;

@@ -106,6 +106,7 @@ function makeEmptyHistoryReadQuery(
 				parent_id: parentId,
 				fork_point_event: null,
 				last_message_at: null,
+				last_turn_error_at: null,
 				permission_mode: null,
 				read_at: null,
 				created_at: 1,

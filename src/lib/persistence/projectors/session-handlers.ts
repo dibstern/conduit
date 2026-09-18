@@ -27,6 +27,9 @@ function isAutoTitleRename(event: StoredEvent): boolean {
 	return event.metadata.source === "auto-title";
 }
 
+// last_turn_error_at answers one durable question rather than mirroring the
+// turn state machine: failures set it, while success or new work clears it.
+//
 // This mapped table replaces SessionProjector's assertHandledOrIgnored runtime
 // guard: every SessionHandledType must have an implementation at compile time.
 // Other projectors still use assertHandledOrIgnored for their imperative branches.
@@ -168,9 +171,13 @@ export const sessionHandlers: {
 	},
 
 	"session.status": (event) => {
+		const startsNewWork =
+			event.data.status === "busy" || event.data.status === "retry";
 		return [
 			{
-				sql: "UPDATE sessions SET status = ?, updated_at = ? WHERE id = ?",
+				sql: startsNewWork
+					? "UPDATE sessions SET status = ?, updated_at = ?, last_turn_error_at = NULL WHERE id = ?"
+					: "UPDATE sessions SET status = ?, updated_at = ? WHERE id = ?",
 				params: [event.data.status, event.createdAt, event.data.sessionId],
 			},
 		];
@@ -197,7 +204,7 @@ export const sessionHandlers: {
 	"turn.completed": (event) => {
 		return [
 			{
-				sql: "UPDATE sessions SET updated_at = ? WHERE id = ?",
+				sql: "UPDATE sessions SET updated_at = ?, last_turn_error_at = NULL WHERE id = ?",
 				params: [event.createdAt, event.sessionId],
 			},
 		];
@@ -205,8 +212,8 @@ export const sessionHandlers: {
 	"turn.error": (event) => {
 		return [
 			{
-				sql: "UPDATE sessions SET updated_at = ? WHERE id = ?",
-				params: [event.createdAt, event.sessionId],
+				sql: "UPDATE sessions SET updated_at = ?, last_turn_error_at = ? WHERE id = ?",
+				params: [event.createdAt, event.createdAt, event.sessionId],
 			},
 		];
 	},
@@ -215,11 +222,12 @@ export const sessionHandlers: {
 	// SessionProjector (not MessageProjector) to keep all session-table
 	// mutations in one projector.
 	"message.created": (event) => {
+		const startsNewTurn = event.data.role === "user";
 		return [
 			{
 				sql: `UPDATE sessions SET
 					last_message_at = MAX(COALESCE(last_message_at, 0), ?),
-					updated_at = ?
+					updated_at = ?${startsNewTurn ? ",\n\t\t\t\t\tlast_turn_error_at = NULL" : ""}
 				 WHERE id = ?`,
 				params: [event.createdAt, event.createdAt, event.data.sessionId],
 			},

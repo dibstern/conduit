@@ -3,7 +3,7 @@
 // Converts SQLite SessionRow[] → SessionInfo[] for the frontend.
 
 import type { ForkEntry } from "../daemon/fork-metadata.js";
-import type { SessionInfo } from "../shared-types.js";
+import type { SessionAttention, SessionInfo } from "../shared-types.js";
 import type {
 	PendingApprovalCountRow,
 	SessionRow,
@@ -43,6 +43,27 @@ export interface SessionListAdapterOptions {
 	pendingQuestionCounts?: ReadonlyMap<string, number>;
 	pendingPermissionCounts?: ReadonlyMap<string, number>;
 	forkMeta?: ReadonlyMap<string, ForkEntry>;
+}
+
+export function deriveSessionAttention(input: {
+	pendingQuestionCount: number | undefined;
+	pendingPermissionCount: number | undefined;
+	lastTurnErrorAt: number | null;
+	liveStatus: SessionStatus | undefined;
+	projectedStatus: string;
+	unread: boolean;
+}): SessionAttention {
+	if ((input.pendingPermissionCount ?? 0) > 0) return "needs-approval";
+	if ((input.pendingQuestionCount ?? 0) > 0) return "needs-reply";
+	if (input.lastTurnErrorAt != null) return "error";
+
+	// Cold daemon-wide reads have no live status, so the projected column is the
+	// only working signal. A relay killed mid-turn can leave it busy until another
+	// event moves it; conduit-test-vik1.12 owns repairing that stale signal.
+	const status = input.liveStatus?.type ?? input.projectedStatus;
+	if (status === "busy" || status === "retry") return "working";
+	if (input.unread) return "done-unread";
+	return "idle";
 }
 
 /**
@@ -94,6 +115,15 @@ export function sessionRowsToSessionInfoList(
 		) {
 			info.unread = true;
 		}
+
+		info.attention = deriveSessionAttention({
+			pendingQuestionCount: info.pendingQuestionCount,
+			pendingPermissionCount: info.pendingPermissionCount,
+			lastTurnErrorAt: row.last_turn_error_at,
+			liveStatus: opts?.statuses?.[row.id],
+			projectedStatus: row.status,
+			unread: info.unread === true,
+		});
 
 		return info;
 	});

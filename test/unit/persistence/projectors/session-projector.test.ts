@@ -2,6 +2,7 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
 	createEventId,
+	type MessageCreatedPayload,
 	type SessionCreatedPayload,
 	type SessionPermissionModeChangedPayload,
 	type SessionProviderChangedPayload,
@@ -47,6 +48,8 @@ interface SessionRow {
 	status: string;
 	parent_id: string | null;
 	fork_point_event: string | null;
+	last_message_at: number | null;
+	last_turn_error_at: number | null;
 	permission_mode: string | null;
 	read_at: number | null;
 	created_at: number;
@@ -206,7 +209,10 @@ describe("SessionProjector", () => {
 	});
 
 	describe("session.status", () => {
-		it("updates the status and updated_at", () => {
+		it.each([
+			"busy",
+			"retry",
+		] as const)("updates status to %s and clears the last turn error", (statusValue) => {
 			const created = makeStored(
 				"session.created",
 				"s1",
@@ -219,15 +225,25 @@ describe("SessionProjector", () => {
 				now,
 			);
 			projector.project(created, db);
+			projector.project(
+				makeStored(
+					"turn.error",
+					"s1",
+					{ messageId: "m1", error: "failed" },
+					2,
+					now + 250,
+				),
+				db,
+			);
 
 			const status = makeStored(
 				"session.status",
 				"s1",
 				{
 					sessionId: "s1",
-					status: "busy",
+					status: statusValue,
 				} satisfies SessionStatusPayload,
-				2,
+				3,
 				now + 500,
 			);
 			projector.project(status, db);
@@ -236,8 +252,46 @@ describe("SessionProjector", () => {
 				"SELECT * FROM sessions WHERE id = ?",
 				["s1"],
 			);
-			expect(row?.status).toBe("busy");
+			expect(row?.status).toBe(statusValue);
 			expect(row?.updated_at).toBe(now + 500);
+			expect(row?.last_turn_error_at).toBeNull();
+		});
+
+		it("preserves the last turn error for an idle status", () => {
+			projector.project(
+				makeStored("session.created", "s1", {
+					sessionId: "s1",
+					title: "Test",
+					provider: "opencode",
+				}),
+				db,
+			);
+			projector.project(
+				makeStored(
+					"turn.error",
+					"s1",
+					{ messageId: "m1", error: "failed" },
+					2,
+					now + 250,
+				),
+				db,
+			);
+			projector.project(
+				makeStored(
+					"session.status",
+					"s1",
+					{ sessionId: "s1", status: "idle" },
+					3,
+					now + 500,
+				),
+				db,
+			);
+
+			const row = db.queryOne<SessionRow>(
+				"SELECT * FROM sessions WHERE id = ?",
+				["s1"],
+			);
+			expect(row?.last_turn_error_at).toBe(now + 250);
 		});
 	});
 
@@ -382,7 +436,7 @@ describe("SessionProjector", () => {
 	});
 
 	describe("turn.completed", () => {
-		it("updates only updated_at", () => {
+		it("updates updated_at and clears the last turn error", () => {
 			const created = makeStored(
 				"session.created",
 				"s1",
@@ -402,6 +456,16 @@ describe("SessionProjector", () => {
 			);
 			const originalTitle = originalRow?.title;
 			const originalStatus = originalRow?.status;
+			projector.project(
+				makeStored(
+					"turn.error",
+					"s1",
+					{ messageId: "m0", error: "failed" },
+					2,
+					now + 3000,
+				),
+				db,
+			);
 
 			const turnDone = makeStored(
 				"turn.completed",
@@ -411,7 +475,7 @@ describe("SessionProjector", () => {
 					cost: 0.01,
 					tokens: { input: 100, output: 50 },
 				} satisfies TurnCompletedPayload,
-				2,
+				3,
 				now + 5000,
 			);
 			projector.project(turnDone, db);
@@ -423,11 +487,12 @@ describe("SessionProjector", () => {
 			expect(row?.title).toBe(originalTitle);
 			expect(row?.status).toBe(originalStatus);
 			expect(row?.updated_at).toBe(now + 5000);
+			expect(row?.last_turn_error_at).toBeNull();
 		});
 	});
 
 	describe("turn.error", () => {
-		it("updates only updated_at", () => {
+		it("updates updated_at and records the failure timestamp", () => {
 			const created = makeStored(
 				"session.created",
 				"s1",
@@ -458,6 +523,69 @@ describe("SessionProjector", () => {
 				["s1"],
 			);
 			expect(row?.updated_at).toBe(now + 3000);
+			expect(row?.last_turn_error_at).toBe(now + 3000);
+		});
+	});
+
+	describe("message.created", () => {
+		it("clears the last turn error only for user messages", () => {
+			projector.project(
+				makeStored("session.created", "s1", {
+					sessionId: "s1",
+					title: "Test",
+					provider: "opencode",
+				}),
+				db,
+			);
+			projector.project(
+				makeStored(
+					"turn.error",
+					"s1",
+					{ messageId: "m1", error: "failed" },
+					2,
+					now + 100,
+				),
+				db,
+			);
+			projector.project(
+				makeStored(
+					"message.created",
+					"s1",
+					{
+						messageId: "a1",
+						role: "assistant",
+						sessionId: "s1",
+					} satisfies MessageCreatedPayload,
+					3,
+					now + 200,
+				),
+				db,
+			);
+			expect(
+				db.queryOne<SessionRow>("SELECT * FROM sessions WHERE id = ?", ["s1"])
+					?.last_turn_error_at,
+			).toBe(now + 100);
+
+			projector.project(
+				makeStored(
+					"message.created",
+					"s1",
+					{
+						messageId: "u1",
+						role: "user",
+						sessionId: "s1",
+					} satisfies MessageCreatedPayload,
+					4,
+					now + 300,
+				),
+				db,
+			);
+			const row = db.queryOne<SessionRow>(
+				"SELECT * FROM sessions WHERE id = ?",
+				["s1"],
+			);
+			expect(row?.last_message_at).toBe(now + 300);
+			expect(row?.last_turn_error_at).toBeNull();
 		});
 	});
 

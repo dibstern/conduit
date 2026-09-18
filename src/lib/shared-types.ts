@@ -201,6 +201,19 @@ export interface FileEntry {
 
 // ─── Session ────────────────────────────────────────────────────────────────
 
+export const SESSION_ATTENTION_TIERS = [
+	"needs-approval",
+	"needs-reply",
+	"error",
+	"working",
+	"done-unread",
+	"idle",
+] as const;
+export type SessionAttention = (typeof SESSION_ATTENTION_TIERS)[number];
+export const SessionAttentionSchema = Schema.Literal(
+	...SESSION_ATTENTION_TIERS,
+);
+
 export interface SessionInfo {
 	id: string;
 	title: string;
@@ -226,6 +239,8 @@ export interface SessionInfo {
 	 */
 	pendingQuestionCount?: number;
 	pendingPermissionCount?: number;
+	/** The adapter is the only producer; tier order is also the sort order. */
+	attention?: SessionAttention;
 	unread?: boolean;
 }
 
@@ -514,6 +529,7 @@ const SessionInfoSchema = Schema.Struct({
 	forkPointTimestamp: Schema.optional(Schema.Number),
 	pendingQuestionCount: Schema.optional(Schema.Number),
 	pendingPermissionCount: Schema.optional(Schema.Number),
+	attention: Schema.optional(SessionAttentionSchema),
 	unread: Schema.optional(Schema.Boolean),
 });
 

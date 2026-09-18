@@ -1,6 +1,9 @@
 import { Rpc, RpcGroup } from "@effect/rpc";
 import { Schema } from "effect";
-import { SessionPermissionModeSchema } from "../shared-types.js";
+import {
+	SessionAttentionSchema,
+	SessionPermissionModeSchema,
+} from "../shared-types.js";
 import {
 	ClaudeSettingsOverridesSchema,
 	ClaudeSettingsResolveError,
@@ -300,6 +303,7 @@ export const SessionInfoSchema = Schema.Struct({
 	forkPointTimestamp: Schema.optional(Schema.Number),
 	pendingQuestionCount: Schema.optional(Schema.Number),
 	pendingPermissionCount: Schema.optional(Schema.Number),
+	attention: Schema.optional(SessionAttentionSchema),
 	unread: Schema.optional(Schema.Boolean),
 });
 

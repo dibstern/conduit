@@ -15,6 +15,7 @@ function makeRow(id: string, overrides?: Partial<SessionRow>): SessionRow {
 		parent_id: null,
 		fork_point_event: null,
 		last_message_at: null,
+		last_turn_error_at: null,
 		permission_mode: null,
 		read_at: null,
 		created_at: 1000,
@@ -40,12 +41,14 @@ describe("sessionRowsToSessionInfoList", () => {
 			title: "First",
 			updatedAt: 3000,
 			messageCount: 0,
+			attention: "idle",
 		});
 		expect(result[1]).toEqual({
 			id: "s2",
 			title: "Second",
 			updatedAt: 1000,
 			messageCount: 0,
+			attention: "idle",
 		});
 	});
 
@@ -87,6 +90,7 @@ describe("sessionRowsToSessionInfoList", () => {
 			parentID: "parent-1",
 			forkMessageId: "msg-42",
 			forkPointTimestamp: 1234,
+			attention: "idle",
 		});
 	});
 
@@ -162,6 +166,91 @@ describe("sessionRowsToSessionInfoList", () => {
 		expect(result[1]?.unread).toBe(true);
 		expect(result[2]).not.toHaveProperty("unread");
 		expect(result[3]).not.toHaveProperty("unread");
+	});
+
+	it("derives needs-approval before every lower tier", () => {
+		const result = sessionRowsToSessionInfoList(
+			[
+				makeRow("s1", {
+					status: "busy",
+					last_turn_error_at: 150,
+					last_message_at: 200,
+				}),
+			],
+			{
+				pendingPermissionCounts: new Map([["s1", 1]]),
+				pendingQuestionCounts: new Map([["s1", 1]]),
+			},
+		);
+
+		expect(result[0]?.attention).toBe("needs-approval");
+	});
+
+	it("derives needs-reply before error, working, and unread", () => {
+		const result = sessionRowsToSessionInfoList(
+			[
+				makeRow("s1", {
+					status: "busy",
+					last_turn_error_at: 150,
+					last_message_at: 200,
+				}),
+			],
+			{ pendingQuestionCounts: new Map([["s1", 1]]) },
+		);
+
+		expect(result[0]?.attention).toBe("needs-reply");
+	});
+
+	it("derives error before working and unread", () => {
+		const result = sessionRowsToSessionInfoList([
+			makeRow("s1", {
+				status: "busy",
+				last_turn_error_at: 150,
+				last_message_at: 200,
+			}),
+		]);
+
+		expect(result[0]?.attention).toBe("error");
+	});
+
+	it("derives working before unread from live status", () => {
+		const result = sessionRowsToSessionInfoList(
+			[makeRow("s1", { last_message_at: 200 })],
+			{ statuses: { s1: { type: "retry" } } },
+		);
+
+		expect(result[0]?.attention).toBe("working");
+	});
+
+	it("derives done-unread from unread activity", () => {
+		const result = sessionRowsToSessionInfoList([
+			makeRow("s1", { last_message_at: 200 }),
+		]);
+
+		expect(result[0]?.attention).toBe("done-unread");
+	});
+
+	it("derives idle when no higher tier matches", () => {
+		expect(sessionRowsToSessionInfoList([makeRow("s1")])[0]?.attention).toBe(
+			"idle",
+		);
+	});
+
+	it("falls back to the projected status for a cold row", () => {
+		const result = sessionRowsToSessionInfoList([
+			makeRow("s1", { status: "busy" }),
+		]);
+
+		expect(result[0]?.attention).toBe("working");
+	});
+
+	it("prefers a live status over the projected status", () => {
+		const result = sessionRowsToSessionInfoList(
+			[makeRow("s1", { status: "busy" })],
+			{ statuses: { s1: { type: "idle" } } },
+		);
+
+		expect(result[0]?.attention).toBe("idle");
 	});
 
 	it("returns empty array for empty input", () => {

@@ -12,6 +12,7 @@ import {
 	MESSAGES_CONTEXT_WINDOW_MIGRATION,
 	readMigrationSql,
 	SESSION_CASCADE_DELETES_MIGRATION,
+	SESSIONS_LAST_TURN_ERROR_MIGRATION,
 	SESSIONS_PERMISSION_MODE_MIGRATION,
 	SESSIONS_READ_AT_MIGRATION,
 	TURN_MODEL_EXECUTION_MIGRATION,
@@ -48,6 +49,9 @@ const sessionCascadeDeletesMigrationSql = readMigrationSql(
 	SESSION_CASCADE_DELETES_MIGRATION,
 );
 const sessionsReadAtMigrationSql = readMigrationSql(SESSIONS_READ_AT_MIGRATION);
+const sessionsLastTurnErrorMigrationSql = readMigrationSql(
+	SESSIONS_LAST_TURN_ERROR_MIGRATION,
+);
 
 const expectedTableColumns = {
 	activities: [
@@ -241,6 +245,7 @@ const expectedTableColumns = {
 		"updated_at",
 		"permission_mode",
 		"read_at",
+		"last_turn_error_at",
 	],
 	tool_content: ["tool_id", "session_id", "content", "created_at"],
 	turns: [
@@ -340,7 +345,11 @@ function splitSqlStatements(sqlText: string): readonly string[] {
  * migrations add them. Keep appending here; nothing else needs to change when a
  * new one lands.
  */
-const appendedSessionColumns = ["permission_mode", "read_at"] as const;
+const appendedSessionColumns = [
+	"permission_mode",
+	"read_at",
+	"last_turn_error_at",
+] as const;
 
 function sameStrings(
 	actual: readonly string[],
@@ -585,6 +594,20 @@ const runSessionsReadAtMigration: Effect.Effect<
 	yield* executeSqlStatements(sessionsReadAtMigrationSql);
 });
 
+const runSessionsLastTurnErrorMigration: Effect.Effect<
+	void,
+	unknown,
+	SqlClient.SqlClient
+> = Effect.gen(function* () {
+	const sql = yield* SqlClient.SqlClient;
+	const columns = yield* sql.unsafe<{ name: string }>(
+		"PRAGMA table_info(sessions)",
+	);
+	if (columns.some((column) => column.name === "last_turn_error_at")) return;
+
+	yield* executeSqlStatements(sessionsLastTurnErrorMigrationSql);
+});
+
 /** 2026-07-15T00:00:00.000Z — midnight UTC of the day 0004_drop_events_session_fk shipped (b2b698c6). */
 export const LEGACY_SKELETON_CUTOFF_MS = 1_784_073_600_000;
 export const MAX_PURGEABLE_SKELETON_SESSIONS = 25;
@@ -710,6 +733,7 @@ export const effectMigrationEntries = {
 		runPurgeLegacySkeletonSessionsMigration,
 	"0011_session_cascade_deletes": runSessionCascadeDeletesMigration,
 	"0012_sessions_read_at": runSessionsReadAtMigration,
+	"0013_sessions_last_turn_error": runSessionsLastTurnErrorMigration,
 } satisfies Record<string, Effect.Effect<void, unknown, SqlClient.SqlClient>>;
 
 export function makeEffectMigrationLoader(

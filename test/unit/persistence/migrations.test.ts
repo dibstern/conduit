@@ -121,6 +121,7 @@ describe("Migration Runner", () => {
 		const sessionsPermissionModeMigration = schemaMigrations[8];
 		const sessionCascadeDeletesMigration = schemaMigrations[9];
 		const sessionsReadAtMigration = schemaMigrations[10];
+		const sessionsLastTurnErrorMigration = schemaMigrations[11];
 		if (
 			!baseline ||
 			!metadataMigration ||
@@ -132,7 +133,8 @@ describe("Migration Runner", () => {
 			!turnModelExecutionMigration ||
 			!sessionsPermissionModeMigration ||
 			!sessionCascadeDeletesMigration ||
-			!sessionsReadAtMigration
+			!sessionsReadAtMigration ||
+			!sessionsLastTurnErrorMigration
 		) {
 			throw new Error("Expected all event-store schema migrations");
 		}
@@ -198,6 +200,11 @@ describe("Migration Runner", () => {
 				name: "sessions_read_at",
 				checksum: calculateMigrationChecksum(sessionsReadAtMigration),
 			},
+			{
+				id: 12,
+				name: "sessions_last_turn_error",
+				checksum: calculateMigrationChecksum(sessionsLastTurnErrorMigration),
+			},
 		]);
 		columns = client
 			.query<{ name: string }>("PRAGMA table_info(message_parts)")
@@ -230,11 +237,13 @@ describe("Migration Runner", () => {
 		const sessionsPermissionModeMigration = schemaMigrations[8];
 		const sessionCascadeDeletesMigration = schemaMigrations[9];
 		const sessionsReadAtMigration = schemaMigrations[10];
+		const sessionsLastTurnErrorMigration = schemaMigrations[11];
 		if (
 			!turnModelExecutionMigration ||
 			!sessionsPermissionModeMigration ||
 			!sessionCascadeDeletesMigration ||
-			!sessionsReadAtMigration
+			!sessionsReadAtMigration ||
+			!sessionsLastTurnErrorMigration
 		) {
 			throw new Error("Expected remaining event-store migrations");
 		}
@@ -266,6 +275,11 @@ describe("Migration Runner", () => {
 				name: "sessions_read_at",
 				checksum: calculateMigrationChecksum(sessionsReadAtMigration),
 			},
+			{
+				id: 12,
+				name: "sessions_last_turn_error",
+				checksum: calculateMigrationChecksum(sessionsLastTurnErrorMigration),
+			},
 		]);
 		expect(runMigrations(client, schemaMigrations)).toEqual([]);
 
@@ -284,6 +298,7 @@ describe("Migration Runner", () => {
 	it("adds read_at once and backfills existing sessions as already read", () => {
 		client = SqliteClient.memory();
 		const migrationsBeforeReadAt = schemaMigrations.slice(0, 10);
+		const migrationsThroughReadAt = schemaMigrations.slice(0, 11);
 		runMigrations(client, migrationsBeforeReadAt);
 		// last_message_at matters: without activity a session is never unread, so a
 		// row that has none cannot tell a working backfill from a missing one.
@@ -299,7 +314,7 @@ describe("Migration Runner", () => {
 				.map((column) => column.name),
 		).not.toContain("read_at");
 
-		expect(runMigrations(client, schemaMigrations)).toHaveLength(1);
+		expect(runMigrations(client, migrationsThroughReadAt)).toHaveLength(1);
 
 		// The criterion is that upgrading does not invent a backlog, so assert on
 		// the derived flag the product actually shows rather than on read_at alone.
@@ -307,11 +322,40 @@ describe("Migration Runner", () => {
 		expect(rows[0]?.read_at).toBe(456);
 		expect(sessionRowsToSessionInfoList(rows)[0]).not.toHaveProperty("unread");
 
-		expect(runMigrations(client, schemaMigrations)).toEqual([]);
+		expect(runMigrations(client, migrationsThroughReadAt)).toEqual([]);
 		expect(
 			client
 				.query<{ name: string }>("PRAGMA table_info(sessions)")
 				.filter((column) => column.name === "read_at"),
+		).toHaveLength(1);
+	});
+
+	it("adds last_turn_error_at once without backfilling historical failures", () => {
+		client = SqliteClient.memory();
+		const migrationsBeforeLastTurnError = schemaMigrations.slice(0, 11);
+		runMigrations(client, migrationsBeforeLastTurnError);
+		client.execute(
+			`INSERT INTO sessions (id, provider, title, status, created_at, updated_at)
+			 VALUES (?, ?, ?, ?, ?, ?)`,
+			["existing", "opencode", "Existing", "idle", 100, 456],
+		);
+
+		expect(
+			client
+				.query<{ name: string }>("PRAGMA table_info(sessions)")
+				.map((column) => column.name),
+		).not.toContain("last_turn_error_at");
+
+		expect(runMigrations(client, schemaMigrations)).toHaveLength(1);
+		const rows = client.query<SessionRow>("SELECT * FROM sessions");
+		expect(rows[0]?.last_turn_error_at).toBeNull();
+		expect(sessionRowsToSessionInfoList(rows)[0]?.attention).toBe("idle");
+
+		expect(runMigrations(client, schemaMigrations)).toEqual([]);
+		expect(
+			client
+				.query<{ name: string }>("PRAGMA table_info(sessions)")
+				.filter((column) => column.name === "last_turn_error_at"),
 		).toHaveLength(1);
 	});
 
