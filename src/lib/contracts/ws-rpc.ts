@@ -1278,6 +1278,8 @@ export const SubscribeSessionDetail = Rpc.make("SubscribeSessionDetail", {
 		projectSlug: NonEmptyString,
 		sessionId: NonEmptyString,
 		resumeFromSequence: Schema.optional(Schema.Number),
+		// Only clients that decode textSuffixes may opt into compressed live rows.
+		textSuffixes: Schema.optional(Schema.Boolean),
 	},
 	success: SessionDetailEnvelopeSchema,
 	error: WsRpcError,

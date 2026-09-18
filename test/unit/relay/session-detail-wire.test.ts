@@ -64,6 +64,80 @@ const testLayer = () => {
 };
 
 describe("session detail wire", () => {
+	for (const seed of ["snapshot", "replay", "live"] as const) {
+		it.effect(
+			`caps retained prefixes at eight with ${seed} seeding and decodes evicted rows`,
+			() =>
+				Effect.gen(function* () {
+					const message = (id: number, text: string): SessionDetailItem => ({
+						_tag: "transcriptMessage",
+						message: {
+							id: String(id),
+							role: "assistant",
+							text,
+							parts: [{ id: "p", type: "text", text }],
+						},
+					});
+					const rows = Array.from({ length: 24 }, (_, id) =>
+						message(id, "Hello"),
+					);
+					const input: SessionDetailEnvelope[] = [
+						{
+							_tag: "snapshot",
+							rows: seed === "snapshot" ? rows : [],
+							sequence: 0,
+						},
+						...(seed === "live" ? [{ _tag: "synchronized" } as const] : []),
+						...(seed === "snapshot"
+							? []
+							: rows.map((item, id) => ({
+									_tag: "upsert" as const,
+									item,
+									sequence: id + 1,
+								}))),
+						...(seed === "live" ? [] : [{ _tag: "synchronized" } as const]),
+					];
+					const probeStart = input.length;
+					// Newest first: misses cannot evict a prefix we have not probed yet.
+					for (let id = 23; id >= 0; id--)
+						input.push({
+							_tag: "upsert",
+							item: message(id, "Hello world"),
+							sequence: input.length,
+						});
+					// Touch the oldest remaining entry, insert another, then check LRU promotion.
+					for (const id of [7, 24, 7, 6])
+						input.push({
+							_tag: "upsert",
+							item: message(id, "Hello world!"),
+							sequence: input.length,
+						});
+					const wire: SessionDetailEnvelope[] = [];
+					const decoded = yield* Stream.fromIterable(input).pipe(
+						encodeSessionDetail,
+						Stream.map(wireRoundTrip),
+						Stream.tap((envelope) =>
+							Effect.sync(() => {
+								wire.push(envelope);
+							}),
+						),
+						decodeSessionDetail,
+						Stream.runCollect,
+					);
+					expect(Chunk.toReadonlyArray(decoded)).toEqual(input);
+					const probes = wire.slice(probeStart, probeStart + 24);
+					expect(
+						probes.filter(
+							(envelope) => envelope._tag === "upsert" && envelope.textSuffixes,
+						),
+					).toHaveLength(8);
+					for (const envelope of probes.slice(8))
+						expect(envelope).not.toHaveProperty("textSuffixes");
+					expect(wire.at(-2)).toHaveProperty("textSuffixes");
+					expect(wire.at(-1)).not.toHaveProperty("textSuffixes");
+				}),
+		);
+	}
 	for (const damage of ["missed", "reordered", "duplicated"] as const) {
 		it.effect(`a ${damage} suffix repairs the transcript`, () =>
 			Effect.gen(function* () {

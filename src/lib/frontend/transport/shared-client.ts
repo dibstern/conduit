@@ -85,6 +85,7 @@ const makeSubscriptions = (
 					.SubscribeSessionDetail({
 						projectSlug,
 						sessionId: options.sessionId,
+						textSuffixes: true,
 						...(resumeFromSequence === undefined ? {} : { resumeFromSequence }),
 					})
 					.pipe(decodeSessionDetail),

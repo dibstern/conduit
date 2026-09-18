@@ -2,15 +2,15 @@
 
 Worktree: `/Users/dstern/src/personal/conduit/.worktrees/ni8-cqhj`. Branch: `feat/ni8-cqhj-suffix`. Base: `1383e48bbfac00ac00cf3739be80e3eb0dc1bc8b`.
 
-Implemented the 2026-09-19 amendment. Live detail advances now carry append-only text suffixes, while the server still re-queries authoritative current rows. There is no timer or new coalescing algorithm. No existing test was edited. Changes remain uncommitted; no index-writing git command or pnpm command was run.
+Implemented the 2026-09-19 amendment. Live detail advances now carry append-only text suffixes, while the server still re-queries authoritative current rows. There is no timer or new coalescing algorithm. The review follow-up below updates request fixtures to opt in explicitly; all existing behavioral assertions remain. Changes remain uncommitted; no index-writing git command or pnpm command was run.
 
 No `-o` path was supplied in the request. This is the announced default report path.
 
 ## State ownership and recovery
 
-The encoder sits immediately after `subscribeSessionDetail` in the RPC handler. It cannot affect the shared orchestrator's read windows, source routing, row versions, or ordering. It transforms an existing `upsert`; it does not introduce an event kind. The generic orchestrator and concrete subscription are unchanged.
+The encoder sits immediately after `subscribeSessionDetail` in the RPC handler and runs only when the request explicitly sets `textSuffixes: true`. Absent or false capabilities bypass the encoder and receive whole rows. The shared client opts in on every request, including reconnects; this does not use `WS_PROTOCOL_VERSION`. It cannot affect the shared orchestrator's read windows, source routing, row versions, or ordering. It transforms an existing `upsert`; it does not introduce an event kind. The generic orchestrator and concrete subscription are unchanged.
 
-Each execution of the encoder owns a `Map` keyed by message ID, allocated inside `Stream.suspend`. It retains the last full row encoded for that subscriber. Keeping the prior strings, rather than lengths alone, lets the encoder verify prefix equality and send a whole row for same-length rewrites or truncation. Cost is O(retained transcript size) per subscriber, including metadata; it is released with the subscription. This is an explicit memory-for-wire tradeoff. No cache belongs to the socket, daemon, project, or reusable stream description.
+Each execution of the encoder owns a `Map` keyed by message ID, allocated inside `Stream.suspend`. It retains text prefixes for at most eight most-recently-touched message IDs. Keeping the prior strings, rather than hashes or lengths alone, lets the encoder verify prefix equality and send a whole row for same-length rewrites or truncation. The cache stores only message text and part-ID/text pairs, with a null marker referring to message text when a part has identical text. It retains no row metadata. Cost depends on text in those eight messages, not transcript length; it is released with the subscription. No cache belongs to the socket, daemon, project, or reusable stream description.
 
 The encoding covers both message-level text and each part's text, keyed by part ID. Both are present in projected messages, so encoding only the part would leave quadratic message-level traffic. The rest of the row remains authoritative replacement metadata. Each suffix carries its base length and resulting total. Lengths use UTF-16 code units, matching JavaScript append and slice; the benchmark counts serialized UTF-8 bytes instead.
 
@@ -472,8 +472,408 @@ All 72 existing tests in the focused ordering/subscription/resume suites passed 
 - The guarantee concerns streamed text for a fixed row structure. Growing tool results or an ever-growing number of parts/metadata fields can still cause repeated non-text bytes; those fields are not delta-encoded.
 - Server re-query/materialization, prefix comparison, and client concatenation still process growing strings. This fixes wire growth, not CPU or database cost.
 - Length checks detect missing, duplicated or reordered nonempty suffixes when a subsequent envelope exposes the discontinuity. They do not detect arbitrary equal-length content corruption, or a silently missing final frame with no subsequent traffic. Normal WebSocket ordering and reconnect replay remain responsible for transport delivery; this implementation adds no checksum or application-level delivery acknowledgement.
-- Encoding and decoding are paired protocol changes. The current shared client consumes the new encoding, but an old browser bundle that ignores suffix metadata is not compatible with a newly deployed encoder. A mixed-version rollout would need capability negotiation or coordinated reloads.
+- Suffix encoding is negotiated per request. Old clients omit the capability and receive whole rows, so daemon/browser version skew no longer requires a coordinated reload. A client explicitly opting in must implement the decoder.
+- Server prefix retention is capped at eight message IDs, with identical message/part text retained once. This is a message-count bound, not an absolute byte budget: a single huge message or many distinct parts can still be large. Full SQL snapshots, transient stream buffers, and the client transcript/decoder cache remain outside this server-cache bound.
 - Socket-listening integration coverage remains unverified in this sandbox. No live provider or browser session was used.
 - A read-only independent review found no normal-path ordering defect. It noted a theoretical mixed interruption-plus-length-mismatch cause could reach the mismatch retry before the existing cancellation branch; no production path producing that mixed cause was identified or claimed tested.
 
 Raw captured evidence remains under `.evidence/cqhj/`. No Beads task was closed or shared tracker state mutated. This is an uncommitted implementation handoff, not a merged or published delivery.
+
+
+## Review follow-up at 8965efcb
+
+Both requested defects are fixed without replacing the suffix encoder. No index-writing Git command, pnpm command, browser build, or generated/minified scratch output was used. The pre-existing `.evidence/` directory was left alone. No `-o` path was supplied; this named report remains the output path.
+
+### Bound and ownership
+
+`SENT_MESSAGE_LIMIT = 8` is the single production tuning constant. The growing transcript tip needs one slot. Seven additional slots allow nearby interleaved updates without retaining completed history. This is a conservative small working window, not a workload-derived optimum. Larger concurrent working sets only lose compression: a miss sends the authoritative whole row, and the real decoder replaces its prior row. Snapshot seeding, replay, and live writes all use the same LRU insertion/eviction path. Touching an existing ID promotes it; removal and snapshot reset still discard entries.
+
+The cache retains full strings for exact prefix comparisons. A null part-text marker means “use this cached message text,” eliminating a second equal string without hashing, length-only comparisons, or retaining the source row. Distinct part text stays exact.
+
+The retention test sends 24 IDs through one encoder in each of the snapshot/replay/live modes, probes newest first, and asserts exactly eight cached-prefix hits and whole rows for all evicted IDs. It then proves a touched older ID survives a new insertion while the least recently touched ID misses. Every envelope crosses the wire schema and the real client decoder; the complete reconstructed envelope sequence equals the authoritative input, including final message and part text. This observes retention through cache hit/miss behavior rather than exposing private cache state.
+
+### Compatibility and existing tests
+
+The optional request capability is `textSuffixes?: boolean`. Only literal true engages the encoder at the RPC handler. The shared client advertises it on initial, resumed, and cold-repair requests. Tests exercise absent, false, and true capabilities against the real RPC handler, persisted text updates, and the real decoder. An empty delta also tests a row version update with unchanged text, which previously could blank an old client's row.
+
+One existing 33-subscriber test expected suffixes from a request with no capability. Its request now opts in; all suffix, reconstruction, concurrency, and replay assertions are preserved. Existing client resume tests used exact payload equality without the new capability. Those expected payloads now require `textSuffixes: true`; all cursor and recovery assertions remain. These are announced contract updates, not deleted or weakened tests.
+
+Files touched in this follow-up: the contract, server RPC handler, server encoder, shared client, relay encoder tests, server subscription tests, frontend resume tests, and this report.
+
+### Verbatim TDD evidence
+
+The user specified the encoder/real-decoder and request-negotiation seams. Loop 1 failed on 24 retained prefixes instead of eight, then passed with the LRU and compact text cache. Loop 2 failed because omitted/false capabilities still received suffixes, then passed with request gating. Loop 3 failed because the real shared-client request omitted the capability, then passed with opt-in on each issue.
+
+#### Loop 1
+
+Command: `./node_modules/.bin/vitest run test/unit/relay/session-detail-wire.test.ts`
+
+RED, exit 1:
+
+```text
+
+ RUN  v3.2.4 /Users/dstern/src/personal/conduit/.worktrees/ni8-cqhj
+
+stdout | test/unit/relay/session-detail-wire.test.ts > session detail wire > delivers linear UTF-8 bytes across N persisted streaming part writes
+wire bytes [{"writes":32,"finalBytes":3072,"deliveredBytes":16371},{"writes":64,"finalBytes":6144,"deliveredBytes":32764},{"writes":128,"finalBytes":12288,"deliveredBytes":66106},{"writes":256,"finalBytes":24576,"deliveredBytes":132601}]
+
+ ❯ |unit| test/unit/relay/session-detail-wire.test.ts (11 tests | 3 failed) 585ms
+   × session detail wire > caps retained prefixes at eight with snapshot seeding and decodes evicted rows 23ms
+     → expected [ { _tag: 'upsert', …(3) }, …(23) ] to have a length of 8 but got 24
+   × session detail wire > caps retained prefixes at eight with replay seeding and decodes evicted rows 9ms
+     → expected [ { _tag: 'upsert', …(3) }, …(23) ] to have a length of 8 but got 24
+   × session detail wire > caps retained prefixes at eight with live seeding and decodes evicted rows 5ms
+     → expected [ { _tag: 'upsert', …(3) }, …(23) ] to have a length of 8 but got 24
+   ✓ session detail wire > a missed suffix repairs the transcript 5ms
+   ✓ session detail wire > a reordered suffix repairs the transcript 4ms
+   ✓ session detail wire > a duplicated suffix repairs the transcript 7ms
+   ✓ session detail wire > rewrites, truncation, removed parts and replacement snapshots remain authoritative 3ms
+   ✓ session detail wire > a resumed subscriber with stale server sent state and no client buffer repairs by length check 3ms
+   ✓ session detail wire > replay seeds decoding before duplicate suppression and remains whole on the wire 3ms
+   ✓ session detail wire > a corrupted total requests a whole-row snapshot and streaming continues correctly 47ms
+   ✓ session detail wire > delivers linear UTF-8 bytes across N persisted streaming part writes  476ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 3 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  |unit| test/unit/relay/session-detail-wire.test.ts > session detail wire > caps retained prefixes at eight with snapshot seeding and decodes evicted rows
+ FAIL  |unit| test/unit/relay/session-detail-wire.test.ts > session detail wire > caps retained prefixes at eight with replay seeding and decodes evicted rows
+ FAIL  |unit| test/unit/relay/session-detail-wire.test.ts > session detail wire > caps retained prefixes at eight with live seeding and decodes evicted rows
+AssertionError: expected [ { _tag: 'upsert', …(3) }, …(23) ] to have a length of 8 but got 24
+
+- Expected
++ Received
+
+- 8
++ 24
+
+ ❯ next test/unit/relay/session-detail-wire.test.ts:101:94
+     99|     expect(Chunk.toReadonlyArray(decoded)).toEqual(input);
+    100|     const probes = wire.slice(probeStart, probeStart + 24);
+    101|     expect(probes.filter((envelope) => envelope._tag === "upsert" && e…
+       |                                                                                              ^
+    102|     for (const envelope of probes.slice(8)) expect(envelope).not.toHav…
+    103|     expect(wire.at(-2)).toHaveProperty("textSuffixes");
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/3]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  3 failed | 8 passed (11)
+   Start at  02:56:59
+   Duration  1.35s (transform 114ms, setup 49ms, collect 564ms, tests 585ms, environment 0ms, prepare 35ms)
+
+```
+
+GREEN, exit 0:
+
+```text
+
+ RUN  v3.2.4 /Users/dstern/src/personal/conduit/.worktrees/ni8-cqhj
+
+stdout | test/unit/relay/session-detail-wire.test.ts > session detail wire > delivers linear UTF-8 bytes across N persisted streaming part writes
+wire bytes [{"writes":32,"finalBytes":3072,"deliveredBytes":16371},{"writes":64,"finalBytes":6144,"deliveredBytes":32764},{"writes":128,"finalBytes":12288,"deliveredBytes":66106},{"writes":256,"finalBytes":24576,"deliveredBytes":132601}]
+
+ ✓ |unit| test/unit/relay/session-detail-wire.test.ts (11 tests) 574ms
+   ✓ session detail wire > delivers linear UTF-8 bytes across N persisted streaming part writes  469ms
+
+ Test Files  1 passed (1)
+      Tests  11 passed (11)
+   Start at  02:57:29
+   Duration  1.31s (transform 112ms, setup 49ms, collect 537ms, tests 574ms, environment 0ms, prepare 35ms)
+
+```
+
+#### Loop 2
+
+Command: `./node_modules/.bin/vitest run test/unit/server/ws-rpc-subscriptions.test.ts`
+
+RED, exit 1:
+
+```text
+
+ RUN  v3.2.4 /Users/dstern/src/personal/conduit/.worktrees/ni8-cqhj
+
+ ❯ |unit| test/unit/server/ws-rpc-subscriptions.test.ts (7 tests | 2 failed) 311ms
+   × subscription RPC handlers > negotiates suffixes only for capability undefined 84ms
+     → expected { Object (_tag, item, ...) } to not have property "textSuffixes"
+   × subscription RPC handlers > negotiates suffixes only for capability false 39ms
+     → expected { Object (_tag, item, ...) } to not have property "textSuffixes"
+   ✓ subscription RPC handlers > negotiates suffixes only for capability true 34ms
+   ✓ subscription RPC handlers > do not require a caller-owned Scope 0ms
+   ✓ subscription RPC handlers > shell snapshot, live and replay preserve Ref-only fork lineage from ListSessions 33ms
+   ✓ subscription RPC handlers > SubscribeShell delivers real snapshots, live updates and resume with 33 subscriptions 62ms
+   ✓ subscription RPC handlers > SubscribeSessionDetail delivers real snapshots, live updates and resume with 33 subscriptions 58ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  |unit| test/unit/server/ws-rpc-subscriptions.test.ts > subscription RPC handlers > negotiates suffixes only for capability undefined
+ FAIL  |unit| test/unit/server/ws-rpc-subscriptions.test.ts > subscription RPC handlers > negotiates suffixes only for capability false
+AssertionError: expected { Object (_tag, item, ...) } to not have property "textSuffixes"
+
+- Expected: 
+undefined
+
++ Received: 
+[
+  {
+    "from": 5,
+    "total": 11,
+  },
+  {
+    "from": 5,
+    "partId": "p",
+    "total": 11,
+  },
+]
+
+ ❯ next test/unit/server/ws-rpc-subscriptions.test.ts:126:28
+    124|       expect(envelope).toMatchObject({ item: { message: { text } } });
+    125|      } else {
+    126|       expect(envelope).not.toHaveProperty("textSuffixes");
+       |                            ^
+    127|       expect(envelope).toMatchObject({ item: { message: { text: "Hello…
+    128|      }
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  2 failed | 5 passed (7)
+   Start at  02:58:14
+   Duration  1.32s (transform 280ms, setup 45ms, collect 811ms, tests 311ms, environment 0ms, prepare 35ms)
+
+```
+
+GREEN, exit 0:
+
+```text
+
+ RUN  v3.2.4 /Users/dstern/src/personal/conduit/.worktrees/ni8-cqhj
+
+ ✓ |unit| test/unit/server/ws-rpc-subscriptions.test.ts (7 tests) 300ms
+
+ Test Files  1 passed (1)
+      Tests  7 passed (7)
+   Start at  02:58:35
+   Duration  1.42s (transform 288ms, setup 52ms, collect 919ms, tests 300ms, environment 0ms, prepare 35ms)
+
+```
+
+#### Loop 3
+
+Command: `./node_modules/.bin/vitest run test/unit/frontend/transport/resume.test.ts`
+
+RED, exit 1:
+
+```text
+
+ RUN  v3.2.4 /Users/dstern/src/personal/conduit/.worktrees/ni8-cqhj
+
+ ❯ |unit| test/unit/frontend/transport/resume.test.ts (16 tests | 1 failed) 320ms
+   × client-side resume at the shared client > re-issues from the last sequence proven complete 24ms
+     → expected { projectSlug: 'alpha', …(1) } to deeply equal { projectSlug: 'alpha', …(2) }
+   ✓ client-side resume at the shared client > one stream, no repeats, when the socket dies before the group's first member 12ms
+   ✓ client-side resume at the shared client > one stream, no repeats, when the socket dies between the group's members 10ms
+   ✓ client-side resume at the shared client > one stream, no repeats, when the socket dies after the group's last member, before the next sequence 9ms
+   ✓ client-side resume at the shared client > one stream, no repeats, when the socket dies after `synchronized` 10ms
+   ✓ client-side resume at the shared client > a drop that delivered nothing keeps the caller's resume point 4ms
+   ✓ client-side resume at the shared client > a drop before the first envelope still asks for a snapshot 3ms
+   ✓ client-side resume at the shared client > a domain failure surfaces instead of being re-issued 4ms
+   ✓ client-side resume at the shared client > a defect surfaces instead of being re-issued 3ms
+   ✓ client-side resume at the shared client > a defect beside a retryable failure still stops the stream 3ms
+   ✓ client-side resume at the shared client > backs off rather than spinning while the socket is still down 16ms
+   ✓ client-side resume at the shared client > a drop between siblings sharing a sequence loses neither 9ms
+   ✓ client-side resume at the shared client > resumes when the socket dies mid-handover, with no frame 55ms
+   ✓ client-side resume at the shared client > stops for good when the consumer unsubscribes 10ms
+   ✓ client-side resume at the shared client > does not re-issue an interruption the consumer itself caused 145ms
+   ✓ client-side resume at the shared client > puts the shell on control and session detail on stream 3ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  |unit| test/unit/frontend/transport/resume.test.ts > client-side resume at the shared client > re-issues from the last sequence proven complete
+AssertionError: expected { projectSlug: 'alpha', …(1) } to deeply equal { projectSlug: 'alpha', …(2) }
+
+- Expected
++ Received
+
+  {
+    "projectSlug": "alpha",
+    "sessionId": "s1",
+-   "textSuffixes": true,
+  }
+
+ ❯ next test/unit/frontend/transport/resume.test.ts:333:28
+    331| 
+    332|      const first = yield* links.stream.takeRequest;
+    333|      expect(first.payload).toEqual({
+       |                            ^
+    334|       projectSlug: "alpha",
+    335|       sessionId: "s1",
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 15 passed (16)
+   Start at  02:58:48
+   Duration  979ms (transform 67ms, setup 53ms, collect 455ms, tests 320ms, environment 0ms, prepare 35ms)
+
+```
+
+GREEN, exit 0:
+
+```text
+
+ RUN  v3.2.4 /Users/dstern/src/personal/conduit/.worktrees/ni8-cqhj
+
+ ✓ |unit| test/unit/frontend/transport/resume.test.ts (16 tests) 319ms
+
+ Test Files  1 passed (1)
+      Tests  16 passed (16)
+   Start at  02:59:08
+   Duration  989ms (transform 65ms, setup 49ms, collect 473ms, tests 319ms, environment 0ms, prepare 38ms)
+
+```
+
+### Follow-up verification
+
+Commands ran after the final code formatting. Output was captured with `tee` before the requested byte tails; shell pipefail preserved the executable exit codes.
+
+```sh
+./node_modules/.bin/vitest run test/unit/relay/ test/unit/frontend/ 2>&1 | tail -c 6000
+```
+
+Vitest exit 1. Verbatim requested tail:
+
+```text
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯
+Serialized Error: { code: 'EPERM', errno: -1, syscall: 'listen', address: '127.0.0.1' }
+This error originated in "test/unit/relay/permission-rehydration-wiring.test.ts" test file. It doesn't mean the error was thrown inside the file itself, but while it was running.
+
+⎯⎯⎯⎯⎯ Uncaught Exception ⎯⎯⎯⎯⎯
+Error: listen EPERM: operation not permitted 127.0.0.1
+ ❯ Server.setupListenHandle [as _listen2] node:net:1986:21
+ ❯ listenInCluster node:net:2065:12
+ ❯ node:net:2274:7
+ ❯ processTicksAndRejections node:internal/process/task_queues:90:21
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯
+Serialized Error: { code: 'EPERM', errno: -1, syscall: 'listen', address: '127.0.0.1' }
+This error originated in "test/unit/relay/status-poller-broadcast.test.ts" test file. It doesn't mean the error was thrown inside the file itself, but while it was running.
+
+⎯⎯⎯⎯⎯ Uncaught Exception ⎯⎯⎯⎯⎯
+Error: listen EPERM: operation not permitted 127.0.0.1
+ ❯ Server.setupListenHandle [as _listen2] node:net:1986:21
+ ❯ listenInCluster node:net:2065:12
+ ❯ node:net:2274:7
+ ❯ processTicksAndRejections node:internal/process/task_queues:90:21
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯
+Serialized Error: { code: 'EPERM', errno: -1, syscall: 'listen', address: '127.0.0.1' }
+This error originated in "test/unit/relay/per-tab-routing-e2e.test.ts" test file. It doesn't mean the error was thrown inside the file itself, but while it was running.
+
+⎯⎯⎯⎯⎯ Uncaught Exception ⎯⎯⎯⎯⎯
+Error: listen EPERM: operation not permitted 127.0.0.1
+ ❯ Server.setupListenHandle [as _listen2] node:net:1986:21
+ ❯ listenInCluster node:net:2065:12
+ ❯ node:net:2274:7
+ ❯ processTicksAndRejections node:internal/process/task_queues:90:21
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯
+Serialized Error: { code: 'EPERM', errno: -1, syscall: 'listen', address: '127.0.0.1' }
+This error originated in "test/unit/relay/relay-stack-opencode-runtime-ingress-wiring.test.ts" test file. It doesn't mean the error was thrown inside the file itself, but while it was running.
+The latest test that might've caused the error is "wires relay-stack SSE events through Effect persistence into the read model". It might mean one of the following:
+- The error was thrown, while Vitest was running this test.
+- If the error occurred after the test had been completed, this was the last documented test before it was thrown.
+
+⎯⎯⎯⎯⎯ Uncaught Exception ⎯⎯⎯⎯⎯
+Error: listen EPERM: operation not permitted 127.0.0.1
+ ❯ Server.setupListenHandle [as _listen2] node:net:1986:21
+ ❯ listenInCluster node:net:2065:12
+ ❯ node:net:2274:7
+ ❯ processTicksAndRejections node:internal/process/task_queues:90:21
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯
+Serialized Error: { code: 'EPERM', errno: -1, syscall: 'listen', address: '127.0.0.1' }
+This error originated in "test/unit/relay/relay-stack-default-overrides.test.ts" test file. It doesn't mean the error was thrown inside the file itself, but while it was running.
+The latest test that might've caused the error is "applies public default-agent commands through the relay-owned command path". It might mean one of the following:
+- The error was thrown, while Vitest was running this test.
+- If the error occurred after the test had been completed, this was the last documented test before it was thrown.
+
+⎯⎯⎯⎯⎯ Uncaught Exception ⎯⎯⎯⎯⎯
+Error: listen EPERM: operation not permitted 127.0.0.1
+ ❯ Server.setupListenHandle [as _listen2] node:net:1986:21
+ ❯ listenInCluster node:net:2065:12
+ ❯ node:net:2274:7
+ ❯ processTicksAndRejections node:internal/process/task_queues:90:21
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯
+Serialized Error: { code: 'EPERM', errno: -1, syscall: 'listen', address: '127.0.0.1' }
+This error originated in "test/unit/relay/relay-stack-opencode-runtime-ingress-wiring.test.ts" test file. It doesn't mean the error was thrown inside the file itself, but while it was running.
+The latest test that might've caused the error is "keeps named OpenCode stream provider bindings isolated through the shared ingress". It might mean one of the following:
+- The error was thrown, while Vitest was running this test.
+- If the error occurred after the test had been completed, this was the last documented test before it was thrown.
+
+⎯⎯⎯⎯⎯ Uncaught Exception ⎯⎯⎯⎯⎯
+Error: listen EPERM: operation not permitted 127.0.0.1
+ ❯ Server.setupListenHandle [as _listen2] node:net:1986:21
+ ❯ listenInCluster node:net:2065:12
+ ❯ node:net:2274:7
+ ❯ processTicksAndRejections node:internal/process/task_queues:90:21
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯
+Serialized Error: { code: 'EPERM', errno: -1, syscall: 'listen', address: '127.0.0.1' }
+This error originated in "test/unit/relay/relay-stack-default-overrides.test.ts" test file. It doesn't mean the error was thrown inside the file itself, but while it was running.
+The latest test that might've caused the error is "starts when OpenCode is unavailable so non-OpenCode providers can load". It might mean one of the following:
+- The error was thrown, while Vitest was running this test.
+- If the error occurred after the test had been completed, this was the last documented test before it was thrown.
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯
+
+
+ Test Files  5 failed | 101 passed (106)
+      Tests  5 failed | 1297 passed | 12 skipped (1314)
+     Errors  8 errors
+   Start at  02:59:29
+   Duration  33.06s (transform 3.93s, setup 2.73s, collect 35.67s, tests 113.70s, environment 7ms, prepare 3.16s)
+
+```
+
+1,297 tests passed and 12 were skipped. Five socket-dependent tests failed or timed out with eight uncaught `listen EPERM` errors across the same five files. These are the sandbox binding artifacts identified in the request, not evidence of a suffix regression. Socket behavior remains unverified here.
+
+```sh
+./node_modules/.bin/tsgo --noEmit 2>&1 | tail -c 2000
+```
+
+TypeScript exit 0; stdout/stderr was empty. Verbatim output:
+
+```text
+```
+
+Additional focused verification, exit 0:
+
+```sh
+./node_modules/.bin/vitest run test/unit/server/ws-rpc-subscriptions.test.ts test/unit/contracts/ws-rpc-stream.test.ts test/unit/effect/runtime-boundary-grep.test.ts
+```
+
+```text
+
+ RUN  v3.2.4 /Users/dstern/src/personal/conduit/.worktrees/ni8-cqhj
+
+ ✓ |unit| test/unit/effect/runtime-boundary-grep.test.ts (105 tests) 255ms
+ ✓ |unit| test/unit/contracts/ws-rpc-stream.test.ts (8 tests) 401ms
+ ✓ |unit| test/unit/server/ws-rpc-subscriptions.test.ts (7 tests) 618ms
+
+ Test Files  3 passed (3)
+      Tests  120 passed (120)
+   Start at  02:59:29
+   Duration  2.58s (transform 738ms, setup 169ms, collect 3.20s, tests 1.27s, environment 0ms, prepare 211ms)
+
+```
+
+Biome check passed for all seven changed TypeScript files. No visual gate was run: this changes the unused detail subscription transport, not composer behavior, appearance, acceptance features, or baselines; browser builds and pnpm were expressly prohibited. Verbatim failure output above intentionally retains trailing spaces from Vitest, so report-only whitespace diagnostics are expected.
+
+### Remaining limits and handoff
+
+The eight-ID cache is bounded by message count, not bytes. Full database snapshots, transient delivery buffers, and the client transcript remain unbounded by this change. Prefix comparison and string concatenation costs remain. More than eight actively changing IDs cause safe whole-row fallback. Clients must truthfully opt in; omitted or false capability requests are safe across daemon restarts without reload coordination.
+
+Beads access failed with `dial tcp 127.0.0.1:3308: connect: operation not permitted`; no tracker state was changed. All changes remain uncommitted as requested.

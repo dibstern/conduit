@@ -6,12 +6,37 @@ import type {
 import type { Envelope } from "./read-model-subscription.js";
 import type { SessionDetailItem } from "./session-detail-subscription.js";
 
+// Usually only the tip grows; eight slots keep it plus seven nearby interleaved
+// messages warm. A cache miss safely sends the whole authoritative row, which the
+// decoder accepts as a replacement, so eviction only costs compression.
+const SENT_MESSAGE_LIMIT = 8;
+
 export const encodeSessionDetail = <E, R>(
 	input: Stream.Stream<Envelope<SessionDetailItem>, E, R>,
 ): Stream.Stream<SessionDetailEnvelope, E, R> =>
 	Stream.suspend(() => {
 		// Owned by this execution, not by the socket or the reusable stream value.
-		const sent = new Map<string, typeof HistoryMessageSchema.Type>();
+		const sent = new Map<
+			string,
+			{
+				text: string | undefined;
+				parts: Map<string, string | null>;
+			}
+		>();
+		const remember = (message: typeof HistoryMessageSchema.Type) => {
+			const parts = new Map<string, string | null>();
+			for (const part of message.parts ?? []) {
+				if (part.text !== undefined)
+					// null refers to message text without retaining a second equal string.
+					parts.set(part.id, part.text === message.text ? null : part.text);
+			}
+			sent.delete(message.id);
+			sent.set(message.id, { text: message.text, parts });
+			if (sent.size > SENT_MESSAGE_LIMIT) {
+				const oldest = sent.keys().next();
+				if (!oldest.done) sent.delete(oldest.value);
+			}
+		};
 		let live = false;
 		return input.pipe(
 			Stream.map((envelope): SessionDetailEnvelope => {
@@ -19,8 +44,7 @@ export const encodeSessionDetail = <E, R>(
 					sent.clear();
 					live = false;
 					for (const row of envelope.rows) {
-						if (row._tag === "transcriptMessage")
-							sent.set(row.message.id, row.message);
+						if (row._tag === "transcriptMessage") remember(row.message);
 					}
 					return envelope;
 				}
@@ -35,7 +59,7 @@ export const encodeSessionDetail = <E, R>(
 				if (envelope.item._tag !== "transcriptMessage") return envelope;
 				const message = envelope.item.message;
 				const previous = sent.get(message.id);
-				sent.set(message.id, message);
+				remember(message);
 				// Replay stays full, ordered and batched. A new subscription never borrows
 				// another execution's sent state, including when it resumes from a cursor.
 				if (!live || !previous) return envelope;
@@ -74,8 +98,9 @@ export const encodeSessionDetail = <E, R>(
 										: {
 												text: suffix(
 													part.text,
-													previous.parts?.find((old) => old.id === part.id)
-														?.text,
+													previous.parts.get(part.id) === null
+														? previous.text
+														: previous.parts.get(part.id),
 													part.id,
 												),
 											}),

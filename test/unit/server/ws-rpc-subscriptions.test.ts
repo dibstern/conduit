@@ -10,10 +10,20 @@ import {
 } from "@effect/rpc";
 import { SqlClient } from "@effect/sql";
 import { describe, it } from "@effect/vitest";
-import { Effect, HashMap, Layer, Queue, Ref, type Scope, Stream } from "effect";
+import {
+	Effect,
+	HashMap,
+	Layer,
+	Queue,
+	Ref,
+	Schema,
+	type Scope,
+	Stream,
+} from "effect";
 import { expect, expectTypeOf } from "vitest";
 import {
 	type SessionDetailEnvelope,
+	SubscribeSessionDetail,
 	type WsRpcError,
 	WsRpcGroup,
 } from "../../../src/lib/contracts/ws-rpc.js";
@@ -89,6 +99,91 @@ const commit = (event: CanonicalEvent) =>
 	});
 
 describe("subscription RPC handlers", () => {
+	for (const textSuffixes of [undefined, false, true]) {
+		it.scoped(`negotiates suffixes only for capability ${textSuffixes}`, () =>
+			Effect.gen(function* () {
+				yield* (yield* ProjectionRunnerEffectTag).recover();
+				yield* commit(
+					canonicalEvent(
+						"session.created",
+						"s",
+						{ sessionId: "s", title: "Negotiation", provider: "claude" },
+						{ provider: "claude", createdAt: 1 },
+					),
+				);
+				yield* commit(
+					canonicalEvent(
+						"message.created",
+						"s",
+						{ sessionId: "s", messageId: "m", role: "assistant" },
+						{ provider: "claude", createdAt: 2 },
+					),
+				);
+				yield* commit(
+					canonicalEvent(
+						"text.delta",
+						"s",
+						{ messageId: "m", partId: "p", text: "Hello" },
+						{ provider: "claude", createdAt: 3 },
+					),
+				);
+				const client = yield* RpcTest.makeClient(WsRpcGroup);
+				const wire = yield* Queue.unbounded<SessionDetailEnvelope>();
+				const decoded = yield* Queue.unbounded<SessionDetailEnvelope>();
+				const request = Schema.decodeUnknownSync(
+					SubscribeSessionDetail.payloadSchema,
+				)({
+					projectSlug: "project-a",
+					sessionId: "s",
+					...(textSuffixes === undefined ? {} : { textSuffixes }),
+				});
+				yield* client.SubscribeSessionDetail(request).pipe(
+					Stream.tap((envelope) => Queue.offer(wire, envelope)),
+					decodeSessionDetail,
+					Stream.runForEach((envelope) => Queue.offer(decoded, envelope)),
+					Effect.forkScoped,
+				);
+				for (const tag of ["snapshot", "synchronized"]) {
+					expect((yield* Queue.take(decoded))._tag).toBe(tag);
+					expect(yield* Queue.take(wire)).not.toHaveProperty("textSuffixes");
+				}
+				// An empty delta moves the row version without changing its text.
+				for (const text of [" world", ""]) {
+					yield* commit(
+						canonicalEvent(
+							"text.delta",
+							"s",
+							{ messageId: "m", partId: "p", text },
+							{ provider: "claude", createdAt: 4 },
+						),
+					);
+					expect(yield* Queue.take(decoded)).toMatchObject({
+						item: {
+							message: {
+								text: "Hello world",
+								parts: [{ text: "Hello world" }],
+							},
+						},
+					});
+					const envelope = yield* Queue.take(wire);
+					if (textSuffixes === true) {
+						expect(envelope).toHaveProperty("textSuffixes");
+						expect(envelope).toMatchObject({ item: { message: { text } } });
+					} else {
+						expect(envelope).not.toHaveProperty("textSuffixes");
+						expect(envelope).toMatchObject({
+							item: {
+								message: {
+									text: "Hello world",
+									parts: [{ text: "Hello world" }],
+								},
+							},
+						});
+					}
+				}
+			}).pipe(Effect.provide(makeLayer())),
+		);
+	}
 	it("do not require a caller-owned Scope", () => {
 		expectTypeOf<
 			Extract<Layer.Layer.Context<typeof WsRpcServerLayer>, Scope.Scope>
@@ -250,12 +345,14 @@ describe("subscription RPC handlers", () => {
 						};
 						return member === "SubscribeShell"
 							? client.SubscribeShell(request)
-							: client.SubscribeSessionDetail(request).pipe(
-									Stream.tap((envelope) =>
-										wire ? Queue.offer(wire, envelope) : Effect.void,
-									),
-									decodeSessionDetail,
-								);
+							: client
+									.SubscribeSessionDetail({ ...request, textSuffixes: true })
+									.pipe(
+										Stream.tap((envelope) =>
+											wire ? Queue.offer(wire, envelope) : Effect.void,
+										),
+										decodeSessionDetail,
+									);
 					};
 					// Each consumer stays live after its boundary; the 33rd must not wait for a permit.
 					for (let i = 0; i < 33; i++) {

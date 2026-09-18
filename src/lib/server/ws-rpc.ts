@@ -260,7 +260,8 @@ export const WsRpcServerLayer = WsRpcGroup.toLayer({
 					? {}
 					: { resumeFromSequence: request.resumeFromSequence }),
 			}).pipe(
-				encodeSessionDetail,
+				(stream) =>
+					request.textSuffixes === true ? encodeSessionDetail(stream) : stream,
 				Stream.mapError(
 					(error) =>
 						new WsRpcError({
