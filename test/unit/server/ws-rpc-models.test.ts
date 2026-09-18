@@ -49,10 +49,9 @@ const makeReadQuery = (
 	getSession: () => Effect.succeed(undefined),
 	getAllSessionStatuses: () => Effect.succeed({}),
 	listSessions: () => Effect.succeed([]),
-	getSessionListEntry: vi.fn(() => Effect.succeed(undefined)),
 	getSessionMessagesWithParts: () => Effect.succeed([]),
-	getSessionDetailSnapshot: () => Effect.succeed({ messages: [], sequence: 0 }),
-	getSessionListSnapshot: () => Effect.succeed({ rows: [], sequence: 0 }),
+	readSessionTranscript: () => Effect.succeed({ messages: [], version: 0 }),
+	readSessionList: () => Effect.succeed({ rows: [], version: 0 }),
 	getLatestTurnModelExecution,
 });
 

@@ -198,15 +198,12 @@ const makeReadQuery = (
 	getSession: vi.fn(() => Effect.succeed(undefined)),
 	getAllSessionStatuses: vi.fn(() => Effect.succeed({})),
 	listSessions: vi.fn(() => Effect.succeed([])),
-	getSessionListEntry: vi.fn(() => Effect.succeed(undefined)),
 	getLatestTurnModelExecution: vi.fn(() => Effect.succeed(undefined)),
 	getSessionMessagesWithParts,
-	getSessionDetailSnapshot: vi.fn(() =>
-		Effect.succeed({ messages: [], sequence: 0 }),
+	readSessionTranscript: vi.fn(() =>
+		Effect.succeed({ messages: [], version: 0 }),
 	),
-	getSessionListSnapshot: vi.fn(() =>
-		Effect.succeed({ rows: [], sequence: 0 }),
-	),
+	readSessionList: vi.fn(() => Effect.succeed({ rows: [], version: 0 })),
 });
 
 const makePersistService = (
