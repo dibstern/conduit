@@ -11,6 +11,7 @@ import type {
 	EffectProjector,
 	ProjectionContext,
 } from "./projectors-effect.js";
+import { SessionStateProjectionNotifierTag } from "./session-state-projection-notifier.js";
 import {
 	decodeStoredEventRow,
 	type StoredEventRow,
@@ -110,6 +111,20 @@ export const makeProjectionRunnerEffect = (
 		let recovered = false;
 		let replaying = false;
 
+		const notifySessionStateProjected = (event: StoredEvent) =>
+			Effect.gen(function* () {
+				if (replaying) return;
+				const notifierOption = yield* Effect.serviceOption(
+					SessionStateProjectionNotifierTag,
+				);
+				if (notifierOption._tag === "Some") {
+					yield* notifierOption.value.sessionStateProjected(
+						event.sessionId,
+						event.type,
+					);
+				}
+			});
+
 		const recordFailure = (
 			projector: EffectProjector,
 			event: StoredEvent,
@@ -168,6 +183,8 @@ export const makeProjectionRunnerEffect = (
 						),
 					);
 				}
+
+				yield* notifySessionStateProjected(event);
 			});
 
 		const projectBatch = (
@@ -219,6 +236,10 @@ export const makeProjectionRunnerEffect = (
 						),
 					),
 				);
+
+				for (const event of events) {
+					yield* notifySessionStateProjected(event);
+				}
 			});
 		};
 

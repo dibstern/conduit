@@ -9,7 +9,7 @@ import { Reactivity } from "@effect/experimental";
 import { SqlClient } from "@effect/sql";
 import * as SqliteNode from "@effect/sql-sqlite-node/SqliteClient";
 import { Effect, Layer } from "effect";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
 	EventStoreEffectTag,
 	EventStoreError,
@@ -31,6 +31,7 @@ import {
 	type ProjectionContext,
 	ProjectionError,
 } from "../../../src/lib/persistence/effect/projectors-effect.js";
+import { SessionStateProjectionNotifierTag } from "../../../src/lib/persistence/effect/session-state-projection-notifier.js";
 import {
 	type CanonicalEvent,
 	canonicalEvent,
@@ -1907,6 +1908,110 @@ describe("Effect Approval Projector (via ProjectionRunner)", () => {
 // ──��� ProjectionRunner Tests ─────────────────────────────────────────────────
 
 describe("ProjectionRunnerEffect", () => {
+	it("notifies after projectEvent succeeds", () => {
+		const sessionStateProjected = vi.fn(() => Effect.void);
+
+		return runTest(
+			Effect.gen(function* () {
+				const store = yield* EventStoreEffectTag;
+				const runner = yield* ProjectionRunnerEffectTag;
+				yield* runner.markRecovered();
+				yield* seedSession("s-single-notified");
+				const event = yield* store.append(
+					makeSessionCreated("s-single-notified"),
+				);
+
+				yield* runner.projectEvent(event);
+
+				expect(sessionStateProjected).toHaveBeenCalledOnce();
+				expect(sessionStateProjected).toHaveBeenCalledWith(
+					"s-single-notified",
+					"session.created",
+				);
+			}).pipe(
+				Effect.provideService(SessionStateProjectionNotifierTag, {
+					sessionStateProjected,
+				}),
+			),
+		);
+	});
+
+	it("notifies once for every successfully projected batch event", () => {
+		const sessionStateProjected = vi.fn(() => Effect.void);
+
+		return runTest(
+			Effect.gen(function* () {
+				const store = yield* EventStoreEffectTag;
+				const runner = yield* ProjectionRunnerEffectTag;
+				yield* runner.markRecovered();
+				yield* seedSession("s-notified");
+				const events = [
+					yield* store.append(makeSessionCreated("s-notified")),
+					yield* store.append(makeMessageCreated("s-notified", "m-notified")),
+				];
+
+				yield* runner.projectBatch(events);
+
+				expect(sessionStateProjected).toHaveBeenCalledTimes(2);
+				expect(sessionStateProjected).toHaveBeenNthCalledWith(
+					1,
+					"s-notified",
+					"session.created",
+				);
+				expect(sessionStateProjected).toHaveBeenNthCalledWith(
+					2,
+					"s-notified",
+					"message.created",
+				);
+			}).pipe(
+				Effect.provideService(SessionStateProjectionNotifierTag, {
+					sessionStateProjected,
+				}),
+			),
+		);
+	});
+
+	it("does not notify while recover replays the event log", () => {
+		const sessionStateProjected = vi.fn(() => Effect.void);
+
+		return runTest(
+			Effect.gen(function* () {
+				const store = yield* EventStoreEffectTag;
+				const runner = yield* ProjectionRunnerEffectTag;
+				yield* seedSession("s-replay-no-notify");
+				yield* store.append(makeSessionCreated("s-replay-no-notify"));
+
+				yield* runner.recover();
+
+				expect(sessionStateProjected).not.toHaveBeenCalled();
+			}).pipe(
+				Effect.provideService(SessionStateProjectionNotifierTag, {
+					sessionStateProjected,
+				}),
+			),
+		);
+	});
+
+	it("projects successfully when the notifier service is absent", () =>
+		runTest(
+			Effect.gen(function* () {
+				const sql = yield* SqlClient.SqlClient;
+				const store = yield* EventStoreEffectTag;
+				const runner = yield* ProjectionRunnerEffectTag;
+				yield* runner.markRecovered();
+				yield* seedSession("s-no-notifier");
+				const event = yield* store.append(
+					makeSessionCreated("s-no-notifier", { title: "No notifier" }),
+				);
+
+				yield* runner.projectEvent(event);
+
+				const rows = yield* sql<{ title: string }>`
+					SELECT title FROM sessions WHERE id = 's-no-notifier'`;
+				expect(rows[0]?.title).toBe("No notifier");
+			}),
+		));
+
 	it("projectEvent surfaces a projector failure with its cause intact", () => {
 		const rootCause = new Error("projector explosion");
 		const projector: EffectProjector = {

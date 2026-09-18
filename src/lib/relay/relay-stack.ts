@@ -28,6 +28,7 @@ import {
 	ProjectRelayLoggerLive,
 } from "../domain/relay/Layers/relay-core-layers.js";
 import { RelayStateLive } from "../domain/relay/Layers/relay-layer.js";
+import { SessionStateProjectionNotifierLive } from "../domain/relay/Layers/session-state-projection-notifier-layer.js";
 import { StatusPollerLive } from "../domain/relay/Layers/status-poller-layer.js";
 import { WebSocketHandlerLive } from "../domain/relay/Layers/websocket-handler-layer.js";
 import { makeWsTransportLive } from "../domain/relay/Layers/ws-transport-layer.js";
@@ -817,9 +818,16 @@ export async function createProjectRelay(
 		relayStateBridgesAndStatus,
 	);
 	const baseLayers = relayStateServicesAndBridges;
+	const baseLayersWithProjectionNotifier = Layer.provideMerge(
+		SessionStateProjectionNotifierLive,
+		baseLayers,
+	);
 	const fullBaseLayers = Layer.provideMerge(
 		ProviderTurnServiceLive,
-		Layer.merge(baseLayers, makeWsTransportLive({ noServer: true })),
+		Layer.merge(
+			baseLayersWithProjectionNotifier,
+			makeWsTransportLive({ noServer: true }),
+		),
 	);
 
 	const effectRuntime: RelayRuntime = {
