@@ -107,6 +107,7 @@ describe("Effect SQL migrations", () => {
 					{ migration_id: 14, name: "read_model_counter" },
 					{ migration_id: 15, name: "sessions_last_viewed_at" },
 					{ migration_id: 16, name: "sent_alerts" },
+					{ migration_id: 17, name: "fork_point_timestamp" },
 				]);
 
 				const legacyRows = yield* sql<{ id: number; name: string }>`
@@ -127,6 +128,7 @@ describe("Effect SQL migrations", () => {
 					{ id: 13, name: "read_model_counter" },
 					{ id: 14, name: "sessions_last_viewed_at" },
 					{ id: 15, name: "sent_alerts" },
+					{ id: 16, name: "fork_point_timestamp" },
 				]);
 			}).pipe(
 				Effect.provide(
@@ -159,6 +161,7 @@ describe("Effect SQL migrations", () => {
 					[14, "read_model_counter"],
 					[15, "sessions_last_viewed_at"],
 					[16, "sent_alerts"],
+					[17, "fork_point_timestamp"],
 				]);
 
 				const sql = yield* SqlClient.SqlClient;
@@ -177,8 +180,8 @@ describe("Effect SQL migrations", () => {
 					name: string;
 				}>`SELECT migration_id, name FROM effect_sql_migrations ORDER BY migration_id`;
 				expect(effectHistory.at(-1)).toEqual({
-					migration_id: 16,
-					name: "sent_alerts",
+					migration_id: 17,
+					name: "fork_point_timestamp",
 				});
 				const legacyHistory = yield* sql<{ id: number; name: string }>`
 					SELECT id, name FROM _migrations ORDER BY id`;
@@ -258,6 +261,7 @@ describe("Effect SQL migrations", () => {
 						[14, "read_model_counter"],
 						[15, "sessions_last_viewed_at"],
 						[16, "sent_alerts"],
+						[17, "fork_point_timestamp"],
 					],
 					columns: [
 						{
@@ -322,8 +326,8 @@ describe("Effect SQL migrations", () => {
 					failures: [],
 					secondRun: [],
 					effectLatest: {
-						migration_id: 16,
-						name: "sent_alerts",
+						migration_id: 17,
+						name: "fork_point_timestamp",
 					},
 					legacyLatest: { id: 9, name: "sessions_permission_mode" },
 				});
@@ -367,6 +371,7 @@ describe("Effect SQL migrations", () => {
 					{ migration_id: 14, name: "read_model_counter" },
 					{ migration_id: 15, name: "sessions_last_viewed_at" },
 					{ migration_id: 16, name: "sent_alerts" },
+					{ migration_id: 17, name: "fork_point_timestamp" },
 				]);
 
 				const columns = yield* sql<{ name: string }>`
@@ -452,8 +457,8 @@ describe("Effect SQL migrations", () => {
 					FROM effect_sql_migrations
 					ORDER BY migration_id`;
 				expect(history.at(-1)).toEqual({
-					migration_id: 16,
-					name: "sent_alerts",
+					migration_id: 17,
+					name: "fork_point_timestamp",
 				});
 			}).pipe(
 				Effect.provide(

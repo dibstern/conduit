@@ -86,11 +86,13 @@ const createdSession = (
 
 const READ_MODEL_PARITY_CASES: Record<ReadModelMutation, ParityCase> = {
 	establishOpenCodeSession: {
-		run: ({ service, readQuery }) =>
+		run: ({ service, readQuery, seedSession }) =>
 			Effect.gen(function* () {
+				yield* seedSession("established-parent", "Parent");
 				const session = createdSession(
 					"ses-established",
 					"Established through service",
+					"established-parent",
 				);
 
 				yield* service.establishOpenCodeSession(
@@ -99,7 +101,11 @@ const READ_MODEL_PARITY_CASES: Record<ReadModelMutation, ParityCase> = {
 				);
 
 				expect(yield* readQuery.getSession(session.id)).toEqual(
-					expect.objectContaining({ id: session.id, title: session.title }),
+					expect.objectContaining({
+						id: session.id,
+						title: session.title,
+						parent_id: "established-parent",
+					}),
 				);
 			}),
 	},

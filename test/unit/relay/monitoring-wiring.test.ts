@@ -17,7 +17,9 @@ type ChangedCallback = Parameters<SessionStatusPollerService["on"]>[1];
 
 const flushPromises = () => new Promise((resolve) => setTimeout(resolve, 0));
 
-function createHarness() {
+function createHarness(parentMap = new Map<string, string>()) {
+	const broadcastPerSessionEvent = vi.fn();
+	const clearProcessingTimeout = vi.fn();
 	let changed: ChangedCallback | undefined;
 	let resolveMessages: ((messages: []) => void) | undefined;
 	const messages = vi.fn(
@@ -36,14 +38,14 @@ function createHarness() {
 			broadcast: vi.fn(),
 			sendToSession: vi.fn(),
 			getClientsForSession: () => [],
-			broadcastPerSessionEvent: vi.fn(),
+			broadcastPerSessionEvent,
 		},
 		sessionService: {
 			sendDualSessionLists: vi.fn(async () => {}),
-			getSessionParentMap: () => new Map(),
+			getSessionParentMap: () => parentMap,
 		},
 		processingTimeouts: {
-			clearProcessingTimeout: vi.fn(),
+			clearProcessingTimeout,
 			resetProcessingTimeout: vi.fn(),
 		},
 		statusPoller: {
@@ -80,6 +82,8 @@ function createHarness() {
 	});
 
 	return {
+		broadcastPerSessionEvent,
+		clearProcessingTimeout,
 		result,
 		messages,
 		startPolling,
@@ -89,6 +93,39 @@ function createHarness() {
 		},
 	};
 }
+
+it("defers parent completion and synthetic done until its last busy child finishes", async () => {
+	const harness = createHarness(new Map([["child", "parent"]]));
+	await harness.emitStatus({
+		parent: { type: "busy" },
+		child: { type: "busy" },
+	});
+	await harness.emitStatus({
+		parent: { type: "idle" },
+		child: { type: "busy" },
+	});
+	expect(
+		harness.result.getMonitoringState().sessions.get("parent")?.phase,
+	).not.toBe("idle");
+	expect(harness.broadcastPerSessionEvent).not.toHaveBeenCalledWith(
+		"parent",
+		expect.objectContaining({ type: "done" }),
+	);
+	expect(harness.clearProcessingTimeout).not.toHaveBeenCalledWith("parent");
+	await harness.emitStatus({
+		parent: { type: "idle" },
+		child: { type: "idle" },
+	});
+	await harness.emitStatus({
+		parent: { type: "idle" },
+		child: { type: "idle" },
+	});
+	expect(
+		harness.broadcastPerSessionEvent.mock.calls.filter(
+			([id, event]) => id === "parent" && event.type === "done",
+		),
+	).toHaveLength(1);
+});
 
 describe("wireMonitoring shutdown", () => {
 	it("does not start a message poller after monitoring has stopped", async () => {

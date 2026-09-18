@@ -1,4 +1,5 @@
 import type { SessionStatus } from "../instance/sdk-types.js";
+import { busySessionIds } from "../session-busy.js";
 import type {
 	MonitoringEffect,
 	MonitoringState,
@@ -229,17 +230,34 @@ export function evaluateAll(
 	state: MonitoringState,
 	contexts: ReadonlyMap<string, SessionEvalContext>,
 	config: Readonly<PollerGatingConfig>,
+	parents: ReadonlyMap<string, string> = new Map(),
 ): {
 	readonly state: MonitoringState;
 	readonly effects: readonly MonitoringEffect[];
 } {
 	const newSessions = new Map<string, SessionMonitorPhase>();
 	const effects: MonitoringEffect[] = [];
+	const busy = busySessionIds(
+		new Map(
+			Array.from(contexts, ([id, ctx]) => [
+				id,
+				{
+					status: ctx.status.type,
+					parentID: parents.get(id),
+				},
+			]),
+		),
+	);
 
 	// Evaluate sessions present in contexts
 	for (const [sessionId, evalCtx] of contexts) {
 		const current = state.sessions.get(sessionId) ?? { phase: "idle" as const };
-		const result = evaluateSession(sessionId, current, evalCtx, config);
+		const result = evaluateSession(
+			sessionId,
+			current,
+			busy.has(sessionId) ? { ...evalCtx, status: { type: "busy" } } : evalCtx,
+			config,
+		);
 		newSessions.set(sessionId, result.phase);
 		effects.push(...result.effects);
 	}

@@ -6,6 +6,7 @@ import {
 	CURRENT_EVENT_STORE_MIGRATION,
 	DROP_EVENTS_SESSION_FK_MIGRATION,
 	DURABLE_PROVIDER_COMMANDS_MIGRATION,
+	FORK_POINT_TIMESTAMP_MIGRATION,
 	MESSAGE_PART_METADATA_MIGRATION,
 	MESSAGE_PARTS_COMPACTION_TYPE_MIGRATION,
 	MESSAGE_PARTS_FILE_TYPE_MIGRATION,
@@ -450,13 +451,26 @@ const verifyExistingBaselineSchema: Effect.Effect<
 			sameStrings(actualColumns, expectedColumns) ||
 			((tableName === "sessions" || tableName === "messages") &&
 				sameStrings(actualColumns, [...expectedColumns, "version"])) ||
-			// 0014 appends last_viewed_at behind 0013's version, so a database can
-			// sit on either rung of that ladder.
 			(tableName === "sessions" &&
 				sameStrings(actualColumns, [
 					...expectedColumns,
 					"version",
 					"last_viewed_at",
+				])) ||
+			(tableName === "sessions" &&
+				sameStrings(actualColumns, [
+					...expectedColumns,
+					"version",
+					"fork_point_timestamp",
+					"fork_point_message_id",
+				])) ||
+			(tableName === "sessions" &&
+				sameStrings(actualColumns, [
+					...expectedColumns,
+					"version",
+					"last_viewed_at",
+					"fork_point_timestamp",
+					"fork_point_message_id",
 				])) ||
 			(tableName === "command_receipts" &&
 				sameStrings(actualColumns, preDurableCommandReceiptColumns)) ||
@@ -796,6 +810,15 @@ export const effectMigrationEntries = {
 	"0014_read_model_counter": runReadModelCounterMigration,
 	"0015_sessions_last_viewed_at": runSessionsLastViewedAtMigration,
 	"0016_sent_alerts": runSentAlertsMigration,
+	"0017_fork_point_timestamp": Effect.gen(function* () {
+		const sql = yield* SqlClient.SqlClient;
+		const columns = yield* sql<{ name: string }>`PRAGMA table_info(sessions)`;
+		if (columns.some((column) => column.name === "fork_point_timestamp"))
+			return;
+		yield* executeSqlStatements(
+			readMigrationSql(FORK_POINT_TIMESTAMP_MIGRATION),
+		);
+	}),
 } satisfies Record<string, Effect.Effect<void, unknown, SqlClient.SqlClient>>;
 
 export function makeEffectMigrationLoader(

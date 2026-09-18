@@ -1,4 +1,5 @@
 import { RpcTest } from "@effect/rpc";
+import { SqlClient } from "@effect/sql";
 import { describe, it } from "@effect/vitest";
 import { Effect, Layer } from "effect";
 import { expect, vi } from "vitest";
@@ -7,6 +8,9 @@ import { WsRpcGroup } from "../../../src/lib/contracts/ws-rpc.js";
 import { PendingInteractionServiceTag } from "../../../src/lib/domain/relay/Services/pending-interaction-service.js";
 import type { SessionManagerService } from "../../../src/lib/domain/relay/Services/session-manager-service.js";
 import type { SessionDetail } from "../../../src/lib/instance/sdk-types.js";
+import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
+import { ProjectionRunnerEffectTag } from "../../../src/lib/persistence/effect/projection-runner-effect.js";
+import { ReadQueryEffectTag } from "../../../src/lib/persistence/effect/read-query-effect.js";
 import { WsRpcServerLayer } from "../../../src/lib/server/ws-rpc.js";
 import type { PermissionId } from "../../../src/lib/shared-types.js";
 import {
@@ -243,6 +247,11 @@ describe("WsRpcServerLayer ListSessions", () => {
 		});
 
 		return Effect.gen(function* () {
+			const sql = yield* SqlClient.SqlClient;
+			const projections = yield* ProjectionRunnerEffectTag;
+			yield* projections.recover();
+			yield* sql`INSERT INTO sessions (id, provider, title, created_at, updated_at)
+				VALUES ('session-1', 'opencode', 'Original Session', 1, 1)`;
 			const client = yield* rpcClient;
 
 			const result = yield* client.ForkSession({
@@ -260,17 +269,30 @@ describe("WsRpcServerLayer ListSessions", () => {
 				messageID: "message-1",
 			});
 			expect(clearPaginationCursor).toHaveBeenCalledWith("session-1");
-			expect(setForkEntry).toHaveBeenCalledWith("session-forked", {
-				forkMessageId: "message-1",
-				parentID: "session-1",
-				forkPointTimestamp: 9,
+			// The fork command commits its boundary with creation. The handler
+			// must not recompute it and append a second lineage event.
+			expect(setForkEntry).not.toHaveBeenCalled();
+			const readQuery = yield* ReadQueryEffectTag;
+			expect(yield* readQuery.getSession("session-forked")).toMatchObject({
+				parent_id: "session-1",
+				fork_point_event: "message-1",
+				fork_point_timestamp: 9,
+				fork_point_message_id: "message-1",
 			});
+			expect(
+				yield* sql`SELECT type FROM events WHERE session_id = 'session-forked'`,
+			).toEqual([{ type: "session.created" }]);
 			expect(wsHandler.broadcast).toHaveBeenCalledWith(
 				expect.objectContaining({
 					type: "session_forked",
 					sessionId: "session-forked",
 					parentId: "session-1",
 					parentTitle: "Original Session",
+					session: expect.objectContaining({
+						parentID: "session-1",
+						forkMessageId: "message-1",
+						forkPointTimestamp: 9,
+					}),
 				}),
 			);
 			expect(wsHandler.setClientSession).toHaveBeenCalledWith(
@@ -289,6 +311,7 @@ describe("WsRpcServerLayer ListSessions", () => {
 							sessionManagerService,
 						}),
 					),
+					Layer.provideMerge(makePersistenceEffectLayer(":memory:")),
 				),
 			),
 		);

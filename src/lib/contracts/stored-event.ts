@@ -195,6 +195,9 @@ export interface SessionCreatedPayload {
 	readonly title: string;
 	readonly provider: string;
 	readonly parentId?: string;
+	readonly forkPointEvent?: string;
+	readonly forkPointTimestamp?: number;
+	readonly forkPointMessageId?: string;
 	readonly providerSessionId?: string;
 }
 
@@ -216,9 +219,8 @@ export interface SessionDeletedPayload {
  * its own event is what lets `setForkEntry` record it without having to know
  * the session's title or provider.
  *
- * `forkPointTimestamp` has no column in `sessions` — it is display-only and
- * still served from the fork-metadata sidecar. It is recorded here anyway so
- * the sidecar stays reconstructible from the log.
+ * Legacy producers may include a display timestamp. Session subscriptions use
+ * the durable parent and fork message IDs.
  */
 export interface SessionForkedPayload {
 	readonly sessionId: string;
@@ -608,6 +610,9 @@ const SessionCreatedPayloadSchema = Schema.Struct({
 	title: Schema.String,
 	provider: Schema.String,
 	parentId: Schema.optionalWith(Schema.String, { exact: true }),
+	forkPointEvent: Schema.optionalWith(Schema.String, { exact: true }),
+	forkPointTimestamp: Schema.optionalWith(Schema.Number, { exact: true }),
+	forkPointMessageId: Schema.optionalWith(Schema.String, { exact: true }),
 	providerSessionId: Schema.optionalWith(Schema.String, { exact: true }),
 });
 

@@ -287,9 +287,8 @@ export function historyToChatMessages(
 	messages: HistoryMessage[],
 	renderHtml?: (text: string) => string,
 ): ChatMessage[] {
-	const result: ChatMessage[] = [];
-
-	for (const msg of messages) {
+	return messages.flatMap((msg) => {
+		const result: ChatMessage[] = [];
 		if (msg.role === "user") {
 			// User messages: extract text from parts
 			const text =
@@ -360,9 +359,14 @@ export function historyToChatMessages(
 				} satisfies ResultMessage);
 			}
 		}
-	}
-
-	return result;
+		const createdAt = msg.time?.created;
+		return createdAt === undefined
+			? result
+			: result.map((part) => ({
+					...part,
+					messageOrder: { createdAt, id: msg.id },
+				}));
+	});
 }
 
 // ─── History Queued Flag (REMOVED) ──────────────────────────────────────────

@@ -218,13 +218,11 @@ const deltas = (member: Member) =>
 
 describe("RpcTest subscription stream semantics", () => {
 	for (const member of ["SubscribeShell", "SubscribeSessionDetail"] as const) {
-		// SubscribeShell's fork-lineage mapEffect emits singleton wire chunks.
-		// Client mailbox reads may combine them. Session detail keeps source
-		// chunks: the opening pair, then one chunk per advance that routes here.
-		const handlerChunks =
-			member === "SubscribeShell"
-				? [...initial, ...deltas(member)].map((envelope) => [envelope])
-				: [initial, ...deltas(member).map((envelope) => [envelope])];
+		// Both handlers preserve the source's opening pair and subsequent chunks.
+		const handlerChunks = [
+			initial,
+			...deltas(member).map((envelope) => [envelope]),
+		];
 		const chunkMessages = handlerChunks.map((values) => ({
 			_tag: "Chunk" as const,
 			values,
@@ -342,22 +340,15 @@ describe("RpcTest subscription stream semantics", () => {
 							expect(Array.from(chunk)).toEqual(
 								transport === "RpcTest" ? initial : handlerChunks[0],
 							);
-							if (transport === "observed" && member === "SubscribeShell") {
-								const [synchronized] = yield* mailbox.takeAll;
-								expect(Array.from(synchronized)).toEqual([initial[1]]);
-							}
 							expect(released).toEqual([]);
 							yield* Scope.close(consumerScope, Exit.void);
 							yield* TestClock.adjust("1 millis");
 							if (transport === "observed") {
 								expect(
 									messages.filter((message) => message._tag === "Chunk"),
-								).toEqual(
-									chunkMessages.slice(0, member === "SubscribeShell" ? 2 : 1),
-								);
+								).toEqual(chunkMessages.slice(0, 1));
 								expect(messages.map((message) => message._tag)).toEqual([
 									"Chunk",
-									...(member === "SubscribeShell" ? ["Chunk"] : []),
 									"Interrupt",
 									"Exit",
 								]);

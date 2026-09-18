@@ -240,8 +240,6 @@ function createMockSessionMgr(): HandlerDeps["sessionMgr"] {
 		setPendingQuestionCounts: vi.fn(),
 		clearPaginationCursor: vi.fn(),
 		seedPaginationCursor: vi.fn(),
-		getForkEntry: vi.fn().mockReturnValue(undefined),
-		setForkEntry: vi.fn(),
 		addToParentMap: vi.fn(),
 		on: vi.fn().mockReturnThis(),
 	} as unknown as HandlerDeps["sessionMgr"];
@@ -780,8 +778,6 @@ export function makeMockSessionManagerShape(
 		setPendingQuestionCounts: vi.fn(),
 		clearPaginationCursor: vi.fn(),
 		seedPaginationCursor: vi.fn(),
-		getForkEntry: vi.fn(() => undefined),
-		setForkEntry: vi.fn(),
 		addToParentMap: vi.fn(),
 		on: vi.fn().mockReturnThis(),
 		...overrides,

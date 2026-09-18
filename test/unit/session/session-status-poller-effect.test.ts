@@ -3,16 +3,13 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { SqlClient } from "@effect/sql";
 import { describe, it } from "@effect/vitest";
-import { Deferred, Duration, Effect, Fiber, HashMap, Layer, Ref } from "effect";
+import { Deferred, Effect, Fiber, Layer, Ref } from "effect";
 import { expect, vi } from "vitest";
 import {
-	clearMessageActivity,
 	getCurrentStatuses,
 	isProcessing,
 	makePollerPubSubLive,
 	makePollerStateLive,
-	markMessageActivity,
-	notifySSEIdle,
 	PollerStateTag,
 	poll,
 	reconcile,
@@ -51,7 +48,6 @@ describe("SessionStatusPoller Effect", () => {
 			const ref = yield* PollerStateTag;
 			const result = yield* Ref.get(ref);
 			expect(Object.keys(result.previousStatuses).length).toBe(0);
-			expect(HashMap.size(result.activityTimestamps)).toBe(0);
 		}).pipe(Effect.provide(makeTestLayer())),
 	);
 
@@ -122,26 +118,6 @@ describe("SessionStatusPoller Effect", () => {
 		}).pipe(Effect.provide(makeTestLayer())),
 	);
 
-	it.effect("isMessageActive checks TTL correctly", () =>
-		Effect.gen(function* () {
-			const now = Date.now();
-			const ref = yield* PollerStateTag;
-			yield* Ref.update(ref, (s) => ({
-				...s,
-				activityTimestamps: HashMap.fromIterable([
-					["active", now - 1000] as const,
-					["stale", now - 300_000] as const,
-				]),
-			}));
-			const state = yield* Ref.get(ref);
-			const activeTTL = Duration.seconds(60);
-			const activeTs = HashMap.unsafeGet(state.activityTimestamps, "active");
-			const staleTs = HashMap.unsafeGet(state.activityTimestamps, "stale");
-			expect(now - activeTs < Duration.toMillis(activeTTL)).toBe(true);
-			expect(now - staleTs < Duration.toMillis(activeTTL)).toBe(false);
-		}).pipe(Effect.provide(makeTestLayer())),
-	);
-
 	it.effect("getCurrentStatuses returns empty when no polls have run", () =>
 		Effect.gen(function* () {
 			const statuses = yield* getCurrentStatuses;
@@ -169,8 +145,6 @@ describe("SessionStatusPoller Effect", () => {
 
 				yield* poll({
 					getRawStatuses: () => readSessionStatusesFromEffect,
-					getSessionParentMap: () => Effect.succeed(new Map()),
-					resolveParent: () => Effect.succeed(undefined),
 				});
 
 				const statuses = yield* getCurrentStatuses;
@@ -232,47 +206,6 @@ describe("SessionStatusPoller Effect", () => {
 			}));
 			const result = yield* isProcessing("s1");
 			expect(result).toBe(true);
-		}).pipe(Effect.provide(makeTestLayer())),
-	);
-
-	it.effect("markMessageActivity sets timestamp", () =>
-		Effect.gen(function* () {
-			yield* markMessageActivity("s1");
-			const ref = yield* PollerStateTag;
-			const state = yield* Ref.get(ref);
-			expect(HashMap.has(state.activityTimestamps, "s1")).toBe(true);
-		}).pipe(Effect.provide(makeTestLayer())),
-	);
-
-	it.effect("clearMessageActivity removes timestamp", () =>
-		Effect.gen(function* () {
-			yield* markMessageActivity("s1");
-			yield* clearMessageActivity("s1");
-			const ref = yield* PollerStateTag;
-			const state = yield* Ref.get(ref);
-			expect(HashMap.has(state.activityTimestamps, "s1")).toBe(false);
-		}).pipe(Effect.provide(makeTestLayer())),
-	);
-
-	it.effect("notifySSEIdle adds to sseIdleSessions and clears activity", () =>
-		Effect.gen(function* () {
-			yield* markMessageActivity("s1");
-			yield* notifySSEIdle("s1");
-			const ref = yield* PollerStateTag;
-			const state = yield* Ref.get(ref);
-			expect(state.sseIdleSessions.has("s1")).toBe(true);
-			expect(HashMap.has(state.activityTimestamps, "s1")).toBe(false);
-		}).pipe(Effect.provide(makeTestLayer())),
-	);
-
-	it.effect("markMessageActivity is ignored for SSE-idle sessions", () =>
-		Effect.gen(function* () {
-			yield* notifySSEIdle("s1");
-			yield* markMessageActivity("s1");
-			const ref = yield* PollerStateTag;
-			const state = yield* Ref.get(ref);
-			// Activity should NOT be set because SSE confirmed idle
-			expect(HashMap.has(state.activityTimestamps, "s1")).toBe(false);
 		}).pipe(Effect.provide(makeTestLayer())),
 	);
 });

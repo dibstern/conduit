@@ -37,11 +37,6 @@ import {
 	resolveInstanceDriver,
 	resolveProviderRoutingDriver,
 } from "../../../daemon/config-persistence.js";
-import {
-	type ForkEntry,
-	loadForkMetadata,
-	saveForkMetadata,
-} from "../../../daemon/fork-metadata.js";
 import { formatErrorDetail, OpenCodeApiError } from "../../../errors.js";
 import type {
 	SessionDetail,
@@ -152,6 +147,12 @@ export interface CreateSessionOptions {
 	readonly providerId?: string;
 }
 
+interface ForkEntry {
+	readonly parentID: string;
+	readonly forkMessageId: string;
+	readonly forkPointTimestamp?: number;
+}
+
 export interface HistoryPage {
 	messages: HistoryMessage[];
 	hasMore: boolean;
@@ -167,14 +168,10 @@ const toReadonlyMap = <K, V>(map: HashMap.HashMap<K, V>): ReadonlyMap<K, V> =>
 
 const sessionsParentMap = (
 	sessions: readonly SessionInfo[],
-	forkMeta: HashMap.HashMap<string, ForkEntry>,
 ): HashMap.HashMap<string, string> => {
 	let parentMap = HashMap.empty<string, string>();
 	for (const session of sessions) {
-		const forkEntry = HashMap.get(forkMeta, session.id);
-		const parentID =
-			session.parentID ??
-			(forkEntry._tag === "Some" ? forkEntry.value.parentID : undefined);
+		const parentID = session.parentID;
 		if (parentID) {
 			parentMap = HashMap.set(parentMap, session.id, parentID);
 		}
@@ -184,43 +181,18 @@ const sessionsParentMap = (
 
 const sessionDetailsParentMap = (
 	sessions: readonly SessionDetail[],
-	forkMeta: HashMap.HashMap<string, ForkEntry>,
 ): HashMap.HashMap<string, string> => {
 	let parentMap = HashMap.empty<string, string>();
 	for (const session of sessions) {
 		const rec = session as Record<string, unknown>;
 		const apiParentID = rec["parentID"];
-		const forkEntry = HashMap.get(forkMeta, session.id);
-		const parentID =
-			(typeof apiParentID === "string" ? apiParentID : undefined) ??
-			(forkEntry._tag === "Some" ? forkEntry.value.parentID : undefined);
+		const parentID = typeof apiParentID === "string" ? apiParentID : undefined;
 		if (parentID) {
 			parentMap = HashMap.set(parentMap, session.id, parentID);
 		}
 	}
 	return parentMap;
 };
-
-/**
- * Fork lineage is the one session fact that still lives in daemon memory
- * instead of the row (ni8.5 §6, until conduit-test-ni8.24 persists it), so it
- * is folded onto the session on the way out. What the row knows wins.
- */
-const withForkLineage = (
-	sessions: readonly SessionInfo[],
-	forkMeta: HashMap.HashMap<string, ForkEntry>,
-): SessionInfo[] =>
-	sessions.map((session) => {
-		const entry = HashMap.get(forkMeta, session.id);
-		if (entry._tag === "None") return session;
-		const { parentID, forkMessageId, forkPointTimestamp } = entry.value;
-		return {
-			...session,
-			...(session.parentID === undefined && { parentID }),
-			...(session.forkMessageId === undefined && { forkMessageId }),
-			...(forkPointTimestamp !== undefined && { forkPointTimestamp }),
-		};
-	});
 
 const updateRelaySessionCountSnapshot = (sessionCount: number) =>
 	Effect.serviceOption(RelayStatusSnapshotTag).pipe(
@@ -281,12 +253,12 @@ export const listSessions = (options?: ListSessionsOptions) =>
 			if (!options?.roots) {
 				yield* Ref.update(stateRef, (s) => ({
 					...s,
-					cachedParentMap: sessionsParentMap(sessions, s.forkMeta),
+					cachedParentMap: sessionsParentMap(sessions),
 					lastKnownSessionCount: sessions.length,
 				}));
 				yield* updateRelaySessionCountSnapshot(sessions.length);
 			}
-			return withForkLineage(sessions, state.forkMeta);
+			return sessions;
 		}
 
 		const clientOptions = {
@@ -311,7 +283,7 @@ export const listSessions = (options?: ListSessionsOptions) =>
 		if (!options?.roots) {
 			yield* Ref.update(stateRef, (s) => ({
 				...s,
-				cachedParentMap: sessionDetailsParentMap(sessions, s.forkMeta),
+				cachedParentMap: sessionDetailsParentMap(sessions),
 				lastKnownSessionCount: sessions.length,
 			}));
 			yield* updateRelaySessionCountSnapshot(sessions.length);
@@ -321,7 +293,6 @@ export const listSessions = (options?: ListSessionsOptions) =>
 			sessions,
 			options?.statuses,
 			toReadonlyMap(state.lastMessageAt),
-			toReadonlyMap(state.forkMeta),
 		);
 	}).pipe(
 		Effect.annotateLogs("operation", "listSessions"),
@@ -357,7 +328,7 @@ export const initialize = (title?: string) =>
 			}
 			return {
 				...s,
-				cachedParentMap: sessionDetailsParentMap(existing, s.forkMeta),
+				cachedParentMap: sessionDetailsParentMap(existing),
 				lastMessageAt,
 				lastKnownSessionCount: existing.length,
 			};
@@ -720,7 +691,6 @@ export const deleteSession = (sessionId: string) =>
 		const deleted = new Set([sessionId, ...childSessionIds]);
 		yield* Ref.update(stateRef, (s) => {
 			const lastMessageAt = HashMap.remove(s.lastMessageAt, sessionId);
-			const forkMeta = HashMap.remove(s.forkMeta, sessionId);
 			const paginationCursors = HashMap.remove(s.paginationCursors, sessionId);
 
 			const cachedParentMap = HashMap.filter(
@@ -731,7 +701,6 @@ export const deleteSession = (sessionId: string) =>
 			return {
 				cachedParentMap,
 				lastMessageAt,
-				forkMeta,
 				paginationCursors,
 				lastKnownSessionCount: Math.max(0, s.lastKnownSessionCount - 1),
 			};
@@ -1168,20 +1137,9 @@ export const getLastKnownSessionCount = () =>
 	}).pipe(Effect.withSpan("session.getLastKnownSessionCount"));
 
 /**
- * Record fork-point metadata for a forked session: lineage into the event
- * store, the whole entry into relay state and the on-disk sidecar.
- *
- * The canonical event leads. `sessions.parent_id` is what the root-session
- * query filters on, so lineage that reaches only the sidecar leaves the fork
- * looking like a top-level session to every reader that does not consult it
- * (conduit-test-o5vp). The sidecar is now a cache of the same fact, plus the
- * fork-point timestamp, which has no column.
+ * Record fork lineage through the event store and announce the projected row.
  */
-export const setForkEntry = (
-	sessionId: string,
-	entry: ForkEntry,
-	configDir?: string,
-) =>
+export const setForkEntry = (sessionId: string, entry: ForkEntry) =>
 	Effect.gen(function* () {
 		if (entry.parentID) {
 			yield* applySessionCommand({
@@ -1205,26 +1163,12 @@ export const setForkEntry = (
 		}
 
 		const ref = yield* SessionManagerStateTag;
-		const forkMeta = yield* Ref.modify(ref, (s) => {
-			const nextForkMeta = HashMap.set(s.forkMeta, sessionId, entry);
-			return [
-				nextForkMeta,
-				{
-					...s,
-					forkMeta: nextForkMeta,
-					cachedParentMap: entry.parentID
-						? HashMap.set(s.cachedParentMap, sessionId, entry.parentID)
-						: s.cachedParentMap,
-				},
-			] as const;
-		});
-
-		yield* Effect.try({
-			try: () =>
-				saveForkMetadata(new Map(HashMap.toEntries(forkMeta)), configDir),
-			catch: (cause) =>
-				new SessionManagerError({ operation: "setForkEntry", cause }),
-		});
+		yield* Ref.update(ref, (s) => ({
+			...s,
+			cachedParentMap: entry.parentID
+				? HashMap.set(s.cachedParentMap, sessionId, entry.parentID)
+				: s.cachedParentMap,
+		}));
 	}).pipe(
 		Effect.annotateLogs("sessionId", sessionId),
 		Effect.withSpan("session.setForkEntry"),
@@ -1360,18 +1304,6 @@ export const SessionManagerServiceLive: Layer.Layer<
 			string,
 			Deferred.Deferred<void, SessionManagerError>
 		>();
-		if (configOption._tag === "Some") {
-			const forkMeta = loadForkMetadata(configDir);
-			if (forkMeta.size > 0) {
-				yield* Ref.update(stateRef, (s) => {
-					let nextForkMeta = s.forkMeta;
-					for (const [sessionId, entry] of forkMeta) {
-						nextForkMeta = HashMap.set(nextForkMeta, sessionId, entry);
-					}
-					return { ...s, forkMeta: nextForkMeta };
-				});
-			}
-		}
 		const currentStatuses = (
 			explicit?: Record<string, SessionStatus> | undefined,
 		): Effect.Effect<Record<string, SessionStatus> | undefined> => {
@@ -1450,6 +1382,9 @@ export const SessionManagerServiceLive: Layer.Layer<
 											title: normalizedTitle,
 											provider: providerInstanceId,
 											providerSessionId: session.id,
+											...(session.parentID === undefined
+												? {}
+												: { parentId: session.parentID }),
 										},
 										{
 											provider: providerInstanceId,
@@ -1924,7 +1859,7 @@ export const SessionManagerServiceLive: Layer.Layer<
 				),
 			setForkEntry: (sessionId, entry) =>
 				Effect.gen(function* () {
-					yield* setForkEntry(sessionId, entry, configDir).pipe(
+					yield* setForkEntry(sessionId, entry).pipe(
 						Effect.provideService(SessionManagerStateTag, stateRef),
 					);
 				}),

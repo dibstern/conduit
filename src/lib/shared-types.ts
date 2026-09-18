@@ -246,8 +246,11 @@ export const SessionStatusSchema = Schema.Literal(
  * projection or — for the fork lineage — from the interim join that
  * conduit-test-ni8.24 deletes.
  *
- * Notably absent: `processing` — the status poller's derived flag; the client
- * now ORs the row's `status` with live chat phase.
+ * Notably absent: `processing` — the status poller's derived flag. The client
+ * session view derives it from the row's `status`, descendant status and
+ * pre-status activity, which is a rendering question. The server keeps its own
+ * answer to the separate notification question (`src/lib/session-busy.ts` is
+ * the one ancestor walk both sides share).
  *
  * The three notification facts are here rather than riding a side message: a
  * badge is a fact about a session, the server is the only place that can decide
@@ -269,9 +272,10 @@ export const SessionInfoSchema = Schema.Struct({
 	parentID: Schema.optional(Schema.String),
 	/** The message ID at the fork point — messages up to this ID are inherited context. */
 	forkMessageId: Schema.optional(Schema.String),
-	/** Unix-ms timestamp of the fork-point message. Messages created before
-	 *  this time are inherited context from the parent session. */
+	/** Inclusive boundary in transcript (created_at, id) order. */
 	forkPointTimestamp: Schema.optional(Schema.Number),
+	/** Ordering ID when the SDK lineage boundary differs from the UI message ID. */
+	forkPointMessageId: Schema.optional(Schema.String),
 	/** Unanswered questions on this session — the count the badge shows. */
 	pendingQuestions: Schema.optional(Schema.Number),
 	/** Unanswered permission requests on this session. */
