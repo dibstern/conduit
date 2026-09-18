@@ -365,17 +365,6 @@ function routePerSession(event: PerSessionEvent): void {
 	}
 }
 
-/** Get the current session slot for non-handler functions that need
- *  activity/messages but don't take an event parameter. */
-function getCurrentSlot(): {
-	activity: SessionActivity;
-	messages: SessionMessages;
-} | null {
-	const id = sessionState.currentId;
-	if (!id) return null;
-	return getOrCreateSessionSlot(id);
-}
-
 // ─── LLM Content Start ──────────────────────────────────────────────────────
 // Single source of truth for event types that indicate the LLM started
 // producing content for a turn. Used by replayEvents() to track `llmActive`
@@ -439,18 +428,16 @@ function drainLiveEventBuffer(
 	const buffer = activity?.liveEventBuffer ?? null;
 	if (activity) activity.liveEventBuffer = null;
 	if (!buffer || buffer.length === 0) return;
+	if (!activity || !messages) return;
 	for (const event of buffer) {
 		// Recomputed per event: draining a buffer replays the turn's own
 		// transitions, and the queued flag must follow the drained slot —
 		// not the session on screen, which may be a different one entirely.
 		const ctx: DispatchContext = {
 			isReplay: false,
-			isQueued:
-				activity !== undefined &&
-				messages !== undefined &&
-				isLlmActive(activity.phase, messages.loadLifecycle),
+			isQueued: isLlmActive(activity.phase, messages.loadLifecycle),
 		};
-		dispatchChatEvent(event, ctx);
+		dispatchChatEvent({ activity, messages }, event, ctx);
 	}
 }
 
@@ -568,6 +555,14 @@ export interface DispatchContext {
 	isQueued: boolean;
 }
 
+/** The session slot an event is dispatched into. Named by the caller, because
+ *  the event's own session id is the only correct answer — a global "current
+ *  slot" pointer routes a background session's output into the foreground. */
+interface ChatSlot {
+	readonly activity: SessionActivity;
+	readonly messages: SessionMessages;
+}
+
 /**
  * Dispatch a single chat event to the appropriate store handler.
  * Returns `true` if the event was a chat event (handled), `false` otherwise.
@@ -580,13 +575,12 @@ export interface DispatchContext {
  *   notifications; replay uses `handleError` directly (those error codes
  *   never appear in the cache — they're sent via sendToSession, not recordEvent)
  */
-function dispatchChatEvent(event: RelayMessage, ctx: DispatchContext): boolean {
-	// ── Resolve per-session slot ────────────────────────────────────────
-	const slot = getCurrentSlot();
-	// During startup or when no session is active, we still need to handle
-	// events (e.g. during session_switched replay). Use a lazy fallback.
-	const activity = slot?.activity;
-	const messages = slot?.messages;
+function dispatchChatEvent(
+	slot: ChatSlot,
+	event: RelayMessage,
+	ctx: DispatchContext,
+): boolean {
+	const { activity, messages } = slot;
 
 	// ── Turn boundary detection ─────────────────────────────────────────
 	// When an event carries a messageId that differs from the current one,
@@ -597,55 +591,13 @@ function dispatchChatEvent(event: RelayMessage, ctx: DispatchContext): boolean {
 	const msgId = hasMessageId
 		? (event as Record<string, unknown>)["messageId"]
 		: undefined;
-	if (
-		event.type !== "user_message" &&
-		hasMessageId &&
-		msgId != null &&
-		activity &&
-		messages
-	) {
+	if (event.type !== "user_message" && hasMessageId && msgId != null) {
 		advanceTurnIfNewMessage(
 			activity,
 			messages,
 			msgId as string,
 			event.type === "delta" ? event.partId : undefined,
 		);
-	} else if (hasMessageId && msgId != null) {
-		// Fallback: no slot yet — just log
-		log.debug(
-			"advanceTurn skipped — no slot for event %s messageId=%s",
-			event.type,
-			msgId,
-		);
-	} else {
-		const LLM_TYPES = new Set([
-			"delta",
-			"thinking_start",
-			"thinking_delta",
-			"thinking_stop",
-			"tool_start",
-			"tool_executing",
-			"tool_result",
-			"result",
-		]);
-		if (LLM_TYPES.has(event.type)) {
-			log.debug(
-				"LLM event %s has NO messageId (hasKey=%s val=%s) replay=%s",
-				event.type,
-				hasMessageId,
-				msgId,
-				ctx.isReplay,
-			);
-		}
-	}
-
-	// Guard: if we have no slot, we can't dispatch. This should only
-	// happen if currentId is null (extremely early in startup).
-	if (!activity || !messages) {
-		if (CHAT_EVENT_TYPES.has(event.type)) {
-			log.debug("dispatchChatEvent: no slot for event %s", event.type);
-		}
-		return false;
 	}
 
 	switch (event.type) {
@@ -702,7 +654,7 @@ function dispatchChatEvent(event: RelayMessage, ctx: DispatchContext): boolean {
 			if (!ctx.isReplay) {
 				// Only notify for root agent sessions — subagent completions are
 				// intermediate steps; the parent emits its own done when finished.
-				const doneSession = findSession(sessionState.currentId ?? "");
+				const doneSession = findSession(event.sessionId ?? "");
 				if (!doneSession?.parentID) {
 					triggerNotifications(event);
 				}
@@ -746,14 +698,17 @@ export function handleMessage(msg: RelayMessage): void {
 	if (isPerSessionEvent(msg)) {
 		// Buffer live chat events during replay to prevent interleaving
 		if (CHAT_EVENT_TYPES.has(msg.type)) {
-			const currentActivity = sessionState.currentId
-				? sessionActivity.get(sessionState.currentId)
+			// The buffer belongs to the session the event names. A replay of a
+			// background session must not swallow the foreground's live events,
+			// and vice versa.
+			const eventActivity = msg.sessionId
+				? sessionActivity.get(msg.sessionId)
 				: undefined;
 			if (
-				currentActivity?.liveEventBuffer !== null &&
-				currentActivity?.liveEventBuffer !== undefined
+				eventActivity?.liveEventBuffer !== null &&
+				eventActivity?.liveEventBuffer !== undefined
 			) {
-				currentActivity.liveEventBuffer.push(msg);
+				eventActivity.liveEventBuffer.push(msg);
 				return;
 			}
 		}
@@ -996,7 +951,8 @@ export function handleMessage(msg: RelayMessage): void {
 						(!hpCapturedSlot ||
 							hpCapturedSlot.activity.replayGeneration === hpActGen)
 					) {
-						// Commit to captured slot, not getCurrentSlot()
+						// Commit to the slot captured when the page was requested,
+						// never to whatever session happens to be current now.
 						if (hpCapturedSlot) {
 							prependMessages(
 								hpCapturedSlot.activity,
@@ -1205,7 +1161,7 @@ export async function replayEvents(
 				llmActive = false;
 
 			const ctx: DispatchContext = { isReplay: true, isQueued: llmActive };
-			dispatchChatEvent(event, ctx);
+			dispatchChatEvent(slot, event, ctx);
 
 			// Yield between chunks to keep the main thread responsive.
 			// NOTE: Do NOT call discardReplayBatch() on abort after yield.
