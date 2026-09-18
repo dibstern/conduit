@@ -45,6 +45,7 @@ describe("applySessionCommand", () => {
 			update: vi.fn(async () => undefined),
 			fork: vi.fn(async () => ({ id: "ses-fork", title: "Forked" })),
 			message: vi.fn(async () => ({ id: "msg-7", time: { created: 123 } })),
+			messagesPage: vi.fn(async () => [{ id: "msg-7" }]),
 		},
 	});
 
@@ -110,6 +111,56 @@ describe("applySessionCommand", () => {
 		const rows = yield* sql<{ type: string }>`SELECT type FROM events`;
 		return rows.map((row) => row.type);
 	});
+
+	it.effect(
+		"persists the local parent tip when the OpenCode tip lookup fails",
+		() =>
+			withHarness(({ api }) =>
+				Effect.gen(function* () {
+					const sql = yield* SqlClient.SqlClient;
+					yield* seedSession("ses-parent", "opencode");
+					yield* seedSession("ses-other", "opencode");
+					yield* sql`INSERT INTO messages (id, session_id, role, created_at, updated_at)
+						VALUES ('msg-z-old', 'ses-parent', 'user', 100, 100),
+						       ('msg-b-tip', 'ses-parent', 'assistant', 200, 200),
+						       ('msg-a-tie', 'ses-parent', 'user', 200, 200),
+						       ('msg-other', 'ses-other', 'assistant', 300, 300)`;
+					api.session.messagesPage.mockRejectedValue(new Error("unavailable"));
+					api.session.message.mockRejectedValue(new Error("unavailable"));
+
+					const forked = yield* forkOpenCodeSession("ses-parent");
+					const reads = yield* makeReadQueryEffect;
+					expect(yield* reads.getSession(forked.id)).toMatchObject({
+						fork_point_event: "msg-b-tip",
+						fork_point_timestamp: 200,
+						fork_point_message_id: "msg-b-tip",
+					});
+					expect(api.session.fork).toHaveBeenCalledTimes(1);
+					expect(api.session.messagesPage).toHaveBeenCalledTimes(1);
+				}),
+			),
+	);
+
+	it.effect(
+		"leaves the tip boundary empty when the local parent has no messages",
+		() =>
+			withHarness(({ api }) =>
+				Effect.gen(function* () {
+					yield* seedSession("ses-parent", "opencode");
+					api.session.messagesPage.mockRejectedValue(new Error("unavailable"));
+
+					const forked = yield* forkOpenCodeSession("ses-parent");
+					const reads = yield* makeReadQueryEffect;
+					expect(yield* reads.getSession(forked.id)).toMatchObject({
+						fork_point_event: null,
+						fork_point_timestamp: null,
+						fork_point_message_id: null,
+					});
+					expect(api.session.fork).toHaveBeenCalledTimes(1);
+					expect(api.session.messagesPage).toHaveBeenCalledTimes(1);
+				}),
+			),
+	);
 
 	it.effect(
 		"tells OpenCode about a mutation to an OpenCode-backed session",

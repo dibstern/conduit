@@ -396,7 +396,7 @@ export const forkOpenCodeSession = (
 						.getSession(parentSessionId)
 						.pipe(Effect.orElseSucceed(() => undefined))
 				: undefined;
-		const forkPointEvent =
+		const providerForkPointEvent =
 			messageId ??
 			(yield* Effect.tryPromise(() =>
 				api.session.messagesPage(session.id, { limit: 1 }),
@@ -408,20 +408,37 @@ export const forkOpenCodeSession = (
 					).pipe(Effect.as(undefined)),
 				),
 			));
-		const forkPointTimestamp =
+		let forkPointTimestamp =
 			requestedBoundary?.time?.created ??
-			(forkPointEvent === undefined
+			(providerForkPointEvent === undefined
 				? undefined
 				: yield* Effect.tryPromise(() =>
-						api.session.message(parentSessionId, forkPointEvent),
+						api.session.message(parentSessionId, providerForkPointEvent),
 					).pipe(
 						Effect.map((message) => message.time?.created),
 						Effect.catchAll((error) =>
 							Effect.logWarning(
-								`Could not read fork boundary ${forkPointEvent}: ${String(error)}`,
+								`Could not read fork boundary ${providerForkPointEvent}: ${String(error)}`,
 							).pipe(Effect.as(undefined)),
 						),
 					));
+
+		let forkPointEvent = providerForkPointEvent;
+		if (
+			messageId === undefined &&
+			(forkPointEvent === undefined || forkPointTimestamp === undefined) &&
+			readQueryOption._tag === "Some"
+		) {
+			const parentMessages =
+				yield* readQueryOption.value.getSessionMessagesWithParts(
+					parentSessionId,
+				);
+			const localTip = parentMessages.at(-1);
+			// The projection orders by created_at, then id. An empty parent has
+			// no inherited messages to split, so its boundary is explicitly empty.
+			forkPointEvent = localTip?.id;
+			forkPointTimestamp = localTip?.created_at;
+		}
 
 		yield* applySessionCommand({
 			type: "session.created",

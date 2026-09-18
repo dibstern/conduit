@@ -1,4 +1,11 @@
-import { existsSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
+import { randomUUID } from "node:crypto";
+import {
+	existsSync,
+	readFileSync,
+	renameSync,
+	unlinkSync,
+	writeFileSync,
+} from "node:fs";
 import { join } from "node:path";
 import { Effect, Schema } from "effect";
 import { loadDaemonConfig } from "../../daemon/config-persistence.js";
@@ -21,25 +28,50 @@ const Sidecar = Schema.Record({
  * Global data import, not a numbered schema migration. The source has no project key, so this runs before
  * project relays open, across all known stores. It cannot run once per database:
  * the first project would delete the remaining projects' only copy of lineage.
- * Deleting the source is the completion marker; partial imports are idempotent.
+ * Unresolved entries are retried from the archive at startup; partial imports are idempotent.
  */
 export const migrateForkLineage = (configDir: string) =>
 	Effect.try({
 		try: () => {
 			const path = join(configDir, "fork-metadata.json");
-			let text: string;
-			try {
-				text = readFileSync(path, "utf8");
-			} catch (error) {
-				if (
-					error instanceof Error &&
-					"code" in error &&
-					error.code === "ENOENT"
-				)
-					return;
-				throw error;
+			const archive = join(configDir, "fork-metadata-unresolved.json");
+			let archiveText: string | undefined;
+			let hasSidecar = false;
+			const entries = new Map<
+				string,
+				Schema.Schema.Type<typeof Sidecar>[string]
+			>();
+			for (const source of [archive, path]) {
+				let text: string;
+				try {
+					text = readFileSync(source, "utf8");
+				} catch (error) {
+					if (
+						error instanceof Error &&
+						"code" in error &&
+						error.code === "ENOENT"
+					)
+						continue;
+					throw error;
+				}
+				if (source === archive) archiveText = text;
+				else hasSidecar = true;
+				const decoded = Schema.decodeUnknownSync(Schema.parseJson(Sidecar))(
+					text,
+				);
+				for (const [id, entry] of Object.entries(decoded)) {
+					if (
+						entries.has(id) &&
+						JSON.stringify(entries.get(id)) !== JSON.stringify(entry)
+					) {
+						throw new MigrationError({
+							reason: `Conflicting fork lineage for ${id} in ${archive} and ${path}`,
+						});
+					}
+					entries.set(id, entry);
+				}
 			}
-			const entries = Schema.decodeUnknownSync(Schema.parseJson(Sidecar))(text);
+			if (!hasSidecar && archiveText === undefined) return;
 			const projects = new Set(
 				loadDaemonConfig(configDir)?.projects.map((project) => project.path),
 			);
@@ -51,7 +83,7 @@ export const migrateForkLineage = (configDir: string) =>
 					projects.add(project.directory);
 				}
 			}
-			const remaining = new Set(Object.keys(entries));
+			const remaining = new Set(entries.keys());
 			for (const project of projects) {
 				const filename = join(project, ".conduit", "events.db");
 				if (!existsSync(filename)) continue;
@@ -59,7 +91,7 @@ export const migrateForkLineage = (configDir: string) =>
 				try {
 					const imported = db.runInTransaction(() => {
 						const ids: string[] = [];
-						for (const [id, entry] of Object.entries(entries)) {
+						for (const [id, entry] of entries) {
 							const row = db.queryOne<{
 								parent_id: string | null;
 								fork_point_event: string | null;
@@ -130,22 +162,38 @@ export const migrateForkLineage = (configDir: string) =>
 				}
 			}
 			if (remaining.size > 0) {
-				const archive = join(configDir, "fork-metadata-unresolved.json");
-				if (existsSync(archive)) {
-					// A crash after archiving but before unlinking is safe to retry.
-					if (readFileSync(archive, "utf8") !== text) {
+				const text = JSON.stringify(
+					Object.fromEntries([...remaining].map((id) => [id, entries.get(id)])),
+				);
+				const temporary = `${archive}.${randomUUID()}.tmp`;
+				try {
+					writeFileSync(temporary, text, { flag: "wx", mode: 0o600 });
+					// Replace only the archive consumed above, never a different file
+					// that appeared while the databases were being imported.
+					const current = existsSync(archive)
+						? readFileSync(archive, "utf8")
+						: undefined;
+					if (current !== archiveText) {
 						throw new MigrationError({
 							reason: `Archive already exists with different contents: ${archive}`,
 						});
 					}
-				} else {
-					writeFileSync(archive, text, { flag: "wx", mode: 0o600 });
+					renameSync(temporary, archive);
+				} finally {
+					if (existsSync(temporary)) unlinkSync(temporary);
 				}
+			} else if (archiveText !== undefined) {
+				if (readFileSync(archive, "utf8") !== archiveText) {
+					throw new MigrationError({
+						reason: `Archive changed during import: ${archive}`,
+					});
+				}
+				unlinkSync(archive);
 			}
 			// All databases have committed and closed before removing the global source.
-			unlinkSync(path);
+			if (hasSidecar) unlinkSync(path);
 			return remaining.size > 0
-				? `Fork lineage import imported known sessions; ${remaining.size} unresolved session(s) retained for manual recovery in ${join(configDir, "fork-metadata-unresolved.json")}. The archive is not a runtime data source.`
+				? `Fork lineage import imported known sessions; ${remaining.size} unresolved session(s) retained for retry at next startup in ${archive}. The archive is not a request-path data source.`
 				: undefined;
 		},
 		catch: (cause) => cause,
