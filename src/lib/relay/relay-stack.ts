@@ -32,6 +32,7 @@ import { StatusPollerLive } from "../domain/relay/Layers/status-poller-layer.js"
 import { WebSocketHandlerLive } from "../domain/relay/Layers/websocket-handler-layer.js";
 import { makeWsTransportLive } from "../domain/relay/Layers/ws-transport-layer.js";
 import { AgentServiceLive } from "../domain/relay/Services/agent-service.js";
+import { DaemonSessionQueryServiceLive } from "../domain/relay/Services/daemon-session-query-service.js";
 import { DirectoryListingServiceLive } from "../domain/relay/Services/directory-listing-service.js";
 import {
 	hasInstanceManagementConfig,
@@ -726,6 +727,9 @@ export async function createProjectRelay(
 	const projectManagementServiceLayer = ProjectManagementServiceLive.pipe(
 		Layer.provide(Layer.mergeAll(configLayer, openCodeSettingsServiceLayer)),
 	);
+	const daemonSessionQueryServiceLayer = DaemonSessionQueryServiceLive.pipe(
+		Layer.provide(configLayer),
+	);
 	const scanServiceLayer = ScanServiceLive.pipe(Layer.provide(configLayer));
 	const webSocketHandlerLayer = WebSocketHandlerLive.pipe(
 		Layer.provide(Layer.mergeAll(configLayer, loggerLayer)),
@@ -770,6 +774,7 @@ export async function createProjectRelay(
 		openCodeSettingsServiceLayer,
 		sseStreamLayer,
 		projectManagementServiceLayer,
+		daemonSessionQueryServiceLayer,
 		DirectoryListingServiceLive,
 		scanServiceLayer,
 		openCodeTerminalServiceLayer,

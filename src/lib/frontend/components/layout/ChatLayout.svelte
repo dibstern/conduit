@@ -6,7 +6,7 @@
 <script lang="ts">
 	import { untrack } from "svelte";
 	import { interruptStream, disposeRuntime } from "../../transport/runtime.js";
-	import { getAgentsRpc, getCommandsRpc, getFileTreeRpc, getModelsRpc, getProjectsRpc, listPtysRpc, listSessionsRpc } from "../../transport/ws-rpc-client.js";
+	import { getAgentsRpc, getCommandsRpc, getFileTreeRpc, getModelsRpc, getProjectsRpc, listDaemonSessionsRpc, listPtysRpc, listSessionsRpc } from "../../transport/ws-rpc-client.js";
 	import Header from "./Header.svelte";
 	import SessionBar from "./SessionBar.svelte";
 	import Sidebar from "./Sidebar.svelte";
@@ -51,7 +51,7 @@
 	import { getCurrentSessionId, slugState } from "../../stores/router.svelte.js";
 	import { clearMessages } from "../../stores/chat.svelte.js";
 	import { applyPtyListResponse, terminalState, destroyAll } from "../../stores/terminal.svelte.js";
-	import { applyListSessionsResponse, clearSessionState, switchToSession } from "../../stores/session.svelte.js";
+	import { applyListDaemonSessionsResponse, applyListSessionsResponse, clearSessionState, switchToSession } from "../../stores/session.svelte.js";
 	import { clearAllPermissions } from "../../stores/permissions.svelte.js";
 	import { applyGetAgentsResponse, applyGetCommandsResponse, applyGetModelsResponse, clearDiscoveryState, discoveryState } from "../../stores/discovery.svelte.js";
 	import { todoState, clearTodoState } from "../../stores/todo.svelte.js";
@@ -343,6 +343,9 @@
 				// Fetch current version for sidebar footer
 				fetchCurrentVersion();
 				// Request initial state from server
+				void listDaemonSessionsRpc({ projectSlug: slug })
+					.then(applyListDaemonSessionsResponse)
+					.catch(() => undefined);
 				void Promise.all([
 					listSessionsRpc({ projectSlug: slug, roots: true }),
 					listSessionsRpc({ projectSlug: slug, roots: false }),

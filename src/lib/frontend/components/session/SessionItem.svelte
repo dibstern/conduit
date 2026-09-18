@@ -16,6 +16,7 @@
 
 	let {
 		session,
+		projectLabel,
 		href = "",
 		active = false,
 		renaming: renamingProp = false,
@@ -28,6 +29,9 @@
 		onrenameend,
 	}: {
 		session: SessionInfo;
+		// `| undefined` because the list passes it unconditionally and a row
+		// without a project name is the single-project case, not a missing prop.
+		projectLabel?: string | undefined;
 		href?: string;
 		active?: boolean;
 		renaming?: boolean;
@@ -92,10 +96,9 @@
 	// ─── Handlers ───────────────────────────────────────────────────────────────
 
 	function handleClick(e: MouseEvent) {
+		if (!onswitchsession) return;
 		e.preventDefault();
-		if (!isRenaming) {
-			onswitchsession?.(session.id);
-		}
+		if (!isRenaming) onswitchsession(session.id);
 	}
 
 	function handleMoreClick(e: MouseEvent) {
@@ -118,7 +121,7 @@
 	}
 
 	function handleDblClick(e: MouseEvent) {
-		if (cleanupMode) return;
+		if (cleanupMode || !onrename) return;
 		e.preventDefault();
 		e.stopPropagation();
 		startRename();
@@ -218,6 +221,11 @@
 		class="session-item-title flex-1 min-w-0 overflow-hidden text-ellipsis whitespace-nowrap font-brand group-hover:text-clip"
 		ondblclick={handleDblClick}
 	>
+		{#if projectLabel && !isRenaming}
+			<span class="block overflow-hidden text-ellipsis whitespace-nowrap text-xs text-text-dimmer">
+				{projectLabel}
+			</span>
+		{/if}
 		{#if isRenaming}
 			<!-- The bespoke version hard-coded `border-accent` to say "this row is
 			     being edited". TextInput says that on focus and the field is
@@ -264,7 +272,7 @@
 	{/if}
 
 	<!-- Three-dot more button -->
-	{#if !isRenaming && !cleanupMode}
+	{#if !isRenaming && !cleanupMode && oncontextmenuProp}
 		<!--
 			`bind:element`, not `bind:this`: Svelte 5 does not forward `bind:this`
 			through a component tag, so ui/Button hands the element back by prop.

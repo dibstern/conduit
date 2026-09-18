@@ -21,6 +21,7 @@ import {
 	type GetTodoResponse,
 	type GetToolContentResponse,
 	type InstanceListResponse,
+	type ListDaemonSessionsResponse,
 	type ListDirectoriesResponse,
 	type ListSessionsResponse,
 	type LoadMoreHistoryResponse,
@@ -332,6 +333,12 @@ export interface ListSessionsRpcInput {
 	readonly projectSlug: string;
 	readonly roots?: boolean;
 	readonly query?: string;
+}
+
+export interface ListDaemonSessionsRpcInput {
+	readonly projectSlug: string;
+	readonly limit?: number;
+	readonly roots?: boolean;
 }
 
 export interface LoadMoreHistoryRpcInput {
@@ -1127,6 +1134,19 @@ const callListSessions = (input: ListSessionsRpcInput) =>
 		Effect.provide(RpcSerialization.layerJson),
 	);
 
+const callListDaemonSessions = (input: ListDaemonSessionsRpcInput) =>
+	Effect.scoped(
+		Effect.gen(function* () {
+			const client = yield* RpcClient.make(WsRpcGroup);
+			return yield* client.ListDaemonSessions(input);
+		}),
+	).pipe(
+		Effect.provide(RpcClient.layerProtocolSocket()),
+		Effect.provide(Socket.layerWebSocket(makeWsRpcUrl(input.projectSlug))),
+		Effect.provide(Socket.layerWebSocketConstructorGlobal),
+		Effect.provide(RpcSerialization.layerJson),
+	);
+
 const callLoadMoreHistory = (input: LoadMoreHistoryRpcInput) =>
 	Effect.scoped(
 		Effect.gen(function* () {
@@ -1490,6 +1510,12 @@ export async function listSessionsRpc(
 	input: ListSessionsRpcInput,
 ): Promise<ListSessionsResponse> {
 	return await runTransportEffect(callListSessions(input));
+}
+
+export async function listDaemonSessionsRpc(
+	input: ListDaemonSessionsRpcInput,
+): Promise<ListDaemonSessionsResponse> {
+	return await runTransportEffect(callListDaemonSessions(input));
 }
 
 export async function loadMoreHistoryRpc(

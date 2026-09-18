@@ -4,6 +4,8 @@
 import type { Logger } from "./logger.js";
 import type { PushNotificationSender } from "./server/push.js";
 import type {
+	DaemonSessionQueryOptions,
+	DaemonSessionQueryResult,
 	PartType,
 	PermissionId,
 	ProviderPermissionUpdate,
@@ -17,6 +19,8 @@ export type {
 	AgentInfo,
 	AskUserQuestion,
 	CommandInfo,
+	DaemonSessionQueryOptions,
+	DaemonSessionQueryResult,
 	FileEntry,
 	GlobalRelayEvent,
 	InstanceConfig,
@@ -234,6 +238,10 @@ export interface ProjectRelayConfig {
 			instanceId?: string;
 		}>
 	>;
+	/** List sessions across every registered project without starting relays. */
+	listDaemonSessions?: (
+		options: DaemonSessionQueryOptions,
+	) => MaybePromise<DaemonSessionQueryResult>;
 	/** Remove a project from the registry. */
 	removeProject?: (slug: string) => void | Promise<void>;
 	/** Set a project's display title. */

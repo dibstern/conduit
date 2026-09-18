@@ -10,6 +10,7 @@ import {
 } from "../daemon/config-persistence.js";
 import { RateLimiterTag } from "../domain/relay/Layers/rate-limiter-layer.js";
 import { AgentServiceTag } from "../domain/relay/Services/agent-service.js";
+import { DaemonSessionQueryServiceTag } from "../domain/relay/Services/daemon-session-query-service.js";
 import { DirectoryListingServiceTag } from "../domain/relay/Services/directory-listing-service.js";
 import { InstanceManagementServiceTag } from "../domain/relay/Services/instance-management-service.js";
 import { ProjectManagementServiceTag } from "../domain/relay/Services/project-management-service.js";
@@ -109,6 +110,8 @@ export {
 	GetToolContent,
 	type GetToolContentResponse,
 	type InstanceListResponse,
+	ListDaemonSessions,
+	type ListDaemonSessionsResponse,
 	ListDirectories,
 	type ListDirectoriesResponse,
 	ListPtys,
@@ -281,6 +284,18 @@ export const WsRpcServerLayer = WsRpcGroup.toLayer({
 				),
 			),
 		),
+	ListDaemonSessions: (request) =>
+		Effect.gen(function* () {
+			const daemonSessions = yield* DaemonSessionQueryServiceTag;
+			const result = yield* daemonSessions.list({
+				...(request.limit !== undefined ? { limit: request.limit } : {}),
+				...(request.roots !== undefined ? { roots: request.roots } : {}),
+			});
+			return {
+				projectSlug: request.projectSlug,
+				...result,
+			};
+		}).pipe(Effect.catchAll(mapRpcFailure("ListDaemonSessions"))),
 	AddProject: (request) =>
 		Effect.gen(function* () {
 			const projectService = yield* ProjectManagementServiceTag;

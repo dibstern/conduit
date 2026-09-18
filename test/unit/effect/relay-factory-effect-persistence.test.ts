@@ -24,6 +24,7 @@ import { makeProjectRegistryLive } from "../../../src/lib/domain/daemon/Services
 import { RelayCacheTag } from "../../../src/lib/domain/daemon/Services/relay-cache.js";
 import { PushManagerTag } from "../../../src/lib/domain/server/Services/push-service.js";
 import type {
+	DaemonSessionQueryResult,
 	OpenCodeInstance,
 	ProjectInfo,
 } from "../../../src/lib/shared-types.js";
@@ -178,6 +179,7 @@ describe("RelayFactoryLive Effect persistence wiring", () => {
 				expect(createProjectRelayMock).toHaveBeenCalledOnce();
 				const config = createProjectRelayMock.mock.calls[0]?.[0];
 				expect(config?.getProjects).toBeTypeOf("function");
+				expect(config?.listDaemonSessions).toBeTypeOf("function");
 				expect(config?.getInstances).toBeTypeOf("function");
 
 				const projects = yield* Effect.tryPromise({
@@ -189,6 +191,19 @@ describe("RelayFactoryLive Effect persistence wiring", () => {
 					unknown
 				>({
 					try: () => Promise.resolve(config?.getInstances?.() ?? []),
+					catch: (cause) => cause,
+				});
+				const daemonSessions = yield* Effect.tryPromise<
+					DaemonSessionQueryResult,
+					unknown
+				>({
+					try: () =>
+						Promise.resolve(
+							config?.listDaemonSessions?.({ limit: 5 }) ?? {
+								sessions: [],
+								availability: [],
+							},
+						),
 					catch: (cause) => cause,
 				});
 
@@ -208,6 +223,10 @@ describe("RelayFactoryLive Effect persistence wiring", () => {
 						managed: false,
 					}),
 				]);
+				expect(daemonSessions).toEqual({
+					sessions: [],
+					availability: [{ projectSlug: "effect-project", available: true }],
+				});
 			}).pipe(
 				Effect.provide(Layer.fresh(layer)),
 				Effect.ensuring(

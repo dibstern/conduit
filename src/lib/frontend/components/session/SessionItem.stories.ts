@@ -1,5 +1,5 @@
 import type { Meta, StoryObj } from "@storybook/svelte-vite";
-import { expect, userEvent, within } from "storybook/test";
+import { expect, fn, userEvent, within } from "storybook/test";
 import {
 	mockSession,
 	mockSessionLongTitle,
@@ -12,6 +12,10 @@ const meta = {
 	title: "Session/SessionItem",
 	component: SessionItem,
 	tags: ["autodocs"],
+	args: {
+		oncontextmenu: fn(),
+		onrename: fn(),
+	},
 } satisfies Meta<typeof SessionItem>;
 
 export default meta;

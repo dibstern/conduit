@@ -2,7 +2,10 @@
 // Manages session list, active session, search, and date grouping.
 
 import { SvelteMap } from "svelte/reactivity";
-import type { ListSessionsResponse } from "../transport/ws-rpc.js";
+import type {
+	ListDaemonSessionsResponse,
+	ListSessionsResponse,
+} from "../transport/ws-rpc.js";
 import {
 	type CreateSessionRpcInput,
 	createSessionRpc,
@@ -40,6 +43,12 @@ import { uiState } from "./ui.svelte.js";
 export const sessionState = $state({
 	rootSessions: [] as SessionInfo[],
 	allSessions: [] as SessionInfo[],
+	daemonSessions: [] as SessionInfo[],
+	// Projects the daemon could not read a session list from -- a directory that
+	// has moved or been deleted, or a store it could not open. Held so the list
+	// can say its own coverage is incomplete: the failure is otherwise
+	// indistinguishable from a project that genuinely has no sessions.
+	daemonUnavailableProjects: [] as string[],
 	currentId: null as string | null,
 	searchQuery: "",
 	searchResults: null as SessionInfo[] | null,
@@ -230,17 +239,35 @@ export function getFilteredSessions(): SessionInfo[] {
 			return liveSession ? [liveSession] : [];
 		});
 	}
-	let sessions: SessionInfo[];
+	let localSessions: SessionInfo[];
 	if (uiState.hideSubagentSessions) {
-		sessions = sessionState.rootSessions;
+		localSessions = sessionState.rootSessions;
 	} else {
 		// Fall back to rootSessions while allSessions hasn't loaded yet
-		sessions =
+		localSessions =
 			sessionState.allSessions.length > 0
 				? sessionState.allSessions
 				: sessionState.rootSessions;
 	}
 	const query = sessionState.searchQuery.toLowerCase().trim();
+	const currentSlug = getCurrentSlug();
+	// Foreign rows stand down while a query is active, even though the title
+	// filter below would happily match them. Typing also fires a server search
+	// against the current project alone, and when its results land the branch
+	// above takes over and returns only those -- so leaving foreign matches in
+	// would show them for a moment and then silently drop them. Absent
+	// throughout is the consistent answer until cross-project search lands.
+	const foreignSessions = query
+		? []
+		: sessionState.daemonSessions.filter(
+				(session) =>
+					session.projectSlug != null &&
+					session.projectSlug !== currentSlug &&
+					(!uiState.hideSubagentSessions || !session.parentID),
+			);
+	const sessions = [...localSessions, ...foreignSessions].sort(
+		(a, b) => getSessionDate(b).getTime() - getSessionDate(a).getTime(),
+	);
 	if (!query) return sessions;
 	return sessions.filter((s) => s.title.toLowerCase().includes(query));
 }
@@ -271,11 +298,7 @@ export function groupSessionsByDate(
 	const groups: DateGroups = { today: [], yesterday: [], older: [] };
 
 	for (const s of sessions) {
-		const updated = s.updatedAt
-			? new Date(s.updatedAt)
-			: s.createdAt
-				? new Date(s.createdAt)
-				: new Date(0);
+		const updated = getSessionDate(s);
 
 		if (updated >= todayStart) {
 			groups.today.push(s);
@@ -287,6 +310,14 @@ export function groupSessionsByDate(
 	}
 
 	return groups;
+}
+
+function getSessionDate(session: SessionInfo): Date {
+	return session.updatedAt
+		? new Date(session.updatedAt)
+		: session.createdAt
+			? new Date(session.createdAt)
+			: new Date(0);
 }
 
 // ─── Message handlers ───────────────────────────────────────────────────────
@@ -368,6 +399,7 @@ const sessionInfoFromRpc = (
 	...(session.pendingQuestionCount != null
 		? { pendingQuestionCount: session.pendingQuestionCount }
 		: {}),
+	...(session.projectSlug != null ? { projectSlug: session.projectSlug } : {}),
 });
 
 export function applyListSessionsResponse(
@@ -379,6 +411,15 @@ export function applyListSessionsResponse(
 		roots: response.roots,
 		...(response.search ? { search: true } : {}),
 	});
+}
+
+export function applyListDaemonSessionsResponse(
+	response: ListDaemonSessionsResponse,
+): void {
+	sessionState.daemonSessions = response.sessions.map(sessionInfoFromRpc);
+	sessionState.daemonUnavailableProjects = response.availability
+		.filter((entry) => !entry.available)
+		.map((entry) => entry.projectSlug);
 }
 
 export function handleSessionSwitched(

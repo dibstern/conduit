@@ -22,6 +22,7 @@ import {
 	getCurrentSessionId,
 	getCurrentSlug,
 	getSessionHref,
+	getSessionHrefForSlug,
 	getTransitionLog,
 	navigate,
 	replaceRoute,
@@ -202,6 +203,13 @@ describe("getSessionHref", () => {
 	it("returns null when not on a chat route", () => {
 		routerState.path = "/";
 		expect(getSessionHref("abc123")).toBeNull();
+	});
+
+	it("builds a foreign session href from that row's project slug", () => {
+		routerState.path = "/p/current-project/";
+		expect(getSessionHrefForSlug("foreign-project", "abc123")).toBe(
+			"/p/foreign-project/s/abc123",
+		);
 	});
 });
 

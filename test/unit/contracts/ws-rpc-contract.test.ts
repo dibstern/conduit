@@ -26,6 +26,7 @@ import {
 	GetTodo,
 	GetToolContent,
 	InstanceListResponseSchema,
+	ListDaemonSessions,
 	ListDirectories,
 	ListPtys,
 	ListSessions,
@@ -128,6 +129,18 @@ const provideRpc = <A, E>(effect: Effect.Effect<A, E, WsRpcTestEnv>) =>
 							},
 						],
 						current: "demo",
+					}),
+				ListDaemonSessions: (request) =>
+					Effect.succeed({
+						projectSlug: request.projectSlug,
+						sessions: [
+							{
+								id: "session-1",
+								title: "Session 1",
+								projectSlug: "demo",
+							},
+						],
+						availability: [{ projectSlug: "demo", available: true as const }],
 					}),
 				AddProject: (request) =>
 					Effect.succeed({
@@ -659,6 +672,7 @@ describe("browser WebSocket RPC contract", () => {
 		expect(WsRpcGroup.requests.has("GetAgents")).toBe(true);
 		expect(WsRpcGroup.requests.has("GetCommands")).toBe(true);
 		expect(WsRpcGroup.requests.has("GetProjects")).toBe(true);
+		expect(WsRpcGroup.requests.has("ListDaemonSessions")).toBe(true);
 		expect(WsRpcGroup.requests.has("AddProject")).toBe(true);
 		expect(WsRpcGroup.requests.has("RemoveProject")).toBe(true);
 		expect(WsRpcGroup.requests.has("RenameProject")).toBe(true);
@@ -774,6 +788,22 @@ describe("browser WebSocket RPC contract", () => {
 						},
 					],
 					current: "demo",
+				});
+				const daemonSessions = yield* client.ListDaemonSessions({
+					projectSlug: "demo",
+					limit: 10,
+					roots: true,
+				});
+				expect(daemonSessions).toEqual({
+					projectSlug: "demo",
+					sessions: [
+						{
+							id: "session-1",
+							title: "Session 1",
+							projectSlug: "demo",
+						},
+					],
+					availability: [{ projectSlug: "demo", available: true }],
 				});
 
 				const addedProject = yield* client.AddProject({
@@ -1177,6 +1207,9 @@ describe("browser WebSocket RPC contract", () => {
 		expect(new GetAgents({ projectSlug: "demo" })._tag).toBe("GetAgents");
 		expect(new GetCommands({ projectSlug: "demo" })._tag).toBe("GetCommands");
 		expect(new GetProjects({ projectSlug: "demo" })._tag).toBe("GetProjects");
+		expect(new ListDaemonSessions({ projectSlug: "demo" })._tag).toBe(
+			"ListDaemonSessions",
+		);
 		expect(
 			new AddProject({
 				projectSlug: "demo",

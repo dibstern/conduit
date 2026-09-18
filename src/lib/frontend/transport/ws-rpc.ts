@@ -33,6 +33,8 @@ export {
 	GetToolContent,
 	type GetToolContentResponse,
 	type InstanceListResponse,
+	ListDaemonSessions,
+	type ListDaemonSessionsResponse,
 	ListDirectories,
 	type ListDirectoriesResponse,
 	ListPtys,

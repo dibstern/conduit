@@ -204,6 +204,8 @@ export interface FileEntry {
 export interface SessionInfo {
 	id: string;
 	title: string;
+	/** Registered project that owns this session in daemon-wide listings. */
+	projectSlug?: string;
 	createdAt?: string | number;
 	updatedAt?: string | number;
 	messageCount?: number;
@@ -217,6 +219,27 @@ export interface SessionInfo {
 	forkPointTimestamp?: number;
 	/** Number of pending questions on this session (from server). */
 	pendingQuestionCount?: number;
+}
+
+export interface DaemonSessionQueryOptions {
+	readonly limit?: number;
+	readonly roots?: boolean;
+}
+
+export type ProjectSessionAvailability =
+	| {
+			readonly projectSlug: string;
+			readonly available: true;
+	  }
+	| {
+			readonly projectSlug: string;
+			readonly available: false;
+			readonly error: string;
+	  };
+
+export interface DaemonSessionQueryResult {
+	readonly sessions: ReadonlyArray<SessionInfo>;
+	readonly availability: ReadonlyArray<ProjectSessionAvailability>;
 }
 
 // ─── Ask User / Questions ───────────────────────────────────────────────────

@@ -152,7 +152,15 @@ export function getCurrentSessionId(): string | null {
 export function getSessionHref(sessionId: string): string | null {
 	const slug = getCurrentSlug();
 	if (!slug) return null;
-	return `/p/${slug}/s/${sessionId}`;
+	return getSessionHrefForSlug(slug, sessionId);
+}
+
+/** Get the href for a session owned by an explicit project slug. */
+export function getSessionHrefForSlug(
+	projectSlug: string,
+	sessionId: string,
+): string {
+	return `/p/${projectSlug}/s/${sessionId}`;
 }
 
 // ─── Actions ────────────────────────────────────────────────────────────────

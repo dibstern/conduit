@@ -29,6 +29,7 @@ import { InstanceMgmtTag } from "../../src/lib/domain/daemon/Services/management
 import { OpenCodeAPITag } from "../../src/lib/domain/provider/Services/opencode-api-service.js";
 import { RateLimiterLive } from "../../src/lib/domain/relay/Layers/rate-limiter-layer.js";
 import { AgentServiceLive } from "../../src/lib/domain/relay/Services/agent-service.js";
+import { DaemonSessionQueryServiceLive } from "../../src/lib/domain/relay/Services/daemon-session-query-service.js";
 import { DirectoryListingServiceLive } from "../../src/lib/domain/relay/Services/directory-listing-service.js";
 import { InstanceManagementServiceLive } from "../../src/lib/domain/relay/Services/instance-management-service.js";
 import { makePollerManagerStateLive } from "../../src/lib/domain/relay/Services/message-poller.js";
@@ -1033,6 +1034,9 @@ export function makeTestHandlerLayer(
 	const projectManagementServiceLayer = ProjectManagementServiceLive.pipe(
 		Layer.provide(Layer.mergeAll(configLayer, openCodeSettingsServiceLayer)),
 	);
+	const daemonSessionQueryServiceLayer = DaemonSessionQueryServiceLive.pipe(
+		Layer.provide(configLayer),
+	);
 	const scanServiceLayer = ScanServiceLive.pipe(Layer.provide(configLayer));
 	const agentServiceLayer = AgentServiceLive.pipe(
 		Layer.provide(
@@ -1098,6 +1102,7 @@ export function makeTestHandlerLayer(
 		openCodeModelServiceLayer,
 		openCodeSettingsServiceLayer,
 		projectManagementServiceLayer,
+		daemonSessionQueryServiceLayer,
 		DirectoryListingServiceLive,
 		scanServiceLayer,
 		agentServiceLayer,

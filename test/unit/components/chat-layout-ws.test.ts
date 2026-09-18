@@ -147,6 +147,7 @@ vi.mock("../../../src/lib/frontend/stores/session.svelte.js", () => ({
 		hasMore: false,
 	},
 	clearSessionState: vi.fn(),
+	applyListDaemonSessionsResponse: vi.fn(),
 	applyListSessionsResponse: vi.fn(),
 	switchToSession: vi.fn(),
 	sessionCreation: { value: { state: "idle" } },
@@ -224,6 +225,11 @@ vi.mock("../../../src/lib/frontend/transport/runtime.js", () => ({
 }));
 
 vi.mock("../../../src/lib/frontend/transport/ws-rpc-client.js", () => ({
+	listDaemonSessionsRpc: vi.fn(async () => ({
+		projectSlug: "test-project",
+		sessions: [],
+		availability: [],
+	})),
 	listSessionsRpc: vi.fn(async (input: { roots?: boolean }) => ({
 		projectSlug: "test-project",
 		roots: input.roots === true,
@@ -261,12 +267,17 @@ import {
 	routerState,
 	syncSlugState,
 } from "../../../src/lib/frontend/stores/router.svelte.js";
+import {
+	applyListDaemonSessionsResponse,
+	applyListSessionsResponse,
+} from "../../../src/lib/frontend/stores/session.svelte.js";
 import { showToast } from "../../../src/lib/frontend/stores/ui.svelte.js";
 import {
 	connect,
 	disconnect,
 	onConnect,
 } from "../../../src/lib/frontend/stores/ws.svelte.js";
+import { listDaemonSessionsRpc } from "../../../src/lib/frontend/transport/ws-rpc-client.js";
 
 // ─── Tests ──────────────────────────────────────────────────────────────────
 
@@ -320,6 +331,24 @@ describe("ChatLayout WS lifecycle", () => {
 		expect(showToast).not.toHaveBeenCalledWith("Failed to load commands", {
 			variant: "error",
 		});
+	});
+
+	it("keeps per-project session lists when the daemon-wide list fails", async () => {
+		vi.mocked(listDaemonSessionsRpc).mockRejectedValueOnce(
+			new Error("not supported in standalone mode"),
+		);
+		render(ChatLayout);
+
+		wsLifecycleHarness.onConnectCallbacks[0]?.();
+		await vi.waitFor(() => {
+			expect(applyListSessionsResponse).toHaveBeenCalledTimes(2);
+		});
+
+		expect(applyListDaemonSessionsResponse).not.toHaveBeenCalled();
+		expect(showToast).not.toHaveBeenCalledWith(
+			"Failed to load daemon sessions",
+			expect.anything(),
+		);
 	});
 
 	// This is the regression test for the untrack() fix. Without untrack(),

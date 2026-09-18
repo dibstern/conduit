@@ -15,7 +15,12 @@
 		sessionCreation,
 		applyListSessionsResponse,
 	} from "../../stores/session.svelte.js";
-	import { getCurrentSlug, getSessionHref } from "../../stores/router.svelte.js";
+	import {
+		getCurrentSlug,
+		getSessionHref,
+		getSessionHrefForSlug,
+	} from "../../stores/router.svelte.js";
+	import { projectState } from "../../stores/project.svelte.js";
 	import { getBrowserClientId } from "../../stores/client-identity.js";
 	import {
 		deleteSessionRpc,
@@ -59,6 +64,9 @@
 	// ─── Derived ────────────────────────────────────────────────────────────────
 
 	const filtered = $derived(getFilteredSessions());
+	const cleanupCandidates = $derived(
+		filtered.filter((session) => !isForeignSession(session)),
+	);
 	const groups: DateGroups = $derived(getDateGroups());
 	const isEmpty = $derived(filtered.length === 0);
 
@@ -68,7 +76,12 @@
 
 	const selectionCount = $derived(selectedForDeletion.size);
 	const allSelected = $derived(
-		filtered.length > 0 && filtered.every((s) => selectedForDeletion.has(s.id)),
+		cleanupCandidates.length > 0 &&
+			cleanupCandidates.every((s) => selectedForDeletion.has(s.id)),
+	);
+
+	const unavailableProjectLabels = $derived(
+		sessionState.daemonUnavailableProjects.map(projectDisplayName),
 	);
 
 	const hasToday = $derived(groups.today.length > 0);
@@ -78,7 +91,7 @@
 	// Prune stale selections when the session list changes externally
 	$effect(() => {
 		if (!cleanupMode) return;
-		const validIds = new Set(filtered.map((s) => s.id));
+		const validIds = new Set(cleanupCandidates.map((s) => s.id));
 		const pruned = new Set([...selectedForDeletion].filter((id) => validIds.has(id)));
 		if (pruned.size !== selectedForDeletion.size) {
 			selectedForDeletion = pruned;
@@ -114,6 +127,43 @@
 				if (uiState.hideSubagentSessions !== roots) return;
 				applyListSessionsResponse(response);
 			},
+		);
+	}
+
+	// A session belonging to a project other than the one this socket is attached
+	// to. Only the daemon's cold cross-project read sets projectSlug, so an
+	// absent slug means "this relay's own session", which is why the current
+	// project's rows come out local.
+	function isForeignSession(session: SessionInfo): boolean {
+		return (
+			session.projectSlug != null && session.projectSlug !== getCurrentSlug()
+		);
+	}
+
+	function getRowHref(session: SessionInfo): string {
+		const slug = session.projectSlug ?? getCurrentSlug();
+		return slug ? getSessionHrefForSlug(slug, session.id) : "";
+	}
+
+	// Named on every row once a second project exists, including the rows of the
+	// project you are already in: in a merged list an unlabelled row would mean
+	// "work out which project this is yourself", and you cannot. With a single
+	// project it is pure noise and is absent entirely.
+	//
+	// Resolved from the live project list rather than stamped onto the session at
+	// fetch time, so renaming a project relabels its rows without the list being
+	// re-fetched. Falls back to the slug because the project list arrives over
+	// the socket and the sidebar renders before it does.
+	function getProjectLabel(session: SessionInfo): string | undefined {
+		if (projectState.projects.length <= 1) return undefined;
+		const slug = session.projectSlug ?? getCurrentSlug();
+		return slug ? projectDisplayName(slug) : undefined;
+	}
+
+	function projectDisplayName(slug: string): string {
+		return (
+			projectState.projects.find((project) => project.slug === slug)?.title ||
+			slug
 		);
 	}
 
@@ -253,7 +303,7 @@
 		if (allSelected) {
 			selectedForDeletion = new Set();
 		} else {
-			selectedForDeletion = new Set(filtered.map((s) => s.id));
+			selectedForDeletion = new Set(cleanupCandidates.map((s) => s.id));
 		}
 	}
 
@@ -443,6 +493,41 @@
 	     Svelte's non-interactive-tabindex heuristic does not model that case.
 	     Labelled by string rather than by the "Sessions" heading, which does not exist
 	     in cleanup mode and would leave the idref dangling. -->
+	<!-- One row, rendered by all three date groups. It is a snippet rather than
+	     three copies because the row is about to grow: the status word, the
+	     shelves and the per-row verbs each land in their own ticket, and three
+	     identical copies would mean three edits with any divergence between them
+	     invisible. -->
+	{#snippet sessionRow(s: SessionInfo)}
+		{#if isForeignSession(s)}
+			<!-- Navigate-only. Rename, the context menu and cleanup selection all
+			     RPC the relay this socket is attached to, so handing them a session
+			     owned by another project would act on the wrong relay. Withholding
+			     the handlers is what makes the row inert instead of wrong, and it
+			     also hands navigation back to the anchor's own href. -->
+			<SessionItem
+				session={s}
+				href={getRowHref(s)}
+				projectLabel={getProjectLabel(s)}
+			/>
+		{:else}
+			<SessionItem
+				session={s}
+				href={getRowHref(s)}
+				projectLabel={getProjectLabel(s)}
+				active={s.id === sessionState.currentId}
+				renaming={s.id === renamingSessionId}
+				{cleanupMode}
+				selected={selectedForDeletion.has(s.id)}
+				onswitchsession={handleSwitchSession}
+				ontoggleselection={handleToggleSelection}
+				oncontextmenu={handleContextMenu}
+				onrename={handleRename}
+				onrenameend={handleRenameEnd}
+			/>
+		{/if}
+	{/snippet}
+
 	<!-- svelte-ignore a11y_no_noninteractive_tabindex -->
 	<div class="flex-1 overflow-y-auto px-2 py-0.5" role="region" aria-label="Sessions" tabindex="0">
 		{#if isEmpty}
@@ -455,19 +540,7 @@
 				Today
 			</div>
 			{#each groups.today as s (s.id)}
-				<SessionItem
-					session={s}
-					href={getSessionHref(s.id) ?? ""}
-					active={s.id === sessionState.currentId}
-					renaming={s.id === renamingSessionId}
-					{cleanupMode}
-					selected={selectedForDeletion.has(s.id)}
-					onswitchsession={handleSwitchSession}
-					ontoggleselection={handleToggleSelection}
-					oncontextmenu={handleContextMenu}
-					onrename={handleRename}
-					onrenameend={handleRenameEnd}
-				/>
+				{@render sessionRow(s)}
 			{/each}
 			{/if}
 
@@ -476,19 +549,7 @@
 				Yesterday
 			</div>
 			{#each groups.yesterday as s (s.id)}
-				<SessionItem
-					session={s}
-					href={getSessionHref(s.id) ?? ""}
-					active={s.id === sessionState.currentId}
-					renaming={s.id === renamingSessionId}
-					{cleanupMode}
-					selected={selectedForDeletion.has(s.id)}
-					onswitchsession={handleSwitchSession}
-					ontoggleselection={handleToggleSelection}
-					oncontextmenu={handleContextMenu}
-					onrename={handleRename}
-					onrenameend={handleRenameEnd}
-				/>
+				{@render sessionRow(s)}
 			{/each}
 			{/if}
 
@@ -497,21 +558,23 @@
 				Older
 			</div>
 			{#each groups.older as s (s.id)}
-				<SessionItem
-					session={s}
-					href={getSessionHref(s.id) ?? ""}
-					active={s.id === sessionState.currentId}
-					renaming={s.id === renamingSessionId}
-					{cleanupMode}
-					selected={selectedForDeletion.has(s.id)}
-					onswitchsession={handleSwitchSession}
-					ontoggleselection={handleToggleSelection}
-					oncontextmenu={handleContextMenu}
-					onrename={handleRename}
-					onrenameend={handleRenameEnd}
-				/>
+				{@render sessionRow(s)}
 			{/each}
 			{/if}
+		{/if}
+
+		<!-- Outside the isEmpty branch on purpose. A project that cannot be read
+		     is most misleading when it leaves the list empty, which is exactly
+		     when the empty message would otherwise claim there is nothing to
+		     show. Naming the projects is safe where counting sessions is not:
+		     the registry is a bounded set. -->
+		{#if unavailableProjectLabels.length > 0}
+			<div
+				class="session-unavailable px-3.5 py-3 text-xs leading-snug text-text-dimmer font-brand"
+				data-testid="session-list-unavailable"
+			>
+				Sessions missing from {unavailableProjectLabels.join(", ")}
+			</div>
 		{/if}
 	</div>
 </div>

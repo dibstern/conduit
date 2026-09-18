@@ -7,11 +7,13 @@ import {
 	setMessages,
 } from "../../../src/lib/frontend/stores/chat.svelte.js";
 import { discoveryState } from "../../../src/lib/frontend/stores/discovery.svelte.js";
+import { projectState } from "../../../src/lib/frontend/stores/project.svelte.js";
 import {
 	routerState,
 	syncSlugState,
 } from "../../../src/lib/frontend/stores/router.svelte.js";
 import {
+	applyListDaemonSessionsResponse,
 	applyListSessionsResponse,
 	clearSessionState,
 	completeNewSession,
@@ -88,6 +90,7 @@ function daysAgoAt(ref: Date, days: number, hour: number): Date {
 beforeEach(() => {
 	sessionState.rootSessions = [];
 	sessionState.allSessions = [];
+	sessionState.daemonSessions = [];
 	sessionState.searchResults = null;
 	sessionState.currentId = null;
 	sessionState.searchQuery = "";
@@ -467,6 +470,127 @@ describe("getFilteredSessions — hideSubagentSessions toggle", () => {
 		uiState.hideSubagentSessions = false;
 		sessionState.searchQuery = "child";
 		expect(getFilteredSessions().map((s) => s.id)).toEqual(["b"]);
+	});
+});
+
+describe("getFilteredSessions — daemon sessions", () => {
+	beforeEach(() => {
+		uiState.hideSubagentSessions = true;
+		sessionState.daemonSessions = [];
+		sessionState.searchResults = null;
+		sessionState.searchQuery = "";
+		sessionState.sessions.clear();
+		routerState.path = "/p/project-a/";
+		syncSlugState(routerState.path);
+	});
+
+	it("includes foreign project sessions", () => {
+		sessionState.rootSessions = [makeSession({ id: "local" })];
+		sessionState.daemonSessions = [
+			makeSession({ id: "foreign", projectSlug: "project-b" }),
+			makeSession({ id: "missing-slug" }),
+		];
+
+		expect(getFilteredSessions().map((session) => session.id)).toEqual([
+			"local",
+			"foreign",
+		]);
+	});
+
+	it("does not duplicate the warm local row from the daemon response", () => {
+		sessionState.rootSessions = [
+			makeSession({ id: "local", title: "Warm title" }),
+		];
+		sessionState.daemonSessions = [
+			makeSession({
+				id: "local",
+				title: "Cold title",
+				projectSlug: "project-a",
+			}),
+		];
+
+		expect(getFilteredSessions()).toEqual([
+			expect.objectContaining({ id: "local", title: "Warm title" }),
+		]);
+	});
+
+	it("orders local and foreign sessions by updatedAt then createdAt", () => {
+		sessionState.rootSessions = [
+			makeSession({ id: "local-old", updatedAt: 100 }),
+			makeSession({ id: "local-created", createdAt: 300 }),
+		];
+		sessionState.daemonSessions = [
+			makeSession({
+				id: "foreign-new",
+				projectSlug: "project-b",
+				updatedAt: 400,
+			}),
+			makeSession({ id: "foreign-undated", projectSlug: "project-b" }),
+		];
+
+		expect(getFilteredSessions().map((session) => session.id)).toEqual([
+			"foreign-new",
+			"local-created",
+			"local-old",
+			"foreign-undated",
+		]);
+	});
+
+	it("filters foreign child sessions when subagents are hidden", () => {
+		sessionState.daemonSessions = [
+			makeSession({ id: "foreign-root", projectSlug: "project-b" }),
+			makeSession({
+				id: "foreign-child",
+				projectSlug: "project-b",
+				parentID: "foreign-root",
+			}),
+		];
+
+		expect(getFilteredSessions().map((session) => session.id)).toEqual([
+			"foreign-root",
+		]);
+		uiState.hideSubagentSessions = false;
+		expect(getFilteredSessions().map((session) => session.id)).toEqual([
+			"foreign-root",
+			"foreign-child",
+		]);
+	});
+
+	it("returns only reconciled server results during an active search", () => {
+		const result = makeSession({ id: "search-result", title: "Match" });
+		sessionState.searchQuery = "match";
+		sessionState.searchResults = [result];
+		sessionState.sessions.set(result.id, result);
+		sessionState.daemonSessions = [
+			makeSession({
+				id: "foreign-match",
+				title: "Match abroad",
+				projectSlug: "project-b",
+			}),
+		];
+
+		expect(getFilteredSessions().map((session) => session.id)).toEqual([
+			"search-result",
+		]);
+	});
+
+	it("renders an applied daemon response without matching project metadata", () => {
+		projectState.projects = [];
+		applyListDaemonSessionsResponse({
+			projectSlug: "project-a",
+			sessions: [
+				{
+					id: "foreign",
+					title: "Foreign session",
+					projectSlug: "unknown-project",
+				},
+			],
+			availability: [{ projectSlug: "unknown-project", available: true }],
+		});
+
+		expect(getFilteredSessions().map((session) => session.id)).toContain(
+			"foreign",
+		);
 	});
 });
 

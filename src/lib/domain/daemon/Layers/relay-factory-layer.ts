@@ -34,6 +34,7 @@ import { PushManagerTag } from "../../server/Services/push-service.js";
 import { ConfigPersistenceTag } from "../Services/config-persistence-service.js";
 import { DaemonConfigRefTag } from "../Services/daemon-config-ref.js";
 import { DaemonEventBusTag } from "../Services/daemon-pubsub.js";
+import { listDaemonSessions as listEffectDaemonSessions } from "../Services/daemon-session-reader.js";
 import {
 	addInstance as addEffectInstance,
 	getInstances as getEffectInstances,
@@ -187,6 +188,15 @@ export const RelayFactoryLive = (
 					),
 				);
 
+			const listDaemonSessions: NonNullable<
+				ProjectRelayConfig["listDaemonSessions"]
+			> = (options) =>
+				runCallback(
+					listEffectDaemonSessions(options).pipe(
+						Effect.provideService(ProjectRegistryTag, projectRegistry),
+					),
+				);
+
 			const getInstances = () =>
 				runCallback(
 					getEffectInstances.pipe(
@@ -324,6 +334,7 @@ export const RelayFactoryLive = (
 									configDir,
 									persistenceDbPath: dbPath,
 									getProjects,
+									listDaemonSessions,
 									getInstances,
 									addInstance,
 									removeInstance,

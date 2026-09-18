@@ -12,6 +12,8 @@ import SessionList from "./SessionList.svelte";
 function resetSessionState() {
 	sessionState.rootSessions = [];
 	sessionState.allSessions = [];
+	sessionState.daemonSessions = [];
+	sessionState.daemonUnavailableProjects = [];
 	sessionState.searchResults = null;
 	sessionState.currentId = null;
 	sessionState.searchQuery = "";
