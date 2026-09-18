@@ -933,6 +933,7 @@ describe("switchModelForSession", () => {
 				),
 				getAllSessionStatuses: vi.fn(() => Effect.succeed({})),
 				listSessions: vi.fn(() => Effect.succeed([])),
+				countPendingApprovalsBySession: vi.fn(() => Effect.succeed([])),
 				getLatestTurnModelExecution: vi.fn(() => Effect.succeed(undefined)),
 				getSessionMessagesWithParts: vi.fn(() => Effect.succeed([])),
 			} satisfies ReadQueryEffect;
@@ -1412,6 +1413,7 @@ describe("handleGetToolContent", () => {
 				getSession: vi.fn(() => Effect.succeed(undefined)),
 				getAllSessionStatuses: vi.fn(() => Effect.succeed({})),
 				listSessions: vi.fn(() => Effect.succeed([])),
+				countPendingApprovalsBySession: vi.fn(() => Effect.succeed([])),
 				getLatestTurnModelExecution: vi.fn(() => Effect.succeed(undefined)),
 				getSessionMessagesWithParts: vi.fn(() => Effect.succeed([])),
 			} satisfies ReadQueryEffect;
@@ -2582,6 +2584,7 @@ describe("handleNewSession", () => {
 				),
 				getAllSessionStatuses: vi.fn(() => Effect.succeed({})),
 				listSessions: vi.fn(() => Effect.succeed([])),
+				countPendingApprovalsBySession: vi.fn(() => Effect.succeed([])),
 				getLatestTurnModelExecution: vi.fn(() => Effect.succeed(undefined)),
 				getSessionMessagesWithParts: vi.fn(() => Effect.succeed([])),
 			} satisfies ReadQueryEffect;
@@ -2672,6 +2675,7 @@ describe("handleNewSession", () => {
 				),
 				getAllSessionStatuses: vi.fn(() => Effect.succeed({})),
 				listSessions: vi.fn(() => Effect.succeed([])),
+				countPendingApprovalsBySession: vi.fn(() => Effect.succeed([])),
 				getLatestTurnModelExecution: vi.fn(() => Effect.succeed(undefined)),
 				getSessionMessagesWithParts: vi.fn(() =>
 					Effect.succeed([
@@ -2789,6 +2793,7 @@ describe("handleNewSession", () => {
 				),
 				getAllSessionStatuses: vi.fn(() => Effect.succeed({})),
 				listSessions: vi.fn(() => Effect.succeed([])),
+				countPendingApprovalsBySession: vi.fn(() => Effect.succeed([])),
 				getLatestTurnModelExecution: vi.fn(() => Effect.succeed(undefined)),
 				getSessionMessagesWithParts: vi.fn(() => Effect.succeed([])),
 			} satisfies ReadQueryEffect;
@@ -3272,6 +3277,7 @@ describe("loadMoreHistoryForSession", () => {
 			),
 			getAllSessionStatuses: vi.fn(() => Effect.succeed({})),
 			listSessions: vi.fn(() => Effect.succeed([])),
+			countPendingApprovalsBySession: vi.fn(() => Effect.succeed([])),
 			getLatestTurnModelExecution: vi.fn(() => Effect.succeed(undefined)),
 			getSessionMessagesWithParts: vi.fn(() =>
 				Effect.succeed([
@@ -3361,6 +3367,7 @@ describe("loadMoreHistoryForSession", () => {
 			),
 			getAllSessionStatuses: vi.fn(() => Effect.succeed({})),
 			listSessions: vi.fn(() => Effect.succeed([])),
+			countPendingApprovalsBySession: vi.fn(() => Effect.succeed([])),
 			getLatestTurnModelExecution: vi.fn(() => Effect.succeed(undefined)),
 			getSessionMessagesWithParts: vi.fn(() =>
 				Effect.succeed([
@@ -3899,6 +3906,7 @@ describe("handleMessage", () => {
 				getSession: vi.fn(() => Effect.succeed(undefined)),
 				getAllSessionStatuses: vi.fn(() => Effect.succeed({})),
 				listSessions: vi.fn(() => Effect.succeed([])),
+				countPendingApprovalsBySession: vi.fn(() => Effect.succeed([])),
 				getLatestTurnModelExecution: vi.fn(() => Effect.succeed(undefined)),
 				getSessionMessagesWithParts: vi.fn(() =>
 					Effect.succeed([
@@ -4276,6 +4284,7 @@ describe("handleMessage", () => {
 				),
 				getAllSessionStatuses: vi.fn(() => Effect.succeed({})),
 				listSessions: vi.fn(() => Effect.succeed([])),
+				countPendingApprovalsBySession: vi.fn(() => Effect.succeed([])),
 				getLatestTurnModelExecution: vi.fn(() => Effect.succeed(undefined)),
 				getSessionMessagesWithParts: vi.fn(() => Effect.succeed([])),
 			} satisfies ReadQueryEffect;

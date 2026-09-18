@@ -5,6 +5,7 @@ import type {
 	MessagePartRow,
 	MessageRow,
 	MessageWithParts,
+	PendingApprovalCountRow,
 	SessionRow,
 	TurnModelExecutionRow,
 } from "../read-model-types.js";
@@ -37,6 +38,11 @@ export interface ReadQueryEffect {
 	readonly listSessions: (opts?: {
 		roots?: boolean;
 	}) => Effect.Effect<readonly SessionRow[], ReadQueryEffectError | SqlError>;
+
+	readonly countPendingApprovalsBySession: () => Effect.Effect<
+		readonly PendingApprovalCountRow[],
+		ReadQueryEffectError | SqlError
+	>;
 
 	readonly getSessionMessagesWithParts: (
 		sessionId: string,
@@ -156,6 +162,27 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 			),
 		);
 
+	const countPendingApprovalsBySession = (): Effect.Effect<
+		readonly PendingApprovalCountRow[],
+		ReadQueryEffectError | SqlError
+	> =>
+		Effect.gen(function* () {
+			return yield* sql<PendingApprovalCountRow>`
+				SELECT session_id, type, COUNT(*) AS pending_count
+				FROM pending_approvals
+				WHERE status = 'pending'
+				GROUP BY session_id, type`;
+		}).pipe(
+			Effect.mapError((e) =>
+				e instanceof ReadQueryEffectError
+					? e
+					: new ReadQueryEffectError({
+							operation: "countPendingApprovalsBySession",
+							cause: e,
+						}),
+			),
+		);
+
 	const getSessionMessagesWithParts = (
 		sessionId: string,
 	): Effect.Effect<MessageWithParts[], ReadQueryEffectError | SqlError> =>
@@ -265,6 +292,7 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 		getSession,
 		getAllSessionStatuses,
 		listSessions,
+		countPendingApprovalsBySession,
 		getSessionMessagesWithParts,
 		getLatestTurnModelExecution,
 	} satisfies ReadQueryEffect;

@@ -217,8 +217,15 @@ export interface SessionInfo {
 	/** Unix-ms timestamp of the fork-point message. Messages created before
 	 *  this time are inherited context from the parent session. */
 	forkPointTimestamp?: number;
-	/** Number of pending questions on this session (from server). */
+	/**
+	 * Sessions waiting on someone. Both are projected from the event log rather
+	 * than read out of a relay's memory, so they are populated for a project
+	 * whose relay has never started. Absent means not waiting; never zero.
+	 * Separate because "approve this command" and "answer this question" are
+	 * different asks and the row says which.
+	 */
 	pendingQuestionCount?: number;
+	pendingPermissionCount?: number;
 }
 
 export interface DaemonSessionQueryOptions {
@@ -505,6 +512,7 @@ const SessionInfoSchema = Schema.Struct({
 	forkMessageId: Schema.optional(Schema.String),
 	forkPointTimestamp: Schema.optional(Schema.Number),
 	pendingQuestionCount: Schema.optional(Schema.Number),
+	pendingPermissionCount: Schema.optional(Schema.Number),
 });
 
 const ContextWindowOptionSchema = Schema.Struct({

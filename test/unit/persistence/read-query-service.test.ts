@@ -205,6 +205,49 @@ describe("ReadQueryService", () => {
 		});
 	});
 
+	describe("countPendingApprovalsBySession", () => {
+		it("counts pending approvals by session and type", () => {
+			seedSession(db, "s1");
+			seedSession(db, "s2");
+			seedPendingApproval(db, "p1", "s1", "permission");
+			seedPendingApproval(db, "p2", "s1", "permission");
+			seedPendingApproval(db, "q1", "s1", "question");
+			seedPendingApproval(db, "q2", "s2", "question");
+			seedPendingApproval(db, "resolved", "s2", "permission", {
+				status: "resolved",
+			});
+
+			const counts = [...svc.countPendingApprovalsBySession()].sort((a, b) =>
+				`${a.session_id}:${a.type}`.localeCompare(`${b.session_id}:${b.type}`),
+			);
+
+			expect(counts).toEqual([
+				{ session_id: "s1", type: "permission", pending_count: 2 },
+				{ session_id: "s1", type: "question", pending_count: 1 },
+				{ session_id: "s2", type: "question", pending_count: 1 },
+			]);
+		});
+
+		// Guards the index, not the query: the SQL below is a copy, so this fails
+		// only if idx_pending_approvals_pending is dropped from the migrations.
+		// Without it this GROUP BY scans every resolved approval ever recorded.
+		it("uses the pending-approval index", () => {
+			const plan = db.query<{ detail: string }>(
+				`EXPLAIN QUERY PLAN
+				 SELECT session_id, type, COUNT(*) AS pending_count
+				 FROM pending_approvals
+				 WHERE status = 'pending'
+				 GROUP BY session_id, type`,
+			);
+
+			expect(
+				plan.some((row) =>
+					row.detail.includes("idx_pending_approvals_pending"),
+				),
+			).toBe(true);
+		});
+	});
+
 	// ── 4d: Session status ────────────────────────────────────────────────
 
 	describe("getSessionStatus", () => {

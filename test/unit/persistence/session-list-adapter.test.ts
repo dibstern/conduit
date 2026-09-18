@@ -128,18 +128,25 @@ describe("sessionRowsToSessionInfoList", () => {
 		expect(result[1]?.processing).toBeUndefined();
 	});
 
-	it("includes pendingQuestionCount when present and > 0", () => {
+	it("includes pending attention counts when present and > 0", () => {
 		const rows: SessionRow[] = [makeRow("s1"), makeRow("s2")];
 		const pendingQuestionCounts = new Map([
 			["s1", 3],
 			["s2", 0],
 		]);
+		const pendingPermissionCounts = new Map([
+			["s1", 2],
+			["s2", 0],
+		]);
 
 		const result = sessionRowsToSessionInfoList(rows, {
 			pendingQuestionCounts,
+			pendingPermissionCounts,
 		});
 		expect(result[0]?.pendingQuestionCount).toBe(3);
+		expect(result[0]?.pendingPermissionCount).toBe(2);
 		expect(result[1]?.pendingQuestionCount).toBeUndefined();
+		expect(result[1]?.pendingPermissionCount).toBeUndefined();
 	});
 
 	it("returns empty array for empty input", () => {

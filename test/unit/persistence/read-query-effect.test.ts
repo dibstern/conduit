@@ -18,6 +18,39 @@ function seedSession(sessionId: string) {
 	});
 }
 
+describe("ReadQueryEffect.countPendingApprovalsBySession", () => {
+	it.effect("counts pending approvals by session and type", () =>
+		Effect.gen(function* () {
+			yield* makeEffectSqlMigrator();
+			yield* seedSession("s1");
+			yield* seedSession("s2");
+			const sql = yield* SqlClient.SqlClient;
+			yield* sql`
+				INSERT INTO pending_approvals
+				(id, session_id, type, status, created_at)
+				VALUES
+				('p1', 's1', 'permission', 'pending', 1),
+				('p2', 's1', 'permission', 'pending', 2),
+				('q1', 's1', 'question', 'pending', 3),
+				('q2', 's2', 'question', 'pending', 4),
+				('resolved', 's2', 'permission', 'resolved', 5)`;
+
+			const readQuery = yield* makeReadQueryEffect;
+			const counts = [
+				...(yield* readQuery.countPendingApprovalsBySession()),
+			].sort((a, b) =>
+				`${a.session_id}:${a.type}`.localeCompare(`${b.session_id}:${b.type}`),
+			);
+
+			expect(counts).toEqual([
+				{ session_id: "s1", type: "permission", pending_count: 2 },
+				{ session_id: "s1", type: "question", pending_count: 1 },
+				{ session_id: "s2", type: "question", pending_count: 1 },
+			]);
+		}).pipe(Effect.provide(testLayer)),
+	);
+});
+
 describe("ReadQueryEffect.getLatestTurnModelExecution", () => {
 	it.effect("returns undefined when no turn has resolved", () =>
 		Effect.gen(function* () {

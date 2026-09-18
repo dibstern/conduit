@@ -248,6 +248,7 @@ describe("handleSessionList", () => {
 					title: "RPC Root",
 					updatedAt: 123,
 					pendingQuestionCount: 2,
+					pendingPermissionCount: 1,
 				},
 			],
 		});
@@ -258,6 +259,7 @@ describe("handleSessionList", () => {
 				title: "RPC Root",
 				updatedAt: 123,
 				pendingQuestionCount: 2,
+				pendingPermissionCount: 1,
 			},
 		]);
 		expect(sessionState.sessions.get("rpc-root")?.title).toBe("RPC Root");

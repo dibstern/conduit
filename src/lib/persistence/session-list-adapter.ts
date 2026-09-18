@@ -4,15 +4,44 @@
 
 import type { ForkEntry } from "../daemon/fork-metadata.js";
 import type { SessionInfo } from "../shared-types.js";
-import type { SessionRow } from "./read-query-service.js";
+import type {
+	PendingApprovalCountRow,
+	SessionRow,
+} from "./read-query-service.js";
 
 interface SessionStatus {
 	type: string;
 }
 
+/** The two attention counts a session list needs, split out of one query. */
+export interface PendingApprovalCounts {
+	questions: ReadonlyMap<string, number>;
+	permissions: ReadonlyMap<string, number>;
+}
+
+/**
+ * Fan the grouped `pending_approvals` rows out into one map per type.
+ *
+ * Shared because both the warm per-project listing and the cold cross-project
+ * read consume the same query, and a divergence between two copies of this
+ * would show up as a row that claims the wrong kind of attention.
+ */
+export function pendingApprovalCountsByType(
+	rows: readonly PendingApprovalCountRow[],
+): PendingApprovalCounts {
+	const questions = new Map<string, number>();
+	const permissions = new Map<string, number>();
+	for (const row of rows) {
+		const target = row.type === "question" ? questions : permissions;
+		target.set(row.session_id, row.pending_count);
+	}
+	return { questions, permissions };
+}
+
 export interface SessionListAdapterOptions {
 	statuses?: Record<string, SessionStatus>;
 	pendingQuestionCounts?: ReadonlyMap<string, number>;
+	pendingPermissionCounts?: ReadonlyMap<string, number>;
 	forkMeta?: ReadonlyMap<string, ForkEntry>;
 }
 
@@ -51,6 +80,10 @@ export function sessionRowsToSessionInfoList(
 		const qCount = opts?.pendingQuestionCounts?.get(row.id);
 		if (qCount != null && qCount > 0) {
 			info.pendingQuestionCount = qCount;
+		}
+		const pCount = opts?.pendingPermissionCounts?.get(row.id);
+		if (pCount != null && pCount > 0) {
+			info.pendingPermissionCount = pCount;
 		}
 
 		return info;

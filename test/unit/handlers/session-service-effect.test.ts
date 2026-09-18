@@ -140,6 +140,7 @@ function makeEmptySessionReadQuery(provider: string): ReadQueryEffect {
 		),
 		getAllSessionStatuses: vi.fn(() => Effect.succeed({})),
 		listSessions: vi.fn(() => Effect.succeed([])),
+		countPendingApprovalsBySession: vi.fn(() => Effect.succeed([])),
 		getLatestTurnModelExecution: vi.fn(() => Effect.succeed(undefined)),
 		getSessionMessagesWithParts: vi.fn(() => Effect.succeed([])),
 	};
@@ -232,6 +233,7 @@ describe("session handlers with Effect-native model service", () => {
 				),
 				getAllSessionStatuses: vi.fn(() => Effect.succeed({})),
 				listSessions: vi.fn(() => Effect.succeed([])),
+				countPendingApprovalsBySession: vi.fn(() => Effect.succeed([])),
 				getLatestTurnModelExecution: vi.fn(() => Effect.succeed(undefined)),
 				getSessionMessagesWithParts: vi.fn(() =>
 					Effect.succeed([
@@ -383,6 +385,7 @@ describe("session handlers with Effect-native model service", () => {
 			),
 			getAllSessionStatuses: vi.fn(() => Effect.succeed({})),
 			listSessions: vi.fn(() => Effect.succeed([])),
+			countPendingApprovalsBySession: vi.fn(() => Effect.succeed([])),
 			getLatestTurnModelExecution: vi.fn(() => Effect.succeed(undefined)),
 			// Rows exist but carry no text — the shape the OpenCode runtime
 			// projection produces today (structure without content).

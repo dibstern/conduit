@@ -44,7 +44,11 @@ import { ProjectionRunnerEffectTag } from "../../../persistence/effect/projectio
 import { ReadQueryEffectTag } from "../../../persistence/effect/read-query-effect.js";
 import { canonicalEvent } from "../../../persistence/events.js";
 import type { SessionRow } from "../../../persistence/read-model-types.js";
-import { sessionRowsToSessionInfoList } from "../../../persistence/session-list-adapter.js";
+import {
+	type PendingApprovalCounts,
+	pendingApprovalCountsByType,
+	sessionRowsToSessionInfoList,
+} from "../../../persistence/session-list-adapter.js";
 import { toSessionInfoList } from "../../../session/session-info-list.js";
 import {
 	type HistoryMessage,
@@ -163,13 +167,14 @@ const sessionRowsToInfo = (
 	options: ListSessionsOptions | undefined,
 	state: {
 		forkMeta: HashMap.HashMap<string, ForkEntry>;
-		pendingQuestionCounts: HashMap.HashMap<string, number>;
 	},
+	pending: PendingApprovalCounts,
 ): SessionInfo[] =>
 	sessionRowsToSessionInfoList(Array.from(rows), {
 		...(options?.statuses !== undefined ? { statuses: options.statuses } : {}),
 		forkMeta: toReadonlyMap(state.forkMeta),
-		pendingQuestionCounts: toReadonlyMap(state.pendingQuestionCounts),
+		pendingQuestionCounts: pending.questions,
+		pendingPermissionCounts: pending.permissions,
 	});
 
 const updateRelaySessionCountSnapshot = (sessionCount: number) =>
@@ -215,14 +220,15 @@ export const listSessions = (options?: ListSessionsOptions) =>
 		const state = yield* Ref.get(stateRef);
 
 		if (readQueryEffectOption._tag === "Some") {
-			const rows = yield* readQueryEffectOption.value
-				.listSessions(sqOpts)
-				.pipe(
-					Effect.mapError(
-						(cause) =>
-							new SessionManagerError({ operation: "listSessions", cause }),
-					),
-				);
+			const [rows, pendingApprovals] = yield* Effect.all([
+				readQueryEffectOption.value.listSessions(sqOpts),
+				readQueryEffectOption.value.countPendingApprovalsBySession(),
+			]).pipe(
+				Effect.mapError(
+					(cause) =>
+						new SessionManagerError({ operation: "listSessions", cause }),
+				),
+			);
 			if (!options?.roots) {
 				yield* Ref.update(stateRef, (s) => ({
 					...s,
@@ -231,7 +237,17 @@ export const listSessions = (options?: ListSessionsOptions) =>
 				}));
 				yield* updateRelaySessionCountSnapshot(rows.length);
 			}
-			return sessionRowsToInfo(rows, options, state);
+			// The durable table wins outright here, with no fallback to the relay's
+			// in-memory map. The map is only correct for a relay that saw the events
+			// live, and a permission decision decrements it even though only a
+			// question increments it, so falling back would reintroduce the skew the
+			// projection exists to avoid.
+			return sessionRowsToInfo(
+				rows,
+				options,
+				state,
+				pendingApprovalCountsByType(pendingApprovals),
+			);
 		}
 
 		const clientOptions = {

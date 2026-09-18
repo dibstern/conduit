@@ -14,6 +14,12 @@ export interface SessionRow {
 	updated_at: number;
 }
 
+export interface PendingApprovalCountRow {
+	session_id: string;
+	type: "permission" | "question";
+	pending_count: number;
+}
+
 export interface MessageRow {
 	id: string;
 	session_id: string;

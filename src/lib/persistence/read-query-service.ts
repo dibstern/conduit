@@ -10,6 +10,7 @@ import type {
 	MessagePartRow,
 	MessageRow,
 	MessageWithParts,
+	PendingApprovalCountRow,
 	PendingApprovalRow,
 	SessionRow,
 	TurnRow,
@@ -21,6 +22,7 @@ export type {
 	MessagePartRow,
 	MessageRow,
 	MessageWithParts,
+	PendingApprovalCountRow,
 	PendingApprovalRow,
 	SessionRow,
 	TurnRow,
@@ -112,6 +114,26 @@ export class ReadQueryService {
 				context: {
 					method: "listSessions",
 					opts,
+					sqliteError: err instanceof Error ? err.message : String(err),
+				},
+			});
+		}
+	}
+
+	countPendingApprovalsBySession(): PendingApprovalCountRow[] {
+		try {
+			return this.db.query<PendingApprovalCountRow>(
+				`SELECT session_id, type, COUNT(*) AS pending_count
+				 FROM pending_approvals
+				 WHERE status = 'pending'
+				 GROUP BY session_id, type`,
+			);
+		} catch (err) {
+			throw new PersistenceError({
+				code: "PROJECTION_FAILED",
+				message: "ReadQueryService.countPendingApprovalsBySession failed",
+				context: {
+					method: "countPendingApprovalsBySession",
 					sqliteError: err instanceof Error ? err.message : String(err),
 				},
 			});

@@ -299,6 +299,7 @@ export const SessionInfoSchema = Schema.Struct({
 	forkMessageId: Schema.optional(Schema.String),
 	forkPointTimestamp: Schema.optional(Schema.Number),
 	pendingQuestionCount: Schema.optional(Schema.Number),
+	pendingPermissionCount: Schema.optional(Schema.Number),
 });
 
 export const ProjectSessionAvailabilitySchema = Schema.Union(

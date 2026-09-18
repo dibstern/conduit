@@ -26,6 +26,12 @@ const makeProjectStore = (
 		readonly updatedAt: number;
 		readonly parentId?: string;
 	}>,
+	pendingApprovals: ReadonlyArray<{
+		readonly id: string;
+		readonly sessionId: string;
+		readonly type: "permission" | "question";
+		readonly status: "pending" | "resolved";
+	}> = [],
 ): void => {
 	const conduitDirectory = join(projectDirectory, ".conduit");
 	mkdirSync(conduitDirectory, { recursive: true });
@@ -46,6 +52,20 @@ const makeProjectStore = (
 				],
 			);
 		}
+		for (const approval of pendingApprovals) {
+			database.execute(
+				`INSERT INTO pending_approvals (
+					id, session_id, type, status, created_at
+				) VALUES (?, ?, ?, ?, ?)`,
+				[
+					approval.id,
+					approval.sessionId,
+					approval.type,
+					approval.status,
+					Date.now(),
+				],
+			);
+		}
 	} finally {
 		database.close();
 	}
@@ -58,6 +78,87 @@ afterEach(() => {
 });
 
 describe("listDaemonSessions", () => {
+	it.effect("reads pending attention counts from a cold project store", () => {
+		const root = makeTemporaryRoot();
+		const project = join(root, "project");
+		mkdirSync(project);
+		makeProjectStore(
+			project,
+			[
+				{ id: "question", title: "Question", updatedAt: 400 },
+				{ id: "permission", title: "Permission", updatedAt: 300 },
+				{ id: "resolved", title: "Resolved", updatedAt: 200 },
+				{ id: "none", title: "None", updatedAt: 100 },
+			],
+			[
+				{
+					id: "q1",
+					sessionId: "question",
+					type: "question",
+					status: "pending",
+				},
+				{
+					id: "q2",
+					sessionId: "question",
+					type: "question",
+					status: "pending",
+				},
+				{
+					id: "p1",
+					sessionId: "permission",
+					type: "permission",
+					status: "pending",
+				},
+				{
+					id: "resolved-1",
+					sessionId: "resolved",
+					type: "question",
+					status: "resolved",
+				},
+			],
+		);
+
+		return Effect.gen(function* () {
+			const result = yield* listDaemonSessions();
+			const sessions = new Map(
+				result.sessions.map((session) => [session.id, session]),
+			);
+
+			expect(sessions.get("question")).toMatchObject({
+				pendingQuestionCount: 2,
+			});
+			expect(sessions.get("permission")).toMatchObject({
+				pendingPermissionCount: 1,
+			});
+			// The two counts come out of one query and are fanned into two maps, so
+			// the failure to watch for is a permission landing on the question count.
+			expect(sessions.get("question")).not.toHaveProperty(
+				"pendingPermissionCount",
+			);
+			expect(sessions.get("permission")).not.toHaveProperty(
+				"pendingQuestionCount",
+			);
+			expect(sessions.get("resolved")).not.toHaveProperty(
+				"pendingQuestionCount",
+			);
+			expect(sessions.get("resolved")).not.toHaveProperty(
+				"pendingPermissionCount",
+			);
+			expect(sessions.get("none")).not.toHaveProperty("pendingQuestionCount");
+			expect(sessions.get("none")).not.toHaveProperty("pendingPermissionCount");
+		}).pipe(
+			Effect.provide(
+				makeProjectRegistryLive([
+					{
+						slug: "project",
+						title: "Project",
+						directory: project,
+					},
+				]),
+			),
+		);
+	});
+
 	it.effect(
 		"merges real project stores without failing on unavailable or empty projects",
 		() => {

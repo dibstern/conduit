@@ -7,7 +7,10 @@ import {
 	makeReadQueryEffect,
 	ReadQueryEffectTag,
 } from "../../../persistence/effect/read-query-effect.js";
-import { sessionRowsToSessionInfoList } from "../../../persistence/session-list-adapter.js";
+import {
+	pendingApprovalCountsByType,
+	sessionRowsToSessionInfoList,
+} from "../../../persistence/session-list-adapter.js";
 import type {
 	DaemonSessionQueryOptions,
 	DaemonSessionQueryResult,
@@ -90,14 +93,21 @@ const readProjectSessions = (
 			makeReadQueryEffect,
 		).pipe(Layer.provide(sqliteLayer));
 
-		const rows = yield* Effect.gen(function* () {
+		const { rows, pendingApprovals } = yield* Effect.gen(function* () {
 			const readQuery = yield* ReadQueryEffectTag;
-			return yield* readQuery.listSessions(
+			const rows = yield* readQuery.listSessions(
 				roots === undefined ? undefined : { roots },
 			);
+			const pendingApprovals =
+				yield* readQuery.countPendingApprovalsBySession();
+			return { rows, pendingApprovals };
 		}).pipe(Effect.provide(readQueryLayer));
+		const pending = pendingApprovalCountsByType(pendingApprovals);
 
-		return sessionRowsToSessionInfoList(Array.from(rows)).map((session) => ({
+		return sessionRowsToSessionInfoList(Array.from(rows), {
+			pendingQuestionCounts: pending.questions,
+			pendingPermissionCounts: pending.permissions,
+		}).map((session) => ({
 			...session,
 			projectSlug,
 		}));

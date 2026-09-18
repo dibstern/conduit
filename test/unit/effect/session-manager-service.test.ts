@@ -2,6 +2,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { SqlClient } from "@effect/sql";
 import { describe, it } from "@effect/vitest";
 import { Effect, HashMap, Layer, Option, Queue, Ref, TestClock } from "effect";
 import { expect, vi } from "vitest";
@@ -58,10 +59,16 @@ import {
 } from "../../../src/lib/domain/relay/Services/session-overrides-state.js";
 import { OpenCodeApiError } from "../../../src/lib/errors.js";
 import type { SessionStatus } from "../../../src/lib/instance/sdk-types.js";
+import { EventStoreEffectTag } from "../../../src/lib/persistence/effect/event-store-effect.js";
 import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
+import { ProjectionRunnerEffectTag } from "../../../src/lib/persistence/effect/projection-runner-effect.js";
 import type { ReadQueryEffect } from "../../../src/lib/persistence/effect/read-query-effect.js";
 import { ReadQueryEffectTag } from "../../../src/lib/persistence/effect/read-query-effect.js";
-import type { SessionRow } from "../../../src/lib/persistence/read-model-types.js";
+import { canonicalEvent } from "../../../src/lib/persistence/events.js";
+import type {
+	PendingApprovalCountRow,
+	SessionRow,
+} from "../../../src/lib/persistence/read-model-types.js";
 import { SqliteClient } from "../../../src/lib/persistence/sqlite-client.js";
 import { OrchestrationEngine } from "../../../src/lib/provider/orchestration-engine.js";
 import { ProviderRegistry } from "../../../src/lib/provider/provider-registry.js";
@@ -90,7 +97,10 @@ function makeRow(id: string, overrides?: Partial<SessionRow>): SessionRow {
 	};
 }
 
-function makeReadQueryEffect(rows: readonly SessionRow[]): ReadQueryEffect {
+function makeReadQueryEffect(
+	rows: readonly SessionRow[],
+	pendingApprovalCounts: readonly PendingApprovalCountRow[] = [],
+): ReadQueryEffect {
 	return {
 		getToolContent: vi.fn(() => Effect.succeed(undefined)),
 		getSessionStatus: vi.fn(() => Effect.succeed(undefined)),
@@ -99,6 +109,9 @@ function makeReadQueryEffect(rows: readonly SessionRow[]): ReadQueryEffect {
 		),
 		getAllSessionStatuses: vi.fn(() => Effect.succeed({})),
 		listSessions: vi.fn(() => Effect.succeed(rows)),
+		countPendingApprovalsBySession: vi.fn(() =>
+			Effect.succeed(pendingApprovalCounts),
+		),
 		getLatestTurnModelExecution: vi.fn(() => Effect.succeed(undefined)),
 		getSessionMessagesWithParts: vi.fn(() => Effect.succeed([])),
 	};
@@ -1026,6 +1039,113 @@ describe("SessionManagerService", () => {
 					forkPointTimestamp: 250,
 				},
 			]);
+		}).pipe(Effect.provide(layer));
+	});
+
+	it.effect(
+		"keeps durable and warm in-memory pending question counts in agreement",
+		() => {
+			const dbFile = join(
+				tmpdir(),
+				`conduit-session-manager-pending-${Date.now()}.sqlite`,
+			);
+			const layer = Layer.provideMerge(
+				SessionManagerServiceLive,
+				Layer.mergeAll(
+					Layer.succeed(OpenCodeAPITag, makeMockOpenCodeAPI()),
+					Layer.succeed(LoggerTag, makeMockLogger()),
+					makeSessionManagerStateLive(),
+					DaemonEventBusLive,
+					makePersistenceEffectLayer(dbFile),
+				),
+			);
+
+			return Effect.gen(function* () {
+				const sql = yield* SqlClient.SqlClient;
+				const store = yield* EventStoreEffectTag;
+				const projectionRunner = yield* ProjectionRunnerEffectTag;
+				const service = yield* SessionManagerServiceTag;
+				const stateRef = yield* SessionManagerStateTag;
+				yield* projectionRunner.markRecovered();
+				yield* sql`
+					INSERT INTO sessions
+					(id, provider, title, status, created_at, updated_at)
+					VALUES ('session-1', 'opencode', 'Warm session', 'idle', 1, 1)`;
+
+				const questionAsked = yield* store.append(
+					canonicalEvent(
+						"question.asked",
+						"session-1",
+						{
+							id: "question-1",
+							sessionId: "session-1",
+							questions: [{ text: "Continue?" }],
+						},
+						{ provider: "opencode", createdAt: 2 },
+					),
+				);
+				yield* projectionRunner.projectEvent(questionAsked);
+				const permissionAsked = yield* store.append(
+					canonicalEvent(
+						"permission.asked",
+						"session-1",
+						{
+							id: "permission-1",
+							sessionId: "session-1",
+							toolName: "bash",
+							input: { command: "pwd" },
+						},
+						{ provider: "opencode", createdAt: 3 },
+					),
+				);
+				yield* projectionRunner.projectEvent(permissionAsked);
+				yield* service.incrementPendingQuestionCount("session-1");
+
+				const sessions = yield* service.listSessions();
+				const state = yield* Ref.get(stateRef);
+				const inMemoryCount = HashMap.get(
+					state.pendingQuestionCounts,
+					"session-1",
+				);
+
+				expect(inMemoryCount).toEqual(Option.some(1));
+				expect(sessions).toEqual([
+					expect.objectContaining({
+						id: "session-1",
+						pendingQuestionCount: Option.getOrUndefined(inMemoryCount),
+						pendingPermissionCount: 1,
+					}),
+				]);
+			}).pipe(
+				Effect.provide(Layer.fresh(layer)),
+				Effect.ensuring(Effect.sync(() => rmSync(dbFile, { force: true }))),
+			);
+		},
+	);
+
+	it.effect("prefers durable pending counts over warm in-memory state", () => {
+		const readQuery = makeReadQueryEffect(
+			[makeRow("session-1")],
+			[
+				{
+					session_id: "session-1",
+					type: "question",
+					pending_count: 1,
+				},
+			],
+		);
+		const layer = Layer.mergeAll(
+			Layer.succeed(OpenCodeAPITag, makeMockOpenCodeAPI()),
+			Layer.succeed(ReadQueryEffectTag, readQuery),
+			makeSessionManagerStateLive({
+				pendingQuestionCounts: HashMap.fromIterable([["session-1", 9]]),
+			}),
+		);
+
+		return Effect.gen(function* () {
+			const sessions = yield* listSessions();
+
+			expect(sessions[0]?.pendingQuestionCount).toBe(1);
 		}).pipe(Effect.provide(layer));
 	});
 

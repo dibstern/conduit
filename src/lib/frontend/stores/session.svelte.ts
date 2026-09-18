@@ -399,6 +399,9 @@ const sessionInfoFromRpc = (
 	...(session.pendingQuestionCount != null
 		? { pendingQuestionCount: session.pendingQuestionCount }
 		: {}),
+	...(session.pendingPermissionCount != null
+		? { pendingPermissionCount: session.pendingPermissionCount }
+		: {}),
 	...(session.projectSlug != null ? { projectSlug: session.projectSlug } : {}),
 });
 
