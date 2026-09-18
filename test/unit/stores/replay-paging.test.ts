@@ -74,6 +74,7 @@ function makeUserMessages(count: number): ChatMessage[] {
 
 beforeEach(() => {
 	clearMessages();
+	sessionState.currentId = "test-session";
 	ta = testActivity();
 	tm = testMessages();
 	vi.useFakeTimers();
@@ -306,8 +307,8 @@ describe("HistoryLoader buffer integration", () => {
 		expect((page[0] as { text: string }).text).toBe("message-35");
 		expect((page[14] as { text: string }).text).toBe("message-49");
 
-		// Prepending these to chatState.messages should produce correct order
-		chatState.messages = [...page, ...chatState.messages];
+		// Prepending these to the slot's messages should produce correct order
+		tm.messages = [...page, ...tm.messages];
 		expect(chatState.messages).toHaveLength(65); // 15 + 50
 		expect((chatState.messages[0] as { text: string }).text).toBe("message-35");
 		expect((chatState.messages[14] as { text: string }).text).toBe(

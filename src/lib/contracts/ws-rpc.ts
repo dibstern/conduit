@@ -19,6 +19,7 @@ import {
 	ResolvedClaudeSettingsSchema,
 } from "./claude-settings.js";
 import { ProviderDriverKindSchema } from "./provider-instance.js";
+import { StoredEventSchema } from "./stored-event.js";
 
 const NonEmptyString = Schema.NonEmptyString;
 
@@ -224,6 +225,17 @@ export const HistoryMessageSchema = Schema.Struct({
 	modelExecution: Schema.optional(ModelExecutionSchema),
 }).pipe(
 	Schema.extend(Schema.Record({ key: Schema.String, value: Schema.Unknown })),
+);
+
+export const SessionDetailItemSchema = Schema.Union(
+	Schema.Struct({
+		_tag: Schema.Literal("transcriptMessage"),
+		message: HistoryMessageSchema,
+	}),
+	Schema.Struct({
+		_tag: Schema.Literal("event"),
+		event: StoredEventSchema,
+	}),
 );
 
 export const GetModelsResponseSchema = Schema.Struct({

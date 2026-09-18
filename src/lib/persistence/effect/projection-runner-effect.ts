@@ -139,13 +139,6 @@ export const makeProjectionRunnerEffect = (
 			SqlClient.SqlClient
 		> =>
 			Effect.gen(function* () {
-				if (!recovered) {
-					return yield* new ProjectionRunnerError({
-						operation: "projectEvent",
-						cause: "recover() must be called before projectEvent()",
-					});
-				}
-
 				const matching = projectorsByEventType.get(event.type) ?? [];
 				const ctx: ProjectionContext = { replaying };
 
@@ -154,9 +147,10 @@ export const makeProjectionRunnerEffect = (
 				// worked when the row is still there. Replay is the one path that
 				// swallows projector failures, and it does so in recover().
 				//
-				// Each projector still gets its own transaction, so a failure leaves
-				// earlier projectors committed and stops the rest; getFailures() is not
-				// involved, because the error reaches the caller instead.
+				// Live producers wrap append and projection in one transaction. These
+				// nested transactions are savepoints; failures roll back the whole write.
+				// Relay startup recovers historical events before enabling live producers.
+				// getFailures() is not involved because the error reaches the caller.
 				for (const projector of matching) {
 					yield* sql.withTransaction(
 						Effect.gen(function* () {
@@ -185,13 +179,6 @@ export const makeProjectionRunnerEffect = (
 			if (events.length === 0) return Effect.void;
 
 			return Effect.gen(function* () {
-				if (!recovered) {
-					return yield* new ProjectionRunnerError({
-						operation: "projectBatch",
-						cause: "recover() must be called before projectBatch()",
-					});
-				}
-
 				const ctx: ProjectionContext = { replaying };
 
 				// One transaction for the whole batch (S9): a translation that produced

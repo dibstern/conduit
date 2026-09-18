@@ -312,23 +312,46 @@ export type ChatPhase = "idle" | "processing" | "streaming";
 
 export type LoadLifecycle = "empty" | "loading" | "committed" | "ready";
 
-export const chatState = $state({
-	messages: [] as ChatMessage[],
-	/** Raw text of the currently streaming assistant message. */
-	currentAssistantText: "",
-	/** Single source of truth for the chat pipeline phase. */
-	phase: "idle" as ChatPhase,
-	/** Tracks the lifecycle of loading session data into the chat store. */
-	loadLifecycle: "empty" as LoadLifecycle,
-	/** Monotonically increasing counter, bumped on each turn boundary.
-	 *  Provides an explicit, reliable turn-boundary signal for logic that
-	 *  needs to distinguish "same turn" from "new turn" (e.g. queued-flag
-	 *  clearing, future turn-aware features). Reset to 0 on clearMessages. */
-	turnEpoch: 0,
-	/** The messageId of the current OpenCode response.  When a new event
-	 *  arrives with a different messageId, that's a turn boundary.  Reset
-	 *  to null on clearMessages and done. */
-	currentMessageId: null as string | null,
+/** The six fields the legacy global mirror ever exposed. */
+type ChatMirror = Readonly<
+	Pick<
+		SessionChatState,
+		| "messages"
+		| "currentAssistantText"
+		| "phase"
+		| "loadLifecycle"
+		| "turnEpoch"
+		| "currentMessageId"
+	>
+>;
+
+/** Legacy global view of the current session's chat state.
+ *
+ *  Frozen by ni8.5 §13: this holds no storage of its own and nothing writes
+ *  it — every getter resolves against `currentChat()`, i.e. the per-session
+ *  slot for `sessionState.currentId`. The object is frozen, so an assignment
+ *  is a compile error under `Readonly<…>` and a TypeError at runtime under
+ *  strict mode. New code reads `currentChat()` directly; when the last reader
+ *  has moved, delete this. */
+export const chatState: ChatMirror = Object.freeze({
+	get messages() {
+		return currentChat().messages;
+	},
+	get currentAssistantText() {
+		return currentChat().currentAssistantText;
+	},
+	get phase() {
+		return currentChat().phase;
+	},
+	get loadLifecycle() {
+		return currentChat().loadLifecycle;
+	},
+	get turnEpoch() {
+		return currentChat().turnEpoch;
+	},
+	get currentMessageId() {
+		return currentChat().currentMessageId;
+	},
 });
 
 // ─── Derived phase flags ────────────────────────────────────────────────────
@@ -336,15 +359,28 @@ export const chatState = $state({
 // We expose the derived values as exported functions that return the current
 // reactive value.  Call sites read them as `isProcessing()`.
 
+/** Is the LLM working on this slot's turn? The one definition of "busy",
+ *  shared by the current-session flag below and by dispatch paths that must
+ *  answer the same question for a *background* session's slot. */
+export function isLlmActive(
+	phase: ChatPhase,
+	loadLifecycle: LoadLifecycle,
+): boolean {
+	return (
+		loadLifecycle !== "loading" &&
+		(phase === "processing" || phase === "streaming")
+	);
+}
+
 const _isProcessing = $derived(
-	chatState.loadLifecycle !== "loading" &&
-		(chatState.phase === "processing" || chatState.phase === "streaming"),
+	isLlmActive(_currentChat.phase, _currentChat.loadLifecycle),
 );
 const _isStreaming = $derived(
-	chatState.loadLifecycle !== "loading" && chatState.phase === "streaming",
+	_currentChat.loadLifecycle !== "loading" &&
+		_currentChat.phase === "streaming",
 );
-const _isReplaying = $derived(chatState.loadLifecycle === "loading");
-const _isLoading = $derived(chatState.loadLifecycle === "loading");
+const _isReplaying = $derived(_currentChat.loadLifecycle === "loading");
+const _isLoading = $derived(_currentChat.loadLifecycle === "loading");
 
 /** LLM is active (processing or streaming). */
 export function isProcessing(): boolean {
@@ -369,30 +405,54 @@ export function isLoading(): boolean {
 // Tests may still set booleans directly for arbitrary state setup.
 
 /** Session is idle — no LLM activity, no streaming. */
-export function phaseToIdle(_activity?: SessionActivity): void {
-	if (_activity) _activity.phase = "idle";
-	chatState.phase = "idle";
+export function phaseToIdle(activity: SessionActivity): void {
+	activity.phase = "idle";
 }
 
 /** LLM is active, awaiting first delta. */
-export function phaseToProcessing(_activity?: SessionActivity): void {
-	if (_activity) _activity.phase = "processing";
-	chatState.phase = "processing";
+export function phaseToProcessing(activity: SessionActivity): void {
+	activity.phase = "processing";
 }
 
 /** Receiving deltas — assistant message being built. */
-export function phaseToStreaming(_activity?: SessionActivity): void {
-	if (_activity) _activity.phase = "streaming";
-	chatState.phase = "streaming";
+export function phaseToStreaming(activity: SessionActivity): void {
+	activity.phase = "streaming";
+}
+
+/** The socket dropped mid-turn: end the on-screen session's turn so the UI
+ *  isn't stuck streaming. Background sessions are left alone — the phase
+ *  flags only ever reported the current session's activity.
+ *
+ *  This ends the *turn*, not just the phase. A dropped socket is a turn
+ *  boundary exactly as `done` is: nothing more will arrive for it. Idling the
+ *  phase alone left `turnEpoch` behind, and the `status:idle` that follows
+ *  reconnection then saw an already-idle slot and skipped `finalizeTurn` —
+ *  so a message queued during that turn stayed rendered as queued forever.
+ *  Going through `finalizeTurn` keeps reconciliation intact: the later
+ *  `status:idle` still sees idle and still declines to bump a second time.
+ *
+ *  The assistant in flight is committed *before* the phase moves, in the same
+ *  order `handleDone` uses. `flushAndFinalizeAssistant` is a no-op once the
+ *  phase is idle, so ending the turn without it would strand the assistant
+ *  unfinalized (no Copy/Fork controls), keep `currentPartId`, and drop text
+ *  that had not been rendered yet — no later event could recover it. */
+export function phaseCurrentSessionToIdle(): void {
+	const id = sessionState.currentId;
+	if (id === null) return;
+	const activity = sessionActivity.get(id);
+	const messages = sessionMessages.get(id);
+	if (!activity || !messages) return;
+	if (activity.phase === "idle") return;
+	flushAndFinalizeAssistant(activity, messages);
+	finalizeTurn(activity, "socket-close");
 }
 
 /** Start event replay. */
 export function phaseStartReplay(
-	_activity?: SessionActivity,
-	_messages?: SessionMessages,
+	_activity: SessionActivity,
+	messages: SessionMessages,
 ): void {
-	if (_messages) _messages.loadLifecycle = "loading";
-	chatState.loadLifecycle = "loading";
+	messages.loadLifecycle = "loading";
 }
 
 /** End event replay, reconcile phase based on current phase
@@ -403,23 +463,15 @@ export function phaseStartReplay(
  *  "ready" on its first (and only) batch.
  *  @param llmActive — whether the replayed event stream ended mid-turn */
 export function phaseEndReplay(
-	_activity: SessionActivity | undefined,
+	activity: SessionActivity,
 	llmActive: boolean,
 ): void {
 	// Don't set loadLifecycle here — leave at "committed" so the
 	// scroll controller's settle phase can run while deferred markdown
 	// rendering completes. renderDeferredMarkdown sets "ready" when done.
-	const phase = _activity?.phase ?? chatState.phase;
-	if (llmActive && phase === "idle") {
-		if (_activity) _activity.phase = "processing";
-		chatState.phase = "processing";
+	if (llmActive && activity.phase === "idle") {
+		activity.phase = "processing";
 	}
-}
-
-/** Full reset — used by clearMessages on session switch. */
-function phaseReset(): void {
-	chatState.phase = "idle";
-	chatState.loadLifecycle = "empty";
 }
 
 /** Pagination state for history loading (shared between HistoryLoader and dispatch). */
@@ -460,7 +512,7 @@ export function handleInputSyncReceived(msg: {
 
 /** Get the number of messages in current conversation. */
 export function getMessageCount(): number {
-	return chatState.messages.length;
+	return currentChat().messages.length;
 }
 
 const log = createFrontendLogger("chat");
@@ -555,7 +607,6 @@ function flushAndFinalizeAssistant(
 	// Clear assistant text. Phase transition is the caller's responsibility
 	// (handleDone → phaseToIdle, handleToolStart → phaseToProcessing, etc.)
 	_messages.currentAssistantText = "";
-	chatState.currentAssistantText = "";
 	_activity.currentPartId = null;
 	return finalizedMessageId;
 }
@@ -666,7 +717,6 @@ export function commitReplayFinal(
 			_messages.messages = all;
 			_messages.historyHasMore = eventsHasMore;
 		}
-		chatState.messages = all;
 		historyState.hasMore = eventsHasMore;
 	} else {
 		const cutoff = all.length - INITIAL_PAGE_SIZE;
@@ -676,34 +726,29 @@ export function commitReplayFinal(
 			_messages.messages = all.slice(cutoff);
 			_messages.historyHasMore = true;
 		}
-		chatState.messages = all.slice(cutoff);
 		historyState.hasMore = true;
 	}
 	if (eventsHasMore) {
 		if (_activity) _activity.eventsHasMore = true;
 	}
 	if (_messages) _messages.loadLifecycle = "committed";
-	chatState.loadLifecycle = "committed";
 }
 
 export function getMessages(_messages?: SessionMessages): ChatMessage[] {
 	if (_messages?.replayBatch !== null && _messages?.replayBatch !== undefined) {
 		return _messages.replayBatch;
 	}
-	return _messages?.messages ?? chatState.messages;
+	return _messages?.messages ?? [];
 }
 
 export function setMessages(
 	_messages: SessionMessages,
 	msgs: ChatMessage[],
 ): void {
-	if (_messages?.replayBatch !== null && _messages?.replayBatch !== undefined) {
+	if (_messages.replayBatch !== null) {
 		_messages.replayBatch = msgs;
-	} else if (_messages) {
-		_messages.messages = msgs;
-		chatState.messages = msgs;
 	} else {
-		chatState.messages = msgs;
+		_messages.messages = msgs;
 	}
 }
 
@@ -743,7 +788,6 @@ export function advanceTurnIfNewMessage(
 	// have changed back from a different message) but don't bump epoch.
 	if (activity.seenMessageIds.has(messageId)) {
 		activity.currentMessageId = messageId;
-		chatState.currentMessageId = messageId;
 		return;
 	}
 
@@ -765,7 +809,6 @@ export function advanceTurnIfNewMessage(
 	const prevId = activity.currentMessageId;
 	if (prevId != null) {
 		activity.turnEpoch++;
-		chatState.turnEpoch = activity.turnEpoch;
 		log.debug(
 			"advanceTurn NEW messageId=%s prev=%s turnEpoch=%d phase=%s",
 			messageId,
@@ -782,7 +825,6 @@ export function advanceTurnIfNewMessage(
 	}
 
 	activity.currentMessageId = messageId;
-	chatState.currentMessageId = messageId;
 }
 
 // ─── Message handlers ───────────────────────────────────────────────────────
@@ -832,13 +874,11 @@ export function handleDelta(
 			setMessages(messages, updated);
 			if (!isContinuingCurrentPart || matchingMessage.finalized) {
 				messages.currentAssistantText = matchingMessage.rawText;
-				chatState.currentAssistantText = matchingMessage.rawText;
 			}
 			activity.currentPartId = partId;
 			if (messageId != null) {
 				activity.seenMessageIds.add(messageId);
 				activity.currentMessageId = messageId;
-				chatState.currentMessageId = messageId;
 			}
 			phaseToStreaming(activity);
 		} else {
@@ -856,7 +896,6 @@ export function handleDelta(
 			phaseToStreaming(activity);
 			activity.currentPartId = partId;
 			messages.currentAssistantText = "";
-			chatState.currentAssistantText = "";
 		}
 	} else if (activity.phase !== "streaming") {
 		const uuid = generateUuid();
@@ -873,13 +912,11 @@ export function handleDelta(
 		phaseToStreaming(activity);
 		activity.currentPartId = null;
 		messages.currentAssistantText = "";
-		chatState.currentAssistantText = "";
 	} else {
 		activity.currentPartId = null;
 	}
 
 	messages.currentAssistantText += text;
-	chatState.currentAssistantText = messages.currentAssistantText;
 
 	// Debounced markdown render (80ms)
 	if (activity?.renderTimer !== null && activity?.renderTimer !== undefined) {
@@ -1229,7 +1266,6 @@ export function handleDone(
  *  directly from a new turn-ending handler — call this. */
 function finalizeTurn(activity: SessionActivity, source: string): void {
 	activity.turnEpoch++;
-	chatState.turnEpoch = activity.turnEpoch;
 	log.debug(
 		"finalizeTurn source=%s turnEpoch=%d currentMessageId=%s phase=%s",
 		source,
@@ -1300,9 +1336,7 @@ export function handleStatus(
 
 		// 3. Clear in-flight state
 		activity.currentMessageId = null;
-		chatState.currentMessageId = null;
 		messages.currentAssistantText = "";
-		chatState.currentAssistantText = "";
 		activity.thinkingStartTime = 0;
 
 		// 4. Drain liveEventBuffer if non-null
@@ -1646,15 +1680,7 @@ export function abortSessionReplay(sessionId: string): void {
 }
 
 export function activateSessionChatState(sessionId: string): void {
-	const activity = sessionActivity.get(sessionId);
 	const messages = sessionMessages.get(sessionId);
-
-	chatState.phase = activity?.phase ?? "idle";
-	chatState.turnEpoch = activity?.turnEpoch ?? 0;
-	chatState.currentMessageId = activity?.currentMessageId ?? null;
-	chatState.messages = messages?.messages ?? [];
-	chatState.currentAssistantText = messages?.currentAssistantText ?? "";
-	chatState.loadLifecycle = messages?.loadLifecycle ?? "empty";
 
 	historyState.hasMore = messages?.historyHasMore ?? false;
 	historyState.loading = messages?.historyLoading ?? false;
@@ -1662,13 +1688,8 @@ export function activateSessionChatState(sessionId: string): void {
 }
 
 export function clearMessages(): void {
-	phaseReset(); // must be cleared before abort hook — stops replay generation check
 	onClearMessages?.(sessionState.currentId); // abort in-flight async replays
 	cancelDeferredMarkdown(); // abort in-flight deferred renders
-	chatState.messages = [];
-	chatState.currentAssistantText = "";
-	chatState.turnEpoch = 0;
-	chatState.currentMessageId = null;
 	_pendingHistoryQueuedFallback = false;
 	// Also clear per-session state for the current session
 	const currentId = sessionState.currentId;
@@ -1789,7 +1810,7 @@ export function renderDeferredMarkdown(
 		// Per-session abort check
 		if (_activity && _activity.replayGeneration !== activityGen) return;
 
-		const source = _messages?.messages ?? chatState.messages;
+		const source = _messages?.messages ?? [];
 		const updated = [...source];
 		let rendered = 0;
 		for (let i = 0; i < updated.length && rendered < BATCH_SIZE; i++) {
@@ -1802,13 +1823,8 @@ export function renderDeferredMarkdown(
 				rendered++;
 			}
 		}
-		if (rendered > 0) {
-			if (_messages) {
-				_messages.messages = updated;
-				chatState.messages = updated;
-			} else {
-				chatState.messages = updated;
-			}
+		if (rendered > 0 && _messages) {
+			_messages.messages = updated;
 		}
 
 		// Continue if more unrendered messages remain
@@ -1818,10 +1834,8 @@ export function renderDeferredMarkdown(
 		if (hasMore) {
 			setTimeout(processBatch, 0);
 		} else {
-			const lc = _messages?.loadLifecycle ?? chatState.loadLifecycle;
-			if (lc === "committed") {
-				if (_messages) _messages.loadLifecycle = "ready";
-				chatState.loadLifecycle = "ready";
+			if (_messages?.loadLifecycle === "committed") {
+				_messages.loadLifecycle = "ready";
 			}
 		}
 	}

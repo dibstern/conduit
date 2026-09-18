@@ -1,46 +1,48 @@
-import { Socket } from "@effect/platform";
-import { RpcClient, RpcSerialization } from "@effect/rpc";
 import { Effect } from "effect";
 import type { ClaudeSettingsOverrides } from "../../contracts/claude-settings.js";
 import { ProviderInstanceIdSchema } from "../../contracts/provider-instance.js";
 import type { SessionPermissionMode } from "../../shared-types.js";
 import { runTransportEffect } from "./runtime.js";
-import {
-	type ClaudeSettingsResponse,
-	type CreateSessionResponse,
-	type DetectProxyResponse,
-	type ForkSessionResponse,
-	type GetAgentsResponse,
-	type GetCommandsResponse,
-	type GetFileContentResponse,
-	type GetFileListResponse,
-	type GetFileTreeResponse,
-	type GetModelsResponse,
-	type GetProjectsResponse,
-	type GetTodoResponse,
-	type GetToolContentResponse,
-	type InstanceListResponse,
-	type ListDirectoriesResponse,
-	type ListSessionsResponse,
-	type LoadMoreHistoryResponse,
-	type PermissionDecision,
-	type PermissionPersistScope,
-	type PermissionUpdateDestination,
-	type ProjectMutationResponse,
-	type PtyListResponse,
-	type ReloadProviderSessionResponse,
-	type ResolveClaudeSettingsResponse,
-	type RewindSessionResponse,
-	type RpcLogLevel,
-	type ScanNowResponse,
-	type SetDefaultModelResponse,
-	type SetDefaultPermissionModeResponse,
-	type SetHiddenEntriesResponse,
-	type SwitchContextWindowResponse,
-	type SwitchModelResponse,
-	type SwitchPermissionModeResponse,
-	type SwitchVariantResponse,
-	WsRpcGroup,
+import { type WsRpcClient, WsRpcClients } from "./shared-client.js";
+
+// Keep the public URL helper available to existing callers.
+export { makeWsRpcUrl, type WsRpcLocation } from "./shared-client.js";
+
+import type {
+	ClaudeSettingsResponse,
+	CreateSessionResponse,
+	DetectProxyResponse,
+	ForkSessionResponse,
+	GetAgentsResponse,
+	GetCommandsResponse,
+	GetFileContentResponse,
+	GetFileListResponse,
+	GetFileTreeResponse,
+	GetModelsResponse,
+	GetProjectsResponse,
+	GetTodoResponse,
+	GetToolContentResponse,
+	InstanceListResponse,
+	ListDirectoriesResponse,
+	ListSessionsResponse,
+	LoadMoreHistoryResponse,
+	PermissionDecision,
+	PermissionPersistScope,
+	PermissionUpdateDestination,
+	ProjectMutationResponse,
+	PtyListResponse,
+	ReloadProviderSessionResponse,
+	ResolveClaudeSettingsResponse,
+	RewindSessionResponse,
+	RpcLogLevel,
+	ScanNowResponse,
+	SetDefaultModelResponse,
+	SetDefaultPermissionModeResponse,
+	SetHiddenEntriesResponse,
+	SwitchContextWindowResponse,
+	SwitchModelResponse,
+	SwitchPermissionModeResponse,
+	SwitchVariantResponse,
 } from "./ws-rpc.js";
 
 export interface CancelSessionRpcInput {
@@ -362,377 +364,145 @@ export interface SetLogLevelRpcInput {
 	readonly level: RpcLogLevel;
 }
 
-export interface WsRpcLocation {
-	readonly protocol: string;
-	readonly host: string;
-}
-
-export const makeWsRpcUrl = (
+const callControl = <A, E>(
 	projectSlug: string,
-	location: WsRpcLocation = window.location,
-): string => {
-	const protocol = location.protocol === "https:" ? "wss:" : "ws:";
-	return `${protocol}//${location.host}/p/${encodeURIComponent(projectSlug)}/rpc`;
-};
+	call: (client: WsRpcClient) => Effect.Effect<A, E>,
+): Effect.Effect<A, E, WsRpcClients> =>
+	Effect.gen(function* () {
+		const clients = yield* WsRpcClients;
+		const { control } = yield* clients.forProject(projectSlug);
+		return yield* call(control);
+	});
 
 const callCancelSession = (input: CancelSessionRpcInput) =>
-	Effect.scoped(
-		Effect.gen(function* () {
-			const client = yield* RpcClient.make(WsRpcGroup);
-			yield* client.CancelSession(input);
-		}),
-	).pipe(
-		Effect.provide(RpcClient.layerProtocolSocket()),
-		Effect.provide(Socket.layerWebSocket(makeWsRpcUrl(input.projectSlug))),
-		Effect.provide(Socket.layerWebSocketConstructorGlobal),
-		Effect.provide(RpcSerialization.layerJson),
+	callControl(input.projectSlug, (client) =>
+		client.CancelSession(input).pipe(Effect.asVoid),
 	);
 
 const callGetModels = (input: GetModelsRpcInput) =>
-	Effect.scoped(
-		Effect.gen(function* () {
-			const client = yield* RpcClient.make(WsRpcGroup);
-			return yield* client.GetModels(input);
-		}),
-	).pipe(
-		Effect.provide(RpcClient.layerProtocolSocket()),
-		Effect.provide(Socket.layerWebSocket(makeWsRpcUrl(input.projectSlug))),
-		Effect.provide(Socket.layerWebSocketConstructorGlobal),
-		Effect.provide(RpcSerialization.layerJson),
-	);
+	callControl(input.projectSlug, (client) => client.GetModels(input));
 
 const callGetAgents = (input: GetAgentsRpcInput) =>
-	Effect.scoped(
-		Effect.gen(function* () {
-			const client = yield* RpcClient.make(WsRpcGroup);
-			return yield* client.GetAgents(input);
-		}),
-	).pipe(
-		Effect.provide(RpcClient.layerProtocolSocket()),
-		Effect.provide(Socket.layerWebSocket(makeWsRpcUrl(input.projectSlug))),
-		Effect.provide(Socket.layerWebSocketConstructorGlobal),
-		Effect.provide(RpcSerialization.layerJson),
-	);
+	callControl(input.projectSlug, (client) => client.GetAgents(input));
 
 const callGetCommands = (input: GetCommandsRpcInput) =>
-	Effect.scoped(
-		Effect.gen(function* () {
-			const client = yield* RpcClient.make(WsRpcGroup);
-			return yield* client.GetCommands(input);
-		}),
-	).pipe(
-		Effect.provide(RpcClient.layerProtocolSocket()),
-		Effect.provide(Socket.layerWebSocket(makeWsRpcUrl(input.projectSlug))),
-		Effect.provide(Socket.layerWebSocketConstructorGlobal),
-		Effect.provide(RpcSerialization.layerJson),
-	);
+	callControl(input.projectSlug, (client) => client.GetCommands(input));
 
 const callGetProjects = (input: GetProjectsRpcInput) =>
-	Effect.scoped(
-		Effect.gen(function* () {
-			const client = yield* RpcClient.make(WsRpcGroup);
-			return yield* client.GetProjects(input);
-		}),
-	).pipe(
-		Effect.provide(RpcClient.layerProtocolSocket()),
-		Effect.provide(Socket.layerWebSocket(makeWsRpcUrl(input.projectSlug))),
-		Effect.provide(Socket.layerWebSocketConstructorGlobal),
-		Effect.provide(RpcSerialization.layerJson),
-	);
+	callControl(input.projectSlug, (client) => client.GetProjects(input));
 
 const callAddProject = (input: AddProjectRpcInput) =>
-	Effect.scoped(
-		Effect.gen(function* () {
-			const client = yield* RpcClient.make(WsRpcGroup);
-			return yield* client.AddProject({
-				projectSlug: input.projectSlug,
-				directory: input.directory,
-				...(input.instanceId != null ? { instanceId: input.instanceId } : {}),
-			});
+	callControl(input.projectSlug, (client) =>
+		client.AddProject({
+			projectSlug: input.projectSlug,
+			directory: input.directory,
+			...(input.instanceId != null ? { instanceId: input.instanceId } : {}),
 		}),
-	).pipe(
-		Effect.provide(RpcClient.layerProtocolSocket()),
-		Effect.provide(Socket.layerWebSocket(makeWsRpcUrl(input.projectSlug))),
-		Effect.provide(Socket.layerWebSocketConstructorGlobal),
-		Effect.provide(RpcSerialization.layerJson),
 	);
 
 const callRemoveProject = (input: RemoveProjectRpcInput) =>
-	Effect.scoped(
-		Effect.gen(function* () {
-			const client = yield* RpcClient.make(WsRpcGroup);
-			return yield* client.RemoveProject(input);
-		}),
-	).pipe(
-		Effect.provide(RpcClient.layerProtocolSocket()),
-		Effect.provide(Socket.layerWebSocket(makeWsRpcUrl(input.projectSlug))),
-		Effect.provide(Socket.layerWebSocketConstructorGlobal),
-		Effect.provide(RpcSerialization.layerJson),
-	);
+	callControl(input.projectSlug, (client) => client.RemoveProject(input));
 
 const callRenameProject = (input: RenameProjectRpcInput) =>
-	Effect.scoped(
-		Effect.gen(function* () {
-			const client = yield* RpcClient.make(WsRpcGroup);
-			return yield* client.RenameProject(input);
-		}),
-	).pipe(
-		Effect.provide(RpcClient.layerProtocolSocket()),
-		Effect.provide(Socket.layerWebSocket(makeWsRpcUrl(input.projectSlug))),
-		Effect.provide(Socket.layerWebSocketConstructorGlobal),
-		Effect.provide(RpcSerialization.layerJson),
-	);
+	callControl(input.projectSlug, (client) => client.RenameProject(input));
 
 const callSetProjectInstance = (input: SetProjectInstanceRpcInput) =>
-	Effect.scoped(
-		Effect.gen(function* () {
-			const client = yield* RpcClient.make(WsRpcGroup);
-			return yield* client.SetProjectInstance(input);
-		}),
-	).pipe(
-		Effect.provide(RpcClient.layerProtocolSocket()),
-		Effect.provide(Socket.layerWebSocket(makeWsRpcUrl(input.projectSlug))),
-		Effect.provide(Socket.layerWebSocketConstructorGlobal),
-		Effect.provide(RpcSerialization.layerJson),
-	);
+	callControl(input.projectSlug, (client) => client.SetProjectInstance(input));
 
 const callStartInstance = (input: InstanceMutationRpcInput) =>
-	Effect.scoped(
-		Effect.gen(function* () {
-			const client = yield* RpcClient.make(WsRpcGroup);
-			return yield* client.StartInstance(input);
-		}),
-	).pipe(
-		Effect.provide(RpcClient.layerProtocolSocket()),
-		Effect.provide(Socket.layerWebSocket(makeWsRpcUrl(input.projectSlug))),
-		Effect.provide(Socket.layerWebSocketConstructorGlobal),
-		Effect.provide(RpcSerialization.layerJson),
-	);
+	callControl(input.projectSlug, (client) => client.StartInstance(input));
 
 const callStopInstance = (input: InstanceMutationRpcInput) =>
-	Effect.scoped(
-		Effect.gen(function* () {
-			const client = yield* RpcClient.make(WsRpcGroup);
-			return yield* client.StopInstance(input);
-		}),
-	).pipe(
-		Effect.provide(RpcClient.layerProtocolSocket()),
-		Effect.provide(Socket.layerWebSocket(makeWsRpcUrl(input.projectSlug))),
-		Effect.provide(Socket.layerWebSocketConstructorGlobal),
-		Effect.provide(RpcSerialization.layerJson),
-	);
+	callControl(input.projectSlug, (client) => client.StopInstance(input));
 
 const callRemoveInstance = (input: InstanceMutationRpcInput) =>
-	Effect.scoped(
-		Effect.gen(function* () {
-			const client = yield* RpcClient.make(WsRpcGroup);
-			return yield* client.RemoveInstance(input);
-		}),
-	).pipe(
-		Effect.provide(RpcClient.layerProtocolSocket()),
-		Effect.provide(Socket.layerWebSocket(makeWsRpcUrl(input.projectSlug))),
-		Effect.provide(Socket.layerWebSocketConstructorGlobal),
-		Effect.provide(RpcSerialization.layerJson),
-	);
+	callControl(input.projectSlug, (client) => client.RemoveInstance(input));
 
 const callRenameInstance = (input: RenameInstanceRpcInput) =>
-	Effect.scoped(
-		Effect.gen(function* () {
-			const client = yield* RpcClient.make(WsRpcGroup);
-			return yield* client.RenameInstance(input);
-		}),
-	).pipe(
-		Effect.provide(RpcClient.layerProtocolSocket()),
-		Effect.provide(Socket.layerWebSocket(makeWsRpcUrl(input.projectSlug))),
-		Effect.provide(Socket.layerWebSocketConstructorGlobal),
-		Effect.provide(RpcSerialization.layerJson),
-	);
+	callControl(input.projectSlug, (client) => client.RenameInstance(input));
 
 const callAddInstance = (input: AddInstanceRpcInput) =>
-	Effect.scoped(
-		Effect.gen(function* () {
-			const client = yield* RpcClient.make(WsRpcGroup);
-			return yield* client.AddInstance(input);
-		}),
-	).pipe(
-		Effect.provide(RpcClient.layerProtocolSocket()),
-		Effect.provide(Socket.layerWebSocket(makeWsRpcUrl(input.projectSlug))),
-		Effect.provide(Socket.layerWebSocketConstructorGlobal),
-		Effect.provide(RpcSerialization.layerJson),
-	);
+	callControl(input.projectSlug, (client) => client.AddInstance(input));
 
 const callUpdateInstance = (input: UpdateInstanceRpcInput) =>
-	Effect.scoped(
-		Effect.gen(function* () {
-			const client = yield* RpcClient.make(WsRpcGroup);
-			return yield* client.UpdateInstance(input);
-		}),
-	).pipe(
-		Effect.provide(RpcClient.layerProtocolSocket()),
-		Effect.provide(Socket.layerWebSocket(makeWsRpcUrl(input.projectSlug))),
-		Effect.provide(Socket.layerWebSocketConstructorGlobal),
-		Effect.provide(RpcSerialization.layerJson),
-	);
+	callControl(input.projectSlug, (client) => client.UpdateInstance(input));
 
 const callScanNow = (input: ScanNowRpcInput) =>
-	Effect.scoped(
-		Effect.gen(function* () {
-			const client = yield* RpcClient.make(WsRpcGroup);
-			return yield* client.ScanNow(input);
-		}),
-	).pipe(
-		Effect.provide(RpcClient.layerProtocolSocket()),
-		Effect.provide(Socket.layerWebSocket(makeWsRpcUrl(input.projectSlug))),
-		Effect.provide(Socket.layerWebSocketConstructorGlobal),
-		Effect.provide(RpcSerialization.layerJson),
-	);
+	callControl(input.projectSlug, (client) => client.ScanNow(input));
 
 const callDetectProxy = (input: DetectProxyRpcInput) =>
-	Effect.scoped(
-		Effect.gen(function* () {
-			const client = yield* RpcClient.make(WsRpcGroup);
-			return yield* client.DetectProxy(input);
-		}),
-	).pipe(
-		Effect.provide(RpcClient.layerProtocolSocket()),
-		Effect.provide(Socket.layerWebSocket(makeWsRpcUrl(input.projectSlug))),
-		Effect.provide(Socket.layerWebSocketConstructorGlobal),
-		Effect.provide(RpcSerialization.layerJson),
-	);
+	callControl(input.projectSlug, (client) => client.DetectProxy(input));
 
 const callListPtys = (input: ListPtysRpcInput) =>
-	Effect.scoped(
-		Effect.gen(function* () {
-			const client = yield* RpcClient.make(WsRpcGroup);
-			return yield* client.ListPtys(input);
-		}),
-	).pipe(
-		Effect.provide(RpcClient.layerProtocolSocket()),
-		Effect.provide(Socket.layerWebSocket(makeWsRpcUrl(input.projectSlug))),
-		Effect.provide(Socket.layerWebSocketConstructorGlobal),
-		Effect.provide(RpcSerialization.layerJson),
-	);
+	callControl(input.projectSlug, (client) => client.ListPtys(input));
 
 const callCreatePty = (input: CreatePtyRpcInput) =>
-	Effect.scoped(
-		Effect.gen(function* () {
-			const client = yield* RpcClient.make(WsRpcGroup);
-			yield* client.CreatePty(input);
-		}),
-	).pipe(
-		Effect.provide(RpcClient.layerProtocolSocket()),
-		Effect.provide(Socket.layerWebSocket(makeWsRpcUrl(input.projectSlug))),
-		Effect.provide(Socket.layerWebSocketConstructorGlobal),
-		Effect.provide(RpcSerialization.layerJson),
+	callControl(input.projectSlug, (client) =>
+		client.CreatePty(input).pipe(Effect.asVoid),
 	);
 
 const callResizePty = (input: ResizePtyRpcInput) =>
-	Effect.scoped(
-		Effect.gen(function* () {
-			const client = yield* RpcClient.make(WsRpcGroup);
-			yield* client.ResizePty({
+	callControl(input.projectSlug, (client) =>
+		client
+			.ResizePty({
 				projectSlug: input.projectSlug,
 				ptyId: input.ptyId,
 				...(input.originId != null ? { originId: input.originId } : {}),
 				...(input.cols != null ? { cols: input.cols } : {}),
 				...(input.rows != null ? { rows: input.rows } : {}),
-			});
-		}),
-	).pipe(
-		Effect.provide(RpcClient.layerProtocolSocket()),
-		Effect.provide(Socket.layerWebSocket(makeWsRpcUrl(input.projectSlug))),
-		Effect.provide(Socket.layerWebSocketConstructorGlobal),
-		Effect.provide(RpcSerialization.layerJson),
+			})
+			.pipe(Effect.asVoid),
 	);
 
 const callClosePty = (input: ClosePtyRpcInput) =>
-	Effect.scoped(
-		Effect.gen(function* () {
-			const client = yield* RpcClient.make(WsRpcGroup);
-			yield* client.ClosePty(input);
-		}),
-	).pipe(
-		Effect.provide(RpcClient.layerProtocolSocket()),
-		Effect.provide(Socket.layerWebSocket(makeWsRpcUrl(input.projectSlug))),
-		Effect.provide(Socket.layerWebSocketConstructorGlobal),
-		Effect.provide(RpcSerialization.layerJson),
+	callControl(input.projectSlug, (client) =>
+		client.ClosePty(input).pipe(Effect.asVoid),
 	);
 
 const callCreateSession = (input: CreateSessionRpcInput) =>
-	Effect.scoped(
-		Effect.gen(function* () {
-			const client = yield* RpcClient.make(WsRpcGroup);
-			return yield* client.CreateSession({
-				projectSlug: input.projectSlug,
-				originId: input.originId,
-				...(input.title != null ? { title: input.title } : {}),
-				...(input.requestId != null ? { requestId: input.requestId } : {}),
-				...(input.instanceId != null
-					? { instanceId: ProviderInstanceIdSchema.make(input.instanceId) }
-					: {}),
-				...(input.providerId != null ? { providerId: input.providerId } : {}),
-			});
+	callControl(input.projectSlug, (client) =>
+		client.CreateSession({
+			projectSlug: input.projectSlug,
+			originId: input.originId,
+			...(input.title != null ? { title: input.title } : {}),
+			...(input.requestId != null ? { requestId: input.requestId } : {}),
+			...(input.instanceId != null
+				? { instanceId: ProviderInstanceIdSchema.make(input.instanceId) }
+				: {}),
+			...(input.providerId != null ? { providerId: input.providerId } : {}),
 		}),
-	).pipe(
-		Effect.provide(RpcClient.layerProtocolSocket()),
-		Effect.provide(Socket.layerWebSocket(makeWsRpcUrl(input.projectSlug))),
-		Effect.provide(Socket.layerWebSocketConstructorGlobal),
-		Effect.provide(RpcSerialization.layerJson),
 	);
 
 const callViewSession = (input: ViewSessionRpcInput) =>
-	Effect.scoped(
-		Effect.gen(function* () {
-			const client = yield* RpcClient.make(WsRpcGroup);
-			yield* client.ViewSession(input);
-		}),
-	).pipe(
-		Effect.provide(RpcClient.layerProtocolSocket()),
-		Effect.provide(Socket.layerWebSocket(makeWsRpcUrl(input.projectSlug))),
-		Effect.provide(Socket.layerWebSocketConstructorGlobal),
-		Effect.provide(RpcSerialization.layerJson),
+	callControl(input.projectSlug, (client) =>
+		client.ViewSession(input).pipe(Effect.asVoid),
 	);
 
 const callDeleteSession = (input: DeleteSessionRpcInput) =>
-	Effect.scoped(
-		Effect.gen(function* () {
-			const client = yield* RpcClient.make(WsRpcGroup);
-			yield* client.DeleteSession({
+	callControl(input.projectSlug, (client) =>
+		client
+			.DeleteSession({
 				projectSlug: input.projectSlug,
 				sessionId: input.sessionId,
 				...(input.originId != null ? { originId: input.originId } : {}),
-			});
-		}),
-	).pipe(
-		Effect.provide(RpcClient.layerProtocolSocket()),
-		Effect.provide(Socket.layerWebSocket(makeWsRpcUrl(input.projectSlug))),
-		Effect.provide(Socket.layerWebSocketConstructorGlobal),
-		Effect.provide(RpcSerialization.layerJson),
+			})
+			.pipe(Effect.asVoid),
 	);
 
 const callForkSession = (input: ForkSessionRpcInput) =>
-	Effect.scoped(
-		Effect.gen(function* () {
-			const client = yield* RpcClient.make(WsRpcGroup);
-			return yield* client.ForkSession({
-				projectSlug: input.projectSlug,
-				originId: input.originId,
-				...(input.sessionId != null ? { sessionId: input.sessionId } : {}),
-				...(input.messageId != null ? { messageId: input.messageId } : {}),
-			});
+	callControl(input.projectSlug, (client) =>
+		client.ForkSession({
+			projectSlug: input.projectSlug,
+			originId: input.originId,
+			...(input.sessionId != null ? { sessionId: input.sessionId } : {}),
+			...(input.messageId != null ? { messageId: input.messageId } : {}),
 		}),
-	).pipe(
-		Effect.provide(RpcClient.layerProtocolSocket()),
-		Effect.provide(Socket.layerWebSocket(makeWsRpcUrl(input.projectSlug))),
-		Effect.provide(Socket.layerWebSocketConstructorGlobal),
-		Effect.provide(RpcSerialization.layerJson),
 	);
 
 const callRespondPermission = (input: RespondPermissionRpcInput) =>
-	Effect.scoped(
-		Effect.gen(function* () {
-			const client = yield* RpcClient.make(WsRpcGroup);
-			yield* client.RespondPermission({
+	callControl(input.projectSlug, (client) =>
+		client
+			.RespondPermission({
 				projectSlug: input.projectSlug,
 				originId: input.originId,
 				commandId: input.commandId,
@@ -747,443 +517,214 @@ const callRespondPermission = (input: RespondPermissionRpcInput) =>
 				...(input.permissionDestination != null
 					? { permissionDestination: input.permissionDestination }
 					: {}),
-			});
-		}),
-	).pipe(
-		Effect.provide(RpcClient.layerProtocolSocket()),
-		Effect.provide(Socket.layerWebSocket(makeWsRpcUrl(input.projectSlug))),
-		Effect.provide(Socket.layerWebSocketConstructorGlobal),
-		Effect.provide(RpcSerialization.layerJson),
+			})
+			.pipe(Effect.asVoid),
 	);
 
 const callAnswerQuestion = (input: AnswerQuestionRpcInput) =>
-	Effect.scoped(
-		Effect.gen(function* () {
-			const client = yield* RpcClient.make(WsRpcGroup);
-			yield* client.AnswerQuestion({
+	callControl(input.projectSlug, (client) =>
+		client
+			.AnswerQuestion({
 				projectSlug: input.projectSlug,
 				originId: input.originId,
 				commandId: input.commandId,
 				toolId: input.toolId,
 				answers: { ...input.answers },
-			});
-		}),
-	).pipe(
-		Effect.provide(RpcClient.layerProtocolSocket()),
-		Effect.provide(Socket.layerWebSocket(makeWsRpcUrl(input.projectSlug))),
-		Effect.provide(Socket.layerWebSocketConstructorGlobal),
-		Effect.provide(RpcSerialization.layerJson),
+			})
+			.pipe(Effect.asVoid),
 	);
 
 const callRejectQuestion = (input: RejectQuestionRpcInput) =>
-	Effect.scoped(
-		Effect.gen(function* () {
-			const client = yield* RpcClient.make(WsRpcGroup);
-			yield* client.RejectQuestion({
+	callControl(input.projectSlug, (client) =>
+		client
+			.RejectQuestion({
 				projectSlug: input.projectSlug,
 				originId: input.originId,
 				commandId: input.commandId,
 				toolId: input.toolId,
-			});
-		}),
-	).pipe(
-		Effect.provide(RpcClient.layerProtocolSocket()),
-		Effect.provide(Socket.layerWebSocket(makeWsRpcUrl(input.projectSlug))),
-		Effect.provide(Socket.layerWebSocketConstructorGlobal),
-		Effect.provide(RpcSerialization.layerJson),
+			})
+			.pipe(Effect.asVoid),
 	);
 
 const callGetTodo = (input: GetTodoRpcInput) =>
-	Effect.scoped(
-		Effect.gen(function* () {
-			const client = yield* RpcClient.make(WsRpcGroup);
-			return yield* client.GetTodo(input);
-		}),
-	).pipe(
-		Effect.provide(RpcClient.layerProtocolSocket()),
-		Effect.provide(Socket.layerWebSocket(makeWsRpcUrl(input.projectSlug))),
-		Effect.provide(Socket.layerWebSocketConstructorGlobal),
-		Effect.provide(RpcSerialization.layerJson),
-	);
+	callControl(input.projectSlug, (client) => client.GetTodo(input));
 
 const callGetFileTree = (input: GetFileTreeRpcInput) =>
-	Effect.scoped(
-		Effect.gen(function* () {
-			const client = yield* RpcClient.make(WsRpcGroup);
-			return yield* client.GetFileTree(input);
-		}),
-	).pipe(
-		Effect.provide(RpcClient.layerProtocolSocket()),
-		Effect.provide(Socket.layerWebSocket(makeWsRpcUrl(input.projectSlug))),
-		Effect.provide(Socket.layerWebSocketConstructorGlobal),
-		Effect.provide(RpcSerialization.layerJson),
-	);
+	callControl(input.projectSlug, (client) => client.GetFileTree(input));
 
 const callGetFileList = (input: GetFileListRpcInput) =>
-	Effect.scoped(
-		Effect.gen(function* () {
-			const client = yield* RpcClient.make(WsRpcGroup);
-			return yield* client.GetFileList(input);
-		}),
-	).pipe(
-		Effect.provide(RpcClient.layerProtocolSocket()),
-		Effect.provide(Socket.layerWebSocket(makeWsRpcUrl(input.projectSlug))),
-		Effect.provide(Socket.layerWebSocketConstructorGlobal),
-		Effect.provide(RpcSerialization.layerJson),
-	);
+	callControl(input.projectSlug, (client) => client.GetFileList(input));
 
 const callGetFileContent = (input: GetFileContentRpcInput) =>
-	Effect.scoped(
-		Effect.gen(function* () {
-			const client = yield* RpcClient.make(WsRpcGroup);
-			return yield* client.GetFileContent(input);
-		}),
-	).pipe(
-		Effect.provide(RpcClient.layerProtocolSocket()),
-		Effect.provide(Socket.layerWebSocket(makeWsRpcUrl(input.projectSlug))),
-		Effect.provide(Socket.layerWebSocketConstructorGlobal),
-		Effect.provide(RpcSerialization.layerJson),
-	);
+	callControl(input.projectSlug, (client) => client.GetFileContent(input));
 
 const callGetToolContent = (input: GetToolContentRpcInput) =>
-	Effect.scoped(
-		Effect.gen(function* () {
-			const client = yield* RpcClient.make(WsRpcGroup);
-			return yield* client.GetToolContent(input);
-		}),
-	).pipe(
-		Effect.provide(RpcClient.layerProtocolSocket()),
-		Effect.provide(Socket.layerWebSocket(makeWsRpcUrl(input.projectSlug))),
-		Effect.provide(Socket.layerWebSocketConstructorGlobal),
-		Effect.provide(RpcSerialization.layerJson),
-	);
+	callControl(input.projectSlug, (client) => client.GetToolContent(input));
 
 const callListDirectories = (input: ListDirectoriesRpcInput) =>
-	Effect.scoped(
-		Effect.gen(function* () {
-			const client = yield* RpcClient.make(WsRpcGroup);
-			return yield* client.ListDirectories(input);
-		}),
-	).pipe(
-		Effect.provide(RpcClient.layerProtocolSocket()),
-		Effect.provide(Socket.layerWebSocket(makeWsRpcUrl(input.projectSlug))),
-		Effect.provide(Socket.layerWebSocketConstructorGlobal),
-		Effect.provide(RpcSerialization.layerJson),
-	);
+	callControl(input.projectSlug, (client) => client.ListDirectories(input));
 
 const callSwitchAgent = (input: SwitchAgentRpcInput) =>
-	Effect.scoped(
-		Effect.gen(function* () {
-			const client = yield* RpcClient.make(WsRpcGroup);
-			yield* client.SwitchAgent({
+	callControl(input.projectSlug, (client) =>
+		client
+			.SwitchAgent({
 				projectSlug: input.projectSlug,
 				sessionId: input.sessionId,
 				agentId: input.agentId,
 				...(input.originId ? { originId: input.originId } : {}),
-			});
-		}),
-	).pipe(
-		Effect.provide(RpcClient.layerProtocolSocket()),
-		Effect.provide(Socket.layerWebSocket(makeWsRpcUrl(input.projectSlug))),
-		Effect.provide(Socket.layerWebSocketConstructorGlobal),
-		Effect.provide(RpcSerialization.layerJson),
+			})
+			.pipe(Effect.asVoid),
 	);
 
 const callSwitchContextWindow = (input: SwitchContextWindowRpcInput) =>
-	Effect.scoped(
-		Effect.gen(function* () {
-			const client = yield* RpcClient.make(WsRpcGroup);
-			return yield* client.SwitchContextWindow({
-				projectSlug: input.projectSlug,
-				sessionId: input.sessionId,
-				contextWindow: input.contextWindow,
-				...(input.originId ? { originId: input.originId } : {}),
-			});
+	callControl(input.projectSlug, (client) =>
+		client.SwitchContextWindow({
+			projectSlug: input.projectSlug,
+			sessionId: input.sessionId,
+			contextWindow: input.contextWindow,
+			...(input.originId ? { originId: input.originId } : {}),
 		}),
-	).pipe(
-		Effect.provide(RpcClient.layerProtocolSocket()),
-		Effect.provide(Socket.layerWebSocket(makeWsRpcUrl(input.projectSlug))),
-		Effect.provide(Socket.layerWebSocketConstructorGlobal),
-		Effect.provide(RpcSerialization.layerJson),
 	);
 
 const callSwitchModel = (input: SwitchModelRpcInput) =>
-	Effect.scoped(
-		Effect.gen(function* () {
-			const client = yield* RpcClient.make(WsRpcGroup);
-			return yield* client.SwitchModel({
-				projectSlug: input.projectSlug,
-				sessionId: input.sessionId,
-				modelId: input.modelId,
-				providerId: input.providerId,
-				...(input.originId ? { originId: input.originId } : {}),
-			});
+	callControl(input.projectSlug, (client) =>
+		client.SwitchModel({
+			projectSlug: input.projectSlug,
+			sessionId: input.sessionId,
+			modelId: input.modelId,
+			providerId: input.providerId,
+			...(input.originId ? { originId: input.originId } : {}),
 		}),
-	).pipe(
-		Effect.provide(RpcClient.layerProtocolSocket()),
-		Effect.provide(Socket.layerWebSocket(makeWsRpcUrl(input.projectSlug))),
-		Effect.provide(Socket.layerWebSocketConstructorGlobal),
-		Effect.provide(RpcSerialization.layerJson),
 	);
 
 const callSetDefaultModel = (input: SetDefaultModelRpcInput) =>
-	Effect.scoped(
-		Effect.gen(function* () {
-			const client = yield* RpcClient.make(WsRpcGroup);
-			return yield* client.SetDefaultModel({
-				projectSlug: input.projectSlug,
-				model: input.model,
-				provider: input.provider,
-				...(input.originId ? { originId: input.originId } : {}),
-			});
+	callControl(input.projectSlug, (client) =>
+		client.SetDefaultModel({
+			projectSlug: input.projectSlug,
+			model: input.model,
+			provider: input.provider,
+			...(input.originId ? { originId: input.originId } : {}),
 		}),
-	).pipe(
-		Effect.provide(RpcClient.layerProtocolSocket()),
-		Effect.provide(Socket.layerWebSocket(makeWsRpcUrl(input.projectSlug))),
-		Effect.provide(Socket.layerWebSocketConstructorGlobal),
-		Effect.provide(RpcSerialization.layerJson),
 	);
 
 const callSetDefaultPermissionMode = (
 	input: SetDefaultPermissionModeRpcInput,
 ) =>
-	Effect.scoped(
-		Effect.gen(function* () {
-			const client = yield* RpcClient.make(WsRpcGroup);
-			return yield* client.SetDefaultPermissionMode({
-				projectSlug: input.projectSlug,
-				mode: input.mode,
-				...(input.originId ? { originId: input.originId } : {}),
-			});
+	callControl(input.projectSlug, (client) =>
+		client.SetDefaultPermissionMode({
+			projectSlug: input.projectSlug,
+			mode: input.mode,
+			...(input.originId ? { originId: input.originId } : {}),
 		}),
-	).pipe(
-		Effect.provide(RpcClient.layerProtocolSocket()),
-		Effect.provide(Socket.layerWebSocket(makeWsRpcUrl(input.projectSlug))),
-		Effect.provide(Socket.layerWebSocketConstructorGlobal),
-		Effect.provide(RpcSerialization.layerJson),
 	);
 
 const callSetHiddenEntries = (input: SetHiddenEntriesRpcInput) =>
-	Effect.scoped(
-		Effect.gen(function* () {
-			const client = yield* RpcClient.make(WsRpcGroup);
-			return yield* client.SetHiddenEntries({
-				projectSlug: input.projectSlug,
-				...(input.hiddenModels ? { hiddenModels: input.hiddenModels } : {}),
-				...(input.hiddenAgents ? { hiddenAgents: input.hiddenAgents } : {}),
-				...(input.originId ? { originId: input.originId } : {}),
-			});
+	callControl(input.projectSlug, (client) =>
+		client.SetHiddenEntries({
+			projectSlug: input.projectSlug,
+			...(input.hiddenModels ? { hiddenModels: input.hiddenModels } : {}),
+			...(input.hiddenAgents ? { hiddenAgents: input.hiddenAgents } : {}),
+			...(input.originId ? { originId: input.originId } : {}),
 		}),
-	).pipe(
-		Effect.provide(RpcClient.layerProtocolSocket()),
-		Effect.provide(Socket.layerWebSocket(makeWsRpcUrl(input.projectSlug))),
-		Effect.provide(Socket.layerWebSocketConstructorGlobal),
-		Effect.provide(RpcSerialization.layerJson),
 	);
 
 const callGetClaudeSettings = (input: GetClaudeSettingsRpcInput) =>
-	Effect.scoped(
-		Effect.gen(function* () {
-			const client = yield* RpcClient.make(WsRpcGroup);
-			return yield* client.GetClaudeSettings(input);
-		}),
-	).pipe(
-		Effect.provide(RpcClient.layerProtocolSocket()),
-		Effect.provide(Socket.layerWebSocket(makeWsRpcUrl(input.projectSlug))),
-		Effect.provide(Socket.layerWebSocketConstructorGlobal),
-		Effect.provide(RpcSerialization.layerJson),
-	);
+	callControl(input.projectSlug, (client) => client.GetClaudeSettings(input));
 
 const callSetClaudeSettings = (input: SetClaudeSettingsRpcInput) =>
-	Effect.scoped(
-		Effect.gen(function* () {
-			const client = yield* RpcClient.make(WsRpcGroup);
-			return yield* client.SetClaudeSettings({
-				projectSlug: input.projectSlug,
-				overrides: input.overrides,
-				...(input.originId ? { originId: input.originId } : {}),
-			});
+	callControl(input.projectSlug, (client) =>
+		client.SetClaudeSettings({
+			projectSlug: input.projectSlug,
+			overrides: input.overrides,
+			...(input.originId ? { originId: input.originId } : {}),
 		}),
-	).pipe(
-		Effect.provide(RpcClient.layerProtocolSocket()),
-		Effect.provide(Socket.layerWebSocket(makeWsRpcUrl(input.projectSlug))),
-		Effect.provide(Socket.layerWebSocketConstructorGlobal),
-		Effect.provide(RpcSerialization.layerJson),
 	);
 
 const callResolveClaudeSettings = (input: ResolveClaudeSettingsRpcInput) =>
-	Effect.scoped(
-		Effect.gen(function* () {
-			const client = yield* RpcClient.make(WsRpcGroup);
-			return yield* client.ResolveClaudeSettings(input);
-		}),
-	).pipe(
-		Effect.provide(RpcClient.layerProtocolSocket()),
-		Effect.provide(Socket.layerWebSocket(makeWsRpcUrl(input.projectSlug))),
-		Effect.provide(Socket.layerWebSocketConstructorGlobal),
-		Effect.provide(RpcSerialization.layerJson),
+	callControl(input.projectSlug, (client) =>
+		client.ResolveClaudeSettings(input),
 	);
 
 const callReloadProviderSession = (input: ReloadProviderSessionRpcInput) =>
-	Effect.scoped(
-		Effect.gen(function* () {
-			const client = yield* RpcClient.make(WsRpcGroup);
-			return yield* client.ReloadProviderSession({
-				projectSlug: input.projectSlug,
-				sessionId: input.sessionId,
-				commandId: input.commandId,
-				...(input.originId ? { originId: input.originId } : {}),
-			});
+	callControl(input.projectSlug, (client) =>
+		client.ReloadProviderSession({
+			projectSlug: input.projectSlug,
+			sessionId: input.sessionId,
+			commandId: input.commandId,
+			...(input.originId ? { originId: input.originId } : {}),
 		}),
-	).pipe(
-		Effect.provide(RpcClient.layerProtocolSocket()),
-		Effect.provide(Socket.layerWebSocket(makeWsRpcUrl(input.projectSlug))),
-		Effect.provide(Socket.layerWebSocketConstructorGlobal),
-		Effect.provide(RpcSerialization.layerJson),
 	);
 
 const callRenameSession = (input: RenameSessionRpcInput) =>
-	Effect.scoped(
-		Effect.gen(function* () {
-			const client = yield* RpcClient.make(WsRpcGroup);
-			yield* client.RenameSession({
+	callControl(input.projectSlug, (client) =>
+		client
+			.RenameSession({
 				projectSlug: input.projectSlug,
 				sessionId: input.sessionId,
 				title: input.title,
 				...(input.originId ? { originId: input.originId } : {}),
-			});
-		}),
-	).pipe(
-		Effect.provide(RpcClient.layerProtocolSocket()),
-		Effect.provide(Socket.layerWebSocket(makeWsRpcUrl(input.projectSlug))),
-		Effect.provide(Socket.layerWebSocketConstructorGlobal),
-		Effect.provide(RpcSerialization.layerJson),
+			})
+			.pipe(Effect.asVoid),
 	);
 
 const callSwitchVariant = (input: SwitchVariantRpcInput) =>
-	Effect.scoped(
-		Effect.gen(function* () {
-			const client = yield* RpcClient.make(WsRpcGroup);
-			return yield* client.SwitchVariant({
-				projectSlug: input.projectSlug,
-				sessionId: input.sessionId,
-				variant: input.variant,
-				...(input.originId ? { originId: input.originId } : {}),
-			});
+	callControl(input.projectSlug, (client) =>
+		client.SwitchVariant({
+			projectSlug: input.projectSlug,
+			sessionId: input.sessionId,
+			variant: input.variant,
+			...(input.originId ? { originId: input.originId } : {}),
 		}),
-	).pipe(
-		Effect.provide(RpcClient.layerProtocolSocket()),
-		Effect.provide(Socket.layerWebSocket(makeWsRpcUrl(input.projectSlug))),
-		Effect.provide(Socket.layerWebSocketConstructorGlobal),
-		Effect.provide(RpcSerialization.layerJson),
 	);
 
 const callSwitchPermissionMode = (input: SwitchPermissionModeRpcInput) =>
-	Effect.scoped(
-		Effect.gen(function* () {
-			const client = yield* RpcClient.make(WsRpcGroup);
-			return yield* client.SwitchPermissionMode({
-				projectSlug: input.projectSlug,
-				sessionId: input.sessionId,
-				mode: input.mode,
-				...(input.originId ? { originId: input.originId } : {}),
-			});
+	callControl(input.projectSlug, (client) =>
+		client.SwitchPermissionMode({
+			projectSlug: input.projectSlug,
+			sessionId: input.sessionId,
+			mode: input.mode,
+			...(input.originId ? { originId: input.originId } : {}),
 		}),
-	).pipe(
-		Effect.provide(RpcClient.layerProtocolSocket()),
-		Effect.provide(Socket.layerWebSocket(makeWsRpcUrl(input.projectSlug))),
-		Effect.provide(Socket.layerWebSocketConstructorGlobal),
-		Effect.provide(RpcSerialization.layerJson),
 	);
 
 const callListSessions = (input: ListSessionsRpcInput) =>
-	Effect.scoped(
-		Effect.gen(function* () {
-			const client = yield* RpcClient.make(WsRpcGroup);
-			return yield* client.ListSessions(input);
-		}),
-	).pipe(
-		Effect.provide(RpcClient.layerProtocolSocket()),
-		Effect.provide(Socket.layerWebSocket(makeWsRpcUrl(input.projectSlug))),
-		Effect.provide(Socket.layerWebSocketConstructorGlobal),
-		Effect.provide(RpcSerialization.layerJson),
-	);
+	callControl(input.projectSlug, (client) => client.ListSessions(input));
 
 const callLoadMoreHistory = (input: LoadMoreHistoryRpcInput) =>
-	Effect.scoped(
-		Effect.gen(function* () {
-			const client = yield* RpcClient.make(WsRpcGroup);
-			return yield* client.LoadMoreHistory(input);
-		}),
-	).pipe(
-		Effect.provide(RpcClient.layerProtocolSocket()),
-		Effect.provide(Socket.layerWebSocket(makeWsRpcUrl(input.projectSlug))),
-		Effect.provide(Socket.layerWebSocketConstructorGlobal),
-		Effect.provide(RpcSerialization.layerJson),
-	);
+	callControl(input.projectSlug, (client) => client.LoadMoreHistory(input));
 
 const callRewindSession = (input: RewindSessionRpcInput) =>
-	Effect.scoped(
-		Effect.gen(function* () {
-			const client = yield* RpcClient.make(WsRpcGroup);
-			return yield* client.RewindSession(input);
-		}),
-	).pipe(
-		Effect.provide(RpcClient.layerProtocolSocket()),
-		Effect.provide(Socket.layerWebSocket(makeWsRpcUrl(input.projectSlug))),
-		Effect.provide(Socket.layerWebSocketConstructorGlobal),
-		Effect.provide(RpcSerialization.layerJson),
-	);
+	callControl(input.projectSlug, (client) => client.RewindSession(input));
 
 const callSendMessage = (input: SendMessageRpcInput) =>
-	Effect.scoped(
-		Effect.gen(function* () {
-			const client = yield* RpcClient.make(WsRpcGroup);
-			yield* client.SendMessage({
+	callControl(input.projectSlug, (client) =>
+		client
+			.SendMessage({
 				projectSlug: input.projectSlug,
 				sessionId: input.sessionId,
 				text: input.text,
 				commandId: input.commandId,
 				...(input.images ? { images: [...input.images] } : {}),
 				...(input.originId ? { originId: input.originId } : {}),
-			});
-		}),
-	).pipe(
-		Effect.provide(RpcClient.layerProtocolSocket()),
-		Effect.provide(Socket.layerWebSocket(makeWsRpcUrl(input.projectSlug))),
-		Effect.provide(Socket.layerWebSocketConstructorGlobal),
-		Effect.provide(RpcSerialization.layerJson),
+			})
+			.pipe(Effect.asVoid),
 	);
 
 const callSyncInputDraft = (input: SyncInputDraftRpcInput) =>
-	Effect.scoped(
-		Effect.gen(function* () {
-			const client = yield* RpcClient.make(WsRpcGroup);
-			yield* client.SyncInputDraft({
+	callControl(input.projectSlug, (client) =>
+		client
+			.SyncInputDraft({
 				projectSlug: input.projectSlug,
 				sessionId: input.sessionId,
 				text: input.text,
 				...(input.originId ? { originId: input.originId } : {}),
-			});
-		}),
-	).pipe(
-		Effect.provide(RpcClient.layerProtocolSocket()),
-		Effect.provide(Socket.layerWebSocket(makeWsRpcUrl(input.projectSlug))),
-		Effect.provide(Socket.layerWebSocketConstructorGlobal),
-		Effect.provide(RpcSerialization.layerJson),
+			})
+			.pipe(Effect.asVoid),
 	);
 
 const callSetLogLevel = (input: SetLogLevelRpcInput) =>
-	Effect.scoped(
-		Effect.gen(function* () {
-			const client = yield* RpcClient.make(WsRpcGroup);
-			yield* client.SetLogLevel(input);
-		}),
-	).pipe(
-		Effect.provide(RpcClient.layerProtocolSocket()),
-		Effect.provide(Socket.layerWebSocket(makeWsRpcUrl(input.projectSlug))),
-		Effect.provide(Socket.layerWebSocketConstructorGlobal),
-		Effect.provide(RpcSerialization.layerJson),
+	callControl(input.projectSlug, (client) =>
+		client.SetLogLevel(input).pipe(Effect.asVoid),
 	);
 
 export async function cancelSessionRpc(

@@ -73,6 +73,7 @@ vi.mock("../../../src/lib/frontend/stores/ui.svelte.js", () => ({
 
 import {
 	clearMessages,
+	getOrCreateSessionActivity,
 	isProcessing,
 	isStreaming,
 	phaseToStreaming,
@@ -188,7 +189,7 @@ describe("handleMessage calls triggerNotifications for notification_event (cross
 	});
 
 	it("does NOT update chat state for notification_event (only triggers notification)", () => {
-		phaseToStreaming();
+		phaseToStreaming(getOrCreateSessionActivity("test-session"));
 
 		handleMessage({
 			type: "notification_event",

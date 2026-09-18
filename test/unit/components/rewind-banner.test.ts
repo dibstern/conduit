@@ -4,6 +4,8 @@ import RewindBanner from "../../../src/lib/frontend/components/overlays/RewindBa
 import {
 	chatState,
 	clearMessages,
+	getOrCreateSessionActivity,
+	getOrCreateSessionMessages,
 } from "../../../src/lib/frontend/stores/chat.svelte.js";
 import { sessionState } from "../../../src/lib/frontend/stores/session.svelte.js";
 import { uiState } from "../../../src/lib/frontend/stores/ui.svelte.js";
@@ -40,10 +42,11 @@ describe("RewindBanner", () => {
 	beforeEach(() => {
 		rewindSessionRpcSpy.mockClear();
 		sessionState.currentId = "session-1";
+		getOrCreateSessionActivity("session-1");
 		uiState.rewindActive = true;
 		uiState.toasts = [];
 		uiState.rewindSelectedUuid = "message-1";
-		chatState.messages = [
+		getOrCreateSessionMessages("session-1").messages = [
 			{
 				type: "user",
 				uuid: "message-1",
@@ -78,7 +81,7 @@ describe("RewindBanner", () => {
 	});
 
 	it("rewinds to an assistant message with a provider id", async () => {
-		chatState.messages = [
+		getOrCreateSessionMessages("session-1").messages = [
 			{
 				type: "assistant",
 				uuid: "message-1",
@@ -102,7 +105,9 @@ describe("RewindBanner", () => {
 	});
 
 	it("keeps the transcript and reports a message that has no provider id yet", async () => {
-		chatState.messages = [{ type: "user", uuid: "message-1", text: "Pending" }];
+		getOrCreateSessionMessages("session-1").messages = [
+			{ type: "user", uuid: "message-1", text: "Pending" },
+		];
 		const { getByRole } = render(RewindBanner);
 		await fireEvent.click(getByRole("button", { name: "Rewind" }));
 		expect(rewindSessionRpcSpy).not.toHaveBeenCalled();
@@ -146,7 +151,7 @@ describe("RewindBanner", () => {
 		);
 		const { getByRole } = render(RewindBanner);
 		await fireEvent.click(getByRole("button", { name: "Rewind" }));
-		chatState.messages = [
+		getOrCreateSessionMessages("session-1").messages = [
 			{
 				type: "user",
 				uuid: "rehydrated",
@@ -186,7 +191,7 @@ describe("RewindBanner", () => {
 					resolveReply = resolve;
 				}),
 		);
-		chatState.messages = [
+		getOrCreateSessionMessages("session-1").messages = [
 			{ type: "user", uuid: "before", text: "Keep this" },
 			{
 				type: "user",

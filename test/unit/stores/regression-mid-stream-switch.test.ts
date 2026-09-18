@@ -75,8 +75,9 @@ beforeEach(() => {
 	for (const id of ["session-a", "session-b"]) {
 		clearSessionChatState(id);
 	}
-	ta = testActivity();
-	tm = testMessages();
+	// Slots live under session-a: every test drives the mirror through it.
+	ta = testActivity("session-a");
+	tm = testMessages("session-a");
 	sessionState.rootSessions = [];
 	sessionState.allSessions = [];
 	sessionState.searchResults = null;

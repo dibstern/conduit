@@ -95,8 +95,7 @@ describe("Phase does not leak between sessions", () => {
 	it("status:idle clears the global phase for the dispatched session", () => {
 		const slotA = getOrCreateSessionSlot("session-a");
 
-		// Set global phase to processing (legacy path)
-		chatState.phase = "processing";
+		slotA.activity.phase = "processing";
 
 		// Send idle to A
 		handleStatus(slotA.activity, slotA.messages, {

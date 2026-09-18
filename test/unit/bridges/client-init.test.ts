@@ -101,6 +101,7 @@ function makeEmptyHistoryReadQuery(
 				id: "requested-session",
 				provider,
 				provider_sid: null,
+				version: 0,
 				title: "Requested session",
 				status: "idle",
 				parent_id: parentId,

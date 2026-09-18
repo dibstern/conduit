@@ -429,7 +429,7 @@ describe("MessageProjector", () => {
 					partId: "tool1",
 					toolName: "read_file",
 					callId: "call_123",
-					input: { path: "/foo/bar.ts" },
+					input: { tool: "Read", filePath: "/foo/bar.ts" },
 				} satisfies ToolStartedPayload,
 				2,
 			);
@@ -445,7 +445,8 @@ describe("MessageProjector", () => {
 			expect(parts[0]?.tool_name).toBe("read_file");
 			expect(parts[0]?.call_id).toBe("call_123");
 			expect(JSON.parse(parts[0]?.input ?? "null")).toEqual({
-				path: "/foo/bar.ts",
+				tool: "Read",
+				filePath: "/foo/bar.ts",
 			});
 			expect(parts[0]?.status).toBe("started");
 		});
@@ -474,7 +475,7 @@ describe("MessageProjector", () => {
 						partId: "tool1",
 						toolName: "read_file",
 						callId: "call_123",
-						input: { path: "/foo" },
+						input: { tool: "Read", filePath: "/foo" },
 					} satisfies ToolStartedPayload,
 					2,
 				),
@@ -736,7 +737,7 @@ describe("MessageProjector", () => {
 						partId: "tool1",
 						toolName: "read_file",
 						callId: "call_123",
-						input: { path: "/foo" },
+						input: { tool: "Read", filePath: "/foo" },
 					} satisfies ToolStartedPayload,
 					2,
 				),
@@ -1133,7 +1134,7 @@ describe("MessageProjector", () => {
 						partId: "tool1",
 						toolName: "read_file",
 						callId: "call_abc",
-						input: { path: "/src/main.ts" },
+						input: { tool: "Read", filePath: "/src/main.ts" },
 					} satisfies ToolStartedPayload,
 					5,
 				),
@@ -1319,7 +1320,7 @@ describe("MessageProjector", () => {
 					partId: "tp1",
 					toolName: "Read",
 					callId: "call-1",
-					input: { file: "test.ts" },
+					input: { tool: "Read", filePath: "test.ts" },
 				} satisfies ToolStartedPayload,
 				1,
 			);
@@ -1410,7 +1411,7 @@ describe("MessageProjector", () => {
 					partId: "tp2",
 					toolName: "Bash",
 					callId: "call-2",
-					input: { command: "ls" },
+					input: { tool: "Bash", command: "ls" },
 				} satisfies ToolStartedPayload,
 				2,
 			);
@@ -1560,7 +1561,7 @@ describe("MessageProjector", () => {
 						partId: "tool1",
 						toolName: "bash",
 						callId: "c1",
-						input: {},
+						input: { tool: "Bash", command: "" },
 					} satisfies ToolStartedPayload,
 					4,
 				),

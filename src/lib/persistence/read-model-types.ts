@@ -2,6 +2,7 @@
 
 export interface SessionRow {
 	id: string;
+	version: number;
 	provider: string;
 	provider_sid: string | null;
 	title: string;
@@ -16,6 +17,7 @@ export interface SessionRow {
 
 export interface MessageRow {
 	id: string;
+	version: number;
 	session_id: string;
 	turn_id: string | null;
 	role: string;

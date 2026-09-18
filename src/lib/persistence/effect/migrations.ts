@@ -11,6 +11,7 @@ import {
 	MESSAGE_PARTS_FILE_TYPE_MIGRATION,
 	MESSAGES_CONTEXT_WINDOW_MIGRATION,
 	PROJECTION_FAILURES_MIGRATION,
+	READ_MODEL_VERSION_MIGRATION,
 	readMigrationSql,
 	SESSION_CASCADE_DELETES_MIGRATION,
 	SESSIONS_PERMISSION_MODE_MIGRATION,
@@ -402,6 +403,14 @@ const verifyExistingBaselineSchema: Effect.Effect<
 	const actualIndexNames = indexes.map((row) => row.name);
 	const knownIndexShape =
 		sameStrings(actualIndexNames, expectedIndexNames) ||
+		sameStrings(
+			actualIndexNames,
+			[
+				...expectedIndexNames,
+				"idx_sessions_version",
+				"idx_messages_version",
+			].sort(),
+		) ||
 		sameStrings(actualIndexNames, preDurableProviderCommandIndexNames);
 	if (!knownIndexShape) {
 		return yield* failSchemaMismatch(
@@ -425,6 +434,8 @@ const verifyExistingBaselineSchema: Effect.Effect<
 		const actualColumns = columns.map((column) => column.name);
 		const matchesKnownSchema =
 			sameStrings(actualColumns, expectedColumns) ||
+			((tableName === "sessions" || tableName === "messages") &&
+				sameStrings(actualColumns, [...expectedColumns, "version"])) ||
 			(tableName === "command_receipts" &&
 				sameStrings(actualColumns, preDurableCommandReceiptColumns)) ||
 			(tableName === "message_parts" &&
@@ -585,6 +596,23 @@ const runProjectionFailuresMigration: Effect.Effect<
 	yield* executeSqlStatements(projectionFailuresMigrationSql);
 });
 
+const runReadModelVersionMigration = Effect.gen(function* () {
+	const sql = yield* SqlClient.SqlClient;
+	const sessionColumns = yield* sql<{
+		name: string;
+	}>`PRAGMA table_info(sessions)`;
+	const messageColumns = yield* sql<{
+		name: string;
+	}>`PRAGMA table_info(messages)`;
+	// A database may have applied this SQL through the synchronous registry.
+	if (
+		sessionColumns.some((column) => column.name === "version") &&
+		messageColumns.some((column) => column.name === "version")
+	)
+		return;
+	yield* executeSqlStatements(readMigrationSql(READ_MODEL_VERSION_MIGRATION));
+});
+
 /** 2026-07-15T00:00:00.000Z — midnight UTC of the day 0004_drop_events_session_fk shipped (b2b698c6). */
 export const LEGACY_SKELETON_CUTOFF_MS = 1_784_073_600_000;
 export const MAX_PURGEABLE_SKELETON_SESSIONS = 25;
@@ -710,6 +738,7 @@ export const effectMigrationEntries = {
 		runPurgeLegacySkeletonSessionsMigration,
 	"0011_session_cascade_deletes": runSessionCascadeDeletesMigration,
 	"0012_create_projection_failures": runProjectionFailuresMigration,
+	"0013_read_model_version": runReadModelVersionMigration,
 } satisfies Record<string, Effect.Effect<void, unknown, SqlClient.SqlClient>>;
 
 export function makeEffectMigrationLoader(

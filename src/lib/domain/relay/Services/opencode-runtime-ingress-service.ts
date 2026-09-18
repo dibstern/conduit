@@ -68,6 +68,10 @@ export class EffectOpenCodeRuntimeIngress
 	private readonly log: OpenCodeRuntimeIngressLog;
 	private readonly translator = new OpenCodeRuntimeEventTranslator();
 	private readonly seenSessions = new Set<string>();
+	/** One permit per session. Provider callbacks for a session overlap, and
+	 *  translation state may only advance once the events it produced have
+	 *  committed, so translate → persist → keep runs as one critical section. */
+	private readonly sessionGates = new Map<string, Effect.Semaphore>();
 
 	private stats: OpenCodeRuntimeIngressStats = {
 		eventsReceived: 0,
@@ -91,18 +95,12 @@ export class EffectOpenCodeRuntimeIngress
 		return effect.pipe(Effect.provideService(SqlClient.SqlClient, this.sql));
 	}
 
-	private hasDurableSession(sessionId: string): Effect.Effect<boolean> {
-		return this.withSql(
-			Effect.gen(function* () {
-				const sql = yield* SqlClient.SqlClient;
-				const rows = yield* sql<{ sequence: number }>`
-					SELECT sequence FROM events
-					WHERE session_id = ${sessionId}
-						AND type = 'session.created'
-					LIMIT 1`;
-				return rows.length > 0;
-			}),
-		).pipe(Effect.catchAllCause(() => Effect.succeed(false)));
+	private sessionGate(sessionId: string): Effect.Semaphore {
+		const existing = this.sessionGates.get(sessionId);
+		if (existing) return existing;
+		const gate = Effect.unsafeMakeSemaphore(1);
+		this.sessionGates.set(sessionId, gate);
+		return gate;
 	}
 
 	private hasProjectedSession(sessionId: string): Effect.Effect<boolean> {
@@ -144,12 +142,41 @@ export class EffectOpenCodeRuntimeIngress
 				} satisfies OpenCodeRuntimeIngressResult;
 			}
 
+			return yield* this.sessionGate(sessionId).withPermits(1)(
+				this.ingestSessionEvent(event, sessionId, providerInstanceId),
+			);
+		}).pipe(
+			Effect.catchAll((err: unknown) =>
+				Effect.sync(() => {
+					this.stats.errors++;
+					const detail = formatErrorDetail(err);
+					this.log.warn("opencode-runtime-ingress: failed to ingest event", {
+						eventType: event.type,
+						sessionId,
+						error: detail,
+					});
+					return { ok: false, reason: "error", error: detail } as const;
+				}),
+			),
+		);
+	}
+
+	private ingestSessionEvent(
+		event: SSEEvent,
+		sessionId: string,
+		providerInstanceId: string,
+	): Effect.Effect<OpenCodeRuntimeIngressResult, unknown> {
+		return Effect.gen(this, function* () {
+			const translation = this.translator.forkSession(sessionId);
 			const translated = yield* Effect.try({
-				try: () => this.translator.translate(event, sessionId),
+				try: () => this.translator.translateInto(event, sessionId, translation),
 				catch: (cause) => cause,
 			});
 
 			if (!translated || translated.length === 0) {
+				// Nothing to persist, so nothing can roll back: whatever the
+				// translator learned about this event stands.
+				this.translator.commitSession(sessionId, translation);
 				this.stats.eventsSkipped++;
 				this.log.verbose(
 					"opencode-runtime-ingress: event not translatable, skipping",
@@ -178,10 +205,22 @@ export class EffectOpenCodeRuntimeIngress
 			// the sole live-delivery path to the browser for OpenCode; publishing
 			// here too would deliver every streamed delta twice (rendered as
 			// doubled text, e.g. "I'mI'm ready. ready.").
+			//
+			// Translation state advances with the events it produced and not
+			// before: a batch that rolled back leaves the fork unused, so the next
+			// copy of the same event translates and persists again. It advances at
+			// the durable boundary — inside the append+project transaction's
+			// uninterruptible region, after COMMIT and before publication — because
+			// everything after COMMIT (bus publish, relay publish) can die or be
+			// interrupted while the batch stays durable, and a retry then would
+			// translate the same event onto a store that already holds it.
 			const written = yield* this.ingestion.ingestBatch(runtimeEvents, {
 				publishToRelay: false,
+				afterCommit: Effect.sync(() => {
+					this.translator.commitSession(sessionId, translation);
+					this.seenSessions.add(sessionId);
+				}),
 			});
-			this.seenSessions.add(sessionId);
 
 			this.stats.eventsWritten += written;
 			this.log.debug("opencode-runtime-ingress: appended events", {
@@ -196,29 +235,18 @@ export class EffectOpenCodeRuntimeIngress
 				eventsWritten: written,
 				sessionSeeded,
 			} satisfies OpenCodeRuntimeIngressResult;
-		}).pipe(
-			Effect.catchAll((err: unknown) =>
-				Effect.gen(this, function* () {
-					this.stats.errors++;
-					const detail = formatErrorDetail(err);
-					const durableSession =
-						sessionId != null
-							? yield* this.hasDurableSession(sessionId)
-							: false;
-					this.log.warn("opencode-runtime-ingress: failed to ingest event", {
-						eventType: event.type,
-						sessionId,
-						error: detail,
-						durableSession,
-					});
-					return { ok: false, reason: "error", error: detail } as const;
-				}),
-			),
-		);
+		});
 	}
 
+	/** Synchronous by contract (the SSE callback calls it inline) and safe to
+	 *  stay that way: it bumps a reconnect generation and drops announcements in
+	 *  one synchronous step, with no suspension point for an in-flight ingest to
+	 *  interleave with, and a fork translated under the old generation drops its
+	 *  announcements when it commits. Taking every session gate instead would
+	 *  have to block a callback on in-flight SQL and would still miss sessions
+	 *  whose gate is created after the sweep. */
 	onReconnect(): void {
-		this.translator.reset();
+		this.translator.resetAnnouncements();
 		this.log.info("opencode-runtime-ingress: translator reset on reconnect");
 	}
 

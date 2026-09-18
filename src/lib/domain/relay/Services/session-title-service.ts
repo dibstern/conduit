@@ -343,29 +343,28 @@ export const makeSessionTitleServiceLive = (
 					const projectionRunner = projectionRunnerOption.value;
 					const sql = sqlOption.value;
 
-					const recovered = yield* projectionRunner.isRecovered();
-					if (!recovered) {
-						yield* withSql(projectionRunner.recover(), sql).pipe(Effect.asVoid);
-					}
-
 					const createdAt = Date.now();
-					const stored = yield* eventStore.append(
-						canonicalEvent(
-							"session.renamed",
-							sessionId,
-							{
-								sessionId,
-								title,
-							},
-							{
-								provider: current.provider,
-								createdAt,
-								metadata: { source: AUTO_TITLE_SOURCE },
-							},
-						),
-					);
+					yield* sql.withTransaction(
+						Effect.gen(function* () {
+							const stored = yield* eventStore.append(
+								canonicalEvent(
+									"session.renamed",
+									sessionId,
+									{
+										sessionId,
+										title,
+									},
+									{
+										provider: current.provider,
+										createdAt,
+										metadata: { source: AUTO_TITLE_SOURCE },
+									},
+								),
+							);
 
-					yield* withSql(projectionRunner.projectEvent(stored), sql);
+							yield* withSql(projectionRunner.projectEvent(stored), sql);
+						}),
+					);
 
 					const rows = yield* sql<{ title: string; provider: string }>`
 						SELECT title, provider FROM sessions WHERE id = ${sessionId}`;

@@ -35,16 +35,26 @@ import {
 	chatState,
 	clearMessages,
 	phaseStartReplay,
+	type SessionActivity,
+	type SessionMessages,
 } from "../../../src/lib/frontend/stores/chat.svelte.js";
 import { createScrollController } from "../../../src/lib/frontend/stores/scroll-controller.svelte.js";
+import { sessionState } from "../../../src/lib/frontend/stores/session.svelte.js";
+import { testActivity, testMessages } from "../../helpers/test-session-slot.js";
+
+let ta: SessionActivity;
+let tm: SessionMessages;
 
 describe("Scroll lifecycle integration", () => {
 	beforeEach(() => {
+		sessionState.currentId = "test-session";
 		clearMessages();
+		ta = testActivity();
+		tm = testMessages();
 	});
 
 	it("full flow: empty -> loading -> committed -> ready -> detach -> follow", () => {
-		const ctrl = createScrollController(() => chatState.loadLifecycle);
+		const ctrl = createScrollController(() => tm.loadLifecycle);
 		const div = document.createElement("div");
 		ctrl.attach(div);
 
@@ -52,16 +62,16 @@ describe("Scroll lifecycle integration", () => {
 		expect(ctrl.state).toBe("loading");
 
 		// 2. Start replay
-		phaseStartReplay();
+		phaseStartReplay(ta, tm);
 		expect(chatState.loadLifecycle).toBe("loading");
 		expect(ctrl.state).toBe("loading");
 
 		// 3. Commit messages (simulate commitReplayFinal)
-		chatState.loadLifecycle = "committed";
+		tm.loadLifecycle = "committed";
 		expect(ctrl.state).toBe("settling");
 
 		// 4. Deferred markdown completes
-		chatState.loadLifecycle = "ready";
+		tm.loadLifecycle = "ready";
 		expect(ctrl.state).toBe("following");
 
 		// 5. User scrolls up (position-based detach)
@@ -91,12 +101,12 @@ describe("Scroll lifecycle integration", () => {
 	});
 
 	it("session switch resets state correctly", () => {
-		const ctrl = createScrollController(() => chatState.loadLifecycle);
+		const ctrl = createScrollController(() => tm.loadLifecycle);
 		const div = document.createElement("div");
 		ctrl.attach(div);
 
 		// Get to following + detached
-		chatState.loadLifecycle = "ready";
+		tm.loadLifecycle = "ready";
 		Object.defineProperty(div, "scrollHeight", {
 			value: 2000,
 			configurable: true,
@@ -115,7 +125,7 @@ describe("Scroll lifecycle integration", () => {
 
 		// Session switch
 		ctrl.resetForSession();
-		chatState.loadLifecycle = "loading";
+		tm.loadLifecycle = "loading";
 		expect(ctrl.state).toBe("loading");
 		expect(ctrl.isDetached).toBe(false);
 
@@ -123,12 +133,12 @@ describe("Scroll lifecycle integration", () => {
 	});
 
 	it("detach during loading is suppressed", () => {
-		const ctrl = createScrollController(() => chatState.loadLifecycle);
+		const ctrl = createScrollController(() => tm.loadLifecycle);
 		const div = document.createElement("div");
 		ctrl.attach(div);
 
 		// During loading, scroll events shouldn't cause detach
-		chatState.loadLifecycle = "loading";
+		tm.loadLifecycle = "loading";
 		Object.defineProperty(div, "scrollHeight", {
 			value: 2000,
 			configurable: true,

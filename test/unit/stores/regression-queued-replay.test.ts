@@ -48,6 +48,7 @@ vi.mock("dompurify", () => ({
 import {
 	chatState,
 	clearMessages,
+	getOrCreateSessionActivity,
 	phaseToProcessing,
 } from "../../../src/lib/frontend/stores/chat.svelte.js";
 import { getBrowserClientId } from "../../../src/lib/frontend/stores/client-identity.js";
@@ -311,7 +312,7 @@ describe("Multi-tab: live user_message sentDuringEpoch", () => {
 	});
 
 	it("sets sentDuringEpoch on live user_message when session is processing", () => {
-		phaseToProcessing();
+		phaseToProcessing(getOrCreateSessionActivity("test-session"));
 		handleMessage({
 			type: "user_message",
 			sessionId: "test-session",

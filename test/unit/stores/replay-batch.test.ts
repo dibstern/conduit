@@ -53,6 +53,7 @@ import {
 	type SessionActivity,
 	type SessionMessages,
 } from "../../../src/lib/frontend/stores/chat.svelte.js";
+import { sessionState } from "../../../src/lib/frontend/stores/session.svelte.js";
 import { testActivity, testMessages } from "../../helpers/test-session-slot.js";
 
 // ─── Reset state before each test ───────────────────────────────────────────
@@ -63,6 +64,7 @@ let tm: SessionMessages;
 
 beforeEach(() => {
 	clearMessages();
+	sessionState.currentId = "test-session";
 	ta = testActivity();
 	tm = testMessages();
 	vi.useFakeTimers();
@@ -231,6 +233,7 @@ describe("Replay batch infrastructure", () => {
 
 		// clearMessages should discard the batch
 		clearMessages();
+		sessionState.currentId = "test-session";
 		ta = testActivity();
 		tm = testMessages();
 

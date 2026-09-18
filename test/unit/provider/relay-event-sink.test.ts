@@ -231,7 +231,7 @@ describe("createRelayEventSink — translation", () => {
 					partId: "part_1",
 					toolName: "Bash",
 					callId: "call_1",
-					input: { command: "ls" },
+					input: { tool: "Bash", command: "ls" },
 				}),
 			),
 		);

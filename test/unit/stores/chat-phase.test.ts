@@ -1,6 +1,7 @@
 // ─── ChatPhase Discriminated Union Tests ─────────────────────────────────────
-// Verifies that chatState.phase is the single source of truth for
-// processing/streaming, with backward-compatible getters.
+// Verifies that the session slot's phase is the single source of truth for
+// processing/streaming, and that chatState — the read-only view over it —
+// reports the same values through the backward-compatible getters.
 // Replaying is now tracked via loadLifecycle, not phase.
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -87,14 +88,14 @@ describe("LoadLifecycle", () => {
 	});
 
 	it("isLoading() returns true only when loading", () => {
-		chatState.loadLifecycle = "loading";
+		tm.loadLifecycle = "loading";
 		expect(isLoading()).toBe(true);
-		chatState.loadLifecycle = "empty";
+		tm.loadLifecycle = "empty";
 		expect(isLoading()).toBe(false);
 	});
 
 	it("clearMessages resets loadLifecycle to 'empty'", () => {
-		chatState.loadLifecycle = "loading";
+		tm.loadLifecycle = "loading";
 		clearMessages();
 		ta = testActivity();
 		tm = testMessages();
@@ -110,7 +111,7 @@ describe("ChatPhase type", () => {
 	});
 
 	it("clearMessages resets phase to 'idle'", () => {
-		phaseToStreaming();
+		phaseToStreaming(ta);
 		expect(chatState.phase).not.toBe("idle");
 		clearMessages();
 		ta = testActivity();
@@ -145,7 +146,7 @@ describe("backward-compatible getters", () => {
 	});
 
 	it("replaying: replaying=true, processing=false, streaming=false", () => {
-		phaseStartReplay();
+		phaseStartReplay(ta, tm);
 		expect(chatState.loadLifecycle).toBe("loading");
 		expect(isReplaying()).toBe(true);
 		expect(isProcessing()).toBe(false);
@@ -173,12 +174,12 @@ describe("phase transitions", () => {
 	});
 
 	it("phaseStartReplay → loadLifecycle='loading'", () => {
-		phaseStartReplay();
+		phaseStartReplay(ta, tm);
 		expect(chatState.loadLifecycle).toBe("loading");
 	});
 
 	it("phaseEndReplay(ta, false) → loadLifecycle stays 'loading' (renderDeferredMarkdown sets ready), phase stays idle", () => {
-		phaseStartReplay();
+		phaseStartReplay(ta, tm);
 		phaseEndReplay(ta, false);
 		// phaseEndReplay no longer sets loadLifecycle — that's renderDeferredMarkdown's job
 		expect(chatState.loadLifecycle).toBe("loading");
@@ -186,15 +187,15 @@ describe("phase transitions", () => {
 	});
 
 	it("phaseEndReplay(ta, true) → phase='processing' when idle, loadLifecycle unchanged", () => {
-		phaseStartReplay();
+		phaseStartReplay(ta, tm);
 		phaseEndReplay(ta, true);
 		expect(chatState.loadLifecycle).toBe("loading");
 		expect(chatState.phase).toBe("processing");
 	});
 
 	it("phaseToIdle → phase='idle' from any state", () => {
-		phaseToStreaming();
-		phaseToIdle();
+		phaseToStreaming(ta);
+		phaseToIdle(ta);
 		expect(chatState.phase).toBe("idle");
 	});
 });
@@ -217,7 +218,7 @@ describe("impossible states prevented", () => {
 		handleDone(ta, tm, { type: "done", sessionId: "s1", code: 0 });
 		expect(validPhases).toContain(chatState.phase);
 
-		phaseStartReplay();
+		phaseStartReplay(ta, tm);
 		expect(validPhases).toContain(chatState.phase);
 
 		phaseEndReplay(ta, false);
@@ -225,11 +226,11 @@ describe("impossible states prevented", () => {
 	});
 
 	it("streaming=true and processing=false cannot coexist when phase is correct", () => {
-		// With the old booleans, you could do chatState.streaming = true
+		// With the old booleans, you could set streaming = true
 		// without setting processing = true. With the union, streaming
 		// phase means streaming getter returns true, and processing getter
 		// derives from phase — no inconsistency possible.
-		phaseToStreaming();
+		phaseToStreaming(ta);
 		// streaming is true — and phase is "streaming"
 		expect(isStreaming()).toBe(true);
 		expect(chatState.phase).toBe("streaming");
@@ -240,32 +241,32 @@ describe("impossible states prevented", () => {
 
 describe("Phase split: replaying removed from ChatPhase", () => {
 	it("isProcessing() returns false during loading even if phase is processing", () => {
-		chatState.phase = "processing";
-		chatState.loadLifecycle = "loading";
+		ta.phase = "processing";
+		tm.loadLifecycle = "loading";
 		expect(isProcessing()).toBe(false);
 	});
 
 	it("isProcessing() returns true when not loading and phase is processing", () => {
-		chatState.phase = "processing";
-		chatState.loadLifecycle = "ready";
+		ta.phase = "processing";
+		tm.loadLifecycle = "ready";
 		expect(isProcessing()).toBe(true);
 	});
 
 	it("phaseToStreaming sets phase directly (no _replayInnerStreaming)", () => {
-		chatState.loadLifecycle = "loading";
-		phaseToStreaming();
+		tm.loadLifecycle = "loading";
+		phaseToStreaming(ta);
 		expect(chatState.phase).toBe("streaming");
 		expect(isStreaming()).toBe(false);
 	});
 
 	it("phaseToProcessing sets phase even during loading", () => {
-		chatState.loadLifecycle = "loading";
-		phaseToProcessing();
+		tm.loadLifecycle = "loading";
+		phaseToProcessing(ta);
 		expect(chatState.phase).toBe("processing");
 	});
 
 	it("phaseEndReplay with streaming phase preserves streaming, loadLifecycle unchanged", () => {
-		phaseStartReplay();
+		phaseStartReplay(ta, tm);
 		expect(chatState.loadLifecycle).toBe("loading");
 		phaseToStreaming(ta);
 		expect(chatState.phase).toBe("streaming");
@@ -290,8 +291,8 @@ describe("LoadLifecycle 'ready' transition", () => {
 	});
 
 	it("renderDeferredMarkdown sets loadLifecycle to 'ready' after all messages rendered", () => {
-		chatState.loadLifecycle = "committed";
-		chatState.messages = [
+		tm.loadLifecycle = "committed";
+		tm.messages = [
 			{
 				type: "assistant",
 				uuid: "1",
@@ -301,14 +302,14 @@ describe("LoadLifecycle 'ready' transition", () => {
 				finalized: true,
 			},
 		];
-		renderDeferredMarkdown();
+		renderDeferredMarkdown(ta, tm);
 		vi.runAllTimers();
 		expect(chatState.loadLifecycle).toBe("ready");
 	});
 
 	it("loadLifecycle stays 'committed' while deferred markdown is still processing", () => {
-		chatState.loadLifecycle = "committed";
-		chatState.messages = Array.from({ length: 10 }, (_, i) => ({
+		tm.loadLifecycle = "committed";
+		tm.messages = Array.from({ length: 10 }, (_, i) => ({
 			type: "assistant" as const,
 			uuid: String(i),
 			rawText: `msg ${i}`,
@@ -316,7 +317,7 @@ describe("LoadLifecycle 'ready' transition", () => {
 			needsRender: true as const,
 			finalized: true,
 		}));
-		renderDeferredMarkdown();
+		renderDeferredMarkdown(ta, tm);
 		vi.runOnlyPendingTimers();
 		// First batch processed (5 messages), but 5 more remain
 		expect(chatState.loadLifecycle).toBe("committed");

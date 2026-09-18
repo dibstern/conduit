@@ -150,7 +150,6 @@ describe("handleToolContentResponse via handleMessage (AC5)", () => {
 				fullContentLength: 50_000,
 				...(opts?.messageId != null && { messageId: opts.messageId }),
 			};
-			chatState.messages = messages;
 			tm.messages = messages;
 		}
 	}
