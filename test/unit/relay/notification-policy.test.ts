@@ -3,9 +3,33 @@ import { resolveNotifications } from "../../../src/lib/relay/notification-policy
 import type { RelayMessage } from "../../../src/lib/shared-types.js";
 
 describe("resolveNotifications", () => {
+	it("does not alert from anonymous status hints", () => {
+		expect(
+			resolveNotifications(
+				{ type: "done", code: 0, sessionId: "s1" },
+				{ action: "drop", reason: "no viewers" },
+				false,
+			),
+		).toEqual({ sendPush: false, broadcastCrossSession: false });
+	});
+	it("preserves originating identity in cross-session delivery", () => {
+		expect(
+			resolveNotifications(
+				{ type: "done", code: 0, sessionId: "s1", alertId: "origin-T1" },
+				{ action: "drop", reason: "no viewers" },
+				false,
+				"s1",
+			).crossSessionPayload,
+		).toEqual({
+			type: "notification_event",
+			eventType: "done",
+			sessionId: "s1",
+			alertId: "origin-T1",
+		});
+	});
 	it("done + not subagent + route send → push yes, broadcast no", () => {
 		const result = resolveNotifications(
-			{ type: "done", code: 0 } as RelayMessage,
+			{ type: "done", code: 0, alertId: "done-1" } as RelayMessage,
 			{ action: "send", sessionId: "s1" },
 			false,
 		);
@@ -15,7 +39,7 @@ describe("resolveNotifications", () => {
 
 	it("done + not subagent + route drop → push yes, broadcast yes", () => {
 		const result = resolveNotifications(
-			{ type: "done", code: 0 } as RelayMessage,
+			{ type: "done", code: 0, alertId: "done-1" } as RelayMessage,
 			{ action: "drop", reason: "no viewers" },
 			false,
 		);
@@ -26,7 +50,7 @@ describe("resolveNotifications", () => {
 
 	it("done + subagent → push no, broadcast no", () => {
 		const result = resolveNotifications(
-			{ type: "done", code: 0 } as RelayMessage,
+			{ type: "done", code: 0, alertId: "done-1" } as RelayMessage,
 			{ action: "drop", reason: "no viewers" },
 			true,
 		);
@@ -39,6 +63,7 @@ describe("resolveNotifications", () => {
 			{
 				type: "error",
 				code: "ERR",
+				alertId: "error-1",
 				message: "something broke",
 			} as RelayMessage,
 			{ action: "drop", reason: "no viewers" },
@@ -53,6 +78,7 @@ describe("resolveNotifications", () => {
 			{
 				type: "error",
 				code: "ERR",
+				alertId: "error-1",
 				message: "something broke",
 			} as RelayMessage,
 			{ action: "drop", reason: "no viewers" },

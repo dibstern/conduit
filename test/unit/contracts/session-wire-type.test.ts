@@ -7,6 +7,7 @@ import { Schema } from "effect";
 import { describe, expect, expectTypeOf, it } from "vitest";
 import { SessionInfoSchema } from "../../../src/lib/contracts/ws-rpc.js";
 import {
+	type RelayMessage,
 	type SessionInfo,
 	SessionInfoSchema as SharedSessionInfoSchema,
 } from "../../../src/lib/shared-types.js";
@@ -48,5 +49,31 @@ describe("session wire type", () => {
 	it("does not carry notification state or the poller's derived flag", () => {
 		expectTypeOf<SessionInfo>().not.toHaveProperty("pendingQuestionCount");
 		expectTypeOf<SessionInfo>().not.toHaveProperty("processing");
+	});
+
+	it("carries the three notification facts on the row itself (ni8.23)", () => {
+		// The badge is derived server-side from pending_approvals and
+		// last_viewed_at, so it travels on the session it describes.
+		const derived: SessionInfo = {
+			id: "ses_1",
+			title: "t",
+			status: "idle",
+			pendingQuestions: 2,
+			pendingPermissions: 1,
+			unseenActivity: true,
+		};
+		const encoded = Schema.encodeSync(SessionInfoSchema)(derived);
+		expect(Schema.decodeUnknownSync(SessionInfoSchema)(encoded)).toEqual(
+			derived,
+		);
+	});
+
+	it("ships no notification side-channel beside the sessions (ni8.23)", () => {
+		// ni8.5 §5 put pending question counts in a map beside the list because
+		// no session row could carry them. One of them is now a column, and two
+		// sources for one fact is how a badge starts disagreeing with itself.
+		expectTypeOf<
+			Extract<RelayMessage, { type: "session_list" }>
+		>().not.toHaveProperty("pendingQuestionCounts");
 	});
 });

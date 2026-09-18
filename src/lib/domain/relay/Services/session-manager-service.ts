@@ -222,23 +222,6 @@ const withForkLineage = (
 		};
 	});
 
-/**
- * Pending questions per session id for the `session_list` message, zero counts
- * omitted and the field itself omitted when nothing is pending. Notification
- * state travels beside the sessions, never inside one (ni8.5 §5), until
- * conduit-test-ni8.23 gives it a channel of its own.
- */
-const pendingQuestionCountsField = (
-	counts: HashMap.HashMap<string, number>,
-): { pendingQuestionCounts?: Record<string, number> } => {
-	const pending = Array.from(HashMap.toEntries(counts)).filter(
-		([, count]) => count > 0,
-	);
-	return pending.length > 0
-		? { pendingQuestionCounts: Object.fromEntries(pending) }
-		: {};
-};
-
 const updateRelaySessionCountSnapshot = (sessionCount: number) =>
 	Effect.serviceOption(RelayStatusSnapshotTag).pipe(
 		Effect.flatMap((snapshot) =>
@@ -731,30 +714,24 @@ export const deleteSession = (sessionId: string) =>
 		for (const childSessionId of childSessionIds)
 			ownership.deleteSession(childSessionId);
 
+		// The delete took the whole lineage, so the cache must forget the whole
+		// lineage: an edge naming a session that no longer exists would put a
+		// deleted grandchild back under a live root on the next list.
+		const deleted = new Set([sessionId, ...childSessionIds]);
 		yield* Ref.update(stateRef, (s) => {
-			let cachedParentMap = HashMap.remove(s.cachedParentMap, sessionId);
 			const lastMessageAt = HashMap.remove(s.lastMessageAt, sessionId);
 			const forkMeta = HashMap.remove(s.forkMeta, sessionId);
-			// The whole lineage goes, so every count in it goes: counts ride the
-			// `session_list` message now, and one left behind rebuilds an attention
-			// badge for a session the browser can no longer show.
-			const pendingQuestionCounts = [sessionId, ...childSessionIds].reduce(
-				(counts, deletedId) => HashMap.remove(counts, deletedId),
-				s.pendingQuestionCounts,
-			);
 			const paginationCursors = HashMap.remove(s.paginationCursors, sessionId);
 
-			// Also remove any entries where this session was a parent
-			cachedParentMap = HashMap.filter(
-				cachedParentMap,
-				(parent) => parent !== sessionId,
+			const cachedParentMap = HashMap.filter(
+				s.cachedParentMap,
+				(parent, child) => !deleted.has(parent) && !deleted.has(child),
 			);
 
 			return {
 				cachedParentMap,
 				lastMessageAt,
 				forkMeta,
-				pendingQuestionCounts,
 				paginationCursors,
 				lastKnownSessionCount: Math.max(0, s.lastKnownSessionCount - 1),
 			};
@@ -1190,61 +1167,6 @@ export const getLastKnownSessionCount = () =>
 		return state.lastKnownSessionCount;
 	}).pipe(Effect.withSpan("session.getLastKnownSessionCount"));
 
-/** Increment pending question count for a session. */
-export const incrementPendingQuestionCount = (sessionId: string) =>
-	Effect.gen(function* () {
-		const ref = yield* SessionManagerStateTag;
-		yield* Ref.update(ref, (s) => {
-			const current = Option.getOrElse(
-				HashMap.get(s.pendingQuestionCounts, sessionId),
-				() => 0,
-			);
-			return {
-				...s,
-				pendingQuestionCounts: HashMap.set(
-					s.pendingQuestionCounts,
-					sessionId,
-					current + 1,
-				),
-			};
-		});
-	}).pipe(
-		Effect.annotateLogs("sessionId", sessionId),
-		Effect.withSpan("session.incrementPendingQuestionCount"),
-	);
-
-/** Decrement pending question count for a session and clear zero counts. */
-export const decrementPendingQuestionCount = (sessionId: string) =>
-	Effect.gen(function* () {
-		const ref = yield* SessionManagerStateTag;
-		yield* Ref.update(ref, (s) => {
-			const current = Option.getOrElse(
-				HashMap.get(s.pendingQuestionCounts, sessionId),
-				() => 0,
-			);
-			return {
-				...s,
-				pendingQuestionCounts:
-					current <= 1
-						? HashMap.remove(s.pendingQuestionCounts, sessionId)
-						: HashMap.set(s.pendingQuestionCounts, sessionId, current - 1),
-			};
-		});
-	}).pipe(
-		Effect.annotateLogs("sessionId", sessionId),
-		Effect.withSpan("session.decrementPendingQuestionCount"),
-	);
-
-/** Replace pending question counts from a reconnect/list-pending snapshot. */
-export const setPendingQuestionCounts = (counts: ReadonlyMap<string, number>) =>
-	Effect.gen(function* () {
-		const ref = yield* SessionManagerStateTag;
-		yield* Ref.update(ref, (s) => ({
-			...s,
-			pendingQuestionCounts: HashMap.fromIterable(counts),
-		}));
-	}).pipe(Effect.withSpan("session.setPendingQuestionCounts"));
-
 /**
  * Record fork-point metadata for a forked session: lineage into the event
  * store, the whole entry into relay state and the on-disk sidecar.
@@ -1317,8 +1239,6 @@ export const sendDualSessionLists = (
 ) =>
 	Effect.gen(function* () {
 		const log = yield* LoggerTag;
-		const stateRef = yield* SessionManagerStateTag;
-		const counts = (yield* Ref.get(stateRef)).pendingQuestionCounts;
 		const roots = yield* listSessions({
 			roots: true,
 			statuses: options?.statuses,
@@ -1327,21 +1247,17 @@ export const sendDualSessionLists = (
 			type: "session_list",
 			sessions: roots,
 			roots: true,
-			...pendingQuestionCountsField(counts),
 		});
 
 		yield* Effect.forkDaemon(
 			listSessions({ statuses: options?.statuses }).pipe(
 				Effect.tap((all) =>
-					Ref.get(stateRef).pipe(
-						Effect.map((state) =>
-							send({
-								type: "session_list",
-								sessions: all,
-								roots: false,
-								...pendingQuestionCountsField(state.pendingQuestionCounts),
-							}),
-						),
+					Effect.sync(() =>
+						send({
+							type: "session_list",
+							sessions: all,
+							roots: false,
+						}),
 					),
 				),
 				Effect.catchAll((err) =>
@@ -1393,11 +1309,6 @@ export interface SessionManagerService {
 	): Effect.Effect<void>;
 	addToParentMap(childId: string, parentId: string): Effect.Effect<void>;
 	getSessionParentMap(): Effect.Effect<Map<string, string>>;
-	incrementPendingQuestionCount(sessionId: string): Effect.Effect<void>;
-	decrementPendingQuestionCount(sessionId: string): Effect.Effect<void>;
-	setPendingQuestionCounts(
-		counts: ReadonlyMap<string, number>,
-	): Effect.Effect<void>;
 	setForkEntry(
 		sessionId: string,
 		entry: ForkEntry,
@@ -2011,18 +1922,6 @@ export const SessionManagerServiceLive: Layer.Layer<
 				getSessionParentMap().pipe(
 					Effect.provideService(SessionManagerStateTag, stateRef),
 				),
-			incrementPendingQuestionCount: (sessionId) =>
-				incrementPendingQuestionCount(sessionId).pipe(
-					Effect.provideService(SessionManagerStateTag, stateRef),
-				),
-			decrementPendingQuestionCount: (sessionId) =>
-				decrementPendingQuestionCount(sessionId).pipe(
-					Effect.provideService(SessionManagerStateTag, stateRef),
-				),
-			setPendingQuestionCounts: (counts) =>
-				setPendingQuestionCounts(counts).pipe(
-					Effect.provideService(SessionManagerStateTag, stateRef),
-				),
 			setForkEntry: (sessionId, entry) =>
 				Effect.gen(function* () {
 					yield* setForkEntry(sessionId, entry, configDir).pipe(
@@ -2031,7 +1930,6 @@ export const SessionManagerServiceLive: Layer.Layer<
 				}),
 			sendDualSessionLists: (send, options) =>
 				Effect.gen(function* () {
-					const counts = (yield* Ref.get(stateRef)).pendingQuestionCounts;
 					const roots = yield* serviceListSessions({
 						roots: true,
 						statuses: options?.statuses,
@@ -2040,23 +1938,17 @@ export const SessionManagerServiceLive: Layer.Layer<
 						type: "session_list",
 						sessions: roots,
 						roots: true,
-						...pendingQuestionCountsField(counts),
 					});
 
 					yield* Effect.forkDaemon(
 						serviceListSessions({ statuses: options?.statuses }).pipe(
 							Effect.tap((all) =>
-								Ref.get(stateRef).pipe(
-									Effect.map((state) =>
-										send({
-											type: "session_list",
-											sessions: all,
-											roots: false,
-											...pendingQuestionCountsField(
-												state.pendingQuestionCounts,
-											),
-										}),
-									),
+								Effect.sync(() =>
+									send({
+										type: "session_list",
+										sessions: all,
+										roots: false,
+									}),
 								),
 							),
 							Effect.catchAll((err) =>

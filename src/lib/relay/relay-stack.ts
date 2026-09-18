@@ -1,4 +1,5 @@
 import { OpenCodeAPITag } from "../domain/provider/Services/opencode-api-service.js";
+import type { RelayMessage } from "../shared-types.js";
 // ─── Relay Stack ─────────────────────────────────────────────────────────────
 // The complete relay wiring: OpenCode client, SSE consumer, event translator,
 // WebSocket handler, session manager, and Effect-owned relay services.
@@ -18,6 +19,7 @@ import { createServer as createHttpsServer } from "node:https";
 import { homedir, networkInterfaces } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { SqlClient } from "@effect/sql";
 import { Cause, Context, Data, Effect, Layer, ManagedRuntime } from "effect";
 import { AuthManager } from "../auth.js";
 import { defaultInstanceIdForDriver } from "../contracts/provider-instance.js";
@@ -33,6 +35,10 @@ import { StatusPollerLive } from "../domain/relay/Layers/status-poller-layer.js"
 import { WebSocketHandlerLive } from "../domain/relay/Layers/websocket-handler-layer.js";
 import { makeWsTransportLive } from "../domain/relay/Layers/ws-transport-layer.js";
 import { AgentServiceLive } from "../domain/relay/Services/agent-service.js";
+import {
+	AlertLedgerLive,
+	AlertLedgerTag,
+} from "../domain/relay/Services/alert-ledger.js";
 import { DirectoryListingServiceLive } from "../domain/relay/Services/directory-listing-service.js";
 import {
 	hasInstanceManagementConfig,
@@ -143,11 +149,12 @@ import {
 	createMonitoringWiringState,
 	wireMonitoringEffect,
 } from "./monitoring-wiring.js";
+import { resolveNotifications } from "./notification-policy.js";
 import { wirePollersEffect } from "./poller-wiring.js";
 import { loadRelaySettings, parseDefaultModel } from "./relay-settings.js";
 import { makeSessionLifecycleWiringLive } from "./session-lifecycle-wiring.js";
 import type { SSEStreamPort } from "./sse-stream.js";
-import { wireSSEConsumerEffect } from "./sse-wiring.js";
+import { sendPushForEventEffect, wireSSEConsumerEffect } from "./sse-wiring.js";
 import { PermissionTimeoutLive } from "./timer-wiring.js";
 import { wireRelayWebSocketCallbacksEffect } from "./websocket-callback-wiring.js";
 
@@ -351,6 +358,44 @@ export class EffectRelayServer {
 }
 
 /** Per-project relay: all relay components attached to a shared server. */
+/** Deliver identified terminal events from the durable provider stream. */
+export const publishProviderRelayMessage = (
+	msg: RelayMessage,
+	deps: {
+		wsHandler: Pick<
+			WebSocketHandlerShape,
+			"sendToSession" | "getClientsForSession" | "broadcast"
+		>;
+		pushManager?: Pick<PushNotificationSender, "sendToAll">;
+		log: Logger;
+		slug: string;
+	},
+) =>
+	Effect.gen(function* () {
+		const sessionId = "sessionId" in msg ? msg.sessionId : undefined;
+		deps.wsHandler.sendToSession(sessionId ?? "", msg);
+		if ((msg.type !== "done" && msg.type !== "error") || !sessionId) return;
+		const sql = yield* SqlClient.SqlClient;
+		const rows = yield* sql<{
+			parent_id: string | null;
+		}>`SELECT parent_id FROM sessions WHERE id = ${sessionId}`;
+		const notification = resolveNotifications(
+			msg,
+			deps.wsHandler.getClientsForSession(sessionId).length > 0
+				? { action: "send", sessionId }
+				: { action: "drop", reason: "no viewers" },
+			rows[0]?.parent_id != null,
+			sessionId,
+		);
+		if (notification.crossSessionPayload)
+			deps.wsHandler.broadcast(notification.crossSessionPayload);
+		if (notification.sendPush && deps.pushManager)
+			yield* sendPushForEventEffect(deps.pushManager, msg, deps.log, {
+				slug: deps.slug,
+				sessionId,
+			});
+	});
+
 export interface ProjectRelay {
 	wsHandler: WebSocketHandlerShape;
 	rpcWsHandler: RpcWebSocketHandlerShape;
@@ -689,25 +734,40 @@ export async function createProjectRelay(
 					SessionEventBusLive,
 				)
 			: undefined;
+	const alertLedgerLayer =
+		persistenceEffectLayer == null
+			? undefined
+			: AlertLedgerLive.pipe(Layer.provide(persistenceEffectLayer));
 	const providerRuntimeIngestionLayer =
-		persistenceEffectLayer != null
-			? makeProviderRuntimeIngestionLive({
-					relayPublisher: {
-						publish: (msg) =>
-							Effect.sync(() => {
-								wsHandler.sendToSession(
-									"sessionId" in msg &&
-										typeof msg.sessionId === "string" &&
-										msg.sessionId.length > 0
-										? msg.sessionId
-										: "",
-									msg,
-								);
-							}),
-					},
-				}).pipe(
+		persistenceEffectLayer != null && alertLedgerLayer != null
+			? Layer.unwrapEffect(
+					Effect.gen(function* () {
+						const ledger = yield* AlertLedgerTag;
+						const sql = yield* SqlClient.SqlClient;
+						return makeProviderRuntimeIngestionLive({
+							relayPublisher: {
+								publish: (msg) =>
+									publishProviderRelayMessage(msg, {
+										wsHandler,
+										log,
+										slug: config.slug,
+										...(config.pushManager
+											? { pushManager: config.pushManager }
+											: {}),
+									}).pipe(
+										Effect.provideService(SqlClient.SqlClient, sql),
+										Effect.provideService(AlertLedgerTag, ledger),
+									),
+							},
+						});
+					}),
+				).pipe(
 					Layer.provide(
-						Layer.mergeAll(persistenceEffectLayer, SessionEventBusLive),
+						Layer.mergeAll(
+							persistenceEffectLayer,
+							SessionEventBusLive,
+							alertLedgerLayer,
+						),
 					),
 				)
 			: undefined;
@@ -750,7 +810,14 @@ export async function createProjectRelay(
 	);
 	const scanServiceLayer = ScanServiceLive.pipe(Layer.provide(configLayer));
 	const webSocketHandlerLayer = WebSocketHandlerLive.pipe(
-		Layer.provide(Layer.mergeAll(configLayer, loggerLayer)),
+		Layer.provide(
+			Layer.mergeAll(
+				configLayer,
+				loggerLayer,
+				SessionEventBusLive,
+				persistenceEffectLayer ?? Layer.empty,
+			),
+		),
 	);
 	const messagePollerManagerLayer = makeMessagePollerManagerLive({
 		hasViewers: (sid) => wsHandler.getClientsForSession(sid).length > 0,
@@ -804,7 +871,15 @@ export async function createProjectRelay(
 		loggerLayer,
 		providerOrchestrationLayer,
 		openCodeInstanceClientsLayer,
-		...(persistenceEffectLayer != null ? [persistenceEffectLayer] : []),
+		// The alert ledger retains pending and delivered claims (ni8.23). It
+		// needs the store, so without persistence there is none — and the push
+		// path says so out loud rather than quietly dinging twice.
+		...(persistenceEffectLayer != null
+			? [
+					persistenceEffectLayer,
+					...(alertLedgerLayer != null ? [alertLedgerLayer] : []),
+				]
+			: []),
 		...(providerRuntimeIngestionLayer != null
 			? [providerRuntimeIngestionLayer]
 			: []),

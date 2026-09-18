@@ -3020,19 +3020,19 @@ describe("Effect runtime boundary grep", () => {
 		expect(hits).toEqual([]);
 	});
 
-	it("does not keep a duplicate pending-question bridge for SSE wiring", () => {
+	it("does not re-grow a pending-question side-channel", () => {
 		const retiredBridgePatterns = [
 			{
 				path: "src/lib/relay/relay-stack.ts",
 				pattern: /\bpendingQuestionCounts:\s*\{/,
 				reason:
-					"SSE wiring should update pending question counts through the session service",
+					"pendingQuestionCounts is retired (ni8.23): the badge is derived onto the session row",
 			},
 			{
 				path: "src/lib/relay/sse-wiring.ts",
 				pattern: /\bpendingQuestionCounts\b/,
 				reason:
-					"SSEWiringDeps should expose one session service surface for question counts",
+					"pendingQuestionCounts is retired (ni8.23): no notification side-channel beside the sessions",
 			},
 		] as const;
 

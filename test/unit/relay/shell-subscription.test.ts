@@ -28,13 +28,14 @@ import { makeSessionManagerStateLive } from "../../../src/lib/domain/relay/Servi
 import { subscribeShell } from "../../../src/lib/domain/relay/Services/shell-subscription.js";
 import { ClaudeEventPersistEffectTag } from "../../../src/lib/persistence/effect/claude-event-persist-effect.js";
 import { makeCommitAndSignal } from "../../../src/lib/persistence/effect/commit-and-signal.js";
-import type { EventStoreEffectTag } from "../../../src/lib/persistence/effect/event-store-effect.js";
+import { EventStoreEffectTag } from "../../../src/lib/persistence/effect/event-store-effect.js";
 import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
 import { ProjectionRunnerEffectTag } from "../../../src/lib/persistence/effect/projection-runner-effect.js";
 import {
 	type ReadQueryEffect,
 	ReadQueryEffectTag,
 } from "../../../src/lib/persistence/effect/read-query-effect.js";
+import { markSessionViewed } from "../../../src/lib/persistence/effect/session-viewed.js";
 import {
 	type CanonicalEvent,
 	canonicalEvent,
@@ -155,6 +156,21 @@ const commit = (events: readonly CanonicalEvent[]) =>
 		commitAndSignal(events),
 	);
 
+// The production choke point, for the tests that need the seam's own publish
+// rather than the hand-rolled one above: `commitAndSignal` appends, projects and
+// announces the read-model advance in one uninterruptible step.
+const commitThroughSeam = (events: readonly CanonicalEvent[]) =>
+	Effect.flatMap(makeCommitAndSignal, (commitAndSignal) =>
+		commitAndSignal.write((project) =>
+			Effect.gen(function* () {
+				const eventStore = yield* EventStoreEffectTag;
+				const stored = yield* eventStore.appendBatch(events);
+				yield* project(stored);
+				return stored;
+			}),
+		),
+	);
+
 /** The number the envelopes speak in. */
 const readModelVersion = Effect.gen(function* () {
 	const sql = yield* SqlClient.SqlClient;
@@ -206,6 +222,106 @@ const takeN = <A>(q: Queue.Queue<A>, n: number): Effect.Effect<A[]> =>
 const SID = "session-shell";
 
 describe("subscribeShell", () => {
+	it.scoped("successive committed bursts deliver successive current rows", () =>
+		Effect.gen(function* () {
+			yield* recoverProjections;
+			yield* commit([sessionCreated(SID)]);
+			const { q } = yield* openShell();
+			yield* takeN(q, 2);
+			yield* commit([sessionRenamed(SID, "First")]);
+			const first = yield* Queue.take(q);
+			yield* commit([sessionRenamed(SID, "Second")]);
+			const second = yield* Queue.take(q);
+			if (first._tag !== "upsert" || second._tag !== "upsert")
+				throw new Error("expected upserts");
+			expect(first.item.title).toBe("First");
+			expect(second.item.title).toBe("Second");
+			expect(second.sequence).toBeGreaterThan(first.sequence);
+			expect(yield* Queue.size(q)).toBe(0);
+		}).pipe(Effect.provide(makeShellTestLayer())),
+	);
+
+	it.scoped(
+		"snapshot orders rows by recency and excludes unprojected history from its version",
+		() =>
+			Effect.gen(function* () {
+				yield* recoverProjections;
+				const readQuery = yield* ReadQueryEffectTag;
+				expect(yield* readQuery.readSessionList()).toEqual({
+					rows: [],
+					version: 0,
+				});
+				yield* commit([
+					sessionCreated("shell-old"),
+					sessionCreated("shell-new"),
+				]);
+				const projected = yield* readQuery.readSessionList();
+				expect(projected.rows.map(({ item }) => item.id)).toEqual([
+					"shell-new",
+					"shell-old",
+				]);
+				expect(projected.version).toBe(yield* readModelVersion);
+				const eventStore = yield* EventStoreEffectTag;
+				yield* eventStore.appendBatch([
+					sessionRenamed("shell-old", "unprojected"),
+				]);
+				expect(yield* readQuery.readSessionList()).toEqual(projected);
+			}).pipe(Effect.provide(makeShellTestLayer())),
+	);
+
+	it.scoped(
+		"resume after a parent deletion rebases away both parent and child",
+		() =>
+			Effect.gen(function* () {
+				yield* recoverProjections;
+				yield* commit([
+					sessionCreated("shell-parent"),
+					sessionCreated("shell-child", "Child", "shell-parent"),
+				]);
+				const cursor = yield* readModelVersion;
+				yield* deleteSession("shell-parent");
+				const { q } = yield* openShell({ resumeFromSequence: cursor });
+				expect(yield* takeN(q, 2)).toEqual([
+					{ _tag: "snapshot", rows: [], sequence: yield* readModelVersion },
+					{ _tag: "synchronized" },
+				]);
+			}).pipe(
+				Effect.provide(
+					Layer.mergeAll(
+						makeShellTestLayer(),
+						Layer.succeed(OpenCodeAPITag, makeMockOpenCodeAPI()),
+						makeSessionManagerStateLive(),
+					),
+				),
+			),
+	);
+
+	it.scoped(
+		"resume covers more than a log page and excludes deleted sessions",
+		() =>
+			Effect.gen(function* () {
+				yield* recoverProjections;
+				yield* commit([sessionCreated("shell-a")]);
+				yield* commit(
+					Array.from({ length: 1000 }, (_, i) =>
+						messageCreated("shell-a", `m${i}`),
+					),
+				);
+				yield* commit([sessionCreated("shell-b"), sessionCreated("shell-c")]);
+				const persist = yield* ClaudeEventPersistEffectTag;
+				yield* persist.persistEvent(sessionDeleted("shell-c"));
+				const { q } = yield* openShell({ resumeFromSequence: 0 });
+				const [snapshot, synchronized] = yield* takeN(q, 2);
+				if (snapshot?._tag !== "snapshot") throw new Error("expected snapshot");
+				expect(snapshot.rows.map((row) => row.id).sort()).toEqual([
+					"shell-a",
+					"shell-b",
+				]);
+				expect(snapshot.sequence).toBe(yield* readModelVersion);
+				expect(synchronized).toEqual({ _tag: "synchronized" });
+			}).pipe(Effect.provide(makeShellTestLayer())),
+	);
+
 	it.scoped(
 		"cold start snapshots the list, then upserts the whole current row per advance",
 		() =>
@@ -523,6 +639,110 @@ describe("subscribeShell", () => {
 			yield* Scope.close(scope, Exit.void);
 
 			expect(Exit.isInterrupted(yield* Fiber.await(fiber))).toBe(true);
+		}).pipe(Effect.provide(makeShellTestLayer())),
+	);
+	it.scoped(
+		"a direct read-model write reaches a live subscriber even though the log has not moved",
+		() =>
+			Effect.gen(function* () {
+				yield* recoverProjections;
+				const stored = yield* commitThroughSeam([
+					sessionCreated(SID),
+					messageCreated(SID, "m1"),
+				]);
+
+				const { q } = yield* openShell();
+				const [snapshot, synchronized] = yield* takeN(q, 2);
+				if (snapshot?._tag !== "snapshot") throw new Error("expected snapshot");
+				expect(synchronized).toEqual({ _tag: "synchronized" });
+				// A message has landed and nobody has looked: the badge is on.
+				expect(snapshot.rows[0]?.unseenActivity).toBe(true);
+				const baseVersion = snapshot.sequence;
+
+				// Viewing appends nothing, so the log is exactly where it was. This is
+				// the ni8.23 C2 trap: the ONLY thing that can carry this to a
+				// subscriber is the row version the write stamped.
+				yield* markSessionViewed(SID, 9_999_999);
+				yield* Effect.yieldNow();
+
+				const delta = yield* Queue.take(q);
+				if (delta._tag !== "upsert") throw new Error("expected upsert");
+				expect(delta.item.id).toBe(SID);
+				expect(delta.item.unseenActivity).toBe(false);
+				// A direct write moves the read-model cursor without appending an event.
+				expect(delta.sequence).toBeGreaterThan(baseVersion);
+				expect(delta.sequence).toBe(yield* readModelVersion);
+				const eventStore = yield* EventStoreEffectTag;
+				expect(
+					yield* eventStore.readFromSequence(
+						stored[stored.length - 1]?.sequence ?? 0,
+					),
+				).toEqual([]);
+				expect(yield* Queue.size(q)).toBe(0);
+			}).pipe(Effect.provide(makeShellTestLayer())),
+	);
+
+	it.scoped(
+		"a view of an unknown session announces nothing and emits nothing",
+		() =>
+			Effect.gen(function* () {
+				yield* recoverProjections;
+				yield* commitThroughSeam([sessionCreated(SID)]);
+
+				const { q } = yield* openShell();
+				yield* takeN(q, 2);
+
+				expect(yield* markSessionViewed("no-such-session", 9_999_999)).toBe(
+					false,
+				);
+				yield* Effect.yieldNow();
+				expect(yield* Queue.size(q)).toBe(0);
+			}).pipe(Effect.provide(makeShellTestLayer())),
+	);
+
+	it.scoped("a message-only advance does not re-emit the session row", () =>
+		Effect.gen(function* () {
+			yield* recoverProjections;
+			yield* commitThroughSeam([
+				sessionCreated(SID),
+				messageCreated(SID, "m1"),
+			]);
+
+			const { q } = yield* openShell();
+			yield* takeN(q, 2);
+
+			// A token advances `messages`, and its advance names the owning
+			// session — but the session ROW did not move. Re-emitting the shell
+			// row on every token would undo the whole point of coalescing.
+			yield* commitThroughSeam([textDelta(SID, "m1", "hello")]);
+			yield* Effect.yieldNow();
+
+			expect(yield* Queue.size(q)).toBe(0);
+		}).pipe(Effect.provide(makeShellTestLayer())),
+	);
+
+	it.scoped("a projection and its advance still produce ONE upsert", () =>
+		Effect.gen(function* () {
+			yield* recoverProjections;
+			yield* commitThroughSeam([sessionCreated(SID)]);
+
+			const requeries = yield* Ref.make(0);
+			const real = yield* ReadQueryEffectTag;
+			const { q } = yield* openShell({
+				readQuery: countingReadQuery(real, requeries),
+			});
+			yield* takeN(q, 2);
+
+			// The seam publishes the events AND the advance for the same commit.
+			// The subscriber follows the advance and must emit only once.
+			yield* commitThroughSeam([sessionRenamed(SID, "Renamed")]);
+			yield* Effect.yieldNow();
+
+			const delta = yield* Queue.take(q);
+			if (delta._tag !== "upsert") throw new Error("expected upsert");
+			expect(delta.item.title).toBe("Renamed");
+			expect(yield* Ref.get(requeries)).toBe(2);
+			expect(yield* Queue.size(q)).toBe(0);
 		}).pipe(Effect.provide(makeShellTestLayer())),
 	);
 });

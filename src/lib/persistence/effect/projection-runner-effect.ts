@@ -77,6 +77,19 @@ export interface ProjectionRunnerEffect {
 		SqlClient.SqlClient
 	>;
 
+	/**
+	 * Take the next read-model version. The clock belongs to the read model, not
+	 * to projection: a column written directly — `sessions.last_viewed_at`, which
+	 * has no event behind it — has to stamp its row from the same counter, or a
+	 * subscriber holding the row's old version never hears that it moved.
+	 *
+	 * Must be taken inside the transaction that writes the rows it stamps: the
+	 * bump's write lock is only held to COMMIT, so a bump that commits on its own
+	 * lets another connection stamp and announce a higher version while these
+	 * rows are still uncommitted.
+	 */
+	readonly nextVersion: Effect.Effect<number, SqlError, SqlClient.SqlClient>;
+
 	readonly recover: () => Effect.Effect<
 		RecoveryResult,
 		ProjectionRunnerError,
@@ -455,6 +468,7 @@ export const makeProjectionRunnerEffect = (
 		return {
 			projectEvent,
 			projectBatch,
+			nextVersion,
 			recover,
 			getFailures,
 			isRecovered,

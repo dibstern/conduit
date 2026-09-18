@@ -16,10 +16,22 @@ import type {
  */
 type SessionSelection = Omit<
 	SessionInfo,
-	"parentID" | "forkMessageId" | "messageCount" | "forkPointTimestamp"
+	| "parentID"
+	| "forkMessageId"
+	| "messageCount"
+	| "forkPointTimestamp"
+	| "pendingQuestions"
+	| "pendingPermissions"
+	| "unseenActivity"
 > & {
 	readonly parentID: string | null;
 	readonly forkMessageId: string | null;
+	// Optional on the wire because `SessionInfo` has a producer with no row
+	// behind it; never optional here — a row read always derives all three.
+	readonly pendingQuestions: number;
+	readonly pendingPermissions: number;
+	/** SQLite has no boolean type: the CASE expression selects 0 or 1. */
+	readonly unseenActivity: 0 | 1;
 	readonly version: number;
 };
 
@@ -222,10 +234,25 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 	// NULL-to-absent, which SQL cannot express. `listSessions` stays a row read
 	// for the server-internal callers that need columns the wire never carries
 	// (the status poller's `updated_at`, permission-mode restore).
+	//
+	// The last three are the notification facts (ni8.23), derived here so that
+	// "does this session want me?" is answered once, by the server, in the same
+	// read that produces the row — rather than by each client folding a stream of
+	// events into a guess. `pending_approvals` is read-only here: the approval
+	// projector owns those rows, and both question and permission requests land
+	// in it, so the counts cannot drift from what the app is actually blocked on.
 	const sessionColumns = sql.literal(
 		`id, title, status, version,
 		 created_at AS createdAt, updated_at AS updatedAt,
-		 parent_id AS parentID, fork_point_event AS forkMessageId`,
+		 parent_id AS parentID, fork_point_event AS forkMessageId,
+		 (SELECT COUNT(*) FROM pending_approvals pa
+		   WHERE pa.session_id = sessions.id
+		     AND pa.status = 'pending' AND pa.type = 'question') AS pendingQuestions,
+		 (SELECT COUNT(*) FROM pending_approvals pa
+		   WHERE pa.session_id = sessions.id
+		     AND pa.status = 'pending' AND pa.type = 'permission') AS pendingPermissions,
+		 CASE WHEN COALESCE(last_message_at, 0) > COALESCE(last_viewed_at, 0)
+		      THEN 1 ELSE 0 END AS unseenActivity`,
 	);
 
 	// The version stays beside the session rather than on it: it is a fact about
@@ -234,10 +261,12 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 		version,
 		parentID,
 		forkMessageId,
+		unseenActivity,
 		...session
 	}: SessionSelection): { item: SessionInfo; version: number } => ({
 		item: {
 			...session,
+			unseenActivity: unseenActivity === 1,
 			...(parentID !== null && { parentID }),
 			...(forkMessageId !== null && { forkMessageId }),
 		},

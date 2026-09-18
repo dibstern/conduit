@@ -89,13 +89,6 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
 	private _lastKnownSessionCount = 0;
 
 	/**
-	 * Tracks the number of pending questions per session.
-	 * Updated from SSE events (question.asked, ask_user_resolved) and
-	 * bulk-set on SSE reconnect from listPendingQuestions.
-	 */
-	private pendingQuestionCounts = new Map<string, number>();
-
-	/**
 	 * Cursor for paginated history loading. Maps sessionId → oldest message ID
 	 * from the last loaded page. Used by loadHistory(offset>0) to fetch the
 	 * next page of older messages via getMessagesPage({ before }).
@@ -382,7 +375,6 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
 		await this.client.session.delete(sessionId);
 
 		for (const deletedId of deleted) {
-			this.pendingQuestionCounts.delete(deletedId);
 			this.cachedParentMap.delete(deletedId);
 		}
 
@@ -500,29 +492,6 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
 		saveForkMetadata(this.forkMeta, this.configDir);
 	}
 
-	// ─── Pending Question Counts ──────────────────────────────────────────
-
-	/** Increment pending question count (called from SSE wiring on question.asked). */
-	incrementPendingQuestionCount(sessionId: string): void {
-		const current = this.pendingQuestionCounts.get(sessionId) ?? 0;
-		this.pendingQuestionCounts.set(sessionId, current + 1);
-	}
-
-	/** Decrement pending question count (called from handlers on answer/reject). */
-	decrementPendingQuestionCount(sessionId: string): void {
-		const current = this.pendingQuestionCounts.get(sessionId) ?? 0;
-		if (current <= 1) {
-			this.pendingQuestionCounts.delete(sessionId);
-		} else {
-			this.pendingQuestionCounts.set(sessionId, current - 1);
-		}
-	}
-
-	/** Bulk-set pending question counts (called on SSE reconnect from listPendingQuestions). */
-	setPendingQuestionCounts(counts: Map<string, number>): void {
-		this.pendingQuestionCounts = counts;
-	}
-
 	/**
 	 * Send roots-only session list immediately, then all-sessions in background.
 	 * Used by all broadcast/unicast send points.
@@ -539,7 +508,6 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
 			type: "session_list",
 			sessions: roots,
 			roots: true,
-			...this.pendingQuestionCountsField(),
 		});
 
 		this.listSessions({ statuses: options?.statuses })
@@ -548,7 +516,6 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
 					type: "session_list",
 					sessions: all,
 					roots: false,
-					...this.pendingQuestionCountsField(),
 				});
 			})
 			.catch((err) => {
@@ -558,25 +525,12 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
 
 	// ─── Internal ──────────────────────────────────────────────────────────
 
-	/** Zero counts drop out, and nothing pending means no field at all. */
-	private pendingQuestionCountsField(): {
-		pendingQuestionCounts?: Record<string, number>;
-	} {
-		const pending = [...this.pendingQuestionCounts].filter(
-			([, count]) => count > 0,
-		);
-		return pending.length > 0
-			? { pendingQuestionCounts: Object.fromEntries(pending) }
-			: {};
-	}
-
 	private async broadcastSessionList(): Promise<void> {
 		const roots = await this.listSessions({ roots: true });
 		this.emit("broadcast", {
 			type: "session_list",
 			sessions: roots,
 			roots: true,
-			...this.pendingQuestionCountsField(),
 		});
 
 		this.listSessions()
@@ -585,7 +539,6 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
 					type: "session_list",
 					sessions: all,
 					roots: false,
-					...this.pendingQuestionCountsField(),
 				});
 			})
 			.catch((err) => {

@@ -141,6 +141,7 @@ function makeHarness(options?: {
 		getFailures: vi.fn(() => Effect.succeed([])),
 		isRecovered: vi.fn(() => Effect.succeed(true)),
 		markRecovered: vi.fn(() => Effect.void),
+		nextVersion: Effect.succeed(0),
 	} satisfies ProjectionRunnerEffect;
 
 	const executeSql = vi.fn(() => Effect.succeed([]));

@@ -20,11 +20,9 @@ export interface NotificationResolution {
 		readonly eventType: string;
 		readonly message?: string;
 		readonly sessionId?: string;
+		readonly alertId: string;
 	};
 }
-
-/** Notification-worthy event types that trigger push and cross-session broadcasts. */
-const NOTIFICATION_TYPES = new Set(["done", "error"]);
 
 /**
  * Pure policy: given a relay message, its route decision, and whether the
@@ -36,8 +34,9 @@ export function resolveNotifications(
 	isSubagent: boolean,
 	sessionId?: string,
 ): NotificationResolution {
-	const isNotifiable = NOTIFICATION_TYPES.has(msg.type);
-	if (!isNotifiable) {
+	// Anonymous status observations update the UI; only identified originating
+	// events can safely own a durable alert receipt.
+	if ((msg.type !== "done" && msg.type !== "error") || !msg.alertId) {
 		return { sendPush: false, broadcastCrossSession: false };
 	}
 
@@ -55,6 +54,7 @@ export function resolveNotifications(
 		const payload: NotificationResolution["crossSessionPayload"] = {
 			type: "notification_event",
 			eventType: msg.type,
+			alertId: msg.alertId,
 			...(errorMessage !== undefined ? { message: errorMessage } : {}),
 			...(sessionId != null ? { sessionId } : {}),
 		};

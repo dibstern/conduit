@@ -248,10 +248,17 @@ const SessionListProbe = Rpc.make("SessionListProbe", {
 });
 const sessionList = {
 	type: "session_list",
-	sessions: [session, { id: "minimal", title: "Minimal", status: "retry" }],
+	sessions: [
+		{
+			...session,
+			pendingQuestions: 2,
+			pendingPermissions: 1,
+			unseenActivity: true,
+		},
+		{ id: "minimal", title: "Minimal", status: "retry" },
+	],
 	roots: true,
 	search: true,
-	pendingQuestionCounts: { "session-1": 2 },
 } as const;
 
 const group = RpcGroup.make(
@@ -510,7 +517,7 @@ it("RewindSession preserves the changed response target identifiers", async () =
 	);
 });
 
-it("session_list keeps question counts on the message and required status on sessions", async () => {
+it("session_list keeps notification state and required status on sessions", async () => {
 	await Effect.runPromise(
 		Effect.scoped(
 			Effect.gen(function* () {

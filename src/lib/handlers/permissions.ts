@@ -6,6 +6,7 @@ import { OpenCodeAPITag } from "../domain/provider/Services/opencode-api-service
 // answer. The handler calls the OpenCode REST API directly — no in-memory
 // bridge state is needed, so questions survive relay restarts.
 
+import { SqlClient } from "@effect/sql";
 import { Data, Effect, Option } from "effect";
 import { PendingInteractionServiceTag } from "../domain/relay/Services/pending-interaction-service.js";
 import {
@@ -14,7 +15,6 @@ import {
 	OrchestrationEngineTag,
 	WebSocketHandlerTag,
 } from "../domain/relay/Services/services.js";
-import { SessionManagerServiceTag } from "../domain/relay/Services/session-manager-service.js";
 import {
 	PROCESSING_TIMEOUT_DURATION,
 	setDefaultPermissionMode,
@@ -22,6 +22,10 @@ import {
 } from "../domain/relay/Services/session-overrides-state.js";
 import { RelayError } from "../errors.js";
 import { fixupConfigFile } from "../instance/opencode-config-fixup.js";
+import { makeCommitAndSignal } from "../persistence/effect/commit-and-signal.js";
+import { EventStoreEffectTag } from "../persistence/effect/event-store-effect.js";
+import { ProjectionRunnerEffectTag } from "../persistence/effect/projection-runner-effect.js";
+import { canonicalEvent } from "../persistence/events.js";
 import { saveRelaySettings } from "../relay/relay-settings.js";
 import type {
 	PermissionId,
@@ -129,6 +133,102 @@ const restartProcessingTimeout = (sessionId: string) =>
 				});
 			}),
 		);
+	});
+
+/**
+ * Persist that a question stopped being pending, and say so out loud if it
+ * cannot be.
+ *
+ * The badge counts unresolved questions out of the read model, so a resolution
+ * that only goes out over the socket clears the card in front of the user and
+ * leaves the count behind: reload, and the session is asking again, forever.
+ * Appending the canonical event is what makes the answer survive — the approval
+ * projector flips `pending_approvals` to resolved, stamps `sessions.version`
+ * with the version it projected at, and the seam publishes that advance after
+ * COMMIT, which is how a subscriber learns the badge moved.
+ *
+ * Only the OpenCode REST paths come through here. A question owned by the
+ * provider runtime is resolved through its event sink, which emits
+ * `question.resolved` itself; appending a second one would be a duplicate
+ * event, not a second fact.
+ *
+ * The services are options for the same reason as `recordSessionViewed`:
+ * handler tests and the CLI's degenerate stacks run without persistence. An
+ * unwired store is reported, never skipped in silence.
+ */
+const recordQuestionResolved = (
+	sessionId: string,
+	questionId: string,
+	answers: Record<string, unknown>,
+) =>
+	Effect.gen(function* () {
+		const log = yield* LoggerTag;
+		if (!sessionId) {
+			log.warn(
+				`question ${questionId} resolved without a session id — nothing to clear the badge on`,
+			);
+			return;
+		}
+
+		const sql = yield* Effect.serviceOption(SqlClient.SqlClient);
+		const eventStore = yield* Effect.serviceOption(EventStoreEffectTag);
+		const projectionRunner = yield* Effect.serviceOption(
+			ProjectionRunnerEffectTag,
+		);
+		if (
+			Option.isNone(sql) ||
+			Option.isNone(eventStore) ||
+			Option.isNone(projectionRunner)
+		) {
+			log.warn(
+				`question ${questionId} resolution not recorded: no read model is wired to write it to`,
+			);
+			return;
+		}
+
+		const written = yield* Effect.gen(function* () {
+			const commitAndSignal = yield* makeCommitAndSignal;
+			yield* commitAndSignal([
+				canonicalEvent("question.resolved", sessionId, {
+					id: questionId,
+					answers,
+				}),
+			]);
+		}).pipe(
+			Effect.provideService(SqlClient.SqlClient, sql.value),
+			Effect.provideService(EventStoreEffectTag, eventStore.value),
+			Effect.provideService(ProjectionRunnerEffectTag, projectionRunner.value),
+			Effect.either,
+		);
+		if (written._tag === "Left") {
+			log.error(
+				`question ${questionId} resolution not recorded for session=${sessionId}`,
+				written.left,
+			);
+		}
+	});
+
+/**
+ * Tell everyone a question is answered: the browsers watching it, the read
+ * model that counts it, and the inactivity timer that stopped while it waited.
+ *
+ * One helper because the three have to happen together. Every exit that skipped
+ * the middle one is how the badge came to outlive the question.
+ */
+const announceQuestionResolved = (
+	sessionId: string,
+	questionId: string,
+	answers: Record<string, unknown>,
+) =>
+	Effect.gen(function* () {
+		const wsHandler = yield* WebSocketHandlerTag;
+		wsHandler.broadcast({
+			type: "ask_user_resolved",
+			toolId: questionId,
+			sessionId,
+		});
+		yield* recordQuestionResolved(sessionId, questionId, answers);
+		yield* restartProcessingTimeout(sessionId);
 	});
 
 /** Persist permission rule to opencode.jsonc. */
@@ -266,7 +366,6 @@ export const handleAskUserResponse = (
 		const client = yield* OpenCodeAPITag;
 		const wsHandler = yield* WebSocketHandlerTag;
 		const log = yield* LoggerTag;
-		const sessionManagerService = yield* SessionManagerServiceTag;
 
 		const { toolId, answers } = payload;
 		const sessionId = wsHandler.getClientSession(clientId) ?? "";
@@ -306,11 +405,6 @@ export const handleAskUserResponse = (
 					toolId,
 					sessionId: questionSessionId,
 				});
-				if (questionSessionId) {
-					yield* sessionManagerService.decrementPendingQuestionCount(
-						questionSessionId,
-					);
-				}
 				yield* restartProcessingTimeout(questionSessionId);
 				return;
 			}
@@ -321,15 +415,7 @@ export const handleAskUserResponse = (
 			Effect.tryPromise(() => client.question.reply(toolId, formatted)),
 		);
 		if (replyResult._tag === "Right") {
-			wsHandler.broadcast({
-				type: "ask_user_resolved",
-				toolId,
-				sessionId,
-			});
-			if (sessionId) {
-				yield* sessionManagerService.decrementPendingQuestionCount(sessionId);
-			}
-			yield* restartProcessingTimeout(sessionId);
+			yield* announceQuestionResolved(sessionId, toolId, answers);
 			return;
 		}
 
@@ -343,26 +429,22 @@ export const handleAskUserResponse = (
 				const pendingQuestions = yield* Effect.tryPromise(() =>
 					client.question.list(),
 				);
-				if (pendingQuestions.length > 0) {
-					// biome-ignore lint/style/noNonNullAssertion: safe — guarded by length check
-					const queId = pendingQuestions[0]!.id;
+				const question =
+					pendingQuestions.find(
+						(question) => question["sessionID"] === sessionId,
+					) ??
+					pendingQuestions.find(
+						(question) => question["sessionID"] === undefined,
+					);
+				if (question) {
+					const queId = question.id;
 					log.info(
 						`client=${clientId} session=${sessionId} API fallback: ${toolId} → ${queId}`,
 					);
 					yield* Effect.tryPromise(() =>
 						client.question.reply(queId, formatted),
 					);
-					wsHandler.broadcast({
-						type: "ask_user_resolved",
-						toolId: queId,
-						sessionId,
-					});
-					if (sessionId) {
-						yield* sessionManagerService.decrementPendingQuestionCount(
-							sessionId,
-						);
-					}
-					yield* restartProcessingTimeout(sessionId);
+					yield* announceQuestionResolved(sessionId, queId, answers);
 					return true;
 				}
 				return false;
@@ -402,7 +484,6 @@ export const handleQuestionReject = (
 		const { toolId } = payload;
 		if (!toolId) return;
 
-		const sessionManagerService = yield* SessionManagerServiceTag;
 		const sessionId = wsHandler.getClientSession(clientId) ?? "";
 
 		log.info(`client=${clientId} session=${sessionId} rejecting: ${toolId}`);
@@ -465,11 +546,6 @@ export const handleQuestionReject = (
 					toolId,
 					sessionId: questionSessionId,
 				});
-				if (questionSessionId) {
-					yield* sessionManagerService.decrementPendingQuestionCount(
-						questionSessionId,
-					);
-				}
 				yield* restartProcessingTimeout(questionSessionId);
 				return;
 			}
@@ -480,15 +556,7 @@ export const handleQuestionReject = (
 			Effect.tryPromise(() => client.question.reject(toolId)),
 		);
 		if (rejectResult._tag === "Right") {
-			wsHandler.broadcast({
-				type: "ask_user_resolved",
-				toolId,
-				sessionId,
-			});
-			if (sessionId) {
-				yield* sessionManagerService.decrementPendingQuestionCount(sessionId);
-			}
-			yield* restartProcessingTimeout(sessionId);
+			yield* announceQuestionResolved(sessionId, toolId, {});
 			return;
 		}
 
@@ -509,17 +577,7 @@ export const handleQuestionReject = (
 						`client=${clientId} session=${sessionId} reject fallback: ${toolId} → ${queId}`,
 					);
 					yield* Effect.tryPromise(() => client.question.reject(queId));
-					wsHandler.broadcast({
-						type: "ask_user_resolved",
-						toolId: queId,
-						sessionId,
-					});
-					if (sessionId) {
-						yield* sessionManagerService.decrementPendingQuestionCount(
-							sessionId,
-						);
-					}
-					yield* restartProcessingTimeout(sessionId);
+					yield* announceQuestionResolved(sessionId, queId, {});
 					return true;
 				}
 				return false;

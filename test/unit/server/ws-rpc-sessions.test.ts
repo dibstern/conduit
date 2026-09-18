@@ -345,11 +345,6 @@ describe("WsRpcServerLayer ListSessions", () => {
 		const wsHandler = makeMockWebSocketHandler({
 			getClientSession: vi.fn(() => "session-1"),
 		});
-		const decrementPendingQuestionCount = vi.fn(() => Effect.void);
-		const sessionManagerService = makeMockSessionManagerService({
-			decrementPendingQuestionCount,
-		});
-
 		return Effect.gen(function* () {
 			const client = yield* rpcClient;
 			const result = yield* client.AnswerQuestion({
@@ -369,14 +364,11 @@ describe("WsRpcServerLayer ListSessions", () => {
 				toolId: "que-1",
 				sessionId: "session-1",
 			});
-			expect(decrementPendingQuestionCount).toHaveBeenCalledWith("session-1");
 		}).pipe(
 			Effect.scoped,
 			Effect.provide(
 				WsRpcServerLayer.pipe(
-					Layer.provideMerge(
-						makeTestHandlerLayer({ api, wsHandler, sessionManagerService }),
-					),
+					Layer.provideMerge(makeTestHandlerLayer({ api, wsHandler })),
 				),
 			),
 		);
@@ -387,11 +379,6 @@ describe("WsRpcServerLayer ListSessions", () => {
 		const wsHandler = makeMockWebSocketHandler({
 			getClientSession: vi.fn(() => "session-1"),
 		});
-		const decrementPendingQuestionCount = vi.fn(() => Effect.void);
-		const sessionManagerService = makeMockSessionManagerService({
-			decrementPendingQuestionCount,
-		});
-
 		return Effect.gen(function* () {
 			const client = yield* rpcClient;
 			const result = yield* client.RejectQuestion({
@@ -408,14 +395,11 @@ describe("WsRpcServerLayer ListSessions", () => {
 				toolId: "que-1",
 				sessionId: "session-1",
 			});
-			expect(decrementPendingQuestionCount).toHaveBeenCalledWith("session-1");
 		}).pipe(
 			Effect.scoped,
 			Effect.provide(
 				WsRpcServerLayer.pipe(
-					Layer.provideMerge(
-						makeTestHandlerLayer({ api, wsHandler, sessionManagerService }),
-					),
+					Layer.provideMerge(makeTestHandlerLayer({ api, wsHandler })),
 				),
 			),
 		);

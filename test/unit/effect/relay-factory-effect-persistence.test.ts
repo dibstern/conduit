@@ -347,7 +347,11 @@ describe("RelayFactoryLive Effect persistence wiring", () => {
 			getPublicKey: () => "public-key",
 			addSubscription: vi.fn(),
 			removeSubscription: vi.fn(),
-			sendToAll: vi.fn(async () => undefined),
+			sendToAll: vi.fn(async () => ({
+				delivered: ["client-1"],
+				expired: [],
+				failed: [],
+			})),
 		};
 		createProjectRelayMock.mockResolvedValue({
 			stop: vi.fn(async () => undefined),

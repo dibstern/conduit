@@ -8,7 +8,6 @@ import type {
 	RelayMessage,
 } from "../types.js";
 import { createFrontendLogger } from "../utils/logger.js";
-import { dispatch } from "./notification-reducer.svelte.js";
 import { sessionState } from "./session.svelte.js";
 
 const log = createFrontendLogger("permissions");
@@ -274,12 +273,12 @@ export function removeQuestion(toolId: string): void {
 }
 
 /** Clear all pending items (e.g. on disconnect).
- *  Also resets the notification reducer (cross-session indicators). */
+ *  Cross-session indicators need no clearing: they are on the session rows, and
+ *  the next snapshot replaces them wholesale. */
 export function clearAll(): void {
 	permissionsState.pendingPermissions = [];
 	permissionsState.pendingQuestions = [];
 	permissionsState.questionErrors = new Map();
-	dispatch({ type: "reset" });
 }
 
 /** Clear only session-local pending items (for session switch).
@@ -295,11 +294,9 @@ export function clearSessionLocal(previousSessionId: string | null): void {
 	permissionsState.questionErrors = new Map();
 }
 
-/** Clear all permissions state (for project switch).
- *  Also resets the notification reducer (cross-session indicators). */
+/** Clear all permissions state (for project switch). */
 export function clearAllPermissions(): void {
 	permissionsState.pendingPermissions = [];
 	permissionsState.pendingQuestions = [];
 	permissionsState.questionErrors = new Map();
-	dispatch({ type: "reset" });
 }

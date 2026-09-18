@@ -398,7 +398,12 @@ export function translateSessionStatus(
 		const delayMs =
 			nextMs && nextMs > Date.now() ? nextMs - Date.now() : undefined;
 		const retryMsg = formatRetryMessage(reason, attempt, delayMs);
-		return { type: "error", code: "RETRY", message: retryMsg };
+		return {
+			type: "error",
+			code: "RETRY",
+			message: retryMsg,
+			alertId: crypto.randomUUID(),
+		};
 	}
 
 	return null;
@@ -742,7 +747,14 @@ export function createTranslator(
 				const errMsg = sessionErrorText(event.properties.error);
 				return {
 					ok: true,
-					messages: [{ type: "error", code: errName, message: errMsg }],
+					messages: [
+						{
+							type: "error",
+							code: errName,
+							message: errMsg,
+							alertId: crypto.randomUUID(),
+						},
+					],
 				};
 			}
 

@@ -1,7 +1,7 @@
 // ─── AttentionBanner Merge Logic Test ──────────────────────────────────────────
 // Verifies that AttentionBanner correctly merges two data sources:
 // 1. Local pending permissions (from permissions store)
-// 2. Attention sessions (from notification reducer)
+// 2. The server-derived per-session counts carried on the session row
 //
 // The merge logic lives in a $derived.by() block inside the component, so we
 // test it by rendering the component and asserting on visible output.
@@ -37,10 +37,6 @@ vi.mock("../../../src/lib/frontend/transport/ws-rpc-client.js", () => ({
 // ─── Imports (after mocks) ──────────────────────────────────────────────────
 
 import AttentionBanner from "../../../src/lib/frontend/components/permissions/AttentionBanner.svelte";
-import {
-	dispatch,
-	resetNotifState,
-} from "../../../src/lib/frontend/stores/notification-reducer.svelte.js";
 import { permissionsState } from "../../../src/lib/frontend/stores/permissions.svelte.js";
 import {
 	routerState,
@@ -66,14 +62,22 @@ function makePerm(id: string, sessionId: string) {
 	};
 }
 
-/** Set up session titles so getSessionTitle() returns readable names. */
-function setSessionTitles(titles: Record<string, string>) {
+/**
+ * Seed the server-owned session rows: titles so getSessionTitle() reads well,
+ * and the counts the server derives onto each row from `pending_approvals`.
+ */
+function setSessionTitles(
+	titles: Record<string, string>,
+	counts: Record<string, { questions?: number; permissions?: number }> = {},
+) {
 	applySessionSnapshot(
 		Object.entries(titles).map(([id, title]) => ({
 			id,
 			title,
 			status: "idle" as const,
 			createdAt: Date.now(),
+			pendingQuestions: counts[id]?.questions ?? 0,
+			pendingPermissions: counts[id]?.permissions ?? 0,
 		})),
 		"complete",
 	);
@@ -92,7 +96,6 @@ async function renderBanner() {
 describe("AttentionBanner merge logic", () => {
 	beforeEach(() => {
 		vi.clearAllMocks();
-		resetNotifState();
 		permissionsState.pendingPermissions = [];
 		permissionsState.pendingQuestions = [];
 		// Clear first: clearSessionState() resets the client half too, so
@@ -138,10 +141,11 @@ describe("AttentionBanner merge logic", () => {
 		expect(status.textContent).toContain("1 permission");
 	});
 
-	it("shows question-only sessions from notification reducer", async () => {
-		dispatch({ type: "question_appeared", sessionId: "ses_other1" });
-		dispatch({ type: "question_appeared", sessionId: "ses_other1" });
-		setSessionTitles({ ses_other1: "API redesign" });
+	it("shows question-only sessions from the server's counts", async () => {
+		setSessionTitles(
+			{ ses_other1: "API redesign" },
+			{ ses_other1: { questions: 2 } },
+		);
 
 		await renderBanner();
 
@@ -160,34 +164,34 @@ describe("AttentionBanner merge logic", () => {
 			makePerm("perm-2", "ses_other1"),
 			makePerm("perm-3", "ses_other1"),
 		];
-		// Reducer has 2 permissions + 1 question for ses_other1
-		dispatch({ type: "permission_appeared", sessionId: "ses_other1" });
-		dispatch({ type: "permission_appeared", sessionId: "ses_other1" });
-		dispatch({ type: "question_appeared", sessionId: "ses_other1" });
-		setSessionTitles({ ses_other1: "Merge session" });
+		// The server's row says 2 permissions + 1 question for ses_other1
+		setSessionTitles(
+			{ ses_other1: "Merge session" },
+			{ ses_other1: { permissions: 2, questions: 1 } },
+		);
 
 		await renderBanner();
 
 		const status = screen.getByRole("status");
 		expect(status).toBeTruthy();
-		// Math.max(3 local, 2 reducer) = 3 permissions, plus 1 question
+		// Math.max(3 local, 2 server) = 3 permissions, plus 1 question
 		expect(status.textContent).toContain("3 permissions");
 		expect(status.textContent).toContain("1 question");
 	});
 
-	it("takes reducer count when it exceeds local count", async () => {
+	it("takes the server count when it exceeds the local one", async () => {
 		// Local store has 1 permission for ses_other1
 		permissionsState.pendingPermissions = [makePerm("perm-1", "ses_other1")];
-		// Reducer has 5 permissions for ses_other1 (server reconciled higher)
-		for (let i = 0; i < 5; i++) {
-			dispatch({ type: "permission_appeared", sessionId: "ses_other1" });
-		}
-		setSessionTitles({ ses_other1: "Big session" });
+		// The server counts 5 — this tab is simply missing four prompts.
+		setSessionTitles(
+			{ ses_other1: "Big session" },
+			{ ses_other1: { permissions: 5 } },
+		);
 
 		await renderBanner();
 
 		const status = screen.getByRole("status");
-		// Math.max(1 local, 5 reducer) = 5
+		// Math.max(1 local, 5 server) = 5
 		expect(status.textContent).toContain("5 permissions");
 	});
 
@@ -197,12 +201,15 @@ describe("AttentionBanner merge logic", () => {
 			makePerm("perm-1", "ses_current"),
 			makePerm("perm-2", "ses_other1"),
 		];
-		// Reducer attention for current session should NOT appear
-		dispatch({ type: "question_appeared", sessionId: "ses_current" });
-		setSessionTitles({
-			ses_current: "Current session",
-			ses_other1: "Other session",
-		});
+		// A server count on the current session should NOT appear either: the
+		// session on screen shows its own prompts inline.
+		setSessionTitles(
+			{
+				ses_current: "Current session",
+				ses_other1: "Other session",
+			},
+			{ ses_current: { questions: 1 } },
+		);
 
 		await renderBanner();
 
@@ -230,6 +237,8 @@ describe("AttentionBanner merge logic", () => {
 					status: "idle",
 					createdAt: Date.now(),
 					parentID: "ses_current",
+					// Server attention on a descendant must not surface either.
+					pendingQuestions: 1,
 				},
 				{
 					id: "ses_other1",
@@ -246,9 +255,6 @@ describe("AttentionBanner merge logic", () => {
 			makePerm("perm-1", "ses_child1"),
 			makePerm("perm-2", "ses_other1"),
 		];
-		// Reducer attention for child session should NOT appear
-		dispatch({ type: "question_appeared", sessionId: "ses_child1" });
-
 		await renderBanner();
 
 		const status = screen.getByRole("status");
@@ -259,7 +265,7 @@ describe("AttentionBanner merge logic", () => {
 		expect(status.textContent).not.toContain("Child session");
 	});
 
-	it("dispatches session_viewed and switches session on click", async () => {
+	it("switches session on click — the server records the view", async () => {
 		permissionsState.pendingPermissions = [makePerm("perm-1", "ses_other1")];
 		setSessionTitles({ ses_other1: "Clickable session" });
 
@@ -310,8 +316,11 @@ describe("AttentionBanner merge logic", () => {
 	});
 
 	it("shows truncated session ID when session title is not found", async () => {
-		dispatch({ type: "question_appeared", sessionId: "ses_unknown_long_id" });
-		// Don't set any session titles — findSession will return undefined
+		// A prompt arrived for a session this tab has no row for yet, so
+		// findSession returns undefined and there is no title to show.
+		permissionsState.pendingPermissions = [
+			makePerm("perm-1", "ses_unknown_long_id"),
+		];
 
 		await renderBanner();
 
@@ -322,8 +331,10 @@ describe("AttentionBanner merge logic", () => {
 
 	it("shows both permissions and questions for the same session", async () => {
 		permissionsState.pendingPermissions = [makePerm("perm-1", "ses_other1")];
-		dispatch({ type: "question_appeared", sessionId: "ses_other1" });
-		setSessionTitles({ ses_other1: "Mixed session" });
+		setSessionTitles(
+			{ ses_other1: "Mixed session" },
+			{ ses_other1: { questions: 1 } },
+		);
 
 		await renderBanner();
 
