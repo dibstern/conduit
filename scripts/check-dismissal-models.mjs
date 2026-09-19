@@ -36,6 +36,18 @@ for (const file of collectSourceFiles(ROOT).sort()) {
 				.join("\n")
 		: source;
 	const path = relative(process.cwd(), file).split(sep).join("/");
+	if (file.endsWith(".svelte")) {
+		const markup = source
+			.replace(/<!--[\s\S]*?-->/g, "")
+			.replace(/<script\b[^>]*>[\s\S]*?<\/script>/g, "");
+		for (const element of markup.matchAll(/<svelte:window\b[^>]*>/g)) {
+			for (const event of element[0].matchAll(
+				/\bon:?(pointerdown|mousedown|click|keydown|focusin)\s*=/g,
+			)) {
+				actual.add(`${path} :: ${event[1]}`);
+			}
+		}
+	}
 	for (const match of code.matchAll(PATTERN)) {
 		if (match[2]) actual.add(`${path} :: ${match[2]}`);
 	}

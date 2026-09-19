@@ -284,14 +284,18 @@ test.describe("Directory Autocomplete", () => {
 		const autocomplete = page.locator(".dir-autocomplete-list");
 		await expect(autocomplete).toBeVisible({ timeout: 5_000 });
 
-		// First item should be active by default
+		// aria-selected, not a class: the `dir-item-active` class this used to
+		// assert stopped existing when the active row became `bg-accent-bg`, and
+		// nothing failed, because the class simply never matched. The ARIA state
+		// is what the listbox actually contracts to expose.
 		const firstItem = autocomplete.locator(".dir-item").nth(0);
-		await expect(firstItem).toHaveClass(/dir-item-active/);
+		await expect(firstItem).toHaveAttribute("aria-selected", "true");
 
 		// Press ArrowDown to move to second item
 		await input.press("ArrowDown");
 		const secondItem = autocomplete.locator(".dir-item").nth(1);
-		await expect(secondItem).toHaveClass(/dir-item-active/);
+		await expect(secondItem).toHaveAttribute("aria-selected", "true");
+		await expect(firstItem).toHaveAttribute("aria-selected", "false");
 
 		// Press Enter to select "work/"
 		await input.press("Enter");
@@ -408,8 +412,8 @@ test.describe("Project Context Menu", () => {
 		await moreBtn.click();
 
 		// Context menu should appear with Rename and Remove options
-		const renameBtn = page.locator("button:has-text('Rename')");
-		const removeBtn = page.locator("button:has-text('Remove')");
+		const renameBtn = page.getByRole("menuitem", { name: "Rename" });
+		const removeBtn = page.getByRole("menuitem", { name: "Remove" });
 		await expect(renameBtn).toBeVisible();
 		await expect(removeBtn).toBeVisible();
 	});
@@ -422,7 +426,7 @@ test.describe("Project Context Menu", () => {
 		const moreBtn = projectItems.nth(1).locator(".proj-more-btn");
 		await moreBtn.click();
 
-		const renameBtn = page.locator("button:has-text('Rename')");
+		const renameBtn = page.getByRole("menuitem", { name: "Rename" });
 		await expect(renameBtn).toBeVisible();
 
 		// Press Escape
@@ -447,7 +451,7 @@ test.describe("Project Rename", () => {
 		const projectItems = page.locator("[data-testid='project-item']");
 		const mylibItem = projectItems.nth(1);
 		await mylibItem.locator(".proj-more-btn").click();
-		await page.locator("button:has-text('Rename')").click();
+		await page.getByRole("menuitem", { name: "Rename" }).click();
 
 		// Inline rename input should appear with current title
 		const renameInput = mylibItem.locator("input[type='text']");
@@ -462,7 +466,7 @@ test.describe("Project Rename", () => {
 		const projectItems = page.locator("[data-testid='project-item']");
 		const mylibItem = projectItems.nth(1);
 		await mylibItem.locator(".proj-more-btn").click();
-		await page.locator("button:has-text('Rename')").click();
+		await page.getByRole("menuitem", { name: "Rename" }).click();
 
 		const renameInput = mylibItem.locator("input[type='text']");
 		await renameInput.fill("My Library");
@@ -490,7 +494,7 @@ test.describe("Project Rename", () => {
 		const projectItems = page.locator("[data-testid='project-item']");
 		const mylibItem = projectItems.nth(1);
 		await mylibItem.locator(".proj-more-btn").click();
-		await page.locator("button:has-text('Rename')").click();
+		await page.getByRole("menuitem", { name: "Rename" }).click();
 
 		const renameInput = mylibItem.locator("input[type='text']");
 		await renameInput.fill("Cancelled Name");
@@ -517,7 +521,7 @@ test.describe("Project Rename", () => {
 		const projectItems = page.locator("[data-testid='project-item']");
 		const mylibItem = projectItems.nth(1);
 		await mylibItem.locator(".proj-more-btn").click();
-		await page.locator("button:has-text('Rename')").click();
+		await page.getByRole("menuitem", { name: "Rename" }).click();
 
 		const renameInput = mylibItem.locator("input[type='text']");
 		await renameInput.fill("My Library");
@@ -540,7 +544,7 @@ test.describe("Project Delete", () => {
 		const projectItems = page.locator("[data-testid='project-item']");
 		const mylibItem = projectItems.nth(1);
 		await mylibItem.locator(".proj-more-btn").click();
-		await page.locator("button:has-text('Remove')").click();
+		await page.getByRole("menuitem", { name: "Remove" }).click();
 
 		// Confirmation modal should appear
 		const confirmModal = page.locator("#confirm-modal");
@@ -559,7 +563,7 @@ test.describe("Project Delete", () => {
 		const projectItems = page.locator("[data-testid='project-item']");
 		const mylibItem = projectItems.nth(1);
 		await mylibItem.locator(".proj-more-btn").click();
-		await page.locator("button:has-text('Remove')").click();
+		await page.getByRole("menuitem", { name: "Remove" }).click();
 
 		// Click the confirm button in the modal
 		await page.click("#confirm-modal button:has-text('Remove')");
@@ -582,7 +586,7 @@ test.describe("Project Delete", () => {
 		const projectItems = page.locator("[data-testid='project-item']");
 		const mylibItem = projectItems.nth(1);
 		await mylibItem.locator(".proj-more-btn").click();
-		await page.locator("button:has-text('Remove')").click();
+		await page.getByRole("menuitem", { name: "Remove" }).click();
 
 		// Click Cancel
 		await page.click("#confirm-modal button:has-text('Cancel')");
@@ -612,7 +616,7 @@ test.describe("Project Delete", () => {
 		// Remove mylib
 		const mylibItem = projectItems.nth(1);
 		await mylibItem.locator(".proj-more-btn").click();
-		await page.locator("button:has-text('Remove')").click();
+		await page.getByRole("menuitem", { name: "Remove" }).click();
 		await page.click("#confirm-modal button:has-text('Remove')");
 
 		// After server responds, only 1 project should remain

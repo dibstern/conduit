@@ -6,9 +6,12 @@
 	import Icon from "../ui/Icon.svelte";
 	import BlockGrid from "../ui/BlockGrid.svelte";
 	import Button from "../ui/Button.svelte";
+	import Surface from "../ui/Surface.svelte";
 	import SessionList from "../session/SessionList.svelte";
 	import ProjectSwitcher from "../project/ProjectSwitcher.svelte";
+	import ProjectManagerPanel from "../project/ProjectManagerPanel.svelte";
 	import SidebarFilePanel from "../file/SidebarFilePanel.svelte";
+	import { dismiss } from "../../actions/use-dismiss.svelte.js";
 	import { versionState } from "../../stores/version.svelte.js";
 	import {
 		uiState,
@@ -28,8 +31,13 @@
 	import { sendNewSession, sessionCreation, switchToSession } from "../../stores/session.svelte.js";
 
 	// ─── Local state ──────────────────────────────────────────────────────────
+	let projectsOpen = $state(false);
+	let projectContextMenuOpen = $state(false);
 
 	// ─── Handlers ──────────────────────────────────────────────────────────────
+	function toggleProjectsPanel() {
+		projectsOpen = !projectsOpen;
+	}
 
 	function handleCloseSidebar() {
 		collapseSidebar();
@@ -138,6 +146,7 @@
 	const sidebarStyle = $derived(
 		`--sidebar-w: ${uiState.sidebarCollapsed ? 0 : uiState.sidebarWidth}px;`,
 	);
+
 </script>
 
 <!-- Sidebar overlay (mobile backdrop) -->
@@ -161,7 +170,15 @@
 	<!-- Sidebar header: logo + toggle -->
 	<div
 		id="sidebar-header"
-		class="flex items-center justify-between px-3 pt-2.5 pb-2 shrink-0"
+		class="relative flex items-center justify-between px-3 pt-2.5 pb-2 shrink-0"
+		use:dismiss={{
+			enabled: projectsOpen && !projectContextMenuOpen,
+			escape: false,
+			onDismiss: () => {
+				if (document.getElementById("confirm-modal")) return;
+				projectsOpen = false;
+			},
+		}}
 	>
 		<a
 			href="/"
@@ -171,6 +188,24 @@
 			<span class="text-sm font-medium tracking-[0.14em] text-text font-brand">conduit</span>
 			<BlockGrid cols={10} mode="static" blockSize={2} gap={1} />
 		</a>
+		<!-- Literal px keeps the phone touch target at 44px despite the 12px root font size. -->
+		<Button
+			id="sidebar-projects-btn"
+			variant="ghost"
+			size="content"
+			tone="muted"
+			hoverFill="alt"
+			iconOnly
+			icon="ellipsis"
+			iconSize={18}
+			class="min-w-[44px] min-h-[44px] md:min-w-0 md:min-h-0 md:p-1 rounded-md"
+			title="Projects"
+			ariaLabel="Projects"
+			aria-haspopup="true"
+			aria-expanded={projectsOpen}
+			aria-controls={projectsOpen ? "sidebar-projects-panel" : undefined}
+			onclick={toggleProjectsPanel}
+		/>
 		<!--
 			`tone="muted"` and `hoverFill="alt"` reproduce this button's two colour
 			pairs token for token. Dropped: `bg-none` (background-image is already
@@ -193,6 +228,25 @@
 			ariaLabel="Close sidebar"
 			onclick={handleCloseSidebar}
 		/>
+
+		<!-- Keep this surface inside #sidebar's stacking context; a body portal paints below the mobile drawer. -->
+		{#if projectsOpen}
+			<Surface
+				variant="card"
+				radius="panel"
+				elevation="dropdown"
+				id="sidebar-projects-panel"
+				data-testid="sidebar-projects-panel"
+				class="absolute top-full left-1 right-1 z-[var(--z-dropdown)] mt-0.5 min-w-[240px] p-1 overflow-hidden font-brand"
+			>
+				<ProjectManagerPanel
+					projects={projectState.projects}
+					currentSlug={getCurrentSlug() ?? undefined}
+					onclose={() => { projectsOpen = false; }}
+					oncontextmenuopenchange={(nextOpen) => { projectContextMenuOpen = nextOpen; }}
+				/>
+			</Surface>
+		{/if}
 	</div>
 
 	<!-- Project switcher -->

@@ -46,6 +46,11 @@
 	"src/lib/frontend/components/project/ProjectContextMenu.svelte :: text-[13px]": "Converged to the shared `text-sm` (11px) that every other menu row in the app already wore. 13px was this one menu's private value and nothing referenced it.",
 	"src/lib/frontend/components/project/ProjectContextMenu.svelte :: z-[var(--z-popover)]": "Was on the full-screen backdrop div that caught outside clicks. The backdrop is gone: bits-ui dismisses on outside pointerdown without painting an element over the page, which also stops the backdrop swallowing the first click elsewhere.",
 	"src/lib/frontend/components/project/ProjectContextMenu.svelte :: z-[var(--z-popover-raised)]": "As above. This menu opens from inside ProjectSwitcher's inline dropdown, which sits below the popover tier, so 200 clears it.",
+	"src/lib/frontend/components/project/ProjectSwitcher.svelte :: Remove,border-border-subtle,border-t,conduit,duration-100,font-medium,font-mono,from,h-5,justify-end,max-h-[280px],overflow-y-auto,pb-1,pb-1.5,proj-more-btn,pt-2,px-1.5,px-3,py-0.5,py-1,py-2,rounded,tabular-nums,text-error,text-xs,w-5": {
+		"movedTo": "src/lib/frontend/components/project/ProjectManagerPanel.svelte",
+		"reason": "conduit-test-vik1.6 extracts the ProjectSwitcher dropdown body into ProjectManagerPanel verbatim. These tokens still render in the navigable panel branch; the switcher now owns only its trigger and Surface shell.",
+		"requires": "<ProjectManagerPanel"
+	},
 	"src/lib/frontend/components/ui/segmented-styles.ts :: border-brand-a": {
 		"renamedTo": "border-accent",
 		"reason": "brand-a and accent hold the same value in both canonical themes, so the swap is zero-diff. accent won because selection is an interactive state and accent is the token family that models one. The underlying token duplication is tracked on conduit-test-57oe."
