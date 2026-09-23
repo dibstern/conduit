@@ -1,5 +1,9 @@
-// test/unit/persistence/projectors/session-projector.test.ts
+// test/unit/persistence/projectors-effect/session-projector.test.ts
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import {
+	createAllEffectProjectors,
+	type EffectProjector,
+} from "../../../../src/lib/persistence/effect/projectors-effect.js";
 import {
 	createEventId,
 	type MessageCreatedPayload,
@@ -14,11 +18,11 @@ import {
 	type TurnCompletedPayload,
 	type TurnErrorPayload,
 } from "../../../../src/lib/persistence/events.js";
-import { runMigrations } from "../../../../src/lib/persistence/migrations.js";
 import { SESSION_HANDLED_TYPES } from "../../../../src/lib/persistence/projectors/session-handlers.js";
-import { SessionProjector } from "../../../../src/lib/persistence/projectors/session-projector.js";
-import { schemaMigrations } from "../../../../src/lib/persistence/schema.js";
-import { SqliteClient } from "../../../../src/lib/persistence/sqlite-client.js";
+import {
+	type EffectProjectionHarness,
+	makeEffectProjectionHarness,
+} from "../../../helpers/effect-projection-harness.js";
 
 function makeStored<T extends StoredEvent["type"]>(
 	type: T,
@@ -57,36 +61,50 @@ interface SessionRow {
 }
 
 describe("SessionProjector", () => {
-	let db: SqliteClient;
-	let projector: SessionProjector;
+	let harness: EffectProjectionHarness;
+	let projector: EffectProjector;
 	const now = 1_000_000_000_000;
 
 	beforeEach(() => {
-		db = SqliteClient.memory();
-		runMigrations(db, schemaMigrations);
-		projector = new SessionProjector();
+		const effectProjector = createAllEffectProjectors().find(
+			(candidate) => candidate.name === "session",
+		);
+		if (!effectProjector) throw new Error("Session projector not found");
+		projector = effectProjector;
+		harness = makeEffectProjectionHarness([projector]);
 	});
 
-	afterEach(() => {
-		db?.close();
+	afterEach(async () => {
+		await harness?.dispose();
 	});
 
-	it("has the correct name and handles list", () => {
+	async function project(event: StoredEvent): Promise<void> {
+		await harness.reproject([event]);
+	}
+
+	async function queryOne<T extends object>(
+		statement: string,
+		params: readonly (string | number | null)[] = [],
+	): Promise<T | undefined> {
+		return (await harness.query<T>(statement, params))[0];
+	}
+
+	it("has the correct name and handles list", async () => {
 		expect(projector.name).toBe("session");
 		expect(projector.handles).toBe(SESSION_HANDLED_TYPES);
 	});
 
 	describe("session.created", () => {
-		it("inserts a new session row", () => {
+		it("inserts a new session row", async () => {
 			const event = makeStored("session.created", "s1", {
 				sessionId: "s1",
 				title: "Hello World",
 				provider: "opencode",
 			} satisfies SessionCreatedPayload);
 
-			projector.project(event, db);
+			await project(event);
 
-			const row = db.queryOne<SessionRow>(
+			const row = await queryOne<SessionRow>(
 				"SELECT * FROM sessions WHERE id = ?",
 				["s1"],
 			);
@@ -99,24 +117,25 @@ describe("SessionProjector", () => {
 			expect(row?.updated_at).toBe(event.createdAt);
 		});
 
-		it("is idempotent (INSERT ON CONFLICT DO UPDATE)", () => {
+		it("is idempotent (INSERT ON CONFLICT DO UPDATE)", async () => {
 			const event = makeStored("session.created", "s1", {
 				sessionId: "s1",
 				title: "First",
 				provider: "opencode",
 			} satisfies SessionCreatedPayload);
 
-			projector.project(event, db);
-			projector.project(event, db);
+			await project(event);
+			await project(event);
 
-			const rows = db.query<SessionRow>("SELECT * FROM sessions WHERE id = ?", [
-				"s1",
-			]);
+			const rows = await harness.query<SessionRow>(
+				"SELECT * FROM sessions WHERE id = ?",
+				["s1"],
+			);
 			expect(rows).toHaveLength(1);
 		});
 
-		it("writes parent and provider session ids, then preserves them when omitted", () => {
-			projector.project(
+		it("writes parent and provider session ids, then preserves them when omitted", async () => {
+			await project(
 				makeStored(
 					"session.created",
 					"parent-session",
@@ -128,10 +147,9 @@ describe("SessionProjector", () => {
 					1,
 					now,
 				),
-				db,
 			);
 
-			projector.project(
+			await project(
 				makeStored(
 					"session.created",
 					"claude-subagent-abc",
@@ -145,9 +163,8 @@ describe("SessionProjector", () => {
 					2,
 					now + 1,
 				),
-				db,
 			);
-			projector.project(
+			await project(
 				makeStored(
 					"session.created",
 					"claude-subagent-abc",
@@ -159,10 +176,9 @@ describe("SessionProjector", () => {
 					3,
 					now + 2,
 				),
-				db,
 			);
 
-			const row = db.queryOne<SessionRow>(
+			const row = await queryOne<SessionRow>(
 				"SELECT * FROM sessions WHERE id = ?",
 				["claude-subagent-abc"],
 			);
@@ -173,7 +189,7 @@ describe("SessionProjector", () => {
 	});
 
 	describe("session.renamed", () => {
-		it("updates the title and updated_at", () => {
+		it("updates the title and updated_at", async () => {
 			const created = makeStored(
 				"session.created",
 				"s1",
@@ -185,7 +201,7 @@ describe("SessionProjector", () => {
 				1,
 				now,
 			);
-			projector.project(created, db);
+			await project(created);
 
 			const renamed = makeStored(
 				"session.renamed",
@@ -197,9 +213,9 @@ describe("SessionProjector", () => {
 				2,
 				now + 1000,
 			);
-			projector.project(renamed, db);
+			await project(renamed);
 
-			const row = db.queryOne<SessionRow>(
+			const row = await queryOne<SessionRow>(
 				"SELECT * FROM sessions WHERE id = ?",
 				["s1"],
 			);
@@ -212,7 +228,7 @@ describe("SessionProjector", () => {
 		it.each([
 			"busy",
 			"retry",
-		] as const)("updates status to %s and clears the last turn error", (statusValue) => {
+		] as const)("updates status to %s and clears the last turn error", async (statusValue) => {
 			const created = makeStored(
 				"session.created",
 				"s1",
@@ -224,8 +240,8 @@ describe("SessionProjector", () => {
 				1,
 				now,
 			);
-			projector.project(created, db);
-			projector.project(
+			await project(created);
+			await project(
 				makeStored(
 					"turn.error",
 					"s1",
@@ -233,7 +249,6 @@ describe("SessionProjector", () => {
 					2,
 					now + 250,
 				),
-				db,
 			);
 
 			const status = makeStored(
@@ -246,9 +261,9 @@ describe("SessionProjector", () => {
 				3,
 				now + 500,
 			);
-			projector.project(status, db);
+			await project(status);
 
-			const row = db.queryOne<SessionRow>(
+			const row = await queryOne<SessionRow>(
 				"SELECT * FROM sessions WHERE id = ?",
 				["s1"],
 			);
@@ -257,16 +272,15 @@ describe("SessionProjector", () => {
 			expect(row?.last_turn_error_at).toBeNull();
 		});
 
-		it("preserves the last turn error for an idle status", () => {
-			projector.project(
+		it("preserves the last turn error for an idle status", async () => {
+			await project(
 				makeStored("session.created", "s1", {
 					sessionId: "s1",
 					title: "Test",
 					provider: "opencode",
 				}),
-				db,
 			);
-			projector.project(
+			await project(
 				makeStored(
 					"turn.error",
 					"s1",
@@ -274,9 +288,8 @@ describe("SessionProjector", () => {
 					2,
 					now + 250,
 				),
-				db,
 			);
-			projector.project(
+			await project(
 				makeStored(
 					"session.status",
 					"s1",
@@ -284,10 +297,9 @@ describe("SessionProjector", () => {
 					3,
 					now + 500,
 				),
-				db,
 			);
 
-			const row = db.queryOne<SessionRow>(
+			const row = await queryOne<SessionRow>(
 				"SELECT * FROM sessions WHERE id = ?",
 				["s1"],
 			);
@@ -296,7 +308,7 @@ describe("SessionProjector", () => {
 	});
 
 	describe("session.provider_changed", () => {
-		it("updates the provider and updated_at", () => {
+		it("updates the provider and updated_at", async () => {
 			const created = makeStored(
 				"session.created",
 				"s1",
@@ -308,7 +320,7 @@ describe("SessionProjector", () => {
 				1,
 				now,
 			);
-			projector.project(created, db);
+			await project(created);
 
 			const changed = makeStored(
 				"session.provider_changed",
@@ -321,9 +333,9 @@ describe("SessionProjector", () => {
 				2,
 				now + 2000,
 			);
-			projector.project(changed, db);
+			await project(changed);
 
-			const row = db.queryOne<SessionRow>(
+			const row = await queryOne<SessionRow>(
 				"SELECT * FROM sessions WHERE id = ?",
 				["s1"],
 			);
@@ -333,9 +345,9 @@ describe("SessionProjector", () => {
 	});
 
 	describe("session.permission_mode_changed", () => {
-		it("updates permission mode and updated_at for the target session only", () => {
+		it("updates permission mode and updated_at for the target session only", async () => {
 			for (const sessionId of ["s1", "s2"]) {
-				projector.project(
+				await project(
 					makeStored(
 						"session.created",
 						sessionId,
@@ -347,11 +359,10 @@ describe("SessionProjector", () => {
 						1,
 						now,
 					),
-					db,
 				);
 			}
 
-			projector.project(
+			await project(
 				makeStored(
 					"session.permission_mode_changed",
 					"s1",
@@ -362,14 +373,13 @@ describe("SessionProjector", () => {
 					2,
 					now + 2500,
 				),
-				db,
 			);
 
-			const target = db.queryOne<SessionRow>(
+			const target = await queryOne<SessionRow>(
 				"SELECT * FROM sessions WHERE id = ?",
 				["s1"],
 			);
-			const other = db.queryOne<SessionRow>(
+			const other = await queryOne<SessionRow>(
 				"SELECT * FROM sessions WHERE id = ?",
 				["s2"],
 			);
@@ -381,8 +391,8 @@ describe("SessionProjector", () => {
 	});
 
 	describe("session read state", () => {
-		it("sets read_at from the event timestamp and clears it when unread", () => {
-			projector.project(
+		it("sets read_at from the event timestamp and clears it when unread", async () => {
+			await project(
 				makeStored(
 					"session.created",
 					"s1",
@@ -394,10 +404,9 @@ describe("SessionProjector", () => {
 					1,
 					now,
 				),
-				db,
 			);
 
-			projector.project(
+			await project(
 				makeStored(
 					"session.read",
 					"s1",
@@ -405,9 +414,8 @@ describe("SessionProjector", () => {
 					2,
 					now + 100,
 				),
-				db,
 			);
-			const afterRead = db.queryOne<SessionRow>(
+			const afterRead = await queryOne<SessionRow>(
 				"SELECT * FROM sessions WHERE id = ?",
 				["s1"],
 			);
@@ -416,7 +424,7 @@ describe("SessionProjector", () => {
 			// must not jump it to the top of the list.
 			expect(afterRead?.updated_at).toBe(now);
 
-			projector.project(
+			await project(
 				makeStored(
 					"session.unread",
 					"s1",
@@ -424,9 +432,8 @@ describe("SessionProjector", () => {
 					3,
 					now + 200,
 				),
-				db,
 			);
-			const afterUnread = db.queryOne<SessionRow>(
+			const afterUnread = await queryOne<SessionRow>(
 				"SELECT * FROM sessions WHERE id = ?",
 				["s1"],
 			);
@@ -436,7 +443,7 @@ describe("SessionProjector", () => {
 	});
 
 	describe("turn.completed", () => {
-		it("updates updated_at and clears the last turn error", () => {
+		it("updates updated_at and clears the last turn error", async () => {
 			const created = makeStored(
 				"session.created",
 				"s1",
@@ -448,15 +455,15 @@ describe("SessionProjector", () => {
 				1,
 				now,
 			);
-			projector.project(created, db);
+			await project(created);
 
-			const originalRow = db.queryOne<SessionRow>(
+			const originalRow = await queryOne<SessionRow>(
 				"SELECT * FROM sessions WHERE id = ?",
 				["s1"],
 			);
 			const originalTitle = originalRow?.title;
 			const originalStatus = originalRow?.status;
-			projector.project(
+			await project(
 				makeStored(
 					"turn.error",
 					"s1",
@@ -464,7 +471,6 @@ describe("SessionProjector", () => {
 					2,
 					now + 3000,
 				),
-				db,
 			);
 
 			const turnDone = makeStored(
@@ -478,9 +484,9 @@ describe("SessionProjector", () => {
 				3,
 				now + 5000,
 			);
-			projector.project(turnDone, db);
+			await project(turnDone);
 
-			const row = db.queryOne<SessionRow>(
+			const row = await queryOne<SessionRow>(
 				"SELECT * FROM sessions WHERE id = ?",
 				["s1"],
 			);
@@ -492,7 +498,7 @@ describe("SessionProjector", () => {
 	});
 
 	describe("turn.error", () => {
-		it("updates updated_at and records the failure timestamp", () => {
+		it("updates updated_at and records the failure timestamp", async () => {
 			const created = makeStored(
 				"session.created",
 				"s1",
@@ -504,7 +510,7 @@ describe("SessionProjector", () => {
 				1,
 				now,
 			);
-			projector.project(created, db);
+			await project(created);
 
 			const turnErr = makeStored(
 				"turn.error",
@@ -516,9 +522,9 @@ describe("SessionProjector", () => {
 				2,
 				now + 3000,
 			);
-			projector.project(turnErr, db);
+			await project(turnErr);
 
-			const row = db.queryOne<SessionRow>(
+			const row = await queryOne<SessionRow>(
 				"SELECT * FROM sessions WHERE id = ?",
 				["s1"],
 			);
@@ -528,16 +534,15 @@ describe("SessionProjector", () => {
 	});
 
 	describe("message.created", () => {
-		it("clears the last turn error only for user messages", () => {
-			projector.project(
+		it("clears the last turn error only for user messages", async () => {
+			await project(
 				makeStored("session.created", "s1", {
 					sessionId: "s1",
 					title: "Test",
 					provider: "opencode",
 				}),
-				db,
 			);
-			projector.project(
+			await project(
 				makeStored(
 					"turn.error",
 					"s1",
@@ -545,9 +550,8 @@ describe("SessionProjector", () => {
 					2,
 					now + 100,
 				),
-				db,
 			);
-			projector.project(
+			await project(
 				makeStored(
 					"message.created",
 					"s1",
@@ -559,14 +563,16 @@ describe("SessionProjector", () => {
 					3,
 					now + 200,
 				),
-				db,
 			);
 			expect(
-				db.queryOne<SessionRow>("SELECT * FROM sessions WHERE id = ?", ["s1"])
-					?.last_turn_error_at,
+				(
+					await queryOne<SessionRow>("SELECT * FROM sessions WHERE id = ?", [
+						"s1",
+					])
+				)?.last_turn_error_at,
 			).toBe(now + 100);
 
-			projector.project(
+			await project(
 				makeStored(
 					"message.created",
 					"s1",
@@ -578,9 +584,8 @@ describe("SessionProjector", () => {
 					4,
 					now + 300,
 				),
-				db,
 			);
-			const row = db.queryOne<SessionRow>(
+			const row = await queryOne<SessionRow>(
 				"SELECT * FROM sessions WHERE id = ?",
 				["s1"],
 			);
@@ -589,7 +594,7 @@ describe("SessionProjector", () => {
 		});
 	});
 
-	it("ignores event types it does not handle", () => {
+	it("ignores event types it does not handle", async () => {
 		// Pre-insert a session so we can verify it's untouched
 		const created = makeStored(
 			"session.created",
@@ -601,9 +606,9 @@ describe("SessionProjector", () => {
 			} satisfies SessionCreatedPayload,
 			1,
 		);
-		projector.project(created, db);
+		await project(created);
 
-		const before = db.queryOne<SessionRow>(
+		const before = await queryOne<SessionRow>(
 			"SELECT * FROM sessions WHERE id = ?",
 			["s1"],
 		);
@@ -619,9 +624,9 @@ describe("SessionProjector", () => {
 			} as any,
 			2,
 		);
-		projector.project(unrelated, db);
+		await project(unrelated);
 
-		const after = db.queryOne<SessionRow>(
+		const after = await queryOne<SessionRow>(
 			"SELECT * FROM sessions WHERE id = ?",
 			["s1"],
 		);

@@ -1,5 +1,9 @@
-// test/unit/persistence/projectors/approval-projector.test.ts
+// test/unit/persistence/projectors-effect/approval-projector.test.ts
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import {
+	createAllEffectProjectors,
+	type EffectProjector,
+} from "../../../../src/lib/persistence/effect/projectors-effect.js";
 import {
 	createEventId,
 	type PermissionAskedPayload,
@@ -8,11 +12,10 @@ import {
 	type QuestionResolvedPayload,
 	type StoredEvent,
 } from "../../../../src/lib/persistence/events.js";
-import { runMigrations } from "../../../../src/lib/persistence/migrations.js";
-import { ApprovalProjector } from "../../../../src/lib/persistence/projectors/approval-projector.js";
-import { decodeJson } from "../../../../src/lib/persistence/projectors/projector.js";
-import { schemaMigrations } from "../../../../src/lib/persistence/schema.js";
-import { SqliteClient } from "../../../../src/lib/persistence/sqlite-client.js";
+import {
+	type EffectProjectionHarness,
+	makeEffectProjectionHarness,
+} from "../../../helpers/effect-projection-harness.js";
 
 function makeStored<T extends StoredEvent["type"]>(
 	type: T,
@@ -48,27 +51,41 @@ interface ApprovalRow {
 }
 
 describe("ApprovalProjector", () => {
-	let db: SqliteClient;
-	let projector: ApprovalProjector;
+	let harness: EffectProjectionHarness;
+	let projector: EffectProjector;
 	const now = Date.now();
 
-	beforeEach(() => {
-		db = SqliteClient.memory();
-		runMigrations(db, schemaMigrations);
-		projector = new ApprovalProjector();
+	beforeEach(async () => {
+		const effectProjector = createAllEffectProjectors().find(
+			(candidate) => candidate.name === "approval",
+		);
+		if (!effectProjector) throw new Error("Approval projector not found");
+		projector = effectProjector;
+		harness = makeEffectProjectionHarness([projector]);
 
 		// Pre-insert a session so FK constraints don't block inserts
-		db.execute(
+		await harness.query(
 			"INSERT INTO sessions (id, provider, title, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
 			["s1", "opencode", "Test", "idle", now, now],
 		);
 	});
 
-	afterEach(() => {
-		db?.close();
+	afterEach(async () => {
+		await harness?.dispose();
 	});
 
-	it("has the correct name and handles list", () => {
+	async function project(event: StoredEvent): Promise<void> {
+		await harness.reproject([event]);
+	}
+
+	async function queryOne<T extends object>(
+		statement: string,
+		params: readonly (string | number | null)[] = [],
+	): Promise<T | undefined> {
+		return (await harness.query<T>(statement, params))[0];
+	}
+
+	it("has the correct name and handles list", async () => {
 		expect(projector.name).toBe("approval");
 		expect(projector.handles).toEqual([
 			"permission.asked",
@@ -79,7 +96,7 @@ describe("ApprovalProjector", () => {
 	});
 
 	describe("permission.asked", () => {
-		it("inserts a pending permission approval", () => {
+		it("inserts a pending permission approval", async () => {
 			const event = makeStored(
 				"permission.asked",
 				"s1",
@@ -93,9 +110,9 @@ describe("ApprovalProjector", () => {
 				now,
 			);
 
-			projector.project(event, db);
+			await project(event);
 
-			const row = db.queryOne<ApprovalRow>(
+			const row = await queryOne<ApprovalRow>(
 				"SELECT * FROM pending_approvals WHERE id = ?",
 				["perm-1"],
 			);
@@ -106,13 +123,13 @@ describe("ApprovalProjector", () => {
 			expect(row?.status).toBe("pending");
 			expect(row?.tool_name).toBe("bash");
 			// biome-ignore lint/style/noNonNullAssertion: test assertion after expect(row).toBeDefined()
-			expect(decodeJson(row!.input)).toEqual({ command: "rm -rf /" });
+			expect(JSON.parse(row!.input ?? "null")).toEqual({ command: "rm -rf /" });
 			expect(row?.decision).toBeNull();
 			expect(row?.created_at).toBe(now);
 			expect(row?.resolved_at).toBeNull();
 		});
 
-		it("is idempotent (INSERT ON CONFLICT DO NOTHING)", () => {
+		it("is idempotent (INSERT ON CONFLICT DO NOTHING)", async () => {
 			const event = makeStored(
 				"permission.asked",
 				"s1",
@@ -126,10 +143,10 @@ describe("ApprovalProjector", () => {
 				now,
 			);
 
-			projector.project(event, db);
-			projector.project(event, db);
+			await project(event);
+			await project(event);
 
-			const rows = db.query<ApprovalRow>(
+			const rows = await harness.query<ApprovalRow>(
 				"SELECT * FROM pending_approvals WHERE id = ?",
 				["perm-1"],
 			);
@@ -138,9 +155,9 @@ describe("ApprovalProjector", () => {
 	});
 
 	describe("permission.resolved", () => {
-		it("updates the approval to resolved with decision", () => {
+		it("updates the approval to resolved with decision", async () => {
 			// First: ask
-			projector.project(
+			await project(
 				makeStored(
 					"permission.asked",
 					"s1",
@@ -153,12 +170,11 @@ describe("ApprovalProjector", () => {
 					1,
 					now,
 				),
-				db,
 			);
 
 			// Then: resolve
 			const resolveTime = now + 3000;
-			projector.project(
+			await project(
 				makeStored(
 					"permission.resolved",
 					"s1",
@@ -169,10 +185,9 @@ describe("ApprovalProjector", () => {
 					2,
 					resolveTime,
 				),
-				db,
 			);
 
-			const row = db.queryOne<ApprovalRow>(
+			const row = await queryOne<ApprovalRow>(
 				"SELECT * FROM pending_approvals WHERE id = ?",
 				["perm-1"],
 			);
@@ -181,8 +196,8 @@ describe("ApprovalProjector", () => {
 			expect(row?.resolved_at).toBe(resolveTime);
 		});
 
-		it("updates to denied decision", () => {
-			projector.project(
+		it("updates to denied decision", async () => {
+			await project(
 				makeStored(
 					"permission.asked",
 					"s1",
@@ -195,10 +210,9 @@ describe("ApprovalProjector", () => {
 					1,
 					now,
 				),
-				db,
 			);
 
-			projector.project(
+			await project(
 				makeStored(
 					"permission.resolved",
 					"s1",
@@ -209,10 +223,9 @@ describe("ApprovalProjector", () => {
 					2,
 					now + 1000,
 				),
-				db,
 			);
 
-			const row = db.queryOne<ApprovalRow>(
+			const row = await queryOne<ApprovalRow>(
 				"SELECT * FROM pending_approvals WHERE id = ?",
 				["perm-2"],
 			);
@@ -222,7 +235,7 @@ describe("ApprovalProjector", () => {
 	});
 
 	describe("question.asked", () => {
-		it("inserts a pending question approval", () => {
+		it("inserts a pending question approval", async () => {
 			const event = makeStored(
 				"question.asked",
 				"s1",
@@ -235,9 +248,9 @@ describe("ApprovalProjector", () => {
 				now,
 			);
 
-			projector.project(event, db);
+			await project(event);
 
-			const row = db.queryOne<ApprovalRow>(
+			const row = await queryOne<ApprovalRow>(
 				"SELECT * FROM pending_approvals WHERE id = ?",
 				["q-1"],
 			);
@@ -248,7 +261,7 @@ describe("ApprovalProjector", () => {
 			expect(row?.status).toBe("pending");
 			expect(row?.tool_name).toBeNull();
 			// biome-ignore lint/style/noNonNullAssertion: test assertion after expect(row).toBeDefined()
-			expect(decodeJson(row!.input)).toEqual([
+			expect(JSON.parse(row!.input ?? "null")).toEqual([
 				{ id: "q1-a", text: "Are you sure?", type: "confirm" },
 			]);
 			expect(row?.decision).toBeNull();
@@ -256,7 +269,7 @@ describe("ApprovalProjector", () => {
 			expect(row?.resolved_at).toBeNull();
 		});
 
-		it("is idempotent (INSERT ON CONFLICT DO NOTHING)", () => {
+		it("is idempotent (INSERT ON CONFLICT DO NOTHING)", async () => {
 			const event = makeStored(
 				"question.asked",
 				"s1",
@@ -269,10 +282,10 @@ describe("ApprovalProjector", () => {
 				now,
 			);
 
-			projector.project(event, db);
-			projector.project(event, db);
+			await project(event);
+			await project(event);
 
-			const rows = db.query<ApprovalRow>(
+			const rows = await harness.query<ApprovalRow>(
 				"SELECT * FROM pending_approvals WHERE id = ?",
 				["q-1"],
 			);
@@ -281,8 +294,8 @@ describe("ApprovalProjector", () => {
 	});
 
 	describe("question.resolved", () => {
-		it("updates the question to resolved with answers as decision", () => {
-			projector.project(
+		it("updates the question to resolved with answers as decision", async () => {
+			await project(
 				makeStored(
 					"question.asked",
 					"s1",
@@ -294,11 +307,10 @@ describe("ApprovalProjector", () => {
 					1,
 					now,
 				),
-				db,
 			);
 
 			const resolveTime = now + 2000;
-			projector.project(
+			await project(
 				makeStored(
 					"question.resolved",
 					"s1",
@@ -309,23 +321,22 @@ describe("ApprovalProjector", () => {
 					2,
 					resolveTime,
 				),
-				db,
 			);
 
-			const row = db.queryOne<ApprovalRow>(
+			const row = await queryOne<ApprovalRow>(
 				"SELECT * FROM pending_approvals WHERE id = ?",
 				["q-1"],
 			);
 			expect(row?.status).toBe("resolved");
 			// biome-ignore lint/style/noNonNullAssertion: test assertion after expect(row).toBeDefined()
-			expect(decodeJson(row!.decision)).toEqual({ "q1-a": true });
+			expect(JSON.parse(row!.decision ?? "null")).toEqual({ "q1-a": true });
 			expect(row?.resolved_at).toBe(resolveTime);
 		});
 	});
 
 	describe("full lifecycle", () => {
-		it("tracks permission from asked to resolved", () => {
-			projector.project(
+		it("tracks permission from asked to resolved", async () => {
+			await project(
 				makeStored(
 					"permission.asked",
 					"s1",
@@ -338,16 +349,15 @@ describe("ApprovalProjector", () => {
 					1,
 					now,
 				),
-				db,
 			);
 
-			let row = db.queryOne<ApprovalRow>(
+			let row = await queryOne<ApprovalRow>(
 				"SELECT * FROM pending_approvals WHERE id = ?",
 				["perm-lifecycle"],
 			);
 			expect(row?.status).toBe("pending");
 
-			projector.project(
+			await project(
 				makeStored(
 					"permission.resolved",
 					"s1",
@@ -358,10 +368,9 @@ describe("ApprovalProjector", () => {
 					2,
 					now + 5000,
 				),
-				db,
 			);
 
-			row = db.queryOne<ApprovalRow>(
+			row = await queryOne<ApprovalRow>(
 				"SELECT * FROM pending_approvals WHERE id = ?",
 				["perm-lifecycle"],
 			);
@@ -369,8 +378,8 @@ describe("ApprovalProjector", () => {
 			expect(row?.decision).toBe("once");
 		});
 
-		it("tracks multiple approvals in one session", () => {
-			projector.project(
+		it("tracks multiple approvals in one session", async () => {
+			await project(
 				makeStored(
 					"permission.asked",
 					"s1",
@@ -383,10 +392,9 @@ describe("ApprovalProjector", () => {
 					1,
 					now,
 				),
-				db,
 			);
 
-			projector.project(
+			await project(
 				makeStored(
 					"question.asked",
 					"s1",
@@ -398,10 +406,9 @@ describe("ApprovalProjector", () => {
 					2,
 					now + 100,
 				),
-				db,
 			);
 
-			const pending = db.query<ApprovalRow>(
+			const pending = await harness.query<ApprovalRow>(
 				"SELECT * FROM pending_approvals WHERE session_id = ? AND status = 'pending' ORDER BY created_at",
 				["s1"],
 			);
@@ -411,7 +418,7 @@ describe("ApprovalProjector", () => {
 		});
 	});
 
-	it("ignores event types it does not handle", () => {
+	it("ignores event types it does not handle", async () => {
 		const unrelated = makeStored(
 			"text.delta",
 			"s1",
@@ -425,9 +432,9 @@ describe("ApprovalProjector", () => {
 			now,
 		);
 
-		projector.project(unrelated, db);
+		await project(unrelated);
 
-		const rows = db.query<ApprovalRow>(
+		const rows = await harness.query<ApprovalRow>(
 			"SELECT * FROM pending_approvals WHERE session_id = ?",
 			["s1"],
 		);

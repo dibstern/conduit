@@ -1,15 +1,19 @@
-// test/unit/persistence/projectors/provider-projector.test.ts
+// test/unit/persistence/projectors-effect/provider-projector.test.ts
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import {
+	createAllEffectProjectors,
+	type EffectProjector,
+} from "../../../../src/lib/persistence/effect/projectors-effect.js";
 import {
 	createEventId,
 	type SessionCreatedPayload,
 	type SessionProviderChangedPayload,
 	type StoredEvent,
 } from "../../../../src/lib/persistence/events.js";
-import { runMigrations } from "../../../../src/lib/persistence/migrations.js";
-import { ProviderProjector } from "../../../../src/lib/persistence/projectors/provider-projector.js";
-import { schemaMigrations } from "../../../../src/lib/persistence/schema.js";
-import { SqliteClient } from "../../../../src/lib/persistence/sqlite-client.js";
+import {
+	type EffectProjectionHarness,
+	makeEffectProjectionHarness,
+} from "../../../helpers/effect-projection-harness.js";
 
 function makeStored<T extends StoredEvent["type"]>(
 	type: T,
@@ -42,27 +46,41 @@ interface ProviderRow {
 }
 
 describe("ProviderProjector", () => {
-	let db: SqliteClient;
-	let projector: ProviderProjector;
+	let harness: EffectProjectionHarness;
+	let projector: EffectProjector;
 	const now = Date.now();
 
-	beforeEach(() => {
-		db = SqliteClient.memory();
-		runMigrations(db, schemaMigrations);
-		projector = new ProviderProjector();
+	beforeEach(async () => {
+		const effectProjector = createAllEffectProjectors().find(
+			(candidate) => candidate.name === "provider",
+		);
+		if (!effectProjector) throw new Error("Provider projector not found");
+		projector = effectProjector;
+		harness = makeEffectProjectionHarness([projector]);
 
 		// Pre-insert a session so FK constraints don't block inserts
-		db.execute(
+		await harness.query(
 			"INSERT INTO sessions (id, provider, title, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
 			["s1", "opencode", "Test", "idle", now, now],
 		);
 	});
 
-	afterEach(() => {
-		db?.close();
+	afterEach(async () => {
+		await harness?.dispose();
 	});
 
-	it("has the correct name and handles list", () => {
+	async function project(event: StoredEvent): Promise<void> {
+		await harness.reproject([event]);
+	}
+
+	async function queryOne<T extends object>(
+		statement: string,
+		params: readonly (string | number | null)[] = [],
+	): Promise<T | undefined> {
+		return (await harness.query<T>(statement, params))[0];
+	}
+
+	it("has the correct name and handles list", async () => {
 		expect(projector.name).toBe("provider");
 		expect(projector.handles).toEqual([
 			"session.created",
@@ -71,7 +89,7 @@ describe("ProviderProjector", () => {
 	});
 
 	describe("session.created", () => {
-		it("inserts an active provider binding", () => {
+		it("inserts an active provider binding", async () => {
 			const event = makeStored(
 				"session.created",
 				"s1",
@@ -84,9 +102,9 @@ describe("ProviderProjector", () => {
 				now,
 			);
 
-			projector.project(event, db);
+			await project(event);
 
-			const rows = db.query<ProviderRow>(
+			const rows = await harness.query<ProviderRow>(
 				"SELECT * FROM session_providers WHERE session_id = ?",
 				["s1"],
 			);
@@ -98,7 +116,7 @@ describe("ProviderProjector", () => {
 			expect(rows[0]?.deactivated_at).toBeNull();
 		});
 
-		it("generates a UUID for the binding id", () => {
+		it("generates a UUID for the binding id", async () => {
 			const event = makeStored(
 				"session.created",
 				"s1",
@@ -111,9 +129,9 @@ describe("ProviderProjector", () => {
 				now,
 			);
 
-			projector.project(event, db);
+			await project(event);
 
-			const row = db.queryOne<ProviderRow>(
+			const row = await queryOne<ProviderRow>(
 				"SELECT * FROM session_providers WHERE session_id = ?",
 				["s1"],
 			);
@@ -121,7 +139,7 @@ describe("ProviderProjector", () => {
 			expect(row?.id.length).toBeGreaterThan(0);
 		});
 
-		it("is idempotent — replaying does not create duplicates when no active binding exists", () => {
+		it("is idempotent — replaying does not create duplicates when no active binding exists", async () => {
 			const event = makeStored(
 				"session.created",
 				"s1",
@@ -134,11 +152,11 @@ describe("ProviderProjector", () => {
 				now,
 			);
 
-			projector.project(event, db);
-			projector.project(event, db);
+			await project(event);
+			await project(event);
 
 			// Second replay should see existing active binding and skip
-			const rows = db.query<ProviderRow>(
+			const rows = await harness.query<ProviderRow>(
 				"SELECT * FROM session_providers WHERE session_id = ? AND status = 'active'",
 				["s1"],
 			);
@@ -147,9 +165,9 @@ describe("ProviderProjector", () => {
 	});
 
 	describe("session.provider_changed", () => {
-		it("deactivates old binding and inserts new active binding", () => {
+		it("deactivates old binding and inserts new active binding", async () => {
 			// First: create the session with initial provider
-			projector.project(
+			await project(
 				makeStored(
 					"session.created",
 					"s1",
@@ -161,12 +179,11 @@ describe("ProviderProjector", () => {
 					1,
 					now,
 				),
-				db,
 			);
 
 			// Then: change provider
 			const changeTime = now + 5000;
-			projector.project(
+			await project(
 				makeStored(
 					"session.provider_changed",
 					"s1",
@@ -178,10 +195,9 @@ describe("ProviderProjector", () => {
 					2,
 					changeTime,
 				),
-				db,
 			);
 
-			const rows = db.query<ProviderRow>(
+			const rows = await harness.query<ProviderRow>(
 				"SELECT * FROM session_providers WHERE session_id = ? ORDER BY activated_at",
 				["s1"],
 			);
@@ -199,8 +215,8 @@ describe("ProviderProjector", () => {
 			expect(rows[1]?.deactivated_at).toBeNull();
 		});
 
-		it("handles multiple provider changes", () => {
-			projector.project(
+		it("handles multiple provider changes", async () => {
+			await project(
 				makeStored(
 					"session.created",
 					"s1",
@@ -212,10 +228,9 @@ describe("ProviderProjector", () => {
 					1,
 					now,
 				),
-				db,
 			);
 
-			projector.project(
+			await project(
 				makeStored(
 					"session.provider_changed",
 					"s1",
@@ -227,10 +242,9 @@ describe("ProviderProjector", () => {
 					2,
 					now + 1000,
 				),
-				db,
 			);
 
-			projector.project(
+			await project(
 				makeStored(
 					"session.provider_changed",
 					"s1",
@@ -242,10 +256,9 @@ describe("ProviderProjector", () => {
 					3,
 					now + 2000,
 				),
-				db,
 			);
 
-			const rows = db.query<ProviderRow>(
+			const rows = await harness.query<ProviderRow>(
 				"SELECT * FROM session_providers WHERE session_id = ? ORDER BY activated_at",
 				["s1"],
 			);
@@ -258,10 +271,10 @@ describe("ProviderProjector", () => {
 			expect(rows[2]?.status).toBe("active");
 		});
 
-		it("is safe when no active binding exists (e.g. out-of-order replay)", () => {
+		it("is safe when no active binding exists (e.g. out-of-order replay)", async () => {
 			// provider_changed without a preceding session.created
 			// Should still insert the new active binding even if there's nothing to deactivate
-			projector.project(
+			await project(
 				makeStored(
 					"session.provider_changed",
 					"s1",
@@ -273,10 +286,9 @@ describe("ProviderProjector", () => {
 					1,
 					now,
 				),
-				db,
 			);
 
-			const rows = db.query<ProviderRow>(
+			const rows = await harness.query<ProviderRow>(
 				"SELECT * FROM session_providers WHERE session_id = ?",
 				["s1"],
 			);
@@ -286,7 +298,7 @@ describe("ProviderProjector", () => {
 		});
 	});
 
-	it("ignores event types it does not handle", () => {
+	it("ignores event types it does not handle", async () => {
 		const unrelated = makeStored(
 			"text.delta",
 			"s1",
@@ -300,9 +312,9 @@ describe("ProviderProjector", () => {
 			now,
 		);
 
-		projector.project(unrelated, db);
+		await project(unrelated);
 
-		const rows = db.query<ProviderRow>(
+		const rows = await harness.query<ProviderRow>(
 			"SELECT * FROM session_providers WHERE session_id = ?",
 			["s1"],
 		);

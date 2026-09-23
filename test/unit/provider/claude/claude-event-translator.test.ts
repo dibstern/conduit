@@ -9,11 +9,6 @@ import {
 } from "../../../../src/lib/contracts/providers/provider-runtime-event.js";
 import { historyToChatMessages } from "../../../../src/lib/frontend/utils/history-logic.js";
 import { createTestLogger } from "../../../../src/lib/logger.js";
-import {
-	createAllProjectors,
-	ProjectionRunner,
-} from "../../../../src/lib/persistence/projection-runner.js";
-import { ProjectorCursorRepository } from "../../../../src/lib/persistence/projector-cursor-repository.js";
 import { ReadQueryService } from "../../../../src/lib/persistence/read-query-service.js";
 import { messageRowsToHistory } from "../../../../src/lib/persistence/session-history-adapter.js";
 import { ClaudeEventTranslator } from "../../../../src/lib/provider/claude/claude-event-translator.js";
@@ -25,7 +20,8 @@ import type {
 } from "../../../../src/lib/provider/claude/types.js";
 import { createRelayEventSink } from "../../../../src/lib/provider/relay-event-sink.js";
 import type { EventSink } from "../../../../src/lib/provider/types.js";
-import { createTestHarness } from "../../../helpers/persistence-factories.js";
+import { makeEffectProjectionHarness } from "../../../helpers/effect-projection-harness.js";
+import { providerRuntimeEventFromCanonical } from "../../../helpers/provider-runtime-event.js";
 import { assertProviderRuntimeStreamInvariants } from "../../../helpers/provider-runtime-stream-invariants.js";
 
 // ─── Test Helpers ─────────────────────────────────────────────────────────
@@ -687,25 +683,22 @@ describe("ClaudeEventTranslator", () => {
 	});
 
 	it("maps Claude Task input from SDK events through relay, history, and frontend ToolMessage", async () => {
-		const harness = createTestHarness();
+		const harness = makeEffectProjectionHarness();
 		try {
-			harness.seedSession("sess-contract", { provider: "claude" });
-			const runner = new ProjectionRunner({
-				db: harness.db,
-				eventStore: harness.eventStore,
-				cursorRepo: new ProjectorCursorRepository(harness.db),
-				projectors: createAllProjectors(),
-			});
-			runner.recover();
+			await harness.query(
+				"INSERT INTO sessions (id, provider, title, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
+				["sess-contract", "claude", "Test", "idle", Date.now(), Date.now()],
+			);
 			const relaySink = createRelayEventSink({
 				sessionId: "sess-contract",
 				send: vi.fn(),
 				persist: {
 					persistEvent: (event) =>
-						Effect.sync(() => {
-							const stored = harness.eventStore.append(event);
-							runner.projectEvent(stored);
-						}),
+						Effect.promise(() =>
+							harness
+								.ingest(providerRuntimeEventFromCanonical(event))
+								.then(() => undefined),
+						),
 				},
 			});
 			const relayTranslator = new ClaudeEventTranslator({
@@ -819,9 +812,9 @@ describe("ClaudeEventTranslator", () => {
 			await runTranslate(relayTranslator, relayCtx, taskStarted);
 			await runTranslate(relayTranslator, relayCtx, taskProgress);
 
-			const rows = new ReadQueryService(harness.db).getSessionMessagesWithParts(
-				"sess-contract",
-			);
+			const rows = new ReadQueryService(
+				harness.readClient(),
+			).getSessionMessagesWithParts("sess-contract");
 			const history = messageRowsToHistory(rows, { pageSize: 50 });
 			const messages = historyToChatMessages(history.messages);
 			const taskMessage = messages.find(
@@ -844,30 +837,34 @@ describe("ClaudeEventTranslator", () => {
 				);
 			}
 		} finally {
-			harness.close();
+			await harness.dispose();
 		}
 	});
 
 	it("maps assistant snapshot thinking blocks through relay, history, and frontend messages", async () => {
-		const harness = createTestHarness();
+		const harness = makeEffectProjectionHarness();
 		try {
-			harness.seedSession("sess-thinking-snapshot", { provider: "claude" });
-			const runner = new ProjectionRunner({
-				db: harness.db,
-				eventStore: harness.eventStore,
-				cursorRepo: new ProjectorCursorRepository(harness.db),
-				projectors: createAllProjectors(),
-			});
-			runner.recover();
+			await harness.query(
+				"INSERT INTO sessions (id, provider, title, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
+				[
+					"sess-thinking-snapshot",
+					"claude",
+					"Test",
+					"idle",
+					Date.now(),
+					Date.now(),
+				],
+			);
 			const relaySink = createRelayEventSink({
 				sessionId: "sess-thinking-snapshot",
 				send: vi.fn(),
 				persist: {
 					persistEvent: (event) =>
-						Effect.sync(() => {
-							const stored = harness.eventStore.append(event);
-							runner.projectEvent(stored);
-						}),
+						Effect.promise(() =>
+							harness
+								.ingest(providerRuntimeEventFromCanonical(event))
+								.then(() => undefined),
+						),
 				},
 			});
 			const relayTranslator = new ClaudeEventTranslator({
@@ -901,9 +898,9 @@ describe("ClaudeEventTranslator", () => {
 				session_id: "sdk-sess-thinking-snapshot",
 			} as unknown as SDKMessage);
 
-			const rows = new ReadQueryService(harness.db).getSessionMessagesWithParts(
-				"sess-thinking-snapshot",
-			);
+			const rows = new ReadQueryService(
+				harness.readClient(),
+			).getSessionMessagesWithParts("sess-thinking-snapshot");
 			const history = messageRowsToHistory(rows, { pageSize: 50 });
 			const messages = historyToChatMessages(history.messages);
 
@@ -921,31 +918,35 @@ describe("ClaudeEventTranslator", () => {
 				]),
 			);
 		} finally {
-			harness.close();
+			await harness.dispose();
 		}
 	});
 
 	it("persists the result context window through history hydration", async () => {
-		const harness = createTestHarness();
+		const harness = makeEffectProjectionHarness();
 		try {
-			harness.seedSession("sess-context-window", { provider: "claude" });
-			const runner = new ProjectionRunner({
-				db: harness.db,
-				eventStore: harness.eventStore,
-				cursorRepo: new ProjectorCursorRepository(harness.db),
-				projectors: createAllProjectors(),
-			});
-			runner.recover();
+			await harness.query(
+				"INSERT INTO sessions (id, provider, title, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
+				[
+					"sess-context-window",
+					"claude",
+					"Test",
+					"idle",
+					Date.now(),
+					Date.now(),
+				],
+			);
 			const send = vi.fn();
 			const relaySink = createRelayEventSink({
 				sessionId: "sess-context-window",
 				send,
 				persist: {
 					persistEvent: (event) =>
-						Effect.sync(() => {
-							const stored = harness.eventStore.append(event);
-							runner.projectEvent(stored);
-						}),
+						Effect.promise(() =>
+							harness
+								.ingest(providerRuntimeEventFromCanonical(event))
+								.then(() => undefined),
+						),
 				},
 			});
 			const relayTranslator = new ClaudeEventTranslator({
@@ -1009,9 +1010,9 @@ describe("ClaudeEventTranslator", () => {
 				}),
 			);
 
-			const rows = new ReadQueryService(harness.db).getSessionMessagesWithParts(
-				"sess-context-window",
-			);
+			const rows = new ReadQueryService(
+				harness.readClient(),
+			).getSessionMessagesWithParts("sess-context-window");
 			const assistantRow = rows.find((row) => row.role === "assistant") as
 				| ((typeof rows)[number] & { context_window?: number })
 				| undefined;
@@ -1032,7 +1033,7 @@ describe("ClaudeEventTranslator", () => {
 				result?.type === "result" ? result.context_window : undefined,
 			).toBe(1_000_000);
 		} finally {
-			harness.close();
+			await harness.dispose();
 		}
 	});
 

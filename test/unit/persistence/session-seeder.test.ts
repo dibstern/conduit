@@ -1,23 +1,26 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { PersistenceLayer } from "../../../src/lib/persistence/persistence-layer.js";
+import { runMigrations } from "../../../src/lib/persistence/migrations.js";
+import { schemaMigrations } from "../../../src/lib/persistence/schema.js";
 import { SessionSeeder } from "../../../src/lib/persistence/session-seeder.js";
+import { SqliteClient } from "../../../src/lib/persistence/sqlite-client.js";
 
 describe("SessionSeeder", () => {
-	let layer: PersistenceLayer;
+	let db: SqliteClient;
 	let seeder: SessionSeeder;
 
 	beforeEach(() => {
-		layer = PersistenceLayer.memory();
-		seeder = new SessionSeeder(layer.db);
+		db = SqliteClient.memory();
+		runMigrations(db, schemaMigrations);
+		seeder = new SessionSeeder(db);
 	});
 
 	afterEach(() => {
-		layer.close();
+		db.close();
 	});
 
 	it("creates a session row that doesn't exist", () => {
 		seeder.ensureSession("sess-1", "opencode");
-		const row = layer.db.queryOne<{
+		const row = db.queryOne<{
 			id: string;
 			provider: string;
 			status: string;
@@ -31,7 +34,7 @@ describe("SessionSeeder", () => {
 	it("is idempotent — second call for same session is a no-op", () => {
 		seeder.ensureSession("sess-1", "opencode");
 		seeder.ensureSession("sess-1", "opencode");
-		const rows = layer.db.query<{ id: string }>(
+		const rows = db.query<{ id: string }>(
 			"SELECT id FROM sessions WHERE id = ?",
 			["sess-1"],
 		);
@@ -40,12 +43,12 @@ describe("SessionSeeder", () => {
 
 	it("does not overwrite existing session data", () => {
 		seeder.ensureSession("sess-1", "opencode");
-		layer.db.execute("UPDATE sessions SET title = ? WHERE id = ?", [
+		db.execute("UPDATE sessions SET title = ? WHERE id = ?", [
 			"Custom Title",
 			"sess-1",
 		]);
 		seeder.ensureSession("sess-1", "opencode");
-		const row = layer.db.queryOne<{ title: string }>(
+		const row = db.queryOne<{ title: string }>(
 			"SELECT title FROM sessions WHERE id = ?",
 			["sess-1"],
 		);
@@ -55,7 +58,7 @@ describe("SessionSeeder", () => {
 	it("creates sessions with different providers", () => {
 		seeder.ensureSession("sess-1", "opencode");
 		seeder.ensureSession("sess-2", "claude");
-		const rows = layer.db.query<{ id: string; provider: string }>(
+		const rows = db.query<{ id: string; provider: string }>(
 			"SELECT id, provider FROM sessions ORDER BY id",
 		);
 		expect(rows).toHaveLength(2);
@@ -70,7 +73,7 @@ describe("SessionSeeder", () => {
 			providerSessionId: "sdk-subagent-1",
 		});
 
-		const row = layer.db.queryOne<{
+		const row = db.queryOne<{
 			parent_id: string | null;
 			provider_sid: string | null;
 		}>("SELECT parent_id, provider_sid FROM sessions WHERE id = ?", [
@@ -86,7 +89,7 @@ describe("SessionSeeder", () => {
 		const before = Date.now();
 		seeder.ensureSession("sess-1", "opencode");
 		const after = Date.now();
-		const row = layer.db.queryOne<{
+		const row = db.queryOne<{
 			created_at: number;
 			updated_at: number;
 		}>("SELECT created_at, updated_at FROM sessions WHERE id = ?", ["sess-1"]);
@@ -96,9 +99,9 @@ describe("SessionSeeder", () => {
 
 	it("uses in-memory cache to skip redundant SQL", () => {
 		seeder.ensureSession("sess-1", "opencode");
-		layer.db.execute("DELETE FROM sessions WHERE id = ?", ["sess-1"]);
+		db.execute("DELETE FROM sessions WHERE id = ?", ["sess-1"]);
 		seeder.ensureSession("sess-1", "opencode");
-		const row = layer.db.queryOne<{ id: string }>(
+		const row = db.queryOne<{ id: string }>(
 			"SELECT id FROM sessions WHERE id = ?",
 			["sess-1"],
 		);
@@ -107,10 +110,10 @@ describe("SessionSeeder", () => {
 
 	it("reset() clears the in-memory cache", () => {
 		seeder.ensureSession("sess-1", "opencode");
-		layer.db.execute("DELETE FROM sessions WHERE id = ?", ["sess-1"]);
+		db.execute("DELETE FROM sessions WHERE id = ?", ["sess-1"]);
 		seeder.reset();
 		seeder.ensureSession("sess-1", "opencode");
-		const row = layer.db.queryOne<{ id: string }>(
+		const row = db.queryOne<{ id: string }>(
 			"SELECT id FROM sessions WHERE id = ?",
 			["sess-1"],
 		);

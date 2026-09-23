@@ -2164,10 +2164,9 @@ describe("Effect runtime boundary grep", () => {
 		const retiredBridgePatterns = [
 			{
 				path: "src/lib/types.ts",
-				pattern:
-					/\bpersistence\?:\s*import\("\.\/persistence\/persistence-layer\.js"\)\.PersistenceLayer/,
+				pattern: /\bpersistence\?:/,
 				reason:
-					"ProjectRelayConfig should expose the Effect persistence DB path only",
+					"ProjectRelayConfig should not expose a legacy persistence object",
 			},
 			{
 				path: "src/lib/relay/relay-stack.ts",
@@ -2834,7 +2833,7 @@ describe("Effect runtime boundary grep", () => {
 			/translateProviderRuntimeEventToDomain/,
 		);
 		expect(openCodeRuntimeIngressSource).not.toMatch(
-			/EventStore|PersistenceLayer|CanonicalEvent/,
+			/EventStore|CanonicalEvent|persistenceLayer/,
 		);
 		expect(openCodeRuntimeIngressSource).toMatch(/ProviderRuntimeIngestionTag/);
 		expect(openCodeRuntimeIngressSource).toMatch(/ingestBatch/);

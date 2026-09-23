@@ -2068,6 +2068,33 @@ describe("ProjectionRunnerEffect", () => {
 			}),
 		));
 
+	it("projectBatch throws before recovery", () =>
+		runTest(
+			Effect.gen(function* () {
+				const store = yield* EventStoreEffectTag;
+				const runner = yield* ProjectionRunnerEffectTag;
+
+				yield* seedSession("s-batch-before-recovery");
+				const event = yield* store.append(
+					makeSessionCreated("s-batch-before-recovery"),
+				);
+
+				const result = yield* Effect.either(runner.projectBatch([event]));
+				expect(result._tag).toBe("Left");
+			}),
+		));
+
+	it("projectBatch is a no-op for an empty batch before recovery", () =>
+		runTest(
+			Effect.gen(function* () {
+				const runner = yield* ProjectionRunnerEffectTag;
+
+				yield* runner.projectBatch([]);
+
+				expect(yield* runner.isRecovered()).toBe(false);
+			}),
+		));
+
 	it("recover replays events and sets recovered state", () =>
 		runTest(
 			Effect.gen(function* () {
@@ -2193,6 +2220,42 @@ describe("ProjectionRunnerEffect", () => {
 				expect(r2.totalReplayed).toBe(0);
 			}),
 		));
+
+	it("recover replays only events after the persisted cursor", () => {
+		const projectedSequences: number[] = [];
+		const projector: EffectProjector = {
+			name: "incremental-recovery-projector",
+			handles: ["session.created"],
+			project: (event) =>
+				Effect.sync(() => {
+					projectedSequences.push(event.sequence);
+				}),
+		};
+
+		return runTestWithProjectors(
+			[projector],
+			Effect.gen(function* () {
+				const store = yield* EventStoreEffectTag;
+				const runner = yield* ProjectionRunnerEffectTag;
+				yield* seedSession("s-incremental-recovery");
+
+				const first = yield* store.append(
+					makeSessionCreated("s-incremental-recovery"),
+				);
+				yield* runner.recover();
+
+				const second = yield* store.append(
+					makeSessionCreated("s-incremental-recovery", {
+						title: "Second event",
+					}),
+				);
+				const result = yield* runner.recover();
+
+				expect(result.totalReplayed).toBe(1);
+				expect(projectedSequences).toEqual([first.sequence, second.sequence]);
+			}),
+		);
+	});
 
 	it("projectBatch projects multiple events in one transaction", () =>
 		runTest(

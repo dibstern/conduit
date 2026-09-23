@@ -365,7 +365,6 @@ describe("ProviderRuntimeEvent contracts", () => {
 		expect(filesImportingContract).toEqual(
 			expect.arrayContaining([
 				"src/lib/provider/types.ts",
-				"src/lib/provider/event-sink.ts",
 				"src/lib/provider/relay-event-sink.ts",
 				"src/lib/provider/provider-runtime-event-to-domain.ts",
 				"src/lib/domain/relay/Services/provider-runtime-ingestion-service.ts",

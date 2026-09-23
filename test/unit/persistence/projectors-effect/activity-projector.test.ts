@@ -1,5 +1,9 @@
-// test/unit/persistence/projectors/activity-projector.test.ts
+// test/unit/persistence/projectors-effect/activity-projector.test.ts
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import {
+	createAllEffectProjectors,
+	type EffectProjector,
+} from "../../../../src/lib/persistence/effect/projectors-effect.js";
 import {
 	createEventId,
 	type PermissionAskedPayload,
@@ -12,11 +16,10 @@ import {
 	type ToolStartedPayload,
 	type TurnErrorPayload,
 } from "../../../../src/lib/persistence/events.js";
-import { runMigrations } from "../../../../src/lib/persistence/migrations.js";
-import { ActivityProjector } from "../../../../src/lib/persistence/projectors/activity-projector.js";
-import { decodeJson } from "../../../../src/lib/persistence/projectors/projector.js";
-import { schemaMigrations } from "../../../../src/lib/persistence/schema.js";
-import { SqliteClient } from "../../../../src/lib/persistence/sqlite-client.js";
+import {
+	type EffectProjectionHarness,
+	makeEffectProjectionHarness,
+} from "../../../helpers/effect-projection-harness.js";
 
 function makeStored<T extends StoredEvent["type"]>(
 	type: T,
@@ -51,27 +54,41 @@ interface ActivityRow {
 }
 
 describe("ActivityProjector", () => {
-	let db: SqliteClient;
-	let projector: ActivityProjector;
+	let harness: EffectProjectionHarness;
+	let projector: EffectProjector;
 	const now = Date.now();
 
-	beforeEach(() => {
-		db = SqliteClient.memory();
-		runMigrations(db, schemaMigrations);
-		projector = new ActivityProjector();
+	beforeEach(async () => {
+		const effectProjector = createAllEffectProjectors().find(
+			(candidate) => candidate.name === "activity",
+		);
+		if (!effectProjector) throw new Error("Activity projector not found");
+		projector = effectProjector;
+		harness = makeEffectProjectionHarness([projector]);
 
 		// Pre-insert a session so FK constraints don't block inserts
-		db.execute(
+		await harness.query(
 			"INSERT INTO sessions (id, provider, title, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
 			["s1", "opencode", "Test", "idle", now, now],
 		);
 	});
 
-	afterEach(() => {
-		db?.close();
+	afterEach(async () => {
+		await harness?.dispose();
 	});
 
-	it("has the correct name and handles list", () => {
+	async function project(event: StoredEvent): Promise<void> {
+		await harness.reproject([event]);
+	}
+
+	async function queryOne<T extends object>(
+		statement: string,
+		params: readonly (string | number | null)[] = [],
+	): Promise<T | undefined> {
+		return (await harness.query<T>(statement, params))[0];
+	}
+
+	it("has the correct name and handles list", async () => {
 		expect(projector.name).toBe("activity");
 		expect(projector.handles).toEqual([
 			"tool.started",
@@ -86,7 +103,7 @@ describe("ActivityProjector", () => {
 	});
 
 	describe("tool.started", () => {
-		it("inserts an activity with tone=tool, kind=tool.started", () => {
+		it("inserts an activity with tone=tool, kind=tool.started", async () => {
 			const event = makeStored(
 				"tool.started",
 				"s1",
@@ -101,9 +118,9 @@ describe("ActivityProjector", () => {
 				now,
 			);
 
-			projector.project(event, db);
+			await project(event);
 
-			const rows = db.query<ActivityRow>(
+			const rows = await harness.query<ActivityRow>(
 				"SELECT * FROM activities WHERE session_id = ?",
 				["s1"],
 			);
@@ -117,7 +134,7 @@ describe("ActivityProjector", () => {
 	});
 
 	describe("tool.running", () => {
-		it("inserts an activity with tone=tool, kind=tool.running", () => {
+		it("inserts an activity with tone=tool, kind=tool.running", async () => {
 			const event = makeStored(
 				"tool.running",
 				"s1",
@@ -129,9 +146,9 @@ describe("ActivityProjector", () => {
 				now + 100,
 			);
 
-			projector.project(event, db);
+			await project(event);
 
-			const rows = db.query<ActivityRow>(
+			const rows = await harness.query<ActivityRow>(
 				"SELECT * FROM activities WHERE kind = 'tool.running'",
 				[],
 			);
@@ -142,7 +159,7 @@ describe("ActivityProjector", () => {
 	});
 
 	describe("tool.completed", () => {
-		it("inserts an activity with tone=tool, kind=tool.completed and duration in summary", () => {
+		it("inserts an activity with tone=tool, kind=tool.completed and duration in summary", async () => {
 			const event = makeStored(
 				"tool.completed",
 				"s1",
@@ -156,9 +173,9 @@ describe("ActivityProjector", () => {
 				now + 1234,
 			);
 
-			projector.project(event, db);
+			await project(event);
 
-			const rows = db.query<ActivityRow>(
+			const rows = await harness.query<ActivityRow>(
 				"SELECT * FROM activities WHERE kind = 'tool.completed'",
 				[],
 			);
@@ -170,7 +187,7 @@ describe("ActivityProjector", () => {
 	});
 
 	describe("permission.asked", () => {
-		it("inserts an activity with tone=approval, kind=permission.asked", () => {
+		it("inserts an activity with tone=approval, kind=permission.asked", async () => {
 			const event = makeStored(
 				"permission.asked",
 				"s1",
@@ -184,9 +201,9 @@ describe("ActivityProjector", () => {
 				now,
 			);
 
-			projector.project(event, db);
+			await project(event);
 
-			const rows = db.query<ActivityRow>(
+			const rows = await harness.query<ActivityRow>(
 				"SELECT * FROM activities WHERE kind = 'permission.asked'",
 				[],
 			);
@@ -197,7 +214,7 @@ describe("ActivityProjector", () => {
 	});
 
 	describe("permission.resolved", () => {
-		it("inserts an activity with tone=approval, kind=permission.resolved", () => {
+		it("inserts an activity with tone=approval, kind=permission.resolved", async () => {
 			const event = makeStored(
 				"permission.resolved",
 				"s1",
@@ -209,9 +226,9 @@ describe("ActivityProjector", () => {
 				now + 1000,
 			);
 
-			projector.project(event, db);
+			await project(event);
 
-			const rows = db.query<ActivityRow>(
+			const rows = await harness.query<ActivityRow>(
 				"SELECT * FROM activities WHERE kind = 'permission.resolved'",
 				[],
 			);
@@ -222,7 +239,7 @@ describe("ActivityProjector", () => {
 	});
 
 	describe("question.asked", () => {
-		it("inserts an activity with tone=info, kind=question.asked", () => {
+		it("inserts an activity with tone=info, kind=question.asked", async () => {
 			const event = makeStored(
 				"question.asked",
 				"s1",
@@ -235,9 +252,9 @@ describe("ActivityProjector", () => {
 				now,
 			);
 
-			projector.project(event, db);
+			await project(event);
 
-			const rows = db.query<ActivityRow>(
+			const rows = await harness.query<ActivityRow>(
 				"SELECT * FROM activities WHERE kind = 'question.asked'",
 				[],
 			);
@@ -248,7 +265,7 @@ describe("ActivityProjector", () => {
 	});
 
 	describe("question.resolved", () => {
-		it("inserts an activity with tone=info, kind=question.resolved", () => {
+		it("inserts an activity with tone=info, kind=question.resolved", async () => {
 			const event = makeStored(
 				"question.resolved",
 				"s1",
@@ -260,9 +277,9 @@ describe("ActivityProjector", () => {
 				now + 500,
 			);
 
-			projector.project(event, db);
+			await project(event);
 
-			const rows = db.query<ActivityRow>(
+			const rows = await harness.query<ActivityRow>(
 				"SELECT * FROM activities WHERE kind = 'question.resolved'",
 				[],
 			);
@@ -273,7 +290,7 @@ describe("ActivityProjector", () => {
 	});
 
 	describe("turn.error", () => {
-		it("inserts an activity with tone=error, kind=turn.error and error message as summary", () => {
+		it("inserts an activity with tone=error, kind=turn.error and error message as summary", async () => {
 			const event = makeStored(
 				"turn.error",
 				"s1",
@@ -286,9 +303,9 @@ describe("ActivityProjector", () => {
 				now + 2000,
 			);
 
-			projector.project(event, db);
+			await project(event);
 
-			const rows = db.query<ActivityRow>(
+			const rows = await harness.query<ActivityRow>(
 				"SELECT * FROM activities WHERE kind = 'turn.error'",
 				[],
 			);
@@ -299,7 +316,7 @@ describe("ActivityProjector", () => {
 	});
 
 	describe("payload storage", () => {
-		it("stores event data as JSON payload", () => {
+		it("stores event data as JSON payload", async () => {
 			const event = makeStored(
 				"tool.started",
 				"s1",
@@ -314,14 +331,14 @@ describe("ActivityProjector", () => {
 				now,
 			);
 
-			projector.project(event, db);
+			await project(event);
 
-			const row = db.queryOne<ActivityRow>(
+			const row = await queryOne<ActivityRow>(
 				"SELECT * FROM activities WHERE kind = 'tool.started'",
 				[],
 			);
 			// biome-ignore lint/style/noNonNullAssertion: test assertion after queryOne
-			const payload = decodeJson<Record<string, unknown>>(row!.payload);
+			const payload = JSON.parse(row!.payload) as Record<string, unknown>;
 			expect(payload).toBeDefined();
 			expect(payload?.["toolName"]).toBe("bash");
 			expect(payload?.["callId"]).toBe("call-1");
@@ -329,7 +346,7 @@ describe("ActivityProjector", () => {
 	});
 
 	describe("session_id tracking", () => {
-		it("stores the session_id from the event envelope", () => {
+		it("stores the session_id from the event envelope", async () => {
 			const event = makeStored(
 				"tool.started",
 				"s1",
@@ -344,9 +361,9 @@ describe("ActivityProjector", () => {
 				now,
 			);
 
-			projector.project(event, db);
+			await project(event);
 
-			const row = db.queryOne<ActivityRow>(
+			const row = await queryOne<ActivityRow>(
 				"SELECT * FROM activities WHERE kind = 'tool.started'",
 				[],
 			);
@@ -355,8 +372,8 @@ describe("ActivityProjector", () => {
 	});
 
 	describe("multiple activities in sequence", () => {
-		it("creates a chronological activity feed", () => {
-			projector.project(
+		it("creates a chronological activity feed", async () => {
+			await project(
 				makeStored(
 					"tool.started",
 					"s1",
@@ -370,10 +387,9 @@ describe("ActivityProjector", () => {
 					1,
 					now,
 				),
-				db,
 			);
 
-			projector.project(
+			await project(
 				makeStored(
 					"tool.running",
 					"s1",
@@ -384,10 +400,9 @@ describe("ActivityProjector", () => {
 					2,
 					now + 50,
 				),
-				db,
 			);
 
-			projector.project(
+			await project(
 				makeStored(
 					"tool.completed",
 					"s1",
@@ -400,10 +415,9 @@ describe("ActivityProjector", () => {
 					3,
 					now + 550,
 				),
-				db,
 			);
 
-			projector.project(
+			await project(
 				makeStored(
 					"permission.asked",
 					"s1",
@@ -416,10 +430,9 @@ describe("ActivityProjector", () => {
 					4,
 					now + 600,
 				),
-				db,
 			);
 
-			const rows = db.query<ActivityRow>(
+			const rows = await harness.query<ActivityRow>(
 				"SELECT * FROM activities WHERE session_id = ? ORDER BY created_at",
 				["s1"],
 			);
@@ -431,7 +444,7 @@ describe("ActivityProjector", () => {
 		});
 	});
 
-	it("ignores event types it does not handle", () => {
+	it("ignores event types it does not handle", async () => {
 		const unrelated = makeStored(
 			"text.delta",
 			"s1",
@@ -445,9 +458,9 @@ describe("ActivityProjector", () => {
 			now,
 		);
 
-		projector.project(unrelated, db);
+		await project(unrelated);
 
-		const rows = db.query<ActivityRow>(
+		const rows = await harness.query<ActivityRow>(
 			"SELECT * FROM activities WHERE session_id = ?",
 			["s1"],
 		);

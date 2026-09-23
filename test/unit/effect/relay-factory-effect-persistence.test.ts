@@ -58,7 +58,7 @@ const NoopAuxiliaryDaemonServices = Layer.mergeAll(
 
 describe("RelayFactoryLive Effect persistence wiring", () => {
 	it.effect(
-		"creates relays with persistenceDbPath but no legacy PersistenceLayer",
+		"creates relays with persistenceDbPath but no legacy persistence object",
 		() => {
 			const dir = mkdtempSync(join(tmpdir(), "conduit-relay-factory-effect-"));
 			const projectDir = join(dir, "project");

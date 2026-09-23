@@ -1,6 +1,5 @@
 // ─── Effect-based Projection Runner ─────────────────────────────────────────
-// Migrates projection-runner.ts from raw SqliteClient to @effect/sql SqlClient.
-// Uses SqlClient.withTransaction for write operations.
+// The only projection runner. Uses SqlClient.withTransaction for writes.
 
 import { SqlClient } from "@effect/sql";
 import type { SqlError } from "@effect/sql/SqlError";
