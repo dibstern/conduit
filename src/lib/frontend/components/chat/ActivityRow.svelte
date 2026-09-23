@@ -28,6 +28,7 @@
 	import { getCurrentSlug } from "../../stores/router.svelte.js";
 	import { getSkillContentRpc } from "../../transport/ws-rpc-client.js";
 	import { renderMarkdown } from "../../utils/markdown.js";
+	import hljs from "highlight.js";
 	import { partStyle } from "./activity-style.js";
 
 	let {
@@ -53,11 +54,17 @@
 
 	function loadSkillDoc(name: string) {
 		const slug = getCurrentSlug();
-		if (!slug || !name || skillState !== "idle") return;
+		// A failed load retries on the next expand: the failure may have been a
+		// dropped socket, not a missing file.
+		if (!slug || !name || skillDoc || skillState === "loading") return;
 		skillState = "loading";
 		void getSkillContentRpc({ projectSlug: slug, name })
 			.then((response) => {
-				skillDoc = response.content;
+				// Markdown would read YAML frontmatter as a rule and a heading.
+				skillDoc = response.content.replace(
+					/^---\r?\n([\s\S]*?)\r?\n---[ \t]*(?:\r?\n|$)/,
+					"```yaml\n$1\n```\n",
+				);
 				skillState = "idle";
 			})
 			.catch(() => {
@@ -133,7 +140,10 @@
 		{#if expanded && isSkill}
 			<div class="ml-7 mr-1 my-1 py-2 px-2.5 bg-code-bg border border-border-subtle rounded-lg max-h-[300px] overflow-y-auto">
 				{#if skillDoc}
-					<div class="md-content text-xs leading-[1.6] text-text-secondary">{@html renderMarkdown(skillDoc)}</div>
+					<div
+						class="md-content text-xs leading-[1.6] text-text-secondary"
+						{@attach (el) => el.querySelectorAll<HTMLElement>("pre code").forEach((c) => hljs.highlightElement(c))}
+					>{@html renderMarkdown(skillDoc)}</div>
 				{:else}
 					<span class="font-mono text-xs text-text-muted">
 						{skillState === "loading" ? "Loading skill…" : "This skill's file could not be found on disk."}
