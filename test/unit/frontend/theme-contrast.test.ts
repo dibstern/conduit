@@ -21,7 +21,6 @@ const textTokens = [
 	"text",
 	"text-secondary",
 	"text-muted",
-	"text-dimmer",
 	"accent",
 	"accent-hover",
 	"error",
@@ -32,8 +31,13 @@ const textTokens = [
 	"brand-a",
 	"brand-b",
 ];
+// The quiet tier. The approved design reserves these for text you are not meant
+// to read to understand the screen -- timestamps, match counts, keyboard hints,
+// code comments -- and its values sit below AA by intent. Held to the 3:1
+// large-text floor so they cannot decay to invisible, not to 4.5:1.
+const quietTextTokens = ["text-dimmer"];
+const quietSyntaxTokens = ["comment"];
 const syntaxTokens = [
-	"comment",
 	"keyword",
 	"string",
 	"number",
@@ -121,6 +125,24 @@ describe.each(["dark", "light"] as const)("%s theme contrast", (variant) => {
 		expect(
 			contrastRatio(colour(`--hl-${token}`), colour("--color-code-bg")),
 		).toBeGreaterThanOrEqual(4.5);
+	});
+
+	it.each(
+		quietTextTokens.flatMap((token) =>
+			surfaces.map((surface) => [token, surface] as const),
+		),
+	)("quiet %s text on %s clears 3:1", (token, surface) => {
+		expect(
+			contrastRatio(colour(`--color-${token}`), colour(`--color-${surface}`)),
+		).toBeGreaterThanOrEqual(3);
+	});
+
+	it.each(
+		quietSyntaxTokens,
+	)("quiet syntax %s on code-bg clears 3:1", (token) => {
+		expect(
+			contrastRatio(colour(`--hl-${token}`), colour("--color-code-bg")),
+		).toBeGreaterThanOrEqual(3);
 	});
 
 	it.each(

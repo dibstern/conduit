@@ -18,7 +18,7 @@
  * One convergence has since landed (conduit-test-de3.6). The three strips
  * marked their selected option in two different colours: `pill` used `accent`
  * while `underline` and `field` used `brand-a`. Those two tokens hold the same
- * value in both canonical themes (#ff72a6 dark, #c6004a light), so the split
+ * value in both canonical themes (#ff2d7b dark, #c9004f light), so the split
  * was invisible on screen and the swap below is zero-diff -- but they are
  * separate names that the queued palette work may give separate values, and
  * then the split would become a real inconsistency nobody chose. `accent` wins

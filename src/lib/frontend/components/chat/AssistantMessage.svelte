@@ -50,12 +50,12 @@
 			// surface token. Pointing it at --color-accent turned every node brand
 			// pink; nodes should read as panels, with the accent reserved for
 			// emphasis elsewhere.
-			primaryColor: get("--color-bg-alt", "#27272a"),
+			primaryColor: get("--color-bg-alt", "#1b1e24"),
 			primaryTextColor: get("--color-text", "#e4e4e7"),
 			primaryBorderColor: get("--color-border", "#3f3f46"),
 			lineColor: get("--color-text-muted", "#71717a"),
 			secondaryColor: get("--color-bg-surface", "#1f1f23"),
-			tertiaryColor: get("--color-bg", "#18181b"),
+			tertiaryColor: get("--color-bg", "#0d0e11"),
 			fontFamily:
 				"'Berkeley Mono', 'IBM Plex Mono', ui-monospace, monospace",
 		};

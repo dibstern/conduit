@@ -30,21 +30,20 @@ async function assertSwapStyles(
 	const popoverProbe = document.createElement("div");
 	popoverProbe.className = "z-[var(--z-popover)]";
 	// The swap dropped the consumer's own `bg-bg-surface` in favour of
-	// FLOATING_SURFACE_CLASSES' `bg-bg-alt`. Those two tokens resolve identically
-	// on every path today, so it was a no-op — but nothing asserted it. Probing
-	// BOTH is the point: the second assertion goes red the day someone gives the
-	// tokens different values, which is when this stops being a no-op
-	// (conduit-test-9kov).
+	// FLOATING_SURFACE_CLASSES' `bg-bg-alt` (conduit-test-9kov). Back then the two
+	// tokens resolved identically, so a second probe asserted their equality --
+	// deliberately, to go red the day they diverged. They have now diverged: the
+	// approved palette puts every surface that FLOATS over content on --alt and
+	// every INSET control on --surface (conduit-test-vik1.21). So the equality
+	// probe is gone and the one below carries the load on its own: pinning the
+	// listbox to bg-alt exactly is what catches a slide back to bg-surface.
 	const surfaceBgProbe = document.createElement("div");
 	surfaceBgProbe.className = "bg-bg-alt";
-	const legacyBgProbe = document.createElement("div");
-	legacyBgProbe.className = "bg-bg-surface";
 	canvasElement.append(
 		radiusProbe,
 		dropdownProbe,
 		popoverProbe,
 		surfaceBgProbe,
-		legacyBgProbe,
 	);
 
 	try {
@@ -53,21 +52,18 @@ async function assertSwapStyles(
 		const dropdownZIndex = getComputedStyle(dropdownProbe).zIndex;
 		const popoverZIndex = getComputedStyle(popoverProbe).zIndex;
 		const surfaceBg = getComputedStyle(surfaceBgProbe).backgroundColor;
-		const legacyBg = getComputedStyle(legacyBgProbe).backgroundColor;
 		console.log(
-			`[swap-style] ${consumer} borderRadius=${surfaceStyle.borderRadius} reference=${radius}; zIndex=${surfaceStyle.zIndex} dropdownReference=${dropdownZIndex} popoverReference=${popoverZIndex}; backgroundColor=${surfaceStyle.backgroundColor} bgAltReference=${surfaceBg} bgSurfaceReference=${legacyBg}`,
+			`[swap-style] ${consumer} borderRadius=${surfaceStyle.borderRadius} reference=${radius}; zIndex=${surfaceStyle.zIndex} dropdownReference=${dropdownZIndex} popoverReference=${popoverZIndex}; backgroundColor=${surfaceStyle.backgroundColor} bgAltReference=${surfaceBg}`,
 		);
 		await expect(surfaceStyle.borderRadius).toBe(radius);
 		await expect(surfaceStyle.zIndex).toBe(dropdownZIndex);
 		await expect(surfaceStyle.zIndex).not.toBe(popoverZIndex);
 		await expect(surfaceStyle.backgroundColor).toBe(surfaceBg);
-		await expect(surfaceBg).toBe(legacyBg);
 	} finally {
 		radiusProbe.remove();
 		dropdownProbe.remove();
 		popoverProbe.remove();
 		surfaceBgProbe.remove();
-		legacyBgProbe.remove();
 	}
 }
 

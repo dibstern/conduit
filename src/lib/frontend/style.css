@@ -9,9 +9,9 @@
 	   Change these two values to rebrand the entire app.
 	   Theme-scoped: Conduit Light redeclares both below with AA-passing
 	   light-surface counterparts. */
-	--color-brand-a: #ff72a6; /* pink */
+	--color-brand-a: #fe3781; /* pink */
 	--color-brand-b: #00e5ff; /* cyan */
-	--color-brand-a-glow: rgba(255, 114, 166, 0.15);
+	--color-brand-a-glow: rgba(254, 55, 129, 0.15);
 	--color-brand-b-glow: rgba(0, 229, 255, 0.15);
 
 	/* Harness (provider driver) identity colors — theme-independent, like brand. */
@@ -25,58 +25,113 @@
 
 	--font-brand: "Chakra Petch", sans-serif;
 
-	--color-bg: #18181b;
-	--color-bg-alt: #27272a;
-	--color-bg-surface: #27272a;
-	--color-text: #e4e4e7;
-	--color-text-secondary: #ceced3;
-	--color-text-muted: #b8b8bd;
-	--color-text-dimmer: #a2a2a7;
-	--color-accent: #ff72a6;
-	--color-accent-hover: #ff83b1;
-	--color-accent-bg: rgba(255, 114, 166, 0.12);
-	--color-code-bg: #141417;
-	--color-border: #3f3f46;
-	--color-border-subtle: #28282c;
-	--color-input-bg: #333338;
-	--color-user-bubble: #38383e;
-	--color-error: #ff7878;
-	--color-error-bg: rgba(255, 120, 120, 0.12);
-	--color-success: #22c55e;
+	--color-bg: #0d0e11;
+	--color-bg-alt: #1b1e24;
+	--color-bg-surface: #141619;
+	--color-text: #eceef2;
+	--color-text-secondary: #a8afbb;
+	--color-text-muted: #838b98;
+	/* The quietest step, held to 3:1 rather than 4.5:1. The approved design puts
+	   timestamps, counts and keyboard hints here, deliberately below the ink of
+	   anything you read to understand the screen. See theme-contrast.test.ts. */
+	--color-text-dimmer: #676e79;
+	--color-accent: #fe3781;
+	--color-accent-hover: #ff5691;
+	--color-accent-bg: rgba(254, 55, 129, 0.12);
+	--color-code-bg: #0d0e11;
+	--color-border: #2d323b;
+	--color-border-subtle: #20242b;
+	/* The brightest border, for chips and other outlined controls that have to
+	   read as interactive against a surface. */
+	--color-border-chip: #3a414c;
+	--color-input-bg: #1b1e24;
+	--color-user-bubble: #20242b;
+	--color-error: #f4607a;
+	--color-error-bg: rgba(244, 96, 122, 0.12);
+	--color-success: #3fd69a;
 
-	--color-sidebar-bg: #161618;
-	--color-sidebar-hover: #202023;
-	--color-sidebar-active: #333338;
+	/* The mock only ever uses two surfaces for a row: --alt for the open one and
+	   --hover for the pressed one. --border2 is a border, never a background, and
+	   using it as the active row is what put status ink below AA on it. */
+	--color-sidebar-bg: #141619;
+	--color-sidebar-hover: #1b1e24;
+	--color-sidebar-active: #20242b;
 
-	--color-thinking: #eab308;
-	--color-thinking-bg: rgba(234, 179, 8, 0.06);
-	--color-tool: #79a1f6;
-	--color-tool-bg: rgba(121, 161, 246, 0.04);
-	--color-warning: #eab308;
-	--color-warning-bg: rgba(234, 179, 8, 0.12);
+	--color-thinking: #f4b740;
+	--color-thinking-bg: rgba(244, 183, 64, 0.06);
+	--color-tool: #5aa9f5;
+	--color-tool-bg: rgba(90, 169, 245, 0.04);
+	--color-warning: #f4b740;
+	--color-warning-bg: rgba(244, 183, 64, 0.12);
 
+	/* === STATUS INK ===
+	   Seven hues a session row can distinguish itself by, read as TEXT on a
+	   surface — so each theme carries its own value. Never use these as a fill;
+	   the --color-fill-* set below is for that. */
+	--color-status-amber: #f4b740;
+	--color-status-blue: #5aa9f5;
+	--color-status-green: #3fd69a;
+	--color-status-red: #f4607a;
+	--color-status-indigo: #9b9bff;
+	--color-status-violet: #c0a8ff;
+	--color-status-pink: #ff9dc2;
+
+	/* === STATUS FILLS (theme-invariant) ===
+	   A saturated fill is the same colour in both themes; only what you read ON
+	   a surface changes. Pair with --color-on-fill, which is the fixed ink these
+	   are contrast-checked against. */
+	--color-fill-amber: #f4b740;
+	--color-fill-blue: #5aa9f5;
+	--color-fill-green: #3fd69a;
+	--color-fill-red: #f4607a;
+	--color-fill-indigo: #9b9bff;
+	--color-fill-brand: #fe3781;
+	--color-on-fill: #0c0d10;
+	--color-on-brand: #ffffff;
+
+	/* === PROJECT ACCENTS (theme-invariant) ===
+	   Identity colours for the sidebar's project square, assigned by index so a
+	   project keeps its colour as the list reorders. Six, then it wraps. */
+	--color-project-1: #b08cff;
+	--color-project-2: #ff9a4d;
+	--color-project-3: #2fd3c0;
+	--color-project-4: #ff6fb1;
+	--color-project-5: #5aa9f5;
+	--color-project-6: #f4b740;
+
+	/* Deliberately inverted surfaces: toast, tooltip. */
+	--color-inverse-bg: #eef0f4;
+	--color-inverse-text: #15171c;
+	--color-inverse-accent: #b3005a;
+
+	/* Frosted surfaces that float over the transcript (the session island). */
+	--color-glass: rgba(24, 25, 29, 0.9);
+	--color-glass-strong: rgba(24, 25, 29, 0.92);
+
+	/* Contrast wash for scrollbars and hairline fills: white over dark, black
+	   over light. Not a scrim — see --color-backdrop, which stays dark in both
+	   themes because a scrim dims, it does not invert. */
 	--overlay-rgb: 255, 255, 255;
-	/* Modal/overlay backdrop — composes the runtime overlay channel. */
-	--color-backdrop: rgba(var(--overlay-rgb), 0.5);
+	--color-backdrop: rgba(6, 7, 9, 0.55);
 	--shadow-rgb: 0, 0, 0;
 
 	/* Syntax highlighting defaults (conduit dark theme) */
-	--hl-comment: #a2a2a7;
-	--hl-keyword: #ff72a6;
-	--hl-string: #22c55e;
-	--hl-number: #ff72a6;
-	--hl-function: #79a1f6;
-	--hl-variable: #ff7878;
-	--hl-type: #eab308;
-	--hl-constant: #ff72a6;
-	--hl-tag: #ff7878;
-	--hl-attr: #79a1f6;
-	--hl-regexp: #00e5ff;
-	--hl-meta: #eab308;
-	--hl-builtin: #ff72a6;
-	--hl-symbol: #eab308;
-	--hl-addition: #22c55e;
-	--hl-deletion: #ff7878;
+	--hl-comment: #79818f;
+	--hl-keyword: #fe3781;
+	--hl-string: #3fd69a;
+	--hl-number: #fe3781;
+	--hl-function: #5aa9f5;
+	--hl-variable: #f4607a;
+	--hl-type: #f4b740;
+	--hl-constant: #fe3781;
+	--hl-tag: #f4607a;
+	--hl-attr: #5aa9f5;
+	--hl-regexp: #c0a8ff;
+	--hl-meta: #f4b740;
+	--hl-builtin: #fe3781;
+	--hl-symbol: #f4b740;
+	--hl-addition: #3fd69a;
+	--hl-deletion: #f4607a;
 
 	--font-mono:
 		"JetBrains Mono", "Berkeley Mono", "IBM Plex Mono", ui-monospace,
@@ -149,60 +204,79 @@
 }
 
 :root.light-theme {
-	--color-brand-a: #c6004a;
+	--color-brand-a: #c9004f;
 	--color-brand-b: #006d7a;
-	--color-brand-a-glow: rgba(198, 0, 74, 0.15);
+	--color-brand-a-glow: rgba(201, 0, 79, 0.15);
 	--color-brand-b-glow: rgba(0, 109, 122, 0.15);
 
-	--color-bg: #f7f7f8;
-	--color-bg-alt: #ffffff;
+	--color-bg: #f5f6f9;
+	--color-bg-alt: #eef0f5;
 	--color-bg-surface: #ffffff;
-	--color-text: #18181b;
-	--color-text-secondary: #2f2f34;
-	--color-text-muted: #48484d;
-	--color-text-dimmer: #626267;
-	--color-accent: #c6004a;
-	--color-accent-hover: #ae0041;
-	--color-accent-bg: rgba(198, 0, 74, 0.12);
-	--color-code-bg: #f0f0f2;
-	--color-border: #d4d4d8;
-	--color-border-subtle: #e9e9ed;
-	--color-input-bg: #ffffff;
-	--color-user-bubble: #ffffff;
-	--color-error: #c90000;
-	--color-error-bg: rgba(201, 0, 0, 0.12);
-	--color-success: #147237;
+	--color-text: #14171c;
+	--color-text-secondary: #4b525e;
+	--color-text-muted: #626975;
+	--color-text-dimmer: #7e8591;
+	--color-accent: #c9004f;
+	--color-accent-hover: #a80042;
+	--color-accent-bg: rgba(201, 0, 79, 0.12);
+	--color-code-bg: #eef0f5;
+	--color-border: #ccd2dc;
+	--color-border-subtle: #e2e6ec;
+	--color-border-chip: #b7c0cc;
+	--color-input-bg: #eef0f5;
+	--color-user-bubble: #e4e8ef;
+	--color-error: #c11d40;
+	--color-error-bg: rgba(193, 29, 64, 0.12);
+	--color-success: #0c7750;
 
-	--color-sidebar-bg: #f1f1f3;
-	--color-sidebar-hover: #e9e9ed;
-	--color-sidebar-active: #e0e0e5;
+	/* Surface is the raised layer in both themes, so the sidebar is lighter than
+	   the page here and darker than it in dark mode. */
+	--color-sidebar-bg: #ffffff;
+	--color-sidebar-hover: #eef0f5;
+	--color-sidebar-active: #e4e8ef;
 
-	--color-thinking: #7c5f04;
-	--color-thinking-bg: rgba(124, 95, 4, 0.06);
-	--color-tool: #1054ea;
-	--color-tool-bg: rgba(16, 84, 234, 0.04);
-	--color-warning: #7c5f04;
-	--color-warning-bg: rgba(124, 95, 4, 0.12);
+	--color-thinking: #8a5500;
+	--color-thinking-bg: rgba(138, 85, 0, 0.06);
+	--color-tool: #0f62c0;
+	--color-tool-bg: rgba(15, 98, 192, 0.04);
+	--color-warning: #8a5500;
+	--color-warning-bg: rgba(138, 85, 0, 0.12);
+
+	--color-status-amber: #8a5500;
+	--color-status-blue: #0f62c0;
+	--color-status-green: #0c7750;
+	--color-status-red: #c11d40;
+	--color-status-indigo: #5344d4;
+	--color-status-violet: #6a3ed4;
+	--color-status-pink: #c4004f;
+
+	--color-inverse-bg: #1b1e24;
+	--color-inverse-text: #f2f4f8;
+	--color-inverse-accent: #ff9dc2;
+
+	--color-glass: rgba(255, 255, 255, 0.88);
+	--color-glass-strong: rgba(255, 255, 255, 0.9);
 
 	--overlay-rgb: 0, 0, 0;
-	--shadow-rgb: 0, 0, 0;
+	--color-backdrop: rgba(22, 26, 33, 0.34);
+	--shadow-rgb: 19, 26, 37;
 
-	--hl-comment: #626267;
-	--hl-keyword: #c6004a;
-	--hl-string: #147237;
-	--hl-number: #c6004a;
-	--hl-function: #1054ea;
-	--hl-variable: #c90000;
-	--hl-type: #7c5f04;
-	--hl-constant: #c6004a;
-	--hl-tag: #c90000;
-	--hl-attr: #1054ea;
-	--hl-regexp: #006d7a;
-	--hl-meta: #7c5f04;
-	--hl-builtin: #c6004a;
-	--hl-symbol: #7c5f04;
-	--hl-addition: #147237;
-	--hl-deletion: #c90000;
+	--hl-comment: #6c7481;
+	--hl-keyword: #c9004f;
+	--hl-string: #0c7750;
+	--hl-number: #c9004f;
+	--hl-function: #0f62c0;
+	--hl-variable: #c11d40;
+	--hl-type: #8a5500;
+	--hl-constant: #c9004f;
+	--hl-tag: #c11d40;
+	--hl-attr: #0f62c0;
+	--hl-regexp: #6a3ed4;
+	--hl-meta: #8a5500;
+	--hl-builtin: #c9004f;
+	--hl-symbol: #8a5500;
+	--hl-addition: #0c7750;
+	--hl-deletion: #c11d40;
 }
 
 @utility glow-brand-a {

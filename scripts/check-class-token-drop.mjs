@@ -114,9 +114,19 @@ function classStrings(line, keyedValues = false) {
 		line.match(
 			/^[+-]\s*(?:[A-Za-z_$][\w$]*|"[^"]*"|'[^']*')\s*:\s*(?:"([^"]*)"|'([^']*)'|`([^`]*)`)\s*,?\s*$/,
 		);
-	if (property) out.push(property[1] ?? property[2] ?? property[3]);
+	if (property) {
+		const value = property[1] ?? property[2] ?? property[3];
+		// A colour literal is never a utility. The xterm palette satisfies
+		// `Record<string, string>` and so reads as a recipe file, which made every
+		// hex it changed look like a dropped class -- the renamed-label false
+		// positive this check's own comment warns about, arriving as a colour.
+		if (value !== undefined && !COLOUR_LITERAL.test(value)) out.push(value);
+	}
 	return out;
 }
+
+const COLOUR_LITERAL =
+	/^(?:#[0-9a-f]{3,8}|(?:rgb|rgba|hsl|hsla|oklch)\(.*\))$/i;
 
 // Comments are stripped before any whole-file scan. Both the prose in this
 // repo and the doc comments on the recipes quote class names in backticks --
