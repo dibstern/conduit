@@ -34,8 +34,8 @@ const meta = {
 		projectState.projects = [
 			{ slug: "conduit", title: "conduit", directory: "/src/conduit" },
 		];
-		sessionState.allSessions = [mockSession, mockSessionLongTitle];
-		sessionState.rootSessions = sessionState.allSessions;
+		sessionState.familySessions = [mockSession, mockSessionLongTitle];
+		sessionState.rootSessions = sessionState.familySessions;
 		sessionState.currentId = mockSession.id;
 		// The bar reads its collapse rule from this store, and Storybook shares
 		// module-level state across story files. Pin the expanded state so only

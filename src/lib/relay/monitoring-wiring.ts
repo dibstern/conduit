@@ -71,7 +71,7 @@ interface MonitoringWsHandlerLike {
 
 /** Narrowed Effect session service capabilities needed by monitoring wiring. */
 interface SessionServiceLike {
-	sendDualSessionLists(
+	sendSessionLists(
 		send: (msg: Extract<RelayMessage, { type: "session_list" }>) => void,
 		options?: {
 			statuses?:
@@ -432,7 +432,7 @@ export function wireMonitoring(
 		// ── Session list broadcast (only when statuses actually changed) ────
 		if (statusesChanged) {
 			try {
-				await sessionService.sendDualSessionLists(
+				await sessionService.sendSessionLists(
 					(msg) => wsHandler.broadcast(msg),
 					{ statuses },
 				);
@@ -555,7 +555,7 @@ export const wireMonitoringEffect = (
 
 					if (statusesChanged) {
 						yield* sessionService
-							.sendDualSessionLists((msg) => wsHandler.broadcast(msg), {
+							.sendSessionLists((msg) => wsHandler.broadcast(msg), {
 								statuses,
 							})
 							.pipe(

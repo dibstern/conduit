@@ -15,7 +15,7 @@ describe("WsRpcServerLayer RenameSession", () => {
 		const { wsHandler, calls } = makeRecordingWebSocketHandler();
 		const sessionManagerService = makeMockSessionManagerService({
 			renameSession: vi.fn(() => Effect.void),
-			sendDualSessionLists: vi.fn((send) =>
+			sendSessionLists: vi.fn((send) =>
 				Effect.sync(() => {
 					send({
 						type: "session_list",
@@ -28,19 +28,6 @@ describe("WsRpcServerLayer RenameSession", () => {
 							},
 						],
 						roots: true,
-					});
-					send({
-						type: "session_list",
-						sessions: [
-							{
-								id: "child-1",
-								title: "Child Session",
-								updatedAt: 200,
-								messageCount: 4,
-								parentID: "root-1",
-							},
-						],
-						roots: false,
 					});
 				}),
 			),
@@ -74,19 +61,6 @@ describe("WsRpcServerLayer RenameSession", () => {
 					],
 					roots: true,
 				},
-				{
-					type: "session_list",
-					sessions: [
-						{
-							id: "child-1",
-							title: "Child Session",
-							updatedAt: 200,
-							messageCount: 4,
-							parentID: "root-1",
-						},
-					],
-					roots: false,
-				},
 			]);
 		}).pipe(
 			Effect.scoped,
@@ -104,7 +78,7 @@ describe("WsRpcServerLayer RenameSession", () => {
 		const { wsHandler, calls } = makeRecordingWebSocketHandler();
 		const sessionManagerService = makeMockSessionManagerService({
 			markSessionUnread: vi.fn(() => Effect.void),
-			sendDualSessionLists: vi.fn((send) =>
+			sendSessionLists: vi.fn((send) =>
 				Effect.sync(() =>
 					send({
 						type: "session_list",

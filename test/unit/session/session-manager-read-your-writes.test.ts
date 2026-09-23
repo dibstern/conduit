@@ -48,7 +48,8 @@ type OperationsOutsideReadModelParity = keyof Pick<
 	| "incrementPendingQuestionCount"
 	| "decrementPendingQuestionCount"
 	| "setPendingQuestionCounts"
-	| "sendDualSessionLists"
+	| "sendSessionLists"
+	| "getSessionFamily"
 >;
 
 type ReadModelMutation = Exclude<

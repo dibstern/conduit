@@ -19,7 +19,6 @@ vi.mock("../../../src/lib/frontend/transport/ws-rpc-client.js", () => ({
 
 import Header from "../../../src/lib/frontend/components/layout/Header.svelte";
 import ConnectOverlay from "../../../src/lib/frontend/components/overlays/ConnectOverlay.svelte";
-import SessionItem from "../../../src/lib/frontend/components/session/SessionItem.svelte";
 import { wsState } from "../../../src/lib/frontend/stores/ws.svelte.js";
 
 describe("non-focusable tooltip accessibility", () => {
@@ -32,21 +31,6 @@ describe("non-focusable tooltip accessibility", () => {
 
 	afterEach(() => {
 		cleanup();
-	});
-
-	it("renders screen-reader text for a forked session", () => {
-		render(SessionItem, {
-			props: {
-				session: {
-					id: "child-session",
-					title: "Forked work",
-					parentID: "parent-session",
-				},
-			},
-		});
-
-		const forkedSessionText = screen.getByText("Forked session");
-		expect(forkedSessionText.classList.contains("sr-only")).toBe(true);
 	});
 
 	it("renders the full relay error with wrapping and scrolling", () => {

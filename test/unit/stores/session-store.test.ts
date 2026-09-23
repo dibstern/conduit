@@ -3,7 +3,11 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
 	clearSessionChatState,
 	currentChat,
+	getOrCreateSessionActivity,
+	getOrCreateSessionMessages,
 	getOrCreateSessionSlot,
+	sessionActivity,
+	sessionMessages,
 	setMessages,
 } from "../../../src/lib/frontend/stores/chat.svelte.js";
 import { discoveryState } from "../../../src/lib/frontend/stores/discovery.svelte.js";
@@ -22,6 +26,7 @@ import {
 	findSession,
 	getFilteredSessions,
 	groupSessionsByAttention,
+	handleSessionFamily,
 	handleSessionForked,
 	handleSessionList,
 	handleSessionSwitched,
@@ -35,7 +40,6 @@ import {
 	setSearchQuery,
 	switchToSession,
 } from "../../../src/lib/frontend/stores/session.svelte.js";
-import { uiState } from "../../../src/lib/frontend/stores/ui.svelte.js";
 import type { CreateSessionRpcInput } from "../../../src/lib/frontend/transport/ws-rpc-client.js";
 import type {
 	RelayMessage,
@@ -65,8 +69,9 @@ function makeSession(
 // ─── Reset state before each test ───────────────────────────────────────────
 
 beforeEach(() => {
+	sessionState.sessions.clear();
 	sessionState.rootSessions = [];
-	sessionState.allSessions = [];
+	sessionState.familySessions = [];
 	sessionState.daemonSessions = [];
 	sessionState.searchResults = null;
 	sessionState.currentId = null;
@@ -79,6 +84,40 @@ beforeEach(() => {
 	discoveryState.defaultModelId = "";
 	routerState.path = "/p/project-a/s/old-session";
 	syncSlugState(routerState.path);
+});
+
+describe("clearSessionState", () => {
+	it("clears evicted activity, replay generations and timers on project reset", () => {
+		vi.useFakeTimers();
+		try {
+			for (const id of new Set([
+				...sessionActivity.keys(),
+				...sessionMessages.keys(),
+			]))
+				clearSessionChatState(id);
+			const evicted = getOrCreateSessionSlot("evicted");
+			evicted.activity.replayGeneration = 7;
+			const render = vi.fn();
+			evicted.activity.renderTimer = setTimeout(() => render(), 100);
+			for (let i = 0; i < 21; i++) getOrCreateSessionSlot(`visited-${i}`);
+			const activityOnly = getOrCreateSessionActivity("activity-only");
+			activityOnly.renderTimer = setTimeout(() => render(), 100);
+			getOrCreateSessionMessages("messages-only");
+			expect(sessionMessages.has("evicted")).toBe(false);
+			expect(sessionActivity.has("evicted")).toBe(true);
+
+			clearSessionState();
+
+			expect(sessionActivity.size).toBe(0);
+			expect(sessionMessages.size).toBe(0);
+			expect(evicted.activity.replayGeneration).toBe(8);
+			expect(activityOnly.replayGeneration).toBe(1);
+			vi.advanceTimersByTime(100);
+			expect(render).not.toHaveBeenCalled();
+		} finally {
+			vi.useRealTimers();
+		}
+	});
 });
 
 describe("switchToSession", () => {
@@ -202,12 +241,10 @@ describe("handleSessionList", () => {
 		expect(sessionState.rootSessions[0]!.id).toBe("a");
 	});
 
-	it("sets allSessions when roots is false", () => {
+	it("ignores obsolete all-session lists", () => {
 		const sessions = [makeSession({ id: "a" }), makeSession({ id: "b" })];
 		handleSessionList({ type: "session_list", sessions, roots: false });
-		expect(sessionState.allSessions).toHaveLength(2);
-		// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-		expect(sessionState.allSessions[0]!.id).toBe("a");
+		expect(sessionState.familySessions).toEqual([]);
 	});
 
 	it("applies ListSessions RPC responses through the same session-list path", () => {
@@ -221,6 +258,7 @@ describe("handleSessionList", () => {
 					updatedAt: 123,
 					pendingQuestionCount: 2,
 					pendingPermissionCount: 1,
+					attention: "needs-approval",
 				},
 			],
 		});
@@ -232,6 +270,7 @@ describe("handleSessionList", () => {
 				updatedAt: 123,
 				pendingQuestionCount: 2,
 				pendingPermissionCount: 1,
+				attention: "needs-approval",
 			},
 		]);
 		expect(sessionState.sessions.get("rpc-root")?.title).toBe("RPC Root");
@@ -245,7 +284,7 @@ describe("handleSessionList", () => {
 		expect(sessionState.rootSessions).toHaveLength(1);
 	});
 
-	it("backward-compat: untagged session_list populates both arrays", () => {
+	it("untagged session_list only populates roots", () => {
 		const root = makeSession({ id: "root1" });
 		const child = makeSession({ id: "child1", parentID: "root1" });
 		// Simulate an untagged message (no `roots` field) — e.g. from legacy sources
@@ -253,8 +292,8 @@ describe("handleSessionList", () => {
 		// rootSessions should contain only non-subagent sessions
 		expect(sessionState.rootSessions).toHaveLength(1);
 		expect(sessionState.rootSessions[0]?.id).toBe("root1");
-		// allSessions should contain everything
-		expect(sessionState.allSessions).toHaveLength(2);
+		// Family membership only comes from session_family.
+		expect(sessionState.familySessions).toEqual([]);
 	});
 });
 
@@ -270,7 +309,7 @@ describe("handleSessionSwitched", () => {
 		expect(sessionState.currentId).toBe("abc");
 	});
 
-	it("records a switched subagent in allSessions with its parent", () => {
+	it("records selected subagent metadata without changing the family", () => {
 		handleSessionSwitched(
 			msg({
 				type: "session_switched",
@@ -280,7 +319,7 @@ describe("handleSessionSwitched", () => {
 			}),
 		);
 
-		expect(sessionState.allSessions).toContainEqual({
+		expect(sessionState.sessions.get("child-session")).toEqual({
 			id: "child-session",
 			title: "",
 			parentID: "parent-session",
@@ -288,14 +327,14 @@ describe("handleSessionSwitched", () => {
 		expect(findSession("child-session")?.parentID).toBe("parent-session");
 	});
 
-	it("does not add a parent-less switched session to allSessions", () => {
+	it("does not add a parent-less switched session to familySessions", () => {
 		handleSessionSwitched({
 			type: "session_switched",
 			id: "root-session",
 			sessionId: "root-session",
 		});
 
-		expect(sessionState.allSessions).toEqual([]);
+		expect(sessionState.familySessions).toEqual([]);
 	});
 
 	it("ignores missing id", () => {
@@ -338,8 +377,8 @@ describe("setCurrentSession", () => {
 // ─── handleSessionForked (ticket 5.3) ───────────────────────────────────────
 
 describe("handleSessionForked (ticket 5.3)", () => {
-	it("adds the forked session to the session list", () => {
-		sessionState.allSessions = [
+	it("does not insert a fork outside the supplied family", () => {
+		sessionState.familySessions = [
 			{ id: "ses_original", title: "Original", updatedAt: 1000 },
 		];
 
@@ -356,17 +395,11 @@ describe("handleSessionForked (ticket 5.3)", () => {
 			parentTitle: "Original",
 		});
 
-		expect(sessionState.allSessions).toHaveLength(2);
-		const forked = sessionState.allSessions.find(
-			(s: SessionInfo) => s.id === "ses_forked",
-		);
-		expect(forked).toBeDefined();
-		// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-		expect(forked!.parentID).toBe("ses_original");
+		expect(sessionState.familySessions).toHaveLength(1);
 	});
 
 	it("does not duplicate if session already exists", () => {
-		sessionState.allSessions = [
+		sessionState.familySessions = [
 			{ id: "ses_forked", title: "Already Here", updatedAt: 1000 },
 		];
 
@@ -383,10 +416,11 @@ describe("handleSessionForked (ticket 5.3)", () => {
 			parentTitle: "Original",
 		});
 
-		expect(sessionState.allSessions).toHaveLength(1);
+		expect(sessionState.familySessions).toHaveLength(1);
 	});
 
-	it("preserves forkMessageId on forked session", () => {
+	it("preserves forkMessageId on the selected fork", () => {
+		sessionState.currentId = "fork-1";
 		handleSessionForked({
 			type: "session_forked",
 			sessionId: "s1",
@@ -400,56 +434,35 @@ describe("handleSessionForked (ticket 5.3)", () => {
 			parentId: "parent-1",
 			parentTitle: "Parent",
 		});
-		const found = sessionState.allSessions.find((s) => s.id === "fork-1");
+		const found = findSession("fork-1");
 		expect(found?.forkMessageId).toBe("msg_42");
 	});
 });
 
 // ─── getFilteredSessions — subagent toggle ──────────────────────────────────
 
-describe("getFilteredSessions — hideSubagentSessions toggle", () => {
-	beforeEach(() => {
-		uiState.hideSubagentSessions = true; // reset to default
-	});
-
-	it("excludes subagent sessions when hideSubagentSessions is true", () => {
-		sessionState.rootSessions = [
-			makeSession({ id: "a", title: "Parent", updatedAt: 1000 }),
-		];
-		uiState.hideSubagentSessions = true;
-		expect(getFilteredSessions().map((s) => s.id)).toEqual(["a"]);
-	});
-
-	it("includes subagent sessions when hideSubagentSessions is false", () => {
-		sessionState.allSessions = [
-			makeSession({ id: "a", title: "Parent", updatedAt: 1000 }),
-			makeSession({ id: "b", title: "Child", parentID: "a", updatedAt: 2000 }),
-		];
-		uiState.hideSubagentSessions = false;
-		const ids = getFilteredSessions().map((s) => s.id);
-		expect(ids).toContain("a");
-		expect(ids).toContain("b");
-	});
-
-	it("still applies search filter when subagents are visible", () => {
-		sessionState.allSessions = [
-			makeSession({ id: "a", title: "Parent Session", updatedAt: 1000 }),
-			makeSession({
-				id: "b",
-				title: "Child Session",
-				parentID: "a",
-				updatedAt: 2000,
-			}),
-		];
-		uiState.hideSubagentSessions = false;
-		sessionState.searchQuery = "child";
-		expect(getFilteredSessions().map((s) => s.id)).toEqual(["b"]);
+describe("roots-only sidebar", () => {
+	it("never shows family children, including search results", () => {
+		const root = makeSession({ id: "root", title: "Parent" });
+		const child = makeSession({
+			id: "child",
+			title: "Child",
+			parentID: "root",
+		});
+		handleSessionList({ type: "session_list", roots: true, sessions: [root] });
+		handleSessionFamily({
+			type: "session_family",
+			rootId: "root",
+			sessions: [root, child],
+		});
+		expect(getFilteredSessions()).toEqual([root]);
+		sessionState.searchResults = [root, child, makeSession({ id: "deleted" })];
+		expect(getFilteredSessions()).toEqual([root]);
 	});
 });
 
 describe("getFilteredSessions — daemon sessions", () => {
 	beforeEach(() => {
-		uiState.hideSubagentSessions = true;
 		sessionState.daemonSessions = [];
 		sessionState.searchResults = null;
 		sessionState.searchQuery = "";
@@ -523,18 +536,13 @@ describe("getFilteredSessions — daemon sessions", () => {
 		expect(getFilteredSessions().map((session) => session.id)).toEqual([
 			"foreign-root",
 		]);
-		uiState.hideSubagentSessions = false;
-		expect(getFilteredSessions().map((session) => session.id)).toEqual([
-			"foreign-root",
-			"foreign-child",
-		]);
 	});
 
 	it("returns only reconciled server results during an active search", () => {
 		const result = makeSession({ id: "search-result", title: "Match" });
 		sessionState.searchQuery = "match";
 		sessionState.searchResults = [result];
-		sessionState.sessions.set(result.id, result);
+		sessionState.rootSessions = [result];
 		sessionState.daemonSessions = [
 			makeSession({
 				id: "foreign-match",

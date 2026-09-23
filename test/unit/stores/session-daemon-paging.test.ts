@@ -30,7 +30,6 @@ import {
 	sessionState,
 	setSearchQuery,
 } from "../../../src/lib/frontend/stores/session.svelte.js";
-import { uiState } from "../../../src/lib/frontend/stores/ui.svelte.js";
 import type { ListDaemonSessionsResponse } from "../../../src/lib/frontend/transport/ws-rpc.js";
 import { listDaemonSessionsRpc } from "../../../src/lib/frontend/transport/ws-rpc-client.js";
 
@@ -76,7 +75,7 @@ function page(
 beforeEach(() => {
 	rpc.mockReset();
 	sessionState.rootSessions = [];
-	sessionState.allSessions = [];
+	sessionState.familySessions = [];
 	sessionState.daemonSessions = [];
 	sessionState.daemonUnavailableProjects = [];
 	sessionState.daemonCursor = null;
@@ -86,7 +85,6 @@ beforeEach(() => {
 	sessionState.sessions.clear();
 	sessionState.searchQuery = "";
 	clearSessionSearch();
-	uiState.hideSubagentSessions = true;
 	routerState.path = "/p/project-a";
 	syncSlugState(routerState.path);
 });

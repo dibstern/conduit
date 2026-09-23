@@ -40,7 +40,7 @@ function createHarness() {
 			broadcastPerSessionEvent: vi.fn(),
 		},
 		sessionService: {
-			sendDualSessionLists: vi.fn(async () => {}),
+			sendSessionLists: vi.fn(async () => {}),
 			getSessionParentMap: () => new Map(),
 		},
 		processingTimeouts: {
@@ -332,7 +332,7 @@ describe("wireMonitoring shutdown", () => {
 	});
 });
 
-async function createEffectHarness(sendDualSessionLists = () => Effect.void) {
+async function createEffectHarness(sendSessionLists = () => Effect.void) {
 	let changed: ChangedCallback | undefined;
 	let resolveMessages: ((messages: []) => void) | undefined;
 	const messages = vi.fn(
@@ -352,6 +352,7 @@ async function createEffectHarness(sendDualSessionLists = () => Effect.void) {
 		Layer.succeed(SessionManagerServiceTag, {
 			initialize: unused,
 			getDefaultSessionId: unused,
+			getSessionFamily: unused,
 			getLastKnownSessionCount: unused,
 			listSessions: unused,
 			createSession: unused,
@@ -368,7 +369,7 @@ async function createEffectHarness(sendDualSessionLists = () => Effect.void) {
 			decrementPendingQuestionCount: unused,
 			setPendingQuestionCounts: unused,
 			setForkEntry: unused,
-			sendDualSessionLists,
+			sendSessionLists,
 			getSessionParentMap: () => Effect.succeed(new Map<string, string>()),
 		}),
 		Layer.succeed(StatusPollerTag, {

@@ -26,26 +26,18 @@
 				],
 				"roots": true
 			}
-		},
+		}
+	],
+	"new_session_success": [
 		{
 			"channel": "sendTo",
 			"clientId": "client-1",
 			"message": {
-				"type": "session_list",
-				"sessions": [
-					{
-						"id": "child-1",
-						"title": "Child Session",
-						"updatedAt": 200,
-						"messageCount": 4,
-						"parentID": "root-1"
-					}
-				],
-				"roots": false
+				"type": "session_family",
+				"rootId": "new-session",
+				"sessions": []
 			}
-		}
-	],
-	"new_session_success": [
+		},
 		{
 			"channel": "sendTo",
 			"clientId": "client-1",
@@ -79,14 +71,6 @@
 				],
 				"roots": true
 			}
-		},
-		{
-			"channel": "broadcast",
-			"message": {
-				"type": "session_list",
-				"sessions": [],
-				"roots": false
-			}
 		}
 	],
 	"delete_session_success": [
@@ -110,14 +94,6 @@
 					}
 				],
 				"roots": true
-			}
-		},
-		{
-			"channel": "broadcast",
-			"message": {
-				"type": "session_list",
-				"sessions": [],
-				"roots": false
 			}
 		}
 	]

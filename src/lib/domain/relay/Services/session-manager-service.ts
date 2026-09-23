@@ -68,6 +68,7 @@ import {
 	LoggerTag,
 	OrchestrationEngineTag,
 	StatusPollerTag,
+	WebSocketHandlerTag,
 } from "./services.js";
 import {
 	applySessionCommand,
@@ -127,7 +128,7 @@ const toReadonlyMap = <K, V>(map: HashMap.HashMap<K, V>): ReadonlyMap<K, V> =>
 	new Map(HashMap.toEntries(map));
 
 const sessionRowsParentMap = (
-	rows: readonly SessionRow[],
+	rows: readonly Pick<SessionRow, "id" | "parent_id">[],
 	forkMeta: HashMap.HashMap<string, ForkEntry>,
 ): HashMap.HashMap<string, string> => {
 	let parentMap = HashMap.empty<string, string>();
@@ -169,10 +170,12 @@ const sessionRowsToInfo = (
 		forkMeta: HashMap.HashMap<string, ForkEntry>;
 	},
 	pending: PendingApprovalCounts,
+	parentMap?: ReadonlyMap<string, string>,
 ): SessionInfo[] =>
 	sessionRowsToSessionInfoList(Array.from(rows), {
 		...(options?.statuses !== undefined ? { statuses: options.statuses } : {}),
 		forkMeta: toReadonlyMap(state.forkMeta),
+		...(parentMap ? { parentMap } : {}),
 		pendingQuestionCounts: pending.questions,
 		pendingPermissionCounts: pending.permissions,
 	});
@@ -220,33 +223,44 @@ export const listSessions = (options?: ListSessionsOptions) =>
 		const state = yield* Ref.get(stateRef);
 
 		if (readQueryEffectOption._tag === "Some") {
-			const [rows, pendingApprovals] = yield* Effect.all([
-				readQueryEffectOption.value.listSessions(sqOpts),
-				readQueryEffectOption.value.countPendingApprovalsBySession(),
-			]).pipe(
-				Effect.mapError(
-					(cause) =>
-						new SessionManagerError({ operation: "listSessions", cause }),
-				),
-			);
-			if (!options?.roots) {
-				yield* Ref.update(stateRef, (s) => ({
-					...s,
-					cachedParentMap: sessionRowsParentMap(rows, s.forkMeta),
-					lastKnownSessionCount: rows.length,
-				}));
-				yield* updateRelaySessionCountSnapshot(rows.length);
-			}
+			const [rows, pendingApprovals, lineage, projectedStatuses] =
+				yield* Effect.all([
+					readQueryEffectOption.value.listSessions(sqOpts),
+					readQueryEffectOption.value.countPendingApprovalsBySession(),
+					readQueryEffectOption.value.getSessionLineage(),
+					readQueryEffectOption.value.getAllSessionStatuses(),
+				]).pipe(
+					Effect.mapError(
+						(cause) =>
+							new SessionManagerError({ operation: "listSessions", cause }),
+					),
+				);
+			const parentMap = sessionRowsParentMap(lineage.rows, state.forkMeta);
+			yield* Ref.update(stateRef, (s) => ({
+				...s,
+				cachedParentMap: parentMap,
+				lastKnownSessionCount: lineage.count,
+			}));
+			yield* updateRelaySessionCountSnapshot(lineage.count);
 			// The durable table wins outright here, with no fallback to the relay's
 			// in-memory map. The map is only correct for a relay that saw the events
 			// live, and a permission decision decrements it even though only a
 			// question increments it, so falling back would reintroduce the skew the
 			// projection exists to avoid.
+			const statuses: Record<string, SessionStatus> = {};
+			for (const [id, status] of Object.entries(projectedStatuses)) {
+				statuses[id] =
+					status === "busy" || status === "retry"
+						? { type: "busy" }
+						: { type: "idle" };
+			}
+			Object.assign(statuses, options?.statuses);
 			return sessionRowsToInfo(
 				rows,
-				options,
+				{ ...options, statuses },
 				state,
 				pendingApprovalCountsByType(pendingApprovals),
+				toReadonlyMap(parentMap),
 			);
 		}
 
@@ -1024,39 +1038,18 @@ export const setForkEntry = (
 		Effect.withSpan("session.setForkEntry"),
 	);
 
-/**
- * Send roots-only session list immediately, then all sessions in the background.
- */
-export const sendDualSessionLists = (
+/** Send the roots-only sidebar snapshot. */
+export const sendSessionLists = (
 	send: (msg: SessionListMessage) => void,
 	options?: { statuses?: Record<string, SessionStatus> | undefined },
 ) =>
 	Effect.gen(function* () {
-		const log = yield* LoggerTag;
 		const roots = yield* listSessions({
 			roots: true,
 			statuses: options?.statuses,
 		});
 		send({ type: "session_list", sessions: roots, roots: true });
-
-		yield* Effect.forkDaemon(
-			listSessions({ statuses: options?.statuses }).pipe(
-				Effect.tap((all) =>
-					Effect.sync(() =>
-						send({ type: "session_list", sessions: all, roots: false }),
-					),
-				),
-				Effect.catchAll((err) =>
-					Effect.sync(() =>
-						log.warn(`Background all-sessions fetch failed: ${err}`),
-					),
-				),
-			),
-		);
-	}).pipe(
-		Effect.annotateLogs("operation", "sendDualSessionLists"),
-		Effect.withSpan("session.sendDualSessionLists"),
-	);
+	});
 
 export interface SessionManagerService {
 	initialize(title?: string): Effect.Effect<string, SessionManagerError>;
@@ -1067,6 +1060,12 @@ export interface SessionManagerService {
 	listSessions(
 		options?: ListSessionsOptions,
 	): Effect.Effect<SessionInfo[], SessionManagerError>;
+	getSessionFamily(
+		sessionId: string,
+	): Effect.Effect<
+		Extract<RelayMessage, { type: "session_family" }>,
+		SessionManagerError
+	>;
 	createSession(
 		title?: string,
 		options?: CreateSessionOptions,
@@ -1104,7 +1103,7 @@ export interface SessionManagerService {
 		sessionId: string,
 		entry: ForkEntry,
 	): Effect.Effect<void, SessionManagerError>;
-	sendDualSessionLists(
+	sendSessionLists(
 		send: (msg: SessionListMessage) => void,
 		options?: { statuses?: Record<string, SessionStatus> | undefined },
 	): Effect.Effect<void, SessionManagerError>;
@@ -1143,6 +1142,8 @@ export const SessionManagerServiceLive: Layer.Layer<
 		);
 		const sqlOption = yield* Effect.serviceOption(SqlClient.SqlClient);
 		const statusPollerOption = yield* Effect.serviceOption(StatusPollerTag);
+		const wsHandlerOption = yield* Effect.serviceOption(WebSocketHandlerTag);
+		const snapshotOption = yield* Effect.serviceOption(RelayStatusSnapshotTag);
 		const instanceClientsOption = yield* Effect.serviceOption(
 			OpenCodeInstanceClientsTag,
 		);
@@ -1185,8 +1186,60 @@ export const SessionManagerServiceLive: Layer.Layer<
 								),
 							)
 						: base;
-				return yield* withEffectRead;
+				return yield* snapshotOption._tag === "Some"
+					? withEffectRead.pipe(
+							Effect.provideService(
+								RelayStatusSnapshotTag,
+								snapshotOption.value,
+							),
+						)
+					: withEffectRead;
 			});
+		const getSessionFamily: SessionManagerService["getSessionFamily"] = (
+			sessionId,
+		) =>
+			Effect.gen(function* () {
+				if (readQueryEffectOption._tag === "None") {
+					return {
+						type: "session_family" as const,
+						rootId: sessionId,
+						sessions: [],
+					};
+				}
+				const [rows, approvals, state] = yield* Effect.all([
+					readQueryEffectOption.value.getSessionFamily(sessionId),
+					readQueryEffectOption.value.countPendingApprovalsBySession(),
+					Ref.get(stateRef),
+				]).pipe(
+					Effect.mapError(
+						(cause) =>
+							new SessionManagerError({ operation: "getSessionFamily", cause }),
+					),
+				);
+				// Poller statuses include ancestor propagation; family rows keep their own state.
+				const familyStatuses: Record<string, SessionStatus> = {};
+				for (const row of rows) {
+					familyStatuses[row.id] =
+						row.status === "busy" || row.status === "retry"
+							? { type: "busy" }
+							: { type: "idle" };
+				}
+				const ids = new Set(rows.map((row) => row.id));
+				const root = rows.find(
+					(row) => !row.parent_id || !ids.has(row.parent_id),
+				);
+				return {
+					type: "session_family" as const,
+					rootId: root?.id ?? sessionId,
+					sessions: sessionRowsToInfo(
+						rows,
+						{ statuses: familyStatuses },
+						state,
+						pendingApprovalCountsByType(approvals),
+					),
+				};
+			});
+
 		const serviceCreateSession = (
 			title?: string,
 			options?: CreateSessionOptions,
@@ -1451,6 +1504,7 @@ export const SessionManagerServiceLive: Layer.Layer<
 					Effect.provideService(SessionManagerStateTag, stateRef),
 				),
 			listSessions: serviceListSessions,
+			getSessionFamily,
 			createSession: (title, options) =>
 				Effect.gen(function* () {
 					const session = yield* serviceCreateSession(title, options);
@@ -1522,32 +1576,47 @@ export const SessionManagerServiceLive: Layer.Layer<
 						Effect.provideService(SessionManagerStateTag, stateRef),
 					);
 				}),
-			sendDualSessionLists: (send, options) =>
+			sendSessionLists: (send, options) =>
 				Effect.gen(function* () {
 					const roots = yield* serviceListSessions({
 						roots: true,
 						statuses: options?.statuses,
 					});
 					send({ type: "session_list", sessions: roots, roots: true });
-
-					yield* Effect.forkDaemon(
-						serviceListSessions({ statuses: options?.statuses }).pipe(
-							Effect.tap((all) =>
-								Effect.sync(() =>
-									send({
-										type: "session_list",
-										sessions: all,
-										roots: false,
-									}),
-								),
-							),
-							Effect.catchAll((err) =>
-								Effect.sync(() =>
-									log.warn(`Background all-sessions fetch failed: ${err}`),
-								),
-							),
-						),
-					);
+					if (wsHandlerOption._tag === "None") return;
+					const ws = wsHandlerOption.value;
+					const parentMap = (yield* Ref.get(stateRef)).cachedParentMap;
+					const families = new Map<string, string[]>();
+					for (const clientId of ws.getClientIds()) {
+						const viewed = ws.getClientSession(clientId);
+						if (!viewed) continue;
+						let root = viewed;
+						const seen = new Set<string>();
+						while (!seen.has(root)) {
+							seen.add(root);
+							const parent = HashMap.get(parentMap, root);
+							if (parent._tag === "None") break;
+							root = parent.value;
+						}
+						const viewers = families.get(root) ?? [];
+						viewers.push(clientId);
+						families.set(root, viewers);
+					}
+					for (const [root, viewers] of families) {
+						const family = yield* getSessionFamily(root);
+						const familyIds = new Set(
+							family.sessions.map((session) => session.id),
+						);
+						for (const clientId of viewers) {
+							const viewed = ws.getClientSession(clientId);
+							if (
+								viewed &&
+								(familyIds.has(viewed) || viewed === family.rootId)
+							) {
+								ws.sendTo(clientId, family);
+							}
+						}
+					}
 				}),
 		} satisfies SessionManagerService;
 	}),

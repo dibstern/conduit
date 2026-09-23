@@ -936,6 +936,8 @@ describe("switchModelForSession", () => {
 				getAllSessionStatuses: vi.fn(() => Effect.succeed({})),
 				getSessionsForReconciliation: () => Effect.succeed([]),
 				listSessions: vi.fn(() => Effect.succeed([])),
+				getSessionLineage: () => Effect.succeed({ rows: [], count: 0 }),
+				getSessionFamily: () => Effect.succeed([]),
 				countPendingApprovalsBySession: vi.fn(() => Effect.succeed([])),
 				getLatestTurnModelExecution: vi.fn(() => Effect.succeed(undefined)),
 				getSessionMessagesWithParts: vi.fn(() => Effect.succeed([])),
@@ -1281,7 +1283,7 @@ function mockSessionManager(
 			messages: [],
 			hasMore: false,
 		})),
-		sendDualSessionLists: vi.fn(async () => {}),
+		sendSessionLists: vi.fn(async () => {}),
 		recordMessageActivity: vi.fn(),
 		clearPaginationCursor: vi.fn(),
 		decrementPendingQuestionCount: vi.fn(),
@@ -1417,6 +1419,8 @@ describe("handleGetToolContent", () => {
 				getAllSessionStatuses: vi.fn(() => Effect.succeed({})),
 				getSessionsForReconciliation: () => Effect.succeed([]),
 				listSessions: vi.fn(() => Effect.succeed([])),
+				getSessionLineage: () => Effect.succeed({ rows: [], count: 0 }),
+				getSessionFamily: () => Effect.succeed([]),
 				countPendingApprovalsBySession: vi.fn(() => Effect.succeed([])),
 				getLatestTurnModelExecution: vi.fn(() => Effect.succeed(undefined)),
 				getSessionMessagesWithParts: vi.fn(() => Effect.succeed([])),
@@ -1502,8 +1506,8 @@ describe("handleForkSession", () => {
 		"stores explicit fork metadata through SessionManagerService",
 		() => {
 			const legacySetForkEntry = vi.fn();
-			const legacySendDualSessionLists = vi.fn(async () => {
-				throw new Error("legacy sendDualSessionLists should not be used");
+			const legacySendSessionLists = vi.fn(async () => {
+				throw new Error("legacy sendSessionLists should not be used");
 			});
 			const legacyListSessions = vi.fn(async () => {
 				throw new Error("legacy listSessions should not be used");
@@ -1519,29 +1523,26 @@ describe("handleForkSession", () => {
 				]),
 			);
 			const serviceSetForkEntry = vi.fn(() => Effect.void);
-			const serviceSendDualSessionLists = vi.fn((send) =>
+			const serviceSendSessionLists = vi.fn((send) =>
 				Effect.sync(() => {
 					send({
 						type: "session_list",
 						sessions: [
 							{
-								id: "ses-child",
-								title: "Forked Session",
-								updatedAt: 201,
-								messageCount: 0,
-								parentID: "ses-parent",
-								forkMessageId: "msg-1",
-								forkPointTimestamp: 123,
+								id: "ses-parent",
+								title: "Parent Session",
+								updatedAt: 100,
+								messageCount: 1,
 							},
 						],
-						roots: false,
+						roots: true,
 					});
 				}),
 			);
 			const ws = mockWsHandler();
 			const sessionMgr = mockSessionManager({
 				setForkEntry: legacySetForkEntry,
-				sendDualSessionLists: legacySendDualSessionLists,
+				sendSessionLists: legacySendSessionLists,
 				listSessions: legacyListSessions,
 				loadPreRenderedHistory: vi.fn(async () => ({
 					messages: [],
@@ -1551,7 +1552,7 @@ describe("handleForkSession", () => {
 			const sessionManagerService = makeMockSessionManagerService({
 				listSessions: serviceListSessions,
 				setForkEntry: serviceSetForkEntry,
-				sendDualSessionLists: serviceSendDualSessionLists,
+				sendSessionLists: serviceSendSessionLists,
 			});
 			const layer = makeForkSessionLayer({
 				sessionMgr,
@@ -1601,22 +1602,19 @@ describe("handleForkSession", () => {
 						sessionId: "ses-child",
 						status: "idle",
 					});
-					expect(serviceSendDualSessionLists).toHaveBeenCalled();
-					expect(legacySendDualSessionLists).not.toHaveBeenCalled();
+					expect(serviceSendSessionLists).toHaveBeenCalled();
+					expect(legacySendSessionLists).not.toHaveBeenCalled();
 					expect(ws.broadcast).toHaveBeenCalledWith({
 						type: "session_list",
 						sessions: [
 							{
-								id: "ses-child",
-								title: "Forked Session",
-								updatedAt: 201,
-								messageCount: 0,
-								parentID: "ses-parent",
-								forkMessageId: "msg-1",
-								forkPointTimestamp: 123,
+								id: "ses-parent",
+								title: "Parent Session",
+								updatedAt: 100,
+								messageCount: 1,
 							},
 						],
-						roots: false,
+						roots: true,
 					});
 				}),
 			);
@@ -2378,15 +2376,15 @@ describe("handleNewSession", () => {
 		() => {
 			const ws = mockWsHandler();
 			const log = mockLogger();
-			const legacySendDualSessionLists = vi.fn(async () => {
-				throw new Error("legacy sendDualSessionLists should not be used");
+			const legacySendSessionLists = vi.fn(async () => {
+				throw new Error("legacy sendSessionLists should not be used");
 			});
 			const legacyCreateSession = vi.fn(async () => {
 				throw new Error("legacy createSession should not be used");
 			});
 			const sessionMgr = mockSessionManager({
 				createSession: legacyCreateSession,
-				sendDualSessionLists: legacySendDualSessionLists,
+				sendSessionLists: legacySendSessionLists,
 			});
 			const serviceCreateSession = vi.fn(() =>
 				Effect.succeed({
@@ -2398,7 +2396,7 @@ describe("handleNewSession", () => {
 					time: { created: 100, updated: 200 },
 				}),
 			);
-			const sendDualSessionLists = vi.fn((send) =>
+			const sendSessionLists = vi.fn((send) =>
 				Effect.sync(() => {
 					send({
 						type: "session_list",
@@ -2416,7 +2414,7 @@ describe("handleNewSession", () => {
 			);
 			const sessionManagerService = makeMockSessionManagerService({
 				createSession: serviceCreateSession,
-				sendDualSessionLists,
+				sendSessionLists,
 			});
 			const layer = makeSessionLifecycleLayer({
 				ws,
@@ -2448,8 +2446,8 @@ describe("handleNewSession", () => {
 						sessionId: "new-session-1",
 						status: "idle",
 					});
-					expect(sendDualSessionLists).toHaveBeenCalled();
-					expect(legacySendDualSessionLists).not.toHaveBeenCalled();
+					expect(sendSessionLists).toHaveBeenCalled();
+					expect(legacySendSessionLists).not.toHaveBeenCalled();
 					expect(ws.broadcast).toHaveBeenCalledWith({
 						type: "session_list",
 						sessions: [
@@ -2483,10 +2481,10 @@ describe("handleNewSession", () => {
 				time: { created: 100, updated: 200 },
 			}),
 		);
-		const sendDualSessionLists = vi.fn(() => Effect.never);
+		const sendSessionLists = vi.fn(() => Effect.never);
 		const sessionManagerService = makeMockSessionManagerService({
 			createSession: serviceCreateSession,
-			sendDualSessionLists,
+			sendSessionLists,
 		});
 		const layer = makeSessionLifecycleLayer({
 			ws,
@@ -2509,7 +2507,7 @@ describe("handleNewSession", () => {
 				sessionId: "new-session-fast",
 				requestId: "request-fast",
 			});
-			expect(sendDualSessionLists).toHaveBeenCalled();
+			expect(sendSessionLists).toHaveBeenCalled();
 		});
 	});
 
@@ -2526,10 +2524,10 @@ describe("handleNewSession", () => {
 				time: { created: 100, updated: 200 },
 			}),
 		);
-		const sendDualSessionLists = vi.fn(() => Effect.void);
+		const sendSessionLists = vi.fn(() => Effect.void);
 		const sessionManagerService = makeMockSessionManagerService({
 			createSession: serviceCreateSession,
-			sendDualSessionLists,
+			sendSessionLists,
 		});
 		const layer = makeSessionLifecycleLayer({
 			ws,
@@ -2591,6 +2589,8 @@ describe("handleNewSession", () => {
 				getAllSessionStatuses: vi.fn(() => Effect.succeed({})),
 				getSessionsForReconciliation: () => Effect.succeed([]),
 				listSessions: vi.fn(() => Effect.succeed([])),
+				getSessionLineage: () => Effect.succeed({ rows: [], count: 0 }),
+				getSessionFamily: () => Effect.succeed([]),
 				countPendingApprovalsBySession: vi.fn(() => Effect.succeed([])),
 				getLatestTurnModelExecution: vi.fn(() => Effect.succeed(undefined)),
 				getSessionMessagesWithParts: vi.fn(() => Effect.succeed([])),
@@ -2685,6 +2685,8 @@ describe("handleNewSession", () => {
 				getAllSessionStatuses: vi.fn(() => Effect.succeed({})),
 				getSessionsForReconciliation: () => Effect.succeed([]),
 				listSessions: vi.fn(() => Effect.succeed([])),
+				getSessionLineage: () => Effect.succeed({ rows: [], count: 0 }),
+				getSessionFamily: () => Effect.succeed([]),
 				countPendingApprovalsBySession: vi.fn(() => Effect.succeed([])),
 				getLatestTurnModelExecution: vi.fn(() => Effect.succeed(undefined)),
 				getSessionMessagesWithParts: vi.fn(() =>
@@ -2806,6 +2808,8 @@ describe("handleNewSession", () => {
 				getAllSessionStatuses: vi.fn(() => Effect.succeed({})),
 				getSessionsForReconciliation: () => Effect.succeed([]),
 				listSessions: vi.fn(() => Effect.succeed([])),
+				getSessionLineage: () => Effect.succeed({ rows: [], count: 0 }),
+				getSessionFamily: () => Effect.succeed([]),
 				countPendingApprovalsBySession: vi.fn(() => Effect.succeed([])),
 				getLatestTurnModelExecution: vi.fn(() => Effect.succeed(undefined)),
 				getSessionMessagesWithParts: vi.fn(() => Effect.succeed([])),
@@ -2869,15 +2873,15 @@ describe("handleNewSession", () => {
 	it.effect("logs and completes when the service list broadcast fails", () => {
 		const ws = mockWsHandler();
 		const log = mockLogger();
-		const legacySendDualSessionLists = vi.fn(async () => {
-			throw new Error("legacy sendDualSessionLists should not be used");
+		const legacySendSessionLists = vi.fn(async () => {
+			throw new Error("legacy sendSessionLists should not be used");
 		});
 		const legacyCreateSession = vi.fn(async () => {
 			throw new Error("legacy createSession should not be used");
 		});
 		const sessionMgr = mockSessionManager({
 			createSession: legacyCreateSession,
-			sendDualSessionLists: legacySendDualSessionLists,
+			sendSessionLists: legacySendSessionLists,
 		});
 		const serviceCreateSession = vi.fn(() =>
 			Effect.succeed({
@@ -2889,17 +2893,17 @@ describe("handleNewSession", () => {
 				time: { created: 100, updated: 200 },
 			}),
 		);
-		const sendDualSessionLists = vi.fn(() =>
+		const sendSessionLists = vi.fn(() =>
 			Effect.fail(
 				new SessionManagerError({
-					operation: "sendDualSessionLists",
+					operation: "sendSessionLists",
 					cause: new Error("service unavailable"),
 				}),
 			),
 		);
 		const sessionManagerService = makeMockSessionManagerService({
 			createSession: serviceCreateSession,
-			sendDualSessionLists,
+			sendSessionLists,
 		});
 		const layer = makeSessionLifecycleLayer({
 			ws,
@@ -2917,8 +2921,8 @@ describe("handleNewSession", () => {
 				);
 				expect(serviceCreateSession).toHaveBeenCalledWith(undefined);
 				expect(legacyCreateSession).not.toHaveBeenCalled();
-				expect(sendDualSessionLists).toHaveBeenCalled();
-				expect(legacySendDualSessionLists).not.toHaveBeenCalled();
+				expect(sendSessionLists).toHaveBeenCalled();
+				expect(legacySendSessionLists).not.toHaveBeenCalled();
 				expect(log.warn).toHaveBeenCalledWith(
 					expect.stringContaining(
 						"Failed to broadcast session list after CreateSession",
@@ -2940,8 +2944,8 @@ describe("handleDeleteSession", () => {
 				getClientsForSession: vi.fn(() => []),
 			});
 			const log = mockLogger();
-			const legacySendDualSessionLists = vi.fn(async () => {
-				throw new Error("legacy sendDualSessionLists should not be used");
+			const legacySendSessionLists = vi.fn(async () => {
+				throw new Error("legacy sendSessionLists should not be used");
 			});
 			const legacyListSessions = vi.fn(async () => {
 				throw new Error("legacy listSessions should not be used");
@@ -2954,9 +2958,9 @@ describe("handleDeleteSession", () => {
 			const sessionMgr = mockSessionManager({
 				deleteSession: legacyDeleteSession,
 				listSessions: legacyListSessions,
-				sendDualSessionLists: legacySendDualSessionLists,
+				sendSessionLists: legacySendSessionLists,
 			});
-			const sendDualSessionLists = vi.fn((send) =>
+			const sendSessionLists = vi.fn((send) =>
 				Effect.sync(() => {
 					send({
 						type: "session_list",
@@ -2968,7 +2972,7 @@ describe("handleDeleteSession", () => {
 			const sessionManagerService = makeMockSessionManagerService({
 				deleteSession: serviceDeleteSession,
 				listSessions: serviceListSessions,
-				sendDualSessionLists,
+				sendSessionLists,
 			});
 			const layer = makeSessionLifecycleLayer({
 				ws,
@@ -2993,8 +2997,8 @@ describe("handleDeleteSession", () => {
 						type: "session_deleted",
 						sessionId: "deleted-session",
 					});
-					expect(sendDualSessionLists).toHaveBeenCalled();
-					expect(legacySendDualSessionLists).not.toHaveBeenCalled();
+					expect(sendSessionLists).toHaveBeenCalled();
+					expect(legacySendSessionLists).not.toHaveBeenCalled();
 					expect(ws.broadcast).toHaveBeenCalledWith({
 						type: "session_list",
 						sessions: [],
@@ -3015,8 +3019,8 @@ describe("handleDeleteSession", () => {
 				getClientsForSession: vi.fn(() => ["client-1", "client-2"]),
 			});
 			const log = mockLogger();
-			const legacySendDualSessionLists = vi.fn(async () => {
-				throw new Error("legacy sendDualSessionLists should not be used");
+			const legacySendSessionLists = vi.fn(async () => {
+				throw new Error("legacy sendSessionLists should not be used");
 			});
 			const legacyListSessions = vi.fn(async () => {
 				throw new Error("legacy listSessions should not be used");
@@ -3042,9 +3046,9 @@ describe("handleDeleteSession", () => {
 					messages: [],
 					hasMore: false,
 				})),
-				sendDualSessionLists: legacySendDualSessionLists,
+				sendSessionLists: legacySendSessionLists,
 			});
-			const sendDualSessionLists = vi.fn((send) =>
+			const sendSessionLists = vi.fn((send) =>
 				Effect.sync(() => {
 					send({
 						type: "session_list",
@@ -3063,7 +3067,7 @@ describe("handleDeleteSession", () => {
 			const sessionManagerService = makeMockSessionManagerService({
 				deleteSession: serviceDeleteSession,
 				listSessions: serviceListSessions,
-				sendDualSessionLists,
+				sendSessionLists,
 			});
 			const client = {
 				session: {
@@ -3137,8 +3141,8 @@ describe("handleDeleteSession", () => {
 					// the session read and re-broadcasts the list, which is how the
 					// unread ring clears on other tabs. Three before this feature
 					// plus one per reassigned viewer.
-					expect(sendDualSessionLists).toHaveBeenCalledTimes(5);
-					expect(legacySendDualSessionLists).not.toHaveBeenCalled();
+					expect(sendSessionLists).toHaveBeenCalledTimes(5);
+					expect(legacySendSessionLists).not.toHaveBeenCalled();
 					expect(ws.broadcast).toHaveBeenCalledWith({
 						type: "session_deleted",
 						sessionId: "deleted-session",
@@ -3179,7 +3183,7 @@ describe("renameSessionForClient", () => {
 					calls.push("rename");
 				}),
 			);
-			const sendDualSessionLists = vi.fn((send) =>
+			const sendSessionLists = vi.fn((send) =>
 				Effect.sync(() => {
 					calls.push("broadcast");
 					send({
@@ -3198,7 +3202,7 @@ describe("renameSessionForClient", () => {
 			);
 			const sessionManagerService = makeMockSessionManagerService({
 				renameSession,
-				sendDualSessionLists,
+				sendSessionLists,
 			});
 
 			const layer = Layer.mergeAll(
@@ -3216,7 +3220,7 @@ describe("renameSessionForClient", () => {
 				Effect.tap(() => {
 					expect(renameSession).toHaveBeenCalledWith("session-1", "New Title");
 					expect(legacyRenameSession).not.toHaveBeenCalled();
-					expect(sendDualSessionLists).toHaveBeenCalled();
+					expect(sendSessionLists).toHaveBeenCalled();
 					expect(calls).toEqual(["rename", "broadcast"]);
 					expect(ws.broadcast).toHaveBeenCalledWith({
 						type: "session_list",
@@ -3241,10 +3245,10 @@ describe("renameSessionForClient", () => {
 		const _sessionMgr = mockSessionManager();
 		const ws = mockWsHandler();
 		const renameSession = vi.fn(() => Effect.void);
-		const sendDualSessionLists = vi.fn(() => Effect.void);
+		const sendSessionLists = vi.fn(() => Effect.void);
 		const sessionManagerService = makeMockSessionManagerService({
 			renameSession,
-			sendDualSessionLists,
+			sendSessionLists,
 		});
 
 		const layer = Layer.mergeAll(
@@ -3261,7 +3265,7 @@ describe("renameSessionForClient", () => {
 			Effect.provide(layer),
 			Effect.tap(() => {
 				expect(renameSession).not.toHaveBeenCalled();
-				expect(sendDualSessionLists).not.toHaveBeenCalled();
+				expect(sendSessionLists).not.toHaveBeenCalled();
 			}),
 		);
 	});
@@ -3298,6 +3302,8 @@ describe("loadMoreHistoryForSession", () => {
 			getAllSessionStatuses: vi.fn(() => Effect.succeed({})),
 			getSessionsForReconciliation: () => Effect.succeed([]),
 			listSessions: vi.fn(() => Effect.succeed([])),
+			getSessionLineage: () => Effect.succeed({ rows: [], count: 0 }),
+			getSessionFamily: () => Effect.succeed([]),
 			countPendingApprovalsBySession: vi.fn(() => Effect.succeed([])),
 			getLatestTurnModelExecution: vi.fn(() => Effect.succeed(undefined)),
 			getSessionMessagesWithParts: vi.fn(() =>
@@ -3391,6 +3397,8 @@ describe("loadMoreHistoryForSession", () => {
 			getAllSessionStatuses: vi.fn(() => Effect.succeed({})),
 			getSessionsForReconciliation: () => Effect.succeed([]),
 			listSessions: vi.fn(() => Effect.succeed([])),
+			getSessionLineage: () => Effect.succeed({ rows: [], count: 0 }),
+			getSessionFamily: () => Effect.succeed([]),
 			countPendingApprovalsBySession: vi.fn(() => Effect.succeed([])),
 			getLatestTurnModelExecution: vi.fn(() => Effect.succeed(undefined)),
 			getSessionMessagesWithParts: vi.fn(() =>
@@ -3931,6 +3939,8 @@ describe("handleMessage", () => {
 				getAllSessionStatuses: vi.fn(() => Effect.succeed({})),
 				getSessionsForReconciliation: () => Effect.succeed([]),
 				listSessions: vi.fn(() => Effect.succeed([])),
+				getSessionLineage: () => Effect.succeed({ rows: [], count: 0 }),
+				getSessionFamily: () => Effect.succeed([]),
 				countPendingApprovalsBySession: vi.fn(() => Effect.succeed([])),
 				getLatestTurnModelExecution: vi.fn(() => Effect.succeed(undefined)),
 				getSessionMessagesWithParts: vi.fn(() =>
@@ -4141,7 +4151,7 @@ describe("handleMessage", () => {
 				]),
 			);
 			const renameSession = vi.fn(() => Effect.void);
-			const sendDualSessionLists = vi.fn((send) =>
+			const sendSessionLists = vi.fn((send) =>
 				Effect.sync(() => {
 					send({
 						type: "session_list",
@@ -4160,7 +4170,7 @@ describe("handleMessage", () => {
 			const sessionManagerService = makeMockSessionManagerService({
 				listSessions,
 				renameSession,
-				sendDualSessionLists,
+				sendSessionLists,
 			});
 			const config = mockConfig();
 			const client = {} as unknown as OpenCodeAPI;
@@ -4195,7 +4205,7 @@ describe("handleMessage", () => {
 
 				expect(listSessions).not.toHaveBeenCalled();
 				expect(renameSession).not.toHaveBeenCalled();
-				expect(sendDualSessionLists).not.toHaveBeenCalled();
+				expect(sendSessionLists).not.toHaveBeenCalled();
 				expect(ws.broadcast).not.toHaveBeenCalled();
 				expect(legacyListSessions).not.toHaveBeenCalled();
 				expect(legacyRenameSession).not.toHaveBeenCalled();
@@ -4221,11 +4231,11 @@ describe("handleMessage", () => {
 			]),
 		);
 		const renameSession = vi.fn(() => Effect.void);
-		const sendDualSessionLists = vi.fn(() => Effect.void);
+		const sendSessionLists = vi.fn(() => Effect.void);
 		const sessionManagerService = makeMockSessionManagerService({
 			listSessions,
 			renameSession,
-			sendDualSessionLists,
+			sendSessionLists,
 		});
 		const config = mockConfig();
 		const client = {} as unknown as OpenCodeAPI;
@@ -4260,7 +4270,7 @@ describe("handleMessage", () => {
 
 			expect(listSessions).not.toHaveBeenCalled();
 			expect(renameSession).not.toHaveBeenCalled();
-			expect(sendDualSessionLists).not.toHaveBeenCalled();
+			expect(sendSessionLists).not.toHaveBeenCalled();
 		}).pipe(Effect.provide(layer));
 	});
 
@@ -4285,7 +4295,7 @@ describe("handleMessage", () => {
 			);
 			const sessionManagerService = makeMockSessionManagerService({
 				createSession: serviceCreateSession,
-				sendDualSessionLists: vi.fn(() => Effect.void),
+				sendSessionLists: vi.fn(() => Effect.void),
 			});
 			const config = mockConfig();
 			const client = {} as unknown as OpenCodeAPI;
@@ -4312,6 +4322,8 @@ describe("handleMessage", () => {
 				getAllSessionStatuses: vi.fn(() => Effect.succeed({})),
 				getSessionsForReconciliation: () => Effect.succeed([]),
 				listSessions: vi.fn(() => Effect.succeed([])),
+				getSessionLineage: () => Effect.succeed({ rows: [], count: 0 }),
+				getSessionFamily: () => Effect.succeed([]),
 				countPendingApprovalsBySession: vi.fn(() => Effect.succeed([])),
 				getLatestTurnModelExecution: vi.fn(() => Effect.succeed(undefined)),
 				getSessionMessagesWithParts: vi.fn(() => Effect.succeed([])),

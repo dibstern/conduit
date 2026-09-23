@@ -90,6 +90,7 @@ vi.mock("../../../src/lib/frontend/stores/ui.svelte.js", () => ({
 }));
 
 import { clearMessages } from "../../../src/lib/frontend/stores/chat.svelte.js";
+import { sessionState } from "../../../src/lib/frontend/stores/session.svelte.js";
 import { handleMessage } from "../../../src/lib/frontend/stores/ws.svelte.js";
 
 // ─── Setup / Teardown ───────────────────────────────────────────────────────
@@ -97,6 +98,7 @@ import { handleMessage } from "../../../src/lib/frontend/stores/ws.svelte.js";
 beforeEach(() => {
 	clearMessages();
 	dispatchMock.mockClear();
+	sessionState.rootSessions = [];
 });
 
 afterEach(() => {
@@ -173,6 +175,7 @@ describe("session_list -> reconcile dispatch", () => {
 		} as RelayMessage);
 		expect(dispatchMock).toHaveBeenCalledWith({
 			type: "reconcile",
+			sessionIds: new Set(["sess-a", "sess-b"]),
 			counts: new Map([
 				["sess-a", { questions: 2, permissions: 0 }],
 				["sess-b", { questions: 1, permissions: 0 }],
@@ -191,7 +194,11 @@ describe("session_list -> reconcile dispatch", () => {
 		} as RelayMessage);
 		expect(dispatchMock).toHaveBeenCalledWith({
 			type: "reconcile",
-			counts: new Map(),
+			sessionIds: new Set(["sess-a", "sess-b"]),
+			counts: new Map([
+				["sess-a", { questions: 0, permissions: 0 }],
+				["sess-b", { questions: 0, permissions: 0 }],
+			]),
 		});
 	});
 
@@ -206,7 +213,11 @@ describe("session_list -> reconcile dispatch", () => {
 		} as RelayMessage);
 		expect(dispatchMock).toHaveBeenCalledWith({
 			type: "reconcile",
-			counts: new Map([["sess-b", { questions: 3, permissions: 0 }]]),
+			sessionIds: new Set(["sess-a", "sess-b"]),
+			counts: new Map([
+				["sess-a", { questions: 0, permissions: 0 }],
+				["sess-b", { questions: 3, permissions: 0 }],
+			]),
 		});
 	});
 });

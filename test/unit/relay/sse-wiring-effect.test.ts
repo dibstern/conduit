@@ -128,6 +128,28 @@ describe("handleSSEEventEffect", () => {
 		);
 	});
 
+	it("broadcasts question resolutions so family viewers drop replayed questions", async () => {
+		const { deps, effectDeps } = makeEffectDeps();
+		const translated: RelayMessage = {
+			type: "ask_user_resolved",
+			sessionId: "child-session",
+			toolId: "que_q1",
+		};
+		vi.mocked(effectDeps.translator.translate).mockReturnValue({
+			ok: true,
+			messages: [translated],
+		});
+
+		await Effect.runPromise(
+			handleSSEEventEffect(effectDeps, {
+				type: "question.replied",
+				properties: { sessionID: "child-session", requestID: "que_q1" },
+			}).pipe(Effect.provide(makeEffectLayer())),
+		);
+
+		expect(deps.wsHandler.broadcast).toHaveBeenCalledWith(translated);
+	});
+
 	it("records message activity through SessionManagerServiceTag", async () => {
 		const deps = createMockSSEWiringDeps();
 		const {

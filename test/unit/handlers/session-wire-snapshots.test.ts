@@ -52,7 +52,7 @@ describe("session handler wire snapshots", () => {
 				hasMore: false,
 				total: 0,
 			})),
-			sendDualSessionLists: vi.fn(async () => undefined),
+			sendSessionLists: vi.fn(async () => undefined),
 		});
 
 		await Effect.runPromise(
@@ -83,7 +83,7 @@ describe("session handler wire snapshots", () => {
 					time: { created: 300, updated: 300 },
 				}),
 			),
-			sendDualSessionLists: vi.fn((send) =>
+			sendSessionLists: vi.fn((send) =>
 				Effect.sync(() => {
 					send({
 						type: "session_list",
@@ -96,11 +96,6 @@ describe("session handler wire snapshots", () => {
 							},
 						],
 						roots: true,
-					});
-					send({
-						type: "session_list",
-						sessions: [],
-						roots: false,
 					});
 				}),
 			),
@@ -123,7 +118,7 @@ describe("session handler wire snapshots", () => {
 		});
 		const sessionManagerService = makeMockSessionManagerService({
 			deleteSession: vi.fn(() => Effect.void),
-			sendDualSessionLists: vi.fn((send) =>
+			sendSessionLists: vi.fn((send) =>
 				Effect.sync(() => {
 					send({
 						type: "session_list",
@@ -136,11 +131,6 @@ describe("session handler wire snapshots", () => {
 							},
 						],
 						roots: true,
-					});
-					send({
-						type: "session_list",
-						sessions: [],
-						roots: false,
 					});
 				}),
 			),

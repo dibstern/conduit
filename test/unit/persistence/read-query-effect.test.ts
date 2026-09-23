@@ -99,6 +99,52 @@ describe("ReadQueryEffect.listSessions", () => {
 	);
 });
 
+describe("ReadQueryEffect session families", () => {
+	it.effect(
+		"finds the root from a grandchild and returns every descendant only once",
+		() =>
+			Effect.gen(function* () {
+				yield* makeEffectSqlMigrator();
+				yield* seedSession("root", { updatedAt: 5 });
+				yield* seedSession("child", { parentId: "root", updatedAt: 4 });
+				yield* seedSession("grandchild", { parentId: "child", updatedAt: 3 });
+				yield* seedSession("sibling", { parentId: "root", updatedAt: 2 });
+				yield* seedSession("unrelated");
+				const readQuery = yield* makeReadQueryEffect;
+				const expected = ["root", "child", "grandchild", "sibling"];
+				expect(
+					(yield* readQuery.getSessionFamily("grandchild")).map(
+						(row) => row.id,
+					),
+				).toEqual(expected);
+				expect(
+					(yield* readQuery.getSessionFamily("root")).map((row) => row.id),
+				).toEqual(expected);
+				expect(yield* readQuery.getSessionFamily("missing")).toEqual([]);
+				const lineage = yield* readQuery.getSessionLineage();
+				expect(lineage.count).toBe(5);
+				expect(lineage.rows).toHaveLength(5);
+				expect(lineage.rows).toEqual(
+					expect.arrayContaining([
+						{ id: "root", parent_id: null },
+						{ id: "grandchild", parent_id: "child" },
+					]),
+				);
+			}).pipe(Effect.provide(testLayer)),
+	);
+
+	it.effect("returns an empty lineage snapshot for an empty store", () =>
+		Effect.gen(function* () {
+			yield* makeEffectSqlMigrator();
+			const readQuery = yield* makeReadQueryEffect;
+			expect(yield* readQuery.getSessionLineage()).toEqual({
+				rows: [],
+				count: 0,
+			});
+		}).pipe(Effect.provide(testLayer)),
+	);
+});
+
 describe("ReadQueryEffect.countPendingApprovalsBySession", () => {
 	it.effect("counts pending approvals by session and type", () =>
 		Effect.gen(function* () {

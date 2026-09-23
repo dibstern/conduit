@@ -9,6 +9,7 @@ import type {
 	SessionRow,
 	TurnModelExecutionRow,
 } from "../read-model-types.js";
+import { sessionFamilyQuery } from "../session-family-query.js";
 
 export class ReadQueryEffectError extends Data.TaggedError(
 	"ReadQueryEffectError",
@@ -48,6 +49,18 @@ export interface ReadQueryEffect {
 		titleQuery?: string;
 		before?: { updatedAt: number; id: string };
 	}) => Effect.Effect<readonly SessionRow[], ReadQueryEffectError | SqlError>;
+
+	readonly getSessionLineage: () => Effect.Effect<
+		{
+			rows: readonly { id: string; parent_id: string | null }[];
+			count: number;
+		},
+		ReadQueryEffectError | SqlError
+	>;
+
+	readonly getSessionFamily: (
+		sessionId: string,
+	) => Effect.Effect<readonly SessionRow[], ReadQueryEffectError | SqlError>;
 
 	readonly countPendingApprovalsBySession: () => Effect.Effect<
 		readonly PendingApprovalCountRow[],
@@ -208,6 +221,30 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 			),
 		);
 
+	const getSessionLineage = () =>
+		Effect.gen(function* () {
+			const rows = yield* sql<{ id: string; parent_id: string | null }>`
+				SELECT id, parent_id FROM sessions`;
+			const counts = yield* sql<{ count: number }>`
+				SELECT COUNT(*) AS count FROM sessions`;
+			return { rows, count: counts[0]?.count ?? 0 };
+		}).pipe(
+			Effect.mapError(
+				(cause) =>
+					new ReadQueryEffectError({ operation: "getSessionLineage", cause }),
+			),
+		);
+
+	const getSessionFamily = (sessionId: string) =>
+		sql
+			.unsafe<SessionRow>(sessionFamilyQuery, [sessionId])
+			.pipe(
+				Effect.mapError(
+					(cause) =>
+						new ReadQueryEffectError({ operation: "getSessionFamily", cause }),
+				),
+			);
+
 	const countPendingApprovalsBySession = (): Effect.Effect<
 		readonly PendingApprovalCountRow[],
 		ReadQueryEffectError | SqlError
@@ -338,6 +375,8 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 		getSession,
 		getAllSessionStatuses,
 		listSessions,
+		getSessionLineage,
+		getSessionFamily,
 		getSessionsForReconciliation,
 		countPendingApprovalsBySession,
 		getSessionMessagesWithParts,

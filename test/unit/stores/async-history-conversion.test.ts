@@ -74,7 +74,7 @@ const identityRender = (text: string) => text;
 beforeEach(() => {
 	clearMessages();
 	sessionState.rootSessions = [];
-	sessionState.allSessions = [];
+	sessionState.familySessions = [];
 	sessionState.searchResults = null;
 	sessionState.currentId = null;
 	sessionState.searchQuery = "";

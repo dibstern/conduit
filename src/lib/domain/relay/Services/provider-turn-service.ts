@@ -720,7 +720,7 @@ export const makeProviderTurnService = Effect.gen(function* () {
 			});
 			yield* Effect.forkDaemon(
 				sessionManagerService
-					.sendDualSessionLists((msg) => wsHandler.broadcast(msg))
+					.sendSessionLists((msg) => wsHandler.broadcast(msg))
 					.pipe(
 						Effect.catchAll((err) =>
 							Effect.sync(() =>

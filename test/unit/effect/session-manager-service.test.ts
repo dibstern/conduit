@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { SqlClient } from "@effect/sql";
 import { describe, it } from "@effect/vitest";
-import { Effect, HashMap, Layer, Option, Queue, Ref, TestClock } from "effect";
+import { Effect, HashMap, Layer, Option, Queue, Ref } from "effect";
 import { expect, vi } from "vitest";
 import { ProviderInstanceIdSchema } from "../../../src/lib/contracts/provider-instance.js";
 import {
@@ -30,6 +30,7 @@ import {
 	LoggerTag,
 	OrchestrationEngineTag,
 	StatusPollerTag,
+	WebSocketHandlerTag,
 } from "../../../src/lib/domain/relay/Services/services.js";
 import {
 	addToParentMap,
@@ -45,7 +46,7 @@ import {
 	SessionManagerServiceLive,
 	SessionManagerServiceTag,
 	seedPaginationCursor,
-	sendDualSessionLists,
+	sendSessionLists,
 	setForkEntry,
 	setPendingQuestionCounts,
 } from "../../../src/lib/domain/relay/Services/session-manager-service.js";
@@ -78,6 +79,7 @@ import {
 	makeMockLogger,
 	makeMockOpenCodeAPI,
 	makeMockStatusPoller,
+	makeMockWebSocketHandler,
 } from "../../helpers/mock-factories.js";
 
 function makeRow(id: string, overrides?: Partial<SessionRow>): SessionRow {
@@ -112,6 +114,13 @@ function makeReadQueryEffect(
 		getAllSessionStatuses: vi.fn(() => Effect.succeed({})),
 		getSessionsForReconciliation: () => Effect.succeed([]),
 		listSessions: vi.fn(() => Effect.succeed(rows)),
+		getSessionLineage: vi.fn(() =>
+			Effect.succeed({
+				rows: rows.map(({ id, parent_id }) => ({ id, parent_id })),
+				count: rows.length,
+			}),
+		),
+		getSessionFamily: vi.fn(() => Effect.succeed(rows)),
 		countPendingApprovalsBySession: vi.fn(() =>
 			Effect.succeed(pendingApprovalCounts),
 		),
@@ -1282,157 +1291,121 @@ describe("SessionManagerService", () => {
 		}).pipe(Effect.provide(layer));
 	});
 
-	it.effect(
-		"sends roots immediately and all sessions in the background",
-		() => {
-			const api = makeMockOpenCodeAPI();
-			let resolveAllSessions!: (
-				value: Awaited<ReturnType<typeof api.session.list>>,
-			) => void;
-			const allSessions = new Promise<
-				Awaited<ReturnType<typeof api.session.list>>
-			>((resolve) => {
-				resolveAllSessions = resolve;
-			});
-			vi.spyOn(api.session, "list").mockImplementation(async (options) => {
-				if (options?.roots) {
-					return [
-						{
-							id: "root-1",
-							projectID: "project-1",
-							directory: "/tmp/project",
-							title: "Root",
-							version: "1.0.0",
-							time: { created: 1, updated: 1 },
-						},
-					];
-				}
-				return allSessions;
-			});
-			const logger = makeMockLogger();
-			const messages: unknown[] = [];
-			const layer = Layer.mergeAll(
-				Layer.succeed(OpenCodeAPITag, api),
-				Layer.succeed(LoggerTag, logger),
-				makeSessionManagerStateLive(),
-			);
-
-			return Effect.gen(function* () {
-				yield* sendDualSessionLists((msg) => messages.push(msg));
-				expect(messages).toEqual([
+	it.effect("sends only roots without requesting the all-session list", () => {
+		const api = makeMockOpenCodeAPI();
+		const list = vi
+			.spyOn(api.session, "list")
+			.mockImplementation(async (options) => {
+				if (!options?.roots)
+					throw new Error("unfiltered list must not be fetched");
+				return [
 					{
-						type: "session_list",
-						sessions: [
-							{
-								id: "root-1",
-								title: "Root",
-								updatedAt: 1,
-								messageCount: 0,
-							},
-						],
-						roots: true,
-					},
-				]);
-
-				resolveAllSessions([
-					{
-						id: "child-1",
+						id: "root-1",
 						projectID: "project-1",
 						directory: "/tmp/project",
-						title: "Child",
+						title: "Root",
 						version: "1.0.0",
-						parentID: "root-1",
-						time: { created: 2, updated: 2 },
+						time: { created: 1, updated: 1 },
 					},
-				]);
-				yield* Effect.promise(
-					() => new Promise((resolve) => setTimeout(resolve, 0)),
-				);
-				expect(messages).toEqual([
-					{
-						type: "session_list",
-						sessions: [
-							{
-								id: "root-1",
-								title: "Root",
-								updatedAt: 1,
-								messageCount: 0,
-							},
-						],
-						roots: true,
-					},
-					{
-						type: "session_list",
-						sessions: [
-							{
-								id: "child-1",
-								title: "Child",
-								updatedAt: 2,
-								messageCount: 0,
-								parentID: "root-1",
-							},
-						],
-						roots: false,
-					},
-				]);
-				expect(logger.warn).not.toHaveBeenCalled();
-			}).pipe(Effect.provide(layer));
-		},
-	);
+				];
+			});
+		const messages: unknown[] = [];
+		const layer = Layer.mergeAll(
+			Layer.succeed(OpenCodeAPITag, api),
+			Layer.succeed(LoggerTag, makeMockLogger()),
+			makeSessionManagerStateLive(),
+		);
+		return Effect.gen(function* () {
+			yield* sendSessionLists((msg) => messages.push(msg));
+			expect(messages).toEqual([
+				{
+					type: "session_list",
+					roots: true,
+					sessions: [
+						{ id: "root-1", title: "Root", updatedAt: 1, messageCount: 0 },
+					],
+				},
+			]);
+			expect(list).toHaveBeenCalledTimes(1);
+			expect(list).toHaveBeenCalledWith({ roots: true });
+		}).pipe(Effect.provide(layer));
+	});
 
 	it.effect(
-		"logs background all-session failures without failing roots",
+		"refreshes lineage and sends one family query to its viewers",
 		() => {
-			const api = makeMockOpenCodeAPI();
-			vi.spyOn(api.session, "list").mockImplementation(async (options) => {
-				if (options?.roots) {
-					return [
-						{
-							id: "root-1",
-							projectID: "project-1",
-							directory: "/tmp/project",
-							title: "Root",
-							version: "1.0.0",
-							time: { created: 1, updated: 1 },
-						},
-					];
-				}
-				throw new Error("all sessions unavailable");
-			});
-			const logger = makeMockLogger();
-			const messages: unknown[] = [];
-			const layer = Layer.mergeAll(
-				Layer.succeed(OpenCodeAPITag, api),
-				Layer.succeed(LoggerTag, logger),
-				makeSessionManagerStateLive(),
+			const rows = [
+				makeRow("root"),
+				makeRow("child", { parent_id: "root" }),
+				makeRow("grandchild", { parent_id: "child", status: "busy" }),
+			];
+			const readQuery = makeReadQueryEffect(rows);
+			vi.mocked(readQuery.listSessions).mockReturnValue(
+				Effect.succeed([makeRow("root")]),
 			);
-
+			const ws = makeMockWebSocketHandler({
+				getClientIds: vi.fn(() => ["root-viewer", "child-viewer"]),
+				getClientSession: vi.fn((id) =>
+					id === "root-viewer" ? "root" : "grandchild",
+				),
+			});
+			const layer = Layer.mergeAll(
+				Layer.succeed(OpenCodeAPITag, makeMockOpenCodeAPI()),
+				Layer.succeed(ReadQueryEffectTag, readQuery),
+				Layer.succeed(WebSocketHandlerTag, ws),
+				Layer.succeed(
+					StatusPollerTag,
+					makeMockStatusPoller({
+						getCurrentStatuses: vi.fn(() =>
+							Effect.succeed({
+								root: { type: "busy" as const },
+								child: { type: "busy" as const },
+								grandchild: { type: "busy" as const },
+							}),
+						),
+					}),
+				),
+				Layer.succeed(LoggerTag, makeMockLogger()),
+				makeSessionManagerStateLive(),
+				DaemonEventBusLive,
+				RelayStatusSnapshotLive,
+			);
 			return Effect.gen(function* () {
-				yield* sendDualSessionLists((msg) => messages.push(msg));
-				expect(messages).toEqual([
-					{
-						type: "session_list",
-						sessions: [
-							{
-								id: "root-1",
-								title: "Root",
-								updatedAt: 1,
-								messageCount: 0,
-							},
-						],
-						roots: true,
-					},
-				]);
-
-				yield* Effect.yieldNow();
-				yield* TestClock.adjust("4 seconds");
-				yield* Effect.yieldNow();
-
-				expect(logger.warn).toHaveBeenCalledWith(
-					expect.stringContaining("Background all-sessions fetch failed:"),
+				const service = yield* SessionManagerServiceTag;
+				const send = vi.fn();
+				yield* service.sendSessionLists(send);
+				expect(readQuery.listSessions).toHaveBeenCalledWith({ roots: true });
+				expect(readQuery.getSessionLineage).toHaveBeenCalledTimes(1);
+				expect(readQuery.getSessionFamily).toHaveBeenCalledTimes(1);
+				expect(readQuery.getSessionFamily).toHaveBeenCalledWith("root");
+				expect(send).toHaveBeenCalledTimes(1);
+				expect(send).toHaveBeenCalledWith(
+					expect.objectContaining({ type: "session_list", roots: true }),
 				);
-				expect(messages).toHaveLength(1);
-			}).pipe(Effect.provide(layer));
+				for (const client of ["root-viewer", "child-viewer"]) {
+					expect(ws.sendTo).toHaveBeenCalledWith(
+						client,
+						expect.objectContaining({
+							type: "session_family",
+							rootId: "root",
+							sessions: expect.arrayContaining([
+								expect.objectContaining({
+									id: "grandchild",
+									parentID: "child",
+									processing: true,
+								}),
+								expect.objectContaining({ id: "root", attention: "idle" }),
+								expect.objectContaining({ id: "child", attention: "idle" }),
+							]),
+						}),
+					);
+				}
+				const state = yield* Ref.get(yield* SessionManagerStateTag);
+				expect(state.lastKnownSessionCount).toBe(3);
+				expect(HashMap.get(state.cachedParentMap, "grandchild")).toEqual(
+					Option.some("child"),
+				);
+			}).pipe(Effect.provide(SessionManagerServiceLive), Effect.provide(layer));
 		},
 	);
 

@@ -6,6 +6,7 @@ import {
 	chatState,
 	getOrCreateSessionSlot,
 } from "../../../src/lib/frontend/stores/chat.svelte.js";
+import { permissionsState } from "../../../src/lib/frontend/stores/permissions.svelte.js";
 import { sessionState } from "../../../src/lib/frontend/stores/session.svelte.js";
 import { sessionViewState } from "../../../src/lib/frontend/stores/session-view.svelte.js";
 
@@ -165,5 +166,54 @@ describe("MessageList session-view publication", () => {
 		slot.messages.messages = [];
 		chatState.phase = "idle";
 		slot.activity.phase = "idle";
+	});
+});
+
+describe("MessageList pending questions", () => {
+	const pendingQuestion = (sessionId: string, text: string) => ({
+		toolId: `que_${sessionId}`,
+		sessionId,
+		questions: [
+			{ question: text, header: "Choice", options: [], multiSelect: false },
+		],
+	});
+
+	beforeEach(() => {
+		sessionState.familySessions = [
+			{ id: "root-a", title: "A" },
+			{ id: "child-a", title: "A child", parentID: "root-a" },
+		];
+		getOrCreateSessionSlot("root-a").messages.loadLifecycle = "ready";
+		getOrCreateSessionSlot("root-b").messages.loadLifecycle = "ready";
+		permissionsState.pendingQuestions = [
+			pendingQuestion("root-a", "Question from A?"),
+			pendingQuestion("child-a", "Question from A's child?"),
+		];
+	});
+
+	afterEach(() => {
+		cleanup();
+		permissionsState.pendingQuestions = [];
+		sessionState.familySessions = [];
+	});
+
+	it("shows questions from the viewed session's family", () => {
+		sessionState.currentId = "root-a";
+		const { container } = render(MessageList);
+		flushSync();
+		expect(container.textContent).toContain("Question from A?");
+		expect(container.textContent).toContain("Question from A's child?");
+	});
+
+	it("hides another family's questions after switching to an unrelated root", () => {
+		// Optimistic switch: the old family is still loaded when B renders.
+		sessionState.currentId = "root-b";
+		const { container } = render(MessageList);
+		flushSync();
+		expect(container.textContent).not.toContain("Question from A");
+
+		sessionState.familySessions = [{ id: "root-b", title: "B" }];
+		flushSync();
+		expect(container.textContent).not.toContain("Question from A");
 	});
 });

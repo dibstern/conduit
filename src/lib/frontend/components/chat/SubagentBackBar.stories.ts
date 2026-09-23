@@ -5,7 +5,7 @@ import SubagentBackBar from "./SubagentBackBar.svelte";
 
 const resetSessions = () => {
 	sessionState.rootSessions = [];
-	sessionState.allSessions = [];
+	sessionState.familySessions = [];
 	sessionState.currentId = null;
 };
 
@@ -22,14 +22,14 @@ type Story = StoryObj<typeof meta>;
 export const Default: Story = {
 	beforeEach: () => {
 		sessionState.rootSessions = [mockSession];
-		sessionState.allSessions = [mockSession, mockSubagentSession];
+		sessionState.familySessions = [mockSession, mockSubagentSession];
 		sessionState.currentId = mockSubagentSession.id;
 	},
 };
 
 export const MissingParent: Story = {
 	beforeEach: () => {
-		sessionState.allSessions = [
+		sessionState.familySessions = [
 			{
 				...mockSubagentSession,
 				id: "sess_story_missing_parent",

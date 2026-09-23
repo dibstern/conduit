@@ -64,11 +64,11 @@ function makePerm(id: string, sessionId: string) {
 
 /** Set up session titles so getSessionTitle() returns readable names. */
 function setSessionTitles(titles: Record<string, string>) {
-	sessionState.allSessions = Object.entries(titles).map(([id, title]) => ({
+	sessionState.familySessions = Object.entries(titles).map(([id, title]) => ({
 		id,
 		title,
 		createdAt: Date.now(),
-	})) as typeof sessionState.allSessions;
+	})) as typeof sessionState.familySessions;
 }
 
 /** Render component and flush reactive updates. */
@@ -89,7 +89,7 @@ describe("AttentionBanner merge logic", () => {
 		permissionsState.pendingQuestions = [];
 		sessionState.currentId = "ses_current";
 		sessionState.rootSessions = [];
-		sessionState.allSessions = [];
+		sessionState.familySessions = [];
 		routerState.path = "/p/project-a/s/ses_current";
 		syncSlugState(routerState.path);
 	});
@@ -207,7 +207,7 @@ describe("AttentionBanner merge logic", () => {
 
 	it("excludes descendant sessions from display", async () => {
 		// Set up parent/child relationship: ses_current → ses_child1
-		sessionState.allSessions = [
+		sessionState.familySessions = [
 			{ id: "ses_current", title: "Parent", createdAt: Date.now() },
 			{
 				id: "ses_child1",
@@ -216,7 +216,7 @@ describe("AttentionBanner merge logic", () => {
 				parentID: "ses_current",
 			},
 			{ id: "ses_other1", title: "Unrelated session", createdAt: Date.now() },
-		] as typeof sessionState.allSessions;
+		] as typeof sessionState.familySessions;
 
 		// Permissions for child session should NOT appear (shown inline)
 		permissionsState.pendingPermissions = [

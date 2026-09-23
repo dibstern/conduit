@@ -48,6 +48,7 @@ import {
 	sessionMessages,
 } from "../../../src/lib/frontend/stores/chat.svelte.js";
 import {
+	handleSessionFamily,
 	handleSessionList,
 	sessionState,
 } from "../../../src/lib/frontend/stores/session.svelte.js";
@@ -62,7 +63,7 @@ beforeEach(() => {
 	_resetLRU();
 	sessionState.currentId = "current-session";
 	sessionState.rootSessions = [];
-	sessionState.allSessions = [];
+	sessionState.familySessions = [];
 	sessionState.searchResults = null;
 	sessionState.searchQuery = "";
 	sessionState.sessions.clear();
@@ -119,7 +120,7 @@ describe("clearSessionChatState wired to session_deleted", () => {
 });
 
 describe("handleSessionList drop path", () => {
-	it("cleans up chat state for sessions removed from session list", () => {
+	it("removes membership without evicting cached chat state", () => {
 		// Pre-populate sessions map with sessions A, B, C
 		sessionState.sessions.set("session-A", {
 			id: "session-A",
@@ -148,8 +149,8 @@ describe("handleSessionList drop path", () => {
 		} as Extract<RelayMessage, { type: "session_list" }>);
 
 		// session-B should be cleaned up
-		expect(sessionActivity.has("session-B")).toBe(false);
-		expect(sessionMessages.has("session-B")).toBe(false);
+		expect(sessionActivity.has("session-B")).toBe(true);
+		expect(sessionMessages.has("session-B")).toBe(true);
 		expect(sessionState.sessions.has("session-B")).toBe(false);
 
 		// session-A and session-C should still exist
@@ -229,4 +230,34 @@ describe("active-session teardown", () => {
 		expect(sessionActivity.has(activeId)).toBe(false);
 		expect(sessionMessages.has(activeId)).toBe(false);
 	});
+});
+
+it("switching families preserves the target transcript and removes old family membership", () => {
+	handleSessionFamily({
+		type: "session_family",
+		rootId: "old-root",
+		sessions: [
+			{ id: "old-root", title: "Old" },
+			{ id: "old-child", title: "Child", parentID: "old-root" },
+		],
+	});
+	const target = getOrCreateSessionSlot("new-child");
+	target.messages.messages = [
+		{ type: "user", uuid: "cached", text: "Keep this transcript" },
+	];
+	sessionState.currentId = "new-child";
+	handleSessionFamily({
+		type: "session_family",
+		rootId: "new-root",
+		sessions: [
+			{ id: "new-root", title: "New" },
+			{ id: "new-child", title: "Target", parentID: "new-root" },
+		],
+	});
+	expect(getOrCreateSessionSlot("new-child").messages.messages).toEqual(
+		target.messages.messages,
+	);
+	expect(getOrCreateSessionSlot("new-child").messages.messages).toHaveLength(1);
+	expect(sessionState.sessions.has("old-child")).toBe(false);
+	expect(sessionState.sessions.get("new-child")?.title).toBe("Target");
 });

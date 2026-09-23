@@ -342,7 +342,7 @@ describe("ChatLayout WS lifecycle", () => {
 
 		wsLifecycleHarness.onConnectCallbacks[0]?.();
 		await vi.waitFor(() => {
-			expect(applyListSessionsResponse).toHaveBeenCalledTimes(2);
+			expect(applyListSessionsResponse).toHaveBeenCalledTimes(1);
 		});
 
 		expect(applyListDaemonSessionsResponse).not.toHaveBeenCalled();

@@ -89,6 +89,11 @@ const sendSessionMetadata = (clientId: string, id: string) =>
 		const modelService = yield* OpenCodeModelServiceTag;
 		const pendingInteractions = yield* PendingInteractionServiceTag;
 		const sessionManagerService = yield* SessionManagerServiceTag;
+		const family = yield* sessionManagerService.getSessionFamily(id);
+		const familyIds = new Set([
+			id,
+			...family.sessions.map((session) => session.id),
+		]);
 
 		// Run all metadata sends concurrently, catching errors individually
 		yield* Effect.all(
@@ -116,9 +121,10 @@ const sendSessionMetadata = (clientId: string, id: string) =>
 				// Pending permissions (service + API)
 				Effect.gen(function* () {
 					const bridgePending =
-						yield* pendingInteractions.listPendingPermissions(id);
+						yield* pendingInteractions.listPendingPermissions();
 					const sentPermissionIds = new Set<string>();
 					for (const perm of bridgePending) {
+						if (!familyIds.has(perm.sessionId)) continue;
 						wsHandler.sendTo(clientId, {
 							type: "permission_request",
 							sessionId: perm.sessionId,
@@ -133,7 +139,7 @@ const sendSessionMetadata = (clientId: string, id: string) =>
 					);
 					for (const p of apiPermissions) {
 						const pSessionId = (p as { sessionID?: string }).sessionID ?? "";
-						if (pSessionId && pSessionId !== id) continue;
+						if (pSessionId && !familyIds.has(pSessionId)) continue;
 						if (sentPermissionIds.has(p.id)) continue;
 						wsHandler.sendTo(clientId, {
 							type: "permission_request",
@@ -162,12 +168,12 @@ const sendSessionMetadata = (clientId: string, id: string) =>
 					const sentQuestionIds = new Set<string>();
 
 					const servicePendingQuestions =
-						yield* pendingInteractions.listPendingQuestions(id);
+						yield* pendingInteractions.listPendingQuestions();
 					for (const pq of servicePendingQuestions) {
-						if (pq.sessionId && pq.sessionId !== id) continue;
+						if (pq.sessionId && !familyIds.has(pq.sessionId)) continue;
 						wsHandler.sendTo(clientId, {
 							type: "ask_user",
-							sessionId: id,
+							sessionId: pq.sessionId || id,
 							toolId: pq.requestId,
 							questions: pq.questions.map((q) => ({
 								question: q.question,
@@ -189,7 +195,7 @@ const sendSessionMetadata = (clientId: string, id: string) =>
 					);
 					for (const pq of pendingQuestions) {
 						const qSessionId = pq["sessionID"] as string | undefined;
-						if (qSessionId && qSessionId !== id) continue;
+						if (qSessionId && !familyIds.has(qSessionId)) continue;
 						if (sentQuestionIds.has(pq.id)) continue;
 
 						const rawQuestions = pq["questions"] as
@@ -210,7 +216,7 @@ const sendSessionMetadata = (clientId: string, id: string) =>
 						const toolCallId = tool?.callID;
 						wsHandler.sendTo(clientId, {
 							type: "ask_user",
-							sessionId: id,
+							sessionId: qSessionId || id,
 							toolId: pq.id,
 							questions,
 							providerId: "opencode",
@@ -229,7 +235,7 @@ const sendSessionMetadata = (clientId: string, id: string) =>
 
 				// Session list
 				sessionManagerService
-					.sendDualSessionLists((msg) => wsHandler.sendTo(clientId, msg))
+					.sendSessionLists((msg) => wsHandler.sendTo(clientId, msg))
 					.pipe(
 						Effect.catchAll((err) =>
 							Effect.sync(() =>
@@ -371,6 +377,11 @@ const switchClientToSession = (
 
 		yield* seedPaginationCursorFromHistory(sessionId, patchedSource);
 
+		const sessionService = yield* SessionManagerServiceTag;
+		wsHandler.sendTo(
+			clientId,
+			yield* sessionService.getSessionFamily(sessionId),
+		);
 		const draft = getSessionInputDraft(sessionId);
 		wsHandler.sendTo(
 			clientId,
@@ -442,7 +453,7 @@ export const viewSessionForClient = ({
 			// Forked, because opening a session must not wait on a fan-out.
 			yield* Effect.forkDaemon(
 				sessionManagerService
-					.sendDualSessionLists((msg) => wsHandler.broadcast(msg))
+					.sendSessionLists((msg) => wsHandler.broadcast(msg))
 					.pipe(
 						Effect.catchAll((err) =>
 							Effect.sync(() =>
@@ -509,7 +520,7 @@ export const createSessionForClient = ({
 
 		yield* Effect.forkDaemon(
 			sessionManagerService
-				.sendDualSessionLists((msg) => wsHandler.broadcast(msg))
+				.sendSessionLists((msg) => wsHandler.broadcast(msg))
 				.pipe(
 					Effect.catchAll((err) =>
 						Effect.sync(() =>
@@ -584,7 +595,7 @@ export const deleteSessionForClient = ({
 		// Broadcast session_deleted so all clients know this session is gone
 		wsHandler.broadcast({ type: "session_deleted", sessionId: id });
 
-		yield* sessionManagerService.sendDualSessionLists((msg) =>
+		yield* sessionManagerService.sendSessionLists((msg) =>
 			wsHandler.broadcast(msg),
 		);
 		log.info(`client=${clientId} Deleted: ${id}`);
@@ -616,7 +627,7 @@ export const renameSessionForClient = ({
 		const id = sessionId;
 		if (id && title) {
 			yield* sessionManagerService.renameSession(id, title);
-			yield* sessionManagerService.sendDualSessionLists((msg) =>
+			yield* sessionManagerService.sendSessionLists((msg) =>
 				wsHandler.broadcast(msg),
 			);
 			log.info(`client=${clientId} Renamed: ${id} → ${title}`);
@@ -637,7 +648,7 @@ export const markSessionUnreadForClient = ({
 
 		if (sessionId) {
 			yield* sessionManagerService.markSessionUnread(sessionId);
-			yield* sessionManagerService.sendDualSessionLists((msg) =>
+			yield* sessionManagerService.sendSessionLists((msg) =>
 				wsHandler.broadcast(msg),
 			);
 			log.info(`client=${clientId} Marked unread: ${sessionId}`);
@@ -788,7 +799,7 @@ export const forkSessionForClient = ({
 		yield* handleViewSession(clientId, { sessionId: forked.id });
 
 		// Broadcast updated session list
-		yield* sessionManagerService.sendDualSessionLists((msg) =>
+		yield* sessionManagerService.sendSessionLists((msg) =>
 			wsHandler.broadcast(msg),
 		);
 

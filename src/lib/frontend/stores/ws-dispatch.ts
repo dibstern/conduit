@@ -94,7 +94,6 @@ import {
 } from "./instance.svelte.js";
 import { dispatch } from "./notification-reducer.svelte.js";
 import {
-	clearSessionLocal,
 	handleAskUser,
 	handleAskUserError,
 	handleAskUserResolved,
@@ -106,6 +105,7 @@ import { getCurrentSlug, replaceRoute } from "./router.svelte.js";
 import {
 	consumeSwitchingFromId,
 	findSession,
+	handleSessionFamily,
 	handleSessionForked,
 	handleSessionList,
 	handleSessionSwitched,
@@ -219,8 +219,36 @@ function routePerSession(event: PerSessionEvent): void {
 		return;
 	}
 
+	// ── Permission and question state ──────────────────────────────────
+	// Lives outside chat slots and accepts sessions not yet in membership
+	// (a new child's first question). Never allocate a slot here:
+	// resolutions are broadcast to every client, and a slot per unrelated
+	// session would evict cached transcripts from the LRU.
+	switch (event.type) {
+		case "permission_request":
+			handlePermissionRequest(event, wsSend);
+			triggerNotifications(event);
+			return;
+		case "permission_resolved":
+			handlePermissionResolved(event);
+			return;
+		case "ask_user":
+			handleAskUser(event, event.sessionId);
+			triggerNotifications(event);
+			return;
+		case "ask_user_resolved":
+			handleAskUserResolved(event);
+			return;
+		case "ask_user_error":
+			handleAskUserError(event);
+			return;
+	}
+
 	// ── Unknown-session guard ──────────────────────────────────────────
-	if (!sessionState.sessions.has(event.sessionId)) {
+	if (
+		!sessionState.sessions.has(event.sessionId) &&
+		event.sessionId !== sessionState.currentId
+	) {
 		log.debug(
 			"routePerSession: unknown sessionId %s for event %s",
 			event.sessionId,
@@ -308,23 +336,6 @@ function routePerSession(event: PerSessionEvent): void {
 			break;
 		case "message_removed":
 			handleMessageRemoved(activity, messages, event);
-			break;
-		case "permission_request":
-			handlePermissionRequest(event, wsSend);
-			triggerNotifications(event);
-			break;
-		case "permission_resolved":
-			handlePermissionResolved(event);
-			break;
-		case "ask_user":
-			handleAskUser(event, event.sessionId);
-			triggerNotifications(event);
-			break;
-		case "ask_user_resolved":
-			handleAskUserResolved(event);
-			break;
-		case "ask_user_error":
-			handleAskUserError(event);
 			break;
 		case "session_switched":
 			// Handled in handleMessage — session_switched requires global
@@ -724,25 +735,27 @@ export function handleMessage(msg: RelayMessage): void {
 	switch (msg.type) {
 		// ─── Sessions ────────────────────────────────────────────────────
 		case "session_list": {
+			const rootIds = new Set(
+				sessionState.rootSessions.map((session) => session.id),
+			);
 			handleSessionList(msg);
-			// Reconcile notification reducer with server-side question counts.
-			// session_list messages include pendingQuestionCount per session.
-			const sessions = msg.sessions;
-			if (Array.isArray(sessions)) {
-				const counts = new Map<
-					string,
-					{ questions: number; permissions: number }
-				>();
-				for (const s of sessions) {
-					if (s.pendingQuestionCount && s.pendingQuestionCount > 0) {
-						counts.set(s.id, {
-							questions: s.pendingQuestionCount,
-							permissions: 0,
-						});
-					}
-				}
-				dispatch({ type: "reconcile", counts });
+			if (msg.roots === false || msg.search) break;
+			const counts = new Map<
+				string,
+				{ questions: number; permissions: number }
+			>();
+			for (const session of sessionState.rootSessions) {
+				rootIds.add(session.id);
+				counts.set(session.id, {
+					questions: session.pendingQuestionCount ?? 0,
+					permissions: session.pendingPermissionCount ?? 0,
+				});
 			}
+			dispatch({ type: "reconcile", counts, sessionIds: rootIds });
+			break;
+		}
+		case "session_family": {
+			handleSessionFamily(msg);
 			break;
 		}
 		case "session_forked": {
@@ -759,10 +772,14 @@ export function handleMessage(msg: RelayMessage): void {
 				clearSessionChatState(deletedId);
 				// Remove from session map
 				sessionState.sessions.delete(deletedId);
+				if (sessionState.searchResults)
+					sessionState.searchResults = sessionState.searchResults.filter(
+						(session) => session.id !== deletedId,
+					);
 				sessionState.rootSessions = sessionState.rootSessions.filter(
 					(s) => s.id !== deletedId,
 				);
-				sessionState.allSessions = sessionState.allSessions.filter(
+				sessionState.familySessions = sessionState.familySessions.filter(
 					(s) => s.id !== deletedId,
 				);
 			}
@@ -795,7 +812,6 @@ export function handleMessage(msg: RelayMessage): void {
 			activateSessionChatState(msg.id);
 			updateContextPercent(0);
 			clearTodoState();
-			clearSessionLocal(previousSessionId);
 			dispatch({ type: "session_viewed", sessionId: msg.id });
 
 			if (msg.events) {

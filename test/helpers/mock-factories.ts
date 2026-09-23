@@ -204,20 +204,13 @@ function createMockSessionMgr(): HandlerDeps["sessionMgr"] {
 			.mockResolvedValue([
 				{ id: "s1", title: "Session 1", updatedAt: 0, messageCount: 0 },
 			]),
-		sendDualSessionLists: vi.fn().mockImplementation(async (send) => {
+		sendSessionLists: vi.fn().mockImplementation(async (send) => {
 			send({
 				type: "session_list",
 				sessions: [
 					{ id: "s1", title: "Session 1", updatedAt: 0, messageCount: 0 },
 				],
 				roots: true,
-			});
-			send({
-				type: "session_list",
-				sessions: [
-					{ id: "s1", title: "Session 1", updatedAt: 0, messageCount: 0 },
-				],
-				roots: false,
 			});
 		}),
 		searchSessions: vi.fn().mockResolvedValue([]),
@@ -377,6 +370,11 @@ export function createMockClientInitDeps(
 ): ClientInitDeps {
 	const sessionService =
 		createMockSessionMgr() as unknown as ClientInitDeps["sessionService"];
+	sessionService.getSessionFamily = vi.fn(async (sessionId) => ({
+		type: "session_family" as const,
+		rootId: sessionId,
+		sessions: [],
+	}));
 	sessionService.resolveSessionHistory = vi.fn(async (sessionId) => ({
 		kind: "rest-history" as const,
 		history: await sessionService.loadPreRenderedHistory(sessionId),
@@ -756,7 +754,7 @@ export function makeMockSessionManagerShape(
 		listSessions: vi.fn(async () => [
 			{ id: "s1", title: "Session 1", updatedAt: 0, messageCount: 0 },
 		]),
-		sendDualSessionLists: vi.fn(async (send) => {
+		sendSessionLists: vi.fn(async (send) => {
 			send({
 				type: "session_list",
 				sessions: [
@@ -795,6 +793,13 @@ export function makeMockSessionManagerService(
 ): SessionManagerService {
 	return {
 		initialize: vi.fn(() => Effect.succeed("s1")),
+		getSessionFamily: vi.fn((sessionId: string) =>
+			Effect.succeed({
+				type: "session_family" as const,
+				rootId: sessionId,
+				sessions: [],
+			}),
+		),
 		getDefaultSessionId: vi.fn(() => Effect.succeed("s1")),
 		getLastKnownSessionCount: vi.fn(() => Effect.succeed(1)),
 		listSessions: vi.fn(() =>
@@ -819,7 +824,7 @@ export function makeMockSessionManagerService(
 		decrementPendingQuestionCount: vi.fn(() => Effect.void),
 		setPendingQuestionCounts: vi.fn(() => Effect.void),
 		setForkEntry: vi.fn(() => Effect.void),
-		sendDualSessionLists: vi.fn((send) =>
+		sendSessionLists: vi.fn((send) =>
 			Effect.sync(() => {
 				send({
 					type: "session_list",
@@ -832,18 +837,6 @@ export function makeMockSessionManagerService(
 						},
 					],
 					roots: true,
-				});
-				send({
-					type: "session_list",
-					sessions: [
-						{
-							id: "s1",
-							title: "Session 1",
-							updatedAt: 0,
-							messageCount: 0,
-						},
-					],
-					roots: false,
 				});
 			}),
 		),

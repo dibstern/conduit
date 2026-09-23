@@ -76,5 +76,12 @@
 		"renamedTo": "group-hover:pr-[3em]",
 		"reason": "The 3em tail exists so the hover marquee does not run the title's end into its own start on the loop. Unconditionally it also shoved the pin and fork glyphs 36px clear of a short title, which the design puts snug against it, so the padding now applies only while the marquee is actually running."
 	},
-	"test/e2e/specs/notification-reducer-indicators.spec.ts :: bg-brand-b,bg-transparent,border-brand-b,span.border-brand-b.bg-transparent": "Not a call site: these were Playwright locators for the indicator dots that conduit-test-vik1.2 deleted. The spec now locates .session-item-status, the status word that replaced them."
+	"test/e2e/specs/notification-reducer-indicators.spec.ts :: bg-brand-b,bg-transparent,border-brand-b,span.border-brand-b.bg-transparent": "Not a call site: these were Playwright locators for the indicator dots that conduit-test-vik1.2 deleted. The spec now locates .session-item-status, the status word that replaced them.",
+	"src/lib/frontend/components/session/SessionItem.svelte :: sr-only": "The fork badge's screen-reader label went with the badge itself. The sidebar lists root sessions only now, so no row has a parentID and the badge could never render.",
+	"test/unit/effect/session-manager-service.test.ts :: all": "Not a class. The word came from a test name string for the removed roots:false background push; the checker matched it as a token.",
+	"test/unit/effect/session-manager-service.test.ts :: background": "Not a class. The word came from a test name string for the removed roots:false background push; the checker matched it as a token.",
+	"test/unit/effect/session-manager-service.test.ts :: failing": "Not a class. The word came from a test name string for the removed roots:false background push; the checker matched it as a token.",
+	"test/unit/effect/session-manager-service.test.ts :: failures": "Not a class. The word came from a test name string for the removed roots:false background push; the checker matched it as a token.",
+	"test/unit/effect/session-manager-service.test.ts :: immediately": "Not a class. The word came from a test name string for the removed roots:false background push; the checker matched it as a token.",
+	"test/unit/effect/session-manager-service.test.ts :: logs": "Not a class. The word came from a test name string for the removed roots:false background push; the checker matched it as a token."
 }
