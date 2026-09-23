@@ -6,7 +6,7 @@
 <script lang="ts">
 	import { untrack } from "svelte";
 	import { interruptStream, disposeRuntime } from "../../transport/runtime.js";
-	import { getAgentsRpc, getCommandsRpc, getFileTreeRpc, getModelsRpc, getProjectsRpc, listDaemonSessionsRpc, listPtysRpc, listSessionsRpc } from "../../transport/ws-rpc-client.js";
+	import { getAgentsRpc, getCommandsRpc, getFileTreeRpc, getModelsRpc, getProjectsRpc, listPtysRpc, listSessionsRpc } from "../../transport/ws-rpc-client.js";
 	import Header from "./Header.svelte";
 	import SessionBar from "./SessionBar.svelte";
 	import Sidebar from "./Sidebar.svelte";
@@ -51,7 +51,7 @@
 	import { getCurrentSessionId, slugState } from "../../stores/router.svelte.js";
 	import { clearMessages } from "../../stores/chat.svelte.js";
 	import { applyPtyListResponse, terminalState, destroyAll } from "../../stores/terminal.svelte.js";
-	import { applyListDaemonSessionsResponse, applyListSessionsResponse, clearSessionState, DAEMON_SESSION_PAGE_SIZE, switchToSession } from "../../stores/session.svelte.js";
+	import { applyListSessionsResponse, clearSessionState, loadDaemonSessions, switchToSession } from "../../stores/session.svelte.js";
 	import { clearAllPermissions } from "../../stores/permissions.svelte.js";
 	import { applyGetAgentsResponse, applyGetCommandsResponse, applyGetModelsResponse, clearDiscoveryState, discoveryState } from "../../stores/discovery.svelte.js";
 	import { todoState, clearTodoState } from "../../stores/todo.svelte.js";
@@ -345,12 +345,7 @@
 				// Request initial state from server
 				// First page only. The cross-project read is keyset-paged now; the
 				// sidebar's scroll sentinel asks for the rest.
-				void listDaemonSessionsRpc({
-					projectSlug: slug,
-					limit: DAEMON_SESSION_PAGE_SIZE,
-				})
-					.then(applyListDaemonSessionsResponse)
-					.catch(() => undefined);
+				void loadDaemonSessions();
 				void listSessionsRpc({ projectSlug: slug, roots: true })
 					.then(applyListSessionsResponse)
 					.catch(() => {

@@ -83,5 +83,6 @@
 	"test/unit/effect/session-manager-service.test.ts :: failing": "Not a class. The word came from a test name string for the removed roots:false background push; the checker matched it as a token.",
 	"test/unit/effect/session-manager-service.test.ts :: failures": "Not a class. The word came from a test name string for the removed roots:false background push; the checker matched it as a token.",
 	"test/unit/effect/session-manager-service.test.ts :: immediately": "Not a class. The word came from a test name string for the removed roots:false background push; the checker matched it as a token.",
-	"test/unit/effect/session-manager-service.test.ts :: logs": "Not a class. The word came from a test name string for the removed roots:false background push; the checker matched it as a token."
+	"test/unit/effect/session-manager-service.test.ts :: logs": "Not a class. The word came from a test name string for the removed roots:false background push; the checker matched it as a token.",
+	"test/unit/components/chat-layout-ws.test.ts :: daemon,sessions": "Not class tokens: the words of a \"Failed to load daemon sessions\" toast assertion. The daemon list's failure handling moved from ChatLayout into the session store's loadDaemonSessions, so the assertion moved to the store's tests."
 }

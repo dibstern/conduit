@@ -344,6 +344,7 @@ export interface ListDaemonSessionsRpcInput {
 		readonly updatedAt: number;
 		readonly id: string;
 	};
+	readonly scope?: string;
 }
 
 export interface LoadMoreHistoryRpcInput {

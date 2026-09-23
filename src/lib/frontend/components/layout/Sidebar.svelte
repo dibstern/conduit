@@ -344,7 +344,7 @@
 		>
 			<!-- Session list -->
 			<div id="session-list-container" class="flex-1 flex flex-col overflow-hidden">
-				<SessionList />
+				<SessionList onaddproject={() => { projectsOpen = true; }} />
 			</div>
 		</div>
 		{:else}

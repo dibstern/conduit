@@ -505,6 +505,62 @@ describe("listDaemonSessions", () => {
 		}).pipe(Effect.provide(registry));
 	});
 
+	it.effect("scopes the read to one project, with search and paging", () => {
+		const root = makeTemporaryRoot();
+		const projectA = join(root, "project-a");
+		const projectB = join(root, "project-b");
+		mkdirSync(projectA);
+		mkdirSync(projectB);
+		makeProjectStore(projectA, [
+			{ id: "a-needle", title: "Needle", updatedAt: 300 },
+			{ id: "a-other", title: "Other", updatedAt: 100 },
+		]);
+		makeProjectStore(projectB, [
+			{ id: "b-needle-new", title: "Needle new", updatedAt: 400 },
+			{ id: "b-other", title: "Other", updatedAt: 250 },
+			{ id: "b-needle-old", title: "needle old", updatedAt: 200 },
+		]);
+		const registry = makeProjectRegistryLive([
+			{ slug: "project-a", title: "project-a", directory: projectA },
+			{ slug: "project-b", title: "project-b", directory: projectB },
+		]);
+
+		return Effect.gen(function* () {
+			const firstPage = yield* listDaemonSessions({
+				scope: "project-b",
+				limit: 2,
+			});
+			expect(firstPage.sessions.map((session) => session.id)).toEqual([
+				"b-needle-new",
+				"b-other",
+			]);
+			expect(firstPage.hasMore).toBe(true);
+			expect(firstPage.availability.map((entry) => entry.projectSlug)).toEqual([
+				"project-b",
+			]);
+
+			const secondPage = yield* listDaemonSessions({
+				scope: "project-b",
+				limit: 2,
+				...(firstPage.nextCursor === null
+					? {}
+					: { cursor: firstPage.nextCursor }),
+			});
+			expect(secondPage.sessions.map((session) => session.id)).toEqual([
+				"b-needle-old",
+			]);
+			expect(secondPage.hasMore).toBe(false);
+
+			const scopedSearch = yield* listDaemonSessions({
+				scope: "project-a",
+				search: "needle",
+			});
+			expect(scopedSearch.sessions.map((session) => session.id)).toEqual([
+				"a-needle",
+			]);
+		}).pipe(Effect.provide(registry));
+	});
+
 	it.effect("treats percent and underscore in search as literals", () => {
 		const root = makeTemporaryRoot();
 		const projectA = join(root, "project-a");

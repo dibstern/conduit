@@ -249,6 +249,9 @@ export interface DaemonSessionQueryOptions {
 	readonly roots?: boolean;
 	readonly search?: string;
 	readonly cursor?: DaemonSessionCursor;
+	/** Read one project only. Filtering the merged page instead would leave a
+	 *  scoped list with a handful of rows per page, and paging would stall. */
+	readonly scope?: string;
 }
 
 export interface DaemonSessionCursor {

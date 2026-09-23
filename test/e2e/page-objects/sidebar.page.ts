@@ -8,7 +8,6 @@ export class SidebarPage {
 	readonly resumeSessionBtn: Locator;
 	readonly fileBrowserBtn: Locator;
 	readonly terminalBtn: Locator;
-	readonly searchBtn: Locator;
 	readonly searchInput: Locator;
 	readonly searchContainer: Locator;
 	readonly fileTree: Locator;
@@ -23,7 +22,6 @@ export class SidebarPage {
 		this.resumeSessionBtn = page.locator("#resume-session-btn");
 		this.fileBrowserBtn = page.locator("#file-browser-btn");
 		this.terminalBtn = page.locator("#terminal-sidebar-btn");
-		this.searchBtn = page.locator("#search-session-btn");
 		this.searchInput = page.locator("#session-search-input");
 		this.searchContainer = page.locator("#session-search");
 		this.fileTree = page.locator("#file-tree");
@@ -47,12 +45,7 @@ export class SidebarPage {
 		await this.newSessionBtn.click();
 	}
 
-	async toggleSearch(): Promise<void> {
-		await this.searchBtn.click();
-	}
-
 	async searchSessions(query: string): Promise<void> {
-		await this.searchBtn.click();
 		await this.searchInput.fill(query);
 	}
 

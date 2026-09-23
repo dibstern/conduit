@@ -1,5 +1,7 @@
 import type { Meta, StoryObj } from "@storybook/svelte-vite";
 import { expect, userEvent, within } from "storybook/test";
+import { projectState } from "../../stores/project.svelte.js";
+import { routerState } from "../../stores/router.svelte.js";
 import {
 	requestNewSession,
 	resetSessionCreation,
@@ -21,6 +23,14 @@ function resetSessionState() {
 	sessionState.daemonHasMore = false;
 	sessionState.searchCursor = null;
 	sessionState.searchHasMore = false;
+	// Storybook shares module state across stories, and the scope lives in the
+	// router, so a scoped story would otherwise scope every story after it.
+	routerState.path = "/p/conduit/";
+	routerState.search = "";
+	projectState.projects = [
+		{ slug: "conduit", title: "conduit", directory: "/src/conduit" },
+		{ slug: "acme", title: "Acme", directory: "/src/acme" },
+	];
 }
 
 const meta = {
@@ -69,23 +79,52 @@ export const Loading: Story = {
 	},
 };
 
-// Searching (above) seeds the query but never opens the field -- `searchVisible`
-// is internal and only the toolbar button flips it, so the search box itself had
-// no baseline at all before conduit-test-de3.35.7.
-export const SearchOpen: Story = {
+// `/` is the way into the always-visible field from anywhere outside a text
+// box. This is the assertion: the field has no other focus path to regress.
+export const SearchFocused: Story = {
 	beforeEach: () => {
 		sessionState.rootSessions = [...mockSessionsAllGroups];
 		sessionState.familySessions = [...mockSessionsAllGroups];
 	},
 	play: async ({ canvasElement }) => {
 		const canvas = within(canvasElement);
-		await userEvent.click(
-			canvas.getByRole("button", { name: "Search sessions" }),
+		await userEvent.keyboard("/");
+		await expect(
+			canvas.getByPlaceholderText("Search sessions..."),
+		).toHaveFocus();
+	},
+};
+
+// The mock sessions are all this project's, so scoping to another project
+// shows the scoped empty state and the chip with its clear button.
+export const Scoped: Story = {
+	beforeEach: () => {
+		sessionState.rootSessions = [...mockSessionsAllGroups];
+		sessionState.familySessions = [...mockSessionsAllGroups];
+		routerState.search = "?p=acme";
+	},
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		await expect(canvas.getByTestId("session-scope-chip")).toHaveTextContent(
+			"Acme",
 		);
-		const search = await canvas.findByPlaceholderText("Search sessions...");
-		// Opening search must land the caret in the field. This is the assertion,
-		// not a setup step: the focus used to come from a `use:focusOnMount`
-		// action, and an action cannot cross a component boundary.
-		await expect(search).toHaveFocus();
+		await expect(canvas.getByText("No sessions in Acme")).toBeVisible();
+	},
+};
+
+export const ScopePickerOpen: Story = {
+	beforeEach: () => {
+		sessionState.rootSessions = [...mockSessionsAllGroups];
+		sessionState.familySessions = [...mockSessionsAllGroups];
+	},
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		await userEvent.click(canvas.getByTestId("session-scope-chip"));
+		// The menu is portalled to the body, outside the story's canvas.
+		const menu = within(canvasElement.ownerDocument.body);
+		await expect(
+			await menu.findByRole("menuitemradio", { name: /All projects/ }),
+		).toHaveAttribute("aria-checked", "true");
+		await expect(menu.getByText("project:acme")).toBeVisible();
 	},
 };

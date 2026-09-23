@@ -147,8 +147,7 @@ vi.mock("../../../src/lib/frontend/stores/session.svelte.js", () => ({
 		hasMore: false,
 	},
 	clearSessionState: vi.fn(),
-	applyListDaemonSessionsResponse: vi.fn(),
-	DAEMON_SESSION_PAGE_SIZE: 30,
+	loadDaemonSessions: vi.fn(async () => {}),
 	applyListSessionsResponse: vi.fn(),
 	switchToSession: vi.fn(),
 	sessionCreation: { value: { state: "idle" } },
@@ -226,11 +225,6 @@ vi.mock("../../../src/lib/frontend/transport/runtime.js", () => ({
 }));
 
 vi.mock("../../../src/lib/frontend/transport/ws-rpc-client.js", () => ({
-	listDaemonSessionsRpc: vi.fn(async () => ({
-		projectSlug: "test-project",
-		sessions: [],
-		availability: [],
-	})),
 	listSessionsRpc: vi.fn(async (input: { roots?: boolean }) => ({
 		projectSlug: "test-project",
 		roots: input.roots === true,
@@ -269,8 +263,8 @@ import {
 	syncSlugState,
 } from "../../../src/lib/frontend/stores/router.svelte.js";
 import {
-	applyListDaemonSessionsResponse,
 	applyListSessionsResponse,
+	loadDaemonSessions,
 } from "../../../src/lib/frontend/stores/session.svelte.js";
 import { showToast } from "../../../src/lib/frontend/stores/ui.svelte.js";
 import {
@@ -278,7 +272,6 @@ import {
 	disconnect,
 	onConnect,
 } from "../../../src/lib/frontend/stores/ws.svelte.js";
-import { listDaemonSessionsRpc } from "../../../src/lib/frontend/transport/ws-rpc-client.js";
 
 // ─── Tests ──────────────────────────────────────────────────────────────────
 
@@ -334,10 +327,7 @@ describe("ChatLayout WS lifecycle", () => {
 		});
 	});
 
-	it("keeps per-project session lists when the daemon-wide list fails", async () => {
-		vi.mocked(listDaemonSessionsRpc).mockRejectedValueOnce(
-			new Error("not supported in standalone mode"),
-		);
+	it("loads both the daemon-wide and the per-project session lists on connect", async () => {
 		render(ChatLayout);
 
 		wsLifecycleHarness.onConnectCallbacks[0]?.();
@@ -345,11 +335,7 @@ describe("ChatLayout WS lifecycle", () => {
 			expect(applyListSessionsResponse).toHaveBeenCalledTimes(1);
 		});
 
-		expect(applyListDaemonSessionsResponse).not.toHaveBeenCalled();
-		expect(showToast).not.toHaveBeenCalledWith(
-			"Failed to load daemon sessions",
-			expect.anything(),
-		);
+		expect(loadDaemonSessions).toHaveBeenCalledTimes(1);
 	});
 
 	// This is the regression test for the untrack() fix. Without untrack(),

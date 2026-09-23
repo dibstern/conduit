@@ -1,8 +1,9 @@
 <!-- ─── SessionList ─────────────────────────────────────────────────────────── -->
-<!-- Sidebar session list with search, status grouping, and new session button. -->
+<!-- Sidebar session list with scope and search, status grouping, and new session button. -->
 <!-- Reads from sessionState store and renders SessionItem components. -->
 
 <script lang="ts">
+	import { untrack } from "svelte";
 	import type { AttentionGroups, SessionInfo } from "../../types.js";
 	import {
 		sessionState,
@@ -14,8 +15,10 @@
 		sendNewSession,
 		sessionCreation,
 		clearSessionSearch,
+		loadDaemonSessions,
 		searchSessions,
 	} from "../../stores/session.svelte.js";
+	import { getSessionScope } from "../../stores/session-scope.js";
 	import {
 		getCurrentSlug,
 		getSessionHref,
@@ -35,8 +38,10 @@
 	import Icon from "../ui/Icon.svelte";
 	import BlockGrid from "../ui/BlockGrid.svelte";
 	import Button from "../ui/Button.svelte";
-	import TextInput from "../ui/TextInput.svelte";
 	import TextButton from "../ui/TextButton.svelte";
+	import SessionSearchField from "./SessionSearchField.svelte";
+
+	let { onaddproject }: { onaddproject?: (() => void) | undefined } = $props();
 
 	// The box only; ui/Button `toolbar` owns the colours and the hover fill.
 	// `size="content"` emits no geometry precisely so a call site can supply
@@ -45,7 +50,6 @@
 
 	// ─── Local state ────────────────────────────────────────────────────────────
 
-	let searchVisible = $state(false);
 	let localSearchValue = $state("");
 	let debounceTimer: ReturnType<typeof setTimeout> | undefined = $state(
 		undefined,
@@ -74,9 +78,12 @@
 	const groups: AttentionGroups = $derived(getAttentionGroups());
 	const isEmpty = $derived(filtered.length === 0);
 
-	const emptyMessage = $derived(
-		sessionState.searchQuery ? "No matching sessions" : "No sessions yet",
-	);
+	const scope = $derived(getSessionScope());
+	const emptyMessage = $derived.by(() => {
+		if (sessionState.searchQuery) return "No matching sessions";
+		if (scope !== null) return `No sessions in ${projectDisplayName(scope)}`;
+		return "No sessions yet";
+	});
 
 	// A trailing "+" whenever another page exists, so the number is always "at
 	// least this many" and never claims to be the size of the whole match set.
@@ -120,6 +127,18 @@
 		if (pruned.size !== selectedForDeletion.size) {
 			selectedForDeletion = pruned;
 		}
+	});
+
+	// The server scopes its page, so a new scope needs a fresh first page, and a
+	// live search its matches re-fetched. The initial scope is already loaded by
+	// ChatLayout on connect, hence skipping the first run.
+	let loadedScope = untrack(() => scope);
+	$effect(() => {
+		if (scope === loadedScope) return;
+		loadedScope = scope;
+		void loadDaemonSessions();
+		const query = untrack(() => localSearchValue);
+		if (query.trim()) requestRemoteSearch(query);
 	});
 
 	// Exit cleanup mode when session list becomes empty
@@ -181,23 +200,15 @@
 		closeMobileSidebar();
 	}
 
-	function closeSearch() {
-		searchVisible = false;
+	function clearSearch() {
+		if (debounceTimer !== undefined) clearTimeout(debounceTimer);
 		localSearchValue = "";
 		setSearchQuery("");
 		clearSessionSearch();
 	}
 
-	function handleToggleSearch() {
-		searchVisible = !searchVisible;
-		if (!searchVisible) {
-			closeSearch();
-		}
-	}
-
-	function handleSearchInput(e: Event) {
-		const input = e.target as HTMLInputElement;
-		localSearchValue = input.value;
+	function handleSearchInput(text: string) {
+		localSearchValue = text;
 
 		// Apply local filter immediately
 		setSearchQuery(localSearchValue);
@@ -208,13 +219,6 @@
 			debounceTimer = setTimeout(() => {
 				requestRemoteSearch(localSearchValue);
 			}, 300);
-		}
-	}
-
-	function handleSearchKeydown(e: KeyboardEvent) {
-		if (e.key === "Escape") {
-			e.preventDefault();
-			closeSearch();
 		}
 	}
 
@@ -287,9 +291,7 @@
 	function handleEnterCleanup() {
 		cleanupMode = true;
 		selectedForDeletion = new Set();
-		if (searchVisible) {
-			closeSearch();
-		}
+		if (localSearchValue) clearSearch();
 	}
 
 	function handleExitCleanup() {
@@ -433,19 +435,6 @@
 						{/if}
 					</Button>
 					<Button
-						id="search-session-btn"
-						variant="toolbar"
-						size="content"
-						class={TOOLBAR_ICON_BOX}
-						iconOnly
-						iconSize={14}
-						icon="search"
-						title="Search sessions"
-						ariaLabel="Search sessions"
-						onclick={handleToggleSearch}
-					/>
-
-					<Button
 						variant="toolbar"
 						size="content"
 						class={TOOLBAR_ICON_BOX}
@@ -461,23 +450,13 @@
 		</div>
 	{/if}
 
-	{#if searchVisible}
-		<div class="shrink-0 px-2.5 py-1 pb-1.5">
-			<!-- `autofocus` replaces a hand-rolled one-line `use:focusOnMount`
-			     action: an action is a DOM directive and cannot cross a component
-			     boundary, and the action did nothing `autofocus` does not. -->
-			<TextInput
-				id="session-search-input"
-				aria-label="Search sessions"
-				size="sm"
-				class="font-brand"
-				placeholder="Search sessions..."
-				autocomplete="off"
-				spellcheck={false}
+	{#if !cleanupMode}
+		<div id="session-search" class="shrink-0 px-2.5 py-1 pb-1.5">
+			<SessionSearchField
 				value={localSearchValue}
 				oninput={handleSearchInput}
-				onkeydown={handleSearchKeydown}
-				autofocus
+				onescape={clearSearch}
+				{onaddproject}
 			/>
 		</div>
 	{/if}
@@ -490,7 +469,7 @@
 			data-testid="session-search-summary"
 		>
 			<span aria-live="polite">{searchSummary}</span>
-			<TextButton onclick={closeSearch}>Clear</TextButton>
+			<TextButton onclick={clearSearch}>Clear</TextButton>
 		</div>
 	{/if}
 

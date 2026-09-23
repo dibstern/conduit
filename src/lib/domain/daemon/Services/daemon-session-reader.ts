@@ -140,7 +140,10 @@ export const listDaemonSessions = (
 	options: DaemonSessionQueryOptions = {},
 ): Effect.Effect<DaemonSessionQueryResult, never, ProjectRegistryTag> =>
 	Effect.gen(function* () {
-		const projects = yield* allProjects;
+		const projects = (yield* allProjects).filter(
+			(project) =>
+				options.scope === undefined || project.slug === options.scope,
+		);
 		const limit =
 			options.limit === undefined
 				? undefined

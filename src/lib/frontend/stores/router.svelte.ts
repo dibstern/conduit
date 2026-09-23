@@ -20,13 +20,36 @@ const MAX_TRANSITION_LOG = 50;
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
-/** Strip query string and hash from a path, returning only the pathname. */
-function stripQuery(path: string): string {
-	const qIdx = path.indexOf("?");
-	const hIdx = path.indexOf("#");
-	if (qIdx === -1 && hIdx === -1) return path;
-	const end = qIdx === -1 ? hIdx : hIdx === -1 ? qIdx : Math.min(qIdx, hIdx);
-	return path.slice(0, end);
+/** Split a path into its pathname and raw search string, discarding the hash. */
+function splitPath(path: string): { pathname: string; search: string } {
+	const hashIndex = path.indexOf("#");
+	const pathWithoutHash = hashIndex === -1 ? path : path.slice(0, hashIndex);
+	const queryIndex = pathWithoutHash.indexOf("?");
+	if (queryIndex === -1) {
+		return { pathname: pathWithoutHash, search: "" };
+	}
+
+	const pathname = pathWithoutHash.slice(0, queryIndex);
+	const query = pathWithoutHash.slice(queryIndex + 1);
+	return { pathname, search: query ? `?${query}` : "" };
+}
+
+/** The sidebar's project scope (`?p=<slug>`). Read and written through
+ *  stores/session-scope.ts; declared here because navigation has to carry it. */
+export const SCOPE_PARAM = "p";
+
+/**
+ * Keeps the scope across a move to another page that names no query of its
+ * own. Every session switch, new session and project hop navigates to a bare
+ * path, and on desktop the list stays on screen through all of them: dropping
+ * the scope there would silently widen the list the user just narrowed. A
+ * same-page navigation is taken literally, which is how clearing the scope
+ * works.
+ */
+function carryScope(pathname: string, search: string): string {
+	if (search || pathname === routerState.path) return search;
+	const scope = new URLSearchParams(routerState.search).get(SCOPE_PARAM);
+	return scope ? `?${new URLSearchParams({ [SCOPE_PARAM]: scope })}` : "";
 }
 
 /** Extract slug from a pathname (e.g. "/p/my-project/s/abc" → "my-project"). */
@@ -75,6 +98,7 @@ export function clearTransitionLog(): void {
 
 export const routerState = $state({
 	path: typeof window !== "undefined" ? window.location.pathname : "/",
+	search: typeof window !== "undefined" ? window.location.search : "",
 });
 
 /**
@@ -145,6 +169,11 @@ export function getCurrentSessionId(): string | null {
 	return route.page === "chat" ? (route.sessionId ?? null) : null;
 }
 
+/** Get the current URL search parameters. */
+export function getCurrentSearchParams(): URLSearchParams {
+	return new URLSearchParams(routerState.search);
+}
+
 /**
  * Get the href for a session link (for use in `<a>` elements).
  * Returns `/p/:slug/s/:sessionId` or null if not on a chat route.
@@ -170,13 +199,16 @@ function applyRoute(
 	path: string,
 	historyMethod: "pushState" | "replaceState",
 ): void {
-	const pathname = stripQuery(path);
-	if (pathname === routerState.path) return;
-	const from = routerState.path;
-	window.history[historyMethod](null, "", path);
+	const { pathname, search: requestedSearch } = splitPath(path);
+	const search = carryScope(pathname, requestedSearch);
+	if (pathname === routerState.path && search === routerState.search) return;
+	const from = routerState.path + routerState.search;
+	const to = pathname + search;
+	window.history[historyMethod](null, "", to);
 	routerState.path = pathname;
+	routerState.search = search;
 	syncSlugState(pathname);
-	recordTransition(from, pathname);
+	recordTransition(from, to);
 }
 
 /** Navigate to a new path using pushState. */
@@ -194,6 +226,7 @@ export function replaceRoute(path: string): void {
 if (typeof window !== "undefined") {
 	window.addEventListener("popstate", () => {
 		routerState.path = window.location.pathname;
+		routerState.search = window.location.search;
 		syncSlugState(window.location.pathname);
 	});
 }

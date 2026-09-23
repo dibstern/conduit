@@ -24,6 +24,7 @@ import {
 	clearSessionSearch,
 	DAEMON_SESSION_PAGE_SIZE,
 	getFilteredSessions,
+	loadDaemonSessions,
 	loadMoreDaemonSessions,
 	loadMoreSearchResults,
 	searchSessions,
@@ -86,6 +87,7 @@ beforeEach(() => {
 	sessionState.searchQuery = "";
 	clearSessionSearch();
 	routerState.path = "/p/project-a";
+	routerState.search = "";
 	syncSlugState(routerState.path);
 });
 
@@ -280,5 +282,53 @@ describe("cross-project search", () => {
 		sessionState.rootSessions = [];
 
 		expect(getFilteredSessions().map((s) => s.id)).toEqual(["s1"]);
+	});
+});
+
+describe("project scope", () => {
+	const local = { id: "local", title: "Local session" };
+
+	beforeEach(() => {
+		routerState.search = "?p=project-b";
+		sessionState.rootSessions = [local];
+		sessionState.sessions.set(local.id, local);
+	});
+
+	it("asks the daemon for the scoped project only, from the first page", async () => {
+		rpc.mockResolvedValueOnce(
+			page([1, 3], { hasMore: false, projectSlug: "project-b" }),
+		);
+
+		await loadDaemonSessions();
+
+		expect(rpc).toHaveBeenCalledWith({
+			projectSlug: "project-a",
+			limit: DAEMON_SESSION_PAGE_SIZE,
+			scope: "project-b",
+		});
+		// The local root belongs to project-a, so the scope hides it too.
+		expect(getFilteredSessions().map((s) => s.id)).toEqual(["s1", "s3"]);
+	});
+
+	it("scopes the search as well", async () => {
+		rpc.mockResolvedValueOnce(
+			page([1], { hasMore: false, projectSlug: "project-b" }),
+		);
+
+		await searchSessions("session", true);
+
+		expect(rpc).toHaveBeenCalledWith(
+			expect.objectContaining({ scope: "project-b" }),
+		);
+		expect(getFilteredSessions().map((s) => s.id)).toEqual(["s1"]);
+	});
+
+	it("keeps the list it has when the first page fails", async () => {
+		routerState.search = "";
+		rpc.mockRejectedValueOnce(new Error("not supported in standalone mode"));
+
+		await loadDaemonSessions();
+
+		expect(getFilteredSessions().map((s) => s.id)).toEqual(["local"]);
 	});
 });

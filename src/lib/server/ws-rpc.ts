@@ -294,6 +294,7 @@ export const WsRpcServerLayer = WsRpcGroup.toLayer({
 				...(request.roots !== undefined ? { roots: request.roots } : {}),
 				...(request.search !== undefined ? { search: request.search } : {}),
 				...(request.cursor !== undefined ? { cursor: request.cursor } : {}),
+				...(request.scope !== undefined ? { scope: request.scope } : {}),
 			});
 			return {
 				projectSlug: request.projectSlug,

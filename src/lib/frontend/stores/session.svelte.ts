@@ -41,6 +41,7 @@ import {
 	getEffectiveInstanceId,
 } from "./discovery.svelte.js";
 import { getCurrentSlug, navigate } from "./router.svelte.js";
+import { getSessionScope } from "./session-scope.js";
 
 // ─── State ──────────────────────────────────────────────────────────────────
 
@@ -258,8 +259,14 @@ function syncSessionMembership(): void {
 
 /** The sidebar and its search show root sessions only. */
 export function getFilteredSessions(): SessionInfo[] {
+	const scope = getSessionScope();
+	const currentSlug = getCurrentSlug();
+	// Local rows carry no projectSlug: they belong to the project this socket
+	// is attached to.
+	const inScope = (session: SessionInfo) =>
+		scope === null || (session.projectSlug ?? currentSlug) === scope;
 	if (sessionState.searchResults !== null) {
-		const searchSlug = getCurrentSlug();
+		const searchSlug = currentSlug;
 		// Root rows carry the subtree rollup, so search hits resolve against
 		// them rather than the membership map, where family rows (individual
 		// state) win.
@@ -267,7 +274,7 @@ export function getFilteredSessions(): SessionInfo[] {
 			sessionState.rootSessions.map((session) => [session.id, session]),
 		);
 		return sessionState.searchResults.flatMap((session) => {
-			if (session.parentID) return [];
+			if (session.parentID || !inScope(session)) return [];
 			if (session.projectSlug != null && session.projectSlug !== searchSlug) {
 				return [session];
 			}
@@ -277,7 +284,6 @@ export function getFilteredSessions(): SessionInfo[] {
 	}
 	const localSessions = sessionState.rootSessions;
 	const query = sessionState.searchQuery.toLowerCase().trim();
-	const currentSlug = getCurrentSlug();
 	// Foreign rows stay in while a query is active and get title-filtered with
 	// the rest. The server search they will be replaced by now covers every
 	// project too, so the local filter and the landing results agree -- which is
@@ -288,9 +294,9 @@ export function getFilteredSessions(): SessionInfo[] {
 			session.projectSlug !== currentSlug &&
 			!session.parentID,
 	);
-	const sessions = [...localSessions, ...foreignSessions].sort(
-		(a, b) => getSessionDate(b).getTime() - getSessionDate(a).getTime(),
-	);
+	const sessions = [...localSessions, ...foreignSessions]
+		.filter(inScope)
+		.sort((a, b) => getSessionDate(b).getTime() - getSessionDate(a).getTime());
 	if (!query) return sessions;
 	return sessions.filter((s) => s.title.toLowerCase().includes(query));
 }
@@ -460,6 +466,26 @@ export const DAEMON_SESSION_PAGE_SIZE = 30;
  *  cannot splice another project's page onto the new list. */
 let daemonBrowseToken = 0;
 
+/** Fetches the first cross-project page for the current scope, replacing
+ *  whatever was listed. Run on connect and again whenever the scope changes. */
+export async function loadDaemonSessions(): Promise<void> {
+	const projectSlug = getCurrentSlug();
+	if (!projectSlug) return;
+	daemonBrowseToken += 1;
+	const token = daemonBrowseToken;
+	const scope = getSessionScope();
+	try {
+		const response = await listDaemonSessionsRpc({
+			projectSlug,
+			limit: DAEMON_SESSION_PAGE_SIZE,
+			...(scope === null ? {} : { scope }),
+		});
+		if (token === daemonBrowseToken) applyListDaemonSessionsResponse(response);
+	} catch {
+		// The local project's rows arrive separately; the list stays usable.
+	}
+}
+
 /** Applies a FIRST page: replaces the accumulator rather than appending. */
 export function applyListDaemonSessionsResponse(
 	response: ListDaemonSessionsResponse,
@@ -491,10 +517,12 @@ export async function loadMoreDaemonSessions(): Promise<void> {
 	const token = daemonBrowseToken;
 	sessionState.daemonLoading = true;
 	try {
+		const scope = getSessionScope();
 		const response = await listDaemonSessionsRpc({
 			projectSlug,
 			limit: DAEMON_SESSION_PAGE_SIZE,
 			cursor,
+			...(scope === null ? {} : { scope }),
 		});
 		if (token !== daemonBrowseToken) return;
 		// Dedupe by id. The keyset cursor does not re-emit rows, but a session
@@ -521,7 +549,11 @@ export async function loadMoreDaemonSessions(): Promise<void> {
 /** The query the server is currently answering. Distinct from
  *  sessionState.searchQuery, which is what the user has typed this instant:
  *  the debounce means they disagree, and paging must repeat the committed one. */
-let activeSearch: { query: string; roots: boolean } | null = null;
+let activeSearch: {
+	query: string;
+	roots: boolean;
+	scope: string | null;
+} | null = null;
 let daemonSearchToken = 0;
 
 /** Runs a fresh cross-project title search, replacing any earlier results. */
@@ -535,7 +567,7 @@ export async function searchSessions(
 		return;
 	}
 	daemonSearchToken += 1;
-	activeSearch = { query: trimmed, roots };
+	activeSearch = { query: trimmed, roots, scope: getSessionScope() };
 	sessionState.searchCursor = null;
 	sessionState.searchHasMore = false;
 	// Results are left on screen until the new page lands. Blanking them first
@@ -577,6 +609,7 @@ async function runSearchPage(token: number, replace: boolean): Promise<void> {
 			roots: search.roots,
 			search: search.query,
 			limit: DAEMON_SESSION_PAGE_SIZE,
+			...(search.scope === null ? {} : { scope: search.scope }),
 			...(cursor === null ? {} : { cursor }),
 		});
 		if (token !== daemonSearchToken) return;

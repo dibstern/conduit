@@ -4,21 +4,30 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 // Mock window.history and window.location before importing
 const pushStateSpy = vi.fn();
 const replaceStateSpy = vi.fn();
+let popstateListener: (() => void) | undefined;
+const addEventListenerSpy = vi.fn(
+	(event: string, listener: () => void): void => {
+		if (event === "popstate") {
+			popstateListener = listener;
+		}
+	},
+);
 
 // Set up window mocks
 vi.stubGlobal("window", {
 	...(typeof window !== "undefined" ? window : {}),
-	location: { pathname: "/" } as Location,
+	location: { pathname: "/", search: "" } as Location,
 	history: {
 		pushState: pushStateSpy,
 		replaceState: replaceStateSpy,
 	} as unknown as History,
-	addEventListener: vi.fn(),
+	addEventListener: addEventListenerSpy,
 });
 
-import {
+const {
 	clearTransitionLog,
 	getCurrentRoute,
+	getCurrentSearchParams,
 	getCurrentSessionId,
 	getCurrentSlug,
 	getSessionHref,
@@ -29,13 +38,16 @@ import {
 	routerState,
 	slugState,
 	syncSlugState,
-} from "../../../src/lib/frontend/stores/router.svelte.js";
+} = await import("../../../src/lib/frontend/stores/router.svelte.js");
 
 // ─── Reset state before each test ───────────────────────────────────────────
 
 beforeEach(() => {
 	routerState.path = "/";
+	routerState.search = "";
 	syncSlugState("/");
+	window.location.pathname = "/";
+	window.location.search = "";
 	clearTransitionLog();
 	pushStateSpy.mockClear();
 	replaceStateSpy.mockClear();
@@ -54,6 +66,68 @@ describe("navigate", () => {
 		routerState.path = "/auth";
 		navigate("/auth");
 		expect(pushStateSpy).not.toHaveBeenCalled();
+	});
+
+	it("updates search when the pathname is unchanged", () => {
+		navigate("/");
+		navigate("/?p=acme");
+
+		expect(routerState.path).toBe("/");
+		expect(routerState.search).toBe("?p=acme");
+		expect(pushStateSpy).toHaveBeenCalledTimes(1);
+		expect(pushStateSpy).toHaveBeenCalledWith(null, "", "/?p=acme");
+	});
+
+	it("updates search when navigating between query strings", () => {
+		navigate("/?a=1");
+		navigate("/?b=2");
+
+		expect(routerState.path).toBe("/");
+		expect(routerState.search).toBe("?b=2");
+		expect(pushStateSpy).toHaveBeenCalledTimes(2);
+		expect(pushStateSpy).toHaveBeenLastCalledWith(null, "", "/?b=2");
+	});
+
+	it("does not navigate if path and search are the same", () => {
+		navigate("/?p=acme");
+		navigate("/?p=acme");
+
+		expect(pushStateSpy).toHaveBeenCalledTimes(1);
+	});
+
+	it("carries the scope, and only the scope, to a new page with no query", () => {
+		navigate("/p/acme/?p=other&x=1");
+		navigate("/p/acme/s/123");
+
+		expect(routerState.path).toBe("/p/acme/s/123");
+		expect(routerState.search).toBe("?p=other");
+		expect(pushStateSpy).toHaveBeenLastCalledWith(
+			null,
+			"",
+			"/p/acme/s/123?p=other",
+		);
+	});
+
+	it("takes a same-page navigation literally, so the scope can be cleared", () => {
+		navigate("/p/acme/?p=other");
+		navigate("/p/acme/");
+
+		expect(routerState.search).toBe("");
+	});
+
+	it("lets an explicit query replace the scope", () => {
+		navigate("/?p=other");
+		navigate("/setup?mode=lan");
+
+		expect(routerState.search).toBe("?mode=lan");
+	});
+
+	it("normalizes a bare query and discards the hash", () => {
+		navigate("/auth?#section");
+
+		expect(routerState.path).toBe("/auth");
+		expect(routerState.search).toBe("");
+		expect(pushStateSpy).toHaveBeenCalledWith(null, "", "/auth");
 	});
 
 	it("navigates to slug routes", () => {
@@ -90,6 +164,24 @@ describe("routerState", () => {
 	it("starts at root by default (after reset)", () => {
 		expect(routerState.path).toBe("/");
 	});
+
+	it("has empty search when the URL has no query", () => {
+		expect(routerState.search).toBe("");
+	});
+});
+
+describe("popstate", () => {
+	it("restores pathname and search from window.location", () => {
+		window.location.pathname = "/p/acme/s/123";
+		window.location.search = "?p=other";
+
+		expect(popstateListener).toBeTypeOf("function");
+		popstateListener?.();
+
+		expect(routerState.path).toBe("/p/acme/s/123");
+		expect(routerState.search).toBe("?p=other");
+		expect(slugState.current).toBe("acme");
+	});
 });
 
 // ─── getCurrentRoute / getCurrentSlug ─────────────────────────────────────
@@ -123,6 +215,21 @@ describe("getCurrentRoute", () => {
 	it("falls back to dashboard for unknown paths", () => {
 		routerState.path = "/unknown";
 		expect(getCurrentRoute()).toEqual({ page: "dashboard" });
+	});
+
+	it("returns the same route with and without a query string", () => {
+		navigate("/p/acme/s/123");
+		const routeWithoutQuery = getCurrentRoute();
+		navigate("/p/acme/s/123?p=x");
+
+		expect(getCurrentRoute()).toEqual(routeWithoutQuery);
+	});
+});
+
+describe("getCurrentSearchParams", () => {
+	it("returns the current query parameters", () => {
+		navigate("/?p=acme");
+		expect(getCurrentSearchParams().get("p")).toBe("acme");
 	});
 });
 
@@ -276,6 +383,16 @@ describe("transition log", () => {
 		navigate("/auth");
 		navigate("/auth"); // same path — no-op
 		expect(getTransitionLog()).toHaveLength(1);
+	});
+
+	it("includes search in transitions", () => {
+		navigate("/?p=acme");
+		navigate("/?p=other");
+
+		expect(getTransitionLog()).toMatchObject([
+			{ from: "/", to: "/?p=acme" },
+			{ from: "/?p=acme", to: "/?p=other" },
+		]);
 	});
 
 	it("caps at 50 entries (ring buffer)", () => {
