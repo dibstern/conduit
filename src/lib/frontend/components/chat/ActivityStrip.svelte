@@ -4,6 +4,7 @@
 <!-- it in the expanded log. Supplementary — every segment is also a row below.    -->
 <!-- A compaction is a fixed-width seam rather than a weighted block: it marks    -->
 <!-- where the context was squeezed, and took no share of the work.                -->
+<!-- An emphasis set dims every other step, so a breakdown can point at its steps.  -->
 <!--                                                                              -->
 <!-- Touch only gets the tap: it opens the log at the step you hit, which is the   -->
 <!-- useful half of the interaction anyway. Captioning is deliberately gated to a  -->
@@ -27,6 +28,7 @@
 		final,
 		now,
 		active = null,
+		emphasis = null,
 		height = "h-1.5",
 		onhover,
 		onjump,
@@ -37,6 +39,8 @@
 		now: number;
 		/** Segment to highlight — owned by the parent so the caption can't drift. */
 		active?: number | null;
+		/** Steps to pick out while the rest recede, e.g. the skills in a breakdown. */
+		emphasis?: ReadonlySet<number> | null;
 		height?: string;
 		onhover?: (i: number | null) => void;
 		onjump?: (i: number) => void;
@@ -78,7 +82,7 @@
 			type="button"
 			class="h-full cursor-pointer touch-manipulation transition-opacity outline-none focus-visible:ring-1 focus-visible:ring-brand-b {segmentClass(part)} {part.type === 'system'
 				? 'compaction-seam shrink-0 w-0.5 mx-px'
-				: `min-w-0.5 ${active === i ? 'opacity-100' : 'opacity-60 hover:opacity-100'}`}"
+				: `min-w-0.5 ${active === i || emphasis?.has(i) ? 'opacity-100' : emphasis ? 'opacity-20 hover:opacity-100' : 'opacity-60 hover:opacity-100'}`}"
 			style={part.type === "system" ? undefined : `flex-grow: ${weights[i] ?? 1}`}
 			title={title(part, i)}
 			aria-label={title(part, i)}

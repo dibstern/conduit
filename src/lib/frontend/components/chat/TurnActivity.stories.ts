@@ -1,7 +1,7 @@
 import type { Meta, StoryObj } from "@storybook/svelte-vite";
 import { expect, userEvent, within } from "storybook/test";
 import { turnFixtureMessages } from "../../stories/turn-fixtures.js";
-import type { ChatMessage } from "../../types.js";
+import type { ChatMessage, ToolMessage } from "../../types.js";
 import {
 	type ActivityPart,
 	type CompactionPart,
@@ -196,4 +196,68 @@ export const CompactedExpanded: Story = {
 export const CompactedTwice: Story = {
 	args: { turn: twice, segment: twice.segments[0]!, final: true },
 	play: ({ canvasElement }) => expand(canvasElement),
+};
+
+// ─── Skills ──────────────────────────────────────────────────────────────────
+
+/** A turn with a Skill call spliced in before each named step, stamped where that step starts. */
+function withSkills(turn: Turn, skills: Record<number, string>): Turn {
+	const segment = turn.segments[0]!;
+	const activity = segment.activity.flatMap((part, i): ActivityPart[] => {
+		const name = skills[i];
+		if (name === undefined) return [part];
+		const skill: ToolMessage = {
+			type: "tool",
+			uuid: `skill-${i}`,
+			id: `skill-${i}`,
+			name: "Skill",
+			input: { tool: "Skill", name },
+			status: "completed",
+			result: `Launching skill: ${name}`,
+			...(part.createdAt !== undefined
+				? { createdAt: part.createdAt, endedAt: part.createdAt + 40 }
+				: {}),
+		};
+		return [skill, part];
+	});
+	return {
+		...turn,
+		segments: [{ ...segment, activity }, ...turn.segments.slice(1)],
+	};
+}
+
+const skilled = withSkills(settled, {
+	0: "systematic-debugging",
+	7: "test-driven-development",
+});
+const skilledLive = withSkills(live, {
+	0: "brainstorming",
+	3: "writing-plans",
+});
+
+async function openSkills(canvasElement: HTMLElement) {
+	const canvas = within(canvasElement);
+	const toggle = canvas.getByRole("button", { name: /skills?$/ });
+	await userEvent.click(toggle);
+	toggle.blur();
+	await expect(
+		canvas.getByRole("list", { name: "Skills in this turn" }),
+	).toBeVisible();
+}
+
+/** The skills count sits beside the sentence as a control of its own. */
+export const Skills: Story = {
+	args: { turn: skilled, segment: skilled.segments[0]!, final: true },
+};
+
+/** Open, it lists each skill with when it started and how long it governed, and the strip picks them out. */
+export const SkillsOpen: Story = {
+	args: { turn: skilled, segment: skilled.segments[0]!, final: true },
+	play: ({ canvasElement }) => openSkills(canvasElement),
+};
+
+/** While live, the skill still in charge is running rather than given a guessed duration. */
+export const SkillsLive: Story = {
+	args: { turn: skilledLive, segment: skilledLive.segments[0]!, final: true },
+	play: ({ canvasElement }) => openSkills(canvasElement),
 };

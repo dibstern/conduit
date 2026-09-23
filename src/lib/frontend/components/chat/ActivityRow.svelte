@@ -18,6 +18,7 @@
 		isSoloTool,
 		thinkingVerb,
 		toolCommand,
+		skillName,
 		toolSubject,
 		toolTags,
 		toolVerb,
@@ -43,16 +44,6 @@
 	const childSession = $derived(
 		part.type === "tool" && isSubagentToolName(part.name) ? subagentSessionId(part) : null,
 	);
-
-	/** Sessions recorded before Skill inputs were normalized carry the name only
-	 *  in the result text, so recover it rather than showing a nameless row. */
-	const legacySkillName = $derived.by(() => {
-		if (part.type !== "tool" || part.name !== "Skill") return "";
-		const match = part.result?.match(
-			/^<skill_content\b[^>]*(?:name|skill_name)=["']([^"']+)["']|^"?Launching skill: ([^"\s]+)/,
-		);
-		return match?.[1] ?? match?.[2] ?? "";
-	});
 
 	// The Skill tool's result is only ever "Launching skill: <name>" — the
 	// instructions themselves are injected into the model's context and never
@@ -82,7 +73,7 @@
 	{@const running = part.status === "running" || part.status === "pending"}
 	{@const failed = part.status === "error" || part.isError}
 	{@const command = toolCommand(part)}
-	{@const subject = toolSubject(part) || legacySkillName}
+	{@const subject = part.name === "Skill" ? skillName(part) : toolSubject(part)}
 	{@const tag = toolTags(part)[0]}
 	{@const isSkill = part.name === "Skill"}
 	<!-- A compact row is still this tool's rendering, so it answers to the same

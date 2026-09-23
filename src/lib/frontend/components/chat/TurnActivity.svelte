@@ -6,9 +6,13 @@
 <!-- Hovering a segment captions it in place of the sentence; clicking one opens   -->
 <!-- the full log at that step. While live the header counts up and the last few   -->
 <!-- steps show as a ticker, so the work is visible without expanding anything.    -->
+<!--                                                                              -->
+<!-- Skills are the turn's chapters, so their count is a control of its own: it    -->
+<!-- lists which ran and when, picks them out on the strip, and jumps to the call.  -->
 <script lang="ts">
 	import { tick } from "svelte";
 	import BlockGrid from "../ui/BlockGrid.svelte";
+	import Button from "../ui/Button.svelte";
 	import Icon from "../ui/Icon.svelte";
 	import {
 		countsPhrase,
@@ -17,6 +21,8 @@
 		fmtDuration,
 		stepCaption,
 		segmentDuration,
+		type SkillChapter,
+		skillChapters,
 		stepDurations,
 		type Segment,
 		type Turn,
@@ -24,11 +30,13 @@
 	} from "../../utils/turns.js";
 	import ActivityRow from "./ActivityRow.svelte";
 	import ActivityStrip from "./ActivityStrip.svelte";
+	import { partStyle } from "./activity-style.js";
 	import TurnEconomics from "./TurnEconomics.svelte";
 
 	let { turn, segment, final }: { turn: Turn; segment: Segment; final: boolean } = $props();
 
 	let expanded = $state(false);
+	let skillsOpen = $state(false);
 	let hovered = $state<number | null>(null);
 	let focusUuid = $state<string | null>(null);
 	let panelEl = $state<HTMLDivElement | undefined>();
@@ -50,8 +58,18 @@
 	// the segment's wall clock rather than the sum of its steps.
 	const duration = $derived(segmentDuration(segment, turn, final, now));
 	const bill = $derived(economics(turn, now));
+	const phrase = $derived(countsPhrase(stats));
+	const chapters = $derived(skillChapters(segment, turn, final, now));
+	const skillSteps = $derived(skillsOpen ? new Set(chapters.map((c) => c.index)) : null);
 	const TICKER_ROWS = 3;
 	const ticker = $derived(segment.activity.slice(-TICKER_ROWS));
+
+	/** "1m 4s in · 12s". Offsets under a second read as the start of the turn. */
+	function chapterTiming(c: SkillChapter): string {
+		const at = c.offset === undefined ? undefined : c.offset < 1000 ? "at start" : `${fmtDuration(c.offset)} in`;
+		const span = c.running ? "running" : c.duration === undefined ? undefined : fmtDuration(c.duration);
+		return [at, span].filter(Boolean).join(" · ");
+	}
 
 	async function jumpTo(i: number) {
 		const part = segment.activity[i];
@@ -102,10 +120,27 @@
 							<span class="font-medium text-text-secondary"
 								>Worked{#if duration !== undefined}&nbsp;for <span class="turn-duration">{fmtDuration(duration)}</span>{/if}</span
 							>
-							· {countsPhrase(stats)}
+							{#if phrase}· {phrase}{/if}
 						</span>
 					{/if}
 				</button>
+				{#if stats.skills > 0}
+					<Button
+						variant="ghost"
+						size="content"
+						tone={skillsOpen ? "secondary" : "muted-soft"}
+						hoverFill={skillsOpen ? "none" : "overlay"}
+						class="skills-toggle shrink-0 gap-1 -mx-1 px-1 rounded [&_.lucide]:w-3 [&_.lucide]:h-3 {skillsOpen
+							? 'bg-[rgba(var(--overlay-rgb),0.06)]'
+							: ''}"
+						aria-expanded={skillsOpen}
+						title="Which skills ran, and when"
+						onclick={() => (skillsOpen = !skillsOpen)}
+					>
+						<Icon name="sparkles" size={12} />
+						<span>{stats.skills}<span class="@max-[336px]:hidden">&nbsp;{stats.skills === 1 ? "skill" : "skills"}</span></span>
+					</Button>
+				{/if}
 				{#if stats.compactions > 0}
 					<!-- Outside the toggle so it survives the hover caption: a collapsed
 					     turn must still disclose that its context was squeezed. -->
@@ -124,13 +159,36 @@
 
 			<div class="flex items-center gap-3 px-3 pb-2">
 				<div class="flex-1 min-w-0">
-					<ActivityStrip {turn} {segment} {final} {now} active={hovered} onhover={(i) => (hovered = i)} onjump={jumpTo} />
+					<ActivityStrip {turn} {segment} {final} {now} active={hovered} emphasis={skillSteps} onhover={(i) => (hovered = i)} onjump={jumpTo} />
 				</div>
 				{#if final}
 					<TurnEconomics economics={bill} />
 				{/if}
 			</div>
 		</div>
+
+		{#if skillsOpen}
+			<ol class="skill-chapters px-1 py-1 border-t border-border-subtle" aria-label="Skills in this turn">
+				{#each chapters as chapter (chapter.index)}
+					{@const part = segment.activity[chapter.index]}
+					<li>
+						<Button
+							variant="ghost"
+							size="content"
+							align="start"
+							tone="inherit"
+							hoverFill="overlay"
+							class="gap-2 w-full py-1 px-2 rounded text-xs text-left"
+							onclick={() => jumpTo(chapter.index)}
+						>
+							<span class="shrink-0 {part ? partStyle(part).text : ''} [&_.lucide]:w-3.5 [&_.lucide]:h-3.5"><Icon name="sparkles" size={14} /></span>
+							<span class="flex-1 truncate font-mono text-text-secondary">{chapter.name || "Unnamed skill"}</span>
+							<span class="shrink-0 font-mono text-text-dimmer">{chapterTiming(chapter)}</span>
+						</Button>
+					</li>
+				{/each}
+			</ol>
+		{/if}
 
 		{#if expanded}
 			<div class="px-1 pb-1 border-t border-border-subtle">
