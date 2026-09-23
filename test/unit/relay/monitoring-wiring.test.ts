@@ -1,5 +1,5 @@
 import { Effect, Layer } from "effect";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { StatusPollerTag } from "../../../src/lib/domain/relay/Services/services.js";
 import { SessionManagerServiceTag } from "../../../src/lib/domain/relay/Services/session-manager-service.js";
 import { makeOverridesStateLive } from "../../../src/lib/domain/relay/Services/session-overrides-state.js";
@@ -93,6 +93,15 @@ function createHarness() {
 }
 
 describe("wireMonitoring shutdown", () => {
+	// The harnesses use a zero grace period, which expires only once the clock
+	// has moved. Two ticks can read the same real millisecond, so give each
+	// reading its own.
+	beforeEach(() => {
+		let now = 0;
+		vi.spyOn(Date, "now").mockImplementation(() => ++now);
+	});
+	afterEach(() => vi.restoreAllMocks());
+
 	it("assembles contexts only for non-settled sessions", async () => {
 		const harness = createHarness();
 		const idle = Object.fromEntries(
