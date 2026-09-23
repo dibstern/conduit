@@ -369,6 +369,30 @@ describe("menu items: PIN set", () => {
 // ─── PIN set action ─────────────────────────────────────────────────────────
 
 describe("PIN set action", () => {
+	it.each([
+		false,
+		true,
+	])("prints a rejected PIN update without success when pinEnabled is %s", async (pinEnabled) => {
+		const io = createMockIO();
+		const setPin = vi
+			.fn()
+			.mockResolvedValue({ ok: false, error: "PIN update rejected" });
+		void showSettingsMenu(
+			io.opts({
+				setPin,
+				getSettingsInfo: () => defaultSettingsInfo({ pinEnabled }),
+			}),
+		);
+		await tick();
+		await sendKeys(io.stdin, ["\x1b[B", "\r"]);
+		await sendKeys(io.stdin, ["1", "2", "3", "4", "\r"]);
+		await tick(50);
+		expect(setPin).toHaveBeenCalledWith("1234");
+		expect(io.text()).toContain("PIN update rejected");
+		expect(io.text()).not.toContain("PIN updated");
+		await sendKeys(io.stdin, ["\x03"]);
+	});
+
 	it("calls setPin callback when PIN entered", async () => {
 		const setPin = vi.fn().mockResolvedValue({ ok: true });
 		const io = createMockIO();
@@ -404,6 +428,26 @@ describe("PIN set action", () => {
 // ─── PIN remove action ──────────────────────────────────────────────────────
 
 describe("PIN remove action", () => {
+	it("prints a rejected removal without reporting success", async () => {
+		const io = createMockIO();
+		const removePin = vi
+			.fn()
+			.mockResolvedValue({ ok: false, error: "PIN removal rejected" });
+		void showSettingsMenu(
+			io.opts({
+				removePin,
+				getSettingsInfo: () => defaultSettingsInfo({ pinEnabled: true }),
+			}),
+		);
+		await tick();
+		await sendKeys(io.stdin, ["\x1b[B", "\x1b[B", "\r"]);
+		await tick(50);
+		expect(removePin).toHaveBeenCalledOnce();
+		expect(io.text()).toContain("PIN removal rejected");
+		expect(io.text()).not.toContain("PIN removed");
+		await sendKeys(io.stdin, ["\x03"]);
+	});
+
 	it("calls removePin callback", async () => {
 		const removePin = vi.fn().mockResolvedValue({ ok: true });
 		const io = createMockIO();
