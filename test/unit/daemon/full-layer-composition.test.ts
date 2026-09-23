@@ -44,6 +44,7 @@ describe("Full Layer composition", () => {
 		makeRelayCacheLive((slug) =>
 			Effect.succeed({
 				slug,
+				attach: () => () => {},
 				wsHandler: { handleUpgrade: () => {} },
 				rpcWsHandler: { handleUpgrade: () => {} },
 				stop: () => {},

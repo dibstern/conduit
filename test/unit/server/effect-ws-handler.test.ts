@@ -1,7 +1,8 @@
+import { EventEmitter } from "node:events";
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { Layer, ManagedRuntime } from "effect";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import WebSocket from "ws";
 import { makeWsTransportLive } from "../../../src/lib/domain/relay/Layers/ws-transport-layer.js";
 import { makeWsHandlerStateLive } from "../../../src/lib/domain/relay/Services/ws-handler-service.js";
@@ -11,6 +12,7 @@ import {
 } from "../../../src/lib/server/effect-ws-handler.js";
 import type {
 	WsClientConnectedEvent,
+	WsClientDisconnectedEvent,
 	WsMessageEvent,
 } from "../../../src/lib/server/ws-handler-shape.js";
 
@@ -69,6 +71,26 @@ function onceMessage(handler: EffectWsHandler): Promise<WsMessageEvent> {
 	return new Promise((resolve) => handler.once("message", resolve));
 }
 
+function onceDisconnected(
+	handler: EffectWsHandler,
+): Promise<WsClientDisconnectedEvent> {
+	return new Promise((resolve) => handler.once("client_disconnected", resolve));
+}
+
+class TestWebSocket extends EventEmitter {
+	readyState: number = WebSocket.OPEN;
+	readonly send = vi.fn();
+	readonly ping = vi.fn();
+	readonly close = vi.fn(() => {
+		this.readyState = WebSocket.CLOSED;
+		this.emit("close");
+	});
+
+	asWebSocket(): WebSocket {
+		return this as unknown as WebSocket;
+	}
+}
+
 function waitOpen(ws: WebSocket): Promise<void> {
 	return new Promise((resolve, reject) => {
 		ws.once("open", () => resolve());
@@ -89,6 +111,70 @@ function waitForMessage(
 }
 
 describe("Effect WS handler bridge", () => {
+	it("attaches and detaches an open socket without closing it", async () => {
+		const handler = await createHandler({ heartbeatInterval: 300_000 });
+		const socket = new TestWebSocket();
+		const connected = onceConnected(handler);
+		const detach = handler.attach(socket.asWebSocket(), {
+			clientId: "daemon-client",
+			requestedSessionId: "session-a",
+		});
+		const connectedInfo = await connected;
+		expect(connectedInfo).toMatchObject({
+			clientId: "daemon-client",
+			requestedSessionId: "session-a",
+		});
+
+		const delivered = vi.fn();
+		handler.on("message", delivered);
+		socket.emit(
+			"message",
+			Buffer.from(
+				JSON.stringify({ type: "pty_input", ptyId: "pty-1", data: "a" }),
+			),
+		);
+		expect(delivered).toHaveBeenCalledTimes(1);
+
+		const disconnected = onceDisconnected(handler);
+		detach();
+		expect(await disconnected).toMatchObject({
+			clientId: "daemon-client",
+			clientCount: 0,
+		});
+		expect(socket.close).not.toHaveBeenCalled();
+		expect(socket.readyState).toBe(WebSocket.OPEN);
+		for (const event of ["message", "close", "error", "pong"]) {
+			expect(socket.listenerCount(event)).toBe(0);
+		}
+		const sentBeforeBroadcast = socket.send.mock.calls.length;
+		handler.broadcast({ type: "client_count", count: 99 });
+		detach();
+		await handler.drain();
+		expect(socket.send).toHaveBeenCalledTimes(sentBeforeBroadcast);
+		expect(socket.close).not.toHaveBeenCalled();
+
+		delivered.mockClear();
+		socket.emit(
+			"message",
+			Buffer.from(
+				JSON.stringify({ type: "pty_input", ptyId: "pty-1", data: "b" }),
+			),
+		);
+		expect(delivered).not.toHaveBeenCalled();
+	});
+
+	it("drain closes sockets attached without an upgrade", async () => {
+		const handler = await createHandler({ heartbeatInterval: 300_000 });
+		const socket = new TestWebSocket();
+		const connected = onceConnected(handler);
+		handler.attach(socket.asWebSocket(), { clientId: "daemon-client" });
+		await connected;
+
+		await handler.drain();
+
+		expect(socket.close).toHaveBeenCalledWith(1001, "Server shutting down");
+	});
+
 	it("upgrades connections and emits routed client messages", async () => {
 		const handler = await createHandler({ heartbeatInterval: 300_000 });
 		const { url } = await startServer(handler);

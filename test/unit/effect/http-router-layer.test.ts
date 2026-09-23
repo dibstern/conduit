@@ -127,6 +127,7 @@ const relayWithSnapshot = (
 	snapshot: RelayStatusSnapshot,
 ): Relay => ({
 	slug,
+	attach: () => () => {},
 	wsHandler: { handleUpgrade: () => {} },
 	rpcWsHandler: { handleUpgrade: () => {} },
 	getStatusSnapshot: () => snapshot,

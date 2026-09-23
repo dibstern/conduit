@@ -174,6 +174,7 @@ describe("DaemonHandleTag", () => {
 				get: (slug: string) =>
 					Effect.succeed({
 						slug,
+						attach: () => () => {},
 						wsHandler: { handleUpgrade: () => {} },
 						rpcWsHandler: { handleUpgrade: () => {} },
 						getStatusSnapshot: () => ({
@@ -196,6 +197,7 @@ describe("DaemonHandleTag", () => {
 						: Effect.succeed(
 								Option.some({
 									slug,
+									attach: () => () => {},
 									wsHandler: { handleUpgrade: () => {} },
 									rpcWsHandler: { handleUpgrade: () => {} },
 									getStatusSnapshot: () => ({

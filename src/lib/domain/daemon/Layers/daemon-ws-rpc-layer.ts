@@ -15,6 +15,7 @@ import {
 	listDaemonSessions,
 	resolveDaemonSession,
 } from "../Services/daemon-session-reader.js";
+import { DaemonWsClientRegistryTag } from "../Services/daemon-ws-client-registry.js";
 import {
 	addInstance,
 	getInstances,
@@ -50,6 +51,7 @@ export const DaemonWsRpcHandlersLive = Layer.scoped(
 			| ProjectRegistryTag
 			| DaemonConfigRefTag
 			| DaemonEventBusTag
+			| DaemonWsClientRegistryTag
 			| ConfigPersistenceTag
 			| RelayCacheTag
 			| InstanceManagerStateTag
@@ -57,12 +59,16 @@ export const DaemonWsRpcHandlersLive = Layer.scoped(
 			| PortScannerTag
 		>();
 		const bus = yield* DaemonEventBusTag;
+		const daemonWsClients = yield* DaemonWsClientRegistryTag;
 		const cache = yield* RelayCacheTag;
 		const subscription = yield* PubSub.subscribe(bus);
 		yield* Stream.fromQueue(subscription).pipe(
 			Stream.runForEach((event) =>
 				event._tag === "RelayBroadcast"
 					? Effect.gen(function* () {
+							yield* daemonWsClients.broadcastUnattached(
+								event.message as RelayMessage,
+							);
 							for (const project of yield* allProjects) {
 								const relay = yield* cache.peek(project.slug);
 								if (Option.isSome(relay)) {
@@ -84,6 +90,7 @@ export const DaemonWsRpcHandlersLive = Layer.scoped(
 				| ProjectRegistryTag
 				| DaemonConfigRefTag
 				| DaemonEventBusTag
+				| DaemonWsClientRegistryTag
 				| ConfigPersistenceTag
 				| RelayCacheTag
 				| InstanceManagerStateTag

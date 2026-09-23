@@ -24,6 +24,8 @@ import {
 	Scope,
 	ScopedRef,
 } from "effect";
+import type { WebSocket } from "ws";
+import type { WsAttachOptions } from "../../../server/ws-handler-shape.js";
 import type { RpcWebSocketHandlerShape } from "../../../server/ws-rpc-handler.js";
 import type { RelayMessage } from "../../../shared-types.js";
 import type { ConnectionHealth } from "../../../types.js";
@@ -40,6 +42,7 @@ export interface RelayStatusSnapshot {
 
 export interface Relay {
 	slug: string;
+	attach: (ws: WebSocket, options: WsAttachOptions) => () => void;
 	wsHandler: {
 		broadcast?: (message: RelayMessage) => void;
 		handleUpgrade: (

@@ -24,6 +24,65 @@ import {
 
 describe("routed RPC server", () => {
 	it.scoped(
+		"lets daemon ViewSession reattachment bypass the relay handler",
+		() =>
+			Effect.gen(function* () {
+				const resolve = vi.fn(() =>
+					Effect.fail(
+						new WsRpcError({ message: "must not resolve relay context" }),
+					),
+				);
+				const reattach = vi.fn(() => Effect.succeed(true));
+				const client = yield* RpcTest.makeClient(WsRpcGroup).pipe(
+					Effect.provide(
+						makeRoutedWsRpcServerLayer(resolve, undefined, undefined, reattach),
+					),
+				);
+
+				expect(
+					yield* client.ViewSession({
+						projectSlug: "project-b",
+						sessionId: "session-b",
+						originId: "daemon-client",
+					}),
+				).toEqual({ ok: true });
+				expect(reattach).toHaveBeenCalledWith(
+					expect.objectContaining({
+						projectSlug: "project-b",
+						sessionId: "session-b",
+						originId: "daemon-client",
+					}),
+				);
+				expect(resolve).not.toHaveBeenCalled();
+			}),
+	);
+
+	it.scoped(
+		"routes ViewSession normally when daemon reattachment declines",
+		() =>
+			Effect.gen(function* () {
+				const context = yield* Layer.build(makeTestHandlerLayer());
+				const resolve = vi.fn(() => Effect.succeed(context));
+				const reattach = vi.fn(() => Effect.succeed(false));
+				const client = yield* RpcTest.makeClient(WsRpcGroup).pipe(
+					Effect.provide(
+						makeRoutedWsRpcServerLayer(resolve, undefined, undefined, reattach),
+					),
+				);
+
+				expect(
+					yield* client.ViewSession({
+						projectSlug: "project-a",
+						sessionId: "session-a",
+						originId: "relay-client",
+					}),
+				).toEqual({ ok: true });
+				expect(reattach).toHaveBeenCalledTimes(1);
+				expect(resolve).toHaveBeenCalledWith("project-a");
+			}),
+	);
+
+	it.scoped(
 		"uses the initial standalone relay when a daemon request omits projectSlug",
 		() =>
 			Effect.gen(function* () {

@@ -58,6 +58,7 @@ const NoOpRelayCacheLive = Layer.succeed(RelayCacheTag, {
 	get: (_slug: string) =>
 		Effect.succeed({
 			slug: _slug,
+			attach: () => () => {},
 			wsHandler: { handleUpgrade: () => {} },
 			rpcWsHandler: { handleUpgrade: () => {} },
 			stop: () => {},
@@ -266,6 +267,7 @@ describe("ProjectRegistry Effect - remove", () => {
 			get: (_slug: string) =>
 				Effect.succeed({
 					slug: _slug,
+					attach: () => () => {},
 					wsHandler: { handleUpgrade: () => {} },
 					rpcWsHandler: { handleUpgrade: () => {} },
 					stop: () => {},
@@ -614,6 +616,7 @@ describe("ProjectRegistry Effect - removeAll", () => {
 					get: (slug: string) =>
 						Effect.succeed({
 							slug,
+							attach: () => () => {},
 							wsHandler: { handleUpgrade: () => {} },
 							rpcWsHandler: { handleUpgrade: () => {} },
 							stop: () => {},

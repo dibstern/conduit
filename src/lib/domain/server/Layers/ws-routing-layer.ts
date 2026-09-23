@@ -1,6 +1,7 @@
 // ─── WebSocket Routing Layer ────────────────────────────────────────────────
 // Scoped Layer that owns daemon WebSocket upgrade routing.
 
+import { randomBytes } from "node:crypto";
 import type http from "node:http";
 import type net from "node:net";
 import type { Duplex } from "node:stream";
@@ -11,9 +12,11 @@ import {
 	Effect,
 	Exit,
 	Layer,
+	Option,
 	Ref,
 	Runtime,
 } from "effect";
+import { WebSocket } from "ws";
 import { WsRpcError } from "../../../contracts/ws-rpc.js";
 import { getClientIp, parseCookies } from "../../../server/http-utils.js";
 import {
@@ -25,14 +28,20 @@ import { HttpServerRefTag } from "../../daemon/Layers/relay-factory-layer.js";
 import { ConfigPersistenceTag } from "../../daemon/Services/config-persistence-service.js";
 import { DaemonConfigRefTag } from "../../daemon/Services/daemon-config-ref.js";
 import { DaemonEventBusTag } from "../../daemon/Services/daemon-pubsub.js";
+import { resolveDaemonSession } from "../../daemon/Services/daemon-session-reader.js";
+import { DaemonWsClientRegistryTag } from "../../daemon/Services/daemon-ws-client-registry.js";
 import {
+	allProjects,
 	getProject,
 	markError,
 	markReady,
 	ProjectRegistryTag,
 	touchLastUsed as touchProjectLastUsed,
 } from "../../daemon/Services/project-registry-service.js";
-import { RelayCacheTag } from "../../daemon/Services/relay-cache.js";
+import {
+	type Relay,
+	RelayCacheTag,
+} from "../../daemon/Services/relay-cache.js";
 import { type AuthManagerService, AuthManagerTag } from "./auth-middleware.js";
 
 const PROJECT_WS_PATTERN = /^\/p\/([^/]+)\/(ws|rpc)(?:\?|$)/;
@@ -40,6 +49,7 @@ const RELAY_WAIT_TIMEOUT_MS = 10_000;
 const SERVICE_UNAVAILABLE_RESPONSE = "HTTP/1.1 503 Service Unavailable\r\n\r\n";
 
 export interface WebSocketRelay {
+	readonly attach: Relay["attach"];
 	readonly wsHandler: {
 		readonly handleUpgrade: (
 			req: http.IncomingMessage,
@@ -246,6 +256,8 @@ export const WebSocketRoutingLive: Layer.Layer<
 	| AuthManagerTag
 	| WebSocketRelayRouterTag
 	| DaemonWsRpcHandlersTag
+	| DaemonWsClientRegistryTag
+	| ProjectRegistryTag
 > = Layer.scopedDiscard(
 	Effect.gen(function* () {
 		const configRef = yield* DaemonConfigRefTag;
@@ -253,7 +265,10 @@ export const WebSocketRoutingLive: Layer.Layer<
 		const auth = yield* AuthManagerTag;
 		const relayRouter = yield* WebSocketRelayRouterTag;
 		const daemonHandlers = yield* DaemonWsRpcHandlersTag;
+		const daemonWsClients = yield* DaemonWsClientRegistryTag;
+		const projectRegistry = yield* ProjectRegistryTag;
 		const runtime = yield* Effect.runtime<never>();
+		const scope = yield* Effect.scope;
 		const server = yield* Ref.get(httpServerRef);
 
 		if (server === null) {
@@ -262,37 +277,203 @@ export const WebSocketRoutingLive: Layer.Layer<
 			);
 		}
 
+		const resolveRelay = (slug: string) =>
+			Effect.gen(function* () {
+				yield* relayRouter.ensureRelayStarted(slug);
+				const relay = yield* relayRouter.waitForRelay(
+					slug,
+					RELAY_WAIT_TIMEOUT_MS,
+				);
+				yield* relayRouter.touchLastUsed(slug);
+				return relay;
+			});
+
+		const toRpcUnavailable = (slug: string, cause: unknown) =>
+			new WsRpcError({
+				message: `Project "${slug}" unavailable: ${formatCause(cause)}`,
+			});
+
+		const resolveRpcRelay = (slug: string) =>
+			resolveRelay(slug).pipe(
+				Effect.mapError((cause) => toRpcUnavailable(slug, cause)),
+				Effect.catchAllDefect((cause) =>
+					Effect.fail(toRpcUnavailable(slug, cause)),
+				),
+			);
+
+		const reattachViewSession = (payload: {
+			readonly projectSlug: string;
+			readonly sessionId: string;
+			readonly originId: string;
+		}) =>
+			Effect.gen(function* () {
+				const current = yield* daemonWsClients.get(payload.originId);
+				if (
+					Option.isNone(current) ||
+					current.value.slug === payload.projectSlug
+				) {
+					return false;
+				}
+				const relay = yield* resolveRpcRelay(payload.projectSlug);
+				const latest = yield* daemonWsClients.get(payload.originId);
+				if (
+					Option.isNone(latest) ||
+					latest.value.slug === payload.projectSlug ||
+					latest.value.ws.readyState !== WebSocket.OPEN
+				) {
+					return false;
+				}
+
+				latest.value.detach();
+				const detached = yield* daemonWsClients.setAttachment(
+					payload.originId,
+					latest.value.ws,
+					null,
+					() => {},
+				);
+				if (!detached) return false;
+				yield* Effect.try({
+					try: () =>
+						latest.value.ws.send(
+							JSON.stringify({
+								type: "project_attached",
+								slug: payload.projectSlug,
+							}),
+						),
+					catch: (cause) => toRpcUnavailable(payload.projectSlug, cause),
+				});
+				const detach = yield* Effect.try({
+					try: () =>
+						relay.attach(latest.value.ws, {
+							clientId: payload.originId,
+							requestedSessionId: payload.sessionId,
+						}),
+					catch: (cause) => toRpcUnavailable(payload.projectSlug, cause),
+				});
+				const attached = yield* daemonWsClients.setAttachment(
+					payload.originId,
+					latest.value.ws,
+					payload.projectSlug,
+					detach,
+				);
+				if (!attached) detach();
+				return attached;
+			});
+
 		const rpcHandler = yield* makeRoutedWsRpcWebSocketHandler(
 			(slug) =>
-				Effect.gen(function* () {
-					yield* relayRouter.ensureRelayStarted(slug);
-					const relay = yield* relayRouter.waitForRelay(
-						slug,
-						RELAY_WAIT_TIMEOUT_MS,
-					);
-					yield* relayRouter.touchLastUsed(slug);
-					if (!relay.rpcWsHandler.context) {
-						return yield* Effect.fail(new Error("RPC context unavailable"));
-					}
-					return yield* relay.rpcWsHandler.context;
-				}).pipe(
-					Effect.catchAll((cause) =>
-						Effect.fail(
-							new WsRpcError({
-								message: `Project "${slug}" unavailable: ${formatCause(cause)}`,
-							}),
+				resolveRpcRelay(slug)
+					.pipe(
+						Effect.flatMap((relay) => {
+							if (!relay.rpcWsHandler.context) {
+								return Effect.fail(new Error("RPC context unavailable"));
+							}
+							return relay.rpcWsHandler.context;
+						}),
+					)
+					.pipe(
+						Effect.catchAll((cause) =>
+							Effect.fail(
+								cause instanceof WsRpcError
+									? cause
+									: toRpcUnavailable(slug, cause),
+							),
+						),
+						Effect.catchAllDefect((cause) =>
+							Effect.fail(toRpcUnavailable(slug, cause)),
 						),
 					),
-					Effect.catchAllDefect((cause) =>
-						Effect.fail(
-							new WsRpcError({
-								message: `Project "${slug}" unavailable: ${formatCause(cause)}`,
-							}),
-						),
-					),
-				),
 			daemonHandlers,
+			undefined,
+			reattachViewSession,
 		);
+
+		const attachDaemonSocket = (ws: WebSocket, req: http.IncomingMessage) =>
+			Effect.gen(function* () {
+				const params = new URL(req.url ?? "/ws", "http://localhost")
+					.searchParams;
+				const requestedClientId = params.get("client") ?? "";
+				const clientId = /^[A-Za-z0-9._:-]{1,128}$/.test(requestedClientId)
+					? requestedClientId
+					: randomBytes(8).toString("hex");
+				const requestedSessionId = params.get("session") || undefined;
+				const requestedProjectSlug = params.get("p") || undefined;
+				const onError = (error: Error) => {
+					Runtime.runCallback(runtime)(
+						Effect.logWarning("Daemon websocket error", {
+							clientId,
+							error: error.message,
+						}),
+					);
+				};
+
+				yield* daemonWsClients.register(clientId, ws);
+				yield* Effect.sync(() => {
+					ws.on("error", onError);
+					ws.once("close", () => {
+						ws.off("error", onError);
+						Runtime.runCallback(runtime)(daemonWsClients.remove(clientId, ws));
+					});
+				});
+				if (ws.readyState !== WebSocket.OPEN) {
+					yield* daemonWsClients.remove(clientId, ws);
+					return;
+				}
+
+				const projects = yield* allProjects.pipe(
+					Effect.provideService(ProjectRegistryTag, projectRegistry),
+				);
+				const sessionSlug = requestedSessionId
+					? yield* resolveDaemonSession(requestedSessionId).pipe(
+							Effect.provideService(ProjectRegistryTag, projectRegistry),
+						)
+					: null;
+				const slug =
+					sessionSlug ??
+					projects.find((project) => project.slug === requestedProjectSlug)
+						?.slug ??
+					projects[0]?.slug ??
+					null;
+				if (slug === null) return;
+
+				const relay = yield* Effect.option(resolveRelay(slug));
+				if (Option.isNone(relay) || ws.readyState !== WebSocket.OPEN) return;
+				const current = yield* daemonWsClients.get(clientId);
+				if (
+					Option.isNone(current) ||
+					current.value.ws !== ws ||
+					current.value.slug !== null
+				)
+					return;
+				yield* Effect.try(() =>
+					ws.send(JSON.stringify({ type: "project_attached", slug })),
+				);
+				const detach = relay.value.attach(ws, {
+					clientId,
+					...(requestedSessionId != null && { requestedSessionId }),
+				});
+				const attached = yield* daemonWsClients.setAttachment(
+					clientId,
+					ws,
+					slug,
+					detach,
+				);
+				if (!attached) detach();
+			}).pipe(
+				Effect.catchAll((cause) =>
+					Effect.logWarning("Daemon websocket remains unattached", { cause }),
+				),
+				Effect.catchAllDefect((cause) =>
+					Effect.logWarning("Daemon websocket remains unattached", { cause }),
+				),
+			);
+
+		const onDaemonConnection = (ws: WebSocket, req: http.IncomingMessage) => {
+			Runtime.runFork(runtime)(
+				Effect.forkIn(attachDaemonSocket(ws, req), scope),
+			);
+		};
+		daemonWsClients.server.on("connection", onDaemonConnection);
 
 		const routeUpgrade = (
 			req: http.IncomingMessage,
@@ -301,8 +482,9 @@ export const WebSocketRoutingLive: Layer.Layer<
 		) =>
 			Effect.gen(function* () {
 				const isSharedRpc = req.url === "/rpc" || req.url?.startsWith("/rpc?");
+				const isSharedWs = req.url === "/ws" || req.url?.startsWith("/ws?");
 				const match = req.url?.match(PROJECT_WS_PATTERN);
-				if (!isSharedRpc && !match) {
+				if (!isSharedRpc && !isSharedWs && !match) {
 					return yield* new WebSocketUpgradeError({
 						reason: "invalid_path",
 						url: req.url ?? "",
@@ -310,7 +492,11 @@ export const WebSocketRoutingLive: Layer.Layer<
 				}
 
 				const slug = match?.[1];
-				if (!isSharedRpc && (slug === undefined || slug.length === 0)) {
+				if (
+					!isSharedRpc &&
+					!isSharedWs &&
+					(slug === undefined || slug.length === 0)
+				) {
 					return yield* new WebSocketUpgradeError({
 						reason: "invalid_path",
 						url: req.url ?? "",
@@ -336,6 +522,21 @@ export const WebSocketRoutingLive: Layer.Layer<
 
 				if (isSharedRpc) {
 					yield* Effect.sync(() => rpcHandler.handleUpgrade(req, socket, head));
+					return;
+				}
+				if (isSharedWs) {
+					yield* Effect.try({
+						try: () =>
+							daemonWsClients.server.handleUpgrade(req, socket, head, (ws) =>
+								daemonWsClients.server.emit("connection", ws, req),
+							),
+						catch: (cause) =>
+							new WebSocketUpgradeError({
+								reason: "server_unavailable",
+								url: req.url ?? "",
+								cause,
+							}),
+					});
 					return;
 				}
 				if (slug === undefined) return;
@@ -389,7 +590,10 @@ export const WebSocketRoutingLive: Layer.Layer<
 		yield* Effect.logInfo("WebSocket routing layer initialized");
 
 		yield* Effect.addFinalizer(() =>
-			Effect.sync(() => server.off("upgrade", onUpgrade)).pipe(
+			Effect.sync(() => {
+				server.off("upgrade", onUpgrade);
+				daemonWsClients.server.off("connection", onDaemonConnection);
+			}).pipe(
 				Effect.zipRight(Effect.logInfo("WebSocket routing layer torn down")),
 			),
 		);

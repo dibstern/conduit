@@ -925,6 +925,11 @@ const ProjectListSchema = Schema.Struct({
 	addedSlug: Schema.optional(Schema.String),
 });
 
+const ProjectAttachedSchema = Schema.Struct({
+	type: Schema.Literal("project_attached"),
+	slug: Schema.String,
+});
+
 // ── File browser ───────────────────────────────────────────────────────
 const FileListSchema = Schema.Struct({
 	type: Schema.Literal("file_list"),
@@ -1221,6 +1226,7 @@ export const RelayMessageSchema = Schema.Union(
 	CommandListSchema,
 	// Projects
 	ProjectListSchema,
+	ProjectAttachedSchema,
 	// File browser
 	FileListSchema,
 	FileContentSchema,
@@ -1309,6 +1315,7 @@ export const RELAY_MESSAGE_TYPES = [
 	"claude_settings_info",
 	"command_list",
 	"project_list",
+	"project_attached",
 	"file_list",
 	"file_content",
 	"file_tree",
@@ -1546,6 +1553,7 @@ export type RelayMessage =
 			current?: string;
 			addedSlug?: string;
 	  }
+	| { type: "project_attached"; slug: string }
 	// ── File browser ───────────────────────────────────────────────────────
 	| { type: "file_list"; path: string; entries: FileEntry[] }
 	| { type: "file_content"; path: string; content: string; binary?: boolean }

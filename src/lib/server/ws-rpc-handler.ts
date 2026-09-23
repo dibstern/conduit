@@ -14,6 +14,7 @@ import {
 import {
 	type DaemonRpcHandlers,
 	makeRoutedWsRpcServerLayer,
+	type ReattachDaemonViewSession,
 	type ResolveRpcContext,
 	WsRpcGroup,
 	WsRpcServerLayer,
@@ -116,6 +117,7 @@ export const makeRoutedWsRpcWebSocketHandler = (
 	resolveContext: ResolveRpcContext,
 	daemonHandlers?: DaemonRpcHandlers,
 	defaultProjectSlug?: string,
+	reattachViewSession?: ReattachDaemonViewSession,
 ) =>
 	Effect.gen(function* () {
 		const transportContext = yield* Layer.build(
@@ -129,6 +131,7 @@ export const makeRoutedWsRpcWebSocketHandler = (
 			resolveContext,
 			daemonHandlers,
 			defaultProjectSlug,
+			reattachViewSession,
 		);
 		const handler = new WsRpcWebSocketHandler(undefined, {
 			transport: Context.get(transportContext, WsTransportTag),

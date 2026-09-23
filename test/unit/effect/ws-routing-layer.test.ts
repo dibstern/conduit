@@ -1,8 +1,10 @@
+import { EventEmitter } from "node:events";
 import { createServer, type IncomingMessage, type Server } from "node:http";
 import type { Socket } from "node:net";
 import { describe, it } from "@effect/vitest";
 import { Effect, Exit, Layer, Option, Ref, Scope } from "effect";
 import { expect, vi } from "vitest";
+import { WebSocket, WebSocketServer } from "ws";
 import { AuthManager, hashPin } from "../../../src/lib/auth.js";
 import { HttpServerRefTag } from "../../../src/lib/domain/daemon/Layers/relay-factory-layer.js";
 import { ConfigPersistenceNoopLive } from "../../../src/lib/domain/daemon/Services/config-persistence-service.js";
@@ -11,6 +13,7 @@ import {
 	makeDaemonConfigFromOptions,
 } from "../../../src/lib/domain/daemon/Services/daemon-config-ref.js";
 import { DaemonEventBusLive } from "../../../src/lib/domain/daemon/Services/daemon-pubsub.js";
+import { DaemonWsClientRegistryTag } from "../../../src/lib/domain/daemon/Services/daemon-ws-client-registry.js";
 import {
 	getEntry,
 	makeProjectRegistryLive,
@@ -59,6 +62,7 @@ const makeRequest = (
 	}) as IncomingMessage;
 
 const makeWebSocketRelay = (): WebSocketRelay => ({
+	attach: vi.fn(() => () => {}),
 	wsHandler: { handleUpgrade: vi.fn() },
 	rpcWsHandler: { handleUpgrade: vi.fn() },
 });
@@ -75,6 +79,7 @@ const makeLayer = (
 			timeoutMs: number,
 		) => Effect.Effect<WebSocketRelay, WebSocketUpgradeError>;
 		shuttingDown?: boolean;
+		projects?: ReadonlyArray<StoredProject>;
 	},
 ) => {
 	const relay = options?.relay ?? makeWebSocketRelay();
@@ -106,7 +111,7 @@ const makeLayer = (
 				touchLastUsed: (slug) => Effect.sync(() => touchLastUsed(slug)),
 			}),
 		),
-		Layer.provide(makeDaemonRpcTestLayer()),
+		Layer.provideMerge(makeDaemonRpcTestLayer(options?.projects)),
 	);
 };
 
@@ -144,6 +149,7 @@ describe("WebSocketRelayRouterLive", () => {
 		const factory = vi.fn((slug: string) =>
 			Effect.succeed({
 				slug,
+				attach: relay.attach,
 				wsHandler: relay.wsHandler,
 				rpcWsHandler: relay.rpcWsHandler,
 				stop: vi.fn(),
@@ -169,6 +175,7 @@ describe("WebSocketRelayRouterLive", () => {
 		const factory = vi.fn((slug: string) =>
 			Effect.succeed({
 				slug,
+				attach: vi.fn(() => () => {}),
 				wsHandler: { handleUpgrade: vi.fn() },
 				rpcWsHandler: { handleUpgrade: vi.fn() },
 				stop: vi.fn(),
@@ -221,6 +228,85 @@ describe("WebSocketRelayRouterLive", () => {
 });
 
 describe("WebSocketRoutingLive", () => {
+	it.scoped.each([
+		{ query: "?p=older", projects: true, fails: false, expected: "older" },
+		{ query: "?p=missing", projects: true, fails: false, expected: "recent" },
+		{ query: "", projects: true, fails: false, expected: "recent" },
+		{
+			query: "?session=missing&p=older",
+			projects: true,
+			fails: false,
+			expected: "older",
+		},
+		{ query: "", projects: false, fails: false, expected: null },
+		{ query: "?p=older", projects: true, fails: true, expected: null },
+	])(
+		"selects a daemon attachment for $query (projects=$projects, fails=$fails)",
+		(scenario) =>
+			Effect.gen(function* () {
+				const relay = makeWebSocketRelay();
+				const context = yield* Layer.build(
+					makeLayer(createServer(), {
+						relay,
+						projects: scenario.projects
+							? [
+									{
+										slug: "older",
+										title: "Older",
+										directory: "/nonexistent/conduit-older",
+										lastUsed: 1,
+									},
+									{
+										slug: "recent",
+										title: "Recent",
+										directory: "/nonexistent/conduit-recent",
+										lastUsed: 2,
+									},
+								]
+							: [],
+						waitForRelay: (slug) =>
+							scenario.fails
+								? Effect.fail(
+										new WebSocketUpgradeError({
+											reason: "relay_unavailable",
+											slug,
+										}),
+									)
+								: Effect.succeed(relay),
+					}),
+				);
+				const registry = yield* DaemonWsClientRegistryTag.pipe(
+					Effect.provide(context),
+				);
+				const socket = Object.assign(new EventEmitter(), {
+					readyState: WebSocket.OPEN,
+					send: vi.fn(),
+					close: vi.fn(),
+				});
+				registry.server.emit(
+					"connection",
+					socket,
+					makeRequest(`/ws${scenario.query}`),
+				);
+				yield* Effect.yieldNow();
+				yield* waitForAssertion(() => {
+					if (scenario.expected) {
+						expect(socket.send).toHaveBeenCalledWith(
+							JSON.stringify({
+								type: "project_attached",
+								slug: scenario.expected,
+							}),
+						);
+						expect(relay.attach).toHaveBeenCalledTimes(1);
+					} else {
+						expect(socket.send).not.toHaveBeenCalled();
+						expect(relay.attach).not.toHaveBeenCalled();
+					}
+				});
+				expect(socket.close).not.toHaveBeenCalled();
+			}),
+	);
+
 	it.scoped("routes project websocket upgrades through the relay", () =>
 		Effect.gen(function* () {
 			const server = createServer();
@@ -284,7 +370,7 @@ describe("WebSocketRoutingLive", () => {
 			}),
 	);
 
-	it.scoped.each(["/invalid", "/rpc/", "/rpc-extra"])(
+	it.scoped.each(["/invalid", "/rpc/", "/rpc-extra", "/ws/", "/ws-extra"])(
 		"destroys sockets for invalid websocket path %s",
 		(path) =>
 			Effect.gen(function* () {
@@ -309,6 +395,8 @@ describe("WebSocketRoutingLive", () => {
 		"/p/test-project/rpc",
 		"/rpc",
 		"/rpc?client=browser",
+		"/ws",
+		"/ws?client=browser",
 	])("rejects unauthenticated %s upgrades before relay startup", (path) =>
 		Effect.gen(function* () {
 			const server = createServer();
@@ -386,6 +474,8 @@ describe("WebSocketRoutingLive", () => {
 		"/p/test-project/rpc",
 		"/rpc",
 		"/rpc?client=browser",
+		"/ws",
+		"/ws?client=browser",
 	])("destroys %s sockets while daemon shutdown is in progress", (path) =>
 		Effect.gen(function* () {
 			const server = createServer();
@@ -435,6 +525,37 @@ describe("WebSocketRoutingLive", () => {
 				);
 				expect(ensureRelayStarted).not.toHaveBeenCalled();
 				expect(relay.rpcWsHandler.handleUpgrade).not.toHaveBeenCalled();
+				expect(socket.destroy).not.toHaveBeenCalled();
+			}),
+	);
+
+	it.scoped.each(["/ws", "/ws?client=browser"])(
+		"accepts daemon event socket %s without resolving a project before upgrade",
+		(path) =>
+			Effect.gen(function* () {
+				const upgrade = vi
+					.spyOn(WebSocketServer.prototype, "handleUpgrade")
+					.mockImplementation(() => {});
+				yield* Effect.addFinalizer(() =>
+					Effect.sync(() => upgrade.mockRestore()),
+				);
+				const server = createServer();
+				const ensureRelayStarted = vi.fn();
+				const relay = makeWebSocketRelay();
+				yield* Layer.build(makeLayer(server, { relay, ensureRelayStarted }));
+				const req = makeRequest(path);
+				const socket = makeSocket();
+				server.emit("upgrade", req, socket, Buffer.alloc(0));
+				yield* waitForAssertion(() =>
+					expect(upgrade).toHaveBeenCalledWith(
+						req,
+						socket,
+						expect.any(Buffer),
+						expect.any(Function),
+					),
+				);
+				expect(ensureRelayStarted).not.toHaveBeenCalled();
+				expect(relay.wsHandler.handleUpgrade).not.toHaveBeenCalled();
 				expect(socket.destroy).not.toHaveBeenCalled();
 			}),
 	);

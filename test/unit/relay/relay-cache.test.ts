@@ -23,6 +23,7 @@ import {
 
 const makeTestRelay = (slug: string): Relay => ({
 	slug,
+	attach: () => () => {},
 	wsHandler: {
 		handleUpgrade: vi.fn(),
 	} as unknown as Relay["wsHandler"],

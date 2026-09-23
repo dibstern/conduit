@@ -1240,6 +1240,10 @@ export type ResolveRpcContext = (
 	projectSlug: string,
 ) => Effect.Effect<Context.Context<unknown>, WsRpcError>;
 
+export type ReattachDaemonViewSession = (
+	payload: Parameters<(typeof wsRpcHandlers)["ViewSession"]>[0],
+) => Effect.Effect<boolean, WsRpcError>;
+
 export type DaemonRpcName =
 	| "GetProjects"
 	| "AddProject"
@@ -1272,10 +1276,11 @@ export const makeRoutedWsRpcServerLayer = (
 	resolveContext: ResolveRpcContext,
 	daemonHandlers?: DaemonRpcHandlers,
 	defaultProjectSlug?: string,
+	reattachViewSession?: ReattachDaemonViewSession,
 ) => {
 	const routeHandler =
-		<P extends { readonly projectSlug?: string }>(
-			handler: (payload: P) => Effect.Effect<unknown, unknown, unknown>,
+		<P extends { readonly projectSlug?: string }, A, E, R>(
+			handler: (payload: P) => Effect.Effect<A, E, R>,
 		) =>
 		(payload: P) =>
 			Effect.gen(function* () {
@@ -1296,16 +1301,29 @@ export const makeRoutedWsRpcServerLayer = (
 				name,
 				daemonHandlers && Object.hasOwn(daemonHandlers, name)
 					? handler
-					: routeHandler<never>(handler),
+					: routeHandler<never, unknown, unknown, unknown>(handler),
 			],
 		),
 	) as {
-		[K in keyof typeof wsRpcHandlers]: (
+		-readonly [K in keyof typeof wsRpcHandlers]: (
 			payload: Parameters<(typeof wsRpcHandlers)[K]>[0],
 		) => Effect.Effect<
 			Effect.Effect.Success<ReturnType<(typeof wsRpcHandlers)[K]>>,
 			Effect.Effect.Error<ReturnType<(typeof wsRpcHandlers)[K]>> | WsRpcError
 		>;
 	};
+	if (reattachViewSession) {
+		const routeViewSession = routeHandler(wsRpcHandlers.ViewSession);
+		handlers.ViewSession = (
+			payload: Parameters<(typeof wsRpcHandlers)["ViewSession"]>[0],
+		) =>
+			reattachViewSession(payload).pipe(
+				Effect.flatMap((reattached) =>
+					reattached
+						? Effect.succeed({ ok: true as const })
+						: routeViewSession(payload),
+				),
+			);
+	}
 	return WsRpcGroup.toLayer(handlers);
 };

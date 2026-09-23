@@ -26,6 +26,7 @@ import {
 import { type RelayMessage, WS_PROTOCOL_VERSION } from "../shared-types.js";
 import type {
 	WebSocketHandlerShape,
+	WsAttachOptions,
 	WsClientConnectedEvent,
 	WsClientDisconnectedEvent,
 	WsMessageEvent,
@@ -136,7 +137,13 @@ export class EffectWsHandler implements WebSocketHandlerShape {
 	}
 
 	broadcast(msg: RelayMessage): void {
-		this.forkLogged("broadcast", broadcast(msg));
+		const clientIds = this.getClientIds();
+		this.forkLogged(
+			"broadcast",
+			Effect.forEach(clientIds, (clientId) => sendTo(clientId, msg), {
+				discard: true,
+			}),
+		);
 	}
 
 	sendTo(clientId: string, msg: RelayMessage): void {
@@ -179,6 +186,68 @@ export class EffectWsHandler implements WebSocketHandlerShape {
 		return [...this.clients];
 	}
 
+	attach(ws: WebSocket, options: WsAttachOptions): () => void {
+		if (this.closed) {
+			ws.close(1001, "Server shutting down");
+			return () => {};
+		}
+		const { clientId, requestedSessionId } = options;
+		let attached = true;
+		const onMessage = (data: RawData) => this.onMessage(clientId, data);
+		const onError = (error: Error) => {
+			this.events.emit("client_error", { clientId, error });
+		};
+		const onPong = () => {
+			this.forkLogged("markClientAlive", markClientAlive(clientId));
+		};
+		const detach = () => {
+			if (!attached) return;
+			attached = false;
+			ws.off("message", onMessage);
+			ws.off("close", detach);
+			ws.off("error", onError);
+			ws.off("pong", onPong);
+			this.recordClientRemoved(clientId);
+			this.removeAttachedClient(clientId);
+		};
+
+		ws.on("message", onMessage);
+		ws.on("close", detach);
+		ws.on("error", onError);
+		ws.on("pong", onPong);
+
+		this.forkLogged(
+			"addClient",
+			Effect.suspend(() =>
+				attached ? addClient(clientId, ws) : Effect.interrupt,
+			).pipe(
+				// Version first: client_connected listeners start the session-init
+				// flood, and the mismatch check must not trail it.
+				Effect.tap(() =>
+					sendTo(clientId, {
+						type: "protocol_version",
+						version: WS_PROTOCOL_VERSION,
+					}),
+				),
+				Effect.tap((clientCount) =>
+					Effect.sync(() => {
+						this.recordClientConnected(clientId);
+						this.events.emit("client_connected", {
+							clientId,
+							clientCount,
+							...(requestedSessionId != null && { requestedSessionId }),
+						});
+					}),
+				),
+				Effect.flatMap((clientCount) =>
+					broadcast(createClientCountMessage(clientCount)),
+				),
+			),
+		);
+
+		return detach;
+	}
+
 	handleUpgrade(req: IncomingMessage, socket: Duplex, head: Buffer): void {
 		this.forkLogged(
 			"handleUpgrade",
@@ -215,42 +284,10 @@ export class EffectWsHandler implements WebSocketHandlerShape {
 		const clientId =
 			extractRequestedClientId(req.url) ?? randomBytes(8).toString("hex");
 		const requestedSessionId = extractRequestedSessionId(req.url);
-
-		ws.on("message", (data: RawData) => this.onMessage(clientId, data));
-		ws.on("close", () => this.onClose(clientId));
-		ws.on("error", (err: Error) => {
-			this.events.emit("client_error", { clientId, error: err });
+		this.attach(ws, {
+			clientId,
+			...(requestedSessionId != null && { requestedSessionId }),
 		});
-		ws.on("pong", () => {
-			this.forkLogged("markClientAlive", markClientAlive(clientId));
-		});
-
-		this.forkLogged(
-			"addClient",
-			addClient(clientId, ws).pipe(
-				// Version first: client_connected listeners start the session-init
-				// flood, and the mismatch check must not trail it.
-				Effect.tap(() =>
-					sendTo(clientId, {
-						type: "protocol_version",
-						version: WS_PROTOCOL_VERSION,
-					}),
-				),
-				Effect.tap((clientCount) =>
-					Effect.sync(() => {
-						this.recordClientConnected(clientId);
-						this.events.emit("client_connected", {
-							clientId,
-							clientCount,
-							...(requestedSessionId != null && { requestedSessionId }),
-						});
-					}),
-				),
-				Effect.flatMap((clientCount) =>
-					broadcast(createClientCountMessage(clientCount)),
-				),
-			),
-		);
 	}
 
 	private matchesPath(url: string | undefined): boolean {
@@ -281,14 +318,13 @@ export class EffectWsHandler implements WebSocketHandlerShape {
 		);
 	}
 
-	private onClose(clientId: string): void {
+	private removeAttachedClient(clientId: string): void {
 		if (this.closed) return;
 		this.forkLogged(
 			"removeClient",
 			removeClient(clientId).pipe(
 				Effect.tap(({ sessionId, newCount }) =>
 					Effect.sync(() => {
-						this.recordClientRemoved(clientId);
 						this.events.emit("client_disconnected", {
 							clientId,
 							clientCount: newCount,

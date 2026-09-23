@@ -109,6 +109,7 @@ describe("daemon RPC handlers", () => {
 			const factory = vi.fn((slug: string) =>
 				Effect.succeed({
 					slug,
+					attach: () => () => {},
 					wsHandler: {
 						handleUpgrade: vi.fn(),
 						broadcast: broadcasts[slug === "a" ? 0 : 1],

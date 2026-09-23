@@ -76,6 +76,7 @@ import {
 	emptyDaemonState,
 	makeDaemonStateLive,
 } from "../Services/daemon-state.js";
+import { DaemonWsClientRegistryLive } from "../Services/daemon-ws-client-registry.js";
 import { InstanceHealthCheckLive } from "../Services/instance-health-service.js";
 import {
 	getInstances as getEffectInstances,
@@ -453,6 +454,7 @@ export const makeRelayCacheLayer: Layer.Layer<
 				);
 				return {
 					slug,
+					attach: (ws, options) => relay.wsHandler.attach(ws, options),
 					wsHandler: relay.wsHandler,
 					rpcWsHandler: relay.rpcWsHandler,
 					getStatusSnapshot: () => relay.getStatusSnapshot(),
@@ -726,6 +728,7 @@ export const makeDaemonLive = (options: DaemonLiveOptions) => {
 	// of the Layer stack that all subsequent tiers build on.
 	const foundation = Layer.mergeAll(
 		DaemonEventBusLive,
+		DaemonWsClientRegistryLive,
 		PinoLoggerLive,
 		makeDaemonTracingLive(resolveTraceConfig(configDir)),
 		DaemonConfigRefLive(options.initialConfig),

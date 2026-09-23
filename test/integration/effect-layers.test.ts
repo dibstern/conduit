@@ -113,6 +113,7 @@ const composedLayer = Layer.mergeAll(
 	makeRelayCacheLive((slug) =>
 		Effect.succeed({
 			slug,
+			attach: () => () => {},
 			wsHandler: { handleUpgrade: () => {} },
 			rpcWsHandler: { handleUpgrade: () => {} },
 			stop: () => {},
