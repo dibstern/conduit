@@ -231,6 +231,7 @@ export const ClaudeSDKAssistantMessageErrorSchema = Schema.Literal(
 	"authentication_failed",
 	"oauth_org_not_allowed",
 	"account_on_hold",
+	"verification_required",
 	"billing_error",
 	"rate_limit",
 	"overloaded",
@@ -239,6 +240,7 @@ export const ClaudeSDKAssistantMessageErrorSchema = Schema.Literal(
 	"server_error",
 	"unknown",
 	"max_output_tokens",
+	"cloud_credential_error",
 );
 
 export const ClaudeSDKStatusSchema = Schema.Literal(
