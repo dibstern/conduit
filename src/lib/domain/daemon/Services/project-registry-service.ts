@@ -10,6 +10,8 @@
 //
 // Relay lifecycle is delegated to RelayCacheTag (Task 18).
 
+import { homedir } from "node:os";
+import { basename, resolve } from "node:path";
 import {
 	Context,
 	Data,
@@ -22,9 +24,10 @@ import {
 	Ref,
 	Stream,
 } from "effect";
-
 import type { StoredProject } from "../../../types.js";
+import { generateSlug } from "../../../utils.js";
 import { requestConfigSave } from "./config-persistence-service.js";
+import { commitDaemonRuntimeConfig } from "./daemon-config-ref.js";
 import { DaemonEvent, DaemonEventBusTag } from "./daemon-pubsub.js";
 import { type DaemonProject, DaemonStateTag } from "./daemon-state.js";
 import { RelayCacheTag } from "./relay-cache.js";
@@ -651,3 +654,48 @@ export const makeProjectRegistryFromDaemonStateLive: Layer.Layer<
 		);
 	}),
 );
+
+const normalizeProjectDirectory = (directory: string): string => {
+	const expanded =
+		directory === "~" || directory.startsWith("~/")
+			? directory.replace(/^~/, homedir())
+			: directory;
+	return resolve(expanded);
+};
+
+const titleForDirectory = (directory: string): string =>
+	basename(directory) || "project";
+
+export const addProjectToEffectRegistry = (
+	directory: string,
+	instanceId?: string | undefined,
+) =>
+	Effect.gen(function* () {
+		const normalizedDirectory = normalizeProjectDirectory(directory);
+		yield* commitDaemonRuntimeConfig((config) => {
+			if (!config.dismissedPaths.has(normalizedDirectory)) return config;
+			const dismissedPaths = new Set(config.dismissedPaths);
+			dismissedPaths.delete(normalizedDirectory);
+			return {
+				...config,
+				dismissedPaths,
+			};
+		});
+
+		const existing = yield* findByDirectory(normalizedDirectory);
+		if (Option.isSome(existing)) {
+			return existing.value.project;
+		}
+
+		const projects = yield* allProjects;
+		const existingSlugs = new Set(projects.map((project) => project.slug));
+		const project: StoredProject = {
+			slug: generateSlug(normalizedDirectory, existingSlugs),
+			directory: normalizedDirectory,
+			title: titleForDirectory(normalizedDirectory),
+			lastUsed: Date.now(),
+			...(instanceId !== undefined && { instanceId }),
+		};
+		yield* addWithoutRelay(project);
+		return project;
+	}).pipe(Effect.withSpan("relayCache.addProjectCallback"));

@@ -3,8 +3,6 @@
 // and leaf drainable services (KeepAwake, VersionChecker, StorageMonitor, PortScanner).
 // Finalizers remove process listeners / drain services to prevent leaks in tests.
 
-import { homedir } from "node:os";
-import { basename, resolve } from "node:path";
 import { NodeFileSystem } from "@effect/platform-node";
 import type { Rpc, RpcGroup } from "@effect/rpc";
 import {
@@ -15,7 +13,6 @@ import {
 	Effect,
 	Exit,
 	Layer,
-	Option,
 	PubSub,
 	Ref,
 	Runtime,
@@ -42,8 +39,6 @@ import {
 	writePidFile,
 } from "../../../daemon/pid-manager.js";
 import { resolveTraceConfig } from "../../../env.js";
-import type { StoredProject } from "../../../types.js";
-import { generateSlug } from "../../../utils.js";
 import { AuthManagerFromConfigLive } from "../../server/Layers/auth-middleware.js";
 import {
 	DaemonHttpRequestHandlerTag,
@@ -97,9 +92,7 @@ import {
 	type IpcRpcGroup,
 } from "../Services/ipc-rpc-group.js";
 import {
-	addWithoutRelay as addEffectProjectWithoutRelay,
-	findByDirectory,
-	allProjects as getAllEffectProjects,
+	addProjectToEffectRegistry,
 	getProject,
 	makeProjectRegistryFromDaemonStateLive,
 	makeProjectRegistryLive,
@@ -119,6 +112,7 @@ import {
 	ConfigSnapshotFromEffectStateLive,
 	makeConfigWriterLive,
 } from "./config-persistence-layer.js";
+import { DaemonWsRpcHandlersLive } from "./daemon-ws-rpc-layer.js";
 import { KeepAwakeLive, KeepAwakeTag } from "./keep-awake-layer.js";
 import { PinoLoggerLive } from "./pino-logger-layer.js";
 import { PortScannerLive, PortScannerTag } from "./port-scanner-layer.js";
@@ -355,51 +349,6 @@ const resolveProjectOpencodeUrl = (project: {
 		if (first == null) return null;
 		return yield* getInstanceUrl(first.id);
 	});
-
-const normalizeProjectDirectory = (directory: string): string => {
-	const expanded =
-		directory === "~" || directory.startsWith("~/")
-			? directory.replace(/^~/, homedir())
-			: directory;
-	return resolve(expanded);
-};
-
-const titleForDirectory = (directory: string): string =>
-	basename(directory) || "project";
-
-const addProjectToEffectRegistry = (
-	directory: string,
-	instanceId?: string | undefined,
-) =>
-	Effect.gen(function* () {
-		const normalizedDirectory = normalizeProjectDirectory(directory);
-		yield* commitDaemonRuntimeConfig((config) => {
-			if (!config.dismissedPaths.has(normalizedDirectory)) return config;
-			const dismissedPaths = new Set(config.dismissedPaths);
-			dismissedPaths.delete(normalizedDirectory);
-			return {
-				...config,
-				dismissedPaths,
-			};
-		});
-
-		const existing = yield* findByDirectory(normalizedDirectory);
-		if (Option.isSome(existing)) {
-			return existing.value.project;
-		}
-
-		const projects = yield* getAllEffectProjects;
-		const existingSlugs = new Set(projects.map((project) => project.slug));
-		const project: StoredProject = {
-			slug: generateSlug(normalizedDirectory, existingSlugs),
-			directory: normalizedDirectory,
-			title: titleForDirectory(normalizedDirectory),
-			lastUsed: Date.now(),
-			...(instanceId !== undefined && { instanceId }),
-		};
-		yield* addEffectProjectWithoutRelay(project);
-		return project;
-	}).pipe(Effect.withSpan("relayCache.addProjectCallback"));
 
 export const makeRelayCacheLayer: Layer.Layer<
 	RelayCacheTag,
@@ -931,9 +880,10 @@ export const makeDaemonLive = (options: DaemonLiveOptions) => {
 		Layer.provideMerge(withDaemonWiring),
 	);
 
-	const withWsRelayRouter = WebSocketRelayRouterLive.pipe(
-		Layer.provideMerge(withBackground),
-	);
+	const withWsRelayRouter = Layer.merge(
+		WebSocketRelayRouterLive,
+		DaemonWsRpcHandlersLive,
+	).pipe(Layer.provideMerge(withBackground));
 
 	// ── Tier 5: Scoped fiber Layers (need registries + config) ────────────
 	// Side-effect-only Layers (scopedDiscard) that fork background fibers.

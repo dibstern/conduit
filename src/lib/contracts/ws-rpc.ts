@@ -325,7 +325,7 @@ export const DaemonSessionCursorSchema = Schema.Struct({
 });
 
 export const ListDaemonSessionsResponseSchema = Schema.Struct({
-	projectSlug: Schema.String,
+	projectSlug: Schema.optional(Schema.String),
 	sessions: Schema.Array(SessionInfoSchema),
 	availability: Schema.Array(ProjectSessionAvailabilitySchema),
 	hasMore: Schema.Boolean,
@@ -372,32 +372,32 @@ export const GetCommandsResponseSchema = Schema.Struct({
 });
 
 export const GetProjectsResponseSchema = Schema.Struct({
-	projectSlug: Schema.String,
+	projectSlug: Schema.optional(Schema.String),
 	projects: Schema.Array(ProjectInfoSchema),
 	current: Schema.optional(Schema.String),
 });
 
 export const ProjectMutationResponseSchema = Schema.Struct({
-	projectSlug: Schema.String,
+	projectSlug: Schema.optional(Schema.String),
 	projects: Schema.Array(ProjectInfoSchema),
 	current: Schema.optional(Schema.String),
 	addedSlug: Schema.optional(Schema.String),
 });
 
 export const InstanceListResponseSchema = Schema.Struct({
-	projectSlug: Schema.String,
+	projectSlug: Schema.optional(Schema.String),
 	instances: Schema.Array(OpenCodeInstanceSchema),
 });
 
 export const ScanNowResponseSchema = Schema.Struct({
-	projectSlug: Schema.String,
+	projectSlug: Schema.optional(Schema.String),
 	discovered: Schema.Array(Schema.Number),
 	lost: Schema.Array(Schema.Number),
 	active: Schema.Array(Schema.Number),
 });
 
 export const DetectProxyResponseSchema = Schema.Struct({
-	projectSlug: Schema.String,
+	projectSlug: Schema.optional(Schema.String),
 	found: Schema.Boolean,
 	port: Schema.Number,
 });
@@ -408,7 +408,7 @@ export const PtyListResponseSchema = Schema.Struct({
 });
 
 export const ListDirectoriesResponseSchema = Schema.Struct({
-	projectSlug: Schema.String,
+	projectSlug: Schema.optional(Schema.String),
 	path: Schema.String,
 	entries: Schema.Array(Schema.String),
 });
@@ -539,7 +539,7 @@ export class GetProjects extends Schema.TaggedRequest<GetProjects>()(
 		failure: WsRpcError,
 		success: GetProjectsResponseSchema,
 		payload: {
-			projectSlug: NonEmptyString,
+			projectSlug: Schema.optional(NonEmptyString),
 		},
 	},
 ) {}
@@ -550,7 +550,7 @@ export class AddProject extends Schema.TaggedRequest<AddProject>()(
 		failure: WsRpcError,
 		success: ProjectMutationResponseSchema,
 		payload: {
-			projectSlug: NonEmptyString,
+			projectSlug: Schema.optional(NonEmptyString),
 			directory: NonEmptyString,
 			instanceId: Schema.optional(NonEmptyString),
 		},
@@ -563,7 +563,7 @@ export class RemoveProject extends Schema.TaggedRequest<RemoveProject>()(
 		failure: WsRpcError,
 		success: ProjectMutationResponseSchema,
 		payload: {
-			projectSlug: NonEmptyString,
+			projectSlug: Schema.optional(NonEmptyString),
 			slug: NonEmptyString,
 		},
 	},
@@ -575,7 +575,7 @@ export class RenameProject extends Schema.TaggedRequest<RenameProject>()(
 		failure: WsRpcError,
 		success: ProjectMutationResponseSchema,
 		payload: {
-			projectSlug: NonEmptyString,
+			projectSlug: Schema.optional(NonEmptyString),
 			slug: NonEmptyString,
 			title: NonEmptyString,
 		},
@@ -588,7 +588,7 @@ export class SetProjectInstance extends Schema.TaggedRequest<SetProjectInstance>
 		failure: WsRpcError,
 		success: ProjectMutationResponseSchema,
 		payload: {
-			projectSlug: NonEmptyString,
+			projectSlug: Schema.optional(NonEmptyString),
 			slug: NonEmptyString,
 			instanceId: NonEmptyString,
 		},
@@ -601,7 +601,7 @@ export class StartInstance extends Schema.TaggedRequest<StartInstance>()(
 		failure: WsRpcError,
 		success: InstanceListResponseSchema,
 		payload: {
-			projectSlug: NonEmptyString,
+			projectSlug: Schema.optional(NonEmptyString),
 			instanceId: NonEmptyString,
 		},
 	},
@@ -613,7 +613,7 @@ export class StopInstance extends Schema.TaggedRequest<StopInstance>()(
 		failure: WsRpcError,
 		success: InstanceListResponseSchema,
 		payload: {
-			projectSlug: NonEmptyString,
+			projectSlug: Schema.optional(NonEmptyString),
 			instanceId: NonEmptyString,
 		},
 	},
@@ -625,7 +625,7 @@ export class RemoveInstance extends Schema.TaggedRequest<RemoveInstance>()(
 		failure: WsRpcError,
 		success: InstanceListResponseSchema,
 		payload: {
-			projectSlug: NonEmptyString,
+			projectSlug: Schema.optional(NonEmptyString),
 			instanceId: NonEmptyString,
 		},
 	},
@@ -637,7 +637,7 @@ export class RenameInstance extends Schema.TaggedRequest<RenameInstance>()(
 		failure: WsRpcError,
 		success: InstanceListResponseSchema,
 		payload: {
-			projectSlug: NonEmptyString,
+			projectSlug: Schema.optional(NonEmptyString),
 			instanceId: NonEmptyString,
 			name: NonEmptyString,
 		},
@@ -650,7 +650,7 @@ export class AddInstance extends Schema.TaggedRequest<AddInstance>()(
 		failure: WsRpcError,
 		success: InstanceListResponseSchema,
 		payload: {
-			projectSlug: NonEmptyString,
+			projectSlug: Schema.optional(NonEmptyString),
 			name: NonEmptyString,
 			driver: Schema.optional(Schema.suspend(() => ProviderDriverKindSchema)),
 			managed: Schema.optional(Schema.Boolean),
@@ -670,7 +670,7 @@ export class UpdateInstance extends Schema.TaggedRequest<UpdateInstance>()(
 		failure: WsRpcError,
 		success: InstanceListResponseSchema,
 		payload: {
-			projectSlug: NonEmptyString,
+			projectSlug: Schema.optional(NonEmptyString),
 			instanceId: NonEmptyString,
 			name: Schema.optional(Schema.String),
 			port: Schema.optional(Schema.Number),
@@ -686,7 +686,7 @@ export class ScanNow extends Schema.TaggedRequest<ScanNow>()("ScanNow", {
 	failure: WsRpcError,
 	success: ScanNowResponseSchema,
 	payload: {
-		projectSlug: NonEmptyString,
+		projectSlug: Schema.optional(NonEmptyString),
 	},
 }) {}
 
@@ -696,7 +696,7 @@ export class DetectProxy extends Schema.TaggedRequest<DetectProxy>()(
 		failure: WsRpcError,
 		success: DetectProxyResponseSchema,
 		payload: {
-			projectSlug: NonEmptyString,
+			projectSlug: Schema.optional(NonEmptyString),
 		},
 	},
 ) {}
@@ -746,7 +746,7 @@ export class ListDirectories extends Schema.TaggedRequest<ListDirectories>()(
 		failure: WsRpcError,
 		success: ListDirectoriesResponseSchema,
 		payload: {
-			projectSlug: NonEmptyString,
+			projectSlug: Schema.optional(NonEmptyString),
 			path: Schema.String,
 		},
 	},
@@ -1035,7 +1035,7 @@ export class ListDaemonSessions extends Schema.TaggedRequest<ListDaemonSessions>
 		failure: WsRpcError,
 		success: ListDaemonSessionsResponseSchema,
 		payload: {
-			projectSlug: NonEmptyString,
+			projectSlug: Schema.optional(NonEmptyString),
 			limit: Schema.optional(Schema.Number),
 			roots: Schema.optional(Schema.Boolean),
 			search: Schema.optional(Schema.String),
@@ -1225,13 +1225,26 @@ export class SetLogLevel extends Schema.TaggedRequest<SetLogLevel>()(
 		failure: WsRpcError,
 		success: OkResponseSchema,
 		payload: {
-			projectSlug: NonEmptyString,
+			projectSlug: Schema.optional(NonEmptyString),
 			level: RpcLogLevelSchema,
 		},
 	},
 ) {}
 
+export class ResolveSession extends Schema.TaggedRequest<ResolveSession>()(
+	"ResolveSession",
+	{
+		failure: WsRpcError,
+		success: Schema.Struct({ projectSlug: Schema.NullOr(Schema.String) }),
+		payload: {
+			projectSlug: Schema.optional(NonEmptyString),
+			sessionId: NonEmptyString,
+		},
+	},
+) {}
+
 export const WsRpcRequest = Schema.Union(
+	ResolveSession,
 	GetAgents,
 	GetCommands,
 	GetProjects,
@@ -1293,6 +1306,7 @@ export const WsRpcRequest = Schema.Union(
 export type WsRpcRequest = typeof WsRpcRequest.Type;
 
 export const WsRpcGroup = RpcGroup.make(
+	Rpc.fromTaggedRequest(ResolveSession),
 	Rpc.fromTaggedRequest(GetAgents),
 	Rpc.fromTaggedRequest(GetCommands),
 	Rpc.fromTaggedRequest(GetProjects),

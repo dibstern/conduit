@@ -12,6 +12,7 @@ import {
 	WsTransportTag,
 } from "../domain/relay/Layers/ws-transport-layer.js";
 import {
+	type DaemonRpcHandlers,
 	makeRoutedWsRpcServerLayer,
 	type ResolveRpcContext,
 	WsRpcGroup,
@@ -113,6 +114,8 @@ export class RoutedWsRpcWebSocketHandlerTag extends Context.Tag(
 
 export const makeRoutedWsRpcWebSocketHandler = (
 	resolveContext: ResolveRpcContext,
+	daemonHandlers?: DaemonRpcHandlers,
+	defaultProjectSlug?: string,
 ) =>
 	Effect.gen(function* () {
 		const transportContext = yield* Layer.build(
@@ -122,7 +125,11 @@ export const makeRoutedWsRpcWebSocketHandler = (
 			Effect.provide(transportContext),
 		);
 		const scope = yield* Effect.scope;
-		const serverLayer = makeRoutedWsRpcServerLayer(resolveContext);
+		const serverLayer = makeRoutedWsRpcServerLayer(
+			resolveContext,
+			daemonHandlers,
+			defaultProjectSlug,
+		);
 		const handler = new WsRpcWebSocketHandler(undefined, {
 			transport: Context.get(transportContext, WsTransportTag),
 			runTransportFork: Runtime.runFork(runtime),

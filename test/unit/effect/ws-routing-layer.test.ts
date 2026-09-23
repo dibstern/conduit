@@ -26,6 +26,7 @@ import {
 } from "../../../src/lib/domain/server/Layers/ws-routing-layer.js";
 import { WsRpcWebSocketHandler } from "../../../src/lib/server/ws-rpc-handler.js";
 import type { StoredProject } from "../../../src/lib/types.js";
+import { makeDaemonRpcTestLayer } from "../../helpers/daemon-rpc.js";
 
 type TestSocket = Socket & {
 	destroyed: boolean;
@@ -105,6 +106,7 @@ const makeLayer = (
 				touchLastUsed: (slug) => Effect.sync(() => touchLastUsed(slug)),
 			}),
 		),
+		Layer.provide(makeDaemonRpcTestLayer()),
 	);
 };
 

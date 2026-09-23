@@ -77,6 +77,7 @@ const provideRpc = <A, E>(effect: Effect.Effect<A, E, WsRpcTestEnv>) =>
 	Effect.scoped(effect).pipe(
 		Effect.provide(
 			WsRpcGroup.toLayer({
+				ResolveSession: () => Effect.succeed({ projectSlug: null }),
 				GetModels: (request) =>
 					Effect.succeed({
 						projectSlug: request.projectSlug,

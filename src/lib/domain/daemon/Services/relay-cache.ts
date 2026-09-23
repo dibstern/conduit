@@ -25,6 +25,7 @@ import {
 	ScopedRef,
 } from "effect";
 import type { RpcWebSocketHandlerShape } from "../../../server/ws-rpc-handler.js";
+import type { RelayMessage } from "../../../shared-types.js";
 import type { ConnectionHealth } from "../../../types.js";
 
 // ─── Relay interface ────────────────────────────────────────────────────────
@@ -40,6 +41,7 @@ export interface RelayStatusSnapshot {
 export interface Relay {
 	slug: string;
 	wsHandler: {
+		broadcast?: (message: RelayMessage) => void;
 		handleUpgrade: (
 			req: http.IncomingMessage,
 			socket: Duplex,

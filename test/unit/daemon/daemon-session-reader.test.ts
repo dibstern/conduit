@@ -1,14 +1,19 @@
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { RpcTest } from "@effect/rpc";
 import { it } from "@effect/vitest";
 import { Effect } from "effect";
 import { afterEach, describe, expect } from "vitest";
+import { WsRpcGroup } from "../../../src/lib/contracts/ws-rpc.js";
+import { DaemonWsRpcHandlersTag } from "../../../src/lib/domain/daemon/Layers/daemon-ws-rpc-layer.js";
 import { listDaemonSessions } from "../../../src/lib/domain/daemon/Services/daemon-session-reader.js";
 import { makeProjectRegistryLive } from "../../../src/lib/domain/daemon/Services/project-registry-service.js";
 import { runMigrations } from "../../../src/lib/persistence/migrations.js";
 import { schemaMigrations } from "../../../src/lib/persistence/schema.js";
 import { SqliteClient } from "../../../src/lib/persistence/sqlite-client.js";
+import { makeRoutedWsRpcServerLayer } from "../../../src/lib/server/ws-rpc.js";
+import { makeDaemonRpcTestLayer } from "../../helpers/daemon-rpc.js";
 
 const temporaryRoots: string[] = [];
 
@@ -642,6 +647,52 @@ describe("listDaemonSessions", () => {
 					]),
 				),
 			);
+		},
+	);
+});
+
+describe("ResolveSession", () => {
+	it.scoped(
+		"finds sessions in cold project stores and returns null for unknown IDs",
+		() => {
+			const root = makeTemporaryRoot();
+			const projects = ["project-a", "project-b"].map((slug) => ({
+				slug,
+				title: slug,
+				directory: join(root, slug),
+			}));
+			for (const project of projects) {
+				makeProjectStore(project.directory, [
+					{ id: `${project.slug}-session`, title: "Session", updatedAt: 1 },
+				]);
+			}
+			return Effect.gen(function* () {
+				const handlers = yield* DaemonWsRpcHandlersTag;
+				const client = yield* RpcTest.makeClient(WsRpcGroup).pipe(
+					Effect.provide(
+						makeRoutedWsRpcServerLayer(
+							() => Effect.die("Must not resolve a relay"),
+							handlers,
+						),
+					),
+				);
+				for (const project of projects) {
+					expect(
+						yield* client.ResolveSession({
+							sessionId: `${project.slug}-session`,
+						}),
+					).toEqual({ projectSlug: project.slug });
+				}
+				expect(
+					yield* client.ResolveSession({
+						projectSlug: "nonexistent",
+						sessionId: "project-b-session",
+					}),
+				).toEqual({ projectSlug: "project-b" });
+				expect(yield* client.ResolveSession({ sessionId: "unknown" })).toEqual({
+					projectSlug: null,
+				});
+			}).pipe(Effect.provide(makeDaemonRpcTestLayer(projects)));
 		},
 	);
 });

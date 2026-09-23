@@ -20,6 +20,7 @@ import {
 	makeRoutedWsRpcWebSocketHandler,
 	type RpcWebSocketHandlerShape,
 } from "../../../server/ws-rpc-handler.js";
+import { DaemonWsRpcHandlersTag } from "../../daemon/Layers/daemon-ws-rpc-layer.js";
 import { HttpServerRefTag } from "../../daemon/Layers/relay-factory-layer.js";
 import { ConfigPersistenceTag } from "../../daemon/Services/config-persistence-service.js";
 import { DaemonConfigRefTag } from "../../daemon/Services/daemon-config-ref.js";
@@ -244,12 +245,14 @@ export const WebSocketRoutingLive: Layer.Layer<
 	| HttpServerRefTag
 	| AuthManagerTag
 	| WebSocketRelayRouterTag
+	| DaemonWsRpcHandlersTag
 > = Layer.scopedDiscard(
 	Effect.gen(function* () {
 		const configRef = yield* DaemonConfigRefTag;
 		const httpServerRef = yield* HttpServerRefTag;
 		const auth = yield* AuthManagerTag;
 		const relayRouter = yield* WebSocketRelayRouterTag;
+		const daemonHandlers = yield* DaemonWsRpcHandlersTag;
 		const runtime = yield* Effect.runtime<never>();
 		const server = yield* Ref.get(httpServerRef);
 
@@ -259,34 +262,36 @@ export const WebSocketRoutingLive: Layer.Layer<
 			);
 		}
 
-		const rpcHandler = yield* makeRoutedWsRpcWebSocketHandler((slug) =>
-			Effect.gen(function* () {
-				yield* relayRouter.ensureRelayStarted(slug);
-				const relay = yield* relayRouter.waitForRelay(
-					slug,
-					RELAY_WAIT_TIMEOUT_MS,
-				);
-				yield* relayRouter.touchLastUsed(slug);
-				if (!relay.rpcWsHandler.context) {
-					return yield* Effect.fail(new Error("RPC context unavailable"));
-				}
-				return yield* relay.rpcWsHandler.context;
-			}).pipe(
-				Effect.catchAll((cause) =>
-					Effect.fail(
-						new WsRpcError({
-							message: `Project "${slug}" unavailable: ${formatCause(cause)}`,
-						}),
+		const rpcHandler = yield* makeRoutedWsRpcWebSocketHandler(
+			(slug) =>
+				Effect.gen(function* () {
+					yield* relayRouter.ensureRelayStarted(slug);
+					const relay = yield* relayRouter.waitForRelay(
+						slug,
+						RELAY_WAIT_TIMEOUT_MS,
+					);
+					yield* relayRouter.touchLastUsed(slug);
+					if (!relay.rpcWsHandler.context) {
+						return yield* Effect.fail(new Error("RPC context unavailable"));
+					}
+					return yield* relay.rpcWsHandler.context;
+				}).pipe(
+					Effect.catchAll((cause) =>
+						Effect.fail(
+							new WsRpcError({
+								message: `Project "${slug}" unavailable: ${formatCause(cause)}`,
+							}),
+						),
+					),
+					Effect.catchAllDefect((cause) =>
+						Effect.fail(
+							new WsRpcError({
+								message: `Project "${slug}" unavailable: ${formatCause(cause)}`,
+							}),
+						),
 					),
 				),
-				Effect.catchAllDefect((cause) =>
-					Effect.fail(
-						new WsRpcError({
-							message: `Project "${slug}" unavailable: ${formatCause(cause)}`,
-						}),
-					),
-				),
-			),
+			daemonHandlers,
 		);
 
 		const routeUpgrade = (

@@ -72,6 +72,7 @@ import {
 	getHiddenEntries,
 	setHiddenEntriesForRelay,
 } from "../handlers/visibility.js";
+import { ReadQueryEffectTag } from "../persistence/effect/read-query-effect.js";
 import { ProviderRegistryTag } from "../provider/provider-registry.js";
 import type { OpenCodeInstance, PermissionId } from "../shared-types.js";
 
@@ -137,6 +138,7 @@ export {
 	ResizePty,
 	ResolveClaudeSettings,
 	type ResolveClaudeSettingsResponse,
+	ResolveSession,
 	RespondPermission,
 	RewindSession,
 	ScanNow,
@@ -213,6 +215,13 @@ const broadcastInstanceList = (instances: ReadonlyArray<OpenCodeInstance>) =>
 	});
 
 export const wsRpcHandlers = WsRpcGroup.of({
+	ResolveSession: (request) =>
+		Effect.gen(function* () {
+			const config = yield* ConfigTag;
+			const reader = yield* ReadQueryEffectTag;
+			const session = yield* reader.getSession(request.sessionId);
+			return { projectSlug: session === undefined ? null : config.slug };
+		}).pipe(Effect.catchAll(mapRpcFailure("ResolveSession"))),
 	GetAgents: (request) =>
 		Effect.gen(function* () {
 			const config = yield* ConfigTag;
@@ -1231,26 +1240,65 @@ export type ResolveRpcContext = (
 	projectSlug: string,
 ) => Effect.Effect<Context.Context<unknown>, WsRpcError>;
 
+export type DaemonRpcName =
+	| "GetProjects"
+	| "AddProject"
+	| "RemoveProject"
+	| "RenameProject"
+	| "SetProjectInstance"
+	| "StartInstance"
+	| "StopInstance"
+	| "RemoveInstance"
+	| "RenameInstance"
+	| "AddInstance"
+	| "UpdateInstance"
+	| "ScanNow"
+	| "DetectProxy"
+	| "ListDirectories"
+	| "ListDaemonSessions"
+	| "SetLogLevel"
+	| "ResolveSession";
+
+export type DaemonRpcHandlers = {
+	[K in DaemonRpcName]: (
+		payload: Parameters<(typeof wsRpcHandlers)[K]>[0],
+	) => Effect.Effect<
+		Effect.Effect.Success<ReturnType<(typeof wsRpcHandlers)[K]>>,
+		WsRpcError
+	>;
+};
+
 export const makeRoutedWsRpcServerLayer = (
 	resolveContext: ResolveRpcContext,
+	daemonHandlers?: DaemonRpcHandlers,
+	defaultProjectSlug?: string,
 ) => {
 	const routeHandler =
-		<P extends { readonly projectSlug: string }>(
+		<P extends { readonly projectSlug?: string }>(
 			handler: (payload: P) => Effect.Effect<unknown, unknown, unknown>,
 		) =>
 		(payload: P) =>
 			Effect.gen(function* () {
-				const context = yield* resolveContext(payload.projectSlug);
+				const slug = payload.projectSlug ?? defaultProjectSlug;
+				if (slug === undefined)
+					return yield* Effect.fail(
+						new WsRpcError({ message: "projectSlug is required" }),
+					);
+				const context = yield* resolveContext(slug);
 				return yield* Effect.provide(handler(payload), context);
 			});
 
 	// Object.entries/fromEntries loses the key-to-payload/result correlation.
 	// Each wrapper preserves its original handler's payload and success type.
 	const handlers = Object.fromEntries(
-		Object.entries(wsRpcHandlers).map(([name, handler]) => [
-			name,
-			routeHandler<never>(handler),
-		]),
+		Object.entries({ ...wsRpcHandlers, ...daemonHandlers }).map(
+			([name, handler]) => [
+				name,
+				daemonHandlers && Object.hasOwn(daemonHandlers, name)
+					? handler
+					: routeHandler<never>(handler),
+			],
+		),
 	) as {
 		[K in keyof typeof wsRpcHandlers]: (
 			payload: Parameters<(typeof wsRpcHandlers)[K]>[0],

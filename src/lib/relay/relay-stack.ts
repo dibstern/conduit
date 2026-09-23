@@ -1397,18 +1397,21 @@ export async function createRelayStack(
 	const rpcRuntime = ManagedRuntime.make(
 		Layer.scoped(
 			RoutedWsRpcWebSocketHandlerTag,
-			makeRoutedWsRpcWebSocketHandler((slug) =>
-				Effect.suspend(() => {
-					const context = relays.get(slug)?.rpcWsHandler.context;
-					const unavailable = () =>
-						new WsRpcError({ message: `Project "${slug}" unavailable` });
-					return context
-						? context.pipe(
-								Effect.mapError(unavailable),
-								Effect.catchAllDefect(() => Effect.fail(unavailable())),
-							)
-						: Effect.fail(unavailable());
-				}),
+			makeRoutedWsRpcWebSocketHandler(
+				(slug) =>
+					Effect.suspend(() => {
+						const context = relays.get(slug)?.rpcWsHandler.context;
+						const unavailable = () =>
+							new WsRpcError({ message: `Project "${slug}" unavailable` });
+						return context
+							? context.pipe(
+									Effect.mapError(unavailable),
+									Effect.catchAllDefect(() => Effect.fail(unavailable())),
+								)
+							: Effect.fail(unavailable());
+					}),
+				undefined,
+				config.slug,
 			),
 		),
 	);

@@ -211,3 +211,35 @@ export const listDaemonSessions = (
 			nextCursor,
 		};
 	}).pipe(Effect.withSpan("daemonSessions.list"));
+
+export const resolveDaemonSession = (sessionId: string) =>
+	Effect.gen(function* () {
+		for (const project of yield* allProjects) {
+			const databasePath = resolve(project.directory, ".conduit", "events.db");
+			const result = yield* Effect.exit(
+				Effect.gen(function* () {
+					yield* Effect.try(() => statSync(databasePath));
+					return yield* Effect.gen(function* () {
+						const readQuery = yield* ReadQueryEffectTag;
+						return yield* readQuery.getSession(sessionId);
+					}).pipe(
+						Effect.provide(
+							Layer.effect(ReadQueryEffectTag, makeReadQueryEffect).pipe(
+								Layer.provide(
+									SqliteNode.layer({
+										filename: databasePath,
+										readonly: true,
+										disableWAL: true,
+									}).pipe(Layer.provide(Reactivity.layer)),
+								),
+							),
+						),
+					);
+				}),
+			);
+			if (Exit.isSuccess(result) && result.value !== undefined) {
+				return project.slug;
+			}
+		}
+		return null;
+	}).pipe(Effect.withSpan("daemonSessions.resolve"));

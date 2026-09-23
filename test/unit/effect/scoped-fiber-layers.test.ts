@@ -54,6 +54,8 @@ import {
 } from "../../../src/lib/domain/server/Layers/ws-routing-layer.js";
 import type { OpenCodeInstance } from "../../../src/lib/shared-types.js";
 
+import { makeDaemonRpcTestLayer } from "../../helpers/daemon-rpc.js";
+
 // ─── Shared test layers ────────────────────────────────────────────────────
 
 const configRefLayer = DaemonConfigRefLive(
@@ -133,6 +135,7 @@ const makeSeededRegistryLayer = (entries: Array<[string, ProjectState]>) =>
 
 describe("WebSocketRoutingLive", () => {
 	const wsLayer = WebSocketRoutingLive.pipe(
+		Layer.provide(makeDaemonRpcTestLayer()),
 		Layer.provide(configRefLayer),
 		Layer.provide(httpServerRefWithServerLayer),
 		Layer.provide(authLayer),
@@ -661,6 +664,7 @@ describe("Scoped fiber lifecycle", () => {
 		Effect.gen(function* () {
 			const layer = Layer.fresh(
 				WebSocketRoutingLive.pipe(
+					Layer.provide(makeDaemonRpcTestLayer()),
 					Layer.provide(configRefLayer),
 					Layer.provide(httpServerRefWithServerLayer),
 					Layer.provide(authLayer),

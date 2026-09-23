@@ -23,6 +23,31 @@ import {
 } from "../../helpers/mock-factories.js";
 
 describe("routed RPC server", () => {
+	it.scoped(
+		"uses the initial standalone relay when a daemon request omits projectSlug",
+		() =>
+			Effect.gen(function* () {
+				const context = yield* Layer.build(
+					makeTestHandlerLayer({
+						config: makeMockConfig({ slug: "initial", getProjects: () => [] }),
+					}),
+				);
+				const resolve = vi.fn(() => Effect.succeed(context));
+				const client = yield* RpcTest.makeClient(WsRpcGroup).pipe(
+					Effect.provide(
+						makeRoutedWsRpcServerLayer(resolve, undefined, "initial"),
+					),
+				);
+				expect(yield* client.GetProjects({})).toMatchObject({
+					current: "initial",
+					projects: [],
+				});
+				expect(resolve).toHaveBeenCalledWith("initial");
+				yield* client.GetProjects({ projectSlug: "explicit" });
+				expect(resolve).toHaveBeenCalledWith("explicit");
+			}),
+	);
+
 	it.scoped("does not return a disposed relay's context", () =>
 		Effect.gen(function* () {
 			const runtime = yield* Effect.acquireRelease(

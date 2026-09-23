@@ -1,4 +1,7 @@
+import { mkdtempSync, rmSync } from "node:fs";
 import { createServer, type Server } from "node:http";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { Socket } from "@effect/platform";
 import { RpcClient, RpcSerialization } from "@effect/rpc";
 import { describe, it } from "@effect/vitest";
@@ -23,12 +26,90 @@ import {
 	WebSocketRoutingLive,
 } from "../../../src/lib/domain/server/Layers/ws-routing-layer.js";
 import { makeWsRpcWebSocketHandler } from "../../../src/lib/server/ws-rpc-handler.js";
+import { makeDaemonRpcTestLayer } from "../../helpers/daemon-rpc.js";
 import {
 	makeMockConfig,
 	makeTestHandlerLayer,
 } from "../../helpers/mock-factories.js";
 
 describe("daemon shared RPC routing", () => {
+	it.scoped(
+		"adds the first project over one daemon RPC socket without starting a relay",
+		() =>
+			Effect.gen(function* () {
+				const directory = yield* Effect.acquireRelease(
+					Effect.sync(() =>
+						mkdtempSync(join(tmpdir(), "conduit-first-project-")),
+					),
+					(path) =>
+						Effect.sync(() => rmSync(path, { recursive: true, force: true })),
+				);
+				const server = yield* Effect.acquireRelease(
+					Effect.async<Server, Error>((resume) => {
+						const server = createServer();
+						server.once("error", (error) => resume(Effect.fail(error)));
+						server.listen(0, "127.0.0.1", () => resume(Effect.succeed(server)));
+					}),
+					(server) =>
+						Effect.async<void>((resume) => {
+							server.close(() => resume(Effect.void));
+						}),
+				);
+				const upgrades = vi.fn();
+				server.on("upgrade", upgrades);
+				const ensure = vi.fn(() => Effect.die("Must not start a relay"));
+				const wait = vi.fn(() => Effect.die("Must not resolve a relay"));
+				const touch = vi.fn(() => Effect.die("Must not touch a relay"));
+				yield* Layer.build(
+					WebSocketRoutingLive.pipe(
+						Layer.provide(
+							Layer.mergeAll(
+								makeDaemonRpcTestLayer(),
+								Layer.effect(HttpServerRefTag, Ref.make<Server | null>(server)),
+								makeAuthManagerLive(
+									new AuthManager({ getPinHash: () => null }),
+								),
+								Layer.succeed(WebSocketRelayRouterTag, {
+									ensureRelayStarted: ensure,
+									waitForRelay: wait,
+									touchLastUsed: touch,
+								}),
+							),
+						),
+					),
+				);
+				const address = server.address();
+				if (!address || typeof address === "string")
+					throw new Error("No TCP address");
+				const clientContext = yield* Layer.build(
+					RpcClient.layerProtocolSocket().pipe(
+						Layer.provide(
+							Socket.layerWebSocket(`ws://127.0.0.1:${address.port}/rpc`),
+						),
+						Layer.provide(Socket.layerWebSocketConstructorGlobal),
+						Layer.provide(RpcSerialization.layerJson),
+					),
+				);
+				const client = yield* RpcClient.make(WsRpcGroup).pipe(
+					Effect.provide(clientContext),
+				);
+				expect((yield* client.GetProjects({})).projects).toEqual([]);
+				const added = yield* client.AddProject({ directory });
+				expect(added.addedSlug).toBeTruthy();
+				expect((yield* client.GetProjects({})).projects).toMatchObject([
+					{ slug: added.addedSlug, directory },
+				]);
+				expect(
+					(yield* client.GetProjects({ projectSlug: "not-registered" }))
+						.projects,
+				).toHaveLength(1);
+				expect(ensure).not.toHaveBeenCalled();
+				expect(wait).not.toHaveBeenCalled();
+				expect(touch).not.toHaveBeenCalled();
+				expect(upgrades).toHaveBeenCalledTimes(1);
+			}),
+	);
+
 	it.scoped.each(["/rpc", "/rpc?client=browser"])(
 		"routes two projects and recovers from unavailable projects on one %s socket",
 		(path) =>
@@ -108,6 +189,7 @@ describe("daemon shared RPC routing", () => {
 				const touch = vi.fn(router.touchLastUsed);
 				yield* Layer.build(
 					WebSocketRoutingLive.pipe(
+						Layer.provide(makeDaemonRpcTestLayer()),
 						Layer.provide(
 							Layer.mergeAll(
 								Layer.effect(HttpServerRefTag, Ref.make<Server | null>(server)),
@@ -141,15 +223,15 @@ describe("daemon shared RPC routing", () => {
 				);
 				const results = yield* Effect.all(
 					[
-						client.GetProjects({ projectSlug: "project-a" }),
-						client.GetProjects({ projectSlug: "project-b" }),
+						client.GetCommands({ projectSlug: "project-a" }),
+						client.GetCommands({ projectSlug: "project-b" }),
 					],
 					{ concurrency: 2 },
 				);
 				for (const [index, slug] of ["project-a", "project-b"].entries()) {
 					expect(results[index]).toMatchObject({
-						current: slug,
-						projects: [{ slug }],
+						projectSlug: slug,
+						commands: [],
 					});
 					expect(ensure).toHaveBeenCalledWith(slug);
 					expect(wait).toHaveBeenCalledWith(slug, 10_000);
@@ -157,7 +239,7 @@ describe("daemon shared RPC routing", () => {
 				}
 				for (const slug of ["missing-project", "unavailable"]) {
 					const result = yield* Effect.either(
-						client.GetProjects({ projectSlug: slug }),
+						client.GetCommands({ projectSlug: slug }),
 					);
 					expect(result._tag).toBe("Left");
 					if (result._tag === "Left") {
@@ -170,7 +252,7 @@ describe("daemon shared RPC routing", () => {
 				if (!firstRelay) throw new Error("Project A was not started");
 				yield* firstRelay.disposeEffect;
 				const disposed = yield* Effect.either(
-					client.GetProjects({ projectSlug: "project-a" }),
+					client.GetCommands({ projectSlug: "project-a" }),
 				);
 				expect(disposed._tag).toBe("Left");
 				if (disposed._tag === "Left") {
@@ -178,8 +260,8 @@ describe("daemon shared RPC routing", () => {
 					expect(disposed.left.message).toContain("project-a");
 				}
 				expect(
-					yield* client.GetProjects({ projectSlug: "project-b" }),
-				).toMatchObject({ current: "project-b" });
+					yield* client.GetCommands({ projectSlug: "project-b" }),
+				).toMatchObject({ projectSlug: "project-b", commands: [] });
 				expect(upgrades).toHaveBeenCalledTimes(1);
 				expect(factory.mock.calls.map(([slug]) => slug)).not.toContain(
 					"missing-project",

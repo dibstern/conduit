@@ -1139,6 +1139,30 @@ const callListSessions = (input: ListSessionsRpcInput) =>
 		Effect.provide(RpcSerialization.layerJson),
 	);
 
+export interface ResolveSessionRpcInput {
+	readonly projectSlug?: string;
+	readonly sessionId: string;
+}
+
+const callResolveSession = (input: ResolveSessionRpcInput) =>
+	Effect.scoped(
+		Effect.gen(function* () {
+			const client = yield* RpcClient.make(WsRpcGroup);
+			return yield* client.ResolveSession(input);
+		}),
+	).pipe(
+		Effect.provide(RpcClient.layerProtocolSocket()),
+		Effect.provide(Socket.layerWebSocket(makeWsRpcUrl())),
+		Effect.provide(Socket.layerWebSocketConstructorGlobal),
+		Effect.provide(RpcSerialization.layerJson),
+	);
+
+export async function resolveSessionRpc(
+	input: ResolveSessionRpcInput,
+): Promise<{ readonly projectSlug: string | null }> {
+	return await runTransportEffect(callResolveSession(input));
+}
+
 const callListDaemonSessions = (input: ListDaemonSessionsRpcInput) =>
 	Effect.scoped(
 		Effect.gen(function* () {
