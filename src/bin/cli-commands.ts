@@ -264,7 +264,7 @@ async function launchMainMenu(
 					return { ok: res.ok, ...(error != null && { error }) };
 				},
 				removePin: async () => {
-					const res = await ipcSend({ cmd: "set_pin", pin: "" });
+					const res = await ipcSend({ cmd: "set_pin", pin: null });
 					const error = res.error as string | undefined;
 					return { ok: res.ok, ...(error != null && { error }) };
 				},

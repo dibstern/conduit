@@ -48,7 +48,7 @@ const GetStatusSchema = Schema.Struct({
 
 const SetPinSchema = Schema.Struct({
 	cmd: Schema.Literal("set_pin"),
-	pin: PinSchema,
+	pin: Schema.NullOr(PinSchema),
 });
 
 const SetKeepAwakeSchema = Schema.Struct({
@@ -328,7 +328,7 @@ function schemaErrorToIPCResponse(
 			};
 
 		case "set_pin":
-			return { ok: false, error: "set_pin requires a 4-8 digit PIN" };
+			return { ok: false, error: "set_pin requires a 4-8 digit PIN or null" };
 
 		case "set_keep_awake":
 			return {
@@ -475,7 +475,7 @@ export function createCommandRouter(handlers: {
 	listProjects: () => Promise<IPCResponse>;
 	setProjectTitle: (slug: string, title: string) => Promise<IPCResponse>;
 	getStatus: () => Promise<IPCResponse>;
-	setPin: (pin: string) => Promise<IPCResponse>;
+	setPin: (pin: string | null) => Promise<IPCResponse>;
 	setKeepAwake: (enabled: boolean) => Promise<IPCResponse>;
 	setKeepAwakeCommand: (
 		command: string,

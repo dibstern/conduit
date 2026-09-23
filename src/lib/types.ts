@@ -100,7 +100,7 @@ export type IPCCommand =
 	| { cmd: "add_project"; directory: string }
 	| { cmd: "remove_project"; slug: string }
 	| { cmd: "set_project_title"; slug: string; title: string }
-	| { cmd: "set_pin"; pin: string }
+	| { cmd: "set_pin"; pin: string | null }
 	| { cmd: "set_keep_awake"; enabled: boolean }
 	| { cmd: "set_keep_awake_command"; command: string; args: string[] }
 	| { cmd: "set_agent"; slug: string; agent: string }

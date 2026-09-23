@@ -218,7 +218,7 @@ export const handleSetPin = (
 > =>
 	Effect.gen(function* () {
 		const ref = yield* DaemonStateTag;
-		const hashed = hashPin(cmd.pin);
+		const hashed = cmd.pin === null ? null : hashPin(cmd.pin);
 
 		// AP-24: Update DaemonConfigRef so AuthManager sees the new pinHash reactively.
 		// AuthManager reads pinHash from DaemonConfigRef, not DaemonState.
