@@ -744,21 +744,31 @@ export function switchToSession(
 	}
 	if (slug) {
 		void getAgentsRpc({ projectSlug: slug, sessionId })
-			.then(applyGetAgentsResponse)
+			.then((response) => {
+				if (getCurrentSlug() === slug && sessionState.currentId === sessionId)
+					applyGetAgentsResponse(response);
+			})
 			.catch(() => undefined);
 		void getCommandsRpc({ projectSlug: slug, sessionId })
-			.then(applyGetCommandsResponse)
+			.then((response) => {
+				if (getCurrentSlug() === slug && sessionState.currentId === sessionId)
+					applyGetCommandsResponse(response);
+			})
 			.catch(() => undefined);
 		// Re-syncs per-session overrides (variant, context window, permission
 		// mode) that connect-time hydration cannot see for later switches.
 		void getModelsRpc({ projectSlug: slug, sessionId })
-			.then(applyGetModelsResponse)
+			.then((response) => {
+				if (getCurrentSlug() === slug && sessionState.currentId === sessionId)
+					applyGetModelsResponse(response);
+			})
 			.catch(() => undefined);
 	}
 }
 
 /** Clear all session state (for project switch). */
 export function clearSessionState(): void {
+	_switchingFromId = null;
 	resetSessionCreation(); // Cancel any in-flight creation (project switch safety)
 	for (const id of new Set([
 		...sessionActivity.keys(),

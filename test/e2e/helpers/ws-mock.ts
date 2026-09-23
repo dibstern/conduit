@@ -132,6 +132,11 @@ export async function mockRelayWebSocket(
 		control._onRouted();
 		control._setWs(ws);
 
+		// The daemon socket announces its project before the relay bootstrap;
+		// the frontend hydrates on this message.
+		const slug = new URL(ws.url()).searchParams.get("p");
+		if (slug) ws.send(JSON.stringify({ type: "project_attached", slug }));
+
 		// Send init messages on connect (instant by default)
 		void sendSequence(ws, options.initMessages, initDelay, control._context);
 

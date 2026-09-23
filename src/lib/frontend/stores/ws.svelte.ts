@@ -18,7 +18,14 @@ import { phaseToIdle } from "./chat.svelte.js";
 import { getBrowserClientId } from "./client-identity.js";
 import { clearInstanceState } from "./instance.svelte.js";
 import { dispatch } from "./notification-reducer.svelte.js";
-import { getCurrentSessionId, replaceRoute } from "./router.svelte.js";
+import {
+	attachedProjectState,
+	getCurrentRoute,
+	getCurrentSessionId,
+	getCurrentSlug,
+	replaceRoute,
+} from "./router.svelte.js";
+import { sessionState } from "./session.svelte.js";
 import {
 	wsDebugLog,
 	wsDebugLogMessage,
@@ -39,6 +46,7 @@ export {
 	onFileHistory,
 	onPlanMode,
 	onProject,
+	onProjectAttached,
 	onRewind,
 	planModeListeners,
 	projectListeners,
@@ -122,8 +130,7 @@ export function onConnect(fn: () => void): void {
 	_onConnectFn = fn;
 }
 
-/** Current slug — stored for auto-reconnect so it reconnects to the right project. */
-let _currentSlug: string | undefined;
+let _active = false;
 
 /**
  * Non-blocking relay status fetch for UI enrichment and auth recovery.
@@ -133,7 +140,10 @@ let _currentSlug: string | undefined;
 function fetchRelayStatus(slug: string, generation: number): void {
 	fetch(`/p/${slug}/api/status`)
 		.then((res) => {
-			if (_currentSlug !== slug || generation !== _connectionGeneration) {
+			if (
+				attachedProjectState.slug !== slug ||
+				generation !== _connectionGeneration
+			) {
 				return null;
 			}
 			if (res.status === 401) {
@@ -146,7 +156,7 @@ function fetchRelayStatus(slug: string, generation: number): void {
 		.then((data: { status?: string; error?: string } | null) => {
 			if (
 				!data ||
-				_currentSlug !== slug ||
+				attachedProjectState.slug !== slug ||
 				generation !== _connectionGeneration
 			) {
 				return;
@@ -173,8 +183,19 @@ function fetchRelayStatus(slug: string, generation: number): void {
  * relay readiness on the upgrade path.
  * A non-blocking relay status fetch runs in parallel for UI display and auth recovery.
  */
-export function connect(slug?: string): void {
-	_currentSlug = slug;
+export function connect(): void {
+	const reconnecting = _active;
+	_active = true;
+	const route = getCurrentRoute();
+	const slug = reconnecting
+		? getCurrentSlug()
+		: route.page === "chat"
+			? route.slug
+			: null;
+	const sessionId =
+		reconnecting && attachedProjectState.slug !== null
+			? sessionState.currentId
+			: getCurrentSessionId();
 	const generation = ++_connectionGeneration;
 
 	// Cancel any pending reconnect or connect timeout
@@ -207,29 +228,32 @@ export function connect(slug?: string): void {
 		`slug=${slug ?? "standalone"}, attempt=${wsState.attempts}`,
 	);
 
-	doConnect(slug, generation);
+	doConnect(slug, sessionId, generation);
 
 	// Non-blocking relay status check for auth recovery and UI enrichment.
-	if (slug) {
-		fetchRelayStatus(slug, generation);
+	if (attachedProjectState.slug) {
+		fetchRelayStatus(attachedProjectState.slug, generation);
 	}
 }
 
 /** Inner function: create the WebSocket and wire up event handlers. */
-function doConnect(slug: string | undefined, generation: number): void {
+function doConnect(
+	slug: string | null,
+	sessionId: string | null,
+	generation: number,
+): void {
 	const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-	const path = slug ? `/p/${slug}/ws` : "/ws";
 	const params = new URLSearchParams({
 		client: getBrowserClientId(),
 	});
-	let url = `${protocol}//${window.location.host}${path}`;
+	let url = `${protocol}//${window.location.host}/ws`;
 
 	// If the URL has a session ID, pass it as a query param so the server
 	// sends the correct session_switched on init (no flash of wrong session).
-	const sessionId = getCurrentSessionId();
 	if (sessionId) {
 		params.set("session", sessionId);
 	}
+	if (slug) params.set("p", slug);
 	url += `?${params.toString()}`;
 
 	const ws = new WebSocket(url);
@@ -336,6 +360,8 @@ function doConnect(slug: string | undefined, generation: number): void {
 
 						try {
 							handleMessage(msg);
+							if (msg.type === "project_attached")
+								fetchRelayStatus(msg.slug, generation);
 						} catch (err) {
 							log.warn("Handler error for", msg.type, err);
 						}
@@ -370,7 +396,7 @@ function scheduleReconnect(): void {
 	_reconnectTimer = setTimeout(() => {
 		_reconnectTimer = null;
 		wsDebugLog("reconnect:fire", wsState.status);
-		connect(_currentSlug);
+		connect();
 	}, _reconnectDelay);
 	_reconnectDelay = Math.min(_reconnectDelay * 1.5, RECONNECT_MAX_MS);
 }
@@ -384,7 +410,7 @@ function scheduleReconnect(): void {
  * also skips a backoff wait of up to RECONNECT_MAX_MS after a real drop.
  */
 function reconnectIfStale(): void {
-	if (document.visibilityState !== "visible" || _currentSlug === undefined) {
+	if (document.visibilityState !== "visible" || !_active) {
 		return;
 	}
 	if (_ws?.readyState === WebSocket.OPEN && hasActiveStreamFiber()) return;
@@ -395,7 +421,7 @@ function reconnectIfStale(): void {
 		_reconnectTimer = null;
 	}
 	_reconnectDelay = RECONNECT_BASE_MS;
-	connect(_currentSlug);
+	connect();
 }
 
 if (typeof document !== "undefined") {
@@ -406,8 +432,7 @@ if (typeof document !== "undefined") {
 /** Disconnect and stop reconnecting. */
 export function disconnect(): void {
 	wsDebugLog("disconnect", wsState.status);
-	// Clear slug first — prevents any in-flight callbacks from interfering.
-	_currentSlug = undefined;
+	_active = false;
 	_connectionGeneration++;
 	wsState.relayStatus = undefined;
 	wsState.relayError = undefined;

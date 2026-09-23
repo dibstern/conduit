@@ -1,6 +1,6 @@
 import type { Meta, StoryObj } from "@storybook/svelte-vite";
 import { expect, waitFor } from "storybook/test";
-import { routerState, syncSlugState } from "../../stores/router.svelte.js";
+import { routerState } from "../../stores/router.svelte.js";
 import { uiState } from "../../stores/ui.svelte.js";
 import { connectedSocket } from "../../stories/sockets.js";
 import ChatLayout from "./ChatLayout.svelte";
@@ -53,15 +53,7 @@ const meta = {
 		uiState.sidebarCollapsed = false;
 		uiState.rewindActive = false;
 		routerState.path = PROJECT_PATH;
-		// ChatLayout's connect effect reads slugState, NOT routerState.path, and
-		// bails on a null slug. Writing the path alone left the slug null, so
-		// connect() was never called at all — which is the first of the two reasons
-		// these baselines were pictures of ConnectOverlay rather than of this
-		// layout. router.svelte.ts documents this export as being for exactly this
-		// case. See conduit-test-732b.
-		syncSlugState(PROJECT_PATH);
-		// The second reason: Storybook is served by a static file server, so the
-		// socket connect() opens never completes and the overlay never lifts.
+		// Static Storybook hosting needs a socket that completes its connection.
 		const restoreSocket = connectedSocket();
 		const restoreFetch = stubProjectFetches();
 		return () => {

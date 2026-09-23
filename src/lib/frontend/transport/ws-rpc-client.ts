@@ -172,6 +172,11 @@ export interface ViewSessionRpcInput {
 	readonly originId: string;
 }
 
+export interface AttachProjectRpcInput {
+	readonly projectSlug: string;
+	readonly originId: string;
+}
+
 export interface DeleteSessionRpcInput {
 	readonly projectSlug: string;
 	readonly sessionId: string;
@@ -689,6 +694,19 @@ const callCreateSession = (input: CreateSessionRpcInput) =>
 					: {}),
 				...(input.providerId != null ? { providerId: input.providerId } : {}),
 			});
+		}),
+	).pipe(
+		Effect.provide(RpcClient.layerProtocolSocket()),
+		Effect.provide(Socket.layerWebSocket(makeWsRpcUrl())),
+		Effect.provide(Socket.layerWebSocketConstructorGlobal),
+		Effect.provide(RpcSerialization.layerJson),
+	);
+
+const callAttachProject = (input: AttachProjectRpcInput) =>
+	Effect.scoped(
+		Effect.gen(function* () {
+			const client = yield* RpcClient.make(WsRpcGroup);
+			yield* client.AttachProject(input);
 		}),
 	).pipe(
 		Effect.provide(RpcClient.layerProtocolSocket()),
@@ -1383,6 +1401,12 @@ export async function viewSessionRpc(
 	input: ViewSessionRpcInput,
 ): Promise<void> {
 	await runTransportEffect(callViewSession(input));
+}
+
+export async function attachProjectRpc(
+	input: AttachProjectRpcInput,
+): Promise<void> {
+	await runTransportEffect(callAttachProject(input));
 }
 
 export async function deleteSessionRpc(

@@ -36,8 +36,7 @@ const {
 	navigate,
 	replaceRoute,
 	routerState,
-	slugState,
-	syncSlugState,
+	attachedProjectState,
 } = await import("../../../src/lib/frontend/stores/router.svelte.js");
 
 // ─── Reset state before each test ───────────────────────────────────────────
@@ -45,7 +44,7 @@ const {
 beforeEach(() => {
 	routerState.path = "/";
 	routerState.search = "";
-	syncSlugState("/");
+	attachedProjectState.slug = null;
 	window.location.pathname = "/";
 	window.location.search = "";
 	clearTransitionLog();
@@ -180,7 +179,7 @@ describe("popstate", () => {
 
 		expect(routerState.path).toBe("/p/acme/s/123");
 		expect(routerState.search).toBe("?p=other");
-		expect(slugState.current).toBe("acme");
+		expect(getCurrentSlug()).toBe("acme");
 	});
 });
 
@@ -320,31 +319,39 @@ describe("getSessionHref", () => {
 	});
 });
 
-// ─── slugState (stable slug for effect dependencies) ────────────────────────
-// Bug fix: ChatLayout's $effect reads getCurrentSlug() which transitively reads
-// routerState.path, causing WS disconnect/reconnect on every session change.
-// slugState provides a stable signal that only updates when the slug changes.
-
-describe("slugState", () => {
-	it("reflects the current slug", () => {
+describe("attachedProjectState", () => {
+	it("falls back to the route before the daemon attaches a project", () => {
 		routerState.path = "/p/my-project/";
-		syncSlugState(routerState.path);
-		expect(slugState.current).toBe("my-project");
+		expect(attachedProjectState.slug).toBeNull();
+		expect(getCurrentSlug()).toBe("my-project");
 	});
 
-	it("returns null on non-chat routes", () => {
+	it("uses the attached slug while navigation targets another project", () => {
+		attachedProjectState.slug = "project-a";
+		navigate("/p/project-b/s/session-b");
+		expect(getCurrentSlug()).toBe("project-a");
+		expect(getCurrentRoute()).toEqual({
+			page: "chat",
+			slug: "project-b",
+			sessionId: "session-b",
+		});
+		expect(getSessionHref("session-a")).toBe("/p/project-a/s/session-a");
+	});
+
+	it("keeps the attached project through route replacement and browser history", () => {
+		attachedProjectState.slug = "project-a";
+		replaceRoute("/p/project-b/");
+		window.location.pathname = "/p/project-c/s/session-c";
+		popstateListener?.();
+		expect(getCurrentSlug()).toBe("project-a");
+		attachedProjectState.slug = "project-c";
+		expect(getCurrentSlug()).toBe("project-c");
+	});
+
+	it("keeps the attached project when the route has no project", () => {
+		attachedProjectState.slug = "project-a";
 		routerState.path = "/";
-		syncSlugState(routerState.path);
-		expect(slugState.current).toBeNull();
-	});
-
-	it("returns the same slug regardless of session ID in path", () => {
-		routerState.path = "/p/my-project/s/session-1";
-		syncSlugState(routerState.path);
-		expect(slugState.current).toBe("my-project");
-		routerState.path = "/p/my-project/s/session-2";
-		syncSlugState(routerState.path);
-		expect(slugState.current).toBe("my-project");
+		expect(getCurrentSlug()).toBe("project-a");
 	});
 });
 

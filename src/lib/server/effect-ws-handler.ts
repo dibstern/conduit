@@ -193,6 +193,25 @@ export class EffectWsHandler implements WebSocketHandlerShape {
 		}
 		const { clientId, requestedSessionId } = options;
 		let attached = true;
+		// In-flight effects can retain this connection after detach removes the
+		// client from the relay. Revoke their access before another relay attaches.
+		const connection = {
+			get readyState() {
+				return attached ? ws.readyState : ws.CLOSED;
+			},
+			send(data: string) {
+				if (attached) ws.send(data);
+			},
+			close(code?: number, reason?: string) {
+				if (attached) ws.close(code, reason);
+			},
+			ping() {
+				if (attached) ws.ping();
+			},
+			terminate() {
+				if (attached) ws.terminate();
+			},
+		};
 		const onMessage = (data: RawData) => this.onMessage(clientId, data);
 		const onError = (error: Error) => {
 			this.events.emit("client_error", { clientId, error });
@@ -219,7 +238,7 @@ export class EffectWsHandler implements WebSocketHandlerShape {
 		this.forkLogged(
 			"addClient",
 			Effect.suspend(() =>
-				attached ? addClient(clientId, ws) : Effect.interrupt,
+				attached ? addClient(clientId, connection) : Effect.interrupt,
 			).pipe(
 				// Version first: client_connected listeners start the session-init
 				// flood, and the mismatch check must not trail it.

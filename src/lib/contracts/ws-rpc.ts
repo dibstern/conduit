@@ -1076,6 +1076,18 @@ export class ViewSession extends Schema.TaggedRequest<ViewSession>()(
 	},
 ) {}
 
+export class AttachProject extends Schema.TaggedRequest<AttachProject>()(
+	"AttachProject",
+	{
+		failure: WsRpcError,
+		success: OkResponseSchema,
+		payload: {
+			projectSlug: NonEmptyString,
+			originId: NonEmptyString,
+		},
+	},
+) {}
+
 export class DeleteSession extends Schema.TaggedRequest<DeleteSession>()(
 	"DeleteSession",
 	{
@@ -1244,6 +1256,7 @@ export class ResolveSession extends Schema.TaggedRequest<ResolveSession>()(
 ) {}
 
 export const WsRpcRequest = Schema.Union(
+	AttachProject,
 	ResolveSession,
 	GetAgents,
 	GetCommands,
@@ -1306,6 +1319,7 @@ export const WsRpcRequest = Schema.Union(
 export type WsRpcRequest = typeof WsRpcRequest.Type;
 
 export const WsRpcGroup = RpcGroup.make(
+	Rpc.fromTaggedRequest(AttachProject),
 	Rpc.fromTaggedRequest(ResolveSession),
 	Rpc.fromTaggedRequest(GetAgents),
 	Rpc.fromTaggedRequest(GetCommands),

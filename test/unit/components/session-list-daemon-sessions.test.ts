@@ -2,10 +2,7 @@ import { cleanup, fireEvent, render, within } from "@testing-library/svelte";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import SessionList from "../../../src/lib/frontend/components/session/SessionList.svelte";
 import { projectState } from "../../../src/lib/frontend/stores/project.svelte.js";
-import {
-	routerState,
-	syncSlugState,
-} from "../../../src/lib/frontend/stores/router.svelte.js";
+import { routerState } from "../../../src/lib/frontend/stores/router.svelte.js";
 import {
 	applyListDaemonSessionsResponse,
 	sessionState,
@@ -14,7 +11,6 @@ import {
 describe("SessionList daemon sessions", () => {
 	beforeEach(() => {
 		routerState.path = "/p/current-project/";
-		syncSlugState(routerState.path);
 		sessionState.rootSessions = [
 			{
 				id: "local-session",

@@ -1,6 +1,6 @@
 import type { Meta, StoryObj } from "@storybook/svelte-vite";
 import { expect, userEvent, waitFor, within } from "storybook/test";
-import { routerState, syncSlugState } from "../../stores/router.svelte.js";
+import { routerState } from "../../stores/router.svelte.js";
 import { fileBrowserListeners } from "../../stores/ws.svelte.js";
 import { applyGetFileListResponse } from "../../stores/ws-dispatch.js";
 import { mockFileTree } from "../../stories/mocks.js";
@@ -31,7 +31,6 @@ const meta = {
 	parameters: { layout: "fullscreen" },
 	beforeEach: () => {
 		routerState.path = "/";
-		syncSlugState("/");
 	},
 } satisfies Meta<typeof SidebarFilePanel>;
 

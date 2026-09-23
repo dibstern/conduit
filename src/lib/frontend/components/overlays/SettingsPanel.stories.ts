@@ -6,12 +6,11 @@ import {
 } from "../../stores/discovery.svelte.js";
 import { featureFlags } from "../../stores/feature-flags.svelte.js";
 import { handleInstanceList } from "../../stores/instance.svelte.js";
-import { routerState, syncSlugState } from "../../stores/router.svelte.js";
+import { routerState } from "../../stores/router.svelte.js";
 import SettingsPanel from "./SettingsPanel.svelte";
 
 function resetState() {
 	routerState.path = "/";
-	syncSlugState("/");
 	clearDiscoveryState();
 	handleInstanceList({ type: "instance_list", instances: [] });
 	featureFlags.debug = false;

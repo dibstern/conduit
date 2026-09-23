@@ -69,9 +69,9 @@ const waitFor = (assertion: () => void) =>
 	});
 
 describe("daemon shared RPC routing", () => {
-	it.scoped(
-		"reattaches one daemon event socket when ViewSession moves across projects",
-		() =>
+	it.scoped.each(["ViewSession", "AttachProject"] as const)(
+		"reattaches one daemon event socket when %s moves across projects",
+		(operation) =>
 			Effect.gen(function* () {
 				const root = yield* Effect.acquireRelease(
 					Effect.sync(() => mkdtempSync(join(tmpdir(), "conduit-daemon-ws-"))),
@@ -254,11 +254,16 @@ describe("daemon shared RPC routing", () => {
 					Effect.provide(rpcContext),
 				);
 				expect(
-					yield* rpcClient.ViewSession({
-						projectSlug: "project-b",
-						sessionId: "session-b",
-						originId: "daemon-client",
-					}),
+					yield* operation === "ViewSession"
+						? rpcClient.ViewSession({
+								projectSlug: "project-b",
+								sessionId: "session-b",
+								originId: "daemon-client",
+							})
+						: rpcClient.AttachProject({
+								projectSlug: "project-b",
+								originId: "daemon-client",
+							}),
 				).toEqual({ ok: true });
 				yield* waitFor(() => {
 					expect(
@@ -292,7 +297,15 @@ describe("daemon shared RPC routing", () => {
 					},
 					{
 						type: "session_list",
-						sessions: [{ id: "session-b", title: "project-b bootstrap" }],
+						sessions: [
+							{
+								id:
+									operation === "ViewSession"
+										? "session-b"
+										: "project-b-default",
+								title: "project-b bootstrap",
+							},
+						],
 						roots: true,
 					},
 				]);

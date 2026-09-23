@@ -2,7 +2,16 @@ import { EventEmitter } from "node:events";
 import { createServer, type IncomingMessage, type Server } from "node:http";
 import type { Socket } from "node:net";
 import { describe, it } from "@effect/vitest";
-import { Effect, Exit, Layer, Option, Ref, Scope } from "effect";
+import {
+	Deferred,
+	Effect,
+	Exit,
+	Fiber,
+	Layer,
+	Option,
+	Ref,
+	Scope,
+} from "effect";
 import { expect, vi } from "vitest";
 import { WebSocket, WebSocketServer } from "ws";
 import { AuthManager, hashPin } from "../../../src/lib/auth.js";
@@ -27,6 +36,7 @@ import {
 	WebSocketRoutingLive,
 	WebSocketUpgradeError,
 } from "../../../src/lib/domain/server/Layers/ws-routing-layer.js";
+import * as wsRpcHandlerModule from "../../../src/lib/server/ws-rpc-handler.js";
 import { WsRpcWebSocketHandler } from "../../../src/lib/server/ws-rpc-handler.js";
 import type { StoredProject } from "../../../src/lib/types.js";
 import { makeDaemonRpcTestLayer } from "../../helpers/daemon-rpc.js";
@@ -304,6 +314,182 @@ describe("WebSocketRoutingLive", () => {
 					}
 				});
 				expect(socket.close).not.toHaveBeenCalled();
+			}),
+	);
+
+	it.scoped.each([
+		{ initial: "project-a", originId: "browser", reattaches: true },
+		{ initial: null, originId: "browser", reattaches: true },
+		{ initial: "project-b", originId: "browser", reattaches: false },
+		{ initial: "project-a", originId: "unknown", reattaches: false },
+	])(
+		"AttachProject from $initial for $originId reattaches=$reattaches without requesting a session",
+		(scenario) =>
+			Effect.gen(function* () {
+				const routing = vi.spyOn(
+					wsRpcHandlerModule,
+					"makeRoutedWsRpcWebSocketHandler",
+				);
+				yield* Effect.addFinalizer(() =>
+					Effect.sync(() => routing.mockRestore()),
+				);
+				const calls: string[] = [];
+				const detach = vi.fn(() => calls.push("detach"));
+				const relay = makeWebSocketRelay();
+				vi.mocked(relay.attach).mockImplementation(() => {
+					calls.push("attach");
+					return detach;
+				});
+				const context = yield* Layer.build(
+					makeLayer(createServer(), {
+						relay,
+						projects: scenario.initial
+							? [{ ...project, slug: scenario.initial }]
+							: [],
+					}),
+				);
+				const registry = yield* DaemonWsClientRegistryTag.pipe(
+					Effect.provide(context),
+				);
+				const socket = Object.assign(new EventEmitter(), {
+					readyState: WebSocket.OPEN,
+					send: vi.fn(() => calls.push("project_attached")),
+					close: vi.fn(),
+				});
+				registry.server.emit(
+					"connection",
+					socket,
+					makeRequest("/ws?client=browser"),
+				);
+				yield* Effect.yieldNow();
+				if (scenario.initial) {
+					yield* waitForAssertion(() =>
+						expect(relay.attach).toHaveBeenCalledTimes(1),
+					);
+				}
+				calls.length = 0;
+				vi.mocked(relay.attach).mockClear();
+				socket.send.mockClear();
+				const reattach = routing.mock.calls.at(-1)?.[3];
+				if (!reattach) {
+					return yield* Effect.fail(
+						new Error("Missing daemon reattach handler"),
+					);
+				}
+				expect(
+					yield* reattach({
+						projectSlug: "project-b",
+						originId: scenario.originId,
+					}),
+				).toBe(scenario.reattaches);
+				if (scenario.reattaches) {
+					expect(calls).toEqual([
+						...(scenario.initial ? ["detach"] : []),
+						"project_attached",
+						"attach",
+					]);
+					expect(socket.send).toHaveBeenCalledWith(
+						JSON.stringify({ type: "project_attached", slug: "project-b" }),
+					);
+					expect(relay.attach).toHaveBeenCalledWith(socket, {
+						clientId: "browser",
+					});
+					const entry = yield* registry.get("browser");
+					expect(Option.isSome(entry) && entry.value.slug).toBe("project-b");
+				} else {
+					expect(calls).toEqual([]);
+				}
+				expect(socket.close).not.toHaveBeenCalled();
+			}),
+	);
+
+	it.scoped.each(["new-project", "original-project", "replacement-socket"])(
+		"ignores a slow attachment superseded by %s",
+		(scenario) =>
+			Effect.gen(function* () {
+				const routing = vi.spyOn(
+					wsRpcHandlerModule,
+					"makeRoutedWsRpcWebSocketHandler",
+				);
+				yield* Effect.addFinalizer(() =>
+					Effect.sync(() => routing.mockRestore()),
+				);
+				const pendingRelay = yield* Deferred.make<WebSocketRelay>();
+				const relay = makeWebSocketRelay();
+				const waitForRelay = vi.fn((slug: string) =>
+					slug === "project-b"
+						? Deferred.await(pendingRelay)
+						: Effect.succeed(relay),
+				);
+				const context = yield* Layer.build(
+					makeLayer(createServer(), {
+						relay,
+						projects: [{ ...project, slug: "project-a" }],
+						waitForRelay,
+					}),
+				);
+				const registry = yield* DaemonWsClientRegistryTag.pipe(
+					Effect.provide(context),
+				);
+				const socket = Object.assign(new EventEmitter(), {
+					readyState: WebSocket.OPEN,
+					send: vi.fn(),
+					close: vi.fn(),
+				});
+				registry.server.emit(
+					"connection",
+					socket,
+					makeRequest("/ws?client=browser"),
+				);
+				yield* waitForAssertion(() =>
+					expect(relay.attach).toHaveBeenCalledTimes(1),
+				);
+				const reattach = routing.mock.calls.at(-1)?.[3];
+				if (!reattach)
+					return yield* Effect.fail(
+						new Error("Missing daemon reattach handler"),
+					);
+				const pending = yield* reattach({
+					projectSlug: "project-b",
+					sessionId: "session-b",
+					originId: "browser",
+				}).pipe(Effect.forkScoped);
+				yield* waitForAssertion(() =>
+					expect(waitForRelay).toHaveBeenCalledWith(
+						"project-b",
+						expect.any(Number),
+					),
+				);
+				if (scenario === "replacement-socket") {
+					const replacement = Object.assign(new EventEmitter(), {
+						readyState: WebSocket.OPEN,
+						send: vi.fn(),
+						close: vi.fn(),
+					});
+					registry.server.emit(
+						"connection",
+						replacement,
+						makeRequest("/ws?client=browser"),
+					);
+					yield* waitForAssertion(() =>
+						expect(relay.attach).toHaveBeenCalledTimes(2),
+					);
+				} else {
+					yield* reattach({
+						projectSlug: scenario === "new-project" ? "project-c" : "project-a",
+						originId: "browser",
+					});
+				}
+				const attachments = vi.mocked(relay.attach).mock.calls.length;
+				yield* Deferred.succeed(pendingRelay, relay);
+				// True marks a stale ViewSession as handled instead of falling
+				// through to the old project's relay handler.
+				expect(yield* Fiber.join(pending)).toBe(true);
+				expect(relay.attach).toHaveBeenCalledTimes(attachments);
+				const entry = yield* registry.get("browser");
+				expect(Option.isSome(entry) && entry.value.slug).toBe(
+					scenario === "new-project" ? "project-c" : "project-a",
+				);
 			}),
 	);
 

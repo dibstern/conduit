@@ -13,8 +13,8 @@ import {
 import { discoveryState } from "../../../src/lib/frontend/stores/discovery.svelte.js";
 import { projectState } from "../../../src/lib/frontend/stores/project.svelte.js";
 import {
+	attachedProjectState,
 	routerState,
-	syncSlugState,
 } from "../../../src/lib/frontend/stores/router.svelte.js";
 import {
 	applyListDaemonSessionsResponse,
@@ -41,6 +41,7 @@ import {
 	switchToSession,
 } from "../../../src/lib/frontend/stores/session.svelte.js";
 import type { CreateSessionRpcInput } from "../../../src/lib/frontend/transport/ws-rpc-client.js";
+import * as sessionRpc from "../../../src/lib/frontend/transport/ws-rpc-client.js";
 import type {
 	RelayMessage,
 	SessionInfo,
@@ -69,6 +70,7 @@ function makeSession(
 // ─── Reset state before each test ───────────────────────────────────────────
 
 beforeEach(() => {
+	attachedProjectState.slug = null;
 	sessionState.sessions.clear();
 	sessionState.rootSessions = [];
 	sessionState.familySessions = [];
@@ -83,7 +85,6 @@ beforeEach(() => {
 	discoveryState.defaultProviderId = "";
 	discoveryState.defaultModelId = "";
 	routerState.path = "/p/project-a/s/old-session";
-	syncSlugState(routerState.path);
 });
 
 describe("clearSessionState", () => {
@@ -121,11 +122,51 @@ describe("clearSessionState", () => {
 });
 
 describe("switchToSession", () => {
+	it("builds the session route and RPC from the attached project", () => {
+		vi.stubGlobal("window", { history: { pushState: vi.fn() } });
+		const viewSession = vi.fn();
+		attachedProjectState.slug = "attached-project";
+		routerState.path = "/p/pending-project/";
+		switchToSession("new-session", viewSession);
+		expect(routerState.path).toBe("/p/attached-project/s/new-session");
+		expect(viewSession).toHaveBeenCalledWith({
+			projectSlug: "attached-project",
+			sessionId: "new-session",
+			originId: expect.any(String),
+		});
+		vi.unstubAllGlobals();
+	});
+	it("ignores session discovery returned after attaching another project", async () => {
+		let finish: (
+			response: Awaited<ReturnType<typeof sessionRpc.getAgentsRpc>>,
+		) => void = () => {};
+		const spy = vi.spyOn(sessionRpc, "getAgentsRpc").mockImplementationOnce(
+			() =>
+				new Promise((resolve) => {
+					finish = resolve;
+				}),
+		);
+		attachedProjectState.slug = "project-a";
+		routerState.path = "/p/project-a/s/session-a";
+		switchToSession("session-a", vi.fn());
+		attachedProjectState.slug = "project-b";
+		clearSessionState();
+		discoveryState.activeAgentId = "agent-b";
+		finish({
+			projectSlug: "project-a",
+			providerScope: { id: "a", name: "A" },
+			agents: [],
+			activeAgentId: "agent-a",
+		});
+		await Promise.resolve();
+		expect(discoveryState.activeAgentId).toBe("agent-b");
+		spy.mockRestore();
+	});
+
 	it("views the session through RPC after changing local state", () => {
 		const viewSession = vi.fn();
 		sessionState.currentId = "old-session";
 		routerState.path = "/p/project-a/s/new-session";
-		syncSlugState(routerState.path);
 
 		switchToSession("new-session", viewSession);
 
@@ -150,7 +191,6 @@ describe("switchToSession", () => {
 		]);
 		sessionState.currentId = "child-subagent";
 		routerState.path = "/p/project-a/s/parent-with-subagents";
-		syncSlugState(routerState.path);
 
 		switchToSession("parent-with-subagents", viewSession);
 
@@ -468,7 +508,6 @@ describe("getFilteredSessions — daemon sessions", () => {
 		sessionState.searchQuery = "";
 		sessionState.sessions.clear();
 		routerState.path = "/p/project-a/";
-		syncSlugState(routerState.path);
 	});
 
 	it("includes foreign project sessions", () => {

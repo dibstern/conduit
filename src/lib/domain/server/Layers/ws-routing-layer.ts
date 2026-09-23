@@ -301,23 +301,29 @@ export const WebSocketRoutingLive: Layer.Layer<
 				),
 			);
 
+		const attachmentRequests = new WeakMap<WebSocket, number>();
 		const reattachViewSession = (payload: {
 			readonly projectSlug: string;
-			readonly sessionId: string;
+			readonly sessionId?: string;
 			readonly originId: string;
 		}) =>
 			Effect.gen(function* () {
 				const current = yield* daemonWsClients.get(payload.originId);
-				if (
-					Option.isNone(current) ||
-					current.value.slug === payload.projectSlug
-				) {
-					return false;
-				}
+				if (Option.isNone(current)) return false;
+				const request = (attachmentRequests.get(current.value.ws) ?? 0) + 1;
+				attachmentRequests.set(current.value.ws, request);
+				if (current.value.slug === payload.projectSlug) return false;
 				const relay = yield* resolveRpcRelay(payload.projectSlug);
 				const latest = yield* daemonWsClients.get(payload.originId);
+				// A slow relay startup must not overwrite a newer navigation or
+				// transfer a request from a dropped socket to its replacement.
 				if (
+					attachmentRequests.get(current.value.ws) !== request ||
 					Option.isNone(latest) ||
+					latest.value.ws !== current.value.ws
+				)
+					return true;
+				if (
 					latest.value.slug === payload.projectSlug ||
 					latest.value.ws.readyState !== WebSocket.OPEN
 				) {
@@ -346,7 +352,9 @@ export const WebSocketRoutingLive: Layer.Layer<
 					try: () =>
 						relay.attach(latest.value.ws, {
 							clientId: payload.originId,
-							requestedSessionId: payload.sessionId,
+							...(payload.sessionId
+								? { requestedSessionId: payload.sessionId }
+								: {}),
 						}),
 					catch: (cause) => toRpcUnavailable(payload.projectSlug, cause),
 				});

@@ -241,6 +241,7 @@ export function clearSessionChatState(id: string): void {
 	const activity = sessionActivity.get(id);
 	if (activity) {
 		activity.replayGeneration++;
+		activity.liveEventBuffer = null;
 		if (activity.renderTimer) {
 			clearTimeout(activity.renderTimer);
 		}

@@ -235,6 +235,8 @@ test.describe("Subagent navigation", () => {
 			};
 			const url = ws.url();
 			const sessionParam = new URL(url).searchParams.get("session");
+			const slug = new URL(url).searchParams.get("p");
+			if (slug) ws.send(JSON.stringify({ type: "project_attached", slug }));
 
 			// Pick init messages based on the session query param
 			const msgs =

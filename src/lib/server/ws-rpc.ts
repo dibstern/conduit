@@ -79,6 +79,7 @@ import type { OpenCodeInstance, PermissionId } from "../shared-types.js";
 export {
 	AddProject,
 	AnswerQuestion,
+	AttachProject,
 	CancelSession,
 	type ClaudeSettingsResponse,
 	ClosePty,
@@ -170,7 +171,11 @@ export {
 	WsRpcRequest,
 } from "../contracts/ws-rpc.js";
 
-import { WsRpcError, WsRpcGroup } from "../contracts/ws-rpc.js";
+import {
+	type AttachProject,
+	WsRpcError,
+	WsRpcGroup,
+} from "../contracts/ws-rpc.js";
 import {
 	getFileContentResponse,
 	getFileListResponse,
@@ -215,6 +220,8 @@ const broadcastInstanceList = (instances: ReadonlyArray<OpenCodeInstance>) =>
 	});
 
 export const wsRpcHandlers = WsRpcGroup.of({
+	AttachProject: (_request: AttachProject) =>
+		Effect.succeed({ ok: true as const }),
 	ResolveSession: (request) =>
 		Effect.gen(function* () {
 			const config = yield* ConfigTag;
@@ -1240,9 +1247,11 @@ export type ResolveRpcContext = (
 	projectSlug: string,
 ) => Effect.Effect<Context.Context<unknown>, WsRpcError>;
 
-export type ReattachDaemonViewSession = (
-	payload: Parameters<(typeof wsRpcHandlers)["ViewSession"]>[0],
-) => Effect.Effect<boolean, WsRpcError>;
+export type ReattachDaemonViewSession = (payload: {
+	readonly projectSlug: string;
+	readonly originId: string;
+	readonly sessionId?: string;
+}) => Effect.Effect<boolean, WsRpcError>;
 
 export type DaemonRpcName =
 	| "GetProjects"
@@ -1312,6 +1321,10 @@ export const makeRoutedWsRpcServerLayer = (
 			Effect.Effect.Error<ReturnType<(typeof wsRpcHandlers)[K]>> | WsRpcError
 		>;
 	};
+	handlers.AttachProject = (payload) =>
+		reattachViewSession
+			? reattachViewSession(payload).pipe(Effect.as({ ok: true as const }))
+			: wsRpcHandlers.AttachProject(payload);
 	if (reattachViewSession) {
 		const routeViewSession = routeHandler(wsRpcHandlers.ViewSession);
 		handlers.ViewSession = (

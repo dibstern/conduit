@@ -2,7 +2,7 @@
  * A WebSocket stand-in for stories of components that mount the real connection
  * lifecycle.
  *
- * Why this exists (conduit-test-732b): ChatLayout calls `connect(slug)` on
+ * Why this exists (conduit-test-732b): ChatLayout calls `connect()` on
  * mount, which opens a real WebSocket. Storybook is served by a static file
  * server, so the upgrade never completes, `wsState.status` never reaches
  * "connected", and ConnectOverlay — `fixed inset-0 bg-bg`, gated on
@@ -55,6 +55,15 @@ export function connectedSocket(): () => void {
 				if (this.readyState !== OpenSocket.CONNECTING) return;
 				this.readyState = OpenSocket.OPEN;
 				this.emit("open");
+				const slug = new URL(this.url).searchParams.get("p");
+				if (slug) {
+					this.emit(
+						"message",
+						new MessageEvent("message", {
+							data: JSON.stringify({ type: "project_attached", slug }),
+						}),
+					);
+				}
 				this.emit(
 					"message",
 					new MessageEvent("message", {

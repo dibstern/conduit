@@ -5,6 +5,7 @@ import { Layer, ManagedRuntime } from "effect";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import WebSocket from "ws";
 import { makeWsTransportLive } from "../../../src/lib/domain/relay/Layers/ws-transport-layer.js";
+import * as wsHandlerService from "../../../src/lib/domain/relay/Services/ws-handler-service.js";
 import { makeWsHandlerStateLive } from "../../../src/lib/domain/relay/Services/ws-handler-service.js";
 import {
 	type EffectWsHandler,
@@ -112,6 +113,8 @@ function waitForMessage(
 
 describe("Effect WS handler bridge", () => {
 	it("attaches and detaches an open socket without closing it", async () => {
+		const addClient = vi.spyOn(wsHandlerService, "addClient");
+		cleanup.push(() => addClient.mockRestore());
 		const handler = await createHandler({ heartbeatInterval: 300_000 });
 		const socket = new TestWebSocket();
 		const connected = onceConnected(handler);
@@ -120,6 +123,8 @@ describe("Effect WS handler bridge", () => {
 			requestedSessionId: "session-a",
 		});
 		const connectedInfo = await connected;
+		const connection = addClient.mock.calls[0]?.[1];
+		expect(connection).toBeDefined();
 		expect(connectedInfo).toMatchObject({
 			clientId: "daemon-client",
 			requestedSessionId: "session-a",
@@ -136,7 +141,16 @@ describe("Effect WS handler bridge", () => {
 		expect(delivered).toHaveBeenCalledTimes(1);
 
 		const disconnected = onceDisconnected(handler);
+		const sentAtDetach = socket.send.mock.calls.length;
 		detach();
+		// A bootstrap/send effect that captured the old connection before detach
+		// must lose access synchronously, before removeClient's fiber runs.
+		connection?.send(JSON.stringify({ type: "session_list", sessions: [] }));
+		connection?.close();
+		connection?.ping?.();
+		connection?.terminate?.();
+		expect(socket.send).toHaveBeenCalledTimes(sentAtDetach);
+		expect(socket.ping).not.toHaveBeenCalled();
 		expect(await disconnected).toMatchObject({
 			clientId: "daemon-client",
 			clientCount: 0,

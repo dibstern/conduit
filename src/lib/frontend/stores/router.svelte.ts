@@ -52,25 +52,6 @@ function carryScope(pathname: string, search: string): string {
 	return scope ? `?${new URLSearchParams({ [SCOPE_PARAM]: scope })}` : "";
 }
 
-/** Extract slug from a pathname (e.g. "/p/my-project/s/abc" → "my-project"). */
-function extractSlug(path: string): string | null {
-	const match = path.match(/^\/p\/([^/]+)/);
-	// biome-ignore lint/style/noNonNullAssertion: safe — regex match guarantees capture group
-	return match ? match[1]! : null;
-}
-
-/**
- * Update slugState.current if the slug extracted from the path differs.
- * Call this whenever routerState.path is written.
- * Exported for test use when setting routerState.path directly.
- */
-export function syncSlugState(path: string): void {
-	const slug = extractSlug(path);
-	if (slug !== slugState.current) {
-		slugState.current = slug;
-	}
-}
-
 // ─── Transition log (dev-mode route debugging) ─────────────────────────────
 // Records {from, to, timestamp} for each route change so developers can
 // trace "how did I end up on this page?" in the browser console.
@@ -101,21 +82,9 @@ export const routerState = $state({
 	search: typeof window !== "undefined" ? window.location.search : "",
 });
 
-/**
- * Stable slug state — only changes when the project slug actually changes.
- *
- * Unlike `getCurrentSlug()` (which reads `routerState.path` and creates a
- * reactive dependency on the full path), `slugState.current` is a separate
- * `$state` that is updated on every `routerState.path` write but only
- * triggers dependents when the slug itself changes.
- *
- * **Use this in `$effect` blocks** where you need to react to project changes
- * (e.g., WebSocket connect/disconnect) without re-firing on session changes.
- */
-export const slugState = $state({
-	current: extractSlug(
-		typeof window !== "undefined" ? window.location.pathname : "/",
-	),
+/** The daemon sets the attached project through project_attached messages. */
+export const attachedProjectState = $state({
+	slug: null as string | null,
 });
 
 // ─── Derived getters ────────────────────────────────────────────────────────
@@ -157,8 +126,9 @@ export function getCurrentRoute(): Route {
 	return { page: "dashboard" };
 }
 
-/** Get the current project slug (null if not on a chat page). */
+/** Use the daemon's attached project, or the route hint before the first attach. */
 export function getCurrentSlug(): string | null {
+	if (attachedProjectState.slug !== null) return attachedProjectState.slug;
 	const route = getCurrentRoute();
 	return route.page === "chat" ? route.slug : null;
 }
@@ -207,7 +177,6 @@ function applyRoute(
 	window.history[historyMethod](null, "", to);
 	routerState.path = pathname;
 	routerState.search = search;
-	syncSlugState(pathname);
 	recordTransition(from, to);
 }
 
@@ -227,6 +196,5 @@ if (typeof window !== "undefined") {
 	window.addEventListener("popstate", () => {
 		routerState.path = window.location.pathname;
 		routerState.search = window.location.search;
-		syncSlugState(window.location.pathname);
 	});
 }

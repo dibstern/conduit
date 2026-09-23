@@ -101,7 +101,12 @@ import {
 	handlePermissionResolved,
 } from "./permissions.svelte.js";
 import { handleProjectList } from "./project.svelte.js";
-import { getCurrentSlug, replaceRoute } from "./router.svelte.js";
+import {
+	attachedProjectState,
+	getCurrentRoute,
+	getCurrentSlug,
+	replaceRoute,
+} from "./router.svelte.js";
 import {
 	consumeSwitchingFromId,
 	findSession,
@@ -136,6 +141,7 @@ import {
 	fileBrowserListeners,
 	fileHistoryListeners,
 	planModeListeners,
+	projectAttachedListeners,
 	projectListeners,
 	rewindListeners,
 } from "./ws-listeners.js";
@@ -429,8 +435,7 @@ function drainLiveEventBuffer(activity?: SessionActivity): void {
 	if (activity) activity.liveEventBuffer = null;
 	if (!buffer || buffer.length === 0) return;
 	for (const event of buffer) {
-		const ctx: DispatchContext = { isReplay: false, isQueued: isProcessing() };
-		dispatchChatEvent(event, ctx);
+		handleMessage(event);
 	}
 }
 
@@ -703,6 +708,23 @@ function dispatchChatEvent(event: RelayMessage, ctx: DispatchContext): boolean {
  * Replaces the vanilla handler registry pattern.
  */
 export function handleMessage(msg: RelayMessage): void {
+	if (msg.type === "project_attached") {
+		if (attachedProjectState.slug !== msg.slug) {
+			for (const activity of sessionActivity.values()) {
+				activity.replayGeneration++;
+				activity.liveEventBuffer = null;
+			}
+		}
+		attachedProjectState.slug = msg.slug;
+		const route = getCurrentRoute();
+		if (route.page === "chat" && route.slug !== msg.slug) {
+			replaceRoute(
+				`/p/${msg.slug}/${route.sessionId ? `s/${route.sessionId}` : ""}`,
+			);
+		}
+		for (const listener of projectAttachedListeners) listener(msg.slug);
+		return;
+	}
 	// ── Two-tier routing: per-session events vs global events ────────────
 	// Per-session events are routed by event.sessionId to the correct
 	// session slot. notification_event is excluded by construction
@@ -710,9 +732,7 @@ export function handleMessage(msg: RelayMessage): void {
 	if (isPerSessionEvent(msg)) {
 		// Buffer live chat events during replay to prevent interleaving
 		if (CHAT_EVENT_TYPES.has(msg.type)) {
-			const currentActivity = sessionState.currentId
-				? sessionActivity.get(sessionState.currentId)
-				: undefined;
+			const currentActivity = sessionActivity.get(msg.sessionId);
 			if (
 				currentActivity?.liveEventBuffer !== null &&
 				currentActivity?.liveEventBuffer !== undefined
@@ -979,10 +999,11 @@ export function handleMessage(msg: RelayMessage): void {
 			convertHistoryAsync(rawMessages, renderMarkdown, hpCapturedSlot?.activity)
 				.then((chatMsgs) => {
 					if (
-						chatMsgs &&
-						(!hpCapturedSlot ||
-							hpCapturedSlot.activity.replayGeneration === hpActGen)
-					) {
+						hpCapturedSlot &&
+						hpCapturedSlot.activity.replayGeneration !== hpActGen
+					)
+						return;
+					if (chatMsgs) {
 						// Commit to captured slot, not getCurrentSlot()
 						if (hpCapturedSlot) {
 							prependMessages(
@@ -1002,10 +1023,15 @@ export function handleMessage(msg: RelayMessage): void {
 						historyState.hasMore = hasMore;
 						historyState.messageCount += rawMessages.length;
 					}
-					historyState.loading = false; // ALWAYS reset, even on abort
+					historyState.loading = false;
 				})
 				.catch((err) => {
 					log.warn("History page conversion error:", err);
+					if (
+						hpCapturedSlot &&
+						hpCapturedSlot.activity.replayGeneration !== hpActGen
+					)
+						return;
 					if (hpCapturedSlot) hpCapturedSlot.messages.historyLoading = false;
 					historyState.loading = false;
 				});

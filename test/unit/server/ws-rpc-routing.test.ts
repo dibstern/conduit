@@ -23,6 +23,35 @@ import {
 } from "../../helpers/mock-factories.js";
 
 describe("routed RPC server", () => {
+	it.scoped.each([true, false])(
+		"AttachProject returns ok without resolving a relay context when reattached=%s",
+		(reattached) =>
+			Effect.gen(function* () {
+				const resolve = vi.fn(() =>
+					Effect.fail(new WsRpcError({ message: "unexpected relay context" })),
+				);
+				const reattach = vi.fn(() => Effect.succeed(reattached));
+				const client = yield* RpcTest.makeClient(WsRpcGroup).pipe(
+					Effect.provide(
+						makeRoutedWsRpcServerLayer(resolve, undefined, undefined, reattach),
+					),
+				);
+				expect(
+					yield* client.AttachProject({
+						projectSlug: "project-b",
+						originId: "daemon-client",
+					}),
+				).toEqual({ ok: true });
+				expect(reattach).toHaveBeenCalledWith(
+					expect.objectContaining({
+						projectSlug: "project-b",
+						originId: "daemon-client",
+					}),
+				);
+				expect(resolve).not.toHaveBeenCalled();
+			}),
+	);
+
 	it.scoped(
 		"lets daemon ViewSession reattachment bypass the relay handler",
 		() =>

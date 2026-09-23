@@ -4,9 +4,9 @@
 <!-- Preserves element IDs and class names for E2E test compatibility. -->
 
 <script lang="ts">
-	import { untrack } from "svelte";
+	import { onMount, untrack } from "svelte";
 	import { interruptStream, disposeRuntime } from "../../transport/runtime.js";
-	import { getAgentsRpc, getCommandsRpc, getFileTreeRpc, getModelsRpc, getProjectsRpc, listPtysRpc, listSessionsRpc } from "../../transport/ws-rpc-client.js";
+	import { attachProjectRpc, viewSessionRpc, getAgentsRpc, getCommandsRpc, getFileTreeRpc, getModelsRpc, getProjectsRpc, listPtysRpc, listSessionsRpc } from "../../transport/ws-rpc-client.js";
 	import Header from "./Header.svelte";
 	import SessionBar from "./SessionBar.svelte";
 	import Sidebar from "./Sidebar.svelte";
@@ -40,7 +40,8 @@
 	import {
 		connect,
 		disconnect,
-		onConnect,
+		onProjectAttached,
+		wsState,
 		onNavigateToSession,
 		clearNavigateToSession,
 		initSWNavigationListener,
@@ -48,7 +49,7 @@
 		onRewind,
 		wsSend,
 	} from "../../stores/ws.svelte.js";
-	import { getCurrentSessionId, slugState } from "../../stores/router.svelte.js";
+	import { attachedProjectState, getCurrentRoute, getCurrentSessionId } from "../../stores/router.svelte.js";
 	import { clearMessages } from "../../stores/chat.svelte.js";
 	import { applyPtyListResponse, terminalState, destroyAll } from "../../stores/terminal.svelte.js";
 	import { applyListSessionsResponse, clearSessionState, loadDaemonSessions, switchToSession } from "../../stores/session.svelte.js";
@@ -306,103 +307,135 @@
 
 	// ─── Lifecycle: WebSocket connection ───────────────────────────────────────
 
-	$effect(() => {
-		// Read slug from slugState — this ONLY changes when the project slug changes,
-		// not on session-within-project changes (unlike getCurrentSlug() which reads
-		// routerState.path and would cause disconnect/reconnect on every session switch).
-		const slug = slugState.current;
-		if (!slug) return;
-
-		// Wrap everything except the slug read in untrack() so the only
-		// reactive dependency of this effect is slugState.current.
-		// In particular, connect() must be untracked because it internally
-		// calls getCurrentSessionId() → getCurrentRoute() → routerState.path,
-		// which would cause a spurious disconnect/reconnect cycle whenever
-		// the session portion of the URL changes (e.g. on initial load when
-		// the server sends session_switched and replaceRoute updates the path).
-		untrack(() => {
-			clearMessages();
-			clearSessionState();
-			clearAllPermissions();
-			destroyAll();
-			clearDiscoveryState();
-			clearTodoState();
-			clearFileTreeState();
-			resetProjectUI();
-			planModeData = { mode: null, content: "" };
-
-			// Register notification-click → session navigation callback.
-			onNavigateToSession((sessionId) => {
-				switchToSession(sessionId);
-			});
-
-			// Listen for SW postMessage (push notification clicks)
-			initSWNavigationListener();
-
-			onConnect(() => {
-				// Fetch current version for sidebar footer
-				fetchCurrentVersion();
-				// Request initial state from server
-				// First page only. The cross-project read is keyset-paged now; the
-				// sidebar's scroll sentinel asks for the rest.
-				void loadDaemonSessions();
-				void listSessionsRpc({ projectSlug: slug, roots: true })
-					.then(applyListSessionsResponse)
-					.catch(() => {
-						showToast("Failed to load sessions", { variant: "error" });
-					});
-				const routeSessionId = getCurrentSessionId();
-				// With no session in the route, scope the agent fetch to the
-				// client-persisted harness draft so the agent list matches the
-				// picker's pre-creation selection after a reload.
-				const draftInstanceId =
-					routeSessionId == null ? discoveryState.selectedInstanceId : null;
-					void getAgentsRpc({
-						projectSlug: slug,
-						...(routeSessionId != null ? { sessionId: routeSessionId } : {}),
-						...(draftInstanceId != null ? { instanceId: draftInstanceId } : {}),
-					})
-						.then(applyGetAgentsResponse)
-						.catch(() => undefined);
-					void getModelsRpc({
-						projectSlug: slug,
-						...(routeSessionId != null ? { sessionId: routeSessionId } : {}),
-					})
-						.then(applyGetModelsResponse)
-						.catch(() => undefined);
-					void getCommandsRpc({
-						projectSlug: slug,
-						...(routeSessionId != null ? { sessionId: routeSessionId } : {}),
-					})
-						.then(applyGetCommandsResponse)
-						.catch(() => undefined);
-				void getProjectsRpc({ projectSlug: slug })
-					.then(applyGetProjectsResponse)
-					.catch(() => {
-						showToast("Failed to load projects", { variant: "error" });
-					});
-				requestFileTree();
-				void getFileTreeRpc({ projectSlug: slug })
-					.then(applyGetFileTreeResponse)
-					.catch(() => {
-						showToast("Failed to load file tree", { variant: "error" });
-					});
-				void listPtysRpc({
-					projectSlug: slug,
-					originId: getBrowserClientId(),
+	const initialRoute = untrack(getCurrentRoute);
+	let receivedAttachment = false;
+	let requestedProject: string | null = null;
+	onMount(() => {
+		let previousSlug: string | null = null;
+		let attachGeneration = 0;
+		const unsubscribe = onProjectAttached((slug) => {
+			receivedAttachment = true;
+			if (requestedProject === slug) requestedProject = null;
+			const generation = ++attachGeneration;
+			if (slug !== previousSlug) {
+				clearMessages();
+				clearSessionState();
+				clearAllPermissions();
+				destroyAll();
+				clearDiscoveryState();
+				clearTodoState();
+				clearFileTreeState();
+				resetProjectUI();
+				planModeData = { mode: null, content: "" };
+				previousSlug = slug;
+			}
+			// Fetch current version for sidebar footer
+			fetchCurrentVersion();
+			// Request initial state from server
+			// First page only. The cross-project read is keyset-paged now; the
+			// sidebar's scroll sentinel asks for the rest.
+			void loadDaemonSessions();
+			void listSessionsRpc({ projectSlug: slug, roots: true })
+				.then((response) => {
+					if (generation === attachGeneration) applyListSessionsResponse(response);
 				})
-					.then(applyPtyListResponse)
-					.catch(() => undefined);
-			});
-
-			connect(slug);
+				.catch(() => {
+					if (generation === attachGeneration) showToast("Failed to load sessions", { variant: "error" });
+				});
+			const routeSessionId = getCurrentSessionId();
+			// With no session in the route, scope the agent fetch to the
+			// client-persisted harness draft so the agent list matches the
+			// picker's pre-creation selection after a reload.
+			const draftInstanceId =
+				routeSessionId == null ? discoveryState.selectedInstanceId : null;
+			void getAgentsRpc({
+				projectSlug: slug,
+				...(routeSessionId != null ? { sessionId: routeSessionId } : {}),
+				...(draftInstanceId != null ? { instanceId: draftInstanceId } : {}),
+			})
+				.then((response) => {
+					if (generation === attachGeneration) applyGetAgentsResponse(response);
+				})
+				.catch(() => undefined);
+			void getModelsRpc({
+				projectSlug: slug,
+				...(routeSessionId != null ? { sessionId: routeSessionId } : {}),
+			})
+				.then((response) => {
+					if (generation === attachGeneration) applyGetModelsResponse(response);
+				})
+				.catch(() => undefined);
+			void getCommandsRpc({
+				projectSlug: slug,
+				...(routeSessionId != null ? { sessionId: routeSessionId } : {}),
+			})
+				.then((response) => {
+					if (generation === attachGeneration) applyGetCommandsResponse(response);
+				})
+				.catch(() => undefined);
+			void getProjectsRpc({ projectSlug: slug })
+				.then((response) => {
+					if (generation === attachGeneration) applyGetProjectsResponse(response);
+				})
+				.catch(() => {
+					if (generation === attachGeneration) showToast("Failed to load projects", { variant: "error" });
+				});
+			requestFileTree();
+			void getFileTreeRpc({ projectSlug: slug })
+				.then((response) => {
+					if (generation === attachGeneration) applyGetFileTreeResponse(response);
+				})
+				.catch(() => {
+					if (generation === attachGeneration) showToast("Failed to load file tree", { variant: "error" });
+				});
+			void listPtysRpc({
+				projectSlug: slug,
+				originId: getBrowserClientId(),
+			})
+				.then((response) => {
+					if (generation === attachGeneration) applyPtyListResponse(response);
+				})
+				.catch(() => undefined);
 		});
-
+		onNavigateToSession((sessionId) => switchToSession(sessionId));
+		initSWNavigationListener();
+		connect();
 		return () => {
+			attachGeneration++;
+			unsubscribe();
 			clearNavigateToSession();
-			interruptStream(); // Interrupt Effect stream fiber before disconnect
+			interruptStream();
 			disconnect();
 		};
+	});
+
+	// Project navigation requests attachment through RPC on the existing socket.
+	// This also covers browser history and project-only links from every caller.
+	const connected = $derived(
+		wsState.status === "connected" || wsState.status === "processing",
+	);
+	$effect(() => {
+		const route = getCurrentRoute();
+		if (!connected || route.page !== "chat") return;
+		untrack(() => {
+			// The initial URL is already included in connect(). Later navigation
+			// can also attach a socket for which the daemon found no project.
+			if (
+				!receivedAttachment &&
+				initialRoute.page === "chat" &&
+				route.slug === initialRoute.slug &&
+				route.sessionId === initialRoute.sessionId
+			) return;
+			if (route.slug === attachedProjectState.slug && requestedProject === null) return;
+			requestedProject = route.slug;
+			const input = { projectSlug: route.slug, originId: getBrowserClientId() };
+			const request = route.sessionId
+				? viewSessionRpc({ ...input, sessionId: route.sessionId })
+				: attachProjectRpc(input);
+			void request.then(() => {
+				if (requestedProject === route.slug && attachedProjectState.slug === route.slug) requestedProject = null;
+			}).catch(() => showToast("Failed to switch projects", { variant: "error" }));
+		});
 	});
 
 	// ─── Effect runtime disposal on page unload ──────────────────────────────

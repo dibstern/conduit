@@ -15,10 +15,7 @@ vi.mock("../../../src/lib/frontend/transport/ws-rpc-client.js", () => ({
 	viewSessionRpc: vi.fn(),
 }));
 
-import {
-	routerState,
-	syncSlugState,
-} from "../../../src/lib/frontend/stores/router.svelte.js";
+import { routerState } from "../../../src/lib/frontend/stores/router.svelte.js";
 import {
 	applyListDaemonSessionsResponse,
 	clearSessionSearch,
@@ -88,7 +85,6 @@ beforeEach(() => {
 	clearSessionSearch();
 	routerState.path = "/p/project-a";
 	routerState.search = "";
-	syncSlugState(routerState.path);
 });
 
 describe("cross-project browse paging", () => {
