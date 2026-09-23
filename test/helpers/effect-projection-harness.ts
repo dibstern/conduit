@@ -26,6 +26,7 @@ import {
 	type EffectProjector,
 } from "../../src/lib/persistence/effect/projectors-effect.js";
 import type { StoredEvent } from "../../src/lib/persistence/events.js";
+import { SqliteClient } from "../../src/lib/persistence/sqlite-client.js";
 
 export interface EffectProjectionHarness {
 	/** Submit one provider runtime event and wait for projection to settle. */
@@ -42,6 +43,12 @@ export interface EffectProjectionHarness {
 	readonly storedEvents: (sessionId: string) => Promise<readonly StoredEvent[]>;
 	/** Re-run projection over already-stored events, as a replay or backfill would. */
 	readonly reproject: (events: readonly StoredEvent[]) => Promise<void>;
+	/**
+	 * A synchronous client on the same database file, for read adapters that take
+	 * one (ReadQueryService and friends). Reads only — writing through it would
+	 * bypass the projection path this harness exists to exercise.
+	 */
+	readonly readClient: () => SqliteClient;
 	readonly dbPath: string;
 	readonly dispose: () => Promise<void>;
 }
@@ -59,6 +66,8 @@ export function makeEffectProjectionHarness(
 			ProviderRuntimeIngestionLive.pipe(Layer.provide(persistenceLayer)),
 		),
 	);
+
+	let readClient: SqliteClient | undefined;
 
 	// The daemon recovers the runner once at startup and the runner refuses to
 	// project until it has; do the same here rather than per call.
@@ -107,6 +116,7 @@ export function makeEffectProjectionHarness(
 				}),
 			);
 		},
+		readClient: () => (readClient ??= SqliteClient.open(dbPath)),
 		storedEvents: (sessionId) =>
 			runtime.runPromise(
 				Effect.gen(function* () {
@@ -116,6 +126,7 @@ export function makeEffectProjectionHarness(
 			),
 		dbPath,
 		dispose: async () => {
+			readClient?.close();
 			await runtime.dispose();
 			rmSync(dir, { recursive: true, force: true });
 		},
