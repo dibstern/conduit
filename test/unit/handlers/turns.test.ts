@@ -19,6 +19,7 @@ import {
 	fmtTokens,
 	isSoloTool,
 	lastResult,
+	partLabel,
 	segmentTurns,
 	stepDurations,
 	stepWeights,
@@ -90,6 +91,19 @@ function result(fields: Partial<ResultMessage> = {}): ResultMessage {
 }
 
 const system = (): SystemMessage => ({ type: "system", uuid: id(), text: "!" });
+
+function compaction(
+	state: NonNullable<SystemMessage["compaction"]> = "completed",
+	fields: Partial<SystemMessage> = {},
+): SystemMessage {
+	return {
+		type: "system",
+		uuid: id(),
+		text: "Context compacted",
+		compaction: state,
+		...fields,
+	};
+}
 
 // Tool inputs are stored canonically (the provider normalizes at the boundary),
 // so fixtures use the canonical discriminated shape rather than raw SDK keys.
@@ -697,5 +711,106 @@ describe("isSoloTool", () => {
 		expect(isSoloTool(tool("Skill"))).toBe(true);
 		expect(isSoloTool(tool("Task"))).toBe(true);
 		expect(isSoloTool(tool("Read"))).toBe(false);
+	});
+});
+
+// ─── Compaction in the ledger ────────────────────────────────────────────────
+
+describe("compaction", () => {
+	it("puts a completed compaction in the activity log where it happened", () => {
+		const before = read("a.ts");
+		const boundary = compaction();
+		const after = read("b.ts");
+		const [turn] = segmentTurns(
+			[user(), before, boundary, after, say()],
+			false,
+		);
+		expect(turn?.segments[0]?.activity).toEqual([before, boundary, after]);
+		expect(turn?.notices).toEqual([]);
+	});
+
+	it("keeps started and failed compactions as notices", () => {
+		const started = compaction("started");
+		const failed = compaction("failed", { variant: "error" });
+		const [turn] = segmentTurns([user(), started, read("a.ts"), failed], true);
+		expect(turn?.notices).toEqual([started, failed]);
+		expect(turn?.segments[0]?.activity.map((p) => p.type)).toEqual(["tool"]);
+	});
+
+	it("keeps several compactions in order and folds narration before them", () => {
+		const first = compaction("completed", { preTokens: 1 });
+		const narration = say("squeezing");
+		const second = compaction("completed", { preTokens: 2 });
+		const [turn] = segmentTurns(
+			[user(), read("a.ts"), first, narration, second, say()],
+			false,
+		);
+		expect(turn?.segments[0]?.activity.slice(1)).toEqual([
+			first,
+			narration,
+			second,
+		]);
+	});
+
+	it("counts compactions apart from tools", () => {
+		const segment = {
+			activity: [read("a.ts"), compaction(), compaction()],
+			reply: [],
+		};
+		const stats = turnStats(segment);
+		expect(stats).toMatchObject({ tools: 1, compactions: 2, others: 0 });
+		expect(countsPhrase(stats)).toBe("1 read");
+	});
+
+	it("says so when a compaction is the only thing in the ledger", () => {
+		const stats = turnStats({ activity: [compaction()], reply: [] });
+		expect(countsPhrase(stats)).toBe("compacted context");
+	});
+
+	it("takes no time, and the step before it ends where it began", () => {
+		const turn = segmentTurns(
+			[
+				user(),
+				read("a.ts", 1000),
+				compaction("completed", { createdAt: 4000 }),
+				read("b.ts", 5000),
+				say("ok", 6000),
+			],
+			false,
+		)[0]!;
+		expect(stepDurations(turn.segments[0]!, turn, true, 0)).toEqual([
+			3000, 0, 1000,
+		]);
+	});
+
+	it("does not void the timings when it carries no stamp", () => {
+		const turn = segmentTurns(
+			[
+				user(),
+				read("a.ts", 1000),
+				compaction(),
+				read("b.ts", 5000),
+				say("ok", 6000),
+			],
+			false,
+		)[0]!;
+		expect(stepDurations(turn.segments[0]!, turn, true, 0)).toEqual([
+			4000, 0, 1000,
+		]);
+	});
+
+	it("labels the saving when both sizes are known", () => {
+		const label = (fields: Partial<SystemMessage>) => {
+			const [turn] = segmentTurns(
+				[user(), compaction("completed", fields)],
+				false,
+			);
+			const part = turn?.segments[0]?.activity[0];
+			return part && partLabel(part);
+		};
+		expect(label({ preTokens: 180_000, postTokens: 42_000 })).toBe(
+			"Compacted context · 180k → 42k, 138k saved",
+		);
+		expect(label({})).toBe("Compacted context");
 	});
 });

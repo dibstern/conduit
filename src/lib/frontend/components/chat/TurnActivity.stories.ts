@@ -1,7 +1,13 @@
 import type { Meta, StoryObj } from "@storybook/svelte-vite";
+import { expect, userEvent, within } from "storybook/test";
 import { turnFixtureMessages } from "../../stories/turn-fixtures.js";
 import type { ChatMessage } from "../../types.js";
-import { segmentTurns, type Turn } from "../../utils/turns.js";
+import {
+	type ActivityPart,
+	type CompactionPart,
+	segmentTurns,
+	type Turn,
+} from "../../utils/turns.js";
 import TurnActivity from "./TurnActivity.svelte";
 
 const EMPTY_TURN: Turn = {
@@ -122,4 +128,72 @@ const handBack = segmentTurns(handBackMessages, false)[0]!;
 /** The pre-question ledger is settled and carries no turn-level bill. */
 export const HandBack: Story = {
 	args: { turn: handBack, segment: handBack.segments[0]!, final: false },
+};
+
+// ─── Compaction ──────────────────────────────────────────────────────────────
+
+function compaction(
+	uuid: string,
+	at: ActivityPart | undefined,
+	preTokens: number,
+	postTokens: number,
+): CompactionPart {
+	return {
+		type: "system",
+		uuid,
+		text: "Context compacted",
+		variant: "info",
+		compaction: "completed",
+		preTokens,
+		postTokens,
+		// Stamped where the next step starts, so the step before it ends there.
+		...(at?.createdAt !== undefined ? { createdAt: at.createdAt } : {}),
+	};
+}
+
+/** The settled turn with a compaction spliced in before each given step. */
+function compacted(...at: number[]): Turn {
+	const segment = settled.segments[0]!;
+	const activity = segment.activity.flatMap((part, i) => {
+		const n = at.indexOf(i);
+		return n === -1
+			? [part]
+			: [
+					compaction(`compaction-${n}`, part, 182_400 - n * 20_000, 41_800),
+					part,
+				];
+	});
+	return {
+		...settled,
+		segments: [{ ...segment, activity }, ...settled.segments.slice(1)],
+	};
+}
+
+const once = compacted(5);
+const twice = compacted(3, 8);
+
+async function expand(canvasElement: HTMLElement) {
+	const canvas = within(canvasElement);
+	const toggle = canvas.getByRole("button", { expanded: false });
+	await userEvent.click(toggle);
+	// A synthetic click leaves a focus ring; the baseline is the resting state.
+	toggle.blur();
+	await expect(canvas.getAllByText("Compacted context")[0]).toBeVisible();
+}
+
+/** A fixed-width seam cuts the strip, and the header discloses the compaction. */
+export const Compacted: Story = {
+	args: { turn: once, segment: once.segments[0]!, final: true },
+};
+
+/** Expanded, the seam is a rule across the log carrying the tokens saved. */
+export const CompactedExpanded: Story = {
+	args: { turn: once, segment: once.segments[0]!, final: true },
+	play: ({ canvasElement }) => expand(canvasElement),
+};
+
+/** Each compaction keeps its place, in order, and the marker counts them. */
+export const CompactedTwice: Story = {
+	args: { turn: twice, segment: twice.segments[0]!, final: true },
+	play: ({ canvasElement }) => expand(canvasElement),
 };

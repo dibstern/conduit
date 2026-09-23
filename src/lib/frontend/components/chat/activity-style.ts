@@ -43,6 +43,13 @@ const TEXT_STYLE: PartStyle = {
 	bg: "bg-text-dimmer",
 };
 
+/** Full contrast, so the seam reads as a cut through the strip rather than work. */
+const COMPACTION_STYLE: PartStyle = {
+	icon: "minimize",
+	text: "text-text-muted",
+	bg: "bg-text",
+};
+
 /** Tools whose own icon reads better than their category's. */
 const TOOL_ICONS: Record<string, string> = {
 	Read: "file-text",
@@ -65,6 +72,8 @@ export function partStyle(part: ActivityPart): PartStyle {
 			return toolStyle(part);
 		case "thinking":
 			return THINKING_STYLE;
+		case "system":
+			return COMPACTION_STYLE;
 		default:
 			return TEXT_STYLE;
 	}

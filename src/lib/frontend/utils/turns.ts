@@ -16,8 +16,20 @@ import { isSubagentToolName } from "./subagent-tools.js";
 import { ensureCanonical } from "./tool-summarizers/ensure-canonical.js";
 import { lookupSummarizer } from "./tool-summarizers/index.js";
 
+/** A finished context compaction: a boundary in the work, not a unit of it. */
+export type CompactionPart = SystemMessage & { compaction: "completed" };
+
 /** Anything that can appear between a prompt and the model's trailing reply. */
-export type ActivityPart = ToolMessage | ThinkingMessage | AssistantMessage;
+export type ActivityPart =
+	| ToolMessage
+	| ThinkingMessage
+	| AssistantMessage
+	| CompactionPart;
+
+/** Started and failed compactions stay notices; only a completed one is activity. */
+export function isCompaction(msg: ChatMessage): msg is CompactionPart {
+	return msg.type === "system" && msg.compaction === "completed";
+}
 
 export interface OpenSegment {
 	/** Everything between the segment's start and its trailing reply, in order. */
@@ -44,8 +56,8 @@ export interface Turn {
 	/** Always at least one. */
 	segments: Segment[];
 	/**
-	 * Transcript-level notices — errors and compaction dividers. Kept out of the
-	 * activity log so a failure is never hidden behind a collapsed panel.
+	 * Transcript-level notices — errors and in-flight or failed compactions. Kept
+	 * out of the activity log so a failure is never hidden behind a collapsed panel.
 	 */
 	notices: SystemMessage[];
 	live: boolean;
@@ -106,7 +118,7 @@ export function segmentTurns(
 			turns.push(turn);
 		}
 		let segment = turn.segments.at(-1)!;
-		if (msg.type === "system") {
+		if (msg.type === "system" && !isCompaction(msg)) {
 			turn.notices.push(msg);
 			continue;
 		}
@@ -289,7 +301,18 @@ export function partLabel(part: ActivityPart): string {
 				: `${thinkingVerb(part)}…`;
 		case "assistant":
 			return firstLine(part.rawText);
+		case "system":
+			return compactionLabel(part);
 	}
+}
+
+/** "Compacted context · 180k → 42k, 138k saved" — or just the first half when
+ *  the provider reported no sizes. */
+export function compactionLabel(part: CompactionPart): string {
+	const { preTokens: pre, postTokens: post } = part;
+	if (pre === undefined || post === undefined) return "Compacted context";
+	const saved = pre > post ? `, ${fmtTokens(pre - post)} saved` : "";
+	return `Compacted context · ${fmtTokens(pre)} → ${fmtTokens(post)}${saved}`;
 }
 
 /** What the model is doing right now, for the live header. */
@@ -330,6 +353,7 @@ export interface TurnStats {
 	skills: number;
 	subagents: number;
 	others: number;
+	compactions: number;
 }
 
 export function turnStats(segment: Segment): TurnStats {
@@ -347,10 +371,15 @@ export function turnStats(segment: Segment): TurnStats {
 		skills: 0,
 		subagents: 0,
 		others: 0,
+		compactions: 0,
 	};
 	for (const part of segment.activity) {
 		if (part.type === "thinking") {
 			s.thinking++;
+			continue;
+		}
+		if (part.type === "system") {
+			s.compactions++;
 			continue;
 		}
 		if (part.type !== "tool") continue;
@@ -410,7 +439,10 @@ export function countsPhrase(s: TurnStats): string {
 		plural(s.others, "other"),
 	].filter(Boolean);
 	if (parts.length > 0) return parts.join(" · ");
-	return plural(s.thinking, "thought") || "no tools";
+	return (
+		plural(s.thinking, "thought") ||
+		(s.compactions > 0 ? "compacted context" : "no tools")
+	);
 }
 
 // ─── Timing ──────────────────────────────────────────────────────────────────
@@ -469,7 +501,8 @@ function segmentEnd(
 	now: number,
 ): number {
 	const last = segment.activity.at(-1);
-	const lastStamp = Math.max(last?.endedAt ?? 0, last?.createdAt ?? now);
+	const lastEnded = last?.type === "system" ? undefined : last?.endedAt;
+	const lastStamp = Math.max(lastEnded ?? 0, last?.createdAt ?? now);
 	// A live turn's work is still running — unless the reply has started, in
 	// which case it is already over and must stop there. Without that boundary
 	// the segment grows for as long as the reply streams and then snaps back
@@ -507,6 +540,9 @@ export function segmentDuration(
  * apart and then run concurrently — charging each one only the gap to its
  * sibling reports 0.0s for work that took seconds.
  *
+ * A compaction is a boundary, not work, so it always measures 0. It needs no
+ * stamp of its own, but when it has one the step before it ends there.
+ *
  * `undefined` when any step lacks a timestamp: durations are never guessed.
  */
 export function stepDurations(
@@ -515,16 +551,24 @@ export function stepDurations(
 	final: boolean,
 	now: number,
 ): number[] | undefined {
-	const stamps: number[] = [];
-	for (const part of segment.activity) {
-		if (part.createdAt === undefined) return undefined;
-		stamps.push(part.createdAt);
+	const { activity } = segment;
+	if (activity.some((p) => p.type !== "system" && p.createdAt === undefined)) {
+		return undefined;
 	}
-	const end = segmentEnd(segment, turn, final, now);
-	return stamps.map((t, i) => {
-		const own = segment.activity[i]?.endedAt;
-		if (own !== undefined && own > t) return own - t;
-		return Math.max(0, (stamps[i + 1] ?? end) - t);
+	// Where each step's successor starts, filled back to front so an unstamped
+	// compaction hands its slot on to whatever follows it.
+	const nextStart: number[] = [];
+	let next = segmentEnd(segment, turn, final, now);
+	for (let i = activity.length - 1; i >= 0; i--) {
+		nextStart[i] = next;
+		next = activity[i]!.createdAt ?? next;
+	}
+	return activity.map((part, i) => {
+		if (part.type === "system") return 0;
+		const t = part.createdAt;
+		if (t === undefined) return 0;
+		if (part.endedAt !== undefined && part.endedAt > t) return part.endedAt - t;
+		return Math.max(0, nextStart[i]! - t);
 	});
 }
 
@@ -554,7 +598,10 @@ export function stepCaption(
 ): string {
 	const part = segment.activity[i];
 	if (!part) return "";
-	const d = stepDurations(segment, turn, final, now)?.[i];
+	const d =
+		part.type === "system"
+			? undefined
+			: stepDurations(segment, turn, final, now)?.[i];
 	return d === undefined
 		? partLabel(part)
 		: `${partLabel(part)} · ${fmtDuration(d)}`;

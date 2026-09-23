@@ -13,6 +13,7 @@ import {
 	addUserMessage,
 	chatState,
 	clearMessages,
+	handleCompaction,
 	handleDelta,
 	handleDone,
 	handleError,
@@ -894,6 +895,60 @@ describe("addSystemMessage", () => {
 		if (m.type === "system") {
 			expect(m.variant).toBe("error");
 		}
+	});
+});
+
+describe("handleCompaction", () => {
+	const compaction = (
+		state: "started" | "completed" | "failed",
+		detail: string,
+		tokens: { preTokens?: number; postTokens?: number } = {},
+	) =>
+		handleCompaction(ta, tm, {
+			type: "compaction",
+			sessionId: "s1",
+			state,
+			detail,
+			...tokens,
+		});
+
+	it("replaces the in-flight notice with the completed boundary", () => {
+		compaction("started", "Compacting conversation…");
+		compaction("completed", "Context compacted", {
+			preTokens: 180_000,
+			postTokens: 42_000,
+		});
+		expect(chatState.messages).toEqual([
+			expect.objectContaining({
+				type: "system",
+				compaction: "completed",
+				preTokens: 180_000,
+				postTokens: 42_000,
+			}),
+		]);
+	});
+
+	it("replaces the in-flight notice with a failure notice", () => {
+		compaction("started", "Compacting conversation…");
+		compaction("failed", "Compaction failed: too large");
+		expect(chatState.messages).toEqual([
+			expect.objectContaining({
+				compaction: "failed",
+				variant: "error",
+				text: "Compaction failed: too large",
+			}),
+		]);
+	});
+
+	it("keeps earlier completed compactions", () => {
+		compaction("completed", "Context compacted");
+		compaction("started", "Compacting conversation…");
+		compaction("completed", "Context compacted");
+		expect(
+			chatState.messages.map((m) =>
+				m.type === "system" ? m.compaction : m.type,
+			),
+		).toEqual(["completed", "completed"]);
 	});
 });
 

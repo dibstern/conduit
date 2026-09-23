@@ -14,6 +14,7 @@
 		type ActivityPart,
 		firstLine,
 		fmtDuration,
+		fmtTokens,
 		isSoloTool,
 		thinkingVerb,
 		toolCommand,
@@ -172,6 +173,26 @@
 				class="ml-7 mr-1 my-1 py-2 px-2.5 font-mono text-xs whitespace-pre-wrap break-words text-text-secondary bg-code-bg border border-border-subtle rounded-lg max-h-[300px] overflow-y-auto"
 			>{part.text}</div>
 		{/if}
+	</div>
+{:else if part.type === "system"}
+	{@const { preTokens: pre, postTokens: post } = part}
+	<!-- A boundary, not a step: there is nothing to open, so it is a rule across
+	     the log rather than a row. The saving is the one number worth reading. -->
+	<div
+		class="compaction-rule flex items-center gap-2 py-1.5 px-2 rounded text-xs {style.text} {highlight ? 'bg-[rgba(var(--overlay-rgb),0.06)]' : ''}"
+		data-part={part.uuid}
+	>
+		<span class="h-px flex-1 bg-border" aria-hidden="true"></span>
+		<span class="shrink-0 [&_.lucide]:w-3 [&_.lucide]:h-3" aria-hidden="true"><Icon name={style.icon} size={12} /></span>
+		<span class="shrink-0">Compacted context</span>
+		{#if pre !== undefined && post !== undefined}
+			<span class="shrink-0 font-mono text-text-dimmer">{fmtTokens(pre)} → {fmtTokens(post)}</span>
+			{#if pre > post}
+				<span class="shrink-0 text-text-dimmer">·</span>
+				<span class="shrink-0 font-medium text-text-secondary">{fmtTokens(pre - post)} saved</span>
+			{/if}
+		{/if}
+		<span class="h-px flex-1 bg-border" aria-hidden="true"></span>
 	</div>
 {:else}
 	<div data-part={part.uuid}>

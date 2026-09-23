@@ -1420,12 +1420,24 @@ export function handleCompaction(
 	msg: Extract<RelayMessage, { type: "compaction" }>,
 ): void {
 	requestScrollOnNextContent();
-	addSystemMessage(
-		activity,
-		messages,
-		msg.detail,
-		msg.state === "failed" ? "error" : "info",
-	);
+	const notice: SystemMessage = {
+		type: "system",
+		uuid: generateUuid(),
+		text: msg.detail,
+		variant: msg.state === "failed" ? "error" : "info",
+		compaction: msg.state,
+		...(msg.preTokens !== undefined ? { preTokens: msg.preTokens } : {}),
+		...(msg.postTokens !== undefined ? { postTokens: msg.postTokens } : {}),
+		createdAt: Date.now(),
+	};
+	// The outcome supersedes the "Compacting…" notice rather than stacking under it.
+	const kept =
+		msg.state === "started"
+			? getMessages(messages)
+			: getMessages(messages).filter(
+					(m) => m.type !== "system" || m.compaction !== "started",
+				);
+	setMessages(messages, [...kept, notice]);
 
 	if (
 		msg.state === "completed" &&

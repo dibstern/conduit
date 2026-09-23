@@ -106,6 +106,17 @@
 						</span>
 					{/if}
 				</button>
+				{#if stats.compactions > 0}
+					<!-- Outside the toggle so it survives the hover caption: a collapsed
+					     turn must still disclose that its context was squeezed. -->
+					<span
+						class="compaction-marker shrink-0 flex items-center gap-1 text-text-muted [&_.lucide]:w-3 [&_.lucide]:h-3"
+						title={stats.compactions === 1 ? "Context compacted once" : `Context compacted ${stats.compactions} times`}
+					>
+						<Icon name="minimize" size={12} />
+						<span class="@max-[336px]:hidden">compacted{stats.compactions > 1 ? ` ×${stats.compactions}` : ""}</span>
+					</span>
+				{/if}
 				{#if stats.failed > 0}
 					<span class="shrink-0 text-error">{stats.failed} failed</span>
 				{/if}

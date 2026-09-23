@@ -36,3 +36,16 @@ export const Hover: Story = {
 	...WithDetails,
 	parameters: { pseudo: { hover: true } },
 };
+
+/** A failed compaction stays a standalone notice: it is a failure, not a boundary. */
+export const CompactionFailed: Story = {
+	args: {
+		message: {
+			type: "system",
+			uuid: "compaction-failed",
+			text: "Compaction failed: prompt is too long",
+			variant: "error",
+			compaction: "failed",
+		},
+	},
+};

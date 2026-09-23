@@ -175,6 +175,11 @@ export interface SystemMessage {
 	 *  Lets restoreContextFromMessages recover the reduced context-% bar on
 	 *  reload when no real turn has run since the compaction. */
 	postTokens?: number;
+	/** Set when this notice reports a context compaction. A completed one leaves
+	 *  the notices and becomes a boundary inside the turn's activity log. */
+	compaction?: "started" | "completed" | "failed";
+	preTokens?: number;
+	createdAt?: number;
 }
 
 // ─── Session Types (frontend-only) ──────────────────────────────────────────
