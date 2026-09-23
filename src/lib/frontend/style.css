@@ -580,7 +580,24 @@ body:has(dialog:modal) {
 
 /* ─── Mobile responsive ────────────────────────────────────────────────────── */
 
+#session-bar-top-edge {
+	display: none;
+}
+
 @media (max-width: 768px) {
+	/* See the comment on the element in SessionBar.svelte. `pointer-events: none`
+	   is safe: WebKit's sampler first hit-tests ignoring pointer-events. */
+	#session-bar-top-edge {
+		display: block;
+		position: fixed;
+		top: 0;
+		left: 0;
+		right: 0;
+		height: 12px;
+		background: var(--color-bg-surface);
+		pointer-events: none;
+	}
+
 	#sidebar {
 		position: fixed;
 		left: 0;

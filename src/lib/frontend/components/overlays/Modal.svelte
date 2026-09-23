@@ -33,6 +33,14 @@
 
 	let dialogEl = $state<HTMLDialogElement | null>(null);
 
+	// Whether the most recent input inside the dialog was a tap or click.
+	// close() hands focus back to the control that opened the dialog, and
+	// WebKit treats that hand-back as keyboard focus, so the opener lights up
+	// with a focus ring after a purely touch-driven open and close (iOS 26,
+	// the "..." session-bar button). Dropping the restored focus is only right
+	// after pointer input; a keyboard user dismissing with Escape keeps it.
+	let closedByPointer = false;
+
 	// showModal()/close() are imperative, so mirror `open` onto the element.
 	// Both directions need the guard: showModal() on an already-open dialog throws.
 	$effect(() => {
@@ -46,8 +54,15 @@
 			// them look pre-selected the instant the modal appears. Focusing the
 			// dialog itself also puts a screen reader at the start of the dialog,
 			// so `aria-labelledby` is announced before any content.
-			el.focus();
-		} else if (!open && el.open) el.close();
+			// `preventScroll` so opening a tall dialog cannot scroll the page
+			// underneath it; the dialog is its own scroller.
+			el.focus({ preventScroll: true });
+		} else if (!open && el.open) {
+			el.close();
+			if (closedByPointer && document.activeElement instanceof HTMLElement) {
+				document.activeElement.blur();
+			}
+		}
 	});
 
 	// Escape closes the dialog at the browser level without touching caller
@@ -77,6 +92,8 @@
 	class="m-auto max-w-[100vw] overflow-visible border-none bg-transparent p-0 text-text focus:outline-none"
 	oncancel={handleCancel}
 	onclick={handleClick}
+	onpointerdown={() => (closedByPointer = true)}
+	onkeydown={() => (closedByPointer = false)}
 >
 	{#if open}
 		{@render children()}

@@ -97,6 +97,13 @@
 	class="shrink-0 bg-bg-surface border-b border-border outline-none"
 >
 	<!--
+		iOS 26 paints a progressive blur under the status bar unless WebKit finds an
+		opaque fixed or sticky box at the top edge (hit-tested at x = width/2, y = 0).
+		The bar itself is static, so this strip stands in for it. Same colour as the
+		bar, so it is invisible; mobile-only, styled in style.css.
+	-->
+	<div id="session-bar-top-edge" aria-hidden="true"></div>
+	<!--
 		Leaving. `size="content"` because this button owns its own box: a 44px
 		minimum is the platform touch target and is taller than the 38px the mock
 		draws, and the taller of the two constraints wins. Literal px, not

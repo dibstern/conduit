@@ -4,6 +4,12 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="mobile-web-app-capable" content="yes">
+  <!-- `black-translucent` does nothing here and is not worth retrying: measured
+       on iOS 26, an installed PWA still gets a web view inset below the status
+       bar (innerHeight 793 vs screen 852) and env(safe-area-inset-top) 0, the
+       same as `default`. viewport-fit=cover above is still load-bearing, but
+       only for the BOTTOM inset, which is what keeps the composer clear of the
+       home indicator. -->
   <meta name="apple-mobile-web-app-status-bar-style" content="default">
   <meta name="apple-mobile-web-app-title" content="Conduit">
   <meta name="apple-mobile-web-app-capable" content="yes">
