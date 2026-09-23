@@ -120,11 +120,16 @@
 	--z-raised: 1;
 	--z-dropdown: 60;
 	--z-sheet: 80;
-	--z-popover: 200;
-	--z-popover-raised: 210;
 	--z-pane: 300;
 	--z-drawer-scrim: 340;
 	--z-drawer: 350;
+	/* Above the drawer, not below it. A portaled surface is opened by something
+	   and has to outrank it. The session "..." menu portals to <body>, so at the
+	   old 200 it painted under the mobile sidebar: the menu opened, you just
+	   could not see it, and the button read as dead (conduit-test-aagi). Only
+	   toasts sit higher. */
+	--z-popover: 360;
+	--z-popover-raised: 370;
 	--z-toast: 400;
 	--z-top-scrim: 990;
 	--z-top: 1000;
