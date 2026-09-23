@@ -148,6 +148,7 @@ vi.mock("../../../src/lib/frontend/stores/session.svelte.js", () => ({
 	},
 	clearSessionState: vi.fn(),
 	applyListDaemonSessionsResponse: vi.fn(),
+	DAEMON_SESSION_PAGE_SIZE: 30,
 	applyListSessionsResponse: vi.fn(),
 	switchToSession: vi.fn(),
 	sessionCreation: { value: { state: "idle" } },

@@ -71,7 +71,8 @@ beforeEach(() => {
 	sessionState.searchResults = null;
 	sessionState.currentId = null;
 	sessionState.searchQuery = "";
-	sessionState.hasMore = false;
+	sessionState.daemonHasMore = false;
+	sessionState.daemonCursor = null;
 	vi.useFakeTimers();
 });
 

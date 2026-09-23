@@ -339,6 +339,11 @@ export interface ListDaemonSessionsRpcInput {
 	readonly projectSlug: string;
 	readonly limit?: number;
 	readonly roots?: boolean;
+	readonly search?: string;
+	readonly cursor?: {
+		readonly updatedAt: number;
+		readonly id: string;
+	};
 }
 
 export interface LoadMoreHistoryRpcInput {

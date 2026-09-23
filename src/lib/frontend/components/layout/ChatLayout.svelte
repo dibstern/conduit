@@ -51,7 +51,7 @@
 	import { getCurrentSessionId, slugState } from "../../stores/router.svelte.js";
 	import { clearMessages } from "../../stores/chat.svelte.js";
 	import { applyPtyListResponse, terminalState, destroyAll } from "../../stores/terminal.svelte.js";
-	import { applyListDaemonSessionsResponse, applyListSessionsResponse, clearSessionState, switchToSession } from "../../stores/session.svelte.js";
+	import { applyListDaemonSessionsResponse, applyListSessionsResponse, clearSessionState, DAEMON_SESSION_PAGE_SIZE, switchToSession } from "../../stores/session.svelte.js";
 	import { clearAllPermissions } from "../../stores/permissions.svelte.js";
 	import { applyGetAgentsResponse, applyGetCommandsResponse, applyGetModelsResponse, clearDiscoveryState, discoveryState } from "../../stores/discovery.svelte.js";
 	import { todoState, clearTodoState } from "../../stores/todo.svelte.js";
@@ -343,7 +343,12 @@
 				// Fetch current version for sidebar footer
 				fetchCurrentVersion();
 				// Request initial state from server
-				void listDaemonSessionsRpc({ projectSlug: slug })
+				// First page only. The cross-project read is keyset-paged now; the
+				// sidebar's scroll sentinel asks for the rest.
+				void listDaemonSessionsRpc({
+					projectSlug: slug,
+					limit: DAEMON_SESSION_PAGE_SIZE,
+				})
 					.then(applyListDaemonSessionsResponse)
 					.catch(() => undefined);
 				void Promise.all([

@@ -37,6 +37,9 @@ export interface ReadQueryEffect {
 
 	readonly listSessions: (opts?: {
 		roots?: boolean;
+		limit?: number;
+		titleQuery?: string;
+		before?: { updatedAt: number; id: string };
 	}) => Effect.Effect<readonly SessionRow[], ReadQueryEffectError | SqlError>;
 
 	readonly countPendingApprovalsBySession: () => Effect.Effect<
@@ -143,14 +146,35 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 
 	const listSessions = (opts?: {
 		roots?: boolean;
+		limit?: number;
+		titleQuery?: string;
+		before?: { updatedAt: number; id: string };
 	}): Effect.Effect<readonly SessionRow[], ReadQueryEffectError | SqlError> =>
 		Effect.gen(function* () {
-			if (opts?.roots) {
-				return yield* sql<SessionRow>`
-					SELECT * FROM sessions WHERE parent_id IS NULL ORDER BY updated_at DESC`;
+			const predicates = [];
+			if (opts?.roots) predicates.push(sql`parent_id IS NULL`);
+			if (opts?.titleQuery !== undefined) {
+				const escapedQuery = opts.titleQuery.replace(/[\\%_]/g, "\\$&");
+				const pattern = `%${escapedQuery}%`;
+				// SQLite LIKE is ASCII-case-insensitive; we accept non-ASCII case sensitivity until deep search adds a collation.
+				predicates.push(sql`title LIKE ${pattern} ESCAPE '\\'`);
 			}
+			if (opts?.before !== undefined) {
+				predicates.push(
+					sql`(updated_at < ${opts.before.updatedAt} OR (updated_at = ${opts.before.updatedAt} AND id < ${opts.before.id}))`,
+				);
+			}
+			const limit =
+				opts?.limit === undefined ? sql.literal("") : sql`LIMIT ${opts.limit}`;
+
+			// The id DESC tiebreaker makes equal timestamps deterministic. This
+			// deliberately replaces the previous arbitrary per-query tie ordering and
+			// is required so keyset pages neither duplicate nor skip rows.
 			return yield* sql<SessionRow>`
-				SELECT * FROM sessions ORDER BY updated_at DESC`;
+				SELECT * FROM sessions
+				WHERE ${sql.and(predicates)}
+				ORDER BY updated_at DESC, id DESC
+				${limit}`;
 		}).pipe(
 			Effect.mapError((e) =>
 				e instanceof ReadQueryEffectError

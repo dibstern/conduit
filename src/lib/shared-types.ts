@@ -247,6 +247,13 @@ export interface SessionInfo {
 export interface DaemonSessionQueryOptions {
 	readonly limit?: number;
 	readonly roots?: boolean;
+	readonly search?: string;
+	readonly cursor?: DaemonSessionCursor;
+}
+
+export interface DaemonSessionCursor {
+	readonly updatedAt: number;
+	readonly id: string;
 }
 
 export type ProjectSessionAvailability =
@@ -263,6 +270,8 @@ export type ProjectSessionAvailability =
 export interface DaemonSessionQueryResult {
 	readonly sessions: ReadonlyArray<SessionInfo>;
 	readonly availability: ReadonlyArray<ProjectSessionAvailability>;
+	readonly hasMore: boolean;
+	readonly nextCursor: DaemonSessionCursor | null;
 }
 
 // ─── Ask User / Questions ───────────────────────────────────────────────────

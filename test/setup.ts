@@ -35,3 +35,23 @@ if (
 		this.dispatchEvent(new Event("close"));
 	};
 }
+
+// 4. jsdom has no IntersectionObserver, so any component that observes a scroll
+//    sentinel throws on mount. This inert shim never reports an intersection,
+//    which is the right default: a test that wants paging to fire stubs its own
+//    (see test/unit/components/history-loader.test.ts).
+if (typeof globalThis.IntersectionObserver === "undefined") {
+	class InertIntersectionObserver implements IntersectionObserver {
+		readonly root = null;
+		readonly rootMargin = "";
+		readonly scrollMargin = "";
+		readonly thresholds: ReadonlyArray<number> = [];
+		observe(): void {}
+		unobserve(): void {}
+		disconnect(): void {}
+		takeRecords(): IntersectionObserverEntry[] {
+			return [];
+		}
+	}
+	globalThis.IntersectionObserver = InertIntersectionObserver;
+}

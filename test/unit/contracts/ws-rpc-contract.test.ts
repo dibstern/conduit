@@ -142,6 +142,8 @@ const provideRpc = <A, E>(effect: Effect.Effect<A, E, WsRpcTestEnv>) =>
 							},
 						],
 						availability: [{ projectSlug: "demo", available: true as const }],
+						hasMore: false,
+						nextCursor: null,
 					}),
 				AddProject: (request) =>
 					Effect.succeed({
@@ -796,6 +798,8 @@ describe("browser WebSocket RPC contract", () => {
 					projectSlug: "demo",
 					limit: 10,
 					roots: true,
+					search: "session",
+					cursor: { updatedAt: 100, id: "session-2" },
 				});
 				expect(daemonSessions).toEqual({
 					projectSlug: "demo",
@@ -807,6 +811,8 @@ describe("browser WebSocket RPC contract", () => {
 						},
 					],
 					availability: [{ projectSlug: "demo", available: true }],
+					hasMore: false,
+					nextCursor: null,
 				});
 
 				const addedProject = yield* client.AddProject({

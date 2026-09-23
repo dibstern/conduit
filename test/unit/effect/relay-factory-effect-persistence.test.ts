@@ -202,6 +202,8 @@ describe("RelayFactoryLive Effect persistence wiring", () => {
 							config?.listDaemonSessions?.({ limit: 5 }) ?? {
 								sessions: [],
 								availability: [],
+								hasMore: false,
+								nextCursor: null,
 							},
 						),
 					catch: (cause) => cause,
@@ -226,6 +228,8 @@ describe("RelayFactoryLive Effect persistence wiring", () => {
 				expect(daemonSessions).toEqual({
 					sessions: [],
 					availability: [{ projectSlug: "effect-project", available: true }],
+					hasMore: false,
+					nextCursor: null,
 				});
 			}).pipe(
 				Effect.provide(Layer.fresh(layer)),

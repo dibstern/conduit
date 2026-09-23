@@ -13,7 +13,8 @@
 		switchToSession,
 		sendNewSession,
 		sessionCreation,
-		applyListSessionsResponse,
+		clearSessionSearch,
+		searchSessions,
 	} from "../../stores/session.svelte.js";
 	import {
 		getCurrentSlug,
@@ -25,11 +26,11 @@
 	import {
 		deleteSessionRpc,
 		forkSessionRpc,
-		listSessionsRpc,
 		renameSessionRpc,
 	} from "../../transport/ws-rpc-client.js";
 	import { closeMobileSidebar, confirm, showToast, toggleHideSubagentSessions, uiState } from "../../stores/ui.svelte.js";
 	import SessionItem from "./SessionItem.svelte";
+	import SessionPager from "./SessionPager.svelte";
 	import SessionContextMenu from "./SessionContextMenu.svelte";
 	import Icon from "../ui/Icon.svelte";
 	import BlockGrid from "../ui/BlockGrid.svelte";
@@ -57,6 +58,9 @@
 	// Rename state — set by context menu to trigger inline rename on a SessionItem
 	let renamingSessionId = $state<string | null>(null);
 
+	// Paging sentinel, observed by SessionPager.
+	let sentinelEl: HTMLElement | undefined = $state();
+
 	// Cleanup mode state
 	let cleanupMode = $state(false);
 	let selectedForDeletion = $state<Set<string>>(new Set());
@@ -72,6 +76,21 @@
 
 	const emptyMessage = $derived(
 		sessionState.searchQuery ? "No matching sessions" : "No sessions yet",
+	);
+
+	// A trailing "+" whenever another page exists, so the number is always "at
+	// least this many" and never claims to be the size of the whole match set.
+	// Counting the full set is exactly what this list must never do.
+	const searchSummary = $derived.by(() => {
+		if (sessionState.searchResults === null) return null;
+		if (sessionState.searchHasMore) return `${filtered.length}+ matches`;
+		return filtered.length === 1 ? "1 match" : `${filtered.length} matches`;
+	});
+
+	const pagerLoading = $derived(
+		sessionState.searchResults === null
+			? sessionState.daemonLoading
+			: sessionState.searchLoading,
 	);
 
 	const selectionCount = $derived(selectedForDeletion.size);
@@ -122,17 +141,11 @@
 
 	// ─── Handlers ───────────────────────────────────────────────────────────────
 
+	// Searches every project the daemon knows about, not just this one, and pages
+	// the matches. The store drops responses for a superseded query, so the
+	// debounce does not need to re-check what was typed since.
 	function requestRemoteSearch(query: string, roots: boolean) {
-		const projectSlug = getCurrentSlug();
-		const trimmed = query.trim();
-		if (!projectSlug || !trimmed) return;
-		void listSessionsRpc({ projectSlug, query: trimmed, roots }).then(
-			(response) => {
-				if (localSearchValue.trim() !== trimmed) return;
-				if (uiState.hideSubagentSessions !== roots) return;
-				applyListSessionsResponse(response);
-			},
-		);
+		void searchSessions(query, roots);
 	}
 
 	// A session belonging to a project other than the one this socket is attached
@@ -181,7 +194,7 @@
 		searchVisible = false;
 		localSearchValue = "";
 		setSearchQuery("");
-		sessionState.searchResults = null;
+		clearSessionSearch();
 	}
 
 	function handleToggleSearch() {
@@ -210,9 +223,7 @@
 	function handleSearchKeydown(e: KeyboardEvent) {
 		if (e.key === "Escape") {
 			e.preventDefault();
-			searchVisible = false;
-			localSearchValue = "";
-			setSearchQuery("");
+			closeSearch();
 		}
 	}
 
@@ -492,6 +503,18 @@
 		</div>
 	{/if}
 
+	{#if searchSummary}
+		<!-- Outside the search-input block: the count belongs to the results, and
+		     the input's visibility is local component state. -->
+		<div
+			class="flex shrink-0 items-center justify-between gap-2 px-3.5 pb-1.5 text-xs text-text-dimmer font-brand"
+			data-testid="session-search-summary"
+		>
+			<span aria-live="polite">{searchSummary}</span>
+			<TextButton onclick={closeSearch}>Clear</TextButton>
+		</div>
+	{/if}
+
 	<!-- Scrollable session list content -->
 	<!-- The region scrolls and has no tabbable descendant, so it must be focusable or a
 	     keyboard-only user cannot scroll it at all (axe scrollable-region-focusable);
@@ -549,6 +572,21 @@
 					{/each}
 				{/if}
 			{/each}
+		{/if}
+
+		<!-- Paging sentinel. Inside the scroll region so the observer's root
+		     intersection is the list's own viewport, and after the rows so it is
+		     only reached at the bottom. -->
+		<div id="session-list-sentinel" class="h-px" bind:this={sentinelEl}></div>
+		<SessionPager {sentinelEl} />
+
+		{#if pagerLoading}
+			<div
+				class="px-3.5 py-2 text-center text-xs text-text-dimmer font-brand"
+				data-testid="session-list-loading-more"
+			>
+				Loading…
+			</div>
 		{/if}
 
 		<!-- Outside the isEmpty branch on purpose. A project that cannot be read

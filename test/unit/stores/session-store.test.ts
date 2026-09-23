@@ -71,7 +71,8 @@ beforeEach(() => {
 	sessionState.searchResults = null;
 	sessionState.currentId = null;
 	sessionState.searchQuery = "";
-	sessionState.hasMore = false;
+	sessionState.daemonHasMore = false;
+	sessionState.daemonCursor = null;
 	discoveryState.currentProviderId = "";
 	discoveryState.currentModelId = "";
 	discoveryState.defaultProviderId = "";
@@ -559,6 +560,8 @@ describe("getFilteredSessions — daemon sessions", () => {
 				},
 			],
 			availability: [{ projectSlug: "unknown-project", available: true }],
+			hasMore: false,
+			nextCursor: null,
 		});
 
 		expect(getFilteredSessions().map((session) => session.id)).toContain(

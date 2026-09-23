@@ -319,10 +319,17 @@ export const ProjectSessionAvailabilitySchema = Schema.Union(
 	}),
 );
 
+export const DaemonSessionCursorSchema = Schema.Struct({
+	updatedAt: Schema.Number,
+	id: Schema.String,
+});
+
 export const ListDaemonSessionsResponseSchema = Schema.Struct({
 	projectSlug: Schema.String,
 	sessions: Schema.Array(SessionInfoSchema),
 	availability: Schema.Array(ProjectSessionAvailabilitySchema),
+	hasMore: Schema.Boolean,
+	nextCursor: Schema.NullOr(DaemonSessionCursorSchema),
 });
 
 export const ListSessionsResponseSchema = Schema.Struct({
@@ -1031,6 +1038,8 @@ export class ListDaemonSessions extends Schema.TaggedRequest<ListDaemonSessions>
 			projectSlug: NonEmptyString,
 			limit: Schema.optional(Schema.Number),
 			roots: Schema.optional(Schema.Boolean),
+			search: Schema.optional(Schema.String),
+			cursor: Schema.optional(DaemonSessionCursorSchema),
 		},
 	},
 ) {}

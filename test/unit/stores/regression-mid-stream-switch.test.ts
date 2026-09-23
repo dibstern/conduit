@@ -82,7 +82,8 @@ beforeEach(() => {
 	sessionState.searchResults = null;
 	sessionState.currentId = null;
 	sessionState.searchQuery = "";
-	sessionState.hasMore = false;
+	sessionState.daemonHasMore = false;
+	sessionState.daemonCursor = null;
 	// Register sessions so routePerSession's unknown-session guard passes.
 	sessionState.sessions.set("session-a", { id: "session-a", title: "" });
 	sessionState.sessions.set("session-b", { id: "session-b", title: "" });

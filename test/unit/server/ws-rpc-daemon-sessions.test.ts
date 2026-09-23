@@ -32,6 +32,8 @@ describe("WsRpcServerLayer daemon sessions", () => {
 					error: "unreadable",
 				},
 			],
+			hasMore: true,
+			nextCursor: { updatedAt: 42, id: "session-1" },
 		}));
 		const config = makeMockConfig({ listDaemonSessions });
 
@@ -41,11 +43,15 @@ describe("WsRpcServerLayer daemon sessions", () => {
 				projectSlug: "project-a",
 				limit: 25,
 				roots: true,
+				search: "session",
+				cursor: { updatedAt: 100, id: "session-2" },
 			});
 
 			expect(listDaemonSessions).toHaveBeenCalledWith({
 				limit: 25,
 				roots: true,
+				search: "session",
+				cursor: { updatedAt: 100, id: "session-2" },
 			});
 			expect(response).toEqual({
 				projectSlug: "project-a",
@@ -65,6 +71,8 @@ describe("WsRpcServerLayer daemon sessions", () => {
 						error: "unreadable",
 					},
 				],
+				hasMore: true,
+				nextCursor: { updatedAt: 42, id: "session-1" },
 			});
 		}).pipe(
 			Effect.scoped,

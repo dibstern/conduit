@@ -120,6 +120,8 @@ describe("listDaemonSessions", () => {
 			expect(sessions.get("finished-away")?.unread).toBe(true);
 			expect(sessions.get("already-read")).not.toHaveProperty("unread");
 			expect(sessions.get("empty")).not.toHaveProperty("unread");
+			expect(result.hasMore).toBe(false);
+			expect(result.nextCursor).toBeNull();
 		}).pipe(
 			Effect.provide(
 				makeProjectRegistryLive([
@@ -201,6 +203,8 @@ describe("listDaemonSessions", () => {
 			);
 			expect(sessions.get("none")).not.toHaveProperty("pendingQuestionCount");
 			expect(sessions.get("none")).not.toHaveProperty("pendingPermissionCount");
+			expect(result.hasMore).toBe(false);
+			expect(result.nextCursor).toBeNull();
 		}).pipe(
 			Effect.provide(
 				makeProjectRegistryLive([
@@ -284,6 +288,8 @@ describe("listDaemonSessions", () => {
 						}),
 					]),
 				);
+				expect(result.hasMore).toBe(true);
+				expect(result.nextCursor).toEqual({ updatedAt: 200, id: "b-mid" });
 			}).pipe(
 				Effect.provide(
 					makeProjectRegistryLive([
@@ -296,6 +302,287 @@ describe("listDaemonSessions", () => {
 							directory: unreadableStore,
 						},
 						{ slug: "missing", title: "Missing", directory: missing },
+					]),
+				),
+			);
+		},
+	);
+
+	it.effect("pages the globally ordered set without duplicates or gaps", () => {
+		const root = makeTemporaryRoot();
+		const projectA = join(root, "project-a");
+		const projectB = join(root, "project-b");
+		const projectC = join(root, "project-c");
+		mkdirSync(projectA);
+		mkdirSync(projectB);
+		mkdirSync(projectC);
+		makeProjectStore(projectA, [
+			{ id: "shared-z", title: "Shared Z", updatedAt: 600 },
+			{ id: "a-500", title: "A 500", updatedAt: 500 },
+			{ id: "a-200", title: "A 200", updatedAt: 200 },
+		]);
+		makeProjectStore(projectB, [
+			{ id: "shared-y", title: "Shared Y", updatedAt: 600 },
+			{ id: "b-400", title: "B 400", updatedAt: 400 },
+		]);
+		makeProjectStore(projectC, [
+			{ id: "shared-x", title: "Shared X", updatedAt: 600 },
+			{ id: "c-300", title: "C 300", updatedAt: 300 },
+		]);
+		const registry = makeProjectRegistryLive([
+			{ slug: "project-a", title: "project-a", directory: projectA },
+			{ slug: "project-b", title: "project-b", directory: projectB },
+			{ slug: "project-c", title: "project-c", directory: projectC },
+		]);
+		const expected = [
+			"shared-z",
+			"shared-y",
+			"shared-x",
+			"a-500",
+			"b-400",
+			"c-300",
+			"a-200",
+		];
+
+		return Effect.gen(function* () {
+			const unbounded = yield* listDaemonSessions();
+			expect(unbounded.sessions.map((session) => session.id)).toEqual(expected);
+			expect(unbounded.hasMore).toBe(false);
+			expect(unbounded.nextCursor).toBeNull();
+
+			const first = yield* listDaemonSessions({ limit: 2 });
+			expect(first.sessions.map((session) => session.id)).toEqual(
+				expected.slice(0, 2),
+			);
+			expect(first.hasMore).toBe(true);
+			expect(first.nextCursor).toEqual({
+				updatedAt: 600,
+				id: "shared-y",
+			});
+
+			const collected: string[] = [];
+			let cursor: { updatedAt: number; id: string } | undefined;
+			let finalCursor: { updatedAt: number; id: string } | undefined;
+			for (;;) {
+				const page = yield* listDaemonSessions({
+					limit: 2,
+					...(cursor === undefined ? {} : { cursor }),
+				});
+				collected.push(...page.sessions.map((session) => session.id));
+				if (!page.hasMore) {
+					expect(page.nextCursor).toBeNull();
+					const last = page.sessions.at(-1);
+					if (last !== undefined) {
+						finalCursor = {
+							updatedAt: Number(last.updatedAt),
+							id: last.id,
+						};
+					}
+					break;
+				}
+				expect(page.nextCursor).not.toBeNull();
+				cursor = page.nextCursor ?? undefined;
+			}
+
+			expect(collected).toEqual(expected);
+			expect(new Set(collected).size).toBe(expected.length);
+			expect(finalCursor).toBeDefined();
+			if (finalCursor === undefined) return;
+			const pastEnd = yield* listDaemonSessions({
+				limit: 2,
+				cursor: finalCursor,
+			});
+			expect(pastEnd.sessions).toEqual([]);
+			expect(pastEnd.hasMore).toBe(false);
+			expect(pastEnd.nextCursor).toBeNull();
+		}).pipe(Effect.provide(registry));
+	});
+
+	it.effect("detects more rows at a single-project page boundary", () => {
+		const root = makeTemporaryRoot();
+		const project = join(root, "project");
+		mkdirSync(project);
+		makeProjectStore(project, [
+			{ id: "five", title: "Five", updatedAt: 500 },
+			{ id: "four", title: "Four", updatedAt: 400 },
+			{ id: "three", title: "Three", updatedAt: 300 },
+			{ id: "two", title: "Two", updatedAt: 200 },
+			{ id: "one", title: "One", updatedAt: 100 },
+		]);
+		const registry = makeProjectRegistryLive([
+			{ slug: "project", title: "Project", directory: project },
+		]);
+
+		return Effect.gen(function* () {
+			const first = yield* listDaemonSessions({ limit: 2 });
+			expect(first.sessions.map((session) => session.id)).toEqual([
+				"five",
+				"four",
+			]);
+			expect(first.hasMore).toBe(true);
+			expect(first.nextCursor).toEqual({ updatedAt: 400, id: "four" });
+			if (first.nextCursor === null) return;
+
+			const second = yield* listDaemonSessions({
+				limit: 2,
+				cursor: first.nextCursor,
+			});
+			expect(second.sessions.map((session) => session.id)).toEqual([
+				"three",
+				"two",
+			]);
+			expect(second.hasMore).toBe(true);
+			expect(second.nextCursor).toEqual({ updatedAt: 200, id: "two" });
+			if (second.nextCursor === null) return;
+
+			const final = yield* listDaemonSessions({
+				limit: 2,
+				cursor: second.nextCursor,
+			});
+			expect(final.sessions.map((session) => session.id)).toEqual(["one"]);
+			expect(final.hasMore).toBe(false);
+			expect(final.nextCursor).toBeNull();
+		}).pipe(Effect.provide(registry));
+	});
+
+	it.effect("searches every project and pages only the filtered set", () => {
+		const root = makeTemporaryRoot();
+		const projectA = join(root, "project-a");
+		const projectB = join(root, "project-b");
+		const projectC = join(root, "project-c");
+		mkdirSync(projectA);
+		mkdirSync(projectB);
+		mkdirSync(projectC);
+		makeProjectStore(projectA, [
+			{ id: "a-needle-new", title: "Needle alpha", updatedAt: 600 },
+			{ id: "a-needle-old", title: "needle delta", updatedAt: 300 },
+			{ id: "a-other", title: "Other", updatedAt: 700 },
+		]);
+		makeProjectStore(projectB, [
+			{ id: "b-needle-new", title: "NEEDLE beta", updatedAt: 500 },
+			{ id: "b-needle-old", title: "needle epsilon", updatedAt: 200 },
+		]);
+		makeProjectStore(projectC, [
+			{ id: "c-needle-new", title: "needle gamma", updatedAt: 400 },
+			{ id: "c-needle-old", title: "Needle zeta", updatedAt: 100 },
+			{ id: "c-other", title: "Not relevant", updatedAt: 800 },
+		]);
+		const registry = makeProjectRegistryLive([
+			{ slug: "project-a", title: "project-a", directory: projectA },
+			{ slug: "project-b", title: "project-b", directory: projectB },
+			{ slug: "project-c", title: "project-c", directory: projectC },
+		]);
+		const expected = [
+			"a-needle-new",
+			"b-needle-new",
+			"c-needle-new",
+			"a-needle-old",
+			"b-needle-old",
+			"c-needle-old",
+		];
+
+		return Effect.gen(function* () {
+			const allMatches = yield* listDaemonSessions({ search: "nEeDlE" });
+			expect(allMatches.sessions.map((session) => session.id)).toEqual(
+				expected,
+			);
+			expect(allMatches.hasMore).toBe(false);
+			expect(allMatches.nextCursor).toBeNull();
+
+			const paged: string[] = [];
+			let cursor: { updatedAt: number; id: string } | undefined;
+			for (;;) {
+				const page = yield* listDaemonSessions({
+					search: "needle",
+					limit: 2,
+					...(cursor === undefined ? {} : { cursor }),
+				});
+				paged.push(...page.sessions.map((session) => session.id));
+				if (!page.hasMore) break;
+				cursor = page.nextCursor ?? undefined;
+			}
+			expect(paged).toEqual(expected);
+		}).pipe(Effect.provide(registry));
+	});
+
+	it.effect("treats percent and underscore in search as literals", () => {
+		const root = makeTemporaryRoot();
+		const projectA = join(root, "project-a");
+		const projectB = join(root, "project-b");
+		const projectC = join(root, "project-c");
+		mkdirSync(projectA);
+		mkdirSync(projectB);
+		mkdirSync(projectC);
+		makeProjectStore(projectA, [
+			{ id: "literal-a", title: "Costs 100%_done", updatedAt: 300 },
+		]);
+		makeProjectStore(projectB, [
+			{ id: "literal-b", title: "Keep %_ literal", updatedAt: 200 },
+		]);
+		makeProjectStore(projectC, [
+			{ id: "decoy", title: "Costs 100XYdone", updatedAt: 100 },
+		]);
+
+		return Effect.gen(function* () {
+			const result = yield* listDaemonSessions({ search: "%_" });
+			expect(result.sessions.map((session) => session.id)).toEqual([
+				"literal-a",
+				"literal-b",
+			]);
+		}).pipe(
+			Effect.provide(
+				makeProjectRegistryLive([
+					{ slug: "project-a", title: "A", directory: projectA },
+					{ slug: "project-b", title: "B", directory: projectB },
+					{ slug: "project-c", title: "C", directory: projectC },
+				]),
+			),
+		);
+	});
+
+	it.effect(
+		"keeps unavailable projects visible while paging available ones",
+		() => {
+			const root = makeTemporaryRoot();
+			const projectA = join(root, "project-a");
+			const projectB = join(root, "project-b");
+			const unavailable = join(root, "unavailable");
+			mkdirSync(projectA);
+			mkdirSync(projectB);
+			mkdirSync(join(unavailable, ".conduit"), { recursive: true });
+			writeFileSync(join(unavailable, ".conduit", "events.db"), "not sqlite");
+			makeProjectStore(projectA, [
+				{ id: "a-new", title: "A new", updatedAt: 300 },
+				{ id: "a-old", title: "A old", updatedAt: 100 },
+			]);
+			makeProjectStore(projectB, [
+				{ id: "b-mid", title: "B mid", updatedAt: 200 },
+			]);
+
+			return Effect.gen(function* () {
+				const result = yield* listDaemonSessions({ limit: 1 });
+				expect(result.sessions.map((session) => session.id)).toEqual(["a-new"]);
+				expect(result.hasMore).toBe(true);
+				expect(result.availability).toEqual(
+					expect.arrayContaining([
+						{ projectSlug: "project-a", available: true },
+						{ projectSlug: "project-b", available: true },
+						expect.objectContaining({
+							projectSlug: "unavailable",
+							available: false,
+						}),
+					]),
+				);
+			}).pipe(
+				Effect.provide(
+					makeProjectRegistryLive([
+						{ slug: "project-a", title: "A", directory: projectA },
+						{ slug: "project-b", title: "B", directory: projectB },
+						{
+							slug: "unavailable",
+							title: "Unavailable",
+							directory: unavailable,
+						},
 					]),
 				),
 			);

@@ -19,6 +19,7 @@ export type {
 	AgentInfo,
 	AskUserQuestion,
 	CommandInfo,
+	DaemonSessionCursor,
 	DaemonSessionQueryOptions,
 	DaemonSessionQueryResult,
 	FileEntry,

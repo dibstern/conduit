@@ -26,6 +26,7 @@ export type {
 	AskUserQuestion,
 	CommandInfo,
 	ContextWindowOption,
+	DaemonSessionCursor,
 	FileEntry,
 	FileVersion,
 	HistoryMessage,

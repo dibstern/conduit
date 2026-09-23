@@ -12,12 +12,14 @@ import {
 	getAgentsRpc,
 	getCommandsRpc,
 	getModelsRpc,
+	listDaemonSessionsRpc,
 	switchPermissionModeRpc,
 	type ViewSessionRpcInput,
 	viewSessionRpc,
 } from "../transport/ws-rpc-client.js";
 import type {
 	AttentionGroups,
+	DaemonSessionCursor,
 	RelayMessage,
 	RequestId,
 	SessionAttention,
@@ -50,10 +52,22 @@ export const sessionState = $state({
 	// can say its own coverage is incomplete: the failure is otherwise
 	// indistinguishable from a project that genuinely has no sessions.
 	daemonUnavailableProjects: [] as string[],
+	// Keyset cursor for the cross-project browse page. Null means "start at the
+	// top"; daemonHasMore false means the merge is exhausted and the scroll
+	// sentinel must stop asking, which is what keeps the list from showing a
+	// loading row that never resolves.
+	daemonCursor: null as DaemonSessionCursor | null,
+	daemonHasMore: false,
+	daemonLoading: false,
 	currentId: null as string | null,
 	searchQuery: "",
 	searchResults: null as SessionInfo[] | null,
-	hasMore: false,
+	// Search pages on its own cursor, deliberately separate from the browse
+	// cursor above. Sharing one would mean clearing a query dropped the browse
+	// list back to its first page instead of restoring where the user was.
+	searchCursor: null as DaemonSessionCursor | null,
+	searchHasMore: false,
+	searchLoading: false,
 	/** Id-keyed map maintained alongside rootSessions/allSessions arrays.
 	 *  Used by the dispatcher's unknown-session guard (O(1) membership check)
 	 *  and by clearSessionChatState's diff path. */
@@ -230,12 +244,19 @@ export function findSession(id: string): SessionInfo | undefined {
  *  Subagent sessions (those with a parentID) are excluded when the
  *  hideSubagentSessions UI toggle is active (default). */
 export function getFilteredSessions(): SessionInfo[] {
-	// Active search results take priority (already filtered by server).
-	// Reconcile against the live session map: searchResults is a snapshot the
-	// removal paths never touch, so without this a session deleted during an
-	// active search keeps rendering until the query is cleared.
+	// Active search results take priority (already filtered by server, across
+	// every project). Local rows are reconciled against the live session map:
+	// searchResults is a snapshot the removal paths never touch, so without this
+	// a session deleted during an active search keeps rendering until the query
+	// is cleared. Foreign rows are passed through instead -- the live map only
+	// ever holds this relay's own sessions, so reconciling them would drop every
+	// cross-project hit.
 	if (sessionState.searchResults !== null) {
+		const searchSlug = getCurrentSlug();
 		return sessionState.searchResults.flatMap((session) => {
+			if (session.projectSlug != null && session.projectSlug !== searchSlug) {
+				return [session];
+			}
 			const liveSession = sessionState.sessions.get(session.id);
 			return liveSession ? [liveSession] : [];
 		});
@@ -252,20 +273,16 @@ export function getFilteredSessions(): SessionInfo[] {
 	}
 	const query = sessionState.searchQuery.toLowerCase().trim();
 	const currentSlug = getCurrentSlug();
-	// Foreign rows stand down while a query is active, even though the title
-	// filter below would happily match them. Typing also fires a server search
-	// against the current project alone, and when its results land the branch
-	// above takes over and returns only those -- so leaving foreign matches in
-	// would show them for a moment and then silently drop them. Absent
-	// throughout is the consistent answer until cross-project search lands.
-	const foreignSessions = query
-		? []
-		: sessionState.daemonSessions.filter(
-				(session) =>
-					session.projectSlug != null &&
-					session.projectSlug !== currentSlug &&
-					(!uiState.hideSubagentSessions || !session.parentID),
-			);
+	// Foreign rows stay in while a query is active and get title-filtered with
+	// the rest. The server search they will be replaced by now covers every
+	// project too, so the local filter and the landing results agree -- which is
+	// why these no longer have to stand down to avoid flashing in and out.
+	const foreignSessions = sessionState.daemonSessions.filter(
+		(session) =>
+			session.projectSlug != null &&
+			session.projectSlug !== currentSlug &&
+			(!uiState.hideSubagentSessions || !session.parentID),
+	);
 	const sessions = [...localSessions, ...foreignSessions].sort(
 		(a, b) => getSessionDate(b).getTime() - getSessionDate(a).getTime(),
 	);
@@ -448,13 +465,155 @@ export function applyListSessionsResponse(
 	});
 }
 
+/** How many cross-project rows one page asks for. Exported so the caller that
+ *  fetches the first page uses the same size as the sentinel that fetches the
+ *  rest -- a first page smaller than the viewport would never scroll, and so
+ *  would never ask for a second. */
+export const DAEMON_SESSION_PAGE_SIZE = 30;
+
+/** Bumped by anything that invalidates in-flight browse pages. A response
+ *  carrying a stale token is dropped rather than appended, so a project switch
+ *  cannot splice another project's page onto the new list. */
+let daemonBrowseToken = 0;
+
+/** Applies a FIRST page: replaces the accumulator rather than appending. */
 export function applyListDaemonSessionsResponse(
 	response: ListDaemonSessionsResponse,
 ): void {
+	daemonBrowseToken += 1;
 	sessionState.daemonSessions = response.sessions.map(sessionInfoFromRpc);
+	sessionState.daemonCursor = response.nextCursor;
+	sessionState.daemonHasMore = response.hasMore;
+	sessionState.daemonLoading = false;
 	sessionState.daemonUnavailableProjects = response.availability
 		.filter((entry) => !entry.available)
 		.map((entry) => entry.projectSlug);
+}
+
+/** Appends the next cross-project page. No-ops at the end of the list and while
+ *  a page is already in flight, which is what stops the scroll sentinel from
+ *  re-requesting an exhausted cursor forever. */
+export async function loadMoreDaemonSessions(): Promise<void> {
+	const projectSlug = getCurrentSlug();
+	const cursor = sessionState.daemonCursor;
+	if (
+		!projectSlug ||
+		cursor === null ||
+		!sessionState.daemonHasMore ||
+		sessionState.daemonLoading
+	) {
+		return;
+	}
+	const token = daemonBrowseToken;
+	sessionState.daemonLoading = true;
+	try {
+		const response = await listDaemonSessionsRpc({
+			projectSlug,
+			limit: DAEMON_SESSION_PAGE_SIZE,
+			cursor,
+		});
+		if (token !== daemonBrowseToken) return;
+		// Dedupe by id. The keyset cursor does not re-emit rows, but a session
+		// whose updated_at moves between two requests can land on both pages, and
+		// a repeated key throws out of Svelte's keyed {#each}.
+		const seen = new Set(sessionState.daemonSessions.map((row) => row.id));
+		const incoming = response.sessions
+			.map(sessionInfoFromRpc)
+			.filter((session) => !seen.has(session.id));
+		sessionState.daemonSessions = [...sessionState.daemonSessions, ...incoming];
+		sessionState.daemonCursor = response.nextCursor;
+		sessionState.daemonHasMore = response.hasMore;
+		sessionState.daemonUnavailableProjects = response.availability
+			.filter((entry) => !entry.available)
+			.map((entry) => entry.projectSlug);
+	} catch {
+		// Keep the rows already on screen and leave hasMore alone, so scrolling
+		// again retries rather than declaring the list finished.
+	} finally {
+		if (token === daemonBrowseToken) sessionState.daemonLoading = false;
+	}
+}
+
+/** The query the server is currently answering. Distinct from
+ *  sessionState.searchQuery, which is what the user has typed this instant:
+ *  the debounce means they disagree, and paging must repeat the committed one. */
+let activeSearch: { query: string; roots: boolean } | null = null;
+let daemonSearchToken = 0;
+
+/** Runs a fresh cross-project title search, replacing any earlier results. */
+export async function searchSessions(
+	query: string,
+	roots: boolean,
+): Promise<void> {
+	const trimmed = query.trim();
+	if (!trimmed) {
+		clearSessionSearch();
+		return;
+	}
+	daemonSearchToken += 1;
+	activeSearch = { query: trimmed, roots };
+	sessionState.searchCursor = null;
+	sessionState.searchHasMore = false;
+	// Results are left on screen until the new page lands. Blanking them first
+	// makes every keystroke flash the list through its "no match" state.
+	await runSearchPage(daemonSearchToken, true);
+}
+
+/** Appends the next page of the active search. */
+export async function loadMoreSearchResults(): Promise<void> {
+	if (
+		activeSearch === null ||
+		sessionState.searchCursor === null ||
+		!sessionState.searchHasMore ||
+		sessionState.searchLoading
+	) {
+		return;
+	}
+	await runSearchPage(daemonSearchToken, false);
+}
+
+export function clearSessionSearch(): void {
+	daemonSearchToken += 1;
+	activeSearch = null;
+	sessionState.searchResults = null;
+	sessionState.searchCursor = null;
+	sessionState.searchHasMore = false;
+	sessionState.searchLoading = false;
+}
+
+async function runSearchPage(token: number, replace: boolean): Promise<void> {
+	const search = activeSearch;
+	const projectSlug = getCurrentSlug();
+	if (search === null || !projectSlug) return;
+	const cursor = replace ? null : sessionState.searchCursor;
+	sessionState.searchLoading = true;
+	try {
+		const response = await listDaemonSessionsRpc({
+			projectSlug,
+			roots: search.roots,
+			search: search.query,
+			limit: DAEMON_SESSION_PAGE_SIZE,
+			...(cursor === null ? {} : { cursor }),
+		});
+		if (token !== daemonSearchToken) return;
+		const incoming = response.sessions.map(sessionInfoFromRpc);
+		if (replace) {
+			sessionState.searchResults = incoming;
+		} else {
+			const previous = sessionState.searchResults ?? [];
+			const seen = new Set(previous.map((row) => row.id));
+			sessionState.searchResults = [
+				...previous,
+				...incoming.filter((session) => !seen.has(session.id)),
+			];
+		}
+		sessionState.searchCursor = response.nextCursor;
+		sessionState.searchHasMore = response.hasMore;
+	} catch {
+		// Same as browse paging: keep what is shown, allow a retry.
+	} finally {
+		if (token === daemonSearchToken) sessionState.searchLoading = false;
+	}
 }
 
 export function handleSessionSwitched(
@@ -590,8 +749,12 @@ export function clearSessionState(): void {
 	sessionState.sessions.clear();
 	sessionState.rootSessions = [];
 	sessionState.allSessions = [];
-	sessionState.searchResults = null;
 	sessionState.currentId = null;
 	sessionState.searchQuery = "";
-	sessionState.hasMore = false;
+	clearSessionSearch();
+	daemonBrowseToken += 1;
+	sessionState.daemonSessions = [];
+	sessionState.daemonCursor = null;
+	sessionState.daemonHasMore = false;
+	sessionState.daemonLoading = false;
 }

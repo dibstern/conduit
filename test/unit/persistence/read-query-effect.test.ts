@@ -8,15 +8,96 @@ import { makeReadQueryEffect } from "../../../src/lib/persistence/effect/read-qu
 
 const testLayer = EffectSqliteClient.layer({ filename: ":memory:" });
 
-function seedSession(sessionId: string) {
+function seedSession(
+	sessionId: string,
+	options: {
+		title?: string;
+		updatedAt?: number;
+		parentId?: string;
+	} = {},
+) {
 	return Effect.gen(function* () {
 		const sql = yield* SqlClient.SqlClient;
 		yield* sql`
 			INSERT INTO sessions
-			(id, provider, title, status, created_at, updated_at)
-			VALUES (${sessionId}, 'claude', 'Test', 'idle', 1, 1)`;
+			(id, provider, title, status, parent_id, created_at, updated_at)
+			VALUES (
+				${sessionId},
+				'claude',
+				${options.title ?? "Test"},
+				'idle',
+				${options.parentId ?? null},
+				${options.updatedAt ?? 1},
+				${options.updatedAt ?? 1}
+			)`;
 	});
 }
+
+describe("ReadQueryEffect.listSessions", () => {
+	it.effect("applies deterministic keyset paging, roots, and limits", () =>
+		Effect.gen(function* () {
+			yield* makeEffectSqlMigrator();
+			yield* seedSession("z", { updatedAt: 300 });
+			yield* seedSession("y", { updatedAt: 200 });
+			yield* seedSession("x", { updatedAt: 200, parentId: "z" });
+			yield* seedSession("a", { updatedAt: 200 });
+			yield* seedSession("w", { updatedAt: 100 });
+			const readQuery = yield* makeReadQueryEffect;
+
+			expect((yield* readQuery.listSessions()).map((row) => row.id)).toEqual([
+				"z",
+				"y",
+				"x",
+				"a",
+				"w",
+			]);
+			expect(
+				(yield* readQuery.listSessions({
+					roots: true,
+					limit: 2,
+				})).map((row) => row.id),
+			).toEqual(["z", "y"]);
+			expect(
+				(yield* readQuery.listSessions({
+					before: { updatedAt: 200, id: "y" },
+					limit: 2,
+				})).map((row) => row.id),
+			).toEqual(["x", "a"]);
+		}).pipe(Effect.provide(testLayer)),
+	);
+
+	it.effect(
+		"searches ASCII case-insensitively and escapes LIKE wildcards",
+		() =>
+			Effect.gen(function* () {
+				yield* makeEffectSqlMigrator();
+				yield* seedSession("literal", {
+					title: "Alpha 100%_done\\now",
+					updatedAt: 3,
+				});
+				yield* seedSession("case-match", {
+					title: "alpha ordinary",
+					updatedAt: 2,
+				});
+				yield* seedSession("wildcard-decoy", {
+					title: "Alpha 100XYdone-now",
+					updatedAt: 1,
+				});
+				const readQuery = yield* makeReadQueryEffect;
+
+				expect(
+					(yield* readQuery.listSessions({ titleQuery: "ALPHA" })).map(
+						(row) => row.id,
+					),
+				).toEqual(["literal", "case-match", "wildcard-decoy"]);
+				expect(
+					(yield* readQuery.listSessions({ titleQuery: "%_done\\" })).map(
+						(row) => row.id,
+					),
+				).toEqual(["literal"]);
+			}).pipe(Effect.provide(testLayer)),
+	);
+});
 
 describe("ReadQueryEffect.countPendingApprovalsBySession", () => {
 	it.effect("counts pending approvals by session and type", () =>

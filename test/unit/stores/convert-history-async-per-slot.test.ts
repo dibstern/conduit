@@ -71,7 +71,8 @@ beforeEach(() => {
 	sessionState.allSessions = [];
 	sessionState.searchResults = null;
 	sessionState.searchQuery = "";
-	sessionState.hasMore = false;
+	sessionState.daemonHasMore = false;
+	sessionState.daemonCursor = null;
 	clearMessages();
 	for (const id of ["session-A", "session-B", "session-C"]) {
 		clearSessionChatState(id);

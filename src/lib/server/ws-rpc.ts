@@ -292,6 +292,8 @@ export const WsRpcServerLayer = WsRpcGroup.toLayer({
 			const result = yield* daemonSessions.list({
 				...(request.limit !== undefined ? { limit: request.limit } : {}),
 				...(request.roots !== undefined ? { roots: request.roots } : {}),
+				...(request.search !== undefined ? { search: request.search } : {}),
+				...(request.cursor !== undefined ? { cursor: request.cursor } : {}),
 			});
 			return {
 				projectSlug: request.projectSlug,

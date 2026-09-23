@@ -17,7 +17,10 @@ function resetSessionState() {
 	sessionState.searchResults = null;
 	sessionState.currentId = null;
 	sessionState.searchQuery = "";
-	sessionState.hasMore = false;
+	sessionState.daemonCursor = null;
+	sessionState.daemonHasMore = false;
+	sessionState.searchCursor = null;
+	sessionState.searchHasMore = false;
 }
 
 const meta = {

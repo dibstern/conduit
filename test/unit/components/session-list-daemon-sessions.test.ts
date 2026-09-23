@@ -60,6 +60,8 @@ describe("SessionList daemon sessions", () => {
 				},
 			],
 			availability: [{ projectSlug: "unlisted-project", available: true }],
+			hasMore: false,
+			nextCursor: null,
 		});
 
 		const view = render(SessionList);
@@ -143,6 +145,8 @@ describe("SessionList daemon sessions", () => {
 					error: "ENOENT: no such directory",
 				},
 			],
+			hasMore: false,
+			nextCursor: null,
 		});
 
 		const view = render(SessionList);
@@ -165,6 +169,8 @@ describe("SessionList daemon sessions", () => {
 					error: "ENOENT: no such directory",
 				},
 			],
+			hasMore: false,
+			nextCursor: null,
 		});
 
 		const view = render(SessionList);
@@ -178,11 +184,15 @@ describe("SessionList daemon sessions", () => {
 			availability: [
 				{ projectSlug: "another-project", available: false, error: "gone" },
 			],
+			hasMore: false,
+			nextCursor: null,
 		});
 		applyListDaemonSessionsResponse({
 			projectSlug: "current-project",
 			sessions: [],
 			availability: [{ projectSlug: "another-project", available: true }],
+			hasMore: false,
+			nextCursor: null,
 		});
 
 		const view = render(SessionList);

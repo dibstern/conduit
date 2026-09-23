@@ -12,6 +12,7 @@ import {
 	sessionRowsToSessionInfoList,
 } from "../../../persistence/session-list-adapter.js";
 import type {
+	DaemonSessionCursor,
 	DaemonSessionQueryOptions,
 	DaemonSessionQueryResult,
 	SessionInfo,
@@ -40,19 +41,15 @@ const isMissingPathError = (cause: unknown): boolean =>
 	"code" in cause &&
 	cause.code === "ENOENT";
 
-const updatedAtMillis = (session: SessionInfo): number => {
-	if (typeof session.updatedAt === "number") return session.updatedAt;
-	if (typeof session.updatedAt === "string") {
-		const parsed = Date.parse(session.updatedAt);
-		return Number.isNaN(parsed) ? 0 : parsed;
-	}
-	return 0;
-};
+interface ProjectSessionCandidate {
+	readonly sortKey: DaemonSessionCursor;
+	readonly session: SessionInfo;
+}
 
 const readProjectSessions = (
 	projectSlug: string,
 	projectDirectory: string,
-	roots: boolean | undefined,
+	options: DaemonSessionQueryOptions,
 ) =>
 	Effect.gen(function* () {
 		const directory = yield* Effect.try({
@@ -95,22 +92,34 @@ const readProjectSessions = (
 
 		const { rows, pendingApprovals } = yield* Effect.gen(function* () {
 			const readQuery = yield* ReadQueryEffectTag;
-			const rows = yield* readQuery.listSessions(
-				roots === undefined ? undefined : { roots },
-			);
+			const rows = yield* readQuery.listSessions({
+				...(options.roots !== undefined ? { roots: options.roots } : {}),
+				...(options.limit !== undefined ? { limit: options.limit } : {}),
+				...(options.search !== undefined ? { titleQuery: options.search } : {}),
+				...(options.cursor !== undefined ? { before: options.cursor } : {}),
+			});
 			const pendingApprovals =
 				yield* readQuery.countPendingApprovalsBySession();
 			return { rows, pendingApprovals };
 		}).pipe(Effect.provide(readQueryLayer));
 		const pending = pendingApprovalCountsByType(pendingApprovals);
 
-		return sessionRowsToSessionInfoList(Array.from(rows), {
+		const sessions = sessionRowsToSessionInfoList(Array.from(rows), {
 			pendingQuestionCounts: pending.questions,
 			pendingPermissionCounts: pending.permissions,
-		}).map((session) => ({
-			...session,
-			projectSlug,
-		}));
+		});
+		const sortKeys = new Map(
+			rows.map((row) => [
+				row.id,
+				{ updatedAt: row.updated_at, id: row.id } satisfies DaemonSessionCursor,
+			]),
+		);
+		return sessions.flatMap((session): ProjectSessionCandidate[] => {
+			const sortKey = sortKeys.get(session.id);
+			return sortKey === undefined
+				? []
+				: [{ sortKey, session: { ...session, projectSlug } }];
+		});
 	});
 
 export const listDaemonSessions = (
@@ -118,12 +127,27 @@ export const listDaemonSessions = (
 ): Effect.Effect<DaemonSessionQueryResult, never, ProjectRegistryTag> =>
 	Effect.gen(function* () {
 		const projects = yield* allProjects;
+		const limit =
+			options.limit === undefined
+				? undefined
+				: Math.max(0, Math.floor(options.limit));
+		// One bounded lookahead row per project is necessary to distinguish an
+		// exhausted project from one whose result count exactly equals the page size.
+		const projectLimit = limit === undefined || limit === 0 ? limit : limit + 1;
+		const projectOptions = {
+			...options,
+			...(projectLimit !== undefined ? { limit: projectLimit } : {}),
+		};
 		const projectResults = yield* Effect.forEach(
 			projects,
 			(project) =>
 				Effect.gen(function* () {
 					const exit = yield* Effect.exit(
-						readProjectSessions(project.slug, project.directory, options.roots),
+						readProjectSessions(
+							project.slug,
+							project.directory,
+							projectOptions,
+						),
 					);
 					if (Exit.isSuccess(exit)) {
 						return {
@@ -146,16 +170,27 @@ export const listDaemonSessions = (
 			{ concurrency: 4 },
 		);
 
-		const sessions = projectResults
+		// Merge with the raw SQL sort key. SessionInfo.updatedAt may be a parsed
+		// string or absent, which would disagree with the integer keyset predicate.
+		const candidates = projectResults
 			.flatMap((result) => result.sessions)
-			.sort((a, b) => updatedAtMillis(b) - updatedAtMillis(a));
-		const limitedSessions =
-			options.limit === undefined
-				? sessions
-				: sessions.slice(0, Math.max(0, Math.floor(options.limit)));
+			.sort((a, b) => {
+				const timestampOrder = b.sortKey.updatedAt - a.sortKey.updatedAt;
+				if (timestampOrder !== 0) return timestampOrder;
+				if (a.sortKey.id === b.sortKey.id) return 0;
+				return a.sortKey.id < b.sortKey.id ? 1 : -1;
+			});
+		const page = limit === undefined ? candidates : candidates.slice(0, limit);
+		// This is exact: the per-project lookahead means a non-overflowing merge has
+		// exhausted every project, while an overflow contains a real next row.
+		const hasMore = limit !== undefined && candidates.length > limit;
+		const last = page.at(-1);
+		const nextCursor = hasMore && last !== undefined ? last.sortKey : null;
 
 		return {
-			sessions: limitedSessions,
+			sessions: page.map((candidate) => candidate.session),
 			availability: projectResults.map((result) => result.availability),
+			hasMore,
+			nextCursor,
 		};
 	}).pipe(Effect.withSpan("daemonSessions.list"));
