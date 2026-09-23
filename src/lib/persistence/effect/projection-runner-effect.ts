@@ -7,9 +7,10 @@ import type { SqlError } from "@effect/sql/SqlError";
 import { Context, Data, Effect } from "effect";
 import type { StoredEvent } from "../events.js";
 import { ProjectorCursorEffectTag } from "./projector-cursor-effect.js";
-import type {
-	EffectProjector,
-	ProjectionContext,
+import {
+	type EffectProjector,
+	type ProjectionContext,
+	UNPROJECTED_CANONICAL_EVENT_TYPES,
 } from "./projectors-effect.js";
 import { SessionStateProjectionNotifierTag } from "./session-state-projection-notifier.js";
 import {
@@ -106,6 +107,27 @@ export const makeProjectionRunnerEffect = (
 			}
 		}
 
+		// An event type no projector claims writes nothing, raises nothing, and
+		// still advances the cursor below — silent by construction, which is how
+		// session.compaction went three months unprojected. Say so once per type
+		// rather than once per event, so the gap shows up in the log instead of as
+		// absent rows much later.
+		const unclaimedWarned = new Set<string>();
+		const warnIfUnclaimed = (eventType: string) =>
+			Effect.suspend(() => {
+				if (
+					projectorsByEventType.has(eventType) ||
+					UNPROJECTED_CANONICAL_EVENT_TYPES.includes(eventType) ||
+					unclaimedWarned.has(eventType)
+				) {
+					return Effect.void;
+				}
+				unclaimedWarned.add(eventType);
+				return Effect.logWarning(
+					`No projector handles "${eventType}"; its events are stored but never projected`,
+				);
+			});
+
 		// Mutable state
 		const failures: ProjectionFailure[] = [];
 		let recovered = false;
@@ -156,6 +178,7 @@ export const makeProjectionRunnerEffect = (
 					});
 				}
 
+				yield* warnIfUnclaimed(event.type);
 				const matching = projectorsByEventType.get(event.type) ?? [];
 				const ctx: ProjectionContext = { replaying };
 
@@ -213,6 +236,7 @@ export const makeProjectionRunnerEffect = (
 				yield* sql.withTransaction(
 					Effect.gen(function* () {
 						for (const event of events) {
+							yield* warnIfUnclaimed(event.type);
 							const matching = projectorsByEventType.get(event.type) ?? [];
 							for (const projector of matching) {
 								yield* projector.project(event, ctx);

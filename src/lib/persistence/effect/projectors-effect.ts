@@ -691,6 +691,21 @@ export const makeProviderProjector = (): EffectProjector => ({
 // ─── Factory ────────────────────────────────────────────────────────────────
 
 /**
+ * Canonical event types that deliberately reach no projector.
+ *
+ * An unclaimed type is indistinguishable from a handled one at runtime: the
+ * dispatch map simply finds nothing, and the cursor advances anyway. That is
+ * how session.compaction stayed unprojected for three months behind a green
+ * suite. Anything absent here and absent from every projector's `handles` is a
+ * bug, and projector-coverage.test.ts fails on it.
+ */
+export const UNPROJECTED_CANONICAL_EVENT_TYPES: readonly string[] = [
+	// Superseded by tool.started carrying the complete input; kept in the
+	// canonical vocabulary only so historical stores still decode.
+	"tool.input_updated",
+];
+
+/**
  * Creates all 6 Effect-based projectors in the correct order.
  * Order matters for FK compliance: SessionProjector first.
  */
