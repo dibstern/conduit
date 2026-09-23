@@ -24,6 +24,9 @@ export const SESSIONS_READ_AT_MIGRATION = "0011_sessions_read_at.sql";
 export const SESSIONS_LAST_TURN_ERROR_MIGRATION =
 	"0012_sessions_last_turn_error.sql";
 
+export const BACKFILL_COMPACTION_MESSAGES_MIGRATION =
+	"0013_backfill_compaction_messages.sql";
+
 export function readMigrationSql(filename: string): string {
 	return readFileSync(
 		join(dirname(fileURLToPath(import.meta.url)), "migrations", filename),
@@ -92,5 +95,10 @@ export const schemaMigrations: readonly Migration[] = [
 		id: 12,
 		name: "sessions_last_turn_error",
 		sql: readMigrationSql(SESSIONS_LAST_TURN_ERROR_MIGRATION),
+	},
+	{
+		id: 13,
+		name: "backfill_compaction_messages",
+		sql: readMigrationSql(BACKFILL_COMPACTION_MESSAGES_MIGRATION),
 	},
 ];

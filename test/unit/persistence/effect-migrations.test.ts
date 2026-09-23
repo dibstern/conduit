@@ -104,6 +104,7 @@ describe("Effect SQL migrations", () => {
 					{ migration_id: 11, name: "session_cascade_deletes" },
 					{ migration_id: 12, name: "sessions_read_at" },
 					{ migration_id: 13, name: "sessions_last_turn_error" },
+					{ migration_id: 14, name: "backfill_compaction_messages" },
 				]);
 
 				const legacyRows = yield* sql<{ id: number; name: string }>`
@@ -121,6 +122,7 @@ describe("Effect SQL migrations", () => {
 					{ id: 10, name: "session_cascade_deletes" },
 					{ id: 11, name: "sessions_read_at" },
 					{ id: 12, name: "sessions_last_turn_error" },
+					{ id: 13, name: "backfill_compaction_messages" },
 				]);
 			}).pipe(
 				Effect.provide(
@@ -150,6 +152,7 @@ describe("Effect SQL migrations", () => {
 					[11, "session_cascade_deletes"],
 					[12, "sessions_read_at"],
 					[13, "sessions_last_turn_error"],
+					[14, "backfill_compaction_messages"],
 				]);
 
 				const sql = yield* SqlClient.SqlClient;
@@ -168,8 +171,8 @@ describe("Effect SQL migrations", () => {
 					name: string;
 				}>`SELECT migration_id, name FROM effect_sql_migrations ORDER BY migration_id`;
 				expect(effectHistory.at(-1)).toEqual({
-					migration_id: 13,
-					name: "sessions_last_turn_error",
+					migration_id: 14,
+					name: "backfill_compaction_messages",
 				});
 				const legacyHistory = yield* sql<{ id: number; name: string }>`
 					SELECT id, name FROM _migrations ORDER BY id`;
@@ -214,6 +217,7 @@ describe("Effect SQL migrations", () => {
 					{ migration_id: 11, name: "session_cascade_deletes" },
 					{ migration_id: 12, name: "sessions_read_at" },
 					{ migration_id: 13, name: "sessions_last_turn_error" },
+					{ migration_id: 14, name: "backfill_compaction_messages" },
 				]);
 
 				const columns = yield* sql<{ name: string }>`
@@ -299,8 +303,8 @@ describe("Effect SQL migrations", () => {
 					FROM effect_sql_migrations
 					ORDER BY migration_id`;
 				expect(history.at(-1)).toEqual({
-					migration_id: 13,
-					name: "sessions_last_turn_error",
+					migration_id: 14,
+					name: "backfill_compaction_messages",
 				});
 			}).pipe(
 				Effect.provide(

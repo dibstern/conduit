@@ -3,6 +3,7 @@ import * as Migrator from "@effect/sql/Migrator";
 import type { SqlError } from "@effect/sql/SqlError";
 import { Effect } from "effect";
 import {
+	BACKFILL_COMPACTION_MESSAGES_MIGRATION,
 	CURRENT_EVENT_STORE_MIGRATION,
 	DROP_EVENTS_SESSION_FK_MIGRATION,
 	DURABLE_PROVIDER_COMMANDS_MIGRATION,
@@ -51,6 +52,9 @@ const sessionCascadeDeletesMigrationSql = readMigrationSql(
 const sessionsReadAtMigrationSql = readMigrationSql(SESSIONS_READ_AT_MIGRATION);
 const sessionsLastTurnErrorMigrationSql = readMigrationSql(
 	SESSIONS_LAST_TURN_ERROR_MIGRATION,
+);
+const backfillCompactionMessagesMigrationSql = readMigrationSql(
+	BACKFILL_COMPACTION_MESSAGES_MIGRATION,
 );
 
 const expectedTableColumns = {
@@ -719,6 +723,29 @@ const runPurgeLegacySkeletonSessionsMigration: Effect.Effect<
 	);
 });
 
+/**
+ * Reconstructs the compaction rows the message projector never wrote, because it
+ * did not declare session.compaction. Idempotent, so it is harmless next to the
+ * plain runner's 0013, which carries the same SQL for legacy-only stores.
+ *
+ * A read model missing its message tables is already broken beyond what a
+ * backfill can repair, and refusing to migrate would turn that into a daemon
+ * that will not start. Skip instead and leave it to the boot diagnostics.
+ */
+const runBackfillCompactionMessagesMigration: Effect.Effect<
+	void,
+	unknown,
+	SqlClient.SqlClient
+> = Effect.gen(function* () {
+	const sql = yield* SqlClient.SqlClient;
+	const tables = yield* sql<{ name: string }>`
+		SELECT name FROM sqlite_master
+		WHERE type = 'table' AND name IN ('messages', 'message_parts')`;
+	if (tables.length < 2) return;
+
+	yield* executeSqlStatements(backfillCompactionMessagesMigrationSql);
+});
+
 export const effectMigrationEntries = {
 	"0001_create_event_store_tables": runBaselineEventStoreMigration,
 	"0002_add_message_part_metadata": runMessagePartMetadataMigration,
@@ -734,6 +761,7 @@ export const effectMigrationEntries = {
 	"0011_session_cascade_deletes": runSessionCascadeDeletesMigration,
 	"0012_sessions_read_at": runSessionsReadAtMigration,
 	"0013_sessions_last_turn_error": runSessionsLastTurnErrorMigration,
+	"0014_backfill_compaction_messages": runBackfillCompactionMessagesMigration,
 } satisfies Record<string, Effect.Effect<void, unknown, SqlClient.SqlClient>>;
 
 export function makeEffectMigrationLoader(

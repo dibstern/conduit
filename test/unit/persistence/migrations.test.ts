@@ -122,6 +122,7 @@ describe("Migration Runner", () => {
 		const sessionCascadeDeletesMigration = schemaMigrations[9];
 		const sessionsReadAtMigration = schemaMigrations[10];
 		const sessionsLastTurnErrorMigration = schemaMigrations[11];
+		const compactionBackfillMigration = schemaMigrations[12];
 		if (
 			!baseline ||
 			!metadataMigration ||
@@ -134,7 +135,8 @@ describe("Migration Runner", () => {
 			!sessionsPermissionModeMigration ||
 			!sessionCascadeDeletesMigration ||
 			!sessionsReadAtMigration ||
-			!sessionsLastTurnErrorMigration
+			!sessionsLastTurnErrorMigration ||
+			!compactionBackfillMigration
 		) {
 			throw new Error("Expected all event-store schema migrations");
 		}
@@ -205,6 +207,11 @@ describe("Migration Runner", () => {
 				name: "sessions_last_turn_error",
 				checksum: calculateMigrationChecksum(sessionsLastTurnErrorMigration),
 			},
+			{
+				id: 13,
+				name: "backfill_compaction_messages",
+				checksum: calculateMigrationChecksum(compactionBackfillMigration),
+			},
 		]);
 		columns = client
 			.query<{ name: string }>("PRAGMA table_info(message_parts)")
@@ -238,12 +245,14 @@ describe("Migration Runner", () => {
 		const sessionCascadeDeletesMigration = schemaMigrations[9];
 		const sessionsReadAtMigration = schemaMigrations[10];
 		const sessionsLastTurnErrorMigration = schemaMigrations[11];
+		const compactionBackfillMigration = schemaMigrations[12];
 		if (
 			!turnModelExecutionMigration ||
 			!sessionsPermissionModeMigration ||
 			!sessionCascadeDeletesMigration ||
 			!sessionsReadAtMigration ||
-			!sessionsLastTurnErrorMigration
+			!sessionsLastTurnErrorMigration ||
+			!compactionBackfillMigration
 		) {
 			throw new Error("Expected remaining event-store migrations");
 		}
@@ -279,6 +288,11 @@ describe("Migration Runner", () => {
 				id: 12,
 				name: "sessions_last_turn_error",
 				checksum: calculateMigrationChecksum(sessionsLastTurnErrorMigration),
+			},
+			{
+				id: 13,
+				name: "backfill_compaction_messages",
+				checksum: calculateMigrationChecksum(compactionBackfillMigration),
 			},
 		]);
 		expect(runMigrations(client, schemaMigrations)).toEqual([]);
@@ -346,7 +360,7 @@ describe("Migration Runner", () => {
 				.map((column) => column.name),
 		).not.toContain("last_turn_error_at");
 
-		expect(runMigrations(client, schemaMigrations)).toHaveLength(1);
+		expect(runMigrations(client, schemaMigrations)).toHaveLength(2);
 		const rows = client.query<SessionRow>("SELECT * FROM sessions");
 		expect(rows[0]?.last_turn_error_at).toBeNull();
 		expect(sessionRowsToSessionInfoList(rows)[0]?.attention).toBe("idle");
