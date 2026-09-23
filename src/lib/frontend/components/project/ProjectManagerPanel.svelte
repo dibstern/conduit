@@ -75,13 +75,9 @@
 		showAddForm = true;
 		addDirectory = "";
 		addError = "";
-		// Default to first healthy instance
-		const healthy = getHealthyInstances();
-		// biome-ignore lint/style/noNonNullAssertion: safe — guarded by length check
+		// Prefer the first healthy instance, else the first configured one.
 		addInstanceId =
-			healthy.length > 0
-				? healthy[0]!.id
-				: (instanceState.instances[0]?.id ?? "");
+			getHealthyInstances()[0]?.id ?? instanceState.instances[0]?.id ?? "";
 	}
 
 	function handleCancelAdd() {
@@ -358,8 +354,10 @@
 
 <!-- Project list -->
 <div class="max-h-[280px] overflow-y-auto">
-	<!-- Manage mode always groups projects so the instance name and health stay visible. -->
-	{#if !navigable || hasMultipleInstances}
+	<!-- Group only when there is more than one instance to tell apart. With a single
+	     instance the header is one label over every project, which is noise: the flat
+	     list is the decided shape. -->
+	{#if hasMultipleInstances}
 		{#each [...projectsByInstance] as [instanceId, instanceProjects] (instanceId)}
 			{@const instance = instanceId !== "_default" ? getInstanceById(instanceId) : undefined}
 			<!-- Instance group header -->
