@@ -24,6 +24,7 @@ import {
 	WebSocketRoutingLive,
 	WebSocketUpgradeError,
 } from "../../../src/lib/domain/server/Layers/ws-routing-layer.js";
+import { WsRpcWebSocketHandler } from "../../../src/lib/server/ws-rpc-handler.js";
 import type { StoredProject } from "../../../src/lib/types.js";
 
 type TestSocket = Socket & {
@@ -281,57 +282,52 @@ describe("WebSocketRoutingLive", () => {
 			}),
 	);
 
-	it.scoped("destroys sockets for non-project websocket paths", () =>
-		Effect.gen(function* () {
-			const server = createServer();
-			const relay = makeWebSocketRelay();
-			const layer = makeLayer(server, { relay });
-
-			yield* Effect.gen(function* () {
-				const socket = makeSocket();
-				server.emit(
-					"upgrade",
-					makeRequest("/invalid"),
-					socket,
-					Buffer.alloc(0),
-				);
-
-				yield* waitForAssertion(() => {
-					expect(socket.destroy).toHaveBeenCalled();
-					expect(relay.wsHandler.handleUpgrade).not.toHaveBeenCalled();
-				});
-			}).pipe(Effect.provide(Layer.fresh(layer)));
-		}),
-	);
-
-	it.scoped(
-		"rejects unauthenticated websocket upgrades before relay startup",
-		() =>
+	it.scoped.each(["/invalid", "/rpc/", "/rpc-extra"])(
+		"destroys sockets for invalid websocket path %s",
+		(path) =>
 			Effect.gen(function* () {
 				const server = createServer();
-				const ensureRelayStarted = vi.fn();
-				const auth = new AuthManager({
-					getPinHash: () => hashPin("1234"),
-				});
 				const relay = makeWebSocketRelay();
-				const layer = makeLayer(server, { auth, relay, ensureRelayStarted });
+				const layer = makeLayer(server, { relay });
 
 				yield* Effect.gen(function* () {
 					const socket = makeSocket();
-					server.emit(
-						"upgrade",
-						makeRequest("/p/test-project/ws"),
-						socket,
-						Buffer.alloc(0),
-					);
+					server.emit("upgrade", makeRequest(path), socket, Buffer.alloc(0));
 
 					yield* waitForAssertion(() => {
 						expect(socket.destroy).toHaveBeenCalled();
-						expect(ensureRelayStarted).not.toHaveBeenCalled();
 						expect(relay.wsHandler.handleUpgrade).not.toHaveBeenCalled();
 					});
 				}).pipe(Effect.provide(Layer.fresh(layer)));
 			}),
+	);
+
+	it.scoped.each([
+		"/p/test-project/ws",
+		"/p/test-project/rpc",
+		"/rpc",
+		"/rpc?client=browser",
+	])("rejects unauthenticated %s upgrades before relay startup", (path) =>
+		Effect.gen(function* () {
+			const server = createServer();
+			const ensureRelayStarted = vi.fn();
+			const auth = new AuthManager({
+				getPinHash: () => hashPin("1234"),
+			});
+			const relay = makeWebSocketRelay();
+			const layer = makeLayer(server, { auth, relay, ensureRelayStarted });
+
+			yield* Effect.gen(function* () {
+				const socket = makeSocket();
+				server.emit("upgrade", makeRequest(path), socket, Buffer.alloc(0));
+
+				yield* waitForAssertion(() => {
+					expect(socket.destroy).toHaveBeenCalled();
+					expect(ensureRelayStarted).not.toHaveBeenCalled();
+					expect(relay.wsHandler.handleUpgrade).not.toHaveBeenCalled();
+				});
+			}).pipe(Effect.provide(Layer.fresh(layer)));
+		}),
 	);
 
 	it.scoped("writes 503 when the relay cannot become ready", () =>
@@ -383,7 +379,12 @@ describe("WebSocketRoutingLive", () => {
 		}),
 	);
 
-	it.scoped("destroys sockets while daemon shutdown is in progress", () =>
+	it.scoped.each([
+		"/p/test-project/ws",
+		"/p/test-project/rpc",
+		"/rpc",
+		"/rpc?client=browser",
+	])("destroys %s sockets while daemon shutdown is in progress", (path) =>
 		Effect.gen(function* () {
 			const server = createServer();
 			const ensureRelayStarted = vi.fn();
@@ -398,12 +399,7 @@ describe("WebSocketRoutingLive", () => {
 
 			yield* Effect.gen(function* () {
 				const socket = makeSocket();
-				server.emit(
-					"upgrade",
-					makeRequest("/p/test-project/ws"),
-					socket,
-					Buffer.alloc(0),
-				);
+				server.emit("upgrade", makeRequest(path), socket, Buffer.alloc(0));
 
 				yield* waitForAssertion(() => {
 					expect(socket.destroy).toHaveBeenCalled();
@@ -413,5 +409,31 @@ describe("WebSocketRoutingLive", () => {
 				});
 			}).pipe(Effect.provide(Layer.fresh(layer)));
 		}),
+	);
+
+	it.scoped.each(["/rpc", "/rpc?client=browser"])(
+		"accepts %s without resolving a project at upgrade time",
+		(path) =>
+			Effect.gen(function* () {
+				const upgrade = vi
+					.spyOn(WsRpcWebSocketHandler.prototype, "handleUpgrade")
+					.mockImplementation(() => {});
+				yield* Effect.addFinalizer(() =>
+					Effect.sync(() => upgrade.mockRestore()),
+				);
+				const server = createServer();
+				const ensureRelayStarted = vi.fn();
+				const relay = makeWebSocketRelay();
+				yield* Layer.build(makeLayer(server, { relay, ensureRelayStarted }));
+				const req = makeRequest(path);
+				const socket = makeSocket();
+				server.emit("upgrade", req, socket, Buffer.alloc(0));
+				yield* waitForAssertion(() =>
+					expect(upgrade).toHaveBeenCalledWith(req, socket, expect.any(Buffer)),
+				);
+				expect(ensureRelayStarted).not.toHaveBeenCalled();
+				expect(relay.rpcWsHandler.handleUpgrade).not.toHaveBeenCalled();
+				expect(socket.destroy).not.toHaveBeenCalled();
+			}),
 	);
 });

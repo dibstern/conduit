@@ -14,7 +14,12 @@ import {
 	Ref,
 	Runtime,
 } from "effect";
+import { WsRpcError } from "../../../contracts/ws-rpc.js";
 import { getClientIp, parseCookies } from "../../../server/http-utils.js";
+import {
+	makeRoutedWsRpcWebSocketHandler,
+	type RpcWebSocketHandlerShape,
+} from "../../../server/ws-rpc-handler.js";
 import { HttpServerRefTag } from "../../daemon/Layers/relay-factory-layer.js";
 import { ConfigPersistenceTag } from "../../daemon/Services/config-persistence-service.js";
 import { DaemonConfigRefTag } from "../../daemon/Services/daemon-config-ref.js";
@@ -41,13 +46,10 @@ export interface WebSocketRelay {
 			head: Buffer,
 		) => void;
 	};
-	readonly rpcWsHandler: {
-		readonly handleUpgrade: (
-			req: http.IncomingMessage,
-			socket: Duplex,
-			head: Buffer,
-		) => void;
-	};
+	readonly rpcWsHandler: Pick<
+		RpcWebSocketHandlerShape,
+		"handleUpgrade" | "context"
+	>;
 }
 
 export class WebSocketUpgradeError extends Data.TaggedError(
@@ -257,22 +259,53 @@ export const WebSocketRoutingLive: Layer.Layer<
 			);
 		}
 
+		const rpcHandler = yield* makeRoutedWsRpcWebSocketHandler((slug) =>
+			Effect.gen(function* () {
+				yield* relayRouter.ensureRelayStarted(slug);
+				const relay = yield* relayRouter.waitForRelay(
+					slug,
+					RELAY_WAIT_TIMEOUT_MS,
+				);
+				yield* relayRouter.touchLastUsed(slug);
+				if (!relay.rpcWsHandler.context) {
+					return yield* Effect.fail(new Error("RPC context unavailable"));
+				}
+				return yield* relay.rpcWsHandler.context;
+			}).pipe(
+				Effect.catchAll((cause) =>
+					Effect.fail(
+						new WsRpcError({
+							message: `Project "${slug}" unavailable: ${formatCause(cause)}`,
+						}),
+					),
+				),
+				Effect.catchAllDefect((cause) =>
+					Effect.fail(
+						new WsRpcError({
+							message: `Project "${slug}" unavailable: ${formatCause(cause)}`,
+						}),
+					),
+				),
+			),
+		);
+
 		const routeUpgrade = (
 			req: http.IncomingMessage,
 			socket: net.Socket,
 			head: Buffer,
 		) =>
 			Effect.gen(function* () {
+				const isSharedRpc = req.url === "/rpc" || req.url?.startsWith("/rpc?");
 				const match = req.url?.match(PROJECT_WS_PATTERN);
-				if (!match) {
+				if (!isSharedRpc && !match) {
 					return yield* new WebSocketUpgradeError({
 						reason: "invalid_path",
 						url: req.url ?? "",
 					});
 				}
 
-				const slug = match[1];
-				if (slug === undefined || slug.length === 0) {
+				const slug = match?.[1];
+				if (!isSharedRpc && (slug === undefined || slug.length === 0)) {
 					return yield* new WebSocketUpgradeError({
 						reason: "invalid_path",
 						url: req.url ?? "",
@@ -282,7 +315,7 @@ export const WebSocketRoutingLive: Layer.Layer<
 				if (!(yield* authenticateUpgrade(auth, req))) {
 					return yield* new WebSocketUpgradeError({
 						reason: "auth_failed",
-						slug,
+						...(slug === undefined ? {} : { slug }),
 						url: req.url ?? "",
 					});
 				}
@@ -291,11 +324,16 @@ export const WebSocketRoutingLive: Layer.Layer<
 				if (socket.destroyed || config.shuttingDown) {
 					return yield* new WebSocketUpgradeError({
 						reason: "daemon_shutting_down",
-						slug,
+						...(slug === undefined ? {} : { slug }),
 						url: req.url ?? "",
 					});
 				}
 
+				if (isSharedRpc) {
+					yield* Effect.sync(() => rpcHandler.handleUpgrade(req, socket, head));
+					return;
+				}
+				if (slug === undefined) return;
 				yield* relayRouter.ensureRelayStarted(slug);
 				const relay = yield* relayRouter.waitForRelay(
 					slug,
@@ -311,7 +349,7 @@ export const WebSocketRoutingLive: Layer.Layer<
 
 				yield* Effect.logDebug("WS upgrade accepted", { slug });
 				yield* relayRouter.touchLastUsed(slug);
-				const endpoint = match[2] === "rpc" ? "rpc" : "ws";
+				const endpoint = match?.[2] === "rpc" ? "rpc" : "ws";
 				yield* Effect.try({
 					try: () =>
 						endpoint === "rpc"

@@ -386,11 +386,10 @@ export interface WsRpcLocation {
 }
 
 export const makeWsRpcUrl = (
-	projectSlug: string,
 	location: WsRpcLocation = window.location,
 ): string => {
 	const protocol = location.protocol === "https:" ? "wss:" : "ws:";
-	return `${protocol}//${location.host}/p/${encodeURIComponent(projectSlug)}/rpc`;
+	return `${protocol}//${location.host}/rpc`;
 };
 
 const callCancelSession = (input: CancelSessionRpcInput) =>
@@ -401,7 +400,7 @@ const callCancelSession = (input: CancelSessionRpcInput) =>
 		}),
 	).pipe(
 		Effect.provide(RpcClient.layerProtocolSocket()),
-		Effect.provide(Socket.layerWebSocket(makeWsRpcUrl(input.projectSlug))),
+		Effect.provide(Socket.layerWebSocket(makeWsRpcUrl())),
 		Effect.provide(Socket.layerWebSocketConstructorGlobal),
 		Effect.provide(RpcSerialization.layerJson),
 	);
@@ -414,7 +413,7 @@ const callGetModels = (input: GetModelsRpcInput) =>
 		}),
 	).pipe(
 		Effect.provide(RpcClient.layerProtocolSocket()),
-		Effect.provide(Socket.layerWebSocket(makeWsRpcUrl(input.projectSlug))),
+		Effect.provide(Socket.layerWebSocket(makeWsRpcUrl())),
 		Effect.provide(Socket.layerWebSocketConstructorGlobal),
 		Effect.provide(RpcSerialization.layerJson),
 	);
@@ -427,7 +426,7 @@ const callGetAgents = (input: GetAgentsRpcInput) =>
 		}),
 	).pipe(
 		Effect.provide(RpcClient.layerProtocolSocket()),
-		Effect.provide(Socket.layerWebSocket(makeWsRpcUrl(input.projectSlug))),
+		Effect.provide(Socket.layerWebSocket(makeWsRpcUrl())),
 		Effect.provide(Socket.layerWebSocketConstructorGlobal),
 		Effect.provide(RpcSerialization.layerJson),
 	);
@@ -440,7 +439,7 @@ const callGetCommands = (input: GetCommandsRpcInput) =>
 		}),
 	).pipe(
 		Effect.provide(RpcClient.layerProtocolSocket()),
-		Effect.provide(Socket.layerWebSocket(makeWsRpcUrl(input.projectSlug))),
+		Effect.provide(Socket.layerWebSocket(makeWsRpcUrl())),
 		Effect.provide(Socket.layerWebSocketConstructorGlobal),
 		Effect.provide(RpcSerialization.layerJson),
 	);
@@ -453,7 +452,7 @@ const callGetProjects = (input: GetProjectsRpcInput) =>
 		}),
 	).pipe(
 		Effect.provide(RpcClient.layerProtocolSocket()),
-		Effect.provide(Socket.layerWebSocket(makeWsRpcUrl(input.projectSlug))),
+		Effect.provide(Socket.layerWebSocket(makeWsRpcUrl())),
 		Effect.provide(Socket.layerWebSocketConstructorGlobal),
 		Effect.provide(RpcSerialization.layerJson),
 	);
@@ -470,7 +469,7 @@ const callAddProject = (input: AddProjectRpcInput) =>
 		}),
 	).pipe(
 		Effect.provide(RpcClient.layerProtocolSocket()),
-		Effect.provide(Socket.layerWebSocket(makeWsRpcUrl(input.projectSlug))),
+		Effect.provide(Socket.layerWebSocket(makeWsRpcUrl())),
 		Effect.provide(Socket.layerWebSocketConstructorGlobal),
 		Effect.provide(RpcSerialization.layerJson),
 	);
@@ -483,7 +482,7 @@ const callRemoveProject = (input: RemoveProjectRpcInput) =>
 		}),
 	).pipe(
 		Effect.provide(RpcClient.layerProtocolSocket()),
-		Effect.provide(Socket.layerWebSocket(makeWsRpcUrl(input.projectSlug))),
+		Effect.provide(Socket.layerWebSocket(makeWsRpcUrl())),
 		Effect.provide(Socket.layerWebSocketConstructorGlobal),
 		Effect.provide(RpcSerialization.layerJson),
 	);
@@ -496,7 +495,7 @@ const callRenameProject = (input: RenameProjectRpcInput) =>
 		}),
 	).pipe(
 		Effect.provide(RpcClient.layerProtocolSocket()),
-		Effect.provide(Socket.layerWebSocket(makeWsRpcUrl(input.projectSlug))),
+		Effect.provide(Socket.layerWebSocket(makeWsRpcUrl())),
 		Effect.provide(Socket.layerWebSocketConstructorGlobal),
 		Effect.provide(RpcSerialization.layerJson),
 	);
@@ -509,7 +508,7 @@ const callSetProjectInstance = (input: SetProjectInstanceRpcInput) =>
 		}),
 	).pipe(
 		Effect.provide(RpcClient.layerProtocolSocket()),
-		Effect.provide(Socket.layerWebSocket(makeWsRpcUrl(input.projectSlug))),
+		Effect.provide(Socket.layerWebSocket(makeWsRpcUrl())),
 		Effect.provide(Socket.layerWebSocketConstructorGlobal),
 		Effect.provide(RpcSerialization.layerJson),
 	);
@@ -522,7 +521,7 @@ const callStartInstance = (input: InstanceMutationRpcInput) =>
 		}),
 	).pipe(
 		Effect.provide(RpcClient.layerProtocolSocket()),
-		Effect.provide(Socket.layerWebSocket(makeWsRpcUrl(input.projectSlug))),
+		Effect.provide(Socket.layerWebSocket(makeWsRpcUrl())),
 		Effect.provide(Socket.layerWebSocketConstructorGlobal),
 		Effect.provide(RpcSerialization.layerJson),
 	);
@@ -535,7 +534,7 @@ const callStopInstance = (input: InstanceMutationRpcInput) =>
 		}),
 	).pipe(
 		Effect.provide(RpcClient.layerProtocolSocket()),
-		Effect.provide(Socket.layerWebSocket(makeWsRpcUrl(input.projectSlug))),
+		Effect.provide(Socket.layerWebSocket(makeWsRpcUrl())),
 		Effect.provide(Socket.layerWebSocketConstructorGlobal),
 		Effect.provide(RpcSerialization.layerJson),
 	);
@@ -548,7 +547,7 @@ const callRemoveInstance = (input: InstanceMutationRpcInput) =>
 		}),
 	).pipe(
 		Effect.provide(RpcClient.layerProtocolSocket()),
-		Effect.provide(Socket.layerWebSocket(makeWsRpcUrl(input.projectSlug))),
+		Effect.provide(Socket.layerWebSocket(makeWsRpcUrl())),
 		Effect.provide(Socket.layerWebSocketConstructorGlobal),
 		Effect.provide(RpcSerialization.layerJson),
 	);
@@ -561,7 +560,7 @@ const callRenameInstance = (input: RenameInstanceRpcInput) =>
 		}),
 	).pipe(
 		Effect.provide(RpcClient.layerProtocolSocket()),
-		Effect.provide(Socket.layerWebSocket(makeWsRpcUrl(input.projectSlug))),
+		Effect.provide(Socket.layerWebSocket(makeWsRpcUrl())),
 		Effect.provide(Socket.layerWebSocketConstructorGlobal),
 		Effect.provide(RpcSerialization.layerJson),
 	);
@@ -574,7 +573,7 @@ const callAddInstance = (input: AddInstanceRpcInput) =>
 		}),
 	).pipe(
 		Effect.provide(RpcClient.layerProtocolSocket()),
-		Effect.provide(Socket.layerWebSocket(makeWsRpcUrl(input.projectSlug))),
+		Effect.provide(Socket.layerWebSocket(makeWsRpcUrl())),
 		Effect.provide(Socket.layerWebSocketConstructorGlobal),
 		Effect.provide(RpcSerialization.layerJson),
 	);
@@ -587,7 +586,7 @@ const callUpdateInstance = (input: UpdateInstanceRpcInput) =>
 		}),
 	).pipe(
 		Effect.provide(RpcClient.layerProtocolSocket()),
-		Effect.provide(Socket.layerWebSocket(makeWsRpcUrl(input.projectSlug))),
+		Effect.provide(Socket.layerWebSocket(makeWsRpcUrl())),
 		Effect.provide(Socket.layerWebSocketConstructorGlobal),
 		Effect.provide(RpcSerialization.layerJson),
 	);
@@ -600,7 +599,7 @@ const callScanNow = (input: ScanNowRpcInput) =>
 		}),
 	).pipe(
 		Effect.provide(RpcClient.layerProtocolSocket()),
-		Effect.provide(Socket.layerWebSocket(makeWsRpcUrl(input.projectSlug))),
+		Effect.provide(Socket.layerWebSocket(makeWsRpcUrl())),
 		Effect.provide(Socket.layerWebSocketConstructorGlobal),
 		Effect.provide(RpcSerialization.layerJson),
 	);
@@ -613,7 +612,7 @@ const callDetectProxy = (input: DetectProxyRpcInput) =>
 		}),
 	).pipe(
 		Effect.provide(RpcClient.layerProtocolSocket()),
-		Effect.provide(Socket.layerWebSocket(makeWsRpcUrl(input.projectSlug))),
+		Effect.provide(Socket.layerWebSocket(makeWsRpcUrl())),
 		Effect.provide(Socket.layerWebSocketConstructorGlobal),
 		Effect.provide(RpcSerialization.layerJson),
 	);
@@ -626,7 +625,7 @@ const callListPtys = (input: ListPtysRpcInput) =>
 		}),
 	).pipe(
 		Effect.provide(RpcClient.layerProtocolSocket()),
-		Effect.provide(Socket.layerWebSocket(makeWsRpcUrl(input.projectSlug))),
+		Effect.provide(Socket.layerWebSocket(makeWsRpcUrl())),
 		Effect.provide(Socket.layerWebSocketConstructorGlobal),
 		Effect.provide(RpcSerialization.layerJson),
 	);
@@ -639,7 +638,7 @@ const callCreatePty = (input: CreatePtyRpcInput) =>
 		}),
 	).pipe(
 		Effect.provide(RpcClient.layerProtocolSocket()),
-		Effect.provide(Socket.layerWebSocket(makeWsRpcUrl(input.projectSlug))),
+		Effect.provide(Socket.layerWebSocket(makeWsRpcUrl())),
 		Effect.provide(Socket.layerWebSocketConstructorGlobal),
 		Effect.provide(RpcSerialization.layerJson),
 	);
@@ -658,7 +657,7 @@ const callResizePty = (input: ResizePtyRpcInput) =>
 		}),
 	).pipe(
 		Effect.provide(RpcClient.layerProtocolSocket()),
-		Effect.provide(Socket.layerWebSocket(makeWsRpcUrl(input.projectSlug))),
+		Effect.provide(Socket.layerWebSocket(makeWsRpcUrl())),
 		Effect.provide(Socket.layerWebSocketConstructorGlobal),
 		Effect.provide(RpcSerialization.layerJson),
 	);
@@ -671,7 +670,7 @@ const callClosePty = (input: ClosePtyRpcInput) =>
 		}),
 	).pipe(
 		Effect.provide(RpcClient.layerProtocolSocket()),
-		Effect.provide(Socket.layerWebSocket(makeWsRpcUrl(input.projectSlug))),
+		Effect.provide(Socket.layerWebSocket(makeWsRpcUrl())),
 		Effect.provide(Socket.layerWebSocketConstructorGlobal),
 		Effect.provide(RpcSerialization.layerJson),
 	);
@@ -693,7 +692,7 @@ const callCreateSession = (input: CreateSessionRpcInput) =>
 		}),
 	).pipe(
 		Effect.provide(RpcClient.layerProtocolSocket()),
-		Effect.provide(Socket.layerWebSocket(makeWsRpcUrl(input.projectSlug))),
+		Effect.provide(Socket.layerWebSocket(makeWsRpcUrl())),
 		Effect.provide(Socket.layerWebSocketConstructorGlobal),
 		Effect.provide(RpcSerialization.layerJson),
 	);
@@ -706,7 +705,7 @@ const callViewSession = (input: ViewSessionRpcInput) =>
 		}),
 	).pipe(
 		Effect.provide(RpcClient.layerProtocolSocket()),
-		Effect.provide(Socket.layerWebSocket(makeWsRpcUrl(input.projectSlug))),
+		Effect.provide(Socket.layerWebSocket(makeWsRpcUrl())),
 		Effect.provide(Socket.layerWebSocketConstructorGlobal),
 		Effect.provide(RpcSerialization.layerJson),
 	);
@@ -723,7 +722,7 @@ const callDeleteSession = (input: DeleteSessionRpcInput) =>
 		}),
 	).pipe(
 		Effect.provide(RpcClient.layerProtocolSocket()),
-		Effect.provide(Socket.layerWebSocket(makeWsRpcUrl(input.projectSlug))),
+		Effect.provide(Socket.layerWebSocket(makeWsRpcUrl())),
 		Effect.provide(Socket.layerWebSocketConstructorGlobal),
 		Effect.provide(RpcSerialization.layerJson),
 	);
@@ -741,7 +740,7 @@ const callForkSession = (input: ForkSessionRpcInput) =>
 		}),
 	).pipe(
 		Effect.provide(RpcClient.layerProtocolSocket()),
-		Effect.provide(Socket.layerWebSocket(makeWsRpcUrl(input.projectSlug))),
+		Effect.provide(Socket.layerWebSocket(makeWsRpcUrl())),
 		Effect.provide(Socket.layerWebSocketConstructorGlobal),
 		Effect.provide(RpcSerialization.layerJson),
 	);
@@ -769,7 +768,7 @@ const callRespondPermission = (input: RespondPermissionRpcInput) =>
 		}),
 	).pipe(
 		Effect.provide(RpcClient.layerProtocolSocket()),
-		Effect.provide(Socket.layerWebSocket(makeWsRpcUrl(input.projectSlug))),
+		Effect.provide(Socket.layerWebSocket(makeWsRpcUrl())),
 		Effect.provide(Socket.layerWebSocketConstructorGlobal),
 		Effect.provide(RpcSerialization.layerJson),
 	);
@@ -788,7 +787,7 @@ const callAnswerQuestion = (input: AnswerQuestionRpcInput) =>
 		}),
 	).pipe(
 		Effect.provide(RpcClient.layerProtocolSocket()),
-		Effect.provide(Socket.layerWebSocket(makeWsRpcUrl(input.projectSlug))),
+		Effect.provide(Socket.layerWebSocket(makeWsRpcUrl())),
 		Effect.provide(Socket.layerWebSocketConstructorGlobal),
 		Effect.provide(RpcSerialization.layerJson),
 	);
@@ -806,7 +805,7 @@ const callRejectQuestion = (input: RejectQuestionRpcInput) =>
 		}),
 	).pipe(
 		Effect.provide(RpcClient.layerProtocolSocket()),
-		Effect.provide(Socket.layerWebSocket(makeWsRpcUrl(input.projectSlug))),
+		Effect.provide(Socket.layerWebSocket(makeWsRpcUrl())),
 		Effect.provide(Socket.layerWebSocketConstructorGlobal),
 		Effect.provide(RpcSerialization.layerJson),
 	);
@@ -819,7 +818,7 @@ const callGetTodo = (input: GetTodoRpcInput) =>
 		}),
 	).pipe(
 		Effect.provide(RpcClient.layerProtocolSocket()),
-		Effect.provide(Socket.layerWebSocket(makeWsRpcUrl(input.projectSlug))),
+		Effect.provide(Socket.layerWebSocket(makeWsRpcUrl())),
 		Effect.provide(Socket.layerWebSocketConstructorGlobal),
 		Effect.provide(RpcSerialization.layerJson),
 	);
@@ -832,7 +831,7 @@ const callGetFileTree = (input: GetFileTreeRpcInput) =>
 		}),
 	).pipe(
 		Effect.provide(RpcClient.layerProtocolSocket()),
-		Effect.provide(Socket.layerWebSocket(makeWsRpcUrl(input.projectSlug))),
+		Effect.provide(Socket.layerWebSocket(makeWsRpcUrl())),
 		Effect.provide(Socket.layerWebSocketConstructorGlobal),
 		Effect.provide(RpcSerialization.layerJson),
 	);
@@ -845,7 +844,7 @@ const callGetFileList = (input: GetFileListRpcInput) =>
 		}),
 	).pipe(
 		Effect.provide(RpcClient.layerProtocolSocket()),
-		Effect.provide(Socket.layerWebSocket(makeWsRpcUrl(input.projectSlug))),
+		Effect.provide(Socket.layerWebSocket(makeWsRpcUrl())),
 		Effect.provide(Socket.layerWebSocketConstructorGlobal),
 		Effect.provide(RpcSerialization.layerJson),
 	);
@@ -858,7 +857,7 @@ const callGetFileContent = (input: GetFileContentRpcInput) =>
 		}),
 	).pipe(
 		Effect.provide(RpcClient.layerProtocolSocket()),
-		Effect.provide(Socket.layerWebSocket(makeWsRpcUrl(input.projectSlug))),
+		Effect.provide(Socket.layerWebSocket(makeWsRpcUrl())),
 		Effect.provide(Socket.layerWebSocketConstructorGlobal),
 		Effect.provide(RpcSerialization.layerJson),
 	);
@@ -871,7 +870,7 @@ const callGetToolContent = (input: GetToolContentRpcInput) =>
 		}),
 	).pipe(
 		Effect.provide(RpcClient.layerProtocolSocket()),
-		Effect.provide(Socket.layerWebSocket(makeWsRpcUrl(input.projectSlug))),
+		Effect.provide(Socket.layerWebSocket(makeWsRpcUrl())),
 		Effect.provide(Socket.layerWebSocketConstructorGlobal),
 		Effect.provide(RpcSerialization.layerJson),
 	);
@@ -884,7 +883,7 @@ const callGetSkillContent = (input: GetSkillContentRpcInput) =>
 		}),
 	).pipe(
 		Effect.provide(RpcClient.layerProtocolSocket()),
-		Effect.provide(Socket.layerWebSocket(makeWsRpcUrl(input.projectSlug))),
+		Effect.provide(Socket.layerWebSocket(makeWsRpcUrl())),
 		Effect.provide(Socket.layerWebSocketConstructorGlobal),
 		Effect.provide(RpcSerialization.layerJson),
 	);
@@ -897,7 +896,7 @@ const callListDirectories = (input: ListDirectoriesRpcInput) =>
 		}),
 	).pipe(
 		Effect.provide(RpcClient.layerProtocolSocket()),
-		Effect.provide(Socket.layerWebSocket(makeWsRpcUrl(input.projectSlug))),
+		Effect.provide(Socket.layerWebSocket(makeWsRpcUrl())),
 		Effect.provide(Socket.layerWebSocketConstructorGlobal),
 		Effect.provide(RpcSerialization.layerJson),
 	);
@@ -915,7 +914,7 @@ const callSwitchAgent = (input: SwitchAgentRpcInput) =>
 		}),
 	).pipe(
 		Effect.provide(RpcClient.layerProtocolSocket()),
-		Effect.provide(Socket.layerWebSocket(makeWsRpcUrl(input.projectSlug))),
+		Effect.provide(Socket.layerWebSocket(makeWsRpcUrl())),
 		Effect.provide(Socket.layerWebSocketConstructorGlobal),
 		Effect.provide(RpcSerialization.layerJson),
 	);
@@ -933,7 +932,7 @@ const callSwitchContextWindow = (input: SwitchContextWindowRpcInput) =>
 		}),
 	).pipe(
 		Effect.provide(RpcClient.layerProtocolSocket()),
-		Effect.provide(Socket.layerWebSocket(makeWsRpcUrl(input.projectSlug))),
+		Effect.provide(Socket.layerWebSocket(makeWsRpcUrl())),
 		Effect.provide(Socket.layerWebSocketConstructorGlobal),
 		Effect.provide(RpcSerialization.layerJson),
 	);
@@ -952,7 +951,7 @@ const callSwitchModel = (input: SwitchModelRpcInput) =>
 		}),
 	).pipe(
 		Effect.provide(RpcClient.layerProtocolSocket()),
-		Effect.provide(Socket.layerWebSocket(makeWsRpcUrl(input.projectSlug))),
+		Effect.provide(Socket.layerWebSocket(makeWsRpcUrl())),
 		Effect.provide(Socket.layerWebSocketConstructorGlobal),
 		Effect.provide(RpcSerialization.layerJson),
 	);
@@ -970,7 +969,7 @@ const callSetDefaultModel = (input: SetDefaultModelRpcInput) =>
 		}),
 	).pipe(
 		Effect.provide(RpcClient.layerProtocolSocket()),
-		Effect.provide(Socket.layerWebSocket(makeWsRpcUrl(input.projectSlug))),
+		Effect.provide(Socket.layerWebSocket(makeWsRpcUrl())),
 		Effect.provide(Socket.layerWebSocketConstructorGlobal),
 		Effect.provide(RpcSerialization.layerJson),
 	);
@@ -989,7 +988,7 @@ const callSetDefaultPermissionMode = (
 		}),
 	).pipe(
 		Effect.provide(RpcClient.layerProtocolSocket()),
-		Effect.provide(Socket.layerWebSocket(makeWsRpcUrl(input.projectSlug))),
+		Effect.provide(Socket.layerWebSocket(makeWsRpcUrl())),
 		Effect.provide(Socket.layerWebSocketConstructorGlobal),
 		Effect.provide(RpcSerialization.layerJson),
 	);
@@ -1007,7 +1006,7 @@ const callSetHiddenEntries = (input: SetHiddenEntriesRpcInput) =>
 		}),
 	).pipe(
 		Effect.provide(RpcClient.layerProtocolSocket()),
-		Effect.provide(Socket.layerWebSocket(makeWsRpcUrl(input.projectSlug))),
+		Effect.provide(Socket.layerWebSocket(makeWsRpcUrl())),
 		Effect.provide(Socket.layerWebSocketConstructorGlobal),
 		Effect.provide(RpcSerialization.layerJson),
 	);
@@ -1020,7 +1019,7 @@ const callGetClaudeSettings = (input: GetClaudeSettingsRpcInput) =>
 		}),
 	).pipe(
 		Effect.provide(RpcClient.layerProtocolSocket()),
-		Effect.provide(Socket.layerWebSocket(makeWsRpcUrl(input.projectSlug))),
+		Effect.provide(Socket.layerWebSocket(makeWsRpcUrl())),
 		Effect.provide(Socket.layerWebSocketConstructorGlobal),
 		Effect.provide(RpcSerialization.layerJson),
 	);
@@ -1037,7 +1036,7 @@ const callSetClaudeSettings = (input: SetClaudeSettingsRpcInput) =>
 		}),
 	).pipe(
 		Effect.provide(RpcClient.layerProtocolSocket()),
-		Effect.provide(Socket.layerWebSocket(makeWsRpcUrl(input.projectSlug))),
+		Effect.provide(Socket.layerWebSocket(makeWsRpcUrl())),
 		Effect.provide(Socket.layerWebSocketConstructorGlobal),
 		Effect.provide(RpcSerialization.layerJson),
 	);
@@ -1050,7 +1049,7 @@ const callResolveClaudeSettings = (input: ResolveClaudeSettingsRpcInput) =>
 		}),
 	).pipe(
 		Effect.provide(RpcClient.layerProtocolSocket()),
-		Effect.provide(Socket.layerWebSocket(makeWsRpcUrl(input.projectSlug))),
+		Effect.provide(Socket.layerWebSocket(makeWsRpcUrl())),
 		Effect.provide(Socket.layerWebSocketConstructorGlobal),
 		Effect.provide(RpcSerialization.layerJson),
 	);
@@ -1068,7 +1067,7 @@ const callReloadProviderSession = (input: ReloadProviderSessionRpcInput) =>
 		}),
 	).pipe(
 		Effect.provide(RpcClient.layerProtocolSocket()),
-		Effect.provide(Socket.layerWebSocket(makeWsRpcUrl(input.projectSlug))),
+		Effect.provide(Socket.layerWebSocket(makeWsRpcUrl())),
 		Effect.provide(Socket.layerWebSocketConstructorGlobal),
 		Effect.provide(RpcSerialization.layerJson),
 	);
@@ -1086,7 +1085,7 @@ const callRenameSession = (input: RenameSessionRpcInput) =>
 		}),
 	).pipe(
 		Effect.provide(RpcClient.layerProtocolSocket()),
-		Effect.provide(Socket.layerWebSocket(makeWsRpcUrl(input.projectSlug))),
+		Effect.provide(Socket.layerWebSocket(makeWsRpcUrl())),
 		Effect.provide(Socket.layerWebSocketConstructorGlobal),
 		Effect.provide(RpcSerialization.layerJson),
 	);
@@ -1104,7 +1103,7 @@ const callSwitchVariant = (input: SwitchVariantRpcInput) =>
 		}),
 	).pipe(
 		Effect.provide(RpcClient.layerProtocolSocket()),
-		Effect.provide(Socket.layerWebSocket(makeWsRpcUrl(input.projectSlug))),
+		Effect.provide(Socket.layerWebSocket(makeWsRpcUrl())),
 		Effect.provide(Socket.layerWebSocketConstructorGlobal),
 		Effect.provide(RpcSerialization.layerJson),
 	);
@@ -1122,7 +1121,7 @@ const callSwitchPermissionMode = (input: SwitchPermissionModeRpcInput) =>
 		}),
 	).pipe(
 		Effect.provide(RpcClient.layerProtocolSocket()),
-		Effect.provide(Socket.layerWebSocket(makeWsRpcUrl(input.projectSlug))),
+		Effect.provide(Socket.layerWebSocket(makeWsRpcUrl())),
 		Effect.provide(Socket.layerWebSocketConstructorGlobal),
 		Effect.provide(RpcSerialization.layerJson),
 	);
@@ -1135,7 +1134,7 @@ const callListSessions = (input: ListSessionsRpcInput) =>
 		}),
 	).pipe(
 		Effect.provide(RpcClient.layerProtocolSocket()),
-		Effect.provide(Socket.layerWebSocket(makeWsRpcUrl(input.projectSlug))),
+		Effect.provide(Socket.layerWebSocket(makeWsRpcUrl())),
 		Effect.provide(Socket.layerWebSocketConstructorGlobal),
 		Effect.provide(RpcSerialization.layerJson),
 	);
@@ -1148,7 +1147,7 @@ const callListDaemonSessions = (input: ListDaemonSessionsRpcInput) =>
 		}),
 	).pipe(
 		Effect.provide(RpcClient.layerProtocolSocket()),
-		Effect.provide(Socket.layerWebSocket(makeWsRpcUrl(input.projectSlug))),
+		Effect.provide(Socket.layerWebSocket(makeWsRpcUrl())),
 		Effect.provide(Socket.layerWebSocketConstructorGlobal),
 		Effect.provide(RpcSerialization.layerJson),
 	);
@@ -1161,7 +1160,7 @@ const callLoadMoreHistory = (input: LoadMoreHistoryRpcInput) =>
 		}),
 	).pipe(
 		Effect.provide(RpcClient.layerProtocolSocket()),
-		Effect.provide(Socket.layerWebSocket(makeWsRpcUrl(input.projectSlug))),
+		Effect.provide(Socket.layerWebSocket(makeWsRpcUrl())),
 		Effect.provide(Socket.layerWebSocketConstructorGlobal),
 		Effect.provide(RpcSerialization.layerJson),
 	);
@@ -1174,7 +1173,7 @@ const callRewindSession = (input: RewindSessionRpcInput) =>
 		}),
 	).pipe(
 		Effect.provide(RpcClient.layerProtocolSocket()),
-		Effect.provide(Socket.layerWebSocket(makeWsRpcUrl(input.projectSlug))),
+		Effect.provide(Socket.layerWebSocket(makeWsRpcUrl())),
 		Effect.provide(Socket.layerWebSocketConstructorGlobal),
 		Effect.provide(RpcSerialization.layerJson),
 	);
@@ -1194,7 +1193,7 @@ const callSendMessage = (input: SendMessageRpcInput) =>
 		}),
 	).pipe(
 		Effect.provide(RpcClient.layerProtocolSocket()),
-		Effect.provide(Socket.layerWebSocket(makeWsRpcUrl(input.projectSlug))),
+		Effect.provide(Socket.layerWebSocket(makeWsRpcUrl())),
 		Effect.provide(Socket.layerWebSocketConstructorGlobal),
 		Effect.provide(RpcSerialization.layerJson),
 	);
@@ -1212,7 +1211,7 @@ const callSyncInputDraft = (input: SyncInputDraftRpcInput) =>
 		}),
 	).pipe(
 		Effect.provide(RpcClient.layerProtocolSocket()),
-		Effect.provide(Socket.layerWebSocket(makeWsRpcUrl(input.projectSlug))),
+		Effect.provide(Socket.layerWebSocket(makeWsRpcUrl())),
 		Effect.provide(Socket.layerWebSocketConstructorGlobal),
 		Effect.provide(RpcSerialization.layerJson),
 	);
@@ -1225,7 +1224,7 @@ const callSetLogLevel = (input: SetLogLevelRpcInput) =>
 		}),
 	).pipe(
 		Effect.provide(RpcClient.layerProtocolSocket()),
-		Effect.provide(Socket.layerWebSocket(makeWsRpcUrl(input.projectSlug))),
+		Effect.provide(Socket.layerWebSocket(makeWsRpcUrl())),
 		Effect.provide(Socket.layerWebSocketConstructorGlobal),
 		Effect.provide(RpcSerialization.layerJson),
 	);

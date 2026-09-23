@@ -18,8 +18,9 @@ import { createServer as createHttpsServer } from "node:https";
 import { homedir, networkInterfaces } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { Cause, Data, Effect, Layer, ManagedRuntime } from "effect";
+import { Cause, Data, Effect, Exit, Layer, ManagedRuntime } from "effect";
 import { AuthManager } from "../auth.js";
+import { WsRpcError } from "../contracts/ws-rpc.js";
 import { makeMessagePollerManagerLive } from "../domain/relay/Layers/message-poller-manager-layer.js";
 import { makePtyRuntimeLive } from "../domain/relay/Layers/pty-manager-layer.js";
 import {
@@ -118,7 +119,9 @@ import { getClientIp, parseCookies } from "../server/http-utils.js";
 import type { PushNotificationSender } from "../server/push.js";
 import type { WebSocketHandlerShape } from "../server/ws-handler-shape.js";
 import {
+	makeRoutedWsRpcWebSocketHandler,
 	makeWsRpcWebSocketHandler,
+	RoutedWsRpcWebSocketHandlerTag,
 	type RpcWebSocketHandlerShape,
 } from "../server/ws-rpc-handler.js";
 import type { ConnectionHealth, ProjectRelayConfig } from "../types.js";
@@ -1387,9 +1390,28 @@ export async function createRelayStack(
 
 	// ── WebSocket upgrade handler ───────────────────────────────────────────
 	// Routes connections by URL: /p/{slug}/ws → project relay, /p/{slug}/rpc
-	// → project RPC, /ws → initial relay, /rpc → initial RPC.
+	// → project RPC, /ws → initial relay, /rpc → per-request project routing.
 	// Also checks auth when a PIN is configured (fixes pre-existing gap where
 	// standalone WS connections bypassed PIN auth).
+
+	const rpcRuntime = ManagedRuntime.make(
+		Layer.scoped(
+			RoutedWsRpcWebSocketHandlerTag,
+			makeRoutedWsRpcWebSocketHandler((slug) =>
+				Effect.suspend(() => {
+					const context = relays.get(slug)?.rpcWsHandler.context;
+					const unavailable = () =>
+						new WsRpcError({ message: `Project "${slug}" unavailable` });
+					return context
+						? context.pipe(
+								Effect.mapError(unavailable),
+								Effect.catchAllDefect(() => Effect.fail(unavailable())),
+							)
+						: Effect.fail(unavailable());
+				}),
+			),
+		),
+	);
 
 	httpServer.on("upgrade", (req, socket, head) => {
 		// Auth check (mirrors server.ts private checkAuth)
@@ -1435,7 +1457,16 @@ export async function createRelayStack(
 			return;
 		}
 		if (req.url === "/rpc" || req.url?.startsWith("/rpc?")) {
-			relay.rpcWsHandler.handleUpgrade(req, socket, head);
+			rpcRuntime
+				.runFork(
+					Effect.gen(function* () {
+						const handler = yield* RoutedWsRpcWebSocketHandlerTag;
+						handler.handleUpgrade(req, socket, head);
+					}),
+				)
+				.addObserver((exit) => {
+					if (Exit.isFailure(exit) && !socket.destroyed) socket.destroy();
+				});
 			return;
 		}
 
@@ -1469,6 +1500,7 @@ export async function createRelayStack(
 		},
 
 		async stop() {
+			await rpcRuntime.dispose();
 			for (const r of relays.values()) {
 				try {
 					await r.stop();

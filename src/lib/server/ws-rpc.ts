@@ -1,4 +1,4 @@
-import { Effect } from "effect";
+import { type Context, Effect } from "effect";
 import {
 	ClaudeSettingsResolveError,
 	ClaudeSettingsTrustBoundaryError,
@@ -212,7 +212,7 @@ const broadcastInstanceList = (instances: ReadonlyArray<OpenCodeInstance>) =>
 		wsHandler.broadcast({ type: "instance_list", instances });
 	});
 
-export const WsRpcServerLayer = WsRpcGroup.toLayer({
+export const wsRpcHandlers = WsRpcGroup.of({
 	GetAgents: (request) =>
 		Effect.gen(function* () {
 			const config = yield* ConfigTag;
@@ -1224,3 +1224,40 @@ export const WsRpcServerLayer = WsRpcGroup.toLayer({
 			return { ok: true as const };
 		}),
 });
+
+export const WsRpcServerLayer = WsRpcGroup.toLayer(wsRpcHandlers);
+
+export type ResolveRpcContext = (
+	projectSlug: string,
+) => Effect.Effect<Context.Context<unknown>, WsRpcError>;
+
+export const makeRoutedWsRpcServerLayer = (
+	resolveContext: ResolveRpcContext,
+) => {
+	const routeHandler =
+		<P extends { readonly projectSlug: string }>(
+			handler: (payload: P) => Effect.Effect<unknown, unknown, unknown>,
+		) =>
+		(payload: P) =>
+			Effect.gen(function* () {
+				const context = yield* resolveContext(payload.projectSlug);
+				return yield* Effect.provide(handler(payload), context);
+			});
+
+	// Object.entries/fromEntries loses the key-to-payload/result correlation.
+	// Each wrapper preserves its original handler's payload and success type.
+	const handlers = Object.fromEntries(
+		Object.entries(wsRpcHandlers).map(([name, handler]) => [
+			name,
+			routeHandler<never>(handler),
+		]),
+	) as {
+		[K in keyof typeof wsRpcHandlers]: (
+			payload: Parameters<(typeof wsRpcHandlers)[K]>[0],
+		) => Effect.Effect<
+			Effect.Effect.Success<ReturnType<(typeof wsRpcHandlers)[K]>>,
+			Effect.Effect.Error<ReturnType<(typeof wsRpcHandlers)[K]>> | WsRpcError
+		>;
+	};
+	return WsRpcGroup.toLayer(handlers);
+};
