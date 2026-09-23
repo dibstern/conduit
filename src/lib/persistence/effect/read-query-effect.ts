@@ -35,6 +35,13 @@ export interface ReadQueryEffect {
 		ReadQueryEffectError | SqlError
 	>;
 
+	readonly getSessionsForReconciliation: (
+		reportedIds: readonly string[],
+	) => Effect.Effect<
+		readonly Pick<SessionRow, "id" | "status" | "updated_at">[],
+		ReadQueryEffectError | SqlError
+	>;
+
 	readonly listSessions: (opts?: {
 		roots?: boolean;
 		limit?: number;
@@ -141,6 +148,21 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 							operation: "getAllSessionStatuses",
 							cause: e,
 						}),
+			),
+		);
+
+	const getSessionsForReconciliation = (reportedIds: readonly string[]) =>
+		sql<Pick<SessionRow, "id" | "status" | "updated_at">>`
+			SELECT id, status, updated_at FROM sessions
+			WHERE status != 'idle'
+				OR id IN (SELECT value FROM json_each(${JSON.stringify(reportedIds)}))
+			ORDER BY updated_at DESC, id DESC`.pipe(
+			Effect.mapError(
+				(cause) =>
+					new ReadQueryEffectError({
+						operation: "getSessionsForReconciliation",
+						cause,
+					}),
 			),
 		);
 
@@ -316,6 +338,7 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 		getSession,
 		getAllSessionStatuses,
 		listSessions,
+		getSessionsForReconciliation,
 		countPendingApprovalsBySession,
 		getSessionMessagesWithParts,
 		getLatestTurnModelExecution,

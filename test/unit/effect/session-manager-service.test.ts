@@ -110,6 +110,7 @@ function makeReadQueryEffect(
 			Effect.succeed(rows.find((row) => row.id === sessionId)),
 		),
 		getAllSessionStatuses: vi.fn(() => Effect.succeed({})),
+		getSessionsForReconciliation: () => Effect.succeed([]),
 		listSessions: vi.fn(() => Effect.succeed(rows)),
 		countPendingApprovalsBySession: vi.fn(() =>
 			Effect.succeed(pendingApprovalCounts),

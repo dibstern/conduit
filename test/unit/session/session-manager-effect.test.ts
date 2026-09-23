@@ -522,6 +522,7 @@ describe("SessionManager Effect", () => {
 				getSessionStatus: vi.fn(() => Effect.succeed(undefined)),
 				getSession: vi.fn(() => Effect.fail(readQueryFailure)),
 				getAllSessionStatuses: vi.fn(() => Effect.succeed({})),
+				getSessionsForReconciliation: () => Effect.succeed([]),
 				listSessions: vi.fn(() => Effect.succeed([])),
 				countPendingApprovalsBySession: vi.fn(() => Effect.succeed([])),
 				getLatestTurnModelExecution: vi.fn(() => Effect.succeed(undefined)),

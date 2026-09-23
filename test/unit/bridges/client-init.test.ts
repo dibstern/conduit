@@ -114,6 +114,7 @@ function makeEmptyHistoryReadQuery(
 			}),
 		),
 		getAllSessionStatuses: vi.fn(() => Effect.succeed({})),
+		getSessionsForReconciliation: () => Effect.succeed([]),
 		listSessions: vi.fn(() => Effect.succeed([])),
 		countPendingApprovalsBySession: vi.fn(() => Effect.succeed([])),
 		getLatestTurnModelExecution: vi.fn(() => Effect.succeed(undefined)),

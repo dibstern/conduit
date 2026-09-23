@@ -225,6 +225,29 @@ export function initialMonitoringState(): MonitoringState {
 	return { sessions: new Map() };
 }
 
+/** Present candidates retain snapshot order for poller admission and promotion. */
+export function selectMonitoringCandidates(
+	state: MonitoringState,
+	statuses: Readonly<Record<string, SessionStatus>>,
+): string[] {
+	const candidates = new Set<string>();
+	for (const [sessionId, status] of Object.entries(statuses)) {
+		const previous = state.sessions.get(sessionId);
+		if (
+			status?.type === "busy" ||
+			status?.type === "retry" ||
+			(previous !== undefined && previous.phase !== "idle")
+		) {
+			candidates.add(sessionId);
+		}
+	}
+	// Missing active sessions still owe deletion effects, but have no context.
+	for (const [sessionId, phase] of state.sessions) {
+		if (phase.phase !== "idle") candidates.add(sessionId);
+	}
+	return [...candidates];
+}
+
 export function evaluateAll(
 	state: MonitoringState,
 	contexts: ReadonlyMap<string, SessionEvalContext>,
@@ -240,7 +263,9 @@ export function evaluateAll(
 	for (const [sessionId, evalCtx] of contexts) {
 		const current = state.sessions.get(sessionId) ?? { phase: "idle" as const };
 		const result = evaluateSession(sessionId, current, evalCtx, config);
-		newSessions.set(sessionId, result.phase);
+		if (result.phase.phase !== "idle") {
+			newSessions.set(sessionId, result.phase);
+		}
 		effects.push(...result.effects);
 	}
 
