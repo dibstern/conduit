@@ -22,7 +22,7 @@
 	import {
 		getCurrentSlug,
 		getSessionHref,
-		getSessionHrefForSlug,
+		routerState,
 	} from "../../stores/router.svelte.js";
 	import { projectState } from "../../stores/project.svelte.js";
 	import { getBrowserClientId } from "../../stores/client-identity.js";
@@ -40,6 +40,7 @@
 	import Button from "../ui/Button.svelte";
 	import TextButton from "../ui/TextButton.svelte";
 	import SessionSearchField from "./SessionSearchField.svelte";
+	import Banners from "../overlays/Banners.svelte";
 
 	let { onaddproject }: { onaddproject?: (() => void) | undefined } = $props();
 
@@ -169,8 +170,7 @@
 	}
 
 	function getRowHref(session: SessionInfo): string {
-		const slug = session.projectSlug ?? getCurrentSlug();
-		return slug ? getSessionHrefForSlug(slug, session.id) : "";
+		return getSessionHref(session.id);
 	}
 
 	// Named on every row once a second project exists, including the rows of the
@@ -222,9 +222,9 @@
 		}
 	}
 
-	function handleSwitchSession(id: string) {
+	function handleSwitchSession(id: string, projectSlug?: string) {
 		if (id !== sessionState.currentId) {
-			switchToSession(id);
+			switchToSession(id, projectSlug);
 		}
 		closeMobileSidebar();
 	}
@@ -280,7 +280,9 @@
 			projectSlug,
 			sessionId: id,
 			originId: getBrowserClientId(),
-		});
+		}).then((response) => {
+			if (!sessionState.currentId) switchToSession(response.sessionId, response.projectSlug);
+		}).catch(() => showToast("Failed to fork session", { variant: "error" }));
 	}
 
 	function resetCleanupMode() {
@@ -358,6 +360,13 @@
 </script>
 
 <div id="session-list" class="flex-1 flex flex-col overflow-hidden">
+	{#if routerState.sessionNotFound}
+		<Banners
+			banners={[{ id: "session-not-found", variant: "warning", icon: "alert-triangle", text: "Session not found. That session no longer exists.", dismissible: true }]}
+			showHealthWarning={false}
+			ondismiss={() => { routerState.sessionNotFound = false; }}
+		/>
+	{/if}
 	<!-- Session list header — cleanup mode (fixed, outside scroll) -->
 	{#if cleanupMode}
 		<div class="shrink-0 px-2 pb-1 bg-bg-surface">
@@ -485,15 +494,16 @@
 	     edit each with any divergence between them invisible. -->
 	{#snippet sessionRow(s: SessionInfo)}
 		{#if isForeignSession(s)}
-			<!-- Navigate-only. Rename, the context menu and cleanup selection all
+			<!-- Rename, the context menu and cleanup selection all
 			     RPC the relay this socket is attached to, so handing them a session
 			     owned by another project would act on the wrong relay. Withholding
 			     the handlers is what makes the row inert instead of wrong, and it
-			     also hands navigation back to the anchor's own href. -->
+			     keeps those actions on the owning relay. -->
 			<SessionItem
 				session={s}
 				href={getRowHref(s)}
 				projectLabel={getProjectLabel(s)}
+				onswitchsession={(id) => handleSwitchSession(id, s.projectSlug)}
 			/>
 		{:else}
 			<SessionItem
@@ -504,7 +514,7 @@
 				renaming={s.id === renamingSessionId}
 				{cleanupMode}
 				selected={selectedForDeletion.has(s.id)}
-				onswitchsession={handleSwitchSession}
+				onswitchsession={(id) => handleSwitchSession(id, s.projectSlug)}
 				ontoggleselection={handleToggleSelection}
 				oncontextmenu={handleContextMenu}
 				onrename={handleRename}

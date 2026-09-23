@@ -126,7 +126,8 @@ describe("WebSocket reconnect stream lifecycle", () => {
 		vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("offline")));
 		replaceStateMock.mockClear();
 		clearDebugLog();
-		routerState.path = "/p/conduit/";
+		routerState.path = "/";
+		routerState.search = "?p=conduit";
 		attachedProjectState.slug = null;
 		sessionState.currentId = null;
 	});
@@ -142,7 +143,8 @@ describe("WebSocket reconnect stream lifecycle", () => {
 	});
 
 	it("opens the daemon socket with the route's session and project hints", () => {
-		routerState.path = "/p/project-a/s/session-a";
+		routerState.path = "/s/session-a";
+		routerState.search = "?p=project-a";
 		connect();
 		const params = new URLSearchParams({
 			client: getBrowserClientId(),
@@ -154,6 +156,7 @@ describe("WebSocket reconnect stream lifecycle", () => {
 
 	it("uses secure WebSockets and omits absent session and project hints", () => {
 		routerState.path = "/";
+		routerState.search = "";
 		window.location.protocol = "https:";
 		connect();
 		expect(instances[0]?.url).toBe(
@@ -161,41 +164,43 @@ describe("WebSocket reconnect stream lifecycle", () => {
 		);
 	});
 
-	it("uses the new route on a fresh mount even when the previous attachment is retained", () => {
+	it("retains the attachment hint on a fresh mount until the route effect changes it", () => {
 		connect();
 		attachedProjectState.slug = "project-a";
 		disconnect();
-		routerState.path = "/p/project-b/";
+		routerState.path = "/";
+		routerState.search = "?p=project-b";
 		connect();
 		expect(new URL(instances[1]?.url ?? "").searchParams.get("p")).toBe(
-			"project-b",
+			"project-a",
 		);
 	});
 
 	it("does not open another socket when the route or attached project changes", () => {
 		connect();
 		attachedProjectState.slug = "conduit";
-		routerState.path = "/p/project-b/s/session-b";
+		routerState.path = "/s/session-b";
 		attachedProjectState.slug = "project-b";
 		expect(instances).toHaveLength(1);
 		expect(instances[0]?.readyState).toBe(MockWebSocket.OPEN);
 	});
 
-	it("reconnects with the attached project and current session rather than a pending route", async () => {
+	it("reconnects with the requested session and attached project", async () => {
 		vi.useFakeTimers();
-		routerState.path = "/p/project-a/s/session-a";
+		routerState.path = "/s/session-a";
+		routerState.search = "?p=project-a";
 		connect();
 		instances[0]?.open();
 		attachedProjectState.slug = "project-b";
 		sessionState.currentId = "session-b";
-		routerState.path = "/p/project-c/s/session-c";
+		routerState.path = "/s/session-c";
 		instances[0]?.close();
 		await vi.advanceTimersByTimeAsync(1_000);
 
 		expect(instances).toHaveLength(2);
 		const params = new URLSearchParams({
 			client: getBrowserClientId(),
-			session: "session-b",
+			session: "session-c",
 			p: "project-b",
 		});
 		expect(instances[1]?.url).toBe(`ws://localhost:3000/ws?${params}`);
@@ -203,7 +208,8 @@ describe("WebSocket reconnect stream lifecycle", () => {
 
 	it("keeps the route session if the connection drops before the first attachment", async () => {
 		vi.useFakeTimers();
-		routerState.path = "/p/project-a/s/session-a";
+		routerState.path = "/s/session-a";
+		routerState.search = "?p=project-a";
 		connect();
 		instances[0]?.open();
 		instances[0]?.close();
@@ -312,7 +318,7 @@ describe("WebSocket reconnect stream lifecycle", () => {
 		connect();
 
 		await vi.waitFor(() => expect(wsState.relayStatus).toBe("ready"));
-		expect(routerState.path).toBe("/p/conduit/");
+		expect(routerState.path).toBe("/");
 		expect(replaceStateMock).not.toHaveBeenCalled();
 	});
 
@@ -348,7 +354,7 @@ describe("WebSocket reconnect stream lifecycle", () => {
 		);
 
 		await vi.waitFor(() => expect(wsState.relayStatus).toBe("ready"));
-		expect(routerState.path).toBe("/p/conduit/");
+		expect(routerState.path).toBe("/");
 		expect(replaceStateMock).not.toHaveBeenCalled();
 	});
 

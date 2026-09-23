@@ -20,12 +20,10 @@ import { clearInstanceState } from "./instance.svelte.js";
 import { dispatch } from "./notification-reducer.svelte.js";
 import {
 	attachedProjectState,
-	getCurrentRoute,
 	getCurrentSessionId,
 	getCurrentSlug,
 	replaceRoute,
 } from "./router.svelte.js";
-import { sessionState } from "./session.svelte.js";
 import {
 	wsDebugLog,
 	wsDebugLogMessage,
@@ -184,18 +182,9 @@ function fetchRelayStatus(slug: string, generation: number): void {
  * A non-blocking relay status fetch runs in parallel for UI display and auth recovery.
  */
 export function connect(): void {
-	const reconnecting = _active;
 	_active = true;
-	const route = getCurrentRoute();
-	const slug = reconnecting
-		? getCurrentSlug()
-		: route.page === "chat"
-			? route.slug
-			: null;
-	const sessionId =
-		reconnecting && attachedProjectState.slug !== null
-			? sessionState.currentId
-			: getCurrentSessionId();
+	const slug = getCurrentSlug();
+	const sessionId = getCurrentSessionId();
 	const generation = ++_connectionGeneration;
 
 	// Cancel any pending reconnect or connect timeout

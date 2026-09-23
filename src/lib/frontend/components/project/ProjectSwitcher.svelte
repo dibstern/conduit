@@ -1,7 +1,7 @@
 <!-- ─── ProjectSwitcher ──────────────────────────────────────────────────────── -->
 <!-- Button with "Projects" label, current project name, count badge, and       -->
 <!-- chevron. Always clickable — dropdown shows project list with indicator     -->
-<!-- dots and an "Add project" footer. Navigates to /p/{slug}/ on selection.   -->
+<!-- dots and an "Add project" footer. Selects a project hint on the list. -->
 
 <script lang="ts">
 	import type { ProjectInfo } from "../../types.js";
@@ -46,7 +46,7 @@
 	function selectProject(slug: string) {
 		open = false;
 		closeMobileSidebar();
-		navigate(`/p/${slug}/`);
+		navigate(`/?${new URLSearchParams({ p: slug })}`);
 	}
 
 </script>

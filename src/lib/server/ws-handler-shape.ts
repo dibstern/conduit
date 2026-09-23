@@ -7,12 +7,15 @@ import type { IncomingMessageType } from "./ws-router.js";
 export interface WsAttachOptions {
 	clientId: string;
 	requestedSessionId?: string;
+	/** Leave session selection to the browser when no session was requested. */
+	skipDefaultSession?: boolean;
 }
 
 export interface WsClientConnectedEvent {
 	clientId: string;
 	clientCount: number;
 	requestedSessionId?: string;
+	skipDefaultSession?: boolean;
 }
 
 export interface WsClientDisconnectedEvent {

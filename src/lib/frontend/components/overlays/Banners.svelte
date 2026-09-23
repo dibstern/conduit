@@ -12,6 +12,11 @@
 	import Icon from "../ui/Icon.svelte";
 	import Button from "../ui/Button.svelte";
 	import { assertNever } from "../../../utils.js";
+	let { banners = uiState.banners, ondismiss = removeBanner, showHealthWarning = true }: {
+		banners?: BannerConfig[];
+		ondismiss?: (id: string) => void;
+		showHealthWarning?: boolean;
+	} = $props();
 
 	// ─── Instance health check ─────────────────────────────────────────────────
 	// Show the warning banner only when ALL instances are "unhealthy" — meaning
@@ -58,7 +63,7 @@
 	}
 </script>
 
-{#if showInstanceWarning}
+{#if showHealthWarning && showInstanceWarning}
 	<div class="banner flex items-center gap-2 px-4 py-2 text-xs border-b bg-error/10 border-error/30 text-error">
 		<span class="banner-icon shrink-0">
 			<Icon name="alert-triangle" size={14} />
@@ -77,9 +82,9 @@
 	</div>
 {/if}
 
-{#if uiState.banners.length > 0}
+{#if banners.length > 0}
 	<div class="banners flex flex-col">
-		{#each uiState.banners as banner (banner.id)}
+		{#each banners as banner (banner.id)}
 			<div
 				class="banner flex items-center gap-2 px-4 py-2 text-xs border-b {getVariantClasses(banner.variant)}"
 				data-banner-id={banner.id}
@@ -113,7 +118,7 @@
 						class="banner-dismiss shrink-0 text-current opacity-60 hover:opacity-100 leading-none"
 						title="Dismiss"
 						ariaLabel="Dismiss"
-						onclick={() => removeBanner(banner.id)}
+						onclick={() => ondismiss(banner.id)}
 					/>
 				{/if}
 			</div>

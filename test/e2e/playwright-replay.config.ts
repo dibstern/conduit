@@ -18,7 +18,6 @@ export default defineConfig({
 		"sidebar-layout.spec.ts",
 		"ui-features.spec.ts",
 		"debug-panel.spec.ts",
-		"dashboard.spec.ts",
 		"pin-page.spec.ts",
 		"unified-rendering.spec.ts",
 		"scroll-stability.spec.ts",

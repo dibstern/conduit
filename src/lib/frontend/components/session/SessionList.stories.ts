@@ -1,7 +1,10 @@
 import type { Meta, StoryObj } from "@storybook/svelte-vite";
 import { expect, userEvent, within } from "storybook/test";
 import { projectState } from "../../stores/project.svelte.js";
-import { routerState } from "../../stores/router.svelte.js";
+import {
+	attachedProjectState,
+	routerState,
+} from "../../stores/router.svelte.js";
 import {
 	requestNewSession,
 	resetSessionCreation,
@@ -25,8 +28,9 @@ function resetSessionState() {
 	sessionState.searchHasMore = false;
 	// Storybook shares module state across stories, and the scope lives in the
 	// router, so a scoped story would otherwise scope every story after it.
-	routerState.path = "/p/conduit/";
+	routerState.path = "/";
 	routerState.search = "";
+	attachedProjectState.slug = "conduit";
 	projectState.projects = [
 		{ slug: "conduit", title: "conduit", directory: "/src/conduit" },
 		{ slug: "acme", title: "Acme", directory: "/src/acme" },
@@ -40,6 +44,10 @@ const meta = {
 	parameters: { layout: "centered" },
 	beforeEach: () => {
 		resetSessionState();
+		return () => {
+			attachedProjectState.slug = null;
+			routerState.search = "";
+		};
 	},
 } satisfies Meta<typeof SessionList>;
 
@@ -54,6 +62,7 @@ export const WithItems: Story = {
 		sessionState.familySessions = [...mockSessionsAllGroups];
 		// biome-ignore lint/style/noNonNullAssertion: safe — guarded by length check
 		sessionState.currentId = mockSessionsAllGroups[0]!.id;
+		routerState.path = `/s/${sessionState.currentId}`;
 	},
 };
 

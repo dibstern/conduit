@@ -51,7 +51,7 @@
 				// Use client-side navigation instead of window.location.href
 				// to avoid the server's single-project 302 redirect, which
 				// would dump the user into ChatLayout's ConnectOverlay with
-				// no way to navigate back to the dashboard.
+				// no way to navigate back to the session list.
 				navigate("/");
 				return;
 			}

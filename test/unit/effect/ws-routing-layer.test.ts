@@ -308,6 +308,13 @@ describe("WebSocketRoutingLive", () => {
 							}),
 						);
 						expect(relay.attach).toHaveBeenCalledTimes(1);
+						expect(relay.attach).toHaveBeenCalledWith(
+							socket,
+							expect.objectContaining({ skipDefaultSession: true }),
+						);
+						expect(
+							vi.mocked(relay.attach).mock.calls[0]?.[1].requestedSessionId,
+						).toBeUndefined();
 					} else {
 						expect(socket.send).not.toHaveBeenCalled();
 						expect(relay.attach).not.toHaveBeenCalled();
@@ -393,6 +400,7 @@ describe("WebSocketRoutingLive", () => {
 					);
 					expect(relay.attach).toHaveBeenCalledWith(socket, {
 						clientId: "browser",
+						skipDefaultSession: true,
 					});
 					const entry = yield* registry.get("browser");
 					expect(Option.isSome(entry) && entry.value.slug).toBe("project-b");

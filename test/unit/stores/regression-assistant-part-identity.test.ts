@@ -28,6 +28,7 @@ import {
 	clearSessionChatState,
 	currentChat,
 } from "../../../src/lib/frontend/stores/chat.svelte.js";
+import { routerState } from "../../../src/lib/frontend/stores/router.svelte.js";
 import { sessionState } from "../../../src/lib/frontend/stores/session.svelte.js";
 import { handleMessage } from "../../../src/lib/frontend/stores/ws.svelte.js";
 
@@ -46,6 +47,7 @@ afterEach(() => {
 
 describe("Regression: assistant text identity follows server part id", () => {
 	it("resumes a history text part when live deltas continue it", async () => {
+		routerState.path = `/s/${SESSION_ID}`;
 		handleMessage({
 			type: "session_switched",
 			id: SESSION_ID,

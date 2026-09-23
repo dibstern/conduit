@@ -104,7 +104,6 @@ import { handleProjectList } from "./project.svelte.js";
 import {
 	attachedProjectState,
 	getCurrentRoute,
-	getCurrentSlug,
 	replaceRoute,
 } from "./router.svelte.js";
 import {
@@ -114,6 +113,7 @@ import {
 	handleSessionForked,
 	handleSessionList,
 	handleSessionSwitched,
+	sessionCreation,
 	sessionState,
 } from "./session.svelte.js";
 import {
@@ -716,12 +716,6 @@ export function handleMessage(msg: RelayMessage): void {
 			}
 		}
 		attachedProjectState.slug = msg.slug;
-		const route = getCurrentRoute();
-		if (route.page === "chat" && route.slug !== msg.slug) {
-			replaceRoute(
-				`/p/${msg.slug}/${route.sessionId ? `s/${route.sessionId}` : ""}`,
-			);
-		}
 		for (const listener of projectAttachedListeners) listener(msg.slug);
 		return;
 	}
@@ -806,6 +800,13 @@ export function handleMessage(msg: RelayMessage): void {
 			break;
 		}
 		case "session_switched": {
+			const route = getCurrentRoute();
+			const requestedCreation =
+				sessionCreation.value.phase === "creating" &&
+				sessionCreation.value.requestId === msg.requestId;
+			// Only this tab's creation request may leave the session list.
+			if (route.page !== "chat" || (!route.sessionId && !requestedCreation))
+				break;
 			if (!msg.id) {
 				clearMessages();
 				break;
@@ -820,8 +821,7 @@ export function handleMessage(msg: RelayMessage): void {
 			handleSessionSwitched(msg);
 
 			// Update URL to reflect the new session
-			const slug = getCurrentSlug();
-			if (slug && msg.id) replaceRoute(`/p/${slug}/s/${msg.id}`);
+			replaceRoute(`/s/${msg.id}`);
 
 			// Bump the outgoing session's replayGeneration to abort any in-flight
 			// convertHistoryAsync or replay for the previous session.

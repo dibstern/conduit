@@ -20,9 +20,6 @@ type VariantSetupControl = WsMockControl & {
 	readonly rpcCalls: Record<string, unknown>[];
 };
 
-/** The project URL for variant tests (must match fixture's current slug). */
-const PROJECT_URL = "/p/myapp/";
-
 /** Wait for the chat page to be ready (WS connected, input visible). */
 async function waitForChatReady(page: Page): Promise<void> {
 	await page.locator("#input").waitFor({ state: "visible", timeout: 10_000 });
@@ -56,7 +53,7 @@ async function setupWithVariants(
 		initDelay: 0,
 		messageDelay: 0,
 	});
-	await page.goto(`${baseURL ?? "http://localhost:4173"}${PROJECT_URL}`);
+	await page.goto(`${baseURL ?? "http://localhost:4173"}/s/sess-var-001`);
 	await waitForChatReady(page);
 	return Object.assign(control, { rpcCalls });
 }
@@ -81,7 +78,7 @@ async function setupWithoutVariants(
 		initDelay: 0,
 		messageDelay: 0,
 	});
-	await page.goto(`${baseURL ?? "http://localhost:4173"}${PROJECT_URL}`);
+	await page.goto(`${baseURL ?? "http://localhost:4173"}/s/sess-novar-001`);
 	await waitForChatReady(page);
 	return control;
 }

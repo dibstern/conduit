@@ -238,6 +238,7 @@ export interface ClientInitDeps {
 }
 
 export interface ClientInitEffectOptions {
+	readonly skipDefaultSession?: boolean;
 	readonly getInstances?: () =>
 		| ReadonlyArray<Readonly<OpenCodeInstance>>
 		| PromiseLike<ReadonlyArray<Readonly<OpenCodeInstance>>>;
@@ -413,7 +414,9 @@ export const handleClientConnectedEffect = (
 					_tag: "Right",
 					right: requestedSessionId,
 				} as const)
-			: yield* Effect.either(sessionService.getDefaultSessionId());
+			: options.skipDefaultSession
+				? ({ _tag: "Right", right: undefined } as const)
+				: yield* Effect.either(sessionService.getDefaultSessionId());
 		const activeId =
 			activeIdResult._tag === "Right" ? activeIdResult.right : undefined;
 		if (activeIdResult._tag === "Left") {

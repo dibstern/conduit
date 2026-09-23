@@ -15,7 +15,10 @@ vi.mock("../../../src/lib/frontend/transport/ws-rpc-client.js", () => ({
 	viewSessionRpc: vi.fn(),
 }));
 
-import { routerState } from "../../../src/lib/frontend/stores/router.svelte.js";
+import {
+	attachedProjectState,
+	routerState,
+} from "../../../src/lib/frontend/stores/router.svelte.js";
 import {
 	applyListDaemonSessionsResponse,
 	clearSessionSearch,
@@ -83,7 +86,8 @@ beforeEach(() => {
 	sessionState.sessions.clear();
 	sessionState.searchQuery = "";
 	clearSessionSearch();
-	routerState.path = "/p/project-a";
+	routerState.path = "/";
+	attachedProjectState.slug = "project-a";
 	routerState.search = "";
 });
 

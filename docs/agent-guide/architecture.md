@@ -62,6 +62,19 @@ Mermaid diagram: docs/agent-guide/per-project-relay-flow-diagram.mermaid
 | Provider to event store to browser | Provider instances stream events into the SQLite event store. Projectors update materialized views (sessions, messages, turns). Pollers reconcile provider-side status. `WebSocketHandler` broadcasts normalized events to relevant clients or session viewers. |
 | CLI to daemon | Commands such as `status`, `stop`, `add_project`, and `set_pin` go over IPC; the daemon updates config and registries, mounts new relays on the shared HTTP and WebSocket surface, and rebroadcasts instance status changes. |
 
+## Browser Routes
+
+Browser session addresses are `/s/<id>`; `/` opens the session list without
+selecting or creating a session. `/?p=<slug>` hints which project to attach.
+The daemon `/ws` socket follows explicit session navigation; legacy
+`/p/<slug>/ws` clients retain their default-session bootstrap.
+
+`GET /api/projects` remains only as a liveness probe, used by
+`test/integration/flows/daemon-lifecycle.integration.ts`,
+`test/unit/effect/http-router-layer.test.ts`, and the router/server tests under
+`test/unit/server/`. Browser project lists and project removal use daemon RPC.
+The dashboard's `DELETE /api/projects/:slug` endpoint has been removed.
+
 ## Provider Runtime Notes
 
 - Do not assume a fixed OpenCode HTTP server or debug port. Managed OpenCode test instances can run on dynamic ports, and the active base URL should come from daemon/project config, logs, or test output.

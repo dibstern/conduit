@@ -717,6 +717,7 @@ export function consumeSwitchingFromId(): string | null {
  */
 export function switchToSession(
 	sessionId: string,
+	projectSlug?: string,
 	view?: (input: ViewSessionRpcInput) => void,
 ): void {
 	// Capture the outgoing session for permission cleanup in ws-dispatch.
@@ -725,11 +726,12 @@ export function switchToSession(
 		abortSessionReplay(_switchingFromId);
 	}
 
-	sessionState.currentId = sessionId;
-	activateSessionChatState(sessionId);
-
-	const slug = getCurrentSlug();
-	if (slug) navigate(`/p/${slug}/s/${sessionId}`);
+	const slug = projectSlug ?? getCurrentSlug();
+	if (slug) {
+		sessionState.currentId = sessionId;
+		activateSessionChatState(sessionId);
+	}
+	navigate(`/s/${sessionId}`);
 	if (slug) {
 		const input: ViewSessionRpcInput = {
 			projectSlug: slug,

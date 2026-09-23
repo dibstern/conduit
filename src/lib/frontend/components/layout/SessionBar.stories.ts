@@ -6,7 +6,10 @@ import {
 	resetNotifState,
 } from "../../stores/notification-reducer.svelte.js";
 import { projectState } from "../../stores/project.svelte.js";
-import { routerState } from "../../stores/router.svelte.js";
+import {
+	attachedProjectState,
+	routerState,
+} from "../../stores/router.svelte.js";
 import { sessionState } from "../../stores/session.svelte.js";
 import { sessionViewState } from "../../stores/session-view.svelte.js";
 import { uiState } from "../../stores/ui.svelte.js";
@@ -30,7 +33,9 @@ const meta = {
 		instanceState.instances = [];
 		uiState.mobileSidebarOpen = false;
 		uiState.sidebarPanel = "files";
-		routerState.path = "/p/conduit/";
+		routerState.path = `/s/${mockSession.id}`;
+		routerState.search = "";
+		attachedProjectState.slug = "conduit";
 		projectState.projects = [
 			{ slug: "conduit", title: "conduit", directory: "/src/conduit" },
 		];
@@ -43,6 +48,9 @@ const meta = {
 		sessionViewState.compact = false;
 		sessionViewState.atBottom = true;
 		sessionViewState.forcedOpen = true;
+		return () => {
+			attachedProjectState.slug = null;
+		};
 	},
 } satisfies Meta<typeof SessionBarPhoneFrame>;
 
@@ -90,6 +98,7 @@ export const NeedsAttention: Story = {
 export const LongTitle: Story = {
 	beforeEach: () => {
 		sessionState.currentId = mockSessionLongTitle.id;
+		routerState.path = `/s/${mockSessionLongTitle.id}`;
 	},
 	play: async ({ canvasElement }) => {
 		const canvas = within(canvasElement);
@@ -113,6 +122,7 @@ export const NarrowestPhone: Story = {
 	args: { width: 320 },
 	beforeEach: () => {
 		sessionState.currentId = mockSessionLongTitle.id;
+		routerState.path = `/s/${mockSessionLongTitle.id}`;
 	},
 	play: async ({ canvasElement }) => {
 		const canvas = within(canvasElement);

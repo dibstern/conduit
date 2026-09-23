@@ -134,11 +134,24 @@ export async function mockRelayWebSocket(
 
 		// The daemon socket announces its project before the relay bootstrap;
 		// the frontend hydrates on this message.
-		const slug = new URL(ws.url()).searchParams.get("p");
-		if (slug) ws.send(JSON.stringify({ type: "project_attached", slug }));
+		const params = new URL(ws.url()).searchParams;
+		const projectList = options.initMessages.find(
+			(message) => message.type === "project_list",
+		);
+		const slug =
+			params.get("p") ??
+			(typeof projectList?.["current"] === "string"
+				? projectList["current"]
+				: "myapp");
+		ws.send(JSON.stringify({ type: "project_attached", slug }));
 
 		// Send init messages on connect (instant by default)
-		void sendSequence(ws, options.initMessages, initDelay, control._context);
+		const initMessages = params.has("session")
+			? options.initMessages
+			: options.initMessages.filter(
+					(message) => !SESSION_SCOPED_MESSAGE_TYPES.has(message.type),
+				);
+		void sendSequence(ws, initMessages, initDelay, control._context);
 
 		// Listen for frontend messages and respond
 		ws.onMessage((data) => {

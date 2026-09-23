@@ -256,7 +256,7 @@
 	<svelte:element
 		this={navigable ? "a" : "div"}
 		role={navigable ? undefined : "group"}
-		href={navigable ? `/p/${project.slug}/` : undefined}
+		href={navigable ? `/?${new URLSearchParams({ p: project.slug })}` : undefined}
 		data-testid={navigable ? "project-item" : "managed-project-item"}
 		data-slug={project.slug}
 		title={project.directory}

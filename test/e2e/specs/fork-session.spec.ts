@@ -73,12 +73,11 @@ async function forkSessionViaRpc(
 	relayUrl: string,
 	originId: string,
 ): Promise<void> {
+	// The replay harness hosts one project; the daemon /rpc routes by slug.
+	const projectSlug = "e2e-replay";
 	const url = new URL(relayUrl);
-	const [, projectSlug] = /^\/p\/([^/]+)\//.exec(url.pathname) ?? [];
-	if (!projectSlug)
-		throw new Error(`Cannot derive project slug from ${relayUrl}`);
 	url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
-	url.pathname = `/p/${projectSlug}/rpc`;
+	url.pathname = "/rpc";
 	url.search = "";
 
 	const previousWebSocket = globalThis.WebSocket;

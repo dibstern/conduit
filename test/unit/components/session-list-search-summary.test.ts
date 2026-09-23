@@ -2,16 +2,22 @@
 // the size of the whole match set: a trailing "+" is what keeps the number
 // honest while pages remain.
 
-import { cleanup, render, screen } from "@testing-library/svelte";
+import { cleanup, fireEvent, render, screen } from "@testing-library/svelte";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import SessionList from "../../../src/lib/frontend/components/session/SessionList.svelte";
 import { projectState } from "../../../src/lib/frontend/stores/project.svelte.js";
-import { routerState } from "../../../src/lib/frontend/stores/router.svelte.js";
+import {
+	attachedProjectState,
+	routerState,
+} from "../../../src/lib/frontend/stores/router.svelte.js";
 import { sessionState } from "../../../src/lib/frontend/stores/session.svelte.js";
 
 describe("SessionList search summary", () => {
 	beforeEach(() => {
-		routerState.path = "/p/current-project/";
+		routerState.path = "/";
+		attachedProjectState.slug = "current-project";
+		routerState.search = "";
+		routerState.sessionNotFound = false;
 		sessionState.rootSessions = [];
 		sessionState.familySessions = [];
 		sessionState.daemonSessions = [];
@@ -42,6 +48,19 @@ describe("SessionList search summary", () => {
 
 	afterEach(() => {
 		cleanup();
+	});
+
+	it("shows and dismisses the missing-session notice above the list", async () => {
+		routerState.sessionNotFound = true;
+		render(SessionList);
+		expect(
+			screen.getByText("Session not found. That session no longer exists."),
+		).toBeTruthy();
+		await fireEvent.click(screen.getByRole("button", { name: "Dismiss" }));
+		expect(routerState.sessionNotFound).toBe(false);
+		expect(
+			screen.queryByText("Session not found. That session no longer exists."),
+		).toBeNull();
 	});
 
 	it("counts the matches it has and offers a one-action clear", () => {

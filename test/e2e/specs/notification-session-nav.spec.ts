@@ -23,7 +23,7 @@ import { mockRelayWebSocket, type WsMockControl } from "../helpers/ws-mock.js";
 type Page = import("@playwright/test").Page;
 
 const PROJECT_SLUG = "test-project";
-const PROJECT_URL = `/p/${PROJECT_SLUG}/`;
+const PROJECT_URL = "/s/sess-notif-A";
 
 const SESS_A = "sess-notif-A";
 const SESS_B = "sess-notif-B";

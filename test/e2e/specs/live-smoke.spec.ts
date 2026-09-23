@@ -33,7 +33,7 @@ test.describe("Live Smoke", () => {
 		const chat = new ChatPage(page);
 
 		// Navigate to the relay SPA and wait for WS connection
-		await app.goto(`${harness.relayBaseUrl}/p/e2e-test/`);
+		await app.goto(`${harness.relayBaseUrl}/?p=e2e-test`);
 
 		// Send a simple prompt
 		await app.sendMessage("Reply with just the word pong");

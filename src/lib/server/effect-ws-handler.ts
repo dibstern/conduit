@@ -50,6 +50,8 @@ interface EffectWsHandlerOptions {
 	maxPayload?: number;
 	server?: Server;
 	pathPrefix?: string;
+	/** Announced as `project_attached` to sockets that upgrade straight into this relay. */
+	projectSlug?: string;
 	verifyClient?: (
 		info: { origin: string; secure: boolean; req: IncomingMessage },
 		callback: (result: boolean, code?: number, message?: string) => void,
@@ -191,7 +193,7 @@ export class EffectWsHandler implements WebSocketHandlerShape {
 			ws.close(1001, "Server shutting down");
 			return () => {};
 		}
-		const { clientId, requestedSessionId } = options;
+		const { clientId, requestedSessionId, skipDefaultSession } = options;
 		let attached = true;
 		// In-flight effects can retain this connection after detach removes the
 		// client from the relay. Revoke their access before another relay attaches.
@@ -255,6 +257,7 @@ export class EffectWsHandler implements WebSocketHandlerShape {
 							clientId,
 							clientCount,
 							...(requestedSessionId != null && { requestedSessionId }),
+							...(skipDefaultSession != null && { skipDefaultSession }),
 						});
 					}),
 				),
@@ -303,6 +306,16 @@ export class EffectWsHandler implements WebSocketHandlerShape {
 		const clientId =
 			extractRequestedClientId(req.url) ?? randomBytes(8).toString("hex");
 		const requestedSessionId = extractRequestedSessionId(req.url);
+		// The frontend learns its project only from project_attached; the daemon
+		// /ws sends it itself, a direct relay socket (foreground mode) needs it here.
+		if (this.options.projectSlug != null) {
+			ws.send(
+				JSON.stringify({
+					type: "project_attached",
+					slug: this.options.projectSlug,
+				}),
+			);
+		}
 		this.attach(ws, {
 			clientId,
 			...(requestedSessionId != null && { requestedSessionId }),

@@ -1,3 +1,4 @@
+import { it as effectIt } from "@effect/vitest";
 import { Effect, Layer } from "effect";
 import { describe, expect, it, vi } from "vitest";
 import {
@@ -154,6 +155,56 @@ function makeClientInitEffectLayer(
 }
 
 describe("handleClientConnectedEffect — empty projected history", () => {
+	effectIt.effect(
+		"a sessionless daemon attach sends project lists without selecting or creating a session",
+		() =>
+			Effect.gen(function* () {
+				const getDefaultSessionId = vi.fn(() =>
+					Effect.succeed("unrequested-session"),
+				);
+				const createSession = vi.fn<SessionManagerService["createSession"]>(
+					() =>
+						Effect.fail(
+							new SessionManagerError({
+								operation: "createSession",
+								cause: "unexpected creation",
+							}),
+						),
+				);
+				const loadPreRenderedHistory = vi.fn(() =>
+					Effect.succeed({ messages: [], hasMore: false }),
+				);
+				const sendSessionLists = vi.fn<
+					SessionManagerService["sendSessionLists"]
+				>(() => Effect.void);
+				const { wsHandler, layer } = makeClientInitEffectLayer(
+					makeEmptyHistoryReadQuery("opencode"),
+					loadPreRenderedHistory,
+					{ getDefaultSessionId, createSession, sendSessionLists },
+				);
+				yield* handleClientConnectedEffect("client-1", undefined, {
+					skipDefaultSession: true,
+				}).pipe(Effect.provide(layer));
+				expect(getDefaultSessionId).not.toHaveBeenCalled();
+				expect(createSession).not.toHaveBeenCalled();
+				expect(loadPreRenderedHistory).not.toHaveBeenCalled();
+				expect(wsHandler.setClientSession).not.toHaveBeenCalled();
+				expect(wsHandler.sendTo).not.toHaveBeenCalledWith(
+					"client-1",
+					expect.objectContaining({ type: "session_switched" }),
+				);
+				expect(sendSessionLists).toHaveBeenCalledOnce();
+				expect(wsHandler.markClientBootstrapped).toHaveBeenCalledWith(
+					"client-1",
+				);
+				for (const type of ["agent_list", "model_list"]) {
+					expect(wsHandler.sendTo).toHaveBeenCalledWith(
+						"client-1",
+						expect.objectContaining({ type }),
+					);
+				}
+			}),
+	);
 	it("replays a grandchild question after sending family before session_switched", async () => {
 		const { wsHandler, layer } = makeClientInitEffectLayer(
 			makeEmptyHistoryReadQuery("opencode"),
@@ -307,9 +358,9 @@ describe("handleClientConnectedEffect — empty projected history", () => {
 		);
 
 		await Effect.runPromise(
-			handleClientConnectedEffect("client-1", "requested-session").pipe(
-				Effect.provide(layer),
-			),
+			handleClientConnectedEffect("client-1", "requested-session", {
+				skipDefaultSession: true,
+			}).pipe(Effect.provide(layer)),
 		);
 
 		expect(loadPreRenderedHistory).not.toHaveBeenCalled();

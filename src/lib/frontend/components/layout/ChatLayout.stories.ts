@@ -1,11 +1,12 @@
 import type { Meta, StoryObj } from "@storybook/svelte-vite";
 import { expect, waitFor } from "storybook/test";
-import { routerState } from "../../stores/router.svelte.js";
+import {
+	attachedProjectState,
+	routerState,
+} from "../../stores/router.svelte.js";
 import { uiState } from "../../stores/ui.svelte.js";
 import { connectedSocket } from "../../stories/sockets.js";
 import ChatLayout from "./ChatLayout.svelte";
-
-const PROJECT_PATH = "/p/test-project/";
 
 /**
  * A deliberately fake version string, not the one from package.json. It renders
@@ -52,13 +53,17 @@ const meta = {
 		// Reset state for each story
 		uiState.sidebarCollapsed = false;
 		uiState.rewindActive = false;
-		routerState.path = PROJECT_PATH;
+		routerState.path = "/";
+		routerState.search = "?p=test-project";
+		attachedProjectState.slug = null;
 		// Static Storybook hosting needs a socket that completes its connection.
 		const restoreSocket = connectedSocket();
 		const restoreFetch = stubProjectFetches();
 		return () => {
 			restoreFetch();
 			restoreSocket();
+			attachedProjectState.slug = null;
+			routerState.search = "";
 		};
 	},
 } satisfies Meta<typeof ChatLayout>;

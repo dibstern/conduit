@@ -65,6 +65,9 @@ export const splitScene: SceneDefinition = {
 		// ── Phase 2: Set up WS mock on context (not page!) ──────────────
 		await phase("setup-ws-mock", async () => {
 			await context.routeWebSocket(/\/ws/, (ws: WebSocketRoute) => {
+				ws.send(
+					JSON.stringify({ type: "project_attached", slug: "saas-landing" }),
+				);
 				// Send all init messages on connect
 				for (const msg of splitInit) {
 					ws.send(JSON.stringify(msg));
@@ -135,7 +138,10 @@ export const splitScene: SceneDefinition = {
 					conduitFrame.src = conduitUrl;
 					siteFrame.src = siteUrl;
 				},
-				[`${previewUrl}/p/saas-landing/`, `${previewUrl}/dummy-site-v1.html`],
+				[
+					`${previewUrl}/s/sess-media-split`,
+					`${previewUrl}/dummy-site-v1.html`,
+				],
 			);
 		});
 

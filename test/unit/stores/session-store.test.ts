@@ -70,7 +70,7 @@ function makeSession(
 // ─── Reset state before each test ───────────────────────────────────────────
 
 beforeEach(() => {
-	attachedProjectState.slug = null;
+	attachedProjectState.slug = "project-a";
 	sessionState.sessions.clear();
 	sessionState.rootSessions = [];
 	sessionState.familySessions = [];
@@ -84,7 +84,7 @@ beforeEach(() => {
 	discoveryState.currentModelId = "";
 	discoveryState.defaultProviderId = "";
 	discoveryState.defaultModelId = "";
-	routerState.path = "/p/project-a/s/old-session";
+	routerState.path = "/s/old-session";
 });
 
 describe("clearSessionState", () => {
@@ -126,12 +126,25 @@ describe("switchToSession", () => {
 		vi.stubGlobal("window", { history: { pushState: vi.fn() } });
 		const viewSession = vi.fn();
 		attachedProjectState.slug = "attached-project";
-		routerState.path = "/p/pending-project/";
-		switchToSession("new-session", viewSession);
-		expect(routerState.path).toBe("/p/attached-project/s/new-session");
+		routerState.path = "/";
+		switchToSession("new-session", undefined, viewSession);
+		expect(routerState.path).toBe("/s/new-session");
 		expect(viewSession).toHaveBeenCalledWith({
 			projectSlug: "attached-project",
 			sessionId: "new-session",
+			originId: expect.any(String),
+		});
+		vi.unstubAllGlobals();
+	});
+	it("views a foreign row through its explicit project", () => {
+		vi.stubGlobal("window", { history: { pushState: vi.fn() } });
+		const viewSession = vi.fn();
+		attachedProjectState.slug = "project-a";
+		switchToSession("foreign-session", "project-b", viewSession);
+		expect(routerState.path).toBe("/s/foreign-session");
+		expect(viewSession).toHaveBeenCalledWith({
+			projectSlug: "project-b",
+			sessionId: "foreign-session",
 			originId: expect.any(String),
 		});
 		vi.unstubAllGlobals();
@@ -147,8 +160,8 @@ describe("switchToSession", () => {
 				}),
 		);
 		attachedProjectState.slug = "project-a";
-		routerState.path = "/p/project-a/s/session-a";
-		switchToSession("session-a", vi.fn());
+		routerState.path = "/s/session-a";
+		switchToSession("session-a", undefined, vi.fn());
 		attachedProjectState.slug = "project-b";
 		clearSessionState();
 		discoveryState.activeAgentId = "agent-b";
@@ -166,9 +179,9 @@ describe("switchToSession", () => {
 	it("views the session through RPC after changing local state", () => {
 		const viewSession = vi.fn();
 		sessionState.currentId = "old-session";
-		routerState.path = "/p/project-a/s/new-session";
+		routerState.path = "/s/new-session";
 
-		switchToSession("new-session", viewSession);
+		switchToSession("new-session", undefined, viewSession);
 
 		expect(viewSession).toHaveBeenCalledWith({
 			projectSlug: "project-a",
@@ -190,9 +203,9 @@ describe("switchToSession", () => {
 			}),
 		]);
 		sessionState.currentId = "child-subagent";
-		routerState.path = "/p/project-a/s/parent-with-subagents";
+		routerState.path = "/s/parent-with-subagents";
 
-		switchToSession("parent-with-subagents", viewSession);
+		switchToSession("parent-with-subagents", undefined, viewSession);
 
 		const tool = currentChat().messages.find((m) => m.type === "tool");
 		expect(tool?.type).toBe("tool");
@@ -507,7 +520,7 @@ describe("getFilteredSessions — daemon sessions", () => {
 		sessionState.searchResults = null;
 		sessionState.searchQuery = "";
 		sessionState.sessions.clear();
-		routerState.path = "/p/project-a/";
+		routerState.path = "/";
 	});
 
 	it("includes foreign project sessions", () => {

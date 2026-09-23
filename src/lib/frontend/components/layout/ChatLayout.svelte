@@ -1,12 +1,12 @@
 <!-- ─── Chat Layout ─────────────────────────────────────────────────────────── -->
-<!-- Main layout for the /p/:slug/ route: Sidebar + Header + Messages + Input. -->
+<!-- Session list and chat: Sidebar + Header + Messages + Input. -->
 <!-- Wires all feature/overlay components into the layout hierarchy. -->
 <!-- Preserves element IDs and class names for E2E test compatibility. -->
 
 <script lang="ts">
 	import { onMount, untrack } from "svelte";
 	import { interruptStream, disposeRuntime } from "../../transport/runtime.js";
-	import { attachProjectRpc, viewSessionRpc, getAgentsRpc, getCommandsRpc, getFileTreeRpc, getModelsRpc, getProjectsRpc, listPtysRpc, listSessionsRpc } from "../../transport/ws-rpc-client.js";
+	import { attachProjectRpc, resolveSessionRpc, viewSessionRpc, getAgentsRpc, getCommandsRpc, getFileTreeRpc, getModelsRpc, getProjectsRpc, listPtysRpc, listSessionsRpc } from "../../transport/ws-rpc-client.js";
 	import Header from "./Header.svelte";
 	import SessionBar from "./SessionBar.svelte";
 	import Sidebar from "./Sidebar.svelte";
@@ -49,10 +49,10 @@
 		onRewind,
 		wsSend,
 	} from "../../stores/ws.svelte.js";
-	import { attachedProjectState, getCurrentRoute, getCurrentSessionId } from "../../stores/router.svelte.js";
+	import { attachedProjectState, getCurrentRoute, getCurrentSessionId, getCurrentSearchParams, replaceRoute, routerState } from "../../stores/router.svelte.js";
 	import { clearMessages } from "../../stores/chat.svelte.js";
 	import { applyPtyListResponse, terminalState, destroyAll } from "../../stores/terminal.svelte.js";
-	import { applyListSessionsResponse, clearSessionState, loadDaemonSessions, switchToSession } from "../../stores/session.svelte.js";
+	import { applyListSessionsResponse, clearSessionState, loadDaemonSessions, sessionState, switchToSession } from "../../stores/session.svelte.js";
 	import { clearAllPermissions } from "../../stores/permissions.svelte.js";
 	import { applyGetAgentsResponse, applyGetCommandsResponse, applyGetModelsResponse, clearDiscoveryState, discoveryState } from "../../stores/discovery.svelte.js";
 	import { todoState, clearTodoState } from "../../stores/todo.svelte.js";
@@ -307,14 +307,11 @@
 
 	// ─── Lifecycle: WebSocket connection ───────────────────────────────────────
 
-	const initialRoute = untrack(getCurrentRoute);
-	let receivedAttachment = false;
 	let requestedProject: string | null = null;
 	onMount(() => {
 		let previousSlug: string | null = null;
 		let attachGeneration = 0;
 		const unsubscribe = onProjectAttached((slug) => {
-			receivedAttachment = true;
 			if (requestedProject === slug) requestedProject = null;
 			const generation = ++attachGeneration;
 			if (slug !== previousSlug) {
@@ -416,26 +413,38 @@
 	);
 	$effect(() => {
 		const route = getCurrentRoute();
+		const projectHint = getCurrentSearchParams().get("p");
 		if (!connected || route.page !== "chat") return;
+		let cancelled = false;
 		untrack(() => {
-			// The initial URL is already included in connect(). Later navigation
-			// can also attach a socket for which the daemon found no project.
-			if (
-				!receivedAttachment &&
-				initialRoute.page === "chat" &&
-				route.slug === initialRoute.slug &&
-				route.sessionId === initialRoute.sessionId
-			) return;
-			if (route.slug === attachedProjectState.slug && requestedProject === null) return;
-			requestedProject = route.slug;
-			const input = { projectSlug: route.slug, originId: getBrowserClientId() };
-			const request = route.sessionId
-				? viewSessionRpc({ ...input, sessionId: route.sessionId })
-				: attachProjectRpc(input);
-			void request.then(() => {
-				if (requestedProject === route.slug && attachedProjectState.slug === route.slug) requestedProject = null;
-			}).catch(() => showToast("Failed to switch projects", { variant: "error" }));
+			if (!route.sessionId) {
+				if (sessionState.currentId !== null) {
+					sessionState.currentId = null;
+					clearMessages();
+					clearAllPermissions();
+					clearTodoState();
+				}
+				if (projectHint && (projectHint !== attachedProjectState.slug || requestedProject !== null)) {
+					requestedProject = projectHint;
+					void attachProjectRpc({ projectSlug: projectHint, originId: getBrowserClientId() })
+						.catch(() => { if (!cancelled) showToast("Failed to switch projects", { variant: "error" }); });
+				}
+				return;
+			}
+			if (route.sessionId === sessionState.currentId) return;
+			const sessionId = route.sessionId;
+			void resolveSessionRpc({ sessionId }).then(({ projectSlug }) => {
+				if (cancelled) return;
+				if (sessionState.currentId === sessionId) return;
+				if (projectSlug === null) {
+					routerState.sessionNotFound = true;
+					replaceRoute("/");
+					return;
+				}
+				return viewSessionRpc({ projectSlug, sessionId, originId: getBrowserClientId() });
+			}).catch(() => { if (!cancelled) showToast("Failed to open session", { variant: "error" }); });
 		});
+		return () => { cancelled = true; };
 	});
 
 	// ─── Effect runtime disposal on page unload ──────────────────────────────

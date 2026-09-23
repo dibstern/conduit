@@ -12,8 +12,6 @@ import { mockRelayWebSocket } from "../helpers/ws-mock.js";
 type Page = import("@playwright/test").Page;
 type WsMockControl = Awaited<ReturnType<typeof mockRelayWebSocket>>;
 
-const PROJECT_URL = "/p/myapp/";
-
 async function waitForChatReady(page: Page): Promise<void> {
 	await page.locator("#input").waitFor({ state: "visible", timeout: 10_000 });
 	await page.locator(".connect-overlay").waitFor({
@@ -44,7 +42,7 @@ async function setupWithContextOptions(
 		initDelay: 0,
 		messageDelay: 0,
 	});
-	await page.goto(`${baseURL ?? "http://localhost:4173"}${PROJECT_URL}`);
+	await page.goto(`${baseURL ?? "http://localhost:4173"}/s/sess-context-001`);
 	await waitForChatReady(page);
 	return control;
 }
@@ -68,7 +66,9 @@ async function setupWithoutContextOptions(
 		initDelay: 0,
 		messageDelay: 0,
 	});
-	await page.goto(`${baseURL ?? "http://localhost:4173"}${PROJECT_URL}`);
+	await page.goto(
+		`${baseURL ?? "http://localhost:4173"}/s/sess-context-none-001`,
+	);
 	await waitForChatReady(page);
 	return control;
 }

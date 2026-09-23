@@ -36,7 +36,7 @@ beforeEach(() => {
 	vi.stubGlobal("window", { history: { replaceState: vi.fn() } });
 	clearSessionState();
 	attachedProjectState.slug = null;
-	routerState.path = "/p/a/s/session-a";
+	routerState.path = "/s/session-a";
 	unsubscribe = onProjectAttached(() => {
 		clearMessages();
 		clearSessionState();
@@ -52,6 +52,7 @@ afterEach(() => {
 
 it("drops old-project buffered and late events while the new project's replay is in flight", async () => {
 	handleMessage({ type: "project_attached", slug: "a" });
+	routerState.path = "/s/session-a";
 	handleMessage({
 		type: "session_switched",
 		id: "session-a",
@@ -78,6 +79,7 @@ it("drops old-project buffered and late events while the new project's replay is
 
 	handleMessage({ type: "project_attached", slug: "b" });
 	expect(oldSlot.activity.liveEventBuffer).toBeNull();
+	routerState.path = "/s/session-b";
 	handleMessage({
 		type: "session_switched",
 		id: "session-b",
@@ -113,7 +115,7 @@ it("drops old-project buffered and late events while the new project's replay is
 	await Promise.all([oldReplay, newReplay]);
 
 	expect(sessionState.currentId).toBe("session-b");
-	expect(routerState.path).toBe("/p/b/s/session-b");
+	expect(routerState.path).toBe("/s/session-b");
 	expect(sessionActivity.has("session-a")).toBe(false);
 	expect(JSON.stringify(chatState.messages)).not.toContain("old");
 	expect(JSON.stringify(chatState.messages)).toContain("new response");
@@ -124,10 +126,11 @@ it("publishes the attached slug and resets synchronously before bootstrap", () =
 	const stop = onProjectAttached((slug) => {
 		order.push(slug);
 		expect(attachedProjectState.slug).toBe("b");
-		expect(routerState.path).toBe("/p/b/s/session-a");
+		expect(routerState.path).toBe("/s/session-a");
 		expect(sessionState.currentId).toBeNull();
 	});
 	handleMessage({ type: "project_attached", slug: "b" });
+	routerState.path = "/s/session-b";
 	handleMessage({
 		type: "session_switched",
 		id: "session-b",
@@ -140,6 +143,7 @@ it("publishes the attached slug and resets synchronously before bootstrap", () =
 
 it("does not let an old history completion clear the new project's loading state", async () => {
 	handleMessage({ type: "project_attached", slug: "a" });
+	routerState.path = "/s/session-a";
 	handleMessage({
 		type: "session_switched",
 		id: "session-a",
@@ -152,6 +156,7 @@ it("does not let an old history completion clear the new project's loading state
 		hasMore: false,
 	});
 	handleMessage({ type: "project_attached", slug: "b" });
+	routerState.path = "/s/session-b";
 	handleMessage({
 		type: "session_switched",
 		id: "session-b",

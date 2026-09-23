@@ -90,6 +90,7 @@ vi.mock("../../../src/lib/frontend/stores/ui.svelte.js", () => ({
 }));
 
 import { clearMessages } from "../../../src/lib/frontend/stores/chat.svelte.js";
+import { routerState } from "../../../src/lib/frontend/stores/router.svelte.js";
 import { sessionState } from "../../../src/lib/frontend/stores/session.svelte.js";
 import { handleMessage } from "../../../src/lib/frontend/stores/ws.svelte.js";
 
@@ -224,6 +225,7 @@ describe("session_list -> reconcile dispatch", () => {
 
 describe("session_switched -> session_viewed dispatch", () => {
 	it("dispatches session_viewed with the new session ID", () => {
+		routerState.path = "/s/new-session-id";
 		handleMessage({
 			type: "session_switched",
 			id: "new-session-id",

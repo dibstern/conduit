@@ -2,7 +2,10 @@ import { cleanup, fireEvent, render, within } from "@testing-library/svelte";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import SessionList from "../../../src/lib/frontend/components/session/SessionList.svelte";
 import { projectState } from "../../../src/lib/frontend/stores/project.svelte.js";
-import { routerState } from "../../../src/lib/frontend/stores/router.svelte.js";
+import {
+	attachedProjectState,
+	routerState,
+} from "../../../src/lib/frontend/stores/router.svelte.js";
 import {
 	applyListDaemonSessionsResponse,
 	sessionState,
@@ -10,7 +13,9 @@ import {
 
 describe("SessionList daemon sessions", () => {
 	beforeEach(() => {
-		routerState.path = "/p/current-project/";
+		routerState.path = "/";
+		attachedProjectState.slug = "current-project";
+		routerState.search = "";
 		sessionState.rootSessions = [
 			{
 				id: "local-session",
@@ -42,7 +47,7 @@ describe("SessionList daemon sessions", () => {
 		cleanup();
 	});
 
-	it("renders a foreign row as a navigate-only link with a project label", async () => {
+	it("renders a foreign row as a session link with a project label", async () => {
 		applyListDaemonSessionsResponse({
 			projectSlug: "current-project",
 			sessions: [
@@ -69,9 +74,7 @@ describe("SessionList daemon sessions", () => {
 		expect(localRow).not.toBeNull();
 		if (!foreignRow || !localRow) return;
 
-		expect(foreignRow.getAttribute("href")).toBe(
-			"/p/unlisted-project/s/foreign-session",
-		);
+		expect(foreignRow.getAttribute("href")).toBe("/s/foreign-session");
 		expect(within(foreignRow).getByText("unlisted-project")).toBeDefined();
 		expect(
 			within(foreignRow).queryByRole("button", { name: /More options/ }),

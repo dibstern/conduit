@@ -6,13 +6,13 @@
 // Routes:
 //   GET  /health, /api/status     — health check
 //   GET  /info                    — version info
-//   GET  /api/projects            — project list
+//   GET  /api/projects            — liveness probe (daemon lifecycle and HTTP router tests)
 //   GET  /api/push/vapid-key      — VAPID public key
 //   POST /api/push/subscribe      — push subscription
 //   POST /api/push/unsubscribe    — push unsubscription
 //   GET  /api/setup-info          — setup/onboarding info
 //   GET  /ca/download             — CA certificate download
-//   GET  /auth, /setup, /, /p/*   — SPA/static entry routes
+//   GET  /auth, /setup, /, /s/*, /p/* — SPA/static entry routes
 
 import { readFile } from "node:fs/promises";
 import {
@@ -94,14 +94,6 @@ export class SetupInfoProvider extends Context.Tag("SetupInfoProvider")<
 	{
 		readonly getPort: () => Effect.Effect<number>;
 		readonly getIsTls: () => Effect.Effect<boolean>;
-	}
->() {}
-
-/** Project removal provider — daemon mode only. */
-export class RemoveProjectProvider extends Context.Tag("RemoveProjectProvider")<
-	RemoveProjectProvider,
-	{
-		readonly removeProject: (slug: string) => Effect.Effect<void, unknown>;
 	}
 >() {}
 
@@ -191,7 +183,11 @@ const infoHandler = Effect.gen(function* () {
 	} satisfies InfoResponse);
 });
 
-/** GET /api/projects */
+/**
+ * GET /api/projects remains only as a liveness probe. Callers are the daemon
+ * lifecycle integration flow and the HTTP router/server unit tests; browser
+ * project lists use daemon RPC.
+ */
 const projectsHandler = Effect.gen(function* () {
 	const { getProjects } = yield* ProjectsProvider;
 	const projects = yield* getProjects();
@@ -333,45 +329,7 @@ const setupInfoHandler = Effect.gen(function* () {
 const authPageHandler = serveStaticFile("/index.html");
 const setupPageHandler = serveStaticFile("/index.html");
 
-const rootHandler = Effect.gen(function* () {
-	const { getProjects } = yield* ProjectsProvider;
-	const projects = yield* getProjects();
-	if (projects.length === 1 && projects[0]) {
-		return HttpServerResponse.empty({
-			status: 302,
-			headers: { Location: `/p/${projects[0].slug}/` },
-		});
-	}
-	return yield* serveStaticFile("/index.html");
-});
-
-const deleteProjectHandler = Effect.gen(function* () {
-	const params = yield* HttpRouter.params;
-	const rawSlug = params["slug"];
-	if (!rawSlug) {
-		return yield* jsonError(400, "BAD_REQUEST", "Missing project slug");
-	}
-
-	const remove = yield* Effect.serviceOption(RemoveProjectProvider);
-	if (Option.isNone(remove)) {
-		return yield* jsonError(
-			501,
-			"NOT_SUPPORTED",
-			"Removing projects is not supported in this mode",
-		);
-	}
-
-	const slug = decodeURIComponent(rawSlug);
-	const removed = yield* remove.value.removeProject(slug).pipe(
-		Effect.as(true),
-		Effect.catchAll(() => Effect.succeed(false)),
-	);
-	if (!removed) {
-		return yield* jsonError(404, "NOT_FOUND", "Project not found");
-	}
-
-	return yield* HttpServerResponse.json({ ok: true });
-});
+const rootHandler = serveStaticFile("/index.html");
 
 const projectRouteHandler = Effect.gen(function* () {
 	const params = yield* HttpRouter.params;
@@ -382,6 +340,9 @@ const projectRouteHandler = Effect.gen(function* () {
 	const host = req.headers["host"] ?? "localhost";
 	const pathname = new URL(req.url, `http://${host}`).pathname;
 	const subPath = pathname.slice(`/p/${rawSlug}`.length) || "/";
+	if (!subPath.startsWith("/api/")) {
+		return yield* serveStaticFile("/index.html");
+	}
 	const { getProjects } = yield* ProjectsProvider;
 	const project = (yield* getProjects()).find((p) => p.slug === slug);
 
@@ -396,19 +357,15 @@ const projectRouteHandler = Effect.gen(function* () {
 		} satisfies ProjectStatusResponse);
 	}
 
-	if (subPath.startsWith("/api/")) {
-		const delegate = yield* Effect.serviceOption(ProjectApiDelegateProvider);
-		if (Option.isSome(delegate)) {
-			return yield* delegate.value.delegateApiRequest(
-				slug,
-				subPath.slice(4),
-				req,
-			);
-		}
-		return yield* jsonError(404, "NOT_FOUND", "Project API route not found");
+	const delegate = yield* Effect.serviceOption(ProjectApiDelegateProvider);
+	if (Option.isSome(delegate)) {
+		return yield* delegate.value.delegateApiRequest(
+			slug,
+			subPath.slice(4),
+			req,
+		);
 	}
-
-	return yield* serveStaticFile("/index.html");
+	return yield* jsonError(404, "NOT_FOUND", "Project API route not found");
 });
 
 const staticCatchAllHandler = Effect.gen(function* () {
@@ -450,11 +407,12 @@ const publicRoutes = HttpRouter.empty.pipe(
 
 const protectedRoutes = HttpRouter.empty.pipe(
 	HttpRouter.get("/api/projects", projectsHandler),
-	HttpRouter.del("/api/projects/:slug", deleteProjectHandler),
 	HttpRouter.get("/api/push/vapid-key", vapidKeyHandler),
 	HttpRouter.post("/api/push/subscribe", pushSubscribeHandler),
 	HttpRouter.post("/api/push/unsubscribe", pushUnsubscribeHandler),
 	HttpRouter.get("/", rootHandler),
+	HttpRouter.get("/s/:id", rootHandler),
+	HttpRouter.get("/p/:slug", rootHandler),
 	HttpRouter.get("/p/:slug/*", projectRouteHandler),
 	HttpRouter.use((handler) => withAuthGate(handler)),
 );

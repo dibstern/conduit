@@ -12,7 +12,6 @@
 		getCachedInstanceById,
 		instanceState,
 	} from "../../stores/instance.svelte.js";
-	import { navigate } from "../../stores/router.svelte.js";
 	import { startInstanceRpc } from "../../transport/ws-rpc-client.js";
 	import type { InstanceStatus } from "../../types.js";
 	import { CONNECT_FADEOUT_MS } from "../../ui-constants.js";
@@ -117,31 +116,6 @@
 		return wsState.statusText;
 	});
 
-	// ─── Escape hatch: show "Back to dashboard" after prolonged disconnect ──────
-
-	let showEscapeLink = $state(false);
-
-	$effect(() => {
-		if (connected) {
-			showEscapeLink = false;
-			return;
-		}
-		if (relayStatus === "error") {
-			showEscapeLink = true;
-			return;
-		}
-		// Show escape link after 4 seconds of failed connection
-		const timer = setTimeout(() => {
-			showEscapeLink = true;
-		}, 4_000);
-		return () => clearTimeout(timer);
-	});
-
-	function handleEscape(e: MouseEvent) {
-		e.preventDefault();
-		navigate("/");
-	}
-
 	// ─── Reset on disconnect ────────────────────────────────────────────────────
 
 	$effect(() => {
@@ -214,13 +188,6 @@
 						{relayError}
 					</div>
 				{/if}
-				<a
-					href="/"
-					class="mt-1 px-4 py-1.5 text-sm rounded-lg bg-bg-surface border border-border text-text hover:bg-bg-alt font-medium"
-					onclick={handleEscape}
-				>
-					Back to dashboard
-				</a>
 			</div>
 		{:else}
 			<div

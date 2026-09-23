@@ -121,6 +121,7 @@ describe("Effect WS handler bridge", () => {
 		const detach = handler.attach(socket.asWebSocket(), {
 			clientId: "daemon-client",
 			requestedSessionId: "session-a",
+			skipDefaultSession: true,
 		});
 		const connectedInfo = await connected;
 		const connection = addClient.mock.calls[0]?.[1];
@@ -128,6 +129,7 @@ describe("Effect WS handler bridge", () => {
 		expect(connectedInfo).toMatchObject({
 			clientId: "daemon-client",
 			requestedSessionId: "session-a",
+			skipDefaultSession: true,
 		});
 
 		const delivered = vi.fn();
@@ -247,6 +249,21 @@ describe("Effect WS handler bridge", () => {
 
 		expect(handler.getClientSession(clientId)).toBe("sess-1");
 		expect(handler.getClientsForSession("sess-1")).toEqual([clientId]);
+	});
+
+	it("announces its project before anything else on a direct connection", async () => {
+		const handler = await createHandler({
+			heartbeatInterval: 300_000,
+			projectSlug: "proj-a",
+		});
+		const { url } = await startServer(handler);
+		const client = new WebSocket(url);
+		cleanup.push(() => client.close());
+		const first = new Promise<unknown>((resolve) =>
+			client.once("message", (data) => resolve(JSON.parse(data.toString()))),
+		);
+
+		expect(await first).toEqual({ type: "project_attached", slug: "proj-a" });
 	});
 
 	it("uses the browser-provided client id when present", async () => {

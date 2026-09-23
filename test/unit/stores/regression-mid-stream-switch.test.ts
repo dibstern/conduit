@@ -55,6 +55,7 @@ import {
 	type SessionActivity,
 	type SessionMessages,
 } from "../../../src/lib/frontend/stores/chat.svelte.js";
+import { routerState } from "../../../src/lib/frontend/stores/router.svelte.js";
 import { sessionState } from "../../../src/lib/frontend/stores/session.svelte.js";
 import { handleMessage } from "../../../src/lib/frontend/stores/ws.svelte.js";
 import type {
@@ -122,6 +123,7 @@ describe("Regression: mid-stream session switch preserves messages", () => {
 		expect(isStreaming()).toBe(true);
 
 		// ── Phase 2: Switch to session B (clears everything) ──
+		routerState.path = "/s/session-b";
 		handleMessage({
 			type: "session_switched",
 			id: "session-b",
@@ -134,6 +136,7 @@ describe("Regression: mid-stream session switch preserves messages", () => {
 		// ── Phase 3: Switch back to session A with full cached events ──
 		// The relay would have cached ALL events for session A, including
 		// events that arrived while viewing session B.
+		routerState.path = "/s/session-a";
 		handleMessage({
 			type: "session_switched",
 			id: "session-a",
@@ -181,6 +184,7 @@ describe("Regression: mid-stream session switch preserves messages", () => {
 		sessionState.currentId = "session-a";
 
 		// Switch to B
+		routerState.path = "/s/session-b";
 		handleMessage({
 			type: "session_switched",
 			id: "session-b",
@@ -188,6 +192,7 @@ describe("Regression: mid-stream session switch preserves messages", () => {
 		});
 
 		// Switch back to A — agent is STILL working (no done event)
+		routerState.path = "/s/session-a";
 		handleMessage({
 			type: "session_switched",
 			id: "session-a",
@@ -224,11 +229,13 @@ describe("Regression: mid-stream session switch preserves messages", () => {
 		sessionState.currentId = "session-a";
 
 		// Switch to B, then back to A with tool events
+		routerState.path = "/s/session-b";
 		handleMessage({
 			type: "session_switched",
 			id: "session-b",
 			sessionId: "session-b",
 		});
+		routerState.path = "/s/session-a";
 		handleMessage({
 			type: "session_switched",
 			id: "session-a",
@@ -291,11 +298,13 @@ describe("Regression: mid-stream session switch preserves messages", () => {
 	it("switching away during thinking then back preserves thinking block", async () => {
 		sessionState.currentId = "session-a";
 
+		routerState.path = "/s/session-b";
 		handleMessage({
 			type: "session_switched",
 			id: "session-b",
 			sessionId: "session-b",
 		});
+		routerState.path = "/s/session-a";
 		handleMessage({
 			type: "session_switched",
 			id: "session-a",
@@ -338,11 +347,13 @@ describe("Regression: mid-stream session switch preserves messages", () => {
 	it("multi-turn conversation: switch away then back preserves all turns", async () => {
 		sessionState.currentId = "session-a";
 
+		routerState.path = "/s/session-b";
 		handleMessage({
 			type: "session_switched",
 			id: "session-b",
 			sessionId: "session-b",
 		});
+		routerState.path = "/s/session-a";
 		handleMessage({
 			type: "session_switched",
 			id: "session-a",
@@ -389,6 +400,7 @@ describe("Regression: mid-stream session switch preserves messages", () => {
 		vi.advanceTimersByTime(100);
 
 		// Rapid switch A→B→A
+		routerState.path = "/s/session-b";
 		handleMessage({
 			type: "session_switched",
 			id: "session-b",
@@ -396,6 +408,7 @@ describe("Regression: mid-stream session switch preserves messages", () => {
 		});
 		expect(chatState.messages).toHaveLength(0);
 
+		routerState.path = "/s/session-a";
 		handleMessage({
 			type: "session_switched",
 			id: "session-a",
@@ -433,11 +446,13 @@ describe("Regression: mid-stream session switch preserves messages", () => {
 
 		// Switch to B and back to A without server events/history yet. The
 		// frontend should keep its hot cache visible while the server fallback loads.
+		routerState.path = "/s/session-b";
 		handleMessage({
 			type: "session_switched",
 			id: "session-b",
 			sessionId: "session-b",
 		});
+		routerState.path = "/s/session-a";
 		handleMessage({
 			type: "session_switched",
 			id: "session-a",
@@ -450,6 +465,7 @@ describe("Regression: mid-stream session switch preserves messages", () => {
 
 	it("events from session A continue arriving live after switching back mid-stream", async () => {
 		// Switch to session A with mid-stream events (no done)
+		routerState.path = "/s/session-a";
 		handleMessage({
 			type: "session_switched",
 			id: "session-a",

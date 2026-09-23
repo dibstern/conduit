@@ -126,6 +126,14 @@ function thresholdExampleValue(
 	return threshold;
 }
 
+// The frontend only honours a session_switched for the session its route
+// names, so a step that switches sessions first moves the route there.
+const openSessionRoute = (page: Page, sessionId: string) =>
+	page.evaluate((id) => {
+		history.pushState(null, "", `/s/${encodeURIComponent(id)}`);
+		window.dispatchEvent(new PopStateEvent("popstate"));
+	}, sessionId);
+
 export const conduitVisualHandlers: StepHandler[] = [
 	{
 		name: "set phone viewport",
@@ -314,6 +322,8 @@ export const conduitVisualHandlers: StepHandler[] = [
 			let createdSessionInstance: string | undefined;
 			const rpcControl = await mockWsRpc(world.page, {
 				handlers: {
+					ResolveSession: async () => ({ projectSlug: "myapp" }),
+					ViewSession: async () => ({ ok: true }),
 					GetClaudeSettings: async () => ({
 						projectSlug: "myapp",
 						overrides: mockClaudeSettings.get(page) ?? {},
@@ -468,8 +478,15 @@ export const conduitVisualHandlers: StepHandler[] = [
 
 			const baseUrl =
 				process.env["CONDUIT_BASE_URL"] ?? "http://localhost:4173";
+			const initialSession = modelExecutionMockup?.initMessages.find(
+				(message) => message.type === "session_switched",
+			)?.["id"];
+			const initialPath =
+				typeof initialSession === "string"
+					? `/s/${encodeURIComponent(initialSession)}`
+					: "/?p=myapp";
 			try {
-				await world.page.goto(new URL("/p/myapp/", baseUrl).toString());
+				await world.page.goto(new URL(initialPath, baseUrl).toString());
 				await world.page.locator("#layout").waitFor({
 					state: "attached",
 					timeout: 30_000,
@@ -601,6 +618,7 @@ export const conduitVisualHandlers: StepHandler[] = [
 		run: async ({ world }) => {
 			const relayControl = relayControls.get(world.page);
 			if (!relayControl) throw new Error("Mock relay was not initialised");
+			await openSessionRoute(world.page, "sess-subagent");
 			relayControl.sendMessage({
 				type: "session_switched",
 				id: "sess-subagent",
@@ -708,10 +726,13 @@ export const conduitVisualHandlers: StepHandler[] = [
 		run: async ({ world, match }) => {
 			const harness = match[1] ?? "";
 			const relayControl = requireRelayControl(world.page);
+			const claude = instanceIdForLabel(harness) === "claude";
+			await openSessionRoute(
+				world.page,
+				claude ? "sess-bound-claude" : "sess-bound-opencode",
+			);
 			await relayControl.sendMessages(
-				instanceIdForLabel(harness) === "claude"
-					? claudeBoundSessionMessages
-					: openCodeBoundSessionMessages,
+				claude ? claudeBoundSessionMessages : openCodeBoundSessionMessages,
 			);
 			// Wait until the binding reached the UI (trigger reflects the harness).
 			await world.page.waitForFunction(
@@ -917,7 +938,8 @@ export const conduitVisualHandlers: StepHandler[] = [
 	{
 		name: "set claude settings session active",
 		match: /^the Claude settings session is active$/,
-		run: ({ world }) => {
+		run: async ({ world }) => {
+			await openSessionRoute(world.page, claudeSettingsSessionId);
 			requireRelayControl(world.page).sendMessage({
 				type: "session_switched",
 				id: claudeSettingsSessionId,

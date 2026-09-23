@@ -306,7 +306,6 @@ export class EffectRelayServer {
 			auth: this.auth,
 			staticDir: this.staticDir,
 			getProjects,
-			removeProject: (slug) => this.removeProject(slug),
 			getPort: () => this.actualPort,
 			getIsTls: () => this.protocol === "https",
 			pushManager: this.options.pushManager,

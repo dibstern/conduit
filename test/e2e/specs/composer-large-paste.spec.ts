@@ -31,7 +31,7 @@ test("@large-paste a pasted log dump bypasses the highlight mirror", async ({
 		},
 	});
 
-	await page.goto("/p/myapp/");
+	await page.goto("/s/sess-mockup-001");
 	const textarea = page.locator("#input");
 	await textarea.waitFor({ state: "visible", timeout: 20_000 });
 

@@ -45,7 +45,7 @@ test("@drift-layout drift indicator never covers the composer controls on mobile
 		},
 	});
 
-	await page.goto("/p/myapp/");
+	await page.goto("/s/sess-mockup-001");
 	await page.locator("#input").waitFor({ state: "visible", timeout: 20_000 });
 
 	const drift = page.getByTestId("current-model-drift");

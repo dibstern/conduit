@@ -1,14 +1,12 @@
 // ─── Router Store ────────────────────────────────────────────────────────────
-// Simple client-side routing for 5 routes. No library needed.
-// Routes: /auth, /setup, /, /p/:slug/, /p/:slug/s/:sessionId
+// Routes: /auth, /setup, / (session list), /s/:sessionId.
 
 // ─── Route types ────────────────────────────────────────────────────────────
 
 export type Route =
 	| { page: "auth" }
 	| { page: "setup" }
-	| { page: "dashboard" }
-	| { page: "chat"; slug: string; sessionId?: string };
+	| { page: "chat"; sessionId?: string };
 
 export interface RouteTransition {
 	from: string;
@@ -80,6 +78,7 @@ export function clearTransitionLog(): void {
 export const routerState = $state({
 	path: typeof window !== "undefined" ? window.location.pathname : "/",
 	search: typeof window !== "undefined" ? window.location.search : "",
+	sessionNotFound: false,
 });
 
 /** The daemon sets the attached project through project_attached messages. */
@@ -103,34 +102,43 @@ export function getCurrentRoute(): Route {
 		return { page: "setup" };
 	}
 
-	// Match /p/:slug/s/:sessionId (before the plain /p/:slug/ match)
-	const sessionMatch = path.match(/^\/p\/([^/]+)\/s\/([^/]+)\/?$/);
+	// Legacy session links remain readable until App normalizes the address.
+	const sessionMatch = path.match(/^(?:\/p\/[^/]+)?\/s\/([^/]+)\/?$/);
 	if (sessionMatch) {
 		return {
 			page: "chat",
 			// biome-ignore lint/style/noNonNullAssertion: safe — regex match guarantees capture group
-			slug: sessionMatch[1]!,
-			// biome-ignore lint/style/noNonNullAssertion: safe — regex match guarantees capture group
-			sessionId: sessionMatch[2]!,
+			sessionId: sessionMatch[1]!,
 		};
 	}
 
-	// Match /p/:slug/ or /p/:slug
-	const slugMatch = path.match(/^\/p\/([^/]+)\/?$/);
-	if (slugMatch) {
-		// biome-ignore lint/style/noNonNullAssertion: safe — regex match guarantees capture group
-		return { page: "chat", slug: slugMatch[1]! };
-	}
+	return { page: "chat" };
+}
 
-	// Root or fallback = dashboard
-	return { page: "dashboard" };
+/** Replace old bookmarks and unknown paths without adding a history entry. */
+export function normalizeRoute(): void {
+	const path = routerState.path;
+	const legacySession = path.match(/^\/p\/[^/]+\/s\/([^/]+)\/?$/);
+	if (legacySession) {
+		replaceRoute(`/s/${legacySession[1]}${routerState.search}`);
+		return;
+	}
+	const legacyProject = path.match(/^\/p\/([^/]+)\/?$/);
+	if (legacyProject?.[1]) {
+		const params = getCurrentSearchParams();
+		params.set(SCOPE_PARAM, legacyProject[1]);
+		replaceRoute(`/?${params}`);
+		return;
+	}
+	if (!/^\/(?:s\/[^/]+\/?|auth\/?|setup\/?)?$/.test(path)) {
+		replaceRoute(`/${routerState.search}`);
+	}
 }
 
 /** Use the daemon's attached project, or the route hint before the first attach. */
 export function getCurrentSlug(): string | null {
 	if (attachedProjectState.slug !== null) return attachedProjectState.slug;
-	const route = getCurrentRoute();
-	return route.page === "chat" ? route.slug : null;
+	return getCurrentSearchParams().get(SCOPE_PARAM);
 }
 
 /** Get the current session ID from the URL (null if not present). */
@@ -146,20 +154,10 @@ export function getCurrentSearchParams(): URLSearchParams {
 
 /**
  * Get the href for a session link (for use in `<a>` elements).
- * Returns `/p/:slug/s/:sessionId` or null if not on a chat route.
+ * Session addresses are independent of their owning project.
  */
-export function getSessionHref(sessionId: string): string | null {
-	const slug = getCurrentSlug();
-	if (!slug) return null;
-	return getSessionHrefForSlug(slug, sessionId);
-}
-
-/** Get the href for a session owned by an explicit project slug. */
-export function getSessionHrefForSlug(
-	projectSlug: string,
-	sessionId: string,
-): string {
-	return `/p/${projectSlug}/s/${sessionId}`;
+export function getSessionHref(sessionId: string): string {
+	return `/s/${sessionId}`;
 }
 
 // ─── Actions ────────────────────────────────────────────────────────────────
@@ -170,7 +168,9 @@ function applyRoute(
 	historyMethod: "pushState" | "replaceState",
 ): void {
 	const { pathname, search: requestedSearch } = splitPath(path);
-	const search = carryScope(pathname, requestedSearch);
+	const search = path.split("#", 1)[0]?.includes("?")
+		? requestedSearch
+		: carryScope(pathname, requestedSearch);
 	if (pathname === routerState.path && search === routerState.search) return;
 	const from = routerState.path + routerState.search;
 	const to = pathname + search;

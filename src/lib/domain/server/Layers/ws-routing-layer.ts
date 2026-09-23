@@ -352,6 +352,7 @@ export const WebSocketRoutingLive: Layer.Layer<
 					try: () =>
 						relay.attach(latest.value.ws, {
 							clientId: payload.originId,
+							skipDefaultSession: true,
 							...(payload.sessionId
 								? { requestedSessionId: payload.sessionId }
 								: {}),
@@ -458,7 +459,9 @@ export const WebSocketRoutingLive: Layer.Layer<
 				);
 				const detach = relay.value.attach(ws, {
 					clientId,
-					...(requestedSessionId != null && { requestedSessionId }),
+					skipDefaultSession: true,
+					...(sessionSlug != null &&
+						requestedSessionId != null && { requestedSessionId }),
 				});
 				const attached = yield* daemonWsClients.setAttachment(
 					clientId,

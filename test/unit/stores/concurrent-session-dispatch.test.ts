@@ -49,6 +49,7 @@ import {
 	clearAllPermissions,
 	permissionsState,
 } from "../../../src/lib/frontend/stores/permissions.svelte.js";
+import { routerState } from "../../../src/lib/frontend/stores/router.svelte.js";
 import { sessionState } from "../../../src/lib/frontend/stores/session.svelte.js";
 import {
 	handleMessage,
@@ -282,6 +283,7 @@ describe("family attention before membership", () => {
 				{ id: "new-child", title: "Child", parentID: "root" },
 			],
 		});
+		routerState.path = "/s/root";
 		handleMessage({ type: "session_switched", sessionId: "root", id: "root" });
 		expect(
 			permissionsState.pendingQuestions.map((question) => question.toolId),

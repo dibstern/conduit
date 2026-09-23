@@ -29,7 +29,7 @@ import {
 type Page = import("@playwright/test").Page;
 
 const PROJECT_SLUG = "test-project";
-const PROJECT_URL = `/p/${PROJECT_SLUG}/`;
+const PROJECT_URL = "/s/sess-indicator-A";
 
 const SESS_A = "sess-indicator-A";
 const SESS_B = "sess-indicator-B";

@@ -35,7 +35,7 @@ export const mainUiScene: SceneDefinition = {
 		});
 
 		await phase("navigate", async () => {
-			await page.goto(`${previewUrl}/p/myapp/`);
+			await page.goto(`${previewUrl}/s/sess-media-001`);
 			await waitForFonts(page);
 			await waitForIcons(page);
 		});

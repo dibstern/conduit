@@ -40,6 +40,7 @@ import {
 	clearMessages,
 	clearSessionChatState,
 } from "../../../src/lib/frontend/stores/chat.svelte.js";
+import { routerState } from "../../../src/lib/frontend/stores/router.svelte.js";
 import { sessionState } from "../../../src/lib/frontend/stores/session.svelte.js";
 import { handleMessage } from "../../../src/lib/frontend/stores/ws.svelte.js";
 
@@ -54,6 +55,7 @@ afterEach(() => vi.useRealTimers());
 
 describe("Regression: parent `done` does not complete a running subagent Task", () => {
 	it("keeps the Task running after a parent done while the subagent is in progress", async () => {
+		routerState.path = "/s/sub-parent";
 		handleMessage({
 			type: "session_switched",
 			id: "sub-parent",
@@ -85,6 +87,7 @@ describe("Regression: parent `done` does not complete a running subagent Task", 
 	});
 
 	it("still force-completes ordinary running tools on done", async () => {
+		routerState.path = "/s/sub-parent";
 		handleMessage({
 			type: "session_switched",
 			id: "sub-parent",

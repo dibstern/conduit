@@ -24,7 +24,7 @@ const { getSessionScope, setSessionScope, takeScopeToken } = await import(
 );
 
 beforeEach(() => {
-	routerState.path = "/p/acme/s/1";
+	routerState.path = "/s/1";
 	routerState.search = "";
 	pushStateSpy.mockClear();
 });
@@ -37,15 +37,11 @@ describe("session scope in the URL", () => {
 	it("round-trips through the URL, pushing a history entry each way", () => {
 		setSessionScope("acme");
 		expect(getSessionScope()).toBe("acme");
-		expect(pushStateSpy).toHaveBeenLastCalledWith(
-			null,
-			"",
-			"/p/acme/s/1?p=acme",
-		);
+		expect(pushStateSpy).toHaveBeenLastCalledWith(null, "", "/s/1?p=acme");
 
 		setSessionScope(null);
 		expect(getSessionScope()).toBeNull();
-		expect(pushStateSpy).toHaveBeenLastCalledWith(null, "", "/p/acme/s/1");
+		expect(pushStateSpy).toHaveBeenLastCalledWith(null, "", "/s/1");
 	});
 
 	it("keeps other query parameters", () => {
@@ -56,7 +52,7 @@ describe("session scope in the URL", () => {
 
 	it("is restored by browser back", () => {
 		setSessionScope("acme");
-		window.location.pathname = "/p/acme/s/1";
+		window.location.pathname = "/s/1";
 		window.location.search = "";
 		popstateListener?.();
 		expect(getSessionScope()).toBeNull();
@@ -64,7 +60,7 @@ describe("session scope in the URL", () => {
 
 	it("survives switching session", () => {
 		setSessionScope("acme");
-		navigate("/p/other/s/2");
+		navigate("/s/2");
 		expect(getSessionScope()).toBe("acme");
 	});
 });

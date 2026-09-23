@@ -14,7 +14,6 @@ import {
 	ProjectApiDelegateProvider,
 	ProjectsProvider,
 	PushProvider,
-	RemoveProjectProvider,
 	type RouterProjectInfo,
 	SetupInfoProvider,
 } from "../../../server/effect-http-router.js";
@@ -67,7 +66,6 @@ export interface StandaloneHttpRouterOptions {
 	readonly auth: AuthManager;
 	readonly staticDir: string;
 	readonly getProjects: () => RouterProjectInfo[];
-	readonly removeProject: (slug: string) => boolean;
 	readonly delegateApiRequest?: (
 		slug: string,
 		subPath: string,
@@ -85,7 +83,6 @@ interface HttpRouterRequestHandlerOptions {
 	readonly setupInfoLayer: Layer.Layer<SetupInfoProvider>;
 	readonly staticDir: string;
 	readonly getProjects: () => Effect.Effect<RouterProjectInfo[]>;
-	readonly removeProject?: (slug: string) => Effect.Effect<void, unknown>;
 	readonly delegateApiRequest?: (
 		slug: string,
 		subPath: string,
@@ -106,15 +103,6 @@ const makeHttpRouterLayer = (options: HttpRouterRequestHandlerOptions) => {
 		NodeFileSystem.layer,
 		NodePath.layer,
 	);
-
-	if (options.removeProject != null) {
-		routerLayer = Layer.merge(
-			routerLayer,
-			Layer.succeed(RemoveProjectProvider, {
-				removeProject: options.removeProject,
-			}),
-		);
-	}
 
 	if (options.delegateApiRequest != null) {
 		routerLayer = Layer.merge(
@@ -241,10 +229,6 @@ export const makeStandaloneHttpRouterRequestHandler = (
 			}),
 			staticDir: options.staticDir,
 			getProjects: () => Effect.sync(options.getProjects),
-			removeProject: (slug) =>
-				options.removeProject(slug)
-					? Effect.void
-					: Effect.fail(new Error("Project not found")),
 			delegateApiRequest:
 				options.delegateApiRequest ??
 				(() => Effect.fail(new Error("Project API route not found"))),
@@ -280,7 +264,6 @@ export const makeDaemonHttpRouterLive = (staticDir: string) =>
 					projectRegistry,
 					relayCache,
 				}),
-				removeProject: (slug: string) => daemonHandle.removeProject(slug),
 				getHealthResponse: () => daemonHandle.getStatus(),
 				pushManager: Option.getOrUndefined(legacyPushManager),
 				caRootPath: tls.caRootPath ?? undefined,

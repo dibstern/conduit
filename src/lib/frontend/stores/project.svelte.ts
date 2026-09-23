@@ -28,30 +28,28 @@ export function handleProjectList(
 	}
 
 	// When the server confirms a newly added project, navigate to it.
-	// This triggers ChatLayout's $effect which disconnects the old WS,
-	// clears stale sessions/files, and connects to the new project's relay.
+	// ChatLayout attaches the existing daemon socket to the new relay.
 	// Lazy import avoids pulling in router.svelte.ts at module init time,
 	// which would fail in test environments without a full window mock.
 	if (typeof addedSlug === "string") {
 		import("./router.svelte.js").then(({ navigate }) => {
-			navigate(`/p/${addedSlug}/`);
+			navigate(`/?${new URLSearchParams({ p: addedSlug })}`);
 		});
 	}
 
-	// If the current route's project was removed, escape to the dashboard.
-	// Without this, deleting the active project from the project picker
-	// leaves the user on a stale /p/<slug>/ route with a connect overlay
-	// that never connects.
+	// Removing the attached project returns to the session list.
 	if (Array.isArray(projects)) {
-		import("./router.svelte.js").then(({ getCurrentRoute, navigate }) => {
-			const route = getCurrentRoute();
-			if (
-				route.page === "chat" &&
-				!projects.some((p) => p.slug === route.slug)
-			) {
-				navigate("/");
-			}
-		});
+		import("./router.svelte.js").then(
+			({ attachedProjectState, replaceRoute }) => {
+				if (
+					attachedProjectState.slug !== null &&
+					!projects.some((p) => p.slug === attachedProjectState.slug)
+				) {
+					attachedProjectState.slug = null;
+					replaceRoute("/?");
+				}
+			},
+		);
 	}
 }
 

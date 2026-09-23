@@ -2,7 +2,10 @@ import type { Meta, StoryObj } from "@storybook/svelte-vite";
 import { expect, userEvent, within } from "storybook/test";
 import { instanceState } from "../../stores/instance.svelte.js";
 import { projectState } from "../../stores/project.svelte.js";
-import { routerState } from "../../stores/router.svelte.js";
+import {
+	attachedProjectState,
+	routerState,
+} from "../../stores/router.svelte.js";
 import { terminalState } from "../../stores/terminal.svelte.js";
 import { uiState } from "../../stores/ui.svelte.js";
 import { wsState } from "../../stores/ws.svelte.js";
@@ -21,9 +24,14 @@ const meta = {
 		uiState.sidebarCollapsed = true;
 		uiState.clientCount = 0;
 		terminalState.tabs = new Map();
-		routerState.path = "/p/my-project/";
+		routerState.path = "/";
+		routerState.search = "";
+		attachedProjectState.slug = "my-project";
 		instanceState.instances = [];
 		projectState.projects = [];
+		return () => {
+			attachedProjectState.slug = null;
+		};
 	},
 } satisfies Meta<typeof Header>;
 
@@ -34,7 +42,6 @@ export const Connected: Story = {
 	beforeEach: () => {
 		wsState.status = "connected";
 		wsState.statusText = "Connected";
-		routerState.path = "/p/my-project/";
 	},
 };
 
@@ -126,7 +133,6 @@ function seedInstances() {
 			instanceId: "inst-personal",
 		},
 	];
-	routerState.path = "/p/my-project/";
 }
 
 export const WithInstanceBadge: Story = {

@@ -16,7 +16,10 @@ async function openComposer(page: Page, baseURL: string | undefined) {
 		messageDelay: 0,
 	});
 	await page.goto(
-		new URL("/p/myapp/", baseURL ?? "http://localhost:4173").toString(),
+		new URL(
+			"/s/sess-mockup-001",
+			baseURL ?? "http://localhost:4173",
+		).toString(),
 	);
 	await page.waitForSelector("#input", { timeout: 15_000 });
 	await page.locator("#input").click();

@@ -48,6 +48,7 @@ import {
 	clearSessionChatState,
 	historyState,
 } from "../../../src/lib/frontend/stores/chat.svelte.js";
+import { routerState } from "../../../src/lib/frontend/stores/router.svelte.js";
 import { sessionState } from "../../../src/lib/frontend/stores/session.svelte.js";
 import { handleMessage } from "../../../src/lib/frontend/stores/ws.svelte.js";
 
@@ -66,6 +67,7 @@ afterEach(() => {
 
 describe("Regression: no dual-render duplication", () => {
 	it("events cache path sets historyState.hasMore to false", async () => {
+		routerState.path = "/s/session-a";
 		handleMessage({
 			type: "session_switched",
 			id: "session-a",
@@ -84,6 +86,7 @@ describe("Regression: no dual-render duplication", () => {
 
 	it("history_page after events replay does not duplicate messages", async () => {
 		// Step 1: Load session via events cache
+		routerState.path = "/s/session-a";
 		handleMessage({
 			type: "session_switched",
 			id: "session-a",
@@ -126,6 +129,7 @@ describe("Regression: no dual-render duplication", () => {
 	});
 
 	it("REST fallback sets historyState.hasMore from server", async () => {
+		routerState.path = "/s/session-b";
 		handleMessage({
 			type: "session_switched",
 			id: "session-b",
@@ -149,6 +153,7 @@ describe("Regression: no dual-render duplication", () => {
 
 	it("session switch clears historyState and messages", async () => {
 		// Load session A
+		routerState.path = "/s/session-a";
 		handleMessage({
 			type: "session_switched",
 			id: "session-a",
@@ -163,6 +168,7 @@ describe("Regression: no dual-render duplication", () => {
 		expect(historyState.hasMore).toBe(false);
 
 		// Switch to session B (empty)
+		routerState.path = "/s/session-b";
 		handleMessage({
 			type: "session_switched",
 			id: "session-b",
@@ -178,6 +184,7 @@ describe("Regression: no dual-render duplication", () => {
 
 describe("messageCount tracking for pagination offset", () => {
 	it("REST fallback sets messageCount to initial page size", async () => {
+		routerState.path = "/s/s1";
 		handleMessage({
 			type: "session_switched",
 			id: "s1",
@@ -211,6 +218,7 @@ describe("messageCount tracking for pagination offset", () => {
 
 	it("history_page increments messageCount (not resets)", async () => {
 		// Initial page: 3 messages
+		routerState.path = "/s/s2";
 		handleMessage({
 			type: "session_switched",
 			id: "s2",
@@ -285,6 +293,7 @@ describe("messageCount tracking for pagination offset", () => {
 
 	it("session switch resets messageCount to 0", async () => {
 		// Load with history
+		routerState.path = "/s/s3";
 		handleMessage({
 			type: "session_switched",
 			id: "s3",
@@ -304,6 +313,7 @@ describe("messageCount tracking for pagination offset", () => {
 		expect(historyState.messageCount).toBe(1);
 
 		// Switch away — must reset (clearMessages resets synchronously)
+		routerState.path = "/s/s4";
 		handleMessage({ type: "session_switched", id: "s4", sessionId: "s4" });
 		expect(historyState.messageCount).toBe(0);
 		expect(historyState.hasMore).toBe(false);
@@ -311,6 +321,7 @@ describe("messageCount tracking for pagination offset", () => {
 	});
 
 	it("events cache path leaves messageCount at 0", async () => {
+		routerState.path = "/s/s5";
 		handleMessage({
 			type: "session_switched",
 			id: "s5",
@@ -352,6 +363,7 @@ describe("messageCount tracking for pagination offset", () => {
 
 	it("messages prepend in correct order across pages", async () => {
 		// Page 1: newest messages
+		routerState.path = "/s/s7";
 		handleMessage({
 			type: "session_switched",
 			id: "s7",

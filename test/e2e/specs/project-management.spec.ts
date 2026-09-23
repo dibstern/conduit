@@ -17,7 +17,7 @@ type ProjectManagementControl = WsMockControl & { rpc: RpcMockControl };
 
 // ─── Constants ──────────────────────────────────────────────────────────────
 
-const PROJECT_URL = "/p/myapp/";
+const PROJECT_URL = "/?p=myapp";
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 

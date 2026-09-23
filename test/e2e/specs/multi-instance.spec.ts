@@ -26,7 +26,7 @@ type WsMockControl = Awaited<ReturnType<typeof mockRelayWebSocket>>;
 type MultiInstanceControl = WsMockControl & { rpc: RpcMockControl };
 
 /** The project URL for multi-instance tests (must match fixture's current slug). */
-const PROJECT_URL = "/p/myapp/";
+const PROJECT_URL = "/?p=myapp";
 
 /** Wait for the chat page to be ready (WS connected, input visible). */
 async function waitForChatReady(page: Page): Promise<void> {
@@ -785,9 +785,9 @@ test.describe("Project-Instance Binding", () => {
 	});
 });
 
-// ─── Group 10: Dashboard Instance Status ─────────────────────────────────
+// ─── Group 10: Session List Instance Status ─────────────────────────────────
 
-test.describe("Dashboard: Instance Status Banner", () => {
+test.describe("Session List: Instance Status Banner", () => {
 	test("banner when no healthy instances", async ({ page, baseURL }) => {
 		// Custom init with all instances unhealthy
 		const unhealthyInit = multiInstanceInitMessages.map((m) => {

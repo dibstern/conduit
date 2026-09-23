@@ -42,7 +42,10 @@ import {
 	resetNotifState,
 } from "../../../src/lib/frontend/stores/notification-reducer.svelte.js";
 import { permissionsState } from "../../../src/lib/frontend/stores/permissions.svelte.js";
-import { routerState } from "../../../src/lib/frontend/stores/router.svelte.js";
+import {
+	attachedProjectState,
+	routerState,
+} from "../../../src/lib/frontend/stores/router.svelte.js";
 import { sessionState } from "../../../src/lib/frontend/stores/session.svelte.js";
 import type { PermissionId } from "../../../src/lib/frontend/types.js";
 
@@ -87,7 +90,8 @@ describe("AttentionBanner merge logic", () => {
 		sessionState.currentId = "ses_current";
 		sessionState.rootSessions = [];
 		sessionState.familySessions = [];
-		routerState.path = "/p/project-a/s/ses_current";
+		attachedProjectState.slug = "project-a";
+		routerState.path = "/s/ses_current";
 	});
 
 	afterEach(() => {

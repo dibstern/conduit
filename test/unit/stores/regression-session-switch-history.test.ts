@@ -65,6 +65,7 @@ import {
 	type SessionMessages,
 	setMessages,
 } from "../../../src/lib/frontend/stores/chat.svelte.js";
+import { routerState } from "../../../src/lib/frontend/stores/router.svelte.js";
 import { sessionState } from "../../../src/lib/frontend/stores/session.svelte.js";
 import { handleMessage } from "../../../src/lib/frontend/stores/ws.svelte.js";
 import { createToolMessage } from "../../../src/lib/frontend/utils/tool-message-factory.js";
@@ -136,6 +137,7 @@ describe("Regression: session switch clears messages", () => {
 		expect(chatState.messages.length).toBeGreaterThan(0);
 
 		// Switch to a different session
+		routerState.path = "/s/session-b";
 		handleMessage({
 			type: "session_switched",
 			id: "session-b",
@@ -165,6 +167,7 @@ describe("Regression: session switch clears messages", () => {
 		expect(msgCountA).toBeGreaterThan(0);
 
 		// Switch to session B
+		routerState.path = "/s/session-b";
 		handleMessage({
 			type: "session_switched",
 			id: "session-b",
@@ -184,6 +187,7 @@ describe("Regression: session switch clears messages", () => {
 		expect(chatState.messages.length).toBeGreaterThan(0);
 
 		// Switch back to session A — must clear B's messages
+		routerState.path = "/s/session-a";
 		handleMessage({
 			type: "session_switched",
 			id: "session-a",
@@ -197,6 +201,7 @@ describe("Regression: session switch clears messages", () => {
 		sessionState.currentId = "old-session";
 		addUserMessage(ta, tm, "some message");
 
+		routerState.path = "/s/new-session";
 		handleMessage({
 			type: "session_switched",
 			id: "new-session",
@@ -216,6 +221,7 @@ describe("Regression: handleMessage session_switched dispatch", () => {
 		sessionState.currentId = "before";
 		addUserMessage(ta, tm, "will be cleared");
 
+		routerState.path = "/s/after";
 		handleMessage({
 			type: "session_switched",
 			id: "after",
@@ -248,6 +254,7 @@ describe("Combined protocol: session_switched with inline events", () => {
 		addUserMessage(ta, tm, "message in A");
 
 		// Switch to session B with cached events
+		routerState.path = "/s/session-b";
 		handleMessage({
 			type: "session_switched",
 			id: "session-b",
@@ -281,6 +288,7 @@ describe("Combined protocol: session_switched with inline events", () => {
 
 	it("replays mid-stream events (no done in events)", async () => {
 		// Switch to session B that was mid-stream when we switched away
+		routerState.path = "/s/session-b";
 		handleMessage({
 			type: "session_switched",
 			id: "session-b",
@@ -307,6 +315,7 @@ describe("Combined protocol: session_switched with inline events", () => {
 	});
 
 	it("replays tool events correctly", async () => {
+		routerState.path = "/s/session-c";
 		handleMessage({
 			type: "session_switched",
 			id: "session-c",
@@ -341,6 +350,7 @@ describe("Combined protocol: session_switched with inline events", () => {
 	});
 
 	it("replays thinking events correctly", async () => {
+		routerState.path = "/s/session-d";
 		handleMessage({
 			type: "session_switched",
 			id: "session-d",
@@ -376,6 +386,7 @@ describe("Combined protocol: session_switched with inline events", () => {
 
 		// Replay is async but with small event arrays (< REPLAY_CHUNK_SIZE)
 		// the entire replay completes synchronously (no yield point hit).
+		routerState.path = "/s/session-e";
 		handleMessage({
 			type: "session_switched",
 			id: "session-e",
@@ -393,6 +404,7 @@ describe("Combined protocol: session_switched with inline events", () => {
 
 	it("rapid session switches: only last session's events are displayed", async () => {
 		// Simulate rapid switches
+		routerState.path = "/s/session-a";
 		handleMessage({
 			type: "session_switched",
 			id: "session-a",
@@ -404,6 +416,7 @@ describe("Combined protocol: session_switched with inline events", () => {
 			],
 		});
 
+		routerState.path = "/s/session-b";
 		handleMessage({
 			type: "session_switched",
 			id: "session-b",
@@ -427,6 +440,7 @@ describe("Combined protocol: session_switched with inline events", () => {
 		sessionState.currentId = "session-a";
 		addUserMessage(ta, tm, "old message");
 
+		routerState.path = "/s/session-b";
 		handleMessage({
 			type: "session_switched",
 			id: "session-b",
@@ -454,6 +468,7 @@ describe("Combined protocol: REST API fallback (history in session_switched)", (
 		]);
 		sessionState.currentId = "parent-with-subagents";
 
+		routerState.path = "/s/parent-with-subagents";
 		handleMessage({
 			type: "session_switched",
 			id: "parent-with-subagents",
@@ -494,6 +509,7 @@ describe("Combined protocol: REST API fallback (history in session_switched)", (
 		]);
 		sessionState.currentId = "parent-with-subagents";
 
+		routerState.path = "/s/parent-with-subagents";
 		handleMessage({
 			type: "session_switched",
 			id: "parent-with-subagents",
@@ -531,6 +547,7 @@ describe("Combined protocol: REST API fallback (history in session_switched)", (
 	});
 
 	it("converts REST history into chatState.messages", async () => {
+		routerState.path = "/s/session-x";
 		handleMessage({
 			type: "session_switched",
 			id: "session-x",
@@ -567,6 +584,7 @@ describe("Combined protocol: REST API fallback (history in session_switched)", (
 	});
 
 	it("REST fallback populates chatState.messages (not empty)", async () => {
+		routerState.path = "/s/session-y";
 		handleMessage({
 			type: "session_switched",
 			id: "session-y",
@@ -590,6 +608,7 @@ describe("Combined protocol: REST API fallback (history in session_switched)", (
 	});
 
 	it("events cache path sets historyState.hasMore to false", async () => {
+		routerState.path = "/s/session-z";
 		handleMessage({
 			type: "session_switched",
 			id: "session-z",
@@ -606,6 +625,7 @@ describe("Combined protocol: REST API fallback (history in session_switched)", (
 	});
 
 	it("REST fallback sets historyState.hasMore from server response", async () => {
+		routerState.path = "/s/session-w";
 		handleMessage({
 			type: "session_switched",
 			id: "session-w",
@@ -690,16 +710,19 @@ describe("history_page for history pagination", () => {
 
 	it("multiple rapid session switches only keep last session's state", async () => {
 		// Rapid switches: A → B → C
+		routerState.path = "/s/session-a";
 		handleMessage({
 			type: "session_switched",
 			id: "session-a",
 			sessionId: "session-a",
 		});
+		routerState.path = "/s/session-b";
 		handleMessage({
 			type: "session_switched",
 			id: "session-b",
 			sessionId: "session-b",
 		});
+		routerState.path = "/s/session-c";
 		handleMessage({
 			type: "session_switched",
 			id: "session-c",
@@ -741,6 +764,7 @@ describe("history_page for history pagination", () => {
 
 describe("Queued state timing with REST history", () => {
 	it("status:processing sets sentDuringEpoch on unresponded user message from REST history", async () => {
+		routerState.path = "/s/s1";
 		handleMessage({
 			type: "session_switched",
 			id: "s1",
@@ -773,6 +797,7 @@ describe("Queued state timing with REST history", () => {
 
 	it("status:processing does NOT apply fallback after events replay (only REST history)", async () => {
 		// Events replay — addUserMessage sets correct sentDuringEpoch via llmActive
+		routerState.path = "/s/s2";
 		handleMessage({
 			type: "session_switched",
 			id: "s2",
@@ -809,6 +834,7 @@ describe("Queued state timing with REST history", () => {
 	});
 
 	it("status:processing skips messages that already have an assistant response", async () => {
+		routerState.path = "/s/s3";
 		handleMessage({
 			type: "session_switched",
 			id: "s3",
@@ -840,6 +866,7 @@ describe("Queued state timing with REST history", () => {
 
 	it("status:processing does NOT overwrite existing sentDuringEpoch (write-once)", async () => {
 		// Simulate replay that already set sentDuringEpoch
+		routerState.path = "/s/s2";
 		handleMessage({
 			type: "session_switched",
 			id: "s2",
@@ -866,6 +893,7 @@ describe("Queued state timing with REST history", () => {
 	});
 
 	it("status:processing skips messages that already have an assistant response", async () => {
+		routerState.path = "/s/s3";
 		handleMessage({
 			type: "session_switched",
 			id: "s3",

@@ -20,6 +20,7 @@ export const WebSocketHandlerLive: Layer.Layer<
 		const log = yield* LoggerTag;
 		const wsLog = log.child("ws-handler");
 		const handler = yield* makeEffectWsHandler({
+			projectSlug: config.slug,
 			...(!config.noServer && {
 				server: config.httpServer,
 				...(config.verifyClient != null && {

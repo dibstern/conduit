@@ -165,7 +165,7 @@ test.describe("Roots-only sidebar", () => {
 			initMessages,
 			responses: new Map(),
 		});
-		await page.goto(`${baseURL}/p/myapp/`);
+		await page.goto(`${baseURL}/s/${snapshot.parentSession.id}`);
 		await waitForChatReady(page);
 
 		const sidebar = new SidebarPage(page);
@@ -189,9 +189,7 @@ test.describe("Subagent navigation", () => {
 		page,
 		baseURL,
 	}) => {
-		// Use a low-level routeWebSocket handler that is session-aware.
-		// The app reconnects the WS whenever session_switched fires (URL changes),
-		// so we must send the correct init messages based on the ?session= param.
+		// Use a session-aware handler for bootstrap and ViewSession replies.
 		const childInitMessages: MockMessage[] = [
 			familyMsg,
 			{
@@ -235,8 +233,8 @@ test.describe("Subagent navigation", () => {
 			};
 			const url = ws.url();
 			const sessionParam = new URL(url).searchParams.get("session");
-			const slug = new URL(url).searchParams.get("p");
-			if (slug) ws.send(JSON.stringify({ type: "project_attached", slug }));
+			const slug = new URL(url).searchParams.get("p") ?? "myapp";
+			ws.send(JSON.stringify({ type: "project_attached", slug }));
 
 			// Pick init messages based on the session query param
 			const msgs =
@@ -261,7 +259,7 @@ test.describe("Subagent navigation", () => {
 			});
 		});
 
-		await page.goto(`${baseURL}/p/myapp/`);
+		await page.goto(`${baseURL}/s/${snapshot.parentSession.id}`);
 		await waitForChatReady(page);
 
 		const chat = new ChatPage(page);
@@ -311,7 +309,7 @@ test.describe("Subagent navigation", () => {
 			initMessages: childInitMessages,
 			responses: new Map(),
 		});
-		await page.goto(`${baseURL}/p/myapp/`);
+		await page.goto(`${baseURL}/s/${snapshot.childSession.id}`);
 		await waitForChatReady(page);
 
 		const chat = new ChatPage(page);
@@ -362,7 +360,7 @@ test.describe("Subagent navigation", () => {
 			initMessages: childInitMessages,
 			responses: new Map(),
 		});
-		await page.goto(`${baseURL}/p/myapp/`);
+		await page.goto(`${baseURL}/s/${snapshot.childSession.id}`);
 		await waitForChatReady(page);
 
 		const chat = new ChatPage(page);
