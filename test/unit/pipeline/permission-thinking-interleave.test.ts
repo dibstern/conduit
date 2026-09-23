@@ -1,37 +1,37 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { ThinkingMessage } from "../../../src/lib/frontend/types.js";
 import { historyToChatMessages } from "../../../src/lib/frontend/utils/history-logic.js";
-import { MessageProjector } from "../../../src/lib/persistence/projectors/message-projector.js";
 import { ReadQueryService } from "../../../src/lib/persistence/read-query-service.js";
 import { messageRowsToHistory } from "../../../src/lib/persistence/session-history-adapter.js";
 import {
-	createTestHarness,
-	makeStored,
-	type TestHarness,
-} from "../../helpers/persistence-factories.js";
+	type EffectProjectionHarness,
+	makeEffectProjectionHarness,
+} from "../../helpers/effect-projection-harness.js";
+import { makeStored } from "../../helpers/persistence-factories.js";
 
 const SESSION_ID = "ses-perm-think";
 const MSG_ID = "msg-perm-think";
 const NOW = 1_000_000_000_000;
 
 describe("Permission + thinking interleaving pipeline", () => {
-	let harness: TestHarness;
-	let projector: MessageProjector;
+	let harness: EffectProjectionHarness;
 	let seq: number;
 
-	beforeEach(() => {
-		harness = createTestHarness();
-		projector = new MessageProjector();
+	beforeEach(async () => {
+		harness = makeEffectProjectionHarness();
 		seq = 0;
-		harness.seedSession(SESSION_ID);
+		await harness.query(
+			"INSERT INTO sessions (id, provider, title, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
+			[SESSION_ID, "claude", "Test", "idle", NOW, NOW],
+		);
 	});
 
-	afterEach(() => {
-		harness?.close();
+	afterEach(async () => {
+		await harness?.dispose();
 	});
 
-	function project(event: ReturnType<typeof makeStored>): void {
-		projector.project(event, harness.db);
+	async function project(event: ReturnType<typeof makeStored>): Promise<void> {
+		await harness.reproject([event]);
 	}
 
 	function nextSeq(): number {
@@ -39,14 +39,14 @@ describe("Permission + thinking interleaving pipeline", () => {
 	}
 
 	function readPipeline() {
-		const readQuery = new ReadQueryService(harness.db);
+		const readQuery = new ReadQueryService(harness.readClient());
 		const rows = readQuery.getSessionMessagesWithParts(SESSION_ID);
 		const { messages } = messageRowsToHistory(rows, { pageSize: 50 });
 		return historyToChatMessages(messages);
 	}
 
-	it("thinking → tool(permission) → text — thinking text preserved across permission boundary", () => {
-		project(
+	it("thinking → tool(permission) → text — thinking text preserved across permission boundary", async () => {
+		await project(
 			makeStored(
 				"message.created",
 				SESSION_ID,
@@ -60,7 +60,7 @@ describe("Permission + thinking interleaving pipeline", () => {
 		);
 
 		// Thinking block
-		project(
+		await project(
 			makeStored(
 				"thinking.start",
 				SESSION_ID,
@@ -69,7 +69,7 @@ describe("Permission + thinking interleaving pipeline", () => {
 			),
 		);
 
-		project(
+		await project(
 			makeStored(
 				"thinking.delta",
 				SESSION_ID,
@@ -82,7 +82,7 @@ describe("Permission + thinking interleaving pipeline", () => {
 			),
 		);
 
-		project(
+		await project(
 			makeStored(
 				"thinking.end",
 				SESSION_ID,
@@ -92,7 +92,7 @@ describe("Permission + thinking interleaving pipeline", () => {
 		);
 
 		// Tool use (triggers permission in real flow)
-		project(
+		await project(
 			makeStored(
 				"tool.started",
 				SESSION_ID,
@@ -107,7 +107,7 @@ describe("Permission + thinking interleaving pipeline", () => {
 			),
 		);
 
-		project(
+		await project(
 			makeStored(
 				"tool.completed",
 				SESSION_ID,
@@ -122,7 +122,7 @@ describe("Permission + thinking interleaving pipeline", () => {
 		);
 
 		// Post-tool text
-		project(
+		await project(
 			makeStored(
 				"text.delta",
 				SESSION_ID,
@@ -135,7 +135,7 @@ describe("Permission + thinking interleaving pipeline", () => {
 			),
 		);
 
-		project(
+		await project(
 			makeStored(
 				"turn.completed",
 				SESSION_ID,
@@ -175,8 +175,8 @@ describe("Permission + thinking interleaving pipeline", () => {
 		expect(types).toEqual(["thinking", "tool", "assistant"]);
 	});
 
-	it("thinking → tool → thinking → text — double thinking across tool boundary", () => {
-		project(
+	it("thinking → tool → thinking → text — double thinking across tool boundary", async () => {
+		await project(
 			makeStored(
 				"message.created",
 				SESSION_ID,
@@ -190,7 +190,7 @@ describe("Permission + thinking interleaving pipeline", () => {
 		);
 
 		// First thinking
-		project(
+		await project(
 			makeStored(
 				"thinking.start",
 				SESSION_ID,
@@ -198,7 +198,7 @@ describe("Permission + thinking interleaving pipeline", () => {
 				{ sequence: nextSeq(), createdAt: NOW + 100 },
 			),
 		);
-		project(
+		await project(
 			makeStored(
 				"thinking.delta",
 				SESSION_ID,
@@ -210,7 +210,7 @@ describe("Permission + thinking interleaving pipeline", () => {
 				{ sequence: nextSeq(), createdAt: NOW + 200 },
 			),
 		);
-		project(
+		await project(
 			makeStored(
 				"thinking.end",
 				SESSION_ID,
@@ -220,7 +220,7 @@ describe("Permission + thinking interleaving pipeline", () => {
 		);
 
 		// Tool
-		project(
+		await project(
 			makeStored(
 				"tool.started",
 				SESSION_ID,
@@ -234,7 +234,7 @@ describe("Permission + thinking interleaving pipeline", () => {
 				{ sequence: nextSeq(), createdAt: NOW + 400 },
 			),
 		);
-		project(
+		await project(
 			makeStored(
 				"tool.completed",
 				SESSION_ID,
@@ -249,7 +249,7 @@ describe("Permission + thinking interleaving pipeline", () => {
 		);
 
 		// Second thinking (post-tool)
-		project(
+		await project(
 			makeStored(
 				"thinking.start",
 				SESSION_ID,
@@ -257,7 +257,7 @@ describe("Permission + thinking interleaving pipeline", () => {
 				{ sequence: nextSeq(), createdAt: NOW + 600 },
 			),
 		);
-		project(
+		await project(
 			makeStored(
 				"thinking.delta",
 				SESSION_ID,
@@ -269,7 +269,7 @@ describe("Permission + thinking interleaving pipeline", () => {
 				{ sequence: nextSeq(), createdAt: NOW + 700 },
 			),
 		);
-		project(
+		await project(
 			makeStored(
 				"thinking.end",
 				SESSION_ID,
@@ -279,7 +279,7 @@ describe("Permission + thinking interleaving pipeline", () => {
 		);
 
 		// Final text
-		project(
+		await project(
 			makeStored(
 				"text.delta",
 				SESSION_ID,
@@ -292,7 +292,7 @@ describe("Permission + thinking interleaving pipeline", () => {
 			),
 		);
 
-		project(
+		await project(
 			makeStored(
 				"turn.completed",
 				SESSION_ID,

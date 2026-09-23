@@ -3,14 +3,13 @@ import { describe, expect, it } from "vitest";
 import type { ThinkingMessage } from "../../../src/lib/frontend/types.js";
 import { historyToChatMessages } from "../../../src/lib/frontend/utils/history-logic.js";
 import type { StoredEvent } from "../../../src/lib/persistence/events.js";
-import { MessageProjector } from "../../../src/lib/persistence/projectors/message-projector.js";
 import { ReadQueryService } from "../../../src/lib/persistence/read-query-service.js";
 import { messageRowsToHistory } from "../../../src/lib/persistence/session-history-adapter.js";
 import {
-	createTestHarness,
-	makeStored,
-	type TestHarness,
-} from "../../helpers/persistence-factories.js";
+	type EffectProjectionHarness,
+	makeEffectProjectionHarness,
+} from "../../helpers/effect-projection-harness.js";
+import { makeStored } from "../../helpers/persistence-factories.js";
 
 const SEED = 42;
 const NUM_RUNS = 100;
@@ -55,73 +54,68 @@ const eventSequenceArb = fc.array(fc.oneof(thinkingBlockArb, textBlockArb), {
 
 // ─── Shared helpers ─────────────────────────────────────────────────────────
 
-function projectBlocks(
-	harness: TestHarness,
-	projector: MessageProjector,
+async function projectBlocks(
+	harness: EffectProjectionHarness,
 	sessionId: string,
 	messageId: string,
 	blocks: Block[],
-): void {
+): Promise<void> {
 	let seq = 0;
 	let ts = 1_000_000_000_000;
+	const events: StoredEvent[] = [];
 
-	projector.project(
+	events.push(
 		makeStored(
 			"message.created",
 			sessionId,
 			{ messageId, role: "assistant", sessionId },
 			{ sequence: ++seq, createdAt: ts++ },
 		),
-		harness.db,
 	);
 
 	for (const block of blocks) {
 		if (block.type === "thinking") {
-			projector.project(
+			events.push(
 				makeStored(
 					"thinking.start",
 					sessionId,
 					{ messageId, partId: block.partId },
 					{ sequence: ++seq, createdAt: ts++ },
 				),
-				harness.db,
 			);
 			for (const text of block.deltas) {
-				projector.project(
+				events.push(
 					makeStored(
 						"thinking.delta",
 						sessionId,
 						{ messageId, partId: block.partId, text },
 						{ sequence: ++seq, createdAt: ts++ },
 					),
-					harness.db,
 				);
 			}
-			projector.project(
+			events.push(
 				makeStored(
 					"thinking.end",
 					sessionId,
 					{ messageId, partId: block.partId },
 					{ sequence: ++seq, createdAt: ts++ },
 				),
-				harness.db,
 			);
 		} else {
 			for (const text of block.deltas) {
-				projector.project(
+				events.push(
 					makeStored(
 						"text.delta",
 						sessionId,
 						{ messageId, partId: block.partId, text },
 						{ sequence: ++seq, createdAt: ts++ },
 					),
-					harness.db,
 				);
 			}
 		}
 	}
 
-	projector.project(
+	events.push(
 		makeStored(
 			"turn.completed",
 			sessionId,
@@ -133,12 +127,23 @@ function projectBlocks(
 			},
 			{ sequence: ++seq, createdAt: ts++ },
 		),
-		harness.db,
+	);
+
+	await harness.reproject(events);
+}
+
+async function seedSession(
+	harness: EffectProjectionHarness,
+	sessionId: string,
+): Promise<void> {
+	await harness.query(
+		"INSERT INTO sessions (id, provider, title, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
+		[sessionId, "claude", "Test", "idle", 1_000_000_000_000, 1_000_000_000_000],
 	);
 }
 
-function readPipeline(harness: TestHarness, sessionId: string) {
-	const readQuery = new ReadQueryService(harness.db);
+function readPipeline(harness: EffectProjectionHarness, sessionId: string) {
+	const readQuery = new ReadQueryService(harness.readClient());
 	const rows = readQuery.getSessionMessagesWithParts(sessionId);
 	const { messages } = messageRowsToHistory(rows, { pageSize: 50 });
 	return historyToChatMessages(messages);
@@ -147,19 +152,13 @@ function readPipeline(harness: TestHarness, sessionId: string) {
 // ─── Property tests ─────────────────────────────────────────────────────────
 
 describe("Pipeline property-based tests", () => {
-	it("PBT: all thinking blocks have done=true after full pipeline", () => {
-		fc.assert(
-			fc.property(eventSequenceArb, (blocks) => {
-				const harness = createTestHarness();
+	it("PBT: all thinking blocks have done=true after full pipeline", async () => {
+		await fc.assert(
+			fc.asyncProperty(eventSequenceArb, async (blocks) => {
+				const harness = makeEffectProjectionHarness();
 				try {
-					harness.seedSession("ses-pbt");
-					projectBlocks(
-						harness,
-						new MessageProjector(),
-						"ses-pbt",
-						"msg-pbt",
-						blocks,
-					);
+					await seedSession(harness, "ses-pbt");
+					await projectBlocks(harness, "ses-pbt", "msg-pbt", blocks);
 
 					const chat = readPipeline(harness, "ses-pbt");
 					const thinkingBlocks = chat.filter(
@@ -169,32 +168,26 @@ describe("Pipeline property-based tests", () => {
 						expect(t.done).toBe(true);
 					}
 				} finally {
-					harness.close();
+					await harness.dispose();
 				}
 			}),
 			{ seed: SEED, numRuns: NUM_RUNS, endOnFailure: true },
 		);
 	});
 
-	it("PBT: thinking blocks appear before their paired text in output", () => {
+	it("PBT: thinking blocks appear before their paired text in output", async () => {
 		// Adaptation: the plan's original assertion (firstThinking < firstAssistant
 		// whenever both exist) is fundamentally wrong for interleaved block arrays
 		// like [text, thinking, ...] — the first text can legitimately appear before
 		// any thinking. Restrict the invariant to sequences where the first block
 		// with content is a thinking block; in that case the pipeline must preserve
 		// that ordering end-to-end.
-		fc.assert(
-			fc.property(eventSequenceArb, (blocks) => {
-				const harness = createTestHarness();
+		await fc.assert(
+			fc.asyncProperty(eventSequenceArb, async (blocks) => {
+				const harness = makeEffectProjectionHarness();
 				try {
-					harness.seedSession("ses-pbt-ord");
-					projectBlocks(
-						harness,
-						new MessageProjector(),
-						"ses-pbt-ord",
-						"msg-pbt-ord",
-						blocks,
-					);
+					await seedSession(harness, "ses-pbt-ord");
+					await projectBlocks(harness, "ses-pbt-ord", "msg-pbt-ord", blocks);
 
 					const chat = readPipeline(harness, "ses-pbt-ord");
 					const types = chat.map((m) => m.type);
@@ -216,26 +209,20 @@ describe("Pipeline property-based tests", () => {
 						expect(firstThinking).toBeLessThan(firstAssistant);
 					}
 				} finally {
-					harness.close();
+					await harness.dispose();
 				}
 			}),
 			{ seed: SEED, numRuns: NUM_RUNS, endOnFailure: true },
 		);
 	});
 
-	it("PBT: round-trip fidelity — text blocks with content produce assistant messages", () => {
-		fc.assert(
-			fc.property(eventSequenceArb, (blocks) => {
-				const harness = createTestHarness();
+	it("PBT: round-trip fidelity — text blocks with content produce assistant messages", async () => {
+		await fc.assert(
+			fc.asyncProperty(eventSequenceArb, async (blocks) => {
+				const harness = makeEffectProjectionHarness();
 				try {
-					harness.seedSession("ses-pbt-rt");
-					projectBlocks(
-						harness,
-						new MessageProjector(),
-						"ses-pbt-rt",
-						"msg-pbt-rt",
-						blocks,
-					);
+					await seedSession(harness, "ses-pbt-rt");
+					await projectBlocks(harness, "ses-pbt-rt", "msg-pbt-rt", blocks);
 
 					const chat = readPipeline(harness, "ses-pbt-rt");
 					const hasTextContent = blocks.some(
@@ -245,85 +232,89 @@ describe("Pipeline property-based tests", () => {
 						expect(chat.some((m) => m.type === "assistant")).toBe(true);
 					}
 				} finally {
-					harness.close();
+					await harness.dispose();
 				}
 			}),
 			{ seed: SEED, numRuns: NUM_RUNS, endOnFailure: true },
 		);
 	});
 
-	it("PBT: session isolation — events for session A absent from session B", () => {
-		fc.assert(
-			fc.property(eventSequenceArb, eventSequenceArb, (blocksA, blocksB) => {
-				const harness = createTestHarness();
-				try {
-					harness.seedSession("ses-iso-a");
-					harness.seedSession("ses-iso-b");
+	it("PBT: session isolation — events for session A absent from session B", async () => {
+		await fc.assert(
+			fc.asyncProperty(
+				eventSequenceArb,
+				eventSequenceArb,
+				async (blocksA, blocksB) => {
+					const harness = makeEffectProjectionHarness();
+					try {
+						await seedSession(harness, "ses-iso-a");
+						await seedSession(harness, "ses-iso-b");
 
-					const projector = new MessageProjector();
-					projectBlocks(harness, projector, "ses-iso-a", "msg-a", blocksA);
-					projectBlocks(harness, projector, "ses-iso-b", "msg-b", blocksB);
+						await projectBlocks(harness, "ses-iso-a", "msg-a", blocksA);
+						await projectBlocks(harness, "ses-iso-b", "msg-b", blocksB);
 
-					const chatA = readPipeline(harness, "ses-iso-a");
-					const chatB = readPipeline(harness, "ses-iso-b");
+						const chatA = readPipeline(harness, "ses-iso-a");
+						const chatB = readPipeline(harness, "ses-iso-b");
 
-					// Count expected thinking blocks per session
-					const expectedThinkingA = blocksA.filter(
-						(b) => b.type === "thinking",
-					).length;
-					const expectedThinkingB = blocksB.filter(
-						(b) => b.type === "thinking",
-					).length;
-					const expectedTextA = blocksA.filter(
-						(b) => b.type === "text" && b.deltas.some((d) => d.length > 0),
-					).length;
-					const expectedTextB = blocksB.filter(
-						(b) => b.type === "text" && b.deltas.some((d) => d.length > 0),
-					).length;
+						// Count expected thinking blocks per session
+						const expectedThinkingA = blocksA.filter(
+							(b) => b.type === "thinking",
+						).length;
+						const expectedThinkingB = blocksB.filter(
+							(b) => b.type === "thinking",
+						).length;
+						const expectedTextA = blocksA.filter(
+							(b) => b.type === "text" && b.deltas.some((d) => d.length > 0),
+						).length;
+						const expectedTextB = blocksB.filter(
+							(b) => b.type === "text" && b.deltas.some((d) => d.length > 0),
+						).length;
 
-					// Session A has correct counts
-					const thinkingA = chatA.filter((m) => m.type === "thinking");
-					const assistantA = chatA.filter((m) => m.type === "assistant");
-					expect(thinkingA).toHaveLength(expectedThinkingA);
-					// Text blocks with content = assistant messages (may merge if same partId)
-					if (expectedTextA > 0) {
-						expect(assistantA.length).toBeGreaterThanOrEqual(1);
+						// Session A has correct counts
+						const thinkingA = chatA.filter((m) => m.type === "thinking");
+						const assistantA = chatA.filter((m) => m.type === "assistant");
+						expect(thinkingA).toHaveLength(expectedThinkingA);
+						// Text blocks with content = assistant messages (may merge if same partId)
+						if (expectedTextA > 0) {
+							expect(assistantA.length).toBeGreaterThanOrEqual(1);
+						}
+
+						// Session B has correct counts
+						const thinkingB = chatB.filter((m) => m.type === "thinking");
+						const assistantB = chatB.filter((m) => m.type === "assistant");
+						expect(thinkingB).toHaveLength(expectedThinkingB);
+						if (expectedTextB > 0) {
+							expect(assistantB.length).toBeGreaterThanOrEqual(1);
+						}
+					} finally {
+						await harness.dispose();
 					}
-
-					// Session B has correct counts
-					const thinkingB = chatB.filter((m) => m.type === "thinking");
-					const assistantB = chatB.filter((m) => m.type === "assistant");
-					expect(thinkingB).toHaveLength(expectedThinkingB);
-					if (expectedTextB > 0) {
-						expect(assistantB.length).toBeGreaterThanOrEqual(1);
-					}
-				} finally {
-					harness.close();
-				}
-			}),
+				},
+			),
 			{ seed: SEED, numRuns: 50, endOnFailure: true },
 		);
 	});
 
-	it("PBT: pipeline never crashes on valid event sequences", () => {
-		fc.assert(
-			fc.property(eventSequenceArb, (blocks) => {
-				const harness = createTestHarness();
+	it("PBT: pipeline never crashes on valid event sequences", async () => {
+		await fc.assert(
+			fc.asyncProperty(eventSequenceArb, async (blocks) => {
+				const harness = makeEffectProjectionHarness();
 				try {
-					harness.seedSession("ses-pbt-nocrash");
+					await seedSession(harness, "ses-pbt-nocrash");
 					// Should not throw for any valid sequence
-					expect(() => {
-						projectBlocks(
-							harness,
-							new MessageProjector(),
-							"ses-pbt-nocrash",
-							"msg-pbt-nocrash",
-							blocks,
-						);
-						readPipeline(harness, "ses-pbt-nocrash");
-					}).not.toThrow();
+					await expect(
+						(async () => {
+							await projectBlocks(
+								harness,
+								"ses-pbt-nocrash",
+								"msg-pbt-nocrash",
+								blocks,
+							);
+							readPipeline(harness, "ses-pbt-nocrash");
+						})(),
+					).resolves.toBeUndefined();
 				} finally {
-					harness.close();
+					await harness.dispose();
 				}
 			}),
 			{ seed: SEED, numRuns: 200, endOnFailure: true },
@@ -363,13 +354,12 @@ const corruptedSequenceArb = fc
 	.map(([blocks, strategy, seed]) => ({ blocks, strategy, seed }));
 
 describe("Pipeline PBT — invalid/corrupted event sequences", () => {
-	it("PBT: pipeline never crashes on shuffled event order", () => {
-		fc.assert(
-			fc.property(corruptedSequenceArb, ({ blocks, seed }) => {
-				const harness = createTestHarness();
+	it("PBT: pipeline never crashes on shuffled event order", async () => {
+		await fc.assert(
+			fc.asyncProperty(corruptedSequenceArb, async ({ blocks, seed }) => {
+				const harness = makeEffectProjectionHarness();
 				try {
-					harness.seedSession("ses-shuffle");
-					const projector = new MessageProjector();
+					await seedSession(harness, "ses-shuffle");
 					const events: StoredEvent[] = [];
 					let seq = 0;
 					let ts = 1_000_000_000_000;
@@ -465,30 +455,31 @@ describe("Pipeline PBT — invalid/corrupted event sequences", () => {
 					const shuffled = shuffle(events, rng);
 
 					// Project all — should never throw
-					expect(() => {
-						for (const event of shuffled) {
-							projector.project(event, harness.db);
-						}
-						readPipeline(harness, "ses-shuffle");
-					}).not.toThrow();
+					await expect(
+						(async () => {
+							for (const event of shuffled) {
+								await harness.reproject([event]);
+							}
+							readPipeline(harness, "ses-shuffle");
+						})(),
+					).resolves.toBeUndefined();
 				} finally {
-					harness.close();
+					await harness.dispose();
 				}
 			}),
 			{ seed: SEED, numRuns: NUM_RUNS, endOnFailure: true },
 		);
 	});
 
-	it("PBT: pipeline never crashes on sequences with randomly dropped events", () => {
-		fc.assert(
-			fc.property(
+	it("PBT: pipeline never crashes on sequences with randomly dropped events", async () => {
+		await fc.assert(
+			fc.asyncProperty(
 				corruptedSequenceArb,
 				fc.integer({ min: 1, max: 3 }),
-				({ blocks, seed }, dropCount) => {
-					const harness = createTestHarness();
+				async ({ blocks, seed }, dropCount) => {
+					const harness = makeEffectProjectionHarness();
 					try {
-						harness.seedSession("ses-drop");
-						const projector = new MessageProjector();
+						await seedSession(harness, "ses-drop");
 						const events: StoredEvent[] = [];
 						let seq = 0;
 						let ts = 1_000_000_000_000;
@@ -591,14 +582,16 @@ describe("Pipeline PBT — invalid/corrupted event sequences", () => {
 							...droppable.filter((_, idx) => !toDrop.has(idx)),
 						];
 
-						expect(() => {
-							for (const event of filtered) {
-								projector.project(event, harness.db);
-							}
-							readPipeline(harness, "ses-drop");
-						}).not.toThrow();
+						await expect(
+							(async () => {
+								for (const event of filtered) {
+									await harness.reproject([event]);
+								}
+								readPipeline(harness, "ses-drop");
+							})(),
+						).resolves.toBeUndefined();
 					} finally {
-						harness.close();
+						await harness.dispose();
 					}
 				},
 			),
@@ -606,16 +599,15 @@ describe("Pipeline PBT — invalid/corrupted event sequences", () => {
 		);
 	});
 
-	it("PBT: pipeline never crashes on sequences with duplicate events", () => {
-		fc.assert(
-			fc.property(
+	it("PBT: pipeline never crashes on sequences with duplicate events", async () => {
+		await fc.assert(
+			fc.asyncProperty(
 				corruptedSequenceArb,
 				fc.integer({ min: 1, max: 3 }),
-				({ blocks, seed }, dupCount) => {
-					const harness = createTestHarness();
+				async ({ blocks, seed }, dupCount) => {
+					const harness = makeEffectProjectionHarness();
 					try {
-						harness.seedSession("ses-dup");
-						const projector = new MessageProjector();
+						await seedSession(harness, "ses-dup");
 						const events: StoredEvent[] = [];
 						let seq = 0;
 						let ts = 1_000_000_000_000;
@@ -714,14 +706,16 @@ describe("Pipeline PBT — invalid/corrupted event sequences", () => {
 							withDups.splice(idx + 1, 0, events[idx]!);
 						}
 
-						expect(() => {
-							for (const event of withDups) {
-								projector.project(event, harness.db);
-							}
-							readPipeline(harness, "ses-dup");
-						}).not.toThrow();
+						await expect(
+							(async () => {
+								for (const event of withDups) {
+									await harness.reproject([event]);
+								}
+								readPipeline(harness, "ses-dup");
+							})(),
+						).resolves.toBeUndefined();
 					} finally {
-						harness.close();
+						await harness.dispose();
 					}
 				},
 			),
@@ -736,19 +730,19 @@ describe("Pipeline PBT — invalid/corrupted event sequences", () => {
 // random seed produces different sequences.
 //
 // Imports used by regression cases should match those used by the PBTs above
-// (createTestHarness, MessageProjector, projectBlocks, readPipeline, Block).
+// (makeEffectProjectionHarness, projectBlocks, readPipeline, Block).
 //
 // Format:
-//   it("REGRESSION <date>: <description>", () => {
+//   it("REGRESSION <date>: <description>", async () => {
 //     const blocks: Block[] = [/* shrunk counterexample */];
-//     const harness = createTestHarness();
+//     const harness = makeEffectProjectionHarness();
 //     try {
-//       harness.seedSession("ses-reg");
-//       projectBlocks(harness, new MessageProjector(), "ses-reg", "msg-reg", blocks);
+//       await seedSession(harness, "ses-reg");
+//       await projectBlocks(harness, "ses-reg", "msg-reg", blocks);
 //       const chat = readPipeline(harness, "ses-reg");
 //       /* assertion that failed */
 //     } finally {
-//       harness.close();
+//       await harness.dispose();
 //     }
 //   });
 

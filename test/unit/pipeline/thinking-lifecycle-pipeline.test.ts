@@ -2,12 +2,12 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { ThinkingMessage } from "../../../src/lib/frontend/types.js";
 import { historyToChatMessages } from "../../../src/lib/frontend/utils/history-logic.js";
 import type { StoredEvent } from "../../../src/lib/persistence/events.js";
-import { runMigrations } from "../../../src/lib/persistence/migrations.js";
-import { MessageProjector } from "../../../src/lib/persistence/projectors/message-projector.js";
 import { ReadQueryService } from "../../../src/lib/persistence/read-query-service.js";
-import { schemaMigrations } from "../../../src/lib/persistence/schema.js";
 import { messageRowsToHistory } from "../../../src/lib/persistence/session-history-adapter.js";
-import { SqliteClient } from "../../../src/lib/persistence/sqlite-client.js";
+import {
+	type EffectProjectionHarness,
+	makeEffectProjectionHarness,
+} from "../../helpers/effect-projection-harness.js";
 import { makeStored } from "../../helpers/persistence-factories.js";
 
 const SESSION_ID = "ses-pipeline-1";
@@ -17,38 +17,35 @@ const TEXT_PART_ID = "part-text-1";
 const NOW = 1_000_000_000_000;
 
 describe("Thinking lifecycle — full pipeline", () => {
-	let db: SqliteClient;
-	let projector: MessageProjector;
+	let harness: EffectProjectionHarness;
 	let seq: number;
 
-	beforeEach(() => {
-		db = SqliteClient.memory();
-		runMigrations(db, schemaMigrations);
-		projector = new MessageProjector();
+	beforeEach(async () => {
+		harness = makeEffectProjectionHarness();
 		seq = 0;
 
 		// Seed session (FK requirement)
-		db.execute(
+		await harness.query(
 			"INSERT INTO sessions (id, provider, title, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
 			[SESSION_ID, "claude", "Test", "idle", NOW, NOW],
 		);
 	});
 
-	afterEach(() => {
-		db?.close();
+	afterEach(async () => {
+		await harness?.dispose();
 	});
 
-	function project(event: StoredEvent): void {
-		projector.project(event, db);
+	async function project(event: StoredEvent): Promise<void> {
+		await harness.reproject([event]);
 	}
 
 	function nextSeq(): number {
 		return ++seq;
 	}
 
-	it("thinking block survives full pipeline: project → SQLite → history → chat", () => {
+	it("thinking block survives full pipeline: project → SQLite → history → chat", async () => {
 		// 1. Project events through MessageProjector → SQLite
-		project(
+		await project(
 			makeStored(
 				"message.created",
 				SESSION_ID,
@@ -61,7 +58,7 @@ describe("Thinking lifecycle — full pipeline", () => {
 			),
 		);
 
-		project(
+		await project(
 			makeStored(
 				"thinking.start",
 				SESSION_ID,
@@ -73,7 +70,7 @@ describe("Thinking lifecycle — full pipeline", () => {
 			),
 		);
 
-		project(
+		await project(
 			makeStored(
 				"thinking.delta",
 				SESSION_ID,
@@ -86,7 +83,7 @@ describe("Thinking lifecycle — full pipeline", () => {
 			),
 		);
 
-		project(
+		await project(
 			makeStored(
 				"thinking.end",
 				SESSION_ID,
@@ -98,7 +95,7 @@ describe("Thinking lifecycle — full pipeline", () => {
 			),
 		);
 
-		project(
+		await project(
 			makeStored(
 				"text.delta",
 				SESSION_ID,
@@ -111,7 +108,7 @@ describe("Thinking lifecycle — full pipeline", () => {
 			),
 		);
 
-		project(
+		await project(
 			makeStored(
 				"turn.completed",
 				SESSION_ID,
@@ -126,7 +123,7 @@ describe("Thinking lifecycle — full pipeline", () => {
 		);
 
 		// 2. Read back from SQLite
-		const readQuery = new ReadQueryService(db);
+		const readQuery = new ReadQueryService(harness.readClient());
 		const rows = readQuery.getSessionMessagesWithParts(SESSION_ID);
 		const { messages: historyMessages } = messageRowsToHistory(rows, {
 			pageSize: 50,
@@ -151,9 +148,9 @@ describe("Thinking lifecycle — full pipeline", () => {
 		expect(thinkingIdx).toBeLessThan(assistantIdx);
 	});
 
-	it("thinking block round-trips through SQLite — simulated reload", () => {
+	it("thinking block round-trips through SQLite — simulated reload", async () => {
 		// Project a thinking lifecycle
-		project(
+		await project(
 			makeStored(
 				"message.created",
 				SESSION_ID,
@@ -166,7 +163,7 @@ describe("Thinking lifecycle — full pipeline", () => {
 			),
 		);
 
-		project(
+		await project(
 			makeStored(
 				"thinking.start",
 				SESSION_ID,
@@ -178,7 +175,7 @@ describe("Thinking lifecycle — full pipeline", () => {
 			),
 		);
 
-		project(
+		await project(
 			makeStored(
 				"thinking.delta",
 				SESSION_ID,
@@ -191,7 +188,7 @@ describe("Thinking lifecycle — full pipeline", () => {
 			),
 		);
 
-		project(
+		await project(
 			makeStored(
 				"thinking.end",
 				SESSION_ID,
@@ -204,7 +201,7 @@ describe("Thinking lifecycle — full pipeline", () => {
 		);
 
 		// Simulate reload: create a NEW ReadQueryService (as if reconnecting)
-		const freshReadQuery = new ReadQueryService(db);
+		const freshReadQuery = new ReadQueryService(harness.readClient());
 		const rows = freshReadQuery.getSessionMessagesWithParts(SESSION_ID);
 		const { messages } = messageRowsToHistory(rows, { pageSize: 50 });
 		const chatMessages = historyToChatMessages(messages);
@@ -223,9 +220,9 @@ describe("Thinking lifecycle — full pipeline", () => {
 		expect(thinking!.duration).toBe(100);
 	});
 
-	it("documents divergence: SQLite has partial thinking, frontend marks done via safety net", () => {
+	it("documents divergence: SQLite has partial thinking, frontend marks done via safety net", async () => {
 		// Project thinking START + DELTA but NO thinking.end
-		project(
+		await project(
 			makeStored(
 				"message.created",
 				SESSION_ID,
@@ -238,7 +235,7 @@ describe("Thinking lifecycle — full pipeline", () => {
 			),
 		);
 
-		project(
+		await project(
 			makeStored(
 				"thinking.start",
 				SESSION_ID,
@@ -250,7 +247,7 @@ describe("Thinking lifecycle — full pipeline", () => {
 			),
 		);
 
-		project(
+		await project(
 			makeStored(
 				"thinking.delta",
 				SESSION_ID,
@@ -266,7 +263,7 @@ describe("Thinking lifecycle — full pipeline", () => {
 		// NO thinking.end projected — simulates crash/lost event
 
 		// Read from SQLite — part exists but no end timestamp
-		const readQuery = new ReadQueryService(db);
+		const readQuery = new ReadQueryService(harness.readClient());
 		const rows = readQuery.getSessionMessagesWithParts(SESSION_ID);
 		const { messages } = messageRowsToHistory(rows, { pageSize: 50 });
 		const chatMessages = historyToChatMessages(messages);
