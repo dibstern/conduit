@@ -114,6 +114,7 @@ export const makeMessageProjector = (): EffectProjector => ({
 		"file.attached",
 		"turn.completed",
 		"turn.error",
+		"session.compaction",
 	],
 	project: (event: StoredEvent, ctx?: ProjectionContext) =>
 		Effect.gen(function* () {
@@ -318,6 +319,37 @@ export const makeMessageProjector = (): EffectProjector => ({
 
 			if (isEventType(event, "turn.error")) {
 				yield* sql`UPDATE messages SET is_streaming = 0, updated_at = ${event.createdAt} WHERE id = ${event.data.messageId}`;
+				return;
+			}
+
+			if (isEventType(event, "session.compaction")) {
+				// Only the terminal "completed" boundary reaches persistence at all —
+				// ingestion filters "started"/"failed" out before the append — but the
+				// guard stays because a replay or backfill can hand us either.
+				// A compaction owns no provider message, so it gets a synthetic
+				// assistant message holding one `compaction` part; that is what keeps
+				// the divider and the reduced context gauge across a reload. Ids keyed
+				// on the event sequence plus DO NOTHING make replay a no-op.
+				if (event.data.state !== "completed") return;
+				const messageId = `compaction-${event.sequence}`;
+				const metadata = encodeJson({
+					...(typeof event.data.preTokens === "number"
+						? { preTokens: event.data.preTokens }
+						: {}),
+					...(typeof event.data.postTokens === "number"
+						? { postTokens: event.data.postTokens }
+						: {}),
+				});
+				yield* sql`
+					INSERT INTO messages
+					(id, session_id, role, text, is_streaming, created_at, updated_at)
+					VALUES (${messageId}, ${event.data.sessionId}, 'assistant', '', 0, ${event.createdAt}, ${event.createdAt})
+					ON CONFLICT (id) DO NOTHING`;
+				yield* sql`
+					INSERT INTO message_parts
+					(id, message_id, type, text, metadata, sort_order, created_at, updated_at)
+					VALUES (${`compaction-part-${event.sequence}`}, ${messageId}, 'compaction', ${event.data.detail}, ${metadata}, 0, ${event.createdAt}, ${event.createdAt})
+					ON CONFLICT (id) DO NOTHING`;
 				return;
 			}
 		}).pipe(
