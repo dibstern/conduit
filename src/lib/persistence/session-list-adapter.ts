@@ -40,6 +40,8 @@ export function pendingApprovalCountsByType(
 
 export interface SessionListAdapterOptions {
 	statuses?: Record<string, SessionStatus>;
+	/** Supply full lineage for root list rollups; omit for per-session family state. */
+	parentMap?: ReadonlyMap<string, string>;
 	pendingQuestionCounts?: ReadonlyMap<string, number>;
 	pendingPermissionCounts?: ReadonlyMap<string, number>;
 	forkMeta?: ReadonlyMap<string, ForkEntry>;
@@ -74,6 +76,35 @@ export function sessionRowsToSessionInfoList(
 	rows: SessionRow[],
 	opts?: SessionListAdapterOptions,
 ): SessionInfo[] {
+	const subtreeState = new Map<
+		string,
+		{ processing: boolean; questions: number; permissions: number }
+	>();
+	if (opts?.parentMap) {
+		const projectedStatuses = new Map(rows.map((row) => [row.id, row.status]));
+		const ids = new Set([
+			...rows.map((row) => row.id),
+			...opts.parentMap.keys(),
+		]);
+		for (const id of ids) {
+			let rootId = id;
+			const visited = new Set<string>();
+			while (opts.parentMap.has(rootId) && !visited.has(rootId)) {
+				visited.add(rootId);
+				rootId = opts.parentMap.get(rootId) ?? rootId;
+			}
+			const state = subtreeState.get(rootId) ?? {
+				processing: false,
+				questions: 0,
+				permissions: 0,
+			};
+			const status = opts.statuses?.[id]?.type ?? projectedStatuses.get(id);
+			state.processing ||= status === "busy" || status === "retry";
+			state.questions += opts.pendingQuestionCounts?.get(id) ?? 0;
+			state.permissions += opts.pendingPermissionCounts?.get(id) ?? 0;
+			subtreeState.set(rootId, state);
+		}
+	}
 	return rows.map((row) => {
 		const info: SessionInfo = {
 			id: row.id,
@@ -90,6 +121,7 @@ export function sessionRowsToSessionInfoList(
 		if (forkEntry?.forkPointTimestamp != null) {
 			info.forkPointTimestamp = forkEntry.forkPointTimestamp;
 		}
+		const subtree = parentID ? undefined : subtreeState.get(row.id);
 
 		if (opts?.statuses) {
 			const status = opts.statuses[row.id];
@@ -97,12 +129,17 @@ export function sessionRowsToSessionInfoList(
 				info.processing = true;
 			}
 		}
+		if (subtree?.processing) {
+			info.processing = true;
+		}
 
-		const qCount = opts?.pendingQuestionCounts?.get(row.id);
+		const qCount =
+			subtree?.questions ?? opts?.pendingQuestionCounts?.get(row.id);
 		if (qCount != null && qCount > 0) {
 			info.pendingQuestionCount = qCount;
 		}
-		const pCount = opts?.pendingPermissionCounts?.get(row.id);
+		const pCount =
+			subtree?.permissions ?? opts?.pendingPermissionCounts?.get(row.id);
 		if (pCount != null && pCount > 0) {
 			info.pendingPermissionCount = pCount;
 		}
@@ -120,7 +157,10 @@ export function sessionRowsToSessionInfoList(
 			pendingQuestionCount: info.pendingQuestionCount,
 			pendingPermissionCount: info.pendingPermissionCount,
 			lastTurnErrorAt: row.last_turn_error_at,
-			liveStatus: opts?.statuses?.[row.id],
+			liveStatus:
+				subtree && info.processing
+					? { type: "busy" }
+					: opts?.statuses?.[row.id],
 			projectedStatus: row.status,
 			unread: info.unread === true,
 		});

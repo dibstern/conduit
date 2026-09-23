@@ -11,7 +11,7 @@ import SessionList from "./SessionList.svelte";
 
 function resetSessionState() {
 	sessionState.rootSessions = [];
-	sessionState.allSessions = [];
+	sessionState.familySessions = [];
 	sessionState.daemonSessions = [];
 	sessionState.daemonUnavailableProjects = [];
 	sessionState.searchResults = null;
@@ -41,7 +41,7 @@ export const Empty: Story = {};
 export const WithItems: Story = {
 	beforeEach: () => {
 		sessionState.rootSessions = [...mockSessionsAllGroups];
-		sessionState.allSessions = [...mockSessionsAllGroups];
+		sessionState.familySessions = [...mockSessionsAllGroups];
 		// biome-ignore lint/style/noNonNullAssertion: safe — guarded by length check
 		sessionState.currentId = mockSessionsAllGroups[0]!.id;
 	},
@@ -50,7 +50,7 @@ export const WithItems: Story = {
 export const Searching: Story = {
 	beforeEach: () => {
 		sessionState.rootSessions = [...mockSessionsAllGroups];
-		sessionState.allSessions = [...mockSessionsAllGroups];
+		sessionState.familySessions = [...mockSessionsAllGroups];
 		setSearchQuery("dark");
 	},
 };
@@ -75,7 +75,7 @@ export const Loading: Story = {
 export const SearchOpen: Story = {
 	beforeEach: () => {
 		sessionState.rootSessions = [...mockSessionsAllGroups];
-		sessionState.allSessions = [...mockSessionsAllGroups];
+		sessionState.familySessions = [...mockSessionsAllGroups];
 	},
 	play: async ({ canvasElement }) => {
 		const canvas = within(canvasElement);

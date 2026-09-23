@@ -125,7 +125,7 @@ export interface SessionManagerShape {
 	setPendingQuestionCounts(counts: Map<string, number>): void;
 
 	// ── Broadcasts ─────────────────────────────────────────────────────
-	sendDualSessionLists(
+	sendSessionLists(
 		send: (msg: Extract<RelayMessage, { type: "session_list" }>) => void,
 		options?: { statuses?: Record<string, SessionStatus> | undefined },
 	): Promise<void>;

@@ -24,7 +24,7 @@ function setupState(opts: {
 }) {
 	flushSync(() => {
 		sessionState.currentId = opts.currentId ?? "ses_current";
-		sessionState.allSessions = Object.entries(opts.sessionTitles ?? {}).map(
+		sessionState.familySessions = Object.entries(opts.sessionTitles ?? {}).map(
 			([id, title]) => ({
 				id,
 				title,
@@ -32,7 +32,7 @@ function setupState(opts: {
 				// be deterministic even where the value is not currently rendered.
 				createdAt: 1_735_689_600_000,
 			}),
-		) as typeof sessionState.allSessions;
+		) as typeof sessionState.familySessions;
 
 		permissionsState.pendingPermissions = (opts.permissions ?? []).map((p) => ({
 			...p,

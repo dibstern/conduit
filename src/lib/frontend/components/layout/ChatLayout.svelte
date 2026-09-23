@@ -351,13 +351,8 @@
 				})
 					.then(applyListDaemonSessionsResponse)
 					.catch(() => undefined);
-				void Promise.all([
-					listSessionsRpc({ projectSlug: slug, roots: true }),
-					listSessionsRpc({ projectSlug: slug, roots: false }),
-				])
-					.then((responses) => {
-						for (const response of responses) applyListSessionsResponse(response);
-					})
+				void listSessionsRpc({ projectSlug: slug, roots: true })
+					.then(applyListSessionsResponse)
 					.catch(() => {
 						showToast("Failed to load sessions", { variant: "error" });
 					});

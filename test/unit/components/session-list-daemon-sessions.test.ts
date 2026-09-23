@@ -10,13 +10,11 @@ import {
 	applyListDaemonSessionsResponse,
 	sessionState,
 } from "../../../src/lib/frontend/stores/session.svelte.js";
-import { uiState } from "../../../src/lib/frontend/stores/ui.svelte.js";
 
 describe("SessionList daemon sessions", () => {
 	beforeEach(() => {
 		routerState.path = "/p/current-project/";
 		syncSlugState(routerState.path);
-		uiState.hideSubagentSessions = true;
 		sessionState.rootSessions = [
 			{
 				id: "local-session",
@@ -24,7 +22,7 @@ describe("SessionList daemon sessions", () => {
 				updatedAt: Date.now(),
 			},
 		];
-		sessionState.allSessions = [...sessionState.rootSessions];
+		sessionState.familySessions = [...sessionState.rootSessions];
 		sessionState.daemonSessions = [];
 		sessionState.searchResults = null;
 		sessionState.searchQuery = "";
@@ -158,7 +156,7 @@ describe("SessionList daemon sessions", () => {
 	// show, and the empty message would otherwise claim there is nothing to see.
 	it("still says a project is missing when that leaves the list empty", () => {
 		sessionState.rootSessions = [];
-		sessionState.allSessions = [];
+		sessionState.familySessions = [];
 		applyListDaemonSessionsResponse({
 			projectSlug: "current-project",
 			sessions: [],

@@ -17,6 +17,7 @@ import { createFrontendLogger } from "../utils/logger.js";
 import { phaseToIdle } from "./chat.svelte.js";
 import { getBrowserClientId } from "./client-identity.js";
 import { clearInstanceState } from "./instance.svelte.js";
+import { dispatch } from "./notification-reducer.svelte.js";
 import { getCurrentSessionId, replaceRoute } from "./router.svelte.js";
 import {
 	wsDebugLog,
@@ -253,6 +254,11 @@ function doConnect(slug: string | undefined, generation: number): void {
 			clearTimeout(_connectTimeout);
 			_connectTimeout = null;
 		}
+		// Resolutions sent while offline are lost; this socket's roots
+		// snapshot restores attention, rolled up onto each root. Reset on
+		// open, not close: a resume can replace a closing socket, whose
+		// close handler then never runs.
+		dispatch({ type: "reset" });
 		setStatus("connected", "Connected");
 		wsDebugLog("ws:open", wsState.status);
 		wsDebugResetMessageCount();

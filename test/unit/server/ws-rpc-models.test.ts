@@ -46,6 +46,8 @@ const makeReadQuery = (
 	getSession: () => Effect.succeed(undefined),
 	getAllSessionStatuses: () => Effect.succeed({}),
 	listSessions: () => Effect.succeed([]),
+	getSessionLineage: () => Effect.succeed({ rows: [], count: 0 }),
+	getSessionFamily: () => Effect.succeed([]),
 	countPendingApprovalsBySession: () => Effect.succeed([]),
 	getSessionMessagesWithParts: () => Effect.succeed([]),
 	getLatestTurnModelExecution,

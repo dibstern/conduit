@@ -843,6 +843,12 @@ const SessionListSchema = Schema.Struct({
 	search: Schema.optional(Schema.Boolean),
 });
 
+const SessionFamilySchema = Schema.Struct({
+	type: Schema.Literal("session_family"),
+	rootId: Schema.String,
+	sessions: Schema.Array(SessionInfoSchema),
+});
+
 const SessionForkedSchema = Schema.Struct({
 	type: Schema.Literal("session_forked"),
 	sessionId: Schema.String,
@@ -1198,6 +1204,7 @@ export const RelayMessageSchema = Schema.Union(
 	DoneSchema,
 	SessionSwitchedSchema,
 	SessionListSchema,
+	SessionFamilySchema,
 	SessionForkedSchema,
 	HistoryPageSchema,
 	// Model / Agent / Commands
@@ -1287,6 +1294,7 @@ export const RELAY_MESSAGE_TYPES = [
 	"done",
 	"session_switched",
 	"session_list",
+	"session_family",
 	"session_forked",
 	"history_page",
 	"model_info",
@@ -1484,6 +1492,7 @@ export type RelayMessage =
 			/** Current input draft text for this session (from input_sync). */
 			inputText?: string;
 	  }
+	| { type: "session_family"; rootId: string; sessions: SessionInfo[] }
 	| {
 			type: "session_list";
 			sessions: SessionInfo[];

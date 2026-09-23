@@ -40,7 +40,7 @@ export function getHasPending(): boolean {
 
 /**
  * Collect all descendant session IDs (children, grandchildren, etc.)
- * for a given session. Uses BFS over `sessionState.allSessions` which
+ * for a given session. Uses BFS over `sessionState.familySessions` which
  * includes `parentID` for subagent sessions.
  */
 export function getDescendantSessionIds(parentId: string): Set<string> {
@@ -49,7 +49,7 @@ export function getDescendantSessionIds(parentId: string): Set<string> {
 	while (queue.length > 0) {
 		// biome-ignore lint/style/noNonNullAssertion: safe — queue.length > 0 guarantees shift returns a value
 		const id = queue.shift()!;
-		for (const s of sessionState.allSessions) {
+		for (const s of sessionState.familySessions) {
 			if (s.parentID === id && !descendants.has(s.id)) {
 				descendants.add(s.id);
 				queue.push(s.id);
@@ -151,6 +151,12 @@ export function handlePermissionRequest(
 	const { requestId, toolName, toolInput } = msg;
 
 	if (!requestId || !toolName) return;
+	if (
+		permissionsState.pendingPermissions.some(
+			(permission) => permission.requestId === requestId,
+		)
+	)
+		return;
 
 	const permission: PermissionRequest & { id: string } = {
 		id: requestId,

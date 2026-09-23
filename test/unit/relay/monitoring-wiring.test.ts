@@ -39,7 +39,7 @@ function createHarness() {
 			broadcastPerSessionEvent: vi.fn(),
 		},
 		sessionService: {
-			sendDualSessionLists: vi.fn(async () => {}),
+			sendSessionLists: vi.fn(async () => {}),
 			getSessionParentMap: () => new Map(),
 		},
 		processingTimeouts: {
@@ -144,7 +144,7 @@ describe("wireMonitoring shutdown", () => {
 		};
 		const layer = Layer.mergeAll(
 			Layer.succeed(SessionManagerServiceTag, {
-				sendDualSessionLists: () => Effect.void,
+				sendSessionLists: () => Effect.void,
 				getSessionParentMap: () => Effect.succeed(new Map()),
 			} as never),
 			Layer.succeed(StatusPollerTag, statusPoller as never),

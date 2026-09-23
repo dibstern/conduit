@@ -43,6 +43,10 @@ class MockWebSocket {
 		this.emit("close");
 	}
 
+	open(): void {
+		this.emit("open");
+	}
+
 	emitMessage(data: string): void {
 		this.emit("message", new MessageEvent("message", { data }));
 	}
@@ -64,6 +68,11 @@ vi.mock("../../../src/lib/frontend/stores/ws-dispatch.js", () => ({
 	disarmProtocolVersionCheck: () => {},
 }));
 
+import {
+	dispatch,
+	getAttentionSessions,
+	resetNotifState,
+} from "../../../src/lib/frontend/stores/notification-reducer.svelte.js";
 import {
 	routerState,
 	slugState,
@@ -245,6 +254,26 @@ describe("WebSocket reconnect stream lifecycle", () => {
 		await vi.advanceTimersByTimeAsync(20_000);
 
 		expect(instances).toHaveLength(1);
+	});
+
+	// Resolutions can be missed while offline, so the reconnect's roots
+	// snapshot is the authority; a still-pending child question survives
+	// as its root's rolled-up count.
+	it.each([
+		["after a disconnect", () => instances[0]?.close()],
+		["when a resume replaces a closing socket", () => connect()],
+	])("drops attention indicators on the next open %s", (_, reconnect) => {
+		resetNotifState();
+		connect();
+		instances[0]?.open();
+		dispatch({ type: "question_appeared", sessionId: "child-c" });
+
+		reconnect();
+		connect();
+		expect(getAttentionSessions(null, () => new Set()).size).toBe(1);
+		instances.at(-1)?.open();
+
+		expect(getAttentionSessions(null, () => new Set()).size).toBe(0);
 	});
 
 	it("removes the old message stream before the replacement stream handles messages", async () => {

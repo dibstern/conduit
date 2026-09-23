@@ -67,7 +67,7 @@ function makeHistoryMessage(
 beforeEach(() => {
 	clearMessages();
 	sessionState.rootSessions = [];
-	sessionState.allSessions = [];
+	sessionState.familySessions = [];
 	sessionState.searchResults = null;
 	sessionState.currentId = null;
 	sessionState.searchQuery = "";

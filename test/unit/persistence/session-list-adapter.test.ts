@@ -27,6 +27,87 @@ function makeRow(id: string, overrides?: Partial<SessionRow>): SessionRow {
 // ─── sessionRowsToSessionInfoList ─────────────────────────────────────────
 
 describe("sessionRowsToSessionInfoList", () => {
+	it("rolls nested descendant counts and activity into roots only", () => {
+		const rows = [
+			makeRow("root"),
+			makeRow("child", { parent_id: "root" }),
+			makeRow("grandchild", { parent_id: "child" }),
+			makeRow("other"),
+		];
+		const options = {
+			parentMap: new Map([
+				["child", "root"],
+				["grandchild", "child"],
+			]),
+			statuses: { grandchild: { type: "retry" } },
+			pendingPermissionCounts: new Map([
+				["root", 1],
+				["grandchild", 2],
+			]),
+			pendingQuestionCounts: new Map([
+				["child", 3],
+				["grandchild", 4],
+			]),
+		};
+		const [root, child, grandchild, other] = sessionRowsToSessionInfoList(
+			rows,
+			options,
+		);
+		expect(root).toMatchObject({
+			processing: true,
+			pendingPermissionCount: 3,
+			pendingQuestionCount: 7,
+			attention: "needs-approval",
+		});
+		expect(child).toMatchObject({
+			pendingQuestionCount: 3,
+			attention: "needs-reply",
+		});
+		expect(child?.processing).toBeUndefined();
+		expect(child?.pendingPermissionCount).toBeUndefined();
+		expect(grandchild).toMatchObject({
+			processing: true,
+			pendingPermissionCount: 2,
+			pendingQuestionCount: 4,
+		});
+		expect(other).toMatchObject({ attention: "idle" });
+		expect(other?.processing).toBeUndefined();
+		// Root-only query results must still include grandchildren's state.
+		expect(sessionRowsToSessionInfoList([makeRow("root")], options)[0]).toEqual(
+			root,
+		);
+		// Family snapshots retain each session's independent state.
+		const { parentMap: _, ...ownStateOptions } = options;
+		const ownRoot = sessionRowsToSessionInfoList(rows, ownStateOptions)[0];
+		expect(ownRoot?.pendingPermissionCount).toBe(1);
+		expect(ownRoot?.pendingQuestionCount).toBeUndefined();
+		expect(ownRoot?.processing).toBeUndefined();
+	});
+
+	it("preserves attention priority after subtree rollup", () => {
+		const parentMap = new Map([
+			["child", "root"],
+			["grandchild", "child"],
+		]);
+		const options = { parentMap, statuses: { grandchild: { type: "busy" } } };
+		const error = makeRow("root", { last_turn_error_at: 1 });
+		expect(sessionRowsToSessionInfoList([error], options)[0]?.attention).toBe(
+			"error",
+		);
+		expect(
+			sessionRowsToSessionInfoList([error], {
+				...options,
+				pendingQuestionCounts: new Map([["grandchild", 1]]),
+			})[0]?.attention,
+		).toBe("needs-reply");
+		expect(
+			sessionRowsToSessionInfoList(
+				[makeRow("root", { last_message_at: 1 })],
+				options,
+			)[0]?.attention,
+		).toBe("working");
+	});
+
 	it("converts session rows to SessionInfo format", () => {
 		const rows: SessionRow[] = [
 			makeRow("s1", { title: "First", updated_at: 3000 }),

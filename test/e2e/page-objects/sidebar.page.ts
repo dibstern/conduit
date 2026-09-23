@@ -14,7 +14,6 @@ export class SidebarPage {
 	readonly fileTree: Locator;
 	readonly sessionsPanel: Locator;
 	readonly filesPanel: Locator;
-	readonly subagentToggleBtn: Locator;
 
 	constructor(page: Page) {
 		this.page = page;
@@ -30,7 +29,6 @@ export class SidebarPage {
 		this.fileTree = page.locator("#file-tree");
 		this.sessionsPanel = page.locator("#sidebar-panel-sessions");
 		this.filesPanel = page.locator("#sidebar-panel-files");
-		this.subagentToggleBtn = page.locator('[data-testid="subagent-toggle"]');
 	}
 
 	async getSessionItems(): Promise<Locator> {

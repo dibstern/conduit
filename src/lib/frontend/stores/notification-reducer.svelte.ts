@@ -35,6 +35,7 @@ export type NotifAction =
 	| { type: "session_viewed"; sessionId: string }
 	| {
 			type: "reconcile";
+			sessionIds?: ReadonlySet<string>;
 			counts: ReadonlyMap<string, { questions: number; permissions: number }>;
 	  }
 	| { type: "reset" };
@@ -116,10 +117,11 @@ export function reduce(state: NotifMap, action: NotifAction): NotifMap {
 			return next;
 		}
 		case "reconcile": {
-			// Server truth, wholesale. Nothing is client-local any more, so there is
-			// no carry-over: anything absent from the server's counts has no
-			// attention state.
-			const next = new Map<string, SessionNotifState>();
+			// A roots snapshot only reconciles roots; child indicators survive.
+			const next = action.sessionIds
+				? new Map(state)
+				: new Map<string, SessionNotifState>();
+			for (const id of action.sessionIds ?? []) next.delete(id);
 			for (const [sid, counts] of action.counts) {
 				if (counts.questions > 0 || counts.permissions > 0) {
 					next.set(sid, {

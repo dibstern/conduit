@@ -473,6 +473,26 @@ describe("handleSSEEvent", () => {
 		).toHaveBeenCalledTimes(1);
 	});
 
+	it("broadcasts question resolutions so family viewers drop replayed questions", () => {
+		const deps = createMockSSEWiringDeps();
+		const translated: RelayMessage = {
+			type: "ask_user_resolved",
+			sessionId: "child-session",
+			toolId: "que_q1",
+		};
+		vi.mocked(deps.translator.translate).mockReturnValue({
+			ok: true,
+			messages: [translated],
+		});
+
+		handleSSEEvent(deps, {
+			type: "question.replied",
+			properties: { sessionID: "child-session", requestID: "que_q1" },
+		});
+
+		expect(deps.wsHandler.broadcast).toHaveBeenCalledWith(translated);
+	});
+
 	it("routes permission.replied events to pending permission state", () => {
 		const deps = createMockSSEWiringDeps();
 

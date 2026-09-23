@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { runMigrations } from "../../../src/lib/persistence/migrations.js";
 import { ReadQueryService } from "../../../src/lib/persistence/read-query-service.js";
 import { schemaMigrations } from "../../../src/lib/persistence/schema.js";
+import { sessionFamilyQuery } from "../../../src/lib/persistence/session-family-query.js";
 import { SqliteClient } from "../../../src/lib/persistence/sqlite-client.js";
 
 function seedSession(
@@ -176,6 +177,48 @@ describe("ReadQueryService", () => {
 	});
 
 	// ── 4c: Session list ──────────────────────────────────────────────────
+
+	it("reads a grandchild's whole family and narrow lineage", () => {
+		seedSession(db, "root", { updatedAt: 4 });
+		seedSession(db, "child", { parentId: "root", updatedAt: 3 });
+		seedSession(db, "grandchild", { parentId: "child", updatedAt: 2 });
+		seedSession(db, "other", { updatedAt: 1 });
+		expect(svc.getSessionFamily("grandchild").map((row) => row.id)).toEqual([
+			"root",
+			"child",
+			"grandchild",
+		]);
+		expect(svc.getSessionFamily("missing")).toEqual([]);
+		const lineage = svc.getSessionLineage();
+		expect(lineage.count).toBe(4);
+		expect(lineage.rows).toHaveLength(4);
+		expect(lineage.rows).toContainEqual({
+			id: "grandchild",
+			parent_id: "child",
+		});
+	});
+
+	it("looks up family rows through indexes without scanning sessions", () => {
+		seedSession(db, "root");
+		seedSession(db, "child", { parentId: "root" });
+		seedSession(db, "grandchild", { parentId: "child" });
+		for (let i = 0; i < 100; i++) seedSession(db, `unrelated-${i}`);
+		const plan = db
+			.query<{ detail: string }>(`EXPLAIN QUERY PLAN ${sessionFamilyQuery}`, [
+				"grandchild",
+			])
+			.map((row) => row.detail);
+
+		expect(plan.some((step) => /\bSCAN (?:s|sessions)\b/i.test(step))).toBe(
+			false,
+		);
+		expect(plan).toContain(
+			"SEARCH s USING INDEX idx_sessions_parent (parent_id=?)",
+		);
+		expect(plan).toContain(
+			"SEARCH s USING INDEX sqlite_autoindex_sessions_1 (id=?)",
+		);
+	});
 
 	describe("listSessions", () => {
 		it("returns all sessions ordered by updated_at DESC", () => {

@@ -28,7 +28,7 @@
 		forkSessionRpc,
 		renameSessionRpc,
 	} from "../../transport/ws-rpc-client.js";
-	import { closeMobileSidebar, confirm, showToast, toggleHideSubagentSessions, uiState } from "../../stores/ui.svelte.js";
+	import { closeMobileSidebar, confirm, showToast } from "../../stores/ui.svelte.js";
 	import SessionItem from "./SessionItem.svelte";
 	import SessionPager from "./SessionPager.svelte";
 	import SessionContextMenu from "./SessionContextMenu.svelte";
@@ -130,22 +130,13 @@
 		}
 	});
 
-	// Re-send search when subagent toggle changes during active search
-	$effect(() => {
-		const hide = uiState.hideSubagentSessions; // track dependency
-		if (localSearchValue.trim()) {
-			if (debounceTimer !== undefined) clearTimeout(debounceTimer);
-			requestRemoteSearch(localSearchValue, hide);
-		}
-	});
-
 	// ─── Handlers ───────────────────────────────────────────────────────────────
 
 	// Searches every project the daemon knows about, not just this one, and pages
 	// the matches. The store drops responses for a superseded query, so the
 	// debounce does not need to re-check what was typed since.
-	function requestRemoteSearch(query: string, roots: boolean) {
-		void searchSessions(query, roots);
+	function requestRemoteSearch(query: string) {
+		void searchSessions(query, true);
 	}
 
 	// A session belonging to a project other than the one this socket is attached
@@ -215,7 +206,7 @@
 		if (debounceTimer !== undefined) clearTimeout(debounceTimer);
 		if (localSearchValue.trim()) {
 			debounceTimer = setTimeout(() => {
-				requestRemoteSearch(localSearchValue, uiState.hideSubagentSessions);
+				requestRemoteSearch(localSearchValue);
 			}, 300);
 		}
 	}
@@ -453,19 +444,7 @@
 						ariaLabel="Search sessions"
 						onclick={handleToggleSearch}
 					/>
-					<Button
-						variant="toolbar"
-						size="content"
-						class={TOOLBAR_ICON_BOX}
-						iconOnly
-						iconSize={14}
-						icon="git-fork"
-						data-testid="subagent-toggle"
-						data-active={uiState.hideSubagentSessions ? undefined : ""}
-						title={uiState.hideSubagentSessions ? "Show subagent sessions" : "Hide subagent sessions"}
-						ariaLabel={uiState.hideSubagentSessions ? "Show subagent sessions" : "Hide subagent sessions"}
-						onclick={toggleHideSubagentSessions}
-					/>
+
 					<Button
 						variant="toolbar"
 						size="content"

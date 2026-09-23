@@ -29,6 +29,8 @@ import {
 	abortSessionReplay,
 	activateSessionChatState,
 	clearSessionChatState,
+	sessionActivity,
+	sessionMessages,
 } from "./chat.svelte.js";
 import { getBrowserClientId } from "./client-identity.js";
 import {
@@ -39,13 +41,12 @@ import {
 	getEffectiveInstanceId,
 } from "./discovery.svelte.js";
 import { getCurrentSlug, navigate } from "./router.svelte.js";
-import { uiState } from "./ui.svelte.js";
 
 // ─── State ──────────────────────────────────────────────────────────────────
 
 export const sessionState = $state({
 	rootSessions: [] as SessionInfo[],
-	allSessions: [] as SessionInfo[],
+	familySessions: [] as SessionInfo[],
 	daemonSessions: [] as SessionInfo[],
 	// Projects the daemon could not read a session list from -- a directory that
 	// has moved or been deleted, or a store it could not open. Held so the list
@@ -68,9 +69,9 @@ export const sessionState = $state({
 	searchCursor: null as DaemonSessionCursor | null,
 	searchHasMore: false,
 	searchLoading: false,
-	/** Id-keyed map maintained alongside rootSessions/allSessions arrays.
+	/** Id-keyed map maintained alongside rootSessions/familySessions arrays.
 	 *  Used by the dispatcher's unknown-session guard (O(1) membership check)
-	 *  and by clearSessionChatState's diff path. */
+	 *  for the roots, family, and selected session. */
 	sessions: new SvelteMap<string, SessionInfo>(),
 });
 
@@ -228,49 +229,53 @@ export function sendNewSession(
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
-/** Find a session by ID across both cached arrays.
- *  Prefers allSessions (more complete), falls back to rootSessions (available earlier). */
+/** Find metadata in the current roots, family, or selected-session stub. */
 export function findSession(id: string): SessionInfo | undefined {
 	return (
-		sessionState.allSessions.find((s) => s.id === id) ??
-		sessionState.rootSessions.find((s) => s.id === id)
+		sessionState.familySessions.find((s) => s.id === id) ??
+		sessionState.rootSessions.find((s) => s.id === id) ??
+		(id === sessionState.currentId ? sessionState.sessions.get(id) : undefined)
 	);
+}
+
+/** Membership changes must not evict cached transcripts during navigation. */
+function syncSessionMembership(): void {
+	const selected = sessionState.currentId
+		? sessionState.sessions.get(sessionState.currentId)
+		: undefined;
+	sessionState.sessions.clear();
+	if (selected) sessionState.sessions.set(selected.id, selected);
+	for (const session of [
+		...sessionState.rootSessions,
+		...sessionState.familySessions,
+	]) {
+		sessionState.sessions.set(session.id, session);
+	}
 }
 
 // ─── Derived getters ────────────────────────────────────────────────────────
 // Components should wrap in $derived() for reactive caching.
 
-/** Get sessions filtered by search query (case-insensitive title match).
- *  Subagent sessions (those with a parentID) are excluded when the
- *  hideSubagentSessions UI toggle is active (default). */
+/** The sidebar and its search show root sessions only. */
 export function getFilteredSessions(): SessionInfo[] {
-	// Active search results take priority (already filtered by server, across
-	// every project). Local rows are reconciled against the live session map:
-	// searchResults is a snapshot the removal paths never touch, so without this
-	// a session deleted during an active search keeps rendering until the query
-	// is cleared. Foreign rows are passed through instead -- the live map only
-	// ever holds this relay's own sessions, so reconciling them would drop every
-	// cross-project hit.
 	if (sessionState.searchResults !== null) {
 		const searchSlug = getCurrentSlug();
+		// Root rows carry the subtree rollup, so search hits resolve against
+		// them rather than the membership map, where family rows (individual
+		// state) win.
+		const liveRoots = new Map(
+			sessionState.rootSessions.map((session) => [session.id, session]),
+		);
 		return sessionState.searchResults.flatMap((session) => {
+			if (session.parentID) return [];
 			if (session.projectSlug != null && session.projectSlug !== searchSlug) {
 				return [session];
 			}
-			const liveSession = sessionState.sessions.get(session.id);
+			const liveSession = liveRoots.get(session.id);
 			return liveSession ? [liveSession] : [];
 		});
 	}
-	let localSessions: SessionInfo[];
-	if (uiState.hideSubagentSessions) {
-		localSessions = sessionState.rootSessions;
-	} else {
-		// Fall back to rootSessions while allSessions hasn't loaded yet
-		localSessions =
-			sessionState.allSessions.length > 0
-				? sessionState.allSessions
-				: sessionState.rootSessions;
-	}
+	const localSessions = sessionState.rootSessions;
 	const query = sessionState.searchQuery.toLowerCase().trim();
 	const currentSlug = getCurrentSlug();
 	// Foreign rows stay in while a query is active and get title-filtered with
@@ -281,7 +286,7 @@ export function getFilteredSessions(): SessionInfo[] {
 		(session) =>
 			session.projectSlug != null &&
 			session.projectSlug !== currentSlug &&
-			(!uiState.hideSubagentSessions || !session.parentID),
+			!session.parentID,
 	);
 	const sessions = [...localSessions, ...foreignSessions].sort(
 		(a, b) => getSessionDate(b).getTime() - getSessionDate(a).getTime(),
@@ -374,56 +379,34 @@ export function handleSessionList(
 	msg: Extract<RelayMessage, { type: "session_list" }>,
 ): void {
 	const { sessions, roots, search } = msg;
-	if (!Array.isArray(sessions)) return;
-
-	// Search results go to a separate field — never overwrite main arrays.
-	// Guard: skip diff if incoming list is a filtered/search payload.
+	if (!Array.isArray(sessions) || roots === false) return;
 	if (search) {
-		sessionState.searchResults = sessions;
+		sessionState.searchResults = sessions.filter(
+			(session) => !session.parentID,
+		);
 		return;
 	}
+	if (!sessionState.searchQuery.trim()) sessionState.searchResults = null;
+	const nextRoots = sessions.filter((session) => !session.parentID);
+	const nextIds = new Set(nextRoots.map((session) => session.id));
+	const removedIds = new Set(
+		sessionState.rootSessions
+			.filter((session) => !nextIds.has(session.id))
+			.map((session) => session.id),
+	);
+	if (sessionState.searchResults)
+		sessionState.searchResults = sessionState.searchResults.filter(
+			(session) => !removedIds.has(session.id),
+		);
+	sessionState.rootSessions = nextRoots;
+	syncSessionMembership();
+}
 
-	// ── Diff logic: detect removed sessions and clean up chat state ────
-	// Snapshot current session IDs before applying incoming list.
-	const previousIds = new Set(sessionState.sessions.keys());
-
-	// Clear search results when a fresh full list arrives (not during active search)
-	if (!sessionState.searchQuery.trim()) {
-		sessionState.searchResults = null;
-	}
-
-	if (roots === true) {
-		sessionState.rootSessions = sessions;
-	} else if (roots === false) {
-		sessionState.allSessions = sessions;
-	} else {
-		// Backward-compat: untagged session_list (no `roots` field) contains
-		// a mixed bag of sessions. Populate both arrays so the sidebar works
-		// regardless of the subagent toggle state.
-		sessionState.rootSessions = sessions.filter((s) => !s.parentID);
-		sessionState.allSessions = sessions;
-	}
-
-	// Populate id-keyed sessions Map for O(1) membership checks.
-	// Used by routePerSession's unknown-session guard.
-	const incomingIds = new Set<string>();
-	for (const s of sessions) {
-		sessionState.sessions.set(s.id, s);
-		incomingIds.add(s.id);
-	}
-
-	// Clean up chat state for sessions that were removed from the list.
-	// roots:false and legacy untagged lists both carry every session, so they
-	// are authoritative for removals. roots:true lists only carry roots, and a
-	// child may not have learned its parentID yet, so they never reap.
-	if (roots !== true) {
-		for (const id of previousIds) {
-			if (!incomingIds.has(id)) {
-				clearSessionChatState(id);
-				sessionState.sessions.delete(id);
-			}
-		}
-	}
+export function handleSessionFamily(
+	msg: Extract<RelayMessage, { type: "session_family" }>,
+): void {
+	sessionState.familySessions = msg.sessions;
+	syncSessionMembership();
 }
 
 const sessionInfoFromRpc = (
@@ -450,6 +433,7 @@ const sessionInfoFromRpc = (
 	...(session.pendingPermissionCount != null
 		? { pendingPermissionCount: session.pendingPermissionCount }
 		: {}),
+	...(session.attention != null ? { attention: session.attention } : {}),
 	...(session.unread != null ? { unread: session.unread } : {}),
 	...(session.projectSlug != null ? { projectSlug: session.projectSlug } : {}),
 });
@@ -622,18 +606,14 @@ export function handleSessionSwitched(
 	const { id, requestId } = msg;
 	if (id) {
 		sessionState.currentId = id;
-		if (msg.parentID) {
-			const session = { id, title: "", parentID: msg.parentID };
-			if (!sessionState.allSessions.some((candidate) => candidate.id === id)) {
-				sessionState.allSessions = [session, ...sessionState.allSessions];
-			}
-			sessionState.sessions.set(id, session);
+		if (!findSession(id)) {
+			sessionState.sessions.set(id, {
+				id,
+				title: "",
+				...(msg.parentID ? { parentID: msg.parentID } : {}),
+			});
 		}
-		// Ensure the session is in the id-keyed Map so routePerSession's
-		// unknown-session guard won't drop events for the active session.
-		if (!sessionState.sessions.has(id)) {
-			sessionState.sessions.set(id, { id, title: "" });
-		}
+		syncSessionMembership();
 		// A permission mode selected before any session was bound can only be
 		// delivered now that we know the session id.
 		const slug = getCurrentSlug();
@@ -655,14 +635,18 @@ export function handleSessionForked(
 	msg: Extract<RelayMessage, { type: "session_forked" }>,
 ): void {
 	const { session } = msg;
-	// Forked sessions always have parentID (the fork source), so they only
-	// go into allSessions. The next session_list broadcast will update both
-	// arrays authoritatively.
-	if (!sessionState.allSessions.some((s) => s.id === session.id)) {
-		sessionState.allSessions = [session, ...sessionState.allSessions];
+	// The family snapshot sent before the switch owns membership. Keep supplied
+	// metadata only when this fork is already part of the viewer's family.
+	if (
+		sessionState.familySessions.some((candidate) => candidate.id === session.id)
+	) {
+		sessionState.familySessions = sessionState.familySessions.map(
+			(candidate) => (candidate.id === session.id ? session : candidate),
+		);
 	}
-	// Ensure the forked session is in the id-keyed Map.
-	sessionState.sessions.set(session.id, session);
+	if (sessionState.currentId === session.id)
+		sessionState.sessions.set(session.id, session);
+	syncSessionMembership();
 }
 
 // ─── Actions ────────────────────────────────────────────────────────────────
@@ -743,12 +727,15 @@ export function switchToSession(
 /** Clear all session state (for project switch). */
 export function clearSessionState(): void {
 	resetSessionCreation(); // Cancel any in-flight creation (project switch safety)
-	for (const id of sessionState.sessions.keys()) {
+	for (const id of new Set([
+		...sessionActivity.keys(),
+		...sessionMessages.keys(),
+	])) {
 		clearSessionChatState(id);
 	}
 	sessionState.sessions.clear();
 	sessionState.rootSessions = [];
-	sessionState.allSessions = [];
+	sessionState.familySessions = [];
 	sessionState.currentId = null;
 	sessionState.searchQuery = "";
 	clearSessionSearch();

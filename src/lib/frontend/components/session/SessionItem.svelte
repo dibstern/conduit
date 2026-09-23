@@ -215,7 +215,6 @@
 			status.spoken,
 			displayTitle,
 			accessibleContext,
-			session.parentID ? "forked" : "",
 			timeText,
 		]
 			.filter((part) => part)
@@ -396,12 +395,7 @@
 				<Icon name="star" size={11} />
 			</span>
 		{/if}
-		{#if session.parentID}
-			<span class="shrink-0 text-text-dimmer" title="Forked session">
-				<Icon name="git-fork" size={11} />
-				<span class="sr-only">Forked session</span>
-			</span>
-		{/if}
+
 	</span>
 
 	{#if contextText && !settled && !isRenaming}

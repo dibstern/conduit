@@ -142,6 +142,8 @@ function makeEmptySessionReadQuery(provider: string): ReadQueryEffect {
 		),
 		getAllSessionStatuses: vi.fn(() => Effect.succeed({})),
 		listSessions: vi.fn(() => Effect.succeed([])),
+		getSessionLineage: () => Effect.succeed({ rows: [], count: 0 }),
+		getSessionFamily: () => Effect.succeed([]),
 		countPendingApprovalsBySession: vi.fn(() => Effect.succeed([])),
 		getLatestTurnModelExecution: vi.fn(() => Effect.succeed(undefined)),
 		getSessionMessagesWithParts: vi.fn(() => Effect.succeed([])),
@@ -273,6 +275,8 @@ describe("session handlers with Effect-native model service", () => {
 				),
 				getAllSessionStatuses: vi.fn(() => Effect.succeed({})),
 				listSessions: vi.fn(() => Effect.succeed([])),
+				getSessionLineage: () => Effect.succeed({ rows: [], count: 0 }),
+				getSessionFamily: () => Effect.succeed([]),
 				countPendingApprovalsBySession: vi.fn(() => Effect.succeed([])),
 				getLatestTurnModelExecution: vi.fn(() => Effect.succeed(undefined)),
 				getSessionMessagesWithParts: vi.fn(() =>
@@ -427,6 +431,8 @@ describe("session handlers with Effect-native model service", () => {
 			),
 			getAllSessionStatuses: vi.fn(() => Effect.succeed({})),
 			listSessions: vi.fn(() => Effect.succeed([])),
+			getSessionLineage: () => Effect.succeed({ rows: [], count: 0 }),
+			getSessionFamily: () => Effect.succeed([]),
 			countPendingApprovalsBySession: vi.fn(() => Effect.succeed([])),
 			getLatestTurnModelExecution: vi.fn(() => Effect.succeed(undefined)),
 			// Rows exist but carry no text — the shape the OpenCode runtime
@@ -663,6 +669,72 @@ describe("session handlers with Effect-native model service", () => {
 		},
 	);
 
+	it.effect(
+		"sends family before switching and replays descendant permissions",
+		() => {
+			const sessions = [
+				{ id: "session-1", title: "Root", updatedAt: 0, messageCount: 0 },
+				{
+					id: "child",
+					parentID: "session-1",
+					title: "Child",
+					updatedAt: 0,
+					messageCount: 0,
+				},
+				{
+					id: "grandchild",
+					parentID: "child",
+					title: "Grandchild",
+					updatedAt: 0,
+					messageCount: 0,
+				},
+			];
+			const { wsHandler, layer } = makeSessionMetadataLayer({
+				sessionManagerService: makeMockSessionManagerService({
+					getSessionFamily: () =>
+						Effect.succeed({
+							type: "session_family",
+							rootId: "session-1",
+							sessions,
+						}),
+				}),
+			});
+			return Effect.gen(function* () {
+				const pending = yield* PendingInteractionServiceTag;
+				for (const sessionId of ["grandchild", "unrelated"]) {
+					yield* pending.recordPermissionRequest({
+						requestId: sessionId as PermissionId,
+						sessionId,
+						toolName: "Bash",
+						toolInput: {},
+						always: [],
+					});
+				}
+				yield* handleViewSession("client-1", { sessionId: "session-1" });
+				expect(wsHandler.sendTo).toHaveBeenCalledWith(
+					"client-1",
+					expect.objectContaining({
+						type: "permission_request",
+						sessionId: "grandchild",
+					}),
+				);
+				expect(wsHandler.sendTo).not.toHaveBeenCalledWith(
+					"client-1",
+					expect.objectContaining({
+						type: "permission_request",
+						sessionId: "unrelated",
+					}),
+				);
+				const messages = vi
+					.mocked(wsHandler.sendTo)
+					.mock.calls.map((call) => call[1].type);
+				expect(messages.indexOf("session_family")).toBeLessThan(
+					messages.indexOf("session_switched"),
+				);
+			}).pipe(Effect.provide(layer));
+		},
+	);
+
 	it.effect("replays pending questions from PendingInteractionService", () => {
 		const { wsHandler, layer } = makeSessionMetadataLayer({});
 
@@ -707,11 +779,11 @@ describe("session handlers with Effect-native model service", () => {
 	it.effect(
 		"logs model metadata lookup failures and still sends session lists",
 		() => {
-			const legacySendDualSessionLists = vi.fn(async () => {
+			const legacySendSessionLists = vi.fn(async () => {
 				throw new Error("legacy session manager sendDual should not be called");
 			});
 			const sessionManagerService = makeMockSessionManagerService({
-				sendDualSessionLists: vi.fn(() => Effect.void),
+				sendSessionLists: vi.fn(() => Effect.void),
 			});
 			const logger = makeMockLogger();
 			const modelService: OpenCodeModelService = {
@@ -729,7 +801,7 @@ describe("session handlers with Effect-native model service", () => {
 				logger,
 				modelService,
 				sessionMgr: makeMockSessionManagerShape({
-					sendDualSessionLists: legacySendDualSessionLists,
+					sendSessionLists: legacySendSessionLists,
 				}),
 				sessionManagerService,
 			});
@@ -745,8 +817,8 @@ describe("session handlers with Effect-native model service", () => {
 						model: "gpt-4",
 						provider: "openai",
 					});
-					expect(legacySendDualSessionLists).not.toHaveBeenCalled();
-					expect(sessionManagerService.sendDualSessionLists).toHaveBeenCalled();
+					expect(legacySendSessionLists).not.toHaveBeenCalled();
+					expect(sessionManagerService.sendSessionLists).toHaveBeenCalled();
 				}),
 			);
 		},

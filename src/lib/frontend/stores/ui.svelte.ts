@@ -9,7 +9,6 @@ import { generateUuid } from "../utils/format.js";
 const SIDEBAR_STORAGE_KEY = "sidebar-collapsed";
 const SIDEBAR_WIDTH_KEY = "sidebar-width";
 const FILE_VIEWER_WIDTH_KEY = "file-viewer-width";
-const HIDE_SUBAGENT_SESSIONS_KEY = "hide-subagent-sessions";
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
@@ -35,9 +34,6 @@ export const uiState = $state({
 	sidebarPanel: "sessions" as "sessions" | "files",
 	mobileSidebarOpen: false,
 	sidebarWidth: Number(safeGetItem(SIDEBAR_WIDTH_KEY)) || SIDEBAR_DEFAULT_WIDTH,
-
-	// Subagent sessions filter
-	hideSubagentSessions: safeGetItem(HIDE_SUBAGENT_SESSIONS_KEY) !== "false",
 
 	// Toasts
 	toasts: [] as Toast[],
@@ -134,20 +130,6 @@ export function setSidebarWidth(width: number): void {
 	uiState.sidebarWidth = clamped;
 	try {
 		localStorage.setItem(SIDEBAR_WIDTH_KEY, String(clamped));
-	} catch {
-		/* ignore */
-	}
-}
-
-// ─── Subagent sessions filter ───────────────────────────────────────────────
-
-export function toggleHideSubagentSessions(): void {
-	uiState.hideSubagentSessions = !uiState.hideSubagentSessions;
-	try {
-		localStorage.setItem(
-			HIDE_SUBAGENT_SESSIONS_KEY,
-			String(uiState.hideSubagentSessions),
-		);
 	} catch {
 		/* ignore */
 	}

@@ -90,21 +90,35 @@ const readProjectSessions = (
 			makeReadQueryEffect,
 		).pipe(Layer.provide(sqliteLayer));
 
-		const { rows, pendingApprovals } = yield* Effect.gen(function* () {
-			const readQuery = yield* ReadQueryEffectTag;
-			const rows = yield* readQuery.listSessions({
-				...(options.roots !== undefined ? { roots: options.roots } : {}),
-				...(options.limit !== undefined ? { limit: options.limit } : {}),
-				...(options.search !== undefined ? { titleQuery: options.search } : {}),
-				...(options.cursor !== undefined ? { before: options.cursor } : {}),
-			});
-			const pendingApprovals =
-				yield* readQuery.countPendingApprovalsBySession();
-			return { rows, pendingApprovals };
-		}).pipe(Effect.provide(readQueryLayer));
+		const { rows, pendingApprovals, lineage, statuses } = yield* Effect.gen(
+			function* () {
+				const readQuery = yield* ReadQueryEffectTag;
+				const rows = yield* readQuery.listSessions({
+					...(options.roots !== undefined ? { roots: options.roots } : {}),
+					...(options.limit !== undefined ? { limit: options.limit } : {}),
+					...(options.search !== undefined
+						? { titleQuery: options.search }
+						: {}),
+					...(options.cursor !== undefined ? { before: options.cursor } : {}),
+				});
+				const pendingApprovals =
+					yield* readQuery.countPendingApprovalsBySession();
+				const lineage = yield* readQuery.getSessionLineage();
+				const statuses = yield* readQuery.getAllSessionStatuses();
+				return { rows, pendingApprovals, lineage, statuses };
+			},
+		).pipe(Effect.provide(readQueryLayer));
 		const pending = pendingApprovalCountsByType(pendingApprovals);
 
 		const sessions = sessionRowsToSessionInfoList(Array.from(rows), {
+			parentMap: new Map(
+				lineage.rows.flatMap((row) =>
+					row.parent_id === null ? [] : [[row.id, row.parent_id] as const],
+				),
+			),
+			statuses: Object.fromEntries(
+				Object.entries(statuses).map(([id, type]) => [id, { type }]),
+			),
 			pendingQuestionCounts: pending.questions,
 			pendingPermissionCounts: pending.permissions,
 		});

@@ -15,6 +15,7 @@ import type {
 	SessionRow,
 	TurnRow,
 } from "./read-model-types.js";
+import { sessionFamilyQuery } from "./session-family-query.js";
 import type { SqliteClient } from "./sqlite-client.js";
 
 export type {
@@ -115,6 +116,44 @@ export class ReadQueryService {
 					method: "listSessions",
 					opts,
 					sqliteError: err instanceof Error ? err.message : String(err),
+				},
+			});
+		}
+	}
+
+	getSessionLineage(): {
+		rows: { id: string; parent_id: string | null }[];
+		count: number;
+	} {
+		try {
+			const rows = this.db.query<{ id: string; parent_id: string | null }>(
+				"SELECT id, parent_id FROM sessions",
+			);
+			const count =
+				this.db.queryOne<{ count: number }>(
+					"SELECT COUNT(*) AS count FROM sessions",
+				)?.count ?? 0;
+			return { rows, count };
+		} catch (err) {
+			throw new PersistenceError({
+				code: "PROJECTION_FAILED",
+				message: "ReadQueryService.getSessionLineage failed",
+				context: { method: "getSessionLineage", sqliteError: String(err) },
+			});
+		}
+	}
+
+	getSessionFamily(sessionId: string): SessionRow[] {
+		try {
+			return this.db.query<SessionRow>(sessionFamilyQuery, [sessionId]);
+		} catch (err) {
+			throw new PersistenceError({
+				code: "PROJECTION_FAILED",
+				message: "ReadQueryService.getSessionFamily failed",
+				context: {
+					method: "getSessionFamily",
+					sessionId,
+					sqliteError: String(err),
 				},
 			});
 		}

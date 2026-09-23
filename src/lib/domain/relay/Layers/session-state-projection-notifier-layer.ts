@@ -32,12 +32,12 @@ export const SessionStateProjectionNotifierLive: Layer.Layer<
 			// duplicate list is invisible, a missing one is the bug.
 			Effect.zipRight(Ref.set(broadcastPending, false)),
 			// Suspended so each broadcast builds its own effect. The same effect
-			// value is forked repeatedly, and sendDualSessionLists happens to be
+			// value is forked repeatedly, and sendSessionLists happens to be
 			// lazy today; relying on that would make a future eager read here
 			// publish one frozen snapshot forever.
 			Effect.zipRight(
 				Effect.suspend(() =>
-					sessionManagerService.sendDualSessionLists((message) =>
+					sessionManagerService.sendSessionLists((message) =>
 						wsHandler.broadcast(message),
 					),
 				),

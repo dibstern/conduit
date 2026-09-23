@@ -28,7 +28,7 @@ describe("WsRpcServerLayer ListSessions", () => {
 				title: "New Session",
 			} as unknown as SessionDetail),
 		);
-		const sendDualSessionLists = vi.fn((send) =>
+		const sendSessionLists = vi.fn((send) =>
 			Effect.sync(() => {
 				send({
 					type: "session_list" as const,
@@ -40,7 +40,7 @@ describe("WsRpcServerLayer ListSessions", () => {
 		const wsHandler = makeMockWebSocketHandler();
 		const sessionManagerService = makeMockSessionManagerService({
 			createSession,
-			sendDualSessionLists,
+			sendSessionLists,
 		});
 
 		return Effect.gen(function* () {
@@ -74,7 +74,7 @@ describe("WsRpcServerLayer ListSessions", () => {
 					requestId: "request-1",
 				}),
 			);
-			expect(sendDualSessionLists).toHaveBeenCalled();
+			expect(sendSessionLists).toHaveBeenCalled();
 		}).pipe(
 			Effect.scoped,
 			Effect.provide(
@@ -123,7 +123,7 @@ describe("WsRpcServerLayer ListSessions", () => {
 
 	it.effect("deletes a session through the shared session handler", () => {
 		const deleteSession = vi.fn(() => Effect.void);
-		const sendDualSessionLists = vi.fn((send) =>
+		const sendSessionLists = vi.fn((send) =>
 			Effect.sync(() => {
 				send({
 					type: "session_list" as const,
@@ -137,7 +137,7 @@ describe("WsRpcServerLayer ListSessions", () => {
 		});
 		const sessionManagerService = makeMockSessionManagerService({
 			deleteSession,
-			sendDualSessionLists,
+			sendSessionLists,
 		});
 
 		return Effect.gen(function* () {
@@ -155,7 +155,7 @@ describe("WsRpcServerLayer ListSessions", () => {
 				type: "session_deleted",
 				sessionId: "session-1",
 			});
-			expect(sendDualSessionLists).toHaveBeenCalled();
+			expect(sendSessionLists).toHaveBeenCalled();
 		}).pipe(
 			Effect.scoped,
 			Effect.provide(
@@ -181,7 +181,7 @@ describe("WsRpcServerLayer ListSessions", () => {
 		} as unknown as Awaited<ReturnType<typeof api.session.message>>);
 		const setForkEntry = vi.fn(() => Effect.void);
 		const clearPaginationCursor = vi.fn(() => Effect.void);
-		const sendDualSessionLists = vi.fn((send) =>
+		const sendSessionLists = vi.fn((send) =>
 			Effect.sync(() => {
 				send({
 					type: "session_list" as const,
@@ -197,7 +197,7 @@ describe("WsRpcServerLayer ListSessions", () => {
 			),
 			clearPaginationCursor,
 			setForkEntry,
-			sendDualSessionLists,
+			sendSessionLists,
 		});
 
 		return Effect.gen(function* () {
@@ -235,7 +235,7 @@ describe("WsRpcServerLayer ListSessions", () => {
 				"browser-tab-a",
 				"session-forked",
 			);
-			expect(sendDualSessionLists).toHaveBeenCalled();
+			expect(sendSessionLists).toHaveBeenCalled();
 		}).pipe(
 			Effect.scoped,
 			Effect.provide(

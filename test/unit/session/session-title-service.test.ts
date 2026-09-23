@@ -408,11 +408,11 @@ describe("SessionTitleService", () => {
 		const { dir, filename } = makeTempDbPath("conduit-title-apply-");
 		return Effect.gen(function* () {
 			const listsSent = yield* Deferred.make<void>();
-			const sendDualSessionLists = vi.fn(() =>
+			const sendSessionLists = vi.fn(() =>
 				Deferred.succeed(listsSent, undefined),
 			);
 			const sessionManager = makeMockSessionManagerService({
-				sendDualSessionLists,
+				sendSessionLists,
 			});
 			const ws = makeWebSocketHandler();
 			const layer = makePersistenceTestLayer({
@@ -438,7 +438,7 @@ describe("SessionTitleService", () => {
 				expect(yield* getSessionTitle()).toBe(
 					"Investigate OAuth Callback Loop In Production",
 				);
-				expect(sendDualSessionLists).toHaveBeenCalled();
+				expect(sendSessionLists).toHaveBeenCalled();
 				expect(ws.broadcast).not.toHaveBeenCalledWith(
 					expect.objectContaining({
 						type: "system_error",
@@ -454,9 +454,7 @@ describe("SessionTitleService", () => {
 		return Effect.gen(function* () {
 			const listsSent = yield* Deferred.make<void>();
 			const sessionManager = makeMockSessionManagerService({
-				sendDualSessionLists: vi.fn(() =>
-					Deferred.succeed(listsSent, undefined),
-				),
+				sendSessionLists: vi.fn(() => Deferred.succeed(listsSent, undefined)),
 			});
 			const layer = makePersistenceTestLayer({
 				queryFactory: () =>
@@ -486,9 +484,9 @@ describe("SessionTitleService", () => {
 		() => {
 			const { dir, filename } = makeTempDbPath("conduit-title-updated-at-");
 			return Effect.gen(function* () {
-				const sendDualSessionLists = vi.fn(() => Effect.void);
+				const sendSessionLists = vi.fn(() => Effect.void);
 				const sessionManager = makeMockSessionManagerService({
-					sendDualSessionLists,
+					sendSessionLists,
 				});
 				const layer = makePersistenceTestLayer({
 					queryFactory: () =>
@@ -515,7 +513,7 @@ describe("SessionTitleService", () => {
 					);
 
 					expect(yield* getSessionTitle()).toBe("Fix OAuth Callback Loop");
-					expect(sendDualSessionLists).toHaveBeenCalled();
+					expect(sendSessionLists).toHaveBeenCalled();
 				}).pipe(Effect.provide(layer));
 			}).pipe(Effect.ensuring(removeTempDir(dir)));
 		},
@@ -526,9 +524,7 @@ describe("SessionTitleService", () => {
 		return Effect.gen(function* () {
 			const listsSent = yield* Deferred.make<void>();
 			const sessionManager = makeMockSessionManagerService({
-				sendDualSessionLists: vi.fn(() =>
-					Deferred.succeed(listsSent, undefined),
-				),
+				sendSessionLists: vi.fn(() => Deferred.succeed(listsSent, undefined)),
 			});
 			const ws = makeWebSocketHandler();
 			const fallbackNow = new Date(2026, 4, 17, 10, 11, 0);
@@ -584,9 +580,7 @@ describe("SessionTitleService", () => {
 				})(),
 			);
 			const sessionManager = makeMockSessionManagerService({
-				sendDualSessionLists: vi.fn(() =>
-					Deferred.succeed(listsSent, undefined),
-				),
+				sendSessionLists: vi.fn(() => Deferred.succeed(listsSent, undefined)),
 			});
 			const layer = makePersistenceTestLayer({
 				queryFactory,
@@ -669,9 +663,9 @@ describe("SessionTitleService", () => {
 		() => {
 			const { dir, filename } = makeTempDbPath("conduit-title-manual-race-");
 			return Effect.gen(function* () {
-				const sendDualSessionLists = vi.fn(() => Effect.void);
+				const sendSessionLists = vi.fn(() => Effect.void);
 				const sessionManager = makeMockSessionManagerService({
-					sendDualSessionLists,
+					sendSessionLists,
 				});
 				const ws = makeWebSocketHandler();
 				yield* Effect.gen(function* () {
@@ -709,7 +703,7 @@ describe("SessionTitleService", () => {
 							},
 						]);
 						expect(yield* getSessionTitle()).toBe("Claude Session");
-						expect(sendDualSessionLists).not.toHaveBeenCalled();
+						expect(sendSessionLists).not.toHaveBeenCalled();
 
 						yield* projectionRunner.projectEvent(manualRename);
 						expect(yield* getSessionTitle()).toBe("Manual OAuth Title");
@@ -727,9 +721,9 @@ describe("SessionTitleService", () => {
 			);
 			return Effect.gen(function* () {
 				const log = makeMockLogger();
-				const sendDualSessionLists = vi.fn(() => Effect.void);
+				const sendSessionLists = vi.fn(() => Effect.void);
 				const sessionManager = makeMockSessionManagerService({
-					sendDualSessionLists,
+					sendSessionLists,
 				});
 				const ws = makeWebSocketHandler();
 				yield* Effect.gen(function* () {
@@ -770,7 +764,7 @@ describe("SessionTitleService", () => {
 							},
 						]);
 						expect(yield* getSessionTitle()).toBe("Claude Session");
-						expect(sendDualSessionLists).not.toHaveBeenCalled();
+						expect(sendSessionLists).not.toHaveBeenCalled();
 						expect(ws.broadcast).not.toHaveBeenCalledWith(
 							expect.objectContaining({
 								type: "system_error",

@@ -37,7 +37,6 @@ import {
 	getFilteredSessions,
 	sessionState,
 } from "../../../src/lib/frontend/stores/session.svelte.js";
-import { uiState } from "../../../src/lib/frontend/stores/ui.svelte.js";
 import { handleMessage } from "../../../src/lib/frontend/stores/ws-dispatch.js";
 import type { RelayMessage } from "../../../src/lib/frontend/types.js";
 
@@ -47,13 +46,12 @@ const KEEPER = { id: "keeper", title: "Survivor", updatedAt: Date.now() };
 beforeEach(() => {
 	sessionState.currentId = "keeper";
 	sessionState.rootSessions = [VICTIM, KEEPER];
-	sessionState.allSessions = [VICTIM, KEEPER];
+	sessionState.familySessions = [VICTIM, KEEPER];
 	sessionState.searchResults = null;
 	sessionState.searchQuery = "";
 	sessionState.sessions.clear();
 	sessionState.sessions.set(VICTIM.id, VICTIM);
 	sessionState.sessions.set(KEEPER.id, KEEPER);
-	uiState.hideSubagentSessions = true;
 });
 
 const deleteVictim = () =>
@@ -70,8 +68,7 @@ describe("deleted sessions leave the sidebar", () => {
 		expect(sidebarIds()).toEqual(["keeper"]);
 	});
 
-	it("drops the session when subagents are shown (allSessions path)", () => {
-		uiState.hideSubagentSessions = false;
+	it("drops the session from the family cache too", () => {
 		deleteVictim();
 		expect(sidebarIds()).toEqual(["keeper"]);
 	});
@@ -105,7 +102,7 @@ describe("deleted sessions leave the sidebar", () => {
 		handleMessage({
 			type: "session_list",
 			sessions: [KEEPER],
-			roots: false,
+			roots: true,
 		} as RelayMessage);
 		expect(sidebarIds()).toEqual(["keeper"]);
 	});
@@ -131,5 +128,28 @@ describe("deleted sessions leave the sidebar", () => {
 		sessionState.searchQuery = "s";
 		sessionState.searchResults = [VICTIM, KEEPER];
 		expect(sidebarIds()).toEqual(["victim", "keeper"]);
+	});
+});
+
+describe("root rows keep their subtree rollup", () => {
+	it("ignores the root's individual state from a later family snapshot", () => {
+		const rolled = { ...VICTIM, attention: "needs-approval" as const };
+		handleMessage({
+			type: "session_list",
+			sessions: [rolled, KEEPER],
+			roots: true,
+		} as RelayMessage);
+		handleMessage({
+			type: "session_family",
+			rootId: VICTIM.id,
+			sessions: [
+				{ ...VICTIM, attention: "idle" },
+				{ id: "child", title: "Child", updatedAt: 0, parentID: VICTIM.id },
+			],
+		} as RelayMessage);
+		expect(getFilteredSessions()[0]?.attention).toBe("needs-approval");
+		sessionState.searchQuery = "doomed";
+		sessionState.searchResults = [VICTIM];
+		expect(getFilteredSessions()).toEqual([rolled]);
 	});
 });

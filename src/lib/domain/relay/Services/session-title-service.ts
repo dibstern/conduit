@@ -376,7 +376,7 @@ export const makeSessionTitleServiceLive = (
 					if (!applied) return false;
 
 					if (wsHandlerOption._tag === "Some") {
-						yield* sessionManagerService.sendDualSessionLists((message) =>
+						yield* sessionManagerService.sendSessionLists((message) =>
 							wsHandlerOption.value.broadcast(message),
 						);
 					}

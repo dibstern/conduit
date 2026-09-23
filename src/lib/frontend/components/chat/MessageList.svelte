@@ -199,9 +199,19 @@
 		}
 		return ids;
 	});
+	// Pending questions outlive session switches so family replays survive;
+	// only the viewed family's belong in this transcript. An optimistic switch
+	// renders before its family arrives, so a family without the current
+	// session is someone else's.
+	const familyIds = $derived.by(() => {
+		const currentId = sessionState.currentId;
+		const ids = new Set(sessionState.familySessions.map((session) => session.id));
+		return currentId && ids.has(currentId) ? ids : new Set([currentId]);
+	});
 	const orphanQuestions = $derived(
 		permissionsState.pendingQuestions.filter(
 			(question) =>
+				familyIds.has(question.sessionId) &&
 				!transcriptToolIds.has(question.toolId) &&
 				(!question.toolUseId || !transcriptToolIds.has(question.toolUseId)),
 		),

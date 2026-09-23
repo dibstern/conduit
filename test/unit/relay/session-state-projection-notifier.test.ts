@@ -14,13 +14,13 @@ describe("SessionStateProjectionNotifier", () => {
 	it.effect("coalesces a burst of projected events into one broadcast", () =>
 		Effect.gen(function* () {
 			const wsHandler = makeMockWebSocketHandler();
-			const sendDualSessionLists = vi.fn((send) =>
+			const sendSessionLists = vi.fn((send) =>
 				Effect.sync(() =>
 					send({ type: "session_list", sessions: [], roots: true }),
 				),
 			);
 			const sessionManagerService = makeMockSessionManagerService({
-				sendDualSessionLists,
+				sendSessionLists,
 			});
 			const layer = SessionStateProjectionNotifierLive.pipe(
 				Layer.provide(
@@ -38,7 +38,7 @@ describe("SessionStateProjectionNotifier", () => {
 				}
 				yield* TestClock.adjust("150 millis");
 
-				expect(sendDualSessionLists).toHaveBeenCalledTimes(1);
+				expect(sendSessionLists).toHaveBeenCalledTimes(1);
 				expect(wsHandler.broadcast).toHaveBeenCalledTimes(1);
 			}).pipe(Effect.provide(layer));
 		}),
@@ -55,13 +55,13 @@ describe("SessionStateProjectionNotifier", () => {
 				const started = yield* Deferred.make<void>();
 				const release = yield* Deferred.make<void>();
 				const wsHandler = makeMockWebSocketHandler();
-				const sendDualSessionLists = vi.fn(() =>
+				const sendSessionLists = vi.fn(() =>
 					Deferred.succeed(started, undefined).pipe(
 						Effect.zipRight(Deferred.await(release)),
 					),
 				);
 				const sessionManagerService = makeMockSessionManagerService({
-					sendDualSessionLists,
+					sendSessionLists,
 				});
 				const layer = SessionStateProjectionNotifierLive.pipe(
 					Layer.provide(
@@ -85,7 +85,7 @@ describe("SessionStateProjectionNotifier", () => {
 					// Under a real clock that gap is microseconds against 150ms.
 					yield* Effect.yieldNow();
 					yield* TestClock.adjust("150 millis");
-					expect(sendDualSessionLists).toHaveBeenCalledTimes(2);
+					expect(sendSessionLists).toHaveBeenCalledTimes(2);
 
 					yield* Deferred.succeed(release, undefined);
 				}).pipe(Effect.provide(layer));

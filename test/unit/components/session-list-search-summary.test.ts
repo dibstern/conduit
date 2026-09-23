@@ -11,15 +11,13 @@ import {
 	syncSlugState,
 } from "../../../src/lib/frontend/stores/router.svelte.js";
 import { sessionState } from "../../../src/lib/frontend/stores/session.svelte.js";
-import { uiState } from "../../../src/lib/frontend/stores/ui.svelte.js";
 
 describe("SessionList search summary", () => {
 	beforeEach(() => {
 		routerState.path = "/p/current-project/";
 		syncSlugState(routerState.path);
-		uiState.hideSubagentSessions = true;
 		sessionState.rootSessions = [];
-		sessionState.allSessions = [];
+		sessionState.familySessions = [];
 		sessionState.daemonSessions = [];
 		sessionState.daemonUnavailableProjects = [];
 		sessionState.currentId = null;
