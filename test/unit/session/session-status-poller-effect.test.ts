@@ -20,6 +20,7 @@ import {
 	type StatusCorrection,
 } from "../../../src/lib/domain/relay/Services/session-status-poller.js";
 import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
+import { ReadQueryEffectTag } from "../../../src/lib/persistence/effect/read-query-effect.js";
 import { readSessionStatusesFromEffect } from "../../../src/lib/session/session-status-effect.js";
 
 const makeTestLayer = () =>
@@ -28,6 +29,69 @@ const makeTestLayer = () =>
 	);
 
 describe("SessionStatusPoller Effect", () => {
+	it.effect(
+		"reconciliation reads only non-idle or reported rows and re-reads after corrections",
+		() => {
+			const dir = mkdtempSync(join(tmpdir(), "conduit-reconcile-read-"));
+			return Effect.gen(function* () {
+				const sql = yield* SqlClient.SqlClient;
+				const queries = yield* ReadQueryEffectTag;
+				const now = Date.now();
+				yield* sql`INSERT INTO sessions (id, provider, title, status, created_at, updated_at)
+				VALUES ('idle', 'opencode', '', 'idle', 0, 0),
+				('reactivated', 'opencode', '', 'idle', 0, 0),
+				('completed', 'opencode', '', 'busy', 0, 0),
+				('stale', 'claude', '', 'busy', 0, 0),
+				('retry', 'opencode', '', 'retry', 0, 0),
+				('fresh', 'opencode', '', 'busy', 0, ${now})`;
+				const ids = ["reactivated", "completed", "missing"];
+				const before = yield* queries.listSessions();
+				const narrowed = yield* queries.getSessionsForReconciliation(ids);
+				expect(narrowed).toEqual(
+					before
+						.filter((row) => row.status !== "idle" || ids.includes(row.id))
+						.map(({ id, status, updated_at }) => ({ id, status, updated_at })),
+				);
+				const reads: string[][] = [];
+				const injected: Array<{ sessionId: string; status: string }> = [];
+				yield* reconcileNow({
+					getRestStatuses: () =>
+						Effect.succeed({
+							reactivated: { type: "busy" },
+							completed: { type: "idle" },
+							missing: { type: "busy" },
+						}),
+					getProjectedSessions: (reportedIds) =>
+						queries.getSessionsForReconciliation(reportedIds).pipe(
+							Effect.tap((rows) =>
+								Effect.sync(() => {
+									reads.push(rows.map((row) => row.id));
+								}),
+							),
+						),
+					injectCorrectiveEvent: (sessionId, status) =>
+						Effect.gen(function* () {
+							injected.push({ sessionId, status });
+							yield* sql`UPDATE sessions SET status = ${status}, updated_at = ${now} WHERE id = ${sessionId}`;
+						}),
+				});
+				expect(injected).toEqual([
+					{ sessionId: "reactivated", status: "busy" },
+					{ sessionId: "completed", status: "idle" },
+					{ sessionId: "stale", status: "idle" },
+				]);
+				expect(reads).toHaveLength(2);
+				expect(reads[0]).not.toContain("idle");
+				expect(reads[1]).not.toContain("completed");
+				expect(reads[1]).toContain("reactivated");
+			}).pipe(
+				Effect.provide(makePersistenceEffectLayer(join(dir, "events.db"))),
+				Effect.ensuring(
+					Effect.sync(() => rmSync(dir, { recursive: true, force: true })),
+				),
+			);
+		},
+	);
 	const mockApi = {
 		getSessionStatuses: vi.fn().mockReturnValue(
 			Effect.succeed([

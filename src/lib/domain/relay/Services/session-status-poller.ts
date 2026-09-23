@@ -500,10 +500,11 @@ export const poll = (deps: PollDeps) =>
 export interface ReconciliationDeps {
 	readonly getRestStatuses: () => Effect.Effect<
 		Record<string, SessionStatus>,
-		// biome-ignore lint/suspicious/noExplicitAny: callers provide various error types; handled internally
-		any
+		unknown
 	>;
-	readonly getProjectedSessions: () => Effect.Effect<
+	readonly getProjectedSessions: (
+		reportedIds: readonly string[],
+	) => Effect.Effect<
 		ReadonlyArray<{
 			id: string;
 			status: string;
@@ -522,7 +523,9 @@ const runReconciliation = (deps: ReconciliationDeps) =>
 		// REST reconciliation
 		yield* Effect.gen(function* () {
 			const restStatuses = yield* deps.getRestStatuses();
-			const sessions = yield* deps.getProjectedSessions();
+			const sessions = yield* deps.getProjectedSessions(
+				Object.keys(restStatuses),
+			);
 			const projectedMap = new Map<string, string>();
 			for (const session of sessions) {
 				projectedMap.set(session.id, session.status);
@@ -545,7 +548,7 @@ const runReconciliation = (deps: ReconciliationDeps) =>
 
 		// Staleness check
 		yield* Effect.gen(function* () {
-			const sessions = yield* deps.getProjectedSessions();
+			const sessions = yield* deps.getProjectedSessions([]);
 			const now = Date.now();
 			for (const session of sessions) {
 				if (

@@ -31,6 +31,7 @@ import {
 	assembleContext,
 	evaluateAll,
 	initialMonitoringState,
+	selectMonitoringCandidates,
 } from "./monitoring-reducer.js";
 import type {
 	MonitoringEffect,
@@ -235,27 +236,41 @@ const executeMonitoringEffectsEffect = (
 	pipelineDeps: Omit<PipelineDeps, "processingTimeouts">,
 	doneDeliveredByPrimary: Set<string>,
 	monitoringActive: () => boolean,
+	// False once a newer reduction replaced this session's phase: the newer
+	// tick owns the session and this batch's effects for it are obsolete.
+	isCurrent: (sessionId: string) => boolean,
 ) =>
 	Effect.gen(function* () {
 		for (const effect of effects) {
+			if (!isCurrent(effect.sessionId)) continue;
 			switch (effect.effect) {
 				case "start-poller": {
 					if (!monitoringActive()) break;
-					const messages = yield* Effect.tryPromise(() =>
-						deps.client.session.messages(effect.sessionId),
-					).pipe(
-						Effect.catchAll((err) =>
-							Effect.sync(() => {
-								deps.statusLog.warn(
-									`Failed to seed poller for ${effect.sessionId.slice(0, 12)}, will retry: ${err instanceof Error ? err.message : err}`,
-								);
-								return undefined;
-							}),
-						),
-					);
-					if (!monitoringActive() || messages === undefined) break;
-					yield* Effect.sync(() =>
-						deps.pollerManager.startPolling(effect.sessionId, messages),
+					const sessionId = effect.sessionId;
+					// Seed off the tick: a hung messages() call must not delay
+					// the effects that follow it (other sessions' stops and dones).
+					yield* Effect.forkDaemon(
+						Effect.gen(function* () {
+							const messages = yield* Effect.tryPromise(() =>
+								deps.client.session.messages(sessionId),
+							).pipe(
+								Effect.catchAll((err) =>
+									Effect.sync(() => {
+										deps.statusLog.warn(
+											`Failed to seed poller for ${sessionId.slice(0, 12)}, will retry: ${err instanceof Error ? err.message : err}`,
+										);
+										return undefined;
+									}),
+								),
+							);
+							if (messages === undefined) return;
+							yield* Effect.sync(() => {
+								// Check and start without yielding to a newer reduction.
+								if (monitoringActive() && isCurrent(sessionId)) {
+									deps.pollerManager.startPolling(sessionId, messages);
+								}
+							});
+						}),
 					);
 					break;
 				}
@@ -430,11 +445,13 @@ export function wireMonitoring(
 
 		if (!monitoringActive) return;
 
-		// ── Monitoring reducer: evaluate all sessions ──────────────────────
+		// Keep present idle candidates explicit; only missing statuses are deletions.
 		const parentMap = sessionService.getSessionParentMap();
 		const now = Date.now();
+		const prevState = getMonitoringState();
 		const contexts = new Map<string, SessionEvalContext>();
-		for (const [sessionId, status] of Object.entries(statuses)) {
+		for (const sessionId of selectMonitoringCandidates(prevState, statuses)) {
+			const status = statuses[sessionId];
 			if (status == null) continue;
 			contexts.set(
 				sessionId,
@@ -450,7 +467,6 @@ export function wireMonitoring(
 			);
 		}
 
-		const prevState = getMonitoringState();
 		const result = evaluateAll(prevState, contexts, pollerGatingCfg);
 		setMonitoringState(result.state);
 
@@ -525,7 +541,13 @@ export const wireMonitoringEffect = (
 		};
 
 		const runFork = Runtime.runFork(runtime);
+		const tickSemaphore = yield* Effect.makeSemaphore(1);
+		// Ticks can reach reduction out of order (the list broadcast before it is
+		// async), so a snapshot older than the last reduced one is dropped.
+		let capturedTicks = 0;
+		let lastReducedTick = 0;
 		yield* statusPoller.on("changed", (statuses, statusesChanged) => {
+			const tick = ++capturedTicks;
 			runFork(
 				Effect.gen(function* () {
 					if (!monitoringActive) return;
@@ -550,27 +572,40 @@ export const wireMonitoringEffect = (
 					if (!monitoringActive) return;
 
 					const parentMap = yield* sessionService.getSessionParentMap();
-					const now = Date.now();
-					const contexts = new Map<string, SessionEvalContext>();
-					for (const [sessionId, status] of Object.entries(statuses)) {
-						if (status == null) continue;
-						contexts.set(
-							sessionId,
-							assembleContext(
-								sessionId,
-								status,
-								{ connected: sseStream.isConnected() },
-								sseTracker,
-								parentMap,
-								(sid) => wsHandler.getClientsForSession(sid).length > 0,
-								now,
-							),
-						);
-					}
+					const reduced = yield* tickSemaphore.withPermits(1)(
+						Effect.sync(() => {
+							if (tick < lastReducedTick) return undefined;
+							lastReducedTick = tick;
+							const now = Date.now();
+							const prevState = getMonitoringState();
+							const contexts = new Map<string, SessionEvalContext>();
+							for (const sessionId of selectMonitoringCandidates(
+								prevState,
+								statuses,
+							)) {
+								const status = statuses[sessionId];
+								if (status == null) continue;
+								contexts.set(
+									sessionId,
+									assembleContext(
+										sessionId,
+										status,
+										{ connected: sseStream.isConnected() },
+										sseTracker,
+										parentMap,
+										(sid) => wsHandler.getClientsForSession(sid).length > 0,
+										now,
+									),
+								);
+							}
 
-					const prevState = getMonitoringState();
-					const result = evaluateAll(prevState, contexts, pollerGatingCfg);
-					setMonitoringState(result.state);
+							const result = evaluateAll(prevState, contexts, pollerGatingCfg);
+							setMonitoringState(result.state);
+							return { prevState, result };
+						}),
+					);
+					if (reduced === undefined) return;
+					const { prevState, result } = reduced;
 
 					if (result.effects.length > 0) {
 						yield* executeMonitoringEffectsEffect(
@@ -579,6 +614,10 @@ export const wireMonitoringEffect = (
 							pipelineDeps,
 							doneDeliveredByPrimary,
 							() => monitoringActive,
+							// Continuing phases retain their object; any transition replaces it.
+							(sessionId) =>
+								getMonitoringState().sessions.get(sessionId) ===
+								result.state.sessions.get(sessionId),
 						);
 					}
 

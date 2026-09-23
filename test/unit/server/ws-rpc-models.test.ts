@@ -45,6 +45,7 @@ const makeReadQuery = (
 	getSessionStatus: () => Effect.succeed(undefined),
 	getSession: () => Effect.succeed(undefined),
 	getAllSessionStatuses: () => Effect.succeed({}),
+	getSessionsForReconciliation: () => Effect.succeed([]),
 	listSessions: () => Effect.succeed([]),
 	countPendingApprovalsBySession: () => Effect.succeed([]),
 	getSessionMessagesWithParts: () => Effect.succeed([]),
