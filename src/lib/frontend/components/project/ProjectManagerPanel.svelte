@@ -96,11 +96,8 @@
 			addError = "Directory path is required";
 			return;
 		}
+		// AddProject is daemon-scoped, so the first project can be added with none attached.
 		const projectSlug = getRpcProjectSlug();
-		if (projectSlug == null) {
-			addError = "No active project connection";
-			return;
-		}
 		adding = true;
 		addError = "";
 		const timeout = window.setTimeout(() => {
@@ -110,7 +107,7 @@
 			}
 		}, ADD_PROJECT_TIMEOUT_MS);
 		void addProjectRpc({
-			projectSlug,
+			...(projectSlug != null ? { projectSlug } : {}),
 			directory: dir,
 			...(addInstanceId ? { instanceId: addInstanceId } : {}),
 		})

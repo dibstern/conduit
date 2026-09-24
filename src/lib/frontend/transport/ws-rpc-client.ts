@@ -72,7 +72,7 @@ export interface GetProjectsRpcInput {
 }
 
 export interface AddProjectRpcInput {
-	readonly projectSlug: string;
+	readonly projectSlug?: string;
 	readonly directory: string;
 	readonly instanceId?: string;
 }
@@ -467,7 +467,9 @@ const callAddProject = (input: AddProjectRpcInput) =>
 		Effect.gen(function* () {
 			const client = yield* RpcClient.make(WsRpcGroup);
 			return yield* client.AddProject({
-				projectSlug: input.projectSlug,
+				...(input.projectSlug != null
+					? { projectSlug: input.projectSlug }
+					: {}),
 				directory: input.directory,
 				...(input.instanceId != null ? { instanceId: input.instanceId } : {}),
 			});
