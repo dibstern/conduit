@@ -1,4 +1,4 @@
-// Shared SQLite projection row types used by legacy and Effect read services.
+// SQLite projection row types returned by the Effect read services.
 
 export interface SessionRow {
 	id: string;
@@ -67,43 +67,8 @@ export interface MessageWithParts extends MessageRow {
 	};
 }
 
-export interface TurnRow {
-	id: string;
-	session_id: string;
-	state: string;
-	user_message_id: string | null;
-	assistant_message_id: string | null;
-	cost: number | null;
-	tokens_in: number | null;
-	tokens_out: number | null;
-	requested_at: number;
-	started_at: number | null;
-	completed_at: number | null;
-	requested_model: string | null;
-	expected_model: string | null;
-	actual_model: string | null;
-}
-
 export interface TurnModelExecutionRow {
 	requested_model: string | null;
 	expected_model: string | null;
 	actual_model: string;
-}
-
-export interface PendingApprovalRow {
-	id: string;
-	session_id: string;
-	turn_id: string | null;
-	type: string;
-	status: string;
-	tool_name: string | null;
-	input: string | null;
-	decision: string | null;
-	created_at: number;
-	resolved_at: number | null;
-}
-
-export interface ForkMetadata {
-	parentId: string;
-	forkPointEvent: string | null;
 }

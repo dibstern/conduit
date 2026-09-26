@@ -11,7 +11,6 @@ import {
 	ProjectionError,
 } from "../../../src/lib/persistence/effect/projectors-effect.js";
 import type { StoredEvent } from "../../../src/lib/persistence/events.js";
-import { ReadQueryService } from "../../../src/lib/persistence/read-query-service.js";
 import { messageRowsToHistory } from "../../../src/lib/persistence/session-history-adapter.js";
 import {
 	type EffectProjectionHarness,
@@ -96,9 +95,8 @@ describe("MessageProjector resilience", () => {
 	}
 
 	/** Full pipeline: SQLite → history → chat messages */
-	function readPipeline(sessionId: string) {
-		const readQuery = new ReadQueryService(harness.readClient());
-		const rows = readQuery.getSessionMessagesWithParts(sessionId);
+	async function readPipeline(sessionId: string) {
+		const rows = await harness.sessionMessagesWithParts(sessionId);
 		const { messages } = messageRowsToHistory(rows, { pageSize: 50 });
 		return historyToChatMessages(messages);
 	}
@@ -184,7 +182,7 @@ describe("MessageProjector resilience", () => {
 			expect(message).toHaveLength(0);
 
 			// Pipeline read on the deleted session returns empty — no orphan data
-			const chat = readPipeline(SESSION_A);
+			const chat = await readPipeline(SESSION_A);
 			expect(chat.filter((m) => m.type === "thinking")).toHaveLength(0);
 			expect(chat.filter((m) => m.type === "assistant")).toHaveLength(0);
 		});
@@ -213,7 +211,7 @@ describe("MessageProjector resilience", () => {
 			).rejects.toThrow(/FOREIGN KEY|constraint/i);
 
 			// Pipeline read on the deleted session returns empty — no data corruption
-			const chat = readPipeline(SESSION_B);
+			const chat = await readPipeline(SESSION_B);
 			expect(chat).toHaveLength(0);
 		});
 	});
@@ -288,7 +286,7 @@ describe("MessageProjector resilience", () => {
 				),
 			);
 
-			const chat = readPipeline(SESSION_A);
+			const chat = await readPipeline(SESSION_A);
 			const thinking = chat.find(
 				(m): m is ThinkingMessage => m.type === "thinking",
 			);
@@ -340,7 +338,7 @@ describe("MessageProjector resilience", () => {
 				),
 			);
 
-			const chat = readPipeline(SESSION_A);
+			const chat = await readPipeline(SESSION_A);
 			const assistant = chat.find((m) => m.type === "assistant");
 			expect(assistant).toBeDefined();
 		});
@@ -416,7 +414,7 @@ describe("MessageProjector resilience", () => {
 				),
 			);
 
-			const chat = readPipeline(SESSION_A);
+			const chat = await readPipeline(SESSION_A);
 			const thinking = chat.find(
 				(m): m is ThinkingMessage => m.type === "thinking",
 			);
@@ -497,7 +495,7 @@ describe("MessageProjector resilience", () => {
 				),
 			);
 
-			const chat = readPipeline(SESSION_A);
+			const chat = await readPipeline(SESSION_A);
 			const thinking = chat.find(
 				(m): m is ThinkingMessage => m.type === "thinking",
 			);
@@ -642,7 +640,7 @@ describe("MessageProjector resilience", () => {
 				),
 			);
 
-			const chat = readPipeline(SESSION_A);
+			const chat = await readPipeline(SESSION_A);
 			const thinking = chat.find(
 				(m): m is ThinkingMessage => m.type === "thinking",
 			);
@@ -726,7 +724,7 @@ describe("MessageProjector resilience", () => {
 				),
 			);
 
-			const chat = readPipeline(SESSION_A);
+			const chat = await readPipeline(SESSION_A);
 			const thinking = chat.find(
 				(m): m is ThinkingMessage => m.type === "thinking",
 			);
@@ -803,7 +801,7 @@ describe("MessageProjector resilience", () => {
 				),
 			);
 
-			const chat = readPipeline(SESSION_A);
+			const chat = await readPipeline(SESSION_A);
 			const thinking = chat.find(
 				(m): m is ThinkingMessage => m.type === "thinking",
 			);
@@ -883,7 +881,7 @@ describe("MessageProjector resilience", () => {
 				),
 			);
 
-			const chat = readPipeline(SESSION_A);
+			const chat = await readPipeline(SESSION_A);
 			const assistant = chat.find(
 				(m): m is AssistantMessage => m.type === "assistant",
 			);
@@ -977,7 +975,7 @@ describe("MessageProjector resilience", () => {
 				),
 			);
 
-			const chat = readPipeline(SESSION_A);
+			const chat = await readPipeline(SESSION_A);
 			const thinking = chat.find(
 				(m): m is ThinkingMessage => m.type === "thinking",
 			);
@@ -1118,7 +1116,7 @@ describe("MessageProjector resilience", () => {
 				),
 			);
 
-			const chat = readPipeline(SESSION_A);
+			const chat = await readPipeline(SESSION_A);
 			const thinkingBlocks = chat.filter(
 				(m): m is ThinkingMessage => m.type === "thinking",
 			);
@@ -1275,7 +1273,7 @@ describe("MessageProjector resilience", () => {
 				),
 			);
 
-			const chat = readPipeline(SESSION_A);
+			const chat = await readPipeline(SESSION_A);
 			const types = chat
 				.filter((m) => ["thinking", "tool", "assistant"].includes(m.type))
 				.map((m) => m.type);
@@ -1332,7 +1330,7 @@ describe("MessageProjector resilience", () => {
 			).rejects.toThrow("Simulated disk error");
 
 			// State is valid: thinking part exists with empty text from start
-			const chat = readPipeline(SESSION_A);
+			const chat = await readPipeline(SESSION_A);
 			const thinking = chat.find(
 				(m): m is ThinkingMessage => m.type === "thinking",
 			);
@@ -1451,12 +1449,12 @@ describe("MessageProjector resilience", () => {
 			);
 
 			// Session A: thinking only, no assistant text
-			const chatA = readPipeline(SESSION_A);
+			const chatA = await readPipeline(SESSION_A);
 			expect(chatA.some((m) => m.type === "thinking")).toBe(true);
 			expect(chatA.some((m) => m.type === "assistant")).toBe(false);
 
 			// Session B: assistant text only, no thinking
-			const chatB = readPipeline(SESSION_B);
+			const chatB = await readPipeline(SESSION_B);
 			expect(chatB.some((m) => m.type === "assistant")).toBe(true);
 			expect(chatB.some((m) => m.type === "thinking")).toBe(false);
 		});
@@ -1505,8 +1503,8 @@ describe("MessageProjector resilience", () => {
 			);
 
 			// Message lands in SESSION_B despite event being "from" SESSION_A
-			const chatB = readPipeline(SESSION_B);
-			const chatA = readPipeline(SESSION_A);
+			const chatB = await readPipeline(SESSION_B);
+			const chatA = await readPipeline(SESSION_A);
 
 			// Documents the risk: message.created uses payload.sessionId,
 			// so the message row's session_id = SESSION_B
@@ -1590,7 +1588,7 @@ describe("MessageProjector resilience", () => {
 				),
 			);
 
-			const chat = readPipeline(SESSION_A);
+			const chat = await readPipeline(SESSION_A);
 			const thinking = chat.find(
 				(m): m is ThinkingMessage => m.type === "thinking",
 			);
@@ -1643,7 +1641,7 @@ describe("MessageProjector resilience", () => {
 			);
 
 			// Table still exists (not dropped)
-			const chat = readPipeline(SESSION_A);
+			const chat = await readPipeline(SESSION_A);
 			const assistant = chat.find((m) => m.type === "assistant");
 			expect(assistant).toBeDefined();
 		});
@@ -1715,7 +1713,7 @@ describe("MessageProjector resilience", () => {
 				),
 			);
 
-			const chat = readPipeline(SESSION_A);
+			const chat = await readPipeline(SESSION_A);
 			const thinking = chat.find(
 				(m): m is ThinkingMessage => m.type === "thinking",
 			);
@@ -1793,7 +1791,7 @@ describe("MessageProjector resilience", () => {
 				),
 			);
 
-			const chat = readPipeline(SESSION_A);
+			const chat = await readPipeline(SESSION_A);
 			const thinking = chat.find(
 				(m): m is ThinkingMessage => m.type === "thinking",
 			);
@@ -1879,7 +1877,7 @@ describe("MessageProjector resilience", () => {
 				"part-emoji",
 				"🧠 Let me think 🤔💭",
 			);
-			const chat = readPipeline(SESSION_A);
+			const chat = await readPipeline(SESSION_A);
 			const thinking = chat.find(
 				(m): m is ThinkingMessage => m.type === "thinking",
 			);
@@ -1894,7 +1892,7 @@ describe("MessageProjector resilience", () => {
 				"part-cjk",
 				"这是一个测试。思考中…",
 			);
-			const chat = readPipeline(SESSION_A);
+			const chat = await readPipeline(SESSION_A);
 			const thinking = chat.find(
 				(m): m is ThinkingMessage => m.type === "thinking",
 			);
@@ -1909,7 +1907,7 @@ describe("MessageProjector resilience", () => {
 				"part-rtl",
 				"هذا اختبار للتفكير",
 			);
-			const chat = readPipeline(SESSION_A);
+			const chat = await readPipeline(SESSION_A);
 			const thinking = chat.find(
 				(m): m is ThinkingMessage => m.type === "thinking",
 			);
@@ -1921,7 +1919,7 @@ describe("MessageProjector resilience", () => {
 		it("surrogate pairs (𝕳𝖊𝖑𝖑𝖔) round-trip through pipeline", async () => {
 			const surrogatePairText = "𝕳𝖊𝖑𝖑𝖔 𝖂𝖔𝖗𝖑𝖉";
 			await projectThinkingWithText("msg-surr", "part-surr", surrogatePairText);
-			const chat = readPipeline(SESSION_A);
+			const chat = await readPipeline(SESSION_A);
 			const thinking = chat.find(
 				(m): m is ThinkingMessage => m.type === "thinking",
 			);
@@ -1933,7 +1931,7 @@ describe("MessageProjector resilience", () => {
 		it("null bytes in text — stored as-is by SQLite TEXT column", async () => {
 			const nullByteText = "before\0after";
 			await projectThinkingWithText("msg-null", "part-null", nullByteText);
-			const chat = readPipeline(SESSION_A);
+			const chat = await readPipeline(SESSION_A);
 			const thinking = chat.find(
 				(m): m is ThinkingMessage => m.type === "thinking",
 			);
@@ -2019,7 +2017,7 @@ describe("MessageProjector resilience", () => {
 				),
 			);
 
-			const chat = readPipeline(SESSION_A);
+			const chat = await readPipeline(SESSION_A);
 			const thinking = chat.find(
 				(m): m is ThinkingMessage => m.type === "thinking",
 			);
@@ -2077,7 +2075,7 @@ describe("MessageProjector resilience", () => {
 			);
 
 			// Pipeline should not crash — orphan end may or may not create a part
-			expect(() => readPipeline(SESSION_A)).not.toThrow();
+			await expect(readPipeline(SESSION_A)).resolves.toBeDefined();
 		});
 
 		it("turn.completed before any parts — message exists with no content", async () => {
@@ -2109,7 +2107,7 @@ describe("MessageProjector resilience", () => {
 				),
 			);
 
-			const chat = readPipeline(SESSION_A);
+			const chat = await readPipeline(SESSION_A);
 			// No assistant or thinking messages — turn had no content
 			expect(chat.filter((m) => m.type === "assistant")).toHaveLength(0);
 			expect(chat.filter((m) => m.type === "thinking")).toHaveLength(0);
@@ -2168,7 +2166,7 @@ describe("MessageProjector resilience", () => {
 				),
 			);
 
-			const chat = readPipeline(SESSION_A);
+			const chat = await readPipeline(SESSION_A);
 			const thinking = chat.find(
 				(m): m is ThinkingMessage => m.type === "thinking",
 			);
@@ -2236,7 +2234,7 @@ describe("MessageProjector resilience", () => {
 				),
 			);
 
-			const chat = readPipeline(SESSION_A);
+			const chat = await readPipeline(SESSION_A);
 			const assistant = chat.find((m) => m.type === "assistant");
 			expect(assistant).toBeDefined();
 		});
@@ -2283,7 +2281,7 @@ describe("MessageProjector resilience", () => {
 			await project(turnEvent);
 			await expect(project(turnEvent)).resolves.toBeUndefined();
 
-			const chat = readPipeline(SESSION_A);
+			const chat = await readPipeline(SESSION_A);
 			const assistant = chat.find((m) => m.type === "assistant");
 			expect(assistant).toBeDefined();
 		});
@@ -2354,7 +2352,7 @@ describe("MessageProjector resilience", () => {
 				),
 			);
 
-			const chat = readPipeline(SESSION_A);
+			const chat = await readPipeline(SESSION_A);
 			const thinking = chat.find(
 				(m): m is ThinkingMessage => m.type === "thinking",
 			);
@@ -2405,7 +2403,7 @@ describe("MessageProjector resilience", () => {
 				),
 			);
 
-			const chat = readPipeline(SESSION_A);
+			const chat = await readPipeline(SESSION_A);
 			const assistant = chat.find((m) => m.type === "assistant");
 			expect(assistant).toBeDefined();
 			// KNOWN RISK: same as thinking.delta doubling — text.delta also uses

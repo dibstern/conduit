@@ -2,6 +2,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { RpcTest } from "@effect/rpc";
+import { SqlClient } from "@effect/sql";
 import { it } from "@effect/vitest";
 import { Effect } from "effect";
 import { afterEach, describe, expect } from "vitest";
@@ -9,11 +10,9 @@ import { WsRpcGroup } from "../../../src/lib/contracts/ws-rpc.js";
 import { DaemonWsRpcHandlersTag } from "../../../src/lib/domain/daemon/Layers/daemon-ws-rpc-layer.js";
 import { listDaemonSessions } from "../../../src/lib/domain/daemon/Services/daemon-session-reader.js";
 import { makeProjectRegistryLive } from "../../../src/lib/domain/daemon/Services/project-registry-service.js";
-import { runMigrations } from "../../../src/lib/persistence/migrations.js";
-import { schemaMigrations } from "../../../src/lib/persistence/schema.js";
-import { SqliteClient } from "../../../src/lib/persistence/sqlite-client.js";
 import { makeRoutedWsRpcServerLayer } from "../../../src/lib/server/ws-rpc.js";
 import { makeDaemonRpcTestLayer } from "../../helpers/daemon-rpc.js";
+import { writeEventStore } from "../../helpers/persistence-factories.js";
 
 const temporaryRoots: string[] = [];
 
@@ -44,45 +43,31 @@ const makeProjectStore = (
 ): void => {
 	const conduitDirectory = join(projectDirectory, ".conduit");
 	mkdirSync(conduitDirectory, { recursive: true });
-	const database = SqliteClient.open(join(conduitDirectory, "events.db"));
-	try {
-		runMigrations(database, schemaMigrations);
-		for (const session of sessions) {
-			database.execute(
-				`INSERT INTO sessions (
+	writeEventStore(
+		join(conduitDirectory, "events.db"),
+		Effect.gen(function* () {
+			const sql = yield* SqlClient.SqlClient;
+			for (const session of sessions) {
+				yield* sql`INSERT INTO sessions (
 					id, provider, title, status, parent_id, last_message_at,
 					read_at, settled_at, pinned_at, created_at, updated_at
-				) VALUES (?, 'opencode', ?, 'idle', ?, ?, ?, ?, ?, ?, ?)`,
-				[
-					session.id,
-					session.title,
-					session.parentId ?? null,
-					session.lastMessageAt ?? null,
-					session.readAt ?? null,
-					session.settledAt ?? null,
-					session.pinnedAt ?? null,
-					session.updatedAt,
-					session.updatedAt,
-				],
-			);
-		}
-		for (const approval of pendingApprovals) {
-			database.execute(
-				`INSERT INTO pending_approvals (
+				) VALUES (
+					${session.id}, 'opencode', ${session.title}, 'idle',
+					${session.parentId ?? null}, ${session.lastMessageAt ?? null},
+					${session.readAt ?? null}, ${session.settledAt ?? null},
+					${session.pinnedAt ?? null}, ${session.updatedAt}, ${session.updatedAt}
+				)`;
+			}
+			for (const approval of pendingApprovals) {
+				yield* sql`INSERT INTO pending_approvals (
 					id, session_id, type, status, created_at
-				) VALUES (?, ?, ?, ?, ?)`,
-				[
-					approval.id,
-					approval.sessionId,
-					approval.type,
-					approval.status,
-					Date.now(),
-				],
-			);
-		}
-	} finally {
-		database.close();
-	}
+				) VALUES (
+					${approval.id}, ${approval.sessionId}, ${approval.type},
+					${approval.status}, ${Date.now()}
+				)`;
+			}
+		}),
+	);
 };
 
 afterEach(() => {

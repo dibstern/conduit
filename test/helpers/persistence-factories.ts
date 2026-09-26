@@ -1,10 +1,13 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { SqlClient } from "@effect/sql";
 import { SqliteClient as EffectSqliteClient } from "@effect/sql-sqlite-node";
-import { Effect, Layer } from "effect";
+import { Effect, Layer, ManagedRuntime } from "effect";
 import { makePersistenceServiceLive } from "../../src/lib/domain/persistence/Services/persistence-service.js";
-import { EventStore } from "../../src/lib/persistence/event-store.js";
+import { makePersistenceEffectLayer } from "../../src/lib/persistence/effect/live.js";
+import { makeEffectSqlMigrator } from "../../src/lib/persistence/effect/migrations.js";
+import { ReadQueryEffectTag } from "../../src/lib/persistence/effect/read-query-effect.js";
 import {
 	type CanonicalEvent,
 	canonicalEvent,
@@ -15,9 +18,7 @@ import {
 	type StoredEvent,
 	validateEventPayload,
 } from "../../src/lib/persistence/events.js";
-import { runMigrations } from "../../src/lib/persistence/migrations.js";
-import { schemaMigrations } from "../../src/lib/persistence/schema.js";
-import { SqliteClient } from "../../src/lib/persistence/sqlite-client.js";
+import type { MessageWithParts } from "../../src/lib/persistence/read-model-types.js";
 
 export const FIXED_TEST_TIMESTAMP = 1_000_000_000_000;
 export const FIXED_TEST_TIMESTAMP_2 = 1_000_000_060_000;
@@ -183,35 +184,39 @@ export interface MessageSeedOpts {
 	}>;
 }
 
-export interface TurnSeedOpts {
-	state?: "pending" | "running" | "completed" | "interrupted" | "error";
-	userMessageId?: string;
-	assistantMessageId?: string;
-	cost?: number;
-	tokensIn?: number;
-	tokensOut?: number;
-	requestedAt?: number;
-	startedAt?: number;
-	completedAt?: number;
-}
-
 export interface TestHarness {
-	readonly db: SqliteClient;
-	readonly eventStore: EventStore;
-	seedSession: (id: string, opts?: SessionSeedOpts) => void;
-	seedMessage: (id: string, sessionId: string, opts?: MessageSeedOpts) => void;
-	seedTurn: (id: string, sessionId: string, opts?: TurnSeedOpts) => void;
-	close: () => void;
+	/** A raw statement that bypasses the projectors, e.g. to probe a constraint. */
+	readonly execute: (
+		statement: string,
+		params?: readonly (string | number | null)[],
+	) => Promise<void>;
+	readonly seedSession: (id: string, opts?: SessionSeedOpts) => Promise<void>;
+	readonly seedMessage: (
+		id: string,
+		sessionId: string,
+		opts?: MessageSeedOpts,
+	) => Promise<void>;
+	/** The read model as session history loads it. */
+	readonly sessionMessagesWithParts: (
+		sessionId: string,
+	) => Promise<MessageWithParts[]>;
+	readonly close: () => Promise<void>;
 }
 
+/** A migrated in-memory event store for seeding read-model rows directly. */
 export function createTestHarness(): TestHarness {
-	const db = SqliteClient.memory();
-	runMigrations(db, schemaMigrations);
-	const eventStore = new EventStore(db);
+	const runtime = ManagedRuntime.make(makePersistenceEffectLayer(":memory:"));
 
-	function seedSession(id: string, opts?: SessionSeedOpts): void {
+	const execute: TestHarness["execute"] = (statement, params = []) =>
+		runtime.runPromise(
+			Effect.flatMap(SqlClient.SqlClient, (sql) =>
+				sql.unsafe(statement, [...params]).pipe(Effect.asVoid),
+			),
+		);
+
+	const seedSession: TestHarness["seedSession"] = (id, opts) => {
 		const now = opts?.createdAt ?? FIXED_TEST_TIMESTAMP;
-		db.execute(
+		return execute(
 			`INSERT INTO sessions (id, provider, title, status, parent_id, fork_point_event, created_at, updated_at)
 			 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
 			[
@@ -225,15 +230,15 @@ export function createTestHarness(): TestHarness {
 				opts?.updatedAt ?? now,
 			],
 		);
-	}
+	};
 
-	function seedMessage(
-		id: string,
-		sessionId: string,
-		opts?: MessageSeedOpts,
-	): void {
+	const seedMessage: TestHarness["seedMessage"] = async (
+		id,
+		sessionId,
+		opts,
+	) => {
 		const now = opts?.createdAt ?? FIXED_TEST_TIMESTAMP;
-		db.execute(
+		await execute(
 			`INSERT INTO messages (id, session_id, role, created_at, updated_at, last_applied_seq)
 			 VALUES (?, ?, ?, ?, ?, ?)`,
 			[
@@ -246,7 +251,7 @@ export function createTestHarness(): TestHarness {
 			],
 		);
 		for (const [i, part] of (opts?.parts ?? []).entries()) {
-			db.execute(
+			await execute(
 				`INSERT INTO message_parts (id, message_id, type, text, sort_order, created_at, updated_at)
 				 VALUES (?, ?, ?, ?, ?, ?, ?)`,
 				[
@@ -260,37 +265,38 @@ export function createTestHarness(): TestHarness {
 				],
 			);
 		}
-	}
-
-	function seedTurn(id: string, sessionId: string, opts?: TurnSeedOpts): void {
-		const now = opts?.requestedAt ?? FIXED_TEST_TIMESTAMP;
-		db.execute(
-			`INSERT INTO turns (id, session_id, state, user_message_id, assistant_message_id, cost, tokens_in, tokens_out, requested_at, started_at, completed_at)
-			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-			[
-				id,
-				sessionId,
-				opts?.state ?? "pending",
-				opts?.userMessageId ?? null,
-				opts?.assistantMessageId ?? null,
-				opts?.cost ?? null,
-				opts?.tokensIn ?? null,
-				opts?.tokensOut ?? null,
-				now,
-				opts?.startedAt ?? null,
-				opts?.completedAt ?? null,
-			],
-		);
-	}
+	};
 
 	return {
-		db,
-		eventStore,
+		execute,
 		seedSession,
 		seedMessage,
-		seedTurn,
-		close: () => db.close(),
+		sessionMessagesWithParts: (sessionId) =>
+			runtime.runPromise(
+				Effect.flatMap(ReadQueryEffectTag, (readQuery) =>
+					readQuery.getSessionMessagesWithParts(sessionId),
+				),
+			),
+		close: () => runtime.dispose(),
 	};
+}
+
+/**
+ * Writes a migrated event store to `filename` and seeds it, for fixtures that
+ * lay down a project's `.conduit/events.db` before the code under test opens it.
+ * The SQLite driver is synchronous, so runSync completes; it throws if that ever
+ * stops being true.
+ */
+export function writeEventStore(
+	filename: string,
+	seed: Effect.Effect<unknown, unknown, SqlClient.SqlClient>,
+): void {
+	Effect.runSync(
+		makeEffectSqlMigrator().pipe(
+			Effect.zipRight(seed),
+			Effect.provide(EffectSqliteClient.layer({ filename })),
+		),
+	);
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -298,7 +304,6 @@ export function createTestHarness(): TestHarness {
 // ═══════════════════════════════════════════════════════════════════════════
 //
 // Convenience layers for @effect/vitest tests that need persistence services.
-// The imperative `createTestHarness()` above is preserved for existing tests.
 
 /**
  * File-backed SQLite layer for Effect tests.

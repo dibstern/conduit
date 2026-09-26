@@ -1,7 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { ThinkingMessage } from "../../../src/lib/frontend/types.js";
 import { historyToChatMessages } from "../../../src/lib/frontend/utils/history-logic.js";
-import { ReadQueryService } from "../../../src/lib/persistence/read-query-service.js";
 import { messageRowsToHistory } from "../../../src/lib/persistence/session-history-adapter.js";
 import {
 	type EffectProjectionHarness,
@@ -29,9 +28,8 @@ describe("Concurrent projection — interleaved sessions", () => {
 		);
 	}
 
-	function readPipeline(sessionId: string) {
-		const readQuery = new ReadQueryService(harness.readClient());
-		const rows = readQuery.getSessionMessagesWithParts(sessionId);
+	async function readPipeline(sessionId: string) {
+		const rows = await harness.sessionMessagesWithParts(sessionId);
 		const { messages } = messageRowsToHistory(rows, { pageSize: 50 });
 		return historyToChatMessages(messages);
 	}
@@ -195,9 +193,9 @@ describe("Concurrent projection — interleaved sessions", () => {
 		}
 
 		// Verify isolation
-		const chat1 = readPipeline("ses-c1");
-		const chat2 = readPipeline("ses-c2");
-		const chat3 = readPipeline("ses-c3");
+		const chat1 = await readPipeline("ses-c1");
+		const chat2 = await readPipeline("ses-c2");
+		const chat3 = await readPipeline("ses-c3");
 
 		// Session 1: thinking + assistant
 		const think1 = chat1.find(
@@ -321,8 +319,8 @@ describe("Concurrent projection — interleaved sessions", () => {
 		]);
 
 		// No cross-contamination
-		const chat1 = readPipeline("ses-shared-1");
-		const chat2 = readPipeline("ses-shared-2");
+		const chat1 = await readPipeline("ses-shared-1");
+		const chat2 = await readPipeline("ses-shared-2");
 
 		expect(chat1.some((m) => m.type === "thinking")).toBe(true);
 		expect(chat1.some((m) => m.type === "assistant")).toBe(false);

@@ -2,7 +2,6 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { ThinkingMessage } from "../../../src/lib/frontend/types.js";
 import { historyToChatMessages } from "../../../src/lib/frontend/utils/history-logic.js";
 import type { StoredEvent } from "../../../src/lib/persistence/events.js";
-import { ReadQueryService } from "../../../src/lib/persistence/read-query-service.js";
 import { messageRowsToHistory } from "../../../src/lib/persistence/session-history-adapter.js";
 import {
 	type EffectProjectionHarness,
@@ -123,8 +122,7 @@ describe("Thinking lifecycle — full pipeline", () => {
 		);
 
 		// 2. Read back from SQLite
-		const readQuery = new ReadQueryService(harness.readClient());
-		const rows = readQuery.getSessionMessagesWithParts(SESSION_ID);
+		const rows = await harness.sessionMessagesWithParts(SESSION_ID);
 		const { messages: historyMessages } = messageRowsToHistory(rows, {
 			pageSize: 50,
 		});
@@ -200,9 +198,8 @@ describe("Thinking lifecycle — full pipeline", () => {
 			),
 		);
 
-		// Simulate reload: create a NEW ReadQueryService (as if reconnecting)
-		const freshReadQuery = new ReadQueryService(harness.readClient());
-		const rows = freshReadQuery.getSessionMessagesWithParts(SESSION_ID);
+		// Simulate reload: read the session back from the store (as if reconnecting)
+		const rows = await harness.sessionMessagesWithParts(SESSION_ID);
 		const { messages } = messageRowsToHistory(rows, { pageSize: 50 });
 		const chatMessages = historyToChatMessages(messages);
 
@@ -263,8 +260,7 @@ describe("Thinking lifecycle — full pipeline", () => {
 		// NO thinking.end projected — simulates crash/lost event
 
 		// Read from SQLite — part exists but no end timestamp
-		const readQuery = new ReadQueryService(harness.readClient());
-		const rows = readQuery.getSessionMessagesWithParts(SESSION_ID);
+		const rows = await harness.sessionMessagesWithParts(SESSION_ID);
 		const { messages } = messageRowsToHistory(rows, { pageSize: 50 });
 		const chatMessages = historyToChatMessages(messages);
 

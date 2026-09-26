@@ -4,7 +4,6 @@ import type {
 	ThinkingMessage,
 } from "../../../src/lib/frontend/types.js";
 import { historyToChatMessages } from "../../../src/lib/frontend/utils/history-logic.js";
-import { ReadQueryService } from "../../../src/lib/persistence/read-query-service.js";
 import { messageRowsToHistory } from "../../../src/lib/persistence/session-history-adapter.js";
 import {
 	type EffectProjectionHarness,
@@ -40,9 +39,8 @@ describe("Multi-turn conversation pipeline", () => {
 		return ++seq;
 	}
 
-	function readPipeline() {
-		const readQuery = new ReadQueryService(harness.readClient());
-		const rows = readQuery.getSessionMessagesWithParts(SESSION_ID);
+	async function readPipeline() {
+		const rows = await harness.sessionMessagesWithParts(SESSION_ID);
 		const { messages } = messageRowsToHistory(rows, { pageSize: 50 });
 		return historyToChatMessages(messages);
 	}
@@ -213,7 +211,7 @@ describe("Multi-turn conversation pipeline", () => {
 		);
 
 		// ─── Verify pipeline output ──────────────────────────
-		const chat = readPipeline();
+		const chat = await readPipeline();
 
 		const userMessages = chat.filter((m) => m.type === "user");
 		expect(userMessages).toHaveLength(2);
@@ -302,7 +300,7 @@ describe("Multi-turn conversation pipeline", () => {
 			);
 		}
 
-		const chat = readPipeline();
+		const chat = await readPipeline();
 		const assistants = chat.filter(
 			(m): m is AssistantMessage => m.type === "assistant",
 		);

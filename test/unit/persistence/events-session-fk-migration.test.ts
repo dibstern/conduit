@@ -2,6 +2,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { SqlClient } from "@effect/sql";
+import Database from "better-sqlite3";
 import { Effect, Layer, ManagedRuntime } from "effect";
 import { afterEach, describe, expect, it } from "vitest";
 import type { ProviderRuntimeEvent } from "../../../src/lib/contracts/providers/provider-runtime-event.js";
@@ -15,7 +16,6 @@ import {
 	CURRENT_EVENT_STORE_MIGRATION,
 	readMigrationSql,
 } from "../../../src/lib/persistence/schema.js";
-import { SqliteClient } from "../../../src/lib/persistence/sqlite-client.js";
 
 const EXISTING_SESSION_ID = "legacy-session";
 const ORPHAN_SESSION_ID = "runtime-only-session";
@@ -48,7 +48,7 @@ function legacyBaselineSql(): string {
 }
 
 function seedLegacyDatabase(filename: string): void {
-	const db = SqliteClient.open(filename);
+	const db = new Database(filename);
 	try {
 		db.exec(legacyBaselineSql());
 		db.exec(`
@@ -60,34 +60,29 @@ function seedLegacyDatabase(filename: string): void {
 			INSERT INTO effect_sql_migrations (migration_id, name)
 			VALUES (1, 'create_event_store_tables');
 		`);
-		db.execute(
-			`INSERT INTO sessions (id, provider, title, status, created_at, updated_at)
-			 VALUES (?, 'opencode', 'Legacy', 'idle', 100, 100)`,
-			[EXISTING_SESSION_ID],
-		);
-		db.execute(
-			`INSERT INTO messages (id, session_id, role, text, created_at, updated_at)
-			 VALUES ('legacy-message', ?, 'user', 'hello', 100, 100)`,
-			[EXISTING_SESSION_ID],
-		);
+		db.prepare(`INSERT INTO sessions (id, provider, title, status, created_at, updated_at)
+			 VALUES (?, 'opencode', 'Legacy', 'idle', 100, 100)`).run([
+			EXISTING_SESSION_ID,
+		]);
+		db.prepare(`INSERT INTO messages (id, session_id, role, text, created_at, updated_at)
+			 VALUES ('legacy-message', ?, 'user', 'hello', 100, 100)`).run([
+			EXISTING_SESSION_ID,
+		]);
 		for (const [sequence, eventId, streamVersion] of [
 			[4, "legacy-event-4", 0],
 			[9, "legacy-event-9", 1],
 		] as const) {
-			db.execute(
-				`INSERT INTO events (
+			db.prepare(`INSERT INTO events (
 					sequence, event_id, session_id, stream_version, type,
 					data, metadata, provider, created_at
-				) VALUES (?, ?, ?, ?, 'session.status', ?, '{}', 'opencode', ?)`,
-				[
-					sequence,
-					eventId,
-					EXISTING_SESSION_ID,
-					streamVersion,
-					JSON.stringify({ sessionId: EXISTING_SESSION_ID, status: "idle" }),
-					100 + sequence,
-				],
-			);
+				) VALUES (?, ?, ?, ?, 'session.status', ?, '{}', 'opencode', ?)`).run([
+				sequence,
+				eventId,
+				EXISTING_SESSION_ID,
+				streamVersion,
+				JSON.stringify({ sessionId: EXISTING_SESSION_ID, status: "idle" }),
+				100 + sequence,
+			]);
 		}
 	} finally {
 		db.close();

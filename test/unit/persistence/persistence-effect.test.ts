@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { SqlClient } from "@effect/sql";
 import { SqliteClient as EffectSqliteClient } from "@effect/sql-sqlite-node";
 import { describe, it } from "@effect/vitest";
+import Database from "better-sqlite3";
 import { Effect, Layer, Logger } from "effect";
 import { expect } from "vitest";
 import {
@@ -17,9 +18,7 @@ import {
 	LEGACY_SKELETON_CUTOFF_MS,
 	MAX_PURGEABLE_SKELETON_SESSIONS,
 } from "../../../src/lib/persistence/effect/migrations.js";
-import { runMigrations } from "../../../src/lib/persistence/migrations.js";
-import { schemaMigrations } from "../../../src/lib/persistence/schema.js";
-import { SqliteClient as SyncSqliteClient } from "../../../src/lib/persistence/sqlite-client.js";
+import { seedLegacyEventStore } from "../../helpers/legacy-event-store.js";
 
 function makeTestSqlLayer(setup?: (filename: string) => void) {
 	const dir = mkdtempSync(join(tmpdir(), "conduit-persistence-effect-"));
@@ -62,8 +61,8 @@ function makePersistenceLayer(setup?: (filename: string) => void) {
 	);
 }
 
-function seedDatabase(filename: string, seed: (db: SyncSqliteClient) => void) {
-	const db = SyncSqliteClient.open(filename);
+function seedDatabase(filename: string, seed: (db: Database.Database) => void) {
+	const db = new Database(filename);
 	try {
 		seed(db);
 	} finally {
@@ -80,18 +79,17 @@ function expectMigrationFailure(error: unknown, reason: string) {
 	expect(String(persistenceError.cause)).toContain(reason);
 }
 
-function seedTrippedDatabase(db: SyncSqliteClient) {
-	runMigrations(db, schemaMigrations);
+function seedTrippedDatabase(db: Database.Database) {
+	seedLegacyEventStore(db);
 	for (let index = 0; index <= MAX_PURGEABLE_SKELETON_SESSIONS; index++) {
-		db.execute(
+		db.prepare(
 			"INSERT INTO sessions (id, provider, created_at, updated_at) VALUES (?, ?, ?, ?)",
-			[
-				`matching-${index.toString().padStart(2, "0")}`,
-				"opencode",
-				LEGACY_SKELETON_CUTOFF_MS - 1,
-				LEGACY_SKELETON_CUTOFF_MS - 1,
-			],
-		);
+		).run([
+			`matching-${index.toString().padStart(2, "0")}`,
+			"opencode",
+			LEGACY_SKELETON_CUTOFF_MS - 1,
+			LEGACY_SKELETON_CUTOFF_MS - 1,
+		]);
 	}
 }
 
@@ -293,7 +291,7 @@ describe("Persistence Effect", () => {
 			Effect.provide(
 				makePersistenceLayer((filename) =>
 					seedDatabase(filename, (db) => {
-						runMigrations(db, schemaMigrations);
+						seedLegacyEventStore(db);
 						db.exec(`
 							CREATE TABLE effect_sql_migrations (
 								migration_id INTEGER PRIMARY KEY NOT NULL,

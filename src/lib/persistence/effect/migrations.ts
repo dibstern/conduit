@@ -748,8 +748,9 @@ const runPurgeLegacySkeletonSessionsMigration: Effect.Effect<
 
 /**
  * Reconstructs the compaction rows the message projector never wrote, because it
- * did not declare session.compaction. Idempotent, so it is harmless next to the
- * plain runner's 0013, which carries the same SQL for legacy-only stores.
+ * did not declare session.compaction. Idempotent, so it is harmless on stores
+ * the retired synchronous runner upgraded, which may already have run the same
+ * SQL as its 0013.
  *
  * A read model missing its message tables is already broken beyond what a
  * backfill can repair, and refusing to migrate would turn that into a daemon

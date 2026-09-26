@@ -3,7 +3,6 @@ import { describe, expect, it } from "vitest";
 import type { ThinkingMessage } from "../../../src/lib/frontend/types.js";
 import { historyToChatMessages } from "../../../src/lib/frontend/utils/history-logic.js";
 import type { StoredEvent } from "../../../src/lib/persistence/events.js";
-import { ReadQueryService } from "../../../src/lib/persistence/read-query-service.js";
 import { messageRowsToHistory } from "../../../src/lib/persistence/session-history-adapter.js";
 import {
 	type EffectProjectionHarness,
@@ -142,9 +141,11 @@ async function seedSession(
 	);
 }
 
-function readPipeline(harness: EffectProjectionHarness, sessionId: string) {
-	const readQuery = new ReadQueryService(harness.readClient());
-	const rows = readQuery.getSessionMessagesWithParts(sessionId);
+async function readPipeline(
+	harness: EffectProjectionHarness,
+	sessionId: string,
+) {
+	const rows = await harness.sessionMessagesWithParts(sessionId);
 	const { messages } = messageRowsToHistory(rows, { pageSize: 50 });
 	return historyToChatMessages(messages);
 }
@@ -160,7 +161,7 @@ describe("Pipeline property-based tests", () => {
 					await seedSession(harness, "ses-pbt");
 					await projectBlocks(harness, "ses-pbt", "msg-pbt", blocks);
 
-					const chat = readPipeline(harness, "ses-pbt");
+					const chat = await readPipeline(harness, "ses-pbt");
 					const thinkingBlocks = chat.filter(
 						(m): m is ThinkingMessage => m.type === "thinking",
 					);
@@ -189,7 +190,7 @@ describe("Pipeline property-based tests", () => {
 					await seedSession(harness, "ses-pbt-ord");
 					await projectBlocks(harness, "ses-pbt-ord", "msg-pbt-ord", blocks);
 
-					const chat = readPipeline(harness, "ses-pbt-ord");
+					const chat = await readPipeline(harness, "ses-pbt-ord");
 					const types = chat.map((m) => m.type);
 					const firstThinking = types.indexOf("thinking");
 					const firstAssistant = types.indexOf("assistant");
@@ -224,7 +225,7 @@ describe("Pipeline property-based tests", () => {
 					await seedSession(harness, "ses-pbt-rt");
 					await projectBlocks(harness, "ses-pbt-rt", "msg-pbt-rt", blocks);
 
-					const chat = readPipeline(harness, "ses-pbt-rt");
+					const chat = await readPipeline(harness, "ses-pbt-rt");
 					const hasTextContent = blocks.some(
 						(b) => b.type === "text" && b.deltas.some((d) => d.length > 0),
 					);
@@ -253,8 +254,8 @@ describe("Pipeline property-based tests", () => {
 						await projectBlocks(harness, "ses-iso-a", "msg-a", blocksA);
 						await projectBlocks(harness, "ses-iso-b", "msg-b", blocksB);
 
-						const chatA = readPipeline(harness, "ses-iso-a");
-						const chatB = readPipeline(harness, "ses-iso-b");
+						const chatA = await readPipeline(harness, "ses-iso-a");
+						const chatB = await readPipeline(harness, "ses-iso-b");
 
 						// Count expected thinking blocks per session
 						const expectedThinkingA = blocksA.filter(
@@ -310,7 +311,7 @@ describe("Pipeline property-based tests", () => {
 								"msg-pbt-nocrash",
 								blocks,
 							);
-							readPipeline(harness, "ses-pbt-nocrash");
+							await readPipeline(harness, "ses-pbt-nocrash");
 						})(),
 					).resolves.toBeUndefined();
 				} finally {
@@ -460,7 +461,7 @@ describe("Pipeline PBT — invalid/corrupted event sequences", () => {
 							for (const event of shuffled) {
 								await harness.reproject([event]);
 							}
-							readPipeline(harness, "ses-shuffle");
+							await readPipeline(harness, "ses-shuffle");
 						})(),
 					).resolves.toBeUndefined();
 				} finally {
@@ -587,7 +588,7 @@ describe("Pipeline PBT — invalid/corrupted event sequences", () => {
 								for (const event of filtered) {
 									await harness.reproject([event]);
 								}
-								readPipeline(harness, "ses-drop");
+								await readPipeline(harness, "ses-drop");
 							})(),
 						).resolves.toBeUndefined();
 					} finally {
@@ -711,7 +712,7 @@ describe("Pipeline PBT — invalid/corrupted event sequences", () => {
 								for (const event of withDups) {
 									await harness.reproject([event]);
 								}
-								readPipeline(harness, "ses-dup");
+								await readPipeline(harness, "ses-dup");
 							})(),
 						).resolves.toBeUndefined();
 					} finally {
@@ -739,7 +740,7 @@ describe("Pipeline PBT — invalid/corrupted event sequences", () => {
 //     try {
 //       await seedSession(harness, "ses-reg");
 //       await projectBlocks(harness, "ses-reg", "msg-reg", blocks);
-//       const chat = readPipeline(harness, "ses-reg");
+//       const chat = await readPipeline(harness, "ses-reg");
 //       /* assertion that failed */
 //     } finally {
 //       await harness.dispose();

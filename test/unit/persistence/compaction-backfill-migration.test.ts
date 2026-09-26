@@ -3,17 +3,15 @@
 // is recoverable from its payload. Migration 0013 reconstructs those rows; this
 // pins its shape against the projector's and its behaviour on a second run.
 
+import Database from "better-sqlite3";
 import { afterEach, describe, expect, it } from "vitest";
-import { runMigrations } from "../../../src/lib/persistence/migrations.js";
 import {
 	BACKFILL_COMPACTION_MESSAGES_MIGRATION,
 	readMigrationSql,
-	schemaMigrations,
 } from "../../../src/lib/persistence/schema.js";
-import { SqliteClient } from "../../../src/lib/persistence/sqlite-client.js";
+import { seedLegacyEventStore } from "../../helpers/legacy-event-store.js";
 
 const BACKFILL_SQL = readMigrationSql(BACKFILL_COMPACTION_MESSAGES_MIGRATION);
-const priorMigrations = schemaMigrations.filter((m) => m.id < 13);
 
 const SESSION = "sess-backfill";
 const T0 = 1_700_000_000_000;
@@ -27,15 +25,16 @@ interface PartRow {
 }
 
 describe("0013 compaction backfill", () => {
-	let client: SqliteClient;
+	let client: Database.Database;
 
 	const seed = () => {
-		client = SqliteClient.memory();
-		runMigrations(client, [...priorMigrations]);
-		client.execute(
-			"INSERT INTO sessions (id, provider, title, created_at, updated_at) VALUES (?, 'claude', 'Backfill', ?, ?)",
-			[SESSION, T0, T0],
-		);
+		client = new Database(":memory:");
+		seedLegacyEventStore(client, 12);
+		client
+			.prepare(
+				"INSERT INTO sessions (id, provider, title, created_at, updated_at) VALUES (?, 'claude', 'Backfill', ?, ?)",
+			)
+			.run([SESSION, T0, T0]);
 	};
 
 	const appendCompaction = (
@@ -43,33 +42,35 @@ describe("0013 compaction backfill", () => {
 		data: Record<string, unknown>,
 		createdAt = T0,
 	) => {
-		client.execute(
-			`INSERT INTO events (sequence, event_id, session_id, stream_version, type, data, provider, created_at)
-			 VALUES (?, ?, ?, ?, 'session.compaction', ?, 'claude', ?)`,
-			[
+		client
+			.prepare(`INSERT INTO events (sequence, event_id, session_id, stream_version, type, data, provider, created_at)
+			 VALUES (?, ?, ?, ?, 'session.compaction', ?, 'claude', ?)`)
+			.run([
 				sequence,
 				`evt-${sequence}`,
 				SESSION,
 				sequence,
 				JSON.stringify(data),
 				createdAt,
-			],
-		);
+			]);
 	};
 
 	const addMessage = (id: string, createdAt: number) => {
-		client.execute(
-			"INSERT INTO messages (id, session_id, role, text, is_streaming, created_at, updated_at) VALUES (?, ?, 'assistant', 'hi', 0, ?, ?)",
-			[id, SESSION, createdAt, createdAt],
-		);
+		client
+			.prepare(
+				"INSERT INTO messages (id, session_id, role, text, is_streaming, created_at, updated_at) VALUES (?, ?, 'assistant', 'hi', 0, ?, ?)",
+			)
+			.run([id, SESSION, createdAt, createdAt]);
 	};
 
 	const backfill = () => client.exec(BACKFILL_SQL);
 
 	const parts = () =>
-		client.query<PartRow>(
-			"SELECT id, message_id, text, metadata, sort_order FROM message_parts WHERE type = 'compaction' ORDER BY id",
-		);
+		client
+			.prepare<unknown[], PartRow>(
+				"SELECT id, message_id, text, metadata, sort_order FROM message_parts WHERE type = 'compaction' ORDER BY id",
+			)
+			.all();
 
 	afterEach(() => {
 		client?.close();
@@ -87,9 +88,11 @@ describe("0013 compaction backfill", () => {
 
 		backfill();
 
-		const messages = client.query<{ id: string; role: string }>(
-			"SELECT id, role FROM messages",
-		);
+		const messages = client
+			.prepare<unknown[], { id: string; role: string }>(
+				"SELECT id, role FROM messages",
+			)
+			.all();
 		expect(messages).toEqual([{ id: "compaction-7", role: "assistant" }]);
 
 		const [part] = parts();
@@ -116,7 +119,9 @@ describe("0013 compaction backfill", () => {
 
 		expect(parts()).toHaveLength(1);
 		expect(
-			client.query("SELECT id FROM messages WHERE id LIKE 'compaction-%'"),
+			client
+				.prepare("SELECT id FROM messages WHERE id LIKE 'compaction-%'")
+				.all(),
 		).toHaveLength(1);
 	});
 
@@ -134,9 +139,10 @@ describe("0013 compaction backfill", () => {
 		backfill();
 
 		const order = client
-			.query<{ id: string }>(
+			.prepare<unknown[], { id: string }>(
 				"SELECT id FROM messages ORDER BY created_at ASC, id ASC",
 			)
+			.all()
 			.map((r) => r.id);
 		expect(order).toEqual(["msg-a", "msg-b", "compaction-11", "msg-c"]);
 	});
@@ -189,7 +195,9 @@ describe("0013 compaction backfill", () => {
 		backfill();
 
 		expect(
-			client.query("SELECT id FROM messages WHERE id LIKE 'compaction-%'"),
+			client
+				.prepare("SELECT id FROM messages WHERE id LIKE 'compaction-%'")
+				.all(),
 		).toHaveLength(0);
 		expect(parts()).toHaveLength(0);
 	});

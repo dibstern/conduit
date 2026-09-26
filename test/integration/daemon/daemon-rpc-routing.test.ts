@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Socket } from "@effect/platform";
 import { RpcClient, RpcSerialization } from "@effect/rpc";
+import { SqlClient } from "@effect/sql";
 import { describe, it } from "@effect/vitest";
 import { Effect, Layer, ManagedRuntime, Ref } from "effect";
 import { expect, vi } from "vitest";
@@ -27,9 +28,6 @@ import {
 	WebSocketRelayRouterTag,
 	WebSocketRoutingLive,
 } from "../../../src/lib/domain/server/Layers/ws-routing-layer.js";
-import { runMigrations } from "../../../src/lib/persistence/migrations.js";
-import { schemaMigrations } from "../../../src/lib/persistence/schema.js";
-import { SqliteClient } from "../../../src/lib/persistence/sqlite-client.js";
 import { makeEffectWsHandler } from "../../../src/lib/server/effect-ws-handler.js";
 import { makeWsRpcWebSocketHandler } from "../../../src/lib/server/ws-rpc-handler.js";
 import { makeDaemonRpcTestLayer } from "../../helpers/daemon-rpc.js";
@@ -37,22 +35,20 @@ import {
 	makeMockConfig,
 	makeTestHandlerLayer,
 } from "../../helpers/mock-factories.js";
+import { writeEventStore } from "../../helpers/persistence-factories.js";
 
 const makeProjectStore = (directory: string, sessionId: string): void => {
 	const conduitDirectory = join(directory, ".conduit");
 	mkdirSync(conduitDirectory, { recursive: true });
-	const database = SqliteClient.open(join(conduitDirectory, "events.db"));
-	try {
-		runMigrations(database, schemaMigrations);
-		database.execute(
-			`INSERT INTO sessions (
+	writeEventStore(
+		join(conduitDirectory, "events.db"),
+		Effect.flatMap(
+			SqlClient.SqlClient,
+			(sql) => sql`INSERT INTO sessions (
 				id, provider, title, status, created_at, updated_at
-			) VALUES (?, 'opencode', ?, 'idle', ?, ?)`,
-			[sessionId, sessionId, 1, 1],
-		);
-	} finally {
-		database.close();
-	}
+			) VALUES (${sessionId}, 'opencode', ${sessionId}, 'idle', 1, 1)`,
+		),
+	);
 };
 
 const waitForOpen = (ws: WebSocket) =>

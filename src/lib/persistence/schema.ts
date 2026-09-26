@@ -1,7 +1,6 @@
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import type { Migration } from "./migrations.js";
 
 export const CURRENT_EVENT_STORE_MIGRATION = "0001_current_event_store.sql";
 export const MESSAGE_PART_METADATA_MIGRATION = "0002_message_part_metadata.sql";
@@ -36,77 +35,3 @@ export function readMigrationSql(filename: string): string {
 		"utf8",
 	);
 }
-
-export const schemaMigrations: readonly Migration[] = [
-	{
-		id: 1,
-		name: "create_event_store_tables",
-		sql: readMigrationSql(CURRENT_EVENT_STORE_MIGRATION),
-	},
-	{
-		id: 2,
-		name: "add_message_part_metadata",
-		sql: readMigrationSql(MESSAGE_PART_METADATA_MIGRATION),
-	},
-	{
-		id: 3,
-		name: "add_durable_provider_commands",
-		sql: readMigrationSql(DURABLE_PROVIDER_COMMANDS_MIGRATION),
-	},
-	{
-		id: 4,
-		name: "drop_events_session_fk",
-		sql: readMigrationSql(DROP_EVENTS_SESSION_FK_MIGRATION),
-	},
-	{
-		id: 5,
-		name: "message_parts_file_type",
-		sql: readMigrationSql(MESSAGE_PARTS_FILE_TYPE_MIGRATION),
-	},
-	{
-		id: 6,
-		name: "message_parts_compaction_type",
-		sql: readMigrationSql(MESSAGE_PARTS_COMPACTION_TYPE_MIGRATION),
-	},
-	{
-		id: 7,
-		name: "messages_context_window",
-		sql: readMigrationSql(MESSAGES_CONTEXT_WINDOW_MIGRATION),
-	},
-	{
-		id: 8,
-		name: "turn_model_execution",
-		sql: readMigrationSql(TURN_MODEL_EXECUTION_MIGRATION),
-	},
-	{
-		id: 9,
-		name: "sessions_permission_mode",
-		sql: readMigrationSql(SESSIONS_PERMISSION_MODE_MIGRATION),
-	},
-	{
-		id: 10,
-		name: "session_cascade_deletes",
-		sql: readMigrationSql(SESSION_CASCADE_DELETES_MIGRATION),
-		rebuildsForeignKeys: true,
-	},
-	{
-		id: 11,
-		name: "sessions_read_at",
-		sql: readMigrationSql(SESSIONS_READ_AT_MIGRATION),
-	},
-	{
-		id: 12,
-		name: "sessions_last_turn_error",
-		sql: readMigrationSql(SESSIONS_LAST_TURN_ERROR_MIGRATION),
-	},
-	{
-		id: 13,
-		name: "backfill_compaction_messages",
-		sql: readMigrationSql(BACKFILL_COMPACTION_MESSAGES_MIGRATION),
-	},
-	{
-		id: 14,
-		name: "sessions_settled_pinned",
-		sql: readMigrationSql(SESSIONS_SETTLED_PINNED_MIGRATION),
-	},
-];

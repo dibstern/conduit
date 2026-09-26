@@ -1,5 +1,5 @@
 // ─── Effect-based Projector Cursor Repository ──────────────────────────────
-// Migrates projector-cursor-repository.ts from raw SqliteClient to @effect/sql.
+// Per-projector sequence cursors, stored in projector_cursors via @effect/sql.
 
 import { SqlClient } from "@effect/sql";
 import type { SqlError } from "@effect/sql/SqlError";

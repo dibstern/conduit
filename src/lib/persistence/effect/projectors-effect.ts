@@ -1,6 +1,5 @@
 // ─── Effect-based Projectors ────────────────────────────────────────────────
-// Migrates all projectors from raw SqliteClient to @effect/sql SqlClient.
-// Each projector's `project` method becomes an Effect program.
+// Each projector's `project` method is an Effect program over @effect/sql SqlClient.
 
 import { SqlClient } from "@effect/sql";
 import type { SqlError } from "@effect/sql/SqlError";

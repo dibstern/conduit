@@ -1,6 +1,6 @@
 // test/unit/persistence/session-list-adapter.test.ts
 import { describe, expect, it } from "vitest";
-import type { SessionRow } from "../../../src/lib/persistence/read-query-service.js";
+import type { SessionRow } from "../../../src/lib/persistence/read-model-types.js";
 import { sessionRowsToSessionInfoList } from "../../../src/lib/persistence/session-list-adapter.js";
 
 // ─── Fixtures ──────────────────────────────────────────────────────────────

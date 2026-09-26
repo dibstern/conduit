@@ -4,15 +4,16 @@ import { join } from "node:path";
 import { SqlClient } from "@effect/sql";
 import { SqliteClient as EffectSqliteClient } from "@effect/sql-sqlite-node";
 import { describe, it } from "@effect/vitest";
-import { Effect, Layer } from "effect";
+import Database from "better-sqlite3";
+import { Effect, Exit, Layer } from "effect";
 import { expect } from "vitest";
 import {
 	makeEffectMigrationLoader,
 	makeEffectSqlMigrator,
 } from "../../../src/lib/persistence/effect/migrations.js";
-import { runMigrations } from "../../../src/lib/persistence/migrations.js";
-import { schemaMigrations } from "../../../src/lib/persistence/schema.js";
-import { SqliteClient as SyncSqliteClient } from "../../../src/lib/persistence/sqlite-client.js";
+import type { SessionRow } from "../../../src/lib/persistence/read-model-types.js";
+import { sessionRowsToSessionInfoList } from "../../../src/lib/persistence/session-list-adapter.js";
+import { seedLegacyEventStore } from "../../helpers/legacy-event-store.js";
 
 function makeFileSqlLayer(setup?: (filename: string) => void) {
 	const dir = mkdtempSync(join(tmpdir(), "conduit-effect-migrations-"));
@@ -29,13 +30,24 @@ function makeFileSqlLayer(setup?: (filename: string) => void) {
 	);
 }
 
-function seedDatabase(filename: string, seed: (db: SyncSqliteClient) => void) {
-	const db = SyncSqliteClient.open(filename);
+function seedDatabase(filename: string, seed: (db: Database.Database) => void) {
+	const db = new Database(filename);
 	try {
 		seed(db);
 	} finally {
 		db.close();
 	}
+}
+
+// After the legacy skeleton cutoff, so migration 10's purge keeps these sessions.
+const CREATED_AT = 2_000_000_000_000;
+const ACTIVE_AT = CREATED_AT + 456;
+
+function sessionColumns(db: Database.Database): string[] {
+	return db
+		.prepare<unknown[], { name: string }>("PRAGMA table_info(sessions)")
+		.all()
+		.map((column) => column.name);
 }
 
 describe("Effect SQL migrations", () => {
@@ -81,6 +93,65 @@ describe("Effect SQL migrations", () => {
 		}),
 	);
 
+	it.effect("runs migrations in key order", () =>
+		Effect.gen(function* () {
+			const sql = yield* SqlClient.SqlClient;
+			const completed = yield* makeEffectSqlMigrator({
+				"0002_seed_users": sql`INSERT INTO users (name) VALUES ('ada')`,
+				"0001_create_users": sql`CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT)`,
+			});
+			expect(completed).toEqual([
+				[1, "create_users"],
+				[2, "seed_users"],
+			]);
+			expect(yield* sql`SELECT name FROM users`).toEqual([{ name: "ada" }]);
+		}).pipe(Effect.provide(EffectSqliteClient.layer({ filename: ":memory:" }))),
+	);
+
+	it.effect("runs only the migrations added since the last run", () =>
+		Effect.gen(function* () {
+			const sql = yield* SqlClient.SqlClient;
+			const createUsers = sql`CREATE TABLE users (id INTEGER PRIMARY KEY)`;
+			yield* makeEffectSqlMigrator({ "0001_create_users": createUsers });
+
+			const completed = yield* makeEffectSqlMigrator({
+				"0001_create_users": createUsers,
+				"0002_create_posts": sql`CREATE TABLE posts (id INTEGER PRIMARY KEY)`,
+			});
+			expect(completed).toEqual([[2, "create_posts"]]);
+		}).pipe(Effect.provide(EffectSqliteClient.layer({ filename: ":memory:" }))),
+	);
+
+	it.effect("a failed migration run applies and records nothing", () =>
+		Effect.gen(function* () {
+			const sql = yield* SqlClient.SqlClient;
+			const createGood = sql`CREATE TABLE good_table (id INTEGER PRIMARY KEY)`;
+			const failed = yield* Effect.exit(
+				makeEffectSqlMigrator({
+					"0001_good": createGood,
+					"0002_bad": sql.unsafe(
+						"CREATE TABLE broken_table (id INTEGER PRIMARY KEY",
+					),
+				}),
+			);
+			expect(Exit.isFailure(failed)).toBe(true);
+			expect(
+				yield* sql`SELECT name FROM sqlite_master WHERE name = 'good_table'`,
+			).toEqual([]);
+
+			// Nothing was recorded, so a fixed run starts again from the first migration.
+			expect(
+				yield* makeEffectSqlMigrator({
+					"0001_good": createGood,
+					"0002_fixed": sql`CREATE TABLE fixed_table (id INTEGER PRIMARY KEY)`,
+				}),
+			).toEqual([
+				[1, "good"],
+				[2, "fixed"],
+			]);
+		}).pipe(Effect.provide(EffectSqliteClient.layer({ filename: ":memory:" }))),
+	);
+
 	it.effect(
 		"adopts an existing legacy baseline schema into Effect SQL history",
 		() =>
@@ -124,12 +195,11 @@ describe("Effect SQL migrations", () => {
 					{ id: 11, name: "sessions_read_at" },
 					{ id: 12, name: "sessions_last_turn_error" },
 					{ id: 13, name: "backfill_compaction_messages" },
-					{ id: 14, name: "sessions_settled_pinned" },
 				]);
 			}).pipe(
 				Effect.provide(
 					makeFileSqlLayer((filename) =>
-						seedDatabase(filename, (db) => runMigrations(db, schemaMigrations)),
+						seedDatabase(filename, (db) => seedLegacyEventStore(db)),
 					),
 				),
 			),
@@ -186,9 +256,7 @@ describe("Effect SQL migrations", () => {
 			}).pipe(
 				Effect.provide(
 					makeFileSqlLayer((filename) =>
-						seedDatabase(filename, (db) =>
-							runMigrations(db, schemaMigrations.slice(0, 7)),
-						),
+						seedDatabase(filename, (db) => seedLegacyEventStore(db, 7)),
 					),
 				),
 			),
@@ -254,13 +322,7 @@ describe("Effect SQL migrations", () => {
 			}).pipe(
 				Effect.provide(
 					makeFileSqlLayer((filename) =>
-						seedDatabase(filename, (db) => {
-							const baseline = schemaMigrations[0];
-							if (!baseline) {
-								throw new Error("Expected event-store baseline migration");
-							}
-							runMigrations(db, [baseline]);
-						}),
+						seedDatabase(filename, (db) => seedLegacyEventStore(db, 1)),
 					),
 				),
 			),
@@ -282,9 +344,7 @@ describe("Effect SQL migrations", () => {
 			}).pipe(
 				Effect.provide(
 					makeFileSqlLayer((filename) =>
-						seedDatabase(filename, (db) =>
-							runMigrations(db, schemaMigrations.slice(0, 8)),
-						),
+						seedDatabase(filename, (db) => seedLegacyEventStore(db, 8)),
 					),
 				),
 			),
@@ -314,9 +374,58 @@ describe("Effect SQL migrations", () => {
 				Effect.provide(
 					makeFileSqlLayer((filename) =>
 						seedDatabase(filename, (db) => {
-							runMigrations(db, schemaMigrations.slice(0, 8));
-							db.execute(
+							seedLegacyEventStore(db, 8);
+							db.prepare(
 								"ALTER TABLE sessions ADD COLUMN permission_mode TEXT",
+							).run();
+						}),
+					),
+				),
+			),
+	);
+
+	it.effect(
+		"adds read_at once and backfills existing sessions as already read",
+		() =>
+			Effect.gen(function* () {
+				yield* makeEffectSqlMigrator();
+
+				const sql = yield* SqlClient.SqlClient;
+				// The criterion is that upgrading does not invent a backlog, so assert on
+				// the derived flag the product actually shows rather than on read_at alone.
+				const rows = yield* sql<SessionRow>`SELECT * FROM sessions`;
+				expect(rows[0]?.read_at).toBe(ACTIVE_AT);
+				expect(sessionRowsToSessionInfoList([...rows])[0]).not.toHaveProperty(
+					"unread",
+				);
+
+				expect(yield* makeEffectSqlMigrator()).toEqual([]);
+				const columns = yield* sql<{
+					name: string;
+				}>`PRAGMA table_info(sessions)`;
+				expect(
+					columns.filter((column) => column.name === "read_at"),
+				).toHaveLength(1);
+			}).pipe(
+				Effect.provide(
+					makeFileSqlLayer((filename) =>
+						seedDatabase(filename, (db) => {
+							seedLegacyEventStore(db, 10);
+							expect(sessionColumns(db)).not.toContain("read_at");
+							// last_message_at matters: without activity a session is never
+							// unread, so a row that has none cannot tell a working backfill
+							// from a missing one.
+							db.prepare(
+								`INSERT INTO sessions (id, provider, title, status, last_message_at, created_at, updated_at)
+								 VALUES (?, ?, ?, ?, ?, ?, ?)`,
+							).run(
+								"existing",
+								"opencode",
+								"Existing",
+								"idle",
+								ACTIVE_AT,
+								CREATED_AT,
+								ACTIVE_AT,
 							);
 						}),
 					),
@@ -356,59 +465,61 @@ describe("Effect SQL migrations", () => {
 				Effect.provide(
 					makeFileSqlLayer((filename) =>
 						seedDatabase(filename, (db) => {
-							runMigrations(db, schemaMigrations.slice(0, 13));
-							db.execute(
-								`INSERT INTO sessions
-								 (id, provider, title, status, created_at, updated_at)
+							seedLegacyEventStore(db, 13);
+							expect(sessionColumns(db)).not.toContain("settled_at");
+							db.prepare(
+								`INSERT INTO sessions (id, provider, title, status, created_at, updated_at)
 								 VALUES (?, ?, ?, ?, ?, ?)`,
-								[
-									"existing",
-									"opencode",
-									"Existing",
-									"idle",
-									2_000_000_000_000,
-									2_000_000_000_000,
-								],
+							).run(
+								"existing",
+								"opencode",
+								"Existing",
+								"idle",
+								2_000_000_000_000,
+								2_000_000_000_000,
 							);
 						}),
 					),
 				),
 			),
 	);
+
 	it.effect(
-		"adds read_at once and backfills existing sessions from updated_at",
+		"adds last_turn_error_at once without backfilling historical failures",
 		() =>
 			Effect.gen(function* () {
 				yield* makeEffectSqlMigrator();
 
 				const sql = yield* SqlClient.SqlClient;
+				const rows = yield* sql<SessionRow>`SELECT * FROM sessions`;
+				expect(rows[0]?.last_turn_error_at).toBeNull();
+				expect(sessionRowsToSessionInfoList([...rows])[0]?.attention).toBe(
+					"idle",
+				);
+
+				expect(yield* makeEffectSqlMigrator()).toEqual([]);
 				const columns = yield* sql<{
 					name: string;
 				}>`PRAGMA table_info(sessions)`;
 				expect(
-					columns.filter((column) => column.name === "read_at"),
+					columns.filter((column) => column.name === "last_turn_error_at"),
 				).toHaveLength(1);
-				const rows = yield* sql<{ read_at: number | null }>`
-					SELECT read_at FROM sessions WHERE id = 'existing'`;
-				expect(rows[0]?.read_at).toBe(2_000_000_000_000);
-				expect(yield* makeEffectSqlMigrator()).toEqual([]);
 			}).pipe(
 				Effect.provide(
 					makeFileSqlLayer((filename) =>
 						seedDatabase(filename, (db) => {
-							runMigrations(db, schemaMigrations.slice(0, 10));
-							db.execute(
-								`INSERT INTO sessions
-								 (id, provider, title, status, created_at, updated_at)
+							seedLegacyEventStore(db, 11);
+							expect(sessionColumns(db)).not.toContain("last_turn_error_at");
+							db.prepare(
+								`INSERT INTO sessions (id, provider, title, status, created_at, updated_at)
 								 VALUES (?, ?, ?, ?, ?, ?)`,
-								[
-									"existing",
-									"opencode",
-									"Existing",
-									"idle",
-									2_000_000_000_000,
-									2_000_000_000_000,
-								],
+							).run(
+								"existing",
+								"opencode",
+								"Existing",
+								"idle",
+								CREATED_AT,
+								ACTIVE_AT,
 							);
 						}),
 					),

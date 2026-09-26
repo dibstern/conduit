@@ -1,7 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { ThinkingMessage } from "../../../src/lib/frontend/types.js";
 import { historyToChatMessages } from "../../../src/lib/frontend/utils/history-logic.js";
-import { ReadQueryService } from "../../../src/lib/persistence/read-query-service.js";
 import { messageRowsToHistory } from "../../../src/lib/persistence/session-history-adapter.js";
 import {
 	type EffectProjectionHarness,
@@ -38,9 +37,8 @@ describe("Permission + thinking interleaving pipeline", () => {
 		return ++seq;
 	}
 
-	function readPipeline() {
-		const readQuery = new ReadQueryService(harness.readClient());
-		const rows = readQuery.getSessionMessagesWithParts(SESSION_ID);
+	async function readPipeline() {
+		const rows = await harness.sessionMessagesWithParts(SESSION_ID);
 		const { messages } = messageRowsToHistory(rows, { pageSize: 50 });
 		return historyToChatMessages(messages);
 	}
@@ -149,7 +147,7 @@ describe("Permission + thinking interleaving pipeline", () => {
 			),
 		);
 
-		const chat = readPipeline();
+		const chat = await readPipeline();
 
 		// Thinking block preserved
 		const thinking = chat.find(
@@ -306,7 +304,7 @@ describe("Permission + thinking interleaving pipeline", () => {
 			),
 		);
 
-		const chat = readPipeline();
+		const chat = await readPipeline();
 
 		// Both thinking blocks preserved with correct text
 		const thinkingBlocks = chat.filter(

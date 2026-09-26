@@ -70,7 +70,6 @@ import type {
 	PendingApprovalCountRow,
 	SessionRow,
 } from "../../../src/lib/persistence/read-model-types.js";
-import { SqliteClient } from "../../../src/lib/persistence/sqlite-client.js";
 import { OrchestrationEngine } from "../../../src/lib/provider/orchestration-engine.js";
 import { ProviderRegistry } from "../../../src/lib/provider/provider-registry.js";
 import type { HistoryMessage } from "../../../src/lib/shared-types.js";
@@ -494,24 +493,16 @@ describe("SessionManagerService", () => {
 					{ instanceId: openCodeInstanceId },
 				);
 
-				const bindings = yield* Effect.sync(() => {
-					const db = SqliteClient.open(dbFile);
-					try {
-						return db.query<{
-							readonly session_id: string;
-							readonly provider: string;
-							readonly status: string;
-						}>(
-							`SELECT session_id, provider, status
-							 FROM session_providers
-							 WHERE session_id IN (?, ?) AND status = 'active'
-							 ORDER BY session_id`,
-							[claudeSession.id, openCodeSession.id],
-						);
-					} finally {
-						db.close();
-					}
-				});
+				const sql = yield* SqlClient.SqlClient;
+				const bindings = yield* sql<{
+					readonly session_id: string;
+					readonly provider: string;
+					readonly status: string;
+				}>`SELECT session_id, provider, status
+					FROM session_providers
+					WHERE session_id IN ${sql.in([claudeSession.id, openCodeSession.id])}
+						AND status = 'active'
+					ORDER BY session_id`;
 
 				expect(bindings).toHaveLength(2);
 				const resolvedBindings = Object.fromEntries(

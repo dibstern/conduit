@@ -5,6 +5,7 @@ import { Effect } from "effect";
 import { expect } from "vitest";
 import { makeEffectSqlMigrator } from "../../../src/lib/persistence/effect/migrations.js";
 import { makeReadQueryEffect } from "../../../src/lib/persistence/effect/read-query-effect.js";
+import { sessionFamilyQuery } from "../../../src/lib/persistence/session-family-query.js";
 
 const testLayer = EffectSqliteClient.layer({ filename: ":memory:" });
 
@@ -12,6 +13,7 @@ function seedSession(
 	sessionId: string,
 	options: {
 		title?: string;
+		status?: string;
 		updatedAt?: number;
 		parentId?: string;
 	} = {},
@@ -25,7 +27,7 @@ function seedSession(
 				${sessionId},
 				'claude',
 				${options.title ?? "Test"},
-				'idle',
+				${options.status ?? "idle"},
 				${options.parentId ?? null},
 				${options.updatedAt ?? 1},
 				${options.updatedAt ?? 1}
@@ -99,6 +101,49 @@ describe("ReadQueryEffect.listSessions", () => {
 	);
 });
 
+describe("ReadQueryEffect session lookups", () => {
+	it.effect("reads tool content by tool id", () =>
+		Effect.gen(function* () {
+			yield* makeEffectSqlMigrator();
+			yield* seedSession("s1");
+			const sql = yield* SqlClient.SqlClient;
+			yield* sql`
+				INSERT INTO tool_content (tool_id, session_id, content, created_at)
+				VALUES ('tool-abc', 's1', '{"result": "hello"}', 1)`;
+			const readQuery = yield* makeReadQueryEffect;
+
+			expect(yield* readQuery.getToolContent("tool-abc")).toBe(
+				'{"result": "hello"}',
+			);
+			expect(yield* readQuery.getToolContent("nonexistent")).toBeUndefined();
+		}).pipe(Effect.provide(testLayer)),
+	);
+
+	it.effect("reads one session's status and the status of every session", () =>
+		Effect.gen(function* () {
+			yield* makeEffectSqlMigrator();
+			yield* seedSession("s1", { status: "idle" });
+			yield* seedSession("s2", { status: "busy" });
+			const readQuery = yield* makeReadQueryEffect;
+
+			expect(yield* readQuery.getSessionStatus("s2")).toBe("busy");
+			expect(yield* readQuery.getSessionStatus("nonexistent")).toBeUndefined();
+			expect(yield* readQuery.getAllSessionStatuses()).toEqual({
+				s1: "idle",
+				s2: "busy",
+			});
+		}).pipe(Effect.provide(testLayer)),
+	);
+
+	it.effect("lists nothing for an empty store", () =>
+		Effect.gen(function* () {
+			yield* makeEffectSqlMigrator();
+			const readQuery = yield* makeReadQueryEffect;
+			expect(yield* readQuery.listSessions()).toEqual([]);
+		}).pipe(Effect.provide(testLayer)),
+	);
+});
+
 describe("ReadQueryEffect session families", () => {
 	it.effect(
 		"finds the root from a grandchild and returns every descendant only once",
@@ -129,6 +174,33 @@ describe("ReadQueryEffect session families", () => {
 						{ id: "root", parent_id: null },
 						{ id: "grandchild", parent_id: "child" },
 					]),
+				);
+			}).pipe(Effect.provide(testLayer)),
+	);
+
+	it.effect(
+		"looks up family rows through indexes without scanning sessions",
+		() =>
+			Effect.gen(function* () {
+				yield* makeEffectSqlMigrator();
+				yield* seedSession("root");
+				yield* seedSession("child", { parentId: "root" });
+				yield* seedSession("grandchild", { parentId: "child" });
+				for (let i = 0; i < 100; i++) yield* seedSession(`unrelated-${i}`);
+				const sql = yield* SqlClient.SqlClient;
+				const plan = (yield* sql.unsafe<{ detail: string }>(
+					`EXPLAIN QUERY PLAN ${sessionFamilyQuery}`,
+					["grandchild"],
+				)).map((row) => row.detail);
+
+				expect(plan.some((step) => /\bSCAN (?:s|sessions)\b/i.test(step))).toBe(
+					false,
+				);
+				expect(plan).toContain(
+					"SEARCH s USING INDEX idx_sessions_parent (parent_id=?)",
+				);
+				expect(plan).toContain(
+					"SEARCH s USING INDEX sqlite_autoindex_sessions_1 (id=?)",
 				);
 			}).pipe(Effect.provide(testLayer)),
 	);
@@ -174,6 +246,28 @@ describe("ReadQueryEffect.countPendingApprovalsBySession", () => {
 				{ session_id: "s1", type: "question", pending_count: 1 },
 				{ session_id: "s2", type: "question", pending_count: 1 },
 			]);
+		}).pipe(Effect.provide(testLayer)),
+	);
+
+	// Guards the index, not the query: the SQL below is a copy, so this fails
+	// only if idx_pending_approvals_pending is dropped from the migrations.
+	// Without it this GROUP BY scans every resolved approval ever recorded.
+	it.effect("uses the pending-approval index", () =>
+		Effect.gen(function* () {
+			yield* makeEffectSqlMigrator();
+			const sql = yield* SqlClient.SqlClient;
+			const plan = yield* sql<{ detail: string }>`
+				EXPLAIN QUERY PLAN
+				SELECT session_id, type, COUNT(*) AS pending_count
+				FROM pending_approvals
+				WHERE status = 'pending'
+				GROUP BY session_id, type`;
+
+			expect(
+				plan.some((row) =>
+					row.detail.includes("idx_pending_approvals_pending"),
+				),
+			).toBe(true);
 		}).pipe(Effect.provide(testLayer)),
 	);
 });
@@ -331,5 +425,32 @@ describe("ReadQueryEffect.getSessionMessagesWithParts", () => {
 			expect(messages[1]?.modelExecution).toEqual(messages[0]?.modelExecution);
 			expect(messages[2]).not.toHaveProperty("modelExecution");
 		}).pipe(Effect.provide(testLayer)),
+	);
+
+	it.effect(
+		"orders messages by created_at, then id, and is empty for an unknown session",
+		() =>
+			Effect.gen(function* () {
+				yield* makeEffectSqlMigrator();
+				yield* seedSession("s1");
+				const sql = yield* SqlClient.SqlClient;
+				yield* sql`
+				INSERT INTO messages
+				(id, session_id, role, text, created_at, updated_at)
+				VALUES
+				('m-later', 's1', 'assistant', 'hi there', 2000, 2000),
+				('m-b', 's1', 'user', 'hello', 1000, 1000),
+				('m-a', 's1', 'user', 'hello', 1000, 1000)`;
+				const readQuery = yield* makeReadQueryEffect;
+
+				expect(
+					(yield* readQuery.getSessionMessagesWithParts("s1")).map(
+						(row) => row.id,
+					),
+				).toEqual(["m-a", "m-b", "m-later"]);
+				expect(
+					yield* readQuery.getSessionMessagesWithParts("nonexistent"),
+				).toEqual([]);
+			}).pipe(Effect.provide(testLayer)),
 	);
 });

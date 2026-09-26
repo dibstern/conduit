@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import type {
 	MessagePartRow,
 	MessageWithParts,
-} from "../../../src/lib/persistence/read-query-service.js";
+} from "../../../src/lib/persistence/read-model-types.js";
 import {
 	type HistoryResult,
 	messageRowsToHistory,

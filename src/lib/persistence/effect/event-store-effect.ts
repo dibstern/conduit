@@ -1,6 +1,5 @@
 // ─── Effect-based Event Store ───���─────────────────────────────────────────
-// Migrates event-store.ts from raw SqliteClient to @effect/sql SqlClient.
-// All database operations are Effect programs using template literal queries.
+// All database operations are Effect programs using @effect/sql template literal queries.
 
 import { SqlClient } from "@effect/sql";
 import type { SqlError } from "@effect/sql/SqlError";

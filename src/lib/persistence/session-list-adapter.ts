@@ -7,7 +7,7 @@ import type { SessionAttention, SessionInfo } from "../shared-types.js";
 import type {
 	PendingApprovalCountRow,
 	SessionRow,
-} from "./read-query-service.js";
+} from "./read-model-types.js";
 
 interface SessionStatus {
 	type: string;

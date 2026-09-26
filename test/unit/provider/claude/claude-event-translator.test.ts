@@ -9,7 +9,6 @@ import {
 } from "../../../../src/lib/contracts/providers/provider-runtime-event.js";
 import { historyToChatMessages } from "../../../../src/lib/frontend/utils/history-logic.js";
 import { createTestLogger } from "../../../../src/lib/logger.js";
-import { ReadQueryService } from "../../../../src/lib/persistence/read-query-service.js";
 import { messageRowsToHistory } from "../../../../src/lib/persistence/session-history-adapter.js";
 import { ClaudeEventTranslator } from "../../../../src/lib/provider/claude/claude-event-translator.js";
 import type {
@@ -812,9 +811,7 @@ describe("ClaudeEventTranslator", () => {
 			await runTranslate(relayTranslator, relayCtx, taskStarted);
 			await runTranslate(relayTranslator, relayCtx, taskProgress);
 
-			const rows = new ReadQueryService(
-				harness.readClient(),
-			).getSessionMessagesWithParts("sess-contract");
+			const rows = await harness.sessionMessagesWithParts("sess-contract");
 			const history = messageRowsToHistory(rows, { pageSize: 50 });
 			const messages = historyToChatMessages(history.messages);
 			const taskMessage = messages.find(
@@ -898,9 +895,9 @@ describe("ClaudeEventTranslator", () => {
 				session_id: "sdk-sess-thinking-snapshot",
 			} as unknown as SDKMessage);
 
-			const rows = new ReadQueryService(
-				harness.readClient(),
-			).getSessionMessagesWithParts("sess-thinking-snapshot");
+			const rows = await harness.sessionMessagesWithParts(
+				"sess-thinking-snapshot",
+			);
 			const history = messageRowsToHistory(rows, { pageSize: 50 });
 			const messages = historyToChatMessages(history.messages);
 
@@ -1010,9 +1007,9 @@ describe("ClaudeEventTranslator", () => {
 				}),
 			);
 
-			const rows = new ReadQueryService(
-				harness.readClient(),
-			).getSessionMessagesWithParts("sess-context-window");
+			const rows = await harness.sessionMessagesWithParts(
+				"sess-context-window",
+			);
 			const assistantRow = rows.find((row) => row.role === "assistant") as
 				| ((typeof rows)[number] & { context_window?: number })
 				| undefined;

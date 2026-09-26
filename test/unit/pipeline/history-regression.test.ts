@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { ThinkingMessage } from "../../../src/lib/frontend/types.js";
 import { historyToChatMessages } from "../../../src/lib/frontend/utils/history-logic.js";
-import { ReadQueryService } from "../../../src/lib/persistence/read-query-service.js";
 import { messageRowsToHistory } from "../../../src/lib/persistence/session-history-adapter.js";
 import type {
 	HistoryMessage,
@@ -164,15 +163,15 @@ describe("History conversion regression", () => {
 	// ─── Pagination guard ───────────────────────────────────────────────
 
 	describe("pagination guard", () => {
-		it("message with multiple parts stays intact at pageSize=1", () => {
+		it("message with multiple parts stays intact at pageSize=1", async () => {
 			// Future-proofing guard: getSessionMessagesWithParts() currently
 			// returns ALL messages (no pagination), but messageRowsToHistory
 			// accepts pageSize. This verifies a multi-part message isn't split.
 			let harness: TestHarness | undefined;
 			try {
 				harness = createTestHarness();
-				harness.seedSession("ses-page");
-				harness.seedMessage("msg-page", "ses-page", {
+				await harness.seedSession("ses-page");
+				await harness.seedMessage("msg-page", "ses-page", {
 					role: "assistant",
 					parts: [
 						{ id: "p1", type: "thinking", text: "thought", sortOrder: 0 },
@@ -180,15 +179,14 @@ describe("History conversion regression", () => {
 					],
 				});
 
-				const readQuery = new ReadQueryService(harness.db);
-				const rows = readQuery.getSessionMessagesWithParts("ses-page");
+				const rows = await harness.sessionMessagesWithParts("ses-page");
 				const { messages } = messageRowsToHistory(rows, { pageSize: 1 });
 
 				// Message should have both parts intact
 				expect(messages).toHaveLength(1);
 				expect(messages[0]?.parts?.length).toBeGreaterThanOrEqual(2);
 			} finally {
-				harness?.close();
+				await harness?.close();
 			}
 		});
 	});
@@ -196,14 +194,14 @@ describe("History conversion regression", () => {
 	// ─── Pre-existing data round-trip (migration safety) ─────────────────
 
 	describe("pre-existing data round-trip", () => {
-		it("pre-existing type='thinking' rows in SQLite round-trip after Task 0 fix", () => {
+		it("pre-existing type='thinking' rows in SQLite round-trip after Task 0 fix", async () => {
 			let harness: TestHarness | undefined;
 			try {
 				harness = createTestHarness();
-				harness.seedSession("ses-migrate");
+				await harness.seedSession("ses-migrate");
 
 				// Seed directly into DB — simulates data created before code fix
-				harness.seedMessage("msg-migrate", "ses-migrate", {
+				await harness.seedMessage("msg-migrate", "ses-migrate", {
 					role: "assistant",
 					parts: [
 						{
@@ -221,8 +219,7 @@ describe("History conversion regression", () => {
 					],
 				});
 
-				const readQuery = new ReadQueryService(harness.db);
-				const rows = readQuery.getSessionMessagesWithParts("ses-migrate");
+				const rows = await harness.sessionMessagesWithParts("ses-migrate");
 				const { messages } = messageRowsToHistory(rows, { pageSize: 50 });
 				const chatMessages = historyToChatMessages(messages);
 
@@ -240,17 +237,17 @@ describe("History conversion regression", () => {
 				const assistant = chatMessages.find((m) => m.type === "assistant");
 				expect(assistant).toBeDefined();
 			} finally {
-				harness?.close();
+				await harness?.close();
 			}
 		});
 
-		it("pre-existing type='thinking' row with empty text — does not crash pipeline", () => {
+		it("pre-existing type='thinking' row with empty text — does not crash pipeline", async () => {
 			let harness: TestHarness | undefined;
 			try {
 				harness = createTestHarness();
-				harness.seedSession("ses-migrate-empty");
+				await harness.seedSession("ses-migrate-empty");
 
-				harness.seedMessage("msg-migrate-empty", "ses-migrate-empty", {
+				await harness.seedMessage("msg-migrate-empty", "ses-migrate-empty", {
 					role: "assistant",
 					parts: [
 						{
@@ -262,8 +259,8 @@ describe("History conversion regression", () => {
 					],
 				});
 
-				const readQuery = new ReadQueryService(harness.db);
-				const rows = readQuery.getSessionMessagesWithParts("ses-migrate-empty");
+				const rows =
+					await harness.sessionMessagesWithParts("ses-migrate-empty");
 				const { messages } = messageRowsToHistory(rows, { pageSize: 50 });
 				const chatMessages = historyToChatMessages(messages);
 
@@ -276,7 +273,7 @@ describe("History conversion regression", () => {
 				// biome-ignore lint/style/noNonNullAssertion: asserted above
 				expect(thinking!.done).toBe(true);
 			} finally {
-				harness?.close();
+				await harness?.close();
 			}
 		});
 	});

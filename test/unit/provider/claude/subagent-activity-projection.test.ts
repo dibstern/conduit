@@ -33,7 +33,7 @@ import {
 } from "../../../../src/lib/persistence/effect/projector-cursor-effect.js";
 import { createAllEffectProjectors } from "../../../../src/lib/persistence/effect/projectors-effect.js";
 import { canonicalEvent } from "../../../../src/lib/persistence/events.js";
-import type { SessionRow } from "../../../../src/lib/persistence/read-query-service.js";
+import type { SessionRow } from "../../../../src/lib/persistence/read-model-types.js";
 import { sessionRowsToSessionInfoList } from "../../../../src/lib/persistence/session-list-adapter.js";
 import { ClaudeEventTranslator } from "../../../../src/lib/provider/claude/claude-event-translator.js";
 import type {

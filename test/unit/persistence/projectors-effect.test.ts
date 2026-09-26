@@ -867,6 +867,149 @@ describe("EventStoreEffect", () => {
 				expect(version).toBe(0);
 			}),
 		));
+
+	it("getNextStreamVersion returns the version after existing events", () =>
+		runTest(
+			Effect.gen(function* () {
+				const store = yield* EventStoreEffectTag;
+				yield* seedSession("s1");
+				yield* store.append(makeSessionCreated("s1"));
+				yield* store.append(makeTextDelta("s1", "m1", "a"));
+				expect(yield* store.getNextStreamVersion("s1")).toBe(2);
+			}),
+		));
+
+	it("appends session.created before the session projection row exists", () =>
+		runTest(
+			Effect.gen(function* () {
+				const store = yield* EventStoreEffectTag;
+				const sql = yield* SqlClient.SqlClient;
+				const stored = yield* store.append(makeSessionCreated("s1"));
+				expect(stored.sequence).toBe(1);
+				expect(stored.streamVersion).toBe(0);
+				expect(stored.sessionId).toBe("s1");
+				expect(yield* sql`SELECT id FROM sessions WHERE id = 's1'`).toEqual([]);
+			}),
+		));
+
+	it("append rejects duplicate event IDs", () =>
+		runTest(
+			Effect.gen(function* () {
+				const store = yield* EventStoreEffectTag;
+				yield* seedSession("s1");
+				const eventId = createEventId();
+				yield* store.append(makeSessionCreated("s1", { eventId }));
+				const duplicate = yield* Effect.either(
+					store.append({ ...makeTextDelta("s1", "m1", "x"), eventId }),
+				);
+				expect(duplicate._tag).toBe("Left");
+			}),
+		));
+
+	it("appendBatch assigns contiguous stream versions and rolls back on a duplicate event ID", () =>
+		runTest(
+			Effect.gen(function* () {
+				const store = yield* EventStoreEffectTag;
+				const sql = yield* SqlClient.SqlClient;
+				yield* seedSession("s1");
+				const stored = yield* store.appendBatch([
+					makeSessionCreated("s1"),
+					makeTextDelta("s1", "m1", "hello"),
+					makeTextDelta("s1", "m1", " world"),
+				]);
+				expect(stored.map((e) => e.streamVersion)).toEqual([0, 1, 2]);
+
+				yield* seedSession("s2");
+				const shared = makeTextDelta("s2", "m2", "hello");
+				const failed = yield* Effect.either(
+					store.appendBatch([
+						makeSessionCreated("s2"),
+						shared,
+						{ ...makeTextDelta("s2", "m2", "world"), eventId: shared.eventId },
+					]),
+				);
+				expect(failed._tag).toBe("Left");
+				expect(
+					yield* sql`SELECT sequence FROM events WHERE session_id = 's2'`,
+				).toEqual([]);
+			}),
+		));
+
+	it("appendBatch returns nothing for empty input", () =>
+		runTest(
+			Effect.gen(function* () {
+				const store = yield* EventStoreEffectTag;
+				expect(yield* store.appendBatch([])).toEqual([]);
+			}),
+		));
+
+	it("readFromSequence honours limit, an exhausted cursor, and a negative cursor", () =>
+		runTest(
+			Effect.gen(function* () {
+				const store = yield* EventStoreEffectTag;
+				yield* seedSession("s1");
+				for (let i = 0; i < 5; i++) {
+					yield* store.append(makeTextDelta("s1", "m1", `chunk-${i}`));
+				}
+				expect(yield* store.readFromSequence(0, 3)).toHaveLength(3);
+				expect(yield* store.readFromSequence(5, 10)).toEqual([]);
+				expect(yield* store.readFromSequence(-1)).toHaveLength(5);
+			}),
+		));
+
+	it("readBySession honours fromSequence and limit, and is empty for an unknown session", () =>
+		runTest(
+			Effect.gen(function* () {
+				const store = yield* EventStoreEffectTag;
+				yield* seedSession("s1");
+				const first = yield* store.append(makeSessionCreated("s1"));
+				for (let i = 0; i < 4; i++) {
+					yield* store.append(makeTextDelta("s1", "m1", `chunk-${i}`));
+				}
+				expect(yield* store.readBySession("s1", first.sequence)).toHaveLength(
+					4,
+				);
+				expect(yield* store.readBySession("s1", 0, 3)).toHaveLength(3);
+				expect(yield* store.readBySession("s1", 0, 0)).toEqual([]);
+				expect(yield* store.readBySession("nonexistent")).toEqual([]);
+			}),
+		));
+
+	it("round-trips nested data, metadata, epoch-zero createdAt, and large payloads", () =>
+		runTest(
+			Effect.gen(function* () {
+				const store = yield* EventStoreEffectTag;
+				yield* seedSession("s1");
+				const toolStarted = canonicalEvent(
+					"tool.started",
+					"s1",
+					{
+						messageId: "m1",
+						partId: "p1",
+						toolName: "bash",
+						callId: "call-1",
+						input: {
+							tool: "Unknown",
+							name: "bash",
+							raw: { command: "ls -la", nested: { deep: true } },
+						},
+					},
+					{
+						metadata: { commandId: "cmd_abc", adapterKey: "oc-main" },
+						createdAt: 0,
+					},
+				);
+				const largeText = "x".repeat(10_000);
+				yield* store.append(toolStarted);
+				yield* store.append(makeTextDelta("s1", "m1", largeText));
+
+				const [tool, delta] = yield* store.readFromSequence(0);
+				expect(tool?.data).toEqual(toolStarted.data);
+				expect(tool?.metadata).toEqual(toolStarted.metadata);
+				expect(tool?.createdAt).toBe(0);
+				expect(delta?.data).toMatchObject({ text: largeText });
+			}),
+		));
 });
 
 // ─── Projector Cursor Tests ─────────────────────────────────────────────────
@@ -890,6 +1033,18 @@ describe("ProjectorCursorEffect", () => {
 				expect(result).toBeDefined();
 				expect(result?.projectorName).toBe("session");
 				expect(result?.lastAppliedSeq).toBe(42);
+				expect(result?.updatedAt).toBeGreaterThan(0);
+			}),
+		));
+
+	it("upsert advances an existing cursor to a higher sequence", () =>
+		runTest(
+			Effect.gen(function* () {
+				const cursor = yield* ProjectorCursorEffectTag;
+				yield* cursor.upsert("session", 5);
+				yield* cursor.upsert("session", 15);
+				const result = yield* cursor.get("session");
+				expect(result?.lastAppliedSeq).toBe(15);
 			}),
 		));
 
@@ -916,6 +1071,14 @@ describe("ProjectorCursorEffect", () => {
 				expect(all[0]?.projectorName).toBe("activity");
 				expect(all[1]?.projectorName).toBe("message");
 				expect(all[2]?.projectorName).toBe("session");
+			}),
+		));
+
+	it("listAll returns nothing when no cursors exist", () =>
+		runTest(
+			Effect.gen(function* () {
+				const cursor = yield* ProjectorCursorEffectTag;
+				expect(yield* cursor.listAll()).toEqual([]);
 			}),
 		));
 
