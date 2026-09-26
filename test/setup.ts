@@ -7,6 +7,31 @@ import { setLogLevel } from "../src/lib/logger.js";
 
 setLogLevel("error");
 
+// Git hooks export GIT_DIR, GIT_INDEX_FILE and friends, and lefthook's
+// pre-commit runs this suite. Any git a test spawns would then act on
+// conduit's own repository, not the temp repo in its cwd: `git init` plus
+// `git config` in session-git.test.ts once pointed core.worktree at a temp
+// dir and set user.name to "Test User". The list is `git rev-parse
+// --local-env-vars`.
+for (const name of [
+	"GIT_ALTERNATE_OBJECT_DIRECTORIES",
+	"GIT_CONFIG",
+	"GIT_CONFIG_PARAMETERS",
+	"GIT_CONFIG_COUNT",
+	"GIT_OBJECT_DIRECTORY",
+	"GIT_DIR",
+	"GIT_WORK_TREE",
+	"GIT_IMPLICIT_WORK_TREE",
+	"GIT_GRAFT_FILE",
+	"GIT_INDEX_FILE",
+	"GIT_NO_REPLACE_OBJECTS",
+	"GIT_REPLACE_REF_BASE",
+	"GIT_PREFIX",
+	"GIT_SHALLOW_FILE",
+	"GIT_COMMON_DIR",
+])
+	delete process.env[name];
+
 // 2. Frontend — silence console.debug/info/warn produced by stores and
 //    createFrontendLogger. console.error is left untouched.
 const noop = () => {};
