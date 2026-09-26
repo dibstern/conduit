@@ -35,6 +35,26 @@ afterEach(() => {
 });
 
 describe("ProjectManagerPanel", () => {
+	it("renders projects as management groups without navigation links", () => {
+		const { getByRole, getByTestId, queryAllByRole } = render(
+			ProjectManagerPanel,
+			{
+				props: {
+					projects: [
+						{ slug: "myapp", title: "My App", directory: "/src/myapp" },
+					],
+					currentSlug: "myapp",
+				},
+			},
+		);
+
+		expect(getByTestId("project-item")).toBe(getByRole("group"));
+		expect(queryAllByRole("link")).toHaveLength(0);
+		expect(
+			getByRole("button", { name: "More options for My App" }),
+		).toBeTruthy();
+	});
+
 	it("adds the first project when no project is attached", async () => {
 		const { getByText, getByRole } = render(ProjectManagerPanel, {
 			props: { projects: [], currentSlug: undefined },

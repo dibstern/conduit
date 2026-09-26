@@ -187,7 +187,7 @@ async function showSessionListOnMobile(page: Page): Promise<void> {
 	if (await back.isVisible()) {
 		await back.click();
 	}
-	await page.locator("#project-switcher-btn").waitFor({ state: "visible" });
+	await page.locator("#sidebar").waitFor({ state: "visible" });
 }
 
 /**
@@ -210,26 +210,28 @@ async function openSettingsPanel(page: Page): Promise<void> {
 	await page.locator("#settings-btn, [title='Settings']").click();
 }
 
-/** Open the ProjectSwitcher dropdown. On mobile, opens the sidebar first. */
-async function openProjectSwitcher(page: Page): Promise<void> {
+/** Open project management from the desktop sidebar or phone list bar. */
+async function openProjectsPanel(page: Page): Promise<void> {
 	await showSessionListOnMobile(page);
-	const switcherBtn = page.locator("#project-switcher-btn");
-	await switcherBtn.click();
-	// Wait for the dropdown container to appear
-	await page
-		.locator("[data-testid='project-switcher-dropdown']")
-		.waitFor({ state: "visible" });
+	const overflow = page.getByTestId("list-bar-overflow");
+	if (await overflow.isVisible()) {
+		await overflow.click();
+		await page.getByTestId("list-overflow-projects").click();
+	} else {
+		await page.locator("#sidebar-projects-btn").click();
+	}
+	await expect(page.getByTestId("sidebar-projects-panel")).toBeVisible();
 }
 
-// ─── Group 1: ProjectSwitcher Instance Grouping (IMPLEMENTED) ──────────────
+// ─── Group 1: ProjectManagerPanel Instance Grouping (IMPLEMENTED) ──────────────
 
-test.describe("ProjectSwitcher: Instance Grouping", () => {
+test.describe("ProjectManagerPanel: Instance Grouping", () => {
 	test("groups projects by instance when multiple instances exist", async ({
 		page,
 		baseURL,
 	}) => {
 		await setupMultiInstance(page, baseURL);
-		await openProjectSwitcher(page);
+		await openProjectsPanel(page);
 
 		// Instance group headers have specific styling
 		const instanceHeaders = page.locator(
@@ -242,7 +244,7 @@ test.describe("ProjectSwitcher: Instance Grouping", () => {
 
 	test("shows flat list when single instance", async ({ page, baseURL }) => {
 		await setupSingleInstance(page, baseURL);
-		await openProjectSwitcher(page);
+		await openProjectsPanel(page);
 
 		// No instance group headers
 		const instanceHeaders = page.locator(
@@ -256,7 +258,7 @@ test.describe("ProjectSwitcher: Instance Grouping", () => {
 		baseURL,
 	}) => {
 		await setupMultiInstance(page, baseURL);
-		await openProjectSwitcher(page);
+		await openProjectsPanel(page);
 
 		const instanceHeaders = page.locator(
 			"[data-testid='instance-group-header']",
@@ -280,7 +282,7 @@ test.describe("ProjectSwitcher: Instance Grouping", () => {
 		baseURL,
 	}) => {
 		const control = await setupMultiInstance(page, baseURL);
-		await openProjectSwitcher(page);
+		await openProjectsPanel(page);
 
 		const instanceHeaders = page.locator(
 			"[data-testid='instance-group-header']",
@@ -397,8 +399,8 @@ test.describe("Instance Store: Reactivity", () => {
 		const badge = page.locator("[data-testid='instance-badge']");
 		await expect(badge).toBeVisible();
 
-		// ProjectSwitcher grouping proves store → ProjectSwitcher
-		await openProjectSwitcher(page);
+		// ProjectManagerPanel grouping proves store → ProjectManagerPanel
+		await openProjectsPanel(page);
 		const instanceHeaders = page.locator(
 			"[data-testid='instance-group-header']",
 		);
@@ -410,7 +412,7 @@ test.describe("Instance Store: Reactivity", () => {
 		baseURL,
 	}) => {
 		const control = await setupMultiInstance(page, baseURL);
-		await openProjectSwitcher(page);
+		await openProjectsPanel(page);
 
 		const instanceHeaders = page.locator(
 			"[data-testid='instance-group-header']",
@@ -457,7 +459,7 @@ test.describe("Instance Store: Reactivity", () => {
 test.describe("Status Color Mapping", () => {
 	test("each status maps to correct color", async ({ page, baseURL }) => {
 		const control = await setupMultiInstance(page, baseURL);
-		await openProjectSwitcher(page);
+		await openProjectsPanel(page);
 
 		const instanceHeaders = page.locator(
 			"[data-testid='instance-group-header']",
@@ -757,7 +759,7 @@ test.describe("Project-Instance Binding", () => {
 		baseURL,
 	}) => {
 		await setupMultiInstance(page, baseURL);
-		await openProjectSwitcher(page);
+		await openProjectsPanel(page);
 		const addBtn = page.getByText("Add project");
 		await addBtn.click();
 		const instanceSelect = page.locator(
@@ -771,7 +773,7 @@ test.describe("Project-Instance Binding", () => {
 		baseURL,
 	}) => {
 		await setupMultiInstance(page, baseURL);
-		await openProjectSwitcher(page);
+		await openProjectsPanel(page);
 		await page.getByText("Add project").click();
 		const instanceSelect = page.locator(
 			"select[name='instance'], #instance-selector",
@@ -927,12 +929,12 @@ test.describe("Add Project: Instance Binding", () => {
 		baseURL,
 	}) => {
 		const control = await setupMultiInstance(page, baseURL);
-		await openProjectSwitcher(page);
+		await openProjectsPanel(page);
 		await page.getByText("Add project").click();
 
 		// Fill directory
 		await page.fill(
-			"[data-testid='project-switcher-dropdown'] input[type='text']",
+			"[data-testid='sidebar-projects-panel'] input[type='text']",
 			"~/src/work/ds/test-generator-skill",
 		);
 

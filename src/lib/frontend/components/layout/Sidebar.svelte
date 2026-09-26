@@ -8,7 +8,6 @@
 	import Button from "../ui/Button.svelte";
 	import Surface from "../ui/Surface.svelte";
 	import SessionList from "../session/SessionList.svelte";
-	import ProjectSwitcher from "../project/ProjectSwitcher.svelte";
 	import ProjectManagerPanel from "../project/ProjectManagerPanel.svelte";
 	import SidebarFilePanel from "../file/SidebarFilePanel.svelte";
 	import { dismiss } from "../../actions/use-dismiss.svelte.js";
@@ -258,11 +257,6 @@
 	</div>
 
 	{#if listScreen}<Banners />{/if}
-
-	<!-- Project switcher -->
-	<div class="px-1 shrink-0">
-		<ProjectSwitcher projects={projectState.projects} currentSlug={getCurrentSlug()} />
-	</div>
 
 	<!-- Sidebar nav -->
 	<nav id="sidebar-nav" class="flex-1 flex flex-col overflow-hidden">

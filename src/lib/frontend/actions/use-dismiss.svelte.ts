@@ -1,6 +1,6 @@
 /**
  * Outside-click / Escape dismissal for surfaces that are NOT built on a Bits
- * primitive. Two consumers remain: InstanceModelPicker and ProjectSwitcher.
+ * primitive. Two consumers remain: InstanceModelPicker and Sidebar.
  * PermissionModeSelector moved onto ui/Menu in conduit-test-de3.35.9.3.
  *
  * Deliberately here rather than in `components/ui/actions/`, where it used to

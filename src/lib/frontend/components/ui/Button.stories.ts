@@ -182,8 +182,7 @@ export const AlignStart: Story = {
 /**
  * The alignment that USED to be unreachable. `.justify-between` is emitted
  * before `.justify-center` in the built stylesheet, so passing it as a class
- * lost silently; ProjectSwitcher's trigger worked around it with `flex-1` on a
- * child and a comment explaining why.
+ * lost silently. The align prop makes this independent of emission order.
  */
 export const AlignBetween: Story = {
 	args: {

@@ -73,17 +73,6 @@ const allowedPlainErrorThrows: readonly AllowedPlainThrow[] = [
 		reason: "storybook/mock fixture text, not executable production code",
 	},
 	{
-		path: "src/lib/frontend/components/project/ProjectSwitcher.stories.ts",
-		// Matches the wording loosely on purpose: the previous pattern pinned the
-		// exact sentence, so rephrasing the guard message in conduit-test-732b broke
-		// this gate for a change that did not alter its meaning at all.
-		// conduit-test-de3.35.6 folded the old per-story trigger guards into one
-		// `openDropdown` helper and added a second guard for the rename flow.
-		snippetPattern: /More options button/,
-		reason:
-			"storybook play() query guard, not executable production code — same class as stories/mocks.ts above",
-	},
-	{
 		path: "src/lib/frontend/components/overlays/NotifSettings.stories.ts",
 		snippetPattern: /pushUnavailable takes precedence/,
 		reason:

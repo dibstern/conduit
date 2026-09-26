@@ -101,12 +101,8 @@
 
 	// Every shadow token declared in style.css, and nothing else.
 	//
-	// `menu-lg` (3) and `dropdown` (1) were shipped tokens the map simply never
-	// exposed, which is why three menu shells and ProjectSwitcher could not
-	// migrate at all. `dropdown` is the one entry here with a single consumer:
-	// omitting it would force that site into a class override, and a token that
-	// exists but is unreachable through the primitive is worse than a
-	// thin map entry.
+	// `menu-lg` and `dropdown` let menu shells and the sidebar projects panel
+	// use the shipped shadow tokens without class overrides.
 	//
 	// Deliberately absent: shadow-2xl (3), shadow-lg (2), shadow-xl (1). Those
 	// are raw Tailwind defaults, visibly unlike the token set, and mapping them

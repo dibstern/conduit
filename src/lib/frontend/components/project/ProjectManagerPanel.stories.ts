@@ -79,6 +79,17 @@ export const SingleProject: Story = {
 		],
 		currentSlug: "my-app",
 	},
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		await expect(canvas.getByTestId("project-item")).toHaveAttribute(
+			"role",
+			"group",
+		);
+		await expect(canvas.queryAllByRole("link")).toHaveLength(0);
+		await expect(
+			canvas.getByRole("button", { name: "More options for My Application" }),
+		).toBeVisible();
+	},
 };
 
 export const MultipleProjects: Story = groupedStory;

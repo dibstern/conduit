@@ -1,10 +1,8 @@
 <!-- ─── SessionContextMenu ──────────────────────────────────────────────────── -->
 <!-- Session actions: Rename, Fork, Copy Resume Command, Delete.              -->
 <!--                                                                         -->
-<!-- Anchored to the "..." button its consumer already owns. Two consumers    -->
-<!-- mount it that way (SessionList and ProjectSwitcher), which is why the    -->
-<!-- `anchor` prop survived the move onto ui/Menu rather than the trigger     -->
-<!-- moving into the row: changing the shape would have restructured both.    -->
+<!-- Anchored to the "..." button SessionList already owns. The `anchor` prop -->
+<!-- lets the row keep its trigger while ui/Menu owns the menu.               -->
 <!--                                                                         -->
 <!-- The consumer mounts this only while the menu should be open, so `open`   -->
 <!-- starts true and `onclose` unmounts us. That is also why the empty        -->

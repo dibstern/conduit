@@ -26,15 +26,11 @@
 	let {
 		projects,
 		currentSlug,
-		navigable = false,
-		onnavigate,
 		onclose,
 		oncontextmenuopenchange,
 	}: {
 		projects: ProjectInfo[];
 		currentSlug: string | undefined;
-		navigable?: boolean;
-		onnavigate?: (slug: string) => void;
 		onclose?: () => void;
 		oncontextmenuopenchange?: (open: boolean) => void;
 	} = $props();
@@ -199,20 +195,6 @@
 		}
 	}
 
-	function handleProjectRowClick(
-		event: MouseEvent,
-		project: ProjectInfo,
-		isRenaming: boolean,
-	) {
-		if (isRenaming) {
-			event.preventDefault();
-			return;
-		}
-		if (event.metaKey || event.ctrlKey) return;
-		event.preventDefault();
-		onnavigate?.(project.slug);
-	}
-
 	let unsubProject: (() => void) | undefined;
 
 	function handleKeydown(event: KeyboardEvent) {
@@ -247,32 +229,17 @@
 <svelte:window onkeydown={handleKeydown} />
 
 {#snippet projectRow(project: ProjectInfo)}
-	{@const isActive = navigable && project.slug === currentSlug}
 	{@const isRenaming = renamingSlug === project.slug}
-	<!-- The rail and manager hooks stay distinct until conduit-test-vik1.7 deletes the rail, when they collapse back. -->
-	<svelte:element
-		this={navigable ? "a" : "div"}
-		role={navigable ? undefined : "group"}
-		href={navigable ? `/?${new URLSearchParams({ p: project.slug })}` : undefined}
-		data-testid={navigable ? "project-item" : "managed-project-item"}
+	<div
+		role="group"
+		data-testid="project-item"
 		data-slug={project.slug}
 		title={project.directory}
-		class={navigable
-			? "group/proj flex items-center gap-2.5 px-3 py-2.5 cursor-pointer transition-colors duration-100 hover:bg-[rgba(var(--overlay-rgb),0.04)] rounded-md no-underline text-inherit visited:text-inherit" +
-				(isActive ? " bg-bg-surface" : "")
-			: "group/proj flex items-center gap-2.5 px-3 py-2.5 rounded-md"}
-		style={isActive
-			? "box-shadow: inset 3px 0 0 var(--color-brand-a), inset 3px 0 12px rgba(255,45,123,0.1);"
-			: ""}
-		onclick={navigable
-			? (event: MouseEvent) =>
-					handleProjectRowClick(event, project, isRenaming)
-			: undefined}
+		class="group/proj flex items-center gap-2.5 px-3 py-2.5 rounded-md"
 	>
 		<!-- Indicator dot -->
 		<span
-			class={"w-1.5 h-1.5 rounded-full shrink-0" +
-				(isActive ? " bg-accent" : " bg-text-dimmer/40")}
+			class="w-1.5 h-1.5 rounded-full shrink-0 bg-text-dimmer/40"
 		></span>
 		<!-- Name and directory -->
 		<div class="flex-1 min-w-0 flex flex-col">
@@ -293,10 +260,7 @@
 				/>
 			{:else}
 				<span
-					class={"text-base truncate" +
-						(isActive
-							? " font-semibold text-text"
-							: " text-text-secondary")}
+					class="text-base truncate text-text-secondary"
 				>
 					{project.title}
 				</span>
@@ -312,12 +276,10 @@
 					{project.clientCount}
 				</span>
 			{/if}
-			<!-- The rail hook is retained for existing e2e specs; manage mode uses a distinct hook until the rail is removed. -->
 			<!-- `w-5 h-5` is 15px, not 20px: the app's root font-size is 12px so
-			     every rem utility is 0.75x. That is fine for the rail, which is
-			     pointer-only, but in manage mode this control IS how you reach
-			     rename and remove on a phone, so it gets a literal 44px floor
-			     there and drops back to the rail's glyph size at md. -->
+			     every rem utility is 0.75x. This control opens rename and remove,
+			     so it keeps a literal 44px floor on phones and uses the compact
+			     glyph size at md. -->
 			<Button
 				variant="toolbar"
 				size="content"
@@ -325,9 +287,7 @@
 				icon="ellipsis"
 				iconSize={13}
 				ariaLabel="More options for {project.title}"
-				class={navigable
-					? "proj-more-btn shrink-0 w-5 h-5 rounded duration-100"
-					: "managed-proj-more-btn shrink-0 min-w-[44px] min-h-[44px] md:w-5 md:h-5 md:min-w-0 md:min-h-0 rounded duration-100"}
+				class="proj-more-btn shrink-0 min-w-[44px] min-h-[44px] md:w-5 md:h-5 md:min-w-0 md:min-h-0 rounded duration-100"
 				title="More options"
 				onclick={(event) => {
 					event.preventDefault();
@@ -339,7 +299,7 @@
 				}}
 			/>
 		{/if}
-	</svelte:element>
+	</div>
 {/snippet}
 
 <!-- Header -->
@@ -360,16 +320,12 @@
 			<!-- Instance group header -->
 			<div
 				class="flex items-center gap-1.5 px-3 pt-2 pb-1 text-xs font-semibold uppercase tracking-[0.5px] text-text-dimmer"
-				data-testid={navigable
-					? "instance-group-header"
-					: "managed-instance-group-header"}
+				data-testid="instance-group-header"
 			>
 				<span
 					class={"w-1.5 h-1.5 rounded-full shrink-0 " +
 						instanceStatusColor(instance?.status)}
-					data-testid={navigable
-						? "instance-status-dot"
-						: "managed-instance-status-dot"}
+					data-testid="instance-status-dot"
 				></span>
 				<span class="truncate">{instance?.name ?? "Default"}</span>
 			</div>
@@ -438,8 +394,7 @@
 				variant="toolbar"
 				size="content"
 				align="start"
-				class={"w-full gap-2 px-3 py-2 text-xs duration-150" +
-					(navigable ? "" : " min-h-[44px] md:min-h-0")}
+				class="w-full gap-2 px-3 py-2 text-xs duration-150 min-h-[44px] md:min-h-0"
 				onclick={handleShowAddForm}
 			>
 				<Icon name="plus" size={13} />

@@ -49,12 +49,7 @@
 	"src/lib/frontend/components/project/ProjectContextMenu.svelte :: py-2": "Deliberate: 6px -> 4.5px. py-1.5 is the row height every other menu in the app already used, and this menu's extra 1.5px was unexplained. The checker refuses to take this as a move, correctly, because py-2 is in no recipe.",
 	"src/lib/frontend/components/project/ProjectContextMenu.svelte :: text-[13px]": "Converged to the shared `text-sm` (11px) that every other menu row in the app already wore. 13px was this one menu's private value and nothing referenced it.",
 	"src/lib/frontend/components/project/ProjectContextMenu.svelte :: z-[var(--z-popover)]": "Was on the full-screen backdrop div that caught outside clicks. The backdrop is gone: bits-ui dismisses on outside pointerdown without painting an element over the page, which also stops the backdrop swallowing the first click elsewhere.",
-	"src/lib/frontend/components/project/ProjectContextMenu.svelte :: z-[var(--z-popover-raised)]": "As above. This menu opens from inside ProjectSwitcher's inline dropdown, which sits below the popover tier, so 200 clears it.",
-	"src/lib/frontend/components/project/ProjectSwitcher.svelte :: Remove,border-border-subtle,border-t,conduit,duration-100,font-medium,font-mono,from,h-5,justify-end,max-h-[280px],overflow-y-auto,pb-1,pb-1.5,proj-more-btn,pt-2,px-1.5,px-3,py-0.5,py-1,py-2,rounded,tabular-nums,text-error,text-xs,w-5": {
-		"movedTo": "src/lib/frontend/components/project/ProjectManagerPanel.svelte",
-		"reason": "conduit-test-vik1.6 extracts the ProjectSwitcher dropdown body into ProjectManagerPanel verbatim. These tokens still render in the navigable panel branch; the switcher now owns only its trigger and Surface shell.",
-		"requires": "<ProjectManagerPanel"
-	},
+	"src/lib/frontend/components/project/ProjectContextMenu.svelte :: z-[var(--z-popover-raised)]": "As above. This menu opens from inside the sidebar projects panel, which sits below the popover tier, so 200 clears it.",
 	"src/lib/frontend/components/ui/segmented-styles.ts :: border-brand-a": {
 		"renamedTo": "border-accent",
 		"reason": "brand-a and accent hold the same value in both canonical themes, so the swap is zero-diff. accent won because selection is an interactive state and accent is the token family that models one. The underlying token duplication is tracked on conduit-test-57oe."
@@ -91,5 +86,11 @@
 	"test/e2e/specs/multi-instance.spec.ts :: hamburger-btn": "A selector string in a test helper, not a class. The hamburger went with the drawer (vik1.17.6).",
 	"src/lib/frontend/components/layout/Sidebar.svelte :: bg-[rgba(var(--overlay-rgb),0.45)]": "The phone drawer's scrim fill, deleted with the drawer (vik1.17.6). Its own key because the token contains a comma.",
 	"test/unit/visual-baseline-uniqueness.test.ts :: desktop,expand,hamburger,hidden,mobile,plus:,sidebar,states": "Prose in a removed test string describing the drawer-open sidebar story, not classes. That story and its baselines were deleted with the drawer (vik1.17.6).",
-	"test/unit/visual-baseline-uniqueness.test.ts :: above,": "Same removed drawer-story prose as the entry above; its own key because the word carries a trailing comma."
+	"test/unit/visual-baseline-uniqueness.test.ts :: above,": "Same removed drawer-story prose as the entry above; its own key because the word carries a trailing comma.",
+	"test/unit/effect/runtime-boundary-grep.test.ts :: play(),query": "Not a call site: an allowlist entry for ProjectSwitcher.stories.ts, removed because the file was deleted in conduit-test-vik1.7.",
+	"src/lib/frontend/components/project/ProjectSwitcher.stories.ts :: App,Frontend,The,clients,dropdown,must,open,s,show,three": "File deleted with ProjectSwitcher.svelte (conduit-test-vik1.7). Not a call site: these are words from story descriptions the token scanner picked up.",
+	"test/e2e/specs/project-management.spec.ts :: project-switcher-dropdown": "Not a call site: a Playwright locator for the switcher dropdown deleted in conduit-test-vik1.7. The spec now drives the sidebar projects panel.",
+	"src/lib/frontend/components/project/ProjectSwitcher.svelte :: duration-150,flex,flex-1,flex-col,font-brand,font-semibold,gap-1.5,gap-2,items-center,leading-tight,left-0,max-w-[180px],max-w-[320px],min-w-0,min-w-[240px],mt-0.5,p-1,proj-switcher,px-2,py-1.5,right-0,rounded-lg,sr-only,text-sm,text-text,text-text-dimmer,top-full,tracking-[0.5px],truncate,uppercase,z-[var(--z-dropdown)]": "File deleted (conduit-test-vik1.7): the sidebar project rail is gone. Project selection is the scope chip or ?p=<slug>, and rename, remove, add and instance grouping live in the sidebar projects panel (ProjectManagerPanel), so nothing it styled survives.",
+	"src/lib/frontend/components/layout/Sidebar.svelte :: px-1": "The wrapper that padded the project rail, deleted with the rail (conduit-test-vik1.7). The session nav below takes the freed space.",
+	"test/e2e/specs/multi-instance.spec.ts :: project-switcher-dropdown": "Not a call site: a Playwright locator for the switcher dropdown deleted in conduit-test-vik1.7. The spec now drives the sidebar projects panel."
 }

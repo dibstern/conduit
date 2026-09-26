@@ -46,7 +46,7 @@
 		count: "min-w-[18px] h-[18px] px-[5px] text-xs font-semibold leading-none justify-center",
 	};
 
-	// Two shapes, not three. ProjectSwitcher's rounded-panel (10px) on an
+	// Two shapes, not three. A rounded-panel (10px) radius on an
 	// ~18px-tall chip already clamps to a capsule, so it and rounded-full are
 	// the same rendering and collapse into one name.
 	const SHAPE_CLASSES: Record<BadgeShape, string> = {
