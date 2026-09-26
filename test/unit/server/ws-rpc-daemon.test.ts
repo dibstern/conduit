@@ -53,6 +53,28 @@ describe("daemon RPC handlers", () => {
 						.entries,
 				).toEqual([]);
 				expect((yield* client.ScanNow({})).active).toEqual([]);
+				expect(
+					(yield* client.GetAutoSettleSetting({})).autoSettleAfterDays,
+				).toBe(3);
+				expect(
+					(yield* client.SetAutoSettleSetting({ autoSettleAfterDays: 7 }))
+						.autoSettleAfterDays,
+				).toBe(7);
+				expect(
+					(yield* client.GetAutoSettleSetting({})).autoSettleAfterDays,
+				).toBe(7);
+				expect(
+					(yield* Effect.either(
+						client.SetAutoSettleSetting({ autoSettleAfterDays: 91 }),
+					))._tag,
+				).toBe("Left");
+				expect(
+					(yield* client.GetAutoSettleSetting({})).autoSettleAfterDays,
+				).toBe(7);
+				yield* client.SetAutoSettleSetting({ autoSettleAfterDays: null });
+				expect(
+					(yield* client.GetAutoSettleSetting({})).autoSettleAfterDays,
+				).toBeNull();
 
 				const instance = yield* client.AddInstance({
 					name: " Test Claude ",

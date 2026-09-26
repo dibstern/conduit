@@ -262,6 +262,8 @@ export interface SessionInfo {
 	attention?: SessionAttention;
 	unread?: boolean;
 	settledAt?: number;
+	settledAutomatically?: boolean;
+	autoSettleDisabled?: boolean;
 	pinnedAt?: number;
 	snoozedAt?: number;
 	git?: SessionGit;
@@ -570,6 +572,8 @@ const SessionInfoSchema = Schema.Struct({
 	attention: Schema.optional(SessionAttentionSchema),
 	unread: Schema.optional(Schema.Boolean),
 	settledAt: Schema.optional(Schema.Number),
+	settledAutomatically: Schema.optional(Schema.Boolean),
+	autoSettleDisabled: Schema.optional(Schema.Boolean),
 	pinnedAt: Schema.optional(Schema.Number),
 	snoozedAt: Schema.optional(Schema.Number),
 	git: Schema.optional(SessionGitSchema),
@@ -959,6 +963,9 @@ const ProjectListSchema = Schema.Struct({
 	current: Schema.optional(Schema.String),
 	addedSlug: Schema.optional(Schema.String),
 });
+const DaemonSessionsChangedSchema = Schema.Struct({
+	type: Schema.Literal("daemon_sessions_changed"),
+});
 
 const ProjectAttachedSchema = Schema.Struct({
 	type: Schema.Literal("project_attached"),
@@ -1261,6 +1268,7 @@ export const RelayMessageSchema = Schema.Union(
 	CommandListSchema,
 	// Projects
 	ProjectListSchema,
+	DaemonSessionsChangedSchema,
 	ProjectAttachedSchema,
 	// File browser
 	FileListSchema,
@@ -1350,6 +1358,7 @@ export const RELAY_MESSAGE_TYPES = [
 	"claude_settings_info",
 	"command_list",
 	"project_list",
+	"daemon_sessions_changed",
 	"project_attached",
 	"file_list",
 	"file_content",
@@ -1589,6 +1598,7 @@ export type RelayMessage =
 			addedSlug?: string;
 	  }
 	| { type: "project_attached"; slug: string }
+	| { type: "daemon_sessions_changed" }
 	// ── File browser ───────────────────────────────────────────────────────
 	| { type: "file_list"; path: string; entries: FileEntry[] }
 	| { type: "file_content"; path: string; content: string; binary?: boolean }

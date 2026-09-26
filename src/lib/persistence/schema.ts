@@ -29,6 +29,7 @@ export const BACKFILL_COMPACTION_MESSAGES_MIGRATION =
 export const SESSIONS_SETTLED_PINNED_MIGRATION =
 	"0014_sessions_settled_pinned.sql";
 export const SESSIONS_SNOOZED_MIGRATION = "0015_sessions_snoozed.sql";
+export const SESSIONS_AUTO_SETTLE_MIGRATION = "0016_sessions_auto_settle.sql";
 
 export function readMigrationSql(filename: string): string {
 	return readFileSync(

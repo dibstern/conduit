@@ -31,6 +31,7 @@ export {
 	loadMoreHistoryForSession,
 	markSessionUnreadForClient,
 	renameSessionForClient,
+	setSessionAutoSettleForClient,
 	setSessionPinnedForClient,
 	setSessionSettledForClient,
 } from "./session.js";

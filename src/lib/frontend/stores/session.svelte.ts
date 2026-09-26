@@ -628,6 +628,12 @@ const sessionInfoFromRpc = (
 	...(session.attention != null ? { attention: session.attention } : {}),
 	...(session.unread != null ? { unread: session.unread } : {}),
 	...(session.settledAt != null ? { settledAt: session.settledAt } : {}),
+	...(session.settledAutomatically != null
+		? { settledAutomatically: session.settledAutomatically }
+		: {}),
+	...(session.autoSettleDisabled != null
+		? { autoSettleDisabled: session.autoSettleDisabled }
+		: {}),
 	...(session.pinnedAt != null ? { pinnedAt: session.pinnedAt } : {}),
 	...(session.snoozedAt != null ? { snoozedAt: session.snoozedAt } : {}),
 	...(session.git != null ? { git: session.git } : {}),

@@ -33,6 +33,7 @@
 		branch,
 		onrename,
 		onsettle,
+		onautosettle,
 		onpin,
 		onsnooze,
 		onunsnooze,
@@ -48,6 +49,7 @@
 		branch?: string | undefined;
 		onrename: (id: string) => void;
 		onsettle: (id: string, next: boolean) => void;
+		onautosettle: (id: string, disabled: boolean) => void;
 		onpin: (id: string, next: boolean) => void;
 		onsnooze: (id: string) => void;
 		onunsnooze: (id: string) => void;
@@ -122,6 +124,16 @@
 		{#if actions.settleDisabledReason}
 			<span class="ml-auto text-xs text-text-dimmer">{actions.settleDisabledReason}</span>
 		{/if}
+	</MenuItem>
+	<MenuItem
+		data-testid="session-ctx-auto-settle"
+		aria-checked={session.autoSettleDisabled !== true}
+		onselect={() => select(() => onautosettle(session.id, session.autoSettleDisabled !== true))}
+	>
+		<span class="w-[13px] shrink-0" aria-hidden="true">
+			{#if session.autoSettleDisabled !== true}<Icon name="check" size={13} />{/if}
+		</span>
+		<span>Auto-settle when idle</span>
 	</MenuItem>
 	<MenuItem
 		data-testid={session.pinnedAt != null ? "session-ctx-unpin" : "session-ctx-pin"}

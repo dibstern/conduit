@@ -134,9 +134,68 @@ test("desktop: hover and Tab reach the row's verbs, and the menu returns focus",
 	await expect(more).toBeFocused();
 });
 
+test("desktop: a settled row un-settles from the shelf by menu and by hover", async ({
+	page,
+	relayUrl,
+}) => {
+	const { row } = await setUp(page, relayUrl);
+	const id = await row.getAttribute("data-session-id");
+	const shelfRow = page.locator(
+		`#settled-shelf-rows [data-session-id="${id}"]`,
+	);
+	const toggle = page.getByTestId("settled-shelf-toggle");
+
+	await row.click({ button: "right" });
+	await page.getByTestId("session-ctx-settle").click();
+	await toggle.click();
+	await expect(shelfRow).toBeVisible();
+
+	// On a settled row the menu offers Un-settle in Settle's place.
+	await shelfRow.click({ button: "right" });
+	await expect(page.getByTestId("session-ctx-settle")).toHaveCount(0);
+	await page.getByTestId("session-ctx-unsettle").click();
+	await expect(shelfRow).toHaveCount(0);
+	await expect(toggle).toHaveCount(0);
+	await expect(row).toBeVisible();
+
+	// The hover verb flips the same way.
+	await row.hover();
+	await row.getByTestId("session-act-settle").click();
+	await expect(toggle).toHaveAttribute("aria-expanded", "true");
+	await shelfRow.hover();
+	await shelfRow.getByTestId("session-act-unsettle").click();
+	await expect(shelfRow).toHaveCount(0);
+	await expect(row).toBeVisible();
+});
+
 test.describe("phone", () => {
 	// Touch devices report no hover, so only this test gets a touchscreen.
 	test.use({ hasTouch: true });
+
+	test("phone: a full swipe right on a settled row un-settles it", async ({
+		page,
+		relayUrl,
+	}) => {
+		const { row } = await setUp(page, relayUrl);
+		const id = await row.getAttribute("data-session-id");
+		await page.setViewportSize({ width: 375, height: 740 });
+		await page.goto(new URL("/", page.url()).toString());
+		await expect(row).toBeVisible();
+		const shelfRow = page.locator(
+			`#settled-shelf-rows [data-session-id="${id}"]`,
+		);
+		const action = page.getByTestId("session-swipe-action");
+
+		await drag(row, [0.3, 0.7]);
+		await page.getByTestId("settled-shelf-toggle").tap();
+		await expect(shelfRow).toBeVisible();
+
+		await drag(shelfRow, [0.3, 0.7], false);
+		await expect(action).toContainText("Release to un-settle");
+		await lift(shelfRow);
+		await expect(shelfRow).toHaveCount(0);
+		await expect(row).toBeVisible();
+	});
 
 	test("phone: swipe settles and snoozes, holds on a short swipe, and long press opens the menu", async ({
 		page,

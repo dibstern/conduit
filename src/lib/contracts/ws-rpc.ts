@@ -307,6 +307,8 @@ export const SessionInfoSchema = Schema.Struct({
 	attention: Schema.optional(SessionAttentionSchema),
 	unread: Schema.optional(Schema.Boolean),
 	settledAt: Schema.optional(Schema.Number),
+	settledAutomatically: Schema.optional(Schema.Boolean),
+	autoSettleDisabled: Schema.optional(Schema.Boolean),
 	pinnedAt: Schema.optional(Schema.Number),
 	snoozedAt: Schema.optional(Schema.Number),
 	git: Schema.optional(SessionGitSchema),
@@ -692,6 +694,28 @@ export class UpdateInstance extends Schema.TaggedRequest<UpdateInstance>()(
 	},
 ) {}
 
+const AutoSettleSettingResponseSchema = Schema.Struct({
+	autoSettleAfterDays: Schema.NullOr(Schema.Number),
+});
+
+export class GetAutoSettleSetting extends Schema.TaggedRequest<GetAutoSettleSetting>()(
+	"GetAutoSettleSetting",
+	{
+		failure: WsRpcError,
+		success: AutoSettleSettingResponseSchema,
+		payload: {},
+	},
+) {}
+
+export class SetAutoSettleSetting extends Schema.TaggedRequest<SetAutoSettleSetting>()(
+	"SetAutoSettleSetting",
+	{
+		failure: WsRpcError,
+		success: AutoSettleSettingResponseSchema,
+		payload: { autoSettleAfterDays: Schema.NullOr(Schema.Number) },
+	},
+) {}
+
 export class ScanNow extends Schema.TaggedRequest<ScanNow>()("ScanNow", {
 	failure: WsRpcError,
 	success: ScanNowResponseSchema,
@@ -952,6 +976,20 @@ export class SetSessionPinned extends Schema.TaggedRequest<SetSessionPinned>()(
 			projectSlug: NonEmptyString,
 			sessionId: NonEmptyString,
 			pinned: Schema.Boolean,
+			originId: Schema.optional(NonEmptyString),
+		},
+	},
+) {}
+
+export class SetSessionAutoSettle extends Schema.TaggedRequest<SetSessionAutoSettle>()(
+	"SetSessionAutoSettle",
+	{
+		failure: WsRpcError,
+		success: OkResponseSchema,
+		payload: {
+			projectSlug: NonEmptyString,
+			sessionId: NonEmptyString,
+			disabled: Schema.Boolean,
 			originId: Schema.optional(NonEmptyString),
 		},
 	},
@@ -1342,6 +1380,7 @@ export const WsRpcRequest = Schema.Union(
 	MarkSessionUnread,
 	SetSessionSettled,
 	SetSessionPinned,
+	SetSessionAutoSettle,
 	SnoozeSession,
 	UnsnoozeSession,
 	SwitchVariant,
@@ -1362,6 +1401,8 @@ export const WsRpcRequest = Schema.Union(
 	RenameInstance,
 	AddInstance,
 	UpdateInstance,
+	GetAutoSettleSetting,
+	SetAutoSettleSetting,
 	ScanNow,
 	DetectProxy,
 	ListPtys,
@@ -1409,6 +1450,7 @@ export const WsRpcGroup = RpcGroup.make(
 	Rpc.fromTaggedRequest(MarkSessionUnread),
 	Rpc.fromTaggedRequest(SetSessionSettled),
 	Rpc.fromTaggedRequest(SetSessionPinned),
+	Rpc.fromTaggedRequest(SetSessionAutoSettle),
 	Rpc.fromTaggedRequest(SnoozeSession),
 	Rpc.fromTaggedRequest(UnsnoozeSession),
 	Rpc.fromTaggedRequest(SwitchVariant),
@@ -1429,6 +1471,8 @@ export const WsRpcGroup = RpcGroup.make(
 	Rpc.fromTaggedRequest(RenameInstance),
 	Rpc.fromTaggedRequest(AddInstance),
 	Rpc.fromTaggedRequest(UpdateInstance),
+	Rpc.fromTaggedRequest(GetAutoSettleSetting),
+	Rpc.fromTaggedRequest(SetAutoSettleSetting),
 	Rpc.fromTaggedRequest(ScanNow),
 	Rpc.fromTaggedRequest(DetectProxy),
 	Rpc.fromTaggedRequest(ListPtys),

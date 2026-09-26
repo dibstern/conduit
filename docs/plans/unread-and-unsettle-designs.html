@@ -1,0 +1,1540 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>conduit · Mark unread and Un-settle, placed</title>
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="dark light">
+<script>/* Shares the theme choice with mobile-first-sidebar.html. */
+document.documentElement.dataset.theme=localStorage.getItem("mfs-theme")||(matchMedia("(prefers-color-scheme:light)").matches?"light":"dark");</script>
+<style>
+  /* ── Tokens: copied from mobile-first-sidebar.html, unchanged ───────────── */
+  :root,[data-theme=dark]{
+    color-scheme:dark;
+    --bg:#0d0e11; --surface:#141619; --alt:#1b1e24; --hover:#20242b;
+    --border:#20242b; --border2:#2d323b; --chipline:#3a414c;
+    --text:#eceef2; --text2:#a8afbb; --dim:#79818f; --dimmer:#555c68;
+    --amber:#f4b740; --blue:#5aa9f5; --green:#3fd69a; --red:#f4607a;
+    --indigo:#9b9bff; --violet:#c0a8ff; --pink:#ff9dc2; --brand:#ff2d7b;
+    --inv:#eef0f4; --inv-ink:#15171c; --inv-act:#b3005a;
+    --scrim:rgba(6,7,9,.55); --sh:rgba(0,0,0,.5); --shx:rgba(0,0,0,.62);
+    --glass:rgba(24,25,29,.9); --glass2:rgba(24,25,29,.92);
+    --amber-f:#f4b740; --blue-f:#5aa9f5; --green-f:#3fd69a; --red-f:#f4607a;
+    --indigo-f:#9b9bff; --brand-f:#ff2d7b;
+    --onfill:#0c0d10; --onbrand:#fff;
+    --p-conduit:#b08cff; --p-dotfiles:#ff9a4d; --p-perry:#2fd3c0; --p-hunk:#ff6fb1;
+    --ui:-apple-system,BlinkMacSystemFont,"Inter","Segoe UI",system-ui,sans-serif;
+    --mono:ui-monospace,SFMono-Regular,"SF Mono",Menlo,monospace;
+  }
+  [data-theme=light]{
+    color-scheme:light;
+    --bg:#f5f6f9; --surface:#ffffff; --alt:#eef0f5; --hover:#e4e8ef;
+    --border:#e2e6ec; --border2:#ccd2dc; --chipline:#b7c0cc;
+    --text:#14171c; --text2:#4b525e; --dim:#6c7481; --dimmer:#9aa3b0;
+    --amber:#8a5500; --blue:#0f62c0; --green:#0c7a51; --red:#c11d40;
+    --indigo:#5344d4; --violet:#6a3ed4; --pink:#c4004f; --brand:#c9004f;
+    --inv:#1b1e24; --inv-ink:#f2f4f8; --inv-act:#ff9dc2;
+    --scrim:rgba(22,26,33,.34); --sh:rgba(19,26,37,.14); --shx:rgba(19,26,37,.2);
+    --glass:rgba(255,255,255,.88); --glass2:rgba(255,255,255,.9);
+  }
+  *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
+  html{-webkit-text-size-adjust:100%}
+  body{background:var(--bg);color:var(--text2);font:15px/1.55 var(--ui);padding:0 0 64px;overflow-x:hidden}
+  a{color:inherit;text-decoration:none}
+  code{font:.88em var(--mono);color:var(--text)}
+  em{color:var(--text);font-style:italic}
+
+  .wrap{max-width:1500px;margin:0 auto;padding:0 16px}
+  header.page{padding:28px 0 18px}
+  header.page h1{font-size:23px;font-weight:600;color:var(--text);letter-spacing:-.01em;line-height:1.2}
+  header.page h1 b{color:var(--brand);font-weight:600}
+  header.page p{margin-top:10px;max-width:66ch;font-size:14.5px}
+  .meta{margin-top:12px;font-size:12.5px;color:var(--dim);display:flex;flex-wrap:wrap;gap:6px 14px}
+  .tocbar{position:sticky;top:0;z-index:40;background:color-mix(in srgb,var(--bg) 92%,transparent);backdrop-filter:blur(12px);border-bottom:1px solid var(--border);margin:0 -16px;padding:9px 16px;display:flex;align-items:center;gap:8px}
+  nav.toc{flex:1;min-width:0;display:flex;gap:7px;overflow-x:auto;scrollbar-width:none}
+  nav.toc::-webkit-scrollbar{display:none}
+  nav.toc a{flex:none;font-size:12.5px;padding:6px 11px;border-radius:999px;border:1px solid var(--border2);color:var(--text2);white-space:nowrap}
+  nav.toc a b{color:var(--dim);font-weight:500;margin-right:5px;font:11px var(--mono)}
+  .tgl{flex:none;display:inline-flex;align-items:center;gap:6px;font:600 12.5px/1 var(--ui);padding:8px 12px;min-height:32px;border-radius:999px;border:1px solid var(--border2);background:var(--surface);color:var(--text2);cursor:pointer;white-space:nowrap}
+  .tgl:hover{background:var(--hover);color:var(--text)}
+  .tgl s{text-decoration:none;font-size:13px;line-height:1}
+  @media (max-width:440px){.tgl span{display:none}.tgl{padding:8px 10px}}
+
+  section.part{padding-top:38px;scroll-margin-top:56px}
+  section.part>h2{font-size:19px;font-weight:600;color:var(--text);letter-spacing:-.01em}
+  section.part>h2 span{color:var(--dim);font:12px var(--mono);margin-right:9px}
+  section.part>.lede{margin-top:9px;max-width:70ch;font-size:14.5px}
+  h3.sub{margin-top:28px;font-size:15px;font-weight:600;color:var(--text)}
+  p.note{color:var(--dim);font-size:12.5px}
+
+  /* screens */
+  .screens{display:grid;grid-template-columns:repeat(auto-fill,minmax(316px,1fr));gap:26px 20px;margin-top:20px;align-items:start}
+  .shot{min-width:0}
+  .shot .cap{margin-bottom:9px}
+  .shot .cap b{display:block;color:var(--text);font-size:14px;font-weight:600}
+  .shot .cap i{display:block;font-style:normal;font-size:10.5px;letter-spacing:.09em;text-transform:uppercase;color:var(--dim);margin-bottom:3px;font-family:var(--mono)}
+  .shot .cap p{font-size:13px;margin-top:5px;color:var(--text2)}
+  .shot .cap p.note{color:var(--dim);font-size:12.5px}
+
+  /* phone */
+  .ph{width:100%;max-width:340px;height:640px;background:var(--bg);border:1px solid var(--border2);border-radius:24px;overflow:hidden;position:relative;display:flex;flex-direction:column;font-size:14px;box-shadow:0 18px 40px var(--sh)}
+  .ph.short{height:500px}
+  .sbar{height:28px;flex:none;display:flex;align-items:center;justify-content:space-between;padding:0 16px 0 18px;font:600 11px var(--ui);color:var(--text2)}
+  .sbar .rt{display:flex;gap:4px;align-items:center;font-size:9px;color:var(--dim)}
+  .scr{flex:1;min-height:0;display:flex;flex-direction:column;position:relative;overflow:hidden}
+  .top{flex:none;padding:2px 12px 0}
+  .tbar{height:40px;display:flex;align-items:center;gap:10px}
+  .tbar .title{font-size:19px;font-weight:600;color:var(--text);letter-spacing:-.01em;display:flex;align-items:center;gap:5px;min-width:0}
+  .tbar .title u{text-decoration:none;color:var(--dim);font-size:13px}
+  .tbar .sp{margin-left:auto}
+  .ic{width:34px;height:34px;flex:none;border-radius:10px;display:grid;place-items:center;color:var(--text2);font-size:15px;background:var(--surface);border:1px solid var(--border)}
+  .ic.plain{background:none;border:0}
+  .sfield{height:38px;border-radius:11px;background:var(--surface);border:1px solid var(--border);display:flex;align-items:center;gap:8px;padding:0 11px;color:var(--dim);font-size:13.5px;margin-top:2px}
+  .sfield .mag{color:var(--dim);font-size:13px}
+  .sfield .chip.scope{padding:5px 8px;font-size:11.5px;margin-left:-5px}
+  .crow{flex:none;display:flex;gap:6px;padding:9px 12px 7px;overflow:hidden}
+  .chip{flex:none;font-size:12.5px;line-height:1;padding:8px 11px;border-radius:999px;border:1px solid var(--border2);color:var(--text2);display:inline-flex;align-items:center;gap:6px;white-space:nowrap;background:transparent}
+  .chip b{font-weight:600;color:var(--text)}
+  .chip.on{background:var(--alt);border-color:var(--chipline);color:var(--text)}
+  .chip.brand{border-color:color-mix(in srgb,var(--brand) 55%,transparent);background:color-mix(in srgb,var(--brand) 14%,transparent);color:var(--pink)}
+
+  .list{flex:1;min-height:0;overflow:hidden;padding:0 8px 8px;display:flex;flex-direction:column;gap:1px}
+  .sec{flex:none;display:flex;align-items:center;gap:8px;padding:13px 6px 6px;font:600 10.5px/1 var(--mono);letter-spacing:.1em;text-transform:uppercase;color:var(--dim)}
+  .sec .n{margin-left:auto;font-weight:500;color:var(--dimmer);letter-spacing:.04em}
+  .sec .caret{color:var(--dimmer);font-size:9px}
+  .sec.first{padding-top:4px}
+
+  /* the row */
+  .r2{flex:none;position:relative;display:grid;grid-template-columns:22px minmax(0,1fr) auto;column-gap:9px;align-items:center;padding:7px 7px;min-height:52px;border-radius:11px;color:var(--text2)}
+  .r2 .st{grid-column:1;grid-row:1/span 2;justify-self:center;display:grid;place-items:center;width:20px;height:20px;font-size:13px;font-weight:700;line-height:1}
+  .r2 .t{grid-column:2;grid-row:1;font-size:14px;line-height:1.3;color:var(--text2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;display:flex;align-items:center;gap:6px}
+  .r2 .t span.txt{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
+  .r2 .m{grid-column:2;grid-row:2;display:flex;align-items:center;gap:6px;margin-top:2px;font-size:11.5px;color:var(--dim);overflow:hidden;white-space:nowrap}
+  .r2 .m>*{flex:none}
+  .r2 .m .tr{overflow:hidden;text-overflow:ellipsis;min-width:0;flex:0 1 auto}
+  .r2 .r{grid-column:3;grid-row:1/span 2;display:flex;flex-direction:column;align-items:flex-end;gap:5px;font-size:12px;color:var(--dim);font-variant-numeric:tabular-nums;white-space:nowrap}
+  .r2.unread .t{color:var(--text);font-weight:600}
+  .r2.idle{opacity:.62}
+  .r2.open{background:var(--alt);box-shadow:inset 3px 0 0 var(--brand)}
+  .r2.press{background:var(--hover)}
+  .r2.settled{min-height:40px;padding:5px 7px;opacity:.5}
+  .r2.settled .t{font-size:13px;font-weight:400}
+  .r2.settled .t .g{margin-right:2px}
+  .r2.settled .g{filter:grayscale(1);opacity:.6}
+  .r2.settled.press,.r2.settled.open{opacity:1}
+  .r2.settled.press .g,.r2.settled.open .g{filter:none;opacity:1}
+  .st.ap{color:var(--amber)}.st.in{color:var(--indigo)}.st.wk{color:var(--blue)}
+  .st.er{color:var(--red)}.st.dn{color:var(--green)}
+  .spin{width:14px;height:14px;border:1.6px dashed var(--blue);border-radius:50%}
+  .udot{width:7px;height:7px;border-radius:50%;background:var(--brand);flex:none;display:inline-block}
+  .udot.ring{background:transparent;box-shadow:inset 0 0 0 1.6px var(--brand)}
+  .g{width:16px;height:16px;flex:none;border-radius:4.5px;background:var(--pc,#555);color:var(--onfill);font:700 8px/1 var(--ui);display:inline-grid;place-items:center;letter-spacing:.02em;font-style:normal}
+  .g.md{width:20px;height:20px;font-size:9px;border-radius:6px}
+  .pc-conduit{--pc:var(--p-conduit)}.pc-dotfiles{--pc:var(--p-dotfiles)}
+  .pc-perry{--pc:var(--p-perry)}.pc-hunk{--pc:var(--p-hunk)}
+
+  .pill{display:inline-flex;align-items:center;gap:6px;font:600 11.5px/1 var(--ui);padding:5px 10px;border-radius:999px;white-space:nowrap}
+  .pill.loud{color:var(--onfill)}
+  .pill.loud.ap{background:var(--amber-f)}.pill.loud.in{background:var(--indigo-f)}
+  .pill.quiet{padding:0 2px;background:none;font-weight:500;gap:5px}
+  .pill.quiet.dn{color:var(--green)}.pill.quiet.er{color:var(--red)}
+  .pill.tint{background:var(--alt);color:var(--text2);border:1px solid var(--border2);font-weight:500;padding:4px 9px}
+  .pr{font:500 11px/1 var(--mono);color:var(--dimmer)}
+  .pr.open{color:var(--green)}.pr.merged{color:var(--violet)}
+  .r2.settled .pr{color:var(--dimmer)}
+  .r2.settled.open .pr.merged,.r2.settled.press .pr.merged{color:var(--violet)}
+  .kbd{font:500 10.5px/1 var(--mono);padding:3px 5px;border-radius:4px;background:var(--alt);border:1px solid var(--border2);color:var(--text2);white-space:nowrap}
+
+  /* swipe: fills are theme-independent, as in the main doc */
+  .sw{position:relative;border-radius:11px;overflow:hidden}
+  .sw .bg{position:absolute;inset:0;display:flex;align-items:center;padding:0 16px;font:600 13px var(--ui);gap:7px}
+  .sw .bg.settle{background:#1f6b4f;color:#d8ffee;justify-content:flex-start}
+  .sw .bg.snooze{background:#3c3a7a;color:#e2e2ff;justify-content:flex-end}
+  .sw .fg{position:relative;background:var(--bg)}
+  /* the tray: a short swipe right holds two targets */
+  .sw .tray{position:absolute;inset:0;display:flex;align-items:stretch}
+  .tb{flex:none;width:74px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;font:600 11.5px/1 var(--ui)}
+  .tb i{font-style:normal;font-size:14px;line-height:1}
+  .tb.settle{background:#1f6b4f;color:#d8ffee}
+  .tb.unread{background:#7a2150;color:#ffdcea}
+  .tb.full{flex:1;flex-direction:row;justify-content:flex-start;padding-left:16px;gap:7px;font-size:13px}
+  .tb.wide{width:104px}
+
+  /* sheets, bars, toasts */
+  .scrim{position:absolute;inset:0;background:var(--scrim);backdrop-filter:blur(1.5px)}
+  .sheet{position:absolute;left:0;right:0;bottom:0;z-index:4;background:var(--alt);border-top:1px solid var(--border2);border-radius:18px 18px 0 0;padding:8px 0 10px;box-shadow:0 -24px 50px var(--sh)}
+  .grab{width:38px;height:4px;border-radius:2px;background:var(--border2);margin:0 auto 6px}
+  .sh-h{padding:8px 16px 11px;display:flex;align-items:flex-start;gap:11px;border-bottom:1px solid var(--border);margin-bottom:4px}
+  .sh-h .st{display:grid;place-items:center;width:20px;height:20px;font-size:13px;font-weight:700;line-height:1;margin-top:2px;flex:none}
+  .sh-t{min-width:0;display:flex;flex-direction:column;gap:6px;flex:1}
+  .sh-h b{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;white-space:normal;font-size:15px;line-height:1.3;color:var(--text);font-weight:600;overflow:hidden}
+  .sh-m{display:flex;align-items:center;flex-wrap:wrap;gap:6px;font-size:11.5px;color:var(--dim);min-width:0}
+  .sh-m .pj{display:inline-flex;align-items:center;gap:5px;color:var(--text2);font-weight:500}
+  .sh-m .br{font:500 10.5px/1 var(--mono);background:var(--surface);border:1px solid var(--border2);border-radius:5px;padding:3px 6px;color:var(--text2)}
+  .sh-m .sep{opacity:.4}
+  .si{display:flex;align-items:center;gap:13px;min-height:44px;padding:0 16px;color:var(--text);font-size:14.5px}
+  .si .ico{width:20px;text-align:center;color:var(--text2);font-size:15px;flex:none}
+  .si .tail{margin-left:auto;color:var(--dim);font-size:12.5px;font-variant-numeric:tabular-nums;display:flex;align-items:center;gap:8px}
+  .si.sub{color:var(--text2);font-size:13.5px;min-height:38px}
+  .si.new{background:color-mix(in srgb,var(--brand) 9%,transparent)}
+  .si.danger{color:var(--red)}.si.danger .ico{color:var(--red)}
+  .sh-div{height:1px;background:var(--border);margin:4px 0}
+  .toast{position:absolute;z-index:5;left:12px;right:12px;bottom:14px;min-height:48px;border-radius:13px;background:var(--inv);color:var(--inv-ink);display:flex;align-items:center;gap:10px;padding:0 8px 0 15px;font-size:13.5px;font-weight:500;box-shadow:0 14px 34px var(--sh)}
+  .toast>span:first-child{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .toast b{color:var(--inv-ink);font-weight:700}
+  .toast .u{margin-left:auto;flex:none;font-weight:700;color:var(--inv-act);padding:10px 12px;border-radius:9px}
+  .toast.dk{left:8px;right:8px;bottom:10px;min-height:40px;font-size:12.5px;padding:0 4px 0 12px}
+  .toast.dk .u{padding:8px 10px}
+  .fab{position:absolute;right:11px;bottom:11px;width:44px;height:44px;border-radius:50%;background:var(--brand-f);color:var(--onbrand);display:grid;place-items:center;font-size:19px;line-height:0;box-shadow:0 4px 14px var(--sh)}
+  .cbox{width:21px;height:21px;border-radius:7px;border:1.5px solid var(--border2);flex:none;display:grid;place-items:center;font-size:12px;color:transparent}
+  .cbox.on{background:var(--brand);border-color:var(--brand);color:var(--onbrand)}
+  .cbox.sm{width:16px;height:16px;border-radius:5px;font-size:10px}
+
+  .banner{margin:auto 10px 10px;border:1px solid var(--border2);background:var(--alt);border-radius:13px;padding:11px 12px;display:flex;align-items:center;gap:10px;font-size:13px;color:var(--text2);flex:none}
+  .banner b{display:block;color:var(--text);font-weight:600;font-size:13.5px}
+  .banner .bs{display:block;font-size:12.5px}
+  .banner .act{margin-left:auto;flex:none;font-size:12.5px;font-weight:600;color:var(--text);border:1px solid var(--border2);border-radius:9px;padding:8px 11px;white-space:nowrap;display:inline-flex;align-items:center;gap:5px}
+  .banner .st{font-size:15px;flex:none}
+  .banner.stk{flex-direction:column;align-items:stretch;gap:0;padding:0}
+  .bn1{display:flex;align-items:center;gap:10px;padding:11px 12px}
+  .bn2{display:flex;align-items:center;gap:10px;padding:9px 12px 10px 42px;border-top:1px solid var(--border);font-size:12.5px;color:var(--text2)}
+  .bn2 .cbox{margin-left:auto}
+  .banner.dk,.composer.dk{margin-left:22px;margin-right:22px;max-width:560px}
+  .banner.dk{margin-top:auto}
+  .composer{flex:none;margin:0 10px 10px;height:44px;border:1px solid var(--border2);border-radius:13px;background:var(--surface);display:flex;align-items:center;padding:0 13px;color:var(--dim);font-size:13.5px}
+  .composer.dk{margin-bottom:18px}
+  .composer.att{border-radius:0 0 13px 13px}
+  .cstrip{flex:none;margin:auto 10px 0;border:1px solid var(--border2);border-bottom:0;border-radius:13px 13px 0 0;background:var(--alt);padding:7px 7px 7px 11px;display:flex;align-items:center;gap:8px;font-size:12px;color:var(--text2)}
+  .cstrip b{color:var(--text);font-weight:600}
+  .cstrip .st{font-size:12px;width:14px;flex:none}
+  .cstrip .cs-t{min-width:0;line-height:1.4}
+  .cstrip .lnk{display:block;color:var(--pink);font-weight:600}
+  .cstrip .act2{margin-left:auto;flex:none;font:600 12px/1 var(--ui);color:var(--text);padding:8px 9px;border-radius:8px;border:1px solid var(--border2);white-space:nowrap}
+  .cstrip.dk{margin-left:22px;margin-right:22px;max-width:560px}
+  .msgs{flex:1;min-height:0;padding:14px 14px 0;display:flex;flex-direction:column;gap:11px;opacity:.5;overflow:hidden}
+  .gh{height:9px;border-radius:5px;background:var(--alt);flex:none}
+  .gh.w1{width:88%}.gh.w2{width:62%}.gh.w3{width:74%}.gh.w4{width:44%}
+  .gh.me{height:38px;width:60%;align-self:flex-end;border-radius:12px;background:var(--hover)}
+
+  /* the session bar (bar 18 of the main doc) */
+  .pb1{flex:none;display:flex;align-items:center;gap:7px;padding:5px 9px 2px;background:var(--surface);min-height:38px}
+  .pb2{flex:none;display:flex;align-items:center;gap:8px;padding:1px 10px 8px 11px;background:var(--surface);border-bottom:1px solid var(--border);min-width:0;min-height:34px}
+  .pb2>b{font:600 14.5px/1.25 var(--ui);color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
+  .pb3{flex:none;padding:7px 9px 8px;border-bottom:1px solid var(--border);background:var(--surface)}
+  .pbc{flex:none;display:flex;align-items:center;gap:7px;padding:7px 9px;min-height:46px;border-bottom:1px solid var(--border);background:var(--surface)}
+  c{font-style:normal;color:var(--dim);font-size:12px;font-weight:500}
+  .bbk{display:inline-flex;align-items:center;gap:5px;flex:none;color:var(--text2);font:600 12.5px/1 var(--ui);padding:6px 7px 6px 4px;border-radius:8px}
+  .bbk s{text-decoration:none;font-size:17px;line-height:0;margin-top:-1px}
+  .bbk i{font-style:normal;background:var(--amber-f);color:var(--onfill);font:700 9px/1 var(--ui);padding:3px 5px;border-radius:999px}
+  .btl{display:flex;flex-direction:column;gap:2px;min-width:0;flex:0 1 auto}
+  .btl b{font:600 13.5px/1.25 var(--ui);color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .bsp{flex:1;min-width:0}
+  .bic{width:31px;height:31px;flex:none;border-radius:8px;display:grid;place-items:center;color:var(--text2);font-size:13.5px}
+  .bic.sm{width:26px;height:26px}
+  .bic.o{background:var(--alt);border:1px solid var(--border2)}
+  .bic.act{background:var(--hover);border:1px solid color-mix(in srgb,var(--brand) 40%,transparent);color:var(--text)}
+  .bdiv{width:1px;height:19px;background:var(--border2);flex:none;margin:0 1px}
+  .bseg{display:flex;background:var(--alt);border:1px solid var(--border2);border-radius:9px;padding:2px;gap:2px;flex:none}
+  .bseg span{padding:6px 10px;border-radius:7px;font:600 11.5px/1 var(--ui);color:var(--dim);display:inline-flex;align-items:center;gap:5px}
+  .bseg span.on{background:var(--hover);color:var(--text)}
+  .bseg.full{flex:1;justify-content:space-between}
+  .bm{display:flex;align-items:center;gap:5px;font:500 11px/1 var(--ui);color:var(--dim);min-width:0;overflow:hidden;white-space:nowrap;flex:none}
+  .bm em{font-style:normal;opacity:.45}
+  .vsheet{position:absolute;left:0;right:0;bottom:0;z-index:4;background:var(--alt);border-top:1px solid var(--border2);border-radius:14px 14px 0 0;padding:8px;box-shadow:0 -14px 34px var(--sh)}
+  .vsheet .vh{font:600 9.5px/1 var(--mono);letter-spacing:.11em;text-transform:uppercase;color:var(--dimmer);padding:4px 8px 8px}
+  .vsheet .vh.sep{border-top:1px solid var(--border);margin-top:6px;padding-top:11px}
+  .vsheet a{display:flex;align-items:center;gap:9px;padding:9px;border-radius:9px;font:500 12.5px/1 var(--ui);color:var(--text2)}
+  .vsheet a.on{background:var(--hover);color:var(--text)}
+  .vsheet a.new{background:color-mix(in srgb,var(--brand) 10%,transparent);color:var(--text)}
+  .vsheet a .tl{color:var(--dim);font-size:11.5px}
+  /* C: the state chip */
+  .schip{display:inline-flex;align-items:center;gap:5px;flex:none;font:600 11px/1 var(--ui);padding:6px 9px;border-radius:999px;background:var(--alt);border:1px solid var(--border2);color:var(--text2);white-space:nowrap}
+  .schip .gl{color:var(--green);font-weight:700}
+  .schip .gz{color:var(--indigo)}
+  .schip.act{border-color:color-mix(in srgb,var(--brand) 45%,transparent);background:var(--hover);color:var(--text)}
+  .schip.dot{padding:6px 7px}
+  .pb2 .schip{margin-left:auto}
+  /* D: the dot in the gutter, and in the session title */
+  .r2.dg{padding-left:16px}
+  .ld{position:absolute;left:5px;top:50%;width:7px;height:7px;margin-top:-3.5px;border-radius:50%;background:var(--brand)}
+  .ld.ring{background:transparent;box-shadow:inset 0 0 0 1.6px var(--brand)}
+  .ld.ghost{background:transparent;box-shadow:inset 0 0 0 1.5px var(--dim)}
+  .ld.halo::after{content:"";position:absolute;inset:-6px;border-radius:50%;background:color-mix(in srgb,var(--text) 12%,transparent)}
+  .tdot{width:30px;height:30px;flex:none;display:grid;place-items:center;margin:-6px -6px -6px -9px;border-radius:9px}
+  .tdot .udot{width:8px;height:8px}
+
+  /* prose */
+  .cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(288px,1fr));gap:14px;margin-top:18px}
+  .card{background:var(--surface);border:1px solid var(--border);border-radius:13px;padding:15px 16px;font-size:13.5px}
+  .card h4{font:600 10.5px/1 var(--mono);letter-spacing:.1em;text-transform:uppercase;color:var(--text);margin-bottom:9px}
+  .card ul{padding-left:17px}.card li{margin:5px 0}
+  .card p+p{margin-top:8px}
+  .card .verdict{margin-top:10px;padding-top:9px;border-top:1px solid var(--border);font-size:12.5px;color:var(--dim)}
+  .card .verdict b{color:var(--text);font-weight:600}
+  .card.win{border-color:color-mix(in srgb,var(--brand) 45%,transparent);box-shadow:0 0 0 1px color-mix(in srgb,var(--brand) 16%,transparent)}
+  .card.good h4{color:var(--green)}.card.risk h4{color:var(--amber)}.card.cost h4{color:var(--blue)}
+  .card b{color:var(--text);font-weight:600}
+  .callout{margin-top:16px;border-left:2px solid var(--brand);background:color-mix(in srgb,var(--brand) 6%,transparent);padding:12px 14px;border-radius:0 10px 10px 0;font-size:13.5px;max-width:110ch}
+  .callout b{color:var(--text)}
+  .ans{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:8px;margin-top:16px}
+  .ans div{background:var(--surface);border:1px solid var(--border);border-radius:11px;padding:9px 11px 10px;font-size:12.5px;color:var(--text2);line-height:1.5}
+  .ans i{display:block;font:600 9.5px/1.4 var(--mono);letter-spacing:.09em;text-transform:uppercase;color:var(--dim);font-style:normal;margin-bottom:3px}
+
+  .states{display:grid;grid-template-columns:repeat(auto-fill,minmax(296px,1fr));gap:12px;margin-top:16px}
+  .cell{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:8px 8px 9px;min-width:0}
+  .cell .lab{font:600 9.5px/1.4 var(--mono);letter-spacing:.09em;text-transform:uppercase;color:var(--dim);padding:2px 6px 7px}
+  .cell .lab em{color:var(--text2);font-style:normal}
+  .cell .r2{background:var(--bg)}
+  .cell .mini{border:1px solid var(--border2);border-radius:10px;overflow:hidden;background:var(--bg)}
+  .cell .mini+.mini{margin-top:6px}
+
+  .tw{margin-top:18px;overflow-x:auto;border:1px solid var(--border);border-radius:13px;background:var(--surface)}
+  table{border-collapse:collapse;width:100%;min-width:660px;font-size:13px}
+  th,td{text-align:left;padding:9px 12px;border-bottom:1px solid var(--border);vertical-align:top}
+  th{font:600 10.5px/1.3 var(--mono);letter-spacing:.08em;text-transform:uppercase;color:var(--dim);background:var(--surface)}
+  tr:last-child td{border-bottom:0}
+  td b{color:var(--text);font-weight:600}
+  td.k{white-space:nowrap}
+  td.pick{color:var(--text)}
+  th.pick{color:var(--pink)}
+  tbody tr:hover td{background:var(--hover)}
+  .sw-lab{color:var(--green)}.un-lab{color:var(--pink)}
+  @media (max-width:720px){
+    .tw{border:0;background:none;overflow:visible;margin-top:14px}
+    .tw table{display:block;min-width:0;width:100%}
+    .tw thead{display:none}
+    .tw tbody,.tw tr,.tw td{display:block}
+    .tw tr{border:1px solid var(--border);border-radius:12px;background:var(--surface);padding:10px 13px 8px;margin-bottom:9px}
+    .tw td{border:0;padding:4px 0;font-size:12.5px;display:flex;gap:9px;align-items:flex-start}
+    .tw td:first-child{display:block;font-size:14px;padding:0 0 6px;margin-bottom:5px;border-bottom:1px solid var(--border)}
+    .tw td[data-l]::before{content:attr(data-l);flex:none;width:52px;color:var(--dim);font:500 10px/1.5 var(--mono);letter-spacing:.06em;text-transform:uppercase;padding-top:2px}
+    .tw td.k{white-space:normal}
+    .tw tbody tr:hover td{background:none}
+  }
+
+  /* desktop */
+  .dt{margin-top:18px;border:1px solid var(--border2);border-radius:13px;overflow:hidden;background:var(--bg);display:flex;height:540px;min-width:0}
+  .dt .sb{width:300px;flex:none;border-right:1px solid var(--border);background:var(--surface);display:flex;flex-direction:column;overflow:hidden;font-size:13px;position:relative}
+  .dt .sb .list{padding:0 7px 7px}
+  .dt .sb .r2{min-height:46px;padding:6px 7px}
+  .dt .sb .r2.dg{padding-left:16px}
+  .dt .sb .r2 .t{font-size:13.5px}
+  .dt .sb .r2.settled{min-height:32px;padding:4px 7px}
+  .dt .sb .r2.settled .t{font-size:13px}
+  .dt .sb .top{padding:10px 10px 0}
+  .dt .sb .tbar{height:34px}
+  .dt .sb .tbar .title{font-size:15px}
+  .dt .sb .tbar .title u{font-size:12px}
+  .dt .sb .ic.plain{width:26px;height:26px;font-size:13px}
+  .dt .sb .sfield{height:32px;font-size:12.5px}
+  .dt .sb .sfield .chip{padding:4px 7px;font-size:11px;margin-left:-4px}
+  .dt .sb .crow{padding:8px 10px 4px}
+  .dt .sb .crow .chip{padding:5px 9px;font-size:11.5px}
+  .dt .main{flex:1;min-width:0;display:flex;flex-direction:column;position:relative}
+  .dt .main .msgs{opacity:.45;padding:22px 30px 0}
+  .dbar{flex:none;display:flex;align-items:center;gap:7px;padding:7px 10px;min-height:46px;border-bottom:1px solid var(--border);background:var(--surface);overflow:hidden;white-space:nowrap}
+  .dbar .btl{min-width:110px}
+  .dbar .btl b c{font-size:11.5px}
+  .empty{flex:1;display:grid;place-items:center;text-align:center;color:var(--dim);font-size:13px;line-height:1.6}
+  .empty b{display:block;color:var(--text2);font-weight:600;font-size:14px}
+  .dsk{display:grid;grid-template-columns:repeat(auto-fill,minmax(304px,1fr));gap:24px 18px;margin-top:18px;align-items:start}
+  .cpop{left:250px;top:50px;min-width:240px}
+  @media (max-width:520px){.cpop{left:10px}}
+  .dsk .span2{grid-column:span 2}
+  @media (max-width:720px){.dsk .span2{grid-column:auto}}
+  .dpan{background:var(--surface);border:1px solid var(--border2);border-radius:12px;padding:5px;position:relative;font-size:13px;min-height:132px}
+  .dpan .r2{min-height:46px;padding:6px 7px}
+  .dpan .r2.dg{padding-left:16px}
+  .dpan .r2.settled{min-height:32px;padding:4px 7px}
+  .dlab{font:600 10px/1 var(--mono);letter-spacing:.09em;color:var(--dim);text-transform:uppercase;margin:16px 0 7px}
+  .dlab b{color:var(--text2);font-weight:600}
+  .menu{position:absolute;background:var(--alt);border:1px solid var(--border2);border-radius:11px;padding:5px;box-shadow:0 18px 44px var(--shx);min-width:212px;z-index:6}
+  .menu a{display:flex;align-items:center;gap:9px;padding:6px 9px;border-radius:7px;font-size:12.5px;color:var(--text2)}
+  .menu a .ico{width:15px;text-align:center;opacity:.8}
+  .menu a .tail{margin-left:auto;font-size:11px;color:var(--dim);display:flex;align-items:center;gap:6px}
+  .menu a.on{background:var(--hover);color:var(--text)}
+  .menu a.new{background:color-mix(in srgb,var(--brand) 10%,transparent);color:var(--text)}
+  .menu a.sub{font-size:12px;color:var(--dim)}
+  .menu a.danger{color:var(--red)}
+  .menu .mlab{font:600 10px/1 var(--mono);letter-spacing:.08em;color:var(--dim);padding:7px 9px 5px}
+  .menu .mnote{font-size:11.5px;color:var(--dim);padding:5px 9px 6px}
+  .menu .sh-div{margin:4px 0}
+  .tip{position:absolute;z-index:7;background:var(--inv);color:var(--inv-ink);font:600 11px/1 var(--ui);padding:6px 8px;border-radius:7px;white-space:nowrap;box-shadow:0 8px 20px var(--sh);display:flex;align-items:center;gap:6px}
+  .tip .kbd{background:color-mix(in srgb,var(--inv-ink) 13%,transparent);border-color:color-mix(in srgb,var(--inv-ink) 19%,transparent);color:var(--inv-ink)}
+  .hov{background:var(--hover)}
+  .acts{display:flex;align-items:center;gap:2px}
+  .acts>*{width:27px;height:27px;border-radius:7px;display:grid;place-items:center;color:var(--text2);font-size:13px}
+  .acts>.hi{background:var(--border2);color:var(--text)}
+  .acts>.hi.u{color:var(--pink)}
+
+  @media (max-width:900px){
+    .dbar .bseg,.dbar .bm{display:none}
+  }
+  @media (max-width:520px){
+    .ph{max-width:100%}
+    .dt{display:block;height:auto}
+    .dt .sb{width:auto;height:480px;border-right:none;border-bottom:1px solid var(--border)}
+    .dt .main{height:400px}
+    .dt .main .msgs{padding:16px 16px 0}
+    .banner.dk,.composer.dk,.cstrip.dk{margin-left:10px;margin-right:10px}
+    .wrap{padding-left:14px;padding-right:14px}
+    .tocbar{margin:0 -14px;padding:9px 14px}
+    .screens{gap:22px 0}
+    header.page h1{font-size:20px}
+    section.part>h2{font-size:17px}
+  }
+  @media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header class="page">
+  <h1>conduit · <b>Mark unread</b> and <b>Un-settle</b>,<br>placed in the system</h1>
+  <p>Two verbs the server already has and the UI only half shows. Mark unread has no control anywhere. Un-settle works from the list, but once a session is open it has only a banner that was designed and never built, and auto-settle is about to make that moment common. This page draws four ways to place both verbs, on the phone and the desktop, in the list and inside a session, and ends with one recommendation.</p>
+  <div class="meta">
+    <span>Companion to <a style="color:var(--text2);border-bottom:1px solid var(--border2)" href="mobile-first-sidebar.html">mobile-first-sidebar.html</a>, whose tokens, rows, sheets and session bar this page reuses unchanged</span>
+    <span>·</span>
+    <span>Phone frames are 340&thinsp;px wide</span>
+  </div>
+</header>
+
+<div class="tocbar">
+<nav class="toc" aria-label="Sections">
+  <a href="#rules"><b>0</b>Ground rules</a>
+  <a href="#a"><b>A</b>Menus and keys</a>
+  <a href="#b"><b>B</b>The swipe tray</a>
+  <a href="#c"><b>C</b>The bar owns state</a>
+  <a href="#d"><b>D</b>The dot</a>
+  <a href="#compare"><b>≡</b>Compared</a>
+  <a href="#rec"><b>★</b>Recommendation</a>
+  <a href="#changes"><b>Δ</b>Changes to the main doc</a>
+</nav>
+<button class="tgl" id="themeBtn" type="button" aria-label="Switch theme"><s aria-hidden="true">☀</s><span>Light</span></button>
+</div>
+
+<!-- ═════════════════════════════════════════════════════════════ 0 -->
+<section class="part" id="rules">
+  <h2><span>0</span>What every direction shares</h2>
+  <p class="lede">The four directions differ only where there is a real choice. Everything below holds in all of them, so the comparison at the end is about placement, not about semantics.</p>
+
+  <div class="cards">
+    <div class="card"><h4>How read works today</h4><ul>
+      <li>One timestamp, <code>read_at</code>. Switching to a session writes it. <code>session.unread</code> sets it to null. Any message newer than it makes the row unread again.</li>
+      <li>So <em>opening</em> marks read, not <em>viewing</em>: the write happens on arrival. Stay in a session you just marked unread and it stays unread, unless the client re-opens it on a reconnect or reload.</li>
+      <li>There is no Mark read RPC. Undo, and Mark read by hand, both need one.</li>
+      <li>A hand-marked row and a never-opened row are the same row to the server. Telling them apart needs one column.</li>
+    </ul></div>
+    <div class="card"><h4>Rules every direction keeps</h4><ul>
+      <li><b>Paired verbs flip in place.</b> Menus, sheets and keys show whichever half applies: Mark unread or Mark read, Settle or Un-settle.</li>
+      <li><b>Neither shelf shows read state</b>, so settled and snoozed rows do not offer Mark unread, the same way Snooze disappears on a settled row.</li>
+      <li><b>The Unread chip counts live rows only.</b> Settled and snoozed never count, as in §2 of the main doc.</li>
+      <li><b>Sending a message means "I'm back".</b> It un-settles, it wakes, and it ends a hand-set unread.</li>
+    </ul></div>
+    <div class="card"><h4>Where this meets auto-settle</h4><ul>
+      <li>An unread session never auto-settles, so Mark unread also means "keep this in front of me". The auto-settle setting should say so in one line: <em>Sessions you haven't read never auto-settle.</em></li>
+      <li>Un-settling pauses auto-settle until there is new activity.</li>
+      <li><b>Auto-settle when idle</b> is a per-session checkbox, on by default. It keeps that label, and that polarity, on every surface.</li>
+      <li>Auto-settled rows read <b>Auto · 1d</b> on the shelf.</li>
+    </ul></div>
+    <div class="card"><h4>Copy</h4><ul>
+      <li>Verbs as the menu has them: <b>Mark unread</b>, <b>Mark read</b>, <b>Settle</b>, <b>Un-settle</b>, <b>Auto-settle when idle</b>.</li>
+      <li>Banners and toasts are short sentences, one idea each. No em dashes, no "successfully", no exclamation marks.</li>
+      <li>The icons stay as they are: ● unread, ✓ settle, ↶ un-settle, ☾ snooze, ⚑ pin.</li>
+    </ul></div>
+  </div>
+</section>
+
+<!-- ═════════════════════════════════════════════════════════════ A -->
+<section class="part" id="a">
+  <h2><span>A</span>Menus and keys: marking unread takes you back to the list</h2>
+  <p class="lede">The smallest change. No new gesture, no new hover icon, no new state to draw. Mark unread goes into the sheet, the menus and the keys that already exist. Inside a session it does what Gmail does: it marks the session and takes you back to the list, so the rule that opening marks read never has to bend.</p>
+
+  <div class="ans">
+    <div><i>Inside a session</i>Marks unread and leaves. The phone pops to the list; desktop closes the pane and puts the focus ring on the row.</div>
+    <div><i>The row</i>Identical to Done, unread: same tier, ✓ glyph, Done pill. That is literally what the server now says.</div>
+    <div><i>Gesture</i>None. Long press is the touch route, as the §4 table already has it.</div>
+    <div><i>Desktop hover</i>Unchanged: ✓ ☾ ⚑ ⋯. Mark unread is in ⋯ and right-click.</div>
+    <div><i>Un-settle when open</i>The banner from the main doc, above the composer. The auto-settled banner adds a second row with the checkbox.</div>
+    <div><i>Keys</i><span class="kbd">u</span> and <span class="kbd">s</span> in the list. <span class="kbd">⌘⇧U</span> in a session marks unread and closes.</div>
+  </div>
+
+  <h3 class="sub">Rows</h3>
+  <div class="states">
+    <div class="cell"><div class="lab">Before · <em>idle, 62% ink</em></div><a class="r2 idle" href="#"><span class="st"></span><span class="t"><span class="txt">Audit brew bundle</span></span><span class="m"><i class="g pc-dotfiles">DF</i><span class="tr">dotfiles · main</span></span><span class="r">2d</span></a></div>
+    <div class="cell"><div class="lab">Marked unread · <em>same as done, unread</em></div><a class="r2 unread" href="#"><span class="st dn">✓</span><span class="t"><span class="txt">Audit brew bundle</span><span class="udot"></span></span><span class="m"><i class="g pc-dotfiles">DF</i><span class="tr">dotfiles · main</span></span><span class="r"><span class="pill quiet dn">Done</span></span></a></div>
+    <div class="cell"><div class="lab">Settled, mid-swipe · <em>↶ on the settle side</em></div><div class="sw"><div class="bg settle">↶ Un-settle</div><a class="r2 settled fg" href="#" style="translate:100px 0;opacity:1;box-shadow:-10px 0 20px var(--sh)"><span class="st"></span><span class="t"><i class="g pc-conduit">CO</i><span class="txt">Wire PTY resize</span></span><span class="r">Auto · 1d</span></a></div></div>
+    <div class="cell"><div class="lab">Desktop hover · <em>unchanged</em></div><a class="r2 hov" href="#"><span class="st"></span><span class="t"><span class="txt">Investigate flaky e2e</span></span><span class="m"><i class="g pc-perry">PE</i><span class="tr">perry · main</span></span><span class="r"><span class="acts"><span>✓</span><span>☾</span><span>⚑</span><span>⋯</span></span></span></a></div>
+  </div>
+
+  <h3 class="sub">Phone</h3>
+  <div class="screens">
+    <div class="shot">
+      <div class="cap"><i>A1 · long press</i><b>Mark unread stays where it is</b>
+        <p>The sheet from the main doc, with the auto-settle checkbox added under Settle, where the code already puts it. Mark unread keeps its place in the second group.</p>
+        <p class="note">On a read row it says Mark unread; on an unread row, Mark read. On a settled row it is not there.</p></div>
+      <div class="ph">
+        <div class="sbar"><span>9:41</span><span class="rt">✦ ▮▮▮</span></div>
+        <div class="scr">
+          <div class="list" style="padding-top:8px">
+            <div class="sec first"><span>Idle</span><span class="n">3</span></div>
+            <a class="r2 idle press" href="#" style="opacity:1"><span class="st"></span><span class="t"><span class="txt">Audit brew bundle</span></span><span class="m"><i class="g pc-dotfiles">DF</i><span class="tr">dotfiles · main</span></span><span class="r">2d</span></a>
+          </div>
+          <div class="scrim"></div>
+          <div class="sheet">
+            <div class="grab"></div>
+            <div class="sh-h"><span class="st"></span><span class="sh-t"><b>Audit brew bundle</b><span class="sh-m"><span class="pj"><i class="g pc-dotfiles md">DF</i>dotfiles</span><span class="br">main</span><span class="sep">·</span><span>12 messages</span><span>idle 2d</span></span></span></div>
+            <a class="si" href="#"><span class="ico">✓</span>Settle<span class="tail"><span class="kbd">⌘⇧S</span></span></a>
+            <a class="si sub" href="#"><span class="ico"></span>Auto-settle when idle<span class="tail"><span class="cbox on sm">✓</span></span></a>
+            <a class="si" href="#"><span class="ico">☾</span>Snooze<span class="tail">▸</span></a>
+            <a class="si" href="#"><span class="ico">⚑</span>Pin to top<span class="tail"><span class="kbd">⌘⇧P</span></span></a>
+            <div class="sh-div"></div>
+            <a class="si" href="#"><span class="ico">✎</span>Rename</a>
+            <a class="si" href="#"><span class="ico">⑂</span>Fork from here</a>
+            <a class="si new" href="#"><span class="ico">●</span>Mark unread<span class="tail"><span class="kbd">u</span></span></a>
+            <a class="si" href="#"><span class="ico">⇲</span>Archive<span class="tail">out of the list</span></a>
+            <div class="sh-div"></div>
+            <a class="si danger" href="#"><span class="ico">⌫</span>Delete session</a>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="shot">
+      <div class="cap"><i>A2 · from the session</i><b>⋯ says where you'll end up</b>
+        <p>Bar 18's overflow sheet gains Mark unread in its Session group. The tail says <em>back to the list</em>, because an action that navigates should say so before you tap it.</p>
+        <p class="note">No hold rule is needed: you are never looking at a session you just marked unread.</p></div>
+      <div class="ph">
+        <div class="sbar"><span>9:41</span><span class="rt">✦ ▮▮▮</span></div>
+        <div class="scr">
+          <div class="pbc" style="opacity:.45"><span class="bbk" style="padding-right:4px"><s>‹</s><i>2</i></span><span class="btl"><b>Audit brew bundle</b></span><span class="bsp"></span><span class="bic o">⌄</span><span class="bic act">⋯</span></div>
+          <div class="msgs" style="opacity:.2"><div class="gh w1"></div><div class="gh w3"></div><div class="gh me"></div><div class="gh w2"></div></div>
+          <div class="vsheet">
+            <div class="vh">Views</div>
+            <a class="on">≡ Chat<span class="bsp"></span><span class="kbd">⌘1</span></a>
+            <a>❯ Terminal<span class="bsp"></span><span class="kbd">⌘2</span></a>
+            <a>± Diff<span class="bsp"></span><span class="kbd">⌘3</span></a>
+            <a>▤ Files<span class="bsp"></span><span class="kbd">⌘4</span></a>
+            <div class="vh sep">Session</div>
+            <a>✓ Settle<span class="bsp"></span><span class="kbd">⌘⇧S</span></a>
+            <a>☾ Snooze<span class="bsp"></span><span class="tl">▸</span></a>
+            <a class="new">● Mark unread<span class="bsp"></span><span class="tl">back to the list</span></a>
+            <a>⋯ Rename, fork, archive…</a>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="shot">
+      <div class="cap"><i>A3 · where you land</i><b>Back on the list, row in Done, unread</b>
+        <p>The list re-sorts on navigation, so the row has already moved into Done, unread when you arrive. The toast names it and offers Undo, which marks it read again.</p>
+        <p class="note">The cost is visible here: a session that went idle two days ago now wears a Done pill as if it just finished.</p></div>
+      <div class="ph">
+        <div class="sbar"><span>9:41</span><span class="rt">✦ ▮▮▮</span></div>
+        <div class="scr">
+          <div class="top">
+            <div class="tbar"><span class="title">Sessions <u>18</u></span><span class="sp"></span><span class="ic plain">⇅</span><span class="ic plain">⋯</span></div>
+            <div class="sfield"><span class="chip on scope">All projects ▾</span><span class="mag">⌕</span><span>Search</span></div>
+          </div>
+          <div class="crow"><span class="chip brand">Needs you <b>1</b></span><span class="chip">Running <b>1</b></span><span class="chip">Unread <b>2</b></span><span class="chip">Settled</span></div>
+          <div class="list">
+            <div class="sec first"><span>Needs you</span><span class="n">1</span></div>
+            <a class="r2 unread" href="#"><span class="st ap">⚠</span><span class="t"><span class="txt">Fix auth token refresh</span></span><span class="m"><i class="g pc-conduit">CO</i><span class="tr">conduit · feat/auth</span><span class="pr open">#214</span></span><span class="r"><span class="pill loud ap">Approve</span></span></a>
+            <div class="sec"><span>Running</span><span class="n">1</span></div>
+            <a class="r2" href="#"><span class="st wk"><i class="spin"></i></span><span class="t"><span class="txt">Migrate zsh config to nushell</span></span><span class="m"><i class="g pc-dotfiles">DF</i><span class="tr">dotfiles · main</span></span><span class="r">4m</span></a>
+            <div class="sec"><span>Done, unread</span><span class="n">2</span></div>
+            <a class="r2 unread" href="#"><span class="st dn">✓</span><span class="t"><span class="txt">Add session export</span><span class="udot"></span></span><span class="m"><i class="g pc-conduit">CO</i><span class="tr">conduit · main</span></span><span class="r"><span class="pill quiet dn">Done</span></span></a>
+            <a class="r2 unread" href="#"><span class="st dn">✓</span><span class="t"><span class="txt">Audit brew bundle</span><span class="udot"></span></span><span class="m"><i class="g pc-dotfiles">DF</i><span class="tr">dotfiles · main</span></span><span class="r"><span class="pill quiet dn">Done</span></span></a>
+            <div class="sec"><span>Idle</span><span class="n">2</span></div>
+            <a class="r2 idle" href="#"><span class="st"></span><span class="t"><span class="txt">Investigate flaky e2e</span></span><span class="m"><i class="g pc-perry">PE</i><span class="tr">perry · main</span></span><span class="r">1h</span></a>
+          </div>
+          <div class="toast"><span>Marked unread <b>Audit brew bundle</b></span><span class="u">Undo</span></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="shot">
+      <div class="cap"><i>A4 · auto-settled, opened</i><b>The banner grows a second row</b>
+        <p>Same banner as the main doc's frame 11, above the composer. When the server settled it, a second row carries the checkbox, with the menu's own label, so the setting that did this is right there to turn off.</p>
+        <p class="note">Unchecking it does not un-settle. It only means this session will not be auto-settled again.</p></div>
+      <div class="ph short">
+        <div class="sbar"><span>9:41</span><span class="rt">✦ ▮▮▮</span></div>
+        <div class="scr">
+          <div class="pb1"><span class="bbk"><s>‹</s>Sessions<i>2</i></span><span class="bsp"></span><span class="bm"><i class="g pc-conduit">CO</i>conduit<em>·</em>main</span><span class="bic sm">⋯</span></div>
+          <div class="pb2"><b>Wire PTY resize <c>▾</c></b></div>
+          <div class="pb3"><div class="bseg full"><span class="on">Chat</span><span>Terminal</span><span>Diff</span><span>Files</span></div></div>
+          <div class="msgs"><div class="gh w1"></div><div class="gh w3"></div><div class="gh me"></div><div class="gh w2"></div></div>
+          <div class="banner stk">
+            <div class="bn1"><span class="st dn">✓</span><span><b>Auto-settled 1 day ago</b><span class="bs">Send a message to un-settle</span></span><span class="act">Un-settle</span></div>
+            <div class="bn2"><span>Auto-settle when idle</span><span class="cbox on sm">✓</span></div>
+          </div>
+          <div class="composer">Message conduit…</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub">Desktop</h3>
+  <div class="dt">
+    <aside class="sb">
+      <div class="top">
+        <div class="tbar"><span class="title">Sessions <u>18</u></span><span class="sp"></span><span class="ic plain">⇅</span><span class="ic plain">+</span></div>
+        <div class="sfield"><span class="chip on">All projects ▾</span><span class="mag">⌕</span><span>Search</span><span class="kbd" style="margin-left:auto">/</span></div>
+      </div>
+      <div class="crow"><span class="chip brand">Needs you <b>1</b></span><span class="chip">Running <b>1</b></span><span class="chip">Unread <b>2</b></span></div>
+      <div class="list">
+        <div class="sec first"><span>Needs you</span><span class="n">1</span></div>
+        <a class="r2 unread" href="#"><span class="st ap">⚠</span><span class="t"><span class="txt">Fix auth token refresh</span></span><span class="m"><i class="g pc-conduit">CO</i><span class="tr">conduit · feat/auth</span></span><span class="r"><span class="pill loud ap">Approve</span></span></a>
+        <div class="sec"><span>Done, unread</span><span class="n">2</span></div>
+        <a class="r2 unread" href="#"><span class="st dn">✓</span><span class="t"><span class="txt">Add session export</span><span class="udot"></span></span><span class="m"><i class="g pc-conduit">CO</i><span class="tr">conduit · main</span></span><span class="r"><span class="pill quiet dn">Done</span></span></a>
+        <a class="r2 unread" href="#" style="box-shadow:inset 0 0 0 1.5px color-mix(in srgb,var(--brand) 55%,transparent)"><span class="st dn">✓</span><span class="t"><span class="txt">Audit brew bundle</span><span class="udot"></span></span><span class="m"><i class="g pc-dotfiles">DF</i><span class="tr">dotfiles · main</span></span><span class="r"><span class="pill quiet dn">Done</span></span></a>
+        <div class="sec"><span>Idle</span><span class="n">2</span></div>
+        <a class="r2 idle hov" href="#" style="opacity:1"><span class="st"></span><span class="t"><span class="txt">Investigate flaky e2e</span></span><span class="m"><i class="g pc-perry">PE</i><span class="tr">perry · main</span></span><span class="r"><span class="acts"><span>✓</span><span>☾</span><span>⚑</span><span class="hi">⋯</span></span></span></a>
+        <div class="sec"><span><span class="caret">▾</span> Settled</span></div>
+        <a class="r2 settled open" href="#"><span class="st"></span><span class="t"><i class="g pc-conduit">CO</i><span class="txt">Wire PTY resize</span><span class="pr merged">#212</span></span><span class="r">Auto · 1d</span></a>
+      </div>
+      <div class="toast dk"><span>Marked unread <b>Audit brew bundle</b></span><span class="u">Undo</span></div>
+    </aside>
+    <div class="main">
+      <div class="dbar"><span class="bbk"><s>‹</s>Sessions<i>2</i></span><span class="bdiv"></span><span class="btl"><b>Wire PTY resize <c>▾</c></b></span><span class="bm"><em>·</em><i class="g pc-conduit">CO</i>conduit<em>·</em>main<span class="pr merged">#212 merged</span></span><span class="bsp"></span><div class="bseg"><span class="on">Chat</span><span>Terminal</span><span>Diff</span><span>Files</span></div><span class="bdiv"></span><span class="bic">⋯</span></div>
+      <div class="msgs"><div class="gh w1"></div><div class="gh w3"></div><div class="gh w2"></div><div class="gh me" style="width:38%"></div><div class="gh w1"></div><div class="gh w4"></div></div>
+      <div class="banner stk dk">
+        <div class="bn1"><span class="st dn">✓</span><span><b>Auto-settled 1 day ago</b><span class="bs">Send a message to un-settle</span></span><span class="act">Un-settle <span class="kbd">⌘⇧S</span></span></div>
+        <div class="bn2"><span>Auto-settle when idle</span><span class="cbox on sm">✓</span></div>
+      </div>
+      <div class="composer dk">Message conduit…</div>
+    </div>
+  </div>
+  <p class="note" style="margin-top:9px">The sidebar toast is from pressing <span class="kbd">u</span> on the focused row while another session is open. Toasts sit at the foot of the column the row lives in: the sidebar on desktop, the screen on a phone.</p>
+
+  <div class="dsk">
+    <div>
+      <div class="dlab"><b>1.</b> &nbsp;Right-click, as today plus the checkbox</div>
+      <div class="dpan" style="padding-bottom:345px">
+        <a class="r2 idle press" href="#" style="opacity:1"><span class="st"></span><span class="t"><span class="txt">Investigate flaky e2e</span></span><span class="m"><i class="g pc-perry">PE</i><span class="tr">perry · main</span></span><span class="r">1h</span></a>
+        <div class="menu" style="left:52px;top:42px">
+          <a href="#"><span class="ico">✓</span>Settle<span class="tail"><span class="kbd">⌘⇧S</span></span></a>
+          <a href="#" class="sub"><span class="ico"></span>Auto-settle when idle<span class="tail"><span class="cbox on sm">✓</span></span></a>
+          <a href="#"><span class="ico">☾</span>Snooze<span class="tail">▸</span></a>
+          <a href="#"><span class="ico">⚑</span>Pin to top<span class="tail"><span class="kbd">⌘⇧P</span></span></a>
+          <div class="sh-div"></div>
+          <a href="#"><span class="ico">✎</span>Rename<span class="tail">F2</span></a>
+          <a href="#"><span class="ico">⑂</span>Fork from here</a>
+          <a href="#" class="new"><span class="ico">●</span>Mark unread<span class="tail"><span class="kbd">u</span></span></a>
+          <a href="#"><span class="ico">⧉</span>Copy link</a>
+          <a href="#"><span class="ico">⇲</span>Archive</a>
+          <div class="sh-div"></div>
+          <a href="#" class="danger"><span class="ico">⌫</span>Delete session</a>
+        </div>
+      </div>
+    </div>
+    <div>
+      <div class="dlab"><b>2.</b> &nbsp;<span class="kbd">⌘⇧U</span> in a session closes the pane</div>
+      <div class="dt" style="height:250px;margin-top:0">
+        <aside class="sb" style="width:190px">
+          <div class="list" style="padding-top:8px">
+            <div class="sec first"><span>Done, unread</span></div>
+            <a class="r2 unread open" href="#"><span class="st dn">✓</span><span class="t"><span class="txt">Audit brew bundle</span></span><span class="m"><i class="g pc-dotfiles">DF</i><span class="tr">dotfiles</span></span><span class="r"></span></a>
+            <div class="sec"><span>Idle</span></div>
+            <a class="r2 idle" href="#"><span class="st"></span><span class="t"><span class="txt">Investigate flaky e2e</span></span><span class="m"><i class="g pc-perry">PE</i><span class="tr">perry</span></span><span class="r"></span></a>
+          </div>
+        </aside>
+        <div class="main"><div class="empty"><span><b>No session open</b><span class="kbd">↵</span> reopens the focused row</span></div></div>
+      </div>
+      <p class="note" style="margin-top:9px">Desktop behaves like the phone: the pane returns to its empty state and the focus ring sits on the row you left. The list was already on screen, so this is a surprise if you meant to keep reading.</p>
+    </div>
+  </div>
+
+  <div class="cards">
+    <div class="card"><h4>Keys</h4><ul>
+      <li><b>List focused:</b> <span class="kbd">u</span> marks unread or read, <span class="kbd">s</span> settles or un-settles.</li>
+      <li><b>In a session:</b> <span class="kbd">⌘⇧U</span> marks unread and closes, Gmail's <span class="kbd">⇧U</span> then back. <span class="kbd">⌘⇧S</span> settles or un-settles and stays.</li>
+      <li><span class="kbd">⌘Z</span> undoes either for five seconds.</li>
+    </ul></div>
+    <div class="card good"><h4>Good</h4><ul>
+      <li>Nothing new to learn, draw or test beyond two menu items.</li>
+      <li>No hold rule: you never look at a session you just marked unread.</li>
+      <li>The row shows exactly what the server stores. No new column.</li>
+    </ul></div>
+    <div class="card risk"><h4>Risky</h4><ul>
+      <li>A two-day-old session reappears with a Done pill, as if it had just finished. That misreports what happened.</li>
+      <li>Closing the pane on desktop, where the list is already visible, punishes the person who wanted to keep reading.</li>
+      <li>Mark unread stays item seven of a menu, so its second job, keeping a session from auto-settling, is invisible.</li>
+    </ul></div>
+    <div class="card cost"><h4>Cost</h4><ul>
+      <li>Two menu items, one sheet item, <span class="kbd">u</span> and <span class="kbd">⌘⇧U</span>.</li>
+      <li>A Mark read RPC for Undo.</li>
+      <li>The banner's second row.</li>
+    </ul><div class="verdict"><b>About a day.</b> The cheapest by a distance.</div></div>
+  </div>
+
+  <div class="tw"><table>
+    <thead><tr><th>Action</th><th>Touch</th><th>Pointer</th><th>Key</th><th>Also</th></tr></thead>
+    <tbody>
+      <tr><td><b class="un-lab">Mark unread</b></td><td data-l="Touch">Long press → Mark unread</td><td data-l="Pointer">⋯ or right-click</td><td class="k" data-l="Key"><span class="kbd">u</span>; <span class="kbd">⌘⇧U</span> in a session</td><td data-l="Also">Session ⋯. From a session it returns you to the list</td></tr>
+      <tr><td><b class="un-lab">Mark read</b></td><td data-l="Touch">Long press → Mark read</td><td data-l="Pointer">⋯ or right-click</td><td class="k" data-l="Key"><span class="kbd">u</span></td><td data-l="Also">Opening the session; Undo on the toast</td></tr>
+      <tr><td><b class="sw-lab">Un-settle</b></td><td data-l="Touch">Swipe right on a settled row</td><td data-l="Pointer">Hover ↶</td><td class="k" data-l="Key"><span class="kbd">s</span> or <span class="kbd">⌘⇧S</span></td><td data-l="Also">Banner button, or send a message</td></tr>
+      <tr><td><b>Auto-settle when idle</b></td><td data-l="Touch">Long press → checkbox</td><td data-l="Pointer">⋯ or right-click → checkbox</td><td class="k" data-l="Key">none, it is a setting</td><td data-l="Also">Second row of the auto-settled banner</td></tr>
+    </tbody>
+  </table></div>
+</section>
+
+<!-- ═════════════════════════════════════════════════════════════ B -->
+<section class="part" id="b">
+  <h2><span>B</span>The swipe tray: a short swipe offers, a full swipe commits</h2>
+  <p class="lede">Swipe left already works this way: a short swipe opens the snooze presets, a full one uses your default. B gives swipe right the same shape. A short swipe holds a tray with <em>Settle</em> and <em>Unread</em>; carry on past halfway and it settles, exactly as today. Inside a session, marking unread keeps you where you are and holds the flag until you leave.</p>
+
+  <div class="ans">
+    <div><i>Inside a session</i>Stays open. The flag holds until you open another session or send a message. A toast says so.</div>
+    <div><i>The row</i>Unread is a flag, not a tier. The row keeps its place and its time, lifts to full ink, and gets the dot.</div>
+    <div><i>Gesture</i>Short swipe right holds Settle and Unread. Full swipe settles. iOS Mail's leading swipe, inside our existing thresholds.</div>
+    <div><i>Desktop hover</i>● joins the strip, first, mirroring the tray: ● ✓ ☾ ⚑ ⋯.</div>
+    <div><i>Un-settle when open</i>The banner. After un-settling an auto-settled session, it turns into a one-time offer to stop auto-settling it.</div>
+    <div><i>Keys</i><span class="kbd">u</span> <span class="kbd">s</span> in the list and transcript; <span class="kbd">⌘⇧U</span> <span class="kbd">⌘⇧S</span> from the composer. Nothing navigates.</div>
+  </div>
+
+  <h3 class="sub">Rows</h3>
+  <div class="states">
+    <div class="cell"><div class="lab">Short swipe · <em>25–55%, tray held</em></div><div class="sw"><div class="tray"><span class="tb settle"><i>✓</i>Settle</span><span class="tb unread"><i>●</i>Unread</span></div><a class="r2 idle fg" href="#" style="translate:148px 0;opacity:1;box-shadow:-10px 0 20px var(--sh)"><span class="st"></span><span class="t"><span class="txt">Investigate flaky e2e</span></span><span class="m"><i class="g pc-perry">PE</i><span class="tr">perry · main</span></span><span class="r">1h</span></a></div></div>
+    <div class="cell"><div class="lab">Full swipe · <em>past 55%, Settle takes the tray</em></div><div class="sw"><div class="tray"><span class="tb settle full"><i>✓</i>Settle</span></div><a class="r2 idle fg" href="#" style="translate:222px 0;opacity:1;box-shadow:-10px 0 20px var(--sh)"><span class="st"></span><span class="t"><span class="txt">Investigate flaky e2e</span></span><span class="m"><i class="g pc-perry">PE</i><span class="tr">perry · main</span></span><span class="r">1h</span></a></div></div>
+    <div class="cell"><div class="lab">Unread row · <em>the tray offers Read</em></div><div class="sw"><div class="tray"><span class="tb settle"><i>✓</i>Settle</span><span class="tb unread"><i>○</i>Read</span></div><a class="r2 unread fg" href="#" style="translate:148px 0;box-shadow:-10px 0 20px var(--sh)"><span class="st dn">✓</span><span class="t"><span class="txt">Add session export</span><span class="udot"></span></span><span class="m"><i class="g pc-conduit">CO</i><span class="tr">conduit · main</span></span><span class="r"><span class="pill quiet dn">Done</span></span></a></div></div>
+    <div class="cell"><div class="lab">Settled row · <em>the tray is Un-settle alone</em></div><div class="sw"><div class="tray"><span class="tb settle wide"><i>↶</i>Un-settle</span></div><a class="r2 settled fg" href="#" style="translate:104px 0;opacity:1;box-shadow:-10px 0 20px var(--sh)"><span class="st"></span><span class="t"><i class="g pc-conduit">CO</i><span class="txt">Wire PTY resize</span></span><span class="r">Auto · 1d</span></a></div></div>
+    <div class="cell"><div class="lab">Marked unread · <em>flag, keeps its tier and time</em></div><a class="r2 unread" href="#"><span class="st"></span><span class="t"><span class="txt">Audit brew bundle</span><span class="udot"></span></span><span class="m"><i class="g pc-dotfiles">DF</i><span class="tr">dotfiles · main</span></span><span class="r">2d</span></a></div>
+    <div class="cell"><div class="lab">Desktop hover · <em>● first, like the tray</em></div><a class="r2 hov" href="#"><span class="st"></span><span class="t"><span class="txt">Investigate flaky e2e</span></span><span class="m"><i class="g pc-perry">PE</i><span class="tr">perry · main</span></span><span class="r"><span class="acts"><span class="hi u">●</span><span>✓</span><span>☾</span><span>⚑</span><span>⋯</span></span></span></a></div>
+  </div>
+  <p class="note" style="margin-top:10px">Tray order follows iOS Mail: the action a full swipe commits sits at the outer edge and stretches to take the tray, the lighter one sits next to the row. A row that is blocked on you still refuses Settle; its tray holds Unread alone.</p>
+
+  <h3 class="sub">Phone</h3>
+  <div class="screens">
+    <div class="shot">
+      <div class="cap"><i>B1 · the list</i><b>Tray held, and a marked row in Idle</b>
+        <p>The held stage of swipe right used to be a slower way to settle. Now it is the one place a thumb finds Mark unread without a long press.</p>
+        <p class="note">Audit brew bundle was marked by hand: it stays in Idle, keeps "2d", and loses the 62% recede. The Unread chip counts it.</p></div>
+      <div class="ph">
+        <div class="sbar"><span>9:41</span><span class="rt">✦ ▮▮▮</span></div>
+        <div class="scr">
+          <div class="top">
+            <div class="tbar"><span class="title">Sessions <u>18</u></span><span class="sp"></span><span class="ic plain">⇅</span><span class="ic plain">⋯</span></div>
+            <div class="sfield"><span class="chip on scope">All projects ▾</span><span class="mag">⌕</span><span>Search</span></div>
+          </div>
+          <div class="crow"><span class="chip brand">Needs you <b>1</b></span><span class="chip">Running <b>1</b></span><span class="chip">Unread <b>2</b></span><span class="chip">Settled</span></div>
+          <div class="list">
+            <div class="sec first"><span>Needs you</span><span class="n">1</span></div>
+            <a class="r2 unread" href="#"><span class="st ap">⚠</span><span class="t"><span class="txt">Fix auth token refresh</span></span><span class="m"><i class="g pc-conduit">CO</i><span class="tr">conduit · feat/auth</span><span class="pr open">#214</span></span><span class="r"><span class="pill loud ap">Approve</span></span></a>
+            <div class="sec"><span>Done, unread</span><span class="n">1</span></div>
+            <a class="r2 unread" href="#"><span class="st dn">✓</span><span class="t"><span class="txt">Add session export</span><span class="udot"></span></span><span class="m"><i class="g pc-conduit">CO</i><span class="tr">conduit · main</span></span><span class="r"><span class="pill quiet dn">Done</span></span></a>
+            <div class="sec"><span>Idle</span><span class="n">3</span></div>
+            <div class="sw"><div class="tray"><span class="tb settle"><i>✓</i>Settle</span><span class="tb unread"><i>●</i>Unread</span></div><a class="r2 idle fg" href="#" style="translate:148px 0;opacity:1;box-shadow:-10px 0 20px var(--sh)"><span class="st"></span><span class="t"><span class="txt">Investigate flaky e2e</span></span><span class="m"><i class="g pc-perry">PE</i><span class="tr">perry · main</span></span><span class="r">1h</span></a></div>
+            <a class="r2 unread" href="#"><span class="st"></span><span class="t"><span class="txt">Audit brew bundle</span><span class="udot"></span></span><span class="m"><i class="g pc-dotfiles">DF</i><span class="tr">dotfiles · main</span></span><span class="r">2d</span></a>
+            <a class="r2 idle" href="#"><span class="st"></span><span class="t"><span class="txt">Port the hunk parser</span></span><span class="m"><i class="g pc-hunk">HK</i><span class="tr">hunk · main</span></span><span class="r">1d</span></a>
+          </div>
+          <div class="fab">+</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="shot">
+      <div class="cap"><i>B2 · long press</i><b>Mark unread joins the paired verbs</b>
+        <p>The top group becomes exactly the verbs that flip in place: Settle, Snooze, Pin, Mark unread. It is the same order as the tray and the hover strip, read left to right.</p>
+        <p class="note">Rename, fork and archive keep the second group. The checkbox stays under Settle.</p></div>
+      <div class="ph">
+        <div class="sbar"><span>9:41</span><span class="rt">✦ ▮▮▮</span></div>
+        <div class="scr">
+          <div class="list" style="padding-top:8px">
+            <div class="sec first"><span>Idle</span><span class="n">3</span></div>
+            <a class="r2 idle press" href="#" style="opacity:1"><span class="st"></span><span class="t"><span class="txt">Investigate flaky e2e</span></span><span class="m"><i class="g pc-perry">PE</i><span class="tr">perry · main</span></span><span class="r">1h</span></a>
+          </div>
+          <div class="scrim"></div>
+          <div class="sheet">
+            <div class="grab"></div>
+            <div class="sh-h"><span class="st"></span><span class="sh-t"><b>Investigate flaky e2e</b><span class="sh-m"><span class="pj"><i class="g pc-perry md">PE</i>perry</span><span class="br">main</span><span class="sep">·</span><span>31 messages</span><span>idle 1h</span></span></span></div>
+            <a class="si" href="#"><span class="ico">✓</span>Settle<span class="tail"><span class="kbd">⌘⇧S</span></span></a>
+            <a class="si sub" href="#"><span class="ico"></span>Auto-settle when idle<span class="tail"><span class="cbox on sm">✓</span></span></a>
+            <a class="si" href="#"><span class="ico">☾</span>Snooze<span class="tail">▸</span></a>
+            <a class="si" href="#"><span class="ico">⚑</span>Pin to top<span class="tail"><span class="kbd">⌘⇧P</span></span></a>
+            <a class="si new" href="#"><span class="ico">●</span>Mark unread<span class="tail"><span class="kbd">⌘⇧U</span></span></a>
+            <div class="sh-div"></div>
+            <a class="si" href="#"><span class="ico">✎</span>Rename</a>
+            <a class="si" href="#"><span class="ico">⑂</span>Fork from here</a>
+            <a class="si" href="#"><span class="ico">⇲</span>Archive<span class="tail">out of the list</span></a>
+            <div class="sh-div"></div>
+            <a class="si danger" href="#"><span class="ico">⌫</span>Delete session</a>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="shot">
+      <div class="cap"><i>B3 · from the session</i><b>You stay; the toast explains the hold</b>
+        <p>Nothing navigates. The toast sits above the composer and says the one thing that is not obvious: reading on will not undo it.</p>
+        <p class="note">After the toast fades, nothing on screen says the session is held unread. That is B's gap.</p></div>
+      <div class="ph short">
+        <div class="sbar"><span>9:41</span><span class="rt">✦ ▮▮▮</span></div>
+        <div class="scr">
+          <div class="pb1"><span class="bbk"><s>‹</s>Sessions<i>1</i></span><span class="bsp"></span><span class="bm"><i class="g pc-dotfiles">DF</i>dotfiles<em>·</em>main</span><span class="bic sm">⋯</span></div>
+          <div class="pb2"><b>Audit brew bundle <c>▾</c></b></div>
+          <div class="pb3"><div class="bseg full"><span class="on">Chat</span><span>Terminal</span><span>Diff</span><span>Files</span></div></div>
+          <div class="msgs"><div class="gh w1"></div><div class="gh w3"></div><div class="gh me"></div><div class="gh w2"></div><div class="gh w4"></div></div>
+          <div class="toast" style="bottom:66px"><span>Kept unread until you leave</span><span class="u">Undo</span></div>
+          <div class="composer" style="margin-top:10px">Message dotfiles…</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="shot">
+      <div class="cap"><i>B4 · after un-settling an auto-settled session</i><b>The offer comes after the signal</b>
+        <p>Before, the banner is the main doc's: <em>Auto-settled 1 day ago · Send a message to un-settle · Un-settle</em>. Un-settle it and the banner turns into a one-time offer, because un-settling is the moment you have told us auto-settle was wrong.</p>
+        <p class="note">If you un-settle by sending a message, the offer shows up while the reply streams in.</p></div>
+      <div class="ph short">
+        <div class="sbar"><span>9:41</span><span class="rt">✦ ▮▮▮</span></div>
+        <div class="scr">
+          <div class="pb1"><span class="bbk"><s>‹</s>Sessions<i>2</i></span><span class="bsp"></span><span class="bm"><i class="g pc-conduit">CO</i>conduit<em>·</em>main</span><span class="bic sm">⋯</span></div>
+          <div class="pb2"><b>Wire PTY resize <c>▾</c></b></div>
+          <div class="pb3"><div class="bseg full"><span class="on">Chat</span><span>Terminal</span><span>Diff</span><span>Files</span></div></div>
+          <div class="msgs"><div class="gh w1"></div><div class="gh w3"></div><div class="gh me"></div><div class="gh w2"></div></div>
+          <div class="banner stk">
+            <div class="bn1"><span class="st" style="color:var(--text2)">↶</span><span><b>Back in your list</b><span class="bs">It won't auto-settle until something new happens</span></span></div>
+            <div class="bn2"><span class="act" style="margin-left:0;padding:7px 10px">Never auto-settle it</span><span style="margin-left:auto;color:var(--dim)">Dismiss</span></div>
+          </div>
+          <div class="composer">Message conduit…</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub">Desktop</h3>
+  <div class="dt">
+    <aside class="sb">
+      <div class="top">
+        <div class="tbar"><span class="title">Sessions <u>18</u></span><span class="sp"></span><span class="ic plain">⇅</span><span class="ic plain">+</span></div>
+        <div class="sfield"><span class="chip on">All projects ▾</span><span class="mag">⌕</span><span>Search</span><span class="kbd" style="margin-left:auto">/</span></div>
+      </div>
+      <div class="crow"><span class="chip brand">Needs you <b>1</b></span><span class="chip">Running <b>1</b></span><span class="chip">Unread <b>2</b></span></div>
+      <div class="list">
+        <div class="sec first"><span>Needs you</span><span class="n">1</span></div>
+        <a class="r2 unread" href="#"><span class="st ap">⚠</span><span class="t"><span class="txt">Fix auth token refresh</span></span><span class="m"><i class="g pc-conduit">CO</i><span class="tr">conduit · feat/auth</span></span><span class="r"><span class="pill loud ap">Approve</span></span></a>
+        <div class="sec"><span>Done, unread</span><span class="n">1</span></div>
+        <a class="r2 unread" href="#"><span class="st dn">✓</span><span class="t"><span class="txt">Add session export</span><span class="udot"></span></span><span class="m"><i class="g pc-conduit">CO</i><span class="tr">conduit · main</span></span><span class="r"><span class="pill quiet dn">Done</span></span></a>
+        <div class="sec"><span>Idle</span><span class="n">3</span></div>
+        <a class="r2 idle hov" href="#" style="opacity:1"><span class="st"></span><span class="t"><span class="txt">Investigate flaky e2e</span></span><span class="m"><i class="g pc-perry">PE</i><span class="tr">perry · main</span></span><span class="r"><span class="acts"><span class="hi u">●</span><span>✓</span><span>☾</span><span>⚑</span><span>⋯</span></span></span></a>
+        <a class="r2 unread open" href="#"><span class="st"></span><span class="t"><span class="txt">Audit brew bundle</span><span class="udot"></span></span><span class="m"><i class="g pc-dotfiles">DF</i><span class="tr">dotfiles · main</span></span><span class="r">2d</span></a>
+        <a class="r2 idle" href="#"><span class="st"></span><span class="t"><span class="txt">Port the hunk parser</span></span><span class="m"><i class="g pc-hunk">HK</i><span class="tr">hunk · main</span></span><span class="r">1d</span></a>
+      </div>
+      <div class="tip" style="left:138px;top:268px">Mark unread <span class="kbd">u</span></div>
+      <div class="toast dk"><span>Kept unread until you leave</span><span class="u">Undo</span></div>
+    </aside>
+    <div class="main">
+      <div class="dbar"><span class="bbk"><s>‹</s>Sessions<i>1</i></span><span class="bdiv"></span><span class="btl"><b>Audit brew bundle <c>▾</c></b></span><span class="bm"><em>·</em><i class="g pc-dotfiles">DF</i>dotfiles<em>·</em>main</span><span class="bsp"></span><div class="bseg"><span class="on">Chat</span><span>Terminal</span><span>Diff</span><span>Files</span></div><span class="bdiv"></span><span class="bic">⋯</span></div>
+      <div class="msgs"><div class="gh w1"></div><div class="gh w3"></div><div class="gh w2"></div><div class="gh me" style="width:38%"></div><div class="gh w1"></div><div class="gh w4"></div><div class="gh w3"></div></div>
+      <div class="composer dk" style="margin-top:10px">Message dotfiles…</div>
+    </div>
+  </div>
+  <p class="note" style="margin-top:9px">The open row carries the brand inset <em>and</em> the dot: that is the hold, drawn by the list itself. Five hover icons take 143&thinsp;px of a 300&thinsp;px sidebar, so the titles under the pointer truncate harder than they do today.</p>
+
+  <div class="dsk">
+    <div>
+      <div class="dlab"><b>1.</b> &nbsp;Right-click, paired verbs on top</div>
+      <div class="dpan" style="padding-bottom:345px">
+        <a class="r2 unread press" href="#"><span class="st dn">✓</span><span class="t"><span class="txt">Add session export</span></span><span class="m"><i class="g pc-conduit">CO</i><span class="tr">conduit · main</span></span><span class="r"><span class="pill quiet dn">Done</span></span></a>
+        <div class="menu" style="left:52px;top:42px">
+          <a href="#"><span class="ico">✓</span>Settle<span class="tail"><span class="kbd">⌘⇧S</span></span></a>
+          <a href="#" class="sub"><span class="ico"></span>Auto-settle when idle<span class="tail"><span class="cbox on sm">✓</span></span></a>
+          <a href="#"><span class="ico">☾</span>Snooze<span class="tail">▸</span></a>
+          <a href="#"><span class="ico">⚑</span>Pin to top<span class="tail"><span class="kbd">⌘⇧P</span></span></a>
+          <a href="#" class="new"><span class="ico">○</span>Mark read<span class="tail"><span class="kbd">⌘⇧U</span></span></a>
+          <div class="sh-div"></div>
+          <a href="#"><span class="ico">✎</span>Rename<span class="tail">F2</span></a>
+          <a href="#"><span class="ico">⑂</span>Fork from here</a>
+          <a href="#"><span class="ico">⧉</span>Copy link</a>
+          <a href="#"><span class="ico">⇲</span>Archive</a>
+          <div class="sh-div"></div>
+          <a href="#" class="danger"><span class="ico">⌫</span>Delete session</a>
+        </div>
+      </div>
+      <p class="note" style="margin-top:9px">On an unread row the verb reads Mark read, with the hollow ○.</p>
+    </div>
+    <div class="span2">
+      <div class="dlab"><b>2.</b> &nbsp;The follow-up banner, desktop</div>
+      <div class="dt" style="height:220px;margin-top:0">
+        <div class="main">
+          <div class="msgs" style="padding:18px 22px 0"><div class="gh w1"></div><div class="gh w3"></div><div class="gh w2"></div></div>
+          <div class="banner dk" style="margin-left:14px;margin-right:14px"><span class="st" style="color:var(--text2)">↶</span><span><b>Back in your list</b><span class="bs">It won't auto-settle until something new happens</span></span><span class="act">Never auto-settle it</span></div>
+          <div class="composer dk" style="margin-left:14px;margin-right:14px">Message conduit…</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="cards">
+    <div class="card"><h4>Keys</h4><ul>
+      <li><b>List or transcript focused:</b> <span class="kbd">u</span> and <span class="kbd">s</span> flip.</li>
+      <li><b>Composer focused:</b> <span class="kbd">⌘⇧U</span> and <span class="kbd">⌘⇧S</span>. Neither navigates.</li>
+      <li>The hover tooltip on ● teaches <span class="kbd">u</span>, as ✓ teaches <span class="kbd">⌘⇧S</span> today.</li>
+    </ul></div>
+    <div class="card good"><h4>Good</h4><ul>
+      <li>One rule for both swipes: short offers, full commits. The held stage of swipe right finally earns its place.</li>
+      <li>iOS Mail users already look for Unread on the leading swipe.</li>
+      <li>Staying matches what the server does anyway, and the row tells the truth: a flag, not a fresh Done.</li>
+    </ul></div>
+    <div class="card risk"><h4>Risky</h4><ul>
+      <li>Two 74&thinsp;px targets under a moving thumb. A miss marks unread instead of settling; harmless, and Undo is right there.</li>
+      <li>Five hover icons squeeze titles in a 300&thinsp;px sidebar, for the least frequent of the five verbs.</li>
+      <li>The hold is invisible on a phone once the toast fades.</li>
+      <li>The follow-up banner can land while output streams.</li>
+    </ul></div>
+    <div class="card cost"><h4>Cost</h4><ul>
+      <li>A second button on the swipe's existing held state.</li>
+      <li>A client-side hold, so a reconnect does not write <code>read_at</code>.</li>
+      <li>Mark read RPC; an <code>unread_marked_at</code> column so the row can stay in its tier.</li>
+      <li>One more hover icon; the follow-up banner state.</li>
+    </ul><div class="verdict"><b>Two to three days.</b></div></div>
+  </div>
+
+  <div class="tw"><table>
+    <thead><tr><th>Action</th><th>Touch</th><th>Pointer</th><th>Key</th><th>Also</th></tr></thead>
+    <tbody>
+      <tr><td><b class="un-lab">Mark unread</b></td><td data-l="Touch">Short swipe right → Unread, or long press</td><td data-l="Pointer">Hover ●, ⋯ or right-click</td><td class="k" data-l="Key"><span class="kbd">u</span> or <span class="kbd">⌘⇧U</span></td><td data-l="Also">Session ⋯. You stay; it holds until you leave</td></tr>
+      <tr><td><b class="un-lab">Mark read</b></td><td data-l="Touch">Short swipe right → Read, or long press</td><td data-l="Pointer">Hover ○, ⋯ or right-click</td><td class="k" data-l="Key"><span class="kbd">u</span> or <span class="kbd">⌘⇧U</span></td><td data-l="Also">Opening the session; Undo</td></tr>
+      <tr><td><b class="sw-lab">Un-settle</b></td><td data-l="Touch">Swipe right on a settled row</td><td data-l="Pointer">Hover ↶</td><td class="k" data-l="Key"><span class="kbd">s</span> or <span class="kbd">⌘⇧S</span></td><td data-l="Also">Banner button, or send a message</td></tr>
+      <tr><td><b>Auto-settle when idle</b></td><td data-l="Touch">Long press → checkbox</td><td data-l="Pointer">⋯ or right-click → checkbox</td><td class="k" data-l="Key">none, it is a setting</td><td data-l="Also">"Never auto-settle it" after un-settling an auto-settled session</td></tr>
+    </tbody>
+  </table></div>
+</section>
+
+<!-- ═════════════════════════════════════════════════════════════ C -->
+<section class="part" id="c">
+  <h2><span>C</span>The bar owns state: a chip after the title</h2>
+  <p class="lede">The session bar already says where you are. C makes it say what state the session is in: one chip after the title for Settled, Auto-settled, Snoozed, Woke and Unread. The chip is a label and a control at once; tap it for the flip verb and the auto-settle checkbox. There is no banner. The composer placeholder says what sending will do.</p>
+
+  <div class="ans">
+    <div><i>Inside a session</i>Stays open. A <b>● Unread</b> chip appears in the bar and stays until you leave. Tap it to mark read.</div>
+    <div><i>The row</i>Flag, not tier, as in B.</div>
+    <div><i>Gesture</i>None in the list. Long press is the touch route.</div>
+    <div><i>Desktop hover</i>Unchanged: ✓ ☾ ⚑ ⋯.</div>
+    <div><i>Un-settle when open</i>The chip's popover: Un-settle, the checkbox, and when and why it settled. Placeholder: <em>Message to un-settle…</em></div>
+    <div><i>Keys</i>As B. <span class="kbd">⌘⇧U</span> and <span class="kbd">⌘⇧S</span> flip the chip you can see.</div>
+  </div>
+
+  <h3 class="sub">The chip, in every state it can be</h3>
+  <div class="states">
+    <div class="cell"><div class="lab">Settled · <em>by hand</em></div>
+      <div class="mini"><div class="pb2" style="border:0;padding-top:8px"><b>Wire PTY resize <c>▾</c></b><span class="schip"><span class="gl">✓</span>Settled</span></div></div>
+      <div class="mini"><div class="pbc" style="border:0"><span class="bbk" style="padding-right:4px"><s>‹</s><i>2</i></span><span class="btl"><b>Wire PTY resize</b></span><span class="bsp"></span><span class="schip dot"><span class="gl">✓</span></span><span class="bic o">⌄</span><span class="bic">⋯</span></div></div></div>
+    <div class="cell"><div class="lab">Auto-settled · <em>by the server</em></div>
+      <div class="mini"><div class="pb2" style="border:0;padding-top:8px"><b>Wire PTY resize <c>▾</c></b><span class="schip"><span class="gl">✓</span>Auto-settled</span></div></div>
+      <div class="mini"><div class="pbc" style="border:0"><span class="bbk" style="padding-right:4px"><s>‹</s><i>2</i></span><span class="btl"><b>Wire PTY resize</b></span><span class="bsp"></span><span class="schip dot"><span class="gl">✓</span></span><span class="bic o">⌄</span><span class="bic">⋯</span></div></div></div>
+    <div class="cell"><div class="lab">Unread · <em>held by hand</em></div>
+      <div class="mini"><div class="pb2" style="border:0;padding-top:8px"><b>Audit brew bundle <c>▾</c></b><span class="schip"><span class="udot"></span>Unread</span></div></div>
+      <div class="mini"><div class="pbc" style="border:0"><span class="bbk" style="padding-right:4px"><s>‹</s><i>1</i></span><span class="btl"><b>Audit brew bundle</b></span><span class="bsp"></span><span class="schip dot"><span class="udot"></span></span><span class="bic o">⌄</span><span class="bic">⋯</span></div></div></div>
+    <div class="cell"><div class="lab">Snoozed · <em>the chip generalises</em></div>
+      <div class="mini"><div class="pb2" style="border:0;padding-top:8px"><b>Wait for the nu 0.99 release <c>▾</c></b><span class="schip"><span class="gz">☾</span>Tue 9:00</span></div></div>
+      <div class="mini"><div class="pbc" style="border:0"><span class="bbk" style="padding-right:4px"><s>‹</s><i>2</i></span><span class="btl"><b>Wait for the nu 0.99 release</b></span><span class="bsp"></span><span class="schip dot"><span class="gz">☾</span></span><span class="bic o">⌄</span><span class="bic">⋯</span></div></div></div>
+  </div>
+  <p class="note" style="margin-top:10px">Top of each cell: the open bar. Bottom: bar 18's collapsed row, where the chip drops to its glyph. The title's 110&thinsp;px floor is what the chip spends.</p>
+
+  <h3 class="sub">Phone</h3>
+  <div class="screens">
+    <div class="shot">
+      <div class="cap"><i>C1 · settled, opened</i><b>The bar says it; the placeholder says how to leave</b>
+        <p>No banner between the transcript and the composer. The placeholder carries the implicit route, and the chip carries the explicit one.</p>
+        <p class="note">The placeholder disappears the moment you type, which is also the moment it has done its job.</p></div>
+      <div class="ph short">
+        <div class="sbar"><span>9:41</span><span class="rt">✦ ▮▮▮</span></div>
+        <div class="scr">
+          <div class="pb1"><span class="bbk"><s>‹</s>Sessions<i>2</i></span><span class="bsp"></span><span class="bm"><i class="g pc-conduit">CO</i>conduit<em>·</em>main</span><span class="bic sm">⋯</span></div>
+          <div class="pb2"><b>Wire PTY resize <c>▾</c></b><span class="schip"><span class="gl">✓</span>Settled</span></div>
+          <div class="pb3"><div class="bseg full"><span class="on">Chat</span><span>Terminal</span><span>Diff</span><span>Files</span></div></div>
+          <div class="msgs"><div class="gh w1"></div><div class="gh w3"></div><div class="gh me"></div><div class="gh w2"></div><div class="gh w1"></div><div class="gh w4"></div></div>
+          <div class="composer" style="margin-top:10px">Message to un-settle…</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="shot">
+      <div class="cap"><i>C2 · auto-settled, chip tapped</i><b>The popover is the whole story</b>
+        <p>When, why, the way out, and the setting that did it, in one small menu anchored to the chip. It is the same checkbox as the session menu.</p>
+        <p class="note">One tap deeper than a banner. Nobody sees the opt-out unless they already suspect it exists.</p></div>
+      <div class="ph short">
+        <div class="sbar"><span>9:41</span><span class="rt">✦ ▮▮▮</span></div>
+        <div class="scr">
+          <div class="pb1"><span class="bbk"><s>‹</s>Sessions<i>2</i></span><span class="bsp"></span><span class="bm"><i class="g pc-conduit">CO</i>conduit<em>·</em>main</span><span class="bic sm">⋯</span></div>
+          <div class="pb2"><b>Wire PTY resize <c>▾</c></b><span class="schip act"><span class="gl">✓</span>Auto-settled</span></div>
+          <div class="pb3"><div class="bseg full"><span class="on">Chat</span><span>Terminal</span><span>Diff</span><span>Files</span></div></div>
+          <div class="msgs" style="opacity:.3"><div class="gh w1"></div><div class="gh w3"></div><div class="gh me"></div><div class="gh w2"></div></div>
+          <div class="menu" style="right:10px;top:80px;min-width:236px">
+            <div class="mlab">AUTO-SETTLED 1 DAY AGO</div>
+            <div class="mnote" style="padding-top:0">It sat idle for 3 days</div>
+            <div class="sh-div"></div>
+            <a href="#" class="on"><span class="ico">↶</span>Un-settle<span class="tail"><span class="kbd">⌘⇧S</span></span></a>
+            <a href="#"><span class="ico"></span>Auto-settle when idle<span class="tail"><span class="cbox on sm">✓</span></span></a>
+          </div>
+          <div class="composer" style="margin-top:10px">Message to un-settle…</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="shot">
+      <div class="cap"><i>C3 · marked unread from inside</i><b>The hold is visible the whole time</b>
+        <p>Mark unread from ⋯ and the chip appears in place. It stays as long as you are here; leave and the row keeps its dot. Tap the chip to mark read.</p>
+        <p class="note">No toast: the change is drawn where you are looking. <span class="kbd">⌘Z</span> still undoes it.</p></div>
+      <div class="ph short">
+        <div class="sbar"><span>9:41</span><span class="rt">✦ ▮▮▮</span></div>
+        <div class="scr">
+          <div class="pb1"><span class="bbk"><s>‹</s>Sessions<i>1</i></span><span class="bsp"></span><span class="bm"><i class="g pc-dotfiles">DF</i>dotfiles<em>·</em>main</span><span class="bic sm">⋯</span></div>
+          <div class="pb2"><b>Audit brew bundle <c>▾</c></b><span class="schip"><span class="udot"></span>Unread</span></div>
+          <div class="pb3"><div class="bseg full"><span class="on">Chat</span><span>Terminal</span><span>Diff</span><span>Files</span></div></div>
+          <div class="msgs"><div class="gh w1"></div><div class="gh w3"></div><div class="gh me"></div><div class="gh w2"></div><div class="gh w1"></div></div>
+          <div class="composer" style="margin-top:10px">Message dotfiles…</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub">Desktop</h3>
+  <div class="dt">
+    <aside class="sb">
+      <div class="top">
+        <div class="tbar"><span class="title">Sessions <u>18</u></span><span class="sp"></span><span class="ic plain">⇅</span><span class="ic plain">+</span></div>
+        <div class="sfield"><span class="chip on">All projects ▾</span><span class="mag">⌕</span><span>Search</span><span class="kbd" style="margin-left:auto">/</span></div>
+      </div>
+      <div class="crow"><span class="chip brand">Needs you <b>1</b></span><span class="chip">Running <b>1</b></span><span class="chip">Unread <b>2</b></span></div>
+      <div class="list">
+        <div class="sec first"><span>Needs you</span><span class="n">1</span></div>
+        <a class="r2 unread" href="#"><span class="st ap">⚠</span><span class="t"><span class="txt">Fix auth token refresh</span></span><span class="m"><i class="g pc-conduit">CO</i><span class="tr">conduit · feat/auth</span></span><span class="r"><span class="pill loud ap">Approve</span></span></a>
+        <div class="sec"><span>Done, unread</span><span class="n">1</span></div>
+        <a class="r2 unread" href="#"><span class="st dn">✓</span><span class="t"><span class="txt">Add session export</span><span class="udot"></span></span><span class="m"><i class="g pc-conduit">CO</i><span class="tr">conduit · main</span></span><span class="r"><span class="pill quiet dn">Done</span></span></a>
+        <div class="sec"><span>Idle</span><span class="n">3</span></div>
+        <a class="r2 idle" href="#"><span class="st"></span><span class="t"><span class="txt">Investigate flaky e2e</span></span><span class="m"><i class="g pc-perry">PE</i><span class="tr">perry · main</span></span><span class="r">1h</span></a>
+        <a class="r2 unread" href="#"><span class="st"></span><span class="t"><span class="txt">Audit brew bundle</span><span class="udot"></span></span><span class="m"><i class="g pc-dotfiles">DF</i><span class="tr">dotfiles · main</span></span><span class="r">2d</span></a>
+        <div class="sec"><span><span class="caret">▾</span> Settled</span></div>
+        <a class="r2 settled open" href="#"><span class="st"></span><span class="t"><i class="g pc-conduit">CO</i><span class="txt">Wire PTY resize</span><span class="pr merged">#212</span></span><span class="r">Auto · 1d</span></a>
+        <a class="r2 settled press hov" href="#"><span class="st"></span><span class="t"><i class="g pc-perry">PE</i><span class="txt">Stabilise visual baselines</span></span><span class="r"><span class="acts"><span class="hi">↶</span><span>⋯</span></span></span></a>
+      </div>
+    </aside>
+    <div class="main">
+      <div class="dbar"><span class="bbk"><s>‹</s>Sessions<i>2</i></span><span class="bdiv"></span><span class="btl"><b>Wire PTY resize <c>▾</c></b></span><span class="schip act"><span class="gl">✓</span>Auto-settled</span><span class="bm"><em>·</em><i class="g pc-conduit">CO</i>conduit<em>·</em>main<span class="pr merged">#212</span></span><span class="bsp"></span><div class="bseg"><span class="on">Chat</span><span>Terminal</span><span>Diff</span><span>Files</span></div><span class="bdiv"></span><span class="bic">⋯</span></div>
+      <div class="menu cpop">
+        <div class="mlab">AUTO-SETTLED 1 DAY AGO</div>
+        <div class="mnote" style="padding-top:0">It sat idle for 3 days</div>
+        <div class="sh-div"></div>
+        <a href="#" class="on"><span class="ico">↶</span>Un-settle<span class="tail"><span class="kbd">⌘⇧S</span></span></a>
+        <a href="#"><span class="ico"></span>Auto-settle when idle<span class="tail"><span class="cbox on sm">✓</span></span></a>
+      </div>
+      <div class="msgs"><div class="gh w1"></div><div class="gh w3"></div><div class="gh w2"></div><div class="gh me" style="width:38%"></div><div class="gh w1"></div><div class="gh w4"></div><div class="gh w3"></div></div>
+      <div class="composer dk" style="margin-top:10px">Message to un-settle…</div>
+    </div>
+  </div>
+  <p class="note" style="margin-top:9px">On desktop the chip sits right after the title, before the project and branch; the one-line bar has room. The settled shelf's hover ↶ is untouched.</p>
+
+  <div class="cards">
+    <div class="card"><h4>Keys</h4><ul>
+      <li>As B: <span class="kbd">u</span> <span class="kbd">s</span> with the list or transcript focused, <span class="kbd">⌘⇧U</span> <span class="kbd">⌘⇧S</span> from the composer.</li>
+      <li>Each flip changes the chip in view, so the key has visible feedback without a toast.</li>
+    </ul></div>
+    <div class="card good"><h4>Good</h4><ul>
+      <li>One place answers "what state is this in?" for every lifecycle state, including Snoozed and Woke, which have no in-session home today either.</li>
+      <li>Nothing sits between the transcript and the composer.</li>
+      <li>The unread hold is visible for as long as it lasts.</li>
+    </ul></div>
+    <div class="card risk"><h4>Risky</h4><ul>
+      <li>Bar 18 was hard won. The chip spends the title's width, and in the collapsed row it shrinks to a bare glyph that says little.</li>
+      <li>The un-settle decision happens at the composer; the chip is at the top of a tall phone.</li>
+      <li>"Send a message to un-settle" shrinks to a placeholder, and the auto-settle opt-out is one tap deeper than any banner.</li>
+    </ul></div>
+    <div class="card cost"><h4>Cost</h4><ul>
+      <li>Chip and popover in three bar layouts: open, collapsed, desktop.</li>
+      <li>Placeholder switch; client hold; Mark read RPC; <code>unread_marked_at</code>.</li>
+      <li>Revisiting §9's width budget.</li>
+    </ul><div class="verdict"><b>About three days</b>, most of it in the bar.</div></div>
+  </div>
+
+  <div class="tw"><table>
+    <thead><tr><th>Action</th><th>Touch</th><th>Pointer</th><th>Key</th><th>Also</th></tr></thead>
+    <tbody>
+      <tr><td><b class="un-lab">Mark unread</b></td><td data-l="Touch">Long press → Mark unread</td><td data-l="Pointer">⋯ or right-click</td><td class="k" data-l="Key"><span class="kbd">u</span> or <span class="kbd">⌘⇧U</span></td><td data-l="Also">Session ⋯; a ● Unread chip appears and holds</td></tr>
+      <tr><td><b class="un-lab">Mark read</b></td><td data-l="Touch">Long press, or tap the ● chip</td><td data-l="Pointer">⋯, right-click, or the chip</td><td class="k" data-l="Key"><span class="kbd">u</span> or <span class="kbd">⌘⇧U</span></td><td data-l="Also">Opening the session</td></tr>
+      <tr><td><b class="sw-lab">Un-settle</b></td><td data-l="Touch">Swipe right on a settled row; the chip</td><td data-l="Pointer">Hover ↶; the chip</td><td class="k" data-l="Key"><span class="kbd">s</span> or <span class="kbd">⌘⇧S</span></td><td data-l="Also">Send a message, as the placeholder says</td></tr>
+      <tr><td><b>Auto-settle when idle</b></td><td data-l="Touch">Long press → checkbox; chip popover</td><td data-l="Pointer">⋯, right-click, chip popover</td><td class="k" data-l="Key">none, it is a setting</td><td data-l="Also">The chip's popover says why it settled</td></tr>
+    </tbody>
+  </table></div>
+</section>
+
+<!-- ═════════════════════════════════════════════════════════════ D -->
+<section class="part" id="d">
+  <h2><span>D</span>The dot is the switch</h2>
+  <p class="lede">Unread becomes one object you can point at: a dot at the row's leading edge, and the same dot before the title inside a session. Filled means there is output you have not seen; a ring means you marked it. With a pointer, clicking the dot flips it, as in Mail, Outlook and Linear. The settled banner moves down to sit on the composer, where sending happens.</p>
+
+  <div class="ans">
+    <div><i>Inside a session</i>Stays open. The ring appears before the title, in a 30&thinsp;px target; tap it to mark read.</div>
+    <div><i>The row</i>A new leading gutter. Filled dot for new output, ring for marked by hand. The dot after the title goes.</div>
+    <div><i>Gesture</i>None. A 7&thinsp;px dot cannot be a touch target (§3: nothing under 34&thinsp;px in a row), so on a phone it is a label.</div>
+    <div><i>Desktop hover</i>A faint ring appears in the gutter of a read row; click to mark unread. Click a dot to mark read.</div>
+    <div><i>Un-settle when open</i>A strip fused to the top of the composer. The auto variant adds a text button.</div>
+    <div><i>Keys</i>As B.</div>
+  </div>
+
+  <h3 class="sub">Rows</h3>
+  <div class="states">
+    <div class="cell"><div class="lab">Done, unread · <em>filled: new output</em></div><a class="r2 unread dg" href="#"><i class="ld"></i><span class="st dn">✓</span><span class="t"><span class="txt">Add session export</span></span><span class="m"><i class="g pc-conduit">CO</i><span class="tr">conduit · main</span></span><span class="r"><span class="pill quiet dn">Done</span></span></a></div>
+    <div class="cell"><div class="lab">Marked unread · <em>ring: you asked</em></div><a class="r2 unread dg" href="#"><i class="ld ring"></i><span class="st"></span><span class="t"><span class="txt">Audit brew bundle</span></span><span class="m"><i class="g pc-dotfiles">DF</i><span class="tr">dotfiles · main</span></span><span class="r">2d</span></a></div>
+    <div class="cell" style="position:relative"><div class="lab">Desktop hover, read row · <em>a ghost ring</em></div><a class="r2 hov dg" href="#"><i class="ld ghost halo"></i><span class="st"></span><span class="t"><span class="txt">Investigate flaky e2e</span></span><span class="m"><i class="g pc-perry">PE</i><span class="tr">perry · main</span></span><span class="r"><span class="acts"><span>✓</span><span>☾</span><span>⚑</span><span>⋯</span></span></span></a></div>
+    <div class="cell"><div class="lab">Desktop hover, unread row · <em>click reads it</em></div><a class="r2 unread hov dg" href="#"><i class="ld halo"></i><span class="st dn">✓</span><span class="t"><span class="txt">Add session export</span></span><span class="m"><i class="g pc-conduit">CO</i><span class="tr">conduit · main</span></span><span class="r"><span class="acts"><span>✓</span><span>☾</span><span>⚑</span><span>⋯</span></span></span></a></div>
+    <div class="cell"><div class="lab">Settled · <em>no dot, no ring, ever</em></div><a class="r2 settled dg" href="#"><span class="st"></span><span class="t"><i class="g pc-conduit">CO</i><span class="txt">Wire PTY resize</span><span class="pr merged">#212</span></span><span class="r">Auto · 1d</span></a></div>
+  </div>
+
+  <h3 class="sub">Phone</h3>
+  <div class="screens">
+    <div class="shot">
+      <div class="cap"><i>D1 · the list</i><b>The gutter reads down the left edge</b>
+        <p>Every unread row lines up on one vertical, so you can count them without reading. The gutter costs every row 9&thinsp;px of title.</p>
+        <p class="note">Needs-you rows are loud already; they get no dot, as today.</p></div>
+      <div class="ph">
+        <div class="sbar"><span>9:41</span><span class="rt">✦ ▮▮▮</span></div>
+        <div class="scr">
+          <div class="top">
+            <div class="tbar"><span class="title">Sessions <u>18</u></span><span class="sp"></span><span class="ic plain">⇅</span><span class="ic plain">⋯</span></div>
+            <div class="sfield"><span class="chip on scope">All projects ▾</span><span class="mag">⌕</span><span>Search</span></div>
+          </div>
+          <div class="crow"><span class="chip brand">Needs you <b>1</b></span><span class="chip">Running <b>1</b></span><span class="chip">Unread <b>2</b></span><span class="chip">Settled</span></div>
+          <div class="list">
+            <div class="sec first"><span>Needs you</span><span class="n">1</span></div>
+            <a class="r2 unread dg" href="#"><span class="st ap">⚠</span><span class="t"><span class="txt">Fix auth token refresh</span></span><span class="m"><i class="g pc-conduit">CO</i><span class="tr">conduit · feat/auth</span><span class="pr open">#214</span></span><span class="r"><span class="pill loud ap">Approve</span></span></a>
+            <div class="sec"><span>Running</span><span class="n">1</span></div>
+            <a class="r2 dg" href="#"><span class="st wk"><i class="spin"></i></span><span class="t"><span class="txt">Migrate zsh config to nushell</span></span><span class="m"><i class="g pc-dotfiles">DF</i><span class="tr">dotfiles · main</span></span><span class="r">4m</span></a>
+            <div class="sec"><span>Done, unread</span><span class="n">1</span></div>
+            <a class="r2 unread dg" href="#"><i class="ld"></i><span class="st dn">✓</span><span class="t"><span class="txt">Add session export</span></span><span class="m"><i class="g pc-conduit">CO</i><span class="tr">conduit · main</span></span><span class="r"><span class="pill quiet dn">Done</span></span></a>
+            <div class="sec"><span>Idle</span><span class="n">3</span></div>
+            <a class="r2 idle dg" href="#"><span class="st"></span><span class="t"><span class="txt">Investigate flaky e2e</span></span><span class="m"><i class="g pc-perry">PE</i><span class="tr">perry · main</span></span><span class="r">1h</span></a>
+            <a class="r2 unread dg" href="#"><i class="ld ring"></i><span class="st"></span><span class="t"><span class="txt">Audit brew bundle</span></span><span class="m"><i class="g pc-dotfiles">DF</i><span class="tr">dotfiles · main</span></span><span class="r">2d</span></a>
+            <a class="r2 idle dg" href="#"><span class="st"></span><span class="t"><span class="txt">Port the hunk parser</span></span><span class="m"><i class="g pc-hunk">HK</i><span class="tr">hunk · main</span></span><span class="r">1d</span></a>
+          </div>
+          <div class="fab">+</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="shot">
+      <div class="cap"><i>D2 · long press</i><b>The sheet's icon is the ring it makes</b>
+        <p>Mark unread's icon is the hollow ring, because that is what it will put on the row. Mark read, on an unread row, shows the filled dot it removes.</p>
+        <p class="note">Touch still has no one-step route. The dot's promise is a pointer promise.</p></div>
+      <div class="ph">
+        <div class="sbar"><span>9:41</span><span class="rt">✦ ▮▮▮</span></div>
+        <div class="scr">
+          <div class="list" style="padding-top:8px">
+            <div class="sec first"><span>Idle</span><span class="n">3</span></div>
+            <a class="r2 idle press dg" href="#" style="opacity:1"><span class="st"></span><span class="t"><span class="txt">Investigate flaky e2e</span></span><span class="m"><i class="g pc-perry">PE</i><span class="tr">perry · main</span></span><span class="r">1h</span></a>
+          </div>
+          <div class="scrim"></div>
+          <div class="sheet">
+            <div class="grab"></div>
+            <div class="sh-h"><span class="st"></span><span class="sh-t"><b>Investigate flaky e2e</b><span class="sh-m"><span class="pj"><i class="g pc-perry md">PE</i>perry</span><span class="br">main</span><span class="sep">·</span><span>31 messages</span><span>idle 1h</span></span></span></div>
+            <a class="si" href="#"><span class="ico">✓</span>Settle<span class="tail"><span class="kbd">⌘⇧S</span></span></a>
+            <a class="si sub" href="#"><span class="ico"></span>Auto-settle when idle<span class="tail"><span class="cbox on sm">✓</span></span></a>
+            <a class="si" href="#"><span class="ico">☾</span>Snooze<span class="tail">▸</span></a>
+            <a class="si" href="#"><span class="ico">⚑</span>Pin to top<span class="tail"><span class="kbd">⌘⇧P</span></span></a>
+            <a class="si new" href="#"><span class="ico"><span class="udot ring" style="width:10px;height:10px"></span></span>Mark unread<span class="tail"><span class="kbd">⌘⇧U</span></span></a>
+            <div class="sh-div"></div>
+            <a class="si" href="#"><span class="ico">✎</span>Rename</a>
+            <a class="si" href="#"><span class="ico">⑂</span>Fork from here</a>
+            <a class="si" href="#"><span class="ico">⇲</span>Archive<span class="tail">out of the list</span></a>
+            <div class="sh-div"></div>
+            <a class="si danger" href="#"><span class="ico">⌫</span>Delete session</a>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="shot">
+      <div class="cap"><i>D3 · marked unread from inside</i><b>The ring sits before the title</b>
+        <p>The only place the dot is big enough to tap on a phone: the title band has the room for a 30&thinsp;px target. Tap it and it clears.</p>
+        <p class="note">A ring before a title is easy to miss and easy to mistake for a status glyph.</p></div>
+      <div class="ph short">
+        <div class="sbar"><span>9:41</span><span class="rt">✦ ▮▮▮</span></div>
+        <div class="scr">
+          <div class="pb1"><span class="bbk"><s>‹</s>Sessions<i>1</i></span><span class="bsp"></span><span class="bm"><i class="g pc-dotfiles">DF</i>dotfiles<em>·</em>main</span><span class="bic sm">⋯</span></div>
+          <div class="pb2"><span class="tdot" style="background:var(--hover)"><span class="udot ring"></span></span><b>Audit brew bundle <c>▾</c></b></div>
+          <div class="pb3"><div class="bseg full"><span class="on">Chat</span><span>Terminal</span><span>Diff</span><span>Files</span></div></div>
+          <div class="msgs"><div class="gh w1"></div><div class="gh w3"></div><div class="gh me"></div><div class="gh w2"></div><div class="gh w1"></div></div>
+          <div class="composer" style="margin-top:10px">Message dotfiles…</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="shot">
+      <div class="cap"><i>D4 · auto-settled, opened</i><b>The strip sits on the composer</b>
+        <p>A strip fused to the composer's top edge instead of a floating card: 20&thinsp;px shorter, and physically attached to the thing that un-settles. The auto variant adds one text button.</p>
+        <p class="note">Two actions, one of them a link, in 320&thinsp;px. Tight, and a thumb can hit the wrong one.</p></div>
+      <div class="ph short">
+        <div class="sbar"><span>9:41</span><span class="rt">✦ ▮▮▮</span></div>
+        <div class="scr">
+          <div class="pb1"><span class="bbk"><s>‹</s>Sessions<i>2</i></span><span class="bsp"></span><span class="bm"><i class="g pc-conduit">CO</i>conduit<em>·</em>main</span><span class="bic sm">⋯</span></div>
+          <div class="pb2"><b>Wire PTY resize <c>▾</c></b></div>
+          <div class="pb3"><div class="bseg full"><span class="on">Chat</span><span>Terminal</span><span>Diff</span><span>Files</span></div></div>
+          <div class="msgs"><div class="gh w1"></div><div class="gh w3"></div><div class="gh me"></div><div class="gh w2"></div></div>
+          <div class="cstrip"><span class="st dn">✓</span><span class="cs-t"><b>Auto-settled</b> 1 day ago. Sending un-settles it.<span class="lnk">Don't auto-settle this</span></span><span class="act2">Un-settle</span></div>
+          <div class="composer att">Message conduit…</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub">Desktop</h3>
+  <div class="dt">
+    <aside class="sb">
+      <div class="top">
+        <div class="tbar"><span class="title">Sessions <u>18</u></span><span class="sp"></span><span class="ic plain">⇅</span><span class="ic plain">+</span></div>
+        <div class="sfield"><span class="chip on">All projects ▾</span><span class="mag">⌕</span><span>Search</span><span class="kbd" style="margin-left:auto">/</span></div>
+      </div>
+      <div class="crow"><span class="chip brand">Needs you <b>1</b></span><span class="chip">Running <b>1</b></span><span class="chip">Unread <b>2</b></span></div>
+      <div class="list">
+        <div class="sec first"><span>Needs you</span><span class="n">1</span></div>
+        <a class="r2 unread dg" href="#"><span class="st ap">⚠</span><span class="t"><span class="txt">Fix auth token refresh</span></span><span class="m"><i class="g pc-conduit">CO</i><span class="tr">conduit · feat/auth</span></span><span class="r"><span class="pill loud ap">Approve</span></span></a>
+        <div class="sec"><span>Done, unread</span><span class="n">1</span></div>
+        <a class="r2 unread dg" href="#"><i class="ld"></i><span class="st dn">✓</span><span class="t"><span class="txt">Add session export</span></span><span class="m"><i class="g pc-conduit">CO</i><span class="tr">conduit · main</span></span><span class="r"><span class="pill quiet dn">Done</span></span></a>
+        <div class="sec"><span>Idle</span><span class="n">3</span></div>
+        <a class="r2 hov dg" href="#"><i class="ld ghost halo"></i><span class="st"></span><span class="t"><span class="txt">Investigate flaky e2e</span></span><span class="m"><i class="g pc-perry">PE</i><span class="tr">perry · main</span></span><span class="r"><span class="acts"><span>✓</span><span>☾</span><span>⚑</span><span>⋯</span></span></span></a>
+        <a class="r2 unread dg" href="#"><i class="ld ring"></i><span class="st"></span><span class="t"><span class="txt">Audit brew bundle</span></span><span class="m"><i class="g pc-dotfiles">DF</i><span class="tr">dotfiles · main</span></span><span class="r">2d</span></a>
+        <div class="sec"><span><span class="caret">▾</span> Settled</span></div>
+        <a class="r2 settled open dg" href="#"><span class="st"></span><span class="t"><i class="g pc-conduit">CO</i><span class="txt">Wire PTY resize</span><span class="pr merged">#212</span></span><span class="r">Auto · 1d</span></a>
+      </div>
+      <div class="tip" style="left:30px;top:270px">Mark unread <span class="kbd">u</span></div>
+    </aside>
+    <div class="main">
+      <div class="dbar"><span class="bbk"><s>‹</s>Sessions<i>2</i></span><span class="bdiv"></span><span class="btl"><b>Wire PTY resize <c>▾</c></b></span><span class="bm"><em>·</em><i class="g pc-conduit">CO</i>conduit<em>·</em>main<span class="pr merged">#212 merged</span></span><span class="bsp"></span><div class="bseg"><span class="on">Chat</span><span>Terminal</span><span>Diff</span><span>Files</span></div><span class="bdiv"></span><span class="bic">⋯</span></div>
+      <div class="msgs"><div class="gh w1"></div><div class="gh w3"></div><div class="gh w2"></div><div class="gh me" style="width:38%"></div><div class="gh w1"></div><div class="gh w4"></div><div class="gh w3"></div></div>
+      <div class="cstrip dk"><span class="st dn">✓</span><span class="cs-t"><b>Auto-settled</b> 1 day ago. Sending un-settles it.<span class="lnk">Don't auto-settle this</span></span><span class="act2">Un-settle <span class="kbd">⌘⇧S</span></span></div>
+      <div class="composer dk att">Message conduit…</div>
+    </div>
+  </div>
+  <p class="note" style="margin-top:9px">The ghost ring and its tooltip appear only while the pointer is in the row. The dot lives inside the row's <code>&lt;a&gt;</code>, so it has to be an overlaid button that stops the click, the same trick the hover strip already needs.</p>
+
+  <div class="dsk">
+    <div>
+      <div class="dlab"><b>1.</b> &nbsp;Right-click, paired verbs on top</div>
+      <div class="dpan" style="padding-bottom:345px">
+        <a class="r2 unread press dg" href="#"><i class="ld ring"></i><span class="st"></span><span class="t"><span class="txt">Audit brew bundle</span></span><span class="m"><i class="g pc-dotfiles">DF</i><span class="tr">dotfiles · main</span></span><span class="r">2d</span></a>
+        <div class="menu" style="left:52px;top:42px">
+          <a href="#"><span class="ico">✓</span>Settle<span class="tail"><span class="kbd">⌘⇧S</span></span></a>
+          <a href="#" class="sub"><span class="ico"></span>Auto-settle when idle<span class="tail"><span class="cbox on sm">✓</span></span></a>
+          <a href="#"><span class="ico">☾</span>Snooze<span class="tail">▸</span></a>
+          <a href="#"><span class="ico">⚑</span>Pin to top<span class="tail"><span class="kbd">⌘⇧P</span></span></a>
+          <a href="#" class="new"><span class="ico">●</span>Mark read<span class="tail"><span class="kbd">⌘⇧U</span></span></a>
+          <div class="sh-div"></div>
+          <a href="#"><span class="ico">✎</span>Rename<span class="tail">F2</span></a>
+          <a href="#"><span class="ico">⑂</span>Fork from here</a>
+          <a href="#"><span class="ico">⧉</span>Copy link</a>
+          <a href="#"><span class="ico">⇲</span>Archive</a>
+          <div class="sh-div"></div>
+          <a href="#" class="danger"><span class="ico">⌫</span>Delete session</a>
+        </div>
+      </div>
+    </div>
+    <div>
+      <div class="dlab"><b>2.</b> &nbsp;The target, at true size</div>
+      <div class="dpan" style="padding:14px">
+        <a class="r2 unread hov dg" href="#" style="background:var(--hover)"><i class="ld halo"></i><span class="st dn">✓</span><span class="t"><span class="txt">Add session export</span></span><span class="m"><i class="g pc-conduit">CO</i><span class="tr">conduit · main</span></span><span class="r"><span class="acts"><span>✓</span><span>☾</span><span>⚑</span><span>⋯</span></span></span></a>
+        <p class="note" style="margin-top:10px">The dot draws at 7&thinsp;px and hit-tests at 19&thinsp;px, measured from the row's edge. Miss by a few pixels to the right and you open the session instead. Fitts is kind to screen edges and unkind to gutters inside a sidebar.</p>
+      </div>
+    </div>
+  </div>
+
+  <div class="cards">
+    <div class="card"><h4>Keys</h4><ul>
+      <li>As B. The keys are the same in every direction; only what they draw differs.</li>
+    </ul></div>
+    <div class="card good"><h4>Good</h4><ul>
+      <li>The fastest pointer path of the four: one click, no menu, no hover strip.</li>
+      <li>Honest about <em>why</em> a row is unread, new output or your own flag, at a glance.</li>
+      <li>One object across the row, the sheet icon and the session title.</li>
+    </ul></div>
+    <div class="card risk"><h4>Risky</h4><ul>
+      <li>Half a design on the phone: the dot cannot be a touch control there, and phone is where conduit lives.</li>
+      <li>A new gutter changes §3's row anatomy and costs every row 9&thinsp;px of title.</li>
+      <li>Two dot shapes is a legend people have to learn, for a distinction they rarely need.</li>
+      <li>A small target next to a large one that navigates.</li>
+    </ul></div>
+    <div class="card cost"><h4>Cost</h4><ul>
+      <li>Row anatomy change, the gutter button with hit slop, the ring state.</li>
+      <li>Title dot in both bar layouts; the composer strip.</li>
+      <li>Client hold; Mark read RPC; <code>unread_marked_at</code>.</li>
+    </ul><div class="verdict"><b>Three to four days</b>, plus reopening §3.</div></div>
+  </div>
+
+  <div class="tw"><table>
+    <thead><tr><th>Action</th><th>Touch</th><th>Pointer</th><th>Key</th><th>Also</th></tr></thead>
+    <tbody>
+      <tr><td><b class="un-lab">Mark unread</b></td><td data-l="Touch">Long press → Mark unread</td><td data-l="Pointer">Click the ghost ring; ⋯ or right-click</td><td class="k" data-l="Key"><span class="kbd">u</span> or <span class="kbd">⌘⇧U</span></td><td data-l="Also">Session ⋯; the ring appears before the title</td></tr>
+      <tr><td><b class="un-lab">Mark read</b></td><td data-l="Touch">Long press; tap the title ring in a session</td><td data-l="Pointer">Click the dot; ⋯ or right-click</td><td class="k" data-l="Key"><span class="kbd">u</span> or <span class="kbd">⌘⇧U</span></td><td data-l="Also">Opening the session</td></tr>
+      <tr><td><b class="sw-lab">Un-settle</b></td><td data-l="Touch">Swipe right on a settled row</td><td data-l="Pointer">Hover ↶</td><td class="k" data-l="Key"><span class="kbd">s</span> or <span class="kbd">⌘⇧S</span></td><td data-l="Also">The composer strip, or send a message</td></tr>
+      <tr><td><b>Auto-settle when idle</b></td><td data-l="Touch">Long press → checkbox</td><td data-l="Pointer">⋯ or right-click → checkbox</td><td class="k" data-l="Key">none, it is a setting</td><td data-l="Also">"Don't auto-settle this" in the strip</td></tr>
+    </tbody>
+  </table></div>
+</section>
+
+<!-- ═════════════════════════════════════════════════════════════ compare -->
+<section class="part" id="compare">
+  <h2><span>≡</span>The four, side by side</h2>
+  <p class="lede">Each row is one of the questions the brief asked. The last column is the pick, which is not always one direction's answer.</p>
+  <div class="tw"><table>
+    <thead><tr><th>Question</th><th>A · Menus and keys</th><th>B · Swipe tray</th><th>C · The bar</th><th>D · The dot</th><th class="pick">Pick</th></tr></thead>
+    <tbody>
+      <tr><td><b>Mark unread inside a session</b></td><td data-l="A">Marks and leaves, both platforms</td><td data-l="B">Stays; toast explains the hold</td><td data-l="C">Stays; chip shows the hold</td><td data-l="D">Stays; ring before the title</td><td class="pick" data-l="Pick">Go to the list: phone navigates, desktop is already there</td></tr>
+      <tr><td><b>"Opening marks read"</b></td><td data-l="A">Never bends</td><td data-l="B">Held until you open another session or send</td><td data-l="C">Same as B</td><td data-l="D">Same as B</td><td class="pick" data-l="Pick">B's hold, needed only on desktop</td></tr>
+      <tr><td><b>Hand-marked row</b></td><td data-l="A">Identical to Done, unread</td><td data-l="B">Flag: keeps tier and time, gets the dot</td><td data-l="C">Same as B</td><td data-l="D">Ring in a new gutter</td><td class="pick" data-l="Pick">B's flag, same dot</td></tr>
+      <tr><td><b>Unread chip</b></td><td data-l="A">Counts both</td><td data-l="B">Counts both</td><td data-l="C">Counts both</td><td data-l="D">Counts both</td><td class="pick" data-l="Pick">Counts both, live rows only</td></tr>
+      <tr><td><b>Phone gesture</b></td><td data-l="A">None</td><td data-l="B">Short swipe right holds Settle and Unread</td><td data-l="C">None</td><td data-l="D">None</td><td class="pick" data-l="Pick">B's tray</td></tr>
+      <tr><td><b>Desktop hover</b></td><td data-l="A">Unchanged</td><td data-l="B">● joins the strip</td><td data-l="C">Unchanged</td><td data-l="D">Ghost ring in the gutter</td><td class="pick" data-l="Pick">Unchanged</td></tr>
+      <tr><td><b>Settled row's ↶</b></td><td data-l="A">Unchanged</td><td data-l="B">Unchanged; tray is Un-settle alone</td><td data-l="C">Unchanged</td><td data-l="D">Unchanged</td><td class="pick" data-l="Pick">Unchanged</td></tr>
+      <tr><td><b>Un-settle when open</b></td><td data-l="A">Banner above the composer</td><td data-l="B">Banner</td><td data-l="C">Chip popover and placeholder</td><td data-l="D">Strip on the composer</td><td class="pick" data-l="Pick">A's banner</td></tr>
+      <tr><td><b>Auto-settle opt-out</b></td><td data-l="A">Checkbox row in the banner</td><td data-l="B">One-time offer after un-settling</td><td data-l="C">Checkbox in the chip popover</td><td data-l="D">Text button in the strip</td><td class="pick" data-l="Pick">A's checkbox row</td></tr>
+      <tr><td><b>Keys</b></td><td data-l="A"><span class="kbd">⌘⇧U</span> also leaves</td><td data-l="B"><span class="kbd">u</span> <span class="kbd">s</span>, <span class="kbd">⌘⇧U</span> <span class="kbd">⌘⇧S</span></td><td data-l="C">Same as B</td><td data-l="D">Same as B</td><td class="pick" data-l="Pick">B's keys</td></tr>
+      <tr><td><b>Feedback</b></td><td data-l="A">Toast on the list you land on</td><td data-l="B">Toast in place</td><td data-l="C">The chip; no toast</td><td data-l="D">The ring; no toast</td><td class="pick" data-l="Pick">Toast where the row lives</td></tr>
+      <tr><td><b>Accidental triggers</b></td><td data-l="A">Low</td><td data-l="B">Low: a tap in a held tray, with Undo</td><td data-l="C">Low</td><td data-l="D">Medium: small target beside a big one</td><td class="pick" data-l="Pick">Low</td></tr>
+      <tr><td><b>Discoverability</b></td><td data-l="A">Poor</td><td data-l="B">High on phone, fair on desktop</td><td data-l="C">Fair; opt-out hidden</td><td data-l="D">High on desktop, poor on phone</td><td class="pick" data-l="Pick">High on phone, fair on desktop</td></tr>
+      <tr><td><b>Build cost</b></td><td data-l="A">~1 day</td><td data-l="B">2 to 3 days</td><td data-l="C">~3 days</td><td data-l="D">3 to 4 days</td><td class="pick" data-l="Pick">~2 days</td></tr>
+    </tbody>
+  </table></div>
+</section>
+
+<!-- ═════════════════════════════════════════════════════════════ rec -->
+<section class="part" id="rec">
+  <h2><span>★</span>Recommendation: B's tray, A's banner, and one rule for leaving</h2>
+  <p class="lede">A hybrid, because each direction is right about one thing. B is right that the held stage of swipe right is wasted and that a hand-marked row should not pretend it just finished. A is right that the banner is the place to un-settle and that the setting belongs there too. Neither C's chip nor D's dot earns its cost on a phone.</p>
+
+  <div class="cards">
+    <div class="card win"><h4>What we build</h4><ul>
+      <li><b>Unread is a flag, not a tier.</b> A hand-marked row keeps its place and its time, lifts to full ink, and gets the same dot as Done, unread. The tier and the pill already say which kind it is, so no second dot shape. Both count in the Unread chip.</li>
+      <li><b>Mark unread puts you where the list is.</b> On a phone that means going back to it, with the toast on arrival. On desktop the list is already on screen, so you stay, the open row gets the dot, and the flag holds until you open another session or send a message. One rule; the platforms just start in different places.</li>
+      <li><b>Short swipe right holds Settle and Unread</b>; full swipe settles, as today. Now both swipes read the same way: a short swipe offers, a full swipe commits.</li>
+      <li><b>Desktop hover is unchanged.</b> Right-click and <span class="kbd">u</span> are one step each; a fifth icon would squeeze every title for the least frequent verb.</li>
+      <li><b>Menus group the paired verbs:</b> Settle, Snooze, Pin, Mark unread, with the checkbox under Settle. Same order in the sheet, right-click, session ⋯ and tray.</li>
+      <li><b>The banner stays where the main doc put it</b>, above the composer. When the server did the settling, a second row carries <b>Auto-settle when idle</b>, in the menu's own words.</li>
+      <li><b>Keys:</b> <span class="kbd">u</span> and <span class="kbd">s</span> with the list or transcript focused; <span class="kbd">⌘⇧U</span> and <span class="kbd">⌘⇧S</span> from anywhere, including the composer.</li>
+    </ul></div>
+    <div class="card"><h4>Why not the others, whole</h4><ul>
+      <li><b>A whole:</b> a two-day-old session wearing a fresh Done pill misreports what happened, and closing the desktop pane punishes reading on.</li>
+      <li><b>B whole:</b> the hover icon is the wrong trade, and the one-time offer after un-settling fires while output streams, when nobody is looking at a banner.</li>
+      <li><b>C:</b> the right idea for a later "state everywhere" pass, but it spends bar 18's width and moves un-settle away from the composer, where the decision is made.</li>
+      <li><b>D:</b> a pointer-first idea in a phone-first product. Worth revisiting as a desktop-only accelerator once the flag exists.</li>
+    </ul></div>
+    <div class="card cost"><h4>What it costs</h4><ul>
+      <li><code>MarkSessionRead</code> RPC, for Undo and Mark read by hand.</li>
+      <li><code>unread_marked_at</code>: set by <code>session.unread</code>, cleared by <code>session.read</code>, so tier derivation can tell a flag from fresh output.</li>
+      <li>A client-side hold: skip the read write when re-attaching to the session you marked, until you open a different one.</li>
+      <li>A second button in the swipe tray; menu and sheet reorder; the banner's second row; two chords.</li>
+    </ul><div class="verdict"><b>About two days</b>, and each piece ships alone.</div></div>
+  </div>
+
+  <h3 class="sub">Drawn</h3>
+  <div class="screens">
+    <div class="shot">
+      <div class="cap"><i>R1 · the list</i><b>Tray held; a flagged row in Idle</b>
+        <p>B's tray on the settle side. The flagged row stands out against the receded Idle rows without moving.</p></div>
+      <div class="ph">
+        <div class="sbar"><span>9:41</span><span class="rt">✦ ▮▮▮</span></div>
+        <div class="scr">
+          <div class="top">
+            <div class="tbar"><span class="title">Sessions <u>18</u></span><span class="sp"></span><span class="ic plain">⇅</span><span class="ic plain">⋯</span></div>
+            <div class="sfield"><span class="chip on scope">All projects ▾</span><span class="mag">⌕</span><span>Search</span></div>
+          </div>
+          <div class="crow"><span class="chip brand">Needs you <b>1</b></span><span class="chip">Running <b>1</b></span><span class="chip">Unread <b>2</b></span><span class="chip">Settled</span></div>
+          <div class="list">
+            <div class="sec first"><span>Needs you</span><span class="n">1</span></div>
+            <a class="r2 unread" href="#"><span class="st ap">⚠</span><span class="t"><span class="txt">Fix auth token refresh</span></span><span class="m"><i class="g pc-conduit">CO</i><span class="tr">conduit · feat/auth</span><span class="pr open">#214</span></span><span class="r"><span class="pill loud ap">Approve</span></span></a>
+            <div class="sec"><span>Done, unread</span><span class="n">1</span></div>
+            <a class="r2 unread" href="#"><span class="st dn">✓</span><span class="t"><span class="txt">Add session export</span><span class="udot"></span></span><span class="m"><i class="g pc-conduit">CO</i><span class="tr">conduit · main</span></span><span class="r"><span class="pill quiet dn">Done</span></span></a>
+            <div class="sec"><span>Idle</span><span class="n">3</span></div>
+            <div class="sw"><div class="tray"><span class="tb settle"><i>✓</i>Settle</span><span class="tb unread"><i>●</i>Unread</span></div><a class="r2 idle fg" href="#" style="translate:148px 0;opacity:1;box-shadow:-10px 0 20px var(--sh)"><span class="st"></span><span class="t"><span class="txt">Investigate flaky e2e</span></span><span class="m"><i class="g pc-perry">PE</i><span class="tr">perry · main</span></span><span class="r">1h</span></a></div>
+            <a class="r2 unread" href="#"><span class="st"></span><span class="t"><span class="txt">Audit brew bundle</span><span class="udot"></span></span><span class="m"><i class="g pc-dotfiles">DF</i><span class="tr">dotfiles · main</span></span><span class="r">2d</span></a>
+            <a class="r2 idle" href="#"><span class="st"></span><span class="t"><span class="txt">Port the hunk parser</span></span><span class="m"><i class="g pc-hunk">HK</i><span class="tr">hunk · main</span></span><span class="r">1d</span></a>
+          </div>
+          <div class="fab">+</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="shot">
+      <div class="cap"><i>R2 · back from a session</i><b>Marked from inside, landed on the list</b>
+        <p>⋯ → Mark unread in the session pops back to the list. The row is where it was, now flagged; the toast names it.</p>
+        <p class="note">Undo marks it read and leaves you on the list. It does not reopen the session.</p></div>
+      <div class="ph">
+        <div class="sbar"><span>9:41</span><span class="rt">✦ ▮▮▮</span></div>
+        <div class="scr">
+          <div class="top">
+            <div class="tbar"><span class="title">Sessions <u>18</u></span><span class="sp"></span><span class="ic plain">⇅</span><span class="ic plain">⋯</span></div>
+            <div class="sfield"><span class="chip on scope">All projects ▾</span><span class="mag">⌕</span><span>Search</span></div>
+          </div>
+          <div class="crow"><span class="chip brand">Needs you <b>1</b></span><span class="chip">Running <b>1</b></span><span class="chip">Unread <b>2</b></span><span class="chip">Settled</span></div>
+          <div class="list">
+            <div class="sec first"><span>Needs you</span><span class="n">1</span></div>
+            <a class="r2 unread" href="#"><span class="st ap">⚠</span><span class="t"><span class="txt">Fix auth token refresh</span></span><span class="m"><i class="g pc-conduit">CO</i><span class="tr">conduit · feat/auth</span><span class="pr open">#214</span></span><span class="r"><span class="pill loud ap">Approve</span></span></a>
+            <div class="sec"><span>Running</span><span class="n">1</span></div>
+            <a class="r2" href="#"><span class="st wk"><i class="spin"></i></span><span class="t"><span class="txt">Migrate zsh config to nushell</span></span><span class="m"><i class="g pc-dotfiles">DF</i><span class="tr">dotfiles · main</span></span><span class="r">4m</span></a>
+            <div class="sec"><span>Done, unread</span><span class="n">1</span></div>
+            <a class="r2 unread" href="#"><span class="st dn">✓</span><span class="t"><span class="txt">Add session export</span><span class="udot"></span></span><span class="m"><i class="g pc-conduit">CO</i><span class="tr">conduit · main</span></span><span class="r"><span class="pill quiet dn">Done</span></span></a>
+            <div class="sec"><span>Idle</span><span class="n">3</span></div>
+            <a class="r2 idle" href="#"><span class="st"></span><span class="t"><span class="txt">Investigate flaky e2e</span></span><span class="m"><i class="g pc-perry">PE</i><span class="tr">perry · main</span></span><span class="r">1h</span></a>
+            <a class="r2 unread" href="#"><span class="st"></span><span class="t"><span class="txt">Audit brew bundle</span><span class="udot"></span></span><span class="m"><i class="g pc-dotfiles">DF</i><span class="tr">dotfiles · main</span></span><span class="r">2d</span></a>
+          </div>
+          <div class="toast"><span>Marked unread <b>Audit brew bundle</b></span><span class="u">Undo</span></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="shot">
+      <div class="cap"><i>R3 · long press a settled row</i><b>The sheet flips, and drops what does not apply</b>
+        <p>Settle becomes Un-settle. Snooze and Mark unread go, because neither shelf shows them. The checkbox stays, so you can turn auto-settle off for a session without reviving it.</p></div>
+      <div class="ph">
+        <div class="sbar"><span>9:41</span><span class="rt">✦ ▮▮▮</span></div>
+        <div class="scr">
+          <div class="list" style="padding-top:8px">
+            <div class="sec first"><span><span class="caret">▾</span> Settled</span></div>
+            <a class="r2 settled press" href="#"><span class="st"></span><span class="t"><i class="g pc-conduit">CO</i><span class="txt">Wire PTY resize</span><span class="pr merged">#212</span></span><span class="r">Auto · 1d</span></a>
+            <a class="r2 settled" href="#"><span class="st"></span><span class="t"><i class="g pc-perry">PE</i><span class="txt">Stabilise visual baselines</span></span><span class="r">5d</span></a>
+          </div>
+          <div class="scrim"></div>
+          <div class="sheet">
+            <div class="grab"></div>
+            <div class="sh-h"><span class="st"></span><span class="sh-t"><b>Wire PTY resize</b><span class="sh-m"><span class="pj"><i class="g pc-conduit md">CO</i>conduit</span><span class="br">main</span><span class="pr merged">#212 merged</span><span class="sep">·</span><span>auto-settled 1d ago</span></span></span></div>
+            <a class="si" href="#"><span class="ico">↶</span>Un-settle<span class="tail"><span class="kbd">⌘⇧S</span></span></a>
+            <a class="si sub" href="#"><span class="ico"></span>Auto-settle when idle<span class="tail"><span class="cbox on sm">✓</span></span></a>
+            <a class="si" href="#"><span class="ico">⚑</span>Pin to top<span class="tail"><span class="kbd">⌘⇧P</span></span></a>
+            <div class="sh-div"></div>
+            <a class="si" href="#"><span class="ico">✎</span>Rename</a>
+            <a class="si" href="#"><span class="ico">⑂</span>Fork from here</a>
+            <a class="si" href="#"><span class="ico">⇲</span>Archive<span class="tail">out of the list</span></a>
+            <div class="sh-div"></div>
+            <a class="si danger" href="#"><span class="ico">⌫</span>Delete session</a>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="shot">
+      <div class="cap"><i>R4 · auto-settled, opened</i><b>A's banner, unchanged from A4</b>
+        <p>The main doc's banner, plus the checkbox row when the server did it. Un-settle and sending both pause auto-settle until new activity; the checkbox makes it permanent.</p></div>
+      <div class="ph">
+        <div class="sbar"><span>9:41</span><span class="rt">✦ ▮▮▮</span></div>
+        <div class="scr">
+          <div class="pb1"><span class="bbk"><s>‹</s>Sessions<i>2</i></span><span class="bsp"></span><span class="bm"><i class="g pc-conduit">CO</i>conduit<em>·</em>main</span><span class="bic sm">⋯</span></div>
+          <div class="pb2"><b>Wire PTY resize <c>▾</c></b></div>
+          <div class="pb3"><div class="bseg full"><span class="on">Chat</span><span>Terminal</span><span>Diff</span><span>Files</span></div></div>
+          <div class="msgs"><div class="gh w1"></div><div class="gh w3"></div><div class="gh me"></div><div class="gh w2"></div><div class="gh w1"></div><div class="gh w4"></div><div class="gh w3"></div></div>
+          <div class="banner stk">
+            <div class="bn1"><span class="st dn">✓</span><span><b>Auto-settled 1 day ago</b><span class="bs">Send a message to un-settle</span></span><span class="act">Un-settle</span></div>
+            <div class="bn2"><span>Auto-settle when idle</span><span class="cbox on sm">✓</span></div>
+          </div>
+          <div class="composer">Message conduit…</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="dt">
+    <aside class="sb">
+      <div class="top">
+        <div class="tbar"><span class="title">Sessions <u>18</u></span><span class="sp"></span><span class="ic plain">⇅</span><span class="ic plain">+</span></div>
+        <div class="sfield"><span class="chip on">All projects ▾</span><span class="mag">⌕</span><span>Search</span><span class="kbd" style="margin-left:auto">/</span></div>
+      </div>
+      <div class="crow"><span class="chip brand">Needs you <b>1</b></span><span class="chip">Running <b>1</b></span><span class="chip">Unread <b>2</b></span></div>
+      <div class="list">
+        <div class="sec first"><span>Needs you</span><span class="n">1</span></div>
+        <a class="r2 unread" href="#"><span class="st ap">⚠</span><span class="t"><span class="txt">Fix auth token refresh</span></span><span class="m"><i class="g pc-conduit">CO</i><span class="tr">conduit · feat/auth</span></span><span class="r"><span class="pill loud ap">Approve</span></span></a>
+        <div class="sec"><span>Done, unread</span><span class="n">1</span></div>
+        <a class="r2 unread hov" href="#"><span class="st dn">✓</span><span class="t"><span class="txt">Add session export</span><span class="udot"></span></span><span class="m"><i class="g pc-conduit">CO</i><span class="tr">conduit · main</span></span><span class="r"><span class="acts"><span class="hi">✓</span><span>☾</span><span>⚑</span><span>⋯</span></span></span></a>
+        <div class="sec"><span>Idle</span><span class="n">3</span></div>
+        <a class="r2 idle" href="#"><span class="st"></span><span class="t"><span class="txt">Investigate flaky e2e</span></span><span class="m"><i class="g pc-perry">PE</i><span class="tr">perry · main</span></span><span class="r">1h</span></a>
+        <a class="r2 unread open" href="#"><span class="st"></span><span class="t"><span class="txt">Audit brew bundle</span><span class="udot"></span></span><span class="m"><i class="g pc-dotfiles">DF</i><span class="tr">dotfiles · main</span></span><span class="r">2d</span></a>
+        <a class="r2 idle" href="#"><span class="st"></span><span class="t"><span class="txt">Port the hunk parser</span></span><span class="m"><i class="g pc-hunk">HK</i><span class="tr">hunk · main</span></span><span class="r">1d</span></a>
+      </div>
+      <div class="tip" style="right:78px;top:184px">Settle <span class="kbd">⌘⇧S</span></div>
+      <div class="toast dk"><span>Marked unread <b>Audit brew bundle</b></span><span class="u">Undo</span></div>
+    </aside>
+    <div class="main">
+      <div class="dbar"><span class="bbk"><s>‹</s>Sessions<i>1</i></span><span class="bdiv"></span><span class="btl"><b>Audit brew bundle <c>▾</c></b></span><span class="bm"><em>·</em><i class="g pc-dotfiles">DF</i>dotfiles<em>·</em>main</span><span class="bsp"></span><div class="bseg"><span class="on">Chat</span><span>Terminal</span><span>Diff</span><span>Files</span></div><span class="bdiv"></span><span class="bic">⋯</span></div>
+      <div class="msgs"><div class="gh w1"></div><div class="gh w3"></div><div class="gh w2"></div><div class="gh me" style="width:38%"></div><div class="gh w1"></div><div class="gh w4"></div><div class="gh w3"></div></div>
+      <div class="composer dk" style="margin-top:10px">Message dotfiles…</div>
+    </div>
+  </div>
+  <p class="note" style="margin-top:9px">Desktop, after <span class="kbd">⌘⇧U</span> in the open session: you are still reading it, the open row carries the brand inset and the dot, and the toast sits at the foot of the sidebar, where the row changed. The hover strip on the row above is untouched.</p>
+
+  <div class="tw"><table>
+    <thead><tr><th>Action</th><th>Touch</th><th>Pointer</th><th>Key</th><th>Also</th></tr></thead>
+    <tbody>
+      <tr><td><b class="un-lab">Mark unread</b></td><td data-l="Touch">Short swipe right → Unread, or long press</td><td data-l="Pointer">⋯ or right-click</td><td class="k" data-l="Key"><span class="kbd">u</span> or <span class="kbd">⌘⇧U</span></td><td data-l="Also">Session ⋯: phone returns to the list, desktop stays and holds</td></tr>
+      <tr><td><b class="un-lab">Mark read</b></td><td data-l="Touch">Short swipe right → Read, or long press</td><td data-l="Pointer">⋯ or right-click</td><td class="k" data-l="Key"><span class="kbd">u</span> or <span class="kbd">⌘⇧U</span></td><td data-l="Also">Opening the session; Undo on the toast</td></tr>
+      <tr><td><b class="sw-lab">Un-settle</b></td><td data-l="Touch">Swipe right on a settled row, or long press</td><td data-l="Pointer">Hover ↶, ⋯ or right-click</td><td class="k" data-l="Key"><span class="kbd">s</span> or <span class="kbd">⌘⇧S</span></td><td data-l="Also">Banner button, or send a message. Pauses auto-settle until new activity</td></tr>
+      <tr><td><b>Auto-settle when idle</b></td><td data-l="Touch">Long press → checkbox</td><td data-l="Pointer">⋯ or right-click → checkbox</td><td class="k" data-l="Key">none, it is a setting</td><td data-l="Also">Second row of the auto-settled banner</td></tr>
+    </tbody>
+  </table></div>
+
+  <div class="cards">
+    <div class="card"><h4>Open questions for you</h4><ul>
+      <li><b><span class="kbd">⌘⇧U</span> needs checking</b> in Safari, Chrome and Firefox on macOS before we commit to it.</li>
+      <li><b>Should settling clear unread?</b> This page says no, as Gmail's archive doesn't, so un-settling an unread session brings it back bold. The auto-settle guard makes this rare either way.</li>
+      <li><b>Should the desktop hold survive a reload?</b> Proposed: in memory only, so a reload counts as opening. Putting it in the URL is possible but leaks into shared links.</li>
+      <li><b>Mark unread on a row that needs you:</b> allowed here, since it is harmless and means "remind me after I answer". Say if you would rather grey it out, like Settle.</li>
+    </ul></div>
+  </div>
+</section>
+
+<!-- ═════════════════════════════════════════════════════════════ changes -->
+<section class="part" id="changes">
+  <h2><span>Δ</span>What would change in mobile-first-sidebar.html</h2>
+  <p class="lede">For the recommendation only. Nothing here changes the structure of that doc; it adds states and corrects rows.</p>
+  <div class="cards">
+    <div class="card"><h4>§1 The system</h4><ul>
+      <li><b>Frame 3, swipe right:</b> redraw the held state as the tray, <em>Settle</em> at the edge and <em>Unread</em> beside the row. Caption: "Short swipe offers, full swipe commits." Add that a settled row's tray is Un-settle alone.</li>
+      <li><b>Frame 4, long press:</b> the top group becomes Settle, Snooze, Pin, Mark unread (<span class="kbd">⌘⇧U</span>), with Auto-settle when idle under Settle. The note gains: "Mark unread is hidden on settled and snoozed rows."</li>
+      <li><b>Frame 6, undo:</b> add Mark unread to the list of toasts, and say where they go: the screen on a phone, the sidebar's foot on desktop.</li>
+      <li><b>Frame 11, settled opened:</b> add the auto-settled variant with the checkbox row.</li>
+    </ul></div>
+    <div class="card"><h4>§3 The row</h4><ul>
+      <li>New state cells: <b>Marked unread</b> (flag, keeps tier and time), <b>Mid-swipe, tray</b>, <b>Settled, mid-swipe un-settle</b>, <b>Settled, Auto · 1d</b>.</li>
+      <li>Touch rules card: "25% reveals and holds the tray" replaces "reveals and holds".</li>
+      <li>Slot ② text: the dot means unread, whether new output or your own flag.</li>
+    </ul></div>
+    <div class="card"><h4>§4 Every interaction</h4><ul>
+      <li>Rewrite <b>Mark unread</b> (touch: tray or long press; key: <span class="kbd">u</span> or <span class="kbd">⌘⇧U</span>; also: from a session). Add <b>Mark read</b> and <b>Auto-settle when idle</b> rows as in the table above.</li>
+      <li><b>Un-settle</b>'s Also column gains "pauses auto-settle until new activity".</li>
+      <li><b>Undo</b>'s Also column gains Mark unread.</li>
+      <li>Single keys card: <span class="kbd">u</span> reads "unread / read".</li>
+    </ul></div>
+    <div class="card"><h4>§5 Desktop</h4><ul>
+      <li>Panel 3, right-click: the paired-verb group and the checkbox, same order as the sheet.</li>
+      <li>Panel 4's note says <span class="kbd">e</span> settles; §4 says <span class="kbd">s</span> settles and <span class="kbd">e</span> archives. Fix the note to <span class="kbd">s</span>.</li>
+      <li>The desktop frame's settled banner can show the auto variant.</li>
+    </ul></div>
+    <div class="card"><h4>§9 and §10</h4><ul>
+      <li><b>Bar 18's ⋯ sheet:</b> the Session group gains Mark unread, and the checkbox under Settle.</li>
+      <li>Noticed while here: bar 18 gives Snooze <span class="kbd">⌘⇧Z</span>, which is Redo inside the composer. Worth a different chord.</li>
+      <li><b>§10 Backend:</b> add <code>unread_marked_at</code> and a <code>MarkSessionRead</code> RPC. <b>Frontend:</b> the desktop hold. <b>Order of work:</b> Mark unread and the tray land with step 3; the banner's checkbox with step 5.</li>
+    </ul></div>
+  </div>
+</section>
+
+</div>
+
+<script>
+(function(){
+  var root=document.documentElement,btn=document.getElementById("themeBtn");
+  var label=function(){
+    var dark=root.dataset.theme==="dark";
+    btn.querySelector("s").textContent=dark?"☀":"☾";
+    btn.querySelector("span").textContent=dark?"Light":"Dark";
+    btn.setAttribute("title",dark?"Switch to light":"Switch to dark");
+  };
+  label();
+  btn.addEventListener("click",function(){
+    root.dataset.theme=root.dataset.theme==="dark"?"light":"dark";
+    localStorage.setItem("mfs-theme",root.dataset.theme);
+    label();
+  });
+  matchMedia("(prefers-color-scheme:light)").addEventListener("change",function(e){
+    if(localStorage.getItem("mfs-theme"))return;
+    root.dataset.theme=e.matches?"light":"dark";label();
+  });
+})();
+</script>
+</body>
+</html>

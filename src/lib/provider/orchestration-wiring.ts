@@ -41,6 +41,9 @@ import type { TurnResult } from "./types.js";
 const log = createLogger("orchestration-wiring");
 
 export interface OrchestrationLayerOptions {
+	readonly onBackgroundTask?: (
+		input: import("../session/background-liveness.js").BackgroundTaskTransition,
+	) => void;
 	readonly client: OpenCodeAPI;
 	readonly workspaceRoot?: string;
 	readonly projectKey?: string;
@@ -49,6 +52,9 @@ export interface OrchestrationLayerOptions {
 }
 
 export interface OrchestrationRuntimeLayerOptions {
+	readonly onBackgroundTask?: (
+		input: import("../session/background-liveness.js").BackgroundTaskTransition,
+	) => void;
 	readonly workspaceRoot?: string;
 	readonly projectKey?: string;
 	readonly configDir?: string;
@@ -189,6 +195,9 @@ const createOrchestrationComponentsEffect = (
 					})
 				: undefined;
 		const claudeInstance = yield* ClaudeDriver.create({
+			...(options.onBackgroundTask
+				? { onBackgroundTask: options.onBackgroundTask }
+				: {}),
 			workspaceRoot: options.workspaceRoot ?? process.cwd(),
 			claudeSettingsOverrides: () =>
 				loadRelaySettings(options.configDir).claudeSettings,
@@ -301,6 +310,9 @@ export const makeOrchestrationRuntimeLayer = (
 			const client = yield* OpenCodeAPITag;
 			const components = yield* createOrchestrationComponentsEffect({
 				client,
+				...(options.onBackgroundTask
+					? { onBackgroundTask: options.onBackgroundTask }
+					: {}),
 				...(options.workspaceRoot != null
 					? { workspaceRoot: options.workspaceRoot }
 					: {}),

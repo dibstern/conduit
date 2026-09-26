@@ -17,6 +17,7 @@ export interface DaemonRuntimeConfig {
 	readonly pinHash: string | null;
 	readonly tlsEnabled: boolean;
 	readonly keepAwake: boolean;
+	readonly autoSettleAfterDays?: number | null;
 	readonly keepAwakeCommand: string | undefined;
 	readonly keepAwakeArgs: string[] | undefined;
 	readonly claudeConfigDir: string | undefined;
@@ -74,6 +75,7 @@ export const makeDaemonConfigFromOptions = (options: {
 	pinHash?: string;
 	tlsEnabled?: boolean;
 	keepAwake?: boolean;
+	autoSettleAfterDays?: number | null;
 	keepAwakeCommand?: string;
 	keepAwakeArgs?: string[];
 	claudeConfigDir?: string;
@@ -86,6 +88,8 @@ export const makeDaemonConfigFromOptions = (options: {
 	pinHash: options.pinHash ?? null,
 	tlsEnabled: options.tlsEnabled ?? false,
 	keepAwake: options.keepAwake ?? false,
+	autoSettleAfterDays:
+		options.autoSettleAfterDays === undefined ? 3 : options.autoSettleAfterDays,
 	keepAwakeCommand: options.keepAwakeCommand,
 	keepAwakeArgs: options.keepAwakeArgs,
 	claudeConfigDir: options.claudeConfigDir,

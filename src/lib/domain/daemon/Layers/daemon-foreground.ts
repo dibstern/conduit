@@ -97,6 +97,10 @@ const buildInitialRuntimeConfig = (
 		...(pinHash != null && { pinHash }),
 		tlsEnabled: options.tlsEnabled ?? persisted?.tls ?? false,
 		keepAwake: options.keepAwake ?? persisted?.keepAwake ?? false,
+		autoSettleAfterDays:
+			persisted?.autoSettleAfterDays === undefined
+				? 3
+				: persisted.autoSettleAfterDays,
 		...(keepAwakeCommand !== undefined && { keepAwakeCommand }),
 		...(keepAwakeArgs !== undefined && { keepAwakeArgs }),
 		...(claudeConfigDir !== undefined && { claudeConfigDir }),

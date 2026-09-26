@@ -51,6 +51,36 @@ function sessionColumns(db: Database.Database): string[] {
 }
 
 describe("Effect SQL migrations", () => {
+	it.effect("adds automatic settlement columns with nullable overrides", () =>
+		Effect.gen(function* () {
+			const sql = yield* SqlClient.SqlClient;
+			yield* makeEffectSqlMigrator();
+			const columns = yield* sql.unsafe<{ name: string }>(
+				"PRAGMA table_info(sessions)",
+			);
+			expect(columns.map((column) => column.name)).toEqual(
+				expect.arrayContaining([
+					"unsettled_at",
+					"auto_settle_disabled_at",
+					"settled_automatically",
+				]),
+			);
+			yield* sql`INSERT INTO sessions (id, provider, title, status, created_at, updated_at)
+				VALUES ('auto-s1', 'opencode', 'Auto', 'idle', 1, 1)`;
+			const rows = yield* sql<{
+				unsettled_at: number | null;
+				auto_settle_disabled_at: number | null;
+				settled_automatically: number;
+			}>`
+				SELECT unsettled_at, auto_settle_disabled_at, settled_automatically FROM sessions WHERE id = 'auto-s1'`;
+			expect(rows[0]).toEqual({
+				unsettled_at: null,
+				auto_settle_disabled_at: null,
+				settled_automatically: 0,
+			});
+			expect(yield* makeEffectSqlMigrator()).toEqual([]);
+		}).pipe(Effect.provide(makeFileSqlLayer())),
+	);
 	it.effect(
 		"runs static record migrations once through Effect SQL Migrator",
 		() =>
@@ -178,6 +208,7 @@ describe("Effect SQL migrations", () => {
 					{ migration_id: 14, name: "backfill_compaction_messages" },
 					{ migration_id: 15, name: "sessions_settled_pinned" },
 					{ migration_id: 16, name: "sessions_snoozed" },
+					{ migration_id: 17, name: "sessions_auto_settle" },
 				]);
 
 				const legacyRows = yield* sql<{ id: number; name: string }>`
@@ -228,6 +259,7 @@ describe("Effect SQL migrations", () => {
 					[14, "backfill_compaction_messages"],
 					[15, "sessions_settled_pinned"],
 					[16, "sessions_snoozed"],
+					[17, "sessions_auto_settle"],
 				]);
 
 				const sql = yield* SqlClient.SqlClient;
@@ -246,8 +278,8 @@ describe("Effect SQL migrations", () => {
 					name: string;
 				}>`SELECT migration_id, name FROM effect_sql_migrations ORDER BY migration_id`;
 				expect(effectHistory.at(-1)).toEqual({
-					migration_id: 16,
-					name: "sessions_snoozed",
+					migration_id: 17,
+					name: "sessions_auto_settle",
 				});
 				const legacyHistory = yield* sql<{ id: number; name: string }>`
 					SELECT id, name FROM _migrations ORDER BY id`;
@@ -293,6 +325,7 @@ describe("Effect SQL migrations", () => {
 					{ migration_id: 14, name: "backfill_compaction_messages" },
 					{ migration_id: 15, name: "sessions_settled_pinned" },
 					{ migration_id: 16, name: "sessions_snoozed" },
+					{ migration_id: 17, name: "sessions_auto_settle" },
 				]);
 
 				const columns = yield* sql<{ name: string }>`
@@ -370,8 +403,8 @@ describe("Effect SQL migrations", () => {
 					FROM effect_sql_migrations
 					ORDER BY migration_id`;
 				expect(history.at(-1)).toEqual({
-					migration_id: 16,
-					name: "sessions_snoozed",
+					migration_id: 17,
+					name: "sessions_auto_settle",
 				});
 			}).pipe(
 				Effect.provide(

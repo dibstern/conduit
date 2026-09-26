@@ -19,6 +19,7 @@ import type {
 } from "../../../../src/lib/provider/claude/types.js";
 import { createRelayEventSink } from "../../../../src/lib/provider/relay-event-sink.js";
 import type { EventSink } from "../../../../src/lib/provider/types.js";
+import { makeSessionBackgroundLiveness } from "../../../../src/lib/session/background-liveness.js";
 import { makeEffectProjectionHarness } from "../../../helpers/effect-projection-harness.js";
 import { providerRuntimeEventFromCanonical } from "../../../helpers/provider-runtime-event.js";
 import { assertProviderRuntimeStreamInvariants } from "../../../helpers/provider-runtime-stream-invariants.js";
@@ -2225,6 +2226,33 @@ describe("ClaudeEventTranslator", () => {
 			session_id: "sdk-sess",
 		} as unknown as SDKMessage);
 
+		expect(sink.events).toHaveLength(0);
+	});
+
+	it("tracks live tasks by task ID even without a tool-use ID", async () => {
+		const liveness = makeSessionBackgroundLiveness();
+		const trackingTranslator = new ClaudeEventTranslator({
+			getSink: () => sink,
+			onBackgroundTask: liveness.record,
+		});
+		await runTranslate(trackingTranslator, ctx, {
+			type: "system",
+			subtype: "task_started",
+			task_id: "background-bash",
+			task_type: "local_bash",
+			uuid: "00000000-0000-0000-0000-000000000401",
+			session_id: "sdk-sess",
+		} as unknown as SDKMessage);
+		expect(liveness.hasLiveWork(ctx.sessionId)).toBe(true);
+		await runTranslate(trackingTranslator, ctx, {
+			type: "system",
+			subtype: "task_notification",
+			task_id: "background-bash",
+			status: "completed",
+			uuid: "00000000-0000-0000-0000-000000000402",
+			session_id: "sdk-sess",
+		} as unknown as SDKMessage);
+		expect(liveness.hasLiveWork(ctx.sessionId)).toBe(false);
 		expect(sink.events).toHaveLength(0);
 	});
 

@@ -39,6 +39,7 @@ describe("domain-event relay translation exhaustiveness", () => {
 		"session.unpinned",
 		"session.snoozed",
 		"session.unsnoozed",
+		"session.auto_settle_set",
 		"permission.asked",
 		"permission.resolved",
 		"question.asked",

@@ -61,12 +61,14 @@
 		addInstanceRpc,
 		detectProxyRpc,
 		getAgentsRpc,
+		getAutoSettleSettingRpc,
 		getModelsRpc,
 		removeInstanceRpc,
 		renameInstanceRpc,
 		scanNowRpc,
 		setHiddenEntriesRpc,
 		startInstanceRpc,
+		setAutoSettleSettingRpc,
 		stopInstanceRpc,
 		updateInstanceRpc,
 	} from "../../transport/ws-rpc-client.js";
@@ -83,6 +85,8 @@
 	// ─── Local state ────────────────────────────────────────────────────────
 
 	let activeTab = $state("notifications");
+	let autoSettleDays = $state<number | null>(3);
+	let autoSettleSaving = $state(false);
 
 	// Instance management
 	let expandedInstanceId = $state<string | null>(null);
@@ -151,6 +155,13 @@
 
 	$effect(() => {
 		if (visible) {
+			void getAutoSettleSettingRpc()
+				.then((days) => {
+					autoSettleDays = days;
+				})
+				.catch(() => {
+					showToast("Couldn't load auto-settle setting", { variant: "error" });
+				});
 			clearClaudeSettingEdits();
 			activeTab = initialTab;
 			expandedInstanceId = null;
@@ -646,6 +657,43 @@
 							<option value="system">System</option>
 						</Select>
 					</Surface>
+					<Surface variant="card" padding="lg" radius="panel" class="mt-4 font-brand">
+						<label for="settings-auto-settle-select" class="block text-base font-medium text-text">Settle idle sessions after</label>
+						<Select
+							id="settings-auto-settle-select"
+							data-testid="settings-auto-settle-select"
+							value={autoSettleDays === null ? "never" : String(autoSettleDays)}
+							disabled={autoSettleSaving}
+							class="mt-3 w-full"
+							onchange={(event) => {
+								const value = event.currentTarget.value;
+								const next = value === "never" ? null : Number(value);
+								autoSettleSaving = true;
+								void setAutoSettleSettingRpc(next)
+									.then((days) => {
+										autoSettleDays = days;
+									})
+									.catch(() => {
+										showToast("Couldn't save auto-settle setting", { variant: "error" });
+									})
+									.finally(() => {
+										autoSettleSaving = false;
+									});
+							}}
+						>
+							<option value="1">1 day</option>
+							<option value="2">2 days</option>
+							<option value="3">3 days</option>
+							<option value="7">1 week</option>
+							<option value="14">2 weeks</option>
+							<option value="30">30 days</option>
+							<option value="90">90 days</option>
+							<option value="never">Never</option>
+						</Select>
+						<p class="mt-1 text-xs text-text-muted">
+							Settled sessions move to the Settled shelf. Nothing is deleted.
+						</p>
+					</Surface>
 
 				<!-- ═══ Agents & Models ═══ -->
 				{:else if activeTab === "visibility"}
@@ -953,4 +1001,3 @@
 			</div>
 		</div>
 </Modal>
-

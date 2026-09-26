@@ -114,6 +114,7 @@ import {
 	handleSessionForked,
 	handleSessionList,
 	handleSessionSwitched,
+	loadDaemonSessions,
 	sessionCreation,
 	sessionState,
 } from "./session.svelte.js";
@@ -1078,6 +1079,9 @@ export function handleMessage(msg: RelayMessage): void {
 		case "project_list":
 			handleProjectList(msg);
 			for (const fn of projectListeners) fn(msg);
+			break;
+		case "daemon_sessions_changed":
+			void loadDaemonSessions();
 			break;
 
 		// ─── Todo ────────────────────────────────────────────────────────

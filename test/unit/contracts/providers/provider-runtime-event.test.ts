@@ -90,6 +90,7 @@ describe("ProviderRuntimeEvent contracts", () => {
 			"session.unpinned",
 			"session.snoozed",
 			"session.unsnoozed",
+			"session.auto_settle_set",
 		];
 		const missingRuntimeTypes = CANONICAL_EVENT_TYPES.filter(
 			(type) =>

@@ -70,6 +70,10 @@ export const buildDaemonConfigSnapshot = Effect.gen(function* () {
 		tls: runtime.tlsEnabled,
 		debug: false,
 		keepAwake: runtime.keepAwake,
+		autoSettleAfterDays:
+			runtime.autoSettleAfterDays === undefined
+				? 3
+				: runtime.autoSettleAfterDays,
 		...(runtime.keepAwakeCommand !== undefined && {
 			keepAwakeCommand: runtime.keepAwakeCommand,
 		}),

@@ -19,6 +19,7 @@ import { createServer as createHttpsServer } from "node:https";
 import { homedir, networkInterfaces } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { SqlClient } from "@effect/sql";
 import { Cause, Data, Effect, Exit, Layer, ManagedRuntime } from "effect";
 import { WebSocketServer } from "ws";
 import { AuthManager } from "../auth.js";
@@ -126,6 +127,8 @@ import {
 	RoutedWsRpcWebSocketHandlerTag,
 	type RpcWebSocketHandlerShape,
 } from "../server/ws-rpc-handler.js";
+import { settleIdleSessions } from "../session/auto-settle-sweep.js";
+import { makeSessionBackgroundLiveness } from "../session/background-liveness.js";
 import type { ConnectionHealth, ProjectRelayConfig } from "../types.js";
 import { generateSlug } from "../utils.js";
 
@@ -353,6 +356,10 @@ export class EffectRelayServer {
 
 /** Per-project relay: all relay components attached to a shared server. */
 export interface ProjectRelay {
+	settleIdleSessions(
+		idleWindowMs: number,
+		now: number,
+	): Effect.Effect<number, unknown>;
 	wsHandler: WebSocketHandlerShape;
 	rpcWsHandler: RpcWebSocketHandlerShape;
 	sseStream: SSEStreamPort;
@@ -620,6 +627,7 @@ export async function createProjectRelay(
 	config: ProjectRelayConfig,
 ): Promise<ProjectRelay> {
 	const log = config.log ?? createLogger("relay");
+	const backgroundLiveness = makeSessionBackgroundLiveness();
 	const wsLog = log.child("ws");
 	const sseLog = log.child("sse");
 	const statusLog = log.child("status-poller");
@@ -630,6 +638,7 @@ export async function createProjectRelay(
 
 	// ── Orchestration runtime layer (provider instance routing) ─────────────
 	const orchestrationRuntimeLayer = makeOrchestrationRuntimeLayer({
+		onBackgroundTask: backgroundLiveness.record,
 		...(config.projectDir != null && { workspaceRoot: config.projectDir }),
 		...(config.slug != null ? { projectKey: config.slug } : {}),
 		...(config.configDir != null ? { configDir: config.configDir } : {}),
@@ -862,6 +871,8 @@ export async function createProjectRelay(
 	relayManagedRuntime = ManagedRuntime.make(fullLayer);
 	let stopMonitoring = () => {};
 	let startup: {
+		sql: SqlClient.SqlClient | undefined;
+		sessionManagerService: typeof SessionManagerServiceTag.Service;
 		api: OpenCodeAPI;
 		wsHandler: WebSocketHandlerShape;
 		rpcWsHandler: RpcWebSocketHandlerShape;
@@ -878,6 +889,7 @@ export async function createProjectRelay(
 		// The startup Effect owns relay acquisition, wiring, and readiness.
 		startup = await relayManagedRuntime.runPromise(
 			Effect.gen(function* () {
+				const sql = yield* Effect.serviceOption(SqlClient.SqlClient);
 				const api = yield* OpenCodeAPITag;
 				const wsHandler = yield* WebSocketHandlerTag;
 				const rpcWsHandler = yield* makeWsRpcWebSocketHandler({
@@ -1129,6 +1141,8 @@ export async function createProjectRelay(
 				const gate = yield* RelayCommandGateTag;
 				yield* gate.markReady();
 				return {
+					sql: sql._tag === "Some" ? sql.value : undefined,
+					sessionManagerService,
 					api,
 					wsHandler,
 					rpcWsHandler,
@@ -1164,6 +1178,23 @@ export async function createProjectRelay(
 	};
 
 	return {
+		settleIdleSessions: (idleWindowMs, now) =>
+			startup.sql === undefined
+				? Effect.succeed(0)
+				: settleIdleSessions(
+						{
+							hasViewer: (id) => wsHandler.getClientsForSession(id).length > 0,
+							hasLiveBackgroundWork: backgroundLiveness.hasLiveWork,
+							setSettled: (id) =>
+								startup.sessionManagerService.setSessionSettled(id, true, true),
+							broadcastSessionList: () =>
+								startup.sessionManagerService.sendSessionLists((msg) =>
+									wsHandler.broadcast(msg),
+								),
+						},
+						idleWindowMs,
+						now,
+					).pipe(Effect.provideService(SqlClient.SqlClient, startup.sql)),
 		wsHandler,
 		rpcWsHandler,
 		sseStream,

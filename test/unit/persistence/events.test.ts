@@ -18,8 +18,8 @@ import {
 } from "../../../src/lib/persistence/events.js";
 
 describe("Canonical Event Types", () => {
-	it("exports all 34 canonical event types", () => {
-		expect(CANONICAL_EVENT_TYPES).toHaveLength(34);
+	it("exports all 35 canonical event types", () => {
+		expect(CANONICAL_EVENT_TYPES).toHaveLength(35);
 		expect(CANONICAL_EVENT_TYPES).toContain("message.created");
 		expect(CANONICAL_EVENT_TYPES).toContain("text.delta");
 		expect(CANONICAL_EVENT_TYPES).toContain("thinking.start");

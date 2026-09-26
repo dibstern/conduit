@@ -48,6 +48,7 @@ import {
 	updateInstance as updateEffectInstance,
 } from "../Services/instance-manager-service.js";
 import {
+	broadcastToAll,
 	allProjects as getEffectProjects,
 	ProjectRegistryTag,
 } from "../Services/project-registry-service.js";
@@ -197,6 +198,12 @@ export const RelayFactoryLive = (
 						Effect.provideService(ProjectRegistryTag, projectRegistry),
 					),
 				);
+			const broadcastSessionListChanged = () =>
+				runCallback(
+					broadcastToAll({ type: "daemon_sessions_changed" }).pipe(
+						Effect.provideService(DaemonEventBusTag, eventBus),
+					),
+				);
 
 			const getInstances = () =>
 				runCallback(
@@ -336,6 +343,7 @@ export const RelayFactoryLive = (
 									persistenceDbPath: dbPath,
 									getProjects,
 									listDaemonSessions,
+									broadcastSessionListChanged,
 									refreshSessionGit: async () => {
 										await daemonSessionGitCache.refresh(project.directory);
 									},

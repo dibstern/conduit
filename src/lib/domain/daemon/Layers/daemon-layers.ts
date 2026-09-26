@@ -107,6 +107,7 @@ import {
 	type RelayCache,
 	RelayCacheTag,
 } from "../Services/relay-cache.js";
+import { AutoSettleLive } from "./auto-settle-layer.js";
 import {
 	ConfigPersistenceLive,
 	ConfigPersistenceTag,
@@ -454,6 +455,8 @@ export const makeRelayCacheLayer: Layer.Layer<
 				);
 				return {
 					slug,
+					settleIdleSessions: (idleWindowMs: number, now: number) =>
+						relay.settleIdleSessions(idleWindowMs, now),
 					attach: (ws, options) => relay.wsHandler.attach(ws, options),
 					wsHandler: relay.wsHandler,
 					rpcWsHandler: relay.rpcWsHandler,
@@ -892,6 +895,7 @@ export const makeDaemonLive = (options: DaemonLiveOptions) => {
 	// Side-effect-only Layers (scopedDiscard) that fork background fibers.
 	// They read Tags from upstream tiers via Layer.provideMerge passthrough.
 	const scopedFibers = Layer.mergeAll(
+		AutoSettleLive,
 		WebSocketRoutingLive,
 		ProjectDiscoveryLive,
 		SessionPrefetchLive,

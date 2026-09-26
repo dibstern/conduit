@@ -39,6 +39,10 @@ export interface RelayStatusSnapshot {
 }
 
 export interface Relay {
+	settleIdleSessions?: (
+		idleWindowMs: number,
+		now: number,
+	) => Effect.Effect<number, unknown>;
 	slug: string;
 	attach: (ws: WebSocket, options: WsAttachOptions) => () => void;
 	wsHandler: {

@@ -5,8 +5,10 @@ import {
 } from "../contracts/claude-settings.js";
 import { ProviderInstanceIdSchema } from "../contracts/provider-instance.js";
 import {
+	defaultDaemonConfig,
 	loadDaemonConfig,
 	resolveInstanceDriver,
+	saveDaemonConfig,
 } from "../daemon/config-persistence.js";
 import { RateLimiterTag } from "../domain/relay/Layers/rate-limiter-layer.js";
 import { AgentServiceTag } from "../domain/relay/Services/agent-service.js";
@@ -61,6 +63,7 @@ import {
 	loadMoreHistoryForSession,
 	markSessionUnreadForClient,
 	renameSessionForClient,
+	setSessionAutoSettleForClient,
 	setSessionPinnedForClient,
 	setSessionSettledForClient,
 	snoozeSessionForClient,
@@ -157,6 +160,7 @@ export {
 	type SetDefaultPermissionModeResponse,
 	SetLogLevel,
 	SetProjectInstance,
+	SetSessionAutoSettle,
 	SetSessionPinned,
 	SetSessionSettled,
 	SnoozeSession,
@@ -530,6 +534,36 @@ export const wsRpcHandlers = WsRpcGroup.of({
 				instances,
 			};
 		}).pipe(Effect.catchAll(mapRpcFailure("UpdateInstance"))),
+	GetAutoSettleSetting: (_request) =>
+		Effect.gen(function* () {
+			const config = yield* ConfigTag;
+			const persisted = loadDaemonConfig(config.configDir);
+			return {
+				autoSettleAfterDays:
+					persisted?.autoSettleAfterDays === undefined
+						? 3
+						: persisted.autoSettleAfterDays,
+			};
+		}),
+	SetAutoSettleSetting: (request) =>
+		Effect.gen(function* () {
+			const days = request.autoSettleAfterDays;
+			if (days !== null && (!Number.isInteger(days) || days < 1 || days > 90)) {
+				return yield* new WsRpcError({
+					message: "Auto-settle days must be an integer from 1 to 90, or Never",
+				});
+			}
+			const config = yield* ConfigTag;
+			const persisted =
+				loadDaemonConfig(config.configDir) ?? defaultDaemonConfig();
+			yield* Effect.tryPromise(() =>
+				saveDaemonConfig(
+					{ ...persisted, autoSettleAfterDays: days },
+					config.configDir,
+				),
+			);
+			return { autoSettleAfterDays: days };
+		}).pipe(Effect.catchAll(mapRpcFailure("SetAutoSettleSetting"))),
 	ScanNow: (request) =>
 		Effect.gen(function* () {
 			const scanService = yield* ScanServiceTag;
@@ -836,6 +870,15 @@ export const wsRpcHandlers = WsRpcGroup.of({
 						message: `SetSessionPinned failed: ${String(error.cause)}`,
 					}),
 			),
+		),
+	SetSessionAutoSettle: (request) =>
+		setSessionAutoSettleForClient({
+			clientId: request.originId ?? "rpc",
+			sessionId: request.sessionId,
+			disabled: request.disabled,
+		}).pipe(
+			Effect.as({ ok: true as const }),
+			Effect.catchAll(mapRpcFailure("SetSessionAutoSettle")),
 		),
 	SnoozeSession: (request) =>
 		snoozeSessionForClient({
@@ -1328,6 +1371,8 @@ export type DaemonRpcName =
 	| "RenameInstance"
 	| "AddInstance"
 	| "UpdateInstance"
+	| "GetAutoSettleSetting"
+	| "SetAutoSettleSetting"
 	| "ScanNow"
 	| "DetectProxy"
 	| "ListDirectories"

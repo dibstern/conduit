@@ -419,6 +419,10 @@ const provideRpc = <A, E>(effect: Effect.Effect<A, E, WsRpcTestEnv>) =>
 				RenameSession: () => Effect.succeed({ ok: true as const }),
 				MarkSessionUnread: () => Effect.succeed({ ok: true as const }),
 				SetSessionSettled: () => Effect.succeed({ ok: true as const }),
+				SetSessionAutoSettle: () => Effect.succeed({ ok: true as const }),
+				GetAutoSettleSetting: () => Effect.succeed({ autoSettleAfterDays: 3 }),
+				SetAutoSettleSetting: (request) =>
+					Effect.succeed({ autoSettleAfterDays: request.autoSettleAfterDays }),
 				SetSessionPinned: () => Effect.succeed({ ok: true as const }),
 				SnoozeSession: () => Effect.succeed({ ok: true as const }),
 				UnsnoozeSession: () => Effect.succeed({ ok: true as const }),

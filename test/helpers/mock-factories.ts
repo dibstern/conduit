@@ -431,6 +431,7 @@ export function createMockProjectRelay(
 	overrides?: Partial<ProjectRelay>,
 ): ProjectRelay {
 	return {
+		settleIdleSessions: () => Effect.succeed(0),
 		wsHandler: {
 			...createMockWsHandlerFull(),
 			attach: vi.fn(() => () => {}),

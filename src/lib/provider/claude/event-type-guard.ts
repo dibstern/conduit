@@ -51,6 +51,7 @@ const CLAUDE_NOT_APPLICABLE_TYPES = [
 	"session.pinned", // Relay-owned triage state
 	"session.unpinned", // Relay-owned triage state
 	"session.snoozed", // Relay-owned triage state
+	"session.auto_settle_set", // Relay-owned triage state
 	"session.unsnoozed", // Relay-owned triage state
 	"session.read", // Whether a human has looked at a session; no provider can know it
 	"session.unread", // Same — appended by the relay when someone marks a session unread

@@ -47,6 +47,7 @@ export function providerRuntimeEventFromCanonical(
 		event.type === "session.pinned" ||
 		event.type === "session.unpinned" ||
 		event.type === "session.snoozed" ||
+		event.type === "session.auto_settle_set" ||
 		event.type === "session.unsnoozed"
 	) {
 		throw new Error(`${event.type} is not a provider runtime event`);

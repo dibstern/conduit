@@ -8,6 +8,7 @@ exports[`Exhaustiveness guards > EventPayloadMap key snapshot > snapshot of all 
   "permission.resolved",
   "question.asked",
   "question.resolved",
+  "session.auto_settle_set",
   "session.compaction",
   "session.created",
   "session.deleted",

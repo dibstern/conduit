@@ -663,7 +663,7 @@
 					{status.word}
 				</span>
 			{:else}
-				<span class="session-item-meta md:group-hover:hidden md:group-focus-within:hidden {menuOpen ? 'md:hidden' : ''}">{timeText}</span>
+				<span class="session-item-meta md:group-hover:hidden md:group-focus-within:hidden {menuOpen ? 'md:hidden' : ''}" title={settled && session.settledAutomatically ? "Settled automatically after it sat idle" : undefined}>{settled && session.settledAutomatically ? `Auto · ${timeText}` : timeText}</span>
 			{/if}
 			{#if woken}
 				<span

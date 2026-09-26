@@ -72,6 +72,7 @@ export const CANONICAL_EVENT_TYPES = [
 	"session.pinned",
 	"session.unpinned",
 	"session.snoozed",
+	"session.auto_settle_set",
 	"session.unsnoozed",
 	"session.deleted",
 	"session.forked",
@@ -263,6 +264,12 @@ export interface SessionUnreadPayload {
 
 export interface SessionSettledPayload {
 	readonly sessionId: string;
+	readonly automatic?: boolean;
+}
+
+export interface SessionAutoSettleSetPayload {
+	readonly sessionId: string;
+	readonly disabled: boolean;
 }
 
 export interface SessionUnsettledPayload {
@@ -390,6 +397,7 @@ export interface EventPayloadMap {
 	"session.pinned": SessionPinnedPayload;
 	"session.unpinned": SessionUnpinnedPayload;
 	"session.snoozed": SessionSnoozedPayload;
+	"session.auto_settle_set": SessionAutoSettleSetPayload;
 	"session.unsnoozed": SessionUnsnoozedPayload;
 	"session.deleted": SessionDeletedPayload;
 	"session.forked": SessionForkedPayload;
@@ -719,6 +727,12 @@ const SessionUnreadPayloadSchema = Schema.Struct({
 
 const SessionSettledPayloadSchema = Schema.Struct({
 	sessionId: Schema.String,
+	automatic: Schema.optional(Schema.Boolean),
+});
+
+const SessionAutoSettleSetPayloadSchema = Schema.Struct({
+	sessionId: Schema.String,
+	disabled: Schema.Boolean,
 });
 
 const SessionUnsettledPayloadSchema = Schema.Struct({
@@ -911,6 +925,10 @@ const SessionSnoozedEventSchema = eventEnvelope(
 	"session.snoozed",
 	SessionSnoozedPayloadSchema,
 );
+const SessionAutoSettleSetEventSchema = eventEnvelope(
+	"session.auto_settle_set",
+	SessionAutoSettleSetPayloadSchema,
+);
 const SessionUnsnoozedEventSchema = eventEnvelope(
 	"session.unsnoozed",
 	SessionUnsnoozedPayloadSchema,
@@ -982,6 +1000,7 @@ export const CanonicalEventSchema = Schema.Union(
 	SessionPinnedEventSchema,
 	SessionUnpinnedEventSchema,
 	SessionSnoozedEventSchema,
+	SessionAutoSettleSetEventSchema,
 	SessionUnsnoozedEventSchema,
 	SessionDeletedEventSchema,
 	SessionForkedEventSchema,
@@ -1019,6 +1038,7 @@ const PAYLOAD_REQUIRED_FIELDS: Record<CanonicalEventType, readonly string[]> = {
 	"session.pinned": ["sessionId"],
 	"session.unpinned": ["sessionId"],
 	"session.snoozed": ["sessionId", "until"],
+	"session.auto_settle_set": ["sessionId", "disabled"],
 	"session.unsnoozed": ["sessionId"],
 	"session.deleted": ["sessionId"],
 	"session.forked": ["sessionId", "parentId"],

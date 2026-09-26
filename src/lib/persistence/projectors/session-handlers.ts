@@ -19,6 +19,7 @@ type SessionHandledType =
 	| "session.pinned"
 	| "session.unpinned"
 	| "session.snoozed"
+	| "session.auto_settle_set"
 	| "session.unsnoozed"
 	| "session.deleted"
 	| "session.forked"
@@ -168,15 +169,19 @@ export const sessionHandlers: {
 
 	"session.settled": (event) => [
 		{
-			sql: "UPDATE sessions SET settled_at = ? WHERE id = ?",
-			params: [event.createdAt, event.data.sessionId],
+			sql: "UPDATE sessions SET settled_at = ?, settled_automatically = ? WHERE id = ?",
+			params: [
+				event.createdAt,
+				event.data.automatic === true ? 1 : 0,
+				event.data.sessionId,
+			],
 		},
 	],
 
 	"session.unsettled": (event) => [
 		{
-			sql: "UPDATE sessions SET settled_at = NULL WHERE id = ?",
-			params: [event.data.sessionId],
+			sql: "UPDATE sessions SET settled_at = NULL, settled_automatically = 0, unsettled_at = ? WHERE id = ?",
+			params: [event.createdAt, event.data.sessionId],
 		},
 	],
 
@@ -199,6 +204,16 @@ export const sessionHandlers: {
 			sql: `UPDATE sessions SET snoozed_at = ?, snoozed_until = ?,
 				woken_at = NULL, woken_reason = NULL WHERE id = ?`,
 			params: [event.createdAt, event.data.until, event.data.sessionId],
+		},
+	],
+
+	"session.auto_settle_set": (event) => [
+		{
+			sql: "UPDATE sessions SET auto_settle_disabled_at = ? WHERE id = ?",
+			params: [
+				event.data.disabled ? event.createdAt : null,
+				event.data.sessionId,
+			],
 		},
 	],
 

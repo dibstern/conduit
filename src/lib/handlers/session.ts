@@ -6,6 +6,7 @@ import { mapQuestionFields } from "../bridges/question-bridge.js";
 import type { ProviderInstanceId } from "../contracts/provider-instance.js";
 import { PendingInteractionServiceTag } from "../domain/relay/Services/pending-interaction-service.js";
 import {
+	ConfigTag,
 	LoggerTag,
 	OpenCodeModelServiceTag,
 	PollerManagerTag,
@@ -649,6 +650,12 @@ export const setSessionSettledForClient = ({
 		const log = yield* LoggerTag;
 		if (yield* service.setSessionSettled(sessionId, settled)) {
 			yield* service.sendSessionLists((msg) => wsHandler.broadcast(msg));
+			const config = yield* Effect.serviceOption(ConfigTag);
+			if (config._tag === "Some" && config.value.broadcastSessionListChanged) {
+				yield* Effect.tryPromise(config.value.broadcastSessionListChanged).pipe(
+					Effect.catchAll(() => Effect.void),
+				);
+			}
 			log.info(`client=${clientId} Set settled=${settled}: ${sessionId}`);
 		}
 	});
@@ -669,6 +676,33 @@ export const setSessionPinnedForClient = ({
 		if (yield* service.setSessionPinned(sessionId, pinned)) {
 			yield* service.sendSessionLists((msg) => wsHandler.broadcast(msg));
 			log.info(`client=${clientId} Set pinned=${pinned}: ${sessionId}`);
+		}
+	});
+
+export const setSessionAutoSettleForClient = ({
+	clientId,
+	sessionId,
+	disabled,
+}: {
+	readonly clientId: string;
+	readonly sessionId: string;
+	readonly disabled: boolean;
+}) =>
+	Effect.gen(function* () {
+		const wsHandler = yield* WebSocketHandlerTag;
+		const service = yield* SessionManagerServiceTag;
+		const log = yield* LoggerTag;
+		if (yield* service.setSessionAutoSettleDisabled(sessionId, disabled)) {
+			yield* service.sendSessionLists((msg) => wsHandler.broadcast(msg));
+			const config = yield* Effect.serviceOption(ConfigTag);
+			if (config._tag === "Some" && config.value.broadcastSessionListChanged) {
+				yield* Effect.tryPromise(config.value.broadcastSessionListChanged).pipe(
+					Effect.catchAll(() => Effect.void),
+				);
+			}
+			log.info(
+				`client=${clientId} Set auto-settle disabled=${disabled}: ${sessionId}`,
+			);
 		}
 	});
 

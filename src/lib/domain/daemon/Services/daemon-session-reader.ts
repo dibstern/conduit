@@ -15,6 +15,8 @@ import {
 	pendingApprovalCountsByType,
 	sessionRowsToSessionInfoList,
 } from "../../../persistence/session-list-adapter.js";
+import { shouldSettleIdleSession } from "../../../session/auto-settle-policy.js";
+import { readPersistedAutoSettleFacts } from "../../../session/auto-settle-reader.js";
 import type {
 	DaemonSessionCursor,
 	DaemonSessionQueryOptions,
@@ -151,6 +153,34 @@ const readProjectSessions = (
 						},
 					];
 		});
+	});
+
+/** Use the same read-only SQLite path as the daemon-wide session list. */
+export const hasColdAutoSettleCandidate = (
+	projectDirectory: string,
+	now: number,
+	idleWindowMs: number,
+) =>
+	Effect.gen(function* () {
+		const databasePath = resolve(projectDirectory, ".conduit", "events.db");
+		const databaseStat = yield* Effect.either(
+			Effect.try(() => statSync(databasePath)),
+		);
+		if (Either.isLeft(databaseStat)) {
+			if (isMissingPathError(databaseStat.left)) return false;
+			return yield* Effect.fail(databaseStat.left);
+		}
+		const sqliteLayer = SqliteNode.layer({
+			filename: databasePath,
+			readonly: true,
+			disableWAL: true,
+		}).pipe(Layer.provide(Reactivity.layer));
+		const facts = yield* readPersistedAutoSettleFacts(now).pipe(
+			Effect.provide(sqliteLayer),
+		);
+		return [...facts.values()].some((item) =>
+			shouldSettleIdleSession(item, now, idleWindowMs),
+		);
 	});
 
 export const listDaemonSessions = (

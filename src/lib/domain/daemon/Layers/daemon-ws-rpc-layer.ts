@@ -1,4 +1,4 @@
-import { Context, Effect, Layer, Option, PubSub, Stream } from "effect";
+import { Context, Effect, Layer, Option, PubSub, Ref, Stream } from "effect";
 import { WsRpcError } from "../../../contracts/ws-rpc.js";
 import { normalizeProjectTitle } from "../../../handlers/settings.js";
 import {
@@ -9,7 +9,10 @@ import type { RelayMessage } from "../../../shared-types.js";
 import { listDirectoryEntries } from "../../relay/Services/directory-listing-service.js";
 import { makeInstanceId } from "../../relay/Services/instance-management-service.js";
 import type { ConfigPersistenceTag } from "../Services/config-persistence-service.js";
-import type { DaemonConfigRefTag } from "../Services/daemon-config-ref.js";
+import {
+	commitDaemonRuntimeConfig,
+	DaemonConfigRefTag,
+} from "../Services/daemon-config-ref.js";
 import { DaemonEventBusTag } from "../Services/daemon-pubsub.js";
 import {
 	listDaemonSessions,
@@ -296,6 +299,37 @@ export const DaemonWsRpcHandlersLive = Layer.scoped(
 							projectSlug: request.projectSlug,
 							instances: yield* instanceList,
 						};
+					}),
+				),
+			GetAutoSettleSetting: () =>
+				run(
+					"GetAutoSettleSetting",
+					Effect.gen(function* () {
+						const config = yield* DaemonConfigRefTag;
+						const days = (yield* Ref.get(config)).autoSettleAfterDays;
+						return { autoSettleAfterDays: days === undefined ? 3 : days };
+					}),
+				),
+			SetAutoSettleSetting: (request) =>
+				run(
+					"SetAutoSettleSetting",
+					Effect.gen(function* () {
+						const days = request.autoSettleAfterDays;
+						if (
+							days !== null &&
+							(!Number.isInteger(days) || days < 1 || days > 90)
+						) {
+							return yield* new WsRpcError({
+								message:
+									"Auto-settle days must be an integer from 1 to 90, or Never",
+							});
+						}
+						yield* commitDaemonRuntimeConfig((config) => ({
+							...config,
+							autoSettleAfterDays: days,
+						}));
+						yield* persistConfig;
+						return { autoSettleAfterDays: days };
 					}),
 				),
 			ScanNow: (request) =>

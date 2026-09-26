@@ -15,6 +15,7 @@
 		{anchor}
 		onrename={() => {}}
 		onsettle={() => {}}
+		onautosettle={() => {}}
 		onpin={() => {}}
 		onsnooze={() => {}}
 		onunsnooze={() => {}}

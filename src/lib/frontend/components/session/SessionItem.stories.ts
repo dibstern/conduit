@@ -171,6 +171,16 @@ export const Settled: Story = {
 	},
 };
 
+export const SettledAutomatically: Story = {
+	name: "Settled automatically",
+	args: {
+		session: { ...mockSession, settledAutomatically: true },
+		active: false,
+		settled: true,
+		settledAt: "Mon 9:00",
+	},
+};
+
 // A dense settled row uses the shortest declared shelf density.
 export const SettledDense: Story = {
 	args: {

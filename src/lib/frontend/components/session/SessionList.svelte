@@ -41,6 +41,7 @@
 		forkSessionRpc,
 		renameSessionRpc,
 		setSessionSettledRpc,
+		setSessionAutoSettleRpc,
 		setSessionPinnedRpc,
 		snoozeSessionRpc,
 		unsnoozeSessionRpc,
@@ -333,6 +334,16 @@
 			}
 		} catch {
 			showToast("Couldn't pin session", { variant: "error" });
+		}
+	}
+
+	async function handleCtxAutoSettle(session: SessionInfo, disabled: boolean) {
+		const projectSlug = session.projectSlug ?? getCurrentSlug();
+		if (!projectSlug || isForeignSession(session)) return;
+		try {
+			await setSessionAutoSettleRpc({ projectSlug, sessionId: session.id, disabled, originId: getBrowserClientId() });
+		} catch {
+			showToast("Couldn't change auto-settle", { variant: "error" });
 		}
 	}
 
@@ -836,6 +847,7 @@
 		now={sessionState.now}
 		onrename={handleCtxRename}
 		onsettle={(_id, next) => { if (ctxMenuSession) void handleCtxSettle(ctxMenuSession, next); }}
+		onautosettle={(_id, disabled) => { if (ctxMenuSession) void handleCtxAutoSettle(ctxMenuSession, disabled); }}
 		onpin={(_id, next) => { if (ctxMenuSession) void handleCtxPin(ctxMenuSession, next); }}
 		onsnooze={(_id) => { if (ctxMenuSession) handleOpenSnooze(ctxMenuSession); }}
 		onunsnooze={(_id) => { if (ctxMenuSession) void handleUnsnooze(ctxMenuSession); }}

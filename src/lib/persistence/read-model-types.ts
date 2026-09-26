@@ -13,6 +13,9 @@ export interface SessionRow {
 	permission_mode: string | null;
 	read_at: number | null;
 	settled_at: number | null;
+	unsettled_at?: number | null;
+	auto_settle_disabled_at?: number | null;
+	settled_automatically?: number;
 	pinned_at: number | null;
 	snoozed_at: number | null;
 	snoozed_until: number | null;

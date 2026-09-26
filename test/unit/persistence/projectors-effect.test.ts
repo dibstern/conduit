@@ -1413,6 +1413,78 @@ describe("Effect Session Projector (via ProjectionRunner)", () => {
 
 // ─── Message Projector Tests ────────────────────────────────────────────────
 
+describe("automatic settlement session projection", () => {
+	it("projects toggle, automatic settlement, and un-settle with replay timestamps", () =>
+		runTest(
+			Effect.gen(function* () {
+				const sql = yield* SqlClient.SqlClient;
+				const store = yield* EventStoreEffectTag;
+				const runner = yield* ProjectionRunnerEffectTag;
+				yield* runner.markRecovered();
+				yield* seedSession("auto-s1");
+				const append = (
+					type:
+						| "session.auto_settle_set"
+						| "session.settled"
+						| "session.unsettled",
+					data: { sessionId: string; disabled?: boolean; automatic?: boolean },
+					createdAt: number,
+				) => store.append(canonicalEvent(type, "auto-s1", data, { createdAt }));
+				const disabled = yield* append(
+					"session.auto_settle_set",
+					{ sessionId: "auto-s1", disabled: true },
+					FIXED_TS + 1,
+				);
+				yield* runner.projectEvent(disabled);
+				const disabledRows = yield* sql<{
+					auto_settle_disabled_at: number | null;
+				}>`SELECT auto_settle_disabled_at FROM sessions WHERE id = 'auto-s1'`;
+				expect(disabledRows[0]?.auto_settle_disabled_at).toBe(FIXED_TS + 1);
+				const enabled = yield* append(
+					"session.auto_settle_set",
+					{ sessionId: "auto-s1", disabled: false },
+					FIXED_TS + 2,
+				);
+				yield* runner.projectEvent(enabled);
+				const settled = yield* append(
+					"session.settled",
+					{ sessionId: "auto-s1", automatic: true },
+					FIXED_TS + 3,
+				);
+				yield* runner.projectEvent(settled);
+				const automaticRows = yield* sql<{
+					settled_automatically: number;
+					auto_settle_disabled_at: number | null;
+				}>`SELECT settled_automatically, auto_settle_disabled_at FROM sessions WHERE id = 'auto-s1'`;
+				expect(automaticRows[0]).toEqual({
+					settled_automatically: 1,
+					auto_settle_disabled_at: null,
+				});
+				const unsettled = yield* append(
+					"session.unsettled",
+					{ sessionId: "auto-s1" },
+					FIXED_TS + 4,
+				);
+				yield* runner.projectEvent(unsettled);
+				const cleared = yield* sql<{
+					settled_automatically: number;
+					unsettled_at: number;
+				}>`SELECT settled_automatically, unsettled_at FROM sessions WHERE id = 'auto-s1'`;
+				expect(cleared[0]).toEqual({
+					settled_automatically: 0,
+					unsettled_at: FIXED_TS + 4,
+				});
+				yield* runner.projectEvent(settled);
+				yield* runner.projectEvent(unsettled);
+				const replayed = yield* sql<{
+					settled_automatically: number;
+					unsettled_at: number;
+				}>`SELECT settled_automatically, unsettled_at FROM sessions WHERE id = 'auto-s1'`;
+				expect(replayed[0]).toEqual(cleared[0]);
+			}),
+		));
+});
+
 describe("Effect Message Projector (via ProjectionRunner)", () => {
 	it("message.created inserts a message row", () =>
 		runTest(

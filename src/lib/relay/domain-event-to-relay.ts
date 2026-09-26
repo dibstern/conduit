@@ -168,6 +168,7 @@ export function translateDomainEventToRelay(
 		case "session.pinned":
 		case "session.unpinned":
 		case "session.snoozed":
+		case "session.auto_settle_set":
 		case "session.unsnoozed":
 			return silent("persistence-only event; no UI surface in relay");
 

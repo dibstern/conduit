@@ -167,6 +167,22 @@ const READ_MODEL_PARITY_CASES: Record<ReadModelMutation, ParityCase> = {
 				).toBeNull();
 			}),
 	},
+	setSessionAutoSettleDisabled: {
+		run: ({ service, readQuery, seedSession }) =>
+			Effect.gen(function* () {
+				yield* seedSession("ses-auto-settle", "Auto settle toggle");
+				yield* service.setSessionAutoSettleDisabled("ses-auto-settle", true);
+				expect(
+					(yield* readQuery.getSession("ses-auto-settle"))
+						?.auto_settle_disabled_at,
+				).toEqual(expect.any(Number));
+				yield* service.setSessionAutoSettleDisabled("ses-auto-settle", false);
+				expect(
+					(yield* readQuery.getSession("ses-auto-settle"))
+						?.auto_settle_disabled_at,
+				).toBeNull();
+			}),
+	},
 	setSessionPinned: {
 		run: ({ service, readQuery, seedSession }) =>
 			Effect.gen(function* () {

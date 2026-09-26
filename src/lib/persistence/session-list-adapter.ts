@@ -139,6 +139,8 @@ export function sessionRowsToSessionInfoList(
 		};
 
 		if (row.settled_at != null) info.settledAt = row.settled_at;
+		if (row.settled_automatically === 1) info.settledAutomatically = true;
+		if (row.auto_settle_disabled_at != null) info.autoSettleDisabled = true;
 		if (row.pinned_at != null) info.pinnedAt = row.pinned_at;
 		Object.assign(info, deriveSessionSnooze(row, opts?.now));
 

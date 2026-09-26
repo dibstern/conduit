@@ -234,6 +234,8 @@ export interface ProjectRelayConfig {
 	listDaemonSessions?: (
 		options: DaemonSessionQueryOptions,
 	) => MaybePromise<DaemonSessionQueryResult>;
+	/** Notify browsers on other project relays that the daemon list changed. */
+	broadcastSessionListChanged?: () => Promise<void>;
 	/** Refresh the daemon's cached git context before publishing a turn-end list. */
 	refreshSessionGit?: () => Promise<void>;
 	/** Remove a project from the registry. */

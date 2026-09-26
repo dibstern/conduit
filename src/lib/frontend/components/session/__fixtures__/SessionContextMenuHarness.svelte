@@ -33,6 +33,7 @@
 		{branch}
 		onrename={() => {}}
 		onsettle={() => {}}
+		onautosettle={() => {}}
 		onpin={() => {}}
 		onsnooze={() => {}}
 		onunsnooze={() => {}}

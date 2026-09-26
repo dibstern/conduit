@@ -3583,7 +3583,7 @@ describe("sendMessageToSession", () => {
 							),
 						),
 					);
-					if (settled) yield* service.setSessionSettled("s1", true);
+					if (settled) yield* service.setSessionSettled("s1", true, true);
 					if (snoozed) yield* service.snoozeSession("s1", null);
 					const provider: ProviderTurnService = {
 						prepareTurnSession: (input) => Effect.succeed(input.sessionId),
@@ -3591,6 +3591,9 @@ describe("sendMessageToSession", () => {
 							Effect.gen(function* () {
 								expect((yield* service.listSessions())[0]).not.toHaveProperty(
 									"settledAt",
+								);
+								expect((yield* service.listSessions())[0]).not.toHaveProperty(
+									"settledAutomatically",
 								);
 								expect((yield* service.listSessions())[0]).not.toHaveProperty(
 									"snoozedAt",

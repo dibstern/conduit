@@ -691,7 +691,11 @@ const readSessionForTriage = (sessionId: string) =>
 		return yield* readQuery.value.getSession(sessionId);
 	});
 
-export const setSessionSettled = (sessionId: string, settled: boolean) =>
+export const setSessionSettled = (
+	sessionId: string,
+	settled: boolean,
+	automatic = false,
+) =>
 	Effect.gen(function* () {
 		const row = yield* readSessionForTriage(sessionId);
 		if (!row) return false;
@@ -700,7 +704,7 @@ export const setSessionSettled = (sessionId: string, settled: boolean) =>
 				new Error("Session is pinned and must be unpinned first"),
 			);
 		}
-		const unsnoozed = settled && row.snoozed_at !== null;
+		const unsnoozed = settled && !automatic && row.snoozed_at !== null;
 		if (unsnoozed) {
 			yield* applySessionCommand({
 				type: "session.unsnoozed",
@@ -708,10 +712,11 @@ export const setSessionSettled = (sessionId: string, settled: boolean) =>
 			});
 		}
 		if ((row.settled_at !== null) === settled) return unsnoozed;
-		yield* applySessionCommand({
-			type: settled ? "session.settled" : "session.unsettled",
-			data: { sessionId },
-		});
+		yield* applySessionCommand(
+			settled
+				? { type: "session.settled", data: { sessionId, automatic } }
+				: { type: "session.unsettled", data: { sessionId } },
+		);
 		return true;
 	}).pipe(
 		Effect.mapError(
@@ -751,6 +756,29 @@ export const setSessionPinned = (sessionId: string, pinned: boolean) =>
 				new SessionManagerError({ operation: "setSessionPinned", cause }),
 		),
 		Effect.withSpan("session.setSessionPinned", { attributes: { sessionId } }),
+	);
+
+export const setSessionAutoSettleDisabled = (
+	sessionId: string,
+	disabled: boolean,
+) =>
+	Effect.gen(function* () {
+		const row = yield* readSessionForTriage(sessionId);
+		if (!row || (row.auto_settle_disabled_at != null) === disabled)
+			return false;
+		yield* applySessionCommand({
+			type: "session.auto_settle_set",
+			data: { sessionId, disabled },
+		});
+		return true;
+	}).pipe(
+		Effect.mapError(
+			(cause) =>
+				new SessionManagerError({
+					operation: "setSessionAutoSettleDisabled",
+					cause,
+				}),
+		),
 	);
 
 export const snoozeSession = (sessionId: string, until: number | null) =>
@@ -1214,6 +1242,11 @@ export interface SessionManagerService {
 	setSessionSettled(
 		sessionId: string,
 		settled: boolean,
+		automatic?: boolean,
+	): Effect.Effect<boolean, SessionManagerError>;
+	setSessionAutoSettleDisabled(
+		sessionId: string,
+		disabled: boolean,
 	): Effect.Effect<boolean, SessionManagerError>;
 	setSessionPinned(
 		sessionId: string,
@@ -1683,9 +1716,17 @@ export const SessionManagerServiceLive: Layer.Layer<
 				withSessionCommandServices(markSessionRead(sessionId)),
 			markSessionUnread: (sessionId) =>
 				withSessionCommandServices(markSessionUnread(sessionId)),
-			setSessionSettled: (sessionId, settled) =>
+			setSessionSettled: (sessionId, settled, automatic) =>
 				triageLock.withPermits(1)(
-					withSessionCommandServices(setSessionSettled(sessionId, settled)),
+					withSessionCommandServices(
+						setSessionSettled(sessionId, settled, automatic),
+					),
+				),
+			setSessionAutoSettleDisabled: (sessionId, disabled) =>
+				triageLock.withPermits(1)(
+					withSessionCommandServices(
+						setSessionAutoSettleDisabled(sessionId, disabled),
+					),
 				),
 			setSessionPinned: (sessionId, pinned) =>
 				triageLock.withPermits(1)(

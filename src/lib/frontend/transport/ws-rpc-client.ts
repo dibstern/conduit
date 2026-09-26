@@ -334,6 +334,13 @@ export interface SetSessionPinnedRpcInput {
 	readonly originId?: string;
 }
 
+export interface SetSessionAutoSettleRpcInput {
+	readonly projectSlug: string;
+	readonly sessionId: string;
+	readonly disabled: boolean;
+	readonly originId?: string;
+}
+
 export interface SnoozeSessionRpcInput {
 	readonly projectSlug: string;
 	readonly sessionId: string;
@@ -1173,6 +1180,24 @@ const callSetSessionPinned = (input: SetSessionPinnedRpcInput) =>
 		Effect.provide(RpcSerialization.layerJson),
 	);
 
+const callSetSessionAutoSettle = (input: SetSessionAutoSettleRpcInput) =>
+	Effect.scoped(
+		Effect.gen(function* () {
+			const client = yield* RpcClient.make(WsRpcGroup);
+			yield* client.SetSessionAutoSettle({
+				projectSlug: input.projectSlug,
+				sessionId: input.sessionId,
+				disabled: input.disabled,
+				...(input.originId ? { originId: input.originId } : {}),
+			});
+		}),
+	).pipe(
+		Effect.provide(RpcClient.layerProtocolSocket()),
+		Effect.provide(Socket.layerWebSocket(makeWsRpcUrl())),
+		Effect.provide(Socket.layerWebSocketConstructorGlobal),
+		Effect.provide(RpcSerialization.layerJson),
+	);
+
 const callSnoozeSession = (input: SnoozeSessionRpcInput) =>
 	Effect.scoped(
 		Effect.gen(function* () {
@@ -1657,6 +1682,48 @@ export async function setSessionPinnedRpc(
 	input: SetSessionPinnedRpcInput,
 ): Promise<void> {
 	await runTransportEffect(callSetSessionPinned(input));
+}
+
+export async function setSessionAutoSettleRpc(
+	input: SetSessionAutoSettleRpcInput,
+): Promise<void> {
+	await runTransportEffect(callSetSessionAutoSettle(input));
+}
+
+export async function getAutoSettleSettingRpc(): Promise<number | null> {
+	return await runTransportEffect(
+		Effect.scoped(
+			Effect.gen(function* () {
+				const client = yield* RpcClient.make(WsRpcGroup);
+				return (yield* client.GetAutoSettleSetting({})).autoSettleAfterDays;
+			}),
+		).pipe(
+			Effect.provide(RpcClient.layerProtocolSocket()),
+			Effect.provide(Socket.layerWebSocket(makeWsRpcUrl())),
+			Effect.provide(Socket.layerWebSocketConstructorGlobal),
+			Effect.provide(RpcSerialization.layerJson),
+		),
+	);
+}
+
+export async function setAutoSettleSettingRpc(
+	days: number | null,
+): Promise<number | null> {
+	return await runTransportEffect(
+		Effect.scoped(
+			Effect.gen(function* () {
+				const client = yield* RpcClient.make(WsRpcGroup);
+				return (yield* client.SetAutoSettleSetting({
+					autoSettleAfterDays: days,
+				})).autoSettleAfterDays;
+			}),
+		).pipe(
+			Effect.provide(RpcClient.layerProtocolSocket()),
+			Effect.provide(Socket.layerWebSocket(makeWsRpcUrl())),
+			Effect.provide(Socket.layerWebSocketConstructorGlobal),
+			Effect.provide(RpcSerialization.layerJson),
+		),
+	);
 }
 
 export async function snoozeSessionRpc(
