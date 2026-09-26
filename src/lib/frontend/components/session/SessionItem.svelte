@@ -147,6 +147,7 @@
 		ontoggleselection,
 		oncontextmenu: oncontextmenuProp,
 		onsettle,
+		onmarkread,
 		onpin,
 		onsnooze,
 		onunsnooze,
@@ -180,6 +181,7 @@
 		markOnly?: boolean;
 		oncontextmenu?: (session: SessionInfo, anchor: HTMLElement) => void;
 		onsettle?: (id: string, next: boolean) => void;
+		onmarkread?: (id: string) => void;
 		onpin?: (id: string, next: boolean) => void;
 		onsnooze?: (id: string) => void;
 		onunsnooze?: (id: string) => void;
@@ -228,9 +230,13 @@
 
 	const displayTitle = $derived(session.title || "New Session");
 	const actions = $derived(getSessionActionState(session, now));
-	const swipeStage = $derived(getSwipeStage(offset, rowEl?.getBoundingClientRect().width ?? 0));
+	const swipeStage = $derived.by(() => {
+		const stage = getSwipeStage(offset, rowEl?.getBoundingClientRect().width ?? 0);
+		return offset > 0 && actions.settleDisabledReason && stage === "commit" ? "reveal" : stage;
+	});
 	const swipeDirection = $derived(offset > 0 ? "settle" : "snooze");
 	const swipeAllowed = $derived(canSwipe(swipeDirection));
+	const showReadSwipeAction = $derived(!settled && !actions.settled && !snoozed && !actions.snoozed && onmarkread != null);
 	const shelfRow = $derived(settled || snoozed);
 	const timeText = $derived(snoozedUntilText ?? settledAt ?? formatTimeAgo(session.updatedAt));
 	const woken = $derived(isSessionWoken(session, now) && !snoozed);
@@ -368,7 +374,7 @@
 	function canSwipe(direction: "settle" | "snooze") {
 		if (markOnly) return false;
 		return direction === "settle"
-			? actions.settleDisabledReason == null
+			? actions.settleDisabledReason == null || showReadSwipeAction
 			: actions.snoozeVisible && (actions.snoozed || actions.snoozeDisabledReason == null);
 	}
 
@@ -421,7 +427,7 @@
 		if (event.pointerId !== activePointer) return;
 		const wasHorizontal = gesture === "horizontal";
 		const direction = offset > 0 ? "settle" : "snooze";
-		const stage = canSwipe(direction) ? getSwipeStage(offset, rowEl?.getBoundingClientRect().width ?? 0) : "none";
+		const stage = canSwipe(direction) ? swipeStage : "none";
 		stopPointer();
 		if (!wasHorizontal) return;
 		armClickSuppression();
@@ -430,7 +436,7 @@
 			offset = 0;
 		} else if (stage === "reveal") {
 			heldDirection = direction;
-			offset = (direction === "settle" ? 1 : -1) * 88;
+			offset = direction === "settle" ? (showReadSwipeAction ? (actions.settleDisabledReason ? 74 : 148) : 88) : -88;
 			onholdchange?.(session.id);
 		} else offset = 0;
 	}
@@ -521,6 +527,33 @@
 		{@const direction = heldDirection ?? swipeDirection}
 		{@const verb = direction === "settle" ? (settled || actions.settled ? "Un-settle" : "Settle") : (snoozed || actions.snoozed ? "Unsnooze" : "Snooze")}
 		{@const stage = heldDirection ? "reveal" : swipeStage}
+		{#if direction === "settle" && stage === "reveal" && showReadSwipeAction}
+			<div class="absolute inset-0 flex items-stretch font-brand text-xs font-semibold">
+				{#if !actions.settleDisabledReason}
+					<button
+						type="button"
+						data-testid="session-swipe-settle"
+						data-stage={stage}
+						aria-label="Settle {displayTitle}"
+						class="flex w-[74px] shrink-0 flex-col items-center justify-center gap-1 bg-success/15 text-success"
+						onclick={(event) => { event.preventDefault(); event.stopPropagation(); if (heldDirection) runSwipeAction("settle", false); }}
+					>
+						<Icon name="check" size={16} />
+						Settle
+					</button>
+				{/if}
+				<button
+					type="button"
+					data-testid={session.unread ? "session-swipe-mark-read" : "session-swipe-mark-unread"}
+					aria-label="Mark {session.unread ? 'read' : 'unread'} {displayTitle}"
+					class="flex w-[74px] shrink-0 flex-col items-center justify-center gap-1 bg-brand-a/15 text-brand-a"
+					onclick={(event) => { event.preventDefault(); event.stopPropagation(); if (heldDirection) { onmarkread?.(session.id); closeHold(); } }}
+				>
+					<Icon name={session.unread ? "circle" : "circle-dot"} size={16} />
+					{session.unread ? "Read" : "Unread"}
+				</button>
+			</div>
+		{:else}
 		<button
 			type="button"
 			data-testid="session-swipe-action"
@@ -532,6 +565,7 @@
 			<Icon name={verb === "Settle" ? "check" : verb === "Snooze" ? "moon" : "undo"} size={16} />
 			{stage === "commit" ? `Release to ${verb.toLowerCase()}` : verb}
 		</button>
+		{/if}
 	{/if}
 <a
 	bind:this={rowEl}

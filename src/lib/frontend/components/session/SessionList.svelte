@@ -738,6 +738,7 @@
 				ontoggleselection={handleToggleSelection}
 				oncontextmenu={handleContextMenu}
 				onsettle={(_id, next) => { void handleCtxSettle(s, next); }}
+				onmarkread={(_id) => { void toggleSessionRead(s); }}
 				onpin={(_id, next) => { void handleCtxPin(s, next); }}
 				onsnooze={() => handleOpenSnooze(s)}
 				onunsnooze={() => { void handleUnsnooze(s); }}

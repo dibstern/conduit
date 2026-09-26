@@ -242,6 +242,8 @@
 
 </script>
 
+<!-- Focusable so keyboard users can scroll it and `u` can target the open session. -->
+<!-- svelte-ignore a11y_no_noninteractive_tabindex -->
 <div
 	id="messages"
 	role="region"
