@@ -5,11 +5,46 @@
 // chip and the typed text from ever disagreeing.
 
 import {
+	GROUP_PARAM,
 	getCurrentSearchParams,
 	navigate,
 	routerState,
 	SCOPE_PARAM,
+	STATUS_PARAM,
 } from "./router.svelte.js";
+
+export type SessionStatusFilter = "needs-you" | "running" | "unread";
+export type SessionGrouping = "status" | "project" | "time";
+
+export function getSessionStatusFilter(): SessionStatusFilter | null {
+	const value = getCurrentSearchParams().get(STATUS_PARAM);
+	return value === "needs-you" || value === "running" || value === "unread"
+		? value
+		: null;
+}
+
+export function getSessionGrouping(): SessionGrouping {
+	const value = getCurrentSearchParams().get(GROUP_PARAM);
+	return value === "project" || value === "time" ? value : "status";
+}
+
+function setArrangementParam(key: string, value: string | null): void {
+	const params = getCurrentSearchParams();
+	if (value === null) params.delete(key);
+	else params.set(key, value);
+	const query = params.toString();
+	navigate(query ? `${routerState.path}?${query}` : routerState.path);
+}
+
+export function setSessionStatusFilter(
+	filter: SessionStatusFilter | null,
+): void {
+	setArrangementParam(STATUS_PARAM, filter);
+}
+
+export function setSessionGrouping(grouping: SessionGrouping): void {
+	setArrangementParam(GROUP_PARAM, grouping === "status" ? null : grouping);
+}
 
 export function getSessionScope(): string | null {
 	return getCurrentSearchParams().get(SCOPE_PARAM) || null;

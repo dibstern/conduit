@@ -105,6 +105,7 @@ import {
 	attachedProjectState,
 	getCurrentRoute,
 	replaceRoute,
+	routerState,
 } from "./router.svelte.js";
 import {
 	consumeSwitchingFromId,
@@ -820,8 +821,10 @@ export function handleMessage(msg: RelayMessage): void {
 				consumeSwitchingFromId() ?? sessionState.currentId;
 			handleSessionSwitched(msg);
 
-			// Update URL to reflect the new session
-			replaceRoute(`/s/${msg.id}`);
+			// Update URL to reflect the new session. Skip it when the URL already
+			// names it: a same-path replace is taken literally and would drop the
+			// list's query (scope, filter, grouping) on every reload.
+			if (routerState.path !== `/s/${msg.id}`) replaceRoute(`/s/${msg.id}`);
 
 			// Bump the outgoing session's replayGeneration to abort any in-flight
 			// convertHistoryAsync or replay for the previous session.

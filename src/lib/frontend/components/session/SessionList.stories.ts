@@ -191,6 +191,72 @@ export const WithItems: Story = {
 	},
 };
 
+export const FilteredToNeedsYou: Story = {
+	name: "Filtered to needs you",
+	beforeEach: () => {
+		sessionState.rootSessions = [
+			...mockSessionsAllGroups,
+			{
+				id: "approval",
+				title: "Approve deployment",
+				attention: "needs-approval",
+			},
+		];
+		routerState.search = "?status=needs-you";
+	},
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		await expect(
+			canvas.getByTestId("session-filter-chip-needs-you"),
+		).toHaveAttribute("aria-pressed", "true");
+		await expect(canvas.getByText("Approve deployment")).toBeVisible();
+	},
+};
+
+export const FilterMatchesNothing: Story = {
+	name: "Filter matches nothing",
+	beforeEach: () => {
+		sessionState.rootSessions = [
+			{ id: "idle", title: "Plan release", attention: "idle" },
+		];
+		routerState.search = "?status=unread";
+	},
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		await expect(canvas.getByTestId("session-filter-empty")).toHaveTextContent(
+			"Nothing unread",
+		);
+		await expect(canvas.getByTestId("session-filter-clear")).toBeVisible();
+	},
+};
+
+export const GroupedByProject: Story = {
+	name: "Grouped by project",
+	beforeEach: () => {
+		sessionState.rootSessions = [
+			{ id: "local", title: "Build sidebar", attention: "working" },
+		];
+		sessionState.daemonSessions = [
+			{
+				id: "foreign",
+				title: "Review release",
+				attention: "idle",
+				projectSlug: "acme",
+			},
+		];
+		routerState.search = "?group=project";
+	},
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		await expect(canvas.getByTestId("session-group-chip")).toHaveTextContent(
+			"By project",
+		);
+		await expect(
+			canvas.getByText("Acme", { selector: ".session-group-label" }),
+		).toBeVisible();
+	},
+};
+
 export const Searching: Story = {
 	beforeEach: () => {
 		sessionState.rootSessions = [...mockSessionsAllGroups];

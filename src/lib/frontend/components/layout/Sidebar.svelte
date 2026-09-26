@@ -8,6 +8,7 @@
 	import Button from "../ui/Button.svelte";
 	import Surface from "../ui/Surface.svelte";
 	import SessionList from "../session/SessionList.svelte";
+	import SessionGroupMenu from "../session/SessionGroupMenu.svelte";
 	import ProjectManagerPanel from "../project/ProjectManagerPanel.svelte";
 	import SidebarFilePanel from "../file/SidebarFilePanel.svelte";
 	import { dismiss } from "../../actions/use-dismiss.svelte.js";
@@ -132,14 +133,15 @@
 	>
 		{#if sessionViewState.compact}
 			<!--
-				Phone list bar (design option A): title, instance identity, overflow.
-				The design's sort control (⇅) lands with group-by, and Select joins
+				Phone list bar (design option A): title, instance identity, group-by, overflow.
+				Select joins
 				this menu with multi-select. Literal px keeps touch targets at 44px
 				despite the 12px root font size.
 			-->
 			<h1 class="m-0 text-[19px] font-semibold tracking-[-0.01em] text-text" data-testid="list-bar-title">Sessions</h1>
 			<span class="flex-1"></span>
 			{#if listScreen}<InstanceBadgeMenu />{/if}
+			<SessionGroupMenu compact />
 			<Menu
 				bind:open={listMenuOpen}
 				ariaLabel="More actions"

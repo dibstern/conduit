@@ -22,6 +22,12 @@ const { navigate, routerState } = await import(
 const { getSessionScope, setSessionScope, takeScopeToken } = await import(
 	"../../../src/lib/frontend/stores/session-scope.js"
 );
+const {
+	getSessionStatusFilter,
+	setSessionStatusFilter,
+	getSessionGrouping,
+	setSessionGrouping,
+} = await import("../../../src/lib/frontend/stores/session-scope.js");
 
 beforeEach(() => {
 	routerState.path = "/s/1";
@@ -70,6 +76,48 @@ describe("session scope in the URL", () => {
 		setSessionScope("acme");
 		navigate("/s/2");
 		expect(getSessionScope()).toBe("acme");
+	});
+});
+
+describe("session arrangement in the URL", () => {
+	it("pushes filter and grouping changes while preserving scope", () => {
+		routerState.search = "?p=acme";
+		setSessionStatusFilter("unread");
+		setSessionGrouping("project");
+		expect(getSessionStatusFilter()).toBe("unread");
+		expect(getSessionGrouping()).toBe("project");
+		expect(routerState.search).toBe("?p=acme&status=unread&group=project");
+		expect(pushStateSpy).toHaveBeenCalledTimes(2);
+		setSessionStatusFilter(null);
+		setSessionGrouping("status");
+		expect(routerState.search).toBe("?p=acme");
+	});
+
+	it("a scope change retains the active filter and grouping", () => {
+		routerState.search = "?status=unread&group=time";
+		setSessionScope("acme");
+		expect(routerState.search).toBe("?status=unread&group=time&p=acme");
+	});
+
+	it("carries scope, filter and grouping across a bare-path navigation", () => {
+		routerState.search = "?p=acme&status=needs-you&group=time&x=1";
+		navigate("/s/2");
+		expect(routerState.search).toBe("?p=acme&status=needs-you&group=time");
+	});
+
+	it("restores both controls through browser history", () => {
+		routerState.search = "?status=running&group=time";
+		window.location.pathname = "/s/1";
+		window.location.search = "?status=unread&group=project";
+		popstateListener?.();
+		expect(getSessionStatusFilter()).toBe("unread");
+		expect(getSessionGrouping()).toBe("project");
+	});
+
+	it("ignores unknown URL values", () => {
+		routerState.search = "?status=unknown&group=unknown";
+		expect(getSessionStatusFilter()).toBeNull();
+		expect(getSessionGrouping()).toBe("status");
 	});
 });
 

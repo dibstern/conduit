@@ -35,19 +35,26 @@ function splitPath(path: string): { pathname: string; search: string } {
 /** The sidebar's project scope (`?p=<slug>`). Read and written through
  *  stores/session-scope.ts; declared here because navigation has to carry it. */
 export const SCOPE_PARAM = "p";
+export const STATUS_PARAM = "status";
+export const GROUP_PARAM = "group";
 
 /**
- * Keeps the scope across a move to another page that names no query of its
+ * Keeps sidebar list parameters across a move to another page that names no query of its
  * own. Every session switch, new session and project hop navigates to a bare
  * path, and on desktop the list stays on screen through all of them: dropping
- * the scope there would silently widen the list the user just narrowed. A
- * same-page navigation is taken literally, which is how clearing the scope
+ * these there would silently change the list the user just arranged. A
+ * same-page navigation is taken literally, which is how clearing a parameter
  * works.
  */
 function carryScope(pathname: string, search: string): string {
 	if (search || pathname === routerState.path) return search;
-	const scope = new URLSearchParams(routerState.search).get(SCOPE_PARAM);
-	return scope ? `?${new URLSearchParams({ [SCOPE_PARAM]: scope })}` : "";
+	const current = new URLSearchParams(routerState.search);
+	const carried = new URLSearchParams();
+	for (const key of [SCOPE_PARAM, STATUS_PARAM, GROUP_PARAM]) {
+		const value = current.get(key);
+		if (value) carried.set(key, value);
+	}
+	return carried.size ? `?${carried}` : "";
 }
 
 // ─── Transition log (dev-mode route debugging) ─────────────────────────────

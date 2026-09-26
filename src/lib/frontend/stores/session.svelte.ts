@@ -41,6 +41,7 @@ import {
 	getEffectiveInstanceId,
 } from "./discovery.svelte.js";
 import { getCurrentSlug, navigate } from "./router.svelte.js";
+import type { SessionGrouping, SessionStatusFilter } from "./session-scope.js";
 import { getSessionScope } from "./session-scope.js";
 
 // ─── State ──────────────────────────────────────────────────────────────────
@@ -436,6 +437,123 @@ export function groupSessionsByAttention(
 			NEEDS_YOU_ORDER.indexOf(sessionAttention(b)),
 	);
 
+	return groups;
+}
+
+export interface SessionSection {
+	key: string;
+	label: string;
+	sessions: SessionInfo[];
+}
+
+export interface SessionProjection {
+	pinned: SessionInfo[];
+	sections: SessionSection[];
+	snoozed: SessionInfo[];
+	settled: SessionInfo[];
+}
+
+/** Project the already scoped and title-searched rows for the sidebar. */
+export function projectSessionList(
+	sessions: SessionInfo[],
+	options: { status: SessionStatusFilter | null; grouping: SessionGrouping },
+	now: number,
+	projectLabel: (session: SessionInfo) => { key: string; label: string },
+): SessionProjection {
+	const matching = sessions.filter(
+		(session) =>
+			options.status === null || sessionMatchesStatus(session, options.status),
+	);
+	const groups = groupSessionsByAttention(matching, now);
+	const shelves = {
+		pinned: groups.pinned,
+		snoozed: groups.snoozed,
+		settled: groups.settled,
+	};
+	if (options.grouping === "status") {
+		return {
+			...shelves,
+			sections: [
+				{ key: "needs-you", label: "Needs you", sessions: groups.needsYou },
+				{ key: "running", label: "Running", sessions: groups.running },
+				{ key: "unread", label: "Done, unread", sessions: groups.doneUnread },
+				{ key: "idle", label: "Idle", sessions: groups.idle },
+			].filter((section) => section.sessions.length > 0),
+		};
+	}
+
+	const live = matching
+		.filter(
+			(session) =>
+				session.pinnedAt == null &&
+				session.settledAt == null &&
+				!isSessionSnoozed(session, now),
+		)
+		.sort((a, b) => getSessionDate(b).getTime() - getSessionDate(a).getTime());
+	if (options.grouping === "time") {
+		const dates = groupSessionsByDate(live, new Date(now));
+		return {
+			...shelves,
+			sections: [
+				{ key: "today", label: "Today", sessions: dates.today },
+				{ key: "yesterday", label: "Yesterday", sessions: dates.yesterday },
+				{ key: "older", label: "Older", sessions: dates.older },
+			].filter((section) => section.sessions.length > 0),
+		};
+	}
+
+	const byProject = new Map<string, SessionSection>();
+	for (const session of live) {
+		const { key, label } = projectLabel(session);
+		let section = byProject.get(key);
+		if (!section) {
+			section = { key, label, sessions: [] };
+			byProject.set(key, section);
+		}
+		section.sessions.push(session);
+	}
+	return { ...shelves, sections: [...byProject.values()] };
+}
+
+export function sessionMatchesStatus(
+	session: SessionInfo,
+	status: SessionStatusFilter,
+): boolean {
+	const attention = sessionAttention(session);
+	switch (status) {
+		case "needs-you":
+			return (
+				attention === "needs-approval" ||
+				attention === "needs-reply" ||
+				attention === "error"
+			);
+		case "running":
+			return attention === "working";
+		case "unread":
+			return attention === "done-unread";
+	}
+}
+
+/** Group sessions into local-calendar today, yesterday and older buckets. */
+export function groupSessionsByDate(
+	sessions: SessionInfo[],
+	now: Date = new Date(),
+): { today: SessionInfo[]; yesterday: SessionInfo[]; older: SessionInfo[] } {
+	const todayStart = new Date(now);
+	todayStart.setHours(0, 0, 0, 0);
+	const yesterdayStart = new Date(todayStart);
+	yesterdayStart.setDate(yesterdayStart.getDate() - 1);
+	const groups = {
+		today: [] as SessionInfo[],
+		yesterday: [] as SessionInfo[],
+		older: [] as SessionInfo[],
+	};
+	for (const session of sessions) {
+		const updated = getSessionDate(session);
+		if (updated >= todayStart) groups.today.push(session);
+		else if (updated >= yesterdayStart) groups.yesterday.push(session);
+		else groups.older.push(session);
+	}
 	return groups;
 }
 

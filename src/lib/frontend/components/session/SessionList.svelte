@@ -4,11 +4,12 @@
 
 <script lang="ts">
 	import { untrack } from "svelte";
-	import type { AttentionGroups, SessionInfo } from "../../types.js";
+	import type { SessionInfo } from "../../types.js";
 	import {
 		sessionState,
 		getFilteredSessions,
-		getAttentionGroups,
+		projectSessionList,
+		sessionMatchesStatus,
 		isSessionSnoozed,
 		setSearchQuery,
 		setCurrentSession,
@@ -19,7 +20,15 @@
 		loadDaemonSessions,
 		searchSessions,
 	} from "../../stores/session.svelte.js";
-	import { getSessionScope } from "../../stores/session-scope.js";
+	import {
+		getSessionGrouping,
+		getSessionScope,
+		getSessionStatusFilter,
+		setSessionGrouping,
+		setSessionStatusFilter,
+		type SessionStatusFilter,
+	} from "../../stores/session-scope.js";
+	import { sessionViewState } from "../../stores/session-view.svelte.js";
 	import {
 		getCurrentSlug,
 		getSessionHref,
@@ -55,6 +64,7 @@
 	import Button from "../ui/Button.svelte";
 	import TextButton from "../ui/TextButton.svelte";
 	import SessionSearchField from "./SessionSearchField.svelte";
+	import SessionGroupMenu from "./SessionGroupMenu.svelte";
 	import Banners from "../overlays/Banners.svelte";
 
 	let { onaddproject }: { onaddproject?: (() => void) | undefined } = $props();
@@ -91,18 +101,41 @@
 	// ─── Derived ────────────────────────────────────────────────────────────────
 
 	const filtered = $derived(getFilteredSessions());
+	const statusFilter = $derived(getSessionStatusFilter());
+	const grouping = $derived(getSessionGrouping());
+	const matching = $derived(filtered.filter((session) => statusFilter === null || sessionMatchesStatus(session, statusFilter)));
+	const arrangement = $derived(projectSessionList(
+		filtered,
+		{ status: statusFilter, grouping },
+		sessionState.now,
+		(session) => {
+			const slug = session.projectSlug ?? getCurrentSlug() ?? "";
+			return { key: slug, label: projectDisplayName(slug) };
+		},
+	));
+	const filterChips: { value: SessionStatusFilter; label: string }[] = [
+		{ value: "needs-you", label: "Needs you" },
+		{ value: "running", label: "Running" },
+		{ value: "unread", label: "Unread" },
+	];
+	// Chips count only live rows: settled and snoozed sets grow without bound.
+	const live = $derived(filtered.filter((session) => session.settledAt == null && !isSessionSnoozed(session, sessionState.now)));
+
 	const cleanupCandidates = $derived(
-		filtered.filter((session) => !isForeignSession(session)),
+		matching.filter((session) => !isForeignSession(session)),
 	);
-	const groups: AttentionGroups = $derived(getAttentionGroups());
-	const isEmpty = $derived(filtered.length === 0);
+	const isEmpty = $derived(matching.length === 0);
 	const searching = $derived(sessionState.searchQuery.trim().length > 0);
 	const settledShelfOpen = $derived(searching || uiState.settledShelfOpen);
 	const snoozedShelfOpen = $derived(searching || uiState.snoozedShelfOpen);
 
 	const scope = $derived(getSessionScope());
 	const emptyMessage = $derived.by(() => {
-		if (sessionState.searchQuery) return "No matching sessions";
+		if (searching && filtered.length === 0) return "No matching sessions";
+		if (statusFilter !== null) {
+			const label = statusFilter === "needs-you" ? "needs you" : statusFilter;
+			return `Nothing ${label}${scope === null ? "" : ` in ${projectDisplayName(scope)}`}`;
+		}
 		if (scope !== null) return `No sessions in ${projectDisplayName(scope)}`;
 		return "No sessions yet";
 	});
@@ -131,16 +164,6 @@
 	const unavailableProjectLabels = $derived(
 		sessionState.daemonUnavailableProjects.map(projectDisplayName),
 	);
-
-	// Rendered in this order, and an empty one is left out entirely: a heading
-	// over nothing costs a line of a phone's list and says nothing.
-	const sections = $derived([
-		{ label: "Pinned", sessions: groups.pinned },
-		{ label: "Needs you", sessions: groups.needsYou },
-		{ label: "Running", sessions: groups.running },
-		{ label: "Done, unread", sessions: groups.doneUnread },
-		{ label: "Idle", sessions: groups.idle },
-	]);
 
 	// Prune stale selections when the session list changes externally
 	$effect(() => {
@@ -597,6 +620,39 @@
 				{onaddproject}
 			/>
 		</div>
+		<div class="flex shrink-0 items-center gap-1 px-2.5 pb-1.5">
+			<div class="flex min-w-0 flex-1 items-center gap-1.5 overflow-x-auto whitespace-nowrap [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+				{#if grouping !== "status"}
+					<Button
+						variant="ghost"
+						size="content"
+						tone="default"
+						class="shrink-0 gap-1.5 rounded-full border border-border bg-bg-alt px-2.5 text-xs font-brand {sessionViewState.compact ? 'min-h-[44px]' : 'min-h-8'}"
+						data-testid="session-group-chip"
+						onclick={() => setSessionGrouping("status")}
+					>
+						By {grouping} <span aria-hidden="true" class="text-text-dimmer">✕</span>
+					</Button>
+				{/if}
+				{#each filterChips as chip (chip.value)}
+					{@const active = statusFilter === chip.value}
+					{@const count = live.filter((session) => sessionMatchesStatus(session, chip.value)).length}
+					<Button
+						variant="ghost"
+						size="content"
+						tone={chip.value === "needs-you" && count > 0 ? "accent" : active ? "default" : "secondary"}
+						class="shrink-0 gap-1.5 rounded-full border px-2.5 text-xs font-brand {sessionViewState.compact ? 'min-h-[44px]' : 'min-h-8'} {chip.value === 'needs-you' && count > 0 ? 'border-accent/40 bg-accent/10' : active ? 'border-border bg-bg-alt' : 'border-border-subtle'}"
+						aria-pressed={active}
+						data-testid={`session-filter-chip-${chip.value}`}
+						onclick={() => setSessionStatusFilter(active ? null : chip.value)}
+					>
+						{chip.label} <b class="font-semibold text-text">{count}</b>
+						{#if active}<span aria-hidden="true" class="text-text-dimmer">✕</span>{/if}
+					</Button>
+				{/each}
+			</div>
+			{#if !sessionViewState.compact}<SessionGroupMenu />{/if}
+		</div>
 	{/if}
 
 	{#if searchSummary}
@@ -677,21 +733,26 @@
 	<!-- svelte-ignore a11y_no_noninteractive_tabindex -->
 	<div id="session-list-scroller" class="flex-1 overflow-y-auto px-2 py-0.5" role="region" aria-label="Sessions" tabindex="0" onscroll={() => { heldSessionId = null; }}>
 		{#if isEmpty}
-			<div class="session-empty py-6 px-3.5 text-center text-xs text-text-dimmer font-brand">
+			<div class="session-empty py-6 px-3.5 text-center text-xs text-text-dimmer font-brand" data-testid={statusFilter !== null && (!searching || filtered.length > 0) ? "session-filter-empty" : undefined}>
 				{emptyMessage}
+				{#if statusFilter !== null && (!searching || filtered.length > 0)}
+					<div class="mt-2"><Button variant="ghost" size="content" tone="accent" class="min-h-8 px-3" data-testid="session-filter-clear" onclick={() => setSessionStatusFilter(null)}>Clear filter</Button></div>
+				{/if}
 			</div>
 		{:else}
-			{#each sections as section (section.label)}
-				{#if section.sessions.length > 0}
+			{#if arrangement.pinned.length > 0}
+				<div class="session-group-label pt-1.5 pb-0.5 px-3 text-xs font-semibold text-text-dimmer tracking-[0.3px] font-brand">Pinned</div>
+				{#each arrangement.pinned as s (s.id)}{@render sessionRow(s)}{/each}
+			{/if}
+			{#each arrangement.sections as section (section.key)}
 					<div class="session-group-label pt-1.5 pb-0.5 px-3 text-xs font-semibold text-text-dimmer tracking-[0.3px] font-brand">
 						{section.label}
 					</div>
 					{#each section.sessions as s (s.id)}
 						{@render sessionRow(s)}
 					{/each}
-				{/if}
 			{/each}
-			{#if groups.snoozed.length > 0}
+			{#if arrangement.snoozed.length > 0}
 				<TextButton
 					tone="dimmer"
 					class="session-group-label flex items-center gap-1 pt-1.5 pb-0.5 px-3 text-xs font-semibold tracking-[0.3px] font-brand"
@@ -705,13 +766,13 @@
 				</TextButton>
 				<div id="snoozed-shelf-rows">
 					{#if snoozedShelfOpen}
-						{#each groups.snoozed as s (s.id)}
+						{#each arrangement.snoozed as s (s.id)}
 							{@render sessionRow(s)}
 						{/each}
 					{/if}
 				</div>
 			{/if}
-			{#if groups.settled.length > 0}
+			{#if arrangement.settled.length > 0}
 				<TextButton
 					tone="dimmer"
 					class="session-group-label flex items-center gap-1 pt-1.5 pb-0.5 px-3 text-xs font-semibold tracking-[0.3px] font-brand"
@@ -725,7 +786,7 @@
 				</TextButton>
 				<div id="settled-shelf-rows">
 					{#if settledShelfOpen}
-						{#each groups.settled as s (s.id)}
+						{#each arrangement.settled as s (s.id)}
 							{@render sessionRow(s)}
 						{/each}
 					{/if}
