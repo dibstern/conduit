@@ -29,15 +29,14 @@
 	import { getBrowserClientId } from "../../stores/client-identity.js";
 	import {
 		getCurrentSlug,
-		navigate,
-		previousHistoryEntryIsSessionList,
 	} from "../../stores/router.svelte.js";
 	import {
 		forceBarOpen,
 		isBarCollapsed,
 	} from "../../stores/session-view.svelte.js";
-	import { findSession, sessionState } from "../../stores/session.svelte.js";
-	import { setSidebarPanel, showToast } from "../../stores/ui.svelte.js";
+	import { findSession, isSessionSnoozed, sessionState } from "../../stores/session.svelte.js";
+	import { showToast } from "../../stores/ui.svelte.js";
+	import { backToSessions, toggleSessionRead } from "../../utils/session-read.js";
 	import { WsRpcError } from "../../transport/ws-rpc.js";
 	import { setSessionAutoSettleRpc, setSessionSettledRpc, unsnoozeSessionRpc } from "../../transport/ws-rpc-client.js";
 	import { formatTimeAgo } from "../../utils/format.js";
@@ -78,15 +77,6 @@
 	const collapsed = $derived(isBarCollapsed());
 
 	let barEl: HTMLElement | null = $state(null);
-
-	function backToSessions() {
-		setSidebarPanel("sessions");
-		if (previousHistoryEntryIsSessionList()) {
-			window.history.back();
-		} else {
-			navigate("/");
-		}
-	}
 
 	function showControls() {
 		forceBarOpen();
@@ -337,6 +327,17 @@
 				data-testid="session-bar-overflow"
 			/>
 		{/snippet}
+
+		{#if session && session.settledAt == null && !isSessionSnoozed(session, sessionState.now)}
+			<MenuItem
+				data-testid={session.unread ? "overflow-mark-read" : "overflow-mark-unread"}
+				onselect={() => void toggleSessionRead(session)}
+			>
+				{session.unread ? "Mark read" : "Mark unread"}
+				<span class="ml-auto text-xs text-text-muted">⌘⇧U</span>
+			</MenuItem>
+			<MenuSeparator />
+		{/if}
 
 		<MenuItem
 			title="Toggle terminal"

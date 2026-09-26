@@ -54,6 +54,8 @@ const SHIPPED_MIGRATION_HASHES: Record<string, string> = {
 		"9e476e07945b4ea923b832a5b69b2cb204fc082e99932ab87f8c33cc0e89f58a",
 	"0016_sessions_auto_settle.sql":
 		"33ba2a35044d1f57cdfa812ad28ba71cb290e5e28f4b4e7e1e05fddc69d93ceb",
+	"0017_sessions_marked_unread.sql":
+		"c424314faa1dacf6bb00f9043a9c83bc36136ef5bcdc791814e135d84151f958",
 };
 
 describe("shipped migrations are immutable", () => {

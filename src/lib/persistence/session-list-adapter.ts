@@ -175,11 +175,12 @@ export function sessionRowsToSessionInfoList(
 			info.pendingPermissionCount = pCount;
 		}
 
-		// Comparing activity to the read timestamp makes new activity re-mark the
-		// session unread without writing another event for every message.
+		// A manual mark works even without messages. Otherwise, new activity
+		// after the last read makes the session unread without another event.
 		if (
-			row.last_message_at != null &&
-			(row.read_at == null || row.read_at < row.last_message_at)
+			row.marked_unread_at != null ||
+			(row.last_message_at != null &&
+				(row.read_at == null || row.read_at < row.last_message_at))
 		) {
 			info.unread = true;
 		}

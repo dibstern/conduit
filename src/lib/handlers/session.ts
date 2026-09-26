@@ -759,7 +759,36 @@ export const markSessionUnreadForClient = ({
 			yield* sessionManagerService.sendSessionLists((msg) =>
 				wsHandler.broadcast(msg),
 			);
+			wsHandler.sendToSession(
+				sessionId,
+				yield* sessionManagerService.getSessionFamily(sessionId),
+			);
 			log.info(`client=${clientId} Marked unread: ${sessionId}`);
+		}
+	});
+
+export const markSessionReadForClient = ({
+	clientId,
+	sessionId,
+}: {
+	readonly clientId: string;
+	readonly sessionId: string;
+}) =>
+	Effect.gen(function* () {
+		const wsHandler = yield* WebSocketHandlerTag;
+		const sessionManagerService = yield* SessionManagerServiceTag;
+		const log = yield* LoggerTag;
+
+		if (sessionId) {
+			yield* sessionManagerService.markSessionRead(sessionId);
+			yield* sessionManagerService.sendSessionLists((msg) =>
+				wsHandler.broadcast(msg),
+			);
+			wsHandler.sendToSession(
+				sessionId,
+				yield* sessionManagerService.getSessionFamily(sessionId),
+			);
+			log.info(`client=${clientId} Marked read: ${sessionId}`);
 		}
 	});
 

@@ -52,7 +52,7 @@
 	import { attachedProjectState, getCurrentRoute, getCurrentSessionId, getCurrentSearchParams, replaceRoute, routerState } from "../../stores/router.svelte.js";
 	import { clearMessages } from "../../stores/chat.svelte.js";
 	import { applyPtyListResponse, terminalState, destroyAll } from "../../stores/terminal.svelte.js";
-	import { applyListSessionsResponse, clearSessionState, loadDaemonSessions, sessionState, switchToSession } from "../../stores/session.svelte.js";
+	import { applyListSessionsResponse, clearSessionState, findSession, getFilteredSessions, loadDaemonSessions, sessionState, switchToSession } from "../../stores/session.svelte.js";
 	import { clearAllPermissions } from "../../stores/permissions.svelte.js";
 	import { applyGetAgentsResponse, applyGetCommandsResponse, applyGetModelsResponse, clearDiscoveryState, discoveryState } from "../../stores/discovery.svelte.js";
 	import { todoState, clearTodoState } from "../../stores/todo.svelte.js";
@@ -63,6 +63,7 @@
 	import { featureFlags, initFeatureFlags, toggleFeature } from "../../stores/feature-flags.svelte.js";
 	import { fetchCurrentVersion } from "../../stores/version.svelte.js";
 	import type { RelayMessage } from "../../types.js";
+	import { toggleSessionRead } from "../../utils/session-read.js";
 
 	// ─── Local state ──────────────────────────────────────────────────────────
 
@@ -618,6 +619,34 @@
 		}
 		window.addEventListener("keydown", handleDebugShortcut);
 		return () => window.removeEventListener("keydown", handleDebugShortcut);
+	});
+
+	$effect(() => {
+		function handleReadShortcut(e: KeyboardEvent) {
+			if (e.key.toLowerCase() !== "u" || e.altKey || e.repeat) return;
+			const target = e.target;
+			const globalShortcut = (e.ctrlKey || e.metaKey) && e.shiftKey;
+			if (globalShortcut) {
+				if (!sessionState.currentId) return;
+				e.preventDefault();
+				const session = findSession(sessionState.currentId);
+				if (session) void toggleSessionRead(session);
+				return;
+			}
+			if (e.ctrlKey || e.metaKey || e.shiftKey || !(target instanceof Element)) return;
+			if (target.closest("input, textarea, [contenteditable]:not([contenteditable='false'])")) return;
+			const rowId = target.closest("#session-list .session-item")?.getAttribute("data-session-id");
+			const session = rowId
+				? getFilteredSessions().find((candidate) => candidate.id === rowId)
+				: target.closest("#messages") && sessionState.currentId
+					? findSession(sessionState.currentId)
+					: undefined;
+			if (!session) return;
+			e.preventDefault();
+			void toggleSessionRead(session);
+		}
+		window.addEventListener("keydown", handleReadShortcut);
+		return () => window.removeEventListener("keydown", handleReadShortcut);
 	});
 
 	// ─── Show debug panel when feature flag enabled ────────────────────────────

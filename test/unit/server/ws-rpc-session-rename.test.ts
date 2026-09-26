@@ -109,7 +109,11 @@ describe("WsRpcServerLayer RenameSession", () => {
 			expect(sessionManagerService.markSessionUnread).toHaveBeenCalledWith(
 				"root-1",
 			);
-			expect(calls.map((call) => call.message)).toEqual([
+			expect(
+				calls
+					.map((call) => call.message)
+					.filter((message) => message.type === "session_list"),
+			).toEqual([
 				{
 					type: "session_list",
 					sessions: [

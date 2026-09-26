@@ -320,6 +320,12 @@ export interface RenameSessionRpcInput {
 	readonly originId?: string;
 }
 
+export interface MarkSessionReadRpcInput {
+	readonly projectSlug: string;
+	readonly sessionId: string;
+	readonly originId?: string;
+}
+
 export interface SetSessionSettledRpcInput {
 	readonly projectSlug: string;
 	readonly sessionId: string;
@@ -1162,6 +1168,40 @@ const callSetSessionSettled = (input: SetSessionSettledRpcInput) =>
 		Effect.provide(RpcSerialization.layerJson),
 	);
 
+const callMarkSessionUnread = (input: MarkSessionReadRpcInput) =>
+	Effect.scoped(
+		Effect.gen(function* () {
+			const client = yield* RpcClient.make(WsRpcGroup);
+			yield* client.MarkSessionUnread({
+				projectSlug: input.projectSlug,
+				sessionId: input.sessionId,
+				...(input.originId ? { originId: input.originId } : {}),
+			});
+		}),
+	).pipe(
+		Effect.provide(RpcClient.layerProtocolSocket()),
+		Effect.provide(Socket.layerWebSocket(makeWsRpcUrl())),
+		Effect.provide(Socket.layerWebSocketConstructorGlobal),
+		Effect.provide(RpcSerialization.layerJson),
+	);
+
+const callMarkSessionRead = (input: MarkSessionReadRpcInput) =>
+	Effect.scoped(
+		Effect.gen(function* () {
+			const client = yield* RpcClient.make(WsRpcGroup);
+			yield* client.MarkSessionRead({
+				projectSlug: input.projectSlug,
+				sessionId: input.sessionId,
+				...(input.originId ? { originId: input.originId } : {}),
+			});
+		}),
+	).pipe(
+		Effect.provide(RpcClient.layerProtocolSocket()),
+		Effect.provide(Socket.layerWebSocket(makeWsRpcUrl())),
+		Effect.provide(Socket.layerWebSocketConstructorGlobal),
+		Effect.provide(RpcSerialization.layerJson),
+	);
+
 const callSetSessionPinned = (input: SetSessionPinnedRpcInput) =>
 	Effect.scoped(
 		Effect.gen(function* () {
@@ -1676,6 +1716,18 @@ export async function setSessionSettledRpc(
 	input: SetSessionSettledRpcInput,
 ): Promise<void> {
 	await runTransportEffect(callSetSessionSettled(input));
+}
+
+export async function markSessionUnreadRpc(
+	input: MarkSessionReadRpcInput,
+): Promise<void> {
+	await runTransportEffect(callMarkSessionUnread(input));
+}
+
+export async function markSessionReadRpc(
+	input: MarkSessionReadRpcInput,
+): Promise<void> {
+	await runTransportEffect(callMarkSessionRead(input));
 }
 
 export async function setSessionPinnedRpc(

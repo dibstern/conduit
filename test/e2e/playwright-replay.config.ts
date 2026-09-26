@@ -19,6 +19,7 @@ export default defineConfig({
 		"session-auto-settle.spec.ts",
 		"session-arrange.spec.ts",
 		"session-snooze.spec.ts",
+		"session-mark-unread.spec.ts",
 		"session-gestures.spec.ts",
 		"sidebar-layout.spec.ts",
 		"ui-features.spec.ts",

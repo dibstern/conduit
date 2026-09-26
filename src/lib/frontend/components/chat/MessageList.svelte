@@ -244,6 +244,9 @@
 
 <div
 	id="messages"
+	role="region"
+	aria-label="Transcript"
+	tabindex="0"
 	class="flex-1 overflow-y-auto pt-5 pb-3 relative"
 	style="-webkit-overflow-scrolling: touch;"
 	bind:this={messagesEl}

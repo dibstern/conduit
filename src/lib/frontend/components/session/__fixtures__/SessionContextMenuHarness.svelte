@@ -35,6 +35,7 @@
 		onsettle={() => {}}
 		onautosettle={() => {}}
 		onpin={() => {}}
+		onmarkread={() => {}}
 		onsnooze={() => {}}
 		onunsnooze={() => {}}
 		ondelete={() => {}}

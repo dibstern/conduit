@@ -21,6 +21,7 @@ function makeRow(id: string, overrides?: Partial<SessionRow>): SessionRow {
 		last_turn_error_at: null,
 		permission_mode: null,
 		read_at: null,
+		marked_unread_at: null,
 		settled_at: null,
 		pinned_at: null,
 		snoozed_at: null,

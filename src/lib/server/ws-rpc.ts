@@ -61,6 +61,7 @@ import {
 	deleteSessionForClient,
 	forkSessionForClient,
 	loadMoreHistoryForSession,
+	markSessionReadForClient,
 	markSessionUnreadForClient,
 	renameSessionForClient,
 	setSessionAutoSettleForClient,
@@ -129,6 +130,7 @@ export {
 	type ListSessionsResponse,
 	LoadMoreHistory,
 	type LoadMoreHistoryResponse,
+	MarkSessionRead,
 	MarkSessionUnread,
 	type ModelInfo,
 	type ProjectMutationResponse,
@@ -917,6 +919,20 @@ export const wsRpcHandlers = WsRpcGroup.of({
 				Effect.fail(
 					new WsRpcError({
 						message: `MarkSessionUnread failed: ${String(error)}`,
+					}),
+				),
+			),
+		),
+	MarkSessionRead: (request) =>
+		markSessionReadForClient({
+			clientId: request.originId ?? "rpc",
+			sessionId: request.sessionId,
+		}).pipe(
+			Effect.as({ ok: true as const }),
+			Effect.catchAll((error) =>
+				Effect.fail(
+					new WsRpcError({
+						message: `MarkSessionRead failed: ${String(error)}`,
 					}),
 				),
 			),

@@ -12,6 +12,7 @@ export interface SessionRow {
 	last_turn_error_at: number | null;
 	permission_mode: string | null;
 	read_at: number | null;
+	marked_unread_at?: number | null;
 	settled_at: number | null;
 	unsettled_at?: number | null;
 	auto_settle_disabled_at?: number | null;

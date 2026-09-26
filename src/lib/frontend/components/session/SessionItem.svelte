@@ -154,6 +154,7 @@
 		heldSessionId,
 		onholdchange,
 		menuOpen = false,
+		markOnly = false,
 		onrename,
 		onrenameend,
 	}: {
@@ -176,6 +177,7 @@
 		pinned?: boolean;
 		onswitchsession?: (id: string) => void;
 		ontoggleselection?: (id: string) => void;
+		markOnly?: boolean;
 		oncontextmenu?: (session: SessionInfo, anchor: HTMLElement) => void;
 		onsettle?: (id: string, next: boolean) => void;
 		onpin?: (id: string, next: boolean) => void;
@@ -364,6 +366,7 @@
 	}
 
 	function canSwipe(direction: "settle" | "snooze") {
+		if (markOnly) return false;
 		return direction === "settle"
 			? actions.settleDisabledReason == null
 			: actions.snoozeVisible && (actions.snoozed || actions.snoozeDisabledReason == null);
@@ -622,6 +625,9 @@
 				class="session-title-inner inline-block group-hover:pr-[3em] group-hover:session-title-marquee overflow-hidden text-ellipsis whitespace-nowrap min-w-0 group-hover:text-clip"
 				>{displayTitle}</span
 			>
+			{#if sessionAttention(session) === "done-unread"}
+				<span data-testid="session-unread-dot" class="size-[7px] shrink-0 rounded-full bg-brand-a" aria-hidden="true"></span>
+			{/if}
 		{/if}
 		{#if pinned}
 			<span class="shrink-0 text-text-dimmer" title="Pinned session">
@@ -672,6 +678,7 @@
 			<!-- Desktop verbs replace the time on hover and keyboard focus. -->
 			{#if !cleanupMode && oncontextmenuProp}
 				<span class="hidden md:group-hover:inline-flex md:group-focus-within:inline-flex {menuOpen ? 'md:inline-flex' : ''} items-center gap-0.5" data-testid="session-row-actions">
+					{#if !markOnly}
 					<Button variant="ghost" size="content" tone="inherit" hoverFill="none"
 						class="size-[27px] rounded-[7px] text-text-secondary hover:text-text hover:bg-bg-alt"
 						data-testid={settled || actions.settled ? "session-act-unsettle" : "session-act-settle"}
@@ -701,8 +708,9 @@
 						data-testid={actions.pinned ? "session-act-unpin" : "session-act-pin"}
 						ariaLabel="{actions.pinned ? 'Unpin' : 'Pin'} {displayTitle}" title={actions.pinned ? "Unpin" : "Pin"}
 						onclick={(event) => { event.preventDefault(); event.stopPropagation(); onpin?.(session.id, !actions.pinned); }}
-					><Icon name={actions.pinned ? "star-off" : "star"} size={16} /></Button>
-				<Button
+						><Icon name={actions.pinned ? "star-off" : "star"} size={16} /></Button>
+					{/if}
+					<Button
 					bind:element={moreBtnEl}
 					variant="ghost"
 					size="content"

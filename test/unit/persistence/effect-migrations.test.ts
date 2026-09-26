@@ -209,6 +209,7 @@ describe("Effect SQL migrations", () => {
 					{ migration_id: 15, name: "sessions_settled_pinned" },
 					{ migration_id: 16, name: "sessions_snoozed" },
 					{ migration_id: 17, name: "sessions_auto_settle" },
+					{ migration_id: 18, name: "sessions_marked_unread" },
 				]);
 
 				const legacyRows = yield* sql<{ id: number; name: string }>`
@@ -260,6 +261,7 @@ describe("Effect SQL migrations", () => {
 					[15, "sessions_settled_pinned"],
 					[16, "sessions_snoozed"],
 					[17, "sessions_auto_settle"],
+					[18, "sessions_marked_unread"],
 				]);
 
 				const sql = yield* SqlClient.SqlClient;
@@ -278,8 +280,8 @@ describe("Effect SQL migrations", () => {
 					name: string;
 				}>`SELECT migration_id, name FROM effect_sql_migrations ORDER BY migration_id`;
 				expect(effectHistory.at(-1)).toEqual({
-					migration_id: 17,
-					name: "sessions_auto_settle",
+					migration_id: 18,
+					name: "sessions_marked_unread",
 				});
 				const legacyHistory = yield* sql<{ id: number; name: string }>`
 					SELECT id, name FROM _migrations ORDER BY id`;
@@ -326,6 +328,7 @@ describe("Effect SQL migrations", () => {
 					{ migration_id: 15, name: "sessions_settled_pinned" },
 					{ migration_id: 16, name: "sessions_snoozed" },
 					{ migration_id: 17, name: "sessions_auto_settle" },
+					{ migration_id: 18, name: "sessions_marked_unread" },
 				]);
 
 				const columns = yield* sql<{ name: string }>`
@@ -403,8 +406,8 @@ describe("Effect SQL migrations", () => {
 					FROM effect_sql_migrations
 					ORDER BY migration_id`;
 				expect(history.at(-1)).toEqual({
-					migration_id: 17,
-					name: "sessions_auto_settle",
+					migration_id: 18,
+					name: "sessions_marked_unread",
 				});
 			}).pipe(
 				Effect.provide(

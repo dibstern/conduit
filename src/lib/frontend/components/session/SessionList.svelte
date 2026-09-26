@@ -56,6 +56,7 @@
 	import { formatSnoozeTime, formatTimeAgo } from "../../utils/format.js";
 	import { getSnoozePresets } from "../../utils/snooze.js";
 	import { WsRpcError } from "../../transport/ws-rpc.js";
+	import { toggleSessionRead } from "../../utils/session-read.js";
 	import SessionItem from "./SessionItem.svelte";
 	import SessionPager from "./SessionPager.svelte";
 	import SessionContextMenu from "./SessionContextMenu.svelte";
@@ -692,11 +693,12 @@
 		{@const settled = s.pinnedAt == null && s.settledAt != null}
 		{@const snoozed = !settled && s.pinnedAt == null && isSessionSnoozed(s, sessionState.now)}
 		{#if isForeignSession(s)}
-			<!-- Rename, the context menu and cleanup selection all
+			<!-- Rename, most context-menu verbs and cleanup selection all
 			     RPC the relay this socket is attached to, so handing them a session
 			     owned by another project would act on the wrong relay. Withholding
-			     the handlers is what makes the row inert instead of wrong, and it
-			     keeps those actions on the owning relay. -->
+			     the handlers is what makes the row inert instead of wrong. The menu
+			     keeps only Mark read/unread (markOnly), which carries the row's
+			     own projectSlug. -->
 			<SessionItem
 				session={s}
 				pinned={s.pinnedAt != null}
@@ -709,6 +711,9 @@
 				projectLabel={getProjectLabel(s)}
 				branch={s.git?.branch}
 				onswitchsession={(id) => handleSwitchSession(id, s.projectSlug)}
+				oncontextmenu={handleContextMenu}
+				menuOpen={ctxMenuSession?.id === s.id}
+				markOnly
 			/>
 		{:else}
 			<SessionItem
@@ -849,12 +854,14 @@
 		onsettle={(_id, next) => { if (ctxMenuSession) void handleCtxSettle(ctxMenuSession, next); }}
 		onautosettle={(_id, disabled) => { if (ctxMenuSession) void handleCtxAutoSettle(ctxMenuSession, disabled); }}
 		onpin={(_id, next) => { if (ctxMenuSession) void handleCtxPin(ctxMenuSession, next); }}
+		onmarkread={(_id) => { if (ctxMenuSession) void toggleSessionRead(ctxMenuSession); }}
 		onsnooze={(_id) => { if (ctxMenuSession) handleOpenSnooze(ctxMenuSession); }}
 		onunsnooze={(_id) => { if (ctxMenuSession) void handleUnsnooze(ctxMenuSession); }}
 		ondelete={handleCtxDelete}
 		oncopyresume={handleCtxCopyResume}
 		onfork={handleCtxFork}
 		onclose={handleCloseContextMenu}
+		markOnly={isForeignSession(ctxMenuSession)}
 	/>
 {/if}
 

@@ -35,6 +35,7 @@
 		onsettle,
 		onautosettle,
 		onpin,
+		onmarkread,
 		onsnooze,
 		onunsnooze,
 		now = Date.now(),
@@ -42,6 +43,7 @@
 		oncopyresume,
 		onfork,
 		onclose,
+		markOnly = false,
 	}: {
 		session: SessionInfo;
 		anchor: HTMLElement;
@@ -51,6 +53,7 @@
 		onsettle: (id: string, next: boolean) => void;
 		onautosettle: (id: string, disabled: boolean) => void;
 		onpin: (id: string, next: boolean) => void;
+		onmarkread?: (id: string) => void;
 		onsnooze: (id: string) => void;
 		onunsnooze: (id: string) => void;
 		now?: number;
@@ -58,6 +61,7 @@
 		oncopyresume: (id: string) => void;
 		onfork: (id: string) => void;
 		onclose: () => void;
+		markOnly?: boolean;
 	} = $props();
 
 	let open = $state(true);
@@ -114,6 +118,7 @@
 		{/if}
 	</div>
 
+	{#if !markOnly}
 	<MenuItem
 		data-testid={session.settledAt != null ? "session-ctx-unsettle" : "session-ctx-settle"}
 		disabled={actions.settleDisabledReason != null}
@@ -135,13 +140,6 @@
 		</span>
 		<span>Auto-settle when idle</span>
 	</MenuItem>
-	<MenuItem
-		data-testid={session.pinnedAt != null ? "session-ctx-unpin" : "session-ctx-pin"}
-		onselect={() => select(() => onpin(session.id, !actions.pinned))}
-	>
-		<Icon name={session.pinnedAt != null ? "star-off" : "star"} size={13} />
-		<span>{session.pinnedAt != null ? "Unpin" : "Pin to top"}</span>
-	</MenuItem>
 	{#if actions.snoozeVisible}
 		<MenuItem
 			data-testid="session-ctx-snooze"
@@ -161,6 +159,25 @@
 			</MenuItem>
 		{/if}
 	{/if}
+	<MenuItem
+		data-testid={session.pinnedAt != null ? "session-ctx-unpin" : "session-ctx-pin"}
+		onselect={() => select(() => onpin(session.id, !actions.pinned))}
+	>
+		<Icon name={session.pinnedAt != null ? "star-off" : "star"} size={13} />
+		<span>{session.pinnedAt != null ? "Unpin" : "Pin to top"}</span>
+	</MenuItem>
+	{/if}
+	{#if onmarkread && !actions.settled && !actions.snoozed}
+		<MenuItem
+			data-testid={session.unread ? "session-ctx-mark-read" : "session-ctx-mark-unread"}
+			onselect={() => select(() => onmarkread(session.id))}
+		>
+			<Icon name={session.unread ? "circle" : "circle-dot"} size={13} />
+			<span>{session.unread ? "Mark read" : "Mark unread"}</span>
+			<span class="ml-auto text-xs text-text-muted">⌘⇧U</span>
+		</MenuItem>
+	{/if}
+	{#if !markOnly}
 	<MenuSeparator />
 
 	<MenuItem
@@ -188,4 +205,5 @@
 	>
 		<span>Delete</span>
 	</MenuItem>
+	{/if}
 </Menu>

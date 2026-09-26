@@ -15,6 +15,7 @@ import {
 	SESSION_CASCADE_DELETES_MIGRATION,
 	SESSIONS_AUTO_SETTLE_MIGRATION,
 	SESSIONS_LAST_TURN_ERROR_MIGRATION,
+	SESSIONS_MARKED_UNREAD_MIGRATION,
 	SESSIONS_PERMISSION_MODE_MIGRATION,
 	SESSIONS_READ_AT_MIGRATION,
 	SESSIONS_SETTLED_PINNED_MIGRATION,
@@ -68,6 +69,9 @@ const sessionsSnoozedMigrationSql = readMigrationSql(
 );
 const sessionsAutoSettleMigrationSql = readMigrationSql(
 	SESSIONS_AUTO_SETTLE_MIGRATION,
+);
+const sessionsMarkedUnreadMigrationSql = readMigrationSql(
+	SESSIONS_MARKED_UNREAD_MIGRATION,
 );
 
 const expectedTableColumns = {
@@ -272,6 +276,7 @@ const expectedTableColumns = {
 		"unsettled_at",
 		"auto_settle_disabled_at",
 		"settled_automatically",
+		"marked_unread_at",
 	],
 	tool_content: ["tool_id", "session_id", "content", "created_at"],
 	turns: [
@@ -384,6 +389,7 @@ const appendedSessionColumns = [
 	"unsettled_at",
 	"auto_settle_disabled_at",
 	"settled_automatically",
+	"marked_unread_at",
 ] as const;
 
 function sameStrings(
@@ -694,6 +700,19 @@ const runSessionsAutoSettleMigration: Effect.Effect<
 	}
 });
 
+const runSessionsMarkedUnreadMigration: Effect.Effect<
+	void,
+	unknown,
+	SqlClient.SqlClient
+> = Effect.gen(function* () {
+	const sql = yield* SqlClient.SqlClient;
+	const columns = yield* sql.unsafe<{ name: string }>(
+		"PRAGMA table_info(sessions)",
+	);
+	if (columns.some((column) => column.name === "marked_unread_at")) return;
+	yield* executeSqlStatements(sessionsMarkedUnreadMigrationSql);
+});
+
 /** 2026-07-15T00:00:00.000Z — midnight UTC of the day 0004_drop_events_session_fk shipped (b2b698c6). */
 export const LEGACY_SKELETON_CUTOFF_MS = 1_784_073_600_000;
 export const MAX_PURGEABLE_SKELETON_SESSIONS = 25;
@@ -848,6 +867,7 @@ export const effectMigrationEntries = {
 	"0015_sessions_settled_pinned": runSessionsSettledPinnedMigration,
 	"0016_sessions_snoozed": runSessionsSnoozedMigration,
 	"0017_sessions_auto_settle": runSessionsAutoSettleMigration,
+	"0018_sessions_marked_unread": runSessionsMarkedUnreadMigration,
 } satisfies Record<string, Effect.Effect<void, unknown, SqlClient.SqlClient>>;
 
 export function makeEffectMigrationLoader(
