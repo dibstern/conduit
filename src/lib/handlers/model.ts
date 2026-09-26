@@ -355,8 +355,8 @@ export const getModelsResponse = (
 		const activeProviderId =
 			activeId &&
 			engineOption._tag === "Some" &&
-			typeof engineOption.value.getProviderForSession === "function"
-				? engineOption.value.getProviderForSession(activeId)
+			typeof engineOption.value.getProviderForSessionEffect === "function"
+				? yield* engineOption.value.getProviderForSessionEffect(activeId)
 				: undefined;
 		const selectedDriver: ProviderDriverKind = isClaudeProvider(
 			activeProviderId ?? fallbackModel?.providerID ?? "",

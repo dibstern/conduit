@@ -134,7 +134,7 @@ describe("model handlers with Effect-native model service", () => {
 				persistDefaultModel: vi.fn(() => Effect.succeed(undefined)),
 			};
 			const engine = withDispatchEffect({
-				getProviderForSession: vi.fn(() => "claude"),
+				getProviderForSessionEffect: vi.fn(() => Effect.succeed("claude")),
 				dispatch: vi.fn(async () => ({
 					models: [{ id: "sonnet", name: "Sonnet", providerId: "claude" }],
 					supportsTools: true,

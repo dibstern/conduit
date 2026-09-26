@@ -629,9 +629,6 @@ export async function createProjectRelay(
 	// ── Orchestration runtime layer (provider instance routing) ─────────────
 	const orchestrationRuntimeLayer = makeOrchestrationRuntimeLayer({
 		...(config.projectDir != null && { workspaceRoot: config.projectDir }),
-		...(config.persistenceDbPath != null
-			? { persistenceDbPath: config.persistenceDbPath }
-			: {}),
 		...(config.slug != null ? { projectKey: config.slug } : {}),
 		...(config.configDir != null ? { configDir: config.configDir } : {}),
 	});
@@ -702,7 +699,9 @@ export async function createProjectRelay(
 	// The orchestration engine's side-effect reactor consumes the SAME
 	// ProviderRuntimeIngestion instance the relay uses (Effect memoizes the shared
 	// layer reference), so committed provider side effects stream through one
-	// ingestion pipeline — no duplicate event append.
+	// ingestion pipeline — no duplicate event append. Likewise the shared
+	// persistenceEffectLayer reference gives orchestration (session bindings,
+	// durable command receipts) the relay's one SqlClient connection.
 	const providerOrchestrationDeps =
 		persistenceEffectLayer != null && providerRuntimeIngestionLayer != null
 			? Layer.mergeAll(

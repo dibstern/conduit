@@ -4,12 +4,12 @@
 // Routes commands to the correct provider instance via ProviderRegistry.
 // Manages session-to-provider mapping.
 
+import type { SqlClient } from "@effect/sql";
 import { Deferred, Effect } from "effect";
 
 import type { ProviderDriverKind } from "../contracts/provider-instance.js";
 import type { ProviderRuntimeIngestion } from "../domain/relay/Services/provider-runtime-ingestion-service.js";
 import { createLogger } from "../logger.js";
-import type { SqliteClient } from "../persistence/sqlite-client.js";
 import {
 	CommandFingerprintMismatch,
 	CommandIdGenerationFailed,
@@ -122,9 +122,13 @@ export interface SessionBinding {
  *
  * `now`/`generateId` are injected so tests can control time and force id-gen
  * failures; production supplies wall-clock and a random id at the wiring edge.
+ * `snapshot` is the narrow command read model (receipts + stale-command
+ * tombstones) loaded by `CommandReadModelRepository.bootstrap()` before the
+ * engine is constructed.
  */
 export interface DurableCommandStoreOptions {
-	readonly db: SqliteClient;
+	readonly sql: SqlClient.SqlClient;
+	readonly snapshot: CommandReadModelSnapshot;
 	readonly projectKey: string;
 	readonly now: () => number;
 	readonly generateId: () => string;
@@ -149,7 +153,7 @@ interface DurableCommandRuntime {
 	readonly commit: DurableCommandCommitRepository;
 	readonly receipts: CommandReadModelRepository;
 	readonly reactor: ProviderSideEffectReactor;
-	readonly db: SqliteClient;
+	readonly sql: SqlClient.SqlClient;
 	readonly projectKey: string;
 	readonly now: () => number;
 	readonly generateId: () => string;
@@ -211,15 +215,14 @@ export class OrchestrationEngine {
 		this.resolveProviderDriver = options.resolveProviderDriver;
 		if (options.durableCommands) {
 			const durable = options.durableCommands;
-			const receipts = new CommandReadModelRepository(durable.db);
 			this.durable = {
-				commit: new DurableCommandCommitRepository(durable.db),
-				receipts,
+				commit: new DurableCommandCommitRepository(durable.sql),
+				receipts: new CommandReadModelRepository(durable.sql),
 				// Single provider executor. Shares the durable DB, registry, and
 				// wall-clock with the engine; provider output streams to the shared
 				// ProviderRuntimeIngestion (no-op sink when none is supplied).
 				reactor: new ProviderSideEffectReactor({
-					db: durable.db,
+					sql: durable.sql,
 					registry: this.registry,
 					ingestion: durable.ingestion ?? { ingest: () => Effect.succeed(0) },
 					nowMs: durable.now,
@@ -227,14 +230,11 @@ export class OrchestrationEngine {
 						? { resolveProviderDriver: this.resolveProviderDriver }
 						: {}),
 				}),
-				db: durable.db,
+				sql: durable.sql,
 				projectKey: durable.projectKey,
 				now: durable.now,
 				generateId: durable.generateId,
-				// Narrow command read-model bootstrap: load only the command decision
-				// snapshot (receipts + stale-command tombstones), never the full
-				// relay/UI snapshot or message history.
-				snapshot: receipts.bootstrap(),
+				snapshot: durable.snapshot,
 			};
 		}
 	}
@@ -355,9 +355,9 @@ export class OrchestrationEngine {
 		return Effect.gen(this, function* () {
 			const hash = fingerprintHash(effectiveDispatchFingerprint(command));
 
-			const existing = yield* Effect.sync(() =>
-				durable.receipts.checkReceipt(command.commandId),
-			);
+			const existing = yield* durable.receipts
+				.checkReceipt(command.commandId)
+				.pipe(Effect.orDie);
 			if (existing) {
 				// The stored hash is only comparable to a freshly computed one within
 				// the same fingerprint scheme version. A version mismatch (a receipt
@@ -386,14 +386,12 @@ export class OrchestrationEngine {
 					// for real (crash policy: never re-execute an orphaned command). The
 					// receipt stays `side_effect_requested` so subsequent replays remain
 					// idempotently orphaned. Then surface an explicit incomplete status.
-					yield* Effect.sync(() =>
-						durable.db.execute(
-							`UPDATE provider_command_outbox
-							 SET status = 'failed', error_code = 'orphaned', updated_at = ?
-							 WHERE command_id = ?
-							   AND status IN ('pending', 'running', 'retryable_failed')`,
-							[durable.now(), command.commandId],
-						),
+					yield* durable.sql`
+						UPDATE provider_command_outbox
+						SET status = 'failed', error_code = 'orphaned', updated_at = ${durable.now()}
+						WHERE command_id = ${command.commandId}
+						  AND status IN ('pending', 'running', 'retryable_failed')`.pipe(
+						Effect.orDie,
 					);
 					return ORPHANED_TURN_RESULT;
 				}
@@ -431,22 +429,22 @@ export class OrchestrationEngine {
 			// up the instance when it executes; this is the pre-commit fail-fast.
 			yield* this.getProviderInstanceEffect(command.providerId);
 
-			yield* Effect.try({
-				try: () =>
-					this.commitAcceptedSendTurn(
-						command,
-						durable,
-						hash,
-						dispatchId,
-						nowMs,
-					),
-				catch: (cause) =>
-					new ProviderInstanceFailure({
-						providerId: command.providerId,
-						operation: "commitSendTurn",
-						cause,
-					}),
-			});
+			yield* this.commitAcceptedSendTurn(
+				command,
+				durable,
+				hash,
+				dispatchId,
+				nowMs,
+			).pipe(
+				Effect.mapError(
+					(cause) =>
+						new ProviderInstanceFailure({
+							providerId: command.providerId,
+							operation: "commitSendTurn",
+							cause,
+						}),
+				),
+			);
 
 			// Bind the session so follow-up commands route to this provider,
 			// matching the inline path.
@@ -484,28 +482,36 @@ export class OrchestrationEngine {
 		fingerprintHashValue: string,
 		dispatchId: string,
 		nowMs: number,
-	): void {
-		const requestSequence =
-			(durable.db.queryOne<{ readonly m: number }>(
-				"SELECT COALESCE(MAX(request_sequence), 0) AS m FROM provider_command_outbox",
-			)?.m ?? 0) + 1;
-		const {
-			eventSink: _eventSink,
-			abortSignal: _abortSignal,
-			...payload
-		} = command.input;
-		const payloadJson = JSON.stringify({ ...payload, dispatchId });
-		durable.commit.commit(
-			decideDurableSendTurnCommand({
-				commandId: command.commandId,
-				projectKey: durable.projectKey,
-				sessionId: command.input.sessionId,
-				providerId: command.providerId,
-				fingerprintHash: fingerprintHashValue,
-				nowMs,
-				requestSequence,
-				payloadJson,
-				events: [],
+	): Effect.Effect<void, unknown> {
+		// The request-sequence read shares the commit transaction so concurrent
+		// dispatches cannot allocate the same sequence.
+		return durable.sql.withTransaction(
+			Effect.gen(function* () {
+				const [maxRow] = yield* durable.sql<{ readonly m: number }>`
+					SELECT COALESCE(MAX(request_sequence), 0) AS m FROM provider_command_outbox`;
+				const requestSequence = (maxRow?.m ?? 0) + 1;
+				const {
+					eventSink: _eventSink,
+					abortSignal: _abortSignal,
+					...payload
+				} = command.input;
+				const payloadJson = yield* Effect.try({
+					try: () => JSON.stringify({ ...payload, dispatchId }),
+					catch: (cause) => cause,
+				});
+				yield* durable.commit.commit(
+					decideDurableSendTurnCommand({
+						commandId: command.commandId,
+						projectKey: durable.projectKey,
+						sessionId: command.input.sessionId,
+						providerId: command.providerId,
+						fingerprintHash: fingerprintHashValue,
+						nowMs,
+						requestSequence,
+						payloadJson,
+						events: [],
+					}),
+				);
 			}),
 		);
 	}
@@ -534,7 +540,7 @@ export class OrchestrationEngine {
 			);
 
 			const previousProviderId =
-				this.sessionBindingReadModel.getProviderForSession(
+				yield* this.sessionBindingReadModel.getProviderForSession(
 					command.input.sessionId,
 				);
 			const restorePreviousBinding = Effect.sync(() => {
@@ -573,7 +579,7 @@ export class OrchestrationEngine {
 		command: InterruptTurnCommand,
 	): Effect.Effect<void, OrchestrationError> {
 		return Effect.gen(this, function* () {
-			const providerId = yield* this.getProviderForSessionEffect(
+			const providerId = yield* this.requireProviderForSessionEffect(
 				command.sessionId,
 			);
 			const instance = yield* this.getProviderInstanceEffect(providerId);
@@ -600,7 +606,7 @@ export class OrchestrationEngine {
 		command: ResolvePermissionCommand,
 	): Effect.Effect<void, OrchestrationError> {
 		return Effect.gen(this, function* () {
-			const providerId = yield* this.getProviderForSessionEffect(
+			const providerId = yield* this.requireProviderForSessionEffect(
 				command.sessionId,
 			);
 			const instance = yield* this.getProviderInstanceEffect(providerId);
@@ -627,7 +633,7 @@ export class OrchestrationEngine {
 		command: ResolveQuestionCommand,
 	): Effect.Effect<void, OrchestrationError> {
 		return Effect.gen(this, function* () {
-			const providerId = yield* this.getProviderForSessionEffect(
+			const providerId = yield* this.requireProviderForSessionEffect(
 				command.sessionId,
 			);
 			const instance = yield* this.getProviderInstanceEffect(providerId);
@@ -675,9 +681,10 @@ export class OrchestrationEngine {
 		command: EndSessionCommand,
 	): Effect.Effect<void, OrchestrationError> {
 		return Effect.gen(this, function* () {
-			const providerId = this.sessionBindingReadModel.getProviderForSession(
-				command.sessionId,
-			);
+			const providerId =
+				yield* this.sessionBindingReadModel.getProviderForSession(
+					command.sessionId,
+				);
 			if (!providerId) {
 				yield* Effect.sync(() =>
 					log.debug(
@@ -724,12 +731,14 @@ export class OrchestrationEngine {
 	}
 
 	/** Get the provider ID for a session, or undefined if not bound. */
-	getProviderForSession(sessionId: string): string | undefined {
+	getProviderForSessionEffect(
+		sessionId: string,
+	): Effect.Effect<string | undefined> {
 		return this.sessionBindingReadModel.getProviderForSession(sessionId);
 	}
 
 	/** List all bound sessions with their provider IDs. */
-	listBoundSessions(): SessionBinding[] {
+	listBoundSessionsEffect(): Effect.Effect<SessionBinding[]> {
 		return this.sessionBindingReadModel.listBoundSessions();
 	}
 
@@ -769,14 +778,17 @@ export class OrchestrationEngine {
 		return this.registry.getInstanceEffect(driver);
 	}
 
-	private getProviderForSessionEffect(
+	private requireProviderForSessionEffect(
 		sessionId: string,
 	): Effect.Effect<string, SessionProviderNotBound> {
-		const providerId =
-			this.sessionBindingReadModel.getProviderForSession(sessionId);
-		if (!providerId) {
-			return Effect.fail(new SessionProviderNotBound({ sessionId }));
-		}
-		return Effect.succeed(providerId);
+		return this.sessionBindingReadModel
+			.getProviderForSession(sessionId)
+			.pipe(
+				Effect.flatMap((providerId) =>
+					providerId
+						? Effect.succeed(providerId)
+						: Effect.fail(new SessionProviderNotBound({ sessionId })),
+				),
+			);
 	}
 }

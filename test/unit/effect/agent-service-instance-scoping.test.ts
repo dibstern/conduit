@@ -46,7 +46,7 @@ const makeEngine = (
 	overrides: Record<string, unknown> = {},
 ): OrchestrationEngine =>
 	({
-		getProviderForSession: vi.fn(() => undefined),
+		getProviderForSessionEffect: vi.fn(() => Effect.succeed(undefined)),
 		dispatchEffect: vi.fn(() => Effect.succeed(makeDiscoverCapabilities([]))),
 		...overrides,
 	}) as unknown as OrchestrationEngine;
@@ -85,7 +85,7 @@ describe("AgentService instance scoping", () => {
 				{ id: "internal", name: "internal", mode: "subagent" },
 			]);
 			const engine = makeEngine({
-				getProviderForSession: vi.fn(() => "claude"),
+				getProviderForSessionEffect: vi.fn(() => Effect.succeed("claude")),
 				dispatchEffect: vi.fn(() =>
 					Effect.succeed(
 						makeDiscoverCapabilities([
@@ -118,7 +118,7 @@ describe("AgentService instance scoping", () => {
 		() => {
 			const api = makeMockOpenCodeAPI();
 			const engine = makeEngine({
-				getProviderForSession: vi.fn(() => "opencode"),
+				getProviderForSessionEffect: vi.fn(() => Effect.succeed("opencode")),
 				dispatchEffect: vi.fn(() =>
 					Effect.succeed(
 						makeDiscoverCapabilities([

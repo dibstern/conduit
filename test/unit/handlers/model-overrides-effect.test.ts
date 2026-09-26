@@ -166,7 +166,7 @@ describe("model handlers with Effect override state", () => {
 			});
 			const engine = {
 				bindSession: vi.fn(),
-				getProviderForSession: vi.fn(() => "opencode"),
+				getProviderForSessionEffect: vi.fn(() => Effect.succeed("opencode")),
 				dispatch: vi.fn(async () => ({
 					status: "completed",
 					cost: 0,

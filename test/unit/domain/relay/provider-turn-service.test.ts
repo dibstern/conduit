@@ -241,7 +241,7 @@ const makeEngine = (input?: {
 		vi.fn(() => Effect.succeed(input?.result ?? completedTurn()));
 	let providerId: string | undefined = input?.providerId;
 	return {
-		getProviderForSession: vi.fn(() => providerId),
+		getProviderForSessionEffect: vi.fn(() => Effect.succeed(providerId)),
 		bindSession: vi.fn((_sessionId: string, nextProviderId: string) => {
 			providerId = nextProviderId;
 		}),
@@ -1319,7 +1319,9 @@ describe("ProviderTurnService", () => {
 					return Effect.succeed(completedTurn());
 				}) as unknown as OrchestrationEngine["dispatchEffect"];
 				const engine = {
-					getProviderForSession: vi.fn(() => boundProviderId),
+					getProviderForSessionEffect: vi.fn(() =>
+						Effect.succeed(boundProviderId),
+					),
 					bindSession: vi.fn((_sessionId: string, providerId: string) => {
 						boundProviderId = providerId;
 					}),
@@ -1368,7 +1370,9 @@ describe("ProviderTurnService", () => {
 					});
 				}) as unknown as OrchestrationEngine["dispatchEffect"];
 				const engine = {
-					getProviderForSession: vi.fn(() => boundProviderId),
+					getProviderForSessionEffect: vi.fn(() =>
+						Effect.succeed(boundProviderId),
+					),
 					bindSession: vi.fn((_sessionId: string, providerId: string) => {
 						boundProviderId = providerId;
 					}),

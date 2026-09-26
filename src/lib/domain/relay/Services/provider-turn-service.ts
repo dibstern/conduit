@@ -621,9 +621,10 @@ export const makeProviderTurnService = Effect.gen(function* () {
 					: {}),
 			};
 
-			const previousProviderId = orchestrationEngine.getProviderForSession(
-				resolvedInput.sessionId,
-			);
+			const previousProviderId =
+				yield* orchestrationEngine.getProviderForSessionEffect(
+					resolvedInput.sessionId,
+				);
 			const restorePreviousBinding = Effect.sync(() => {
 				if (previousProviderId) {
 					orchestrationEngine.bindSession(
@@ -671,7 +672,9 @@ export const makeProviderTurnService = Effect.gen(function* () {
 
 			const orchestrationEngine = engineOption.value;
 			const providerId =
-				orchestrationEngine.getProviderForSession(input.sessionId) ??
+				(yield* orchestrationEngine.getProviderForSessionEffect(
+					input.sessionId,
+				)) ??
 				(input.model && input.model.providerID === CLAUDE_PROVIDER_ID
 					? CLAUDE_PROVIDER_ID
 					: OPENCODE_PROVIDER_ID);
@@ -742,7 +745,9 @@ export const makeProviderTurnService = Effect.gen(function* () {
 			const engineOption = yield* Effect.serviceOption(OrchestrationEngineTag);
 			if (engineOption._tag === "Some") {
 				const providerId =
-					engineOption.value.getProviderForSession(input.sessionId) ??
+					(yield* engineOption.value.getProviderForSessionEffect(
+						input.sessionId,
+					)) ??
 					(input.model && input.model.providerID === CLAUDE_PROVIDER_ID
 						? CLAUDE_PROVIDER_ID
 						: OPENCODE_PROVIDER_ID);
@@ -806,7 +811,7 @@ export const makeProviderTurnService = Effect.gen(function* () {
 				return;
 			}
 
-			const providerId = engineOption.value.getProviderForSession(
+			const providerId = yield* engineOption.value.getProviderForSessionEffect(
 				input.sessionId,
 			);
 			if (!providerId) {

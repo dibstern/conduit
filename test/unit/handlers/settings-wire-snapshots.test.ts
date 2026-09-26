@@ -82,7 +82,7 @@ describe("settings handler wire snapshots", () => {
 			commands: vi.fn(async () => [{ name: "opencode-only" }]),
 		});
 		const engine = {
-			getProviderForSession: vi.fn(() => "claude"),
+			getProviderForSessionEffect: vi.fn(() => Effect.succeed("claude")),
 			dispatch: vi.fn(async () => ({
 				models: [],
 				commands: [

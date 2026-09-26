@@ -103,7 +103,7 @@ describe("handleMessage with Effect provider state persistence", () => {
 				},
 			} as unknown as OpenCodeAPI;
 			const engine = {
-				getProviderForSession: vi.fn(() => "claude"),
+				getProviderForSessionEffect: vi.fn(() => Effect.succeed("claude")),
 				dispatch: vi.fn(async () => ({
 					status: "completed" as const,
 					cost: 0,
@@ -196,7 +196,7 @@ describe("handleMessage with Effect provider state persistence", () => {
 			},
 		} as unknown as OpenCodeAPI;
 		const engine = {
-			getProviderForSession: vi.fn(() => "claude"),
+			getProviderForSessionEffect: vi.fn(() => Effect.succeed("claude")),
 			dispatch: vi.fn(async () => ({
 				status: "completed" as const,
 				cost: 0,
@@ -295,7 +295,7 @@ describe("handleMessage with Effect provider state persistence", () => {
 			},
 		} as unknown as OpenCodeAPI;
 		const engine = {
-			getProviderForSession: vi.fn(() => "claude"),
+			getProviderForSessionEffect: vi.fn(() => Effect.succeed("claude")),
 			dispatch: vi.fn(async () => ({
 				status: "completed" as const,
 				cost: 0,
@@ -368,7 +368,7 @@ describe("handleMessage with Effect provider state persistence", () => {
 				},
 			} as unknown as OpenCodeAPI;
 			const engine = {
-				getProviderForSession: vi.fn(() => "claude"),
+				getProviderForSessionEffect: vi.fn(() => Effect.succeed("claude")),
 				dispatch: vi.fn(async (command: SendTurnCommand) => {
 					await Effect.runPromise(
 						command.input.eventSink.push(
@@ -488,7 +488,7 @@ describe("handleMessage with Effect provider state persistence", () => {
 			},
 		} as unknown as OpenCodeAPI;
 		const engine = {
-			getProviderForSession: vi.fn(() => "claude"),
+			getProviderForSessionEffect: vi.fn(() => Effect.succeed("claude")),
 			dispatch: vi.fn(async (command: SendTurnCommand) => {
 				await Effect.runPromise(
 					command.input.eventSink.push(

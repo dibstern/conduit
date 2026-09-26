@@ -137,7 +137,7 @@ function makeClientInitEffectLayer(
 		...sessionManagerOverrides,
 	});
 	const orchestrationEngine = {
-		getProviderForSession: vi.fn(() => undefined),
+		getProviderForSessionEffect: vi.fn(() => Effect.succeed(undefined)),
 		dispatchEffect: vi.fn(() => Effect.succeed(makeClaudeCapabilities())),
 	} as unknown as OrchestrationEngine;
 

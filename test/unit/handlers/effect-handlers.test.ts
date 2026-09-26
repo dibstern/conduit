@@ -746,7 +746,7 @@ describe("sendModelsStateToClient", () => {
 		() => {
 			const ws = mockWsHandler();
 			const engine = {
-				getProviderForSession: vi.fn(() => "claude"),
+				getProviderForSessionEffect: vi.fn(() => Effect.succeed("claude")),
 				dispatch: vi.fn(async () => ({
 					models: [
 						{
@@ -1909,7 +1909,7 @@ describe("handlePermissionResponse", () => {
 			} as unknown as OpenCodeAPI;
 			const config = mockConfig();
 			const engine = {
-				getProviderForSession: vi.fn(() => "claude"),
+				getProviderForSessionEffect: vi.fn(() => Effect.succeed("claude")),
 			};
 
 			const layer = Layer.mergeAll(
@@ -2201,8 +2201,10 @@ describe("handleQuestionReject", () => {
 				},
 			} as unknown as OpenCodeAPI;
 			const engine = {
-				getProviderForSession: vi.fn((sessionId: string) =>
-					sessionId === "question-session" ? "claude" : "opencode",
+				getProviderForSessionEffect: vi.fn((sessionId: string) =>
+					Effect.succeed(
+						sessionId === "question-session" ? "claude" : "opencode",
+					),
 				),
 			} as unknown as OrchestrationEngine;
 
@@ -2230,7 +2232,7 @@ describe("handleQuestionReject", () => {
 				Effect.provide(layer),
 				Effect.tap((pending) => {
 					expect(client.question.reject).not.toHaveBeenCalled();
-					expect(engine.getProviderForSession).toHaveBeenCalledWith(
+					expect(engine.getProviderForSessionEffect).toHaveBeenCalledWith(
 						"question-session",
 					);
 					expect(ws.sendTo).toHaveBeenCalledWith(
@@ -2322,8 +2324,10 @@ describe("handleAskUserResponse", () => {
 				},
 			} as unknown as OpenCodeAPI;
 			const engine = {
-				getProviderForSession: vi.fn((sessionId: string) =>
-					sessionId === "question-session" ? "claude" : "opencode",
+				getProviderForSessionEffect: vi.fn((sessionId: string) =>
+					Effect.succeed(
+						sessionId === "question-session" ? "claude" : "opencode",
+					),
 				),
 			} as unknown as OrchestrationEngine;
 
@@ -2352,7 +2356,7 @@ describe("handleAskUserResponse", () => {
 				Effect.provide(layer),
 				Effect.tap(() => {
 					expect(client.question.reply).not.toHaveBeenCalled();
-					expect(engine.getProviderForSession).toHaveBeenCalledWith(
+					expect(engine.getProviderForSessionEffect).toHaveBeenCalledWith(
 						"question-session",
 					);
 					expect(ws.broadcast).toHaveBeenCalledWith(
@@ -3775,7 +3779,7 @@ describe("handleMessage", () => {
 		const config = mockConfig();
 		const client = {} as unknown as OpenCodeAPI;
 		const engine = {
-			getProviderForSession: vi.fn(() => "claude"),
+			getProviderForSessionEffect: vi.fn(() => Effect.succeed("claude")),
 			dispatch: vi.fn(async () => ({
 				status: "completed",
 				cost: 0,
@@ -3832,7 +3836,7 @@ describe("handleMessage", () => {
 			const client = {} as unknown as OpenCodeAPI;
 			let questionPromise: Promise<Record<string, unknown>> | undefined;
 			const engine = {
-				getProviderForSession: vi.fn(() => "claude"),
+				getProviderForSessionEffect: vi.fn(() => Effect.succeed("claude")),
 				dispatch: vi.fn(async (command) => {
 					if (
 						typeof command === "object" &&
@@ -3924,7 +3928,7 @@ describe("handleMessage", () => {
 			const config = mockConfig();
 			const client = {} as unknown as OpenCodeAPI;
 			const engine = {
-				getProviderForSession: vi.fn(() => "claude"),
+				getProviderForSessionEffect: vi.fn(() => Effect.succeed("claude")),
 				dispatch: vi.fn(async () => ({
 					status: "completed",
 					cost: 0,
@@ -4069,7 +4073,7 @@ describe("handleMessage", () => {
 			const config = mockConfig();
 			const client = {} as unknown as OpenCodeAPI;
 			const engine = {
-				getProviderForSession: vi.fn(() => "claude"),
+				getProviderForSessionEffect: vi.fn(() => Effect.succeed("claude")),
 				dispatch: vi.fn(async () => ({
 					status: "completed",
 					cost: 0,
@@ -4176,7 +4180,7 @@ describe("handleMessage", () => {
 			const config = mockConfig();
 			const client = {} as unknown as OpenCodeAPI;
 			const engine = {
-				getProviderForSession: vi.fn(() => "claude"),
+				getProviderForSessionEffect: vi.fn(() => Effect.succeed("claude")),
 				dispatch: vi.fn(async () => ({
 					status: "completed",
 					cost: 0,
@@ -4241,7 +4245,7 @@ describe("handleMessage", () => {
 		const config = mockConfig();
 		const client = {} as unknown as OpenCodeAPI;
 		const engine = {
-			getProviderForSession: vi.fn(() => "claude"),
+			getProviderForSessionEffect: vi.fn(() => Effect.succeed("claude")),
 			dispatch: vi.fn(async () => ({
 				status: "completed",
 				cost: 0,
@@ -4330,7 +4334,7 @@ describe("handleMessage", () => {
 				getSessionMessagesWithParts: vi.fn(() => Effect.succeed([])),
 			} satisfies ReadQueryEffect;
 			const engine = {
-				getProviderForSession: vi.fn(() => undefined),
+				getProviderForSessionEffect: vi.fn(() => Effect.succeed(undefined)),
 				bindSession: vi.fn(),
 				dispatch: vi.fn(async () => ({
 					status: "completed",
@@ -4420,7 +4424,7 @@ describe("handleMessage", () => {
 			const client = {} as unknown as OpenCodeAPI;
 			const dispatchError = new Error("dispatch failed");
 			const engine = {
-				getProviderForSession: vi.fn(() => "claude"),
+				getProviderForSessionEffect: vi.fn(() => Effect.succeed("claude")),
 				dispatch: vi.fn(async (command: { readonly type: string }) => {
 					if (command.type === "discover") {
 						return {

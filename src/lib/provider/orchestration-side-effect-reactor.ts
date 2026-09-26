@@ -1,7 +1,8 @@
+import type { SqlClient } from "@effect/sql";
+import type { SqlError } from "@effect/sql/SqlError";
 import { Clock, Data, Duration, Effect } from "effect";
 import type { ProviderDriverKind } from "../contracts/provider-instance.js";
 import type { ProviderRuntimeIngestion } from "../domain/relay/Services/provider-runtime-ingestion-service.js";
-import type { SqliteClient } from "../persistence/sqlite-client.js";
 import { ProviderInstanceFailure, ProviderNotRegistered } from "./errors.js";
 import type { ProviderRegistry } from "./provider-registry.js";
 import type { EventSink, SendTurnInput, TurnResult } from "./types.js";
@@ -93,7 +94,7 @@ class ProviderCommandNotExecutable extends Data.TaggedError(
 }
 
 export interface ProviderSideEffectReactorOptions {
-	readonly db: SqliteClient;
+	readonly sql: SqlClient.SqlClient;
 	readonly registry: ProviderRegistry;
 	readonly ingestion: Pick<ProviderRuntimeIngestion, "ingest">;
 	/** Optional deterministic override; defaults to the Effect Clock service. */
@@ -123,6 +124,15 @@ function clampPollDuration(
 			: minimumMillis,
 	);
 }
+
+const storeFailure =
+	(operation: string) =>
+	(cause: SqlError): ProviderCommandStoreFailure =>
+		new ProviderCommandStoreFailure({
+			operation,
+			code: "provider_command_store_failure",
+			cause,
+		});
 
 export class ProviderSideEffectReactor {
 	constructor(private readonly options: ProviderSideEffectReactorOptions) {}
@@ -287,25 +297,17 @@ export class ProviderSideEffectReactor {
 		ProviderCommandOutboxRow | undefined,
 		ProviderCommandStoreFailure
 	> {
-		return Effect.try({
-			try: () =>
-				this.options.db.queryOne<ProviderCommandOutboxRow>(
-					`SELECT request_sequence, command_id, project_key, session_id, provider_id,
-					        effect_type, payload_json, attempt_count
-					 FROM provider_command_outbox
-					 WHERE status = 'pending'
-					    OR (status = 'retryable_failed' AND next_attempt_at <= ?)
-					 ORDER BY request_sequence
-					 LIMIT 1`,
-					[nowMs],
-				),
-			catch: (cause) =>
-				new ProviderCommandStoreFailure({
-					operation: "nextPendingRequest",
-					code: "provider_command_store_failure",
-					cause,
-				}),
-		});
+		return this.options.sql<ProviderCommandOutboxRow>`
+			SELECT request_sequence, command_id, project_key, session_id, provider_id,
+			       effect_type, payload_json, attempt_count
+			FROM provider_command_outbox
+			WHERE status = 'pending'
+			   OR (status = 'retryable_failed' AND next_attempt_at <= ${nowMs})
+			ORDER BY request_sequence
+			LIMIT 1`.pipe(
+			Effect.map((rows) => rows[0]),
+			Effect.mapError(storeFailure("nextPendingRequest")),
+		);
 	}
 
 	/** Returns the number of rows updated: 1 when this fiber won the exclusive
@@ -314,27 +316,18 @@ export class ProviderSideEffectReactor {
 		row: ProviderCommandOutboxRow,
 		updatedAt: number,
 	): Effect.Effect<number, ProviderCommandStoreFailure> {
-		return Effect.try({
-			try: () => {
-				const { changes } = this.options.db.execute(
-					`UPDATE provider_command_outbox
-					 SET status = 'running',
-					     attempt_count = attempt_count + 1,
-					     next_attempt_at = NULL,
-					     updated_at = ?
-					 WHERE request_sequence = ?
-					   AND status IN ('pending', 'retryable_failed')`,
-					[updatedAt, row.request_sequence],
-				);
-				return Number(changes);
-			},
-			catch: (cause) =>
-				new ProviderCommandStoreFailure({
-					operation: "markRunning",
-					code: "provider_command_store_failure",
-					cause,
-				}),
-		});
+		return this.options.sql`
+			UPDATE provider_command_outbox
+			SET status = 'running',
+			    attempt_count = attempt_count + 1,
+			    next_attempt_at = NULL,
+			    updated_at = ${updatedAt}
+			WHERE request_sequence = ${row.request_sequence}
+			  AND status IN ('pending', 'retryable_failed')
+			RETURNING request_sequence`.pipe(
+			Effect.map((rows) => rows.length),
+			Effect.mapError(storeFailure("markRunning")),
+		);
 	}
 
 	private runProviderEffect(
@@ -379,24 +372,16 @@ export class ProviderSideEffectReactor {
 		ProviderCommandOutboxRow | undefined,
 		ProviderCommandStoreFailure
 	> {
-		return Effect.try({
-			try: () =>
-				this.options.db.queryOne<ProviderCommandOutboxRow>(
-					`SELECT request_sequence, command_id, project_key, session_id, provider_id,
-					        effect_type, payload_json, attempt_count
-					 FROM provider_command_outbox
-					 WHERE command_id = ? AND status IN ('pending', 'retryable_failed')
-					 ORDER BY request_sequence
-					 LIMIT 1`,
-					[commandId],
-				),
-			catch: (cause) =>
-				new ProviderCommandStoreFailure({
-					operation: "pendingRequestForCommand",
-					code: "provider_command_store_failure",
-					cause,
-				}),
-		});
+		return this.options.sql<ProviderCommandOutboxRow>`
+			SELECT request_sequence, command_id, project_key, session_id, provider_id,
+			       effect_type, payload_json, attempt_count
+			FROM provider_command_outbox
+			WHERE command_id = ${commandId} AND status IN ('pending', 'retryable_failed')
+			ORDER BY request_sequence
+			LIMIT 1`.pipe(
+			Effect.map((rows) => rows[0]),
+			Effect.mapError(storeFailure("pendingRequestForCommand")),
+		);
 	}
 
 	private receiptOutcome(
@@ -405,22 +390,13 @@ export class ProviderSideEffectReactor {
 		{ readonly status: string; readonly error_code: string | null } | undefined,
 		ProviderCommandStoreFailure
 	> {
-		return Effect.try({
-			try: () =>
-				this.options.db.queryOne<{
-					readonly status: string;
-					readonly error_code: string | null;
-				}>(
-					"SELECT status, error_code FROM command_receipts WHERE command_id = ?",
-					[commandId],
-				),
-			catch: (cause) =>
-				new ProviderCommandStoreFailure({
-					operation: "receiptOutcome",
-					code: "provider_command_store_failure",
-					cause,
-				}),
-		});
+		return this.options.sql<{
+			readonly status: string;
+			readonly error_code: string | null;
+		}>`SELECT status, error_code FROM command_receipts WHERE command_id = ${commandId}`.pipe(
+			Effect.map((rows) => rows[0]),
+			Effect.mapError(storeFailure("receiptOutcome")),
+		);
 	}
 
 	private parseSendTurnPayload(
@@ -450,30 +426,21 @@ export class ProviderSideEffectReactor {
 		row: ProviderCommandOutboxRow,
 		updatedAt: number,
 	): Effect.Effect<void, ProviderCommandStoreFailure> {
-		return Effect.try({
-			try: () => {
-				this.options.db.runInTransaction(() => {
-					this.options.db.execute(
-						`UPDATE provider_command_outbox
-						 SET status = 'completed', updated_at = ?
-						 WHERE request_sequence = ?`,
-						[updatedAt, row.request_sequence],
-					);
-					this.options.db.execute(
-						`UPDATE command_receipts
-						 SET status = 'side_effect_completed', updated_at = ?
-						 WHERE command_id = ?`,
-						[updatedAt, row.command_id],
-					);
-				});
-			},
-			catch: (cause) =>
-				new ProviderCommandStoreFailure({
-					operation: "markCompleted",
-					code: "provider_command_store_failure",
-					cause,
-				}),
-		});
+		const { sql } = this.options;
+		return sql
+			.withTransaction(
+				Effect.all([
+					sql`
+						UPDATE provider_command_outbox
+						SET status = 'completed', updated_at = ${updatedAt}
+						WHERE request_sequence = ${row.request_sequence}`,
+					sql`
+						UPDATE command_receipts
+						SET status = 'side_effect_completed', updated_at = ${updatedAt}
+						WHERE command_id = ${row.command_id}`,
+				]),
+			)
+			.pipe(Effect.asVoid, Effect.mapError(storeFailure("markCompleted")));
 	}
 
 	/** Failure from the Effect error channel (thrown/failed provider effect). */
@@ -518,39 +485,24 @@ export class ProviderSideEffectReactor {
 		const nextAttemptAt = retryable
 			? updatedAt + Duration.toMillis(retryBackoff(row.attempt_count + 1))
 			: null;
-		return Effect.try({
-			try: () => {
-				this.options.db.runInTransaction(() => {
-					this.options.db.execute(
-						`UPDATE provider_command_outbox
-						 SET status = ?,
-						     error_code = ?,
-						     next_attempt_at = ?,
-						     updated_at = ?
-						 WHERE request_sequence = ?`,
-						[
-							retryable ? "retryable_failed" : "failed",
-							errorCode,
-							nextAttemptAt,
-							updatedAt,
-							row.request_sequence,
-						],
-					);
-					this.options.db.execute(
-						`UPDATE command_receipts
-						 SET status = 'side_effect_failed', error_code = ?, updated_at = ?
-						 WHERE command_id = ?`,
-						[errorCode, updatedAt, row.command_id],
-					);
-				});
-			},
-			catch: (cause) =>
-				new ProviderCommandStoreFailure({
-					operation: "markFailed",
-					code: "provider_command_store_failure",
-					cause,
-				}),
-		});
+		const { sql } = this.options;
+		return sql
+			.withTransaction(
+				Effect.all([
+					sql`
+						UPDATE provider_command_outbox
+						SET status = ${retryable ? "retryable_failed" : "failed"},
+						    error_code = ${errorCode},
+						    next_attempt_at = ${nextAttemptAt},
+						    updated_at = ${updatedAt}
+						WHERE request_sequence = ${row.request_sequence}`,
+					sql`
+						UPDATE command_receipts
+						SET status = 'side_effect_failed', error_code = ${errorCode}, updated_at = ${updatedAt}
+						WHERE command_id = ${row.command_id}`,
+				]),
+			)
+			.pipe(Effect.asVoid, Effect.mapError(storeFailure("markFailed")));
 	}
 
 	/**

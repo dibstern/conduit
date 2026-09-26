@@ -5,6 +5,7 @@
 // instantiate the provider layer alongside the existing relay pipeline.
 
 import { randomUUID } from "node:crypto";
+import { SqlClient } from "@effect/sql";
 import { Context, Effect, Layer, type Scope } from "effect";
 import {
 	loadDaemonConfig,
@@ -17,7 +18,6 @@ import { OrchestrationEngineTag } from "../domain/relay/Services/services.js";
 import type { OpenCodeAPI } from "../instance/opencode-api.js";
 import { createLogger } from "../logger.js";
 import { ClaudeEventPersistEffectTag } from "../persistence/effect/claude-event-persist-effect.js";
-import { SqliteClient } from "../persistence/sqlite-client.js";
 import type { SSEEvent } from "../relay/opencode-events.js";
 import { loadRelaySettings } from "../relay/relay-settings.js";
 import {
@@ -30,6 +30,7 @@ import {
 	OpenCodeProviderInstance,
 } from "./opencode-provider-instance.js";
 import { OrchestrationEngine } from "./orchestration-engine.js";
+import { CommandReadModelRepository } from "./orchestration-read-model.js";
 import { ProviderRegistry, ProviderRegistryTag } from "./provider-registry.js";
 import {
 	type ProviderSessionBindingReadModel,
@@ -42,7 +43,6 @@ const log = createLogger("orchestration-wiring");
 export interface OrchestrationLayerOptions {
 	readonly client: OpenCodeAPI;
 	readonly workspaceRoot?: string;
-	readonly persistenceDbPath?: string;
 	readonly projectKey?: string;
 	readonly sessionBindingReadModel?: ProviderSessionBindingReadModel;
 	readonly configDir?: string;
@@ -50,7 +50,6 @@ export interface OrchestrationLayerOptions {
 
 export interface OrchestrationRuntimeLayerOptions {
 	readonly workspaceRoot?: string;
-	readonly persistenceDbPath?: string;
 	readonly projectKey?: string;
 	readonly configDir?: string;
 }
@@ -140,20 +139,13 @@ const createOrchestrationComponentsEffect = (
 	Effect.gen(function* () {
 		const registry = new ProviderRegistry();
 
-		const persistenceDbPath = options.persistenceDbPath;
-		const sessionBindingDb =
-			persistenceDbPath != null
-				? yield* Effect.sync(() => SqliteClient.open(persistenceDbPath))
-				: undefined;
-		if (sessionBindingDb != null) {
-			yield* Effect.addFinalizer(() =>
-				Effect.sync(() => sessionBindingDb.close()),
-			);
-		}
+		// The relay's persistence SqlClient (when persistence is configured) backs
+		// the session binding read model and durable command receipts, so
+		// orchestration shares the relay's single database connection.
+		const sqlOption = yield* Effect.serviceOption(SqlClient.SqlClient);
+		const sql = sqlOption._tag === "Some" ? sqlOption.value : undefined;
 		const sessionBindingReadModel =
-			sessionBindingDb != null
-				? new SqliteProviderSessionBindingReadModel(sessionBindingDb)
-				: undefined;
+			sql != null ? new SqliteProviderSessionBindingReadModel(sql) : undefined;
 
 		// Phase 4.4: sessions bound to a NAMED OpenCode instance route their
 		// provider calls to that instance's client. The binding is set before
@@ -166,13 +158,15 @@ const createOrchestrationComponentsEffect = (
 		const clientForSession =
 			instanceClientsOption._tag === "Some" && sessionBindingReadModel != null
 				? (sessionId: string) =>
-						Effect.suspend(() => {
-							const boundInstanceId =
-								sessionBindingReadModel.getProviderForSession(sessionId);
-							return boundInstanceId == null
-								? Effect.succeed(undefined)
-								: instanceClientsOption.value.clientFor(boundInstanceId);
-						})
+						sessionBindingReadModel
+							.getProviderForSession(sessionId)
+							.pipe(
+								Effect.flatMap((boundInstanceId) =>
+									boundInstanceId == null
+										? Effect.succeed(undefined)
+										: instanceClientsOption.value.clientFor(boundInstanceId),
+								),
+							)
 				: undefined;
 
 		const openCodeInstance = (yield* OpenCodeDriver.create({
@@ -201,8 +195,8 @@ const createOrchestrationComponentsEffect = (
 			...(materializeSubagents ? { materializeSubagents } : {}),
 		});
 		registry.registerInstance(claudeInstance);
-		// Durable command receipts share the persistence DB with the session
-		// binding read model. `now`/`generateId` are supplied at this wiring edge
+		// Durable command receipts share the persistence SqlClient with the
+		// session binding read model. `now`/`generateId` are supplied at this wiring edge
 		// (wall clock + random) so core orchestration stays free of Date.now /
 		// global randomness. The shared ProviderRuntimeIngestion (when present) is
 		// handed to the engine's side-effect reactor so streamed provider output
@@ -210,10 +204,16 @@ const createOrchestrationComponentsEffect = (
 		const ingestionOption = yield* Effect.serviceOption(
 			ProviderRuntimeIngestionTag,
 		);
+		// Narrow command read-model bootstrap: load only the command decision
+		// snapshot (receipts + stale-command tombstones), never the full
+		// relay/UI snapshot or message history.
 		const durableCommands =
-			sessionBindingDb != null
+			sql != null
 				? {
-						db: sessionBindingDb,
+						sql,
+						snapshot: yield* new CommandReadModelRepository(sql)
+							.bootstrap()
+							.pipe(Effect.orDie),
 						projectKey:
 							options.projectKey ?? options.workspaceRoot ?? process.cwd(),
 						now: () => Date.now(),
@@ -303,9 +303,6 @@ export const makeOrchestrationRuntimeLayer = (
 				client,
 				...(options.workspaceRoot != null
 					? { workspaceRoot: options.workspaceRoot }
-					: {}),
-				...(options.persistenceDbPath != null
-					? { persistenceDbPath: options.persistenceDbPath }
 					: {}),
 				...(options.projectKey != null
 					? { projectKey: options.projectKey }

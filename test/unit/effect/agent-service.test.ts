@@ -47,7 +47,7 @@ function makeDiscoverCapabilities(
 
 function makeEngine(overrides?: Record<string, unknown>): OrchestrationEngine {
 	return {
-		getProviderForSession: vi.fn(() => undefined),
+		getProviderForSessionEffect: vi.fn(() => Effect.succeed(undefined)),
 		dispatchEffect: vi.fn(() => Effect.succeed(makeDiscoverCapabilities([]))),
 		...overrides,
 	} as unknown as OrchestrationEngine;
@@ -86,7 +86,7 @@ describe("AgentService", () => {
 				{ id: "plan", name: "plan", mode: "all" },
 			]);
 			const engine = makeEngine({
-				getProviderForSession: vi.fn(() => "opencode"),
+				getProviderForSessionEffect: vi.fn(() => Effect.succeed("opencode")),
 			});
 
 			return Effect.gen(function* () {
@@ -116,7 +116,7 @@ describe("AgentService", () => {
 				{ id: "build", name: "build" },
 			]);
 			const engine = makeEngine({
-				getProviderForSession: vi.fn(() => "claude"),
+				getProviderForSessionEffect: vi.fn(() => Effect.succeed("claude")),
 				dispatchEffect: vi.fn(() =>
 					Effect.succeed(
 						makeDiscoverCapabilities([
@@ -151,7 +151,7 @@ describe("AgentService", () => {
 		"logs Claude discovery failures and clears stale active agent",
 		() => {
 			const engine = makeEngine({
-				getProviderForSession: vi.fn(() => "claude"),
+				getProviderForSessionEffect: vi.fn(() => Effect.succeed("claude")),
 				dispatchEffect: vi.fn(() => Effect.fail(new Error("claude offline"))),
 			});
 			const log = makeMockLogger();

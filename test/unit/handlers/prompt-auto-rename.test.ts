@@ -30,7 +30,7 @@ const completedTurn = (): TurnResult => ({
 
 const makeEngine = (providerId: "claude" | "opencode") =>
 	withDispatchEffect({
-		getProviderForSession: vi.fn(() => providerId),
+		getProviderForSessionEffect: vi.fn(() => Effect.succeed(providerId)),
 		dispatch: vi.fn(async () => completedTurn()),
 	} as unknown as OrchestrationEngine);
 

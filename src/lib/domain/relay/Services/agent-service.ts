@@ -196,8 +196,11 @@ export const AgentServiceLive: Layer.Layer<
 						const activeProviderId =
 							activeSessionId &&
 							engineOption._tag === "Some" &&
-							typeof engineOption.value.getProviderForSession === "function"
-								? engineOption.value.getProviderForSession(activeSessionId)
+							typeof engineOption.value.getProviderForSessionEffect ===
+								"function"
+								? yield* engineOption.value.getProviderForSessionEffect(
+										activeSessionId,
+									)
 								: undefined;
 						const defaultModel =
 							activeProviderId == null

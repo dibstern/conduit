@@ -1,12 +1,5 @@
-import type { SQLInputValue } from "node:sqlite";
-
-type SessionBindingReadModelDb = {
-	readonly query: <T>(sql: string, params?: readonly SQLInputValue[]) => T[];
-	readonly queryOne: <T>(
-		sql: string,
-		params?: readonly SQLInputValue[],
-	) => T | undefined;
-};
+import type { SqlClient } from "@effect/sql";
+import { Effect } from "effect";
 
 export interface ProviderSessionBinding {
 	readonly sessionId: string;
@@ -16,8 +9,8 @@ export interface ProviderSessionBinding {
 export interface ProviderSessionBindingReadModel {
 	bindSession(sessionId: string, providerId: string): void;
 	unbindSession(sessionId: string): void;
-	getProviderForSession(sessionId: string): string | undefined;
-	listBoundSessions(): ProviderSessionBinding[];
+	getProviderForSession(sessionId: string): Effect.Effect<string | undefined>;
+	listBoundSessions(): Effect.Effect<ProviderSessionBinding[]>;
 	clearTransientBindings(): void;
 }
 
@@ -39,15 +32,17 @@ export class InMemoryProviderSessionBindingReadModel
 		this.bindings.delete(sessionId);
 	}
 
-	getProviderForSession(sessionId: string): string | undefined {
-		return this.bindings.get(sessionId);
+	getProviderForSession(sessionId: string): Effect.Effect<string | undefined> {
+		return Effect.sync(() => this.bindings.get(sessionId));
 	}
 
-	listBoundSessions(): ProviderSessionBinding[] {
-		return [...this.bindings.entries()].map(([sessionId, providerId]) => ({
-			sessionId,
-			providerId,
-		}));
+	listBoundSessions(): Effect.Effect<ProviderSessionBinding[]> {
+		return Effect.sync(() =>
+			[...this.bindings.entries()].map(([sessionId, providerId]) => ({
+				sessionId,
+				providerId,
+			})),
+		);
 	}
 
 	clearTransientBindings(): void {
@@ -60,7 +55,7 @@ export class SqliteProviderSessionBindingReadModel
 {
 	private readonly transientBindings = new Map<string, string | null>();
 
-	constructor(private readonly db: SessionBindingReadModelDb) {}
+	constructor(private readonly sql: SqlClient.SqlClient) {}
 
 	bindSession(sessionId: string, providerId: string): void {
 		this.transientBindings.set(sessionId, providerId);
@@ -70,53 +65,57 @@ export class SqliteProviderSessionBindingReadModel
 		this.transientBindings.set(sessionId, null);
 	}
 
-	getProviderForSession(sessionId: string): string | undefined {
-		if (this.transientBindings.has(sessionId)) {
-			return this.transientBindings.get(sessionId) ?? undefined;
-		}
-
-		const row = this.db.queryOne<ProviderSessionBindingRow>(
-			`SELECT session_id, provider
-			 FROM session_providers
-			 WHERE session_id = ? AND status = 'active'
-			 ORDER BY activated_at DESC, id DESC
-			 LIMIT 1`,
-			[sessionId],
-		);
-		return row?.provider;
+	getProviderForSession(sessionId: string): Effect.Effect<string | undefined> {
+		return Effect.suspend(() => {
+			if (this.transientBindings.has(sessionId)) {
+				return Effect.succeed(
+					this.transientBindings.get(sessionId) ?? undefined,
+				);
+			}
+			return this.sql<ProviderSessionBindingRow>`
+				SELECT session_id, provider
+				FROM session_providers
+				WHERE session_id = ${sessionId} AND status = 'active'
+				ORDER BY activated_at DESC, id DESC
+				LIMIT 1`.pipe(
+				Effect.map((rows) => rows[0]?.provider),
+				Effect.orDie,
+			);
+		});
 	}
 
-	listBoundSessions(): ProviderSessionBinding[] {
-		const rows = this.db.query<ProviderSessionBindingRow>(
-			`SELECT active.session_id, active.provider
-			 FROM session_providers AS active
-			 JOIN (
-				 SELECT session_id, MAX(activated_at) AS activated_at
-				 FROM session_providers
-				 WHERE status = 'active'
-				 GROUP BY session_id
-			 ) AS latest
-			 ON latest.session_id = active.session_id
-			 AND latest.activated_at = active.activated_at
-			 WHERE active.status = 'active'
-			 ORDER BY active.session_id, active.id`,
+	listBoundSessions(): Effect.Effect<ProviderSessionBinding[]> {
+		return this.sql<ProviderSessionBindingRow>`
+			SELECT active.session_id, active.provider
+			FROM session_providers AS active
+			JOIN (
+				SELECT session_id, MAX(activated_at) AS activated_at
+				FROM session_providers
+				WHERE status = 'active'
+				GROUP BY session_id
+			) AS latest
+			ON latest.session_id = active.session_id
+			AND latest.activated_at = active.activated_at
+			WHERE active.status = 'active'
+			ORDER BY active.session_id, active.id`.pipe(
+			Effect.orDie,
+			Effect.map((rows) => {
+				const bindings = new Map(
+					rows.map((row) => [row.session_id, row.provider] as const),
+				);
+				for (const [sessionId, providerId] of this.transientBindings) {
+					if (providerId == null) {
+						bindings.delete(sessionId);
+					} else {
+						bindings.set(sessionId, providerId);
+					}
+				}
+				return [...bindings.entries()].map(([sessionId, providerId]) => ({
+					sessionId,
+					providerId,
+				}));
+			}),
 		);
-		const bindings = new Map(
-			rows.map((row) => [row.session_id, row.provider] as const),
-		);
-
-		for (const [sessionId, providerId] of this.transientBindings) {
-			if (providerId == null) {
-				bindings.delete(sessionId);
-			} else {
-				bindings.set(sessionId, providerId);
-			}
-		}
-
-		return [...bindings.entries()].map(([sessionId, providerId]) => ({
-			sessionId,
-			providerId,
-		}));
 	}
 
 	clearTransientBindings(): void {

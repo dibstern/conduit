@@ -243,7 +243,9 @@ describe("OrchestrationEngine", () => {
 				},
 			});
 
-			expect(engine.getProviderForSession("s1")).toBe("opencode");
+			expect(Effect.runSync(engine.getProviderForSessionEffect("s1"))).toBe(
+				"opencode",
+			);
 		});
 	});
 
@@ -354,7 +356,9 @@ describe("OrchestrationEngine", () => {
 				sessionId: "s-keep",
 			});
 
-			expect(engine.getProviderForSession("s-keep")).toBe("opencode");
+			expect(Effect.runSync(engine.getProviderForSessionEffect("s-keep"))).toBe(
+				"opencode",
+			);
 		});
 
 		it("removes the binding when unbind: true is set", async () => {
@@ -367,7 +371,9 @@ describe("OrchestrationEngine", () => {
 				unbind: true,
 			});
 
-			expect(engine.getProviderForSession("s-drop")).toBeUndefined();
+			expect(
+				Effect.runSync(engine.getProviderForSessionEffect("s-drop")),
+			).toBeUndefined();
 		});
 
 		it("propagates provider instance errors and preserves binding", async () => {
@@ -391,24 +397,32 @@ describe("OrchestrationEngine", () => {
 			).rejects.toThrow("provider instance boom");
 
 			// Binding should be preserved when endSession throws
-			expect(engine.getProviderForSession("s-err")).toBe("opencode");
+			expect(Effect.runSync(engine.getProviderForSessionEffect("s-err"))).toBe(
+				"opencode",
+			);
 		});
 	});
 
 	describe("session binding", () => {
 		it("bindSession creates a session-to-provider mapping", () => {
 			engine.bindSession("s1", "opencode");
-			expect(engine.getProviderForSession("s1")).toBe("opencode");
+			expect(Effect.runSync(engine.getProviderForSessionEffect("s1"))).toBe(
+				"opencode",
+			);
 		});
 
 		it("unbindSession removes the mapping", () => {
 			engine.bindSession("s1", "opencode");
 			engine.unbindSession("s1");
-			expect(engine.getProviderForSession("s1")).toBeUndefined();
+			expect(
+				Effect.runSync(engine.getProviderForSessionEffect("s1")),
+			).toBeUndefined();
 		});
 
 		it("getProviderForSession returns undefined for unbound session", () => {
-			expect(engine.getProviderForSession("unknown")).toBeUndefined();
+			expect(
+				Effect.runSync(engine.getProviderForSessionEffect("unknown")),
+			).toBeUndefined();
 		});
 
 		it("rebinding a session to a different provider updates the mapping", () => {
@@ -417,14 +431,16 @@ describe("OrchestrationEngine", () => {
 
 			engine.bindSession("s1", "opencode");
 			engine.bindSession("s1", "claude");
-			expect(engine.getProviderForSession("s1")).toBe("claude");
+			expect(Effect.runSync(engine.getProviderForSessionEffect("s1"))).toBe(
+				"claude",
+			);
 		});
 
 		it("listBoundSessions returns all bound sessions", () => {
 			engine.bindSession("s1", "opencode");
 			engine.bindSession("s2", "opencode");
 
-			const sessions = engine.listBoundSessions();
+			const sessions = Effect.runSync(engine.listBoundSessionsEffect());
 			expect(sessions).toEqual(
 				expect.arrayContaining([
 					{ sessionId: "s1", providerId: "opencode" },
@@ -604,9 +620,13 @@ describe("OrchestrationEngine", () => {
 
 			await Effect.runPromise(engine.shutdownEffect());
 
-			expect(engine.getProviderForSession("s1")).toBeUndefined();
-			expect(engine.getProviderForSession("s2")).toBeUndefined();
-			expect(engine.listBoundSessions()).toEqual([]);
+			expect(
+				Effect.runSync(engine.getProviderForSessionEffect("s1")),
+			).toBeUndefined();
+			expect(
+				Effect.runSync(engine.getProviderForSessionEffect("s2")),
+			).toBeUndefined();
+			expect(Effect.runSync(engine.listBoundSessionsEffect())).toEqual([]);
 		});
 	});
 
@@ -696,9 +716,11 @@ describe("OrchestrationEngine", () => {
 				}),
 			});
 
-			expect(claudeEngine.getProviderForSession("int-session-bind")).toBe(
-				"claude",
-			);
+			expect(
+				Effect.runSync(
+					claudeEngine.getProviderForSessionEffect("int-session-bind"),
+				),
+			).toBe("claude");
 		});
 
 		it("error propagation: queryFactory throws → TurnResult has status error", async () => {
@@ -805,7 +827,9 @@ describe("OrchestrationEngine", () => {
 			).rejects.toThrow("Provider instance crash");
 
 			// Binding should NOT exist after a thrown error
-			expect(throwingEngine.getProviderForSession("s-crash")).toBeUndefined();
+			expect(
+				Effect.runSync(throwingEngine.getProviderForSessionEffect("s-crash")),
+			).toBeUndefined();
 		});
 
 		it("sendTurnEffect synchronous throw does NOT leave stale early binding", async () => {
@@ -839,7 +863,9 @@ describe("OrchestrationEngine", () => {
 			).rejects.toThrow("Provider instance sync crash");
 
 			expect(
-				throwingEngine.getProviderForSession("s-sync-crash"),
+				Effect.runSync(
+					throwingEngine.getProviderForSessionEffect("s-sync-crash"),
+				),
 			).toBeUndefined();
 		});
 
@@ -907,9 +933,11 @@ describe("OrchestrationEngine", () => {
 
 			// Error TurnResult (not thrown) — binding should exist
 			expect(result.status).toBe("error");
-			expect(claudeEngine.getProviderForSession("int-session-erred")).toBe(
-				"claude",
-			);
+			expect(
+				Effect.runSync(
+					claudeEngine.getProviderForSessionEffect("int-session-erred"),
+				),
+			).toBe("claude");
 		});
 	});
 
