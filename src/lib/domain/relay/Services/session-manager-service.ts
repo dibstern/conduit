@@ -673,6 +673,71 @@ export const markSessionUnread = (sessionId: string) =>
 		Effect.withSpan("session.markSessionUnread", { attributes: { sessionId } }),
 	);
 
+const readSessionForTriage = (sessionId: string) =>
+	Effect.gen(function* () {
+		const readQuery = yield* Effect.serviceOption(ReadQueryEffectTag);
+		if (readQuery._tag === "None") return undefined;
+		const runner = yield* Effect.serviceOption(ProjectionRunnerEffectTag);
+		const sql = yield* Effect.serviceOption(SqlClient.SqlClient);
+		if (
+			runner._tag === "Some" &&
+			sql._tag === "Some" &&
+			!(yield* runner.value.isRecovered())
+		) {
+			yield* runner.value
+				.recover()
+				.pipe(Effect.provideService(SqlClient.SqlClient, sql.value));
+		}
+		return yield* readQuery.value.getSession(sessionId);
+	});
+
+export const setSessionSettled = (sessionId: string, settled: boolean) =>
+	Effect.gen(function* () {
+		const row = yield* readSessionForTriage(sessionId);
+		if (!row) return false;
+		if (settled && row.pinned_at !== null) {
+			return yield* Effect.fail(
+				new Error("Session is pinned and must be unpinned first"),
+			);
+		}
+		if ((row.settled_at !== null) === settled) return false;
+		yield* applySessionCommand({
+			type: settled ? "session.settled" : "session.unsettled",
+			data: { sessionId },
+		});
+		return true;
+	}).pipe(
+		Effect.mapError(
+			(cause) =>
+				new SessionManagerError({ operation: "setSessionSettled", cause }),
+		),
+		Effect.withSpan("session.setSessionSettled", { attributes: { sessionId } }),
+	);
+
+export const setSessionPinned = (sessionId: string, pinned: boolean) =>
+	Effect.gen(function* () {
+		const row = yield* readSessionForTriage(sessionId);
+		if (!row || (row.pinned_at !== null) === pinned) return false;
+		// A session is never both pinned and settled, so a pin brings it back.
+		if (pinned && row.settled_at !== null) {
+			yield* applySessionCommand({
+				type: "session.unsettled",
+				data: { sessionId },
+			});
+		}
+		yield* applySessionCommand({
+			type: pinned ? "session.pinned" : "session.unpinned",
+			data: { sessionId },
+		});
+		return true;
+	}).pipe(
+		Effect.mapError(
+			(cause) =>
+				new SessionManagerError({ operation: "setSessionPinned", cause }),
+		),
+		Effect.withSpan("session.setSessionPinned", { attributes: { sessionId } }),
+	);
+
 /**
  * Clear the stored pagination cursor for a session.
  */
@@ -1076,6 +1141,14 @@ export interface SessionManagerService {
 		title: string,
 	): Effect.Effect<void, SessionManagerError>;
 	markSessionRead(sessionId: string): Effect.Effect<void, SessionManagerError>;
+	setSessionSettled(
+		sessionId: string,
+		settled: boolean,
+	): Effect.Effect<boolean, SessionManagerError>;
+	setSessionPinned(
+		sessionId: string,
+		pinned: boolean,
+	): Effect.Effect<boolean, SessionManagerError>;
 	markSessionUnread(
 		sessionId: string,
 	): Effect.Effect<void, SessionManagerError>;
@@ -1466,6 +1539,7 @@ export const SessionManagerServiceLive: Layer.Layer<
 			return provided;
 		};
 
+		const triageLock = yield* Effect.makeSemaphore(1);
 		return {
 			getDefaultSessionId: (title) =>
 				Effect.gen(function* () {
@@ -1532,6 +1606,14 @@ export const SessionManagerServiceLive: Layer.Layer<
 				withSessionCommandServices(markSessionRead(sessionId)),
 			markSessionUnread: (sessionId) =>
 				withSessionCommandServices(markSessionUnread(sessionId)),
+			setSessionSettled: (sessionId, settled) =>
+				triageLock.withPermits(1)(
+					withSessionCommandServices(setSessionSettled(sessionId, settled)),
+				),
+			setSessionPinned: (sessionId, pinned) =>
+				triageLock.withPermits(1)(
+					withSessionCommandServices(setSessionPinned(sessionId, pinned)),
+				),
 			clearPaginationCursor: (sessionId) =>
 				clearPaginationCursor(sessionId).pipe(
 					Effect.provideService(SessionManagerStateTag, stateRef),

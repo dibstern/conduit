@@ -51,6 +51,10 @@ type SessionCommandType =
 	| "session.renamed"
 	| "session.read"
 	| "session.unread"
+	| "session.settled"
+	| "session.unsettled"
+	| "session.pinned"
+	| "session.unpinned"
 	| "session.deleted"
 	| "session.forked";
 
@@ -101,7 +105,11 @@ export const openCodeUpstreamAdapter = (
 				return Effect.void;
 			case "session.read":
 			case "session.unread":
-				// Read state belongs to Conduit and has no provider-side equivalent.
+			case "session.settled":
+			case "session.unsettled":
+			case "session.pinned":
+			case "session.unpinned":
+				// Triage state belongs to Conduit and has no provider-side equivalent.
 				return Effect.void;
 			case "session.forked":
 				// Same: the fork happened upstream first, which is where the forked

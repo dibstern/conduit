@@ -369,6 +369,8 @@ async function createEffectHarness(sendSessionLists = () => Effect.void) {
 			renameSession: unused,
 			markSessionRead: unused,
 			markSessionUnread: unused,
+			setSessionSettled: unused,
+			setSessionPinned: unused,
 			clearPaginationCursor: unused,
 			seedPaginationCursor: unused,
 			loadPreRenderedHistory: unused,

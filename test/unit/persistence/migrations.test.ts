@@ -123,6 +123,7 @@ describe("Migration Runner", () => {
 		const sessionsReadAtMigration = schemaMigrations[10];
 		const sessionsLastTurnErrorMigration = schemaMigrations[11];
 		const compactionBackfillMigration = schemaMigrations[12];
+		const sessionsSettledPinnedMigration = schemaMigrations[13];
 		if (
 			!baseline ||
 			!metadataMigration ||
@@ -136,7 +137,8 @@ describe("Migration Runner", () => {
 			!sessionCascadeDeletesMigration ||
 			!sessionsReadAtMigration ||
 			!sessionsLastTurnErrorMigration ||
-			!compactionBackfillMigration
+			!compactionBackfillMigration ||
+			!sessionsSettledPinnedMigration
 		) {
 			throw new Error("Expected all event-store schema migrations");
 		}
@@ -212,6 +214,11 @@ describe("Migration Runner", () => {
 				name: "backfill_compaction_messages",
 				checksum: calculateMigrationChecksum(compactionBackfillMigration),
 			},
+			{
+				id: 14,
+				name: "sessions_settled_pinned",
+				checksum: calculateMigrationChecksum(sessionsSettledPinnedMigration),
+			},
 		]);
 		columns = client
 			.query<{ name: string }>("PRAGMA table_info(message_parts)")
@@ -246,13 +253,15 @@ describe("Migration Runner", () => {
 		const sessionsReadAtMigration = schemaMigrations[10];
 		const sessionsLastTurnErrorMigration = schemaMigrations[11];
 		const compactionBackfillMigration = schemaMigrations[12];
+		const sessionsSettledPinnedMigration = schemaMigrations[13];
 		if (
 			!turnModelExecutionMigration ||
 			!sessionsPermissionModeMigration ||
 			!sessionCascadeDeletesMigration ||
 			!sessionsReadAtMigration ||
 			!sessionsLastTurnErrorMigration ||
-			!compactionBackfillMigration
+			!compactionBackfillMigration ||
+			!sessionsSettledPinnedMigration
 		) {
 			throw new Error("Expected remaining event-store migrations");
 		}
@@ -294,6 +303,11 @@ describe("Migration Runner", () => {
 				name: "backfill_compaction_messages",
 				checksum: calculateMigrationChecksum(compactionBackfillMigration),
 			},
+			{
+				id: 14,
+				name: "sessions_settled_pinned",
+				checksum: calculateMigrationChecksum(sessionsSettledPinnedMigration),
+			},
 		]);
 		expect(runMigrations(client, schemaMigrations)).toEqual([]);
 
@@ -307,6 +321,46 @@ describe("Migration Runner", () => {
 				"actual_model",
 			]),
 		);
+	});
+
+	it("adds settled_at and pinned_at once without backfilling existing sessions", () => {
+		client = SqliteClient.memory();
+		const migrationsBeforeTriage = schemaMigrations.slice(0, 13);
+		const migrationsThroughTriage = schemaMigrations;
+		runMigrations(client, migrationsBeforeTriage);
+		client.execute(
+			`INSERT INTO sessions (id, provider, title, status, last_message_at, created_at, updated_at)
+			 VALUES (?, ?, ?, ?, ?, ?, ?)`,
+			["existing", "opencode", "Existing", "idle", 456, 100, 456],
+		);
+
+		expect(
+			client
+				.query<{ name: string }>("PRAGMA table_info(sessions)")
+				.map((column) => column.name),
+		).not.toContain("settled_at");
+
+		expect(runMigrations(client, migrationsThroughTriage)).toHaveLength(1);
+
+		const rows = client.query<SessionRow>("SELECT * FROM sessions");
+		expect(rows[0]).toMatchObject({
+			settled_at: null,
+			pinned_at: null,
+			updated_at: 456,
+		});
+		const [session] = sessionRowsToSessionInfoList(rows);
+		expect(session).not.toHaveProperty("settledAt");
+		expect(session).not.toHaveProperty("pinnedAt");
+
+		expect(runMigrations(client, migrationsThroughTriage)).toEqual([]);
+		expect(
+			client
+				.query<{ name: string }>("PRAGMA table_info(sessions)")
+				.filter(
+					(column) =>
+						column.name === "settled_at" || column.name === "pinned_at",
+				),
+		).toHaveLength(2);
 	});
 
 	it("adds read_at once and backfills existing sessions as already read", () => {
@@ -360,7 +414,7 @@ describe("Migration Runner", () => {
 				.map((column) => column.name),
 		).not.toContain("last_turn_error_at");
 
-		expect(runMigrations(client, schemaMigrations)).toHaveLength(2);
+		expect(runMigrations(client, schemaMigrations)).toHaveLength(3);
 		const rows = client.query<SessionRow>("SELECT * FROM sessions");
 		expect(rows[0]?.last_turn_error_at).toBeNull();
 		expect(sessionRowsToSessionInfoList(rows)[0]?.attention).toBe("idle");

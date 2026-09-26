@@ -1081,6 +1081,56 @@ describe("Effect Session Projector (via ProjectionRunner)", () => {
 			}),
 		));
 
+	it.each([
+		["session.settled", "session.unsettled", "settled_at"],
+		["session.pinned", "session.unpinned", "pinned_at"],
+	] as const)("%s is deterministic across replay", (setType, clearType, column) =>
+		runTest(
+			Effect.gen(function* () {
+				const sql = yield* SqlClient.SqlClient;
+				const store = yield* EventStoreEffectTag;
+				const runner = yield* ProjectionRunnerEffectTag;
+				yield* runner.markRecovered();
+				yield* seedSession("s1");
+				const created = yield* store.append(makeSessionCreated("s1"));
+				yield* runner.projectEvent(created);
+				const set = yield* store.append(
+					canonicalEvent(
+						setType,
+						"s1",
+						{ sessionId: "s1" },
+						{ createdAt: FIXED_TS + 100 },
+					),
+				);
+				const clear = yield* store.append(
+					canonicalEvent(
+						clearType,
+						"s1",
+						{ sessionId: "s1" },
+						{ createdAt: FIXED_TS + 200 },
+					),
+				);
+				for (let replay = 0; replay < 2; replay++) {
+					yield* runner.projectEvent(set);
+					const afterSet = yield* sql<{
+						settled_at: number | null;
+						pinned_at: number | null;
+						updated_at: number;
+					}>`SELECT settled_at, pinned_at, updated_at FROM sessions WHERE id = 's1'`;
+					expect(afterSet[0]?.[column]).toBe(FIXED_TS + 100);
+					expect(afterSet[0]?.updated_at).toBe(FIXED_TS);
+					yield* runner.projectEvent(clear);
+					const afterClear = yield* sql<{
+						settled_at: number | null;
+						pinned_at: number | null;
+						updated_at: number;
+					}>`SELECT settled_at, pinned_at, updated_at FROM sessions WHERE id = 's1'`;
+					expect(afterClear[0]?.[column]).toBeNull();
+					expect(afterClear[0]?.updated_at).toBe(FIXED_TS);
+				}
+			}),
+		));
+
 	it("session read state is deterministic across replay", () =>
 		runTest(
 			Effect.gen(function* () {

@@ -305,6 +305,8 @@ export const SessionInfoSchema = Schema.Struct({
 	pendingPermissionCount: Schema.optional(Schema.Number),
 	attention: Schema.optional(SessionAttentionSchema),
 	unread: Schema.optional(Schema.Boolean),
+	settledAt: Schema.optional(Schema.Number),
+	pinnedAt: Schema.optional(Schema.Number),
 });
 
 export const ProjectSessionAvailabilitySchema = Schema.Union(
@@ -919,6 +921,34 @@ export class MarkSessionUnread extends Schema.TaggedRequest<MarkSessionUnread>()
 	},
 ) {}
 
+export class SetSessionSettled extends Schema.TaggedRequest<SetSessionSettled>()(
+	"SetSessionSettled",
+	{
+		failure: WsRpcError,
+		success: OkResponseSchema,
+		payload: {
+			projectSlug: NonEmptyString,
+			sessionId: NonEmptyString,
+			settled: Schema.Boolean,
+			originId: Schema.optional(NonEmptyString),
+		},
+	},
+) {}
+
+export class SetSessionPinned extends Schema.TaggedRequest<SetSessionPinned>()(
+	"SetSessionPinned",
+	{
+		failure: WsRpcError,
+		success: OkResponseSchema,
+		payload: {
+			projectSlug: NonEmptyString,
+			sessionId: NonEmptyString,
+			pinned: Schema.Boolean,
+			originId: Schema.optional(NonEmptyString),
+		},
+	},
+) {}
+
 export class SwitchVariant extends Schema.TaggedRequest<SwitchVariant>()(
 	"SwitchVariant",
 	{
@@ -1275,6 +1305,8 @@ export const WsRpcRequest = Schema.Union(
 	ReloadProviderSession,
 	RenameSession,
 	MarkSessionUnread,
+	SetSessionSettled,
+	SetSessionPinned,
 	SwitchVariant,
 	SwitchPermissionMode,
 	GetFileTree,
@@ -1338,6 +1370,8 @@ export const WsRpcGroup = RpcGroup.make(
 	Rpc.fromTaggedRequest(ReloadProviderSession),
 	Rpc.fromTaggedRequest(RenameSession),
 	Rpc.fromTaggedRequest(MarkSessionUnread),
+	Rpc.fromTaggedRequest(SetSessionSettled),
+	Rpc.fromTaggedRequest(SetSessionPinned),
 	Rpc.fromTaggedRequest(SwitchVariant),
 	Rpc.fromTaggedRequest(SwitchPermissionMode),
 	Rpc.fromTaggedRequest(GetFileTree),

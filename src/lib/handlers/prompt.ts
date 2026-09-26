@@ -96,6 +96,21 @@ export const sendMessageToSession = (input: SendMessageToSessionInput) =>
 			...(sessionModel ? { model: sessionModel } : {}),
 			modelUserSelected: sessionModelUserSelected,
 		});
+		// Talking to a settled session brings it back. Triage bookkeeping must
+		// never stop the message itself, so a failure here is only logged.
+		yield* Effect.gen(function* () {
+			if (yield* sessionManagerService.setSessionSettled(activeId, false)) {
+				yield* sessionManagerService.sendSessionLists((msg) =>
+					wsHandler.broadcast(msg),
+				);
+			}
+		}).pipe(
+			Effect.catchAll((error) =>
+				Effect.sync(() =>
+					log.warn(`Failed to un-settle ${activeId}: ${String(error)}`),
+				),
+			),
+		);
 		log.info(
 			`client=${clientId} session=${activeId} → ${text.slice(0, 80)}${text.length > 80 ? "…" : ""}`,
 		);

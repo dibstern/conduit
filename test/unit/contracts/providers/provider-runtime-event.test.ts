@@ -84,6 +84,10 @@ describe("ProviderRuntimeEvent contracts", () => {
 			"session.permission_mode_changed",
 			"session.read",
 			"session.unread",
+			"session.settled",
+			"session.unsettled",
+			"session.pinned",
+			"session.unpinned",
 		];
 		const missingRuntimeTypes = CANONICAL_EVENT_TYPES.filter(
 			(type) =>

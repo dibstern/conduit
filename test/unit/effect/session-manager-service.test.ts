@@ -95,6 +95,8 @@ function makeRow(id: string, overrides?: Partial<SessionRow>): SessionRow {
 		last_turn_error_at: null,
 		permission_mode: null,
 		read_at: null,
+		settled_at: null,
+		pinned_at: null,
 		created_at: 1000,
 		updated_at: 2000,
 		...overrides,
@@ -1129,6 +1131,168 @@ describe("SessionManagerService", () => {
 						pendingPermissionCount: 1,
 					}),
 				]);
+			}).pipe(
+				Effect.provide(Layer.fresh(layer)),
+				Effect.ensuring(Effect.sync(() => rmSync(dbFile, { force: true }))),
+			);
+		},
+	);
+
+	it.effect(
+		"recovers pending events before triage guards and idempotency checks",
+		() => {
+			const dbFile = join(
+				tmpdir(),
+				`conduit-triage-recovery-${crypto.randomUUID()}.sqlite`,
+			);
+			const layer = Layer.provideMerge(
+				SessionManagerServiceLive,
+				Layer.mergeAll(
+					Layer.succeed(OpenCodeAPITag, makeMockOpenCodeAPI()),
+					Layer.succeed(LoggerTag, makeMockLogger()),
+					makeSessionManagerStateLive(),
+					DaemonEventBusLive,
+					makePersistenceEffectLayer(dbFile),
+				),
+			);
+			return Effect.gen(function* () {
+				const store = yield* EventStoreEffectTag;
+				const service = yield* SessionManagerServiceTag;
+				for (const id of ["settled", "pinned"]) {
+					yield* store.append(
+						canonicalEvent(
+							"session.created",
+							id,
+							{ sessionId: id, title: id, provider: "opencode" },
+							{ provider: "opencode", createdAt: 10 },
+						),
+					);
+					yield* store.append(
+						canonicalEvent(
+							id === "settled" ? "session.settled" : "session.pinned",
+							id,
+							{ sessionId: id },
+							{ provider: "opencode", createdAt: 20 },
+						),
+					);
+				}
+				expect(yield* service.setSessionSettled("settled", true)).toBe(false);
+				expect(yield* store.readAllBySession("settled")).toHaveLength(2);
+				expect(yield* service.setSessionSettled("settled", false)).toBe(true);
+				const blocked = yield* Effect.either(
+					service.setSessionSettled("pinned", true),
+				);
+				expect(blocked._tag).toBe("Left");
+				expect(yield* store.readAllBySession("pinned")).toHaveLength(2);
+				expect(yield* service.setSessionPinned("pinned", false)).toBe(true);
+				expect(yield* service.setSessionSettled("pinned", true)).toBe(true);
+			}).pipe(
+				Effect.provide(Layer.fresh(layer)),
+				Effect.ensuring(Effect.sync(() => rmSync(dbFile, { force: true }))),
+			);
+		},
+	);
+
+	it.effect(
+		"persists idempotent triage commands without changing list order",
+		() => {
+			const dbFile = join(
+				tmpdir(),
+				`conduit-session-triage-${crypto.randomUUID()}.sqlite`,
+			);
+			const api = makeMockOpenCodeAPI();
+			const layer = Layer.provideMerge(
+				SessionManagerServiceLive,
+				Layer.mergeAll(
+					Layer.succeed(OpenCodeAPITag, api),
+					Layer.succeed(LoggerTag, makeMockLogger()),
+					makeSessionManagerStateLive(),
+					DaemonEventBusLive,
+					makePersistenceEffectLayer(dbFile),
+				),
+			);
+			return Effect.gen(function* () {
+				const store = yield* EventStoreEffectTag;
+				const runner = yield* ProjectionRunnerEffectTag;
+				const service = yield* SessionManagerServiceTag;
+				yield* runner.markRecovered();
+				for (const [id, createdAt] of [
+					["older", 10],
+					["newer", 20],
+				] as const) {
+					yield* runner.projectEvent(
+						yield* store.append(
+							canonicalEvent(
+								"session.created",
+								id,
+								{ sessionId: id, title: id, provider: "opencode" },
+								{ provider: "opencode", createdAt },
+							),
+						),
+					);
+				}
+				expect(yield* service.setSessionSettled("older", false)).toBe(false);
+				expect(yield* service.setSessionPinned("older", false)).toBe(false);
+				expect(
+					yield* Effect.all(
+						[
+							service.setSessionSettled("older", true),
+							service.setSessionSettled("older", true),
+						],
+						{ concurrency: "unbounded" },
+					),
+				).toEqual([true, false]);
+				const settled = (yield* service.listSessions()).find(
+					(s) => s.id === "older",
+				);
+				expect(settled?.settledAt).toEqual(expect.any(Number));
+				expect(yield* service.setSessionSettled("older", false)).toBe(true);
+				expect(yield* service.setSessionPinned("older", true)).toBe(true);
+				expect(yield* service.setSessionPinned("older", true)).toBe(false);
+				const blocked = yield* Effect.either(
+					service.setSessionSettled("older", true),
+				);
+				expect(blocked._tag).toBe("Left");
+				if (blocked._tag === "Left")
+					expect(String(blocked.left.cause)).toMatch(/pinned.*unpinned first/);
+				const pinned = (yield* service.listSessions()).find(
+					(s) => s.id === "older",
+				);
+				expect(pinned?.pinnedAt).toEqual(expect.any(Number));
+				expect(pinned).not.toHaveProperty("settledAt");
+				expect(yield* service.setSessionPinned("older", false)).toBe(true);
+				expect(yield* service.setSessionPinned("older", false)).toBe(false);
+				expect(yield* service.setSessionSettled("older", true)).toBe(true);
+				// Pinning a settled session un-settles it: a session is never both.
+				expect(yield* service.setSessionPinned("older", true)).toBe(true);
+				const repinned = (yield* service.listSessions()).find(
+					(s) => s.id === "older",
+				);
+				expect(repinned?.pinnedAt).toEqual(expect.any(Number));
+				expect(repinned).not.toHaveProperty("settledAt");
+				expect(yield* service.setSessionPinned("older", false)).toBe(true);
+				const sessions = yield* service.listSessions();
+				expect(sessions.map((s) => [s.id, s.updatedAt])).toEqual([
+					["newer", 20],
+					["older", 10],
+				]);
+				expect(sessions[1]).not.toHaveProperty("settledAt");
+				expect(sessions[1]).not.toHaveProperty("pinnedAt");
+				expect(
+					(yield* store.readAllBySession("older")).map((e) => e.type),
+				).toEqual([
+					"session.created",
+					"session.settled",
+					"session.unsettled",
+					"session.pinned",
+					"session.unpinned",
+					"session.settled",
+					"session.unsettled",
+					"session.pinned",
+					"session.unpinned",
+				]);
+				expect(api.session.update).not.toHaveBeenCalled();
+				expect(api.session.delete).not.toHaveBeenCalled();
 			}).pipe(
 				Effect.provide(Layer.fresh(layer)),
 				Effect.ensuring(Effect.sync(() => rmSync(dbFile, { force: true }))),

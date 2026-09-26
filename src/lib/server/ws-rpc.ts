@@ -61,6 +61,8 @@ import {
 	loadMoreHistoryForSession,
 	markSessionUnreadForClient,
 	renameSessionForClient,
+	setSessionPinnedForClient,
+	setSessionSettledForClient,
 	viewSessionForClient,
 } from "../handlers/session.js";
 import {
@@ -153,6 +155,8 @@ export {
 	type SetDefaultPermissionModeResponse,
 	SetLogLevel,
 	SetProjectInstance,
+	SetSessionPinned,
+	SetSessionSettled,
 	StartInstance,
 	StopInstance,
 	SwitchAgent,
@@ -799,6 +803,34 @@ export const wsRpcHandlers = WsRpcGroup.of({
 						message: `RenameSession failed: ${String(error)}`,
 					}),
 				),
+			),
+		),
+	SetSessionSettled: (request) =>
+		setSessionSettledForClient({
+			clientId: request.originId ?? "rpc",
+			sessionId: request.sessionId,
+			settled: request.settled,
+		}).pipe(
+			Effect.as({ ok: true as const }),
+			Effect.mapError(
+				(error) =>
+					new WsRpcError({
+						message: `SetSessionSettled failed: ${String(error.cause)}`,
+					}),
+			),
+		),
+	SetSessionPinned: (request) =>
+		setSessionPinnedForClient({
+			clientId: request.originId ?? "rpc",
+			sessionId: request.sessionId,
+			pinned: request.pinned,
+		}).pipe(
+			Effect.as({ ok: true as const }),
+			Effect.mapError(
+				(error) =>
+					new WsRpcError({
+						message: `SetSessionPinned failed: ${String(error.cause)}`,
+					}),
 			),
 		),
 	MarkSessionUnread: (request) =>

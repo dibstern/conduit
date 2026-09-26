@@ -47,11 +47,14 @@ import {
 	RewindSession,
 	ScanNow,
 	SendMessage,
+	SessionInfoSchema,
 	SetClaudeSettings,
 	SetDefaultModel,
 	SetDefaultPermissionMode,
 	SetLogLevel,
 	SetProjectInstance,
+	SetSessionPinned,
+	SetSessionSettled,
 	StartInstance,
 	StopInstance,
 	SwitchAgent,
@@ -413,6 +416,8 @@ const provideRpc = <A, E>(effect: Effect.Effect<A, E, WsRpcTestEnv>) =>
 					}),
 				RenameSession: () => Effect.succeed({ ok: true as const }),
 				MarkSessionUnread: () => Effect.succeed({ ok: true as const }),
+				SetSessionSettled: () => Effect.succeed({ ok: true as const }),
+				SetSessionPinned: () => Effect.succeed({ ok: true as const }),
 				SwitchVariant: (request) =>
 					Effect.succeed({
 						projectSlug: request.projectSlug,
@@ -488,6 +493,44 @@ const provideRpc = <A, E>(effect: Effect.Effect<A, E, WsRpcTestEnv>) =>
 	);
 
 describe("browser WebSocket RPC contract", () => {
+	it("round-trips durable settled and pinned timestamps", () => {
+		const session = {
+			id: "s1",
+			title: "Triage",
+			updatedAt: 1,
+			messageCount: 0,
+			settledAt: 123,
+			pinnedAt: 456,
+		};
+		const encoded = Schema.encodeSync(SessionInfoSchema)(session);
+		expect(encoded).toEqual(session);
+		expect(Schema.decodeUnknownSync(SessionInfoSchema)(encoded)).toEqual(
+			session,
+		);
+	});
+
+	it("registers and decodes the project-scoped triage RPCs", () => {
+		for (const request of [
+			new SetSessionSettled({
+				projectSlug: "demo",
+				sessionId: "s1",
+				settled: true,
+				originId: "browser",
+			}),
+			new SetSessionPinned({
+				projectSlug: "demo",
+				sessionId: "s1",
+				pinned: false,
+			}),
+		]) {
+			expect(WsRpcGroup.requests.has(request._tag)).toBe(true);
+			expect(
+				Schema.decodeUnknownSync(WsRpcRequest)(
+					Schema.encodeSync(WsRpcRequest)(request),
+				),
+			).toEqual(request);
+		}
+	});
 	it.effect(
 		"never returns secret-bearing extra fields from a stubbed resolver child",
 		() =>

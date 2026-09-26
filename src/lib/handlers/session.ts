@@ -634,6 +634,44 @@ export const renameSessionForClient = ({
 		}
 	});
 
+export const setSessionSettledForClient = ({
+	clientId,
+	sessionId,
+	settled,
+}: {
+	readonly clientId: string;
+	readonly sessionId: string;
+	readonly settled: boolean;
+}) =>
+	Effect.gen(function* () {
+		const wsHandler = yield* WebSocketHandlerTag;
+		const service = yield* SessionManagerServiceTag;
+		const log = yield* LoggerTag;
+		if (yield* service.setSessionSettled(sessionId, settled)) {
+			yield* service.sendSessionLists((msg) => wsHandler.broadcast(msg));
+			log.info(`client=${clientId} Set settled=${settled}: ${sessionId}`);
+		}
+	});
+
+export const setSessionPinnedForClient = ({
+	clientId,
+	sessionId,
+	pinned,
+}: {
+	readonly clientId: string;
+	readonly sessionId: string;
+	readonly pinned: boolean;
+}) =>
+	Effect.gen(function* () {
+		const wsHandler = yield* WebSocketHandlerTag;
+		const service = yield* SessionManagerServiceTag;
+		const log = yield* LoggerTag;
+		if (yield* service.setSessionPinned(sessionId, pinned)) {
+			yield* service.sendSessionLists((msg) => wsHandler.broadcast(msg));
+			log.info(`client=${clientId} Set pinned=${pinned}: ${sessionId}`);
+		}
+	});
+
 export const markSessionUnreadForClient = ({
 	clientId,
 	sessionId,

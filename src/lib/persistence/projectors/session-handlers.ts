@@ -14,6 +14,10 @@ type SessionHandledType =
 	| "session.renamed"
 	| "session.read"
 	| "session.unread"
+	| "session.settled"
+	| "session.unsettled"
+	| "session.pinned"
+	| "session.unpinned"
 	| "session.deleted"
 	| "session.forked"
 	| "session.status"
@@ -131,6 +135,34 @@ export const sessionHandlers: {
 	"session.unread": (event) => [
 		{
 			sql: "UPDATE sessions SET read_at = NULL WHERE id = ?",
+			params: [event.data.sessionId],
+		},
+	],
+
+	"session.settled": (event) => [
+		{
+			sql: "UPDATE sessions SET settled_at = ? WHERE id = ?",
+			params: [event.createdAt, event.data.sessionId],
+		},
+	],
+
+	"session.unsettled": (event) => [
+		{
+			sql: "UPDATE sessions SET settled_at = NULL WHERE id = ?",
+			params: [event.data.sessionId],
+		},
+	],
+
+	"session.pinned": (event) => [
+		{
+			sql: "UPDATE sessions SET pinned_at = ? WHERE id = ?",
+			params: [event.createdAt, event.data.sessionId],
+		},
+	],
+
+	"session.unpinned": (event) => [
+		{
+			sql: "UPDATE sessions SET pinned_at = NULL WHERE id = ?",
 			params: [event.data.sessionId],
 		},
 	],

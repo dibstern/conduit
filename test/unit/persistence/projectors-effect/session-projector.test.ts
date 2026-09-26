@@ -56,6 +56,8 @@ interface SessionRow {
 	last_turn_error_at: number | null;
 	permission_mode: string | null;
 	read_at: number | null;
+	settled_at: number | null;
+	pinned_at: number | null;
 	created_at: number;
 	updated_at: number;
 }
@@ -388,6 +390,60 @@ describe("SessionProjector", () => {
 			expect(other?.permission_mode).toBeNull();
 			expect(other?.updated_at).toBe(now);
 		});
+	});
+
+	it.each([
+		["session.settled", "session.unsettled", "settled_at"],
+		["session.pinned", "session.unpinned", "pinned_at"],
+	] as const)("%s and its undo preserve the session sort key", async (setType, clearType, column) => {
+		await project(
+			makeStored(
+				"session.created",
+				"s1",
+				{
+					sessionId: "s1",
+					title: "Test",
+					provider: "opencode",
+				},
+				1,
+				now,
+			),
+		);
+		await project(
+			makeStored(
+				"session.created",
+				"s2",
+				{
+					sessionId: "s2",
+					title: "Other",
+					provider: "opencode",
+				},
+				2,
+				now + 50,
+			),
+		);
+		await project(makeStored(setType, "s1", { sessionId: "s1" }, 3, now + 100));
+		const afterSet = await queryOne<SessionRow>(
+			"SELECT * FROM sessions WHERE id = ?",
+			["s1"],
+		);
+		expect(afterSet?.[column]).toBe(now + 100);
+		expect(afterSet?.updated_at).toBe(now);
+		const other = await queryOne<SessionRow>(
+			"SELECT * FROM sessions WHERE id = ?",
+			["s2"],
+		);
+		expect(other?.[column]).toBeNull();
+		expect(other?.updated_at).toBe(now + 50);
+		await project(
+			makeStored(clearType, "s1", { sessionId: "s1" }, 4, now + 200),
+		);
+		const afterClear = await queryOne<SessionRow>(
+			"SELECT * FROM sessions WHERE id = ?",
+			["s1"],
+		);
+		expect(afterClear?.[column]).toBeNull();
+		expect(afterClear?.updated_at).toBe(now);
 	});
 
 	describe("session read state", () => {

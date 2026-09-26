@@ -111,6 +111,8 @@ function makeEmptyHistoryReadQuery(
 				last_turn_error_at: null,
 				permission_mode: null,
 				read_at: null,
+				settled_at: null,
+				pinned_at: null,
 				created_at: 1,
 				updated_at: 1,
 			}),

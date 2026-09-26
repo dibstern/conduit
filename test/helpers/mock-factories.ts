@@ -814,6 +814,8 @@ export function makeMockSessionManagerService(
 		renameSession: vi.fn(() => Effect.void),
 		markSessionRead: vi.fn(() => Effect.void),
 		markSessionUnread: vi.fn(() => Effect.void),
+		setSessionSettled: vi.fn(() => Effect.succeed(false)),
+		setSessionPinned: vi.fn(() => Effect.succeed(false)),
 		clearPaginationCursor: vi.fn(() => Effect.void),
 		seedPaginationCursor: vi.fn(() => Effect.void),
 		loadPreRenderedHistory: vi.fn(() =>

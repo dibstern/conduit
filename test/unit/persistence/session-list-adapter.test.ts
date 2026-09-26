@@ -18,6 +18,8 @@ function makeRow(id: string, overrides?: Partial<SessionRow>): SessionRow {
 		last_turn_error_at: null,
 		permission_mode: null,
 		read_at: null,
+		settled_at: null,
+		pinned_at: null,
 		created_at: 1000,
 		updated_at: 2000,
 		...overrides,
@@ -27,6 +29,16 @@ function makeRow(id: string, overrides?: Partial<SessionRow>): SessionRow {
 // ─── sessionRowsToSessionInfoList ─────────────────────────────────────────
 
 describe("sessionRowsToSessionInfoList", () => {
+	it("carries settled and pinned timestamps and omits NULL values", () => {
+		const [set, unset] = sessionRowsToSessionInfoList([
+			makeRow("set", { settled_at: 0, pinned_at: 456 }),
+			makeRow("unset"),
+		]);
+		expect(set).toMatchObject({ settledAt: 0, pinnedAt: 456 });
+		expect(unset).not.toHaveProperty("settledAt");
+		expect(unset).not.toHaveProperty("pinnedAt");
+	});
+
 	it("rolls nested descendant counts and activity into roots only", () => {
 		const rows = [
 			makeRow("root"),

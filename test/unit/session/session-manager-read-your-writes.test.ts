@@ -153,6 +153,34 @@ const READ_MODEL_PARITY_CASES: Record<ReadModelMutation, ParityCase> = {
 				expect((yield* readQuery.getSession(sessionId))?.read_at).toBeNull();
 			}),
 	},
+	setSessionSettled: {
+		run: ({ service, readQuery, seedSession }) =>
+			Effect.gen(function* () {
+				yield* seedSession("ses-settled", "Settle me");
+				yield* service.setSessionSettled("ses-settled", true);
+				expect(
+					(yield* readQuery.getSession("ses-settled"))?.settled_at,
+				).toEqual(expect.any(Number));
+				yield* service.setSessionSettled("ses-settled", false);
+				expect(
+					(yield* readQuery.getSession("ses-settled"))?.settled_at,
+				).toBeNull();
+			}),
+	},
+	setSessionPinned: {
+		run: ({ service, readQuery, seedSession }) =>
+			Effect.gen(function* () {
+				yield* seedSession("ses-pinned", "Pin me");
+				yield* service.setSessionPinned("ses-pinned", true);
+				expect((yield* readQuery.getSession("ses-pinned"))?.pinned_at).toEqual(
+					expect.any(Number),
+				);
+				yield* service.setSessionPinned("ses-pinned", false);
+				expect(
+					(yield* readQuery.getSession("ses-pinned"))?.pinned_at,
+				).toBeNull();
+			}),
+	},
 	setForkEntry: {
 		run: ({ api, service, readQuery, seedSession }) =>
 			Effect.gen(function* () {

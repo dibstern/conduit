@@ -1,4 +1,5 @@
 // test/unit/persistence/events.test.ts
+import { Schema } from "effect";
 import { describe, expect, it } from "vitest";
 import type {
 	CanonicalEvent,
@@ -9,6 +10,7 @@ import type {
 } from "../../../src/lib/persistence/events.js";
 import {
 	CANONICAL_EVENT_TYPES,
+	CanonicalEventSchema,
 	canonicalEvent,
 	createCommandId,
 	createEventId,
@@ -16,8 +18,8 @@ import {
 } from "../../../src/lib/persistence/events.js";
 
 describe("Canonical Event Types", () => {
-	it("exports all 28 canonical event types", () => {
-		expect(CANONICAL_EVENT_TYPES).toHaveLength(28);
+	it("exports all 32 canonical event types", () => {
+		expect(CANONICAL_EVENT_TYPES).toHaveLength(32);
 		expect(CANONICAL_EVENT_TYPES).toContain("message.created");
 		expect(CANONICAL_EVENT_TYPES).toContain("text.delta");
 		expect(CANONICAL_EVENT_TYPES).toContain("thinking.start");
@@ -36,6 +38,10 @@ describe("Canonical Event Types", () => {
 		expect(CANONICAL_EVENT_TYPES).toContain("session.renamed");
 		expect(CANONICAL_EVENT_TYPES).toContain("session.read");
 		expect(CANONICAL_EVENT_TYPES).toContain("session.unread");
+		expect(CANONICAL_EVENT_TYPES).toContain("session.settled");
+		expect(CANONICAL_EVENT_TYPES).toContain("session.unsettled");
+		expect(CANONICAL_EVENT_TYPES).toContain("session.pinned");
+		expect(CANONICAL_EVENT_TYPES).toContain("session.unpinned");
 		expect(CANONICAL_EVENT_TYPES).toContain("session.deleted");
 		expect(CANONICAL_EVENT_TYPES).toContain("session.forked");
 		expect(CANONICAL_EVENT_TYPES).toContain("session.status");
@@ -46,6 +52,25 @@ describe("Canonical Event Types", () => {
 		expect(CANONICAL_EVENT_TYPES).toContain("permission.resolved");
 		expect(CANONICAL_EVENT_TYPES).toContain("question.asked");
 		expect(CANONICAL_EVENT_TYPES).toContain("question.resolved");
+	});
+
+	it.each([
+		"session.settled",
+		"session.unsettled",
+		"session.pinned",
+		"session.unpinned",
+	] as const)("validates and round-trips %s", (type) => {
+		const event = canonicalEvent(type, "s1", { sessionId: "s1" });
+		expect(() => validateEventPayload(event)).not.toThrow();
+		const encoded = Schema.encodeSync(CanonicalEventSchema)(event);
+		expect(Schema.decodeUnknownSync(CanonicalEventSchema)(encoded)).toEqual(
+			event,
+		);
+		const missingSession = { ...event, data: {} };
+		// @ts-expect-error Deliberately malformed payload verifies runtime validation.
+		expect(() => validateEventPayload(missingSession)).toThrow(
+			"missing required fields: sessionId",
+		);
 	});
 
 	it("createEventId generates a prefixed UUID", () => {

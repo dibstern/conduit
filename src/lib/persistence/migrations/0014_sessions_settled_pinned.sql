@@ -1,0 +1,2 @@
+ALTER TABLE sessions ADD COLUMN settled_at INTEGER;
+ALTER TABLE sessions ADD COLUMN pinned_at INTEGER;

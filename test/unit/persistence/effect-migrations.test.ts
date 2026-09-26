@@ -105,6 +105,7 @@ describe("Effect SQL migrations", () => {
 					{ migration_id: 12, name: "sessions_read_at" },
 					{ migration_id: 13, name: "sessions_last_turn_error" },
 					{ migration_id: 14, name: "backfill_compaction_messages" },
+					{ migration_id: 15, name: "sessions_settled_pinned" },
 				]);
 
 				const legacyRows = yield* sql<{ id: number; name: string }>`
@@ -123,6 +124,7 @@ describe("Effect SQL migrations", () => {
 					{ id: 11, name: "sessions_read_at" },
 					{ id: 12, name: "sessions_last_turn_error" },
 					{ id: 13, name: "backfill_compaction_messages" },
+					{ id: 14, name: "sessions_settled_pinned" },
 				]);
 			}).pipe(
 				Effect.provide(
@@ -153,6 +155,7 @@ describe("Effect SQL migrations", () => {
 					[12, "sessions_read_at"],
 					[13, "sessions_last_turn_error"],
 					[14, "backfill_compaction_messages"],
+					[15, "sessions_settled_pinned"],
 				]);
 
 				const sql = yield* SqlClient.SqlClient;
@@ -171,8 +174,8 @@ describe("Effect SQL migrations", () => {
 					name: string;
 				}>`SELECT migration_id, name FROM effect_sql_migrations ORDER BY migration_id`;
 				expect(effectHistory.at(-1)).toEqual({
-					migration_id: 14,
-					name: "backfill_compaction_messages",
+					migration_id: 15,
+					name: "sessions_settled_pinned",
 				});
 				const legacyHistory = yield* sql<{ id: number; name: string }>`
 					SELECT id, name FROM _migrations ORDER BY id`;
@@ -218,6 +221,7 @@ describe("Effect SQL migrations", () => {
 					{ migration_id: 12, name: "sessions_read_at" },
 					{ migration_id: 13, name: "sessions_last_turn_error" },
 					{ migration_id: 14, name: "backfill_compaction_messages" },
+					{ migration_id: 15, name: "sessions_settled_pinned" },
 				]);
 
 				const columns = yield* sql<{ name: string }>`
@@ -303,8 +307,8 @@ describe("Effect SQL migrations", () => {
 					FROM effect_sql_migrations
 					ORDER BY migration_id`;
 				expect(history.at(-1)).toEqual({
-					migration_id: 14,
-					name: "backfill_compaction_messages",
+					migration_id: 15,
+					name: "sessions_settled_pinned",
 				});
 			}).pipe(
 				Effect.provide(
@@ -320,6 +324,57 @@ describe("Effect SQL migrations", () => {
 			),
 	);
 
+	it.effect(
+		"adds settled_at and pinned_at once without backfilling existing sessions",
+		() =>
+			Effect.gen(function* () {
+				yield* makeEffectSqlMigrator();
+
+				const sql = yield* SqlClient.SqlClient;
+				const columns = yield* sql<{
+					name: string;
+				}>`PRAGMA table_info(sessions)`;
+				expect(
+					columns.filter(
+						(column) =>
+							column.name === "settled_at" || column.name === "pinned_at",
+					),
+				).toHaveLength(2);
+				const rows = yield* sql<{
+					settled_at: number | null;
+					pinned_at: number | null;
+					updated_at: number;
+				}>`
+					SELECT settled_at, pinned_at, updated_at FROM sessions WHERE id = 'existing'`;
+				expect(rows[0]).toEqual({
+					settled_at: null,
+					pinned_at: null,
+					updated_at: 2_000_000_000_000,
+				});
+				expect(yield* makeEffectSqlMigrator()).toEqual([]);
+			}).pipe(
+				Effect.provide(
+					makeFileSqlLayer((filename) =>
+						seedDatabase(filename, (db) => {
+							runMigrations(db, schemaMigrations.slice(0, 13));
+							db.execute(
+								`INSERT INTO sessions
+								 (id, provider, title, status, created_at, updated_at)
+								 VALUES (?, ?, ?, ?, ?, ?)`,
+								[
+									"existing",
+									"opencode",
+									"Existing",
+									"idle",
+									2_000_000_000_000,
+									2_000_000_000_000,
+								],
+							);
+						}),
+					),
+				),
+			),
+	);
 	it.effect(
 		"adds read_at once and backfills existing sessions from updated_at",
 		() =>

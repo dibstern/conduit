@@ -11,6 +11,7 @@ import { join } from "node:path";
 import { describe, it } from "@effect/vitest";
 import { Deferred, Duration, Effect, Fiber, Layer } from "effect";
 import { expect, vi } from "vitest";
+import { DaemonEventBusLive } from "../../../src/lib/domain/daemon/Services/daemon-pubsub.js";
 import {
 	PendingInteractionServiceLive,
 	PendingInteractionServiceTag,
@@ -40,8 +41,10 @@ import {
 import {
 	SessionManagerError,
 	type SessionManagerService,
+	SessionManagerServiceLive,
 	SessionManagerServiceTag,
 } from "../../../src/lib/domain/relay/Services/session-manager-service.js";
+import { makeSessionManagerStateLive } from "../../../src/lib/domain/relay/Services/session-manager-state.js";
 import {
 	getAgent,
 	getContextWindow,
@@ -111,10 +114,14 @@ import { handlePtyInput } from "../../../src/lib/handlers/terminal.js";
 import { handleGetToolContent } from "../../../src/lib/handlers/tool-content.js";
 import type { OpenCodeAPI } from "../../../src/lib/instance/opencode-api.js";
 import type { Logger } from "../../../src/lib/logger.js";
+import { EventStoreEffectTag } from "../../../src/lib/persistence/effect/event-store-effect.js";
+import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
+import { ProjectionRunnerEffectTag } from "../../../src/lib/persistence/effect/projection-runner-effect.js";
 import {
 	type ReadQueryEffect,
 	ReadQueryEffectTag,
 } from "../../../src/lib/persistence/effect/read-query-effect.js";
+import { canonicalEvent } from "../../../src/lib/persistence/events.js";
 import { OrchestrationEngine } from "../../../src/lib/provider/orchestration-engine.js";
 import { ProviderRegistry } from "../../../src/lib/provider/provider-registry.js";
 import type { ProviderInstance } from "../../../src/lib/provider/types.js";
@@ -122,6 +129,7 @@ import { loadRelaySettings } from "../../../src/lib/relay/relay-settings.js";
 import type { PermissionId, RequestId } from "../../../src/lib/shared-types.js";
 import type { ProjectRelayConfig } from "../../../src/lib/types.js";
 import {
+	makeMockOpenCodeAPI,
 	makeMockSessionManagerService,
 	makeMockStatusPoller,
 	makeTestHandlerLayer,
@@ -929,6 +937,8 @@ describe("switchModelForSession", () => {
 						last_turn_error_at: null,
 						permission_mode: null,
 						read_at: null,
+						settled_at: null,
+						pinned_at: null,
 						created_at: 1,
 						updated_at: 1,
 					}),
@@ -2586,6 +2596,8 @@ describe("handleNewSession", () => {
 						last_turn_error_at: null,
 						permission_mode: null,
 						read_at: null,
+						settled_at: null,
+						pinned_at: null,
 						created_at: 1,
 						updated_at: 1,
 					}),
@@ -2682,6 +2694,8 @@ describe("handleNewSession", () => {
 						last_turn_error_at: null,
 						permission_mode: null,
 						read_at: null,
+						settled_at: null,
+						pinned_at: null,
 						created_at: 1,
 						updated_at: 1,
 					}),
@@ -2805,6 +2819,8 @@ describe("handleNewSession", () => {
 						last_turn_error_at: null,
 						permission_mode: null,
 						read_at: null,
+						settled_at: null,
+						pinned_at: null,
 						created_at: 1,
 						updated_at: 1,
 					}),
@@ -3299,6 +3315,8 @@ describe("loadMoreHistoryForSession", () => {
 					last_turn_error_at: null,
 					permission_mode: null,
 					read_at: null,
+					settled_at: null,
+					pinned_at: null,
 					created_at: 1,
 					updated_at: 1,
 				}),
@@ -3394,6 +3412,8 @@ describe("loadMoreHistoryForSession", () => {
 					last_turn_error_at: null,
 					permission_mode: null,
 					read_at: null,
+					settled_at: null,
+					pinned_at: null,
 					created_at: 1,
 					updated_at: 1,
 				}),
@@ -3501,6 +3521,88 @@ describe("loadMoreHistoryForSession", () => {
 // ─── Prompt handler tests ─────────────────────────────────────────────────
 
 describe("sendMessageToSession", () => {
+	for (const settled of [true, false]) {
+		it.effect(
+			`message clears durable settled state only when settled=${settled}`,
+			() => {
+				const dbFile = join(
+					tmpdir(),
+					`conduit-prompt-triage-${crypto.randomUUID()}.sqlite`,
+				);
+				const ws = mockWsHandler();
+				const serviceLayer = Layer.provideMerge(
+					SessionManagerServiceLive,
+					Layer.mergeAll(
+						Layer.succeed(OpenCodeAPITag, makeMockOpenCodeAPI()),
+						Layer.succeed(LoggerTag, mockLogger()),
+						makeSessionManagerStateLive(),
+						DaemonEventBusLive,
+						makePersistenceEffectLayer(dbFile),
+					),
+				);
+				return Effect.gen(function* () {
+					const store = yield* EventStoreEffectTag;
+					const runner = yield* ProjectionRunnerEffectTag;
+					const service = yield* SessionManagerServiceTag;
+					yield* runner.markRecovered();
+					yield* runner.projectEvent(
+						yield* store.append(
+							canonicalEvent(
+								"session.created",
+								"s1",
+								{ sessionId: "s1", title: "Triage", provider: "opencode" },
+								{ provider: "opencode", createdAt: 10 },
+							),
+						),
+					);
+					if (settled) yield* service.setSessionSettled("s1", true);
+					const provider: ProviderTurnService = {
+						prepareTurnSession: (input) => Effect.succeed(input.sessionId),
+						sendTurn: () =>
+							Effect.gen(function* () {
+								expect((yield* service.listSessions())[0]).not.toHaveProperty(
+									"settledAt",
+								);
+								const events = yield* store.readAllBySession("s1");
+								expect(
+									events.filter((e) => e.type === "session.unsettled"),
+								).toHaveLength(settled ? 1 : 0);
+							}),
+						interruptTurn: () => Effect.void,
+					};
+					yield* sendMessageToSession({
+						clientId: "c1",
+						sessionId: "s1",
+						text: "Continue",
+						commandId: "cmd1",
+					}).pipe(Effect.provideService(ProviderTurnServiceTag, provider));
+					expect(ws.broadcast).toHaveBeenCalledTimes(settled ? 1 : 0);
+					if (settled)
+						expect(ws.broadcast).toHaveBeenCalledWith(
+							expect.objectContaining({
+								type: "session_list",
+								sessions: [
+									expect.not.objectContaining({
+										settledAt: expect.any(Number),
+									}),
+								],
+							}),
+						);
+				}).pipe(
+					Effect.provide(
+						Layer.mergeAll(
+							serviceLayer,
+							Layer.succeed(WebSocketHandlerTag, ws),
+							Layer.succeed(ConfigTag, mockConfig()),
+							PendingInteractionServiceLive,
+							makeOverridesStateLive(),
+						),
+					),
+					Effect.ensuring(Effect.sync(() => rmSync(dbFile, { force: true }))),
+				);
+			},
+		);
+	}
 	function makeLayer(
 		ws: WebSocketHandlerShape,
 		prepareTurnSession: ProviderTurnService["prepareTurnSession"],
@@ -4319,6 +4421,8 @@ describe("handleMessage", () => {
 						last_turn_error_at: null,
 						permission_mode: null,
 						read_at: null,
+						settled_at: null,
+						pinned_at: null,
 						created_at: 1,
 						updated_at: 1,
 					}),

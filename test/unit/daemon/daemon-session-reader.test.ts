@@ -32,6 +32,8 @@ const makeProjectStore = (
 		readonly parentId?: string;
 		readonly lastMessageAt?: number | null;
 		readonly readAt?: number | null;
+		readonly settledAt?: number | null;
+		readonly pinnedAt?: number | null;
 	}>,
 	pendingApprovals: ReadonlyArray<{
 		readonly id: string;
@@ -49,14 +51,16 @@ const makeProjectStore = (
 			database.execute(
 				`INSERT INTO sessions (
 					id, provider, title, status, parent_id, last_message_at,
-					read_at, created_at, updated_at
-				) VALUES (?, 'opencode', ?, 'idle', ?, ?, ?, ?, ?)`,
+					read_at, settled_at, pinned_at, created_at, updated_at
+				) VALUES (?, 'opencode', ?, 'idle', ?, ?, ?, ?, ?, ?, ?)`,
 				[
 					session.id,
 					session.title,
 					session.parentId ?? null,
 					session.lastMessageAt ?? null,
 					session.readAt ?? null,
+					session.settledAt ?? null,
+					session.pinnedAt ?? null,
 					session.updatedAt,
 					session.updatedAt,
 				],
@@ -88,6 +92,63 @@ afterEach(() => {
 });
 
 describe("listDaemonSessions", () => {
+	it.effect("reads settled and pinned state from a cold project store", () => {
+		const root = makeTemporaryRoot();
+		const project = join(root, "project");
+		mkdirSync(project);
+		makeProjectStore(project, [
+			{
+				id: "finished-away",
+				title: "Finished away",
+				updatedAt: 300,
+				lastMessageAt: 300,
+				readAt: 200,
+				settledAt: 0,
+				pinnedAt: 456,
+			},
+			{
+				id: "already-read",
+				title: "Already read",
+				updatedAt: 200,
+				lastMessageAt: 200,
+				readAt: 200,
+			},
+			{
+				id: "empty",
+				title: "Empty",
+				updatedAt: 100,
+				lastMessageAt: null,
+				readAt: null,
+			},
+		]);
+
+		return Effect.gen(function* () {
+			const result = yield* listDaemonSessions();
+			const sessions = new Map(
+				result.sessions.map((session) => [session.id, session]),
+			);
+
+			expect(sessions.get("finished-away")).toMatchObject({
+				settledAt: 0,
+				pinnedAt: 456,
+			});
+			expect(sessions.get("empty")).not.toHaveProperty("settledAt");
+			expect(sessions.get("empty")).not.toHaveProperty("pinnedAt");
+			expect(result.hasMore).toBe(false);
+			expect(result.nextCursor).toBeNull();
+		}).pipe(
+			Effect.provide(
+				makeProjectRegistryLive([
+					{
+						slug: "project",
+						title: "Project",
+						directory: project,
+					},
+				]),
+			),
+		);
+	});
+
 	it.effect("reads unread state from a cold project store", () => {
 		const root = makeTemporaryRoot();
 		const project = join(root, "project");

@@ -242,6 +242,8 @@ export interface SessionInfo {
 	/** The adapter is the only producer; tier order is also the sort order. */
 	attention?: SessionAttention;
 	unread?: boolean;
+	settledAt?: number;
+	pinnedAt?: number;
 }
 
 export interface DaemonSessionQueryOptions {
@@ -543,6 +545,8 @@ const SessionInfoSchema = Schema.Struct({
 	pendingPermissionCount: Schema.optional(Schema.Number),
 	attention: Schema.optional(SessionAttentionSchema),
 	unread: Schema.optional(Schema.Boolean),
+	settledAt: Schema.optional(Schema.Number),
+	pinnedAt: Schema.optional(Schema.Number),
 });
 
 const ContextWindowOptionSchema = Schema.Struct({

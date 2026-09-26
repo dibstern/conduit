@@ -113,6 +113,9 @@ export function sessionRowsToSessionInfoList(
 			messageCount: 0,
 		};
 
+		if (row.settled_at != null) info.settledAt = row.settled_at;
+		if (row.pinned_at != null) info.pinnedAt = row.pinned_at;
+
 		const forkEntry = opts?.forkMeta?.get(row.id);
 		const parentID = row.parent_id ?? forkEntry?.parentID;
 		const forkMessageId = row.fork_point_event ?? forkEntry?.forkMessageId;

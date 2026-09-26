@@ -27,7 +27,11 @@ import {
 	makeOverridesStateLive,
 	startProcessingTimeout,
 } from "../../../src/lib/domain/relay/Services/session-overrides-state.js";
-import { handleViewSession } from "../../../src/lib/handlers/session.js";
+import {
+	handleViewSession,
+	setSessionPinnedForClient,
+	setSessionSettledForClient,
+} from "../../../src/lib/handlers/session.js";
 import type { OpenCodeAPI } from "../../../src/lib/instance/opencode-api.js";
 import {
 	type ReadQueryEffect,
@@ -136,6 +140,8 @@ function makeEmptySessionReadQuery(provider: string): ReadQueryEffect {
 				last_turn_error_at: null,
 				permission_mode: null,
 				read_at: null,
+				settled_at: null,
+				pinned_at: null,
 				created_at: 1,
 				updated_at: 1,
 			}),
@@ -152,6 +158,37 @@ function makeEmptySessionReadQuery(provider: string): ReadQueryEffect {
 }
 
 describe("session handlers with Effect-native model service", () => {
+	for (const changed of [true, false]) {
+		it.effect(`broadcasts triage lists only when changed=${changed}`, () => {
+			const service = makeMockSessionManagerService({
+				setSessionSettled: vi.fn(() => Effect.succeed(changed)),
+				setSessionPinned: vi.fn(() => Effect.succeed(changed)),
+				sendSessionLists: vi.fn((send) =>
+					Effect.sync(() =>
+						send({ type: "session_list", sessions: [], roots: true }),
+					),
+				),
+			});
+			const { wsHandler, layer } = makeSessionMetadataLayer({
+				sessionManagerService: service,
+			});
+			return Effect.gen(function* () {
+				yield* setSessionSettledForClient({
+					clientId: "c1",
+					sessionId: "s1",
+					settled: true,
+				});
+				yield* setSessionPinnedForClient({
+					clientId: "c1",
+					sessionId: "s1",
+					pinned: false,
+				});
+				expect(service.setSessionSettled).toHaveBeenCalledWith("s1", true);
+				expect(service.setSessionPinned).toHaveBeenCalledWith("s1", false);
+				expect(wsHandler.broadcast).toHaveBeenCalledTimes(changed ? 2 : 0);
+			}).pipe(Effect.provide(layer));
+		});
+	}
 	it.effect(
 		"loads view-session REST history through SessionManagerService",
 		() => {
@@ -270,6 +307,8 @@ describe("session handlers with Effect-native model service", () => {
 						last_turn_error_at: null,
 						permission_mode: null,
 						read_at: null,
+						settled_at: null,
+						pinned_at: null,
 						created_at: 10,
 						updated_at: 11,
 					}),
@@ -427,6 +466,8 @@ describe("session handlers with Effect-native model service", () => {
 					last_turn_error_at: null,
 					permission_mode: null,
 					read_at: null,
+					settled_at: null,
+					pinned_at: null,
 					created_at: 10,
 					updated_at: 11,
 				}),

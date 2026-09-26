@@ -163,6 +163,10 @@ export function translateDomainEventToRelay(
 		// list, never as a relay event, so there is nothing to translate here.
 		case "session.read":
 		case "session.unread":
+		case "session.settled":
+		case "session.unsettled":
+		case "session.pinned":
+		case "session.unpinned":
 			return silent("persistence-only event; no UI surface in relay");
 
 		// The SDK owns the live mode, so a change reported mid-session has to
