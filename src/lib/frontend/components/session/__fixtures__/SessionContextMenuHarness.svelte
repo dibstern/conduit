@@ -2,7 +2,7 @@
 	import type { SessionInfo } from "../../../types.js";
 	import SessionContextMenu from "../SessionContextMenu.svelte";
 
-	let { session }: { session: SessionInfo } = $props();
+	let { session, projectLabel, branch }: { session: SessionInfo; projectLabel?: string; branch?: string } = $props();
 
 	/**
 	 * A real element, not a `getBoundingClientRect` stub. Since
@@ -29,6 +29,8 @@
 	<SessionContextMenu
 		{session}
 		{anchor}
+		{projectLabel}
+		{branch}
 		onrename={() => {}}
 		onsettle={() => {}}
 		onpin={() => {}}

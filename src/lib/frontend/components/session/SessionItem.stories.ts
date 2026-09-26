@@ -1,5 +1,5 @@
 import type { Meta, StoryObj } from "@storybook/svelte-vite";
-import { expect, fn, userEvent, within } from "storybook/test";
+import { expect, fireEvent, fn, within } from "storybook/test";
 import {
 	mockForkSession,
 	mockSession,
@@ -223,12 +223,11 @@ export const WithContextMenu: Story = {
 	render: (args) => ({ Component: SessionItemWithContextMenu, props: args }),
 	tags: ["viewport-capture"],
 	play: async ({ canvasElement }) => {
-		// Regex, not an exact string: since conduit-test-de3.35.9.3 the name
-		// carries the session title, because a screen reader hears this same
-		// control once per row and "More options" alone identifies nothing.
-		await userEvent.click(
-			within(canvasElement).getByRole("button", { name: /^More options for / }),
-		);
+		// Right-click, not the ⋯ button: since vik1.9 that button only exists on
+		// real hover or focus at desktop width, and never on a phone.
+		const row = canvasElement.querySelector<HTMLElement>(".session-item");
+		if (!row) throw new Error("Session row is missing");
+		await fireEvent.contextMenu(row);
 		const body = within(canvasElement.ownerDocument.body);
 		await expect(
 			// menuitem, not button: since conduit-test-de3.35.4 the menu is
@@ -246,6 +245,88 @@ export const WithContextMenu: Story = {
 export const Hover: Story = {
 	...Inactive,
 	parameters: { pseudo: { hover: true } },
+};
+
+export const HoverActions: Story = {
+	name: "Hover actions",
+	args: { session: mockSession, projectLabel: "Conduit", branch: "main" },
+	parameters: { pseudo: { hover: true } },
+};
+
+export const SettledHoverActions: Story = {
+	name: "Settled hover actions",
+	args: {
+		session: { ...mockSession, settledAt: 1 },
+		settled: true,
+		settledAt: "Mon 9:00",
+		projectLabel: "Conduit",
+	},
+	parameters: { pseudo: { hover: true } },
+};
+
+export const SnoozedHoverActions: Story = {
+	name: "Snoozed hover actions",
+	args: {
+		session: { ...mockSession, snoozedAt: 1 },
+		snoozed: true,
+		snoozedUntilText: "Tue 9:00",
+		projectLabel: "Conduit",
+	},
+	parameters: { pseudo: { hover: true } },
+};
+
+function dragStory(
+	direction: 1 | -1,
+	fraction: number,
+): NonNullable<Story["play"]> {
+	return async ({ canvasElement }) => {
+		const row = canvasElement.querySelector<HTMLAnchorElement>(".session-item");
+		if (!row) throw new Error("Session row is missing");
+		if (row.parentElement) row.parentElement.style.width = "300px";
+		const startX = row.getBoundingClientRect().left + 20;
+		const startY = row.getBoundingClientRect().top + 20;
+		row.dispatchEvent(
+			new PointerEvent("pointerdown", {
+				bubbles: true,
+				pointerType: "touch",
+				pointerId: 1,
+				clientX: startX,
+				clientY: startY,
+			}),
+		);
+		window.dispatchEvent(
+			new PointerEvent("pointermove", {
+				bubbles: true,
+				pointerType: "touch",
+				pointerId: 1,
+				clientX:
+					startX + direction * row.getBoundingClientRect().width * fraction,
+				clientY: startY,
+			}),
+		);
+		await expect(
+			await within(canvasElement).findByTestId("session-swipe-action"),
+		).toHaveAttribute("data-stage", fraction >= 0.55 ? "commit" : "reveal");
+	};
+}
+
+export const MidSwipeSettle: Story = {
+	name: "Mid-swipe settle",
+	// A row swipes only when it has actions, which oncontextmenu signals.
+	args: { session: mockSessionDoneUnread, onsettle: fn(), oncontextmenu: fn() },
+	play: dragStory(1, 0.35),
+};
+
+export const MidSwipeSnooze: Story = {
+	name: "Mid-swipe snooze",
+	args: { session: mockSessionIdle, onsnooze: fn(), oncontextmenu: fn() },
+	play: dragStory(-1, 0.35),
+};
+
+export const SwipeArmedToCommit: Story = {
+	name: "Swipe armed to commit",
+	args: { session: mockSessionDoneUnread, onsettle: fn(), oncontextmenu: fn() },
+	play: dragStory(1, 0.65),
 };
 
 // The inline rename field had no baseline before conduit-test-de3.35.7, which

@@ -1,5 +1,5 @@
 import type { Meta, StoryObj } from "@storybook/svelte-vite";
-import { mockSession } from "../../stories/mocks.js";
+import { mockSession, mockSessionLongTitle } from "../../stories/mocks.js";
 import SessionContextMenuHarness from "./__fixtures__/SessionContextMenuHarness.svelte";
 
 const meta = {
@@ -18,6 +18,15 @@ export default meta;
 type Story = StoryObj<typeof meta>;
 
 export const Default: Story = {};
+
+export const LongHeader: Story = {
+	name: "Long title header",
+	args: {
+		session: mockSessionLongTitle,
+		projectLabel: "Conduit",
+		branch: "fix/reconnect-double-subscribe",
+	},
+};
 
 // `rootSelector: "body"` is load-bearing. Since conduit-test-de3.35.4 the menu
 // portals out of #storybook-root, which is where the pseudo-states addon starts

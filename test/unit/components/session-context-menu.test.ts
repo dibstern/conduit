@@ -5,7 +5,15 @@ import type { SessionInfo } from "../../../src/lib/frontend/types.js";
 
 afterEach(cleanup);
 
-function openMenu(session: SessionInfo) {
+function openMenu(
+	session: SessionInfo,
+	options?: {
+		anchor?: HTMLElement;
+		projectLabel?: string;
+		branch?: string;
+		onrename?: () => void;
+	},
+) {
 	const onsettle = vi.fn();
 	const onpin = vi.fn();
 	const onsnooze = vi.fn();
@@ -13,12 +21,14 @@ function openMenu(session: SessionInfo) {
 	render(SessionContextMenu, {
 		props: {
 			session,
-			anchor: document.body,
+			anchor: options?.anchor ?? document.body,
+			projectLabel: options?.projectLabel,
+			branch: options?.branch,
 			onsettle,
 			onpin,
 			onsnooze,
 			onunsnooze,
-			onrename: vi.fn(),
+			onrename: options?.onrename ?? vi.fn(),
 			ondelete: vi.fn(),
 			oncopyresume: vi.fn(),
 			onfork: vi.fn(),
@@ -29,6 +39,50 @@ function openMenu(session: SessionInfo) {
 }
 
 describe("session triage menu", () => {
+	it("shows a two-line title and separate project and branch in its header", async () => {
+		openMenu(
+			{
+				id: "a",
+				title: "Investigate why the websocket reconnect loop double subscribes",
+			},
+			{ projectLabel: "Conduit", branch: "fix/reconnect" },
+		);
+		const header = await screen.findByTestId("session-ctx-header");
+		expect(header.textContent).toContain(
+			"Investigate why the websocket reconnect loop double subscribes",
+		);
+		expect(header.querySelector(".line-clamp-2")).toBeTruthy();
+		expect(
+			[...header.querySelectorAll("span")].map((part) => part.textContent),
+		).toEqual(["Conduit", "fix/reconnect"]);
+		expect(header.getAttribute("tabindex")).toBeNull();
+	});
+
+	it("returns focus to its live anchor on Escape", async () => {
+		const anchor = document.createElement("button");
+		anchor.textContent = "Actions";
+		document.body.append(anchor);
+		anchor.focus();
+		openMenu({ id: "a", title: "Alpha" }, { anchor });
+		await screen.findByRole("menu");
+		await fireEvent.keyDown(screen.getByRole("menu"), { key: "Escape" });
+		await vi.waitFor(() => expect(document.activeElement).toBe(anchor));
+		anchor.remove();
+	});
+
+	it("keeps focus in the rename input after selecting Rename", async () => {
+		const anchor = document.createElement("button");
+		const input = document.createElement("input");
+		document.body.append(anchor, input);
+		openMenu(
+			{ id: "a", title: "Alpha" },
+			{ anchor, onrename: () => input.focus() },
+		);
+		await fireEvent.click(await screen.findByTestId("session-ctx-rename"));
+		expect(document.activeElement).toBe(input);
+		anchor.remove();
+		input.remove();
+	});
 	it("puts Settle and Pin above Rename, with a divider", async () => {
 		const { onsettle } = openMenu({ id: "a", title: "Alpha" });
 		const items = await screen.findAllByRole("menuitem");

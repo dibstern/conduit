@@ -79,6 +79,12 @@ const allowedPlainErrorThrows: readonly AllowedPlainThrow[] = [
 			"storybook beforeEach environment guard, not executable production code — same class as stories/mocks.ts above",
 	},
 	{
+		path: "src/lib/frontend/components/session/SessionItem.stories.ts",
+		snippetPattern: /Session row is missing/,
+		reason:
+			"storybook play() guard that narrows the row query, not executable production code",
+	},
+	{
 		path: "src/lib/frontend/components/input/input-utils.ts",
 		snippetPattern: /GIF exceeds the 5 MB encoded size limit/,
 		reason: "browser attachment validation failure surfaced to UI caller",

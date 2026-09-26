@@ -17,6 +17,7 @@ export default defineConfig({
 		"sessions.spec.ts",
 		"session-triage.spec.ts",
 		"session-snooze.spec.ts",
+		"session-gestures.spec.ts",
 		"sidebar-layout.spec.ts",
 		"ui-features.spec.ts",
 		"debug-panel.spec.ts",

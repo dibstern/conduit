@@ -51,6 +51,7 @@ export class SidebarPage {
 
 	async openContextMenu(sessionId: string): Promise<void> {
 		const item = this.sessionList.locator(`[data-session-id="${sessionId}"]`);
+		await item.hover();
 		await item.locator(".session-more-btn").click();
 	}
 

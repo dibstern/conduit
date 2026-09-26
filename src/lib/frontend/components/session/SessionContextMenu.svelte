@@ -16,7 +16,7 @@
 
 <script lang="ts">
 	import type { SessionInfo } from "../../types.js";
-	import { isSessionSnoozed, sessionAttention } from "../../stores/session.svelte.js";
+	import { getSessionActionState } from "../../utils/swipe.js";
 	import { copyToClipboard } from "../../utils/clipboard.js";
 	import { showToast } from "../../stores/ui.svelte.js";
 	import Icon from "../ui/Icon.svelte";
@@ -29,6 +29,8 @@
 	let {
 		session,
 		anchor,
+		projectLabel,
+		branch,
 		onrename,
 		onsettle,
 		onpin,
@@ -42,6 +44,8 @@
 	}: {
 		session: SessionInfo;
 		anchor: HTMLElement;
+		projectLabel?: string | undefined;
+		branch?: string | undefined;
 		onrename: (id: string) => void;
 		onsettle: (id: string, next: boolean) => void;
 		onpin: (id: string, next: boolean) => void;
@@ -55,11 +59,13 @@
 	} = $props();
 
 	let open = $state(true);
-	const snoozed = $derived(isSessionSnoozed(session, now));
-	const waitingOnYou = $derived(
-		sessionAttention(session) === "needs-approval" ||
-			sessionAttention(session) === "needs-reply",
-	);
+	let selected = false;
+	const actions = $derived(getSessionActionState(session, now));
+
+	function select(action: () => void) {
+		selected = true;
+		action();
+	}
 
 	// ─── Handlers ───────────────────────────────────────────────────────────────
 
@@ -79,7 +85,12 @@
 <Menu
 	bind:open
 	onopenchange={(nextOpen) => {
-		if (!nextOpen) onclose();
+		if (!nextOpen) {
+			// Before onclose(): the parent drops the anchor, and the row hides its
+			// verbs once neither the menu nor focus holds them open.
+			if (!selected && anchor.isConnected) anchor.focus();
+			onclose();
+		}
 	}}
 	customAnchor={anchor}
 	ariaLabel="Session actions"
@@ -91,41 +102,48 @@
 	<!-- Intentionally empty: the anchor is an element the consumer owns, so
 	     there is nothing for us to render. `customAnchor` does the pointing. -->
 	{#snippet trigger()}{/snippet}
+	<div data-testid="session-ctx-header" class="px-3 py-2 border-b border-border font-brand">
+		<div class="line-clamp-2 whitespace-normal break-words text-sm font-semibold text-text">{session.title || "New Session"}</div>
+		{#if projectLabel || branch}
+			<div class="mt-1 flex gap-2 text-xs text-text-dimmer">
+				{#if projectLabel}<span>{projectLabel}</span>{/if}
+				{#if branch}<span>{branch}</span>{/if}
+			</div>
+		{/if}
+	</div>
 
 	<MenuItem
 		data-testid={session.settledAt != null ? "session-ctx-unsettle" : "session-ctx-settle"}
-		disabled={session.pinnedAt != null}
-		onselect={() => onsettle(session.id, session.settledAt == null)}
+		disabled={actions.settleDisabledReason != null}
+		onselect={() => select(() => onsettle(session.id, !actions.settled))}
 	>
 		<Icon name={session.settledAt != null ? "undo" : "check"} size={13} />
 		<span>{session.settledAt != null ? "Un-settle" : "Settle"}</span>
-		{#if session.pinnedAt != null}
-			<span class="ml-auto text-xs text-text-dimmer">Unpin to settle</span>
+		{#if actions.settleDisabledReason}
+			<span class="ml-auto text-xs text-text-dimmer">{actions.settleDisabledReason}</span>
 		{/if}
 	</MenuItem>
 	<MenuItem
 		data-testid={session.pinnedAt != null ? "session-ctx-unpin" : "session-ctx-pin"}
-		onselect={() => onpin(session.id, session.pinnedAt == null)}
+		onselect={() => select(() => onpin(session.id, !actions.pinned))}
 	>
 		<Icon name={session.pinnedAt != null ? "star-off" : "star"} size={13} />
 		<span>{session.pinnedAt != null ? "Unpin" : "Pin to top"}</span>
 	</MenuItem>
-	{#if session.settledAt == null}
+	{#if actions.snoozeVisible}
 		<MenuItem
 			data-testid="session-ctx-snooze"
-			disabled={session.pinnedAt != null || waitingOnYou}
-			onselect={() => onsnooze(session.id)}
+			disabled={actions.snoozeDisabledReason != null}
+			onselect={() => select(() => onsnooze(session.id))}
 		>
 			<Icon name="moon" size={13} />
-			<span>{snoozed ? "Change snooze…" : "Snooze…"}</span>
-			{#if session.pinnedAt != null}
-				<span class="ml-auto text-xs text-text-dimmer">Unpin to snooze</span>
-			{:else if waitingOnYou}
-				<span class="ml-auto text-xs text-text-dimmer">Waiting on you</span>
+			<span>{actions.snoozed ? "Change snooze…" : "Snooze…"}</span>
+			{#if actions.snoozeDisabledReason}
+				<span class="ml-auto text-xs text-text-dimmer">{actions.snoozeDisabledReason}</span>
 			{/if}
 		</MenuItem>
-		{#if snoozed}
-			<MenuItem data-testid="session-ctx-unsnooze" onselect={() => onunsnooze(session.id)}>
+		{#if actions.snoozed}
+			<MenuItem data-testid="session-ctx-unsnooze" onselect={() => select(() => onunsnooze(session.id))}>
 				<Icon name="undo" size={13} />
 				<span>Unsnooze</span>
 			</MenuItem>
@@ -135,18 +153,18 @@
 
 	<MenuItem
 		data-testid="session-ctx-rename"
-		onselect={() => onrename(session.id)}
+		onselect={() => select(() => onrename(session.id))}
 	>
 		<Icon name="pencil" size={13} />
 		<span>Rename</span>
 	</MenuItem>
 
-	<MenuItem data-testid="session-ctx-fork" onselect={() => onfork(session.id)}>
+	<MenuItem data-testid="session-ctx-fork" onselect={() => select(() => onfork(session.id))}>
 		<Icon name="git-fork" size={13} />
 		<span>Fork</span>
 	</MenuItem>
 
-	<MenuItem data-testid="session-ctx-copy-resume" onselect={handleCopyResume}>
+	<MenuItem data-testid="session-ctx-copy-resume" onselect={() => select(() => { void handleCopyResume(); })}>
 		<Icon name="copy" size={13} />
 		<span>Copy resume command</span>
 	</MenuItem>
@@ -154,7 +172,7 @@
 	<MenuItem
 		variant="danger"
 		data-testid="session-ctx-delete"
-		onselect={() => ondelete(session.id, session.title || "New Session")}
+		onselect={() => select(() => ondelete(session.id, session.title || "New Session"))}
 	>
 		<span>Delete</span>
 	</MenuItem>

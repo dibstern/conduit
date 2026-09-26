@@ -104,7 +104,77 @@ function addSnoozedRow(until: number | null = Date.now() + 3_600_000) {
 	return row;
 }
 
+async function touchSwipe(row: HTMLElement, dx: number) {
+	vi.spyOn(row, "getBoundingClientRect").mockReturnValue({
+		width: 200,
+		height: 52,
+		x: 0,
+		y: 0,
+		top: 0,
+		left: 0,
+		right: 200,
+		bottom: 52,
+		toJSON: () => ({}),
+	});
+	await fireEvent.pointerDown(row, {
+		pointerId: 1,
+		pointerType: "touch",
+		clientX: 100,
+		clientY: 10,
+	});
+	await fireEvent.pointerMove(window, {
+		pointerId: 1,
+		pointerType: "touch",
+		clientX: 100 + dx,
+		clientY: 10,
+	});
+	await fireEvent.pointerUp(window, {
+		pointerId: 1,
+		pointerType: "touch",
+		clientX: 100 + dx,
+		clientY: 10,
+	});
+}
+
 describe("session triage list", () => {
+	it("commits a left swipe to tomorrow at 9:00 using the existing snooze toast", async () => {
+		const now = new Date(2026, 9, 5, 15).getTime();
+		vi.spyOn(Date, "now").mockReturnValue(now);
+		render(SessionList);
+		render(Toast);
+		const row = screen.getByText("Idle work").closest("a");
+		if (!row) throw new Error("Missing row");
+		await touchSwipe(row, -120);
+		const tomorrow = new Date(2026, 9, 6, 9).getTime();
+		await waitFor(() =>
+			expect(snoozeSessionRpc).toHaveBeenCalledWith(
+				expect.objectContaining({ sessionId: "idle", until: tomorrow }),
+			),
+		);
+		expect((await screen.findByRole("status")).textContent).toContain(
+			`Snoozed “Idle work” until ${formatSnoozeTime(tomorrow, now)}`,
+		);
+	});
+
+	it("keeps only one revealed swipe open and closes it on list scroll", async () => {
+		render(SessionList);
+		const first = screen.getByText("Idle work").closest("a");
+		const second = screen.getByText("Approval").closest("a");
+		if (!first || !second) throw new Error("Missing row");
+		await touchSwipe(first, 70);
+		expect(screen.getAllByTestId("session-swipe-action")).toHaveLength(1);
+		await touchSwipe(second, 70);
+		expect(screen.getAllByTestId("session-swipe-action")).toHaveLength(1);
+		await fireEvent.click(screen.getByTestId("session-swipe-action"));
+		await waitFor(() =>
+			expect(setSessionSettledRpc).toHaveBeenCalledWith(
+				expect.objectContaining({ sessionId: "approval", settled: true }),
+			),
+		);
+		await touchSwipe(first, 70);
+		await fireEvent.scroll(screen.getByRole("region", { name: "Sessions" }));
+		expect(screen.queryByTestId("session-swipe-action")).toBeNull();
+	});
 	it("keeps snoozed rows in a count-free shelf above Settled", async () => {
 		const until = new Date(2099, 9, 12, 9).getTime();
 		addSnoozedRow(until);
@@ -288,6 +358,9 @@ describe("session triage list", () => {
 		vi.mocked(rpc).mockRejectedValueOnce(new Error("offline"));
 		render(SessionList);
 		render(Toast);
+		const row = screen.getByText("Idle work").closest("a");
+		if (!row) throw new Error("Missing row");
+		await fireEvent.mouseOver(row);
 		await fireEvent.click(
 			screen.getByRole("button", { name: "More options for Idle work" }),
 		);
@@ -329,6 +402,9 @@ describe("session triage list", () => {
 		uiState.settledShelfOpen = true;
 		render(SessionList);
 		const title = verb === "unsettle" ? "Finished work" : "Pinned work";
+		const row = screen.getByText(title).closest("a");
+		if (!row) throw new Error("Missing row");
+		await fireEvent.mouseOver(row);
 		await fireEvent.click(
 			screen.getByRole("button", { name: `More options for ${title}` }),
 		);
@@ -351,6 +427,9 @@ describe("session triage list", () => {
 		];
 		render(SessionList);
 		render(Toast);
+		const row = screen.getByText("New Session").closest("a");
+		if (!row) throw new Error("Missing row");
+		await fireEvent.mouseOver(row);
 		await fireEvent.click(
 			screen.getByRole("button", { name: "More options for New Session" }),
 		);
@@ -396,6 +475,9 @@ describe("session triage list", () => {
 		vi.spyOn(Date, "now").mockReturnValue(now);
 		render(SessionList);
 		render(Toast);
+		const row = screen.getByText("Idle work").closest("a");
+		if (!row) throw new Error("Missing row");
+		await fireEvent.mouseOver(row);
 		await fireEvent.click(
 			screen.getByRole("button", { name: "More options for Idle work" }),
 		);

@@ -44,6 +44,7 @@
 		setSnoozedShelfOpen,
 	} from "../../stores/ui.svelte.js";
 	import { formatSnoozeTime, formatTimeAgo } from "../../utils/format.js";
+	import { getSnoozePresets } from "../../utils/snooze.js";
 	import { WsRpcError } from "../../transport/ws-rpc.js";
 	import SessionItem from "./SessionItem.svelte";
 	import SessionPager from "./SessionPager.svelte";
@@ -75,6 +76,7 @@
 	let ctxMenuAnchor = $state<HTMLElement | null>(null);
 	let snoozeSession = $state<SessionInfo | null>(null);
 	let snoozeSheetNow = $state(0);
+	let heldSessionId = $state<string | null>(null);
 
 	// Rename state — set by context menu to trigger inline rename on a SessionItem
 	let renamingSessionId = $state<string | null>(null);
@@ -315,6 +317,12 @@
 		if (isForeignSession(session)) return;
 		snoozeSheetNow = Date.now();
 		snoozeSession = session;
+	}
+
+	function handleCommitSnooze(session: SessionInfo) {
+		snoozeSheetNow = Date.now();
+		const tomorrow = getSnoozePresets(snoozeSheetNow).find((preset) => preset.id === "tomorrow");
+		if (tomorrow) void handleSnooze(session, tomorrow.until);
 	}
 
 	async function handleSnooze(session: SessionInfo, until: number | null) {
@@ -649,9 +657,17 @@
 				renaming={s.id === renamingSessionId}
 				{cleanupMode}
 				selected={selectedForDeletion.has(s.id)}
+				heldSessionId={heldSessionId}
+				menuOpen={ctxMenuSession?.id === s.id}
+				onholdchange={(id) => { heldSessionId = id; }}
 				onswitchsession={(id) => handleSwitchSession(id, s.projectSlug)}
 				ontoggleselection={handleToggleSelection}
 				oncontextmenu={handleContextMenu}
+				onsettle={(_id, next) => { void handleCtxSettle(s, next); }}
+				onpin={(_id, next) => { void handleCtxPin(s, next); }}
+				onsnooze={() => handleOpenSnooze(s)}
+				onunsnooze={() => { void handleUnsnooze(s); }}
+				oncommitsnooze={() => handleCommitSnooze(s)}
 				onrename={handleRename}
 				onrenameend={handleRenameEnd}
 			/>
@@ -659,7 +675,7 @@
 	{/snippet}
 
 	<!-- svelte-ignore a11y_no_noninteractive_tabindex -->
-	<div id="session-list-scroller" class="flex-1 overflow-y-auto px-2 py-0.5" role="region" aria-label="Sessions" tabindex="0">
+	<div id="session-list-scroller" class="flex-1 overflow-y-auto px-2 py-0.5" role="region" aria-label="Sessions" tabindex="0" onscroll={() => { heldSessionId = null; }}>
 		{#if isEmpty}
 			<div class="session-empty py-6 px-3.5 text-center text-xs text-text-dimmer font-brand">
 				{emptyMessage}
@@ -753,6 +769,7 @@
 	<SessionContextMenu
 		session={ctxMenuSession}
 		anchor={ctxMenuAnchor}
+		projectLabel={getProjectLabel(ctxMenuSession)}
 		now={sessionState.now}
 		onrename={handleCtxRename}
 		onsettle={(_id, next) => { if (ctxMenuSession) void handleCtxSettle(ctxMenuSession, next); }}

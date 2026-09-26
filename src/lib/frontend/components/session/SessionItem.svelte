@@ -100,8 +100,8 @@
 		// it and the declared min-height is what wins. Watch the rem scaling --
 		// the app's root font-size is 12px, so `py-1.5` is 4.5px, not 6px.
 		// Settled has no `md:` step because it cannot go below 40 while the row
-		// still carries the 27px overflow button; that button leaves the row in
-		// conduit-test-17xt.9, which is when a 36px settled row becomes possible.
+		// still carries the desktop action buttons; the phone overflow button
+		// leaves the row in conduit-test-vik1.9. Keep these heights for now.
 		comfortable: {
 			row: "min-h-[52px] md:min-h-[46px] py-1.5 md:py-1 px-[7px]",
 			settled: "min-h-[40px] py-1 px-[7px]",
@@ -121,6 +121,8 @@
 	import Button from "../ui/Button.svelte";
 	import TextInput from "../ui/TextInput.svelte";
 	import { isSessionWoken } from "../../stores/session.svelte.js";
+	import { getSessionActionState, getSwipeStage, LONG_PRESS_DELAY_MS, MOVEMENT_SLOP_PX } from "../../utils/swipe.js";
+	import { onDestroy } from "svelte";
 
 	// ─── Props ──────────────────────────────────────────────────────────────────
 
@@ -143,6 +145,14 @@
 		onswitchsession,
 		ontoggleselection,
 		oncontextmenu: oncontextmenuProp,
+		onsettle,
+		onpin,
+		onsnooze,
+		onunsnooze,
+		oncommitsnooze,
+		heldSessionId,
+		onholdchange,
+		menuOpen = false,
 		onrename,
 		onrenameend,
 	}: {
@@ -166,6 +176,15 @@
 		onswitchsession?: (id: string) => void;
 		ontoggleselection?: (id: string) => void;
 		oncontextmenu?: (session: SessionInfo, anchor: HTMLElement) => void;
+		onsettle?: (id: string, next: boolean) => void;
+		onpin?: (id: string, next: boolean) => void;
+		onsnooze?: (id: string) => void;
+		onunsnooze?: (id: string) => void;
+		oncommitsnooze?: (id: string) => void;
+		heldSessionId?: string | null;
+		onholdchange?: (id: string | null) => void;
+		/** This row's action menu is open: keep its anchor and verbs on screen. */
+		menuOpen?: boolean;
 		onrename?: (id: string, title: string) => void;
 		onrenameend?: () => void;
 	} = $props();
@@ -176,6 +195,20 @@
 	let renameValue = $state("");
 	let moreBtnEl: HTMLButtonElement | HTMLAnchorElement | undefined =
 		$state(undefined);
+	let rowEl: HTMLAnchorElement | undefined = $state();
+	let offset = $state(0);
+	let dragging = $state(false);
+	let heldDirection = $state<"settle" | "snooze" | null>(null);
+	let activePointer: number | null = null;
+	let startX = 0;
+	let startY = 0;
+	let gesture: "pending" | "horizontal" | "scroll" = "pending";
+	let longPressTimer: ReturnType<typeof setTimeout> | undefined;
+	let suppressClick = false;
+	let suppressTimer: ReturnType<typeof setTimeout> | undefined;
+	let suppressNativeContextMenu = false;
+	let pendingOutsideBlock: ((event: MouseEvent) => void) | undefined;
+	let pendingOutsideTimer: ReturnType<typeof setTimeout> | undefined;
 
 	// Combined rename state: local (double-click) OR external (context menu)
 	const isRenaming = $derived(localRenaming || renamingProp);
@@ -191,6 +224,10 @@
 	// ─── Derived ────────────────────────────────────────────────────────────────
 
 	const displayTitle = $derived(session.title || "New Session");
+	const actions = $derived(getSessionActionState(session, now));
+	const swipeStage = $derived(getSwipeStage(offset, rowEl?.getBoundingClientRect().width ?? 0));
+	const swipeDirection = $derived(offset > 0 ? "settle" : "snooze");
+	const swipeAllowed = $derived(canSwipe(swipeDirection));
 	const shelfRow = $derived(settled || snoozed);
 	const timeText = $derived(snoozedUntilText ?? settledAt ?? formatTimeAgo(session.updatedAt));
 	const woken = $derived(isSessionWoken(session, now) && !snoozed);
@@ -253,7 +290,7 @@
 			cleanupMode
 				? "grid-cols-[44px_minmax(110px,1fr)_auto]"
 				: "grid-cols-[20px_minmax(110px,1fr)_auto]"
-		} gap-x-[9px] items-center ${densityClass} ${rowOpacityClass} rounded-panel cursor-pointer relative transition-colors duration-100` +
+		} gap-x-[9px] items-center ${densityClass} ${rowOpacityClass} rounded-panel cursor-pointer relative` +
 			(active
 				? " active bg-bg-surface text-text"
 				: " text-text-secondary hover:bg-sidebar-hover hover:text-text"),
@@ -262,10 +299,160 @@
 	// ─── Handlers ───────────────────────────────────────────────────────────────
 
 	function handleClick(e: MouseEvent) {
+		if (e.defaultPrevented) return;
+		if (heldDirection) { e.preventDefault(); e.stopPropagation(); closeHold(); return; }
 		if (!onswitchsession) return;
 		e.preventDefault();
 		if (!isRenaming) onswitchsession(session.id);
 	}
+
+	function suppressGestureClick(e: MouseEvent) {
+		if (!suppressClick && !heldDirection) return;
+		e.preventDefault();
+		e.stopPropagation();
+		// The click trailing the gesture that opened a hold must not close it.
+		if (suppressClick) suppressClick = false;
+		else closeHold();
+	}
+
+	function armClickSuppression() {
+		suppressClick = true;
+		if (suppressTimer) clearTimeout(suppressTimer);
+		suppressTimer = setTimeout(() => { suppressClick = false; }, 450);
+	}
+
+	function closeHold(notify = true) {
+		heldDirection = null;
+		offset = 0;
+		if (notify) onholdchange?.(null);
+	}
+
+	function clearOutsideBlock() {
+		if (pendingOutsideBlock) window.removeEventListener("click", pendingOutsideBlock, true);
+		if (pendingOutsideTimer) clearTimeout(pendingOutsideTimer);
+		pendingOutsideBlock = undefined;
+		pendingOutsideTimer = undefined;
+	}
+
+	$effect(() => {
+		if (heldSessionId !== undefined && heldSessionId !== session.id && heldDirection) closeHold(false);
+	});
+
+	$effect(() => {
+		if (!heldDirection) return;
+		const closeOutside = (event: PointerEvent) => {
+			if (!rowEl?.parentElement?.contains(event.target as Node)) {
+				const pressed = event.target as Node;
+				closeHold();
+				clearOutsideBlock();
+				const blockClick = (click: MouseEvent) => {
+					clearOutsideBlock();
+					const target = click.target as Node;
+					if (!pressed.contains(target) && !target.contains(pressed)) return;
+					click.preventDefault();
+					click.stopImmediatePropagation();
+				};
+				pendingOutsideBlock = blockClick;
+				window.addEventListener("click", blockClick, true);
+				pendingOutsideTimer = setTimeout(clearOutsideBlock, 450);
+			}
+		};
+		window.addEventListener("pointerdown", closeOutside, true);
+		return () => window.removeEventListener("pointerdown", closeOutside, true);
+	});
+
+	function clearLongPress() {
+		if (longPressTimer) clearTimeout(longPressTimer);
+		longPressTimer = undefined;
+	}
+
+	function canSwipe(direction: "settle" | "snooze") {
+		return direction === "settle"
+			? actions.settleDisabledReason == null
+			: actions.snoozeVisible && (actions.snoozed || actions.snoozeDisabledReason == null);
+	}
+
+	function stopPointer() {
+		window.removeEventListener("pointermove", movePointer);
+		window.removeEventListener("pointerup", finishPointer);
+		window.removeEventListener("pointercancel", cancelPointer);
+		clearLongPress();
+		activePointer = null;
+		dragging = false;
+	}
+
+	function startPointer(event: PointerEvent) {
+		if (event.pointerType !== "touch" || cleanupMode || isRenaming || !oncontextmenuProp || (event.target as Element).closest("button")) return;
+		if (activePointer !== null) return;
+		if (heldDirection) { closeHold(); armClickSuppression(); return; }
+		activePointer = event.pointerId;
+		startX = event.clientX;
+		startY = event.clientY;
+		gesture = "pending";
+		longPressTimer = setTimeout(() => {
+			if (activePointer === null || gesture !== "pending") return;
+			suppressNativeContextMenu = true;
+			setTimeout(() => { suppressNativeContextMenu = false; }, 1000);
+			armClickSuppression();
+			if (rowEl) oncontextmenuProp?.(session, rowEl);
+			stopPointer();
+		}, LONG_PRESS_DELAY_MS);
+		window.addEventListener("pointermove", movePointer);
+		window.addEventListener("pointerup", finishPointer);
+		window.addEventListener("pointercancel", cancelPointer);
+	}
+
+	function movePointer(event: PointerEvent) {
+		if (event.pointerId !== activePointer) return;
+		const dx = event.clientX - startX;
+		const dy = event.clientY - startY;
+		if (gesture === "pending" && Math.max(Math.abs(dx), Math.abs(dy)) > MOVEMENT_SLOP_PX) {
+			clearLongPress();
+			gesture = Math.abs(dy) > Math.abs(dx) ? "scroll" : "horizontal";
+		}
+		if (gesture === "scroll") { stopPointer(); return; }
+		if (gesture !== "horizontal") return;
+		dragging = true;
+		const allowed = canSwipe(dx > 0 ? "settle" : "snooze");
+		offset = allowed ? dx : Math.sign(dx) * Math.min(Math.abs(dx) * 0.2, 24);
+	}
+
+	function finishPointer(event: PointerEvent) {
+		if (event.pointerId !== activePointer) return;
+		const wasHorizontal = gesture === "horizontal";
+		const direction = offset > 0 ? "settle" : "snooze";
+		const stage = canSwipe(direction) ? getSwipeStage(offset, rowEl?.getBoundingClientRect().width ?? 0) : "none";
+		stopPointer();
+		if (!wasHorizontal) return;
+		armClickSuppression();
+		if (stage === "commit") {
+			runSwipeAction(direction, true);
+			offset = 0;
+		} else if (stage === "reveal") {
+			heldDirection = direction;
+			offset = (direction === "settle" ? 1 : -1) * 88;
+			onholdchange?.(session.id);
+		} else offset = 0;
+	}
+
+	function cancelPointer(event: PointerEvent) {
+		if (event.pointerId !== activePointer) return;
+		stopPointer();
+		offset = 0;
+	}
+
+	function runSwipeAction(direction: "settle" | "snooze", commit: boolean) {
+		if (direction === "settle") {
+			if (!actions.settleDisabledReason) onsettle?.(session.id, !(settled || actions.settled));
+		} else if (snoozed || actions.snoozed) onunsnooze?.(session.id);
+		else if (actions.snoozeVisible && !actions.snoozeDisabledReason) {
+			if (commit) oncommitsnooze?.(session.id);
+			else onsnooze?.(session.id);
+		}
+		closeHold();
+	}
+
+	onDestroy(() => { stopPointer(); clearOutsideBlock(); if (suppressTimer) clearTimeout(suppressTimer); });
 
 	function handleMoreClick(e: MouseEvent) {
 		e.preventDefault();
@@ -329,16 +516,38 @@
 
 <!-- svelte-ignore a11y_click_events_have_key_events -->
 <!-- svelte-ignore a11y_no_static_element_interactions -->
+<div class="relative overflow-hidden rounded-panel session-swipe-wrapper">
+	{#if (dragging && swipeStage !== "none" && swipeAllowed) || heldDirection}
+		{@const direction = heldDirection ?? swipeDirection}
+		{@const verb = direction === "settle" ? (settled || actions.settled ? "Un-settle" : "Settle") : (snoozed || actions.snoozed ? "Unsnooze" : "Snooze")}
+		{@const stage = heldDirection ? "reveal" : swipeStage}
+		<button
+			type="button"
+			data-testid="session-swipe-action"
+			data-stage={stage}
+			aria-label="{verb} {displayTitle}"
+			class="absolute inset-0 {direction === 'settle' ? 'justify-start' : 'justify-end'} flex items-center gap-1 px-3 font-brand text-sm font-medium {stage === 'commit' ? (direction === 'settle' ? 'bg-success text-bg' : 'bg-accent text-bg') : (direction === 'settle' ? 'bg-success/15 text-success' : 'bg-accent/15 text-accent')}"
+			onclick={(event) => { event.preventDefault(); event.stopPropagation(); if (heldDirection) runSwipeAction(heldDirection, false); }}
+		>
+			<Icon name={verb === "Settle" ? "check" : verb === "Snooze" ? "moon" : "undo"} size={16} />
+			{stage === "commit" ? `Release to ${verb.toLowerCase()}` : verb}
+		</button>
+	{/if}
 <a
+	bind:this={rowEl}
 	href={href || undefined}
-	class="{itemClass} no-underline"
-	style={active ? "box-shadow: inset 3px 0 0 var(--color-brand-a), inset 3px 0 12px rgba(255,45,123,0.1);" : ""}
+	class="{itemClass} no-underline {offset !== 0 && !active ? 'bg-sidebar-bg' : ''} {dragging ? 'transition-none' : 'transition-[color,background-color,transform] duration-150 motion-reduce:transition-none'}"
+	style="touch-action: pan-y; -webkit-touch-callout: none; user-select: none; transform: translateX({offset}px); {active ? 'box-shadow: inset 3px 0 0 var(--color-brand-a), inset 3px 0 12px rgba(255,45,123,0.1);' : ''}"
 	data-session-id={session.id}
 	aria-label={ariaLabel}
 	onclick={handleClick}
+	onclickcapture={suppressGestureClick}
+	onpointerdown={startPointer}
 	oncontextmenu={(event) => {
 		if (cleanupMode || !oncontextmenuProp) return;
 		event.preventDefault();
+		if (suppressNativeContextMenu) { suppressNativeContextMenu = false; return; }
+		if (activePointer !== null) { stopPointer(); armClickSuppression(); }
 		oncontextmenuProp(session, event.currentTarget);
 	}}
 >
@@ -448,13 +657,13 @@
 			     already leads with it; announcing it twice per row is noise. -->
 			{#if status.word && !shelfRow}
 				<span
-					class="session-item-status inline-flex items-center px-0.5 text-sm font-medium whitespace-nowrap font-brand {status.colour}"
+					class="session-item-status inline-flex items-center px-0.5 text-sm font-medium whitespace-nowrap font-brand {status.colour} md:group-hover:hidden md:group-focus-within:hidden {menuOpen ? 'md:hidden' : ''}"
 					aria-hidden="true"
 				>
 					{status.word}
 				</span>
 			{:else}
-				<span class="session-item-meta">{timeText}</span>
+				<span class="session-item-meta md:group-hover:hidden md:group-focus-within:hidden {menuOpen ? 'md:hidden' : ''}">{timeText}</span>
 			{/if}
 			{#if woken}
 				<span
@@ -463,34 +672,59 @@
 				>{wokeText}</span>
 			{/if}
 
-			<!-- Three-dot more button -->
+			<!-- Desktop verbs replace the time on hover and keyboard focus. -->
 			{#if !cleanupMode && oncontextmenuProp}
-				<!--
-					`bind:element`, not `bind:this`: Svelte 5 does not forward `bind:this`
-					through a component tag, so ui/Button hands the element back by prop.
-					The hover pair stays in `class` because it is `group-hover:` driven off
-					the row, which no `hoverFill` member expresses. Dropped
-					`transition-[opacity,color]`: BASE's `transition-colors` already outranked
-					it, and nothing here animates `opacity` -- the fade is an alpha channel on
-					the text colour.
-				-->
+				<span class="hidden md:group-hover:inline-flex md:group-focus-within:inline-flex {menuOpen ? 'md:inline-flex' : ''} items-center gap-0.5" data-testid="session-row-actions">
+					<Button variant="ghost" size="content" tone="inherit" hoverFill="none"
+						class="size-[27px] rounded-[7px] text-text-secondary hover:text-text hover:bg-bg-alt"
+						data-testid={settled || actions.settled ? "session-act-unsettle" : "session-act-settle"}
+						ariaLabel="{settled || actions.settled ? 'Un-settle' : 'Settle'} {displayTitle}"
+						title={actions.settleDisabledReason ?? (settled || actions.settled ? "Un-settle" : "Settle")}
+						disabled={actions.settleDisabledReason != null}
+						onclick={(event) => { event.preventDefault(); event.stopPropagation(); onsettle?.(session.id, !(settled || actions.settled)); }}
+					><Icon name={settled || actions.settled ? "undo" : "check"} size={16} /></Button>
+					{#if actions.snoozeVisible}
+						{#if snoozed || actions.snoozed}
+							<Button variant="ghost" size="content" tone="inherit" hoverFill="none"
+								class="size-[27px] rounded-[7px] text-text-secondary hover:text-text hover:bg-bg-alt"
+								data-testid="session-act-unsnooze" ariaLabel="Unsnooze {displayTitle}" title="Unsnooze"
+								onclick={(event) => { event.preventDefault(); event.stopPropagation(); onunsnooze?.(session.id); }}
+							><Icon name="undo" size={16} /></Button>
+						{:else}
+							<Button variant="ghost" size="content" tone="inherit" hoverFill="none"
+								class="size-[27px] rounded-[7px] text-text-secondary hover:text-text hover:bg-bg-alt"
+								data-testid="session-act-snooze" ariaLabel="Snooze {displayTitle}"
+								title={actions.snoozeDisabledReason ?? "Snooze"} disabled={actions.snoozeDisabledReason != null}
+								onclick={(event) => { event.preventDefault(); event.stopPropagation(); onsnooze?.(session.id); }}
+							><Icon name="moon" size={16} /></Button>
+						{/if}
+					{/if}
+					<Button variant="ghost" size="content" tone="inherit" hoverFill="none"
+						class="size-[27px] rounded-[7px] text-text-secondary hover:text-text hover:bg-bg-alt"
+						data-testid={actions.pinned ? "session-act-unpin" : "session-act-pin"}
+						ariaLabel="{actions.pinned ? 'Unpin' : 'Pin'} {displayTitle}" title={actions.pinned ? "Unpin" : "Pin"}
+						onclick={(event) => { event.preventDefault(); event.stopPropagation(); onpin?.(session.id, !actions.pinned); }}
+					><Icon name={actions.pinned ? "star-off" : "star"} size={16} /></Button>
 				<Button
 					bind:element={moreBtnEl}
 					variant="ghost"
 					size="content"
 					tone="inherit"
 					hoverFill="none"
-					class="session-more-btn shrink-0 self-stretch w-[44px] rounded duration-100 {active
+					class="session-more-btn shrink-0 size-[27px] rounded-[7px] duration-100 {active
 						? 'text-text-muted group-hover:text-text-secondary hover:text-text hover:bg-bg-alt'
 						: 'text-text-dimmer/50 group-hover:text-text-dimmer hover:text-text hover:bg-bg-alt'}"
 					title="More options"
 					ariaLabel="More options for {displayTitle}"
 					aria-haspopup="menu"
+					aria-expanded={menuOpen}
 					onclick={handleMoreClick}
 				>
 					<Icon name="ellipsis" size={16} />
 				</Button>
+				</span>
 			{/if}
 		</div>
 	{/if}
 </a>
+</div>
