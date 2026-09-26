@@ -217,18 +217,12 @@ export const conduitVisualHandlers: StepHandler[] = [
 		name: "session list is open",
 		match: /^the session list is open$/,
 		run: async ({ world }) => {
-			// Openness is read off the overlay, never off the sidebar's contents:
-			// the closed off-canvas sidebar is translated out of view rather than
-			// hidden, so Playwright reports everything inside it as visible even
-			// while it is shut. The overlay is genuinely display:none when closed.
-			await world.page
-				.locator("#sidebar-overlay")
-				.waitFor({ state: "visible" });
-			// And that it landed on sessions rather than projects. This one is a
-			// presence check by nature, for the reason just given.
+			await world.page.waitForFunction(
+				() => new URL(window.location.href).pathname === "/",
+			);
 			await world.page
 				.locator("#sidebar-panel-sessions")
-				.waitFor({ state: "attached" });
+				.waitFor({ state: "visible" });
 		},
 	},
 	{

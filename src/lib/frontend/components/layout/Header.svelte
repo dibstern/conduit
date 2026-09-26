@@ -22,7 +22,6 @@
 		uiState,
 		toggleSidebar,
 		expandSidebar,
-		openMobileSidebar,
 		togglePanel,
 	} from "../../stores/ui.svelte.js";
 	import { wsState } from "../../stores/ws.svelte.js";
@@ -50,10 +49,6 @@
 
 	// ─── Handlers ──────────────────────────────────────────────────────────────
 
-	function handleHamburger() {
-		openMobileSidebar();
-	}
-
 	function handleExpandSidebar() {
 		expandSidebar();
 	}
@@ -67,7 +62,7 @@
 	id="header"
 	class="flex items-center justify-between px-5 py-3 min-h-[48px] shrink-0 gap-2"
 >
-	<!-- Left section: hamburger/expand + project name (scrollable on mobile) -->
+	<!-- Left section: expand + project name -->
 	<div id="header-left" class="flex items-center gap-2 min-w-0 flex-1">
 		<!-- `{#if}` rather than `class:hidden`: Button's base sets `inline-flex`,
 		     and Tailwind emits display utilities alphabetically, so `.hidden`
@@ -88,22 +83,6 @@
 				onclick={handleExpandSidebar}
 			/>
 		{/if}
-		<!-- Visibility is purely viewport-driven and always was: the `hidden`
-		     class here only ever mattered until the mobile media query in
-		     style.css overrode it. That is now stated once, as a pair of
-		     ID rules, instead of split between markup and a media query. -->
-		<Button
-			id="hamburger-btn"
-			variant="toolbar"
-			size="content"
-			class={HEADER_ICON_BOX}
-			iconOnly
-			icon="menu"
-			iconSize={15}
-			title="Menu"
-			ariaLabel="Menu"
-			onclick={handleHamburger}
-		/>
 		<div id="header-project-scroll" class="min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap max-md:flex max-md:items-center">
 			<div class="flex items-center gap-2 whitespace-nowrap">
 			<h1 id="project-name" class="text-lg font-semibold tracking-[0.08em] font-brand">

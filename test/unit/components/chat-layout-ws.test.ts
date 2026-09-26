@@ -20,6 +20,10 @@ vi.mock(
 );
 vi.mock(
 	"../../../src/lib/frontend/components/layout/Sidebar.svelte",
+	() => import("../../helpers/SidebarStub.svelte"),
+);
+vi.mock(
+	"../../../src/lib/frontend/components/layout/SessionBar.svelte",
 	emptyComponent,
 );
 vi.mock(
@@ -266,6 +270,7 @@ import {
 	loadDaemonSessions,
 	sessionState,
 } from "../../../src/lib/frontend/stores/session.svelte.js";
+import { sessionViewState } from "../../../src/lib/frontend/stores/session-view.svelte.js";
 import { showToast } from "../../../src/lib/frontend/stores/ui.svelte.js";
 import {
 	connect,
@@ -304,6 +309,7 @@ describe("ChatLayout WS lifecycle", () => {
 		routerState.search = "";
 		routerState.sessionNotFound = false;
 		sessionState.currentId = null;
+		sessionViewState.compact = false;
 		vi.mocked(resolveSessionRpc).mockResolvedValue({
 			projectSlug: "test-project",
 		});
@@ -316,6 +322,7 @@ describe("ChatLayout WS lifecycle", () => {
 		// Reset router state so it doesn't leak between tests
 		routerState.path = "/";
 		attachedProjectState.slug = null;
+		sessionViewState.compact = false;
 	});
 
 	it("connects once on mount", () => {
@@ -472,6 +479,43 @@ describe("ChatLayout WS lifecycle", () => {
 		expect(resolveSessionRpc).not.toHaveBeenCalled();
 		expect(viewSessionRpc).not.toHaveBeenCalled();
 		expect(sessionState.currentId).toBeNull();
+	});
+
+	it("uses the route-driven full-screen list layout on compact viewports", () => {
+		sessionViewState.compact = true;
+		const { container } = render(ChatLayout);
+
+		const layout = container.querySelector("#layout");
+		expect(layout?.classList.contains("layout-compact")).toBe(true);
+		expect(layout?.classList.contains("phone-list-screen")).toBe(true);
+		expect(container.querySelector("#sidebar")).not.toBeNull();
+
+		replaceRoute("/s/session-a");
+		flushSync();
+		expect(layout?.classList.contains("layout-compact")).toBe(true);
+		expect(layout?.classList.contains("phone-list-screen")).toBe(false);
+		expect(container.querySelector("#sidebar")).not.toBeNull();
+	});
+
+	it("restores the compact session list scroll position after returning", async () => {
+		sessionViewState.compact = true;
+		const { container } = render(ChatLayout);
+		const scroller = container.querySelector<HTMLElement>(
+			"#session-list-scroller",
+		);
+		expect(scroller).not.toBeNull();
+		if (!scroller) return;
+
+		scroller.scrollTop = 84;
+		replaceRoute("/s/session-a");
+		flushSync();
+		await tick();
+		scroller.scrollTop = 0;
+
+		replaceRoute("/");
+		flushSync();
+		await tick();
+		expect(scroller.scrollTop).toBe(84);
 	});
 
 	it("clears the selected session when returning to the list", async () => {

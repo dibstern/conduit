@@ -28,16 +28,18 @@ type MultiInstanceControl = WsMockControl & { rpc: RpcMockControl };
 /** The project URL for multi-instance tests (must match fixture's current slug). */
 const PROJECT_URL = "/?p=myapp";
 
-/** Wait for the chat page to be ready (WS connected, input visible). */
+/** Wait for the routed app shell to be ready and connected. */
 async function waitForChatReady(page: Page): Promise<void> {
 	// Use the test-level timeout (default 30s) rather than a hardcoded 10s.
 	// The SPA needs to load a ~2.4MB bundle, mount Svelte, connect the
 	// mocked WS, receive init messages, and render — under resource
 	// pressure this can exceed 10s.
-	await page.locator("#input").waitFor({ state: "visible" });
-	// Overlay uses class not id, and it fades out via opacity transition.
-	// Wait for it to be either removed from DOM or have opacity 0 (fadeOut).
-	await page.locator(".connect-overlay").waitFor({ state: "hidden" });
+	await page.locator("#layout").waitFor({ state: "attached" });
+	// On a phone the list route hides #app, including the connection overlay, so
+	// visibility cannot prove readiness. Wait for the overlay to unmount instead.
+	await page.waitForFunction(
+		() => document.querySelector(".connect-overlay") === null,
+	);
 }
 
 /** Navigate and wait for SPA readiness. */
@@ -176,48 +178,41 @@ async function mockInstanceRpc(page: Page): Promise<RpcMockControl> {
 }
 
 /**
- * Open the ProjectSwitcher dropdown, opening the off-canvas sidebar first when
- * the viewport is a phone.
- *
- * Two routes in, because the phone no longer has the first one: the session
- * owns the top bar at this width and the global header is not rendered at all,
- * so the way in is the bar's back control (conduit-test-17xt.3). Neither
- * control is visible on desktop, where this is a no-op.
+ * Return to the list route on a phone. This is a no-op on desktop and when the
+ * test already starts at `/`.
  */
-async function openSidebarOnMobile(page: Page): Promise<void> {
-	// Guard on the mobile control, never on the sidebar's own contents: the
-	// closed off-canvas sidebar is translated out of view rather than hidden, so
-	// Playwright still reports everything inside it as visible.
-	for (const selector of [
-		"#hamburger-btn",
-		"[data-testid='session-bar-back']",
-	]) {
-		const control = page.locator(selector);
-		if (await control.isVisible()) {
-			await control.click();
-			await page.locator("#project-switcher-btn").waitFor({ state: "visible" });
-			return;
-		}
+
+async function showSessionListOnMobile(page: Page): Promise<void> {
+	const back = page.locator("[data-testid='session-bar-back']");
+	if (await back.isVisible()) {
+		await back.click();
 	}
+	await page.locator("#project-switcher-btn").waitFor({ state: "visible" });
 }
 
 /**
- * The gear. On a phone it lives in the session bar's overflow menu, because the
- * global header that used to hold it is replaced at this width.
+ * The gear. On a phone it lives in the overflow menu of whichever top bar is
+ * showing (the list's or the session's), because the global header that used
+ * to hold it is replaced at this width.
  */
 async function openSettingsPanel(page: Page): Promise<void> {
-	const overflow = page.locator("[data-testid='session-bar-overflow']");
-	if (await overflow.isVisible()) {
-		await overflow.click();
-		await page.locator("[data-testid='overflow-settings']").click();
-		return;
+	for (const [trigger, item] of [
+		["list-bar-overflow", "list-overflow-settings"],
+		["session-bar-overflow", "overflow-settings"],
+	] as const) {
+		const overflow = page.getByTestId(trigger);
+		if (await overflow.isVisible()) {
+			await overflow.click();
+			await page.getByTestId(item).click();
+			return;
+		}
 	}
 	await page.locator("#settings-btn, [title='Settings']").click();
 }
 
 /** Open the ProjectSwitcher dropdown. On mobile, opens the sidebar first. */
 async function openProjectSwitcher(page: Page): Promise<void> {
-	await openSidebarOnMobile(page);
+	await showSessionListOnMobile(page);
 	const switcherBtn = page.locator("#project-switcher-btn");
 	await switcherBtn.click();
 	// Wait for the dropdown container to appear

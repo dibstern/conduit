@@ -7,7 +7,6 @@ export class AppPage {
 	// Header
 	readonly projectName: Locator;
 	readonly statusDot: Locator;
-	readonly hamburgerBtn: Locator;
 	readonly sidebarExpandBtn: Locator;
 	readonly terminalToggleBtn: Locator;
 	readonly qrBtn: Locator;
@@ -17,7 +16,9 @@ export class AppPage {
 	// Layout
 	readonly layout: Locator;
 	readonly sidebar: Locator;
-	readonly sidebarOverlay: Locator;
+	readonly sessionsPanel: Locator;
+	readonly sessionListScroller: Locator;
+	readonly sessionBarBack: Locator;
 	readonly app: Locator;
 
 	// Connection
@@ -42,7 +43,6 @@ export class AppPage {
 		this.page = page;
 		this.projectName = page.locator("#project-name");
 		this.statusDot = page.locator("#status");
-		this.hamburgerBtn = page.locator("#hamburger-btn");
 		this.sidebarExpandBtn = page.locator("#sidebar-expand-btn");
 		this.terminalToggleBtn = page.locator("#header-terminal-btn");
 		this.qrBtn = page.locator("#qr-btn");
@@ -50,8 +50,10 @@ export class AppPage {
 		this.clientCountBadge = page.locator("#client-count-badge");
 		this.layout = page.locator("#layout");
 		this.sidebar = page.locator("#sidebar");
-		this.sidebarOverlay = page.locator("#sidebar-overlay");
-		this.app = page.locator("#app");
+		this.sessionsPanel = page.locator("#sidebar-panel-sessions");
+		this.sessionListScroller = page.locator("#session-list-scroller");
+		this.sessionBarBack = page.locator("[data-testid='session-bar-back']");
+		this.app = page.locator("#layout #app");
 		this.connectOverlay = page.locator("#connect-overlay");
 		this.input = page.locator("#input");
 		this.sendBtn = page.locator("#send");
@@ -67,14 +69,12 @@ export class AppPage {
 	async goto(baseUrl: string): Promise<void> {
 		await this.page.goto(baseUrl);
 		// Wait for Svelte SPA to mount — layout appears on initial render.
-		// Without this, the overlay waitFor({ state: 'hidden' }) can pass
-		// immediately because Playwright treats "not attached" as "hidden",
-		// and #connect-overlay doesn't exist until Svelte renders.
 		// Use the full test timeout (30s) — under resource pressure during
 		// pnpm test:all, the SPA bundle + Svelte mount can take >15s.
 		await this.layout.waitFor({ state: "attached", timeout: 30_000 });
-		// Wait for WebSocket to connect — overlay should disappear
-		await this.connectOverlay.waitFor({ state: "hidden", timeout: 30_000 });
+		// Compact list routes hide all of #app, so visibility cannot prove the
+		// socket connected. The overlay unmounts only after connection succeeds.
+		await this.connectOverlay.waitFor({ state: "detached", timeout: 30_000 });
 	}
 
 	async waitForConnected(): Promise<void> {

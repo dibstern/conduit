@@ -5,7 +5,7 @@
 <script lang="ts">
 	import type { BreadcrumbSegment, FileEntry, RelayMessage } from "../../types.js";
 	import { onFileBrowser } from "../../stores/ws.svelte.js";
-	import { openFileViewer, closeMobileSidebar, setSidebarPanel } from "../../stores/ui.svelte.js";
+	import { openFileViewer, setSidebarPanel } from "../../stores/ui.svelte.js";
 	import { getCurrentSlug } from "../../stores/router.svelte.js";
 	import { getFileContentRpc, getFileListRpc } from "../../transport/ws-rpc-client.js";
 	import { applyGetFileContentResponse, applyGetFileListResponse } from "../../stores/ws-dispatch.js";
@@ -91,9 +91,6 @@
 			void getFileContentRpc({ projectSlug: slug, path: fullPath }).then(
 				applyGetFileContentResponse,
 			);
-		}
-		if (typeof window !== "undefined" && window.innerWidth < 768) {
-			closeMobileSidebar();
 		}
 	}
 

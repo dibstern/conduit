@@ -97,7 +97,7 @@
 
 	// `/` to search and Cmd/Ctrl+P to the scope, on pointer devices only: a
 	// touch device has no keyboard to press them with, and a stray key from a
-	// paired one should not pull focus into a closed drawer.
+	// paired one should not pull focus into a hidden route panel.
 	function handleShortcut(event: KeyboardEvent) {
 		if (event.defaultPrevented || event.altKey || event.shiftKey) return;
 		if (!window.matchMedia("(hover: hover) and (pointer: fine)").matches) {

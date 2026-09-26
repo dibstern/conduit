@@ -2,8 +2,14 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 // Mock window.history and window.location before importing
-const pushStateSpy = vi.fn();
-const replaceStateSpy = vi.fn();
+let historyState: unknown = null;
+const pushStateSpy = vi.fn((state: unknown) => {
+	historyState = state;
+});
+const replaceStateSpy = vi.fn((state: unknown) => {
+	historyState = state;
+});
+const backSpy = vi.fn();
 let popstateListener: (() => void) | undefined;
 const addEventListenerSpy = vi.fn(
 	(event: string, listener: () => void): void => {
@@ -18,8 +24,12 @@ vi.stubGlobal("window", {
 	...(typeof window !== "undefined" ? window : {}),
 	location: { pathname: "/", search: "" } as Location,
 	history: {
+		get state() {
+			return historyState;
+		},
 		pushState: pushStateSpy,
 		replaceState: replaceStateSpy,
+		back: backSpy,
 	} as unknown as History,
 	addEventListener: addEventListenerSpy,
 });
@@ -34,6 +44,7 @@ const {
 	getTransitionLog,
 	navigate,
 	normalizeRoute,
+	previousHistoryEntryIsSessionList,
 	replaceRoute,
 	routerState,
 	attachedProjectState,
@@ -48,9 +59,11 @@ beforeEach(() => {
 	attachedProjectState.slug = null;
 	window.location.pathname = "/";
 	window.location.search = "";
+	historyState = null;
 	clearTransitionLog();
 	pushStateSpy.mockClear();
 	replaceStateSpy.mockClear();
+	backSpy.mockClear();
 });
 
 // ─── navigate ───────────────────────────────────────────────────────────────
@@ -59,7 +72,11 @@ describe("navigate", () => {
 	it("updates path and calls pushState", () => {
 		navigate("/auth");
 		expect(routerState.path).toBe("/auth");
-		expect(pushStateSpy).toHaveBeenCalledWith(null, "", "/auth");
+		expect(pushStateSpy).toHaveBeenCalledWith(
+			{ conduitFrom: "/" },
+			"",
+			"/auth",
+		);
 	});
 
 	it("does not navigate if path is the same", () => {
@@ -75,7 +92,11 @@ describe("navigate", () => {
 		expect(routerState.path).toBe("/");
 		expect(routerState.search).toBe("?p=acme");
 		expect(pushStateSpy).toHaveBeenCalledTimes(1);
-		expect(pushStateSpy).toHaveBeenCalledWith(null, "", "/?p=acme");
+		expect(pushStateSpy).toHaveBeenCalledWith(
+			{ conduitFrom: "/" },
+			"",
+			"/?p=acme",
+		);
 	});
 
 	it("updates search when navigating between query strings", () => {
@@ -85,7 +106,11 @@ describe("navigate", () => {
 		expect(routerState.path).toBe("/");
 		expect(routerState.search).toBe("?b=2");
 		expect(pushStateSpy).toHaveBeenCalledTimes(2);
-		expect(pushStateSpy).toHaveBeenLastCalledWith(null, "", "/?b=2");
+		expect(pushStateSpy).toHaveBeenLastCalledWith(
+			{ conduitFrom: "/" },
+			"",
+			"/?b=2",
+		);
 	});
 
 	it("does not navigate if path and search are the same", () => {
@@ -101,7 +126,11 @@ describe("navigate", () => {
 
 		expect(routerState.path).toBe("/s/123");
 		expect(routerState.search).toBe("?p=other");
-		expect(pushStateSpy).toHaveBeenLastCalledWith(null, "", "/s/123?p=other");
+		expect(pushStateSpy).toHaveBeenLastCalledWith(
+			{ conduitFrom: "/" },
+			"",
+			"/s/123?p=other",
+		);
 	});
 
 	it("takes a same-page navigation literally, so the scope can be cleared", () => {
@@ -130,13 +159,44 @@ describe("navigate", () => {
 
 		expect(routerState.path).toBe("/auth");
 		expect(routerState.search).toBe("");
-		expect(pushStateSpy).toHaveBeenCalledWith(null, "", "/auth");
+		expect(pushStateSpy).toHaveBeenCalledWith(
+			{ conduitFrom: "/" },
+			"",
+			"/auth",
+		);
 	});
 
 	it("navigates to slug routes", () => {
 		navigate("/p/my-project/");
 		expect(routerState.path).toBe("/p/my-project/");
-		expect(pushStateSpy).toHaveBeenCalledWith(null, "", "/p/my-project/");
+		expect(pushStateSpy).toHaveBeenCalledWith(
+			{ conduitFrom: "/" },
+			"",
+			"/p/my-project/",
+		);
+	});
+
+	it("marks a session entry pushed from the session list", () => {
+		navigate("/s/123");
+		expect(previousHistoryEntryIsSessionList()).toBe(true);
+	});
+
+	it("does not treat a direct session entry as coming from the list", () => {
+		routerState.path = "/s/direct";
+		historyState = null;
+		expect(previousHistoryEntryIsSessionList()).toBe(false);
+	});
+
+	it("does not treat navigation from another app route as coming from the list", () => {
+		routerState.path = "/auth";
+		navigate("/s/123");
+		expect(previousHistoryEntryIsSessionList()).toBe(false);
+	});
+
+	it("preserves the previous-entry marker when replacing the current route", () => {
+		navigate("/s/123");
+		replaceRoute("/s/456");
+		expect(previousHistoryEntryIsSessionList()).toBe(true);
 	});
 });
 

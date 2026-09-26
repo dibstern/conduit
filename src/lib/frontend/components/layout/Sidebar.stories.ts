@@ -15,7 +15,6 @@ const meta = {
 		// Reset state for each story
 		uiState.sidebarCollapsed = false;
 		uiState.sidebarPanel = "sessions";
-		uiState.mobileSidebarOpen = false;
 	},
 } satisfies Meta<typeof Sidebar>;
 
@@ -31,18 +30,6 @@ export const Default: Story = {
 export const FileBrowserPanel: Story = {
 	beforeEach: () => {
 		uiState.sidebarPanel = "files";
-	},
-};
-
-export const MobileOpen: Story = {
-	// The open mobile sidebar lays a fixed, full-viewport dimming backdrop over
-	// the page; an element capture crops it to the sidebar's own height.
-	tags: ["viewport-capture"],
-	parameters: {
-		viewport: { defaultViewport: "mobile1" },
-	},
-	beforeEach: () => {
-		uiState.mobileSidebarOpen = true;
 	},
 };
 

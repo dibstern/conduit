@@ -10,6 +10,7 @@
 
 import { getBrowserClientId } from "../../stores/client-identity.js";
 import { getCurrentSlug } from "../../stores/router.svelte.js";
+import { sessionViewState } from "../../stores/session-view.svelte.js";
 import {
 	beginCreateTab,
 	failCreateTab,
@@ -56,7 +57,7 @@ export function toggleTerminal(): void {
 		}
 	}
 
-	if (window.innerWidth <= 768) {
+	if (sessionViewState.compact) {
 		window.dispatchEvent(new CustomEvent("terminal:mobile-maximize"));
 	}
 }

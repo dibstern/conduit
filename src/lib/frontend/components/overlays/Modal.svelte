@@ -2,7 +2,7 @@
 <!-- Native <dialog> promoted to the browser's top layer via showModal().        -->
 <!--                                                                            -->
 <!-- The top layer paints above every stacking context on the page, so modals    -->
-<!-- never compete on z-index and can't end up behind the mobile drawer.         -->
+<!-- never compete on z-index and can't end up behind an application pane.      -->
 <!-- showModal() also makes the rest of the page inert, which is what stops      -->
 <!-- taps, swipes, tab focus, and screen readers from reaching an open sidebar   -->
 <!-- underneath.                                                                 -->

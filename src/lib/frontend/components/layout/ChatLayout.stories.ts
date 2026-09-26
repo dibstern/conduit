@@ -95,11 +95,20 @@ const expectLayoutVisible: NonNullable<Story["play"]> = async ({
 	expect(canvasElement.querySelector("#app")).not.toBeNull();
 };
 
+/** On a phone, `/` is the session list screen: the list fills the viewport. */
 export const Default: Story = { play: expectLayoutVisible };
+
+/**
+ * The stories below open a session, because on a phone both states belong to the
+ * session screen; left on `/` they would render the list screen, identical to
+ * Default.
+ */
+const SESSION_PATH = "/s/story-session";
 
 export const SidebarCollapsed: Story = {
 	beforeEach: () => {
 		uiState.sidebarCollapsed = true;
+		routerState.path = SESSION_PATH;
 	},
 	play: expectLayoutVisible,
 };
@@ -113,6 +122,9 @@ export const SidebarCollapsed: Story = {
  * does not touch it. See conduit-test-732b.
  */
 export const WithRewindBanner: Story = {
+	beforeEach: () => {
+		routerState.path = SESSION_PATH;
+	},
 	play: async (context) => {
 		await expectLayoutVisible(context);
 		uiState.rewindActive = true;

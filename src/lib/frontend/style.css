@@ -164,7 +164,7 @@
 	/* ── Z-Index Layers (theme-invariant) ────────────────
 	   Referenced as z-[var(--z-name)] (Tailwind v4 has no z-index theme namespace).
 	   Listed in paint order, lowest first. Never write a bare z-index number;
-	   a literal here is how the mobile drawer ended up painting over modals.
+	   centralizing the order keeps panes and portaled surfaces consistent.
 
 	   Modals are deliberately absent. They use <dialog>.showModal() and live in
 	   the browser's top layer, above every z-index on the page. Anything that
@@ -176,13 +176,8 @@
 	--z-dropdown: 60;
 	--z-sheet: 80;
 	--z-pane: 300;
-	--z-drawer-scrim: 340;
-	--z-drawer: 350;
-	/* Above the drawer, not below it. A portaled surface is opened by something
-	   and has to outrank it. The session "..." menu portals to <body>, so at the
-	   old 200 it painted under the mobile sidebar: the menu opened, you just
-	   could not see it, and the button read as dead (conduit-test-aagi). Only
-	   toasts sit higher. */
+	/* A portaled surface has to outrank the pane that opened it. Only toasts sit
+	   higher. */
 	--z-popover: 360;
 	--z-popover-raised: 370;
 	--z-toast: 400;
@@ -559,21 +554,7 @@ body:has(dialog:modal) {
 	display: none;
 }
 
-/* Overlay hidden state */
-#sidebar-overlay.hidden {
-	display: none;
-}
-
 /* ─── Header ───────────────────────────────────────────────────────────────── */
-
-/* The hamburger is viewport-only: hidden on desktop, shown by the mobile media
-   query below. Stated as an ID rule rather than a `hidden` class on the element
-   because ui/Button's base sets `inline-flex`, and Tailwind emits display
-   utilities alphabetically, so `.hidden` sorts before `.inline-flex` and loses.
-   ID specificity sidesteps the ordering question entirely. (conduit-test-de3.35.3) */
-#hamburger-btn {
-	display: none;
-}
 
 /* Parent-state: sidebar expand button only visible when sidebar collapsed */
 #layout.sidebar-collapsed #sidebar-expand-btn {
@@ -652,65 +633,44 @@ body:has(dialog:modal) {
 	grid-area: more;
 }
 
-/* ─── Mobile responsive ────────────────────────────────────────────────────── */
+/* ─── Compact route layout ─────────────────────────────────────────────────── */
 
-#session-bar-top-edge {
+#compact-top-edge {
 	display: none;
 }
 
-@media (max-width: 768px) {
-	/* See the comment on the element in SessionBar.svelte. `pointer-events: none`
-	   is safe: WebKit's sampler first hit-tests ignoring pointer-events. */
-	#session-bar-top-edge {
-		display: block;
-		position: fixed;
-		top: 0;
-		left: 0;
-		right: 0;
-		height: 12px;
-		background: var(--color-bg-surface);
-		pointer-events: none;
-	}
+/* See the comment on the element in ChatLayout.svelte. `pointer-events: none`
+   is safe: WebKit's sampler first hit-tests ignoring pointer-events. */
+#layout.layout-compact #compact-top-edge {
+	display: block;
+	position: fixed;
+	top: 0;
+	left: 0;
+	right: 0;
+	height: 12px;
+	background: var(--color-bg-surface);
+	pointer-events: none;
+}
 
-	#sidebar {
-		position: fixed;
-		left: 0;
-		top: 0;
-		bottom: 0;
-		z-index: var(--z-drawer);
-		transform: translateX(-100%);
-		transition: transform 0.25s ease;
-		/* Mobile sidebar width driven by --sidebar-w custom property */
-		width: var(--sidebar-w, 260px);
-		border-right: 1px solid var(--color-border-subtle);
-		overflow: visible;
-	}
+#layout.layout-compact.phone-list-screen #sidebar {
+	display: flex;
+	width: 100%;
+	border-right: none;
+	overflow: hidden;
+	padding-top: env(safe-area-inset-top, 0px);
+}
 
-	/* Override collapsed state on mobile — hamburger controls visibility */
-	#layout.sidebar-collapsed #sidebar {
-		width: var(--sidebar-w, 260px);
-		border-right: 1px solid var(--color-border-subtle);
-		overflow: visible;
-	}
+#layout.layout-compact.phone-list-screen #app,
+#layout.layout-compact:not(.phone-list-screen) #sidebar {
+	display: none;
+}
 
-	#sidebar.open {
-		transform: translateX(0);
-	}
+#layout.layout-compact #app {
+	width: 100%;
+}
 
-	/* Hide the layout-level sidebar resize handle on mobile (uses internal handle instead) */
-	.sidebar-resize-handle {
-		display: none;
-	}
-
-	#hamburger-btn {
-		display: flex;
-	}
-
-	#sidebar-toggle-btn,
-	#sidebar-expand-btn,
-	#layout.sidebar-collapsed #sidebar-expand-btn {
-		display: none;
-	}
+#layout.layout-compact .sidebar-resize-handle {
+	display: none;
 }
 
 /* ─── Animations ────────────────────────────────────────────────────────────── */

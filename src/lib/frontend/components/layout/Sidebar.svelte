@@ -1,6 +1,6 @@
 <!-- ─── Sidebar ─────────────────────────────────────────────────────────────── -->
 <!-- Left sidebar with session actions, session list, and file browser panel. -->
-<!-- Desktop: collapsible via toggle. Mobile: slide-over with overlay. -->
+<!-- Desktop: collapsible via toggle. Phone: full-screen list route. -->
 
 <script lang="ts">
 	import Icon from "../ui/Icon.svelte";
@@ -16,12 +16,9 @@
 	import {
 		uiState,
 		collapseSidebar,
-		closeMobileSidebar,
 		setSidebarPanel,
-		setSidebarWidth,
-		SIDEBAR_MIN_WIDTH,
-		SIDEBAR_MAX_WIDTH,
 	} from "../../stores/ui.svelte.js";
+	import { sessionViewState } from "../../stores/session-view.svelte.js";
 	import { navigate, getCurrentSlug } from "../../stores/router.svelte.js";
 	import { createPtyRpc, getFileListRpc } from "../../transport/ws-rpc-client.js";
 	import { applyGetFileListResponse } from "../../stores/ws-dispatch.js";
@@ -29,9 +26,20 @@
 	import { getBrowserClientId } from "../../stores/client-identity.js";
 	import { projectState } from "../../stores/project.svelte.js";
 	import { sendNewSession, sessionCreation, switchToSession } from "../../stores/session.svelte.js";
+	import { featureFlags } from "../../stores/feature-flags.svelte.js";
+	import Menu from "../ui/Menu.svelte";
+	import MenuItem from "../ui/MenuItem.svelte";
+	import MenuSeparator from "../ui/MenuSeparator.svelte";
+	import { openSettings, toggleDebugPanel } from "./chrome-actions.js";
+	import InstanceBadgeMenu from "./InstanceBadgeMenu.svelte";
+	import Banners from "../overlays/Banners.svelte";
+
+	// True while this sidebar is the phone's full-screen session list.
+	let { listScreen = false }: { listScreen?: boolean } = $props();
 
 	// ─── Local state ──────────────────────────────────────────────────────────
 	let projectsOpen = $state(false);
+	let listMenuOpen = $state(false);
 	let projectContextMenuOpen = $state(false);
 
 	// ─── Handlers ──────────────────────────────────────────────────────────────
@@ -41,10 +49,6 @@
 
 	function handleCloseSidebar() {
 		collapseSidebar();
-	}
-
-	function handleOverlayClick() {
-		closeMobileSidebar();
 	}
 
 	function handleNewSession() {
@@ -89,9 +93,8 @@
 		if (!wasOpen && terminalState.tabs.size === 0) {
 			requestTerminalCreate();
 		}
-		// On mobile: close sidebar overlay and maximize terminal so user can type
-		if (!wasOpen && window.innerWidth <= 768) {
-			closeMobileSidebar();
+		// On a phone, maximize the terminal so it replaces the list screen.
+		if (!wasOpen && sessionViewState.compact) {
 			window.dispatchEvent(new CustomEvent("terminal:mobile-maximize"));
 		}
 	}
@@ -101,46 +104,6 @@
 		navigate("/");
 	}
 
-	// ─── Mobile resize ────────────────────────────────────────────────────
-
-	function handleMobileResizeStart(e: MouseEvent | TouchEvent) {
-		e.preventDefault();
-		e.stopPropagation();
-		const startX = "touches" in e ? ((e as TouchEvent).touches[0]?.clientX ?? 0) : e.clientX;
-		const startW = uiState.mobileSidebarOpen ? (sidebarEl?.offsetWidth ?? 260) : 260;
-
-		function onMove(ev: MouseEvent | TouchEvent) {
-			const clientX =
-				"touches" in ev
-				? ((ev as TouchEvent).touches[0]?.clientX ?? 0)
-				: (ev as MouseEvent).clientX;
-			const newW = Math.max(
-				SIDEBAR_MIN_WIDTH,
-				Math.min(SIDEBAR_MAX_WIDTH, startW + (clientX - startX)),
-			);
-			setSidebarWidth(newW);
-		}
-
-		function onEnd() {
-			document.removeEventListener("mousemove", onMove);
-			document.removeEventListener("mouseup", onEnd);
-			document.removeEventListener("touchmove", onMove);
-			document.removeEventListener("touchend", onEnd);
-		}
-
-		document.addEventListener("mousemove", onMove);
-		document.addEventListener("mouseup", onEnd);
-		document.addEventListener("touchmove", onMove, { passive: false });
-		document.addEventListener("touchend", onEnd);
-	}
-
-	let sidebarEl: HTMLDivElement | undefined = $state(undefined);
-
-	// On mobile, sidebar uses user-set width (not fixed 260px)
-	const mobileSidebarWidth = $derived(
-		uiState.mobileSidebarOpen ? uiState.sidebarWidth : 260,
-	);
-
 	// Sidebar width: collapsed → 0, otherwise user-set width.
 	// Sets a CSS custom property that the stylesheet references.
 	const sidebarStyle = $derived(
@@ -149,22 +112,10 @@
 
 </script>
 
-<!-- Sidebar overlay (mobile backdrop) -->
-<div
-	id="sidebar-overlay"
-	class="fixed inset-0 bg-[rgba(var(--overlay-rgb),0.45)] backdrop-blur-[2px] z-[var(--z-drawer-scrim)] transition-opacity duration-[250ms] ease-linear"
-	class:hidden={!uiState.mobileSidebarOpen}
-	onclick={handleOverlayClick}
-	onkeydown={undefined}
-	role="presentation"
-></div>
-
 <!-- Sidebar -->
 <div
-	bind:this={sidebarEl}
 	id="sidebar"
 	class="bg-bg-surface border-r border-border-subtle flex flex-col shrink-0 h-full overflow-hidden"
-	class:open={uiState.mobileSidebarOpen}
 	style={sidebarStyle}
 >
 	<!-- Sidebar header: logo + toggle -->
@@ -180,56 +131,113 @@
 			},
 		}}
 	>
-		<a
-			href="/"
-			class="sidebar-logo flex items-center gap-2 no-underline"
-			onclick={handleLogoClick}
-		>
-			<span class="text-sm font-medium tracking-[0.14em] text-text font-brand">conduit</span>
-			<BlockGrid cols={10} mode="static" blockSize={2} gap={1} />
-		</a>
-		<!-- Literal px keeps the phone touch target at 44px despite the 12px root font size. -->
-		<Button
-			id="sidebar-projects-btn"
-			variant="ghost"
-			size="content"
-			tone="muted"
-			hoverFill="alt"
-			iconOnly
-			icon="ellipsis"
-			iconSize={18}
-			class="min-w-[44px] min-h-[44px] md:min-w-0 md:min-h-0 md:p-1 rounded-md"
-			title="Projects"
-			ariaLabel="Projects"
-			aria-haspopup="true"
-			aria-expanded={projectsOpen}
-			aria-controls={projectsOpen ? "sidebar-projects-panel" : undefined}
-			onclick={toggleProjectsPanel}
-		/>
-		<!--
-			`tone="muted"` and `hoverFill="alt"` reproduce this button's two colour
-			pairs token for token. Dropped: `bg-none` (background-image is already
-			none), `border-none` and `cursor-pointer` (preflight and BASE do those on
-			a button), `transition-[color,background]` (BASE's `transition-colors`
-			has always outranked it, since arbitrary values sort first) and
-			`duration-150`, which only restated the default.
-		-->
-		<Button
-			id="sidebar-toggle-btn"
-			variant="ghost"
-			size="content"
-			tone="muted"
-			hoverFill="alt"
-			iconOnly
-			icon="panel-left-close"
-			iconSize={18}
-			class="p-1 rounded-md"
-			title="Close sidebar"
-			ariaLabel="Close sidebar"
-			onclick={handleCloseSidebar}
-		/>
+		{#if sessionViewState.compact}
+			<!--
+				Phone list bar (design option A): title, instance identity, overflow.
+				The design's sort control (⇅) lands with group-by, and Select joins
+				this menu with multi-select. Literal px keeps touch targets at 44px
+				despite the 12px root font size.
+			-->
+			<h1 class="m-0 text-[19px] font-semibold tracking-[-0.01em] text-text" data-testid="list-bar-title">Sessions</h1>
+			<span class="flex-1"></span>
+			{#if listScreen}<InstanceBadgeMenu />{/if}
+			<Menu
+				bind:open={listMenuOpen}
+				ariaLabel="More actions"
+				align="end"
+				data-testid="list-bar-overflow-menu"
+			>
+				{#snippet trigger({ props })}
+					<Button
+						{...props}
+						id="list-bar-more"
+						variant="ghost"
+						size="content"
+						iconOnly
+						icon="ellipsis"
+						iconSize={17}
+						class="shrink-0 min-h-[44px] min-w-[44px] justify-center rounded-lg"
+						title="More actions"
+						ariaLabel="More actions"
+						data-testid="list-bar-overflow"
+					/>
+				{/snippet}
+				<MenuItem
+					title="Projects"
+					data-testid="list-overflow-projects"
+					onselect={() => { projectsOpen = true; }}
+				>
+					Projects…
+				</MenuItem>
+				<MenuItem
+					title="Settings"
+					data-testid="list-overflow-settings"
+					onselect={() => openSettings()}
+				>
+					Settings
+				</MenuItem>
+				{#if featureFlags.debug}
+					<MenuSeparator />
+					<MenuItem
+						title="Toggle debug panel"
+						data-testid="list-overflow-debug"
+						onselect={toggleDebugPanel}
+					>
+						Debug panel
+					</MenuItem>
+				{/if}
+			</Menu>
+		{:else}
+			<a
+				href="/"
+				class="sidebar-logo flex items-center gap-2 no-underline"
+				onclick={handleLogoClick}
+			>
+				<span class="text-sm font-medium tracking-[0.14em] text-text font-brand">conduit</span>
+				<BlockGrid cols={10} mode="static" blockSize={2} gap={1} />
+			</a>
+			<Button
+				id="sidebar-projects-btn"
+				variant="ghost"
+				size="content"
+				tone="muted"
+				hoverFill="alt"
+				iconOnly
+				icon="ellipsis"
+				iconSize={18}
+				class="p-1 rounded-md"
+				title="Projects"
+				ariaLabel="Projects"
+				aria-haspopup="true"
+				aria-expanded={projectsOpen}
+				aria-controls={projectsOpen ? "sidebar-projects-panel" : undefined}
+				onclick={toggleProjectsPanel}
+			/>
+			<!--
+				`tone="muted"` and `hoverFill="alt"` reproduce this button's two colour
+				pairs token for token. Dropped: `bg-none` (background-image is already
+				none), `border-none` and `cursor-pointer` (preflight and BASE do those on
+				a button), `transition-[color,background]` (BASE's `transition-colors`
+				has always outranked it, since arbitrary values sort first) and
+				`duration-150`, which only restated the default.
+			-->
+			<Button
+				id="sidebar-toggle-btn"
+				variant="ghost"
+				size="content"
+				tone="muted"
+				hoverFill="alt"
+				iconOnly
+				icon="panel-left-close"
+				iconSize={18}
+				class="p-1 rounded-md"
+				title="Close sidebar"
+				ariaLabel="Close sidebar"
+				onclick={handleCloseSidebar}
+			/>
+		{/if}
 
-		<!-- Keep this surface inside #sidebar's stacking context; a body portal paints below the mobile drawer. -->
+		<!-- Keep this surface inside #sidebar so it follows the list route. -->
 		{#if projectsOpen}
 			<Surface
 				variant="card"
@@ -248,6 +256,8 @@
 			</Surface>
 		{/if}
 	</div>
+
+	{#if listScreen}<Banners />{/if}
 
 	<!-- Project switcher -->
 	<div class="px-1 shrink-0">
@@ -365,15 +375,4 @@
 		{/if}
 	</div>
 
-	<!-- Mobile resize handle (right edge, only visible on mobile when open) -->
-	{#if uiState.mobileSidebarOpen}
-		<!-- svelte-ignore a11y_no_static_element_interactions -->
-		<div
-			class="mobile-sidebar-resize absolute top-0 bottom-0 -right-1 w-3 cursor-col-resize md:hidden z-[var(--z-raised)] flex items-center justify-center"
-			onmousedown={handleMobileResizeStart}
-			ontouchstart={handleMobileResizeStart}
-		>
-			<div class="absolute inset-y-0 -left-0.5 -right-0.5 hover:bg-accent/15 transition-colors"></div>
-		</div>
-	{/if}
 </div>

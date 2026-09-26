@@ -6,7 +6,6 @@
 <script lang="ts">
 	import type { ProjectInfo } from "../../types.js";
 	import { navigate } from "../../stores/router.svelte.js";
-	import { closeMobileSidebar } from "../../stores/ui.svelte.js";
 	import { dismiss } from "../../actions/use-dismiss.svelte.js";
 	import Badge from "../ui/Badge.svelte";
 	import Button from "../ui/Button.svelte";
@@ -45,7 +44,6 @@
 
 	function selectProject(slug: string) {
 		open = false;
-		closeMobileSidebar();
 		navigate(`/?${new URLSearchParams({ p: slug })}`);
 	}
 

@@ -7,7 +7,12 @@
 	import { COPY_FEEDBACK_MS } from "../../ui-constants.js";
 	import { onFileBrowser } from "../../stores/ws.svelte.js";
 	import { copyToClipboard } from "../../utils/clipboard.js";
-	import { showToast, openMobileSidebar, setSidebarPanel, uiState } from "../../stores/ui.svelte.js";
+	import { setSidebarPanel, showToast, uiState } from "../../stores/ui.svelte.js";
+	import {
+		getCurrentSessionId,
+		navigate,
+	} from "../../stores/router.svelte.js";
+	import { sessionViewState } from "../../stores/session-view.svelte.js";
 	import hljs from "highlight.js";
 	import Button from "../ui/Button.svelte";
 	import BlockGrid from "../ui/BlockGrid.svelte";
@@ -176,7 +181,9 @@
 
 	function handleOpenFileBrowser() {
 		setSidebarPanel("files");
-		openMobileSidebar();
+		if (!sessionViewState.compact) return;
+		handleClose();
+		if (getCurrentSessionId()) navigate("/");
 	}
 </script>
 

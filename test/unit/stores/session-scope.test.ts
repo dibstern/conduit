@@ -37,11 +37,19 @@ describe("session scope in the URL", () => {
 	it("round-trips through the URL, pushing a history entry each way", () => {
 		setSessionScope("acme");
 		expect(getSessionScope()).toBe("acme");
-		expect(pushStateSpy).toHaveBeenLastCalledWith(null, "", "/s/1?p=acme");
+		expect(pushStateSpy).toHaveBeenLastCalledWith(
+			{ conduitFrom: "/s/1" },
+			"",
+			"/s/1?p=acme",
+		);
 
 		setSessionScope(null);
 		expect(getSessionScope()).toBeNull();
-		expect(pushStateSpy).toHaveBeenLastCalledWith(null, "", "/s/1");
+		expect(pushStateSpy).toHaveBeenLastCalledWith(
+			{ conduitFrom: "/s/1" },
+			"",
+			"/s/1",
+		);
 	});
 
 	it("keeps other query parameters", () => {

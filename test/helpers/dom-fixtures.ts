@@ -82,13 +82,11 @@ export const SHARED_DOM_HTML = `
 export const FULL_DOM_HTML = `
   <div id="layout">
     <div id="sidebar"></div>
-    <div id="sidebar-overlay" class="hidden"></div>
     <button id="sidebar-toggle-btn"></button>
     <div id="app">
       <div id="header">
         <div id="header-left">
           <button id="sidebar-expand-btn" class="header-icon-btn hidden" title="Open sidebar"><i data-lucide="panel-left-open"></i></button>
-          <button id="hamburger-btn" class="header-icon-btn hidden" title="Menu"><i data-lucide="menu"></i></button>
           <h1 id="project-name" class="text-[15px] font-semibold truncate">Conduit</h1>
         </div>
         <div id="header-right">

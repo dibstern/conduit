@@ -64,14 +64,6 @@
 	import { fetchCurrentVersion } from "../../stores/version.svelte.js";
 	import type { RelayMessage } from "../../types.js";
 
-	// ─── Layout classes ────────────────────────────────────────────────────────
-
-	const layoutClass = $derived.by(() => {
-		let cls = "flex h-dvh";
-		if (uiState.sidebarCollapsed) cls += " sidebar-collapsed";
-		return cls;
-	});
-
 	// ─── Local state ──────────────────────────────────────────────────────────
 
 	let qrVisible = $state(false);
@@ -103,6 +95,46 @@
 	/** Visual viewport height — tracks keyboard show/hide on mobile. */
 	let vvHeight = $state<number | null>(null);
 	let appEl: HTMLDivElement | undefined = $state(undefined);
+	let sessionListScrollTop = 0;
+	let wasPhoneListScreen = false;
+
+	const phoneListScreen = $derived.by(() => {
+		const route = getCurrentRoute();
+		return (
+			sessionViewState.compact &&
+			route.page === "chat" &&
+			!route.sessionId &&
+			!uiState.fileViewerOpen &&
+			!mobileMaximized
+		);
+	});
+
+	const layoutClass = $derived.by(() => {
+		let cls = "flex h-dvh";
+		if (uiState.sidebarCollapsed) cls += " sidebar-collapsed";
+		if (sessionViewState.compact) cls += " layout-compact";
+		if (phoneListScreen) cls += " phone-list-screen";
+		return cls;
+	});
+
+	// Some browsers zero a scroller when an ancestor becomes display:none. Save
+	// before the route class hides the sidebar, then restore after it is shown.
+	$effect.pre(() => {
+		const active = phoneListScreen;
+		if (wasPhoneListScreen && !active) {
+			const scroller = document.getElementById("session-list-scroller");
+			if (scroller) sessionListScrollTop = scroller.scrollTop;
+		}
+	});
+
+	$effect(() => {
+		const active = phoneListScreen;
+		if (active && !wasPhoneListScreen) {
+			const scroller = document.getElementById("session-list-scroller");
+			if (scroller) scroller.scrollTop = sessionListScrollTop;
+		}
+		wasPhoneListScreen = active;
+	});
 
 	// ─── Sidebar resize state ─────────────────────────────────────────────
 
@@ -533,8 +565,7 @@
 	// the keyboard and xterm.js refits via its ResizeObserver.
 	// Active whenever the terminal panel is open on a mobile-width viewport.
 	$effect(() => {
-		const isMobile = typeof window !== "undefined" && window.innerWidth <= 768;
-		if (!terminalState.panelOpen || !isMobile) {
+		if (!terminalState.panelOpen || !sessionViewState.compact) {
 			vvHeight = null;
 			return;
 		}
@@ -607,8 +638,20 @@
 </script>
 
 <div bind:this={layoutEl} id="layout" class={layoutClass}>
-	<!-- Sidebar (includes overlay backdrop) -->
-	<Sidebar />
+	<!--
+		iOS 26 paints a progressive blur under the status bar unless WebKit finds an
+		opaque fixed or sticky box at the top edge (hit-tested at x = width/2, y = 0).
+		Both phone top bars are static, so this strip stands in for them. Same colour
+		as the bars, so it is invisible; compact-only, styled in style.css.
+	-->
+	<div id="compact-top-edge" aria-hidden="true"></div>
+
+	<!-- Fixed and full-viewport, so it lives outside #app: the phone list screen
+	     hides #app but still needs to show the connection state. -->
+	<ConnectOverlay />
+
+	<!-- Sidebar stays mounted so list state survives route changes. -->
+	<Sidebar listScreen={phoneListScreen} />
 
 	<!-- Sidebar resize handle (desktop only) -->
 	{#if !uiState.sidebarCollapsed}
@@ -635,16 +678,16 @@
 		     header is replaced rather than stacked under. Exactly one of the two
 		     renders, so there is never a second row of chrome to scroll past. -->
 		{#if sessionViewState.compact}
-			<SessionBar />
+			<!-- The list screen has its own bar in Sidebar; skipping this one keeps
+			     the shared instance badge test IDs unique. -->
+			{#if !phoneListScreen}<SessionBar />{/if}
 		{:else}
 			<Header />
 		{/if}
 
-		<!-- Connection Overlay -->
-		<ConnectOverlay />
-
-		<!-- Banners (update available, skip permissions, etc.) -->
-		<Banners />
+		<!-- Banners (update available, skip permissions, etc.). The phone list
+		     screen hides #app, so Sidebar shows them there instead. -->
+		{#if !phoneListScreen}<Banners />{/if}
 
 		<!-- Todo Sticky Overlay -->
 		<TodoOverlay items={todoItems} />

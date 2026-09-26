@@ -32,7 +32,6 @@ export const uiState = $state({
 	// Sidebar
 	sidebarCollapsed: safeGetItem(SIDEBAR_STORAGE_KEY) === "true",
 	sidebarPanel: "sessions" as "sessions" | "files",
-	mobileSidebarOpen: false,
 	sidebarWidth: Number(safeGetItem(SIDEBAR_WIDTH_KEY)) || SIDEBAR_DEFAULT_WIDTH,
 
 	// Toasts
@@ -108,14 +107,6 @@ export function toggleSidebar(): void {
 	} else {
 		collapseSidebar();
 	}
-}
-
-export function openMobileSidebar(): void {
-	uiState.mobileSidebarOpen = true;
-}
-
-export function closeMobileSidebar(): void {
-	uiState.mobileSidebarOpen = false;
 }
 
 export function setSidebarPanel(panel: "sessions" | "files"): void {
@@ -317,6 +308,4 @@ export function resetProjectUI(): void {
 	uiState.fileViewerPath = null;
 	uiState.openPanels = new Set();
 	uiState.banners = [];
-	// Close mobile sidebar overlay so the app isn't blocked after project switch.
-	uiState.mobileSidebarOpen = false;
 }

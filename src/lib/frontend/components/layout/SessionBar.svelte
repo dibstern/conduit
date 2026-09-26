@@ -26,13 +26,17 @@
 	import { getAttentionSessions } from "../../stores/notification-reducer.svelte.js";
 	import { getDescendantSessionIds } from "../../stores/permissions.svelte.js";
 	import { projectState } from "../../stores/project.svelte.js";
-	import { getCurrentSlug } from "../../stores/router.svelte.js";
+	import {
+		getCurrentSlug,
+		navigate,
+		previousHistoryEntryIsSessionList,
+	} from "../../stores/router.svelte.js";
 	import {
 		forceBarOpen,
 		isBarCollapsed,
 	} from "../../stores/session-view.svelte.js";
 	import { findSession, sessionState } from "../../stores/session.svelte.js";
-	import { openMobileSidebar, setSidebarPanel } from "../../stores/ui.svelte.js";
+	import { setSidebarPanel } from "../../stores/ui.svelte.js";
 	import Badge from "../ui/Badge.svelte";
 	import Button from "../ui/Button.svelte";
 	import Menu from "../ui/Menu.svelte";
@@ -71,7 +75,11 @@
 
 	function backToSessions() {
 		setSidebarPanel("sessions");
-		openMobileSidebar();
+		if (previousHistoryEntryIsSessionList()) {
+			window.history.back();
+		} else {
+			navigate("/");
+		}
 	}
 
 	function showControls() {
@@ -96,13 +104,6 @@
 	bind:this={barEl}
 	class="shrink-0 bg-bg-surface border-b border-border outline-none"
 >
-	<!--
-		iOS 26 paints a progressive blur under the status bar unless WebKit finds an
-		opaque fixed or sticky box at the top edge (hit-tested at x = width/2, y = 0).
-		The bar itself is static, so this strip stands in for it. Same colour as the
-		bar, so it is invisible; mobile-only, styled in style.css.
-	-->
-	<div id="session-bar-top-edge" aria-hidden="true"></div>
 	<!--
 		Leaving. `size="content"` because this button owns its own box: a 44px
 		minimum is the platform touch target and is taller than the 38px the mock

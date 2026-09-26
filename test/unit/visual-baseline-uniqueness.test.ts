@@ -35,8 +35,6 @@ const ALLOWED_DUPLICATE_GROUPS: Record<string, string> = {
 	// source; the two stories genuinely produce the same frame.
 	"layout-header--connected | layout-header--processing":
 		"connected and processing share the same green dot once capture freezes the processing pulse at opacity 1; the difference is title and screen-reader text",
-	"layout-header--connected | layout-header--processing | layout-header--sidebar-expanded":
-		"as above, plus: on mobile the desktop expand button is hidden and both sidebar states render the same hamburger",
 	"model-contextwindowselector--premium-default | model-contextwindowselector--selected-1-m":
 		"premium default and an explicit 1M override both resolve to the same closed '1M (beta)' badge; they differ only inside the open dropdown",
 	"overlays-attentionbanner--permissions-and-questions | overlays-notificationstack--attention-only":

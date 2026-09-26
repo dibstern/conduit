@@ -10,16 +10,9 @@ test.use({ recording: "chat-simple" });
 
 test.describe("Session Management", () => {
 	test("session list is populated on page load", async ({ page, relayUrl }) => {
-		const isNarrow = (page.viewportSize()?.width ?? 1440) < 769;
 		const app = new AppPage(page);
 		const sidebar = new SidebarPage(page);
 		await app.goto(relayUrl);
-
-		// Open sidebar on mobile
-		if (isNarrow) {
-			await app.hamburgerBtn.click();
-			await expect(app.sidebar).toBeVisible();
-		}
 
 		// Wait for sessions to render (auto-retrying, avoids race with WS data)
 		await sidebar.waitForSessions();
@@ -28,15 +21,9 @@ test.describe("Session Management", () => {
 	});
 
 	test("create new session via sidebar button", async ({ page, relayUrl }) => {
-		const isNarrow = (page.viewportSize()?.width ?? 1440) < 769;
 		const app = new AppPage(page);
 		const sidebar = new SidebarPage(page);
 		await app.goto(relayUrl);
-
-		if (isNarrow) {
-			await app.hamburgerBtn.click();
-			await expect(app.sidebar).toBeVisible();
-		}
 
 		// Wait for sessions to render before counting
 		await sidebar.waitForSessions();
@@ -56,30 +43,14 @@ test.describe("Session Management", () => {
 			{ timeout: 10_000 },
 		);
 
-		// Refresh sidebar view if mobile (may auto-close)
-		if (isNarrow) {
-			try {
-				await app.hamburgerBtn.click();
-				await expect(app.sidebar).toBeVisible();
-			} catch {
-				// Sidebar may already be open
-			}
-		}
-
 		const countAfter = await sidebar.getSessionCount();
 		expect(countAfter).toBeGreaterThan(countBefore);
 	});
 
 	test("search sessions filters the list", async ({ page, relayUrl }) => {
-		const isNarrow = (page.viewportSize()?.width ?? 1440) < 769;
 		const app = new AppPage(page);
 		const sidebar = new SidebarPage(page);
 		await app.goto(relayUrl);
-
-		if (isNarrow) {
-			await app.hamburgerBtn.click();
-			await expect(app.sidebar).toBeVisible();
-		}
 
 		// Wait for sessions to render (auto-retrying, avoids race with WS data)
 		await sidebar.waitForSessions();
@@ -99,15 +70,9 @@ test.describe("Session Management", () => {
 	});
 
 	test("action buttons are visible in sidebar", async ({ page, relayUrl }) => {
-		const isNarrow = (page.viewportSize()?.width ?? 1440) < 769;
 		const app = new AppPage(page);
 		const sidebar = new SidebarPage(page);
 		await app.goto(relayUrl);
-
-		if (isNarrow) {
-			await app.hamburgerBtn.click();
-			await expect(app.sidebar).toBeVisible();
-		}
 
 		// All action buttons should be present
 		await expect(sidebar.newSessionBtn).toBeVisible();
@@ -117,15 +82,9 @@ test.describe("Session Management", () => {
 	});
 
 	test("file browser panel opens and closes", async ({ page, relayUrl }) => {
-		const isNarrow = (page.viewportSize()?.width ?? 1440) < 769;
 		const app = new AppPage(page);
 		const sidebar = new SidebarPage(page);
 		await app.goto(relayUrl);
-
-		if (isNarrow) {
-			await app.hamburgerBtn.click();
-			await expect(app.sidebar).toBeVisible();
-		}
 
 		// Sessions panel visible, files panel hidden
 		await expect(sidebar.sessionsPanel).toBeVisible();

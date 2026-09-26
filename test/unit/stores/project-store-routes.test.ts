@@ -36,7 +36,11 @@ describe("project navigation", () => {
 		});
 		await vi.waitFor(() => expect(routerState.path).toBe("/"));
 		expect(routerState.search).toBe("?p=project-b");
-		expect(pushState).toHaveBeenCalledWith(null, "", "/?p=project-b");
+		expect(pushState).toHaveBeenCalledWith(
+			expect.anything(),
+			"",
+			"/?p=project-b",
+		);
 	});
 
 	it("replaces a removed attached project's session with an unscoped list", async () => {
@@ -44,7 +48,7 @@ describe("project navigation", () => {
 		await vi.waitFor(() => expect(attachedProjectState.slug).toBeNull());
 		expect(routerState.path).toBe("/");
 		expect(routerState.search).toBe("");
-		expect(replaceState).toHaveBeenCalledWith(null, "", "/");
+		expect(replaceState.mock.lastCall?.[2]).toBe("/");
 		expect(pushState).not.toHaveBeenCalled();
 	});
 

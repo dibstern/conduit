@@ -59,7 +59,6 @@ beforeEach(() => {
 	// Reset UI state
 	uiState.sidebarCollapsed = false;
 	uiState.sidebarPanel = "sessions";
-	uiState.mobileSidebarOpen = false;
 	uiState.toasts = [];
 	uiState.confirmDialog = null;
 	uiState.openPanels = new Set();

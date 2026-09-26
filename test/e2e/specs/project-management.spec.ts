@@ -149,14 +149,11 @@ function getMockDirectories(path: string): string[] {
 	return [];
 }
 
-/** Open the ProjectSwitcher dropdown. On mobile, opens hamburger first. */
+/** Open the ProjectSwitcher dropdown from the list route. */
 async function openProjectSwitcher(page: Page): Promise<void> {
-	const hamburger = page.locator("#hamburger-btn");
-	if (await hamburger.isVisible()) {
-		await hamburger.click();
-		await page.locator("#project-switcher-btn").waitFor({ state: "visible" });
-	}
-	await page.locator("#project-switcher-btn").click();
+	const switcher = page.locator("#project-switcher-btn");
+	await switcher.waitFor({ state: "visible" });
+	await switcher.click();
 	await page
 		.locator("[data-testid='project-switcher-dropdown']")
 		.waitFor({ state: "visible" });

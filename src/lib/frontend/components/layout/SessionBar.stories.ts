@@ -31,7 +31,6 @@ const meta = {
 		// Layout/Header seeds this same module-level store, and Storybook shares
 		// it across story files. Reset or the badge appears in every story.
 		instanceState.instances = [];
-		uiState.mobileSidebarOpen = false;
 		uiState.sidebarPanel = "files";
 		routerState.path = `/s/${mockSession.id}`;
 		routerState.search = "";
@@ -65,7 +64,7 @@ export const Default: Story = {
 		// accessible name and its wiring are both worth pinning.
 		const back = canvas.getByRole("button", { name: /Sessions/ });
 		await userEvent.click(back);
-		expect(uiState.mobileSidebarOpen).toBe(true);
+		expect(routerState.path).toBe("/");
 		expect(uiState.sidebarPanel).toBe("sessions");
 
 		expect(canvas.getByRole("heading", { level: 1 })).toHaveTextContent(

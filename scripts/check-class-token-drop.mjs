@@ -196,9 +196,11 @@ const waivers = existsSync(MANIFEST)
 	: {};
 
 // A waiver key is `path :: token` or `path :: tokenA,tokenB` for one decision
-// that moved a group.
+// that moved a group. The whole key is indexed too, so a single token that
+// itself contains a comma (`bg-[rgba(...,0.45)]`) can still be waived.
 const waiverIndex = new Map();
 for (const [key, value] of Object.entries(waivers)) {
+	waiverIndex.set(key, value);
 	const [path, tokens] = key.split(" :: ");
 	for (const token of tokens.split(",")) {
 		waiverIndex.set(`${path} :: ${token.trim()}`, value);

@@ -383,10 +383,7 @@ if (stories.length > 0) {
 	// through check:storybook and by modal-focus.spec.ts in a real browser,
 	// including focus restoration. This is NOT a blessed-away regression.
 	// The value is WHICH viewports to skip. Most exclusions are a property of the
-	// story ("all"), but some are a property of the layout at one width only: the
-	// sidebar is correctly off-canvas on mobile, so its mobile captures are blank
-	// while its desktop captures carry 457-486 distinct colours. Skipping those by
-	// story id would throw away the desktop coverage to fix a mobile problem.
+	// story ("all"), but some are a property of the layout at one width only.
 	// See conduit-test-7jv.
 	const SKIP_STORIES = new Map<string, "all" | "desktop" | "mobile">([
 		["fixtures-modalfocus--default", "all"],
@@ -408,17 +405,6 @@ if (stories.length > 0) {
 		// render child elements, they just have no visible extent, so that check
 		// still earns its keep here.
 		["overlays-attentionbanner--no-notifications", "all"],
-
-		// Three of the four blank mobile sidebar captures. The fourth,
-		// layout-sidebar--default, is deliberately still captured on mobile as the
-		// sentinel for "off-canvas stays off-canvas" — a regression that let the
-		// closed sidebar render at mobile width would turn that baseline red, and
-		// nothing else in the suite would catch it (layout-sidebar--mobile-open
-		// covers the OPEN state only). Skipping all four would have quietly traded
-		// that check away to silence a duplicate-baseline warning.
-		["layout-sidebar--hover", "mobile"],
-		["layout-sidebar--loading", "mobile"],
-		["layout-sidebar--file-browser-panel", "mobile"],
 	]);
 
 	// Stories whose element dimensions vary across platforms (e.g. Mermaid SVGs
@@ -571,7 +557,7 @@ if (stories.length > 0) {
 							// Both capture modes clip at the viewport, so only the
 							// on-screen part of a rect can ever differ between them.
 							// Comparing raw rects instead flags content that is
-							// off-canvas (a closed drawer parked at x=-260) or that
+							// positioned outside the viewport or that
 							// overflows the viewport edge (a 400px element in a 393px
 							// viewport) — neither of which a page capture would
 							// recover, so neither is a reason to switch modes.

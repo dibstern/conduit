@@ -160,6 +160,18 @@ export function getSessionHref(sessionId: string): string {
 	return `/s/${sessionId}`;
 }
 
+/** Whether this history entry was pushed from the app's session-list route. */
+export function previousHistoryEntryIsSessionList(): boolean {
+	if (typeof window === "undefined") return false;
+	const state: unknown = window.history.state;
+	return (
+		typeof state === "object" &&
+		state !== null &&
+		"conduitFrom" in state &&
+		state.conduitFrom === "/"
+	);
+}
+
 // ─── Actions ────────────────────────────────────────────────────────────────
 
 /** Shared transition logic for navigate/replaceRoute. */
@@ -174,7 +186,13 @@ function applyRoute(
 	if (pathname === routerState.path && search === routerState.search) return;
 	const from = routerState.path + routerState.search;
 	const to = pathname + search;
-	window.history[historyMethod](null, "", to);
+	// A push records the page it left so SessionBar back can use history.back();
+	// a replace keeps that record.
+	const state: unknown =
+		historyMethod === "pushState"
+			? { conduitFrom: routerState.path }
+			: window.history.state;
+	window.history[historyMethod](state, "", to);
 	routerState.path = pathname;
 	routerState.search = search;
 	recordTransition(from, to);

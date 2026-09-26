@@ -31,7 +31,7 @@
 		forkSessionRpc,
 		renameSessionRpc,
 	} from "../../transport/ws-rpc-client.js";
-	import { closeMobileSidebar, confirm, showToast } from "../../stores/ui.svelte.js";
+	import { confirm, showToast } from "../../stores/ui.svelte.js";
 	import SessionItem from "./SessionItem.svelte";
 	import SessionPager from "./SessionPager.svelte";
 	import SessionContextMenu from "./SessionContextMenu.svelte";
@@ -196,8 +196,7 @@
 	}
 
 	function handleNewSession() {
-		if (!sendNewSession()) return;
-		closeMobileSidebar();
+		sendNewSession();
 	}
 
 	function clearSearch() {
@@ -226,7 +225,6 @@
 		if (id !== sessionState.currentId) {
 			switchToSession(id, projectSlug);
 		}
-		closeMobileSidebar();
 	}
 
 	function handleContextMenu(session: SessionInfo, anchor: HTMLElement) {
@@ -524,7 +522,7 @@
 	{/snippet}
 
 	<!-- svelte-ignore a11y_no_noninteractive_tabindex -->
-	<div class="flex-1 overflow-y-auto px-2 py-0.5" role="region" aria-label="Sessions" tabindex="0">
+	<div id="session-list-scroller" class="flex-1 overflow-y-auto px-2 py-0.5" role="region" aria-label="Sessions" tabindex="0">
 		{#if isEmpty}
 			<div class="session-empty py-6 px-3.5 text-center text-xs text-text-dimmer font-brand">
 				{emptyMessage}
