@@ -16,11 +16,17 @@ import {
 } from "../../../src/lib/frontend/stores/router.svelte.js";
 import { sessionState } from "../../../src/lib/frontend/stores/session.svelte.js";
 import { uiState } from "../../../src/lib/frontend/stores/ui.svelte.js";
+import { WsRpcError } from "../../../src/lib/frontend/transport/ws-rpc.js";
 import {
 	setSessionPinnedRpc,
 	setSessionSettledRpc,
+	snoozeSessionRpc,
+	unsnoozeSessionRpc,
 } from "../../../src/lib/frontend/transport/ws-rpc-client.js";
-import { formatTimeAgo } from "../../../src/lib/frontend/utils/format.js";
+import {
+	formatSnoozeTime,
+	formatTimeAgo,
+} from "../../../src/lib/frontend/utils/format.js";
 
 vi.mock(
 	"../../../src/lib/frontend/transport/ws-rpc-client.js",
@@ -30,6 +36,8 @@ vi.mock(
 		>()),
 		setSessionSettledRpc: vi.fn().mockResolvedValue(undefined),
 		setSessionPinnedRpc: vi.fn().mockResolvedValue(undefined),
+		snoozeSessionRpc: vi.fn().mockResolvedValue(undefined),
+		unsnoozeSessionRpc: vi.fn().mockResolvedValue(undefined),
 	}),
 );
 
@@ -41,6 +49,7 @@ beforeEach(() => {
 		setItem: (key: string, value: string) => storage.set(key, value),
 	});
 	uiState.settledShelfOpen = false;
+	uiState.snoozedShelfOpen = false;
 	uiState.toasts = [];
 	routerState.path = "/";
 	routerState.search = "";
@@ -74,14 +83,109 @@ beforeEach(() => {
 	sessionState.searchHasMore = false;
 	sessionState.daemonHasMore = false;
 	sessionState.currentId = null;
+	sessionState.now = Date.now();
 	sessionState.sessions.clear();
 });
 afterEach(() => {
 	cleanup();
+	if (vi.isMockFunction(Date.now)) vi.mocked(Date.now).mockRestore();
 	vi.unstubAllGlobals();
 });
 
+function addSnoozedRow(until: number | null = Date.now() + 3_600_000) {
+	const row = {
+		id: "sleeping",
+		title: "Sleeping work",
+		attention: "idle" as const,
+		snoozedAt: Date.now() - 1_000,
+		...(until === null ? {} : { snoozedUntil: until }),
+	};
+	sessionState.rootSessions = [...sessionState.rootSessions, row];
+	return row;
+}
+
 describe("session triage list", () => {
+	it("keeps snoozed rows in a count-free shelf above Settled", async () => {
+		const until = new Date(2099, 9, 12, 9).getTime();
+		addSnoozedRow(until);
+		render(SessionList);
+		const toggle = screen.getByTestId("snoozed-shelf-toggle");
+		expect(toggle.textContent?.trim()).toBe("Snoozed");
+		expect(toggle.getAttribute("aria-expanded")).toBe("false");
+		expect(toggle.getAttribute("aria-controls")).toBe("snoozed-shelf-rows");
+		expect(screen.queryByText("Sleeping work")).toBeNull();
+		expect(
+			toggle.compareDocumentPosition(
+				screen.getByTestId("settled-shelf-toggle"),
+			) & Node.DOCUMENT_POSITION_FOLLOWING,
+		).toBeTruthy();
+		await fireEvent.click(toggle);
+		expect(localStorage.getItem("snoozed-shelf-open")).toBe("true");
+		const row = screen.getByText("Sleeping work").closest("a");
+		expect(row?.querySelector(".session-item-meta")?.textContent).toBe(
+			formatSnoozeTime(until, sessionState.now),
+		);
+		expect(row?.querySelector(".session-item-status")).toBeNull();
+	});
+
+	it("forces snoozed search results open without saving the preference", async () => {
+		addSnoozedRow();
+		render(SessionList);
+		sessionState.searchQuery = "Sleeping";
+		await tick();
+		expect(screen.getByText("Sleeping work")).toBeTruthy();
+		await fireEvent.click(screen.getByTestId("snoozed-shelf-toggle"));
+		expect(uiState.snoozedShelfOpen).toBe(false);
+		expect(localStorage.getItem("snoozed-shelf-open")).toBeNull();
+		sessionState.searchQuery = "";
+		await tick();
+		expect(screen.queryByText("Sleeping work")).toBeNull();
+	});
+
+	it("wakes a timed row on the client clock without another list read", async () => {
+		vi.useFakeTimers();
+		try {
+			vi.setSystemTime(new Date(2026, 9, 5, 9));
+			const now = Date.now();
+			sessionState.now = now;
+			sessionState.rootSessions = [
+				{
+					id: "wake",
+					title: "Wake soon",
+					attention: "idle",
+					snoozedAt: now,
+					snoozedUntil: now + 5_000,
+				},
+			];
+			uiState.snoozedShelfOpen = true;
+			render(SessionList);
+			await tick();
+			expect(
+				screen.getByText("Wake soon").closest("#snoozed-shelf-rows"),
+			).not.toBeNull();
+			expect(vi.getTimerCount()).toBe(1);
+			sessionState.rootSessions = [
+				{
+					id: "wake",
+					title: "Wake soon",
+					attention: "idle",
+					snoozedAt: now,
+					snoozedUntil: now + 1_000,
+				},
+			];
+			await tick();
+			expect(vi.getTimerCount()).toBe(1);
+			await vi.advanceTimersByTimeAsync(1_000);
+			await tick();
+			expect(screen.queryByTestId("snoozed-shelf-toggle")).toBeNull();
+			expect(
+				screen.getByText("Wake soon").closest("#snoozed-shelf-rows"),
+			).toBeNull();
+			expect(screen.getByTestId("session-woke-pill").textContent).toBe("Woke");
+		} finally {
+			vi.useRealTimers();
+		}
+	});
 	it("places Pinned first and hides settled rows behind a count-free disclosure", () => {
 		const { container } = render(SessionList);
 		expect(
@@ -285,5 +389,127 @@ describe("session triage list", () => {
 		expect(screen.queryByRole("menu")).toBeNull();
 		expect(setSessionPinnedRpc).not.toHaveBeenCalled();
 		expect(setSessionSettledRpc).not.toHaveBeenCalled();
+	});
+
+	it("snoozes through the sheet and Undo unsnoozes the same project", async () => {
+		const now = new Date(2026, 9, 5, 9).getTime();
+		vi.spyOn(Date, "now").mockReturnValue(now);
+		render(SessionList);
+		render(Toast);
+		await fireEvent.click(
+			screen.getByRole("button", { name: "More options for Idle work" }),
+		);
+		await fireEvent.click(await screen.findByTestId("session-ctx-snooze"));
+		expect(screen.getByText("Snooze until…")).toBeTruthy();
+		await fireEvent.click(screen.getByTestId("snooze-option-1h"));
+		await waitFor(() =>
+			expect(snoozeSessionRpc).toHaveBeenCalledWith(
+				expect.objectContaining({
+					projectSlug: "current-project",
+					sessionId: "idle",
+					until: now + 3_600_000,
+				}),
+			),
+		);
+		expect(screen.getByRole("status").textContent).toContain(
+			"Snoozed “Idle work” until 10:00",
+		);
+		expect(uiState.toasts[0]?.duration).toBe(5000);
+		await fireEvent.click(screen.getByTestId("toast-action"));
+		await waitFor(() =>
+			expect(unsnoozeSessionRpc).toHaveBeenCalledWith(
+				expect.objectContaining({
+					projectSlug: "current-project",
+					sessionId: "idle",
+				}),
+			),
+		);
+	});
+
+	it("Undo restores the previous snooze deadline", async () => {
+		const now = new Date(2026, 9, 5, 9).getTime();
+		vi.spyOn(Date, "now").mockReturnValue(now);
+		sessionState.now = now;
+		const previousUntil = now + 86_400_000;
+		addSnoozedRow(previousUntil);
+		uiState.snoozedShelfOpen = true;
+		render(SessionList);
+		render(Toast);
+		await fireEvent.click(
+			screen.getByRole("button", { name: "More options for Sleeping work" }),
+		);
+		await fireEvent.click(await screen.findByTestId("session-ctx-snooze"));
+		await fireEvent.click(screen.getByTestId("snooze-option-3h"));
+		await waitFor(() =>
+			expect(snoozeSessionRpc).toHaveBeenCalledWith(
+				expect.objectContaining({ until: now + 10_800_000 }),
+			),
+		);
+		await fireEvent.click(screen.getByTestId("toast-action"));
+		await waitFor(() =>
+			expect(snoozeSessionRpc).toHaveBeenLastCalledWith(
+				expect.objectContaining({
+					sessionId: "sleeping",
+					until: previousUntil,
+				}),
+			),
+		);
+		expect(unsnoozeSessionRpc).not.toHaveBeenCalled();
+	});
+
+	it("reports RPC refusal text, transport failure, and failed Undo", async () => {
+		const now = new Date(2026, 9, 5, 9).getTime();
+		vi.spyOn(Date, "now").mockReturnValue(now);
+		vi.mocked(snoozeSessionRpc).mockRejectedValueOnce(
+			new WsRpcError({ message: "Waiting on you" }),
+		);
+		render(SessionList);
+		render(Toast);
+		await fireEvent.click(
+			screen.getByRole("button", { name: "More options for Idle work" }),
+		);
+		await fireEvent.click(await screen.findByTestId("session-ctx-snooze"));
+		await fireEvent.click(screen.getByTestId("snooze-option-1h"));
+		expect((await screen.findByRole("alert")).textContent).toContain(
+			"Waiting on you",
+		);
+		uiState.toasts = [];
+		vi.mocked(snoozeSessionRpc).mockRejectedValueOnce(new Error("offline"));
+		await fireEvent.click(
+			screen.getByRole("button", { name: "More options for Idle work" }),
+		);
+		await fireEvent.click(await screen.findByTestId("session-ctx-snooze"));
+		await fireEvent.click(screen.getByTestId("snooze-option-1h"));
+		expect((await screen.findByRole("alert")).textContent).toContain(
+			"Couldn't snooze session",
+		);
+		uiState.toasts = [];
+		await fireEvent.click(
+			screen.getByRole("button", { name: "More options for Idle work" }),
+		);
+		await fireEvent.click(await screen.findByTestId("session-ctx-snooze"));
+		await fireEvent.click(screen.getByTestId("snooze-option-1h"));
+		await screen.findByRole("status");
+		vi.mocked(unsnoozeSessionRpc).mockRejectedValueOnce(new Error("offline"));
+		await fireEvent.click(screen.getByTestId("toast-action"));
+		expect((await screen.findByRole("alert")).textContent).toContain(
+			"Couldn't undo",
+		);
+	});
+
+	it("unsnoozes without a success toast", async () => {
+		addSnoozedRow();
+		uiState.snoozedShelfOpen = true;
+		render(SessionList);
+		await fireEvent.click(
+			screen.getByRole("button", { name: "More options for Sleeping work" }),
+		);
+		await fireEvent.click(await screen.findByTestId("session-ctx-unsnooze"));
+		await waitFor(() =>
+			expect(unsnoozeSessionRpc).toHaveBeenCalledWith(
+				expect.objectContaining({ sessionId: "sleeping" }),
+			),
+		);
+		expect(uiState.toasts).toEqual([]);
 	});
 });

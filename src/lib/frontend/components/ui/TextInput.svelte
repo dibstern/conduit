@@ -12,7 +12,7 @@
 	type TextInputProps = {
 		value?: string | number;
 		/** Text-like inputs only — checkbox/radio/file are separate primitives. */
-		type?: "text" | "search" | "email" | "url" | "tel" | "password" | "number";
+		type?: "text" | "search" | "email" | "url" | "tel" | "password" | "number" | "datetime-local";
 		size?: FieldControlSize;
 		/**
 		 * How the field is painted. `bare` drops the border, background,

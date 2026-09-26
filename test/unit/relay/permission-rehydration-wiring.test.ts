@@ -14,8 +14,8 @@ import {
 	type ServerResponse,
 } from "node:http";
 import { Effect } from "effect";
-import { WebSocketServer } from "ws";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { WebSocketServer } from "ws";
 import { PendingInteractionServiceTag } from "../../../src/lib/domain/relay/Services/pending-interaction-service.js";
 import { createSilentLogger } from "../../../src/lib/logger.js";
 import {

@@ -1,6 +1,6 @@
 import { Socket } from "@effect/platform";
 import { RpcClient, RpcSerialization } from "@effect/rpc";
-import { Effect } from "effect";
+import { Effect, Either } from "effect";
 import type { ClaudeSettingsOverrides } from "../../contracts/claude-settings.js";
 import { ProviderInstanceIdSchema } from "../../contracts/provider-instance.js";
 import type { GetSkillContentResponse } from "../../contracts/ws-rpc.js";
@@ -331,6 +331,19 @@ export interface SetSessionPinnedRpcInput {
 	readonly projectSlug: string;
 	readonly sessionId: string;
 	readonly pinned: boolean;
+	readonly originId?: string;
+}
+
+export interface SnoozeSessionRpcInput {
+	readonly projectSlug: string;
+	readonly sessionId: string;
+	readonly until: number | null;
+	readonly originId?: string;
+}
+
+export interface UnsnoozeSessionRpcInput {
+	readonly projectSlug: string;
+	readonly sessionId: string;
 	readonly originId?: string;
 }
 
@@ -1160,6 +1173,41 @@ const callSetSessionPinned = (input: SetSessionPinnedRpcInput) =>
 		Effect.provide(RpcSerialization.layerJson),
 	);
 
+const callSnoozeSession = (input: SnoozeSessionRpcInput) =>
+	Effect.scoped(
+		Effect.gen(function* () {
+			const client = yield* RpcClient.make(WsRpcGroup);
+			yield* client.SnoozeSession({
+				projectSlug: input.projectSlug,
+				sessionId: input.sessionId,
+				until: input.until,
+				...(input.originId ? { originId: input.originId } : {}),
+			});
+		}),
+	).pipe(
+		Effect.provide(RpcClient.layerProtocolSocket()),
+		Effect.provide(Socket.layerWebSocket(makeWsRpcUrl())),
+		Effect.provide(Socket.layerWebSocketConstructorGlobal),
+		Effect.provide(RpcSerialization.layerJson),
+	);
+
+const callUnsnoozeSession = (input: UnsnoozeSessionRpcInput) =>
+	Effect.scoped(
+		Effect.gen(function* () {
+			const client = yield* RpcClient.make(WsRpcGroup);
+			yield* client.UnsnoozeSession({
+				projectSlug: input.projectSlug,
+				sessionId: input.sessionId,
+				...(input.originId ? { originId: input.originId } : {}),
+			});
+		}),
+	).pipe(
+		Effect.provide(RpcClient.layerProtocolSocket()),
+		Effect.provide(Socket.layerWebSocket(makeWsRpcUrl())),
+		Effect.provide(Socket.layerWebSocketConstructorGlobal),
+		Effect.provide(RpcSerialization.layerJson),
+	);
+
 const callSwitchVariant = (input: SwitchVariantRpcInput) =>
 	Effect.scoped(
 		Effect.gen(function* () {
@@ -1609,6 +1657,24 @@ export async function setSessionPinnedRpc(
 	input: SetSessionPinnedRpcInput,
 ): Promise<void> {
 	await runTransportEffect(callSetSessionPinned(input));
+}
+
+export async function snoozeSessionRpc(
+	input: SnoozeSessionRpcInput,
+): Promise<void> {
+	const result = await runTransportEffect(
+		Effect.either(callSnoozeSession(input)),
+	);
+	if (Either.isLeft(result)) throw result.left;
+}
+
+export async function unsnoozeSessionRpc(
+	input: UnsnoozeSessionRpcInput,
+): Promise<void> {
+	const result = await runTransportEffect(
+		Effect.either(callUnsnoozeSession(input)),
+	);
+	if (Either.isLeft(result)) throw result.left;
 }
 
 export async function switchVariantRpc(

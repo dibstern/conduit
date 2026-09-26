@@ -181,6 +181,33 @@ export const SettledDense: Story = {
 	},
 };
 
+const WOKEN_STORY_NOW = new Date(2030, 9, 7, 9).getTime();
+const wokenStory = (
+	reason: "time" | "approval" | "question" | "error" | "turn",
+): Story => ({
+	args: {
+		session: {
+			id: `woken-${reason}`,
+			title: `Woken by ${reason}`,
+			attention: "idle",
+			wokenAt: WOKEN_STORY_NOW,
+			wokeBecause: reason,
+		},
+		now: WOKEN_STORY_NOW,
+	},
+	play: async ({ canvasElement }) => {
+		await expect(
+			within(canvasElement).getByTestId("session-woke-pill"),
+		).toBeVisible();
+	},
+});
+
+export const WokenByTime: Story = wokenStory("time");
+export const WokenByApproval: Story = wokenStory("approval");
+export const WokenByQuestion: Story = wokenStory("question");
+export const WokenByError: Story = wokenStory("error");
+export const WokenByTurn: Story = wokenStory("turn");
+
 // A dense row uses the compact two-line density.
 export const Dense: Story = {
 	args: {

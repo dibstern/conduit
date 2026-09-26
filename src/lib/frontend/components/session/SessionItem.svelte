@@ -120,6 +120,7 @@
 	import Icon from "../ui/Icon.svelte";
 	import Button from "../ui/Button.svelte";
 	import TextInput from "../ui/TextInput.svelte";
+	import { isSessionWoken } from "../../stores/session.svelte.js";
 
 	// ─── Props ──────────────────────────────────────────────────────────────────
 
@@ -133,8 +134,11 @@
 		selected = false,
 		density = "comfortable",
 		settled = false,
+		snoozed = false,
 		branch,
 		settledAt,
+		snoozedUntilText,
+		now = Date.now(),
 		pinned = false,
 		onswitchsession,
 		ontoggleselection,
@@ -153,8 +157,11 @@
 		selected?: boolean;
 		density?: Density;
 		settled?: boolean;
+		snoozed?: boolean;
 		branch?: string | undefined;
 		settledAt?: string | undefined;
+		snoozedUntilText?: string | undefined;
+		now?: number;
 		pinned?: boolean;
 		onswitchsession?: (id: string) => void;
 		ontoggleselection?: (id: string) => void;
@@ -184,11 +191,25 @@
 	// ─── Derived ────────────────────────────────────────────────────────────────
 
 	const displayTitle = $derived(session.title || "New Session");
-	const timeText = $derived(settledAt ?? formatTimeAgo(session.updatedAt));
+	const shelfRow = $derived(settled || snoozed);
+	const timeText = $derived(snoozedUntilText ?? settledAt ?? formatTimeAgo(session.updatedAt));
+	const woken = $derived(isSessionWoken(session, now) && !snoozed);
+	const wokeReason = $derived(session.wokenAt != null ? (session.wokeBecause ?? "time") : "time");
+	const wokeText = $derived(
+		wokeReason === "time" ? "Woke" :
+		wokeReason === "error" ? "Woke · failed" :
+		wokeReason === "turn" ? "Woke · done" : `Woke · ${wokeReason}`,
+	);
+	const wokeColour = $derived(
+		wokeReason === "approval" ? "bg-warning/10 text-warning" :
+		wokeReason === "question" ? "bg-brand-b/10 text-brand-b" :
+		wokeReason === "error" ? "bg-error/10 text-error" :
+		wokeReason === "turn" ? "bg-success/10 text-success" : "bg-accent-bg text-accent",
+	);
 	const contextText = $derived(
 		[projectLabel, branch].filter((part) => part).join(" \u00B7 "),
 	);
-	const accessibleContext = $derived(settled ? projectLabel : contextText);
+	const accessibleContext = $derived(shelfRow ? projectLabel : contextText);
 
 	// The server derives the tier in one place and the row only reads it. It is
 	// deliberately not re-derived from `processing`, the local phase or the
@@ -197,14 +218,14 @@
 	const status = $derived(ATTENTION_DISPLAY[sessionAttention(session)]);
 	const emphasis = $derived(EMPHASIS_CLASSES[status.emphasis]);
 	const densityClass = $derived(
-		settled ? DENSITY_CLASSES[density].settled : DENSITY_CLASSES[density].row,
+		shelfRow ? DENSITY_CLASSES[density].settled : DENSITY_CLASSES[density].row,
 	);
 	const titleClass = $derived(
-		settled
+		shelfRow
 			? "text-base text-text-secondary font-normal"
 			: `text-lg ${emphasis.title}`,
 	);
-	const rowOpacityClass = $derived(settled ? "opacity-50" : emphasis.row);
+	const rowOpacityClass = $derived(shelfRow ? "opacity-50" : woken ? "" : emphasis.row);
 
 	// Status first, per the design reference. A screen reader user scanning the
 	// list hears what a row wants before its title. This overrides the row's own
@@ -216,6 +237,7 @@
 			displayTitle,
 			accessibleContext,
 			timeText,
+			woken ? wokeText : "",
 		]
 			.filter((part) => part)
 			.join(", "),
@@ -357,7 +379,7 @@
 			class="col-start-1 row-start-1 row-span-2 grid place-items-center w-5 h-5 justify-self-center {status.colour}"
 			aria-hidden="true"
 		>
-			<Icon name={status.icon} size={settled ? 11 : 14} />
+			<Icon name={status.icon} size={shelfRow ? 11 : 14} />
 		</span>
 	{/if}
 
@@ -367,7 +389,7 @@
 		class="session-item-title col-start-2 row-start-1 flex items-center gap-1.5 overflow-hidden font-brand {titleClass}"
 		ondblclick={handleDblClick}
 	>
-		{#if settled && projectLabel && !isRenaming}
+		{#if shelfRow && projectLabel && !isRenaming}
 			<span class="text-sm text-text-dimmer shrink-0">
 				{projectLabel}
 			</span>
@@ -403,7 +425,7 @@
 
 	</span>
 
-	{#if contextText && !settled && !isRenaming}
+	{#if contextText && !shelfRow && !isRenaming}
 		<span
 			class="session-item-context col-start-2 row-start-2 flex items-center gap-1.5 mt-0.5 text-sm text-text-dimmer overflow-hidden whitespace-nowrap font-brand"
 		>
@@ -424,7 +446,7 @@
 			     emphasis, which only describes the title's weight. -->
 			<!-- Status word. Hidden from the accessible name because aria-label above
 			     already leads with it; announcing it twice per row is noise. -->
-			{#if status.word && !settled}
+			{#if status.word && !shelfRow}
 				<span
 					class="session-item-status inline-flex items-center px-0.5 text-sm font-medium whitespace-nowrap font-brand {status.colour}"
 					aria-hidden="true"
@@ -433,6 +455,12 @@
 				</span>
 			{:else}
 				<span class="session-item-meta">{timeText}</span>
+			{/if}
+			{#if woken}
+				<span
+					data-testid="session-woke-pill"
+					class="inline-flex shrink-0 items-center rounded-full px-1.5 py-0.5 text-xs font-medium {wokeColour}"
+				>{wokeText}</span>
 			{/if}
 
 			<!-- Three-dot more button -->

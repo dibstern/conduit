@@ -190,6 +190,7 @@ export interface SystemMessage {
 export interface AttentionGroups {
 	pinned: SessionInfo[];
 	settled: SessionInfo[];
+	snoozed: SessionInfo[];
 	needsYou: SessionInfo[];
 	running: SessionInfo[];
 	doneUnread: SessionInfo[];

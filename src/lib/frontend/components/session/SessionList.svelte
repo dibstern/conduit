@@ -9,6 +9,7 @@
 		sessionState,
 		getFilteredSessions,
 		getAttentionGroups,
+		isSessionSnoozed,
 		setSearchQuery,
 		setCurrentSession,
 		switchToSession,
@@ -32,17 +33,22 @@
 		renameSessionRpc,
 		setSessionSettledRpc,
 		setSessionPinnedRpc,
+		snoozeSessionRpc,
+		unsnoozeSessionRpc,
 	} from "../../transport/ws-rpc-client.js";
 	import {
 		confirm,
 		showToast,
 		uiState,
 		setSettledShelfOpen,
+		setSnoozedShelfOpen,
 	} from "../../stores/ui.svelte.js";
-	import { formatTimeAgo } from "../../utils/format.js";
+	import { formatSnoozeTime, formatTimeAgo } from "../../utils/format.js";
+	import { WsRpcError } from "../../transport/ws-rpc.js";
 	import SessionItem from "./SessionItem.svelte";
 	import SessionPager from "./SessionPager.svelte";
 	import SessionContextMenu from "./SessionContextMenu.svelte";
+	import SnoozeSheet from "./SnoozeSheet.svelte";
 	import Icon from "../ui/Icon.svelte";
 	import BlockGrid from "../ui/BlockGrid.svelte";
 	import Button from "../ui/Button.svelte";
@@ -67,6 +73,8 @@
 	// Context menu state
 	let ctxMenuSession = $state<SessionInfo | null>(null);
 	let ctxMenuAnchor = $state<HTMLElement | null>(null);
+	let snoozeSession = $state<SessionInfo | null>(null);
+	let snoozeSheetNow = $state(0);
 
 	// Rename state — set by context menu to trigger inline rename on a SessionItem
 	let renamingSessionId = $state<string | null>(null);
@@ -88,6 +96,7 @@
 	const isEmpty = $derived(filtered.length === 0);
 	const searching = $derived(sessionState.searchQuery.trim().length > 0);
 	const settledShelfOpen = $derived(searching || uiState.settledShelfOpen);
+	const snoozedShelfOpen = $derived(searching || uiState.snoozedShelfOpen);
 
 	const scope = $derived(getSessionScope());
 	const emptyMessage = $derived.by(() => {
@@ -299,6 +308,61 @@
 			}
 		} catch {
 			showToast("Couldn't pin session", { variant: "error" });
+		}
+	}
+
+	function handleOpenSnooze(session: SessionInfo) {
+		if (isForeignSession(session)) return;
+		snoozeSheetNow = Date.now();
+		snoozeSession = session;
+	}
+
+	async function handleSnooze(session: SessionInfo, until: number | null) {
+		const projectSlug = session.projectSlug ?? getCurrentSlug();
+		if (!projectSlug || isForeignSession(session)) return;
+		const input = { projectSlug, sessionId: session.id, originId: getBrowserClientId() };
+		const wasSnoozed = isSessionSnoozed(session, snoozeSheetNow);
+		const previousUntil = session.snoozedUntil ?? null;
+		try {
+			await snoozeSessionRpc({ ...input, until });
+			showToast(
+				until === null
+					? `Snoozed “${session.title || "New Session"}” until something happens`
+					: `Snoozed “${session.title || "New Session"}” until ${formatSnoozeTime(until, snoozeSheetNow)}`,
+				{
+					duration: 5000,
+					action: {
+						label: "Undo",
+						run: () => {
+							const undo = wasSnoozed
+								? snoozeSessionRpc({ ...input, until: previousUntil })
+								: unsnoozeSessionRpc(input);
+							void undo.catch(() => showToast("Couldn't undo", { variant: "error" }));
+						},
+					},
+				},
+			);
+		} catch (error) {
+			showToast(
+				error instanceof WsRpcError ? error.message : "Couldn't snooze session",
+				{ variant: "error" },
+			);
+		}
+	}
+
+	async function handleUnsnooze(session: SessionInfo) {
+		const projectSlug = session.projectSlug ?? getCurrentSlug();
+		if (!projectSlug || isForeignSession(session)) return;
+		try {
+			await unsnoozeSessionRpc({
+				projectSlug,
+				sessionId: session.id,
+				originId: getBrowserClientId(),
+			});
+		} catch (error) {
+			showToast(error instanceof WsRpcError ? error.message : "Couldn't unsnooze session", {
+				variant: "error",
+			});
 		}
 	}
 
@@ -551,6 +615,7 @@
 	     edit each with any divergence between them invisible. -->
 	{#snippet sessionRow(s: SessionInfo)}
 		{@const settled = s.pinnedAt == null && s.settledAt != null}
+		{@const snoozed = !settled && s.pinnedAt == null && isSessionSnoozed(s, sessionState.now)}
 		{#if isForeignSession(s)}
 			<!-- Rename, the context menu and cleanup selection all
 			     RPC the relay this socket is attached to, so handing them a session
@@ -561,7 +626,10 @@
 				session={s}
 				pinned={s.pinnedAt != null}
 				{settled}
+				{snoozed}
 				settledAt={settled ? formatTimeAgo(s.settledAt) : undefined}
+				snoozedUntilText={snoozed ? formatSnoozeTime(s.snoozedUntil ?? null, sessionState.now) : undefined}
+				now={sessionState.now}
 				href={getRowHref(s)}
 				projectLabel={getProjectLabel(s)}
 				onswitchsession={(id) => handleSwitchSession(id, s.projectSlug)}
@@ -571,7 +639,10 @@
 				session={s}
 				pinned={s.pinnedAt != null}
 				{settled}
+				{snoozed}
 				settledAt={settled ? formatTimeAgo(s.settledAt) : undefined}
+				snoozedUntilText={snoozed ? formatSnoozeTime(s.snoozedUntil ?? null, sessionState.now) : undefined}
+				now={sessionState.now}
 				href={getRowHref(s)}
 				projectLabel={getProjectLabel(s)}
 				active={s.id === sessionState.currentId}
@@ -604,6 +675,26 @@
 					{/each}
 				{/if}
 			{/each}
+			{#if groups.snoozed.length > 0}
+				<TextButton
+					tone="dimmer"
+					class="session-group-label flex items-center gap-1 pt-1.5 pb-0.5 px-3 text-xs font-semibold tracking-[0.3px] font-brand"
+					data-testid="snoozed-shelf-toggle"
+					aria-expanded={snoozedShelfOpen}
+					aria-controls="snoozed-shelf-rows"
+					onclick={() => { if (!searching) setSnoozedShelfOpen(!uiState.snoozedShelfOpen); }}
+				>
+					<Icon name={snoozedShelfOpen ? "chevron-down" : "chevron-right"} size={12} />
+					Snoozed
+				</TextButton>
+				<div id="snoozed-shelf-rows">
+					{#if snoozedShelfOpen}
+						{#each groups.snoozed as s (s.id)}
+							{@render sessionRow(s)}
+						{/each}
+					{/if}
+				</div>
+			{/if}
 			{#if groups.settled.length > 0}
 				<TextButton
 					tone="dimmer"
@@ -662,12 +753,25 @@
 	<SessionContextMenu
 		session={ctxMenuSession}
 		anchor={ctxMenuAnchor}
+		now={sessionState.now}
 		onrename={handleCtxRename}
 		onsettle={(_id, next) => { if (ctxMenuSession) void handleCtxSettle(ctxMenuSession, next); }}
 		onpin={(_id, next) => { if (ctxMenuSession) void handleCtxPin(ctxMenuSession, next); }}
+		onsnooze={(_id) => { if (ctxMenuSession) handleOpenSnooze(ctxMenuSession); }}
+		onunsnooze={(_id) => { if (ctxMenuSession) void handleUnsnooze(ctxMenuSession); }}
 		ondelete={handleCtxDelete}
 		oncopyresume={handleCtxCopyResume}
 		onfork={handleCtxFork}
 		onclose={handleCloseContextMenu}
+	/>
+{/if}
+
+{#if snoozeSession}
+	<SnoozeSheet
+		open={true}
+		sessionTitle={snoozeSession.title}
+		now={snoozeSheetNow}
+		onclose={() => { snoozeSession = null; }}
+		onsnooze={(until) => { if (snoozeSession) void handleSnooze(snoozeSession, until); }}
 	/>
 {/if}

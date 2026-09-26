@@ -58,6 +58,29 @@ export function formatClockTime(timestamp: number | undefined): string {
 	});
 }
 
+/** Short local wall-clock label for a snooze deadline. */
+export function formatSnoozeTime(
+	until: number | null,
+	now: number = Date.now(),
+): string {
+	if (until === null) return "No timer";
+	const date = new Date(until);
+	const today = new Date(now);
+	const day = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+	const start = new Date(
+		today.getFullYear(),
+		today.getMonth(),
+		today.getDate(),
+	);
+	const daysAway = Math.round((day.getTime() - start.getTime()) / 86_400_000);
+	const time = `${date.getHours()}:${String(date.getMinutes()).padStart(2, "0")}`;
+	if (daysAway === 0) return time;
+	if (daysAway > 0 && daysAway < 7) {
+		return `${date.toLocaleDateString("en", { weekday: "short" })} ${time}`;
+	}
+	return `${date.getDate()} ${date.toLocaleDateString("en", { month: "short" })} ${time}`;
+}
+
 /**
  * Generate a unique ID for messages, tools, etc.
  * Uses crypto.randomUUID if available, falls back to timestamp + random.

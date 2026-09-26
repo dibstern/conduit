@@ -8,6 +8,7 @@ import { generateUuid } from "../utils/format.js";
 
 const SIDEBAR_STORAGE_KEY = "sidebar-collapsed";
 const SETTLED_SHELF_STORAGE_KEY = "settled-shelf-open";
+const SNOOZED_SHELF_STORAGE_KEY = "snoozed-shelf-open";
 const SIDEBAR_WIDTH_KEY = "sidebar-width";
 const FILE_VIEWER_WIDTH_KEY = "file-viewer-width";
 
@@ -33,6 +34,7 @@ export const uiState = $state({
 	// Sidebar
 	sidebarCollapsed: safeGetItem(SIDEBAR_STORAGE_KEY) === "true",
 	settledShelfOpen: safeGetItem(SETTLED_SHELF_STORAGE_KEY) === "true",
+	snoozedShelfOpen: safeGetItem(SNOOZED_SHELF_STORAGE_KEY) === "true",
 	sidebarPanel: "sessions" as "sessions" | "files",
 	sidebarWidth: Number(safeGetItem(SIDEBAR_WIDTH_KEY)) || SIDEBAR_DEFAULT_WIDTH,
 
@@ -132,6 +134,15 @@ export function setSettledShelfOpen(open: boolean): void {
 	uiState.settledShelfOpen = open;
 	try {
 		localStorage.setItem(SETTLED_SHELF_STORAGE_KEY, String(open));
+	} catch {
+		/* Storage may be unavailable; keep the in-memory preference. */
+	}
+}
+
+export function setSnoozedShelfOpen(open: boolean): void {
+	uiState.snoozedShelfOpen = open;
+	try {
+		localStorage.setItem(SNOOZED_SHELF_STORAGE_KEY, String(open));
 	} catch {
 		/* Storage may be unavailable; keep the in-memory preference. */
 	}

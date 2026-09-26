@@ -86,6 +86,7 @@
     Star,
     StarOff,
     Brain,
+    Moon,
   } from '@lucide/svelte';
 
   // Map of kebab-case icon name to Svelte component.
@@ -159,6 +160,7 @@
     'upload': Upload,
     'external-link': ExternalLink,
     'clock': Clock,
+    'moon': Moon,
     'message-square': MessageSquare,
     'chevron-up': ChevronUp,
     'chevron-left': ChevronLeft,

@@ -30,6 +30,8 @@ import {
 	handleSessionForked,
 	handleSessionList,
 	handleSessionSwitched,
+	isSessionSnoozed,
+	isSessionWoken,
 	NEW_SESSION_TIMEOUT_MS,
 	requestNewSession,
 	resetSessionCreation,
@@ -221,6 +223,39 @@ describe("switchToSession", () => {
 // ─── groupSessionsByAttention (pure function) ───────────────────────────────
 
 describe("groupSessionsByAttention", () => {
+	it("places snoozed after pinned and settled, ordered by deadline", () => {
+		const now = 1_000;
+		const groups = groupSessionsByAttention(
+			[
+				makeSession({ id: "indefinite", snoozedAt: 1, attention: "working" }),
+				makeSession({ id: "later", snoozedAt: 1, snoozedUntil: 3_000 }),
+				makeSession({ id: "pinned", pinnedAt: 1, snoozedAt: 1 }),
+				makeSession({ id: "soon", snoozedAt: 1, snoozedUntil: 2_000 }),
+				makeSession({ id: "settled", settledAt: 1, snoozedAt: 1 }),
+				makeSession({ id: "newer-idle", attention: "idle" }),
+				makeSession({
+					id: "woken",
+					snoozedAt: 1,
+					snoozedUntil: now,
+					attention: "idle",
+				}),
+				makeSession({ id: "older-idle", attention: "idle" }),
+			],
+			now,
+		);
+		expect(groups.pinned.map((row) => row.id)).toEqual(["pinned"]);
+		expect(groups.settled.map((row) => row.id)).toEqual(["settled"]);
+		expect(groups.snoozed.map((row) => row.id)).toEqual([
+			"soon",
+			"later",
+			"indefinite",
+		]);
+		expect(groups.idle.map((row) => row.id)).toEqual([
+			"newer-idle",
+			"woken",
+			"older-idle",
+		]);
+	});
 	it("keeps pinned and settled sessions out of every attention tier", () => {
 		const groups = groupSessionsByAttention([
 			makeSession({
@@ -322,6 +357,24 @@ describe("groupSessionsByAttention", () => {
 	});
 });
 
+describe("snooze clock predicates", () => {
+	it("keeps an indefinite snooze asleep and wakes at the exact deadline", () => {
+		const indefinite = makeSession({ id: "a", snoozedAt: 1 });
+		const timed = makeSession({ id: "b", snoozedAt: 1, snoozedUntil: 100 });
+		expect(isSessionSnoozed(indefinite, 1_000)).toBe(true);
+		expect(isSessionWoken(indefinite, 1_000)).toBe(false);
+		expect(isSessionSnoozed(timed, 99)).toBe(true);
+		expect(isSessionSnoozed(timed, 100)).toBe(false);
+		expect(isSessionWoken(timed, 100)).toBe(true);
+		expect(
+			isSessionWoken(
+				makeSession({ id: "c", wokenAt: 50, wokeBecause: "question" }),
+				1_000,
+			),
+		).toBe(true);
+	});
+});
+
 // ─── handleSessionList ──────────────────────────────────────────────────────
 
 describe("handleSessionList", () => {
@@ -368,7 +421,7 @@ describe("handleSessionList", () => {
 		expect(sessionState.sessions.get("rpc-root")?.title).toBe("RPC Root");
 	});
 
-	it("keeps settle and pin through ListSessions RPC responses", () => {
+	it("keeps pin, settle, snooze and wake fields through ListSessions RPC responses", () => {
 		// A reload's first list arrives this way; dropping the fields here
 		// silently unpins and unsettles every row until the next broadcast.
 		applyListSessionsResponse({
@@ -377,12 +430,16 @@ describe("handleSessionList", () => {
 			sessions: [
 				{ id: "pinned", title: "P", pinnedAt: 10 },
 				{ id: "settled", title: "S", settledAt: 20 },
+				{ id: "snoozed", title: "Z", snoozedAt: 30, snoozedUntil: 40 },
+				{ id: "woken", title: "W", wokenAt: 50, wokeBecause: "approval" },
 			],
 		});
 
 		expect(sessionState.rootSessions).toEqual([
 			{ id: "pinned", title: "P", pinnedAt: 10 },
 			{ id: "settled", title: "S", settledAt: 20 },
+			{ id: "snoozed", title: "Z", snoozedAt: 30, snoozedUntil: 40 },
+			{ id: "woken", title: "W", wokenAt: 50, wokeBecause: "approval" },
 		]);
 	});
 

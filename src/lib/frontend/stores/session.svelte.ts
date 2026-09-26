@@ -61,6 +61,7 @@ export const sessionState = $state({
 	daemonCursor: null as DaemonSessionCursor | null,
 	daemonHasMore: false,
 	daemonLoading: false,
+	now: Date.now(),
 	currentId: null as string | null,
 	searchQuery: "",
 	searchResults: null as SessionInfo[] | null,
@@ -303,7 +304,7 @@ export function getFilteredSessions(): SessionInfo[] {
 
 /** Get sessions grouped into the sidebar's sections. */
 export function getAttentionGroups(): AttentionGroups {
-	return groupSessionsByAttention(getFilteredSessions());
+	return groupSessionsByAttention(getFilteredSessions(), sessionState.now);
 }
 
 /** Get the currently active session object (or undefined). */
@@ -331,13 +332,57 @@ const NEEDS_YOU_ORDER: readonly SessionAttention[] = [
 	"error",
 ];
 
-/** Manual pin/settle placement takes precedence over attention tiers. */
+export function isSessionSnoozed(session: SessionInfo, now: number): boolean {
+	return (
+		session.snoozedAt != null &&
+		!(session.snoozedUntil != null && session.snoozedUntil <= now)
+	);
+}
+
+export function isSessionWoken(session: SessionInfo, now: number): boolean {
+	return (
+		session.wokenAt != null ||
+		(session.snoozedAt != null &&
+			session.snoozedUntil != null &&
+			session.snoozedUntil <= now)
+	);
+}
+
+// The store is global for the life of the browser page. Keep one timer for the
+// earliest loaded wake and replace it whenever a list page changes.
+$effect.root(() => {
+	$effect(() => {
+		const rows = [
+			...sessionState.rootSessions,
+			...sessionState.daemonSessions,
+			...(sessionState.searchResults ?? []),
+		];
+		const now = sessionState.now;
+		const nextWake = rows.reduce<number | null>((earliest, row) => {
+			const until = row.snoozedAt != null ? row.snoozedUntil : undefined;
+			if (until == null || until <= now) return earliest;
+			return earliest == null ? until : Math.min(earliest, until);
+		}, null);
+		if (nextWake == null) return;
+		const timer = setTimeout(
+			() => {
+				sessionState.now = Date.now();
+			},
+			Math.max(1, Math.min(nextWake - Date.now(), 2_147_483_647)),
+		);
+		return () => clearTimeout(timer);
+	});
+});
+
+/** Manual pin/settle/snooze placement takes precedence over attention tiers. */
 export function groupSessionsByAttention(
 	sessions: SessionInfo[],
+	now: number = Date.now(),
 ): AttentionGroups {
 	const groups: AttentionGroups = {
 		pinned: [],
 		settled: [],
+		snoozed: [],
 		needsYou: [],
 		running: [],
 		doneUnread: [],
@@ -351,6 +396,10 @@ export function groupSessionsByAttention(
 		}
 		if (s.settledAt != null) {
 			groups.settled.push(s);
+			continue;
+		}
+		if (isSessionSnoozed(s, now)) {
+			groups.snoozed.push(s);
 			continue;
 		}
 		switch (sessionAttention(s)) {
@@ -373,6 +422,13 @@ export function groupSessionsByAttention(
 
 	groups.pinned.sort((a, b) => (a.pinnedAt ?? 0) - (b.pinnedAt ?? 0));
 	groups.settled.sort((a, b) => (b.settledAt ?? 0) - (a.settledAt ?? 0));
+	// Indefinite snoozes go last; MAX_SAFE_INTEGER rather than Infinity because
+	// Infinity - Infinity is NaN, which breaks the comparator for two of them.
+	groups.snoozed.sort(
+		(a, b) =>
+			(a.snoozedUntil ?? Number.MAX_SAFE_INTEGER) -
+			(b.snoozedUntil ?? Number.MAX_SAFE_INTEGER),
+	);
 	// Stable, so recency still decides between two rows of the same tier.
 	groups.needsYou.sort(
 		(a, b) =>
@@ -455,6 +511,12 @@ const sessionInfoFromRpc = (
 	...(session.unread != null ? { unread: session.unread } : {}),
 	...(session.settledAt != null ? { settledAt: session.settledAt } : {}),
 	...(session.pinnedAt != null ? { pinnedAt: session.pinnedAt } : {}),
+	...(session.snoozedAt != null ? { snoozedAt: session.snoozedAt } : {}),
+	...(session.snoozedUntil != null
+		? { snoozedUntil: session.snoozedUntil }
+		: {}),
+	...(session.wokenAt != null ? { wokenAt: session.wokenAt } : {}),
+	...(session.wokeBecause != null ? { wokeBecause: session.wokeBecause } : {}),
 	...(session.projectSlug != null ? { projectSlug: session.projectSlug } : {}),
 });
 

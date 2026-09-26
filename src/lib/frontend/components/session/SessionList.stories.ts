@@ -17,6 +17,7 @@ import SessionList from "./SessionList.svelte";
 
 function resetSessionState() {
 	uiState.settledShelfOpen = false;
+	uiState.snoozedShelfOpen = false;
 	sessionState.rootSessions = [];
 	sessionState.familySessions = [];
 	sessionState.daemonSessions = [];
@@ -57,6 +58,67 @@ export default meta;
 type Story = StoryObj<typeof meta>;
 
 export const Empty: Story = {};
+
+const SNOOZE_STORY_NOW = new Date(2030, 9, 7, 9).getTime();
+
+export const SnoozedShelfCollapsed: Story = {
+	name: "Snoozed shelf collapsed",
+	beforeEach: () => {
+		sessionState.now = SNOOZE_STORY_NOW;
+		sessionState.rootSessions = [
+			{
+				id: "sleeping",
+				title: "Review build logs",
+				attention: "idle",
+				snoozedAt: SNOOZE_STORY_NOW,
+				snoozedUntil: new Date(2030, 9, 8, 9).getTime(),
+			},
+			{ id: "working", title: "Prepare release", attention: "working" },
+		];
+	},
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		await expect(canvas.getByTestId("snoozed-shelf-toggle")).toHaveAttribute(
+			"aria-expanded",
+			"false",
+		);
+		await expect(
+			canvas.queryByText("Review build logs"),
+		).not.toBeInTheDocument();
+	},
+};
+
+export const SnoozedShelfOpen: Story = {
+	name: "Snoozed shelf open",
+	beforeEach: () => {
+		uiState.snoozedShelfOpen = true;
+		sessionState.now = SNOOZE_STORY_NOW;
+		sessionState.rootSessions = [
+			{
+				id: "sleeping",
+				title: "Review build logs",
+				attention: "idle",
+				snoozedAt: SNOOZE_STORY_NOW,
+				snoozedUntil: new Date(2030, 9, 8, 9).getTime(),
+			},
+			{
+				id: "untimed",
+				title: "Wait for update",
+				attention: "idle",
+				snoozedAt: SNOOZE_STORY_NOW,
+			},
+		];
+	},
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		await expect(canvas.getByTestId("snoozed-shelf-toggle")).toHaveAttribute(
+			"aria-expanded",
+			"true",
+		);
+		await expect(canvas.getByText("Tue 9:00")).toBeVisible();
+		await expect(canvas.getByText("No timer")).toBeVisible();
+	},
+};
 
 export const PinnedAndSettledShelfCollapsed: Story = {
 	name: "Pinned and settled, shelf collapsed",

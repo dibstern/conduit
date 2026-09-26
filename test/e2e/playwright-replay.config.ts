@@ -16,6 +16,7 @@ export default defineConfig({
 		"smoke.spec.ts",
 		"sessions.spec.ts",
 		"session-triage.spec.ts",
+		"session-snooze.spec.ts",
 		"sidebar-layout.spec.ts",
 		"ui-features.spec.ts",
 		"debug-panel.spec.ts",

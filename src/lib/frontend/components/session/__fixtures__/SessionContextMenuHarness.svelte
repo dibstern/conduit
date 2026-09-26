@@ -32,6 +32,8 @@
 		onrename={() => {}}
 		onsettle={() => {}}
 		onpin={() => {}}
+		onsnooze={() => {}}
+		onunsnooze={() => {}}
 		ondelete={() => {}}
 		oncopyresume={() => {}}
 		onfork={() => {}}

@@ -16,6 +16,7 @@
 
 <script lang="ts">
 	import type { SessionInfo } from "../../types.js";
+	import { isSessionSnoozed, sessionAttention } from "../../stores/session.svelte.js";
 	import { copyToClipboard } from "../../utils/clipboard.js";
 	import { showToast } from "../../stores/ui.svelte.js";
 	import Icon from "../ui/Icon.svelte";
@@ -31,6 +32,9 @@
 		onrename,
 		onsettle,
 		onpin,
+		onsnooze,
+		onunsnooze,
+		now = Date.now(),
 		ondelete,
 		oncopyresume,
 		onfork,
@@ -41,6 +45,9 @@
 		onrename: (id: string) => void;
 		onsettle: (id: string, next: boolean) => void;
 		onpin: (id: string, next: boolean) => void;
+		onsnooze: (id: string) => void;
+		onunsnooze: (id: string) => void;
+		now?: number;
 		ondelete: (id: string, title: string) => void;
 		oncopyresume: (id: string) => void;
 		onfork: (id: string) => void;
@@ -48,6 +55,11 @@
 	} = $props();
 
 	let open = $state(true);
+	const snoozed = $derived(isSessionSnoozed(session, now));
+	const waitingOnYou = $derived(
+		sessionAttention(session) === "needs-approval" ||
+			sessionAttention(session) === "needs-reply",
+	);
 
 	// ─── Handlers ───────────────────────────────────────────────────────────────
 
@@ -98,6 +110,27 @@
 		<Icon name={session.pinnedAt != null ? "star-off" : "star"} size={13} />
 		<span>{session.pinnedAt != null ? "Unpin" : "Pin to top"}</span>
 	</MenuItem>
+	{#if session.settledAt == null}
+		<MenuItem
+			data-testid="session-ctx-snooze"
+			disabled={session.pinnedAt != null || waitingOnYou}
+			onselect={() => onsnooze(session.id)}
+		>
+			<Icon name="moon" size={13} />
+			<span>{snoozed ? "Change snooze…" : "Snooze…"}</span>
+			{#if session.pinnedAt != null}
+				<span class="ml-auto text-xs text-text-dimmer">Unpin to snooze</span>
+			{:else if waitingOnYou}
+				<span class="ml-auto text-xs text-text-dimmer">Waiting on you</span>
+			{/if}
+		</MenuItem>
+		{#if snoozed}
+			<MenuItem data-testid="session-ctx-unsnooze" onselect={() => onunsnooze(session.id)}>
+				<Icon name="undo" size={13} />
+				<span>Unsnooze</span>
+			</MenuItem>
+		{/if}
+	{/if}
 	<MenuSeparator />
 
 	<MenuItem
