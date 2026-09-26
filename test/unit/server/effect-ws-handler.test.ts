@@ -193,6 +193,49 @@ describe("Effect WS handler bridge", () => {
 		expect(socket.close).toHaveBeenCalledWith(1001, "Server shutting down");
 	});
 
+	it("keeps the replacement socket registered when the previous one closes", async () => {
+		const handler = await createHandler({ heartbeatInterval: 300_000 });
+		const first = new TestWebSocket();
+		const second = new TestWebSocket();
+		const firstConnected = onceConnected(handler);
+		handler.attach(first.asWebSocket(), { clientId: "same-client" });
+		await firstConnected;
+
+		const secondConnected = onceConnected(handler);
+		handler.attach(second.asWebSocket(), { clientId: "same-client" });
+		await secondConnected;
+		handler.setClientSession("same-client", "session-b");
+		const disconnected = vi.fn();
+		handler.on("client_disconnected", disconnected);
+
+		first.close();
+		await new Promise<void>((resolve) => setImmediate(resolve));
+		handler.broadcast({ type: "client_count", count: 99 });
+
+		await vi.waitFor(() => {
+			expect(second.send).toHaveBeenCalledWith(
+				JSON.stringify({ type: "client_count", count: 99 }),
+			);
+		});
+		expect(handler.getClientIds()).toEqual(["same-client"]);
+		expect(handler.getClientSession("same-client")).toBe("session-b");
+		expect(handler.getClientsForSession("session-b")).toEqual(["same-client"]);
+		expect(disconnected).not.toHaveBeenCalled();
+		expect(second.send).not.toHaveBeenCalledWith(
+			JSON.stringify({ type: "client_count", count: 0 }),
+		);
+
+		const secondDisconnected = onceDisconnected(handler);
+		second.close();
+		expect(await secondDisconnected).toMatchObject({
+			clientId: "same-client",
+			clientCount: 0,
+			sessionId: "session-b",
+		});
+		expect(disconnected).toHaveBeenCalledTimes(1);
+		expect(handler.getClientCount()).toBe(0);
+	});
+
 	it("emits routed messages for attached connections", async () => {
 		const handler = await createHandler({ heartbeatInterval: 300_000 });
 		const { url } = await startServer(handler, {

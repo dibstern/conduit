@@ -1,7 +1,7 @@
 import type { IncomingMessage } from "node:http";
 import { createRequire } from "node:module";
 import type { Duplex } from "node:stream";
-import { Context, Effect, HashMap, Layer, Ref } from "effect";
+import { Context, Effect, HashMap, Layer, Option, Ref } from "effect";
 import {
 	type ClientState,
 	removeClient,
@@ -91,12 +91,12 @@ export const makeWsTransportLive = (
 const heartbeatOnce = Effect.fn("ws.heartbeat.tick")(function* () {
 	const ref = yield* WsHandlerStateTag;
 	const clients = yield* Ref.get(ref);
-	const staleClientIds: string[] = [];
+	const staleClients: Array<[string, ClientState]> = [];
 	const clientsToPing: Array<[string, ClientState]> = [];
 
 	for (const [clientId, client] of clients) {
 		if (!client.isAlive) {
-			staleClientIds.push(clientId);
+			staleClients.push([clientId, client]);
 			yield* Effect.sync(() => {
 				client.ws.terminate?.();
 				if (!client.ws.terminate) client.ws.close();
@@ -110,8 +110,10 @@ const heartbeatOnce = Effect.fn("ws.heartbeat.tick")(function* () {
 		yield* Ref.update(ref, (map) => {
 			let updated = map;
 			for (const [clientId, client] of clientsToPing) {
+				const current = HashMap.get(updated, clientId);
+				if (Option.isNone(current) || current.value.ws !== client.ws) continue;
 				updated = HashMap.set(updated, clientId, {
-					...client,
+					...current.value,
 					isAlive: false,
 				});
 			}
@@ -125,8 +127,8 @@ const heartbeatOnce = Effect.fn("ws.heartbeat.tick")(function* () {
 		);
 	}
 
-	for (const clientId of staleClientIds) {
-		yield* removeClient(clientId);
+	for (const [clientId, client] of staleClients) {
+		yield* removeClient(clientId, client.ws);
 	}
 });
 

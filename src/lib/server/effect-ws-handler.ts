@@ -14,6 +14,7 @@ import {
 	removeClient,
 	sendTo,
 	sendToSession,
+	type WsConn,
 	type WsHandlerStateTag,
 } from "../domain/relay/Services/ws-handler-service.js";
 import { type RelayMessage, WS_PROTOCOL_VERSION } from "../shared-types.js";
@@ -66,7 +67,7 @@ export class EffectWsHandler implements WebSocketHandlerShape {
 	private readonly events = new EventEmitter();
 	private readonly runFork: WsRunFork;
 	private readonly heartbeatFiber: RuntimeFiber<unknown, never>;
-	private readonly clients = new Set<string>();
+	private readonly clients = new Map<string, WsConn>();
 	private readonly clientSessions = new Map<string, string>();
 	private readonly sessionClients = new Map<string, Set<string>>();
 	private closed = false;
@@ -143,7 +144,7 @@ export class EffectWsHandler implements WebSocketHandlerShape {
 	}
 
 	getClientIds(): string[] {
-		return [...this.clients];
+		return [...this.clients.keys()];
 	}
 
 	attach(ws: WebSocket, options: WsAttachOptions): () => void {
@@ -186,8 +187,8 @@ export class EffectWsHandler implements WebSocketHandlerShape {
 			ws.off("close", detach);
 			ws.off("error", onError);
 			ws.off("pong", onPong);
-			this.recordClientRemoved(clientId);
-			this.removeAttachedClient(clientId);
+			this.recordClientRemoved(clientId, connection);
+			this.removeAttachedClient(clientId, connection);
 		};
 
 		ws.on("message", onMessage);
@@ -210,7 +211,7 @@ export class EffectWsHandler implements WebSocketHandlerShape {
 				),
 				Effect.tap((clientCount) =>
 					Effect.sync(() => {
-						this.recordClientConnected(clientId);
+						this.recordClientConnected(clientId, connection);
 						this.events.emit("client_connected", {
 							clientId,
 							clientCount,
@@ -244,22 +245,24 @@ export class EffectWsHandler implements WebSocketHandlerShape {
 		);
 	}
 
-	private removeAttachedClient(clientId: string): void {
+	private removeAttachedClient(clientId: string, connection: WsConn): void {
 		if (this.closed) return;
 		this.forkLogged(
 			"removeClient",
-			removeClient(clientId).pipe(
-				Effect.tap(({ sessionId, newCount }) =>
-					Effect.sync(() => {
-						this.events.emit("client_disconnected", {
-							clientId,
-							clientCount: newCount,
-							...(sessionId != null ? { sessionId } : {}),
-						});
-					}),
+			removeClient(clientId, connection).pipe(
+				Effect.tap(({ removed, sessionId, newCount }) =>
+					removed
+						? Effect.sync(() => {
+								this.events.emit("client_disconnected", {
+									clientId,
+									clientCount: newCount,
+									...(sessionId != null ? { sessionId } : {}),
+								});
+							})
+						: Effect.void,
 				),
-				Effect.flatMap(({ newCount }) =>
-					broadcast(createClientCountMessage(newCount)),
+				Effect.flatMap(({ removed, newCount }) =>
+					removed ? broadcast(createClientCountMessage(newCount)) : Effect.void,
 				),
 			),
 		);
@@ -323,12 +326,14 @@ export class EffectWsHandler implements WebSocketHandlerShape {
 		});
 	}
 
-	private recordClientConnected(clientId: string): void {
+	private recordClientConnected(clientId: string, connection: WsConn): void {
 		this.recordClientRemoved(clientId);
-		this.clients.add(clientId);
+		this.clients.set(clientId, connection);
 	}
 
-	private recordClientRemoved(clientId: string): void {
+	private recordClientRemoved(clientId: string, connection?: WsConn): void {
+		if (connection !== undefined && this.clients.get(clientId) !== connection)
+			return;
 		this.clients.delete(clientId);
 		const sessionId = this.clientSessions.get(clientId);
 		if (sessionId == null) return;
