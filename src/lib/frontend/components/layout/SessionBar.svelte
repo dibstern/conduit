@@ -26,6 +26,7 @@
 	import { getAttentionSessions } from "../../stores/notification-reducer.svelte.js";
 	import { getDescendantSessionIds } from "../../stores/permissions.svelte.js";
 	import { projectState } from "../../stores/project.svelte.js";
+	import { getBrowserClientId } from "../../stores/client-identity.js";
 	import {
 		getCurrentSlug,
 		navigate,
@@ -36,9 +37,14 @@
 		isBarCollapsed,
 	} from "../../stores/session-view.svelte.js";
 	import { findSession, sessionState } from "../../stores/session.svelte.js";
-	import { setSidebarPanel } from "../../stores/ui.svelte.js";
+	import { setSidebarPanel, showToast } from "../../stores/ui.svelte.js";
+	import { WsRpcError } from "../../transport/ws-rpc.js";
+	import { setSessionAutoSettleRpc, setSessionSettledRpc, unsnoozeSessionRpc } from "../../transport/ws-rpc-client.js";
+	import { formatTimeAgo } from "../../utils/format.js";
+	import { getSessionBarState } from "../../utils/session-lifecycle.js";
 	import Badge from "../ui/Badge.svelte";
 	import Button from "../ui/Button.svelte";
+	import Icon from "../ui/Icon.svelte";
 	import Menu from "../ui/Menu.svelte";
 	import MenuItem from "../ui/MenuItem.svelte";
 	import MenuSeparator from "../ui/MenuSeparator.svelte";
@@ -52,9 +58,9 @@
 
 	// "New Session" matches session/SessionItem.svelte, so an untitled session
 	// reads the same in the bar as it does in the list it came from.
-	const title = $derived(
-		findSession(sessionState.currentId ?? "")?.title || "New Session",
-	);
+	const session = $derived(findSession(sessionState.currentId ?? ""));
+	const title = $derived(session?.title || "New Session");
+	const stateChip = $derived(getSessionBarState(session, sessionState.now));
 
 	// The design mock also shows a branch and a PR number beside the project.
 	// The frontend has neither, so identity is the project alone; it falls back
@@ -92,6 +98,46 @@
 	}
 
 	let overflowOpen = $state(false);
+	let stateMenuOpen = $state(false);
+
+	function rpcInput() {
+		if (!session) return null;
+		if (session.projectSlug != null && session.projectSlug !== getCurrentSlug()) return null;
+		const projectSlug = session.projectSlug ?? getCurrentSlug();
+		return projectSlug
+			? { projectSlug, sessionId: session.id, originId: getBrowserClientId() }
+			: null;
+	}
+
+	async function unsettle() {
+		const input = rpcInput();
+		if (!input) return;
+		try {
+			await setSessionSettledRpc({ ...input, settled: false });
+		} catch {
+			showToast("Couldn't un-settle session", { variant: "error" });
+		}
+	}
+
+	async function toggleAutoSettle() {
+		const input = rpcInput();
+		if (!input || !session) return;
+		try {
+			await setSessionAutoSettleRpc({ ...input, disabled: session.autoSettleDisabled !== true });
+		} catch {
+			showToast("Couldn't change auto-settle", { variant: "error" });
+		}
+	}
+
+	async function wakeNow() {
+		const input = rpcInput();
+		if (!input) return;
+		try {
+			await unsnoozeSessionRpc(input);
+		} catch (error) {
+			showToast(error instanceof WsRpcError ? error.message : "Couldn't unsnooze session", { variant: "error" });
+		}
+	}
 </script>
 
 <div
@@ -174,22 +220,64 @@
 	     one across the collapse, because this is the same element in both
 	     layouts.
 
-	     Collapsed it drops a size: the row is sharing its width with two 44px
-	     controls, and the mock's smallest state carries the name alone.
+	     Collapsed it drops a size: the row shares its width with the state
+	     glyph and two 44px controls.
 
 	     The mock draws a chevron beside the name, the session menu's affordance.
 	     It is not here yet, because a control that does nothing is worse than no
 	     control -- it reads as broken rather than as coming. It arrives with the
 	     menu it opens, as one of that menu's two triggers. -->
-	<h1
-		id="session-bar-title"
-		data-testid="session-bar-title"
-		class="flex min-w-0 items-center gap-1.5 font-semibold leading-tight text-text"
-		class:text-lg={!collapsed}
-		class:text-base={collapsed}
-	>
-		<span class="truncate">{title}</span>
-	</h1>
+	<div id="session-bar-title-row" class="flex min-w-0 items-center gap-1.5">
+		<h1
+			id="session-bar-title"
+			data-testid="session-bar-title"
+			class="min-w-0 truncate font-semibold leading-tight text-text"
+			class:text-lg={!collapsed}
+			class:text-base={collapsed}
+		><span class="block truncate">{title}</span></h1>
+		{#if stateChip && session}
+			{#if stateChip.kind === "woke"}
+				<Badge variant="neutral" shape="pill" size="sm" class="shrink-0 border-border-subtle! bg-bg-alt! text-text-muted!" data-testid="session-bar-state-chip" data-state="woke" title={stateChip.label}>
+					<Icon name={stateChip.icon} size={13} class="text-accent" />
+					{#if !collapsed}<span>{stateChip.label}</span>{/if}
+				</Badge>
+			{:else}
+				<Menu bind:open={stateMenuOpen} ariaLabel="Session state options" align="end" data-testid="session-bar-state-menu">
+					{#snippet trigger({ props })}
+						<Button {...props} variant="ghost" size="content" class="min-h-[44px] min-w-[44px] shrink-0 rounded-full" ariaLabel={`${stateChip.label} — open options`} data-testid="session-bar-state-chip" data-state={stateChip.kind}>
+							<Badge variant="neutral" shape="pill" size="sm" class="border-border-subtle! bg-bg-alt! text-text-muted!">
+								<Icon name={stateChip.icon} size={13} class={stateChip.kind === "snoozed" ? "text-brand-b" : "text-success"} />
+								{#if !collapsed}<span>{stateChip.label}</span>{/if}
+							</Badge>
+						</Button>
+					{/snippet}
+					<div class="border-b border-border px-3 py-2 text-xs font-semibold text-text">
+						{#if stateChip.kind === "snoozed"}
+							{session.snoozedUntil == null ? "Snoozed" : `Snoozed until ${stateChip.label}`}
+						{:else}
+							{stateChip.label} {formatTimeAgo(session.settledAt)}
+						{/if}
+						{#if stateChip.kind === "auto-settled"}
+							<div class="mt-1 font-normal text-text-dimmer">Settled automatically after it sat idle</div>
+						{/if}
+					</div>
+					{#if stateChip.kind === "snoozed"}
+						<MenuItem data-testid="session-bar-wake" onselect={() => void wakeNow()}>
+							<Icon name="undo" size={13} /><span>Wake now</span>
+						</MenuItem>
+					{:else}
+						<MenuItem data-testid="session-bar-unsettle" onselect={() => void unsettle()}>
+							<Icon name="undo" size={13} /><span>Un-settle</span>
+						</MenuItem>
+						<MenuItem data-testid="session-bar-auto-settle" aria-checked={session.autoSettleDisabled !== true} onselect={() => void toggleAutoSettle()}>
+							<span class="w-[13px] shrink-0" aria-hidden="true">{#if session.autoSettleDisabled !== true}<Icon name="check" size={13} />{/if}</span>
+							<span>Auto-settle when idle</span>
+						</MenuItem>
+					{/if}
+				</Menu>
+			{/if}
+		{/if}
+	</div>
 
 	{#if collapsed}
 		<!--

@@ -121,6 +121,7 @@
 	import Button from "../ui/Button.svelte";
 	import TextInput from "../ui/TextInput.svelte";
 	import { isSessionWoken } from "../../stores/session.svelte.js";
+	import { getWokenSessionText } from "../../utils/session-lifecycle.js";
 	import { getSessionActionState, getSwipeStage, LONG_PRESS_DELAY_MS, MOVEMENT_SLOP_PX } from "../../utils/swipe.js";
 	import { onDestroy } from "svelte";
 
@@ -232,11 +233,7 @@
 	const timeText = $derived(snoozedUntilText ?? settledAt ?? formatTimeAgo(session.updatedAt));
 	const woken = $derived(isSessionWoken(session, now) && !snoozed);
 	const wokeReason = $derived(session.wokenAt != null ? (session.wokeBecause ?? "time") : "time");
-	const wokeText = $derived(
-		wokeReason === "time" ? "Woke" :
-		wokeReason === "error" ? "Woke · failed" :
-		wokeReason === "turn" ? "Woke · done" : `Woke · ${wokeReason}`,
-	);
+	const wokeText = $derived(getWokenSessionText(session));
 	const wokeColour = $derived(
 		wokeReason === "approval" ? "bg-warning/10 text-warning" :
 		wokeReason === "question" ? "bg-brand-b/10 text-brand-b" :

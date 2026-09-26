@@ -81,6 +81,46 @@ export const Default: Story = {
 	},
 };
 
+function showState(overrides: Partial<typeof mockSession>) {
+	const session = { ...mockSession, ...overrides };
+	sessionState.familySessions = [session];
+	sessionState.rootSessions = [session];
+	sessionState.currentId = session.id;
+}
+
+export const Settled: Story = {
+	beforeEach: () => showState({ settledAt: Date.now() - 3_600_000 }),
+};
+
+export const AutoSettled: Story = {
+	beforeEach: () =>
+		showState({
+			settledAt: Date.now() - 3_600_000,
+			settledAutomatically: true,
+		}),
+};
+
+export const Snoozed: Story = {
+	beforeEach: () =>
+		showState({ snoozedAt: Date.now(), snoozedUntil: Date.now() + 3_600_000 }),
+};
+
+export const Woke: Story = {
+	beforeEach: () => showState({ wokenAt: Date.now(), wokeBecause: "error" }),
+};
+
+export const AutoSettledCollapsed: Story = {
+	beforeEach: () => {
+		showState({
+			settledAt: Date.now() - 3_600_000,
+			settledAutomatically: true,
+		});
+		sessionViewState.compact = true;
+		sessionViewState.atBottom = true;
+		sessionViewState.forcedOpen = false;
+	},
+};
+
 export const NeedsAttention: Story = {
 	beforeEach: () => {
 		// Attention elsewhere, deliberately not in the open session: the badge

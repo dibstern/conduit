@@ -34,7 +34,7 @@
 		filterFiles,
 	} from "../../stores/file-tree.svelte.js";
 	import { fetchFileContent, fetchDirectoryListing, resizeImageIfNeeded } from "./input-utils.js";
-	import { sessionState, switchToSession } from "../../stores/session.svelte.js";
+	import { findSession, isSessionSnoozed, sessionState, switchToSession } from "../../stores/session.svelte.js";
 	import { getCurrentSlug } from "../../stores/router.svelte.js";
 	import { showToast } from "../../stores/ui.svelte.js";
 	import { rateLimitChatSend } from "../../stores/ws.svelte.js";
@@ -60,6 +60,12 @@
 	let subagentBackBarRef: SubagentBackBar | undefined = $state();
 	let cursorPos = $state(0);
 	let composing = $state(false);
+	const currentSession = $derived(findSession(sessionState.currentId ?? ""));
+	const placeholder = $derived(
+		currentSession?.settledAt != null ? "Message to un-settle…" :
+		currentSession && isSessionSnoozed(currentSession, sessionState.now) ? "Message to wake…" :
+		"Ask anything. / to use skills, @ to mention files",
+	);
 
 	// ─── Per-session input drafts ─────────────────────────────────────────────
 	// Each session keeps its own unsent input text. Switching sessions saves the
@@ -658,7 +664,7 @@
 						aria-activedescendant={activeOptionId}
 						chrome="bare"
 						size="content"
-						placeholder="Ask anything. / to use skills, @ to mention files"
+						{placeholder}
 						autocomplete="off"
 						enterkeyhint={isMobile() ? "enter" : "send"}
 						class="composer-text-metrics absolute inset-0 z-10 caret-[var(--color-text)] resize-none placeholder:text-text-muted {plainText

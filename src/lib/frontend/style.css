@@ -623,7 +623,7 @@ body:has(dialog:modal) {
    only when some generated utility references it, so dropping `text-lg` from
    the markup pruned `--text-lg` from the stylesheet and the title silently
    rendered at the inherited 12px. */
-#session-bar-title {
+#session-bar-title-row {
 	grid-area: title;
 }
 #session-bar-chevron {
