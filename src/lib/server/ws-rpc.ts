@@ -1206,13 +1206,17 @@ export const wsRpcHandlers = WsRpcGroup.of({
 						}),
 			),
 			Effect.catchAll((error) =>
-				error instanceof WsRpcError
-					? Effect.fail(error)
-					: Effect.fail(
-							new WsRpcError({
-								message: `ForkSession failed: ${String(error)}`,
-							}),
-						),
+				Effect.gen(function* () {
+					const log = yield* LoggerTag;
+					log.warn("ForkSession failed", { cause: error });
+					return yield* Effect.fail(
+						error instanceof WsRpcError
+							? error
+							: new WsRpcError({
+									message: `ForkSession failed: ${String(error)}`,
+								}),
+					);
+				}),
 			),
 		),
 	RespondPermission: (request) =>

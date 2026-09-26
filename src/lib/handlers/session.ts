@@ -13,7 +13,7 @@ import {
 	StatusPollerTag,
 	WebSocketHandlerTag,
 } from "../domain/relay/Services/services.js";
-import { forkOpenCodeSession } from "../domain/relay/Services/session-command.js";
+import { forkSession } from "../domain/relay/Services/session-command.js";
 import { SessionManagerServiceTag } from "../domain/relay/Services/session-manager-service.js";
 import {
 	clearSession as clearEffectOverrideSession,
@@ -856,7 +856,6 @@ export const forkSessionForClient = ({
 	readonly messageId?: string;
 }) =>
 	Effect.gen(function* () {
-		const client = yield* OpenCodeAPITag;
 		const wsHandler = yield* WebSocketHandlerTag;
 		const sessionManagerService = yield* SessionManagerServiceTag;
 		const log = yield* LoggerTag;
@@ -865,43 +864,12 @@ export const forkSessionForClient = ({
 			requestedSessionId || wsHandler.getClientSession(clientId) || "";
 		if (!sessionId) return undefined;
 
-		// Through the seam: forking upstream and forgetting to record the forked
-		// session locally is the same parity gap as creating one and forgetting.
-		const forked = yield* forkOpenCodeSession(sessionId, messageId);
+		const forked = yield* forkSession(sessionId, messageId);
 
 		yield* clearEffectOverrideSession(sessionId);
 		yield* sessionManagerService.clearPaginationCursor(sessionId);
 
-		// Determine fork-point metadata
-		let forkMessageId: string | undefined = messageId;
-		let forkPointTimestamp: number | undefined;
-
-		if (messageId) {
-			const msgResult = yield* Effect.either(
-				Effect.tryPromise(() => client.session.message(sessionId, messageId)),
-			);
-			if (msgResult._tag === "Right" && msgResult.right?.time?.created) {
-				forkPointTimestamp = msgResult.right.time.created;
-			} else if (msgResult._tag === "Left") {
-				log.warn(
-					`Could not look up fork-point message ${messageId} in ${sessionId}`,
-				);
-			}
-		} else {
-			forkPointTimestamp = forked.time?.created ?? forked.time?.updated;
-
-			const msgsResult = yield* Effect.either(
-				Effect.tryPromise(() =>
-					client.session.messagesPage(forked.id, { limit: 1 }),
-				),
-			);
-			if (msgsResult._tag === "Right" && msgsResult.right.length > 0) {
-				// biome-ignore lint/style/noNonNullAssertion: safe — guarded by length check
-				forkMessageId = msgsResult.right[msgsResult.right.length - 1]!.id;
-			} else if (msgsResult._tag === "Left") {
-				log.warn(`Could not determine fork-point for ${forked.id}`);
-			}
-		}
+		const { forkMessageId, forkPointTimestamp } = forked;
 
 		// Persist fork-point metadata
 		if (forkMessageId || forkPointTimestamp) {

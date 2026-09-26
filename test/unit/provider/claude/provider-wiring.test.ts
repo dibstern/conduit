@@ -87,7 +87,7 @@ describe("Provider wiring with Claude provider instance", () => {
 
 		expect(caps.models.length).toBeGreaterThan(0);
 		expect(caps.supportsTools).toBe(true);
-		expect(caps.supportsFork).toBe(false);
+		expect(caps.supportsFork).toBe(true);
 	});
 
 	it("OrchestrationEngine throws for unregistered provider", async () => {

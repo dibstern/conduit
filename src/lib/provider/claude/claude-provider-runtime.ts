@@ -703,7 +703,7 @@ export class ClaudeProviderRuntime {
 				supportsPermissions: true,
 				supportsQuestions: true,
 				supportsAttachments: true,
-				supportsFork: false,
+				supportsFork: true,
 				supportsRevert: false,
 				commands,
 				agents: probe.agents,

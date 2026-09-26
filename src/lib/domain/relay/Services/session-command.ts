@@ -10,21 +10,27 @@
 //
 // See docs/adr/0004-session-mutations-are-canonical-events.md.
 
+import { randomUUID } from "node:crypto";
 import { SqlClient } from "@effect/sql";
 import { Data, Effect } from "effect";
 import {
 	loadDaemonConfig,
+	resolveClaudeInstanceConfigDir,
 	resolveProviderRoutingDriver,
 } from "../../../daemon/config-persistence.js";
 import type { OpenCodeAPI } from "../../../instance/opencode-api.js";
+import { ClaudeEventPersistEffectTag } from "../../../persistence/effect/claude-event-persist-effect.js";
 import { EventStoreEffectTag } from "../../../persistence/effect/event-store-effect.js";
 import { ProjectionRunnerEffectTag } from "../../../persistence/effect/projection-runner-effect.js";
+import { ProviderStateEffectTag } from "../../../persistence/effect/provider-state-effect.js";
 import { ReadQueryEffectTag } from "../../../persistence/effect/read-query-effect.js";
 import {
 	canonicalEvent,
 	type EventPayloadMap,
 } from "../../../persistence/events.js";
+import { copyForkHistory } from "../../../persistence/fork-history.js";
 import type { SessionRow } from "../../../persistence/read-model-types.js";
+import { forkClaudeTranscript } from "../../../provider/claude/claude-session-fork.js";
 import { OpenCodeAPITag } from "../../provider/Services/opencode-api-service.js";
 import { ConfigTag, LoggerTag } from "./services.js";
 
@@ -36,6 +42,7 @@ export class SessionCommandError extends Data.TaggedError(
 )<{
 	readonly operation: string;
 	readonly cause: unknown;
+	readonly message?: string;
 }> {}
 
 // ─── Commands ───────────────────────────────────────────────────────────────
@@ -405,3 +412,186 @@ export const forkOpenCodeSession = (
 		Effect.annotateLogs("operation", "forkOpenCodeSession"),
 		Effect.withSpan("session.forkOpenCodeSession"),
 	);
+
+const forkClaudeSession = (parentSessionId: string, messageId?: string) =>
+	Effect.gen(function* () {
+		const readQueryOption = yield* Effect.serviceOption(ReadQueryEffectTag);
+		const providerStateOption = yield* Effect.serviceOption(
+			ProviderStateEffectTag,
+		);
+		const persistOption = yield* Effect.serviceOption(
+			ClaudeEventPersistEffectTag,
+		);
+		const eventStoreOption = yield* Effect.serviceOption(EventStoreEffectTag);
+		const configOption = yield* Effect.serviceOption(ConfigTag);
+		if (
+			readQueryOption._tag === "None" ||
+			providerStateOption._tag === "None" ||
+			persistOption._tag === "None" ||
+			eventStoreOption._tag === "None" ||
+			configOption._tag === "None"
+		) {
+			return yield* Effect.fail(
+				new SessionCommandError({
+					operation: "session.forked.services",
+					cause: parentSessionId,
+					message: "Claude session fork services are unavailable",
+				}),
+			);
+		}
+		const readQuery = readQueryOption.value;
+		const providerState = providerStateOption.value;
+		const persist = persistOption.value;
+		const eventStore = eventStoreOption.value;
+		const config = configOption.value;
+		const parent = yield* readQuery.getSession(parentSessionId);
+		if (!parent) {
+			return yield* Effect.fail(
+				new SessionCommandError({
+					operation: "session.forked.parent",
+					cause: parentSessionId,
+					message: `Parent session ${parentSessionId} was not found`,
+				}),
+			);
+		}
+		const { resumeSessionId } = yield* providerState.getState(parentSessionId);
+		if (!resumeSessionId) {
+			return yield* Effect.fail(
+				new SessionCommandError({
+					operation: "session.forked.transcript",
+					cause: parentSessionId,
+					message: `Session ${parentSessionId} has no Claude transcript yet`,
+				}),
+			);
+		}
+		const title = `${parent.title} (fork)`;
+		const id = `ses_${randomUUID().replaceAll("-", "")}`;
+		const parentEvents = yield* eventStore.readBySession(parentSessionId);
+		const history = copyForkHistory(parentEvents, {
+			newSessionId: id,
+			...(messageId !== undefined && { upToMessageId: messageId }),
+		});
+		if (!history) {
+			return yield* Effect.fail(
+				new SessionCommandError({
+					operation: "session.forked.point",
+					cause: messageId,
+					message: `Fork point ${messageId} was not found in the session history`,
+				}),
+			);
+		}
+		const instanceConfigDir = resolveClaudeInstanceConfigDir(
+			loadDaemonConfig(config.configDir),
+			parent.provider,
+		);
+		const sdkFork = yield* Effect.tryPromise({
+			try: () =>
+				forkClaudeTranscript({
+					parentSdkId: resumeSessionId,
+					projectDir: config.projectDir,
+					...(instanceConfigDir !== undefined && {
+						configDir: instanceConfigDir,
+					}),
+					title,
+					...(messageId !== undefined && { messageId }),
+				}),
+			catch: (cause) =>
+				new SessionCommandError({
+					operation: "session.forked.upstream",
+					cause,
+					message: cause instanceof Error ? cause.message : String(cause),
+				}),
+		});
+		yield* applySessionCommand({
+			type: "session.created",
+			data: {
+				sessionId: id,
+				title,
+				provider: parent.provider,
+				parentId: parentSessionId,
+				providerSessionId: sdkFork.sdkSessionId,
+			},
+		});
+		// A fork that cannot resume or has no history must not linger, so undo
+		// the session exactly as a user delete would (cascades to its messages).
+		yield* Effect.gen(function* () {
+			yield* providerState.saveUpdates(id, [
+				{ key: "resumeSessionId", value: sdkFork.sdkSessionId },
+			]);
+			yield* persist.persistEvents(history.events);
+		}).pipe(
+			Effect.tapErrorCause(() =>
+				applySessionCommand({
+					type: "session.deleted",
+					data: { sessionId: id },
+				}).pipe(Effect.ignore),
+			),
+		);
+		const forkPointTimestamp = Date.now();
+		return {
+			id,
+			title,
+			forkMessageId: history.forkMessageId,
+			forkPointTimestamp,
+			time: { created: forkPointTimestamp, updated: forkPointTimestamp },
+		};
+	}).pipe(
+		Effect.annotateLogs("operation", "forkClaudeSession"),
+		Effect.withSpan("session.forkClaudeSession"),
+	);
+
+export const forkSession = (parentSessionId: string, messageId?: string) =>
+	Effect.gen(function* () {
+		const readQueryOption = yield* Effect.serviceOption(ReadQueryEffectTag);
+		const configOption = yield* Effect.serviceOption(ConfigTag);
+		const parent =
+			readQueryOption._tag === "Some"
+				? yield* readQueryOption.value
+						.getSession(parentSessionId)
+						.pipe(Effect.orElseSucceed(() => undefined))
+				: undefined;
+		if (
+			parent &&
+			isClaudeSessionRow(
+				parent,
+				configOption._tag === "Some" ? configOption.value.configDir : undefined,
+			)
+		) {
+			return yield* forkClaudeSession(parentSessionId, messageId);
+		}
+
+		const forked = yield* forkOpenCodeSession(parentSessionId, messageId);
+		const client = yield* OpenCodeAPITag;
+		const log = yield* LoggerTag;
+		let forkMessageId: string | undefined = messageId;
+		let forkPointTimestamp: number | undefined;
+		if (messageId) {
+			const msgResult = yield* Effect.either(
+				Effect.tryPromise(() =>
+					client.session.message(parentSessionId, messageId),
+				),
+			);
+			if (msgResult._tag === "Right" && msgResult.right?.time?.created) {
+				forkPointTimestamp = msgResult.right.time.created;
+			} else if (msgResult._tag === "Left") {
+				log.warn(
+					`Could not look up fork-point message ${messageId} in ${parentSessionId}`,
+				);
+			}
+		} else {
+			forkPointTimestamp = forked.time?.created ?? forked.time?.updated;
+
+			const msgsResult = yield* Effect.either(
+				Effect.tryPromise(() =>
+					client.session.messagesPage(forked.id, { limit: 1 }),
+				),
+			);
+			if (msgsResult._tag === "Right" && msgsResult.right.length > 0) {
+				// biome-ignore lint/style/noNonNullAssertion: safe — guarded by length check
+				forkMessageId = msgsResult.right[msgsResult.right.length - 1]!.id;
+			} else if (msgsResult._tag === "Left") {
+				log.warn(`Could not determine fork-point for ${forked.id}`);
+			}
+		}
+		return { ...forked, forkMessageId, forkPointTimestamp };
+	});
