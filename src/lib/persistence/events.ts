@@ -71,6 +71,8 @@ export const CANONICAL_EVENT_TYPES = [
 	"session.unsettled",
 	"session.pinned",
 	"session.unpinned",
+	"session.snoozed",
+	"session.unsnoozed",
 	"session.deleted",
 	"session.forked",
 	"session.status",
@@ -275,6 +277,15 @@ export interface SessionUnpinnedPayload {
 	readonly sessionId: string;
 }
 
+export interface SessionSnoozedPayload {
+	readonly sessionId: string;
+	readonly until: number | null;
+}
+
+export interface SessionUnsnoozedPayload {
+	readonly sessionId: string;
+}
+
 export interface SessionDeletedPayload {
 	readonly sessionId: string;
 }
@@ -378,6 +389,8 @@ export interface EventPayloadMap {
 	"session.unsettled": SessionUnsettledPayload;
 	"session.pinned": SessionPinnedPayload;
 	"session.unpinned": SessionUnpinnedPayload;
+	"session.snoozed": SessionSnoozedPayload;
+	"session.unsnoozed": SessionUnsnoozedPayload;
 	"session.deleted": SessionDeletedPayload;
 	"session.forked": SessionForkedPayload;
 	"session.status": SessionStatusPayload;
@@ -720,6 +733,15 @@ const SessionUnpinnedPayloadSchema = Schema.Struct({
 	sessionId: Schema.String,
 });
 
+const SessionSnoozedPayloadSchema = Schema.Struct({
+	sessionId: Schema.String,
+	until: Schema.NullOr(Schema.Number),
+});
+
+const SessionUnsnoozedPayloadSchema = Schema.Struct({
+	sessionId: Schema.String,
+});
+
 const SessionDeletedPayloadSchema = Schema.Struct({
 	sessionId: Schema.String,
 });
@@ -885,6 +907,14 @@ const SessionUnpinnedEventSchema = eventEnvelope(
 	"session.unpinned",
 	SessionUnpinnedPayloadSchema,
 );
+const SessionSnoozedEventSchema = eventEnvelope(
+	"session.snoozed",
+	SessionSnoozedPayloadSchema,
+);
+const SessionUnsnoozedEventSchema = eventEnvelope(
+	"session.unsnoozed",
+	SessionUnsnoozedPayloadSchema,
+);
 const SessionDeletedEventSchema = eventEnvelope(
 	"session.deleted",
 	SessionDeletedPayloadSchema,
@@ -951,6 +981,8 @@ export const CanonicalEventSchema = Schema.Union(
 	SessionUnsettledEventSchema,
 	SessionPinnedEventSchema,
 	SessionUnpinnedEventSchema,
+	SessionSnoozedEventSchema,
+	SessionUnsnoozedEventSchema,
 	SessionDeletedEventSchema,
 	SessionForkedEventSchema,
 	SessionStatusEventSchema,
@@ -986,6 +1018,8 @@ const PAYLOAD_REQUIRED_FIELDS: Record<CanonicalEventType, readonly string[]> = {
 	"session.unsettled": ["sessionId"],
 	"session.pinned": ["sessionId"],
 	"session.unpinned": ["sessionId"],
+	"session.snoozed": ["sessionId", "until"],
+	"session.unsnoozed": ["sessionId"],
 	"session.deleted": ["sessionId"],
 	"session.forked": ["sessionId", "parentId"],
 	"session.status": ["sessionId", "status"],

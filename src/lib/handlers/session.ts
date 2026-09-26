@@ -672,6 +672,42 @@ export const setSessionPinnedForClient = ({
 		}
 	});
 
+export const snoozeSessionForClient = ({
+	clientId,
+	sessionId,
+	until,
+}: {
+	readonly clientId: string;
+	readonly sessionId: string;
+	readonly until: number | null;
+}) =>
+	Effect.gen(function* () {
+		const wsHandler = yield* WebSocketHandlerTag;
+		const service = yield* SessionManagerServiceTag;
+		const log = yield* LoggerTag;
+		if (yield* service.snoozeSession(sessionId, until)) {
+			yield* service.sendSessionLists((msg) => wsHandler.broadcast(msg));
+			log.info(`client=${clientId} Snoozed: ${sessionId}`);
+		}
+	});
+
+export const unsnoozeSessionForClient = ({
+	clientId,
+	sessionId,
+}: {
+	readonly clientId: string;
+	readonly sessionId: string;
+}) =>
+	Effect.gen(function* () {
+		const wsHandler = yield* WebSocketHandlerTag;
+		const service = yield* SessionManagerServiceTag;
+		const log = yield* LoggerTag;
+		if (yield* service.unsnoozeSession(sessionId)) {
+			yield* service.sendSessionLists((msg) => wsHandler.broadcast(msg));
+			log.info(`client=${clientId} Unsnoozed: ${sessionId}`);
+		}
+	});
+
 export const markSessionUnreadForClient = ({
 	clientId,
 	sessionId,

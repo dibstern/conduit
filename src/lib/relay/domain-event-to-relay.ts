@@ -167,6 +167,8 @@ export function translateDomainEventToRelay(
 		case "session.unsettled":
 		case "session.pinned":
 		case "session.unpinned":
+		case "session.snoozed":
+		case "session.unsnoozed":
 			return silent("persistence-only event; no UI surface in relay");
 
 		// The SDK owns the live mode, so a change reported mid-session has to

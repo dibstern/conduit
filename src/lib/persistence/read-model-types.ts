@@ -14,6 +14,10 @@ export interface SessionRow {
 	read_at: number | null;
 	settled_at: number | null;
 	pinned_at: number | null;
+	snoozed_at: number | null;
+	snoozed_until: number | null;
+	woken_at: number | null;
+	woken_reason: "approval" | "question" | "error" | "turn" | null;
 	created_at: number;
 	updated_at: number;
 }

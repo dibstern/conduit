@@ -939,6 +939,10 @@ describe("switchModelForSession", () => {
 						read_at: null,
 						settled_at: null,
 						pinned_at: null,
+						snoozed_at: null,
+						snoozed_until: null,
+						woken_at: null,
+						woken_reason: null,
 						created_at: 1,
 						updated_at: 1,
 					}),
@@ -2598,6 +2602,10 @@ describe("handleNewSession", () => {
 						read_at: null,
 						settled_at: null,
 						pinned_at: null,
+						snoozed_at: null,
+						snoozed_until: null,
+						woken_at: null,
+						woken_reason: null,
 						created_at: 1,
 						updated_at: 1,
 					}),
@@ -2696,6 +2704,10 @@ describe("handleNewSession", () => {
 						read_at: null,
 						settled_at: null,
 						pinned_at: null,
+						snoozed_at: null,
+						snoozed_until: null,
+						woken_at: null,
+						woken_reason: null,
 						created_at: 1,
 						updated_at: 1,
 					}),
@@ -2821,6 +2833,10 @@ describe("handleNewSession", () => {
 						read_at: null,
 						settled_at: null,
 						pinned_at: null,
+						snoozed_at: null,
+						snoozed_until: null,
+						woken_at: null,
+						woken_reason: null,
 						created_at: 1,
 						updated_at: 1,
 					}),
@@ -3317,6 +3333,10 @@ describe("loadMoreHistoryForSession", () => {
 					read_at: null,
 					settled_at: null,
 					pinned_at: null,
+					snoozed_at: null,
+					snoozed_until: null,
+					woken_at: null,
+					woken_reason: null,
 					created_at: 1,
 					updated_at: 1,
 				}),
@@ -3414,6 +3434,10 @@ describe("loadMoreHistoryForSession", () => {
 					read_at: null,
 					settled_at: null,
 					pinned_at: null,
+					snoozed_at: null,
+					snoozed_until: null,
+					woken_at: null,
+					woken_reason: null,
 					created_at: 1,
 					updated_at: 1,
 				}),
@@ -3521,9 +3545,13 @@ describe("loadMoreHistoryForSession", () => {
 // ─── Prompt handler tests ─────────────────────────────────────────────────
 
 describe("sendMessageToSession", () => {
-	for (const settled of [true, false]) {
+	for (const [settled, snoozed] of [
+		[true, false],
+		[false, true],
+		[false, false],
+	] as const) {
 		it.effect(
-			`message clears durable settled state only when settled=${settled}`,
+			`message clears triage state when settled=${settled}, snoozed=${snoozed}`,
 			() => {
 				const dbFile = join(
 					tmpdir(),
@@ -3556,6 +3584,7 @@ describe("sendMessageToSession", () => {
 						),
 					);
 					if (settled) yield* service.setSessionSettled("s1", true);
+					if (snoozed) yield* service.snoozeSession("s1", null);
 					const provider: ProviderTurnService = {
 						prepareTurnSession: (input) => Effect.succeed(input.sessionId),
 						sendTurn: () =>
@@ -3563,10 +3592,16 @@ describe("sendMessageToSession", () => {
 								expect((yield* service.listSessions())[0]).not.toHaveProperty(
 									"settledAt",
 								);
+								expect((yield* service.listSessions())[0]).not.toHaveProperty(
+									"snoozedAt",
+								);
 								const events = yield* store.readAllBySession("s1");
 								expect(
 									events.filter((e) => e.type === "session.unsettled"),
 								).toHaveLength(settled ? 1 : 0);
+								expect(
+									events.filter((e) => e.type === "session.unsnoozed"),
+								).toHaveLength(snoozed ? 1 : 0);
 							}),
 						interruptTurn: () => Effect.void,
 					};
@@ -3576,8 +3611,10 @@ describe("sendMessageToSession", () => {
 						text: "Continue",
 						commandId: "cmd1",
 					}).pipe(Effect.provideService(ProviderTurnServiceTag, provider));
-					expect(ws.broadcast).toHaveBeenCalledTimes(settled ? 1 : 0);
-					if (settled)
+					expect(ws.broadcast).toHaveBeenCalledTimes(
+						settled || snoozed ? 1 : 0,
+					);
+					if (settled || snoozed)
 						expect(ws.broadcast).toHaveBeenCalledWith(
 							expect.objectContaining({
 								type: "session_list",
@@ -3623,6 +3660,43 @@ describe("sendMessageToSession", () => {
 			makeOverridesStateLive(),
 		);
 	}
+
+	it.effect("sends the message when unsnooze bookkeeping fails", () => {
+		const sendTurn = vi.fn(() => Effect.void);
+		const provider: ProviderTurnService = {
+			prepareTurnSession: (input) => Effect.succeed(input.sessionId),
+			sendTurn,
+			interruptTurn: () => Effect.void,
+		};
+		const service = makeMockSessionManagerService({
+			unsnoozeSession: () =>
+				Effect.fail(
+					new SessionManagerError({
+						operation: "unsnoozeSession",
+						cause: new Error("write failed"),
+					}),
+				),
+		});
+		const layer = Layer.mergeAll(
+			Layer.succeed(ProviderTurnServiceTag, provider),
+			Layer.succeed(OpenCodeAPITag, {} as OpenCodeAPI),
+			Layer.succeed(WebSocketHandlerTag, mockWsHandler()),
+			Layer.succeed(LoggerTag, mockLogger()),
+			Layer.succeed(ConfigTag, mockConfig()),
+			Layer.succeed(SessionManagerServiceTag, service),
+			PendingInteractionServiceLive,
+			makeOverridesStateLive(),
+		);
+		return sendMessageToSession({
+			clientId: "c1",
+			sessionId: "s1",
+			text: "Continue",
+			commandId: "cmd1",
+		}).pipe(
+			Effect.provide(layer),
+			Effect.tap(() => expect(sendTurn).toHaveBeenCalledOnce()),
+		);
+	});
 
 	it.effect(
 		"omits originId when preparing the turn changes the session id",
@@ -4423,6 +4497,10 @@ describe("handleMessage", () => {
 						read_at: null,
 						settled_at: null,
 						pinned_at: null,
+						snoozed_at: null,
+						snoozed_until: null,
+						woken_at: null,
+						woken_reason: null,
 						created_at: 1,
 						updated_at: 1,
 					}),

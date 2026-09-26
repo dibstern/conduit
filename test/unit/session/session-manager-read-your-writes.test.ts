@@ -181,6 +181,27 @@ const READ_MODEL_PARITY_CASES: Record<ReadModelMutation, ParityCase> = {
 				).toBeNull();
 			}),
 	},
+	snoozeSession: {
+		run: ({ service, readQuery, seedSession }) =>
+			Effect.gen(function* () {
+				yield* seedSession("ses-snoozed", "Snooze me");
+				yield* service.snoozeSession("ses-snoozed", null);
+				expect(
+					(yield* readQuery.getSession("ses-snoozed"))?.snoozed_at,
+				).toEqual(expect.any(Number));
+			}),
+	},
+	unsnoozeSession: {
+		run: ({ service, readQuery, seedSession }) =>
+			Effect.gen(function* () {
+				yield* seedSession("ses-unsnoozed", "Wake me");
+				yield* service.snoozeSession("ses-unsnoozed", null);
+				yield* service.unsnoozeSession("ses-unsnoozed");
+				expect(
+					(yield* readQuery.getSession("ses-unsnoozed"))?.snoozed_at,
+				).toBeNull();
+			}),
+	},
 	setForkEntry: {
 		run: ({ api, service, readQuery, seedSession }) =>
 			Effect.gen(function* () {

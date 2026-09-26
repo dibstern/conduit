@@ -37,6 +37,8 @@ describe("domain-event relay translation exhaustiveness", () => {
 		"session.unsettled",
 		"session.pinned",
 		"session.unpinned",
+		"session.snoozed",
+		"session.unsnoozed",
 		"permission.asked",
 		"permission.resolved",
 		"question.asked",

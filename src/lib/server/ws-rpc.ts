@@ -63,6 +63,8 @@ import {
 	renameSessionForClient,
 	setSessionPinnedForClient,
 	setSessionSettledForClient,
+	snoozeSessionForClient,
+	unsnoozeSessionForClient,
 	viewSessionForClient,
 } from "../handlers/session.js";
 import {
@@ -157,6 +159,7 @@ export {
 	SetProjectInstance,
 	SetSessionPinned,
 	SetSessionSettled,
+	SnoozeSession,
 	StartInstance,
 	StopInstance,
 	SwitchAgent,
@@ -169,6 +172,7 @@ export {
 	SwitchVariant,
 	type SwitchVariantResponse,
 	SyncInputDraft,
+	UnsnoozeSession,
 	ViewSession,
 	WsRpcError,
 	WsRpcGroup,
@@ -830,6 +834,33 @@ export const wsRpcHandlers = WsRpcGroup.of({
 				(error) =>
 					new WsRpcError({
 						message: `SetSessionPinned failed: ${String(error.cause)}`,
+					}),
+			),
+		),
+	SnoozeSession: (request) =>
+		snoozeSessionForClient({
+			clientId: request.originId ?? "rpc",
+			sessionId: request.sessionId,
+			until: request.until,
+		}).pipe(
+			Effect.as({ ok: true as const }),
+			Effect.mapError(
+				(error) =>
+					new WsRpcError({
+						message: `SnoozeSession failed: ${String(error.cause)}`,
+					}),
+			),
+		),
+	UnsnoozeSession: (request) =>
+		unsnoozeSessionForClient({
+			clientId: request.originId ?? "rpc",
+			sessionId: request.sessionId,
+		}).pipe(
+			Effect.as({ ok: true as const }),
+			Effect.mapError(
+				(error) =>
+					new WsRpcError({
+						message: `UnsnoozeSession failed: ${String(error.cause)}`,
 					}),
 			),
 		),

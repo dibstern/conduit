@@ -700,7 +700,14 @@ export const setSessionSettled = (sessionId: string, settled: boolean) =>
 				new Error("Session is pinned and must be unpinned first"),
 			);
 		}
-		if ((row.settled_at !== null) === settled) return false;
+		const unsnoozed = settled && row.snoozed_at !== null;
+		if (unsnoozed) {
+			yield* applySessionCommand({
+				type: "session.unsnoozed",
+				data: { sessionId },
+			});
+		}
+		if ((row.settled_at !== null) === settled) return unsnoozed;
 		yield* applySessionCommand({
 			type: settled ? "session.settled" : "session.unsettled",
 			data: { sessionId },
@@ -717,7 +724,15 @@ export const setSessionSettled = (sessionId: string, settled: boolean) =>
 export const setSessionPinned = (sessionId: string, pinned: boolean) =>
 	Effect.gen(function* () {
 		const row = yield* readSessionForTriage(sessionId);
-		if (!row || (row.pinned_at !== null) === pinned) return false;
+		if (!row) return false;
+		const unsnoozed = pinned && row.snoozed_at !== null;
+		if (unsnoozed) {
+			yield* applySessionCommand({
+				type: "session.unsnoozed",
+				data: { sessionId },
+			});
+		}
+		if ((row.pinned_at !== null) === pinned) return unsnoozed;
 		// A session is never both pinned and settled, so a pin brings it back.
 		if (pinned && row.settled_at !== null) {
 			yield* applySessionCommand({
@@ -736,6 +751,61 @@ export const setSessionPinned = (sessionId: string, pinned: boolean) =>
 				new SessionManagerError({ operation: "setSessionPinned", cause }),
 		),
 		Effect.withSpan("session.setSessionPinned", { attributes: { sessionId } }),
+	);
+
+export const snoozeSession = (sessionId: string, until: number | null) =>
+	Effect.gen(function* () {
+		const row = yield* readSessionForTriage(sessionId);
+		if (!row) return false;
+		if (row.pinned_at !== null) {
+			return yield* Effect.fail(new Error("Unpin the session first"));
+		}
+		if (row.settled_at !== null) {
+			return yield* Effect.fail(new Error("Un-settle the session first"));
+		}
+		const readQuery = yield* Effect.serviceOption(ReadQueryEffectTag);
+		if (readQuery._tag === "Some") {
+			const pending = yield* readQuery.value.countPendingApprovalsBySession();
+			if (pending.some((approval) => approval.session_id === sessionId)) {
+				return yield* Effect.fail(new Error("Session is waiting on you"));
+			}
+		}
+		if (until !== null && (!Number.isFinite(until) || until <= Date.now())) {
+			return yield* Effect.fail(new Error("Snooze time must be in the future"));
+		}
+		if (
+			row.snoozed_at !== null &&
+			row.woken_at === null &&
+			row.snoozed_until === until
+		)
+			return false;
+		yield* applySessionCommand({
+			type: "session.snoozed",
+			data: { sessionId, until },
+		});
+		return true;
+	}).pipe(
+		Effect.mapError(
+			(cause) => new SessionManagerError({ operation: "snoozeSession", cause }),
+		),
+		Effect.withSpan("session.snoozeSession", { attributes: { sessionId } }),
+	);
+
+export const unsnoozeSession = (sessionId: string) =>
+	Effect.gen(function* () {
+		const row = yield* readSessionForTriage(sessionId);
+		if (!row || row.snoozed_at === null) return false;
+		yield* applySessionCommand({
+			type: "session.unsnoozed",
+			data: { sessionId },
+		});
+		return true;
+	}).pipe(
+		Effect.mapError(
+			(cause) =>
+				new SessionManagerError({ operation: "unsnoozeSession", cause }),
+		),
+		Effect.withSpan("session.unsnoozeSession", { attributes: { sessionId } }),
 	);
 
 /**
@@ -1148,6 +1218,13 @@ export interface SessionManagerService {
 	setSessionPinned(
 		sessionId: string,
 		pinned: boolean,
+	): Effect.Effect<boolean, SessionManagerError>;
+	snoozeSession(
+		sessionId: string,
+		until: number | null,
+	): Effect.Effect<boolean, SessionManagerError>;
+	unsnoozeSession(
+		sessionId: string,
 	): Effect.Effect<boolean, SessionManagerError>;
 	markSessionUnread(
 		sessionId: string,
@@ -1613,6 +1690,14 @@ export const SessionManagerServiceLive: Layer.Layer<
 			setSessionPinned: (sessionId, pinned) =>
 				triageLock.withPermits(1)(
 					withSessionCommandServices(setSessionPinned(sessionId, pinned)),
+				),
+			snoozeSession: (sessionId, until) =>
+				triageLock.withPermits(1)(
+					withSessionCommandServices(snoozeSession(sessionId, until)),
+				),
+			unsnoozeSession: (sessionId) =>
+				triageLock.withPermits(1)(
+					withSessionCommandServices(unsnoozeSession(sessionId)),
 				),
 			clearPaginationCursor: (sessionId) =>
 				clearPaginationCursor(sessionId).pipe(

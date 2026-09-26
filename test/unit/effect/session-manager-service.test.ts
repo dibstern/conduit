@@ -96,6 +96,10 @@ function makeRow(id: string, overrides?: Partial<SessionRow>): SessionRow {
 		read_at: null,
 		settled_at: null,
 		pinned_at: null,
+		snoozed_at: null,
+		snoozed_until: null,
+		woken_at: null,
+		woken_reason: null,
 		created_at: 1000,
 		updated_at: 2000,
 		...overrides,
@@ -1749,4 +1753,111 @@ describe("SessionManagerService", () => {
 			);
 		},
 	);
+});
+
+describe("snooze session commands", () => {
+	function makeLayer() {
+		const dbFile = join(
+			tmpdir(),
+			`conduit-snooze-${crypto.randomUUID()}.sqlite`,
+		);
+		return {
+			dbFile,
+			layer: Layer.provideMerge(
+				SessionManagerServiceLive,
+				Layer.mergeAll(
+					Layer.succeed(OpenCodeAPITag, makeMockOpenCodeAPI()),
+					Layer.succeed(LoggerTag, makeMockLogger()),
+					makeSessionManagerStateLive(),
+					DaemonEventBusLive,
+					makePersistenceEffectLayer(dbFile),
+				),
+			),
+		};
+	}
+
+	for (const [reason, expected] of [
+		["pinned", /unpin.*first/i],
+		["settled", /un-settle.*first/i],
+		["permission", /waiting on you/i],
+		["question", /waiting on you/i],
+		["past", /future/i],
+	] as const) {
+		it.effect(`refuses ${reason} without emitting an event`, () => {
+			const { dbFile, layer } = makeLayer();
+			return Effect.gen(function* () {
+				const sql = yield* SqlClient.SqlClient;
+				const store = yield* EventStoreEffectTag;
+				const service = yield* SessionManagerServiceTag;
+				yield* sql`INSERT INTO sessions (id, provider, title, status, created_at, updated_at) VALUES ('s1', 'opencode', 'Session', 'idle', 1, 1)`;
+				if (reason === "pinned")
+					yield* sql`UPDATE sessions SET pinned_at = 2 WHERE id = 's1'`;
+				if (reason === "settled")
+					yield* sql`UPDATE sessions SET settled_at = 2 WHERE id = 's1'`;
+				if (reason === "permission" || reason === "question") {
+					yield* sql`INSERT INTO pending_approvals (id, session_id, type, created_at) VALUES ('a1', 's1', ${reason}, 2)`;
+				}
+				const result = yield* Effect.either(
+					service.snoozeSession(
+						"s1",
+						reason === "past" ? Date.now() - 1 : null,
+					),
+				);
+				expect(result._tag).toBe("Left");
+				if (result._tag === "Left")
+					expect(String(result.left.cause)).toMatch(expected);
+				expect(yield* store.readAllBySession("s1")).toEqual([]);
+			}).pipe(
+				Effect.provide(Layer.fresh(layer)),
+				Effect.ensuring(Effect.sync(() => rmSync(dbFile, { force: true }))),
+			);
+		});
+	}
+
+	it.effect("emits only on a new snooze value and an active unsnooze", () => {
+		const { dbFile, layer } = makeLayer();
+		return Effect.gen(function* () {
+			const sql = yield* SqlClient.SqlClient;
+			const store = yield* EventStoreEffectTag;
+			const service = yield* SessionManagerServiceTag;
+			yield* sql`INSERT INTO sessions (id, provider, title, status, created_at, updated_at) VALUES ('s1', 'opencode', 'Session', 'idle', 1, 1)`;
+			const firstUntil = Date.now() + 60_000;
+			expect(yield* service.snoozeSession("s1", firstUntil)).toBe(true);
+			expect(yield* service.snoozeSession("s1", firstUntil)).toBe(false);
+			expect(yield* service.snoozeSession("s1", null)).toBe(true);
+			expect(yield* service.unsnoozeSession("s1")).toBe(true);
+			expect(yield* service.unsnoozeSession("s1")).toBe(false);
+			expect(
+				(yield* store.readAllBySession("s1")).map((event) => event.type),
+			).toEqual(["session.snoozed", "session.snoozed", "session.unsnoozed"]);
+		}).pipe(
+			Effect.provide(Layer.fresh(layer)),
+			Effect.ensuring(Effect.sync(() => rmSync(dbFile, { force: true }))),
+		);
+	});
+
+	for (const action of ["settle", "pin"] as const) {
+		it.effect(`${action} emits unsnoozed before its own event`, () => {
+			const { dbFile, layer } = makeLayer();
+			return Effect.gen(function* () {
+				const sql = yield* SqlClient.SqlClient;
+				const store = yield* EventStoreEffectTag;
+				const service = yield* SessionManagerServiceTag;
+				yield* sql`INSERT INTO sessions (id, provider, title, status, created_at, updated_at) VALUES ('s1', 'opencode', 'Session', 'idle', 1, 1)`;
+				yield* service.snoozeSession("s1", null);
+				if (action === "settle") yield* service.setSessionSettled("s1", true);
+				else yield* service.setSessionPinned("s1", true);
+				expect(
+					(yield* store.readAllBySession("s1")).map((event) => event.type),
+				).toEqual([
+					"session.snoozed",
+					"session.unsnoozed",
+					action === "settle" ? "session.settled" : "session.pinned",
+				]);
+			}).pipe(
+				Effect.provide(Layer.fresh(layer)),
+				Effect.ensuring(Effect.sync(() => rmSync(dbFile, { force: true }))),
+			);
+		});
+	}
 });

@@ -1294,6 +1294,73 @@ describe("Effect Session Projector (via ProjectionRunner)", () => {
 			}),
 		));
 
+	it("snooze, wake, and unsnooze replay to the same projection", () =>
+		runTest(
+			Effect.gen(function* () {
+				const sql = yield* SqlClient.SqlClient;
+				const store = yield* EventStoreEffectTag;
+				const runner = yield* ProjectionRunnerEffectTag;
+				yield* runner.markRecovered();
+				yield* seedSession("s1");
+				yield* runner.projectEvent(
+					yield* store.append(makeSessionCreated("s1")),
+				);
+				const snoozed = yield* store.append(
+					canonicalEvent(
+						"session.snoozed",
+						"s1",
+						{ sessionId: "s1", until: null },
+						{ createdAt: FIXED_TS + 100 },
+					),
+				);
+				const asked = yield* store.append(
+					canonicalEvent(
+						"question.asked",
+						"s1",
+						{ id: "q1", sessionId: "s1", questions: [] },
+						{ createdAt: FIXED_TS + 200 },
+					),
+				);
+				const unsnoozed = yield* store.append(
+					canonicalEvent(
+						"session.unsnoozed",
+						"s1",
+						{ sessionId: "s1" },
+						{ createdAt: FIXED_TS + 300 },
+					),
+				);
+				for (let replay = 0; replay < 2; replay++) {
+					yield* runner.projectEvent(snoozed);
+					yield* runner.projectEvent(asked);
+					const woken = yield* sql<{
+						snoozed_at: number | null;
+						woken_at: number | null;
+						woken_reason: string | null;
+						updated_at: number;
+					}>`SELECT snoozed_at, woken_at, woken_reason, updated_at FROM sessions WHERE id = 's1'`;
+					expect(woken[0]).toEqual({
+						snoozed_at: FIXED_TS + 100,
+						woken_at: FIXED_TS + 200,
+						woken_reason: "question",
+						updated_at: FIXED_TS,
+					});
+					yield* runner.projectEvent(unsnoozed);
+					const cleared = yield* sql<{
+						snoozed_at: number | null;
+						woken_at: number | null;
+						woken_reason: string | null;
+						updated_at: number;
+					}>`SELECT snoozed_at, woken_at, woken_reason, updated_at FROM sessions WHERE id = 's1'`;
+					expect(cleared[0]).toEqual({
+						snoozed_at: null,
+						woken_at: null,
+						woken_reason: null,
+						updated_at: FIXED_TS,
+					});
+				}
+			}),
+		));
+
 	it("session read state is deterministic across replay", () =>
 		runTest(
 			Effect.gen(function* () {

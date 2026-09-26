@@ -55,6 +55,8 @@ type SessionCommandType =
 	| "session.unsettled"
 	| "session.pinned"
 	| "session.unpinned"
+	| "session.snoozed"
+	| "session.unsnoozed"
 	| "session.deleted"
 	| "session.forked";
 
@@ -109,6 +111,8 @@ export const openCodeUpstreamAdapter = (
 			case "session.unsettled":
 			case "session.pinned":
 			case "session.unpinned":
+			case "session.snoozed":
+			case "session.unsnoozed":
 				// Triage state belongs to Conduit and has no provider-side equivalent.
 				return Effect.void;
 			case "session.forked":

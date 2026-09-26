@@ -33,6 +33,10 @@ const makeProjectStore = (
 		readonly readAt?: number | null;
 		readonly settledAt?: number | null;
 		readonly pinnedAt?: number | null;
+		readonly snoozedAt?: number | null;
+		readonly snoozedUntil?: number | null;
+		readonly wokenAt?: number | null;
+		readonly wokenReason?: "approval" | "question" | "error" | "turn" | null;
 	}>,
 	pendingApprovals: ReadonlyArray<{
 		readonly id: string;
@@ -50,12 +54,15 @@ const makeProjectStore = (
 			for (const session of sessions) {
 				yield* sql`INSERT INTO sessions (
 					id, provider, title, status, parent_id, last_message_at,
-					read_at, settled_at, pinned_at, created_at, updated_at
+					read_at, settled_at, pinned_at, snoozed_at, snoozed_until,
+					woken_at, woken_reason, created_at, updated_at
 				) VALUES (
 					${session.id}, 'opencode', ${session.title}, 'idle',
 					${session.parentId ?? null}, ${session.lastMessageAt ?? null},
 					${session.readAt ?? null}, ${session.settledAt ?? null},
-					${session.pinnedAt ?? null}, ${session.updatedAt}, ${session.updatedAt}
+					${session.pinnedAt ?? null}, ${session.snoozedAt ?? null},
+					${session.snoozedUntil ?? null}, ${session.wokenAt ?? null},
+					${session.wokenReason ?? null}, ${session.updatedAt}, ${session.updatedAt}
 				)`;
 			}
 			for (const approval of pendingApprovals) {
@@ -129,6 +136,59 @@ describe("listDaemonSessions", () => {
 						title: "Project",
 						directory: project,
 					},
+				]),
+			),
+		);
+	});
+
+	it.effect("derives snooze and wake state from a cold project store", () => {
+		const root = makeTemporaryRoot();
+		const project = join(root, "project");
+		mkdirSync(project);
+		makeProjectStore(project, [
+			{
+				id: "sleeping",
+				title: "Sleeping",
+				updatedAt: 300,
+				snoozedAt: 100,
+				snoozedUntil: Date.now() + 60_000,
+			},
+			{
+				id: "woken",
+				title: "Woken",
+				updatedAt: 200,
+				snoozedAt: 100,
+				wokenAt: 150,
+				wokenReason: "approval",
+			},
+			{
+				id: "read",
+				title: "Read",
+				updatedAt: 100,
+				snoozedAt: 10,
+				wokenAt: 50,
+				wokenReason: "turn",
+				readAt: 50,
+			},
+		]);
+		return Effect.gen(function* () {
+			const result = yield* listDaemonSessions();
+			const sessions = new Map(
+				result.sessions.map((session) => [session.id, session]),
+			);
+			expect(sessions.get("sleeping")).toMatchObject({
+				snoozedAt: 100,
+				snoozedUntil: expect.any(Number),
+			});
+			expect(sessions.get("woken")).toMatchObject({
+				wokenAt: 150,
+				wokeBecause: "approval",
+			});
+			expect(sessions.get("read")).not.toHaveProperty("wokenAt");
+		}).pipe(
+			Effect.provide(
+				makeProjectRegistryLive([
+					{ slug: "project", title: "Project", directory: project },
 				]),
 			),
 		);

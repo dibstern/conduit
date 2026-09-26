@@ -20,6 +20,8 @@ describe("session triage RPCs", () => {
 				const service = makeMockSessionManagerService({
 					setSessionSettled: vi.fn(() => Effect.succeed(true)),
 					setSessionPinned: vi.fn(() => Effect.succeed(true)),
+					snoozeSession: vi.fn(() => Effect.succeed(true)),
+					unsnoozeSession: vi.fn(() => Effect.succeed(true)),
 					sendSessionLists: vi.fn((send) =>
 						Effect.sync(() =>
 							send({ type: "session_list", sessions: [], roots: true }),
@@ -52,12 +54,27 @@ describe("session triage RPCs", () => {
 					expect(service.setSessionSettled).toHaveBeenCalledWith("s1", value);
 					expect(service.setSessionPinned).toHaveBeenCalledWith("s1", value);
 				}
-				expect(resolve).toHaveBeenCalledTimes(4);
+				expect(
+					yield* client.SnoozeSession({
+						projectSlug: "project-b",
+						sessionId: "s1",
+						until: null,
+					}),
+				).toEqual({ ok: true });
+				expect(
+					yield* client.UnsnoozeSession({
+						projectSlug: "project-b",
+						sessionId: "s1",
+					}),
+				).toEqual({ ok: true });
+				expect(service.snoozeSession).toHaveBeenCalledWith("s1", null);
+				expect(service.unsnoozeSession).toHaveBeenCalledWith("s1");
+				expect(resolve).toHaveBeenCalledTimes(6);
 				expect(resolve.mock.calls.every(([slug]) => slug === "project-b")).toBe(
 					true,
 				);
 				expect(calls.map((call) => call.message)).toEqual(
-					Array.from({ length: 4 }, () => ({
+					Array.from({ length: 6 }, () => ({
 						type: "session_list",
 						sessions: [],
 						roots: true,
@@ -133,7 +150,61 @@ describe("session triage RPCs", () => {
 					pinned: false,
 				}),
 			).toEqual({ ok: true });
+			expect(
+				yield* client.SnoozeSession({
+					projectSlug: "a",
+					sessionId: "s",
+					until: null,
+				}),
+			).toEqual({ ok: true });
+			expect(
+				yield* client.UnsnoozeSession({ projectSlug: "a", sessionId: "s" }),
+			).toEqual({ ok: true });
 			expect(service.sendSessionLists).not.toHaveBeenCalled();
 		}),
 	);
+
+	for (const [reason, message] of [
+		["pinned", "Unpin the session first"],
+		["settled", "Un-settle the session first"],
+		["permission", "Session is waiting on you"],
+		["question", "Session is waiting on you"],
+		["past", "Snooze time must be in the future"],
+	] as const) {
+		it.scoped(`maps ${reason} refusal to WsRpcError without broadcasting`, () =>
+			Effect.gen(function* () {
+				const service = makeMockSessionManagerService({
+					snoozeSession: () =>
+						Effect.fail(
+							new SessionManagerError({
+								operation: "snoozeSession",
+								cause: new Error(message),
+							}),
+						),
+				});
+				const context = yield* Layer.build(
+					makeTestHandlerLayer({ sessionManagerService: service }),
+				);
+				const client = yield* RpcTest.makeClient(WsRpcGroup).pipe(
+					Effect.provide(
+						makeRoutedWsRpcServerLayer(() => Effect.succeed(context)),
+					),
+				);
+				const result = yield* Effect.either(
+					client.SnoozeSession({
+						projectSlug: "project-a",
+						sessionId: "s1",
+						until: null,
+					}),
+				);
+				expect(result._tag).toBe("Left");
+				if (result._tag === "Left")
+					expect(result.left).toMatchObject({
+						_tag: "WsRpcError",
+						message: expect.stringContaining(message),
+					});
+				expect(service.sendSessionLists).not.toHaveBeenCalled();
+			}),
+		);
+	}
 });

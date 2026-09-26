@@ -177,6 +177,7 @@ describe("Effect SQL migrations", () => {
 					{ migration_id: 13, name: "sessions_last_turn_error" },
 					{ migration_id: 14, name: "backfill_compaction_messages" },
 					{ migration_id: 15, name: "sessions_settled_pinned" },
+					{ migration_id: 16, name: "sessions_snoozed" },
 				]);
 
 				const legacyRows = yield* sql<{ id: number; name: string }>`
@@ -226,6 +227,7 @@ describe("Effect SQL migrations", () => {
 					[13, "sessions_last_turn_error"],
 					[14, "backfill_compaction_messages"],
 					[15, "sessions_settled_pinned"],
+					[16, "sessions_snoozed"],
 				]);
 
 				const sql = yield* SqlClient.SqlClient;
@@ -244,8 +246,8 @@ describe("Effect SQL migrations", () => {
 					name: string;
 				}>`SELECT migration_id, name FROM effect_sql_migrations ORDER BY migration_id`;
 				expect(effectHistory.at(-1)).toEqual({
-					migration_id: 15,
-					name: "sessions_settled_pinned",
+					migration_id: 16,
+					name: "sessions_snoozed",
 				});
 				const legacyHistory = yield* sql<{ id: number; name: string }>`
 					SELECT id, name FROM _migrations ORDER BY id`;
@@ -290,6 +292,7 @@ describe("Effect SQL migrations", () => {
 					{ migration_id: 13, name: "sessions_last_turn_error" },
 					{ migration_id: 14, name: "backfill_compaction_messages" },
 					{ migration_id: 15, name: "sessions_settled_pinned" },
+					{ migration_id: 16, name: "sessions_snoozed" },
 				]);
 
 				const columns = yield* sql<{ name: string }>`
@@ -367,8 +370,8 @@ describe("Effect SQL migrations", () => {
 					FROM effect_sql_migrations
 					ORDER BY migration_id`;
 				expect(history.at(-1)).toEqual({
-					migration_id: 15,
-					name: "sessions_settled_pinned",
+					migration_id: 16,
+					name: "sessions_snoozed",
 				});
 			}).pipe(
 				Effect.provide(
@@ -482,6 +485,55 @@ describe("Effect SQL migrations", () => {
 					),
 				),
 			),
+	);
+
+	it.effect("adds nullable snooze columns once without backfilling", () =>
+		Effect.gen(function* () {
+			yield* makeEffectSqlMigrator();
+			const sql = yield* SqlClient.SqlClient;
+			const columns = yield* sql<{ name: string }>`PRAGMA table_info(sessions)`;
+			expect(columns.map((column) => column.name)).toEqual(
+				expect.arrayContaining([
+					"snoozed_at",
+					"snoozed_until",
+					"woken_at",
+					"woken_reason",
+				]),
+			);
+			const rows = yield* sql<{
+				snoozed_at: number | null;
+				snoozed_until: number | null;
+				woken_at: number | null;
+				woken_reason: string | null;
+				updated_at: number;
+			}>`SELECT snoozed_at, snoozed_until, woken_at, woken_reason, updated_at FROM sessions WHERE id = 'existing'`;
+			expect(rows[0]).toEqual({
+				snoozed_at: null,
+				snoozed_until: null,
+				woken_at: null,
+				woken_reason: null,
+				updated_at: CREATED_AT,
+			});
+			expect(yield* makeEffectSqlMigrator()).toEqual([]);
+		}).pipe(
+			Effect.provide(
+				makeFileSqlLayer((filename) =>
+					seedDatabase(filename, (db) => {
+						seedLegacyEventStore(db, 13);
+						db.prepare(
+							`INSERT INTO sessions (id, provider, title, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)`,
+						).run(
+							"existing",
+							"opencode",
+							"Existing",
+							"idle",
+							CREATED_AT,
+							CREATED_AT,
+						);
+					}),
+				),
+			),
+		),
 	);
 
 	it.effect(

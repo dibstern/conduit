@@ -307,6 +307,12 @@ export const SessionInfoSchema = Schema.Struct({
 	unread: Schema.optional(Schema.Boolean),
 	settledAt: Schema.optional(Schema.Number),
 	pinnedAt: Schema.optional(Schema.Number),
+	snoozedAt: Schema.optional(Schema.Number),
+	snoozedUntil: Schema.optional(Schema.Number),
+	wokenAt: Schema.optional(Schema.Number),
+	wokeBecause: Schema.optional(
+		Schema.Literal("time", "approval", "question", "error", "turn"),
+	),
 });
 
 export const ProjectSessionAvailabilitySchema = Schema.Union(
@@ -949,6 +955,33 @@ export class SetSessionPinned extends Schema.TaggedRequest<SetSessionPinned>()(
 	},
 ) {}
 
+export class SnoozeSession extends Schema.TaggedRequest<SnoozeSession>()(
+	"SnoozeSession",
+	{
+		failure: WsRpcError,
+		success: OkResponseSchema,
+		payload: {
+			projectSlug: NonEmptyString,
+			sessionId: NonEmptyString,
+			until: Schema.NullOr(Schema.Number),
+			originId: Schema.optional(NonEmptyString),
+		},
+	},
+) {}
+
+export class UnsnoozeSession extends Schema.TaggedRequest<UnsnoozeSession>()(
+	"UnsnoozeSession",
+	{
+		failure: WsRpcError,
+		success: OkResponseSchema,
+		payload: {
+			projectSlug: NonEmptyString,
+			sessionId: NonEmptyString,
+			originId: Schema.optional(NonEmptyString),
+		},
+	},
+) {}
+
 export class SwitchVariant extends Schema.TaggedRequest<SwitchVariant>()(
 	"SwitchVariant",
 	{
@@ -1307,6 +1340,8 @@ export const WsRpcRequest = Schema.Union(
 	MarkSessionUnread,
 	SetSessionSettled,
 	SetSessionPinned,
+	SnoozeSession,
+	UnsnoozeSession,
 	SwitchVariant,
 	SwitchPermissionMode,
 	GetFileTree,
@@ -1372,6 +1407,8 @@ export const WsRpcGroup = RpcGroup.make(
 	Rpc.fromTaggedRequest(MarkSessionUnread),
 	Rpc.fromTaggedRequest(SetSessionSettled),
 	Rpc.fromTaggedRequest(SetSessionPinned),
+	Rpc.fromTaggedRequest(SnoozeSession),
+	Rpc.fromTaggedRequest(UnsnoozeSession),
 	Rpc.fromTaggedRequest(SwitchVariant),
 	Rpc.fromTaggedRequest(SwitchPermissionMode),
 	Rpc.fromTaggedRequest(GetFileTree),

@@ -39,6 +39,7 @@ export function pendingApprovalCountsByType(
 }
 
 export interface SessionListAdapterOptions {
+	now?: number;
 	statuses?: Record<string, SessionStatus>;
 	/** Supply full lineage for root list rollups; omit for per-session family state. */
 	parentMap?: ReadonlyMap<string, string>;
@@ -66,6 +67,30 @@ export function deriveSessionAttention(input: {
 	if (status === "busy" || status === "retry") return "working";
 	if (input.unread) return "done-unread";
 	return "idle";
+}
+
+export function deriveSessionSnooze(
+	row: Pick<
+		SessionRow,
+		"snoozed_at" | "snoozed_until" | "woken_at" | "woken_reason" | "read_at"
+	>,
+	now = Date.now(),
+): Pick<SessionInfo, "snoozedAt" | "snoozedUntil" | "wokenAt" | "wokeBecause"> {
+	if (row.snoozed_at === null) return {};
+	const wakeAt =
+		row.woken_at ??
+		(row.snoozed_until !== null && row.snoozed_until <= now
+			? row.snoozed_until
+			: null);
+	if (wakeAt !== null) {
+		return row.read_at === null || row.read_at < wakeAt
+			? { wokenAt: wakeAt, wokeBecause: row.woken_reason ?? "time" }
+			: {};
+	}
+	return {
+		snoozedAt: row.snoozed_at,
+		...(row.snoozed_until !== null ? { snoozedUntil: row.snoozed_until } : {}),
+	};
 }
 
 /**
@@ -115,6 +140,7 @@ export function sessionRowsToSessionInfoList(
 
 		if (row.settled_at != null) info.settledAt = row.settled_at;
 		if (row.pinned_at != null) info.pinnedAt = row.pinned_at;
+		Object.assign(info, deriveSessionSnooze(row, opts?.now));
 
 		const forkEntry = opts?.forkMeta?.get(row.id);
 		const parentID = row.parent_id ?? forkEntry?.parentID;

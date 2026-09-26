@@ -244,6 +244,10 @@ export interface SessionInfo {
 	unread?: boolean;
 	settledAt?: number;
 	pinnedAt?: number;
+	snoozedAt?: number;
+	snoozedUntil?: number;
+	wokenAt?: number;
+	wokeBecause?: "time" | "approval" | "question" | "error" | "turn";
 }
 
 export interface DaemonSessionQueryOptions {
@@ -547,6 +551,12 @@ const SessionInfoSchema = Schema.Struct({
 	unread: Schema.optional(Schema.Boolean),
 	settledAt: Schema.optional(Schema.Number),
 	pinnedAt: Schema.optional(Schema.Number),
+	snoozedAt: Schema.optional(Schema.Number),
+	snoozedUntil: Schema.optional(Schema.Number),
+	wokenAt: Schema.optional(Schema.Number),
+	wokeBecause: Schema.optional(
+		Schema.Literal("time", "approval", "question", "error", "turn"),
+	),
 });
 
 const ContextWindowOptionSchema = Schema.Struct({

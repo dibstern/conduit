@@ -1,7 +1,10 @@
 // test/unit/persistence/session-list-adapter.test.ts
 import { describe, expect, it } from "vitest";
 import type { SessionRow } from "../../../src/lib/persistence/read-model-types.js";
-import { sessionRowsToSessionInfoList } from "../../../src/lib/persistence/session-list-adapter.js";
+import {
+	deriveSessionSnooze,
+	sessionRowsToSessionInfoList,
+} from "../../../src/lib/persistence/session-list-adapter.js";
 
 // ─── Fixtures ──────────────────────────────────────────────────────────────
 
@@ -20,6 +23,10 @@ function makeRow(id: string, overrides?: Partial<SessionRow>): SessionRow {
 		read_at: null,
 		settled_at: null,
 		pinned_at: null,
+		snoozed_at: null,
+		snoozed_until: null,
+		woken_at: null,
+		woken_reason: null,
 		created_at: 1000,
 		updated_at: 2000,
 		...overrides,
@@ -27,6 +34,68 @@ function makeRow(id: string, overrides?: Partial<SessionRow>): SessionRow {
 }
 
 // ─── sessionRowsToSessionInfoList ─────────────────────────────────────────
+
+describe("deriveSessionSnooze", () => {
+	it("omits fields when the session was never snoozed", () => {
+		expect(deriveSessionSnooze(makeRow("s1"), 100)).toEqual({});
+	});
+	it("shows an indefinite snooze", () => {
+		expect(deriveSessionSnooze(makeRow("s1", { snoozed_at: 10 }), 100)).toEqual(
+			{ snoozedAt: 10 },
+		);
+	});
+	it("shows a timed snooze before expiry", () => {
+		expect(
+			deriveSessionSnooze(
+				makeRow("s1", { snoozed_at: 10, snoozed_until: 100 }),
+				99,
+			),
+		).toEqual({ snoozedAt: 10, snoozedUntil: 100 });
+	});
+	it("derives time expiry from the injected clock", () => {
+		expect(
+			deriveSessionSnooze(
+				makeRow("s1", { snoozed_at: 10, snoozed_until: 100 }),
+				100,
+			),
+		).toEqual({ wokenAt: 100, wokeBecause: "time" });
+	});
+	it("shows the first projected wake and its reason", () => {
+		expect(
+			deriveSessionSnooze(
+				makeRow("s1", {
+					snoozed_at: 10,
+					snoozed_until: 100,
+					woken_at: 30,
+					woken_reason: "approval",
+				}),
+				200,
+			),
+		).toEqual({ wokenAt: 30, wokeBecause: "approval" });
+	});
+	it("clears the wake marker after it is read", () => {
+		expect(
+			deriveSessionSnooze(
+				makeRow("s1", {
+					snoozed_at: 10,
+					woken_at: 30,
+					woken_reason: "question",
+					read_at: 30,
+				}),
+				200,
+			),
+		).toEqual({});
+	});
+	it("uses the adapter clock for list rows", () => {
+		const [session] = sessionRowsToSessionInfoList(
+			[makeRow("s1", { snoozed_at: 10, snoozed_until: 100 })],
+			{ now: 100 },
+		);
+		expect(session).toEqual(
+			expect.objectContaining({ wokenAt: 100, wokeBecause: "time" }),
+		);
+	});
+});
 
 describe("sessionRowsToSessionInfoList", () => {
 	it("carries settled and pinned timestamps and omits NULL values", () => {

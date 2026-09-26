@@ -55,6 +55,7 @@ import {
 	SetProjectInstance,
 	SetSessionPinned,
 	SetSessionSettled,
+	SnoozeSession,
 	StartInstance,
 	StopInstance,
 	SwitchAgent,
@@ -63,6 +64,7 @@ import {
 	SwitchPermissionMode,
 	SwitchVariant,
 	SyncInputDraft,
+	UnsnoozeSession,
 	ViewSession,
 	WsRpcError,
 	WsRpcGroup,
@@ -418,6 +420,8 @@ const provideRpc = <A, E>(effect: Effect.Effect<A, E, WsRpcTestEnv>) =>
 				MarkSessionUnread: () => Effect.succeed({ ok: true as const }),
 				SetSessionSettled: () => Effect.succeed({ ok: true as const }),
 				SetSessionPinned: () => Effect.succeed({ ok: true as const }),
+				SnoozeSession: () => Effect.succeed({ ok: true as const }),
+				UnsnoozeSession: () => Effect.succeed({ ok: true as const }),
 				SwitchVariant: (request) =>
 					Effect.succeed({
 						projectSlug: request.projectSlug,
@@ -501,6 +505,10 @@ describe("browser WebSocket RPC contract", () => {
 			messageCount: 0,
 			settledAt: 123,
 			pinnedAt: 456,
+			snoozedAt: 789,
+			snoozedUntil: 1000,
+			wokenAt: 900,
+			wokeBecause: "question" as const,
 		};
 		const encoded = Schema.encodeSync(SessionInfoSchema)(session);
 		expect(encoded).toEqual(session);
@@ -521,6 +529,15 @@ describe("browser WebSocket RPC contract", () => {
 				projectSlug: "demo",
 				sessionId: "s1",
 				pinned: false,
+			}),
+			new SnoozeSession({
+				projectSlug: "demo",
+				sessionId: "s1",
+				until: null,
+			}),
+			new UnsnoozeSession({
+				projectSlug: "demo",
+				sessionId: "s1",
 			}),
 		]) {
 			expect(WsRpcGroup.requests.has(request._tag)).toBe(true);

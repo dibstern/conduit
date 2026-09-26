@@ -18,6 +18,8 @@ type SessionHandledType =
 	| "session.unsettled"
 	| "session.pinned"
 	| "session.unpinned"
+	| "session.snoozed"
+	| "session.unsnoozed"
 	| "session.deleted"
 	| "session.forked"
 	| "session.status"
@@ -25,7 +27,32 @@ type SessionHandledType =
 	| "session.permission_mode_changed"
 	| "turn.completed"
 	| "turn.error"
+	| "permission.asked"
+	| "question.asked"
 	| "message.created";
+
+// An approval or question in a child rolls up into its root's attention, so it
+// must wake a snoozed ancestor too; otherwise the root sits on the shelf while
+// blocked on you. A child's turn ending or failing is not what was awaited.
+function wakeSession(
+	sessionId: string,
+	createdAt: number,
+	reason: "approval" | "question" | "error" | "turn",
+): SessionStatement {
+	const blocksOnUser = reason === "approval" || reason === "question";
+	const target = blocksOnUser
+		? `id IN (WITH RECURSIVE lineage(id) AS (
+				SELECT ? UNION SELECT s.parent_id FROM sessions s
+				JOIN lineage ON s.id = lineage.id WHERE s.parent_id IS NOT NULL
+			) SELECT id FROM lineage)`
+		: "id = ?";
+	return {
+		sql: `UPDATE sessions SET woken_at = ?, woken_reason = ?
+			WHERE ${target} AND snoozed_at IS NOT NULL AND woken_at IS NULL
+			AND snoozed_at <= ? AND (snoozed_until IS NULL OR snoozed_until > ?)`,
+		params: [createdAt, reason, sessionId, createdAt, createdAt],
+	};
+}
 
 function isAutoTitleRename(event: StoredEvent): boolean {
 	return event.metadata.source === "auto-title";
@@ -167,6 +194,22 @@ export const sessionHandlers: {
 		},
 	],
 
+	"session.snoozed": (event) => [
+		{
+			sql: `UPDATE sessions SET snoozed_at = ?, snoozed_until = ?,
+				woken_at = NULL, woken_reason = NULL WHERE id = ?`,
+			params: [event.createdAt, event.data.until, event.data.sessionId],
+		},
+	],
+
+	"session.unsnoozed": (event) => [
+		{
+			sql: `UPDATE sessions SET snoozed_at = NULL, snoozed_until = NULL,
+				woken_at = NULL, woken_reason = NULL WHERE id = ?`,
+			params: [event.data.sessionId],
+		},
+	],
+
 	"session.deleted": (event) => {
 		// sessions.parent_id, turns.session_id, messages.session_id/turn_id,
 		// message_parts.message_id, and every other FK into sessions/turns carry
@@ -235,6 +278,7 @@ export const sessionHandlers: {
 
 	"turn.completed": (event) => {
 		return [
+			wakeSession(event.sessionId, event.createdAt, "turn"),
 			{
 				sql: "UPDATE sessions SET updated_at = ?, last_turn_error_at = NULL WHERE id = ?",
 				params: [event.createdAt, event.sessionId],
@@ -243,12 +287,19 @@ export const sessionHandlers: {
 	},
 	"turn.error": (event) => {
 		return [
+			wakeSession(event.sessionId, event.createdAt, "error"),
 			{
 				sql: "UPDATE sessions SET updated_at = ?, last_turn_error_at = ? WHERE id = ?",
 				params: [event.createdAt, event.createdAt, event.sessionId],
 			},
 		];
 	},
+	"permission.asked": (event) => [
+		wakeSession(event.data.sessionId, event.createdAt, "approval"),
+	],
+	"question.asked": (event) => [
+		wakeSession(event.data.sessionId, event.createdAt, "question"),
+	],
 
 	// (P8) Denormalize last_message_at on the session. Owned by
 	// SessionProjector (not MessageProjector) to keep all session-table

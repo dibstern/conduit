@@ -58,6 +58,10 @@ interface SessionRow {
 	read_at: number | null;
 	settled_at: number | null;
 	pinned_at: number | null;
+	snoozed_at: number | null;
+	snoozed_until: number | null;
+	woken_at: number | null;
+	woken_reason: string | null;
 	created_at: number;
 	updated_at: number;
 }
@@ -94,6 +98,208 @@ describe("SessionProjector", () => {
 	it("has the correct name and handles list", async () => {
 		expect(projector.name).toBe("session");
 		expect(projector.handles).toBe(SESSION_HANDLED_TYPES);
+	});
+
+	describe("snooze projection", () => {
+		async function seedSnooze(until: number | null = null, at = now + 10) {
+			await project(
+				makeStored(
+					"session.created",
+					"s1",
+					{ sessionId: "s1", title: "Session", provider: "opencode" },
+					1,
+					now,
+				),
+			);
+			await project(
+				makeStored("session.snoozed", "s1", { sessionId: "s1", until }, 2, at),
+			);
+		}
+
+		it.each([
+			[
+				"approval",
+				makeStored(
+					"permission.asked",
+					"s1",
+					{ id: "p1", sessionId: "s1", toolName: "bash", input: {} },
+					3,
+					now + 20,
+				),
+			],
+			[
+				"question",
+				makeStored(
+					"question.asked",
+					"s1",
+					{ id: "q1", sessionId: "s1", questions: [] },
+					3,
+					now + 20,
+				),
+			],
+			[
+				"error",
+				makeStored(
+					"turn.error",
+					"s1",
+					{ messageId: "m1", error: "failed" },
+					3,
+					now + 20,
+				),
+			],
+			[
+				"turn",
+				makeStored("turn.completed", "s1", { messageId: "m1" }, 3, now + 20),
+			],
+		] as const)("wakes on %s alone", async (reason, trigger) => {
+			await seedSnooze(now + 100);
+			await project(trigger);
+			const row = await queryOne<SessionRow>(
+				"SELECT * FROM sessions WHERE id = 's1'",
+			);
+			expect(row?.woken_at).toBe(now + 20);
+			expect(row?.woken_reason).toBe(reason);
+		});
+
+		it("does not wake for a trigger before snoozed_at", async () => {
+			await seedSnooze(null, now + 30);
+			await project(
+				makeStored(
+					"question.asked",
+					"s1",
+					{ id: "q1", sessionId: "s1", questions: [] },
+					3,
+					now + 20,
+				),
+			);
+			expect(
+				(await queryOne<SessionRow>("SELECT * FROM sessions WHERE id = 's1'"))
+					?.woken_at,
+			).toBeNull();
+		});
+
+		it("does not record a trigger after snoozed_until", async () => {
+			await seedSnooze(now + 15);
+			await project(
+				makeStored(
+					"permission.asked",
+					"s1",
+					{ id: "p1", sessionId: "s1", toolName: "bash", input: {} },
+					3,
+					now + 20,
+				),
+			);
+			expect(
+				(await queryOne<SessionRow>("SELECT * FROM sessions WHERE id = 's1'"))
+					?.woken_at,
+			).toBeNull();
+		});
+
+		it("keeps the first wake when a later trigger arrives", async () => {
+			await seedSnooze();
+			await project(
+				makeStored(
+					"question.asked",
+					"s1",
+					{ id: "q1", sessionId: "s1", questions: [] },
+					3,
+					now + 20,
+				),
+			);
+			await project(
+				makeStored(
+					"turn.error",
+					"s1",
+					{ messageId: "m1", error: "failed" },
+					4,
+					now + 30,
+				),
+			);
+			const row = await queryOne<SessionRow>(
+				"SELECT * FROM sessions WHERE id = 's1'",
+			);
+			expect([row?.woken_at, row?.woken_reason]).toEqual([
+				now + 20,
+				"question",
+			]);
+		});
+
+		it("wakes a snoozed ancestor when a child blocks on the user, not when it finishes", async () => {
+			await seedSnooze();
+			await project(
+				makeStored(
+					"session.created",
+					"child",
+					{ sessionId: "child", title: "Child", provider: "opencode" },
+					3,
+					now + 11,
+				),
+			);
+			await project(
+				makeStored(
+					"session.forked",
+					"child",
+					{ sessionId: "child", parentId: "s1" },
+					4,
+					now + 12,
+				),
+			);
+			await project(
+				makeStored("turn.completed", "child", { messageId: "m1" }, 5, now + 15),
+			);
+			expect(
+				(await queryOne<SessionRow>("SELECT * FROM sessions WHERE id = 's1'"))
+					?.woken_at,
+			).toBeNull();
+			await project(
+				makeStored(
+					"permission.asked",
+					"child",
+					{ id: "p1", sessionId: "child", toolName: "bash", input: {} },
+					6,
+					now + 20,
+				),
+			);
+			const row = await queryOne<SessionRow>(
+				"SELECT * FROM sessions WHERE id = 's1'",
+			);
+			expect([row?.woken_at, row?.woken_reason]).toEqual([
+				now + 20,
+				"approval",
+			]);
+		});
+
+		it("wakes an indefinite snooze", async () => {
+			await seedSnooze();
+			await project(
+				makeStored("turn.completed", "s1", { messageId: "m1" }, 3, now + 20),
+			);
+			expect(
+				(await queryOne<SessionRow>("SELECT * FROM sessions WHERE id = 's1'"))
+					?.woken_reason,
+			).toBe("turn");
+		});
+
+		it("leaves updated_at unchanged on snooze and unsnooze", async () => {
+			await seedSnooze(now + 100);
+			let row = await queryOne<SessionRow>(
+				"SELECT * FROM sessions WHERE id = 's1'",
+			);
+			expect(row?.updated_at).toBe(now);
+			await project(
+				makeStored("session.unsnoozed", "s1", { sessionId: "s1" }, 3, now + 20),
+			);
+			row = await queryOne<SessionRow>(
+				"SELECT * FROM sessions WHERE id = 's1'",
+			);
+			expect(row).toMatchObject({
+				updated_at: now,
+				snoozed_at: null,
+				snoozed_until: null,
+				woken_at: null,
+				woken_reason: null,
+			});
+		});
 	});
 
 	describe("session.created", () => {

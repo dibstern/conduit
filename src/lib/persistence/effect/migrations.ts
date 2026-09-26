@@ -17,6 +17,7 @@ import {
 	SESSIONS_PERMISSION_MODE_MIGRATION,
 	SESSIONS_READ_AT_MIGRATION,
 	SESSIONS_SETTLED_PINNED_MIGRATION,
+	SESSIONS_SNOOZED_MIGRATION,
 	TURN_MODEL_EXECUTION_MIGRATION,
 } from "../schema.js";
 
@@ -60,6 +61,9 @@ const backfillCompactionMessagesMigrationSql = readMigrationSql(
 
 const sessionsSettledPinnedMigrationSql = readMigrationSql(
 	SESSIONS_SETTLED_PINNED_MIGRATION,
+);
+const sessionsSnoozedMigrationSql = readMigrationSql(
+	SESSIONS_SNOOZED_MIGRATION,
 );
 
 const expectedTableColumns = {
@@ -257,6 +261,10 @@ const expectedTableColumns = {
 		"last_turn_error_at",
 		"settled_at",
 		"pinned_at",
+		"snoozed_at",
+		"snoozed_until",
+		"woken_at",
+		"woken_reason",
 	],
 	tool_content: ["tool_id", "session_id", "content", "created_at"],
 	turns: [
@@ -362,6 +370,10 @@ const appendedSessionColumns = [
 	"last_turn_error_at",
 	"settled_at",
 	"pinned_at",
+	"snoozed_at",
+	"snoozed_until",
+	"woken_at",
+	"woken_reason",
 ] as const;
 
 function sameStrings(
@@ -635,6 +647,19 @@ const runSessionsSettledPinnedMigration: Effect.Effect<
 	yield* executeSqlStatements(sessionsSettledPinnedMigrationSql);
 });
 
+const runSessionsSnoozedMigration: Effect.Effect<
+	void,
+	unknown,
+	SqlClient.SqlClient
+> = Effect.gen(function* () {
+	const sql = yield* SqlClient.SqlClient;
+	const columns = yield* sql.unsafe<{ name: string }>(
+		"PRAGMA table_info(sessions)",
+	);
+	if (columns.some((column) => column.name === "woken_reason")) return;
+	yield* executeSqlStatements(sessionsSnoozedMigrationSql);
+});
+
 /** 2026-07-15T00:00:00.000Z — midnight UTC of the day 0004_drop_events_session_fk shipped (b2b698c6). */
 export const LEGACY_SKELETON_CUTOFF_MS = 1_784_073_600_000;
 export const MAX_PURGEABLE_SKELETON_SESSIONS = 25;
@@ -787,6 +812,7 @@ export const effectMigrationEntries = {
 	"0013_sessions_last_turn_error": runSessionsLastTurnErrorMigration,
 	"0014_backfill_compaction_messages": runBackfillCompactionMessagesMigration,
 	"0015_sessions_settled_pinned": runSessionsSettledPinnedMigration,
+	"0016_sessions_snoozed": runSessionsSnoozedMigration,
 } satisfies Record<string, Effect.Effect<void, unknown, SqlClient.SqlClient>>;
 
 export function makeEffectMigrationLoader(
