@@ -84,6 +84,7 @@
     Palette,
     Sparkles,
     Star,
+    StarOff,
     Brain,
   } from '@lucide/svelte';
 
@@ -182,6 +183,7 @@
     'palette': Palette,
     'sparkles': Sparkles,
     'star': Star,
+    'star-off': StarOff,
     'brain': Brain,
   };
 

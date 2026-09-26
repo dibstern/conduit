@@ -25,6 +25,8 @@ import { createReplayHarness, type ReplayHarness } from "./e2e-harness.js";
 interface ReplayOptions {
 	/** Name of the .opencode.json.gz recording to use (default: "chat-simple") */
 	recording: string;
+	/** Give the relay a temp SQLite event store (default: false) */
+	persistence: boolean;
 }
 
 /** Fixtures provided to tests */
@@ -40,10 +42,11 @@ interface ReplayFixtures {
 export const test = base.extend<ReplayFixtures & ReplayOptions>({
 	// Default recording — override per-describe with test.use({ recording: "..." })
 	recording: ["chat-simple", { option: true }],
+	persistence: [false, { option: true }],
 
 	// Per-test harness lifecycle
-	harness: async ({ recording }, use) => {
-		const harness = await createReplayHarness(recording);
+	harness: async ({ recording, persistence }, use) => {
+		const harness = await createReplayHarness(recording, { persistence });
 		await use(harness);
 		await harness.stop();
 	},

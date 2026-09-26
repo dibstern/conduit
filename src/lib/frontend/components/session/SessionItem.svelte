@@ -314,6 +314,11 @@
 	data-session-id={session.id}
 	aria-label={ariaLabel}
 	onclick={handleClick}
+	oncontextmenu={(event) => {
+		if (cleanupMode || !oncontextmenuProp) return;
+		event.preventDefault();
+		oncontextmenuProp(session, event.currentTarget);
+	}}
 >
 	<!-- Selection circle (cleanup mode) -->
 	{#if cleanupMode}
@@ -419,7 +424,7 @@
 			     emphasis, which only describes the title's weight. -->
 			<!-- Status word. Hidden from the accessible name because aria-label above
 			     already leads with it; announcing it twice per row is noise. -->
-			{#if status.word}
+			{#if status.word && !settled}
 				<span
 					class="session-item-status inline-flex items-center px-0.5 text-sm font-medium whitespace-nowrap font-brand {status.colour}"
 					aria-hidden="true"

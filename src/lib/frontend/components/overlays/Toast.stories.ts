@@ -1,4 +1,5 @@
 import type { Meta, StoryObj } from "@storybook/svelte-vite";
+import { fn } from "storybook/test";
 import { resetNotifState } from "../../stores/notification-reducer.svelte.js";
 import { permissionsState } from "../../stores/permissions.svelte.js";
 import { uiState } from "../../stores/ui.svelte.js";
@@ -21,6 +22,21 @@ const meta = {
 
 export default meta;
 type Story = StoryObj<typeof meta>;
+
+export const WithUndoAction: Story = {
+	name: "With undo action",
+	beforeEach: () => {
+		setToasts([
+			{
+				id: "story-undo",
+				message: "Moved “Fix navigation” to Settled",
+				variant: "default",
+				duration: 5000,
+				action: { label: "Undo", run: fn() },
+			},
+		]);
+	},
+};
 
 /** Helper to set toasts directly without auto-dismiss. */
 function setToasts(toasts: ToastType[]): void {

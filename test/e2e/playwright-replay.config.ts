@@ -15,6 +15,7 @@ export default defineConfig({
 		"advanced-ui.spec.ts",
 		"smoke.spec.ts",
 		"sessions.spec.ts",
+		"session-triage.spec.ts",
 		"sidebar-layout.spec.ts",
 		"ui-features.spec.ts",
 		"debug-panel.spec.ts",

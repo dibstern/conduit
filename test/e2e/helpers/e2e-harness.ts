@@ -125,6 +125,7 @@ export interface ReplayHarness {
  */
 export async function createReplayHarness(
 	recordingName: string,
+	options: { persistence?: boolean } = {},
 ): Promise<ReplayHarness> {
 	const recording = loadOpenCodeRecording(recordingName);
 	const mock = new MockOpenCodeServer(recording);
@@ -145,6 +146,11 @@ export async function createReplayHarness(
 		sessionTitle: "E2E Replay Session",
 		staticDir,
 		configDir,
+		// Off by default: durable per-session state (settle, pin, read) only
+		// exists with an event store, and most replay specs predate it.
+		...(options.persistence
+			? { persistenceDbPath: path.join(configDir, "events.db") }
+			: {}),
 		log: createSilentLogger(),
 	});
 

@@ -4,17 +4,20 @@
   Auto-dismiss is handled by the store's showToast() via setTimeout.
 -->
 <script lang="ts">
-	import { uiState } from "../../stores/ui.svelte.js";
+	import { dismissToast, uiState } from "../../stores/ui.svelte.js";
 	import Icon from "../ui/Icon.svelte";
+	import Button from "../ui/Button.svelte";
 </script>
 
 {#each uiState.toasts as toast (toast.id)}
 	<div
-		class="pointer-events-auto w-full px-4 py-2 rounded-lg text-sm font-medium shadow-lg notification-slide-in {toast.variant === 'warn'
-			? 'bg-warning-bg border border-warning text-warning'
-			: toast.variant === 'error'
-				? 'flex items-center gap-2 bg-error-bg border border-error text-error'
-				: 'bg-bg-alt border border-border text-text'}"
+		class="pointer-events-auto w-full px-4 py-2 rounded-lg text-sm font-medium shadow-lg notification-slide-in {toast.action
+			? 'flex items-center gap-2 bg-inverse-bg text-inverse-text'
+			: toast.variant === 'warn'
+				? 'bg-warning-bg border border-warning text-warning'
+				: toast.variant === 'error'
+					? 'flex items-center gap-2 bg-error-bg border border-error text-error'
+					: 'bg-bg-alt border border-border text-text'}"
 		role={toast.variant === "error" ? "alert" : "status"}
 		aria-live={toast.variant === "error" ? "assertive" : "polite"}
 	>
@@ -25,6 +28,23 @@
 			<span>{toast.message}</span>
 		{:else}
 			{toast.message}
+		{/if}
+		{#if toast.action}
+			<Button
+				variant="ghost"
+				size="content"
+				tone="inherit"
+				hoverFill="none"
+				class="ml-auto shrink-0 text-inverse-accent font-bold"
+				data-testid="toast-action"
+				onclick={() => {
+					try {
+						toast.action?.run();
+					} finally {
+						dismissToast(toast.id);
+					}
+				}}
+			>{toast.action.label}</Button>
 		{/if}
 	</div>
 {/each}

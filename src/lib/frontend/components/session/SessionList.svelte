@@ -30,8 +30,16 @@
 		deleteSessionRpc,
 		forkSessionRpc,
 		renameSessionRpc,
+		setSessionSettledRpc,
+		setSessionPinnedRpc,
 	} from "../../transport/ws-rpc-client.js";
-	import { confirm, showToast } from "../../stores/ui.svelte.js";
+	import {
+		confirm,
+		showToast,
+		uiState,
+		setSettledShelfOpen,
+	} from "../../stores/ui.svelte.js";
+	import { formatTimeAgo } from "../../utils/format.js";
 	import SessionItem from "./SessionItem.svelte";
 	import SessionPager from "./SessionPager.svelte";
 	import SessionContextMenu from "./SessionContextMenu.svelte";
@@ -78,6 +86,8 @@
 	);
 	const groups: AttentionGroups = $derived(getAttentionGroups());
 	const isEmpty = $derived(filtered.length === 0);
+	const searching = $derived(sessionState.searchQuery.trim().length > 0);
+	const settledShelfOpen = $derived(searching || uiState.settledShelfOpen);
 
 	const scope = $derived(getSessionScope());
 	const emptyMessage = $derived.by(() => {
@@ -114,6 +124,7 @@
 	// Rendered in this order, and an empty one is left out entirely: a heading
 	// over nothing costs a line of a phone's list and says nothing.
 	const sections = $derived([
+		{ label: "Pinned", sessions: groups.pinned },
 		{ label: "Needs you", sessions: groups.needsYou },
 		{ label: "Running", sessions: groups.running },
 		{ label: "Done, unread", sessions: groups.doneUnread },
@@ -241,6 +252,54 @@
 	function handleCtxRename(id: string) {
 		// Set reactive state — SessionItem with matching id enters rename mode
 		renamingSessionId = id;
+	}
+
+	async function handleCtxSettle(session: SessionInfo, settled: boolean) {
+		const projectSlug = session.projectSlug ?? getCurrentSlug();
+		if (!projectSlug || isForeignSession(session)) return;
+		const input = { projectSlug, sessionId: session.id, originId: getBrowserClientId() };
+		try {
+			await setSessionSettledRpc({ ...input, settled });
+			if (settled) {
+				showToast(`Moved “${session.title || "New Session"}” to Settled`, {
+					duration: 5000,
+					action: {
+						label: "Undo",
+						run: () => {
+							void setSessionSettledRpc({ ...input, settled: false }).catch(() => {
+								showToast("Couldn't undo", { variant: "error" });
+							});
+						},
+					},
+				});
+			}
+		} catch {
+			showToast("Couldn't settle session", { variant: "error" });
+		}
+	}
+
+	async function handleCtxPin(session: SessionInfo, pinned: boolean) {
+		const projectSlug = session.projectSlug ?? getCurrentSlug();
+		if (!projectSlug || isForeignSession(session)) return;
+		const input = { projectSlug, sessionId: session.id, originId: getBrowserClientId() };
+		try {
+			await setSessionPinnedRpc({ ...input, pinned });
+			if (pinned) {
+				showToast(`Pinned “${session.title || "New Session"}” to the top`, {
+					duration: 5000,
+					action: {
+						label: "Undo",
+						run: () => {
+							void setSessionPinnedRpc({ ...input, pinned: false }).catch(() => {
+								showToast("Couldn't undo", { variant: "error" });
+							});
+						},
+					},
+				});
+			}
+		} catch {
+			showToast("Couldn't pin session", { variant: "error" });
+		}
 	}
 
 	function handleRenameEnd() {
@@ -491,6 +550,7 @@
 	     per-row verbs each land in their own ticket, and copies would mean one
 	     edit each with any divergence between them invisible. -->
 	{#snippet sessionRow(s: SessionInfo)}
+		{@const settled = s.pinnedAt == null && s.settledAt != null}
 		{#if isForeignSession(s)}
 			<!-- Rename, the context menu and cleanup selection all
 			     RPC the relay this socket is attached to, so handing them a session
@@ -499,6 +559,9 @@
 			     keeps those actions on the owning relay. -->
 			<SessionItem
 				session={s}
+				pinned={s.pinnedAt != null}
+				{settled}
+				settledAt={settled ? formatTimeAgo(s.settledAt) : undefined}
 				href={getRowHref(s)}
 				projectLabel={getProjectLabel(s)}
 				onswitchsession={(id) => handleSwitchSession(id, s.projectSlug)}
@@ -506,6 +569,9 @@
 		{:else}
 			<SessionItem
 				session={s}
+				pinned={s.pinnedAt != null}
+				{settled}
+				settledAt={settled ? formatTimeAgo(s.settledAt) : undefined}
 				href={getRowHref(s)}
 				projectLabel={getProjectLabel(s)}
 				active={s.id === sessionState.currentId}
@@ -538,6 +604,26 @@
 					{/each}
 				{/if}
 			{/each}
+			{#if groups.settled.length > 0}
+				<TextButton
+					tone="dimmer"
+					class="session-group-label flex items-center gap-1 pt-1.5 pb-0.5 px-3 text-xs font-semibold tracking-[0.3px] font-brand"
+					data-testid="settled-shelf-toggle"
+					aria-expanded={settledShelfOpen}
+					aria-controls="settled-shelf-rows"
+					onclick={() => { if (!searching) setSettledShelfOpen(!uiState.settledShelfOpen); }}
+				>
+					<Icon name={settledShelfOpen ? "chevron-down" : "chevron-right"} size={12} />
+					Settled
+				</TextButton>
+				<div id="settled-shelf-rows">
+					{#if settledShelfOpen}
+						{#each groups.settled as s (s.id)}
+							{@render sessionRow(s)}
+						{/each}
+					{/if}
+				</div>
+			{/if}
 		{/if}
 
 		<!-- Paging sentinel. Inside the scroll region so the observer's root
@@ -577,6 +663,8 @@
 		session={ctxMenuSession}
 		anchor={ctxMenuAnchor}
 		onrename={handleCtxRename}
+		onsettle={(_id, next) => { if (ctxMenuSession) void handleCtxSettle(ctxMenuSession, next); }}
+		onpin={(_id, next) => { if (ctxMenuSession) void handleCtxPin(ctxMenuSession, next); }}
 		ondelete={handleCtxDelete}
 		oncopyresume={handleCtxCopyResume}
 		onfork={handleCtxFork}

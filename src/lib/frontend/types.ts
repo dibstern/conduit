@@ -188,6 +188,8 @@ export interface SystemMessage {
  *  failure and a pending approval both mean "a human is needed", and one
  *  heading for that reads faster than three. */
 export interface AttentionGroups {
+	pinned: SessionInfo[];
+	settled: SessionInfo[];
 	needsYou: SessionInfo[];
 	running: SessionInfo[];
 	doneUnread: SessionInfo[];
@@ -279,6 +281,7 @@ export interface Toast {
 	message: string;
 	variant: ToastVariant;
 	duration: number;
+	action?: { label: string; run: () => void };
 }
 
 // ─── Banner Types ────────────────────────────────────────────────────────────

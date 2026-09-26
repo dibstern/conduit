@@ -77,6 +77,8 @@ export {
 	type SetHiddenEntriesResponse,
 	SetLogLevel,
 	SetProjectInstance,
+	SetSessionPinned,
+	SetSessionSettled,
 	StartInstance,
 	StopInstance,
 	SwitchAgent,

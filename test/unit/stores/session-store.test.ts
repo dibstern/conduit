@@ -221,6 +221,45 @@ describe("switchToSession", () => {
 // ─── groupSessionsByAttention (pure function) ───────────────────────────────
 
 describe("groupSessionsByAttention", () => {
+	it("keeps pinned and settled sessions out of every attention tier", () => {
+		const groups = groupSessionsByAttention([
+			makeSession({
+				id: "second-pin",
+				pinnedAt: 20,
+				attention: "working",
+				updatedAt: 999,
+			}),
+			makeSession({
+				id: "first-pin",
+				pinnedAt: 0,
+				settledAt: 40,
+				attention: "needs-approval",
+				updatedAt: 1,
+			}),
+			makeSession({
+				id: "old-settle",
+				settledAt: 0,
+				attention: "done-unread",
+				updatedAt: 999,
+			}),
+			makeSession({
+				id: "new-settle",
+				settledAt: 30,
+				attention: "needs-reply",
+				updatedAt: 1,
+			}),
+		]);
+		expect(groups.pinned.map((s) => s.id)).toEqual(["first-pin", "second-pin"]);
+		expect(groups.settled.map((s) => s.id)).toEqual([
+			"new-settle",
+			"old-settle",
+		]);
+		expect(groups.needsYou).toEqual([]);
+		expect(groups.running).toEqual([]);
+		expect(groups.doneUnread).toEqual([]);
+		expect(groups.idle).toEqual([]);
+	});
+
 	it("files each tier under its section", () => {
 		const groups = groupSessionsByAttention([
 			makeSession({ id: "approve", attention: "needs-approval" }),
@@ -327,6 +366,24 @@ describe("handleSessionList", () => {
 			},
 		]);
 		expect(sessionState.sessions.get("rpc-root")?.title).toBe("RPC Root");
+	});
+
+	it("keeps settle and pin through ListSessions RPC responses", () => {
+		// A reload's first list arrives this way; dropping the fields here
+		// silently unpins and unsettles every row until the next broadcast.
+		applyListSessionsResponse({
+			projectSlug: "project-a",
+			roots: true,
+			sessions: [
+				{ id: "pinned", title: "P", pinnedAt: 10 },
+				{ id: "settled", title: "S", settledAt: 20 },
+			],
+		});
+
+		expect(sessionState.rootSessions).toEqual([
+			{ id: "pinned", title: "P", pinnedAt: 10 },
+			{ id: "settled", title: "S", settledAt: 20 },
+		]);
 	});
 
 	it("ignores non-array sessions payload", () => {

@@ -14,6 +14,8 @@
 		{session}
 		{anchor}
 		onrename={() => {}}
+		onsettle={() => {}}
+		onpin={() => {}}
 		ondelete={() => {}}
 		oncopyresume={() => {}}
 		onfork={() => {}}

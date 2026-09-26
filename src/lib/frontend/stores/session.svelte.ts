@@ -301,7 +301,7 @@ export function getFilteredSessions(): SessionInfo[] {
 	return sessions.filter((s) => s.title.toLowerCase().includes(query));
 }
 
-/** Get sessions grouped into the sidebar's four sections. */
+/** Get sessions grouped into the sidebar's sections. */
 export function getAttentionGroups(): AttentionGroups {
 	return groupSessionsByAttention(getFilteredSessions());
 }
@@ -331,11 +331,13 @@ const NEEDS_YOU_ORDER: readonly SessionAttention[] = [
 	"error",
 ];
 
-/** Group sessions into the sidebar's four sections, in tier order. */
+/** Manual pin/settle placement takes precedence over attention tiers. */
 export function groupSessionsByAttention(
 	sessions: SessionInfo[],
 ): AttentionGroups {
 	const groups: AttentionGroups = {
+		pinned: [],
+		settled: [],
 		needsYou: [],
 		running: [],
 		doneUnread: [],
@@ -343,6 +345,14 @@ export function groupSessionsByAttention(
 	};
 
 	for (const s of sessions) {
+		if (s.pinnedAt != null) {
+			groups.pinned.push(s);
+			continue;
+		}
+		if (s.settledAt != null) {
+			groups.settled.push(s);
+			continue;
+		}
 		switch (sessionAttention(s)) {
 			case "needs-approval":
 			case "needs-reply":
@@ -361,6 +371,8 @@ export function groupSessionsByAttention(
 		}
 	}
 
+	groups.pinned.sort((a, b) => (a.pinnedAt ?? 0) - (b.pinnedAt ?? 0));
+	groups.settled.sort((a, b) => (b.settledAt ?? 0) - (a.settledAt ?? 0));
 	// Stable, so recency still decides between two rows of the same tier.
 	groups.needsYou.sort(
 		(a, b) =>
@@ -441,6 +453,8 @@ const sessionInfoFromRpc = (
 		: {}),
 	...(session.attention != null ? { attention: session.attention } : {}),
 	...(session.unread != null ? { unread: session.unread } : {}),
+	...(session.settledAt != null ? { settledAt: session.settledAt } : {}),
+	...(session.pinnedAt != null ? { pinnedAt: session.pinnedAt } : {}),
 	...(session.projectSlug != null ? { projectSlug: session.projectSlug } : {}),
 });
 

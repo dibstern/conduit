@@ -21,6 +21,7 @@
 	import Icon from "../ui/Icon.svelte";
 	import Menu from "../ui/Menu.svelte";
 	import MenuItem from "../ui/MenuItem.svelte";
+	import MenuSeparator from "../ui/MenuSeparator.svelte";
 
 	// ─── Props ──────────────────────────────────────────────────────────────────
 
@@ -28,6 +29,8 @@
 		session,
 		anchor,
 		onrename,
+		onsettle,
+		onpin,
 		ondelete,
 		oncopyresume,
 		onfork,
@@ -36,6 +39,8 @@
 		session: SessionInfo;
 		anchor: HTMLElement;
 		onrename: (id: string) => void;
+		onsettle: (id: string, next: boolean) => void;
+		onpin: (id: string, next: boolean) => void;
 		ondelete: (id: string, title: string) => void;
 		oncopyresume: (id: string) => void;
 		onfork: (id: string) => void;
@@ -74,6 +79,26 @@
 	<!-- Intentionally empty: the anchor is an element the consumer owns, so
 	     there is nothing for us to render. `customAnchor` does the pointing. -->
 	{#snippet trigger()}{/snippet}
+
+	<MenuItem
+		data-testid={session.settledAt != null ? "session-ctx-unsettle" : "session-ctx-settle"}
+		disabled={session.pinnedAt != null}
+		onselect={() => onsettle(session.id, session.settledAt == null)}
+	>
+		<Icon name={session.settledAt != null ? "undo" : "check"} size={13} />
+		<span>{session.settledAt != null ? "Un-settle" : "Settle"}</span>
+		{#if session.pinnedAt != null}
+			<span class="ml-auto text-xs text-text-dimmer">Unpin to settle</span>
+		{/if}
+	</MenuItem>
+	<MenuItem
+		data-testid={session.pinnedAt != null ? "session-ctx-unpin" : "session-ctx-pin"}
+		onselect={() => onpin(session.id, session.pinnedAt == null)}
+	>
+		<Icon name={session.pinnedAt != null ? "star-off" : "star"} size={13} />
+		<span>{session.pinnedAt != null ? "Unpin" : "Pin to top"}</span>
+	</MenuItem>
+	<MenuSeparator />
 
 	<MenuItem
 		data-testid="session-ctx-rename"

@@ -11,10 +11,12 @@ import {
 	sessionState,
 	setSearchQuery,
 } from "../../stores/session.svelte.js";
+import { uiState } from "../../stores/ui.svelte.js";
 import { mockSessionsAllGroups } from "../../stories/mocks.js";
 import SessionList from "./SessionList.svelte";
 
 function resetSessionState() {
+	uiState.settledShelfOpen = false;
 	sessionState.rootSessions = [];
 	sessionState.familySessions = [];
 	sessionState.daemonSessions = [];
@@ -55,6 +57,67 @@ export default meta;
 type Story = StoryObj<typeof meta>;
 
 export const Empty: Story = {};
+
+export const PinnedAndSettledShelfCollapsed: Story = {
+	name: "Pinned and settled, shelf collapsed",
+	beforeEach: () => {
+		sessionState.rootSessions = [
+			...mockSessionsAllGroups,
+			{
+				id: "pinned",
+				title: "Review authentication",
+				attention: "needs-approval",
+				pinnedAt: Date.now() - 300_000,
+			},
+			{
+				id: "settled",
+				title: "Fix navigation",
+				attention: "done-unread",
+				settledAt: Date.now() - 120_000,
+			},
+		];
+		sessionState.familySessions = [...sessionState.rootSessions];
+	},
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		await expect(canvas.getByTestId("settled-shelf-toggle")).toHaveAttribute(
+			"aria-expanded",
+			"false",
+		);
+		await expect(canvas.queryByText("Fix navigation")).not.toBeInTheDocument();
+	},
+};
+
+export const PinnedAndSettledShelfOpen: Story = {
+	name: "Pinned and settled, shelf open",
+	beforeEach: () => {
+		uiState.settledShelfOpen = true;
+		sessionState.rootSessions = [
+			...mockSessionsAllGroups,
+			{
+				id: "pinned",
+				title: "Review authentication",
+				attention: "needs-approval",
+				pinnedAt: Date.now() - 300_000,
+			},
+			{
+				id: "settled",
+				title: "Fix navigation",
+				attention: "done-unread",
+				settledAt: Date.now() - 120_000,
+			},
+		];
+		sessionState.familySessions = [...sessionState.rootSessions];
+	},
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		await expect(canvas.getByTestId("settled-shelf-toggle")).toHaveAttribute(
+			"aria-expanded",
+			"true",
+		);
+		await expect(canvas.getByText("Fix navigation")).toBeVisible();
+	},
+};
 
 export const WithItems: Story = {
 	beforeEach: () => {

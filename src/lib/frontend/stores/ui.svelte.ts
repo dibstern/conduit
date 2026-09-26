@@ -7,6 +7,7 @@ import { generateUuid } from "../utils/format.js";
 // ─── Constants ──────────────────────────────────────────────────────────────
 
 const SIDEBAR_STORAGE_KEY = "sidebar-collapsed";
+const SETTLED_SHELF_STORAGE_KEY = "settled-shelf-open";
 const SIDEBAR_WIDTH_KEY = "sidebar-width";
 const FILE_VIEWER_WIDTH_KEY = "file-viewer-width";
 
@@ -31,6 +32,7 @@ export const FILE_VIEWER_MAX_WIDTH = 70; // percentage
 export const uiState = $state({
 	// Sidebar
 	sidebarCollapsed: safeGetItem(SIDEBAR_STORAGE_KEY) === "true",
+	settledShelfOpen: safeGetItem(SETTLED_SHELF_STORAGE_KEY) === "true",
 	sidebarPanel: "sessions" as "sessions" | "files",
 	sidebarWidth: Number(safeGetItem(SIDEBAR_WIDTH_KEY)) || SIDEBAR_DEFAULT_WIDTH,
 
@@ -126,17 +128,31 @@ export function setSidebarWidth(width: number): void {
 	}
 }
 
+export function setSettledShelfOpen(open: boolean): void {
+	uiState.settledShelfOpen = open;
+	try {
+		localStorage.setItem(SETTLED_SHELF_STORAGE_KEY, String(open));
+	} catch {
+		/* Storage may be unavailable; keep the in-memory preference. */
+	}
+}
+
 // ─── Toast actions ──────────────────────────────────────────────────────────
 
 export function showToast(
 	message: string,
-	options?: { duration?: number; variant?: ToastVariant },
+	options?: {
+		duration?: number;
+		variant?: ToastVariant;
+		action?: Toast["action"];
+	},
 ): void {
 	const toast: Toast = {
 		id: generateUuid(),
 		message,
 		variant: options?.variant ?? "default",
 		duration: options?.duration ?? 7000,
+		...(options?.action ? { action: options.action } : {}),
 	};
 	uiState.toasts = [...uiState.toasts, toast];
 

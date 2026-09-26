@@ -1,9 +1,12 @@
-import { cleanup, render, screen } from "@testing-library/svelte";
+import { cleanup, fireEvent, render, screen } from "@testing-library/svelte";
 import { flushSync, tick } from "svelte";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import Toast from "../../../src/lib/frontend/components/overlays/Toast.svelte";
-import { uiState } from "../../../src/lib/frontend/stores/ui.svelte.js";
+import {
+	showToast,
+	uiState,
+} from "../../../src/lib/frontend/stores/ui.svelte.js";
 import type { Toast as ToastType } from "../../../src/lib/frontend/types.js";
 
 async function renderToasts(toasts: ToastType[]): Promise<void> {
@@ -14,6 +17,34 @@ async function renderToasts(toasts: ToastType[]): Promise<void> {
 }
 
 describe("Toast", () => {
+	it("runs the stored action and dismisses its toast", async () => {
+		const run = vi.fn();
+		showToast("Moved a session to Settled", {
+			duration: 5000,
+			action: { label: "Undo", run },
+		});
+		render(Toast);
+		const toast = screen.getByRole("status");
+		expect(toast.classList.contains("bg-inverse-bg")).toBe(true);
+		expect(toast.classList.contains("text-inverse-text")).toBe(true);
+		const action = screen.getByTestId("toast-action");
+		expect(action.tagName).toBe("BUTTON");
+		expect(action.textContent?.trim()).toBe("Undo");
+		await fireEvent.click(action);
+		expect(run).toHaveBeenCalledOnce();
+		expect(uiState.toasts).toEqual([]);
+		expect(screen.queryByRole("status")).toBeNull();
+	});
+
+	it("renders no action for an ordinary toast", () => {
+		showToast("Saved");
+		render(Toast);
+		expect(screen.queryByTestId("toast-action")).toBeNull();
+		expect(screen.getByRole("status").classList.contains("bg-bg-alt")).toBe(
+			true,
+		);
+	});
+
 	beforeEach(() => {
 		uiState.toasts = [];
 	});

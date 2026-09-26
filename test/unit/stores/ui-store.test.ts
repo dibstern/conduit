@@ -44,6 +44,7 @@ import {
 	removeBanner,
 	resetProjectUI,
 	resolveConfirm,
+	setSettledShelfOpen,
 	setSidebarPanel,
 	showBanner,
 	showToast,
@@ -78,6 +79,38 @@ beforeEach(() => {
 });
 
 // ─── Sidebar actions ────────────────────────────────────────────────────────
+
+describe("settled shelf preference", () => {
+	it("starts collapsed with no saved preference", async () => {
+		vi.resetModules();
+		const fresh = await import("../../../src/lib/frontend/stores/ui.svelte.js");
+		expect(fresh.uiState.settledShelfOpen).toBe(false);
+	});
+
+	it("restores the saved preference when the store loads", async () => {
+		localStorageMock.setItem("settled-shelf-open", "true");
+		vi.resetModules();
+		const fresh = await import("../../../src/lib/frontend/stores/ui.svelte.js");
+		expect(fresh.uiState.settledShelfOpen).toBe(true);
+	});
+
+	it("persists both states", () => {
+		setSettledShelfOpen(true);
+		expect(uiState.settledShelfOpen).toBe(true);
+		expect(localStorageMock.getItem("settled-shelf-open")).toBe("true");
+		setSettledShelfOpen(false);
+		expect(uiState.settledShelfOpen).toBe(false);
+		expect(localStorageMock.getItem("settled-shelf-open")).toBe("false");
+	});
+
+	it("still changes state when storage is unavailable", () => {
+		localStorageMock.setItem.mockImplementationOnce(() => {
+			throw new Error("unavailable");
+		});
+		expect(() => setSettledShelfOpen(true)).not.toThrow();
+		expect(uiState.settledShelfOpen).toBe(true);
+	});
+});
 
 describe("collapseSidebar", () => {
 	it("sets sidebarCollapsed to true", () => {

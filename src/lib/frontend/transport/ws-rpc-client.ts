@@ -320,6 +320,20 @@ export interface RenameSessionRpcInput {
 	readonly originId?: string;
 }
 
+export interface SetSessionSettledRpcInput {
+	readonly projectSlug: string;
+	readonly sessionId: string;
+	readonly settled: boolean;
+	readonly originId?: string;
+}
+
+export interface SetSessionPinnedRpcInput {
+	readonly projectSlug: string;
+	readonly sessionId: string;
+	readonly pinned: boolean;
+	readonly originId?: string;
+}
+
 export interface SwitchVariantRpcInput {
 	readonly projectSlug: string;
 	readonly sessionId: string;
@@ -1110,6 +1124,42 @@ const callRenameSession = (input: RenameSessionRpcInput) =>
 		Effect.provide(RpcSerialization.layerJson),
 	);
 
+const callSetSessionSettled = (input: SetSessionSettledRpcInput) =>
+	Effect.scoped(
+		Effect.gen(function* () {
+			const client = yield* RpcClient.make(WsRpcGroup);
+			yield* client.SetSessionSettled({
+				projectSlug: input.projectSlug,
+				sessionId: input.sessionId,
+				settled: input.settled,
+				...(input.originId ? { originId: input.originId } : {}),
+			});
+		}),
+	).pipe(
+		Effect.provide(RpcClient.layerProtocolSocket()),
+		Effect.provide(Socket.layerWebSocket(makeWsRpcUrl())),
+		Effect.provide(Socket.layerWebSocketConstructorGlobal),
+		Effect.provide(RpcSerialization.layerJson),
+	);
+
+const callSetSessionPinned = (input: SetSessionPinnedRpcInput) =>
+	Effect.scoped(
+		Effect.gen(function* () {
+			const client = yield* RpcClient.make(WsRpcGroup);
+			yield* client.SetSessionPinned({
+				projectSlug: input.projectSlug,
+				sessionId: input.sessionId,
+				pinned: input.pinned,
+				...(input.originId ? { originId: input.originId } : {}),
+			});
+		}),
+	).pipe(
+		Effect.provide(RpcClient.layerProtocolSocket()),
+		Effect.provide(Socket.layerWebSocket(makeWsRpcUrl())),
+		Effect.provide(Socket.layerWebSocketConstructorGlobal),
+		Effect.provide(RpcSerialization.layerJson),
+	);
+
 const callSwitchVariant = (input: SwitchVariantRpcInput) =>
 	Effect.scoped(
 		Effect.gen(function* () {
@@ -1547,6 +1597,18 @@ export async function renameSessionRpc(
 	input: RenameSessionRpcInput,
 ): Promise<void> {
 	await runTransportEffect(callRenameSession(input));
+}
+
+export async function setSessionSettledRpc(
+	input: SetSessionSettledRpcInput,
+): Promise<void> {
+	await runTransportEffect(callSetSessionSettled(input));
+}
+
+export async function setSessionPinnedRpc(
+	input: SetSessionPinnedRpcInput,
+): Promise<void> {
+	await runTransportEffect(callSetSessionPinned(input));
 }
 
 export async function switchVariantRpc(
