@@ -3,7 +3,7 @@
 <!-- Reads from sessionState store and renders SessionItem components. -->
 
 <script lang="ts">
-	import { untrack } from "svelte";
+	import { tick, untrack } from "svelte";
 	import type { SessionInfo } from "../../types.js";
 	import {
 		sessionState,
@@ -24,6 +24,7 @@
 		getSessionGrouping,
 		getSessionScope,
 		getSessionStatusFilter,
+		setSessionScope,
 		setSessionGrouping,
 		setSessionStatusFilter,
 		type SessionStatusFilter,
@@ -48,6 +49,7 @@
 	} from "../../transport/ws-rpc-client.js";
 	import {
 		confirm,
+		dismissToast,
 		showToast,
 		uiState,
 		setSettledShelfOpen,
@@ -57,10 +59,12 @@
 	import { getSnoozePresets } from "../../utils/snooze.js";
 	import { WsRpcError } from "../../transport/ws-rpc.js";
 	import { toggleSessionRead } from "../../utils/session-read.js";
+	import { getSessionActionState } from "../../utils/swipe.js";
 	import SessionItem from "./SessionItem.svelte";
 	import SessionPager from "./SessionPager.svelte";
 	import SessionContextMenu from "./SessionContextMenu.svelte";
 	import SnoozeSheet from "./SnoozeSheet.svelte";
+	import ShortcutSheet from "./ShortcutSheet.svelte";
 	import Icon from "../ui/Icon.svelte";
 	import BlockGrid from "../ui/BlockGrid.svelte";
 	import Button from "../ui/Button.svelte";
@@ -89,6 +93,10 @@
 	let snoozeSession = $state<SessionInfo | null>(null);
 	let snoozeSheetNow = $state(0);
 	let heldSessionId = $state<string | null>(null);
+	let shortcutSheetOpen = $state(false);
+	let shortcutReturnFocus: HTMLElement | null = null;
+	let focusedRowId = $state<string | null>(null);
+	let focusedRowIndex = $state(0);
 
 	// Rename state — set by context menu to trigger inline rename on a SessionItem
 	let renamingSessionId = $state<string | null>(null);
@@ -130,6 +138,12 @@
 	const searching = $derived(sessionState.searchQuery.trim().length > 0);
 	const settledShelfOpen = $derived(searching || uiState.settledShelfOpen);
 	const snoozedShelfOpen = $derived(searching || uiState.snoozedShelfOpen);
+	const visibleRowIds = $derived([
+		...arrangement.pinned.map((session) => session.id),
+		...arrangement.sections.flatMap((section) => section.sessions.map((session) => session.id)),
+		...(snoozedShelfOpen ? arrangement.snoozed.map((session) => session.id) : []),
+		...(settledShelfOpen ? arrangement.settled.map((session) => session.id) : []),
+	]);
 
 	const scope = $derived(getSessionScope());
 	const emptyMessage = $derived.by(() => {
@@ -195,6 +209,33 @@
 			cleanupMode = false;
 			selectedForDeletion = new Set();
 		}
+	});
+
+	// Keyed rows may be moved or destroyed while focused. Restore by identity,
+	// or take the row that replaced its old position when it leaves the list.
+	$effect(() => {
+		const ids = visibleRowIds;
+		const id = focusedRowId;
+		if (!id) return;
+		void tick().then(() => {
+			if (focusedRowId !== id) return;
+			const rows = Array.from(document.querySelectorAll<HTMLAnchorElement>("#session-list .session-item[data-session-id]"));
+			if (rows.length === 0) {
+				focusedRowId = null;
+				document.getElementById("session-list-scroller")?.focus();
+				return;
+			}
+			// Only recover focus the list itself dropped; never pull it from elsewhere.
+			const current = document.activeElement;
+			if (current && current !== document.body && !rows.includes(current as HTMLAnchorElement)) return;
+			const nextIndex = Math.min(focusedRowIndex, rows.length - 1);
+			const row = rows.find((element) => element.dataset["sessionId"] === id) ?? rows[nextIndex];
+			if (!row) return;
+			focusedRowId = row.dataset["sessionId"] ?? null;
+			focusedRowIndex = rows.indexOf(row);
+			if (document.activeElement !== row) row.focus();
+		});
+		void ids;
 	});
 
 	// ─── Handlers ───────────────────────────────────────────────────────────────
@@ -413,6 +454,94 @@
 		renamingSessionId = null;
 	}
 
+	function handleRowFocus(event: FocusEvent) {
+		const target = event.target;
+		if (!(target instanceof HTMLAnchorElement) || !target.matches("#session-list .session-item")) {
+			focusedRowId = null;
+			return;
+		}
+		focusedRowId = target.dataset["sessionId"] ?? null;
+		focusedRowIndex = Array.from(document.querySelectorAll("#session-list .session-item")).indexOf(target);
+	}
+
+	function isEditable(target: EventTarget | null): boolean {
+		return target instanceof HTMLElement &&
+			(target.closest("input, textarea, select, [contenteditable]") !== null || target.isContentEditable);
+	}
+
+	function handleListKeydown(event: KeyboardEvent) {
+		if (event.defaultPrevented || event.repeat || event.altKey || cleanupMode) return;
+		if (!window.matchMedia("(hover: hover) and (pointer: fine)").matches) return;
+		if (isEditable(event.target) || document.querySelector('[role="dialog"], [role="menu"]') || renamingSessionId) return;
+		if ((event.metaKey || event.ctrlKey) && !event.shiftKey && event.key.toLowerCase() === "z") {
+			const toast = [...uiState.toasts].reverse().find((item) => item.action);
+			if (toast?.action) {
+				event.preventDefault();
+				toast.action.run();
+				dismissToast(toast.id);
+			}
+			return;
+		}
+		if (event.metaKey || event.ctrlKey || (event.shiftKey && event.key !== "?")) return;
+		if (event.key === "?") {
+			event.preventDefault();
+			shortcutReturnFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+			shortcutSheetOpen = true;
+			return;
+		}
+		if (/^[0-9]$/.test(event.key)) {
+			const index = Number(event.key) - 1;
+			if (event.key === "0" || projectState.projects[index]) {
+				event.preventDefault();
+				setSessionScope(event.key === "0" ? null : projectState.projects[index]?.slug ?? null);
+			}
+			return;
+		}
+		const rows = Array.from(document.querySelectorAll<HTMLAnchorElement>("#session-list .session-item[data-session-id]"));
+		if (event.key === "j" || event.key === "k") {
+			if (rows.length === 0) return;
+			const current = rows.indexOf(document.activeElement as HTMLAnchorElement);
+			const active = rows.findIndex((row) => row.dataset["sessionId"] === sessionState.currentId);
+			const next = current < 0 ? (active < 0 ? 0 : active) : Math.max(0, Math.min(rows.length - 1, current + (event.key === "j" ? 1 : -1)));
+			event.preventDefault();
+			rows[next]?.focus();
+			rows[next]?.scrollIntoView({ block: "nearest" });
+			return;
+		}
+		const row = document.activeElement;
+		if (!(row instanceof HTMLAnchorElement) || !row.matches("#session-list .session-item")) return;
+		const session = filtered.find((item) => item.id === row.dataset["sessionId"]);
+		if (!session || isForeignSession(session)) return;
+		const actions = getSessionActionState(session, sessionState.now);
+		switch (event.key) {
+			case "s":
+				event.preventDefault();
+				if (actions.settleDisabledReason) showToast(actions.settleDisabledReason, { variant: "warn" });
+				else void handleCtxSettle(session, !actions.settled);
+				break;
+			case "z":
+				event.preventDefault();
+				if (actions.snoozed) void handleUnsnooze(session);
+				else if (actions.snoozeVisible && !actions.snoozeDisabledReason) handleOpenSnooze(session);
+				break;
+			case "p":
+				event.preventDefault();
+				void handleCtxPin(session, !actions.pinned);
+				break;
+			case "r":
+				event.preventDefault();
+				handleCtxRename(session.id);
+				break;
+		}
+	}
+
+	function closeShortcutSheet() {
+		shortcutSheetOpen = false;
+		const target = shortcutReturnFocus;
+		shortcutReturnFocus = null;
+		void tick().then(() => target?.focus());
+	}
+
 	async function handleCtxDelete(id: string, title: string) {
 		const confirmed = await confirm(
 			`Delete "${title}"? This session and its history will be permanently removed.`,
@@ -522,6 +651,9 @@
 		void renameSessionRpc({ projectSlug, sessionId: id, title });
 	}
 </script>
+
+<!-- A click anywhere forgets the focused row; focusin re-records it if the click landed on one. -->
+<svelte:window onkeydown={handleListKeydown} onfocusin={handleRowFocus} onpointerdown={() => { focusedRowId = null; }} />
 
 <div id="session-list" class="flex-1 flex flex-col overflow-hidden">
 	{#if routerState.sessionNotFound}
@@ -866,6 +998,8 @@
 		markOnly={isForeignSession(ctxMenuSession)}
 	/>
 {/if}
+
+<ShortcutSheet open={shortcutSheetOpen} onclose={closeShortcutSheet} />
 
 {#if snoozeSession}
 	<SnoozeSheet

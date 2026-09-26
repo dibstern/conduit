@@ -295,7 +295,7 @@
 			cleanupMode
 				? "grid-cols-[44px_minmax(110px,1fr)_auto]"
 				: "grid-cols-[20px_minmax(110px,1fr)_auto]"
-		} gap-x-[9px] items-center ${densityClass} ${rowOpacityClass} rounded-panel cursor-pointer relative` +
+		} gap-x-[9px] items-center ${densityClass} ${rowOpacityClass} rounded-panel cursor-pointer relative focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent` +
 			(active
 				? " active bg-bg-surface text-text"
 				: " text-text-secondary hover:bg-sidebar-hover hover:text-text"),
@@ -726,7 +726,7 @@
 						class="size-[27px] rounded-[7px] text-text-secondary hover:text-text hover:bg-bg-alt"
 						data-testid={settled || actions.settled ? "session-act-unsettle" : "session-act-settle"}
 						ariaLabel="{settled || actions.settled ? 'Un-settle' : 'Settle'} {displayTitle}"
-						title={actions.settleDisabledReason ?? (settled || actions.settled ? "Un-settle" : "Settle")}
+						title={actions.settleDisabledReason ?? (settled || actions.settled ? "Un-settle (s)" : "Settle (s)")}
 						disabled={actions.settleDisabledReason != null}
 						onclick={(event) => { event.preventDefault(); event.stopPropagation(); onsettle?.(session.id, !(settled || actions.settled)); }}
 					><Icon name={settled || actions.settled ? "undo" : "check"} size={16} /></Button>
@@ -734,14 +734,14 @@
 						{#if snoozed || actions.snoozed}
 							<Button variant="ghost" size="content" tone="inherit" hoverFill="none"
 								class="size-[27px] rounded-[7px] text-text-secondary hover:text-text hover:bg-bg-alt"
-								data-testid="session-act-unsnooze" ariaLabel="Unsnooze {displayTitle}" title="Unsnooze"
+								data-testid="session-act-unsnooze" ariaLabel="Unsnooze {displayTitle}" title="Unsnooze (z)"
 								onclick={(event) => { event.preventDefault(); event.stopPropagation(); onunsnooze?.(session.id); }}
 							><Icon name="undo" size={16} /></Button>
 						{:else}
 							<Button variant="ghost" size="content" tone="inherit" hoverFill="none"
 								class="size-[27px] rounded-[7px] text-text-secondary hover:text-text hover:bg-bg-alt"
 								data-testid="session-act-snooze" ariaLabel="Snooze {displayTitle}"
-								title={actions.snoozeDisabledReason ?? "Snooze"} disabled={actions.snoozeDisabledReason != null}
+								title={actions.snoozeDisabledReason ?? "Snooze (z)"} disabled={actions.snoozeDisabledReason != null}
 								onclick={(event) => { event.preventDefault(); event.stopPropagation(); onsnooze?.(session.id); }}
 							><Icon name="moon" size={16} /></Button>
 						{/if}
@@ -749,7 +749,7 @@
 					<Button variant="ghost" size="content" tone="inherit" hoverFill="none"
 						class="size-[27px] rounded-[7px] text-text-secondary hover:text-text hover:bg-bg-alt"
 						data-testid={actions.pinned ? "session-act-unpin" : "session-act-pin"}
-						ariaLabel="{actions.pinned ? 'Unpin' : 'Pin'} {displayTitle}" title={actions.pinned ? "Unpin" : "Pin"}
+						ariaLabel="{actions.pinned ? 'Unpin' : 'Pin'} {displayTitle}" title={actions.pinned ? "Unpin (p)" : "Pin (p)"}
 						onclick={(event) => { event.preventDefault(); event.stopPropagation(); onpin?.(session.id, !actions.pinned); }}
 						><Icon name={actions.pinned ? "star-off" : "star"} size={16} /></Button>
 					{/if}

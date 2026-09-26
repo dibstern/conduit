@@ -126,6 +126,7 @@
 	>
 		<Icon name={session.settledAt != null ? "undo" : "check"} size={13} />
 		<span>{session.settledAt != null ? "Un-settle" : "Settle"}</span>
+		<span class="ml-auto text-xs text-text-muted">s</span>
 		{#if actions.settleDisabledReason}
 			<span class="ml-auto text-xs text-text-dimmer">{actions.settleDisabledReason}</span>
 		{/if}
@@ -148,6 +149,7 @@
 		>
 			<Icon name="moon" size={13} />
 			<span>{actions.snoozed ? "Change snooze…" : "Snooze…"}</span>
+			<span class="ml-auto text-xs text-text-muted">z</span>
 			{#if actions.snoozeDisabledReason}
 				<span class="ml-auto text-xs text-text-dimmer">{actions.snoozeDisabledReason}</span>
 			{/if}
@@ -155,7 +157,7 @@
 		{#if actions.snoozed}
 			<MenuItem data-testid="session-ctx-unsnooze" onselect={() => select(() => onunsnooze(session.id))}>
 				<Icon name="undo" size={13} />
-				<span>Unsnooze</span>
+				<span>Unsnooze</span><span class="ml-auto text-xs text-text-muted">z</span>
 			</MenuItem>
 		{/if}
 	{/if}
@@ -165,6 +167,7 @@
 	>
 		<Icon name={session.pinnedAt != null ? "star-off" : "star"} size={13} />
 		<span>{session.pinnedAt != null ? "Unpin" : "Pin to top"}</span>
+		<span class="ml-auto text-xs text-text-muted">p</span>
 	</MenuItem>
 	{/if}
 	{#if onmarkread && !actions.settled && !actions.snoozed}
@@ -174,7 +177,7 @@
 		>
 			<Icon name={session.unread ? "circle" : "circle-dot"} size={13} />
 			<span>{session.unread ? "Mark read" : "Mark unread"}</span>
-			<span class="ml-auto text-xs text-text-muted">⌘⇧U</span>
+			<span class="ml-auto text-xs text-text-muted">u · ⌘⇧U</span>
 		</MenuItem>
 	{/if}
 	{#if !markOnly}
@@ -186,6 +189,7 @@
 	>
 		<Icon name="pencil" size={13} />
 		<span>Rename</span>
+		<span class="ml-auto text-xs text-text-muted">r</span>
 	</MenuItem>
 
 	<MenuItem data-testid="session-ctx-fork" onselect={() => select(() => onfork(session.id))}>
