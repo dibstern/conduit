@@ -8,8 +8,6 @@
 //   - Semaphore(1) to prevent duplicate creation on concurrent gets
 //   - Layer.scoped ties all ScopedRefs to the layer scope
 
-import type http from "node:http";
-import type { Duplex } from "node:stream";
 import {
 	Context,
 	Data,
@@ -45,13 +43,8 @@ export interface Relay {
 	attach: (ws: WebSocket, options: WsAttachOptions) => () => void;
 	wsHandler: {
 		broadcast?: (message: RelayMessage) => void;
-		handleUpgrade: (
-			req: http.IncomingMessage,
-			socket: Duplex,
-			head: Buffer,
-		) => void;
 	};
-	rpcWsHandler: Pick<RpcWebSocketHandlerShape, "handleUpgrade" | "context">;
+	rpcWsHandler: Pick<RpcWebSocketHandlerShape, "context">;
 	getStatusSnapshot?: () => RelayStatusSnapshot;
 	setDefaultAgent?: (agent: string) => Promise<void>;
 	setDefaultModel?: (model: {

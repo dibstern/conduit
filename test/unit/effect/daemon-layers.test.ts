@@ -175,8 +175,8 @@ describe("DaemonHandleTag", () => {
 					Effect.succeed({
 						slug,
 						attach: () => () => {},
-						wsHandler: { handleUpgrade: () => {} },
-						rpcWsHandler: { handleUpgrade: () => {} },
+						wsHandler: {},
+						rpcWsHandler: {},
 						getStatusSnapshot: () => ({
 							sessionCount: slug === "existing" ? 5 : 4,
 							clients: 0,
@@ -198,8 +198,8 @@ describe("DaemonHandleTag", () => {
 								Option.some({
 									slug,
 									attach: () => () => {},
-									wsHandler: { handleUpgrade: () => {} },
-									rpcWsHandler: { handleUpgrade: () => {} },
+									wsHandler: {},
+									rpcWsHandler: {},
 									getStatusSnapshot: () => ({
 										sessionCount: slug === "existing" ? 5 : 4,
 										clients: 0,

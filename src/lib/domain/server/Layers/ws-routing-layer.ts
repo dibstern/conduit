@@ -4,7 +4,6 @@
 import { randomBytes } from "node:crypto";
 import type http from "node:http";
 import type net from "node:net";
-import type { Duplex } from "node:stream";
 import {
 	Context,
 	Data,
@@ -44,23 +43,11 @@ import {
 } from "../../daemon/Services/relay-cache.js";
 import { type AuthManagerService, AuthManagerTag } from "./auth-middleware.js";
 
-const PROJECT_WS_PATTERN = /^\/p\/([^/]+)\/(ws|rpc)(?:\?|$)/;
 const RELAY_WAIT_TIMEOUT_MS = 10_000;
-const SERVICE_UNAVAILABLE_RESPONSE = "HTTP/1.1 503 Service Unavailable\r\n\r\n";
 
 export interface WebSocketRelay {
 	readonly attach: Relay["attach"];
-	readonly wsHandler: {
-		readonly handleUpgrade: (
-			req: http.IncomingMessage,
-			socket: Duplex,
-			head: Buffer,
-		) => void;
-	};
-	readonly rpcWsHandler: Pick<
-		RpcWebSocketHandlerShape,
-		"handleUpgrade" | "context"
-	>;
+	readonly rpcWsHandler: Pick<RpcWebSocketHandlerShape, "context">;
 }
 
 export class WebSocketUpgradeError extends Data.TaggedError(
@@ -184,13 +171,6 @@ const destroySocket = (socket: net.Socket) =>
 		if (!socket.destroyed) socket.destroy();
 	});
 
-const writeServiceUnavailable = (socket: net.Socket) =>
-	Effect.sync(() => {
-		if (socket.destroyed) return;
-		if (socket.writable) socket.write(SERVICE_UNAVAILABLE_RESPONSE);
-		socket.destroy();
-	});
-
 const formatCause = (cause: unknown): string =>
 	cause instanceof Error ? cause.message : String(cause);
 
@@ -217,15 +197,6 @@ const authenticateUpgrade = (
 
 const handleFailure = (error: WebSocketUpgradeError, socket: net.Socket) =>
 	Effect.gen(function* () {
-		if (error.reason === "relay_unavailable") {
-			yield* Effect.logWarning("WS upgrade rejected: relay unavailable", {
-				slug: error.slug,
-				error: error.cause == null ? error.message : formatCause(error.cause),
-			});
-			yield* writeServiceUnavailable(socket);
-			return;
-		}
-
 		const log =
 			error.reason === "invalid_path" || error.reason === "daemon_shutting_down"
 				? Effect.logDebug
@@ -494,20 +465,7 @@ export const WebSocketRoutingLive: Layer.Layer<
 			Effect.gen(function* () {
 				const isSharedRpc = req.url === "/rpc" || req.url?.startsWith("/rpc?");
 				const isSharedWs = req.url === "/ws" || req.url?.startsWith("/ws?");
-				const match = req.url?.match(PROJECT_WS_PATTERN);
-				if (!isSharedRpc && !isSharedWs && !match) {
-					return yield* new WebSocketUpgradeError({
-						reason: "invalid_path",
-						url: req.url ?? "",
-					});
-				}
-
-				const slug = match?.[1];
-				if (
-					!isSharedRpc &&
-					!isSharedWs &&
-					(slug === undefined || slug.length === 0)
-				) {
+				if (!isSharedRpc && !isSharedWs) {
 					return yield* new WebSocketUpgradeError({
 						reason: "invalid_path",
 						url: req.url ?? "",
@@ -517,7 +475,6 @@ export const WebSocketRoutingLive: Layer.Layer<
 				if (!(yield* authenticateUpgrade(auth, req))) {
 					return yield* new WebSocketUpgradeError({
 						reason: "auth_failed",
-						...(slug === undefined ? {} : { slug }),
 						url: req.url ?? "",
 					});
 				}
@@ -526,7 +483,6 @@ export const WebSocketRoutingLive: Layer.Layer<
 				if (socket.destroyed || config.shuttingDown) {
 					return yield* new WebSocketUpgradeError({
 						reason: "daemon_shutting_down",
-						...(slug === undefined ? {} : { slug }),
 						url: req.url ?? "",
 					});
 				}
@@ -550,36 +506,6 @@ export const WebSocketRoutingLive: Layer.Layer<
 					});
 					return;
 				}
-				if (slug === undefined) return;
-				yield* relayRouter.ensureRelayStarted(slug);
-				const relay = yield* relayRouter.waitForRelay(
-					slug,
-					RELAY_WAIT_TIMEOUT_MS,
-				);
-				if (socket.destroyed) {
-					return yield* new WebSocketUpgradeError({
-						reason: "daemon_shutting_down",
-						slug,
-						url: req.url ?? "",
-					});
-				}
-
-				yield* Effect.logDebug("WS upgrade accepted", { slug });
-				yield* relayRouter.touchLastUsed(slug);
-				const endpoint = match?.[2] === "rpc" ? "rpc" : "ws";
-				yield* Effect.try({
-					try: () =>
-						endpoint === "rpc"
-							? relay.rpcWsHandler.handleUpgrade(req, socket, head)
-							: relay.wsHandler.handleUpgrade(req, socket, head),
-					catch: (cause) =>
-						new WebSocketUpgradeError({
-							reason: "relay_unavailable",
-							slug,
-							url: req.url ?? "",
-							cause,
-						}),
-				});
 			}).pipe(
 				Effect.catchAll((error) => handleFailure(error, socket)),
 				Effect.annotateLogs("component", "ws-routing"),

@@ -431,8 +431,10 @@ export function createMockProjectRelay(
 	overrides?: Partial<ProjectRelay>,
 ): ProjectRelay {
 	return {
-		wsHandler:
-			createMockWsHandlerFull() as unknown as ProjectRelay["wsHandler"],
+		wsHandler: {
+			...createMockWsHandlerFull(),
+			attach: vi.fn(() => () => {}),
+		} as unknown as ProjectRelay["wsHandler"],
 		rpcWsHandler: {
 			handleUpgrade: vi.fn(),
 			drain: vi.fn().mockResolvedValue(undefined),
@@ -670,7 +672,6 @@ export function makeMockWebSocketHandler(
 		getClientCount: vi.fn(() => 0),
 		getClientIds: vi.fn(() => []),
 		attach: vi.fn(() => () => {}),
-		handleUpgrade: vi.fn(),
 		close: vi.fn(),
 		drain: vi.fn(async () => undefined),
 		on: vi.fn(),

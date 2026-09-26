@@ -1,15 +1,8 @@
-import { randomBytes } from "node:crypto";
 import { EventEmitter } from "node:events";
-import type { IncomingMessage, Server } from "node:http";
-import type { Duplex } from "node:stream";
 import { Cause, Effect, Exit, Fiber, Runtime } from "effect";
 import type { RuntimeFiber } from "effect/Fiber";
 import type { RawData, WebSocket } from "ws";
-import {
-	makeHeartbeatFiber,
-	type WsTransport,
-	WsTransportTag,
-} from "../domain/relay/Layers/ws-transport-layer.js";
+import { makeHeartbeatFiber } from "../domain/relay/Layers/ws-transport-layer.js";
 import {
 	addClient,
 	bindClientSession,
@@ -47,25 +40,15 @@ type WsEventMap = {
 
 interface EffectWsHandlerOptions {
 	heartbeatInterval?: number;
-	maxPayload?: number;
-	server?: Server;
-	pathPrefix?: string;
-	/** Announced as `project_attached` to sockets that upgrade straight into this relay. */
-	projectSlug?: string;
-	verifyClient?: (
-		info: { origin: string; secure: boolean; req: IncomingMessage },
-		callback: (result: boolean, code?: number, message?: string) => void,
-	) => void;
 }
 
-type WsBridgeServices = WsHandlerStateTag | WsTransportTag;
+type WsBridgeServices = WsHandlerStateTag;
 
 type WsRunFork = <A, E>(
 	effect: Effect.Effect<A, E, WsBridgeServices>,
 ) => RuntimeFiber<A, E>;
 
 interface EffectWsHandlerRuntime {
-	readonly transport: WsTransport;
 	readonly runFork: WsRunFork;
 }
 
@@ -73,51 +56,26 @@ export const makeEffectWsHandler = (
 	options: EffectWsHandlerOptions = {},
 ): Effect.Effect<EffectWsHandler, never, WsBridgeServices> =>
 	Effect.gen(function* () {
-		const transport = yield* WsTransportTag;
 		const runtime = yield* Effect.runtime<WsBridgeServices>();
 		return new EffectWsHandler(options, {
-			transport,
 			runFork: Runtime.runFork(runtime),
 		});
 	});
 
 export class EffectWsHandler implements WebSocketHandlerShape {
 	private readonly events = new EventEmitter();
-	private readonly transport: WsTransport;
 	private readonly runFork: WsRunFork;
 	private readonly heartbeatFiber: RuntimeFiber<unknown, never>;
 	private readonly clients = new Set<string>();
 	private readonly clientSessions = new Map<string, string>();
 	private readonly sessionClients = new Map<string, Set<string>>();
-	private readonly upgradeListener?: (
-		req: IncomingMessage,
-		socket: Duplex,
-		head: Buffer,
-	) => void;
 	private closed = false;
 
 	constructor(
-		private readonly options: EffectWsHandlerOptions = {},
+		options: EffectWsHandlerOptions = {},
 		runtime: EffectWsHandlerRuntime,
 	) {
-		this.transport = runtime.transport;
 		this.runFork = runtime.runFork;
-		this.transport.wss.on("connection", (ws, req) =>
-			this.onConnection(ws, req),
-		);
-		if (options.server) {
-			this.upgradeListener = (req, socket, head) => {
-				if (!this.matchesPath(req.url)) return;
-				this.verifyUpgrade(req, socket, (allowed) => {
-					if (!allowed) {
-						socket.destroy();
-						return;
-					}
-					this.handleUpgrade(req, socket, head);
-				});
-			};
-			options.server.on("upgrade", this.upgradeListener);
-		}
 		this.heartbeatFiber = this.forkLogged(
 			"heartbeat",
 			makeHeartbeatFiber(options.heartbeatInterval ?? 30_000),
@@ -270,19 +228,6 @@ export class EffectWsHandler implements WebSocketHandlerShape {
 		return detach;
 	}
 
-	handleUpgrade(req: IncomingMessage, socket: Duplex, head: Buffer): void {
-		this.forkLogged(
-			"handleUpgrade",
-			this.transport.handleUpgrade(req, socket, head).pipe(
-				Effect.catchAll((err) =>
-					Effect.sync(() => {
-						socket.destroy(err instanceof Error ? err : undefined);
-					}),
-				),
-			),
-		);
-	}
-
 	close(): void {
 		void this.drain();
 	}
@@ -290,63 +235,12 @@ export class EffectWsHandler implements WebSocketHandlerShape {
 	async drain(): Promise<void> {
 		if (this.closed) return;
 		this.closed = true;
-		if (this.options.server && this.upgradeListener) {
-			this.options.server.off("upgrade", this.upgradeListener);
-		}
 		this.clearClientMirror();
 		await this.runEffectPromise(
 			"drain",
 			closeAllClients().pipe(
 				Effect.zipRight(Fiber.interrupt(this.heartbeatFiber)),
 			),
-		);
-	}
-
-	private onConnection(ws: WebSocket, req: IncomingMessage): void {
-		const clientId =
-			extractRequestedClientId(req.url) ?? randomBytes(8).toString("hex");
-		const requestedSessionId = extractRequestedSessionId(req.url);
-		// The frontend learns its project only from project_attached; the daemon
-		// /ws sends it itself, a direct relay socket (foreground mode) needs it here.
-		if (this.options.projectSlug != null) {
-			ws.send(
-				JSON.stringify({
-					type: "project_attached",
-					slug: this.options.projectSlug,
-				}),
-			);
-		}
-		this.attach(ws, {
-			clientId,
-			...(requestedSessionId != null && { requestedSessionId }),
-		});
-	}
-
-	private matchesPath(url: string | undefined): boolean {
-		if (!this.options.pathPrefix) return true;
-		return Boolean(
-			url === `${this.options.pathPrefix}/ws` ||
-				url?.startsWith(`${this.options.pathPrefix}/ws?`),
-		);
-	}
-
-	private verifyUpgrade(
-		req: IncomingMessage,
-		socket: Duplex,
-		callback: (allowed: boolean) => void,
-	): void {
-		if (!this.options.verifyClient) {
-			callback(true);
-			return;
-		}
-		this.options.verifyClient(
-			{
-				origin:
-					typeof req.headers.origin === "string" ? req.headers.origin : "",
-				secure: Boolean((socket as Duplex & { encrypted?: boolean }).encrypted),
-				req,
-			},
-			(result) => callback(result),
 		);
 	}
 
@@ -471,30 +365,5 @@ export class EffectWsHandler implements WebSocketHandlerShape {
 			if (this.closed) return;
 			console.error(`[ws-bridge] ${op} failed:`, err);
 		};
-	}
-}
-
-function extractRequestedSessionId(
-	url: string | undefined,
-): string | undefined {
-	if (!url) return undefined;
-	try {
-		const parsed = new URL(url, "http://localhost");
-		return parsed.searchParams.get("session") ?? undefined;
-	} catch {
-		return undefined;
-	}
-}
-
-function extractRequestedClientId(url: string | undefined): string | undefined {
-	if (!url) return undefined;
-	try {
-		const parsed = new URL(url, "http://localhost");
-		const clientId = parsed.searchParams.get("client") ?? undefined;
-		if (!clientId) return undefined;
-		if (!/^[A-Za-z0-9._:-]{1,128}$/.test(clientId)) return undefined;
-		return clientId;
-	} catch {
-		return undefined;
 	}
 }

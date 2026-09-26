@@ -45,8 +45,8 @@ describe("Full Layer composition", () => {
 			Effect.succeed({
 				slug,
 				attach: () => () => {},
-				wsHandler: { handleUpgrade: () => {} },
-				rpcWsHandler: { handleUpgrade: () => {} },
+				wsHandler: {},
+				rpcWsHandler: {},
 				stop: () => {},
 			}),
 		),

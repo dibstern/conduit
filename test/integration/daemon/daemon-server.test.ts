@@ -5,9 +5,9 @@
 // unit test suite (~15s total). Run via `pnpm test:integration`.
 //
 // Covers:
-// - WS upgrade blocking on registering projects (waitForRelay)
-// - WS upgrade for non-existent slugs
-// - WS upgrade returning 503 for failed relays
+// - WS attachment waiting on registering projects (waitForRelay)
+// - Rejection of removed per-project socket paths
+// - WS connections remaining unattached for failed relays
 // - WS upgrade rejection for non-matching URLs
 // - Instance status broadcast and health checking
 
@@ -16,6 +16,7 @@ import http from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import WebSocket from "ws";
 import {
 	type ForegroundDaemonHandle,
 	startForegroundDaemon,
@@ -59,13 +60,12 @@ describe("Daemon WS upgrade — waitForRelay integration", () => {
 		cleanTmpDir(tmpDir);
 	});
 
-	it("WS upgrade blocks on registering project, calls handleUpgrade when relay becomes ready", async () => {
+	it("WS connection attaches when a registering relay becomes ready", async () => {
 		const { createMockProjectRelay } = await import(
 			"../../helpers/mock-factories.js"
 		);
 		const relay = createMockProjectRelay();
-		(relay.wsHandler as unknown as Record<string, unknown>)["handleUpgrade"] =
-			vi.fn();
+		const attach = vi.spyOn(relay.wsHandler, "attach");
 
 		let releaseRelay!: () => void;
 		const relayGate = new Promise<void>((resolve) => {
@@ -83,7 +83,7 @@ describe("Daemon WS upgrade — waitForRelay integration", () => {
 		const projectDir = join(tmpDir, slug);
 		mkdirSync(projectDir, { recursive: true });
 		let d: ForegroundDaemonHandle | null = null;
-		let upgradeReq: http.ClientRequest | null = null;
+		let ws: WebSocket | null = null;
 
 		try {
 			d = await startForegroundDaemon({
@@ -100,23 +100,19 @@ describe("Daemon WS upgrade — waitForRelay integration", () => {
 					.projects.find((project) => project.slug === slug)?.status,
 			).toBe("registering");
 
-			upgradeReq = http.request({
-				hostname: "127.0.0.1",
-				port,
-				path: `/p/${slug}/ws`,
-				headers: {
-					Connection: "Upgrade",
-					Upgrade: "websocket",
-					"Sec-WebSocket-Version": "13",
-					"Sec-WebSocket-Key": "dGhlIHNhbXBsZSBub25jZQ==",
-				},
+			ws = new WebSocket(
+				`ws://127.0.0.1:${port}/ws?p=${slug}&client=waiting-client`,
+			);
+			const socket = ws;
+			await new Promise<void>((resolve, reject) => {
+				socket.once("open", resolve);
+				socket.once("error", reject);
 			});
-			upgradeReq.on("error", () => {});
-			upgradeReq.end();
 
 			await vi.waitFor(() => {
 				expect(createProjectRelayMock).toHaveBeenCalled();
 			});
+			expect(attach).not.toHaveBeenCalled();
 
 			releaseRelay();
 
@@ -128,18 +124,22 @@ describe("Daemon WS upgrade — waitForRelay integration", () => {
 				).toBe("ready");
 			});
 			await vi.waitFor(() => {
-				expect(relay.wsHandler.handleUpgrade).toHaveBeenCalled();
+				expect(attach).toHaveBeenCalledWith(expect.any(WebSocket), {
+					clientId: "waiting-client",
+					skipDefaultSession: true,
+				});
 			});
-
-			upgradeReq.destroy();
 		} finally {
-			upgradeReq?.destroy();
+			ws?.terminate();
 			await d?.stop();
 			vi.doUnmock("../../../src/lib/relay/relay-stack.js");
 		}
 	});
 
-	it("WS upgrade for non-existent slug destroys socket immediately", async () => {
+	it.each([
+		"/p/ghost/ws",
+		"/p/ghost/rpc",
+	])("rejects removed socket path %s", async (path) => {
 		const d = await startForegroundDaemon(daemonOpts(tmpDir));
 		const port = d.port;
 
@@ -148,7 +148,7 @@ describe("Daemon WS upgrade — waitForRelay integration", () => {
 				const req = http.request({
 					hostname: "127.0.0.1",
 					port,
-					path: "/p/ghost/ws",
+					path,
 					headers: {
 						Connection: "Upgrade",
 						Upgrade: "websocket",
@@ -168,70 +168,46 @@ describe("Daemon WS upgrade — waitForRelay integration", () => {
 			});
 
 			// Socket should be destroyed by the daemon (connection reset or closed)
-			expect(error).toBeDefined();
+			expect(error).toMatchObject({ code: "ECONNRESET" });
 		} finally {
 			await d.stop();
 		}
 	});
 
-	it("WS upgrade returns HTTP 503 when relay fails to become ready", async () => {
+	it("WS stays open without attaching when the relay fails to become ready", async () => {
 		const d = await startForegroundDaemon(daemonOpts(tmpDir));
 		const port = d.port;
 
 		// Add a project with no usable OpenCode instance. Relay startup should
-		// fail through the Effect-owned relay cache and return HTTP 503.
+		// fail through the Effect-owned relay cache without closing the daemon socket.
 		await d.addProject("/home/user/error-app", "error-app");
 		const slug = "error-app";
+		const ws = new WebSocket(`ws://127.0.0.1:${port}/ws?p=${slug}`);
+		const messages: string[] = [];
+		ws.on("message", (data) => messages.push(data.toString()));
 
 		try {
-			const result = await new Promise<
-				{ statusCode: number } | { error: Error }
-			>((resolve) => {
-				const req = http.request({
-					hostname: "127.0.0.1",
-					port,
-					path: `/p/${slug}/ws`,
-					headers: {
-						Connection: "Upgrade",
-						Upgrade: "websocket",
-						"Sec-WebSocket-Version": "13",
-						"Sec-WebSocket-Key": "dGhlIHNhbXBsZSBub25jZQ==",
-					},
-				});
-				const timeout = setTimeout(() => {
-					req.destroy();
-					resolve({ error: new Error("timed out") });
-				}, 5000);
-				req.on("response", (res) => {
-					clearTimeout(timeout);
-					resolve({ statusCode: res.statusCode ?? 0 });
-					res.resume();
-				});
-				req.on("error", (err) => {
-					clearTimeout(timeout);
-					resolve({ error: err });
-				});
-				req.end();
+			await new Promise<void>((resolve, reject) => {
+				ws.once("open", resolve);
+				ws.once("error", reject);
 			});
-
-			// The daemon should have written "HTTP/1.1 503 Service Unavailable"
-			// which Node sees as a regular response (not an upgrade)
-			expect("statusCode" in result).toBe(true);
-			if ("statusCode" in result) {
-				expect(result.statusCode).toBe(503);
-			}
 			await vi.waitFor(() => {
 				const project = d
 					.getStatus()
 					.projects.find((entry) => entry.slug === slug);
 				expect(project?.status).toBe("error");
 			});
+			expect(ws.readyState).toBe(WebSocket.OPEN);
+			expect(
+				messages.some((message) => message.includes("project_attached")),
+			).toBe(false);
 		} finally {
+			ws.terminate();
 			await d.stop();
 		}
 	});
 
-	it("WS upgrade on URL that does not match /p/{slug}/ws destroys socket", async () => {
+	it("WS upgrade on a path other than /ws or /rpc destroys socket", async () => {
 		const d = await startForegroundDaemon(daemonOpts(tmpDir));
 		const port = d.port;
 

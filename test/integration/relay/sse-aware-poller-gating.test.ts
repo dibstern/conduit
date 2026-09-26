@@ -14,6 +14,7 @@
 // Uses accelerated timing intervals (~10x faster than production) to avoid
 // 100+ second real-time waits while still exercising the same code paths.
 
+import { randomBytes } from "node:crypto";
 import {
 	createServer,
 	type IncomingMessage,
@@ -21,6 +22,7 @@ import {
 	type ServerResponse,
 } from "node:http";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { WebSocketServer } from "ws";
 import { createSilentLogger } from "../../../src/lib/logger.js";
 import {
 	createProjectRelay,
@@ -250,9 +252,28 @@ async function createTestHarness(
 		messagePollerInterval: TEST_MSG_POLL_MS,
 	});
 
+	const eventSockets = new WebSocketServer({ noServer: true });
 	relayServer.on("upgrade", (req, socket, head) => {
 		if (req.url === "/ws" || req.url?.startsWith("/ws?")) {
-			relay.wsHandler.handleUpgrade(req, socket, head);
+			eventSockets.handleUpgrade(req, socket, head, (ws) => {
+				const params = new URL(req.url ?? "/ws", "http://localhost")
+					.searchParams;
+				const requestedClientId = params.get("client") ?? "";
+				const clientId = /^[A-Za-z0-9._:-]{1,128}$/.test(requestedClientId)
+					? requestedClientId
+					: randomBytes(8).toString("hex");
+				const requestedSessionId = params.get("session") || undefined;
+				ws.send(
+					JSON.stringify({
+						type: "project_attached",
+						slug: `test-sse-gating-${relayPort}`,
+					}),
+				);
+				relay.wsHandler.attach(ws, {
+					clientId,
+					...(requestedSessionId != null && { requestedSessionId }),
+				});
+			});
 			return;
 		}
 		if (req.url === "/rpc" || req.url?.startsWith("/rpc?")) {
@@ -270,12 +291,15 @@ async function createTestHarness(
 		mock,
 		relayPort,
 		async connectClient() {
-			const client = new TestWsClient(`ws://127.0.0.1:${relayPort}/ws`);
+			const client = new TestWsClient(
+				`ws://127.0.0.1:${relayPort}/ws?p=test-sse-gating-${relayPort}`,
+			);
 			await client.waitForOpen();
 			return client;
 		},
 		async stop() {
 			await relay.stop();
+			await new Promise<void>((resolve) => eventSockets.close(() => resolve()));
 			await new Promise<void>((r) => relayServer.close(() => r()));
 			await mock.close();
 		},

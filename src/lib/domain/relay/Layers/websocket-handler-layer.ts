@@ -1,33 +1,19 @@
 import { Cause, Effect, Layer } from "effect";
 import { formatErrorDetail } from "../../../errors.js";
 import { makeEffectWsHandler } from "../../../server/effect-ws-handler.js";
-import {
-	ConfigTag,
-	LoggerTag,
-	WebSocketHandlerTag,
-} from "../Services/services.js";
+import { LoggerTag, WebSocketHandlerTag } from "../Services/services.js";
 import { makeWsHandlerStateLive } from "../Services/ws-handler-service.js";
-import { makeWsTransportLive } from "./ws-transport-layer.js";
 
 export const WebSocketHandlerLive: Layer.Layer<
 	WebSocketHandlerTag,
 	never,
-	ConfigTag | LoggerTag
+	LoggerTag
 > = Layer.scoped(
 	WebSocketHandlerTag,
 	Effect.gen(function* () {
-		const config = yield* ConfigTag;
 		const log = yield* LoggerTag;
 		const wsLog = log.child("ws-handler");
-		const handler = yield* makeEffectWsHandler({
-			projectSlug: config.slug,
-			...(!config.noServer && {
-				server: config.httpServer,
-				...(config.verifyClient != null && {
-					verifyClient: config.verifyClient,
-				}),
-			}),
-		});
+		const handler = yield* makeEffectWsHandler();
 
 		yield* Effect.addFinalizer(() =>
 			Effect.tryPromise({
@@ -53,11 +39,4 @@ export const WebSocketHandlerLive: Layer.Layer<
 
 		return handler;
 	}),
-).pipe(
-	Layer.provide(
-		Layer.mergeAll(
-			makeWsTransportLive({ noServer: true }),
-			makeWsHandlerStateLive(),
-		),
-	),
-);
+).pipe(Layer.provide(makeWsHandlerStateLive()));

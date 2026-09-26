@@ -1,10 +1,9 @@
 import { EventEmitter } from "node:events";
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
-import { Layer, ManagedRuntime } from "effect";
+import { ManagedRuntime } from "effect";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import WebSocket from "ws";
-import { makeWsTransportLive } from "../../../src/lib/domain/relay/Layers/ws-transport-layer.js";
+import WebSocket, { WebSocketServer } from "ws";
 import * as wsHandlerService from "../../../src/lib/domain/relay/Services/ws-handler-service.js";
 import { makeWsHandlerStateLive } from "../../../src/lib/domain/relay/Services/ws-handler-service.js";
 import {
@@ -12,6 +11,7 @@ import {
 	makeEffectWsHandler,
 } from "../../../src/lib/server/effect-ws-handler.js";
 import type {
+	WsAttachOptions,
 	WsClientConnectedEvent,
 	WsClientDisconnectedEvent,
 	WsMessageEvent,
@@ -29,12 +29,7 @@ afterEach(async () => {
 async function createHandler(
 	options: Parameters<typeof makeEffectWsHandler>[0],
 ): Promise<EffectWsHandler> {
-	const runtime = ManagedRuntime.make(
-		Layer.mergeAll(
-			makeWsHandlerStateLive(),
-			makeWsTransportLive({ noServer: true }),
-		),
-	);
+	const runtime = ManagedRuntime.make(makeWsHandlerStateLive());
 	const handler = await runtime.runPromise(makeEffectWsHandler(options));
 	cleanup.push(async () => {
 		await handler.drain();
@@ -43,19 +38,26 @@ async function createHandler(
 	return handler;
 }
 
-async function startServer(handler: EffectWsHandler): Promise<{
+async function startServer(
+	handler: EffectWsHandler,
+	options: WsAttachOptions = { clientId: "test-client" },
+): Promise<{
 	server: Server;
 	url: string;
 }> {
 	const server = createServer();
+	const wss = new WebSocketServer({ noServer: true });
 	server.on("upgrade", (req, socket, head) => {
-		handler.handleUpgrade(req, socket, head);
+		wss.handleUpgrade(req, socket, head, (ws) => {
+			handler.attach(ws, options);
+		});
 	});
 	await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
 	const addr = server.address() as AddressInfo;
 	cleanup.push(
 		() =>
 			new Promise<void>((resolve) => {
+				wss.close();
 				server.close(() => resolve());
 			}),
 	);
@@ -191,11 +193,14 @@ describe("Effect WS handler bridge", () => {
 		expect(socket.close).toHaveBeenCalledWith(1001, "Server shutting down");
 	});
 
-	it("upgrades connections and emits routed client messages", async () => {
+	it("emits routed messages for attached connections", async () => {
 		const handler = await createHandler({ heartbeatInterval: 300_000 });
-		const { url } = await startServer(handler);
+		const { url } = await startServer(handler, {
+			clientId: "test-client",
+			requestedSessionId: "s1",
+		});
 		const connected = onceConnected(handler);
-		const client = new WebSocket(`${url}?session=s1`);
+		const client = new WebSocket(url);
 		cleanup.push(() => client.close());
 
 		await waitOpen(client);
@@ -251,26 +256,11 @@ describe("Effect WS handler bridge", () => {
 		expect(handler.getClientsForSession("sess-1")).toEqual([clientId]);
 	});
 
-	it("announces its project before anything else on a direct connection", async () => {
-		const handler = await createHandler({
-			heartbeatInterval: 300_000,
-			projectSlug: "proj-a",
-		});
-		const { url } = await startServer(handler);
-		const client = new WebSocket(url);
-		cleanup.push(() => client.close());
-		const first = new Promise<unknown>((resolve) =>
-			client.once("message", (data) => resolve(JSON.parse(data.toString()))),
-		);
-
-		expect(await first).toEqual({ type: "project_attached", slug: "proj-a" });
-	});
-
-	it("uses the browser-provided client id when present", async () => {
+	it("uses the client id supplied when attaching", async () => {
 		const handler = await createHandler({ heartbeatInterval: 300_000 });
-		const { url } = await startServer(handler);
+		const { url } = await startServer(handler, { clientId: "browser-tab-1" });
 		const connected = onceConnected(handler);
-		const client = new WebSocket(`${url}?client=browser-tab-1`);
+		const client = new WebSocket(url);
 		cleanup.push(() => client.close());
 
 		await waitOpen(client);

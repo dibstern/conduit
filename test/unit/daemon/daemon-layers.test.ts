@@ -110,8 +110,8 @@ describe("daemon-layers", () => {
 					Effect.succeed({
 						slug,
 						attach: () => () => {},
-						wsHandler: { handleUpgrade: () => {} },
-						rpcWsHandler: { handleUpgrade: () => {} },
+						wsHandler: {},
+						rpcWsHandler: {},
 						stop: () => {},
 					} satisfies Relay),
 				),

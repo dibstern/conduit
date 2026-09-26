@@ -1,5 +1,3 @@
-import type { IncomingMessage } from "node:http";
-import type { Duplex } from "node:stream";
 import type { WebSocket } from "ws";
 import type { RelayMessage } from "../shared-types.js";
 import type { IncomingMessageType } from "./ws-router.js";
@@ -42,7 +40,6 @@ export interface WebSocketHandlerShape {
 	getClientCount(): number;
 	getClientIds(): string[];
 	attach(ws: WebSocket, options: WsAttachOptions): () => void;
-	handleUpgrade(req: IncomingMessage, socket: Duplex, head: Buffer): void;
 	close(): void;
 	drain(): Promise<void>;
 	on(

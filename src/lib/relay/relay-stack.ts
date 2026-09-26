@@ -6,6 +6,7 @@ import { OpenCodeAPITag } from "../domain/provider/Services/opencode-api-service
 // Extracted from skeleton.ts so integration tests exercise the exact same
 // wiring as production. skeleton.ts is now a thin CLI wrapper around this.
 
+import { randomBytes } from "node:crypto";
 import { existsSync } from "node:fs";
 import { stat } from "node:fs/promises";
 import {
@@ -19,6 +20,7 @@ import { homedir, networkInterfaces } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { Cause, Data, Effect, Exit, Layer, ManagedRuntime } from "effect";
+import { WebSocketServer } from "ws";
 import { AuthManager } from "../auth.js";
 import { WsRpcError } from "../contracts/ws-rpc.js";
 import { makeMessagePollerManagerLive } from "../domain/relay/Layers/message-poller-manager-layer.js";
@@ -1252,8 +1254,7 @@ export async function createRelayStack(
 	const httpServer = maybeServer;
 
 	// ── Multi-project relay management ──────────────────────────────────────
-	// All relays use noServer mode. A single upgrade handler routes WebSocket
-	// connections to the correct relay by URL path (/ws → initial, /p/{slug}/ws → project).
+	// The server owns browser upgrades and attaches /ws sockets to the initial relay.
 	// This matches the daemon pattern and allows dynamic project addition.
 
 	const relays = new Map<string, ProjectRelay>();
@@ -1387,8 +1388,8 @@ export async function createRelayStack(
 	});
 
 	// ── WebSocket upgrade handler ───────────────────────────────────────────
-	// Routes connections by URL: /p/{slug}/ws → project relay, /p/{slug}/rpc
-	// → project RPC, /ws → initial relay, /rpc → per-request project routing.
+	// Owns /ws upgrades and attaches sockets to the initial relay.
+	// /rpc uses per-request project routing.
 	// Also checks auth when a PIN is configured (fixes pre-existing gap where
 	// standalone WS connections bypassed PIN auth).
 
@@ -1414,6 +1415,14 @@ export async function createRelayStack(
 		),
 	);
 
+	const wss = new WebSocketServer({
+		noServer: true,
+		maxPayload: 50 * 1024 * 1024,
+		perMessageDeflate: {
+			serverMaxWindowBits: 10,
+			zlibDeflateOptions: { level: 1 },
+		},
+	});
 	httpServer.on("upgrade", (req, socket, head) => {
 		// Auth check (mirrors server.ts private checkAuth)
 		const auth = server.getAuth();
@@ -1435,26 +1444,24 @@ export async function createRelayStack(
 			}
 		}
 
-		// Route /p/{slug}/ws or /p/{slug}/rpc → project relay endpoint
-		const projectMatch = req.url?.match(/^\/p\/([^/]+)\/(ws|rpc)(?:\?|$)/);
-		if (projectMatch) {
-			// biome-ignore lint/style/noNonNullAssertion: safe — regex match guarantees capture group
-			const target = relays.get(projectMatch[1]!);
-			if (target) {
-				if (projectMatch[2] === "rpc") {
-					target.rpcWsHandler.handleUpgrade(req, socket, head);
-				} else {
-					target.wsHandler.handleUpgrade(req, socket, head);
-				}
-			} else {
-				socket.destroy();
-			}
-			return;
-		}
-
 		// Route /ws → initial relay
 		if (req.url === "/ws" || req.url?.startsWith("/ws?")) {
-			relay.wsHandler.handleUpgrade(req, socket, head);
+			wss.handleUpgrade(req, socket, head, (ws) => {
+				const params = new URL(req.url ?? "/ws", "http://localhost")
+					.searchParams;
+				const requestedClientId = params.get("client") ?? "";
+				const clientId = /^[A-Za-z0-9._:-]{1,128}$/.test(requestedClientId)
+					? requestedClientId
+					: randomBytes(8).toString("hex");
+				const requestedSessionId = params.get("session") || undefined;
+				ws.send(
+					JSON.stringify({ type: "project_attached", slug: config.slug }),
+				);
+				relay.wsHandler.attach(ws, {
+					clientId,
+					...(requestedSessionId != null && { requestedSessionId }),
+				});
+			});
 			return;
 		}
 		if (req.url === "/rpc" || req.url?.startsWith("/rpc?")) {
@@ -1513,6 +1520,8 @@ export async function createRelayStack(
 				}
 			}
 			relays.clear();
+			for (const ws of wss.clients) ws.terminate();
+			await new Promise<void>((resolve) => wss.close(() => resolve()));
 			await server.stop();
 		},
 	};

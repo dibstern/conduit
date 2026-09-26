@@ -26,7 +26,7 @@ export async function switchModelViaWs(
 	providerId: string,
 ): Promise<void> {
 	const sessionId = await new Promise<string>((resolve, reject) => {
-		const ws = new WebSocket(`ws://127.0.0.1:${relayPort}/ws`);
+		const ws = new WebSocket(`ws://127.0.0.1:${relayPort}/ws?p=e2e`);
 		const timer = setTimeout(() => {
 			ws.close();
 			reject(new Error("Timeout switching model"));

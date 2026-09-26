@@ -51,7 +51,6 @@ function mockWsHandler(
 		getClientCount: vi.fn(() => 1),
 		getClientIds: vi.fn(() => ["client-1"]),
 		attach: vi.fn(() => () => {}),
-		handleUpgrade: vi.fn(),
 		close: vi.fn(),
 		drain: vi.fn(async () => undefined),
 		on: vi.fn(),

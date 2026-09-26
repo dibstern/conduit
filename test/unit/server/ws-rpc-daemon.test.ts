@@ -111,10 +111,9 @@ describe("daemon RPC handlers", () => {
 					slug,
 					attach: () => () => {},
 					wsHandler: {
-						handleUpgrade: vi.fn(),
 						broadcast: broadcasts[slug === "a" ? 0 : 1],
 					},
-					rpcWsHandler: { handleUpgrade: vi.fn() },
+					rpcWsHandler: {},
 					stop: vi.fn(),
 				}),
 			);

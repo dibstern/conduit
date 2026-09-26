@@ -51,7 +51,6 @@ function makeWebSocketHandler() {
 		getClientCount: vi.fn(() => 0),
 		getClientIds: vi.fn(() => []),
 		attach: vi.fn(() => () => {}),
-		handleUpgrade: vi.fn(),
 		close: vi.fn(),
 		drain: vi.fn(async () => undefined),
 		on: vi.fn(),

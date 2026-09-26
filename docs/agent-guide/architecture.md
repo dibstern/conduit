@@ -58,7 +58,7 @@ Mermaid diagram: docs/agent-guide/per-project-relay-flow-diagram.mermaid
 
 | Flow | Path |
 |---|---|
-| Browser to relay | Browser loads the SPA over HTTP, `RequestRouter` serves auth/setup/health/info/themes/project routes, project WebSocket upgrades go to `WebSocketHandler`, and `src/lib/handlers/index.ts` dispatches incoming message types to session, instance, file, terminal, and bridge services. |
+| Browser to relay | Browser loads the SPA over HTTP, `RequestRouter` serves auth/setup/health/info/themes/project routes, the daemon upgrades `/ws` and attaches sockets to relay `WebSocketHandler`s, and `src/lib/handlers/index.ts` dispatches incoming message types to session, instance, file, terminal, and bridge services. |
 | Provider to event store to browser | Provider instances stream events into the SQLite event store. Projectors update materialized views (sessions, messages, turns). Pollers reconcile provider-side status. `WebSocketHandler` broadcasts normalized events to relevant clients or session viewers. |
 | CLI to daemon | Commands such as `status`, `stop`, `add_project`, and `set_pin` go over IPC; the daemon updates config and registries, mounts new relays on the shared HTTP and WebSocket surface, and rebroadcasts instance status changes. |
 
@@ -66,8 +66,11 @@ Mermaid diagram: docs/agent-guide/per-project-relay-flow-diagram.mermaid
 
 Browser session addresses are `/s/<id>`; `/` opens the session list without
 selecting or creating a session. `/?p=<slug>` hints which project to attach.
-The daemon `/ws` socket follows explicit session navigation; legacy
-`/p/<slug>/ws` clients retain their default-session bootstrap.
+The daemon accepts browser sockets only at `/ws` and `/rpc`, including query
+strings. The `/ws` socket follows explicit session navigation, with `?p=<slug>`
+as an initial project hint. Relays receive attached sockets and never handle
+browser upgrades. The test-only relay server also owns its `/ws` upgrade and
+preserves default-session bootstrap when attaching to its initial relay.
 
 `GET /api/projects` remains only as a liveness probe, used by
 `test/integration/flows/daemon-lifecycle.integration.ts`,

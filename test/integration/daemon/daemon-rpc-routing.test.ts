@@ -475,7 +475,7 @@ describe("daemon shared RPC routing", () => {
 						return {
 							slug,
 							attach: () => () => {},
-							wsHandler: { handleUpgrade: vi.fn() },
+							wsHandler: {},
 							rpcWsHandler,
 							stop: async () => {
 								await rpcWsHandler.drain();
