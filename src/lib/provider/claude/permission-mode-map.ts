@@ -43,10 +43,3 @@ export const fromSdkPermissionMode = (
 	mode: string,
 ): SessionPermissionMode | undefined =>
 	(FROM_SDK as Record<string, SessionPermissionMode | undefined>)[mode];
-
-/**
- * The SDK refuses `bypassPermissions` unless the caller opts in explicitly at
- * query creation, so this has to travel with the mode rather than be inferred.
- */
-export const requiresDangerousSkip = (mode: SessionPermissionMode): boolean =>
-	TO_SDK[mode] === "bypassPermissions";

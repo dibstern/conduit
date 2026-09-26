@@ -100,10 +100,7 @@ import {
 } from "./claude-translation-service.js";
 import { makeEffectPromptQueue } from "./effect-prompt-queue.js";
 import { serializePriorConversation } from "./history-transcript.js";
-import {
-	requiresDangerousSkip,
-	toSdkPermissionMode,
-} from "./permission-mode-map.js";
+import { toSdkPermissionMode } from "./permission-mode-map.js";
 import { captureClaudeSdkMessage } from "./sdk-trace-capture.js";
 import type {
 	ClaudeSessionContext,
@@ -948,15 +945,13 @@ export class ClaudeProviderRuntime {
 							settingSources: ["user", "project", "local"],
 							canUseTool: bridge.createCanUseTool(ctx),
 							model: apiModelId,
+							// The SDK refuses bypassPermissions, at launch or via a later
+							// setPermissionMode, unless the query opted in here. Opting in
+							// only permits the mode; it does not enable it. Always opt in
+							// so "Full access" can be chosen mid-session.
+							allowDangerouslySkipPermissions: true,
 							...(input.permissionMode
-								? {
-										permissionMode: toSdkPermissionMode(input.permissionMode),
-										// The SDK rejects bypassPermissions unless the
-										// caller opts in explicitly.
-										...(requiresDangerousSkip(input.permissionMode)
-											? { allowDangerouslySkipPermissions: true }
-											: {}),
-									}
+								? { permissionMode: toSdkPermissionMode(input.permissionMode) }
 								: {}),
 							...(resumeSessionId ? { resume: resumeSessionId } : {}),
 							...(input.agent ? { agent: input.agent } : {}),
