@@ -713,6 +713,7 @@
 				onswitchsession={(id) => handleSwitchSession(id, s.projectSlug)}
 				oncontextmenu={handleContextMenu}
 				menuOpen={ctxMenuSession?.id === s.id}
+				onmarkread={() => { void toggleSessionRead(s); }}
 				markOnly
 			/>
 		{:else}

@@ -102,15 +102,33 @@ test("desktop: hover and Tab reach the row's verbs, and the menu returns focus",
 	await expect(row.locator(".session-item-meta")).toBeHidden();
 	await expect(row.getByTestId("session-act-snooze")).toBeVisible();
 	await expect(row.getByTestId("session-act-pin")).toBeVisible();
+	// ● leads the strip and teaches u; on an unread row it flips to ○, Mark read.
+	const markUnread = row.getByTestId("session-act-mark-unread");
+	await expect(markUnread).toHaveAttribute("title", "Mark unread (u)");
+	await markUnread.click();
+	await expect(row.getByTestId("session-unread-dot")).toBeVisible();
+	await expect(
+		page.getByRole("status").filter({ hasText: "Marked unread" }),
+	).toHaveCount(1);
+	await expect(row.getByTestId("session-act-mark-read")).toHaveAttribute(
+		"title",
+		"Mark read (u)",
+	);
+	await page.getByTestId("toast-action").last().click();
+	await expect(row.getByTestId("session-unread-dot")).toHaveCount(0);
+	await row.hover();
+	await expect(markUnread).toBeVisible();
 	await row.getByTestId("session-act-settle").click();
 	await expect(row).toHaveCount(0);
 	await expect(settled).toHaveCount(1);
-	await page.getByTestId("toast-action").click();
+	await page.getByTestId("toast-action").last().click();
 	await expect(row).toBeVisible();
 
-	// Keyboard: the settle twin is the first stop after the row link.
+	// Keyboard: ● then the settle twin are the first stops after the row link.
 	await page.mouse.move(0, 0);
 	await row.focus();
+	await page.keyboard.press("Tab");
+	await expect(markUnread).toBeFocused();
 	await page.keyboard.press("Tab");
 	await expect(row.getByTestId("session-act-settle")).toBeFocused();
 	await page.keyboard.press("Enter");

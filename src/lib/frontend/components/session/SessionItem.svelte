@@ -236,7 +236,7 @@
 	});
 	const swipeDirection = $derived(offset > 0 ? "settle" : "snooze");
 	const swipeAllowed = $derived(canSwipe(swipeDirection));
-	const showReadSwipeAction = $derived(!settled && !actions.settled && !snoozed && !actions.snoozed && onmarkread != null);
+	const canMarkRead = $derived(!settled && !actions.settled && !snoozed && !actions.snoozed && onmarkread != null);
 	const shelfRow = $derived(settled || snoozed);
 	const timeText = $derived(snoozedUntilText ?? settledAt ?? formatTimeAgo(session.updatedAt));
 	const woken = $derived(isSessionWoken(session, now) && !snoozed);
@@ -374,7 +374,7 @@
 	function canSwipe(direction: "settle" | "snooze") {
 		if (markOnly) return false;
 		return direction === "settle"
-			? actions.settleDisabledReason == null || showReadSwipeAction
+			? actions.settleDisabledReason == null || canMarkRead
 			: actions.snoozeVisible && (actions.snoozed || actions.snoozeDisabledReason == null);
 	}
 
@@ -436,7 +436,7 @@
 			offset = 0;
 		} else if (stage === "reveal") {
 			heldDirection = direction;
-			offset = direction === "settle" ? (showReadSwipeAction ? (actions.settleDisabledReason ? 74 : 148) : 88) : -88;
+			offset = direction === "settle" ? (canMarkRead ? (actions.settleDisabledReason ? 74 : 148) : 88) : -88;
 			onholdchange?.(session.id);
 		} else offset = 0;
 	}
@@ -527,7 +527,7 @@
 		{@const direction = heldDirection ?? swipeDirection}
 		{@const verb = direction === "settle" ? (settled || actions.settled ? "Un-settle" : "Settle") : (snoozed || actions.snoozed ? "Unsnooze" : "Snooze")}
 		{@const stage = heldDirection ? "reveal" : swipeStage}
-		{#if direction === "settle" && stage === "reveal" && showReadSwipeAction}
+		{#if direction === "settle" && stage === "reveal" && canMarkRead}
 			<div class="absolute inset-0 flex items-stretch font-brand text-xs font-semibold">
 				{#if !actions.settleDisabledReason}
 					<button
@@ -712,6 +712,15 @@
 			<!-- Desktop verbs replace the time on hover and keyboard focus. -->
 			{#if !cleanupMode && oncontextmenuProp}
 				<span class="hidden md:group-hover:inline-flex md:group-focus-within:inline-flex {menuOpen ? 'md:inline-flex' : ''} items-center gap-0.5" data-testid="session-row-actions">
+					{#if canMarkRead}
+						<Button variant="ghost" size="content" tone="inherit" hoverFill="none"
+							class="size-[27px] rounded-[7px] text-text-secondary hover:text-text hover:bg-bg-alt"
+							data-testid={session.unread ? "session-act-mark-read" : "session-act-mark-unread"}
+							ariaLabel="Mark {session.unread ? 'read' : 'unread'} {displayTitle}"
+							title="Mark {session.unread ? 'read' : 'unread'} (u)"
+							onclick={(event) => { event.preventDefault(); event.stopPropagation(); onmarkread?.(session.id); }}
+						><Icon name={session.unread ? "circle" : "circle-dot"} size={16} /></Button>
+					{/if}
 					{#if !markOnly}
 					<Button variant="ghost" size="content" tone="inherit" hoverFill="none"
 						class="size-[27px] rounded-[7px] text-text-secondary hover:text-text hover:bg-bg-alt"

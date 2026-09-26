@@ -259,7 +259,12 @@ export const Hover: Story = {
 
 export const HoverActions: Story = {
 	name: "Hover actions",
-	args: { session: mockSession, projectLabel: "Conduit", branch: "main" },
+	args: {
+		session: mockSession,
+		projectLabel: "Conduit",
+		branch: "main",
+		onmarkread: fn(),
+	},
 	parameters: { pseudo: { hover: true } },
 };
 
