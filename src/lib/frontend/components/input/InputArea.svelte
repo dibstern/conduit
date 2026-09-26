@@ -35,6 +35,7 @@
 	} from "../../stores/file-tree.svelte.js";
 	import { fetchFileContent, fetchDirectoryListing, resizeImageIfNeeded } from "./input-utils.js";
 	import { sessionState, switchToSession } from "../../stores/session.svelte.js";
+	import { permissionsState } from "../../stores/permissions.svelte.js";
 	import { getCurrentSlug } from "../../stores/router.svelte.js";
 	import { showToast } from "../../stores/ui.svelte.js";
 	import { rateLimitChatSend } from "../../stores/ws.svelte.js";
@@ -182,6 +183,13 @@
 	const plainText = $derived(inputText.length > HIGHLIGHT_MAX_CHARS);
 
 	const canSend = $derived(inputText.trim().length > 0 || pendingImages.length > 0);
+	const sendButtonLabel = $derived(
+		permissionsState.pendingQuestions.some((question) => question.sessionId === sessionState.currentId)
+			? "Reply"
+			: isProcessing()
+				? "Queue message"
+				: "Send message",
+	);
 	const showContextMini = $derived(currentChat().contextPercent > 0);
 	/** Drift is only reportable with complete mismatch evidence. */
 	const modelDrift = $derived.by(() => {
@@ -737,8 +745,8 @@
 						type="button"
 						class="send-btn shrink-0 w-8 h-8 rounded-[10px] bg-brand-a text-white touch-manipulation hover:not-disabled:opacity-90 active:not-disabled:opacity-70"
 						disabled={!canSend}
-						title={isProcessing() ? "Queue message" : "Send message"}
-						ariaLabel={isProcessing() ? "Queue message" : "Send message"}
+						title={sendButtonLabel}
+						ariaLabel={sendButtonLabel}
 						onclick={handleSendClick}
 					/>
 					{#if isProcessing()}

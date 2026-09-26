@@ -3,12 +3,14 @@ import { OpenCodeAPITag } from "../domain/provider/Services/opencode-api-service
 
 import { Effect } from "effect";
 import { AgentServiceTag } from "../domain/relay/Services/agent-service.js";
+import { PendingInteractionServiceTag } from "../domain/relay/Services/pending-interaction-service.js";
 import {
 	makeProviderTurnService,
 	ProviderTurnServiceTag,
 } from "../domain/relay/Services/provider-turn-service.js";
 import {
 	LoggerTag,
+	OrchestrationEngineTag,
 	WebSocketHandlerTag,
 } from "../domain/relay/Services/services.js";
 import { SessionManagerServiceTag } from "../domain/relay/Services/session-manager-service.js";
@@ -90,6 +92,38 @@ export const sendMessageToSession = (input: SendMessageToSessionInput) =>
 			providerTurnServiceOption._tag === "Some"
 				? providerTurnServiceOption.value
 				: yield* makeProviderTurnService;
+		const engineOption = yield* Effect.serviceOption(OrchestrationEngineTag);
+		const pendingInteractionsOption = yield* Effect.serviceOption(
+			PendingInteractionServiceTag,
+		);
+		if (
+			engineOption._tag === "Some" &&
+			pendingInteractionsOption._tag === "Some"
+		) {
+			const providerId =
+				yield* engineOption.value.getProviderForSessionEffect(activeId);
+			if (providerId === "claude") {
+				const pendingQuestions =
+					yield* pendingInteractionsOption.value.listPendingQuestions(activeId);
+				if (pendingQuestions.length > 0) {
+					yield* providerTurnService.interruptTurn({
+						clientId,
+						sessionId: activeId,
+						commandId: `${input.commandId}:interrupt-for-question`,
+					});
+					for (const question of pendingQuestions) {
+						wsHandler.broadcast({
+							type: "ask_user_resolved",
+							sessionId: activeId,
+							toolId: question.requestId,
+						});
+						yield* sessionManagerService.decrementPendingQuestionCount(
+							activeId,
+						);
+					}
+				}
+			}
+		}
 		activeId = yield* providerTurnService.prepareTurnSession({
 			clientId,
 			sessionId: activeId,
