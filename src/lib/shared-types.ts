@@ -214,6 +214,25 @@ export const SessionAttentionSchema = Schema.Literal(
 	...SESSION_ATTENTION_TIERS,
 );
 
+export interface SessionGit {
+	branch?: string;
+	head?: string;
+	worktree?: string;
+	merged?: boolean;
+	operation?: "rebase" | "merge" | "cherry-pick" | "revert" | "bisect";
+}
+
+export const SessionGitSchema = Schema.Struct({
+	branch: Schema.optionalWith(Schema.String, { exact: true }),
+	head: Schema.optionalWith(Schema.String, { exact: true }),
+	worktree: Schema.optionalWith(Schema.String, { exact: true }),
+	merged: Schema.optionalWith(Schema.Boolean, { exact: true }),
+	operation: Schema.optionalWith(
+		Schema.Literal("rebase", "merge", "cherry-pick", "revert", "bisect"),
+		{ exact: true },
+	),
+});
+
 export interface SessionInfo {
 	id: string;
 	title: string;
@@ -245,6 +264,7 @@ export interface SessionInfo {
 	settledAt?: number;
 	pinnedAt?: number;
 	snoozedAt?: number;
+	git?: SessionGit;
 	snoozedUntil?: number;
 	wokenAt?: number;
 	wokeBecause?: "time" | "approval" | "question" | "error" | "turn";
@@ -552,6 +572,7 @@ const SessionInfoSchema = Schema.Struct({
 	settledAt: Schema.optional(Schema.Number),
 	pinnedAt: Schema.optional(Schema.Number),
 	snoozedAt: Schema.optional(Schema.Number),
+	git: Schema.optional(SessionGitSchema),
 	snoozedUntil: Schema.optional(Schema.Number),
 	wokenAt: Schema.optional(Schema.Number),
 	wokeBecause: Schema.optional(

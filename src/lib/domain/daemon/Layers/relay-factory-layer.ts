@@ -24,6 +24,7 @@ import {
 	Ref,
 	Runtime,
 } from "effect";
+import { daemonSessionGitCache } from "../../../git/session-git.js";
 import type { ProjectRelay } from "../../../relay/relay-stack.js";
 import type {
 	InstanceConfig,
@@ -335,6 +336,9 @@ export const RelayFactoryLive = (
 									persistenceDbPath: dbPath,
 									getProjects,
 									listDaemonSessions,
+									refreshSessionGit: async () => {
+										await daemonSessionGitCache.refresh(project.directory);
+									},
 									getInstances,
 									addInstance,
 									removeInstance,

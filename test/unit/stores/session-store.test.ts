@@ -378,6 +378,24 @@ describe("snooze clock predicates", () => {
 // ─── handleSessionList ──────────────────────────────────────────────────────
 
 describe("handleSessionList", () => {
+	it("keeps git context through ListSessions RPC responses", () => {
+		applyListSessionsResponse({
+			projectSlug: "project-a",
+			roots: true,
+			sessions: [
+				{
+					id: "git-session",
+					title: "Git",
+					git: { branch: "feature", head: "abc1234", merged: false },
+				},
+			],
+		});
+		expect(sessionState.rootSessions[0]?.git).toEqual({
+			branch: "feature",
+			head: "abc1234",
+			merged: false,
+		});
+	});
 	it("sets rootSessions when roots is true", () => {
 		const sessions = [makeSession({ id: "a" }), makeSession({ id: "b" })];
 		handleSessionList({ type: "session_list", sessions, roots: true });

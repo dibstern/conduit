@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -10,6 +11,7 @@ import { WsRpcGroup } from "../../../src/lib/contracts/ws-rpc.js";
 import { DaemonWsRpcHandlersTag } from "../../../src/lib/domain/daemon/Layers/daemon-ws-rpc-layer.js";
 import { listDaemonSessions } from "../../../src/lib/domain/daemon/Services/daemon-session-reader.js";
 import { makeProjectRegistryLive } from "../../../src/lib/domain/daemon/Services/project-registry-service.js";
+import { createSessionGitCache } from "../../../src/lib/git/session-git.js";
 import { makeRoutedWsRpcServerLayer } from "../../../src/lib/server/ws-rpc.js";
 import { makeDaemonRpcTestLayer } from "../../helpers/daemon-rpc.js";
 import { writeEventStore } from "../../helpers/persistence-factories.js";
@@ -84,6 +86,41 @@ afterEach(() => {
 });
 
 describe("listDaemonSessions", () => {
+	it.effect("stamps cached git context only on git project sessions", () => {
+		const root = makeTemporaryRoot();
+		const gitProject = join(root, "git-project");
+		const plainProject = join(root, "plain-project");
+		mkdirSync(gitProject);
+		mkdirSync(plainProject);
+		execFileSync("git", ["-c", "init.defaultBranch=main", "init", "-q"], {
+			cwd: gitProject,
+		});
+		makeProjectStore(gitProject, [
+			{ id: "git-session", title: "Git", updatedAt: 2 },
+		]);
+		makeProjectStore(plainProject, [
+			{ id: "plain-session", title: "Plain", updatedAt: 1 },
+		]);
+		const cache = createSessionGitCache();
+		return Effect.gen(function* () {
+			yield* Effect.promise(() => cache.refresh(gitProject));
+			yield* Effect.promise(() => cache.refresh(plainProject));
+			const result = yield* listDaemonSessions({}, cache);
+			expect(
+				result.sessions.find((session) => session.id === "git-session")?.git,
+			).toEqual({ branch: "main" });
+			expect(
+				result.sessions.find((session) => session.id === "plain-session"),
+			).not.toHaveProperty("git");
+		}).pipe(
+			Effect.provide(
+				makeProjectRegistryLive([
+					{ slug: "git-project", title: "Git", directory: gitProject },
+					{ slug: "plain-project", title: "Plain", directory: plainProject },
+				]),
+			),
+		);
+	});
 	it.effect("reads settled and pinned state from a cold project store", () => {
 		const root = makeTemporaryRoot();
 		const project = join(root, "project");

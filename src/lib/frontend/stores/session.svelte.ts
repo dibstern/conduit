@@ -630,6 +630,7 @@ const sessionInfoFromRpc = (
 	...(session.settledAt != null ? { settledAt: session.settledAt } : {}),
 	...(session.pinnedAt != null ? { pinnedAt: session.pinnedAt } : {}),
 	...(session.snoozedAt != null ? { snoozedAt: session.snoozedAt } : {}),
+	...(session.git != null ? { git: session.git } : {}),
 	...(session.snoozedUntil != null
 		? { snoozedUntil: session.snoozedUntil }
 		: {}),

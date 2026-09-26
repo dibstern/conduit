@@ -696,6 +696,7 @@
 				now={sessionState.now}
 				href={getRowHref(s)}
 				projectLabel={getProjectLabel(s)}
+				branch={s.git?.branch}
 				onswitchsession={(id) => handleSwitchSession(id, s.projectSlug)}
 			/>
 		{:else}
@@ -709,6 +710,7 @@
 				now={sessionState.now}
 				href={getRowHref(s)}
 				projectLabel={getProjectLabel(s)}
+				branch={s.git?.branch}
 				active={s.id === sessionState.currentId}
 				renaming={s.id === renamingSessionId}
 				{cleanupMode}

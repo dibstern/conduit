@@ -4,6 +4,10 @@ import { Reactivity } from "@effect/experimental";
 import * as SqliteNode from "@effect/sql-sqlite-node/SqliteClient";
 import { Cause, Data, Effect, Either, Exit, Layer } from "effect";
 import {
+	type createSessionGitCache,
+	daemonSessionGitCache,
+} from "../../../git/session-git.js";
+import {
 	makeReadQueryEffect,
 	ReadQueryEffectTag,
 } from "../../../persistence/effect/read-query-effect.js";
@@ -50,6 +54,7 @@ const readProjectSessions = (
 	projectSlug: string,
 	projectDirectory: string,
 	options: DaemonSessionQueryOptions,
+	gitCache: ReturnType<typeof createSessionGitCache>,
 ) =>
 	Effect.gen(function* () {
 		const directory = yield* Effect.try({
@@ -62,6 +67,8 @@ const readProjectSessions = (
 				cause: `Project path is not a directory: ${projectDirectory}`,
 			});
 		}
+		if (gitCache.isStale(projectDirectory))
+			void gitCache.refresh(projectDirectory);
 
 		const databasePath = resolve(projectDirectory, ".conduit", "events.db");
 		const databaseStat = yield* Effect.either(
@@ -128,16 +135,27 @@ const readProjectSessions = (
 				{ updatedAt: row.updated_at, id: row.id } satisfies DaemonSessionCursor,
 			]),
 		);
+		const gitContext = gitCache.peek(projectDirectory);
 		return sessions.flatMap((session): ProjectSessionCandidate[] => {
 			const sortKey = sortKeys.get(session.id);
 			return sortKey === undefined
 				? []
-				: [{ sortKey, session: { ...session, projectSlug } }];
+				: [
+						{
+							sortKey,
+							session: {
+								...session,
+								projectSlug,
+								...(gitContext ? { git: gitContext } : {}),
+							},
+						},
+					];
 		});
 	});
 
 export const listDaemonSessions = (
 	options: DaemonSessionQueryOptions = {},
+	gitCache: ReturnType<typeof createSessionGitCache> = daemonSessionGitCache,
 ): Effect.Effect<DaemonSessionQueryResult, never, ProjectRegistryTag> =>
 	Effect.gen(function* () {
 		const projects = (yield* allProjects).filter(
@@ -164,6 +182,7 @@ export const listDaemonSessions = (
 							project.slug,
 							project.directory,
 							projectOptions,
+							gitCache,
 						),
 					);
 					if (Exit.isSuccess(exit)) {

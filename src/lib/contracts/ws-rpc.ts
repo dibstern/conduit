@@ -2,6 +2,7 @@ import { Rpc, RpcGroup } from "@effect/rpc";
 import { Schema } from "effect";
 import {
 	SessionAttentionSchema,
+	SessionGitSchema,
 	SessionPermissionModeSchema,
 } from "../shared-types.js";
 import {
@@ -308,6 +309,7 @@ export const SessionInfoSchema = Schema.Struct({
 	settledAt: Schema.optional(Schema.Number),
 	pinnedAt: Schema.optional(Schema.Number),
 	snoozedAt: Schema.optional(Schema.Number),
+	git: Schema.optional(SessionGitSchema),
 	snoozedUntil: Schema.optional(Schema.Number),
 	wokenAt: Schema.optional(Schema.Number),
 	wokeBecause: Schema.optional(

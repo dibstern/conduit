@@ -234,6 +234,8 @@ export interface ProjectRelayConfig {
 	listDaemonSessions?: (
 		options: DaemonSessionQueryOptions,
 	) => MaybePromise<DaemonSessionQueryResult>;
+	/** Refresh the daemon's cached git context before publishing a turn-end list. */
+	refreshSessionGit?: () => Promise<void>;
 	/** Remove a project from the registry. */
 	removeProject?: (slug: string) => void | Promise<void>;
 	/** Set a project's display title. */

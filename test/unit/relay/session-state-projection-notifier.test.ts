@@ -1,7 +1,10 @@
 import { describe, it } from "@effect/vitest";
 import { Deferred, Effect, Layer, TestClock } from "effect";
 import { expect, vi } from "vitest";
-import { SessionStateProjectionNotifierLive } from "../../../src/lib/domain/relay/Layers/session-state-projection-notifier-layer.js";
+import {
+	makeSessionStateProjectionNotifierLive,
+	SessionStateProjectionNotifierLive,
+} from "../../../src/lib/domain/relay/Layers/session-state-projection-notifier-layer.js";
 import { WebSocketHandlerTag } from "../../../src/lib/domain/relay/Services/services.js";
 import { SessionManagerServiceTag } from "../../../src/lib/domain/relay/Services/session-manager-service.js";
 import { SessionStateProjectionNotifierTag } from "../../../src/lib/persistence/effect/session-state-projection-notifier.js";
@@ -11,6 +14,60 @@ import {
 } from "../../helpers/mock-factories.js";
 
 describe("SessionStateProjectionNotifier", () => {
+	it.effect("refreshes git before broadcasting a completed turn", () =>
+		Effect.gen(function* () {
+			const order: string[] = [];
+			const wsHandler = makeMockWebSocketHandler();
+			const sessionManagerService = makeMockSessionManagerService({
+				sendSessionLists: () =>
+					Effect.sync(() => {
+						order.push("broadcast");
+					}),
+			});
+			const layer = makeSessionStateProjectionNotifierLive(async () => {
+				order.push("refresh");
+			}).pipe(
+				Layer.provide(
+					Layer.merge(
+						Layer.succeed(WebSocketHandlerTag, wsHandler),
+						Layer.succeed(SessionManagerServiceTag, sessionManagerService),
+					),
+				),
+			);
+			yield* Effect.gen(function* () {
+				const notifier = yield* SessionStateProjectionNotifierTag;
+				yield* notifier.sessionStateProjected("session-1", "turn.completed");
+				expect(order).toEqual(["refresh"]);
+				yield* TestClock.adjust("150 millis");
+				expect(order).toEqual(["refresh", "broadcast"]);
+			}).pipe(Effect.provide(layer));
+		}),
+	);
+	it.effect("broadcasts after a git refresh failure", () =>
+		Effect.gen(function* () {
+			const wsHandler = makeMockWebSocketHandler();
+			const sendSessionLists = vi.fn(() => Effect.void);
+			const sessionManagerService = makeMockSessionManagerService({
+				sendSessionLists,
+			});
+			const layer = makeSessionStateProjectionNotifierLive(async () => {
+				throw new Error("git unavailable");
+			}).pipe(
+				Layer.provide(
+					Layer.merge(
+						Layer.succeed(WebSocketHandlerTag, wsHandler),
+						Layer.succeed(SessionManagerServiceTag, sessionManagerService),
+					),
+				),
+			);
+			yield* Effect.gen(function* () {
+				const notifier = yield* SessionStateProjectionNotifierTag;
+				yield* notifier.sessionStateProjected("session-1", "turn.error");
+				yield* TestClock.adjust("150 millis");
+				expect(sendSessionLists).toHaveBeenCalledTimes(1);
+			}).pipe(Effect.provide(layer));
+		}),
+	);
 	it.effect("coalesces a burst of projected events into one broadcast", () =>
 		Effect.gen(function* () {
 			const wsHandler = makeMockWebSocketHandler();
