@@ -40,7 +40,7 @@ export type VisualMatchResult = {
  *  time working normally. */
 const PINNED_CLOCK_MS = Date.UTC(2026, 0, 1, 9, 41, 0);
 
-const DEFAULT_VIEWPORT: Viewport = {
+export const DESKTOP_VIEWPORT: Viewport = {
 	name: "desktop",
 	width: 1440,
 	height: 900,
@@ -54,7 +54,7 @@ export const PHONE_VIEWPORT: Viewport = {
 
 function viewportFromEnv(value = process.env["VIEWPORT"]): Viewport {
 	if (!value || value === "desktop") {
-		return DEFAULT_VIEWPORT;
+		return DESKTOP_VIEWPORT;
 	}
 	if (value === "phone") return PHONE_VIEWPORT;
 
