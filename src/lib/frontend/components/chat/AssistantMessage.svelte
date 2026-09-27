@@ -4,9 +4,15 @@
 <!-- Preserves .msg-assistant class for E2E. -->
 
 <script module lang="ts">
+	import type { Mermaid } from "mermaid";
+
 	// Module-level: shared across all AssistantMessage instances.
 	// Avoids O(n) mermaid re-init when theme changes with many visible messages.
 	let mermaidInitialized = false;
+	// Mermaid is large, so it loads with the first diagram rather than at startup.
+	let mermaidModule: Promise<Mermaid> | null = null;
+	const loadMermaid = () =>
+		(mermaidModule ??= import("mermaid").then((m) => m.default));
 </script>
 
 <script lang="ts">
@@ -27,7 +33,6 @@
 	// Register aliases for template languages not natively supported by highlight.js.
 	// Consistent with FileViewer's mapExtToLanguage mapping (svelte/vue → xml).
 	hljs.registerAliases(["svelte", "vue"], { languageName: "xml" });
-	import mermaid from "mermaid";
 	import { themeState } from "../../stores/theme.svelte.js";
 
 	let { message }: { message: AssistantMessage } = $props();
@@ -40,7 +45,7 @@
 
 	// ─── Mermaid init (once globally) ──────────────────────────────────────────
 
-	function initializeMermaid(): void {
+	function initializeMermaid(mermaid: Mermaid): void {
 		const styles = getComputedStyle(document.documentElement);
 		const get = (name: string, fallback: string) =>
 			styles.getPropertyValue(name).trim() || fallback;
@@ -72,18 +77,22 @@
 		});
 	}
 
-	function ensureMermaidInit(): void {
-		if (mermaidInitialized) return;
-		initializeMermaid();
-		mermaidInitialized = true;
+	async function ensureMermaid(): Promise<Mermaid> {
+		const mermaid = await loadMermaid();
+		if (!mermaidInitialized) {
+			initializeMermaid(mermaid);
+			mermaidInitialized = true;
+		}
+		return mermaid;
 	}
 
-	// Re-initialize mermaid when theme changes and re-render existing diagrams
+	// Re-initialize mermaid when theme changes and re-render existing diagrams.
+	// Until a diagram has loaded mermaid there is nothing to re-theme.
 	$effect(() => {
 		const _resolvedTheme = themeState.resolved;
-		initializeMermaid();
-		// Re-render already-rendered mermaid diagrams with the new theme
-		if (containerEl) {
+		void mermaidModule?.then((mermaid) => {
+			initializeMermaid(mermaid);
+			if (!containerEl) return;
 			const diagrams = containerEl.querySelectorAll(".mermaid-diagram");
 			for (const wrapper of diagrams) {
 				const svgEl = wrapper.querySelector("svg");
@@ -107,7 +116,7 @@
 						// Diagram failed to re-render with new theme — keep old SVG
 					});
 			}
-		}
+		});
 	});
 
 	// ─── Post-render: code block headers + syntax highlighting ─────────────────
@@ -229,9 +238,10 @@
 	// ─── Mermaid diagrams ──────────────────────────────────────────────────────
 
 	async function renderMermaidBlocks(container: HTMLElement): Promise<void> {
-		ensureMermaidInit();
-
 		const blocks = container.querySelectorAll("code.language-mermaid");
+		if (blocks.length === 0) return;
+		const mermaid = await ensureMermaid();
+
 		for (const code of blocks) {
 			const pre = code.parentElement;
 			if (!pre || pre.tagName !== "PRE") continue;
