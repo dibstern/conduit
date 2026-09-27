@@ -50,11 +50,11 @@ test.describe("Permissions", () => {
 		const card = await perm.waitForCard(30_000);
 
 		// Card should have Allow button
-		const allowBtn = card.locator("button", { hasText: /^Allow$/ });
+		const allowBtn = card.getByRole("button", { name: "Allow", exact: true });
 		await expect(allowBtn).toBeVisible();
 
 		// Card should have Deny button
-		const denyBtn = card.locator("button", { hasText: "Deny" });
+		const denyBtn = card.getByRole("button", { name: "Deny", exact: true });
 		await expect(denyBtn).toBeVisible();
 	});
 });

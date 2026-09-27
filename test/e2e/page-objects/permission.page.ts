@@ -17,21 +17,21 @@ export class PermissionPage {
 
 	async clickAllow(): Promise<void> {
 		const card = this.cards.last();
-		await card.locator("button", { hasText: /^Allow$/ }).click();
+		await card.getByRole("button", { name: "Allow", exact: true }).click();
 	}
 
 	async clickDeny(): Promise<void> {
 		const card = this.cards.last();
-		await card.locator("button", { hasText: "Deny" }).click();
+		await card.getByRole("button", { name: "Deny", exact: true }).click();
 	}
 
 	/** Click "Always Allow" — defaults to tool-level if options expand */
 	async clickAlwaysAllow(): Promise<void> {
 		const card = this.cards.last();
-		await card.locator("button", { hasText: /^Always Allow/ }).click();
+		await card.getByRole("button", { name: /^Always Allow/ }).click();
 		// If options appeared, click "All ... operations" (tool-level)
-		const toolOption = card.locator("button", {
-			hasText: /^All .+ operations$/,
+		const toolOption = card.getByRole("button", {
+			name: /^All .+ operations$/,
 		});
 		if (await toolOption.isVisible({ timeout: 1000 }).catch(() => false)) {
 			await toolOption.click();
@@ -41,7 +41,7 @@ export class PermissionPage {
 	/** Click a specific pattern option from the "Always Allow" expansion */
 	async clickAlwaysAllowPattern(pattern: string): Promise<void> {
 		const card = this.cards.last();
-		await card.locator("button", { hasText: /^Always Allow/ }).click();
+		await card.getByRole("button", { name: /^Always Allow/ }).click();
 		const patternBtn = card.locator("button", { hasText: pattern });
 		await patternBtn.click();
 	}
