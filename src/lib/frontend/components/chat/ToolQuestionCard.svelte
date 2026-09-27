@@ -123,15 +123,23 @@
 		return pendingQuestionRequest?.questions ?? questionDataFromInput;
 	});
 
-	/** Parse the answer from the tool result text */
-	const questionAnswer = $derived.by((): string | null => {
-		if (!message.result) return null;
-		return message.result;
-	});
+	// History returns results still JSON-encoded, so a question closed without an
+	// answer reloads as the literal '""' rather than an empty string.
+	const questionAnswer = $derived(
+		message.result && message.result !== '""' ? message.result : null,
+	);
 
 	// ─── Status display ─────────────────────────────────────────────────────
 
+	// An interrupted turn (Stop, or a message sent instead of answering) completes
+	// the tool with no result, so "completed" alone does not mean answered.
+	const isAnswered = $derived(
+		message.status === "completed" && !message.isError && questionAnswer !== null,
+	);
+	const isUnanswered = $derived(message.status === "completed" && !isAnswered);
+
 	const statusIconName = $derived.by(() => {
+		if (isUnanswered) return "minus";
 		switch (message.status) {
 			case "running":
 			case "pending":
@@ -157,7 +165,7 @@
 	<QuestionCard request={questionRequest} inline synthetic={pendingQuestionRequest === null} />
 {:else}
 	<!-- Completed/historical question: show read-only summary -->
-	<div class="{message.status === 'completed' ? '' : 'bg-bg-surface'} rounded-panel relative overflow-hidden {message.status === 'error' ? 'glow-tool-error' : message.status === 'completed' ? 'glow-brand-b' : message.status === 'running' ? 'glow-tool-running' : ''}">
+	<div class="{isAnswered ? '' : 'bg-bg-surface'} rounded-panel relative overflow-hidden {message.status === 'error' ? 'glow-tool-error' : isAnswered ? 'glow-brand-b' : message.status === 'running' ? 'glow-tool-running' : ''}">
 		{#if message.status === 'running'}
 			<div class="absolute inset-0 pointer-events-none" style="background: linear-gradient(90deg, transparent 0%, rgba(234,179,8,0.04) 50%, transparent 100%); animation: tool-shimmer-slide 2s ease-in-out infinite;"></div>
 		{/if}
@@ -223,8 +231,10 @@
 			class="tool-subtitle flex items-center gap-1.5 py-0.5 px-3 pl-4 text-xs italic text-text-dimmer"
 		>
 			<span class="tool-connector font-mono not-italic text-border">└</span>
-			{#if message.status === "completed" && !message.isError}
+			{#if isAnswered}
 				<span class="tool-subtitle-text text-success not-italic">Answered ✓</span>
+			{:else if isUnanswered}
+				<span class="tool-subtitle-text not-italic">Not answered</span>
 			{:else if message.status === "error"}
 				<span class="tool-subtitle-text text-error not-italic">Skipped ✗</span>
 			{:else}
@@ -233,7 +243,7 @@
 		</div>
 
 		<!-- Show answer when completed -->
-		{#if message.status === "completed" && questionAnswer}
+		{#if isAnswered}
 			<Surface
 				variant="inset"
 				radius="md"

@@ -159,6 +159,7 @@ export interface ProviderTurnServiceSendInput {
 
 export interface ProviderTurnServicePrepareInput {
 	readonly clientId: string;
+	readonly commandId: string;
 	readonly sessionId: string;
 	readonly model?: ProviderTurnServiceSendInput["model"];
 	readonly modelUserSelected: boolean;
@@ -427,7 +428,10 @@ export const makeProviderTurnService = Effect.gen(function* () {
 		result: TurnResult,
 	) =>
 		Effect.gen(function* () {
-			// Any non-`completed` terminal status (error / interrupted / cancelled)
+			// The interrupter already sent done; finalizing again can end a newer turn.
+			if (result.status === "interrupted" && !result.error) return;
+
+			// Other non-`completed` terminal statuses (error / cancelled / orphaned)
 			// must finalize the turn: a completed turn's `done` arrives via the
 			// streamed provider events, but these results emit no such stream, so
 			// without this the browser stays "processing" until the 2-minute
@@ -680,7 +684,31 @@ export const makeProviderTurnService = Effect.gen(function* () {
 					: OPENCODE_PROVIDER_ID);
 			const daemonConfig = loadDaemonConfig(config.configDir);
 			const driver = resolveProviderRoutingDriver(daemonConfig, providerId);
-			if (driver === undefined || isClaudeDriver(driver)) {
+			if (driver === undefined) return input.sessionId;
+			if (isClaudeDriver(driver)) {
+				// A Claude turn blocked on a question never reaches the next message, so
+				// replying instead of answering interrupts it and resolves the question.
+				const pendingQuestions =
+					yield* pendingInteractionService.listPendingQuestions(
+						input.sessionId,
+					);
+				if (pendingQuestions.length > 0) {
+					yield* interruptTurn({
+						clientId: input.clientId,
+						sessionId: input.sessionId,
+						commandId: `${input.commandId}:interrupt-for-question`,
+					});
+					for (const question of pendingQuestions) {
+						wsHandler.broadcast({
+							type: "ask_user_resolved",
+							sessionId: input.sessionId,
+							toolId: question.requestId,
+						});
+						yield* sessionManagerService.decrementPendingQuestionCount(
+							input.sessionId,
+						);
+					}
+				}
 				return input.sessionId;
 			}
 

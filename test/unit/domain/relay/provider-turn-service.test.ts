@@ -6,7 +6,10 @@ import { Deferred, Effect, Layer } from "effect";
 import { afterEach, expect, vi } from "vitest";
 import type { DaemonConfig } from "../../../../src/lib/daemon/config-persistence.js";
 import { OpenCodeAPITag } from "../../../../src/lib/domain/provider/Services/opencode-api-service.js";
-import { PendingInteractionServiceLive } from "../../../../src/lib/domain/relay/Services/pending-interaction-service.js";
+import {
+	PendingInteractionServiceLive,
+	PendingInteractionServiceTag,
+} from "../../../../src/lib/domain/relay/Services/pending-interaction-service.js";
 import {
 	type ProviderRuntimeIngestion,
 	ProviderRuntimeIngestionTag,
@@ -1095,6 +1098,36 @@ describe("ProviderTurnService", () => {
 	);
 
 	it.effect(
+		"leaves a newer turn's timeout and browser state alone after an explicit interrupt result",
+		() => {
+			const engine = makeEngine({
+				providerId: "opencode",
+				result: completedTurn({ status: "interrupted" }),
+			});
+			const { layer, wsHandler } = serviceLayer({ engine });
+
+			return Effect.gen(function* () {
+				yield* startProcessingTimeout(
+					"session-1",
+					"2 minutes",
+					() => Effect.void,
+				);
+				yield* sendTurn();
+
+				expect(yield* hasActiveProcessingTimeout("session-1")).toBe(true);
+				expect(wsHandler.sendToSession).not.toHaveBeenCalledWith(
+					"session-1",
+					expect.objectContaining({ type: "done" }),
+				);
+				expect(wsHandler.sendTo).not.toHaveBeenCalledWith(
+					"client-1",
+					expect.objectContaining({ type: "error" }),
+				);
+			}).pipe(Effect.provide(layer));
+		},
+	);
+
+	it.effect(
 		"finalizes an interrupted dispatch result by clearing the processing timeout and broadcasting done",
 		() => {
 			const engine = makeEngine({
@@ -1127,6 +1160,10 @@ describe("ProviderTurnService", () => {
 					sessionId: "session-1",
 					code: 1,
 				});
+				expect(wsHandler.sendTo).toHaveBeenCalledWith(
+					"client-1",
+					expect.objectContaining({ type: "error", code: "SEND_FAILED" }),
+				);
 			}).pipe(Effect.provide(layer));
 		},
 	);
@@ -1251,6 +1288,49 @@ describe("ProviderTurnService", () => {
 			}).pipe(Effect.provide(layer));
 		},
 	);
+
+	for (const { providerId, questionCount, interrupts } of [
+		{ providerId: "claude", questionCount: 1, interrupts: true },
+		{ providerId: "claude", questionCount: 0, interrupts: false },
+		{ providerId: "opencode", questionCount: 1, interrupts: false },
+	]) {
+		it.effect(
+			`prepareTurnSession with ${questionCount} pending ${providerId} questions ${interrupts ? "interrupts and resolves them" : "leaves the turn alone"}`,
+			() => {
+				const engine = makeEngine({ providerId });
+				const { layer, wsHandler } = serviceLayer({ engine });
+
+				return Effect.gen(function* () {
+					const interactions = yield* PendingInteractionServiceTag;
+					for (let i = 0; i < questionCount; i++) {
+						yield* interactions.recordQuestionRequest({
+							requestId: `question-${i}`,
+							sessionId: "session-1",
+							questions: [],
+						});
+					}
+					const service = yield* ProviderTurnServiceTag;
+					yield* service.prepareTurnSession({
+						clientId: "client-1",
+						commandId: "cmd-reply",
+						sessionId: "session-1",
+						modelUserSelected: false,
+					});
+
+					expect(
+						vi
+							.mocked(engine.dispatchEffect)
+							.mock.calls.some(([call]) => call.type === "interrupt_turn"),
+					).toBe(interrupts);
+					expect(
+						vi
+							.mocked(wsHandler.broadcast)
+							.mock.calls.some(([msg]) => msg.type === "ask_user_resolved"),
+					).toBe(interrupts);
+				}).pipe(Effect.provide(layer));
+			},
+		);
+	}
 
 	it.effect(
 		"interrupts a first Claude turn while engine dispatch is still in flight",

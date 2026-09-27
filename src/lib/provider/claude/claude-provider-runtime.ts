@@ -2136,10 +2136,13 @@ export class ClaudeProviderRuntime {
 
 			log.info(`Interrupting turn for session ${sessionId}`);
 			yield* this.cleanupSessionEffect(ctx, "Turn interrupted");
-			yield* this.rejectQueuedTurnDeferredsEffect(
-				ctx.sessionId,
-				"Turn interrupted",
-			);
+			yield* this.settleQueuedTurnDeferredsEffect(ctx.sessionId, {
+				status: "interrupted",
+				cost: 0,
+				tokens: { input: 0, output: 0 },
+				durationMs: 0,
+				providerStateUpdates: [],
+			});
 		});
 	}
 
@@ -2295,7 +2298,7 @@ export class ClaudeProviderRuntime {
 		return Effect.gen(this, function* () {
 			yield* this.cleanupSessionEffect(ctx, reason);
 
-			yield* this.rejectQueuedTurnDeferredsEffect(ctx.sessionId, reason);
+			yield* this.settleQueuedTurnDeferredsEffect(ctx.sessionId, reason);
 
 			// Terminal close of the SDK query (vs interrupt(), which is resumable).
 			yield* Effect.try({
@@ -2308,16 +2311,20 @@ export class ClaudeProviderRuntime {
 		});
 	}
 
-	private rejectQueuedTurnDeferredsEffect(
+	private settleQueuedTurnDeferredsEffect(
 		sessionId: string,
-		reason: string,
+		outcome: string | TurnResult,
 	): Effect.Effect<void, never> {
 		return Effect.gen(this, function* () {
 			const state = yield* this.getState();
 			const queue = getOrUndefined(HashMap.get(state.turnWaiters, sessionId));
 			if (!queue) return;
 			for (const d of queue) {
-				yield* Deferred.fail(d, new Error(reason)).pipe(Effect.ignore);
+				yield* (
+					typeof outcome === "string"
+						? Deferred.fail(d, new Error(outcome))
+						: Deferred.succeed(d, outcome)
+				).pipe(Effect.ignore);
 			}
 			yield* this.clearTurnDeferreds(sessionId);
 		});
