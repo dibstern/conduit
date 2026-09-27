@@ -333,8 +333,13 @@
 			const opener = overflowOpener;
 			if (opener?.isConnected) {
 				event.preventDefault();
+				// Yield to an item that moved focus on purpose: the Terminal view
+				// focuses xterm once its lazily loaded tab mounts, which can land
+				// either side of this restore.
 				setTimeout(() => {
-					requestAnimationFrame(() => { if (opener.isConnected) opener.focus(); });
+					requestAnimationFrame(() => {
+						if (opener.isConnected && document.activeElement === document.body) opener.focus();
+					});
 				}, 0);
 			}
 		}}
