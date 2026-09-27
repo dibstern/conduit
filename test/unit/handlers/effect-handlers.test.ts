@@ -5044,6 +5044,7 @@ describe("handleMessage", () => {
 					type: "session_switched",
 					id: "ses-opencode-created",
 					sessionId: "ses-opencode-created",
+					replacesSessionId: "ses-local-placeholder",
 				});
 				expect(engine.dispatchEffect).toHaveBeenCalledWith(
 					expect.objectContaining({

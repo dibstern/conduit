@@ -792,11 +792,13 @@ export function handleMessage(msg: RelayMessage): void {
 			// it may leave whichever session is open. A child of the open session
 			// (a fork) may too; its lineage is on the switch or, when the relay
 			// has no read model to announce it, on the row session_forked sent.
+			// So may a session that replaces the open one.
 			if (
 				!requestedCreation &&
 				route.sessionId &&
 				msg.id &&
 				route.sessionId !== msg.id &&
+				route.sessionId !== msg.replacesSessionId &&
 				route.sessionId !== (msg.parentID ?? findSession(msg.id)?.parentID) &&
 				(sessionState.currentId !== null || (!msg.events && !msg.history))
 			)

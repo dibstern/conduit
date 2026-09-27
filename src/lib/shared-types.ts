@@ -845,6 +845,7 @@ const SessionSwitchedSchema = Schema.Struct({
 	id: Schema.String,
 	sessionId: Schema.String,
 	parentID: Schema.optional(Schema.String),
+	replacesSessionId: Schema.optional(Schema.String),
 	requestId: Schema.optional(RequestId),
 	events: Schema.optional(Schema.Array(Schema.Unknown)),
 	eventsHasMore: Schema.optional(Schema.Boolean),
@@ -1508,6 +1509,9 @@ export type RelayMessage =
 			id: string;
 			sessionId: string;
 			parentID?: string;
+			/** The session this one takes over for the recipient, as when a turn
+			 *  on a local row materializes an OpenCode session. */
+			replacesSessionId?: string;
 			/** Correlation ID echoed from CreateSession or ViewSession request. */
 			requestId?: RequestId;
 			/** Raw events for client replay (cache hit). */
