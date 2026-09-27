@@ -267,7 +267,14 @@ test.describe("Subagent navigation", () => {
 
 		const chat = new ChatPage(page);
 
-		// Click the subagent link in the task tool card
+		// A settled turn collapses its steps into a strip (22875676); the link to
+		// the child session is on the subagent's row in the expanded log
+		// (5517789f). Clicking the strip segment opens the log at that step.
+		await page
+			.getByRole("button", {
+				name: /^Delegated Explore synthesis pipeline code/,
+			})
+			.click();
 		const subagentLink = chat.subagentLinks.first();
 		await expect(subagentLink).toBeVisible({ timeout: 5_000 });
 		await subagentLink.click();
