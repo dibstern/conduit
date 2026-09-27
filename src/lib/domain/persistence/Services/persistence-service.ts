@@ -1,6 +1,6 @@
 // ─── Effect Persistence Service ──────────────────────────────────────────────
 // Thin wrapper around @effect/sql-sqlite-node providing schema migration,
-// health checking, eviction, and transaction helpers for the relay event store.
+// health checking and transaction helpers for the relay event store.
 
 import { SqlClient } from "@effect/sql";
 import { Context, Data, Effect, Layer } from "effect";
@@ -18,9 +18,6 @@ export class PersistenceError extends Data.TaggedError("PersistenceError")<{
 export interface PersistenceService {
 	readonly migrate: Effect.Effect<void, PersistenceError>;
 	readonly healthCheck: Effect.Effect<boolean, PersistenceError>;
-	readonly evictBefore: (
-		timestampMs: number,
-	) => Effect.Effect<number, PersistenceError>;
 	readonly sql: SqlClient.SqlClient;
 }
 
@@ -89,22 +86,7 @@ export const makePersistenceServiceLive: Layer.Layer<
 			Effect.withSpan("persistence.healthCheck"),
 		);
 
-		const evictBefore = (timestampMs: number) =>
-			Effect.gen(function* () {
-				// Use .raw to get the better-sqlite3 RunResult with .changes
-				const result =
-					yield* sql`DELETE FROM events WHERE created_at < ${timestampMs}`.raw;
-				return (result as { changes: number }).changes ?? 0;
-			}).pipe(
-				Effect.mapError((e) =>
-					e instanceof PersistenceError
-						? e
-						: new PersistenceError({ operation: "evictBefore", cause: e }),
-				),
-				Effect.withSpan("persistence.evictBefore"),
-			);
-
-		return { migrate, healthCheck, evictBefore, sql };
+		return { migrate, healthCheck, sql };
 	}),
 );
 

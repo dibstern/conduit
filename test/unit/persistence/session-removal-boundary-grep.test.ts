@@ -19,17 +19,10 @@ const REMOVAL_SEAM = [
 // list someone has to add themselves to is the point: it is a deliberate act,
 // and it needs a reason that survives review.
 //
-//   eviction.ts — `cascadeProjections` is retention maintenance over sessions
-//     whose events have already been evicted. It holds a raw SqliteClient with
-//     no event bus and no read-model counter to move, and nothing in production
-//     calls it: its only callers are its own tests. Its removals are silent.
 //   effect/migrations.ts — the legacy skeleton purge runs once, at startup,
 //     before a relay exists for anyone to subscribe to. There is no advance to
 //     publish because there is nobody to publish it to.
-const RECORDED_GAPS = [
-	"src/lib/persistence/eviction.ts",
-	"src/lib/persistence/effect/migrations.ts",
-];
+const RECORDED_GAPS = ["src/lib/persistence/effect/migrations.ts"];
 
 // Being inside the seam is not a licence to write another delete: an ordinary
 // SessionWrite is executed with `RETURNING id` appended, which names the row it
