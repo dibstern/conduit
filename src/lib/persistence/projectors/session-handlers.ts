@@ -241,7 +241,7 @@ export const sessionHandlers: {
 	// that is the list's sort key, so reading a session must not reorder it.
 	"session.read": (event) => [
 		{
-			sql: "UPDATE sessions SET read_at = ? WHERE id = ?",
+			sql: "UPDATE sessions SET read_at = ?, marked_unread_at = NULL WHERE id = ?",
 			// The event's own timestamp, never Date.now(): the same log has to
 			// project to the same table every time.
 			params: [event.createdAt, event.data.sessionId],
@@ -250,8 +250,8 @@ export const sessionHandlers: {
 
 	"session.unread": (event) => [
 		{
-			sql: "UPDATE sessions SET read_at = NULL WHERE id = ?",
-			params: [event.data.sessionId],
+			sql: "UPDATE sessions SET read_at = NULL, marked_unread_at = ? WHERE id = ?",
+			params: [event.createdAt, event.data.sessionId],
 		},
 	],
 

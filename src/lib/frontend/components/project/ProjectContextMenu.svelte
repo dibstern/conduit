@@ -57,6 +57,7 @@
 	{#if onrename}
 		<MenuItem
 			data-testid="project-ctx-rename"
+			class="min-h-[44px] md:min-h-0"
 			onselect={() => onrename?.(project.slug)}
 		>
 			<Icon name="pencil" size={13} />
@@ -67,6 +68,7 @@
 	<MenuItem
 		variant="danger"
 		data-testid="project-ctx-delete"
+		class="min-h-[44px] md:min-h-0"
 		onselect={() => ondelete(project.slug, project.title)}
 	>
 		<span>Remove</span>

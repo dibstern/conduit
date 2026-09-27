@@ -325,6 +325,12 @@ export interface RenameSessionRpcInput {
 	readonly originId?: string;
 }
 
+export interface MarkSessionReadRpcInput {
+	readonly projectSlug: string;
+	readonly sessionId: string;
+	readonly originId?: string;
+}
+
 export interface SetSessionSettledRpcInput {
 	readonly projectSlug: string;
 	readonly sessionId: string;
@@ -742,6 +748,16 @@ const callSetSessionSettled = (input: SetSessionSettledRpcInput) =>
 		client.SetSessionSettled(input).pipe(Effect.asVoid),
 	);
 
+const callMarkSessionUnread = (input: MarkSessionReadRpcInput) =>
+	callControl(input.projectSlug, (client) =>
+		client.MarkSessionUnread(input).pipe(Effect.asVoid),
+	);
+
+const callMarkSessionRead = (input: MarkSessionReadRpcInput) =>
+	callControl(input.projectSlug, (client) =>
+		client.MarkSessionRead(input).pipe(Effect.asVoid),
+	);
+
 const callSetSessionPinned = (input: SetSessionPinnedRpcInput) =>
 	callControl(input.projectSlug, (client) =>
 		client.SetSessionPinned(input).pipe(Effect.asVoid),
@@ -1105,6 +1121,18 @@ export async function setSessionSettledRpc(
 	input: SetSessionSettledRpcInput,
 ): Promise<void> {
 	await runTransportEffect(callSetSessionSettled(input));
+}
+
+export async function markSessionUnreadRpc(
+	input: MarkSessionReadRpcInput,
+): Promise<void> {
+	await runTransportEffect(callMarkSessionUnread(input));
+}
+
+export async function markSessionReadRpc(
+	input: MarkSessionReadRpcInput,
+): Promise<void> {
+	await runTransportEffect(callMarkSessionRead(input));
 }
 
 export async function setSessionPinnedRpc(

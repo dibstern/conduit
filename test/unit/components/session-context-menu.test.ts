@@ -83,17 +83,17 @@ describe("session triage menu", () => {
 		anchor.remove();
 		input.remove();
 	});
-	it("puts Settle and Pin above Rename, with a divider", async () => {
+	it("shows triage actions and shortcuts above Rename, with a divider", async () => {
 		const { onsettle } = openMenu({ id: "a", title: "Alpha" });
 		const items = await screen.findAllByRole("menuitem");
 		expect(items.slice(0, 5).map((item) => item.textContent?.trim())).toEqual([
-			"Settle",
+			"Settle s",
 			"Auto-settle when idle",
-			"Pin to top",
-			"Snooze…",
-			"Rename",
+			"Snooze… z",
+			"Pin to top p",
+			"Rename r",
 		]);
-		expect(screen.getByRole("separator")).toBeTruthy();
+		expect(screen.getAllByRole("separator")).toHaveLength(2);
 		await fireEvent.click(screen.getByTestId("session-ctx-settle"));
 		expect(onsettle).toHaveBeenCalledWith("a", true);
 	});

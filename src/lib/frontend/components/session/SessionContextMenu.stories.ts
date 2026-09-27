@@ -28,6 +28,16 @@ export const LongHeader: Story = {
 	},
 };
 
+export const PhoneSheet: Story = {
+	args: {
+		session: mockSessionLongTitle,
+		projectLabel: "Conduit",
+		branch: "main",
+		presentation: "sheet",
+	},
+	parameters: { viewport: { defaultViewport: "mobile1" } },
+};
+
 // `rootSelector: "body"` is load-bearing. Since conduit-test-de3.35.4 the menu
 // portals out of #storybook-root, which is where the pseudo-states addon starts
 // walking -- so a plain `hover: true` reached nothing and this story rendered a

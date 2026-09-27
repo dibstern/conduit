@@ -105,6 +105,26 @@ describe("ClaudeProviderInstance lifecycle", () => {
 	});
 
 	describe("shutdown()", () => {
+		it("rejects queued turn deferreds with the shutdown reason", async () => {
+			const instance = new ClaudeProviderInstance({ workspaceRoot: workspace });
+			const ctx = makeFakeSessionContext("sess-shutdown");
+			setClaudeRuntimeSessionForTest(instance, "sess-shutdown", ctx);
+			const deferred = await Effect.runPromise(
+				Deferred.make<TurnResult, Error>(),
+			);
+			setClaudeRuntimeTurnWaitersForTest(instance, "sess-shutdown", [deferred]);
+			const result = Effect.runPromise(
+				Deferred.await(deferred).pipe(Effect.either),
+			);
+
+			await Effect.runPromise(instance.shutdownEffect());
+
+			expect(await result).toMatchObject({
+				_tag: "Left",
+				left: { message: "Provider instance shutting down" },
+			});
+		});
+
 		it("closes all active sessions", async () => {
 			const instance = new ClaudeProviderInstance({ workspaceRoot: workspace });
 			const ctx = makeFakeSessionContext("sess-1");
@@ -235,7 +255,7 @@ describe("ClaudeProviderInstance lifecycle", () => {
 			expect(ctx.pendingApprovals.size).toBe(0);
 		});
 
-		it("rejects all queued turn deferreds with interrupt reason", async () => {
+		it("resolves all queued turn deferreds as interrupted", async () => {
 			const instance = new ClaudeProviderInstance({ workspaceRoot: workspace });
 			const ctx = makeFakeSessionContext("sess-interrupt-reject");
 			setClaudeRuntimeSessionForTest(instance, "sess-interrupt-reject", ctx);
@@ -247,20 +267,23 @@ describe("ClaudeProviderInstance lifecycle", () => {
 				d2,
 			]);
 
-			const rejected: Error[] = [];
-			const caught = [
-				collectTurnFailure(d1, rejected),
-				collectTurnFailure(d2, rejected),
-			];
-
 			await Effect.runPromise(
 				instance.interruptTurnEffect("sess-interrupt-reject"),
 			);
-			await Promise.all(caught);
+			const results = await Promise.all([
+				Effect.runPromise(Deferred.await(d1)),
+				Effect.runPromise(Deferred.await(d2)),
+			]);
 
-			expect(rejected).toHaveLength(2);
-			expect(rejected[0]?.message).toContain("interrupted");
-			expect(rejected[1]?.message).toContain("interrupted");
+			for (const result of results) {
+				expect(result).toEqual({
+					status: "interrupted",
+					cost: 0,
+					tokens: { input: 0, output: 0 },
+					durationMs: 0,
+					providerStateUpdates: [],
+				});
+			}
 			expect(
 				hasClaudeRuntimeTurnWaitersForTest(instance, "sess-interrupt-reject"),
 			).toBe(false);
@@ -392,10 +415,10 @@ describe("ClaudeProviderInstance lifecycle", () => {
 				Deferred.make<TurnResult, Error>(),
 			);
 			setClaudeRuntimeTurnWaitersForTest(instance, "sess-1", [deferred]);
-			const caught = collectTurnFailure(deferred, []);
-
 			await Effect.runPromise(instance.interruptTurnEffect("sess-1"));
-			await caught;
+			expect(await Effect.runPromise(Deferred.await(deferred))).toMatchObject({
+				status: "interrupted",
+			});
 
 			const pushCalls = (sink.push as ReturnType<typeof vi.fn>).mock
 				.calls as Array<[CanonicalEvent]>;
@@ -494,6 +517,23 @@ describe("ClaudeProviderInstance lifecycle", () => {
 	});
 
 	describe("endSessionEffect()", () => {
+		it("signals session-ended on terminal disposal", async () => {
+			const onBackgroundTask = vi.fn();
+			const instance = new ClaudeProviderInstance({
+				workspaceRoot: workspace,
+				onBackgroundTask,
+			});
+			const ctx = makeFakeSessionContext("sess-end");
+			setClaudeRuntimeSessionForTest(instance, "sess-end", ctx);
+
+			await Effect.runPromise(instance.endSessionEffect("sess-end"));
+			expect(onBackgroundTask).toHaveBeenCalledOnce();
+			expect(onBackgroundTask).toHaveBeenCalledWith({
+				sessionId: "sess-end",
+				kind: "session-ended",
+			});
+		});
+
 		it("closes query and removes session from map", async () => {
 			const instance = new ClaudeProviderInstance({ workspaceRoot: workspace });
 			const ctx = makeFakeSessionContext("sess-end");

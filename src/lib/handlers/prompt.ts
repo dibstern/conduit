@@ -94,6 +94,7 @@ export const sendMessageToSession = (input: SendMessageToSessionInput) =>
 				: yield* makeProviderTurnService;
 		activeId = yield* providerTurnService.prepareTurnSession({
 			clientId,
+			commandId: input.commandId,
 			sessionId: activeId,
 			...(sessionModel ? { model: sessionModel } : {}),
 			modelUserSelected: sessionModelUserSelected,

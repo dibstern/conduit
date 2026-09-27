@@ -44,7 +44,7 @@ const CLAUDE_NOT_APPLICABLE_TYPES = [
 	"session.created", // Emitted directly in prompt.ts via eventStore.append(), not via translator
 	"session.renamed", // Title changes handled by auto-rename in prompt.ts
 	"session.deleted", // Relay-owned lifecycle event appended directly by SessionManager
-	"session.forked", // User-initiated forks are published by the session command, not the SDK stream
+	"session.forked", // Fork lineage is recorded by the relay, not the Claude event translator
 	"session.provider_changed", // Provider switching is a relay-level concept
 	"session.provider_cleanup_failed", // Relay-owned cleanup diagnostic
 	"session.settled", // Relay-owned triage state

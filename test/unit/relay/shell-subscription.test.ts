@@ -1,10 +1,6 @@
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import {
-	getSessionMessages,
-	forkSession as sdkForkSession,
-} from "@anthropic-ai/claude-agent-sdk";
 import { SqlClient } from "@effect/sql";
 import { describe, it } from "@effect/vitest";
 import {
@@ -55,6 +51,7 @@ import {
 	type CanonicalEvent,
 	canonicalEvent,
 } from "../../../src/lib/persistence/events.js";
+import { defaultClaudeSessionForkSdk } from "../../../src/lib/provider/claude/claude-session-fork.js";
 import {
 	type SessionInfo,
 	SessionInfoSchema,
@@ -67,11 +64,11 @@ import {
 import { withDispatchEffect } from "../../helpers/orchestration-engine-test-double.js";
 
 // ─── Real-stack harness ──────────────────────────────────────────────────────
-vi.mock("@anthropic-ai/claude-agent-sdk", async (importOriginal) => ({
-	...(await importOriginal<typeof import("@anthropic-ai/claude-agent-sdk")>()),
-	forkSession: vi.fn(),
-	getSessionMessages: vi.fn(),
-}));
+const getSessionMessages = vi.spyOn(
+	defaultClaudeSessionForkSdk,
+	"readTranscript",
+);
+const sdkForkSession = vi.spyOn(defaultClaudeSessionForkSdk, "forkSession");
 // A fresh temp-file persistence stack + the real SessionEventBus per test. The
 // shell source reads the sessions projection and nothing else, so what is under
 // test is a contract WITH the store: the version column the projectors stamp,
@@ -101,6 +98,7 @@ const makeShellTestLayer = () => {
 			OrchestrationEngineTag,
 			withDispatchEffect({ dispatch: async () => undefined }),
 		),
+		Layer.succeed(ConfigTag, makeMockConfig({ configDir: dir })),
 		cleanup,
 	);
 };
@@ -142,12 +140,16 @@ const sessionStatus = (
 		{ sessionId, status },
 		{ provider: "claude", createdAt: at() },
 	);
-const messageCreated = (sessionId: string, messageId: string): CanonicalEvent =>
+const messageCreated = (
+	sessionId: string,
+	messageId: string,
+	createdAt = at(),
+): CanonicalEvent =>
 	canonicalEvent(
 		"message.created",
 		sessionId,
 		{ messageId, role: "user", sessionId },
-		{ provider: "claude", createdAt: at() },
+		{ provider: "claude", createdAt },
 	);
 const textDelta = (
 	sessionId: string,
@@ -284,10 +286,10 @@ describe("subscribeShell", () => {
 			() =>
 				Effect.gen(function* () {
 					yield* recoverProjections;
-					yield* commit([sessionCreated("claude-parent")]);
-					const sql = yield* SqlClient.SqlClient;
-					yield* sql`INSERT INTO messages (id, session_id, role, text, created_at, updated_at)
-						VALUES ('ui-boundary', 'claude-parent', 'assistant', 'answer', 1000, 1000)`;
+					yield* commit([
+						sessionCreated("claude-parent"),
+						messageCreated("claude-parent", "ui-boundary", 1000),
+					]);
 					const state = yield* ProviderStateEffectTag;
 					yield* state.saveUpdates("claude-parent", [
 						{ key: "resumeSessionId", value: "sdk-parent" },
@@ -376,10 +378,10 @@ describe("subscribeShell", () => {
 		() =>
 			Effect.gen(function* () {
 				yield* recoverProjections;
-				yield* commit([sessionCreated("claude-parent")]);
-				const sql = yield* SqlClient.SqlClient;
-				yield* sql`INSERT INTO messages (id, session_id, role, text, created_at, updated_at)
-					VALUES ('ui-tip', 'claude-parent', 'assistant', 'answer', 1000, 1000)`;
+				yield* commit([
+					sessionCreated("claude-parent"),
+					messageCreated("claude-parent", "ui-tip", 1000),
+				]);
 				const state = yield* ProviderStateEffectTag;
 				yield* state.saveUpdates("claude-parent", [
 					{ key: "resumeSessionId", value: "sdk-parent" },
@@ -401,13 +403,13 @@ describe("subscribeShell", () => {
 				const read = yield* ReadQueryEffectTag;
 				expect(yield* read.getSession(child.id)).toMatchObject({
 					parent_id: "claude-parent",
-					fork_point_event: "transcript-tip",
+					fork_point_event: "ui-tip",
 					fork_point_timestamp: 1000,
 					fork_point_message_id: "ui-tip",
 				});
 				expect(sdkForkSession).toHaveBeenCalledWith(
 					"sdk-parent",
-					expect.objectContaining({ upToMessageId: "transcript-tip" }),
+					expect.objectContaining({ dir: "/test/project" }),
 				);
 			}).pipe(Effect.provide(makeShellTestLayer())),
 	);
@@ -485,8 +487,7 @@ describe("subscribeShell", () => {
 				});
 				const sql = yield* SqlClient.SqlClient;
 				yield* sql`CREATE TRIGGER reject_child_state BEFORE INSERT ON provider_state WHEN NEW.session_id = 'unresumable-child' BEGIN SELECT RAISE(ABORT, 'resume state unavailable'); END`;
-				yield* sql`INSERT INTO messages (id, session_id, role, text, created_at, updated_at)
-					VALUES ('api-tip', 'claude-parent', 'assistant', 'answer', 1000, 1000)`;
+				yield* commit([messageCreated("claude-parent", "api-tip", 1000)]);
 				const result = yield* Effect.either(forkSession("claude-parent"));
 				expect(result._tag).toBe("Left");
 				const read = yield* ReadQueryEffectTag;
@@ -511,7 +512,10 @@ describe("subscribeShell", () => {
 					}),
 				);
 				yield* recoverProjections;
-				yield* commit([sessionCreated("claude-parent")]);
+				yield* commit([
+					sessionCreated("claude-parent"),
+					messageCreated("claude-parent", "api-tip", 1000),
+				]);
 				const state = yield* ProviderStateEffectTag;
 				yield* state.saveUpdates("claude-parent", [
 					{ key: "resumeSessionId", value: "sdk-parent" },
@@ -519,13 +523,13 @@ describe("subscribeShell", () => {
 				vi.mocked(getSessionMessages).mockClear();
 				vi.mocked(getSessionMessages).mockResolvedValue([]);
 				const result = yield* Effect.either(
-					forkSession("claude-parent").pipe(
+					forkSession("claude-parent", "api-tip").pipe(
 						Effect.provideService(ConfigTag, makeMockConfig({ configDir })),
 					),
 				);
 				expect(result).toMatchObject({
 					_tag: "Left",
-					left: { cause: expect.stringContaining("transcript UUID") },
+					left: { message: expect.stringContaining("Claude transcript") },
 				});
 				expect(getSessionMessages).toHaveBeenCalledWith("sdk-parent", {
 					dir: "/test/project",

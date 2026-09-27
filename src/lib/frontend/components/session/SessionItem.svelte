@@ -8,11 +8,12 @@
 	type AttentionEmphasis = "strong" | "normal" | "dim";
 	type Density = "comfortable" | "dense";
 
-	// One word per tier, and nothing at all for idle, so a quiet list looks
-	// quiet. The word on screen is what the row wants from you; the spoken form
+	// One word per actionable tier; idle keeps only a quiet glyph and says
+	// nothing, so a quiet list stays quiet. The word on screen is what the row
+	// wants from you; the spoken form
 	// is a state, because a screen reader reads a link's label as a description
 	// of the row rather than as a button.
-	const ATTENTION_DISPLAY: Record<
+	export const ATTENTION_DISPLAY: Record<
 		SessionAttention,
 		{
 			word: string;
@@ -24,6 +25,7 @@
 				| "octagon-alert"
 				| "loader-circle"
 				| "check"
+				| "circle"
 				| null;
 			emphasis: AttentionEmphasis;
 		}
@@ -70,8 +72,8 @@
 		idle: {
 			word: "",
 			spoken: "",
-			colour: "",
-			icon: null,
+			colour: "text-text-dimmer",
+			icon: "circle",
 			emphasis: "dim",
 		},
 	};
@@ -99,16 +101,14 @@
 		// it never reaches: the padding is tuned so the two-line content clears
 		// it and the declared min-height is what wins. Watch the rem scaling --
 		// the app's root font-size is 12px, so `py-1.5` is 4.5px, not 6px.
-		// Settled has no `md:` step because it cannot go below 40 while the row
-		// still carries the desktop action buttons; the phone overflow button
-		// leaves the row in conduit-test-vik1.9. Keep these heights for now.
+		// Settled rows keep a 44px phone target and their compact desktop heights.
 		comfortable: {
 			row: "min-h-[52px] md:min-h-[46px] py-1.5 md:py-1 px-[7px]",
-			settled: "min-h-[40px] py-1 px-[7px]",
+			settled: "min-h-[44px] md:min-h-[40px] py-1 px-[7px]",
 		},
 		dense: {
 			row: "min-h-[44px] py-1 px-[7px]",
-			settled: "min-h-[38px] py-[3px] px-[7px]",
+			settled: "min-h-[44px] md:min-h-[38px] py-[3px] px-[7px]",
 		},
 	};
 </script>
@@ -120,7 +120,9 @@
 	import Icon from "../ui/Icon.svelte";
 	import Button from "../ui/Button.svelte";
 	import TextInput from "../ui/TextInput.svelte";
+	import ProjectSquare from "./ProjectSquare.svelte";
 	import { isSessionWoken } from "../../stores/session.svelte.js";
+	import { getWokenSessionText } from "../../utils/session-lifecycle.js";
 	import { getSessionActionState, getSwipeStage, LONG_PRESS_DELAY_MS, MOVEMENT_SLOP_PX } from "../../utils/swipe.js";
 	import { onDestroy } from "svelte";
 
@@ -129,10 +131,11 @@
 	let {
 		session,
 		projectLabel,
+		projectAccent = 1,
 		href = "",
 		active = false,
 		renaming: renamingProp = false,
-		cleanupMode = false,
+		selectMode = false,
 		selected = false,
 		density = "comfortable",
 		settled = false,
@@ -146,6 +149,7 @@
 		ontoggleselection,
 		oncontextmenu: oncontextmenuProp,
 		onsettle,
+		onmarkread,
 		onpin,
 		onsnooze,
 		onunsnooze,
@@ -153,17 +157,19 @@
 		heldSessionId,
 		onholdchange,
 		menuOpen = false,
+		markOnly = false,
 		onrename,
 		onrenameend,
 	}: {
 		session: SessionInfo;
-		// `| undefined` because the list passes it unconditionally and a row
-		// without a project name is the single-project case, not a missing prop.
+		// `| undefined` because the list passes it unconditionally before the
+		// attached project's slug is available.
 		projectLabel?: string | undefined;
+		projectAccent?: number;
 		href?: string;
 		active?: boolean;
 		renaming?: boolean;
-		cleanupMode?: boolean;
+		selectMode?: boolean;
 		selected?: boolean;
 		density?: Density;
 		settled?: boolean;
@@ -175,8 +181,10 @@
 		pinned?: boolean;
 		onswitchsession?: (id: string) => void;
 		ontoggleselection?: (id: string) => void;
-		oncontextmenu?: (session: SessionInfo, anchor: HTMLElement) => void;
+		markOnly?: boolean;
+		oncontextmenu?: (session: SessionInfo, anchor: HTMLElement, trigger?: "touch") => void;
 		onsettle?: (id: string, next: boolean) => void;
+		onmarkread?: (id: string) => void;
 		onpin?: (id: string, next: boolean) => void;
 		onsnooze?: (id: string) => void;
 		onunsnooze?: (id: string) => void;
@@ -225,18 +233,18 @@
 
 	const displayTitle = $derived(session.title || "New Session");
 	const actions = $derived(getSessionActionState(session, now));
-	const swipeStage = $derived(getSwipeStage(offset, rowEl?.getBoundingClientRect().width ?? 0));
+	const swipeStage = $derived.by(() => {
+		const stage = getSwipeStage(offset, rowEl?.getBoundingClientRect().width ?? 0);
+		return offset > 0 && actions.settleDisabledReason && stage === "commit" ? "reveal" : stage;
+	});
 	const swipeDirection = $derived(offset > 0 ? "settle" : "snooze");
 	const swipeAllowed = $derived(canSwipe(swipeDirection));
+	const canMarkRead = $derived(!settled && !actions.settled && !snoozed && !actions.snoozed && onmarkread != null);
 	const shelfRow = $derived(settled || snoozed);
 	const timeText = $derived(snoozedUntilText ?? settledAt ?? formatTimeAgo(session.updatedAt));
 	const woken = $derived(isSessionWoken(session, now) && !snoozed);
 	const wokeReason = $derived(session.wokenAt != null ? (session.wokeBecause ?? "time") : "time");
-	const wokeText = $derived(
-		wokeReason === "time" ? "Woke" :
-		wokeReason === "error" ? "Woke · failed" :
-		wokeReason === "turn" ? "Woke · done" : `Woke · ${wokeReason}`,
-	);
+	const wokeText = $derived(getWokenSessionText(session));
 	const wokeColour = $derived(
 		wokeReason === "approval" ? "bg-warning/10 text-warning" :
 		wokeReason === "question" ? "bg-brand-b/10 text-brand-b" :
@@ -257,12 +265,17 @@
 	const densityClass = $derived(
 		shelfRow ? DENSITY_CLASSES[density].settled : DENSITY_CLASSES[density].row,
 	);
+	// The open row is never faded or greyed, whatever its tier: it is the one
+	// row you have to find at a glance. Its weight still follows the tier, so
+	// being open never reads as unread.
 	const titleClass = $derived(
 		shelfRow
-			? "text-base text-text-secondary font-normal"
-			: `text-lg ${emphasis.title}`,
+			? `text-base font-normal ${active ? "text-text" : "text-text-secondary"}`
+			: `text-lg ${active && status.emphasis !== "strong" ? "text-text font-normal" : emphasis.title}`,
 	);
-	const rowOpacityClass = $derived(shelfRow ? "opacity-50" : woken ? "" : emphasis.row);
+	const rowOpacityClass = $derived(
+		active ? "" : shelfRow ? "opacity-50" : woken ? "" : emphasis.row,
+	);
 
 	// Status first, per the design reference. A screen reader user scanning the
 	// list hears what a row wants before its title. This overrides the row's own
@@ -280,19 +293,19 @@
 			.join(", "),
 	);
 
-	// The leading column holds either the 20px status glyph or, in cleanup mode,
+	// The leading column holds either the 20px status glyph or, in select mode,
 	// the selection control, which is 44px wide because it is a touch target and
 	// not a glyph. It widens rather than letting the control overflow into the
 	// title, and the `minmax(110px, 1fr)` middle column IS the title's floor --
 	// no `min-w-` utility anywhere else may restate it.
 	const itemClass = $derived(
 		`session-item group grid ${
-			cleanupMode
+			selectMode
 				? "grid-cols-[44px_minmax(110px,1fr)_auto]"
 				: "grid-cols-[20px_minmax(110px,1fr)_auto]"
-		} gap-x-[9px] items-center ${densityClass} ${rowOpacityClass} rounded-panel cursor-pointer relative` +
+		} gap-x-[9px] items-center ${densityClass} ${rowOpacityClass} mb-px rounded-panel cursor-pointer relative focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent` +
 			(active
-				? " active bg-bg-surface text-text"
+				? " active bg-bg-alt text-text"
 				: " text-text-secondary hover:bg-sidebar-hover hover:text-text"),
 	);
 
@@ -367,8 +380,9 @@
 	}
 
 	function canSwipe(direction: "settle" | "snooze") {
+		if (markOnly) return false;
 		return direction === "settle"
-			? actions.settleDisabledReason == null
+			? actions.settleDisabledReason == null || canMarkRead
 			: actions.snoozeVisible && (actions.snoozed || actions.snoozeDisabledReason == null);
 	}
 
@@ -382,7 +396,7 @@
 	}
 
 	function startPointer(event: PointerEvent) {
-		if (event.pointerType !== "touch" || cleanupMode || isRenaming || !oncontextmenuProp || (event.target as Element).closest("button")) return;
+		if (event.pointerType !== "touch" || selectMode || isRenaming || !oncontextmenuProp || (event.target as Element).closest("button")) return;
 		if (activePointer !== null) return;
 		if (heldDirection) { closeHold(); armClickSuppression(); return; }
 		activePointer = event.pointerId;
@@ -394,7 +408,7 @@
 			suppressNativeContextMenu = true;
 			setTimeout(() => { suppressNativeContextMenu = false; }, 1000);
 			armClickSuppression();
-			if (rowEl) oncontextmenuProp?.(session, rowEl);
+			if (rowEl) oncontextmenuProp?.(session, rowEl, "touch");
 			stopPointer();
 		}, LONG_PRESS_DELAY_MS);
 		window.addEventListener("pointermove", movePointer);
@@ -421,7 +435,7 @@
 		if (event.pointerId !== activePointer) return;
 		const wasHorizontal = gesture === "horizontal";
 		const direction = offset > 0 ? "settle" : "snooze";
-		const stage = canSwipe(direction) ? getSwipeStage(offset, rowEl?.getBoundingClientRect().width ?? 0) : "none";
+		const stage = canSwipe(direction) ? swipeStage : "none";
 		stopPointer();
 		if (!wasHorizontal) return;
 		armClickSuppression();
@@ -430,7 +444,7 @@
 			offset = 0;
 		} else if (stage === "reveal") {
 			heldDirection = direction;
-			offset = (direction === "settle" ? 1 : -1) * 88;
+			offset = direction === "settle" ? (canMarkRead ? (actions.settleDisabledReason ? 74 : 148) : 88) : -88;
 			onholdchange?.(session.id);
 		} else offset = 0;
 	}
@@ -474,7 +488,7 @@
 	}
 
 	function handleDblClick(e: MouseEvent) {
-		if (cleanupMode || !onrename) return;
+		if (selectMode || !onrename) return;
 		e.preventDefault();
 		e.stopPropagation();
 		startRename();
@@ -521,17 +535,48 @@
 		{@const direction = heldDirection ?? swipeDirection}
 		{@const verb = direction === "settle" ? (settled || actions.settled ? "Un-settle" : "Settle") : (snoozed || actions.snoozed ? "Unsnooze" : "Snooze")}
 		{@const stage = heldDirection ? "reveal" : swipeStage}
-		<button
+		{#if direction === "settle" && stage === "reveal" && canMarkRead}
+			<div class="absolute inset-0 flex items-stretch font-brand text-xs font-semibold">
+				{#if !actions.settleDisabledReason}
+					<Button
+						variant="ghost" size="content" layout="flow" tone="inherit" hoverFill="none"
+						type="button"
+						data-testid="session-swipe-settle"
+						data-stage={stage}
+						ariaLabel="Settle {displayTitle}"
+						class="flex w-[74px] shrink-0 flex-col items-center justify-center gap-1 bg-success/15 text-success"
+						onclick={(event) => { event.preventDefault(); event.stopPropagation(); if (heldDirection) runSwipeAction("settle", false); }}
+					>
+						<Icon name="check" size={16} />
+						Settle
+					</Button>
+				{/if}
+				<Button
+					variant="ghost" size="content" layout="flow" tone="inherit" hoverFill="none"
+					type="button"
+					data-testid={session.unread ? "session-swipe-mark-read" : "session-swipe-mark-unread"}
+					ariaLabel="Mark {session.unread ? 'read' : 'unread'} {displayTitle}"
+					class="flex w-[74px] shrink-0 flex-col items-center justify-center gap-1 bg-brand-a/15 text-brand-a"
+					onclick={(event) => { event.preventDefault(); event.stopPropagation(); if (heldDirection) { onmarkread?.(session.id); closeHold(); } }}
+				>
+					<Icon name={session.unread ? "circle" : "circle-dot"} size={16} />
+					{session.unread ? "Read" : "Unread"}
+				</Button>
+			</div>
+		{:else}
+		<Button
+			variant="ghost" size="content" layout="flow" tone="inherit" hoverFill="none"
 			type="button"
 			data-testid="session-swipe-action"
 			data-stage={stage}
-			aria-label="{verb} {displayTitle}"
+			ariaLabel="{verb} {displayTitle}"
 			class="absolute inset-0 {direction === 'settle' ? 'justify-start' : 'justify-end'} flex items-center gap-1 px-3 font-brand text-sm font-medium {stage === 'commit' ? (direction === 'settle' ? 'bg-success text-bg' : 'bg-accent text-bg') : (direction === 'settle' ? 'bg-success/15 text-success' : 'bg-accent/15 text-accent')}"
 			onclick={(event) => { event.preventDefault(); event.stopPropagation(); if (heldDirection) runSwipeAction(heldDirection, false); }}
 		>
 			<Icon name={verb === "Settle" ? "check" : verb === "Snooze" ? "moon" : "undo"} size={16} />
 			{stage === "commit" ? `Release to ${verb.toLowerCase()}` : verb}
-		</button>
+		</Button>
+		{/if}
 	{/if}
 <a
 	bind:this={rowEl}
@@ -544,15 +589,15 @@
 	onclickcapture={suppressGestureClick}
 	onpointerdown={startPointer}
 	oncontextmenu={(event) => {
-		if (cleanupMode || !oncontextmenuProp) return;
+		if (selectMode || !oncontextmenuProp) return;
 		event.preventDefault();
 		if (suppressNativeContextMenu) { suppressNativeContextMenu = false; return; }
 		if (activePointer !== null) { stopPointer(); armClickSuppression(); }
 		oncontextmenuProp(session, event.currentTarget);
 	}}
 >
-	<!-- Selection circle (cleanup mode) -->
-	{#if cleanupMode}
+	<!-- Selection circle (select mode) -->
+	{#if selectMode}
 		<!--
 			No `tone`/`hoverFill` member fits: the colour is a four-way expression on
 			two booleans and there is no hover change at all, so both axes emit
@@ -572,7 +617,7 @@
 			role="checkbox"
 			aria-checked={selected}
 			ariaLabel="Select {displayTitle}"
-			class="col-start-1 row-start-1 row-span-2 self-stretch shrink-0 w-[44px] rounded duration-100 {active
+			class="col-start-1 row-start-1 row-span-2 self-stretch shrink-0 w-[44px] min-h-[44px] md:min-h-0 rounded duration-100 {active
 				? selected
 					? 'text-brand-a'
 					: 'text-text-muted'
@@ -585,7 +630,7 @@
 		</Button>
 	{:else if status.icon}
 		<span
-			class="col-start-1 row-start-1 row-span-2 grid place-items-center w-5 h-5 justify-self-center {status.colour}"
+			class="session-status-glyph col-start-1 row-start-1 row-span-2 grid place-items-center size-[20px] justify-self-center {status.colour}"
 			aria-hidden="true"
 		>
 			<Icon name={status.icon} size={shelfRow ? 11 : 14} />
@@ -599,7 +644,8 @@
 		ondblclick={handleDblClick}
 	>
 		{#if shelfRow && projectLabel && !isRenaming}
-			<span class="text-sm text-text-dimmer shrink-0">
+			<span class="inline-flex items-center gap-[6px] text-sm text-text-dimmer shrink-0">
+				<ProjectSquare label={projectLabel} accent={projectAccent} />
 				{projectLabel}
 			</span>
 		{/if}
@@ -613,7 +659,7 @@
 			<TextInput
 				aria-label="Session name"
 				size="sm"
-				class="font-brand"
+				class="font-brand min-h-[44px] md:min-h-0"
 				bind:value={renameValue}
 				onkeydown={handleRenameKeydown}
 				onblur={handleRenameBlur}
@@ -625,6 +671,9 @@
 				class="session-title-inner inline-block group-hover:pr-[3em] group-hover:session-title-marquee overflow-hidden text-ellipsis whitespace-nowrap min-w-0 group-hover:text-clip"
 				>{displayTitle}</span
 			>
+			{#if sessionAttention(session) === "done-unread"}
+				<span data-testid="session-unread-dot" class="size-[7px] shrink-0 rounded-full bg-brand-a" aria-hidden="true"></span>
+			{/if}
 		{/if}
 		{#if pinned}
 			<span class="shrink-0 text-text-dimmer" title="Pinned session">
@@ -638,6 +687,7 @@
 		<span
 			class="session-item-context col-start-2 row-start-2 flex items-center gap-1.5 mt-0.5 text-sm text-text-dimmer overflow-hidden whitespace-nowrap font-brand"
 		>
+			{#if projectLabel}<ProjectSquare label={projectLabel} accent={projectAccent} />{/if}
 			<span class="overflow-hidden text-ellipsis min-w-0">{contextText}</span>
 		</span>
 	{/if}
@@ -673,13 +723,23 @@
 			{/if}
 
 			<!-- Desktop verbs replace the time on hover and keyboard focus. -->
-			{#if !cleanupMode && oncontextmenuProp}
+			{#if !selectMode && oncontextmenuProp}
 				<span class="hidden md:group-hover:inline-flex md:group-focus-within:inline-flex {menuOpen ? 'md:inline-flex' : ''} items-center gap-0.5" data-testid="session-row-actions">
+					{#if canMarkRead}
+						<Button variant="ghost" size="content" tone="inherit" hoverFill="none"
+							class="size-[27px] rounded-[7px] text-text-secondary hover:text-text hover:bg-bg-alt"
+							data-testid={session.unread ? "session-act-mark-read" : "session-act-mark-unread"}
+							ariaLabel="Mark {session.unread ? 'read' : 'unread'} {displayTitle}"
+							title="Mark {session.unread ? 'read' : 'unread'} (u)"
+							onclick={(event) => { event.preventDefault(); event.stopPropagation(); onmarkread?.(session.id); }}
+						><Icon name={session.unread ? "circle" : "circle-dot"} size={16} /></Button>
+					{/if}
+					{#if !markOnly}
 					<Button variant="ghost" size="content" tone="inherit" hoverFill="none"
 						class="size-[27px] rounded-[7px] text-text-secondary hover:text-text hover:bg-bg-alt"
 						data-testid={settled || actions.settled ? "session-act-unsettle" : "session-act-settle"}
 						ariaLabel="{settled || actions.settled ? 'Un-settle' : 'Settle'} {displayTitle}"
-						title={actions.settleDisabledReason ?? (settled || actions.settled ? "Un-settle" : "Settle")}
+						title={actions.settleDisabledReason ?? (settled || actions.settled ? "Un-settle (s)" : "Settle (s)")}
 						disabled={actions.settleDisabledReason != null}
 						onclick={(event) => { event.preventDefault(); event.stopPropagation(); onsettle?.(session.id, !(settled || actions.settled)); }}
 					><Icon name={settled || actions.settled ? "undo" : "check"} size={16} /></Button>
@@ -687,14 +747,14 @@
 						{#if snoozed || actions.snoozed}
 							<Button variant="ghost" size="content" tone="inherit" hoverFill="none"
 								class="size-[27px] rounded-[7px] text-text-secondary hover:text-text hover:bg-bg-alt"
-								data-testid="session-act-unsnooze" ariaLabel="Unsnooze {displayTitle}" title="Unsnooze"
+								data-testid="session-act-unsnooze" ariaLabel="Unsnooze {displayTitle}" title="Unsnooze (z)"
 								onclick={(event) => { event.preventDefault(); event.stopPropagation(); onunsnooze?.(session.id); }}
 							><Icon name="undo" size={16} /></Button>
 						{:else}
 							<Button variant="ghost" size="content" tone="inherit" hoverFill="none"
 								class="size-[27px] rounded-[7px] text-text-secondary hover:text-text hover:bg-bg-alt"
 								data-testid="session-act-snooze" ariaLabel="Snooze {displayTitle}"
-								title={actions.snoozeDisabledReason ?? "Snooze"} disabled={actions.snoozeDisabledReason != null}
+								title={actions.snoozeDisabledReason ?? "Snooze (z)"} disabled={actions.snoozeDisabledReason != null}
 								onclick={(event) => { event.preventDefault(); event.stopPropagation(); onsnooze?.(session.id); }}
 							><Icon name="moon" size={16} /></Button>
 						{/if}
@@ -702,10 +762,11 @@
 					<Button variant="ghost" size="content" tone="inherit" hoverFill="none"
 						class="size-[27px] rounded-[7px] text-text-secondary hover:text-text hover:bg-bg-alt"
 						data-testid={actions.pinned ? "session-act-unpin" : "session-act-pin"}
-						ariaLabel="{actions.pinned ? 'Unpin' : 'Pin'} {displayTitle}" title={actions.pinned ? "Unpin" : "Pin"}
+						ariaLabel="{actions.pinned ? 'Unpin' : 'Pin'} {displayTitle}" title={actions.pinned ? "Unpin (p)" : "Pin (p)"}
 						onclick={(event) => { event.preventDefault(); event.stopPropagation(); onpin?.(session.id, !actions.pinned); }}
-					><Icon name={actions.pinned ? "star-off" : "star"} size={16} /></Button>
-				<Button
+						><Icon name={actions.pinned ? "star-off" : "star"} size={16} /></Button>
+					{/if}
+					<Button
 					bind:element={moreBtnEl}
 					variant="ghost"
 					size="content"

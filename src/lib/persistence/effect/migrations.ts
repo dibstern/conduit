@@ -20,6 +20,7 @@ import {
 	SESSION_CASCADE_DELETES_MIGRATION,
 	SESSIONS_AUTO_SETTLE_MIGRATION,
 	SESSIONS_LAST_TURN_ERROR_MIGRATION,
+	SESSIONS_MARKED_UNREAD_MIGRATION,
 	SESSIONS_PERMISSION_MODE_MIGRATION,
 	SESSIONS_READ_AT_MIGRATION,
 	SESSIONS_SETTLED_PINNED_MIGRATION,
@@ -76,6 +77,9 @@ const sessionsSnoozedMigrationSql = readMigrationSql(
 );
 const sessionsAutoSettleMigrationSql = readMigrationSql(
 	SESSIONS_AUTO_SETTLE_MIGRATION,
+);
+const sessionsMarkedUnreadMigrationSql = readMigrationSql(
+	SESSIONS_MARKED_UNREAD_MIGRATION,
 );
 
 const expectedTableColumns = {
@@ -292,6 +296,7 @@ const expectedTableColumns = {
 		"version",
 		"fork_point_timestamp",
 		"fork_point_message_id",
+		"marked_unread_at",
 	],
 	tool_content: ["tool_id", "session_id", "content", "created_at"],
 	turns: [
@@ -419,6 +424,7 @@ const appendedSessionColumns = [
 	"version",
 	"fork_point_timestamp",
 	"fork_point_message_id",
+	"marked_unread_at",
 ] as const;
 
 function sameStrings(
@@ -795,6 +801,19 @@ const runSessionsAutoSettleMigration: Effect.Effect<
 	}
 });
 
+const runSessionsMarkedUnreadMigration: Effect.Effect<
+	void,
+	unknown,
+	SqlClient.SqlClient
+> = Effect.gen(function* () {
+	const sql = yield* SqlClient.SqlClient;
+	const columns = yield* sql.unsafe<{ name: string }>(
+		"PRAGMA table_info(sessions)",
+	);
+	if (columns.some((column) => column.name === "marked_unread_at")) return;
+	yield* executeSqlStatements(sessionsMarkedUnreadMigrationSql);
+});
+
 /** 2026-07-15T00:00:00.000Z — midnight UTC of the day 0004_drop_events_session_fk shipped (b2b698c6). */
 export const LEGACY_SKELETON_CUTOFF_MS = 1_784_073_600_000;
 export const MAX_PURGEABLE_SKELETON_SESSIONS = 25;
@@ -962,6 +981,7 @@ export const effectMigrationEntries = {
 			readMigrationSql(FORK_POINT_TIMESTAMP_MIGRATION),
 		);
 	}),
+	"0023_sessions_marked_unread": runSessionsMarkedUnreadMigration,
 } satisfies Record<string, Effect.Effect<void, unknown, SqlClient.SqlClient>>;
 
 export function makeEffectMigrationLoader(
@@ -1038,32 +1058,40 @@ export function makeEffectSqlMigrator(
 > {
 	return Effect.gen(function* () {
 		const sql = yield* SqlClient.SqlClient;
+		const registry = yield* makeEffectMigrationLoader(entries);
+		const expectedNames = new Map(registry.map(([id, name]) => [id, name]));
+		const knownNames = new Set(registry.map(([, name]) => name));
 		const ledger = yield* sql<{ name: string }>`
 			SELECT name FROM sqlite_master
-			WHERE type = 'table' AND name = 'effect_sql_migrations'`;
+			WHERE type = 'table' AND name = ${EFFECT_SQL_MIGRATIONS_TABLE}`;
 		if (ledger.length > 0) {
-			const stale = yield* sql<{
+			const recorded = yield* sql<{
 				migration_id: number;
 				name: string;
 			}>`
 				SELECT migration_id, name FROM effect_sql_migrations
-				WHERE migration_id BETWEEN 12 AND 17
-				AND name IN (
-					'create_projection_failures', 'read_model_version',
-					'read_model_counter', 'sessions_last_viewed_at',
-					'sent_alerts', 'fork_point_timestamp'
-				)`;
-			if (stale.length > 0) {
-				const row = stale[0]!;
-				return yield* Effect.fail(
-					migrationRegistryError(
-						`Stale feature migration ${row.name} at main-owned Effect id ${row.migration_id}; refusing to migrate`,
-					),
-				);
+				ORDER BY migration_id`;
+			const firstMismatch = recorded.findIndex(
+				(row) => expectedNames.get(row.migration_id) !== row.name,
+			);
+			const mismatch = recorded[firstMismatch];
+			if (mismatch !== undefined) {
+				const suffix = recorded.slice(firstMismatch);
+				const unknown = suffix.find((row) => !knownNames.has(row.name));
+				if (unknown) {
+					return yield* Effect.fail(
+						migrationRegistryError(
+							`Unknown recorded migration ${unknown.name} at Effect id ${unknown.migration_id}; refusing to migrate`,
+						),
+					);
+				}
+				// Known names recorded at divergent ids are replayed in registry order.
+				yield* sql`DELETE FROM effect_sql_migrations
+					WHERE migration_id >= ${mismatch.migration_id}`;
 			}
 		}
 		return yield* Migrator.make({})({
-			loader: makeEffectMigrationLoader(entries),
+			loader: Effect.succeed(registry),
 			table: EFFECT_SQL_MIGRATIONS_TABLE,
 		});
 	});

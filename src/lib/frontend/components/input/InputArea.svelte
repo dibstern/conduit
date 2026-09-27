@@ -34,7 +34,8 @@
 		filterFiles,
 	} from "../../stores/file-tree.svelte.js";
 	import { fetchFileContent, fetchDirectoryListing, resizeImageIfNeeded } from "./input-utils.js";
-	import { sessionState, switchToSession } from "../../stores/session.svelte.js";
+	import { findSession, isSessionSnoozed, sessionAttention, sessionState, switchToSession } from "../../stores/session.svelte.js";
+	import { permissionsState } from "../../stores/permissions.svelte.js";
 	import { getCurrentSlug } from "../../stores/router.svelte.js";
 	import { showToast } from "../../stores/ui.svelte.js";
 	import { rateLimitChatSend } from "../../stores/ws.svelte.js";
@@ -60,6 +61,12 @@
 	let subagentBackBarRef: SubagentBackBar | undefined = $state();
 	let cursorPos = $state(0);
 	let composing = $state(false);
+	const currentSession = $derived(findSession(sessionState.currentId ?? ""));
+	const placeholder = $derived(
+		currentSession?.settledAt != null ? "Message to un-settle…" :
+		currentSession && isSessionSnoozed(currentSession, sessionState.now) ? "Message to wake…" :
+		"Ask anything. / to use skills, @ to mention files",
+	);
 
 	// ─── Per-session input drafts ─────────────────────────────────────────────
 	// Each session keeps its own unsent input text. Switching sessions saves the
@@ -182,6 +189,13 @@
 	const plainText = $derived(inputText.length > HIGHLIGHT_MAX_CHARS);
 
 	const canSend = $derived(inputText.trim().length > 0 || pendingImages.length > 0);
+	const sendButtonLabel = $derived(
+		permissionsState.pendingQuestions.some((question) => question.sessionId === sessionState.currentId)
+			? "Reply"
+			: isProcessing()
+				? "Queue message"
+				: "Send message",
+	);
 	const showContextMini = $derived(currentChat().contextPercent > 0);
 	/** Drift is only reportable with complete mismatch evidence. */
 	const modelDrift = $derived.by(() => {
@@ -593,7 +607,7 @@
 		{/if}
 
 		<!-- Processing indicator: animated bounce bar aligned with context mini bar -->
-		{#if isProcessing()}
+		{#if isProcessing() || (currentSession && sessionAttention(currentSession) === "working")}
 			<div class="flex items-center gap-2 pb-1.5 px-2">
 				<div class="min-w-6"></div>
 				<div
@@ -658,7 +672,7 @@
 						aria-activedescendant={activeOptionId}
 						chrome="bare"
 						size="content"
-						placeholder="Ask anything. / to use skills, @ to mention files"
+						{placeholder}
 						autocomplete="off"
 						enterkeyhint={isMobile() ? "enter" : "send"}
 						class="composer-text-metrics absolute inset-0 z-10 caret-[var(--color-text)] resize-none placeholder:text-text-muted {plainText
@@ -737,8 +751,8 @@
 						type="button"
 						class="send-btn shrink-0 w-8 h-8 rounded-[10px] bg-brand-a text-white touch-manipulation hover:not-disabled:opacity-90 active:not-disabled:opacity-70"
 						disabled={!canSend}
-						title={isProcessing() ? "Queue message" : "Send message"}
-						ariaLabel={isProcessing() ? "Queue message" : "Send message"}
+						title={sendButtonLabel}
+						ariaLabel={sendButtonLabel}
 						onclick={handleSendClick}
 					/>
 					{#if isProcessing()}

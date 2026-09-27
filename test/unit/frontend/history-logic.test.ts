@@ -490,24 +490,35 @@ describe("historyToChatMessages — messageId propagation", () => {
 		);
 	});
 
-	test("only first text part of an assistant message gets messageId", () => {
+	// A Claude turn is one message with text between tool calls. The transcript
+	// folds the earlier text into the activity line and shows only the trailing
+	// reply, so that is where the one fork point must live.
+	test("only the last text part of an assistant message gets messageId", () => {
 		const history: HistoryMessage[] = [
 			{
 				id: "msg_multi",
 				role: "assistant",
 				parts: [
 					{ id: "p1", type: "text", text: "part one" },
+					{
+						id: "t1",
+						type: "tool",
+						callID: "toolu_1",
+						tool: "read",
+						state: { status: "completed", input: {} },
+					},
 					{ id: "p2", type: "text", text: "part two" },
+					{ id: "p3", type: "text", text: "" },
 				],
 			},
 		];
 		const chatMsgs = historyToChatMessages(history);
 		const assistants = chatMsgs.filter((m) => m.type === "assistant");
 		expect(assistants).toHaveLength(2);
-		expect((assistants[0] as { messageId?: string }).messageId).toBe(
+		expect(assistants[0] && "messageId" in assistants[0]).toBe(false);
+		expect((assistants[1] as { messageId?: string }).messageId).toBe(
 			"msg_multi",
 		);
-		expect(assistants[1] && "messageId" in assistants[1]).toBe(false);
 	});
 });
 

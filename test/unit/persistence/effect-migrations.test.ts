@@ -56,6 +56,7 @@ const expectedNames = [
 	"read_model_counter",
 	"sent_alerts",
 	"fork_point_timestamp",
+	"sessions_marked_unread",
 ];
 const legacyNames = [
 	"create_event_store_tables",
@@ -401,6 +402,7 @@ describe("Effect migration lineage", () => {
 						"version",
 						"fork_point_timestamp",
 						"fork_point_message_id",
+						"marked_unread_at",
 					]),
 				);
 				expect(columns.map((row) => row.name)).not.toContain("last_viewed_at");
@@ -432,20 +434,97 @@ describe("Effect migration lineage", () => {
 		);
 	}
 
-	it.effect("refuses a feature name occupying a main-owned migration id", () =>
+	it.effect(
+		"reconciles a known feature name occupying a main-owned migration id",
+		() =>
+			Effect.gen(function* () {
+				yield* makeEffectSqlMigrator(prefix(17));
+				const sql = yield* SqlClient.SqlClient;
+				yield* sql`UPDATE effect_sql_migrations SET name = 'create_projection_failures'
+				WHERE migration_id = 12`;
+				expect(yield* makeEffectSqlMigrator()).toHaveLength(12);
+				const history = yield* sql<{ name: string }>`
+				SELECT name FROM effect_sql_migrations ORDER BY migration_id`;
+				expect(history.map((row) => row.name)).toEqual(expectedNames);
+				expect(yield* makeEffectSqlMigrator()).toEqual([]);
+			}).pipe(Effect.provide(makeFileSqlLayer())),
+	);
+
+	it.effect("reconciles local-main id 18 and reruns 18 through 23 once", () =>
 		Effect.gen(function* () {
 			yield* makeEffectSqlMigrator(prefix(17));
 			const sql = yield* SqlClient.SqlClient;
-			yield* sql`UPDATE effect_sql_migrations SET name = 'create_projection_failures'
-				WHERE migration_id = 12`;
-			const result = yield* Effect.either(makeEffectSqlMigrator());
-			expect(Either.isLeft(result)).toBe(true);
-			if (Either.isLeft(result)) {
-				expect(result.left.message).toContain("Stale feature migration");
-			}
-			const history = yield* sql<{ count: number }>`
-				SELECT COUNT(*) AS count FROM effect_sql_migrations`;
-			expect(history[0]?.count).toBe(17);
+			yield* sql`ALTER TABLE sessions ADD COLUMN marked_unread_at INTEGER`;
+			yield* sql`INSERT INTO effect_sql_migrations (migration_id, name)
+				VALUES (18, 'sessions_marked_unread')`;
+			const before = yield* sql<{ name: string }>`SELECT name FROM sqlite_master
+				WHERE type = 'table' AND name = 'projection_failures'`;
+			expect(before).toEqual([]);
+			expect(yield* makeEffectSqlMigrator()).toEqual(
+				expectedNames.slice(17).map((name, index) => [index + 18, name]),
+			);
+			const tables = yield* sql<{ name: string }>`SELECT name FROM sqlite_master
+				WHERE type = 'table' AND name IN ('projection_failures', 'read_model_counter', 'sent_alerts')`;
+			expect(tables.map((row) => row.name).sort()).toEqual([
+				"projection_failures",
+				"read_model_counter",
+				"sent_alerts",
+			]);
+			const columns = yield* sql<{ name: string }>`PRAGMA table_info(sessions)`;
+			expect(columns.map((row) => row.name)).toEqual(
+				expect.arrayContaining([
+					"version",
+					"fork_point_timestamp",
+					"fork_point_message_id",
+					"marked_unread_at",
+				]),
+			);
+			const history = yield* sql<{
+				name: string;
+			}>`SELECT name FROM effect_sql_migrations ORDER BY migration_id`;
+			expect(history.map((row) => row.name)).toEqual(expectedNames);
+			expect(yield* makeEffectSqlMigrator()).toEqual([]);
 		}).pipe(Effect.provide(makeFileSqlLayer())),
+	);
+
+	it.effect("appends only migration 23 to a HEAD id-22 database", () =>
+		Effect.gen(function* () {
+			yield* makeEffectSqlMigrator(prefix(22));
+			const sql = yield* SqlClient.SqlClient;
+			expect(yield* makeEffectSqlMigrator()).toEqual([
+				[23, "sessions_marked_unread"],
+			]);
+			const columns = yield* sql<{ name: string }>`PRAGMA table_info(sessions)`;
+			expect(columns.map((row) => row.name)).toContain("marked_unread_at");
+			expect(yield* makeEffectSqlMigrator()).toEqual([]);
+		}).pipe(Effect.provide(makeFileSqlLayer())),
+	);
+
+	it.effect(
+		"refuses an unknown recorded name without deleting ledger rows",
+		() =>
+			Effect.gen(function* () {
+				yield* makeEffectSqlMigrator(prefix(17));
+				const sql = yield* SqlClient.SqlClient;
+				yield* sql`INSERT INTO effect_sql_migrations (migration_id, name)
+				VALUES (18, 'foreign_future_migration')`;
+				const result = yield* Effect.either(makeEffectSqlMigrator());
+				expect(Either.isLeft(result)).toBe(true);
+				if (Either.isLeft(result))
+					expect(result.left.message).toContain("foreign_future_migration");
+				const history = yield* sql<{ migration_id: number; name: string }>`
+				SELECT migration_id, name FROM effect_sql_migrations ORDER BY migration_id`;
+				expect(history).toEqual([
+					...expectedNames
+						.slice(0, 17)
+						.map((name, index) => ({ migration_id: index + 1, name })),
+					{ migration_id: 18, name: "foreign_future_migration" },
+				]);
+				const tables = yield* sql<{
+					name: string;
+				}>`SELECT name FROM sqlite_master
+				WHERE type = 'table' AND name = 'projection_failures'`;
+				expect(tables).toEqual([]);
+			}).pipe(Effect.provide(makeFileSqlLayer())),
 	);
 });

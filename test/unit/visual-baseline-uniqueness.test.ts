@@ -30,6 +30,8 @@ const ALLOWED_DUPLICATE_GROUPS: Record<string, string> = {
 		"both end with focus on the same item",
 	"ui-popover--default | ui-popover--escape-restores-focus":
 		"escape story re-opens the popover as its last step",
+	"layout-sessionbar--expanded-by-chevron | layout-sessionbar--switcher":
+		"the chevron story ends at the same expanded bar as Switcher; its play assertion verifies the collapse transition and focus",
 
 	// Verified legitimate (conduit-test-732b). Each of these was traced to the
 	// source; the two stories genuinely produce the same frame.

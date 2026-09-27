@@ -29,6 +29,7 @@ import {
 	Exit,
 	Layer,
 	ManagedRuntime,
+	Runtime,
 } from "effect";
 import { WebSocketServer } from "ws";
 import { AuthManager } from "../auth.js";
@@ -77,6 +78,7 @@ import {
 } from "../domain/relay/Services/relay-status-snapshot.js";
 import { ScanServiceLive } from "../domain/relay/Services/scan-service.js";
 import {
+	BackgroundLivenessTag,
 	type ConfigTag,
 	type LoggerTag,
 	OpenCodeFileServiceLive,
@@ -682,7 +684,10 @@ export async function createProjectRelay(
 	config: ProjectRelayConfig,
 ): Promise<ProjectRelay> {
 	const log = config.log ?? createLogger("relay");
-	const backgroundLiveness = makeSessionBackgroundLiveness();
+	let broadcastBackgroundSessionLists: (() => void) | undefined;
+	const backgroundLiveness = makeSessionBackgroundLiveness(() =>
+		broadcastBackgroundSessionLists?.(),
+	);
 	const wsLog = log.child("ws");
 	const sseLog = log.child("sse");
 	const statusLog = log.child("status-poller");
@@ -889,6 +894,7 @@ export async function createProjectRelay(
 		toolContentServiceLayer,
 		webSocketHandlerLayer,
 		messagePollerManagerLayer,
+		Layer.sync(BackgroundLivenessTag, () => backgroundLiveness.hasLiveWork),
 		ptyRuntimeLayer,
 		configLayer,
 		loggerLayer,
@@ -985,6 +991,7 @@ export async function createProjectRelay(
 	let startup: {
 		sql: SqlClient.SqlClient | undefined;
 		sessionManagerService: typeof SessionManagerServiceTag.Service;
+		broadcastBackgroundSessionLists: () => void;
 		api: OpenCodeAPI;
 		wsHandler: WebSocketHandlerShape;
 		rpcWsHandler: RpcWebSocketHandlerShape;
@@ -1082,6 +1089,9 @@ export async function createProjectRelay(
 					);
 				}
 				const sessionManagerService = yield* SessionManagerServiceTag;
+				const runFork = Runtime.runFork(
+					yield* Effect.runtime<SessionManagerServiceTag>(),
+				);
 				const sessionId = opencodeAvailable
 					? yield* sessionManagerService.initialize(config.sessionTitle)
 					: yield* Effect.gen(function* () {
@@ -1266,6 +1276,21 @@ export async function createProjectRelay(
 				return {
 					sql: sql._tag === "Some" ? sql.value : undefined,
 					sessionManagerService,
+					broadcastBackgroundSessionLists: () => {
+						runFork(
+							sessionManagerService
+								.sendSessionLists((msg) => wsHandler.broadcast(msg))
+								.pipe(
+									Effect.catchAllCause((cause) =>
+										Effect.sync(() =>
+											log.warn(
+												`Failed to broadcast background session list: ${Cause.pretty(cause)}`,
+											),
+										),
+									),
+								),
+						);
+					},
 					api,
 					wsHandler,
 					rpcWsHandler,
@@ -1282,6 +1307,7 @@ export async function createProjectRelay(
 		await relayManagedRuntime.dispose();
 		throw err;
 	}
+	broadcastBackgroundSessionLists = startup.broadcastBackgroundSessionLists;
 	const api = startup.api;
 	wsHandler = startup.wsHandler;
 	const {

@@ -31,6 +31,8 @@ const tabTitles = new SvelteMap<string, string>();
 const clientTerminal = $state({
 	activeTabId: null as string | null,
 	panelOpen: false,
+	/** One badge count per PTY that emitted output while the panel was closed. */
+	unreadPtyIds: new Set<string>(),
 	pendingCreate: false,
 	statusMessage: null as string | null,
 });
@@ -47,6 +49,9 @@ export const terminalState = {
 	},
 	get panelOpen(): boolean {
 		return clientTerminal.panelOpen;
+	},
+	get unreadPtyIds(): ReadonlySet<string> {
+		return clientTerminal.unreadPtyIds;
 	},
 	get pendingCreate(): boolean {
 		return clientTerminal.pendingCreate;
@@ -161,7 +166,12 @@ export function handlePtyList(
 ): void {
 	const ptys = msg.ptys ?? [];
 
-	if (ptys.length === 0) return;
+	if (ptys.length === 0) {
+		for (const id of [...serverPtys.keys()]) forgetPty(id);
+		clientTerminal.activeTabId = null;
+		clientTerminal.unreadPtyIds = new Set();
+		return;
+	}
 
 	const serverIds = new Set<string>();
 	for (const pty of ptys) {
@@ -175,6 +185,11 @@ export function handlePtyList(
 		if (!serverIds.has(id)) forgetPty(id);
 	}
 
+	if ([...clientTerminal.unreadPtyIds].some((id) => !serverIds.has(id))) {
+		clientTerminal.unreadPtyIds = new Set(
+			[...clientTerminal.unreadPtyIds].filter((id) => serverIds.has(id)),
+		);
+	}
 	// Set active tab if none set
 	const active = clientTerminal.activeTabId;
 	if (!active || !serverPtys.has(active)) {
@@ -221,6 +236,7 @@ export function handlePtyCreated(
 	rememberPty(ptyId, false);
 	clientTerminal.activeTabId = ptyId;
 	clientTerminal.panelOpen = true;
+	clientTerminal.unreadPtyIds = new Set();
 }
 
 export function handlePtyOutput(
@@ -228,6 +244,12 @@ export function handlePtyOutput(
 ): void {
 	const { ptyId, data } = msg;
 	if (!ptyId || typeof data !== "string") return;
+	if (!clientTerminal.panelOpen && !clientTerminal.unreadPtyIds.has(ptyId)) {
+		clientTerminal.unreadPtyIds = new Set([
+			...clientTerminal.unreadPtyIds,
+			ptyId,
+		]);
+	}
 
 	// Append to scrollback buffer (trim if over limit)
 	let buffer = scrollbackBuffers.get(ptyId);
@@ -271,6 +293,11 @@ export function handlePtyDeleted(
 	if (!ptyId) return;
 
 	forgetPty(ptyId);
+	if (clientTerminal.unreadPtyIds.has(ptyId)) {
+		const unread = new Set(clientTerminal.unreadPtyIds);
+		unread.delete(ptyId);
+		clientTerminal.unreadPtyIds = unread;
+	}
 
 	// Switch to another tab if the deleted one was active
 	if (clientTerminal.activeTabId === ptyId) {
@@ -345,11 +372,13 @@ export function renameTab(ptyId: string, title: string): void {
  */
 export function togglePanel(): void {
 	clientTerminal.panelOpen = !clientTerminal.panelOpen;
+	if (clientTerminal.panelOpen) clientTerminal.unreadPtyIds = new Set();
 }
 
 /** Open the terminal panel. */
 export function openPanel(): void {
 	clientTerminal.panelOpen = true;
+	clientTerminal.unreadPtyIds = new Set();
 }
 
 /** Close the terminal panel. */
@@ -376,6 +405,7 @@ export function destroyAll(): void {
 	clientTerminal.panelOpen = false;
 	clientTerminal.pendingCreate = false;
 	clientTerminal.statusMessage = null;
+	clientTerminal.unreadPtyIds = new Set();
 	scrollbackBuffers.clear();
 	outputListeners.clear();
 	if (pendingCreateTimer !== null) {

@@ -3,7 +3,7 @@
 <!-- Reads from sessionState store and renders SessionItem components. -->
 
 <script lang="ts">
-	import { untrack } from "svelte";
+	import { tick, untrack } from "svelte";
 	import type { SessionInfo } from "../../types.js";
 	import {
 		sessionState,
@@ -24,6 +24,7 @@
 		getSessionGrouping,
 		getSessionScope,
 		getSessionStatusFilter,
+		setSessionScope,
 		setSessionGrouping,
 		setSessionStatusFilter,
 		type SessionStatusFilter,
@@ -48,6 +49,7 @@
 	} from "../../transport/ws-rpc-client.js";
 	import {
 		confirm,
+		dismissToast,
 		showToast,
 		uiState,
 		setSettledShelfOpen,
@@ -56,10 +58,13 @@
 	import { formatSnoozeTime, formatTimeAgo } from "../../utils/format.js";
 	import { getSnoozePresets } from "../../utils/snooze.js";
 	import { WsRpcError } from "../../transport/ws-rpc.js";
+	import { toggleSessionRead } from "../../utils/session-read.js";
+	import { getSessionActionState } from "../../utils/swipe.js";
 	import SessionItem from "./SessionItem.svelte";
 	import SessionPager from "./SessionPager.svelte";
 	import SessionContextMenu from "./SessionContextMenu.svelte";
 	import SnoozeSheet from "./SnoozeSheet.svelte";
+	import ShortcutSheet from "./ShortcutSheet.svelte";
 	import Icon from "../ui/Icon.svelte";
 	import BlockGrid from "../ui/BlockGrid.svelte";
 	import Button from "../ui/Button.svelte";
@@ -73,7 +78,9 @@
 	// The box only; ui/Button `toolbar` owns the colours and the hover fill.
 	// `size="content"` emits no geometry precisely so a call site can supply
 	// its own without a `!` override (see Button.svelte::ButtonSize).
-	const TOOLBAR_ICON_BOX = "h-6 w-6 rounded-md";
+	// Phone touch floors across the sidebar are literal px: the root font-size
+	// is 12px, so rem utilities undershoot (min-h-11 is 33px, not 44px).
+	const TOOLBAR_ICON_BOX = "h-6 w-6 min-h-[44px] min-w-[44px] md:min-h-0 md:min-w-0 rounded-md";
 
 	// ─── Local state ────────────────────────────────────────────────────────────
 
@@ -85,9 +92,15 @@
 	// Context menu state
 	let ctxMenuSession = $state<SessionInfo | null>(null);
 	let ctxMenuAnchor = $state<HTMLElement | null>(null);
+	let ctxMenuPresentation = $state<"menu" | "sheet">("menu");
 	let snoozeSession = $state<SessionInfo | null>(null);
+	let snoozePlacement = $state<"center" | "sheet">("center");
 	let snoozeSheetNow = $state(0);
 	let heldSessionId = $state<string | null>(null);
+	let shortcutSheetOpen = $state(false);
+	let shortcutReturnFocus: HTMLElement | null = null;
+	let focusedRowId = $state<string | null>(null);
+	let focusedRowIndex = $state(0);
 
 	// Rename state — set by context menu to trigger inline rename on a SessionItem
 	let renamingSessionId = $state<string | null>(null);
@@ -95,9 +108,13 @@
 	// Paging sentinel, observed by SessionPager.
 	let sentinelEl: HTMLElement | undefined = $state();
 
-	// Cleanup mode state
-	let cleanupMode = $state(false);
-	let selectedForDeletion = $state<Set<string>>(new Set());
+	// Select mode includes both settle and the former cleanup/delete flow.
+	// Two modes putting checkboxes on the same rows would be two ways to do one thing.
+	const selectMode = $derived(uiState.selectMode);
+	let selectedSessionIds = $state<Set<string>>(new Set());
+	let bulkPending = $state(false);
+	let bulkSnoozeOpen = $state(false);
+	const selectVerbClass = "min-w-0 flex-1 min-h-[50px] flex-col gap-1 rounded-lg text-[11px] disabled:opacity-[0.35] disabled:cursor-default";
 
 	// ─── Derived ────────────────────────────────────────────────────────────────
 
@@ -122,13 +139,20 @@
 	// Chips count only live rows: settled and snoozed sets grow without bound.
 	const live = $derived(filtered.filter((session) => session.settledAt == null && !isSessionSnoozed(session, sessionState.now)));
 
-	const cleanupCandidates = $derived(
-		matching.filter((session) => !isForeignSession(session)),
-	);
 	const isEmpty = $derived(matching.length === 0);
 	const searching = $derived(sessionState.searchQuery.trim().length > 0);
 	const settledShelfOpen = $derived(searching || uiState.settledShelfOpen);
 	const snoozedShelfOpen = $derived(searching || uiState.snoozedShelfOpen);
+	const visibleRowIds = $derived([
+		...arrangement.pinned.map((session) => session.id),
+		...arrangement.sections.flatMap((section) => section.sessions.map((session) => session.id)),
+		...(snoozedShelfOpen ? arrangement.snoozed.map((session) => session.id) : []),
+		...(settledShelfOpen ? arrangement.settled.map((session) => session.id) : []),
+	]);
+	const selectCandidates = $derived.by(() => {
+		const shown = new Set(visibleRowIds);
+		return matching.filter((session) => shown.has(session.id) && !isForeignSession(session));
+	});
 
 	const scope = $derived(getSessionScope());
 	const emptyMessage = $derived.by(() => {
@@ -156,10 +180,21 @@
 			: sessionState.searchLoading,
 	);
 
-	const selectionCount = $derived(selectedForDeletion.size);
+	const selectionCount = $derived(selectedSessionIds.size);
+	const selectedSessions = $derived(selectCandidates.filter((session) => selectedSessionIds.has(session.id)));
+	const settleEligible = $derived(selectedSessions.filter((session) => {
+		const actions = getSessionActionState(session, sessionState.now);
+		return !actions.settled && !actions.settleDisabledReason;
+	}));
+	const snoozeEligible = $derived(selectedSessions.filter((session) => {
+		const actions = getSessionActionState(session, sessionState.now);
+		return actions.snoozeVisible && !actions.snoozeDisabledReason;
+	}));
+	const unpinSelected = $derived(selectedSessions.length > 0 && selectedSessions.every((session) => getSessionActionState(session, sessionState.now).pinned));
+	const pinEligible = $derived(selectedSessions.filter((session) => getSessionActionState(session, sessionState.now).pinned === unpinSelected));
 	const allSelected = $derived(
-		cleanupCandidates.length > 0 &&
-			cleanupCandidates.every((s) => selectedForDeletion.has(s.id)),
+		selectCandidates.length > 0 &&
+			selectCandidates.every((s) => selectedSessionIds.has(s.id)),
 	);
 
 	const unavailableProjectLabels = $derived(
@@ -168,11 +203,11 @@
 
 	// Prune stale selections when the session list changes externally
 	$effect(() => {
-		if (!cleanupMode) return;
-		const validIds = new Set(cleanupCandidates.map((s) => s.id));
-		const pruned = new Set([...selectedForDeletion].filter((id) => validIds.has(id)));
-		if (pruned.size !== selectedForDeletion.size) {
-			selectedForDeletion = pruned;
+		if (!selectMode) return;
+		const validIds = new Set(selectCandidates.map((s) => s.id));
+		const pruned = new Set([...selectedSessionIds].filter((id) => validIds.has(id)));
+		if (pruned.size !== selectedSessionIds.size) {
+			selectedSessionIds = pruned;
 		}
 	});
 
@@ -188,12 +223,38 @@
 		if (query.trim()) requestRemoteSearch(query);
 	});
 
-	// Exit cleanup mode when session list becomes empty
+	// Exit select mode when the shown list becomes empty.
 	$effect(() => {
-		if (cleanupMode && isEmpty) {
-			cleanupMode = false;
-			selectedForDeletion = new Set();
+		if (selectMode && visibleRowIds.length === 0 && !pagerLoading) {
+			resetSelectMode();
 		}
+	});
+
+	// Keyed rows may be moved or destroyed while focused. Restore by identity,
+	// or take the row that replaced its old position when it leaves the list.
+	$effect(() => {
+		const ids = visibleRowIds;
+		const id = focusedRowId;
+		if (!id) return;
+		void tick().then(() => {
+			if (focusedRowId !== id) return;
+			const rows = Array.from(document.querySelectorAll<HTMLAnchorElement>("#session-list .session-item[data-session-id]"));
+			if (rows.length === 0) {
+				focusedRowId = null;
+				document.getElementById("session-list-scroller")?.focus();
+				return;
+			}
+			// Only recover focus the list itself dropped; never pull it from elsewhere.
+			const current = document.activeElement;
+			if (current && current !== document.body && !rows.includes(current as HTMLAnchorElement)) return;
+			const nextIndex = Math.min(focusedRowIndex, rows.length - 1);
+			const row = rows.find((element) => element.dataset["sessionId"] === id) ?? rows[nextIndex];
+			if (!row) return;
+			focusedRowId = row.dataset["sessionId"] ?? null;
+			focusedRowIndex = rows.indexOf(row);
+			if (document.activeElement !== row) row.focus();
+		});
+		void ids;
 	});
 
 	// ─── Handlers ───────────────────────────────────────────────────────────────
@@ -219,19 +280,21 @@
 		return getSessionHref(session.id);
 	}
 
-	// Named on every row once a second project exists, including the rows of the
-	// project you are already in: in a merged list an unlabelled row would mean
-	// "work out which project this is yourself", and you cannot. With a single
-	// project it is pure noise and is absent entirely.
+	// Name every row's project so the square and title identify it in any scope.
 	//
 	// Resolved from the live project list rather than stamped onto the session at
 	// fetch time, so renaming a project relabels its rows without the list being
 	// re-fetched. Falls back to the slug because the project list arrives over
 	// the socket and the sidebar renders before it does.
 	function getProjectLabel(session: SessionInfo): string | undefined {
-		if (projectState.projects.length <= 1) return undefined;
 		const slug = session.projectSlug ?? getCurrentSlug();
 		return slug ? projectDisplayName(slug) : undefined;
+	}
+
+	function getProjectAccent(session: SessionInfo): number {
+		const slug = session.projectSlug ?? getCurrentSlug();
+		const index = projectState.projects.findIndex((project) => project.slug === slug);
+		return (Math.max(index, 0) % 6) + 1;
 	}
 
 	function projectDisplayName(slug: string): string {
@@ -273,10 +336,11 @@
 		}
 	}
 
-	function handleContextMenu(session: SessionInfo, anchor: HTMLElement) {
+	function handleContextMenu(session: SessionInfo, anchor: HTMLElement, trigger?: "touch") {
 		// Open context menu for this session
 		ctxMenuSession = session;
 		ctxMenuAnchor = anchor;
+		ctxMenuPresentation = trigger === "touch" ? "sheet" : "menu";
 	}
 
 	function handleCloseContextMenu() {
@@ -349,6 +413,7 @@
 
 	function handleOpenSnooze(session: SessionInfo) {
 		if (isForeignSession(session)) return;
+		snoozePlacement = "center";
 		snoozeSheetNow = Date.now();
 		snoozeSession = session;
 	}
@@ -412,6 +477,101 @@
 		renamingSessionId = null;
 	}
 
+	function handleRowFocus(event: FocusEvent) {
+		const target = event.target;
+		if (!(target instanceof HTMLAnchorElement) || !target.matches("#session-list .session-item")) {
+			focusedRowId = null;
+			return;
+		}
+		focusedRowId = target.dataset["sessionId"] ?? null;
+		focusedRowIndex = Array.from(document.querySelectorAll("#session-list .session-item")).indexOf(target);
+	}
+
+	function isEditable(target: EventTarget | null): boolean {
+		return target instanceof HTMLElement &&
+			(target.closest("input, textarea, select, [contenteditable]") !== null || target.isContentEditable);
+	}
+
+	function handleListKeydown(event: KeyboardEvent) {
+		if (selectMode) {
+			if (event.key === "Escape" && event.target instanceof Element && event.target.closest("#session-list")) {
+				event.preventDefault();
+				resetSelectMode();
+			}
+			return;
+		}
+		if (event.defaultPrevented || event.repeat || event.altKey) return;
+		if (!window.matchMedia("(hover: hover) and (pointer: fine)").matches) return;
+		if (isEditable(event.target) || document.querySelector('[role="dialog"], [role="menu"]') || renamingSessionId) return;
+		if ((event.metaKey || event.ctrlKey) && !event.shiftKey && event.key.toLowerCase() === "z") {
+			const toast = [...uiState.toasts].reverse().find((item) => item.action);
+			if (toast?.action) {
+				event.preventDefault();
+				toast.action.run();
+				dismissToast(toast.id);
+			}
+			return;
+		}
+		if (event.metaKey || event.ctrlKey || (event.shiftKey && event.key !== "?")) return;
+		if (event.key === "?") {
+			event.preventDefault();
+			shortcutReturnFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+			shortcutSheetOpen = true;
+			return;
+		}
+		if (/^[0-9]$/.test(event.key)) {
+			const index = Number(event.key) - 1;
+			if (event.key === "0" || projectState.projects[index]) {
+				event.preventDefault();
+				setSessionScope(event.key === "0" ? null : projectState.projects[index]?.slug ?? null);
+			}
+			return;
+		}
+		const rows = Array.from(document.querySelectorAll<HTMLAnchorElement>("#session-list .session-item[data-session-id]"));
+		if (event.key === "j" || event.key === "k") {
+			if (rows.length === 0) return;
+			const current = rows.indexOf(document.activeElement as HTMLAnchorElement);
+			const active = rows.findIndex((row) => row.dataset["sessionId"] === sessionState.currentId);
+			const next = current < 0 ? (active < 0 ? 0 : active) : Math.max(0, Math.min(rows.length - 1, current + (event.key === "j" ? 1 : -1)));
+			event.preventDefault();
+			rows[next]?.focus();
+			rows[next]?.scrollIntoView({ block: "nearest" });
+			return;
+		}
+		const row = document.activeElement;
+		if (!(row instanceof HTMLAnchorElement) || !row.matches("#session-list .session-item")) return;
+		const session = filtered.find((item) => item.id === row.dataset["sessionId"]);
+		if (!session || isForeignSession(session)) return;
+		const actions = getSessionActionState(session, sessionState.now);
+		switch (event.key) {
+			case "s":
+				event.preventDefault();
+				if (actions.settleDisabledReason) showToast(actions.settleDisabledReason, { variant: "warn" });
+				else void handleCtxSettle(session, !actions.settled);
+				break;
+			case "z":
+				event.preventDefault();
+				if (actions.snoozed) void handleUnsnooze(session);
+				else if (actions.snoozeVisible && !actions.snoozeDisabledReason) handleOpenSnooze(session);
+				break;
+			case "p":
+				event.preventDefault();
+				void handleCtxPin(session, !actions.pinned);
+				break;
+			case "r":
+				event.preventDefault();
+				handleCtxRename(session.id);
+				break;
+		}
+	}
+
+	function closeShortcutSheet() {
+		shortcutSheetOpen = false;
+		const target = shortcutReturnFocus;
+		shortcutReturnFocus = null;
+		void tick().then(() => target?.focus());
+	}
+
 	async function handleCtxDelete(id: string, title: string) {
 		const confirmed = await confirm(
 			`Delete "${title}"? This session and its history will be permanently removed.`,
@@ -448,40 +608,134 @@
 		}).catch(() => showToast("Failed to fork session", { variant: "error" }));
 	}
 
-	function resetCleanupMode() {
-		cleanupMode = false;
-		selectedForDeletion = new Set();
+	function resetSelectMode() {
+		uiState.selectMode = false;
+		selectedSessionIds = new Set();
 	}
 
-	function handleEnterCleanup() {
-		cleanupMode = true;
-		selectedForDeletion = new Set();
-		if (localSearchValue) clearSearch();
-	}
-
-	function handleExitCleanup() {
-		resetCleanupMode();
+	function handleEnterSelect(id?: string) {
+		selectedSessionIds = id ? new Set([id]) : new Set();
+		uiState.selectMode = true;
 	}
 
 	function handleToggleSelection(id: string) {
-		const next = new Set(selectedForDeletion);
+		const next = new Set(selectedSessionIds);
 		if (next.has(id)) {
 			next.delete(id);
 		} else {
 			next.add(id);
 		}
-		selectedForDeletion = next;
+		selectedSessionIds = next;
 	}
 
 	function handleToggleSelectAll() {
 		if (allSelected) {
-			selectedForDeletion = new Set();
+			selectedSessionIds = new Set();
 		} else {
-			selectedForDeletion = new Set(cleanupCandidates.map((s) => s.id));
+			selectedSessionIds = new Set(selectCandidates.map((s) => s.id));
 		}
 	}
 
+	async function handleBulkSettle() {
+		if (bulkPending || settleEligible.length === 0) return;
+		const skipped = selectedSessions.length - settleEligible.length;
+		const input = settleEligible.map((session) => ({ projectSlug: session.projectSlug ?? getCurrentSlug() ?? "", sessionId: session.id, originId: getBrowserClientId() }));
+		bulkPending = true;
+		const results = await Promise.allSettled(input.map((session) => setSessionSettledRpc({ ...session, settled: true })));
+		bulkPending = false;
+		const settled = input.filter((_, index) => results[index]?.status === "fulfilled");
+		resetSelectMode();
+		const count = settled.length;
+		const message = (count === input.length
+			? `Settled ${count} ${count === 1 ? "session" : "sessions"}`
+			: `Settled ${count} of ${input.length} ${input.length === 1 ? "session" : "sessions"}`) + (skipped ? `, ${skipped} skipped` : "");
+		showToast(message, {
+			duration: 5000,
+			...(count > 0 ? { action: {
+				label: "Undo",
+				run: () => {
+					void Promise.allSettled(settled.map((session) => setSessionSettledRpc({ ...session, settled: false }))).then((undoResults) => {
+						if (undoResults.some((result) => result.status === "rejected")) showToast("Couldn't undo", { variant: "error" });
+					});
+				},
+			} } : {}),
+		});
+	}
+
+	async function handleBulkPin() {
+		if (bulkPending || pinEligible.length === 0) return;
+		const pinned = !unpinSelected;
+		const skipped = selectedSessions.length - pinEligible.length;
+		const input = pinEligible.map((session) => ({ projectSlug: session.projectSlug ?? getCurrentSlug() ?? "", sessionId: session.id, originId: getBrowserClientId() }));
+		bulkPending = true;
+		const results = await Promise.allSettled(input.map((session) => setSessionPinnedRpc({ ...session, pinned })));
+		bulkPending = false;
+		const changed = input.filter((_, index) => results[index]?.status === "fulfilled");
+		resetSelectMode();
+		const count = changed.length;
+		const verb = pinned ? "Pinned" : "Unpinned";
+		const message = (count === input.length
+			? `${verb} ${count} ${count === 1 ? "session" : "sessions"}`
+			: `${verb} ${count} of ${input.length} ${input.length === 1 ? "session" : "sessions"}`) + (skipped ? `, ${skipped} skipped` : "");
+		showToast(message, {
+			duration: 5000,
+			...(count > 0 ? { action: {
+				label: "Undo",
+				run: () => {
+					void Promise.allSettled(changed.map((session) => setSessionPinnedRpc({ ...session, pinned: !pinned }))).then((undoResults) => {
+						if (undoResults.some((result) => result.status === "rejected")) showToast("Couldn't undo", { variant: "error" });
+					});
+				},
+			} } : {}),
+		});
+	}
+
+	function handleOpenBulkSnooze() {
+		if (bulkPending || snoozeEligible.length === 0) return;
+		snoozePlacement = window.matchMedia("(hover: hover) and (pointer: fine)").matches ? "center" : "sheet";
+		snoozeSheetNow = Date.now();
+		bulkSnoozeOpen = true;
+	}
+
+	async function handleBulkSnooze(until: number | null) {
+		if (bulkPending || snoozeEligible.length === 0) return;
+		const skipped = selectedSessions.length - snoozeEligible.length;
+		const input = snoozeEligible.map((session) => ({
+			projectSlug: session.projectSlug ?? getCurrentSlug() ?? "",
+			sessionId: session.id,
+			originId: getBrowserClientId(),
+			wasSnoozed: isSessionSnoozed(session, snoozeSheetNow),
+			previousUntil: session.snoozedUntil ?? null,
+		}));
+		bulkPending = true;
+		const results = await Promise.allSettled(input.map((session) => snoozeSessionRpc({ projectSlug: session.projectSlug, sessionId: session.sessionId, originId: session.originId, until })));
+		bulkPending = false;
+		const changed = input.filter((_, index) => results[index]?.status === "fulfilled");
+		resetSelectMode();
+		const count = changed.length;
+		const message = (count === input.length
+			? `Snoozed ${count} ${count === 1 ? "session" : "sessions"}`
+			: `Snoozed ${count} of ${input.length} ${input.length === 1 ? "session" : "sessions"}`)
+			+ (count > 0 ? ` until ${until === null ? "something happens" : formatSnoozeTime(until, snoozeSheetNow)}` : "")
+			+ (skipped ? `, ${skipped} skipped` : "");
+		showToast(message, {
+			duration: 5000,
+			...(count > 0 ? { action: {
+				label: "Undo",
+				run: () => {
+					void Promise.allSettled(changed.map((session) => session.wasSnoozed
+						? snoozeSessionRpc({ projectSlug: session.projectSlug, sessionId: session.sessionId, originId: session.originId, until: session.previousUntil })
+						: unsnoozeSessionRpc({ projectSlug: session.projectSlug, sessionId: session.sessionId, originId: session.originId }))).then((undoResults) => {
+						if (undoResults.some((result) => result.status === "rejected")) showToast("Couldn't undo", { variant: "error" });
+					});
+				},
+			} } : {}),
+		});
+	}
+
 	async function handleBulkDelete() {
+		if (bulkPending || selectionCount === 0) return;
+		bulkPending = true;
 		const count = selectionCount;
 		const label = count === 1 ? "1 session" : `${count} sessions`;
 		const confirmed = await confirm(
@@ -489,19 +743,12 @@
 			"Delete",
 		);
 		if (confirmed) {
-			const projectSlug = getCurrentSlug();
-			if (!projectSlug) return;
-			// Copy the ids, then clear selection so the UI responds at once.
-			const ids = [...selectedForDeletion];
-			resetCleanupMode();
+			// Snapshot the rows, then clear selection so the UI responds at once.
+			// The list is cross-project, so each row deletes in its own project.
+			const targets = selectedSessions.map((session) => ({ projectSlug: session.projectSlug ?? getCurrentSlug() ?? "", sessionId: session.id }));
+			resetSelectMode();
 			const results = await Promise.allSettled(
-				ids.map((id) =>
-					deleteSessionRpc({
-						projectSlug,
-						sessionId: id,
-						originId: getBrowserClientId(),
-					}),
-				),
+				targets.map((target) => deleteSessionRpc({ ...target, originId: getBrowserClientId() })),
 			);
 			const failed = results.filter((r) => r.status === "rejected").length;
 			if (failed > 0) {
@@ -513,6 +760,7 @@
 				);
 			}
 		}
+		bulkPending = false;
 	}
 
 	function handleRename(id: string, title: string) {
@@ -522,6 +770,9 @@
 	}
 </script>
 
+<!-- A click anywhere forgets the focused row; focusin re-records it if the click landed on one. -->
+<svelte:window onkeydown={handleListKeydown} onfocusin={handleRowFocus} onpointerdown={() => { focusedRowId = null; }} />
+
 <div id="session-list" class="flex-1 flex flex-col overflow-hidden">
 	{#if routerState.sessionNotFound}
 		<Banners
@@ -530,58 +781,14 @@
 			ondismiss={() => { routerState.sessionNotFound = false; }}
 		/>
 	{/if}
-	<!-- Session list header — cleanup mode (fixed, outside scroll) -->
-	{#if cleanupMode}
-		<div class="shrink-0 px-2 pb-1 bg-bg-surface">
-			<div class="session-list-header flex items-center justify-between px-2 py-1">
-				<TextButton
-					type="button"
-					title={allSelected ? "Deselect all sessions" : "Select all sessions"}
-				tone="dimmer" class="flex items-center gap-1.5 text-sm font-semibold transition-colors duration-100 font-brand"
-				onclick={handleToggleSelectAll}
-				>
-					<Icon name={allSelected ? "circle-check" : "circle"} size={14} />
-					<span>{allSelected ? "Deselect all" : "Select all"}</span>
-				</TextButton>
-				<TextButton
-					type="button"
-					title="Exit cleanup mode"
-				tone="dimmer" class="text-sm font-semibold transition-colors duration-100 font-brand"
-				onclick={handleExitCleanup}
-				>
-					Cancel
-				</TextButton>
-			</div>
-			<div class="px-2">
-				<!--
-					The parent stays a plain block on purpose. A raw button element is
-					`inline-block` by default, so this control already sits on a line box
-					and already carries the descender gap below it; BASE's `inline-flex`
-					is inline-level too, so nothing moves. (Contrast file/FileTreeNode,
-					where the as-found class list said `flex` -- block-level -- and the
-					swap DID need a `flex flex-col` wrapper.) Making this parent a flex
-					column would close a gap that is currently there, which is a diff.
-					`disabledStyle="undimmed"` because the as-found disabled state does
-					not dim: it only swaps the colour set through the expression below.
-				-->
-				<Button
-					variant="ghost"
-					size="content"
-					tone="inherit"
-					hoverFill="none"
-					disabledStyle="undimmed"
-					disabled={selectionCount === 0}
-					class="w-full py-1.5 px-4 rounded-lg text-xs font-medium border duration-100 font-brand {selectionCount >
-					0
-						? 'bg-error/10 text-error border-error/20 hover:bg-error/20'
-						: 'bg-transparent text-text-dimmer border-border-subtle cursor-default'}"
-					onclick={handleBulkDelete}
-				>
-					{selectionCount > 0
-						? `Delete ${selectionCount === 1 ? "1 session" : `${selectionCount} sessions`}`
-						: "Select sessions to delete"}
-				</Button>
-			</div>
+	<!-- Select-mode header stays outside the scroller. -->
+	{#if selectMode}
+		<div class="session-list-header flex shrink-0 items-center gap-2 px-4 py-1 bg-bg-surface font-brand">
+			<span class="min-w-0 flex-1 text-sm font-semibold">{selectionCount} selected</span>
+			<TextButton type="button" title={allSelected ? "Select none" : "Select all"} tone="dimmer" class="min-h-[44px] min-w-[44px] md:min-h-0 md:min-w-0 text-sm font-semibold" onclick={handleToggleSelectAll}>
+				{allSelected ? "None" : "All"}
+			</TextButton>
+			<TextButton type="button" title="Done selecting" tone="dimmer" class="min-h-[44px] min-w-[44px] md:min-h-0 md:min-w-0 text-sm font-semibold" onclick={resetSelectMode}>Done</TextButton>
 		</div>
 	{:else}
 		<div class="shrink-0 px-2">
@@ -612,26 +819,25 @@
 						class={TOOLBAR_ICON_BOX}
 						iconOnly
 						iconSize={14}
-						icon="trash-2"
-						title="Cleanup sessions"
-						ariaLabel="Cleanup sessions"
-						onclick={handleEnterCleanup}
+						icon="circle-check"
+						title="Select sessions"
+						ariaLabel="Select sessions"
+						onclick={() => handleEnterSelect()}
 					/>
 				</div>
 			</div>
 		</div>
 	{/if}
 
-	{#if !cleanupMode}
-		<div id="session-search" class="shrink-0 px-2.5 py-1 pb-1.5">
-			<SessionSearchField
-				value={localSearchValue}
-				oninput={handleSearchInput}
-				onescape={clearSearch}
-				{onaddproject}
-			/>
-		</div>
-		<div class="flex shrink-0 items-center gap-1 px-2.5 pb-1.5">
+	<div id="session-search" class="shrink-0 px-2.5 py-1 pb-1.5">
+		<SessionSearchField
+			value={localSearchValue}
+			oninput={handleSearchInput}
+			onescape={clearSearch}
+			{onaddproject}
+		/>
+	</div>
+	<div class="flex shrink-0 items-center gap-1 px-2.5 pb-1.5">
 			<div class="flex min-w-0 flex-1 items-center gap-1.5 overflow-x-auto whitespace-nowrap [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
 				{#if grouping !== "status"}
 					<Button
@@ -663,9 +869,7 @@
 				{/each}
 			</div>
 			{#if !sessionViewState.compact}<SessionGroupMenu />{/if}
-		</div>
-	{/if}
-
+	</div>
 	{#if searchSummary}
 		<!-- Outside the search-input block: the count belongs to the results, and
 		     the input's visibility is local component state. -->
@@ -683,7 +887,7 @@
 	     keyboard-only user cannot scroll it at all (axe scrollable-region-focusable);
 	     Svelte's non-interactive-tabindex heuristic does not model that case.
 	     Labelled by string rather than by the "Sessions" heading, which does not exist
-	     in cleanup mode and would leave the idref dangling. -->
+	     in select mode and would leave the idref dangling. -->
 	<!-- One row, rendered by every section. It is a snippet rather than a copy
 	     per section because the row is about to grow: the shelves and the
 	     per-row verbs each land in their own ticket, and copies would mean one
@@ -692,11 +896,12 @@
 		{@const settled = s.pinnedAt == null && s.settledAt != null}
 		{@const snoozed = !settled && s.pinnedAt == null && isSessionSnoozed(s, sessionState.now)}
 		{#if isForeignSession(s)}
-			<!-- Rename, the context menu and cleanup selection all
+			<!-- Rename, most context-menu verbs and select-mode selection all
 			     RPC the relay this socket is attached to, so handing them a session
 			     owned by another project would act on the wrong relay. Withholding
-			     the handlers is what makes the row inert instead of wrong, and it
-			     keeps those actions on the owning relay. -->
+			     the handlers is what makes the row inert instead of wrong. The menu
+			     keeps only Mark read/unread (markOnly), which carries the row's
+			     own projectSlug. -->
 			<SessionItem
 				session={s}
 				pinned={s.pinnedAt != null}
@@ -707,8 +912,13 @@
 				now={sessionState.now}
 				href={getRowHref(s)}
 				projectLabel={getProjectLabel(s)}
+				projectAccent={getProjectAccent(s)}
 				branch={s.git?.branch}
 				onswitchsession={(id) => handleSwitchSession(id, s.projectSlug)}
+				oncontextmenu={handleContextMenu}
+				menuOpen={ctxMenuSession?.id === s.id}
+				onmarkread={() => { void toggleSessionRead(s); }}
+				markOnly
 			/>
 		{:else}
 			<SessionItem
@@ -721,11 +931,12 @@
 				now={sessionState.now}
 				href={getRowHref(s)}
 				projectLabel={getProjectLabel(s)}
+				projectAccent={getProjectAccent(s)}
 				branch={s.git?.branch}
 				active={s.id === sessionState.currentId}
 				renaming={s.id === renamingSessionId}
-				{cleanupMode}
-				selected={selectedForDeletion.has(s.id)}
+				{selectMode}
+				selected={selectedSessionIds.has(s.id)}
 				heldSessionId={heldSessionId}
 				menuOpen={ctxMenuSession?.id === s.id}
 				onholdchange={(id) => { heldSessionId = id; }}
@@ -733,6 +944,7 @@
 				ontoggleselection={handleToggleSelection}
 				oncontextmenu={handleContextMenu}
 				onsettle={(_id, next) => { void handleCtxSettle(s, next); }}
+				onmarkread={(_id) => { void toggleSessionRead(s); }}
 				onpin={(_id, next) => { void handleCtxPin(s, next); }}
 				onsnooze={() => handleOpenSnooze(s)}
 				onunsnooze={() => { void handleUnsnooze(s); }}
@@ -749,17 +961,17 @@
 			<div class="session-empty py-6 px-3.5 text-center text-xs text-text-dimmer font-brand" data-testid={statusFilter !== null && (!searching || filtered.length > 0) ? "session-filter-empty" : undefined}>
 				{emptyMessage}
 				{#if statusFilter !== null && (!searching || filtered.length > 0)}
-					<div class="mt-2"><Button variant="ghost" size="content" tone="accent" class="min-h-8 px-3" data-testid="session-filter-clear" onclick={() => setSessionStatusFilter(null)}>Clear filter</Button></div>
+					<div class="mt-2"><Button variant="ghost" size="content" tone="accent" class="min-h-[44px] md:min-h-8 px-3" data-testid="session-filter-clear" onclick={() => setSessionStatusFilter(null)}>Clear filter</Button></div>
 				{/if}
 			</div>
 		{:else}
 			{#if arrangement.pinned.length > 0}
-				<div class="session-group-label pt-1.5 pb-0.5 px-3 text-xs font-semibold text-text-dimmer tracking-[0.3px] font-brand">Pinned</div>
+				<div class="session-group-label flex items-center uppercase pt-1.5 pb-0.5 px-3 text-xs font-semibold text-text-dimmer tracking-[0.3px] font-brand">Pinned</div>
 				{#each arrangement.pinned as s (s.id)}{@render sessionRow(s)}{/each}
 			{/if}
 			{#each arrangement.sections as section (section.key)}
-					<div class="session-group-label pt-1.5 pb-0.5 px-3 text-xs font-semibold text-text-dimmer tracking-[0.3px] font-brand">
-						{section.label}
+					<div class="session-group-label flex items-center uppercase pt-1.5 pb-0.5 px-3 text-xs font-semibold text-text-dimmer tracking-[0.3px] font-brand">
+						<span>{section.label}</span>
 					</div>
 					{#each section.sessions as s (s.id)}
 						{@render sessionRow(s)}
@@ -768,14 +980,14 @@
 			{#if arrangement.snoozed.length > 0}
 				<TextButton
 					tone="dimmer"
-					class="session-group-label flex items-center gap-1 pt-1.5 pb-0.5 px-3 text-xs font-semibold tracking-[0.3px] font-brand"
+					class="session-group-label flex items-center gap-1 min-h-[44px] md:min-h-0 pt-1.5 pb-0.5 px-3 text-xs font-semibold tracking-[0.3px] font-brand"
 					data-testid="snoozed-shelf-toggle"
 					aria-expanded={snoozedShelfOpen}
 					aria-controls="snoozed-shelf-rows"
 					onclick={() => { if (!searching) setSnoozedShelfOpen(!uiState.snoozedShelfOpen); }}
 				>
 					<Icon name={snoozedShelfOpen ? "chevron-down" : "chevron-right"} size={12} />
-					Snoozed
+						<span class="uppercase">Snoozed</span>
 				</TextButton>
 				<div id="snoozed-shelf-rows">
 					{#if snoozedShelfOpen}
@@ -788,14 +1000,14 @@
 			{#if arrangement.settled.length > 0}
 				<TextButton
 					tone="dimmer"
-					class="session-group-label flex items-center gap-1 pt-1.5 pb-0.5 px-3 text-xs font-semibold tracking-[0.3px] font-brand"
+					class="session-group-label flex items-center gap-1 min-h-[44px] md:min-h-0 pt-1.5 pb-0.5 px-3 text-xs font-semibold tracking-[0.3px] font-brand"
 					data-testid="settled-shelf-toggle"
 					aria-expanded={settledShelfOpen}
 					aria-controls="settled-shelf-rows"
 					onclick={() => { if (!searching) setSettledShelfOpen(!uiState.settledShelfOpen); }}
 				>
 					<Icon name={settledShelfOpen ? "chevron-down" : "chevron-right"} size={12} />
-					Settled
+						<span class="uppercase">Settled</span>
 				</TextButton>
 				<div id="settled-shelf-rows">
 					{#if settledShelfOpen}
@@ -836,31 +1048,87 @@
 			</div>
 		{/if}
 	</div>
+	{#if selectMode}
+		<div data-testid="select-bar" class="flex shrink-0 border-t border-border bg-bg-surface px-[6px] pt-2 pb-[calc(10px+env(safe-area-inset-bottom))] font-brand">
+			<Button
+				variant="ghost" size="content" tone="inherit" hoverFill="none" disabledStyle="none"
+				disabled={settleEligible.length === 0 || bulkPending}
+				data-testid="select-bar-settle"
+				ariaLabel={`Settle ${settleEligible.length} ${settleEligible.length === 1 ? "session" : "sessions"}`}
+				class={selectVerbClass}
+				onclick={() => { void handleBulkSettle(); }}
+			><Icon name="check" size={17} /> Settle</Button>
+			<Button
+				variant="ghost" size="content" tone="inherit" hoverFill="none" disabledStyle="none"
+				disabled={snoozeEligible.length === 0 || bulkPending}
+				data-testid="select-bar-snooze"
+				ariaLabel={`Snooze ${snoozeEligible.length} ${snoozeEligible.length === 1 ? "session" : "sessions"}`}
+				class={selectVerbClass}
+				onclick={handleOpenBulkSnooze}
+			><Icon name="moon" size={17} /> Snooze</Button>
+			<Button
+				variant="ghost" size="content" tone="inherit" hoverFill="none" disabledStyle="none"
+				disabled={pinEligible.length === 0 || bulkPending}
+				data-testid="select-bar-pin"
+				ariaLabel={`${unpinSelected ? "Unpin" : "Pin"} ${pinEligible.length} ${pinEligible.length === 1 ? "session" : "sessions"}`}
+				class={selectVerbClass}
+				onclick={() => { void handleBulkPin(); }}
+			><Icon name={unpinSelected ? "star-off" : "star"} size={17} /> {unpinSelected ? "Unpin" : "Pin"}</Button>
+			<Button
+				variant="ghost" size="content" tone="inherit" hoverFill="none" disabledStyle="none"
+				disabled={selectionCount === 0 || bulkPending}
+				data-testid="select-bar-delete"
+				ariaLabel={`Delete ${selectionCount} ${selectionCount === 1 ? "session" : "sessions"}`}
+				class="{selectVerbClass} text-error"
+				onclick={handleBulkDelete}
+			><Icon name="trash-2" size={17} /> Delete</Button>
+		</div>
+	{/if}
 </div>
 
 <!-- Session context menu (rendered outside the scrollable area for proper z-index) -->
-{#if !cleanupMode && ctxMenuSession && ctxMenuAnchor}
+{#if !selectMode && ctxMenuSession && ctxMenuAnchor}
 	<SessionContextMenu
 		session={ctxMenuSession}
 		anchor={ctxMenuAnchor}
 		projectLabel={getProjectLabel(ctxMenuSession)}
+		projectAccent={getProjectAccent(ctxMenuSession)}
+		branch={ctxMenuSession.git?.branch}
+		presentation={ctxMenuPresentation}
 		now={sessionState.now}
 		onrename={handleCtxRename}
+		onselect={(id) => handleEnterSelect(id)}
 		onsettle={(_id, next) => { if (ctxMenuSession) void handleCtxSettle(ctxMenuSession, next); }}
 		onautosettle={(_id, disabled) => { if (ctxMenuSession) void handleCtxAutoSettle(ctxMenuSession, disabled); }}
 		onpin={(_id, next) => { if (ctxMenuSession) void handleCtxPin(ctxMenuSession, next); }}
-		onsnooze={(_id) => { if (ctxMenuSession) handleOpenSnooze(ctxMenuSession); }}
+		onmarkread={(_id) => { if (ctxMenuSession) void toggleSessionRead(ctxMenuSession); }}
+		onsnooze={(_id) => { if (ctxMenuSession) { handleOpenSnooze(ctxMenuSession); snoozePlacement = ctxMenuPresentation === "sheet" ? "sheet" : "center"; } }}
 		onunsnooze={(_id) => { if (ctxMenuSession) void handleUnsnooze(ctxMenuSession); }}
 		ondelete={handleCtxDelete}
 		oncopyresume={handleCtxCopyResume}
 		onfork={handleCtxFork}
 		onclose={handleCloseContextMenu}
+		markOnly={isForeignSession(ctxMenuSession)}
+	/>
+{/if}
+
+<ShortcutSheet open={shortcutSheetOpen} onclose={closeShortcutSheet} />
+
+{#if bulkSnoozeOpen}
+	<SnoozeSheet
+		open={true}
+		placement={snoozePlacement}
+		sessionTitle={`${snoozeEligible.length} ${snoozeEligible.length === 1 ? "session" : "sessions"}`}
+		now={snoozeSheetNow}
+		onclose={() => { bulkSnoozeOpen = false; }}
+		onsnooze={(until) => { void handleBulkSnooze(until); }}
 	/>
 {/if}
 
 {#if snoozeSession}
 	<SnoozeSheet
 		open={true}
+		placement={snoozePlacement}
 		sessionTitle={snoozeSession.title}
 		now={snoozeSheetNow}
 		onclose={() => { snoozeSession = null; }}

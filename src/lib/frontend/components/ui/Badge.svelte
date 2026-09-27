@@ -15,7 +15,7 @@
   (that one is a Button).
 -->
 <script module lang="ts">
-	type BadgeVariant = "neutral" | "accent" | "accent-solid" | "tag";
+	type BadgeVariant = "neutral" | "accent" | "accent-solid" | "state" | "tag";
 	type BadgeSize = "xs" | "sm" | "count";
 	type BadgeShape = "rounded" | "pill";
 
@@ -23,6 +23,7 @@
 		neutral: "bg-bg text-text-dimmer border border-border",
 		accent: "bg-accent-bg text-accent",
 		"accent-solid": "bg-accent text-bg",
+		state: "bg-bg-alt text-text-muted border border-border-subtle",
 		// The tag tint is theme-aware on purpose: the two SettingsPanel chips
 		// used bg-white/[0.08], which is white-on-white in the light theme.
 		// An arbitrary rgba() belongs here, inside the design system, rather

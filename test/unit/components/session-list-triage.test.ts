@@ -169,10 +169,10 @@ describe("session triage list", () => {
 		const second = screen.getByText("Approval").closest("a");
 		if (!first || !second) throw new Error("Missing row");
 		await touchSwipe(first, 70);
-		expect(screen.getAllByTestId("session-swipe-action")).toHaveLength(1);
+		expect(screen.getAllByTestId("session-swipe-settle")).toHaveLength(1);
 		await touchSwipe(second, 70);
-		expect(screen.getAllByTestId("session-swipe-action")).toHaveLength(1);
-		await fireEvent.click(screen.getByTestId("session-swipe-action"));
+		expect(screen.getAllByTestId("session-swipe-settle")).toHaveLength(1);
+		await fireEvent.click(screen.getByTestId("session-swipe-settle"));
 		await waitFor(() =>
 			expect(setSessionSettledRpc).toHaveBeenCalledWith(
 				expect.objectContaining({ sessionId: "approval", settled: true }),
@@ -180,7 +180,7 @@ describe("session triage list", () => {
 		);
 		await touchSwipe(first, 70);
 		await fireEvent.scroll(screen.getByRole("region", { name: "Sessions" }));
-		expect(screen.queryByTestId("session-swipe-action")).toBeNull();
+		expect(screen.queryByTestId("session-swipe-settle")).toBeNull();
 	});
 	it("keeps snoozed rows in a count-free shelf above Settled", async () => {
 		const until = new Date(2099, 9, 12, 9).getTime();
@@ -459,7 +459,7 @@ describe("session triage list", () => {
 		);
 	});
 
-	it("keeps foreign rows inert even on right-click", async () => {
+	it("offers only the routed read action on a foreign row", async () => {
 		seedDaemonSessions([
 			{
 				id: "foreign",
@@ -472,7 +472,10 @@ describe("session triage list", () => {
 		const row = screen.getByText("Foreign work").closest("a");
 		if (!row) throw new Error("Missing foreign row");
 		await fireEvent.contextMenu(row);
-		expect(screen.queryByRole("menu")).toBeNull();
+		expect(screen.getByRole("menu")).toBeDefined();
+		expect(screen.getByTestId("session-ctx-mark-unread")).toBeDefined();
+		expect(screen.queryByTestId("session-ctx-settle")).toBeNull();
+		expect(screen.queryByTestId("session-ctx-pin")).toBeNull();
 		expect(setSessionPinnedRpc).not.toHaveBeenCalled();
 		expect(setSessionSettledRpc).not.toHaveBeenCalled();
 	});

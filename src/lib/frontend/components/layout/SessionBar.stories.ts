@@ -1,5 +1,6 @@
 import type { Meta, StoryObj } from "@storybook/svelte-vite";
 import { expect, userEvent, within } from "storybook/test";
+import { tick } from "svelte";
 import { instanceState } from "../../stores/instance.svelte.js";
 import { projectState } from "../../stores/project.svelte.js";
 import {
@@ -13,6 +14,12 @@ import {
 	sessionState,
 } from "../../stores/session.svelte.js";
 import { sessionViewState } from "../../stores/session-view.svelte.js";
+import {
+	destroyAll,
+	handlePtyOutput,
+	openPanel,
+	terminalState,
+} from "../../stores/terminal.svelte.js";
 import { uiState } from "../../stores/ui.svelte.js";
 import { mockSession, mockSessionLongTitle } from "../../stories/mocks.js";
 import type { OpenCodeInstance } from "../../types.js";
@@ -56,6 +63,9 @@ const meta = {
 		sessionViewState.compact = false;
 		sessionViewState.atBottom = true;
 		sessionViewState.forcedOpen = true;
+		sessionViewState.filesOpen = false;
+		sessionViewState.filesEverOpened = false;
+		destroyAll();
 		return () => {
 			attachedProjectState.slug = null;
 		};
@@ -87,6 +97,101 @@ export const Default: Story = {
 		// terminal at this width, so its presence is not cosmetic.
 		expect(canvas.getByTestId("session-bar-overflow")).toBeVisible();
 		expect(canvas.queryByTestId("instance-badge")).toBeNull();
+	},
+};
+
+export const Switcher: Story = {
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		const tabs = within(canvas.getByTestId("session-bar-views")).getAllByRole(
+			"tab",
+		);
+		await expect(tabs.map((tab) => tab.getAttribute("aria-label"))).toEqual([
+			"Chat",
+			"Terminal",
+			"Diff",
+			"Files",
+		]);
+		await expect(tabs[0]).toHaveAttribute("aria-selected", "true");
+		await expect(tabs[2]).toBeDisabled();
+		for (const tab of tabs)
+			expect(tab.getBoundingClientRect().height).toBeGreaterThanOrEqual(44);
+	},
+};
+
+function emitOutputFromTwoTerminals() {
+	handlePtyOutput({ type: "pty_output", ptyId: "pty-1", data: "one" });
+	handlePtyOutput({ type: "pty_output", ptyId: "pty-1", data: "two" });
+	handlePtyOutput({ type: "pty_output", ptyId: "pty-2", data: "three" });
+}
+
+export const WithTerminalBadge: Story = {
+	beforeEach: emitOutputFromTwoTerminals,
+	play: async ({ canvasElement }) => {
+		const terminal = within(canvasElement).getByRole("tab", {
+			name: "Terminal",
+		});
+		await expect(terminal).toHaveTextContent("2");
+		await expect(terminal).toHaveAttribute("aria-selected", "false");
+	},
+};
+
+export const OpeningTerminalClearsBadge: Story = {
+	beforeEach: emitOutputFromTwoTerminals,
+	play: async ({ canvasElement }) => {
+		const terminal = within(canvasElement).getByRole("tab", {
+			name: "Terminal",
+		});
+		await expect(terminal).toHaveTextContent("2");
+		openPanel();
+		await tick();
+		await expect(terminal).toHaveAttribute("aria-selected", "true");
+		await expect(terminal).not.toHaveTextContent("2");
+		expect(terminalState.unreadPtyIds.size).toBe(0);
+	},
+};
+
+function showState(overrides: Partial<typeof mockSession>) {
+	const session = { ...mockSession, ...overrides };
+	handleSessionList({ type: "session_list", roots: true, sessions: [session] });
+	handleSessionFamily({
+		type: "session_family",
+		rootId: session.id,
+		sessions: [session],
+	});
+	sessionState.currentId = session.id;
+}
+
+export const Settled: Story = {
+	beforeEach: () => showState({ settledAt: Date.now() - 3_600_000 }),
+};
+
+export const AutoSettled: Story = {
+	beforeEach: () =>
+		showState({
+			settledAt: Date.now() - 3_600_000,
+			settledAutomatically: true,
+		}),
+};
+
+export const Snoozed: Story = {
+	beforeEach: () =>
+		showState({ snoozedAt: Date.now(), snoozedUntil: Date.now() + 3_600_000 }),
+};
+
+export const Woke: Story = {
+	beforeEach: () => showState({ wokenAt: Date.now(), wokeBecause: "error" }),
+};
+
+export const AutoSettledCollapsed: Story = {
+	beforeEach: () => {
+		showState({
+			settledAt: Date.now() - 3_600_000,
+			settledAutomatically: true,
+		});
+		sessionViewState.compact = true;
+		sessionViewState.atBottom = true;
+		sessionViewState.forcedOpen = false;
 	},
 };
 

@@ -18,6 +18,7 @@
 	import { getCurrentSlug } from "../../stores/router.svelte.js";
 	import { getBrowserClientId } from "../../stores/client-identity.js";
 	import { forkSessionRpc } from "../../transport/ws-rpc-client.js";
+	import { showToast } from "../../stores/ui.svelte.js";
 	import { assertNever } from "../../../utils.js";
 	import Button from "../ui/Button.svelte";
 	import MessageTime from "./MessageTime.svelte";
@@ -329,7 +330,7 @@
 				originId: getBrowserClientId(),
 				...(sessionState.currentId ? { sessionId: sessionState.currentId } : {}),
 				messageId: message.messageId,
-			});
+			}).catch(() => showToast("Failed to fork session", { variant: "error" }));
 		}
 	}
 

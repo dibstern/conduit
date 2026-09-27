@@ -119,6 +119,7 @@ export const Idle: Story = {
 			/^Plan documentation cleanup,/,
 		);
 		await expect(row.querySelector(".session-item-status")).toBeNull();
+		await expect(row.querySelector(".session-status-glyph svg")).not.toBeNull();
 	},
 };
 
@@ -260,7 +261,12 @@ export const Hover: Story = {
 
 export const HoverActions: Story = {
 	name: "Hover actions",
-	args: { session: mockSession, projectLabel: "Conduit", branch: "main" },
+	args: {
+		session: mockSession,
+		projectLabel: "Conduit",
+		branch: "main",
+		onmarkread: fn(),
+	},
 	parameters: { pseudo: { hover: true } },
 };
 
@@ -289,6 +295,7 @@ export const SnoozedHoverActions: Story = {
 function dragStory(
 	direction: 1 | -1,
 	fraction: number,
+	testId = "session-swipe-action",
 ): NonNullable<Story["play"]> {
 	return async ({ canvasElement }) => {
 		const row = canvasElement.querySelector<HTMLAnchorElement>(".session-item");
@@ -316,16 +323,22 @@ function dragStory(
 			}),
 		);
 		await expect(
-			await within(canvasElement).findByTestId("session-swipe-action"),
+			await within(canvasElement).findByTestId(testId),
 		).toHaveAttribute("data-stage", fraction >= 0.55 ? "commit" : "reveal");
 	};
 }
 
 export const MidSwipeSettle: Story = {
 	name: "Mid-swipe settle",
-	// A row swipes only when it has actions, which oncontextmenu signals.
-	args: { session: mockSessionDoneUnread, onsettle: fn(), oncontextmenu: fn() },
-	play: dragStory(1, 0.35),
+	// A row swipes only when it has actions, which oncontextmenu signals. A
+	// short swipe right holds the tray: Settle, then Read on this unread row.
+	args: {
+		session: mockSessionDoneUnread,
+		onsettle: fn(),
+		onmarkread: fn(),
+		oncontextmenu: fn(),
+	},
+	play: dragStory(1, 0.35, "session-swipe-settle"),
 };
 
 export const MidSwipeSnooze: Story = {
@@ -350,15 +363,15 @@ export const Renaming: Story = {
 	},
 };
 
-// Cleanup mode is the only state that renders the selection control, and it had
+// Select mode is the only state that renders the selection control, and it had
 // no story at all -- which is how it kept a checkbox drawn entirely in glyphs,
 // with no role and no checked state, through the whole migration
 // (conduit-test-de3.35.9.3).
-export const CleanupMode: Story = {
+export const SelectMode: Story = {
 	args: {
 		session: mockSession,
 		active: false,
-		cleanupMode: true,
+		selectMode: true,
 	},
 	play: async ({ canvasElement }) => {
 		const box = within(canvasElement).getByRole("checkbox");
@@ -367,11 +380,11 @@ export const CleanupMode: Story = {
 	},
 };
 
-export const CleanupModeSelected: Story = {
+export const SelectModeSelected: Story = {
 	args: {
 		session: mockSession,
 		active: false,
-		cleanupMode: true,
+		selectMode: true,
 		selected: true,
 	},
 	play: async ({ canvasElement }) => {

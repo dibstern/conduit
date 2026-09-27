@@ -504,10 +504,10 @@ describe("handlePtyList", () => {
 		expect(terminalState.tabs.has("pty2")).toBe(true);
 	});
 
-	it("ignores empty pty list", () => {
+	it("clears server-owned tabs when the authoritative pty list is empty", () => {
 		handlePtyCreated(ptyCreatedMsg("pty1"));
 		handlePtyList({ type: "pty_list", ptys: [] });
-		expect(terminalState.tabs.size).toBe(1);
+		expect(terminalState.tabs.size).toBe(0);
 	});
 
 	it("marks exited PTYs", () => {

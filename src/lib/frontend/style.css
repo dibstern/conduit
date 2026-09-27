@@ -539,7 +539,7 @@ body:has(dialog:modal) {
 
 /* Sidebar width driven by --sidebar-w custom property (set inline by Sidebar.svelte) */
 #sidebar {
-	width: var(--sidebar-w, 260px);
+	width: var(--sidebar-w, 300px);
 	transition: width 0.15s ease;
 }
 
@@ -593,7 +593,8 @@ body:has(dialog:modal) {
 	grid-template-columns: auto minmax(0, 1fr) auto auto;
 	grid-template-areas:
 		"back  meta  meta  more"
-		"title title title title";
+		"title title title title"
+		"views views views views";
 	align-items: center;
 	column-gap: 6px;
 	padding: 3px 12px 6px;
@@ -623,7 +624,7 @@ body:has(dialog:modal) {
    only when some generated utility references it, so dropping `text-lg` from
    the markup pruned `--text-lg` from the stylesheet and the title silently
    rendered at the inherited 12px. */
-#session-bar-title {
+#session-bar-title-row {
 	grid-area: title;
 }
 #session-bar-chevron {
@@ -631,6 +632,23 @@ body:has(dialog:modal) {
 }
 #session-bar-more {
 	grid-area: more;
+}
+#session-bar-views {
+	grid-area: views;
+	min-width: 0;
+	width: 100%;
+	padding-top: 2px;
+}
+#session-bar-views [role="tab"] {
+	container-type: inline-size;
+}
+@container (max-width: 76px) {
+	.session-view-label {
+		display: none;
+	}
+}
+.session-view-shortcut {
+	display: none;
 }
 
 /* ─── Compact route layout ─────────────────────────────────────────────────── */

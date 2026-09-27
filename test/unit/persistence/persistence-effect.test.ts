@@ -268,6 +268,7 @@ describe("Persistence Effect", () => {
 				{ migration_id: 20, name: "read_model_counter" },
 				{ migration_id: 21, name: "sent_alerts" },
 				{ migration_id: 22, name: "fork_point_timestamp" },
+				{ migration_id: 23, name: "sessions_marked_unread" },
 			]);
 
 			const legacyMigrationTable = yield* sql<{ name: string }>`
@@ -371,7 +372,7 @@ describe("Persistence Effect", () => {
 	);
 
 	it.effect(
-		"rejects a stale feature ledger before running new migrations",
+		"rejects an unknown migration ledger before changing the database",
 		() =>
 			Effect.gen(function* () {
 				const result = yield* Effect.either(
@@ -389,7 +390,7 @@ describe("Persistence Effect", () => {
 								name VARCHAR(255) NOT NULL
 							);
 							INSERT INTO effect_sql_migrations (migration_id, name)
-							VALUES (13, 'read_model_version');
+							VALUES (13, 'foreign_migration');
 							DROP TABLE message_parts;
 							DROP TABLE messages;
 						`);
@@ -400,7 +401,7 @@ describe("Persistence Effect", () => {
 				);
 				expect(result._tag).toBe("Left");
 				if (result._tag === "Left")
-					expectMigrationFailure(result.left, "Stale feature migration");
+					expectMigrationFailure(result.left, "Unknown recorded migration");
 			}),
 	);
 

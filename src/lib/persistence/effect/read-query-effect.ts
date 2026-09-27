@@ -63,6 +63,7 @@ export const sessionRowsToSessionInfoList = (
 		readonly parentMap?: ReadonlyMap<string, string>;
 		readonly pendingQuestionCounts?: ReadonlyMap<string, number>;
 		readonly pendingPermissionCounts?: ReadonlyMap<string, number>;
+		readonly hasLiveBackgroundWork?: (sessionId: string) => boolean;
 	} = {},
 ): Array<SessionInfo & { readonly updatedAt: number }> => {
 	const subtree = new Map<
@@ -87,7 +88,10 @@ export const sessionRowsToSessionInfoList = (
 				permissions: 0,
 			};
 			const status = opts.statuses?.[id]?.type ?? rowStatuses.get(id);
-			state.processing ||= status === "busy" || status === "retry";
+			state.processing ||=
+				status === "busy" ||
+				status === "retry" ||
+				opts.hasLiveBackgroundWork?.(id) === true;
 			state.questions += opts.pendingQuestionCounts?.get(id) ?? 0;
 			state.permissions += opts.pendingPermissionCounts?.get(id) ?? 0;
 			subtree.set(root, state);
@@ -101,15 +105,20 @@ export const sessionRowsToSessionInfoList = (
 		const pendingPermissionCount =
 			state?.permissions ?? opts.pendingPermissionCounts?.get(row.id);
 		const unread =
-			row.last_message_at !== null &&
-			(row.read_at === null || row.read_at < row.last_message_at);
+			row.marked_unread_at != null ||
+			(row.last_message_at !== null &&
+				(row.read_at === null || row.read_at < row.last_message_at));
 		const status = opts.statuses?.[row.id]?.type ?? row.status;
+		const processing =
+			state?.processing ||
+			status === "busy" ||
+			status === "retry" ||
+			opts.hasLiveBackgroundWork?.(row.id) === true;
 		let attention: SessionAttention = "idle";
 		if ((pendingPermissionCount ?? 0) > 0) attention = "needs-approval";
 		else if ((pendingQuestionCount ?? 0) > 0) attention = "needs-reply";
 		else if (row.last_turn_error_at !== null) attention = "error";
-		else if (state?.processing || status === "busy" || status === "retry")
-			attention = "working";
+		else if (processing) attention = "working";
 		else if (unread) attention = "done-unread";
 		return {
 			id: row.id,
@@ -131,9 +140,7 @@ export const sessionRowsToSessionInfoList = (
 			...(row.fork_point_message_id != null
 				? { forkPointMessageId: row.fork_point_message_id }
 				: {}),
-			...(state?.processing || status === "busy" || status === "retry"
-				? { processing: true }
-				: {}),
+			...(processing ? { processing: true } : {}),
 			...(pendingQuestionCount ? { pendingQuestionCount } : {}),
 			...(pendingPermissionCount ? { pendingPermissionCount } : {}),
 			...(unread ? { unread: true } : {}),
@@ -196,6 +203,7 @@ export interface ReadQueryEffect {
 		titleQuery?: string;
 		before?: { updatedAt: number; id: string };
 		statuses?: Readonly<Record<string, { type: string }>>;
+		hasLiveBackgroundWork?: (sessionId: string) => boolean;
 	}) => Effect.Effect<
 		readonly (SessionInfo & { readonly updatedAt: number })[],
 		ReadQueryEffectError | SqlError
@@ -524,6 +532,9 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 				},
 				pendingQuestionCounts: pending.questions,
 				pendingPermissionCounts: pending.permissions,
+				...(opts?.hasLiveBackgroundWork && {
+					hasLiveBackgroundWork: opts.hasLiveBackgroundWork,
+				}),
 			});
 		});
 

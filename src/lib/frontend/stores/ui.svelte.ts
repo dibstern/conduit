@@ -22,7 +22,7 @@ function safeGetItem(key: string): string | null {
 		return null;
 	}
 }
-export const SIDEBAR_DEFAULT_WIDTH = 260;
+export const SIDEBAR_DEFAULT_WIDTH = 300;
 export const SIDEBAR_MIN_WIDTH = 180;
 export const SIDEBAR_MAX_WIDTH = 480;
 export const FILE_VIEWER_DEFAULT_WIDTH = 50; // percentage of layout
@@ -35,6 +35,8 @@ export const uiState = $state({
 	sidebarCollapsed: safeGetItem(SIDEBAR_STORAGE_KEY) === "true",
 	settledShelfOpen: safeGetItem(SETTLED_SHELF_STORAGE_KEY) === "true",
 	snoozedShelfOpen: safeGetItem(SNOOZED_SHELF_STORAGE_KEY) === "true",
+	// Cleanup and bulk settle share one row-selection mode, entered from either sidebar surface.
+	selectMode: false,
 	sidebarPanel: "sessions" as "sessions" | "files",
 	sidebarWidth: Number(safeGetItem(SIDEBAR_WIDTH_KEY)) || SIDEBAR_DEFAULT_WIDTH,
 

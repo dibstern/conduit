@@ -3294,27 +3294,22 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 			prompt: "Second",
 			eventSink: sink,
 		});
-		const turn2Promise = Effect.runPromise(
-			instance.sendTurnEffect(input2).pipe(Effect.either),
-		);
+		const turn2Promise = Effect.runPromise(instance.sendTurnEffect(input2));
 
 		// Interrupt the second turn
 		await Effect.runPromise(
 			instance.interruptTurnEffect("session-interrupt-2nd"),
 		);
 
-		// The interrupt path rejects the queued turn directly before the stream can
-		// finish without a result.
+		// The interrupt path settles the queued turn before the stream finishes.
 		const turn2Result = await turn2Promise;
-		expect(turn2Result._tag).toBe("Left");
-		if (turn2Result._tag === "Left") {
-			expect(turn2Result.left).toMatchObject({
-				_tag: "ProviderInstanceFailure",
-				providerId: "claude",
-				operation: "sendTurn",
-			});
-			expect(turn2Result.left.message).toContain("Turn interrupted");
-		}
+		expect(turn2Result).toEqual({
+			status: "interrupted",
+			cost: 0,
+			tokens: { input: 0, output: 0 },
+			durationMs: 0,
+			providerStateUpdates: [],
+		});
 	});
 
 	it("enqueueTurn updates eventSink on context (latest sink wins)", async () => {

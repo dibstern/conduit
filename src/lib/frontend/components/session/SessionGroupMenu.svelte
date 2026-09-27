@@ -35,7 +35,7 @@
 	{/snippet}
 	<MenuRadioGroup value={grouping} onvaluechange={(value) => { const choice = choices.find((c) => c.value === value); if (choice) setSessionGrouping(choice.value); }}>
 		{#each choices as choice (choice.value)}
-			<MenuRadioItem value={choice.value} data-testid={`session-group-option-${choice.value}`}>
+			<MenuRadioItem value={choice.value} data-testid={`session-group-option-${choice.value}`} class={compact ? "min-h-[44px] md:min-h-0" : undefined}>
 				<span class="flex min-w-0 flex-1 items-center gap-2">
 					<span>{choice.label}</span>
 					{#if choice.hint}<span class="text-text-dimmer text-xs">{choice.hint}</span>{/if}

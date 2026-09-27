@@ -19,6 +19,54 @@ import { sessionFamilyQuery } from "../../../src/lib/persistence/session-family-
 const testLayer = EffectSqliteClient.layer({ filename: ":memory:" });
 
 describe("typed session row derivations", () => {
+	it.effect("keeps a manual unread mark without messages", () =>
+		Effect.gen(function* () {
+			yield* makeEffectSqlMigrator();
+			yield* seedSession("manual");
+			const sql = yield* SqlClient.SqlClient;
+			const [row] =
+				yield* sql<SessionRow>`SELECT * FROM sessions WHERE id = 'manual'`;
+			if (!row) throw new Error("expected session");
+			expect(
+				sessionRowsToSessionInfoList([{ ...row, marked_unread_at: 1 }])[0],
+			).toMatchObject({
+				unread: true,
+				attention: "done-unread",
+			});
+		}).pipe(Effect.provide(testLayer)),
+	);
+
+	it.effect(
+		"rolls live background work into root attention without changing status",
+		() =>
+			Effect.gen(function* () {
+				yield* makeEffectSqlMigrator();
+				yield* seedSession("root");
+				yield* seedSession("child", { parentId: "root" });
+				const sql = yield* SqlClient.SqlClient;
+				const rows = yield* sql<SessionRow>`SELECT * FROM sessions ORDER BY id`;
+				const converted = sessionRowsToSessionInfoList(rows, {
+					parentMap: new Map([["child", "root"]]),
+					hasLiveBackgroundWork: (id) => id === "child",
+				});
+				for (const item of converted) {
+					expect(item).toMatchObject({
+						status: "idle",
+						processing: true,
+						attention: "working",
+					});
+				}
+				const priority = sessionRowsToSessionInfoList(rows, {
+					hasLiveBackgroundWork: () => true,
+					pendingPermissionCounts: new Map([["child", 1]]),
+				});
+				expect(priority.find((item) => item.id === "child")).toMatchObject({
+					attention: "needs-approval",
+					processing: true,
+				});
+			}).pipe(Effect.provide(testLayer)),
+	);
+
 	it.effect(
 		"derives approval, reply, error, working, unread and idle in priority order",
 		() =>

@@ -70,7 +70,7 @@ describe("ClaudeProviderInstance.discoverEffect()", () => {
 		expect(caps.supportsPermissions).toBe(true);
 		expect(caps.supportsQuestions).toBe(true);
 		expect(caps.supportsAttachments).toBe(true);
-		expect(caps.supportsFork).toBe(false);
+		expect(caps.supportsFork).toBe(true);
 		expect(caps.supportsRevert).toBe(false);
 	});
 

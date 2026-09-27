@@ -161,7 +161,8 @@ function convertAssistantParts(
 	createdAt?: number,
 ): ChatMessage[] {
 	const result: ChatMessage[] = [];
-	let firstTextSeen = false;
+	// One fork point per message, on the text the transcript shows as the reply.
+	const replyPart = parts.filter((p) => p.type === "text" && p.text).at(-1);
 
 	for (const part of parts) {
 		// A turn's parts all live under one message, so the message stamp would
@@ -182,11 +183,10 @@ function convertAssistantParts(
 					html,
 					finalized: true,
 					partId: part.id,
-					...(messageId != null && !firstTextSeen && { messageId }),
+					...(messageId != null && part === replyPart && { messageId }),
 					...(partCreatedAt != null && { createdAt: partCreatedAt }),
 					...(partEndedAt != null && { endedAt: partEndedAt }),
 				} satisfies AssistantMessage);
-				firstTextSeen = true;
 				break;
 			}
 			case "thinking":

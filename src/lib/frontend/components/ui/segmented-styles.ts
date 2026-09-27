@@ -86,6 +86,13 @@ export const SEGMENTED_VARIANTS = {
 		selected: "border-accent text-text bg-accent/10",
 		unselected: "border-border text-text-muted hover:text-text",
 	},
+	/** Full-width session view band, with literal 44px phone targets. */
+	switcher: {
+		list: "flex w-full min-w-0 gap-1 rounded-lg bg-bg-alt p-0.5",
+		item: "flex min-w-0 min-h-[44px] flex-1 items-center justify-center gap-1 rounded-md px-1 text-sm font-medium cursor-pointer transition-colors",
+		selected: "bg-bg-surface text-text shadow-sm",
+		unselected: "text-text-muted hover:text-text disabled:opacity-50",
+	},
 } as const satisfies Record<string, SegmentedRecipe>;
 
 export type SegmentedVariant = keyof typeof SEGMENTED_VARIANTS;

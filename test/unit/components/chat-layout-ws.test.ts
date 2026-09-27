@@ -36,6 +36,10 @@ vi.mock(
 	"../../../src/lib/frontend/components/chat/MessageList.svelte",
 	emptyComponent,
 );
+vi.mock(
+	"../../../src/lib/frontend/components/session/DeepSearch.svelte",
+	emptyComponent,
+);
 
 // Overlay components
 vi.mock(
@@ -133,6 +137,7 @@ vi.mock("../../../src/lib/frontend/stores/ws.svelte.js", async () => {
 vi.mock("../../../src/lib/frontend/stores/chat.svelte.js", () => ({
 	chatState: { streaming: false, processing: false, messages: [] },
 	clearMessages: vi.fn(),
+	registerClearMessagesHook: vi.fn(),
 }));
 
 vi.mock("../../../src/lib/frontend/stores/session.svelte.js", () => ({

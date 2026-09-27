@@ -35,6 +35,8 @@ export const READ_MODEL_VERSION_MIGRATION = "0018_read_model_version.sql";
 export const READ_MODEL_COUNTER_MIGRATION = "0019_read_model_counter.sql";
 export const SENT_ALERTS_MIGRATION = "0020_sent_alerts.sql";
 export const FORK_POINT_TIMESTAMP_MIGRATION = "0021_fork_point_timestamp.sql";
+export const SESSIONS_MARKED_UNREAD_MIGRATION =
+	"0022_sessions_marked_unread.sql";
 
 export function readMigrationSql(filename: string): string {
 	return readFileSync(

@@ -1,8 +1,9 @@
 <!-- ─── Sidebar File Panel ───────────────────────────────────────────────────── -->
-<!-- Inline file browser panel rendered inside the sidebar when sidebarPanel -->
-<!-- is "files". Owns WS subscriptions for file_list/file_content. -->
+<!-- File browser shared by the sidebar and the phone session view. -->
+<!-- Owns WS subscriptions for file_list/file_content. -->
 
 <script lang="ts">
+	import { untrack } from "svelte";
 	import type { BreadcrumbSegment, FileEntry, RelayMessage } from "../../types.js";
 	import { onFileBrowser } from "../../stores/ws.svelte.js";
 	import { openFileViewer, setSidebarPanel } from "../../stores/ui.svelte.js";
@@ -13,21 +14,25 @@
 	import BlockGrid from "../ui/BlockGrid.svelte";
 	import TextButton from "../ui/TextButton.svelte";
 	import Button from "../ui/Button.svelte";
+	import { fileTreeState } from "../../stores/file-tree.svelte.js";
+
+	let { onClose }: { onClose?: () => void } = $props();
 
 	// ─── State ─────────────────────────────────────────────────────────────────
 
-	let currentPath = $state(".");
-	let entries = $state<FileEntry[]>([]);
 	let loading = $state(false);
-
-	const dirCache = new Map<string, FileEntry[]>();
-	let dirChildren = $state(new Map<string, FileEntry[]>());
+	let fileTreeEl: HTMLDivElement | undefined = $state(undefined);
+	// Restore the saved scroll once per mount; tracking browserScrollTop here
+	// would re-run on every scroll event.
+	$effect(() => {
+		if (fileTreeEl) fileTreeEl.scrollTop = untrack(() => fileTreeState.browserScrollTop);
+	});
 
 	// ─── Breadcrumbs ────────────────────────────────────────────────────────────
 
 	const breadcrumbs = $derived.by((): BreadcrumbSegment[] => {
-		if (currentPath === ".") return [{ label: "/", path: "." }];
-		const parts = currentPath.split("/").filter(Boolean);
+		if (fileTreeState.browserPath === ".") return [{ label: "/", path: "." }];
+		const parts = fileTreeState.browserPath.split("/").filter(Boolean);
 		const segments: BreadcrumbSegment[] = [{ label: "/", path: "." }];
 		let accum = "";
 		for (const part of parts) {
@@ -40,20 +45,20 @@
 	// ─── Directory loading ──────────────────────────────────────────────────────
 
 	function loadDirectory(path: string) {
-		if (dirCache.has(path)) {
+		if (fileTreeState.browserCache.has(path)) {
 			// biome-ignore lint/style/noNonNullAssertion: safe — Map.get after has() check
-			entries = dirCache.get(path)!;
-			currentPath = path;
+			fileTreeState.browserEntries = fileTreeState.browserCache.get(path)!;
+			fileTreeState.browserPath = path;
 			return;
 		}
 		const slug = getCurrentSlug();
 		if (!slug) return;
 		loading = true;
-		currentPath = path;
+		fileTreeState.browserPath = path;
 		void getFileListRpc({ projectSlug: slug, path })
 			.then(applyGetFileListResponse)
 			.catch(() => {
-				if (currentPath === path) loading = false;
+				if (fileTreeState.browserPath === path) loading = false;
 			});
 	}
 
@@ -66,18 +71,18 @@
 
 	function handleFileList(path: string, fileEntries: FileEntry[]) {
 		const sorted = sortEntries(fileEntries);
-		dirCache.set(path, sorted);
+		fileTreeState.browserCache = new Map([...fileTreeState.browserCache, [path, sorted]]);
 
-		if (currentPath === path) {
-			entries = sorted;
+		if (fileTreeState.browserPath === path) {
+			fileTreeState.browserEntries = sorted;
 			loading = false;
 		}
 
-		dirChildren = new Map([...dirChildren, [path, sorted]]);
+		fileTreeState.browserChildren = new Map([...fileTreeState.browserChildren, [path, sorted]]);
 	}
 
 	function getChildrenForPath(path: string): FileEntry[] | undefined {
-		return dirChildren.get(path);
+		return fileTreeState.browserChildren.get(path);
 	}
 
 	function navigateTo(path: string) {
@@ -96,7 +101,7 @@
 
 	function handleDirClick(fullPath: string) {
 		const slug = getCurrentSlug();
-		if (slug && !dirChildren.has(fullPath)) {
+		if (slug && !fileTreeState.browserChildren.has(fullPath)) {
 			void getFileListRpc({ projectSlug: slug, path: fullPath }).then(
 				applyGetFileListResponse,
 			);
@@ -104,13 +109,15 @@
 	}
 
 	function refresh() {
-		dirCache.clear();
-		dirChildren = new Map<string, FileEntry[]>();
-		loadDirectory(currentPath);
+		fileTreeState.browserCache = new Map();
+		fileTreeState.browserChildren = new Map();
+		fileTreeState.browserExpandedPaths = new Set();
+		loadDirectory(fileTreeState.browserPath);
 	}
 
 	function closePanel() {
-		setSidebarPanel("sessions");
+		if (onClose) onClose();
+		else setSidebarPanel("sessions");
 	}
 
 	// ─── WS message subscription ───────────────────────────────────────────────
@@ -126,8 +133,8 @@
 
 	// Load root directory on mount
 	$effect(() => {
-		if (entries.length === 0) {
-			loadDirectory(".");
+		if (!fileTreeState.browserCache.has(fileTreeState.browserPath)) {
+			loadDirectory(fileTreeState.browserPath);
 		}
 	});
 </script>
@@ -144,7 +151,7 @@
 				id="file-panel-refresh"
 				variant="toolbar"
 				size="content"
-				class="h-6 w-6 rounded-md"
+				class="h-6 w-6 min-h-[44px] min-w-[44px] md:min-h-0 md:min-w-0 rounded-md"
 				iconOnly
 				iconSize={14}
 				icon="refresh-cw"
@@ -156,7 +163,7 @@
 				id="file-panel-close"
 				variant="toolbar"
 				size="content"
-				class="h-6 w-6 rounded-md"
+				class="h-6 w-6 min-h-[44px] min-w-[44px] md:min-h-0 md:min-w-0 rounded-md"
 				iconOnly
 				iconSize={14}
 				icon="x"
@@ -187,21 +194,21 @@
 	</div>
 
 	<!-- File tree -->
-	<div id="file-tree" class="flex-1 overflow-y-auto px-1">
+	<div id="file-tree" class="flex-1 overflow-y-auto px-1" bind:this={fileTreeEl} onscroll={(event) => { fileTreeState.browserScrollTop = event.currentTarget.scrollTop; }}>
 		{#if loading}
 			<div class="flex items-center justify-center py-8 text-text-dimmer text-sm">
 				<BlockGrid cols={5} mode="fast" blockSize={1.5} gap={0.5} class="shrink-0" />
 				<span class="ml-2">Loading...</span>
 			</div>
-		{:else if entries.length === 0}
+		{:else if fileTreeState.browserEntries.length === 0}
 			<div class="text-center py-8 text-text-dimmer text-sm">
 				Empty directory
 			</div>
 		{:else}
-			{#each entries as entry (entry.name)}
+			{#each fileTreeState.browserEntries as entry (entry.name)}
 				<FileTreeNode
 					{entry}
-					parentPath={currentPath}
+					parentPath={fileTreeState.browserPath}
 					onFileClick={handleFileClick}
 					onDirClick={handleDirClick}
 					getChildren={getChildrenForPath}

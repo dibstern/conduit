@@ -9,6 +9,7 @@
 	import { attachProjectRpc, resolveSessionRpc, viewSessionRpc, getAgentsRpc, getCommandsRpc, getFileTreeRpc, getModelsRpc, getProjectsRpc, listPtysRpc, listSessionsRpc } from "../../transport/ws-rpc-client.js";
 	import Header from "./Header.svelte";
 	import SessionBar from "./SessionBar.svelte";
+	import SidebarFilePanel from "../file/SidebarFilePanel.svelte";
 	import Sidebar from "./Sidebar.svelte";
 	import InputArea from "../input/InputArea.svelte";
 	import MessageList from "../chat/MessageList.svelte";
@@ -52,7 +53,7 @@
 	import { attachedProjectState, getCurrentRoute, getCurrentSessionId, getCurrentSearchParams, replaceRoute, routerState } from "../../stores/router.svelte.js";
 	import { clearMessages } from "../../stores/chat.svelte.js";
 	import { applyPtyListResponse, terminalState, destroyAll } from "../../stores/terminal.svelte.js";
-	import { applyListSessionsResponse, clearSessionState, loadDaemonSessions, sessionState, switchToSession } from "../../stores/session.svelte.js";
+	import { applyListSessionsResponse, clearSessionState, findSession, getFilteredSessions, loadDaemonSessions, sessionState, switchToSession } from "../../stores/session.svelte.js";
 	import { applyGetAgentsResponse, applyGetCommandsResponse, applyGetModelsResponse, clearDiscoveryState, discoveryState } from "../../stores/discovery.svelte.js";
 	import { todoState, clearTodoState } from "../../stores/todo.svelte.js";
 	import { applyGetFileTreeResponse, requestFileTree, clearFileTreeState } from "../../stores/file-tree.svelte.js";
@@ -62,6 +63,8 @@
 	import { featureFlags, initFeatureFlags, toggleFeature } from "../../stores/feature-flags.svelte.js";
 	import { fetchCurrentVersion } from "../../stores/version.svelte.js";
 	import type { RelayMessage } from "../../types.js";
+	import { toggleSessionRead } from "../../utils/session-read.js";
+	import DeepSearch from "../session/DeepSearch.svelte";
 
 	// ─── Local state ──────────────────────────────────────────────────────────
 
@@ -602,6 +605,34 @@
 		return () => window.removeEventListener("keydown", handleDebugShortcut);
 	});
 
+	$effect(() => {
+		function handleReadShortcut(e: KeyboardEvent) {
+			if (e.key.toLowerCase() !== "u" || e.altKey || e.repeat) return;
+			const target = e.target;
+			const globalShortcut = (e.ctrlKey || e.metaKey) && e.shiftKey;
+			if (globalShortcut) {
+				if (!sessionState.currentId) return;
+				e.preventDefault();
+				const session = findSession(sessionState.currentId);
+				if (session) void toggleSessionRead(session);
+				return;
+			}
+			if (e.ctrlKey || e.metaKey || e.shiftKey || !(target instanceof Element)) return;
+			if (target.closest("input, textarea, [contenteditable]:not([contenteditable='false'])")) return;
+			const rowId = target.closest("#session-list .session-item")?.getAttribute("data-session-id");
+			const session = rowId
+				? getFilteredSessions().find((candidate) => candidate.id === rowId)
+				: target.closest("#messages") && sessionState.currentId
+					? findSession(sessionState.currentId)
+					: undefined;
+			if (!session) return;
+			e.preventDefault();
+			void toggleSessionRead(session);
+		}
+		window.addEventListener("keydown", handleReadShortcut);
+		return () => window.removeEventListener("keydown", handleReadShortcut);
+	});
+
 	// ─── Show debug panel when feature flag enabled ────────────────────────────
 	$effect(() => {
 		if (featureFlags.debug) {
@@ -689,13 +720,17 @@
 			<RewindBanner />
 		{/if}
 
-		<!-- Messages + Input area (hidden when terminal is mobile-maximized) -->
-		{#if !mobileMaximized}
-			<div class="flex flex-col flex-1 min-h-0">
+		<!-- Keep the transcript mounted and sized beneath phone views so its scrollTop survives. -->
+		<div class="relative flex flex-col flex-1 min-h-0">
+			<div class="flex flex-col flex-1 min-h-0" class:invisible={mobileMaximized} inert={sessionViewState.filesOpen || mobileMaximized}>
 				<MessageList />
 				<InputArea />
 			</div>
-		{/if}
+			{#if sessionViewState.compact && sessionViewState.filesEverOpened}
+				<div class="absolute inset-0 z-10 flex min-h-0 bg-bg-surface" class:invisible={!sessionViewState.filesOpen} inert={!sessionViewState.filesOpen}>
+					<SidebarFilePanel onClose={() => { sessionViewState.filesOpen = false; }} />
+				</div>
+			{/if}
 
 		<!-- Terminal Panel (resizable bottom panel) -->
 		{#if terminalState.panelOpen}
@@ -710,10 +745,11 @@
 					<div class="w-8 h-0.5 rounded-full bg-border group-hover:bg-accent/50 transition-colors"></div>
 				</div>
 			{/if}
-			<div class={mobileMaximized ? "flex-1 min-h-0 bg-bg-surface" : "shrink-0 min-h-0"} style={mobileMaximized ? "" : `height: ${terminalHeight}px;`}>
+			<div class={mobileMaximized ? "absolute inset-0 z-20 flex min-h-0 bg-bg-surface" : "shrink-0 min-h-0"} style={mobileMaximized ? "" : `height: ${terminalHeight}px;`}>
 				<TerminalPanel onTabBarTouchStart={handleTabBarTouchStart} />
 			</div>
 		{/if}
+		</div>
 
 		<!-- Info Panels (absolute positioned floating panels) -->
 		<InfoPanels />
@@ -740,6 +776,7 @@
 <!-- Global overlays + notification stack (outside layout for proper z-index stacking) -->
 <ImageLightbox />
 <NotificationStack />
+<DeepSearch />
 <QrModal visible={qrVisible} onClose={handleQrClose} />
 <SettingsPanel visible={settingsVisible} initialTab={settingsInitialTab} onClose={() => (settingsVisible = false)} />
 {#if featureFlags.debug}

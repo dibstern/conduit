@@ -27,7 +27,9 @@ import {
 	canonicalEvent,
 	type EventPayloadMap,
 } from "../../../persistence/events.js";
+import { copyForkHistory } from "../../../persistence/fork-history.js";
 import type { SessionRow } from "../../../persistence/read-model-types.js";
+import { forkClaudeTranscript } from "../../../provider/claude/claude-session-fork.js";
 import { OpenCodeAPITag } from "../../provider/Services/opencode-api-service.js";
 import { ConfigTag, LoggerTag } from "./services.js";
 
@@ -39,6 +41,7 @@ export class SessionCommandError extends Data.TaggedError(
 )<{
 	readonly operation: string;
 	readonly cause: unknown;
+	readonly message?: string;
 }> {}
 
 // ─── Commands ───────────────────────────────────────────────────────────────
@@ -515,6 +518,7 @@ export const forkSession = (parentSessionId: string, messageId?: string) =>
 		const projections = yield* Effect.serviceOption(ProjectionRunnerEffectTag);
 		const sql = yield* Effect.serviceOption(SqlClient.SqlClient);
 		if (
+			readOption._tag === "None" ||
 			stateOption._tag === "None" ||
 			eventStore._tag === "None" ||
 			projections._tag === "None" ||
@@ -526,22 +530,16 @@ export const forkSession = (parentSessionId: string, messageId?: string) =>
 			});
 		}
 		const state = stateOption.value;
-		const claudeConfigDir = resolveClaudeInstanceConfigDir(
-			loadDaemonConfig(
-				config._tag === "Some" ? config.value.configDir : undefined,
-			),
-			parent.provider,
-		);
-		if (
-			claudeConfigDir &&
-			claudeConfigDir !== process.env["CLAUDE_CONFIG_DIR"]
-		) {
+		if (config._tag === "None") {
 			return yield* new SessionCommandError({
 				operation: "session.forked.claude",
-				cause:
-					"Claude fork cannot access this instance's transcript store: the SDK fork API has no per-call config directory option",
+				cause: "Claude fork requires project configuration",
 			});
 		}
+		const claudeConfigDir = resolveClaudeInstanceConfigDir(
+			loadDaemonConfig(config.value.configDir),
+			parent.provider,
+		);
 		const commitAndSignal = yield* makeCommitAndSignal.pipe(
 			Effect.provideService(EventStoreEffectTag, eventStore.value),
 			Effect.provideService(ProjectionRunnerEffectTag, projections.value),
@@ -553,67 +551,11 @@ export const forkSession = (parentSessionId: string, messageId?: string) =>
 			return yield* new SessionCommandError({
 				operation: "session.forked.claude",
 				cause: "Claude parent has no SDK resume session",
+				message: `Session ${parentSessionId} has no Claude transcript yet`,
 			});
 		}
-		const sdk = yield* Effect.tryPromise(
-			() => import("@anthropic-ai/claude-agent-sdk"),
-		);
-		const directory =
-			config._tag === "Some" ? { dir: config.value.projectDir } : {};
-		const messages = yield* Effect.tryPromise(() =>
-			sdk.getSessionMessages(providerSessionId, directory),
-		);
-		const boundary =
-			messageId === undefined
-				? messages.at(-1)
-				: messages.find((message) => {
-						const body = message.message;
-						return (
-							message.uuid === messageId ||
-							(typeof body === "object" &&
-								body !== null &&
-								"id" in body &&
-								body.id === messageId)
-						);
-					});
-		if (!boundary) {
-			return yield* new SessionCommandError({
-				operation: "session.forked.claude",
-				cause: "Claude fork point cannot be resolved to an SDK transcript UUID",
-			});
-		}
-		if (messageId !== undefined && messageId !== boundary.uuid) {
-			const next = messages[messages.indexOf(boundary) + 1];
-			const nextBody = next?.message;
-			const continuesThroughTool =
-				typeof nextBody === "object" &&
-				nextBody !== null &&
-				"content" in nextBody &&
-				Array.isArray(nextBody.content) &&
-				nextBody.content.some(
-					(part: unknown) =>
-						typeof part === "object" &&
-						part !== null &&
-						"type" in part &&
-						part.type === "tool_result",
-				);
-			if (next?.type === "assistant" || continuesThroughTool) {
-				return yield* new SessionCommandError({
-					operation: "session.forked.claude",
-					cause:
-						"Claude UI message spans SDK rounds; its fork boundary is ambiguous. Fork at the conversation tip instead.",
-				});
-			}
-		}
-		// At tip, keep the SDK's exact parent boundary. The final API message
-		// id may belong to a round coalesced into a different UI message.
-		const forkPointEvent = messageId ?? boundary.uuid;
-		// SDK transcript UUIDs and coalesced UI message IDs are distinct at tip.
-		// Capture the UI ordering pair before the upstream fork can accept work.
 		const parentMessages =
-			readOption._tag === "Some"
-				? yield* readOption.value.getSessionMessagesWithParts(parentSessionId)
-				: [];
+			yield* readOption.value.getSessionMessagesWithParts(parentSessionId);
 		const forkPointMessage =
 			messageId === undefined
 				? parentMessages.at(-1)
@@ -622,28 +564,59 @@ export const forkSession = (parentSessionId: string, messageId?: string) =>
 			return yield* new SessionCommandError({
 				operation: "session.forked.claude",
 				cause: "Claude fork boundary has no persisted message ordering key",
+				message: `Fork point ${messageId} was not found in the session history`,
 			});
 		}
-		const forked = yield* Effect.tryPromise(() =>
-			sdk.forkSession(providerSessionId, {
-				...directory,
-				upToMessageId: boundary.uuid,
-			}),
-		);
 		const title = `${parent.title} (fork)`;
+		const parentEvents =
+			yield* eventStore.value.readAllBySession(parentSessionId);
+		if (
+			messageId !== undefined &&
+			!copyForkHistory(parentEvents, {
+				newSessionId: parentSessionId,
+				upToMessageId: messageId,
+			})
+		) {
+			return yield* new SessionCommandError({
+				operation: "session.forked.point",
+				cause: `Fork point ${messageId} was not found in the session history`,
+				message: `Fork point ${messageId} was not found in the session history`,
+			});
+		}
+		const forked = yield* Effect.tryPromise({
+			try: () =>
+				forkClaudeTranscript({
+					parentSdkId: providerSessionId,
+					projectDir: config.value.projectDir,
+					...(claudeConfigDir !== undefined && { configDir: claudeConfigDir }),
+					title,
+					...(messageId !== undefined && { messageId }),
+				}),
+			catch: (cause) =>
+				new SessionCommandError({
+					operation: "session.forked.upstream",
+					cause,
+					message: cause instanceof Error ? cause.message : String(cause),
+				}),
+		});
+		const history = copyForkHistory(parentEvents, {
+			newSessionId: forked.sdkSessionId,
+			...(messageId !== undefined && { upToMessageId: messageId }),
+		});
+		const forkPointEvent = messageId ?? forkPointMessage.id;
 		// Creation and the SDK resume cursor must commit before the first row
 		// is announced, or a prompt could start a fresh Claude conversation.
 		yield* commitAndSignal.write((project) =>
 			Effect.gen(function* () {
-				const stored = yield* eventStore.value.append(
+				const stored = yield* eventStore.value.appendBatch([
 					canonicalEvent(
 						"session.created",
-						forked.sessionId,
+						forked.sdkSessionId,
 						{
-							sessionId: forked.sessionId,
+							sessionId: forked.sdkSessionId,
 							title,
 							provider: parent.provider,
-							providerSessionId: forked.sessionId,
+							providerSessionId: forked.sdkSessionId,
 							parentId: parentSessionId,
 							forkPointEvent,
 							forkPointTimestamp: forkPointMessage.created_at,
@@ -655,19 +628,21 @@ export const forkSession = (parentSessionId: string, messageId?: string) =>
 							metadata: { source: "relay" },
 						},
 					),
-				);
-				yield* project([stored]);
-				yield* state.saveUpdates(forked.sessionId, [
-					{ key: "resumeSessionId", value: forked.sessionId },
+					...(history?.events ?? []),
+				]);
+				yield* project(stored);
+				yield* state.saveUpdates(forked.sdkSessionId, [
+					{ key: "resumeSessionId", value: forked.sdkSessionId },
 				]);
 			}),
 		);
 		const now = Date.now();
 		return {
-			id: forked.sessionId,
+			id: forked.sdkSessionId,
 			title,
 			time: { created: now, updated: now },
 			provider: "claude" as const,
 			forkMessageId: forkPointEvent,
+			forkPointTimestamp: forkPointMessage.created_at,
 		};
 	});

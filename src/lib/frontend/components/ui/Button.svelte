@@ -57,6 +57,9 @@
 	// nine controls dissented on how far a dead button should dim, and none of
 	// them could win against a BASE utility. It is now `disabledStyle` — see
 	// DISABLED_CLASSES in button-recipes.ts (conduit-test-8lxm).
+	const TOUCH_TARGET_CLASSES =
+		"relative before:absolute before:content-[''] before:left-1/2 before:top-1/2 before:-translate-x-1/2 before:-translate-y-1/2 before:size-full before:min-h-[44px] before:min-w-[44px] md:before:hidden";
+
 	const BASE_CLASSES =
 		"no-underline cursor-pointer transition-colors " +
 		// Neutral, not accent. An accent ring against an accent-filled button
@@ -223,6 +226,14 @@
 		 * tax every call site to serve none of them.
 		 */
 		element?: HTMLButtonElement | HTMLAnchorElement | undefined;
+		/**
+		 * Paint at the designed size, take the tap at 44px on phones: a
+		 * transparent ::before, centred, at least 44x44 below `md`. Growing the
+		 * control itself turns a rounded-full pill into a tall empty lozenge
+		 * (conduit-test-lciu). Literal px because the root font-size is 12px.
+		 * Adds `relative`, so not for a control that is itself positioned.
+		 */
+		touchTarget?: boolean;
 		class?: string;
 	} & Omit<
 		HTMLButtonAttributes,
@@ -287,6 +298,7 @@
 		ariaLabel,
 		onclick,
 		element = $bindable(),
+		touchTarget = false,
 		class: className,
 		children,
 		...rest
@@ -360,6 +372,7 @@
 			layout === "flow" ? "" : ALIGN_CLASSES[align],
 			variantClass,
 			sizeClasses,
+			touchTarget ? TOUCH_TARGET_CLASSES : "",
 			className,
 		]
 			.filter(Boolean)

@@ -142,22 +142,26 @@ export const closeAllClients = (code = 1001, reason = "Server shutting down") =>
 
 /**
  * Remove a client connection and clean up all per-client state.
- * Returns the session the client was viewing (Option), plus new client count.
+ * When provided, the connection must match the current registration.
+ * Returns whether removal occurred, the session, and the new client count.
  */
-export const removeClient = (clientId: string) =>
+export const removeClient = (clientId: string, expectedWs?: WsConn) =>
 	Effect.gen(function* () {
 		const ref = yield* WsHandlerStateTag;
 		const result = yield* Ref.modify(ref, (map) => {
 			const entry = HashMap.get(map, clientId);
-			const sessionId = Option.isSome(entry)
-				? entry.value.sessionId
-				: undefined;
+			const removed =
+				Option.isSome(entry) &&
+				(expectedWs === undefined || entry.value.ws === expectedWs);
+			const sessionId =
+				removed && Option.isSome(entry) ? entry.value.sessionId : undefined;
 			return [
 				{
+					removed,
 					sessionId,
-					newCount: HashMap.size(map) - (Option.isSome(entry) ? 1 : 0),
+					newCount: HashMap.size(map) - (removed ? 1 : 0),
 				},
-				HashMap.remove(map, clientId),
+				removed ? HashMap.remove(map, clientId) : map,
 			] as const;
 		});
 		return result;

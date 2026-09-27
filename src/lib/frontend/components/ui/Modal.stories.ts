@@ -11,6 +11,7 @@ const meta = {
 		ariaLabel: { control: "text" },
 		description: { control: "text" },
 		size: { control: "select", options: ["sm", "md", "lg"] },
+		placement: { control: "select", options: ["center", "sheet"] },
 		dismissible: { control: "boolean" },
 		showClose: { control: "boolean" },
 		withFooter: { control: "boolean" },
@@ -77,6 +78,11 @@ export const Small: Story = {
 
 export const Large: Story = {
 	args: { initiallyOpen: true, size: "lg" },
+};
+
+export const BottomSheet: Story = {
+	args: { initiallyOpen: true, placement: "sheet", showClose: false },
+	parameters: { viewport: { defaultViewport: "mobile1" } },
 };
 
 export const Headerless: Story = {

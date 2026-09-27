@@ -103,10 +103,7 @@ import {
 } from "./claude-translation-service.js";
 import { makeEffectPromptQueue } from "./effect-prompt-queue.js";
 import { serializePriorConversation } from "./history-transcript.js";
-import {
-	requiresDangerousSkip,
-	toSdkPermissionMode,
-} from "./permission-mode-map.js";
+import { toSdkPermissionMode } from "./permission-mode-map.js";
 import { captureClaudeSdkMessage } from "./sdk-trace-capture.js";
 import type {
 	ClaudeSessionContext,
@@ -605,7 +602,14 @@ export class ClaudeProviderRuntime {
 			...state,
 			sessions: HashMap.remove(state.sessions, sessionId),
 			endedStreams: HashSet.remove(state.endedStreams, sessionId),
-		}));
+		})).pipe(
+			// The removed query's background tasks can never report back.
+			Effect.andThen(
+				Effect.sync(() =>
+					this.deps.onBackgroundTask?.({ sessionId, kind: "session-ended" }),
+				),
+			),
+		);
 	}
 
 	private getSetupLock(
@@ -709,7 +713,7 @@ export class ClaudeProviderRuntime {
 				supportsPermissions: true,
 				supportsQuestions: true,
 				supportsAttachments: true,
-				supportsFork: false,
+				supportsFork: true,
 				supportsRevert: false,
 				commands,
 				agents: probe.agents,
@@ -951,15 +955,13 @@ export class ClaudeProviderRuntime {
 							settingSources: ["user", "project", "local"],
 							canUseTool: bridge.createCanUseTool(ctx),
 							model: apiModelId,
+							// The SDK refuses bypassPermissions, at launch or via a later
+							// setPermissionMode, unless the query opted in here. Opting in
+							// only permits the mode; it does not enable it. Always opt in
+							// so "Full access" can be chosen mid-session.
+							allowDangerouslySkipPermissions: true,
 							...(input.permissionMode
-								? {
-										permissionMode: toSdkPermissionMode(input.permissionMode),
-										// The SDK rejects bypassPermissions unless the
-										// caller opts in explicitly.
-										...(requiresDangerousSkip(input.permissionMode)
-											? { allowDangerouslySkipPermissions: true }
-											: {}),
-									}
+								? { permissionMode: toSdkPermissionMode(input.permissionMode) }
 								: {}),
 							...(resumeSessionId ? { resume: resumeSessionId } : {}),
 							...(input.agent ? { agent: input.agent } : {}),
@@ -1474,7 +1476,23 @@ export class ClaudeProviderRuntime {
 					);
 				}
 			}
-		});
+		}).pipe(
+			// Once this stream ends, its background tasks can never report
+			// completion, even after an interrupt: the next turn starts a new
+			// query. A newer query that already replaced this one went through
+			// removeSession, which cleared it; don't wipe the newer query's tasks.
+			Effect.ensuring(
+				Effect.gen(this, function* () {
+					const current = yield* this.getSession(ctx.sessionId);
+					if (current === undefined || current === ctx) {
+						this.deps.onBackgroundTask?.({
+							sessionId: ctx.sessionId,
+							kind: "session-ended",
+						});
+					}
+				}),
+			),
+		);
 	}
 
 	private detachSubagentFinalizationContext(
@@ -2146,10 +2164,13 @@ export class ClaudeProviderRuntime {
 
 			log.info(`Interrupting turn for session ${sessionId}`);
 			yield* this.cleanupSessionEffect(ctx, "Turn interrupted");
-			yield* this.rejectQueuedTurnDeferredsEffect(
-				ctx.sessionId,
-				"Turn interrupted",
-			);
+			yield* this.settleQueuedTurnDeferredsEffect(ctx.sessionId, {
+				status: "interrupted",
+				cost: 0,
+				tokens: { input: 0, output: 0 },
+				durationMs: 0,
+				providerStateUpdates: [],
+			});
 		});
 	}
 
@@ -2305,7 +2326,7 @@ export class ClaudeProviderRuntime {
 		return Effect.gen(this, function* () {
 			yield* this.cleanupSessionEffect(ctx, reason);
 
-			yield* this.rejectQueuedTurnDeferredsEffect(ctx.sessionId, reason);
+			yield* this.settleQueuedTurnDeferredsEffect(ctx.sessionId, reason);
 
 			// Terminal close of the SDK query (vs interrupt(), which is resumable).
 			yield* Effect.try({
@@ -2318,16 +2339,20 @@ export class ClaudeProviderRuntime {
 		});
 	}
 
-	private rejectQueuedTurnDeferredsEffect(
+	private settleQueuedTurnDeferredsEffect(
 		sessionId: string,
-		reason: string,
+		outcome: string | TurnResult,
 	): Effect.Effect<void, never> {
 		return Effect.gen(this, function* () {
 			const state = yield* this.getState();
 			const queue = getOrUndefined(HashMap.get(state.turnWaiters, sessionId));
 			if (!queue) return;
 			for (const d of queue) {
-				yield* Deferred.fail(d, new Error(reason)).pipe(Effect.ignore);
+				yield* (
+					typeof outcome === "string"
+						? Deferred.fail(d, new Error(outcome))
+						: Deferred.succeed(d, outcome)
+				).pipe(Effect.ignore);
 			}
 			yield* this.clearTurnDeferreds(sessionId);
 		});

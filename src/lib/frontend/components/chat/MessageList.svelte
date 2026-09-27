@@ -242,8 +242,13 @@
 
 </script>
 
+<!-- Focusable so keyboard users can scroll it and `u` can target the open session. -->
+<!-- svelte-ignore a11y_no_noninteractive_tabindex -->
 <div
 	id="messages"
+	role="region"
+	aria-label="Transcript"
+	tabindex="0"
 	class="flex-1 overflow-y-auto pt-5 pb-3 relative"
 	style="-webkit-overflow-scrolling: touch;"
 	bind:this={messagesEl}

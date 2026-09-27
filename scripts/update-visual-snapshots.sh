@@ -114,6 +114,8 @@ clean_stale() {
     # Strip the trailing -<project>-<platform> suffix to get the story ID
     local story_id
     story_id=$(echo "$basename" | sed -E 's/-(desktop|mobile)-(darwin|linux)$//')
+    # Light captures use the same Storybook ID as their dark counterparts.
+    story_id=${story_id%-light}
     if ! echo "$valid_ids" | grep -qxF "$story_id"; then
       rm "$snap"
       removed=$((removed + 1))

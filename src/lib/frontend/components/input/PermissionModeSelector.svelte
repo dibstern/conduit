@@ -54,17 +54,18 @@
 		if (projectSlug && sessionId) {
 			discoveryState.pendingPermissionMode = null;
 			void switchPermissionModeRpc({ projectSlug, sessionId, mode }).catch(
-				() => {
+				(error: unknown) => {
 					undoMode();
 					// Without this the pill silently snaps back, which reads as a
-					// frontend bug instead of what it is: the server rejected the
-					// mode (typically a stale daemon that predates it).
+					// frontend bug. Show the server's reason rather than guessing:
+					// a stale daemon already gets its own banner (ws-dispatch).
 					const label =
 						PERMISSION_MODES.find((m) => m.mode === mode)?.label ?? mode;
-					showToast(
-						`Couldn't switch approval mode to "${label}" — the daemon rejected it. It may be running an older version.`,
-						{ variant: "warn" },
-					);
+					const reason =
+						error instanceof Error ? error.message : "the daemon rejected it.";
+					showToast(`Couldn't switch approval mode to "${label}": ${reason}`, {
+						variant: "warn",
+					});
 				},
 			);
 		} else {

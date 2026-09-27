@@ -66,8 +66,25 @@ async function lift(row: Locator) {
 	});
 }
 
-// The held action fills the strip behind the row; only its uncovered edge is
-// under the thumb.
+async function longPress(row: Locator) {
+	await row.evaluate(async (element) => {
+		const box = element.getBoundingClientRect();
+		const init = {
+			pointerType: "touch",
+			pointerId: 9,
+			isPrimary: true,
+			bubbles: true,
+			clientX: box.left + box.width / 2,
+			clientY: box.top + box.height / 2,
+		};
+		element.dispatchEvent(new PointerEvent("pointerdown", init));
+		await new Promise((resolve) => setTimeout(resolve, 700));
+		element.dispatchEvent(new PointerEvent("pointerup", init));
+		(element as HTMLElement).click();
+	});
+}
+
+// Tap the part of a held action exposed by the translated row.
 async function tapExposed(action: Locator, edge: "left" | "right") {
 	const box = await action.boundingBox();
 	if (!box) throw new Error("swipe action is not rendered");
@@ -103,15 +120,33 @@ test("desktop: hover and Tab reach the row's verbs, and the menu returns focus",
 	await expect(row.locator(".session-item-meta")).toBeHidden();
 	await expect(row.getByTestId("session-act-snooze")).toBeVisible();
 	await expect(row.getByTestId("session-act-pin")).toBeVisible();
+	// ● leads the strip and teaches u; on an unread row it flips to ○, Mark read.
+	const markUnread = row.getByTestId("session-act-mark-unread");
+	await expect(markUnread).toHaveAttribute("title", "Mark unread (u)");
+	await markUnread.click();
+	await expect(row.getByTestId("session-unread-dot")).toBeVisible();
+	await expect(
+		page.getByRole("status").filter({ hasText: "Marked unread" }),
+	).toHaveCount(1);
+	await expect(row.getByTestId("session-act-mark-read")).toHaveAttribute(
+		"title",
+		"Mark read (u)",
+	);
+	await page.getByTestId("toast-action").last().click();
+	await expect(row.getByTestId("session-unread-dot")).toHaveCount(0);
+	await row.hover();
+	await expect(markUnread).toBeVisible();
 	await row.getByTestId("session-act-settle").click();
 	await expect(row).toHaveCount(0);
 	await expect(settled).toHaveCount(1);
-	await page.getByTestId("toast-action").click();
+	await page.getByTestId("toast-action").last().click();
 	await expect(row).toBeVisible();
 
-	// Keyboard: the settle twin is the first stop after the row link.
+	// Keyboard: ● then the settle twin are the first stops after the row link.
 	await page.mouse.move(0, 0);
 	await row.focus();
+	await page.keyboard.press("Tab");
+	await expect(markUnread).toBeFocused();
 	await page.keyboard.press("Tab");
 	await expect(row.getByTestId("session-act-settle")).toBeFocused();
 	await page.keyboard.press("Enter");
@@ -132,6 +167,9 @@ test("desktop: hover and Tab reach the row's verbs, and the menu returns focus",
 	await page.keyboard.press("Escape");
 	await expect(page.getByTestId("session-ctx-menu")).toHaveCount(0);
 	await expect(more).toBeFocused();
+	await row.click({ button: "right" });
+	await expect(page.getByTestId("session-ctx-menu")).toBeVisible();
+	await expect(page.getByTestId("session-action-sheet")).toHaveCount(0);
 });
 
 test("desktop: a settled row un-settles from the shelf by menu and by hover", async ({
@@ -189,6 +227,12 @@ test.describe("phone", () => {
 		await drag(row, [0.3, 0.7]);
 		await page.getByTestId("settled-shelf-toggle").tap();
 		await expect(shelfRow).toBeVisible();
+		await drag(shelfRow, [0.4]);
+		await expect(action).toHaveAttribute("data-stage", "reveal");
+		await expect(action).toHaveAccessibleName(/Un-settle/);
+		await expect(page.getByTestId("session-swipe-mark-unread")).toHaveCount(0);
+		await shelfRow.tap();
+		await expect(action).toHaveCount(0);
 
 		await drag(shelfRow, [0.3, 0.7], false);
 		await expect(action).toContainText("Release to un-settle");
@@ -197,7 +241,7 @@ test.describe("phone", () => {
 		await expect(row).toBeVisible();
 	});
 
-	test("phone: swipe settles and snoozes, holds on a short swipe, and long press opens the menu", async ({
+	test("phone: swipe settles and snoozes, holds on a short swipe, and long press opens the sheet", async ({
 		page,
 		relayUrl,
 	}) => {
@@ -234,24 +278,24 @@ test.describe("phone", () => {
 		await expect(action).toHaveCount(0);
 		await expect(page).toHaveURL(onList);
 
-		// A short swipe is a look: it holds with the action under the thumb, and a
+		// A short swipe is a look: it holds the tray under the thumb, and a
 		// tap on the row closes it without opening the session.
 		await drag(row, [0.4]);
-		await expect(action).toHaveAttribute("data-stage", "reveal");
-		await expect(
-			page.getByRole("button", { name: `Settle ${title}` }),
-		).toBeVisible();
+		const settleButton = page.getByTestId("session-swipe-settle");
+		const unreadButton = page.getByTestId("session-swipe-mark-unread");
+		await expect(settleButton).toHaveAttribute("data-stage", "reveal");
+		await expect(settleButton).toBeVisible();
+		await expect(settleButton).toHaveAccessibleName(`Settle ${title}`);
+		await expect(unreadButton).toHaveAccessibleName(`Mark unread ${title}`);
+		await expect(row).toHaveCSS("transform", "matrix(1, 0, 0, 1, 148, 0)");
 		await expect(row).toBeVisible();
 		await row.tap();
-		await expect(action).toHaveCount(0);
+		await expect(settleButton).toHaveCount(0);
 		await expect(page).toHaveURL(onList);
 
-		// Tapping the held action runs it.
+		// Tapping Settle in the held tray runs it.
 		await drag(row, [0.4]);
-		await tapExposed(
-			page.getByRole("button", { name: `Settle ${title}` }),
-			"left",
-		);
+		await settleButton.tap();
 		await expect(row).toHaveCount(0);
 		await page.getByTestId("toast-action").last().click();
 		await expect(row).toBeVisible();
@@ -273,30 +317,122 @@ test.describe("phone", () => {
 		await page.keyboard.press("Escape");
 		await expect(page.getByTestId("snooze-option-1h")).toHaveCount(0);
 
-		// Long press opens the row's menu with the whole title, and does not navigate.
-		await row.evaluate(async (element) => {
-			const box = element.getBoundingClientRect();
-			const init = {
-				pointerType: "touch",
-				pointerId: 9,
-				isPrimary: true,
-				bubbles: true,
-				clientX: box.left + box.width / 2,
-				clientY: box.top + box.height / 2,
-			};
-			element.dispatchEvent(new PointerEvent("pointerdown", init));
-			await new Promise((resolve) => setTimeout(resolve, 700));
-			element.dispatchEvent(new PointerEvent("pointerup", init));
-			(element as HTMLElement).click();
-		});
-		await expect(page.getByTestId("session-ctx-header")).toContainText(title);
-		await expect(page.getByTestId("session-ctx-menu")).toHaveCount(1);
+		// Long press opens the bottom sheet and does not navigate.
+		await longPress(row);
+		await expect(page.getByTestId("session-sheet-header")).toContainText(title);
+		await expect(page.getByTestId("session-action-sheet")).toBeVisible();
 		await expect(page).toHaveURL(onList);
 		await page.keyboard.press("Escape");
-		await expect(page.getByTestId("session-ctx-menu")).toHaveCount(0);
+		await expect(page.getByTestId("session-action-sheet")).toHaveCount(0);
 
 		// A plain tap still opens the session.
 		await row.tap();
 		await expect(page).not.toHaveURL(onList);
+	});
+
+	test("phone: long press docks the action sheet, pins, and dismisses on scrim", async ({
+		page,
+		relayUrl,
+	}) => {
+		const { row, title } = await setUp(page, relayUrl);
+		await page.setViewportSize({ width: 393, height: 852 });
+		await page.goto(new URL("/", page.url()).toString());
+		await expect(row).toBeVisible();
+		const project = (
+			await row.locator(".session-item-context span:last-child").innerText()
+		)
+			.split("·")[0]
+			?.trim();
+
+		await longPress(row);
+		const sheet = page.getByTestId("session-action-sheet");
+		await expect(sheet).toBeVisible();
+		await expect(page.getByTestId("session-ctx-menu")).toHaveCount(0);
+		const panel = page.getByTestId("modal-sheet-panel");
+		const box = await panel.boundingBox();
+		expect(box).not.toBeNull();
+		expect(box?.x).toBe(0);
+		expect(box?.width).toBe(393);
+		expect((box?.y ?? 0) + (box?.height ?? 0)).toBe(852);
+		await expect(page.getByTestId("session-sheet-header")).toContainText(title);
+		if (project)
+			await expect(page.getByTestId("session-sheet-header")).toContainText(
+				project,
+			);
+		const firstFive = await sheet
+			.locator('[data-testid^="session-ctx-"]')
+			.evaluateAll((items) =>
+				items.slice(0, 5).map((item) => item.getAttribute("data-testid")),
+			);
+		expect(firstFive).toEqual([
+			"session-ctx-settle",
+			"session-ctx-auto-settle",
+			"session-ctx-snooze",
+			"session-ctx-pin",
+			"session-ctx-mark-unread",
+		]);
+		await page.getByTestId("session-ctx-pin").click();
+		await expect(sheet).toHaveCount(0);
+		await expect(row.getByTitle("Pinned session")).toBeVisible();
+
+		await longPress(row);
+		await expect(sheet).toBeVisible();
+		await page
+			.getByTestId("modal-sheet-scrim")
+			.click({ position: { x: 10, y: 10 } });
+		await expect(sheet).toHaveCount(0);
+		await expect(row.getByTitle("Pinned session")).toBeVisible();
+		await expect(row).toBeFocused();
+	});
+
+	test("phone: the right tray marks unread and then offers Read", async ({
+		page,
+		relayUrl,
+	}) => {
+		const { row, title } = await setUp(page, relayUrl);
+		await page.setViewportSize({ width: 375, height: 740 });
+		await page.goto(new URL("/", page.url()).toString());
+		await expect(row).toBeVisible();
+
+		await drag(row, [0.4]);
+		await page.getByTestId("session-swipe-mark-unread").tap();
+		await expect(row.getByTestId("session-unread-dot")).toBeVisible();
+		await expect(page.getByTestId("session-swipe-mark-unread")).toHaveCount(0);
+		await expect(
+			page.getByRole("status").filter({ hasText: "Marked unread" }),
+		).toHaveCount(1);
+		await expect(page.getByTestId("toast-action")).toBeVisible();
+
+		await drag(row, [0.4]);
+		const readButton = page.getByTestId("session-swipe-mark-read");
+		await expect(readButton).toHaveAccessibleName(`Mark read ${title}`);
+		await expect(readButton).toBeVisible();
+		await readButton.tap();
+		await expect(row.getByTestId("session-unread-dot")).toHaveCount(0);
+	});
+
+	test("phone: a row that cannot settle holds only Unread after a full swipe", async ({
+		page,
+		relayUrl,
+	}) => {
+		const { row } = await setUp(page, relayUrl);
+		await row.click({ button: "right" });
+		await page.getByTestId("session-ctx-pin").click();
+		await expect(
+			page.getByRole("status").filter({ hasText: "Pinned" }),
+		).toBeVisible();
+		await page.setViewportSize({ width: 375, height: 740 });
+		await page.goto(new URL("/", page.url()).toString());
+		await expect(row).toBeVisible();
+		await row.click({ button: "right" });
+		await expect(page.getByTestId("session-ctx-unpin")).toBeVisible();
+		await page.keyboard.press("Escape");
+
+		await drag(row, [0.3, 0.7]);
+		await expect(row).toHaveCSS("transform", "matrix(1, 0, 0, 1, 74, 0)");
+		await expect(page.getByTestId("session-swipe-settle")).toHaveCount(0);
+		await expect(page.getByTestId("session-swipe-action")).toHaveCount(0);
+		await expect(page.getByTestId("session-swipe-mark-unread")).toBeVisible();
+		await expect(row).toBeVisible();
 	});
 });

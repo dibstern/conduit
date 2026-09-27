@@ -1,3 +1,7 @@
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import type { SessionMessage } from "@anthropic-ai/claude-agent-sdk";
 import { RpcTest } from "@effect/rpc";
 import { SqlClient } from "@effect/sql";
 import { describe, it } from "@effect/vitest";
@@ -5,15 +9,26 @@ import { Effect, Layer } from "effect";
 import { expect, vi } from "vitest";
 import { ProviderInstanceIdSchema } from "../../../src/lib/contracts/provider-instance.js";
 import { WsRpcGroup } from "../../../src/lib/contracts/ws-rpc.js";
+import { defaultDaemonConfig } from "../../../src/lib/daemon/config-persistence.js";
 import { PendingInteractionServiceTag } from "../../../src/lib/domain/relay/Services/pending-interaction-service.js";
+import { applySessionCommand } from "../../../src/lib/domain/relay/Services/session-command.js";
 import type { SessionManagerService } from "../../../src/lib/domain/relay/Services/session-manager-service.js";
 import type { SessionDetail } from "../../../src/lib/instance/sdk-types.js";
+import { ClaudeEventPersistEffectTag } from "../../../src/lib/persistence/effect/claude-event-persist-effect.js";
+import {
+	EventStoreEffectTag,
+	EventStoreError,
+} from "../../../src/lib/persistence/effect/event-store-effect.js";
 import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
 import { ProjectionRunnerEffectTag } from "../../../src/lib/persistence/effect/projection-runner-effect.js";
+import { ProviderStateEffectTag } from "../../../src/lib/persistence/effect/provider-state-effect.js";
 import { ReadQueryEffectTag } from "../../../src/lib/persistence/effect/read-query-effect.js";
+import { canonicalEvent } from "../../../src/lib/persistence/events.js";
+import { defaultClaudeSessionForkSdk } from "../../../src/lib/provider/claude/claude-session-fork.js";
 import { WsRpcServerLayer } from "../../../src/lib/server/ws-rpc.js";
 import type { PermissionId } from "../../../src/lib/shared-types.js";
 import {
+	makeMockConfig,
 	makeMockOpenCodeAPI,
 	makeMockSessionManagerService,
 	makeMockWebSocketHandler,
@@ -341,6 +356,364 @@ describe("WsRpcServerLayer ListSessions", () => {
 			),
 		);
 	});
+
+	it.effect(
+		"forks a Claude transcript and binds its copied history to a new session",
+		() => {
+			const dir = mkdtempSync(join(tmpdir(), "conduit-claude-fork-rpc-"));
+			writeFileSync(
+				join(dir, "daemon.json"),
+				JSON.stringify({
+					...defaultDaemonConfig(),
+					instances: [
+						{
+							id: "my-claude",
+							name: "Claude",
+							port: 0,
+							managed: false,
+							driver: "claude",
+							configDir: "/instance-config",
+						},
+					],
+				}),
+			);
+			const api = makeMockOpenCodeAPI();
+			const wsHandler = makeMockWebSocketHandler();
+			const setForkEntry = vi.fn(() => Effect.void);
+			const sessionManagerService = makeMockSessionManagerService({
+				setForkEntry,
+				listSessions: vi.fn(() =>
+					Effect.succeed([
+						{ id: "ses-parent", title: "Parent", status: "idle" as const },
+					]),
+				),
+			});
+			const transcript = (
+				uuid: string,
+				type: SessionMessage["type"],
+				message: unknown,
+			): SessionMessage => ({
+				uuid,
+				type,
+				message,
+				session_id: "sdk-parent",
+				parent_tool_use_id: null,
+				parent_agent_id: null,
+			});
+			const parentMessages = [
+				transcript("parent-prompt", "user", { content: "Question" }),
+				transcript("parent-thinking", "assistant", {
+					id: "api-first",
+					content: [{ type: "thinking", thinking: "Think" }],
+				}),
+				transcript("parent-final", "assistant", {
+					id: "api-second",
+					content: [{ type: "text", text: "Answer" }],
+				}),
+			];
+			const readTranscript = vi
+				.spyOn(defaultClaudeSessionForkSdk, "readTranscript")
+				.mockResolvedValue(parentMessages);
+			const forkSession = vi
+				.spyOn(defaultClaudeSessionForkSdk, "forkSession")
+				.mockResolvedValueOnce({ sessionId: "sdk-fork" })
+				.mockResolvedValueOnce({ sessionId: "sdk-rollback" });
+			const layer = WsRpcServerLayer.pipe(
+				Layer.provideMerge(
+					Layer.mergeAll(
+						makeTestHandlerLayer({
+							api,
+							wsHandler,
+							sessionManagerService,
+							config: makeMockConfig({
+								configDir: dir,
+								projectDir: "/project",
+							}),
+						}),
+						makePersistenceEffectLayer(join(dir, "events.db")),
+					),
+				),
+			);
+
+			return Effect.gen(function* () {
+				yield* applySessionCommand({
+					type: "session.created",
+					data: {
+						sessionId: "ses-parent",
+						title: "Parent",
+						provider: "my-claude",
+						providerSessionId: "sdk-parent",
+					},
+				});
+				const providerState = yield* ProviderStateEffectTag;
+				yield* providerState.saveUpdates("ses-parent", [
+					{ key: "resumeSessionId", value: "sdk-parent" },
+				]);
+				const persist = yield* ClaudeEventPersistEffectTag;
+				const timestamp = Date.now() - 1000;
+				yield* persist.persistEvents([
+					canonicalEvent(
+						"message.created",
+						"ses-parent",
+						{
+							sessionId: "ses-parent",
+							messageId: "parent-prompt",
+							role: "user",
+						},
+						{ provider: "claude", createdAt: timestamp },
+					),
+					canonicalEvent(
+						"text.delta",
+						"ses-parent",
+						{
+							messageId: "parent-prompt",
+							partId: "prompt-text",
+							text: "Question",
+						},
+						{ provider: "claude", createdAt: timestamp + 1 },
+					),
+					canonicalEvent(
+						"message.created",
+						"ses-parent",
+						{
+							sessionId: "ses-parent",
+							messageId: "api-first",
+							role: "assistant",
+						},
+						{ provider: "claude", createdAt: timestamp + 2 },
+					),
+					canonicalEvent(
+						"thinking.start",
+						"ses-parent",
+						{ messageId: "api-first", partId: "thinking-part" },
+						{ provider: "claude", createdAt: timestamp + 3 },
+					),
+					canonicalEvent(
+						"thinking.delta",
+						"ses-parent",
+						{ messageId: "api-first", partId: "thinking-part", text: "Think" },
+						{ provider: "claude", createdAt: timestamp + 4 },
+					),
+					canonicalEvent(
+						"thinking.end",
+						"ses-parent",
+						{ messageId: "api-first", partId: "thinking-part" },
+						{ provider: "claude", createdAt: timestamp + 5 },
+					),
+					canonicalEvent(
+						"tool.started",
+						"ses-parent",
+						{
+							messageId: "api-first",
+							partId: "tool-part",
+							callId: "tool-call",
+							toolName: "Read",
+							input: { tool: "Read", filePath: "/file" },
+						},
+						{ provider: "claude", createdAt: timestamp + 6 },
+					),
+					canonicalEvent(
+						"tool.completed",
+						"ses-parent",
+						{
+							messageId: "api-first",
+							partId: "tool-part",
+							result: "done",
+							duration: 3,
+						},
+						{ provider: "claude", createdAt: timestamp + 7 },
+					),
+					canonicalEvent(
+						"text.delta",
+						"ses-parent",
+						{ messageId: "api-first", partId: "answer-part", text: "Answer" },
+						{ provider: "claude", createdAt: timestamp + 8 },
+					),
+					canonicalEvent(
+						"turn.completed",
+						"ses-parent",
+						{ messageId: "api-first" },
+						{ provider: "claude", createdAt: timestamp + 9 },
+					),
+					canonicalEvent(
+						"message.created",
+						"ses-parent",
+						{ sessionId: "ses-parent", messageId: "next-prompt", role: "user" },
+						{ provider: "claude", createdAt: timestamp + 10 },
+					),
+					canonicalEvent(
+						"message.created",
+						"ses-parent",
+						{
+							sessionId: "ses-parent",
+							messageId: "api-next",
+							role: "assistant",
+						},
+						{ provider: "claude", createdAt: timestamp + 11 },
+					),
+				]);
+				const client = yield* rpcClient;
+				const result = yield* client.ForkSession({
+					projectSlug: "project-a",
+					sessionId: "ses-parent",
+					messageId: "api-first",
+					originId: "browser-tab-a",
+				});
+				const readQuery = yield* ReadQueryEffectTag;
+				const forkRow = yield* readQuery.getSession(result.sessionId);
+				expect(forkRow).toMatchObject({
+					provider: "my-claude",
+					parent_id: "ses-parent",
+					provider_sid: "sdk-fork",
+					fork_point_event: "api-first",
+					fork_point_message_id: "api-first",
+				});
+				expect(
+					(yield* providerState.getState(result.sessionId))["resumeSessionId"],
+				).toBe("sdk-fork");
+				expect(api.session.fork).not.toHaveBeenCalled();
+				expect(forkSession).toHaveBeenCalledWith("sdk-parent", {
+					dir: "/project",
+					configDir: "/instance-config",
+					title: "Parent (fork)",
+					upToMessageId: "parent-final",
+				});
+				expect(readTranscript).toHaveBeenCalledWith("sdk-parent", {
+					dir: "/project",
+					configDir: "/instance-config",
+				});
+				expect(readTranscript).toHaveBeenCalledTimes(1);
+				const forkNotice = vi
+					.mocked(wsHandler.broadcast)
+					.mock.calls.map(([message]) => message)
+					.find((message) => message.type === "session_forked");
+				expect(forkNotice).toMatchObject({
+					parentId: "ses-parent",
+					sessionId: result.sessionId,
+					session: {
+						forkMessageId: "api-first",
+						forkPointTimestamp: expect.any(Number),
+					},
+				});
+				expect(setForkEntry).not.toHaveBeenCalled();
+				const history = yield* readQuery.getSessionMessagesWithParts(
+					result.sessionId,
+				);
+				const parentHistory =
+					yield* readQuery.getSessionMessagesWithParts("ses-parent");
+				const parentCut = parentHistory.filter((message) =>
+					["parent-prompt", "api-first"].includes(message.id),
+				);
+				const summary = (messages: typeof history) =>
+					messages.map((message) => ({
+						id: message.id,
+						role: message.role,
+						text: message.text,
+						parts: message.parts.map((part) => ({
+							id: part.id,
+							type: part.type,
+							text: part.text,
+							callId: part.call_id,
+							status: part.status,
+						})),
+					}));
+				expect(summary(history)).toEqual(
+					summary(parentCut).map((message) => ({
+						...message,
+						id: `${message.id}_${result.sessionId}`,
+						parts: message.parts.map((part) => ({
+							...part,
+							id: `${part.id}_${result.sessionId}`,
+							callId:
+								part.callId === null
+									? null
+									: `${part.callId}_${result.sessionId}`,
+						})),
+					})),
+				);
+				if (forkNotice?.type === "session_forked") {
+					expect(forkNotice.session.forkPointTimestamp).toBe(
+						parentHistory.find((message) => message.id === "api-first")
+							?.created_at,
+					);
+				}
+				const sql = yield* SqlClient.SqlClient;
+				const sessionCount = () =>
+					sql<{ count: number }>`SELECT COUNT(*) AS count FROM sessions`;
+				const beforeMissingPoint = (yield* sessionCount())[0]?.count;
+				const missingPoint = yield* Effect.either(
+					client.ForkSession({
+						projectSlug: "project-a",
+						sessionId: "ses-parent",
+						messageId: "not-in-history",
+						originId: "browser-tab-a",
+					}),
+				);
+				expect(missingPoint._tag).toBe("Left");
+				if (missingPoint._tag === "Left")
+					expect(String(missingPoint.left)).toContain(
+						"was not found in the session history",
+					);
+				expect((yield* sessionCount())[0]?.count).toBe(beforeMissingPoint);
+				expect(forkSession).toHaveBeenCalledTimes(1);
+
+				const eventStore = yield* EventStoreEffectTag;
+				const failPersist = vi
+					.spyOn(eventStore, "appendBatch")
+					.mockReturnValueOnce(
+						Effect.fail(
+							new EventStoreError({
+								operation: "appendBatch",
+								cause: "disk full",
+							}),
+						),
+					);
+				const rolledBack = yield* Effect.either(
+					client.ForkSession({
+						projectSlug: "project-a",
+						sessionId: "ses-parent",
+						originId: "browser-tab-a",
+					}),
+				);
+				failPersist.mockRestore();
+				expect(rolledBack._tag).toBe("Left");
+				expect(forkSession).toHaveBeenCalledTimes(2);
+				expect((yield* sessionCount())[0]?.count).toBe(beforeMissingPoint);
+
+				yield* applySessionCommand({
+					type: "session.created",
+					data: {
+						sessionId: "ses-no-transcript",
+						title: "New",
+						provider: "my-claude",
+					},
+				});
+				const missing = yield* Effect.either(
+					client.ForkSession({
+						projectSlug: "project-a",
+						sessionId: "ses-no-transcript",
+						originId: "browser-tab-a",
+					}),
+				);
+				expect(missing._tag).toBe("Left");
+				if (missing._tag === "Left")
+					expect(String(missing.left)).toContain(
+						"has no Claude transcript yet",
+					);
+				expect(forkSession).toHaveBeenCalledTimes(2);
+			}).pipe(
+				Effect.scoped,
+				Effect.provide(layer),
+				Effect.ensuring(
+					Effect.sync(() => {
+						readTranscript.mockRestore();
+						forkSession.mockRestore();
+						rmSync(dir, { recursive: true, force: true });
+					}),
+				),
+			);
+		},
+	);
 
 	it.effect("responds to a permission request for the originating tab", () => {
 		const api = makeMockOpenCodeAPI();

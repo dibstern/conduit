@@ -10,6 +10,7 @@ import {
 	type SessionStatusValue,
 } from "../../../persistence/events.js";
 import { OpenCodeAPITag } from "../../provider/Services/opencode-api-service.js";
+import { PendingInteractionServiceTag } from "../Services/pending-interaction-service.js";
 import { RelayStatusSnapshotTag } from "../Services/relay-status-snapshot.js";
 import { ConfigTag, LoggerTag, StatusPollerTag } from "../Services/services.js";
 import { SessionManagerStateTag } from "../Services/session-manager-state.js";
@@ -58,6 +59,9 @@ export const StatusPollerLive: Layer.Layer<
 		const pubsub = yield* PollerPubSubTag;
 		const statusSnapshot = yield* RelayStatusSnapshotTag;
 		const sessionState = yield* Effect.serviceOption(SessionManagerStateTag);
+		const pendingInteractions = yield* Effect.serviceOption(
+			PendingInteractionServiceTag,
+		);
 		const readQueryOption = yield* Effect.serviceOption(ReadQueryEffectTag);
 		const eventStoreOption = yield* Effect.serviceOption(EventStoreEffectTag);
 		const projectionRunnerOption = yield* Effect.serviceOption(
@@ -88,6 +92,22 @@ export const StatusPollerLive: Layer.Layer<
 							Effect.tryPromise(() => api.session.statuses()),
 						getProjectedSessions: (reportedIds) =>
 							readQueryOption.value.getSessionsForReconciliation(reportedIds),
+						getSessionsAwaitingUser: () =>
+							pendingInteractions._tag === "Some"
+								? Effect.all([
+										pendingInteractions.value.listPendingQuestions(),
+										pendingInteractions.value.listPendingPermissions(),
+									]).pipe(
+										Effect.map(
+											([questions, permissions]) =>
+												new Set(
+													[...questions, ...permissions].map(
+														(p) => p.sessionId,
+													),
+												),
+										),
+									)
+								: Effect.succeed(new Set<string>()),
 						injectCorrectiveEvent: (sessionId: string, status: string) =>
 							commitAndSignalOption([
 								canonicalEvent(

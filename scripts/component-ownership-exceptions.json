@@ -18,9 +18,6 @@
 		},
 		"src/lib/frontend/components/permissions/PermissionCard.svelte": {
 			"native-control-bypass": 2
-		},
-		"src/lib/frontend/components/session/SessionItem.svelte": {
-			"native-control-bypass": 1
 		}
 	}
 }

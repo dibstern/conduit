@@ -3,7 +3,10 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import ToolQuestionCard from "../../../src/lib/frontend/components/chat/ToolQuestionCard.svelte";
 import { permissionsState } from "../../../src/lib/frontend/stores/permissions.svelte.js";
 import { sessionState } from "../../../src/lib/frontend/stores/session.svelte.js";
-import { mockQuestionRunning } from "../../../src/lib/frontend/stories/mocks.js";
+import {
+	mockQuestionAnswered,
+	mockQuestionRunning,
+} from "../../../src/lib/frontend/stories/mocks.js";
 import type { AskUserQuestion } from "../../../src/lib/frontend/types.js";
 
 vi.mock("../../../src/lib/frontend/transport/ws-rpc-client.js", () => ({
@@ -49,5 +52,26 @@ describe("ToolQuestionCard content match", () => {
 
 	it("ignores another session's question with identical text", () => {
 		expect(boundToolId("ses-a")).toBe(mockQuestionRunning.id);
+	});
+});
+
+// An interrupted turn completes the question tool with no result.
+const { result: _answer, ...interruptedQuestion } = mockQuestionAnswered;
+
+describe("ToolQuestionCard outcome", () => {
+	afterEach(cleanup);
+
+	it.each([
+		{ message: mockQuestionAnswered, label: "Answered ✓" },
+		{ message: interruptedQuestion, label: "Not answered" },
+		{
+			message: { ...mockQuestionAnswered, result: '""' },
+			label: "Not answered",
+		},
+	])("labels a completed question $label", ({ message, label }) => {
+		const { container } = render(ToolQuestionCard, { props: { message } });
+		expect(container.querySelector(".tool-subtitle-text")?.textContent).toBe(
+			label,
+		);
 	});
 });

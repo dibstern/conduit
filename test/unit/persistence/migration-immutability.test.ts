@@ -64,6 +64,8 @@ const SHIPPED_MIGRATION_HASHES: Record<string, string> = {
 		"094c38bd9dccf2799076feb9dce6196a83cf1699e58bee296e14e86b1e729068",
 	"0021_fork_point_timestamp.sql":
 		"55e06b7e72140b5dfca14caa81625574c7132d9e26420e7074297a69f3afb113",
+	"0022_sessions_marked_unread.sql":
+		"c424314faa1dacf6bb00f9043a9c83bc36136ef5bcdc791814e135d84151f958",
 };
 
 describe("shipped migrations are immutable", () => {

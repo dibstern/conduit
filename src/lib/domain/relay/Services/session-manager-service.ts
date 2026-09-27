@@ -68,6 +68,7 @@ import {
 import { OpenCodeInstanceClientsTag } from "./opencode-instance-clients.js";
 import { RelayStatusSnapshotTag } from "./relay-status-snapshot.js";
 import {
+	BackgroundLivenessTag,
 	ConfigTag,
 	LoggerTag,
 	OrchestrationEngineTag,
@@ -145,6 +146,7 @@ export type ListSessionsOptions = {
 	limit?: number;
 	roots?: boolean;
 	statuses?: Record<string, SessionStatus> | undefined;
+	hasLiveBackgroundWork?: (sessionId: string) => boolean;
 };
 
 type SessionListMessage = Extract<RelayMessage, { type: "session_list" }>;
@@ -246,6 +248,9 @@ export const listSessions = (options?: ListSessionsOptions) =>
 					...(options?.statuses !== undefined
 						? { statuses: options.statuses }
 						: {}),
+					...(options?.hasLiveBackgroundWork && {
+						hasLiveBackgroundWork: options.hasLiveBackgroundWork,
+					}),
 				}),
 				readQueryEffectOption.value.getSessionLineage(),
 			]).pipe(
@@ -1487,6 +1492,13 @@ export const SessionManagerServiceLive: Layer.Layer<
 		);
 		const sqlOption = yield* Effect.serviceOption(SqlClient.SqlClient);
 		const statusPollerOption = yield* Effect.serviceOption(StatusPollerTag);
+		const backgroundLivenessOption = yield* Effect.serviceOption(
+			BackgroundLivenessTag,
+		);
+		const hasLiveBackgroundWork =
+			backgroundLivenessOption._tag === "Some"
+				? backgroundLivenessOption.value
+				: undefined;
 		const wsHandlerOption = yield* Effect.serviceOption(WebSocketHandlerTag);
 		const snapshotOption = yield* Effect.serviceOption(RelayStatusSnapshotTag);
 		const instanceClientsOption = yield* Effect.serviceOption(
@@ -1651,6 +1663,7 @@ export const SessionManagerServiceLive: Layer.Layer<
 				const base = listSessions({
 					...options,
 					statuses,
+					...(hasLiveBackgroundWork && { hasLiveBackgroundWork }),
 				}).pipe(
 					Effect.provideService(OpenCodeAPITag, api),
 					Effect.provideService(SessionManagerStateTag, stateRef),
@@ -1721,6 +1734,7 @@ export const SessionManagerServiceLive: Layer.Layer<
 							pendingApprovalCountsByType(approvals).questions,
 						pendingPermissionCounts:
 							pendingApprovalCountsByType(approvals).permissions,
+						...(hasLiveBackgroundWork && { hasLiveBackgroundWork }),
 					}),
 				};
 			});

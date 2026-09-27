@@ -38,7 +38,7 @@ function makeCapabilitiesService(): ClaudeCapabilitiesService {
 }
 
 function makeMockQuery(gen: AsyncGenerator<SDKMessage, void, unknown>) {
-	const setPermissionMode = vi.fn(async () => {});
+	const setPermissionMode = vi.fn(async (_mode: string) => {});
 	const query = Object.assign(gen, {
 		interrupt: vi.fn(async () => {}),
 		close: vi.fn(),
@@ -163,21 +163,23 @@ describe("Claude permission mode mapping", () => {
 		expect(createdOptions?.allowDangerouslySkipPermissions).toBe(true);
 	});
 
-	it("does not set the dangerous-skip flag for any other mode", async () => {
-		const { query } = makeMockQuery(singleTurn());
-		let createdOptions:
-			| { permissionMode?: string; allowDangerouslySkipPermissions?: boolean }
-			| undefined;
+	it("lets a session started in Ask switch to Full access mid-session", async () => {
+		// Mirrors the real SDK: a live query refuses bypassPermissions unless it
+		// was launched with the dangerous-skip opt-in.
+		const { query, setPermissionMode } = makeMockQuery(singleTurn());
+		let optedIn = false;
+		setPermissionMode.mockImplementation(async (mode: string) => {
+			if (mode === "bypassPermissions" && !optedIn) {
+				throw new Error(
+					"Cannot set permission mode to bypassPermissions because the session was not launched with --dangerously-skip-permissions",
+				);
+			}
+		});
 		const instance = new ClaudeProviderInstance({
 			workspaceRoot: workspace,
 			queryFactory: vi.fn(
-				(args: {
-					options?: {
-						permissionMode?: string;
-						allowDangerouslySkipPermissions?: boolean;
-					};
-				}) => {
-					createdOptions = args.options;
+				(args: { options?: { allowDangerouslySkipPermissions?: boolean } }) => {
+					optedIn = args.options?.allowDangerouslySkipPermissions === true;
 					return query;
 				},
 			),
@@ -191,12 +193,12 @@ describe("Claude permission mode mapping", () => {
 					turnId: "turn-1",
 					eventSink: createMockEventSink(),
 					model: { providerId: "claude", modelId: SONNET },
-					permissionMode: "acceptEdits",
+					permissionMode: "ask",
 				}),
 			),
 		);
 
-		expect(createdOptions?.permissionMode).toBe("acceptEdits");
-		expect(createdOptions?.allowDangerouslySkipPermissions).toBeUndefined();
+		await Effect.runPromise(instance.setPermissionModeEffect("s1", "full"));
+		expect(setPermissionMode).toHaveBeenCalledWith("bypassPermissions");
 	});
 });

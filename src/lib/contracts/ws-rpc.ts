@@ -985,6 +985,19 @@ export class MarkSessionUnread extends Schema.TaggedRequest<MarkSessionUnread>()
 	},
 ) {}
 
+export class MarkSessionRead extends Schema.TaggedRequest<MarkSessionRead>()(
+	"MarkSessionRead",
+	{
+		failure: WsRpcError,
+		success: OkResponseSchema,
+		payload: {
+			projectSlug: NonEmptyString,
+			sessionId: NonEmptyString,
+			originId: Schema.optional(NonEmptyString),
+		},
+	},
+) {}
+
 export class SetSessionSettled extends Schema.TaggedRequest<SetSessionSettled>()(
 	"SetSessionSettled",
 	{
@@ -1419,6 +1432,7 @@ export const WsRpcRequest = Schema.Union(
 	ReloadProviderSession,
 	RenameSession,
 	MarkSessionUnread,
+	MarkSessionRead,
 	SetSessionSettled,
 	SetSessionPinned,
 	SetSessionAutoSettle,
@@ -1514,6 +1528,7 @@ export const WsRpcGroup = RpcGroup.make(
 	Rpc.fromTaggedRequest(ReloadProviderSession),
 	Rpc.fromTaggedRequest(RenameSession),
 	Rpc.fromTaggedRequest(MarkSessionUnread),
+	Rpc.fromTaggedRequest(MarkSessionRead),
 	Rpc.fromTaggedRequest(SetSessionSettled),
 	Rpc.fromTaggedRequest(SetSessionPinned),
 	Rpc.fromTaggedRequest(SetSessionAutoSettle),
