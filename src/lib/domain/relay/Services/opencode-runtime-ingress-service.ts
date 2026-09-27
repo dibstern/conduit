@@ -68,6 +68,10 @@ export class EffectOpenCodeRuntimeIngress
 	private readonly log: OpenCodeRuntimeIngressLog;
 	private readonly translator = new OpenCodeRuntimeEventTranslator();
 	private readonly seenSessions = new Set<string>();
+	/** Parents named by `session.created`, which translates to nothing, kept
+	 *  until the session's first translatable event seeds it. A sub-agent seeded
+	 *  without one would be a root, and roots get the turn-end dot. */
+	private readonly parentIds = new Map<string, string>();
 	/** One permit per session. Provider callbacks for a session overlap, and
 	 *  translation state may only advance once the events it produced have
 	 *  committed, so translate → persist → keep runs as one critical section. */
@@ -167,6 +171,18 @@ export class EffectOpenCodeRuntimeIngress
 		providerInstanceId: string,
 	): Effect.Effect<OpenCodeRuntimeIngressResult, unknown> {
 		return Effect.gen(this, function* () {
+			const info =
+				event.type === "session.created"
+					? (event.properties as Record<string, unknown>)["info"]
+					: undefined;
+			if (
+				typeof info === "object" &&
+				info !== null &&
+				"parentID" in info &&
+				typeof info.parentID === "string"
+			) {
+				this.parentIds.set(sessionId, info.parentID);
+			}
 			const translation = this.translator.forkSession(sessionId);
 			const translated = yield* Effect.try({
 				try: () => this.translator.translateInto(event, sessionId, translation),
@@ -194,9 +210,22 @@ export class EffectOpenCodeRuntimeIngress
 			const sessionSeeded = !this.seenSessions.has(sessionId);
 			const shouldAppendSessionCreation =
 				sessionSeeded && !(yield* this.hasProjectedSession(sessionId));
+			// The parent is kept only once it is a row: sessions.parent_id is a
+			// foreign key, and an unknown parent would fail the batch forever.
+			const parentId = this.parentIds.get(sessionId);
+			const knownParentId =
+				shouldAppendSessionCreation &&
+				parentId !== undefined &&
+				(yield* this.hasProjectedSession(parentId))
+					? parentId
+					: undefined;
 			const runtimeEvents: ProviderRuntimeEvent[] = shouldAppendSessionCreation
 				? [
-						opencodeSessionCreatedRuntimeEvent(sessionId, providerInstanceId),
+						opencodeSessionCreatedRuntimeEvent(
+							sessionId,
+							providerInstanceId,
+							knownParentId,
+						),
 						...translated,
 					]
 				: [...translated];
@@ -219,6 +248,7 @@ export class EffectOpenCodeRuntimeIngress
 				afterCommit: Effect.sync(() => {
 					this.translator.commitSession(sessionId, translation);
 					this.seenSessions.add(sessionId);
+					this.parentIds.delete(sessionId);
 				}),
 			});
 

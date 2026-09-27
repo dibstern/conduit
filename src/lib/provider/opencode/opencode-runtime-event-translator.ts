@@ -657,6 +657,7 @@ export class OpenCodeRuntimeEventTranslator {
 export function opencodeSessionCreatedRuntimeEvent(
 	sessionId: string,
 	providerInstanceId: string,
+	parentId?: string,
 ): ProviderRuntimeEvent {
 	return {
 		eventId: `evt_opencode_session_created_${sessionId}`,
@@ -670,6 +671,7 @@ export function opencodeSessionCreatedRuntimeEvent(
 			sessionId,
 			title: "Untitled",
 			provider: providerInstanceId,
+			...(parentId === undefined ? {} : { parentId }),
 		},
 		metadata: {
 			synthetic: true,

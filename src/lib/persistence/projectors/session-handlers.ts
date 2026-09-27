@@ -378,8 +378,8 @@ export const sessionHandlers: {
 		return [
 			wakeSession(event.sessionId, event.createdAt, "turn"),
 			{
-				sql: "UPDATE sessions SET updated_at = ?, last_turn_error_at = NULL WHERE id = ?",
-				params: [event.createdAt, event.sessionId],
+				sql: "UPDATE sessions SET updated_at = ?, last_turn_error_at = NULL, last_turn_end_version = MAX(COALESCE(last_turn_end_version, -1), ?) WHERE id = ?",
+				params: [event.createdAt, event.streamVersion, event.sessionId],
 			},
 		];
 	},
@@ -387,8 +387,13 @@ export const sessionHandlers: {
 		return [
 			wakeSession(event.sessionId, event.createdAt, "error"),
 			{
-				sql: "UPDATE sessions SET updated_at = ?, last_turn_error_at = ? WHERE id = ?",
-				params: [event.createdAt, event.createdAt, event.sessionId],
+				sql: "UPDATE sessions SET updated_at = ?, last_turn_error_at = ?, last_turn_end_version = MAX(COALESCE(last_turn_end_version, -1), ?) WHERE id = ?",
+				params: [
+					event.createdAt,
+					event.createdAt,
+					event.streamVersion,
+					event.sessionId,
+				],
 			},
 		];
 	},

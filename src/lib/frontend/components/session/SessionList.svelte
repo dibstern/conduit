@@ -39,6 +39,7 @@
 	import { getBrowserClientId } from "../../stores/client-identity.js";
 	import {
 		deleteSessionRpc,
+		markSessionSeenRpc,
 		forkSessionRpc,
 		renameSessionRpc,
 		setSessionSettledRpc,
@@ -330,9 +331,21 @@
 		}
 	}
 
-	function handleSwitchSession(id: string, projectSlug?: string) {
-		if (id !== sessionState.currentId) {
-			switchToSession(id, projectSlug);
+	// A user's pick is the only thing that clears the turn-end dot, so it is
+	// reported even when the session is already open; switching alone writes no
+	// read state (ADR-0004, Scope; conduit-test-hk9m.3).
+	function handleSwitchSession(session: SessionInfo) {
+		const projectSlug = session.projectSlug ?? getCurrentSlug();
+		if (session.unread && session.lastTurnEndVersion != null && projectSlug) {
+			markSessionSeenRpc({
+				projectSlug,
+				sessionId: session.id,
+				upTo: session.lastTurnEndVersion,
+				originId: getBrowserClientId(),
+			}).catch(() => showToast("Couldn't mark read", { variant: "error" }));
+		}
+		if (session.id !== sessionState.currentId) {
+			switchToSession(session.id, session.projectSlug);
 		}
 	}
 
@@ -917,7 +930,7 @@
 				projectLabel={getProjectLabel(s)}
 				projectAccent={getProjectAccent(s)}
 				branch={s.git?.branch}
-				onswitchsession={(id) => handleSwitchSession(id, s.projectSlug)}
+				onswitchsession={() => handleSwitchSession(s)}
 				oncontextmenu={handleContextMenu}
 				menuOpen={ctxMenuSession?.id === s.id}
 				onmarkread={() => { void toggleSessionRead(s); }}
@@ -943,7 +956,7 @@
 				heldSessionId={heldSessionId}
 				menuOpen={ctxMenuSession?.id === s.id}
 				onholdchange={(id) => { heldSessionId = id; }}
-				onswitchsession={(id) => handleSwitchSession(id, s.projectSlug)}
+				onswitchsession={() => handleSwitchSession(s)}
 				ontoggleselection={handleToggleSelection}
 				oncontextmenu={handleContextMenu}
 				onsettle={(_id, next) => { void handleCtxSettle(s, next); }}

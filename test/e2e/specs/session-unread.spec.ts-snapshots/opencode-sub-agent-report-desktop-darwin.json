@@ -1,0 +1,42 @@
+[
+  {
+    "provider": "opencode",
+    "scenario": "sub-agent",
+    "window": "A",
+    "dot": false,
+    "lastTurnEndVersion": null,
+    "seenVersion": null,
+    "unread": 0,
+    "session": "root"
+  },
+  {
+    "provider": "opencode",
+    "scenario": "sub-agent",
+    "window": "B",
+    "dot": false,
+    "lastTurnEndVersion": null,
+    "seenVersion": null,
+    "unread": 0,
+    "session": "root"
+  },
+  {
+    "provider": "opencode",
+    "scenario": "sub-agent",
+    "window": "A",
+    "dot": false,
+    "lastTurnEndVersion": "turn end 1",
+    "seenVersion": null,
+    "unread": 0,
+    "session": "sub-agent"
+  },
+  {
+    "provider": "opencode",
+    "scenario": "sub-agent",
+    "window": "B",
+    "dot": false,
+    "lastTurnEndVersion": "turn end 1",
+    "seenVersion": null,
+    "unread": 0,
+    "session": "sub-agent"
+  }
+]

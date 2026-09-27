@@ -22,6 +22,7 @@ import {
 	ConfigTag,
 	OrchestrationEngineTag,
 } from "../../../src/lib/domain/relay/Services/services.js";
+import { markSeen } from "../../../src/lib/domain/relay/Services/session-attention.js";
 import {
 	forkOpenCodeSession,
 	forkSession,
@@ -994,32 +995,33 @@ describe("subscribeShell", () => {
 			expect(Exit.isInterrupted(yield* Fiber.await(fiber))).toBe(true);
 		}).pipe(Effect.provide(makeShellTestLayer())),
 	);
+	// Unread is a turn end past the seen marker, and only SessionAttention
+	// moves the marker (ADR-0004, Scope; conduit-test-hk9m.3).
 	it.scoped(
-		"a read event reaches a live subscriber with the updated unread state",
+		"a seen mark reaches a live subscriber with the updated unread state",
 		() =>
 			Effect.gen(function* () {
 				yield* recoverProjections;
 				yield* commitThroughSeam([
 					sessionCreated(SID),
 					messageCreated(SID, "m1"),
+					canonicalEvent(
+						"turn.completed",
+						SID,
+						{ messageId: "m1" },
+						{ provider: "claude" },
+					),
 				]);
 
 				const { q } = yield* openShell();
 				const [snapshot, synchronized] = yield* takeN(q, 2);
 				if (snapshot?._tag !== "snapshot") throw new Error("expected snapshot");
 				expect(synchronized).toEqual({ _tag: "synchronized" });
-				// A message has landed and nobody has looked: the badge is on.
+				// A turn has ended and nobody has looked: the badge is on.
 				expect(snapshot.rows[0]?.unread).toBe(true);
 				const baseVersion = snapshot.sequence;
 
-				yield* commitThroughSeam([
-					canonicalEvent(
-						"session.read",
-						SID,
-						{ sessionId: SID },
-						{ provider: "claude", createdAt: 9_999_999 },
-					),
-				]);
+				expect(yield* markSeen(SID, Number.MAX_SAFE_INTEGER)).toBe(true);
 				yield* Effect.yieldNow();
 
 				const delta = yield* Queue.take(q);

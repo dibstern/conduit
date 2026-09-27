@@ -105,10 +105,7 @@ export const sessionRowsToSessionInfoList = (
 			state?.questions ?? opts.pendingQuestionCounts?.get(row.id);
 		const pendingPermissionCount =
 			state?.permissions ?? opts.pendingPermissionCounts?.get(row.id);
-		const unread =
-			row.marked_unread_at != null ||
-			(row.last_message_at !== null &&
-				(row.read_at === null || row.read_at < row.last_message_at));
+		const unread = row.unread === 1;
 		const status = opts.statuses?.[row.id]?.type ?? row.status;
 		const processing =
 			state?.processing ||
@@ -145,6 +142,9 @@ export const sessionRowsToSessionInfoList = (
 			...(pendingQuestionCount ? { pendingQuestionCount } : {}),
 			...(pendingPermissionCount ? { pendingPermissionCount } : {}),
 			...(unread ? { unread: true } : {}),
+			...(row.last_turn_end_version != null
+				? { lastTurnEndVersion: row.last_turn_end_version }
+				: {}),
 			...(row.settled_at !== null ? { settledAt: row.settled_at } : {}),
 			...(row.settled_automatically === 1
 				? { settledAutomatically: true }

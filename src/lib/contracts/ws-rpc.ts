@@ -985,6 +985,25 @@ export class MarkSessionUnread extends Schema.TaggedRequest<MarkSessionUnread>()
 	},
 ) {}
 
+/**
+ * `session.mark_seen`: the user picked the session in the sidebar, having seen
+ * it up to stream version `upTo`. The server caps `upTo` at the latest turn
+ * end, so a report can never mark a turn that has not happened yet as seen.
+ */
+export class MarkSessionSeen extends Schema.TaggedRequest<MarkSessionSeen>()(
+	"MarkSessionSeen",
+	{
+		failure: WsRpcError,
+		success: OkResponseSchema,
+		payload: {
+			projectSlug: NonEmptyString,
+			sessionId: NonEmptyString,
+			upTo: Schema.NonNegativeInt,
+			originId: Schema.optional(NonEmptyString),
+		},
+	},
+) {}
+
 export class MarkSessionRead extends Schema.TaggedRequest<MarkSessionRead>()(
 	"MarkSessionRead",
 	{
@@ -1433,6 +1452,7 @@ export const WsRpcRequest = Schema.Union(
 	RenameSession,
 	MarkSessionUnread,
 	MarkSessionRead,
+	MarkSessionSeen,
 	SetSessionSettled,
 	SetSessionPinned,
 	SetSessionAutoSettle,
@@ -1529,6 +1549,7 @@ export const WsRpcGroup = RpcGroup.make(
 	Rpc.fromTaggedRequest(RenameSession),
 	Rpc.fromTaggedRequest(MarkSessionUnread),
 	Rpc.fromTaggedRequest(MarkSessionRead),
+	Rpc.fromTaggedRequest(MarkSessionSeen),
 	Rpc.fromTaggedRequest(SetSessionSettled),
 	Rpc.fromTaggedRequest(SetSessionPinned),
 	Rpc.fromTaggedRequest(SetSessionAutoSettle),

@@ -62,7 +62,7 @@ interface ParityContext {
 	readonly seedSession: (
 		sessionId: string,
 		title: string,
-		opts?: { parentId?: string },
+		opts?: { parentId?: string; turnEnded?: boolean },
 	) => Effect.Effect<void, unknown>;
 }
 
@@ -154,25 +154,40 @@ const READ_MODEL_PARITY_CASES: Record<ReadModelMutation, ParityCase> = {
 		run: ({ service, readQuery, seedSession }) =>
 			Effect.gen(function* () {
 				const sessionId = "ses-read";
-				yield* seedSession(sessionId, "Read me");
+				yield* seedSession(sessionId, "Read me", { turnEnded: true });
 
 				yield* service.markSessionRead(sessionId);
 
-				expect(
-					(yield* readQuery.getSession(sessionId))?.read_at,
-				).not.toBeNull();
+				const row = yield* readQuery.getSession(sessionId);
+				expect(row?.read_at).not.toBeNull();
+				expect(row?.unread).toBe(0);
 			}),
 	},
 	markSessionUnread: {
 		run: ({ service, readQuery, seedSession }) =>
 			Effect.gen(function* () {
 				const sessionId = "ses-unread";
-				yield* seedSession(sessionId, "Unread me");
+				yield* seedSession(sessionId, "Unread me", { turnEnded: true });
 				yield* service.markSessionRead(sessionId);
 
 				yield* service.markSessionUnread(sessionId);
 
-				expect((yield* readQuery.getSession(sessionId))?.read_at).toBeNull();
+				const row = yield* readQuery.getSession(sessionId);
+				expect(row?.read_at).toBeNull();
+				expect(row?.unread).toBe(1);
+			}),
+	},
+	markSessionSeen: {
+		run: ({ service, readQuery, seedSession }) =>
+			Effect.gen(function* () {
+				const sessionId = "ses-seen";
+				yield* seedSession(sessionId, "See me", { turnEnded: true });
+
+				expect(yield* service.markSessionSeen(sessionId, 99)).toBe(true);
+
+				const row = yield* readQuery.getSession(sessionId);
+				expect(row?.unread).toBe(0);
+				expect(row?.seen_version).toBe(row?.last_turn_end_version);
 			}),
 	},
 	setSessionSettled: {
@@ -331,6 +346,19 @@ describe("SessionManager read-your-writes parity", () => {
 							yield* projectionRunner
 								.projectEvent(stored)
 								.pipe(Effect.provideService(SqlClient.SqlClient, sql));
+							if (opts?.turnEnded)
+								yield* projectionRunner
+									.projectEvent(
+										yield* store.append(
+											canonicalEvent(
+												"turn.completed",
+												sessionId,
+												{ messageId: `${sessionId}-a` },
+												{ provider: "opencode", createdAt: 1_001 },
+											),
+										),
+									)
+									.pipe(Effect.provideService(SqlClient.SqlClient, sql));
 						});
 
 					const context = { api, service, readQuery, seedSession };

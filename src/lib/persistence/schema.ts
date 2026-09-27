@@ -37,6 +37,7 @@ export const SENT_ALERTS_MIGRATION = "0020_sent_alerts.sql";
 export const FORK_POINT_TIMESTAMP_MIGRATION = "0021_fork_point_timestamp.sql";
 export const SESSIONS_MARKED_UNREAD_MIGRATION =
 	"0022_sessions_marked_unread.sql";
+export const SESSION_ATTENTION_MIGRATION = "0023_session_attention.sql";
 
 export function readMigrationSql(filename: string): string {
 	return readFileSync(

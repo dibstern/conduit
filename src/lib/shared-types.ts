@@ -263,6 +263,8 @@ export const SessionInfoSchema = Schema.Struct({
 	pendingPermissionCount: Schema.optional(Schema.Number),
 	attention: Schema.optional(SessionAttentionSchema),
 	unread: Schema.optional(Schema.Boolean),
+	/** Stream version of the latest turn end; what a sidebar pick reports as seen. */
+	lastTurnEndVersion: Schema.optional(Schema.Number),
 	settledAt: Schema.optional(Schema.Number),
 	settledAutomatically: Schema.optional(Schema.Boolean),
 	autoSettleDisabled: Schema.optional(Schema.Boolean),

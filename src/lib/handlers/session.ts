@@ -424,8 +424,6 @@ export const viewSessionForClient = ({
 	readonly skipMetadata?: boolean;
 }) =>
 	Effect.gen(function* () {
-		const wsHandler = yield* WebSocketHandlerTag;
-		const sessionManagerService = yield* SessionManagerServiceTag;
 		const log = yield* LoggerTag;
 
 		const id = sessionId;
@@ -435,18 +433,9 @@ export const viewSessionForClient = ({
 			...(requestId != null && { requestId: requestId as RequestId }),
 		});
 
-		// Read state is durable but best-effort: opening the session must still
-		// succeed if recording it is temporarily unavailable. Logged rather than
-		// swallowed, because the symptom of a persistent failure here is a session
-		// that will not stop looking unread, with nothing to explain why.
-		const readRecorded = yield* Effect.either(
-			sessionManagerService.markSessionRead(id),
-		);
-		if (readRecorded._tag === "Left") {
-			log.warn(
-				`client=${clientId} Failed to record read state for ${id}: ${String(readRecorded.left)}`,
-			);
-		}
+		// No read state here: a switch also fires on restore, reload and
+		// reconnect. The browser reports a user's sidebar pick through
+		// session.mark_seen instead (ADR-0004, Scope; conduit-test-hk9m.3).
 
 		// Fire-and-forget metadata (unless skipMetadata is set)
 		if (!skipMetadata) {
@@ -747,6 +736,30 @@ export const markSessionUnreadForClient = ({
 				yield* sessionManagerService.getSessionFamily(sessionId),
 			);
 			log.info(`client=${clientId} Marked unread: ${sessionId}`);
+		}
+	});
+
+export const markSessionSeenForClient = ({
+	clientId,
+	sessionId,
+	upTo,
+}: {
+	readonly clientId: string;
+	readonly sessionId: string;
+	readonly upTo: number;
+}) =>
+	Effect.gen(function* () {
+		const wsHandler = yield* WebSocketHandlerTag;
+		const sessionManagerService = yield* SessionManagerServiceTag;
+		const log = yield* LoggerTag;
+
+		if (yield* sessionManagerService.markSessionSeen(sessionId, upTo)) {
+			// Interim cross-window sync: the stamp's advance is published, but the
+			// sidebar still renders from full lists (ni8.5.20).
+			yield* sessionManagerService.sendSessionLists((msg) =>
+				wsHandler.broadcast(msg),
+			);
+			log.info(`client=${clientId} Marked seen: ${sessionId} up to ${upTo}`);
 		}
 	});
 

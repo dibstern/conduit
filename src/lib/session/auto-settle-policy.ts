@@ -19,7 +19,7 @@ export interface AutoSettleFacts {
 	readonly hasViewer: boolean;
 	readonly isSnoozed: boolean;
 	readonly pinnedAt: number | null;
-	readonly readAt: number | null;
+	readonly unread: boolean;
 	readonly autoSettleDisabledAt: number | null;
 	readonly unsettledAt: number | null;
 }
@@ -43,8 +43,7 @@ export function shouldSettleIdleSession(
 		facts.isSnoozed ||
 		facts.pinnedAt !== null ||
 		facts.hasViewer ||
-		facts.readAt === null ||
-		(facts.lastMessageAt !== null && facts.readAt < facts.lastMessageAt)
+		facts.unread
 	)
 		return false;
 
@@ -82,7 +81,7 @@ export function sessionRowToAutoSettleFacts(
 		| "lastMessageAt"
 		| "status"
 		| "pinnedAt"
-		| "readAt"
+		| "unread"
 		| "autoSettleDisabledAt"
 		| "unsettledAt"
 	>,
@@ -94,7 +93,7 @@ export function sessionRowToAutoSettleFacts(
 		lastMessageAt: row?.last_message_at ?? null,
 		status: row?.status ?? "idle",
 		pinnedAt: row?.pinned_at ?? null,
-		readAt: row?.read_at ?? null,
+		unread: row?.unread === 1,
 		autoSettleDisabledAt: row?.auto_settle_disabled_at ?? null,
 		unsettledAt: row?.unsettled_at ?? null,
 	};

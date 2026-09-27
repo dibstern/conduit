@@ -22,6 +22,7 @@ export default defineConfig({
 		"session-arrange.spec.ts",
 		"session-snooze.spec.ts",
 		"session-mark-unread.spec.ts",
+		"session-unread.spec.ts",
 		"session-gestures.spec.ts",
 		"deep-search.spec.ts",
 		"session-keyboard.spec.ts",

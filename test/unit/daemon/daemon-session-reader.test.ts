@@ -33,6 +33,8 @@ const makeProjectStore = (
 		readonly parentId?: string;
 		readonly lastMessageAt?: number | null;
 		readonly readAt?: number | null;
+		readonly lastTurnEndVersion?: number | null;
+		readonly seenVersion?: number | null;
 		readonly settledAt?: number | null;
 		readonly pinnedAt?: number | null;
 		readonly snoozedAt?: number | null;
@@ -56,12 +58,14 @@ const makeProjectStore = (
 			for (const session of sessions) {
 				yield* sql`INSERT INTO sessions (
 					id, provider, title, status, parent_id, last_message_at,
-					read_at, settled_at, pinned_at, snoozed_at, snoozed_until,
-					woken_at, woken_reason, created_at, updated_at
+					read_at, last_turn_end_version, seen_version, settled_at,
+					pinned_at, snoozed_at, snoozed_until, woken_at, woken_reason,
+					created_at, updated_at
 				) VALUES (
 					${session.id}, 'opencode', ${session.title}, 'idle',
 					${session.parentId ?? null}, ${session.lastMessageAt ?? null},
-					${session.readAt ?? null}, ${session.settledAt ?? null},
+					${session.readAt ?? null}, ${session.lastTurnEndVersion ?? null},
+					${session.seenVersion ?? null}, ${session.settledAt ?? null},
 					${session.pinnedAt ?? null}, ${session.snoozedAt ?? null},
 					${session.snoozedUntil ?? null}, ${session.wokenAt ?? null},
 					${session.wokenReason ?? null}, ${session.updatedAt}, ${session.updatedAt}
@@ -231,6 +235,8 @@ describe("listDaemonSessions", () => {
 		);
 	});
 
+	// Unread is a turn end past the seen marker (ADR-0004, Scope;
+	// conduit-test-hk9m.3), not a message newer than read_at.
 	it.effect("reads unread state from a cold project store", () => {
 		const root = makeTemporaryRoot();
 		const project = join(root, "project");
@@ -240,22 +246,22 @@ describe("listDaemonSessions", () => {
 				id: "finished-away",
 				title: "Finished away",
 				updatedAt: 300,
-				lastMessageAt: 300,
-				readAt: 200,
+				lastTurnEndVersion: 5,
+				seenVersion: 2,
 			},
 			{
 				id: "already-read",
 				title: "Already read",
 				updatedAt: 200,
-				lastMessageAt: 200,
-				readAt: 200,
+				lastTurnEndVersion: 5,
+				seenVersion: 5,
 			},
 			{
 				id: "empty",
 				title: "Empty",
 				updatedAt: 100,
-				lastMessageAt: null,
-				readAt: null,
+				lastTurnEndVersion: null,
+				seenVersion: null,
 			},
 		]);
 

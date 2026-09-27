@@ -21,6 +21,7 @@ import {
 import { uiState } from "../../../src/lib/frontend/stores/ui.svelte.js";
 import { WsRpcError } from "../../../src/lib/frontend/transport/ws-rpc.js";
 import {
+	markSessionSeenRpc,
 	setSessionPinnedRpc,
 	setSessionSettledRpc,
 	snoozeSessionRpc,
@@ -44,6 +45,7 @@ vi.mock(
 		...(await importOriginal<
 			typeof import("../../../src/lib/frontend/transport/ws-rpc-client.js")
 		>()),
+		markSessionSeenRpc: vi.fn().mockResolvedValue(undefined),
 		setSessionSettledRpc: vi.fn().mockResolvedValue(undefined),
 		setSessionPinnedRpc: vi.fn().mockResolvedValue(undefined),
 		snoozeSessionRpc: vi.fn().mockResolvedValue(undefined),
@@ -586,5 +588,43 @@ describe("session triage list", () => {
 			),
 		);
 		expect(uiState.toasts).toEqual([]);
+	});
+});
+
+// A user's sidebar pick is the only thing that clears the turn-end dot, and
+// the browser reports it; the server no longer marks a switch read, because a
+// switch also fires on restore, reload and reconnect (ADR-0004, Scope;
+// conduit-test-hk9m.3).
+describe("sidebar pick", () => {
+	const pick = (id: string) => {
+		const row = document.querySelector(`a[data-session-id="${id}"]`);
+		if (!row) throw new Error(`no row for ${id}`);
+		return fireEvent.click(row);
+	};
+
+	beforeEach(() => {
+		seedRootSessions([
+			{ id: "unread", title: "unread", unread: true, lastTurnEndVersion: 7 },
+			{ id: "read", title: "read", lastTurnEndVersion: 3 },
+		]);
+	});
+
+	it("reports an unread row seen up to its latest turn end, even when it is already open", async () => {
+		sessionState.currentId = "unread";
+		render(SessionList);
+		await pick("unread");
+		expect(markSessionSeenRpc).toHaveBeenCalledExactlyOnceWith({
+			projectSlug: "current-project",
+			sessionId: "unread",
+			upTo: 7,
+			originId: expect.any(String),
+		});
+	});
+
+	it("reports nothing for a row with no dot", async () => {
+		render(SessionList);
+		await pick("read");
+		await tick();
+		expect(markSessionSeenRpc).not.toHaveBeenCalled();
 	});
 });

@@ -640,6 +640,7 @@ async function createEffectHarness(
 			renameSession: unused,
 			markSessionRead: unused,
 			markSessionUnread: unused,
+			markSessionSeen: unused,
 			setSessionSettled: unused,
 			setSessionAutoSettleDisabled: unused,
 			setSessionPinned: unused,
