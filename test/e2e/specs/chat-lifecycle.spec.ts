@@ -27,9 +27,8 @@ test.describe("Tool Call", () => {
 		await chat.waitForAssistantMessage();
 		await chat.waitForStreamingComplete();
 
-		// Tool steps live inside activity ledgers, which collapse once settled.
-		// The recording's tool step and its reply land in separate segments, so
-		// open them all once the reply is in.
+		// Tool steps live inside the turn's activity ledger, which collapses
+		// once settled, so open it once the reply is in.
 		await chat.expandTurnActivity();
 
 		// A tool block should appear (the recording includes tool events)
@@ -44,6 +43,37 @@ test.describe("Tool Call", () => {
 		// The assistant should have responded with something
 		const text = await chat.getLastAssistantText();
 		expect(text.length).toBeGreaterThan(0);
+	});
+
+	// OpenCode runs this turn as two assistant messages: a step that calls
+	// `read`, then a step that replies. Both are one turn, so they share one
+	// ledger — the same shape a Claude turn renders.
+	test("a multi-step turn renders one ledger, live and after reload", async ({
+		page,
+		relayUrl,
+	}) => {
+		const app = new AppPage(page);
+		const chat = new ChatPage(page);
+		const ledgers = page.locator(".turn-activity");
+		await app.goto(relayUrl);
+
+		await app.sendMessage("Show me a tool call");
+		await chat.waitForAssistantMessage();
+		await chat.waitForStreamingComplete();
+
+		await expect(ledgers).toHaveCount(1);
+		await expect(ledgers.locator(".turn-activity-toggle")).toContainText(
+			/Worked\sfor/,
+		);
+
+		await page.reload();
+		await app.layout.waitFor({ state: "attached", timeout: 30_000 });
+		await chat.waitForAssistantMessage();
+
+		await expect(ledgers).toHaveCount(1);
+		await expect(ledgers.locator(".turn-activity-toggle")).toContainText(
+			/Worked\sfor/,
+		);
 	});
 });
 

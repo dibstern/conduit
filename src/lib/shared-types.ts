@@ -420,6 +420,11 @@ export interface HistoryMessage {
 		cache?: { read?: number; write?: number };
 		context_window?: number;
 	};
+	/** OpenCode: the user message this assistant step answers. */
+	parentID?: string;
+	/** OpenCode: why the step stopped; "tool-calls" means the turn goes on. */
+	finish?: string;
+	error?: unknown;
 	modelExecution?: ModelExecution;
 	[key: string]: unknown;
 }
@@ -539,6 +544,9 @@ const HistoryMessageSchema = Schema.Struct({
 			),
 		}),
 	),
+	parentID: Schema.optional(Schema.String),
+	finish: Schema.optional(Schema.String),
+	error: Schema.optional(Schema.Unknown),
 	modelExecution: Schema.optional(ModelExecutionSchema),
 });
 
@@ -812,6 +820,7 @@ const ResultSchema = Schema.Struct({
 	duration: Schema.Number,
 	sessionId: Schema.String,
 	messageId: Schema.optional(Schema.String),
+	midTurn: Schema.optional(Schema.Literal(true)),
 });
 
 const StatusSchema = Schema.Struct({
@@ -1493,6 +1502,9 @@ export type RelayMessage =
 			duration: number;
 			sessionId: string;
 			messageId?: string;
+			/** A step inside a longer turn: usage for the context meter only.
+			 *  It must not end the turn — the turn's own result does that. */
+			midTurn?: true;
 	  }
 	| { type: "status"; sessionId: string; status: string }
 	| {

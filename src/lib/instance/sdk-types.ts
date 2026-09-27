@@ -188,4 +188,7 @@ export interface Message {
 		contextWindow?: number;
 	};
 	time?: { created?: number; completed?: number };
+	parentID?: string;
+	finish?: string;
+	error?: unknown;
 }

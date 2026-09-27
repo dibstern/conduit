@@ -152,7 +152,9 @@ describe("translateMessageUpdated — properties.info regression", () => {
 				sessionID: "ses_xyz",
 				info: {
 					role: "assistant",
-					// No cost, no tokens, no time
+					// No cost, no tokens, no start time: only a completed step
+					// reports a result.
+					time: { completed: 1 },
 				},
 			},
 		};

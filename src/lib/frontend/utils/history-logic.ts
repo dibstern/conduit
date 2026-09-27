@@ -2,7 +2,11 @@
 // Pure functions with no DOM or framework dependencies.
 // Extracted for unit testing without a browser environment.
 
-import { mapToolName } from "../../relay/event-translator.js";
+import {
+	endsOpenCodeTurn,
+	mapToolName,
+	openCodeTurnTotals,
+} from "../../relay/event-translator.js";
 import type {
 	AssistantMessage,
 	ChatMessage,
@@ -291,6 +295,7 @@ function convertAssistantParts(
 export function historyToChatMessages(
 	messages: HistoryMessage[],
 	renderHtml?: (text: string) => string,
+	turnContext: readonly HistoryMessage[] = messages,
 ): ChatMessage[] {
 	return messages.flatMap((msg) => {
 		const result: ChatMessage[] = [];
@@ -324,25 +329,32 @@ export function historyToChatMessages(
 				);
 			}
 
-			// Append a ResultMessage if cost/token metadata is present
+			// Append a ResultMessage once a step with cost/token metadata has
+			// completed. An OpenCode turn is one assistant message per step; only
+			// the step that ends the turn gets a result, billed for every step.
 			const hasCost = msg.cost !== undefined && msg.cost > 0;
 			const hasTokens =
 				msg.tokens?.input !== undefined ||
 				msg.tokens?.output !== undefined ||
 				msg.tokens?.context_window !== undefined;
-			const hasDuration =
-				msg.time?.created !== undefined && msg.time?.completed !== undefined;
 
-			if (hasCost || hasTokens) {
-				const duration = hasDuration
-					? // biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior null check
-						msg.time!.completed! - msg.time!.created!
-					: undefined;
+			if (
+				(hasCost || hasTokens) &&
+				msg.time?.completed !== undefined &&
+				endsOpenCodeTurn(msg)
+			) {
+				const turnSteps =
+					msg.parentID === undefined
+						? [msg]
+						: turnContext.filter(
+								(m) => m.role === "assistant" && m.parentID === msg.parentID,
+							);
+				const { cost, duration } = openCodeTurnTotals(msg, turnSteps);
 				result.push({
 					type: "result",
 					uuid: generateUuid(),
-					...(msg.cost != null && { cost: msg.cost }),
-					...(duration != null && { duration }),
+					...(msg.cost != null && { cost }),
+					duration,
 					...(msg.tokens?.input != null && { inputTokens: msg.tokens.input }),
 					...(msg.tokens?.output != null && {
 						outputTokens: msg.tokens.output,
