@@ -138,15 +138,17 @@ test.describe("Smart Default Detection", () => {
 	test("browser connects to smart-default daemon and receives instance_list", async ({
 		page,
 		smartDaemonProjectUrl,
+		isNarrow,
 	}) => {
 		await page.goto(smartDaemonProjectUrl);
 
 		// SPA should load
 		await expect(page).toHaveTitle("Conduit", { timeout: 10_000 });
 
-		// Connect overlay should disappear
+		// Connect overlay unmounts once connected (a phone's list route hides
+		// it, so "hidden" would not prove the socket connected)
 		await page.locator(".connect-overlay").waitFor({
-			state: "hidden",
+			state: "detached",
 			timeout: 15_000,
 		});
 
@@ -156,7 +158,10 @@ test.describe("Smart Default Detection", () => {
 		});
 		await expect(banner).not.toBeVisible({ timeout: 5_000 });
 
-		// Chat input should be visible — full pipeline works
-		await expect(page.locator("#input")).toBeVisible({ timeout: 5_000 });
+		// Full pipeline works. On a phone `/` is the session list screen and the
+		// chat input lives at /s/<id> (d9da0776), so check the list.
+		await expect(
+			page.locator(isNarrow ? "#sidebar-panel-sessions" : "#input"),
+		).toBeVisible({ timeout: 5_000 });
 	});
 });

@@ -12,17 +12,19 @@ test.describe("Daemon Smoke", () => {
 	test("browser connects via WS and receives instance_list", async ({
 		page,
 		daemonProjectUrl,
+		isNarrow,
 	}) => {
 		await page.goto(daemonProjectUrl);
 
 		// SPA should load
 		await expect(page).toHaveTitle("Conduit", { timeout: 10_000 });
 
-		// Connect overlay should disappear once WS connects and initClient runs.
-		// initClient sends instance_list, session_list, etc. The overlay fades
-		// out over 600ms once connected=true, then sets display:none.
+		// Connect overlay unmounts once WS connects and initClient runs.
+		// initClient sends instance_list, session_list, etc. Wait for detach,
+		// not hidden: a phone's list route hides the whole chat pane, overlay
+		// included, so "hidden" would pass before the socket connects.
 		await page.locator(".connect-overlay").waitFor({
-			state: "hidden",
+			state: "detached",
 			timeout: 15_000,
 		});
 
@@ -39,8 +41,11 @@ test.describe("Daemon Smoke", () => {
 		});
 		await expect(banner).not.toBeVisible({ timeout: 5_000 });
 
-		// Chat input should be visible — full pipeline is working
-		await expect(page.locator("#input")).toBeVisible({ timeout: 5_000 });
+		// Full pipeline is working. On a phone `/` is the session list screen
+		// and the chat input lives at /s/<id> (d9da0776), so check the list.
+		await expect(
+			page.locator(isNarrow ? "#sidebar-panel-sessions" : "#input"),
+		).toBeVisible({ timeout: 5_000 });
 	});
 
 	test("instance badge is hidden with single instance", async ({

@@ -119,6 +119,8 @@ export default defineConfig({
 	// overlap: a host run alongside the emulated Docker leg.
 	workers: Number(process.env["VISUAL_WORKERS"] ?? 8),
 	retries: strict ? 0 : 1,
+	// require-tests-reporter fails a run where every test skipped (conduit-test-g49a).
+	reporter: [["list"], ["../e2e/helpers/require-tests-reporter.ts"]],
 	expect: {
 		toHaveScreenshot: strict
 			? { threshold: 0, maxDiffPixels: 0, maxDiffPixelRatio: 0 }
