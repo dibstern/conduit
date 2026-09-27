@@ -12,7 +12,6 @@
 	import ProjectManagerPanel from "../project/ProjectManagerPanel.svelte";
 	import SidebarFilePanel from "../file/SidebarFilePanel.svelte";
 	import { dismiss } from "../../actions/use-dismiss.svelte.js";
-	import { versionState } from "../../stores/version.svelte.js";
 	import {
 		uiState,
 		collapseSidebar,
@@ -358,17 +357,5 @@
 			<SidebarFilePanel />
 		{/if}
 	</nav>
-
-	<!-- Sidebar footer: version info -->
-	<div
-		id="sidebar-footer"
-		class="px-3.5 py-2.5 max-md:pb-[calc(env(safe-area-inset-bottom,0px)+12px)] border-t border-border-subtle shrink-0"
-	>
-		{#if versionState.current}
-			<div class="text-xs text-text-dimmer px-2 font-brand">
-				conduit v{versionState.current}
-			</div>
-		{/if}
-	</div>
 
 </div>

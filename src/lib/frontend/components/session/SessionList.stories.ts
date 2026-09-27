@@ -252,7 +252,7 @@ export const GroupedByProject: Story = {
 			"By project",
 		);
 		await expect(
-			canvas.getByText("Acme", { selector: ".session-group-label" }),
+			canvas.getByText("Acme", { selector: ".session-group-label span" }),
 		).toBeVisible();
 	},
 };

@@ -22,7 +22,7 @@ function safeGetItem(key: string): string | null {
 		return null;
 	}
 }
-export const SIDEBAR_DEFAULT_WIDTH = 260;
+export const SIDEBAR_DEFAULT_WIDTH = 300;
 export const SIDEBAR_MIN_WIDTH = 180;
 export const SIDEBAR_MAX_WIDTH = 480;
 export const FILE_VIEWER_DEFAULT_WIDTH = 50; // percentage of layout

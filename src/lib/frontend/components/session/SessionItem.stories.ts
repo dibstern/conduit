@@ -119,6 +119,7 @@ export const Idle: Story = {
 			/^Plan documentation cleanup,/,
 		);
 		await expect(row.querySelector(".session-item-status")).toBeNull();
+		await expect(row.querySelector(".session-status-glyph svg")).not.toBeNull();
 	},
 };
 

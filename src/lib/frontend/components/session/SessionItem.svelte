@@ -8,8 +8,9 @@
 	type AttentionEmphasis = "strong" | "normal" | "dim";
 	type Density = "comfortable" | "dense";
 
-	// One word per tier, and nothing at all for idle, so a quiet list looks
-	// quiet. The word on screen is what the row wants from you; the spoken form
+	// One word per actionable tier; idle keeps only a quiet glyph and says
+	// nothing, so a quiet list stays quiet. The word on screen is what the row
+	// wants from you; the spoken form
 	// is a state, because a screen reader reads a link's label as a description
 	// of the row rather than as a button.
 	const ATTENTION_DISPLAY: Record<
@@ -24,6 +25,7 @@
 				| "octagon-alert"
 				| "loader-circle"
 				| "check"
+				| "circle"
 				| null;
 			emphasis: AttentionEmphasis;
 		}
@@ -70,8 +72,8 @@
 		idle: {
 			word: "",
 			spoken: "",
-			colour: "",
-			icon: null,
+			colour: "text-text-dimmer",
+			icon: "circle",
 			emphasis: "dim",
 		},
 	};
@@ -111,6 +113,14 @@
 			settled: "min-h-[38px] py-[3px] px-[7px]",
 		},
 	};
+	const PROJECT_ACCENT_CLASSES = [
+		"bg-project-1",
+		"bg-project-2",
+		"bg-project-3",
+		"bg-project-4",
+		"bg-project-5",
+		"bg-project-6",
+	] as const;
 </script>
 
 <script lang="ts">
@@ -130,6 +140,7 @@
 	let {
 		session,
 		projectLabel,
+		projectAccent = 1,
 		href = "",
 		active = false,
 		renaming: renamingProp = false,
@@ -160,9 +171,10 @@
 		onrenameend,
 	}: {
 		session: SessionInfo;
-		// `| undefined` because the list passes it unconditionally and a row
-		// without a project name is the single-project case, not a missing prop.
+		// `| undefined` because the list passes it unconditionally before the
+		// attached project's slug is available.
 		projectLabel?: string | undefined;
+		projectAccent?: number;
 		href?: string;
 		active?: boolean;
 		renaming?: boolean;
@@ -251,6 +263,8 @@
 	const contextText = $derived(
 		[projectLabel, branch].filter((part) => part).join(" \u00B7 "),
 	);
+	const projectInitials = $derived(projectLabel?.match(/\p{L}/gu)?.slice(0, 2).join("").toUpperCase() ?? "");
+	const projectAccentClass = $derived(PROJECT_ACCENT_CLASSES[projectAccent - 1] ?? PROJECT_ACCENT_CLASSES[0]);
 	const accessibleContext = $derived(shelfRow ? projectLabel : contextText);
 
 	// The server derives the tier in one place and the row only reads it. It is
@@ -295,7 +309,7 @@
 			cleanupMode
 				? "grid-cols-[44px_minmax(110px,1fr)_auto]"
 				: "grid-cols-[20px_minmax(110px,1fr)_auto]"
-		} gap-x-[9px] items-center ${densityClass} ${rowOpacityClass} rounded-panel cursor-pointer relative focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent` +
+		} gap-x-[9px] items-center ${densityClass} ${rowOpacityClass} mb-px rounded-panel cursor-pointer relative focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent` +
 			(active
 				? " active bg-bg-surface text-text"
 				: " text-text-secondary hover:bg-sidebar-hover hover:text-text"),
@@ -619,7 +633,7 @@
 		</Button>
 	{:else if status.icon}
 		<span
-			class="col-start-1 row-start-1 row-span-2 grid place-items-center w-5 h-5 justify-self-center {status.colour}"
+			class="session-status-glyph col-start-1 row-start-1 row-span-2 grid place-items-center size-[20px] justify-self-center {status.colour}"
 			aria-hidden="true"
 		>
 			<Icon name={status.icon} size={shelfRow ? 11 : 14} />
@@ -633,7 +647,8 @@
 		ondblclick={handleDblClick}
 	>
 		{#if shelfRow && projectLabel && !isRenaming}
-			<span class="text-sm text-text-dimmer shrink-0">
+			<span class="inline-flex items-center gap-[6px] text-sm text-text-dimmer shrink-0">
+				<span class="project-square inline-grid size-[16px] shrink-0 place-items-center rounded-[4.5px] text-[8px] font-bold leading-none text-on-fill not-italic {projectAccentClass}" aria-hidden="true">{projectInitials}</span>
 				{projectLabel}
 			</span>
 		{/if}
@@ -675,6 +690,7 @@
 		<span
 			class="session-item-context col-start-2 row-start-2 flex items-center gap-1.5 mt-0.5 text-sm text-text-dimmer overflow-hidden whitespace-nowrap font-brand"
 		>
+			{#if projectLabel}<span class="project-square inline-grid size-[16px] shrink-0 place-items-center rounded-[4.5px] text-[8px] font-bold leading-none text-on-fill not-italic {projectAccentClass}" aria-hidden="true">{projectInitials}</span>{/if}
 			<span class="overflow-hidden text-ellipsis min-w-0">{contextText}</span>
 		</span>
 	{/if}

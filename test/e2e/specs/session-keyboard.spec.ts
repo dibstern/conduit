@@ -31,7 +31,7 @@ test("j/k cross groups; Enter opens; settle, undo, pin, snooze and rename work f
 	await page.keyboard.press("p");
 	await expect(
 		page.locator("#session-list-scroller > .session-group-label").first(),
-	).toHaveText("Pinned");
+	).toHaveText(/Pinned\s+1/);
 	await expect(firstRow).toBeFocused();
 	await page.keyboard.press("j");
 	const neighbour = rows.nth(1);
@@ -41,7 +41,7 @@ test("j/k cross groups; Enter opens; settle, undo, pin, snooze and rename work f
 	await page.keyboard.press("ControlOrMeta+z");
 	await expect(
 		page.locator("#session-list-scroller > .session-group-label", {
-			hasText: /^Pinned$/,
+			hasText: /^Pinned\s+1$/,
 		}),
 	).toHaveCount(0);
 

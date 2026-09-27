@@ -37,7 +37,7 @@ test("snooze, undo, shelf, reload, search, unsnooze and a time wake", async ({
 
 	await snooze("snooze-option-indefinite");
 	await expect(row).toHaveCount(0);
-	await expect(toggle).toHaveText("Snoozed");
+	await expect(toggle).toHaveText(/Snoozed\s+1/);
 	await expect(toggle).toHaveAttribute("aria-expanded", "false");
 	await expect(
 		page

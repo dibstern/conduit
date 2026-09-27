@@ -261,19 +261,21 @@
 		return getSessionHref(session.id);
 	}
 
-	// Named on every row once a second project exists, including the rows of the
-	// project you are already in: in a merged list an unlabelled row would mean
-	// "work out which project this is yourself", and you cannot. With a single
-	// project it is pure noise and is absent entirely.
+	// Name every row's project so the square and title identify it in any scope.
 	//
 	// Resolved from the live project list rather than stamped onto the session at
 	// fetch time, so renaming a project relabels its rows without the list being
 	// re-fetched. Falls back to the slug because the project list arrives over
 	// the socket and the sidebar renders before it does.
 	function getProjectLabel(session: SessionInfo): string | undefined {
-		if (projectState.projects.length <= 1) return undefined;
 		const slug = session.projectSlug ?? getCurrentSlug();
 		return slug ? projectDisplayName(slug) : undefined;
+	}
+
+	function getProjectAccent(session: SessionInfo): number {
+		const slug = session.projectSlug ?? getCurrentSlug();
+		const index = projectState.projects.findIndex((project) => project.slug === slug);
+		return (Math.max(index, 0) % 6) + 1;
 	}
 
 	function projectDisplayName(slug: string): string {
@@ -841,6 +843,7 @@
 				now={sessionState.now}
 				href={getRowHref(s)}
 				projectLabel={getProjectLabel(s)}
+				projectAccent={getProjectAccent(s)}
 				branch={s.git?.branch}
 				onswitchsession={(id) => handleSwitchSession(id, s.projectSlug)}
 				oncontextmenu={handleContextMenu}
@@ -859,6 +862,7 @@
 				now={sessionState.now}
 				href={getRowHref(s)}
 				projectLabel={getProjectLabel(s)}
+				projectAccent={getProjectAccent(s)}
 				branch={s.git?.branch}
 				active={s.id === sessionState.currentId}
 				renaming={s.id === renamingSessionId}
@@ -893,12 +897,12 @@
 			</div>
 		{:else}
 			{#if arrangement.pinned.length > 0}
-				<div class="session-group-label pt-1.5 pb-0.5 px-3 text-xs font-semibold text-text-dimmer tracking-[0.3px] font-brand">Pinned</div>
+				<div class="session-group-label flex items-center uppercase pt-1.5 pb-0.5 px-3 text-xs font-semibold text-text-dimmer tracking-[0.3px] font-brand"><span>Pinned</span>{" "}<span class="ml-auto font-medium">{arrangement.pinned.length}</span></div>
 				{#each arrangement.pinned as s (s.id)}{@render sessionRow(s)}{/each}
 			{/if}
 			{#each arrangement.sections as section (section.key)}
-					<div class="session-group-label pt-1.5 pb-0.5 px-3 text-xs font-semibold text-text-dimmer tracking-[0.3px] font-brand">
-						{section.label}
+					<div class="session-group-label flex items-center uppercase pt-1.5 pb-0.5 px-3 text-xs font-semibold text-text-dimmer tracking-[0.3px] font-brand">
+						<span>{section.label}</span>{" "}<span class="ml-auto font-medium">{section.sessions.length}</span>
 					</div>
 					{#each section.sessions as s (s.id)}
 						{@render sessionRow(s)}
@@ -914,7 +918,7 @@
 					onclick={() => { if (!searching) setSnoozedShelfOpen(!uiState.snoozedShelfOpen); }}
 				>
 					<Icon name={snoozedShelfOpen ? "chevron-down" : "chevron-right"} size={12} />
-					Snoozed
+						<span class="uppercase">Snoozed</span>{" "}<span class="ml-auto font-medium">{arrangement.snoozed.length}</span>
 				</TextButton>
 				<div id="snoozed-shelf-rows">
 					{#if snoozedShelfOpen}
@@ -934,7 +938,7 @@
 					onclick={() => { if (!searching) setSettledShelfOpen(!uiState.settledShelfOpen); }}
 				>
 					<Icon name={settledShelfOpen ? "chevron-down" : "chevron-right"} size={12} />
-					Settled
+						<span class="uppercase">Settled</span>{" "}<span class="ml-auto font-medium">{arrangement.settled.length}</span>
 				</TextButton>
 				<div id="settled-shelf-rows">
 					{#if settledShelfOpen}

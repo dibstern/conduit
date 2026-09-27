@@ -6,6 +6,7 @@
 
 import { expect, test } from "../helpers/replay-fixture.js";
 import { AppPage } from "../page-objects/app.page.js";
+import { SidebarPage } from "../page-objects/sidebar.page.js";
 
 test.use({ recording: "chat-simple" });
 
@@ -21,6 +22,66 @@ test.describe("Sidebar Layout — Desktop", () => {
 
 		// The sidebar expand button should be hidden when sidebar is open
 		await expect(app.sidebarExpandBtn).toBeHidden();
+	});
+
+	test("desktop: sidebar chrome shows loaded groups and project identity", async ({
+		page,
+		relayUrl,
+	}) => {
+		const app = new AppPage(page);
+		await app.goto(relayUrl);
+		const rows = page.locator("#session-list .session-item");
+		await expect(rows.first()).toBeVisible();
+		await expect(app.sidebar).toHaveCSS("width", "300px");
+		await expect(page.locator("#sidebar-footer")).toHaveCount(0);
+		await new SidebarPage(page).createNewSession();
+		await expect.poll(() => rows.count()).toBeGreaterThanOrEqual(2);
+		await expect(rows.first()).toHaveCSS("margin-bottom", "1px");
+
+		for (const shelf of ["snoozed", "settled"]) {
+			const toggle = page.getByTestId(`${shelf}-shelf-toggle`);
+			if (await toggle.count()) await toggle.click();
+		}
+		const headings = page.locator(
+			"#session-list-scroller > .session-group-label",
+		);
+		expect(await headings.count()).toBeGreaterThan(0);
+		for (const heading of await headings.all()) {
+			const label = (await heading.locator("span").first().innerText()).trim();
+			expect(label).toBe(label.toUpperCase());
+			const renderedRows = await heading.evaluate((element) => {
+				let count = 0;
+				let sibling = element.nextElementSibling;
+				while (sibling && !sibling.classList.contains("session-group-label")) {
+					count += sibling.matches(".session-item")
+						? 1
+						: sibling.querySelectorAll(".session-item").length;
+					sibling = sibling.nextElementSibling;
+				}
+				return count;
+			});
+			await expect(heading.locator("span").last()).toHaveText(
+				String(renderedRows),
+			);
+		}
+
+		// The status column is never blank, idle rows included.
+		for (const row of await rows.all()) {
+			await expect(row.locator(".session-status-glyph svg")).toBeVisible();
+		}
+		const square = rows.first().locator(".project-square");
+		await expect(square).toHaveText(/^[A-Z]{2}$/);
+		await expect(square).toHaveCSS("width", "16px");
+		await expect(square).toHaveCSS("height", "16px");
+		await expect(square).toHaveClass(/bg-project-1/);
+		expect(
+			await square.evaluate(
+				(element) => getComputedStyle(element).backgroundColor,
+			),
+		).not.toBe("rgba(0, 0, 0, 0)");
+		await expect(rows.first().locator(".session-item-context")).toContainText(
+			"e2e-replay",
+		);
 	});
 
 	test("desktop: sidebar toggle collapses and expands", async ({

@@ -539,7 +539,7 @@ body:has(dialog:modal) {
 
 /* Sidebar width driven by --sidebar-w custom property (set inline by Sidebar.svelte) */
 #sidebar {
-	width: var(--sidebar-w, 260px);
+	width: var(--sidebar-w, 300px);
 	transition: width 0.15s ease;
 }
 

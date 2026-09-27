@@ -41,7 +41,7 @@ test("settle, undo, search, pin and reload preserve triage and shelf preference"
 	await row.click({ button: "right" });
 	await page.getByTestId("session-ctx-settle").click();
 	await expect(toggle).toHaveAttribute("aria-expanded", "false");
-	await expect(toggle).toHaveText("Settled");
+	await expect(toggle).toHaveText(/Settled\s+1/);
 	await expect(row).toHaveCount(0);
 	// Other live regions exist ("Connected", the composer); only one may speak
 	// about the settle.
@@ -76,7 +76,7 @@ test("settle, undo, search, pin and reload preserve triage and shelf preference"
 	await pinRow.click({ button: "right" });
 	await page.getByTestId("session-ctx-pin").click();
 	await expect(page.locator(".session-group-label").first()).toHaveText(
-		"Pinned",
+		/Pinned\s+1/,
 	);
 	await expect(rows.first()).toHaveAttribute("data-session-id", pinId ?? "");
 	await pinRow.click({ button: "right" });
@@ -87,7 +87,7 @@ test("settle, undo, search, pin and reload preserve triage and shelf preference"
 	await page.keyboard.press("Escape");
 	await page.reload();
 	await expect(page.locator(".session-group-label").first()).toHaveText(
-		"Pinned",
+		/Pinned\s+1/,
 	);
 	await expect(rows.first()).toHaveAttribute("data-session-id", pinId ?? "");
 	await expect(toggle).toHaveAttribute("aria-expanded", "false");
