@@ -683,7 +683,8 @@ export function createTranslator(
 		if (msg?.role !== "assistant" || msg.id == null || msg.parentID == null) {
 			return undefined;
 		}
-		const key = event.properties.sessionID ?? DEFAULT_SESSION;
+		// OpenCode puts the session on the message itself, not on the event.
+		const key = msg.sessionID ?? event.properties.sessionID ?? DEFAULT_SESSION;
 		let turn = sessionTurns.get(key);
 		if (turn?.parentID !== msg.parentID) {
 			turn = { parentID: msg.parentID, steps: new Map() };

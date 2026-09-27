@@ -4,7 +4,10 @@
 // reached the browser.
 
 import { describe, expect, it } from "vitest";
-import { translateMessageUpdated } from "../../../src/lib/relay/event-translator.js";
+import {
+	createTranslator,
+	translateMessageUpdated,
+} from "../../../src/lib/relay/event-translator.js";
 
 describe("translateMessageUpdated — properties.info regression", () => {
 	it("extracts usage from properties.info (actual OpenCode format)", () => {
@@ -172,5 +175,46 @@ describe("translateMessageUpdated — properties.info regression", () => {
 			// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
 			expect(result!.duration).toBe(0);
 		}
+	});
+});
+
+describe("createTranslator — OpenCode turn totals across sessions", () => {
+	// OpenCode carries the session on `info`, not on `properties`. Two sessions
+	// stepping at once must keep separate turn bills.
+	const step = (
+		sessionID: string,
+		id: string,
+		parentID: string,
+		cost: number,
+		finish: string,
+		time: { created: number; completed: number },
+	) => ({
+		type: "message.updated" as const,
+		properties: {
+			info: { id, sessionID, parentID, role: "assistant", cost, finish, time },
+		},
+	});
+
+	it("bills every step of a turn when another session steps in between", () => {
+		const translator = createTranslator();
+		translator.translate(
+			step("ses_a", "a1", "ua", 1, "tool-calls", {
+				created: 100,
+				completed: 200,
+			}),
+		);
+		translator.translate(
+			step("ses_b", "b1", "ub", 5, "tool-calls", {
+				created: 150,
+				completed: 250,
+			}),
+		);
+		const final = translator.translate(
+			step("ses_a", "a2", "ua", 2, "stop", { created: 300, completed: 400 }),
+		);
+
+		expect(final.ok).toBe(true);
+		const result = final.ok ? final.messages[0] : undefined;
+		expect(result).toMatchObject({ type: "result", cost: 3, duration: 300 });
 	});
 });

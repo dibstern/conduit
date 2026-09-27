@@ -313,6 +313,7 @@ export function isPermissionRepliedEvent(
 
 interface MessagePayload {
 	id?: string;
+	sessionID?: string;
 	role?: string;
 	cost?: number;
 	tokens?: {
