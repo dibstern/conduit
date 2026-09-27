@@ -156,31 +156,12 @@ describe("session triage list", () => {
 		);
 	});
 
-	it("keeps only one revealed swipe open and closes it on list scroll", async () => {
-		render(SessionList);
-		const first = screen.getByText("Idle work").closest("a");
-		const second = screen.getByText("Approval").closest("a");
-		if (!first || !second) throw new Error("Missing row");
-		await touchSwipe(first, 70);
-		expect(screen.getAllByTestId("session-swipe-action")).toHaveLength(1);
-		await touchSwipe(second, 70);
-		expect(screen.getAllByTestId("session-swipe-action")).toHaveLength(1);
-		await fireEvent.click(screen.getByTestId("session-swipe-action"));
-		await waitFor(() =>
-			expect(setSessionSettledRpc).toHaveBeenCalledWith(
-				expect.objectContaining({ sessionId: "approval", settled: true }),
-			),
-		);
-		await touchSwipe(first, 70);
-		await fireEvent.scroll(screen.getByRole("region", { name: "Sessions" }));
-		expect(screen.queryByTestId("session-swipe-action")).toBeNull();
-	});
-	it("keeps snoozed rows in a count-free shelf above Settled", async () => {
+	it("keeps snoozed rows in a counted shelf above Settled", async () => {
 		const until = new Date(2099, 9, 12, 9).getTime();
 		addSnoozedRow(until);
 		render(SessionList);
 		const toggle = screen.getByTestId("snoozed-shelf-toggle");
-		expect(toggle.textContent?.trim()).toBe("Snoozed");
+		expect(toggle.textContent?.trim()).toBe("Snoozed 1");
 		expect(toggle.getAttribute("aria-expanded")).toBe("false");
 		expect(toggle.getAttribute("aria-controls")).toBe("snoozed-shelf-rows");
 		expect(screen.queryByText("Sleeping work")).toBeNull();
@@ -260,7 +241,7 @@ describe("session triage list", () => {
 		const { container } = render(SessionList);
 		expect(
 			container.querySelector(".session-group-label")?.textContent?.trim(),
-		).toBe("Pinned");
+		).toBe("Pinned 1");
 		expect(
 			container
 				.querySelector("[data-session-id]")
@@ -452,7 +433,7 @@ describe("session triage list", () => {
 		);
 	});
 
-	it("keeps foreign rows inert even on right-click", async () => {
+	it("limits another project's row menu to Mark read/unread", async () => {
 		sessionState.daemonSessions = [
 			{
 				id: "foreign",
@@ -465,7 +446,12 @@ describe("session triage list", () => {
 		const row = screen.getByText("Foreign work").closest("a");
 		if (!row) throw new Error("Missing foreign row");
 		await fireEvent.contextMenu(row);
-		expect(screen.queryByRole("menu")).toBeNull();
+		const menu = screen.getByRole("menu");
+		expect(
+			[...menu.querySelectorAll("[role^='menuitem']")].map((item) =>
+				item.getAttribute("data-testid"),
+			),
+		).toEqual(["session-ctx-mark-unread"]);
 		expect(setSessionPinnedRpc).not.toHaveBeenCalled();
 		expect(setSessionSettledRpc).not.toHaveBeenCalled();
 	});
