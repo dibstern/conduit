@@ -5,9 +5,14 @@ import {
 	getOrCreateSessionActivity,
 	getOrCreateSessionMessages,
 	phaseToIdle,
+	phaseToProcessing,
 } from "../../../src/lib/frontend/stores/chat.svelte.js";
 import { discoveryState } from "../../../src/lib/frontend/stores/discovery.svelte.js";
 import { fileTreeState } from "../../../src/lib/frontend/stores/file-tree.svelte.js";
+import {
+	handleAskUserResolved,
+	permissionsState,
+} from "../../../src/lib/frontend/stores/permissions.svelte.js";
 import { sessionState } from "../../../src/lib/frontend/stores/session.svelte.js";
 
 const testSessionId = "input-area-mention-menus-test";
@@ -32,6 +37,7 @@ describe("InputArea detached listboxes", () => {
 	beforeEach(() => {
 		sessionState.currentId = testSessionId;
 		phaseToIdle();
+		permissionsState.pendingQuestions = [];
 		getOrCreateSessionActivity(testSessionId).phase = "idle";
 		getOrCreateSessionMessages(testSessionId).contextPercent = 0;
 		discoveryState.commands = [
@@ -51,12 +57,41 @@ describe("InputArea detached listboxes", () => {
 
 	afterEach(() => {
 		cleanup();
+		phaseToIdle();
 		sessionState.currentId = null;
+		permissionsState.pendingQuestions = [];
 		discoveryState.commands = [];
 		fileTreeState.entries = [];
 		fileTreeState.loading = false;
 		fileTreeState.loaded = false;
 		vi.unstubAllGlobals();
+	});
+
+	it("labels the send button Reply only for a question in the current session", async () => {
+		phaseToProcessing();
+		permissionsState.pendingQuestions = [
+			{ toolId: "other-question", sessionId: "other-session", questions: [] },
+		];
+		const { getByRole } = render(InputArea);
+		const queuedButton = getByRole("button", { name: "Queue message" });
+		expect(queuedButton.getAttribute("title")).toBe("Queue message");
+
+		permissionsState.pendingQuestions = [
+			...permissionsState.pendingQuestions,
+			{ toolId: "current-question", sessionId: testSessionId, questions: [] },
+		];
+		await waitFor(() => {
+			const replyButton = getByRole("button", { name: "Reply" });
+			expect(replyButton.getAttribute("title")).toBe("Reply");
+		});
+		handleAskUserResolved({
+			type: "ask_user_resolved",
+			sessionId: testSessionId,
+			toolId: "current-question",
+		});
+		await waitFor(() => {
+			expect(getByRole("button", { name: "Queue message" })).toBeTruthy();
+		});
 	});
 
 	it("keeps FileMenu ownership on the textarea and commits Tab", async () => {
