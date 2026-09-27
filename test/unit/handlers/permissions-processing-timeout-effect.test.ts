@@ -2,7 +2,10 @@ import { describe, it } from "@effect/vitest";
 import { Effect, Layer } from "effect";
 import { expect, vi } from "vitest";
 import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
+import { PendingInteractionServiceLive } from "../../../src/lib/domain/relay/Services/pending-interaction-service.js";
+import { PendingSendOwnershipLive } from "../../../src/lib/domain/relay/Services/pending-send-ownership.js";
 import {
+	ConfigTag,
 	LoggerTag,
 	WebSocketHandlerTag,
 } from "../../../src/lib/domain/relay/Services/services.js";
@@ -17,6 +20,7 @@ import {
 } from "../../../src/lib/handlers/permissions.js";
 import type { OpenCodeAPI } from "../../../src/lib/instance/opencode-api.js";
 import { createSilentLogger } from "../../../src/lib/logger.js";
+import type { ProjectRelayConfig } from "../../../src/lib/types.js";
 import { makeMockSessionManagerService } from "../../helpers/mock-factories.js";
 
 function makeWsHandler() {
@@ -49,6 +53,9 @@ describe("permission/question processing timeouts through Effect state", () => {
 			const layer = Layer.mergeAll(
 				Layer.succeed(OpenCodeAPITag, client),
 				Layer.succeed(WebSocketHandlerTag, makeWsHandler()),
+				Layer.succeed(ConfigTag, {} as ProjectRelayConfig),
+				PendingInteractionServiceLive,
+				PendingSendOwnershipLive,
 				Layer.succeed(LoggerTag, createSilentLogger()),
 				Layer.succeed(
 					SessionManagerServiceTag,

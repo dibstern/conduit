@@ -291,9 +291,13 @@ describe("RelayEventSink lifecycle", () => {
 		});
 
 		await Effect.runPromise(
-			sink.cancelSessionInteractions?.("session ended") ?? Effect.void,
+			sink.cancelSessionInteractions?.("session ended", {
+				recoverQuestions: true,
+			}) ?? Effect.void,
 		);
 
-		expect(cancelSessionInteractions).toHaveBeenCalledWith("session ended");
+		expect(cancelSessionInteractions).toHaveBeenCalledWith("session ended", {
+			recoverQuestions: true,
+		});
 	});
 });

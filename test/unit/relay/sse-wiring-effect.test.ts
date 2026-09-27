@@ -97,7 +97,6 @@ describe("handleSSEEventEffect", () => {
 			alertId: "session-1:question:q1",
 		});
 	});
-
 	it("clears processing timeout through Effect state for done messages", async () => {
 		const deps = createMockSSEWiringDeps();
 		const {

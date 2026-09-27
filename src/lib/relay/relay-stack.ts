@@ -76,6 +76,7 @@ import {
 	type RelayStatusSnapshotService,
 	RelayStatusSnapshotTag,
 } from "../domain/relay/Services/relay-status-snapshot.js";
+import { restoreClaudeQuestionsFromStore } from "../domain/relay/Services/restore-claude-questions.js";
 import { ScanServiceLive } from "../domain/relay/Services/scan-service.js";
 import {
 	BackgroundLivenessTag,
@@ -1080,6 +1081,7 @@ export async function createProjectRelay(
 
 				// Recovery must finish before initialization can create a session and
 				// advance projector cursors past historical unprojected events.
+				yield* restoreClaudeQuestionsFromStore;
 				const restoredPermissionModes = yield* restoreSessionPermissionModes();
 				if (restoredPermissionModes > 0) {
 					yield* Effect.sync(() =>

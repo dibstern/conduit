@@ -2386,6 +2386,72 @@ describe("handleQuestionReject", () => {
 });
 
 describe("handleAskUserResponse", () => {
+	it.effect(
+		"persists and dispatches an answer to a recovered Claude question",
+		() => {
+			const ws = mockWsHandler({
+				getClientSession: vi.fn(() => "question-session"),
+				getClientsForSession: vi.fn(() => ["client-1"]),
+			});
+			const completeRecoveredQuestion = vi.fn(() => Effect.void);
+			const sendTurn = vi.fn(() => Effect.void);
+			const turns: ProviderTurnService = {
+				completeRecoveredQuestion,
+				prepareTurnSession: ({ sessionId }) => Effect.succeed(sessionId),
+				sendTurn,
+				interruptTurn: () => Effect.void,
+			};
+			const layer = Layer.mergeAll(
+				Layer.succeed(OpenCodeAPITag, makeMockOpenCodeAPI()),
+				Layer.succeed(WebSocketHandlerTag, ws),
+				Layer.succeed(ConfigTag, mockConfig()),
+				Layer.succeed(LoggerTag, mockLogger()),
+				Layer.succeed(
+					SessionManagerServiceTag,
+					makeMockSessionManagerService(),
+				),
+				Layer.succeed(ProviderTurnServiceTag, turns),
+				PendingInteractionServiceLive,
+				PendingSendOwnershipLive,
+				makeOverridesStateLive(),
+			);
+			return Effect.gen(function* () {
+				const pending = yield* PendingInteractionServiceTag;
+				yield* pending.recoverPendingQuestions([
+					{
+						requestId: "toolu-1",
+						sessionId: "question-session",
+						toolCallId: "toolu-1",
+						messageId: "message-1",
+						providerId: "claude",
+						questions: [{ question: "Which colour?" }],
+					},
+				]);
+				yield* handleAskUserResponse("client-1", {
+					toolId: "toolu-1",
+					answers: { "0": "red" },
+				});
+				expect(completeRecoveredQuestion).toHaveBeenCalledWith(
+					expect.objectContaining({ requestId: "toolu-1", recovered: true }),
+					'Answer to your question "Which colour?": red',
+					{ "0": "red" },
+				);
+				expect(sendTurn).toHaveBeenCalledWith(
+					expect.objectContaining({
+						sessionId: "question-session",
+						text: 'Answer to your question "Which colour?": red',
+					}),
+				);
+				expect(ws.broadcast).toHaveBeenCalledWith(
+					expect.objectContaining({
+						type: "ask_user_resolved",
+						toolId: "toolu-1",
+					}),
+				);
+				expect(yield* pending.listPendingQuestions()).toHaveLength(0);
+			}).pipe(Effect.provide(layer));
+		},
+	);
 	it.effect("answers question via REST API and broadcasts resolution", () => {
 		const ws = mockWsHandler({
 			getClientSession: vi.fn(() => "session-1"),
@@ -2399,8 +2465,11 @@ describe("handleAskUserResponse", () => {
 		const layer = Layer.mergeAll(
 			Layer.succeed(OpenCodeAPITag, client),
 			Layer.succeed(WebSocketHandlerTag, ws),
+			Layer.succeed(ConfigTag, mockConfig()),
 			Layer.succeed(LoggerTag, log),
 			Layer.succeed(SessionManagerServiceTag, sessionManagerService),
+			PendingInteractionServiceLive,
+			PendingSendOwnershipLive,
 			makeOverridesStateLive(),
 		);
 
@@ -2449,6 +2518,7 @@ describe("handleAskUserResponse", () => {
 			const layer = Layer.mergeAll(
 				Layer.succeed(OpenCodeAPITag, client),
 				Layer.succeed(WebSocketHandlerTag, ws),
+				Layer.succeed(ConfigTag, mockConfig()),
 				Layer.succeed(LoggerTag, log),
 				Layer.succeed(SessionManagerServiceTag, sessionManagerService),
 				PendingInteractionServiceLive,

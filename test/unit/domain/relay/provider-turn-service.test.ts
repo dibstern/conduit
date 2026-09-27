@@ -62,6 +62,10 @@ import {
 	type SendTurnCommand,
 } from "../../../../src/lib/provider/orchestration-engine.js";
 import { ProviderRegistry } from "../../../../src/lib/provider/provider-registry.js";
+import {
+	emptyProviderRuntimeDomainMapperState,
+	translateProviderRuntimeEventToDomain,
+} from "../../../../src/lib/provider/provider-runtime-event-to-domain.js";
 import type {
 	EventSink,
 	ModelInfo,
@@ -1439,16 +1443,44 @@ describe("ProviderTurnService", () => {
 		},
 	);
 
-	for (const { providerId, questionCount, interrupts } of [
-		{ providerId: "claude", questionCount: 1, interrupts: true },
-		{ providerId: "claude", questionCount: 0, interrupts: false },
-		{ providerId: "opencode", questionCount: 1, interrupts: false },
+	for (const { providerId, questionCount, recoveredCount, interrupts } of [
+		{
+			providerId: "claude",
+			questionCount: 1,
+			recoveredCount: 0,
+			interrupts: true,
+		},
+		{
+			providerId: "claude",
+			questionCount: 0,
+			recoveredCount: 0,
+			interrupts: false,
+		},
+		{
+			providerId: "claude",
+			questionCount: 0,
+			recoveredCount: 1,
+			interrupts: false,
+		},
+		{
+			providerId: "claude",
+			questionCount: 1,
+			recoveredCount: 1,
+			interrupts: true,
+		},
+		{
+			providerId: "opencode",
+			questionCount: 1,
+			recoveredCount: 0,
+			interrupts: false,
+		},
 	]) {
 		it.effect(
-			`prepareTurnSession with ${questionCount} pending ${providerId} questions ${interrupts ? "interrupts and resolves them" : "leaves the turn alone"}`,
+			`prepareTurnSession with ${questionCount} live and ${recoveredCount} recovered ${providerId} questions`,
 			() => {
 				const engine = makeEngine({ providerId });
-				const { layer, wsHandler } = serviceLayer({ engine });
+				const ingestion = makeIngestion();
+				const { layer, wsHandler } = serviceLayer({ engine, ingestion });
 
 				return Effect.gen(function* () {
 					const interactions = yield* PendingInteractionServiceTag;
@@ -1458,6 +1490,17 @@ describe("ProviderTurnService", () => {
 							sessionId: "session-1",
 							questions: [],
 						});
+					}
+					for (let i = 0; i < recoveredCount; i++) {
+						yield* interactions.recoverPendingQuestions([
+							{
+								requestId: `recovered-${i}`,
+								sessionId: "session-1",
+								toolCallId: `recovered-${i}`,
+								messageId: "message-1",
+								questions: [{ question: "Continue?" }],
+							},
+						]);
 					}
 					const service = yield* ProviderTurnServiceTag;
 					yield* service.prepareTurnSession({
@@ -1476,11 +1519,122 @@ describe("ProviderTurnService", () => {
 						vi
 							.mocked(wsHandler.broadcast)
 							.mock.calls.some(([msg]) => msg.type === "ask_user_resolved"),
-					).toBe(interrupts);
+					).toBe(interrupts || recoveredCount > 0);
+					expect(vi.mocked(ingestion.ingestBatch).mock.calls).toHaveLength(
+						recoveredCount,
+					);
+					if (recoveredCount > 0) {
+						const events =
+							vi.mocked(ingestion.ingestBatch).mock.calls[0]?.[0] ?? [];
+						expect(events).toMatchObject([
+							{
+								type: "tool.started",
+								data: { partId: "recovered-0", toolName: "AskUserQuestion" },
+							},
+							{
+								type: "tool.completed",
+								sessionId: "session-1",
+								data: { partId: "recovered-0", result: null },
+							},
+							{
+								type: "question.resolved",
+								data: { id: "recovered-0", answers: {} },
+							},
+						]);
+						const [start, completion, resolution] = events;
+						if (!start || !completion || !resolution)
+							return yield* Effect.fail(
+								new Error("Missing recovered tool events"),
+							);
+						const started = translateProviderRuntimeEventToDomain(
+							start,
+							emptyProviderRuntimeDomainMapperState,
+						);
+						const completed = translateProviderRuntimeEventToDomain(
+							completion,
+							started.state,
+						);
+						expect(completed.events.map((event) => event.type)).toEqual([
+							"tool.completed",
+						]);
+						expect(
+							translateProviderRuntimeEventToDomain(resolution, completed.state)
+								.events,
+						).toMatchObject([
+							{ type: "question.resolved", data: { id: "recovered-0" } },
+						]);
+						expect(
+							(yield* interactions.listPendingQuestions("session-1")).filter(
+								(question) => question.recovered,
+							),
+						).toHaveLength(0);
+					}
 				}).pipe(Effect.provide(layer));
 			},
 		);
 	}
+
+	it.effect(
+		"completes a disposed question using its projected tool identity",
+		() => {
+			const ingestion = makeIngestion();
+			const getPendingClaudeQuestionTool = vi.fn(() =>
+				Effect.succeed({
+					id: "part-1",
+					call_id: "toolu-1",
+					message_id: "assistant-message-1",
+					input: null,
+					created_at: 1,
+					session_id: "session-1",
+				}),
+			);
+			const readQuery = {
+				...makeReadQuery(() => Effect.succeed([])),
+				getPendingClaudeQuestionTool,
+			};
+			const { layer } = serviceLayer({ ingestion, readQuery });
+			return Effect.gen(function* () {
+				const service = yield* ProviderTurnServiceTag;
+				if (!service.completeRecoveredQuestion)
+					return yield* Effect.fail(
+						new Error("Missing recovered question handler"),
+					);
+				yield* service.completeRecoveredQuestion(
+					{
+						requestId: "toolu-1",
+						sessionId: "session-1",
+						toolCallId: "toolu-1",
+						questions: [{ question: "Which colour?" }],
+						recovered: true,
+						timestamp: 1,
+					},
+					'Answer to your question "Which colour?": red',
+				);
+				expect(getPendingClaudeQuestionTool).toHaveBeenCalledWith(
+					"session-1",
+					"toolu-1",
+				);
+				expect(ingestion.ingestBatch).toHaveBeenCalledWith(
+					expect.arrayContaining([
+						expect.objectContaining({
+							type: "tool.completed",
+							providerId: "claude",
+							data: {
+								messageId: "assistant-message-1",
+								partId: "part-1",
+								result: 'Answer to your question "Which colour?": red',
+								duration: 0,
+							},
+						}),
+						expect.objectContaining({
+							type: "question.resolved",
+							data: { id: "toolu-1", answers: {} },
+						}),
+					]),
+				);
+			}).pipe(Effect.provide(layer));
+		},
+	);
 
 	it.effect(
 		"interrupts a first Claude turn while engine dispatch is still in flight",

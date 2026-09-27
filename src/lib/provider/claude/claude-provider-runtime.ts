@@ -2163,7 +2163,7 @@ export class ClaudeProviderRuntime {
 			if (!ctx) return;
 
 			log.info(`Interrupting turn for session ${sessionId}`);
-			yield* this.cleanupSessionEffect(ctx, "Turn interrupted");
+			yield* this.cleanupSessionEffect(ctx, "Turn interrupted", false);
 			yield* this.settleQueuedTurnDeferredsEffect(ctx.sessionId, {
 				status: "interrupted",
 				cost: 0,
@@ -2178,14 +2178,15 @@ export class ClaudeProviderRuntime {
 
 	/**
 	 * Shared cleanup for a single session — used by both interruptTurn()
-	 * and shutdown(). Emits tool.completed for in-flight tools, resolves
-	 * pending approvals with deny, rejects pending questions, persists
+	 * and shutdown(). Completes in-flight tools except questions on disposal,
+	 * resolves pending approvals with deny, rejects provider question waiters, persists
 	 * turn.interrupted + session.status idle for any in-flight turn, closes
 	 * the prompt queue, and interrupts the SDK query.
 	 */
 	private cleanupSessionEffect(
 		ctx: ClaudeSessionContext,
 		reason: string,
+		recoverQuestions: boolean,
 	): Effect.Effect<void, unknown> {
 		return Effect.gen(this, function* () {
 			if (ctx.stopped) return;
@@ -2195,6 +2196,7 @@ export class ClaudeProviderRuntime {
 
 			// 1. Complete in-flight tools as failed via EventSink.
 			for (const [, tool] of ctx.inFlightTools) {
+				if (recoverQuestions && tool.toolName === "AskUserQuestion") continue;
 				const event = claudeRuntimeEvent("tool.completed", ctx.sessionId, {
 					messageId: ctx.lastAssistantUuid ?? "",
 					partId: tool.itemId,
@@ -2221,7 +2223,10 @@ export class ClaudeProviderRuntime {
 
 			if (ctx.eventSink?.cancelSessionInteractions) {
 				yield* Effect.try({
-					try: () => ctx.eventSink?.cancelSessionInteractions?.(reason),
+					try: () =>
+						ctx.eventSink?.cancelSessionInteractions?.(reason, {
+							recoverQuestions,
+						}),
 					catch: (cause) => cause,
 				}).pipe(
 					Effect.flatMap((cancelEffect) => cancelEffect ?? Effect.void),
@@ -2324,7 +2329,7 @@ export class ClaudeProviderRuntime {
 		reason: string,
 	): Effect.Effect<void, unknown> {
 		return Effect.gen(this, function* () {
-			yield* this.cleanupSessionEffect(ctx, reason);
+			yield* this.cleanupSessionEffect(ctx, reason, true);
 
 			yield* this.settleQueuedTurnDeferredsEffect(ctx.sessionId, reason);
 

@@ -17,6 +17,15 @@ import { expect, it, vi } from "vitest";
 import type { ReadModelAdvance } from "../../../src/lib/contracts/read-model-advance.js";
 import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
 import {
+	PendingInteractionServiceLive,
+	type PendingInteractionServiceTag,
+} from "../../../src/lib/domain/relay/Services/pending-interaction-service.js";
+import {
+	PendingSendOwnershipLive,
+	type PendingSendOwnershipTag,
+} from "../../../src/lib/domain/relay/Services/pending-send-ownership.js";
+import {
+	ConfigTag,
 	LoggerTag,
 	WebSocketHandlerTag,
 } from "../../../src/lib/domain/relay/Services/services.js";
@@ -47,6 +56,7 @@ import {
 	emptyProviderRuntimeDomainMapperState,
 	translateProviderRuntimeEventToDomain,
 } from "../../../src/lib/provider/provider-runtime-event-to-domain.js";
+import type { ProjectRelayConfig } from "../../../src/lib/types.js";
 import { makeMockSessionManagerService } from "../../helpers/mock-factories.js";
 
 const SESSION = "session-1";
@@ -79,6 +89,9 @@ const makeWsHandler = () => ({
 type HandlerStack =
 	| PersistenceEffectContext
 	| SessionEventBusTag
+	| ConfigTag
+	| PendingInteractionServiceTag
+	| PendingSendOwnershipTag
 	| OpenCodeAPITag
 	| WebSocketHandlerTag
 	| LoggerTag
@@ -112,6 +125,9 @@ const withHandlerStack = async (
 	const layer = Layer.mergeAll(
 		persistence,
 		bus,
+		Layer.succeed(ConfigTag, {} as ProjectRelayConfig),
+		PendingInteractionServiceLive,
+		PendingSendOwnershipLive,
 		Layer.succeed(OpenCodeAPITag, client),
 		Layer.succeed(WebSocketHandlerTag, makeWsHandler()),
 		Layer.succeed(LoggerTag, createSilentLogger()),

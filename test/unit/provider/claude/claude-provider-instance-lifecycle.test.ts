@@ -105,6 +105,38 @@ describe("ClaudeProviderInstance lifecycle", () => {
 	});
 
 	describe("shutdown()", () => {
+		it("leaves an in-flight question open while completing other tools", async () => {
+			const instance = new ClaudeProviderInstance({ workspaceRoot: workspace });
+			const sink = {
+				...createMockEventSink(),
+				cancelSessionInteractions: vi.fn(() => Effect.void),
+			};
+			const ctx = makeFakeSessionContext("sess-1", {
+				eventSink: sink,
+				lastAssistantUuid: "message-1",
+			});
+			for (const [index, toolName] of ["AskUserQuestion", "Bash"].entries()) {
+				ctx.inFlightTools.set(index, {
+					itemId: `tool-${index}`,
+					toolName,
+					title: toolName,
+					input: {},
+					partialInputJson: "",
+				});
+			}
+			setClaudeRuntimeSessionForTest(instance, "sess-1", ctx);
+
+			await Effect.runPromise(instance.shutdownEffect());
+
+			const completed = (sink.push as ReturnType<typeof vi.fn>).mock.calls
+				.map(([event]) => event as CanonicalEvent)
+				.filter((event) => event.type === "tool.completed");
+			expect(completed.map((event) => event.data.partId)).toEqual(["tool-1"]);
+			expect(sink.cancelSessionInteractions).toHaveBeenCalledWith(
+				"Provider instance shutting down",
+				{ recoverQuestions: true },
+			);
+		});
 		it("rejects queued turn deferreds with the shutdown reason", async () => {
 			const instance = new ClaudeProviderInstance({ workspaceRoot: workspace });
 			const ctx = makeFakeSessionContext("sess-shutdown");
@@ -383,6 +415,13 @@ describe("ClaudeProviderInstance lifecycle", () => {
 				input: {},
 				partialInputJson: "",
 			});
+			ctx.inFlightTools.set(2, {
+				itemId: "question-1",
+				toolName: "AskUserQuestion",
+				title: "Question",
+				input: {},
+				partialInputJson: "",
+			});
 			setClaudeRuntimeSessionForTest(instance, "sess-1", ctx);
 
 			await Effect.runPromise(instance.interruptTurnEffect("sess-1"));
@@ -392,13 +431,17 @@ describe("ClaudeProviderInstance lifecycle", () => {
 			const completedEvents = pushCalls.filter(
 				(call) => call[0].type === "tool.completed",
 			);
-			expect(completedEvents).toHaveLength(2);
+			expect(completedEvents).toHaveLength(3);
 			expect(completedEvents[0]?.[0].data).toMatchObject({
 				partId: "tool-1",
 				result: null,
 			});
 			expect(completedEvents[1]?.[0].data).toMatchObject({
 				partId: "tool-2",
+				result: null,
+			});
+			expect(completedEvents[2]?.[0].data).toMatchObject({
+				partId: "question-1",
 				result: null,
 			});
 		});
@@ -463,6 +506,7 @@ describe("ClaudeProviderInstance lifecycle", () => {
 
 			expect(sink.cancelSessionInteractions).toHaveBeenCalledWith(
 				"Turn interrupted",
+				{ recoverQuestions: false },
 			);
 			expect(ctx.promptQueue.close).toHaveBeenCalled();
 			expect(ctx.query.interrupt).toHaveBeenCalled();

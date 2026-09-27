@@ -102,7 +102,10 @@ export interface RelayEventSinkDeps {
 			requestId: string,
 			answers: Record<string, unknown>,
 		): Effect.Effect<boolean | undefined, unknown>;
-		cancelSessionInteractions?(reason: string): Effect.Effect<void, unknown>;
+		cancelSessionInteractions?(
+			reason: string,
+			options?: { readonly recoverQuestions?: boolean },
+		): Effect.Effect<void, unknown>;
 	};
 }
 
@@ -388,9 +391,15 @@ export function createRelayEventSink(deps: RelayEventSinkDeps): RelayEventSink {
 			});
 		},
 
-		cancelSessionInteractions(reason: string): Effect.Effect<void, unknown> {
+		cancelSessionInteractions(
+			reason: string,
+			options?: { readonly recoverQuestions?: boolean },
+		): Effect.Effect<void, unknown> {
 			if (deps.pendingInteractions?.cancelSessionInteractions) {
-				return deps.pendingInteractions.cancelSessionInteractions(reason);
+				return deps.pendingInteractions.cancelSessionInteractions(
+					reason,
+					options,
+				);
 			}
 			return Effect.void;
 		},

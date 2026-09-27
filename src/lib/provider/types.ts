@@ -77,7 +77,10 @@ export interface EventSink {
 		requestId: string,
 		answers: Record<string, unknown>,
 	): Effect.Effect<void, unknown>;
-	cancelSessionInteractions?(reason: string): Effect.Effect<void, unknown>;
+	cancelSessionInteractions?(
+		reason: string,
+		options?: { readonly recoverQuestions?: boolean },
+	): Effect.Effect<void, unknown>;
 	/**
 	 * Relay liveness hook. Providers never call this; the orchestration reactor
 	 * calls it for every streamed event so the relay's processing timeout stays

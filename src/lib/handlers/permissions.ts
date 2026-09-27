@@ -9,6 +9,7 @@ import { OpenCodeAPITag } from "../domain/provider/Services/opencode-api-service
 import { SqlClient } from "@effect/sql";
 import { Data, Effect, Option } from "effect";
 import { PendingInteractionServiceTag } from "../domain/relay/Services/pending-interaction-service.js";
+import { ProviderTurnServiceTag } from "../domain/relay/Services/provider-turn-service.js";
 import {
 	ConfigTag,
 	LoggerTag,
@@ -25,13 +26,14 @@ import { fixupConfigFile } from "../instance/opencode-config-fixup.js";
 import { makeCommitAndSignal } from "../persistence/effect/commit-and-signal.js";
 import { EventStoreEffectTag } from "../persistence/effect/event-store-effect.js";
 import { ProjectionRunnerEffectTag } from "../persistence/effect/projection-runner-effect.js";
-import { canonicalEvent } from "../persistence/events.js";
+import { canonicalEvent, createCommandId } from "../persistence/events.js";
 import { saveRelaySettings } from "../relay/relay-settings.js";
 import type {
 	PermissionId,
 	ProviderPermissionUpdateDestination,
 	SessionPermissionMode,
 } from "../shared-types.js";
+import { sendMessageToSession } from "./prompt.js";
 
 class RelaySettingsSaveError extends Data.TaggedError(
 	"RelaySettingsSaveError",
@@ -388,6 +390,45 @@ export const handleAskUserResponse = (
 			const resolved = Option.getOrUndefined(resolvedOption);
 			if (resolved) {
 				const questionSessionId = resolved.sessionId || sessionId;
+				if (resolved.question.recovered) {
+					const answerText = resolved.question.questions
+						.map(
+							(question, index) =>
+								`Answer to your question "${question.question}": ${answers[String(index)] ?? ""}`,
+						)
+						.join("\n");
+					const turnsOption = yield* Effect.serviceOption(
+						ProviderTurnServiceTag,
+					);
+					const turns = Option.getOrUndefined(turnsOption);
+					if (!turns?.completeRecoveredQuestion) {
+						yield* pendingInteractionsOption.value.recoverPendingQuestions([
+							resolved.question,
+						]);
+						return yield* Effect.fail(
+							new Error("Recovered question turn service unavailable"),
+						);
+					}
+					const completed = yield* Effect.either(
+						turns.completeRecoveredQuestion(
+							resolved.question,
+							answerText,
+							answers,
+						),
+					);
+					if (completed._tag === "Left") {
+						yield* pendingInteractionsOption.value.recoverPendingQuestions([
+							resolved.question,
+						]);
+						return yield* Effect.fail(completed.left);
+					}
+					yield* sendMessageToSession({
+						clientId,
+						sessionId: questionSessionId,
+						text: answerText,
+						commandId: payload.commandId ?? createCommandId(),
+					});
+				}
 				const engineOption = yield* Effect.serviceOption(
 					OrchestrationEngineTag,
 				);
@@ -402,12 +443,16 @@ export const handleAskUserResponse = (
 						);
 					}
 				}
-				wsHandler.broadcast({
-					type: "ask_user_resolved",
-					toolId,
-					sessionId: questionSessionId,
-				});
-				yield* restartProcessingTimeout(questionSessionId);
+				if (resolved.question.recovered) {
+					wsHandler.broadcast({
+						type: "ask_user_resolved",
+						toolId,
+						sessionId: questionSessionId,
+					});
+					yield* restartProcessingTimeout(questionSessionId);
+				} else {
+					yield* announceQuestionResolved(questionSessionId, toolId, answers);
+				}
 				return;
 			}
 		}
@@ -547,12 +592,7 @@ export const handleQuestionReject = (
 						);
 					}
 				}
-				wsHandler.broadcast({
-					type: "ask_user_resolved",
-					toolId,
-					sessionId: questionSessionId,
-				});
-				yield* restartProcessingTimeout(questionSessionId);
+				yield* announceQuestionResolved(questionSessionId, toolId, {});
 				return;
 			}
 		}

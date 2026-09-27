@@ -60,6 +60,10 @@ export interface PendingQuestionInput {
 	readonly questions: readonly PendingQuestionItemInput[];
 	readonly toolCallId?: string;
 	readonly providerId?: string;
+	readonly messageId?: string;
+	readonly partId?: string;
+	readonly recovered?: true;
+	readonly timestamp?: number;
 }
 
 export interface PendingQuestionItemInput {
@@ -75,6 +79,9 @@ export interface PendingQuestion {
 	readonly questions: readonly PendingQuestionItem[];
 	readonly toolCallId?: string;
 	readonly providerId?: string;
+	readonly messageId?: string;
+	readonly partId?: string;
+	readonly recovered?: true;
 	readonly timestamp: number;
 }
 
@@ -93,6 +100,7 @@ export interface ResolvedPermissionDecision {
 
 export interface ResolvedQuestionResponse {
 	readonly sessionId: string;
+	readonly question: PendingQuestion;
 }
 
 export interface PendingPermissionResponse {
@@ -146,6 +154,9 @@ export interface PendingInteractionService {
 	beginQuestionRequest(
 		input: PendingQuestionInput,
 	): Effect.Effect<StartedQuestionRequest>;
+	recoverPendingQuestions(
+		questions: readonly PendingQuestionInput[],
+	): Effect.Effect<PendingQuestion[]>;
 	listPendingQuestions(sessionId?: string): Effect.Effect<PendingQuestion[]>;
 	resolvePermissionRequest(
 		requestId: string,
@@ -163,6 +174,7 @@ export interface PendingInteractionService {
 	cancelSessionInteractions(
 		sessionId: string,
 		reason: string,
+		options?: { readonly recoverQuestions?: boolean },
 	): Effect.Effect<void>;
 }
 
@@ -229,6 +241,9 @@ export const makePendingInteractionServiceLive = (
 				questions: state.questions,
 				...(state.toolCallId != null ? { toolCallId: state.toolCallId } : {}),
 				...(state.providerId != null ? { providerId: state.providerId } : {}),
+				...(state.messageId != null ? { messageId: state.messageId } : {}),
+				...(state.partId != null ? { partId: state.partId } : {}),
+				...(state.recovered ? { recovered: true as const } : {}),
 				timestamp: state.timestamp,
 			});
 
@@ -291,7 +306,7 @@ export const makePendingInteractionServiceLive = (
 				>,
 			) =>
 				Effect.gen(function* () {
-					const timestamp = yield* Clock.currentTimeMillis;
+					const timestamp = input.timestamp ?? (yield* Clock.currentTimeMillis);
 					const entry: QuestionState = {
 						requestId: input.requestId,
 						sessionId: input.sessionId,
@@ -311,6 +326,9 @@ export const makePendingInteractionServiceLive = (
 						...(input.providerId != null
 							? { providerId: input.providerId }
 							: {}),
+						...(input.messageId != null ? { messageId: input.messageId } : {}),
+						...(input.partId != null ? { partId: input.partId } : {}),
+						...(input.recovered ? { recovered: true as const } : {}),
 						timestamp,
 						...(waiter != null ? { waiter } : {}),
 					};
@@ -372,7 +390,10 @@ export const makePendingInteractionServiceLive = (
 					if (state.waiter) {
 						yield* Deferred.succeed(state.waiter, answers).pipe(Effect.ignore);
 					}
-					return Option.some({ sessionId: state.sessionId });
+					return Option.some({
+						sessionId: state.sessionId,
+						question: toPendingQuestion(state),
+					});
 				});
 
 			const resolveQuestionRequest = (
@@ -381,7 +402,11 @@ export const makePendingInteractionServiceLive = (
 			) =>
 				takeQuestionRequest(requestId, answers).pipe(Effect.map(Option.isSome));
 
-			const cancelSessionInteractions = (sessionId: string, reason: string) =>
+			const cancelSessionInteractions = (
+				sessionId: string,
+				reason: string,
+				options?: { readonly recoverQuestions?: boolean },
+			) =>
 				Effect.gen(function* () {
 					const cancelledPermissions = yield* Ref.modify(
 						permissions,
@@ -403,7 +428,15 @@ export const makePendingInteractionServiceLive = (
 						for (const [id, entry] of current) {
 							if (entry.sessionId === sessionId) {
 								cancelled.push(entry);
-								next.delete(id);
+								if (options?.recoverQuestions) {
+									const { waiter: _waiter, ...recoverable } = entry;
+									next.set(id, {
+										...recoverable,
+										recovered: true,
+									});
+								} else {
+									next.delete(id);
+								}
 							}
 						}
 						return [cancelled, next] as const;
@@ -561,6 +594,10 @@ export const makePendingInteractionServiceLive = (
 					}),
 				recordQuestionRequest,
 				beginQuestionRequest,
+				recoverPendingQuestions: (pending) =>
+					Effect.forEach(pending, (question) =>
+						storeQuestionRequest({ ...question, recovered: true }),
+					),
 				listPendingQuestions: (sessionId?: string) =>
 					Ref.get(questions).pipe(
 						Effect.map((current) =>

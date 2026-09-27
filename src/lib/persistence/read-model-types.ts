@@ -35,6 +35,15 @@ export interface PendingApprovalCountRow {
 	pending_count: number;
 }
 
+export interface PendingClaudeQuestionToolRow {
+	id: string;
+	call_id: string | null;
+	message_id: string;
+	input: string | null;
+	created_at: number;
+	session_id: string;
+}
+
 export interface MessageRow {
 	id: string;
 	version: number;
