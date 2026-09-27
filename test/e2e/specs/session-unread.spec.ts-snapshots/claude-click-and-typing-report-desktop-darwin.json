@@ -1,0 +1,62 @@
+[
+  {
+    "provider": "claude",
+    "scenario": "watching",
+    "window": "A",
+    "dot": true,
+    "lastTurnEndVersion": "turn end 1",
+    "seenVersion": null,
+    "unread": 1,
+    "session": "root"
+  },
+  {
+    "provider": "claude",
+    "scenario": "watching",
+    "window": "B",
+    "dot": true,
+    "lastTurnEndVersion": "turn end 1",
+    "seenVersion": null,
+    "unread": 1,
+    "session": "root"
+  },
+  {
+    "provider": "claude",
+    "scenario": "click",
+    "window": "A",
+    "dot": false,
+    "lastTurnEndVersion": "turn end 1",
+    "seenVersion": "turn end 1",
+    "unread": 0,
+    "session": "root"
+  },
+  {
+    "provider": "claude",
+    "scenario": "click",
+    "window": "B",
+    "dot": false,
+    "lastTurnEndVersion": "turn end 1",
+    "seenVersion": "turn end 1",
+    "unread": 0,
+    "session": "root"
+  },
+  {
+    "provider": "claude",
+    "scenario": "typing",
+    "window": "A",
+    "dot": false,
+    "lastTurnEndVersion": "turn end 2",
+    "seenVersion": "turn end 2",
+    "unread": 0,
+    "session": "root"
+  },
+  {
+    "provider": "claude",
+    "scenario": "typing",
+    "window": "B",
+    "dot": false,
+    "lastTurnEndVersion": "turn end 2",
+    "seenVersion": "turn end 2",
+    "unread": 0,
+    "session": "root"
+  }
+]

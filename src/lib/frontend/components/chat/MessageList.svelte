@@ -239,6 +239,12 @@
 	const currentTurns = $derived(
 		forkSplit ? segmentTurns(forkSplit.current, isProcessing()) : [],
 	);
+	// A touch on the view marks the session seen only while this turn's end is
+	// on screen (utils/attention.ts).
+	const newestEndedTurnId = $derived(
+		(forkSplit && forkSplit.inherited.length > 0 ? [...inheritedTurns, ...currentTurns] : turns)
+			.filter((turn) => !turn.live).at(-1)?.id,
+	);
 
 </script>
 
@@ -321,6 +327,9 @@
 					<TurnEconomics economics={bill} showDuration />
 				</div>
 			</div>
+		{/if}
+		{#if turn.id === newestEndedTurnId}
+			<div data-turn-end aria-hidden="true"></div>
 		{/if}
 	{/snippet}
 

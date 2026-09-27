@@ -39,7 +39,6 @@
 	import { getBrowserClientId } from "../../stores/client-identity.js";
 	import {
 		deleteSessionRpc,
-		markSessionSeenRpc,
 		forkSessionRpc,
 		renameSessionRpc,
 		setSessionSettledRpc,
@@ -58,6 +57,7 @@
 	} from "../../stores/ui.svelte.js";
 	import { formatSnoozeTime, formatTimeAgo } from "../../utils/format.js";
 	import { getSnoozePresets } from "../../utils/snooze.js";
+	import { touch } from "../../utils/attention.js";
 	import { WsRpcError } from "../../transport/ws-rpc.js";
 	import { toggleSessionRead } from "../../utils/session-read.js";
 	import { getSessionActionState } from "../../utils/swipe.js";
@@ -331,19 +331,11 @@
 		}
 	}
 
-	// A user's pick is the only thing that clears the turn-end dot, so it is
-	// reported even when the session is already open; switching alone writes no
-	// read state (ADR-0004, Scope; conduit-test-hk9m.3).
+	// A user's pick clears the turn-end dot, so it is reported even when the
+	// session is already open; switching alone writes no read state (ADR-0004,
+	// Scope; conduit-test-hk9m.3, .4).
 	function handleSwitchSession(session: SessionInfo) {
-		const projectSlug = session.projectSlug ?? getCurrentSlug();
-		if (session.unread && session.lastTurnEndVersion != null && projectSlug) {
-			markSessionSeenRpc({
-				projectSlug,
-				sessionId: session.id,
-				upTo: session.lastTurnEndVersion,
-				originId: getBrowserClientId(),
-			}).catch(() => showToast("Couldn't mark read", { variant: "error" }));
-		}
+		touch(session, "sidebar-pick");
 		if (session.id !== sessionState.currentId) {
 			switchToSession(session.id, session.projectSlug);
 		}
