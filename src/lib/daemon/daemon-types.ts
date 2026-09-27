@@ -38,6 +38,8 @@ export interface DaemonOptions {
 	 * Set to false in tests that don't want network probing.
 	 */
 	smartDefault?: boolean;
+	/** Where smart default looks for OpenCode (default: http://localhost:4096). */
+	smartDefaultUrl?: string;
 	/** Log level override (default: info). */
 	logLevel?: LogLevel;
 	/** Log format override (default: json for daemon, pretty for foreground). */

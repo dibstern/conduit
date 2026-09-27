@@ -119,6 +119,28 @@ describe("daemon auto-start (probe-and-convert)", () => {
 		expect(mockInstalled).not.toHaveBeenCalled();
 	});
 
+	it("probes smartDefaultUrl instead of localhost:4096 when given", async () => {
+		mockProbe.mockResolvedValue(true);
+
+		const instances = await Effect.runPromise(
+			resolveSmartDefaultInstances([], {
+				smartDefault: true,
+				smartDefaultUrl: "http://localhost:4297",
+			}),
+		);
+
+		expect(mockProbe.mock.calls).toEqual([["http://localhost:4297"]]);
+		expect(instances).toEqual([
+			{
+				id: "opencode",
+				name: "Default",
+				port: 4297,
+				managed: false,
+				url: "http://localhost:4297",
+			},
+		]);
+	});
+
 	it("converts to managed when OpenCode is unreachable and binary exists", async () => {
 		mockProbe.mockResolvedValue(false);
 		mockInstalled.mockResolvedValue(true);
