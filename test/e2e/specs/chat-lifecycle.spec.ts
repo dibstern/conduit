@@ -23,8 +23,13 @@ test.describe("Tool Call", () => {
 		// Send prompt — the mock will serve the first prompt_async response
 		await app.sendMessage("Show me a tool call");
 
-		// Tool steps live inside the turn's activity ledger, which collapses once
-		// the turn settles. Open it first so the wait doesn't race the reply.
+		// Wait for the assistant to finish responding after the tool result
+		await chat.waitForAssistantMessage();
+		await chat.waitForStreamingComplete();
+
+		// Tool steps live inside activity ledgers, which collapse once settled.
+		// The recording's tool step and its reply land in separate segments, so
+		// open them all once the reply is in.
 		await chat.expandTurnActivity();
 
 		// A tool block should appear (the recording includes tool events)
@@ -35,10 +40,6 @@ test.describe("Tool Call", () => {
 
 		// Wait for the tool to complete
 		await chat.waitForToolCompleted();
-
-		// Wait for the assistant to finish responding after the tool result
-		await chat.waitForAssistantMessage();
-		await chat.waitForStreamingComplete();
 
 		// The assistant should have responded with something
 		const text = await chat.getLastAssistantText();

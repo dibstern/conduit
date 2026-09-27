@@ -417,6 +417,8 @@ test.describe("Sidebar Layout — Mobile", () => {
 			.click();
 		await page.locator("#file-browser-btn").click();
 		await expect(page.locator("#sidebar-panel-files")).toBeVisible();
+		// Measure the rows, not the loading placeholder that precedes them.
+		await expect(page.locator("#file-tree .fb-entry").first()).toBeVisible();
 		await measure("#sidebar");
 		await page.locator("#file-panel-close").click();
 		await page

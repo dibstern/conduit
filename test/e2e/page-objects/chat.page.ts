@@ -116,14 +116,19 @@ export class ChatPage {
 	}
 
 	/**
-	 * Open the most recent turn's activity ledger. A settled turn collapses every
+	 * Open every activity ledger on the page. A settled ledger collapses every
 	 * tool and thinking step behind it, so steps are only in the DOM once opened.
+	 * One prompt can own several ledgers: a result closes a segment and later
+	 * work opens another (segmentTurns), and OpenCode reports a result per step.
 	 */
 	async expandTurnActivity(timeout = 30_000): Promise<void> {
-		const toggle = this.turnActivityToggles.last();
-		await toggle.waitFor({ state: "visible", timeout });
-		if ((await toggle.getAttribute("aria-expanded")) !== "true") {
-			await toggle.click();
+		await this.turnActivityToggles
+			.last()
+			.waitFor({ state: "visible", timeout });
+		for (const toggle of await this.turnActivityToggles.all()) {
+			if ((await toggle.getAttribute("aria-expanded")) !== "true") {
+				await toggle.click();
+			}
 		}
 	}
 
