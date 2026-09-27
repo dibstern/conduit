@@ -862,6 +862,7 @@ export const makeProviderTurnService = Effect.gen(function* () {
 				type: "session_switched",
 				id: session.id,
 				sessionId: session.id,
+				replacesSessionId: input.sessionId,
 			});
 			yield* Effect.forkDaemon(
 				sessionManagerService

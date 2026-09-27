@@ -933,7 +933,10 @@ test.describe("Scroll Controller — Session Lifecycle", () => {
 			responses: new Map(),
 		});
 
-		await page.goto(relayUrl);
+		// Open the empty session's own address. relayUrl names the recording's
+		// session, and a switch to a different session that brings no replay
+		// is treated as stale and ignored.
+		await page.goto(new URL("/s/sess-empty-001", relayUrl).href);
 		await page.locator("#connect-overlay").waitFor({
 			state: "hidden",
 			timeout: 15_000,

@@ -604,7 +604,10 @@
 			sessionId: id,
 			originId: getBrowserClientId(),
 		}).then((response) => {
-			if (!sessionState.currentId) switchToSession(response.sessionId, response.projectSlug);
+			// The relay's switch to a fork of a session that is not open is
+			// uncorrelated, so the session_switched guard ignores it. Open the
+			// fork here unless that switch already did.
+			if (sessionState.currentId !== response.sessionId) switchToSession(response.sessionId, response.projectSlug);
 		}).catch(() => showToast("Failed to fork session", { variant: "error" }));
 	}
 

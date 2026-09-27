@@ -444,6 +444,9 @@ describe("Integration: Session Visibility Repros", () => {
 		const newId = switched["id"] as string;
 		// eslint-disable-next-line no-console
 		console.log(`[REPRO-C] materialized ${localId} -> ${newId}`);
+		// The switch is uncorrelated, so it must name the row it replaces for
+		// the sender's session_switched guard to accept it.
+		expect(switched["replacesSessionId"]).toBe(localId);
 
 		// Bug 1 (server contract): the echo for the materialized session must be
 		// renderable by the sender — the optimistic copy lives in the OLD slot,

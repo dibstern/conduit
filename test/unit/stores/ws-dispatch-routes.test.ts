@@ -123,6 +123,62 @@ describe("session_switched routes", () => {
 		expect(sessionState.currentId).toBe("fork");
 	});
 
+	it("opens a fork whose lineage only its session_forked row carries", () => {
+		routerState.path = "/s/parent";
+		handleMessage({
+			type: "session_forked",
+			sessionId: "fork",
+			session: {
+				id: "fork",
+				title: "Parent (fork)",
+				status: "idle",
+				updatedAt: 0,
+				parentID: "parent",
+			},
+			parentId: "parent",
+			parentTitle: "Parent",
+		});
+		handleMessage({ type: "session_switched", id: "fork", sessionId: "fork" });
+		expect(routerState.path).toBe("/s/fork");
+		expect(sessionState.currentId).toBe("fork");
+	});
+
+	// OpenCode materialization: sending on a local row with an OpenCode model
+	// moves the sender to a new OpenCode session with no request to echo.
+	it("opens the session that replaces the open local row", () => {
+		routerState.path = "/s/local";
+		handleMessage({
+			type: "session_switched",
+			id: "local",
+			sessionId: "local",
+		});
+		handleMessage({
+			type: "session_switched",
+			id: "opencode",
+			sessionId: "opencode",
+			replacesSessionId: "local",
+		});
+		expect(routerState.path).toBe("/s/opencode");
+		expect(sessionState.currentId).toBe("opencode");
+	});
+
+	it("ignores a replacement for a row that is no longer open", () => {
+		routerState.path = "/s/other";
+		handleMessage({
+			type: "session_switched",
+			id: "other",
+			sessionId: "other",
+		});
+		handleMessage({
+			type: "session_switched",
+			id: "opencode",
+			sessionId: "opencode",
+			replacesSessionId: "local",
+		});
+		expect(routerState.path).toBe("/s/other");
+		expect(sessionState.currentId).toBe("other");
+	});
+
 	it("opens a fork returned while viewing its parent", () => {
 		routerState.path = "/s/parent";
 		handleMessage({
