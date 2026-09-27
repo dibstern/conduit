@@ -125,7 +125,7 @@ export const mockForkSession: SessionInfo = {
 	updatedAt: "2026-02-25T09:12:00Z",
 	messageCount: 2,
 	processing: false,
-	parentID: mockSession.id,
+	forkedFrom: mockSession.id,
 	forkMessageId: "msg-assistant-002",
 };
 

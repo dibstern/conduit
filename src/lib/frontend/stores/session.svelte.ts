@@ -613,6 +613,7 @@ const sessionInfoFromRpc = (
 		: {}),
 	...(session.processing != null ? { processing: session.processing } : {}),
 	...(session.parentID != null ? { parentID: session.parentID } : {}),
+	...(session.forkedFrom != null ? { forkedFrom: session.forkedFrom } : {}),
 	...(session.forkMessageId != null
 		? { forkMessageId: session.forkMessageId }
 		: {}),
@@ -845,6 +846,7 @@ export function handleSessionSwitched(
 				id,
 				title: "",
 				...(msg.parentID ? { parentID: msg.parentID } : {}),
+				...(msg.forkedFrom ? { forkedFrom: msg.forkedFrom } : {}),
 			});
 		}
 		syncSessionMembership();

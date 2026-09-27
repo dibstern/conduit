@@ -367,12 +367,14 @@ const switchClientToSession = (
 		);
 		const readQueryOption = yield* Effect.serviceOption(ReadQueryEffectTag);
 		let parentID: string | undefined;
+		let forkedFrom: string | undefined;
 		if (readQueryOption._tag === "Some") {
 			const sessionRowResult = yield* Effect.either(
 				readQueryOption.value.getSession(sessionId),
 			);
 			if (sessionRowResult._tag === "Right") {
 				parentID = sessionRowResult.right?.parent_id ?? undefined;
+				forkedFrom = sessionRowResult.right?.forked_from ?? undefined;
 			}
 		}
 
@@ -389,6 +391,7 @@ const switchClientToSession = (
 			buildSessionSwitchedMessage(sessionId, patchedSource, {
 				...(draft ? { draft } : {}),
 				...(parentID != null ? { parentID } : {}),
+				...(forkedFrom != null ? { forkedFrom } : {}),
 				...(options?.requestId != null ? { requestId: options.requestId } : {}),
 			}),
 		);
@@ -872,13 +875,11 @@ export const forkSessionForClient = ({
 		const { forkMessageId, forkPointTimestamp } = forked;
 
 		// Persist fork-point metadata
-		if (forkMessageId || forkPointTimestamp) {
-			yield* sessionManagerService.setForkEntry(forked.id, {
-				forkMessageId: forkMessageId ?? "",
-				parentID: sessionId,
-				...(forkPointTimestamp != null && { forkPointTimestamp }),
-			});
-		}
+		yield* sessionManagerService.setForkEntry(forked.id, {
+			forkMessageId: forkMessageId ?? "",
+			parentID: sessionId,
+			...(forkPointTimestamp != null && { forkPointTimestamp }),
+		});
 
 		// Find the parent title for the notification
 		const sessions = yield* sessionManagerService.listSessions();
@@ -892,11 +893,11 @@ export const forkSessionForClient = ({
 				id: forked.id,
 				title: forked.title ?? "Forked Session",
 				updatedAt: forked.time?.updated ?? forked.time?.created ?? 0,
-				parentID: sessionId,
+				forkedFrom: sessionId,
 				...(forkMessageId && { forkMessageId }),
 				...(forkPointTimestamp != null && { forkPointTimestamp }),
 			},
-			parentId: sessionId,
+			forkedFrom: sessionId,
 			parentTitle: parent?.title ?? "Unknown",
 		});
 

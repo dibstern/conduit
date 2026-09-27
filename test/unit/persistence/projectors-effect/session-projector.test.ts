@@ -51,6 +51,7 @@ interface SessionRow {
 	title: string;
 	status: string;
 	parent_id: string | null;
+	forked_from: string | null;
 	fork_point_event: string | null;
 	last_message_at: number | null;
 	last_turn_error_at: number | null;
@@ -230,18 +231,14 @@ describe("SessionProjector", () => {
 				makeStored(
 					"session.created",
 					"child",
-					{ sessionId: "child", title: "Child", provider: "opencode" },
+					{
+						sessionId: "child",
+						title: "Child",
+						provider: "opencode",
+						parentId: "s1",
+					},
 					3,
 					now + 11,
-				),
-			);
-			await project(
-				makeStored(
-					"session.forked",
-					"child",
-					{ sessionId: "child", parentId: "s1" },
-					4,
-					now + 12,
 				),
 			);
 			await project(
@@ -393,6 +390,44 @@ describe("SessionProjector", () => {
 			expect(row?.title).toBe("Explore Agent Updated");
 			expect(row?.parent_id).toBe("parent-session");
 			expect(row?.provider_sid).toBe("sdk-subagent-1");
+		});
+	});
+
+	describe("session.forked", () => {
+		it.each([
+			false,
+			true,
+		])("records a top-level fork when session.created carried parentId: %s", async (legacyParent) => {
+			await project(
+				makeStored("session.created", "origin", {
+					sessionId: "origin",
+					title: "Origin",
+					provider: "claude",
+				}),
+			);
+			await project(
+				makeStored("session.created", "fork", {
+					sessionId: "fork",
+					title: "Fork",
+					provider: "claude",
+					...(legacyParent ? { parentId: "origin" } : {}),
+				}),
+			);
+			await project(
+				makeStored("session.forked", "fork", {
+					sessionId: "fork",
+					parentId: "origin",
+					forkPointEvent: "msg-1",
+				}),
+			);
+			const fork = await queryOne<SessionRow>(
+				"SELECT * FROM sessions WHERE id = 'fork'",
+			);
+			expect(fork).toMatchObject({
+				parent_id: null,
+				forked_from: "origin",
+				fork_point_event: "msg-1",
+			});
 		});
 	});
 

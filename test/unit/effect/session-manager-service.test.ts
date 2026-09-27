@@ -89,6 +89,7 @@ function makeRow(id: string, overrides?: Partial<SessionRow>): SessionRow {
 		title: "Untitled",
 		status: "idle",
 		parent_id: null,
+		forked_from: null,
 		fork_point_event: null,
 		last_message_at: null,
 		last_turn_error_at: null,
@@ -932,6 +933,7 @@ describe("SessionManagerService", () => {
 					messageCount: 0,
 					parentID: "root-1",
 					forkMessageId: "msg-1",
+					forkedFrom: "fallback-parent",
 					forkPointTimestamp: 90,
 					processing: true,
 					pendingQuestionCount: 2,
@@ -986,7 +988,7 @@ describe("SessionManagerService", () => {
 					title: "Forked",
 					updatedAt: 50,
 					messageCount: 0,
-					parentID: "parent-1",
+					forkedFrom: "parent-1",
 					forkMessageId: "msg-1",
 					forkPointTimestamp: 40,
 				},
@@ -1043,7 +1045,7 @@ describe("SessionManagerService", () => {
 					title: "Forked",
 					updatedAt: 300,
 					messageCount: 0,
-					parentID: "parent-1",
+					forkedFrom: "parent-1",
 					forkMessageId: "msg-1",
 					forkPointTimestamp: 250,
 					attention: "idle",
@@ -1675,7 +1677,7 @@ describe("SessionManagerService", () => {
 						title: "Forked",
 						updatedAt: 50,
 						messageCount: 0,
-						parentID: "parent-1",
+						forkedFrom: "parent-1",
 						forkMessageId: "msg-1",
 						forkPointTimestamp: 250,
 					},
@@ -1738,14 +1740,12 @@ describe("SessionManagerService", () => {
 						title: "Forked",
 						updatedAt: 50,
 						messageCount: 0,
-						parentID: "parent-1",
+						forkedFrom: "parent-1",
 						forkMessageId: "msg-1",
 						forkPointTimestamp: 250,
 					},
 				]);
-				expect(Array.from(parentMap.entries())).toEqual([
-					["forked-1", "parent-1"],
-				]);
+				expect(Array.from(parentMap.entries())).toEqual([]);
 				expect(loadForkMetadata(tmpDir).get("forked-1")).toEqual(entry);
 			}).pipe(
 				Effect.provide(layer),

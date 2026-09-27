@@ -244,7 +244,7 @@ describe("WsRpcServerLayer ListSessions", () => {
 				expect.objectContaining({
 					type: "session_forked",
 					sessionId: "session-forked",
-					parentId: "session-1",
+					forkedFrom: "session-1",
 					parentTitle: "Original Session",
 				}),
 			);
@@ -472,7 +472,8 @@ describe("WsRpcServerLayer ListSessions", () => {
 				const forkRow = yield* readQuery.getSession(result.sessionId);
 				expect(forkRow).toMatchObject({
 					provider: "my-claude",
-					parent_id: "ses-parent",
+					parent_id: null,
+					forked_from: null,
 					provider_sid: "sdk-fork",
 				});
 				expect(
@@ -495,7 +496,7 @@ describe("WsRpcServerLayer ListSessions", () => {
 					.mock.calls.map(([message]) => message)
 					.find((message) => message.type === "session_forked");
 				expect(forkNotice).toMatchObject({
-					parentId: "ses-parent",
+					forkedFrom: "ses-parent",
 					sessionId: result.sessionId,
 					session: {
 						forkMessageId: `api-first_${result.sessionId}`,

@@ -35,6 +35,7 @@ export type SessionHistorySource =
 export interface SessionSwitchMessageOptions {
 	readonly draft?: string;
 	readonly parentID?: string;
+	readonly forkedFrom?: string;
 	readonly requestId?: RequestId;
 }
 
@@ -213,6 +214,7 @@ export function buildSessionSwitchedMessage(
 	const optionalFields = {
 		...(options?.draft ? { inputText: options.draft } : {}),
 		...(options?.parentID != null ? { parentID: options.parentID } : {}),
+		...(options?.forkedFrom != null ? { forkedFrom: options.forkedFrom } : {}),
 		...(options?.requestId != null ? { requestId: options.requestId } : {}),
 	};
 

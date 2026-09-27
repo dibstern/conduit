@@ -242,8 +242,10 @@ export interface SessionInfo {
 	updatedAt?: string | number;
 	messageCount?: number;
 	processing?: boolean;
-	/** Parent session ID — set when this session was forked from another. */
+	/** Subagent parent session ID. */
 	parentID?: string;
+	/** Session this top-level fork originated from. */
+	forkedFrom?: string;
 	/** The message ID at the fork point — messages up to this ID are inherited context. */
 	forkMessageId?: string;
 	/** Unix-ms timestamp of the fork-point message. Messages created before
@@ -565,6 +567,7 @@ const SessionInfoSchema = Schema.Struct({
 	messageCount: Schema.optional(Schema.Number),
 	processing: Schema.optional(Schema.Boolean),
 	parentID: Schema.optional(Schema.String),
+	forkedFrom: Schema.optional(Schema.String),
 	forkMessageId: Schema.optional(Schema.String),
 	forkPointTimestamp: Schema.optional(Schema.Number),
 	pendingQuestionCount: Schema.optional(Schema.Number),
@@ -865,6 +868,7 @@ const SessionSwitchedSchema = Schema.Struct({
 	id: Schema.String,
 	sessionId: Schema.String,
 	parentID: Schema.optional(Schema.String),
+	forkedFrom: Schema.optional(Schema.String),
 	requestId: Schema.optional(RequestId),
 	events: Schema.optional(Schema.Array(Schema.Unknown)),
 	eventsHasMore: Schema.optional(Schema.Boolean),
@@ -895,7 +899,7 @@ const SessionForkedSchema = Schema.Struct({
 	type: Schema.Literal("session_forked"),
 	sessionId: Schema.String,
 	session: SessionInfoSchema,
-	parentId: Schema.String,
+	forkedFrom: Schema.String,
 	parentTitle: Schema.String,
 });
 
@@ -1529,6 +1533,7 @@ export type RelayMessage =
 			id: string;
 			sessionId: string;
 			parentID?: string;
+			forkedFrom?: string;
 			/** Correlation ID echoed from CreateSession request. */
 			requestId?: RequestId;
 			/** Raw events for client replay (cache hit). */
@@ -1559,7 +1564,7 @@ export type RelayMessage =
 			/** The newly created forked session. */
 			session: SessionInfo;
 			/** The session this was forked from. */
-			parentId: string;
+			forkedFrom: string;
 			/** Title of the parent session. */
 			parentTitle: string;
 	  }

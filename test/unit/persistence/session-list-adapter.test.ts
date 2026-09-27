@@ -17,6 +17,7 @@ function makeRow(id: string, overrides?: Partial<SessionRow>): SessionRow {
 		title: "Untitled",
 		status: "idle",
 		parent_id: null,
+		forked_from: null,
 		fork_point_event: null,
 		last_message_at: null,
 		last_turn_error_at: null,
@@ -248,17 +249,18 @@ describe("sessionRowsToSessionInfoList", () => {
 		});
 	});
 
-	it("includes parentID and forkMessageId for forked sessions", () => {
+	it("includes forkedFrom and forkMessageId without subagent lineage", () => {
 		const rows: SessionRow[] = [
 			makeRow("fork-1", {
-				parent_id: "parent-1",
+				forked_from: "parent-1",
 				fork_point_event: "msg-42",
 			}),
 		];
 
 		const result = sessionRowsToSessionInfoList(rows);
 		const [row] = result;
-		expect(row?.parentID).toBe("parent-1");
+		expect(row?.forkedFrom).toBe("parent-1");
+		expect(row?.parentID).toBeUndefined();
 		expect(row?.forkMessageId).toBe("msg-42");
 	});
 
@@ -283,11 +285,12 @@ describe("sessionRowsToSessionInfoList", () => {
 			title: "Untitled",
 			updatedAt: 2000,
 			messageCount: 0,
-			parentID: "parent-1",
+			forkedFrom: "parent-1",
 			forkMessageId: "msg-42",
 			forkPointTimestamp: 1234,
 			attention: "idle",
 		});
+		expect(result[0]?.parentID).toBeUndefined();
 	});
 
 	it("omits parentID and forkMessageId when not a fork", () => {

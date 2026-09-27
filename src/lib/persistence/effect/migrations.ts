@@ -14,6 +14,7 @@ import {
 	readMigrationSql,
 	SESSION_CASCADE_DELETES_MIGRATION,
 	SESSIONS_AUTO_SETTLE_MIGRATION,
+	SESSIONS_FORKED_FROM_MIGRATION,
 	SESSIONS_LAST_TURN_ERROR_MIGRATION,
 	SESSIONS_MARKED_UNREAD_MIGRATION,
 	SESSIONS_PERMISSION_MODE_MIGRATION,
@@ -72,6 +73,9 @@ const sessionsAutoSettleMigrationSql = readMigrationSql(
 );
 const sessionsMarkedUnreadMigrationSql = readMigrationSql(
 	SESSIONS_MARKED_UNREAD_MIGRATION,
+);
+const sessionsForkedFromMigrationSql = readMigrationSql(
+	SESSIONS_FORKED_FROM_MIGRATION,
 );
 
 const expectedTableColumns = {
@@ -390,6 +394,7 @@ const appendedSessionColumns = [
 	"auto_settle_disabled_at",
 	"settled_automatically",
 	"marked_unread_at",
+	"forked_from",
 ] as const;
 
 function sameStrings(
@@ -868,6 +873,9 @@ export const effectMigrationEntries = {
 	"0016_sessions_snoozed": runSessionsSnoozedMigration,
 	"0017_sessions_auto_settle": runSessionsAutoSettleMigration,
 	"0018_sessions_marked_unread": runSessionsMarkedUnreadMigration,
+	"0019_sessions_forked_from": executeSqlStatements(
+		sessionsForkedFromMigrationSql,
+	),
 } satisfies Record<string, Effect.Effect<void, unknown, SqlClient.SqlClient>>;
 
 export function makeEffectMigrationLoader(

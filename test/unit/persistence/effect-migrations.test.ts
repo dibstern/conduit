@@ -12,6 +12,10 @@ import {
 	makeEffectSqlMigrator,
 } from "../../../src/lib/persistence/effect/migrations.js";
 import type { SessionRow } from "../../../src/lib/persistence/read-model-types.js";
+import {
+	readMigrationSql,
+	SESSIONS_FORKED_FROM_MIGRATION,
+} from "../../../src/lib/persistence/schema.js";
 import { sessionRowsToSessionInfoList } from "../../../src/lib/persistence/session-list-adapter.js";
 import { seedLegacyEventStore } from "../../helpers/legacy-event-store.js";
 
@@ -51,6 +55,39 @@ function sessionColumns(db: Database.Database): string[] {
 }
 
 describe("Effect SQL migrations", () => {
+	it("moves existing forks without changing subagents or cascading origin deletion", () => {
+		const db = new Database(":memory:");
+		try {
+			db.pragma("foreign_keys = ON");
+			db.exec(`CREATE TABLE sessions (
+				id TEXT PRIMARY KEY,
+				parent_id TEXT REFERENCES sessions(id) ON DELETE CASCADE,
+				fork_point_event TEXT
+			)`);
+			const insert = db.prepare(
+				"INSERT INTO sessions (id, parent_id, fork_point_event) VALUES (?, ?, ?)",
+			);
+			insert.run("origin", null, null);
+			insert.run("fork", "origin", "msg-1");
+			insert.run("child", "origin", null);
+			db.exec(readMigrationSql(SESSIONS_FORKED_FROM_MIGRATION));
+			const rows = db
+				.prepare("SELECT id, parent_id, forked_from FROM sessions ORDER BY id")
+				.all();
+			expect(rows).toEqual([
+				{ id: "child", parent_id: "origin", forked_from: null },
+				{ id: "fork", parent_id: null, forked_from: "origin" },
+				{ id: "origin", parent_id: null, forked_from: null },
+			]);
+			db.prepare("DELETE FROM sessions WHERE id = 'origin'").run();
+			expect(db.prepare("SELECT id FROM sessions").all()).toEqual([
+				{ id: "fork" },
+			]);
+		} finally {
+			db.close();
+		}
+	});
+
 	it.effect("adds automatic settlement columns with nullable overrides", () =>
 		Effect.gen(function* () {
 			const sql = yield* SqlClient.SqlClient;
@@ -210,6 +247,7 @@ describe("Effect SQL migrations", () => {
 					{ migration_id: 16, name: "sessions_snoozed" },
 					{ migration_id: 17, name: "sessions_auto_settle" },
 					{ migration_id: 18, name: "sessions_marked_unread" },
+					{ migration_id: 19, name: "sessions_forked_from" },
 				]);
 
 				const legacyRows = yield* sql<{ id: number; name: string }>`
@@ -262,6 +300,7 @@ describe("Effect SQL migrations", () => {
 					[16, "sessions_snoozed"],
 					[17, "sessions_auto_settle"],
 					[18, "sessions_marked_unread"],
+					[19, "sessions_forked_from"],
 				]);
 
 				const sql = yield* SqlClient.SqlClient;
@@ -280,8 +319,8 @@ describe("Effect SQL migrations", () => {
 					name: string;
 				}>`SELECT migration_id, name FROM effect_sql_migrations ORDER BY migration_id`;
 				expect(effectHistory.at(-1)).toEqual({
-					migration_id: 18,
-					name: "sessions_marked_unread",
+					migration_id: 19,
+					name: "sessions_forked_from",
 				});
 				const legacyHistory = yield* sql<{ id: number; name: string }>`
 					SELECT id, name FROM _migrations ORDER BY id`;
@@ -329,6 +368,7 @@ describe("Effect SQL migrations", () => {
 					{ migration_id: 16, name: "sessions_snoozed" },
 					{ migration_id: 17, name: "sessions_auto_settle" },
 					{ migration_id: 18, name: "sessions_marked_unread" },
+					{ migration_id: 19, name: "sessions_forked_from" },
 				]);
 
 				const columns = yield* sql<{ name: string }>`
@@ -406,8 +446,8 @@ describe("Effect SQL migrations", () => {
 					FROM effect_sql_migrations
 					ORDER BY migration_id`;
 				expect(history.at(-1)).toEqual({
-					migration_id: 18,
-					name: "sessions_marked_unread",
+					migration_id: 19,
+					name: "sessions_forked_from",
 				});
 			}).pipe(
 				Effect.provide(

@@ -402,7 +402,6 @@ export const forkOpenCodeSession = (
 				sessionId: session.id,
 				title: normalizeSessionTitle(session.title),
 				provider: parent?.provider ?? "opencode",
-				parentId: parentSessionId,
 				providerSessionId: session.id,
 			},
 		});
@@ -508,7 +507,6 @@ const forkClaudeSession = (parentSessionId: string, messageId?: string) =>
 				sessionId: id,
 				title,
 				provider: parent.provider,
-				parentId: parentSessionId,
 				providerSessionId: sdkFork.sdkSessionId,
 			},
 		});

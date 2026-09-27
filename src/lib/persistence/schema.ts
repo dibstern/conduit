@@ -32,6 +32,7 @@ export const SESSIONS_SNOOZED_MIGRATION = "0015_sessions_snoozed.sql";
 export const SESSIONS_AUTO_SETTLE_MIGRATION = "0016_sessions_auto_settle.sql";
 export const SESSIONS_MARKED_UNREAD_MIGRATION =
 	"0017_sessions_marked_unread.sql";
+export const SESSIONS_FORKED_FROM_MIGRATION = "0018_sessions_forked_from.sql";
 
 export function readMigrationSql(filename: string): string {
 	return readFileSync(

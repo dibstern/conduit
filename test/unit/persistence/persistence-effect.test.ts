@@ -184,6 +184,8 @@ describe("Persistence Effect", () => {
 				{ migration_id: 15, name: "sessions_settled_pinned" },
 				{ migration_id: 16, name: "sessions_snoozed" },
 				{ migration_id: 17, name: "sessions_auto_settle" },
+				{ migration_id: 18, name: "sessions_marked_unread" },
+				{ migration_id: 19, name: "sessions_forked_from" },
 			]);
 
 			const legacyMigrationTable = yield* sql<{ name: string }>`

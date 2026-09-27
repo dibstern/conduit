@@ -151,9 +151,11 @@ export function sessionRowsToSessionInfoList(
 		Object.assign(info, deriveSessionSnooze(row, opts?.now));
 
 		const forkEntry = opts?.forkMeta?.get(row.id);
-		const parentID = row.parent_id ?? forkEntry?.parentID;
+		const parentID = row.parent_id;
+		const forkedFrom = row.forked_from ?? forkEntry?.parentID;
 		const forkMessageId = row.fork_point_event ?? forkEntry?.forkMessageId;
 		if (parentID) info.parentID = parentID;
+		if (forkedFrom) info.forkedFrom = forkedFrom;
 		if (forkMessageId) info.forkMessageId = forkMessageId;
 		if (forkEntry?.forkPointTimestamp != null) {
 			info.forkPointTimestamp = forkEntry.forkPointTimestamp;

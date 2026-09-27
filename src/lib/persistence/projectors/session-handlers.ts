@@ -246,7 +246,8 @@ export const sessionHandlers: {
 		return [
 			{
 				sql: `UPDATE sessions SET
-					parent_id = ?,
+					forked_from = ?,
+					parent_id = NULL,
 					fork_point_event = COALESCE(?, fork_point_event),
 					updated_at = ?
 				 WHERE id = ?`,

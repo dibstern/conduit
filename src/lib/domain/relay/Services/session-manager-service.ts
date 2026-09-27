@@ -131,16 +131,11 @@ const toReadonlyMap = <K, V>(map: HashMap.HashMap<K, V>): ReadonlyMap<K, V> =>
 
 const sessionRowsParentMap = (
 	rows: readonly Pick<SessionRow, "id" | "parent_id">[],
-	forkMeta: HashMap.HashMap<string, ForkEntry>,
 ): HashMap.HashMap<string, string> => {
 	let parentMap = HashMap.empty<string, string>();
 	for (const row of rows) {
-		const forkEntry = HashMap.get(forkMeta, row.id);
-		const parentID =
-			row.parent_id ??
-			(forkEntry._tag === "Some" ? forkEntry.value.parentID : undefined);
-		if (parentID) {
-			parentMap = HashMap.set(parentMap, row.id, parentID);
+		if (row.parent_id) {
+			parentMap = HashMap.set(parentMap, row.id, row.parent_id);
 		}
 	}
 	return parentMap;
@@ -148,16 +143,12 @@ const sessionRowsParentMap = (
 
 const sessionDetailsParentMap = (
 	sessions: readonly SessionDetail[],
-	forkMeta: HashMap.HashMap<string, ForkEntry>,
 ): HashMap.HashMap<string, string> => {
 	let parentMap = HashMap.empty<string, string>();
 	for (const session of sessions) {
 		const rec = session as Record<string, unknown>;
 		const apiParentID = rec["parentID"];
-		const forkEntry = HashMap.get(forkMeta, session.id);
-		const parentID =
-			(typeof apiParentID === "string" ? apiParentID : undefined) ??
-			(forkEntry._tag === "Some" ? forkEntry.value.parentID : undefined);
+		const parentID = typeof apiParentID === "string" ? apiParentID : undefined;
 		if (parentID) {
 			parentMap = HashMap.set(parentMap, session.id, parentID);
 		}
@@ -240,7 +231,7 @@ export const listSessions = (options?: ListSessionsOptions) =>
 							new SessionManagerError({ operation: "listSessions", cause }),
 					),
 				);
-			const parentMap = sessionRowsParentMap(lineage.rows, state.forkMeta);
+			const parentMap = sessionRowsParentMap(lineage.rows);
 			yield* Ref.update(stateRef, (s) => ({
 				...s,
 				cachedParentMap: parentMap,
@@ -291,7 +282,7 @@ export const listSessions = (options?: ListSessionsOptions) =>
 		if (!options?.roots) {
 			yield* Ref.update(stateRef, (s) => ({
 				...s,
-				cachedParentMap: sessionDetailsParentMap(sessions, s.forkMeta),
+				cachedParentMap: sessionDetailsParentMap(sessions),
 				lastKnownSessionCount: sessions.length,
 			}));
 			yield* updateRelaySessionCountSnapshot(sessions.length);
@@ -338,7 +329,7 @@ export const initialize = (title?: string) =>
 			}
 			return {
 				...s,
-				cachedParentMap: sessionDetailsParentMap(existing, s.forkMeta),
+				cachedParentMap: sessionDetailsParentMap(existing),
 				lastMessageAt,
 				lastKnownSessionCount: existing.length,
 			};
@@ -1147,11 +1138,8 @@ export const setPendingQuestionCounts = (counts: ReadonlyMap<string, number>) =>
  * Record fork-point metadata for a forked session: lineage into the event
  * store, the whole entry into relay state and the on-disk sidecar.
  *
- * The canonical event leads. `sessions.parent_id` is what the root-session
- * query filters on, so lineage that reaches only the sidecar leaves the fork
- * looking like a top-level session to every reader that does not consult it
- * (conduit-test-o5vp). The sidecar is now a cache of the same fact, plus the
- * fork-point timestamp, which has no column.
+ * The canonical event records fork origin separately from subagent lineage.
+ * The sidecar retains the fork-point timestamp, which has no column.
  */
 export const setForkEntry = (
 	sessionId: string,
@@ -1188,9 +1176,7 @@ export const setForkEntry = (
 				{
 					...s,
 					forkMeta: nextForkMeta,
-					cachedParentMap: entry.parentID
-						? HashMap.set(s.cachedParentMap, sessionId, entry.parentID)
-						: s.cachedParentMap,
+					cachedParentMap: HashMap.remove(s.cachedParentMap, sessionId),
 				},
 			] as const;
 		});

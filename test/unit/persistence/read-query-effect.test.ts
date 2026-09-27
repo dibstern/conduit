@@ -15,6 +15,7 @@ import {
 	ReadQueryEffectTag,
 } from "../../../src/lib/persistence/effect/read-query-effect.js";
 import { sessionFamilyQuery } from "../../../src/lib/persistence/session-family-query.js";
+import { sessionRowsToSessionInfoList } from "../../../src/lib/persistence/session-list-adapter.js";
 import { makeMockSessionManagerService } from "../../helpers/mock-factories.js";
 
 const testLayer = EffectSqliteClient.layer({ filename: ":memory:" });
@@ -26,19 +27,21 @@ function seedSession(
 		status?: string;
 		updatedAt?: number;
 		parentId?: string;
+		forkedFrom?: string;
 	} = {},
 ) {
 	return Effect.gen(function* () {
 		const sql = yield* SqlClient.SqlClient;
 		yield* sql`
 			INSERT INTO sessions
-			(id, provider, title, status, parent_id, created_at, updated_at)
+			(id, provider, title, status, parent_id, forked_from, created_at, updated_at)
 			VALUES (
 				${sessionId},
 				'claude',
 				${options.title ?? "Test"},
 				${options.status ?? "idle"},
 				${options.parentId ?? null},
+				${options.forkedFrom ?? null},
 				${options.updatedAt ?? 1},
 				${options.updatedAt ?? 1}
 			)`;
@@ -46,6 +49,34 @@ function seedSession(
 }
 
 describe("ReadQueryEffect.listSessions", () => {
+	it.effect(
+		"lists forks as roots and keeps their busy state off the origin",
+		() =>
+			Effect.gen(function* () {
+				yield* makeEffectSqlMigrator();
+				yield* seedSession("origin");
+				yield* seedSession("fork", { status: "busy", forkedFrom: "origin" });
+				yield* seedSession("child", { parentId: "origin" });
+				const readQuery = yield* makeReadQueryEffect;
+				const roots = yield* readQuery.listSessions({ roots: true });
+				expect(roots.map((row) => row.id)).toEqual(["origin", "fork"]);
+				const lineage = yield* readQuery.getSessionLineage();
+				const parentMap = new Map(
+					lineage.rows.flatMap((row) =>
+						row.parent_id ? [[row.id, row.parent_id] as const] : [],
+					),
+				);
+				const infos = sessionRowsToSessionInfoList([...roots], { parentMap });
+				expect(
+					infos.find((row) => row.id === "origin")?.processing,
+				).toBeUndefined();
+				expect(infos.find((row) => row.id === "fork")).toMatchObject({
+					forkedFrom: "origin",
+					processing: true,
+				});
+			}).pipe(Effect.provide(testLayer)),
+	);
+
 	it.effect("applies deterministic keyset paging, roots, and limits", () =>
 		Effect.gen(function* () {
 			yield* makeEffectSqlMigrator();

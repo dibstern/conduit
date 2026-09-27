@@ -260,15 +260,17 @@ describe("applySessionCommand", () => {
 						id: string;
 						provider: string;
 						parent_id: string | null;
+						forked_from: string | null;
 						fork_point_event: string | null;
-					}>`SELECT id, provider, parent_id, fork_point_event
+					}>`SELECT id, provider, parent_id, forked_from, fork_point_event
 					   FROM sessions WHERE id = ${forked.id}`,
 				).toEqual([
 					{
 						id: "ses-fork",
 						// Inherited from the parent, not assumed.
 						provider: "opencode",
-						parent_id: "ses-parent",
+						parent_id: null,
+						forked_from: "ses-parent",
 						fork_point_event: "msg-7",
 					},
 				]);

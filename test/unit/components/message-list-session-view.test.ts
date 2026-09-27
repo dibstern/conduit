@@ -25,6 +25,7 @@ describe("MessageList session-view publication", () => {
 
 	afterEach(() => {
 		cleanup();
+		sessionState.sessions.delete("fork-with-deleted-origin");
 		vi.clearAllTimers();
 		vi.useRealTimers();
 	});
@@ -48,6 +49,27 @@ describe("MessageList session-view publication", () => {
 		transcript.dispatchEvent(new Event("scroll"));
 		flushSync();
 	}
+
+	it("links the fork divider to its origin even when the origin is not loaded", () => {
+		sessionState.currentId = "fork-with-deleted-origin";
+		sessionState.sessions.set("fork-with-deleted-origin", {
+			id: "fork-with-deleted-origin",
+			title: "Fork",
+			forkedFrom: "deleted-origin",
+			forkPointTimestamp: 2,
+		});
+		const slot = getOrCreateSessionSlot("fork-with-deleted-origin");
+		slot.messages.loadLifecycle = "ready";
+		slot.messages.messages = [
+			{ type: "user", uuid: "inherited", text: "Earlier", createdAt: 1 },
+			{ type: "user", uuid: "new", text: "Later", createdAt: 3 },
+		];
+		const { container } = mountTranscript();
+		const divider = container.querySelector(".fork-divider");
+		expect(divider?.querySelector("button")?.textContent?.trim()).toBe(
+			"parent session",
+		);
+	});
 
 	it("publishes detach, re-follow and programmatic follow without false detach", () => {
 		const { transcript, getByRole } = mountTranscript();

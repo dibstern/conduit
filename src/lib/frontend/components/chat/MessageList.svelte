@@ -230,7 +230,7 @@
 			: null,
 	);
 	const parentSession = $derived(
-		activeSession?.parentID ? findSession(activeSession.parentID) : null,
+		activeSession?.forkedFrom ? findSession(activeSession.forkedFrom) : null,
 	);
 	// A fork renders two transcripts; only the current half can be live.
 	const inheritedTurns = $derived(
@@ -337,7 +337,7 @@
 
 		<ForkDivider
 			parentTitle={parentSession?.title ?? "parent session"}
-			parentId={activeSession?.parentID ?? ""}
+			parentId={activeSession?.forkedFrom ?? ""}
 		/>
 
 		{#each currentTurns as turn (turn.id)}

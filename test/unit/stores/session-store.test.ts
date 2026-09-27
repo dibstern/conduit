@@ -574,9 +574,9 @@ describe("handleSessionForked (ticket 5.3)", () => {
 				id: "ses_forked",
 				title: "Forked from Original",
 				updatedAt: 2000,
-				parentID: "ses_original",
+				forkedFrom: "ses_original",
 			},
-			parentId: "ses_original",
+			forkedFrom: "ses_original",
 			parentTitle: "Original",
 		});
 
@@ -595,9 +595,9 @@ describe("handleSessionForked (ticket 5.3)", () => {
 				id: "ses_forked",
 				title: "Forked from Original",
 				updatedAt: 2000,
-				parentID: "ses_original",
+				forkedFrom: "ses_original",
 			},
-			parentId: "ses_original",
+			forkedFrom: "ses_original",
 			parentTitle: "Original",
 		});
 
@@ -613,13 +613,15 @@ describe("handleSessionForked (ticket 5.3)", () => {
 				id: "fork-1",
 				title: "Forked",
 				updatedAt: Date.now(),
-				parentID: "parent-1",
+				forkedFrom: "parent-1",
 				forkMessageId: "msg_42",
 			},
-			parentId: "parent-1",
+			forkedFrom: "parent-1",
 			parentTitle: "Parent",
 		});
 		const found = findSession("fork-1");
+		expect(found?.forkedFrom).toBe("parent-1");
+		expect(found?.parentID).toBeUndefined();
 		expect(found?.forkMessageId).toBe("msg_42");
 	});
 });

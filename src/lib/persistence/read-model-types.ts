@@ -7,6 +7,7 @@ export interface SessionRow {
 	title: string;
 	status: string;
 	parent_id: string | null;
+	forked_from: string | null;
 	fork_point_event: string | null;
 	last_message_at: number | null;
 	last_turn_error_at: number | null;

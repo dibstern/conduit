@@ -17,7 +17,7 @@ describe("conduit-owned fields survive session list refresh", () => {
 	});
 
 	describe("toSessionInfoList fork metadata enrichment", () => {
-		it("applies parentID from fork metadata when OpenCode has no parentID", async () => {
+		it("applies forkedFrom from fork metadata when OpenCode has no parentID", async () => {
 			const mockClient = {
 				session: {
 					list: vi.fn().mockResolvedValue([
@@ -45,7 +45,8 @@ describe("conduit-owned fields survive session list refresh", () => {
 
 			const forked = sessions.find((s) => s.id === "ses_forked");
 			expect(forked).toBeDefined();
-			expect(forked?.parentID).toBe("ses_parent");
+			expect(forked?.forkedFrom).toBe("ses_parent");
+			expect(forked?.parentID).toBeUndefined();
 			expect(forked?.forkMessageId).toBe("msg_42");
 		});
 
@@ -72,6 +73,7 @@ describe("conduit-owned fields survive session list refresh", () => {
 			const sessions = await mgr.listSessions();
 			const sub = sessions.find((s) => s.id === "ses_sub");
 			expect(sub?.parentID).toBe("ses_opencode_parent");
+			expect(sub?.forkedFrom).toBe("ses_conduit_parent");
 		});
 
 		it("applies forkMessageId even when parentID comes from OpenCode", async () => {
@@ -143,17 +145,17 @@ describe("conduit-owned fields survive session list refresh", () => {
 
 			// First call
 			const first = await mgr.listSessions();
-			expect(first[0]?.parentID).toBe("ses_parent");
+			expect(first[0]?.forkedFrom).toBe("ses_parent");
 			expect(first[0]?.forkMessageId).toBe("msg_1");
 
 			// Second call (simulates session_list refresh)
 			const second = await mgr.listSessions();
-			expect(second[0]?.parentID).toBe("ses_parent");
+			expect(second[0]?.forkedFrom).toBe("ses_parent");
 			expect(second[0]?.forkMessageId).toBe("msg_1");
 
 			// Third call (another refresh)
 			const third = await mgr.listSessions();
-			expect(third[0]?.parentID).toBe("ses_parent");
+			expect(third[0]?.forkedFrom).toBe("ses_parent");
 			expect(third[0]?.forkMessageId).toBe("msg_1");
 		});
 
@@ -177,7 +179,7 @@ describe("conduit-owned fields survive session list refresh", () => {
 			});
 
 			const results = await mgr.searchSessions("Search Target");
-			expect(results[0]?.parentID).toBe("ses_p");
+			expect(results[0]?.forkedFrom).toBe("ses_p");
 			expect(results[0]?.forkMessageId).toBe("msg_search");
 		});
 	});

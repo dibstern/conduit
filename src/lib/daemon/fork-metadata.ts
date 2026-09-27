@@ -1,6 +1,7 @@
 // Fork Metadata Persistence
 // Stores fork-point metadata in ~/.conduit/fork-metadata.json.
 // Maps sessionId → { forkMessageId, parentID } for user-initiated forks.
+// The on-disk parentID is the fork origin, not a subagent parent.
 
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";

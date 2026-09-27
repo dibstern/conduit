@@ -21,7 +21,7 @@ export function toSessionInfoList(
 			const lastMsgTime = lastMessageAt?.get(s.id);
 			const displayTime = lastMsgTime ?? s.time?.created ?? 0;
 			const forkEntry = forkMeta?.get(s.id);
-			const parentID = s.parentID ?? forkEntry?.parentID;
+			const parentID = s.parentID;
 
 			const info: SessionInfo = {
 				id: s.id,
@@ -29,6 +29,7 @@ export function toSessionInfoList(
 				updatedAt: displayTime,
 				messageCount: 0,
 				...(parentID != null && { parentID }),
+				...(forkEntry?.parentID && { forkedFrom: forkEntry.parentID }),
 				...(forkEntry != null && { forkMessageId: forkEntry.forkMessageId }),
 				...(forkEntry?.forkPointTimestamp != null && {
 					forkPointTimestamp: forkEntry.forkPointTimestamp,
