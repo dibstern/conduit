@@ -27,7 +27,7 @@ import {
 	type ProjectAlreadyExists,
 	type ProjectNotFound,
 	ProjectRegistryTag,
-	remove as removeProjectFromRegistry,
+	removeProjectFromEffectRegistry,
 } from "./project-registry-service.js";
 import { RelayCacheTag } from "./relay-cache.js";
 
@@ -169,23 +169,16 @@ export const DaemonHandleLive: Layer.Layer<
 
 		const removeProject = (slug: string) =>
 			Effect.gen(function* () {
-				const removedProject = yield* getProject(slug).pipe(
+				yield* getProject(slug).pipe(
 					Effect.provideService(ProjectRegistryTag, projectRef),
 				);
-				yield* removeProjectFromRegistry(slug).pipe(
+				yield* removeProjectFromEffectRegistry(slug).pipe(
 					Effect.provideService(ProjectRegistryTag, projectRef),
 					Effect.provideService(DaemonEventBusTag, bus),
 					Effect.provideService(RelayCacheTag, relayCache),
 					Effect.provideService(ConfigPersistenceTag, persistence),
+					Effect.provideService(DaemonConfigRefTag, configRef),
 				);
-				yield* commitConfig((config) => ({
-					...config,
-					dismissedPaths: new Set([
-						...config.dismissedPaths,
-						removedProject.directory,
-					]),
-				}));
-				yield* persistence.requestSave;
 			}).pipe(Effect.withSpan("daemonHandle.removeProject"));
 
 		const getProjects = () =>

@@ -699,3 +699,20 @@ export const addProjectToEffectRegistry = (
 		yield* addWithoutRelay(project);
 		return project;
 	}).pipe(Effect.withSpan("relayCache.addProjectCallback"));
+
+/**
+ * Remove a project the user asked to drop, and dismiss its directory so
+ * OpenCode project discovery does not re-register it on the next start.
+ */
+export const removeProjectFromEffectRegistry = (slug: string) =>
+	Effect.gen(function* () {
+		const entry = yield* getEntry(slug);
+		if (Option.isNone(entry)) return;
+		const { directory } = entry.value.project;
+		yield* remove(slug);
+		yield* commitDaemonRuntimeConfig((config) => ({
+			...config,
+			dismissedPaths: new Set([...config.dismissedPaths, directory]),
+		}));
+		yield* requestConfigSave;
+	}).pipe(Effect.withSpan("projectRegistry.removeAndDismiss"));

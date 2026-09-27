@@ -9,15 +9,17 @@
 	let {
 		open = $bindable(true),
 		selected = $bindable("shared"),
+		presentation = "popover",
 	}: {
 		open?: boolean;
 		selected?: string;
+		presentation?: "popover" | "sheet";
 	} = $props();
 </script>
 
 <output class="sr-only" data-testid="selected-value">{selected}</output>
 
-<Menu bind:open ariaLabel="File actions" class="min-w-44">
+<Menu bind:open {presentation} ariaLabel="File actions" class="min-w-44">
 	{#snippet trigger({ props })}
 		<button
 			{...props}

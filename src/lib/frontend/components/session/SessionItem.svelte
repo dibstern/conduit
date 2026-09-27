@@ -539,8 +539,11 @@
 			<div class="absolute inset-0 flex items-stretch font-brand text-xs font-semibold">
 				{#if !actions.settleDisabledReason}
 					<Button
-						variant="ghost" size="content" layout="flow" tone="inherit" hoverFill="none"
-						type="button"
+						variant="ghost"
+						size="content"
+						layout="flow"
+						tone="inherit"
+						hoverFill="none"
 						data-testid="session-swipe-settle"
 						data-stage={stage}
 						ariaLabel="Settle {displayTitle}"
@@ -552,8 +555,11 @@
 					</Button>
 				{/if}
 				<Button
-					variant="ghost" size="content" layout="flow" tone="inherit" hoverFill="none"
-					type="button"
+					variant="ghost"
+					size="content"
+					layout="flow"
+					tone="inherit"
+					hoverFill="none"
 					data-testid={session.unread ? "session-swipe-mark-read" : "session-swipe-mark-unread"}
 					ariaLabel="Mark {session.unread ? 'read' : 'unread'} {displayTitle}"
 					class="flex w-[74px] shrink-0 flex-col items-center justify-center gap-1 bg-brand-a/15 text-brand-a"
@@ -565,8 +571,11 @@
 			</div>
 		{:else}
 		<Button
-			variant="ghost" size="content" layout="flow" tone="inherit" hoverFill="none"
-			type="button"
+			variant="ghost"
+			size="content"
+			layout="flow"
+			tone="inherit"
+			hoverFill="none"
 			data-testid="session-swipe-action"
 			data-stage={stage}
 			ariaLabel="{verb} {displayTitle}"

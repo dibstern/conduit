@@ -1,9 +1,10 @@
 import { RpcTest } from "@effect/rpc";
 import { describe, it } from "@effect/vitest";
-import { Effect } from "effect";
+import { Effect, Ref } from "effect";
 import { expect, vi } from "vitest";
 import { WsRpcGroup } from "../../../src/lib/contracts/ws-rpc.js";
 import { DaemonWsRpcHandlersTag } from "../../../src/lib/domain/daemon/Layers/daemon-ws-rpc-layer.js";
+import { DaemonConfigRefTag } from "../../../src/lib/domain/daemon/Services/daemon-config-ref.js";
 import { RelayCacheTag } from "../../../src/lib/domain/daemon/Services/relay-cache.js";
 import { makeRoutedWsRpcServerLayer } from "../../../src/lib/server/ws-rpc.js";
 import { makeDaemonRpcTestLayer } from "../../helpers/daemon-rpc.js";
@@ -117,6 +118,35 @@ describe("daemon RPC handlers", () => {
 				expect(resolve).not.toHaveBeenCalled();
 			}).pipe(Effect.provide(makeDaemonRpcTestLayer()));
 		},
+	);
+
+	it.scoped(
+		"dismisses a removed project so discovery does not re-register it on restart",
+		() =>
+			Effect.gen(function* () {
+				const handlers = yield* DaemonWsRpcHandlersTag;
+				const client = yield* RpcTest.makeClient(WsRpcGroup).pipe(
+					Effect.provide(
+						makeRoutedWsRpcServerLayer(
+							() => Effect.die("Unexpected routing"),
+							handlers,
+						),
+					),
+				);
+				const configRef = yield* DaemonConfigRefTag;
+				yield* client.RemoveProject({ slug: "gone" });
+				expect((yield* Ref.get(configRef)).dismissedPaths).toEqual(
+					new Set(["/tmp/gone"]),
+				);
+				yield* client.AddProject({ directory: "/tmp/gone" });
+				expect((yield* Ref.get(configRef)).dismissedPaths).toEqual(new Set());
+			}).pipe(
+				Effect.provide(
+					makeDaemonRpcTestLayer([
+						{ slug: "gone", title: "gone", directory: "/tmp/gone" },
+					]),
+				),
+			),
 	);
 
 	it.scoped(

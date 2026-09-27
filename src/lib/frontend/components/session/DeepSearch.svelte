@@ -5,8 +5,8 @@
 	import { switchToSession } from "../../stores/session.svelte.js";
 	import { listDaemonSessionsRpc } from "../../transport/ws-rpc-client.js";
 	import { formatSnoozeTime, formatTimeAgo } from "../../utils/format.js";
-	import Modal from "../ui/Modal.svelte";
 	import Button from "../ui/Button.svelte";
+	import Modal from "../ui/Modal.svelte";
 	import TextInput from "../ui/TextInput.svelte";
 	import ProjectSquare from "./ProjectSquare.svelte";
 
@@ -167,6 +167,7 @@
 		<TextInput
 			bind:element={input}
 			size="content"
+			chrome="bare"
 			data-testid="deep-search-input"
 			role="combobox"
 			aria-label="Search every session"
@@ -174,7 +175,7 @@
 			aria-expanded="true"
 			aria-controls="deep-search-results"
 			aria-activedescendant={highlighted >= 0 ? `deep-search-option-${highlighted}` : undefined}
-			class="w-full rounded-lg border border-border bg-bg-surface px-3 py-2 text-base text-text outline-none focus:border-border-chip"
+			class="w-full rounded-lg border border-border bg-bg-surface px-3 py-2 text-base text-text focus:border-border-chip"
 			placeholder="Search every session…"
 			autocomplete="off"
 			spellcheck={false}
@@ -195,15 +196,15 @@
 					variant="ghost"
 					size="content"
 					layout="flow"
-					tone="inherit"
-					hoverFill="none"
+					tone="default"
+					hoverFill="surface"
 					id={`deep-search-option-${index}`}
 					data-testid="deep-search-result"
 					role="option"
 					aria-selected={highlighted === index}
 					ariaLabel={`${result.title || "New Session"}, ${name}, ${location || "Live"}`}
 					tabindex={-1}
-					class="flex w-full flex-col gap-1 rounded-md px-3 py-2 text-left text-sm text-text hover:bg-bg-surface data-[active=true]:bg-bg-surface"
+					class="flex w-full flex-col gap-1 rounded-md px-3 py-2 text-left text-sm data-[active=true]:bg-bg-surface"
 					data-active={highlighted === index}
 					onpointermove={() => (highlighted = index)}
 					onclick={() => choose(result)}
@@ -224,7 +225,7 @@
 			<p class="py-4 text-center text-sm text-text-secondary">Search unavailable</p>
 		{/if}
 		{#if hasMore}
-			<Button variant="ghost" size="content" layout="flow" tone="inherit" hoverFill="none" data-testid="deep-search-more" class="self-center rounded px-3 py-2 text-sm text-text-secondary hover:bg-bg-surface" disabled={loading} onclick={showMore}>Show more</Button>
+			<Button variant="ghost" size="content" layout="flow" tone="inherit" hoverFill="surface" disabledStyle="undimmed" data-testid="deep-search-more" class="self-center rounded px-3 py-2 text-sm text-text-secondary" disabled={loading} onclick={showMore}>Show more</Button>
 		{/if}
 	</div>
 {/snippet}

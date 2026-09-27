@@ -79,6 +79,32 @@ describe("Menu", () => {
 		stylesheet.remove();
 	});
 
+	it("presents a sheet with a token scrim, touch rows, and Escape dismissal", async () => {
+		const view = render(MenuTestHarness, {
+			props: { open: false, presentation: "sheet" },
+		});
+		const trigger = view.getByRole("button", { name: "Open actions" });
+		trigger.focus();
+		await fireEvent.click(trigger);
+		const menu = view.getByRole("menu", { name: "Test actions" });
+		expect(menu.classList.contains("fixed")).toBe(true);
+		expect(menu.classList.contains("bottom-0")).toBe(true);
+		expect(menu.classList.contains("z-[var(--z-sheet)]")).toBe(true);
+		expect(
+			view.getByTestId("menu-sheet-scrim").classList.contains("bg-backdrop"),
+		).toBe(true);
+		expect(view.getByTestId("archive-item").classList.contains("py-3")).toBe(
+			true,
+		);
+		expect(
+			view.getByTestId("explicit-density-item").classList.contains("py-1.5"),
+		).toBe(true);
+
+		await fireEvent.keyDown(menu, { key: "Escape" });
+		await waitFor(() => expect(view.queryByRole("menu")).toBeNull());
+		await waitFor(() => expect(document.activeElement).toBe(trigger));
+	});
+
 	it("keeps a body-portaled menu live while its trigger is inside a modal", async () => {
 		const view = render(MenuInModalHarness);
 		const modal = view.getByRole("dialog", { name: "Modal with menu" });

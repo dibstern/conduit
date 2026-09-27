@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { DropdownMenu, type DropdownMenuItemProps } from "bits-ui";
-	import type { Snippet } from "svelte";
+	import { getContext, type Snippet } from "svelte";
 	import type { HTMLAnchorAttributes, HTMLAttributes } from "svelte/elements";
 	import Icon from "./Icon.svelte";
 	import {
@@ -9,6 +9,7 @@
 		MENU_ITEM_VARIANT_CLASSES,
 		type MenuItemDensity,
 	} from "./floating-styles.js";
+	import { menuDensityContextKey, type MenuDensityContext } from "./menu-context.js";
 
 	type MenuItemVariant = keyof typeof MENU_ITEM_VARIANT_CLASSES;
 	type MenuAnchorAttributes = Omit<
@@ -62,7 +63,7 @@
 
 	let {
 		variant = "default",
-		density = "default",
+		density,
 		icon = "trash-2",
 		disabled = false,
 		href,
@@ -73,11 +74,12 @@
 		children,
 		...rest
 	}: MenuItemProps = $props();
+	const menuDensity = getContext<MenuDensityContext | undefined>(menuDensityContextKey);
 
 	const itemClass = $derived(
 		[
 			FLOATING_ITEM_BASE_CLASSES,
-			MENU_ITEM_DENSITY_CLASSES[density],
+			MENU_ITEM_DENSITY_CLASSES[density ?? menuDensity?.() ?? "default"],
 			MENU_ITEM_VARIANT_CLASSES[variant],
 			className,
 		]

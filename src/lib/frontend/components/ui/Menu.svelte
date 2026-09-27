@@ -2,9 +2,10 @@
 	import {
 		DropdownMenu,
 		type DropdownMenuContentProps,
+		type DropdownMenuContentStaticProps,
 		type DropdownMenuPortalProps,
 	} from "bits-ui";
-	import type { Snippet } from "svelte";
+	import { setContext, type Snippet } from "svelte";
 	import {
 		exemptFromBackgroundInert,
 		registerOpenSurface,
@@ -13,6 +14,7 @@
 		FLOATING_MENU_CONTENT_CLASSES,
 		FLOATING_POSITIONING_DEFAULTS,
 	} from "./floating-styles.js";
+	import { menuDensityContextKey, type MenuDensityContext } from "./menu-context.js";
 
 	type MenuSide = "top" | "right" | "bottom" | "left";
 	type MenuAlign = "start" | "center" | "end";
@@ -22,6 +24,8 @@
 		open?: boolean | undefined;
 		onopenchange?: ((open: boolean) => void) | undefined;
 		ariaLabel?: string | undefined;
+		/** MenuItem rows need DropdownMenu's dismissal model; a Modal sheet would require raw rows and a second model. */
+		presentation?: "popover" | "sheet" | undefined;
 		side?: MenuSide | undefined;
 		align?: MenuAlign | undefined;
 		sideOffset?: number | undefined;
@@ -54,6 +58,7 @@
 		open = $bindable(false),
 		onopenchange,
 		ariaLabel,
+		presentation = "popover",
 		side,
 		align = FLOATING_POSITIONING_DEFAULTS.align,
 		sideOffset = FLOATING_POSITIONING_DEFAULTS.sideOffset,
@@ -65,6 +70,9 @@
 		children,
 		...rest
 	}: MenuOwnProps = $props();
+	setContext<MenuDensityContext>(menuDensityContextKey, () =>
+		presentation === "sheet" ? "touch" : "default",
+	);
 
 	const contentClass = $derived(
 		[FLOATING_MENU_CONTENT_CLASSES, className].filter(Boolean).join(" "),
@@ -80,6 +88,7 @@
 	 */
 	const contentId = $props.id();
 	let contentNode = $state<HTMLElement | null>(null);
+	let scrimInteractive = $state(false);
 
 	function handleOpenChange(nextOpen: boolean) {
 		open = nextOpen;
@@ -90,6 +99,16 @@
 		if (open) return registerOpenSurface(() => handleOpenChange(false));
 		return undefined;
 	});
+	$effect(() => {
+		if (!open || presentation !== "sheet") {
+			scrimInteractive = false;
+			return;
+		}
+		// Bits opens on pointerdown and installs outside dismissal after mount.
+		const timer = setTimeout(() => { scrimInteractive = true; }, 50);
+		return () => clearTimeout(timer);
+	});
+
 
 	/**
 	 * bits-ui mounts the content's focus scope twice per open, so its
@@ -132,6 +151,18 @@
 		...(ariaLabel === undefined ? {} : { "aria-label": ariaLabel }),
 		class: contentClass,
 	});
+	const sheetContentProps: Omit<DropdownMenuContentStaticProps, "child" | "children"> = $derived({
+		...rest,
+		id: contentId,
+		onOpenAutoFocus: focusContentOnce,
+		preventScroll: false,
+		loop: true,
+		...(ariaLabel === undefined ? {} : { "aria-label": ariaLabel }),
+		class: [
+			"fixed inset-x-0 bottom-0 z-[var(--z-sheet)] max-h-[90vh] w-full overflow-y-auto rounded-t-[18px] border-t border-border bg-bg-alt pb-[calc(12px+env(safe-area-inset-bottom))] shadow-modal focus-visible:outline-hidden",
+			className,
+		].filter(Boolean).join(" "),
+	});
 </script>
 
 <DropdownMenu.Root bind:open onOpenChange={handleOpenChange}>
@@ -142,6 +173,17 @@
 	</DropdownMenu.Trigger>
 
 	<DropdownMenu.Portal {...portalProps}>
+		{#if presentation === "sheet"}
+			{#if open}<div aria-hidden="true" data-testid="menu-sheet-scrim" class="fixed inset-0 z-[var(--z-sheet)] bg-backdrop" class:pointer-events-none={!scrimInteractive} use:exemptFromBackgroundInert></div>{/if}
+			<DropdownMenu.ContentStatic {...sheetContentProps}>
+				{#snippet child({ props })}
+					<div {...props} id={contentId} bind:this={contentNode} use:exemptFromBackgroundInert>
+						<div class="mx-auto mt-2 -mb-2 h-1 w-[38px] shrink-0 rounded-full bg-border" aria-hidden="true"></div>
+						{@render children()}
+					</div>
+				{/snippet}
+			</DropdownMenu.ContentStatic>
+		{:else}
 		<DropdownMenu.Content {...contentProps}>
 			{#snippet child({ props, wrapperProps })}
 				<div {...wrapperProps}>
@@ -156,5 +198,6 @@
 				</div>
 			{/snippet}
 		</DropdownMenu.Content>
+		{/if}
 	</DropdownMenu.Portal>
 </DropdownMenu.Root>

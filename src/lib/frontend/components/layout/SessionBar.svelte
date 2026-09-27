@@ -51,7 +51,6 @@
 		openSettings,
 		shareViaQr,
 		toggleDebugPanel,
-		toggleTerminal,
 	} from "./chrome-actions.js";
 	import InstanceBadgeMenu from "./InstanceBadgeMenu.svelte";
 	import { activeSessionView, sessionViews } from "./session-views.js";
@@ -90,6 +89,7 @@
 	}
 
 	let overflowOpen = $state(false);
+	let overflowOpener: HTMLElement | null = null;
 	let stateMenuOpen = $state(false);
 
 	function rpcInput() {
@@ -215,10 +215,8 @@
 	     Collapsed it drops a size: the row shares its width with the state
 	     glyph and two 44px controls.
 
-	     The mock draws a chevron beside the name, the session menu's affordance.
-	     It is not here yet, because a control that does nothing is worse than no
-	     control -- it reads as broken rather than as coming. It arrives with the
-	     menu it opens, as one of that menu's two triggers. -->
+	     Expanded, the title chevron opens the same menu as the overflow button.
+	     The collapsed row keeps its separate chevron for expanding the bar. -->
 	<div id="session-bar-title-row" class="flex min-w-0 items-center gap-1.5">
 		<h1
 			id="session-bar-title"
@@ -227,6 +225,24 @@
 			class:text-lg={!collapsed}
 			class:text-base={collapsed}
 		><span class="block truncate">{title}</span></h1>
+		{#if !collapsed}
+			<Button
+				variant="ghost"
+				size="content"
+				iconOnly
+				icon="chevron-down"
+				iconSize={17}
+				class="-my-[13px] shrink-0 min-h-[44px] min-w-[44px] justify-center rounded-lg"
+				ariaLabel="Session menu"
+				aria-haspopup="menu"
+				aria-expanded={overflowOpen}
+				data-testid="session-bar-title-menu"
+				onclick={(event) => {
+					overflowOpener = event.currentTarget as HTMLElement;
+					overflowOpen = true;
+				}}
+			/>
+		{/if}
 		{#if stateChip && session}
 			{#if stateChip.kind === "woke"}
 				<Badge variant="state" shape="pill" size="sm" data-testid="session-bar-state-chip" data-state="woke" title={stateChip.label}>
@@ -310,8 +326,18 @@
 	-->
 	<Menu
 		bind:open={overflowOpen}
+		presentation="sheet"
 		ariaLabel="More actions"
 		align="end"
+		onCloseAutoFocus={(event) => {
+			const opener = overflowOpener;
+			if (opener?.isConnected) {
+				event.preventDefault();
+				setTimeout(() => {
+					requestAnimationFrame(() => { if (opener.isConnected) opener.focus(); });
+				}, 0);
+			}
+		}}
 		data-testid="session-bar-overflow-menu"
 	>
 		{#snippet trigger({ props })}
@@ -327,8 +353,27 @@
 				title="More actions"
 				ariaLabel="More actions"
 				data-testid="session-bar-overflow"
+				onpointerdowncapture={(event) => { overflowOpener = event.currentTarget as HTMLElement; }}
+				onkeydowncapture={(event) => { overflowOpener = event.currentTarget as HTMLElement; }}
 			/>
 		{/snippet}
+
+		{#each sessionViews as view (view.id)}
+			<MenuItem
+				data-testid={`overflow-view-${view.id}`}
+				disabled={view.disabled === true}
+				aria-current={view.id === activeView ? "true" : undefined}
+				onselect={view.activate}
+			>
+				<Icon name={view.icon} size={16} class="shrink-0" />
+				<span class="min-w-0 flex-1">{view.label}</span>
+				{#if view.badge?.()}
+					<Badge variant="accent-solid" size="count" shape="pill">{view.badge()}</Badge>
+				{/if}
+				{#if view.id === activeView}<Icon name="check" size={14} class="shrink-0 text-accent" />{/if}
+			</MenuItem>
+		{/each}
+		<MenuSeparator />
 
 		{#if session && session.settledAt == null && !isSessionSnoozed(session, sessionState.now)}
 			<MenuItem
@@ -341,13 +386,6 @@
 			<MenuSeparator />
 		{/if}
 
-		<MenuItem
-			title="Toggle terminal"
-			data-testid="overflow-terminal"
-			onselect={toggleTerminal}
-		>
-			Terminal
-		</MenuItem>
 		<MenuItem title="Share" data-testid="overflow-share" onselect={shareViaQr}>
 			Share
 		</MenuItem>

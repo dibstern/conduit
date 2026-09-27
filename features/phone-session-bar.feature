@@ -29,6 +29,27 @@ Scenario: Switching back to chat keeps the transcript scroll position
   And I choose the Chat session view
   Then the transcript is visible at the remembered scroll position
 
+Scenario: The collapsed bar overflow lists the same views as the switcher
+  Given the viewport is a phone
+  And the conduit app is served with the long-transcript mockup
+  When I remember the session views from the switcher
+  And I scroll the transcript back to the bottom
+  And I scroll the transcript up by 400 pixels
+  Then the jump-to-latest control is visible
+  When I scroll the transcript back to the bottom
+  Then the session bar is collapsed
+  When I open the session overflow menu
+  Then the menu lists the same session views as the switcher
+
+Scenario: Activating a view from the menu switches the view
+  Given the viewport is a phone
+  And the conduit app is served with the long-transcript mockup
+  When I open the session overflow menu
+  And I choose the Terminal view from the menu
+  Then the terminal panel is visible
+  And the Terminal session view is selected
+  And the session overflow menu is closed
+
 # The collapse is a walk through the state machine rather than four separate
 # scenarios: the interesting claims are all about transitions, and a transition
 # needs the step before it to have actually happened.

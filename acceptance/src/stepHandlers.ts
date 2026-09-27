@@ -27,6 +27,7 @@ const relayControls = new WeakMap<Page, WsMockControl>();
 const rpcControls = new WeakMap<Page, RpcMockControl>();
 const composerMessages = new WeakMap<Page, string>();
 const transcriptScrollPositions = new WeakMap<Page, number>();
+const rememberedSessionViews = new WeakMap<Page, string[]>();
 const mockClaudeSettings = new WeakMap<Page, Record<string, unknown>>();
 const inheritedClaudeCommitAttribution = "Inherited commit attribution";
 const claudeSettingsSessionId = "sess-claude-settings";
@@ -170,6 +171,72 @@ export const conduitVisualHandlers: StepHandler[] = [
 			await world.page
 				.getByRole("tab", { name: match[1] ?? "", exact: true })
 				.click();
+		},
+	},
+	{
+		name: "remember session views from switcher",
+		match: /^I remember the session views from the switcher$/,
+		run: async ({ world }) => {
+			rememberedSessionViews.set(
+				world.page,
+				await world.page
+					.getByTestId("session-bar-views")
+					.getByRole("tab")
+					.evaluateAll((tabs) =>
+						tabs.map((tab) => tab.getAttribute("aria-label") ?? ""),
+					),
+			);
+		},
+	},
+	{
+		name: "open session overflow menu",
+		match: /^I open the session overflow menu$/,
+		run: async ({ world }) => {
+			await world.page.getByTestId("session-bar-overflow").click();
+			await world.page
+				.getByTestId("session-bar-overflow-menu")
+				.waitFor({ state: "visible" });
+		},
+	},
+	{
+		name: "menu lists same session views",
+		match: /^the menu lists the same session views as the switcher$/,
+		run: async ({ world }) => {
+			const expected = rememberedSessionViews.get(world.page);
+			if (!expected?.length)
+				throw new Error("session views were not remembered");
+			const actual = await world.page
+				.getByTestId("session-bar-overflow-menu")
+				.getByRole("menuitem")
+				.evaluateAll(
+					(items, count) =>
+						items.slice(0, count).map((item) => item.textContent?.trim() ?? ""),
+					expected.length,
+				);
+			if (JSON.stringify(actual) !== JSON.stringify(expected)) {
+				throw new Error(
+					`menu views ${JSON.stringify(actual)} differ from switcher ${JSON.stringify(expected)}`,
+				);
+			}
+		},
+	},
+	{
+		name: "choose view from menu",
+		match: /^I choose the (Chat|Terminal|Files) view from the menu$/,
+		run: async ({ world, match }) => {
+			await world.page
+				.getByTestId("session-bar-overflow-menu")
+				.getByRole("menuitem", { name: match[1] ?? "", exact: true })
+				.click();
+		},
+	},
+	{
+		name: "session overflow menu is closed",
+		match: /^the session overflow menu is closed$/,
+		run: async ({ world }) => {
+			await world.page
+				.getByTestId("session-bar-overflow-menu")
+				.waitFor({ state: "hidden" });
 		},
 	},
 	{

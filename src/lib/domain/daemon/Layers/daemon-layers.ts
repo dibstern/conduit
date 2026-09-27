@@ -40,8 +40,6 @@ import {
 } from "../../../daemon/pid-manager.js";
 import { resolveTraceConfig } from "../../../env.js";
 import { migrateForkLineage } from "../../../persistence/migrations/fork-lineage-import.js";
-import type { StoredProject } from "../../../types.js";
-import { generateSlug } from "../../../utils.js";
 import { AuthManagerFromConfigLive } from "../../server/Layers/auth-middleware.js";
 import {
 	DaemonHttpRequestHandlerTag,
@@ -101,7 +99,7 @@ import {
 	makeProjectRegistryFromDaemonStateLive,
 	makeProjectRegistryLive,
 	ProjectRegistryTag,
-	remove as removeEffectProject,
+	removeProjectFromEffectRegistry,
 	replaceRelay as replaceEffectRelay,
 	updateProject as updateEffectProject,
 } from "../Services/project-registry-service.js";
@@ -442,7 +440,9 @@ export const makeRelayCacheLayer: Layer.Layer<
 						),
 					removeProject: (projectSlug: string) =>
 						runCallback(
-							provideProjectMutationDeps(removeEffectProject(projectSlug)),
+							provideProjectMutationDeps(
+								removeProjectFromEffectRegistry(projectSlug),
+							),
 						),
 					setProjectTitle: (projectSlug: string, title: string) =>
 						runCallback(

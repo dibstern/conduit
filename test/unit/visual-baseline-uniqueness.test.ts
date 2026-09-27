@@ -26,12 +26,17 @@ const ALLOWED_DUPLICATE_GROUPS: Record<string, string> = {
 	// real assertions live in play(), not in the pixels.
 	"ui-menu--default | ui-menu--escape-restores-focus | ui-menu--selecting-item-restores-focus":
 		"both interaction stories re-open the menu as their last step",
+	// Captures where the selecting-item frame differs still pair the other two.
+	"ui-menu--default | ui-menu--escape-restores-focus":
+		"the escape story re-opens the menu as its last step",
 	"ui-menu--arrow-key-navigation | ui-menu--typeahead":
 		"both end with focus on the same item",
 	"ui-popover--default | ui-popover--escape-restores-focus":
 		"escape story re-opens the popover as its last step",
 	"layout-sessionbar--expanded-by-chevron | layout-sessionbar--switcher":
 		"the chevron story ends at the same expanded bar as Switcher; its play assertion verifies the collapse transition and focus",
+	"layout-sessionbar--overflow-menu-open | layout-sessionbar--title-chevron-sheet":
+		"the overflow button and the title chevron open the same menu; each play assertion verifies its own trigger",
 
 	// Verified legitimate (conduit-test-732b). Each of these was traced to the
 	// source; the two stories genuinely produce the same frame.
