@@ -492,29 +492,6 @@ describe("Persistence Effect", () => {
 		}).pipe(Effect.provide(makePersistenceLayer())),
 	);
 
-	it.effect("evictBefore deletes old events", () =>
-		Effect.gen(function* () {
-			const persistence = yield* PersistenceServiceTag;
-			const sql = yield* SqlClient.SqlClient;
-			yield* sql`INSERT INTO sessions (id, provider, title, status, created_at, updated_at)
-				VALUES ('s-evict', 'opencode', 'Evict', 'idle', 1000, 1000)`;
-			yield* sql`INSERT INTO events (
-					event_id, session_id, stream_version, type, data, metadata, provider, created_at
-				) VALUES (
-					'evt-old', 's-evict', 0, 'session.created', '{}', '{}', 'opencode', 1000
-				)`;
-			yield* sql`INSERT INTO events (
-					event_id, session_id, stream_version, type, data, metadata, provider, created_at
-				) VALUES (
-					'evt-new', 's-evict', 1, 'session.status', '{}', '{}', 'opencode', 9999999999
-				)`;
-			const deleted = yield* persistence.evictBefore(5000);
-			expect(deleted).toBe(1);
-			const remaining = yield* sql`SELECT * FROM events`;
-			expect(remaining.length).toBe(1);
-		}).pipe(Effect.provide(makePersistenceLayer())),
-	);
-
 	it.effect("withTransaction commits on success", () =>
 		Effect.gen(function* () {
 			const sql = yield* SqlClient.SqlClient;

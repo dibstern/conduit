@@ -32,10 +32,8 @@
 //     would report the row it deleted while the cascade took the subtree in
 //     silence. So a new delete path anywhere, inside the seam or outside it,
 //     breaks the suite the moment it is written, with the fix named in the
-//     failure message. The two deletes that legitimately sit outside —
-//     retention eviction and the legacy skeleton migration — are listed there
-//     with their reasons, and adding to that list is a deliberate act rather
-//     than a silent one.
+//     failure message. The legacy skeleton migration delete sits outside and is
+//     listed there with its reason; adding another gap is a deliberate act.
 //
 // Bead conduit-test-ni8.5.12.
 
