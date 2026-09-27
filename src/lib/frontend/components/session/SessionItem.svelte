@@ -538,41 +538,53 @@
 		{#if direction === "settle" && stage === "reveal" && canMarkRead}
 			<div class="absolute inset-0 flex items-stretch font-brand text-xs font-semibold">
 				{#if !actions.settleDisabledReason}
-					<button
-						type="button"
+					<Button
+						variant="ghost"
+						size="content"
+						layout="flow"
+						tone="inherit"
+						hoverFill="none"
 						data-testid="session-swipe-settle"
 						data-stage={stage}
-						aria-label="Settle {displayTitle}"
+						ariaLabel="Settle {displayTitle}"
 						class="flex w-[74px] shrink-0 flex-col items-center justify-center gap-1 bg-success/15 text-success"
 						onclick={(event) => { event.preventDefault(); event.stopPropagation(); if (heldDirection) runSwipeAction("settle", false); }}
 					>
 						<Icon name="check" size={16} />
 						Settle
-					</button>
+					</Button>
 				{/if}
-				<button
-					type="button"
+				<Button
+					variant="ghost"
+					size="content"
+					layout="flow"
+					tone="inherit"
+					hoverFill="none"
 					data-testid={session.unread ? "session-swipe-mark-read" : "session-swipe-mark-unread"}
-					aria-label="Mark {session.unread ? 'read' : 'unread'} {displayTitle}"
+					ariaLabel="Mark {session.unread ? 'read' : 'unread'} {displayTitle}"
 					class="flex w-[74px] shrink-0 flex-col items-center justify-center gap-1 bg-brand-a/15 text-brand-a"
 					onclick={(event) => { event.preventDefault(); event.stopPropagation(); if (heldDirection) { onmarkread?.(session.id); closeHold(); } }}
 				>
 					<Icon name={session.unread ? "circle" : "circle-dot"} size={16} />
 					{session.unread ? "Read" : "Unread"}
-				</button>
+				</Button>
 			</div>
 		{:else}
-		<button
-			type="button"
+		<Button
+			variant="ghost"
+			size="content"
+			layout="flow"
+			tone="inherit"
+			hoverFill="none"
 			data-testid="session-swipe-action"
 			data-stage={stage}
-			aria-label="{verb} {displayTitle}"
+			ariaLabel="{verb} {displayTitle}"
 			class="absolute inset-0 {direction === 'settle' ? 'justify-start' : 'justify-end'} flex items-center gap-1 px-3 font-brand text-sm font-medium {stage === 'commit' ? (direction === 'settle' ? 'bg-success text-bg' : 'bg-accent text-bg') : (direction === 'settle' ? 'bg-success/15 text-success' : 'bg-accent/15 text-accent')}"
 			onclick={(event) => { event.preventDefault(); event.stopPropagation(); if (heldDirection) runSwipeAction(heldDirection, false); }}
 		>
 			<Icon name={verb === "Settle" ? "check" : verb === "Snooze" ? "moon" : "undo"} size={16} />
 			{stage === "commit" ? `Release to ${verb.toLowerCase()}` : verb}
-		</button>
+		</Button>
 		{/if}
 	{/if}
 <a
