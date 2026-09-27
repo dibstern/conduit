@@ -18,6 +18,7 @@ import {
 	countsPhrase,
 	economics,
 	fmtTokens,
+	forkMessageIdAtReply,
 	isSoloTool,
 	lastResult,
 	partLabel,
@@ -121,6 +122,64 @@ const read = (path: string, createdAt?: number) =>
 		{ tool: "Read", filePath: path },
 		createdAt !== undefined ? { createdAt } : {},
 	);
+
+describe("forkMessageIdAtReply", () => {
+	it.each([
+		"tool",
+		"thinking",
+		"text",
+	] as const)("uses the preceding %s part when the reply has no id", (kind) => {
+		const previous =
+			kind === "tool"
+				? read("/a.ts")
+				: kind === "thinking"
+					? think()
+					: say("Working");
+		previous.messageId = `${kind}-id`;
+		const reply = say();
+		const between = kind === "text" ? read("/a.ts") : undefined;
+		const turn = segmentTurns(
+			[user(), previous, ...(between ? [between] : []), reply],
+			false,
+		)[0]!;
+		expect(forkMessageIdAtReply(turn, reply)).toBe(`${kind}-id`);
+	});
+
+	it("does not use ids after an earlier segment's reply", () => {
+		const reply = say();
+		const end = result({ messageId: "end-id" });
+		const later = say("Later");
+		later.messageId = "later-id";
+		const turn = segmentTurns([user(), reply, end, later], false)[0]!;
+		expect(forkMessageIdAtReply(turn, reply)).toBeUndefined();
+		expect(forkMessageIdAtReply(turn, later)).toBe("later-id");
+	});
+
+	it("uses an earlier segment end and returns undefined when no id exists", () => {
+		const first = say("First");
+		const second = say("Second");
+		const withEnd = segmentTurns(
+			[user(), first, result({ messageId: "end-id" }), second],
+			false,
+		)[0]!;
+		expect(forkMessageIdAtReply(withEnd, second)).toBe("end-id");
+		const noId = say();
+		expect(
+			forkMessageIdAtReply(segmentTurns([user(), noId], false)[0]!, noId),
+		).toBeUndefined();
+	});
+
+	it("uses a hand-back id from an earlier segment", () => {
+		const question = tool("AskUserQuestion", { questions: [] });
+		question.messageId = "hand-back-id";
+		const reply = say();
+		const turn = segmentTurns(
+			[user(), say("Question"), question, reply],
+			false,
+		)[0]!;
+		expect(forkMessageIdAtReply(turn, reply)).toBe("hand-back-id");
+	});
+});
 
 // ─── segmentTurns ────────────────────────────────────────────────────────────
 

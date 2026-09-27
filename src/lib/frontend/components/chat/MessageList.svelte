@@ -23,7 +23,7 @@
 		noteUserScroll,
 		publishAtBottom,
 	} from "../../stores/session-view.svelte.js";
-	import { economics, lastResult, segmentTurns, type Turn } from "../../utils/turns.js";
+	import { economics, forkMessageIdAtReply, lastResult, segmentTurns, type Turn } from "../../utils/turns.js";
 	import UserMessage from "./UserMessage.svelte";
 	import AssistantMessage from "./AssistantMessage.svelte";
 	import TurnActivity from "./TurnActivity.svelte";
@@ -298,7 +298,7 @@
 			{/if}
 			{#each segment.reply as reply (reply.uuid)}
 				<div class="msg-container" class:rewind-point={uiState.rewindActive}>
-					<AssistantMessage message={reply} />
+					<AssistantMessage message={reply} forkMessageId={forkMessageIdAtReply(turn, reply)} />
 				</div>
 			{/each}
 			{#if segment.handBack}

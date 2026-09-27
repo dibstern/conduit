@@ -460,6 +460,26 @@ describe("WsRpcServerLayer ListSessions", () => {
 						},
 						{ provider: "claude", createdAt: timestamp + 11 },
 					),
+					canonicalEvent(
+						"message.created",
+						"ses-parent",
+						{
+							sessionId: "ses-parent",
+							messageId: "result-only",
+							role: "assistant",
+						},
+						{ provider: "claude", createdAt: timestamp + 12 },
+					),
+					canonicalEvent(
+						"text.delta",
+						"ses-parent",
+						{
+							messageId: "result-only",
+							partId: "result-only-text",
+							text: "Handled locally",
+						},
+						{ provider: "claude", createdAt: timestamp + 13 },
+					),
 				]);
 				const client = yield* rpcClient;
 				const result = yield* client.ForkSession({
@@ -557,6 +577,23 @@ describe("WsRpcServerLayer ListSessions", () => {
 				const sql = yield* SqlClient.SqlClient;
 				const sessionCount = () =>
 					sql<{ count: number }>`SELECT COUNT(*) AS count FROM sessions`;
+				const resultOnlyFork = yield* client.ForkSession({
+					projectSlug: "project-a",
+					sessionId: "ses-parent",
+					messageId: "result-only",
+					originId: "browser-tab-a",
+				});
+				expect(forkSession).toHaveBeenLastCalledWith("sdk-parent", {
+					dir: "/project",
+					configDir: "/instance-config",
+					title: "Parent (fork)",
+					upToMessageId: "parent-final",
+				});
+				expect(
+					(yield* readQuery.getSessionMessagesWithParts(
+						resultOnlyFork.sessionId,
+					)).map((message) => message.id),
+				).toContain(`result-only_${resultOnlyFork.sessionId}`);
 				const beforeMissingPoint = (yield* sessionCount())[0]?.count;
 				const missingPoint = yield* Effect.either(
 					client.ForkSession({
@@ -572,7 +609,7 @@ describe("WsRpcServerLayer ListSessions", () => {
 						"was not found in the session history",
 					);
 				expect((yield* sessionCount())[0]?.count).toBe(beforeMissingPoint);
-				expect(forkSession).toHaveBeenCalledTimes(1);
+				expect(forkSession).toHaveBeenCalledTimes(2);
 
 				const persistService = yield* ClaudeEventPersistEffectTag;
 				const failPersist = vi
@@ -594,7 +631,7 @@ describe("WsRpcServerLayer ListSessions", () => {
 				);
 				failPersist.mockRestore();
 				expect(rolledBack._tag).toBe("Left");
-				expect(forkSession).toHaveBeenCalledTimes(2);
+				expect(forkSession).toHaveBeenCalledTimes(3);
 				expect((yield* sessionCount())[0]?.count).toBe(beforeMissingPoint);
 
 				yield* applySessionCommand({
@@ -617,7 +654,7 @@ describe("WsRpcServerLayer ListSessions", () => {
 					expect(String(missing.left)).toContain(
 						"has no Claude transcript yet",
 					);
-				expect(forkSession).toHaveBeenCalledTimes(2);
+				expect(forkSession).toHaveBeenCalledTimes(3);
 			}).pipe(
 				Effect.scoped,
 				Effect.provide(layer),

@@ -166,6 +166,7 @@ export async function forkClaudeTranscript(
 		readonly configDir?: string;
 		readonly title: string;
 		readonly messageId?: string;
+		readonly fallbackMessageIds?: readonly string[];
 	},
 	sdk: ClaudeSessionForkSdk = defaultClaudeSessionForkSdk,
 ): Promise<{ sdkSessionId: string }> {
@@ -177,6 +178,10 @@ export async function forkClaudeTranscript(
 	if (input.messageId !== undefined) {
 		const parentMessages = await sdk.readTranscript(input.parentSdkId, options);
 		upToMessageId = resolveForkUpToUuid(parentMessages, input.messageId);
+		for (const fallbackMessageId of input.fallbackMessageIds ?? []) {
+			if (upToMessageId !== undefined) break;
+			upToMessageId = resolveForkUpToUuid(parentMessages, fallbackMessageId);
+		}
 		if (upToMessageId === undefined) {
 			throw new ClaudeForkPointNotFoundError(input.messageId);
 		}

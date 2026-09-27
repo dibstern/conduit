@@ -156,6 +156,26 @@ export function lastResult(turn: Turn): ResultMessage | undefined {
 	return undefined;
 }
 
+/** The newest message id in this turn no later than the selected reply. */
+export function forkMessageIdAtReply(
+	turn: Turn,
+	reply: AssistantMessage,
+): string | undefined {
+	let messageId: string | undefined;
+	for (const segment of turn.segments) {
+		for (const part of segment.activity) {
+			if ("messageId" in part && part.messageId) messageId = part.messageId;
+		}
+		for (const part of segment.reply) {
+			if (part.messageId) messageId = part.messageId;
+			if (part === reply) return messageId;
+		}
+		if (segment.handBack?.messageId) messageId = segment.handBack.messageId;
+		if (segment.end?.messageId) messageId = segment.end.messageId;
+	}
+	return undefined;
+}
+
 // ─── Labels ──────────────────────────────────────────────────────────────────
 
 const VERBS: Record<string, [past: string, present: string]> = {

@@ -493,6 +493,17 @@ const forkClaudeSession = (parentSessionId: string, messageId?: string) =>
 					}),
 					title,
 					...(messageId !== undefined && { messageId }),
+					...(messageId !== undefined && {
+						fallbackMessageIds: history.events
+							.flatMap((event) =>
+								event.type === "message.created" &&
+								event.data.role === "assistant" &&
+								event.data.messageId !== `${messageId}_${id}`
+									? [event.data.messageId.slice(0, -id.length - 1)]
+									: [],
+							)
+							.reverse(),
+					}),
 				}),
 			catch: (cause) =>
 				new SessionCommandError({
