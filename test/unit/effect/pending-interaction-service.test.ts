@@ -280,8 +280,9 @@ describe("PendingInteractionService", () => {
 			const resolved = yield* service.resolveQuestionFromBrowser("question-1", {
 				"0": "Yes",
 			});
-			expect(Option.getOrUndefined(resolved)).toEqual({
+			expect(Option.getOrUndefined(resolved)).toMatchObject({
 				sessionId: "session-1",
+				question: { requestId: "question-1" },
 			});
 			expect(yield* Fiber.join(waiter)).toEqual({ "0": "Yes" });
 			expect(yield* service.listPendingQuestions("session-1")).toHaveLength(0);
@@ -315,8 +316,9 @@ describe("PendingInteractionService", () => {
 			const resolved = yield* service.resolveQuestionFromBrowser("question-1", {
 				"0": "Yes",
 			});
-			expect(Option.getOrUndefined(resolved)).toEqual({
+			expect(Option.getOrUndefined(resolved)).toMatchObject({
 				sessionId: "question-session",
+				question: { requestId: "question-1" },
 			});
 			const duplicate = yield* service.resolveQuestionFromBrowser(
 				"question-1",
@@ -359,5 +361,74 @@ describe("PendingInteractionService", () => {
 			);
 			expect(yield* service.listPendingQuestions("session-1")).toHaveLength(0);
 		}).pipe(Effect.provide(PendingInteractionServiceLive)),
+	);
+
+	it.effect(
+		"recovers stored questions without a waiter and resolves them once",
+		() =>
+			Effect.gen(function* () {
+				const service = yield* PendingInteractionServiceTag;
+				yield* service.recoverPendingQuestions([
+					{
+						requestId: "toolu-1",
+						toolCallId: "toolu-1",
+						messageId: "message-1",
+						sessionId: "session-1",
+						providerId: "claude",
+						questions: [
+							{
+								question: "Which colour?",
+								header: "Colour",
+								options: [{ label: "red" }],
+								multiSelect: false,
+							},
+						],
+					},
+				]);
+				expect(yield* service.listPendingQuestions("session-1")).toMatchObject([
+					{
+						requestId: "toolu-1",
+						recovered: true,
+						toolCallId: "toolu-1",
+						questions: [{ question: "Which colour?" }],
+					},
+				]);
+				const resolved = yield* service.resolveQuestionFromBrowser("toolu-1", {
+					"0": "red",
+				});
+				expect(Option.getOrUndefined(resolved)).toMatchObject({
+					question: { recovered: true },
+				});
+				expect(yield* service.listPendingQuestions("session-1")).toHaveLength(
+					0,
+				);
+			}).pipe(Effect.provide(PendingInteractionServiceLive)),
+	);
+
+	it.effect(
+		"converts a live question to recovered when its session is disposed",
+		() =>
+			Effect.gen(function* () {
+				const service = yield* PendingInteractionServiceTag;
+				const pending = yield* service.beginQuestionRequest({
+					requestId: "toolu-1",
+					sessionId: "session-1",
+					questions: [{ question: "Continue?" }],
+				});
+				const waiter = yield* Effect.fork(pending.awaitAnswers);
+				yield* service.cancelSessionInteractions("session-1", "disposed", {
+					recoverQuestions: true,
+				});
+				expect(Exit.isFailure(yield* Effect.exit(Fiber.join(waiter)))).toBe(
+					true,
+				);
+				expect(yield* service.listPendingQuestions("session-1")).toMatchObject([
+					{ requestId: "toolu-1", recovered: true },
+				]);
+				const resolved = yield* service.resolveQuestionFromBrowser("toolu-1", {
+					"0": "Yes",
+				});
+				expect(Option.isSome(resolved)).toBe(true);
+			}).pipe(Effect.provide(PendingInteractionServiceLive)),
 	);
 });

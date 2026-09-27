@@ -6,6 +6,7 @@ import type {
 	MessageRow,
 	MessageWithParts,
 	PendingApprovalCountRow,
+	PendingClaudeQuestionToolRow,
 	SessionRow,
 	TurnModelExecutionRow,
 } from "../read-model-types.js";
@@ -64,6 +65,17 @@ export interface ReadQueryEffect {
 
 	readonly countPendingApprovalsBySession: () => Effect.Effect<
 		readonly PendingApprovalCountRow[],
+		ReadQueryEffectError | SqlError
+	>;
+	readonly listPendingClaudeQuestionTools?: () => Effect.Effect<
+		readonly PendingClaudeQuestionToolRow[],
+		ReadQueryEffectError | SqlError
+	>;
+	readonly getPendingClaudeQuestionTool?: (
+		sessionId: string,
+		callId: string,
+	) => Effect.Effect<
+		PendingClaudeQuestionToolRow | undefined,
 		ReadQueryEffectError | SqlError
 	>;
 
@@ -266,6 +278,53 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 			),
 		);
 
+	const listPendingClaudeQuestionTools = () =>
+		sql<PendingClaudeQuestionToolRow>`
+			SELECT mp.id, mp.call_id, mp.message_id, mp.input, mp.created_at, m.session_id
+			FROM message_parts mp
+			JOIN messages m ON m.id = mp.message_id
+			JOIN sessions s ON s.id = m.session_id
+			WHERE s.provider = 'claude'
+				AND mp.type = 'tool'
+				AND mp.tool_name = 'AskUserQuestion'
+				AND mp.status IN ('started', 'running', 'pending')
+				-- A later user message means the conversation moved on (e.g. after a
+				-- crash), so the question is abandoned rather than still pending.
+				AND NOT EXISTS (
+					SELECT 1 FROM messages later
+					WHERE later.session_id = m.session_id
+						AND later.role = 'user'
+						AND later.created_at > m.created_at
+				)`.pipe(
+			Effect.mapError(
+				(cause) =>
+					new ReadQueryEffectError({
+						operation: "listPendingClaudeQuestionTools",
+						cause,
+					}),
+			),
+		);
+
+	const getPendingClaudeQuestionTool = (sessionId: string, callId: string) =>
+		sql<PendingClaudeQuestionToolRow>`
+			SELECT mp.id, mp.call_id, mp.message_id, mp.input, mp.created_at, m.session_id
+			FROM message_parts mp
+			JOIN messages m ON m.id = mp.message_id
+			JOIN sessions s ON s.id = m.session_id
+			WHERE s.provider = 'claude' AND m.session_id = ${sessionId}
+				AND mp.call_id = ${callId} AND mp.tool_name = 'AskUserQuestion'
+				AND mp.status IN ('started', 'running', 'pending')
+			LIMIT 1`.pipe(
+			Effect.map((rows) => rows[0]),
+			Effect.mapError(
+				(cause) =>
+					new ReadQueryEffectError({
+						operation: "getPendingClaudeQuestionTool",
+						cause,
+					}),
+			),
+		);
+
 	const getSessionMessagesWithParts = (
 		sessionId: string,
 	): Effect.Effect<MessageWithParts[], ReadQueryEffectError | SqlError> =>
@@ -379,6 +438,8 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 		getSessionFamily,
 		getSessionsForReconciliation,
 		countPendingApprovalsBySession,
+		listPendingClaudeQuestionTools,
+		getPendingClaudeQuestionTool,
 		getSessionMessagesWithParts,
 		getLatestTurnModelExecution,
 	} satisfies ReadQueryEffect;

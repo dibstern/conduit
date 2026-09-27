@@ -27,6 +27,7 @@ import {
 	type ReadQueryEffect,
 	ReadQueryEffectTag,
 } from "../../../persistence/effect/read-query-effect.js";
+import { createEventId } from "../../../persistence/events.js";
 import { messageRowsToHistory } from "../../../persistence/session-history-adapter.js";
 import type { OrchestrationEngine } from "../../../provider/orchestration-engine.js";
 import {
@@ -42,7 +43,10 @@ import type {
 	TurnResult,
 } from "../../../provider/types.js";
 import { OpenCodeAPITag } from "../../provider/Services/opencode-api-service.js";
-import { PendingInteractionServiceTag } from "./pending-interaction-service.js";
+import {
+	PendingInteractionServiceTag,
+	type PendingQuestion,
+} from "./pending-interaction-service.js";
 import {
 	type ProviderRuntimeIngestion,
 	ProviderRuntimeIngestionTag,
@@ -172,6 +176,10 @@ export interface ProviderTurnServiceInterruptInput {
 }
 
 export interface ProviderTurnService {
+	readonly completeRecoveredQuestion?: (
+		question: PendingQuestion,
+		result: string | null,
+	) => Effect.Effect<void, unknown>;
 	readonly prepareTurnSession: (
 		input: ProviderTurnServicePrepareInput,
 	) => Effect.Effect<string, unknown, OverridesStateTag>;
@@ -389,10 +397,11 @@ export const makeProviderTurnService = Effect.gen(function* () {
 					pendingInteractionService.beginQuestionRequest(request),
 				resolveQuestionRequest: (requestId, answers) =>
 					pendingInteractionService.resolveQuestionRequest(requestId, answers),
-				cancelSessionInteractions: (reason) =>
+				cancelSessionInteractions: (reason, options) =>
 					pendingInteractionService.cancelSessionInteractions(
 						sessionId,
 						reason,
+						options,
 					),
 			},
 		});
@@ -669,6 +678,80 @@ export const makeProviderTurnService = Effect.gen(function* () {
 			).pipe(Effect.asVoid);
 		});
 
+	const completeRecoveredQuestion = (
+		question: PendingQuestion,
+		result: string | null,
+	) =>
+		Effect.gen(function* () {
+			let messageId = question.messageId;
+			let partId = question.partId ?? question.toolCallId ?? question.requestId;
+			if (!messageId) {
+				const readQuery = yield* Effect.serviceOption(ReadQueryEffectTag);
+				const tool =
+					readQuery._tag === "Some" &&
+					readQuery.value.getPendingClaudeQuestionTool
+						? yield* readQuery.value.getPendingClaudeQuestionTool(
+								question.sessionId,
+								question.toolCallId ?? question.requestId,
+							)
+						: undefined;
+				if (!tool)
+					return yield* Effect.fail(
+						new Error(
+							`Pending Claude question tool not found: ${question.requestId}`,
+						),
+					);
+				messageId = tool.message_id;
+				partId = tool.id;
+			}
+			const ingestion = yield* Effect.serviceOption(
+				ProviderRuntimeIngestionTag,
+			);
+			if (ingestion._tag === "None") {
+				return yield* Effect.fail(
+					new ProviderRuntimeIngestionRequired(question.sessionId),
+				);
+			}
+			const completedEvent = {
+				eventId: createEventId(),
+				type: "tool.completed" as const,
+				providerId: CLAUDE_PROVIDER_ID,
+				sessionId: question.sessionId,
+				providerRefs: {
+					providerToolUseId: question.toolCallId ?? question.requestId,
+				},
+				rawSource: { kind: "relay.recovered-question" },
+				createdAt: Date.now(),
+				data: {
+					messageId,
+					partId,
+					result,
+					duration: 0,
+				},
+			};
+			if (question.messageId) {
+				// A fresh mapper has not seen the stored tool start. Seed its identity
+				// so completion updates the existing card without an Unknown tool.
+				yield* ingestion.value.ingestBatch([
+					{
+						...completedEvent,
+						eventId: createEventId(),
+						type: "tool.started",
+						data: {
+							messageId,
+							partId,
+							toolName: "AskUserQuestion",
+							callId: question.toolCallId ?? question.requestId,
+							input: { tool: "AskUserQuestion", questions: question.questions },
+						},
+					},
+					completedEvent,
+				]);
+			} else {
+				yield* ingestion.value.ingest(completedEvent);
+			}
+		});
+
 	const prepareTurnSession = (input: ProviderTurnServicePrepareInput) =>
 		Effect.gen(function* () {
 			const engineOption = yield* Effect.serviceOption(OrchestrationEngineTag);
@@ -692,22 +775,29 @@ export const makeProviderTurnService = Effect.gen(function* () {
 					yield* pendingInteractionService.listPendingQuestions(
 						input.sessionId,
 					);
-				if (pendingQuestions.length > 0) {
+				for (const question of pendingQuestions) {
+					if (!question.recovered) continue;
+					yield* completeRecoveredQuestion(question, null);
+					yield* pendingInteractionService.markQuestionResolved(
+						question.requestId,
+					);
+				}
+				if (pendingQuestions.some((question) => !question.recovered)) {
 					yield* interruptTurn({
 						clientId: input.clientId,
 						sessionId: input.sessionId,
 						commandId: `${input.commandId}:interrupt-for-question`,
 					});
-					for (const question of pendingQuestions) {
-						wsHandler.broadcast({
-							type: "ask_user_resolved",
-							sessionId: input.sessionId,
-							toolId: question.requestId,
-						});
-						yield* sessionManagerService.decrementPendingQuestionCount(
-							input.sessionId,
-						);
-					}
+				}
+				for (const question of pendingQuestions) {
+					wsHandler.broadcast({
+						type: "ask_user_resolved",
+						sessionId: input.sessionId,
+						toolId: question.requestId,
+					});
+					yield* sessionManagerService.decrementPendingQuestionCount(
+						input.sessionId,
+					);
 				}
 				return input.sessionId;
 			}
@@ -887,6 +977,7 @@ export const makeProviderTurnService = Effect.gen(function* () {
 		});
 
 	return {
+		completeRecoveredQuestion,
 		prepareTurnSession,
 		sendTurn,
 		interruptTurn,

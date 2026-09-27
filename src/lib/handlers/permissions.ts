@@ -8,6 +8,7 @@ import { OpenCodeAPITag } from "../domain/provider/Services/opencode-api-service
 
 import { Data, Effect, Option } from "effect";
 import { PendingInteractionServiceTag } from "../domain/relay/Services/pending-interaction-service.js";
+import { ProviderTurnServiceTag } from "../domain/relay/Services/provider-turn-service.js";
 import {
 	ConfigTag,
 	LoggerTag,
@@ -22,12 +23,14 @@ import {
 } from "../domain/relay/Services/session-overrides-state.js";
 import { RelayError } from "../errors.js";
 import { fixupConfigFile } from "../instance/opencode-config-fixup.js";
+import { createCommandId } from "../persistence/events.js";
 import { saveRelaySettings } from "../relay/relay-settings.js";
 import type {
 	PermissionId,
 	ProviderPermissionUpdateDestination,
 	SessionPermissionMode,
 } from "../shared-types.js";
+import { sendMessageToSession } from "./prompt.js";
 
 class RelaySettingsSaveError extends Data.TaggedError(
 	"RelaySettingsSaveError",
@@ -289,6 +292,41 @@ export const handleAskUserResponse = (
 			const resolved = Option.getOrUndefined(resolvedOption);
 			if (resolved) {
 				const questionSessionId = resolved.sessionId || sessionId;
+				if (resolved.question.recovered) {
+					const answerText = resolved.question.questions
+						.map(
+							(question, index) =>
+								`Answer to your question "${question.question}": ${answers[String(index)] ?? ""}`,
+						)
+						.join("\n");
+					const turnsOption = yield* Effect.serviceOption(
+						ProviderTurnServiceTag,
+					);
+					const turns = Option.getOrUndefined(turnsOption);
+					if (!turns?.completeRecoveredQuestion) {
+						yield* pendingInteractionsOption.value.recoverPendingQuestions([
+							resolved.question,
+						]);
+						return yield* Effect.fail(
+							new Error("Recovered question turn service unavailable"),
+						);
+					}
+					const completed = yield* Effect.either(
+						turns.completeRecoveredQuestion(resolved.question, answerText),
+					);
+					if (completed._tag === "Left") {
+						yield* pendingInteractionsOption.value.recoverPendingQuestions([
+							resolved.question,
+						]);
+						return yield* Effect.fail(completed.left);
+					}
+					yield* sendMessageToSession({
+						clientId,
+						sessionId: questionSessionId,
+						text: answerText,
+						commandId: payload.commandId ?? createCommandId(),
+					});
+				}
 				const engineOption = yield* Effect.serviceOption(
 					OrchestrationEngineTag,
 				);

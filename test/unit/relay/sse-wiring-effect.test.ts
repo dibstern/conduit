@@ -14,6 +14,7 @@ import {
 import {
 	type EffectSSEWiringDeps,
 	handleSSEEventEffect,
+	wireSSEConsumerEffect,
 } from "../../../src/lib/relay/sse-wiring.js";
 import type { OpenCodeEvent, RelayMessage } from "../../../src/lib/types.js";
 import { createMockSSEWiringDeps } from "../../helpers/mock-factories.js";
@@ -67,6 +68,54 @@ const makeEffectDeps = (
 };
 
 describe("handleSSEEventEffect", () => {
+	it("keeps recovered Claude counts when OpenCode questions rehydrate", async () => {
+		const { effectDeps } = makeEffectDeps();
+		const deps = {
+			...effectDeps,
+			listPendingQuestions: vi.fn(async () => [
+				{ id: "que-open", sessionID: "opencode-session", questions: [] },
+			]),
+		};
+		const setPendingQuestionCounts = vi.fn(() => Effect.void);
+		const listeners = new Map<string, () => void>();
+		const consumer = {
+			on: vi.fn((name: string, listener: () => void) => {
+				listeners.set(name, listener);
+			}),
+		} as unknown as Parameters<typeof wireSSEConsumerEffect>[1];
+		const layer = Layer.mergeAll(
+			PendingInteractionServiceLive,
+			makeOverridesStateLive(),
+			Layer.succeed(SessionManagerServiceTag, {
+				getSessionParentMap: () => Effect.succeed(new Map()),
+				setPendingQuestionCounts,
+			} as never),
+		);
+		await Effect.runPromise(
+			Effect.gen(function* () {
+				const pending = yield* PendingInteractionServiceTag;
+				yield* pending.recoverPendingQuestions([
+					{
+						requestId: "toolu-claude",
+						sessionId: "claude-session",
+						questions: [{ question: "Continue?" }],
+					},
+				]);
+				yield* wireSSEConsumerEffect(deps, consumer);
+				listeners.get("connected")?.();
+				yield* Effect.promise(() =>
+					vi.waitFor(() => {
+						expect(setPendingQuestionCounts).toHaveBeenCalledWith(
+							new Map([
+								["opencode-session", 1],
+								["claude-session", 1],
+							]),
+						);
+					}),
+				);
+			}).pipe(Effect.provide(layer)),
+		);
+	});
 	it("clears processing timeout through Effect state for done messages", async () => {
 		const deps = createMockSSEWiringDeps();
 		const {

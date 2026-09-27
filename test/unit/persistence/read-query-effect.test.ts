@@ -1,11 +1,21 @@
 import { SqlClient } from "@effect/sql";
 import { SqliteClient as EffectSqliteClient } from "@effect/sql-sqlite-node";
 import { describe, it } from "@effect/vitest";
-import { Effect } from "effect";
-import { expect } from "vitest";
+import { Effect, Layer } from "effect";
+import { expect, vi } from "vitest";
+import {
+	PendingInteractionServiceLive,
+	PendingInteractionServiceTag,
+} from "../../../src/lib/domain/relay/Services/pending-interaction-service.js";
+import { restoreClaudeQuestionsFromStore } from "../../../src/lib/domain/relay/Services/restore-claude-questions.js";
+import { SessionManagerServiceTag } from "../../../src/lib/domain/relay/Services/session-manager-service.js";
 import { makeEffectSqlMigrator } from "../../../src/lib/persistence/effect/migrations.js";
-import { makeReadQueryEffect } from "../../../src/lib/persistence/effect/read-query-effect.js";
+import {
+	makeReadQueryEffect,
+	ReadQueryEffectTag,
+} from "../../../src/lib/persistence/effect/read-query-effect.js";
 import { sessionFamilyQuery } from "../../../src/lib/persistence/session-family-query.js";
+import { makeMockSessionManagerService } from "../../helpers/mock-factories.js";
 
 const testLayer = EffectSqliteClient.layer({ filename: ":memory:" });
 
@@ -102,6 +112,79 @@ describe("ReadQueryEffect.listSessions", () => {
 });
 
 describe("ReadQueryEffect session lookups", () => {
+	it.effect(
+		"restores only running Claude question tools with stored inputs",
+		() => {
+			const setPendingQuestionCounts = vi.fn(() => Effect.void);
+			const services = Layer.mergeAll(
+				PendingInteractionServiceLive,
+				Layer.succeed(
+					SessionManagerServiceTag,
+					makeMockSessionManagerService({ setPendingQuestionCounts }),
+				),
+			);
+			return Effect.gen(function* () {
+				yield* makeEffectSqlMigrator();
+				yield* seedSession("claude-session");
+				yield* seedSession("opencode-session");
+				yield* seedSession("abandoned-session");
+				const sql = yield* SqlClient.SqlClient;
+				yield* sql`UPDATE sessions SET provider = 'opencode' WHERE id = 'opencode-session'`;
+				for (const [sessionId, status] of [
+					["claude-session", "running"],
+					["claude-session", "completed"],
+					["opencode-session", "running"],
+					["abandoned-session", "running"],
+				] as const) {
+					const messageId = `${sessionId}-${status}`;
+					yield* sql`INSERT INTO messages (id, session_id, role, text, is_streaming, created_at, updated_at)
+					VALUES (${messageId}, ${sessionId}, 'assistant', '', 0, 1, 1)`;
+					yield* sql`INSERT INTO message_parts
+					(id, message_id, type, tool_name, call_id, input, status, sort_order, created_at, updated_at)
+					VALUES (${`part-${messageId}`}, ${messageId}, 'tool', 'AskUserQuestion', ${`toolu-${messageId}`},
+						${JSON.stringify({ questions: [{ question: "Which colour?", header: "Colour", options: [{ label: "red" }], multiSelect: false }] })},
+						${status}, 0, 1, 1)`;
+				}
+				// The user moved on after this question, so it must not come back.
+				yield* sql`INSERT INTO messages (id, session_id, role, text, is_streaming, created_at, updated_at)
+				VALUES ('abandoned-later', 'abandoned-session', 'user', 'never mind', 0, 2, 2)`;
+				const readQuery = yield* makeReadQueryEffect;
+				if (!readQuery.getPendingClaudeQuestionTool)
+					return yield* Effect.fail(new Error("Missing question lookup"));
+				expect(
+					yield* readQuery.getPendingClaudeQuestionTool(
+						"claude-session",
+						"toolu-claude-session-running",
+					),
+				).toMatchObject({
+					id: "part-claude-session-running",
+					message_id: "claude-session-running",
+				});
+				yield* restoreClaudeQuestionsFromStore.pipe(
+					Effect.provideService(ReadQueryEffectTag, readQuery),
+				);
+				const pending = yield* PendingInteractionServiceTag;
+				expect(yield* pending.listPendingQuestions()).toMatchObject([
+					{
+						requestId: "toolu-claude-session-running",
+						toolCallId: "toolu-claude-session-running",
+						recovered: true,
+						questions: [
+							{
+								question: "Which colour?",
+								header: "Colour",
+								options: [{ label: "red" }],
+								multiSelect: false,
+							},
+						],
+					},
+				]);
+				expect(setPendingQuestionCounts).toHaveBeenCalledWith(
+					new Map([["claude-session", 1]]),
+				);
+			}).pipe(Effect.provide(Layer.mergeAll(testLayer, services)));
+		},
+	);
 	it.effect("reads tool content by tool id", () =>
 		Effect.gen(function* () {
 			yield* makeEffectSqlMigrator();

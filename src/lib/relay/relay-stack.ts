@@ -68,6 +68,7 @@ import {
 	type RelayStatusSnapshotService,
 	RelayStatusSnapshotTag,
 } from "../domain/relay/Services/relay-status-snapshot.js";
+import { restoreClaudeQuestionsFromStore } from "../domain/relay/Services/restore-claude-questions.js";
 import { ScanServiceLive } from "../domain/relay/Services/scan-service.js";
 import {
 	BackgroundLivenessTag,
@@ -1007,6 +1008,7 @@ export async function createProjectRelay(
 							}
 							return "";
 						});
+				yield* restoreClaudeQuestionsFromStore;
 				const restoredPermissionModes = yield* restoreSessionPermissionModes();
 				if (restoredPermissionModes > 0) {
 					yield* Effect.sync(() =>

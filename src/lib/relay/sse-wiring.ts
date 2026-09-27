@@ -968,9 +968,13 @@ const recoverPendingQuestionsEffect = (
 ) =>
 	Effect.gen(function* () {
 		const sessionService = yield* SessionManagerServiceTag;
-		yield* sessionService.setPendingQuestionCounts(
-			questionCountsBySession(pendingQuestions),
-		);
+		const counts = questionCountsBySession(pendingQuestions);
+		const interactions = yield* PendingInteractionServiceTag;
+		for (const question of yield* interactions.listPendingQuestions()) {
+			if (!question.recovered) continue;
+			counts.set(question.sessionId, (counts.get(question.sessionId) ?? 0) + 1);
+		}
+		yield* sessionService.setPendingQuestionCounts(counts);
 		yield* Effect.sync(() =>
 			broadcastRecoveredQuestions(deps, pendingQuestions),
 		);

@@ -552,9 +552,12 @@ export class ProviderSideEffectReactor {
 				interactions.resolveQuestion(requestId, answers),
 			...(interactions.cancelSessionInteractions
 				? {
-						cancelSessionInteractions: (reason: string) =>
+						cancelSessionInteractions: (
+							reason: string,
+							options?: { readonly recoverQuestions?: boolean },
+						) =>
 							// biome-ignore lint/style/noNonNullAssertion: guarded by the truthy check above.
-							interactions.cancelSessionInteractions!(reason),
+							interactions.cancelSessionInteractions!(reason, options),
 					}
 				: {}),
 		};
