@@ -41,12 +41,12 @@ const IGNORED_ERRORS = ["Unexpected token 'export'", "vite-inject-mocker"];
 // The waiver is self-invalidating: `no stale empty-root exemptions` below fails
 // if an entry here renders content or disappears from the index, so an
 // exemption cannot outlive the reason it was granted.
+//
+// Closed overlays built on overlays/Modal.svelte do not belong here: Modal keeps
+// its native <dialog> mounted so showModal()/close() can manage focus, and a
+// closed <dialog> is display:none and absent from the accessibility tree.
 const EXPECTED_EMPTY_ROOT = new Set([
-	"overlays-confirmmodal--hidden",
-	"overlays-qrmodal--hidden",
-	"overlays-imagelightbox--hidden",
 	"overlays-notifsettings--closed",
-	"overlays-rewindbanner--inactive",
 	"chat-pastepreview--empty",
 ]);
 

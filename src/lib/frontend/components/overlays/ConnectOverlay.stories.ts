@@ -36,7 +36,7 @@ type Story = StoryObj<typeof meta>;
 export const Connecting: Story = {};
 
 /**
- * Relay failed to start — overlay shows error text and a back link.
+ * Relay failed to start — overlay shows the error text.
  */
 export const RelayError: Story = {
 	beforeEach: () => {

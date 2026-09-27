@@ -118,5 +118,6 @@
 		"movedTo": "src/lib/frontend/components/ui/Badge.svelte",
 		"reason": "The woke/snoozed/settled state chips forced these onto the neutral Badge with ! overrides, which the appearance-override rule forbids. They are now Badge variant=\"quiet\" (bg-bg-alt text-text-muted border-border-subtle).",
 		"requires": "variant=\"quiet\""
-	}
+	},
+	"test/visual/build-health.spec.ts :: overlays-confirmmodal--hidden,overlays-imagelightbox--hidden,overlays-qrmodal--hidden,overlays-rewindbanner--inactive": "Not classes: Storybook story ids dropped from the EXPECTED_EMPTY_ROOT waiver list, which the recipe-continuation heuristic reads as a string array."
 }
