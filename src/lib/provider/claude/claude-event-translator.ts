@@ -591,6 +591,24 @@ export class ClaudeEventTranslator {
 					return yield* this.translateTaskNotification(ctx, message);
 				}
 
+				// The full live set, replacing the previous one. Ambient tasks
+				// (watchers, housekeeping) are not activity, per the SDK.
+				case "background_tasks_changed": {
+					this.deps.onBackgroundTask?.({
+						sessionId: ctx.sessionId,
+						kind: "snapshot",
+						taskIds: message.tasks
+							.filter(
+								(task) =>
+									!task.ambient &&
+									task.task_type !== "plan" &&
+									task.task_type !== "plan_mode",
+							)
+							.map((task) => task.task_id),
+					});
+					return;
+				}
+
 				case "init": {
 					const modelEvidence = {
 						...(ctx.currentModel ? { requestedModel: ctx.currentModel } : {}),
@@ -680,15 +698,6 @@ export class ClaudeEventTranslator {
 		ctx: ClaudeSessionContext,
 		message: SDKSystemLike & { subtype: "task_started" },
 	): Effect.Effect<void, unknown> {
-		const taskId = message.task_id ?? message.tool_use_id;
-		if (taskId)
-			this.deps.onBackgroundTask?.({
-				sessionId: ctx.sessionId,
-				taskId,
-				kind: "started",
-				status: "running",
-				...(message.task_type ? { taskType: message.task_type } : {}),
-			});
 		if (!message.tool_use_id) return Effect.void;
 		const extras = message as unknown as Record<string, unknown>;
 		return this.pushTaskMetadata(ctx, message.tool_use_id, {
@@ -711,14 +720,6 @@ export class ClaudeEventTranslator {
 		ctx: ClaudeSessionContext,
 		message: SDKSystemLike & { subtype: "task_progress" },
 	): Effect.Effect<void, unknown> {
-		const taskId = message.task_id ?? message.tool_use_id;
-		if (taskId)
-			this.deps.onBackgroundTask?.({
-				sessionId: ctx.sessionId,
-				taskId,
-				kind: "progress",
-				status: "running",
-			});
 		if (!message.tool_use_id) return Effect.void;
 		const usage = message.usage as Record<string, unknown>;
 		const extras = message as unknown as Record<string, unknown>;
@@ -747,22 +748,6 @@ export class ClaudeEventTranslator {
 		message: SDKSystemLike & { subtype: "task_notification" },
 	): Effect.Effect<void, unknown> {
 		return Effect.gen(this, function* () {
-			const taskId = message.task_id ?? message.tool_use_id;
-			if (taskId)
-				this.deps.onBackgroundTask?.({
-					sessionId: ctx.sessionId,
-					taskId,
-					kind: [
-						"completed",
-						"failed",
-						"stopped",
-						"cancelled",
-						"interrupted",
-					].includes(message.status ?? "")
-						? "completed"
-						: "progress",
-					...(message.status ? { status: message.status } : {}),
-				});
 			if (!message.tool_use_id) return;
 			const usage = message.usage as Record<string, unknown> | undefined;
 			const extras = message as unknown as Record<string, unknown>;

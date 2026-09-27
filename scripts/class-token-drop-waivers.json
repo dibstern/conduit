@@ -113,5 +113,10 @@
 	"test/unit/persistence/sqlite-client.test.ts :: BY,FROM,ORDER,SELECT,id,test,val": "Not class tokens: SQL fragments and test-name words from sqlite-client.test.ts, a test of the retired node:sqlite persistence layer. conduit-test-v6co.10 deleted it after porting its uncovered cases to the Effect tests.",
 	"vitest.config.ts :: test/unit/effect/sqlite-transactions.test.ts": "Not a class. It is the path of test/unit/effect/sqlite-transactions.test.ts, which tested only the retired node:sqlite wrapper and was deleted in conduit-test-v6co.10; the unit-sqlite include and unit exclude no longer name it.",
 	"test/unit/persistence/effect-migrations.test.ts :: an,baseline,context_window,execution,failures,fingerprint_hash,history,into,message,migration-7,model,old,part": "Not classes. The words came from wrapped test-name and SQL strings in the per-migration adoption tests; the main/feature merge folded them into parameterised loops over legacy migration ids and no-backfill column sets, which still assert every original claim.",
-	"src/lib/handlers/session.ts :: not": "Not a class. The word came from the `view not recorded` log strings of markSessionViewed, retired with last_viewed_at when the merge adopted main's read_at."
+	"src/lib/handlers/session.ts :: not": "Not a class. The word came from the `view not recorded` log strings of markSessionViewed, retired with last_viewed_at when the merge adopted main's read_at.",
+	"src/lib/frontend/components/layout/SessionBar.svelte :: bg-bg-alt,border-border-subtle": {
+		"movedTo": "src/lib/frontend/components/ui/Badge.svelte",
+		"reason": "The woke/snoozed/settled state chips forced these onto the neutral Badge with ! overrides, which the appearance-override rule forbids. They are now Badge variant=\"quiet\" (bg-bg-alt text-text-muted border-border-subtle).",
+		"requires": "variant=\"quiet\""
+	}
 }

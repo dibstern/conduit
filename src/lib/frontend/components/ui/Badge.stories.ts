@@ -17,7 +17,7 @@ const meta = {
 	argTypes: {
 		variant: {
 			control: "inline-radio",
-			options: ["neutral", "accent", "accent-solid", "tag"],
+			options: ["neutral", "quiet", "accent", "accent-solid", "tag"],
 		},
 		size: { control: "inline-radio", options: ["xs", "sm", "count"] },
 		shape: { control: "inline-radio", options: ["rounded", "pill"] },

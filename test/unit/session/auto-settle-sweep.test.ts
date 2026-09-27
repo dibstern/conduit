@@ -99,9 +99,8 @@ describe("relay automatic settlement sweep", () => {
 				const background = makeSessionBackgroundLiveness();
 				background.record({
 					sessionId: "background",
-					taskId: "task1",
-					kind: "started",
-					status: "running",
+					kind: "snapshot",
+					taskIds: ["task1"],
 				});
 				const broadcast = vi.fn();
 				const ports = {
@@ -140,9 +139,8 @@ describe("relay automatic settlement sweep", () => {
 				).toBe(0);
 				background.record({
 					sessionId: "background",
-					taskId: "task1",
-					kind: "completed",
-					status: "completed",
+					kind: "snapshot",
+					taskIds: [],
 				});
 				viewers.clear();
 				expect(yield* settleIdleSessions(ports, 3 * DAY, now)).toBe(2);
