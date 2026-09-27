@@ -10,6 +10,7 @@ export default defineConfig({
 	testDir: "./specs",
 	testMatch: [
 		"chat.spec.ts",
+		"claude-replay.spec.ts",
 		"chat-lifecycle.spec.ts",
 		"permissions.spec.ts",
 		"advanced-ui.spec.ts",

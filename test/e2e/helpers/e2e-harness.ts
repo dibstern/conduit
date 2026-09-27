@@ -10,7 +10,13 @@
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { Socket } from "@effect/platform";
+import { RpcClient, RpcSerialization } from "@effect/rpc";
+import { Effect } from "effect";
+import { WsRpcGroup } from "../../../src/lib/contracts/ws-rpc.js";
 import { createSilentLogger } from "../../../src/lib/logger.js";
+import { __setProbeOverrideForTesting } from "../../../src/lib/provider/claude/claude-capabilities-probe.js";
+import { saveRelaySettings } from "../../../src/lib/relay/relay-settings.js";
 import {
 	createRelayStack,
 	type RelayStack,
@@ -20,6 +26,11 @@ import {
 	isOpenCodeRunning,
 	switchModelViaWs,
 } from "../../helpers/opencode-utils.js";
+import {
+	type ClaudeReplayPlan,
+	type ClaudeTraceReplayer,
+	createClaudeTraceReplayer,
+} from "./claude-trace-replayer.js";
 import { loadOpenCodeRecording } from "./recorded-loader.js";
 
 export { isOpenCodeRunning };
@@ -110,9 +121,40 @@ export interface ReplayHarness {
 	mock: MockOpenCodeServer;
 	relayPort: number;
 	relayBaseUrl: string;
-	/** The relay's startup session route (e.g. "/s/ses_abc"); `/` opens no session. */
+	/** The relay's startup session route (e.g. "/s/ses_abc"); `/` opens no session.
+	 *  With a Claude replay plan, the route of a fresh Claude session instead. */
 	projectUrl: string;
+	/** Present when the harness was created with a Claude replay plan. */
+	claudeReplayer?: ClaudeTraceReplayer;
+	/** The fresh per-run SQLite event store, when persistence is on. */
+	eventsDbPath?: string;
 	stop(): Promise<void>;
+}
+
+// The model the committed traces were captured with (their system/init
+// `model`), so the runtime sees no model drift during replay.
+const CLAUDE_TRACE_MODEL = "claude-fable-5";
+
+/** Create a relay-owned Claude session over the typed WS RPC. */
+async function createClaudeSession(relayPort: number): Promise<string> {
+	const { sessionId } = await Effect.runPromise(
+		Effect.scoped(
+			Effect.gen(function* () {
+				const client = yield* RpcClient.make(WsRpcGroup);
+				return yield* client.CreateSession({
+					projectSlug: "e2e-replay",
+					originId: "e2e-claude-replay",
+					providerId: "claude",
+				});
+			}),
+		).pipe(
+			Effect.provide(RpcClient.layerProtocolSocket()),
+			Effect.provide(Socket.layerWebSocket(`ws://127.0.0.1:${relayPort}/rpc`)),
+			Effect.provide(Socket.layerWebSocketConstructorGlobal),
+			Effect.provide(RpcSerialization.layerJson),
+		),
+	);
+	return sessionId;
 }
 
 /**
@@ -125,7 +167,13 @@ export interface ReplayHarness {
  */
 export async function createReplayHarness(
 	recordingName: string,
-	options: { persistence?: boolean } = {},
+	options: {
+		persistence?: boolean;
+		/** Claude lane: open a Claude session whose SDK turns replay these
+		 *  committed traces (implies persistence — Claude sessions are
+		 *  relay-owned). No live model call is possible. */
+		claudeReplay?: ClaudeReplayPlan;
+	} = {},
 ): Promise<ReplayHarness> {
 	const recording = loadOpenCodeRecording(recordingName);
 	const mock = new MockOpenCodeServer(recording);
@@ -136,6 +184,31 @@ export async function createReplayHarness(
 	// Use an isolated temp dir for config/cache to avoid stale JSONL files
 	// from previous runs polluting the MessageCache.
 	const configDir = mkdtempSync(path.join(tmpdir(), "e2e-relay-"));
+
+	const claudeReplayer =
+		options.claudeReplay && createClaudeTraceReplayer(options.claudeReplay);
+	const eventsDbPath =
+		options.persistence || claudeReplayer
+			? path.join(configDir, "events.db")
+			: undefined;
+	if (claudeReplayer) {
+		saveRelaySettings(
+			{ defaultModel: `claude/${CLAUDE_TRACE_MODEL}` },
+			configDir,
+		);
+		// Capability discovery would otherwise spawn the real Claude CLI.
+		__setProbeOverrideForTesting(async () => ({
+			models: [
+				{
+					id: CLAUDE_TRACE_MODEL,
+					name: "Claude Fable 5",
+					providerId: "claude",
+				},
+			],
+			commands: [],
+			agents: [],
+		}));
+	}
 
 	const stack = await createRelayStack({
 		port: 0,
@@ -148,24 +221,29 @@ export async function createReplayHarness(
 		configDir,
 		// Off by default: durable per-session state (settle, pin, read) only
 		// exists with an event store, and most replay specs predate it.
-		...(options.persistence
-			? { persistenceDbPath: path.join(configDir, "events.db") }
-			: {}),
+		...(eventsDbPath ? { persistenceDbPath: eventsDbPath } : {}),
+		...(claudeReplayer ? { claudeSdk: claudeReplayer.sdk } : {}),
 		log: createSilentLogger(),
 	});
 
 	const relayPort = stack.getPort();
 	const relayBaseUrl = `http://127.0.0.1:${relayPort}`;
+	const sessionId = claudeReplayer
+		? await createClaudeSession(relayPort)
+		: stack.initialSessionId;
 
 	return {
 		stack,
 		mock,
 		relayPort,
 		relayBaseUrl,
-		projectUrl: `/s/${encodeURIComponent(stack.initialSessionId)}`,
+		projectUrl: `/s/${encodeURIComponent(sessionId)}`,
+		...(claudeReplayer ? { claudeReplayer } : {}),
+		...(eventsDbPath ? { eventsDbPath } : {}),
 		async stop(): Promise<void> {
 			await stack.stop();
 			await mock.stop();
+			if (claudeReplayer) __setProbeOverrideForTesting(undefined);
 		},
 	};
 }
