@@ -325,4 +325,15 @@ export interface ProjectRelayConfig {
 	messagePollerInterval?: number;
 	/** Optional: SQLite event-store path for Effect-native persistence services. */
 	persistenceDbPath?: string;
+	/**
+	 * Test seam: replaces every Claude Agent SDK `query()` this relay makes —
+	 * session turns and session-title generation — so E2E replay never reaches
+	 * a live model. Defaults to the real SDK.
+	 */
+	claudeSdk?: {
+		readonly query: NonNullable<
+			import("./provider/claude/claude-provider-runtime.js").ClaudeProviderInstanceDeps["queryFactory"]
+		>;
+		readonly titleQuery: import("./domain/relay/Services/session-title-service.js").ClaudeTitleQueryFactory;
+	};
 }

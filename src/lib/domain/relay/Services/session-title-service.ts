@@ -435,5 +435,3 @@ export const makeSessionTitleServiceLive = (
 			} satisfies SessionTitleService;
 		}),
 	);
-
-export const SessionTitleServiceLive = makeSessionTitleServiceLive();

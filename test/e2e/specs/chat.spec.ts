@@ -4,11 +4,39 @@
 // Uses real relay backed by MockOpenCodeServer replaying recorded HTTP
 // interactions — no real OpenCode needed.
 
+import type { Page } from "@playwright/test";
 import { expect, test } from "../helpers/replay-fixture.js";
 import { AppPage } from "../page-objects/app.page.js";
 import { ChatPage } from "../page-objects/chat.page.js";
 
 test.use({ recording: "chat-simple" });
+
+async function receiveStreamedAssistantResponse({
+	page,
+	relayUrl,
+}: {
+	page: Page;
+	relayUrl: string;
+}): Promise<void> {
+	const viewport = page.viewportSize();
+	const isDesktop = viewport ? viewport.width >= 1440 : false;
+	test.skip(!isDesktop, "Chat tests run on desktop viewport only");
+
+	const app = new AppPage(page);
+	const chat = new ChatPage(page);
+	await app.goto(relayUrl);
+
+	await app.sendMessage("Ping");
+
+	// Wait for the full response — streaming must finish before we
+	// can assert on content (otherwise we may read a partial token).
+	await chat.waitForAssistantMessage();
+	await chat.waitForStreamingComplete();
+
+	// The completed response should contain "pong"
+	const text = await chat.getLastAssistantText();
+	expect(text.toLowerCase()).toContain("pong");
+}
 
 test.describe("Chat Flow", () => {
 	test.describe.configure({ timeout: 30_000 });
@@ -38,25 +66,17 @@ test.describe("Chat Flow", () => {
 		await chat.waitForStreamingComplete();
 	});
 
-	test("receive streamed assistant response", async ({ page, relayUrl }) => {
-		const viewport = page.viewportSize();
-		const isDesktop = viewport ? viewport.width >= 1440 : false;
-		test.skip(!isDesktop, "Chat tests run on desktop viewport only");
+	test("receive streamed assistant response", receiveStreamedAssistantResponse);
 
-		const app = new AppPage(page);
-		const chat = new ChatPage(page);
-		await app.goto(relayUrl);
+	test.describe("on a Claude session", () => {
+		// Same scenario, but the turn runs through the Claude runtime,
+		// replaying a committed Claude SDK trace instead of OpenCode.
+		test.use({ claudeReplay: { turns: ["pong-thinking-text-turn"] } });
 
-		await app.sendMessage("Ping");
-
-		// Wait for the full response — streaming must finish before we
-		// can assert on content (otherwise we may read a partial token).
-		await chat.waitForAssistantMessage();
-		await chat.waitForStreamingComplete();
-
-		// The completed response should contain "pong"
-		const text = await chat.getLastAssistantText();
-		expect(text.toLowerCase()).toContain("pong");
+		test(
+			"receive streamed assistant response",
+			receiveStreamedAssistantResponse,
+		);
 	});
 
 	test("stop button appears during processing and hides after", async ({

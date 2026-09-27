@@ -42,7 +42,7 @@ import {
 	OpenCodeAPILive,
 	ProjectRelayLoggerLive,
 } from "../domain/relay/Layers/relay-core-layers.js";
-import { RelayStateLive } from "../domain/relay/Layers/relay-layer.js";
+import { makeRelayStateLive } from "../domain/relay/Layers/relay-layer.js";
 import { makeSessionStateProjectionNotifierLive } from "../domain/relay/Layers/session-state-projection-notifier-layer.js";
 import { StatusPollerLive } from "../domain/relay/Layers/status-poller-layer.js";
 import { WebSocketHandlerLive } from "../domain/relay/Layers/websocket-handler-layer.js";
@@ -645,6 +645,8 @@ export interface RelayStackConfig {
 	/** SQLite event-store path — enables the durable persistence pipeline
 	 *  (same wiring the daemon passes to createProjectRelay). */
 	persistenceDbPath?: string;
+	/** Test seam forwarded to createProjectRelay (E2E Claude trace replay). */
+	claudeSdk?: ProjectRelayConfig["claudeSdk"];
 }
 
 // ─── Stack ───────────────────────────────────────────────────────────────────
@@ -703,6 +705,9 @@ export async function createProjectRelay(
 		...(config.projectDir != null && { workspaceRoot: config.projectDir }),
 		...(config.slug != null ? { projectKey: config.slug } : {}),
 		...(config.configDir != null ? { configDir: config.configDir } : {}),
+		...(config.claudeSdk != null && {
+			claudeQueryFactory: config.claudeSdk.query,
+		}),
 	});
 
 	const TranslatorTag =
@@ -929,7 +934,14 @@ export async function createProjectRelay(
 	// baseLayers are defined here; wiringLayers (PermissionTimeoutLive,
 	// SessionLifecycleWiringLive) are added after monitoring state exists
 	// (provides sseTracker, getMonitoringState).
-	const relayStateAndBridges = Layer.provideMerge(RelayStateLive, bridgeLayers);
+	const relayStateAndBridges = Layer.provideMerge(
+		makeRelayStateLive(
+			config.claudeSdk != null
+				? { titleQueryFactory: config.claudeSdk.titleQuery }
+				: {},
+		),
+		bridgeLayers,
+	);
 	const relayStateBridgesAndStatus = Layer.provideMerge(
 		StatusPollerLive,
 		relayStateAndBridges,
@@ -1565,6 +1577,7 @@ export async function createRelayStack(
 		...(config.persistenceDbPath != null && {
 			persistenceDbPath: config.persistenceDbPath,
 		}),
+		...(config.claudeSdk != null && { claudeSdk: config.claudeSdk }),
 	});
 	relays.set(config.slug, relay);
 	server.addProject({

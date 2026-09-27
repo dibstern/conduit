@@ -23,7 +23,10 @@ import {
 	makePollerPubSubLive,
 	makePollerStateLive,
 } from "../Services/session-status-poller.js";
-import { SessionTitleServiceLive } from "../Services/session-title-service.js";
+import {
+	type ClaudeTitleQueryFactory,
+	makeSessionTitleServiceLive,
+} from "../Services/session-title-service.js";
 import { makeWsHandlerStateLive } from "../Services/ws-handler-service.js";
 import { RateLimiterLive } from "./rate-limiter-layer.js";
 
@@ -39,11 +42,6 @@ const SessionManagerStateAndServiceLive = Layer.provideMerge(
 	sessionManagerDepsLive,
 );
 
-const SessionManagerStateServiceAndTitleLive = Layer.provideMerge(
-	SessionTitleServiceLive,
-	SessionManagerStateAndServiceLive,
-);
-
 /**
  * Composed Layer providing all Effect-native state Tags.
  *
@@ -53,27 +51,42 @@ const SessionManagerStateServiceAndTitleLive = Layer.provideMerge(
  * Keep new relay state in self-constructing Layers here, or in a focused
  * service Layer merged here, so relay-stack does not regain prebuilt service
  * instance wiring.
+ *
+ * `titleQueryFactory` replaces the Claude SDK query used for session titles
+ * (E2E replay passes one so no title request reaches a live model).
  */
-export const RelayStateLive = Layer.mergeAll(
-	// Session state
-	makeSessionRegistryStateLive(),
-	makeOverridesStateLive(),
-	SessionManagerStateServiceAndTitleLive,
-	// Poller state
-	makePollerManagerStateLive(),
-	makePollerStateLive(),
-	makePollerPubSubLive(),
-	// WebSocket handler state
-	makeWsHandlerStateLive(),
-	ClientMessageSerializationLive,
-	// Per-relay domain event fanout
-	RelayEventBusLive,
-	// Per-relay committed-event change signal (streaming subscriptions)
-	SessionEventBusLive,
-	// PTY state
-	PtyManagerStateLive,
-	// Instance management state
-	makeInstanceManagerStateLive(),
-	// Rate limiter (scoped — cleanup fiber runs every 60s)
-	RateLimiterLive({ maxRequests: 5, windowMs: 10_000 }),
-);
+export const makeRelayStateLive = (
+	options: { readonly titleQueryFactory?: ClaudeTitleQueryFactory } = {},
+) =>
+	Layer.mergeAll(
+		// Session state
+		makeSessionRegistryStateLive(),
+		makeOverridesStateLive(),
+		Layer.provideMerge(
+			makeSessionTitleServiceLive(
+				options.titleQueryFactory != null
+					? { queryFactory: options.titleQueryFactory }
+					: {},
+			),
+			SessionManagerStateAndServiceLive,
+		),
+		// Poller state
+		makePollerManagerStateLive(),
+		makePollerStateLive(),
+		makePollerPubSubLive(),
+		// WebSocket handler state
+		makeWsHandlerStateLive(),
+		ClientMessageSerializationLive,
+		// Per-relay domain event fanout
+		RelayEventBusLive,
+		// Per-relay committed-event change signal (streaming subscriptions)
+		SessionEventBusLive,
+		// PTY state
+		PtyManagerStateLive,
+		// Instance management state
+		makeInstanceManagerStateLive(),
+		// Rate limiter (scoped — cleanup fiber runs every 60s)
+		RateLimiterLive({ maxRequests: 5, windowMs: 10_000 }),
+	);
+
+export const RelayStateLive = makeRelayStateLive();
