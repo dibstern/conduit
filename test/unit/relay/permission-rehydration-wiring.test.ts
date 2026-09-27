@@ -15,6 +15,7 @@ import {
 } from "node:http";
 import { Effect } from "effect";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { WebSocketServer } from "ws";
 import { PendingInteractionServiceTag } from "../../../src/lib/domain/relay/Services/pending-interaction-service.js";
 import { createSilentLogger } from "../../../src/lib/logger.js";
 import {
@@ -199,6 +200,7 @@ describe("Permission rehydration wiring in createProjectRelay", () => {
 	let relay: ProjectRelay;
 	let relayServer: Server;
 	let relayPort: number;
+	let wss: WebSocketServer;
 
 	beforeAll(async () => {
 		mock = await createMockOpenCode();
@@ -215,12 +217,21 @@ describe("Permission rehydration wiring in createProjectRelay", () => {
 			log: createSilentLogger(),
 		});
 
+		// Relays never own upgrades; the caller attaches sockets, as the daemon does.
+		wss = new WebSocketServer({ noServer: true });
+		relayServer.on("upgrade", (req, socket, head) => {
+			wss.handleUpgrade(req, socket, head, (ws) => {
+				relay.wsHandler.attach(ws, { clientId: "perm-rehydrate-client" });
+			});
+		});
+
 		// Wait for SSE to connect and rehydration to complete
 		await new Promise((r) => setTimeout(r, 1000));
 	}, 15_000);
 
 	afterAll(async () => {
 		if (relay) await relay.stop();
+		if (wss) await new Promise<void>((r) => wss.close(() => r()));
 		if (relayServer)
 			await new Promise<void>((r) => relayServer.close(() => r()));
 		if (mock) await mock.close();

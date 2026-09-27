@@ -53,8 +53,6 @@ import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/
 import { ProjectionRunnerEffectTag } from "../../../src/lib/persistence/effect/projection-runner-effect.js";
 import { createAllEffectProjectors } from "../../../src/lib/persistence/effect/projectors-effect.js";
 import { canonicalEvent } from "../../../src/lib/persistence/events.js";
-import { PersistenceLayer } from "../../../src/lib/persistence/persistence-layer.js";
-import { EventSinkImpl } from "../../../src/lib/provider/event-sink.js";
 import {
 	makeMockConfig,
 	makeMockLogger,
@@ -62,7 +60,6 @@ import {
 	makeMockSessionManagerService,
 	makeMockWebSocketHandler,
 } from "../../helpers/mock-factories.js";
-import { providerRuntimeEvent } from "../../helpers/provider-runtime-event.js";
 
 const versionOf = (sessionId: string) =>
 	Effect.gen(function* () {
@@ -157,6 +154,7 @@ it("establishOpenCodeSession advances the version of the session it seeds", asyn
 		await Effect.runPromise(
 			Effect.scoped(
 				Effect.gen(function* () {
+					yield* (yield* ProjectionRunnerEffectTag).recover();
 					const manager = yield* SessionManagerServiceTag;
 					const announced = yield* announcedDuring(
 						manager.establishOpenCodeSession(
@@ -196,6 +194,7 @@ it("local session creation advances its row version and announces its session", 
 		await Effect.runPromise(
 			Effect.scoped(
 				Effect.gen(function* () {
+					yield* (yield* ProjectionRunnerEffectTag).recover();
 					const manager = yield* SessionManagerServiceTag;
 					let sessionId = "";
 					const announced = yield* announcedDuring(
@@ -233,6 +232,7 @@ it("session-manager rename advances its row version and announces its session", 
 		await Effect.runPromise(
 			Effect.scoped(
 				Effect.gen(function* () {
+					yield* (yield* ProjectionRunnerEffectTag).recover();
 					const manager = yield* SessionManagerServiceTag;
 					const session = yield* manager.createSession("Before rename");
 					expect(session.providerID).toBe("claude");
@@ -263,6 +263,7 @@ it("persistSessionPermissionMode advances the version of the session it edits", 
 		await Effect.runPromise(
 			Effect.scoped(
 				Effect.gen(function* () {
+					yield* (yield* ProjectionRunnerEffectTag).recover();
 					const sql = yield* SqlClient.SqlClient;
 					yield* sql`
 						INSERT INTO sessions (id, provider, title, status, created_at, updated_at)
@@ -303,6 +304,7 @@ it("the status poller's corrective write advances the version", async () => {
 		await Effect.runPromise(
 			Effect.scoped(
 				Effect.gen(function* () {
+					yield* (yield* ProjectionRunnerEffectTag).recover();
 					yield* seedBusySession("corrected", Date.now());
 					const poller = yield* StatusPollerTag;
 
@@ -324,6 +326,7 @@ it("the status poller's staleness write advances the version", async () => {
 		await Effect.runPromise(
 			Effect.scoped(
 				Effect.gen(function* () {
+					yield* (yield* ProjectionRunnerEffectTag).recover();
 					yield* seedBusySession("stale", 0);
 					const poller = yield* StatusPollerTag;
 
@@ -341,7 +344,7 @@ it("the auto-title rename advances the version of the session it renames", async
 	await withTempDb(async (dbPath) => {
 		const renamed = await Effect.runPromise(Deferred.make<void>());
 		const sessionManager = makeMockSessionManagerService({
-			sendDualSessionLists: vi.fn(() => Deferred.succeed(renamed, undefined)),
+			sendSessionLists: vi.fn(() => Deferred.succeed(renamed, undefined)),
 		});
 		const bus = makeSessionEventBusLive();
 		const layer = Layer.provideMerge(
@@ -361,6 +364,7 @@ it("the auto-title rename advances the version of the session it renames", async
 		await Effect.runPromise(
 			Effect.scoped(
 				Effect.gen(function* () {
+					yield* (yield* ProjectionRunnerEffectTag).recover();
 					const sql = yield* SqlClient.SqlClient;
 					yield* sql`
 						INSERT INTO sessions (id, provider, title, status, created_at, updated_at)
@@ -524,103 +528,4 @@ it("REPORTED GAP: the provider cleanup receipt reaches no projector at all", () 
 			projector.handles.includes("session.provider_cleanup_failed"),
 		),
 	).toEqual([]);
-});
-
-it("REPORTED GAP: the legacy event sink projects, but through unstamped projectors", async () => {
-	await withTempDb(async (dbPath) => {
-		const bus = makeSessionEventBusLive();
-		const persistence = PersistenceLayer.open(dbPath);
-		try {
-			persistence.projectionRunner.recover();
-			const sink = new EventSinkImpl({
-				eventStore: persistence.eventStore,
-				projectionRunner: persistence.projectionRunner,
-				sessionId: "legacy",
-				provider: "opencode",
-			});
-
-			await Effect.runPromise(
-				Effect.scoped(
-					Effect.gen(function* () {
-						const runner = yield* ProjectionRunnerEffectTag;
-						yield* runner.recover();
-						const sql = yield* SqlClient.SqlClient;
-						yield* sql`
-							INSERT INTO sessions (id, provider, title, status, created_at, updated_at)
-							VALUES ('legacy', 'opencode', 'Legacy', 'idle', 1000, 1000)`;
-						const bus = yield* SessionEventBusTag;
-						const advances = yield* bus.subscribeAdvances();
-						yield* sink.push(
-							providerRuntimeEvent(
-								"message.created",
-								"legacy",
-								{
-									sessionId: "legacy",
-									messageId: "legacy-m1",
-									role: "assistant",
-								},
-								{ eventId: "evt-legacy-1", providerId: "opencode" },
-							),
-						);
-						// A stamped write marks the end of the observation window.
-						// Observe it on the same subscription to rule out a dead bus.
-						yield* (yield* makeCommitAndSignal)([
-							canonicalEvent(
-								"session.created",
-								"stamped-control",
-								{
-									sessionId: "stamped-control",
-									title: "Stamped control",
-									provider: "claude",
-								},
-								{ provider: "claude" },
-							),
-						]);
-						const seen = yield* Stream.runCollect(
-							advances.pipe(
-								Stream.takeUntil((advance) =>
-									advance.sessionIds.includes("stamped-control"),
-								),
-							),
-						).pipe(Effect.timeout("2 seconds"));
-						const announced = [...seen].flatMap((advance) => [
-							...advance.sessionIds,
-						]);
-						expect(yield* versionOf("stamped-control")).toBeGreaterThan(0);
-						expect(announced).toContain("stamped-control");
-						expect(announced).not.toContain("legacy");
-						expect(Chunk.size(seen)).toBe(1);
-					}).pipe(
-						Effect.provide(
-							Layer.mergeAll(
-								bus,
-								makePersistenceEffectLayer(
-									dbPath,
-									createAllEffectProjectors(),
-									bus,
-								),
-							),
-						),
-						Effect.orDie,
-					),
-				),
-			);
-
-			// The event is durable and the legacy read model moved...
-			expect(
-				persistence.db.query("SELECT id FROM messages WHERE id = 'legacy-m1'"),
-			).toEqual([{ id: "legacy-m1" }]);
-			// ...but the synchronous projectors do not stamp `version`, so this
-			// write is still silent. No production caller constructs EventSinkImpl;
-			// the live Claude path goes through
-			// createRelayEventSink → ProviderRuntimeIngestion → commitAndSignal.
-			expect(
-				persistence.db.query(
-					"SELECT version FROM sessions WHERE id = 'legacy'",
-				),
-			).toEqual([{ version: 0 }]);
-		} finally {
-			persistence.close();
-		}
-	});
 });

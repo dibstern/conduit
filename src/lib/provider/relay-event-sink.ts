@@ -238,7 +238,11 @@ export function createRelayEventSink(deps: RelayEventSinkDeps): RelayEventSink {
 			request: PermissionRequest,
 		): Effect.Effect<PermissionResponse, unknown> {
 			return Effect.gen(function* () {
-				yield* Effect.sync(reset);
+				// The turn now blocks on the human. Stop the inactivity timeout
+				// instead of restarting it, or it fires a bogus PROCESSING_TIMEOUT
+				// while the prompt is still on screen. The handler restarts it once
+				// the user responds (restartProcessingTimeout in handlers/permissions).
+				yield* Effect.sync(finish);
 				// Approval policy is delegated to the Claude Agent SDK via
 				// `permissionMode` at query creation, so an ask reaching here has
 				// already survived the SDK's own auto-approval. Re-deciding it
@@ -299,7 +303,8 @@ export function createRelayEventSink(deps: RelayEventSinkDeps): RelayEventSink {
 			request: QuestionRequest,
 		): Effect.Effect<Record<string, unknown>, unknown> {
 			return Effect.gen(function* () {
-				yield* Effect.sync(reset);
+				// Same as requestPermission: awaiting the user is not inactivity.
+				yield* Effect.sync(finish);
 				const pendingInteractions = deps.pendingInteractions;
 				if (!pendingInteractions) {
 					return yield* Effect.fail(

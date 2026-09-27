@@ -118,7 +118,9 @@ describe("Provider wiring with Claude provider instance", () => {
 		const engine = new OrchestrationEngine({ registry });
 		engine.bindSession("sess-1", "claude");
 
-		expect(engine.getProviderForSession("sess-1")).toBe("claude");
+		expect(Effect.runSync(engine.getProviderForSessionEffect("sess-1"))).toBe(
+			"claude",
+		);
 	});
 
 	it("session binding can switch provider", () => {
@@ -126,10 +128,14 @@ describe("Provider wiring with Claude provider instance", () => {
 		const engine = new OrchestrationEngine({ registry });
 
 		engine.bindSession("sess-1", "opencode");
-		expect(engine.getProviderForSession("sess-1")).toBe("opencode");
+		expect(Effect.runSync(engine.getProviderForSessionEffect("sess-1"))).toBe(
+			"opencode",
+		);
 
 		engine.bindSession("sess-1", "claude");
-		expect(engine.getProviderForSession("sess-1")).toBe("claude");
+		expect(Effect.runSync(engine.getProviderForSessionEffect("sess-1"))).toBe(
+			"claude",
+		);
 	});
 
 	it("listBoundSessions includes claude-bound sessions", () => {
@@ -139,7 +145,7 @@ describe("Provider wiring with Claude provider instance", () => {
 		engine.bindSession("sess-1", "claude");
 		engine.bindSession("sess-2", "opencode");
 
-		const bindings = engine.listBoundSessions();
+		const bindings = Effect.runSync(engine.listBoundSessionsEffect());
 		expect(bindings).toHaveLength(2);
 		expect(bindings.find((b) => b.sessionId === "sess-1")?.providerId).toBe(
 			"claude",
@@ -195,7 +201,9 @@ describe("Provider wiring with Claude provider instance", () => {
 		expect(queryFactory).toHaveBeenCalledTimes(1);
 
 		// Session binding was established
-		expect(engine.getProviderForSession("e2e-session-1")).toBe("claude");
+		expect(
+			Effect.runSync(engine.getProviderForSessionEffect("e2e-session-1")),
+		).toBe("claude");
 
 		// EventSink received events (at minimum session.status + turn.completed)
 		expect(sink.push).toHaveBeenCalled();

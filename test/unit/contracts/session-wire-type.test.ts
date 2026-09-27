@@ -46,21 +46,22 @@ describe("session wire type", () => {
 		).toThrow();
 	});
 
-	it("does not carry notification state or the poller's derived flag", () => {
-		expectTypeOf<SessionInfo>().not.toHaveProperty("pendingQuestionCount");
-		expectTypeOf<SessionInfo>().not.toHaveProperty("processing");
+	it("uses the canonical read and attention fields", () => {
+		expectTypeOf<SessionInfo>().not.toHaveProperty("pendingQuestions");
+		expectTypeOf<SessionInfo>().not.toHaveProperty("pendingPermissions");
+		expectTypeOf<SessionInfo>().not.toHaveProperty("unseenActivity");
+		expectTypeOf<SessionInfo>().not.toHaveProperty("last_viewed_at");
 	});
 
-	it("carries the three notification facts on the row itself (ni8.23)", () => {
-		// The badge is derived server-side from pending_approvals and
-		// last_viewed_at, so it travels on the session it describes.
+	it("carries main's read and attention state on the session", () => {
 		const derived: SessionInfo = {
 			id: "ses_1",
 			title: "t",
 			status: "idle",
-			pendingQuestions: 2,
-			pendingPermissions: 1,
-			unseenActivity: true,
+			pendingQuestionCount: 2,
+			pendingPermissionCount: 1,
+			unread: true,
+			attention: "needs-approval",
 		};
 		const encoded = Schema.encodeSync(SessionInfoSchema)(derived);
 		expect(Schema.decodeUnknownSync(SessionInfoSchema)(encoded)).toEqual(

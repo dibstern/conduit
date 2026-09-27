@@ -1,9 +1,12 @@
 import type { Meta, StoryObj } from "@storybook/svelte-vite";
 import { flushSync } from "svelte";
-import { permissionsState } from "../../stores/permissions.svelte.js";
 import {
-	applySessionSnapshot,
+	clearAllPermissions,
+	handlePermissionRequest,
+} from "../../stores/permissions.svelte.js";
+import {
 	clearSessionState,
+	handleSessionList,
 	sessionState,
 } from "../../stores/session.svelte.js";
 import { uiState } from "../../stores/ui.svelte.js";
@@ -24,25 +27,27 @@ function setupState(opts: {
 }) {
 	flushSync(() => {
 		sessionState.currentId = opts.currentId ?? "ses_current";
-		const questions = new Set(opts.questionSessions ?? []);
-		applySessionSnapshot(
-			Object.entries(opts.sessionTitles ?? {}).map(([id, title]) => ({
+		handleSessionList({
+			type: "session_list",
+			roots: true,
+			sessions: Object.entries(opts.sessionTitles ?? {}).map(([id, title]) => ({
 				id,
 				title,
 				status: "idle" as const,
-				createdAt: Date.now(),
-				// The server derives this count onto the row; the banner just reads it.
-				pendingQuestions: questions.has(id) ? 1 : 0,
+				createdAt: 1_735_689_600_000,
+				pendingQuestionCount: opts.questionSessions?.includes(id) ? 1 : 0,
 			})),
-			"complete",
-		);
+		});
 
-		permissionsState.pendingPermissions = (opts.permissions ?? []).map((p) => ({
-			...p,
-			requestId: p.id as PermissionId,
-			toolName: p.toolName,
-			toolInput: {},
-		}));
+		for (const p of opts.permissions ?? []) {
+			handlePermissionRequest({
+				type: "permission_request",
+				requestId: p.id as PermissionId,
+				sessionId: p.sessionId,
+				toolName: p.toolName,
+				toolInput: {},
+			});
+		}
 	});
 }
 
@@ -57,7 +62,7 @@ const meta = {
 	},
 	beforeEach: () => {
 		uiState.toasts = [];
-		permissionsState.pendingPermissions = [];
+		clearAllPermissions();
 		clearSessionState();
 	},
 } satisfies Meta<typeof NotificationStack>;
@@ -133,4 +138,9 @@ export const MixedSameSession: Story = {
 
 export const NoNotifications: Story = {
 	name: "Empty (hidden)",
+};
+
+export const Hover: Story = {
+	...SinglePermission,
+	parameters: { pseudo: { hover: true } },
 };

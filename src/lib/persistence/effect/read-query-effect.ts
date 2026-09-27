@@ -1,41 +1,154 @@
 import { SqlClient } from "@effect/sql";
 import type { SqlError } from "@effect/sql/SqlError";
 import { Context, Data, Effect } from "effect";
-import type { SessionInfo } from "../../shared-types.js";
+import type { SessionAttention, SessionInfo } from "../../shared-types.js";
 import type {
 	MessagePartRow,
 	MessageRow,
 	MessageWithParts,
+	PendingApprovalCountRow,
 	SessionRow,
 	TurnModelExecutionRow,
 } from "../read-model-types.js";
+import { sessionFamilyQuery } from "../session-family-query.js";
 
 /**
  * What `sessionColumns` selects: the single session type with SQLite's NULLs
  * still in place for the two nullable columns.
  */
-type SessionSelection = Omit<
+export const deriveSessionSnooze = (
+	row: Pick<
+		SessionRow,
+		"snoozed_at" | "snoozed_until" | "woken_at" | "woken_reason" | "read_at"
+	>,
+	now = Date.now(),
+): Pick<
 	SessionInfo,
-	| "parentID"
-	| "forkMessageId"
-	| "messageCount"
-	| "forkPointTimestamp"
-	| "forkPointMessageId"
-	| "pendingQuestions"
-	| "pendingPermissions"
-	| "unseenActivity"
-> & {
-	readonly parentID: string | null;
-	readonly forkMessageId: string | null;
-	readonly forkPointTimestamp: number | null;
-	readonly forkPointMessageId: string | null;
-	// Optional on the wire because `SessionInfo` has a producer with no row
-	// behind it; never optional here — a row read always derives all three.
-	readonly pendingQuestions: number;
-	readonly pendingPermissions: number;
-	/** SQLite has no boolean type: the CASE expression selects 0 or 1. */
-	readonly unseenActivity: 0 | 1;
-	readonly version: number;
+	"snoozedAt" | "snoozedUntil" | "wokenAt" | "wokeBecause"
+> => {
+	if (row.snoozed_at === null) return {};
+	const wakeAt =
+		row.woken_at ??
+		(row.snoozed_until !== null && row.snoozed_until <= now
+			? row.snoozed_until
+			: null);
+	if (wakeAt !== null)
+		return row.read_at === null || row.read_at < wakeAt
+			? { wokenAt: wakeAt, wokeBecause: row.woken_reason ?? "time" }
+			: {};
+	return {
+		snoozedAt: row.snoozed_at,
+		...(row.snoozed_until !== null ? { snoozedUntil: row.snoozed_until } : {}),
+	};
+};
+
+export const pendingApprovalCountsByType = (
+	rows: readonly PendingApprovalCountRow[],
+) => {
+	const questions = new Map<string, number>();
+	const permissions = new Map<string, number>();
+	for (const row of rows)
+		(row.type === "question" ? questions : permissions).set(
+			row.session_id,
+			row.pending_count,
+		);
+	return { questions, permissions };
+};
+
+export const sessionRowsToSessionInfoList = (
+	rows: readonly SessionRow[],
+	opts: {
+		readonly now?: number;
+		readonly statuses?: Readonly<Record<string, { type: string }>>;
+		readonly parentMap?: ReadonlyMap<string, string>;
+		readonly pendingQuestionCounts?: ReadonlyMap<string, number>;
+		readonly pendingPermissionCounts?: ReadonlyMap<string, number>;
+	} = {},
+): Array<SessionInfo & { readonly updatedAt: number }> => {
+	const subtree = new Map<
+		string,
+		{ processing: boolean; questions: number; permissions: number }
+	>();
+	if (opts.parentMap) {
+		const rowStatuses = new Map(rows.map((row) => [row.id, row.status]));
+		for (const id of new Set([
+			...rowStatuses.keys(),
+			...opts.parentMap.keys(),
+		])) {
+			let root = id;
+			const seen = new Set<string>();
+			while (opts.parentMap.has(root) && !seen.has(root)) {
+				seen.add(root);
+				root = opts.parentMap.get(root) ?? root;
+			}
+			const state = subtree.get(root) ?? {
+				processing: false,
+				questions: 0,
+				permissions: 0,
+			};
+			const status = opts.statuses?.[id]?.type ?? rowStatuses.get(id);
+			state.processing ||= status === "busy" || status === "retry";
+			state.questions += opts.pendingQuestionCounts?.get(id) ?? 0;
+			state.permissions += opts.pendingPermissionCounts?.get(id) ?? 0;
+			subtree.set(root, state);
+		}
+	}
+	return rows.map((row) => {
+		const parentID = row.parent_id ?? undefined;
+		const state = parentID ? undefined : subtree.get(row.id);
+		const pendingQuestionCount =
+			state?.questions ?? opts.pendingQuestionCounts?.get(row.id);
+		const pendingPermissionCount =
+			state?.permissions ?? opts.pendingPermissionCounts?.get(row.id);
+		const unread =
+			row.last_message_at !== null &&
+			(row.read_at === null || row.read_at < row.last_message_at);
+		const status = opts.statuses?.[row.id]?.type ?? row.status;
+		let attention: SessionAttention = "idle";
+		if ((pendingPermissionCount ?? 0) > 0) attention = "needs-approval";
+		else if ((pendingQuestionCount ?? 0) > 0) attention = "needs-reply";
+		else if (row.last_turn_error_at !== null) attention = "error";
+		else if (state?.processing || status === "busy" || status === "retry")
+			attention = "working";
+		else if (unread) attention = "done-unread";
+		return {
+			id: row.id,
+			title: row.title,
+			status:
+				row.status === "busy" ||
+				row.status === "retry" ||
+				row.status === "error"
+					? row.status
+					: "idle",
+			createdAt: row.created_at,
+			updatedAt: row.updated_at,
+			messageCount: 0,
+			...(parentID ? { parentID } : {}),
+			...(row.fork_point_event ? { forkMessageId: row.fork_point_event } : {}),
+			...(row.fork_point_timestamp != null
+				? { forkPointTimestamp: row.fork_point_timestamp }
+				: {}),
+			...(row.fork_point_message_id != null
+				? { forkPointMessageId: row.fork_point_message_id }
+				: {}),
+			...(state?.processing || status === "busy" || status === "retry"
+				? { processing: true }
+				: {}),
+			...(pendingQuestionCount ? { pendingQuestionCount } : {}),
+			...(pendingPermissionCount ? { pendingPermissionCount } : {}),
+			...(unread ? { unread: true } : {}),
+			...(row.settled_at !== null ? { settledAt: row.settled_at } : {}),
+			...(row.settled_automatically === 1
+				? { settledAutomatically: true }
+				: {}),
+			...(row.auto_settle_disabled_at != null
+				? { autoSettleDisabled: true }
+				: {}),
+			...(row.pinned_at !== null ? { pinnedAt: row.pinned_at } : {}),
+			...deriveSessionSnooze(row, opts.now),
+			attention,
+		};
+	});
 };
 
 export class ReadQueryEffectError extends Data.TaggedError(
@@ -63,9 +176,47 @@ export interface ReadQueryEffect {
 		ReadQueryEffectError | SqlError
 	>;
 
+	readonly getSessionsForReconciliation: (
+		reportedIds: readonly string[],
+	) => Effect.Effect<
+		readonly Pick<SessionRow, "id" | "status" | "updated_at">[],
+		ReadQueryEffectError | SqlError
+	>;
+
 	readonly listSessions: (opts?: {
 		roots?: boolean;
+		limit?: number;
+		titleQuery?: string;
+		before?: { updatedAt: number; id: string };
 	}) => Effect.Effect<readonly SessionRow[], ReadQueryEffectError | SqlError>;
+
+	readonly listSessionInfos: (opts?: {
+		roots?: boolean;
+		limit?: number;
+		titleQuery?: string;
+		before?: { updatedAt: number; id: string };
+		statuses?: Readonly<Record<string, { type: string }>>;
+	}) => Effect.Effect<
+		readonly (SessionInfo & { readonly updatedAt: number })[],
+		ReadQueryEffectError | SqlError
+	>;
+
+	readonly getSessionLineage: () => Effect.Effect<
+		{
+			rows: readonly { id: string; parent_id: string | null }[];
+			count: number;
+		},
+		ReadQueryEffectError | SqlError
+	>;
+
+	readonly getSessionFamily: (
+		sessionId: string,
+	) => Effect.Effect<readonly SessionRow[], ReadQueryEffectError | SqlError>;
+
+	readonly countPendingApprovalsBySession: () => Effect.Effect<
+		readonly PendingApprovalCountRow[],
+		ReadQueryEffectError | SqlError
+	>;
 
 	readonly getSessionMessagesWithParts: (
 		sessionId: string,
@@ -89,6 +240,7 @@ export interface ReadQueryEffect {
 	readonly readSessionList: (range?: {
 		readonly after?: number;
 		readonly through?: number;
+		readonly roots?: boolean;
 	}) => Effect.Effect<
 		{
 			readonly rows: readonly {
@@ -227,6 +379,21 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 			),
 		);
 
+	const getSessionsForReconciliation = (reportedIds: readonly string[]) =>
+		sql<Pick<SessionRow, "id" | "status" | "updated_at">>`
+			SELECT id, status, updated_at FROM sessions
+			WHERE status != 'idle'
+				OR id IN (SELECT value FROM json_each(${JSON.stringify(reportedIds)}))
+			ORDER BY updated_at DESC, id DESC`.pipe(
+			Effect.mapError(
+				(cause) =>
+					new ReadQueryEffectError({
+						operation: "getSessionsForReconciliation",
+						cause,
+					}),
+			),
+		);
+
 	// ─── The session list reads ───────────────────────────────────────────
 	// `readSessionList` is the only producer of the single session type (ni8.5
 	// T-1) — what the shell subscription streams and what the browser holds.
@@ -244,53 +411,37 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 	// events into a guess. `pending_approvals` is read-only here: the approval
 	// projector owns those rows, and both question and permission requests land
 	// in it, so the counts cannot drift from what the app is actually blocked on.
-	const sessionColumns = sql.literal(
-		`id, title, status, version,
-		 created_at AS createdAt, updated_at AS updatedAt,
-		 parent_id AS parentID, fork_point_event AS forkMessageId,
-		 fork_point_timestamp AS forkPointTimestamp, fork_point_message_id AS forkPointMessageId,
-		 (SELECT COUNT(*) FROM pending_approvals pa
-		   WHERE pa.session_id = sessions.id
-		     AND pa.status = 'pending' AND pa.type = 'question') AS pendingQuestions,
-		 (SELECT COUNT(*) FROM pending_approvals pa
-		   WHERE pa.session_id = sessions.id
-		     AND pa.status = 'pending' AND pa.type = 'permission') AS pendingPermissions,
-		 CASE WHEN COALESCE(last_message_at, 0) > COALESCE(last_viewed_at, 0)
-		      THEN 1 ELSE 0 END AS unseenActivity`,
-	);
-
-	// The version stays beside the session rather than on it: it is a fact about
-	// the read model, not a field the wire carries.
-	const toSession = ({
-		version,
-		parentID,
-		forkMessageId,
-		forkPointTimestamp,
-		forkPointMessageId,
-		unseenActivity,
-		...session
-	}: SessionSelection): { item: SessionInfo; version: number } => ({
-		item: {
-			...session,
-			unseenActivity: unseenActivity === 1,
-			...(parentID !== null && { parentID }),
-			...(forkMessageId !== null && { forkMessageId }),
-			...(forkPointTimestamp !== null && { forkPointTimestamp }),
-			...(forkPointMessageId !== null && { forkPointMessageId }),
-		},
-		version,
-	});
-
 	const listSessions = (opts?: {
 		roots?: boolean;
+		limit?: number;
+		titleQuery?: string;
+		before?: { updatedAt: number; id: string };
 	}): Effect.Effect<readonly SessionRow[], ReadQueryEffectError | SqlError> =>
 		Effect.gen(function* () {
-			if (opts?.roots) {
-				return yield* sql<SessionRow>`
-					SELECT * FROM sessions WHERE parent_id IS NULL ORDER BY updated_at DESC`;
+			const predicates = [];
+			if (opts?.roots) predicates.push(sql`parent_id IS NULL`);
+			if (opts?.titleQuery !== undefined) {
+				const escapedQuery = opts.titleQuery.replace(/[\\%_]/g, "\\$&");
+				const pattern = `%${escapedQuery}%`;
+				// SQLite LIKE is ASCII-case-insensitive; we accept non-ASCII case sensitivity until deep search adds a collation.
+				predicates.push(sql`title LIKE ${pattern} ESCAPE '\\'`);
 			}
+			if (opts?.before !== undefined) {
+				predicates.push(
+					sql`(updated_at < ${opts.before.updatedAt} OR (updated_at = ${opts.before.updatedAt} AND id < ${opts.before.id}))`,
+				);
+			}
+			const limit =
+				opts?.limit === undefined ? sql.literal("") : sql`LIMIT ${opts.limit}`;
+
+			// The id DESC tiebreaker makes equal timestamps deterministic. This
+			// deliberately replaces the previous arbitrary per-query tie ordering and
+			// is required so keyset pages neither duplicate nor skip rows.
 			return yield* sql<SessionRow>`
-				SELECT * FROM sessions ORDER BY updated_at DESC`;
+				SELECT * FROM sessions
+				WHERE ${sql.and(predicates)}
+				ORDER BY updated_at DESC, id DESC
+				${limit}`;
 		}).pipe(
 			Effect.mapError((e) =>
 				e instanceof ReadQueryEffectError
@@ -301,6 +452,80 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 						}),
 			),
 		);
+
+	const getSessionLineage = () =>
+		Effect.gen(function* () {
+			const rows = yield* sql<{ id: string; parent_id: string | null }>`
+				SELECT id, parent_id FROM sessions`;
+			const counts = yield* sql<{ count: number }>`
+				SELECT COUNT(*) AS count FROM sessions`;
+			return { rows, count: counts[0]?.count ?? 0 };
+		}).pipe(
+			Effect.mapError(
+				(cause) =>
+					new ReadQueryEffectError({ operation: "getSessionLineage", cause }),
+			),
+		);
+
+	const getSessionFamily = (sessionId: string) =>
+		sql
+			.unsafe<SessionRow>(sessionFamilyQuery, [sessionId])
+			.pipe(
+				Effect.mapError(
+					(cause) =>
+						new ReadQueryEffectError({ operation: "getSessionFamily", cause }),
+				),
+			);
+
+	const countPendingApprovalsBySession = (): Effect.Effect<
+		readonly PendingApprovalCountRow[],
+		ReadQueryEffectError | SqlError
+	> =>
+		Effect.gen(function* () {
+			return yield* sql<PendingApprovalCountRow>`
+				SELECT session_id, type, COUNT(*) AS pending_count
+				FROM pending_approvals
+				WHERE status = 'pending'
+				GROUP BY session_id, type`;
+		}).pipe(
+			Effect.mapError((e) =>
+				e instanceof ReadQueryEffectError
+					? e
+					: new ReadQueryEffectError({
+							operation: "countPendingApprovalsBySession",
+							cause: e,
+						}),
+			),
+		);
+
+	const listSessionInfos: ReadQueryEffect["listSessionInfos"] = (opts) =>
+		Effect.gen(function* () {
+			const [rows, lineage, approvals, projectedStatuses] = yield* Effect.all([
+				listSessions(opts),
+				getSessionLineage(),
+				countPendingApprovalsBySession(),
+				getAllSessionStatuses(),
+			]);
+			const pending = pendingApprovalCountsByType(approvals);
+			return sessionRowsToSessionInfoList(rows, {
+				parentMap: new Map(
+					lineage.rows.flatMap((row) =>
+						row.parent_id === null ? [] : [[row.id, row.parent_id] as const],
+					),
+				),
+				statuses: {
+					...Object.fromEntries(
+						Object.entries(projectedStatuses).map(([id, type]) => [
+							id,
+							{ type },
+						]),
+					),
+					...opts?.statuses,
+				},
+				pendingQuestionCounts: pending.questions,
+				pendingPermissionCounts: pending.permissions,
+			});
+		});
 
 	const getSessionMessagesWithParts = (
 		sessionId: string,
@@ -402,6 +627,7 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 	const readSessionList = (range?: {
 		readonly after?: number;
 		readonly through?: number;
+		readonly roots?: boolean;
 	}): Effect.Effect<
 		{
 			readonly rows: readonly {
@@ -416,12 +642,59 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 			.withTransaction(
 				Effect.gen(function* () {
 					const version = yield* readModelVersion;
-					const rows = yield* sql<SessionSelection>`
-						SELECT ${sessionColumns} FROM sessions
-						WHERE version > ${range?.after ?? BEFORE_FIRST_VERSION}
-							AND version <= ${range?.through ?? AFTER_LAST_VERSION}
-						ORDER BY updated_at DESC`;
-					return { rows: rows.map(toSession), version };
+					const floor = range?.after ?? BEFORE_FIRST_VERSION;
+					const ceiling = range?.through ?? AFTER_LAST_VERSION;
+					const rows = range?.roots
+						? yield* sql<SessionRow & { effective_version: number }>`
+							WITH RECURSIVE descendants(root_id, id, version) AS (
+								SELECT id, id, version FROM sessions WHERE parent_id IS NULL
+								UNION ALL
+								SELECT d.root_id, child.id, child.version FROM sessions child
+								JOIN descendants d ON child.parent_id = d.id
+							), roots AS (
+								SELECT root_id, MAX(version) AS effective_version FROM descendants GROUP BY root_id
+							)
+							SELECT sessions.*, roots.effective_version FROM sessions
+							JOIN roots ON roots.root_id = sessions.id
+							WHERE roots.effective_version > ${floor} AND roots.effective_version <= ${ceiling}
+							ORDER BY sessions.updated_at DESC`
+						: yield* sql<SessionRow>`
+							SELECT * FROM sessions
+							WHERE version > ${floor} AND version <= ${ceiling}
+							ORDER BY updated_at DESC`;
+					const [lineage, approvals, projectedStatuses] = yield* Effect.all([
+						getSessionLineage(),
+						countPendingApprovalsBySession(),
+						getAllSessionStatuses(),
+					]);
+					const pending = pendingApprovalCountsByType(approvals);
+					const items = sessionRowsToSessionInfoList(rows, {
+						parentMap: new Map(
+							lineage.rows.flatMap((row) =>
+								row.parent_id === null
+									? []
+									: [[row.id, row.parent_id] as const],
+							),
+						),
+						statuses: Object.fromEntries(
+							Object.entries(projectedStatuses).map(([id, type]) => [
+								id,
+								{ type },
+							]),
+						),
+						pendingQuestionCounts: pending.questions,
+						pendingPermissionCounts: pending.permissions,
+					});
+					return {
+						rows: rows.map((row, index) => ({
+							item: items[index]!,
+							version: range?.roots
+								? (row as SessionRow & { effective_version: number })
+										.effective_version
+								: row.version,
+						})),
+						version,
+					};
 				}),
 			)
 			.pipe(
@@ -516,6 +789,11 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 		getSession,
 		getAllSessionStatuses,
 		listSessions,
+		listSessionInfos,
+		getSessionLineage,
+		getSessionFamily,
+		getSessionsForReconciliation,
+		countPendingApprovalsBySession,
 		getSessionMessagesWithParts,
 		readSessionList,
 		readSessionTranscript,

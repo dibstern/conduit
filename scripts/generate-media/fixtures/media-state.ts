@@ -234,47 +234,6 @@ export const approvalPermission: MockMessage = {
 	always: ["npm run *"],
 } satisfies RelayMessage as MockMessage;
 
-// ─── Dashboard Scene ────────────────────────────────────────────────────────
-
-export const dashboardProjects = [
-	{
-		slug: "saas-landing",
-		path: "/Users/dev/projects/saas-landing",
-		title: "SaaS Landing Page",
-		status: "ready" as const,
-		sessions: 3,
-		clients: 1,
-		isProcessing: false,
-	},
-	{
-		slug: "api-server",
-		path: "/Users/dev/projects/api-server",
-		title: "API Server",
-		status: "ready" as const,
-		sessions: 5,
-		clients: 2,
-		isProcessing: true,
-	},
-	{
-		slug: "mobile-app",
-		path: "/Users/dev/projects/mobile-app",
-		title: "Mobile App",
-		status: "ready" as const,
-		sessions: 2,
-		clients: 0,
-		isProcessing: false,
-	},
-	{
-		slug: "docs-site",
-		path: "/Users/dev/projects/docs-site",
-		title: "Documentation Site",
-		status: "ready" as const,
-		sessions: 1,
-		clients: 1,
-		isProcessing: false,
-	},
-];
-
 // ─── Setup Scene ────────────────────────────────────────────────────────────
 
 export const setupInfo = {

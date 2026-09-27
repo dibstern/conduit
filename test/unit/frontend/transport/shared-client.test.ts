@@ -117,7 +117,7 @@ const withClients = <A>(
 
 describe("shared two-socket RPC client in memory", () => {
 	it.effect(
-		"opens one transport per traffic class, both at the project RPC url",
+		"opens one transport per traffic class, both at the daemon RPC url",
 		() =>
 			Effect.gen(function* () {
 				const { transports, connect } = recordingConnect();
@@ -129,8 +129,8 @@ describe("shared two-socket RPC client in memory", () => {
 					"stream",
 				]);
 				expect(transports.map((t) => t.url)).toEqual([
-					makeWsRpcUrl("alpha"),
-					makeWsRpcUrl("alpha"),
+					makeWsRpcUrl(),
+					makeWsRpcUrl(),
 				]);
 			}),
 	);
@@ -196,10 +196,10 @@ describe("shared two-socket RPC client in memory", () => {
 				);
 
 				expect(transports.map((t) => t.url)).toEqual([
-					makeWsRpcUrl("alpha"),
-					makeWsRpcUrl("alpha"),
-					makeWsRpcUrl("beta"),
-					makeWsRpcUrl("beta"),
+					makeWsRpcUrl(),
+					makeWsRpcUrl(),
+					makeWsRpcUrl(),
+					makeWsRpcUrl(),
 				]);
 			}),
 	);
@@ -210,9 +210,9 @@ describe("shared two-socket RPC client in memory", () => {
 			Effect.gen(function* () {
 				const { transports, connect } = recordingConnect();
 				// beta's control transport opens; its stream transport does not.
+				let attempts = 0;
 				const halfOpen: WsRpcConnect = (options) =>
-					options.trafficClass === "stream" &&
-					options.url === makeWsRpcUrl("beta")
+					++attempts === 4
 						? Effect.die(new Error("beta stream refused"))
 						: connect(options);
 
@@ -235,11 +235,11 @@ describe("shared two-socket RPC client in memory", () => {
 				);
 
 				expect(transports.map((t) => t.url)).toEqual([
-					makeWsRpcUrl("alpha"),
-					makeWsRpcUrl("alpha"),
-					makeWsRpcUrl("beta"),
-					makeWsRpcUrl("alpha"),
-					makeWsRpcUrl("alpha"),
+					makeWsRpcUrl(),
+					makeWsRpcUrl(),
+					makeWsRpcUrl(),
+					makeWsRpcUrl(),
+					makeWsRpcUrl(),
 				]);
 			}),
 	);
@@ -251,13 +251,12 @@ describe("shared two-socket RPC client in memory", () => {
 				const { transports, connect } = recordingConnect();
 				const closing = yield* Deferred.make<void>();
 				const releaseClose = yield* Deferred.make<void>();
+				let attempts = 0;
 				const slowClose: WsRpcConnect = (options) =>
 					Effect.gen(function* () {
+						const attempt = ++attempts;
 						const client = yield* connect(options);
-						if (
-							options.url === makeWsRpcUrl("alpha") &&
-							options.trafficClass === "stream"
-						) {
+						if (attempt === 2) {
 							// Registered last, so this pauses Scope.close before either
 							// transport finalizer runs, after the scope is marked closed.
 							yield* Scope.addFinalizer(
@@ -298,13 +297,12 @@ describe("shared two-socket RPC client in memory", () => {
 				const { transports, connect } = recordingConnect();
 				const acquired = yield* Deferred.make<void>();
 				const releaseConnect = yield* Deferred.make<void>();
+				let attempts = 0;
 				const gatedConnect: WsRpcConnect = (options) =>
 					Effect.gen(function* () {
+						const attempt = ++attempts;
 						const client = yield* connect(options);
-						if (
-							options.url === makeWsRpcUrl("beta") &&
-							options.trafficClass === "stream"
-						) {
+						if (attempt === 4) {
 							yield* Deferred.succeed(acquired, undefined);
 							yield* Deferred.await(releaseConnect);
 						}
@@ -360,7 +358,7 @@ describe("shared two-socket RPC client in memory", () => {
 						);
 					yield* Deferred.await(acquired);
 					expect(transports.filter((t) => !t.closed).map((t) => t.url)).toEqual(
-						[makeWsRpcUrl("beta"), makeWsRpcUrl("beta")],
+						[makeWsRpcUrl(), makeWsRpcUrl()],
 					);
 					yield* Deferred.succeed(releaseConnect, undefined);
 					expect(Exit.isInterrupted(yield* Fiber.await(replacement))).toBe(
@@ -381,9 +379,9 @@ describe("shared two-socket RPC client in memory", () => {
 			Effect.gen(function* () {
 				const { transports, connect } = recordingConnect();
 				const connecting = yield* Deferred.make<void>();
+				let attempts = 0;
 				const slowConnect: WsRpcConnect = (options) =>
-					options.url === makeWsRpcUrl("beta") &&
-					options.trafficClass === "stream"
+					++attempts === 4
 						? Deferred.succeed(connecting, undefined).pipe(
 								Effect.zipRight(Effect.never),
 							)
@@ -510,8 +508,8 @@ describe("shared two-socket RPC client over WebSockets", () => {
 			);
 
 			expect(fakeSockets.map((ws) => ws.url)).toEqual([
-				makeWsRpcUrl("alpha"),
-				makeWsRpcUrl("alpha"),
+				makeWsRpcUrl(),
+				makeWsRpcUrl(),
 			]);
 			expect(fakeSockets.map((ws) => ws.closeCode)).toEqual([
 				undefined,

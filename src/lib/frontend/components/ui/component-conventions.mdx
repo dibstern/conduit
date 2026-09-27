@@ -1,0 +1,141 @@
+import { Meta } from "@storybook/addon-docs/blocks";
+
+<Meta title="UI/Component API Conventions" />
+
+# Component API conventions
+
+The `components/ui/` layer is conduit's design system: one curated, accessible,
+token-disciplined set of primitives that every feature component consumes.
+`Button.svelte` is the exemplar — new primitives follow the contract below.
+
+## Props
+
+- **Typed `$props()`, no `any`.** Declare an inline props type; extend the native
+  element attributes (e.g. `HTMLButtonAttributes`) via `& Omit<…, handledKeys>` and
+  spread `...rest` onto the root element so consumers can pass `title`, `data-*`,
+  `aria-*`, `form`, etc.
+- **Optional props include `undefined`.** Under `exactOptionalPropertyTypes`, write
+  `prop?: T | undefined` for component-owned optional props. After `$props()`
+  destructuring, an absent prop and an explicitly `undefined` prop have the same
+  runtime meaning, so the public type must accept both.
+- **`variant` + `size`, not booleans.** Prefer a single closed `variant` union over
+  a spray of boolean flags (`primary`/`danger`/… beats `isPrimary`/`isDanger`). Keep
+  the set small and semantic.
+- **Sensible defaults.** Default to the least-emphasized safe choice (`Button`
+  defaults to `variant="secondary"`), so emphasis is always intentional.
+- **Naming.** camelCase props; boolean props read as states (`loading`, `disabled`,
+  `iconOnly`); event props use the native lowercase name (`onclick`).
+
+## Variant styling
+
+- **Typed class maps, no new dependency.** Select plain Tailwind **token** classes
+  from a `Record<Variant, string>` (and a derived size string). No `clsx` /
+  `tailwind-merge` / `cva` — consistent with `Toggle.svelte`.
+- **Tokens only.** Use design tokens (`bg-accent`, `text-text`, `border-border`,
+  `bg-error`, radius/`z`/shadow scales). No hardcoded hex, no arbitrary
+  `z-[…]`/`shadow-[…]`/`rgba(…)` where a token exists.
+  `scripts/check-design-tokens.mjs` enforces these rules in both `.svelte` and `.ts`
+  files under `src/lib/frontend`, so hoisting a class string into a shared constant
+  (e.g. `ui/floating-styles.ts`) no longer moves it out of the scanner's reach.
+- **`class` is additive, not an override.** Accept
+  `class?: string | undefined` and append it after the variant/size classes:
+  `[BASE, variant, size, className].filter(Boolean).join(" ")`.
+  Order in the `class` **attribute** does not decide the CSS cascade — conflicting
+  utilities are resolved by Tailwind's generated stylesheet order, so `class="px-2"`
+  can silently lose to a variant's `px-4`. Treat `class` as **additive** (layout:
+  `w-full`, `shrink-0`, margins). To change a styled property, add a `variant`/`size`;
+  for a genuine one-off override use Tailwind's important modifier (`px-2!`), which
+  raises specificity and wins regardless of order. (We deliberately avoid a
+  `tailwind-merge` dependency.)
+- **An important override kills the variant's hover too.** `text-text-muted!` is
+  `!important` at every state, so it also beats the variant's `hover:text-text` —
+  the call site keeps its resting colour and silently loses the hover change. If
+  you make a property important, make its hover form important as well
+  (`text-text-muted! hover:text-text!`). Measured during the SettingsPanel swap:
+  the close control's hovered icon sat 17/255 darker than before, 52 pixels, which
+  is comfortably invisible to the eye and to the default 1% tolerance
+  (conduit-test-de3.5).
+- **Prove an override; don't assert its class.** Concatenating a conflicting
+  utility is not evidence that it won. A consumer that must differ from a base
+  property needs either an explicitly authoritative utility (`rounded-xl!`) backed
+  by a `getComputedStyle` assertion in a browser-rendered story, or a collision-free,
+  semantically justified component prop. `toHaveClass("rounded-xl")` proves only
+  that the string is in the attribute — it passes just as happily when the base
+  radius is what actually paints.
+
+## Accessibility (baked in, not bolted on)
+
+Destructive menu items always carry an icon; colour is never the only danger
+signal. `MenuItem` uses `trash-2` by default, and other danger actions pass a
+matching icon.
+
+- Correct roles/semantics by construction; keyboard operability by default.
+- **Suppress focus with `focus-visible:outline-hidden` (not `outline-none`)** so a
+  transparent outline survives for forced-colors / high-contrast users when the
+  box-shadow ring is stripped.
+- **The house focus ring is `focus-visible:ring-2 focus-visible:ring-text`** — a
+  neutral ring, deliberately not the accent. An accent ring on an accent-filled
+  control is the same colour as the control, which made it invisible on Button's
+  `primary` variant, the one that most needed it. `ring-text` reads against every
+  surface in both themes. `focus-visible` is keyboard-only by definition, so this
+  never appears on a mouse click.
+- **Busy ≠ disabled.** A `loading` control stays focusable (`aria-disabled` +
+  `aria-busy`, not the native `disabled` attribute) and guards its handler, so
+  keyboard/screen-reader context is not lost mid-action. Reserve native `disabled`
+  for genuinely unavailable controls.
+- **Icon-only controls require an accessible name** — expressed as a discriminated
+  props union (the Svelte type-checker / editor flags a missing `ariaLabel`), backed
+  by a dev-time `console.warn` runtime backstop for callers that bypass the types.
+- Interactive overlay primitives delegate focus, dismissal, and roving focus to
+  Bits UI. `use-background-inert` supplements the missing assistive-tech
+  background hiding and exempts live Dialog, Menu, Popover, and Tooltip portal branches.
+
+## Floating overlays inside a Modal
+
+`Menu`, `Popover` and `Tooltip` portal to `body` by default and register themselves as live
+background-inert exemptions. Their canonical `--z-popover` layer is intentionally
+below `--z-modal`, though, so a floating surface triggered inside a Modal must pass
+`portalTo` targeting an element inside that Modal's content subtree. The local
+portal target resolves both stacking and inert containment without speculative
+global overlay coordination.
+
+Menu typeahead is not currently functional; tracked as `conduit-test-de3.3.11`.
+
+## Listboxes owned by an external input
+
+`DetachedListbox` is the surface for a combobox whose input lives outside the
+list — FileMenu, CommandMenu and DirectoryAutocomplete all keep DOM focus on
+their own input and move a highlight with `aria-activedescendant`.
+
+- **The input owns the relationship; the surface owns the semantics.** The
+  primitive applies `role="listbox"`, a required `id`, and `aria-label`. The
+  caller owns `role="combobox"`, `aria-expanded`, `aria-controls`,
+  `aria-activedescendant` on its input, and `role="option"` / `aria-selected` /
+  stable ids on its rows — because the caller already owns the row loop, the
+  active index, and the keys.
+- **Not focusable.** `aria-activedescendant` navigation means the input never
+  loses focus, so the listbox carries no `tabindex`: a tabbable list would be a
+  second, wrong tab stop. This is the reason the primitive omits `tabindex` from
+  its prop type rather than defaulting it.
+- **Never portaled.** These surfaces are absolutely positioned drop-ups inside
+  their consumer, and each consumer scrolls the active row with a descendant
+  query (`.file-menu-list .file-item-active`, …). Portaling would silently break
+  those selectors, so the primitive renders inline and pins `data-side="top"`.
+- **Derive ids from `$props.id()`** in the owning component, not from a shared
+  registry, so a second mounted instance cannot collide.
+
+## Every primitive ships together
+
+In the same commit: the `.svelte` primitive, a `.stories.ts` covering every
+variant/state via `argTypes`, an **asserting** `play()` interaction test, a green
+`addon-a11y` panel, and a behavioral unit test under
+`test/unit/components/`. Pass a text label to a snippet `children` from a
+`.stories.ts` / test with `createRawSnippet(() => ({ render: () => \`<span>…</span>\` }))`
+— plain, trusted text only (the interpolated string is not HTML-escaped).
+
+## When to add a primitive
+
+Add one only when the pattern is **shared and reused** (a control copy-pasted across
+several features) and **owns behavior or a11y** worth centralizing. A one-off layout
+belongs in its feature. Extend an existing primitive with a `variant` before forking
+a new component.

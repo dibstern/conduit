@@ -5,6 +5,7 @@
 	import type { StatusVariant } from "../../utils/setup-utils.js";
 	import StepHeader from "./StepHeader.svelte";
 	import StatusBox from "./StatusBox.svelte";
+	import Button from "../ui/Button.svelte";
 
 	let {
 		totalSteps,
@@ -63,30 +64,42 @@
 			account.
 			{#if isIOS}
 				<div class="mt-2">
-					<a
-						class="inline-flex items-center justify-center gap-2 bg-accent text-bg no-underline px-6 py-3 rounded-xl font-semibold text-sm hover:opacity-90 transition-opacity"
+					<Button
+						variant="primary"
+						size="content"
 						href="https://apps.apple.com/app/tailscale/id1470499037"
 						target="_blank"
-						rel="noopener">App Store</a
+						rel="noopener"
+						class="gap-2 px-6 py-3 rounded-xl font-semibold text-sm font-sans"
 					>
+						App Store
+					</Button>
 				</div>
 			{:else if isAndroid}
 				<div class="mt-2">
-					<a
-						class="inline-flex items-center justify-center gap-2 bg-accent text-bg no-underline px-6 py-3 rounded-xl font-semibold text-sm hover:opacity-90 transition-opacity"
+					<Button
+						variant="primary"
+						size="content"
 						href="https://play.google.com/store/apps/details?id=com.tailscale.ipn"
 						target="_blank"
-						rel="noopener">Google Play</a
+						rel="noopener"
+						class="gap-2 px-6 py-3 rounded-xl font-semibold text-sm font-sans"
 					>
+						Google Play
+					</Button>
 				</div>
 			{:else}
 				<div class="mt-2">
-					<a
-						class="inline-flex items-center justify-center gap-2 bg-accent text-bg no-underline px-6 py-3 rounded-xl font-semibold text-sm hover:opacity-90 transition-opacity"
+					<Button
+						variant="primary"
+						size="content"
 						href="https://tailscale.com/download"
 						target="_blank"
-						rel="noopener">Download Tailscale</a
+						rel="noopener"
+						class="gap-2 px-6 py-3 rounded-xl font-semibold text-sm font-sans"
 					>
+						Download Tailscale
+					</Button>
 				</div>
 			{/if}
 		</div>
@@ -110,15 +123,17 @@
 		</div>
 	</div>
 
-	<StatusBox status={tsStatus} message={tsMessage} />
+	<StatusBox status={tsStatus}>{tsMessage}</StatusBox>
 
 	<!-- Actions -->
 	<div class="flex gap-2 mt-5">
-		<button
-			class="flex-1 inline-flex items-center justify-center gap-2 bg-accent text-bg px-6 py-3 rounded-xl font-semibold text-sm border-none cursor-pointer font-sans hover:opacity-90 transition-opacity"
+		<Button
+			variant="primary"
+			size="content"
+			class="flex-1 gap-2 px-6 py-3 rounded-xl font-semibold text-sm font-sans"
 			onclick={onnextstep}
 		>
 			Next
-		</button>
+		</Button>
 	</div>
 </div>

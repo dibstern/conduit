@@ -1,6 +1,5 @@
 // ─── Effect-based Projection Runner ─────────────────────────────────────────
-// Migrates projection-runner.ts from raw SqliteClient to @effect/sql SqlClient.
-// Uses SqlClient.withTransaction for write operations.
+// The only projection runner. Uses SqlClient.withTransaction for writes.
 
 import { SqlClient } from "@effect/sql";
 import type { SqlError } from "@effect/sql/SqlError";
@@ -13,6 +12,7 @@ import {
 	mergeTouches,
 	type ProjectionContext,
 	type ProjectionTouch,
+	UNPROJECTED_CANONICAL_EVENT_TYPES,
 } from "./projectors-effect.js";
 import {
 	decodeStoredEventRow,
@@ -79,8 +79,8 @@ export interface ProjectionRunnerEffect {
 
 	/**
 	 * Take the next read-model version. The clock belongs to the read model, not
-	 * to projection: a column written directly — `sessions.last_viewed_at`, which
-	 * has no event behind it — has to stamp its row from the same counter, or a
+	 * to projection: a direct read-model write has to stamp its row from the
+	 * same counter, or a
 	 * subscriber holding the row's old version never hears that it moved.
 	 *
 	 * Must be taken inside the transaction that writes the rows it stamps: the
@@ -130,6 +130,27 @@ export const makeProjectionRunnerEffect = (
 				list.push(projector);
 			}
 		}
+
+		// An event type no projector claims writes nothing, raises nothing, and
+		// still advances the cursor below — silent by construction, which is how
+		// session.compaction went three months unprojected. Say so once per type
+		// rather than once per event, so the gap shows up in the log instead of as
+		// absent rows much later.
+		const unclaimedWarned = new Set<string>();
+		const warnIfUnclaimed = (eventType: string) =>
+			Effect.suspend(() => {
+				if (
+					projectorsByEventType.has(eventType) ||
+					UNPROJECTED_CANONICAL_EVENT_TYPES.includes(eventType) ||
+					unclaimedWarned.has(eventType)
+				) {
+					return Effect.void;
+				}
+				unclaimedWarned.add(eventType);
+				return Effect.logWarning(
+					`No projector handles "${eventType}"; its events are stored but never projected`,
+				);
+			});
 
 		// Mutable state
 		const failures: ProjectionFailure[] = [];
@@ -183,6 +204,7 @@ export const makeProjectionRunnerEffect = (
 		> =>
 			sql.withTransaction(
 				Effect.gen(function* () {
+					yield* warnIfUnclaimed(event.type);
 					const matching = projectorsByEventType.get(event.type) ?? [];
 					// Inside the transaction on purpose: the bump's write lock is only
 					// held to COMMIT, so a bump that auto-commits on its own would let a
@@ -248,6 +270,12 @@ export const makeProjectionRunnerEffect = (
 				});
 
 			return Effect.gen(function* () {
+				if (!recovered) {
+					return yield* new ProjectionRunnerError({
+						operation: "projectBatch",
+						cause: "recover() must be called before projectBatch()",
+					});
+				}
 				// Event order decides the outcome, so the touches are folded, not
 				// unioned — see projectEvent.
 				const touches: ProjectionTouch[] = [];
@@ -265,6 +293,7 @@ export const makeProjectionRunnerEffect = (
 						const version = yield* nextVersion;
 						const ctx: ProjectionContext = { version, replaying };
 						for (const event of events) {
+							yield* warnIfUnclaimed(event.type);
 							const matching = projectorsByEventType.get(event.type) ?? [];
 							for (const projector of matching) {
 								touches.push(yield* projector.project(event, ctx));

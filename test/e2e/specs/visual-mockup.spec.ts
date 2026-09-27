@@ -192,7 +192,12 @@ async function hideLiveOnlyElements(page: Page) {
 
 async function gotoLiveAndDrive(page: Page, baseURL: string | undefined) {
 	await setupLiveAppWithMockWS(page);
-	await page.goto(baseURL ?? "http://localhost:4173");
+	await page.goto(
+		new URL(
+			"/s/sess-mockup-001",
+			baseURL ?? "http://localhost:4173",
+		).toString(),
+	);
 	await driveToMockupState(page);
 	await hideLiveOnlyElements(page);
 	await preparePageForScreenshot(page);

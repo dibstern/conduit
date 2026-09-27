@@ -53,6 +53,15 @@ export const CANONICAL_EVENT_TYPES = [
 	"turn.model_resolved",
 	"session.created",
 	"session.renamed",
+	"session.read",
+	"session.unread",
+	"session.settled",
+	"session.unsettled",
+	"session.pinned",
+	"session.unpinned",
+	"session.snoozed",
+	"session.auto_settle_set",
+	"session.unsnoozed",
 	"session.deleted",
 	"session.forked",
 	"session.status",
@@ -201,6 +210,45 @@ export interface SessionCreatedPayload {
 	readonly providerSessionId?: string;
 }
 
+export interface SessionReadPayload {
+	readonly sessionId: string;
+}
+
+export interface SessionUnreadPayload {
+	readonly sessionId: string;
+}
+
+export interface SessionSettledPayload {
+	readonly sessionId: string;
+	readonly automatic?: boolean;
+}
+
+export interface SessionAutoSettleSetPayload {
+	readonly sessionId: string;
+	readonly disabled: boolean;
+}
+
+export interface SessionUnsettledPayload {
+	readonly sessionId: string;
+}
+
+export interface SessionPinnedPayload {
+	readonly sessionId: string;
+}
+
+export interface SessionUnpinnedPayload {
+	readonly sessionId: string;
+}
+
+export interface SessionSnoozedPayload {
+	readonly sessionId: string;
+	readonly until: number | null;
+}
+
+export interface SessionUnsnoozedPayload {
+	readonly sessionId: string;
+}
+
 export interface SessionRenamedPayload {
 	readonly sessionId: string;
 	readonly title: string;
@@ -320,6 +368,15 @@ export interface EventPayloadMap {
 	"turn.model_resolved": TurnModelResolvedPayload;
 	"session.created": SessionCreatedPayload;
 	"session.renamed": SessionRenamedPayload;
+	"session.read": SessionReadPayload;
+	"session.unread": SessionUnreadPayload;
+	"session.settled": SessionSettledPayload;
+	"session.unsettled": SessionUnsettledPayload;
+	"session.pinned": SessionPinnedPayload;
+	"session.unpinned": SessionUnpinnedPayload;
+	"session.snoozed": SessionSnoozedPayload;
+	"session.auto_settle_set": SessionAutoSettleSetPayload;
+	"session.unsnoozed": SessionUnsnoozedPayload;
 	"session.deleted": SessionDeletedPayload;
 	"session.forked": SessionForkedPayload;
 	"session.status": SessionStatusPayload;
@@ -621,6 +678,45 @@ const SessionRenamedPayloadSchema = Schema.Struct({
 	title: Schema.String,
 });
 
+const SessionReadPayloadSchema = Schema.Struct({
+	sessionId: Schema.String,
+});
+
+const SessionUnreadPayloadSchema = Schema.Struct({
+	sessionId: Schema.String,
+});
+
+const SessionSettledPayloadSchema = Schema.Struct({
+	sessionId: Schema.String,
+	automatic: Schema.optional(Schema.Boolean),
+});
+
+const SessionAutoSettleSetPayloadSchema = Schema.Struct({
+	sessionId: Schema.String,
+	disabled: Schema.Boolean,
+});
+
+const SessionUnsettledPayloadSchema = Schema.Struct({
+	sessionId: Schema.String,
+});
+
+const SessionPinnedPayloadSchema = Schema.Struct({
+	sessionId: Schema.String,
+});
+
+const SessionUnpinnedPayloadSchema = Schema.Struct({
+	sessionId: Schema.String,
+});
+
+const SessionSnoozedPayloadSchema = Schema.Struct({
+	sessionId: Schema.String,
+	until: Schema.NullOr(Schema.Number),
+});
+
+const SessionUnsnoozedPayloadSchema = Schema.Struct({
+	sessionId: Schema.String,
+});
+
 const SessionForkedPayloadSchema = Schema.Struct({
 	sessionId: Schema.String,
 	parentId: Schema.String,
@@ -772,6 +868,42 @@ const SessionRenamedEventSchema = eventEnvelope(
 	"session.renamed",
 	SessionRenamedPayloadSchema,
 );
+const SessionReadEventSchema = eventEnvelope(
+	"session.read",
+	SessionReadPayloadSchema,
+);
+const SessionUnreadEventSchema = eventEnvelope(
+	"session.unread",
+	SessionUnreadPayloadSchema,
+);
+const SessionSettledEventSchema = eventEnvelope(
+	"session.settled",
+	SessionSettledPayloadSchema,
+);
+const SessionUnsettledEventSchema = eventEnvelope(
+	"session.unsettled",
+	SessionUnsettledPayloadSchema,
+);
+const SessionPinnedEventSchema = eventEnvelope(
+	"session.pinned",
+	SessionPinnedPayloadSchema,
+);
+const SessionUnpinnedEventSchema = eventEnvelope(
+	"session.unpinned",
+	SessionUnpinnedPayloadSchema,
+);
+const SessionSnoozedEventSchema = eventEnvelope(
+	"session.snoozed",
+	SessionSnoozedPayloadSchema,
+);
+const SessionAutoSettleSetEventSchema = eventEnvelope(
+	"session.auto_settle_set",
+	SessionAutoSettleSetPayloadSchema,
+);
+const SessionUnsnoozedEventSchema = eventEnvelope(
+	"session.unsnoozed",
+	SessionUnsnoozedPayloadSchema,
+);
 const SessionDeletedEventSchema = eventEnvelope(
 	"session.deleted",
 	SessionDeletedPayloadSchema,
@@ -817,7 +949,7 @@ const QuestionResolvedEventSchema = eventEnvelope(
 	QuestionResolvedPayloadSchema,
 );
 
-// ─── Canonical Event Schema (Union of all 27 event types) ──────────────────
+// ─── Canonical Event Schema (Union of all 36 event types) ──────────────────
 
 export const CanonicalEventSchema = Schema.Union(
 	MessageCreatedEventSchema,
@@ -836,6 +968,15 @@ export const CanonicalEventSchema = Schema.Union(
 	TurnModelResolvedEventSchema,
 	SessionCreatedEventSchema,
 	SessionRenamedEventSchema,
+	SessionReadEventSchema,
+	SessionUnreadEventSchema,
+	SessionSettledEventSchema,
+	SessionUnsettledEventSchema,
+	SessionPinnedEventSchema,
+	SessionUnpinnedEventSchema,
+	SessionSnoozedEventSchema,
+	SessionAutoSettleSetEventSchema,
+	SessionUnsnoozedEventSchema,
 	SessionDeletedEventSchema,
 	SessionForkedEventSchema,
 	SessionStatusEventSchema,

@@ -75,6 +75,7 @@ export function evaluateSession(
 					effect: "notify-idle",
 					sessionId,
 					isSubagent: ctx.isSubagent,
+					busySince: current.busySince,
 				});
 				return { phase: { phase: "idle" }, effects };
 			}
@@ -116,6 +117,7 @@ export function evaluateSession(
 					effect: "notify-idle",
 					sessionId,
 					isSubagent: ctx.isSubagent,
+					busySince: current.busySince,
 				});
 				return { phase: { phase: "idle" }, effects };
 			}
@@ -170,6 +172,7 @@ export function evaluateSession(
 					effect: "notify-idle",
 					sessionId,
 					isSubagent: ctx.isSubagent,
+					busySince: current.busySince,
 				});
 				return { phase: { phase: "idle" }, effects };
 			}
@@ -197,6 +200,7 @@ export function evaluateSession(
 					effect: "notify-idle",
 					sessionId,
 					isSubagent: ctx.isSubagent,
+					busySince: current.busySince,
 				});
 				return { phase: { phase: "idle" }, effects };
 			}
@@ -224,6 +228,43 @@ export function evaluateSession(
 
 export function initialMonitoringState(): MonitoringState {
 	return { sessions: new Map() };
+}
+
+/** Present candidates retain snapshot order for poller admission and promotion. */
+export function selectMonitoringCandidates(
+	state: MonitoringState,
+	statuses: Readonly<Record<string, SessionStatus>>,
+	parents: ReadonlyMap<string, string> = new Map(),
+): string[] {
+	const candidates = new Set<string>();
+	for (const [sessionId, status] of Object.entries(statuses)) {
+		const previous = state.sessions.get(sessionId);
+		if (
+			status?.type === "busy" ||
+			status?.type === "retry" ||
+			(previous !== undefined && previous.phase !== "idle")
+		) {
+			candidates.add(sessionId);
+		}
+	}
+	// Missing active sessions still owe deletion effects, but have no context.
+	for (const [sessionId, phase] of state.sessions) {
+		if (phase.phase !== "idle") candidates.add(sessionId);
+	}
+	// Include idle ancestors before building contexts: a busy child changes
+	// its root's phase even when the root's own status has not moved.
+	for (const id of [...candidates]) {
+		let current = id;
+		const seen = new Set<string>([id]);
+		while (parents.has(current)) {
+			const parent = parents.get(current);
+			if (parent === undefined || seen.has(parent)) break;
+			seen.add(parent);
+			if (statuses[parent] !== undefined) candidates.add(parent);
+			current = parent;
+		}
+	}
+	return [...candidates];
 }
 
 export function evaluateAll(
@@ -258,7 +299,9 @@ export function evaluateAll(
 			busy.has(sessionId) ? { ...evalCtx, status: { type: "busy" } } : evalCtx,
 			config,
 		);
-		newSessions.set(sessionId, result.phase);
+		if (result.phase.phase !== "idle") {
+			newSessions.set(sessionId, result.phase);
+		}
 		effects.push(...result.effects);
 	}
 
@@ -277,6 +320,7 @@ export function evaluateAll(
 					effect: "notify-idle",
 					sessionId,
 					isSubagent: false,
+					busySince: phase.busySince,
 				});
 			}
 			// Don't add to newSessions — session is removed

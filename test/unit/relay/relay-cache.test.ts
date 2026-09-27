@@ -23,12 +23,9 @@ import {
 
 const makeTestRelay = (slug: string): Relay => ({
 	slug,
-	wsHandler: {
-		handleUpgrade: vi.fn(),
-	} as unknown as Relay["wsHandler"],
-	rpcWsHandler: {
-		handleUpgrade: vi.fn(),
-	} as unknown as Relay["rpcWsHandler"],
+	attach: () => () => {},
+	wsHandler: {},
+	rpcWsHandler: {},
 	setDefaultAgent: vi.fn(() => Promise.resolve()),
 	setDefaultModel: vi.fn(() => Promise.resolve()),
 	stop: vi.fn(),

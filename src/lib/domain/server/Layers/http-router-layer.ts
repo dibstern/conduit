@@ -14,14 +14,10 @@ import {
 	ProjectApiDelegateProvider,
 	ProjectsProvider,
 	PushProvider,
-	RemoveProjectProvider,
 	type RouterProjectInfo,
 	SetupInfoProvider,
-	ThemeProvider,
 } from "../../../server/effect-http-router.js";
 import type { PushSubscriptionData } from "../../../server/push.js";
-import { loadThemeFiles } from "../../../server/theme-loader.js";
-import type { ThemesResponse } from "../../../shared-types.js";
 import { TlsCertTag } from "../../daemon/Layers/tls-cert-layer.js";
 import {
 	DaemonConfigRefTag,
@@ -70,7 +66,6 @@ export interface StandaloneHttpRouterOptions {
 	readonly auth: AuthManager;
 	readonly staticDir: string;
 	readonly getProjects: () => RouterProjectInfo[];
-	readonly removeProject: (slug: string) => boolean;
 	readonly delegateApiRequest?: (
 		slug: string,
 		subPath: string,
@@ -78,7 +73,6 @@ export interface StandaloneHttpRouterOptions {
 	) => Effect.Effect<HttpServerResponse.HttpServerResponse, unknown>;
 	readonly getPort: () => number;
 	readonly getIsTls: () => boolean;
-	readonly loadThemes: () => Promise<ThemesResponse>;
 	readonly pushManager?: DaemonHttpRouterPushManager | null | undefined;
 	readonly caRootPath?: string | undefined;
 	readonly caCertDer?: Buffer | undefined;
@@ -89,14 +83,12 @@ interface HttpRouterRequestHandlerOptions {
 	readonly setupInfoLayer: Layer.Layer<SetupInfoProvider>;
 	readonly staticDir: string;
 	readonly getProjects: () => Effect.Effect<RouterProjectInfo[]>;
-	readonly removeProject?: (slug: string) => Effect.Effect<void, unknown>;
 	readonly delegateApiRequest?: (
 		slug: string,
 		subPath: string,
 		req: HttpServerRequest.HttpServerRequest,
 	) => Effect.Effect<HttpServerResponse.HttpServerResponse, unknown>;
 	readonly getHealthResponse?: () => Effect.Effect<object>;
-	readonly loadThemes: () => Effect.Effect<ThemesResponse, unknown>;
 	readonly pushManager?: DaemonHttpRouterPushManager | null | undefined;
 	readonly caRootPath?: string | undefined;
 	readonly caCertDer?: Buffer | undefined;
@@ -108,19 +100,9 @@ const makeHttpRouterLayer = (options: HttpRouterRequestHandlerOptions) => {
 		Layer.succeed(StaticDirTag, options.staticDir),
 		Layer.succeed(ProjectsProvider, { getProjects: options.getProjects }),
 		options.setupInfoLayer,
-		Layer.succeed(ThemeProvider, { loadThemes: options.loadThemes }),
 		NodeFileSystem.layer,
 		NodePath.layer,
 	);
-
-	if (options.removeProject != null) {
-		routerLayer = Layer.merge(
-			routerLayer,
-			Layer.succeed(RemoveProjectProvider, {
-				removeProject: options.removeProject,
-			}),
-		);
-	}
 
 	if (options.delegateApiRequest != null) {
 		routerLayer = Layer.merge(
@@ -247,18 +229,9 @@ export const makeStandaloneHttpRouterRequestHandler = (
 			}),
 			staticDir: options.staticDir,
 			getProjects: () => Effect.sync(options.getProjects),
-			removeProject: (slug) =>
-				options.removeProject(slug)
-					? Effect.void
-					: Effect.fail(new Error("Project not found")),
 			delegateApiRequest:
 				options.delegateApiRequest ??
 				(() => Effect.fail(new Error("Project API route not found"))),
-			loadThemes: () =>
-				Effect.tryPromise({
-					try: options.loadThemes,
-					catch: (cause) => cause,
-				}),
 			pushManager: options.pushManager,
 			caRootPath: options.caRootPath,
 			caCertDer: options.caCertDer,
@@ -291,13 +264,7 @@ export const makeDaemonHttpRouterLive = (staticDir: string) =>
 					projectRegistry,
 					relayCache,
 				}),
-				removeProject: (slug: string) => daemonHandle.removeProject(slug),
 				getHealthResponse: () => daemonHandle.getStatus(),
-				loadThemes: () =>
-					Effect.tryPromise({
-						try: loadThemeFiles,
-						catch: (cause) => cause,
-					}),
 				pushManager: Option.getOrUndefined(legacyPushManager),
 				caRootPath: tls.caRootPath ?? undefined,
 				caCertDer: tls.caCertDer ?? undefined,

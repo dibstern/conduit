@@ -5,9 +5,8 @@
 // with an HttpClient that knows the server's address. This validates that
 // the router is correctly wired through the server layer.
 //
-// Also tests the new routes added to effect-http-router.ts:
+// Also tests routes added to effect-http-router.ts:
 //   POST /api/push/unsubscribe
-//   GET  /api/themes
 //   GET  /api/setup-info
 
 import { mkdtemp, rm } from "node:fs/promises";
@@ -41,7 +40,6 @@ import {
 	PushProvider,
 	type RouterProjectInfo,
 	SetupInfoProvider,
-	ThemeProvider,
 } from "../../../src/lib/server/effect-http-router.js";
 
 // ─── Test Data ─────────────────────────────────────────────────────────────
@@ -68,35 +66,6 @@ const TestPushLayer = Layer.succeed(PushProvider, {
 	getPublicKey: () => "test-vapid-public-key",
 	addSubscription: () => {},
 	removeSubscription: () => {},
-});
-
-const TestThemeLayer = Layer.succeed(ThemeProvider, {
-	loadThemes: () =>
-		Effect.succeed({
-			bundled: {
-				"test-theme": {
-					name: "Test Theme",
-					variant: "dark" as const,
-					base00: "000000",
-					base01: "111111",
-					base02: "222222",
-					base03: "333333",
-					base04: "444444",
-					base05: "555555",
-					base06: "666666",
-					base07: "777777",
-					base08: "888888",
-					base09: "999999",
-					base0A: "AAAAAA",
-					base0B: "BBBBBB",
-					base0C: "CCCCCC",
-					base0D: "DDDDDD",
-					base0E: "EEEEEE",
-					base0F: "FFFFFF",
-				},
-			},
-			custom: {},
-		}),
 });
 
 let setupInfoPort = 9999;
@@ -183,38 +152,6 @@ describe("Effect HTTP Router - Extended Routes", () => {
 						endpoint: "https://push.example.com/sub123",
 					}),
 				}),
-			);
-
-			expect(response.status).toBe(404);
-			const body = (await response.json()) as {
-				error: { code: string };
-			};
-			expect(body.error.code).toBe("NOT_AVAILABLE");
-		});
-	});
-
-	// ─── Route Tests: Themes ───────────────────────────────────────────────
-
-	describe("GET /api/themes", () => {
-		it("returns themes when ThemeProvider present", async () => {
-			const handler = tracked(Layer.merge(TestProjectsLayer, TestThemeLayer));
-			const response = await handler(
-				new Request("http://localhost/api/themes"),
-			);
-
-			expect(response.status).toBe(200);
-			const body = (await response.json()) as {
-				bundled: Record<string, unknown>;
-				custom: Record<string, unknown>;
-			};
-			expect(body.bundled).toHaveProperty("test-theme");
-			expect(body.custom).toEqual({});
-		});
-
-		it("returns 404 when ThemeProvider absent", async () => {
-			const handler = tracked(TestProjectsLayer);
-			const response = await handler(
-				new Request("http://localhost/api/themes"),
 			);
 
 			expect(response.status).toBe(404);
@@ -324,7 +261,6 @@ describe("HTTP Server Layer", () => {
 	const AllTestLayers = Layer.mergeAll(
 		TestProjectsLayer,
 		TestPushLayer,
-		TestThemeLayer,
 		TestSetupInfoLayer,
 		baseRouterLayer(),
 	);
@@ -368,19 +304,6 @@ describe("HTTP Server Layer", () => {
 			};
 			expect(data.projects).toHaveLength(1);
 			expect(data.projects[0]).toHaveProperty("slug", "test-project");
-		}).pipe(Effect.provide(TestServerLayer)),
-	);
-
-	it.scoped("themes endpoint responds via real HTTP server", () =>
-		Effect.gen(function* () {
-			const client = yield* HttpClient.HttpClient;
-			const response = yield* client.get("/api/themes");
-			expect(response.status).toBe(200);
-			const data = (yield* response.json) as {
-				bundled: Record<string, unknown>;
-				custom: Record<string, unknown>;
-			};
-			expect(data.bundled).toHaveProperty("test-theme");
 		}).pipe(Effect.provide(TestServerLayer)),
 	);
 

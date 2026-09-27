@@ -29,6 +29,7 @@ import { InstanceMgmtTag } from "../../src/lib/domain/daemon/Services/management
 import { OpenCodeAPITag } from "../../src/lib/domain/provider/Services/opencode-api-service.js";
 import { RateLimiterLive } from "../../src/lib/domain/relay/Layers/rate-limiter-layer.js";
 import { AgentServiceLive } from "../../src/lib/domain/relay/Services/agent-service.js";
+import { DaemonSessionQueryServiceLive } from "../../src/lib/domain/relay/Services/daemon-session-query-service.js";
 import { DirectoryListingServiceLive } from "../../src/lib/domain/relay/Services/directory-listing-service.js";
 import { InstanceManagementServiceLive } from "../../src/lib/domain/relay/Services/instance-management-service.js";
 import { makePollerManagerStateLive } from "../../src/lib/domain/relay/Services/message-poller.js";
@@ -203,20 +204,13 @@ function createMockSessionMgr(): HandlerDeps["sessionMgr"] {
 			.mockResolvedValue([
 				{ id: "s1", title: "Session 1", updatedAt: 0, messageCount: 0 },
 			]),
-		sendDualSessionLists: vi.fn().mockImplementation(async (send) => {
+		sendSessionLists: vi.fn().mockImplementation(async (send) => {
 			send({
 				type: "session_list",
 				sessions: [
 					{ id: "s1", title: "Session 1", updatedAt: 0, messageCount: 0 },
 				],
 				roots: true,
-			});
-			send({
-				type: "session_list",
-				sessions: [
-					{ id: "s1", title: "Session 1", updatedAt: 0, messageCount: 0 },
-				],
-				roots: false,
 			});
 		}),
 		searchSessions: vi.fn().mockResolvedValue([]),
@@ -374,6 +368,11 @@ export function createMockClientInitDeps(
 ): ClientInitDeps {
 	const sessionService =
 		createMockSessionMgr() as unknown as ClientInitDeps["sessionService"];
+	sessionService.getSessionFamily = vi.fn(async (sessionId) => ({
+		type: "session_family" as const,
+		rootId: sessionId,
+		sessions: [],
+	}));
 	sessionService.resolveSessionHistory = vi.fn(async (sessionId) => ({
 		kind: "rest-history" as const,
 		history: await sessionService.loadPreRenderedHistory(sessionId),
@@ -430,8 +429,11 @@ export function createMockProjectRelay(
 	overrides?: Partial<ProjectRelay>,
 ): ProjectRelay {
 	return {
-		wsHandler:
-			createMockWsHandlerFull() as unknown as ProjectRelay["wsHandler"],
+		settleIdleSessions: () => Effect.succeed(0),
+		wsHandler: {
+			...createMockWsHandlerFull(),
+			attach: vi.fn(() => () => {}),
+		} as unknown as ProjectRelay["wsHandler"],
 		rpcWsHandler: {
 			handleUpgrade: vi.fn(),
 			drain: vi.fn().mockResolvedValue(undefined),
@@ -462,8 +464,8 @@ export function createMockProjectRelay(
 				}),
 				bindSession: vi.fn(),
 				unbindSession: vi.fn(),
-				getProviderForSession: vi.fn().mockReturnValue(undefined),
-				listBoundSessions: vi.fn().mockReturnValue([]),
+				getProviderForSessionEffect: vi.fn(() => Effect.succeed(undefined)),
+				listBoundSessionsEffect: vi.fn(() => Effect.succeed([])),
 				shutdown: vi.fn().mockResolvedValue(undefined),
 			},
 			registry: {} as OrchestrationLayer["registry"],
@@ -668,7 +670,7 @@ export function makeMockWebSocketHandler(
 		markClientBootstrapped: vi.fn(),
 		getClientCount: vi.fn(() => 0),
 		getClientIds: vi.fn(() => []),
-		handleUpgrade: vi.fn(),
+		attach: vi.fn(() => () => {}),
 		close: vi.fn(),
 		drain: vi.fn(async () => undefined),
 		on: vi.fn(),
@@ -753,7 +755,7 @@ export function makeMockSessionManagerShape(
 		listSessions: vi.fn(async () => [
 			{ id: "s1", title: "Session 1", updatedAt: 0, messageCount: 0 },
 		]),
-		sendDualSessionLists: vi.fn(async (send) => {
+		sendSessionLists: vi.fn(async (send) => {
 			send({
 				type: "session_list",
 				sessions: [
@@ -790,6 +792,13 @@ export function makeMockSessionManagerService(
 ): SessionManagerService {
 	return {
 		initialize: vi.fn(() => Effect.succeed("s1")),
+		getSessionFamily: vi.fn((sessionId: string) =>
+			Effect.succeed({
+				type: "session_family" as const,
+				rootId: sessionId,
+				sessions: [],
+			}),
+		),
 		getDefaultSessionId: vi.fn(() => Effect.succeed("s1")),
 		getLastKnownSessionCount: vi.fn(() => Effect.succeed(1)),
 		listSessions: vi.fn(() =>
@@ -801,6 +810,12 @@ export function makeMockSessionManagerService(
 		establishOpenCodeSession: vi.fn(() => Effect.void),
 		deleteSession: vi.fn(() => Effect.succeed(true)),
 		renameSession: vi.fn(() => Effect.void),
+		markSessionRead: vi.fn(() => Effect.void),
+		markSessionUnread: vi.fn(() => Effect.void),
+		setSessionSettled: vi.fn(() => Effect.succeed(false)),
+		setSessionPinned: vi.fn(() => Effect.succeed(false)),
+		snoozeSession: vi.fn(() => Effect.succeed(false)),
+		unsnoozeSession: vi.fn(() => Effect.succeed(false)),
 		clearPaginationCursor: vi.fn(() => Effect.void),
 		seedPaginationCursor: vi.fn(() => Effect.void),
 		loadPreRenderedHistory: vi.fn(() =>
@@ -813,7 +828,7 @@ export function makeMockSessionManagerService(
 		decrementPendingQuestionCount: vi.fn(() => Effect.void),
 		setPendingQuestionCounts: vi.fn(() => Effect.void),
 		setForkEntry: vi.fn(() => Effect.void),
-		sendDualSessionLists: vi.fn((send) =>
+		sendSessionLists: vi.fn((send) =>
 			Effect.sync(() => {
 				send({
 					type: "session_list",
@@ -826,18 +841,6 @@ export function makeMockSessionManagerService(
 						},
 					],
 					roots: true,
-				});
-				send({
-					type: "session_list",
-					sessions: [
-						{
-							id: "s1",
-							title: "Session 1",
-							updatedAt: 0,
-							messageCount: 0,
-						},
-					],
-					roots: false,
 				});
 			}),
 		),
@@ -1030,6 +1033,9 @@ export function makeTestHandlerLayer(
 	const projectManagementServiceLayer = ProjectManagementServiceLive.pipe(
 		Layer.provide(Layer.mergeAll(configLayer, openCodeSettingsServiceLayer)),
 	);
+	const daemonSessionQueryServiceLayer = DaemonSessionQueryServiceLive.pipe(
+		Layer.provide(configLayer),
+	);
 	const scanServiceLayer = ScanServiceLive.pipe(Layer.provide(configLayer));
 	const agentServiceLayer = AgentServiceLive.pipe(
 		Layer.provide(
@@ -1095,6 +1101,7 @@ export function makeTestHandlerLayer(
 		openCodeModelServiceLayer,
 		openCodeSettingsServiceLayer,
 		projectManagementServiceLayer,
+		daemonSessionQueryServiceLayer,
 		DirectoryListingServiceLive,
 		scanServiceLayer,
 		agentServiceLayer,

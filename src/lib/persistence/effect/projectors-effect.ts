@@ -1,10 +1,10 @@
 // ─── Effect-based Projectors ────────────────────────────────────────────────
-// Migrates all projectors from raw SqliteClient to @effect/sql SqlClient.
-// Each projector's `project` method becomes an Effect program.
+// Each projector's `project` method is an Effect program over @effect/sql SqlClient.
 
 import { SqlClient } from "@effect/sql";
 import type { SqlError } from "@effect/sql/SqlError";
 import { Data, Effect } from "effect";
+import { persistedTurnState } from "../../contracts/turn-phase.js";
 import type {
 	CanonicalEventType,
 	EventPayloadMap,
@@ -277,6 +277,7 @@ export const makeMessageProjector = (): EffectProjector => ({
 		"file.attached",
 		"turn.completed",
 		"turn.error",
+		"session.compaction",
 	],
 	project: (event: StoredEvent, ctx: ProjectionContext) =>
 		Effect.gen(function* () {
@@ -289,7 +290,10 @@ export const makeMessageProjector = (): EffectProjector => ({
 						INSERT INTO messages
 						(id, session_id, role, text, is_streaming, created_at, updated_at)
 						VALUES (${event.data.messageId}, ${event.data.sessionId}, ${event.data.role}, '', ${isStreaming}, ${event.createdAt}, ${event.createdAt})
-						ON CONFLICT (id) DO NOTHING
+						ON CONFLICT (id) DO UPDATE SET
+							role = excluded.role,
+							is_streaming = CASE WHEN excluded.role = 'user' THEN 0 ELSE messages.is_streaming END
+						WHERE messages.role <> excluded.role
 						RETURNING id`,
 				);
 			}
@@ -484,6 +488,11 @@ export const makeMessageProjector = (): EffectProjector => ({
 			}
 
 			if (isEventType(event, "turn.completed")) {
+				// Cost and tokens are counted differently by the provider, which
+				// reads like a bug and is not: cost is cumulative for the whole
+				// SDK session (two completions in one turn read 38.53 then 39.84),
+				// so the latest value wins. Tokens are per-execution, so a turn
+				// that ran twice sums them.
 				const tokens = event.data.tokens;
 				return ids(
 					yield* sql<{ id: string }>`
@@ -509,6 +518,36 @@ export const makeMessageProjector = (): EffectProjector => ({
 				);
 			}
 
+			if (isEventType(event, "session.compaction")) {
+				// Only the terminal "completed" boundary reaches persistence at all —
+				// ingestion filters "started"/"failed" out before the append — but the
+				// guard stays because a replay or backfill can hand us either.
+				// A compaction owns no provider message, so it gets a synthetic
+				// assistant message holding one `compaction` part; that is what keeps
+				// the divider and the reduced context gauge across a reload. Ids keyed
+				// on the event sequence plus DO NOTHING make replay a no-op.
+				if (event.data.state !== "completed") return [];
+				const messageId = `compaction-${event.sequence}`;
+				const metadata = encodeJson({
+					...(typeof event.data.preTokens === "number"
+						? { preTokens: event.data.preTokens }
+						: {}),
+					...(typeof event.data.postTokens === "number"
+						? { postTokens: event.data.postTokens }
+						: {}),
+				});
+				yield* sql`
+					INSERT INTO messages
+					(id, session_id, role, text, is_streaming, created_at, updated_at, version)
+					VALUES (${messageId}, ${event.data.sessionId}, 'assistant', '', 0, ${event.createdAt}, ${event.createdAt}, ${ctx.version})
+					ON CONFLICT (id) DO NOTHING`;
+				yield* sql`
+					INSERT INTO message_parts
+					(id, message_id, type, text, metadata, sort_order, created_at, updated_at)
+					VALUES (${`compaction-part-${event.sequence}`}, ${messageId}, 'compaction', ${event.data.detail}, ${metadata}, 0, ${event.createdAt}, ${event.createdAt})
+					ON CONFLICT (id) DO NOTHING`;
+				return [messageId];
+			}
 			return [];
 		}).pipe(
 			Effect.mapError((e) =>
@@ -530,6 +569,7 @@ export const makeTurnProjector = (): EffectProjector => ({
 	name: "turn",
 	handles: [
 		"message.created",
+		"tool.started",
 		"session.status",
 		"turn.completed",
 		"turn.error",
@@ -546,39 +586,39 @@ export const makeTurnProjector = (): EffectProjector => ({
 						yield* sql<OwnedRow>`
 							INSERT OR REPLACE INTO turns
 							(id, session_id, state, user_message_id, requested_at)
-							VALUES (${event.data.messageId}, ${event.data.sessionId}, 'pending', ${event.data.messageId}, ${event.createdAt})
+							VALUES (${event.data.messageId}, ${event.data.sessionId}, ${persistedTurnState("prompt")}, ${event.data.messageId}, ${event.createdAt})
 							RETURNING session_id`,
 					);
 				}
-				return owners(
-					yield* sql<OwnedRow>`
-						UPDATE turns
-						SET assistant_message_id = ${event.data.messageId}
-						WHERE id = (
-							SELECT id FROM turns
-							WHERE session_id = ${event.data.sessionId}
-								AND assistant_message_id IS NULL
-								AND state IN ('pending', 'running')
-							ORDER BY requested_at DESC
-							LIMIT 1
-						)
-						RETURNING session_id`,
-				);
 			}
 
-			if (isEventType(event, "session.status")) {
-				if (event.data.status !== "busy") return [];
+			// A result may arrive before the provider continues the same turn.
+			if (
+				(isEventType(event, "session.status") &&
+					event.data.status === "busy") ||
+				(isEventType(event, "message.created") &&
+					event.data.role === "assistant") ||
+				isEventType(event, "tool.started")
+			) {
+				const [turn] = yield* sql<{
+					id: string;
+					state: string;
+					assistant_message_id: string | null;
+				}>`
+					SELECT id, state, assistant_message_id FROM turns
+					WHERE session_id = ${event.sessionId}
+					ORDER BY requested_at DESC, rowid DESC LIMIT 1`;
+				if (!turn) return [];
+				const reopening = turn.state !== "pending" && turn.state !== "running";
+				const assistantMessageId = reopening ? null : turn.assistant_message_id;
 				return owners(
 					yield* sql<OwnedRow>`
 						UPDATE turns
-						SET state = 'running', started_at = ${event.createdAt}
-						WHERE id = (
-							SELECT id FROM turns
-							WHERE session_id = ${event.data.sessionId}
-								AND state = 'pending'
-							ORDER BY requested_at DESC
-							LIMIT 1
-						)
+						SET state = ${persistedTurnState(event.type === "session.status" ? "busy" : "activity")},
+							started_at = COALESCE(started_at, ${event.createdAt}),
+							completed_at = NULL,
+							assistant_message_id = ${isEventType(event, "message.created") ? (assistantMessageId ?? event.data.messageId) : assistantMessageId}
+						WHERE id = ${turn.id}
 						RETURNING session_id`,
 				);
 			}
@@ -587,14 +627,19 @@ export const makeTurnProjector = (): EffectProjector => ({
 			// session is nowhere in the statement — `RETURNING session_id` is the
 			// only thing that knows which session row actually moved.
 			if (isEventType(event, "turn.completed")) {
+				// Cost and tokens are counted differently by the provider, which
+				// reads like a bug and is not: cost is cumulative for the whole
+				// SDK session (two completions in one turn read 38.53 then 39.84),
+				// so the latest value wins. Tokens are per-execution, so a turn
+				// that ran twice sums them.
 				const tokens = event.data.tokens;
 				return owners(
 					yield* sql<OwnedRow>`
 						UPDATE turns
 						SET state = 'completed',
-							cost = ${event.data.cost ?? null},
-							tokens_in = ${tokens?.input ?? null},
-							tokens_out = ${tokens?.output ?? null},
+							cost = COALESCE(${event.data.cost ?? null}, cost),
+							tokens_in = COALESCE(tokens_in + ${tokens?.input ?? null}, tokens_in, ${tokens?.input ?? null}),
+							tokens_out = COALESCE(tokens_out + ${tokens?.output ?? null}, tokens_out, ${tokens?.output ?? null}),
 							completed_at = ${event.createdAt}
 						WHERE assistant_message_id = ${event.data.messageId}
 						RETURNING session_id`,
@@ -894,6 +939,22 @@ export const makeProviderProjector = (): EffectProjector => ({
 });
 
 // ─── Factory ────────────────────────────────────────────────────────────────
+
+/**
+ * Canonical event types that deliberately reach no projector.
+ *
+ * An unclaimed type is indistinguishable from a handled one at runtime: the
+ * dispatch map simply finds nothing, and the cursor advances anyway. That is
+ * how session.compaction stayed unprojected for three months behind a green
+ * suite. Anything absent here and absent from every projector's `handles` is a
+ * bug, and projector-coverage.test.ts fails on it.
+ */
+export const UNPROJECTED_CANONICAL_EVENT_TYPES: readonly string[] = [
+	// Superseded by tool.started carrying the complete input; kept in the
+	// canonical vocabulary only so historical stores still decode.
+	"tool.input_updated",
+	"session.provider_cleanup_failed",
+];
 
 /**
  * Creates all 6 Effect-based projectors in the correct order.

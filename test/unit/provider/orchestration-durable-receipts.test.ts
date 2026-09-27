@@ -1,3 +1,5 @@
+import { SqlClient } from "@effect/sql";
+import type { SqlError } from "@effect/sql/SqlError";
 import { describe, it } from "@effect/vitest";
 import { Effect } from "effect";
 import { expect, vi } from "vitest";
@@ -5,9 +7,7 @@ import {
 	decodeProviderRuntimeEvent,
 	type ProviderRuntimeEvent,
 } from "../../../src/lib/contracts/providers/provider-runtime-event.js";
-import { runMigrations } from "../../../src/lib/persistence/migrations.js";
-import { schemaMigrations } from "../../../src/lib/persistence/schema.js";
-import { SqliteClient } from "../../../src/lib/persistence/sqlite-client.js";
+import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
 import { ProviderInstanceFailure } from "../../../src/lib/provider/errors.js";
 import {
 	effectiveDispatchFingerprint,
@@ -18,6 +18,7 @@ import {
 	OrchestrationEngine,
 	type SendTurnCommand,
 } from "../../../src/lib/provider/orchestration-engine.js";
+import { CommandReadModelRepository } from "../../../src/lib/provider/orchestration-read-model.js";
 import { ProviderRegistry } from "../../../src/lib/provider/provider-registry.js";
 import type {
 	ProviderInstance,
@@ -88,39 +89,36 @@ function sendTurnCommand(
 	};
 }
 
-interface DurableFixture {
-	readonly db: SqliteClient;
-	readonly now: ReturnType<typeof vi.fn>;
-	readonly generateId: ReturnType<typeof vi.fn>;
+function makeDurableOptions(fixture: {
+	readonly sql: SqlClient.SqlClient;
+	readonly now?: () => number;
+	readonly generateId?: () => string;
+}): Effect.Effect<DurableCommandStoreOptions, SqlError> {
+	return new CommandReadModelRepository(fixture.sql).bootstrap().pipe(
+		Effect.map((snapshot) => ({
+			sql: fixture.sql,
+			snapshot,
+			projectKey: "project-1",
+			now: fixture.now ?? (() => 1000),
+			generateId: fixture.generateId ?? (() => "disp-1"),
+		})),
+	);
 }
 
-function makeDurableOptions(
-	fixture: Pick<DurableFixture, "db"> & Partial<DurableFixture>,
-): DurableCommandStoreOptions {
-	return {
-		db: fixture.db,
-		projectKey: "project-1",
-		now: fixture.now ?? (() => 1000),
-		generateId: fixture.generateId ?? (() => "disp-1"),
-	};
-}
-
-function receiptRow(db: SqliteClient, commandId: string) {
-	return db.queryOne<{
+function receiptRow(sql: SqlClient.SqlClient, commandId: string) {
+	return sql<{
 		readonly status: string;
 		readonly fingerprint_hash: string | null;
 		readonly updated_at: number | null;
-	}>(
-		"SELECT status, fingerprint_hash, updated_at FROM command_receipts WHERE command_id = ?",
-		[commandId],
+	}>`SELECT status, fingerprint_hash, updated_at FROM command_receipts WHERE command_id = ${commandId}`.pipe(
+		Effect.map((rows) => rows[0]),
 	);
 }
 
 describe("OrchestrationEngine durable receipts", () => {
 	it.effect("uses injected id and time sources", () =>
 		Effect.gen(function* () {
-			const db = SqliteClient.memory();
-			runMigrations(db, schemaMigrations);
+			const sql = yield* SqlClient.SqlClient;
 			const now = vi.fn(() => 4242);
 			const generateId = vi.fn(() => "disp-xyz");
 			const registry = new ProviderRegistry();
@@ -128,7 +126,7 @@ describe("OrchestrationEngine durable receipts", () => {
 			registry.registerInstance(instance);
 			const engine = new OrchestrationEngine({
 				registry,
-				durableCommands: makeDurableOptions({ db, now, generateId }),
+				durableCommands: yield* makeDurableOptions({ sql, now, generateId }),
 			});
 
 			const result = yield* engine.dispatchEffect(sendTurnCommand());
@@ -137,24 +135,22 @@ describe("OrchestrationEngine durable receipts", () => {
 			expect(instance.sendTurnEffect).toHaveBeenCalledTimes(1);
 			expect(now).toHaveBeenCalled();
 			expect(generateId).toHaveBeenCalled();
-			const row = receiptRow(db, "cmd-durable-1");
+			const row = yield* receiptRow(sql, "cmd-durable-1");
 			expect(row?.status).toBe("side_effect_completed");
 			expect(row?.fingerprint_hash).toMatch(/^sha256:/);
 			expect(row?.updated_at).toBe(4242);
-			db.close();
-		}),
+		}).pipe(Effect.provide(makePersistenceEffectLayer(":memory:"))),
 	);
 
 	it.effect("preserves a Claude config dir through durable dispatch", () =>
 		Effect.gen(function* () {
-			const db = SqliteClient.memory();
-			runMigrations(db, schemaMigrations);
+			const sql = yield* SqlClient.SqlClient;
 			const registry = new ProviderRegistry();
 			const instance = makeStubInstance("claude");
 			registry.registerInstance(instance);
 			const engine = new OrchestrationEngine({
 				registry,
-				durableCommands: makeDurableOptions({ db }),
+				durableCommands: yield* makeDurableOptions({ sql }),
 			});
 
 			yield* engine.dispatchEffect(
@@ -169,16 +165,14 @@ describe("OrchestrationEngine durable receipts", () => {
 					configDir: "/instances/work-claude",
 				}),
 			);
-			db.close();
-		}),
+		}).pipe(Effect.provide(makePersistenceEffectLayer(":memory:"))),
 	);
 
 	it.effect(
 		"routes committed send_turn through the reactor to provider runtime ingestion",
 		() =>
 			Effect.gen(function* () {
-				const db = SqliteClient.memory();
-				runMigrations(db, schemaMigrations);
+				const sql = yield* SqlClient.SqlClient;
 				const runtimeEvent = decodeProviderRuntimeEvent({
 					eventId: "runtime-text-1",
 					type: "text.delta",
@@ -206,7 +200,7 @@ describe("OrchestrationEngine durable receipts", () => {
 				const engine = new OrchestrationEngine({
 					registry,
 					durableCommands: {
-						...makeDurableOptions({ db }),
+						...(yield* makeDurableOptions({ sql })),
 						ingestion: { ingest },
 					},
 				});
@@ -216,24 +210,22 @@ describe("OrchestrationEngine durable receipts", () => {
 				expect(result).toMatchObject({ status: "completed" });
 				expect(ingest).toHaveBeenCalledWith(runtimeEvent);
 				expect(commandSinkPush).not.toHaveBeenCalled();
-				expect(receiptRow(db, "cmd-durable-1")?.status).toBe(
+				expect((yield* receiptRow(sql, "cmd-durable-1"))?.status).toBe(
 					"side_effect_completed",
 				);
-				db.close();
-			}),
+			}).pipe(Effect.provide(makePersistenceEffectLayer(":memory:"))),
 	);
 
 	it.effect("id generation failure does not consume command receipt", () =>
 		Effect.gen(function* () {
-			const db = SqliteClient.memory();
-			runMigrations(db, schemaMigrations);
+			const sql = yield* SqlClient.SqlClient;
 			const registry = new ProviderRegistry();
 			const instance = makeStubInstance("opencode");
 			registry.registerInstance(instance);
 			const engine = new OrchestrationEngine({
 				registry,
-				durableCommands: makeDurableOptions({
-					db,
+				durableCommands: yield* makeDurableOptions({
+					sql,
 					generateId: vi.fn(() => {
 						throw new Error("id service down");
 					}),
@@ -249,24 +241,22 @@ describe("OrchestrationEngine durable receipts", () => {
 				expect(failed.left._tag).toBe("CommandIdGenerationFailed");
 			}
 			expect(instance.sendTurnEffect).not.toHaveBeenCalled();
-			expect(receiptRow(db, "cmd-durable-1")).toBeUndefined();
-			db.close();
-		}),
+			expect(yield* receiptRow(sql, "cmd-durable-1")).toBeUndefined();
+		}).pipe(Effect.provide(makePersistenceEffectLayer(":memory:"))),
 	);
 
 	it.effect(
 		"replays accepted send_turn after restart without provider call",
 		() =>
 			Effect.gen(function* () {
-				const db = SqliteClient.memory();
-				runMigrations(db, schemaMigrations);
+				const sql = yield* SqlClient.SqlClient;
 
 				const firstRegistry = new ProviderRegistry();
 				const firstInstance = makeStubInstance("opencode");
 				firstRegistry.registerInstance(firstInstance);
 				const firstEngine = new OrchestrationEngine({
 					registry: firstRegistry,
-					durableCommands: makeDurableOptions({ db }),
+					durableCommands: yield* makeDurableOptions({ sql }),
 				});
 				yield* firstEngine.dispatchEffect(sendTurnCommand());
 				expect(firstInstance.sendTurnEffect).toHaveBeenCalledTimes(1);
@@ -277,29 +267,27 @@ describe("OrchestrationEngine durable receipts", () => {
 				secondRegistry.registerInstance(secondInstance);
 				const secondEngine = new OrchestrationEngine({
 					registry: secondRegistry,
-					durableCommands: makeDurableOptions({ db }),
+					durableCommands: yield* makeDurableOptions({ sql }),
 				});
 
 				const replayed = yield* secondEngine.dispatchEffect(sendTurnCommand());
 
 				expect(replayed).toMatchObject({ status: "completed" });
 				expect(secondInstance.sendTurnEffect).not.toHaveBeenCalled();
-				db.close();
-			}),
+			}).pipe(Effect.provide(makePersistenceEffectLayer(":memory:"))),
 	);
 
 	it.effect(
 		"rejects reused command id with different fingerprint (changed dispatch identity)",
 		() =>
 			Effect.gen(function* () {
-				const db = SqliteClient.memory();
-				runMigrations(db, schemaMigrations);
+				const sql = yield* SqlClient.SqlClient;
 
 				const firstRegistry = new ProviderRegistry();
 				firstRegistry.registerInstance(makeStubInstance("opencode"));
 				const firstEngine = new OrchestrationEngine({
 					registry: firstRegistry,
-					durableCommands: makeDurableOptions({ db }),
+					durableCommands: yield* makeDurableOptions({ sql }),
 				});
 				yield* firstEngine.dispatchEffect(sendTurnCommand({ prompt: "hello" }));
 
@@ -309,7 +297,7 @@ describe("OrchestrationEngine durable receipts", () => {
 				secondRegistry.registerInstance(secondInstance);
 				const secondEngine = new OrchestrationEngine({
 					registry: secondRegistry,
-					durableCommands: makeDurableOptions({ db }),
+					durableCommands: yield* makeDurableOptions({ sql }),
 				});
 
 				const rejected = yield* Effect.either(
@@ -328,23 +316,21 @@ describe("OrchestrationEngine durable receipts", () => {
 				thirdRegistry.registerInstance(thirdInstance);
 				const thirdEngine = new OrchestrationEngine({
 					registry: thirdRegistry,
-					durableCommands: makeDurableOptions({ db }),
+					durableCommands: yield* makeDurableOptions({ sql }),
 				});
 				const rejectedAgain = yield* Effect.either(
 					thirdEngine.dispatchEffect(sendTurnCommand({ prompt: "changed" })),
 				);
 				expect(rejectedAgain._tag).toBe("Left");
 				expect(thirdInstance.sendTurnEffect).not.toHaveBeenCalled();
-				db.close();
-			}),
+			}).pipe(Effect.provide(makePersistenceEffectLayer(":memory:"))),
 	);
 
 	it.effect(
 		"resolves provider permission requests through the caller's sink on the durable path (finding #3)",
 		() =>
 			Effect.gen(function* () {
-				const db = SqliteClient.memory();
-				runMigrations(db, schemaMigrations);
+				const sql = yield* SqlClient.SqlClient;
 				const command = sendTurnCommand();
 				// The caller's real, interaction-capable sink must answer the
 				// provider's permission request; on the durable path the reactor
@@ -370,26 +356,24 @@ describe("OrchestrationEngine durable receipts", () => {
 				registry.registerInstance(instance);
 				const engine = new OrchestrationEngine({
 					registry,
-					durableCommands: makeDurableOptions({ db }),
+					durableCommands: yield* makeDurableOptions({ sql }),
 				});
 
 				const result = yield* engine.dispatchEffect(command);
 
 				expect(result).toMatchObject({ status: "completed" });
 				expect(requestPermission).toHaveBeenCalledTimes(1);
-				expect(receiptRow(db, "cmd-durable-1")?.status).toBe(
+				expect((yield* receiptRow(sql, "cmd-durable-1"))?.status).toBe(
 					"side_effect_completed",
 				);
-				db.close();
-			}),
+			}).pipe(Effect.provide(makePersistenceEffectLayer(":memory:"))),
 	);
 
 	it.effect(
 		"redispatch after retryable failure leaves one live outbox row; drain does not re-invoke the provider (finding #2)",
 		() =>
 			Effect.gen(function* () {
-				const db = SqliteClient.memory();
-				runMigrations(db, schemaMigrations);
+				const sql = yield* SqlClient.SqlClient;
 				let providerCalls = 0;
 				const registry = new ProviderRegistry();
 				const instance = makeStubInstance("opencode");
@@ -411,7 +395,7 @@ describe("OrchestrationEngine durable receipts", () => {
 				registry.registerInstance(instance);
 				const engine = new OrchestrationEngine({
 					registry,
-					durableCommands: makeDurableOptions({ db }),
+					durableCommands: yield* makeDurableOptions({ sql }),
 				});
 
 				const first = yield* Effect.either(
@@ -429,22 +413,20 @@ describe("OrchestrationEngine durable receipts", () => {
 				yield* engine.drainSideEffects();
 				expect(providerCalls).toBe(2);
 
-				const rows = db.query<{ status: string }>(
+				const rows = yield* sql.unsafe<{ status: string }>(
 					`SELECT status FROM provider_command_outbox
 					 WHERE command_id = ? ORDER BY request_sequence`,
 					["cmd-durable-1"],
 				);
 				expect(rows.map((r) => r.status)).toEqual(["completed"]);
-				db.close();
-			}),
+			}).pipe(Effect.provide(makePersistenceEffectLayer(":memory:"))),
 	);
 
 	it.effect(
 		"records provider-declared error turns as failed, not completed (finding #4)",
 		() =>
 			Effect.gen(function* () {
-				const db = SqliteClient.memory();
-				runMigrations(db, schemaMigrations);
+				const sql = yield* SqlClient.SqlClient;
 				const errorTurn: TurnResult = {
 					status: "error",
 					cost: 0,
@@ -460,12 +442,12 @@ describe("OrchestrationEngine durable receipts", () => {
 				registry.registerInstance(instance);
 				const engine = new OrchestrationEngine({
 					registry,
-					durableCommands: makeDurableOptions({ db }),
+					durableCommands: yield* makeDurableOptions({ sql }),
 				});
 
 				const result = yield* engine.dispatchEffect(sendTurnCommand());
 				expect(result).toMatchObject({ status: "error" });
-				expect(receiptRow(db, "cmd-durable-1")?.status).toBe(
+				expect((yield* receiptRow(sql, "cmd-durable-1"))?.status).toBe(
 					"side_effect_failed",
 				);
 
@@ -475,25 +457,23 @@ describe("OrchestrationEngine durable receipts", () => {
 				secondRegistry.registerInstance(secondInstance);
 				const secondEngine = new OrchestrationEngine({
 					registry: secondRegistry,
-					durableCommands: makeDurableOptions({ db }),
+					durableCommands: yield* makeDurableOptions({ sql }),
 				});
 				yield* Effect.either(secondEngine.dispatchEffect(sendTurnCommand()));
 				expect(secondInstance.sendTurnEffect).toHaveBeenCalled();
-				db.close();
-			}),
+			}).pipe(Effect.provide(makePersistenceEffectLayer(":memory:"))),
 	);
 
 	it.effect(
 		"replays an orphaned committed-but-unexecuted command as incomplete, not completed (finding #7)",
 		() =>
 			Effect.gen(function* () {
-				const db = SqliteClient.memory();
-				runMigrations(db, schemaMigrations);
+				const sql = yield* SqlClient.SqlClient;
 				const command = sendTurnCommand();
 				// Simulate a crash after commit but before execution: a
 				// side_effect_requested receipt whose fingerprint matches the command.
 				const hash = fingerprintHash(effectiveDispatchFingerprint(command));
-				db.execute(
+				yield* sql.unsafe(
 					`INSERT INTO command_receipts (
 						command_id, session_id, status, created_at, command_type,
 						project_key, fingerprint_hash, fingerprint_version,
@@ -517,7 +497,7 @@ describe("OrchestrationEngine durable receipts", () => {
 				registry.registerInstance(instance);
 				const engine = new OrchestrationEngine({
 					registry,
-					durableCommands: makeDurableOptions({ db }),
+					durableCommands: yield* makeDurableOptions({ sql }),
 				});
 
 				const result = yield* engine.dispatchEffect(command);
@@ -525,21 +505,19 @@ describe("OrchestrationEngine durable receipts", () => {
 				expect(result.status).toBe("interrupted");
 				expect(result.status).not.toBe("completed");
 				expect(instance.sendTurnEffect).not.toHaveBeenCalled();
-				db.close();
-			}),
+			}).pipe(Effect.provide(makePersistenceEffectLayer(":memory:"))),
 	);
 
 	it.effect(
 		"orphan replay terminalizes the leftover outbox row so a later drain cannot execute it (re-review finding #2)",
 		() =>
 			Effect.gen(function* () {
-				const db = SqliteClient.memory();
-				runMigrations(db, schemaMigrations);
+				const sql = yield* SqlClient.SqlClient;
 				const command = sendTurnCommand();
 				const hash = fingerprintHash(effectiveDispatchFingerprint(command));
 				// Crash after commit but before execution: a side_effect_requested
 				// receipt AND the still-pending outbox row it committed.
-				db.execute(
+				yield* sql.unsafe(
 					`INSERT INTO command_receipts (
 						command_id, session_id, status, created_at, command_type,
 						project_key, fingerprint_hash, fingerprint_version,
@@ -563,7 +541,7 @@ describe("OrchestrationEngine durable receipts", () => {
 					abortSignal: _abort,
 					...payload
 				} = command.input;
-				db.execute(
+				yield* sql.unsafe(
 					`INSERT INTO provider_command_outbox (
 						request_sequence, command_id, project_key, session_id, provider_id,
 						effect_type, payload_json, status, attempt_count, requested_at, updated_at
@@ -585,7 +563,7 @@ describe("OrchestrationEngine durable receipts", () => {
 				registry.registerInstance(instance);
 				const engine = new OrchestrationEngine({
 					registry,
-					durableCommands: makeDurableOptions({ db }),
+					durableCommands: yield* makeDurableOptions({ sql }),
 				});
 
 				const result = yield* engine.dispatchEffect(command);
@@ -596,7 +574,7 @@ describe("OrchestrationEngine durable receipts", () => {
 				yield* engine.drainSideEffects();
 				expect(instance.sendTurnEffect).not.toHaveBeenCalled();
 
-				const rows = db.query<{ status: string }>(
+				const rows = yield* sql.unsafe<{ status: string }>(
 					`SELECT status FROM provider_command_outbox
 					 WHERE command_id = ? ORDER BY request_sequence`,
 					[command.commandId],
@@ -609,23 +587,21 @@ describe("OrchestrationEngine durable receipts", () => {
 							r.status !== "retryable_failed",
 					),
 				).toBe(true);
-				db.close();
-			}),
+			}).pipe(Effect.provide(makePersistenceEffectLayer(":memory:"))),
 	);
 
 	it.effect(
 		"rejects a receipt written under an older fingerprint scheme version instead of replaying it (re-review finding #5)",
 		() =>
 			Effect.gen(function* () {
-				const db = SqliteClient.memory();
-				runMigrations(db, schemaMigrations);
+				const sql = yield* SqlClient.SqlClient;
 				const command = sendTurnCommand();
 				// Hash matches the current command, but the receipt was written under
 				// fingerprint scheme version 1. Hashes are only comparable within a
 				// scheme version, so this must be treated as a fingerprint mismatch,
 				// never a completed replay and never a re-execution.
 				const hash = fingerprintHash(effectiveDispatchFingerprint(command));
-				db.execute(
+				yield* sql.unsafe(
 					`INSERT INTO command_receipts (
 						command_id, session_id, status, created_at, command_type,
 						project_key, fingerprint_hash, fingerprint_version,
@@ -649,7 +625,7 @@ describe("OrchestrationEngine durable receipts", () => {
 				registry.registerInstance(instance);
 				const engine = new OrchestrationEngine({
 					registry,
-					durableCommands: makeDurableOptions({ db }),
+					durableCommands: yield* makeDurableOptions({ sql }),
 				});
 
 				const result = yield* Effect.either(engine.dispatchEffect(command));
@@ -660,19 +636,17 @@ describe("OrchestrationEngine durable receipts", () => {
 					);
 				}
 				expect(instance.sendTurnEffect).not.toHaveBeenCalled();
-				db.close();
-			}),
+			}).pipe(Effect.provide(makePersistenceEffectLayer(":memory:"))),
 	);
 
 	it.effect(
 		"honors stale-command tombstones from the narrow command read model",
 		() =>
 			Effect.gen(function* () {
-				const db = SqliteClient.memory();
-				runMigrations(db, schemaMigrations);
+				const sql = yield* SqlClient.SqlClient;
 				// Seed a session-scope tombstone directly in the command read model
 				// (no full relay/UI snapshot rows exist).
-				db.execute(
+				yield* sql.unsafe(
 					`INSERT INTO provider_command_tombstones
 						(project_key, scope_kind, scope_id, event_sequence, reason_code, tombstoned_at)
 					 VALUES ('project-1', 'session', 'session-1', 1, 'session_deleted', 500)`,
@@ -683,7 +657,7 @@ describe("OrchestrationEngine durable receipts", () => {
 				registry.registerInstance(instance);
 				const engine = new OrchestrationEngine({
 					registry,
-					durableCommands: makeDurableOptions({ db }),
+					durableCommands: yield* makeDurableOptions({ sql }),
 				});
 
 				const rejected = yield* Effect.either(
@@ -695,8 +669,7 @@ describe("OrchestrationEngine durable receipts", () => {
 					expect(rejected.left._tag).toBe("StaleCommandRejected");
 				}
 				expect(instance.sendTurnEffect).not.toHaveBeenCalled();
-				expect(receiptRow(db, "cmd-durable-1")).toBeUndefined();
-				db.close();
-			}),
+				expect(yield* receiptRow(sql, "cmd-durable-1")).toBeUndefined();
+			}).pipe(Effect.provide(makePersistenceEffectLayer(":memory:"))),
 	);
 });

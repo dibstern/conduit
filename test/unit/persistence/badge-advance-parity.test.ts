@@ -30,7 +30,6 @@ import {
 	type PersistenceEffectContext,
 } from "../../../src/lib/persistence/effect/live.js";
 import { createAllEffectProjectors } from "../../../src/lib/persistence/effect/projectors-effect.js";
-import { markSessionViewed } from "../../../src/lib/persistence/effect/session-viewed.js";
 import { canonicalEvent } from "../../../src/lib/persistence/events.js";
 
 const recordingBus = (advances: ReadModelAdvance[], filename: string) => {
@@ -129,13 +128,24 @@ const expectAdvanceMatchesRow = (advances: readonly ReadModelAdvance[]) =>
 		expect(last?.version).toBe(version);
 	});
 
-it("a view advances the row version and announces it", async () => {
+it("marking read advances the row version and announces it", async () => {
 	await withPersistence((advances) =>
 		Effect.gen(function* () {
+			const commit = yield* makeCommitAndSignal;
 			yield* createSession;
 			advances.length = 0;
 
-			yield* markSessionViewed(SESSION, 1_700_000_000_000);
+			yield* commit([
+				canonicalEvent(
+					"session.read",
+					SESSION,
+					{ sessionId: SESSION },
+					{
+						provider: "claude",
+						createdAt: 1_700_000_000_000,
+					},
+				),
+			]);
 
 			yield* expectAdvanceMatchesRow(advances);
 		}),

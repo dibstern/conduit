@@ -34,7 +34,7 @@ function mockWsHandler(
 		markClientBootstrapped: vi.fn(),
 		getClientCount: vi.fn(() => 0),
 		getClientIds: vi.fn(() => []),
-		handleUpgrade: vi.fn(),
+		attach: vi.fn(() => () => {}),
 		close: vi.fn(),
 		drain: vi.fn(async () => undefined),
 		on: vi.fn(),
@@ -89,7 +89,7 @@ describe("handleGetAgents active provider", () => {
 			app: { agents: vi.fn(async () => [{ id: "build", name: "build" }]) },
 		} as unknown as OpenCodeAPI;
 		const engine = {
-			getProviderForSession: vi.fn(() => "claude"),
+			getProviderForSessionEffect: vi.fn(() => Effect.succeed("claude")),
 			dispatchEffect: vi.fn(() =>
 				Effect.succeed({
 					models: [],
@@ -145,7 +145,7 @@ describe("handleGetAgents active provider", () => {
 				app: { agents: vi.fn(async () => [{ id: "build", name: "build" }]) },
 			} as unknown as OpenCodeAPI;
 			const engine = {
-				getProviderForSession: vi.fn(() => "claude"),
+				getProviderForSessionEffect: vi.fn(() => Effect.succeed("claude")),
 				dispatchEffect: vi.fn(() =>
 					Effect.succeed({
 						models: [],
@@ -199,7 +199,7 @@ describe("handleGetAgents active provider", () => {
 				app: { agents: vi.fn(async () => rawAgents) },
 			} as unknown as OpenCodeAPI;
 			const engine = {
-				getProviderForSession: vi.fn(() => "opencode"),
+				getProviderForSessionEffect: vi.fn(() => Effect.succeed("opencode")),
 				dispatchEffect: vi.fn(),
 			} as unknown as OrchestrationEngine;
 
@@ -231,7 +231,7 @@ describe("handleGetAgents active provider", () => {
 				},
 			} as unknown as OpenCodeAPI;
 			const engine = {
-				getProviderForSession: vi.fn(() => "claude"),
+				getProviderForSessionEffect: vi.fn(() => Effect.succeed("claude")),
 				dispatchEffect: vi.fn(),
 			} as unknown as OrchestrationEngine;
 
@@ -381,7 +381,7 @@ describe("handleGetAgents active provider", () => {
 			app: { agents: vi.fn(async () => [{ id: "build", name: "build" }]) },
 		} as unknown as OpenCodeAPI;
 		const engine = {
-			getProviderForSession: vi.fn(() => "claude"),
+			getProviderForSessionEffect: vi.fn(() => Effect.succeed("claude")),
 			dispatchEffect: vi.fn(() =>
 				Effect.succeed({
 					models: [],

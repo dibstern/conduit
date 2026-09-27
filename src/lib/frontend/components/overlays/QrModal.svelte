@@ -5,6 +5,8 @@
 
 <script lang="ts">
 	import QRCode from "@castlenine/svelte-qrcode";
+	import Button from "../ui/Button.svelte";
+	import Surface from "../ui/Surface.svelte";
 	import Modal from "./Modal.svelte";
 
 	// ─── Props ──────────────────────────────────────────────────────────────────
@@ -121,9 +123,11 @@
 
 <Modal open={visible} onclose={() => onClose?.()} labelledBy="qr-modal-title">
 		<!-- Dialog card -->
-		<div
+		<Surface
+			variant="card"
+			radius="lg"
 			id="qr-overlay"
-			class="bg-bg-surface border border-border rounded-xl p-6 shadow-2xl max-w-xs w-[calc(100vw-2rem)] mx-4 flex flex-col items-center gap-4"
+			class="p-6 shadow-2xl max-w-xs w-[calc(100vw-2rem)] mx-4 flex flex-col items-center gap-4"
 		>
 			<!-- Title -->
 			<h2 id="qr-modal-title" class="text-text font-semibold text-base">Share Session</h2>
@@ -146,21 +150,24 @@
 			{/if}
 
 			<!-- URL / Copied feedback -->
-			<button
+			<Button
 				type="button"
-				class="text-sm font-mono px-3 py-1.5 rounded-md cursor-pointer transition-colors duration-150 max-w-full truncate
-					{copied
-					? 'text-success font-semibold bg-success/10'
-					: 'text-text-muted hover:text-text hover:bg-bg-alt'}"
+				variant="ghost"
+				size="content"
+				layout="flow"
+				tone={copied ? "success" : "muted"}
+				hoverFill={copied ? "none" : "alt"}
+				class="text-sm font-mono px-3 py-1.5 rounded-md duration-150 max-w-full truncate
+					{copied ? 'font-semibold bg-success/10' : ''}"
 				onclick={copyUrl}
 			>
 				{copied ? "Copied!" : shareUrl}
-			</button>
+			</Button>
 
 			<!-- Hint -->
 			<p class="text-xs text-text-dimmer">
 				Scan to open on another device
 			</p>
-		</div>
+		</Surface>
 </Modal>
 

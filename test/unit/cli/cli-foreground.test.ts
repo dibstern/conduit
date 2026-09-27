@@ -21,6 +21,7 @@ const { mockAddProject, mockStartForegroundDaemon, mockEnv } = vi.hoisted(
 				Promise.resolve({
 					addProject: mockAddProject,
 					discoverProjects: mockDiscoverProjects,
+					stopped: new Promise<void>(() => {}),
 					getStatus: vi
 						.fn()
 						.mockReturnValue({ tlsEnabled: true, host: "0.0.0.0" }),

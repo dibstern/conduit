@@ -4,6 +4,7 @@
 //
 // Extracted from createProjectRelay() — all closure captures are explicit params.
 
+import { SqlClient } from "@effect/sql";
 import { Cause, Effect, Runtime } from "effect";
 import { StatusPollerTag } from "../domain/relay/Services/services.js";
 import { SessionManagerServiceTag } from "../domain/relay/Services/session-manager-service.js";
@@ -27,6 +28,7 @@ import {
 	assembleContext,
 	evaluateAll,
 	initialMonitoringState,
+	selectMonitoringCandidates,
 } from "./monitoring-reducer.js";
 import type {
 	MonitoringEffect,
@@ -66,7 +68,7 @@ interface MonitoringWsHandlerLike {
 
 /** Narrowed Effect session service capabilities needed by monitoring wiring. */
 interface SessionServiceLike {
-	sendDualSessionLists(
+	sendSessionLists(
 		send: (msg: Extract<RelayMessage, { type: "session_list" }>) => void,
 		options?: {
 			statuses?:
@@ -172,6 +174,7 @@ export function createMonitoringWiringState(): MonitoringWiringStateAccess {
 const processAndApplyDoneEffect = (
 	sessionId: string,
 	isSubagent: boolean,
+	busySince: number,
 	doneDeliveredByPrimary: Set<string>,
 	deps: EffectMonitoringWiringDeps,
 	pipelineDeps: Omit<PipelineDeps, "processingTimeouts">,
@@ -188,7 +191,63 @@ const processAndApplyDoneEffect = (
 			return;
 		}
 
-		const doneMsg = { type: "done" as const, sessionId, code: 0 };
+		const sql = yield* Effect.serviceOption(SqlClient.SqlClient);
+		let originId: string | undefined;
+		if (sql._tag === "Some") {
+			originId = yield* Effect.gen(function* () {
+				const [turn] = yield* sql.value<{
+					assistant_message_id: string | null;
+					requested_at: number;
+				}>`
+					SELECT assistant_message_id, requested_at FROM turns
+					WHERE session_id = ${sessionId}
+					ORDER BY requested_at DESC, rowid DESC LIMIT 1`;
+				const [terminal] = yield* sql.value<{
+					origin_id: string;
+					message_id: string | null;
+					created_at: number;
+				}>`
+					SELECT COALESCE(NULLIF(json_extract(data, '$.messageId'), ''), event_id) AS origin_id,
+						json_extract(data, '$.messageId') AS message_id, created_at
+					FROM events WHERE session_id = ${sessionId}
+						AND type IN ('turn.completed', 'turn.error')
+					ORDER BY sequence DESC LIMIT 1`;
+				if (
+					terminal &&
+					(!turn ||
+						(terminal.created_at >= turn.requested_at &&
+							(!terminal.message_id ||
+								terminal.message_id === turn.assistant_message_id)))
+				)
+					return terminal.origin_id;
+				if (turn) {
+					if (turn.assistant_message_id) return turn.assistant_message_id;
+					const [message] = yield* sql.value<{ id: string }>`
+						SELECT id FROM messages WHERE session_id = ${sessionId}
+							AND role = 'assistant' AND created_at >= ${turn.requested_at}
+						ORDER BY created_at DESC, rowid DESC LIMIT 1`;
+					return message?.id;
+				}
+				return undefined;
+			}).pipe(
+				Effect.catchAllCause((cause) =>
+					Effect.sync(() => {
+						deps.statusLog.warn(
+							`Failed to identify poller completion: ${Cause.pretty(cause)}`,
+						);
+						return undefined;
+					}),
+				),
+			);
+		}
+		const doneMsg = {
+			type: "done" as const,
+			sessionId,
+			code: 0,
+			...(originId && {
+				alertId: JSON.stringify([sessionId, originId, "done"]),
+			}),
+		};
 		const doneViewers = deps.wsHandler.getClientsForSession(sessionId);
 		const doneResult = processEvent(
 			doneMsg,
@@ -203,6 +262,7 @@ const processAndApplyDoneEffect = (
 			doneResult.route,
 			isSubagent,
 			sessionId,
+			JSON.stringify([sessionId, "poller", busySince, "done"]),
 		);
 		const pushManager = deps.config.pushManager;
 		if (notification.sendPush && pushManager) {
@@ -210,6 +270,34 @@ const processAndApplyDoneEffect = (
 				slug: deps.config.slug,
 				sessionId,
 			});
+		}
+		if (!originId && !isSubagent && sql._tag === "Some" && pushManager) {
+			// The provider can know the completed assistant message before its
+			// terminal event reaches this relay. Resolve that identity off the tick.
+			yield* Effect.forkDaemon(
+				Effect.tryPromise(() => deps.client.session.messages(sessionId)).pipe(
+					Effect.flatMap((messages) => {
+						const lastMessage = messages.at(-1);
+						if (lastMessage?.role !== "assistant") return Effect.void;
+						return sendPushForEventEffect(
+							pushManager,
+							{
+								...doneMsg,
+								alertId: JSON.stringify([sessionId, lastMessage.id, "done"]),
+							},
+							deps.sseLog,
+							{ slug: deps.config.slug, sessionId },
+						);
+					}),
+					Effect.catchAllCause((cause) =>
+						Effect.sync(() =>
+							deps.statusLog.warn(
+								`Failed to identify provider completion: ${Cause.pretty(cause)}`,
+							),
+						),
+					),
+				),
+			);
 		}
 		if (
 			notification.broadcastCrossSession &&
@@ -229,27 +317,41 @@ const executeMonitoringEffectsEffect = (
 	pipelineDeps: Omit<PipelineDeps, "processingTimeouts">,
 	doneDeliveredByPrimary: Set<string>,
 	monitoringActive: () => boolean,
+	// False once a newer reduction replaced this session's phase: the newer
+	// tick owns the session and this batch's effects for it are obsolete.
+	isCurrent: (sessionId: string) => boolean,
 ) =>
 	Effect.gen(function* () {
 		for (const effect of effects) {
+			if (!isCurrent(effect.sessionId)) continue;
 			switch (effect.effect) {
 				case "start-poller": {
 					if (!monitoringActive()) break;
-					const messages = yield* Effect.tryPromise(() =>
-						deps.client.session.messages(effect.sessionId),
-					).pipe(
-						Effect.catchAll((err) =>
-							Effect.sync(() => {
-								deps.statusLog.warn(
-									`Failed to seed poller for ${effect.sessionId.slice(0, 12)}, will retry: ${err instanceof Error ? err.message : err}`,
-								);
-								return undefined;
-							}),
-						),
-					);
-					if (!monitoringActive() || messages === undefined) break;
-					yield* Effect.sync(() =>
-						deps.pollerManager.startPolling(effect.sessionId, messages),
+					const sessionId = effect.sessionId;
+					// Seed off the tick: a hung messages() call must not delay
+					// the effects that follow it (other sessions' stops and dones).
+					yield* Effect.forkDaemon(
+						Effect.gen(function* () {
+							const messages = yield* Effect.tryPromise(() =>
+								deps.client.session.messages(sessionId),
+							).pipe(
+								Effect.catchAll((err) =>
+									Effect.sync(() => {
+										deps.statusLog.warn(
+											`Failed to seed poller for ${sessionId.slice(0, 12)}, will retry: ${err instanceof Error ? err.message : err}`,
+										);
+										return undefined;
+									}),
+								),
+							);
+							if (messages === undefined) return;
+							yield* Effect.sync(() => {
+								// Check and start without yielding to a newer reduction.
+								if (monitoringActive() && isCurrent(sessionId)) {
+									deps.pollerManager.startPolling(sessionId, messages);
+								}
+							});
+						}),
 					);
 					break;
 				}
@@ -274,6 +376,7 @@ const executeMonitoringEffectsEffect = (
 					yield* processAndApplyDoneEffect(
 						effect.sessionId,
 						effect.isSubagent,
+						effect.busySince,
 						doneDeliveredByPrimary,
 						deps,
 						pipelineDeps,
@@ -353,7 +456,7 @@ export function wireMonitoring(
 		stopPoller: (sessionId) => pollerManager.stopPolling(sessionId),
 		sendStatusToSession: (sessionId, msg) =>
 			wsHandler.sendToSession(sessionId, msg),
-		processAndApplyDone: (sessionId, isSubagent) => {
+		processAndApplyDone: (sessionId, isSubagent, busySince) => {
 			// Dedup: if SSE or message poller already delivered a "done" for
 			// this session in the current busy cycle, skip the synthetic
 			// safety-net done. Consume the entry so the next cycle works.
@@ -380,6 +483,7 @@ export function wireMonitoring(
 				doneResult.route,
 				isSubagent,
 				sessionId,
+				JSON.stringify([sessionId, "poller", busySince, "done"]),
 			);
 			if (notification.sendPush && config.pushManager) {
 				sendPushForEvent(config.pushManager, doneMsg, sseLog, {
@@ -409,7 +513,7 @@ export function wireMonitoring(
 		// ── Session list broadcast (only when statuses actually changed) ────
 		if (statusesChanged) {
 			try {
-				await sessionService.sendDualSessionLists(
+				await sessionService.sendSessionLists(
 					(msg) => wsHandler.broadcast(msg),
 					{ statuses },
 				);
@@ -422,11 +526,17 @@ export function wireMonitoring(
 
 		if (!monitoringActive) return;
 
-		// ── Monitoring reducer: evaluate all sessions ──────────────────────
+		// Keep present idle candidates explicit; only missing statuses are deletions.
 		const parentMap = sessionService.getSessionParentMap();
 		const now = Date.now();
+		const prevState = getMonitoringState();
 		const contexts = new Map<string, SessionEvalContext>();
-		for (const [sessionId, status] of Object.entries(statuses)) {
+		for (const sessionId of selectMonitoringCandidates(
+			prevState,
+			statuses,
+			parentMap,
+		)) {
+			const status = statuses[sessionId];
 			if (status == null) continue;
 			contexts.set(
 				sessionId,
@@ -442,7 +552,6 @@ export function wireMonitoring(
 			);
 		}
 
-		const prevState = getMonitoringState();
 		const result = evaluateAll(prevState, contexts, pollerGatingCfg, parentMap);
 		setMonitoringState(result.state);
 
@@ -514,7 +623,13 @@ export const wireMonitoringEffect = (
 		};
 
 		const runFork = Runtime.runFork(runtime);
+		const tickSemaphore = yield* Effect.makeSemaphore(1);
+		// Ticks can reach reduction out of order (the list broadcast before it is
+		// async), so a snapshot older than the last reduced one is dropped.
+		let capturedTicks = 0;
+		let lastReducedTick = 0;
 		yield* statusPoller.on("changed", (statuses, statusesChanged) => {
+			const tick = ++capturedTicks;
 			runFork(
 				Effect.gen(function* () {
 					if (!monitoringActive) return;
@@ -522,7 +637,7 @@ export const wireMonitoringEffect = (
 
 					if (statusesChanged) {
 						yield* sessionService
-							.sendDualSessionLists((msg) => wsHandler.broadcast(msg), {
+							.sendSessionLists((msg) => wsHandler.broadcast(msg), {
 								statuses,
 							})
 							.pipe(
@@ -539,32 +654,46 @@ export const wireMonitoringEffect = (
 					if (!monitoringActive) return;
 
 					const parentMap = yield* sessionService.getSessionParentMap();
-					const now = Date.now();
-					const contexts = new Map<string, SessionEvalContext>();
-					for (const [sessionId, status] of Object.entries(statuses)) {
-						if (status == null) continue;
-						contexts.set(
-							sessionId,
-							assembleContext(
-								sessionId,
-								status,
-								{ connected: sseStream.isConnected() },
-								sseTracker,
+					const reduced = yield* tickSemaphore.withPermits(1)(
+						Effect.sync(() => {
+							if (tick < lastReducedTick) return undefined;
+							lastReducedTick = tick;
+							const now = Date.now();
+							const prevState = getMonitoringState();
+							const contexts = new Map<string, SessionEvalContext>();
+							for (const sessionId of selectMonitoringCandidates(
+								prevState,
+								statuses,
 								parentMap,
-								(sid) => wsHandler.getClientsForSession(sid).length > 0,
-								now,
-							),
-						);
-					}
+							)) {
+								const status = statuses[sessionId];
+								if (status == null) continue;
+								contexts.set(
+									sessionId,
+									assembleContext(
+										sessionId,
+										status,
+										{ connected: sseStream.isConnected() },
+										sseTracker,
+										parentMap,
+										(sid) => wsHandler.getClientsForSession(sid).length > 0,
+										now,
+									),
+								);
+							}
 
-					const prevState = getMonitoringState();
-					const result = evaluateAll(
-						prevState,
-						contexts,
-						pollerGatingCfg,
-						parentMap,
+							const result = evaluateAll(
+								prevState,
+								contexts,
+								pollerGatingCfg,
+								parentMap,
+							);
+							setMonitoringState(result.state);
+							return { prevState, result };
+						}),
 					);
-					setMonitoringState(result.state);
+					if (reduced === undefined) return;
+					const { prevState, result } = reduced;
 
 					if (result.effects.length > 0) {
 						yield* executeMonitoringEffectsEffect(
@@ -573,6 +702,10 @@ export const wireMonitoringEffect = (
 							pipelineDeps,
 							doneDeliveredByPrimary,
 							() => monitoringActive,
+							// Continuing phases retain their object; any transition replaces it.
+							(sessionId) =>
+								getMonitoringState().sessions.get(sessionId) ===
+								result.state.sessions.get(sessionId),
 						);
 					}
 

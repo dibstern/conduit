@@ -3,7 +3,10 @@
 
 <script lang="ts">
 	import { tick } from "svelte";
-	import Icon from "../shared/Icon.svelte";
+	import Icon from "../ui/Icon.svelte";
+	import Button from "../ui/Button.svelte";
+	import Badge from "../ui/Badge.svelte";
+	import Surface from "../ui/Surface.svelte";
 	import {
 		buildAgentTooltip,
 		chooseAgent,
@@ -71,12 +74,28 @@
 		return index === highlightedIndex;
 	}
 
-	function agentItemClass(agent: AgentInfo, index: number): string {
+	/**
+	 * Two tokens were dropped here, and only one of the two was dead weight.
+	 *
+	 * `text-accent` on the active agent never rendered: `.text-text` is emitted
+	 * at byte 59336 in the built stylesheet and `.text-accent` at 57412, so the
+	 * base colour has always won. It is deleted rather than rescued -- the
+	 * active agent is already marked by its own accent checkmark, and turning a
+	 * whole row accent is a design change nobody asked for.
+	 *
+	 * `bg-transparent` was the same kind of dead token with the opposite
+	 * consequence, so it gets the opposite treatment. `.bg-transparent` at 47762
+	 * outranks `.bg-bg` at 41623, which means the keyboard-navigation highlight
+	 * has never rendered either -- arrow-keying this list showed nothing at all.
+	 * That is the only feedback for where the cursor is, so deleting
+	 * `bg-transparent` (a no-op on its own: preflight already makes a button's
+	 * background transparent) makes `bg-bg` load-bearing and fixes it. Same
+	 * shape as the dead `border-none`/`border-b-2` underline in conduit-test-mkah.
+	 */
+	function agentItemClass(index: number): string {
 		const base =
-			"agent-item flex items-center gap-2 w-full py-1.5 px-3.5 m-0 border-none bg-transparent text-text text-sm text-left cursor-pointer transition-colors duration-100 leading-[1.35] hover:bg-bg font-brand";
-		const activeClass = isActive(agent) ? " text-accent" : "";
-		const highlightedClass = isHighlighted(index) ? " bg-bg" : "";
-		return `${base}${activeClass}${highlightedClass}`;
+			"agent-item flex items-center gap-2 w-full py-1.5 px-3.5 m-0 text-sm text-left duration-100 leading-[1.35]";
+		return isHighlighted(index) ? `${base} bg-bg` : base;
 	}
 
 	function clamp(value: number, min: number, max: number): number {
@@ -116,13 +135,23 @@
 		portalStyle = `position:fixed;left:${left}px;${verticalPosition}width:${width}px;max-height:${maxHeight}px;overflow-y:auto;z-index:9999;`;
 	}
 
-	function portal(node: HTMLElement) {
-		if (typeof document === "undefined") return {};
+	// An attachment, not a `use:` action, and that is the whole point of
+	// conduit-test-p4kj. Actions and `bind:this` cannot be applied to a
+	// component tag, so as long as the portal was an action the dropdown was
+	// physically unable to become a `ui/Surface`. Attachments forward through a
+	// component's `{...rest}` spread, so the primitive never has to know.
+	//
+	// It also owns `portalEl` now. The old code nulled that ref by hand in
+	// `close()`, which was correct only as long as `close()` stayed the single
+	// path out; the attachment's teardown runs on every unmount, including ones
+	// nobody remembers to route through `close()`.
+	function portal(node: HTMLDivElement) {
+		if (typeof document === "undefined") return;
+		portalEl = node;
 		document.body.appendChild(node);
-		return {
-			destroy() {
-				node.remove();
-			},
+		return () => {
+			node.remove();
+			portalEl = undefined;
 		};
 	}
 
@@ -151,7 +180,6 @@
 
 	function close() {
 		dropdownOpen = false;
-		portalEl = undefined;
 	}
 
 	function toggleDropdown(e: MouseEvent) {
@@ -238,10 +266,20 @@
 </script>
 
 <div id="agent-selector" class:hidden={shouldHide}>
-	<button
-		bind:this={triggerEl}
+	<!-- An attachment retains the DOM ref through Button's rest spread; bind:this would bind the component. -->
+	<Button
+		variant="ghost"
+		size="content"
+		tone="muted-soft"
+		hoverFill="alt"
+		{@attach (node: HTMLButtonElement) => {
+			triggerEl = node;
+			return () => {
+				triggerEl = undefined;
+			};
+		}}
 		data-testid="agent-selector-trigger"
-	class="inline-flex items-center gap-[2px] h-9 px-2 border-none bg-transparent text-text-muted text-xs font-medium cursor-pointer whitespace-nowrap transition-[background,color] duration-150 rounded-panel max-w-[160px] hover:bg-bg-alt hover:text-text-secondary font-brand"
+		class="gap-[2px] h-9 px-2 text-xs font-medium rounded-panel max-w-[160px] font-brand"
 		title="Switch agent"
 		onclick={toggleDropdown}
 		aria-haspopup="listbox"
@@ -251,15 +289,17 @@
 			{displayName}
 		</span>
 		<Icon name="chevron-down" size={10} class="shrink-0 opacity-50" />
-	</button>
+	</Button>
 </div>
 
 {#if dropdownOpen}
-	<div
-		bind:this={portalEl}
-		use:portal
+	<Surface
+		{@attach portal}
+		variant="raised"
+		radius="md"
+		elevation="menu-lg"
 		data-testid="agent-dropdown"
-		class="agent-dropdown-panel max-w-[calc(100vw-16px)] bg-bg-alt border border-border rounded-lg shadow-menu-lg py-1.5 font-brand"
+		class="agent-dropdown-panel max-w-[calc(100vw-16px)] py-1.5 font-brand"
 		style={portalStyle}
 		role="listbox"
 		aria-label={providerHeading}
@@ -277,13 +317,23 @@
 			</div>
 		{:else}
 			{#each visibleAgents as agent, index (agent.id)}
-				<button
+				<!--
+					`layout="flow"` preserves the as-found `flex`: these rows stack in
+					a plain block panel, so the default `inline-flex` would open a
+					line-box gap between each one.
+				-->
+				<Button
+					variant="ghost"
+					size="content"
+					layout="flow"
+					tone="default"
+					hoverFill="base"
 					role="option"
 					aria-selected={isActive(agent)}
 					data-testid="agent-option-{agent.id}"
 					data-agent-id={agent.id}
 					data-agent-index={index}
-					class={agentItemClass(agent, index)}
+					class={agentItemClass(index)}
 					title={buildAgentTooltip(agent)}
 					onclick={() => handleAgentClick(agent)}
 					onmouseenter={() => {
@@ -297,15 +347,12 @@
 						{displayLabel(agent)}
 					</span>
 					{#if agent.model}
-						<span
+						<Badge
 							data-testid="agent-model-badge"
-							class="ml-auto shrink-0 rounded border border-border bg-bg px-1.5 py-0.5 text-[10px] leading-none text-text-dimmer"
-						>
-							{agent.model}
-						</span>
+							class="ml-auto">{agent.model}</Badge>
 					{/if}
-				</button>
+				</Button>
 			{/each}
 		{/if}
-	</div>
+	</Surface>
 {/if}

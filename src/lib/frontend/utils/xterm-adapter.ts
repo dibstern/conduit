@@ -5,32 +5,12 @@ import { FitAddon } from "@xterm/addon-fit";
 import { Terminal } from "@xterm/xterm";
 import "@xterm/xterm/css/xterm.css";
 import type { TerminalAdapter } from "../types.js";
+import { XTERM_THEMES } from "./xterm-themes.js";
 
-// ─── ANSI Theme Colors (design system) ──────────────────────────────────────
-
-export const ANSI_THEME: Record<string, string> = {
-	background: "#111111",
-	foreground: "#EEEEEE",
-	cursor: "#EEEEEE",
-	cursorAccent: "#111111",
-	selectionBackground: "rgba(92, 156, 245, 0.3)",
-	black: "#0A0A0A",
-	red: "#E06C75",
-	green: "#7FD88F",
-	yellow: "#FAB283",
-	blue: "#5C9CF5",
-	magenta: "#9D7CD8",
-	cyan: "#56B6C2",
-	white: "#EEEEEE",
-	brightBlack: "#606060",
-	brightRed: "#E06C75",
-	brightGreen: "#7FD88F",
-	brightYellow: "#FAB283",
-	brightBlue: "#5C9CF5",
-	brightMagenta: "#9D7CD8",
-	brightCyan: "#56B6C2",
-	brightWhite: "#EEEEEE",
-};
+// ─── Default Terminal Palette ───────────────────────────────────────────────
+// Construction defaults to Conduit Dark; TerminalTab applies the resolved
+// Light/Dark palette immediately and whenever the mode resolution changes.
+export const ANSI_THEME: Record<string, string> = XTERM_THEMES.dark;
 
 // ─── Options ────────────────────────────────────────────────────────────────
 

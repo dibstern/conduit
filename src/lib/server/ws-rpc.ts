@@ -1,16 +1,19 @@
 import { Rpc } from "@effect/rpc";
-import { Effect, Stream } from "effect";
+import { type Context, Effect, Stream } from "effect";
 import {
 	ClaudeSettingsResolveError,
 	ClaudeSettingsTrustBoundaryError,
 } from "../contracts/claude-settings.js";
 import { ProviderInstanceIdSchema } from "../contracts/provider-instance.js";
 import {
+	defaultDaemonConfig,
 	loadDaemonConfig,
 	resolveInstanceDriver,
+	saveDaemonConfig,
 } from "../daemon/config-persistence.js";
 import { RateLimiterTag } from "../domain/relay/Layers/rate-limiter-layer.js";
 import { AgentServiceTag } from "../domain/relay/Services/agent-service.js";
+import { DaemonSessionQueryServiceTag } from "../domain/relay/Services/daemon-session-query-service.js";
 import { DirectoryListingServiceTag } from "../domain/relay/Services/directory-listing-service.js";
 import { InstanceManagementServiceTag } from "../domain/relay/Services/instance-management-service.js";
 import { ProjectManagementServiceTag } from "../domain/relay/Services/project-management-service.js";
@@ -62,7 +65,13 @@ import {
 	deleteSessionForClient,
 	forkSessionForClient,
 	loadMoreHistoryForSession,
+	markSessionUnreadForClient,
 	renameSessionForClient,
+	setSessionAutoSettleForClient,
+	setSessionPinnedForClient,
+	setSessionSettledForClient,
+	snoozeSessionForClient,
+	unsnoozeSessionForClient,
 	viewSessionForClient,
 } from "../handlers/session.js";
 import {
@@ -74,12 +83,14 @@ import {
 	getHiddenEntries,
 	setHiddenEntriesForRelay,
 } from "../handlers/visibility.js";
+import { ReadQueryEffectTag } from "../persistence/effect/read-query-effect.js";
 import { ProviderRegistryTag } from "../provider/provider-registry.js";
 import type { OpenCodeInstance, PermissionId } from "../shared-types.js";
 
 export {
 	AddProject,
 	AnswerQuestion,
+	AttachProject,
 	CancelSession,
 	type ClaudeSettingsResponse,
 	ClosePty,
@@ -106,11 +117,15 @@ export {
 	type GetModelsResponse,
 	GetProjects,
 	type GetProjectsResponse,
+	GetSkillContent,
+	type GetSkillContentResponse,
 	GetTodo,
 	type GetTodoResponse,
 	GetToolContent,
 	type GetToolContentResponse,
 	type InstanceListResponse,
+	ListDaemonSessions,
+	type ListDaemonSessionsResponse,
 	ListDirectories,
 	type ListDirectoriesResponse,
 	ListPtys,
@@ -118,6 +133,7 @@ export {
 	type ListSessionsResponse,
 	LoadMoreHistory,
 	type LoadMoreHistoryResponse,
+	MarkSessionUnread,
 	type ModelInfo,
 	type ProjectMutationResponse,
 	type ProviderInfo,
@@ -134,6 +150,7 @@ export {
 	ResizePty,
 	ResolveClaudeSettings,
 	type ResolveClaudeSettingsResponse,
+	ResolveSession,
 	RespondPermission,
 	RewindSession,
 	ScanNow,
@@ -147,6 +164,10 @@ export {
 	type SetDefaultPermissionModeResponse,
 	SetLogLevel,
 	SetProjectInstance,
+	SetSessionAutoSettle,
+	SetSessionPinned,
+	SetSessionSettled,
+	SnoozeSession,
 	StartInstance,
 	StopInstance,
 	SwitchAgent,
@@ -159,18 +180,24 @@ export {
 	SwitchVariant,
 	type SwitchVariantResponse,
 	SyncInputDraft,
+	UnsnoozeSession,
 	ViewSession,
 	WsRpcError,
 	WsRpcGroup,
 	WsRpcRequest,
 } from "../contracts/ws-rpc.js";
 
-import { WsRpcError, WsRpcGroup } from "../contracts/ws-rpc.js";
+import {
+	type AttachProject,
+	WsRpcError,
+	WsRpcGroup,
+} from "../contracts/ws-rpc.js";
 import {
 	getFileContentResponse,
 	getFileListResponse,
 	getFileTreeEntries,
 } from "../handlers/files.js";
+import { getSkillContentValue } from "../handlers/skill-content.js";
 import { getToolContentValue } from "../handlers/tool-content.js";
 import { setLogLevel } from "../logger.js";
 
@@ -208,7 +235,7 @@ const broadcastInstanceList = (instances: ReadonlyArray<OpenCodeInstance>) =>
 		wsHandler.broadcast({ type: "instance_list", instances });
 	});
 
-export const WsRpcServerLayer = WsRpcGroup.toLayer({
+export const wsRpcHandlers = WsRpcGroup.of({
 	SubscribeShell: (request) =>
 		Rpc.fork(
 			subscribeShell(
@@ -242,6 +269,15 @@ export const WsRpcServerLayer = WsRpcGroup.toLayer({
 				),
 			),
 		),
+	AttachProject: (_request: AttachProject) =>
+		Effect.succeed({ ok: true as const }),
+	ResolveSession: (request) =>
+		Effect.gen(function* () {
+			const config = yield* ConfigTag;
+			const reader = yield* ReadQueryEffectTag;
+			const session = yield* reader.getSession(request.sessionId);
+			return { projectSlug: session === undefined ? null : config.slug };
+		}).pipe(Effect.catchAll(mapRpcFailure("ResolveSession"))),
 	GetAgents: (request) =>
 		Effect.gen(function* () {
 			const config = yield* ConfigTag;
@@ -315,6 +351,21 @@ export const WsRpcServerLayer = WsRpcGroup.toLayer({
 				),
 			),
 		),
+	ListDaemonSessions: (request) =>
+		Effect.gen(function* () {
+			const daemonSessions = yield* DaemonSessionQueryServiceTag;
+			const result = yield* daemonSessions.list({
+				...(request.limit !== undefined ? { limit: request.limit } : {}),
+				...(request.roots !== undefined ? { roots: request.roots } : {}),
+				...(request.search !== undefined ? { search: request.search } : {}),
+				...(request.cursor !== undefined ? { cursor: request.cursor } : {}),
+				...(request.scope !== undefined ? { scope: request.scope } : {}),
+			});
+			return {
+				projectSlug: request.projectSlug,
+				...result,
+			};
+		}).pipe(Effect.catchAll(mapRpcFailure("ListDaemonSessions"))),
 	AddProject: (request) =>
 		Effect.gen(function* () {
 			const projectService = yield* ProjectManagementServiceTag;
@@ -520,6 +571,36 @@ export const WsRpcServerLayer = WsRpcGroup.toLayer({
 				instances,
 			};
 		}).pipe(Effect.catchAll(mapRpcFailure("UpdateInstance"))),
+	GetAutoSettleSetting: (_request) =>
+		Effect.gen(function* () {
+			const config = yield* ConfigTag;
+			const persisted = loadDaemonConfig(config.configDir);
+			return {
+				autoSettleAfterDays:
+					persisted?.autoSettleAfterDays === undefined
+						? 3
+						: persisted.autoSettleAfterDays,
+			};
+		}),
+	SetAutoSettleSetting: (request) =>
+		Effect.gen(function* () {
+			const days = request.autoSettleAfterDays;
+			if (days !== null && (!Number.isInteger(days) || days < 1 || days > 90)) {
+				return yield* new WsRpcError({
+					message: "Auto-settle days must be an integer from 1 to 90, or Never",
+				});
+			}
+			const config = yield* ConfigTag;
+			const persisted =
+				loadDaemonConfig(config.configDir) ?? defaultDaemonConfig();
+			yield* Effect.tryPromise(() =>
+				saveDaemonConfig(
+					{ ...persisted, autoSettleAfterDays: days },
+					config.configDir,
+				),
+			);
+			return { autoSettleAfterDays: days };
+		}).pipe(Effect.catchAll(mapRpcFailure("SetAutoSettleSetting"))),
 	ScanNow: (request) =>
 		Effect.gen(function* () {
 			const scanService = yield* ScanServiceTag;
@@ -799,6 +880,84 @@ export const WsRpcServerLayer = WsRpcGroup.toLayer({
 				),
 			),
 		),
+	SetSessionSettled: (request) =>
+		setSessionSettledForClient({
+			clientId: request.originId ?? "rpc",
+			sessionId: request.sessionId,
+			settled: request.settled,
+		}).pipe(
+			Effect.as({ ok: true as const }),
+			Effect.mapError(
+				(error) =>
+					new WsRpcError({
+						message: `SetSessionSettled failed: ${String(error.cause)}`,
+					}),
+			),
+		),
+	SetSessionPinned: (request) =>
+		setSessionPinnedForClient({
+			clientId: request.originId ?? "rpc",
+			sessionId: request.sessionId,
+			pinned: request.pinned,
+		}).pipe(
+			Effect.as({ ok: true as const }),
+			Effect.mapError(
+				(error) =>
+					new WsRpcError({
+						message: `SetSessionPinned failed: ${String(error.cause)}`,
+					}),
+			),
+		),
+	SetSessionAutoSettle: (request) =>
+		setSessionAutoSettleForClient({
+			clientId: request.originId ?? "rpc",
+			sessionId: request.sessionId,
+			disabled: request.disabled,
+		}).pipe(
+			Effect.as({ ok: true as const }),
+			Effect.catchAll(mapRpcFailure("SetSessionAutoSettle")),
+		),
+	SnoozeSession: (request) =>
+		snoozeSessionForClient({
+			clientId: request.originId ?? "rpc",
+			sessionId: request.sessionId,
+			until: request.until,
+		}).pipe(
+			Effect.as({ ok: true as const }),
+			Effect.mapError(
+				(error) =>
+					new WsRpcError({
+						message: `SnoozeSession failed: ${String(error.cause)}`,
+					}),
+			),
+		),
+	UnsnoozeSession: (request) =>
+		unsnoozeSessionForClient({
+			clientId: request.originId ?? "rpc",
+			sessionId: request.sessionId,
+		}).pipe(
+			Effect.as({ ok: true as const }),
+			Effect.mapError(
+				(error) =>
+					new WsRpcError({
+						message: `UnsnoozeSession failed: ${String(error.cause)}`,
+					}),
+			),
+		),
+	MarkSessionUnread: (request) =>
+		markSessionUnreadForClient({
+			clientId: request.originId ?? "rpc",
+			sessionId: request.sessionId,
+		}).pipe(
+			Effect.as({ ok: true as const }),
+			Effect.catchAll((error) =>
+				Effect.fail(
+					new WsRpcError({
+						message: `MarkSessionUnread failed: ${String(error)}`,
+					}),
+				),
+			),
+		),
 	SwitchVariant: (request) =>
 		switchVariantForSession({
 			clientId: request.originId ?? "rpc",
@@ -930,6 +1089,24 @@ export const WsRpcServerLayer = WsRpcGroup.toLayer({
 						),
 			),
 		),
+	GetSkillContent: (request) =>
+		Effect.gen(function* () {
+			const config = yield* ConfigTag;
+			const result = yield* getSkillContentValue(
+				request.name,
+				config.slug === request.projectSlug ? config.projectDir : undefined,
+			);
+			if (result === undefined) {
+				return yield* Effect.fail(
+					new WsRpcError({ message: "Skill content not available" }),
+				);
+			}
+			return {
+				projectSlug: request.projectSlug,
+				name: request.name,
+				...result,
+			};
+		}).pipe(Effect.catchAll(mapRpcFailure("GetSkillContent"))),
 	GetModels: (request) =>
 		Effect.gen(function* () {
 			const config = yield* ConfigTag;
@@ -1211,3 +1388,147 @@ export const WsRpcServerLayer = WsRpcGroup.toLayer({
 			return { ok: true as const };
 		}),
 });
+
+export const WsRpcServerLayer = WsRpcGroup.toLayer(wsRpcHandlers);
+
+export type ResolveRpcContext = (
+	projectSlug: string,
+) => Effect.Effect<Context.Context<unknown>, WsRpcError>;
+
+export type ReattachDaemonViewSession = (payload: {
+	readonly projectSlug: string;
+	readonly originId: string;
+	readonly sessionId?: string;
+}) => Effect.Effect<boolean, WsRpcError>;
+
+export type DaemonRpcName =
+	| "GetProjects"
+	| "AddProject"
+	| "RemoveProject"
+	| "RenameProject"
+	| "SetProjectInstance"
+	| "StartInstance"
+	| "StopInstance"
+	| "RemoveInstance"
+	| "RenameInstance"
+	| "AddInstance"
+	| "UpdateInstance"
+	| "GetAutoSettleSetting"
+	| "SetAutoSettleSetting"
+	| "ScanNow"
+	| "DetectProxy"
+	| "ListDirectories"
+	| "ListDaemonSessions"
+	| "SetLogLevel"
+	| "ResolveSession";
+
+export type DaemonRpcHandlers = {
+	[K in DaemonRpcName]: (
+		payload: Parameters<(typeof wsRpcHandlers)[K]>[0],
+	) => Effect.Effect<
+		Effect.Effect.Success<ReturnType<(typeof wsRpcHandlers)[K]>>,
+		WsRpcError
+	>;
+};
+
+export const makeRoutedWsRpcServerLayer = (
+	resolveContext: ResolveRpcContext,
+	daemonHandlers?: DaemonRpcHandlers,
+	defaultProjectSlug?: string,
+	reattachViewSession?: ReattachDaemonViewSession,
+) => {
+	const routeHandler =
+		<P extends { readonly projectSlug?: string }, A, E, R>(
+			handler: (payload: P) => Effect.Effect<A, E, R>,
+		) =>
+		(payload: P) =>
+			Effect.gen(function* () {
+				const slug = payload.projectSlug ?? defaultProjectSlug;
+				if (slug === undefined)
+					return yield* Effect.fail(
+						new WsRpcError({ message: "projectSlug is required" }),
+					);
+				const context = yield* resolveContext(slug);
+				return yield* Effect.provide(handler(payload), context);
+			});
+
+	// Object.entries/fromEntries loses the key-to-payload/result correlation.
+	// Each wrapper preserves its original handler's payload and success type.
+	const { SubscribeShell, SubscribeSessionDetail, ...unaryHandlers } =
+		wsRpcHandlers;
+	const handlers = Object.fromEntries(
+		Object.entries({ ...unaryHandlers, ...daemonHandlers }).map(
+			([name, handler]) => [
+				name,
+				daemonHandlers && Object.hasOwn(daemonHandlers, name)
+					? handler
+					: routeHandler<never, unknown, unknown, unknown>(handler),
+			],
+		),
+	) as {
+		-readonly [K in keyof typeof unaryHandlers]: (
+			payload: Parameters<(typeof unaryHandlers)[K]>[0],
+		) => Effect.Effect<
+			Effect.Effect.Success<ReturnType<(typeof unaryHandlers)[K]>>,
+			Effect.Effect.Error<ReturnType<(typeof unaryHandlers)[K]>> | WsRpcError
+		>;
+	};
+	handlers.AttachProject = (payload) =>
+		reattachViewSession
+			? reattachViewSession(payload).pipe(Effect.as({ ok: true as const }))
+			: wsRpcHandlers.AttachProject(payload);
+	if (reattachViewSession) {
+		const routeViewSession = routeHandler(wsRpcHandlers.ViewSession);
+		handlers.ViewSession = (
+			payload: Parameters<(typeof wsRpcHandlers)["ViewSession"]>[0],
+		) =>
+			reattachViewSession(payload).pipe(
+				Effect.flatMap((reattached) =>
+					reattached
+						? Effect.succeed({ ok: true as const })
+						: routeViewSession(payload),
+				),
+			);
+	}
+	const routeStream = <A, E, R>(
+		projectSlug: string,
+		make: () => Stream.Stream<A, E, R>,
+	) =>
+		Rpc.fork(
+			Stream.unwrap(
+				Effect.map(resolveContext(projectSlug), (context) =>
+					Stream.provideContext(make(), context).pipe(
+						Stream.mapError(
+							(error) =>
+								new WsRpcError({
+									message: `Subscription failed: ${String(error)}`,
+								}),
+						),
+					),
+				),
+			),
+		);
+	return WsRpcGroup.toLayer({
+		...handlers,
+		SubscribeShell: (request) =>
+			routeStream(request.projectSlug, () =>
+				subscribeShell(
+					request.resumeFromSequence === undefined
+						? {}
+						: { resumeFromSequence: request.resumeFromSequence },
+				),
+			),
+		SubscribeSessionDetail: (request) =>
+			routeStream(request.projectSlug, () => {
+				const source = subscribeSessionDetail({
+					sessionId: request.sessionId,
+					...(request.resumeFromSequence === undefined
+						? {}
+						: { resumeFromSequence: request.resumeFromSequence }),
+				});
+				return request.textSuffixes === true
+					? encodeSessionDetail(source)
+					: source;
+			}),
+	});
+};

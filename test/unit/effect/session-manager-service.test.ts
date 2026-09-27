@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { SqlClient } from "@effect/sql";
 import { describe, it } from "@effect/vitest";
+import Database from "better-sqlite3";
 import {
 	Deferred,
 	Effect,
@@ -58,7 +59,8 @@ import {
 	SessionManagerServiceLive,
 	SessionManagerServiceTag,
 	seedPaginationCursor,
-	sendDualSessionLists,
+	sendSessionLists,
+	setForkEntry,
 } from "../../../src/lib/domain/relay/Services/session-manager-service.js";
 import {
 	makeSessionManagerStateLive,
@@ -74,15 +76,26 @@ import type { SessionStatus } from "../../../src/lib/instance/sdk-types.js";
 import { ClaudeEventPersistEffectTag } from "../../../src/lib/persistence/effect/claude-event-persist-effect.js";
 import { EventStoreEffectTag } from "../../../src/lib/persistence/effect/event-store-effect.js";
 import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
+import { ProjectionRunnerEffectTag } from "../../../src/lib/persistence/effect/projection-runner-effect.js";
 import {
 	createAllEffectProjectors,
 	ProjectionError,
 } from "../../../src/lib/persistence/effect/projectors-effect.js";
 import type { ReadQueryEffect } from "../../../src/lib/persistence/effect/read-query-effect.js";
-import { ReadQueryEffectTag } from "../../../src/lib/persistence/effect/read-query-effect.js";
-import { runMigrations } from "../../../src/lib/persistence/migrations.js";
-import { schemaMigrations } from "../../../src/lib/persistence/schema.js";
-import { SqliteClient } from "../../../src/lib/persistence/sqlite-client.js";
+import {
+	pendingApprovalCountsByType,
+	ReadQueryEffectTag,
+	sessionRowsToSessionInfoList,
+} from "../../../src/lib/persistence/effect/read-query-effect.js";
+import { canonicalEvent } from "../../../src/lib/persistence/events.js";
+import type {
+	PendingApprovalCountRow,
+	SessionRow,
+} from "../../../src/lib/persistence/read-model-types.js";
+import {
+	CURRENT_EVENT_STORE_MIGRATION,
+	readMigrationSql,
+} from "../../../src/lib/persistence/schema.js";
 import { OrchestrationEngine } from "../../../src/lib/provider/orchestration-engine.js";
 import { ProviderRegistry } from "../../../src/lib/provider/provider-registry.js";
 import { SqliteProviderSessionBindingReadModel } from "../../../src/lib/provider/provider-session-binding-read-model.js";
@@ -103,23 +116,81 @@ import {
 } from "../../helpers/mock-factories.js";
 import { withDispatchEffect } from "../../helpers/orchestration-engine-test-double.js";
 
+function makeRow(id: string, overrides?: Partial<SessionRow>): SessionRow {
+	return {
+		id,
+		version: 0,
+		provider: "opencode",
+		provider_sid: null,
+		title: "Untitled",
+		status: "idle",
+		parent_id: null,
+		fork_point_event: null,
+		last_message_at: null,
+		last_turn_error_at: null,
+		permission_mode: null,
+		read_at: null,
+		settled_at: null,
+		pinned_at: null,
+		snoozed_at: null,
+		snoozed_until: null,
+		woken_at: null,
+		woken_reason: null,
+		created_at: 1000,
+		updated_at: 2000,
+		...overrides,
+	};
+}
+
 function makeReadQueryEffect(
-	sessions: readonly SessionInfo[],
+	rows: readonly SessionRow[],
+	pendingApprovalCounts: readonly PendingApprovalCountRow[] = [],
 ): ReadQueryEffect {
 	return {
 		getToolContent: vi.fn(() => Effect.succeed(undefined)),
 		getSessionStatus: vi.fn(() => Effect.succeed(undefined)),
 		getSession: vi.fn(() => Effect.succeed(undefined)),
 		getAllSessionStatuses: vi.fn(() => Effect.succeed({})),
-		listSessions: vi.fn(() => Effect.succeed([])),
+		getSessionsForReconciliation: () => Effect.succeed([]),
+		listSessions: vi.fn(() => Effect.succeed(rows)),
+		listSessionInfos: vi.fn((options) => {
+			const pending = pendingApprovalCountsByType(pendingApprovalCounts);
+			const selected = options?.roots
+				? rows.filter((row) => row.parent_id === null)
+				: rows;
+			return Effect.succeed(
+				sessionRowsToSessionInfoList(selected, {
+					parentMap: new Map(
+						rows.flatMap((row) =>
+							row.parent_id === null ? [] : [[row.id, row.parent_id] as const],
+						),
+					),
+					pendingQuestionCounts: pending.questions,
+					pendingPermissionCounts: pending.permissions,
+				}),
+			);
+		}),
+		readSessionList: vi.fn(() =>
+			Effect.succeed({
+				rows: rows.map((row) => ({
+					item: sessionRowsToSessionInfoList([row])[0]!,
+					version: row.version,
+				})),
+				version: 0,
+			}),
+		),
 		readSessionTranscript: vi.fn(() =>
 			Effect.succeed({ messages: [], version: 0 }),
 		),
-		readSessionList: vi.fn(() =>
+		getSessionLineage: vi.fn(() =>
 			Effect.succeed({
-				rows: sessions.map((item) => ({ item, version: 0 })),
-				version: 0,
+				rows: rows.map(({ id, parent_id }) => ({ id, parent_id })),
+				count: rows.length,
 			}),
+		),
+		getSessionFamily: vi.fn(() => Effect.succeed(rows)),
+		countPendingApprovalsBySession: vi.fn(() =>
+			Effect.succeed(pendingApprovalCounts),
 		),
 		getLatestTurnModelExecution: vi.fn(() => Effect.succeed(undefined)),
 		getSessionMessagesWithParts: vi.fn(() => Effect.succeed([])),
@@ -158,15 +229,37 @@ function makeRelayConfig(configDir: string): ProjectRelayConfig {
 	};
 }
 
+function openFixtureDb(filename: string) {
+	const db = new Database(filename);
+	return {
+		exec: (sql: string) => db.exec(sql),
+		execute: (sql: string, values: readonly (string | number | null)[]) => {
+			db.prepare(sql).run([...values]);
+		},
+		queryOne: <T>(sql: string, values: readonly (string | number | null)[]) =>
+			db.prepare(sql).get([...values]) as T | undefined,
+		query: <T>(sql: string, values: readonly (string | number | null)[]) =>
+			db.prepare(sql).all([...values]) as T[],
+		close: () => db.close(),
+	};
+}
+
 function seedProjectedSessionBinding(
 	dbFile: string,
 	sessionId: string,
 	providerId: string,
 	parentId?: string,
 ): void {
-	const db = SqliteClient.open(dbFile);
+	const db = openFixtureDb(dbFile);
 	try {
-		runMigrations(db, schemaMigrations);
+		if (
+			db.queryOne<{ name: string }>(
+				"SELECT name FROM sqlite_master WHERE name = 'sessions'",
+				[],
+			) === undefined
+		) {
+			db.exec(readMigrationSql(CURRENT_EVENT_STORE_MIGRATION));
+		}
 		// Keep this fixture newer than the one-time legacy-skeleton purge cutoff.
 		// These tests exercise deletion, not cleanup of pre-event-store rows.
 		const now = 1_800_000_000_000;
@@ -192,7 +285,7 @@ function seedProjectedSessionBinding(
 }
 
 function readProjectedDeleteState(dbFile: string, sessionId: string) {
-	const db = SqliteClient.open(dbFile);
+	const db = openFixtureDb(dbFile);
 	try {
 		return {
 			sessionPresent:
@@ -213,7 +306,7 @@ function readProjectedDeleteState(dbFile: string, sessionId: string) {
 
 function readTombstoneFirstState(dbFile: string, sessionId: string) {
 	const projected = readProjectedDeleteState(dbFile, sessionId);
-	const db = SqliteClient.open(dbFile);
+	const db = openFixtureDb(dbFile);
 	try {
 		return {
 			...projected,
@@ -286,7 +379,7 @@ describe("SessionManagerService", () => {
 			// a descendant may outlive it.
 			yield* service.deleteSession("parent-1");
 			expect([...(yield* service.getSessionParentMap())]).toEqual([]);
-			yield* service.sendDualSessionLists((msg) => messages.push(msg));
+			yield* service.sendSessionLists((msg) => messages.push(msg));
 
 			expect(messages[0]?.sessions).toEqual([]);
 			expect([...(yield* service.getSessionParentMap())]).toEqual([]);
@@ -438,7 +531,7 @@ describe("SessionManagerService", () => {
 				});
 				const sessions = yield* service.listSessions();
 				const persisted = yield* Effect.sync(() => {
-					const db = SqliteClient.open(dbFile);
+					const db = openFixtureDb(dbFile);
 					try {
 						return {
 							session: db.queryOne<{
@@ -574,7 +667,7 @@ describe("SessionManagerService", () => {
 				yield* persist.persistUserMessage(child.id, "Claude turn on fork");
 
 				const state = yield* Effect.sync(() => {
-					const db = SqliteClient.open(dbFile);
+					const db = openFixtureDb(dbFile);
 					try {
 						return {
 							session: db.queryOne<{
@@ -855,24 +948,16 @@ describe("SessionManagerService", () => {
 					{ instanceId: openCodeInstanceId },
 				);
 
-				const bindings = yield* Effect.sync(() => {
-					const db = SqliteClient.open(dbFile);
-					try {
-						return db.query<{
-							readonly session_id: string;
-							readonly provider: string;
-							readonly status: string;
-						}>(
-							`SELECT session_id, provider, status
-							 FROM session_providers
-							 WHERE session_id IN (?, ?) AND status = 'active'
-							 ORDER BY session_id`,
-							[claudeSession.id, openCodeSession.id],
-						);
-					} finally {
-						db.close();
-					}
-				});
+				const sql = yield* SqlClient.SqlClient;
+				const bindings = yield* sql<{
+					readonly session_id: string;
+					readonly provider: string;
+					readonly status: string;
+				}>`SELECT session_id, provider, status
+					FROM session_providers
+					WHERE session_id IN ${sql.in([claudeSession.id, openCodeSession.id])}
+						AND status = 'active'
+					ORDER BY session_id`;
 
 				expect(bindings).toHaveLength(2);
 				const resolvedBindings = Object.fromEntries(
@@ -959,7 +1044,7 @@ describe("SessionManagerService", () => {
 					instanceId: ProviderInstanceIdSchema.make("work-oc"),
 				});
 				const bindings = yield* Effect.sync(() => {
-					const db = SqliteClient.open(dbFile);
+					const db = openFixtureDb(dbFile);
 					try {
 						return db.query<{
 							readonly session_provider: string;
@@ -1728,8 +1813,8 @@ describe("SessionManagerService", () => {
 			);
 			const dbFile = join(tmpDir, "events.sqlite");
 			const sessionId = "deleted-session";
-			const db = SqliteClient.open(dbFile);
-			runMigrations(db, schemaMigrations);
+			const db = openFixtureDb(dbFile);
+			db.exec(readMigrationSql(CURRENT_EVENT_STORE_MIGRATION));
 			const now = 1_735_689_600_000;
 			db.execute(
 				"INSERT INTO sessions (id, provider, title, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
@@ -1739,7 +1824,6 @@ describe("SessionManagerService", () => {
 				"INSERT INTO session_providers (id, session_id, provider, status, activated_at) VALUES (?, ?, ?, 'active', ?)",
 				[`${sessionId}:initial`, sessionId, "work-oc", now],
 			);
-			const bindingReadModel = new SqliteProviderSessionBindingReadModel(db);
 			const cleanupObservations: Array<{
 				readonly sessionPresent: boolean;
 				readonly bindingPresent: boolean;
@@ -1780,12 +1864,21 @@ describe("SessionManagerService", () => {
 			};
 			const registry = new ProviderRegistry([providerInstance]);
 			const daemonConfig = makeNamedOpenCodeDaemonConfig();
-			const engine = new OrchestrationEngine({
-				registry,
-				sessionBindingReadModel: bindingReadModel,
-				resolveProviderDriver: (providerId) =>
-					resolveInstanceDriver(daemonConfig, providerId),
-			});
+			const persistenceLayer = makePersistenceEffectLayer(dbFile);
+			const engineLayer = Layer.effect(
+				OrchestrationEngineTag,
+				Effect.map(
+					SqlClient.SqlClient,
+					(sql) =>
+						new OrchestrationEngine({
+							registry,
+							sessionBindingReadModel:
+								new SqliteProviderSessionBindingReadModel(sql),
+							resolveProviderDriver: (providerId) =>
+								resolveInstanceDriver(daemonConfig, providerId),
+						}),
+				),
+			).pipe(Layer.provide(persistenceLayer));
 			const api = makeMockOpenCodeAPI();
 			vi.spyOn(api.session, "delete").mockResolvedValue(undefined);
 			const namedApi = makeMockOpenCodeAPI();
@@ -1803,15 +1896,18 @@ describe("SessionManagerService", () => {
 					Layer.succeed(ConfigTag, makeRelayConfig(tmpDir)),
 					makeSessionManagerStateLive(),
 					DaemonEventBusLive,
-					makePersistenceEffectLayer(dbFile),
+					persistenceLayer,
 					Layer.succeed(OpenCodeInstanceClientsTag, instanceClients),
-					Layer.succeed(OrchestrationEngineTag, engine),
+					engineLayer,
 				),
 			);
 
 			return Effect.gen(function* () {
 				yield* Effect.tryPromise(() => saveDaemonConfig(daemonConfig, tmpDir));
-				expect(engine.getProviderForSession(sessionId)).toBe("work-oc");
+				const engine = yield* OrchestrationEngineTag;
+				expect(yield* engine.getProviderForSessionEffect(sessionId)).toBe(
+					"work-oc",
+				);
 				const service = yield* SessionManagerServiceTag;
 				yield* service.deleteSession(sessionId);
 				const eventStore = yield* EventStoreEffectTag;
@@ -1821,7 +1917,9 @@ describe("SessionManagerService", () => {
 				expect(cleanupObservations).toEqual([
 					{ sessionPresent: false, bindingPresent: false },
 				]);
-				expect(engine.getProviderForSession(sessionId)).toBeUndefined();
+				expect(
+					yield* engine.getProviderForSessionEffect(sessionId),
+				).toBeUndefined();
 				expect(clientFor).toHaveBeenCalledWith("work-oc");
 				expect(namedApi.session.delete).toHaveBeenCalledWith(sessionId);
 				expect(events.map((event) => event.type)).toEqual(["session.deleted"]);
@@ -1908,7 +2006,9 @@ describe("SessionManagerService", () => {
 						true,
 					);
 					expect(receipt?.data.reason).toBe("cleanup: timed out after 2s");
-					expect(engine.getProviderForSession(sessionId)).toBe("claude");
+					expect(yield* engine.getProviderForSessionEffect(sessionId)).toBe(
+						"claude",
+					);
 					expect(bindSession).toHaveBeenCalledOnce();
 					expect(bindSession).toHaveBeenCalledWith(sessionId, "claude");
 				}).pipe(Effect.provide(Layer.fresh(layer)));
@@ -2227,14 +2327,15 @@ describe("SessionManagerService", () => {
 			new Error("provider API should not be called"),
 		);
 		const readQuery = makeReadQueryEffect([
-			{
-				id: "forked-1",
+			makeRow("forked-1", {
 				title: "Forked",
 				status: "idle",
-				createdAt: 100,
-				updatedAt: 300,
-				parentID: "parent-1",
-			},
+				created_at: 100,
+				updated_at: 300,
+				parent_id: "parent-1",
+				fork_point_event: "msg-1",
+				fork_point_timestamp: 250,
+			}),
 		]);
 		const layer = Layer.mergeAll(
 			Layer.succeed(OpenCodeAPITag, api),
@@ -2245,7 +2346,7 @@ describe("SessionManagerService", () => {
 		return Effect.gen(function* () {
 			const sessions = yield* listSessions();
 
-			expect(readQuery.readSessionList).toHaveBeenCalled();
+			expect(readQuery.listSessionInfos).toHaveBeenCalled();
 			expect(api.session.list).not.toHaveBeenCalled();
 			// The read hands back the projected session type as-is.
 			expect(sessions).toEqual([
@@ -2255,9 +2356,328 @@ describe("SessionManagerService", () => {
 					status: "idle",
 					createdAt: 100,
 					updatedAt: 300,
+					messageCount: 0,
 					parentID: "parent-1",
+					forkMessageId: "msg-1",
+					forkPointTimestamp: 250,
+					attention: "idle",
 				},
 			]);
+		}).pipe(Effect.provide(layer));
+	});
+
+	it.effect("reads durable pending question and permission counts", () => {
+		const dbFile = join(
+			tmpdir(),
+			`conduit-session-manager-pending-${Date.now()}.sqlite`,
+		);
+		const layer = Layer.provideMerge(
+			SessionManagerServiceLive,
+			Layer.mergeAll(
+				Layer.succeed(OpenCodeAPITag, makeMockOpenCodeAPI()),
+				Layer.succeed(LoggerTag, makeMockLogger()),
+				makeSessionManagerStateLive(),
+				DaemonEventBusLive,
+				makePersistenceEffectLayer(dbFile),
+			),
+		);
+
+		return Effect.gen(function* () {
+			const sql = yield* SqlClient.SqlClient;
+			const store = yield* EventStoreEffectTag;
+			const projectionRunner = yield* ProjectionRunnerEffectTag;
+			const service = yield* SessionManagerServiceTag;
+			yield* projectionRunner.markRecovered();
+			yield* sql`
+					INSERT INTO sessions
+					(id, provider, title, status, created_at, updated_at)
+					VALUES ('session-1', 'opencode', 'Warm session', 'idle', 1, 1)`;
+
+			const questionAsked = yield* store.append(
+				canonicalEvent(
+					"question.asked",
+					"session-1",
+					{
+						id: "question-1",
+						sessionId: "session-1",
+						questions: [{ text: "Continue?" }],
+					},
+					{ provider: "opencode", createdAt: 2 },
+				),
+			);
+			yield* projectionRunner.projectEvent(questionAsked);
+			const permissionAsked = yield* store.append(
+				canonicalEvent(
+					"permission.asked",
+					"session-1",
+					{
+						id: "permission-1",
+						sessionId: "session-1",
+						toolName: "bash",
+						input: { command: "pwd" },
+					},
+					{ provider: "opencode", createdAt: 3 },
+				),
+			);
+			yield* projectionRunner.projectEvent(permissionAsked);
+
+			const sessions = yield* service.listSessions();
+			expect(sessions).toEqual([
+				expect.objectContaining({
+					id: "session-1",
+					pendingQuestionCount: 1,
+					pendingPermissionCount: 1,
+				}),
+			]);
+		}).pipe(
+			Effect.provide(Layer.fresh(layer)),
+			Effect.ensuring(Effect.sync(() => rmSync(dbFile, { force: true }))),
+		);
+	});
+
+	it.effect(
+		"recovers pending events before triage guards and idempotency checks",
+		() => {
+			const dbFile = join(
+				tmpdir(),
+				`conduit-triage-recovery-${crypto.randomUUID()}.sqlite`,
+			);
+			const layer = Layer.provideMerge(
+				SessionManagerServiceLive,
+				Layer.mergeAll(
+					Layer.succeed(OpenCodeAPITag, makeMockOpenCodeAPI()),
+					Layer.succeed(LoggerTag, makeMockLogger()),
+					makeSessionManagerStateLive(),
+					DaemonEventBusLive,
+					makePersistenceEffectLayer(dbFile),
+				),
+			);
+			return Effect.gen(function* () {
+				const store = yield* EventStoreEffectTag;
+				const service = yield* SessionManagerServiceTag;
+				for (const id of ["settled", "pinned"]) {
+					yield* store.append(
+						canonicalEvent(
+							"session.created",
+							id,
+							{ sessionId: id, title: id, provider: "opencode" },
+							{ provider: "opencode", createdAt: 10 },
+						),
+					);
+					yield* store.append(
+						canonicalEvent(
+							id === "settled" ? "session.settled" : "session.pinned",
+							id,
+							{ sessionId: id },
+							{ provider: "opencode", createdAt: 20 },
+						),
+					);
+				}
+				expect(yield* service.setSessionSettled("settled", true)).toBe(false);
+				expect(yield* store.readAllBySession("settled")).toHaveLength(2);
+				expect(yield* service.setSessionSettled("settled", false)).toBe(true);
+				const blocked = yield* Effect.either(
+					service.setSessionSettled("pinned", true),
+				);
+				expect(blocked._tag).toBe("Left");
+				expect(yield* store.readAllBySession("pinned")).toHaveLength(2);
+				expect(yield* service.setSessionPinned("pinned", false)).toBe(true);
+				expect(yield* service.setSessionSettled("pinned", true)).toBe(true);
+			}).pipe(
+				Effect.provide(Layer.fresh(layer)),
+				Effect.ensuring(Effect.sync(() => rmSync(dbFile, { force: true }))),
+			);
+		},
+	);
+
+	it.effect(
+		"persists idempotent triage commands without changing list order",
+		() => {
+			const dbFile = join(
+				tmpdir(),
+				`conduit-session-triage-${crypto.randomUUID()}.sqlite`,
+			);
+			const api = makeMockOpenCodeAPI();
+			const layer = Layer.provideMerge(
+				SessionManagerServiceLive,
+				Layer.mergeAll(
+					Layer.succeed(OpenCodeAPITag, api),
+					Layer.succeed(LoggerTag, makeMockLogger()),
+					makeSessionManagerStateLive(),
+					DaemonEventBusLive,
+					makePersistenceEffectLayer(dbFile),
+				),
+			);
+			return Effect.gen(function* () {
+				const store = yield* EventStoreEffectTag;
+				const runner = yield* ProjectionRunnerEffectTag;
+				const service = yield* SessionManagerServiceTag;
+				yield* runner.markRecovered();
+				for (const [id, createdAt] of [
+					["older", 10],
+					["newer", 20],
+				] as const) {
+					yield* runner.projectEvent(
+						yield* store.append(
+							canonicalEvent(
+								"session.created",
+								id,
+								{ sessionId: id, title: id, provider: "opencode" },
+								{ provider: "opencode", createdAt },
+							),
+						),
+					);
+				}
+				expect(yield* service.setSessionSettled("older", false)).toBe(false);
+				expect(yield* service.setSessionPinned("older", false)).toBe(false);
+				expect(
+					yield* Effect.all(
+						[
+							service.setSessionSettled("older", true),
+							service.setSessionSettled("older", true),
+						],
+						{ concurrency: "unbounded" },
+					),
+				).toEqual([true, false]);
+				const settled = (yield* service.listSessions()).find(
+					(s) => s.id === "older",
+				);
+				expect(settled?.settledAt).toEqual(expect.any(Number));
+				expect(yield* service.setSessionSettled("older", false)).toBe(true);
+				expect(yield* service.setSessionPinned("older", true)).toBe(true);
+				expect(yield* service.setSessionPinned("older", true)).toBe(false);
+				const blocked = yield* Effect.either(
+					service.setSessionSettled("older", true),
+				);
+				expect(blocked._tag).toBe("Left");
+				if (blocked._tag === "Left")
+					expect(String(blocked.left.cause)).toMatch(/pinned.*unpinned first/);
+				const pinned = (yield* service.listSessions()).find(
+					(s) => s.id === "older",
+				);
+				expect(pinned?.pinnedAt).toEqual(expect.any(Number));
+				expect(pinned).not.toHaveProperty("settledAt");
+				expect(yield* service.setSessionPinned("older", false)).toBe(true);
+				expect(yield* service.setSessionPinned("older", false)).toBe(false);
+				expect(yield* service.setSessionSettled("older", true)).toBe(true);
+				// Pinning a settled session un-settles it: a session is never both.
+				expect(yield* service.setSessionPinned("older", true)).toBe(true);
+				const repinned = (yield* service.listSessions()).find(
+					(s) => s.id === "older",
+				);
+				expect(repinned?.pinnedAt).toEqual(expect.any(Number));
+				expect(repinned).not.toHaveProperty("settledAt");
+				expect(yield* service.setSessionPinned("older", false)).toBe(true);
+				const sessions = yield* service.listSessions();
+				expect(sessions.map((s) => [s.id, s.updatedAt])).toEqual([
+					["newer", 20],
+					["older", 10],
+				]);
+				expect(sessions[1]).not.toHaveProperty("settledAt");
+				expect(sessions[1]).not.toHaveProperty("pinnedAt");
+				expect(
+					(yield* store.readAllBySession("older")).map((e) => e.type),
+				).toEqual([
+					"session.created",
+					"session.settled",
+					"session.unsettled",
+					"session.pinned",
+					"session.unpinned",
+					"session.settled",
+					"session.unsettled",
+					"session.pinned",
+					"session.unpinned",
+				]);
+				expect(api.session.update).not.toHaveBeenCalled();
+				expect(api.session.delete).not.toHaveBeenCalled();
+			}).pipe(
+				Effect.provide(Layer.fresh(layer)),
+				Effect.ensuring(Effect.sync(() => rmSync(dbFile, { force: true }))),
+			);
+		},
+	);
+
+	it.effect("lists durable unread state from real projected events", () => {
+		const dbFile = join(
+			tmpdir(),
+			`conduit-session-manager-unread-${Date.now()}.sqlite`,
+		);
+		const layer = Layer.provideMerge(
+			SessionManagerServiceLive,
+			Layer.mergeAll(
+				Layer.succeed(OpenCodeAPITag, makeMockOpenCodeAPI()),
+				Layer.succeed(LoggerTag, makeMockLogger()),
+				makeSessionManagerStateLive(),
+				DaemonEventBusLive,
+				makePersistenceEffectLayer(dbFile),
+			),
+		);
+
+		return Effect.gen(function* () {
+			const store = yield* EventStoreEffectTag;
+			const projectionRunner = yield* ProjectionRunnerEffectTag;
+			const service = yield* SessionManagerServiceTag;
+			yield* projectionRunner.markRecovered();
+
+			for (const event of [
+				canonicalEvent(
+					"session.created",
+					"session-1",
+					{
+						sessionId: "session-1",
+						title: "Durable unread",
+						provider: "opencode",
+					},
+					{ provider: "opencode", createdAt: 10 },
+				),
+				canonicalEvent(
+					"message.created",
+					"session-1",
+					{
+						messageId: "message-1",
+						role: "assistant",
+						sessionId: "session-1",
+					},
+					{ provider: "opencode", createdAt: 20 },
+				),
+			]) {
+				const stored = yield* store.append(event);
+				yield* projectionRunner.projectEvent(stored);
+			}
+			expect((yield* service.listSessions())[0]?.unread).toBe(true);
+
+			yield* service.markSessionRead("session-1");
+			expect((yield* service.listSessions())[0]).not.toHaveProperty("unread");
+
+			yield* service.markSessionUnread("session-1");
+			expect((yield* service.listSessions())[0]?.unread).toBe(true);
+		}).pipe(
+			Effect.provide(Layer.fresh(layer)),
+			Effect.ensuring(Effect.sync(() => rmSync(dbFile, { force: true }))),
+		);
+	});
+
+	it.effect("reads projected pending counts", () => {
+		const readQuery = makeReadQueryEffect(
+			[makeRow("session-1")],
+			[
+				{
+					session_id: "session-1",
+					type: "question",
+					pending_count: 1,
+				},
+			],
+		);
+		const layer = Layer.mergeAll(
+			Layer.succeed(OpenCodeAPITag, makeMockOpenCodeAPI()),
+			Layer.succeed(ReadQueryEffectTag, readQuery),
+			makeSessionManagerStateLive(),
+		);
+
+		return Effect.gen(function* () {
+			const sessions = yield* listSessions();
+
+			expect(sessions[0]?.pendingQuestionCount).toBe(1);
 		}).pipe(Effect.provide(layer));
 	});
 
@@ -2330,157 +2750,123 @@ describe("SessionManagerService", () => {
 		}).pipe(Effect.provide(layer));
 	});
 
-	it.effect(
-		"sends roots immediately and all sessions in the background",
-		() => {
-			const api = makeMockOpenCodeAPI();
-			let resolveAllSessions!: (
-				value: Awaited<ReturnType<typeof api.session.list>>,
-			) => void;
-			const allSessions = new Promise<
-				Awaited<ReturnType<typeof api.session.list>>
-			>((resolve) => {
-				resolveAllSessions = resolve;
-			});
-			vi.spyOn(api.session, "list").mockImplementation(async (options) => {
-				if (options?.roots) {
-					return [
-						{
-							id: "root-1",
-							projectID: "project-1",
-							directory: "/tmp/project",
-							title: "Root",
-							version: "1.0.0",
-							time: { created: 1, updated: 1 },
-						},
-					];
-				}
-				return allSessions;
-			});
-			const logger = makeMockLogger();
-			const messages: unknown[] = [];
-			const layer = Layer.mergeAll(
-				Layer.succeed(OpenCodeAPITag, api),
-				Layer.succeed(LoggerTag, logger),
-				makeSessionManagerStateLive(),
-			);
-
-			return Effect.gen(function* () {
-				yield* sendDualSessionLists((msg) => messages.push(msg));
-				expect(messages).toEqual([
+	it.effect("sends only roots without requesting the all-session list", () => {
+		const api = makeMockOpenCodeAPI();
+		const list = vi
+			.spyOn(api.session, "list")
+			.mockImplementation(async (options) => {
+				if (!options?.roots)
+					throw new Error("unfiltered list must not be fetched");
+				return [
 					{
-						type: "session_list",
-						sessions: [
-							{
-								id: "root-1",
-								title: "Root",
-								updatedAt: 1,
-								status: "idle",
-							},
-						],
-						roots: true,
-					},
-				]);
-
-				resolveAllSessions([
-					{
-						id: "child-1",
+						id: "root-1",
 						projectID: "project-1",
 						directory: "/tmp/project",
-						title: "Child",
+						title: "Root",
 						version: "1.0.0",
-						parentID: "root-1",
-						time: { created: 2, updated: 2 },
+						time: { created: 1, updated: 1 },
 					},
-				]);
-				yield* Effect.promise(
-					() => new Promise((resolve) => setTimeout(resolve, 0)),
-				);
-				expect(messages).toEqual([
-					{
-						type: "session_list",
-						sessions: [
-							{
-								id: "root-1",
-								title: "Root",
-								updatedAt: 1,
-								status: "idle",
-							},
-						],
-						roots: true,
-					},
-					{
-						type: "session_list",
-						sessions: [
-							{
-								id: "child-1",
-								title: "Child",
-								updatedAt: 2,
-								status: "idle",
-								parentID: "root-1",
-							},
-						],
-						roots: false,
-					},
-				]);
-				expect(logger.warn).not.toHaveBeenCalled();
-			}).pipe(Effect.provide(layer));
-		},
-	);
+				];
+			});
+		const messages: unknown[] = [];
+		const layer = Layer.mergeAll(
+			Layer.succeed(OpenCodeAPITag, api),
+			Layer.succeed(LoggerTag, makeMockLogger()),
+			makeSessionManagerStateLive(),
+		);
+		return Effect.gen(function* () {
+			yield* sendSessionLists((msg) => messages.push(msg));
+			expect(messages).toEqual([
+				{
+					type: "session_list",
+					roots: true,
+					sessions: [
+						{ id: "root-1", title: "Root", status: "idle", updatedAt: 1 },
+					],
+				},
+			]);
+			expect(list).toHaveBeenCalledTimes(1);
+			expect(list).toHaveBeenCalledWith({ roots: true });
+		}).pipe(Effect.provide(layer));
+	});
 
 	it.effect(
-		"logs background all-session failures without failing roots",
+		"refreshes lineage and sends one family query to its viewers",
 		() => {
-			const api = makeMockOpenCodeAPI();
-			vi.spyOn(api.session, "list").mockImplementation(async (options) => {
-				if (options?.roots) {
-					return [
-						{
-							id: "root-1",
-							projectID: "project-1",
-							directory: "/tmp/project",
-							title: "Root",
-							version: "1.0.0",
-							time: { created: 1, updated: 1 },
-						},
-					];
-				}
-				throw new Error("all sessions unavailable");
-			});
-			const logger = makeMockLogger();
-			const messages: unknown[] = [];
-			const layer = Layer.mergeAll(
-				Layer.succeed(OpenCodeAPITag, api),
-				Layer.succeed(LoggerTag, logger),
-				makeSessionManagerStateLive(),
+			const rows = [
+				makeRow("root"),
+				makeRow("child", { parent_id: "root" }),
+				makeRow("grandchild", { parent_id: "child", status: "busy" }),
+			];
+			const readQuery = makeReadQueryEffect(rows);
+			vi.mocked(readQuery.listSessions).mockReturnValue(
+				Effect.succeed([makeRow("root")]),
 			);
-
+			const ws = makeMockWebSocketHandler({
+				getClientIds: vi.fn(() => ["root-viewer", "child-viewer"]),
+				getClientSession: vi.fn((id) =>
+					id === "root-viewer" ? "root" : "grandchild",
+				),
+			});
+			const layer = Layer.mergeAll(
+				Layer.succeed(OpenCodeAPITag, makeMockOpenCodeAPI()),
+				Layer.succeed(ReadQueryEffectTag, readQuery),
+				Layer.succeed(WebSocketHandlerTag, ws),
+				Layer.succeed(
+					StatusPollerTag,
+					makeMockStatusPoller({
+						getCurrentStatuses: vi.fn(() =>
+							Effect.succeed({
+								root: { type: "busy" as const },
+								child: { type: "busy" as const },
+								grandchild: { type: "busy" as const },
+							}),
+						),
+					}),
+				),
+				Layer.succeed(LoggerTag, makeMockLogger()),
+				makeSessionManagerStateLive(),
+				DaemonEventBusLive,
+				RelayStatusSnapshotLive,
+			);
 			return Effect.gen(function* () {
-				yield* sendDualSessionLists((msg) => messages.push(msg));
-				expect(messages).toEqual([
-					{
-						type: "session_list",
-						sessions: [
-							{
-								id: "root-1",
-								title: "Root",
-								updatedAt: 1,
-								status: "idle",
-							},
-						],
-						roots: true,
-					},
-				]);
-
-				yield* Effect.yieldNow();
-				yield* TestClock.adjust("4 seconds");
-				yield* Effect.yieldNow();
-
-				expect(logger.warn).toHaveBeenCalledWith(
-					expect.stringContaining("Background all-sessions fetch failed:"),
+				const service = yield* SessionManagerServiceTag;
+				const send = vi.fn();
+				yield* service.sendSessionLists(send);
+				expect(readQuery.listSessionInfos).toHaveBeenCalledWith(
+					expect.objectContaining({ roots: true }),
 				);
-				expect(messages).toHaveLength(1);
-			}).pipe(Effect.provide(layer));
+				expect(readQuery.getSessionLineage).toHaveBeenCalledTimes(1);
+				expect(readQuery.getSessionFamily).toHaveBeenCalledTimes(1);
+				expect(readQuery.getSessionFamily).toHaveBeenCalledWith("root");
+				expect(send).toHaveBeenCalledTimes(1);
+				expect(send).toHaveBeenCalledWith(
+					expect.objectContaining({ type: "session_list", roots: true }),
+				);
+				for (const client of ["root-viewer", "child-viewer"]) {
+					expect(ws.sendTo).toHaveBeenCalledWith(
+						client,
+						expect.objectContaining({
+							type: "session_family",
+							rootId: "root",
+							sessions: expect.arrayContaining([
+								expect.objectContaining({
+									id: "grandchild",
+									parentID: "child",
+									processing: true,
+								}),
+								expect.objectContaining({ id: "root", attention: "idle" }),
+								expect.objectContaining({ id: "child", attention: "idle" }),
+							]),
+						}),
+					);
+				}
+				const state = yield* Ref.get(yield* SessionManagerStateTag);
+				expect(state.lastKnownSessionCount).toBe(3);
+				expect(HashMap.get(state.cachedParentMap, "grandchild")).toEqual(
+					Option.some("child"),
+				);
+			}).pipe(Effect.provide(SessionManagerServiceLive), Effect.provide(layer));
 		},
 	);
 
@@ -2533,4 +2919,111 @@ describe("SessionManagerService", () => {
 			]);
 		}).pipe(Effect.provide(layer));
 	});
+});
+
+describe("snooze session commands", () => {
+	function makeLayer() {
+		const dbFile = join(
+			tmpdir(),
+			`conduit-snooze-${crypto.randomUUID()}.sqlite`,
+		);
+		return {
+			dbFile,
+			layer: Layer.provideMerge(
+				SessionManagerServiceLive,
+				Layer.mergeAll(
+					Layer.succeed(OpenCodeAPITag, makeMockOpenCodeAPI()),
+					Layer.succeed(LoggerTag, makeMockLogger()),
+					makeSessionManagerStateLive(),
+					DaemonEventBusLive,
+					makePersistenceEffectLayer(dbFile),
+				),
+			),
+		};
+	}
+
+	for (const [reason, expected] of [
+		["pinned", /unpin.*first/i],
+		["settled", /un-settle.*first/i],
+		["permission", /waiting on you/i],
+		["question", /waiting on you/i],
+		["past", /future/i],
+	] as const) {
+		it.effect(`refuses ${reason} without emitting an event`, () => {
+			const { dbFile, layer } = makeLayer();
+			return Effect.gen(function* () {
+				const sql = yield* SqlClient.SqlClient;
+				const store = yield* EventStoreEffectTag;
+				const service = yield* SessionManagerServiceTag;
+				yield* sql`INSERT INTO sessions (id, provider, title, status, created_at, updated_at) VALUES ('s1', 'opencode', 'Session', 'idle', 1, 1)`;
+				if (reason === "pinned")
+					yield* sql`UPDATE sessions SET pinned_at = 2 WHERE id = 's1'`;
+				if (reason === "settled")
+					yield* sql`UPDATE sessions SET settled_at = 2 WHERE id = 's1'`;
+				if (reason === "permission" || reason === "question") {
+					yield* sql`INSERT INTO pending_approvals (id, session_id, type, created_at) VALUES ('a1', 's1', ${reason}, 2)`;
+				}
+				const result = yield* Effect.either(
+					service.snoozeSession(
+						"s1",
+						reason === "past" ? Date.now() - 1 : null,
+					),
+				);
+				expect(result._tag).toBe("Left");
+				if (result._tag === "Left")
+					expect(String(result.left.cause)).toMatch(expected);
+				expect(yield* store.readAllBySession("s1")).toEqual([]);
+			}).pipe(
+				Effect.provide(Layer.fresh(layer)),
+				Effect.ensuring(Effect.sync(() => rmSync(dbFile, { force: true }))),
+			);
+		});
+	}
+
+	it.effect("emits only on a new snooze value and an active unsnooze", () => {
+		const { dbFile, layer } = makeLayer();
+		return Effect.gen(function* () {
+			const sql = yield* SqlClient.SqlClient;
+			const store = yield* EventStoreEffectTag;
+			const service = yield* SessionManagerServiceTag;
+			yield* sql`INSERT INTO sessions (id, provider, title, status, created_at, updated_at) VALUES ('s1', 'opencode', 'Session', 'idle', 1, 1)`;
+			const firstUntil = Date.now() + 60_000;
+			expect(yield* service.snoozeSession("s1", firstUntil)).toBe(true);
+			expect(yield* service.snoozeSession("s1", firstUntil)).toBe(false);
+			expect(yield* service.snoozeSession("s1", null)).toBe(true);
+			expect(yield* service.unsnoozeSession("s1")).toBe(true);
+			expect(yield* service.unsnoozeSession("s1")).toBe(false);
+			expect(
+				(yield* store.readAllBySession("s1")).map((event) => event.type),
+			).toEqual(["session.snoozed", "session.snoozed", "session.unsnoozed"]);
+		}).pipe(
+			Effect.provide(Layer.fresh(layer)),
+			Effect.ensuring(Effect.sync(() => rmSync(dbFile, { force: true }))),
+		);
+	});
+
+	for (const action of ["settle", "pin"] as const) {
+		it.effect(`${action} emits unsnoozed before its own event`, () => {
+			const { dbFile, layer } = makeLayer();
+			return Effect.gen(function* () {
+				const sql = yield* SqlClient.SqlClient;
+				const store = yield* EventStoreEffectTag;
+				const service = yield* SessionManagerServiceTag;
+				yield* sql`INSERT INTO sessions (id, provider, title, status, created_at, updated_at) VALUES ('s1', 'opencode', 'Session', 'idle', 1, 1)`;
+				yield* service.snoozeSession("s1", null);
+				if (action === "settle") yield* service.setSessionSettled("s1", true);
+				else yield* service.setSessionPinned("s1", true);
+				expect(
+					(yield* store.readAllBySession("s1")).map((event) => event.type),
+				).toEqual([
+					"session.snoozed",
+					"session.unsnoozed",
+					action === "settle" ? "session.settled" : "session.pinned",
+				]);
+			}).pipe(
+				Effect.provide(Layer.fresh(layer)),
+				Effect.ensuring(Effect.sync(() => rmSync(dbFile, { force: true }))),
+			);
+		});
+	}
 });

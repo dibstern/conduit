@@ -33,26 +33,28 @@ export const wireRelayWebSocketCallbacksEffect = ({
 			const runFork = Runtime.runFork(runtime);
 			let relayCommandSequence = 0;
 
-			wsHandler.on("client_connected", ({ clientId, requestedSessionId }) => {
-				log.info(
-					`Client connected: ${clientId}${requestedSessionId ? ` (requested session: ${requestedSessionId})` : ""}`,
-				);
-				runFork(
-					handleClientConnectedEffect(
-						clientId,
-						requestedSessionId,
-						clientInitOptions,
-					).pipe(
-						Effect.catchAllCause((cause) =>
-							Effect.sync(() =>
-								log.error(
-									`Client init failed for ${clientId}: ${Cause.pretty(cause)}`,
+			wsHandler.on(
+				"client_connected",
+				({ clientId, requestedSessionId, skipDefaultSession }) => {
+					log.info(
+						`Client connected: ${clientId}${requestedSessionId ? ` (requested session: ${requestedSessionId})` : ""}`,
+					);
+					runFork(
+						handleClientConnectedEffect(clientId, requestedSessionId, {
+							...clientInitOptions,
+							...(skipDefaultSession != null && { skipDefaultSession }),
+						}).pipe(
+							Effect.catchAllCause((cause) =>
+								Effect.sync(() =>
+									log.error(
+										`Client init failed for ${clientId}: ${Cause.pretty(cause)}`,
+									),
 								),
 							),
 						),
-					),
-				);
-			});
+					);
+				},
+			);
 
 			wsHandler.on("client_disconnected", ({ clientId }) => {
 				runFork(

@@ -7,6 +7,7 @@ import type { RelayMessage } from "../shared-types.js";
 // Extracted from skeleton.ts so integration tests exercise the exact same
 // wiring as production. skeleton.ts is now a thin CLI wrapper around this.
 
+import { randomBytes } from "node:crypto";
 import { existsSync } from "node:fs";
 import { stat } from "node:fs/promises";
 import {
@@ -20,9 +21,19 @@ import { homedir, networkInterfaces } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { SqlClient } from "@effect/sql";
-import { Cause, Context, Data, Effect, Layer, ManagedRuntime } from "effect";
+import {
+	Cause,
+	Context,
+	Data,
+	Effect,
+	Exit,
+	Layer,
+	ManagedRuntime,
+} from "effect";
+import { WebSocketServer } from "ws";
 import { AuthManager } from "../auth.js";
 import { defaultInstanceIdForDriver } from "../contracts/provider-instance.js";
+import { WsRpcError } from "../contracts/ws-rpc.js";
 import { makeMessagePollerManagerLive } from "../domain/relay/Layers/message-poller-manager-layer.js";
 import { makePtyRuntimeLive } from "../domain/relay/Layers/pty-manager-layer.js";
 import {
@@ -31,6 +42,7 @@ import {
 	ProjectRelayLoggerLive,
 } from "../domain/relay/Layers/relay-core-layers.js";
 import { RelayStateLive } from "../domain/relay/Layers/relay-layer.js";
+import { makeSessionStateProjectionNotifierLive } from "../domain/relay/Layers/session-state-projection-notifier-layer.js";
 import { StatusPollerLive } from "../domain/relay/Layers/status-poller-layer.js";
 import { WebSocketHandlerLive } from "../domain/relay/Layers/websocket-handler-layer.js";
 import { makeWsTransportLive } from "../domain/relay/Layers/ws-transport-layer.js";
@@ -39,6 +51,7 @@ import {
 	AlertLedgerLive,
 	AlertLedgerTag,
 } from "../domain/relay/Services/alert-ledger.js";
+import { DaemonSessionQueryServiceLive } from "../domain/relay/Services/daemon-session-query-service.js";
 import { DirectoryListingServiceLive } from "../domain/relay/Services/directory-listing-service.js";
 import {
 	hasInstanceManagementConfig,
@@ -123,12 +136,15 @@ import {
 } from "../provider/orchestration-wiring.js";
 import { getClientIp, parseCookies } from "../server/http-utils.js";
 import type { PushNotificationSender } from "../server/push.js";
-import { loadThemeFiles } from "../server/theme-loader.js";
 import type { WebSocketHandlerShape } from "../server/ws-handler-shape.js";
 import {
+	makeRoutedWsRpcWebSocketHandler,
 	makeWsRpcWebSocketHandler,
+	RoutedWsRpcWebSocketHandlerTag,
 	type RpcWebSocketHandlerShape,
 } from "../server/ws-rpc-handler.js";
+import { settleIdleSessions } from "../session/auto-settle-sweep.js";
+import { makeSessionBackgroundLiveness } from "../session/background-liveness.js";
 import type { ConnectionHealth, ProjectRelayConfig } from "../types.js";
 import { generateSlug } from "../utils.js";
 
@@ -312,10 +328,8 @@ export class EffectRelayServer {
 			auth: this.auth,
 			staticDir: this.staticDir,
 			getProjects,
-			removeProject: (slug) => this.removeProject(slug),
 			getPort: () => this.actualPort,
 			getIsTls: () => this.protocol === "https",
-			loadThemes: loadThemeFiles,
 			pushManager: this.options.pushManager,
 			caRootPath: this.options.tls?.caRoot,
 		});
@@ -397,6 +411,10 @@ export const publishProviderRelayMessage = (
 	});
 
 export interface ProjectRelay {
+	settleIdleSessions(
+		idleWindowMs: number,
+		now: number,
+	): Effect.Effect<number, unknown>;
 	wsHandler: WebSocketHandlerShape;
 	rpcWsHandler: RpcWebSocketHandlerShape;
 	sseStream: SSEStreamPort;
@@ -664,6 +682,7 @@ export async function createProjectRelay(
 	config: ProjectRelayConfig,
 ): Promise<ProjectRelay> {
 	const log = config.log ?? createLogger("relay");
+	const backgroundLiveness = makeSessionBackgroundLiveness();
 	const wsLog = log.child("ws");
 	const sseLog = log.child("sse");
 	const statusLog = log.child("status-poller");
@@ -674,10 +693,8 @@ export async function createProjectRelay(
 
 	// ── Orchestration runtime layer (provider instance routing) ─────────────
 	const orchestrationRuntimeLayer = makeOrchestrationRuntimeLayer({
+		onBackgroundTask: backgroundLiveness.record,
 		...(config.projectDir != null && { workspaceRoot: config.projectDir }),
-		...(config.persistenceDbPath != null
-			? { persistenceDbPath: config.persistenceDbPath }
-			: {}),
 		...(config.slug != null ? { projectKey: config.slug } : {}),
 		...(config.configDir != null ? { configDir: config.configDir } : {}),
 	});
@@ -780,7 +797,9 @@ export async function createProjectRelay(
 	// The orchestration engine's side-effect reactor consumes the SAME
 	// ProviderRuntimeIngestion instance the relay uses (Effect memoizes the shared
 	// layer reference), so committed provider side effects stream through one
-	// ingestion pipeline — no duplicate event append.
+	// ingestion pipeline — no duplicate event append. Likewise the shared
+	// persistenceEffectLayer reference gives orchestration (session bindings,
+	// durable command receipts) the relay's one SqlClient connection.
 	const providerOrchestrationDeps =
 		persistenceEffectLayer != null && providerRuntimeIngestionLayer != null
 			? Layer.mergeAll(
@@ -807,6 +826,9 @@ export async function createProjectRelay(
 	);
 	const projectManagementServiceLayer = ProjectManagementServiceLive.pipe(
 		Layer.provide(Layer.mergeAll(configLayer, openCodeSettingsServiceLayer)),
+	);
+	const daemonSessionQueryServiceLayer = DaemonSessionQueryServiceLive.pipe(
+		Layer.provide(configLayer),
 	);
 	const scanServiceLayer = ScanServiceLive.pipe(Layer.provide(configLayer));
 	const webSocketHandlerLayer = WebSocketHandlerLive.pipe(
@@ -859,6 +881,7 @@ export async function createProjectRelay(
 		openCodeSettingsServiceLayer,
 		sseStreamLayer,
 		projectManagementServiceLayer,
+		daemonSessionQueryServiceLayer,
 		DirectoryListingServiceLive,
 		scanServiceLayer,
 		openCodeTerminalServiceLayer,
@@ -912,9 +935,19 @@ export async function createProjectRelay(
 		translatorLayer,
 		relayStateServicesAndBridges,
 	);
+	const baseLayersWithProjectionNotifier = Layer.provideMerge(
+		makeSessionStateProjectionNotifierLive(async () => {
+			await config.refreshSessionGit?.();
+			await config.broadcastSessionListChanged?.();
+		}),
+		baseLayers,
+	);
 	const fullBaseLayers = Layer.provideMerge(
 		ProviderTurnServiceLive,
-		Layer.merge(baseLayers, makeWsTransportLive({ noServer: true })),
+		Layer.merge(
+			baseLayersWithProjectionNotifier,
+			makeWsTransportLive({ noServer: true }),
+		),
 	);
 
 	const effectRuntime: RelayRuntime = {
@@ -950,6 +983,8 @@ export async function createProjectRelay(
 	relayManagedRuntime = ManagedRuntime.make(fullLayer);
 	let stopMonitoring = () => {};
 	let startup: {
+		sql: SqlClient.SqlClient | undefined;
+		sessionManagerService: typeof SessionManagerServiceTag.Service;
 		api: OpenCodeAPI;
 		wsHandler: WebSocketHandlerShape;
 		rpcWsHandler: RpcWebSocketHandlerShape;
@@ -967,6 +1002,7 @@ export async function createProjectRelay(
 		// The startup Effect owns relay acquisition, wiring, and readiness.
 		startup = await relayManagedRuntime.runPromise(
 			Effect.gen(function* () {
+				const sql = yield* Effect.serviceOption(SqlClient.SqlClient);
 				const api = yield* OpenCodeAPITag;
 				const translator = yield* TranslatorTag;
 				const wsHandler = yield* WebSocketHandlerTag;
@@ -1228,6 +1264,8 @@ export async function createProjectRelay(
 				const gate = yield* RelayCommandGateTag;
 				yield* gate.markReady();
 				return {
+					sql: sql._tag === "Some" ? sql.value : undefined,
+					sessionManagerService,
 					api,
 					wsHandler,
 					rpcWsHandler,
@@ -1270,6 +1308,23 @@ export async function createProjectRelay(
 	};
 
 	return {
+		settleIdleSessions: (idleWindowMs, now) =>
+			startup.sql === undefined
+				? Effect.succeed(0)
+				: settleIdleSessions(
+						{
+							hasViewer: (id) => wsHandler.getClientsForSession(id).length > 0,
+							hasLiveBackgroundWork: backgroundLiveness.hasLiveWork,
+							setSettled: (id) =>
+								startup.sessionManagerService.setSessionSettled(id, true, true),
+							broadcastSessionList: () =>
+								startup.sessionManagerService.sendSessionLists((msg) =>
+									wsHandler.broadcast(msg),
+								),
+						},
+						idleWindowMs,
+						now,
+					).pipe(Effect.provideService(SqlClient.SqlClient, startup.sql)),
 		wsHandler,
 		rpcWsHandler,
 		sseStream,
@@ -1360,8 +1415,7 @@ export async function createRelayStack(
 	const httpServer = maybeServer;
 
 	// ── Multi-project relay management ──────────────────────────────────────
-	// All relays use noServer mode. A single upgrade handler routes WebSocket
-	// connections to the correct relay by URL path (/ws → initial, /p/{slug}/ws → project).
+	// The server owns browser upgrades and attaches /ws sockets to the initial relay.
 	// This matches the daemon pattern and allows dynamic project addition.
 
 	const relays = new Map<string, ProjectRelay>();
@@ -1495,11 +1549,41 @@ export async function createRelayStack(
 	});
 
 	// ── WebSocket upgrade handler ───────────────────────────────────────────
-	// Routes connections by URL: /p/{slug}/ws → project relay, /p/{slug}/rpc
-	// → project RPC, /ws → initial relay, /rpc → initial RPC.
+	// Owns /ws upgrades and attaches sockets to the initial relay.
+	// /rpc uses per-request project routing.
 	// Also checks auth when a PIN is configured (fixes pre-existing gap where
 	// standalone WS connections bypassed PIN auth).
 
+	const rpcRuntime = ManagedRuntime.make(
+		Layer.scoped(
+			RoutedWsRpcWebSocketHandlerTag,
+			makeRoutedWsRpcWebSocketHandler(
+				(slug) =>
+					Effect.suspend(() => {
+						const context = relays.get(slug)?.rpcWsHandler.context;
+						const unavailable = () =>
+							new WsRpcError({ message: `Project "${slug}" unavailable` });
+						return context
+							? context.pipe(
+									Effect.mapError(unavailable),
+									Effect.catchAllDefect(() => Effect.fail(unavailable())),
+								)
+							: Effect.fail(unavailable());
+					}),
+				undefined,
+				config.slug,
+			),
+		),
+	);
+
+	const wss = new WebSocketServer({
+		noServer: true,
+		maxPayload: 50 * 1024 * 1024,
+		perMessageDeflate: {
+			serverMaxWindowBits: 10,
+			zlibDeflateOptions: { level: 1 },
+		},
+	});
 	httpServer.on("upgrade", (req, socket, head) => {
 		// Auth check (mirrors server.ts private checkAuth)
 		const auth = server.getAuth();
@@ -1521,30 +1605,37 @@ export async function createRelayStack(
 			}
 		}
 
-		// Route /p/{slug}/ws or /p/{slug}/rpc → project relay endpoint
-		const projectMatch = req.url?.match(/^\/p\/([^/]+)\/(ws|rpc)(?:\?|$)/);
-		if (projectMatch) {
-			// biome-ignore lint/style/noNonNullAssertion: safe — regex match guarantees capture group
-			const target = relays.get(projectMatch[1]!);
-			if (target) {
-				if (projectMatch[2] === "rpc") {
-					target.rpcWsHandler.handleUpgrade(req, socket, head);
-				} else {
-					target.wsHandler.handleUpgrade(req, socket, head);
-				}
-			} else {
-				socket.destroy();
-			}
-			return;
-		}
-
 		// Route /ws → initial relay
 		if (req.url === "/ws" || req.url?.startsWith("/ws?")) {
-			relay.wsHandler.handleUpgrade(req, socket, head);
+			wss.handleUpgrade(req, socket, head, (ws) => {
+				const params = new URL(req.url ?? "/ws", "http://localhost")
+					.searchParams;
+				const requestedClientId = params.get("client") ?? "";
+				const clientId = /^[A-Za-z0-9._:-]{1,128}$/.test(requestedClientId)
+					? requestedClientId
+					: randomBytes(8).toString("hex");
+				const requestedSessionId = params.get("session") || undefined;
+				ws.send(
+					JSON.stringify({ type: "project_attached", slug: config.slug }),
+				);
+				relay.wsHandler.attach(ws, {
+					clientId,
+					...(requestedSessionId != null && { requestedSessionId }),
+				});
+			});
 			return;
 		}
 		if (req.url === "/rpc" || req.url?.startsWith("/rpc?")) {
-			relay.rpcWsHandler.handleUpgrade(req, socket, head);
+			rpcRuntime
+				.runFork(
+					Effect.gen(function* () {
+						const handler = yield* RoutedWsRpcWebSocketHandlerTag;
+						handler.handleUpgrade(req, socket, head);
+					}),
+				)
+				.addObserver((exit) => {
+					if (Exit.isFailure(exit) && !socket.destroyed) socket.destroy();
+				});
 			return;
 		}
 
@@ -1578,6 +1669,7 @@ export async function createRelayStack(
 		},
 
 		async stop() {
+			await rpcRuntime.dispose();
 			for (const r of relays.values()) {
 				try {
 					await r.stop();
@@ -1589,6 +1681,8 @@ export async function createRelayStack(
 				}
 			}
 			relays.clear();
+			for (const ws of wss.clients) ws.terminate();
+			await new Promise<void>((resolve) => wss.close(() => resolve()));
 			await server.stop();
 		},
 	};

@@ -15,7 +15,7 @@ describe("WsRpcServerLayer RenameSession", () => {
 		const { wsHandler, calls } = makeRecordingWebSocketHandler();
 		const sessionManagerService = makeMockSessionManagerService({
 			renameSession: vi.fn(() => Effect.void),
-			sendDualSessionLists: vi.fn((send) =>
+			sendSessionLists: vi.fn((send) =>
 				Effect.sync(() => {
 					send({
 						type: "session_list",
@@ -28,19 +28,6 @@ describe("WsRpcServerLayer RenameSession", () => {
 							},
 						],
 						roots: true,
-					});
-					send({
-						type: "session_list",
-						sessions: [
-							{
-								id: "child-1",
-								title: "Child Session",
-								updatedAt: 200,
-								messageCount: 4,
-								parentID: "root-1",
-							},
-						],
-						roots: false,
 					});
 				}),
 			),
@@ -74,18 +61,67 @@ describe("WsRpcServerLayer RenameSession", () => {
 					],
 					roots: true,
 				},
+			]);
+		}).pipe(
+			Effect.scoped,
+			Effect.provide(
+				WsRpcServerLayer.pipe(
+					Layer.provideMerge(
+						makeTestHandlerLayer({ wsHandler, sessionManagerService }),
+					),
+				),
+			),
+		);
+	});
+
+	it.effect("marks a session unread and broadcasts refreshed lists", () => {
+		const { wsHandler, calls } = makeRecordingWebSocketHandler();
+		const sessionManagerService = makeMockSessionManagerService({
+			markSessionUnread: vi.fn(() => Effect.void),
+			sendSessionLists: vi.fn((send) =>
+				Effect.sync(() =>
+					send({
+						type: "session_list",
+						sessions: [
+							{
+								id: "root-1",
+								title: "Unread Root",
+								updatedAt: 100,
+								messageCount: 2,
+								unread: true,
+							},
+						],
+						roots: true,
+					}),
+				),
+			),
+		});
+
+		return Effect.gen(function* () {
+			const client = yield* RpcTest.makeClient(WsRpcGroup);
+			const result = yield* client.MarkSessionUnread({
+				projectSlug: "project-a",
+				sessionId: "root-1",
+				originId: "browser-1",
+			});
+
+			expect(result).toEqual({ ok: true });
+			expect(sessionManagerService.markSessionUnread).toHaveBeenCalledWith(
+				"root-1",
+			);
+			expect(calls.map((call) => call.message)).toEqual([
 				{
 					type: "session_list",
 					sessions: [
 						{
-							id: "child-1",
-							title: "Child Session",
-							updatedAt: 200,
-							messageCount: 4,
-							parentID: "root-1",
+							id: "root-1",
+							title: "Unread Root",
+							updatedAt: 100,
+							messageCount: 2,
+							unread: true,
 						},
 					],
-					roots: false,
+					roots: true,
 				},
 			]);
 		}).pipe(

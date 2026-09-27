@@ -13,6 +13,7 @@ import {
 	addUserMessage,
 	chatState,
 	clearMessages,
+	handleCompaction,
 	handleDelta,
 	handleDone,
 	handleError,
@@ -42,6 +43,12 @@ import type {
 	ToolMessage,
 	UserMessage as UserMsg,
 } from "../../../src/lib/frontend/types.js";
+import { segmentTurns } from "../../../src/lib/frontend/utils/turns.js";
+import type { StoredEvent } from "../../../src/lib/persistence/events.js";
+import { translateDomainEventToRelay } from "../../../src/lib/relay/domain-event-to-relay.js";
+import resumedTurnEvents from "../../fixtures/claude-resumed-turn.json" with {
+	type: "json",
+};
 import { testActivity, testMessages } from "../../helpers/test-session-slot.js";
 
 // ─── Per-session tiers for handler calls ────────────────────────────────────
@@ -69,6 +76,80 @@ beforeEach(() => {
 
 afterEach(() => {
 	vi.useRealTimers();
+});
+
+// Whether the turn reads as live, and how many segments it has, after each
+// recorded event. A result closes a segment; the next visible part opens a
+// fresh one and the turn is live again. The false rows right after a result
+// are not the bug: work has resumed but has produced nothing to show yet.
+const EXPECTED_TRANSCRIPT: [live: boolean, segments: number][] = [
+	[true, 1], // 1. the user prompt opens the turn
+	[true, 1], // 2. the session goes busy
+	[true, 1], // 3. the first assistant message, nothing rendered yet
+	[false, 1], // 4. a result arrives, but Claude is not done
+	[false, 1], // 5. idle
+	[false, 1], // 6. busy again, 68ms later
+	[false, 1], // 7. a second assistant message, still nothing to show
+	[true, 2], // 8. thinking opens a fresh segment: live again
+	[true, 2], // 9. a tool starts
+	[true, 2], // 10. the tool finishes
+	[false, 2], // 11. the second execution reports its own result
+	[false, 2], // 12. a third assistant message, 15 minutes later
+	[true, 3], // 13. a tool starts 45 minutes after the first "completion"
+];
+
+it("keeps one production turn live when Claude resumes after successive results", () => {
+	const sessionId = "ses_c2d8cd521bc14f9f8f7700096bbf1d23";
+	for (const [index, recorded] of resumedTurnEvents.entries()) {
+		const event = {
+			...recorded,
+			eventId: `recorded-${recorded.sequence}`,
+			sessionId,
+			streamVersion: index,
+			metadata: {},
+		} as StoredEvent;
+		vi.setSystemTime(event.createdAt);
+		if (event.type === "message.created" && event.data.role === "user") {
+			// The prompt is already in the UI when sending; its text is not exported.
+			addUserMessage(ta, tm, "");
+		}
+		const translated = translateDomainEventToRelay(event);
+		if (translated.kind === "emit") {
+			for (const message of translated.messages) {
+				const relay = { ...message, sessionId } as RelayMessage;
+				switch (relay.type) {
+					case "thinking_start":
+						handleThinkingStart(ta, tm, relay);
+						break;
+					case "tool_start":
+						handleToolStart(ta, tm, relay);
+						break;
+					case "tool_executing":
+						handleToolExecuting(ta, tm, relay);
+						break;
+					case "tool_result":
+						handleToolResult(ta, tm, relay);
+						break;
+					case "result":
+						handleResult(ta, tm, relay);
+						break;
+					case "done":
+						handleDone(ta, tm, relay);
+						break;
+					default:
+						throw new Error(`Unexpected fixture relay event: ${relay.type}`);
+				}
+			}
+		}
+		// Keep processing true so only the transcript itself settles the turn.
+		const turns = segmentTurns(chatState.messages, true);
+		// No user message follows, so all thirteen events are one turn group.
+		expect(turns).toHaveLength(1);
+		expect(
+			[turns[0]?.live, turns[0]?.segments.length],
+			`after event ${index + 1}`,
+		).toEqual(EXPECTED_TRANSCRIPT[index]);
+	}
 });
 
 // ─── handleDelta (streaming text) ───────────────────────────────────────────
@@ -154,6 +235,63 @@ describe("thinking lifecycle", () => {
 // ─── handleToolStart / handleToolExecuting / handleToolResult ───────────────
 
 describe("tool lifecycle", () => {
+	it("keeps late output and metadata on a completed tool inside its closed segment", () => {
+		handleToolStart(ta, tm, {
+			type: "tool_start",
+			sessionId: "s1",
+			id: "t1",
+			name: "Read",
+		});
+		handleToolResult(ta, tm, {
+			type: "tool_result",
+			sessionId: "s1",
+			id: "t1",
+			content: "initial",
+			is_error: false,
+		});
+		handleResult(ta, tm, {
+			type: "result",
+			sessionId: "s1",
+			cost: 0.01,
+			duration: 100,
+			usage: { input: 1, output: 1, cache_read: 0, cache_creation: 0 },
+		});
+		const before = segmentTurns(chatState.messages, true)[0]!;
+		expect(before.live).toBe(false);
+		handleToolResult(ta, tm, {
+			type: "tool_result",
+			sessionId: "s1",
+			id: "t1",
+			content: "late output",
+			is_error: false,
+		});
+		handleToolExecuting(ta, tm, {
+			type: "tool_executing",
+			sessionId: "s1",
+			id: "t1",
+			name: "Read",
+			input: undefined,
+			metadata: { duration: 500 },
+		});
+		const after = segmentTurns(chatState.messages, true)[0]!;
+		expect(after.live).toBe(false);
+		expect(after.segments).toHaveLength(1);
+		expect(after.segments[0]?.activity[0]).toMatchObject({
+			result: "late output",
+			metadata: { duration: 500 },
+		});
+		expect(after.segments[0]?.end).toBe(before.segments[0]?.end);
+		handleToolStart(ta, tm, {
+			type: "tool_start",
+			sessionId: "s1",
+			id: "t2",
+			name: "Read",
+		});
+		const resumed = segmentTurns(chatState.messages, true)[0]!;
+		expect(resumed.live).toBe(true);
+		expect(resumed.segments).toHaveLength(2);
+	});
+
 	it("creates a tool message on start", () => {
 		handleToolStart(ta, tm, {
 			type: "tool_start",
@@ -757,6 +895,60 @@ describe("addSystemMessage", () => {
 		if (m.type === "system") {
 			expect(m.variant).toBe("error");
 		}
+	});
+});
+
+describe("handleCompaction", () => {
+	const compaction = (
+		state: "started" | "completed" | "failed",
+		detail: string,
+		tokens: { preTokens?: number; postTokens?: number } = {},
+	) =>
+		handleCompaction(ta, tm, {
+			type: "compaction",
+			sessionId: "s1",
+			state,
+			detail,
+			...tokens,
+		});
+
+	it("replaces the in-flight notice with the completed boundary", () => {
+		compaction("started", "Compacting conversation…");
+		compaction("completed", "Context compacted", {
+			preTokens: 180_000,
+			postTokens: 42_000,
+		});
+		expect(chatState.messages).toEqual([
+			expect.objectContaining({
+				type: "system",
+				compaction: "completed",
+				preTokens: 180_000,
+				postTokens: 42_000,
+			}),
+		]);
+	});
+
+	it("replaces the in-flight notice with a failure notice", () => {
+		compaction("started", "Compacting conversation…");
+		compaction("failed", "Compaction failed: too large");
+		expect(chatState.messages).toEqual([
+			expect.objectContaining({
+				compaction: "failed",
+				variant: "error",
+				text: "Compaction failed: too large",
+			}),
+		]);
+	});
+
+	it("keeps earlier completed compactions", () => {
+		compaction("completed", "Context compacted");
+		compaction("started", "Compacting conversation…");
+		compaction("completed", "Context compacted");
+		expect(
+			chatState.messages.map((m) =>
+				m.type === "system" ? m.compaction : m.type,
+			),
+		).toEqual(["completed", "completed"]);
 	});
 });
 

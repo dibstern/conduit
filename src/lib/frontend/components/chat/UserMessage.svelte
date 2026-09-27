@@ -20,6 +20,7 @@
 	} from "../../stores/discovery.svelte.js";
 	import { extractDisplayText } from "../../utils/format.js";
 	import { tokenizeSkills } from "../../utils/skill-highlight.js";
+	import Surface from "../ui/Surface.svelte";
 	import MessageTime from "./MessageTime.svelte";
 
 	let { message }: { message: UserMessage } = $props();
@@ -45,11 +46,15 @@
 	class:opacity-50={isQueued}
 	data-uuid={message.uuid}
 >
-	<div
-		class="bg-bg-surface rounded-panel py-4 px-5 relative glow-brand-a"
-		class:border={isQueued}
-		class:border-dashed={isQueued}
-		class:border-border={isQueued}
+	<!-- The queued outline rides in `class` rather than on three `class:`
+	     directives: Svelte has no `class:` on a component, and a dashed border
+	     is one idea, not three. -->
+	<Surface
+		variant="plain"
+		padding="lg"
+		class="relative glow-brand-a {isQueued
+			? 'border border-dashed border-border'
+			: ''}"
 	>
 		<div class="flex items-baseline gap-2.5 mb-2">
 			<span class="text-sm font-mono font-semibold uppercase tracking-[1.5px] text-brand-a">You</span>
@@ -71,7 +76,7 @@
 				<span class="queued-shimmer text-text-muted text-xs font-mono">Queued</span>
 			</div>
 		{/if}
-	</div>
+	</Surface>
 </div>
 
 <style>

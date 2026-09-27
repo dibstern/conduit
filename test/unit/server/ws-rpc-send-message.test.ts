@@ -30,7 +30,7 @@ describe("WsRpcServerLayer SendMessage", () => {
 			}),
 		);
 		const engine = withDispatchEffect({
-			getProviderForSession: vi.fn(() => "claude"),
+			getProviderForSessionEffect: vi.fn(() => Effect.succeed("claude")),
 			dispatchEffect: dispatch,
 		});
 

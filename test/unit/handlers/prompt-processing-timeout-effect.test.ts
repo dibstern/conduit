@@ -47,7 +47,7 @@ function makeWsHandler() {
 		markClientBootstrapped: vi.fn(),
 		getClientCount: vi.fn(() => 1),
 		getClientIds: vi.fn(() => ["client-1"]),
-		handleUpgrade: vi.fn(),
+		attach: vi.fn(() => () => {}),
 		close: vi.fn(),
 		drain: vi.fn(async () => undefined),
 		on: vi.fn(),

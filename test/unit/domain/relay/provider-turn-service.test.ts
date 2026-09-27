@@ -197,7 +197,12 @@ const makeReadQuery = (
 	getSessionStatus: vi.fn(() => Effect.succeed(undefined)),
 	getSession: vi.fn(() => Effect.succeed(undefined)),
 	getAllSessionStatuses: vi.fn(() => Effect.succeed({})),
+	getSessionsForReconciliation: () => Effect.succeed([]),
 	listSessions: vi.fn(() => Effect.succeed([])),
+	listSessionInfos: vi.fn(() => Effect.succeed([])),
+	getSessionLineage: () => Effect.succeed({ rows: [], count: 0 }),
+	getSessionFamily: () => Effect.succeed([]),
+	countPendingApprovalsBySession: vi.fn(() => Effect.succeed([])),
 	getLatestTurnModelExecution: vi.fn(() => Effect.succeed(undefined)),
 	getSessionMessagesWithParts,
 	readSessionTranscript: vi.fn(() =>
@@ -248,7 +253,7 @@ const makeEngine = (input?: {
 		vi.fn(() => Effect.succeed(input?.result ?? completedTurn()));
 	let providerId: string | undefined = input?.providerId;
 	return {
-		getProviderForSession: vi.fn(() => providerId),
+		getProviderForSessionEffect: vi.fn(() => Effect.succeed(providerId)),
 		bindSession: vi.fn((_sessionId: string, nextProviderId: string) => {
 			providerId = nextProviderId;
 		}),
@@ -1464,7 +1469,9 @@ describe("ProviderTurnService", () => {
 					return Effect.succeed(completedTurn());
 				}) as unknown as OrchestrationEngine["dispatchEffect"];
 				const engine = {
-					getProviderForSession: vi.fn(() => boundProviderId),
+					getProviderForSessionEffect: vi.fn(() =>
+						Effect.succeed(boundProviderId),
+					),
 					bindSession: vi.fn((_sessionId: string, providerId: string) => {
 						boundProviderId = providerId;
 					}),
@@ -1513,7 +1520,9 @@ describe("ProviderTurnService", () => {
 					});
 				}) as unknown as OrchestrationEngine["dispatchEffect"];
 				const engine = {
-					getProviderForSession: vi.fn(() => boundProviderId),
+					getProviderForSessionEffect: vi.fn(() =>
+						Effect.succeed(boundProviderId),
+					),
 					bindSession: vi.fn((_sessionId: string, providerId: string) => {
 						boundProviderId = providerId;
 					}),

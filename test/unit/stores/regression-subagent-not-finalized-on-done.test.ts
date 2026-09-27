@@ -8,6 +8,7 @@
 //
 // Fix: finalizeAll skips subagent tools, leaving them to event-driven completion.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { routerState } from "../../../src/lib/frontend/stores/router.svelte.js";
 
 vi.hoisted(() => {
 	let store: Record<string, string> = {};
@@ -57,6 +58,7 @@ afterEach(() => vi.useRealTimers());
 
 describe("Regression: parent `done` does not complete a running subagent Task", () => {
 	it("keeps the Task running after a parent done while the subagent is in progress", async () => {
+		routerState.path = "/s/sub-parent";
 		handleMessage({
 			type: "session_switched",
 			id: "sub-parent",
@@ -88,6 +90,7 @@ describe("Regression: parent `done` does not complete a running subagent Task", 
 	});
 
 	it("still force-completes ordinary running tools on done", async () => {
+		routerState.path = "/s/sub-parent";
 		handleMessage({
 			type: "session_switched",
 			id: "sub-parent",

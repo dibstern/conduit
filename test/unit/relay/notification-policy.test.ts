@@ -27,6 +27,26 @@ describe("resolveNotifications", () => {
 			alertId: "origin-T1",
 		});
 	});
+	it("broadcasts an anonymous poller completion only when given an in-app identity", () => {
+		expect(
+			resolveNotifications(
+				{ type: "done", code: 0, sessionId: "s1" },
+				{ action: "drop", reason: "no viewers" },
+				false,
+				"s1",
+				"poller-transition-1",
+			),
+		).toEqual({
+			sendPush: false,
+			broadcastCrossSession: true,
+			crossSessionPayload: {
+				type: "notification_event",
+				eventType: "done",
+				sessionId: "s1",
+				alertId: "poller-transition-1",
+			},
+		});
+	});
 	it("done + not subagent + route send → push yes, broadcast no", () => {
 		const result = resolveNotifications(
 			{ type: "done", code: 0, alertId: "done-1" } as RelayMessage,

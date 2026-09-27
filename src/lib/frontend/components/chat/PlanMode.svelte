@@ -4,7 +4,8 @@
 <!-- Preserves .plan-banner, .plan-card, .plan-approval classes for E2E/CSS.    -->
 
 <script lang="ts">
-	import Icon from "../shared/Icon.svelte";
+	import Button from "../ui/Button.svelte";
+	import Icon from "../ui/Icon.svelte";
 	import { renderMarkdown } from "../../utils/markdown.js";
 	import { initTableScrollShadows } from "../../utils/table-scroll.js";
 	import { copyToClipboard } from "../../utils/clipboard.js";
@@ -34,8 +35,7 @@
 
 	// ─── Handlers ────────────────────────────────────────────────────────────
 
-	function handleCopy(e: MouseEvent) {
-		e.stopPropagation();
+	function handleCopy() {
 		if (!content) return;
 
 		copyToClipboard(content);
@@ -84,24 +84,49 @@
 {:else if mode === "content" && content}
 	<!-- Plan content card (collapsible) -->
 	<div class={cardClass}>
-		<div
-			class="plan-card-header"
-			onclick={toggleCollapse}
-			onkeydown={undefined}
-			role="button"
-			tabindex="0"
-		>
-			<span class="plan-card-icon">
-				<Icon name="file-text" size={16} />
-			</span>
-			<span class="plan-card-title">Implementation Plan</span>
-			<button
+		<div class="plan-card-header">
+			<!--
+			  The header is a plain container: the collapse toggle has to be a real
+			  button, and the copy button cannot be nested inside it.
+			-->
+			<!--
+				`layout="flow"` because plan-mode.css is imported UNLAYERED, so its
+				`display: flex` already beats any Tailwind utility and the hooks own
+				the whole box. Emitting nothing is the only way to leave it that way:
+				the default `center` would add `whitespace-nowrap` and `select-none`,
+				neither of which the CSS declares, so neither would be contested and
+				both would quietly redefine a control whose content is prose.
+			-->
+			<Button
+				variant="ghost"
+				size="content"
+				layout="flow"
+				tone="inherit"
+				hoverFill="none"
+				class="plan-card-toggle"
+				aria-expanded={!collapsed}
+				onclick={toggleCollapse}
+			>
+				<span class="plan-card-icon">
+					<Icon name="file-text" size={16} />
+				</span>
+				<span class="plan-card-title">Implementation Plan</span>
+			</Button>
+			<!-- The hook owns both text colours, so both axes emit nothing. -->
+			<Button
+				variant="ghost"
+				size="content"
+				layout="flow"
+				tone="inherit"
+				hoverFill="none"
+				iconOnly
+				icon={copyIcon}
+				iconSize={14}
 				class="plan-card-copy"
 				title="Copy plan"
+				ariaLabel="Copy plan"
 				onclick={handleCopy}
-			>
-				<Icon name={copyIcon} size={14} />
-			</button>
+			/>
 			<span class="plan-card-chevron">
 				<Icon name="chevron-down" size={16} />
 			</span>
@@ -117,11 +142,30 @@
 {:else if mode === "approval"}
 	<!-- Plan approval buttons -->
 	<div class="plan-approval">
-		<button class="plan-approve-btn" onclick={handleApprove}>
+		<!-- `.plan-approval button` owns the geometry; `.plan-approve-btn` the fill. -->
+		<Button
+			variant="ghost"
+			size="content"
+			layout="flow"
+			tone="inherit"
+			hoverFill="none"
+			class="plan-approve-btn"
+			onclick={handleApprove}
+		>
 			Approve Plan
-		</button>
-		<button class="plan-reject-btn" onclick={handleReject}>
+		</Button>
+		<!-- Same, with the error outline. The red border here is already dead:
+		     `.plan-approval button` sets `border: none` at higher specificity. -->
+		<Button
+			variant="ghost"
+			size="content"
+			layout="flow"
+			tone="inherit"
+			hoverFill="none"
+			class="plan-reject-btn"
+			onclick={handleReject}
+		>
 			Reject Plan
-		</button>
+		</Button>
 	</div>
 {/if}

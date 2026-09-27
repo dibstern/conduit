@@ -46,15 +46,22 @@ const DEFAULT_VIEWPORT: Viewport = {
 	height: 900,
 };
 
+export const PHONE_VIEWPORT: Viewport = {
+	name: "phone",
+	width: 393,
+	height: 852,
+};
+
 function viewportFromEnv(value = process.env["VIEWPORT"]): Viewport {
 	if (!value || value === "desktop") {
 		return DEFAULT_VIEWPORT;
 	}
+	if (value === "phone") return PHONE_VIEWPORT;
 
 	const match = value.match(/^(\d+)x(\d+)$/);
 	if (!match) {
 		throw new Error(
-			`Unsupported VIEWPORT: ${value}. Use desktop or <width>x<height>.`,
+			`Unsupported VIEWPORT: ${value}. Use desktop, phone or <width>x<height>.`,
 		);
 	}
 
@@ -75,7 +82,8 @@ function safeArtifactName(value: string): string {
 }
 
 export class PlaywrightDriver {
-	readonly viewport = viewportFromEnv();
+	private readonly defaultViewport = viewportFromEnv();
+	private activeViewport = this.defaultViewport;
 	private browser: Browser | undefined;
 	private context: BrowserContext | undefined;
 
@@ -102,11 +110,12 @@ export class PlaywrightDriver {
 
 	async newExecution(): Promise<Page> {
 		await this.closeExecution();
+		this.activeViewport = this.defaultViewport;
 		const browser = await this.launch();
 		this.context = await browser.newContext({
 			viewport: {
-				width: this.viewport.width,
-				height: this.viewport.height,
+				width: this.activeViewport.width,
+				height: this.activeViewport.height,
 			},
 			colorScheme: "dark",
 			timezoneId: "UTC",
@@ -116,6 +125,14 @@ export class PlaywrightDriver {
 			Date.now = () => pinned;
 		}, PINNED_CLOCK_MS);
 		return this.context.newPage();
+	}
+
+	async setViewport(page: Page, viewport: Viewport): Promise<void> {
+		await page.setViewportSize({
+			width: viewport.width,
+			height: viewport.height,
+		});
+		this.activeViewport = viewport;
 	}
 
 	async closeExecution(): Promise<void> {
@@ -162,7 +179,7 @@ export class PlaywrightDriver {
 		const baselineRoot = resolve(
 			projectRoot,
 			process.env["VISUAL_ACCEPTANCE_BASELINE_ROOT"] ??
-				join("acceptance", "visual", "baselines", this.viewport.name),
+				join("acceptance", "visual", "baselines", this.activeViewport.name),
 		);
 		const baselinePath = join(baselineRoot, `${baseline}.png`);
 

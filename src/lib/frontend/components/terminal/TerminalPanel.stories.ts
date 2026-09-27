@@ -7,7 +7,7 @@ import {
 	renameTab,
 	switchTab,
 } from "../../stores/terminal.svelte.js";
-import TerminalPanel from "./TerminalPanel.svelte";
+import TerminalPanelHost from "./__fixtures__/TerminalPanelHost.svelte";
 
 function resetTerminal() {
 	destroyAll();
@@ -39,13 +39,13 @@ function setTabs(
 
 const meta = {
 	title: "Terminal/TerminalPanel",
-	component: TerminalPanel,
+	component: TerminalPanelHost,
 	tags: ["autodocs"],
 	parameters: { layout: "fullscreen" },
 	beforeEach: () => {
 		resetTerminal();
 	},
-} satisfies Meta<typeof TerminalPanel>;
+} satisfies Meta<typeof TerminalPanelHost>;
 
 export default meta;
 type Story = StoryObj<typeof meta>;
@@ -101,5 +101,19 @@ export const MaxTabs: Story = {
 			title: `Terminal ${i + 1}`,
 		}));
 		setTabs(entries, "pty-005");
+	},
+};
+
+export const Hover: Story = {
+	...SingleTab,
+	parameters: { pseudo: { hover: true } },
+};
+
+export const Disabled: Story = {
+	...SingleTab,
+	beforeEach: () => {
+		localStorage.setItem("terminal-font-size", "6");
+		setTabs([{ ptyId: "pty-001", title: "Terminal" }]);
+		return () => localStorage.removeItem("terminal-font-size");
 	},
 };

@@ -2,7 +2,7 @@
 	"name": "conduit-code",
 	"version": "0.1.3",
 	"type": "module",
-	"packageManager": "pnpm@10.33.4",
+	"packageManager": "pnpm@11.17.0",
 	"license": "MIT",
 	"description": "Web UI relay for OpenCode. Access your OpenCode sessions from any device.",
 	"repository": {
@@ -26,12 +26,14 @@
 		"build": "tsgo && pnpm copy:assets && vite build",
 		"build:server": "tsgo && pnpm copy:assets",
 		"build:frontend": "vite build",
-		"copy:assets": "rm -rf dist/src/lib/themes dist/src/lib/persistence/migrations && cp -r src/lib/themes dist/src/lib/themes && mkdir -p dist/src/lib/persistence && cp -r src/lib/persistence/migrations dist/src/lib/persistence/migrations",
+		"copy:assets": "rm -rf dist/src/lib/persistence/migrations && mkdir -p dist/src/lib/persistence && cp -r src/lib/persistence/migrations dist/src/lib/persistence/migrations",
 		"preview:frontend": "vite preview",
 		"preview:server": "pnpm build && node dist/src/bin/cli.js",
-		"check": "tsgo --noEmit && tsgo --noEmit --project src/lib/frontend/tsconfig.json",
+		"check": "tsgo --noEmit && tsgo --noEmit --project src/lib/frontend/tsconfig.json && pnpm check:svelte",
 		"check:frontend": "tsgo --noEmit --project src/lib/frontend/tsconfig.json",
-		"lint": "biome check . && node scripts/check-design-tokens.mjs",
+		"check:svelte": "svelte-check --tsconfig ./src/lib/frontend/tsconfig.json --output human --fail-on-warnings",
+		"lint": "biome check . && node scripts/check-design-tokens.mjs && node scripts/check-component-ownership.mjs && node scripts/check-class-token-drop.mjs && node scripts/check-dismissal-models.mjs && node scripts/check-svelte-imports.mjs",
+		"verify": "node scripts/verify.mjs",
 		"format": "biome check --write .",
 		"test": "vitest run",
 		"test:unit": "vitest run",
@@ -58,12 +60,13 @@
 		"storybook": "storybook dev -p 6006",
 		"storybook:build": "storybook build -o dist/storybook",
 		"test:storybook-visual": "pnpm storybook:build && pnpm exec playwright test --config test/visual/playwright.config.ts",
+		"test:storybook-visual:strict": "VISUAL_STRICT=1 pnpm test:storybook-visual",
 		"test:storybook-visual:update": "pnpm storybook:build && pnpm exec playwright test --config test/visual/playwright.config.ts --update-snapshots",
 		"test:storybook-visual:update-all": "bash scripts/update-visual-snapshots.sh",
 		"test:storybook-visual:update-linux": "bash scripts/update-visual-snapshots.sh linux",
 		"generate:media": "tsx scripts/generate-media/index.ts",
 		"check:design-tokens": "node scripts/check-design-tokens.mjs",
-		"check:storybook": "node scripts/check-storybook-health.mjs",
+		"check:storybook": "pnpm test:storybook && pnpm storybook:build && pnpm exec playwright test --config test/visual/playwright.config.ts --project=desktop --grep 'Built Storybook render health'",
 		"test:all": "bash scripts/test-all.sh",
 		"test:e2e:expensive-real-prompts": "RUN_EXPENSIVE_E2E=1 vitest run --config vitest.e2e.config.ts",
 		"test:coverage": "vitest run --coverage",
@@ -71,10 +74,11 @@
 		"prepublishOnly": "pnpm test:all",
 		"preversion": "pnpm check && pnpm lint && pnpm test:unit",
 		"postversion": "git push origin main --follow-tags",
-		"prepare": "node scripts/install-git-hooks.mjs"
+		"prepare": "node scripts/install-git-hooks.mjs",
+		"test:storybook": "vitest run --config vitest.storybook.config.ts --project=storybook"
 	},
 	"dependencies": {
-		"@anthropic-ai/claude-agent-sdk": "0.3.258",
+		"@anthropic-ai/claude-agent-sdk": "0.3.280",
 		"@effect/experimental": "0.60.0",
 		"@effect/opentelemetry": "^0.63.0",
 		"@effect/platform": "^0.96.1",
@@ -82,10 +86,11 @@
 		"@effect/rpc": "0.75.1",
 		"@effect/sql": "0.51.1",
 		"@effect/sql-sqlite-node": "0.52.0",
-		"@opencode-ai/sdk": "1.18.16",
+		"@opencode-ai/sdk": "1.18.32",
 		"@opentelemetry/exporter-trace-otlp-http": "^0.215.0",
 		"@opentelemetry/sdk-trace-node": "^2.7.0",
 		"better-sqlite3": "^12.9.0",
+		"bits-ui": "2.18.1",
 		"dompurify": "^3.3.1",
 		"effect": "^3.21.2",
 		"ignore": "^7.0.5",
@@ -108,6 +113,7 @@
 		"@playwright/test": "^1.58.2",
 		"@storybook/addon-a11y": "^10.2.13",
 		"@storybook/addon-docs": "^10.2.13",
+		"@storybook/addon-vitest": "^10.2.13",
 		"@storybook/svelte": "^10.2.13",
 		"@storybook/svelte-vite": "^10.2.13",
 		"@sveltejs/vite-plugin-svelte": "^5.1.1",
@@ -115,10 +121,11 @@
 		"@testing-library/svelte": "^5.3.1",
 		"@types/better-sqlite3": "^7.6.13",
 		"@types/jsdom": "^28.0.0",
-		"@types/node": "^22.0.0",
+		"@types/node": "^26.0.0",
 		"@types/pngjs": "^6.0.5",
 		"@types/ws": "^8.5.0",
 		"@typescript/native-preview": "7.0.0-dev.20260317.1",
+		"@vitest/browser": "3.2.4",
 		"@vitest/coverage-v8": "^3.2.4",
 		"@xterm/addon-fit": "^0.11.0",
 		"@xterm/xterm": "^6.0.0",
@@ -130,7 +137,9 @@
 		"pngjs": "^7.0.0",
 		"sharp": "^0.34.5",
 		"storybook": "^10.2.13",
+		"storybook-addon-pseudo-states": "10.2.13",
 		"svelte": "^5.53.3",
+		"svelte-check": "^4.7.4",
 		"tailwindcss": "^4.2.0",
 		"tsx": "^4.19.0",
 		"typescript": "^5.8.2",
@@ -138,20 +147,6 @@
 		"vitest": "^3.0.0"
 	},
 	"engines": {
-		"node": ">=24.16.0 <25"
-	},
-	"pnpm": {
-		"onlyBuiltDependencies": [
-			"better-sqlite3",
-			"node-pty"
-		],
-		"ignoredBuiltDependencies": [
-			"@evilmartians/lefthook",
-			"@parcel/watcher",
-			"esbuild",
-			"msgpackr-extract",
-			"protobufjs",
-			"sharp"
-		]
+		"node": ">=26.10.0 <27"
 	}
 }

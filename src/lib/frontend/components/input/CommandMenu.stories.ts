@@ -1,4 +1,6 @@
 import type { Meta, StoryObj } from "@storybook/svelte-vite";
+import { expect } from "storybook/test";
+import { menuOpensUpwardFrame } from "../../stories/frames";
 import type { CommandInfo } from "../../types.js";
 import CommandMenu from "./CommandMenu.svelte";
 
@@ -50,6 +52,15 @@ const meta = {
 	parameters: {
 		layout: "padded",
 	},
+	// Standalone stories render without InputArea, which owns the textarea that
+	// points `aria-controls` here. A fixed id keeps the listbox named and stable.
+	args: {
+		listboxId: "command-menu-listbox",
+	},
+	// This menu opens upward (`absolute bottom-full`), so without a positioned
+	// ancestor it renders above the viewport and the capture is a blank page.
+	// See conduit-test-7jv.
+	beforeEach: () => menuOpensUpwardFrame(),
 } satisfies Meta<typeof CommandMenu>;
 
 export default meta;
@@ -75,13 +86,27 @@ export const Filtered: Story = {
 	},
 };
 
-export const Empty: Story = {
+/**
+ * Typing a query with no matches dismisses the menu silently. That is the
+ * intended behaviour, ratified as decision 3B on conduit-test-qf3s: there is no
+ * "no results" empty state, and the markup that used to imply one was
+ * unreachable in every state and has been deleted.
+ *
+ * Excluded from visual capture (SKIP_STORIES in test/visual/components.spec.ts)
+ * because the render is empty: the baseline was a blank PNG, and a blank PNG
+ * compares equal to any other blank PNG, so the pixels could never have caught a
+ * regression. The behaviour is asserted in play() instead, where it is real.
+ */
+export const HidesWhenNoMatches: Story = {
 	args: {
 		query: "zzz",
 		visible: true,
 		commands: mockCommands,
 		onSelect: noopSelect,
 		onClose: noopClose,
+	},
+	play: ({ canvasElement }) => {
+		expect(canvasElement.querySelector('[role="listbox"]')).toBeNull();
 	},
 };
 

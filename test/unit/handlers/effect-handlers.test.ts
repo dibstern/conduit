@@ -15,6 +15,7 @@ import { join } from "node:path";
 import { describe, it } from "@effect/vitest";
 import { Deferred, Duration, Effect, Exit, Fiber, Layer } from "effect";
 import { expect, vi } from "vitest";
+import { DaemonEventBusLive } from "../../../src/lib/domain/daemon/Services/daemon-pubsub.js";
 import {
 	PendingInteractionServiceLive,
 	PendingInteractionServiceTag,
@@ -44,8 +45,10 @@ import {
 import {
 	SessionManagerError,
 	type SessionManagerService,
+	SessionManagerServiceLive,
 	SessionManagerServiceTag,
 } from "../../../src/lib/domain/relay/Services/session-manager-service.js";
+import { makeSessionManagerStateLive } from "../../../src/lib/domain/relay/Services/session-manager-state.js";
 import {
 	getAgent,
 	getContextWindow,
@@ -115,10 +118,14 @@ import { handlePtyInput } from "../../../src/lib/handlers/terminal.js";
 import { handleGetToolContent } from "../../../src/lib/handlers/tool-content.js";
 import type { OpenCodeAPI } from "../../../src/lib/instance/opencode-api.js";
 import type { Logger } from "../../../src/lib/logger.js";
+import { EventStoreEffectTag } from "../../../src/lib/persistence/effect/event-store-effect.js";
+import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
+import { ProjectionRunnerEffectTag } from "../../../src/lib/persistence/effect/projection-runner-effect.js";
 import {
 	type ReadQueryEffect,
 	ReadQueryEffectTag,
 } from "../../../src/lib/persistence/effect/read-query-effect.js";
+import { canonicalEvent } from "../../../src/lib/persistence/events.js";
 import { OrchestrationEngine } from "../../../src/lib/provider/orchestration-engine.js";
 import { ProviderRegistry } from "../../../src/lib/provider/provider-registry.js";
 import type { ProviderInstance } from "../../../src/lib/provider/types.js";
@@ -128,6 +135,7 @@ import { loadRelaySettings } from "../../../src/lib/relay/relay-settings.js";
 import type { PermissionId, RequestId } from "../../../src/lib/shared-types.js";
 import type { ProjectRelayConfig } from "../../../src/lib/types.js";
 import {
+	makeMockOpenCodeAPI,
 	makeMockSessionManagerService,
 	makeMockStatusPoller,
 	makeTestHandlerLayer,
@@ -151,7 +159,7 @@ function mockWsHandler(
 		markClientBootstrapped: vi.fn(),
 		getClientCount: vi.fn(() => 0),
 		getClientIds: vi.fn(() => []),
-		handleUpgrade: vi.fn(),
+		attach: vi.fn(() => () => {}),
 		close: vi.fn(),
 		drain: vi.fn(async () => undefined),
 		on: vi.fn(),
@@ -751,7 +759,7 @@ describe("sendModelsStateToClient", () => {
 		() => {
 			const ws = mockWsHandler();
 			const engine = {
-				getProviderForSession: vi.fn(() => "claude"),
+				getProviderForSessionEffect: vi.fn(() => Effect.succeed("claude")),
 				dispatch: vi.fn(async () => ({
 					models: [
 						{
@@ -934,17 +942,30 @@ describe("switchModelForSession", () => {
 						parent_id: null,
 						fork_point_event: null,
 						last_message_at: null,
+						last_turn_error_at: null,
 						permission_mode: null,
+						read_at: null,
+						settled_at: null,
+						pinned_at: null,
+						snoozed_at: null,
+						snoozed_until: null,
+						woken_at: null,
+						woken_reason: null,
 						created_at: 1,
 						updated_at: 1,
 					}),
 				),
 				getAllSessionStatuses: vi.fn(() => Effect.succeed({})),
+				getSessionsForReconciliation: () => Effect.succeed([]),
 				listSessions: vi.fn(() => Effect.succeed([])),
+				listSessionInfos: vi.fn(() => Effect.succeed([])),
 				readSessionTranscript: vi.fn(() =>
 					Effect.succeed({ messages: [], version: 0 }),
 				),
 				readSessionList: vi.fn(() => Effect.succeed({ rows: [], version: 0 })),
+				getSessionLineage: () => Effect.succeed({ rows: [], count: 0 }),
+				getSessionFamily: () => Effect.succeed([]),
+				countPendingApprovalsBySession: vi.fn(() => Effect.succeed([])),
 				getLatestTurnModelExecution: vi.fn(() => Effect.succeed(undefined)),
 				getSessionMessagesWithParts: vi.fn(() => Effect.succeed([])),
 			} satisfies ReadQueryEffect;
@@ -1289,7 +1310,7 @@ function mockSessionManager(
 			messages: [],
 			hasMore: false,
 		})),
-		sendDualSessionLists: vi.fn(async () => {}),
+		sendSessionLists: vi.fn(async () => {}),
 		recordMessageActivity: vi.fn(),
 		clearPaginationCursor: vi.fn(),
 		...overrides,
@@ -1424,11 +1445,16 @@ describe("handleGetToolContent", () => {
 				getSessionStatus: vi.fn(() => Effect.succeed(undefined)),
 				getSession: vi.fn(() => Effect.succeed(undefined)),
 				getAllSessionStatuses: vi.fn(() => Effect.succeed({})),
+				getSessionsForReconciliation: () => Effect.succeed([]),
 				listSessions: vi.fn(() => Effect.succeed([])),
+				listSessionInfos: vi.fn(() => Effect.succeed([])),
 				readSessionTranscript: vi.fn(() =>
 					Effect.succeed({ messages: [], version: 0 }),
 				),
 				readSessionList: vi.fn(() => Effect.succeed({ rows: [], version: 0 })),
+				getSessionLineage: () => Effect.succeed({ rows: [], count: 0 }),
+				getSessionFamily: () => Effect.succeed([]),
+				countPendingApprovalsBySession: vi.fn(() => Effect.succeed([])),
 				getLatestTurnModelExecution: vi.fn(() => Effect.succeed(undefined)),
 				getSessionMessagesWithParts: vi.fn(() => Effect.succeed([])),
 			} satisfies ReadQueryEffect;
@@ -1487,7 +1513,7 @@ describe("handleForkSession", () => {
 		() => {
 			const establishOpenCodeSession = vi.fn(() => Effect.void);
 			const setForkEntry = vi.fn(() => Effect.void);
-			const sendDualSessionLists = vi.fn(() => Effect.void);
+			const sendSessionLists = vi.fn(() => Effect.void);
 			const ws = mockWsHandler();
 			const client = {
 				session: {
@@ -1508,7 +1534,7 @@ describe("handleForkSession", () => {
 				sessionManagerService: makeMockSessionManagerService({
 					establishOpenCodeSession,
 					setForkEntry,
-					sendDualSessionLists,
+					sendSessionLists,
 				}),
 			});
 
@@ -1530,7 +1556,7 @@ describe("handleForkSession", () => {
 					"client-1",
 					expect.objectContaining({ type: "session_switched" }),
 				);
-				expect(sendDualSessionLists).toHaveBeenCalled();
+				expect(sendSessionLists).toHaveBeenCalled();
 			});
 		},
 	);
@@ -1539,7 +1565,7 @@ describe("handleForkSession", () => {
 		"does not expose a fork when the canonical upstream fork fails",
 		() => {
 			const setForkEntry = vi.fn(() => Effect.void);
-			const sendDualSessionLists = vi.fn(() => Effect.void);
+			const sendSessionLists = vi.fn(() => Effect.void);
 			const ws = mockWsHandler();
 			const client = {
 				session: {
@@ -1557,7 +1583,7 @@ describe("handleForkSession", () => {
 				ws,
 				sessionManagerService: makeMockSessionManagerService({
 					setForkEntry,
-					sendDualSessionLists,
+					sendSessionLists,
 				}),
 			});
 
@@ -1572,7 +1598,7 @@ describe("handleForkSession", () => {
 					expect(setForkEntry).not.toHaveBeenCalled();
 					expect(ws.broadcast).not.toHaveBeenCalled();
 					expect(ws.sendTo).not.toHaveBeenCalled();
-					expect(sendDualSessionLists).not.toHaveBeenCalled();
+					expect(sendSessionLists).not.toHaveBeenCalled();
 				}),
 			);
 		},
@@ -1609,8 +1635,8 @@ describe("handleForkSession", () => {
 		"broadcasts the persisted fork boundary instead of recomputing metadata",
 		() => {
 			const legacySetForkEntry = vi.fn();
-			const legacySendDualSessionLists = vi.fn(async () => {
-				throw new Error("legacy sendDualSessionLists should not be used");
+			const legacySendSessionLists = vi.fn(async () => {
+				throw new Error("legacy sendSessionLists should not be used");
 			});
 			const legacyListSessions = vi.fn(async () => {
 				throw new Error("legacy listSessions should not be used");
@@ -1636,29 +1662,24 @@ describe("handleForkSession", () => {
 				]),
 			);
 			const serviceSetForkEntry = vi.fn(() => Effect.void);
-			const serviceSendDualSessionLists = vi.fn((send) =>
+			const serviceSendSessionLists = vi.fn((send) =>
 				Effect.sync(() => {
 					send({
 						type: "session_list",
 						sessions: [
 							{
-								id: "ses-child",
-								title: "Forked Session",
-								status: "idle" as const,
-								updatedAt: 201,
-								messageCount: 0,
-								parentID: "ses-parent",
-								forkMessageId: "msg-1",
-								forkPointTimestamp: 123,
+								id: "ses-parent",
+								title: "Parent Session",
+								updatedAt: 100,
+								messageCount: 1,
 							},
 						],
-						roots: false,
+						roots: true,
 					});
 				}),
 			);
 			const ws = mockWsHandler();
 			const sessionMgr = mockSessionManager({
-				sendDualSessionLists: legacySendDualSessionLists,
 				listSessions: legacyListSessions,
 				loadPreRenderedHistory: vi.fn(async () => ({
 					messages: [],
@@ -1668,7 +1689,7 @@ describe("handleForkSession", () => {
 			const sessionManagerService = makeMockSessionManagerService({
 				listSessions: serviceListSessions,
 				setForkEntry: serviceSetForkEntry,
-				sendDualSessionLists: serviceSendDualSessionLists,
+				sendSessionLists: serviceSendSessionLists,
 			});
 			const layer = makeForkSessionLayer({
 				sessionMgr,
@@ -1715,23 +1736,19 @@ describe("handleForkSession", () => {
 						sessionId: "ses-child",
 						status: "idle",
 					});
-					expect(serviceSendDualSessionLists).toHaveBeenCalled();
-					expect(legacySendDualSessionLists).not.toHaveBeenCalled();
+					expect(serviceSendSessionLists).toHaveBeenCalled();
+					expect(legacySendSessionLists).not.toHaveBeenCalled();
 					expect(ws.broadcast).toHaveBeenCalledWith({
 						type: "session_list",
 						sessions: [
 							{
-								id: "ses-child",
-								title: "Forked Session",
-								status: "idle" as const,
-								updatedAt: 201,
-								messageCount: 0,
-								parentID: "ses-parent",
-								forkMessageId: "msg-1",
-								forkPointTimestamp: 123,
+								id: "ses-parent",
+								title: "Parent Session",
+								updatedAt: 100,
+								messageCount: 1,
 							},
 						],
-						roots: false,
+						roots: true,
 					});
 				}),
 			);
@@ -2022,7 +2039,7 @@ describe("handlePermissionResponse", () => {
 			} as unknown as OpenCodeAPI;
 			const config = mockConfig();
 			const engine = {
-				getProviderForSession: vi.fn(() => "claude"),
+				getProviderForSessionEffect: vi.fn(() => Effect.succeed("claude")),
 			};
 
 			const layer = Layer.mergeAll(
@@ -2311,8 +2328,10 @@ describe("handleQuestionReject", () => {
 				},
 			} as unknown as OpenCodeAPI;
 			const engine = {
-				getProviderForSession: vi.fn((sessionId: string) =>
-					sessionId === "question-session" ? "claude" : "opencode",
+				getProviderForSessionEffect: vi.fn((sessionId: string) =>
+					Effect.succeed(
+						sessionId === "question-session" ? "claude" : "opencode",
+					),
 				),
 			} as unknown as OrchestrationEngine;
 
@@ -2341,7 +2360,7 @@ describe("handleQuestionReject", () => {
 				Effect.provide(layer),
 				Effect.tap((pending) => {
 					expect(client.question.reject).not.toHaveBeenCalled();
-					expect(engine.getProviderForSession).toHaveBeenCalledWith(
+					expect(engine.getProviderForSessionEffect).toHaveBeenCalledWith(
 						"question-session",
 					);
 					expect(ws.sendTo).toHaveBeenCalledWith(
@@ -2420,8 +2439,10 @@ describe("handleAskUserResponse", () => {
 				},
 			} as unknown as OpenCodeAPI;
 			const engine = {
-				getProviderForSession: vi.fn((sessionId: string) =>
-					sessionId === "question-session" ? "claude" : "opencode",
+				getProviderForSessionEffect: vi.fn((sessionId: string) =>
+					Effect.succeed(
+						sessionId === "question-session" ? "claude" : "opencode",
+					),
 				),
 			} as unknown as OrchestrationEngine;
 
@@ -2451,7 +2472,7 @@ describe("handleAskUserResponse", () => {
 				Effect.provide(layer),
 				Effect.tap(() => {
 					expect(client.question.reply).not.toHaveBeenCalled();
-					expect(engine.getProviderForSession).toHaveBeenCalledWith(
+					expect(engine.getProviderForSessionEffect).toHaveBeenCalledWith(
 						"question-session",
 					);
 					expect(ws.broadcast).toHaveBeenCalledWith(
@@ -2473,15 +2494,15 @@ describe("handleNewSession", () => {
 		() => {
 			const ws = mockWsHandler();
 			const log = mockLogger();
-			const legacySendDualSessionLists = vi.fn(async () => {
-				throw new Error("legacy sendDualSessionLists should not be used");
+			const legacySendSessionLists = vi.fn(async () => {
+				throw new Error("legacy sendSessionLists should not be used");
 			});
 			const legacyCreateSession = vi.fn(async () => {
 				throw new Error("legacy createSession should not be used");
 			});
 			const sessionMgr = mockSessionManager({
 				createSession: legacyCreateSession,
-				sendDualSessionLists: legacySendDualSessionLists,
+				sendSessionLists: legacySendSessionLists,
 			});
 			const serviceCreateSession = vi.fn(() =>
 				Effect.succeed({
@@ -2493,7 +2514,7 @@ describe("handleNewSession", () => {
 					time: { created: 100, updated: 200 },
 				}),
 			);
-			const sendDualSessionLists = vi.fn((send) =>
+			const sendSessionLists = vi.fn((send) =>
 				Effect.sync(() => {
 					send({
 						type: "session_list",
@@ -2512,7 +2533,7 @@ describe("handleNewSession", () => {
 			);
 			const sessionManagerService = makeMockSessionManagerService({
 				createSession: serviceCreateSession,
-				sendDualSessionLists,
+				sendSessionLists,
 			});
 			const layer = makeSessionLifecycleLayer({
 				ws,
@@ -2544,8 +2565,8 @@ describe("handleNewSession", () => {
 						sessionId: "new-session-1",
 						status: "idle",
 					});
-					expect(sendDualSessionLists).toHaveBeenCalled();
-					expect(legacySendDualSessionLists).not.toHaveBeenCalled();
+					expect(sendSessionLists).toHaveBeenCalled();
+					expect(legacySendSessionLists).not.toHaveBeenCalled();
 					expect(ws.broadcast).toHaveBeenCalledWith({
 						type: "session_list",
 						sessions: [
@@ -2580,10 +2601,10 @@ describe("handleNewSession", () => {
 				time: { created: 100, updated: 200 },
 			}),
 		);
-		const sendDualSessionLists = vi.fn(() => Effect.never);
+		const sendSessionLists = vi.fn(() => Effect.never);
 		const sessionManagerService = makeMockSessionManagerService({
 			createSession: serviceCreateSession,
-			sendDualSessionLists,
+			sendSessionLists,
 		});
 		const layer = makeSessionLifecycleLayer({
 			ws,
@@ -2606,7 +2627,7 @@ describe("handleNewSession", () => {
 				sessionId: "new-session-fast",
 				requestId: "request-fast",
 			});
-			expect(sendDualSessionLists).toHaveBeenCalled();
+			expect(sendSessionLists).toHaveBeenCalled();
 		});
 	});
 
@@ -2623,10 +2644,10 @@ describe("handleNewSession", () => {
 				time: { created: 100, updated: 200 },
 			}),
 		);
-		const sendDualSessionLists = vi.fn(() => Effect.void);
+		const sendSessionLists = vi.fn(() => Effect.void);
 		const sessionManagerService = makeMockSessionManagerService({
 			createSession: serviceCreateSession,
-			sendDualSessionLists,
+			sendSessionLists,
 		});
 		const layer = makeSessionLifecycleLayer({
 			ws,
@@ -2679,17 +2700,30 @@ describe("handleNewSession", () => {
 						parent_id: null,
 						fork_point_event: null,
 						last_message_at: null,
+						last_turn_error_at: null,
 						permission_mode: null,
+						read_at: null,
+						settled_at: null,
+						pinned_at: null,
+						snoozed_at: null,
+						snoozed_until: null,
+						woken_at: null,
+						woken_reason: null,
 						created_at: 1,
 						updated_at: 1,
 					}),
 				),
 				getAllSessionStatuses: vi.fn(() => Effect.succeed({})),
+				getSessionsForReconciliation: () => Effect.succeed([]),
 				listSessions: vi.fn(() => Effect.succeed([])),
+				listSessionInfos: vi.fn(() => Effect.succeed([])),
 				readSessionTranscript: vi.fn(() =>
 					Effect.succeed({ messages: [], version: 0 }),
 				),
 				readSessionList: vi.fn(() => Effect.succeed({ rows: [], version: 0 })),
+				getSessionLineage: () => Effect.succeed({ rows: [], count: 0 }),
+				getSessionFamily: () => Effect.succeed([]),
+				countPendingApprovalsBySession: vi.fn(() => Effect.succeed([])),
 				getLatestTurnModelExecution: vi.fn(() => Effect.succeed(undefined)),
 				getSessionMessagesWithParts: vi.fn(() => Effect.succeed([])),
 			} satisfies ReadQueryEffect;
@@ -2775,17 +2809,30 @@ describe("handleNewSession", () => {
 						parent_id: null,
 						fork_point_event: null,
 						last_message_at: 1,
+						last_turn_error_at: null,
 						permission_mode: null,
+						read_at: null,
+						settled_at: null,
+						pinned_at: null,
+						snoozed_at: null,
+						snoozed_until: null,
+						woken_at: null,
+						woken_reason: null,
 						created_at: 1,
 						updated_at: 1,
 					}),
 				),
 				getAllSessionStatuses: vi.fn(() => Effect.succeed({})),
+				getSessionsForReconciliation: () => Effect.succeed([]),
 				listSessions: vi.fn(() => Effect.succeed([])),
+				listSessionInfos: vi.fn(() => Effect.succeed([])),
 				readSessionTranscript: vi.fn(() =>
 					Effect.succeed({ messages: [], version: 0 }),
 				),
 				readSessionList: vi.fn(() => Effect.succeed({ rows: [], version: 0 })),
+				getSessionLineage: () => Effect.succeed({ rows: [], count: 0 }),
+				getSessionFamily: () => Effect.succeed([]),
+				countPendingApprovalsBySession: vi.fn(() => Effect.succeed([])),
 				getLatestTurnModelExecution: vi.fn(() => Effect.succeed(undefined)),
 				getSessionMessagesWithParts: vi.fn(() =>
 					Effect.succeed([
@@ -2899,17 +2946,30 @@ describe("handleNewSession", () => {
 						parent_id: null,
 						fork_point_event: null,
 						last_message_at: null,
+						last_turn_error_at: null,
 						permission_mode: null,
+						read_at: null,
+						settled_at: null,
+						pinned_at: null,
+						snoozed_at: null,
+						snoozed_until: null,
+						woken_at: null,
+						woken_reason: null,
 						created_at: 1,
 						updated_at: 1,
 					}),
 				),
 				getAllSessionStatuses: vi.fn(() => Effect.succeed({})),
+				getSessionsForReconciliation: () => Effect.succeed([]),
 				listSessions: vi.fn(() => Effect.succeed([])),
+				listSessionInfos: vi.fn(() => Effect.succeed([])),
 				readSessionTranscript: vi.fn(() =>
 					Effect.succeed({ messages: [], version: 0 }),
 				),
 				readSessionList: vi.fn(() => Effect.succeed({ rows: [], version: 0 })),
+				getSessionLineage: () => Effect.succeed({ rows: [], count: 0 }),
+				getSessionFamily: () => Effect.succeed([]),
+				countPendingApprovalsBySession: vi.fn(() => Effect.succeed([])),
 				getLatestTurnModelExecution: vi.fn(() => Effect.succeed(undefined)),
 				getSessionMessagesWithParts: vi.fn(() => Effect.succeed([])),
 			} satisfies ReadQueryEffect;
@@ -2973,15 +3033,15 @@ describe("handleNewSession", () => {
 	it.effect("logs and completes when the service list broadcast fails", () => {
 		const ws = mockWsHandler();
 		const log = mockLogger();
-		const legacySendDualSessionLists = vi.fn(async () => {
-			throw new Error("legacy sendDualSessionLists should not be used");
+		const legacySendSessionLists = vi.fn(async () => {
+			throw new Error("legacy sendSessionLists should not be used");
 		});
 		const legacyCreateSession = vi.fn(async () => {
 			throw new Error("legacy createSession should not be used");
 		});
 		const sessionMgr = mockSessionManager({
 			createSession: legacyCreateSession,
-			sendDualSessionLists: legacySendDualSessionLists,
+			sendSessionLists: legacySendSessionLists,
 		});
 		const serviceCreateSession = vi.fn(() =>
 			Effect.succeed({
@@ -2993,17 +3053,17 @@ describe("handleNewSession", () => {
 				time: { created: 100, updated: 200 },
 			}),
 		);
-		const sendDualSessionLists = vi.fn(() =>
+		const sendSessionLists = vi.fn(() =>
 			Effect.fail(
 				new SessionManagerError({
-					operation: "sendDualSessionLists",
+					operation: "sendSessionLists",
 					cause: new Error("service unavailable"),
 				}),
 			),
 		);
 		const sessionManagerService = makeMockSessionManagerService({
 			createSession: serviceCreateSession,
-			sendDualSessionLists,
+			sendSessionLists,
 		});
 		const layer = makeSessionLifecycleLayer({
 			ws,
@@ -3021,8 +3081,8 @@ describe("handleNewSession", () => {
 				);
 				expect(serviceCreateSession).toHaveBeenCalledWith(undefined);
 				expect(legacyCreateSession).not.toHaveBeenCalled();
-				expect(sendDualSessionLists).toHaveBeenCalled();
-				expect(legacySendDualSessionLists).not.toHaveBeenCalled();
+				expect(sendSessionLists).toHaveBeenCalled();
+				expect(legacySendSessionLists).not.toHaveBeenCalled();
 				expect(log.warn).toHaveBeenCalledWith(
 					expect.stringContaining(
 						"Failed to broadcast session list after CreateSession",
@@ -3056,11 +3116,11 @@ describe("handleDeleteSession", () => {
 					},
 				]),
 			);
-			const sendDualSessionLists = vi.fn(() => Effect.void);
+			const sendSessionLists = vi.fn(() => Effect.void);
 			const sessionManagerService = makeMockSessionManagerService({
 				deleteSession,
 				listSessions,
-				sendDualSessionLists,
+				sendSessionLists,
 			});
 			const layer = makeSessionLifecycleLayer({
 				ws,
@@ -3078,7 +3138,7 @@ describe("handleDeleteSession", () => {
 					expect(ws.setClientSession).not.toHaveBeenCalled();
 					expect(ws.sendTo).not.toHaveBeenCalled();
 					expect(ws.broadcast).not.toHaveBeenCalled();
-					expect(sendDualSessionLists).not.toHaveBeenCalled();
+					expect(sendSessionLists).not.toHaveBeenCalled();
 					expect(log.info).not.toHaveBeenCalled();
 				}),
 			);
@@ -3092,8 +3152,8 @@ describe("handleDeleteSession", () => {
 				getClientsForSession: vi.fn(() => []),
 			});
 			const log = mockLogger();
-			const legacySendDualSessionLists = vi.fn(async () => {
-				throw new Error("legacy sendDualSessionLists should not be used");
+			const legacySendSessionLists = vi.fn(async () => {
+				throw new Error("legacy sendSessionLists should not be used");
 			});
 			const legacyListSessions = vi.fn(async () => {
 				throw new Error("legacy listSessions should not be used");
@@ -3106,9 +3166,9 @@ describe("handleDeleteSession", () => {
 			const sessionMgr = mockSessionManager({
 				deleteSession: legacyDeleteSession,
 				listSessions: legacyListSessions,
-				sendDualSessionLists: legacySendDualSessionLists,
+				sendSessionLists: legacySendSessionLists,
 			});
-			const sendDualSessionLists = vi.fn((send) =>
+			const sendSessionLists = vi.fn((send) =>
 				Effect.sync(() => {
 					send({
 						type: "session_list",
@@ -3120,7 +3180,7 @@ describe("handleDeleteSession", () => {
 			const sessionManagerService = makeMockSessionManagerService({
 				deleteSession: serviceDeleteSession,
 				listSessions: serviceListSessions,
-				sendDualSessionLists,
+				sendSessionLists,
 			});
 			const layer = makeSessionLifecycleLayer({
 				ws,
@@ -3145,8 +3205,8 @@ describe("handleDeleteSession", () => {
 						type: "session_deleted",
 						sessionId: "deleted-session",
 					});
-					expect(sendDualSessionLists).toHaveBeenCalled();
-					expect(legacySendDualSessionLists).not.toHaveBeenCalled();
+					expect(sendSessionLists).toHaveBeenCalled();
+					expect(legacySendSessionLists).not.toHaveBeenCalled();
 					expect(ws.broadcast).toHaveBeenCalledWith({
 						type: "session_list",
 						sessions: [],
@@ -3167,8 +3227,8 @@ describe("handleDeleteSession", () => {
 				getClientsForSession: vi.fn(() => ["client-1", "client-2"]),
 			});
 			const log = mockLogger();
-			const legacySendDualSessionLists = vi.fn(async () => {
-				throw new Error("legacy sendDualSessionLists should not be used");
+			const legacySendSessionLists = vi.fn(async () => {
+				throw new Error("legacy sendSessionLists should not be used");
 			});
 			const legacyListSessions = vi.fn(async () => {
 				throw new Error("legacy listSessions should not be used");
@@ -3195,9 +3255,9 @@ describe("handleDeleteSession", () => {
 					messages: [],
 					hasMore: false,
 				})),
-				sendDualSessionLists: legacySendDualSessionLists,
+				sendSessionLists: legacySendSessionLists,
 			});
-			const sendDualSessionLists = vi.fn((send) =>
+			const sendSessionLists = vi.fn((send) =>
 				Effect.sync(() => {
 					send({
 						type: "session_list",
@@ -3217,7 +3277,7 @@ describe("handleDeleteSession", () => {
 			const sessionManagerService = makeMockSessionManagerService({
 				deleteSession: serviceDeleteSession,
 				listSessions: serviceListSessions,
-				sendDualSessionLists,
+				sendSessionLists,
 			});
 			const client = {
 				session: {
@@ -3288,8 +3348,12 @@ describe("handleDeleteSession", () => {
 						model: "claude-sonnet-4-5",
 						provider: "anthropic",
 					});
-					expect(sendDualSessionLists).toHaveBeenCalledTimes(3);
-					expect(legacySendDualSessionLists).not.toHaveBeenCalled();
+					// Two viewers get reassigned, and each reassignment goes through
+					// the same view path a human click does -- so each also records
+					// the session read and re-broadcasts the list, which is how the
+					// One roots/family update per reassigned viewer, then the delete update.
+					expect(sendSessionLists).toHaveBeenCalledTimes(3);
+					expect(legacySendSessionLists).not.toHaveBeenCalled();
 					expect(ws.broadcast).toHaveBeenCalledWith({
 						type: "session_deleted",
 						sessionId: "deleted-session",
@@ -3331,7 +3395,7 @@ describe("renameSessionForClient", () => {
 					calls.push("rename");
 				}),
 			);
-			const sendDualSessionLists = vi.fn((send) =>
+			const sendSessionLists = vi.fn((send) =>
 				Effect.sync(() => {
 					calls.push("broadcast");
 					send({
@@ -3351,7 +3415,7 @@ describe("renameSessionForClient", () => {
 			);
 			const sessionManagerService = makeMockSessionManagerService({
 				renameSession,
-				sendDualSessionLists,
+				sendSessionLists,
 			});
 
 			const layer = Layer.mergeAll(
@@ -3369,7 +3433,7 @@ describe("renameSessionForClient", () => {
 				Effect.tap(() => {
 					expect(renameSession).toHaveBeenCalledWith("session-1", "New Title");
 					expect(legacyRenameSession).not.toHaveBeenCalled();
-					expect(sendDualSessionLists).toHaveBeenCalled();
+					expect(sendSessionLists).toHaveBeenCalled();
 					expect(calls).toEqual(["rename", "broadcast"]);
 					expect(ws.broadcast).toHaveBeenCalledWith({
 						type: "session_list",
@@ -3395,10 +3459,10 @@ describe("renameSessionForClient", () => {
 		const _sessionMgr = mockSessionManager();
 		const ws = mockWsHandler();
 		const renameSession = vi.fn(() => Effect.void);
-		const sendDualSessionLists = vi.fn(() => Effect.void);
+		const sendSessionLists = vi.fn(() => Effect.void);
 		const sessionManagerService = makeMockSessionManagerService({
 			renameSession,
-			sendDualSessionLists,
+			sendSessionLists,
 		});
 
 		const layer = Layer.mergeAll(
@@ -3415,7 +3479,7 @@ describe("renameSessionForClient", () => {
 			Effect.provide(layer),
 			Effect.tap(() => {
 				expect(renameSession).not.toHaveBeenCalled();
-				expect(sendDualSessionLists).not.toHaveBeenCalled();
+				expect(sendSessionLists).not.toHaveBeenCalled();
 			}),
 		);
 	});
@@ -3443,17 +3507,30 @@ describe("loadMoreHistoryForSession", () => {
 					parent_id: null,
 					fork_point_event: null,
 					last_message_at: 1,
+					last_turn_error_at: null,
 					permission_mode: null,
+					read_at: null,
+					settled_at: null,
+					pinned_at: null,
+					snoozed_at: null,
+					snoozed_until: null,
+					woken_at: null,
+					woken_reason: null,
 					created_at: 1,
 					updated_at: 1,
 				}),
 			),
 			getAllSessionStatuses: vi.fn(() => Effect.succeed({})),
+			getSessionsForReconciliation: () => Effect.succeed([]),
 			listSessions: vi.fn(() => Effect.succeed([])),
+			listSessionInfos: vi.fn(() => Effect.succeed([])),
 			readSessionTranscript: vi.fn(() =>
 				Effect.succeed({ messages: [], version: 0 }),
 			),
 			readSessionList: vi.fn(() => Effect.succeed({ rows: [], version: 0 })),
+			getSessionLineage: () => Effect.succeed({ rows: [], count: 0 }),
+			getSessionFamily: () => Effect.succeed([]),
+			countPendingApprovalsBySession: vi.fn(() => Effect.succeed([])),
 			getLatestTurnModelExecution: vi.fn(() => Effect.succeed(undefined)),
 			getSessionMessagesWithParts: vi.fn(() =>
 				Effect.succeed([
@@ -3538,17 +3615,30 @@ describe("loadMoreHistoryForSession", () => {
 					parent_id: null,
 					fork_point_event: null,
 					last_message_at: 1,
+					last_turn_error_at: null,
 					permission_mode: null,
+					read_at: null,
+					settled_at: null,
+					pinned_at: null,
+					snoozed_at: null,
+					snoozed_until: null,
+					woken_at: null,
+					woken_reason: null,
 					created_at: 1,
 					updated_at: 1,
 				}),
 			),
 			getAllSessionStatuses: vi.fn(() => Effect.succeed({})),
+			getSessionsForReconciliation: () => Effect.succeed([]),
 			listSessions: vi.fn(() => Effect.succeed([])),
+			listSessionInfos: vi.fn(() => Effect.succeed([])),
 			readSessionTranscript: vi.fn(() =>
 				Effect.succeed({ messages: [], version: 0 }),
 			),
 			readSessionList: vi.fn(() => Effect.succeed({ rows: [], version: 0 })),
+			getSessionLineage: () => Effect.succeed({ rows: [], count: 0 }),
+			getSessionFamily: () => Effect.succeed([]),
+			countPendingApprovalsBySession: vi.fn(() => Effect.succeed([])),
 			getLatestTurnModelExecution: vi.fn(() => Effect.succeed(undefined)),
 			getSessionMessagesWithParts: vi.fn(() =>
 				Effect.succeed([
@@ -3647,6 +3737,104 @@ describe("loadMoreHistoryForSession", () => {
 // ─── Prompt handler tests ─────────────────────────────────────────────────
 
 describe("sendMessageToSession", () => {
+	for (const [settled, snoozed] of [
+		[true, false],
+		[false, true],
+		[false, false],
+	] as const) {
+		it.effect(
+			`message clears triage state when settled=${settled}, snoozed=${snoozed}`,
+			() => {
+				const dbFile = join(
+					tmpdir(),
+					`conduit-prompt-triage-${crypto.randomUUID()}.sqlite`,
+				);
+				const ws = mockWsHandler();
+				const serviceLayer = Layer.provideMerge(
+					SessionManagerServiceLive,
+					Layer.mergeAll(
+						Layer.succeed(OpenCodeAPITag, makeMockOpenCodeAPI()),
+						Layer.succeed(LoggerTag, mockLogger()),
+						makeSessionManagerStateLive(),
+						DaemonEventBusLive,
+						makePersistenceEffectLayer(dbFile),
+					),
+				);
+				return Effect.gen(function* () {
+					const store = yield* EventStoreEffectTag;
+					const runner = yield* ProjectionRunnerEffectTag;
+					const service = yield* SessionManagerServiceTag;
+					yield* runner.markRecovered();
+					yield* runner.projectEvent(
+						yield* store.append(
+							canonicalEvent(
+								"session.created",
+								"s1",
+								{ sessionId: "s1", title: "Triage", provider: "opencode" },
+								{ provider: "opencode", createdAt: 10 },
+							),
+						),
+					);
+					if (settled) yield* service.setSessionSettled("s1", true, true);
+					if (snoozed) yield* service.snoozeSession("s1", null);
+					const provider: ProviderTurnService = {
+						prepareTurnSession: (input) => Effect.succeed(input.sessionId),
+						sendTurn: () =>
+							Effect.gen(function* () {
+								expect((yield* service.listSessions())[0]).not.toHaveProperty(
+									"settledAt",
+								);
+								expect((yield* service.listSessions())[0]).not.toHaveProperty(
+									"settledAutomatically",
+								);
+								expect((yield* service.listSessions())[0]).not.toHaveProperty(
+									"snoozedAt",
+								);
+								const events = yield* store.readAllBySession("s1");
+								expect(
+									events.filter((e) => e.type === "session.unsettled"),
+								).toHaveLength(settled ? 1 : 0);
+								expect(
+									events.filter((e) => e.type === "session.unsnoozed"),
+								).toHaveLength(snoozed ? 1 : 0);
+							}),
+						interruptTurn: () => Effect.void,
+					};
+					yield* sendMessageToSession({
+						clientId: "c1",
+						sessionId: "s1",
+						text: "Continue",
+						commandId: "cmd1",
+					}).pipe(Effect.provideService(ProviderTurnServiceTag, provider));
+					expect(ws.broadcast).toHaveBeenCalledTimes(
+						settled || snoozed ? 1 : 0,
+					);
+					if (settled || snoozed)
+						expect(ws.broadcast).toHaveBeenCalledWith(
+							expect.objectContaining({
+								type: "session_list",
+								sessions: [
+									expect.not.objectContaining({
+										settledAt: expect.any(Number),
+									}),
+								],
+							}),
+						);
+				}).pipe(
+					Effect.provide(
+						Layer.mergeAll(
+							serviceLayer,
+							Layer.succeed(WebSocketHandlerTag, ws),
+							Layer.succeed(ConfigTag, mockConfig()),
+							PendingInteractionServiceLive,
+							makeOverridesStateLive(),
+						),
+					),
+					Effect.ensuring(Effect.sync(() => rmSync(dbFile, { force: true }))),
+				);
+			},
+		);
+	}
 	function makeLayer(
 		ws: WebSocketHandlerShape,
 		prepareTurnSession: ProviderTurnService["prepareTurnSession"],
@@ -3669,6 +3857,44 @@ describe("sendMessageToSession", () => {
 			makeOverridesStateLive(),
 		);
 	}
+
+	it.effect("sends the message when unsnooze bookkeeping fails", () => {
+		const sendTurn = vi.fn(() => Effect.void);
+		const provider: ProviderTurnService = {
+			prepareTurnSession: (input) => Effect.succeed(input.sessionId),
+			sendTurn,
+			interruptTurn: () => Effect.void,
+		};
+		const service = makeMockSessionManagerService({
+			unsnoozeSession: () =>
+				Effect.fail(
+					new SessionManagerError({
+						operation: "unsnoozeSession",
+						cause: new Error("write failed"),
+					}),
+				),
+		});
+		const layer = Layer.mergeAll(
+			Layer.succeed(ProviderTurnServiceTag, provider),
+			Layer.succeed(OpenCodeAPITag, {} as OpenCodeAPI),
+			Layer.succeed(WebSocketHandlerTag, mockWsHandler()),
+			Layer.succeed(LoggerTag, mockLogger()),
+			Layer.succeed(ConfigTag, mockConfig()),
+			Layer.succeed(SessionManagerServiceTag, service),
+			PendingInteractionServiceLive,
+			PendingSendOwnershipLive,
+			makeOverridesStateLive(),
+		);
+		return sendMessageToSession({
+			clientId: "c1",
+			sessionId: "s1",
+			text: "Continue",
+			commandId: "cmd1",
+		}).pipe(
+			Effect.provide(layer),
+			Effect.tap(() => expect(sendTurn).toHaveBeenCalledOnce()),
+		);
+	});
 
 	it.effect(
 		"removes only the failed command on a propagated Effect failure",
@@ -4185,7 +4411,7 @@ describe("handleMessage", () => {
 		const config = mockConfig();
 		const client = {} as unknown as OpenCodeAPI;
 		const engine = {
-			getProviderForSession: vi.fn(() => "claude"),
+			getProviderForSessionEffect: vi.fn(() => Effect.succeed("claude")),
 			dispatch: vi.fn(async () => ({
 				status: "completed",
 				cost: 0,
@@ -4243,7 +4469,7 @@ describe("handleMessage", () => {
 			const client = {} as unknown as OpenCodeAPI;
 			let questionPromise: Promise<Record<string, unknown>> | undefined;
 			const engine = {
-				getProviderForSession: vi.fn(() => "claude"),
+				getProviderForSessionEffect: vi.fn(() => Effect.succeed("claude")),
 				dispatch: vi.fn(async (command) => {
 					if (
 						typeof command === "object" &&
@@ -4336,7 +4562,7 @@ describe("handleMessage", () => {
 			const config = mockConfig();
 			const client = {} as unknown as OpenCodeAPI;
 			const engine = {
-				getProviderForSession: vi.fn(() => "claude"),
+				getProviderForSessionEffect: vi.fn(() => Effect.succeed("claude")),
 				dispatch: vi.fn(async () => ({
 					status: "completed",
 					cost: 0,
@@ -4350,11 +4576,16 @@ describe("handleMessage", () => {
 				getSessionStatus: vi.fn(() => Effect.succeed(undefined)),
 				getSession: vi.fn(() => Effect.succeed(undefined)),
 				getAllSessionStatuses: vi.fn(() => Effect.succeed({})),
+				getSessionsForReconciliation: () => Effect.succeed([]),
 				listSessions: vi.fn(() => Effect.succeed([])),
+				listSessionInfos: vi.fn(() => Effect.succeed([])),
 				readSessionTranscript: vi.fn(() =>
 					Effect.succeed({ messages: [], version: 0 }),
 				),
 				readSessionList: vi.fn(() => Effect.succeed({ rows: [], version: 0 })),
+				getSessionLineage: () => Effect.succeed({ rows: [], count: 0 }),
+				getSessionFamily: () => Effect.succeed([]),
+				countPendingApprovalsBySession: vi.fn(() => Effect.succeed([])),
 				getLatestTurnModelExecution: vi.fn(() => Effect.succeed(undefined)),
 				getSessionMessagesWithParts: vi.fn(() =>
 					Effect.succeed([
@@ -4483,7 +4714,7 @@ describe("handleMessage", () => {
 			const config = mockConfig();
 			const client = {} as unknown as OpenCodeAPI;
 			const engine = {
-				getProviderForSession: vi.fn(() => "claude"),
+				getProviderForSessionEffect: vi.fn(() => Effect.succeed("claude")),
 				dispatch: vi.fn(async () => ({
 					status: "completed",
 					cost: 0,
@@ -4568,7 +4799,7 @@ describe("handleMessage", () => {
 				]),
 			);
 			const renameSession = vi.fn(() => Effect.void);
-			const sendDualSessionLists = vi.fn((send) =>
+			const sendSessionLists = vi.fn((send) =>
 				Effect.sync(() => {
 					send({
 						type: "session_list",
@@ -4588,12 +4819,12 @@ describe("handleMessage", () => {
 			const sessionManagerService = makeMockSessionManagerService({
 				listSessions,
 				renameSession,
-				sendDualSessionLists,
+				sendSessionLists,
 			});
 			const config = mockConfig();
 			const client = {} as unknown as OpenCodeAPI;
 			const engine = {
-				getProviderForSession: vi.fn(() => "claude"),
+				getProviderForSessionEffect: vi.fn(() => Effect.succeed("claude")),
 				dispatch: vi.fn(async () => ({
 					status: "completed",
 					cost: 0,
@@ -4624,7 +4855,7 @@ describe("handleMessage", () => {
 
 				expect(listSessions).not.toHaveBeenCalled();
 				expect(renameSession).not.toHaveBeenCalled();
-				expect(sendDualSessionLists).not.toHaveBeenCalled();
+				expect(sendSessionLists).not.toHaveBeenCalled();
 				expect(ws.broadcast).not.toHaveBeenCalled();
 				expect(legacyListSessions).not.toHaveBeenCalled();
 				expect(legacyRenameSession).not.toHaveBeenCalled();
@@ -4651,16 +4882,16 @@ describe("handleMessage", () => {
 			]),
 		);
 		const renameSession = vi.fn(() => Effect.void);
-		const sendDualSessionLists = vi.fn(() => Effect.void);
+		const sendSessionLists = vi.fn(() => Effect.void);
 		const sessionManagerService = makeMockSessionManagerService({
 			listSessions,
 			renameSession,
-			sendDualSessionLists,
+			sendSessionLists,
 		});
 		const config = mockConfig();
 		const client = {} as unknown as OpenCodeAPI;
 		const engine = {
-			getProviderForSession: vi.fn(() => "claude"),
+			getProviderForSessionEffect: vi.fn(() => Effect.succeed("claude")),
 			dispatch: vi.fn(async () => ({
 				status: "completed",
 				cost: 0,
@@ -4691,7 +4922,7 @@ describe("handleMessage", () => {
 
 			expect(listSessions).not.toHaveBeenCalled();
 			expect(renameSession).not.toHaveBeenCalled();
-			expect(sendDualSessionLists).not.toHaveBeenCalled();
+			expect(sendSessionLists).not.toHaveBeenCalled();
 		}).pipe(Effect.provide(layer));
 	});
 
@@ -4716,7 +4947,7 @@ describe("handleMessage", () => {
 			);
 			const sessionManagerService = makeMockSessionManagerService({
 				createSession: serviceCreateSession,
-				sendDualSessionLists: vi.fn(() => Effect.void),
+				sendSessionLists: vi.fn(() => Effect.void),
 			});
 			const config = mockConfig();
 			const client = {} as unknown as OpenCodeAPI;
@@ -4734,22 +4965,35 @@ describe("handleMessage", () => {
 						parent_id: null,
 						fork_point_event: null,
 						last_message_at: null,
+						last_turn_error_at: null,
 						permission_mode: null,
+						read_at: null,
+						settled_at: null,
+						pinned_at: null,
+						snoozed_at: null,
+						snoozed_until: null,
+						woken_at: null,
+						woken_reason: null,
 						created_at: 1,
 						updated_at: 1,
 					}),
 				),
 				getAllSessionStatuses: vi.fn(() => Effect.succeed({})),
+				getSessionsForReconciliation: () => Effect.succeed([]),
 				listSessions: vi.fn(() => Effect.succeed([])),
+				listSessionInfos: vi.fn(() => Effect.succeed([])),
 				readSessionTranscript: vi.fn(() =>
 					Effect.succeed({ messages: [], version: 0 }),
 				),
 				readSessionList: vi.fn(() => Effect.succeed({ rows: [], version: 0 })),
+				getSessionLineage: () => Effect.succeed({ rows: [], count: 0 }),
+				getSessionFamily: () => Effect.succeed([]),
+				countPendingApprovalsBySession: vi.fn(() => Effect.succeed([])),
 				getLatestTurnModelExecution: vi.fn(() => Effect.succeed(undefined)),
 				getSessionMessagesWithParts: vi.fn(() => Effect.succeed([])),
 			} satisfies ReadQueryEffect;
 			const engine = {
-				getProviderForSession: vi.fn(() => undefined),
+				getProviderForSessionEffect: vi.fn(() => Effect.succeed(undefined)),
 				bindSession: vi.fn(),
 				dispatch: vi.fn(async () => ({
 					status: "completed",
@@ -4840,7 +5084,7 @@ describe("handleMessage", () => {
 			const client = {} as unknown as OpenCodeAPI;
 			const dispatchError = new Error("dispatch failed");
 			const engine = {
-				getProviderForSession: vi.fn(() => "claude"),
+				getProviderForSessionEffect: vi.fn(() => Effect.succeed("claude")),
 				dispatch: vi.fn(async (command: { readonly type: string }) => {
 					if (command.type === "discover") {
 						return {
@@ -4959,7 +5203,7 @@ describe("handleMessage", () => {
 
 	it.effect("clears ownership when model discovery prevents dispatch", () => {
 		const engine = withDispatchEffect({
-			getProviderForSession: vi.fn(() => "claude"),
+			getProviderForSessionEffect: vi.fn(() => Effect.succeed("claude")),
 			dispatch: vi.fn(async () => ({ models: [] })),
 		} as unknown as OrchestrationEngine);
 		const layer = Layer.mergeAll(

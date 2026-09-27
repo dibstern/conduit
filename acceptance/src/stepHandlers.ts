@@ -18,7 +18,7 @@ import {
 	type WsMockControl,
 } from "../../test/e2e/helpers/ws-mock.js";
 import { InputPage } from "../../test/e2e/page-objects/input.page.js";
-import { PlaywrightDriver } from "./playwrightDriver.js";
+import { PHONE_VIEWPORT, PlaywrightDriver } from "./playwrightDriver.js";
 import type { AcceptanceLifecycle, StepHandler } from "./runtime.js";
 import { currentVisualMode } from "./visualMode.js";
 
@@ -126,7 +126,167 @@ function thresholdExampleValue(
 	return threshold;
 }
 
+// The frontend only honours a session_switched for the session its route
+// names, so a step that switches sessions first moves the route there.
+const openSessionRoute = (page: Page, sessionId: string) =>
+	page.evaluate((id) => {
+		history.pushState(null, "", `/s/${encodeURIComponent(id)}`);
+		window.dispatchEvent(new PopStateEvent("popstate"));
+	}, sessionId);
+
 export const conduitVisualHandlers: StepHandler[] = [
+	{
+		name: "set phone viewport",
+		match: /^the viewport is a phone$/,
+		run: async ({ world }) => {
+			await world.driver.setViewport(world.page, PHONE_VIEWPORT);
+		},
+	},
+	{
+		name: "scroll transcript up",
+		match: /^I scroll the transcript up by ([0-9]+) pixels$/,
+		run: async ({ world, match }) => {
+			await world.page.locator("#messages").hover();
+			await world.page.mouse.wheel(0, -Number(match[1]));
+		},
+	},
+	{
+		name: "scroll transcript to bottom",
+		match: /^I scroll the transcript back to the bottom$/,
+		run: async ({ world }) => {
+			await world.page.locator("#messages").evaluate((el) => {
+				el.scrollTo({ top: el.scrollHeight });
+			});
+		},
+	},
+	{
+		name: "assert jump-to-latest visibility",
+		match: /^the jump-to-latest control is (visible|not visible)$/,
+		run: async ({ world, match }) => {
+			const button = world.page.locator("#messages #scroll-btn");
+			await button.waitFor({ state: "attached" });
+			await button.waitFor({
+				state: match[1] === "visible" ? "visible" : "hidden",
+			});
+		},
+	},
+	{
+		// Geometry, not class names: the point of bar 18 is that a phone can see
+		// which session it is in without scrolling, and only the rendered boxes
+		// can say whether that is true.
+		name: "session bar title sits above the transcript",
+		match: /^the session bar title is above the transcript$/,
+		run: async ({ world }) => {
+			const title = world.page.locator("[data-testid='session-bar-title']");
+			await title.waitFor({ state: "visible" });
+			const titleBox = await title.boundingBox();
+			const transcriptBox = await world.page.locator("#messages").boundingBox();
+			if (!titleBox || !transcriptBox) {
+				throw new Error("session bar title or transcript has no layout box");
+			}
+			if (titleBox.y + titleBox.height > transcriptBox.y + 1) {
+				throw new Error(
+					`session bar title overlaps the transcript: title ends at ${
+						titleBox.y + titleBox.height
+					}, transcript starts at ${transcriptBox.y}`,
+				);
+			}
+		},
+	},
+	{
+		// The session bar REPLACES the header at this width rather than stacking
+		// under it, so the header must be absent from the DOM, not merely hidden:
+		// two stacked bars was the bug bar 18 exists to fix.
+		name: "global header is not rendered",
+		match: /^the global header is not rendered$/,
+		run: async ({ world }) => {
+			const count = await world.page.locator("#header").count();
+			if (count !== 0) {
+				throw new Error(`expected no #header on a phone, found ${count}`);
+			}
+		},
+	},
+	{
+		name: "tap back to the session list",
+		match: /^I tap back to the session list$/,
+		run: async ({ world }) => {
+			await world.page.locator("[data-testid='session-bar-back']").click();
+		},
+	},
+	{
+		name: "session list is open",
+		match: /^the session list is open$/,
+		run: async ({ world }) => {
+			await world.page.waitForFunction(
+				() => new URL(window.location.href).pathname === "/",
+			);
+			await world.page
+				.locator("#sidebar-panel-sessions")
+				.waitFor({ state: "visible" });
+		},
+	},
+	{
+		// Geometry as well as the attribute. `data-collapsed` is what the CSS keys
+		// on, so checking it alone would pass a regression where the attribute
+		// flips correctly and the grid template does not — which is exactly the
+		// failure this ticket's whole layout is one edit away from.
+		name: "session bar collapse state",
+		match: /^the session bar is (collapsed|expanded)$/,
+		run: async ({ world, match }) => {
+			const want = match[1] === "collapsed";
+			const bar = world.page.locator("#session-bar");
+			await bar.waitFor({ state: "attached" });
+			// Polled by hand rather than through waitForFunction so the failure can
+			// name the state it actually found. A bare timeout here says only "the
+			// bar was wrong", which is the least useful half of the answer.
+			const read = () =>
+				bar.evaluate((el) => ({
+					collapsed: el.getAttribute("data-collapsed") === "true",
+					height: el.getBoundingClientRect().height,
+					compact: matchMedia("(max-width: 767px)").matches,
+				}));
+			// The collapsed row is 46px in the design; expanded is two bands and
+			// necessarily taller. 50 separates them with room for the border and
+			// subpixel rounding without being a second definition of the number.
+			const ok = (s: { collapsed: boolean; height: number }) =>
+				s.collapsed === want && (want ? s.height <= 50 : s.height > 50);
+			let state = await read();
+			for (let i = 0; i < 50 && !ok(state); i++) {
+				await world.page.waitForTimeout(100);
+				state = await read();
+			}
+			if (!ok(state)) {
+				throw new Error(
+					`expected the session bar to be ${match[1]}, found data-collapsed=${state.collapsed} height=${state.height} compact=${state.compact}`,
+				);
+			}
+		},
+	},
+	{
+		name: "tap the chevron to show the bar",
+		match: /^I tap the chevron to show the bar$/,
+		run: async ({ world }) => {
+			await world.page.locator("[data-testid='session-bar-expand']").click();
+		},
+	},
+	{
+		// The chevron expands the bar, which shrinks the scroll container. If the
+		// transcript is not re-pinned the newest message slides off the bottom —
+		// pressing a control to see more chrome must not cost you your place.
+		name: "transcript is pinned to the bottom",
+		match: /^the transcript is pinned to the bottom$/,
+		run: async ({ world }) => {
+			await world.page.waitForFunction(
+				() => {
+					const el = document.querySelector("#messages");
+					if (!el) return false;
+					return el.scrollHeight - el.scrollTop - el.clientHeight < 5;
+				},
+				undefined,
+				{ timeout: 5_000 },
+			);
+		},
+	},
 	{
 		name: "serve conduit with mockup state",
 		match: /^the conduit app is served with the ([a-z0-9-]+) mockup$/,
@@ -156,6 +316,8 @@ export const conduitVisualHandlers: StepHandler[] = [
 			let createdSessionInstance: string | undefined;
 			const rpcControl = await mockWsRpc(world.page, {
 				handlers: {
+					ResolveSession: async () => ({ projectSlug: "myapp" }),
+					ViewSession: async () => ({ ok: true }),
 					GetClaudeSettings: async () => ({
 						projectSlug: "myapp",
 						overrides: mockClaudeSettings.get(page) ?? {},
@@ -310,8 +472,15 @@ export const conduitVisualHandlers: StepHandler[] = [
 
 			const baseUrl =
 				process.env["CONDUIT_BASE_URL"] ?? "http://localhost:4173";
+			const initialSession = modelExecutionMockup?.initMessages.find(
+				(message) => message.type === "session_switched",
+			)?.["id"];
+			const initialPath =
+				typeof initialSession === "string"
+					? `/s/${encodeURIComponent(initialSession)}`
+					: "/?p=myapp";
 			try {
-				await world.page.goto(new URL("/p/myapp/", baseUrl).toString());
+				await world.page.goto(new URL(initialPath, baseUrl).toString());
 				await world.page.locator("#layout").waitFor({
 					state: "attached",
 					timeout: 30_000,
@@ -443,6 +612,7 @@ export const conduitVisualHandlers: StepHandler[] = [
 		run: async ({ world }) => {
 			const relayControl = relayControls.get(world.page);
 			if (!relayControl) throw new Error("Mock relay was not initialised");
+			await openSessionRoute(world.page, "sess-subagent");
 			relayControl.sendMessage({
 				type: "session_switched",
 				id: "sess-subagent",
@@ -550,10 +720,13 @@ export const conduitVisualHandlers: StepHandler[] = [
 		run: async ({ world, match }) => {
 			const harness = match[1] ?? "";
 			const relayControl = requireRelayControl(world.page);
+			const claude = instanceIdForLabel(harness) === "claude";
+			await openSessionRoute(
+				world.page,
+				claude ? "sess-bound-claude" : "sess-bound-opencode",
+			);
 			await relayControl.sendMessages(
-				instanceIdForLabel(harness) === "claude"
-					? claudeBoundSessionMessages
-					: openCodeBoundSessionMessages,
+				claude ? claudeBoundSessionMessages : openCodeBoundSessionMessages,
 			);
 			// Wait until the binding reached the UI (trigger reflects the harness).
 			await world.page.waitForFunction(
@@ -759,7 +932,8 @@ export const conduitVisualHandlers: StepHandler[] = [
 	{
 		name: "set claude settings session active",
 		match: /^the Claude settings session is active$/,
-		run: ({ world }) => {
+		run: async ({ world }) => {
+			await openSessionRoute(world.page, claudeSettingsSessionId);
 			requireRelayControl(world.page).sendMessage({
 				type: "session_switched",
 				id: claudeSettingsSessionId,

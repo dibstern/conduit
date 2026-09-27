@@ -1,5 +1,9 @@
 import type { Meta, StoryObj } from "@storybook/svelte-vite";
-import { mockSystemError, mockSystemInfo } from "../../stories/mocks.js";
+import {
+	mockSystemError,
+	mockSystemErrorWithDetails,
+	mockSystemInfo,
+} from "../../stories/mocks.js";
 import SystemMessage from "./SystemMessage.svelte";
 
 const meta = {
@@ -17,4 +21,31 @@ export const Info: Story = {
 
 export const ErrorState: Story = {
 	args: { message: mockSystemError },
+};
+
+export const WithDetails: Story = {
+	args: { message: mockSystemErrorWithDetails },
+};
+
+/**
+ * Hovers the details-bearing card, not the plain info card. The info card has no
+ * hover treatment by design — it is inert — so a hover story over it captured a
+ * frame byte-identical to Info and asserted nothing (conduit-test-wzat).
+ */
+export const Hover: Story = {
+	...WithDetails,
+	parameters: { pseudo: { hover: true } },
+};
+
+/** A failed compaction stays a standalone notice: it is a failure, not a boundary. */
+export const CompactionFailed: Story = {
+	args: {
+		message: {
+			type: "system",
+			uuid: "compaction-failed",
+			text: "Compaction failed: prompt is too long",
+			variant: "error",
+			compaction: "failed",
+		},
+	},
 };

@@ -1,14 +1,12 @@
 // ─── Router Store ────────────────────────────────────────────────────────────
-// Simple client-side routing for 5 routes. No library needed.
-// Routes: /auth, /setup, /, /p/:slug/, /p/:slug/s/:sessionId
+// Routes: /auth, /setup, / (session list), /s/:sessionId.
 
 // ─── Route types ────────────────────────────────────────────────────────────
 
 export type Route =
 	| { page: "auth" }
 	| { page: "setup" }
-	| { page: "dashboard" }
-	| { page: "chat"; slug: string; sessionId?: string };
+	| { page: "chat"; sessionId?: string };
 
 export interface RouteTransition {
 	from: string;
@@ -20,32 +18,43 @@ const MAX_TRANSITION_LOG = 50;
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
-/** Strip query string and hash from a path, returning only the pathname. */
-function stripQuery(path: string): string {
-	const qIdx = path.indexOf("?");
-	const hIdx = path.indexOf("#");
-	if (qIdx === -1 && hIdx === -1) return path;
-	const end = qIdx === -1 ? hIdx : hIdx === -1 ? qIdx : Math.min(qIdx, hIdx);
-	return path.slice(0, end);
+/** Split a path into its pathname and raw search string, discarding the hash. */
+function splitPath(path: string): { pathname: string; search: string } {
+	const hashIndex = path.indexOf("#");
+	const pathWithoutHash = hashIndex === -1 ? path : path.slice(0, hashIndex);
+	const queryIndex = pathWithoutHash.indexOf("?");
+	if (queryIndex === -1) {
+		return { pathname: pathWithoutHash, search: "" };
+	}
+
+	const pathname = pathWithoutHash.slice(0, queryIndex);
+	const query = pathWithoutHash.slice(queryIndex + 1);
+	return { pathname, search: query ? `?${query}` : "" };
 }
 
-/** Extract slug from a pathname (e.g. "/p/my-project/s/abc" → "my-project"). */
-function extractSlug(path: string): string | null {
-	const match = path.match(/^\/p\/([^/]+)/);
-	// biome-ignore lint/style/noNonNullAssertion: safe — regex match guarantees capture group
-	return match ? match[1]! : null;
-}
+/** The sidebar's project scope (`?p=<slug>`). Read and written through
+ *  stores/session-scope.ts; declared here because navigation has to carry it. */
+export const SCOPE_PARAM = "p";
+export const STATUS_PARAM = "status";
+export const GROUP_PARAM = "group";
 
 /**
- * Update slugState.current if the slug extracted from the path differs.
- * Call this whenever routerState.path is written.
- * Exported for test use when setting routerState.path directly.
+ * Keeps sidebar list parameters across a move to another page that names no query of its
+ * own. Every session switch, new session and project hop navigates to a bare
+ * path, and on desktop the list stays on screen through all of them: dropping
+ * these there would silently change the list the user just arranged. A
+ * same-page navigation is taken literally, which is how clearing a parameter
+ * works.
  */
-export function syncSlugState(path: string): void {
-	const slug = extractSlug(path);
-	if (slug !== slugState.current) {
-		slugState.current = slug;
+function carryScope(pathname: string, search: string): string {
+	if (search || pathname === routerState.path) return search;
+	const current = new URLSearchParams(routerState.search);
+	const carried = new URLSearchParams();
+	for (const key of [SCOPE_PARAM, STATUS_PARAM, GROUP_PARAM]) {
+		const value = current.get(key);
+		if (value) carried.set(key, value);
 	}
+	return carried.size ? `?${carried}` : "";
 }
 
 // ─── Transition log (dev-mode route debugging) ─────────────────────────────
@@ -75,23 +84,13 @@ export function clearTransitionLog(): void {
 
 export const routerState = $state({
 	path: typeof window !== "undefined" ? window.location.pathname : "/",
+	search: typeof window !== "undefined" ? window.location.search : "",
+	sessionNotFound: false,
 });
 
-/**
- * Stable slug state — only changes when the project slug actually changes.
- *
- * Unlike `getCurrentSlug()` (which reads `routerState.path` and creates a
- * reactive dependency on the full path), `slugState.current` is a separate
- * `$state` that is updated on every `routerState.path` write but only
- * triggers dependents when the slug itself changes.
- *
- * **Use this in `$effect` blocks** where you need to react to project changes
- * (e.g., WebSocket connect/disconnect) without re-firing on session changes.
- */
-export const slugState = $state({
-	current: extractSlug(
-		typeof window !== "undefined" ? window.location.pathname : "/",
-	),
+/** The daemon sets the attached project through project_attached messages. */
+export const attachedProjectState = $state({
+	slug: null as string | null,
 });
 
 // ─── Derived getters ────────────────────────────────────────────────────────
@@ -110,33 +109,43 @@ export function getCurrentRoute(): Route {
 		return { page: "setup" };
 	}
 
-	// Match /p/:slug/s/:sessionId (before the plain /p/:slug/ match)
-	const sessionMatch = path.match(/^\/p\/([^/]+)\/s\/([^/]+)\/?$/);
+	// Legacy session links remain readable until App normalizes the address.
+	const sessionMatch = path.match(/^(?:\/p\/[^/]+)?\/s\/([^/]+)\/?$/);
 	if (sessionMatch) {
 		return {
 			page: "chat",
 			// biome-ignore lint/style/noNonNullAssertion: safe — regex match guarantees capture group
-			slug: sessionMatch[1]!,
-			// biome-ignore lint/style/noNonNullAssertion: safe — regex match guarantees capture group
-			sessionId: sessionMatch[2]!,
+			sessionId: sessionMatch[1]!,
 		};
 	}
 
-	// Match /p/:slug/ or /p/:slug
-	const slugMatch = path.match(/^\/p\/([^/]+)\/?$/);
-	if (slugMatch) {
-		// biome-ignore lint/style/noNonNullAssertion: safe — regex match guarantees capture group
-		return { page: "chat", slug: slugMatch[1]! };
-	}
-
-	// Root or fallback = dashboard
-	return { page: "dashboard" };
+	return { page: "chat" };
 }
 
-/** Get the current project slug (null if not on a chat page). */
+/** Replace old bookmarks and unknown paths without adding a history entry. */
+export function normalizeRoute(): void {
+	const path = routerState.path;
+	const legacySession = path.match(/^\/p\/[^/]+\/s\/([^/]+)\/?$/);
+	if (legacySession) {
+		replaceRoute(`/s/${legacySession[1]}${routerState.search}`);
+		return;
+	}
+	const legacyProject = path.match(/^\/p\/([^/]+)\/?$/);
+	if (legacyProject?.[1]) {
+		const params = getCurrentSearchParams();
+		params.set(SCOPE_PARAM, legacyProject[1]);
+		replaceRoute(`/?${params}`);
+		return;
+	}
+	if (!/^\/(?:s\/[^/]+\/?|auth\/?|setup\/?)?$/.test(path)) {
+		replaceRoute(`/${routerState.search}`);
+	}
+}
+
+/** Use the daemon's attached project, or the route hint before the first attach. */
 export function getCurrentSlug(): string | null {
-	const route = getCurrentRoute();
-	return route.page === "chat" ? route.slug : null;
+	if (attachedProjectState.slug !== null) return attachedProjectState.slug;
+	return getCurrentSearchParams().get(SCOPE_PARAM);
 }
 
 /** Get the current session ID from the URL (null if not present). */
@@ -145,14 +154,29 @@ export function getCurrentSessionId(): string | null {
 	return route.page === "chat" ? (route.sessionId ?? null) : null;
 }
 
+/** Get the current URL search parameters. */
+export function getCurrentSearchParams(): URLSearchParams {
+	return new URLSearchParams(routerState.search);
+}
+
 /**
  * Get the href for a session link (for use in `<a>` elements).
- * Returns `/p/:slug/s/:sessionId` or null if not on a chat route.
+ * Session addresses are independent of their owning project.
  */
-export function getSessionHref(sessionId: string): string | null {
-	const slug = getCurrentSlug();
-	if (!slug) return null;
-	return `/p/${slug}/s/${sessionId}`;
+export function getSessionHref(sessionId: string): string {
+	return `/s/${sessionId}`;
+}
+
+/** Whether this history entry was pushed from the app's session-list route. */
+export function previousHistoryEntryIsSessionList(): boolean {
+	if (typeof window === "undefined") return false;
+	const state: unknown = window.history.state;
+	return (
+		typeof state === "object" &&
+		state !== null &&
+		"conduitFrom" in state &&
+		state.conduitFrom === "/"
+	);
 }
 
 // ─── Actions ────────────────────────────────────────────────────────────────
@@ -162,13 +186,23 @@ function applyRoute(
 	path: string,
 	historyMethod: "pushState" | "replaceState",
 ): void {
-	const pathname = stripQuery(path);
-	if (pathname === routerState.path) return;
-	const from = routerState.path;
-	window.history[historyMethod](null, "", path);
+	const { pathname, search: requestedSearch } = splitPath(path);
+	const search = path.split("#", 1)[0]?.includes("?")
+		? requestedSearch
+		: carryScope(pathname, requestedSearch);
+	if (pathname === routerState.path && search === routerState.search) return;
+	const from = routerState.path + routerState.search;
+	const to = pathname + search;
+	// A push records the page it left so SessionBar back can use history.back();
+	// a replace keeps that record.
+	const state: unknown =
+		historyMethod === "pushState"
+			? { conduitFrom: routerState.path }
+			: window.history.state;
+	window.history[historyMethod](state, "", to);
 	routerState.path = pathname;
-	syncSlugState(pathname);
-	recordTransition(from, pathname);
+	routerState.search = search;
+	recordTransition(from, to);
 }
 
 /** Navigate to a new path using pushState. */
@@ -186,6 +220,6 @@ export function replaceRoute(path: string): void {
 if (typeof window !== "undefined") {
 	window.addEventListener("popstate", () => {
 		routerState.path = window.location.pathname;
-		syncSlugState(window.location.pathname);
+		routerState.search = window.location.search;
 	});
 }

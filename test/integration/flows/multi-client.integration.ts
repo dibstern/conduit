@@ -77,7 +77,7 @@ describe("Integration: Multi-Client", () => {
 
 		// The other client receives session_list broadcast (not session_switched)
 		// since CreateSession only switches the requesting client's tab.
-		// sendDualSessionLists sends roots then all — use a predicate to wait
+		// sendSessionLists sends roots then all — use a predicate to wait
 		// for the list that actually contains the new session ID.
 		const list2 = await client2.waitFor("session_list", {
 			timeout: 5000,

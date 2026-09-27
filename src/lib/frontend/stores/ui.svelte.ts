@@ -7,9 +7,10 @@ import { generateUuid } from "../utils/format.js";
 // ─── Constants ──────────────────────────────────────────────────────────────
 
 const SIDEBAR_STORAGE_KEY = "sidebar-collapsed";
+const SETTLED_SHELF_STORAGE_KEY = "settled-shelf-open";
+const SNOOZED_SHELF_STORAGE_KEY = "snoozed-shelf-open";
 const SIDEBAR_WIDTH_KEY = "sidebar-width";
 const FILE_VIEWER_WIDTH_KEY = "file-viewer-width";
-const HIDE_SUBAGENT_SESSIONS_KEY = "hide-subagent-sessions";
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
@@ -32,12 +33,10 @@ export const FILE_VIEWER_MAX_WIDTH = 70; // percentage
 export const uiState = $state({
 	// Sidebar
 	sidebarCollapsed: safeGetItem(SIDEBAR_STORAGE_KEY) === "true",
+	settledShelfOpen: safeGetItem(SETTLED_SHELF_STORAGE_KEY) === "true",
+	snoozedShelfOpen: safeGetItem(SNOOZED_SHELF_STORAGE_KEY) === "true",
 	sidebarPanel: "sessions" as "sessions" | "files",
-	mobileSidebarOpen: false,
 	sidebarWidth: Number(safeGetItem(SIDEBAR_WIDTH_KEY)) || SIDEBAR_DEFAULT_WIDTH,
-
-	// Subagent sessions filter
-	hideSubagentSessions: safeGetItem(HIDE_SUBAGENT_SESSIONS_KEY) !== "false",
 
 	// Toasts
 	toasts: [] as Toast[],
@@ -114,14 +113,6 @@ export function toggleSidebar(): void {
 	}
 }
 
-export function openMobileSidebar(): void {
-	uiState.mobileSidebarOpen = true;
-}
-
-export function closeMobileSidebar(): void {
-	uiState.mobileSidebarOpen = false;
-}
-
 export function setSidebarPanel(panel: "sessions" | "files"): void {
 	uiState.sidebarPanel = panel;
 }
@@ -139,17 +130,21 @@ export function setSidebarWidth(width: number): void {
 	}
 }
 
-// ─── Subagent sessions filter ───────────────────────────────────────────────
-
-export function toggleHideSubagentSessions(): void {
-	uiState.hideSubagentSessions = !uiState.hideSubagentSessions;
+export function setSettledShelfOpen(open: boolean): void {
+	uiState.settledShelfOpen = open;
 	try {
-		localStorage.setItem(
-			HIDE_SUBAGENT_SESSIONS_KEY,
-			String(uiState.hideSubagentSessions),
-		);
+		localStorage.setItem(SETTLED_SHELF_STORAGE_KEY, String(open));
 	} catch {
-		/* ignore */
+		/* Storage may be unavailable; keep the in-memory preference. */
+	}
+}
+
+export function setSnoozedShelfOpen(open: boolean): void {
+	uiState.snoozedShelfOpen = open;
+	try {
+		localStorage.setItem(SNOOZED_SHELF_STORAGE_KEY, String(open));
+	} catch {
+		/* Storage may be unavailable; keep the in-memory preference. */
 	}
 }
 
@@ -157,13 +152,18 @@ export function toggleHideSubagentSessions(): void {
 
 export function showToast(
 	message: string,
-	options?: { duration?: number; variant?: ToastVariant },
+	options?: {
+		duration?: number;
+		variant?: ToastVariant;
+		action?: Toast["action"];
+	},
 ): void {
 	const toast: Toast = {
 		id: generateUuid(),
 		message,
 		variant: options?.variant ?? "default",
 		duration: options?.duration ?? 7000,
+		...(options?.action ? { action: options.action } : {}),
 	};
 	uiState.toasts = [...uiState.toasts, toast];
 
@@ -335,6 +335,4 @@ export function resetProjectUI(): void {
 	uiState.fileViewerPath = null;
 	uiState.openPanels = new Set();
 	uiState.banners = [];
-	// Close mobile sidebar overlay so the app isn't blocked after project switch.
-	uiState.mobileSidebarOpen = false;
 }

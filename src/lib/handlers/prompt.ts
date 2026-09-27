@@ -98,6 +98,35 @@ export const sendMessageToSession = (input: SendMessageToSessionInput) =>
 			...(sessionModel ? { model: sessionModel } : {}),
 			modelUserSelected: sessionModelUserSelected,
 		});
+		// Talking to a settled or snoozed session brings it back. Triage bookkeeping must
+		// never stop the message itself, so a failure here is only logged.
+		yield* Effect.gen(function* () {
+			const unsnoozed = yield* sessionManagerService
+				.unsnoozeSession(activeId)
+				.pipe(
+					Effect.catchAll((error) =>
+						Effect.sync(() => {
+							log.warn(`Failed to un-snooze ${activeId}: ${String(error)}`);
+							return false;
+						}),
+					),
+				);
+			const unsettled = yield* sessionManagerService.setSessionSettled(
+				activeId,
+				false,
+			);
+			if (unsnoozed || unsettled) {
+				yield* sessionManagerService.sendSessionLists((msg) =>
+					wsHandler.broadcast(msg),
+				);
+			}
+		}).pipe(
+			Effect.catchAll((error) =>
+				Effect.sync(() =>
+					log.warn(`Failed to un-settle ${activeId}: ${String(error)}`),
+				),
+			),
+		);
 		log.info(
 			`client=${clientId} session=${activeId} → ${text.slice(0, 80)}${text.length > 80 ? "…" : ""}`,
 		);

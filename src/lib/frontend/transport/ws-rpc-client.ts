@@ -1,7 +1,9 @@
 import { Effect } from "effect";
 import type { ClaudeSettingsOverrides } from "../../contracts/claude-settings.js";
 import { ProviderInstanceIdSchema } from "../../contracts/provider-instance.js";
+import type { GetSkillContentResponse } from "../../contracts/ws-rpc.js";
 import type { SessionPermissionMode } from "../../shared-types.js";
+import { getCurrentSlug } from "../stores/router.svelte.js";
 import { runTransportEffect } from "./runtime.js";
 import { type WsRpcClient, WsRpcClients } from "./shared-client.js";
 
@@ -23,6 +25,7 @@ import type {
 	GetTodoResponse,
 	GetToolContentResponse,
 	InstanceListResponse,
+	ListDaemonSessionsResponse,
 	ListDirectoriesResponse,
 	ListSessionsResponse,
 	LoadMoreHistoryResponse,
@@ -73,7 +76,7 @@ export interface GetProjectsRpcInput {
 }
 
 export interface AddProjectRpcInput {
-	readonly projectSlug: string;
+	readonly projectSlug?: string;
 	readonly directory: string;
 	readonly instanceId?: string;
 }
@@ -174,6 +177,11 @@ export interface ViewSessionRpcInput {
 	readonly requestId?: string;
 }
 
+export interface AttachProjectRpcInput {
+	readonly projectSlug: string;
+	readonly originId: string;
+}
+
 export interface DeleteSessionRpcInput {
 	readonly projectSlug: string;
 	readonly sessionId: string;
@@ -234,6 +242,11 @@ export interface GetFileContentRpcInput {
 export interface GetToolContentRpcInput {
 	readonly projectSlug: string;
 	readonly toolId: string;
+}
+
+export interface GetSkillContentRpcInput {
+	readonly projectSlug: string;
+	readonly name: string;
 }
 
 export interface ListDirectoriesRpcInput {
@@ -312,6 +325,40 @@ export interface RenameSessionRpcInput {
 	readonly originId?: string;
 }
 
+export interface SetSessionSettledRpcInput {
+	readonly projectSlug: string;
+	readonly sessionId: string;
+	readonly settled: boolean;
+	readonly originId?: string;
+}
+
+export interface SetSessionPinnedRpcInput {
+	readonly projectSlug: string;
+	readonly sessionId: string;
+	readonly pinned: boolean;
+	readonly originId?: string;
+}
+
+export interface SetSessionAutoSettleRpcInput {
+	readonly projectSlug: string;
+	readonly sessionId: string;
+	readonly disabled: boolean;
+	readonly originId?: string;
+}
+
+export interface SnoozeSessionRpcInput {
+	readonly projectSlug: string;
+	readonly sessionId: string;
+	readonly until: number | null;
+	readonly originId?: string;
+}
+
+export interface UnsnoozeSessionRpcInput {
+	readonly projectSlug: string;
+	readonly sessionId: string;
+	readonly originId?: string;
+}
+
 export interface SwitchVariantRpcInput {
 	readonly projectSlug: string;
 	readonly sessionId: string;
@@ -330,6 +377,18 @@ export interface ListSessionsRpcInput {
 	readonly projectSlug: string;
 	readonly roots?: boolean;
 	readonly query?: string;
+}
+
+export interface ListDaemonSessionsRpcInput {
+	readonly projectSlug: string;
+	readonly limit?: number;
+	readonly roots?: boolean;
+	readonly search?: string;
+	readonly cursor?: {
+		readonly updatedAt: number;
+		readonly id: string;
+	};
+	readonly scope?: string;
 }
 
 export interface LoadMoreHistoryRpcInput {
@@ -366,12 +425,14 @@ export interface SetLogLevelRpcInput {
 }
 
 const callControl = <A, E>(
-	projectSlug: string,
+	projectSlug: string | undefined,
 	call: (client: WsRpcClient) => Effect.Effect<A, E>,
 ): Effect.Effect<A, E, WsRpcClients> =>
 	Effect.gen(function* () {
 		const clients = yield* WsRpcClients;
-		const { control } = yield* clients.forProject(projectSlug);
+		const { control } = yield* clients.forProject(
+			projectSlug ?? getCurrentSlug() ?? "",
+		);
 		return yield* call(control);
 	});
 
@@ -479,6 +540,11 @@ const callViewSession = (input: ViewSessionRpcInput) =>
 		client.ViewSession(input).pipe(Effect.asVoid),
 	);
 
+const callAttachProject = (input: AttachProjectRpcInput) =>
+	callControl(input.projectSlug, (client) =>
+		client.AttachProject(input).pipe(Effect.asVoid),
+	);
+
 const callDeleteSession = (input: DeleteSessionRpcInput) =>
 	callControl(input.projectSlug, (client) =>
 		client
@@ -561,6 +627,9 @@ const callGetFileContent = (input: GetFileContentRpcInput) =>
 
 const callGetToolContent = (input: GetToolContentRpcInput) =>
 	callControl(input.projectSlug, (client) => client.GetToolContent(input));
+
+const callGetSkillContent = (input: GetSkillContentRpcInput) =>
+	callControl(input.projectSlug, (client) => client.GetSkillContent(input));
 
 const callListDirectories = (input: ListDirectoriesRpcInput) =>
 	callControl(input.projectSlug, (client) => client.ListDirectories(input));
@@ -668,6 +737,31 @@ const callRenameSession = (input: RenameSessionRpcInput) =>
 			.pipe(Effect.asVoid),
 	);
 
+const callSetSessionSettled = (input: SetSessionSettledRpcInput) =>
+	callControl(input.projectSlug, (client) =>
+		client.SetSessionSettled(input).pipe(Effect.asVoid),
+	);
+
+const callSetSessionPinned = (input: SetSessionPinnedRpcInput) =>
+	callControl(input.projectSlug, (client) =>
+		client.SetSessionPinned(input).pipe(Effect.asVoid),
+	);
+
+const callSetSessionAutoSettle = (input: SetSessionAutoSettleRpcInput) =>
+	callControl(input.projectSlug, (client) =>
+		client.SetSessionAutoSettle(input).pipe(Effect.asVoid),
+	);
+
+const callSnoozeSession = (input: SnoozeSessionRpcInput) =>
+	callControl(input.projectSlug, (client) =>
+		client.SnoozeSession(input).pipe(Effect.asVoid),
+	);
+
+const callUnsnoozeSession = (input: UnsnoozeSessionRpcInput) =>
+	callControl(input.projectSlug, (client) =>
+		client.UnsnoozeSession(input).pipe(Effect.asVoid),
+	);
+
 const callSwitchVariant = (input: SwitchVariantRpcInput) =>
 	callControl(input.projectSlug, (client) =>
 		client.SwitchVariant({
@@ -690,6 +784,9 @@ const callSwitchPermissionMode = (input: SwitchPermissionModeRpcInput) =>
 
 const callListSessions = (input: ListSessionsRpcInput) =>
 	callControl(input.projectSlug, (client) => client.ListSessions(input));
+
+const callListDaemonSessions = (input: ListDaemonSessionsRpcInput) =>
+	callControl(input.projectSlug, (client) => client.ListDaemonSessions(input));
 
 const callLoadMoreHistory = (input: LoadMoreHistoryRpcInput) =>
 	callControl(input.projectSlug, (client) => client.LoadMoreHistory(input));
@@ -860,6 +957,12 @@ export async function viewSessionRpc(
 	await runTransportEffect(callViewSession(input));
 }
 
+export async function attachProjectRpc(
+	input: AttachProjectRpcInput,
+): Promise<void> {
+	await runTransportEffect(callAttachProject(input));
+}
+
 export async function deleteSessionRpc(
 	input: DeleteSessionRpcInput,
 ): Promise<void> {
@@ -918,6 +1021,12 @@ export async function getToolContentRpc(
 	input: GetToolContentRpcInput,
 ): Promise<GetToolContentResponse> {
 	return await runTransportEffect(callGetToolContent(input));
+}
+
+export async function getSkillContentRpc(
+	input: GetSkillContentRpcInput,
+): Promise<GetSkillContentResponse> {
+	return await runTransportEffect(callGetSkillContent(input));
 }
 
 export async function listDirectoriesRpc(
@@ -992,6 +1101,54 @@ export async function renameSessionRpc(
 	await runTransportEffect(callRenameSession(input));
 }
 
+export async function setSessionSettledRpc(
+	input: SetSessionSettledRpcInput,
+): Promise<void> {
+	await runTransportEffect(callSetSessionSettled(input));
+}
+
+export async function setSessionPinnedRpc(
+	input: SetSessionPinnedRpcInput,
+): Promise<void> {
+	await runTransportEffect(callSetSessionPinned(input));
+}
+
+export async function setSessionAutoSettleRpc(
+	input: SetSessionAutoSettleRpcInput,
+): Promise<void> {
+	await runTransportEffect(callSetSessionAutoSettle(input));
+}
+
+export async function getAutoSettleSettingRpc(): Promise<number | null> {
+	const result = await runTransportEffect(
+		callControl(undefined, (client) => client.GetAutoSettleSetting({})),
+	);
+	return result.autoSettleAfterDays;
+}
+
+export async function setAutoSettleSettingRpc(
+	days: number | null,
+): Promise<number | null> {
+	const result = await runTransportEffect(
+		callControl(undefined, (client) =>
+			client.SetAutoSettleSetting({ autoSettleAfterDays: days }),
+		),
+	);
+	return result.autoSettleAfterDays;
+}
+
+export async function snoozeSessionRpc(
+	input: SnoozeSessionRpcInput,
+): Promise<void> {
+	await runTransportEffect(callSnoozeSession(input));
+}
+
+export async function unsnoozeSessionRpc(
+	input: UnsnoozeSessionRpcInput,
+): Promise<void> {
+	await runTransportEffect(callUnsnoozeSession(input));
+}
+
 export async function switchVariantRpc(
 	input: SwitchVariantRpcInput,
 ): Promise<SwitchVariantResponse> {
@@ -1008,6 +1165,25 @@ export async function listSessionsRpc(
 	input: ListSessionsRpcInput,
 ): Promise<ListSessionsResponse> {
 	return await runTransportEffect(callListSessions(input));
+}
+
+export interface ResolveSessionRpcInput {
+	readonly projectSlug?: string;
+	readonly sessionId: string;
+}
+
+export async function resolveSessionRpc(
+	input: ResolveSessionRpcInput,
+): Promise<{ readonly projectSlug: string | null }> {
+	return await runTransportEffect(
+		callControl(input.projectSlug, (client) => client.ResolveSession(input)),
+	);
+}
+
+export async function listDaemonSessionsRpc(
+	input: ListDaemonSessionsRpcInput,
+): Promise<ListDaemonSessionsResponse> {
+	return await runTransportEffect(callListDaemonSessions(input));
 }
 
 export async function loadMoreHistoryRpc(

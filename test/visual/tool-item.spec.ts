@@ -4,10 +4,13 @@
 
 import { expect, test } from "@playwright/test";
 
-const STORYBOOK = "http://localhost:6007";
-
 function storyUrl(storyId: string): string {
-	return `${STORYBOOK}/iframe.html?id=${storyId}&viewMode=story`;
+	// Relative, so Playwright resolves it against the config's baseURL. A
+	// hardcoded host pinned these specs to port 6007 no matter which port the
+	// run actually started — so a second worktree's run silently exercised the
+	// FIRST worktree's build, which is the exact failure `reuseExistingServer:
+	// false` was added to prevent. See conduit-test-afp.
+	return `/iframe.html?id=${storyId}&viewMode=story`;
 }
 
 // ─── ToolGenericCard ────────────────────────────────────────────────────────

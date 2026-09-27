@@ -40,7 +40,7 @@ export const approvalScene: SceneDefinition = {
 		});
 
 		await phase("navigate", async () => {
-			await page.goto(`${previewUrl}/p/myapp/`);
+			await page.goto(`${previewUrl}/s/sess-media-approval`);
 			await waitForFonts(page);
 			await waitForIcons(page);
 		});

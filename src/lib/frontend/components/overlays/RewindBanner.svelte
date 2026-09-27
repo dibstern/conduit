@@ -5,7 +5,9 @@
   conversation only, files only.
 -->
 <script lang="ts">
-	import Icon from "../shared/Icon.svelte";
+	import Icon from "../ui/Icon.svelte";
+	import Button from "../ui/Button.svelte";
+	import Radio from "../ui/Radio.svelte";
 	import Modal from "./Modal.svelte";
 	import {
 		uiState,
@@ -23,6 +25,7 @@
 	import { sessionState } from "../../stores/session.svelte.js";
 	import { getCurrentSlug } from "../../stores/router.svelte.js";
 	import { rewindSessionRpc } from "../../transport/ws-rpc-client.js";
+	import Surface from "../ui/Surface.svelte";
 
 	// ─── Props ──────────────────────────────────────────────────────────────────
 
@@ -119,20 +122,26 @@
 		class="rewind-banner flex items-center justify-between gap-3 px-4 py-2.5 bg-accent-bg border-b border-[rgba(var(--overlay-rgb),0.15)] text-accent text-sm font-medium"
 	>
 		<span class="rewind-banner-text">Select a message to rewind to</span>
-		<button
-			class="rewind-banner-exit flex items-center justify-center w-6 h-6 rounded bg-transparent border-none text-accent cursor-pointer hover:bg-[rgba(var(--overlay-rgb),0.06)]"
+		<Button
+			iconOnly
+			icon="x"
+			ariaLabel="Exit rewind mode"
+			variant="ghost-accent"
+			size="content"
+			class="rewind-banner-exit w-6 h-6 rounded"
 			title="Exit rewind mode"
 			onclick={handleExit}
-		>
-			<Icon name="x" size={16} />
-		</button>
+		/>
 	</div>
 {/if}
 
 <Modal open={showModal} onclose={handleCancel} labelledBy="rewind-modal-title">
-		<div
+		<Surface
+			variant="raised"
+			radius="lg"
+			elevation="modal"
 			id="rewind-modal"
-			class="modal-dialog bg-bg-alt border border-border rounded-xl py-5 px-6 max-w-80 w-[90vw] shadow-modal"
+			class="modal-dialog py-5 px-6 max-w-80 w-[90vw]"
 		>
 			<h3 id="rewind-modal-title" class="text-sm font-semibold text-text mb-4">
 				Rewind to this point?
@@ -143,12 +152,11 @@
 				<label
 					class="flex items-center gap-2.5 text-sm text-text cursor-pointer"
 				>
-					<input
-						type="radio"
+					<Radio
 						name="rewind-mode"
 						value="both"
-						bind:group={selectedMode}
-						class="rewind-radio accent-[var(--accent)]"
+						checked={selectedMode === "both"}
+						onchange={() => (selectedMode = "both")}
 					/>
 					<span>Both</span>
 					<span class="text-xs text-text-muted"
@@ -158,24 +166,22 @@
 				<label
 					class="flex items-center gap-2.5 text-sm text-text cursor-pointer"
 				>
-					<input
-						type="radio"
+					<Radio
 						name="rewind-mode"
 						value="conversation"
-						bind:group={selectedMode}
-						class="rewind-radio accent-[var(--accent)]"
+						checked={selectedMode === "conversation"}
+						onchange={() => (selectedMode = "conversation")}
 					/>
 					<span>Conversation only</span>
 				</label>
 				<label
 					class="flex items-center gap-2.5 text-sm text-text cursor-pointer"
 				>
-					<input
-						type="radio"
+					<Radio
 						name="rewind-mode"
 						value="files"
-						bind:group={selectedMode}
-						class="rewind-radio accent-[var(--accent)]"
+						checked={selectedMode === "files"}
+						onchange={() => (selectedMode = "files")}
 					/>
 					<span>Files only</span>
 				</label>
@@ -183,18 +189,23 @@
 
 			<!-- Action buttons -->
 			<div class="flex gap-2 justify-end">
-				<button
-					class="bg-transparent border border-border text-text-muted rounded-lg py-1.5 px-4 text-base cursor-pointer hover:bg-[rgba(var(--overlay-rgb),0.05)]"
+				<Button
+					variant="secondary"
+					tone="muted"
+					size="content"
+					class="rounded-lg py-1.5 px-4 text-base"
 					onclick={handleCancel}
 				>
 					Cancel
-				</button>
-				<button
-					class="bg-accent border-none text-bg rounded-lg py-1.5 px-4 text-base font-medium cursor-pointer hover:bg-accent-hover"
+				</Button>
+				<Button
+					variant="primary"
+					size="content"
+					class="rounded-lg py-1.5 px-4 text-base font-medium"
 					onclick={handleConfirm}
 				>
 					Rewind
-				</button>
+				</Button>
 			</div>
-		</div>
+		</Surface>
 </Modal>

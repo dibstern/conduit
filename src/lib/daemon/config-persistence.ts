@@ -35,6 +35,8 @@ export interface DaemonConfig {
 	tls: boolean;
 	debug: boolean;
 	keepAwake: boolean;
+	/** Days of inactivity before automatic settlement; null disables it. */
+	autoSettleAfterDays?: number | null;
 	/** User-provided keep-awake command override (e.g. "systemd-inhibit"). */
 	keepAwakeCommand?: string;
 	/** Arguments for the keep-awake command override. */
@@ -104,6 +106,9 @@ export const DaemonConfigSchema = Schema.Struct({
 	tls: Schema.Boolean,
 	debug: Schema.Boolean,
 	keepAwake: Schema.Boolean,
+	autoSettleAfterDays: Schema.optional(
+		Schema.NullOr(Schema.Number.pipe(Schema.int(), Schema.between(1, 90))),
+	),
 	keepAwakeCommand: Schema.optional(Schema.String),
 	keepAwakeArgs: Schema.optional(Schema.Array(Schema.String)),
 	dangerouslySkipPermissions: Schema.Boolean,
@@ -228,7 +233,7 @@ export function resolveClaudeInstanceConfigDir(
 }
 
 /** Default config for first-startup when no daemon.json exists. */
-function defaultDaemonConfig(): DaemonConfig {
+export function defaultDaemonConfig(): DaemonConfig {
 	return {
 		pid: process.pid,
 		port: 2633,
@@ -236,6 +241,7 @@ function defaultDaemonConfig(): DaemonConfig {
 		tls: false,
 		debug: false,
 		keepAwake: false,
+		autoSettleAfterDays: 3,
 		dangerouslySkipPermissions: false,
 		projects: [],
 	};
@@ -271,7 +277,13 @@ export const ServerConfigLive = (configDir?: string) =>
 			// DaemonConfig uses exact optional properties (key absent, never
 			// undefined). The schema guarantees structural correctness.
 			const decoded = yield* Schema.decodeUnknown(DaemonConfigSchema)(json);
-			return migrateLegacyInstanceIds(decoded as unknown as DaemonConfig);
+			return {
+				...migrateLegacyInstanceIds(decoded as unknown as DaemonConfig),
+				autoSettleAfterDays:
+					decoded.autoSettleAfterDays === undefined
+						? 3
+						: decoded.autoSettleAfterDays,
+			};
 		}),
 	);
 
@@ -337,7 +349,16 @@ export function loadDaemonConfig(configDir?: string): DaemonConfig | null {
 	try {
 		const dir = resolveDir(configDir);
 		const data = readFileSync(join(dir, "daemon.json"), "utf-8");
-		return migrateLegacyInstanceIds(JSON.parse(data) as DaemonConfig);
+		const decoded = Schema.decodeUnknownSync(DaemonConfigSchema)(
+			JSON.parse(data),
+		);
+		return {
+			...migrateLegacyInstanceIds(decoded as unknown as DaemonConfig),
+			autoSettleAfterDays:
+				decoded.autoSettleAfterDays === undefined
+					? 3
+					: decoded.autoSettleAfterDays,
+		};
 	} catch {
 		return null;
 	}

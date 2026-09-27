@@ -21,6 +21,10 @@
 	import { getCurrentSlug } from "../../stores/router.svelte.js";
 	import { closePtyRpc, createPtyRpc, resizePtyRpc } from "../../transport/ws-rpc-client.js";
 	import TerminalTab from "./TerminalTab.svelte";
+	import Button from "../ui/Button.svelte";
+	import Surface from "../ui/Surface.svelte";
+	import TextButton from "../ui/TextButton.svelte";
+	import TextInput from "../ui/TextInput.svelte";
 
 	// ─── Props ────────────────────────────────────────────────────────────────
 
@@ -38,7 +42,8 @@
 
 	let renamingPtyId: string | null = $state(null);
 	let renameValue: string = $state("");
-	let renameInputEl: HTMLInputElement | null = $state(null);
+	let renameInputEl = $state<HTMLInputElement>();
+	let tabListEl: HTMLDivElement | null = $state(null);
 
 	// ─── Font size state ──────────────────────────────────────────────────────
 
@@ -105,8 +110,7 @@
 		});
 	}
 
-	function handleCloseTab(e: MouseEvent, ptyId: string) {
-		e.stopPropagation();
+	function handleCloseTab(ptyId: string) {
 		const projectSlug = getCurrentSlug();
 		if (projectSlug) {
 			void closePtyRpc({ projectSlug, ptyId }).catch(() => undefined);
@@ -114,8 +118,47 @@
 		handlePtyDeleted({ type: "pty_deleted", ptyId });
 	}
 
-	function handleSwitchTab(ptyId: string) {
+	/**
+	 * A `role="tab"` has presentational children, so the close affordance cannot be
+	 * a nested button. It is an `aria-hidden` glyph handled here by hit-testing the
+	 * click target; keyboard users close the focused tab with Delete/Backspace.
+	 */
+	function handleTabClick(e: MouseEvent, ptyId: string) {
+		if ((e.target as Element).closest(".term-tab-close")) {
+			handleCloseTab(ptyId);
+			return;
+		}
 		switchTab(ptyId);
+	}
+
+	function handleTabKeydown(e: KeyboardEvent, ptyId: string) {
+		switch (e.key) {
+			case "Enter":
+			case " ":
+				e.preventDefault();
+				switchTab(ptyId);
+				return;
+			case "Delete":
+			case "Backspace":
+				e.preventDefault();
+				handleCloseTab(ptyId);
+				return;
+			case "ArrowLeft":
+			case "ArrowRight": {
+				e.preventDefault();
+				const index = tabs.findIndex((tab) => tab.ptyId === ptyId);
+				const step = e.key === "ArrowRight" ? 1 : -1;
+				const next = tabs[(index + step + tabs.length) % tabs.length];
+				if (!next || next.ptyId === ptyId) return;
+				switchTab(next.ptyId);
+				void tick().then(() => {
+					tabListEl
+						?.querySelector<HTMLElement>(`[data-pty-id="${next.ptyId}"]`)
+						?.focus();
+				});
+				return;
+			}
+		}
 	}
 
 	function handleClosePanel() {
@@ -124,8 +167,7 @@
 
 	// ─── Double-click rename ───────────────────────────────────────────────────
 
-	function startRename(e: MouseEvent, ptyId: string, currentTitle: string) {
-		e.stopPropagation();
+	function startRename(ptyId: string, currentTitle: string) {
 		renamingPtyId = ptyId;
 		renameValue = currentTitle;
 		// Focus the input after Svelte renders it
@@ -161,9 +203,11 @@
 </script>
 
 {#if panelOpen}
-	<div
+	<Surface
+		variant="card"
+		radius="md"
 		id="terminal-panel"
-		class="term-panel flex flex-col h-full bg-bg-surface border border-border rounded-lg overflow-hidden"
+		class="term-panel flex flex-col h-full overflow-hidden"
 	>
 		<!-- Tab bar -->
 		<!-- svelte-ignore a11y_no_static_element_interactions -->
@@ -172,95 +216,142 @@
 			ontouchstart={onTabBarTouchStart}
 		>
 			<!-- Tab buttons -->
-			{#each tabs as tab (tab.ptyId)}
-				<div
-					class="term-tab group flex items-center gap-1 py-1.5 px-2.5 text-xs font-sans cursor-pointer whitespace-nowrap border-b-2 transition-[color,background,border-color] duration-100 shrink-0 max-[480px]:py-[5px] max-[480px]:px-2 max-[480px]:text-sm
-						{tab.ptyId === activeTabId
-						? 'term-tab-active text-text border-b-accent bg-bg-surface'
-						: 'text-text-muted border-transparent hover:text-text-secondary hover:bg-bg-alt'}
-						{tab.exited ? 'term-tab-exited opacity-55 italic' : ''}"
-					data-pty-id={tab.ptyId}
-					role="tab"
-					tabindex="0"
-					aria-selected={tab.ptyId === activeTabId}
-					onclick={() => handleSwitchTab(tab.ptyId)}
-					onkeydown={(e) => {
-						if (e.key === "Enter" || e.key === " ") handleSwitchTab(tab.ptyId);
-					}}
-				>
-					<!-- Label (editable on double-click) -->
-					{#if renamingPtyId === tab.ptyId}
-						<input
-							bind:this={renameInputEl}
-							bind:value={renameValue}
-							class="term-rename-input bg-transparent border-none outline-none text-xs text-text font-sans w-[100px] p-0"
-							type="text"
-							onblur={commitRename}
-							onkeydown={handleRenameKeydown}
-							onclick={(e) => e.stopPropagation()}
-						/>
-					{:else}
-						<span
-							class="term-tab-label overflow-hidden text-ellipsis max-w-[120px] max-[480px]:max-w-[80px]"
-							role="button"
-							tabindex="-1"
-							ondblclick={(e) => startRename(e, tab.ptyId, tab.title)}
-						>
-							{tab.title}
-						</span>
-					{/if}
-
-					<!-- Close button -->
-					<button
-						class="term-tab-close shrink-0 w-[18px] h-[18px] border-none rounded bg-transparent text-text-muted text-sm leading-none cursor-pointer flex items-center justify-center transition-[color] duration-100 hover:text-error hover:bg-error/[0.08]"
-						title="Close terminal"
-						onclick={(e) => handleCloseTab(e, tab.ptyId)}
+			<div
+				bind:this={tabListEl}
+				class="flex items-center shrink-0"
+				role="tablist"
+				aria-label="Terminal sessions"
+			>
+				{#each tabs as tab (tab.ptyId)}
+					<div
+						class="term-tab group flex items-center gap-1 py-1.5 px-2.5 text-xs font-sans cursor-pointer whitespace-nowrap border-b-2 transition-[color,background,border-color] duration-100 shrink-0 max-[480px]:py-[5px] max-[480px]:px-2 max-[480px]:text-sm
+							{tab.ptyId === activeTabId
+							? 'term-tab-active text-text border-b-accent bg-bg-surface'
+							: 'text-text-muted border-transparent hover:text-text-secondary hover:bg-bg-alt'}
+							{tab.exited ? 'term-tab-exited opacity-55 italic' : ''}"
+						data-pty-id={tab.ptyId}
+						role="tab"
+						tabindex={tab.ptyId === activeTabId ? 0 : -1}
+						aria-selected={tab.ptyId === activeTabId}
+						onclick={(e) => handleTabClick(e, tab.ptyId)}
+						ondblclick={() => startRename(tab.ptyId, tab.title)}
+						onkeydown={(e) => handleTabKeydown(e, tab.ptyId)}
 					>
-						&times;
-					</button>
-				</div>
-			{/each}
+						<!-- Label (editable on double-click) -->
+						{#if renamingPtyId === tab.ptyId}
+							<!--
+								`chrome="bare"` and `size="content"` go together: the
+								affordance here is the tab around the field, so the
+								field paints nothing and sizes itself. Dropped from the
+								class list: `bg-transparent`, `border-none` and `p-0`,
+								all three of which Tailwind v4's preflight already does
+								on an input and which only squatted on their utility
+								group.
+
+								`focus-only` rather than `bare`: this field is only
+								reachable by double-clicking a tab and is autofocused on
+								appear, so with no focus indicator a keyboard user had no
+								way to tell the edit box was live. A text input always
+								matches `:focus-visible` while focused, so the inset
+								outline shows the moment the field appears -- which is the
+								point (conduit-test-de3.35.9.3).
+							-->
+							<TextInput
+								bind:element={renameInputEl}
+								bind:value={renameValue}
+								chrome="focus-only"
+								size="content"
+								class="term-rename-input text-xs text-text font-sans w-[100px]"
+								aria-label="Rename terminal"
+								onblur={commitRename}
+								onkeydown={handleRenameKeydown}
+								onclick={(e) => e.stopPropagation()}
+							/>
+						{:else}
+							<span
+								class="term-tab-label overflow-hidden text-ellipsis max-w-[120px] max-[480px]:max-w-[80px]"
+							>
+								{tab.title}
+							</span>
+						{/if}
+
+						<!-- Close affordance: see handleTabClick -->
+						<span
+							class="term-tab-close shrink-0 w-[18px] h-[18px] border-none rounded bg-transparent text-text-muted text-sm leading-none cursor-pointer flex items-center justify-center transition-[color] duration-100 hover:text-error hover:bg-error/[0.08]"
+							title="Close terminal"
+							aria-hidden="true"
+						>
+							&times;
+						</span>
+					</div>
+				{/each}
+			</div>
 
 			<!-- New Terminal button -->
 			{#if canCreate}
-				<button
-					class="term-new-btn shrink-0 py-1 px-2.5 ml-0.5 border-none rounded bg-transparent text-accent font-sans text-xs font-medium cursor-pointer whitespace-nowrap transition-[background,color] duration-100 hover:bg-accent-bg hover:text-accent-hover max-[480px]:py-[3px] max-[480px]:px-2 max-[480px]:text-sm"
+				<!--
+					`hoverFill="accent-bg"` is new to the union (conduit-test-4ors):
+					the label is already accent-coloured, so a neutral wash reads as
+					the label dimming rather than the row lighting up.
+					`hover:text-accent-hover` stays in `class` because no tone member
+					pairs a hover colour with `text-accent`, and a `hover:` variant
+					outranks the unprefixed `text-accent` it comes from anyway.
+				-->
+				<Button
+					variant="ghost"
+					size="content"
+					tone="accent"
+					hoverFill="accent-bg"
+					class="term-new-btn shrink-0 py-1 px-2.5 ml-0.5 rounded font-sans text-xs font-medium duration-100 hover:text-accent-hover max-[480px]:py-[3px] max-[480px]:px-2 max-[480px]:text-sm"
 					title="New terminal"
 					onclick={handleNewTab}
 				>
 					+ Terminal
-				</button>
+				</Button>
 			{/if}
 
 			<!-- Font size controls (right-aligned) -->
 			<div class="flex items-center gap-0 ml-auto shrink-0">
-				<button
-					class="term-font-btn shrink-0 py-0.5 px-1.5 border-none rounded bg-transparent text-text-dimmer font-mono text-sm cursor-pointer transition-[color,background] duration-100 hover:text-text hover:bg-bg-alt disabled:opacity-30 disabled:cursor-default"
+				<Button
+					variant="ghost"
+					size="content"
+					tone="dimmer"
+					hoverFill="alt"
+					disabledStyle="faint"
+					class="term-font-btn shrink-0 py-0.5 px-1.5 rounded font-mono text-sm duration-100"
 					title="Decrease font size"
+					ariaLabel="Decrease font size"
 					disabled={termFontSize <= FONT_SIZE_MIN}
 					onclick={decreaseFontSize}
 				>
 					&#8722;
-				</button>
+				</Button>
 				<span class="text-xs text-text-dimmer font-mono tabular-nums min-w-[2ch] text-center select-none">{termFontSize}</span>
-				<button
-					class="term-font-btn shrink-0 py-0.5 px-1.5 border-none rounded bg-transparent text-text-dimmer font-mono text-sm cursor-pointer transition-[color,background] duration-100 hover:text-text hover:bg-bg-alt disabled:opacity-30 disabled:cursor-default"
+				<Button
+					variant="ghost"
+					size="content"
+					tone="dimmer"
+					hoverFill="alt"
+					disabledStyle="faint"
+					class="term-font-btn shrink-0 py-0.5 px-1.5 rounded font-mono text-sm duration-100"
 					title="Increase font size"
+					ariaLabel="Increase font size"
 					disabled={termFontSize >= FONT_SIZE_MAX}
 					onclick={increaseFontSize}
 				>
 					+
-				</button>
+				</Button>
 			</div>
 
 			<!-- Close panel button -->
-			<button
-				class="term-close-panel-btn shrink-0 py-1 px-2 border-none rounded bg-transparent text-text-dimmer text-sm cursor-pointer transition-[color] duration-100 hover:text-text"
+			<TextButton
+				tone="dimmer" class="term-close-panel-btn shrink-0 py-1 px-2 rounded text-sm transition-[color] duration-100"
 				title="Close terminal panel"
+				aria-label="Close terminal panel"
 				onclick={handleClosePanel}
 			>
 				&#215;
-			</button>
+			</TextButton>
 		</div>
 
 		<!-- Terminal body area -->
@@ -283,5 +374,5 @@
 				{statusMessage}
 			</div>
 		{/if}
-	</div>
+	</Surface>
 {/if}

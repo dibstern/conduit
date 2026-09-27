@@ -1,3 +1,4 @@
+import { it as effectIt } from "@effect/vitest";
 import { Effect, Layer } from "effect";
 import { describe, expect, it, vi } from "vitest";
 import {
@@ -5,6 +6,7 @@ import {
 	handleClientConnected,
 	handleClientConnectedEffect,
 } from "../../../src/lib/bridges/client-init.js";
+import { PendingInteractionServiceTag } from "../../../src/lib/domain/relay/Services/pending-interaction-service.js";
 import {
 	SessionManagerError,
 	type SessionManagerService,
@@ -107,17 +109,30 @@ function makeEmptyHistoryReadQuery(
 				parent_id: parentId,
 				fork_point_event: null,
 				last_message_at: null,
+				last_turn_error_at: null,
 				permission_mode: null,
+				read_at: null,
+				settled_at: null,
+				pinned_at: null,
+				snoozed_at: null,
+				snoozed_until: null,
+				woken_at: null,
+				woken_reason: null,
 				created_at: 1,
 				updated_at: 1,
 			}),
 		),
 		getAllSessionStatuses: vi.fn(() => Effect.succeed({})),
+		getSessionsForReconciliation: () => Effect.succeed([]),
 		listSessions: vi.fn(() => Effect.succeed([])),
+		listSessionInfos: vi.fn(() => Effect.succeed([])),
 		readSessionTranscript: vi.fn(() =>
 			Effect.succeed({ messages: [], version: 0 }),
 		),
 		readSessionList: vi.fn(() => Effect.succeed({ rows: [], version: 0 })),
+		getSessionLineage: () => Effect.succeed({ rows: [], count: 0 }),
+		getSessionFamily: () => Effect.succeed([]),
+		countPendingApprovalsBySession: vi.fn(() => Effect.succeed([])),
 		getLatestTurnModelExecution: vi.fn(() => Effect.succeed(undefined)),
 		getSessionMessagesWithParts: vi.fn(() => Effect.succeed([])),
 	};
@@ -134,7 +149,7 @@ function makeClientInitEffectLayer(
 		...sessionManagerOverrides,
 	});
 	const orchestrationEngine = {
-		getProviderForSession: vi.fn(() => undefined),
+		getProviderForSessionEffect: vi.fn(() => Effect.succeed(undefined)),
 		dispatchEffect: vi.fn(() => Effect.succeed(makeClaudeCapabilities())),
 	} as unknown as OrchestrationEngine;
 
@@ -152,6 +167,120 @@ function makeClientInitEffectLayer(
 }
 
 describe("handleClientConnectedEffect — empty projected history", () => {
+	effectIt.effect(
+		"a sessionless daemon attach sends project lists without selecting or creating a session",
+		() =>
+			Effect.gen(function* () {
+				const getDefaultSessionId = vi.fn(() =>
+					Effect.succeed("unrequested-session"),
+				);
+				const createSession = vi.fn<SessionManagerService["createSession"]>(
+					() =>
+						Effect.fail(
+							new SessionManagerError({
+								operation: "createSession",
+								cause: "unexpected creation",
+							}),
+						),
+				);
+				const loadPreRenderedHistory = vi.fn(() =>
+					Effect.succeed({ messages: [], hasMore: false }),
+				);
+				const sendSessionLists = vi.fn<
+					SessionManagerService["sendSessionLists"]
+				>(() => Effect.void);
+				const { wsHandler, layer } = makeClientInitEffectLayer(
+					makeEmptyHistoryReadQuery("opencode"),
+					loadPreRenderedHistory,
+					{ getDefaultSessionId, createSession, sendSessionLists },
+				);
+				yield* handleClientConnectedEffect("client-1", undefined, {
+					skipDefaultSession: true,
+				}).pipe(Effect.provide(layer));
+				expect(getDefaultSessionId).not.toHaveBeenCalled();
+				expect(createSession).not.toHaveBeenCalled();
+				expect(loadPreRenderedHistory).not.toHaveBeenCalled();
+				expect(wsHandler.setClientSession).not.toHaveBeenCalled();
+				expect(wsHandler.sendTo).not.toHaveBeenCalledWith(
+					"client-1",
+					expect.objectContaining({ type: "session_switched" }),
+				);
+				expect(sendSessionLists).toHaveBeenCalledOnce();
+				expect(wsHandler.markClientBootstrapped).toHaveBeenCalledWith(
+					"client-1",
+				);
+				for (const type of ["agent_list", "model_list"]) {
+					expect(wsHandler.sendTo).toHaveBeenCalledWith(
+						"client-1",
+						expect.objectContaining({ type }),
+					);
+				}
+			}),
+	);
+	it("replays a grandchild question after sending family before session_switched", async () => {
+		const { wsHandler, layer } = makeClientInitEffectLayer(
+			makeEmptyHistoryReadQuery("opencode"),
+			vi.fn(() => Effect.succeed({ messages: [], hasMore: false })),
+			{
+				getSessionFamily: () =>
+					Effect.succeed({
+						type: "session_family",
+						rootId: "root",
+						sessions: [
+							{
+								id: "root",
+								title: "Root",
+								status: "idle",
+								updatedAt: 0,
+								messageCount: 0,
+							},
+							{
+								id: "child",
+								parentID: "root",
+								title: "Child",
+								status: "idle",
+								updatedAt: 0,
+								messageCount: 0,
+							},
+							{
+								id: "grandchild",
+								parentID: "child",
+								title: "Grandchild",
+								status: "idle",
+								updatedAt: 0,
+								messageCount: 0,
+							},
+						],
+					}),
+			},
+		);
+		await Effect.runPromise(
+			Effect.gen(function* () {
+				const pending = yield* PendingInteractionServiceTag;
+				yield* pending.recordQuestionRequest({
+					requestId: "grandchild-question",
+					sessionId: "grandchild",
+					questions: [{ question: "Continue?" }],
+				});
+				yield* handleClientConnectedEffect("client-1", "root");
+			}).pipe(Effect.provide(layer)),
+		);
+		expect(wsHandler.sendTo).toHaveBeenCalledWith(
+			"client-1",
+			expect.objectContaining({
+				type: "ask_user",
+				sessionId: "grandchild",
+				toolId: "grandchild-question",
+			}),
+		);
+		const types = vi
+			.mocked(wsHandler.sendTo)
+			.mock.calls.map((call) => call[1].type);
+		expect(types.indexOf("session_family")).toBeLessThan(
+			types.indexOf("session_switched"),
+		);
+	});
+
 	it("sends distinct session and default permission modes", async () => {
 		const loadPreRenderedHistory = vi.fn(() =>
 			Effect.succeed({
@@ -249,9 +378,9 @@ describe("handleClientConnectedEffect — empty projected history", () => {
 		);
 
 		await Effect.runPromise(
-			handleClientConnectedEffect("client-1", "requested-session").pipe(
-				Effect.provide(layer),
-			),
+			handleClientConnectedEffect("client-1", "requested-session", {
+				skipDefaultSession: true,
+			}).pipe(Effect.provide(layer)),
 		);
 
 		expect(loadPreRenderedHistory).not.toHaveBeenCalled();
@@ -546,9 +675,9 @@ describe("handleClientConnected — session list", () => {
 		expect(sessionListOrder).toBeLessThan(bootstrappedOrder);
 	});
 
-	it("sends INIT_FAILED when sendDualSessionLists throws", async () => {
+	it("sends INIT_FAILED when sendSessionLists throws", async () => {
 		const deps = createMockClientInitDeps();
-		vi.mocked(deps.sessionService.sendDualSessionLists).mockRejectedValue(
+		vi.mocked(deps.sessionService.sendSessionLists).mockRejectedValue(
 			new Error("list fail"),
 		);
 
@@ -1163,6 +1292,90 @@ describe("handleClientConnected — pending permissions", () => {
 // ─── Pending questions replay ────────────────────────────────────────────────
 
 describe("handleClientConnected — pending questions", () => {
+	it("replays grandchild questions after publishing the reconnect family", async () => {
+		const deps = createMockClientInitDeps();
+		vi.mocked(deps.sessionService.getSessionFamily).mockResolvedValue({
+			type: "session_family",
+			rootId: "session-1",
+			sessions: [
+				{
+					id: "session-1",
+					title: "Root",
+					status: "idle",
+					updatedAt: 0,
+					messageCount: 0,
+				},
+				{
+					id: "child",
+					parentID: "session-1",
+					title: "Child",
+					status: "idle",
+					updatedAt: 0,
+					messageCount: 0,
+				},
+				{
+					id: "grandchild",
+					parentID: "child",
+					title: "Grandchild",
+					status: "idle",
+					updatedAt: 0,
+					messageCount: 0,
+				},
+			],
+		});
+		vi.mocked(deps.pendingInteractions.listPendingQuestions).mockResolvedValue([
+			{
+				requestId: "service-question",
+				timestamp: 0,
+				sessionId: "grandchild",
+				questions: [
+					{
+						question: "Continue?",
+						header: "Confirm",
+						options: [],
+						multiSelect: false,
+					},
+				],
+			},
+		]);
+		vi.mocked(deps.client.question.list).mockResolvedValue([
+			{
+				id: "api-question",
+				sessionID: "grandchild",
+				questions: [{ question: "Proceed?", header: "Confirm", options: [] }],
+			},
+			{
+				id: "unrelated-question",
+				sessionID: "unrelated",
+				questions: [{ question: "Proceed?", header: "Confirm", options: [] }],
+			},
+		]);
+		await handleClientConnected(deps, "client-1");
+		expect(
+			deps.pendingInteractions.listPendingQuestions,
+		).toHaveBeenCalledWith();
+		for (const toolId of ["service-question", "api-question"]) {
+			expect(deps.wsHandler.sendTo).toHaveBeenCalledWith(
+				"client-1",
+				expect.objectContaining({
+					type: "ask_user",
+					sessionId: "grandchild",
+					toolId,
+				}),
+			);
+		}
+		expect(deps.wsHandler.sendTo).not.toHaveBeenCalledWith(
+			"client-1",
+			expect.objectContaining({ toolId: "unrelated-question" }),
+		);
+		const types = vi
+			.mocked(deps.wsHandler.sendTo)
+			.mock.calls.map((call) => call[1].type);
+		expect(types.indexOf("session_family")).toBeLessThan(
+			types.indexOf("session_switched"),
+		);
+	});
+
 	it("sends pending questions to reconnecting client", async () => {
 		const deps = createMockClientInitDeps();
 		vi.mocked(deps.client.question.list).mockResolvedValue([
@@ -1337,7 +1550,7 @@ describe("handleClientConnected — error resilience", () => {
 		vi.mocked(deps.modelService.getSession).mockRejectedValue(
 			new Error("fail"),
 		);
-		vi.mocked(deps.sessionService.sendDualSessionLists).mockRejectedValue(
+		vi.mocked(deps.sessionService.sendSessionLists).mockRejectedValue(
 			new Error("fail"),
 		);
 		vi.mocked(deps.agentService.listAgents).mockRejectedValue(
@@ -1803,8 +2016,8 @@ describe("handleClientConnected — processing status on connect", () => {
 
 		await handleClientConnected(deps, "client-1");
 
-		// sessionService.sendDualSessionLists should have been called with statuses
-		expect(deps.sessionService.sendDualSessionLists).toHaveBeenCalledWith(
+		// sessionService.sendSessionLists should have been called with statuses
+		expect(deps.sessionService.sendSessionLists).toHaveBeenCalledWith(
 			expect.any(Function),
 			{ statuses: { s1: { type: "busy" } } },
 		);

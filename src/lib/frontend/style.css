@@ -7,10 +7,11 @@
 @theme {
 	/* === BRAND COLORS ===
 	   Change these two values to rebrand the entire app.
-	   They are constant across all user-selected themes. */
-	--color-brand-a: #ff2d7b; /* pink */
+	   Theme-scoped: Conduit Light redeclares both below with AA-passing
+	   light-surface counterparts. */
+	--color-brand-a: #fe3781; /* pink */
 	--color-brand-b: #00e5ff; /* cyan */
-	--color-brand-a-glow: rgba(255, 45, 123, 0.15);
+	--color-brand-a-glow: rgba(254, 55, 129, 0.15);
 	--color-brand-b-glow: rgba(0, 229, 255, 0.15);
 
 	/* Harness (provider driver) identity colors — theme-independent, like brand. */
@@ -24,55 +25,113 @@
 
 	--font-brand: "Chakra Petch", sans-serif;
 
-	--color-bg: #18181b;
-	--color-bg-alt: #27272a;
-	--color-bg-surface: #27272a;
-	--color-text: #e4e4e7;
-	--color-text-secondary: #a1a1aa;
-	--color-text-muted: #71717a;
-	--color-text-dimmer: #52525b;
-	--color-accent: #ff2d7b;
-	--color-accent-hover: #ff4d91;
-	--color-accent-bg: rgba(255, 45, 123, 0.12);
-	--color-code-bg: #131315;
-	--color-border: #3f3f46;
-	--color-border-subtle: rgba(255, 255, 255, 0.06);
-	--color-input-bg: #333338;
-	--color-user-bubble: #2c2c30;
-	--color-error: #ff4444;
-	--color-success: #22c55e;
+	--color-bg: #0d0e11;
+	--color-bg-alt: #1b1e24;
+	--color-bg-surface: #141619;
+	--color-text: #eceef2;
+	--color-text-secondary: #a8afbb;
+	--color-text-muted: #838b98;
+	/* The quietest step, held to 3:1 rather than 4.5:1. The approved design puts
+	   timestamps, counts and keyboard hints here, deliberately below the ink of
+	   anything you read to understand the screen. See theme-contrast.test.ts. */
+	--color-text-dimmer: #676e79;
+	--color-accent: #fe3781;
+	--color-accent-hover: #ff5691;
+	--color-accent-bg: rgba(254, 55, 129, 0.12);
+	--color-code-bg: #0d0e11;
+	--color-border: #2d323b;
+	--color-border-subtle: #20242b;
+	/* The brightest border, for chips and other outlined controls that have to
+	   read as interactive against a surface. */
+	--color-border-chip: #3a414c;
+	--color-input-bg: #1b1e24;
+	--color-user-bubble: #20242b;
+	--color-error: #f4607a;
+	--color-error-bg: rgba(244, 96, 122, 0.12);
+	--color-success: #3fd69a;
 
-	--color-sidebar-bg: #141416;
-	--color-sidebar-hover: #202023;
-	--color-sidebar-active: #2a2a2e;
+	/* The mock only ever uses two surfaces for a row: --alt for the open one and
+	   --hover for the pressed one. --border2 is a border, never a background, and
+	   using it as the active row is what put status ink below AA on it. */
+	--color-sidebar-bg: #141619;
+	--color-sidebar-hover: #1b1e24;
+	--color-sidebar-active: #20242b;
 
-	--color-thinking: #eab308;
-	--color-thinking-bg: rgba(234, 179, 8, 0.06);
-	--color-tool: #00e5ff;
-	--color-tool-bg: rgba(0, 229, 255, 0.04);
-	--color-warning: #eab308;
-	--color-warning-bg: rgba(234, 179, 8, 0.12);
+	--color-thinking: #f4b740;
+	--color-thinking-bg: rgba(244, 183, 64, 0.06);
+	--color-tool: #5aa9f5;
+	--color-tool-bg: rgba(90, 169, 245, 0.04);
+	--color-warning: #f4b740;
+	--color-warning-bg: rgba(244, 183, 64, 0.12);
 
+	/* === STATUS INK ===
+	   Seven hues a session row can distinguish itself by, read as TEXT on a
+	   surface — so each theme carries its own value. Never use these as a fill;
+	   the --color-fill-* set below is for that. */
+	--color-status-amber: #f4b740;
+	--color-status-blue: #5aa9f5;
+	--color-status-green: #3fd69a;
+	--color-status-red: #f4607a;
+	--color-status-indigo: #9b9bff;
+	--color-status-violet: #c0a8ff;
+	--color-status-pink: #ff9dc2;
+
+	/* === STATUS FILLS (theme-invariant) ===
+	   A saturated fill is the same colour in both themes; only what you read ON
+	   a surface changes. Pair with --color-on-fill, which is the fixed ink these
+	   are contrast-checked against. */
+	--color-fill-amber: #f4b740;
+	--color-fill-blue: #5aa9f5;
+	--color-fill-green: #3fd69a;
+	--color-fill-red: #f4607a;
+	--color-fill-indigo: #9b9bff;
+	--color-fill-brand: #fe3781;
+	--color-on-fill: #0c0d10;
+	--color-on-brand: #ffffff;
+
+	/* === PROJECT ACCENTS (theme-invariant) ===
+	   Identity colours for the sidebar's project square, assigned by index so a
+	   project keeps its colour as the list reorders. Six, then it wraps. */
+	--color-project-1: #b08cff;
+	--color-project-2: #ff9a4d;
+	--color-project-3: #2fd3c0;
+	--color-project-4: #ff6fb1;
+	--color-project-5: #5aa9f5;
+	--color-project-6: #f4b740;
+
+	/* Deliberately inverted surfaces: toast, tooltip. */
+	--color-inverse-bg: #eef0f4;
+	--color-inverse-text: #15171c;
+	--color-inverse-accent: #b3005a;
+
+	/* Frosted surfaces that float over the transcript (the session island). */
+	--color-glass: rgba(24, 25, 29, 0.9);
+	--color-glass-strong: rgba(24, 25, 29, 0.92);
+
+	/* Contrast wash for scrollbars and hairline fills: white over dark, black
+	   over light. Not a scrim — see --color-backdrop, which stays dark in both
+	   themes because a scrim dims, it does not invert. */
 	--overlay-rgb: 255, 255, 255;
+	--color-backdrop: rgba(6, 7, 9, 0.55);
 	--shadow-rgb: 0, 0, 0;
 
 	/* Syntax highlighting defaults (conduit dark theme) */
-	--hl-comment: #52525b;
-	--hl-keyword: #ff2d7b;
-	--hl-string: #22c55e;
-	--hl-number: #ff2d7b;
-	--hl-function: #00e5ff;
-	--hl-variable: #ff4444;
-	--hl-type: #eab308;
-	--hl-constant: #ff2d7b;
-	--hl-tag: #ff4444;
-	--hl-attr: #00e5ff;
-	--hl-regexp: #00e5ff;
-	--hl-meta: #eab308;
-	--hl-builtin: #ff2d7b;
-	--hl-symbol: #eab308;
-	--hl-addition: #22c55e;
-	--hl-deletion: #ff4444;
+	--hl-comment: #79818f;
+	--hl-keyword: #fe3781;
+	--hl-string: #3fd69a;
+	--hl-number: #fe3781;
+	--hl-function: #5aa9f5;
+	--hl-variable: #f4607a;
+	--hl-type: #f4b740;
+	--hl-constant: #fe3781;
+	--hl-tag: #f4607a;
+	--hl-attr: #5aa9f5;
+	--hl-regexp: #c0a8ff;
+	--hl-meta: #f4b740;
+	--hl-builtin: #fe3781;
+	--hl-symbol: #f4b740;
+	--hl-addition: #3fd69a;
+	--hl-deletion: #f4607a;
 
 	--font-mono:
 		"JetBrains Mono", "Berkeley Mono", "IBM Plex Mono", ui-monospace,
@@ -105,7 +164,7 @@
 	/* ── Z-Index Layers (theme-invariant) ────────────────
 	   Referenced as z-[var(--z-name)] (Tailwind v4 has no z-index theme namespace).
 	   Listed in paint order, lowest first. Never write a bare z-index number;
-	   a literal here is how the mobile drawer ended up painting over modals.
+	   centralizing the order keeps panes and portaled surfaces consistent.
 
 	   Modals are deliberately absent. They use <dialog>.showModal() and live in
 	   the browser's top layer, above every z-index on the page. Anything that
@@ -116,18 +175,18 @@
 	--z-raised: 1;
 	--z-dropdown: 60;
 	--z-sheet: 80;
-	--z-popover: 200;
-	--z-popover-raised: 210;
 	--z-pane: 300;
-	--z-drawer-scrim: 340;
-	--z-drawer: 350;
+	/* A portaled surface has to outrank the pane that opened it. Only toasts sit
+	   higher. */
+	--z-popover: 360;
+	--z-popover-raised: 370;
 	--z-toast: 400;
 	--z-top-scrim: 990;
 	--z-top: 1000;
 	--z-debug: 9999;
 
 	/* ── Elevation / Shadows ──────────────────────────────
-	   Compose with the runtime var(--shadow-rgb) produced by computeVars(). */
+	   Compose with var(--shadow-rgb), redeclared per theme. */
 	--shadow-menu: 0 -4px 16px rgba(var(--shadow-rgb), 0.3);
 	--shadow-menu-lg: 0 -4px 24px rgba(var(--shadow-rgb), 0.4);
 	--shadow-panel: 0 4px 16px rgba(var(--shadow-rgb), 0.3);
@@ -137,6 +196,82 @@
 	/* ── Radius ───────────────────────────────────────────
 	   Panel/card corner used across setup + settings surfaces. */
 	--radius-panel: 10px;
+}
+
+:root.light-theme {
+	--color-brand-a: #c9004f;
+	--color-brand-b: #006d7a;
+	--color-brand-a-glow: rgba(201, 0, 79, 0.15);
+	--color-brand-b-glow: rgba(0, 109, 122, 0.15);
+
+	--color-bg: #f5f6f9;
+	--color-bg-alt: #eef0f5;
+	--color-bg-surface: #ffffff;
+	--color-text: #14171c;
+	--color-text-secondary: #4b525e;
+	--color-text-muted: #626975;
+	--color-text-dimmer: #7e8591;
+	--color-accent: #c9004f;
+	--color-accent-hover: #a80042;
+	--color-accent-bg: rgba(201, 0, 79, 0.12);
+	--color-code-bg: #eef0f5;
+	--color-border: #ccd2dc;
+	--color-border-subtle: #e2e6ec;
+	--color-border-chip: #b7c0cc;
+	--color-input-bg: #eef0f5;
+	--color-user-bubble: #e4e8ef;
+	--color-error: #c11d40;
+	--color-error-bg: rgba(193, 29, 64, 0.12);
+	--color-success: #0c7750;
+
+	/* Surface is the raised layer in both themes, so the sidebar is lighter than
+	   the page here and darker than it in dark mode. */
+	--color-sidebar-bg: #ffffff;
+	--color-sidebar-hover: #eef0f5;
+	--color-sidebar-active: #e4e8ef;
+
+	--color-thinking: #8a5500;
+	--color-thinking-bg: rgba(138, 85, 0, 0.06);
+	--color-tool: #0f62c0;
+	--color-tool-bg: rgba(15, 98, 192, 0.04);
+	--color-warning: #8a5500;
+	--color-warning-bg: rgba(138, 85, 0, 0.12);
+
+	--color-status-amber: #8a5500;
+	--color-status-blue: #0f62c0;
+	--color-status-green: #0c7750;
+	--color-status-red: #c11d40;
+	--color-status-indigo: #5344d4;
+	--color-status-violet: #6a3ed4;
+	--color-status-pink: #c4004f;
+
+	--color-inverse-bg: #1b1e24;
+	--color-inverse-text: #f2f4f8;
+	--color-inverse-accent: #ff9dc2;
+
+	--color-glass: rgba(255, 255, 255, 0.88);
+	--color-glass-strong: rgba(255, 255, 255, 0.9);
+
+	--overlay-rgb: 0, 0, 0;
+	--color-backdrop: rgba(22, 26, 33, 0.34);
+	--shadow-rgb: 19, 26, 37;
+
+	--hl-comment: #6c7481;
+	--hl-keyword: #c9004f;
+	--hl-string: #0c7750;
+	--hl-number: #c9004f;
+	--hl-function: #0f62c0;
+	--hl-variable: #c11d40;
+	--hl-type: #8a5500;
+	--hl-constant: #c9004f;
+	--hl-tag: #c11d40;
+	--hl-attr: #0f62c0;
+	--hl-regexp: #6a3ed4;
+	--hl-meta: #8a5500;
+	--hl-builtin: #c9004f;
+	--hl-symbol: #8a5500;
+	--hl-addition: #0c7750;
+	--hl-deletion: #c11d40;
 }
 
 @utility glow-brand-a {
@@ -151,8 +286,8 @@
 }
 @utility glow-brand-a-strong {
 	box-shadow:
-		0 0 8px rgba(255, 45, 123, 0.4),
-		0 0 24px rgba(255, 45, 123, 0.15);
+		0 0 8px rgb(from var(--color-brand-a) r g b / 0.4),
+		0 0 24px rgb(from var(--color-brand-a) r g b / 0.15);
 }
 @utility glow-brand-b-strong {
 	box-shadow:
@@ -166,7 +301,7 @@
 }
 @utility glow-tool-completed {
 	box-shadow:
-		-4px 0 16px rgba(0, 229, 255, 0.12),
+		-4px 0 16px rgb(from var(--color-brand-b) r g b / 0.12),
 		-3px 0 0 var(--color-brand-b);
 }
 @utility glow-tool-error {
@@ -241,6 +376,32 @@
 /* ─── Base ──────────────────────────────────────────────────────────────────── */
 
 @layer base {
+	/* The house focus ring as a floor, not a rollout.
+	   de3.19 planned to hand components the ring as they migrated onto
+	   ui/Button and ui/Pill, but roughly a third of the focusable surface is
+	   structural — disclosure headers, file-tree rows, session-list rows — and
+	   never migrates, so it would never have been reached. Those elements were
+	   not ringless before this: they showed Chromium's default blue ring, which
+	   is a fixed colour that belongs to neither theme. This replaces it with a
+	   token-driven one. Neutral text colour, not accent: an accent ring on an
+	   accent-filled button is the same colour as the button.
+
+	   Wrapped in :where() so it has ZERO specificity. Layer order alone would
+	   be enough in the app — focus-visible:outline-hidden is a utility, and
+	   utilities outrank @layer base — but storybook-addon-pseudo-states
+	   rewrites every :focus-visible rule into a .pseudo-focus-visible clone in
+	   its own unlayered sheet, and unlayered CSS beats every layer. That put
+	   this outline on top of Button's and Pill's own rings in exactly the two
+	   stories whose job is to depict the ring. At zero specificity the
+	   primitives' (0,2,0) selectors win with or without the layer, so the
+	   picture matches the product. Verified by keyboard-Tabbing the real build:
+	   both primitives report outline-style none and keep their box-shadow ring
+	   (conduit-test-j7ny). */
+	:where(:focus-visible) {
+		outline: 2px solid var(--color-text);
+		outline-offset: 0;
+	}
+
 	*,
 	*::before,
 	*::after {
@@ -393,45 +554,7 @@ body:has(dialog:modal) {
 	display: none;
 }
 
-/* Overlay hidden state */
-#sidebar-overlay.hidden {
-	display: none;
-}
-
 /* ─── Header ───────────────────────────────────────────────────────────────── */
-
-/* Header icon button component (6+ instances — keep as @apply).
-   MUST be inside @layer components so Tailwind utilities like `hidden`
-   (display:none) properly override the `display:flex` set here. */
-@layer components {
-	.header-icon-btn {
-		@apply flex items-center justify-center rounded-lg bg-transparent cursor-pointer transition-[background,color,border-color] duration-150 shrink-0;
-		border: 1px solid transparent;
-		color: var(--color-text-dimmer);
-		padding: 4px;
-	}
-	.header-icon-btn:hover {
-		color: var(--color-text-secondary);
-		background: rgba(var(--overlay-rgb), 0.04);
-		border-color: var(--color-border);
-	}
-	.header-icon-btn .lucide {
-		@apply w-[15px] h-[15px];
-	}
-	.header-icon-btn.active {
-		background: rgba(var(--overlay-rgb), 0.06);
-		@apply text-accent;
-	}
-}
-
-/* Badge hidden state overrides */
-.client-count-badge.hidden {
-	display: none;
-}
-
-.terminal-badge.hidden {
-	display: none;
-}
 
 /* Parent-state: sidebar expand button only visible when sidebar collapsed */
 #layout.sidebar-collapsed #sidebar-expand-btn {
@@ -450,48 +573,104 @@ body:has(dialog:modal) {
 	animation: marquee-scroll var(--marquee-dur, 6s) linear 0.4s infinite;
 }
 
-/* ─── Mobile responsive ────────────────────────────────────────────────────── */
+/* ─── Session bar (design bar 18) ──────────────────────────────────────────── */
 
-@media (max-width: 768px) {
-	#sidebar {
-		position: fixed;
-		left: 0;
-		top: 0;
-		bottom: 0;
-		z-index: var(--z-drawer);
-		transform: translateX(-100%);
-		transition: transform 0.25s ease;
-		/* Mobile sidebar width driven by --sidebar-w custom property */
-		width: var(--sidebar-w, 260px);
-		border-right: 1px solid var(--color-border-subtle);
-		overflow: visible;
-	}
+/* Two layouts, one DOM tree. Collapsed, the title moves out of its own row and
+   up beside the back control; expanded, it drops back down. A grid can do that
+   without re-parenting anything, which is the whole point: the <h1> never
+   unmounts, so collapsing is a state change rather than the heading vanishing
+   and a different one appearing.
 
-	/* Override collapsed state on mobile — hamburger controls visibility */
-	#layout.sidebar-collapsed #sidebar {
-		width: var(--sidebar-w, 260px);
-		border-right: 1px solid var(--color-border-subtle);
-		overflow: visible;
-	}
+   Child order in the markup is back, meta, title, chevron, more — chosen so the
+   focus order matches the visual order in BOTH layouts, since grid areas move
+   boxes around without moving the DOM.
 
-	#sidebar.open {
-		transform: translateX(0);
-	}
+   `minmax(0, 1fr)` rather than `1fr`: a bare `1fr` floors at its content's
+   width, and the title and the project identity both have to be allowed to
+   truncate instead of pushing the back control off the edge. */
+#session-bar {
+	display: grid;
+	grid-template-columns: auto minmax(0, 1fr) auto auto;
+	grid-template-areas:
+		"back  meta  meta  more"
+		"title title title title";
+	align-items: center;
+	column-gap: 6px;
+	padding: 3px 12px 6px;
+}
 
-	/* Hide the layout-level sidebar resize handle on mobile (uses internal handle instead) */
-	.sidebar-resize-handle {
-		display: none;
-	}
+#session-bar[data-collapsed="true"] {
+	grid-template-areas: "back title chev more";
+	min-height: 46px;
+	padding: 0 12px;
+}
 
-	#hamburger-btn {
-		display: flex;
-	}
+/* The meta area does not exist in the collapsed template, and a grid item
+   naming a missing area gets auto-placed into a phantom row. */
+#session-bar[data-collapsed="true"] #session-bar-meta {
+	display: none;
+}
 
-	#sidebar-toggle-btn,
-	#sidebar-expand-btn,
-	#layout.sidebar-collapsed #sidebar-expand-btn {
-		display: none;
-	}
+#session-bar-back {
+	grid-area: back;
+}
+#session-bar-meta {
+	grid-area: meta;
+	justify-self: end;
+}
+/* Size is a `class:` directive on the element, not a rule here. `font-size:
+   var(--text-lg)` was tried and is a trap: Tailwind v4 emits a theme variable
+   only when some generated utility references it, so dropping `text-lg` from
+   the markup pruned `--text-lg` from the stylesheet and the title silently
+   rendered at the inherited 12px. */
+#session-bar-title {
+	grid-area: title;
+}
+#session-bar-chevron {
+	grid-area: chev;
+}
+#session-bar-more {
+	grid-area: more;
+}
+
+/* ─── Compact route layout ─────────────────────────────────────────────────── */
+
+#compact-top-edge {
+	display: none;
+}
+
+/* See the comment on the element in ChatLayout.svelte. `pointer-events: none`
+   is safe: WebKit's sampler first hit-tests ignoring pointer-events. */
+#layout.layout-compact #compact-top-edge {
+	display: block;
+	position: fixed;
+	top: 0;
+	left: 0;
+	right: 0;
+	height: 12px;
+	background: var(--color-bg-surface);
+	pointer-events: none;
+}
+
+#layout.layout-compact.phone-list-screen #sidebar {
+	display: flex;
+	width: 100%;
+	border-right: none;
+	overflow: hidden;
+	padding-top: env(safe-area-inset-top, 0px);
+}
+
+#layout.layout-compact.phone-list-screen #app,
+#layout.layout-compact:not(.phone-list-screen) #sidebar {
+	display: none;
+}
+
+#layout.layout-compact #app {
+	width: 100%;
+}
+
+#layout.layout-compact .sidebar-resize-handle {
+	display: none;
 }
 
 /* ─── Animations ────────────────────────────────────────────────────────────── */
@@ -538,10 +717,12 @@ body:has(dialog:modal) {
 /* ─── Session title marquee on hover ────────────────────────────────────────── */
 /* The .session-item-title clips overflow. On hover, the inner span scrolls left
    in a continuous loop so long titles are fully readable. */
-.session-item:hover .session-item-title {
-	text-overflow: clip;
-}
-.session-item:hover .session-item-title .session-title-inner {
+/* Applied by SessionItem as `group-hover:session-title-marquee`. A descendant
+   selector keyed off `.session-item:hover` would be the component owning its
+   own recipe from outside itself; an @utility is the same animation as a
+   Tailwind utility the markup opts into, and `text-overflow: clip` is just
+   `group-hover:text-clip` at the call site. */
+@utility session-title-marquee {
 	animation: marquee-scroll var(--marquee-dur, 6s) linear 0.4s infinite;
 }
 
@@ -757,14 +938,6 @@ body:has(dialog:modal) {
 	}
 }
 
-/* Pseudo-element: cannot be expressed as Tailwind utility */
-.model-provider-disabled .model-provider-header::after {
-	content: " (not configured)";
-	font-weight: 400;
-	text-transform: none;
-	letter-spacing: 0;
-}
-
 /* ─── Progressive History Loading (4.8) — keyframes only ───────────────────── */
 
 @keyframes history-spin {
@@ -888,13 +1061,6 @@ body:has(dialog:modal) {
 	}
 }
 
-/* Sticky Ctrl toggle — active state (toggled via JS) */
-.term-touch-toggle.active {
-	background: var(--color-accent-bg);
-	color: var(--color-accent);
-	border-color: var(--color-accent);
-}
-
 /* ─── Terminal Side Panel ──────────────────────────────────────────────────── */
 
 /* When visible, terminal-container is a flex column */
@@ -973,10 +1139,6 @@ body:has(dialog:modal) {
 }
 
 /* Hidden overrides */
-#attach-menu.hidden {
-	display: none;
-}
-
 #context-mini.hidden {
 	display: none;
 }
@@ -1004,11 +1166,14 @@ body:has(dialog:modal) {
 	border-radius: 8px;
 	cursor: pointer;
 	transition: outline-color 0.15s;
-}
 
-.rewind-point:hover {
-	outline-color: var(--color-accent-hover);
-	background: var(--color-accent-bg);
+	/* Nested rather than a sibling `.rewind-point:hover` rule: a loose global
+	   selector outranks the utility it is modifying, which is the whole reason
+	   the ownership check flags one. */
+	&:hover {
+		outline-color: var(--color-accent-hover);
+		background: var(--color-accent-bg);
+	}
 }
 
 /* ─── Content Visibility Optimization ──────────────────────────────────────── */
@@ -1204,24 +1369,6 @@ body:has(dialog:modal) {
 	gap: 0.25rem;
 	margin-bottom: 0.5rem;
 }
-.diff-toggle-btn {
-	padding: 0.25rem 0.75rem;
-	font-size: 10px;
-	border: 1px solid var(--color-border-subtle);
-	background: transparent;
-	color: var(--color-text-secondary);
-	border-radius: 0.25rem;
-	cursor: pointer;
-}
-.diff-toggle-btn.active {
-	background: var(--color-accent);
-	color: var(--color-bg);
-	border-color: var(--color-accent);
-}
-.diff-toggle-btn:hover:not(.active) {
-	background: var(--color-bg-alt);
-}
-
 /* ─── File Edit History & Compare (8.23) ──────────────────────────────────── */
 
 .file-history-panel {
@@ -1240,16 +1387,6 @@ body:has(dialog:modal) {
 	border-color: var(--color-border-subtle);
 }
 
-.file-history-badge {
-	display: inline-block;
-	font-size: 10px;
-	font-weight: 600;
-	text-transform: uppercase;
-	padding: 0.125rem 0.375rem;
-	border-radius: 3px;
-	line-height: 1.4;
-}
-
 .file-history-compare-bar {
 	display: flex;
 	align-items: center;
@@ -1259,21 +1396,6 @@ body:has(dialog:modal) {
 	background: var(--color-bg-alt);
 	border: 1px solid var(--color-border-subtle);
 	border-radius: 0.375rem;
-}
-
-.file-history-compare-btn {
-	padding: 0.25rem 0.75rem;
-	font-size: 10px;
-	font-weight: 500;
-	border-radius: 0.375rem;
-	background: var(--color-success);
-	color: var(--color-bg);
-	border: none;
-	cursor: pointer;
-	transition: opacity 0.15s;
-}
-.file-history-compare-btn:hover {
-	opacity: 0.85;
 }
 
 .file-history-view {

@@ -2,7 +2,7 @@
 // Starts a real foreground daemon pointed at a real OpenCode
 // instance. Unlike E2EHarness (which wraps RelayStack), this provides the
 // full daemon experience: project routing, instance management, health
-// polling, and the dashboard. Browser tests connect to the daemon's own
+// polling, and the session list. Browser tests connect to the daemon's own
 // HTTP server.
 //
 // Requires:
@@ -29,9 +29,9 @@ export interface DaemonHarness {
 	baseUrl: string;
 	/** The slug of the added project */
 	projectSlug: string;
-	/** Full project URL (e.g. "http://127.0.0.1:54321/p/conduit/") */
+	/** Full project URL (e.g. "http://127.0.0.1:54321/?p=conduit") */
 	projectUrl: string;
-	/** Project URL path (e.g. "/p/conduit/") */
+	/** Project URL path (e.g. "/?p=conduit") */
 	projectPath: string;
 	/** Stop daemon and clean up temp directories */
 	stop(): Promise<void>;
@@ -110,7 +110,7 @@ export async function createDaemonHarness(
 
 	const port = daemon.port;
 	const baseUrl = `http://127.0.0.1:${port}`;
-	const projectPath = `/p/${projectSlug}/`;
+	const projectPath = `/?p=${encodeURIComponent(projectSlug)}`;
 	const projectUrl = `${baseUrl}${projectPath}`;
 
 	return {

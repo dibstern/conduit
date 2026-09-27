@@ -1,5 +1,6 @@
 import { Either, Schema } from "effect";
 import { describe, expect, it } from "vitest";
+import { SetPin } from "../../../src/lib/contracts/ipc-requests.js";
 import {
 	IPCCommandSchema,
 	parseCommand,
@@ -8,6 +9,46 @@ import {
 } from "../../../src/lib/daemon/ipc-protocol.js";
 
 describe("IPC Command Schema validation", () => {
+	it.each([
+		null,
+		"1234",
+		"12345678",
+	])("accepts explicit SetPin value %j in both protocols", (pin) => {
+		expect(
+			Either.isRight(
+				Schema.decodeUnknownEither(SetPin)({ _tag: "SetPin", pin }),
+			),
+		).toBe(true);
+		expect(
+			Either.isRight(
+				Schema.decodeUnknownEither(IPCCommandSchema)({ cmd: "set_pin", pin }),
+			),
+		).toBe(true);
+		expect(validateCommand({ cmd: "set_pin", pin })).toBeNull();
+	});
+
+	it.each([
+		"",
+		"123",
+		"123456789",
+		"abcd",
+		undefined,
+	])("rejects invalid SetPin value %j in both protocols", (pin) => {
+		expect(
+			Either.isLeft(
+				Schema.decodeUnknownEither(SetPin)({ _tag: "SetPin", pin }),
+			),
+		).toBe(true);
+		expect(
+			Either.isLeft(
+				Schema.decodeUnknownEither(IPCCommandSchema)({ cmd: "set_pin", pin }),
+			),
+		).toBe(true);
+		expect(validateCommand({ cmd: "set_pin", pin })).toMatchObject({
+			ok: false,
+		});
+	});
+
 	// ─── Basic decode tests ────────────────────────────────────────────────
 
 	it("decodes add_project command", () => {

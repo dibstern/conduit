@@ -43,6 +43,10 @@ class MockWebSocket {
 		this.emit("close");
 	}
 
+	open(): void {
+		this.emit("open");
+	}
+
 	emitMessage(data: string): void {
 		this.emit("message", new MessageEvent("message", { data }));
 	}
@@ -64,11 +68,18 @@ vi.mock("../../../src/lib/frontend/stores/ws-dispatch.js", () => ({
 	disarmProtocolVersionCheck: () => {},
 }));
 
+import { getBrowserClientId } from "../../../src/lib/frontend/stores/client-identity.js";
 import {
+	attachedProjectState,
+	getCurrentSlug,
 	routerState,
-	slugState,
-	syncSlugState,
 } from "../../../src/lib/frontend/stores/router.svelte.js";
+import {
+	clearSessionState,
+	getAttentionSessions,
+	handleSessionList,
+	sessionState,
+} from "../../../src/lib/frontend/stores/session.svelte.js";
 import {
 	connect,
 	disconnect,
@@ -79,6 +90,7 @@ import {
 	getDebugEvents,
 } from "../../../src/lib/frontend/stores/ws-debug.svelte.js";
 import { disposeRuntime } from "../../../src/lib/frontend/transport/runtime.js";
+import type { RelayMessage } from "../../../src/lib/frontend/types.js";
 
 function installBrowserGlobals(): void {
 	Object.defineProperty(globalThis, "WebSocket", {
@@ -105,11 +117,21 @@ describe("WebSocket reconnect stream lifecycle", () => {
 	beforeEach(() => {
 		installBrowserGlobals();
 		instances.length = 0;
-		handleMessageMock.mockClear();
+		handleMessageMock.mockReset();
+		handleMessageMock.mockImplementation((message: RelayMessage) => {
+			if (message.type === "project_attached") {
+				attachedProjectState.slug = message.slug;
+			}
+			if (message.type === "session_list") handleSessionList(message);
+		});
+		vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("offline")));
 		replaceStateMock.mockClear();
 		clearDebugLog();
-		routerState.path = "/p/conduit/";
-		syncSlugState(routerState.path);
+		routerState.path = "/";
+		routerState.search = "?p=conduit";
+		attachedProjectState.slug = null;
+		clearSessionState();
+		sessionState.currentId = null;
 	});
 
 	afterEach(async () => {
@@ -118,7 +140,145 @@ describe("WebSocket reconnect stream lifecycle", () => {
 		vi.useRealTimers();
 		vi.unstubAllGlobals();
 		routerState.path = "/";
-		syncSlugState(routerState.path);
+		attachedProjectState.slug = null;
+		sessionState.currentId = null;
+	});
+
+	it("opens the daemon socket with the route's session and project hints", () => {
+		routerState.path = "/s/session-a";
+		routerState.search = "?p=project-a";
+		connect();
+		const params = new URLSearchParams({
+			client: getBrowserClientId(),
+			session: "session-a",
+			p: "project-a",
+		});
+		expect(instances[0]?.url).toBe(`ws://localhost:3000/ws?${params}`);
+	});
+
+	it("uses secure WebSockets and omits absent session and project hints", () => {
+		routerState.path = "/";
+		routerState.search = "";
+		window.location.protocol = "https:";
+		connect();
+		expect(instances[0]?.url).toBe(
+			`wss://localhost:3000/ws?client=${getBrowserClientId()}`,
+		);
+	});
+
+	it("retains the attachment hint on a fresh mount until the route effect changes it", () => {
+		connect();
+		attachedProjectState.slug = "project-a";
+		disconnect();
+		routerState.path = "/";
+		routerState.search = "?p=project-b";
+		connect();
+		expect(new URL(instances[1]?.url ?? "").searchParams.get("p")).toBe(
+			"project-a",
+		);
+	});
+
+	it("does not open another socket when the route or attached project changes", () => {
+		connect();
+		attachedProjectState.slug = "conduit";
+		routerState.path = "/s/session-b";
+		attachedProjectState.slug = "project-b";
+		expect(instances).toHaveLength(1);
+		expect(instances[0]?.readyState).toBe(MockWebSocket.OPEN);
+	});
+
+	it("reconnects with the requested session and attached project", async () => {
+		vi.useFakeTimers();
+		routerState.path = "/s/session-a";
+		routerState.search = "?p=project-a";
+		connect();
+		instances[0]?.open();
+		attachedProjectState.slug = "project-b";
+		sessionState.currentId = "session-b";
+		routerState.path = "/s/session-c";
+		instances[0]?.close();
+		await vi.advanceTimersByTimeAsync(1_000);
+
+		expect(instances).toHaveLength(2);
+		const params = new URLSearchParams({
+			client: getBrowserClientId(),
+			session: "session-c",
+			p: "project-b",
+		});
+		expect(instances[1]?.url).toBe(`ws://localhost:3000/ws?${params}`);
+	});
+
+	it("keeps the route session if the connection drops before the first attachment", async () => {
+		vi.useFakeTimers();
+		routerState.path = "/s/session-a";
+		routerState.search = "?p=project-a";
+		connect();
+		instances[0]?.open();
+		instances[0]?.close();
+		await vi.advanceTimersByTimeAsync(1_000);
+
+		expect(instances).toHaveLength(2);
+		expect(instances[1]?.url).toBe(instances[0]?.url);
+	});
+
+	it("waits for attachment before fetching status from the attached project", async () => {
+		const fetchMock = vi.fn().mockResolvedValue(
+			new Response(JSON.stringify({ status: "ready" }), {
+				status: 200,
+				headers: { "content-type": "application/json" },
+			}),
+		);
+		vi.stubGlobal("fetch", fetchMock);
+		connect();
+		expect(fetchMock).not.toHaveBeenCalled();
+		const ws = instances[0];
+		await vi.waitFor(() => expect(ws?.listenerCount("message")).toBe(1));
+		ws?.emitMessage(
+			JSON.stringify({ type: "project_attached", slug: "project-b" }),
+		);
+
+		await vi.waitFor(() => expect(wsState.relayStatus).toBe("ready"));
+		expect(fetchMock).toHaveBeenCalledExactlyOnceWith(
+			"/p/project-b/api/status",
+		);
+		expect(instances).toHaveLength(1);
+	});
+
+	it("ignores an old project's pending status response after reattachment", async () => {
+		let resolveOldStatus!: (response: Response) => void;
+		const oldStatus = new Promise<Response>((resolve) => {
+			resolveOldStatus = resolve;
+		});
+		const fetchMock = vi
+			.fn()
+			.mockImplementationOnce(() => oldStatus)
+			.mockResolvedValueOnce(
+				new Response(JSON.stringify({ status: "ready" }), {
+					status: 200,
+					headers: { "content-type": "application/json" },
+				}),
+			);
+		vi.stubGlobal("fetch", fetchMock);
+		connect();
+		const ws = instances[0];
+		await vi.waitFor(() => expect(ws?.listenerCount("message")).toBe(1));
+		ws?.emitMessage(
+			JSON.stringify({ type: "project_attached", slug: "project-a" }),
+		);
+		await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledOnce());
+		ws?.emitMessage(
+			JSON.stringify({ type: "project_attached", slug: "project-b" }),
+		);
+		await vi.waitFor(() => expect(wsState.relayStatus).toBe("ready"));
+		resolveOldStatus(new Response(null, { status: 401 }));
+		await new Promise((resolve) => setTimeout(resolve, 0));
+
+		expect(wsState.relayStatus).toBe("ready");
+		expect(replaceStateMock).not.toHaveBeenCalled();
+		expect(fetchMock.mock.calls).toEqual([
+			["/p/project-a/api/status"],
+			["/p/project-b/api/status"],
+		]);
 	});
 
 	it("routes an unauthenticated relay status response to the PIN page", async () => {
@@ -137,10 +297,11 @@ describe("WebSocket reconnect stream lifecycle", () => {
 			),
 		);
 
-		connect("conduit");
+		attachedProjectState.slug = "conduit";
+		connect();
 
 		await vi.waitFor(() => expect(routerState.path).toBe("/auth"));
-		expect(slugState.current).toBeNull();
+		expect(getCurrentSlug()).toBe("conduit");
 		expect(replaceStateMock).toHaveBeenCalledOnce();
 	});
 
@@ -155,10 +316,11 @@ describe("WebSocket reconnect stream lifecycle", () => {
 			),
 		);
 
-		connect("conduit");
+		attachedProjectState.slug = "conduit";
+		connect();
 
 		await vi.waitFor(() => expect(wsState.relayStatus).toBe("ready"));
-		expect(routerState.path).toBe("/p/conduit/");
+		expect(routerState.path).toBe("/");
 		expect(replaceStateMock).not.toHaveBeenCalled();
 	});
 
@@ -178,8 +340,9 @@ describe("WebSocket reconnect stream lifecycle", () => {
 			);
 		vi.stubGlobal("fetch", fetchMock);
 
-		connect("conduit");
-		connect("conduit");
+		attachedProjectState.slug = "conduit";
+		connect();
+		connect();
 		resolveFirst(
 			new Response(
 				JSON.stringify({
@@ -193,7 +356,7 @@ describe("WebSocket reconnect stream lifecycle", () => {
 		);
 
 		await vi.waitFor(() => expect(wsState.relayStatus).toBe("ready"));
-		expect(routerState.path).toBe("/p/conduit/");
+		expect(routerState.path).toBe("/");
 		expect(replaceStateMock).not.toHaveBeenCalled();
 	});
 
@@ -218,9 +381,10 @@ describe("WebSocket reconnect stream lifecycle", () => {
 			);
 		vi.stubGlobal("fetch", fetchMock);
 
-		connect("conduit");
+		attachedProjectState.slug = "conduit";
+		connect();
 		await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledOnce());
-		connect("conduit");
+		connect();
 		await vi.waitFor(() => expect(wsState.relayStatus).toBe("ready"));
 
 		bodyController.enqueue(
@@ -245,6 +409,54 @@ describe("WebSocket reconnect stream lifecycle", () => {
 		await vi.advanceTimersByTimeAsync(20_000);
 
 		expect(instances).toHaveLength(1);
+	});
+
+	// Socket open preserves the last row until the next roots snapshot arrives.
+	it.each([
+		["after a disconnect", () => instances[0]?.close()],
+		["when a resume replaces a closing socket", () => connect()],
+	])("reconciles attention from rows after reconnect %s", async (_, reconnect) => {
+		connect();
+		instances[0]?.open();
+		handleSessionList({
+			type: "session_list",
+			roots: true,
+			sessions: [
+				{
+					id: "root-a",
+					title: "Root",
+					status: "idle",
+					pendingQuestionCount: 1,
+				},
+			],
+		});
+
+		reconnect();
+		connect();
+		expect(getAttentionSessions(null, () => new Set()).size).toBe(1);
+		instances.at(-1)?.open();
+
+		expect(getAttentionSessions(null, () => new Set()).size).toBe(1);
+		await vi.waitFor(() =>
+			expect(instances.at(-1)?.listenerCount("message")).toBeGreaterThan(0),
+		);
+		instances.at(-1)?.emitMessage(
+			JSON.stringify({
+				type: "session_list",
+				roots: true,
+				sessions: [
+					{
+						id: "root-a",
+						title: "Root",
+						status: "idle",
+						pendingQuestionCount: 0,
+					},
+				],
+			}),
+		);
+		await vi.waitFor(() =>
+			expect(getAttentionSessions(null, () => new Set()).size).toBe(0),
+		);
 	});
 
 	it("removes the old message stream before the replacement stream handles messages", async () => {

@@ -1,0 +1,52 @@
+import { Meta } from "@storybook/addon-docs/blocks";
+
+<Meta title="UI/Foundations/Typography" />
+
+# Typography
+
+## Families
+
+| Token | Current stack | Use |
+| --- | --- | --- |
+| `--font-sans` | JetBrains Mono, Berkeley Mono, IBM Plex Mono, system monospace fallbacks | Default application copy |
+| `--font-mono` | JetBrains Mono, Berkeley Mono, IBM Plex Mono, system monospace fallbacks | Code, paths, and data |
+| `--font-brand` | Chakra Petch, sans-serif | Branded controls and headings |
+
+`--font-sans` and `--font-mono` intentionally resolve to the same stack today.
+Use `font-sans`, `font-mono`, or `font-brand`; do not repeat a font-family list in a
+component.
+
+<div style={{ display: "grid", gap: "12px", padding: "16px", background: "var(--color-bg-surface)", color: "var(--color-text)", borderRadius: "var(--radius-panel)" }}>
+  <div style={{ fontFamily: "var(--font-sans)" }}><code>--font-sans</code> — The quick brown fox</div>
+  <div style={{ fontFamily: "var(--font-mono)" }}><code>--font-mono</code> — const session = active;</div>
+  <div style={{ fontFamily: "var(--font-brand)" }}><code>--font-brand</code> — CONDUIT</div>
+</div>
+
+## Size scale
+
+The text utilities use this conduit-owned scale from `style.css`:
+
+| Utility / token | Size | Line height |
+| --- | ---: | ---: |
+| `text-xs` / `--text-xs` | 10px | 1.4 |
+| `text-sm` / `--text-sm` | 11px | 1.4 |
+| `text-base` / `--text-base` | 12px | 1.5 |
+| `text-lg` / `--text-lg` | 15px | 1.4 |
+| `text-xl` / `--text-xl` | 20px | 1.3 |
+| `text-2xl` / `--text-2xl` | 24px | 1.2 |
+
+<div style={{ display: "grid", gap: "8px", color: "var(--color-text)" }}>
+  <div style={{ fontSize: "var(--text-xs)", lineHeight: "var(--text-xs--line-height)" }}><code>--text-xs</code> — Metadata and compact labels</div>
+  <div style={{ fontSize: "var(--text-sm)", lineHeight: "var(--text-sm--line-height)" }}><code>--text-sm</code> — Supporting copy</div>
+  <div style={{ fontSize: "var(--text-base)", lineHeight: "var(--text-base--line-height)" }}><code>--text-base</code> — Default body copy</div>
+  <div style={{ fontSize: "var(--text-lg)", lineHeight: "var(--text-lg--line-height)" }}><code>--text-lg</code> — Emphasized copy</div>
+  <div style={{ fontSize: "var(--text-xl)", lineHeight: "var(--text-xl--line-height)" }}><code>--text-xl</code> — Section heading</div>
+  <div style={{ fontSize: "var(--text-2xl)", lineHeight: "var(--text-2xl--line-height)" }}><code>--text-2xl</code> — Page heading</div>
+</div>
+
+## Weight gap
+
+Font weights are not tokenized in `style.css`. Components currently use Tailwind's
+`font-medium`, `font-semibold`, and `font-bold` utilities. Treat that as the current
+convention and an open design-system gap; do not invent `--font-weight-*` tokens in a
+feature.

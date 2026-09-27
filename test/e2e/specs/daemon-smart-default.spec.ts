@@ -73,7 +73,7 @@ const test = base.extend<{
 		const project = await daemon.addProject(process.cwd());
 		const port = daemon.port;
 		const baseUrl = `http://127.0.0.1:${port}`;
-		const projectUrl = `${baseUrl}/p/${project.slug}/`;
+		const projectUrl = `${baseUrl}/?p=${encodeURIComponent(project.slug)}`;
 
 		// Wait for the default instance to become healthy
 		const start = Date.now();

@@ -12,11 +12,18 @@ import type {
 	UserMessage,
 } from "../../../src/lib/frontend/types.js";
 import {
+	appendActivity,
+	type ClosedSegment,
+	type CompactionPart,
 	countsPhrase,
 	economics,
 	fmtTokens,
 	isSoloTool,
+	lastResult,
+	partLabel,
 	segmentTurns,
+	skillChapters,
+	skillName,
 	stepDurations,
 	stepWeights,
 	turnDuration,
@@ -88,6 +95,24 @@ function result(fields: Partial<ResultMessage> = {}): ResultMessage {
 
 const system = (): SystemMessage => ({ type: "system", uuid: id(), text: "!" });
 
+function compaction(
+	state: NonNullable<SystemMessage["compaction"]> = "completed",
+	fields: Partial<SystemMessage> = {},
+): SystemMessage {
+	return {
+		type: "system",
+		uuid: id(),
+		text: "Context compacted",
+		compaction: state,
+		...fields,
+	};
+}
+
+/** A completed compaction, typed as the activity part it becomes. */
+function compacted(): CompactionPart {
+	return { ...compaction(), compaction: "completed" };
+}
+
 // Tool inputs are stored canonically (the provider normalizes at the boundary),
 // so fixtures use the canonical discriminated shape rather than raw SDK keys.
 const read = (path: string, createdAt?: number) =>
@@ -100,6 +125,78 @@ const read = (path: string, createdAt?: number) =>
 // ─── segmentTurns ────────────────────────────────────────────────────────────
 
 describe("segmentTurns", () => {
+	it.each([
+		"assistant",
+		"tool",
+		"thinking",
+	])("reopens liveness for new %s activity after a result", (kind) => {
+		const next =
+			kind === "assistant" ? say() : kind === "tool" ? read("/b.ts") : think();
+		const turn = segmentTurns(
+			[user(), read("/a.ts"), result(), next],
+			true,
+		)[0]!;
+		expect(turn.live).toBe(true);
+		expect(turn.segments).toHaveLength(2);
+	});
+
+	it("keeps a finished segment closed without an empty trailing segment", () => {
+		const end = result();
+		const turn = segmentTurns(
+			[user(), read("/a.ts"), say(), end, system()],
+			true,
+		)[0]!;
+		expect(turn.live).toBe(false);
+		expect(turn.segments).toHaveLength(1);
+		expect(turn.segments[0]?.end).toBe(end);
+	});
+
+	it("keeps a closed segment's reply separate from later work", () => {
+		const reply = say();
+		const end = result({ cost: 0.02, duration: 100, createdAt: 200 });
+		const next = read("/b.ts", 300);
+		const turn = segmentTurns([user(undefined, 0), reply, end, next], true)[0]!;
+		expect(turn.segments[0]?.reply).toEqual([reply]);
+		expect(turn.segments[1]?.activity).toEqual([next]);
+		expect(lastResult(turn)).toBe(end);
+		expect(economics(turn, 500).cost).toBe(0.02);
+		expect(turnDuration(turn, 500)).toBe(500);
+	});
+
+	it("settles again after resumed work finishes", () => {
+		const end = result();
+		const turn = segmentTurns(
+			[user(), read("/a.ts"), result(), read("/b.ts"), end],
+			true,
+		)[0]!;
+		expect(turn.live).toBe(false);
+		expect(turn.segments).toHaveLength(2);
+		expect(turn.segments[1]?.end).toBe(end);
+	});
+
+	it("does not open a segment for consecutive result metadata", () => {
+		const end = result({ duration: 100 });
+		const turn = segmentTurns([user(), read("/a.ts"), result(), end], true)[0]!;
+		expect(turn.segments).toHaveLength(1);
+		expect(lastResult(turn)).toBe(end);
+		expect(turn.live).toBe(false);
+	});
+
+	it("refuses to append activity to a closed segment at compile time", () => {
+		const segment: ClosedSegment = { activity: [], reply: [], end: result() };
+		// This branch is checked by pnpm check, but never mutates the fixture.
+		// biome-ignore lint/correctness/noConstantCondition: compile-fail assertions must not execute.
+		if (false) {
+			// @ts-expect-error A closed segment cannot enter the append path.
+			appendActivity(segment, read("/a.ts"));
+			// @ts-expect-error Closed activity cannot be appended directly either.
+			segment.activity.push(read("/a.ts"));
+			// @ts-expect-error Closing a segment cannot be undone by replacing activity.
+			segment.activity = [];
+		}
+		expect(segment.activity).toEqual([]);
+	});
+
 	it("closes a live segment at a pending question", () => {
 		const text = say("Which option?");
 		const question = tool(
@@ -110,10 +207,9 @@ describe("segmentTurns", () => {
 		const turn = segmentTurns([user(), text, question], true)[0];
 
 		expect(turn?.segments).toEqual([
-			{ activity: [], reply: [text], handBack: question },
-			{ activity: [], reply: [] },
+			{ activity: [], reply: [text], handBack: question, end: question },
 		]);
-		expect(turn?.live).toBe(true);
+		expect(turn?.live).toBe(false);
 	});
 
 	it("keeps system messages out of the activity log, as turn notices", () => {
@@ -135,7 +231,7 @@ describe("segmentTurns", () => {
 		expect(turns[0]?.user).toBe(u);
 		expect(turns[0]?.segments[0]?.activity).toEqual([r]);
 		expect(turns[0]?.segments[0]?.reply).toEqual([reply]);
-		expect(turns[0]?.result).toBe(res);
+		expect(turns[0]?.segments[0]?.end).toBe(res);
 	});
 
 	it("starts a new turn at every user message", () => {
@@ -191,8 +287,7 @@ describe("segmentTurns", () => {
 		const turn = segmentTurns([user(), text, question], false)[0];
 
 		expect(turn?.segments).toEqual([
-			{ activity: [], reply: [text], handBack: question },
-			{ activity: [], reply: [] },
+			{ activity: [], reply: [text], handBack: question, end: question },
 		]);
 		expect(turn?.live).toBe(false);
 	});
@@ -205,7 +300,7 @@ describe("segmentTurns", () => {
 		const turn = segmentTurns([user(), a, question, file, b], false)[0];
 
 		expect(turn?.segments).toEqual([
-			{ activity: [], reply: [a], handBack: question },
+			{ activity: [], reply: [a], handBack: question, end: question },
 			{ activity: [file], reply: [b] },
 		]);
 	});
@@ -220,6 +315,7 @@ describe("segmentTurns", () => {
 			activity: [text, file],
 			reply: [],
 			handBack: question,
+			end: question,
 		});
 	});
 
@@ -234,6 +330,7 @@ describe("segmentTurns", () => {
 			activity: [text, thought],
 			reply: [],
 			handBack: question,
+			end: question,
 		});
 	});
 
@@ -251,8 +348,7 @@ describe("segmentTurns", () => {
 		const turn = segmentTurns([user(), text, exit], false)[0];
 
 		expect(turn?.segments).toEqual([
-			{ activity: [], reply: [text], handBack: exit },
-			{ activity: [], reply: [] },
+			{ activity: [], reply: [text], handBack: exit, end: exit },
 		]);
 	});
 
@@ -264,9 +360,8 @@ describe("segmentTurns", () => {
 		const turn = segmentTurns([user(), a, first, b, second], false)[0];
 
 		expect(turn?.segments).toEqual([
-			{ activity: [], reply: [a], handBack: first },
-			{ activity: [], reply: [b], handBack: second },
-			{ activity: [], reply: [] },
+			{ activity: [], reply: [a], handBack: first, end: first },
+			{ activity: [], reply: [b], handBack: second, end: second },
 		]);
 	});
 
@@ -279,10 +374,10 @@ describe("segmentTurns", () => {
 		expect(turns[0]?.segments[0]?.activity).toEqual([r]);
 	});
 
-	it("routes result messages to the turn's result, not its activity", () => {
+	it("closes the segment with its result, not activity", () => {
 		const res = result({ cost: 0.02 });
 		const turns = segmentTurns([user(), read("/a.ts"), res], false);
-		expect(turns[0]?.result).toBe(res);
+		expect(turns[0]?.segments[0]?.end).toBe(res);
 		expect(turns[0]?.segments[0]?.activity).toHaveLength(1);
 	});
 
@@ -345,6 +440,18 @@ describe("turnStats", () => {
 		expect(s.tools).toBe(8);
 	});
 
+	it("names skills instead of lumping them into 'other'", () => {
+		const s = turnStats({
+			activity: [
+				tool("Skill", { tool: "Skill", name: "brainstorm" }),
+				tool("Skill", { tool: "Skill", name: "tdd" }),
+			],
+			reply: [],
+		});
+		expect(s.skills).toBe(2);
+		expect(s.others).toBe(0);
+	});
+
 	it("counts failures from either the status or the error flag", () => {
 		const s = turnStats({
 			activity: [
@@ -378,6 +485,29 @@ describe("countsPhrase", () => {
 			}),
 		);
 		expect(phrase).toBe("2 reads · 1 search · 1 edit · 1 command");
+	});
+
+	it("leaves skills to their own control", () => {
+		expect(
+			countsPhrase(
+				turnStats({
+					activity: [
+						tool("WebFetch", { tool: "WebFetch", url: "https://example.com" }),
+						tool("Skill", { tool: "Skill", name: "tdd" }),
+						tool("Task", { tool: "Task", description: "go", prompt: "p" }),
+					],
+					reply: [],
+				}),
+			),
+		).toBe("1 fetch · 1 subagent");
+		expect(
+			countsPhrase(
+				turnStats({
+					activity: [tool("Skill", { tool: "Skill", name: "tdd" })],
+					reply: [],
+				}),
+			),
+		).toBe("");
 	});
 
 	it("falls back to thoughts, then to 'no tools'", () => {
@@ -597,5 +727,199 @@ describe("isSoloTool", () => {
 		expect(isSoloTool(tool("Skill"))).toBe(true);
 		expect(isSoloTool(tool("Task"))).toBe(true);
 		expect(isSoloTool(tool("Read"))).toBe(false);
+	});
+});
+
+// ─── Compaction in the ledger ────────────────────────────────────────────────
+
+describe("compaction", () => {
+	it("puts a completed compaction in the activity log where it happened", () => {
+		const before = read("a.ts");
+		const boundary = compaction();
+		const after = read("b.ts");
+		const [turn] = segmentTurns(
+			[user(), before, boundary, after, say()],
+			false,
+		);
+		expect(turn?.segments[0]?.activity).toEqual([before, boundary, after]);
+		expect(turn?.notices).toEqual([]);
+	});
+
+	it("keeps started and failed compactions as notices", () => {
+		const started = compaction("started");
+		const failed = compaction("failed", { variant: "error" });
+		const [turn] = segmentTurns([user(), started, read("a.ts"), failed], true);
+		expect(turn?.notices).toEqual([started, failed]);
+		expect(turn?.segments[0]?.activity.map((p) => p.type)).toEqual(["tool"]);
+	});
+
+	it("keeps several compactions in order and folds narration before them", () => {
+		const first = compaction("completed", { preTokens: 1 });
+		const narration = say("squeezing");
+		const second = compaction("completed", { preTokens: 2 });
+		const [turn] = segmentTurns(
+			[user(), read("a.ts"), first, narration, second, say()],
+			false,
+		);
+		expect(turn?.segments[0]?.activity.slice(1)).toEqual([
+			first,
+			narration,
+			second,
+		]);
+	});
+
+	it("counts compactions apart from tools", () => {
+		const segment = {
+			activity: [read("a.ts"), compacted(), compacted()],
+			reply: [],
+		};
+		const stats = turnStats(segment);
+		expect(stats).toMatchObject({ tools: 1, compactions: 2, others: 0 });
+		expect(countsPhrase(stats)).toBe("1 read");
+	});
+
+	it("leaves the phrase to the marker when a compaction is all the ledger holds", () => {
+		const stats = turnStats({ activity: [compacted()], reply: [] });
+		expect(countsPhrase(stats)).toBe("");
+	});
+
+	it("takes no time, and the step before it ends where it began", () => {
+		const turn = segmentTurns(
+			[
+				user(),
+				read("a.ts", 1000),
+				compaction("completed", { createdAt: 4000 }),
+				read("b.ts", 5000),
+				say("ok", 6000),
+			],
+			false,
+		)[0]!;
+		expect(stepDurations(turn.segments[0]!, turn, true, 0)).toEqual([
+			3000, 0, 1000,
+		]);
+	});
+
+	it("does not void the timings when it carries no stamp", () => {
+		const turn = segmentTurns(
+			[
+				user(),
+				read("a.ts", 1000),
+				compaction(),
+				read("b.ts", 5000),
+				say("ok", 6000),
+			],
+			false,
+		)[0]!;
+		expect(stepDurations(turn.segments[0]!, turn, true, 0)).toEqual([
+			4000, 0, 1000,
+		]);
+	});
+
+	it("labels the saving when both sizes are known", () => {
+		const label = (fields: Partial<SystemMessage>) => {
+			const [turn] = segmentTurns(
+				[user(), compaction("completed", fields)],
+				false,
+			);
+			const part = turn?.segments[0]?.activity[0];
+			return part && partLabel(part);
+		};
+		expect(label({ preTokens: 180_000, postTokens: 42_000 })).toBe(
+			"Compacted context · 180k → 42k, 138k saved",
+		);
+		expect(label({})).toBe("Compacted context");
+	});
+});
+
+describe("skillChapters", () => {
+	const skill = (name: string, createdAt?: number) =>
+		tool(
+			"Skill",
+			{ tool: "Skill", name },
+			createdAt !== undefined ? { createdAt } : {},
+		);
+	const chapters = (messages: ChatMessage[], live: boolean, now: number) => {
+		const turn = segmentTurns(messages, live)[0]!;
+		return skillChapters(turn.segments[0]!, turn, true, now);
+	};
+
+	it("runs each skill until the next one loads, and the last until the reply", () => {
+		expect(
+			chapters(
+				[
+					user(undefined, 0),
+					skill("tdd", 2_000),
+					read("/a.ts", 3_000),
+					skill("debugging", 10_000),
+					read("/b.ts", 11_000),
+					say("done", 20_000),
+				],
+				false,
+				0,
+			),
+		).toEqual([
+			{ index: 0, name: "tdd", offset: 2_000, duration: 8_000, running: false },
+			{
+				index: 2,
+				name: "debugging",
+				offset: 10_000,
+				duration: 10_000,
+				running: false,
+			},
+		]);
+	});
+
+	it("leaves the last skill of a live turn open rather than guessing its end", () => {
+		expect(
+			chapters(
+				[
+					user(undefined, 0),
+					skill("tdd", 1_000),
+					read("/a.ts", 2_000),
+					skill("debugging", 5_000),
+				],
+				true,
+				9_000,
+			),
+		).toEqual([
+			{ index: 0, name: "tdd", offset: 1_000, duration: 4_000, running: false },
+			{ index: 2, name: "debugging", offset: 5_000, running: true },
+		]);
+	});
+
+	it("omits whatever a missing stamp would have measured", () => {
+		expect(
+			chapters(
+				[
+					user(undefined, 0),
+					skill("tdd"),
+					skill("debugging", 4_000),
+					say("done", 6_000),
+				],
+				false,
+				0,
+			),
+		).toEqual([
+			{ index: 0, name: "tdd", running: false },
+			{
+				index: 1,
+				name: "debugging",
+				offset: 4_000,
+				duration: 2_000,
+				running: false,
+			},
+		]);
+	});
+
+	it("is empty when no skill ran", () => {
+		expect(chapters([user(), read("/a.ts"), say()], false, 0)).toEqual([]);
+	});
+
+	it("recovers the name of a skill recorded before inputs were normalized", () => {
+		expect(
+			skillName(
+				tool("Skill", {}, { result: "Launching skill: brainstorming" }),
+			),
+		).toBe("brainstorming");
 	});
 });

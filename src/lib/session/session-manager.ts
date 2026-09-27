@@ -458,10 +458,10 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
 	}
 
 	/**
-	 * Send roots-only session list immediately, then all-sessions in background.
+	 * Send the roots-only session list.
 	 * Used by all broadcast/unicast send points.
 	 */
-	async sendDualSessionLists(
+	async sendSessionLists(
 		send: (msg: Extract<RelayMessage, { type: "session_list" }>) => void,
 		options?: { statuses?: Record<string, SessionStatus> | undefined },
 	): Promise<void> {
@@ -469,23 +469,7 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
 			roots: true,
 			statuses: options?.statuses,
 		});
-		send({
-			type: "session_list",
-			sessions: roots,
-			roots: true,
-		});
-
-		this.listSessions({ statuses: options?.statuses })
-			.then((all) => {
-				send({
-					type: "session_list",
-					sessions: all,
-					roots: false,
-				});
-			})
-			.catch((err) => {
-				this.log.warn(`Background all-sessions fetch failed: ${err}`);
-			});
+		send({ type: "session_list", sessions: roots, roots: true });
 	}
 
 	// ─── Internal ──────────────────────────────────────────────────────────
@@ -497,17 +481,5 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
 			sessions: roots,
 			roots: true,
 		});
-
-		this.listSessions()
-			.then((all) => {
-				this.emit("broadcast", {
-					type: "session_list",
-					sessions: all,
-					roots: false,
-				});
-			})
-			.catch((err) => {
-				this.log.warn(`Background all-sessions broadcast failed: ${err}`);
-			});
 	}
 }

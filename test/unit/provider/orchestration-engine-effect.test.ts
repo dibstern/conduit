@@ -1,3 +1,4 @@
+import { SqlClient } from "@effect/sql";
 import { describe, it } from "@effect/vitest";
 import { Deferred, Effect, Fiber } from "effect";
 import { expect, vi } from "vitest";
@@ -5,9 +6,7 @@ import {
 	type DaemonConfig,
 	resolveProviderRoutingDriver,
 } from "../../../src/lib/daemon/config-persistence.js";
-import { runMigrations } from "../../../src/lib/persistence/migrations.js";
-import { schemaMigrations } from "../../../src/lib/persistence/schema.js";
-import { SqliteClient } from "../../../src/lib/persistence/sqlite-client.js";
+import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
 import {
 	OrchestrationEngine,
 	type SendTurnCommand,
@@ -90,19 +89,15 @@ function sendTurnCommand(): SendTurnCommand {
 }
 
 function seedProjectedSessionBinding(
-	db: SqliteClient,
+	sql: SqlClient.SqlClient,
 	sessionId: string,
 	providerId: string,
-): void {
+) {
 	const now = 1_735_689_600_000;
-	db.execute(
-		"INSERT INTO sessions (id, provider, title, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
-		[sessionId, providerId, "Persisted session", "idle", now, now],
-	);
-	db.execute(
-		"INSERT INTO session_providers (id, session_id, provider, status, activated_at) VALUES (?, ?, ?, 'active', ?)",
-		[`${sessionId}:initial`, sessionId, providerId, now],
-	);
+	return Effect.all([
+		sql`INSERT INTO sessions (id, provider, title, status, created_at, updated_at) VALUES (${sessionId}, ${providerId}, ${"Persisted session"}, ${"idle"}, ${now}, ${now})`,
+		sql`INSERT INTO session_providers (id, session_id, provider, status, activated_at) VALUES (${`${sessionId}:initial`}, ${sessionId}, ${providerId}, 'active', ${now})`,
+	]);
 }
 
 describe("OrchestrationEngine dispatchEffect", () => {
@@ -110,16 +105,15 @@ describe("OrchestrationEngine dispatchEffect", () => {
 		"recovers session provider bindings from the durable read model in a fresh engine",
 		() =>
 			Effect.gen(function* () {
-				const db = SqliteClient.memory();
-				runMigrations(db, schemaMigrations);
-				seedProjectedSessionBinding(db, "session-1", "claude");
+				const sql = yield* SqlClient.SqlClient;
+				yield* seedProjectedSessionBinding(sql, "session-1", "claude");
 				const registry = new ProviderRegistry();
 				const instance = makeStubInstance("claude");
 				registry.registerInstance(instance);
 				const engine = new OrchestrationEngine({
 					registry,
 					sessionBindingReadModel: new SqliteProviderSessionBindingReadModel(
-						db,
+						sql,
 					),
 				});
 
@@ -130,9 +124,10 @@ describe("OrchestrationEngine dispatchEffect", () => {
 				});
 
 				expect(instance.interruptTurnEffect).toHaveBeenCalledWith("session-1");
-				expect(engine.getProviderForSession("session-1")).toBe("claude");
-				db.close();
-			}),
+				expect(yield* engine.getProviderForSessionEffect("session-1")).toBe(
+					"claude",
+				);
+			}).pipe(Effect.provide(makePersistenceEffectLayer(":memory:"))),
 	);
 
 	it.effect(
@@ -158,7 +153,9 @@ describe("OrchestrationEngine dispatchEffect", () => {
 
 				expect(result).toMatchObject({ status: "completed" });
 				expect(instance.sendTurnEffect).toHaveBeenCalledTimes(1);
-				expect(engine.getProviderForSession("session-1")).toBe("opencode");
+				expect(yield* engine.getProviderForSessionEffect("session-1")).toBe(
+					"opencode",
+				);
 			}),
 	);
 
@@ -196,7 +193,9 @@ describe("OrchestrationEngine dispatchEffect", () => {
 				expect(result).toMatchObject({ status: "completed" });
 				expect(sendTurn).not.toHaveBeenCalled();
 				expect(sendTurnEffect).toHaveBeenCalledWith(command.input);
-				expect(engine.getProviderForSession("session-1")).toBe("opencode");
+				expect(yield* engine.getProviderForSessionEffect("session-1")).toBe(
+					"opencode",
+				);
 			}),
 	);
 
@@ -241,7 +240,9 @@ describe("OrchestrationEngine dispatchEffect", () => {
 
 				expect(result).toMatchObject({ status: "completed" });
 				expect(instance.sendTurnEffect).toHaveBeenCalledWith(command.input);
-				expect(engine.getProviderForSession("session-1")).toBe("work-claude");
+				expect(yield* engine.getProviderForSessionEffect("session-1")).toBe(
+					"work-claude",
+				);
 			}),
 	);
 
@@ -286,7 +287,9 @@ describe("OrchestrationEngine dispatchEffect", () => {
 
 				expect(result).toMatchObject({ status: "completed" });
 				expect(instance.sendTurnEffect).toHaveBeenCalledWith(command.input);
-				expect(engine.getProviderForSession("session-1")).toBe("work-opencode");
+				expect(yield* engine.getProviderForSessionEffect("session-1")).toBe(
+					"work-opencode",
+				);
 			}),
 	);
 
@@ -328,7 +331,9 @@ describe("OrchestrationEngine dispatchEffect", () => {
 					},
 				});
 				expect(openCodeInstance.sendTurnEffect).not.toHaveBeenCalled();
-				expect(engine.getProviderForSession("session-1")).toBe(undefined);
+				expect(yield* engine.getProviderForSessionEffect("session-1")).toBe(
+					undefined,
+				);
 			}),
 	);
 
@@ -365,7 +370,9 @@ describe("OrchestrationEngine dispatchEffect", () => {
 				);
 				yield* Deferred.await(sendStarted);
 
-				expect(engine.getProviderForSession("session-1")).toBe("claude");
+				expect(yield* engine.getProviderForSessionEffect("session-1")).toBe(
+					"claude",
+				);
 
 				yield* Deferred.succeed(releaseSend, undefined);
 				yield* Fiber.join(fiber);
@@ -545,7 +552,9 @@ describe("OrchestrationEngine dispatchEffect", () => {
 
 				expect(endSession).not.toHaveBeenCalled();
 				expect(endSessionEffect).toHaveBeenCalledWith("session-1");
-				expect(engine.getProviderForSession("session-1")).toBeUndefined();
+				expect(
+					yield* engine.getProviderForSessionEffect("session-1"),
+				).toBeUndefined();
 			}),
 	);
 });

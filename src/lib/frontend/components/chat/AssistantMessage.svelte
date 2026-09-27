@@ -19,7 +19,7 @@
 	import { getBrowserClientId } from "../../stores/client-identity.js";
 	import { forkSessionRpc } from "../../transport/ws-rpc-client.js";
 	import { assertNever } from "../../../utils.js";
-	import Icon from "../shared/Icon.svelte";
+	import Button from "../ui/Button.svelte";
 	import MessageTime from "./MessageTime.svelte";
 	import { initTableScrollShadows } from "../../utils/table-scroll.js";
 	import hljs from "highlight.js";
@@ -27,11 +27,7 @@
 	// Consistent with FileViewer's mapExtToLanguage mapping (svelte/vue → xml).
 	hljs.registerAliases(["svelte", "vue"], { languageName: "xml" });
 	import mermaid from "mermaid";
-	import {
-		themeState,
-		getCurrentTheme,
-	} from "../../stores/theme.svelte.js";
-	import { computeMermaidVars } from "../../stores/theme-compute.js";
+	import { themeState } from "../../stores/theme.svelte.js";
 
 	let { message }: { message: AssistantMessage } = $props();
 	let containerEl: HTMLDivElement | undefined = $state();
@@ -44,31 +40,33 @@
 	// ─── Mermaid init (once globally) ──────────────────────────────────────────
 
 	function initializeMermaid(): void {
-		const theme = getCurrentTheme();
-		let vars: ReturnType<typeof computeMermaidVars>;
-		if (theme) {
-			vars = computeMermaidVars(theme);
-		} else {
-			// Read fallback values from the active CSS custom properties
-			const s = getComputedStyle(document.documentElement);
-			const get = (name: string, fallback: string) => s.getPropertyValue(name).trim() || fallback;
-			vars = {
-				darkMode: false,
-				background: get("--color-code-bg", "#f5f4f3"),
-				primaryColor: get("--color-accent", "#1d1b1b"),
-				primaryTextColor: get("--color-text", "#1d1b1b"),
-				primaryBorderColor: get("--color-border", "#e0dfde"),
-				lineColor: get("--color-text-muted", "#999999"),
-				secondaryColor: get("--color-bg-alt", "#f7f6f5"),
-				tertiaryColor: get("--color-bg", "#fdfdfc"),
-				fontFamily:
-					"'Berkeley Mono', 'IBM Plex Mono', ui-monospace, monospace",
-			};
-		}
+		const styles = getComputedStyle(document.documentElement);
+		const get = (name: string, fallback: string) =>
+			styles.getPropertyValue(name).trim() || fallback;
+		const vars = {
+			darkMode: themeState.resolved === "dark",
+			background: get("--color-code-bg", "#141417"),
+			// Under theme "base", primaryColor IS the node fill, so it must be a
+			// surface token. Pointing it at --color-accent turned every node brand
+			// pink; nodes should read as panels, with the accent reserved for
+			// emphasis elsewhere.
+			primaryColor: get("--color-bg-alt", "#1b1e24"),
+			primaryTextColor: get("--color-text", "#e4e4e7"),
+			primaryBorderColor: get("--color-border", "#3f3f46"),
+			lineColor: get("--color-text-muted", "#71717a"),
+			secondaryColor: get("--color-bg-surface", "#1f1f23"),
+			tertiaryColor: get("--color-bg", "#0d0e11"),
+			fontFamily:
+				"'Berkeley Mono', 'IBM Plex Mono', ui-monospace, monospace",
+		};
 
 		mermaid.initialize({
 			startOnLoad: false,
-			theme: vars.darkMode ? "dark" : "default",
+			// "base" is the only mermaid theme that honours themeVariables. The prebuilt
+			// "default"/"dark" themes recompute their own palette and discard most of
+			// what we pass, which left light-mode diagrams rendering mermaid's stock
+			// lavender (#ECECFF) instead of conduit's tokens.
+			theme: "base",
 			themeVariables: vars,
 		});
 	}
@@ -81,7 +79,7 @@
 
 	// Re-initialize mermaid when theme changes and re-render existing diagrams
 	$effect(() => {
-		const _themeId = themeState.currentThemeId;
+		const _resolvedTheme = themeState.resolved;
 		initializeMermaid();
 		// Re-render already-rendered mermaid diagrams with the new theme
 		if (containerEl) {
@@ -164,6 +162,7 @@
 		}
 		// Fallback for environments without requestIdleCallback (SSR, old browsers)
 		postRender();
+		return undefined;
 	});
 
 	// ─── Code block headers ────────────────────────────────────────────────────
@@ -349,9 +348,7 @@
 		}
 	});
 
-	// TODO: Look into this warning:
-	// This comparison appears to be unintentional because the types '"idle"' and '"done"' have no overlap.ts(2367)
-	const hintColor = $derived(
+	const hintColor = $derived.by(() =>
 		copyState === "done" ? "text-success" : "text-text-dimmer",
 	);
 
@@ -387,25 +384,34 @@
 				class="msg-actions absolute top-2 right-2 flex gap-1 opacity-0 group-hover:opacity-100 touch:opacity-100 transition-opacity duration-150 z-10"
 				class:opacity-100={copyState !== "idle"}
 			>
-				<button
-					class="flex items-center justify-center w-7 h-7 rounded-md border cursor-pointer transition-colors duration-150 backdrop-blur-sm {copyState === 'done' ? 'border-success/30 bg-success/10 text-success' : copyState === 'primed' ? 'border-brand-b/30 bg-brand-b/10 text-brand-b' : 'border-border-subtle/50 bg-bg-surface/80 text-text-muted hover:text-text-secondary'}"
+				<!-- No tone pairs all three copy states; inherit leaves their exact colours here. -->
+				<Button
+					variant="ghost"
+					size="content"
+					tone="inherit"
+					hoverFill="none"
+					iconOnly
+					icon={copyState === 'done' ? 'check' : 'copy'}
+					iconSize={14}
+					class="w-7 h-7 rounded-md border backdrop-blur-sm {copyState === 'done' ? 'border-success/30 bg-success/10 text-success' : copyState === 'primed' ? 'border-brand-b/30 bg-brand-b/10 text-brand-b' : 'border-border-subtle/50 bg-bg-surface/80 text-text-muted hover:text-text-secondary'}"
 					title={copyState === 'done' ? 'Copied!' : copyState === 'primed' ? 'Click to confirm copy' : 'Copy message'}
+					ariaLabel={copyState === 'done' ? 'Copied!' : copyState === 'primed' ? 'Click to confirm copy' : 'Copy message'}
 					onclick={handleClick}
-				>
-					{#if copyState === 'done'}
-						<Icon name="check" size={14} />
-					{:else}
-						<Icon name="copy" size={14} />
-					{/if}
-				</button>
+				/>
 				{#if message.messageId}
-					<button
-						class="flex items-center justify-center w-7 h-7 rounded-md border border-border-subtle/50 bg-bg-surface/80 text-text-muted hover:text-text-secondary cursor-pointer transition-colors duration-150 backdrop-blur-sm"
+					<Button
+						variant="ghost"
+						size="content"
+						tone="muted-soft"
+						hoverFill="none"
+						iconOnly
+						icon="git-fork"
+						iconSize={14}
+						class="w-7 h-7 rounded-md border border-border-subtle/50 bg-bg-surface/80 backdrop-blur-sm"
 						title="Fork from here"
+						ariaLabel="Fork from here"
 						onclick={handleFork}
-					>
-						<Icon name="git-fork" size={14} />
-					</button>
+					/>
 				{/if}
 			</div>
 		{/if}

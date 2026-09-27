@@ -73,6 +73,7 @@ export type MonitoringEffect =
 			readonly effect: "notify-idle";
 			readonly sessionId: string;
 			readonly isSubagent: boolean;
+			readonly busySince: number;
 	  };
 
 // ── Global state ────────────────────────────────────────────────────────

@@ -15,6 +15,13 @@ export const planModeListeners = new Set<MessageListener>();
 export const fileBrowserListeners = new Set<MessageListener>();
 export const fileHistoryListeners = new Set<MessageListener>();
 export const projectListeners = new Set<MessageListener>();
+export const projectAttachedListeners = new Set<(slug: string) => void>();
+
+/** Runs synchronously before the attached relay's bootstrap is dispatched. */
+export function onProjectAttached(fn: (slug: string) => void): () => void {
+	projectAttachedListeners.add(fn);
+	return () => projectAttachedListeners.delete(fn);
+}
 
 // ─── Subscription functions ─────────────────────────────────────────────────
 

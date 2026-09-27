@@ -86,7 +86,8 @@ export const StatusPollerLive: Layer.Layer<
 				? {
 						getRestStatuses: () =>
 							Effect.tryPromise(() => api.session.statuses()),
-						getProjectedSessions: () => readQueryOption.value.listSessions(),
+						getProjectedSessions: (reportedIds) =>
+							readQueryOption.value.getSessionsForReconciliation(reportedIds),
 						injectCorrectiveEvent: (sessionId: string, status: string) =>
 							commitAndSignalOption([
 								canonicalEvent(

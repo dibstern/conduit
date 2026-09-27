@@ -251,9 +251,10 @@ const sessionList = {
 	sessions: [
 		{
 			...session,
-			pendingQuestions: 2,
-			pendingPermissions: 1,
-			unseenActivity: true,
+			pendingQuestionCount: 2,
+			pendingPermissionCount: 1,
+			unread: true,
+			attention: "needs-approval",
 		},
 		{ id: "minimal", title: "Minimal", status: "retry" },
 	],

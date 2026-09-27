@@ -41,8 +41,8 @@ import {
 	discoveryState,
 } from "../../../src/lib/frontend/stores/discovery.svelte.js";
 import {
+	attachedProjectState,
 	routerState,
-	syncSlugState,
 } from "../../../src/lib/frontend/stores/router.svelte.js";
 import {
 	clearSessionState,
@@ -55,7 +55,7 @@ import { handleMessage } from "../../../src/lib/frontend/stores/ws-dispatch.js";
 
 function select(sessionId: string): RequestId {
 	let requestId: RequestId | undefined;
-	switchToSession(sessionId, (input) => {
+	switchToSession(sessionId, "project-a", (input) => {
 		requestId = Schema.decodeUnknownSync(RequestId)(input.requestId);
 	});
 	if (!requestId) throw new Error("ViewSession must send a requestId");
@@ -78,8 +78,8 @@ beforeEach(() => {
 		.mockResolvedValue({ projectSlug: "project-a", providers: [] });
 	clearSessionState();
 	clearDiscoveryState();
-	routerState.path = "/p/project-a";
-	syncSlugState(routerState.path);
+	routerState.path = "/";
+	attachedProjectState.slug = "project-a";
 });
 
 function deferred<T>() {
@@ -169,7 +169,7 @@ it("keeps B selected and in the URL when A's switch confirmation arrives last", 
 		inputText: "A draft",
 	});
 	expect.soft(sessionState.currentId).toBe("B");
-	expect.soft(routerState.path).toBe("/p/project-a/s/B");
+	expect.soft(routerState.path).toBe("/s/B");
 	expect(inputSyncState.text).toBe("B draft");
 });
 
@@ -194,7 +194,7 @@ it("accepts the current CreateSession confirmation and rejects it after a newer 
 		requestId: superseded,
 	});
 	expect(sessionState.currentId).toBe("B");
-	expect(routerState.path).toBe("/p/project-a/s/B");
+	expect(routerState.path).toBe("/s/B");
 });
 
 it.each([
@@ -208,7 +208,10 @@ it.each([
 	if (reason === "project reset") clearSessionState();
 	else if (reason === "empty-id switch")
 		handleMessage({ type: "session_switched", id: "", sessionId: "" });
-	else handleMessage({ type: "session_switched", id: "B", sessionId: "B" });
+	else {
+		routerState.path = "/s/B";
+		handleMessage({ type: "session_switched", id: "B", sessionId: "B" });
+	}
 	models.resolve({
 		projectSlug: "project-a",
 		providers: [],
@@ -220,9 +223,10 @@ it.each([
 });
 
 it("selects a server-initiated session without a preceding click", () => {
+	routerState.path = "/s/A";
 	handleMessage({ type: "session_switched", id: "A", sessionId: "A" });
 	expect(sessionState.currentId).toBe("A");
-	expect(routerState.path).toBe("/p/project-a/s/A");
+	expect(routerState.path).toBe("/s/A");
 });
 
 it("rejects an abandoned selection confirmation after an empty-id switch", () => {
@@ -242,23 +246,25 @@ it("rejects an abandoned selection confirmation after an empty-id switch", () =>
 // A delete-survivor switch can arrive while A's ViewSession is still pending.
 // It carries no requestId, unlike the superseded client confirmation above.
 it("accepts a server delete-survivor switch to A while A's earlier view is pending", () => {
-	switchToSession("A", () => {});
-	switchToSession("B", () => {});
+	switchToSession("A", "project-a", () => {});
+	switchToSession("B", "project-a", () => {});
 	handleMessage({ type: "session_switched", id: "B", sessionId: "B" });
+	routerState.path = "/s/A";
 	handleMessage({ type: "session_switched", id: "A", sessionId: "A" });
 	expect(sessionState.currentId).toBe("A");
-	expect(routerState.path).toBe("/p/project-a/s/A");
+	expect(routerState.path).toBe("/s/A");
 });
 
 it("accepts an uncorrelated server switch while a client selection is outstanding", () => {
 	const b = select("B");
+	routerState.path = "/s/survivor";
 	handleMessage({
 		type: "session_switched",
 		id: "survivor",
 		sessionId: "survivor",
 	});
 	expect(sessionState.currentId).toBe("survivor");
-	expect(routerState.path).toBe("/p/project-a/s/survivor");
+	expect(routerState.path).toBe("/s/survivor");
 	handleMessage({
 		type: "session_switched",
 		id: "B",
@@ -266,7 +272,7 @@ it("accepts an uncorrelated server switch while a client selection is outstandin
 		requestId: b,
 	});
 	expect(sessionState.currentId).toBe("survivor");
-	expect(routerState.path).toBe("/p/project-a/s/survivor");
+	expect(routerState.path).toBe("/s/survivor");
 });
 
 it("keeps B's active model and provider when A's model metadata arrives last", () => {

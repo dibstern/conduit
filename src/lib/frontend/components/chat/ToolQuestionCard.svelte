@@ -5,10 +5,12 @@
 <script lang="ts">
 	import type { ToolMessage, QuestionRequest, AskUserQuestion } from "../../types.js";
 	import { permissionsState } from "../../stores/permissions.svelte.js";
+	import { sessionState } from "../../stores/session.svelte.js";
 
-	import Icon from "../shared/Icon.svelte";
-	import BlockGrid from '../shared/BlockGrid.svelte';
+	import Icon from "../ui/Icon.svelte";
+	import BlockGrid from '../ui/BlockGrid.svelte';
 	import QuestionCard from "./QuestionCard.svelte";
+	import Surface from "../ui/Surface.svelte";
 
 	let { message }: {
 		message: ToolMessage;
@@ -68,10 +70,13 @@
 		);
 		if (byToolId) return byToolId;
 
-		// Tertiary: content-match against pending questions to find the correct que_ ID
+		// Tertiary: content-match against pending questions to find the correct que_ ID.
+		// Scoped to the viewed session: pending questions outlive switches, and
+		// another session's identical text must not bind (answers go by toolId).
 		const fallbackQuestions = questionDataFromInput;
 		if (fallbackQuestions) {
 			const contentMatch = permissionsState.pendingQuestions.find((pq) => {
+				if (pq.sessionId !== sessionState.currentId) return false;
 				if (pq.questions.length !== fallbackQuestions.length) return false;
 				return pq.questions.every((pqQ, i) => {
 					const q = fallbackQuestions[i];
@@ -229,11 +234,13 @@
 
 		<!-- Show answer when completed -->
 		{#if message.status === "completed" && questionAnswer}
-			<div
-				class="font-mono text-xs whitespace-pre-wrap break-all my-0.5 mx-2.5 py-2 px-2.5 bg-code-bg border border-border-subtle rounded-lg text-text-secondary max-h-[200px] overflow-y-auto mb-2"
+			<Surface
+				variant="inset"
+				radius="md"
+				class="font-mono text-xs whitespace-pre-wrap break-all my-0.5 mx-2.5 py-2 px-2.5 text-text-secondary max-h-[200px] overflow-y-auto mb-2"
 			>
 				{questionAnswer}
-			</div>
+			</Surface>
 		{/if}
 	</div>
 {/if}

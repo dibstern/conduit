@@ -24,6 +24,7 @@ import {
 	Ref,
 	Runtime,
 } from "effect";
+import { daemonSessionGitCache } from "../../../git/session-git.js";
 import type { ProjectRelay } from "../../../relay/relay-stack.js";
 import type {
 	InstanceConfig,
@@ -34,6 +35,7 @@ import { PushManagerTag } from "../../server/Services/push-service.js";
 import { ConfigPersistenceTag } from "../Services/config-persistence-service.js";
 import { DaemonConfigRefTag } from "../Services/daemon-config-ref.js";
 import { DaemonEventBusTag } from "../Services/daemon-pubsub.js";
+import { listDaemonSessions as listEffectDaemonSessions } from "../Services/daemon-session-reader.js";
 import {
 	addInstance as addEffectInstance,
 	getInstances as getEffectInstances,
@@ -46,6 +48,7 @@ import {
 	updateInstance as updateEffectInstance,
 } from "../Services/instance-manager-service.js";
 import {
+	broadcastToAll,
 	allProjects as getEffectProjects,
 	ProjectRegistryTag,
 } from "../Services/project-registry-service.js";
@@ -187,6 +190,21 @@ export const RelayFactoryLive = (
 					),
 				);
 
+			const listDaemonSessions: NonNullable<
+				ProjectRelayConfig["listDaemonSessions"]
+			> = (options) =>
+				runCallback(
+					listEffectDaemonSessions(options).pipe(
+						Effect.provideService(ProjectRegistryTag, projectRegistry),
+					),
+				);
+			const broadcastSessionListChanged = () =>
+				runCallback(
+					broadcastToAll({ type: "daemon_sessions_changed" }).pipe(
+						Effect.provideService(DaemonEventBusTag, eventBus),
+					),
+				);
+
 			const getInstances = () =>
 				runCallback(
 					getEffectInstances.pipe(
@@ -324,6 +342,11 @@ export const RelayFactoryLive = (
 									configDir,
 									persistenceDbPath: dbPath,
 									getProjects,
+									listDaemonSessions,
+									broadcastSessionListChanged,
+									refreshSessionGit: async () => {
+										await daemonSessionGitCache.refresh(project.directory);
+									},
 									getInstances,
 									addInstance,
 									removeInstance,

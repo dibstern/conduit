@@ -46,7 +46,8 @@ type OperationsOutsideReadModelParity = keyof Pick<
 	| "recordMessageActivity"
 	| "addToParentMap"
 	| "getSessionParentMap"
-	| "sendDualSessionLists"
+	| "sendSessionLists"
+	| "getSessionFamily"
 >;
 
 type ReadModelMutation = Exclude<
@@ -147,6 +148,96 @@ const READ_MODEL_PARITY_CASES: Record<ReadModelMutation, ParityCase> = {
 				expect((yield* readQuery.getSession(sessionId))?.title).toBe(
 					"New title",
 				);
+			}),
+	},
+	markSessionRead: {
+		run: ({ service, readQuery, seedSession }) =>
+			Effect.gen(function* () {
+				const sessionId = "ses-read";
+				yield* seedSession(sessionId, "Read me");
+
+				yield* service.markSessionRead(sessionId);
+
+				expect(
+					(yield* readQuery.getSession(sessionId))?.read_at,
+				).not.toBeNull();
+			}),
+	},
+	markSessionUnread: {
+		run: ({ service, readQuery, seedSession }) =>
+			Effect.gen(function* () {
+				const sessionId = "ses-unread";
+				yield* seedSession(sessionId, "Unread me");
+				yield* service.markSessionRead(sessionId);
+
+				yield* service.markSessionUnread(sessionId);
+
+				expect((yield* readQuery.getSession(sessionId))?.read_at).toBeNull();
+			}),
+	},
+	setSessionSettled: {
+		run: ({ service, readQuery, seedSession }) =>
+			Effect.gen(function* () {
+				yield* seedSession("ses-settled", "Settle me");
+				yield* service.setSessionSettled("ses-settled", true);
+				expect(
+					(yield* readQuery.getSession("ses-settled"))?.settled_at,
+				).toEqual(expect.any(Number));
+				yield* service.setSessionSettled("ses-settled", false);
+				expect(
+					(yield* readQuery.getSession("ses-settled"))?.settled_at,
+				).toBeNull();
+			}),
+	},
+	setSessionAutoSettleDisabled: {
+		run: ({ service, readQuery, seedSession }) =>
+			Effect.gen(function* () {
+				yield* seedSession("ses-auto-settle", "Auto settle toggle");
+				yield* service.setSessionAutoSettleDisabled("ses-auto-settle", true);
+				expect(
+					(yield* readQuery.getSession("ses-auto-settle"))
+						?.auto_settle_disabled_at,
+				).toEqual(expect.any(Number));
+				yield* service.setSessionAutoSettleDisabled("ses-auto-settle", false);
+				expect(
+					(yield* readQuery.getSession("ses-auto-settle"))
+						?.auto_settle_disabled_at,
+				).toBeNull();
+			}),
+	},
+	setSessionPinned: {
+		run: ({ service, readQuery, seedSession }) =>
+			Effect.gen(function* () {
+				yield* seedSession("ses-pinned", "Pin me");
+				yield* service.setSessionPinned("ses-pinned", true);
+				expect((yield* readQuery.getSession("ses-pinned"))?.pinned_at).toEqual(
+					expect.any(Number),
+				);
+				yield* service.setSessionPinned("ses-pinned", false);
+				expect(
+					(yield* readQuery.getSession("ses-pinned"))?.pinned_at,
+				).toBeNull();
+			}),
+	},
+	snoozeSession: {
+		run: ({ service, readQuery, seedSession }) =>
+			Effect.gen(function* () {
+				yield* seedSession("ses-snoozed", "Snooze me");
+				yield* service.snoozeSession("ses-snoozed", null);
+				expect(
+					(yield* readQuery.getSession("ses-snoozed"))?.snoozed_at,
+				).toEqual(expect.any(Number));
+			}),
+	},
+	unsnoozeSession: {
+		run: ({ service, readQuery, seedSession }) =>
+			Effect.gen(function* () {
+				yield* seedSession("ses-unsnoozed", "Wake me");
+				yield* service.snoozeSession("ses-unsnoozed", null);
+				yield* service.unsnoozeSession("ses-unsnoozed");
+				expect(
+					(yield* readQuery.getSession("ses-unsnoozed"))?.snoozed_at,
+				).toBeNull();
 			}),
 	},
 	setForkEntry: {

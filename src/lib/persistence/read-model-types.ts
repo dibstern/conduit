@@ -1,4 +1,4 @@
-// Shared SQLite projection row types used by legacy and Effect read services.
+// SQLite projection row types returned by the Effect read services.
 
 export interface SessionRow {
 	id: string;
@@ -9,10 +9,29 @@ export interface SessionRow {
 	status: string;
 	parent_id: string | null;
 	fork_point_event: string | null;
+	fork_point_timestamp?: number | null;
+	fork_point_message_id?: string | null;
 	last_message_at: number | null;
+	last_turn_error_at: number | null;
 	permission_mode: string | null;
+	read_at: number | null;
+	settled_at: number | null;
+	unsettled_at?: number | null;
+	auto_settle_disabled_at?: number | null;
+	settled_automatically?: number;
+	pinned_at: number | null;
+	snoozed_at: number | null;
+	snoozed_until: number | null;
+	woken_at: number | null;
+	woken_reason: "approval" | "question" | "error" | "turn" | null;
 	created_at: number;
 	updated_at: number;
+}
+
+export interface PendingApprovalCountRow {
+	session_id: string;
+	type: "permission" | "question";
+	pending_count: number;
 }
 
 export interface MessageRow {
@@ -59,43 +78,8 @@ export interface MessageWithParts extends MessageRow {
 	};
 }
 
-export interface TurnRow {
-	id: string;
-	session_id: string;
-	state: string;
-	user_message_id: string | null;
-	assistant_message_id: string | null;
-	cost: number | null;
-	tokens_in: number | null;
-	tokens_out: number | null;
-	requested_at: number;
-	started_at: number | null;
-	completed_at: number | null;
-	requested_model: string | null;
-	expected_model: string | null;
-	actual_model: string | null;
-}
-
 export interface TurnModelExecutionRow {
 	requested_model: string | null;
 	expected_model: string | null;
 	actual_model: string;
-}
-
-export interface PendingApprovalRow {
-	id: string;
-	session_id: string;
-	turn_id: string | null;
-	type: string;
-	status: string;
-	tool_name: string | null;
-	input: string | null;
-	decision: string | null;
-	created_at: number;
-	resolved_at: number | null;
-}
-
-export interface ForkMetadata {
-	parentId: string;
-	forkPointEvent: string | null;
 }

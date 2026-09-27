@@ -29,7 +29,7 @@ function mockWsHandler(
 		markClientBootstrapped: vi.fn(),
 		getClientCount: vi.fn(() => 0),
 		getClientIds: vi.fn(() => []),
-		handleUpgrade: vi.fn(),
+		attach: vi.fn(() => () => {}),
 		close: vi.fn(),
 		drain: vi.fn(async () => undefined),
 		on: vi.fn(),
@@ -64,7 +64,7 @@ describe("handleGetCommands active provider", () => {
 			app: { commands: vi.fn(async () => [{ name: "opencode-only" }]) },
 		} as unknown as OpenCodeAPI;
 		const engine = {
-			getProviderForSession: vi.fn(() => "claude"),
+			getProviderForSessionEffect: vi.fn(() => Effect.succeed("claude")),
 			dispatch: vi.fn(async () => ({
 				models: [],
 				supportsTools: true,
@@ -121,7 +121,7 @@ describe("handleGetCommands active provider", () => {
 				app: { commands: vi.fn(async () => opencodeCommands) },
 			} as unknown as OpenCodeAPI;
 			const engine = {
-				getProviderForSession: vi.fn(() => "opencode"),
+				getProviderForSessionEffect: vi.fn(() => Effect.succeed("opencode")),
 				dispatch: vi.fn(),
 			} as unknown as OrchestrationEngine;
 
@@ -240,7 +240,7 @@ describe("handleGetCommands active provider", () => {
 		} as unknown as OpenCodeAPI;
 		const log = mockLogger();
 		const engine = {
-			getProviderForSession: vi.fn(() => "claude"),
+			getProviderForSessionEffect: vi.fn(() => Effect.succeed("claude")),
 			dispatch: vi.fn(async () => {
 				throw new Error("discover failed");
 			}),

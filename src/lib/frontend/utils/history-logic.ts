@@ -254,9 +254,14 @@ function convertAssistantParts(
 					uuid: generateUuid(),
 					text: part.text ?? "",
 					variant: "info",
+					compaction: "completed",
+					...(typeof part.preTokens === "number" && part.preTokens > 0
+						? { preTokens: part.preTokens }
+						: {}),
 					...(typeof part.postTokens === "number" && part.postTokens > 0
 						? { postTokens: part.postTokens }
 						: {}),
+					...(partCreatedAt != null && { createdAt: partCreatedAt }),
 				} satisfies SystemMessage);
 				break;
 			}

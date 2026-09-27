@@ -9,6 +9,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { SqlClient } from "@effect/sql";
+import Database from "better-sqlite3";
 import { Effect, ManagedRuntime } from "effect";
 import { afterEach, describe, expect, it } from "vitest";
 import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
@@ -17,13 +18,12 @@ import {
 	MESSAGE_PART_METADATA_MIGRATION,
 	readMigrationSql,
 } from "../../../src/lib/persistence/schema.js";
-import { SqliteClient } from "../../../src/lib/persistence/sqlite-client.js";
 
 const SESSION_ID = "legacy-session";
 const MESSAGE_ID = "legacy-message";
 
 function seedLegacyDatabase(filename: string): void {
-	const db = SqliteClient.open(filename);
+	const db = new Database(filename);
 	try {
 		// 0001 + 0002 exactly as a pre-0005 database ran them: the old
 		// three-value CHECK plus the appended metadata column.
@@ -39,42 +39,33 @@ function seedLegacyDatabase(filename: string): void {
 				(1, 'create_event_store_tables'),
 				(2, 'add_message_part_metadata');
 		`);
-		db.execute(
-			`INSERT INTO sessions (id, provider, title, status, created_at, updated_at)
-			 VALUES (?, 'opencode', 'Legacy', 'idle', 100, 100)`,
-			[SESSION_ID],
-		);
-		db.execute(
-			`INSERT INTO messages (id, session_id, role, text, created_at, updated_at)
-			 VALUES (?, ?, 'assistant', 'hello', 100, 100)`,
-			[MESSAGE_ID, SESSION_ID],
-		);
-		db.execute(
-			`INSERT INTO message_parts
+		db.prepare(`INSERT INTO sessions (id, provider, title, status, created_at, updated_at)
+			 VALUES (?, 'opencode', 'Legacy', 'idle', 100, 100)`).run([SESSION_ID]);
+		db.prepare(`INSERT INTO messages (id, session_id, role, text, created_at, updated_at)
+			 VALUES (?, ?, 'assistant', 'hello', 100, 100)`).run([
+			MESSAGE_ID,
+			SESSION_ID,
+		]);
+		db.prepare(`INSERT INTO message_parts
 			 (id, message_id, type, text, tool_name, call_id, status, metadata,
 			  sort_order, created_at, updated_at)
 			 VALUES ('legacy-part', ?, 'tool', '', 'Bash', 'call-1', 'completed',
-			         '{"sessionId":"ses_child"}', 0, 100, 100)`,
-			[MESSAGE_ID],
-		);
+			         '{"sessionId":"ses_child"}', 0, 100, 100)`).run([MESSAGE_ID]);
 		expect(() =>
-			db.execute(
-				`INSERT INTO message_parts
+			db
+				.prepare(`INSERT INTO message_parts
 				 (id, message_id, type, sort_order, created_at, updated_at)
-				 VALUES ('pre-migration-file', ?, 'file', 1, 100, 100)`,
-				[MESSAGE_ID],
-			),
+				 VALUES ('pre-migration-file', ?, 'file', 1, 100, 100)`)
+				.run([MESSAGE_ID]),
 		).toThrow(/CHECK/);
 		// FK-outage era leftovers: parts whose messages row never landed. These
 		// were written by connections without foreign-key enforcement and are
 		// unreadable (every query path joins through messages); the migration
 		// must drop them instead of failing the rebuild's FK check.
 		db.exec("PRAGMA foreign_keys=OFF");
-		db.execute(
-			`INSERT INTO message_parts
+		db.prepare(`INSERT INTO message_parts
 			 (id, message_id, type, text, sort_order, created_at, updated_at)
-			 VALUES ('orphan-part', 'missing-message', 'text', 'orphan', 0, 100, 100)`,
-		);
+			 VALUES ('orphan-part', 'missing-message', 'text', 'orphan', 0, 100, 100)`).run();
 		db.exec("PRAGMA foreign_keys=ON");
 	} finally {
 		db.close();

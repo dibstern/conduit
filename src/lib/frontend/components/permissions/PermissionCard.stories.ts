@@ -57,3 +57,8 @@ export const WithToolInput: Story = {
 export const EditFileInput: Story = {
 	args: { request: mockPermissionEditFile },
 };
+
+export const Hover: Story = {
+	...Pending,
+	parameters: { pseudo: { hover: true } },
+};

@@ -9,14 +9,24 @@ import fs, {
 import { syncBuiltinESMExports } from "node:module";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { Reactivity } from "@effect/experimental";
 import { SqlClient } from "@effect/sql";
-import { Effect, Layer, Stream } from "effect";
+import * as SqliteNode from "@effect/sql-sqlite-node/SqliteClient";
+import { Effect, Layer } from "effect";
 import { expect, it, vi } from "vitest";
 import { serializeRecent } from "../../../src/lib/daemon/recent-projects.js";
-import { SessionEventBusLive } from "../../../src/lib/domain/relay/Services/session-event-bus.js";
-import { subscribeShell } from "../../../src/lib/domain/relay/Services/shell-subscription.js";
-import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
+import { makeEffectSqlMigrator } from "../../../src/lib/persistence/effect/migrations.js";
 import { migrateForkLineage } from "../../../src/lib/persistence/migrations/fork-lineage-import.js";
+
+function makePersistenceEffectLayer(filename: string) {
+	const sqlite = SqliteNode.layer({ filename }).pipe(
+		Layer.provide(Reactivity.layer),
+	);
+	return Layer.merge(
+		sqlite,
+		Layer.effectDiscard(makeEffectSqlMigrator()).pipe(Layer.provide(sqlite)),
+	);
+}
 
 it.each([
 	"publish",
@@ -103,26 +113,19 @@ it("repairs an archived boundary whose event is present but timestamp is missing
 		await Effect.runPromise(migrateForkLineage(dir));
 		await Effect.runPromise(
 			Effect.gen(function* () {
-				const envelope = yield* Stream.runHead(subscribeShell({}));
-				if (envelope._tag !== "Some" || envelope.value._tag !== "snapshot")
-					throw new Error("expected snapshot");
-				expect(envelope.value.rows).toContainEqual(
-					expect.objectContaining({
-						id: "child",
-						parentID: "parent",
-						forkMessageId: "boundary",
-						forkPointTimestamp: 200,
-						forkPointMessageId: "boundary",
-					}),
-				);
-			}).pipe(
-				Effect.provide(
-					Layer.merge(
-						makePersistenceEffectLayer(filename),
-						SessionEventBusLive,
-					),
-				),
-			),
+				const sql = yield* SqlClient.SqlClient;
+				expect(
+					yield* sql`SELECT parent_id, fork_point_event, fork_point_timestamp,
+				fork_point_message_id FROM sessions WHERE id = 'child'`,
+				).toEqual([
+					{
+						parent_id: "parent",
+						fork_point_event: "boundary",
+						fork_point_timestamp: 200,
+						fork_point_message_id: "boundary",
+					},
+				]);
+			}).pipe(Effect.provide(makePersistenceEffectLayer(filename))),
 		);
 		expect(existsSync(archive)).toBe(false);
 	} finally {
@@ -260,28 +263,23 @@ it("imports all known projects before deleting the sidecar, without appending hi
 			await Effect.runPromise(
 				Effect.gen(function* () {
 					const sql = yield* SqlClient.SqlClient;
-					const envelope = yield* Stream.runHead(subscribeShell({}));
-					expect(envelope._tag).toBe("Some");
-					if (envelope._tag !== "Some" || envelope.value._tag !== "snapshot")
-						throw new Error("expected snapshot");
-					expect(envelope.value.rows).toContainEqual(
-						expect.objectContaining({
-							id: `child-${i}`,
-							parentID: `parent-${i}`,
-							forkMessageId: `message-${i}`,
-							forkPointTimestamp: 100,
-							forkPointMessageId: `message-${i}`,
-						}),
-					);
+					expect(
+						yield* sql`SELECT parent_id, fork_point_event, fork_point_timestamp,
+					fork_point_message_id FROM sessions WHERE id = ${`child-${i}`}`,
+					).toEqual([
+						{
+							parent_id: `parent-${i}`,
+							fork_point_event: `message-${i}`,
+							fork_point_timestamp: 100,
+							fork_point_message_id: `message-${i}`,
+						},
+					]);
 					expect(yield* sql`SELECT count(*) AS count FROM events`).toEqual([
 						{ count: 0 },
 					]);
 				}).pipe(
 					Effect.provide(
-						Layer.merge(
-							makePersistenceEffectLayer(join(project, ".conduit/events.db")),
-							SessionEventBusLive,
-						),
+						makePersistenceEffectLayer(join(project, ".conduit/events.db")),
 					),
 				),
 			);
@@ -357,14 +355,10 @@ it("retrying an incomplete import does not advance an already imported session",
 		await Effect.runPromise(migrateForkLineage(dir));
 		const snapshot = () =>
 			Effect.runPromise(
-				Stream.runHead(subscribeShell({})).pipe(
-					Effect.provide(
-						Layer.merge(
-							makePersistenceEffectLayer(filename),
-							SessionEventBusLive,
-						),
-					),
-				),
+				Effect.gen(function* () {
+					const sql = yield* SqlClient.SqlClient;
+					return yield* sql`SELECT id, parent_id, fork_point_event, version FROM sessions ORDER BY id`;
+				}).pipe(Effect.provide(makePersistenceEffectLayer(filename))),
 			);
 		const first = await snapshot();
 		await Effect.runPromise(migrateForkLineage(dir));

@@ -110,7 +110,7 @@ export interface ReplayHarness {
 	mock: MockOpenCodeServer;
 	relayPort: number;
 	relayBaseUrl: string;
-	/** Project URL path for Playwright navigation (e.g. "/p/e2e-replay/") */
+	/** The relay's startup session route (e.g. "/s/ses_abc"); `/` opens no session. */
 	projectUrl: string;
 	stop(): Promise<void>;
 }
@@ -125,6 +125,7 @@ export interface ReplayHarness {
  */
 export async function createReplayHarness(
 	recordingName: string,
+	options: { persistence?: boolean } = {},
 ): Promise<ReplayHarness> {
 	const recording = loadOpenCodeRecording(recordingName);
 	const mock = new MockOpenCodeServer(recording);
@@ -145,6 +146,11 @@ export async function createReplayHarness(
 		sessionTitle: "E2E Replay Session",
 		staticDir,
 		configDir,
+		// Off by default: durable per-session state (settle, pin, read) only
+		// exists with an event store, and most replay specs predate it.
+		...(options.persistence
+			? { persistenceDbPath: path.join(configDir, "events.db") }
+			: {}),
 		log: createSilentLogger(),
 	});
 
@@ -156,7 +162,7 @@ export async function createReplayHarness(
 		mock,
 		relayPort,
 		relayBaseUrl,
-		projectUrl: "/p/e2e-replay/",
+		projectUrl: `/s/${encodeURIComponent(stack.initialSessionId)}`,
 		async stop(): Promise<void> {
 			await stack.stop();
 			await mock.stop();

@@ -8,28 +8,36 @@ import {
 	resetSessionSubscription,
 	sessionSubscription,
 } from "../transport/session-subscription.svelte.js";
-import type { ListSessionsResponse } from "../transport/ws-rpc.js";
+import type {
+	ListDaemonSessionsResponse,
+	ListSessionsResponse,
+} from "../transport/ws-rpc.js";
 import {
 	type CreateSessionRpcInput,
 	createSessionRpc,
 	getAgentsRpc,
 	getCommandsRpc,
 	getModelsRpc,
+	listDaemonSessionsRpc,
 	switchPermissionModeRpc,
 	type ViewSessionRpcInput,
 	viewSessionRpc,
 } from "../transport/ws-rpc-client.js";
 import type {
+	AttentionGroups,
 	DateGroups,
 	Immutable,
 	RelayMessage,
 	RequestId,
+	SessionAttention,
 	SessionInfo,
 } from "../types.js";
 import {
 	abortSessionReplay,
 	activateSessionChatState,
 	clearSessionChatState,
+	sessionActivity,
+	sessionMessages,
 } from "./chat.svelte.js";
 import { getBrowserClientId } from "./client-identity.js";
 import {
@@ -41,7 +49,8 @@ import {
 } from "./discovery.svelte.js";
 import { getCurrentSlug, navigate } from "./router.svelte.js";
 import { sessionActivityBridge } from "./session-activity.svelte.js";
-import { uiState } from "./ui.svelte.js";
+import type { SessionGrouping, SessionStatusFilter } from "./session-scope.js";
+import { getSessionScope } from "./session-scope.js";
 
 // ─── Server-owned state ─────────────────────────────────────────────────────
 // Every session the server has told us about, keyed by id — one representation,
@@ -53,6 +62,8 @@ import { uiState } from "./ui.svelte.js";
 // `ReadonlyMap`.
 
 const serverSessions = $derived(sessionSubscription.rows);
+let rootSessions = $state.raw<readonly SessionInfo[]>([]);
+let familySessions = $state.raw<readonly SessionInfo[]>([]);
 const busySessionIds = $derived.by(() => {
 	return propagateBusySessions(
 		serverSessions,
@@ -88,11 +99,22 @@ export function observeSessionActivity(event: RelayMessage): void {
 
 const clientSession = $state({
 	currentId: null as string | null,
+	announcedParent: null as { sessionId: string; parentId: string } | null,
 	searchQuery: "",
 	/** Ids the last server search matched, or null when no search is running.
 	 *  Ids rather than rows, so a session renamed or deleted mid-search follows
 	 *  the server half instead of a snapshot that nothing updates. */
 	searchMatchIds: null as string[] | null,
+	daemonSessions: [] as SessionInfo[],
+	daemonUnavailableProjects: [] as string[],
+	daemonCursor: null as ListDaemonSessionsResponse["nextCursor"],
+	daemonHasMore: false,
+	daemonLoading: false,
+	searchResults: null as SessionInfo[] | null,
+	searchCursor: null as ListDaemonSessionsResponse["nextCursor"],
+	searchHasMore: false,
+	searchLoading: false,
+	now: Date.now(),
 });
 
 /** Read view over both halves. The server half is read-only by type; the
@@ -103,12 +125,61 @@ export const sessionState = {
 	get sessions(): ReadonlyMap<string, Immutable<SessionInfo>> {
 		return serverSessions;
 	},
+	get rootSessions(): readonly Immutable<SessionInfo>[] {
+		return rootSessions;
+	},
+	get familySessions(): readonly Immutable<SessionInfo>[] {
+		return familySessions;
+	},
+	get daemonSessions(): readonly SessionInfo[] {
+		return clientSession.daemonSessions;
+	},
+	get daemonUnavailableProjects(): readonly string[] {
+		return clientSession.daemonUnavailableProjects;
+	},
+	get daemonCursor() {
+		return clientSession.daemonCursor;
+	},
+	get daemonHasMore() {
+		return clientSession.daemonHasMore;
+	},
+	get daemonLoading() {
+		return clientSession.daemonLoading;
+	},
+	get searchResults(): readonly SessionInfo[] | null {
+		return clientSession.searchResults;
+	},
+	get searchCursor() {
+		return clientSession.searchCursor;
+	},
+	get searchHasMore() {
+		return clientSession.searchHasMore;
+	},
+	get searchLoading() {
+		return clientSession.searchLoading;
+	},
+	get now() {
+		return clientSession.now;
+	},
+	set now(value: number) {
+		clientSession.now = value;
+	},
 	/** Whether the subscription has finished delivering its initial rows. */
 	get settled(): boolean {
 		return sessionSubscription.settled;
 	},
 	get currentId(): string | null {
 		return clientSession.currentId;
+	},
+	get currentParentId(): string | null {
+		const id = clientSession.currentId;
+		if (!id) return null;
+		return (
+			serverSessions.get(id)?.parentID ??
+			(clientSession.announcedParent?.sessionId === id
+				? clientSession.announcedParent.parentId
+				: null)
+		);
 	},
 	set currentId(id: string | null) {
 		clientSession.currentId = id;
@@ -313,17 +384,36 @@ export function applySessionSnapshot(
 	const incoming = new Set(rows.map((row) => row.id));
 	const reaped = [...serverSessions.keys()].filter((id) => !incoming.has(id));
 	applySessionChange({ _tag: "snapshot", rows });
+	rootSessions = rows.filter((row) => !row.parentID);
+	familySessions = rows;
 	for (const id of reaped) forgetSession(id);
 }
 
 /** Apply a single session row the server has created or changed. */
 export function applySessionUpsert(row: SessionInfo): void {
 	applySessionChange({ _tag: "upsert", item: row });
+	if (rootSessions.some((existing) => existing.id === row.id))
+		rootSessions = rootSessions.map((existing) =>
+			existing.id === row.id ? row : existing,
+		);
+	if (familySessions.some((existing) => existing.id === row.id))
+		familySessions = familySessions.map((existing) =>
+			existing.id === row.id ? row : existing,
+		);
 }
 
 /** Apply a session the server has deleted. */
 export function applySessionRemoved(id: string): void {
 	applySessionChange({ _tag: "remove", id });
+	rootSessions = rootSessions.filter((row) => row.id !== id);
+	familySessions = familySessions.filter((row) => row.id !== id);
+	clientSession.daemonSessions = clientSession.daemonSessions.filter(
+		(row) => row.id !== id,
+	);
+	if (clientSession.searchResults)
+		clientSession.searchResults = clientSession.searchResults.filter(
+			(row) => row.id !== id,
+		);
 	forgetSession(id);
 }
 
@@ -336,6 +426,235 @@ function forgetSession(id: string): void {
 	// away — and deleting the last session leaves no other for the server to
 	// switch us to, so nothing else would clear it.
 	if (clientSession.currentId === id) clientSession.currentId = null;
+}
+
+// ─── Pure helpers ───────────────────────────────────────────────────────────
+
+/**
+ * The row's attention tier. The server derives it in one place and sends it on
+ * every row, so the client only has to read it; a row arriving without one is
+ * from a daemon that predates the field, and idle is the honest reading of no
+ * signal rather than a guess assembled from processing flags and counts.
+ */
+export function sessionAttention(session: SessionInfo): SessionAttention {
+	return session.attention ?? "idle";
+}
+
+// Within "Needs you", an approval outranks a question outranks a failure: the
+// first two are blocking something right now, a failure has already stopped.
+const NEEDS_YOU_ORDER: readonly SessionAttention[] = [
+	"needs-approval",
+	"needs-reply",
+	"error",
+];
+
+export function isSessionSnoozed(session: SessionInfo, now: number): boolean {
+	return (
+		session.snoozedAt != null &&
+		!(session.snoozedUntil != null && session.snoozedUntil <= now)
+	);
+}
+
+export function isSessionWoken(session: SessionInfo, now: number): boolean {
+	return (
+		session.wokenAt != null ||
+		(session.snoozedAt != null &&
+			session.snoozedUntil != null &&
+			session.snoozedUntil <= now)
+	);
+}
+
+// The store is global for the life of the browser page. Keep one timer for the
+// earliest loaded wake and replace it whenever a list page changes.
+$effect.root(() => {
+	$effect(() => {
+		const rows = [
+			...sessionState.rootSessions,
+			...sessionState.daemonSessions,
+			...(sessionState.searchResults ?? []),
+		];
+		const now = sessionState.now;
+		const nextWake = rows.reduce<number | null>((earliest, row) => {
+			const until = row.snoozedAt != null ? row.snoozedUntil : undefined;
+			if (until == null || until <= now) return earliest;
+			return earliest == null ? until : Math.min(earliest, until);
+		}, null);
+		if (nextWake == null) return;
+		const timer = setTimeout(
+			() => {
+				clientSession.now = Date.now();
+			},
+			Math.max(1, Math.min(nextWake - Date.now(), 2_147_483_647)),
+		);
+		return () => clearTimeout(timer);
+	});
+});
+
+/** Manual pin/settle/snooze placement takes precedence over attention tiers. */
+export function groupSessionsByAttention(
+	sessions: SessionInfo[],
+	now: number = Date.now(),
+): AttentionGroups {
+	const groups: AttentionGroups = {
+		pinned: [],
+		settled: [],
+		snoozed: [],
+		needsYou: [],
+		running: [],
+		doneUnread: [],
+		idle: [],
+	};
+
+	for (const s of sessions) {
+		if (s.pinnedAt != null) {
+			groups.pinned.push(s);
+			continue;
+		}
+		if (s.settledAt != null) {
+			groups.settled.push(s);
+			continue;
+		}
+		if (isSessionSnoozed(s, now)) {
+			groups.snoozed.push(s);
+			continue;
+		}
+		switch (sessionAttention(s)) {
+			case "needs-approval":
+			case "needs-reply":
+			case "error":
+				groups.needsYou.push(s);
+				break;
+			case "working":
+				groups.running.push(s);
+				break;
+			case "done-unread":
+				groups.doneUnread.push(s);
+				break;
+			case "idle":
+				groups.idle.push(s);
+				break;
+		}
+	}
+
+	groups.pinned.sort((a, b) => (a.pinnedAt ?? 0) - (b.pinnedAt ?? 0));
+	groups.settled.sort((a, b) => (b.settledAt ?? 0) - (a.settledAt ?? 0));
+	// Indefinite snoozes go last; MAX_SAFE_INTEGER rather than Infinity because
+	// Infinity - Infinity is NaN, which breaks the comparator for two of them.
+	groups.snoozed.sort(
+		(a, b) =>
+			(a.snoozedUntil ?? Number.MAX_SAFE_INTEGER) -
+			(b.snoozedUntil ?? Number.MAX_SAFE_INTEGER),
+	);
+	// Stable, so recency still decides between two rows of the same tier.
+	groups.needsYou.sort(
+		(a, b) =>
+			NEEDS_YOU_ORDER.indexOf(sessionAttention(a)) -
+			NEEDS_YOU_ORDER.indexOf(sessionAttention(b)),
+	);
+
+	return groups;
+}
+
+export interface SessionSection {
+	key: string;
+	label: string;
+	sessions: SessionInfo[];
+}
+
+export interface SessionProjection {
+	pinned: SessionInfo[];
+	sections: SessionSection[];
+	snoozed: SessionInfo[];
+	settled: SessionInfo[];
+}
+
+/** Project the already scoped and title-searched rows for the sidebar. */
+export function projectSessionList(
+	sessions: SessionInfo[],
+	options: { status: SessionStatusFilter | null; grouping: SessionGrouping },
+	now: number,
+	projectLabel: (session: SessionInfo) => { key: string; label: string },
+): SessionProjection {
+	const matching = sessions.filter(
+		(session) =>
+			options.status === null || sessionMatchesStatus(session, options.status),
+	);
+	const groups = groupSessionsByAttention(matching, now);
+	const shelves = {
+		pinned: groups.pinned,
+		snoozed: groups.snoozed,
+		settled: groups.settled,
+	};
+	if (options.grouping === "status") {
+		return {
+			...shelves,
+			sections: [
+				{ key: "needs-you", label: "Needs you", sessions: groups.needsYou },
+				{ key: "running", label: "Running", sessions: groups.running },
+				{ key: "unread", label: "Done, unread", sessions: groups.doneUnread },
+				{ key: "idle", label: "Idle", sessions: groups.idle },
+			].filter((section) => section.sessions.length > 0),
+		};
+	}
+
+	const live = matching
+		.filter(
+			(session) =>
+				session.pinnedAt == null &&
+				session.settledAt == null &&
+				!isSessionSnoozed(session, now),
+		)
+		.sort((a, b) => getSessionDate(b).getTime() - getSessionDate(a).getTime());
+	if (options.grouping === "time") {
+		const dates = groupSessionsByDate(live, new Date(now));
+		return {
+			...shelves,
+			sections: [
+				{ key: "today", label: "Today", sessions: dates.today },
+				{ key: "yesterday", label: "Yesterday", sessions: dates.yesterday },
+				{ key: "older", label: "Older", sessions: dates.older },
+			].filter((section) => section.sessions.length > 0),
+		};
+	}
+
+	const byProject = new Map<string, SessionSection>();
+	for (const session of live) {
+		const { key, label } = projectLabel(session);
+		let section = byProject.get(key);
+		if (!section) {
+			section = { key, label, sessions: [] };
+			byProject.set(key, section);
+		}
+		section.sessions.push(session);
+	}
+	return { ...shelves, sections: [...byProject.values()] };
+}
+
+export function sessionMatchesStatus(
+	session: SessionInfo,
+	status: SessionStatusFilter,
+): boolean {
+	const attention = sessionAttention(session);
+	switch (status) {
+		case "needs-you":
+			return (
+				attention === "needs-approval" ||
+				attention === "needs-reply" ||
+				attention === "error"
+			);
+		case "running":
+			return attention === "working";
+		case "unread":
+			return attention === "done-unread";
+	}
+}
+
+function getSessionDate(session: SessionInfo): Date {
+	return session.updatedAt
+		? new Date(session.updatedAt)
+		: session.createdAt
+			? new Date(session.createdAt)
+			: new Date(0);
 }
 
 // ─── Message handlers ───────────────────────────────────────────────────────
@@ -351,9 +670,22 @@ export function handleSessionList(
 		clientSession.searchMatchIds = sessions.map((s) => s.id);
 		return;
 	}
-	// An untagged list (legacy sources) carries a mixed bag of roots and
-	// children, so like a roots:false list it covers everything.
-	applySessionSnapshot(sessions, roots === true ? "partial" : "complete");
+	if (roots !== true) return;
+	rootSessions = sessions.filter((row) => !row.parentID);
+	for (const row of rootSessions)
+		applySessionChange({ _tag: "upsert", item: row });
+}
+
+export function handleSessionFamily(
+	msg: Extract<RelayMessage, { type: "session_family" }>,
+): void {
+	familySessions = msg.sessions;
+	const rootIds = new Set(rootSessions.map((root) => root.id));
+	for (const row of familySessions) {
+		if (!rootIds.has(row.id)) {
+			applySessionChange({ _tag: "upsert", item: row });
+		}
+	}
 }
 
 export function applyListSessionsResponse(
@@ -369,6 +701,194 @@ export function applyListSessionsResponse(
 	});
 }
 
+/** How many cross-project rows one page asks for. Exported so the caller that
+ *  fetches the first page uses the same size as the sentinel that fetches the
+ *  rest -- a first page smaller than the viewport would never scroll, and so
+ *  would never ask for a second. */
+export const DAEMON_SESSION_PAGE_SIZE = 30;
+
+/** Bumped by anything that invalidates in-flight browse pages. A response
+ *  carrying a stale token is dropped rather than appended, so a project switch
+ *  cannot splice another project's page onto the new list. */
+let daemonBrowseToken = 0;
+
+/** Fetches the first cross-project page for the current scope, replacing
+ *  whatever was listed. Run on connect and again whenever the scope changes. */
+export async function loadDaemonSessions(): Promise<void> {
+	const projectSlug = getCurrentSlug();
+	if (!projectSlug) return;
+	daemonBrowseToken += 1;
+	const token = daemonBrowseToken;
+	const scope = getSessionScope();
+	try {
+		const response = await listDaemonSessionsRpc({
+			projectSlug,
+			limit: DAEMON_SESSION_PAGE_SIZE,
+			...(scope === null ? {} : { scope }),
+		});
+		if (token === daemonBrowseToken) applyListDaemonSessionsResponse(response);
+	} catch {
+		// The local project's rows arrive separately; the list stays usable.
+	}
+}
+
+/** Applies a FIRST page: replaces the accumulator rather than appending. */
+export function applyListDaemonSessionsResponse(
+	response: ListDaemonSessionsResponse,
+): void {
+	daemonBrowseToken += 1;
+	clientSession.daemonSessions = [...response.sessions];
+	clientSession.daemonCursor = response.nextCursor;
+	clientSession.daemonHasMore = response.hasMore;
+	clientSession.daemonLoading = false;
+	clientSession.daemonUnavailableProjects = response.availability
+		.filter((entry) => !entry.available)
+		.map((entry) => entry.projectSlug);
+}
+
+/** Appends the next cross-project page. No-ops at the end of the list and while
+ *  a page is already in flight, which is what stops the scroll sentinel from
+ *  re-requesting an exhausted cursor forever. */
+export async function loadMoreDaemonSessions(): Promise<void> {
+	const projectSlug = getCurrentSlug();
+	const cursor = sessionState.daemonCursor;
+	if (
+		!projectSlug ||
+		cursor === null ||
+		!sessionState.daemonHasMore ||
+		sessionState.daemonLoading
+	) {
+		return;
+	}
+	const token = daemonBrowseToken;
+	clientSession.daemonLoading = true;
+	try {
+		const scope = getSessionScope();
+		const response = await listDaemonSessionsRpc({
+			projectSlug,
+			limit: DAEMON_SESSION_PAGE_SIZE,
+			cursor,
+			...(scope === null ? {} : { scope }),
+		});
+		if (token !== daemonBrowseToken) return;
+		// Dedupe by id. The keyset cursor does not re-emit rows, but a session
+		// whose updated_at moves between two requests can land on both pages, and
+		// a repeated key throws out of Svelte's keyed {#each}.
+		const seen = new Set(sessionState.daemonSessions.map((row) => row.id));
+		const incoming = response.sessions.filter(
+			(session) => !seen.has(session.id),
+		);
+		clientSession.daemonSessions = [
+			...sessionState.daemonSessions,
+			...incoming,
+		];
+		clientSession.daemonCursor = response.nextCursor;
+		clientSession.daemonHasMore = response.hasMore;
+		clientSession.daemonUnavailableProjects = response.availability
+			.filter((entry) => !entry.available)
+			.map((entry) => entry.projectSlug);
+	} catch {
+		// Keep the rows already on screen and leave hasMore alone, so scrolling
+		// again retries rather than declaring the list finished.
+	} finally {
+		if (token === daemonBrowseToken) clientSession.daemonLoading = false;
+	}
+}
+
+/** The query the server is currently answering. Distinct from
+ *  sessionState.searchQuery, which is what the user has typed this instant:
+ *  the debounce means they disagree, and paging must repeat the committed one. */
+let activeSearch: {
+	query: string;
+	roots: boolean;
+	scope: string | null;
+} | null = null;
+let daemonSearchToken = 0;
+
+/** Runs a fresh cross-project title search, replacing any earlier results. */
+export async function searchSessions(
+	query: string,
+	roots: boolean,
+): Promise<void> {
+	const trimmed = query.trim();
+	if (!trimmed) {
+		clearSessionSearch();
+		return;
+	}
+	daemonSearchToken += 1;
+	activeSearch = { query: trimmed, roots, scope: getSessionScope() };
+	clientSession.searchCursor = null;
+	clientSession.searchHasMore = false;
+	// Results are left on screen until the new page lands. Blanking them first
+	// makes every keystroke flash the list through its "no match" state.
+	await runSearchPage(daemonSearchToken, true);
+}
+
+/** Appends the next page of the active search. */
+export async function loadMoreSearchResults(): Promise<void> {
+	if (
+		activeSearch === null ||
+		clientSession.searchCursor === null ||
+		!sessionState.searchHasMore ||
+		sessionState.searchLoading
+	) {
+		return;
+	}
+	await runSearchPage(daemonSearchToken, false);
+}
+
+export function clearSessionSearch(): void {
+	daemonSearchToken += 1;
+	activeSearch = null;
+	clientSession.searchResults = null;
+	clientSession.searchCursor = null;
+	clientSession.searchHasMore = false;
+	clientSession.searchLoading = false;
+}
+
+async function runSearchPage(token: number, replace: boolean): Promise<void> {
+	const search = activeSearch;
+	const projectSlug = getCurrentSlug();
+	if (search === null || !projectSlug) return;
+	const cursor = replace ? null : sessionState.searchCursor;
+	clientSession.searchLoading = true;
+	try {
+		const response = await listDaemonSessionsRpc({
+			projectSlug,
+			roots: search.roots,
+			search: search.query,
+			limit: DAEMON_SESSION_PAGE_SIZE,
+			...(search.scope === null ? {} : { scope: search.scope }),
+			...(cursor === null ? {} : { cursor }),
+		});
+		if (token !== daemonSearchToken) return;
+		applySearchResultsResponse(response, replace);
+	} catch {
+		// Same as browse paging: keep what is shown, allow a retry.
+	} finally {
+		if (token === daemonSearchToken) clientSession.searchLoading = false;
+	}
+}
+
+export function applySearchResultsResponse(
+	response: ListDaemonSessionsResponse,
+	replace = true,
+): void {
+	const incoming = response.sessions;
+	if (replace) {
+		clientSession.searchResults = [...incoming];
+	} else {
+		const previous = sessionState.searchResults ?? [];
+		const seen = new Set(previous.map((row) => row.id));
+		clientSession.searchResults = [
+			...previous,
+			...incoming.filter((session) => !seen.has(session.id)),
+		];
+	}
+	clientSession.searchCursor = response.nextCursor;
+	clientSession.searchHasMore = response.hasMore;
+}
+
 export function handleSessionSwitched(
 	msg: Extract<RelayMessage, { type: "session_switched" }>,
 ): void {
@@ -377,13 +897,11 @@ export function handleSessionSwitched(
 	pendingSelectionRequestId = undefined;
 	if (id) {
 		clientSession.currentId = id;
-		// `session_switched` can beat the list that contains the session, so it
-		// carries the parent itself. Patch the row if we hold one; never invent
-		// one — the list will carry the same lineage when it lands.
-		const known = msg.parentID ? serverSessions.get(id) : undefined;
-		if (known && msg.parentID) {
-			applySessionUpsert({ ...known, parentID: msg.parentID });
-		}
+		// A switch can precede the family row. Keep only this selection's
+		// announced lineage; a server row takes precedence when it arrives.
+		clientSession.announcedParent = msg.parentID
+			? { sessionId: id, parentId: msg.parentID }
+			: null;
 		// A permission mode selected before any session was bound can only be
 		// delivered now that we know the session id.
 		const slug = getCurrentSlug();
@@ -412,7 +930,11 @@ export function handleSessionForked(
 
 /** Find a session by id. */
 export function findSession(id: string): Immutable<SessionInfo> | undefined {
-	return serverSessions.get(id);
+	return (
+		familySessions.find((row) => row.id === id) ??
+		rootSessions.find((row) => row.id === id) ??
+		serverSessions.get(id)
+	);
 }
 
 // ─── Notification views (ni8.23) ────────────────────────────────────────────
@@ -432,14 +954,16 @@ export function getSessionIndicator(
 	// on your screen, and which one that is differs per browser tab, so the
 	// server cannot answer it (ni8.23 C3).
 	if (sessionId === currentSessionId) return null;
-	const session = serverSessions.get(sessionId);
+	const session =
+		rootSessions.find((row) => row.id === sessionId) ??
+		serverSessions.get(sessionId);
 	if (session === undefined) return null;
 	if (
-		(session.pendingQuestions ?? 0) > 0 ||
-		(session.pendingPermissions ?? 0) > 0
+		(session.pendingQuestionCount ?? 0) > 0 ||
+		(session.pendingPermissionCount ?? 0) > 0
 	)
 		return "attention";
-	return session.unseenActivity === true ? "done-unviewed" : null;
+	return session.unread === true ? "done-unviewed" : null;
 }
 
 /** Every session waiting on an answer, for the attention banner. Excludes the
@@ -452,10 +976,11 @@ export function getAttentionSessions(
 		? getDescendantIds(currentSessionId)
 		: new Set<string>();
 	const waiting = new Map<string, { questions: number; permissions: number }>();
-	for (const [sessionId, session] of serverSessions) {
+	for (const session of sessionState.rootSessions) {
+		const sessionId = session.id;
 		if (sessionId === currentSessionId || descendants.has(sessionId)) continue;
-		const questions = session.pendingQuestions ?? 0;
-		const permissions = session.pendingPermissions ?? 0;
+		const questions = session.pendingQuestionCount ?? 0;
+		const permissions = session.pendingPermissionCount ?? 0;
 		if (questions > 0 || permissions > 0)
 			waiting.set(sessionId, { questions, permissions });
 	}
@@ -471,28 +996,53 @@ function lastChangedAt(session: Immutable<SessionInfo>): number {
 	return at ? new Date(at).getTime() : 0;
 }
 
-/** The sessions the sidebar should show, most recently changed first.
- *  Subagent sessions (those with a parentID) are excluded when the
- *  hideSubagentSessions UI toggle is active (default). */
-export function getFilteredSessions(): readonly Immutable<SessionInfo>[] {
-	const matchIds = clientSession.searchMatchIds;
-	if (matchIds !== null) {
-		// Resolve against the server half so a session renamed or deleted while
-		// the search is up follows the server, in the order the server matched.
-		return matchIds.flatMap((id) => {
-			const session = serverSessions.get(id);
-			return session ? [session] : [];
+/** The sidebar and its search show root sessions only. */
+export function getFilteredSessions(): SessionInfo[] {
+	const scope = getSessionScope();
+	const currentSlug = getCurrentSlug();
+	// Local rows carry no projectSlug: they belong to the project this socket
+	// is attached to.
+	const inScope = (session: SessionInfo) =>
+		scope === null || (session.projectSlug ?? currentSlug) === scope;
+	if (sessionState.searchResults !== null) {
+		const searchSlug = currentSlug;
+		// Root rows carry the subtree rollup, so search hits resolve against
+		// them rather than the membership map, where family rows (individual
+		// state) win.
+		const liveRoots = new Map(
+			sessionState.rootSessions.map((session) => [session.id, session]),
+		);
+		return sessionState.searchResults.flatMap((session) => {
+			if (session.parentID || !inScope(session)) return [];
+			if (session.projectSlug != null && session.projectSlug !== searchSlug) {
+				return [session];
+			}
+			const liveSession = liveRoots.get(session.id);
+			return liveSession ? [liveSession] : [];
 		});
 	}
+	const localSessions = sessionState.rootSessions;
+	const query = sessionState.searchQuery.toLowerCase().trim();
+	// Foreign rows stay in while a query is active and get title-filtered with
+	// the rest. The server search they will be replaced by now covers every
+	// project too, so the local filter and the landing results agree -- which is
+	// why these no longer have to stand down to avoid flashing in and out.
+	const foreignSessions = sessionState.daemonSessions.filter(
+		(session) =>
+			session.projectSlug != null &&
+			session.projectSlug !== currentSlug &&
+			!session.parentID,
+	);
+	const sessions = [...localSessions, ...foreignSessions]
+		.filter(inScope)
+		.sort((a, b) => getSessionDate(b).getTime() - getSessionDate(a).getTime());
+	if (!query) return sessions;
+	return sessions.filter((s) => s.title.toLowerCase().includes(query));
+}
 
-	const query = clientSession.searchQuery.toLowerCase().trim();
-	return [...serverSessions.values()]
-		.filter(
-			(s) =>
-				!(uiState.hideSubagentSessions && s.parentID) &&
-				(!query || s.title.toLowerCase().includes(query)),
-		)
-		.sort((a, b) => lastChangedAt(b) - lastChangedAt(a));
+/** Get sessions grouped into the sidebar's sections. */
+export function getAttentionGroups(): AttentionGroups {
+	return groupSessionsByAttention(getFilteredSessions(), sessionState.now);
 }
 
 /** Get sessions grouped by date: today, yesterday, older. */
@@ -547,14 +1097,13 @@ export function setCurrentSession(id: string | null): void {
 
 /**
  * The session ID we are switching *away from*.  Captured here before
- * `currentId` is overwritten so that `ws-dispatch` can pass the correct
- * value to `clearSessionLocal` when the server confirms the switch.
+ * `currentId` is overwritten so dispatch can abort the outgoing replay
+ * when the server confirms the switch.
  */
 let _switchingFromId: string | null = null;
 
-/** Read and clear the switching-from ID. Used by ws-dispatch to pass the
- *  correct previous session to `clearSessionLocal`. Consuming (clearing)
- *  prevents stale IDs from leaking into future server-initiated switches. */
+/** Read and clear the switching-from ID. Consuming it prevents stale IDs
+ *  from leaking into future server-initiated switches. */
 export function consumeSwitchingFromId(): string | null {
 	const id = _switchingFromId;
 	_switchingFromId = null;
@@ -570,6 +1119,7 @@ export function consumeSwitchingFromId(): string | null {
  */
 export function switchToSession(
 	sessionId: string,
+	projectSlug?: string,
 	view?: (input: ViewSessionRpcInput) => void,
 ): void {
 	// Capture the outgoing session for permission cleanup in ws-dispatch.
@@ -581,10 +1131,12 @@ export function switchToSession(
 	}
 
 	clientSession.currentId = sessionId;
+	clientSession.announcedParent = null;
 	activateSessionChatState(sessionId);
 
-	const slug = getCurrentSlug();
-	if (slug) navigate(`/p/${slug}/s/${sessionId}`);
+	const slug = projectSlug ?? getCurrentSlug();
+	clientSession.currentId = sessionId;
+	navigate(`/s/${sessionId}`);
 	if (slug) {
 		const input: ViewSessionRpcInput = {
 			projectSlug: slug,
@@ -643,6 +1195,22 @@ export function clearSessionState(): void {
 	const held = [...serverSessions.keys()];
 	resetSessionSubscription();
 	for (const id of held) forgetSession(id);
+	for (const id of new Set([
+		...sessionActivity.keys(),
+		...sessionMessages.keys(),
+	])) {
+		clearSessionChatState(id);
+	}
 	clientSession.currentId = null;
+	clientSession.announcedParent = null;
 	setSearchQuery("");
+	rootSessions = [];
+	familySessions = [];
+	clientSession.daemonSessions = [];
+	clientSession.daemonUnavailableProjects = [];
+	clientSession.daemonCursor = null;
+	clientSession.daemonHasMore = false;
+	clientSession.daemonLoading = false;
+	daemonBrowseToken++;
+	clearSessionSearch();
 }

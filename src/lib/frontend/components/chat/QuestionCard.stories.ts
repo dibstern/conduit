@@ -121,3 +121,8 @@ export const WithCustomInput: Story = {
 export const MultipleQuestions: Story = {
 	args: { request: mockMultiQuestion },
 };
+
+export const Hover: Story = {
+	...SingleSelect,
+	parameters: { pseudo: { hover: true } },
+};

@@ -12,6 +12,11 @@ marked.use({
 	gfm: true,
 	breaks: false,
 	renderer: {
+		// GFM task-list checkboxes are disabled state indicators with no label
+		// element of their own; name them after the state they report.
+		checkbox({ checked }) {
+			return `<input type="checkbox" disabled${checked ? " checked" : ""} aria-label="${checked ? "Completed" : "Not completed"}">`;
+		},
 		table(token) {
 			const tableHtml = Renderer.prototype.table.call(this, token);
 			return (

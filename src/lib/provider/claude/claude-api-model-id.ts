@@ -20,6 +20,10 @@ const CONTEXT_WINDOW_OPTIONS_BY_MODEL: Readonly<
 > = {
 	"claude-fable-5-1": OPTIONS_1M_DEFAULT,
 	"claude-fable-5": OPTIONS_1M_DEFAULT,
+	// Catalogs are asymmetric: today Opus is advertised as the alias `opus[1m]`
+	// and only resolves to `claude-opus-5-5[1m]`. Fable used to be an alias too
+	// and is now advertised as a full id, so carry the full-id row as well.
+	"claude-opus-5-5": OPTIONS_1M_DEFAULT,
 	"claude-opus-5": OPTIONS_1M_DEFAULT,
 	"claude-opus-4-8": undefined,
 	"claude-opus-4-7": undefined,

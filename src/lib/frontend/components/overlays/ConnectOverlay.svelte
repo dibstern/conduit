@@ -12,11 +12,11 @@
 		getCachedInstanceById,
 		instanceState,
 	} from "../../stores/instance.svelte.js";
-	import { navigate } from "../../stores/router.svelte.js";
 	import { startInstanceRpc } from "../../transport/ws-rpc-client.js";
 	import type { InstanceStatus } from "../../types.js";
 	import { CONNECT_FADEOUT_MS } from "../../ui-constants.js";
-	import ConduitLogo from '../shared/ConduitLogo.svelte';
+	import ConduitLogo from '../ui/ConduitLogo.svelte';
+	import Button from '../ui/Button.svelte';
 
 	// ─── State ──────────────────────────────────────────────────────────────────
 
@@ -116,31 +116,6 @@
 		return wsState.statusText;
 	});
 
-	// ─── Escape hatch: show "Back to dashboard" after prolonged disconnect ──────
-
-	let showEscapeLink = $state(false);
-
-	$effect(() => {
-		if (connected) {
-			showEscapeLink = false;
-			return;
-		}
-		if (relayStatus === "error") {
-			showEscapeLink = true;
-			return;
-		}
-		// Show escape link after 4 seconds of failed connection
-		const timer = setTimeout(() => {
-			showEscapeLink = true;
-		}, 4_000);
-		return () => clearTimeout(timer);
-	});
-
-	function handleEscape(e: MouseEvent) {
-		e.preventDefault();
-		navigate("/");
-	}
-
 	// ─── Reset on disconnect ────────────────────────────────────────────────────
 
 	$effect(() => {
@@ -207,17 +182,12 @@
 				Relay failed to start
 			</div>
 				{#if relayError}
-					<div class="text-xs text-text-dimmer max-w-xs text-center truncate" title={relayError}>
+					<div
+						class="text-xs text-text-dimmer max-w-xs max-h-[200px] overflow-y-auto break-words whitespace-pre-wrap text-left font-mono"
+					>
 						{relayError}
 					</div>
 				{/if}
-				<a
-					href="/"
-					class="mt-1 px-4 py-1.5 text-sm rounded-lg bg-bg-surface border border-border text-text hover:bg-bg-alt font-medium"
-					onclick={handleEscape}
-				>
-					Back to dashboard
-				</a>
 			</div>
 		{:else}
 			<div
@@ -231,18 +201,22 @@
 		<!-- Instance action buttons (shown when instance is down in multi-instance mode) -->
 		{#if showInstanceActions}
 			<div class="flex gap-3 mt-2">
-				<button
-					class="px-4 py-1.5 text-sm rounded-lg border border-border text-text hover:bg-bg-alt font-medium"
+				<Button
+					variant="secondary"
+					size="content"
+					class="px-4 py-1.5 text-sm rounded-lg font-medium"
 					onclick={handleStartInstance}
 				>
 					Start Instance
-				</button>
-				<button
-					class="px-4 py-1.5 text-sm rounded-lg border border-border text-text hover:bg-bg-alt font-medium"
+				</Button>
+				<Button
+					variant="secondary"
+					size="content"
+					class="px-4 py-1.5 text-sm rounded-lg font-medium"
 					onclick={handleSwitchInstance}
 				>
 					Switch Instance
-				</button>
+				</Button>
 			</div>
 		{/if}
 		</div>

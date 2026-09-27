@@ -9,8 +9,14 @@
 	import { uiState, removeBanner } from "../../stores/ui.svelte.js";
 	import { discoveryState } from "../../stores/discovery.svelte.js";
 	import { instanceState } from "../../stores/instance.svelte.js";
-	import Icon from "../shared/Icon.svelte";
+	import Icon from "../ui/Icon.svelte";
+	import Button from "../ui/Button.svelte";
 	import { assertNever } from "../../../utils.js";
+	let { banners = uiState.banners, ondismiss = removeBanner, showHealthWarning = true }: {
+		banners?: BannerConfig[];
+		ondismiss?: (id: string) => void;
+		showHealthWarning?: boolean;
+	} = $props();
 
 	// ─── Instance health check ─────────────────────────────────────────────────
 	// Show the warning banner only when ALL instances are "unhealthy" — meaning
@@ -57,7 +63,7 @@
 	}
 </script>
 
-{#if showInstanceWarning}
+{#if showHealthWarning && showInstanceWarning}
 	<div class="banner flex items-center gap-2 px-4 py-2 text-xs border-b bg-error/10 border-error/30 text-error">
 		<span class="banner-icon shrink-0">
 			<Icon name="alert-triangle" size={14} />
@@ -76,9 +82,9 @@
 	</div>
 {/if}
 
-{#if uiState.banners.length > 0}
+{#if banners.length > 0}
 	<div class="banners flex flex-col">
-		{#each uiState.banners as banner (banner.id)}
+		{#each banners as banner (banner.id)}
 			<div
 				class="banner flex items-center gap-2 px-4 py-2 text-xs border-b {getVariantClasses(banner.variant)}"
 				data-banner-id={banner.id}
@@ -100,13 +106,20 @@
 					</a>
 				{/if}
 				{#if banner.dismissible}
-					<button
-						class="banner-dismiss shrink-0 text-current opacity-60 hover:opacity-100 cursor-pointer bg-transparent border-none p-0 leading-none"
+					<!-- Inherit keeps the banner's own colour without adding a hover colour. -->
+					<Button
+						variant="ghost"
+						size="content"
+						tone="inherit"
+						hoverFill="none"
+						iconOnly
+						icon="x"
+						iconSize={14}
+						class="banner-dismiss shrink-0 text-current opacity-60 hover:opacity-100 leading-none"
 						title="Dismiss"
-						onclick={() => removeBanner(banner.id)}
-					>
-						<Icon name="x" size={14} />
-					</button>
+						ariaLabel="Dismiss"
+						onclick={() => ondismiss(banner.id)}
+					/>
 				{/if}
 			</div>
 		{/each}

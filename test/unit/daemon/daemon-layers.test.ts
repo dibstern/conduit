@@ -109,8 +109,9 @@ describe("daemon-layers", () => {
 				makeRelayCacheLive((slug) =>
 					Effect.succeed({
 						slug,
-						wsHandler: { handleUpgrade: () => {} },
-						rpcWsHandler: { handleUpgrade: () => {} },
+						attach: () => () => {},
+						wsHandler: {},
+						rpcWsHandler: {},
 						stop: () => {},
 					} satisfies Relay),
 				),

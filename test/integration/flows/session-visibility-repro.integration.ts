@@ -12,9 +12,11 @@
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { SqlClient } from "@effect/sql";
+import { SqliteClient } from "@effect/sql-sqlite-node";
+import { Effect } from "effect";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
-import { ReadQueryService } from "../../../src/lib/persistence/read-query-service.js";
-import { SqliteClient } from "../../../src/lib/persistence/sqlite-client.js";
+import { makeReadQueryEffect } from "../../../src/lib/persistence/effect/read-query-effect.js";
 import { resolveSessionHistoryFromRows } from "../../../src/lib/session/session-switch.js";
 import type {
 	OpenCodeInteraction,
@@ -186,7 +188,7 @@ async function waitForProjectedMessage(
 ): Promise<void> {
 	const deadline = Date.now() + timeoutMs;
 	for (;;) {
-		const projected = projectedHistory(dbPath, sessionId, 200);
+		const projected = await projectedHistory(dbPath, sessionId, 200);
 		if (
 			projected.kind === "rest-history" &&
 			(projected.history as DifferentialHistory).messages.some(
@@ -200,16 +202,27 @@ async function waitForProjectedMessage(
 	}
 }
 
-function projectedHistory(dbPath: string, sessionId: string, pageSize = 50) {
-	const db = SqliteClient.open(dbPath);
-	try {
-		const rows = new ReadQueryService(db).getSessionMessagesWithParts(
-			sessionId,
-		);
-		return resolveSessionHistoryFromRows(rows, { pageSize });
-	} finally {
-		db.close();
-	}
+function readStore<A, E>(
+	dbPath: string,
+	read: Effect.Effect<A, E, SqlClient.SqlClient>,
+): Promise<A> {
+	return Effect.runPromise(
+		read.pipe(Effect.provide(SqliteClient.layer({ filename: dbPath }))),
+	);
+}
+
+async function projectedHistory(
+	dbPath: string,
+	sessionId: string,
+	pageSize = 50,
+) {
+	const rows = await readStore(
+		dbPath,
+		Effect.flatMap(makeReadQueryEffect, (readQuery) =>
+			readQuery.getSessionMessagesWithParts(sessionId),
+		),
+	);
+	return resolveSessionHistoryFromRows(rows, { pageSize });
 }
 
 /**
@@ -296,7 +309,7 @@ async function runPaginationDifferential(count: number) {
 			predicate: (message) => message["id"] === sessionId,
 		});
 		const rest = switched["history"] as DifferentialHistory;
-		const projected = projectedHistory(dbPath, sessionId, 50);
+		const projected = await projectedHistory(dbPath, sessionId, 50);
 		expect(projected.kind).toBe("rest-history");
 		const projectedRest =
 			projected.kind === "rest-history"
@@ -547,11 +560,7 @@ describe("Integration: Session Visibility Repros", () => {
 
 		// Projection-served history: the exact adapter chain the resolvers use
 		// when falling back to (or preferring) the read model.
-		const db = SqliteClient.open(textDbPath);
-		const rows = new ReadQueryService(db).getSessionMessagesWithParts(
-			sessionId,
-		);
-		const projected = resolveSessionHistoryFromRows(rows, { pageSize: 50 });
+		const projected = await projectedHistory(textDbPath, sessionId, 50);
 
 		const summarize = (
 			msgs: readonly {
@@ -629,11 +638,7 @@ describe("Integration: Session Visibility Repros", () => {
 				}>;
 			};
 
-			const db = SqliteClient.open(toolDbPath);
-			const rows = new ReadQueryService(db).getSessionMessagesWithParts(
-				sessionId,
-			);
-			const projected = resolveSessionHistoryFromRows(rows, { pageSize: 50 });
+			const projected = await projectedHistory(toolDbPath, sessionId, 50);
 
 			type Msg = {
 				role?: string;
@@ -786,7 +791,7 @@ describe("Integration: Session Visibility Repros", () => {
 				predicate: (message) => message["id"] === sessionId,
 			});
 			const rest = switched["history"] as DifferentialHistory;
-			const projected = projectedHistory(dbPath, sessionId);
+			const projected = await projectedHistory(dbPath, sessionId);
 			expect(projected.kind).toBe("rest-history");
 			const summarize = (messages: DifferentialMessage[]) =>
 				messages.map((message) => ({
@@ -907,7 +912,7 @@ describe("Integration: Session Visibility Repros", () => {
 				predicate: (message) => message["id"] === sessionId,
 			});
 			const rest = switched["history"] as DifferentialHistory;
-			const projected = projectedHistory(dbPath, sessionId);
+			const projected = await projectedHistory(dbPath, sessionId);
 			expect(projected.kind).toBe("rest-history");
 			const summarize = (messages: DifferentialMessage[]) =>
 				messages.map((message) => ({
@@ -983,7 +988,7 @@ describe("Integration: Session Visibility Repros", () => {
 				predicate: (message) => message["id"] === sessionId,
 			});
 			const rest = switched["history"] as DifferentialHistory;
-			const projected = projectedHistory(dbPath, sessionId as string);
+			const projected = await projectedHistory(dbPath, sessionId as string);
 			expect(projected.kind).toBe("rest-history");
 			const summarize = (messages: DifferentialMessage[]) =>
 				messages.map((message) => ({
@@ -1010,23 +1015,21 @@ describe("Integration: Session Visibility Repros", () => {
 			);
 			expect(projectedSummary).toEqual(restSummary);
 
-			const db = SqliteClient.open(dbPath);
-			try {
-				const eventTypes = db
-					.query<{ type: string }>(
-						"SELECT type FROM events WHERE session_id = ? ORDER BY sequence",
-						[sessionId],
-					)
-					.map((row) => row.type);
-				// eslint-disable-next-line no-console
-				console.log(
-					`[REPRO-I] permissionEvents=${JSON.stringify(eventTypes.filter((type) => type.startsWith("permission.")))}`,
-				);
-				expect(eventTypes).toContain("permission.asked");
-				expect(eventTypes).toContain("permission.resolved");
-			} finally {
-				db.close();
-			}
+			const eventTypes = await readStore(
+				dbPath,
+				Effect.flatMap(
+					SqlClient.SqlClient,
+					(sql) =>
+						sql<{ type: string }>`
+						SELECT type FROM events WHERE session_id = ${sessionId as string} ORDER BY sequence`,
+				),
+			).then((rows) => rows.map((row) => row.type));
+			// eslint-disable-next-line no-console
+			console.log(
+				`[REPRO-I] permissionEvents=${JSON.stringify(eventTypes.filter((type) => type.startsWith("permission.")))}`,
+			);
+			expect(eventTypes).toContain("permission.asked");
+			expect(eventTypes).toContain("permission.resolved");
 		} finally {
 			await client2?.close().catch(() => {});
 			await client1?.close().catch(() => {});

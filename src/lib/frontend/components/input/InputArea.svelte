@@ -4,7 +4,8 @@
 
 <script lang="ts">
 	import { untrack } from "svelte";
-	import Icon from "../shared/Icon.svelte";
+	import Button from "../ui/Button.svelte";
+	import Textarea from "../ui/Textarea.svelte";
 	import AgentSelector from "../model/AgentSelector.svelte";
 	import AttachMenu from "./AttachMenu.svelte";
 	// biome-ignore lint/style/useImportType: CommandMenu is used as a value for bind:this
@@ -19,8 +20,19 @@
 	import SubagentBackBar from "../chat/SubagentBackBar.svelte";
 	import PastePreview from "../chat/PastePreview.svelte";
 	import { addUserMessage, currentChat, getOrCreateSessionSlot, inputSyncState, isProcessing } from "../../stores/chat.svelte.js";
-	import { discoveryState, extractSlashQuery, getEffectiveInstanceId, getModelDisplayName } from "../../stores/discovery.svelte.js";
-	import { extractAtQuery, fileTreeState, filterFiles } from "../../stores/file-tree.svelte.js";
+	import {
+		discoveryState,
+		extractSlashQuery,
+		filterCommands,
+		getEffectiveInstanceId,
+		getModelDisplayName,
+	} from "../../stores/discovery.svelte.js";
+	import {
+		buildMentionInsertion,
+		extractAtQuery,
+		fileTreeState,
+		filterFiles,
+	} from "../../stores/file-tree.svelte.js";
 	import { fetchFileContent, fetchDirectoryListing, resizeImageIfNeeded } from "./input-utils.js";
 	import { sessionState, switchToSession } from "../../stores/session.svelte.js";
 	import { getCurrentSlug } from "../../stores/router.svelte.js";
@@ -32,14 +44,19 @@
 	import type { FileAttachment } from "../../utils/file-attach.js";
 	import type { PendingImage } from "../../types.js";
 
+	const inputAreaId = $props.id();
+	const fileListboxId = `${inputAreaId}-file-listbox`;
+	const commandListboxId = `${inputAreaId}-command-listbox`;
+
 	// ─── State ─────────────────────────────────────────────────────────────────
 
 	let inputText = $state("");
 	let textareaEl: HTMLTextAreaElement | undefined = $state();
-	let attachMenuOpen = $state(false);
 	let pendingImages = $state<PendingImage[]>([]);
 	let commandMenuRef: CommandMenu | undefined = $state();
 	let fileMenuRef: FileMenu | undefined = $state();
+	let commandMenuActiveIndex = $state(0);
+	let fileMenuActiveIndex = $state(0);
 	let subagentBackBarRef: SubagentBackBar | undefined = $state();
 	let cursorPos = $state(0);
 	let composing = $state(false);
@@ -100,6 +117,10 @@
 	const slashQuery = $derived(extractSlashQuery(inputText, cursorPos));
 	const commandMenuVisible = $derived(slashQuery !== null);
 	const commandQuery = $derived(slashQuery?.query ?? "");
+	const filteredCommands = $derived(
+		commandMenuVisible ? filterCommands(discoveryState.commands, commandQuery) : [],
+	);
+	const commandListboxVisible = $derived(filteredCommands.length > 0);
 
 	/** Names of known slash commands/skills, for inline recognition in the composer. */
 	const commandNameSet = $derived(new Set(discoveryState.commands.map((c) => c.name)));
@@ -114,6 +135,42 @@
 	const filteredFiles = $derived(
 		fileMenuVisible ? filterFiles(fileTreeState.entries, fileQuery) : [],
 	);
+	const fileListboxVisible = $derived(
+		fileMenuVisible && (filteredFiles.length > 0 || fileTreeState.loading),
+	);
+	const activeListboxId = $derived(
+		commandListboxVisible
+			? commandListboxId
+			: fileListboxVisible
+				? fileListboxId
+				: undefined,
+	);
+	const activeOptionId = $derived(
+		commandListboxVisible
+			? `${commandListboxId}-option-${commandMenuActiveIndex}`
+			: fileListboxVisible && filteredFiles.length > 0
+				? `${fileListboxId}-option-${fileMenuActiveIndex}`
+				: undefined,
+	);
+
+	/**
+	 * Spoken announcement for the mention menus. The composer is a plain textarea,
+	 * not a combobox (conduit-test-n9s, option 3C), so there is no `aria-expanded`
+	 * for a screen reader to read the opened state off. This live region carries
+	 * that signal instead. Empty string when nothing is open, so closing is silent.
+	 */
+	const listboxStatusText = $derived.by(() => {
+		if (commandListboxVisible) {
+			const n = filteredCommands.length;
+			return `${n} command${n === 1 ? "" : "s"} available`;
+		}
+		if (fileListboxVisible) {
+			if (filteredFiles.length === 0) return "Loading files";
+			const n = filteredFiles.length;
+			return `${n} file${n === 1 ? "" : "s"} available`;
+		}
+		return "";
+	});
 
 	// ─── Derived ───────────────────────────────────────────────────────────────
 
@@ -133,7 +190,10 @@
 			execution.requestedModel &&
 			execution.expectedModel &&
 			execution.actualModel
-			? execution
+			? {
+					actualModel: execution.actualModel,
+					requestedModel: execution.requestedModel,
+				}
 			: null;
 	});
 
@@ -343,12 +403,7 @@
 		sendMessage();
 	}
 
-	function toggleAttachMenu() {
-		attachMenuOpen = !attachMenuOpen;
-	}
-
 	function handleAttachCamera() {
-		attachMenuOpen = false;
 		const fileInput = document.createElement("input");
 		fileInput.type = "file";
 		fileInput.accept = "image/*";
@@ -358,7 +413,6 @@
 	}
 
 	function handleAttachPhotos() {
-		attachMenuOpen = false;
 		const fileInput = document.createElement("input");
 		fileInput.type = "file";
 		fileInput.accept = "image/*";
@@ -443,10 +497,9 @@
 	function handleFileSelect(path: string) {
 		if (!atQuery || !textareaEl) return;
 
-		// Replace @query with @path (with trailing space)
 		const before = inputText.slice(0, atQuery.start);
 		const after = inputText.slice(atQuery.end);
-		const insertion = `@${path} `;
+		const insertion = buildMentionInsertion(path);
 		inputText = before + insertion + after;
 
 		// Move cursor to after the inserted path
@@ -470,22 +523,7 @@
 		}
 	}
 
-	// Close attach menu on outside click
-	function handleDocumentClick(e: MouseEvent) {
-		if (attachMenuOpen) {
-			const target = e.target as HTMLElement;
-			if (!target.closest("#attach-wrap")) {
-				attachMenuOpen = false;
-			}
-		}
-	}
-
 	// ─── Lifecycle ─────────────────────────────────────────────────────────────
-
-	$effect(() => {
-		document.addEventListener("click", handleDocumentClick);
-		return () => document.removeEventListener("click", handleDocumentClick);
-	});
 
 	// Navigate to parent session on ESC — works regardless of focus
 	$effect(() => {
@@ -513,6 +551,8 @@
 	<div id="file-menu-wrap" class="relative w-full max-w-[760px] mx-auto px-4">
 		<FileMenu
 			bind:this={fileMenuRef}
+			bind:activeIndex={fileMenuActiveIndex}
+			listboxId={fileListboxId}
 			query={fileQuery}
 			visible={fileMenuVisible}
 			entries={filteredFiles}
@@ -525,12 +565,14 @@
 
 <!-- Command Menu (above input when "/" is typed) -->
 {#if commandMenuVisible}
-	<div id="command-menu" class="relative w-full max-w-[760px] mx-auto px-4">
+	<div id="command-menu-wrap" class="relative w-full max-w-[760px] mx-auto px-4">
 		<CommandMenu
 			bind:this={commandMenuRef}
+			bind:activeIndex={commandMenuActiveIndex}
+			listboxId={commandListboxId}
 			query={commandQuery}
 			visible={commandMenuVisible}
-			commands={discoveryState.commands}
+			commands={[...discoveryState.commands]}
 			onSelect={handleCommandSelect}
 			onClose={handleCommandClose}
 		/>
@@ -591,23 +633,51 @@
 						commandNames={commandNameSet}
 						dimmed={composing || plainText}
 					/>
-					<textarea
+					<!--
+						`chrome="bare"` + `size="content"`: the affordance is
+						`#input-row` above, which owns the border and the focus ring,
+						so the field itself paints nothing and sizes itself. Dropped
+						from the class list: `bg-transparent` and `border-none`, both
+						of which Tailwind v4's preflight already does on a textarea
+						and which only squatted on their utility group.
+						`outline-none` is load-bearing and now comes from `bare`.
+
+						The text colour moved from two `class:` directives into the
+						class string because Svelte has no `class:` directive on a
+						COMPONENT tag. That is also why `bare` emits no text colour:
+						this swap and a primitive `text-text` would be two utilities
+						in one Tailwind group, resolved by stylesheet order, and the
+						call site would lose.
+					-->
+					<Textarea
 						id="input"
+						aria-label="Message"
+						aria-autocomplete="list"
+						aria-haspopup="listbox"
+						aria-controls={activeListboxId}
+						aria-activedescendant={activeOptionId}
+						chrome="bare"
+						size="content"
 						placeholder="Ask anything. / to use skills, @ to mention files"
 						autocomplete="off"
 						enterkeyhint={isMobile() ? "enter" : "send"}
-						class="composer-text-metrics absolute inset-0 z-10 bg-transparent border-none caret-[var(--color-text)] resize-none outline-none placeholder:text-text-muted {plainText ? 'overflow-y-auto' : 'overflow-hidden'}"
-						class:text-transparent={!composing && !plainText}
-						class:text-text={composing || plainText}
+						class="composer-text-metrics absolute inset-0 z-10 caret-[var(--color-text)] resize-none placeholder:text-text-muted {plainText
+							? 'overflow-y-auto'
+							: 'overflow-hidden'} {composing || plainText
+							? 'text-text'
+							: 'text-transparent'}"
 						bind:value={inputText}
-						bind:this={textareaEl}
+						bind:element={textareaEl}
 						oninput={handleInput}
 						onkeydown={handleKeydown}
 						onkeyup={handleKeyup}
 						onclick={handleClick}
 						oncompositionstart={handleCompositionStart}
 						oncompositionend={handleCompositionEnd}
-					></textarea>
+					/>
+					<div class="sr-only" role="status" data-testid="composer-menu-status">
+						{listboxStatusText}
+					</div>
 				</div>
 			</div>
 
@@ -633,7 +703,7 @@
 					class="flex items-center gap-1 min-w-0"
 				>
 					<!-- Attach button + menu -->
-					<AttachMenu open={attachMenuOpen} onToggle={toggleAttachMenu} onCamera={handleAttachCamera} onPhotos={handleAttachPhotos} />
+					<AttachMenu onCamera={handleAttachCamera} onPhotos={handleAttachPhotos} />
 
 					<!-- Agent selector -->
 					<div id="agent-selector-wrap">
@@ -652,26 +722,42 @@
 					<PermissionModeSelector />
 
 					<!-- Send / Stop buttons -->
-					<button
+					<!-- No tone supplies text-white without a hover step; inherit leaves that colour local.
+					     transition-colors replaces the arbitrary transition; 150ms is its default. -->
+					<Button
+						variant="ghost"
+						size="content"
+						tone="inherit"
+						hoverFill="none"
+						disabledStyle="ghosted"
+						iconOnly
+						icon="arrow-up"
+						iconSize={18}
 						id="send"
 						type="button"
-						class="send-btn shrink-0 w-8 h-8 rounded-[10px] border-none bg-brand-a text-white cursor-pointer flex items-center justify-center transition-[background,opacity] duration-150 touch-manipulation hover:not-disabled:opacity-90 disabled:opacity-25 disabled:cursor-default active:not-disabled:opacity-70"
+						class="send-btn shrink-0 w-8 h-8 rounded-[10px] bg-brand-a text-white touch-manipulation hover:not-disabled:opacity-90 active:not-disabled:opacity-70"
 						disabled={!canSend}
 						title={isProcessing() ? "Queue message" : "Send message"}
+						ariaLabel={isProcessing() ? "Queue message" : "Send message"}
 						onclick={handleSendClick}
-					>
-						<Icon name="arrow-up" size={18} />
-					</button>
+					/>
 					{#if isProcessing()}
-						<button
+						<!-- The arbitrary transition yields to Button's transition-colors; duration-150 restates its default. -->
+						<Button
+							variant="secondary"
+							size="content"
+							tone="muted"
+							hoverFill="alt"
+							iconOnly
+							icon="square"
+							iconSize={18}
 							id="stop"
 							type="button"
-							class="shrink-0 w-8 h-8 rounded-[10px] bg-transparent border border-border text-text-muted cursor-pointer flex items-center justify-center transition-[background,color,opacity] duration-150 touch-manipulation hover:bg-bg-alt hover:text-text active:opacity-70"
+							class="shrink-0 w-8 h-8 rounded-[10px] touch-manipulation active:opacity-70"
 							title="Stop generating"
+							ariaLabel="Stop generating"
 							onclick={handleStop}
-						>
-							<Icon name="square" size={18} />
-						</button>
+						/>
 					{/if}
 				</div>
 			</div>

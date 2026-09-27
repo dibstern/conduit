@@ -352,6 +352,31 @@ export const RpcLogLevelSchema = Schema.Literal(
 	"error",
 );
 
+export const ProjectSessionAvailabilitySchema = Schema.Union(
+	Schema.Struct({
+		projectSlug: Schema.String,
+		available: Schema.Literal(true),
+	}),
+	Schema.Struct({
+		projectSlug: Schema.String,
+		available: Schema.Literal(false),
+		error: Schema.String,
+	}),
+);
+
+export const DaemonSessionCursorSchema = Schema.Struct({
+	updatedAt: Schema.Number,
+	id: Schema.String,
+});
+
+export const ListDaemonSessionsResponseSchema = Schema.Struct({
+	projectSlug: Schema.optional(Schema.String),
+	sessions: Schema.Array(SessionInfoSchema),
+	availability: Schema.Array(ProjectSessionAvailabilitySchema),
+	hasMore: Schema.Boolean,
+	nextCursor: Schema.NullOr(DaemonSessionCursorSchema),
+});
+
 export const ListSessionsResponseSchema = Schema.Struct({
 	projectSlug: Schema.String,
 	sessions: Schema.Array(SessionInfoSchema),
@@ -392,32 +417,32 @@ export const GetCommandsResponseSchema = Schema.Struct({
 });
 
 export const GetProjectsResponseSchema = Schema.Struct({
-	projectSlug: Schema.String,
+	projectSlug: Schema.optional(Schema.String),
 	projects: Schema.Array(ProjectInfoSchema),
 	current: Schema.optional(Schema.String),
 });
 
 export const ProjectMutationResponseSchema = Schema.Struct({
-	projectSlug: Schema.String,
+	projectSlug: Schema.optional(Schema.String),
 	projects: Schema.Array(ProjectInfoSchema),
 	current: Schema.optional(Schema.String),
 	addedSlug: Schema.optional(Schema.String),
 });
 
 export const InstanceListResponseSchema = Schema.Struct({
-	projectSlug: Schema.String,
+	projectSlug: Schema.optional(Schema.String),
 	instances: Schema.Array(OpenCodeInstanceSchema),
 });
 
 export const ScanNowResponseSchema = Schema.Struct({
-	projectSlug: Schema.String,
+	projectSlug: Schema.optional(Schema.String),
 	discovered: Schema.Array(Schema.Number),
 	lost: Schema.Array(Schema.Number),
 	active: Schema.Array(Schema.Number),
 });
 
 export const DetectProxyResponseSchema = Schema.Struct({
-	projectSlug: Schema.String,
+	projectSlug: Schema.optional(Schema.String),
 	found: Schema.Boolean,
 	port: Schema.Number,
 });
@@ -428,7 +453,7 @@ export const PtyListResponseSchema = Schema.Struct({
 });
 
 export const ListDirectoriesResponseSchema = Schema.Struct({
-	projectSlug: Schema.String,
+	projectSlug: Schema.optional(Schema.String),
 	path: Schema.String,
 	entries: Schema.Array(Schema.String),
 });
@@ -462,6 +487,13 @@ export const GetToolContentResponseSchema = Schema.Struct({
 	content: Schema.String,
 });
 
+export const GetSkillContentResponseSchema = Schema.Struct({
+	projectSlug: Schema.String,
+	name: Schema.String,
+	path: Schema.String,
+	content: Schema.String,
+});
+
 export type AgentInfo = typeof AgentInfoSchema.Type;
 export type AgentProviderScope = typeof AgentProviderScopeSchema.Type;
 export type GetAgentsResponse = typeof GetAgentsResponseSchema.Type;
@@ -484,6 +516,7 @@ export type FileEntry = typeof FileEntrySchema.Type;
 export type GetFileListResponse = typeof GetFileListResponseSchema.Type;
 export type GetFileContentResponse = typeof GetFileContentResponseSchema.Type;
 export type GetToolContentResponse = typeof GetToolContentResponseSchema.Type;
+export type GetSkillContentResponse = typeof GetSkillContentResponseSchema.Type;
 export type ContextWindowOption = typeof ContextWindowOptionSchema.Type;
 export type ModelInfo = typeof ModelInfoSchema.Type;
 export type ProviderInfo = typeof ProviderInfoSchema.Type;
@@ -504,6 +537,10 @@ export type ReloadProviderSessionResponse =
 export type SwitchVariantResponse = typeof SwitchVariantResponseSchema.Type;
 export type SwitchPermissionModeResponse =
 	typeof SwitchPermissionModeResponseSchema.Type;
+export type ProjectSessionAvailability =
+	typeof ProjectSessionAvailabilitySchema.Type;
+export type ListDaemonSessionsResponse =
+	typeof ListDaemonSessionsResponseSchema.Type;
 export type ListSessionsResponse = typeof ListSessionsResponseSchema.Type;
 export type CreateSessionResponse = typeof CreateSessionResponseSchema.Type;
 export type LoadMoreHistoryResponse = typeof LoadMoreHistoryResponseSchema.Type;
@@ -546,7 +583,7 @@ export class GetProjects extends Schema.TaggedRequest<GetProjects>()(
 		failure: WsRpcError,
 		success: GetProjectsResponseSchema,
 		payload: {
-			projectSlug: NonEmptyString,
+			projectSlug: Schema.optional(NonEmptyString),
 		},
 	},
 ) {}
@@ -557,7 +594,7 @@ export class AddProject extends Schema.TaggedRequest<AddProject>()(
 		failure: WsRpcError,
 		success: ProjectMutationResponseSchema,
 		payload: {
-			projectSlug: NonEmptyString,
+			projectSlug: Schema.optional(NonEmptyString),
 			directory: NonEmptyString,
 			instanceId: Schema.optional(NonEmptyString),
 		},
@@ -570,7 +607,7 @@ export class RemoveProject extends Schema.TaggedRequest<RemoveProject>()(
 		failure: WsRpcError,
 		success: ProjectMutationResponseSchema,
 		payload: {
-			projectSlug: NonEmptyString,
+			projectSlug: Schema.optional(NonEmptyString),
 			slug: NonEmptyString,
 		},
 	},
@@ -582,7 +619,7 @@ export class RenameProject extends Schema.TaggedRequest<RenameProject>()(
 		failure: WsRpcError,
 		success: ProjectMutationResponseSchema,
 		payload: {
-			projectSlug: NonEmptyString,
+			projectSlug: Schema.optional(NonEmptyString),
 			slug: NonEmptyString,
 			title: NonEmptyString,
 		},
@@ -595,7 +632,7 @@ export class SetProjectInstance extends Schema.TaggedRequest<SetProjectInstance>
 		failure: WsRpcError,
 		success: ProjectMutationResponseSchema,
 		payload: {
-			projectSlug: NonEmptyString,
+			projectSlug: Schema.optional(NonEmptyString),
 			slug: NonEmptyString,
 			instanceId: NonEmptyString,
 		},
@@ -608,7 +645,7 @@ export class StartInstance extends Schema.TaggedRequest<StartInstance>()(
 		failure: WsRpcError,
 		success: InstanceListResponseSchema,
 		payload: {
-			projectSlug: NonEmptyString,
+			projectSlug: Schema.optional(NonEmptyString),
 			instanceId: NonEmptyString,
 		},
 	},
@@ -620,7 +657,7 @@ export class StopInstance extends Schema.TaggedRequest<StopInstance>()(
 		failure: WsRpcError,
 		success: InstanceListResponseSchema,
 		payload: {
-			projectSlug: NonEmptyString,
+			projectSlug: Schema.optional(NonEmptyString),
 			instanceId: NonEmptyString,
 		},
 	},
@@ -632,7 +669,7 @@ export class RemoveInstance extends Schema.TaggedRequest<RemoveInstance>()(
 		failure: WsRpcError,
 		success: InstanceListResponseSchema,
 		payload: {
-			projectSlug: NonEmptyString,
+			projectSlug: Schema.optional(NonEmptyString),
 			instanceId: NonEmptyString,
 		},
 	},
@@ -644,7 +681,7 @@ export class RenameInstance extends Schema.TaggedRequest<RenameInstance>()(
 		failure: WsRpcError,
 		success: InstanceListResponseSchema,
 		payload: {
-			projectSlug: NonEmptyString,
+			projectSlug: Schema.optional(NonEmptyString),
 			instanceId: NonEmptyString,
 			name: NonEmptyString,
 		},
@@ -657,7 +694,7 @@ export class AddInstance extends Schema.TaggedRequest<AddInstance>()(
 		failure: WsRpcError,
 		success: InstanceListResponseSchema,
 		payload: {
-			projectSlug: NonEmptyString,
+			projectSlug: Schema.optional(NonEmptyString),
 			name: NonEmptyString,
 			driver: Schema.optional(Schema.suspend(() => ProviderDriverKindSchema)),
 			managed: Schema.optional(Schema.Boolean),
@@ -677,7 +714,7 @@ export class UpdateInstance extends Schema.TaggedRequest<UpdateInstance>()(
 		failure: WsRpcError,
 		success: InstanceListResponseSchema,
 		payload: {
-			projectSlug: NonEmptyString,
+			projectSlug: Schema.optional(NonEmptyString),
 			instanceId: NonEmptyString,
 			name: Schema.optional(Schema.String),
 			port: Schema.optional(Schema.Number),
@@ -689,11 +726,33 @@ export class UpdateInstance extends Schema.TaggedRequest<UpdateInstance>()(
 	},
 ) {}
 
+const AutoSettleSettingResponseSchema = Schema.Struct({
+	autoSettleAfterDays: Schema.NullOr(Schema.Number),
+});
+
+export class GetAutoSettleSetting extends Schema.TaggedRequest<GetAutoSettleSetting>()(
+	"GetAutoSettleSetting",
+	{
+		failure: WsRpcError,
+		success: AutoSettleSettingResponseSchema,
+		payload: {},
+	},
+) {}
+
+export class SetAutoSettleSetting extends Schema.TaggedRequest<SetAutoSettleSetting>()(
+	"SetAutoSettleSetting",
+	{
+		failure: WsRpcError,
+		success: AutoSettleSettingResponseSchema,
+		payload: { autoSettleAfterDays: Schema.NullOr(Schema.Number) },
+	},
+) {}
+
 export class ScanNow extends Schema.TaggedRequest<ScanNow>()("ScanNow", {
 	failure: WsRpcError,
 	success: ScanNowResponseSchema,
 	payload: {
-		projectSlug: NonEmptyString,
+		projectSlug: Schema.optional(NonEmptyString),
 	},
 }) {}
 
@@ -703,7 +762,7 @@ export class DetectProxy extends Schema.TaggedRequest<DetectProxy>()(
 		failure: WsRpcError,
 		success: DetectProxyResponseSchema,
 		payload: {
-			projectSlug: NonEmptyString,
+			projectSlug: Schema.optional(NonEmptyString),
 		},
 	},
 ) {}
@@ -753,7 +812,7 @@ export class ListDirectories extends Schema.TaggedRequest<ListDirectories>()(
 		failure: WsRpcError,
 		success: ListDirectoriesResponseSchema,
 		payload: {
-			projectSlug: NonEmptyString,
+			projectSlug: Schema.optional(NonEmptyString),
 			path: Schema.String,
 		},
 	},
@@ -913,6 +972,88 @@ export class RenameSession extends Schema.TaggedRequest<RenameSession>()(
 	},
 ) {}
 
+export class MarkSessionUnread extends Schema.TaggedRequest<MarkSessionUnread>()(
+	"MarkSessionUnread",
+	{
+		failure: WsRpcError,
+		success: OkResponseSchema,
+		payload: {
+			projectSlug: NonEmptyString,
+			sessionId: NonEmptyString,
+			originId: Schema.optional(NonEmptyString),
+		},
+	},
+) {}
+
+export class SetSessionSettled extends Schema.TaggedRequest<SetSessionSettled>()(
+	"SetSessionSettled",
+	{
+		failure: WsRpcError,
+		success: OkResponseSchema,
+		payload: {
+			projectSlug: NonEmptyString,
+			sessionId: NonEmptyString,
+			settled: Schema.Boolean,
+			originId: Schema.optional(NonEmptyString),
+		},
+	},
+) {}
+
+export class SetSessionPinned extends Schema.TaggedRequest<SetSessionPinned>()(
+	"SetSessionPinned",
+	{
+		failure: WsRpcError,
+		success: OkResponseSchema,
+		payload: {
+			projectSlug: NonEmptyString,
+			sessionId: NonEmptyString,
+			pinned: Schema.Boolean,
+			originId: Schema.optional(NonEmptyString),
+		},
+	},
+) {}
+
+export class SetSessionAutoSettle extends Schema.TaggedRequest<SetSessionAutoSettle>()(
+	"SetSessionAutoSettle",
+	{
+		failure: WsRpcError,
+		success: OkResponseSchema,
+		payload: {
+			projectSlug: NonEmptyString,
+			sessionId: NonEmptyString,
+			disabled: Schema.Boolean,
+			originId: Schema.optional(NonEmptyString),
+		},
+	},
+) {}
+
+export class SnoozeSession extends Schema.TaggedRequest<SnoozeSession>()(
+	"SnoozeSession",
+	{
+		failure: WsRpcError,
+		success: OkResponseSchema,
+		payload: {
+			projectSlug: NonEmptyString,
+			sessionId: NonEmptyString,
+			until: Schema.NullOr(Schema.Number),
+			originId: Schema.optional(NonEmptyString),
+		},
+	},
+) {}
+
+export class UnsnoozeSession extends Schema.TaggedRequest<UnsnoozeSession>()(
+	"UnsnoozeSession",
+	{
+		failure: WsRpcError,
+		success: OkResponseSchema,
+		payload: {
+			projectSlug: NonEmptyString,
+			sessionId: NonEmptyString,
+			originId: Schema.optional(NonEmptyString),
+		},
+	},
+) {}
+
 export class SwitchVariant extends Schema.TaggedRequest<SwitchVariant>()(
 	"SwitchVariant",
 	{
@@ -988,6 +1129,18 @@ export class GetToolContent extends Schema.TaggedRequest<GetToolContent>()(
 	},
 ) {}
 
+export class GetSkillContent extends Schema.TaggedRequest<GetSkillContent>()(
+	"GetSkillContent",
+	{
+		failure: WsRpcError,
+		success: GetSkillContentResponseSchema,
+		payload: {
+			projectSlug: NonEmptyString,
+			name: NonEmptyString,
+		},
+	},
+) {}
+
 export class GetModels extends Schema.TaggedRequest<GetModels>()("GetModels", {
 	failure: WsRpcError,
 	success: GetModelsResponseSchema,
@@ -1007,6 +1160,22 @@ export class ListSessions extends Schema.TaggedRequest<ListSessions>()(
 			projectSlug: NonEmptyString,
 			roots: Schema.optional(Schema.Boolean),
 			query: Schema.optional(Schema.String),
+		},
+	},
+) {}
+
+export class ListDaemonSessions extends Schema.TaggedRequest<ListDaemonSessions>()(
+	"ListDaemonSessions",
+	{
+		failure: WsRpcError,
+		success: ListDaemonSessionsResponseSchema,
+		payload: {
+			projectSlug: Schema.optional(NonEmptyString),
+			limit: Schema.optional(Schema.Number),
+			roots: Schema.optional(Schema.Boolean),
+			search: Schema.optional(Schema.String),
+			cursor: Schema.optional(DaemonSessionCursorSchema),
+			scope: Schema.optional(NonEmptyString),
 		},
 	},
 ) {}
@@ -1039,6 +1208,18 @@ export class ViewSession extends Schema.TaggedRequest<ViewSession>()(
 			sessionId: NonEmptyString,
 			originId: NonEmptyString,
 			requestId: Schema.optional(NonEmptyString),
+		},
+	},
+) {}
+
+export class AttachProject extends Schema.TaggedRequest<AttachProject>()(
+	"AttachProject",
+	{
+		failure: WsRpcError,
+		success: OkResponseSchema,
+		payload: {
+			projectSlug: NonEmptyString,
+			originId: NonEmptyString,
 		},
 	},
 ) {}
@@ -1200,13 +1381,27 @@ export class SetLogLevel extends Schema.TaggedRequest<SetLogLevel>()(
 		failure: WsRpcError,
 		success: OkResponseSchema,
 		payload: {
-			projectSlug: NonEmptyString,
+			projectSlug: Schema.optional(NonEmptyString),
 			level: RpcLogLevelSchema,
 		},
 	},
 ) {}
 
+export class ResolveSession extends Schema.TaggedRequest<ResolveSession>()(
+	"ResolveSession",
+	{
+		failure: WsRpcError,
+		success: Schema.Struct({ projectSlug: Schema.NullOr(Schema.String) }),
+		payload: {
+			projectSlug: Schema.optional(NonEmptyString),
+			sessionId: NonEmptyString,
+		},
+	},
+) {}
+
 export const WsRpcRequest = Schema.Union(
+	AttachProject,
+	ResolveSession,
 	GetAgents,
 	GetCommands,
 	GetProjects,
@@ -1223,12 +1418,19 @@ export const WsRpcRequest = Schema.Union(
 	ResolveClaudeSettings,
 	ReloadProviderSession,
 	RenameSession,
+	MarkSessionUnread,
+	SetSessionSettled,
+	SetSessionPinned,
+	SetSessionAutoSettle,
+	SnoozeSession,
+	UnsnoozeSession,
 	SwitchVariant,
 	SwitchPermissionMode,
 	GetFileTree,
 	GetFileList,
 	GetFileContent,
 	GetToolContent,
+	GetSkillContent,
 	GetModels,
 	AddProject,
 	RemoveProject,
@@ -1240,12 +1442,15 @@ export const WsRpcRequest = Schema.Union(
 	RenameInstance,
 	AddInstance,
 	UpdateInstance,
+	GetAutoSettleSetting,
+	SetAutoSettleSetting,
 	ScanNow,
 	DetectProxy,
 	ListPtys,
 	CreatePty,
 	ResizePty,
 	ClosePty,
+	ListDaemonSessions,
 	ListSessions,
 	CreateSession,
 	ViewSession,
@@ -1290,6 +1495,8 @@ export const SubscribeSessionDetail = Rpc.make("SubscribeSessionDetail", {
 export const WsRpcGroup = RpcGroup.make(
 	SubscribeShell,
 	SubscribeSessionDetail,
+	Rpc.fromTaggedRequest(AttachProject),
+	Rpc.fromTaggedRequest(ResolveSession),
 	Rpc.fromTaggedRequest(GetAgents),
 	Rpc.fromTaggedRequest(GetCommands),
 	Rpc.fromTaggedRequest(GetProjects),
@@ -1306,12 +1513,19 @@ export const WsRpcGroup = RpcGroup.make(
 	Rpc.fromTaggedRequest(ResolveClaudeSettings),
 	Rpc.fromTaggedRequest(ReloadProviderSession),
 	Rpc.fromTaggedRequest(RenameSession),
+	Rpc.fromTaggedRequest(MarkSessionUnread),
+	Rpc.fromTaggedRequest(SetSessionSettled),
+	Rpc.fromTaggedRequest(SetSessionPinned),
+	Rpc.fromTaggedRequest(SetSessionAutoSettle),
+	Rpc.fromTaggedRequest(SnoozeSession),
+	Rpc.fromTaggedRequest(UnsnoozeSession),
 	Rpc.fromTaggedRequest(SwitchVariant),
 	Rpc.fromTaggedRequest(SwitchPermissionMode),
 	Rpc.fromTaggedRequest(GetFileTree),
 	Rpc.fromTaggedRequest(GetFileList),
 	Rpc.fromTaggedRequest(GetFileContent),
 	Rpc.fromTaggedRequest(GetToolContent),
+	Rpc.fromTaggedRequest(GetSkillContent),
 	Rpc.fromTaggedRequest(GetModels),
 	Rpc.fromTaggedRequest(AddProject),
 	Rpc.fromTaggedRequest(RemoveProject),
@@ -1323,12 +1537,15 @@ export const WsRpcGroup = RpcGroup.make(
 	Rpc.fromTaggedRequest(RenameInstance),
 	Rpc.fromTaggedRequest(AddInstance),
 	Rpc.fromTaggedRequest(UpdateInstance),
+	Rpc.fromTaggedRequest(GetAutoSettleSetting),
+	Rpc.fromTaggedRequest(SetAutoSettleSetting),
 	Rpc.fromTaggedRequest(ScanNow),
 	Rpc.fromTaggedRequest(DetectProxy),
 	Rpc.fromTaggedRequest(ListPtys),
 	Rpc.fromTaggedRequest(CreatePty),
 	Rpc.fromTaggedRequest(ResizePty),
 	Rpc.fromTaggedRequest(ClosePty),
+	Rpc.fromTaggedRequest(ListDaemonSessions),
 	Rpc.fromTaggedRequest(ListSessions),
 	Rpc.fromTaggedRequest(CreateSession),
 	Rpc.fromTaggedRequest(ViewSession),

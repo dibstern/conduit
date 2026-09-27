@@ -1,7 +1,7 @@
 // ─── E2E Sidebar Layout Tests ────────────────────────────────────────────────
 // Tests responsive sidebar behavior across viewports:
 // - Desktop: sidebar visible, collapse/expand toggle
-// - Mobile: hamburger menu, sidebar overlay, backdrop close
+// - Mobile: session list and session are separate routes
 // Uses real relay backed by MockOpenCodeServer.
 
 import { expect, test } from "../helpers/replay-fixture.js";
@@ -68,66 +68,90 @@ test.describe("Sidebar Layout — Desktop", () => {
 test.describe("Sidebar Layout — Mobile", () => {
 	test.use({ viewport: { width: 375, height: 667 } });
 
-	test("mobile: sidebar is hidden by default", async ({ page, relayUrl }) => {
-		const app = new AppPage(page);
-		await app.goto(relayUrl);
-
-		// On mobile, sidebar overlay should be hidden by default
-		await expect(app.sidebarOverlay).toBeHidden();
-
-		// Hamburger button should be visible
-		await expect(app.hamburgerBtn).toBeVisible();
-	});
-
-	test("mobile: hamburger opens sidebar overlay", async ({
+	test("mobile: root route shows the session list full screen", async ({
 		page,
 		relayUrl,
 	}) => {
 		const app = new AppPage(page);
-		await app.goto(relayUrl);
+		// The harness URL opens a session; the list is the root route.
+		await app.goto(new URL("/", relayUrl).toString());
 
-		// Open sidebar
-		await app.hamburgerBtn.click();
-
-		// Sidebar overlay should be visible
-		await expect(app.sidebarOverlay).toBeVisible();
-
-		// Session list should be accessible
-		const sessionList = page.locator("#session-list");
-		await expect(sessionList).toBeVisible();
+		await expect(page).toHaveURL((url) => url.pathname === "/");
+		await expect(app.layout).toHaveClass(/layout-compact/);
+		await expect(app.layout).toHaveClass(/phone-list-screen/);
+		await expect(app.sidebar).toBeVisible();
+		await expect(app.sessionsPanel).toBeVisible();
+		await expect(app.app).toBeHidden();
 	});
 
-	test("mobile: tapping overlay closes sidebar", async ({ page, relayUrl }) => {
-		const app = new AppPage(page);
-		await app.goto(relayUrl);
-
-		// Open sidebar
-		await app.hamburgerBtn.click();
-		await expect(app.sidebarOverlay).toBeVisible();
-
-		// Tap the overlay to close — click to the right of the 260px sidebar
-		// (which sits at z-400 above the z-350 overlay) so the click
-		// actually reaches the overlay element, not the sidebar.
-		await app.sidebarOverlay.click({ position: { x: 320, y: 333 } });
-
-		// Sidebar overlay should be hidden again
-		await expect(app.sidebarOverlay).toBeHidden();
-	});
-
-	test("header elements are appropriately visible on mobile", async ({
+	test("mobile: list bar menu opens the projects panel", async ({
 		page,
 		relayUrl,
 	}) => {
 		const app = new AppPage(page);
-		await app.goto(relayUrl);
+		await app.goto(new URL("/", relayUrl).toString());
 
-		// Project name always visible
-		await expect(app.projectName).toBeVisible();
+		await page.getByTestId("list-bar-overflow").click();
+		await page.getByTestId("list-overflow-projects").click();
 
-		// Status dot always visible
-		await expect(app.statusDot).toBeVisible();
+		// The menu is portaled outside the header, so the header's click-outside
+		// dismissal must not close the panel the menu item just opened.
+		await expect(page.getByTestId("sidebar-projects-panel")).toBeVisible();
+	});
 
-		// Hamburger visible on mobile
-		await expect(app.hamburgerBtn).toBeVisible();
+	test("mobile: selecting a session shows the session route", async ({
+		page,
+		relayUrl,
+	}) => {
+		const app = new AppPage(page);
+		// The harness URL opens a session; the list is the root route.
+		await app.goto(new URL("/", relayUrl).toString());
+		const session = page.locator("#session-list .session-item").first();
+		await expect(session).toBeVisible({ timeout: 10_000 });
+
+		await session.click();
+		await expect(page).toHaveURL((url) => url.pathname.startsWith("/s/"));
+		await expect(app.layout).not.toHaveClass(/phone-list-screen/);
+		await expect(app.sidebar).toBeHidden();
+		await expect(app.app).toBeVisible();
+		await expect(app.sessionBarBack).toBeVisible();
+	});
+
+	test("mobile: back returns to the list with its scroll position", async ({
+		page,
+		relayUrl,
+	}) => {
+		const app = new AppPage(page);
+		// The harness URL opens a session; the list is the root route.
+		await app.goto(new URL("/", relayUrl).toString());
+		const session = page.locator("#session-list .session-item").first();
+		await expect(session).toBeVisible({ timeout: 10_000 });
+
+		await app.sessionListScroller.evaluate((element) => {
+			const spacer = document.createElement("div");
+			spacer.style.height = "1000px";
+			element.append(spacer);
+			element.scrollTop = 160;
+		});
+		await expect
+			.poll(() =>
+				app.sessionListScroller.evaluate((element) => element.scrollTop),
+			)
+			.toBe(160);
+
+		await session.evaluate((element: HTMLElement) => element.click());
+		await expect(app.sessionBarBack).toBeVisible();
+		await app.sessionListScroller.evaluate((element) => {
+			element.scrollTop = 0;
+		});
+		await app.sessionBarBack.click();
+
+		await expect(page).toHaveURL((url) => url.pathname === "/");
+		await expect(app.sessionsPanel).toBeVisible();
+		await expect
+			.poll(() =>
+				app.sessionListScroller.evaluate((element) => element.scrollTop),
+			)
+			.toBe(160);
 	});
 });

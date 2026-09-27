@@ -53,6 +53,7 @@ const SESSION = "session-1";
 const QUESTION = "que-1";
 
 const makeWsHandler = () => ({
+	attach: vi.fn(() => () => {}),
 	broadcast: vi.fn(),
 	sendTo: vi.fn(),
 	setClientSession: vi.fn(),

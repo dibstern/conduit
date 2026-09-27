@@ -48,10 +48,7 @@ const closeableEmptyComponent = vi.hoisted(
 	() => async () => import("../../helpers/CloseableEmpty.svelte"),
 );
 
-vi.mock(
-	"../../../src/lib/frontend/components/shared/Icon.svelte",
-	emptyComponent,
-);
+vi.mock("../../../src/lib/frontend/components/ui/Icon.svelte", emptyComponent);
 vi.mock(
 	"../../../src/lib/frontend/components/model/ModelVariant.svelte",
 	closeableEmptyComponent,
@@ -59,12 +56,6 @@ vi.mock(
 vi.mock(
 	"../../../src/lib/frontend/components/model/ContextWindowSelector.svelte",
 	closeableEmptyComponent,
-);
-vi.mock(
-	"../../../src/lib/frontend/components/shared/use-click-outside.svelte.js",
-	() => ({
-		clickOutside: () => ({ destroy: () => {} }),
-	}),
 );
 vi.mock("../../../src/lib/frontend/stores/ws.svelte.js", () => ({
 	wsSend: (...args: unknown[]) => wsSendSpy(...args),
@@ -243,6 +234,15 @@ describe("InstanceModelPicker", () => {
 		expect(wsSendSpy).not.toHaveBeenCalled();
 		expect(discoveryState.defaultModelId).toBe("claude-opus-4-7");
 		expect(discoveryState.defaultProviderId).toBe("claude");
+	});
+
+	it("renders screen-reader text for the default model star", async () => {
+		const { getByText, getByTitle } = render(InstanceModelPicker);
+		await fireEvent.click(getByTitle("Switch model"));
+
+		const defaultModelText = getByText("Default model");
+		expect(defaultModelText.classList.contains("sr-only")).toBe(true);
+		expect(getByText("(default)").hasAttribute("title")).toBe(false);
 	});
 
 	it("reloads provider session through RPC", async () => {

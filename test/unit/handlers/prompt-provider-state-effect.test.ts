@@ -54,7 +54,7 @@ function mockWsHandler(
 		markClientBootstrapped: vi.fn(),
 		getClientCount: vi.fn(() => 1),
 		getClientIds: vi.fn(() => ["client-1"]),
-		handleUpgrade: vi.fn(),
+		attach: vi.fn(() => () => {}),
 		close: vi.fn(),
 		drain: vi.fn(async () => undefined),
 		on: vi.fn(),
@@ -122,7 +122,7 @@ describe("handleMessage with Effect provider state persistence", () => {
 				},
 			} as unknown as OpenCodeAPI;
 			const engine = {
-				getProviderForSession: vi.fn(() => "claude"),
+				getProviderForSessionEffect: vi.fn(() => Effect.succeed("claude")),
 				dispatch: vi.fn(async () => ({
 					status: "completed" as const,
 					cost: 0,
@@ -214,7 +214,7 @@ describe("handleMessage with Effect provider state persistence", () => {
 			},
 		} as unknown as OpenCodeAPI;
 		const engine = {
-			getProviderForSession: vi.fn(() => "claude"),
+			getProviderForSessionEffect: vi.fn(() => Effect.succeed("claude")),
 			dispatch: vi.fn(async () => ({
 				status: "completed" as const,
 				cost: 0,
@@ -312,7 +312,7 @@ describe("handleMessage with Effect provider state persistence", () => {
 			},
 		} as unknown as OpenCodeAPI;
 		const engine = {
-			getProviderForSession: vi.fn(() => "claude"),
+			getProviderForSessionEffect: vi.fn(() => Effect.succeed("claude")),
 			dispatch: vi.fn(async () => ({
 				status: "completed" as const,
 				cost: 0,
@@ -387,7 +387,7 @@ describe("handleMessage with Effect provider state persistence", () => {
 				},
 			} as unknown as OpenCodeAPI;
 			const engine = {
-				getProviderForSession: vi.fn(() => "claude"),
+				getProviderForSessionEffect: vi.fn(() => Effect.succeed("claude")),
 				dispatch: vi.fn(async (command: SendTurnCommand) => {
 					await Effect.runPromise(
 						command.input.eventSink.push(
@@ -509,7 +509,7 @@ describe("handleMessage with Effect provider state persistence", () => {
 			},
 		} as unknown as OpenCodeAPI;
 		const engine = {
-			getProviderForSession: vi.fn(() => "claude"),
+			getProviderForSessionEffect: vi.fn(() => Effect.succeed("claude")),
 			dispatch: vi.fn(async (command: SendTurnCommand) => {
 				await Effect.runPromise(
 					command.input.eventSink.push(

@@ -19,7 +19,7 @@ const row = (
 	notif: Partial<
 		Pick<
 			SessionInfo,
-			"pendingQuestions" | "pendingPermissions" | "unseenActivity"
+			"pendingQuestionCount" | "pendingPermissionCount" | "unread"
 		>
 	> = {},
 ): SessionInfo => ({
@@ -28,9 +28,9 @@ const row = (
 	status: "idle",
 	createdAt: 1,
 	updatedAt: 1,
-	pendingQuestions: 0,
-	pendingPermissions: 0,
-	unseenActivity: false,
+	pendingQuestionCount: 0,
+	pendingPermissionCount: 0,
+	unread: false,
 	...notif,
 });
 
@@ -44,8 +44,8 @@ describe("getSessionIndicator", () => {
 	it("shows attention when the server says something is pending", () => {
 		applySessionSnapshot(
 			[
-				row("asking", { pendingQuestions: 1 }),
-				row("permitting", { pendingPermissions: 2 }),
+				row("asking", { pendingQuestionCount: 1 }),
+				row("permitting", { pendingPermissionCount: 2 }),
 				row("quiet"),
 			],
 			"complete",
@@ -56,16 +56,13 @@ describe("getSessionIndicator", () => {
 	});
 
 	it("shows unseen activity when nothing is pending but something arrived", () => {
-		applySessionSnapshot(
-			[row("finished", { unseenActivity: true })],
-			"complete",
-		);
+		applySessionSnapshot([row("finished", { unread: true })], "complete");
 		expect(getSessionIndicator("finished", null)).toBe("done-unviewed");
 	});
 
 	it("prefers attention over unseen activity", () => {
 		applySessionSnapshot(
-			[row("both", { pendingQuestions: 1, unseenActivity: true })],
+			[row("both", { pendingQuestionCount: 1, unread: true })],
 			"complete",
 		);
 		expect(getSessionIndicator("both", null)).toBe("attention");
@@ -76,7 +73,7 @@ describe("getSessionIndicator", () => {
 		// attention while you are looking at it, and which session that is differs
 		// per browser tab.
 		applySessionSnapshot(
-			[row("here", { pendingQuestions: 3, unseenActivity: true })],
+			[row("here", { pendingQuestionCount: 3, unread: true })],
 			"complete",
 		);
 		expect(getSessionIndicator("here", "here")).toBe(null);
@@ -87,11 +84,11 @@ describe("getSessionIndicator", () => {
 	});
 
 	it("clears the moment the server's row says the session was viewed", () => {
-		applySessionSnapshot([row("s1", { unseenActivity: true })], "complete");
+		applySessionSnapshot([row("s1", { unread: true })], "complete");
 		expect(getSessionIndicator("s1", null)).toBe("done-unviewed");
-		// Exactly what a shell upsert delivers after `last_viewed_at` moves. No
+		// Exactly what a shell upsert delivers after `read_at` changes. No
 		// client-local viewed-set to keep in step, so there is nothing to drift.
-		applySessionSnapshot([row("s1", { unseenActivity: false })], "complete");
+		applySessionSnapshot([row("s1", { unread: false })], "complete");
 		expect(getSessionIndicator("s1", null)).toBe(null);
 	});
 });
@@ -100,9 +97,9 @@ describe("getAttentionSessions", () => {
 	it("returns the server's counts for every session that wants attention", () => {
 		applySessionSnapshot(
 			[
-				row("a", { pendingQuestions: 2, pendingPermissions: 1 }),
-				row("b", { pendingPermissions: 1 }),
-				row("c", { unseenActivity: true }),
+				row("a", { pendingQuestionCount: 2, pendingPermissionCount: 1 }),
+				row("b", { pendingPermissionCount: 1 }),
+				row("c", { unread: true }),
 			],
 			"complete",
 		);
@@ -117,9 +114,9 @@ describe("getAttentionSessions", () => {
 	it("excludes the current session and its descendants", () => {
 		applySessionSnapshot(
 			[
-				row("parent", { pendingQuestions: 1 }),
-				row("child", { pendingQuestions: 1 }),
-				row("other", { pendingQuestions: 1 }),
+				row("parent", { pendingQuestionCount: 1 }),
+				row("child", { pendingQuestionCount: 1 }),
+				row("other", { pendingQuestionCount: 1 }),
 			],
 			"complete",
 		);

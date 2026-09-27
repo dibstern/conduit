@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { SqlClient } from "@effect/sql";
 import { SqliteClient as EffectSqliteClient } from "@effect/sql-sqlite-node";
 import { describe, it } from "@effect/vitest";
+import Database from "better-sqlite3";
 import { Effect, Layer } from "effect";
 import { expect } from "vitest";
 import {
@@ -13,9 +14,7 @@ import {
 	MAX_PURGEABLE_SKELETON_SESSIONS,
 	makeEffectSqlMigrator,
 } from "../../../src/lib/persistence/effect/migrations.js";
-import { runMigrations } from "../../../src/lib/persistence/migrations.js";
-import { schemaMigrations } from "../../../src/lib/persistence/schema.js";
-import { SqliteClient as SyncSqliteClient } from "../../../src/lib/persistence/sqlite-client.js";
+import { seedLegacyEventStore } from "../../helpers/legacy-event-store.js";
 
 // Keep the purge regression fixtures on the schema that shipped with migration 10.
 const migrationsThroughPurge = Object.fromEntries(
@@ -40,19 +39,18 @@ function makeFileSqlLayer(setup: (filename: string) => void) {
 }
 
 function seedSession(
-	db: SyncSqliteClient,
+	db: Database.Database,
 	id: string,
 	createdAt = LEGACY_SKELETON_CUTOFF_MS - 1,
 	provider = "opencode",
 ) {
-	db.execute(
+	db.prepare(
 		"INSERT INTO sessions (id, provider, created_at, updated_at) VALUES (?, ?, ?, ?)",
-		[id, provider, createdAt, createdAt],
-	);
+	).run([id, provider, createdAt, createdAt]);
 }
 
 function seedMatchingSessions(
-	db: SyncSqliteClient,
+	db: Database.Database,
 	count: number,
 	prefix = "matching",
 ) {
@@ -61,10 +59,10 @@ function seedMatchingSessions(
 	}
 }
 
-function seedDatabase(filename: string, seed: (db: SyncSqliteClient) => void) {
-	const db = SyncSqliteClient.open(filename);
+function seedDatabase(filename: string, seed: (db: Database.Database) => void) {
+	const db = new Database(filename);
 	try {
-		runMigrations(db, schemaMigrations.slice(0, 9));
+		seedLegacyEventStore(db, 9);
 		seed(db);
 	} finally {
 		db.close();
@@ -94,48 +92,44 @@ describe("legacy skeleton purge migration", () => {
 			Effect.provide(
 				makeFileSqlLayer((filename) =>
 					seedDatabase(filename, (db) => {
-						db.execute(
+						db.prepare(
 							"INSERT INTO sessions (id, provider, created_at, updated_at) VALUES (?, ?, ?, ?)",
-							[
-								"with-message",
-								"opencode",
-								LEGACY_SKELETON_CUTOFF_MS - 1,
-								LEGACY_SKELETON_CUTOFF_MS - 1,
-							],
-						);
-						db.execute(
+						).run([
+							"with-message",
+							"opencode",
+							LEGACY_SKELETON_CUTOFF_MS - 1,
+							LEGACY_SKELETON_CUTOFF_MS - 1,
+						]);
+						db.prepare(
 							"INSERT INTO messages (id, session_id, role, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
-							[
-								"message-1",
-								"with-message",
-								"user",
-								LEGACY_SKELETON_CUTOFF_MS - 1,
-								LEGACY_SKELETON_CUTOFF_MS - 1,
-							],
-						);
-						db.execute(
+						).run([
+							"message-1",
+							"with-message",
+							"user",
+							LEGACY_SKELETON_CUTOFF_MS - 1,
+							LEGACY_SKELETON_CUTOFF_MS - 1,
+						]);
+						db.prepare(
 							"INSERT INTO message_parts (id, message_id, type, sort_order, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
-							[
-								"part-1",
-								"message-1",
-								"text",
-								0,
-								LEGACY_SKELETON_CUTOFF_MS - 1,
-								LEGACY_SKELETON_CUTOFF_MS - 1,
-							],
-						);
-						db.execute(
+						).run([
+							"part-1",
+							"message-1",
+							"text",
+							0,
+							LEGACY_SKELETON_CUTOFF_MS - 1,
+							LEGACY_SKELETON_CUTOFF_MS - 1,
+						]);
+						db.prepare(
 							"INSERT INTO events (event_id, session_id, stream_version, type, data, provider, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
-							[
-								"event-1",
-								"with-message",
-								0,
-								"session.created",
-								"{}",
-								"opencode",
-								LEGACY_SKELETON_CUTOFF_MS - 1,
-							],
-						);
+						).run([
+							"event-1",
+							"with-message",
+							0,
+							"session.created",
+							"{}",
+							"opencode",
+							LEGACY_SKELETON_CUTOFF_MS - 1,
+						]);
 					}),
 				),
 			),
@@ -225,113 +219,110 @@ describe("legacy skeleton purge migration", () => {
 								["event-created", 0, "session.created"],
 								["event-renamed", 1, "session.renamed"],
 							] as const) {
-								db.execute(
+								db.prepare(
 									"INSERT INTO events (event_id, session_id, stream_version, type, data, provider, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
-									[
-										eventId,
-										"legacy-skeleton",
-										streamVersion,
-										type,
-										"{}",
-										"opencode",
-										LEGACY_SKELETON_CUTOFF_MS - 1,
-									],
-								);
-							}
-							db.execute(
-								"INSERT INTO turns (id, session_id, requested_at) VALUES (?, ?, ?)",
-								["turn-1", "legacy-skeleton", LEGACY_SKELETON_CUTOFF_MS - 1],
-							);
-							db.execute(
-								"INSERT INTO activities (id, session_id, tone, kind, summary, created_at) VALUES (?, ?, ?, ?, ?, ?)",
-								["activity-1", "legacy-skeleton", "info", "status", "x", 1],
-							);
-							db.execute(
-								"INSERT INTO pending_approvals (id, session_id, type, created_at) VALUES (?, ?, ?, ?)",
-								["approval-1", "legacy-skeleton", "permission", 1],
-							);
-							db.execute(
-								"INSERT INTO session_providers (id, session_id, provider, activated_at) VALUES (?, ?, ?, ?)",
-								["session-provider-1", "legacy-skeleton", "opencode", 1],
-							);
-							db.execute(
-								"INSERT INTO tool_content (tool_id, session_id, content, created_at) VALUES (?, ?, ?, ?)",
-								["tool-1", "legacy-skeleton", "x", 1],
-							);
-							db.execute(
-								"INSERT INTO provider_state (session_id, key, value) VALUES (?, ?, ?)",
-								["legacy-skeleton", "key", "value"],
-							);
-							db.execute(
-								"INSERT INTO command_receipts (command_id, session_id, status, created_at) VALUES (?, ?, ?, ?)",
-								["command-1", "legacy-skeleton", "accepted", 1],
-							);
-							db.execute(
-								"INSERT INTO provider_command_sessions (project_key, session_id, provider_id, provider_kind, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
-								[
-									"project",
+								).run([
+									eventId,
 									"legacy-skeleton",
-									"provider",
-									"opencode",
-									"active",
-									1,
-									1,
-								],
-							);
-							db.execute(
-								"INSERT INTO provider_command_turns (project_key, session_id, turn_id, command_id, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
-								[
-									"project",
-									"legacy-skeleton",
-									"turn-1",
-									"command-1",
-									"active",
-									1,
-									1,
-								],
-							);
-							db.execute(
-								"INSERT INTO provider_command_interactions (project_key, session_id, interaction_id, kind, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
-								[
-									"project",
-									"legacy-skeleton",
-									"interaction-1",
-									"permission",
-									"pending",
-									1,
-									1,
-								],
-							);
-							db.execute(
-								"INSERT INTO provider_command_outbox (request_sequence, command_id, project_key, session_id, provider_id, effect_type, payload_json, requested_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-								[
-									1,
-									"command-1",
-									"project",
-									"legacy-skeleton",
-									"provider",
-									"send",
+									streamVersion,
+									type,
 									"{}",
-									1,
-									1,
-								],
-							);
-							db.execute(
+									"opencode",
+									LEGACY_SKELETON_CUTOFF_MS - 1,
+								]);
+							}
+							db.prepare(
+								"INSERT INTO turns (id, session_id, requested_at) VALUES (?, ?, ?)",
+							).run([
+								"turn-1",
+								"legacy-skeleton",
+								LEGACY_SKELETON_CUTOFF_MS - 1,
+							]);
+							db.prepare(
+								"INSERT INTO activities (id, session_id, tone, kind, summary, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+							).run([
+								"activity-1",
+								"legacy-skeleton",
+								"info",
+								"status",
+								"x",
+								1,
+							]);
+							db.prepare(
+								"INSERT INTO pending_approvals (id, session_id, type, created_at) VALUES (?, ?, ?, ?)",
+							).run(["approval-1", "legacy-skeleton", "permission", 1]);
+							db.prepare(
+								"INSERT INTO session_providers (id, session_id, provider, activated_at) VALUES (?, ?, ?, ?)",
+							).run(["session-provider-1", "legacy-skeleton", "opencode", 1]);
+							db.prepare(
+								"INSERT INTO tool_content (tool_id, session_id, content, created_at) VALUES (?, ?, ?, ?)",
+							).run(["tool-1", "legacy-skeleton", "x", 1]);
+							db.prepare(
+								"INSERT INTO provider_state (session_id, key, value) VALUES (?, ?, ?)",
+							).run(["legacy-skeleton", "key", "value"]);
+							db.prepare(
+								"INSERT INTO command_receipts (command_id, session_id, status, created_at) VALUES (?, ?, ?, ?)",
+							).run(["command-1", "legacy-skeleton", "accepted", 1]);
+							db.prepare(
+								"INSERT INTO provider_command_sessions (project_key, session_id, provider_id, provider_kind, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+							).run([
+								"project",
+								"legacy-skeleton",
+								"provider",
+								"opencode",
+								"active",
+								1,
+								1,
+							]);
+							db.prepare(
+								"INSERT INTO provider_command_turns (project_key, session_id, turn_id, command_id, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+							).run([
+								"project",
+								"legacy-skeleton",
+								"turn-1",
+								"command-1",
+								"active",
+								1,
+								1,
+							]);
+							db.prepare(
+								"INSERT INTO provider_command_interactions (project_key, session_id, interaction_id, kind, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+							).run([
+								"project",
+								"legacy-skeleton",
+								"interaction-1",
+								"permission",
+								"pending",
+								1,
+								1,
+							]);
+							db.prepare(
+								"INSERT INTO provider_command_outbox (request_sequence, command_id, project_key, session_id, provider_id, effect_type, payload_json, requested_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+							).run([
+								1,
+								"command-1",
+								"project",
+								"legacy-skeleton",
+								"provider",
+								"send",
+								"{}",
+								1,
+								1,
+							]);
+							db.prepare(
 								"INSERT INTO provider_command_tombstones (project_key, scope_kind, scope_id, session_id, event_sequence, reason_code, tombstoned_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
-								[
-									"project",
-									"session",
-									"legacy-skeleton",
-									"legacy-skeleton",
-									1,
-									"deleted",
-									1,
-								],
-							);
-							db.execute(
+							).run([
+								"project",
+								"session",
+								"legacy-skeleton",
+								"legacy-skeleton",
+								1,
+								"deleted",
+								1,
+							]);
+							db.prepare(
 								"INSERT INTO projector_cursors (projector_name, last_applied_seq, updated_at) VALUES (?, ?, ?)",
-								["sessions", 2, 1],
-							);
+							).run(["sessions", 2, 1]);
 						}),
 					),
 				),
@@ -351,16 +342,15 @@ describe("legacy skeleton purge migration", () => {
 				makeFileSqlLayer((filename) =>
 					seedDatabase(filename, (db) => {
 						seedSession(db, "a-parent");
-						db.execute(
+						db.prepare(
 							"INSERT INTO sessions (id, provider, parent_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
-							[
-								"z-child",
-								"opencode",
-								"a-parent",
-								LEGACY_SKELETON_CUTOFF_MS - 1,
-								LEGACY_SKELETON_CUTOFF_MS - 1,
-							],
-						);
+						).run([
+							"z-child",
+							"opencode",
+							"a-parent",
+							LEGACY_SKELETON_CUTOFF_MS - 1,
+							LEGACY_SKELETON_CUTOFF_MS - 1,
+						]);
 					}),
 				),
 			),
@@ -373,7 +363,7 @@ describe("legacy skeleton purge migration", () => {
 		try {
 			seedDatabase(filename, (db) => {
 				seedSession(db, "self-parent");
-				db.execute("UPDATE sessions SET parent_id = id WHERE id = ?", [
+				db.prepare("UPDATE sessions SET parent_id = id WHERE id = ?").run([
 					"self-parent",
 				]);
 			});
@@ -442,10 +432,9 @@ describe("legacy skeleton purge migration", () => {
 					makeFileSqlLayer((filename) =>
 						seedDatabase(filename, (db) => {
 							seedSession(db, "with-message");
-							db.execute(
+							db.prepare(
 								"INSERT INTO messages (id, session_id, role, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
-								["message-1", "with-message", "user", 1, 1],
-							);
+							).run(["message-1", "with-message", "user", 1, 1]);
 						}),
 					),
 				),

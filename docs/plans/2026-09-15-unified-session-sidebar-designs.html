@@ -1,0 +1,1403 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark">
+<meta name="theme-color" content="#0d0e11">
+<title>Unified session sidebar · 25 designs</title>
+<style>
+  :root{
+    --bg:#0d0e11; --surface:#141619; --alt:#1b1e24; --hover:#20242b; --border:#262a31; --border2:#30353e;
+    --text:#e7e8eb; --text2:#a3a8b2; --dim:#6c717b; --dimmer:#4d525b;
+    --brand:#ff2d7b;
+    --amber:#f4b740; --blue:#5aa9f5; --green:#3fd69a; --red:#f4607a; --indigo:#8f8ff7;
+    --p-conduit:#b08cff; --p-dotfiles:#ff9a4d; --p-perry:#2fd3c0; --p-hunk:#ff6fb1;
+    --mono:ui-monospace,"JetBrains Mono",SFMono-Regular,Menlo,monospace;
+    --sans:-apple-system,BlinkMacSystemFont,"Inter","Segoe UI",Roboto,sans-serif;
+  }
+  *{box-sizing:border-box}
+  html{color-scheme:dark}
+  body{margin:0;background:var(--bg);color:var(--text);font:14px/1.45 var(--sans);-webkit-font-smoothing:antialiased}
+  a{color:inherit;text-decoration:none}
+  h1,h2,h3{text-wrap:balance;margin:0}
+  .wrap{max-width:1380px;margin:0 auto;padding:40px 28px 120px}
+  .intro{max-width:760px;margin-bottom:36px}
+  .intro h1{font-size:28px;font-weight:600;letter-spacing:-.01em;margin-bottom:8px}
+  .intro p{color:var(--text2);margin:0 0 10px}
+  .legend{display:flex;flex-wrap:wrap;gap:14px 22px;font-size:12px;color:var(--text2);margin:18px 0 0;padding:14px 16px;background:var(--surface);border:1px solid var(--border);border-radius:10px}
+  .legend span{display:inline-flex;align-items:center;gap:6px}
+  .toc{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:4px 18px;font-size:12.5px;margin:24px 0 48px;color:var(--text2)}
+  .toc a:hover{color:var(--text)}
+  .toc b{color:var(--dim);font-weight:500;font-variant-numeric:tabular-nums;margin-right:6px}
+  .part{margin:56px 0 18px;padding-top:24px;border-top:1px solid var(--border)}
+  .part h2{font-size:20px;font-weight:600}
+  .part p{color:var(--text2);max-width:760px;margin:6px 0 0}
+
+  .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(430px,1fr));gap:26px}
+  .design{background:var(--surface);border:1px solid var(--border);border-radius:14px;overflow:hidden;display:flex;flex-direction:column}
+  .design.wide{grid-column:span 2}
+  @media (max-width:980px){.design.wide{grid-column:span 1}}
+  .design>header{padding:16px 18px 12px;display:flex;flex-direction:column;gap:5px}
+  .design .num{font:500 11px var(--mono);color:var(--dim);letter-spacing:.06em}
+  .design h3{font-size:15px;font-weight:600;display:flex;align-items:center;gap:8px}
+  .tag{font-size:10px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;padding:2px 7px;border-radius:999px;border:1px solid}
+  .tag.bp{color:var(--blue);border-color:color-mix(in srgb,var(--blue) 45%,transparent)}
+  .tag.wild{color:var(--brand);border-color:color-mix(in srgb,var(--brand) 55%,transparent)}
+  .design .blurb{font-size:12.5px;color:var(--text2);margin:0}
+  .design .cost{font-size:12px;color:var(--dim);margin:0}
+  .design .cost b{color:var(--text2);font-weight:500}
+
+  /* faux app frame */
+  .frame{display:flex;height:460px;background:var(--bg);border-top:1px solid var(--border);position:relative;overflow:hidden}
+  .frame.tall{height:520px}
+  .frame.xtall{height:600px}
+  .frame.xxtall{height:660px}
+  .main{flex:1;min-width:0;padding:22px 26px;display:flex;flex-direction:column;gap:12px;opacity:.55}
+  .main .ghost{height:10px;border-radius:5px;background:var(--alt)}
+  .main .ghost.w1{width:78%}.main .ghost.w2{width:52%}.main .ghost.w3{width:64%}.main .ghost.w4{width:30%}
+  .main .bubble{align-self:flex-end;width:44%;height:36px;border-radius:10px;background:var(--alt);margin-top:8px}
+
+  /* sidebar */
+  .sb{width:272px;flex:none;background:var(--surface);border-right:1px solid var(--border);display:flex;flex-direction:column;overflow:hidden;font-size:12.5px}
+  .sb.w340{width:340px}.sb.w420{width:420px}.sb.w520{width:520px}
+  .brand{display:flex;align-items:center;justify-content:space-between;padding:10px 12px 6px;font-size:12px;letter-spacing:.14em;color:var(--text2)}
+  .brand i{display:inline-block;width:22px;height:8px;background:
+    repeating-linear-gradient(90deg,var(--dim) 0 2px,transparent 2px 3px);opacity:.7;margin-left:6px}
+  .hdr{display:flex;gap:6px;padding:6px 10px 8px}
+  .search{flex:1;min-width:0;height:28px;border:1px solid var(--border2);border-radius:7px;background:var(--bg);color:var(--dim);padding:0 9px;display:flex;align-items:center;gap:6px;font-size:12px}
+  .search::before{content:"";width:10px;height:10px;border:1.5px solid var(--dim);border-radius:50%;box-shadow:4px 4px 0 -2px var(--dim)}
+  .well{display:flex;border:1px solid var(--border2);border-radius:7px;background:var(--bg);overflow:hidden}
+  .ib{width:28px;height:28px;display:grid;place-items:center;color:var(--text2);font-size:13px;border-left:1px solid var(--border)}
+  .ib:first-child{border-left:0}
+  .list{flex:1;overflow:hidden;padding:2px 6px;display:flex;flex-direction:column;gap:1px}
+  .sec{display:flex;align-items:center;justify-content:space-between;font-size:10.5px;font-weight:600;letter-spacing:.09em;text-transform:uppercase;color:var(--dim);padding:10px 8px 4px}
+  .sec .n{font-weight:500;font-variant-numeric:tabular-nums}
+  .sec.bottom{margin-top:auto}
+  .sec .caret{color:var(--dimmer);margin-right:5px}
+
+  .row{display:grid;grid-template-columns:16px minmax(0,1fr) auto;column-gap:7px;align-items:center;padding:6px 8px;border-radius:7px;color:var(--text2);position:relative}
+  .row:hover{background:var(--hover);color:var(--text)}
+  .row.active{background:var(--alt);color:var(--text);box-shadow:inset 3px 0 0 var(--brand),inset 3px 0 12px rgba(255,45,123,.12)}
+  .row .t{grid-column:2;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0;line-height:1.35}
+  .row .m{grid-column:2;display:flex;align-items:center;gap:6px;font-size:11px;color:var(--dim);overflow:hidden;white-space:nowrap;min-width:0;line-height:1.3}
+  .row .m>*{flex:none}
+  .row .m .tr{overflow:hidden;text-overflow:ellipsis;min-width:0;flex:0 1 auto}
+  .row .r{grid-column:3;grid-row:1;font-size:11px;color:var(--dim);font-variant-numeric:tabular-nums;white-space:nowrap}
+  .row .r.verb{color:var(--amber);font-weight:600;background:color-mix(in srgb,var(--amber) 15%,transparent);padding:2px 7px;border-radius:999px;font-size:10.5px}
+  .row .r.verb.i{color:var(--indigo);background:color-mix(in srgb,var(--indigo) 18%,transparent)}
+  .row.two .t{grid-row:1}.row.two .m{grid-row:2}
+  .row.slim{padding:5px 8px}
+  .row.card{grid-template-rows:auto auto auto;padding:7px 8px}
+  .row.card .m.top{grid-row:1;color:var(--text2)}
+  .row.card .t{grid-row:2}
+  .row.card .m.bot{grid-row:3}
+  .row.card .r{grid-row:1}
+  .row.unread .t{color:var(--text);font-weight:500}
+  .row.recede{opacity:.62}
+  .row.recede:hover{opacity:1}
+  .st{display:inline-grid;place-items:center;width:16px;height:16px;font-size:11px;font-weight:700;line-height:1;flex:none}
+  .row .st{grid-column:1;grid-row:1}
+  .row.two .st,.row.card .st{align-self:start;margin-top:1px}
+  .row.card .st{grid-row:2}
+  .st.ap{color:var(--amber)}.st.in{color:var(--indigo)}.st.wk{color:var(--blue)}.st.er{color:var(--red)}.st.dn{color:var(--green)}
+  .st.wk::before{content:"";width:10px;height:10px;border:1.5px dashed currentColor;border-radius:50%}
+  .st.ap::before{content:"⚠"}.st.in::before{content:"?"}.st.er::before{content:"!"}.st.dn::before{content:"✓"}
+  .fork{color:var(--dimmer);font-size:10px;margin-left:4px}
+  .g{display:inline-grid;place-items:center;width:14px;height:14px;border-radius:4px;font:700 7.5px/1 var(--mono);color:#0d0e11;background:var(--pc,var(--dim));letter-spacing:.02em;flex:none}
+  .g.lg{width:22px;height:22px;font-size:10px;border-radius:6px}
+  .g.xl{width:28px;height:28px;font-size:11px;border-radius:8px}
+  .pc-conduit{--pc:var(--p-conduit)}.pc-dotfiles{--pc:var(--p-dotfiles)}.pc-perry{--pc:var(--p-perry)}.pc-hunk{--pc:var(--p-hunk)}
+  .pn{color:var(--text2)}
+  .dot{width:6px;height:6px;border-radius:50%;background:var(--dimmer);display:inline-block}
+  .dot.ap{background:var(--amber)}.dot.wk{background:var(--blue)}.dot.dn{background:var(--green)}.dot.er{background:var(--red)}.dot.in{background:var(--indigo)}
+  .badge{display:inline-flex;align-items:center;gap:3px;font-size:10px;font-variant-numeric:tabular-nums;color:var(--text2);padding:1px 5px;border-radius:999px;background:var(--alt)}
+  .badge.ap{color:var(--amber)}.badge.wk{color:var(--blue)}.badge.dn{color:var(--green)}
+  .chips{display:flex;flex-wrap:wrap;gap:5px;padding:4px 10px 6px}
+  .chip{font-size:11px;padding:3px 8px;border-radius:999px;border:1px solid var(--border2);color:var(--text2);display:inline-flex;align-items:center;gap:5px;white-space:nowrap}
+  .chip.on{background:var(--alt);color:var(--text);border-color:var(--border2)}
+  .chip .x{color:var(--dim);margin-left:2px}
+  .more{padding:8px;text-align:center;font-size:11.5px;color:var(--dim)}
+  .kbd{font:500 9.5px/1 var(--mono);padding:2px 5px;border-radius:4px;background:var(--alt);border:1px solid var(--border2);color:var(--text2)}
+  .stripe{position:absolute;left:0;top:4px;bottom:4px;width:3px;border-radius:2px;background:var(--pc)}
+  .pill{position:absolute;right:8px;top:50%;translate:0 -50%;background:var(--alt);border:1px solid var(--border2);color:var(--text);font:600 10px/1 var(--mono);padding:3px 6px;border-radius:5px}
+  .actions{display:flex;gap:2px}
+  .actions span{width:20px;height:20px;display:grid;place-items:center;border-radius:5px;color:var(--text2);background:var(--alt);font-size:11px}
+  .caption{font-size:11px;color:var(--dim);padding:8px 12px;border-top:1px solid var(--border);background:var(--surface)}
+
+  /* rail */
+  .rail{width:44px;flex:none;background:var(--bg);border-right:1px solid var(--border);display:flex;flex-direction:column;align-items:center;gap:8px;padding:10px 0}
+  .tile{position:relative;width:28px;height:28px;border-radius:8px;display:grid;place-items:center}
+  .tile.all{background:var(--alt);color:var(--text2);font-size:12px;font-weight:600}
+  .tile.on::after{content:"";position:absolute;inset:-4px;border:1.5px solid var(--text2);border-radius:11px}
+  .tile .cb{position:absolute;right:-3px;top:-3px;width:9px;height:9px;border-radius:50%;box-shadow:0 0 0 2px var(--bg)}
+  .tile .cb.ap{background:var(--amber)}.tile .cb.wk{background:var(--blue)}.tile .cb.dn{background:var(--green)}
+  .tile.off{opacity:.4}
+  .tile.plus{border:1px dashed var(--border2);color:var(--dim);font-size:14px}
+
+  /* table */
+  table.tbl{width:100%;border-collapse:collapse;font-size:12px}
+  .tbl th{font-size:10.5px;text-transform:uppercase;letter-spacing:.07em;color:var(--dim);font-weight:600;text-align:left;padding:8px 8px 6px;border-bottom:1px solid var(--border);white-space:nowrap}
+  .tbl th.sorted{color:var(--text)}
+  .tbl td{padding:6px 8px;border-bottom:1px solid var(--border);color:var(--text2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:0}
+  .tbl td.num{font-variant-numeric:tabular-nums;color:var(--dim);text-align:right}
+  .tbl tr:hover td{background:var(--hover)}
+
+  /* kanban */
+  .kb{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;padding:8px;height:100%}
+  .kb .col{background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:6px;display:flex;flex-direction:column;gap:5px;min-width:0}
+  .kb .col h4{margin:0 0 2px;font-size:10px;letter-spacing:.08em;text-transform:uppercase;color:var(--dim);display:flex;justify-content:space-between}
+  .kcard{background:var(--surface);border:1px solid var(--border2);border-radius:6px;padding:6px;font-size:11px;color:var(--text2);display:flex;flex-direction:column;gap:4px;min-width:0}
+  .kcard .t{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text)}
+  .kcard .m{display:flex;align-items:center;gap:5px;font-size:10px;color:var(--dim)}
+
+  /* timeline */
+  .tl{position:relative;padding:8px 8px 8px 44px;display:flex;flex-direction:column;gap:9px;height:100%}
+  .tl .axis{position:absolute;left:38px;top:0;bottom:0;border-left:1px solid var(--border2)}
+  .tl .tick{position:absolute;left:6px;font:10px var(--mono);color:var(--dim)}
+  .tl .bar{position:relative;height:18px;display:flex;align-items:center}
+  .tl .bar i{height:8px;border-radius:4px;background:var(--pc);opacity:.85;display:block}
+  .tl .bar i.live{background:linear-gradient(90deg,var(--pc),color-mix(in srgb,var(--pc) 30%,transparent));animation:breathe 2.4s ease-in-out infinite}
+  .tl .bar span{margin-left:8px;font-size:11px;color:var(--text2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .tl .nowline{position:absolute;right:8px;left:44px;top:6px;border-top:1px dashed var(--red);opacity:.6}
+  .tl .nowlab{position:absolute;right:8px;top:-4px;font:10px var(--mono);color:var(--red)}
+  @keyframes breathe{50%{opacity:.5}}
+  @media (prefers-reduced-motion:reduce){*{animation:none!important}}
+
+  /* heatmap */
+  .hm{padding:6px 8px;display:flex;flex-direction:column;gap:5px;border-bottom:1px solid var(--border)}
+  .hmr{display:grid;grid-template-columns:54px 1fr auto;gap:8px;align-items:center;font-size:11px;color:var(--text2)}
+  .cells{display:grid;grid-template-columns:repeat(24,1fr);gap:1.5px}
+  .cells i{height:9px;border-radius:1.5px;background:var(--pc);opacity:var(--o,.12)}
+  .cells i.live{animation:breathe 1.6s ease-in-out infinite}
+
+  /* treemap */
+  .tm{position:relative;height:100%;margin:8px}
+  .tm .z{position:absolute;border:1px solid color-mix(in srgb,var(--pc) 55%,transparent);background:color-mix(in srgb,var(--pc) 8%,transparent);border-radius:7px;padding:22px 6px 6px}
+  .tm .z b{position:absolute;left:8px;top:5px;font-size:11px;font-weight:600;color:var(--pc)}
+  .tm .tile2{position:absolute;background:var(--surface);border:1px solid var(--border2);border-radius:5px;padding:5px;font-size:10.5px;color:var(--text2);overflow:hidden;display:flex;gap:4px;align-items:flex-start}
+  .tm .tile2 .st{width:12px;height:12px;font-size:9px}
+
+  /* orbit */
+  .orb{position:relative;height:100%;overflow:hidden}
+  .ring{position:absolute;left:50%;top:50%;translate:-50% -50%;border:1px solid var(--border);border-radius:50%}
+  .node{position:absolute;translate:-50% -50%;font-size:10.5px;color:var(--text2);display:flex;gap:4px;align-items:center;white-space:nowrap}
+  .node.core{background:var(--alt);border:1px solid var(--amber);border-radius:8px;padding:8px 10px;color:var(--text);font-size:11.5px;flex-direction:column;gap:2px;align-items:flex-start;box-shadow:0 0 24px rgba(244,183,64,.18)}
+
+  /* river */
+  .post{padding:8px;border-radius:8px;display:flex;flex-direction:column;gap:5px;color:var(--text2)}
+  .post:hover{background:var(--hover)}
+  .post .h{display:flex;align-items:center;gap:6px;font-size:11px;color:var(--dim)}
+  .post .h b{color:var(--text2);font-weight:500}
+  .post .h .r{margin-left:auto;font-variant-numeric:tabular-nums}
+  .post .body{font-size:12px;color:var(--text);display:flex;gap:6px;align-items:flex-start}
+  .post .body.mute{color:var(--text2)}
+  .post code{font:11px var(--mono);background:var(--alt);padding:1px 4px;border-radius:3px}
+  .btns{display:flex;gap:6px;margin-left:22px}
+  .btn{font-size:11px;padding:3px 9px;border-radius:6px;border:1px solid var(--border2);color:var(--text)}
+  .btn.pri{background:var(--text);color:var(--bg);border-color:var(--text)}
+  .prog{height:3px;background:var(--alt);border-radius:2px;margin-left:22px;overflow:hidden}
+  .prog i{display:block;height:100%;width:44%;background:var(--blue)}
+
+  /* spatial */
+  .desk{position:relative;height:100%;background:
+    radial-gradient(circle,var(--border) 1px,transparent 1px) 0 0/14px 14px}
+  .zone{position:absolute;border:1px dashed color-mix(in srgb,var(--pc) 60%,transparent);border-radius:9px;padding:20px 6px 6px}
+  .zone b{position:absolute;top:4px;left:8px;font-size:10.5px;color:var(--pc);font-weight:600}
+  .note{position:absolute;background:var(--surface);border:1px solid var(--border2);border-radius:6px;padding:5px 7px;font-size:10.5px;color:var(--text2);display:flex;gap:5px;align-items:center;box-shadow:0 4px 12px rgba(0,0,0,.35);white-space:nowrap}
+  .note .st{width:12px;height:12px;font-size:9px}
+  .note.tilt{rotate:-2deg}.note.tilt2{rotate:1.5deg}
+
+  /* tty */
+  .tty{font:11.5px/1.7 var(--mono);color:var(--text2);padding:8px 10px;white-space:pre;overflow:hidden;height:100%;display:flex;flex-direction:column}
+  .tty .ln{display:flex;gap:0}
+  .tty .ln.cur{background:var(--alt);color:var(--text);margin:0 -10px;padding:0 10px}
+  .tty .c1{width:18px;color:var(--dim)}.tty .c2{width:16px}.tty .c3{width:76px}.tty .c4{width:84px;color:var(--dim)}.tty .c5{flex:1;overflow:hidden;text-overflow:ellipsis}.tty .c6{width:32px;text-align:right;color:var(--dim)}
+  .tty .cmd{margin-top:auto;color:var(--text);border-top:1px solid var(--border);padding-top:4px}
+  .tty .cmd::after{content:"▍";animation:blink 1s steps(1) infinite;color:var(--brand)}
+  @keyframes blink{50%{opacity:0}}
+
+  /* fork graph */
+  .fg .row{grid-template-columns:auto 16px minmax(0,1fr) auto}
+  .fg .row .st{grid-column:2}.fg .row .t{grid-column:3}.fg .row .r{grid-column:4}
+  .fg .gutter{font:11px var(--mono);color:var(--dimmer);white-space:pre;grid-column:1;grid-row:1}
+  .fg .node2{width:8px;height:8px;border-radius:50%;background:var(--pc);display:inline-block}
+
+  /* stacks */
+  .stacks{display:grid;grid-template-columns:1fr 1fr;gap:12px;padding:10px}
+  .stack{position:relative;height:118px}
+  .stack .hd{display:flex;align-items:center;gap:6px;font-size:11.5px;color:var(--text2);margin-bottom:8px}
+  .stack .hd .n{margin-left:auto;font-variant-numeric:tabular-nums;color:var(--dim)}
+  .stack .c{position:absolute;left:0;right:0;top:26px;background:var(--surface);border:1px solid var(--border2);border-radius:7px;padding:7px 8px;font-size:11px;color:var(--text2);display:flex;gap:5px;align-items:center;transform-origin:50% 100%}
+  .stack .c.b{translate:0 8px;scale:.94;opacity:.7;z-index:1}.stack .c.c3{translate:0 16px;scale:.88;opacity:.45;z-index:0}
+  .stack .c.top{z-index:2;color:var(--text)}
+  .stack:hover .c.b{translate:0 42px;scale:1;opacity:1}.stack:hover .c.c3{translate:0 80px;scale:1;opacity:1}
+  .stack .c{transition:translate .2s,scale .2s,opacity .2s}
+
+  /* dock */
+  .dock{position:absolute;left:0;right:0;bottom:0;height:44px;background:var(--surface);border-top:1px solid var(--border);display:flex;align-items:center;gap:6px;padding:0 10px;overflow:hidden}
+  .dchip{display:flex;align-items:center;gap:6px;background:var(--alt);border:1px solid var(--border2);border-radius:999px;padding:4px 10px 4px 5px;font-size:11px;color:var(--text2);white-space:nowrap}
+  .ring2{width:16px;height:16px;border-radius:50%;background:conic-gradient(var(--blue) var(--p,40%),var(--border2) 0);display:grid;place-items:center}
+  .ring2::after{content:"";width:10px;height:10px;border-radius:50%;background:var(--alt)}
+  .ring2.ap{background:var(--amber)}.ring2.ap::after{content:"⚠";background:none;font-size:9px;color:#0d0e11;font-weight:700;width:auto;height:auto}
+
+  /* queue */
+  .q .row{grid-template-columns:16px minmax(0,1fr) 90px}
+  .q .wait{grid-column:3;grid-row:1;display:flex;align-items:center;gap:6px;font-size:10.5px;color:var(--dim);font-variant-numeric:tabular-nums}
+  .q .wait i{flex:1;height:5px;border-radius:3px;background:var(--alt);overflow:hidden}
+  .q .wait i::after{content:"";display:block;height:100%;width:var(--w);background:var(--text2);border-radius:3px}
+  .q .rule{display:flex;align-items:center;gap:8px;font-size:10px;color:var(--dim);letter-spacing:.08em;text-transform:uppercase;padding:8px 8px 4px}
+  .q .rule::before,.q .rule::after{content:"";flex:1;border-top:1px solid var(--border)}
+
+  /* deck */
+  .deck{display:flex;height:100%}
+  .vtabs{width:26px;flex:none;border-right:1px solid var(--border);display:flex;flex-direction:column;align-items:center;padding:8px 0;gap:6px}
+  .vt{writing-mode:vertical-rl;rotate:180deg;font-size:10.5px;letter-spacing:.08em;text-transform:uppercase;color:var(--dim);padding:8px 4px;border-radius:4px}
+  .vt.on{color:var(--text);background:var(--alt)}
+  .cols{flex:1;display:grid;grid-template-columns:1fr 1fr;min-width:0}
+  .cols .col{border-right:1px solid var(--border);display:flex;flex-direction:column;min-width:0}
+  .cols .col h4{margin:0;padding:8px 8px 4px;font-size:11px;color:var(--text2);display:flex;align-items:center;gap:6px}
+
+  /* pulse */
+  .pulse{width:8px;flex:none;background:var(--surface);border-right:1px solid var(--border);display:flex;flex-direction:column;gap:2px;padding:8px 1px}
+  .pulse i{flex:1;border-radius:2px;background:var(--dimmer);max-height:34px}
+  .pulse i.ap{background:var(--amber);box-shadow:0 0 8px var(--amber);animation:breathe 1.4s ease-in-out infinite}
+  .pulse i.wk{background:var(--blue);animation:breathe 2.6s ease-in-out infinite}
+  .pulse i.dn{background:var(--green)}
+  .hovered{position:absolute;left:8px;top:0;bottom:0;width:264px;background:var(--surface);border-right:1px solid var(--border);box-shadow:12px 0 40px rgba(0,0,0,.45);display:flex;flex-direction:column;font-size:12.5px}
+
+  /* settle v2 */
+  .row.settled{opacity:.55}
+  .row.settled:hover,.row.settled.hov{opacity:1}
+  .row.hov{background:var(--hover);color:var(--text)}
+  .row .r.act{display:none;color:var(--text2);align-items:center;gap:4px}
+  .row:hover .r.rest,.row.hov .r.rest{display:none}
+  .row:hover .r.act,.row.hov .r.act{display:inline-flex}
+  .pr{font-size:10.5px;font-variant-numeric:tabular-nums;color:var(--dim);margin-left:5px}
+  .row:hover .pr.merged,.row.hov .pr.merged{color:#c4b5fd}
+  .row:hover .pr.open,.row.hov .pr.open{color:var(--green)}
+  .row:hover .pr.closed,.row.hov .pr.closed{color:var(--red)}
+  .row.settled .g{filter:grayscale(1);opacity:.5}
+  .row.settled:hover .g,.row.settled.hov .g{filter:none;opacity:1}
+  .woke{font-size:10px;font-weight:600;color:var(--indigo);background:color-mix(in srgb,var(--indigo) 16%,transparent);padding:1px 6px;border-radius:999px;display:inline-flex;align-items:center;gap:3px}
+  .showmore{font-size:11px;color:var(--dim);padding:4px 8px 6px}
+  .sec.target{color:var(--brand);box-shadow:inset 0 -1px 0 var(--brand)}
+  .dragging{outline:1px dashed var(--border2);outline-offset:-1px;box-shadow:0 8px 24px rgba(0,0,0,.45);rotate:-1deg;background:var(--alt);color:var(--text)}
+  .dverb{background:var(--text);color:var(--bg);padding:1px 7px;border-radius:4px;font-weight:600;font-size:10.5px;display:inline-flex;align-items:center;gap:4px}
+  .banner{border:1px solid var(--border2);background:var(--alt);border-radius:8px;padding:8px 10px;display:flex;align-items:center;gap:8px;font-size:12px;color:var(--text2);margin-top:auto}
+  .banner b{color:var(--text);font-weight:500}
+  .banner .btn{margin-left:auto}
+  .rules{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:14px;margin-bottom:26px}
+  .rule{background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:14px 16px;font-size:12.5px;color:var(--text2)}
+  .rule h4{margin:0 0 8px;font-size:11px;color:var(--text);text-transform:uppercase;letter-spacing:.08em}
+  .rule ul{margin:0;padding-left:16px}.rule li{margin:3px 0}
+  .rule code{font:11px var(--mono);color:var(--text)}
+  .rule .rn{color:var(--dim);margin:8px 0 0;font-size:12px}
+
+  /* row sheet */
+  .sheet{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:14px}
+  .sheet .cell{background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:8px}
+  .sheet .lab{font-size:10.5px;letter-spacing:.08em;text-transform:uppercase;color:var(--dim);padding:2px 8px 8px}
+  .hc{margin:6px 8px 2px 30px;background:var(--alt);border:1px solid var(--border2);border-radius:8px;padding:8px 10px;font-size:11px;color:var(--text2);display:grid;grid-template-columns:auto 1fr;gap:3px 10px}
+  .hc b{color:var(--dim);font-weight:500}
+  .hc code{font:10.5px var(--mono);color:var(--text)}
+
+  .rec{background:linear-gradient(180deg,color-mix(in srgb,var(--brand) 6%,var(--surface)),var(--surface));border:1px solid color-mix(in srgb,var(--brand) 35%,var(--border));border-radius:14px;padding:22px 24px;margin-top:40px;max-width:900px}
+  .rec h2{font-size:18px;margin-bottom:8px}
+  .rec p{color:var(--text2);margin:0 0 8px}
+  /* phone: the explorations are readable on a phone, one column, sidebar goes full-bleed */
+  @media (max-width:620px){
+    .wrap{padding:24px 12px 80px}
+    .grid{grid-template-columns:1fr;gap:18px}
+    .toc{grid-template-columns:1fr 1fr;gap:3px 12px;font-size:12px;margin:18px 0 32px}
+    .frame .main{display:none}
+    .frame .sb,.frame .sb.w340,.sb.w420,.sb.w520{width:auto;flex:1;border-right:0}
+    .frame{height:520px}
+    .frame.tall{height:560px}
+    .frame.xtall,.frame.xxtall{height:620px}
+    h1{font-size:21px}
+    h2{font-size:17px}
+    .sheet{grid-template-columns:1fr}
+    .sheet .cell{overflow:hidden}
+    .hc{margin-left:8px}
+    .rec,.rule{max-width:100%}
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<div class="intro">
+  <h1>Unified session sidebar · 25 designs</h1>
+  <p>Drop the project switcher as a container; show every project's sessions in one sidebar with filtering and grouping. Ten designs stay inside web-interface best practice, fifteen don't. Every mockup uses the same eight sample sessions across four projects so they compare fairly.</p>
+  <p>Every design now carries t3code's <b>settle v2</b> lifecycle: sessions are cards while active, park as slim rows in a collapsed Settled shelf when done (by hand, or automatically by the server), and can be snoozed. Rules and anatomy are in the first section.</p>
+  <p>Companion write-up: <code>2026-09-15-unified-session-sidebar-designs.md</code>.</p>
+  <div class="legend">
+    <span><i class="st ap" style="display:inline-grid;width:14px"></i>Approval</span>
+    <span><i class="st in" style="display:inline-grid;width:14px"></i>Input</span>
+    <span><i class="st wk" style="display:inline-grid;width:14px"></i>Working</span>
+    <span><i class="st er" style="display:inline-grid;width:14px"></i>Error</span>
+    <span><i class="st dn" style="display:inline-grid;width:14px"></i>Done, unread</span>
+    <span style="opacity:.6">Idle = no glyph, receded</span>
+    <span><span class="woke">Woke</span> snooze ended</span>
+    <span style="color:var(--dim)">↶ un-settle · ✓ settle</span>
+    <span style="margin-left:auto"><i class="g pc-conduit">CO</i> conduit</span>
+    <span><i class="g pc-dotfiles">DF</i> dotfiles</span>
+    <span><i class="g pc-perry">PE</i> perry</span>
+    <span><i class="g pc-hunk">HK</i> hunk</span>
+  </div>
+</div>
+
+<div style="border-left:2px solid var(--brand);background:color-mix(in srgb,var(--brand) 7%,transparent);border-radius:0 10px 10px 0;padding:12px 15px;margin:22px 0 0;font-size:13px;color:var(--text2);max-width:900px">
+  <b style="color:var(--text)">These 25 are the desktop exploration.</b> The decision, rebuilt mobile-first with every settle, snooze, filter and search control drawn out, lives in <a href="mobile-first-sidebar.html" style="color:var(--brand);border-bottom:1px solid color-mix(in srgb,var(--brand) 45%,transparent)">the mobile-first page →</a>
+</div>
+
+<nav class="toc" aria-label="Designs">
+  <a href="#settle"><b>§0</b>Settle v2 lifecycle</a>
+  <a href="#d1"><b>01</b>Flat inbox, project as glyph</a>
+  <a href="#d2"><b>02</b>Collapsible project sections</a>
+  <a href="#d3"><b>03</b>Icon rail + flat list</a>
+  <a href="#d4"><b>04</b>Filter chips + time buckets</a>
+  <a href="#d5"><b>05</b>Status-first triage</a>
+  <a href="#d6"><b>06</b>Colour-stripe compact rows</a>
+  <a href="#d7"><b>07</b>Pinned / Active / Archived shelves</a>
+  <a href="#d8"><b>08</b>Table density mode</a>
+  <a href="#d9"><b>09</b>Palette-first, minimal sidebar</a>
+  <a href="#d10"><b>10</b>Mobile-first tabs</a>
+  <a href="#d11"><b>11</b>Kanban swimlanes</a>
+  <a href="#d12"><b>12</b>Timeline strip</a>
+  <a href="#d13"><b>13</b>Activity heatmap per project</a>
+  <a href="#d14"><b>14</b>Treemap</a>
+  <a href="#d15"><b>15</b>Attention orbit</a>
+  <a href="#d16"><b>16</b>Unified message river</a>
+  <a href="#d17"><b>17</b>Spatial desk</a>
+  <a href="#d18"><b>18</b>Terminal status list</a>
+  <a href="#d19"><b>19</b>Fork graph</a>
+  <a href="#d20"><b>20</b>Card stacks per project</a>
+  <a href="#d21"><b>21</b>Now-playing dock</a>
+  <a href="#d22"><b>22</b>Topic clusters</a>
+  <a href="#d23"><b>23</b>Waiting-time queue</a>
+  <a href="#d24"><b>24</b>Deck columns</a>
+  <a href="#d25"><b>25</b>Ambient pulse strip</a>
+  <a href="#row"><b>§6</b>Session row redesign</a>
+  <a href="#rec"><b>§7</b>Recommendation</a>
+</nav>
+
+<div class="part" id="settle" style="margin-top:0;border-top:0;padding-top:0">
+  <h2>§0 · Settle v2 lifecycle (from t3code)</h2>
+  <p>Three shelves, one overlay. <b>Active</b> rows are full cards; <b>Settled</b> rows are slim, quiet, and collapsed by default; <b>Snoozed</b> is an overlay on Active with a wake time. Pinned is a flag, not a shelf. The server settles work on its own while the app is closed, and the sidebar never second-guesses density: only settling or snoozing collapses a row.</p>
+</div>
+
+<div class="grid" style="margin-bottom:26px">
+
+<section class="design wide">
+  <header>
+    <span class="num">§0.1</span>
+    <h3>Anatomy: Pinned / Active / Snoozed / Settled + chat banner</h3>
+    <p class="blurb">Card rows hover to reveal ✓ settle in the time slot. Settled rows sit at 70% ink, glyph desaturated, and hover to reveal ↶ un-settle; their time is <em>when they settled</em>, not last activity. A woken snooze shows a Woke pill in its original slot until visited. Opening a settled session shows a banner; sending a message un-settles it.</p>
+    <p class="cost"><b>Keys:</b> <span class="kbd">⌘⇧S</span> settle / un-settle · <span class="kbd">⌘⇧P</span> pin · drag onto the Settled header · thread menu.</p>
+  </header>
+  <div class="frame xxtall">
+    <aside class="sb w340">
+      <div class="brand">conduit<i></i></div>
+      <div class="hdr"><div class="search">Search sessions…</div><div class="well"><span class="ib">◫</span><span class="ib">+</span></div></div>
+      <div class="list">
+        <div class="sec"><span>Pinned</span></div>
+        <a class="row two unread" href="#"><span class="st ap"></span><span class="t">Fix auth token refresh <span style="color:var(--dim);font-size:10px">📌</span></span><span class="m"><i class="g pc-conduit">CO</i><span class="tr">conduit · feat/auth</span><span class="pr open">#214</span></span><span class="r verb">approve</span></a>
+        <div style="border-top:1px solid var(--border);margin:6px 8px 4px"></div>
+        <a class="row two recede" href="#"><span class="st wk"></span><span class="t">Migrate zsh config to nushell</span><span class="m"><i class="g pc-dotfiles">DF</i><span class="tr">dotfiles · main</span></span><span class="r">4m</span></a>
+        <a class="row two active recede" href="#"><span class="st wk"></span><span class="t">Refactor relay stack</span><span class="m"><i class="g pc-conduit">CO</i><span class="tr">conduit · main</span></span><span class="r">9m</span></a>
+        <a class="row two unread hov" href="#"><span class="st dn"></span><span class="t">Add session export</span><span class="m"><i class="g pc-conduit">CO</i><span class="tr">conduit · main</span></span><span class="r rest" style="color:var(--green)">done</span><span class="r act">✓ settle</span></a>
+        <a class="row two" href="#"><span class="st"><span class="woke" style="padding:1px 4px">⏰</span></span><span class="t">Audit brew bundle</span><span class="m"><i class="g pc-dotfiles">DF</i><span class="tr">dotfiles · main</span></span><span class="r"><span class="woke">Woke</span></span></a>
+        <a class="row two recede" href="#"><span class="st"></span><span class="t">Investigate flaky e2e</span><span class="m"><i class="g pc-perry">PE</i><span class="tr">perry · main</span></span><span class="r">1h</span></a>
+        <div class="sec" style="margin-top:10px"><span><span class="caret">▾</span>Snoozed</span><span class="n">1</span></div>
+        <a class="row slim settled" href="#"><span class="st" style="color:var(--dim);font-size:10px">⏰</span><span class="t"><i class="g pc-dotfiles" style="vertical-align:-2px;margin-right:5px">DF</i>Pick a migration strategy</span><span class="r rest">Mon 9:00</span><span class="r act">⏰ wake</span></a>
+        <div class="sec"><span><span class="caret">▾</span>Settled</span><span class="n">41</span></div>
+        <a class="row slim settled" href="#"><span class="st"></span><span class="t"><i class="g pc-conduit" style="vertical-align:-2px;margin-right:5px">CO</i>Wire PTY resize<span class="pr merged">#212</span></span><span class="r rest">3d</span><span class="r act">↶ un-settle</span></a>
+        <a class="row slim settled hov" href="#"><span class="st"></span><span class="t"><i class="g pc-perry" style="vertical-align:-2px;margin-right:5px">PE</i>Stabilise visual baselines</span><span class="r rest">5d</span><span class="r act">↶ un-settle</span></a>
+        <a class="row slim settled" href="#"><span class="st"></span><span class="t"><i class="g pc-conduit" style="vertical-align:-2px;margin-right:5px">CO</i>Reauth on stale socket<span class="pr closed">#198</span></span><span class="r rest">1w</span><span class="r act">↶ un-settle</span></a>
+        <div class="showmore">Show 25 more</div>
+      </div>
+    </aside>
+    <div class="main" style="opacity:1;padding-bottom:16px">
+      <div style="opacity:.55;display:flex;flex-direction:column;gap:12px"><div class="ghost w1"></div><div class="ghost w2"></div><div class="ghost w3"></div><div class="bubble"></div><div class="ghost w1"></div><div class="ghost w4"></div></div>
+      <div class="banner"><span class="st dn"></span><span><b>This session is settled</b> · Send a message to un-settle</span><span class="btn">Un-settle</span></div>
+      <div style="height:38px;border:1px solid var(--border2);border-radius:9px;background:var(--surface);margin-top:8px;display:flex;align-items:center;padding:0 12px;color:var(--dim);font-size:12px">Message conduit…</div>
+    </div>
+  </div>
+</section>
+
+<section class="design">
+  <header>
+    <span class="num">§0.2</span>
+    <h3>Drag onto the Settled header</h3>
+    <p class="blurb">Mid-drag the row swaps its status and time for the verb the drop will perform (Pin / Unpin / Settle / Un-settle / Wake), the target section takes the accent, other rows slide aside. Dragging out of Settled un-settles; nothing can be dragged <em>into</em> Snoozed because snoozing needs a wake time.</p>
+    <p class="cost"><b>Twins:</b> every drop has a menu item and a shortcut; reduced-motion drops the slide.</p>
+  </header>
+  <div class="frame tall">
+    <aside class="sb">
+      <div class="brand">conduit<i></i></div>
+      <div class="hdr"><div class="search">Search sessions…</div></div>
+      <div class="list">
+        <div class="sec"><span>Active</span></div>
+        <a class="row two unread" href="#"><span class="st ap"></span><span class="t">Fix auth token refresh</span><span class="m"><i class="g pc-conduit">CO</i><span class="tr">conduit · feat/auth</span></span><span class="r verb">approve</span></a>
+        <a class="row two recede" href="#"><span class="st wk"></span><span class="t">Refactor relay stack</span><span class="m"><i class="g pc-conduit">CO</i><span class="tr">conduit · main</span></span><span class="r">9m</span></a>
+        <a class="row two recede" href="#"><span class="st"></span><span class="t">Investigate flaky e2e</span><span class="m"><i class="g pc-perry">PE</i><span class="tr">perry · main</span></span><span class="r">1h</span></a>
+        <div style="height:52px;border:1px dashed var(--border2);border-radius:7px;margin:2px 0;opacity:.5"></div>
+        <div class="sec target" style="margin-top:8px"><span><span class="caret" style="color:var(--brand)">▾</span>Settled</span><span class="n">41</span></div>
+        <a class="row two dragging" href="#" style="translate:6px -30px"><span class="st"></span><span class="t">Add session export</span><span class="m"><i class="g pc-conduit">CO</i><span class="tr">conduit · main</span></span><span class="r"><span class="dverb">✓ Settle</span></span></a>
+        <a class="row slim settled" href="#"><span class="st"></span><span class="t"><i class="g pc-conduit" style="vertical-align:-2px;margin-right:5px">CO</i>Wire PTY resize<span class="pr merged">#212</span></span><span class="r rest">3d</span><span class="r act">↶ un-settle</span></a>
+        <a class="row slim settled" href="#"><span class="st"></span><span class="t"><i class="g pc-perry" style="vertical-align:-2px;margin-right:5px">PE</i>Stabilise visual baselines</span><span class="r rest">5d</span><span class="r act">↶ un-settle</span></a>
+      </div>
+    </aside>
+    <div class="main"><div class="ghost w1"></div><div class="ghost w2"></div><div class="ghost w3"></div><div class="bubble"></div></div>
+  </div>
+</section>
+
+<section class="design">
+  <header>
+    <span class="num">§0.3</span>
+    <h3>Snooze menu + woken session</h3>
+    <p class="blurb">Presets are computed from now (1h, 3h, this evening only while it's meaningfully before 6pm, tomorrow 9:00, next week, custom). You can snooze a running session, never one that's blocked on you. Anything that outranks the snooze raises its hand and wakes it early: an approval, a question, a fresh error, or a turn finishing after the snooze was set.</p>
+    <p class="cost"><b>Sort stays static:</b> a woken session reappears where it was, so the Woke pill carries the signal until you visit.</p>
+  </header>
+  <div class="frame xtall">
+    <aside class="sb">
+      <div class="brand">conduit<i></i></div>
+      <div class="hdr"><div class="search">Search sessions…</div></div>
+      <div class="list">
+        <div class="sec"><span>Active</span></div>
+        <a class="row two unread" href="#"><span class="st ap"></span><span class="t">Fix auth token refresh</span><span class="m"><i class="g pc-conduit">CO</i><span class="tr">conduit · feat/auth</span></span><span class="r verb">approve</span></a>
+        <a class="row two hov" href="#"><span class="st wk"></span><span class="t">Refactor relay stack</span><span class="m"><i class="g pc-conduit">CO</i><span class="tr">conduit · main</span></span><span class="r act">⏰ ▾</span></a>
+        <div style="margin:2px 8px 6px 30px;background:var(--alt);border:1px solid var(--border2);border-radius:8px;padding:4px;font-size:11.5px;box-shadow:0 10px 30px rgba(0,0,0,.45)">
+          <div style="display:flex;justify-content:space-between;padding:5px 8px;border-radius:5px;color:var(--text)"><span>In 1 hour</span><span style="color:var(--dim)">5:14 PM</span></div>
+          <div style="display:flex;justify-content:space-between;padding:5px 8px;border-radius:5px;color:var(--text)"><span>In 3 hours</span><span style="color:var(--dim)">7:14 PM</span></div>
+          <div style="display:flex;justify-content:space-between;padding:5px 8px;border-radius:5px;color:var(--text)"><span>This evening</span><span style="color:var(--dim)">6:00 PM</span></div>
+          <div style="display:flex;justify-content:space-between;padding:5px 8px;border-radius:5px;background:var(--hover);color:var(--text)"><span>Tomorrow</span><span style="color:var(--dim)">9:00 AM</span></div>
+          <div style="display:flex;justify-content:space-between;padding:5px 8px;border-radius:5px;color:var(--text)"><span>Next week</span><span style="color:var(--dim)">Mon 9:00 AM</span></div>
+          <div style="border-top:1px solid var(--border);margin:3px 4px"></div>
+          <div style="padding:5px 8px;color:var(--text2)">Custom…</div>
+        </div>
+        <a class="row two" href="#"><span class="st"><span class="woke" style="padding:1px 4px">⏰</span></span><span class="t">Audit brew bundle</span><span class="m"><i class="g pc-dotfiles">DF</i><span class="tr">dotfiles · main</span></span><span class="r"><span class="woke">Woke</span></span></a>
+        <div class="sec" style="margin-top:10px"><span><span class="caret">▾</span>Snoozed</span><span class="n">1</span></div>
+        <a class="row slim settled" href="#"><span class="st" style="color:var(--dim);font-size:10px">⏰</span><span class="t"><i class="g pc-dotfiles" style="vertical-align:-2px;margin-right:5px">DF</i>Pick a migration strategy</span><span class="r rest">2h</span><span class="r act">⏰ wake</span></a>
+        <div class="sec"><span><span class="caret">▸</span>Settled</span><span class="n">41</span></div>
+      </div>
+    </aside>
+    <div class="main"><div class="ghost w1"></div><div class="ghost w2"></div><div class="ghost w3"></div><div class="bubble"></div></div>
+  </div>
+</section>
+
+</div>
+
+<div class="rules">
+  <div class="rule"><h4>Manual settle</h4><ul>
+    <li>✓ on card hover, <code>⌘⇧S</code>, menu, or drag onto the Settled header.</li>
+    <li>Settling <b>clears the pin</b> and the manual Active slot ("done" beats "keep on top").</li>
+    <li>Settling an idle session dismisses unanswered questions without answering them.</li>
+    <li>Un-settle (↶, banner, or just send a message) returns it to the <b>top of Active</b> and blocks auto-settle until new activity resumes the rules.</li>
+  </ul></div>
+  <div class="rule"><h4>Auto settle (server, runs while the app is closed)</h4><ul>
+    <li>Idle for <code>N</code> days, default 3, range 1–90, or off.</li>
+    <li>Linked PR <b>merged</b> (default on), or an idle session's PR <b>closed</b>. conduit analogue: branch merged into main / worktree removed.</li>
+    <li>An old merge doesn't settle work you resumed after it: the PR's terminal time must be newer than your last message.</li>
+    <li>Settled time is the last activity, so the shelf reads "wrapped up 3d ago".</li>
+  </ul><p class="rn">Per project override, changing a rule never reopens already-settled sessions.</p></div>
+  <div class="rule"><h4>Never auto-settles while</h4><ul>
+    <li>Pending approval or question (hiding the request would defeat it).</li>
+    <li>Session starting or running, or background work alive (PTY, dev server).</li>
+    <li>A queued message under 2 min old that no turn has adopted yet.</li>
+    <li>Manually un-settled, or snoozed with time left (unless it raised its hand).</li>
+  </ul></div>
+  <div class="rule"><h4>Rendering</h4><ul>
+    <li>Only Settled and Snoozed collapse a row to slim. Every Active row is a card; density comes from parking work, not from the sidebar guessing.</li>
+    <li>Settled rows: 70% ink and desaturated glyph until hover; PR number colours on hover only (open emerald, merged violet, closed red, draft grey).</li>
+    <li>Both shelves collapsed by default, remembered per device. Settled tail shows 10, then +25 per Show more.</li>
+    <li>Active order is static: activity never reorders. Settled sorts by settled time.</li>
+  </ul></div>
+</div>
+
+<div class="part">
+  <h2>Best-practice designs</h2>
+  <p>All ten: rows are real links, scope and group-by live in the URL, lists virtualise past 50, one polite live region for status, tabular numerals, truncation everywhere, reduced-motion honoured, archive with undo.</p>
+</div>
+
+<div class="grid">
+
+<!-- D1 -->
+<section class="design" id="d1">
+  <header>
+    <span class="num">D1 · T3CODE BASELINE</span>
+    <h3>Flat inbox, project as glyph <span class="tag bp">Best practice</span></h3>
+    <p class="blurb">One recency list with a status-tier boost. Three-line 78px card; project is a glyph + name on line 1. Header holds search and a scope combobox whose trigger becomes the chosen project's glyph. Hover a card for ✓ settle; Snoozed and Settled shelves sit collapsed at the floor.</p>
+    <p class="cost"><b>Costs:</b> at 40+ sessions the glyph column turns to noise.</p>
+  </header>
+  <div class="frame">
+    <aside class="sb">
+      <div class="brand">conduit<i></i></div>
+      <div class="hdr"><div class="search">Search sessions…</div><div class="well"><span class="ib">◫</span><span class="ib">+</span></div></div>
+      <div class="list">
+        <a class="row card unread" href="#"><span class="m top"><i class="g pc-conduit">CO</i><span class="pn">conduit</span></span><span class="st ap"></span><span class="t">Fix auth token refresh</span><span class="m bot"><span class="tr">⌥ feat/auth</span><span>· opus</span></span><span class="r verb">Approval</span></a>
+        <a class="row card unread" href="#"><span class="m top"><i class="g pc-dotfiles">DF</i><span class="pn">dotfiles</span></span><span class="st in"></span><span class="t">Pick a migration strategy</span><span class="m bot"><span class="tr">⌥ main</span><span>· sonnet</span></span><span class="r verb i">Reply</span></a>
+        <a class="row card recede" href="#"><span class="m top"><i class="g pc-dotfiles">DF</i><span class="pn">dotfiles</span></span><span class="st wk"></span><span class="t">Migrate zsh config to nushell</span><span class="m bot"><span class="tr">⌥ main</span><span>· opus</span></span><span class="r">4m</span></a>
+        <a class="row card active recede" href="#"><span class="m top"><i class="g pc-conduit">CO</i><span class="pn">conduit</span></span><span class="st wk"></span><span class="t">Refactor relay stack</span><span class="m bot"><span class="tr">⌥ main</span><span>· opus</span></span><span class="r">9m</span></a>
+        <a class="row card unread hov" href="#"><span class="m top"><i class="g pc-conduit">CO</i><span class="pn">conduit</span></span><span class="st dn"></span><span class="t">Add session export</span><span class="m bot"><span class="tr">⌥ main</span><span>· sonnet</span></span><span class="r rest">Done</span><span class="r act">✓ settle</span></a>
+        <div class="sec bottom"><span><span class="caret">▸</span>Snoozed</span><span class="n">1</span></div>
+        <div class="sec"><span><span class="caret">▸</span>Settled</span><span class="n">41</span></div>
+      </div>
+    </aside>
+    <div class="main"><div class="ghost w1"></div><div class="ghost w2"></div><div class="ghost w3"></div><div class="bubble"></div><div class="ghost w1"></div><div class="ghost w4"></div></div>
+  </div>
+</section>
+
+<!-- D2 -->
+<section class="design" id="d2">
+  <header>
+    <span class="num">D2</span>
+    <h3>Collapsible project sections <span class="tag bp">Best practice</span></h3>
+    <p class="blurb">Projects are sticky headers ordered by latest activity, each with a rollup badge strip. A collapsed section still shows its strip, so no approval can hide. One-line rows because the project is already known. Settled rows live at the tail of their own project, one visible then "8 more".</p>
+    <p class="cost"><b>Costs:</b> cross-project triage means scanning every header.</p>
+  </header>
+  <div class="frame">
+    <aside class="sb">
+      <div class="brand">conduit<i></i></div>
+      <div class="hdr"><div class="search">Search sessions…</div><div class="well"><span class="ib">+</span></div></div>
+      <div class="list">
+        <div class="sec"><span><span class="caret">▾</span><i class="g pc-conduit" style="vertical-align:-2px;margin-right:6px">CO</i>conduit</span><span><span class="badge ap">⚠ 1</span> <span class="badge wk">◌ 1</span> <span class="badge dn">✓ 1</span></span></div>
+        <a class="row slim unread" href="#"><span class="st ap"></span><span class="t">Fix auth token refresh</span><span class="r verb">Approve</span></a>
+        <a class="row slim active recede" href="#"><span class="st wk"></span><span class="t">Refactor relay stack</span><span class="r">9m</span></a>
+        <a class="row slim unread" href="#"><span class="st dn"></span><span class="t">Add session export</span><span class="r">12m</span></a>
+        <a class="row slim settled" href="#"><span class="st"></span><span class="t">Wire PTY resize<span class="pr merged">#212</span></span><span class="r rest">3d</span><span class="r act">↶ un-settle</span></a>
+        <div class="showmore" style="padding-top:0">▸ 8 more settled</div>
+        <div class="sec"><span><span class="caret">▾</span><i class="g pc-dotfiles" style="vertical-align:-2px;margin-right:6px">DF</i>dotfiles</span><span><span class="badge ap">? 1</span> <span class="badge wk">◌ 1</span></span></div>
+        <a class="row slim unread" href="#"><span class="st in"></span><span class="t">Pick a migration strategy</span><span class="r verb i">Reply</span></a>
+        <a class="row slim recede" href="#"><span class="st wk"></span><span class="t">Migrate zsh config to nushell</span><span class="r">4m</span></a>
+        <div class="sec"><span><span class="caret">▸</span><i class="g pc-perry" style="vertical-align:-2px;margin-right:6px">PE</i>perry</span><span><span class="badge">2</span> <span class="n">1h</span></span></div>
+        <div class="sec"><span><span class="caret">▸</span><i class="g pc-hunk" style="vertical-align:-2px;margin-right:6px">HK</i>hunk</span><span><span class="badge">5</span> <span class="n">2d</span></span></div>
+      </div>
+    </aside>
+    <div class="main"><div class="ghost w1"></div><div class="ghost w2"></div><div class="ghost w3"></div><div class="bubble"></div><div class="ghost w1"></div><div class="ghost w4"></div></div>
+  </div>
+</section>
+
+<!-- D3 -->
+<section class="design" id="d3">
+  <header>
+    <span class="num">D3 · OPENCODE / DISCORD</span>
+    <h3>Icon rail + flat list <span class="tag bp">Best practice</span></h3>
+    <p class="blurb">A 44px rail of project tiles with corner status badges. Click a tile to toggle it in scope, ⌘-click to solo; the top tile is All. Hover a tile to peek at its sessions. The list is a two-line row with provenance on line 2.</p>
+    <p class="cost"><b>Costs:</b> 44px of width; rail folds into the header when narrow.</p>
+  </header>
+  <div class="frame">
+    <div class="rail">
+      <div class="tile all on">All</div>
+      <div class="tile g xl pc-conduit">CO<span class="cb ap"></span></div>
+      <div class="tile g xl pc-dotfiles">DF<span class="cb wk"></span></div>
+      <div class="tile g xl pc-perry off">PE</div>
+      <div class="tile g xl pc-hunk off">HK<span class="cb dn"></span></div>
+      <div class="tile plus">+</div>
+    </div>
+    <aside class="sb" style="width:236px">
+      <div class="hdr" style="padding-top:10px"><div class="search">Search…</div></div>
+      <div class="chips" style="padding-top:0"><span class="chip on">All</span><span class="chip">Needs you <b>2</b></span><span class="chip">Running <b>2</b></span></div>
+      <div class="list">
+        <a class="row two unread" href="#"><span class="st ap"></span><span class="t">Fix auth token refresh</span><span class="m"><i class="g pc-conduit">CO</i><span class="tr">conduit · feat/auth</span></span><span class="r">2m</span></a>
+        <a class="row two unread" href="#"><span class="st in"></span><span class="t">Pick a migration strategy</span><span class="m"><i class="g pc-dotfiles">DF</i><span class="tr">dotfiles · main</span></span><span class="r">22m</span></a>
+        <a class="row two recede" href="#"><span class="st wk"></span><span class="t">Migrate zsh config to nushell</span><span class="m"><i class="g pc-dotfiles">DF</i><span class="tr">dotfiles · main</span></span><span class="r">4m</span></a>
+        <a class="row two active recede" href="#"><span class="st wk"></span><span class="t">Refactor relay stack</span><span class="m"><i class="g pc-conduit">CO</i><span class="tr">conduit · main</span></span><span class="r">9m</span></a>
+        <a class="row two unread" href="#"><span class="st dn"></span><span class="t">Add session export</span><span class="m"><i class="g pc-conduit">CO</i><span class="tr">conduit · main</span></span><span class="r">12m</span></a>
+        <a class="row two" href="#"><span class="st"><span class="woke" style="padding:1px 4px">⏰</span></span><span class="t">Audit brew bundle</span><span class="m"><i class="g pc-dotfiles">DF</i><span class="tr">dotfiles · main</span></span><span class="r"><span class="woke">Woke</span></span></a>
+        <div class="sec bottom"><span><span class="caret">▸</span>Settled</span><span class="n">41</span></div>
+      </div>
+    </aside>
+    <div class="main"><div class="ghost w1"></div><div class="ghost w2"></div><div class="ghost w3"></div><div class="bubble"></div><div class="ghost w1"></div><div class="ghost w4"></div></div>
+  </div>
+</section>
+
+<!-- D4 -->
+<section class="design" id="d4">
+  <header>
+    <span class="num">D4</span>
+    <h3>Filter chips + time buckets <span class="tag bp">Best practice</span></h3>
+    <p class="blurb">Status chips (single select) over removable project chips (multi select), then the familiar Today / Yesterday / Older buckets. A segmented control swaps group-by to project or status.</p>
+    <p class="cost"><b>Costs:</b> ~64px of chips before the first session.</p>
+  </header>
+  <div class="frame tall">
+    <aside class="sb">
+      <div class="brand">conduit<i></i></div>
+      <div class="hdr"><div class="search">Search sessions…</div><div class="well"><span class="ib">⋮</span></div></div>
+      <div class="chips"><span class="chip on">All</span><span class="chip">Needs you <b>2</b></span><span class="chip">Running <b>2</b></span><span class="chip">Done <b>1</b></span><span class="chip" style="opacity:.6">Settled</span></div>
+      <div class="chips" style="padding-top:0"><span class="chip on"><i class="g pc-conduit">CO</i>conduit<span class="x">×</span></span><span class="chip on"><i class="g pc-dotfiles">DF</i>dotfiles<span class="x">×</span></span><span class="chip">+ project</span></div>
+      <div class="list">
+        <div class="sec"><span>Today</span><span class="n">Time · Project · Status</span></div>
+        <a class="row slim unread" href="#"><span class="st ap"></span><span class="t"><i class="g pc-conduit" style="vertical-align:-2px;margin-right:5px">CO</i>Fix auth token refresh</span><span class="r">2m</span></a>
+        <a class="row slim recede" href="#"><span class="st wk"></span><span class="t"><i class="g pc-dotfiles" style="vertical-align:-2px;margin-right:5px">DF</i>Migrate zsh config to nushell</span><span class="r">4m</span></a>
+        <a class="row slim active recede" href="#"><span class="st wk"></span><span class="t"><i class="g pc-conduit" style="vertical-align:-2px;margin-right:5px">CO</i>Refactor relay stack</span><span class="r">9m</span></a>
+        <a class="row slim unread" href="#"><span class="st dn"></span><span class="t"><i class="g pc-conduit" style="vertical-align:-2px;margin-right:5px">CO</i>Add session export</span><span class="r">12m</span></a>
+        <a class="row slim unread" href="#"><span class="st in"></span><span class="t"><i class="g pc-dotfiles" style="vertical-align:-2px;margin-right:5px">DF</i>Pick a migration strategy</span><span class="r">22m</span></a>
+        <div class="sec"><span>Yesterday</span></div>
+        <a class="row slim recede" href="#"><span class="st"></span><span class="t"><i class="g pc-conduit" style="vertical-align:-2px;margin-right:5px">CO</i>Wire PTY resize</span><span class="r">1d</span></a>
+        <a class="row slim recede" href="#"><span class="st"></span><span class="t"><i class="g pc-dotfiles" style="vertical-align:-2px;margin-right:5px">DF</i>Audit brew bundle</span><span class="r">1d</span></a>
+        <div class="sec bottom"><span><span class="caret">▸</span>Settled</span><span class="n">41 · <span style="font-weight:400">auto after 3d</span></span></div>
+      </div>
+    </aside>
+    <div class="main"><div class="ghost w1"></div><div class="ghost w2"></div><div class="ghost w3"></div><div class="bubble"></div><div class="ghost w1"></div><div class="ghost w4"></div></div>
+  </div>
+</section>
+
+<!-- D5 -->
+<section class="design" id="d5">
+  <header>
+    <span class="num">D5 · RECOMMENDED CONTAINER</span>
+    <h3>Status-first triage (inbox zero) <span class="tag bp">Best practice</span></h3>
+    <p class="blurb">Sections are status tiers. Needs-you rows carry the verb as their primary action; running and recent rows recede. "Recent" is what's left of Active after the auto-settle rules have swept it; Snoozed and Settled sink to the floor. Group-by-project works inside each tier.</p>
+    <p class="cost"><b>Costs:</b> rows move between tiers while you look; pin anything touched in the last 60s. Done-unread settles on hover ✓ or on visit + 3d idle.</p>
+  </header>
+  <div class="frame xtall">
+    <aside class="sb">
+      <div class="brand">conduit<i></i></div>
+      <div class="hdr"><div class="search">Search sessions…</div><div class="well"><span class="ib">◫</span><span class="ib">+</span></div></div>
+      <div class="list">
+        <div class="sec"><span>Needs you</span><span class="n">2</span></div>
+        <a class="row two unread" href="#"><span class="st ap"></span><span class="t">Fix auth token refresh</span><span class="m"><i class="g pc-conduit">CO</i><span class="tr">conduit · feat/auth</span></span><span class="r verb">approve</span></a>
+        <a class="row two unread" href="#"><span class="st in"></span><span class="t">Pick a migration strategy</span><span class="m"><i class="g pc-dotfiles">DF</i><span class="tr">dotfiles · main</span></span><span class="r verb i">reply</span></a>
+        <div class="sec"><span>Running</span><span class="n">2</span></div>
+        <a class="row two recede" href="#"><span class="st wk"></span><span class="t">Migrate zsh config to nushell</span><span class="m"><i class="g pc-dotfiles">DF</i><span class="tr">dotfiles · main</span></span><span class="r">4m</span></a>
+        <a class="row two active recede" href="#"><span class="st wk"></span><span class="t">Refactor relay stack</span><span class="m"><i class="g pc-conduit">CO</i><span class="tr">conduit · main</span></span><span class="r">9m</span></a>
+        <div class="sec"><span>Done, unread</span><span class="n">1</span></div>
+        <a class="row two unread hov" href="#"><span class="st dn"></span><span class="t">Add session export</span><span class="m"><i class="g pc-conduit">CO</i><span class="tr">conduit · main</span></span><span class="r rest">12m</span><span class="r act">✓ settle</span></a>
+        <div class="sec"><span>Recent</span></div>
+        <a class="row two recede" href="#"><span class="st"></span><span class="t">Investigate flaky e2e</span><span class="m"><i class="g pc-perry">PE</i><span class="tr">perry · main</span></span><span class="r">1h</span></a>
+        <div class="sec" style="margin-top:10px"><span><span class="caret">▸</span>Snoozed</span><span class="n">1</span></div>
+        <div class="sec"><span><span class="caret">▾</span>Settled</span><span class="n">41</span></div>
+        <a class="row slim settled" href="#"><span class="st"></span><span class="t"><i class="g pc-conduit" style="vertical-align:-2px;margin-right:5px">CO</i>Wire PTY resize<span class="pr merged">#212</span></span><span class="r rest">3d</span><span class="r act">↶ un-settle</span></a>
+        <a class="row slim settled" href="#"><span class="st"></span><span class="t"><i class="g pc-perry" style="vertical-align:-2px;margin-right:5px">PE</i>Stabilise visual baselines</span><span class="r rest">5d</span><span class="r act">↶ un-settle</span></a>
+      </div>
+    </aside>
+    <div class="main"><div class="ghost w1"></div><div class="ghost w2"></div><div class="ghost w3"></div><div class="bubble"></div><div class="ghost w1"></div><div class="ghost w4"></div></div>
+  </div>
+</section>
+
+<!-- D6 -->
+<section class="design" id="d6">
+  <header>
+    <span class="num">D6</span>
+    <h3>Colour-stripe compact rows <span class="tag bp">Best practice</span></h3>
+    <p class="blurb">Project is a 3px left stripe; line 2 still names it so colour is never the only signal. Scope is a swatch legend at the top. The active row's stripe widens with the brand glow.</p>
+    <p class="cost"><b>Costs:</b> falls apart past four or five projects.</p>
+  </header>
+  <div class="frame tall">
+    <aside class="sb">
+      <div class="brand">conduit<i></i></div>
+      <div class="hdr"><div class="search">Search sessions…</div></div>
+      <div class="chips" style="padding-top:0"><span class="chip on"><i class="dot" style="background:var(--p-conduit)"></i>conduit</span><span class="chip on"><i class="dot" style="background:var(--p-dotfiles)"></i>dotfiles</span><span class="chip" style="opacity:.5"><i class="dot" style="background:var(--p-perry)"></i>perry</span><span class="chip" style="opacity:.5"><i class="dot" style="background:var(--p-hunk)"></i>hunk</span></div>
+      <div class="list">
+        <a class="row two unread pc-conduit" href="#" style="padding-left:14px"><i class="stripe"></i><span class="st ap"></span><span class="t">Fix auth token refresh</span><span class="m"><span class="tr">conduit · feat/auth</span></span><span class="r verb">2m</span></a>
+        <a class="row two unread pc-dotfiles" href="#" style="padding-left:14px"><i class="stripe"></i><span class="st in"></span><span class="t">Pick a migration strategy</span><span class="m"><span class="tr">dotfiles · main</span></span><span class="r verb i">22m</span></a>
+        <a class="row two recede pc-dotfiles" href="#" style="padding-left:14px"><i class="stripe"></i><span class="st wk"></span><span class="t">Migrate zsh config to nushell</span><span class="m"><span class="tr">dotfiles · main</span></span><span class="r">4m</span></a>
+        <a class="row two active recede pc-conduit" href="#" style="padding-left:14px;box-shadow:inset 5px 0 0 var(--p-conduit),inset 5px 0 12px color-mix(in srgb,var(--p-conduit) 20%,transparent)"><span class="st wk"></span><span class="t">Refactor relay stack</span><span class="m"><span class="tr">conduit · main</span></span><span class="r">9m</span></a>
+        <a class="row two unread pc-conduit" href="#" style="padding-left:14px"><i class="stripe"></i><span class="st dn"></span><span class="t">Add session export</span><span class="m"><span class="tr">conduit · main</span></span><span class="r">12m</span></a>
+        <a class="row two recede pc-conduit" href="#" style="padding-left:14px"><i class="stripe"></i><span class="st"></span><span class="t">Wire PTY resize</span><span class="m"><span class="tr">conduit · main</span></span><span class="r">3h</span></a>
+        <div class="sec bottom"><span><span class="caret">▾</span>Settled</span><span class="n">41</span></div>
+        <a class="row slim settled pc-conduit" href="#" style="padding-left:14px"><i class="stripe" style="opacity:.4"></i><span class="st"></span><span class="t">Wire PTY resize<span class="pr merged">#212</span></span><span class="r rest">3d</span><span class="r act">↶ un-settle</span></a>
+        <a class="row slim settled pc-dotfiles" href="#" style="padding-left:14px"><i class="stripe" style="opacity:.4"></i><span class="st"></span><span class="t">Audit brew bundle</span><span class="r rest">4d</span><span class="r act">↶ un-settle</span></a>
+      </div>
+    </aside>
+    <div class="main"><div class="ghost w1"></div><div class="ghost w2"></div><div class="ghost w3"></div><div class="bubble"></div><div class="ghost w1"></div><div class="ghost w4"></div></div>
+  </div>
+</section>
+
+<!-- D7 -->
+<section class="design" id="d7">
+  <header>
+    <span class="num">D7 · T3CODE SHELVES</span>
+    <h3>Pinned / Active / Snoozed / Settled shelves with drag <span class="tag bp">Best practice</span></h3>
+    <p class="blurb">The t3code layout verbatim: manual order in Active, fractional keys in Pinned, drag between shelves with a verb badge replacing the status slot mid-drag (shown: dragging into Pinned). Snoozed rows show their wake time. No time buckets, the auto-settle sweep is the only thing that moves rows for you.</p>
+    <p class="cost"><b>Costs:</b> people who never curate get one long Active list. Every drag needs a menu + shortcut twin.</p>
+  </header>
+  <div class="frame xtall">
+    <aside class="sb">
+      <div class="brand">conduit<i></i></div>
+      <div class="hdr"><div class="search">Search sessions…</div><div class="well"><span class="ib">◫</span><span class="ib">+</span></div></div>
+      <div class="list">
+        <div class="sec"><span>Pinned</span></div>
+        <a class="row two unread" href="#"><span class="st ap"></span><span class="t">Fix auth token refresh</span><span class="m"><i class="g pc-conduit">CO</i><span class="tr">conduit · feat/auth</span></span><span class="r verb">Approval</span></a>
+        <div style="border-top:1px solid var(--border);margin:6px 8px 4px"></div>
+        <a class="row two recede" href="#"><span class="st wk"></span><span class="t">Migrate zsh config to nushell</span><span class="m"><i class="g pc-dotfiles">DF</i><span class="tr">dotfiles · main</span></span><span class="r">4m</span></a>
+        <a class="row two active" href="#" style="outline:1px dashed var(--border2);outline-offset:-1px;box-shadow:0 8px 24px rgba(0,0,0,.4);rotate:-1deg"><span class="st wk"></span><span class="t">Refactor relay stack</span><span class="m"><i class="g pc-conduit">CO</i><span class="tr">conduit · main</span></span><span class="r" style="background:var(--text);color:var(--bg);padding:1px 6px;border-radius:4px;font-weight:600">Pin</span></a>
+        <a class="row two unread" href="#"><span class="st dn"></span><span class="t">Add session export</span><span class="m"><i class="g pc-conduit">CO</i><span class="tr">conduit · main</span></span><span class="r">Done</span></a>
+        <a class="row two recede" href="#"><span class="st"></span><span class="t">Investigate flaky e2e</span><span class="m"><i class="g pc-perry">PE</i><span class="tr">perry · main</span></span><span class="r">1h</span></a>
+        <div class="sec bottom"><span><span class="caret">▾</span>Snoozed</span><span class="n">1</span></div>
+        <a class="row slim recede" href="#"><span class="st" style="color:var(--amber);font-size:10px">⏰</span><span class="t"><i class="g pc-dotfiles" style="vertical-align:-2px;margin-right:5px">DF</i>Pick a migration strategy</span><span class="r">Mon 9:00</span></a>
+        <div class="sec"><span><span class="caret">▾</span>Settled</span><span class="n">41</span></div>
+        <a class="row slim settled" href="#"><span class="st"></span><span class="t"><i class="g pc-conduit" style="vertical-align:-2px;margin-right:5px">CO</i>Wire PTY resize<span class="pr merged">#212</span></span><span class="r rest">3d</span><span class="r act">↶ un-settle</span></a>
+        <div class="showmore">Show 25 more</div>
+      </div>
+    </aside>
+    <div class="main"><div class="ghost w1"></div><div class="ghost w2"></div><div class="ghost w3"></div><div class="bubble"></div><div class="ghost w1"></div><div class="ghost w4"></div></div>
+  </div>
+</section>
+
+<!-- D8 -->
+<section class="design wide" id="d8">
+  <header>
+    <span class="num">D8</span>
+    <h3>Table density mode <span class="tag bp">Best practice</span></h3>
+    <p class="blurb">Drag the sidebar past ~380px and it becomes a sortable table with <code>aria-sort</code> headers; column sort is the grouping mechanism. Narrower than that, it falls back to D1 cards. Settled rows form a dimmed tail group and the Status cell explains <em>why</em> they settled.</p>
+    <p class="cost"><b>Costs:</b> two layouts to maintain.</p>
+  </header>
+  <div class="frame">
+    <aside class="sb w520">
+      <div class="brand">conduit<i></i></div>
+      <div class="hdr"><div class="search">Search sessions…</div><div class="well"><span class="ib">◫</span><span class="ib">+</span></div></div>
+      <table class="tbl">
+        <thead><tr><th style="width:44%">Title</th><th>Project</th><th class="sorted">Status ↑</th><th>Branch</th><th style="text-align:right">Updated</th></tr></thead>
+        <tbody>
+          <tr><td style="color:var(--text)"><span class="st ap" style="display:inline-grid;width:14px;margin-right:6px"></span>Fix auth token refresh</td><td><i class="g pc-conduit" style="vertical-align:-2px;margin-right:5px">CO</i>conduit</td><td style="color:var(--amber)">Approval</td><td>feat/auth</td><td class="num">2m</td></tr>
+          <tr><td style="color:var(--text)"><span class="st in" style="display:inline-grid;width:14px;margin-right:6px"></span>Pick a migration strategy</td><td><i class="g pc-dotfiles" style="vertical-align:-2px;margin-right:5px">DF</i>dotfiles</td><td style="color:var(--indigo)">Input</td><td>main</td><td class="num">22m</td></tr>
+          <tr><td><span class="st wk" style="display:inline-grid;width:14px;margin-right:6px"></span>Migrate zsh config to nushell</td><td><i class="g pc-dotfiles" style="vertical-align:-2px;margin-right:5px">DF</i>dotfiles</td><td style="color:var(--blue)">Working 4m</td><td>main</td><td class="num">4m</td></tr>
+          <tr style="background:var(--alt)"><td style="color:var(--text)"><span class="st wk" style="display:inline-grid;width:14px;margin-right:6px"></span>Refactor relay stack</td><td><i class="g pc-conduit" style="vertical-align:-2px;margin-right:5px">CO</i>conduit</td><td style="color:var(--blue)">Working 9m</td><td>main</td><td class="num">9m</td></tr>
+          <tr><td style="color:var(--text)"><span class="st dn" style="display:inline-grid;width:14px;margin-right:6px"></span>Add session export</td><td><i class="g pc-conduit" style="vertical-align:-2px;margin-right:5px">CO</i>conduit</td><td style="color:var(--green)">Done</td><td>main</td><td class="num">12m</td></tr>
+          <tr><td>Investigate flaky e2e</td><td><i class="g pc-perry" style="vertical-align:-2px;margin-right:5px">PE</i>perry</td><td>–</td><td>main</td><td class="num">1h</td></tr>
+          <tr><td>Wire PTY resize</td><td><i class="g pc-conduit" style="vertical-align:-2px;margin-right:5px">CO</i>conduit</td><td>–</td><td>main</td><td class="num">3h</td></tr>
+          <tr><td>Stabilise visual baselines</td><td><i class="g pc-perry" style="vertical-align:-2px;margin-right:5px">PE</i>perry</td><td>–</td><td>ci/visual</td><td class="num">1d</td></tr>
+          <tr><td colspan="5" style="font-size:10.5px;text-transform:uppercase;letter-spacing:.07em;color:var(--dim);padding-top:10px">▾ Settled · 41 <span style="text-transform:none;letter-spacing:0;margin-left:8px">sorted by settled time</span></td></tr>
+          <tr style="opacity:.55"><td>Wire PTY resize</td><td><i class="g pc-conduit" style="vertical-align:-2px;margin-right:5px">CO</i>conduit</td><td>Settled · <span style="color:#c4b5fd">#212 merged</span></td><td>main</td><td class="num">3d</td></tr>
+          <tr style="opacity:.55"><td>Reauth on stale socket</td><td><i class="g pc-conduit" style="vertical-align:-2px;margin-right:5px">CO</i>conduit</td><td>Settled · auto (idle 3d)</td><td>fix/reauth</td><td class="num">1w</td></tr>
+        </tbody>
+      </table>
+    </aside>
+    <div class="main"><div class="ghost w1"></div><div class="ghost w2"></div><div class="ghost w3"></div><div class="bubble"></div><div class="ghost w1"></div><div class="ghost w4"></div></div>
+  </div>
+</section>
+
+<!-- D9 -->
+<section class="design" id="d9">
+  <header>
+    <span class="num">D9</span>
+    <h3>Palette-first, minimal sidebar <span class="tag bp">Best practice</span></h3>
+    <p class="blurb">The sidebar shows needs-you plus the eight most recent. Everything else is ⌘K: fuzzy search over title + last message, grouped by project, ⌘1–9 jumps. "Show all" opens a full-page browser instead of growing the sidebar.</p>
+    <p class="cost"><b>Costs:</b> older sessions are hard to stumble on.</p>
+  </header>
+  <div class="frame">
+    <aside class="sb">
+      <div class="brand">conduit<i></i></div>
+      <div class="hdr"><div class="search" style="justify-content:space-between">Search all sessions… <span class="kbd">⌘K</span></div></div>
+      <div class="list">
+        <div class="sec"><span>Needs you</span><span class="n">2</span></div>
+        <a class="row slim unread" href="#"><span class="st ap"></span><span class="t"><i class="g pc-conduit" style="vertical-align:-2px;margin-right:5px">CO</i>Fix auth token refresh</span><span class="r verb">approve</span></a>
+        <a class="row slim unread" href="#"><span class="st in"></span><span class="t"><i class="g pc-dotfiles" style="vertical-align:-2px;margin-right:5px">DF</i>Pick a migration strategy</span><span class="r verb i">reply</span></a>
+        <div class="sec"><span>Recent</span></div>
+        <a class="row slim recede" href="#"><span class="st wk"></span><span class="t"><i class="g pc-dotfiles" style="vertical-align:-2px;margin-right:5px">DF</i>Migrate zsh config to nushell</span><span class="r">4m</span></a>
+        <a class="row slim active recede" href="#"><span class="st wk"></span><span class="t"><i class="g pc-conduit" style="vertical-align:-2px;margin-right:5px">CO</i>Refactor relay stack</span><span class="r">9m</span></a>
+        <a class="row slim unread" href="#"><span class="st dn"></span><span class="t"><i class="g pc-conduit" style="vertical-align:-2px;margin-right:5px">CO</i>Add session export</span><span class="r">12m</span></a>
+        <a class="row slim recede" href="#"><span class="st"></span><span class="t"><i class="g pc-perry" style="vertical-align:-2px;margin-right:5px">PE</i>Investigate flaky e2e</span><span class="r">1h</span></a>
+        <a class="row slim recede" href="#"><span class="st"></span><span class="t"><i class="g pc-conduit" style="vertical-align:-2px;margin-right:5px">CO</i>Wire PTY resize</span><span class="r">3h</span></a>
+        <div class="more">Show all 47 sessions → <span style="color:var(--dimmer)">· 41 settled</span></div>
+      </div>
+    </aside>
+    <div class="main" style="position:relative;opacity:1">
+      <div style="position:absolute;inset:0;background:rgba(0,0,0,.5)"></div>
+      <div style="position:absolute;left:50%;top:40px;translate:-50% 0;width:78%;max-width:360px;background:var(--surface);border:1px solid var(--border2);border-radius:12px;box-shadow:0 24px 60px rgba(0,0,0,.5);overflow:hidden">
+        <div style="padding:10px 12px;border-bottom:1px solid var(--border);font-size:13px;color:var(--text)">auth<span style="color:var(--brand)">▍</span></div>
+        <div class="list" style="padding:6px">
+          <div class="sec" style="padding-top:4px"><span><i class="g pc-conduit" style="vertical-align:-2px;margin-right:5px">CO</i>conduit</span></div>
+          <a class="row slim active" href="#"><span class="st ap"></span><span class="t">Fix <b style="color:var(--brand)">auth</b> token refresh</span><span class="r"><span class="kbd">1</span></span></a>
+          <a class="row slim" href="#"><span class="st"></span><span class="t">Re<b style="color:var(--brand)">auth</b> on stale socket</span><span class="r"><span class="kbd">2</span></span></a>
+          <div class="sec"><span><i class="g pc-hunk" style="vertical-align:-2px;margin-right:5px">HK</i>hunk</span></div>
+          <a class="row slim" href="#"><span class="st"></span><span class="t">OAuth device flow for <b style="color:var(--brand)">auth</b></span><span class="r"><span class="kbd">3</span></span></a>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- D10 -->
+<section class="design" id="d10">
+  <header>
+    <span class="num">D10</span>
+    <h3>Mobile-first tabs <span class="tag bp">Best practice</span></h3>
+    <p class="blurb">Scrolling project tabs with badge dots over a segmented status control. 44px touch rows, swipe right to settle, left to snooze, long-press for the menu twins (t3code mobile uses an "Arrange" mode with drag handles instead). Same component on desktop, where the tab row wraps.</p>
+    <p class="cost"><b>Costs:</b> least distinctive on desktop.</p>
+  </header>
+  <div class="frame" style="justify-content:center;background:var(--bg)">
+    <div style="width:250px;margin:14px 0;border:1px solid var(--border2);border-radius:26px;overflow:hidden;background:var(--surface);display:flex;flex-direction:column">
+      <div style="height:22px;display:flex;justify-content:center;align-items:flex-end"><i style="width:60px;height:6px;border-radius:3px;background:var(--border2)"></i></div>
+      <div class="chips" style="padding:10px 10px 4px;flex-wrap:nowrap;overflow:hidden"><span class="chip on">All</span><span class="chip"><i class="g pc-conduit">CO</i>conduit <i class="dot ap"></i></span><span class="chip"><i class="g pc-dotfiles">DF</i>dotfiles <i class="dot wk"></i></span><span class="chip"><i class="g pc-perry">PE</i>perry</span></div>
+      <div style="margin:4px 10px 6px;display:grid;grid-template-columns:repeat(4,1fr);background:var(--bg);border-radius:8px;padding:2px;font-size:10.5px;text-align:center;color:var(--dim)"><span style="background:var(--alt);color:var(--text);border-radius:6px;padding:4px">Needs you</span><span style="padding:4px">Running</span><span style="padding:4px">Done</span><span style="padding:4px">All</span></div>
+      <div class="list" style="gap:0">
+        <a class="row two unread" href="#" style="padding:10px 8px"><span class="st ap"></span><span class="t">Fix auth token refresh</span><span class="m"><i class="g pc-conduit">CO</i><span class="tr">conduit · feat/auth</span></span><span class="r verb">approve</span></a>
+        <div style="position:relative;overflow:hidden;border-radius:7px"><div style="position:absolute;inset:0;background:var(--green);display:flex;align-items:center;padding-left:12px;font-size:11px;font-weight:600;color:#0d0e11">✓ Settle</div>
+        <a class="row two unread" href="#" style="padding:10px 8px;translate:64px 0;background:var(--surface)"><span class="st in"></span><span class="t">Pick a migration strategy</span><span class="m"><i class="g pc-dotfiles">DF</i><span class="tr">dotfiles · main</span></span><span class="r verb i">reply</span></a></div>
+        <a class="row two recede" href="#" style="padding:10px 8px"><span class="st wk"></span><span class="t">Migrate zsh config to nushell</span><span class="m"><i class="g pc-dotfiles">DF</i><span class="tr">dotfiles · main</span></span><span class="r">4m</span></a>
+        <a class="row two unread" href="#" style="padding:10px 8px"><span class="st dn"></span><span class="t">Add session export</span><span class="m"><i class="g pc-conduit">CO</i><span class="tr">conduit · main</span></span><span class="r">12m</span></a>
+        <a class="row two recede" href="#" style="padding:10px 8px"><span class="st"></span><span class="t">Investigate flaky e2e</span><span class="m"><i class="g pc-perry">PE</i><span class="tr">perry · main</span></span><span class="r">1h</span></a>
+        <div class="sec bottom"><span><span class="caret">▸</span>Settled</span><span class="n">41</span></div>
+      </div>
+      <div style="height:18px;display:flex;justify-content:center;align-items:center"><i style="width:80px;height:4px;border-radius:2px;background:var(--border2)"></i></div>
+    </div>
+  </div>
+</section>
+
+</div>
+
+<div class="part">
+  <h2>Outside-the-box designs</h2>
+  <p>Each one breaks at least one convention on purpose and says what it costs. Several want a full-page mode more than a 272px sidebar.</p>
+</div>
+
+<div class="grid">
+
+<!-- D11 -->
+<section class="design" id="d11">
+  <header>
+    <span class="num">D11</span>
+    <h3>Kanban swimlanes <span class="tag wild">Wild</span></h3>
+    <p class="blurb">The sidebar is a three-column board. Columns are status, cards are sessions. Drop a card past Done to settle it; auto-settle clears the Done column for you after 3 days or a merge.</p>
+    <p class="cost"><b>Costs:</b> wants 420px+; fights the vertical scroll everything else assumes.</p>
+  </header>
+  <div class="frame">
+    <aside class="sb w420">
+      <div class="brand">conduit<i></i></div>
+      <div class="kb">
+        <div class="col"><h4>Needs you <span>2</span></h4>
+          <div class="kcard"><span class="t">Fix auth token refresh</span><span class="m"><span class="st ap" style="width:12px;height:12px;font-size:9px"></span><i class="g pc-conduit">CO</i>2m</span></div>
+          <div class="kcard"><span class="t">Pick a migration strategy</span><span class="m"><span class="st in" style="width:12px;height:12px;font-size:9px"></span><i class="g pc-dotfiles">DF</i>22m</span></div>
+        </div>
+        <div class="col"><h4>Running <span>3</span></h4>
+          <div class="kcard" style="opacity:.75"><span class="t">Migrate zsh to nushell</span><span class="m"><span class="st wk" style="width:12px;height:12px"></span><i class="g pc-dotfiles">DF</i>4m</span></div>
+          <div class="kcard" style="border-color:var(--brand)"><span class="t">Refactor relay stack</span><span class="m"><span class="st wk" style="width:12px;height:12px"></span><i class="g pc-conduit">CO</i>9m</span></div>
+          <div class="kcard" style="opacity:.75"><span class="t">Wire PTY resize</span><span class="m"><span class="st wk" style="width:12px;height:12px"></span><i class="g pc-conduit">CO</i>31m</span></div>
+        </div>
+        <div class="col"><h4>Done <span>1</span></h4>
+          <div class="kcard"><span class="t">Add session export</span><span class="m"><span class="st dn" style="width:12px;height:12px;font-size:9px"></span><i class="g pc-conduit">CO</i>12m</span></div>
+          <div style="margin-top:auto;display:flex;flex-direction:column;gap:4px">
+            <div style="font-size:10px;color:var(--brand);text-align:center;padding:6px;border:1px dashed var(--brand);border-radius:6px">✓ drop to settle</div>
+            <div style="font-size:10px;color:var(--dim);display:flex;justify-content:space-between;padding:4px 2px 0"><span>▸ Settled</span><span>41</span></div>
+          </div>
+        </div>
+      </div>
+    </aside>
+    <div class="main"><div class="ghost w1"></div><div class="ghost w2"></div><div class="ghost w3"></div><div class="bubble"></div></div>
+  </div>
+</section>
+
+<!-- D12 -->
+<section class="design" id="d12">
+  <header>
+    <span class="num">D12</span>
+    <h3>Timeline strip <span class="tag wild">Wild</span></h3>
+    <p class="blurb">Vertical time axis. Each session is a bar from creation to last activity; running bars extend to the live edge and breathe. Bar colour is project, status glyph sits at the head. You see who's been running longest and what overlapped.</p>
+    <p class="cost"><b>Costs:</b> lots of empty width; long-lived sessions dominate.</p>
+  </header>
+  <div class="frame">
+    <aside class="sb w340">
+      <div class="brand">conduit<i></i></div>
+      <div class="tl">
+        <div class="axis"></div>
+        <div class="nowline"><span class="nowlab">now</span></div>
+        <span class="tick" style="top:36px">15:30</span>
+        <span class="tick" style="top:148px">15:00</span>
+        <span class="tick" style="top:260px">14:30</span>
+        <span class="tick" style="top:372px">14:00</span>
+        <div class="bar pc-dotfiles" style="margin-top:14px"><i class="live" style="width:38%"></i><span><b class="st wk" style="display:inline-grid;width:12px;height:12px;vertical-align:-2px"></b> Migrate zsh to nushell</span></div>
+        <div class="bar pc-conduit"><i style="width:22%;background:var(--amber)"></i><span><b class="st ap" style="display:inline-grid;width:12px;height:12px;font-size:9px;vertical-align:-2px"></b> Fix auth token refresh</span></div>
+        <div class="bar pc-conduit"><i class="live" style="width:52%"></i><span><b class="st wk" style="display:inline-grid;width:12px;height:12px;vertical-align:-2px"></b> Refactor relay stack</span></div>
+        <div class="bar pc-conduit" style="margin-top:24px"><i style="width:30%"></i><span><b class="st dn" style="display:inline-grid;width:12px;height:12px;font-size:9px;vertical-align:-2px"></b> Add session export</span></div>
+        <div class="bar pc-dotfiles"><i style="width:18%"></i><span><b class="st in" style="display:inline-grid;width:12px;height:12px;font-size:9px;vertical-align:-2px"></b> Pick a migration strategy</span></div>
+        <div class="bar pc-perry" style="margin-top:36px;opacity:.6"><i style="width:44%"></i><span>Investigate flaky e2e</span></div>
+        <div class="bar pc-conduit" style="margin-top:40px;opacity:.6"><i style="width:64%"></i><span>Wire PTY resize</span></div>
+        <div class="bar pc-perry" style="margin-top:40px;opacity:.6"><i style="width:26%"></i><span>Stabilise visual baselines</span></div>
+        <div style="margin-top:auto;display:flex;justify-content:space-between;font:10px var(--mono);color:var(--dim);border-top:1px dashed var(--border2);padding-top:6px"><span>▸ settled · 41 (bars go grey, then leave the axis)</span></div>
+      </div>
+    </aside>
+    <div class="main"><div class="ghost w1"></div><div class="ghost w2"></div><div class="ghost w3"></div><div class="bubble"></div></div>
+  </div>
+</section>
+
+<!-- D13 -->
+<section class="design" id="d13">
+  <header>
+    <span class="num">D13 · BLOCKGRID NATIVE</span>
+    <h3>Activity heatmap per project <span class="tag wild">Wild</span></h3>
+    <p class="blurb">Each project is a 24-cell sparkline built from the existing BlockGrid: one cell per hour, intensity = messages, cell pulses when live. Click a cell to filter the list to that hour; click the name to toggle scope.</p>
+    <p class="cost"><b>Costs:</b> the sparkline informs, the list below still navigates.</p>
+  </header>
+  <div class="frame">
+    <aside class="sb">
+      <div class="brand">conduit<i></i></div>
+      <div class="hm">
+        <div class="hmr pc-conduit"><span><i class="g pc-conduit" style="vertical-align:-2px;margin-right:4px">CO</i>conduit</span><div class="cells"><i style="--o:.1"></i><i style="--o:.1"></i><i style="--o:.12"></i><i style="--o:.1"></i><i style="--o:.1"></i><i style="--o:.1"></i><i style="--o:.2"></i><i style="--o:.35"></i><i style="--o:.5"></i><i style="--o:.3"></i><i style="--o:.7"></i><i style="--o:.9"></i><i style="--o:.6"></i><i style="--o:.4"></i><i style="--o:.2"></i><i style="--o:.1"></i><i style="--o:.3"></i><i style="--o:.55"></i><i style="--o:.8"></i><i style="--o:.95"></i><i style="--o:.7"></i><i style="--o:.8"></i><i style="--o:1"></i><i class="live" style="--o:1"></i></div><span><span class="badge ap">1</span><span class="badge wk">1</span></span></div>
+        <div class="hmr pc-dotfiles"><span><i class="g pc-dotfiles" style="vertical-align:-2px;margin-right:4px">DF</i>dotfiles</span><div class="cells"><i style="--o:.1"></i><i style="--o:.1"></i><i style="--o:.1"></i><i style="--o:.1"></i><i style="--o:.1"></i><i style="--o:.1"></i><i style="--o:.1"></i><i style="--o:.1"></i><i style="--o:.1"></i><i style="--o:.1"></i><i style="--o:.1"></i><i style="--o:.1"></i><i style="--o:.1"></i><i style="--o:.1"></i><i style="--o:.1"></i><i style="--o:.1"></i><i style="--o:.1"></i><i style="--o:.1"></i><i style="--o:.1"></i><i style="--o:.1"></i><i style="--o:.4"></i><i style="--o:.7"></i><i style="--o:.9"></i><i class="live" style="--o:1"></i></div><span><span class="badge wk">1</span></span></div>
+        <div class="hmr pc-perry"><span><i class="g pc-perry" style="vertical-align:-2px;margin-right:4px">PE</i>perry</span><div class="cells"><i style="--o:.5"></i><i style="--o:.7"></i><i style="--o:.4"></i><i style="--o:.1"></i><i style="--o:.1"></i><i style="--o:.1"></i><i style="--o:.1"></i><i style="--o:.1"></i><i style="--o:.1"></i><i style="--o:.1"></i><i style="--o:.1"></i><i style="--o:.1"></i><i style="--o:.1"></i><i style="--o:.1"></i><i style="--o:.1"></i><i style="--o:.1"></i><i style="--o:.1"></i><i style="--o:.1"></i><i style="--o:.1"></i><i style="--o:.1"></i><i style="--o:.1"></i><i style="--o:.1"></i><i style="--o:.35"></i><i style="--o:.1"></i></div><span class="badge dn">1</span></div>
+        <div class="hmr pc-hunk" style="opacity:.55"><span><i class="g pc-hunk" style="vertical-align:-2px;margin-right:4px">HK</i>hunk</span><div class="cells"><i style="--o:.1"></i><i style="--o:.1"></i><i style="--o:.1"></i><i style="--o:.1"></i><i style="--o:.1"></i><i style="--o:.1"></i><i style="--o:.1"></i><i style="--o:.1"></i><i style="--o:.1"></i><i style="--o:.1"></i><i style="--o:.1"></i><i style="--o:.1"></i><i style="--o:.1"></i><i style="--o:.1"></i><i style="--o:.1"></i><i style="--o:.1"></i><i style="--o:.1"></i><i style="--o:.1"></i><i style="--o:.1"></i><i style="--o:.1"></i><i style="--o:.1"></i><i style="--o:.1"></i><i style="--o:.1"></i><i style="--o:.1"></i></div><span></span></div>
+        <div style="display:flex;justify-content:space-between;font:9.5px var(--mono);color:var(--dimmer);padding:0 0 0 62px"><span>-24h</span><span>-12h</span><span>now</span></div>
+      </div>
+      <div class="list">
+        <div class="sec"><span>Last hour</span><span class="n">5</span></div>
+        <a class="row slim unread" href="#"><span class="st ap"></span><span class="t"><i class="g pc-conduit" style="vertical-align:-2px;margin-right:5px">CO</i>Fix auth token refresh</span><span class="r">2m</span></a>
+        <a class="row slim recede" href="#"><span class="st wk"></span><span class="t"><i class="g pc-dotfiles" style="vertical-align:-2px;margin-right:5px">DF</i>Migrate zsh config to nushell</span><span class="r">4m</span></a>
+        <a class="row slim active recede" href="#"><span class="st wk"></span><span class="t"><i class="g pc-conduit" style="vertical-align:-2px;margin-right:5px">CO</i>Refactor relay stack</span><span class="r">9m</span></a>
+        <a class="row slim unread" href="#"><span class="st dn"></span><span class="t"><i class="g pc-conduit" style="vertical-align:-2px;margin-right:5px">CO</i>Add session export</span><span class="r">12m</span></a>
+        <a class="row slim unread" href="#"><span class="st in"></span><span class="t"><i class="g pc-dotfiles" style="vertical-align:-2px;margin-right:5px">DF</i>Pick a migration strategy</span><span class="r">22m</span></a>
+        <div class="sec bottom"><span><span class="caret">▸</span>Settled</span><span class="n">41</span></div>
+      </div>
+    </aside>
+    <div class="main"><div class="ghost w1"></div><div class="ghost w2"></div><div class="ghost w3"></div><div class="bubble"></div></div>
+  </div>
+</section>
+
+<!-- D14 -->
+<section class="design" id="d14">
+  <header>
+    <span class="num">D14</span>
+    <h3>Treemap <span class="tag wild">Wild</span></h3>
+    <p class="blurb">Projects are rectangles sized by recent activity; sessions are tiles inside, sized by recency, tinted by status. One glance: conduit is where the action is and one tile is amber.</p>
+    <p class="cost"><b>Costs:</b> tiny tiles are unreadable and un-tappable; needs a list under ~40px. Settling is what keeps the map readable: settled sessions leave it entirely.</p>
+  </header>
+  <div class="frame">
+    <aside class="sb w340">
+      <div class="brand">conduit<i></i></div>
+      <div class="tm">
+        <div class="z pc-conduit" style="left:0;top:0;width:62%;height:64%"><b>conduit · 4</b>
+          <div class="tile2" style="left:6px;top:24px;width:calc(50% - 9px);height:calc(48% - 14px);border-color:var(--amber)"><span class="st ap"></span>Fix auth token refresh</div>
+          <div class="tile2" style="left:calc(50% + 3px);top:24px;width:calc(50% - 9px);height:calc(48% - 14px);box-shadow:inset 0 0 0 1px var(--brand)"><span class="st wk"></span>Refactor relay stack</div>
+          <div class="tile2" style="left:6px;top:calc(48% + 14px);width:calc(60% - 9px);height:calc(52% - 20px)"><span class="st dn"></span>Add session export</div>
+          <div class="tile2" style="left:calc(60% + 3px);top:calc(48% + 14px);width:calc(40% - 9px);height:calc(52% - 20px);opacity:.6">Wire PTY</div>
+        </div>
+        <div class="z pc-dotfiles" style="left:calc(62% + 6px);top:0;width:calc(38% - 6px);height:64%"><b>dotfiles · 2</b>
+          <div class="tile2" style="left:6px;top:24px;right:6px;height:calc(50% - 15px)"><span class="st wk"></span>Migrate zsh</div>
+          <div class="tile2" style="left:6px;top:calc(50% + 12px);right:6px;height:calc(50% - 20px);border-color:var(--indigo)"><span class="st in"></span>Migration strategy</div>
+        </div>
+        <div class="z pc-perry" style="left:0;top:calc(64% + 6px);width:62%;height:calc(36% - 14px)"><b>perry · 2</b>
+          <div class="tile2" style="left:6px;top:24px;width:calc(55% - 9px);bottom:6px;opacity:.6">Flaky e2e</div>
+          <div class="tile2" style="left:calc(55% + 3px);top:24px;right:6px;bottom:6px;opacity:.6">Visual baselines</div>
+        </div>
+        <div class="z pc-hunk" style="left:calc(62% + 6px);top:calc(64% + 6px);width:calc(38% - 6px);height:calc(36% - 14px);opacity:.6"><b>hunk · 5</b>
+          <div class="tile2" style="left:6px;top:24px;right:6px;bottom:6px;opacity:.6;font-size:10px">5 idle</div>
+        </div>
+        <div style="position:absolute;left:0;right:0;bottom:-2px;height:14px;font:10px var(--mono);color:var(--dim);display:flex;justify-content:space-between"><span>▸ settled · 41 leave the map</span><span>auto after 3d</span></div>
+      </div>
+    </aside>
+    <div class="main"><div class="ghost w1"></div><div class="ghost w2"></div><div class="ghost w3"></div><div class="bubble"></div></div>
+  </div>
+</section>
+
+<!-- D15 -->
+<section class="design" id="d15">
+  <header>
+    <span class="num">D15</span>
+    <h3>Attention orbit <span class="tag wild">Wild</span></h3>
+    <p class="blurb">Radial. The session that most needs you sits in the centre; needs-you ring, running ring, idle ring fading out. Angle within a ring is project (each owns a sector). Sessions drift inward the longer they wait.</p>
+    <p class="cost"><b>Costs:</b> hostile to screen readers and keyboard order; alternate view only.</p>
+  </header>
+  <div class="frame">
+    <aside class="sb w340">
+      <div class="brand">conduit<i></i></div>
+      <div class="orb">
+        <div class="ring" style="width:150px;height:150px;border-color:color-mix(in srgb,var(--amber) 40%,transparent)"></div>
+        <div class="ring" style="width:260px;height:260px"></div>
+        <div class="ring" style="width:380px;height:380px;opacity:.5"></div>
+        <div class="node core" style="left:50%;top:50%"><span style="display:flex;gap:5px;align-items:center"><span class="st ap" style="width:12px;height:12px;font-size:9px"></span>Fix auth token refresh</span><span style="font-size:10px;color:var(--dim)"><i class="g pc-conduit">CO</i> conduit · waiting 6m</span></div>
+        <div class="node" style="left:50%;top:calc(50% - 74px);color:var(--text)"><span class="st in" style="width:12px;height:12px;font-size:9px"></span>Pick a migration strategy</div>
+        <div class="node" style="left:calc(50% - 104px);top:calc(50% - 56px)"><span class="st wk" style="width:12px;height:12px"></span>Migrate zsh</div>
+        <div class="node" style="left:calc(50% + 100px);top:calc(50% + 70px)"><span class="st wk" style="width:12px;height:12px"></span>Refactor relay</div>
+        <div class="node" style="left:calc(50% - 14px);top:calc(50% + 126px)"><span class="st dn" style="width:12px;height:12px;font-size:9px"></span>Add session export</div>
+        <div class="node" style="left:calc(50% + 118px);top:calc(50% - 124px);opacity:.5">· Flaky e2e</div>
+        <div class="node" style="left:calc(50% - 96px);top:calc(50% + 44px);opacity:.5">· Wire PTY resize</div>
+        <div class="node" style="left:calc(50% + 44px);top:calc(50% - 178px);opacity:.4">· Visual baselines</div>
+        <div class="node" style="left:calc(50% - 40px);top:calc(50% + 186px);opacity:.4">· Audit brew bundle</div>
+        <div class="node" style="left:calc(50% + 150px);top:calc(50% + 150px);opacity:.25">· Wire PTY (settled)</div>
+        <div style="position:absolute;right:8px;bottom:6px;font:9.5px var(--mono);color:var(--dimmer)">rings: needs you → running → idle → settled drifts off the edge</div>
+      </div>
+    </aside>
+    <div class="main"><div class="ghost w1"></div><div class="ghost w2"></div><div class="ghost w3"></div><div class="bubble"></div></div>
+  </div>
+</section>
+
+<!-- D16 -->
+<section class="design" id="d16">
+  <header>
+    <span class="num">D16 · GENUINELY USEFUL</span>
+    <h3>Unified message river <span class="tag wild">Wild</span></h3>
+    <p class="blurb">A feed of last assistant lines, newest first, like a Slack unified inbox. Permission prompts and questions render inline with their buttons so you approve without opening the session. Title becomes secondary. "Done" posts get a ✓ settle on hover; settled posts leave the river.</p>
+    <p class="cost"><b>Costs:</b> 3–4 line rows; inline actions in a nav region need careful focus management.</p>
+  </header>
+  <div class="frame xtall">
+    <aside class="sb w340">
+      <div class="brand">conduit<i></i></div>
+      <div class="hdr"><div class="search">Search sessions…</div><div class="well"><span class="ib">◫</span><span class="ib">+</span></div></div>
+      <div class="list" style="gap:2px">
+        <a class="post" href="#"><span class="h"><i class="g pc-conduit">CO</i><b>conduit</b> · Fix auth token refresh<span class="r">2m</span></span><span class="body"><span class="st ap" style="width:16px"></span><span>May I run <code>pnpm test:unit</code>? It touches 3 files.</span></span><span class="btns"><span class="btn pri">Allow</span><span class="btn">Deny</span><span class="btn" style="border:0;color:var(--dim)">Open</span></span></a>
+        <a class="post" href="#"><span class="h"><i class="g pc-dotfiles">DF</i><b>dotfiles</b> · Pick a migration strategy<span class="r">22m</span></span><span class="body"><span class="st in" style="width:16px"></span><span>Rewrite aliases in place, or generate a fresh <code>config.nu</code>?</span></span><span class="btns"><span class="btn">In place</span><span class="btn">Fresh file</span><span class="btn" style="border:0;color:var(--dim)">Reply…</span></span></a>
+        <a class="post" href="#"><span class="h"><i class="g pc-dotfiles">DF</i><b>dotfiles</b> · Migrate zsh config to nushell<span class="r">4m</span></span><span class="body mute"><span class="st wk" style="width:16px"></span><span>Rewriting aliases… 14/32 files</span></span><span class="prog"><i></i></span></a>
+        <a class="post" href="#" style="background:var(--alt);box-shadow:inset 3px 0 0 var(--brand)"><span class="h"><i class="g pc-conduit">CO</i><b>conduit</b> · Refactor relay stack<span class="r">9m</span></span><span class="body mute"><span class="st wk" style="width:16px"></span><span>Extracting <code>PtyUpstream</code> from relay-stack.ts…</span></span></a>
+        <a class="post" href="#"><span class="h"><i class="g pc-conduit">CO</i><b>conduit</b> · Add session export<span class="r">12m</span></span><span class="body"><span class="st dn" style="width:16px"></span><span>Done. Added JSON and Markdown export behind the kebab menu.</span></span></a>
+        <a class="post" href="#" style="opacity:.6"><span class="h"><i class="g pc-perry">PE</i><b>perry</b> · Investigate flaky e2e<span class="r">1h</span></span><span class="body mute"><span style="width:16px"></span><span>The race is in workspace teardown; see the summary above.</span></span></a>
+        <div class="sec bottom"><span><span class="caret">▸</span>Settled</span><span class="n">41 · <span style="font-weight:400">posts leave the river</span></span></div>
+      </div>
+    </aside>
+    <div class="main"><div class="ghost w1"></div><div class="ghost w2"></div><div class="ghost w3"></div><div class="bubble"></div></div>
+  </div>
+</section>
+
+<!-- D17 -->
+<section class="design wide" id="d17">
+  <header>
+    <span class="num">D17 · MISSION CONTROL</span>
+    <h3>Spatial desk <span class="tag wild">Wild</span></h3>
+    <p class="blurb">Freeform canvas. Sessions are draggable cards, projects are resizable zones, positions persist. Spatial memory replaces sorting ("the auth work is top-left"). New sessions spawn inside their zone.</p>
+    <p class="cost"><b>Costs:</b> canvases rot; needs a Tidy command and a list mode. Full-page, not a 272px sidebar.</p>
+  </header>
+  <div class="frame tall">
+    <div class="desk" style="flex:1">
+      <div class="zone pc-conduit" style="left:24px;top:22px;width:330px;height:250px"><b>conduit</b></div>
+      <div class="note tilt" style="left:44px;top:56px;border-color:var(--amber);color:var(--text)"><span class="st ap"></span>Fix auth token refresh <span style="color:var(--amber);font-size:10px">approve</span></div>
+      <div class="note" style="left:190px;top:112px;box-shadow:0 0 0 1px var(--brand),0 4px 12px rgba(0,0,0,.35)"><span class="st wk"></span>Refactor relay stack <span style="color:var(--dim)">9m</span></div>
+      <div class="note tilt2" style="left:60px;top:160px;color:var(--text)"><span class="st dn"></span>Add session export</div>
+      <div class="note" style="left:210px;top:212px;opacity:.6">Wire PTY resize</div>
+      <div class="zone pc-dotfiles" style="left:390px;top:22px;width:250px;height:160px"><b>dotfiles</b></div>
+      <div class="note" style="left:410px;top:58px"><span class="st wk"></span>Migrate zsh → nushell <span style="color:var(--dim)">4m</span></div>
+      <div class="note tilt" style="left:440px;top:118px;border-color:var(--indigo);color:var(--text)"><span class="st in"></span>Migration strategy?</div>
+      <div class="zone pc-perry" style="left:390px;top:206px;width:250px;height:120px;opacity:.7"><b>perry</b></div>
+      <div class="note" style="left:410px;top:240px;opacity:.6">Investigate flaky e2e</div>
+      <div class="note" style="left:470px;top:284px;opacity:.6">Visual baselines</div>
+      <div class="zone pc-hunk" style="left:24px;top:296px;width:330px;height:110px;opacity:.5"><b>hunk</b></div>
+      <div class="note" style="left:50px;top:334px;opacity:.5">5 idle sessions · collapsed</div>
+      <div style="position:absolute;left:24px;right:14px;bottom:34px;height:36px;border-top:1px dashed var(--border2);display:flex;align-items:center;gap:10px;font-size:10.5px;color:var(--dim)"><span>▸ Settled tray · 41</span><span style="opacity:.6">drag a card below the line to settle it; auto-settled cards slide down here on their own</span></div>
+      <div style="position:absolute;right:14px;top:12px;display:flex;gap:6px"><span class="btn" style="font-size:11px">Tidy</span><span class="btn" style="font-size:11px">List view</span><span class="btn pri" style="font-size:11px">+ New</span></div>
+      <div style="position:absolute;right:14px;bottom:10px;font:10px var(--mono);color:var(--dimmer)">positions persist per user · cards spawn in their zone</div>
+    </div>
+  </div>
+</section>
+
+<!-- D18 -->
+<section class="design" id="d18">
+  <header>
+    <span class="num">D18 · EASTER EGG CANDIDATE</span>
+    <h3>Terminal status list (mutt / tmux) <span class="tag wild">Wild</span></h3>
+    <p class="blurb">Monospace, fixed columns, zero chrome. <code>j/k</code> move, <code>1–9</code> jump, <code>/</code> search, <code>:</code> opens a filter mini-language. Grouping is <code>:group project</code>. Fits the block-grid, PTY-adjacent brand.</p>
+    <p class="cost"><b>Costs:</b> alienates non-terminal people; needs a palette that writes the commands for you.</p>
+  </header>
+  <div class="frame">
+    <aside class="sb w420">
+      <div class="tty">
+        <div class="ln" style="color:var(--dim)"><span class="c1">#</span><span class="c2"> </span><span class="c3">project</span><span class="c4">branch</span><span class="c5">title</span><span class="c6">age</span></div>
+        <div class="ln"><span class="c1">1</span><span class="c2" style="color:var(--amber)">⚠</span><span class="c3" style="color:var(--p-conduit)">conduit</span><span class="c4">feat/auth</span><span class="c5" style="color:var(--text)">Fix auth token refresh</span><span class="c6">2m</span></div>
+        <div class="ln"><span class="c1">2</span><span class="c2" style="color:var(--indigo)">?</span><span class="c3" style="color:var(--p-dotfiles)">dotfiles</span><span class="c4">main</span><span class="c5" style="color:var(--text)">Pick a migration strategy</span><span class="c6">22m</span></div>
+        <div class="ln" style="opacity:.7"><span class="c1">3</span><span class="c2" style="color:var(--blue)">◌</span><span class="c3" style="color:var(--p-dotfiles)">dotfiles</span><span class="c4">main</span><span class="c5">Migrate zsh config to nushell</span><span class="c6">4m</span></div>
+        <div class="ln cur"><span class="c1">4</span><span class="c2" style="color:var(--blue)">◌</span><span class="c3" style="color:var(--p-conduit)">conduit</span><span class="c4">main</span><span class="c5">Refactor relay stack</span><span class="c6">9m</span></div>
+        <div class="ln"><span class="c1">5</span><span class="c2" style="color:var(--green)">✓</span><span class="c3" style="color:var(--p-conduit)">conduit</span><span class="c4">main</span><span class="c5" style="color:var(--text)">Add session export</span><span class="c6">12m</span></div>
+        <div class="ln" style="opacity:.55"><span class="c1">6</span><span class="c2"> </span><span class="c3" style="color:var(--p-perry)">perry</span><span class="c4">main</span><span class="c5">Investigate flaky e2e</span><span class="c6">1h</span></div>
+        <div class="ln" style="opacity:.55"><span class="c1">7</span><span class="c2"> </span><span class="c3" style="color:var(--p-conduit)">conduit</span><span class="c4">main</span><span class="c5">Wire PTY resize</span><span class="c6">3h</span></div>
+        <div class="ln" style="opacity:.55"><span class="c1">8</span><span class="c2"> </span><span class="c3" style="color:var(--p-perry)">perry</span><span class="c4">ci/visual</span><span class="c5">Stabilise visual baselines</span><span class="c6">1d</span></div>
+        <div class="ln" style="opacity:.55"><span class="c1">9</span><span class="c2"> </span><span class="c3" style="color:var(--p-dotfiles)">dotfiles</span><span class="c4">main</span><span class="c5">Audit brew bundle</span><span class="c6">1d</span></div>
+        <div class="ln" style="color:var(--dimmer)"><span class="c1">…</span><span class="c5">41 settled · :settled to show · s settle · u un-settle · z snooze</span></div>
+        <div class="cmd">:filter status=needs-you p=conduit since=1h</div>
+      </div>
+    </aside>
+    <div class="main"><div class="ghost w1"></div><div class="ghost w2"></div><div class="ghost w3"></div><div class="bubble"></div></div>
+  </div>
+</section>
+
+<!-- D19 -->
+<section class="design" id="d19">
+  <header>
+    <span class="num">D19 · USES parentID WE ALREADY HAVE</span>
+    <h3>Fork graph <span class="tag wild">Wild</span></h3>
+    <p class="blurb">Git-style graph: forks branch off their parent with connector lines, projects are lanes, status glyphs sit on nodes. Collapse a parent to hide its subtree. Answers "which exploration is still alive" at a glance. Settled branches stay in the tree, dimmed, so the shape of the exploration survives.</p>
+    <p class="cost"><b>Costs:</b> unforked sessions waste the gutter; only pays off for heavy forkers.</p>
+  </header>
+  <div class="frame">
+    <aside class="sb">
+      <div class="brand">conduit<i></i></div>
+      <div class="hdr"><div class="search">Search sessions…</div></div>
+      <div class="list fg">
+        <div class="sec"><span><i class="g pc-conduit" style="vertical-align:-2px;margin-right:6px">CO</i>conduit</span></div>
+        <a class="row slim unread pc-conduit" href="#"><span class="gutter"><i class="node2"></i>  </span><span class="st ap"></span><span class="t">Fix auth token refresh</span><span class="r verb">approve</span></a>
+        <a class="row slim recede pc-conduit" href="#"><span class="gutter">├─<i class="node2"></i></span><span class="st wk"></span><span class="t">Try refresh-token rotation<span class="fork">⑂</span></span><span class="r">6m</span></a>
+        <a class="row slim unread pc-conduit" href="#"><span class="gutter">│ └<i class="node2"></i></span><span class="st dn"></span><span class="t">…with backoff<span class="fork">⑂</span></span><span class="r">3m</span></a>
+        <a class="row slim settled pc-conduit" href="#"><span class="gutter">└─<i class="node2"></i></span><span class="st"></span><span class="t">Try session cookies<span class="fork">⑂</span></span><span class="r rest">settled 2h</span><span class="r act">↶ un-settle</span></a>
+        <a class="row slim active recede pc-conduit" href="#"><span class="gutter"><i class="node2"></i>  </span><span class="st wk"></span><span class="t">Refactor relay stack</span><span class="r">9m</span></a>
+        <a class="row slim unread pc-conduit" href="#"><span class="gutter"><i class="node2"></i>  </span><span class="st dn"></span><span class="t">Add session export</span><span class="r">12m</span></a>
+        <div class="sec"><span><i class="g pc-dotfiles" style="vertical-align:-2px;margin-right:6px">DF</i>dotfiles</span></div>
+        <a class="row slim recede pc-dotfiles" href="#"><span class="gutter"><i class="node2"></i>  </span><span class="st wk"></span><span class="t">Migrate zsh config to nushell</span><span class="r">4m</span></a>
+        <a class="row slim unread pc-dotfiles" href="#"><span class="gutter">└─<i class="node2"></i></span><span class="st in"></span><span class="t">Pick a migration strategy<span class="fork">⑂</span></span><span class="r verb i">reply</span></a>
+        <div class="sec"><span><i class="g pc-perry" style="vertical-align:-2px;margin-right:6px">PE</i>perry</span></div>
+        <a class="row slim recede pc-perry" href="#"><span class="gutter"><i class="node2"></i>  </span><span class="st"></span><span class="t">Investigate flaky e2e</span><span class="r">1h</span></a>
+      </div>
+    </aside>
+    <div class="main"><div class="ghost w1"></div><div class="ghost w2"></div><div class="ghost w3"></div><div class="bubble"></div></div>
+  </div>
+</section>
+
+<!-- D20 -->
+<section class="design" id="d20">
+  <header>
+    <span class="num">D20</span>
+    <h3>Card stacks per project <span class="tag wild">Wild</span></h3>
+    <p class="blurb">Each project is a stack, top card = most urgent session, count in the corner. Hover (or arrow key) fans the stack out; click a card to open. Scope is implicit because every stack is visible. <em>Hover a stack below.</em></p>
+    <p class="cost"><b>Costs:</b> only the top card reads at rest, so it lives or dies on the sort.</p>
+  </header>
+  <div class="frame xtall">
+    <aside class="sb w340">
+      <div class="brand">conduit<i></i></div>
+      <div class="hdr"><div class="search">Search sessions…</div></div>
+      <div class="stacks">
+        <div class="stack"><div class="hd"><i class="g lg pc-conduit">CO</i>conduit<span class="n">4</span></div>
+          <div class="c top" style="border-color:var(--amber)"><span class="st ap" style="width:12px;height:12px;font-size:9px"></span>Fix auth token refresh</div>
+          <div class="c b"><span class="st wk" style="width:12px;height:12px"></span>Refactor relay stack</div>
+          <div class="c c3"><span class="st dn" style="width:12px;height:12px;font-size:9px"></span>Add session export</div>
+        </div>
+        <div class="stack"><div class="hd"><i class="g lg pc-dotfiles">DF</i>dotfiles<span class="n">2</span></div>
+          <div class="c top" style="border-color:var(--indigo)"><span class="st in" style="width:12px;height:12px;font-size:9px"></span>Pick a migration strategy</div>
+          <div class="c b"><span class="st wk" style="width:12px;height:12px"></span>Migrate zsh to nushell</div>
+        </div>
+        <div class="stack" style="margin-top:44px"><div class="hd"><i class="g lg pc-perry">PE</i>perry<span class="n">2</span></div>
+          <div class="c top" style="color:var(--text2)">Investigate flaky e2e</div>
+          <div class="c b">Stabilise visual baselines</div>
+        </div>
+        <div class="stack" style="margin-top:44px;opacity:.6"><div class="hd"><i class="g lg pc-hunk">HK</i>hunk<span class="n">5</span></div>
+          <div class="c top">OAuth device flow</div>
+          <div class="c b">Split diff hunks</div>
+          <div class="c c3">Keymap docs</div>
+        </div>
+      </div>
+      <div class="sec bottom" style="padding:8px 16px 12px"><span><span class="caret">▸</span>Settled</span><span class="n">41 · never in a stack</span></div>
+    </aside>
+    <div class="main"><div class="ghost w1"></div><div class="ghost w2"></div><div class="ghost w3"></div><div class="bubble"></div></div>
+  </div>
+</section>
+
+<!-- D21 -->
+<section class="design wide" id="d21">
+  <header>
+    <span class="num">D21</span>
+    <h3>Now-playing dock <span class="tag wild">Wild</span></h3>
+    <p class="blurb">Running and needs-you sessions leave the sidebar and live in a bottom dock across the whole app, each a chip with a progress ring (elapsed vs. that session's median turn). The sidebar shrinks to a plain recency list of idle sessions.</p>
+    <p class="cost"><b>Costs:</b> two places to look; competes with the terminal panel for the bottom edge.</p>
+  </header>
+  <div class="frame">
+    <aside class="sb">
+      <div class="brand">conduit<i></i></div>
+      <div class="hdr"><div class="search">Search sessions…</div></div>
+      <div class="list">
+        <div class="sec"><span>Recent</span></div>
+        <a class="row slim unread" href="#"><span class="st dn"></span><span class="t"><i class="g pc-conduit" style="vertical-align:-2px;margin-right:5px">CO</i>Add session export</span><span class="r">12m</span></a>
+        <a class="row slim recede" href="#"><span class="st"></span><span class="t"><i class="g pc-perry" style="vertical-align:-2px;margin-right:5px">PE</i>Investigate flaky e2e</span><span class="r">1h</span></a>
+        <a class="row slim recede" href="#"><span class="st"></span><span class="t"><i class="g pc-conduit" style="vertical-align:-2px;margin-right:5px">CO</i>Wire PTY resize</span><span class="r">3h</span></a>
+        <a class="row slim recede" href="#"><span class="st"></span><span class="t"><i class="g pc-perry" style="vertical-align:-2px;margin-right:5px">PE</i>Stabilise visual baselines</span><span class="r">1d</span></a>
+        <a class="row slim recede" href="#"><span class="st"></span><span class="t"><i class="g pc-dotfiles" style="vertical-align:-2px;margin-right:5px">DF</i>Audit brew bundle</span><span class="r">1d</span></a>
+        <a class="row slim recede" href="#"><span class="st"></span><span class="t"><i class="g pc-hunk" style="vertical-align:-2px;margin-right:5px">HK</i>OAuth device flow</span><span class="r">2d</span></a>
+        <div class="sec bottom"><span><span class="caret">▸</span>Settled</span><span class="n">41</span></div>
+      </div>
+    </aside>
+    <div class="main" style="padding-bottom:60px"><div class="ghost w1"></div><div class="ghost w2"></div><div class="ghost w3"></div><div class="bubble"></div><div class="ghost w1"></div><div class="ghost w4"></div></div>
+    <div class="dock">
+      <span style="font-size:10px;letter-spacing:.08em;text-transform:uppercase;color:var(--dim);margin-right:4px">Live</span>
+      <span class="dchip" style="border-color:var(--amber);color:var(--text)"><span class="ring2 ap"></span><i class="g pc-conduit">CO</i>Fix auth token refresh <b style="color:var(--amber);font-weight:500">approve</b></span>
+      <span class="dchip" style="border-color:var(--indigo);color:var(--text)"><span class="ring2" style="background:var(--indigo)"></span><i class="g pc-dotfiles">DF</i>Migration strategy <b style="color:var(--indigo);font-weight:500">reply</b></span>
+      <span class="dchip"><span class="ring2" style="--p:40%"></span><i class="g pc-dotfiles">DF</i>Migrate zsh <span style="color:var(--dim)">4m</span></span>
+      <span class="dchip" style="box-shadow:inset 0 0 0 1px var(--brand)"><span class="ring2" style="--p:72%"></span><i class="g pc-conduit">CO</i>Refactor relay <span style="color:var(--dim)">9m</span></span>
+    </div>
+  </div>
+</section>
+
+<!-- D22 -->
+<section class="design" id="d22">
+  <header>
+    <span class="num">D22</span>
+    <h3>Topic clusters <span class="tag wild">Wild</span></h3>
+    <p class="blurb">Group by what a session is about, not where it lives. Cluster labels come from embeddings of title + first message, recomputed nightly. Projects appear only as glyphs.</p>
+    <p class="cost"><b>Costs:</b> nondeterministic groups confuse spatial memory; needs an always-group-by-project escape hatch.</p>
+  </header>
+  <div class="frame xtall">
+    <aside class="sb">
+      <div class="brand">conduit<i></i></div>
+      <div class="hdr"><div class="search">Search sessions…</div><div class="well"><span class="ib" title="Auto-grouped">✦</span></div></div>
+      <div class="list">
+        <div class="sec"><span>Auth &amp; sessions</span><span class="n" style="color:var(--dimmer)">✦ auto</span></div>
+        <a class="row slim unread" href="#"><span class="st ap"></span><span class="t"><i class="g pc-conduit" style="vertical-align:-2px;margin-right:5px">CO</i>Fix auth token refresh</span><span class="r verb">approve</span></a>
+        <a class="row slim unread" href="#"><span class="st dn"></span><span class="t"><i class="g pc-conduit" style="vertical-align:-2px;margin-right:5px">CO</i>Add session export</span><span class="r">12m</span></a>
+        <a class="row slim recede" href="#"><span class="st"></span><span class="t"><i class="g pc-hunk" style="vertical-align:-2px;margin-right:5px">HK</i>OAuth device flow</span><span class="r">2d</span></a>
+        <div class="sec"><span>Shell &amp; dotfiles</span><span class="n" style="color:var(--dimmer)">✦ auto</span></div>
+        <a class="row slim unread" href="#"><span class="st in"></span><span class="t"><i class="g pc-dotfiles" style="vertical-align:-2px;margin-right:5px">DF</i>Pick a migration strategy</span><span class="r verb i">reply</span></a>
+        <a class="row slim recede" href="#"><span class="st wk"></span><span class="t"><i class="g pc-dotfiles" style="vertical-align:-2px;margin-right:5px">DF</i>Migrate zsh config to nushell</span><span class="r">4m</span></a>
+        <a class="row slim recede" href="#"><span class="st"></span><span class="t"><i class="g pc-dotfiles" style="vertical-align:-2px;margin-right:5px">DF</i>Audit brew bundle</span><span class="r">1d</span></a>
+        <div class="sec"><span>Testing &amp; CI</span><span class="n" style="color:var(--dimmer)">✦ auto</span></div>
+        <a class="row slim recede" href="#"><span class="st"></span><span class="t"><i class="g pc-perry" style="vertical-align:-2px;margin-right:5px">PE</i>Investigate flaky e2e</span><span class="r">1h</span></a>
+        <a class="row slim recede" href="#"><span class="st"></span><span class="t"><i class="g pc-perry" style="vertical-align:-2px;margin-right:5px">PE</i>Stabilise visual baselines</span><span class="r">1d</span></a>
+        <div class="sec"><span>Relay &amp; PTY</span><span class="n" style="color:var(--dimmer)">✦ auto</span></div>
+        <a class="row slim active recede" href="#"><span class="st wk"></span><span class="t"><i class="g pc-conduit" style="vertical-align:-2px;margin-right:5px">CO</i>Refactor relay stack</span><span class="r">9m</span></a>
+        <a class="row slim recede" href="#"><span class="st"></span><span class="t"><i class="g pc-conduit" style="vertical-align:-2px;margin-right:5px">CO</i>Wire PTY resize</span><span class="r">3h</span></a>
+        <div class="sec bottom"><span><span class="caret">▸</span>Settled</span><span class="n">41 · <span style="font-weight:400">clusters ignore them</span></span></div>
+      </div>
+    </aside>
+    <div class="main"><div class="ghost w1"></div><div class="ghost w2"></div><div class="ghost w3"></div><div class="bubble"></div></div>
+  </div>
+</section>
+
+<!-- D23 -->
+<section class="design" id="d23">
+  <header>
+    <span class="num">D23</span>
+    <h3>Waiting-time queue <span class="tag wild">Wild</span></h3>
+    <p class="blurb">Sessions blocked on you sort by how long they've waited, with a bar growing in real time. The top row is the agent you've neglected longest. Everything else is under a rule.</p>
+    <p class="cost"><b>Costs:</b> guilt-driven; the bar reads as progress (it isn't). Keep it neutral and label it.</p>
+  </header>
+  <div class="frame tall">
+    <aside class="sb">
+      <div class="brand">conduit<i></i></div>
+      <div class="hdr"><div class="search">Search sessions…</div></div>
+      <div class="list q">
+        <div class="sec"><span>Waiting on you</span><span class="n">3</span></div>
+        <a class="row two unread" href="#"><span class="st in"></span><span class="t">Pick a migration strategy</span><span class="m"><i class="g pc-dotfiles">DF</i><span class="tr">dotfiles</span></span><span class="wait"><i style="--w:100%"></i>22m</span></a>
+        <a class="row two unread" href="#"><span class="st ap"></span><span class="t">Fix auth token refresh</span><span class="m"><i class="g pc-conduit">CO</i><span class="tr">conduit · feat/auth</span></span><span class="wait"><i style="--w:28%"></i>6m</span></a>
+        <a class="row two unread" href="#"><span class="st ap"></span><span class="t">Approve <code style="font:11px var(--mono)">rm -rf dist</code></span><span class="m"><i class="g pc-hunk">HK</i><span class="tr">hunk</span></span><span class="wait"><i style="--w:5%"></i>1m</span></a>
+        <div class="rule">running</div>
+        <a class="row two recede" href="#"><span class="st wk"></span><span class="t">Migrate zsh config to nushell</span><span class="m"><i class="g pc-dotfiles">DF</i><span class="tr">dotfiles</span></span><span class="wait" style="justify-content:flex-end">4m</span></a>
+        <a class="row two active recede" href="#"><span class="st wk"></span><span class="t">Refactor relay stack</span><span class="m"><i class="g pc-conduit">CO</i><span class="tr">conduit</span></span><span class="wait" style="justify-content:flex-end">9m</span></a>
+        <div class="rule">recent</div>
+        <a class="row slim unread" href="#"><span class="st dn"></span><span class="t"><i class="g pc-conduit" style="vertical-align:-2px;margin-right:5px">CO</i>Add session export</span><span class="wait" style="justify-content:flex-end">12m</span></a>
+        <a class="row slim recede" href="#"><span class="st"></span><span class="t"><i class="g pc-perry" style="vertical-align:-2px;margin-right:5px">PE</i>Investigate flaky e2e</span><span class="wait" style="justify-content:flex-end">1h</span></a>
+        <div class="sec bottom"><span><span class="caret">▸</span>Settled</span><span class="n">41</span></div>
+      </div>
+    </aside>
+    <div class="main"><div class="ghost w1"></div><div class="ghost w2"></div><div class="ghost w3"></div><div class="bubble"></div></div>
+  </div>
+</section>
+
+<!-- D24 -->
+<section class="design wide" id="d24">
+  <header>
+    <span class="num">D24 · TWEETDECK</span>
+    <h3>Deck columns <span class="tag wild">Wild</span></h3>
+    <p class="blurb">A rail of vertical text tabs; clicking one opens that project as a column beside whatever's already open. Independent scrolling per column. Best when you're juggling exactly two repos.</p>
+    <p class="cost"><b>Costs:</b> 500px+; rotated text is a readability and accessibility hit.</p>
+  </header>
+  <div class="frame">
+    <aside class="sb w520">
+      <div class="deck">
+        <div class="vtabs"><span class="vt on">conduit</span><span class="vt on">dotfiles</span><span class="vt">perry</span><span class="vt">hunk</span><span class="vt" style="margin-top:auto;color:var(--dimmer)">+</span></div>
+        <div class="cols">
+          <div class="col"><h4><i class="g pc-conduit">CO</i>conduit <span class="badge ap" style="margin-left:auto">1</span><span class="badge wk">1</span><span class="badge dn">1</span></h4>
+            <div class="list">
+              <a class="row slim unread" href="#"><span class="st ap"></span><span class="t">Fix auth token refresh</span><span class="r verb">approve</span></a>
+              <a class="row slim active recede" href="#"><span class="st wk"></span><span class="t">Refactor relay stack</span><span class="r">9m</span></a>
+              <a class="row slim unread" href="#"><span class="st dn"></span><span class="t">Add session export</span><span class="r">12m</span></a>
+              <a class="row slim recede" href="#"><span class="st"></span><span class="t">Wire PTY resize</span><span class="r">3h</span></a>
+              <a class="row slim recede" href="#"><span class="st"></span><span class="t">Reauth on stale socket</span><span class="r">1d</span></a>
+              <a class="row slim recede" href="#"><span class="st"></span><span class="t">Trim event store migrations</span><span class="r">2d</span></a>
+              <div class="sec bottom"><span><span class="caret">▸</span>Settled</span><span class="n">29</span></div>
+            </div>
+          </div>
+          <div class="col"><h4><i class="g pc-dotfiles">DF</i>dotfiles <span class="badge" style="margin-left:auto;color:var(--indigo)">1</span><span class="badge wk">1</span></h4>
+            <div class="list">
+              <a class="row slim unread" href="#"><span class="st in"></span><span class="t">Pick a migration strategy</span><span class="r verb i">reply</span></a>
+              <a class="row slim recede" href="#"><span class="st wk"></span><span class="t">Migrate zsh config to nushell</span><span class="r">4m</span></a>
+              <a class="row slim recede" href="#"><span class="st"></span><span class="t">Audit brew bundle</span><span class="r">1d</span></a>
+              <a class="row slim recede" href="#"><span class="st"></span><span class="t">Chezmoi apply on new machine</span><span class="r">4d</span></a>
+              <div class="sec bottom"><span><span class="caret">▸</span>Settled</span><span class="n">12</span></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </aside>
+    <div class="main"><div class="ghost w1"></div><div class="ghost w2"></div><div class="ghost w3"></div><div class="bubble"></div></div>
+  </div>
+</section>
+
+<!-- D25 -->
+<section class="design" id="d25">
+  <header>
+    <span class="num">D25</span>
+    <h3>Ambient pulse strip <span class="tag wild">Wild</span></h3>
+    <p class="blurb">The sidebar collapses to an 8px strip of stacked segments, one per session, ordered like D5. Amber segments glow when they need you, blue ones breathe while working. Hover or ⌘B expands the full list (shown mid-expand).</p>
+    <p class="cost"><b>Costs:</b> zero information at rest; must freeze to static colour under reduced motion.</p>
+  </header>
+  <div class="frame">
+    <div class="pulse"><i class="ap"></i><i class="ap" style="background:var(--indigo);box-shadow:0 0 8px var(--indigo)"></i><i class="wk"></i><i class="wk"></i><i class="dn"></i><i></i><i></i><i></i><i></i><i></i></div>
+    <div class="main" style="padding-left:300px"><div class="ghost w1"></div><div class="ghost w2"></div><div class="ghost w3"></div><div class="bubble"></div><div class="ghost w1"></div><div class="ghost w4"></div></div>
+    <div class="hovered">
+      <div class="brand">conduit<i></i></div>
+      <div class="list">
+        <div class="sec"><span>Needs you</span><span class="n">2</span></div>
+        <a class="row slim unread" href="#"><span class="st ap"></span><span class="t"><i class="g pc-conduit" style="vertical-align:-2px;margin-right:5px">CO</i>Fix auth token refresh</span><span class="r verb">approve</span></a>
+        <a class="row slim unread" href="#"><span class="st in"></span><span class="t"><i class="g pc-dotfiles" style="vertical-align:-2px;margin-right:5px">DF</i>Pick a migration strategy</span><span class="r verb i">reply</span></a>
+        <div class="sec"><span>Running</span><span class="n">2</span></div>
+        <a class="row slim recede" href="#"><span class="st wk"></span><span class="t"><i class="g pc-dotfiles" style="vertical-align:-2px;margin-right:5px">DF</i>Migrate zsh config to nushell</span><span class="r">4m</span></a>
+        <a class="row slim active recede" href="#"><span class="st wk"></span><span class="t"><i class="g pc-conduit" style="vertical-align:-2px;margin-right:5px">CO</i>Refactor relay stack</span><span class="r">9m</span></a>
+        <div class="sec"><span>Done, unread</span><span class="n">1</span></div>
+        <a class="row slim unread" href="#"><span class="st dn"></span><span class="t"><i class="g pc-conduit" style="vertical-align:-2px;margin-right:5px">CO</i>Add session export</span><span class="r">12m</span></a>
+        <div class="sec"><span>Recent</span></div>
+        <a class="row slim recede" href="#"><span class="st"></span><span class="t"><i class="g pc-perry" style="vertical-align:-2px;margin-right:5px">PE</i>Investigate flaky e2e</span><span class="r">1h</span></a>
+        <a class="row slim recede" href="#"><span class="st"></span><span class="t"><i class="g pc-conduit" style="vertical-align:-2px;margin-right:5px">CO</i>Wire PTY resize</span><span class="r">3h</span></a>
+        <div class="sec bottom"><span><span class="caret">▸</span>Settled</span><span class="n">41</span></div>
+      </div>
+      <div class="caption">hover or <span class="kbd">⌘B</span> to expand · strip only shows unsettled sessions</div>
+    </div>
+  </div>
+</section>
+
+</div>
+
+<!-- Row sheet -->
+<div class="part" id="row">
+  <h2>§6 · Session row redesign</h2>
+  <p>Whichever container wins, this is the thing you look at four hundred times a day. Two lines, 52px, with a one-line 36px variant that only Settled and Snoozed use. The trailing slot cross-fades between verb / time, hover actions (✓ settle, ↶ un-settle, ⏰ wake), and ⌘ jump pills so nothing ever reflows.</p>
+</div>
+
+<div class="sheet">
+  <div class="cell"><div class="lab">Approval · full weight</div>
+    <a class="row two unread" href="#"><span class="st ap"></span><span class="t">Fix auth token refresh</span><span class="m"><i class="g pc-conduit">CO</i><span class="tr">conduit · feat/auth · opus</span></span><span class="r verb">approve</span></a></div>
+  <div class="cell"><div class="lab">Input · full weight</div>
+    <a class="row two unread" href="#"><span class="st in"></span><span class="t">Pick a migration strategy</span><span class="m"><i class="g pc-dotfiles">DF</i><span class="tr">dotfiles · main · sonnet</span></span><span class="r verb i">reply</span></a></div>
+  <div class="cell"><div class="lab">Working · recedes, timer is the only motion</div>
+    <a class="row two recede" href="#"><span class="st wk"></span><span class="t">Migrate zsh config to nushell</span><span class="m"><i class="g pc-dotfiles">DF</i><span class="tr">dotfiles · main · opus</span></span><span class="r">4m</span></a></div>
+  <div class="cell"><div class="lab">Error · full weight</div>
+    <a class="row two unread" href="#"><span class="st er"></span><span class="t">Try session cookies</span><span class="m"><i class="g pc-conduit">CO</i><span class="tr">conduit · feat/auth · opus</span></span><span class="r" style="color:var(--red)">failed</span></a></div>
+  <div class="cell"><div class="lab">Done, unread · brightens</div>
+    <a class="row two unread" href="#"><span class="st dn"></span><span class="t">Add session export</span><span class="m"><i class="g pc-conduit">CO</i><span class="tr">conduit · main · sonnet</span></span><span class="r" style="color:var(--green)">done</span></a></div>
+  <div class="cell"><div class="lab">Idle · no glyph, recedes, time only</div>
+    <a class="row two recede" href="#"><span class="st"></span><span class="t">Investigate flaky e2e</span><span class="m"><i class="g pc-perry">PE</i><span class="tr">perry · main</span></span><span class="r">1h</span></a></div>
+  <div class="cell"><div class="lab">Forked · icon after title</div>
+    <a class="row two recede" href="#"><span class="st wk"></span><span class="t">Try refresh-token rotation<span class="fork">⑂</span></span><span class="m"><i class="g pc-conduit">CO</i><span class="tr">conduit · feat/auth · opus</span></span><span class="r">6m</span></a></div>
+  <div class="cell"><div class="lab">Active · brand inset, project already known so glyph hidden</div>
+    <a class="row two active recede" href="#"><span class="st wk"></span><span class="t">Refactor relay stack</span><span class="m"><span class="tr">main · opus</span></span><span class="r">9m</span></a></div>
+  <div class="cell"><div class="lab">Hover / focus · actions swap into the trailing slot</div>
+    <a class="row two unread" href="#" style="background:var(--hover);color:var(--text)"><span class="st dn"></span><span class="t">Add session export</span><span class="m"><i class="g pc-conduit">CO</i><span class="tr">conduit · main · sonnet</span></span><span class="r actions"><span>⇪</span><span>⊟</span><span>⋯</span></span></a></div>
+  <div class="cell"><div class="lab">⌘ held 200ms · jump pill, absolutely positioned</div>
+    <a class="row two unread" href="#"><span class="st ap"></span><span class="t">Fix auth token refresh</span><span class="m"><i class="g pc-conduit">CO</i><span class="tr">conduit · feat/auth · opus</span></span><span class="r verb" style="opacity:.25">approve</span><span class="pill">1</span></a></div>
+  <div class="cell"><div class="lab">Very long title · truncates, provenance truncates from right</div>
+    <a class="row two recede" href="#" style="max-width:300px"><span class="st wk"></span><span class="t">Investigate why the websocket reconnect loop double-subscribes after daemon restart on macOS</span><span class="m"><i class="g pc-conduit">CO</i><span class="tr">conduit · fix/ws-reconnect-double-subscribe · opus</span></span><span class="r">2m</span></a></div>
+  <div class="cell"><div class="lab">Hover on a done card · ✓ settle replaces the time</div>
+    <a class="row two unread hov" href="#"><span class="st dn"></span><span class="t">Add session export</span><span class="m"><i class="g pc-conduit">CO</i><span class="tr">conduit · main · sonnet</span></span><span class="r rest">done</span><span class="r act">✓ settle</span></a></div>
+  <div class="cell"><div class="lab">Settled slim · 36px, 70% ink, time = when it settled</div>
+    <a class="row slim settled" href="#"><span class="st"></span><span class="t"><i class="g pc-conduit" style="vertical-align:-2px;margin-right:5px">CO</i>Wire PTY resize<span class="pr merged">#212</span></span><span class="r rest">3d</span><span class="r act">↶ un-settle</span></a>
+    <a class="row slim settled" href="#"><span class="st"></span><span class="t"><i class="g pc-hunk" style="vertical-align:-2px;margin-right:5px">HK</i>OAuth device flow</span><span class="r rest">2w</span><span class="r act">↶ un-settle</span></a></div>
+  <div class="cell"><div class="lab">Settled slim, hovered · full ink, PR colour, ↶ un-settle</div>
+    <a class="row slim settled hov" href="#"><span class="st"></span><span class="t"><i class="g pc-conduit" style="vertical-align:-2px;margin-right:5px">CO</i>Wire PTY resize<span class="pr merged">#212</span></span><span class="r rest">3d</span><span class="r act">↶ un-settle</span></a>
+    <a class="row slim settled hov" href="#"><span class="st"></span><span class="t"><i class="g pc-conduit" style="vertical-align:-2px;margin-right:5px">CO</i>Stale socket reauth<span class="pr closed">#198</span></span><span class="r rest">1w</span><span class="r act">↶ un-settle</span></a></div>
+  <div class="cell"><div class="lab">Snoozed slim · wake time, hover to wake now</div>
+    <a class="row slim settled" href="#"><span class="st" style="color:var(--dim);font-size:10px">⏰</span><span class="t"><i class="g pc-dotfiles" style="vertical-align:-2px;margin-right:5px">DF</i>Pick a migration strategy</span><span class="r rest">Mon 9:00</span><span class="r act">⏰ wake</span></a>
+    <a class="row slim settled hov" href="#"><span class="st" style="color:var(--dim);font-size:10px">⏰</span><span class="t"><i class="g pc-dotfiles" style="vertical-align:-2px;margin-right:5px">DF</i>Pick a migration strategy</span><span class="r rest">Mon 9:00</span><span class="r act">⏰ wake</span></a></div>
+  <div class="cell"><div class="lab">Woke · back in its original slot, pill until visited</div>
+    <a class="row two" href="#"><span class="st"><span class="woke" style="padding:1px 4px">⏰</span></span><span class="t">Audit brew bundle</span><span class="m"><i class="g pc-dotfiles">DF</i><span class="tr">dotfiles · main</span></span><span class="r"><span class="woke">Woke</span></span></a></div>
+  <div class="cell"><div class="lab">Mid-drag over Settled · verb badge replaces status + time</div>
+    <a class="row two dragging" href="#"><span class="st"></span><span class="t">Add session export</span><span class="m"><i class="g pc-conduit">CO</i><span class="tr">conduit · main</span></span><span class="r"><span class="dverb">✓ Settle</span></span></a></div>
+  <div class="cell" style="grid-column:span 2"><div class="lab">Hover card after 400ms · everything we were tempted to cram into line 3</div>
+    <a class="row two unread" href="#" style="background:var(--hover);color:var(--text)"><span class="st ap"></span><span class="t">Fix auth token refresh</span><span class="m"><i class="g pc-conduit">CO</i><span class="tr">conduit · feat/auth · opus</span></span><span class="r verb">approve</span></a>
+    <div class="hc"><b>Directory</b><code>~/src/personal/conduit</code><b>Worktree</b><span><code>.worktrees/feat-auth</code> <span style="color:var(--amber)">· branch differs from main checkout</span></span><b>Model</b><span>claude-opus-5 · Claude Agent SDK</span><b>Last line</b><span>May I run <code>pnpm test:unit</code>? It touches 3 files.</span><b>Cost</b><span>$0.84 · 41k in / 6k out · 27 messages</span><b>Started</b><span>Today 15:04 · 2 forks</span></div></div>
+</div>
+
+<div class="rec" id="rec">
+  <h2>§7 · Recommendation</h2>
+  <p><b style="color:var(--text)">D5 as the container, D3's rail as the scope control, D1's header as search, D9's ⌘K as deep search</b>, with the row above. Group-by (none / project / time) is a header menu; status tiers stay the outer grouping because that is what the product is for.</p>
+  <p><b style="color:var(--text)">Settle v2 ships with it, not after it.</b> Server-side: <code>settledOverride · settledAt · unsettledAt · snoozedUntil · snoozedAt · pinnedAt</code> on <code>SessionInfo</code>, a settlement reactor that sweeps every project on a timer (idle 3d default; branch merged into main as conduit's stand-in for "PR merged" until PR links exist), and <code>session.settle / unsettle / snooze / unsnooze / pin</code> RPCs. Client-side: the two shelves collapsed by default, ✓ / ↶ hover affordances, <span class="kbd">⌘⇧S</span>, the chat banner, and "send a message un-settles". Leave the Archived list as a Settings page; Settle is the sidebar's only parking verb.</p>
+  <p>First follow-ups once the row exists: D16's inline approve / deny, then D13's sparkline on rail tooltips as a brand flourish. Ship D18 behind <code>?view=tty</code>; it's a day of work and the brand wants it.</p>
+  <p style="margin:0">Backend cost, plainly: <code>listSessions</code> spans projects, <code>SessionInfo</code> gains <code>projectSlug · status · branch · model</code>, routing moves from <code>/p/&lt;slug&gt;/s/&lt;id&gt;</code> to <code>/s/&lt;id&gt;?p=…&amp;g=…</code>. Project registration is untouched; only the switcher-as-container goes.</p>
+</div>
+
+</div>
+</body>
+</html>

@@ -44,7 +44,11 @@ import {
 	createEventId,
 	type EventId,
 	type EventMetadata,
+	type StoredEvent,
 } from "../../../src/lib/persistence/events.js";
+import resumedTurnEvents from "../../fixtures/claude-resumed-turn.json" with {
+	type: "json",
+};
 
 // ─── Test helpers ───────────────────────────────────────────────────────────
 
@@ -968,6 +972,149 @@ describe("EventStoreEffect", () => {
 				expect(version).toBe(0);
 			}),
 		));
+
+	it("getNextStreamVersion returns the version after existing events", () =>
+		runTest(
+			Effect.gen(function* () {
+				const store = yield* EventStoreEffectTag;
+				yield* seedSession("s1");
+				yield* store.append(makeSessionCreated("s1"));
+				yield* store.append(makeTextDelta("s1", "m1", "a"));
+				expect(yield* store.getNextStreamVersion("s1")).toBe(2);
+			}),
+		));
+
+	it("appends session.created before the session projection row exists", () =>
+		runTest(
+			Effect.gen(function* () {
+				const store = yield* EventStoreEffectTag;
+				const sql = yield* SqlClient.SqlClient;
+				const stored = yield* store.append(makeSessionCreated("s1"));
+				expect(stored.sequence).toBe(1);
+				expect(stored.streamVersion).toBe(0);
+				expect(stored.sessionId).toBe("s1");
+				expect(yield* sql`SELECT id FROM sessions WHERE id = 's1'`).toEqual([]);
+			}),
+		));
+
+	it("append rejects duplicate event IDs", () =>
+		runTest(
+			Effect.gen(function* () {
+				const store = yield* EventStoreEffectTag;
+				yield* seedSession("s1");
+				const eventId = createEventId();
+				yield* store.append(makeSessionCreated("s1", { eventId }));
+				const duplicate = yield* Effect.either(
+					store.append({ ...makeTextDelta("s1", "m1", "x"), eventId }),
+				);
+				expect(duplicate._tag).toBe("Left");
+			}),
+		));
+
+	it("appendBatch assigns contiguous stream versions and rolls back on a duplicate event ID", () =>
+		runTest(
+			Effect.gen(function* () {
+				const store = yield* EventStoreEffectTag;
+				const sql = yield* SqlClient.SqlClient;
+				yield* seedSession("s1");
+				const stored = yield* store.appendBatch([
+					makeSessionCreated("s1"),
+					makeTextDelta("s1", "m1", "hello"),
+					makeTextDelta("s1", "m1", " world"),
+				]);
+				expect(stored.map((e) => e.streamVersion)).toEqual([0, 1, 2]);
+
+				yield* seedSession("s2");
+				const shared = makeTextDelta("s2", "m2", "hello");
+				const failed = yield* Effect.either(
+					store.appendBatch([
+						makeSessionCreated("s2"),
+						shared,
+						{ ...makeTextDelta("s2", "m2", "world"), eventId: shared.eventId },
+					]),
+				);
+				expect(failed._tag).toBe("Left");
+				expect(
+					yield* sql`SELECT sequence FROM events WHERE session_id = 's2'`,
+				).toEqual([]);
+			}),
+		));
+
+	it("appendBatch returns nothing for empty input", () =>
+		runTest(
+			Effect.gen(function* () {
+				const store = yield* EventStoreEffectTag;
+				expect(yield* store.appendBatch([])).toEqual([]);
+			}),
+		));
+
+	it("readFromSequence honours limit, an exhausted cursor, and a negative cursor", () =>
+		runTest(
+			Effect.gen(function* () {
+				const store = yield* EventStoreEffectTag;
+				yield* seedSession("s1");
+				for (let i = 0; i < 5; i++) {
+					yield* store.append(makeTextDelta("s1", "m1", `chunk-${i}`));
+				}
+				expect(yield* store.readFromSequence(0, 3)).toHaveLength(3);
+				expect(yield* store.readFromSequence(5, 10)).toEqual([]);
+				expect(yield* store.readFromSequence(-1)).toHaveLength(5);
+			}),
+		));
+
+	it("readBySession honours fromSequence and limit, and is empty for an unknown session", () =>
+		runTest(
+			Effect.gen(function* () {
+				const store = yield* EventStoreEffectTag;
+				yield* seedSession("s1");
+				const first = yield* store.append(makeSessionCreated("s1"));
+				for (let i = 0; i < 4; i++) {
+					yield* store.append(makeTextDelta("s1", "m1", `chunk-${i}`));
+				}
+				expect(yield* store.readBySession("s1", first.sequence)).toHaveLength(
+					4,
+				);
+				expect(yield* store.readBySession("s1", 0, 3)).toHaveLength(3);
+				expect(yield* store.readBySession("s1", 0, 0)).toEqual([]);
+				expect(yield* store.readBySession("nonexistent")).toEqual([]);
+			}),
+		));
+
+	it("round-trips nested data, metadata, epoch-zero createdAt, and large payloads", () =>
+		runTest(
+			Effect.gen(function* () {
+				const store = yield* EventStoreEffectTag;
+				yield* seedSession("s1");
+				const toolStarted = canonicalEvent(
+					"tool.started",
+					"s1",
+					{
+						messageId: "m1",
+						partId: "p1",
+						toolName: "bash",
+						callId: "call-1",
+						input: {
+							tool: "Unknown",
+							name: "bash",
+							raw: { command: "ls -la", nested: { deep: true } },
+						},
+					},
+					{
+						metadata: { commandId: "cmd_abc", adapterKey: "oc-main" },
+						createdAt: 0,
+					},
+				);
+				const largeText = "x".repeat(10_000);
+				yield* store.append(toolStarted);
+				yield* store.append(makeTextDelta("s1", "m1", largeText));
+
+				const [tool, delta] = yield* store.readFromSequence(0);
+				expect(tool?.data).toEqual(toolStarted.data);
+				expect(tool?.metadata).toEqual(toolStarted.metadata);
+				expect(tool?.createdAt).toBe(0);
+				expect(delta?.data).toMatchObject({ text: largeText });
+			}),
+		));
 });
 
 // ─── Projector Cursor Tests ─────────────────────────────────────────────────
@@ -991,6 +1138,18 @@ describe("ProjectorCursorEffect", () => {
 				expect(result).toBeDefined();
 				expect(result?.projectorName).toBe("session");
 				expect(result?.lastAppliedSeq).toBe(42);
+				expect(result?.updatedAt).toBeGreaterThan(0);
+			}),
+		));
+
+	it("upsert advances an existing cursor to a higher sequence", () =>
+		runTest(
+			Effect.gen(function* () {
+				const cursor = yield* ProjectorCursorEffectTag;
+				yield* cursor.upsert("session", 5);
+				yield* cursor.upsert("session", 15);
+				const result = yield* cursor.get("session");
+				expect(result?.lastAppliedSeq).toBe(15);
 			}),
 		));
 
@@ -1017,6 +1176,14 @@ describe("ProjectorCursorEffect", () => {
 				expect(all[0]?.projectorName).toBe("activity");
 				expect(all[1]?.projectorName).toBe("message");
 				expect(all[2]?.projectorName).toBe("session");
+			}),
+		));
+
+	it("listAll returns nothing when no cursors exist", () =>
+		runTest(
+			Effect.gen(function* () {
+				const cursor = yield* ProjectorCursorEffectTag;
+				expect(yield* cursor.listAll()).toEqual([]);
 			}),
 		));
 
@@ -1357,9 +1524,247 @@ describe("Effect Session Projector (via ProjectionRunner)", () => {
 				]);
 			}),
 		));
+
+	it.each([
+		["session.settled", "session.unsettled", "settled_at"],
+		["session.pinned", "session.unpinned", "pinned_at"],
+	] as const)("%s is deterministic across replay", (setType, clearType, column) =>
+		runTest(
+			Effect.gen(function* () {
+				const sql = yield* SqlClient.SqlClient;
+				const store = yield* EventStoreEffectTag;
+				const runner = yield* ProjectionRunnerEffectTag;
+				yield* runner.markRecovered();
+				yield* seedSession("s1");
+				const created = yield* store.append(makeSessionCreated("s1"));
+				yield* runner.projectEvent(created);
+				const set = yield* store.append(
+					canonicalEvent(
+						setType,
+						"s1",
+						{ sessionId: "s1" },
+						{ createdAt: FIXED_TS + 100 },
+					),
+				);
+				const clear = yield* store.append(
+					canonicalEvent(
+						clearType,
+						"s1",
+						{ sessionId: "s1" },
+						{ createdAt: FIXED_TS + 200 },
+					),
+				);
+				for (let replay = 0; replay < 2; replay++) {
+					yield* runner.projectEvent(set);
+					const afterSet = yield* sql<{
+						settled_at: number | null;
+						pinned_at: number | null;
+						updated_at: number;
+					}>`SELECT settled_at, pinned_at, updated_at FROM sessions WHERE id = 's1'`;
+					expect(afterSet[0]?.[column]).toBe(FIXED_TS + 100);
+					expect(afterSet[0]?.updated_at).toBe(FIXED_TS);
+					yield* runner.projectEvent(clear);
+					const afterClear = yield* sql<{
+						settled_at: number | null;
+						pinned_at: number | null;
+						updated_at: number;
+					}>`SELECT settled_at, pinned_at, updated_at FROM sessions WHERE id = 's1'`;
+					expect(afterClear[0]?.[column]).toBeNull();
+					expect(afterClear[0]?.updated_at).toBe(FIXED_TS);
+				}
+			}),
+		));
+
+	it("snooze, wake, and unsnooze replay to the same projection", () =>
+		runTest(
+			Effect.gen(function* () {
+				const sql = yield* SqlClient.SqlClient;
+				const store = yield* EventStoreEffectTag;
+				const runner = yield* ProjectionRunnerEffectTag;
+				yield* runner.markRecovered();
+				yield* seedSession("s1");
+				yield* runner.projectEvent(
+					yield* store.append(makeSessionCreated("s1")),
+				);
+				const snoozed = yield* store.append(
+					canonicalEvent(
+						"session.snoozed",
+						"s1",
+						{ sessionId: "s1", until: null },
+						{ createdAt: FIXED_TS + 100 },
+					),
+				);
+				const asked = yield* store.append(
+					canonicalEvent(
+						"question.asked",
+						"s1",
+						{ id: "q1", sessionId: "s1", questions: [] },
+						{ createdAt: FIXED_TS + 200 },
+					),
+				);
+				const unsnoozed = yield* store.append(
+					canonicalEvent(
+						"session.unsnoozed",
+						"s1",
+						{ sessionId: "s1" },
+						{ createdAt: FIXED_TS + 300 },
+					),
+				);
+				for (let replay = 0; replay < 2; replay++) {
+					yield* runner.projectEvent(snoozed);
+					yield* runner.projectEvent(asked);
+					const woken = yield* sql<{
+						snoozed_at: number | null;
+						woken_at: number | null;
+						woken_reason: string | null;
+						updated_at: number;
+					}>`SELECT snoozed_at, woken_at, woken_reason, updated_at FROM sessions WHERE id = 's1'`;
+					expect(woken[0]).toEqual({
+						snoozed_at: FIXED_TS + 100,
+						woken_at: FIXED_TS + 200,
+						woken_reason: "question",
+						updated_at: FIXED_TS,
+					});
+					yield* runner.projectEvent(unsnoozed);
+					const cleared = yield* sql<{
+						snoozed_at: number | null;
+						woken_at: number | null;
+						woken_reason: string | null;
+						updated_at: number;
+					}>`SELECT snoozed_at, woken_at, woken_reason, updated_at FROM sessions WHERE id = 's1'`;
+					expect(cleared[0]).toEqual({
+						snoozed_at: null,
+						woken_at: null,
+						woken_reason: null,
+						updated_at: FIXED_TS,
+					});
+				}
+			}),
+		));
+
+	it("session read state is deterministic across replay", () =>
+		runTest(
+			Effect.gen(function* () {
+				const sql = yield* SqlClient.SqlClient;
+				const store = yield* EventStoreEffectTag;
+				const runner = yield* ProjectionRunnerEffectTag;
+				yield* runner.markRecovered();
+
+				yield* seedSession("s1");
+				const created = yield* store.append(makeSessionCreated("s1"));
+				yield* runner.projectEvent(created);
+				const read = yield* store.append(
+					canonicalEvent(
+						"session.read",
+						"s1",
+						{ sessionId: "s1" },
+						{ createdAt: FIXED_TS + 100 },
+					),
+				);
+				yield* runner.projectEvent(read);
+				const unread = yield* store.append(
+					canonicalEvent(
+						"session.unread",
+						"s1",
+						{ sessionId: "s1" },
+						{ createdAt: FIXED_TS + 200 },
+					),
+				);
+				yield* runner.projectEvent(unread);
+
+				const readAt = () =>
+					sql<{ read_at: number | null }>`
+						SELECT read_at FROM sessions WHERE id = 's1'`;
+				expect((yield* readAt())[0]?.read_at).toBeNull();
+
+				// Replaying the same log in the same order reaches the same state.
+				// Order is the only thing these handlers rely on, and every replay
+				// path is ORDER BY sequence ASC, so last transition wins.
+				yield* runner.projectEvent(read);
+				yield* runner.projectEvent(unread);
+				expect((yield* readAt())[0]?.read_at).toBeNull();
+
+				// Reading again after an unread is a real transition, not a stale
+				// replay, and must take effect.
+				yield* runner.projectEvent(read);
+				expect((yield* readAt())[0]?.read_at).toBe(FIXED_TS + 100);
+			}),
+		));
 });
 
 // ─── Message Projector Tests ────────────────────────────────────────────────
+
+describe("automatic settlement session projection", () => {
+	it("projects toggle, automatic settlement, and un-settle with replay timestamps", () =>
+		runTest(
+			Effect.gen(function* () {
+				const sql = yield* SqlClient.SqlClient;
+				const store = yield* EventStoreEffectTag;
+				const runner = yield* ProjectionRunnerEffectTag;
+				yield* runner.markRecovered();
+				yield* seedSession("auto-s1");
+				const append = (
+					type:
+						| "session.auto_settle_set"
+						| "session.settled"
+						| "session.unsettled",
+					data: { sessionId: string; disabled?: boolean; automatic?: boolean },
+					createdAt: number,
+				) => store.append(canonicalEvent(type, "auto-s1", data, { createdAt }));
+				const disabled = yield* append(
+					"session.auto_settle_set",
+					{ sessionId: "auto-s1", disabled: true },
+					FIXED_TS + 1,
+				);
+				yield* runner.projectEvent(disabled);
+				const disabledRows = yield* sql<{
+					auto_settle_disabled_at: number | null;
+				}>`SELECT auto_settle_disabled_at FROM sessions WHERE id = 'auto-s1'`;
+				expect(disabledRows[0]?.auto_settle_disabled_at).toBe(FIXED_TS + 1);
+				const enabled = yield* append(
+					"session.auto_settle_set",
+					{ sessionId: "auto-s1", disabled: false },
+					FIXED_TS + 2,
+				);
+				yield* runner.projectEvent(enabled);
+				const settled = yield* append(
+					"session.settled",
+					{ sessionId: "auto-s1", automatic: true },
+					FIXED_TS + 3,
+				);
+				yield* runner.projectEvent(settled);
+				const automaticRows = yield* sql<{
+					settled_automatically: number;
+					auto_settle_disabled_at: number | null;
+				}>`SELECT settled_automatically, auto_settle_disabled_at FROM sessions WHERE id = 'auto-s1'`;
+				expect(automaticRows[0]).toEqual({
+					settled_automatically: 1,
+					auto_settle_disabled_at: null,
+				});
+				const unsettled = yield* append(
+					"session.unsettled",
+					{ sessionId: "auto-s1" },
+					FIXED_TS + 4,
+				);
+				yield* runner.projectEvent(unsettled);
+				const cleared = yield* sql<{
+					settled_automatically: number;
+					unsettled_at: number;
+				}>`SELECT settled_automatically, unsettled_at FROM sessions WHERE id = 'auto-s1'`;
+				expect(cleared[0]).toEqual({
+					settled_automatically: 0,
+					unsettled_at: FIXED_TS + 4,
+				});
+				yield* runner.projectEvent(settled);
+				yield* runner.projectEvent(unsettled);
+				const replayed = yield* sql<{
+					settled_automatically: number;
+					unsettled_at: number;
+				}>`SELECT settled_automatically, unsettled_at FROM sessions WHERE id = 'auto-s1'`;
+				expect(replayed[0]).toEqual(cleared[0]);
+			}),
+		));
+});
 
 describe("Effect Message Projector (via ProjectionRunner)", () => {
 	it("message.created inserts a message row", () =>
@@ -1588,6 +1993,330 @@ describe("Effect Message Projector (via ProjectionRunner)", () => {
 // ─── Turn Projector Tests ───────────────────────────────────────────────────
 
 describe("Effect Turn Projector (via ProjectionRunner)", () => {
+	// The persisted state after each recorded event, in fixture order. Only the
+	// turn's own results finish it; anything that follows puts it back to work.
+	const EXPECTED_STATE = [
+		"pending", // 1. the user prompt opens the turn
+		"running", // 2. the session goes busy
+		"running", // 3. the first assistant message
+		"completed", // 4. a result arrives, but Claude is not done
+		"completed", // 5. idle
+		"running", // 6. busy again, 68ms later
+		"running", // 7. a second assistant message, same turn
+		"running", // 8. thinking
+		"running", // 9. a tool starts
+		"running", // 10. the tool finishes
+		"completed", // 11. the second execution reports its own result
+		"running", // 12. a third assistant message, 15 minutes later
+		"running", // 13. still working 45 minutes after the first "completion"
+	];
+
+	it("keeps one production turn running when Claude resumes after successive results", () =>
+		runTest(
+			Effect.gen(function* () {
+				const sql = yield* SqlClient.SqlClient;
+				const runner = yield* ProjectionRunnerEffectTag;
+				const sessionId = "ses_c2d8cd521bc14f9f8f7700096bbf1d23";
+				yield* seedSession(sessionId);
+				yield* runner.markRecovered();
+				for (const [index, recorded] of resumedTurnEvents.entries()) {
+					// The export omits envelope fields unrelated to the regression.
+					const event = {
+						...recorded,
+						eventId: `recorded-${recorded.sequence}`,
+						sessionId,
+						streamVersion: index,
+						metadata: {},
+					} as StoredEvent;
+					yield* runner.projectEvent(event);
+					const turns = yield* sql<{
+						id: string;
+					}>`SELECT id, state, assistant_message_id, completed_at, cost, tokens_in, tokens_out FROM turns`;
+					// No user message follows, so all thirteen events are one turn.
+					expect(turns).toHaveLength(1);
+					expect(turns[0], `after event ${index + 1}`).toMatchObject({
+						id: "52feab57-ed40-4885-b23b-71dcd78209a8",
+						state: EXPECTED_STATE[index],
+					});
+					if (EXPECTED_STATE[index] === "running") {
+						// Reopening has to clear the finish too, or every reader that
+						// asks "when did this end" still sees a finished turn.
+						expect(turns[0], `after event ${index + 1}`).toMatchObject({
+							completed_at: null,
+						});
+					}
+					if (event.type === "turn.completed") {
+						expect(turns[0]).toMatchObject({
+							assistant_message_id: event.data.messageId,
+							completed_at: event.createdAt,
+							// Cost is cumulative for the whole SDK session, so the latest
+							// wins; tokens are per-execution, so the second result adds.
+							cost: event.data.cost,
+							tokens_in: index === 3 ? 2 : 4,
+							tokens_out: index === 3 ? 2 : 3,
+						});
+					}
+				}
+				expect(yield* runner.getFailures()).toEqual([]);
+			}),
+		));
+
+	it("preserves known accounting when a later execution omits usage", () =>
+		runTest(
+			Effect.gen(function* () {
+				const sql = yield* SqlClient.SqlClient;
+				const store = yield* EventStoreEffectTag;
+				const runner = yield* ProjectionRunnerEffectTag;
+				yield* runner.markRecovered();
+				for (const event of [
+					makeSessionCreated("s1"),
+					makeMessageCreated("s1", "u1", { role: "user" }),
+					makeMessageCreated("s1", "a1"),
+					canonicalEvent("turn.completed", "s1", { messageId: "a1" }),
+				])
+					yield* runner.projectEvent(yield* store.append(event));
+				expect(
+					yield* sql`SELECT cost, tokens_in, tokens_out FROM turns`,
+				).toEqual([{ cost: null, tokens_in: null, tokens_out: null }]);
+				for (const event of [
+					makeMessageCreated("s1", "a2"),
+					canonicalEvent("turn.completed", "s1", {
+						messageId: "a2",
+						cost: 0.5,
+						tokens: { input: 100, output: 20 },
+					}),
+					makeMessageCreated("s1", "a3"),
+					canonicalEvent("turn.completed", "s1", {
+						messageId: "a3",
+						tokens: { output: 0 },
+					}),
+				])
+					yield* runner.projectEvent(yield* store.append(event));
+				expect(
+					yield* sql`SELECT cost, tokens_in, tokens_out FROM turns`,
+				).toEqual([{ cost: 0.5, tokens_in: 100, tokens_out: 20 }]);
+			}),
+		));
+
+	it.each([
+		"busy",
+		"assistant",
+		"tool",
+	] as const)("reopens on %s, attaches the next execution, and keeps accounting straight through replay", (resume) =>
+		runTest(
+			Effect.gen(function* () {
+				const sql = yield* SqlClient.SqlClient;
+				const store = yield* EventStoreEffectTag;
+				const runner = yield* ProjectionRunnerEffectTag;
+				yield* runner.markRecovered();
+				const events = [
+					makeSessionCreated("s1"),
+					makeMessageCreated("s1", "u1", { role: "user" }),
+					makeMessageCreated("s1", "a1", { createdAt: FIXED_TS + 1 }),
+					canonicalEvent(
+						"turn.completed",
+						"s1",
+						{
+							messageId: "a1",
+							cost: 0.25,
+							tokens: { input: 100, output: 20 },
+						},
+						{ createdAt: FIXED_TS + 2 },
+					),
+					canonicalEvent("session.status", "s1", {
+						sessionId: "s1",
+						status: "idle",
+					}),
+				];
+				for (const event of events) {
+					yield* runner.projectEvent(yield* store.append(event));
+				}
+				expect(yield* sql`SELECT state, completed_at FROM turns`).toEqual([
+					{ state: "completed", completed_at: FIXED_TS + 2 },
+				]);
+
+				const activity =
+					resume === "busy"
+						? canonicalEvent("session.status", "s1", {
+								sessionId: "s1",
+								status: "busy",
+							})
+						: resume === "assistant"
+							? makeMessageCreated("s1", "a2")
+							: makeToolStarted("s1", "a1", "tool2");
+				yield* runner.projectEvent(yield* store.append(activity));
+				expect(
+					yield* sql`SELECT state, assistant_message_id, started_at, completed_at FROM turns`,
+				).toEqual([
+					{
+						state: "running",
+						assistant_message_id: resume === "assistant" ? "a2" : null,
+						started_at: FIXED_TS + 1,
+						completed_at: null,
+					},
+				]);
+				if (resume !== "assistant") {
+					yield* runner.projectEvent(
+						yield* store.append(makeMessageCreated("s1", "a2")),
+					);
+				}
+				// Repeated busy signals must preserve the new attachment.
+				yield* runner.projectEvent(
+					yield* store.append(
+						canonicalEvent("session.status", "s1", {
+							sessionId: "s1",
+							status: "busy",
+						}),
+					),
+				);
+				yield* runner.projectEvent(
+					yield* store.append(
+						canonicalEvent(
+							"turn.completed",
+							"s1",
+							{
+								messageId: "a2",
+								cost: 0.5,
+								tokens: { input: 200, output: 30 },
+							},
+							{ createdAt: FIXED_TS + 5 },
+						),
+					),
+				);
+				const expected = [
+					{
+						id: "u1",
+						state: "completed",
+						assistant_message_id: "a2",
+						cost: 0.5,
+						tokens_in: 300,
+						tokens_out: 50,
+						completed_at: FIXED_TS + 5,
+					},
+				];
+				expect(
+					yield* sql`SELECT id, state, assistant_message_id, cost, tokens_in, tokens_out, completed_at FROM turns`,
+				).toEqual(expected);
+
+				// Rebuild the turn projection from its durable events.
+				yield* sql`DELETE FROM turns`;
+				yield* sql`DELETE FROM projector_cursors WHERE projector_name = 'turn'`;
+				yield* runner.recover();
+				expect(yield* runner.getFailures()).toEqual([]);
+				expect(
+					yield* sql`SELECT id, state, assistant_message_id, cost, tokens_in, tokens_out, completed_at FROM turns`,
+				).toEqual(expected);
+			}),
+		));
+
+	it("streamed output and tool progress do not reopen a settled turn", () =>
+		runTest(
+			Effect.gen(function* () {
+				const sql = yield* SqlClient.SqlClient;
+				const store = yield* EventStoreEffectTag;
+				const runner = yield* ProjectionRunnerEffectTag;
+				yield* runner.markRecovered();
+				for (const event of [
+					makeSessionCreated("s1"),
+					makeMessageCreated("s1", "u1", { role: "user" }),
+					makeMessageCreated("s1", "a1"),
+					makeToolStarted("s1", "a1", "tool1"),
+					makeToolCompleted("s1", "a1", "tool1"),
+					canonicalEvent(
+						"turn.completed",
+						"s1",
+						{ messageId: "a1" },
+						{ createdAt: FIXED_TS + 2 },
+					),
+				]) {
+					yield* runner.projectEvent(yield* store.append(event));
+				}
+				// A late flush of text for work that already finished is not new
+				// work. Treating it as new would leave the turn permanently running.
+				yield* runner.projectEvent(
+					yield* store.append(
+						makeToolRunning("s1", "a1", "tool1", { duration: 500 }),
+					),
+				);
+				yield* runner.projectEvent(
+					yield* store.append(makeTextDelta("s1", "a1", "trailing")),
+				);
+				expect(yield* sql`SELECT state, completed_at FROM turns`).toEqual([
+					{ state: "completed", completed_at: FIXED_TS + 2 },
+				]);
+			}),
+		));
+
+	it("a new prompt opens a separate turn, including when prompt timestamps tie", () =>
+		runTest(
+			Effect.gen(function* () {
+				const sql = yield* SqlClient.SqlClient;
+				const store = yield* EventStoreEffectTag;
+				const runner = yield* ProjectionRunnerEffectTag;
+				yield* runner.markRecovered();
+				for (const event of [
+					makeSessionCreated("s1"),
+					makeMessageCreated("s1", "u1", { role: "user" }),
+					makeMessageCreated("s1", "a1"),
+					canonicalEvent("turn.completed", "s1", { messageId: "a1", cost: 1 }),
+					makeMessageCreated("s1", "u2", { role: "user" }),
+				])
+					yield* runner.projectEvent(yield* store.append(event));
+				expect(yield* sql`SELECT id, state FROM turns ORDER BY rowid`).toEqual([
+					{ id: "u1", state: "completed" },
+					{ id: "u2", state: "pending" },
+				]);
+				for (const event of [
+					canonicalEvent("session.status", "s1", {
+						sessionId: "s1",
+						status: "busy",
+					}),
+					makeMessageCreated("s1", "a2"),
+					canonicalEvent("turn.completed", "s1", { messageId: "a2", cost: 2 }),
+				])
+					yield* runner.projectEvent(yield* store.append(event));
+				expect(
+					yield* sql`SELECT id, state, assistant_message_id, cost FROM turns ORDER BY rowid`,
+				).toEqual([
+					{ id: "u1", state: "completed", assistant_message_id: "a1", cost: 1 },
+					{ id: "u2", state: "completed", assistant_message_id: "a2", cost: 2 },
+				]);
+			}),
+		));
+
+	it.each([
+		"turn.error",
+		"turn.interrupted",
+	] as const)("preserves the %s settlement reason and permits more work", (type) =>
+		runTest(
+			Effect.gen(function* () {
+				const sql = yield* SqlClient.SqlClient;
+				const store = yield* EventStoreEffectTag;
+				const runner = yield* ProjectionRunnerEffectTag;
+				yield* runner.markRecovered();
+				for (const event of [
+					makeSessionCreated("s1"),
+					makeMessageCreated("s1", "u1", { role: "user" }),
+					makeMessageCreated("s1", "a1"),
+					type === "turn.error"
+						? canonicalEvent(type, "s1", { messageId: "a1", error: "Failed" })
+						: canonicalEvent(type, "s1", { messageId: "a1" }),
+				])
+					yield* runner.projectEvent(yield* store.append(event));
+				expect(yield* sql`SELECT state FROM turns`).toEqual([
+					{ state: type === "turn.error" ? "error" : "interrupted" },
+				]);
+				yield* runner.projectEvent(
+					yield* store.append(makeMessageCreated("s1", "a2")),
+				);
+				expect(
+					yield* sql`SELECT state, assistant_message_id, completed_at FROM turns`,
+				).toEqual([
+					{ state: "running", assistant_message_id: "a2", completed_at: null },
+				]);
+			}),
+		));
+
 	it("updates only the newest open turn and is replay-idempotent", () =>
 		runTest(
 			Effect.gen(function* () {
@@ -2559,7 +3288,7 @@ describe("ProjectionRunnerEffect", () => {
 			}),
 		));
 
-	it("live append and projection do not require recovery", () =>
+	it("live append recovers before projection", () =>
 		runTest(
 			Effect.gen(function* () {
 				const runner = yield* ProjectionRunnerEffectTag;
@@ -2568,10 +3297,37 @@ describe("ProjectionRunnerEffect", () => {
 
 				yield* seedSession("s1");
 				yield* commit([makeSessionCreated("s1")]);
-				expect(yield* runner.isRecovered()).toBe(false);
+				expect(yield* runner.isRecovered()).toBe(true);
 				expect(yield* sql`SELECT title FROM sessions WHERE id = 's1'`).toEqual([
 					{ title: "Test Session" },
 				]);
+			}),
+		));
+
+	it("projectBatch throws before recovery", () =>
+		runTest(
+			Effect.gen(function* () {
+				const store = yield* EventStoreEffectTag;
+				const runner = yield* ProjectionRunnerEffectTag;
+
+				yield* seedSession("s-batch-before-recovery");
+				const event = yield* store.append(
+					makeSessionCreated("s-batch-before-recovery"),
+				);
+
+				const result = yield* Effect.either(runner.projectBatch([event]));
+				expect(result._tag).toBe("Left");
+			}),
+		));
+
+	it("projectBatch is a no-op for an empty batch before recovery", () =>
+		runTest(
+			Effect.gen(function* () {
+				const runner = yield* ProjectionRunnerEffectTag;
+
+				yield* runner.projectBatch([]);
+
+				expect(yield* runner.isRecovered()).toBe(false);
 			}),
 		));
 
@@ -2706,6 +3462,43 @@ describe("ProjectionRunnerEffect", () => {
 				expect(r2.totalReplayed).toBe(0);
 			}),
 		));
+
+	it("recover replays only events after the persisted cursor", () => {
+		const projectedSequences: number[] = [];
+		const projector: EffectProjector = {
+			name: "incremental-recovery-projector",
+			handles: ["session.created"],
+			project: (event) =>
+				Effect.sync(() => {
+					projectedSequences.push(event.sequence);
+					return { stamped: [], removed: [] };
+				}),
+		};
+
+		return runTestWithProjectors(
+			[projector],
+			Effect.gen(function* () {
+				const store = yield* EventStoreEffectTag;
+				const runner = yield* ProjectionRunnerEffectTag;
+				yield* seedSession("s-incremental-recovery");
+
+				const first = yield* store.append(
+					makeSessionCreated("s-incremental-recovery"),
+				);
+				yield* runner.recover();
+
+				const second = yield* store.append(
+					makeSessionCreated("s-incremental-recovery", {
+						title: "Second event",
+					}),
+				);
+				const result = yield* runner.recover();
+
+				expect(result.totalReplayed).toBe(1);
+				expect(projectedSequences).toEqual([first.sequence, second.sequence]);
+			}),
+		);
+	});
 
 	it("projectBatch projects multiple events in one transaction", () =>
 		runTest(

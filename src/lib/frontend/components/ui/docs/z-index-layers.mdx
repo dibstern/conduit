@@ -1,0 +1,25 @@
+import { Meta } from "@storybook/addon-docs/blocks";
+
+<Meta title="UI/Foundations/Z-index Layers" />
+
+# Z-index layers
+
+The ladder is theme-invariant and preserves conduit's stacking order. Tailwind v4
+has no z-index theme namespace here, so consume a rung through its real variable,
+for example `z-[var(--z-popover)]`.
+
+| Token | Value | Semantic layer |
+| --- | ---: | --- |
+| `--z-raised` | 1 | Local content raised over siblings, such as sticky gutters and controls inside an overlay |
+| `--z-dropdown` | 60 | Dropdowns and autocomplete panels attached to ordinary content |
+| `--z-popover` | 200 | Floating popovers and context-menu backdrops |
+| `--z-popover-raised` | 210 | The floating panel above its popover backdrop |
+| `--z-modal` | 300 | Modal backdrops and modal content |
+| `--z-overlay` | 350 | Full-screen application overlays that must cover modal-level content |
+| `--z-toast` | 400 | Non-blocking notification stacks |
+| `--z-top` | 1000 | Exceptional top-level utility panels |
+| `--z-debug` | 9999 | Developer-only debug UI above the application |
+
+Arbitrary numeric `z-[…]` values are banned. Select the semantic rung that matches
+the surface. If none fits, resolve the stacking model at the design-system level
+instead of inserting a number between existing layers.

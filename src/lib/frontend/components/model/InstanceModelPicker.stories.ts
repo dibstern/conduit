@@ -1,4 +1,5 @@
 import type { Meta, StoryObj } from "@storybook/svelte-vite";
+import { expect, userEvent, within } from "storybook/test";
 import {
 	clearDiscoveryState,
 	discoveryState,
@@ -7,6 +8,7 @@ import {
 	handleModelList,
 	handleVariantInfo,
 } from "../../stores/discovery.svelte.js";
+import { sessionState } from "../../stores/session.svelte.js";
 import type { ProviderInfo } from "../../types.js";
 import InstanceModelPicker from "./InstanceModelPicker.svelte";
 
@@ -56,6 +58,31 @@ function seedClaude(): void {
 	});
 }
 
+/**
+ * Open the popover and assert it really opened. Shared by every story below,
+ * because a silent no-op click would bless a baseline of a CLOSED picker and
+ * nothing in the screenshot would say so.
+ */
+async function openPicker(canvasElement: HTMLElement) {
+	const canvas = within(canvasElement);
+	const trigger = await canvas.findByTestId("model-picker-trigger");
+	await userEvent.click(trigger);
+	const picker = await canvas.findByTestId("model-picker");
+	await canvas.findByTestId("model-picker-list");
+	// Opening the picker must land the caret in the search box. This is an
+	// assertion, not a setup step: the focus used to come from an `autofocus`
+	// attribute, which the HTML spec ignores once the document's
+	// autofocus-processed flag is set -- i.e. for anything rendered after load.
+	// It was inert, so the picker opened with focus nowhere and typing did
+	// nothing (conduit-test-de3.35.6).
+	await expect(await canvas.findByTestId("model-picker-search")).toHaveFocus();
+	// userEvent.click leaves the pointer on the trigger. Its background has a
+	// 150ms transition, so a hovered trigger is a flaky thing to bake into a
+	// baseline, and the hover is incidental to what these stories document.
+	await userEvent.unhover(trigger);
+	return picker;
+}
+
 const meta = {
 	title: "Model/InstanceModelPicker",
 	component: InstanceModelPicker,
@@ -66,6 +93,9 @@ const meta = {
 		// from localStorage, so it has to be pinned or a stale draft leaks in.
 		clearDiscoveryState();
 		discoveryState.selectedInstanceId = "claude";
+		// Locked mode keys off an active session, so leaving this set would dim
+		// the rail in every story that ran after `Locked`.
+		sessionState.currentId = null;
 	},
 } satisfies Meta<typeof InstanceModelPicker>;
 
@@ -79,14 +109,16 @@ export const Closed: Story = {
 
 /** Popover open, showing the instance rail and the provider's models. */
 export const Open: Story = {
+	// The dropdown is `absolute` on desktop but `max-sm:fixed`, so at mobile width it
+	// escapes #storybook-root — which is the element this suite screenshots. Without
+	// this tag the mobile baseline would capture the trigger and no menu at all.
+	tags: ["viewport-capture"],
 	beforeEach: () => {
 		seedClaude();
 		return bottomRightFrame();
 	},
 	play: async ({ canvasElement }) => {
-		await new Promise((r) => setTimeout(r, 50));
-		const btn = canvasElement.querySelector(".model-btn") as HTMLElement | null;
-		btn?.click();
+		await openPicker(canvasElement);
 	},
 };
 
@@ -99,5 +131,214 @@ export const WithVariants: Story = {
 			variant: "high",
 			variants: ["low", "medium", "high"],
 		});
+	},
+};
+
+// ─── Controls migrated onto ui/Button in conduit-test-de3.35.6 ───────────────
+// Four of the seven had no baseline at all: the favourites toggle in its lit
+// state, the geo-routing chips, and the whole locked-mode rail. `Open` covers
+// the rest (search row, model rows, the set-default star, the reload footer).
+
+/** Favourites filter engaged — the rail toggle lit via `data-active`. */
+export const FavoritesOn: Story = {
+	tags: ["viewport-capture"],
+	beforeEach: () => {
+		seedClaude();
+		return bottomRightFrame();
+	},
+	play: async ({ canvasElement }) => {
+		const picker = await openPicker(canvasElement);
+		const favorites = within(picker).getByTestId("picker-favorites");
+		await userEvent.click(favorites);
+		await expect(favorites).toHaveAttribute("aria-pressed", "true");
+		// The lit colour comes from the variant's `data-[active]:text-accent`,
+		// not from a class at the call site: a call-site `text-accent` loses to
+		// `toolbar`'s own `text-text-dimmer` on stylesheet order.
+		await expect(favorites).toHaveAttribute("data-active");
+		await userEvent.unhover(favorites);
+	},
+};
+
+/** A model with geo-routing scopes, one of them currently selected. */
+export const RoutingOptions: Story = {
+	tags: ["viewport-capture"],
+	beforeEach: () => {
+		handleModelList({
+			type: "model_list",
+			providers: [
+				{
+					...anthropic,
+					models: [
+						{
+							id: "claude-sonnet-4-5",
+							name: "Claude Sonnet 4.5",
+							provider: "claude",
+							routingOptions: [
+								{
+									value: "claude-sonnet-4-5",
+									label: "global",
+									isDefault: true,
+								},
+								{ value: "claude-sonnet-4-5-eu", label: "eu" },
+								{ value: "claude-sonnet-4-5-us", label: "us" },
+							],
+						},
+					],
+				},
+			],
+		});
+		handleModelInfo({
+			type: "model_info",
+			provider: "claude",
+			model: "claude-sonnet-4-5-eu",
+		});
+		handleDefaultModelInfo({
+			type: "default_model_info",
+			provider: "claude",
+			model: "claude-sonnet-4-5",
+			variant: "",
+		});
+		return bottomRightFrame();
+	},
+	play: async ({ canvasElement }) => {
+		const picker = await openPicker(canvasElement);
+		const chips = within(picker).getAllByRole("button", {
+			name: /^(global|eu|us)$/,
+		});
+		expect(chips).toHaveLength(3);
+		// `getByRole` rather than indexing the array: it raises its own failure if
+		// the chip is missing, which keeps a hand-written plain-Error throw out of
+		// this file. test/unit/effect/runtime-boundary-grep.test.ts scans stories
+		// too, and it matches source text -- including comments, which is how the
+		// first draft of THIS comment failed the suite.
+		await expect(
+			within(picker).getByRole("button", { name: "eu" }),
+		).toHaveAttribute("data-active");
+	},
+};
+
+/**
+ * Locked mode: a session is already bound to an instance, so every other rail
+ * entry is soft-disabled. Soft, not `disabled`, because the hover tooltip is
+ * the only thing that explains the lock and a real disabled button fires no
+ * `mouseenter`.
+ */
+export const Locked: Story = {
+	tags: ["viewport-capture"],
+	beforeEach: () => {
+		seedClaude();
+		handleModelList({
+			type: "model_list",
+			providers: [
+				anthropic,
+				{
+					id: "opencode",
+					name: "OpenCode",
+					configured: true,
+					models: [{ id: "gpt-5", name: "GPT-5", provider: "opencode" }],
+				},
+			],
+		});
+		sessionState.currentId = "session-1";
+		return bottomRightFrame();
+	},
+	play: async ({ canvasElement }) => {
+		const picker = await openPicker(canvasElement);
+		const other = within(picker).getByTestId("picker-instance-opencode");
+		await expect(other).toHaveAttribute("aria-disabled", "true");
+	},
+};
+
+/**
+ * The rail's hover tooltip, which had no visual coverage before
+ * conduit-test-ee6y replaced the hand-written one with `ui/Tooltip`.
+ *
+ * This is the first real consumer of that primitive -- until now only a
+ * fixture used it -- and it is the story that proves two things the unit
+ * tests cannot: that the tooltip escapes the picker's clip by portalling to
+ * <body>, and that a `side="right"` surface actually casts a shadow. It did
+ * not before; nothing had ever asked for a side-anchored one.
+ *
+ * The explicit timeout is not padding. `ui/Tooltip` keeps Bits' 700ms open
+ * delay on purpose, and testing-library's default `findBy` timeout is 1000ms,
+ * which leaves 300ms of slack on a loaded CI box. A flaky gate teaches people
+ * to rerun until green, which is worse than no gate.
+ */
+export const RailTooltip: Story = {
+	tags: ["viewport-capture"],
+	beforeEach: () => {
+		seedClaude();
+		return bottomRightFrame();
+	},
+	play: async ({ canvasElement }) => {
+		await openPicker(canvasElement);
+		const body = canvasElement.ownerDocument.body;
+		const rail = body.querySelector<HTMLElement>(
+			'[data-testid^="picker-instance-"]',
+		);
+		await expect(rail).not.toBeNull();
+		await userEvent.hover(rail as HTMLElement);
+		const tip = await within(body).findByRole("tooltip", undefined, {
+			timeout: 3000,
+		});
+		// Parent, not visibility: a body-scoped query finds the tooltip whether
+		// or not it portalled, so only the parent distinguishes the two.
+		await expect(tip.closest("body")).toBe(body);
+		await expect(tip).toBeVisible();
+	},
+};
+
+/**
+ * A provider the user has not set up yet. This state ships and had no visual
+ * coverage at all, which is how conduit-test-40k4 found it: the "(not
+ * configured)" suffix was a `::after` recipe in style.css, and moving it into
+ * the markup would have been unverifiable against a suite that never renders
+ * an unconfigured provider.
+ *
+ * The suffix is asserted as real text rather than by screenshot alone. That
+ * is the point of moving it: pseudo-element `content` cannot be selected,
+ * cannot be translated, and is announced inconsistently, so a query that
+ * finds it in the accessibility tree is proof the fix did what it claimed.
+ */
+export const UnconfiguredProvider: Story = {
+	tags: ["viewport-capture"],
+	beforeEach: () => {
+		seedClaude();
+		// Every non-claude provider maps to the `opencode` instance
+		// (instanceIdForProviderId is a two-way split), and the picker lists only
+		// the selected instance's groups -- so selecting opencode is what puts a
+		// configured and an unconfigured group side by side. That pairing is the
+		// real shape: an OpenCode instance exposes whatever providers it knows
+		// about, set up or not.
+		handleModelList({
+			type: "model_list",
+			providers: [
+				anthropic,
+				{
+					id: "google",
+					name: "Google",
+					configured: true,
+					models: [{ id: "gemini-3", name: "Gemini 3", provider: "google" }],
+				},
+				{
+					id: "openai",
+					name: "OpenAI",
+					configured: false,
+					models: [{ id: "gpt-5", name: "GPT-5", provider: "openai" }],
+				},
+			],
+		});
+		discoveryState.selectedInstanceId = "opencode";
+		return bottomRightFrame();
+	},
+	play: async ({ canvasElement }) => {
+		const picker = await openPicker(canvasElement);
+		// Queried by class rather than by text: the provider name also appears
+		// on the instance rail, so a text query would match two elements and
+		// fail for a reason that has nothing to do with what is being proved.
+		const headers = [
+			...picker.querySelectorAll<HTMLElement>(".model-provider-header"),
+		].map((node) => node.textContent?.trim());
+		await expect(headers.sort()).toEqual(["Google", "OpenAI (not configured)"]);
 	},
 };

@@ -1,3 +1,5 @@
+import { routerState } from "../../../src/lib/frontend/stores/router.svelte.js";
+import { seedSearchResults } from "./session-fixtures.js";
 // ─── Session store invariants ────────────────────────────────────────────────
 // The session store is split in two: a server-owned map of `SessionInfo` rows
 // written only by the `applySession*` functions, and a client-owned block
@@ -54,7 +56,6 @@ import {
 	handleSessionSwitched,
 	sessionState,
 } from "../../../src/lib/frontend/stores/session.svelte.js";
-import { uiState } from "../../../src/lib/frontend/stores/ui.svelte.js";
 import { handleMessage } from "../../../src/lib/frontend/stores/ws.svelte.js";
 import type {
 	RelayMessage,
@@ -70,7 +71,6 @@ const decodeServerHalf = (): readonly (typeof SessionInfoSchema.Type)[] =>
 
 beforeEach(() => {
 	clearSessionState();
-	uiState.hideSubagentSessions = true;
 });
 
 // ─── Loop 1: no invented rows ───────────────────────────────────────────────
@@ -88,11 +88,10 @@ describe("the server half holds only rows the server sent", () => {
 		expect(sessionState.sessions.has("ses_child")).toBe(false);
 		// The partial row this used to insert had `title: ""`, so it rendered as
 		// a blank entry in the sidebar whenever subagents were shown.
-		uiState.hideSubagentSessions = false;
 		expect(getFilteredSessions()).toEqual([]);
 	});
 
-	it("records the parent on a row the server has already sent", () => {
+	it("keeps a listed row unchanged while exposing announced parent lineage", () => {
 		applySessionSnapshot(
 			[{ id: "ses_child", title: "Child", status: "idle" }],
 			"complete",
@@ -108,15 +107,15 @@ describe("the server half holds only rows the server sent", () => {
 			id: "ses_child",
 			title: "Child",
 			status: "idle",
-			parentID: "ses_parent",
 		});
+		expect(sessionState.currentParentId).toBe("ses_parent");
 	});
 });
 
 // ─── Loop 2: one representation ─────────────────────────────────────────────
 
 describe("the server half is one representation", () => {
-	it("shows a rename delivered by an all-sessions list in the roots view", () => {
+	it("shows a rename delivered by a new root snapshot", () => {
 		handleSessionList({
 			type: "session_list",
 			sessions: [{ id: "a", title: "Old", status: "idle" }],
@@ -125,7 +124,7 @@ describe("the server half is one representation", () => {
 		handleSessionList({
 			type: "session_list",
 			sessions: [{ id: "a", title: "New", status: "idle" }],
-			roots: false,
+			roots: true,
 		});
 
 		expect(sessionState.sessions.size).toBe(1);
@@ -136,9 +135,9 @@ describe("the server half is one representation", () => {
 		handleSessionList({
 			type: "session_list",
 			sessions: [{ id: "a", title: "Old", status: "idle" }],
-			roots: false,
-			search: true,
+			roots: true,
 		});
+		seedSearchResults([{ id: "a", title: "Old" }]);
 		applySessionUpsert({ id: "a", title: "Renamed", status: "idle" });
 
 		expect(getFilteredSessions().map((s) => s.title)).toEqual(["Renamed"]);
@@ -151,9 +150,12 @@ describe("the server half is one representation", () => {
 				{ id: "a", title: "A", status: "idle" },
 				{ id: "b", title: "B", status: "idle" },
 			],
-			roots: false,
-			search: true,
+			roots: true,
 		});
+		seedSearchResults([
+			{ id: "a", title: "A" },
+			{ id: "b", title: "B" },
+		]);
 		applySessionRemoved("a");
 
 		expect(getFilteredSessions().map((s) => s.id)).toEqual(["b"]);
@@ -376,6 +378,7 @@ describe("event routing for the session being viewed", () => {
 	it("routes events for the selected session before its row arrives", async () => {
 		vi.useFakeTimers();
 		try {
+			routerState.path = "/s/ses_new";
 			handleMessage({
 				type: "session_switched",
 				id: "ses_new",

@@ -1,13 +1,14 @@
 <!-- ─── Chat Layout ─────────────────────────────────────────────────────────── -->
-<!-- Main layout for the /p/:slug/ route: Sidebar + Header + Messages + Input. -->
+<!-- Session list and chat: Sidebar + Header + Messages + Input. -->
 <!-- Wires all feature/overlay components into the layout hierarchy. -->
 <!-- Preserves element IDs and class names for E2E test compatibility. -->
 
 <script lang="ts">
-	import { untrack } from "svelte";
+	import { onMount, untrack } from "svelte";
 	import { interruptStream, disposeRuntime } from "../../transport/runtime.js";
-	import { getAgentsRpc, getCommandsRpc, getFileTreeRpc, getModelsRpc, getProjectsRpc, listPtysRpc, listSessionsRpc } from "../../transport/ws-rpc-client.js";
+	import { attachProjectRpc, resolveSessionRpc, viewSessionRpc, getAgentsRpc, getCommandsRpc, getFileTreeRpc, getModelsRpc, getProjectsRpc, listPtysRpc, listSessionsRpc } from "../../transport/ws-rpc-client.js";
 	import Header from "./Header.svelte";
+	import SessionBar from "./SessionBar.svelte";
 	import Sidebar from "./Sidebar.svelte";
 	import InputArea from "../input/InputArea.svelte";
 	import MessageList from "../chat/MessageList.svelte";
@@ -39,7 +40,8 @@
 	import {
 		connect,
 		disconnect,
-		onConnect,
+		onProjectAttached,
+		wsState,
 		onNavigateToSession,
 		clearNavigateToSession,
 		initSWMessageListener,
@@ -47,27 +49,19 @@
 		onPlanMode,
 		wsSend,
 	} from "../../stores/ws.svelte.js";
-	import { getCurrentSessionId, slugState } from "../../stores/router.svelte.js";
+	import { attachedProjectState, getCurrentRoute, getCurrentSessionId, getCurrentSearchParams, replaceRoute, routerState } from "../../stores/router.svelte.js";
 	import { clearMessages } from "../../stores/chat.svelte.js";
 	import { applyPtyListResponse, terminalState, destroyAll } from "../../stores/terminal.svelte.js";
-	import { applyListSessionsResponse, clearSessionState, switchToSession } from "../../stores/session.svelte.js";
-	import { clearAllPermissions } from "../../stores/permissions.svelte.js";
+	import { applyListSessionsResponse, clearSessionState, loadDaemonSessions, sessionState, switchToSession } from "../../stores/session.svelte.js";
 	import { applyGetAgentsResponse, applyGetCommandsResponse, applyGetModelsResponse, clearDiscoveryState, discoveryState } from "../../stores/discovery.svelte.js";
 	import { todoState, clearTodoState } from "../../stores/todo.svelte.js";
 	import { applyGetFileTreeResponse, requestFileTree, clearFileTreeState } from "../../stores/file-tree.svelte.js";
 	import { applyGetProjectsResponse } from "../../stores/project.svelte.js";
+	import { sessionViewState, watchCompactViewport } from "../../stores/session-view.svelte.js";
 	import { getBrowserClientId } from "../../stores/client-identity.js";
 	import { featureFlags, initFeatureFlags, toggleFeature } from "../../stores/feature-flags.svelte.js";
 	import { fetchCurrentVersion } from "../../stores/version.svelte.js";
 	import type { RelayMessage } from "../../types.js";
-
-	// ─── Layout classes ────────────────────────────────────────────────────────
-
-	const layoutClass = $derived.by(() => {
-		let cls = "flex h-dvh";
-		if (uiState.sidebarCollapsed) cls += " sidebar-collapsed";
-		return cls;
-	});
 
 	// ─── Local state ──────────────────────────────────────────────────────────
 
@@ -100,6 +94,46 @@
 	/** Visual viewport height — tracks keyboard show/hide on mobile. */
 	let vvHeight = $state<number | null>(null);
 	let appEl: HTMLDivElement | undefined = $state(undefined);
+	let sessionListScrollTop = 0;
+	let wasPhoneListScreen = false;
+
+	const phoneListScreen = $derived.by(() => {
+		const route = getCurrentRoute();
+		return (
+			sessionViewState.compact &&
+			route.page === "chat" &&
+			!route.sessionId &&
+			!uiState.fileViewerOpen &&
+			!mobileMaximized
+		);
+	});
+
+	const layoutClass = $derived.by(() => {
+		let cls = "flex h-dvh";
+		if (uiState.sidebarCollapsed) cls += " sidebar-collapsed";
+		if (sessionViewState.compact) cls += " layout-compact";
+		if (phoneListScreen) cls += " phone-list-screen";
+		return cls;
+	});
+
+	// Some browsers zero a scroller when an ancestor becomes display:none. Save
+	// before the route class hides the sidebar, then restore after it is shown.
+	$effect.pre(() => {
+		const active = phoneListScreen;
+		if (wasPhoneListScreen && !active) {
+			const scroller = document.getElementById("session-list-scroller");
+			if (scroller) sessionListScrollTop = scroller.scrollTop;
+		}
+	});
+
+	$effect(() => {
+		const active = phoneListScreen;
+		if (active && !wasPhoneListScreen) {
+			const scroller = document.getElementById("session-list-scroller");
+			if (scroller) scroller.scrollTop = sessionListScrollTop;
+		}
+		wasPhoneListScreen = active;
+	});
 
 	// ─── Sidebar resize state ─────────────────────────────────────────────
 
@@ -304,110 +338,141 @@
 
 	// ─── Lifecycle: WebSocket connection ───────────────────────────────────────
 
-	$effect(() => {
-		// Read slug from slugState — this ONLY changes when the project slug changes,
-		// not on session-within-project changes (unlike getCurrentSlug() which reads
-		// routerState.path and would cause disconnect/reconnect on every session switch).
-		const slug = slugState.current;
-		if (!slug) return;
-
-		// Wrap everything except the slug read in untrack() so the only
-		// reactive dependency of this effect is slugState.current.
-		// In particular, connect() must be untracked because it internally
-		// calls getCurrentSessionId() → getCurrentRoute() → routerState.path,
-		// which would cause a spurious disconnect/reconnect cycle whenever
-		// the session portion of the URL changes (e.g. on initial load when
-		// the server sends session_switched and replaceRoute updates the path).
-		untrack(() => {
-			clearMessages();
-			clearSessionState();
-			clearAllPermissions();
-			destroyAll();
-			clearDiscoveryState();
-			clearTodoState();
-			clearFileTreeState();
-			resetProjectUI();
-			planModeData = { mode: null, content: "" };
-
-			// Register notification-click → session navigation callback.
-			onNavigateToSession((sessionId) => {
-				switchToSession(sessionId);
-			});
-
-			// Listen for SW postMessage (push notification clicks)
-			initSWMessageListener();
-
-			// A push subscription outlives the tab that made it, so a reload
-			// starts out not knowing whether push already owns the ding. Ask
-			// the browser rather than guess, or every alert lands twice.
-			void reconcilePushActive();
-
-			onConnect(() => {
-				// Fetch current version for sidebar footer
-				fetchCurrentVersion();
-				// Request initial state from server
-				void Promise.all([
-					listSessionsRpc({ projectSlug: slug, roots: true }),
-					listSessionsRpc({ projectSlug: slug, roots: false }),
-				])
-					.then((responses) => {
-						for (const response of responses) applyListSessionsResponse(response);
-					})
-					.catch(() => {
-						showToast("Failed to load sessions", { variant: "error" });
-					});
-				const routeSessionId = getCurrentSessionId();
-				// With no session in the route, scope the agent fetch to the
-				// client-persisted harness draft so the agent list matches the
-				// picker's pre-creation selection after a reload.
-				const draftInstanceId =
-					routeSessionId == null ? discoveryState.selectedInstanceId : null;
-					void getAgentsRpc({
-						projectSlug: slug,
-						...(routeSessionId != null ? { sessionId: routeSessionId } : {}),
-						...(draftInstanceId != null ? { instanceId: draftInstanceId } : {}),
-					})
-						.then(applyGetAgentsResponse)
-						.catch(() => undefined);
-					void getModelsRpc({
-						projectSlug: slug,
-						...(routeSessionId != null ? { sessionId: routeSessionId } : {}),
-					})
-						.then(applyGetModelsResponse)
-						.catch(() => undefined);
-					void getCommandsRpc({
-						projectSlug: slug,
-						...(routeSessionId != null ? { sessionId: routeSessionId } : {}),
-					})
-						.then(applyGetCommandsResponse)
-						.catch(() => undefined);
-				void getProjectsRpc({ projectSlug: slug })
-					.then(applyGetProjectsResponse)
-					.catch(() => {
-						showToast("Failed to load projects", { variant: "error" });
-					});
-				requestFileTree();
-				void getFileTreeRpc({ projectSlug: slug })
-					.then(applyGetFileTreeResponse)
-					.catch(() => {
-						showToast("Failed to load file tree", { variant: "error" });
-					});
-				void listPtysRpc({
-					projectSlug: slug,
-					originId: getBrowserClientId(),
+	let requestedProject: string | null = null;
+	onMount(() => {
+		let previousSlug: string | null = null;
+		let attachGeneration = 0;
+		const unsubscribe = onProjectAttached((slug) => {
+			if (requestedProject === slug) requestedProject = null;
+			const generation = ++attachGeneration;
+			if (slug !== previousSlug) {
+				clearMessages();
+				clearSessionState();
+				destroyAll();
+				clearDiscoveryState();
+				clearTodoState();
+				clearFileTreeState();
+				resetProjectUI();
+				planModeData = { mode: null, content: "" };
+				previousSlug = slug;
+			}
+			// Fetch current version for sidebar footer
+			fetchCurrentVersion();
+			// Request initial state from server
+			// First page only. The cross-project read is keyset-paged now; the
+			// sidebar's scroll sentinel asks for the rest.
+			void loadDaemonSessions();
+			void listSessionsRpc({ projectSlug: slug, roots: true })
+				.then((response) => {
+					if (generation === attachGeneration) applyListSessionsResponse(response);
 				})
-					.then(applyPtyListResponse)
-					.catch(() => undefined);
-			});
-
-			connect(slug);
+				.catch(() => {
+					if (generation === attachGeneration) showToast("Failed to load sessions", { variant: "error" });
+				});
+			const routeSessionId = getCurrentSessionId();
+			// With no session in the route, scope the agent fetch to the
+			// client-persisted harness draft so the agent list matches the
+			// picker's pre-creation selection after a reload.
+			const draftInstanceId =
+				routeSessionId == null ? discoveryState.selectedInstanceId : null;
+			void getAgentsRpc({
+				projectSlug: slug,
+				...(routeSessionId != null ? { sessionId: routeSessionId } : {}),
+				...(draftInstanceId != null ? { instanceId: draftInstanceId } : {}),
+			})
+				.then((response) => {
+					if (generation === attachGeneration) applyGetAgentsResponse(response);
+				})
+				.catch(() => undefined);
+			void getModelsRpc({
+				projectSlug: slug,
+				...(routeSessionId != null ? { sessionId: routeSessionId } : {}),
+			})
+				.then((response) => {
+					if (generation === attachGeneration) applyGetModelsResponse(response);
+				})
+				.catch(() => undefined);
+			void getCommandsRpc({
+				projectSlug: slug,
+				...(routeSessionId != null ? { sessionId: routeSessionId } : {}),
+			})
+				.then((response) => {
+					if (generation === attachGeneration) applyGetCommandsResponse(response);
+				})
+				.catch(() => undefined);
+			void getProjectsRpc({ projectSlug: slug })
+				.then((response) => {
+					if (generation === attachGeneration) applyGetProjectsResponse(response);
+				})
+				.catch(() => {
+					if (generation === attachGeneration) showToast("Failed to load projects", { variant: "error" });
+				});
+			requestFileTree();
+			void getFileTreeRpc({ projectSlug: slug })
+				.then((response) => {
+					if (generation === attachGeneration) applyGetFileTreeResponse(response);
+				})
+				.catch(() => {
+					if (generation === attachGeneration) showToast("Failed to load file tree", { variant: "error" });
+				});
+			void listPtysRpc({
+				projectSlug: slug,
+				originId: getBrowserClientId(),
+			})
+				.then((response) => {
+					if (generation === attachGeneration) applyPtyListResponse(response);
+				})
+				.catch(() => undefined);
 		});
-
+		onNavigateToSession((sessionId) => switchToSession(sessionId));
+		initSWMessageListener();
+		connect();
 		return () => {
+			attachGeneration++;
+			unsubscribe();
 			clearNavigateToSession();
-			interruptStream(); // Interrupt Effect stream fiber before disconnect
+			interruptStream();
 			disconnect();
 		};
+	});
+
+	// Project navigation requests attachment through RPC on the existing socket.
+	// This also covers browser history and project-only links from every caller.
+	const connected = $derived(
+		wsState.status === "connected" || wsState.status === "processing",
+	);
+	$effect(() => {
+		const route = getCurrentRoute();
+		const projectHint = getCurrentSearchParams().get("p");
+		if (!connected || route.page !== "chat") return;
+		let cancelled = false;
+		untrack(() => {
+			if (!route.sessionId) {
+				if (sessionState.currentId !== null) {
+					sessionState.currentId = null;
+					clearTodoState();
+				}
+				if (projectHint && (projectHint !== attachedProjectState.slug || requestedProject !== null)) {
+					requestedProject = projectHint;
+					void attachProjectRpc({ projectSlug: projectHint, originId: getBrowserClientId() })
+						.catch(() => { if (!cancelled) showToast("Failed to switch projects", { variant: "error" }); });
+				}
+				return;
+			}
+			if (route.sessionId === sessionState.currentId) return;
+			const sessionId = route.sessionId;
+			void resolveSessionRpc({ sessionId }).then(({ projectSlug }) => {
+				if (cancelled) return;
+				if (sessionState.currentId === sessionId) return;
+				if (projectSlug === null) {
+					routerState.sessionNotFound = true;
+					replaceRoute("/");
+					return;
+				}
+				return viewSessionRpc({ projectSlug, sessionId, originId: getBrowserClientId() });
+			}).catch(() => { if (!cancelled) showToast("Failed to open session", { variant: "error" }); });
+		});
+		return () => { cancelled = true; };
 	});
 
 	// ─── Effect runtime disposal on page unload ──────────────────────────────
@@ -471,14 +536,18 @@
 		}
 	});
 
+	// One matchMedia listener for the whole app decides whether the session's
+	// own bar replaces the global header. Kept here rather than in each consumer
+	// so the chrome cannot disagree with itself about what "compact" means.
+	$effect(() => watchCompactViewport());
+
 	// ─── Visual viewport tracking (keyboard avoidance when terminal is open) ──
 	// CSS dvh does NOT account for the virtual keyboard. We listen to the
 	// visualViewport API and constrain #app height so the terminal stays above
 	// the keyboard and xterm.js refits via its ResizeObserver.
 	// Active whenever the terminal panel is open on a mobile-width viewport.
 	$effect(() => {
-		const isMobile = typeof window !== "undefined" && window.innerWidth <= 768;
-		if (!terminalState.panelOpen || !isMobile) {
+		if (!terminalState.panelOpen || !sessionViewState.compact) {
 			vvHeight = null;
 			return;
 		}
@@ -551,8 +620,20 @@
 </script>
 
 <div bind:this={layoutEl} id="layout" class={layoutClass}>
-	<!-- Sidebar (includes overlay backdrop) -->
-	<Sidebar />
+	<!--
+		iOS 26 paints a progressive blur under the status bar unless WebKit finds an
+		opaque fixed or sticky box at the top edge (hit-tested at x = width/2, y = 0).
+		Both phone top bars are static, so this strip stands in for them. Same colour
+		as the bars, so it is invisible; compact-only, styled in style.css.
+	-->
+	<div id="compact-top-edge" aria-hidden="true"></div>
+
+	<!-- Fixed and full-viewport, so it lives outside #app: the phone list screen
+	     hides #app but still needs to show the connection state. -->
+	<ConnectOverlay />
+
+	<!-- Sidebar stays mounted so list state survives route changes. -->
+	<Sidebar listScreen={phoneListScreen} />
 
 	<!-- Sidebar resize handle (desktop only) -->
 	{#if !uiState.sidebarCollapsed}
@@ -575,14 +656,20 @@
 		class:select-none={isResizing || isSidebarResizing || isFileViewerResizing}
 		style={vvHeight ? `height: ${vvHeight}px;` : ""}
 	>
-		<!-- Header -->
-		<Header />
+		<!-- Chrome: on a phone the session owns the top bar, and the global
+		     header is replaced rather than stacked under. Exactly one of the two
+		     renders, so there is never a second row of chrome to scroll past. -->
+		{#if sessionViewState.compact}
+			<!-- The list screen has its own bar in Sidebar; skipping this one keeps
+			     the shared instance badge test IDs unique. -->
+			{#if !phoneListScreen}<SessionBar />{/if}
+		{:else}
+			<Header />
+		{/if}
 
-		<!-- Connection Overlay -->
-		<ConnectOverlay />
-
-		<!-- Banners (update available, skip permissions, etc.) -->
-		<Banners />
+		<!-- Banners (update available, skip permissions, etc.). The phone list
+		     screen hides #app, so Sidebar shows them there instead. -->
+		{#if !phoneListScreen}<Banners />{/if}
 
 		<!-- Todo Sticky Overlay -->
 		<TodoOverlay items={todoItems} />

@@ -1,0 +1,163 @@
+import { cleanup, fireEvent, render, screen } from "@testing-library/svelte";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import SessionContextMenu from "../../../src/lib/frontend/components/session/SessionContextMenu.svelte";
+import type { SessionInfo } from "../../../src/lib/frontend/types.js";
+
+afterEach(cleanup);
+
+function openMenu(
+	session: Pick<SessionInfo, "id" | "title"> & Partial<SessionInfo>,
+	options?: {
+		anchor?: HTMLElement;
+		projectLabel?: string;
+		branch?: string;
+		onrename?: () => void;
+	},
+) {
+	const onsettle = vi.fn();
+	const onpin = vi.fn();
+	const onsnooze = vi.fn();
+	const onunsnooze = vi.fn();
+	render(SessionContextMenu, {
+		props: {
+			session: { status: "idle", ...session },
+			anchor: options?.anchor ?? document.body,
+			projectLabel: options?.projectLabel,
+			branch: options?.branch,
+			onsettle,
+			onpin,
+			onsnooze,
+			onunsnooze,
+			onrename: options?.onrename ?? vi.fn(),
+			ondelete: vi.fn(),
+			oncopyresume: vi.fn(),
+			onfork: vi.fn(),
+			onclose: vi.fn(),
+		},
+	});
+	return { onsettle, onpin, onsnooze, onunsnooze };
+}
+
+describe("session triage menu", () => {
+	it("shows a two-line title and separate project and branch in its header", async () => {
+		openMenu(
+			{
+				id: "a",
+				title: "Investigate why the websocket reconnect loop double subscribes",
+			},
+			{ projectLabel: "Conduit", branch: "fix/reconnect" },
+		);
+		const header = await screen.findByTestId("session-ctx-header");
+		expect(header.textContent).toContain(
+			"Investigate why the websocket reconnect loop double subscribes",
+		);
+		expect(header.querySelector(".line-clamp-2")).toBeTruthy();
+		expect(
+			[...header.querySelectorAll("span")].map((part) => part.textContent),
+		).toEqual(["Conduit", "fix/reconnect"]);
+		expect(header.getAttribute("tabindex")).toBeNull();
+	});
+
+	it("returns focus to its live anchor on Escape", async () => {
+		const anchor = document.createElement("button");
+		anchor.textContent = "Actions";
+		document.body.append(anchor);
+		anchor.focus();
+		openMenu({ id: "a", title: "Alpha" }, { anchor });
+		await screen.findByRole("menu");
+		await fireEvent.keyDown(screen.getByRole("menu"), { key: "Escape" });
+		await vi.waitFor(() => expect(document.activeElement).toBe(anchor));
+		anchor.remove();
+	});
+
+	it("keeps focus in the rename input after selecting Rename", async () => {
+		const anchor = document.createElement("button");
+		const input = document.createElement("input");
+		document.body.append(anchor, input);
+		openMenu(
+			{ id: "a", title: "Alpha" },
+			{ anchor, onrename: () => input.focus() },
+		);
+		await fireEvent.click(await screen.findByTestId("session-ctx-rename"));
+		expect(document.activeElement).toBe(input);
+		anchor.remove();
+		input.remove();
+	});
+	it("puts Settle and Pin above Rename, with a divider", async () => {
+		const { onsettle } = openMenu({ id: "a", title: "Alpha" });
+		const items = await screen.findAllByRole("menuitem");
+		expect(items.slice(0, 5).map((item) => item.textContent?.trim())).toEqual([
+			"Settle",
+			"Auto-settle when idle",
+			"Pin to top",
+			"Snooze…",
+			"Rename",
+		]);
+		expect(screen.getByRole("separator")).toBeTruthy();
+		await fireEvent.click(screen.getByTestId("session-ctx-settle"));
+		expect(onsettle).toHaveBeenCalledWith("a", true);
+	});
+
+	it("hides snooze on settled rows", async () => {
+		openMenu({ id: "a", title: "Alpha", settledAt: 1 });
+		await screen.findByTestId("session-ctx-unsettle");
+		expect(screen.queryByTestId("session-ctx-snooze")).toBeNull();
+	});
+
+	it("disables snooze on pinned and waiting rows with reasons", async () => {
+		const { onsnooze } = openMenu({ id: "a", title: "Alpha", pinnedAt: 1 });
+		const snooze = await screen.findByTestId("session-ctx-snooze");
+		expect(snooze.getAttribute("aria-disabled")).toBe("true");
+		expect(snooze.textContent).toContain("Unpin to snooze");
+		await fireEvent.click(snooze);
+		expect(onsnooze).not.toHaveBeenCalled();
+		cleanup();
+		for (const attention of ["needs-approval", "needs-reply"] as const) {
+			openMenu({ id: "a", title: "Alpha", attention });
+			const waiting = await screen.findByTestId("session-ctx-snooze");
+			expect(waiting.getAttribute("aria-disabled")).toBe("true");
+			expect(waiting.textContent).toContain("Waiting on you");
+			cleanup();
+		}
+	});
+
+	it("changes or removes an existing snooze", async () => {
+		const { onsnooze } = openMenu({ id: "a", title: "Alpha", snoozedAt: 1 });
+		const change = await screen.findByTestId("session-ctx-snooze");
+		expect(change.textContent).toContain("Change snooze…");
+		await fireEvent.click(change);
+		expect(onsnooze).toHaveBeenCalledWith("a");
+		// Re-open: selecting a menu item closes the portal.
+		cleanup();
+		const { onunsnooze } = openMenu({ id: "a", title: "Alpha", snoozedAt: 1 });
+		await fireEvent.click(await screen.findByTestId("session-ctx-unsnooze"));
+		expect(onunsnooze).toHaveBeenCalledWith("a");
+	});
+
+	it("un-settles a settled session", async () => {
+		const { onsettle } = openMenu({ id: "a", title: "Alpha", settledAt: 0 });
+		await fireEvent.click(await screen.findByTestId("session-ctx-unsettle"));
+		expect(onsettle).toHaveBeenCalledWith("a", false);
+	});
+
+	it("pins a session", async () => {
+		const { onpin } = openMenu({ id: "a", title: "Alpha" });
+		await fireEvent.click(await screen.findByTestId("session-ctx-pin"));
+		expect(onpin).toHaveBeenCalledWith("a", true);
+	});
+
+	it("explains the disabled Settle action on a pinned session and allows Unpin", async () => {
+		const { onsettle, onpin } = openMenu({
+			id: "a",
+			title: "Alpha",
+			pinnedAt: 0,
+		});
+		const settle = await screen.findByTestId("session-ctx-settle");
+		expect(settle.getAttribute("aria-disabled")).toBe("true");
+		expect(settle.textContent).toContain("Unpin to settle");
+		await fireEvent.click(settle);
+		expect(onsettle).not.toHaveBeenCalled();
+		await fireEvent.click(screen.getByTestId("session-ctx-unpin"));
+		expect(onpin).toHaveBeenCalledWith("a", false);
+	});
+});

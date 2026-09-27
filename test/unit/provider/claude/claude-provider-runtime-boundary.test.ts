@@ -49,6 +49,9 @@ function makeBlockingQuery(
 		[Symbol.asyncIterator]() {
 			return this;
 		},
+		async [Symbol.asyncDispose]() {
+			await release();
+		},
 	} as AsyncGenerator<SDKMessage, void, unknown>;
 
 	return Object.assign(stream, {

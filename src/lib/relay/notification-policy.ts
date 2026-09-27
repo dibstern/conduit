@@ -33,19 +33,24 @@ export function resolveNotifications(
 	route: RouteDecision,
 	isSubagent: boolean,
 	sessionId?: string,
+	/** In-app identity when no durable completion origin is available. */
+	syntheticAlertId?: string,
 ): NotificationResolution {
-	// Anonymous status observations update the UI; only identified originating
-	// events can safely own a durable alert receipt.
-	if ((msg.type !== "done" && msg.type !== "error") || !msg.alertId) {
+	if (msg.type !== "done" && msg.type !== "error") {
 		return { sendPush: false, broadcastCrossSession: false };
 	}
+	const alertId =
+		msg.alertId ?? (msg.type === "done" ? syntheticAlertId : undefined);
+	if (!alertId) return { sendPush: false, broadcastCrossSession: false };
 
 	// Subagent "done" is suppressed — parent session emits its own done
 	if (isSubagent && msg.type === "done") {
 		return { sendPush: false, broadcastCrossSession: false };
 	}
 
-	const sendPush = true;
+	// Only an originating ID can claim a durable push receipt. Anonymous poller
+	// transitions retain their in-app notification without claiming a push.
+	const sendPush = msg.alertId !== undefined;
 	const broadcastCrossSession = route.action === "drop";
 
 	if (broadcastCrossSession) {
@@ -54,7 +59,7 @@ export function resolveNotifications(
 		const payload: NotificationResolution["crossSessionPayload"] = {
 			type: "notification_event",
 			eventType: msg.type,
-			alertId: msg.alertId,
+			alertId,
 			...(errorMessage !== undefined ? { message: errorMessage } : {}),
 			...(sessionId != null ? { sessionId } : {}),
 		};

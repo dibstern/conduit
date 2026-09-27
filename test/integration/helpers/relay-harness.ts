@@ -70,7 +70,9 @@ export async function createRelayHarness(
 		relayBaseUrl,
 
 		async connectWsClient(): Promise<TestWsClient> {
-			const client = new TestWsClient(`ws://127.0.0.1:${relayPort}/ws`);
+			const client = new TestWsClient(
+				`ws://127.0.0.1:${relayPort}/ws?p=integration-test`,
+			);
 			clients.push(client);
 			await client.waitForOpen();
 			return client;

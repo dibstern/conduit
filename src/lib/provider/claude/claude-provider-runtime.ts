@@ -389,6 +389,9 @@ function enumerateSkills(
 // ─── Provider Runtime Config ───────────────────────────────────────────────
 
 export interface ClaudeProviderInstanceDeps {
+	readonly onBackgroundTask?: (
+		input: import("../../session/background-liveness.js").BackgroundTaskTransition,
+	) => void;
 	readonly workspaceRoot: string;
 	readonly claudeSettingsOverrides?: () => Settings | undefined;
 	/** Injectable factory for the SDK's query() function. Defaults to the real SDK. */
@@ -984,6 +987,9 @@ export class ClaudeProviderRuntime {
 				// 8. Start background stream consumer.
 				const translator = makeClaudeTranslationService({
 					getSink: (ctx) => ctx.eventSink,
+					...(this.deps.onBackgroundTask
+						? { onBackgroundTask: this.deps.onBackgroundTask }
+						: {}),
 				});
 				yield* FiberMap.run(
 					this.streamFibers,

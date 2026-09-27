@@ -41,7 +41,7 @@
 		setDefaultPermissionModeRpc,
 	} from "../../transport/ws-rpc-client.js";
 	import { createFrontendLogger } from "../../utils/logger.js";
-	import ToggleSetting from "../shared/ToggleSetting.svelte";
+	import Toggle from "../ui/Toggle.svelte";
 	import ClaudeSettingRow from "./ClaudeSettingRow.svelte";
 
 	const log = createFrontendLogger("claude-settings");
@@ -62,19 +62,19 @@
 	);
 	const attribution = $derived(getClaudeSettingValue("attribution"));
 	const attributionCommit = $derived(
-		isAttributionObject(attribution) && typeof attribution.commit === "string"
-			? attribution.commit
+		isAttributionObject(attribution) && typeof attribution["commit"] === "string"
+			? attribution["commit"]
 			: "",
 	);
 	const attributionPr = $derived(
-		isAttributionObject(attribution) && typeof attribution.pr === "string"
-			? attribution.pr
+		isAttributionObject(attribution) && typeof attribution["pr"] === "string"
+			? attribution["pr"]
 			: "",
 	);
 	const attributionSessionUrl = $derived(
 		isAttributionObject(attribution) &&
-			typeof attribution.sessionUrl === "boolean"
-			? attribution.sessionUrl
+			typeof attribution["sessionUrl"] === "boolean"
+			? attribution["sessionUrl"]
 			: undefined,
 	);
 	const autoCompactEnabledProvenance = $derived(
@@ -227,7 +227,7 @@
 
 	function getEffectiveAttribution(): { [key: string]: JsonValue } {
 		const value = Object.hasOwn(claudeSettingsState.overrides, "attribution")
-			? claudeSettingsState.overrides.attribution
+			? claudeSettingsState.overrides["attribution"]
 			: claudeSettingsState.resolved.attribution?.value;
 		return isAttributionObject(value) ? { ...value } : {};
 	}
@@ -344,12 +344,11 @@
 </script>
 
 {#snippet autoCompactEnabledControl(label: string, description: string)}
-	<ToggleSetting
+	<Toggle
 		{label}
 		{description}
 		checked={autoCompactEnabled === true}
 		disabled={autoCompactEnabledProvenance.locked}
-		dimmed={autoCompactEnabledProvenance.locked}
 		onchange={() =>
 			void setOverride("autoCompactEnabled", autoCompactEnabled !== true)}
 		class="border-none bg-transparent p-0 gap-4 font-brand"
@@ -465,12 +464,11 @@
 {/snippet}
 
 {#snippet alwaysThinkingEnabledControl(label: string, description: string)}
-	<ToggleSetting
+	<Toggle
 		{label}
 		{description}
 		checked={alwaysThinkingEnabled !== false}
 		disabled={alwaysThinkingEnabledProvenance.locked}
-		dimmed={alwaysThinkingEnabledProvenance.locked}
 		onchange={() =>
 			void setOverride(
 				"alwaysThinkingEnabled",
@@ -481,12 +479,11 @@
 {/snippet}
 
 {#snippet disableAllHooksControl(label: string, description: string)}
-	<ToggleSetting
+	<Toggle
 		{label}
 		{description}
 		checked={disableAllHooks !== true}
 		disabled={disableAllHooksProvenance.locked}
-		dimmed={disableAllHooksProvenance.locked}
 		onchange={() =>
 			void setOverride("disableAllHooks", disableAllHooks !== true)}
 		class="border-none bg-transparent p-0 gap-4 font-brand"
@@ -559,12 +556,11 @@
 		<p class="text-xs text-text-dimmer">
 			Leave a box empty to add no attribution at all. Reset restores the default.
 		</p>
-		<ToggleSetting
+		<Toggle
 			label="Session link"
 			description="Append the claude.ai session link to commits and pull requests created from web sessions."
 			checked={attributionSessionUrl !== false}
 			disabled={attributionProvenance.locked}
-			dimmed={attributionProvenance.locked}
 			onchange={() =>
 				void setAttributionField(
 					"sessionUrl",

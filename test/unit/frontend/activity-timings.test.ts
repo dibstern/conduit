@@ -4,6 +4,8 @@ import { describe, expect, it } from "vitest";
 import { createToolRegistry } from "../../../src/lib/frontend/stores/tool-registry.js";
 import { historyToChatMessages } from "../../../src/lib/frontend/utils/history-logic.js";
 import {
+	fmtDuration,
+	segmentDuration,
 	segmentTurns,
 	stepDurations,
 } from "../../../src/lib/frontend/utils/turns.js";
@@ -95,5 +97,80 @@ describe("activity timings", () => {
 		expect(
 			started.action === "create" ? started.tool.createdAt : undefined,
 		).toBeTypeOf("number");
+	});
+
+	it("reports a tool's own runtime, not the gap to a parallel sibling", () => {
+		// Two tools dispatched in one assistant block start milliseconds apart but
+		// run concurrently. Measuring a step as "until the next step starts" hands
+		// the whole span to the last sibling and reports 0.0s for the others.
+		const rows: MessageWithParts[] = [
+			{
+				id: "u1",
+				session_id: "s1",
+				role: "user",
+				text: "go",
+				created_at: T0,
+				updated_at: T0,
+				parts: [
+					part({
+						id: "up",
+						message_id: "u1",
+						type: "text",
+						text: "go",
+						tool_name: null,
+						call_id: null,
+						status: null,
+						result: null,
+						created_at: T0,
+					}),
+				],
+			} as unknown as MessageWithParts,
+			{
+				id: "m1",
+				session_id: "s1",
+				role: "assistant",
+				text: "",
+				created_at: T0,
+				updated_at: T0 + 20_000,
+				parts: [
+					part({
+						id: "a",
+						created_at: T0,
+						updated_at: T0 + 3_479,
+						sort_order: 0,
+					}),
+					part({
+						id: "b",
+						created_at: T0 + 42,
+						updated_at: T0 + 42 + 5_683,
+						sort_order: 1,
+					}),
+					part({
+						id: "c",
+						created_at: T0 + 12_000,
+						updated_at: T0 + 20_000,
+						sort_order: 2,
+					}),
+				],
+			} as unknown as MessageWithParts,
+		];
+
+		const { messages } = messageRowsToHistory(rows, { pageSize: 50 });
+		const turn = segmentTurns(historyToChatMessages(messages), false)[0];
+		if (!turn?.segments[0]) throw new Error("expected one segmented turn");
+		const seg = turn.segments[0];
+
+		expect(stepDurations(seg, turn, true, T0 + 20_000)).toEqual([
+			3_479, 5_683, 8_000,
+		]);
+		// The header still reads the turn's wall clock, which overlapping steps
+		// must not be summed into.
+		expect(segmentDuration(seg, turn, true, T0 + 20_000)).toBe(20_000);
+	});
+
+	it("keeps sub-second steps legible instead of rounding them to 0.0s", () => {
+		expect(fmtDuration(3)).toBe("3ms");
+		expect(fmtDuration(480)).toBe("480ms");
+		expect(fmtDuration(3_479)).toBe("3s");
 	});
 });

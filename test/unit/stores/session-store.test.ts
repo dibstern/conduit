@@ -3,19 +3,27 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
 	clearSessionChatState,
 	currentChat,
+	getOrCreateSessionActivity,
+	getOrCreateSessionMessages,
 	getOrCreateSessionSlot,
+	handleDelta,
+	sessionActivity,
+	sessionMessages,
 	setMessages,
 } from "../../../src/lib/frontend/stores/chat.svelte.js";
 import {
+	applyGetAgentsResponse,
 	chooseModel,
 	clearDiscoveryState,
 	discoveryState,
 } from "../../../src/lib/frontend/stores/discovery.svelte.js";
+import { projectState } from "../../../src/lib/frontend/stores/project.svelte.js";
 import {
+	attachedProjectState,
 	routerState,
-	syncSlugState,
 } from "../../../src/lib/frontend/stores/router.svelte.js";
 import {
+	applyListDaemonSessionsResponse,
 	applyListSessionsResponse,
 	applySessionSnapshot,
 	clearSessionState,
@@ -23,10 +31,14 @@ import {
 	ERROR_DISPLAY_MS,
 	failNewSession,
 	getFilteredSessions,
+	groupSessionsByAttention,
 	groupSessionsByDate,
+	handleSessionFamily,
 	handleSessionForked,
 	handleSessionList,
 	handleSessionSwitched,
+	isSessionSnoozed,
+	isSessionWoken,
 	NEW_SESSION_TIMEOUT_MS,
 	requestNewSession,
 	resetSessionCreation,
@@ -37,13 +49,14 @@ import {
 	setSearchQuery,
 	switchToSession,
 } from "../../../src/lib/frontend/stores/session.svelte.js";
-import { uiState } from "../../../src/lib/frontend/stores/ui.svelte.js";
 import type { CreateSessionRpcInput } from "../../../src/lib/frontend/transport/ws-rpc-client.js";
+import * as sessionRpc from "../../../src/lib/frontend/transport/ws-rpc-client.js";
 import type {
 	RelayMessage,
 	SessionInfo,
 } from "../../../src/lib/frontend/types.js";
 import { createToolMessage } from "../../../src/lib/frontend/utils/tool-message-factory.js";
+import { seedSearchResults } from "./session-fixtures.js";
 
 // ─── Helper: cast incomplete test data to the expected type ─────────────────
 function msg<T extends RelayMessage["type"]>(data: {
@@ -95,18 +108,126 @@ beforeEach(() => {
 	sessionState.currentId = null;
 	sessionState.searchQuery = "";
 	clearDiscoveryState();
-	routerState.path = "/p/project-a/s/old-session";
-	syncSlugState(routerState.path);
+	routerState.path = "/s/old-session";
+	attachedProjectState.slug = "project-a";
+});
+
+describe("clearSessionState", () => {
+	it("clears evicted activity, replay generations and timers on project reset", () => {
+		vi.useFakeTimers();
+		try {
+			const evicted = getOrCreateSessionSlot("evicted");
+			evicted.activity.replayGeneration = 7;
+			handleDelta(evicted.activity, evicted.messages, {
+				type: "delta",
+				sessionId: "evicted",
+				text: "pending",
+			});
+			for (let index = 0; index < 21; index += 1)
+				getOrCreateSessionSlot(`visited-${index}`);
+			const activityOnly = getOrCreateSessionActivity("activity-only");
+			handleDelta(activityOnly, getOrCreateSessionMessages("activity-only"), {
+				type: "delta",
+				sessionId: "activity-only",
+				text: "pending",
+			});
+			getOrCreateSessionMessages("messages-only");
+			const clearTimeoutSpy = vi.spyOn(globalThis, "clearTimeout");
+			expect(sessionMessages.has("evicted")).toBe(false);
+			expect(sessionActivity.has("evicted")).toBe(true);
+			clearSessionState();
+			expect(sessionActivity.size).toBe(0);
+			expect(sessionMessages.size).toBe(0);
+			expect(evicted.activity.replayGeneration).toBe(8);
+			expect(activityOnly.replayGeneration).toBe(1);
+			expect(clearTimeoutSpy).toHaveBeenCalled();
+			expect(vi.getTimerCount()).toBe(0);
+			vi.advanceTimersByTime(100);
+			expect(vi.getTimerCount()).toBe(0);
+			clearTimeoutSpy.mockRestore();
+		} finally {
+			vi.useRealTimers();
+		}
+	});
 });
 
 describe("switchToSession", () => {
+	it("ignores session discovery returned after attaching another project", async () => {
+		vi.stubGlobal("window", { history: { pushState: vi.fn() } });
+		let finish: (
+			response: Awaited<ReturnType<typeof sessionRpc.getAgentsRpc>>,
+		) => void = () => {};
+		const spy = vi.spyOn(sessionRpc, "getAgentsRpc").mockImplementationOnce(
+			() =>
+				new Promise((resolve) => {
+					finish = resolve;
+				}),
+		);
+		try {
+			attachedProjectState.slug = "project-a";
+			switchToSession("session-a", undefined, vi.fn());
+			attachedProjectState.slug = "project-b";
+			clearSessionState();
+			applyGetAgentsResponse({
+				projectSlug: "project-b",
+				providerScope: { id: "b", name: "B" },
+				agents: [],
+				activeAgentId: "agent-b",
+			});
+			finish({
+				projectSlug: "project-a",
+				providerScope: { id: "a", name: "A" },
+				agents: [],
+				activeAgentId: "agent-a",
+			});
+			await Promise.resolve();
+			expect(discoveryState.activeAgentId).toBe("agent-b");
+		} finally {
+			spy.mockRestore();
+			vi.unstubAllGlobals();
+		}
+	});
+	it("builds the session route and RPC from the attached project", () => {
+		vi.stubGlobal("window", { history: { pushState: vi.fn() } });
+		try {
+			const viewSession = vi.fn();
+			attachedProjectState.slug = "attached-project";
+			routerState.path = "/";
+			switchToSession("new-session", undefined, viewSession);
+			expect(routerState.path).toBe("/s/new-session");
+			expect(viewSession).toHaveBeenCalledWith({
+				projectSlug: "attached-project",
+				sessionId: "new-session",
+				originId: expect.any(String),
+				requestId: expect.any(String),
+			});
+		} finally {
+			vi.unstubAllGlobals();
+		}
+	});
+
+	it("views a foreign row through its explicit project", () => {
+		vi.stubGlobal("window", { history: { pushState: vi.fn() } });
+		try {
+			const viewSession = vi.fn();
+			switchToSession("foreign", "project-b", viewSession);
+			expect(viewSession).toHaveBeenCalledWith({
+				projectSlug: "project-b",
+				sessionId: "foreign",
+				originId: expect.any(String),
+				requestId: expect.any(String),
+			});
+		} finally {
+			vi.unstubAllGlobals();
+		}
+	});
 	it("views the session through RPC after changing local state", () => {
 		const viewSession = vi.fn();
 		sessionState.currentId = "old-session";
-		routerState.path = "/p/project-a/s/new-session";
-		syncSlugState(routerState.path);
+		routerState.path = "/s/new-session";
+		attachedProjectState.slug = "project-a";
 
-		switchToSession("new-session", viewSession);
+		switchToSession("new-session", "project-a", viewSession);
 
 		expect(viewSession).toHaveBeenCalledWith({
 			projectSlug: "project-a",
@@ -129,10 +250,10 @@ describe("switchToSession", () => {
 			}),
 		]);
 		sessionState.currentId = "child-subagent";
-		routerState.path = "/p/project-a/s/parent-with-subagents";
-		syncSlugState(routerState.path);
+		routerState.path = "/s/parent-with-subagents";
+		attachedProjectState.slug = "project-a";
 
-		switchToSession("parent-with-subagents", viewSession);
+		switchToSession("parent-with-subagents", "project-a", viewSession);
 
 		const tool = currentChat().messages.find((m) => m.type === "tool");
 		expect(tool?.type).toBe("tool");
@@ -216,19 +337,189 @@ describe("groupSessionsByDate", () => {
 	});
 });
 
+describe("attention placement and daemon rows", () => {
+	it("files each tier under its section and orders approvals before replies", () => {
+		const groups = groupSessionsByAttention([
+			makeSession({ id: "failed", attention: "error" }),
+			makeSession({ id: "reply", attention: "needs-reply" }),
+			makeSession({ id: "approve", attention: "needs-approval" }),
+			makeSession({ id: "busy", attention: "working" }),
+			makeSession({ id: "unread", attention: "done-unread" }),
+			makeSession({ id: "quiet", attention: "idle" }),
+			makeSession({ id: "legacy" }),
+		]);
+		expect(groups.needsYou.map((row) => row.id)).toEqual([
+			"approve",
+			"reply",
+			"failed",
+		]);
+		expect(groups.running.map((row) => row.id)).toEqual(["busy"]);
+		expect(groups.doneUnread.map((row) => row.id)).toEqual(["unread"]);
+		expect(groups.idle.map((row) => row.id)).toEqual(["quiet", "legacy"]);
+	});
+
+	it("keeps incoming order within a tier and shelves pinned, settled, and snoozed rows", () => {
+		const groups = groupSessionsByAttention(
+			[
+				makeSession({ id: "newer", attention: "needs-reply" }),
+				makeSession({ id: "older", attention: "needs-reply" }),
+				makeSession({ id: "pin", pinnedAt: 10, attention: "needs-approval" }),
+				makeSession({ id: "settled", settledAt: 20, attention: "error" }),
+				makeSession({ id: "later", snoozedAt: 1, snoozedUntil: 3000 }),
+				makeSession({ id: "soon", snoozedAt: 1, snoozedUntil: 2000 }),
+				makeSession({ id: "indefinite", snoozedAt: 1 }),
+			],
+			1000,
+		);
+		expect(groups.needsYou.map((row) => row.id)).toEqual(["newer", "older"]);
+		expect(groups.pinned.map((row) => row.id)).toEqual(["pin"]);
+		expect(groups.settled.map((row) => row.id)).toEqual(["settled"]);
+		expect(groups.snoozed.map((row) => row.id)).toEqual([
+			"soon",
+			"later",
+			"indefinite",
+		]);
+	});
+
+	it("keeps an indefinite snooze asleep and wakes a timed snooze at its deadline", () => {
+		const indefinite = makeSession({ id: "indefinite", snoozedAt: 1 });
+		const timed = makeSession({ id: "timed", snoozedAt: 1, snoozedUntil: 100 });
+		expect(isSessionSnoozed(indefinite, 1000)).toBe(true);
+		expect(isSessionWoken(indefinite, 1000)).toBe(false);
+		expect(isSessionSnoozed(timed, 99)).toBe(true);
+		expect(isSessionSnoozed(timed, 100)).toBe(false);
+		expect(isSessionWoken(timed, 100)).toBe(true);
+	});
+
+	it("combines local roots with foreign daemon roots without duplicating local rows", () => {
+		projectState.projects = [];
+		handleSessionList({
+			type: "session_list",
+			roots: true,
+			sessions: [
+				makeSession({ id: "local", title: "Warm title", updatedAt: 100 }),
+			],
+		});
+		applyListDaemonSessionsResponse({
+			projectSlug: "project-a",
+			sessions: [
+				makeSession({
+					id: "local",
+					title: "Cold title",
+					projectSlug: "project-a",
+				}),
+				makeSession({
+					id: "foreign",
+					projectSlug: "project-b",
+					updatedAt: 400,
+				}),
+				makeSession({
+					id: "foreign-created",
+					projectSlug: "project-b",
+					createdAt: 300,
+				}),
+				makeSession({
+					id: "foreign-child",
+					parentID: "foreign",
+					projectSlug: "project-b",
+					updatedAt: 500,
+				}),
+			],
+			availability: [{ projectSlug: "project-b", available: true }],
+			hasMore: false,
+			nextCursor: null,
+		});
+		expect(getFilteredSessions().map((row) => row.id)).toEqual([
+			"foreign",
+			"foreign-created",
+			"local",
+		]);
+		expect(getFilteredSessions().find((row) => row.id === "local")?.title).toBe(
+			"Warm title",
+		);
+	});
+
+	it("returns only reconciled root search results, never family children", () => {
+		const root = makeSession({ id: "root", title: "Match" });
+		const child = makeSession({
+			id: "child",
+			title: "Match child",
+			parentID: "root",
+		});
+		handleSessionList({ type: "session_list", roots: true, sessions: [root] });
+		handleSessionFamily({
+			type: "session_family",
+			rootId: "root",
+			sessions: [root, child],
+		});
+		applyListDaemonSessionsResponse({
+			projectSlug: "project-a",
+			sessions: [
+				makeSession({
+					id: "foreign-match",
+					title: "Match abroad",
+					projectSlug: "project-b",
+				}),
+			],
+			availability: [{ projectSlug: "project-b", available: true }],
+			hasMore: false,
+			nextCursor: null,
+		});
+		sessionState.searchQuery = "match";
+		seedSearchResults([root, child]);
+		expect(getFilteredSessions().map((row) => row.id)).toEqual(["root"]);
+	});
+});
+
 // ─── handleSessionList ──────────────────────────────────────────────────────
 
 describe("handleSessionList", () => {
+	it("keeps git context through ListSessions RPC responses", () => {
+		applyListSessionsResponse({
+			projectSlug: "project-a",
+			roots: true,
+			sessions: [
+				makeSession({
+					id: "git",
+					git: { branch: "feature", head: "abc1234", merged: false },
+				}),
+			],
+		});
+		expect(sessionState.rootSessions[0]?.git).toEqual({
+			branch: "feature",
+			head: "abc1234",
+			merged: false,
+		});
+	});
+
+	it("keeps pin, settle, snooze and wake fields through ListSessions RPC responses", () => {
+		applyListSessionsResponse({
+			projectSlug: "project-a",
+			roots: true,
+			sessions: [
+				makeSession({ id: "pinned", pinnedAt: 10 }),
+				makeSession({ id: "settled", settledAt: 20 }),
+				makeSession({ id: "snoozed", snoozedAt: 30, snoozedUntil: 40 }),
+				makeSession({ id: "woken", wokenAt: 50, wokeBecause: "approval" }),
+			],
+		});
+		expect(sessionState.rootSessions).toEqual([
+			makeSession({ id: "pinned", pinnedAt: 10 }),
+			makeSession({ id: "settled", settledAt: 20 }),
+			makeSession({ id: "snoozed", snoozedAt: 30, snoozedUntil: 40 }),
+			makeSession({ id: "woken", wokenAt: 50, wokeBecause: "approval" }),
+		]);
+	});
 	it("holds the sessions a roots-only list carries", () => {
 		const sessions = [makeSession({ id: "a" }), makeSession({ id: "b" })];
 		handleSessionList({ type: "session_list", sessions, roots: true });
 		expect([...sessionState.sessions.keys()]).toEqual(["a", "b"]);
 	});
 
-	it("holds the sessions an all-sessions list carries", () => {
+	it("ignores the deferred all-session list", () => {
 		const sessions = [makeSession({ id: "a" }), makeSession({ id: "b" })];
 		handleSessionList({ type: "session_list", sessions, roots: false });
-		expect([...sessionState.sessions.keys()]).toEqual(["a", "b"]);
+		expect([...sessionState.sessions.keys()]).toEqual([]);
 	});
 
 	it("applies ListSessions RPC responses through the same session-list path", () => {
@@ -258,18 +549,16 @@ describe("handleSessionList", () => {
 		expect(sessionState.sessions.size).toBe(1);
 	});
 
-	it("takes an untagged list as covering every session", () => {
+	it("ignores an untagged list that has no declared scope", () => {
 		const root = makeSession({ id: "root1" });
 		const child = makeSession({ id: "child1", parentID: "root1" });
 		// Simulate an untagged message (no `roots` field) — e.g. from legacy sources
 		handleSessionList(msg({ type: "session_list", sessions: [root, child] }));
-		expect(sessionState.sessions.size).toBe(2);
-		uiState.hideSubagentSessions = true;
-		expect(getFilteredSessions().map((s) => s.id)).toEqual(["root1"]);
+		expect(sessionState.sessions.size).toBe(0);
+		expect(getFilteredSessions()).toEqual([]);
 	});
 
-	it("shows a rename delivered by an all-sessions list in the roots view", () => {
-		uiState.hideSubagentSessions = true;
+	it("shows a rename delivered by the root view", () => {
 		handleSessionList({
 			type: "session_list",
 			sessions: [makeSession({ id: "a", title: "Old" })],
@@ -278,20 +567,19 @@ describe("handleSessionList", () => {
 		handleSessionList({
 			type: "session_list",
 			sessions: [makeSession({ id: "a", title: "New" })],
-			roots: false,
+			roots: true,
 		});
 		expect(getFilteredSessions().map((s) => s.title)).toEqual(["New"]);
 	});
 
 	it("orders the sidebar by last change, newest first", () => {
-		uiState.hideSubagentSessions = true;
 		handleSessionList({
 			type: "session_list",
 			sessions: [
 				makeSession({ id: "a", updatedAt: 1000 }),
 				makeSession({ id: "b", updatedAt: 2000 }),
 			],
-			roots: false,
+			roots: true,
 		});
 		// `a` is used, so the server now reports it as the most recent.
 		handleSessionList({
@@ -300,12 +588,12 @@ describe("handleSessionList", () => {
 				makeSession({ id: "a", updatedAt: 3000 }),
 				makeSession({ id: "b", updatedAt: 2000 }),
 			],
-			roots: false,
+			roots: true,
 		});
 		expect(getFilteredSessions().map((s) => s.id)).toEqual(["a", "b"]);
 	});
 
-	it("drops a session an all-sessions list no longer carries", () => {
+	it("keeps a session omitted from a different list scope", () => {
 		applySessionSnapshot(
 			[makeSession({ id: "a" }), makeSession({ id: "b" })],
 			"complete",
@@ -315,7 +603,7 @@ describe("handleSessionList", () => {
 			sessions: [makeSession({ id: "a" })],
 			roots: false,
 		});
-		expect([...sessionState.sessions.keys()]).toEqual(["a"]);
+		expect([...sessionState.sessions.keys()]).toEqual(["a", "b"]);
 	});
 
 	it("keeps a session a roots-only list omits", () => {
@@ -355,10 +643,26 @@ describe("handleSessionSwitched", () => {
 		);
 
 		expect(sessionState.sessions.has("child-session")).toBe(false);
+		expect(sessionState.familySessions).toEqual([]);
 		expect(getFilteredSessions()).toEqual([]);
+		expect(sessionState.currentParentId).toBe("parent-session");
 	});
 
-	it("records the parent on a session the server has listed", () => {
+	it("uses announced lineage only for the current unlisted session, then yields to a row", () => {
+		handleSessionSwitched(
+			msg({ type: "session_switched", id: "child", parentID: "first-parent" }),
+		);
+		expect(sessionState.currentParentId).toBe("first-parent");
+		applySessionSnapshot(
+			[makeSession({ id: "child", parentID: "row-parent" })],
+			"complete",
+		);
+		expect(sessionState.currentParentId).toBe("row-parent");
+		handleSessionSwitched(msg({ type: "session_switched", id: "other" }));
+		expect(sessionState.currentParentId).toBeNull();
+	});
+
+	it("uses the announced parent without rewriting a listed row", () => {
 		applySessionSnapshot(
 			[makeSession({ id: "child-session", title: "Child" })],
 			"complete",
@@ -376,8 +680,8 @@ describe("handleSessionSwitched", () => {
 			id: "child-session",
 			title: "Child",
 			status: "idle",
-			parentID: "parent-session",
 		});
+		expect(sessionState.currentParentId).toBe("parent-session");
 	});
 
 	it("ignores missing id", () => {
@@ -420,6 +724,25 @@ describe("setCurrentSession", () => {
 // ─── handleSessionForked (ticket 5.3) ───────────────────────────────────────
 
 describe("handleSessionForked (ticket 5.3)", () => {
+	it("does not insert a fork outside the supplied family", () => {
+		const root = makeSession({ id: "parent" });
+		handleSessionFamily({
+			type: "session_family",
+			rootId: "parent",
+			sessions: [root],
+		});
+		handleSessionForked({
+			type: "session_forked",
+			sessionId: "fork",
+			session: makeSession({ id: "fork", parentID: "parent" }),
+			parentId: "parent",
+			parentTitle: "Parent",
+		});
+		expect(sessionState.sessions.has("fork")).toBe(true);
+		expect(sessionState.familySessions.map((row) => row.id)).toEqual([
+			"parent",
+		]);
+	});
 	it("adds the forked session to the session list", () => {
 		applySessionSnapshot(
 			[
@@ -505,57 +828,47 @@ describe("handleSessionForked (ticket 5.3)", () => {
 	});
 });
 
-// ─── getFilteredSessions — subagent toggle ──────────────────────────────────
+// ─── Root subscription view ──────────────────────────────────────────────────
 
-describe("getFilteredSessions — hideSubagentSessions toggle", () => {
-	beforeEach(() => {
-		uiState.hideSubagentSessions = true; // reset to default
+describe("getFilteredSessions root view", () => {
+	it("shows roots while the family view contains descendants", () => {
+		const root = makeSession({ id: "a", title: "Parent", updatedAt: 1000 });
+		const child = makeSession({
+			id: "b",
+			title: "Child",
+			parentID: "a",
+			updatedAt: 2000,
+		});
+		handleSessionList({ type: "session_list", roots: true, sessions: [root] });
+		handleSessionFamily({
+			type: "session_family",
+			rootId: "a",
+			sessions: [root, child],
+		});
+		expect(getFilteredSessions().map((session) => session.id)).toEqual(["a"]);
+		expect(sessionState.familySessions.map((session) => session.id)).toEqual([
+			"a",
+			"b",
+		]);
 	});
 
-	it("excludes subagent sessions when hideSubagentSessions is true", () => {
-		applySessionSnapshot(
-			[makeSession({ id: "a", title: "Parent", updatedAt: 1000 })],
-			"complete",
-		);
-		uiState.hideSubagentSessions = true;
-		expect(getFilteredSessions().map((s) => s.id)).toEqual(["a"]);
-	});
-
-	it("includes subagent sessions when hideSubagentSessions is false", () => {
-		applySessionSnapshot(
-			[
-				makeSession({ id: "a", title: "Parent", updatedAt: 1000 }),
-				makeSession({
-					id: "b",
-					title: "Child",
-					parentID: "a",
-					updatedAt: 2000,
-				}),
-			],
-			"complete",
-		);
-		uiState.hideSubagentSessions = false;
-		const ids = getFilteredSessions().map((s) => s.id);
-		expect(ids).toContain("a");
-		expect(ids).toContain("b");
-	});
-
-	it("still applies search filter when subagents are visible", () => {
-		applySessionSnapshot(
-			[
-				makeSession({ id: "a", title: "Parent Session", updatedAt: 1000 }),
-				makeSession({
-					id: "b",
-					title: "Child Session",
-					parentID: "a",
-					updatedAt: 2000,
-				}),
-			],
-			"complete",
-		);
-		uiState.hideSubagentSessions = false;
-		sessionState.searchQuery = "child";
-		expect(getFilteredSessions().map((s) => s.id)).toEqual(["b"]);
+	it("an omitted family member remains in the canonical session map", () => {
+		const root = makeSession({ id: "a" });
+		const child = makeSession({ id: "b", parentID: "a" });
+		handleSessionFamily({
+			type: "session_family",
+			rootId: "a",
+			sessions: [root, child],
+		});
+		handleSessionFamily({
+			type: "session_family",
+			rootId: "a",
+			sessions: [root],
+		});
+		expect(sessionState.familySessions.map((session) => session.id)).toEqual([
+			"a",
+		]);
+		expect(sessionState.sessions.has("b")).toBe(true);
 	});
 });
 

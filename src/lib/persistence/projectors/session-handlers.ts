@@ -89,6 +89,15 @@ SELECT id FROM subtree`;
 type SessionHandledType =
 	| "session.created"
 	| "session.renamed"
+	| "session.read"
+	| "session.unread"
+	| "session.settled"
+	| "session.unsettled"
+	| "session.pinned"
+	| "session.unpinned"
+	| "session.snoozed"
+	| "session.auto_settle_set"
+	| "session.unsnoozed"
 	| "session.deleted"
 	| "session.forked"
 	| "session.status"
@@ -96,12 +105,40 @@ type SessionHandledType =
 	| "session.permission_mode_changed"
 	| "turn.completed"
 	| "turn.error"
+	| "permission.asked"
+	| "question.asked"
 	| "message.created";
+
+// An approval or question in a child rolls up into its root's attention, so it
+// must wake a snoozed ancestor too; otherwise the root sits on the shelf while
+// blocked on you. A child's turn ending or failing is not what was awaited.
+function wakeSession(
+	sessionId: string,
+	createdAt: number,
+	reason: "approval" | "question" | "error" | "turn",
+): SessionStatement {
+	const blocksOnUser = reason === "approval" || reason === "question";
+	const target = blocksOnUser
+		? `id IN (WITH RECURSIVE lineage(id) AS (
+				SELECT ? UNION SELECT s.parent_id FROM sessions s
+				JOIN lineage ON s.id = lineage.id WHERE s.parent_id IS NOT NULL
+			) SELECT id FROM lineage)`
+		: "id = ?";
+	return {
+		sql: `UPDATE sessions SET woken_at = ?, woken_reason = ?
+			WHERE ${target} AND snoozed_at IS NOT NULL AND woken_at IS NULL
+			AND snoozed_at <= ? AND (snoozed_until IS NULL OR snoozed_until > ?)`,
+		params: [createdAt, reason, sessionId, createdAt, createdAt],
+	};
+}
 
 function isAutoTitleRename(event: StoredEvent): boolean {
 	return event.metadata.source === "auto-title";
 }
 
+// last_turn_error_at answers one durable question rather than mirroring the
+// turn state machine: failures set it, while success or new work clears it.
+//
 // This mapped table replaces SessionProjector's assertHandledOrIgnored runtime
 // guard: every SessionHandledType must have an implementation at compile time.
 // Other projectors still use assertHandledOrIgnored for their imperative branches.
@@ -197,6 +234,85 @@ export const sessionHandlers: {
 		];
 	},
 
+	// Last transition wins, and these need no guard against an earlier one
+	// overwriting a later one: every replay path is ORDER BY sequence ASC, so the
+	// events arrive in the order they happened. The lookahead subquery this
+	// briefly had was pure cost. Deliberately does NOT touch `updated_at` --
+	// that is the list's sort key, so reading a session must not reorder it.
+	"session.read": (event) => [
+		{
+			sql: "UPDATE sessions SET read_at = ? WHERE id = ?",
+			// The event's own timestamp, never Date.now(): the same log has to
+			// project to the same table every time.
+			params: [event.createdAt, event.data.sessionId],
+		},
+	],
+
+	"session.unread": (event) => [
+		{
+			sql: "UPDATE sessions SET read_at = NULL WHERE id = ?",
+			params: [event.data.sessionId],
+		},
+	],
+
+	"session.settled": (event) => [
+		{
+			sql: "UPDATE sessions SET settled_at = ?, settled_automatically = ? WHERE id = ?",
+			params: [
+				event.createdAt,
+				event.data.automatic === true ? 1 : 0,
+				event.data.sessionId,
+			],
+		},
+	],
+
+	"session.unsettled": (event) => [
+		{
+			sql: "UPDATE sessions SET settled_at = NULL, settled_automatically = 0, unsettled_at = ? WHERE id = ?",
+			params: [event.createdAt, event.data.sessionId],
+		},
+	],
+
+	"session.pinned": (event) => [
+		{
+			sql: "UPDATE sessions SET pinned_at = ? WHERE id = ?",
+			params: [event.createdAt, event.data.sessionId],
+		},
+	],
+
+	"session.unpinned": (event) => [
+		{
+			sql: "UPDATE sessions SET pinned_at = NULL WHERE id = ?",
+			params: [event.data.sessionId],
+		},
+	],
+
+	"session.snoozed": (event) => [
+		{
+			sql: `UPDATE sessions SET snoozed_at = ?, snoozed_until = ?,
+				woken_at = NULL, woken_reason = NULL WHERE id = ?`,
+			params: [event.createdAt, event.data.until, event.data.sessionId],
+		},
+	],
+
+	"session.auto_settle_set": (event) => [
+		{
+			sql: "UPDATE sessions SET auto_settle_disabled_at = ? WHERE id = ?",
+			params: [
+				event.data.disabled ? event.createdAt : null,
+				event.data.sessionId,
+			],
+		},
+	],
+
+	"session.unsnoozed": (event) => [
+		{
+			sql: `UPDATE sessions SET snoozed_at = NULL, snoozed_until = NULL,
+				woken_at = NULL, woken_reason = NULL WHERE id = ?`,
+			params: [event.data.sessionId],
+		},
+	],
+
 	"session.deleted": (event) => {
 		// sessions.parent_id, turns.session_id, messages.session_id/turn_id,
 		// message_parts.message_id, and every other FK into sessions/turns carry
@@ -230,9 +346,13 @@ export const sessionHandlers: {
 	},
 
 	"session.status": (event) => {
+		const startsNewWork =
+			event.data.status === "busy" || event.data.status === "retry";
 		return [
 			{
-				sql: "UPDATE sessions SET status = ?, updated_at = ? WHERE id = ?",
+				sql: startsNewWork
+					? "UPDATE sessions SET status = ?, updated_at = ?, last_turn_error_at = NULL WHERE id = ?"
+					: "UPDATE sessions SET status = ?, updated_at = ? WHERE id = ?",
 				params: [event.data.status, event.createdAt, event.data.sessionId],
 			},
 		];
@@ -258,30 +378,39 @@ export const sessionHandlers: {
 
 	"turn.completed": (event) => {
 		return [
+			wakeSession(event.sessionId, event.createdAt, "turn"),
 			{
-				sql: "UPDATE sessions SET updated_at = ? WHERE id = ?",
+				sql: "UPDATE sessions SET updated_at = ?, last_turn_error_at = NULL WHERE id = ?",
 				params: [event.createdAt, event.sessionId],
 			},
 		];
 	},
 	"turn.error": (event) => {
 		return [
+			wakeSession(event.sessionId, event.createdAt, "error"),
 			{
-				sql: "UPDATE sessions SET updated_at = ? WHERE id = ?",
-				params: [event.createdAt, event.sessionId],
+				sql: "UPDATE sessions SET updated_at = ?, last_turn_error_at = ? WHERE id = ?",
+				params: [event.createdAt, event.createdAt, event.sessionId],
 			},
 		];
 	},
+	"permission.asked": (event) => [
+		wakeSession(event.data.sessionId, event.createdAt, "approval"),
+	],
+	"question.asked": (event) => [
+		wakeSession(event.data.sessionId, event.createdAt, "question"),
+	],
 
 	// (P8) Denormalize last_message_at on the session. Owned by
 	// SessionProjector (not MessageProjector) to keep all session-table
 	// mutations in one projector.
 	"message.created": (event) => {
+		const startsNewTurn = event.data.role === "user";
 		return [
 			{
 				sql: `UPDATE sessions SET
 					last_message_at = MAX(COALESCE(last_message_at, 0), ?),
-					updated_at = ?
+					updated_at = ?${startsNewTurn ? ",\n\t\t\t\t\tlast_turn_error_at = NULL" : ""}
 				 WHERE id = ?`,
 				params: [event.createdAt, event.createdAt, event.data.sessionId],
 			},

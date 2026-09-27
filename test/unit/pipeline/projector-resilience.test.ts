@@ -1,20 +1,22 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { Cause, Effect, Runtime } from "effect";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type {
 	AssistantMessage,
 	ThinkingMessage,
 } from "../../../src/lib/frontend/types.js";
 import { historyToChatMessages } from "../../../src/lib/frontend/utils/history-logic.js";
+import {
+	createAllEffectProjectors,
+	type ProjectionContext,
+	ProjectionError,
+} from "../../../src/lib/persistence/effect/projectors-effect.js";
 import type { StoredEvent } from "../../../src/lib/persistence/events.js";
-import { MessageProjector } from "../../../src/lib/persistence/projectors/message-projector.js";
-import type { ProjectionContext } from "../../../src/lib/persistence/projectors/projector.js";
-import { SessionProjector } from "../../../src/lib/persistence/projectors/session-projector.js";
-import { ReadQueryService } from "../../../src/lib/persistence/read-query-service.js";
 import { messageRowsToHistory } from "../../../src/lib/persistence/session-history-adapter.js";
 import {
-	createTestHarness,
-	makeStored,
-	type TestHarness,
-} from "../../helpers/persistence-factories.js";
+	type EffectProjectionHarness,
+	makeEffectProjectionHarness,
+} from "../../helpers/effect-projection-harness.js";
+import { makeStored } from "../../helpers/persistence-factories.js";
 
 const SESSION_A = "ses-resilience-a";
 const SESSION_B = "ses-resilience-b";
@@ -22,26 +24,70 @@ const MSG_ID = "msg-res-1";
 const NOW = 1_000_000_000_000;
 
 describe("MessageProjector resilience", () => {
-	let harness: TestHarness;
-	let projector: MessageProjector;
-	let sessionProjector: SessionProjector;
+	let harness: EffectProjectionHarness;
 	let seq: number;
+	let replayNextProjection: boolean;
+	let failNextProjection: boolean;
 
-	beforeEach(() => {
-		harness = createTestHarness();
-		projector = new MessageProjector();
-		sessionProjector = new SessionProjector();
+	beforeEach(async () => {
+		replayNextProjection = false;
+		failNextProjection = false;
+		const projectors = createAllEffectProjectors().map((projector) => {
+			if (projector.name !== "message") return projector;
+
+			return {
+				...projector,
+				project: (event: StoredEvent, context: ProjectionContext) => {
+					if (failNextProjection && event.type === "thinking.delta") {
+						failNextProjection = false;
+						return Effect.fail(
+							new ProjectionError({
+								projector: "message",
+								operation: "project",
+								cause: new Error("Simulated disk error"),
+							}),
+						);
+					}
+
+					const effectiveContext = replayNextProjection
+						? { ...context, replaying: true }
+						: context;
+					replayNextProjection = false;
+					return projector.project(event, effectiveContext);
+				},
+			};
+		});
+		harness = makeEffectProjectionHarness(projectors);
 		seq = 0;
-		harness.seedSession(SESSION_A);
-		harness.seedSession(SESSION_B);
+		for (const sessionId of [SESSION_A, SESSION_B]) {
+			await harness.query(
+				"INSERT INTO sessions (id, provider, title, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
+				[sessionId, "claude", "Test", "idle", NOW, NOW],
+			);
+		}
 	});
 
-	afterEach(() => {
-		harness.close();
+	afterEach(async () => {
+		await harness?.dispose();
 	});
 
-	function project(event: StoredEvent, ctx?: ProjectionContext): void {
-		projector.project(event, harness.db, ctx);
+	async function project(
+		event: StoredEvent,
+		ctx?: ProjectionContext,
+	): Promise<void> {
+		replayNextProjection = ctx?.replaying === true;
+		try {
+			await harness.reproject([event]);
+		} catch (error) {
+			if (Runtime.isFiberFailure(error)) {
+				throw new Error(
+					Cause.pretty(error[Runtime.FiberFailureCauseId], {
+						renderErrorCause: true,
+					}),
+				);
+			}
+			throw error;
+		}
 	}
 
 	function nextSeq(): number {
@@ -49,9 +95,8 @@ describe("MessageProjector resilience", () => {
 	}
 
 	/** Full pipeline: SQLite → history → chat messages */
-	function readPipeline(sessionId: string) {
-		const readQuery = new ReadQueryService(harness.db);
-		const rows = readQuery.getSessionMessagesWithParts(sessionId);
+	async function readPipeline(sessionId: string) {
+		const rows = await harness.sessionMessagesWithParts(sessionId);
 		const { messages } = messageRowsToHistory(rows, { pageSize: 50 });
 		return historyToChatMessages(messages);
 	}
@@ -59,9 +104,9 @@ describe("MessageProjector resilience", () => {
 	// ─── Session lifecycle ───────────────────────────────────────────────
 
 	describe("session lifecycle", () => {
-		it("duplicate session.created does not overwrite a renamed title", () => {
+		it("duplicate session.created does not overwrite a renamed title", async () => {
 			const sessionId = "ses-title-owner";
-			sessionProjector.project(
+			await project(
 				makeStored(
 					"session.created",
 					sessionId,
@@ -72,9 +117,8 @@ describe("MessageProjector resilience", () => {
 					},
 					{ sequence: nextSeq(), createdAt: NOW },
 				),
-				harness.db,
 			);
-			sessionProjector.project(
+			await project(
 				makeStored(
 					"session.renamed",
 					sessionId,
@@ -84,9 +128,8 @@ describe("MessageProjector resilience", () => {
 					},
 					{ sequence: nextSeq(), createdAt: NOW + 1000 },
 				),
-				harness.db,
 			);
-			sessionProjector.project(
+			await project(
 				makeStored(
 					"session.created",
 					sessionId,
@@ -97,18 +140,17 @@ describe("MessageProjector resilience", () => {
 					},
 					{ sequence: nextSeq(), createdAt: NOW + 2000 },
 				),
-				harness.db,
 			);
 
-			const row = harness.db.queryOne<{ title: string }>(
+			const [row] = await harness.query<{ title: string }>(
 				"SELECT title FROM sessions WHERE id = ?",
 				[sessionId],
 			);
 			expect(row?.title).toBe("Useful title");
 		});
 
-		it("deleting session with dependent messages cascades via ON DELETE CASCADE", () => {
-			project(
+		it("deleting session with dependent messages cascades via ON DELETE CASCADE", async () => {
+			await project(
 				makeStored(
 					"message.created",
 					SESSION_A,
@@ -124,36 +166,36 @@ describe("MessageProjector resilience", () => {
 			// messages.session_id carries ON DELETE CASCADE (see
 			// 0010_session_cascade_deletes.sql), so deleting the session removes
 			// its dependent messages in the same statement instead of throwing.
-			expect(() =>
-				harness.db.execute("DELETE FROM sessions WHERE id = ?", [SESSION_A]),
-			).not.toThrow();
+			await expect(
+				harness.query("DELETE FROM sessions WHERE id = ?", [SESSION_A]),
+			).resolves.toBeDefined();
 
-			const session = harness.db.queryOne(
+			const session = await harness.query(
 				"SELECT id FROM sessions WHERE id = ?",
 				[SESSION_A],
 			);
-			expect(session).toBeUndefined();
-			const message = harness.db.queryOne(
+			expect(session).toHaveLength(0);
+			const message = await harness.query(
 				"SELECT id FROM messages WHERE session_id = ?",
 				[SESSION_A],
 			);
-			expect(message).toBeUndefined();
+			expect(message).toHaveLength(0);
 
 			// Pipeline read on the deleted session returns empty — no orphan data
-			const chat = readPipeline(SESSION_A);
+			const chat = await readPipeline(SESSION_A);
 			expect(chat.filter((m) => m.type === "thinking")).toHaveLength(0);
 			expect(chat.filter((m) => m.type === "assistant")).toHaveLength(0);
 		});
 
-		it("deleting session with no dependents succeeds; subsequent message.created fails FK", () => {
+		it("deleting session with no dependents succeeds; subsequent message.created fails FK", async () => {
 			// Safe to delete: no messages/turns reference SESSION_B yet
 			// (beforeEach only seeds the session row, no events projected).
-			expect(() =>
-				harness.db.execute("DELETE FROM sessions WHERE id = ?", [SESSION_B]),
-			).not.toThrow();
+			await expect(
+				harness.query("DELETE FROM sessions WHERE id = ?", [SESSION_B]),
+			).resolves.toBeDefined();
 
 			// Subsequent message.created for the deleted session fails FK
-			expect(() =>
+			await expect(
 				project(
 					makeStored(
 						"message.created",
@@ -166,10 +208,10 @@ describe("MessageProjector resilience", () => {
 						{ sequence: nextSeq(), createdAt: NOW },
 					),
 				),
-			).toThrow(/FOREIGN KEY|constraint/i);
+			).rejects.toThrow(/FOREIGN KEY|constraint/i);
 
 			// Pipeline read on the deleted session returns empty — no data corruption
-			const chat = readPipeline(SESSION_B);
+			const chat = await readPipeline(SESSION_B);
 			expect(chat).toHaveLength(0);
 		});
 	});
@@ -177,8 +219,8 @@ describe("MessageProjector resilience", () => {
 	// ─── Out-of-order events ────────────────────────────────────────────
 
 	describe("out-of-order events", () => {
-		it("thinking.delta before thinking.start — part created with correct text", () => {
-			project(
+		it("thinking.delta before thinking.start — part created with correct text", async () => {
+			await project(
 				makeStored(
 					"message.created",
 					SESSION_A,
@@ -192,7 +234,7 @@ describe("MessageProjector resilience", () => {
 			);
 
 			// Delta arrives BEFORE start
-			project(
+			await project(
 				makeStored(
 					"thinking.delta",
 					SESSION_A,
@@ -206,7 +248,7 @@ describe("MessageProjector resilience", () => {
 			);
 
 			// Start arrives late — ON CONFLICT DO NOTHING on the part row
-			project(
+			await project(
 				makeStored(
 					"thinking.start",
 					SESSION_A,
@@ -218,7 +260,7 @@ describe("MessageProjector resilience", () => {
 				),
 			);
 
-			project(
+			await project(
 				makeStored(
 					"thinking.end",
 					SESSION_A,
@@ -230,7 +272,7 @@ describe("MessageProjector resilience", () => {
 				),
 			);
 
-			project(
+			await project(
 				makeStored(
 					"turn.completed",
 					SESSION_A,
@@ -244,7 +286,7 @@ describe("MessageProjector resilience", () => {
 				),
 			);
 
-			const chat = readPipeline(SESSION_A);
+			const chat = await readPipeline(SESSION_A);
 			const thinking = chat.find(
 				(m): m is ThinkingMessage => m.type === "thinking",
 			);
@@ -253,9 +295,9 @@ describe("MessageProjector resilience", () => {
 			expect(thinking!.text).toBe("early delta");
 		});
 
-		it("text.delta before message.created — message auto-created defensively", () => {
+		it("text.delta before message.created — message auto-created defensively", async () => {
 			// text.delta with no preceding message.created
-			project(
+			await project(
 				makeStored(
 					"text.delta",
 					SESSION_A,
@@ -269,7 +311,7 @@ describe("MessageProjector resilience", () => {
 			);
 
 			// message.created arrives late — INSERT OR IGNORE (no-op)
-			project(
+			await project(
 				makeStored(
 					"message.created",
 					SESSION_A,
@@ -282,7 +324,7 @@ describe("MessageProjector resilience", () => {
 				),
 			);
 
-			project(
+			await project(
 				makeStored(
 					"turn.completed",
 					SESSION_A,
@@ -296,7 +338,7 @@ describe("MessageProjector resilience", () => {
 				),
 			);
 
-			const chat = readPipeline(SESSION_A);
+			const chat = await readPipeline(SESSION_A);
 			const assistant = chat.find((m) => m.type === "assistant");
 			expect(assistant).toBeDefined();
 		});
@@ -305,8 +347,8 @@ describe("MessageProjector resilience", () => {
 	// ─── Duplicate event delivery ───────────────────────────────────────
 
 	describe("duplicate event delivery", () => {
-		it("KNOWN RISK: duplicate thinking.delta in normal mode doubles text", () => {
-			project(
+		it("KNOWN RISK: duplicate thinking.delta in normal mode doubles text", async () => {
+			await project(
 				makeStored(
 					"message.created",
 					SESSION_A,
@@ -319,7 +361,7 @@ describe("MessageProjector resilience", () => {
 				),
 			);
 
-			project(
+			await project(
 				makeStored(
 					"thinking.start",
 					SESSION_A,
@@ -343,10 +385,10 @@ describe("MessageProjector resilience", () => {
 			);
 
 			// Same delta projected twice — no replaying flag
-			project(deltaEvent);
-			project(deltaEvent);
+			await project(deltaEvent);
+			await project(deltaEvent);
 
-			project(
+			await project(
 				makeStored(
 					"thinking.end",
 					SESSION_A,
@@ -358,7 +400,7 @@ describe("MessageProjector resilience", () => {
 				),
 			);
 
-			project(
+			await project(
 				makeStored(
 					"turn.completed",
 					SESSION_A,
@@ -372,7 +414,7 @@ describe("MessageProjector resilience", () => {
 				),
 			);
 
-			const chat = readPipeline(SESSION_A);
+			const chat = await readPipeline(SESSION_A);
 			const thinking = chat.find(
 				(m): m is ThinkingMessage => m.type === "thinking",
 			);
@@ -383,8 +425,8 @@ describe("MessageProjector resilience", () => {
 			expect(thinking!.text).toBe("hellohello");
 		});
 
-		it("duplicate thinking.delta in replay mode — alreadyApplied() prevents doubling", () => {
-			project(
+		it("duplicate thinking.delta in replay mode — alreadyApplied() prevents doubling", async () => {
+			await project(
 				makeStored(
 					"message.created",
 					SESSION_A,
@@ -397,7 +439,7 @@ describe("MessageProjector resilience", () => {
 				),
 			);
 
-			project(
+			await project(
 				makeStored(
 					"thinking.start",
 					SESSION_A,
@@ -422,12 +464,15 @@ describe("MessageProjector resilience", () => {
 			);
 
 			// First projection (normal)
-			project(deltaEvent);
+			await project(deltaEvent);
 
 			// Second projection (replay mode) — skipped via alreadyApplied()
-			project(deltaEvent, { replaying: true });
+			await project(deltaEvent, {
+				version: deltaEvent.streamVersion,
+				replaying: true,
+			});
 
-			project(
+			await project(
 				makeStored(
 					"thinking.end",
 					SESSION_A,
@@ -439,7 +484,7 @@ describe("MessageProjector resilience", () => {
 				),
 			);
 
-			project(
+			await project(
 				makeStored(
 					"turn.completed",
 					SESSION_A,
@@ -453,7 +498,7 @@ describe("MessageProjector resilience", () => {
 				),
 			);
 
-			const chat = readPipeline(SESSION_A);
+			const chat = await readPipeline(SESSION_A);
 			const thinking = chat.find(
 				(m): m is ThinkingMessage => m.type === "thinking",
 			);
@@ -462,8 +507,8 @@ describe("MessageProjector resilience", () => {
 			expect(thinking!.text).toBe("hello"); // Not doubled
 		});
 
-		it("duplicate thinking.start — ON CONFLICT DO NOTHING, no error", () => {
-			project(
+		it("duplicate thinking.start — ON CONFLICT DO NOTHING, no error", async () => {
+			await project(
 				makeStored(
 					"message.created",
 					SESSION_A,
@@ -486,13 +531,13 @@ describe("MessageProjector resilience", () => {
 				{ sequence: nextSeq(), createdAt: NOW + 100 },
 			);
 
-			project(startEvent);
-			expect(() => project(startEvent)).not.toThrow();
+			await project(startEvent);
+			await expect(project(startEvent)).resolves.toBeUndefined();
 		});
 
-		it("SSE reconnection replay — overlap events skipped, new events applied", () => {
+		it("SSE reconnection replay — overlap events skipped, new events applied", async () => {
 			// Phase 1: Normal streaming — events seq 1-3
-			project(
+			await project(
 				makeStored(
 					"message.created",
 					SESSION_A,
@@ -505,7 +550,7 @@ describe("MessageProjector resilience", () => {
 				),
 			);
 
-			project(
+			await project(
 				makeStored(
 					"thinking.start",
 					SESSION_A,
@@ -514,7 +559,7 @@ describe("MessageProjector resilience", () => {
 				),
 			);
 
-			project(
+			await project(
 				makeStored(
 					"thinking.delta",
 					SESSION_A,
@@ -524,10 +569,10 @@ describe("MessageProjector resilience", () => {
 			);
 
 			// Phase 2: SSE reconnects — replays events 2-5 (overlap: 2,3; new: 4,5)
-			const replayCtx = { replaying: true };
+			const replayCtx = { version: 0, replaying: true };
 
 			// Event seq 2 replay — should be skipped
-			project(
+			await project(
 				makeStored(
 					"thinking.start",
 					SESSION_A,
@@ -538,7 +583,7 @@ describe("MessageProjector resilience", () => {
 			);
 
 			// Event seq 3 replay — should be skipped
-			project(
+			await project(
 				makeStored(
 					"thinking.delta",
 					SESSION_A,
@@ -549,7 +594,7 @@ describe("MessageProjector resilience", () => {
 			);
 
 			// Event seq 4 — NEW, should be applied
-			project(
+			await project(
 				makeStored(
 					"thinking.delta",
 					SESSION_A,
@@ -560,7 +605,7 @@ describe("MessageProjector resilience", () => {
 			);
 
 			// Event seq 5 — NEW, should be applied
-			project(
+			await project(
 				makeStored(
 					"thinking.end",
 					SESSION_A,
@@ -571,7 +616,7 @@ describe("MessageProjector resilience", () => {
 			);
 
 			// Normal mode resumes
-			project(
+			await project(
 				makeStored(
 					"text.delta",
 					SESSION_A,
@@ -584,7 +629,7 @@ describe("MessageProjector resilience", () => {
 				),
 			);
 
-			project(
+			await project(
 				makeStored(
 					"turn.completed",
 					SESSION_A,
@@ -598,7 +643,7 @@ describe("MessageProjector resilience", () => {
 				),
 			);
 
-			const chat = readPipeline(SESSION_A);
+			const chat = await readPipeline(SESSION_A);
 			const thinking = chat.find(
 				(m): m is ThinkingMessage => m.type === "thinking",
 			);
@@ -616,8 +661,8 @@ describe("MessageProjector resilience", () => {
 	// ─── Edge cases ─────────────────────────────────────────────────────
 
 	describe("edge cases", () => {
-		it("empty thinking block — start + end, no delta", () => {
-			project(
+		it("empty thinking block — start + end, no delta", async () => {
+			await project(
 				makeStored(
 					"message.created",
 					SESSION_A,
@@ -630,7 +675,7 @@ describe("MessageProjector resilience", () => {
 				),
 			);
 
-			project(
+			await project(
 				makeStored(
 					"thinking.start",
 					SESSION_A,
@@ -643,7 +688,7 @@ describe("MessageProjector resilience", () => {
 			);
 
 			// No thinking.delta — straight to end
-			project(
+			await project(
 				makeStored(
 					"thinking.end",
 					SESSION_A,
@@ -655,7 +700,7 @@ describe("MessageProjector resilience", () => {
 				),
 			);
 
-			project(
+			await project(
 				makeStored(
 					"text.delta",
 					SESSION_A,
@@ -668,7 +713,7 @@ describe("MessageProjector resilience", () => {
 				),
 			);
 
-			project(
+			await project(
 				makeStored(
 					"turn.completed",
 					SESSION_A,
@@ -682,7 +727,7 @@ describe("MessageProjector resilience", () => {
 				),
 			);
 
-			const chat = readPipeline(SESSION_A);
+			const chat = await readPipeline(SESSION_A);
 			const thinking = chat.find(
 				(m): m is ThinkingMessage => m.type === "thinking",
 			);
@@ -694,8 +739,8 @@ describe("MessageProjector resilience", () => {
 			expect(thinking!.done).toBe(true);
 		});
 
-		it("thinking-only turn — no text.delta, only thinking", () => {
-			project(
+		it("thinking-only turn — no text.delta, only thinking", async () => {
+			await project(
 				makeStored(
 					"message.created",
 					SESSION_A,
@@ -708,7 +753,7 @@ describe("MessageProjector resilience", () => {
 				),
 			);
 
-			project(
+			await project(
 				makeStored(
 					"thinking.start",
 					SESSION_A,
@@ -720,7 +765,7 @@ describe("MessageProjector resilience", () => {
 				),
 			);
 
-			project(
+			await project(
 				makeStored(
 					"thinking.delta",
 					SESSION_A,
@@ -733,7 +778,7 @@ describe("MessageProjector resilience", () => {
 				),
 			);
 
-			project(
+			await project(
 				makeStored(
 					"thinking.end",
 					SESSION_A,
@@ -745,7 +790,7 @@ describe("MessageProjector resilience", () => {
 				),
 			);
 
-			project(
+			await project(
 				makeStored(
 					"turn.completed",
 					SESSION_A,
@@ -759,7 +804,7 @@ describe("MessageProjector resilience", () => {
 				),
 			);
 
-			const chat = readPipeline(SESSION_A);
+			const chat = await readPipeline(SESSION_A);
 			const thinking = chat.find(
 				(m): m is ThinkingMessage => m.type === "thinking",
 			);
@@ -772,8 +817,8 @@ describe("MessageProjector resilience", () => {
 			expect(assistant).toBeUndefined();
 		});
 
-		it("3 sequential text.deltas concatenate in correct order", () => {
-			project(
+		it("3 sequential text.deltas concatenate in correct order", async () => {
+			await project(
 				makeStored(
 					"message.created",
 					SESSION_A,
@@ -786,7 +831,7 @@ describe("MessageProjector resilience", () => {
 				),
 			);
 
-			project(
+			await project(
 				makeStored(
 					"text.delta",
 					SESSION_A,
@@ -799,7 +844,7 @@ describe("MessageProjector resilience", () => {
 				),
 			);
 
-			project(
+			await project(
 				makeStored(
 					"text.delta",
 					SESSION_A,
@@ -812,7 +857,7 @@ describe("MessageProjector resilience", () => {
 				),
 			);
 
-			project(
+			await project(
 				makeStored(
 					"text.delta",
 					SESSION_A,
@@ -825,7 +870,7 @@ describe("MessageProjector resilience", () => {
 				),
 			);
 
-			project(
+			await project(
 				makeStored(
 					"turn.completed",
 					SESSION_A,
@@ -839,7 +884,7 @@ describe("MessageProjector resilience", () => {
 				),
 			);
 
-			const chat = readPipeline(SESSION_A);
+			const chat = await readPipeline(SESSION_A);
 			const assistant = chat.find(
 				(m): m is AssistantMessage => m.type === "assistant",
 			);
@@ -848,8 +893,8 @@ describe("MessageProjector resilience", () => {
 			expect(assistant!.rawText).toBe("alphabetagamma");
 		});
 
-		it("3 sequential thinking.deltas concatenate in correct order", () => {
-			project(
+		it("3 sequential thinking.deltas concatenate in correct order", async () => {
+			await project(
 				makeStored(
 					"message.created",
 					SESSION_A,
@@ -862,7 +907,7 @@ describe("MessageProjector resilience", () => {
 				),
 			);
 
-			project(
+			await project(
 				makeStored(
 					"thinking.start",
 					SESSION_A,
@@ -871,7 +916,7 @@ describe("MessageProjector resilience", () => {
 				),
 			);
 
-			project(
+			await project(
 				makeStored(
 					"thinking.delta",
 					SESSION_A,
@@ -884,7 +929,7 @@ describe("MessageProjector resilience", () => {
 				),
 			);
 
-			project(
+			await project(
 				makeStored(
 					"thinking.delta",
 					SESSION_A,
@@ -897,7 +942,7 @@ describe("MessageProjector resilience", () => {
 				),
 			);
 
-			project(
+			await project(
 				makeStored(
 					"thinking.delta",
 					SESSION_A,
@@ -910,7 +955,7 @@ describe("MessageProjector resilience", () => {
 				),
 			);
 
-			project(
+			await project(
 				makeStored(
 					"thinking.end",
 					SESSION_A,
@@ -919,7 +964,7 @@ describe("MessageProjector resilience", () => {
 				),
 			);
 
-			project(
+			await project(
 				makeStored(
 					"turn.completed",
 					SESSION_A,
@@ -933,7 +978,7 @@ describe("MessageProjector resilience", () => {
 				),
 			);
 
-			const chat = readPipeline(SESSION_A);
+			const chat = await readPipeline(SESSION_A);
 			const thinking = chat.find(
 				(m): m is ThinkingMessage => m.type === "thinking",
 			);
@@ -946,8 +991,8 @@ describe("MessageProjector resilience", () => {
 	// ─── Multi-part turns ───────────────────────────────────────────────
 
 	describe("multi-part turns", () => {
-		it("multiple thinking blocks in one message — all survive pipeline", () => {
-			project(
+		it("multiple thinking blocks in one message — all survive pipeline", async () => {
+			await project(
 				makeStored(
 					"message.created",
 					SESSION_A,
@@ -961,7 +1006,7 @@ describe("MessageProjector resilience", () => {
 			);
 
 			// Thinking block 1
-			project(
+			await project(
 				makeStored(
 					"thinking.start",
 					SESSION_A,
@@ -972,7 +1017,7 @@ describe("MessageProjector resilience", () => {
 					{ sequence: nextSeq(), createdAt: NOW + 100 },
 				),
 			);
-			project(
+			await project(
 				makeStored(
 					"thinking.delta",
 					SESSION_A,
@@ -984,7 +1029,7 @@ describe("MessageProjector resilience", () => {
 					{ sequence: nextSeq(), createdAt: NOW + 150 },
 				),
 			);
-			project(
+			await project(
 				makeStored(
 					"thinking.end",
 					SESSION_A,
@@ -997,7 +1042,7 @@ describe("MessageProjector resilience", () => {
 			);
 
 			// Text block 1
-			project(
+			await project(
 				makeStored(
 					"text.delta",
 					SESSION_A,
@@ -1011,7 +1056,7 @@ describe("MessageProjector resilience", () => {
 			);
 
 			// Thinking block 2
-			project(
+			await project(
 				makeStored(
 					"thinking.start",
 					SESSION_A,
@@ -1022,7 +1067,7 @@ describe("MessageProjector resilience", () => {
 					{ sequence: nextSeq(), createdAt: NOW + 400 },
 				),
 			);
-			project(
+			await project(
 				makeStored(
 					"thinking.delta",
 					SESSION_A,
@@ -1034,7 +1079,7 @@ describe("MessageProjector resilience", () => {
 					{ sequence: nextSeq(), createdAt: NOW + 450 },
 				),
 			);
-			project(
+			await project(
 				makeStored(
 					"thinking.end",
 					SESSION_A,
@@ -1047,7 +1092,7 @@ describe("MessageProjector resilience", () => {
 			);
 
 			// Text block 2
-			project(
+			await project(
 				makeStored(
 					"text.delta",
 					SESSION_A,
@@ -1060,7 +1105,7 @@ describe("MessageProjector resilience", () => {
 				),
 			);
 
-			project(
+			await project(
 				makeStored(
 					"turn.completed",
 					SESSION_A,
@@ -1074,7 +1119,7 @@ describe("MessageProjector resilience", () => {
 				),
 			);
 
-			const chat = readPipeline(SESSION_A);
+			const chat = await readPipeline(SESSION_A);
 			const thinkingBlocks = chat.filter(
 				(m): m is ThinkingMessage => m.type === "thinking",
 			);
@@ -1091,8 +1136,8 @@ describe("MessageProjector resilience", () => {
 			expect(types).toEqual(["thinking", "assistant", "thinking", "assistant"]);
 		});
 
-		it("tool use interleaved with thinking — sort_order preserves sequence", () => {
-			project(
+		it("tool use interleaved with thinking — sort_order preserves sequence", async () => {
+			await project(
 				makeStored(
 					"message.created",
 					SESSION_A,
@@ -1106,7 +1151,7 @@ describe("MessageProjector resilience", () => {
 			);
 
 			// Think → tool → think → text
-			project(
+			await project(
 				makeStored(
 					"thinking.start",
 					SESSION_A,
@@ -1117,7 +1162,7 @@ describe("MessageProjector resilience", () => {
 					{ sequence: nextSeq(), createdAt: NOW + 100 },
 				),
 			);
-			project(
+			await project(
 				makeStored(
 					"thinking.delta",
 					SESSION_A,
@@ -1129,7 +1174,7 @@ describe("MessageProjector resilience", () => {
 					{ sequence: nextSeq(), createdAt: NOW + 150 },
 				),
 			);
-			project(
+			await project(
 				makeStored(
 					"thinking.end",
 					SESSION_A,
@@ -1141,7 +1186,7 @@ describe("MessageProjector resilience", () => {
 				),
 			);
 
-			project(
+			await project(
 				makeStored(
 					"tool.started",
 					SESSION_A,
@@ -1155,7 +1200,7 @@ describe("MessageProjector resilience", () => {
 					{ sequence: nextSeq(), createdAt: NOW + 300 },
 				),
 			);
-			project(
+			await project(
 				makeStored(
 					"tool.completed",
 					SESSION_A,
@@ -1169,7 +1214,7 @@ describe("MessageProjector resilience", () => {
 				),
 			);
 
-			project(
+			await project(
 				makeStored(
 					"thinking.start",
 					SESSION_A,
@@ -1180,7 +1225,7 @@ describe("MessageProjector resilience", () => {
 					{ sequence: nextSeq(), createdAt: NOW + 500 },
 				),
 			);
-			project(
+			await project(
 				makeStored(
 					"thinking.delta",
 					SESSION_A,
@@ -1192,7 +1237,7 @@ describe("MessageProjector resilience", () => {
 					{ sequence: nextSeq(), createdAt: NOW + 550 },
 				),
 			);
-			project(
+			await project(
 				makeStored(
 					"thinking.end",
 					SESSION_A,
@@ -1204,7 +1249,7 @@ describe("MessageProjector resilience", () => {
 				),
 			);
 
-			project(
+			await project(
 				makeStored(
 					"text.delta",
 					SESSION_A,
@@ -1217,7 +1262,7 @@ describe("MessageProjector resilience", () => {
 				),
 			);
 
-			project(
+			await project(
 				makeStored(
 					"turn.completed",
 					SESSION_A,
@@ -1231,7 +1276,7 @@ describe("MessageProjector resilience", () => {
 				),
 			);
 
-			const chat = readPipeline(SESSION_A);
+			const chat = await readPipeline(SESSION_A);
 			const types = chat
 				.filter((m) => ["thinking", "tool", "assistant"].includes(m.type))
 				.map((m) => m.type);
@@ -1243,8 +1288,8 @@ describe("MessageProjector resilience", () => {
 	// ─── Error recovery ─────────────────────────────────────────────────
 
 	describe("error recovery", () => {
-		it("partial failure — thinking.start committed, delta rejected, state still valid", () => {
-			project(
+		it("partial failure — thinking.start committed, delta rejected, state still valid", async () => {
+			await project(
 				makeStored(
 					"message.created",
 					SESSION_A,
@@ -1257,7 +1302,7 @@ describe("MessageProjector resilience", () => {
 				),
 			);
 
-			project(
+			await project(
 				makeStored(
 					"thinking.start",
 					SESSION_A,
@@ -1269,12 +1314,10 @@ describe("MessageProjector resilience", () => {
 				),
 			);
 
-			// Force the next db.execute call to throw (simulates disk error)
-			vi.spyOn(harness.db, "execute").mockImplementationOnce(() => {
-				throw new Error("Simulated disk error");
-			});
+			// Force the next message projection to fail (simulates disk error)
+			failNextProjection = true;
 
-			expect(() =>
+			await expect(
 				project(
 					makeStored(
 						"thinking.delta",
@@ -1287,12 +1330,10 @@ describe("MessageProjector resilience", () => {
 						{ sequence: nextSeq(), createdAt: NOW + 200 },
 					),
 				),
-			).toThrow("Simulated disk error");
-
-			vi.restoreAllMocks();
+			).rejects.toThrow("Simulated disk error");
 
 			// State is valid: thinking part exists with empty text from start
-			const chat = readPipeline(SESSION_A);
+			const chat = await readPipeline(SESSION_A);
 			const thinking = chat.find(
 				(m): m is ThinkingMessage => m.type === "thinking",
 			);
@@ -1309,9 +1350,9 @@ describe("MessageProjector resilience", () => {
 	// ─── Session isolation ──────────────────────────────────────────────
 
 	describe("session isolation", () => {
-		it("events from session A never appear in session B pipeline", () => {
+		it("events from session A never appear in session B pipeline", async () => {
 			// Project thinking in session A
-			project(
+			await project(
 				makeStored(
 					"message.created",
 					SESSION_A,
@@ -1323,7 +1364,7 @@ describe("MessageProjector resilience", () => {
 					{ sequence: nextSeq(), createdAt: NOW },
 				),
 			);
-			project(
+			await project(
 				makeStored(
 					"thinking.start",
 					SESSION_A,
@@ -1334,7 +1375,7 @@ describe("MessageProjector resilience", () => {
 					{ sequence: nextSeq(), createdAt: NOW + 100 },
 				),
 			);
-			project(
+			await project(
 				makeStored(
 					"thinking.delta",
 					SESSION_A,
@@ -1346,7 +1387,7 @@ describe("MessageProjector resilience", () => {
 					{ sequence: nextSeq(), createdAt: NOW + 200 },
 				),
 			);
-			project(
+			await project(
 				makeStored(
 					"thinking.end",
 					SESSION_A,
@@ -1357,7 +1398,7 @@ describe("MessageProjector resilience", () => {
 					{ sequence: nextSeq(), createdAt: NOW + 300 },
 				),
 			);
-			project(
+			await project(
 				makeStored(
 					"turn.completed",
 					SESSION_A,
@@ -1372,7 +1413,7 @@ describe("MessageProjector resilience", () => {
 			);
 
 			// Project text in session B
-			project(
+			await project(
 				makeStored(
 					"message.created",
 					SESSION_B,
@@ -1384,7 +1425,7 @@ describe("MessageProjector resilience", () => {
 					{ sequence: nextSeq(), createdAt: NOW },
 				),
 			);
-			project(
+			await project(
 				makeStored(
 					"text.delta",
 					SESSION_B,
@@ -1396,7 +1437,7 @@ describe("MessageProjector resilience", () => {
 					{ sequence: nextSeq(), createdAt: NOW + 100 },
 				),
 			);
-			project(
+			await project(
 				makeStored(
 					"turn.completed",
 					SESSION_B,
@@ -1411,17 +1452,17 @@ describe("MessageProjector resilience", () => {
 			);
 
 			// Session A: thinking only, no assistant text
-			const chatA = readPipeline(SESSION_A);
+			const chatA = await readPipeline(SESSION_A);
 			expect(chatA.some((m) => m.type === "thinking")).toBe(true);
 			expect(chatA.some((m) => m.type === "assistant")).toBe(false);
 
 			// Session B: assistant text only, no thinking
-			const chatB = readPipeline(SESSION_B);
+			const chatB = await readPipeline(SESSION_B);
 			expect(chatB.some((m) => m.type === "assistant")).toBe(true);
 			expect(chatB.some((m) => m.type === "thinking")).toBe(false);
 		});
 
-		it("KNOWN RISK: mismatched StoredEvent.sessionId vs payload.sessionId — data leaks to wrong session", () => {
+		it("KNOWN RISK: mismatched StoredEvent.sessionId vs payload.sessionId — data leaks to wrong session", async () => {
 			// StoredEvent wrapper says SESSION_A, but payload says SESSION_B
 			// MessageProjector uses payload.sessionId for the FK insert
 			const mismatchEvent = makeStored(
@@ -1435,9 +1476,9 @@ describe("MessageProjector resilience", () => {
 				{ sequence: nextSeq(), createdAt: NOW },
 			);
 
-			project(mismatchEvent);
+			await project(mismatchEvent);
 
-			project(
+			await project(
 				makeStored(
 					"text.delta",
 					SESSION_A,
@@ -1450,7 +1491,7 @@ describe("MessageProjector resilience", () => {
 				),
 			);
 
-			project(
+			await project(
 				makeStored(
 					"turn.completed",
 					SESSION_A,
@@ -1465,8 +1506,8 @@ describe("MessageProjector resilience", () => {
 			);
 
 			// Message lands in SESSION_B despite event being "from" SESSION_A
-			const chatB = readPipeline(SESSION_B);
-			const chatA = readPipeline(SESSION_A);
+			const chatB = await readPipeline(SESSION_B);
+			const chatA = await readPipeline(SESSION_A);
 
 			// Documents the risk: message.created uses payload.sessionId,
 			// so the message row's session_id = SESSION_B
@@ -1485,8 +1526,8 @@ describe("MessageProjector resilience", () => {
 	// ─── Malformed / adversarial payloads ────────────────────────────────
 
 	describe("malformed and adversarial payloads", () => {
-		it("thinking.delta with empty string text — concatenates to empty", () => {
-			project(
+		it("thinking.delta with empty string text — concatenates to empty", async () => {
+			await project(
 				makeStored(
 					"message.created",
 					SESSION_A,
@@ -1499,7 +1540,7 @@ describe("MessageProjector resilience", () => {
 				),
 			);
 
-			project(
+			await project(
 				makeStored(
 					"thinking.start",
 					SESSION_A,
@@ -1511,7 +1552,7 @@ describe("MessageProjector resilience", () => {
 				),
 			);
 
-			project(
+			await project(
 				makeStored(
 					"thinking.delta",
 					SESSION_A,
@@ -1524,7 +1565,7 @@ describe("MessageProjector resilience", () => {
 				),
 			);
 
-			project(
+			await project(
 				makeStored(
 					"thinking.end",
 					SESSION_A,
@@ -1536,7 +1577,7 @@ describe("MessageProjector resilience", () => {
 				),
 			);
 
-			project(
+			await project(
 				makeStored(
 					"turn.completed",
 					SESSION_A,
@@ -1550,7 +1591,7 @@ describe("MessageProjector resilience", () => {
 				),
 			);
 
-			const chat = readPipeline(SESSION_A);
+			const chat = await readPipeline(SESSION_A);
 			const thinking = chat.find(
 				(m): m is ThinkingMessage => m.type === "thinking",
 			);
@@ -1559,10 +1600,10 @@ describe("MessageProjector resilience", () => {
 			expect(thinking!.text).toBe("");
 		});
 
-		it("text.delta with SQL-injection-like string — parameterized queries prevent injection", () => {
+		it("text.delta with SQL-injection-like string — parameterized queries prevent injection", async () => {
 			const evilText = "'; DROP TABLE message_parts; --";
 
-			project(
+			await project(
 				makeStored(
 					"message.created",
 					SESSION_A,
@@ -1575,7 +1616,7 @@ describe("MessageProjector resilience", () => {
 				),
 			);
 
-			project(
+			await project(
 				makeStored(
 					"text.delta",
 					SESSION_A,
@@ -1588,7 +1629,7 @@ describe("MessageProjector resilience", () => {
 				),
 			);
 
-			project(
+			await project(
 				makeStored(
 					"turn.completed",
 					SESSION_A,
@@ -1603,15 +1644,15 @@ describe("MessageProjector resilience", () => {
 			);
 
 			// Table still exists (not dropped)
-			const chat = readPipeline(SESSION_A);
+			const chat = await readPipeline(SESSION_A);
 			const assistant = chat.find((m) => m.type === "assistant");
 			expect(assistant).toBeDefined();
 		});
 
-		it("thinking.delta with very long text (100KB) — stored and retrieved intact", () => {
+		it("thinking.delta with very long text (100KB) — stored and retrieved intact", async () => {
 			const longText = "x".repeat(100_000);
 
-			project(
+			await project(
 				makeStored(
 					"message.created",
 					SESSION_A,
@@ -1624,7 +1665,7 @@ describe("MessageProjector resilience", () => {
 				),
 			);
 
-			project(
+			await project(
 				makeStored(
 					"thinking.start",
 					SESSION_A,
@@ -1636,7 +1677,7 @@ describe("MessageProjector resilience", () => {
 				),
 			);
 
-			project(
+			await project(
 				makeStored(
 					"thinking.delta",
 					SESSION_A,
@@ -1649,7 +1690,7 @@ describe("MessageProjector resilience", () => {
 				),
 			);
 
-			project(
+			await project(
 				makeStored(
 					"thinking.end",
 					SESSION_A,
@@ -1661,7 +1702,7 @@ describe("MessageProjector resilience", () => {
 				),
 			);
 
-			project(
+			await project(
 				makeStored(
 					"turn.completed",
 					SESSION_A,
@@ -1675,7 +1716,7 @@ describe("MessageProjector resilience", () => {
 				),
 			);
 
-			const chat = readPipeline(SESSION_A);
+			const chat = await readPipeline(SESSION_A);
 			const thinking = chat.find(
 				(m): m is ThinkingMessage => m.type === "thinking",
 			);
@@ -1686,10 +1727,10 @@ describe("MessageProjector resilience", () => {
 			expect(thinking!.text.length).toBe(100_000);
 		});
 
-		it("thinking.delta with HTML entities — stored raw, not escaped at DB layer", () => {
+		it("thinking.delta with HTML entities — stored raw, not escaped at DB layer", async () => {
 			const htmlText = '<script>alert("xss")</script>&amp;';
 
-			project(
+			await project(
 				makeStored(
 					"message.created",
 					SESSION_A,
@@ -1702,7 +1743,7 @@ describe("MessageProjector resilience", () => {
 				),
 			);
 
-			project(
+			await project(
 				makeStored(
 					"thinking.start",
 					SESSION_A,
@@ -1714,7 +1755,7 @@ describe("MessageProjector resilience", () => {
 				),
 			);
 
-			project(
+			await project(
 				makeStored(
 					"thinking.delta",
 					SESSION_A,
@@ -1727,7 +1768,7 @@ describe("MessageProjector resilience", () => {
 				),
 			);
 
-			project(
+			await project(
 				makeStored(
 					"thinking.end",
 					SESSION_A,
@@ -1739,7 +1780,7 @@ describe("MessageProjector resilience", () => {
 				),
 			);
 
-			project(
+			await project(
 				makeStored(
 					"turn.completed",
 					SESSION_A,
@@ -1753,7 +1794,7 @@ describe("MessageProjector resilience", () => {
 				),
 			);
 
-			const chat = readPipeline(SESSION_A);
+			const chat = await readPipeline(SESSION_A);
 			const thinking = chat.find(
 				(m): m is ThinkingMessage => m.type === "thinking",
 			);
@@ -1767,12 +1808,12 @@ describe("MessageProjector resilience", () => {
 	// ─── Unicode and encoding stress ─────────────────────────────────────
 
 	describe("unicode and encoding stress", () => {
-		function projectThinkingWithText(
+		async function projectThinkingWithText(
 			msgId: string,
 			partId: string,
 			text: string,
-		) {
-			project(
+		): Promise<void> {
+			await project(
 				makeStored(
 					"message.created",
 					SESSION_A,
@@ -1784,7 +1825,7 @@ describe("MessageProjector resilience", () => {
 					{ sequence: nextSeq(), createdAt: NOW },
 				),
 			);
-			project(
+			await project(
 				makeStored(
 					"thinking.start",
 					SESSION_A,
@@ -1795,7 +1836,7 @@ describe("MessageProjector resilience", () => {
 					{ sequence: nextSeq(), createdAt: NOW + 100 },
 				),
 			);
-			project(
+			await project(
 				makeStored(
 					"thinking.delta",
 					SESSION_A,
@@ -1807,7 +1848,7 @@ describe("MessageProjector resilience", () => {
 					{ sequence: nextSeq(), createdAt: NOW + 200 },
 				),
 			);
-			project(
+			await project(
 				makeStored(
 					"thinking.end",
 					SESSION_A,
@@ -1818,7 +1859,7 @@ describe("MessageProjector resilience", () => {
 					{ sequence: nextSeq(), createdAt: NOW + 300 },
 				),
 			);
-			project(
+			await project(
 				makeStored(
 					"turn.completed",
 					SESSION_A,
@@ -1833,13 +1874,13 @@ describe("MessageProjector resilience", () => {
 			);
 		}
 
-		it("emoji round-trips through pipeline", () => {
-			projectThinkingWithText(
+		it("emoji round-trips through pipeline", async () => {
+			await projectThinkingWithText(
 				"msg-emoji",
 				"part-emoji",
 				"🧠 Let me think 🤔💭",
 			);
-			const chat = readPipeline(SESSION_A);
+			const chat = await readPipeline(SESSION_A);
 			const thinking = chat.find(
 				(m): m is ThinkingMessage => m.type === "thinking",
 			);
@@ -1848,9 +1889,13 @@ describe("MessageProjector resilience", () => {
 			expect(thinking!.text).toBe("🧠 Let me think 🤔💭");
 		});
 
-		it("CJK characters round-trip through pipeline", () => {
-			projectThinkingWithText("msg-cjk", "part-cjk", "这是一个测试。思考中…");
-			const chat = readPipeline(SESSION_A);
+		it("CJK characters round-trip through pipeline", async () => {
+			await projectThinkingWithText(
+				"msg-cjk",
+				"part-cjk",
+				"这是一个测试。思考中…",
+			);
+			const chat = await readPipeline(SESSION_A);
 			const thinking = chat.find(
 				(m): m is ThinkingMessage => m.type === "thinking",
 			);
@@ -1859,9 +1904,13 @@ describe("MessageProjector resilience", () => {
 			expect(thinking!.text).toBe("这是一个测试。思考中…");
 		});
 
-		it("RTL text (Arabic) round-trips through pipeline", () => {
-			projectThinkingWithText("msg-rtl", "part-rtl", "هذا اختبار للتفكير");
-			const chat = readPipeline(SESSION_A);
+		it("RTL text (Arabic) round-trips through pipeline", async () => {
+			await projectThinkingWithText(
+				"msg-rtl",
+				"part-rtl",
+				"هذا اختبار للتفكير",
+			);
+			const chat = await readPipeline(SESSION_A);
 			const thinking = chat.find(
 				(m): m is ThinkingMessage => m.type === "thinking",
 			);
@@ -1870,10 +1919,10 @@ describe("MessageProjector resilience", () => {
 			expect(thinking!.text).toBe("هذا اختبار للتفكير");
 		});
 
-		it("surrogate pairs (𝕳𝖊𝖑𝖑𝖔) round-trip through pipeline", () => {
+		it("surrogate pairs (𝕳𝖊𝖑𝖑𝖔) round-trip through pipeline", async () => {
 			const surrogatePairText = "𝕳𝖊𝖑𝖑𝖔 𝖂𝖔𝖗𝖑𝖉";
-			projectThinkingWithText("msg-surr", "part-surr", surrogatePairText);
-			const chat = readPipeline(SESSION_A);
+			await projectThinkingWithText("msg-surr", "part-surr", surrogatePairText);
+			const chat = await readPipeline(SESSION_A);
 			const thinking = chat.find(
 				(m): m is ThinkingMessage => m.type === "thinking",
 			);
@@ -1882,10 +1931,10 @@ describe("MessageProjector resilience", () => {
 			expect(thinking!.text).toBe(surrogatePairText);
 		});
 
-		it("null bytes in text — stored as-is by SQLite TEXT column", () => {
+		it("null bytes in text — stored as-is by SQLite TEXT column", async () => {
 			const nullByteText = "before\0after";
-			projectThinkingWithText("msg-null", "part-null", nullByteText);
-			const chat = readPipeline(SESSION_A);
+			await projectThinkingWithText("msg-null", "part-null", nullByteText);
+			const chat = await readPipeline(SESSION_A);
 			const thinking = chat.find(
 				(m): m is ThinkingMessage => m.type === "thinking",
 			);
@@ -1895,8 +1944,8 @@ describe("MessageProjector resilience", () => {
 			expect(thinking!.text.length).toBeGreaterThanOrEqual("before".length);
 		});
 
-		it("multi-byte concatenation via multiple deltas — boundary not corrupted", () => {
-			project(
+		it("multi-byte concatenation via multiple deltas — boundary not corrupted", async () => {
+			await project(
 				makeStored(
 					"message.created",
 					SESSION_A,
@@ -1908,7 +1957,7 @@ describe("MessageProjector resilience", () => {
 					{ sequence: nextSeq(), createdAt: NOW },
 				),
 			);
-			project(
+			await project(
 				makeStored(
 					"thinking.start",
 					SESSION_A,
@@ -1921,7 +1970,7 @@ describe("MessageProjector resilience", () => {
 			);
 
 			// Two deltas with multi-byte chars at boundaries
-			project(
+			await project(
 				makeStored(
 					"thinking.delta",
 					SESSION_A,
@@ -1933,7 +1982,7 @@ describe("MessageProjector resilience", () => {
 					{ sequence: nextSeq(), createdAt: NOW + 200 },
 				),
 			);
-			project(
+			await project(
 				makeStored(
 					"thinking.delta",
 					SESSION_A,
@@ -1946,7 +1995,7 @@ describe("MessageProjector resilience", () => {
 				),
 			);
 
-			project(
+			await project(
 				makeStored(
 					"thinking.end",
 					SESSION_A,
@@ -1957,7 +2006,7 @@ describe("MessageProjector resilience", () => {
 					{ sequence: nextSeq(), createdAt: NOW + 400 },
 				),
 			);
-			project(
+			await project(
 				makeStored(
 					"turn.completed",
 					SESSION_A,
@@ -1971,7 +2020,7 @@ describe("MessageProjector resilience", () => {
 				),
 			);
 
-			const chat = readPipeline(SESSION_A);
+			const chat = await readPipeline(SESSION_A);
 			const thinking = chat.find(
 				(m): m is ThinkingMessage => m.type === "thinking",
 			);
@@ -1985,8 +2034,8 @@ describe("MessageProjector resilience", () => {
 	// ─── Orphan event edges ──────────────────────────────────────────────
 
 	describe("orphan event edges", () => {
-		it("thinking.end with no thinking.start or thinking.delta — no crash", () => {
-			project(
+		it("thinking.end with no thinking.start or thinking.delta — no crash", async () => {
+			await project(
 				makeStored(
 					"message.created",
 					SESSION_A,
@@ -2000,7 +2049,7 @@ describe("MessageProjector resilience", () => {
 			);
 
 			// Orphan end — no start, no delta
-			expect(() =>
+			await expect(
 				project(
 					makeStored(
 						"thinking.end",
@@ -2012,9 +2061,9 @@ describe("MessageProjector resilience", () => {
 						{ sequence: nextSeq(), createdAt: NOW + 100 },
 					),
 				),
-			).not.toThrow();
+			).resolves.toBeUndefined();
 
-			project(
+			await project(
 				makeStored(
 					"turn.completed",
 					SESSION_A,
@@ -2029,11 +2078,11 @@ describe("MessageProjector resilience", () => {
 			);
 
 			// Pipeline should not crash — orphan end may or may not create a part
-			expect(() => readPipeline(SESSION_A)).not.toThrow();
+			await expect(readPipeline(SESSION_A)).resolves.toBeDefined();
 		});
 
-		it("turn.completed before any parts — message exists with no content", () => {
-			project(
+		it("turn.completed before any parts — message exists with no content", async () => {
+			await project(
 				makeStored(
 					"message.created",
 					SESSION_A,
@@ -2047,7 +2096,7 @@ describe("MessageProjector resilience", () => {
 			);
 
 			// Immediate turn.completed — no thinking, no text, no tool
-			project(
+			await project(
 				makeStored(
 					"turn.completed",
 					SESSION_A,
@@ -2061,14 +2110,14 @@ describe("MessageProjector resilience", () => {
 				),
 			);
 
-			const chat = readPipeline(SESSION_A);
+			const chat = await readPipeline(SESSION_A);
 			// No assistant or thinking messages — turn had no content
 			expect(chat.filter((m) => m.type === "assistant")).toHaveLength(0);
 			expect(chat.filter((m) => m.type === "thinking")).toHaveLength(0);
 		});
 
-		it("turn.error mid-thinking — thinking part still readable", () => {
-			project(
+		it("turn.error mid-thinking — thinking part still readable", async () => {
+			await project(
 				makeStored(
 					"message.created",
 					SESSION_A,
@@ -2081,7 +2130,7 @@ describe("MessageProjector resilience", () => {
 				),
 			);
 
-			project(
+			await project(
 				makeStored(
 					"thinking.start",
 					SESSION_A,
@@ -2093,7 +2142,7 @@ describe("MessageProjector resilience", () => {
 				),
 			);
 
-			project(
+			await project(
 				makeStored(
 					"thinking.delta",
 					SESSION_A,
@@ -2107,7 +2156,7 @@ describe("MessageProjector resilience", () => {
 			);
 
 			// Error arrives — no thinking.end, no turn.completed
-			project(
+			await project(
 				makeStored(
 					"turn.error",
 					SESSION_A,
@@ -2120,7 +2169,7 @@ describe("MessageProjector resilience", () => {
 				),
 			);
 
-			const chat = readPipeline(SESSION_A);
+			const chat = await readPipeline(SESSION_A);
 			const thinking = chat.find(
 				(m): m is ThinkingMessage => m.type === "thinking",
 			);
@@ -2132,7 +2181,7 @@ describe("MessageProjector resilience", () => {
 			expect(thinking!.done).toBe(true);
 		});
 
-		it("duplicate message.created for same messageId — ON CONFLICT DO NOTHING", () => {
+		it("duplicate message.created for same messageId — ON CONFLICT DO NOTHING", async () => {
 			const firstCreate = makeStored(
 				"message.created",
 				SESSION_A,
@@ -2144,7 +2193,7 @@ describe("MessageProjector resilience", () => {
 				{ sequence: nextSeq(), createdAt: NOW },
 			);
 
-			project(firstCreate);
+			await project(firstCreate);
 
 			// Second create for same ID — should be idempotent
 			const secondCreate = makeStored(
@@ -2158,10 +2207,10 @@ describe("MessageProjector resilience", () => {
 				{ sequence: nextSeq(), createdAt: NOW + 100 },
 			);
 
-			expect(() => project(secondCreate)).not.toThrow();
+			await expect(project(secondCreate)).resolves.toBeUndefined();
 
 			// Message still works
-			project(
+			await project(
 				makeStored(
 					"text.delta",
 					SESSION_A,
@@ -2174,7 +2223,7 @@ describe("MessageProjector resilience", () => {
 				),
 			);
 
-			project(
+			await project(
 				makeStored(
 					"turn.completed",
 					SESSION_A,
@@ -2188,13 +2237,13 @@ describe("MessageProjector resilience", () => {
 				),
 			);
 
-			const chat = readPipeline(SESSION_A);
+			const chat = await readPipeline(SESSION_A);
 			const assistant = chat.find((m) => m.type === "assistant");
 			expect(assistant).toBeDefined();
 		});
 
-		it("duplicate turn.completed — no error, message not corrupted", () => {
-			project(
+		it("duplicate turn.completed — no error, message not corrupted", async () => {
+			await project(
 				makeStored(
 					"message.created",
 					SESSION_A,
@@ -2207,7 +2256,7 @@ describe("MessageProjector resilience", () => {
 				),
 			);
 
-			project(
+			await project(
 				makeStored(
 					"text.delta",
 					SESSION_A,
@@ -2232,16 +2281,16 @@ describe("MessageProjector resilience", () => {
 				{ sequence: nextSeq(), createdAt: NOW + 200 },
 			);
 
-			project(turnEvent);
-			expect(() => project(turnEvent)).not.toThrow();
+			await project(turnEvent);
+			await expect(project(turnEvent)).resolves.toBeUndefined();
 
-			const chat = readPipeline(SESSION_A);
+			const chat = await readPipeline(SESSION_A);
 			const assistant = chat.find((m) => m.type === "assistant");
 			expect(assistant).toBeDefined();
 		});
 
-		it("duplicate thinking.end — no error", () => {
-			project(
+		it("duplicate thinking.end — no error", async () => {
+			await project(
 				makeStored(
 					"message.created",
 					SESSION_A,
@@ -2254,7 +2303,7 @@ describe("MessageProjector resilience", () => {
 				),
 			);
 
-			project(
+			await project(
 				makeStored(
 					"thinking.start",
 					SESSION_A,
@@ -2266,7 +2315,7 @@ describe("MessageProjector resilience", () => {
 				),
 			);
 
-			project(
+			await project(
 				makeStored(
 					"thinking.delta",
 					SESSION_A,
@@ -2289,10 +2338,10 @@ describe("MessageProjector resilience", () => {
 				{ sequence: nextSeq(), createdAt: NOW + 300 },
 			);
 
-			project(endEvent);
-			expect(() => project(endEvent)).not.toThrow();
+			await project(endEvent);
+			await expect(project(endEvent)).resolves.toBeUndefined();
 
-			project(
+			await project(
 				makeStored(
 					"turn.completed",
 					SESSION_A,
@@ -2306,7 +2355,7 @@ describe("MessageProjector resilience", () => {
 				),
 			);
 
-			const chat = readPipeline(SESSION_A);
+			const chat = await readPipeline(SESSION_A);
 			const thinking = chat.find(
 				(m): m is ThinkingMessage => m.type === "thinking",
 			);
@@ -2315,8 +2364,8 @@ describe("MessageProjector resilience", () => {
 			expect(thinking!.text).toBe("thought");
 		});
 
-		it("text.delta duplicate in normal mode — documents text doubling risk", () => {
-			project(
+		it("text.delta duplicate in normal mode — documents text doubling risk", async () => {
+			await project(
 				makeStored(
 					"message.created",
 					SESSION_A,
@@ -2340,10 +2389,10 @@ describe("MessageProjector resilience", () => {
 				{ sequence: nextSeq(), createdAt: NOW + 100 },
 			);
 
-			project(textDelta);
-			project(textDelta);
+			await project(textDelta);
+			await project(textDelta);
 
-			project(
+			await project(
 				makeStored(
 					"turn.completed",
 					SESSION_A,
@@ -2357,7 +2406,7 @@ describe("MessageProjector resilience", () => {
 				),
 			);
 
-			const chat = readPipeline(SESSION_A);
+			const chat = await readPipeline(SESSION_A);
 			const assistant = chat.find((m) => m.type === "assistant");
 			expect(assistant).toBeDefined();
 			// KNOWN RISK: same as thinking.delta doubling — text.delta also uses

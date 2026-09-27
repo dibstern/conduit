@@ -39,8 +39,8 @@ vi.mock("../../../src/lib/frontend/transport/ws-rpc-client.js", () => ({
 import AttentionBanner from "../../../src/lib/frontend/components/permissions/AttentionBanner.svelte";
 import { permissionsState } from "../../../src/lib/frontend/stores/permissions.svelte.js";
 import {
+	attachedProjectState,
 	routerState,
-	syncSlugState,
 } from "../../../src/lib/frontend/stores/router.svelte.js";
 import {
 	applySessionSnapshot,
@@ -76,8 +76,8 @@ function setSessionTitles(
 			title,
 			status: "idle" as const,
 			createdAt: Date.now(),
-			pendingQuestions: counts[id]?.questions ?? 0,
-			pendingPermissions: counts[id]?.permissions ?? 0,
+			pendingQuestionCount: counts[id]?.questions ?? 0,
+			pendingPermissionCount: counts[id]?.permissions ?? 0,
 		})),
 		"complete",
 	);
@@ -102,8 +102,8 @@ describe("AttentionBanner merge logic", () => {
 		// selecting the session has to come after it.
 		clearSessionState();
 		sessionState.currentId = "ses_current";
-		routerState.path = "/p/project-a/s/ses_current";
-		syncSlugState(routerState.path);
+		routerState.path = "/s/ses_current";
+		attachedProjectState.slug = "project-a";
 	});
 
 	afterEach(() => {
@@ -238,7 +238,7 @@ describe("AttentionBanner merge logic", () => {
 					createdAt: Date.now(),
 					parentID: "ses_current",
 					// Server attention on a descendant must not surface either.
-					pendingQuestions: 1,
+					pendingQuestionCount: 1,
 				},
 				{
 					id: "ses_other1",

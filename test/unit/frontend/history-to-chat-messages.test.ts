@@ -647,17 +647,21 @@ describe("historyToChatMessages: edge cases", () => {
 // ─── Compaction dividers ────────────────────────────────────────────────────
 
 describe("historyToChatMessages: compaction dividers", () => {
-	it("renders a persisted compaction part as an info SystemMessage carrying postTokens", () => {
+	it("renders a persisted compaction part as a completed compaction carrying its sizes and stamp", () => {
 		const messages: HistoryMessage[] = [
-			assistantMsg("compaction-7", [
-				{
-					id: "compaction-part-7",
-					type: "compaction" as PartType,
-					text: "Context compacted · 195k → 96k",
-					preTokens: 194925,
-					postTokens: 96000,
-				},
-			]),
+			assistantMsg(
+				"compaction-7",
+				[
+					{
+						id: "compaction-part-7",
+						type: "compaction" as PartType,
+						text: "Context compacted · 195k → 96k",
+						preTokens: 194925,
+						postTokens: 96000,
+					},
+				],
+				{ time: { created: 1_700_000_000_000 } },
+			),
 		];
 
 		const result = historyToChatMessages(messages);
@@ -666,8 +670,11 @@ describe("historyToChatMessages: compaction dividers", () => {
 		expect(result[0]).toMatchObject({
 			type: "system",
 			variant: "info",
+			compaction: "completed",
 			text: "Context compacted · 195k → 96k",
+			preTokens: 194925,
 			postTokens: 96000,
+			createdAt: 1_700_000_000_000,
 		});
 	});
 

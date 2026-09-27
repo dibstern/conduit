@@ -91,7 +91,6 @@ import {
 	handleScanResult,
 } from "./instance.svelte.js";
 import {
-	clearSessionLocal,
 	handleAskUser,
 	handleAskUserError,
 	handleAskUserResolved,
@@ -99,16 +98,24 @@ import {
 	handlePermissionResolved,
 } from "./permissions.svelte.js";
 import { handleProjectList } from "./project.svelte.js";
-import { getCurrentSlug, replaceRoute } from "./router.svelte.js";
+import {
+	attachedProjectState,
+	getCurrentRoute,
+	replaceRoute,
+	routerState,
+} from "./router.svelte.js";
 import {
 	acceptsSessionSwitch,
 	applySessionRemoved,
 	consumeSwitchingFromId,
 	findSession,
+	handleSessionFamily,
 	handleSessionForked,
 	handleSessionList,
 	handleSessionSwitched,
+	loadDaemonSessions,
 	observeSessionActivity,
+	sessionCreation,
 	sessionState,
 } from "./session.svelte.js";
 import {
@@ -136,6 +143,7 @@ import {
 	fileBrowserListeners,
 	fileHistoryListeners,
 	planModeListeners,
+	projectAttachedListeners,
 	projectListeners,
 } from "./ws-listeners.js";
 import { triggerNotifications } from "./ws-notifications.js";
@@ -217,6 +225,31 @@ function routePerSession(event: PerSessionEvent): void {
 			throw new Error(`routePerSession: missing sessionId on ${event.type}`);
 		// prod: silently drop — telemetry counter would go here
 		return;
+	}
+
+	// ── Permission and question state ──────────────────────────────────
+	// Lives outside chat slots and accepts sessions not yet in membership
+	// (a new child's first question). Never allocate a slot here:
+	// resolutions are broadcast to every client, and a slot per unrelated
+	// session would evict cached transcripts from the LRU.
+	switch (event.type) {
+		case "permission_request":
+			handlePermissionRequest(event, wsSend);
+			triggerNotifications(event);
+			return;
+		case "permission_resolved":
+			handlePermissionResolved(event);
+			return;
+		case "ask_user":
+			handleAskUser(event, event.sessionId);
+			triggerNotifications(event);
+			return;
+		case "ask_user_resolved":
+			handleAskUserResolved(event);
+			return;
+		case "ask_user_error":
+			handleAskUserError(event);
+			return;
 	}
 
 	// ── Unknown-session guard ──────────────────────────────────────────
@@ -328,23 +361,6 @@ function routePerSession(event: PerSessionEvent): void {
 			break;
 		case "message_removed":
 			handleMessageRemoved(activity, messages, event);
-			break;
-		case "permission_request":
-			handlePermissionRequest(event, wsSend);
-			triggerNotifications(event);
-			break;
-		case "permission_resolved":
-			handlePermissionResolved(event);
-			break;
-		case "ask_user":
-			handleAskUser(event, event.sessionId);
-			triggerNotifications(event);
-			break;
-		case "ask_user_resolved":
-			handleAskUserResolved(event);
-			break;
-		case "ask_user_error":
-			handleAskUserError(event);
 			break;
 		case "session_switched":
 			// Handled in handleMessage — session_switched requires global
@@ -696,6 +712,17 @@ export function handleMessage(msg: RelayMessage): void {
 		return;
 	}
 	observeSessionActivity(msg);
+	if (msg.type === "project_attached") {
+		if (attachedProjectState.slug !== msg.slug) {
+			for (const activity of sessionActivity.values()) {
+				activity.replayGeneration++;
+				activity.liveEventBuffer = null;
+			}
+		}
+		attachedProjectState.slug = msg.slug;
+		for (const listener of projectAttachedListeners) listener(msg.slug);
+		return;
+	}
 	// ── Two-tier routing: per-session events vs global events ────────────
 	// Per-session events are routed by event.sessionId to the correct
 	// session slot. notification_event is excluded by construction
@@ -731,9 +758,11 @@ export function handleMessage(msg: RelayMessage): void {
 	switch (msg.type) {
 		// ─── Sessions ────────────────────────────────────────────────────
 		case "session_list": {
-			// Notification counts ride the rows now (ni8.23), so there is nothing
-			// left to reconcile: applying the list applies the badges.
 			handleSessionList(msg);
+			break;
+		}
+		case "session_family": {
+			handleSessionFamily(msg);
 			break;
 		}
 		case "session_forked": {
@@ -750,6 +779,26 @@ export function handleMessage(msg: RelayMessage): void {
 			break;
 		}
 		case "session_switched": {
+			const route = getCurrentRoute();
+			const requestedCreation =
+				sessionCreation.value.phase === "creating" &&
+				sessionCreation.value.requestId === msg.requestId;
+			// Only this tab's creation request may leave the session list.
+			if (route.page !== "chat" || (!route.sessionId && !requestedCreation))
+				break;
+			// An initial replay may name the provider's session after the URL was
+			// formed. Keep unrelated, uncorrelated switches from replacing a later
+			// user selection. This tab's own creation response is correlated, so
+			// it may leave whichever session is open.
+			if (
+				!requestedCreation &&
+				route.sessionId &&
+				msg.id &&
+				route.sessionId !== msg.id &&
+				route.sessionId !== msg.parentID &&
+				(sessionState.currentId !== null || (!msg.events && !msg.history))
+			)
+				break;
 			if (!msg.id) {
 				handleSessionSwitched(msg);
 				clearMessages();
@@ -764,9 +813,10 @@ export function handleMessage(msg: RelayMessage): void {
 				consumeSwitchingFromId() ?? sessionState.currentId;
 			handleSessionSwitched(msg);
 
-			// Update URL to reflect the new session
-			const slug = getCurrentSlug();
-			if (slug && msg.id) replaceRoute(`/p/${slug}/s/${msg.id}`);
+			// Update URL to reflect the new session. Skip it when the URL already
+			// names it: a same-path replace is taken literally and would drop the
+			// list's query (scope, filter, grouping) on every reload.
+			if (routerState.path !== `/s/${msg.id}`) replaceRoute(`/s/${msg.id}`);
 
 			// Bump the outgoing session's replayGeneration to abort any in-flight
 			// convertHistoryAsync or replay for the previous session.
@@ -777,7 +827,6 @@ export function handleMessage(msg: RelayMessage): void {
 			activateSessionChatState(msg.id);
 			updateContextPercent(0);
 			clearTodoState();
-			clearSessionLocal(previousSessionId);
 
 			if (msg.events) {
 				// Cache hit: replay raw events through existing chat handlers
@@ -946,6 +995,10 @@ export function handleMessage(msg: RelayMessage): void {
 			const hpActGen = hpCapturedSlot?.activity.replayGeneration; // per-session snapshot
 			convertHistoryAsync(rawMessages, renderMarkdown, hpCapturedSlot?.activity)
 				.then((chatMsgs) => {
+					const stillCurrent =
+						hpCapturedSlot !== null &&
+						hpSessionId === sessionState.currentId &&
+						hpCapturedSlot.activity.replayGeneration === hpActGen;
 					if (
 						chatMsgs &&
 						(!hpCapturedSlot ||
@@ -968,15 +1021,23 @@ export function handleMessage(msg: RelayMessage): void {
 							hpCapturedSlot.messages.historyMessageCount += rawMessages.length;
 						}
 						if (hpCapturedSlot) hpCapturedSlot.messages.historyLoading = false;
-						historyState.hasMore = hasMore;
-						historyState.messageCount += rawMessages.length;
+						if (stillCurrent) {
+							historyState.hasMore = hasMore;
+							historyState.messageCount += rawMessages.length;
+						}
 					}
-					historyState.loading = false; // ALWAYS reset, even on abort
+					if (stillCurrent) historyState.loading = false;
 				})
 				.catch((err) => {
 					log.warn("History page conversion error:", err);
+					if (
+						hpCapturedSlot &&
+						hpCapturedSlot.activity.replayGeneration !== hpActGen
+					)
+						return;
 					if (hpCapturedSlot) hpCapturedSlot.messages.historyLoading = false;
-					historyState.loading = false;
+					if (hpSessionId === sessionState.currentId)
+						historyState.loading = false;
 				});
 			break;
 		}
@@ -1013,6 +1074,9 @@ export function handleMessage(msg: RelayMessage): void {
 		case "project_list":
 			handleProjectList(msg);
 			for (const fn of projectListeners) fn(msg);
+			break;
+		case "daemon_sessions_changed":
+			void loadDaemonSessions();
 			break;
 
 		// ─── Todo ────────────────────────────────────────────────────────

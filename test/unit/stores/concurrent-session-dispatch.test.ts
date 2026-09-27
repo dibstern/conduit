@@ -1,3 +1,5 @@
+import { routerState } from "../../../src/lib/frontend/stores/router.svelte.js";
+import { seedFamilySessions, seedRootSessions } from "./session-fixtures.js";
 // ─── Concurrent Session Dispatch Tests ──────────────────────────────────────
 // Verifies that interleaved per-session events for sessions A/B/C are routed
 // independently. Covers: live event buffering during replay, notification_event
@@ -49,20 +51,35 @@ import {
 } from "../../../src/lib/frontend/stores/chat.svelte.js";
 import { getBrowserClientId } from "../../../src/lib/frontend/stores/client-identity.js";
 import {
+	clearAllPermissions,
+	permissionsState,
+} from "../../../src/lib/frontend/stores/permissions.svelte.js";
+import {
 	applySessionUpsert,
 	clearSessionState,
+	getAttentionSessions,
+	getSessionIndicator,
 	sessionState,
 } from "../../../src/lib/frontend/stores/session.svelte.js";
 import {
 	handleMessage,
 	isPerSessionEvent,
 } from "../../../src/lib/frontend/stores/ws-dispatch.js";
-import type { RelayMessage } from "../../../src/lib/shared-types.js";
+import type {
+	PermissionId,
+	RelayMessage,
+} from "../../../src/lib/shared-types.js";
 
 // ─── Setup / Teardown ───────────────────────────────────────────────────────
 
 beforeEach(() => {
 	clearMessages();
+	clearAllPermissions();
+	clearSessionState();
+	seedRootSessions(
+		["session-a", "session-b", "session-c"].map((id) => ({ id, title: "" })),
+	);
+	seedFamilySessions("root-a", []);
 	sessionState.currentId = "session-a";
 	for (const id of ["session-a", "session-b", "session-c"]) {
 		applySessionUpsert({ id, title: "", status: "idle" });
@@ -433,5 +450,124 @@ describe("isPerSessionEvent — runtime guard", () => {
 			const msg = { type } as RelayMessage;
 			expect(isPerSessionEvent(msg)).toBe(false);
 		}
+	});
+});
+
+describe("family attention before membership", () => {
+	it("accepts an unknown child permission and its resolution", () => {
+		handleMessage({
+			type: "permission_request",
+			sessionId: "new-child",
+			requestId: "permission-1" as PermissionId,
+			toolName: "bash",
+			toolInput: {},
+		});
+		expect(
+			permissionsState.pendingPermissions.map(
+				(permission) => permission.requestId,
+			),
+		).toContain("permission-1");
+		handleMessage({
+			type: "permission_resolved",
+			sessionId: "new-child",
+			requestId: "permission-1" as PermissionId,
+			decision: "once",
+		});
+		expect(permissionsState.pendingPermissions).toEqual([]);
+	});
+
+	it("accepts unknown child questions and preserves replay through a switch", () => {
+		handleMessage({
+			type: "ask_user",
+			sessionId: "new-child",
+			toolId: "question-1",
+			questions: [],
+		});
+		handleMessage({
+			type: "session_family",
+			rootId: "root",
+			sessions: [
+				{ id: "root", title: "Root", status: "idle" },
+				{ id: "new-child", title: "Child", status: "idle", parentID: "root" },
+			],
+		});
+		routerState.path = "/s/root";
+		handleMessage({ type: "session_switched", sessionId: "root", id: "root" });
+		expect(
+			permissionsState.pendingQuestions.map((question) => question.toolId),
+		).toEqual(["question-1"]);
+		handleMessage({
+			type: "ask_user_error",
+			sessionId: "unknown-child",
+			toolId: "question-1",
+			message: "Retry",
+		});
+		expect(permissionsState.questionErrors.get("question-1")).toBe("Retry");
+		handleMessage({
+			type: "ask_user_resolved",
+			sessionId: "unknown-child",
+			toolId: "question-1",
+		});
+		expect(permissionsState.pendingQuestions).toEqual([]);
+	});
+
+	// Resolutions are broadcast to every client, so a slot per unrelated
+	// session would evict cached transcripts from the LRU.
+	it("keeps permission and question events out of chat slots", () => {
+		handleMessage({
+			type: "ask_user",
+			sessionId: "other-child",
+			toolId: "question-2",
+			questions: [],
+		});
+		handleMessage({
+			type: "ask_user_error",
+			sessionId: "other-child",
+			toolId: "question-2",
+			message: "Retry",
+		});
+		handleMessage({
+			type: "ask_user_resolved",
+			sessionId: "other-child",
+			toolId: "question-2",
+		});
+		handleMessage({
+			type: "permission_resolved",
+			sessionId: "other-child",
+			requestId: "permission-2" as PermissionId,
+			decision: "once",
+		});
+		expect(sessionActivity.has("other-child")).toBe(false);
+		expect(sessionMessages.has("other-child")).toBe(false);
+	});
+
+	it("roots-only reconciliation preserves child indicators and uses rolled root counts", () => {
+		seedFamilySessions("root", [
+			{ id: "root", title: "Root" },
+			{
+				id: "new-child",
+				title: "Child",
+				parentID: "root",
+				pendingQuestionCount: 1,
+			},
+		]);
+		handleMessage({
+			type: "session_list",
+			roots: true,
+			sessions: [
+				{
+					id: "root",
+					title: "Root",
+					status: "idle",
+					pendingPermissionCount: 2,
+					pendingQuestionCount: 1,
+				},
+			],
+		});
+		expect(getSessionIndicator("new-child", null)).toBe("attention");
+		expect(getAttentionSessions(null, () => new Set()).get("root")).toEqual({
+			questions: 1,
+			permissions: 2,
+		});
 	});
 });

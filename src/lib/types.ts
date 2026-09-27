@@ -4,6 +4,8 @@
 import type { Logger } from "./logger.js";
 import type { PushNotificationSender } from "./server/push.js";
 import type {
+	DaemonSessionQueryOptions,
+	DaemonSessionQueryResult,
 	PartType,
 	PermissionId,
 	ProviderPermissionUpdate,
@@ -17,6 +19,9 @@ export type {
 	AgentInfo,
 	AskUserQuestion,
 	CommandInfo,
+	DaemonSessionCursor,
+	DaemonSessionQueryOptions,
+	DaemonSessionQueryResult,
 	FileEntry,
 	GlobalRelayEvent,
 	InstanceConfig,
@@ -95,7 +100,7 @@ export type IPCCommand =
 	| { cmd: "add_project"; directory: string }
 	| { cmd: "remove_project"; slug: string }
 	| { cmd: "set_project_title"; slug: string; title: string }
-	| { cmd: "set_pin"; pin: string }
+	| { cmd: "set_pin"; pin: string | null }
 	| { cmd: "set_keep_awake"; enabled: boolean }
 	| { cmd: "set_keep_awake_command"; command: string; args: string[] }
 	| { cmd: "set_agent"; slug: string; agent: string }
@@ -196,9 +201,9 @@ export interface FileContentResult {
 
 // ─── Per-Project Relay Config ────────────────────────────────────────────────
 
-/** Config for creating a per-project relay that attaches to an existing server. */
+/** Config for creating a per-project relay that receives attached sockets. */
 export interface ProjectRelayConfig {
-	/** The HTTP server to attach the WebSocket handler to */
+	/** Shared HTTP server owned by the caller. */
 	httpServer: import("node:http").Server;
 	/** OpenCode server URL (e.g., "http://localhost:4096") */
 	opencodeUrl: string;
@@ -211,20 +216,11 @@ export interface ProjectRelayConfig {
 	/** Logger instance — defaults to a console-backed root logger */
 	log?: Logger;
 	/**
-	 * When true, create WebSocket server in noServer mode.
-	 * The caller (daemon) handles HTTP upgrades and routes to handleUpgrade().
-	 * Also enables per-directory scoping via x-opencode-directory header.
+	 * Enables per-directory scoping via x-opencode-directory header.
+	 * WebSocket upgrades are always owned by the caller, which attaches sockets
+	 * to the relay.
 	 */
 	noServer?: boolean;
-	/** Optional auth check on WebSocket upgrade (threaded to ws-handler verifyClient). */
-	verifyClient?: (
-		info: {
-			origin: string;
-			secure: boolean;
-			req: import("node:http").IncomingMessage;
-		},
-		callback: (result: boolean, code?: number, message?: string) => void,
-	) => void;
 	/** Return the relay's registered project list (for the project switcher). */
 	getProjects?: () => MaybePromise<
 		ReadonlyArray<{
@@ -234,6 +230,14 @@ export interface ProjectRelayConfig {
 			instanceId?: string;
 		}>
 	>;
+	/** List sessions across every registered project without starting relays. */
+	listDaemonSessions?: (
+		options: DaemonSessionQueryOptions,
+	) => MaybePromise<DaemonSessionQueryResult>;
+	/** Notify browsers on other project relays that the daemon list changed. */
+	broadcastSessionListChanged?: () => Promise<void>;
+	/** Refresh the daemon's cached git context before publishing a turn-end list. */
+	refreshSessionGit?: () => Promise<void>;
 	/** Remove a project from the registry. */
 	removeProject?: (slug: string) => void | Promise<void>;
 	/** Set a project's display title. */

@@ -2,7 +2,7 @@
 // Verifies that the relay handles malformed, unknown, and invalid messages
 // gracefully without crashing the server or disconnecting the client.
 
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import WebSocket from "ws";
 import {
 	createRelayHarness,
@@ -20,9 +20,74 @@ describe("Integration: Error Handling", () => {
 		if (harness) await harness.stop();
 	});
 
+	it.each([
+		"ws",
+		"rpc",
+	])("rejects the removed project %s socket", async (transport) => {
+		const ws = new WebSocket(
+			`ws://127.0.0.1:${harness.relayPort}/p/integration-test/${transport}`,
+		);
+		try {
+			const error = await new Promise<Error>((resolve, reject) => {
+				ws.once("error", resolve);
+				ws.once("open", () => reject(new Error("Removed socket path opened")));
+			});
+			expect(error).toMatchObject({ code: "ECONNRESET" });
+		} finally {
+			ws.terminate();
+		}
+	});
+
+	it.each([
+		"client.valid_:123-",
+		"invalid client",
+		"x".repeat(129),
+	])("attaches /ws with validated client identity %s and the requested session", async (requestedClientId) => {
+		const attach = vi.spyOn(harness.stack.wsHandler, "attach");
+		const sessionId = harness.stack.initialSessionId;
+		const ws = new WebSocket(
+			`ws://127.0.0.1:${harness.relayPort}/ws?p=integration-test&client=${encodeURIComponent(requestedClientId)}&session=${encodeURIComponent(sessionId)}`,
+		);
+		const messages: Record<string, unknown>[] = [];
+		ws.on("message", (data) => {
+			messages.push(JSON.parse(data.toString()) as Record<string, unknown>);
+		});
+		try {
+			await new Promise<void>((resolve, reject) => {
+				ws.once("open", resolve);
+				ws.once("error", reject);
+			});
+			await vi.waitFor(() => {
+				expect(
+					messages.some((message) => message["type"] === "session_switched"),
+				).toBe(true);
+			});
+			expect(messages[0]).toEqual({
+				type: "project_attached",
+				slug: "integration-test",
+			});
+			expect(attach).toHaveBeenCalledOnce();
+			expect(attach).toHaveBeenCalledWith(expect.any(WebSocket), {
+				clientId:
+					requestedClientId === "client.valid_:123-"
+						? requestedClientId
+						: expect.stringMatching(/^[a-f0-9]{16}$/),
+				requestedSessionId: sessionId,
+			});
+		} finally {
+			attach.mockRestore();
+			await new Promise<void>((resolve) => {
+				ws.once("close", resolve);
+				ws.close();
+			});
+		}
+	});
+
 	it("sending invalid JSON does not crash the server", async () => {
 		// Use a raw WebSocket to send non-JSON data
-		const rawWs = new WebSocket(`ws://127.0.0.1:${harness.relayPort}/ws`);
+		const rawWs = new WebSocket(
+			`ws://127.0.0.1:${harness.relayPort}/ws?p=integration-test`,
+		);
 		await new Promise<void>((resolve, reject) => {
 			rawWs.once("open", resolve);
 			rawWs.once("error", reject);

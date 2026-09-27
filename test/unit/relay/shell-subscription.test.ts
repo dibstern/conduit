@@ -51,7 +51,6 @@ import {
 	type ReadQueryEffect,
 	ReadQueryEffectTag,
 } from "../../../src/lib/persistence/effect/read-query-effect.js";
-import { markSessionViewed } from "../../../src/lib/persistence/effect/session-viewed.js";
 import {
 	type CanonicalEvent,
 	canonicalEvent,
@@ -270,11 +269,7 @@ describe("subscribeShell", () => {
 					});
 					expect(yield* Queue.take(q)).toMatchObject({
 						_tag: "upsert",
-						item: {
-							id: "child",
-							parentID: "parent",
-							forkMessageId: "fork-point",
-						},
+						item: { id: "parent" },
 					});
 				}).pipe(
 					Effect.provide(
@@ -330,12 +325,7 @@ describe("subscribeShell", () => {
 					});
 					expect(yield* Queue.take(q)).toMatchObject({
 						_tag: "upsert",
-						item: {
-							id: child.id,
-							parentID: "claude-parent",
-							forkMessageId: "ui-boundary",
-							forkPointTimestamp: 1000,
-						},
+						item: { id: "claude-parent" },
 					});
 					expect(sdkForkSession).toHaveBeenCalledWith(
 						"sdk-parent",
@@ -535,9 +525,11 @@ describe("subscribeShell", () => {
 				);
 				expect(result).toMatchObject({
 					_tag: "Left",
-					left: { cause: expect.stringContaining("transcript store") },
+					left: { cause: expect.stringContaining("transcript UUID") },
 				});
-				expect(getSessionMessages).not.toHaveBeenCalled();
+				expect(getSessionMessages).toHaveBeenCalledWith("sdk-parent", {
+					dir: "/test/project",
+				});
 			}).pipe(Effect.provide(makeShellTestLayer())),
 	);
 	for (const messageId of ["fork-message", undefined]) {
@@ -566,11 +558,7 @@ describe("subscribeShell", () => {
 					const envelope = yield* Queue.take(q);
 					expect(envelope).toMatchObject({
 						_tag: "upsert",
-						item: {
-							id: "new-fork",
-							parentID: "parent",
-							forkMessageId: "fork-message",
-						},
+						item: { id: "parent" },
 					});
 				}).pipe(
 					Effect.provide(
@@ -1003,11 +991,11 @@ describe("subscribeShell", () => {
 		}).pipe(Effect.provide(makeShellTestLayer())),
 	);
 	it.scoped(
-		"a direct read-model write reaches a live subscriber even though the log has not moved",
+		"a read event reaches a live subscriber with the updated unread state",
 		() =>
 			Effect.gen(function* () {
 				yield* recoverProjections;
-				const stored = yield* commitThroughSeam([
+				yield* commitThroughSeam([
 					sessionCreated(SID),
 					messageCreated(SID, "m1"),
 				]);
@@ -1017,28 +1005,25 @@ describe("subscribeShell", () => {
 				if (snapshot?._tag !== "snapshot") throw new Error("expected snapshot");
 				expect(synchronized).toEqual({ _tag: "synchronized" });
 				// A message has landed and nobody has looked: the badge is on.
-				expect(snapshot.rows[0]?.unseenActivity).toBe(true);
+				expect(snapshot.rows[0]?.unread).toBe(true);
 				const baseVersion = snapshot.sequence;
 
-				// Viewing appends nothing, so the log is exactly where it was. This is
-				// the ni8.23 C2 trap: the ONLY thing that can carry this to a
-				// subscriber is the row version the write stamped.
-				yield* markSessionViewed(SID, 9_999_999);
+				yield* commitThroughSeam([
+					canonicalEvent(
+						"session.read",
+						SID,
+						{ sessionId: SID },
+						{ provider: "claude", createdAt: 9_999_999 },
+					),
+				]);
 				yield* Effect.yieldNow();
 
 				const delta = yield* Queue.take(q);
 				if (delta._tag !== "upsert") throw new Error("expected upsert");
 				expect(delta.item.id).toBe(SID);
-				expect(delta.item.unseenActivity).toBe(false);
-				// A direct write moves the read-model cursor without appending an event.
+				expect(delta.item.unread).toBeUndefined();
 				expect(delta.sequence).toBeGreaterThan(baseVersion);
 				expect(delta.sequence).toBe(yield* readModelVersion);
-				const eventStore = yield* EventStoreEffectTag;
-				expect(
-					yield* eventStore.readFromSequence(
-						stored[stored.length - 1]?.sequence ?? 0,
-					),
-				).toEqual([]);
 				expect(yield* Queue.size(q)).toBe(0);
 			}).pipe(Effect.provide(makeShellTestLayer())),
 	);
@@ -1053,9 +1038,14 @@ describe("subscribeShell", () => {
 				const { q } = yield* openShell();
 				yield* takeN(q, 2);
 
-				expect(yield* markSessionViewed("no-such-session", 9_999_999)).toBe(
-					false,
-				);
+				yield* commitThroughSeam([
+					canonicalEvent(
+						"session.read",
+						"no-such-session",
+						{ sessionId: "no-such-session" },
+						{ provider: "claude", createdAt: 9_999_999 },
+					),
+				]);
 				yield* Effect.yieldNow();
 				expect(yield* Queue.size(q)).toBe(0);
 			}).pipe(Effect.provide(makeShellTestLayer())),

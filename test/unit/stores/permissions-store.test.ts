@@ -4,7 +4,6 @@ import {
 	buildAnswerPayload,
 	clearAll,
 	clearAllPermissions,
-	clearSessionLocal,
 	formatQuestionHeader,
 	getDescendantSessionIds,
 	getLocalPermissions,
@@ -20,10 +19,12 @@ import {
 	removeQuestion,
 	shouldAutoSubmit,
 } from "../../../src/lib/frontend/stores/permissions.svelte.js";
+import { routerState } from "../../../src/lib/frontend/stores/router.svelte.js";
 import {
 	applySessionSnapshot,
 	clearSessionState,
 } from "../../../src/lib/frontend/stores/session.svelte.js";
+import { handleMessage } from "../../../src/lib/frontend/stores/ws-dispatch.js";
 import type {
 	AskUserQuestion,
 	PermissionId,
@@ -737,10 +738,9 @@ describe("session switch re-derives", () => {
 	});
 });
 
-// ─── clearSessionLocal ──────────────────────────────────────────────────────
-
-describe("clearSessionLocal", () => {
-	it("clears only permissions for the previous session, keeps remote", () => {
+// Pending prompts stay with their sessions when this tab changes routes.
+describe("pending prompts across a session switch", () => {
+	it("keeps permissions and questions until their resolution events arrive", () => {
 		handlePermissionRequest({
 			type: "permission_request",
 			requestId: pid("r1"),
@@ -748,56 +748,28 @@ describe("clearSessionLocal", () => {
 			toolName: "Write",
 			toolInput: {},
 		});
-		handlePermissionRequest({
-			type: "permission_request",
-			requestId: pid("r2"),
-			sessionId: "sess-2",
-			toolName: "Bash",
-			toolInput: {},
-		});
-
-		// Switching away from sess-1 — should clear sess-1's permissions but keep sess-2's
-		clearSessionLocal("sess-1");
-
-		expect(permissionsState.pendingPermissions).toHaveLength(1);
-		// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-		expect(permissionsState.pendingPermissions[0]!.requestId).toBe("r2");
-	});
-
-	it("clears questions and errors regardless of session", () => {
 		handleAskUser({
 			type: "ask_user",
-			sessionId: "s1",
+			sessionId: "sess-1",
 			toolId: "t1",
 			questions: [
-				{
-					question: "Q",
-					header: "H",
-					options: [{ label: "A" }],
-					multiSelect: false,
-				},
+				{ question: "Q", header: "H", options: [], multiSelect: false },
 			],
 		});
-		permissionsState.questionErrors.set("t1", "Some error");
-
-		clearSessionLocal("sess-1");
-
-		expect(permissionsState.pendingQuestions).toHaveLength(0);
-		expect(permissionsState.questionErrors.size).toBe(0);
-	});
-
-	it("clears nothing when previousSessionId is null", () => {
-		handlePermissionRequest({
-			type: "permission_request",
-			requestId: pid("r1"),
-			sessionId: "sess-1",
-			toolName: "Write",
-			toolInput: {},
+		routerState.path = "/s/sess-2";
+		handleMessage({
+			type: "session_switched",
+			id: "sess-2",
+			sessionId: "sess-2",
 		});
-
-		clearSessionLocal(null);
-
-		expect(permissionsState.pendingPermissions).toHaveLength(1);
+		expect(
+			permissionsState.pendingPermissions.map(
+				(permission) => permission.requestId,
+			),
+		).toEqual(["r1"]);
+		expect(
+			permissionsState.pendingQuestions.map((question) => question.toolId),
+		).toEqual(["t1"]);
 	});
 });
 

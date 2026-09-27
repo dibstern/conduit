@@ -2,6 +2,7 @@ import type {
 	ProviderRuntimeEvent,
 	ProviderRuntimeEventType,
 } from "../../src/lib/contracts/providers/provider-runtime-event.js";
+import { PROVIDER_RUNTIME_EVENT_TYPES } from "../../src/lib/contracts/providers/provider-runtime-event.js";
 import type {
 	CanonicalEvent,
 	EventPayloadMap,
@@ -33,19 +34,18 @@ export function providerRuntimeEvent<K extends ProviderRuntimeEventType>(
 }
 
 export function providerRuntimeEventFromCanonical(
-	// Providers never emit conduit-initiated canonical event types.
-	event: Extract<CanonicalEvent, { type: ProviderRuntimeEventType }>,
+	event: CanonicalEvent,
 	options: {
 		readonly rawSourceKind?: string;
 	} = {},
 ): ProviderRuntimeEvent {
 	const metadata = metadataRecord(event.metadata);
-	if (event.type === "session.permission_mode_changed") {
+	if (!PROVIDER_RUNTIME_EVENT_TYPES.some((type) => type === event.type)) {
 		throw new Error(`${event.type} is not a provider runtime event`);
 	}
 	return {
 		eventId: event.eventId,
-		type: event.type,
+		type: event.type as ProviderRuntimeEventType,
 		providerId: event.provider,
 		sessionId: event.sessionId,
 		providerRefs: {},

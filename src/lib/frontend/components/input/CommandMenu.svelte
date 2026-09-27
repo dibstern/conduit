@@ -6,26 +6,27 @@
 <script lang="ts">
 	import type { CommandInfo } from "../../types.js";
 	import { filterCommands } from "../../stores/discovery.svelte.js";
+	import DetachedListbox from "../ui/DetachedListbox.svelte";
 
 	// ─── Props ──────────────────────────────────────────────────────────────────
 
 	let {
+		listboxId,
 		query,
 		visible,
 		commands,
 		onSelect,
 		onClose,
+		activeIndex = $bindable(0),
 	}: {
+		listboxId: string;
 		query: string;
 		visible: boolean;
 		commands: CommandInfo[];
 		onSelect: (command: string) => void;
 		onClose: () => void;
+		activeIndex?: number | undefined;
 	} = $props();
-
-	// ─── State ──────────────────────────────────────────────────────────────────
-
-	let activeIndex = $state(0);
 
 	// ─── Derived ────────────────────────────────────────────────────────────────
 
@@ -97,30 +98,34 @@
 		onSelect(`/${cmd.name} `);
 	}
 
+	// Resolved by option id rather than a descendant class query: the old lookup
+	// started at `document` and matched the first `#command-menu .cmd-menu` in the
+	// page, which is the wrong list once two instances are mounted
+	// (conduit-test-9kov). rAF still waits for the DOM update.
 	function scrollActiveIntoView(): void {
-		// Use tick-like scheduling to wait for DOM update
 		requestAnimationFrame(() => {
-			const menu = document.querySelector("#command-menu .cmd-menu");
-			const activeItem = menu?.querySelector(".cmd-item-active");
-			if (activeItem) {
-				activeItem.scrollIntoView({ block: "nearest" });
-			}
+			document
+				.getElementById(`${listboxId}-option-${activeIndex}`)
+				?.scrollIntoView({ block: "nearest" });
 		});
 	}
 </script>
 
 <div id="command-menu" class:hidden={!isVisible}>
 	{#if isVisible}
-		<div
-			class="cmd-menu absolute bottom-full left-0 right-0 mb-1 bg-bg-surface border border-border rounded-xl shadow-menu max-h-[300px] overflow-y-auto z-[var(--z-dropdown)] py-1"
+		<DetachedListbox
+			id={listboxId}
+			ariaLabel="Slash commands"
+			class="cmd-menu absolute bottom-full left-0 right-0 mb-1 max-h-[300px] overflow-y-auto"
 		>
 			{#each filtered as cmd, i}
 				<div
-					class="cmd-item flex items-baseline gap-2 py-2 px-3.5 cursor-pointer transition-colors duration-100 max-sm:py-1.5 max-sm:px-2.5 max-sm:gap-1.5 {i === activeIndex ? 'cmd-item-active bg-accent-bg hover:bg-accent-bg' : 'hover:bg-bg-alt'}"
+					class="cmd-item flex items-baseline gap-2 py-2 px-3.5 cursor-pointer transition-colors duration-100 max-sm:py-1.5 max-sm:px-2.5 max-sm:gap-1.5 {i === activeIndex ? 'bg-accent-bg hover:bg-accent-bg' : 'hover:bg-bg-alt'}"
+					id="{listboxId}-option-{i}"
 					data-cmd-index={i}
 					role="option"
-					tabindex="-1"
 					aria-selected={i === activeIndex}
+					tabindex="-1"
 					onmousedown={(e) => {
 						e.preventDefault();
 						selectCommand(cmd);
@@ -148,6 +153,6 @@
 					{/if}
 				</div>
 			{/each}
-		</div>
+		</DetachedListbox>
 	{/if}
 </div>

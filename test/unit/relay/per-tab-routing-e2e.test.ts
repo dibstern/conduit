@@ -4,6 +4,7 @@
 //
 // No real OpenCode required — runs in CI without external dependencies.
 
+import { randomBytes } from "node:crypto";
 import {
 	createServer,
 	type IncomingMessage,
@@ -11,6 +12,7 @@ import {
 	type ServerResponse,
 } from "node:http";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { WebSocketServer } from "ws";
 import { createSilentLogger } from "../../../src/lib/logger.js";
 import {
 	createProjectRelay,
@@ -247,9 +249,25 @@ async function createTestHarness(): Promise<TestHarness> {
 		},
 	});
 
+	const browserSockets = new WebSocketServer({ noServer: true });
 	relayServer.on("upgrade", (req, socket, head) => {
 		if (req.url === "/ws" || req.url?.startsWith("/ws?")) {
-			relay.wsHandler.handleUpgrade(req, socket, head);
+			browserSockets.handleUpgrade(req, socket, head, (ws) => {
+				const params = new URL(req.url ?? "/ws", "http://localhost")
+					.searchParams;
+				const clientId = params.get("client");
+				const requestedSessionId = params.get("session");
+				ws.send(
+					JSON.stringify({ type: "project_attached", slug: "test-project" }),
+				);
+				relay.wsHandler.attach(ws, {
+					clientId:
+						clientId && /^[A-Za-z0-9._:-]{1,128}$/.test(clientId)
+							? clientId
+							: randomBytes(8).toString("hex"),
+					...(requestedSessionId != null ? { requestedSessionId } : {}),
+				});
+			});
 			return;
 		}
 		if (req.url === "/rpc" || req.url?.startsWith("/rpc?")) {
@@ -276,7 +294,14 @@ async function createTestHarness(): Promise<TestHarness> {
 			return client;
 		},
 		async stop() {
-			await relay.stop();
+			try {
+				await relay.stop();
+			} finally {
+				for (const ws of browserSockets.clients) ws.terminate();
+				await new Promise<void>((resolve) =>
+					browserSockets.close(() => resolve()),
+				);
+			}
 			await new Promise<void>((r) => relayServer.close(() => r()));
 			await mock.close();
 		},

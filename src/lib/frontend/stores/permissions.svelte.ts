@@ -42,8 +42,8 @@ export function getHasPending(): boolean {
 
 /**
  * Collect all descendant session IDs (children, grandchildren, etc.)
- * for a given session. Uses BFS over the known sessions, which carry
- * `parentID` for subagent sessions.
+ * for a given session. Uses BFS over `sessionState.familySessions` which
+ * includes `parentID` for subagent sessions.
  */
 export function getDescendantSessionIds(parentId: string): Set<string> {
 	const descendants = new Set<string>();
@@ -51,7 +51,7 @@ export function getDescendantSessionIds(parentId: string): Set<string> {
 	while (queue.length > 0) {
 		// biome-ignore lint/style/noNonNullAssertion: safe — queue.length > 0 guarantees shift returns a value
 		const id = queue.shift()!;
-		for (const s of sessionState.sessions.values()) {
+		for (const s of sessionState.familySessions) {
 			if (s.parentID === id && !descendants.has(s.id)) {
 				descendants.add(s.id);
 				queue.push(s.id);
@@ -153,6 +153,12 @@ export function handlePermissionRequest(
 	const { requestId, toolName, toolInput } = msg;
 
 	if (!requestId || !toolName) return;
+	if (
+		permissionsState.pendingPermissions.some(
+			(permission) => permission.requestId === requestId,
+		)
+	)
+		return;
 
 	const permission: PermissionRequest & { id: string } = {
 		id: requestId,
@@ -277,19 +283,6 @@ export function removeQuestion(toolId: string): void {
  *  the next snapshot replaces them wholesale. */
 export function clearAll(): void {
 	permissionsState.pendingPermissions = [];
-	permissionsState.pendingQuestions = [];
-	permissionsState.questionErrors = new Map();
-}
-
-/** Clear only session-local pending items (for session switch).
- *  Keeps remote permissions so the AttentionBanner persists. */
-export function clearSessionLocal(previousSessionId: string | null): void {
-	if (previousSessionId) {
-		permissionsState.pendingPermissions =
-			permissionsState.pendingPermissions.filter(
-				(p) => p.sessionId !== previousSessionId,
-			);
-	}
 	permissionsState.pendingQuestions = [];
 	permissionsState.questionErrors = new Map();
 }

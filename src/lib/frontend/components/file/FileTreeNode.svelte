@@ -5,6 +5,7 @@
 <script lang="ts">
 	import type { FileEntry } from "../../types.js";
 	import { formatFileSize } from "../../utils/format.js";
+	import Button from "../ui/Button.svelte";
 	import FileTreeNode from "./FileTreeNode.svelte";
 
 	let {
@@ -16,11 +17,13 @@
 		getChildren,
 	}: {
 		entry: FileEntry;
-		depth?: number;
-		parentPath?: string;
-		onFileClick?: (path: string) => void;
-		onDirClick?: (path: string) => void;
-		getChildren?: (path: string) => FileEntry[] | undefined;
+		depth?: number | undefined;
+		parentPath?: string | undefined;
+		onFileClick?: ((path: string) => void) | undefined;
+		onDirClick?: ((path: string) => void) | undefined;
+		getChildren?:
+			| ((path: string) => FileEntry[] | undefined)
+			| undefined;
 	} = $props();
 
 	let expanded = $state(false);
@@ -53,15 +56,44 @@
 	}
 </script>
 
-<div class="fb-entry-wrapper">
-	<button
-		class="fb-entry flex items-center gap-1.5 w-full py-1 px-2 cursor-pointer bg-transparent border-none text-left text-base text-text-secondary hover:bg-[rgba(var(--overlay-rgb),0.03)] rounded transition-colors duration-100 {hiddenClass}"
+<!--
+	`flex flex-col` is load-bearing, not tidying. ui/Button's BASE is
+	`inline-flex`, and an inline-level box in a block parent sits on a line box,
+	so every tree row would gain a descender gap below it. Making the wrapper a
+	flex container blockifies the child per spec, and a column of full-width
+	items lays out identically to the block stacking it replaces.
+-->
+<div class="fb-entry-wrapper flex flex-col">
+	<!--
+		`tone="inherit"` rather than `secondary`: the row is `text-text-secondary`
+		with NO hover colour change as-found, and every real tone member pairs its
+		colour with one. `inherit` emits nothing, so the class below owns the
+		group uncontested. Dropped: `flex items-center cursor-pointer
+		transition-colors` (all in BASE) and `bg-transparent border-none`, both of
+		which Tailwind v4's preflight already does on a button. `duration-100`
+		stays — it beats BASE's default 150ms.
+
+		`aria-expanded` is conditional: a file row is not expandable, and
+		`aria-expanded="false"` on one announces a collapsed disclosure that can
+		never open.
+	-->
+	<Button
+		variant="ghost"
+		size="content"
+		align="start"
+		tone="inherit"
+		hoverFill="overlay-soft"
+		class="fb-entry gap-1.5 w-full py-1 px-2 text-left text-base text-text-secondary rounded duration-100 {hiddenClass}"
 		style="padding-left: {depth * 16 + 8}px"
+		aria-expanded={isDir ? expanded : undefined}
 		onclick={handleClick}
 	>
 		{#if isDir}
-			<!-- Chevron indicator — rotates when expanded -->
+			<!-- Chevron indicator — rotates when expanded. Decorative: the rotation
+			     is what a sighted user reads, `aria-expanded` above is what a screen
+			     reader reads. -->
 			<svg
+				aria-hidden="true"
 				class="fb-chevron shrink-0 transition-transform duration-100"
 				class:rotate-90={expanded}
 				width="12" height="12" viewBox="0 0 20 20" fill="none"
@@ -90,7 +122,7 @@
 		{#if shouldCollapse && !expanded}
 			<span class="fb-collapsed-hint text-xs text-text-dimmer italic">(click to expand)</span>
 		{/if}
-	</button>
+	</Button>
 
 	{#if isDir && expanded}
 		{@const children = getChildren?.(fullPath)}

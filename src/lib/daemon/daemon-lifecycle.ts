@@ -163,7 +163,15 @@ export function startHttpServer(
 				res.end();
 			});
 
+			// net.Server has no closeAllConnections, and the HTTPS server's own
+			// closeAllConnections cannot reach the raw sockets handed to it, so an
+			// idle keep-alive connection would hold close() open until the client
+			// hung up (or SHUTDOWN_TIMEOUT_MS). Track the raw sockets and destroy
+			// them ourselves.
+			const rawSockets = new Set<Socket>();
 			const netServer = createNetServer((socket) => {
+				rawSockets.add(socket);
+				socket.once("close", () => rawSockets.delete(socket));
 				socket.once("readable", () => {
 					const buf: Buffer | null = socket.read(1);
 					if (buf === null) return;
@@ -181,7 +189,11 @@ export function startHttpServer(
 
 			// Store the net.Server as httpServer for listen/close/address.
 			// The upgrade-capable HTTPS server is in ctx.upgradeServer.
-			ctx.httpServer = netServer as unknown as HttpServer;
+			ctx.httpServer = Object.assign(netServer, {
+				closeAllConnections: () => {
+					for (const socket of rawSockets) socket.destroy();
+				},
+			}) as unknown as HttpServer;
 		} else {
 			// ─── Plain HTTP mode ──────────────────────────────────────────
 			ctx.httpServer = createServer(handler);

@@ -262,6 +262,33 @@ describe("IPC handlers", () => {
 	// ── handleSetPin ─────────────────────────────────────────────────────
 
 	describe("handleSetPin", () => {
+		it.effect("clears both PIN refs before requesting persistence", () =>
+			Effect.gen(function* () {
+				const stateRef = yield* DaemonStateTag;
+				const configRef = yield* DaemonConfigRefTag;
+				yield* handleSetPin({ cmd: "set_pin", pin: "1234" });
+				expect((yield* Ref.get(stateRef)).pinHash).toBe(hashPin("1234"));
+				expect((yield* Ref.get(configRef)).pinHash).toBe(hashPin("1234"));
+				const saved = yield* Ref.make(false);
+
+				const result = yield* handleSetPin({ cmd: "set_pin", pin: null }).pipe(
+					Effect.provideService(ConfigPersistenceTag, {
+						requestSave: Effect.gen(function* () {
+							expect((yield* Ref.get(stateRef)).pinHash).toBeNull();
+							expect((yield* Ref.get(configRef)).pinHash).toBeNull();
+							yield* Ref.set(saved, true);
+						}),
+						flush: Effect.void,
+					}),
+				);
+
+				expect(result.ok).toBe(true);
+				expect(yield* Ref.get(saved)).toBe(true);
+				expect((yield* Ref.get(stateRef)).pinHash).toBeNull();
+				expect((yield* Ref.get(configRef)).pinHash).toBeNull();
+			}).pipe(Effect.provide(Layer.fresh(makeTestLayers()))),
+		);
+
 		it.effect("updates pinHash in state and DaemonConfigRef", () =>
 			Effect.gen(function* () {
 				const ref = yield* DaemonStateTag;

@@ -1,0 +1,37 @@
+import { Meta } from "@storybook/addon-docs/blocks";
+
+<Meta title="UI/Foundations/Getting Started" />
+
+# Getting started
+
+Conduit's design system is the `components/ui/` layer: one curated set of
+accessible, token-disciplined primitives for every feature to consume. It keeps
+interaction behavior, visual language, and accessibility fixes consistent across
+the application.
+
+## Where primitives live
+
+Each primitive lives in `src/lib/frontend/components/ui/`. Import the primitive
+directly from that directory and compose it in the feature that owns the workflow:
+
+```svelte
+<script lang="ts">
+	import Button from "../ui/Button.svelte";
+</script>
+
+<Button variant="primary">Continue</Button>
+```
+
+Choose the primitive's semantic props (`variant`, `size`, `elevation`, and similar)
+before adding layout-only classes. Consumer classes are additive; they are not a
+second styling API.
+
+## Add or compose?
+
+Add a primitive only when a pattern is shared and reused **and** owns behavior or
+accessibility worth centralizing. Compose existing primitives for a feature-specific
+arrangement, and extend an existing primitive with a variant before creating a fork.
+A one-off layout belongs with its feature.
+
+Before adding or changing a primitive, read the
+[Component API conventions](?path=/docs/ui-component-api-conventions--docs).

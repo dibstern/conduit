@@ -179,7 +179,7 @@ describe("subscription RPC handlers", () => {
 	});
 
 	it.scoped(
-		"shell snapshot, live and replay preserve projected fork lineage",
+		"shell snapshots roots and republishes the root when its fork changes",
 		() =>
 			Effect.gen(function* () {
 				const runner = yield* ProjectionRunnerEffectTag;
@@ -223,6 +223,10 @@ describe("subscription RPC handlers", () => {
 						}),
 					]),
 				);
+				const roots = yield* client.ListSessions({
+					projectSlug: "project-a",
+					roots: true,
+				});
 				const envelopes = yield* Queue.unbounded<unknown>();
 				yield* client.SubscribeShell({ projectSlug: "project-a" }).pipe(
 					Stream.runForEach((envelope) => Queue.offer(envelopes, envelope)),
@@ -231,7 +235,7 @@ describe("subscription RPC handlers", () => {
 				expect(yield* Queue.take(envelopes)).toEqual({
 					_tag: "snapshot",
 					sequence: createdVersion,
-					rows: listed.sessions,
+					rows: roots.sessions,
 				});
 				expect(yield* Queue.take(envelopes)).toEqual({ _tag: "synchronized" });
 				const renamedVersion = yield* commit(
@@ -244,6 +248,7 @@ describe("subscription RPC handlers", () => {
 				);
 				const updated = yield* client.ListSessions({
 					projectSlug: "project-a",
+					roots: true,
 				});
 				expect(yield* Queue.take(envelopes)).toEqual({
 					_tag: "upsert",

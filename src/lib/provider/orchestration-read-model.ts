@@ -1,20 +1,10 @@
-import type { SQLInputValue } from "node:sqlite";
-import { Data } from "effect";
+import type { SqlClient } from "@effect/sql";
+import type { SqlError } from "@effect/sql/SqlError";
+import { Data, Effect } from "effect";
 import {
 	DURABLE_COMMAND_RECEIPT_STATUSES,
 	type DurableCommandReceiptStatus,
 } from "./orchestration-command-contracts.js";
-
-type CommandReadModelDb = {
-	readonly query: <T>(
-		sql: string,
-		params?: ReadonlyArray<SQLInputValue>,
-	) => T[];
-	readonly queryOne: <T>(
-		sql: string,
-		params?: ReadonlyArray<SQLInputValue>,
-	) => T | undefined;
-};
 
 export type CommandReceiptStatus = DurableCommandReceiptStatus;
 
@@ -109,60 +99,63 @@ export interface CommandReceiptCheck {
 }
 
 export class CommandReadModelRepository {
-	constructor(private readonly db: CommandReadModelDb) {}
+	constructor(private readonly sql: SqlClient.SqlClient) {}
 
 	/**
 	 * Narrow point read of a single command receipt for the durable dedupe /
 	 * fingerprint-mismatch decision. Returns the durable status and the stored
 	 * effective-dispatch fingerprint, or `undefined` if no receipt exists.
 	 */
-	checkReceipt(commandId: string): CommandReceiptCheck | undefined {
-		const row = this.db.queryOne<{
+	checkReceipt(
+		commandId: string,
+	): Effect.Effect<CommandReceiptCheck | undefined, SqlError> {
+		return this.sql<{
 			readonly status: string;
 			readonly fingerprint_hash: string | null;
 			readonly fingerprint_version: number | null;
-		}>(
-			"SELECT status, fingerprint_hash, fingerprint_version FROM command_receipts WHERE command_id = ?",
-			[commandId],
+		}>`SELECT status, fingerprint_hash, fingerprint_version FROM command_receipts WHERE command_id = ${commandId}`.pipe(
+			Effect.map(([row]) =>
+				row
+					? {
+							status: toCommandReceiptStatus(row.status),
+							fingerprintHash: row.fingerprint_hash ?? undefined,
+							fingerprintVersion: row.fingerprint_version ?? undefined,
+						}
+					: undefined,
+			),
 		);
-		if (!row) return undefined;
-		return {
-			status: toCommandReceiptStatus(row.status),
-			fingerprintHash: row.fingerprint_hash ?? undefined,
-			fingerprintVersion: row.fingerprint_version ?? undefined,
-		};
 	}
 
-	bootstrap(): CommandReadModelSnapshot {
-		const receiptRows = this.db.query<CommandReceiptRow>(
-			`SELECT command_id, session_id, status, result_sequence, error, created_at
-			 FROM command_receipts
-			 ORDER BY command_id`,
-		);
-		const lastSequence = this.db.queryOne<LastSequenceRow>(
-			"SELECT MAX(sequence) AS last_sequence FROM events",
-		);
-		const tombstoneRows = this.db.query<{
-			readonly scope_kind: string;
-			readonly scope_id: string;
-		}>("SELECT scope_kind, scope_id FROM provider_command_tombstones");
-
-		return {
-			lastEventSequence: lastSequence?.last_sequence ?? 0,
-			receipts: new Map(
-				receiptRows.map((row) => {
-					const receipt = rowToReceipt(row);
-					return [receipt.commandId, receipt];
-				}),
-			),
-			tombstones: new Set(
-				tombstoneRows.map((row) =>
-					tombstoneKey(
-						row.scope_kind as CommandTombstoneScopeKind,
-						row.scope_id,
+	bootstrap(): Effect.Effect<CommandReadModelSnapshot, SqlError> {
+		return Effect.all({
+			receiptRows: this.sql<CommandReceiptRow>`
+				SELECT command_id, session_id, status, result_sequence, error, created_at
+				FROM command_receipts
+				ORDER BY command_id`,
+			lastSequence: this.sql<LastSequenceRow>`
+				SELECT MAX(sequence) AS last_sequence FROM events`,
+			tombstoneRows: this.sql<{
+				readonly scope_kind: string;
+				readonly scope_id: string;
+			}>`SELECT scope_kind, scope_id FROM provider_command_tombstones`,
+		}).pipe(
+			Effect.map(({ receiptRows, lastSequence, tombstoneRows }) => ({
+				lastEventSequence: lastSequence[0]?.last_sequence ?? 0,
+				receipts: new Map(
+					receiptRows.map((row) => {
+						const receipt = rowToReceipt(row);
+						return [receipt.commandId, receipt];
+					}),
+				),
+				tombstones: new Set(
+					tombstoneRows.map((row) =>
+						tombstoneKey(
+							row.scope_kind as CommandTombstoneScopeKind,
+							row.scope_id,
+						),
 					),
 				),
-			),
-		};
+			})),
+		);
 	}
 }

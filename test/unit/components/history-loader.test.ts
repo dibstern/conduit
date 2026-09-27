@@ -63,8 +63,8 @@ import {
 	type SessionMessages,
 } from "../../../src/lib/frontend/stores/chat.svelte.js";
 import {
+	attachedProjectState,
 	routerState,
-	syncSlugState,
 } from "../../../src/lib/frontend/stores/router.svelte.js";
 import { sessionState } from "../../../src/lib/frontend/stores/session.svelte.js";
 import type { ChatMessage } from "../../../src/lib/frontend/types.js";
@@ -80,8 +80,8 @@ describe("HistoryLoader component", () => {
 		vi.clearAllMocks();
 		observerCallback = null;
 		observedElements = [];
-		routerState.path = "/p/test-project/s/test-session";
-		syncSlugState(routerState.path);
+		attachedProjectState.slug = "test-project";
+		routerState.path = "/s/test-session";
 		loadMoreHistoryRpcSpy.mockImplementation(() => new Promise(() => {}));
 		// Reset state — use per-session slot (need both activity + messages for currentChat())
 		sessionState.currentId = "test-session";
@@ -270,8 +270,7 @@ describe("HistoryLoader buffer → server fallback", () => {
 		observerCallback = null;
 		observedElements = [];
 		clearMessages();
-		routerState.path = "/p/test-project/s/buf-session";
-		syncSlugState(routerState.path);
+		routerState.path = "/s/buf-session";
 		loadMoreHistoryRpcSpy.mockImplementation(() => new Promise(() => {}));
 		sessionState.currentId = "buf-session";
 		const slot = getOrCreateSessionSlot("buf-session");

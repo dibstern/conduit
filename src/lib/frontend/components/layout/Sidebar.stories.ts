@@ -1,4 +1,8 @@
 import type { Meta, StoryObj } from "@storybook/svelte-vite";
+import {
+	requestNewSession,
+	resetSessionCreation,
+} from "../../stores/session.svelte.js";
 import { uiState } from "../../stores/ui.svelte.js";
 import Sidebar from "./Sidebar.svelte";
 
@@ -11,7 +15,6 @@ const meta = {
 		// Reset state for each story
 		uiState.sidebarCollapsed = false;
 		uiState.sidebarPanel = "sessions";
-		uiState.mobileSidebarOpen = false;
 	},
 } satisfies Meta<typeof Sidebar>;
 
@@ -30,11 +33,16 @@ export const FileBrowserPanel: Story = {
 	},
 };
 
-export const MobileOpen: Story = {
-	parameters: {
-		viewport: { defaultViewport: "mobile1" },
-	},
+export const Hover: Story = {
+	...Default,
+	parameters: { pseudo: { hover: true } },
+};
+
+export const Loading: Story = {
+	...Default,
 	beforeEach: () => {
-		uiState.mobileSidebarOpen = true;
+		resetSessionCreation();
+		requestNewSession();
+		return resetSessionCreation;
 	},
 };

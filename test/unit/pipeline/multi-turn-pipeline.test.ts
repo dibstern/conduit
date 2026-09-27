@@ -4,52 +4,50 @@ import type {
 	ThinkingMessage,
 } from "../../../src/lib/frontend/types.js";
 import { historyToChatMessages } from "../../../src/lib/frontend/utils/history-logic.js";
-import { MessageProjector } from "../../../src/lib/persistence/projectors/message-projector.js";
-import { ReadQueryService } from "../../../src/lib/persistence/read-query-service.js";
 import { messageRowsToHistory } from "../../../src/lib/persistence/session-history-adapter.js";
 import {
-	createTestHarness,
-	makeStored,
-	type TestHarness,
-} from "../../helpers/persistence-factories.js";
+	type EffectProjectionHarness,
+	makeEffectProjectionHarness,
+} from "../../helpers/effect-projection-harness.js";
+import { makeStored } from "../../helpers/persistence-factories.js";
 
 const SESSION_ID = "ses-multi-turn";
 const NOW = 1_000_000_000_000;
 
 describe("Multi-turn conversation pipeline", () => {
-	let harness: TestHarness;
-	let projector: MessageProjector;
+	let harness: EffectProjectionHarness;
 	let seq: number;
 
-	beforeEach(() => {
-		harness = createTestHarness();
-		projector = new MessageProjector();
+	beforeEach(async () => {
+		harness = makeEffectProjectionHarness();
 		seq = 0;
-		harness.seedSession(SESSION_ID);
+		await harness.query(
+			"INSERT INTO sessions (id, provider, title, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
+			[SESSION_ID, "claude", "Test", "idle", NOW, NOW],
+		);
 	});
 
-	afterEach(() => {
-		harness?.close();
+	afterEach(async () => {
+		await harness?.dispose();
 	});
 
-	function project(event: ReturnType<typeof makeStored>): void {
-		projector.project(event, harness.db);
+	async function project(event: ReturnType<typeof makeStored>): Promise<void> {
+		await harness.reproject([event]);
 	}
 
 	function nextSeq(): number {
 		return ++seq;
 	}
 
-	function readPipeline() {
-		const readQuery = new ReadQueryService(harness.db);
-		const rows = readQuery.getSessionMessagesWithParts(SESSION_ID);
+	async function readPipeline() {
+		const rows = await harness.sessionMessagesWithParts(SESSION_ID);
 		const { messages } = messageRowsToHistory(rows, { pageSize: 50 });
 		return historyToChatMessages(messages);
 	}
 
-	it("user→assistant(thinking)→user→assistant(thinking) — full pipeline", () => {
+	it("user→assistant(thinking)→user→assistant(thinking) — full pipeline", async () => {
 		// ─── Turn 1: User message ─────────────────────────────
-		project(
+		await project(
 			makeStored(
 				"message.created",
 				SESSION_ID,
@@ -59,7 +57,7 @@ describe("Multi-turn conversation pipeline", () => {
 		);
 
 		// ─── Turn 1: Assistant response with thinking ─────────
-		project(
+		await project(
 			makeStored(
 				"message.created",
 				SESSION_ID,
@@ -72,7 +70,7 @@ describe("Multi-turn conversation pipeline", () => {
 			),
 		);
 
-		project(
+		await project(
 			makeStored(
 				"thinking.start",
 				SESSION_ID,
@@ -81,7 +79,7 @@ describe("Multi-turn conversation pipeline", () => {
 			),
 		);
 
-		project(
+		await project(
 			makeStored(
 				"thinking.delta",
 				SESSION_ID,
@@ -94,7 +92,7 @@ describe("Multi-turn conversation pipeline", () => {
 			),
 		);
 
-		project(
+		await project(
 			makeStored(
 				"thinking.end",
 				SESSION_ID,
@@ -103,7 +101,7 @@ describe("Multi-turn conversation pipeline", () => {
 			),
 		);
 
-		project(
+		await project(
 			makeStored(
 				"text.delta",
 				SESSION_ID,
@@ -116,7 +114,7 @@ describe("Multi-turn conversation pipeline", () => {
 			),
 		);
 
-		project(
+		await project(
 			makeStored(
 				"turn.completed",
 				SESSION_ID,
@@ -131,7 +129,7 @@ describe("Multi-turn conversation pipeline", () => {
 		);
 
 		// ─── Turn 2: User message ─────────────────────────────
-		project(
+		await project(
 			makeStored(
 				"message.created",
 				SESSION_ID,
@@ -141,7 +139,7 @@ describe("Multi-turn conversation pipeline", () => {
 		);
 
 		// ─── Turn 2: Assistant response with thinking ─────────
-		project(
+		await project(
 			makeStored(
 				"message.created",
 				SESSION_ID,
@@ -154,7 +152,7 @@ describe("Multi-turn conversation pipeline", () => {
 			),
 		);
 
-		project(
+		await project(
 			makeStored(
 				"thinking.start",
 				SESSION_ID,
@@ -163,7 +161,7 @@ describe("Multi-turn conversation pipeline", () => {
 			),
 		);
 
-		project(
+		await project(
 			makeStored(
 				"thinking.delta",
 				SESSION_ID,
@@ -176,7 +174,7 @@ describe("Multi-turn conversation pipeline", () => {
 			),
 		);
 
-		project(
+		await project(
 			makeStored(
 				"thinking.end",
 				SESSION_ID,
@@ -185,7 +183,7 @@ describe("Multi-turn conversation pipeline", () => {
 			),
 		);
 
-		project(
+		await project(
 			makeStored(
 				"text.delta",
 				SESSION_ID,
@@ -198,7 +196,7 @@ describe("Multi-turn conversation pipeline", () => {
 			),
 		);
 
-		project(
+		await project(
 			makeStored(
 				"turn.completed",
 				SESSION_ID,
@@ -213,7 +211,7 @@ describe("Multi-turn conversation pipeline", () => {
 		);
 
 		// ─── Verify pipeline output ──────────────────────────
-		const chat = readPipeline();
+		const chat = await readPipeline();
 
 		const userMessages = chat.filter((m) => m.type === "user");
 		expect(userMessages).toHaveLength(2);
@@ -246,13 +244,13 @@ describe("Multi-turn conversation pipeline", () => {
 		}
 	});
 
-	it("3-turn conversation — messages stay in projection order", () => {
+	it("3-turn conversation — messages stay in projection order", async () => {
 		for (let turn = 1; turn <= 3; turn++) {
 			const base = NOW + turn * 10_000;
 			const userMsgId = `msg-u${turn}`;
 			const asstMsgId = `msg-a${turn}`;
 
-			project(
+			await project(
 				makeStored(
 					"message.created",
 					SESSION_ID,
@@ -261,7 +259,7 @@ describe("Multi-turn conversation pipeline", () => {
 				),
 			);
 
-			project(
+			await project(
 				makeStored(
 					"message.created",
 					SESSION_ID,
@@ -274,7 +272,7 @@ describe("Multi-turn conversation pipeline", () => {
 				),
 			);
 
-			project(
+			await project(
 				makeStored(
 					"text.delta",
 					SESSION_ID,
@@ -287,7 +285,7 @@ describe("Multi-turn conversation pipeline", () => {
 				),
 			);
 
-			project(
+			await project(
 				makeStored(
 					"turn.completed",
 					SESSION_ID,
@@ -302,7 +300,7 @@ describe("Multi-turn conversation pipeline", () => {
 			);
 		}
 
-		const chat = readPipeline();
+		const chat = await readPipeline();
 		const assistants = chat.filter(
 			(m): m is AssistantMessage => m.type === "assistant",
 		);

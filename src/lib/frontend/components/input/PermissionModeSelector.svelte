@@ -3,12 +3,12 @@
 <!-- Amber tint when not "ask" so elevated permissions are visibly active.    -->
 
 <script lang="ts">
-	import Icon from "../shared/Icon.svelte";
-	import { clickOutside } from "../shared/use-click-outside.svelte.js";
-	import {
-		choosePermissionMode,
-		discoveryState,
-	} from "../../stores/discovery.svelte.js";
+	import Button from "../ui/Button.svelte";
+	import Icon from "../ui/Icon.svelte";
+	import Menu from "../ui/Menu.svelte";
+	import MenuRadioGroup from "../ui/MenuRadioGroup.svelte";
+	import MenuRadioItem from "../ui/MenuRadioItem.svelte";
+	import { choosePermissionMode, discoveryState } from "../../stores/discovery.svelte.js";
 	import { getCurrentSlug } from "../../stores/router.svelte.js";
 	import { sessionState } from "../../stores/session.svelte.js";
 	import { showToast } from "../../stores/ui.svelte.js";
@@ -18,7 +18,6 @@
 
 	// ─── State ──────────────────────────────────────────────────────────────
 
-	let dropdownOpen = $state(false);
 	let autoNormalizationProvider: string | null = null;
 
 	// ─── Derived ────────────────────────────────────────────────────────────
@@ -42,20 +41,13 @@
 
 	// ─── Handlers ───────────────────────────────────────────────────────────
 
-	function toggleDropdown(e: MouseEvent) {
-		e.stopPropagation();
-		dropdownOpen = !dropdownOpen;
-	}
-
 	/** Always re-assert to the server, even when the pill already shows this
 	 *  mode. The server keeps the mode in memory only, so a daemon restart
 	 *  resets it to "ask" while this client still believes "Full access" — and
 	 *  an equality short-circuit would make clicking "Full access" a silent
 	 *  no-op, with no way back to it short of picking another mode first. The
 	 *  RPC is idempotent, so asserting costs nothing and removes the trap. */
-	function selectMode(mode: SessionPermissionMode, e?: MouseEvent) {
-		e?.stopPropagation();
-		dropdownOpen = false;
+	function selectMode(mode: SessionPermissionMode) {
 		const undoMode = choosePermissionMode(mode);
 		const projectSlug = getCurrentSlug();
 		const sessionId = sessionState.currentId;
@@ -82,10 +74,6 @@
 		}
 	}
 
-	function handleKeydown(e: KeyboardEvent) {
-		if (e.key === "Escape" && dropdownOpen) dropdownOpen = false;
-	}
-
 	$effect(() => {
 		const providerId = discoveryState.currentProviderId;
 		if (providerId === "claude") {
@@ -101,45 +89,57 @@
 			selectMode("ask");
 		}
 	});
-
-	$effect(() => {
-		document.addEventListener("keydown", handleKeydown);
-		return () => document.removeEventListener("keydown", handleKeydown);
-	});
 </script>
 
-<div class="relative" use:clickOutside={() => { dropdownOpen = false; }}>
-	<button
-		data-testid="permission-mode-badge"
-		class="inline-flex items-center gap-1 h-6 px-2 ml-0.5 border text-xs font-medium cursor-pointer whitespace-nowrap rounded-full transition-colors duration-100 font-brand {isElevated
-			? 'border-warning/30 bg-warning-bg text-warning'
-			: 'border-border bg-bg-alt text-text-muted hover:bg-bg hover:text-text-secondary'}"
-		title="Approvals ({currentLabel})"
-		onclick={toggleDropdown}
-	>
-		{currentLabel}
-		<Icon name="chevron-down" size={8} class="shrink-0 opacity-50" />
-	</button>
+<!-- ui/Menu rather than a hand-rolled panel: the old markup was four plain
+     buttons in a Surface with a hand-drawn checkmark, so assistive technology
+     heard four unrelated controls and never that exactly one was current. It
+     also carried its own Escape listener, outside-click action and open state,
+     all of which the primitive already owns (conduit-test-de3.35.9.3).
 
-	{#if dropdownOpen}
-		<div
-			data-testid="permission-mode-dropdown"
-			class="absolute bottom-[calc(100%+4px)] right-0 w-40 bg-bg-alt border border-border rounded-lg shadow-menu z-[var(--z-popover-raised)] py-1 font-brand"
+     MenuRadioGroup is the honest shape here: "approvals is exactly one of
+     these" is a radio group, and `aria-checked` says what the &#10003; glyph was
+     only drawing. The check moves to the trailing edge because that is where
+     every other radio menu in the app puts it. -->
+<Menu
+	ariaLabel="Approvals"
+	side="top"
+	align="end"
+	sideOffset={4}
+	class="w-40 font-brand"
+	data-testid="permission-mode-dropdown"
+>
+	{#snippet trigger({ props })}
+		<!-- The elevated state is a whole variant rather than a conditional class
+		     list, because a call-site colour cannot be trusted to beat a variant's:
+		     consumer `class` is additive, and Tailwind's emission order decides the
+		     winner rather than the order you wrote them in. Both pill recipes now
+		     live in ui/Button, so the two states cannot drift apart.
+
+		     `ml-0.5` is the only thing left here: it is this pill's position in the
+		     composer strip, which is the feature's business, not the pill's. -->
+		<Button
+			{...props}
+			variant={isElevated ? "pill-warning" : "pill"}
+			size="content"
+			data-testid="permission-mode-badge"
+			class="ml-0.5"
+			title="Approvals ({currentLabel})"
 		>
-			{#each availableModes as { mode, label } (mode)}
-				<button
-					data-testid="permission-mode-option-{mode}"
-					class="flex items-center gap-2 w-full py-1.5 px-3 border-none bg-transparent text-text text-base text-left cursor-pointer transition-colors duration-100 hover:bg-bg {currentMode === mode ? 'text-accent' : ''}"
-					onclick={(e) => selectMode(mode, e)}
-				>
-					{#if currentMode === mode}
-						<span class="text-accent font-bold text-xs">&#10003;</span>
-					{:else}
-						<span class="w-[10px]"></span>
-					{/if}
-					{label}
-				</button>
-			{/each}
-		</div>
-	{/if}
-</div>
+			{currentLabel}
+			<Icon name="chevron-down" size={8} class="shrink-0 opacity-50" />
+		</Button>
+	{/snippet}
+
+	<MenuRadioGroup value={currentMode}>
+		{#each availableModes as { mode, label } (mode)}
+			<MenuRadioItem
+				value={mode}
+				data-testid="permission-mode-option-{mode}"
+				onselect={() => selectMode(mode)}
+			>
+				{label}
+			</MenuRadioItem>
+		{/each}
+	</MenuRadioGroup>
+</Menu>

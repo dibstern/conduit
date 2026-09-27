@@ -25,6 +25,29 @@ const rpcClient = Effect.gen(function* () {
 });
 
 describe("WsRpcServerLayer ListSessions", () => {
+	it.effect("publishes a root summary when a child wakes", () =>
+		Effect.gen(function* () {
+			const projections = yield* ProjectionRunnerEffectTag;
+			yield* projections.recover();
+			const sql = yield* SqlClient.SqlClient;
+			yield* sql`INSERT INTO sessions (id, provider, title, created_at, updated_at, version)
+				VALUES ('root', 'claude', 'Root', 1, 1, 1)`;
+			yield* sql`INSERT INTO sessions
+				(id, provider, title, parent_id, created_at, updated_at, version, snoozed_at)
+				VALUES ('child', 'claude', 'Child', 'root', 1, 1, 1, 2)`;
+			yield* sql`UPDATE read_model_counter SET value = 1 WHERE id = 1`;
+			const reader = yield* ReadQueryEffectTag;
+			const before = yield* reader.readSessionList({ roots: true });
+			expect(before.rows.map(({ item }) => item.id)).toEqual(["root"]);
+			expect(before.rows[0]?.version).toBe(1);
+			yield* sql`UPDATE sessions SET woken_at = 3, woken_reason = 'activity', version = 2
+				WHERE id = 'child'`;
+			yield* sql`UPDATE read_model_counter SET value = 2 WHERE id = 1`;
+			const after = yield* reader.readSessionList({ after: 1, roots: true });
+			expect(after.rows).toEqual([{ item: before.rows[0]?.item, version: 2 }]);
+		}).pipe(Effect.provide(makePersistenceEffectLayer(":memory:"))),
+	);
+
 	it.effect("creates a session for the originating browser tab", () => {
 		const createSession = vi.fn(() =>
 			Effect.succeed({
@@ -32,7 +55,7 @@ describe("WsRpcServerLayer ListSessions", () => {
 				title: "New Session",
 			} as unknown as SessionDetail),
 		);
-		const sendDualSessionLists = vi.fn((send) =>
+		const sendSessionLists = vi.fn((send) =>
 			Effect.sync(() => {
 				send({
 					type: "session_list" as const,
@@ -44,7 +67,7 @@ describe("WsRpcServerLayer ListSessions", () => {
 		const wsHandler = makeMockWebSocketHandler();
 		const sessionManagerService = makeMockSessionManagerService({
 			createSession,
-			sendDualSessionLists,
+			sendSessionLists,
 		});
 
 		return Effect.gen(function* () {
@@ -78,7 +101,7 @@ describe("WsRpcServerLayer ListSessions", () => {
 					requestId: "request-1",
 				}),
 			);
-			expect(sendDualSessionLists).toHaveBeenCalled();
+			expect(sendSessionLists).toHaveBeenCalled();
 		}).pipe(
 			Effect.scoped,
 			Effect.provide(
@@ -129,7 +152,7 @@ describe("WsRpcServerLayer ListSessions", () => {
 
 	it.effect("deletes a session through the shared session handler", () => {
 		const deleteSession = vi.fn(() => Effect.succeed(true));
-		const sendDualSessionLists = vi.fn((send) =>
+		const sendSessionLists = vi.fn((send) =>
 			Effect.sync(() => {
 				send({
 					type: "session_list" as const,
@@ -143,7 +166,7 @@ describe("WsRpcServerLayer ListSessions", () => {
 		});
 		const sessionManagerService = makeMockSessionManagerService({
 			deleteSession,
-			sendDualSessionLists,
+			sendSessionLists,
 		});
 
 		return Effect.gen(function* () {
@@ -161,7 +184,7 @@ describe("WsRpcServerLayer ListSessions", () => {
 				type: "session_deleted",
 				sessionId: "session-1",
 			});
-			expect(sendDualSessionLists).toHaveBeenCalled();
+			expect(sendSessionLists).toHaveBeenCalled();
 		}).pipe(
 			Effect.scoped,
 			Effect.provide(
@@ -176,13 +199,13 @@ describe("WsRpcServerLayer ListSessions", () => {
 
 	it.effect("returns ok for a coalesced delete without rebroadcasting", () => {
 		const deleteSession = vi.fn(() => Effect.succeed(false));
-		const sendDualSessionLists = vi.fn(() => Effect.void);
+		const sendSessionLists = vi.fn(() => Effect.void);
 		const wsHandler = makeMockWebSocketHandler({
 			getClientsForSession: vi.fn(() => []),
 		});
 		const sessionManagerService = makeMockSessionManagerService({
 			deleteSession,
-			sendDualSessionLists,
+			sendSessionLists,
 		});
 
 		return Effect.gen(function* () {
@@ -197,7 +220,7 @@ describe("WsRpcServerLayer ListSessions", () => {
 			expect(result).toEqual({ ok: true });
 			expect(deleteSession).toHaveBeenCalledWith("session-1");
 			expect(wsHandler.broadcast).not.toHaveBeenCalled();
-			expect(sendDualSessionLists).not.toHaveBeenCalled();
+			expect(sendSessionLists).not.toHaveBeenCalled();
 		}).pipe(
 			Effect.scoped,
 			Effect.provide(
@@ -223,7 +246,7 @@ describe("WsRpcServerLayer ListSessions", () => {
 		} as unknown as Awaited<ReturnType<typeof api.session.message>>);
 		const setForkEntry = vi.fn(() => Effect.void);
 		const clearPaginationCursor = vi.fn(() => Effect.void);
-		const sendDualSessionLists = vi.fn((send) =>
+		const sendSessionLists = vi.fn((send) =>
 			Effect.sync(() => {
 				send({
 					type: "session_list" as const,
@@ -245,7 +268,7 @@ describe("WsRpcServerLayer ListSessions", () => {
 			),
 			clearPaginationCursor,
 			setForkEntry,
-			sendDualSessionLists,
+			sendSessionLists,
 		});
 
 		return Effect.gen(function* () {
@@ -301,7 +324,7 @@ describe("WsRpcServerLayer ListSessions", () => {
 				"browser-tab-a",
 				"session-forked",
 			);
-			expect(sendDualSessionLists).toHaveBeenCalled();
+			expect(sendSessionLists).toHaveBeenCalled();
 		}).pipe(
 			Effect.scoped,
 			Effect.provide(

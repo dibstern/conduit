@@ -234,7 +234,7 @@ function connectWs(relayPort: number): Promise<RecordingWebSocket> {
 	return new Promise((resolve, reject) => {
 		const clientId = `record-${randomUUID()}`;
 		const ws = new WebSocket(
-			`ws://127.0.0.1:${relayPort}/ws?client=${encodeURIComponent(clientId)}`,
+			`ws://127.0.0.1:${relayPort}/ws?p=${encodeURIComponent(RECORD_PROJECT_SLUG)}&client=${encodeURIComponent(clientId)}`,
 		) as RecordingWebSocket;
 		Object.defineProperties(ws, {
 			clientId: { value: clientId },

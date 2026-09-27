@@ -126,87 +126,87 @@
 		const p = payload as Record<string, unknown>;
 		const id = (v: unknown) => typeof v === "string" ? v : "";
 
-		switch (p.type) {
+		switch (p["type"]) {
 			// ── Chat-visible: streaming ──────────────────────────────────────
 			case "delta":
-				return `${typeof p.text === "string" ? `${p.text.length}ch` : ""}${p.messageId ? ` msg=${id(p.messageId)}` : ""}`;
+				return `${typeof p["text"] === "string" ? `${p["text"].length}ch` : ""}${p["messageId"] ? ` msg=${id(p["messageId"])}` : ""}`;
 			case "thinking_start":
 			case "thinking_stop":
-				return p.messageId ? `msg=${id(p.messageId)}` : "";
+				return p["messageId"] ? `msg=${id(p["messageId"])}` : "";
 			case "thinking_delta":
-				return `${typeof p.text === "string" ? `${p.text.length}ch` : ""}${p.messageId ? ` msg=${id(p.messageId)}` : ""}`;
+				return `${typeof p["text"] === "string" ? `${p["text"].length}ch` : ""}${p["messageId"] ? ` msg=${id(p["messageId"])}` : ""}`;
 
 			// ── Chat-visible: tools ──────────────────────────────────────────
 			case "tool_start":
-				return `${p.name ?? "?"} id=${id(p.id)}${p.messageId ? ` msg=${id(p.messageId)}` : ""}`;
+				return `${p["name"] ?? "?"} id=${id(p["id"])}${p["messageId"] ? ` msg=${id(p["messageId"])}` : ""}`;
 			case "tool_executing":
-				return `${p.name ?? "?"} id=${id(p.id)}${p.messageId ? ` msg=${id(p.messageId)}` : ""}`;
+				return `${p["name"] ?? "?"} id=${id(p["id"])}${p["messageId"] ? ` msg=${id(p["messageId"])}` : ""}`;
 			case "tool_result":
-				return `${p.is_error ? "ERR " : ""}${id(p.id)}${p.messageId ? ` msg=${id(p.messageId)}` : ""}`;
+				return `${p["is_error"] ? "ERR " : ""}${id(p["id"])}${p["messageId"] ? ` msg=${id(p["messageId"])}` : ""}`;
 			case "tool_content":
-				return `id=${id(p.toolId)}`;
+				return `id=${id(p["toolId"])}`;
 
 			// ── Chat-visible: permissions / questions ────────────────────────
 			case "permission_request":
-				return `${p.toolName ?? "?"} sess=${id(p.sessionId)} req=${id(p.requestId)}`;
+				return `${p["toolName"] ?? "?"} sess=${id(p["sessionId"])} req=${id(p["requestId"])}`;
 			case "permission_resolved":
-				return `${p.decision} req=${id(p.requestId)}`;
+				return `${p["decision"]} req=${id(p["requestId"])}`;
 			case "ask_user":
-				return `tool=${id(p.toolId)}`;
+				return `tool=${id(p["toolId"])}`;
 			case "ask_user_resolved":
 			case "ask_user_error":
-				return `tool=${id(p.toolId)}`;
+				return `tool=${id(p["toolId"])}`;
 
 			// ── Chat-visible: session lifecycle ──────────────────────────────
 			case "result":
-				return `sess=${id(p.sessionId)} cost=$${typeof p.cost === "number" ? p.cost.toFixed(4) : "?"}`;
+				return `sess=${id(p["sessionId"])} cost=$${typeof p["cost"] === "number" ? p["cost"].toFixed(4) : "?"}`;
 			case "done":
-				return `code=${p.code ?? "?"}`;
+				return `code=${p["code"] ?? "?"}`;
 			case "status":
-				return String(p.status ?? "");
+				return String(p["status"] ?? "");
 			case "error":
-				return `[${p.code}] ${p.message}`;
+				return `[${p["code"]}] ${p["message"]}`;
 
 			// ── Session management ───────────────────────────────────────────
 			case "session_switched":
-				return `id=${id(p.id)}${p.requestId ? ` req=${id(p.requestId)}` : ""}${Array.isArray(p.events) ? ` +${p.events.length} cached` : ""}`;
+				return `id=${id(p["id"])}${p["requestId"] ? ` req=${id(p["requestId"])}` : ""}${Array.isArray(p["events"]) ? ` +${p["events"].length} cached` : ""}`;
 			case "session_list":
-				return Array.isArray(p.sessions) ? `${p.sessions.length} sessions` : "";
+				return Array.isArray(p["sessions"]) ? `${p["sessions"].length} sessions` : "";
 
 			// ── Connection / infra ───────────────────────────────────────────
 			case "connection_status":
-				return String(p.status ?? "");
+				return String(p["status"] ?? "");
 			case "notification_event":
-				return `${p.eventType ?? "?"}${p.sessionId ? ` sess=${id(p.sessionId)}` : ""}${p.message ? `: ${p.message}` : ""}`;
+				return `${p["eventType"] ?? "?"}${p["sessionId"] ? ` sess=${id(p["sessionId"])}` : ""}${p["message"] ? `: ${p["message"]}` : ""}`;
 			case "client_count":
-				return `${p.count ?? 0} clients`;
+				return `${p["count"] ?? 0} clients`;
 
 			// ── Discovery / metadata ─────────────────────────────────────────
 			case "instance_list":
-				return Array.isArray(p.instances) ? `${p.instances.length} instances` : "";
+				return Array.isArray(p["instances"]) ? `${p["instances"].length} instances` : "";
 			case "pty_list":
-				return Array.isArray(p.ptys) ? `${p.ptys.length} ptys` : "";
+				return Array.isArray(p["ptys"]) ? `${p["ptys"].length} ptys` : "";
 			case "variant_info":
-				return p.variant ? String(p.variant) : "";
+				return p["variant"] ? String(p["variant"]) : "";
 			case "context_window_info":
-				return p.contextWindow ? String(p.contextWindow) : "";
+				return p["contextWindow"] ? String(p["contextWindow"]) : "";
 			case "model_info":
-				return p.provider && p.model ? `${p.provider}:${p.model}` : "";
+				return p["provider"] && p["model"] ? `${p["provider"]}:${p["model"]}` : "";
 			case "default_model_info":
-				return p.provider && p.model ? `${p.provider}:${p.model}` : "";
+				return p["provider"] && p["model"] ? `${p["provider"]}:${p["model"]}` : "";
 			case "model_list": {
-				if (!Array.isArray(p.providers)) return "";
-				const counts = (p.providers as Array<{ name?: string; models?: unknown[] }>)
+				if (!Array.isArray(p["providers"])) return "";
+				const counts = (p["providers"] as Array<{ name?: string; models?: unknown[] }>)
 					.map((prov) => `${prov.name ?? "?"}: ${Array.isArray(prov.models) ? prov.models.length : 0}`)
 					.join(", ");
 				return counts;
 			}
 			case "project_list":
-				return Array.isArray(p.projects) ? `${p.projects.length} projects${p.current ? ` current=${p.current}` : ""}` : "";
+				return Array.isArray(p["projects"]) ? `${p["projects"].length} projects${p["current"] ? ` current=${p["current"]}` : ""}` : "";
 			case "command_list":
-				return Array.isArray(p.commands) ? `${p.commands.length} commands` : "";
+				return Array.isArray(p["commands"]) ? `${p["commands"].length} commands` : "";
 			case "agent_list":
-				return Array.isArray(p.agents) ? `${p.agents.length} agents${p.activeAgentId ? ` active=${p.activeAgentId}` : ""}` : "";
+				return Array.isArray(p["agents"]) ? `${p["agents"].length} agents${p["activeAgentId"] ? ` active=${p["activeAgentId"]}` : ""}` : "";
 			default:
 				return "";
 		}
@@ -364,6 +364,7 @@
 			onmousedown={handleResizeStart}
 			ontouchstart={handleResizeStart}
 		>
+		<!-- design-token-waiver: Fixed dark-terminal debug overlay (see file header); its palette is intentionally raw and theme-independent, not part of the themed UI surface. -->
 		<svg class="w-2.5 h-2.5 text-green-700/60 hover:text-green-500/80 transition-colors" viewBox="0 0 10 10" fill="none">
 			<line x1="1" y1="3" x2="3" y2="1" stroke="currentColor" stroke-width="1.5" />
 			<line x1="1" y1="7" x2="7" y2="1" stroke="currentColor" stroke-width="1.5" />
@@ -382,13 +383,16 @@
 			onmousedown={(e) => e.stopPropagation()}
 			ontouchstart={(e) => e.stopPropagation()}
 		>
+			<!-- design-token-waiver: Fixed dark-terminal debug overlay (see file header); its palette is intentionally raw and theme-independent, not part of the themed UI surface. -->
 			<button
 				class="cursor-pointer text-xs px-2 py-1.5 {wsDebugState.verboseMessages ? 'text-yellow-400' : 'text-gray-500 hover:text-gray-300'}"
 				onclick={toggleVerbose}
+				aria-pressed={wsDebugState.verboseMessages}
 				title={wsDebugState.verboseMessages ? "Verbose: showing all messages + server verbose logging" : "Normal: sampled messages + server info logging"}
 			>
 				{wsDebugState.verboseMessages ? "verbose:on" : "verbose:off"}
 			</button>
+			<!-- design-token-waiver: Fixed dark-terminal debug overlay (see file header); its palette is intentionally raw and theme-independent, not part of the themed UI surface. -->
 			<button
 				class="cursor-pointer text-xs px-2 py-1.5 {copyFlash ? 'text-green-400' : 'text-gray-500 hover:text-gray-300'}"
 				onclick={copyLog}
@@ -396,6 +400,7 @@
 			>
 				{copyFlash ? "copied!" : "copy"}
 			</button>
+			<!-- design-token-waiver: Fixed dark-terminal debug overlay (see file header); its palette is intentionally raw and theme-independent, not part of the themed UI surface. -->
 			<button
 				class="text-gray-500 hover:text-gray-300 cursor-pointer text-xs px-2 py-1.5"
 				onclick={handleClear}
@@ -403,10 +408,12 @@
 			>
 				clear
 			</button>
+			<!-- design-token-waiver: Fixed dark-terminal debug overlay (see file header); its palette is intentionally raw and theme-independent, not part of the themed UI surface. -->
 			<button
 				class="text-gray-500 hover:text-gray-300 cursor-pointer text-xs leading-none px-2 py-1.5"
 				onclick={() => onClose?.()}
 				title="Close panel"
+				aria-label="Close panel"
 			>
 				&times;
 			</button>
@@ -452,9 +459,12 @@
 								<span class="text-cyan-600 truncate text-[11px]">{summary}</span>
 							{/if}
 							{#if evt.payload}
+								<!-- design-token-waiver: Fixed dark-terminal debug overlay (see file header); its palette is intentionally raw and theme-independent, not part of the themed UI surface. -->
 								<button
 									class="text-gray-600 hover:text-gray-300 text-[10px] ml-auto shrink-0 cursor-pointer"
 									onclick={() => { evt._expanded = !evt._expanded; }}
+									aria-expanded={!!evt._expanded}
+									aria-label="Toggle raw payload"
 								>
 									{evt._expanded ? '[-]' : '[+]'}
 								</button>

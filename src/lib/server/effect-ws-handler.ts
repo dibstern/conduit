@@ -1,15 +1,8 @@
-import { randomBytes } from "node:crypto";
 import { EventEmitter } from "node:events";
-import type { IncomingMessage, Server } from "node:http";
-import type { Duplex } from "node:stream";
 import { Cause, Effect, Exit, Fiber, Runtime } from "effect";
 import type { RuntimeFiber } from "effect/Fiber";
 import type { RawData, WebSocket } from "ws";
-import {
-	makeHeartbeatFiber,
-	type WsTransport,
-	WsTransportTag,
-} from "../domain/relay/Layers/ws-transport-layer.js";
+import { makeHeartbeatFiber } from "../domain/relay/Layers/ws-transport-layer.js";
 import {
 	addClient,
 	bindClientSession,
@@ -26,6 +19,7 @@ import {
 import { type RelayMessage, WS_PROTOCOL_VERSION } from "../shared-types.js";
 import type {
 	WebSocketHandlerShape,
+	WsAttachOptions,
 	WsClientConnectedEvent,
 	WsClientDisconnectedEvent,
 	WsMessageEvent,
@@ -46,23 +40,15 @@ type WsEventMap = {
 
 interface EffectWsHandlerOptions {
 	heartbeatInterval?: number;
-	maxPayload?: number;
-	server?: Server;
-	pathPrefix?: string;
-	verifyClient?: (
-		info: { origin: string; secure: boolean; req: IncomingMessage },
-		callback: (result: boolean, code?: number, message?: string) => void,
-	) => void;
 }
 
-type WsBridgeServices = WsHandlerStateTag | WsTransportTag;
+type WsBridgeServices = WsHandlerStateTag;
 
 type WsRunFork = <A, E>(
 	effect: Effect.Effect<A, E, WsBridgeServices>,
 ) => RuntimeFiber<A, E>;
 
 interface EffectWsHandlerRuntime {
-	readonly transport: WsTransport;
 	readonly runFork: WsRunFork;
 }
 
@@ -70,51 +56,26 @@ export const makeEffectWsHandler = (
 	options: EffectWsHandlerOptions = {},
 ): Effect.Effect<EffectWsHandler, never, WsBridgeServices> =>
 	Effect.gen(function* () {
-		const transport = yield* WsTransportTag;
 		const runtime = yield* Effect.runtime<WsBridgeServices>();
 		return new EffectWsHandler(options, {
-			transport,
 			runFork: Runtime.runFork(runtime),
 		});
 	});
 
 export class EffectWsHandler implements WebSocketHandlerShape {
 	private readonly events = new EventEmitter();
-	private readonly transport: WsTransport;
 	private readonly runFork: WsRunFork;
 	private readonly heartbeatFiber: RuntimeFiber<unknown, never>;
 	private readonly clients = new Set<string>();
 	private readonly clientSessions = new Map<string, string>();
 	private readonly sessionClients = new Map<string, Set<string>>();
-	private readonly upgradeListener?: (
-		req: IncomingMessage,
-		socket: Duplex,
-		head: Buffer,
-	) => void;
 	private closed = false;
 
 	constructor(
-		private readonly options: EffectWsHandlerOptions = {},
+		options: EffectWsHandlerOptions = {},
 		runtime: EffectWsHandlerRuntime,
 	) {
-		this.transport = runtime.transport;
 		this.runFork = runtime.runFork;
-		this.transport.wss.on("connection", (ws, req) =>
-			this.onConnection(ws, req),
-		);
-		if (options.server) {
-			this.upgradeListener = (req, socket, head) => {
-				if (!this.matchesPath(req.url)) return;
-				this.verifyUpgrade(req, socket, (allowed) => {
-					if (!allowed) {
-						socket.destroy();
-						return;
-					}
-					this.handleUpgrade(req, socket, head);
-				});
-			};
-			options.server.on("upgrade", this.upgradeListener);
-		}
 		this.heartbeatFiber = this.forkLogged(
 			"heartbeat",
 			makeHeartbeatFiber(options.heartbeatInterval ?? 30_000),
@@ -136,7 +97,13 @@ export class EffectWsHandler implements WebSocketHandlerShape {
 	}
 
 	broadcast(msg: RelayMessage): void {
-		this.forkLogged("broadcast", broadcast(msg));
+		const clientIds = this.getClientIds();
+		this.forkLogged(
+			"broadcast",
+			Effect.forEach(clientIds, (clientId) => sendTo(clientId, msg), {
+				discard: true,
+			}),
+		);
 	}
 
 	sendTo(clientId: string, msg: RelayMessage): void {
@@ -179,55 +146,60 @@ export class EffectWsHandler implements WebSocketHandlerShape {
 		return [...this.clients];
 	}
 
-	handleUpgrade(req: IncomingMessage, socket: Duplex, head: Buffer): void {
-		this.forkLogged(
-			"handleUpgrade",
-			this.transport.handleUpgrade(req, socket, head).pipe(
-				Effect.catchAll((err) =>
-					Effect.sync(() => {
-						socket.destroy(err instanceof Error ? err : undefined);
-					}),
-				),
-			),
-		);
-	}
-
-	close(): void {
-		void this.drain();
-	}
-
-	async drain(): Promise<void> {
-		if (this.closed) return;
-		this.closed = true;
-		if (this.options.server && this.upgradeListener) {
-			this.options.server.off("upgrade", this.upgradeListener);
+	attach(ws: WebSocket, options: WsAttachOptions): () => void {
+		if (this.closed) {
+			ws.close(1001, "Server shutting down");
+			return () => {};
 		}
-		this.clearClientMirror();
-		await this.runEffectPromise(
-			"drain",
-			closeAllClients().pipe(
-				Effect.zipRight(Fiber.interrupt(this.heartbeatFiber)),
-			),
-		);
-	}
-
-	private onConnection(ws: WebSocket, req: IncomingMessage): void {
-		const clientId =
-			extractRequestedClientId(req.url) ?? randomBytes(8).toString("hex");
-		const requestedSessionId = extractRequestedSessionId(req.url);
-
-		ws.on("message", (data: RawData) => this.onMessage(clientId, data));
-		ws.on("close", () => this.onClose(clientId));
-		ws.on("error", (err: Error) => {
-			this.events.emit("client_error", { clientId, error: err });
-		});
-		ws.on("pong", () => {
+		const { clientId, requestedSessionId, skipDefaultSession } = options;
+		let attached = true;
+		// In-flight effects can retain this connection after detach removes the
+		// client from the relay. Revoke their access before another relay attaches.
+		const connection = {
+			get readyState() {
+				return attached ? ws.readyState : ws.CLOSED;
+			},
+			send(data: string) {
+				if (attached) ws.send(data);
+			},
+			close(code?: number, reason?: string) {
+				if (attached) ws.close(code, reason);
+			},
+			ping() {
+				if (attached) ws.ping();
+			},
+			terminate() {
+				if (attached) ws.terminate();
+			},
+		};
+		const onMessage = (data: RawData) => this.onMessage(clientId, data);
+		const onError = (error: Error) => {
+			this.events.emit("client_error", { clientId, error });
+		};
+		const onPong = () => {
 			this.forkLogged("markClientAlive", markClientAlive(clientId));
-		});
+		};
+		const detach = () => {
+			if (!attached) return;
+			attached = false;
+			ws.off("message", onMessage);
+			ws.off("close", detach);
+			ws.off("error", onError);
+			ws.off("pong", onPong);
+			this.recordClientRemoved(clientId);
+			this.removeAttachedClient(clientId);
+		};
+
+		ws.on("message", onMessage);
+		ws.on("close", detach);
+		ws.on("error", onError);
+		ws.on("pong", onPong);
 
 		this.forkLogged(
 			"addClient",
-			addClient(clientId, ws).pipe(
+			Effect.suspend(() =>
+				attached ? addClient(clientId, connection) : Effect.interrupt,
+			).pipe(
 				// Version first: client_connected listeners start the session-init
 				// flood, and the mismatch check must not trail it.
 				Effect.tap(() =>
@@ -243,6 +215,7 @@ export class EffectWsHandler implements WebSocketHandlerShape {
 							clientId,
 							clientCount,
 							...(requestedSessionId != null && { requestedSessionId }),
+							...(skipDefaultSession != null && { skipDefaultSession }),
 						});
 					}),
 				),
@@ -251,44 +224,33 @@ export class EffectWsHandler implements WebSocketHandlerShape {
 				),
 			),
 		);
+
+		return detach;
 	}
 
-	private matchesPath(url: string | undefined): boolean {
-		if (!this.options.pathPrefix) return true;
-		return Boolean(
-			url === `${this.options.pathPrefix}/ws` ||
-				url?.startsWith(`${this.options.pathPrefix}/ws?`),
+	close(): void {
+		void this.drain();
+	}
+
+	async drain(): Promise<void> {
+		if (this.closed) return;
+		this.closed = true;
+		this.clearClientMirror();
+		await this.runEffectPromise(
+			"drain",
+			closeAllClients().pipe(
+				Effect.zipRight(Fiber.interrupt(this.heartbeatFiber)),
+			),
 		);
 	}
 
-	private verifyUpgrade(
-		req: IncomingMessage,
-		socket: Duplex,
-		callback: (allowed: boolean) => void,
-	): void {
-		if (!this.options.verifyClient) {
-			callback(true);
-			return;
-		}
-		this.options.verifyClient(
-			{
-				origin:
-					typeof req.headers.origin === "string" ? req.headers.origin : "",
-				secure: Boolean((socket as Duplex & { encrypted?: boolean }).encrypted),
-				req,
-			},
-			(result) => callback(result),
-		);
-	}
-
-	private onClose(clientId: string): void {
+	private removeAttachedClient(clientId: string): void {
 		if (this.closed) return;
 		this.forkLogged(
 			"removeClient",
 			removeClient(clientId).pipe(
 				Effect.tap(({ sessionId, newCount }) =>
 					Effect.sync(() => {
-						this.recordClientRemoved(clientId);
 						this.events.emit("client_disconnected", {
 							clientId,
 							clientCount: newCount,
@@ -403,30 +365,5 @@ export class EffectWsHandler implements WebSocketHandlerShape {
 			if (this.closed) return;
 			console.error(`[ws-bridge] ${op} failed:`, err);
 		};
-	}
-}
-
-function extractRequestedSessionId(
-	url: string | undefined,
-): string | undefined {
-	if (!url) return undefined;
-	try {
-		const parsed = new URL(url, "http://localhost");
-		return parsed.searchParams.get("session") ?? undefined;
-	} catch {
-		return undefined;
-	}
-}
-
-function extractRequestedClientId(url: string | undefined): string | undefined {
-	if (!url) return undefined;
-	try {
-		const parsed = new URL(url, "http://localhost");
-		const clientId = parsed.searchParams.get("client") ?? undefined;
-		if (!clientId) return undefined;
-		if (!/^[A-Za-z0-9._:-]{1,128}$/.test(clientId)) return undefined;
-		return clientId;
-	} catch {
-		return undefined;
 	}
 }

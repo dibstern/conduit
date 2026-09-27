@@ -1,6 +1,7 @@
 // ─── File Tree Store Tests ───────────────────────────────────────────────────
 import { beforeEach, describe, expect, it } from "vitest";
 import {
+	buildMentionInsertion,
 	extractAtQuery,
 	fileTreeState,
 	filterFiles,
@@ -128,5 +129,42 @@ describe("handleFileTree", () => {
 	it("ignores non-array entries", () => {
 		handleFileTree({ type: "file_tree" as const, entries: "bad" as unknown });
 		expect(fileTreeState.entries).toHaveLength(0);
+	});
+});
+
+// ─── buildMentionInsertion ──────────────────────────────────────────────────
+
+describe("buildMentionInsertion", () => {
+	it("closes the mention with a trailing space for a file", () => {
+		expect(buildMentionInsertion("src/main.ts")).toBe("@src/main.ts ");
+	});
+
+	it("withholds the trailing space for a directory", () => {
+		expect(buildMentionInsertion("src/lib/")).toBe("@src/lib/");
+	});
+
+	// The round-trip is the actual contract: whether the menu stays open after a
+	// selection is decided entirely by whether extractAtQuery still finds a token.
+	it("leaves the @-token live after a directory, so the menu keeps drilling", () => {
+		const text = buildMentionInsertion("src/lib/");
+		const query = extractAtQuery(text, text.length);
+		expect(query?.query).toBe("src/lib/");
+	});
+
+	it("ends the @-token after a file, so the menu closes", () => {
+		const text = buildMentionInsertion("src/main.ts");
+		expect(extractAtQuery(text, text.length)).toBeNull();
+	});
+
+	it("ends the @-token when the user types a space to finish a path", () => {
+		const text = `${buildMentionInsertion("src/lib/")} `;
+		expect(extractAtQuery(text, text.length)).toBeNull();
+	});
+
+	it("preserves drill-down when the mention follows existing text", () => {
+		const text = `look at ${buildMentionInsertion("src/lib/")}`;
+		const query = extractAtQuery(text, text.length);
+		expect(query?.query).toBe("src/lib/");
+		expect(text.slice(query?.start)).toBe("@src/lib/");
 	});
 });

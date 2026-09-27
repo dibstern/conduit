@@ -52,6 +52,15 @@ export class SessionCommandError extends Data.TaggedError(
 type SessionCommandType =
 	| "session.created"
 	| "session.renamed"
+	| "session.read"
+	| "session.unread"
+	| "session.settled"
+	| "session.unsettled"
+	| "session.pinned"
+	| "session.unpinned"
+	| "session.snoozed"
+	| "session.auto_settle_set"
+	| "session.unsnoozed"
 	| "session.deleted"
 	| "session.forked";
 
@@ -111,6 +120,17 @@ export const openCodeUpstreamAdapter = (
 				// Whoever created the session chose its id — upstream for
 				// OpenCode-backed sessions, locally for the rest — so by the time this
 				// event exists upstream already has it. Nothing to replicate.
+				return Effect.void;
+			case "session.read":
+			case "session.unread":
+			case "session.settled":
+			case "session.unsettled":
+			case "session.pinned":
+			case "session.unpinned":
+			case "session.snoozed":
+			case "session.auto_settle_set":
+			case "session.unsnoozed":
+				// Triage state belongs to Conduit and has no provider-side equivalent.
 				return Effect.void;
 			case "session.forked":
 				// Same: the fork happened upstream first, which is where the forked

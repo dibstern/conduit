@@ -1,12 +1,3 @@
-// ─── ChatLayout WS Lifecycle Regression Test ─────────────────────────────────
-// Verifies that the WebSocket lifecycle $effect in ChatLayout only re-runs
-// when the project slug changes — NOT when the session portion of the URL
-// changes (e.g., from session_switched → replaceRoute).
-//
-// Bug: connect() internally reads routerState.path via getCurrentSessionId().
-// Without untrack(), this registered routerState.path as a dependency,
-// causing a spurious disconnect/reconnect on every path change.
-
 import { cleanup, render } from "@testing-library/svelte";
 import { flushSync, tick } from "svelte";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -19,7 +10,7 @@ const emptyComponent = vi.hoisted(
 	() => async () => import("../../helpers/Empty.svelte"),
 );
 const wsLifecycleHarness = vi.hoisted(() => ({
-	onConnectCallbacks: [] as Array<() => void>,
+	onAttachCallbacks: [] as Array<(slug: string) => void>,
 }));
 
 // Layout components
@@ -29,6 +20,10 @@ vi.mock(
 );
 vi.mock(
 	"../../../src/lib/frontend/components/layout/Sidebar.svelte",
+	() => import("../../helpers/SidebarStub.svelte"),
+);
+vi.mock(
+	"../../../src/lib/frontend/components/layout/SessionBar.svelte",
 	emptyComponent,
 );
 vi.mock(
@@ -104,7 +99,7 @@ vi.mock(
 
 // ─── Mock stores ────────────────────────────────────────────────────────────
 // Mock all stores EXCEPT router.svelte.ts (which must be real to test
-// reactive dependencies on routerState.path / slugState.current).
+// reactive dependencies on routerState.path).
 
 vi.mock("../../../src/lib/frontend/stores/ws.svelte.js", async () => {
 	// The real connect() calls getCurrentSessionId() which reads
@@ -121,8 +116,9 @@ vi.mock("../../../src/lib/frontend/stores/ws.svelte.js", async () => {
 			getCurrentSessionId();
 		}),
 		disconnect: vi.fn(),
-		onConnect: vi.fn((callback: () => void) => {
-			wsLifecycleHarness.onConnectCallbacks.push(callback);
+		onProjectAttached: vi.fn((callback: (slug: string) => void) => {
+			wsLifecycleHarness.onAttachCallbacks.push(callback);
+			return () => {};
 		}),
 		onNavigateToSession: vi.fn(),
 		clearNavigateToSession: vi.fn(),
@@ -130,7 +126,7 @@ vi.mock("../../../src/lib/frontend/stores/ws.svelte.js", async () => {
 		reconcilePushActive: vi.fn(async () => {}),
 		onPlanMode: vi.fn(() => () => {}),
 		wsSend: vi.fn(),
-		wsState: { status: "", statusText: "" },
+		wsState: { status: "connected", statusText: "" },
 	};
 });
 
@@ -147,6 +143,7 @@ vi.mock("../../../src/lib/frontend/stores/session.svelte.js", () => ({
 		hasMore: false,
 	},
 	clearSessionState: vi.fn(),
+	loadDaemonSessions: vi.fn(async () => {}),
 	applyListSessionsResponse: vi.fn(),
 	switchToSession: vi.fn(),
 	sessionCreation: { value: { state: "idle" } },
@@ -224,6 +221,11 @@ vi.mock("../../../src/lib/frontend/transport/runtime.js", () => ({
 }));
 
 vi.mock("../../../src/lib/frontend/transport/ws-rpc-client.js", () => ({
+	viewSessionRpc: vi.fn(async () => {}),
+	resolveSessionRpc: vi.fn(async () => ({
+		projectSlug: "test-project" as string | null,
+	})),
+	attachProjectRpc: vi.fn(async () => {}),
 	listSessionsRpc: vi.fn(async (input: { roots?: boolean }) => ({
 		projectSlug: "test-project",
 		roots: input.roots === true,
@@ -256,24 +258,43 @@ vi.mock("../../../src/lib/frontend/transport/ws-rpc-client.js", () => ({
 // ─── Imports (after mocks) ──────────────────────────────────────────────────
 
 import ChatLayout from "../../../src/lib/frontend/components/layout/ChatLayout.svelte";
+import { clearMessages } from "../../../src/lib/frontend/stores/chat.svelte.js";
 import {
+	attachedProjectState,
 	replaceRoute,
 	routerState,
-	syncSlugState,
 } from "../../../src/lib/frontend/stores/router.svelte.js";
+import {
+	applyListSessionsResponse,
+	clearSessionState,
+	loadDaemonSessions,
+	sessionState,
+} from "../../../src/lib/frontend/stores/session.svelte.js";
+import { sessionViewState } from "../../../src/lib/frontend/stores/session-view.svelte.js";
 import { showToast } from "../../../src/lib/frontend/stores/ui.svelte.js";
 import {
 	connect,
 	disconnect,
-	onConnect,
+	onProjectAttached,
 } from "../../../src/lib/frontend/stores/ws.svelte.js";
+import {
+	attachProjectRpc,
+	listSessionsRpc,
+	resolveSessionRpc,
+	viewSessionRpc,
+} from "../../../src/lib/frontend/transport/ws-rpc-client.js";
+
+function attach(slug: string): void {
+	attachedProjectState.slug = slug;
+	wsLifecycleHarness.onAttachCallbacks[0]?.(slug);
+}
 
 // ─── Tests ──────────────────────────────────────────────────────────────────
 
 describe("ChatLayout WS lifecycle", () => {
 	beforeEach(() => {
 		vi.clearAllMocks();
-		wsLifecycleHarness.onConnectCallbacks = [];
+		wsLifecycleHarness.onAttachCallbacks = [];
 		// Stub localStorage — the component reads terminal panel height from it
 		// on mount, but the test environment may not provide a full Storage impl.
 		vi.stubGlobal("localStorage", {
@@ -284,8 +305,15 @@ describe("ChatLayout WS lifecycle", () => {
 			length: 0,
 			key: vi.fn(() => null),
 		});
-		routerState.path = "/p/test-project/";
-		syncSlugState(routerState.path);
+		routerState.path = "/";
+		routerState.search = "";
+		routerState.sessionNotFound = false;
+		sessionState.currentId = null;
+		sessionViewState.compact = false;
+		vi.mocked(resolveSessionRpc).mockResolvedValue({
+			projectSlug: "test-project",
+		});
+		attachedProjectState.slug = null;
 	});
 
 	afterEach(() => {
@@ -293,21 +321,22 @@ describe("ChatLayout WS lifecycle", () => {
 		vi.unstubAllGlobals();
 		// Reset router state so it doesn't leak between tests
 		routerState.path = "/";
-		syncSlugState("/");
+		attachedProjectState.slug = null;
+		sessionViewState.compact = false;
 	});
 
 	it("connects once on mount", () => {
 		render(ChatLayout);
 
 		expect(connect).toHaveBeenCalledTimes(1);
-		expect(connect).toHaveBeenCalledWith("test-project");
+		expect(connect).toHaveBeenCalledWith();
 	});
 
-	it("does not toast when optional discovery RPCs fail on connect", async () => {
+	it("does not toast when optional discovery RPCs fail on attach", async () => {
 		render(ChatLayout);
 
-		expect(onConnect).toHaveBeenCalledTimes(1);
-		wsLifecycleHarness.onConnectCallbacks[0]?.();
+		expect(onProjectAttached).toHaveBeenCalledTimes(1);
+		attach("test-project");
 		await Promise.resolve();
 		await Promise.resolve();
 
@@ -322,63 +351,293 @@ describe("ChatLayout WS lifecycle", () => {
 		});
 	});
 
-	// This is the regression test for the untrack() fix. Without untrack(),
-	// connect() reads routerState.path (via getCurrentSessionId), registering
-	// it as a dependency. Changing the path within the same slug would then
-	// trigger a spurious disconnect + reconnect.
-	it("does not reconnect when routerState.path changes within the same slug", async () => {
+	it("loads both the daemon-wide and the per-project session lists on attach", async () => {
 		render(ChatLayout);
-		expect(connect).toHaveBeenCalledTimes(1);
 
-		// Simulate session_switched → replaceRoute updating the path.
-		// This changes routerState.path but NOT slugState.current.
-		routerState.path = "/p/test-project/s/ses_abc123";
-		syncSlugState(routerState.path);
+		attach("test-project");
+		await vi.waitFor(() => {
+			expect(applyListSessionsResponse).toHaveBeenCalledTimes(1);
+		});
 
-		// Flush reactive updates. Use both flushSync (synchronous batches)
-		// and tick (microtask-scheduled effects) to ensure any $effect
-		// re-runs complete. The "reconnects when slug changes" test below
-		// validates that this flush strategy actually reaches the effect —
-		// if it didn't, that test would fail (canary).
+		expect(loadDaemonSessions).toHaveBeenCalledTimes(1);
+	});
+
+	it("keeps one connection when resolving a session within the attached project", async () => {
+		render(ChatLayout);
+		attach("test-project");
+		replaceRoute("/s/ses_abc123");
 		flushSync();
 		await tick();
-
-		// connect should NOT have been called again
 		expect(connect).toHaveBeenCalledTimes(1);
-		// disconnect should NOT have been called
+		expect(disconnect).not.toHaveBeenCalled();
+		expect(resolveSessionRpc).toHaveBeenCalledExactlyOnceWith({
+			sessionId: "ses_abc123",
+		});
+		expect(viewSessionRpc).toHaveBeenCalledExactlyOnceWith({
+			projectSlug: "test-project",
+			sessionId: "ses_abc123",
+			originId: "browser-client-1",
+		});
+	});
+
+	it("switches sessions across projects with ViewSession and resets before hydrating the attach", async () => {
+		render(ChatLayout);
+		attach("test-project");
+		vi.clearAllMocks();
+		vi.mocked(resolveSessionRpc).mockResolvedValueOnce({
+			projectSlug: "other-project",
+		});
+		replaceRoute("/s/session-b");
+		flushSync();
+		await tick();
+		expect(viewSessionRpc).toHaveBeenCalledExactlyOnceWith({
+			projectSlug: "other-project",
+			sessionId: "session-b",
+			originId: "browser-client-1",
+		});
+		expect(connect).not.toHaveBeenCalled();
+		expect(disconnect).not.toHaveBeenCalled();
+		expect(clearMessages).not.toHaveBeenCalled();
+		expect(listSessionsRpc).not.toHaveBeenCalled();
+		attach("other-project");
+		expect(clearMessages).toHaveBeenCalledTimes(1);
+		expect(clearSessionState).toHaveBeenCalledTimes(1);
+		expect(listSessionsRpc).toHaveBeenCalledExactlyOnceWith({
+			projectSlug: "other-project",
+			roots: true,
+		});
+		expect(
+			vi.mocked(clearSessionState).mock.invocationCallOrder[0],
+		).toBeLessThan(vi.mocked(listSessionsRpc).mock.invocationCallOrder[0] ?? 0);
+		flushSync();
+		await tick();
+		expect(listSessionsRpc).toHaveBeenCalledTimes(1);
+	});
+
+	it("resolves a cold session link before viewing it", async () => {
+		routerState.path = "/s/cold-session";
+		vi.mocked(resolveSessionRpc).mockResolvedValueOnce({
+			projectSlug: "other-project",
+		});
+		render(ChatLayout);
+		await vi.waitFor(() =>
+			expect(viewSessionRpc).toHaveBeenCalledExactlyOnceWith({
+				projectSlug: "other-project",
+				sessionId: "cold-session",
+				originId: "browser-client-1",
+			}),
+		);
+		expect(resolveSessionRpc).toHaveBeenCalledExactlyOnceWith({
+			sessionId: "cold-session",
+		});
+		expect(
+			vi.mocked(resolveSessionRpc).mock.invocationCallOrder[0],
+		).toBeLessThan(vi.mocked(viewSessionRpc).mock.invocationCallOrder[0] ?? 0);
+	});
+
+	it("resolves and views history navigation across projects", async () => {
+		render(ChatLayout);
+		attach("test-project");
+		sessionState.currentId = "session-a";
+		vi.mocked(resolveSessionRpc).mockResolvedValueOnce({
+			projectSlug: "other-project",
+		});
+		window.history.pushState(null, "", "/s/session-b");
+		window.dispatchEvent(new PopStateEvent("popstate"));
+		flushSync();
+		await vi.waitFor(() =>
+			expect(viewSessionRpc).toHaveBeenLastCalledWith({
+				projectSlug: "other-project",
+				sessionId: "session-b",
+				originId: "browser-client-1",
+			}),
+		);
+		attach("other-project");
+		sessionState.currentId = "session-b";
+		vi.mocked(resolveSessionRpc).mockResolvedValueOnce({
+			projectSlug: "test-project",
+		});
+		window.history.replaceState(null, "", "/s/session-a");
+		window.dispatchEvent(new PopStateEvent("popstate"));
+		flushSync();
+		await vi.waitFor(() =>
+			expect(viewSessionRpc).toHaveBeenLastCalledWith({
+				projectSlug: "test-project",
+				sessionId: "session-a",
+				originId: "browser-client-1",
+			}),
+		);
+		expect(resolveSessionRpc).toHaveBeenCalledTimes(2);
+		expect(connect).toHaveBeenCalledTimes(1);
+	});
+
+	it("does not resolve or view a session at the list front door", async () => {
+		render(ChatLayout);
+		attach("test-project");
+		flushSync();
+		await tick();
+		expect(resolveSessionRpc).not.toHaveBeenCalled();
+		expect(viewSessionRpc).not.toHaveBeenCalled();
+		expect(sessionState.currentId).toBeNull();
+	});
+
+	it("uses the route-driven full-screen list layout on compact viewports", () => {
+		sessionViewState.compact = true;
+		const { container } = render(ChatLayout);
+
+		const layout = container.querySelector("#layout");
+		expect(layout?.classList.contains("layout-compact")).toBe(true);
+		expect(layout?.classList.contains("phone-list-screen")).toBe(true);
+		expect(container.querySelector("#sidebar")).not.toBeNull();
+
+		replaceRoute("/s/session-a");
+		flushSync();
+		expect(layout?.classList.contains("layout-compact")).toBe(true);
+		expect(layout?.classList.contains("phone-list-screen")).toBe(false);
+		expect(container.querySelector("#sidebar")).not.toBeNull();
+	});
+
+	it("restores the compact session list scroll position after returning", async () => {
+		sessionViewState.compact = true;
+		const { container } = render(ChatLayout);
+		const scroller = container.querySelector<HTMLElement>(
+			"#session-list-scroller",
+		);
+		expect(scroller).not.toBeNull();
+		if (!scroller) return;
+
+		scroller.scrollTop = 84;
+		replaceRoute("/s/session-a");
+		flushSync();
+		await tick();
+		scroller.scrollTop = 0;
+
+		replaceRoute("/");
+		flushSync();
+		await tick();
+		expect(scroller.scrollTop).toBe(84);
+	});
+
+	it("clears the selected session when returning to the list", async () => {
+		sessionState.currentId = "session-a";
+		routerState.path = "/s/session-a";
+		render(ChatLayout);
+		replaceRoute("/");
+		flushSync();
+		await tick();
+		expect(sessionState.currentId).toBeNull();
+		expect(viewSessionRpc).not.toHaveBeenCalled();
+	});
+
+	it("returns an unknown session to the list with a dismissible notice", async () => {
+		routerState.path = "/s/missing-session";
+		vi.mocked(resolveSessionRpc).mockResolvedValueOnce({ projectSlug: null });
+		render(ChatLayout);
+		await vi.waitFor(() => expect(routerState.path).toBe("/"));
+		expect(routerState.sessionNotFound).toBe(true);
+		expect(viewSessionRpc).not.toHaveBeenCalled();
+		expect(sessionState.currentId).toBeNull();
+	});
+
+	it("ignores a late missing-session result after navigation elsewhere", async () => {
+		let resolveMissing:
+			| ((value: { projectSlug: string | null }) => void)
+			| undefined;
+		vi.mocked(resolveSessionRpc).mockImplementationOnce(
+			() =>
+				new Promise((resolve) => {
+					resolveMissing = resolve;
+				}),
+		);
+		routerState.path = "/s/missing-session";
+		render(ChatLayout);
+		replaceRoute("/s/next-session");
+		flushSync();
+		await tick();
+		resolveMissing?.({ projectSlug: null });
+		await tick();
+		expect(routerState.path).toBe("/s/next-session");
+		expect(routerState.sessionNotFound).toBe(false);
+	});
+
+	it("rehydrates once on a reconnect attach to the same project without resetting", () => {
+		render(ChatLayout);
+		attach("test-project");
+		vi.clearAllMocks();
+		attach("test-project");
+		expect(clearMessages).not.toHaveBeenCalled();
+		expect(loadDaemonSessions).toHaveBeenCalledTimes(1);
+		expect(listSessionsRpc).toHaveBeenCalledTimes(1);
+	});
+
+	it("uses AttachProject for project-only navigation without reconnecting", async () => {
+		render(ChatLayout);
+		attach("test-project");
+		replaceRoute("/?p=other-project");
+		flushSync();
+		await tick();
+		expect(attachProjectRpc).toHaveBeenCalledExactlyOnceWith({
+			projectSlug: "other-project",
+			originId: "browser-client-1",
+		});
+		expect(viewSessionRpc).not.toHaveBeenCalled();
+		expect(connect).toHaveBeenCalledTimes(1);
 		expect(disconnect).not.toHaveBeenCalled();
 	});
 
-	// Positive control: verifies the flush strategy reaches the $effect.
-	// If this test passes, we know flushSync + tick IS triggering effect
-	// re-runs, which means the negative test above is meaningful (not
-	// vacuously true because effects never ran).
-	it("reconnects when the slug actually changes", async () => {
+	it("can select a project before the socket has attached to one", async () => {
 		render(ChatLayout);
-		expect(connect).toHaveBeenCalledTimes(1);
-		expect(connect).toHaveBeenCalledWith("test-project");
-
-		// Switch to a different project slug
-		routerState.path = "/p/other-project/";
-		syncSlugState(routerState.path);
-
+		expect(attachProjectRpc).not.toHaveBeenCalled();
+		replaceRoute("/?p=first-project");
 		flushSync();
 		await tick();
-
-		// Should disconnect old + connect new
-		expect(disconnect).toHaveBeenCalledTimes(1);
-		expect(connect).toHaveBeenCalledTimes(2);
-		expect(connect).toHaveBeenLastCalledWith("other-project");
+		expect(attachProjectRpc).toHaveBeenCalledExactlyOnceWith({
+			projectSlug: "first-project",
+			originId: "browser-client-1",
+		});
+		expect(connect).toHaveBeenCalledTimes(1);
 	});
 
-	it("disconnects without reconnecting when routed to authentication", async () => {
+	it("cancels a pending project switch when navigating back to the attached project", async () => {
 		render(ChatLayout);
-		expect(connect).toHaveBeenCalledTimes(1);
-
-		replaceRoute("/auth");
+		attach("test-project");
+		replaceRoute("/?p=other-project");
 		flushSync();
 		await tick();
+		replaceRoute("/?p=test-project");
+		flushSync();
+		await tick();
+		expect(attachProjectRpc).toHaveBeenLastCalledWith({
+			projectSlug: "test-project",
+			originId: "browser-client-1",
+		});
+		expect(connect).toHaveBeenCalledTimes(1);
+	});
 
+	it("discards late hydration from the previous project", async () => {
+		let resolveOld:
+			| ((value: Awaited<ReturnType<typeof listSessionsRpc>>) => void)
+			| undefined;
+		vi.mocked(listSessionsRpc).mockImplementationOnce(
+			() =>
+				new Promise((resolve) => {
+					resolveOld = resolve;
+				}),
+		);
+		render(ChatLayout);
+		attach("test-project");
+		attach("other-project");
+		await vi.waitFor(() =>
+			expect(applyListSessionsResponse).toHaveBeenCalledTimes(1),
+		);
+		resolveOld?.({ projectSlug: "test-project", roots: true, sessions: [] });
+		await Promise.resolve();
+		expect(applyListSessionsResponse).toHaveBeenCalledTimes(1);
+	});
+
+	it("disconnects on unmount", () => {
+		const { unmount } = render(ChatLayout);
+		unmount();
 		expect(disconnect).toHaveBeenCalledTimes(1);
 		expect(connect).toHaveBeenCalledTimes(1);
 	});

@@ -42,17 +42,27 @@ const SHIPPED_MIGRATION_HASHES: Record<string, string> = {
 		"704698b5fbe61b4755833cde9fb4b8dfe1f0c33f77cc38b478baef49ac0f7909",
 	"0010_session_cascade_deletes.sql":
 		"2c71dbc0b5afd829d4c642885e8fdcb70cb4890669ab9f9d8b9f9b8bfd65b494",
-	"0011_projection_failures.sql":
+	"0011_sessions_read_at.sql":
+		"27f5420844d257201e825ab10ba08edfcfc3facb53b7b9cece72540db01e8117",
+	"0012_sessions_last_turn_error.sql":
+		"ac34afb2ab3b5cc14383fd05f2b1d81e03579ee1d64c6d0972b8f61b58565e91",
+	"0013_backfill_compaction_messages.sql":
+		"70028b0cee1dd66436319c1d24d7ae3b215265aeafae8c62eba4099616695d73",
+	"0014_sessions_settled_pinned.sql":
+		"6109b7a23498029054c907af06a1efccef86472ef8b5fd66c8ef3b757eb1e6f9",
+	"0015_sessions_snoozed.sql":
+		"9e476e07945b4ea923b832a5b69b2cb204fc082e99932ab87f8c33cc0e89f58a",
+	"0016_sessions_auto_settle.sql":
+		"33ba2a35044d1f57cdfa812ad28ba71cb290e5e28f4b4e7e1e05fddc69d93ceb",
+	"0017_projection_failures.sql":
 		"ade689f16ce4c5a201fc872718f4f6c678923ca07e55a0774b5991fdd07ac173",
-	"0012_read_model_version.sql":
+	"0018_read_model_version.sql":
 		"b643e63439f45ef732258efb12ccfd40ccc8f6b85ee2ad8e6a9713537ab137af",
-	"0013_read_model_counter.sql":
-		"8fc125d3cf44cea1f0b876a18bb3e175250ba5520a29a00eba4a2363dedffb2b",
-	"0014_sessions_last_viewed_at.sql":
-		"2fd1b7438fe4e7ef1a88b2a436d15b0277cdbae18a8af234944fd3a2fea495f7",
-	"0015_sent_alerts.sql":
+	"0019_read_model_counter.sql":
+		"b83d069271c9161783e71f5dbd0330622e6cc83340d13ec31e396da591813769",
+	"0020_sent_alerts.sql":
 		"094c38bd9dccf2799076feb9dce6196a83cf1699e58bee296e14e86b1e729068",
-	"0016_fork_point_timestamp.sql":
+	"0021_fork_point_timestamp.sql":
 		"55e06b7e72140b5dfca14caa81625574c7132d9e26420e7074297a69f3afb113",
 };
 

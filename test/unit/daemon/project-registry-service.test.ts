@@ -35,8 +35,9 @@ const makeStubRelayCache = (): RelayCache => ({
 	get: (_slug: string) =>
 		Effect.succeed({
 			slug: _slug,
-			wsHandler: { handleUpgrade: () => {} },
-			rpcWsHandler: { handleUpgrade: () => {} },
+			attach: () => () => {},
+			wsHandler: {},
+			rpcWsHandler: {},
 			stop: () => {},
 		}),
 	peek: () => Effect.succeed(Option.none()),

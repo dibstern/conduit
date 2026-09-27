@@ -18,7 +18,7 @@ import { mockRelayWebSocket, type WsMockControl } from "../helpers/ws-mock.js";
 type Page = import("@playwright/test").Page;
 type QuestionFlowControl = WsMockControl & { rpc: RpcMockControl };
 
-const PROJECT_URL = "/p/myapp/";
+const PROJECT_URL = "/s/sess-mockup-001";
 
 /** Wait for the chat page to be ready (WS connected, input visible). */
 async function waitForChatReady(page: Page): Promise<void> {

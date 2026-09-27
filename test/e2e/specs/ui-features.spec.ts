@@ -48,19 +48,18 @@ test.describe("Input Area", () => {
 		const input = new InputPage(page);
 		await app.goto(relayUrl);
 
-		// Menu starts hidden
-		expect(await input.isAttachMenuVisible()).toBe(false);
+		// Web-first assertions rather than boolean snapshots: since
+		// conduit-test-de3.35.9.3 the menu is portaled and mounted only while
+		// open, so open and close are both a DOM mutation a frame or two after
+		// the click rather than a class flip that lands synchronously.
+		await expect(input.attachMenu).toBeHidden();
 
-		// Click attach button
 		await input.openAttachMenu();
+		await expect(input.attachMenu).toBeVisible();
 
-		// Menu should be visible (toggled via CSS class, not DOM insertion)
-		expect(await input.isAttachMenuVisible()).toBe(true);
-
-		// Click again to close
+		// Clicking the trigger again closes it.
 		await input.openAttachMenu();
-
-		expect(await input.isAttachMenuVisible()).toBe(false);
+		await expect(input.attachMenu).toBeHidden();
 	});
 
 	test("attach menu has camera and photos options", async ({

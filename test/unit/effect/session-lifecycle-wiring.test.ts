@@ -27,7 +27,6 @@ import { makeSessionManagerStateLive } from "../../../src/lib/domain/relay/Servi
 import { createSilentLogger } from "../../../src/lib/logger.js";
 import { ClaudeEventPersistEffectTag } from "../../../src/lib/persistence/effect/claude-event-persist-effect.js";
 import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
-import { SqliteClient } from "../../../src/lib/persistence/sqlite-client.js";
 import type { MonitoringState } from "../../../src/lib/relay/monitoring-types.js";
 import {
 	handleSessionCreated,
@@ -148,15 +147,14 @@ function makeServiceLifecycleTestLayer(
 	api = makeMockOpenCodeAPI(),
 	dbFile?: string,
 ) {
-	const persistenceLayer =
-		dbFile === undefined ? Layer.empty : makePersistenceEffectLayer(dbFile);
+	const persistenceLayer = makePersistenceEffectLayer(dbFile ?? ":memory:");
 	const { baseLayer, serviceLayer } = makeServiceLifecycleLayers(
 		services,
 		deps,
 		api,
 		persistenceLayer,
 	);
-	return serviceLayer.pipe(Layer.provide(baseLayer));
+	return serviceLayer.pipe(Layer.provideMerge(baseLayer));
 }
 
 function makeDurableServiceLifecycleTestLayer(
@@ -276,7 +274,9 @@ describe("SessionLifecycleWiringLive", () => {
 			return Effect.gen(function* () {
 				const service = yield* SessionManagerServiceTag;
 				yield* Effect.sleep("10 millis");
-				yield* service.createSession("Service Created");
+				yield* service.createSession("Service Created", {
+					providerId: "opencode",
+				});
 				yield* Effect.sleep("50 millis");
 
 				expect(api.session.create).toHaveBeenCalledWith({
@@ -322,21 +322,13 @@ describe("SessionLifecycleWiringLive", () => {
 				yield* Effect.sleep("10 millis");
 				yield* service.deleteSession("service-deleted");
 				yield* Effect.sleep("50 millis");
-				const events = yield* Effect.sync(() => {
-					const db = SqliteClient.open(dbFile);
-					try {
-						return db.query<{
-							readonly type: string;
-							readonly data: string;
-							readonly provider: string;
-						}>(
-							"SELECT type, data, provider FROM events WHERE session_id = ? ORDER BY sequence ASC",
-							["service-deleted"],
-						);
-					} finally {
-						db.close();
-					}
-				});
+				const sql = yield* SqlClient.SqlClient;
+				const events = yield* sql<{
+					readonly type: string;
+					readonly data: string;
+					readonly provider: string;
+				}>`SELECT type, data, provider FROM events
+					WHERE session_id = 'service-deleted' ORDER BY sequence ASC`;
 
 				expect(api.session.delete).not.toHaveBeenCalled();
 				expect(deps.translator.reset).toHaveBeenCalledWith("service-deleted");

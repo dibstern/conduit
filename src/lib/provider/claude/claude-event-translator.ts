@@ -208,6 +208,14 @@ function enrichTaskInput(
 	return input;
 }
 
+function stringMetadata(
+	metadata: Record<string, unknown>,
+	key: string,
+): string | undefined {
+	const value = metadata[key];
+	return typeof value === "string" && value.length > 0 ? value : undefined;
+}
+
 function taskCompletionResult(
 	metadata: Record<string, unknown>,
 ): string | null {
@@ -227,6 +235,9 @@ function taskCompletionResult(
 
 export interface ClaudeEventTranslatorDeps {
 	readonly getSink: (ctx: ClaudeSessionContext) => EventSink | undefined;
+	readonly onBackgroundTask?: (
+		input: import("../../session/background-liveness.js").BackgroundTaskTransition,
+	) => void;
 	readonly logger?: Logger;
 }
 
@@ -234,6 +245,9 @@ export class ClaudeEventTranslator {
 	// State tracker for mapping Claude content blocks to messageId/partId.
 	private currentAssistantMessageId = "";
 	private partIdCounter = 0;
+	// inFlightTools is keyed by content block index. Tasks that never stream a
+	// tool_use block get a negative key so they can never collide with one.
+	private nextSyntheticToolIndex = -1;
 	// Who each block of assistant text is, and what of it has already been
 	// sent. Identity is positional, so no rewrite of the text can change it.
 	private readonly ledger = new AssistantTextLedger();
@@ -666,6 +680,15 @@ export class ClaudeEventTranslator {
 		ctx: ClaudeSessionContext,
 		message: SDKSystemLike & { subtype: "task_started" },
 	): Effect.Effect<void, unknown> {
+		const taskId = message.task_id ?? message.tool_use_id;
+		if (taskId)
+			this.deps.onBackgroundTask?.({
+				sessionId: ctx.sessionId,
+				taskId,
+				kind: "started",
+				status: "running",
+				...(message.task_type ? { taskType: message.task_type } : {}),
+			});
 		if (!message.tool_use_id) return Effect.void;
 		const extras = message as unknown as Record<string, unknown>;
 		return this.pushTaskMetadata(ctx, message.tool_use_id, {
@@ -688,6 +711,14 @@ export class ClaudeEventTranslator {
 		ctx: ClaudeSessionContext,
 		message: SDKSystemLike & { subtype: "task_progress" },
 	): Effect.Effect<void, unknown> {
+		const taskId = message.task_id ?? message.tool_use_id;
+		if (taskId)
+			this.deps.onBackgroundTask?.({
+				sessionId: ctx.sessionId,
+				taskId,
+				kind: "progress",
+				status: "running",
+			});
 		if (!message.tool_use_id) return Effect.void;
 		const usage = message.usage as Record<string, unknown>;
 		const extras = message as unknown as Record<string, unknown>;
@@ -716,6 +747,22 @@ export class ClaudeEventTranslator {
 		message: SDKSystemLike & { subtype: "task_notification" },
 	): Effect.Effect<void, unknown> {
 		return Effect.gen(this, function* () {
+			const taskId = message.task_id ?? message.tool_use_id;
+			if (taskId)
+				this.deps.onBackgroundTask?.({
+					sessionId: ctx.sessionId,
+					taskId,
+					kind: [
+						"completed",
+						"failed",
+						"stopped",
+						"cancelled",
+						"interrupted",
+					].includes(message.status ?? "")
+						? "completed"
+						: "progress",
+					...(message.status ? { status: message.status } : {}),
+				});
 			if (!message.tool_use_id) return;
 			const usage = message.usage as Record<string, unknown> | undefined;
 			const extras = message as unknown as Record<string, unknown>;
@@ -830,7 +877,14 @@ export class ClaudeEventTranslator {
 		messageId: string,
 	): Effect.Effect<void, unknown> {
 		const tool = this.findInFlightTool(parentToolUseId, ctx);
-		if (!tool || !tool.pendingStart) return Effect.void;
+		if (!tool)
+			return this.startBackgroundBashTool(
+				ctx,
+				parentToolUseId,
+				metadata,
+				messageId,
+			);
+		if (!tool.pendingStart) return Effect.void;
 		if (tool.toolName !== "Agent" && tool.toolName !== "Task")
 			return Effect.void;
 
@@ -859,12 +913,59 @@ export class ClaudeEventTranslator {
 		);
 	}
 
+	/**
+	 * A `run_in_background` Bash shell reaches us as a task, never as a streamed
+	 * tool_use block, so nothing in inFlightTools matches its tool_use_id. Start
+	 * one from the task metadata: the command lives in `description`, and
+	 * without a tool.started the later completion is an orphan the ingress
+	 * mapper renders as a phantom "Unknown {}" card.
+	 */
+	private startBackgroundBashTool(
+		ctx: ClaudeSessionContext,
+		parentToolUseId: string,
+		metadata: Record<string, unknown>,
+		messageId: string,
+	): Effect.Effect<void, unknown> {
+		if (metadata["subagentType"] !== "local_bash") return Effect.void;
+		const command =
+			stringMetadata(metadata, "description") ??
+			stringMetadata(metadata, "summary");
+		if (!command) return Effect.void;
+		const input = normalizeToolInput("Bash", { command });
+		ctx.inFlightTools.set(this.nextSyntheticToolIndex--, {
+			itemId: parentToolUseId,
+			toolName: "Bash",
+			title: titleForItemType(classifyToolItemType("Bash")),
+			input: { command },
+			partialInputJson: "",
+			pendingStart: false,
+		});
+		return this.push(
+			ctx,
+			makeProviderRuntimeEvent(
+				"tool.started",
+				ctx.sessionId,
+				{
+					messageId,
+					partId: parentToolUseId,
+					toolName: canonicalToolName("Bash", input),
+					callId: parentToolUseId,
+					input,
+				},
+				{ schemaVersion: 2 },
+			),
+		);
+	}
+
 	private completeTaskTool(
 		ctx: ClaudeSessionContext,
 		parentToolUseId: string,
 		result: string | null,
 	): Effect.Effect<void, unknown> {
 		return Effect.gen(this, function* () {
+			// No in-flight tool means no tool.started was ever emitted for this
+			// id; completing it would leave an orphan downstream.
+			if (!this.findInFlightTool(parentToolUseId, ctx)) return;
 			const messageId =
 				this.currentAssistantMessageId || ctx.lastAssistantUuid || "";
 			yield* this.push(

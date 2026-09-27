@@ -8,8 +8,6 @@
 //   - Semaphore(1) to prevent duplicate creation on concurrent gets
 //   - Layer.scoped ties all ScopedRefs to the layer scope
 
-import type http from "node:http";
-import type { Duplex } from "node:stream";
 import {
 	Context,
 	Data,
@@ -24,6 +22,10 @@ import {
 	Scope,
 	ScopedRef,
 } from "effect";
+import type { WebSocket } from "ws";
+import type { WsAttachOptions } from "../../../server/ws-handler-shape.js";
+import type { RpcWebSocketHandlerShape } from "../../../server/ws-rpc-handler.js";
+import type { RelayMessage } from "../../../shared-types.js";
 import type { ConnectionHealth } from "../../../types.js";
 
 // ─── Relay interface ────────────────────────────────────────────────────────
@@ -37,21 +39,16 @@ export interface RelayStatusSnapshot {
 }
 
 export interface Relay {
+	settleIdleSessions?: (
+		idleWindowMs: number,
+		now: number,
+	) => Effect.Effect<number, unknown>;
 	slug: string;
+	attach: (ws: WebSocket, options: WsAttachOptions) => () => void;
 	wsHandler: {
-		handleUpgrade: (
-			req: http.IncomingMessage,
-			socket: Duplex,
-			head: Buffer,
-		) => void;
+		broadcast?: (message: RelayMessage) => void;
 	};
-	rpcWsHandler: {
-		handleUpgrade: (
-			req: http.IncomingMessage,
-			socket: Duplex,
-			head: Buffer,
-		) => void;
-	};
+	rpcWsHandler: Pick<RpcWebSocketHandlerShape, "context">;
 	getStatusSnapshot?: () => RelayStatusSnapshot;
 	setDefaultAgent?: (agent: string) => Promise<void>;
 	setDefaultModel?: (model: {

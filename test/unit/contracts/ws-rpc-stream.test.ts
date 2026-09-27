@@ -100,6 +100,11 @@ const makeLayer = (options: {
 					getSession: () => Effect.succeed(undefined),
 					getAllSessionStatuses: () => Effect.succeed({}),
 					listSessions: () => Effect.succeed([]),
+					listSessionInfos: () => Effect.succeed([]),
+					getSessionsForReconciliation: () => Effect.succeed([]),
+					getSessionLineage: () => Effect.succeed({ rows: [], count: 0 }),
+					getSessionFamily: () => Effect.succeed([]),
+					countPendingApprovalsBySession: () => Effect.succeed([]),
 					getSessionMessagesWithParts: () => Effect.succeed([]),
 					// The catch-up read answers from its floor, so the version it
 					// reports is the one the caller will next carry — stateless, and

@@ -18,7 +18,7 @@ import sharp from "sharp";
 
 const PINK = { r: 255, g: 45, b: 123 };
 const CYAN = { r: 0, g: 229, b: 255 };
-const BG_COLOR = "#18181B"; // matches connect overlay / app background
+const BG_COLOR = "#0d0e11"; // matches --color-bg in style.css
 
 // Favicons: transparent background, tight padding (browser tabs, bookmarks)
 const FAVICON_OUTPUTS = [{ name: "favicon-96x96.png", size: 96 }];

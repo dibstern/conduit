@@ -1,3 +1,4 @@
+import { routerState } from "../../../src/lib/frontend/stores/router.svelte.js";
 // ─── convertHistoryAsync Per-Slot ────────────────────────────────────────────
 // Verifies that cache-miss session_switched (REST history path) commits to
 // the captured slot, not currentChat(). Also verifies that history_page
@@ -88,6 +89,7 @@ afterEach(() => {
 describe("convertHistoryAsync per-slot", () => {
 	it("session_switched with REST history commits to correct session slot", async () => {
 		// Switch to session-A with REST history (cache miss)
+		routerState.path = "/s/session-A";
 		handleMessage({
 			type: "session_switched",
 			id: "session-A",
@@ -113,6 +115,7 @@ describe("convertHistoryAsync per-slot", () => {
 
 	it("session_switched REST history path captures slot at start", async () => {
 		// Switch to session-A
+		routerState.path = "/s/session-A";
 		handleMessage({
 			type: "session_switched",
 			id: "session-A",
@@ -136,6 +139,7 @@ describe("convertHistoryAsync per-slot", () => {
 
 	it("history_page pagination commits to captured session slot", async () => {
 		// First, switch to a session
+		routerState.path = "/s/session-A";
 		handleMessage({
 			type: "session_switched",
 			id: "session-A",
@@ -165,6 +169,7 @@ describe("convertHistoryAsync per-slot", () => {
 
 	it("session switch mid-history-conversion aborts via generation check", async () => {
 		// Switch to session-A with large history
+		routerState.path = "/s/session-A";
 		handleMessage({
 			type: "session_switched",
 			id: "session-A",
@@ -176,6 +181,7 @@ describe("convertHistoryAsync per-slot", () => {
 		});
 
 		// Immediately switch to session-B (aborts session-A's history conversion)
+		routerState.path = "/s/session-B";
 		handleMessage({
 			type: "session_switched",
 			id: "session-B",
@@ -194,6 +200,7 @@ describe("convertHistoryAsync per-slot", () => {
 	});
 
 	it("empty session_switched (no events/history) sets loadLifecycle to ready", async () => {
+		routerState.path = "/s/session-C";
 		handleMessage({
 			type: "session_switched",
 			id: "session-C",

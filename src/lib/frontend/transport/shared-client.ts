@@ -39,11 +39,10 @@ export interface WsRpcLocation {
 }
 
 export const makeWsRpcUrl = (
-	projectSlug: string,
 	location: WsRpcLocation = globalThis.location,
 ): string => {
 	const protocol = location.protocol === "https:" ? "wss:" : "ws:";
-	return `${protocol}//${location.host}/p/${encodeURIComponent(projectSlug)}/rpc`;
+	return `${protocol}//${location.host}/rpc`;
 };
 
 /** Which of the two sockets a caller's traffic belongs on. */
@@ -177,7 +176,7 @@ const make = (connect: WsRpcConnect) =>
 			scope: Scope.CloseableScope,
 		): Effect.Effect<OpenPair> =>
 			Effect.gen(function* () {
-				const url = makeWsRpcUrl(projectSlug);
+				const url = makeWsRpcUrl();
 				const [control, stream] = yield* Effect.all([
 					connect({ url, trafficClass: "control" }),
 					connect({ url, trafficClass: "stream" }),

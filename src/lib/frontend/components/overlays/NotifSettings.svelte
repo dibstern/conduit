@@ -6,7 +6,7 @@
   key fetch, browser subscribe, server registration).
 -->
 <script lang="ts">
-	import ToggleSetting from "../shared/ToggleSetting.svelte";
+	import Toggle from "../ui/Toggle.svelte";
 	import {
 		type NotifSettings,
 		getNotifSettings,
@@ -14,6 +14,7 @@
 	} from "../../utils/notif-settings.js";
 	import { createFrontendLogger } from "../../utils/logger.js";
 	import { setPushActive } from "../../stores/ws.svelte.js";
+	import Surface from "../ui/Surface.svelte";
 
 	const pushLog = createFrontendLogger("push");
 	const notifLog = createFrontendLogger("notif");
@@ -197,27 +198,28 @@
 	<!-- svelte-ignore a11y_no_static_element_interactions -->
 	<div class="fixed inset-0 z-[var(--z-top-scrim)]" onclick={handleBackdropClick}></div>
 
-	<!-- Dropdown menu (opens upward, fixed to sidebar bottom-left like ThemePicker) -->
-	<div
-		class="fixed bottom-[56px] left-2 w-[240px] bg-bg-alt border border-border rounded-lg shadow-xl z-[var(--z-top)] py-1.5 overflow-hidden"
+	<!-- Dropdown menu (opens upward, fixed to the sidebar bottom-left) -->
+	<Surface
+		variant="raised"
+		radius="md"
+		class="fixed bottom-[56px] left-2 w-[240px] shadow-xl z-[var(--z-top)] py-1.5 overflow-hidden"
 	>
-		<ToggleSetting
+		<Toggle
 			icon="smartphone"
 			label="Push notifications"
 			checked={settings.push}
 			onchange={togglePush}
 			disabled={pushBusy || pushUnavailable}
-			dimmed={pushUnavailable}
 		/>
 
-		<ToggleSetting
+		<Toggle
 			icon="bell"
 			label="Browser alerts"
 			checked={settings.browser}
 			onchange={toggleBrowser}
 		/>
 
-		<ToggleSetting
+		<Toggle
 			icon="volume-2"
 			label="Sound"
 			checked={settings.sound}
@@ -253,5 +255,5 @@
 				notifications.
 			</div>
 		{/if}
-	</div>
+	</Surface>
 {/if}

@@ -326,7 +326,7 @@ export const handlePermissionResponse = (
 			const engineOption = yield* Effect.serviceOption(OrchestrationEngineTag);
 			if (engineOption._tag === "Some") {
 				const engine = engineOption.value;
-				const providerId = engine.getProviderForSession(sessionId);
+				const providerId = yield* engine.getProviderForSessionEffect(sessionId);
 				if (providerId === "claude") {
 					isClaudeSession = true;
 				}
@@ -393,7 +393,9 @@ export const handleAskUserResponse = (
 				);
 				if (engineOption._tag === "Some") {
 					const providerId =
-						engineOption.value.getProviderForSession(questionSessionId);
+						yield* engineOption.value.getProviderForSessionEffect(
+							questionSessionId,
+						);
 					if (providerId !== "claude") {
 						log.warn(
 							`client=${clientId} session=${questionSessionId} service-owned question ${toolId} resolved for provider=${providerId ?? "unknown"}`,
@@ -504,7 +506,9 @@ export const handleQuestionReject = (
 				);
 				const providerId =
 					engineOption._tag === "Some"
-						? engineOption.value.getProviderForSession(questionSessionId)
+						? yield* engineOption.value.getProviderForSessionEffect(
+								questionSessionId,
+							)
 						: undefined;
 				if (providerId === "claude") {
 					log.warn(
@@ -534,7 +538,9 @@ export const handleQuestionReject = (
 				);
 				if (engineOption._tag === "Some") {
 					const providerId =
-						engineOption.value.getProviderForSession(questionSessionId);
+						yield* engineOption.value.getProviderForSessionEffect(
+							questionSessionId,
+						);
 					if (providerId !== "claude") {
 						log.warn(
 							`client=${clientId} session=${questionSessionId} service-owned question reject ${toolId} resolved for provider=${providerId ?? "unknown"}`,

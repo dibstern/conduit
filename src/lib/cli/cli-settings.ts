@@ -184,9 +184,11 @@ export async function showSettingsMenu(
 						const pinPromise = new Promise<void>((pinResolve) => {
 							promptPin(async (pin) => {
 								if (pin) {
-									await opts.setPin(pin);
+									const result = await opts.setPin(pin);
 									log(
-										`${sym.done}  ${a.green}PIN updated${a.reset}`,
+										result.ok
+											? `${sym.done}  ${a.green}PIN updated${a.reset}`
+											: `${a.red}${result.error ?? "Failed to update PIN"}${a.reset}`,
 										opts.stdout,
 									);
 									log("", opts.stdout);
@@ -201,8 +203,13 @@ export async function showSettingsMenu(
 					}
 
 					case "remove_pin": {
-						await opts.removePin();
-						log(`${sym.done}  ${a.dim}PIN removed${a.reset}`, opts.stdout);
+						const result = await opts.removePin();
+						log(
+							result.ok
+								? `${sym.done}  ${a.dim}PIN removed${a.reset}`
+								: `${a.red}${result.error ?? "Failed to remove PIN"}${a.reset}`,
+							opts.stdout,
+						);
 						log("", opts.stdout);
 						await showSettingsMenu(opts);
 						resolve();

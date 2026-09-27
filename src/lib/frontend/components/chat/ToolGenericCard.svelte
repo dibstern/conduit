@@ -11,8 +11,12 @@
 	import { applyToolContentResponse } from "../../stores/ws-dispatch.js";
 	import { getToolContentRpc } from "../../transport/ws-rpc-client.js";
 
-	import Icon from "../shared/Icon.svelte";
-	import BlockGrid from '../shared/BlockGrid.svelte';
+	import Icon from "../ui/Icon.svelte";
+	import Badge from "../ui/Badge.svelte";
+	import Disclosure from "../ui/Disclosure.svelte";
+	import Button from "../ui/Button.svelte";
+	import BlockGrid from '../ui/BlockGrid.svelte';
+	import Surface from "../ui/Surface.svelte";
 
 	let { message }: {
 		message: ToolMessage;
@@ -136,17 +140,8 @@
 	{#if message.status === 'running'}
 		<div class="absolute inset-0 pointer-events-none" style="background: linear-gradient(90deg, transparent 0%, rgba(234,179,8,0.04) 50%, transparent 100%); animation: tool-shimmer-slide 2s ease-in-out infinite;"></div>
 	{/if}
-	<button
-		class="tool-header flex items-center gap-2.5 w-full py-2 px-3 cursor-pointer select-text text-xs text-text-dimmer hover:bg-bg-surface transition-colors duration-150 border-none text-left"
-		onclick={handleToggle}
-	>
-	<span
-		class="tool-chevron text-text-dimmer transition-transform duration-200 [&_.lucide]:w-3.5 [&_.lucide]:h-3.5"
-		class:rotate-90={expanded}
-	>
-		<Icon name="chevron-right" size={14} />
-	</span>
-
+	<!-- `tool-header` is load-bearing: test/visual/tool-item.spec.ts clicks it. -->
+	<Disclosure {expanded} onToggle={handleToggle} selectable class="tool-header">
 	{#if message.status === 'running'}
 		<BlockGrid cols={5} mode="fast" blockSize={1.5} gap={0.5} class="shrink-0 self-center" />
 	{:else}
@@ -167,12 +162,10 @@
 
 	{#if toolSummary.tags}
 		{#each toolSummary.tags as tag}
-			<span class="px-1.5 py-0.5 rounded bg-[rgba(var(--overlay-rgb),0.05)] font-mono text-sm text-text-dimmer shrink-0 select-text">
-				{tag}
-			</span>
+			<Badge variant="tag" size="sm" class="font-mono select-text">{tag}</Badge>
 		{/each}
 	{/if}
-	</button>
+	</Disclosure>
 
 	{#if message.status !== 'completed'}
 	<div
@@ -184,20 +177,24 @@
 	{/if}
 
 	{#if expanded && (message.result || bashCommand)}
-		<div
-			class="tool-result font-mono text-xs whitespace-pre-wrap break-all my-0.5 mx-2.5 py-3 px-4 bg-code-bg border border-border-subtle rounded-lg text-text-secondary max-h-[200px] overflow-y-auto select-text {resultErrorClass}"
-			class:is-error={message.isError}
+		<Surface
+			variant="inset"
+			padding="md"
+			radius="md"
+			class="tool-result font-mono text-xs whitespace-pre-wrap break-all my-0.5 mx-2.5 text-text-secondary max-h-[200px] overflow-y-auto select-text {resultErrorClass}"
 		>
 			{#if bashCommand}<span class="text-text-muted">$ {bashCommand}</span>{#if message.result}{"\n\n"}{/if}{/if}{#if message.result}{message.result}{/if}
-		</div>
+		</Surface>
 
 		{#if message.isTruncated && message.result}
 			<div class="flex items-center gap-2 mx-2.5 mt-1 mb-1 text-xs text-text-dimmer">
 				<span class="font-mono">
 					Showing {formatKB(message.result.length)} of {formatKB(message.fullContentLength ?? message.result.length)}
 				</span>
-				<button
-					class="px-2 py-0.5 rounded bg-accent/10 text-accent hover:bg-accent/20 transition-colors duration-150 text-xs font-medium disabled:opacity-50 disabled:cursor-not-allowed"
+				<Button
+					variant="accent-soft"
+					size="content"
+					class="px-2 py-0.5 rounded text-xs font-medium"
 					onclick={requestFullContent}
 					disabled={loadingFullContent}
 				>
@@ -206,7 +203,7 @@
 					{:else}
 						Show full output
 					{/if}
-				</button>
+				</Button>
 			</div>
 		{/if}
 	{/if}

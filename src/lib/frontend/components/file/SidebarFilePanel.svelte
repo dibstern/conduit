@@ -5,13 +5,14 @@
 <script lang="ts">
 	import type { BreadcrumbSegment, FileEntry, RelayMessage } from "../../types.js";
 	import { onFileBrowser } from "../../stores/ws.svelte.js";
-	import { openFileViewer, closeMobileSidebar, setSidebarPanel } from "../../stores/ui.svelte.js";
+	import { openFileViewer, setSidebarPanel } from "../../stores/ui.svelte.js";
 	import { getCurrentSlug } from "../../stores/router.svelte.js";
 	import { getFileContentRpc, getFileListRpc } from "../../transport/ws-rpc-client.js";
 	import { applyGetFileContentResponse, applyGetFileListResponse } from "../../stores/ws-dispatch.js";
 	import FileTreeNode from "./FileTreeNode.svelte";
-	import Icon from "../shared/Icon.svelte";
-	import BlockGrid from "../shared/BlockGrid.svelte";
+	import BlockGrid from "../ui/BlockGrid.svelte";
+	import TextButton from "../ui/TextButton.svelte";
+	import Button from "../ui/Button.svelte";
 
 	// ─── State ─────────────────────────────────────────────────────────────────
 
@@ -91,9 +92,6 @@
 				applyGetFileContentResponse,
 			);
 		}
-		if (typeof window !== "undefined" && window.innerWidth < 768) {
-			closeMobileSidebar();
-		}
 	}
 
 	function handleDirClick(fullPath: string) {
@@ -142,24 +140,30 @@
 	<div class="session-list-header flex items-center justify-between px-4 py-1 shrink-0">
 		<span class="text-sm font-semibold uppercase tracking-[0.5px] text-text-dimmer">File Browser</span>
 		<div class="session-list-header-actions flex items-center gap-0.5">
-			<button
+			<Button
 				id="file-panel-refresh"
-				type="button"
+				variant="toolbar"
+				size="content"
+				class="h-6 w-6 rounded-md"
+				iconOnly
+				iconSize={14}
+				icon="refresh-cw"
 				title="Refresh file tree"
-			class="flex items-center justify-center w-6 h-6 border-none rounded-md bg-transparent text-text-dimmer cursor-pointer transition-[background,color] duration-100 p-0 hover:bg-[rgba(var(--overlay-rgb),0.04)] hover:text-text"
-			onclick={refresh}
-			>
-				<Icon name="refresh-cw" size={14} />
-			</button>
-			<button
+				ariaLabel="Refresh file tree"
+				onclick={refresh}
+			/>
+			<Button
 				id="file-panel-close"
-				type="button"
+				variant="toolbar"
+				size="content"
+				class="h-6 w-6 rounded-md"
+				iconOnly
+				iconSize={14}
+				icon="x"
 				title="Close file browser"
-			class="flex items-center justify-center w-6 h-6 border-none rounded-md bg-transparent text-text-dimmer cursor-pointer transition-[background,color] duration-100 p-0 hover:bg-[rgba(var(--overlay-rgb),0.04)] hover:text-text"
-			onclick={closePanel}
-			>
-				<Icon name="x" size={14} />
-			</button>
+				ariaLabel="Close file browser"
+				onclick={closePanel}
+			/>
 		</div>
 	</div>
 
@@ -172,12 +176,12 @@
 			{#if i === breadcrumbs.length - 1}
 				<span class="fb-crumb-active text-text font-medium">{crumb.label}</span>
 			{:else}
-				<button
-					class="fb-crumb hover:text-text hover:underline cursor-pointer bg-transparent border-none text-text-muted text-xs p-0"
+				<TextButton
+					underline="hover" class="fb-crumb text-xs"
 					onclick={() => navigateTo(crumb.path)}
 				>
 					{crumb.label}
-				</button>
+				</TextButton>
 			{/if}
 		{/each}
 	</div>

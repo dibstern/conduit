@@ -4,6 +4,8 @@
 <script lang="ts">
 	import type { StatusVariant } from "../../utils/setup-utils.js";
 	import StepHeader from "./StepHeader.svelte";
+	import StatusBox from "./StatusBox.svelte";
+	import Button from "../ui/Button.svelte";
 
 	let {
 		totalSteps,
@@ -37,53 +39,48 @@
 	/>
 
 	{#if pushNeedsHttps}
-		<div
-		class="flex items-center gap-2 px-4 py-3 rounded-panel text-base my-4 bg-bg-alt text-text border border-border"
-		>
+		<StatusBox status="warn">
 			Push notifications require HTTPS. Complete the certificate step
 			first.
-		</div>
+		</StatusBox>
 		<div class="flex gap-2 mt-5">
-			<button
-				class="w-full inline-flex items-center justify-center gap-2 bg-accent text-bg px-6 py-3 rounded-xl font-semibold text-sm border-none cursor-pointer font-sans hover:opacity-90 transition-opacity"
+			<Button
+				variant="primary"
+				size="content"
+				class="w-full gap-2 px-6 py-3 rounded-xl font-semibold text-sm font-sans"
 				onclick={onnextstep}
 			>
 				Finish anyway
-			</button>
+			</Button>
 		</div>
 	{:else if !pushEnabled}
-		<button
-			class="w-full inline-flex items-center justify-center gap-2 bg-accent text-bg px-6 py-3 rounded-xl font-semibold text-sm border-none cursor-pointer font-sans hover:opacity-90 transition-opacity disabled:opacity-40 disabled:cursor-default"
+		<Button
+			variant="primary"
+			size="content"
+			class="w-full gap-2 px-6 py-3 rounded-xl font-semibold text-sm font-sans"
 			onclick={onenablepush}
 			disabled={pushBusy}
 		>
 			{pushBusy
 				? "Requesting permission..."
 				: "Enable Push Notifications"}
-		</button>
+		</Button>
 	{/if}
 
 	{#if pushStatus}
-		{@const statusClasses =
-			pushStatus === "ok"
-				? "bg-success/10 text-success border-success/15"
-				: "bg-bg-alt text-text border-border"}
-		<div
-			class="flex items-center gap-2 px-4 py-3 rounded-panel text-base my-4 {statusClasses}"
-			style="border-width: 1px;"
-		>
-			{pushMessage}
-		</div>
+		<StatusBox status={pushStatus}>{pushMessage}</StatusBox>
 	{/if}
 
 	{#if pushStatus === "warn"}
 		<div class="flex gap-2 mt-5">
-			<button
-				class="w-full inline-flex items-center justify-center gap-2 bg-accent text-bg px-6 py-3 rounded-xl font-semibold text-sm border-none cursor-pointer font-sans hover:opacity-90 transition-opacity"
+			<Button
+				variant="primary"
+				size="content"
+				class="w-full gap-2 px-6 py-3 rounded-xl font-semibold text-sm font-sans"
 				onclick={onnextstep}
 			>
 				Finish anyway
-			</button>
+			</Button>
 		</div>
 	{/if}
 </div>

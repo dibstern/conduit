@@ -39,7 +39,16 @@ build_storybook() {
 update_macos() {
   echo ""
   echo "━━━ Updating macOS (darwin) snapshots ━━━"
-  pnpm exec playwright test "$SCREENSHOT_SPEC" \
+  # VISUAL_STRICT=1 for the same reason the Linux leg sets it, and it is not
+  # optional here either: `--update-snapshots` defaults to mode `changed`, which
+  # respects the CONFIGURED tolerance (maxDiffPixelRatio 0.01 = ~13k pixels of a
+  # 1440x900 capture). Without strict, any existing darwin baseline whose drift
+  # is under that threshold is silently LEFT STALE while the run reports success.
+  # Observed for real: a palette-wide recapture rewrote 736 linux baselines and
+  # only 133 darwin ones, leaving ~600 darwin goldens frozen at the old colours
+  # with no error anywhere. Strict sets threshold 0, so "changed" means "differs
+  # at all" and the two platforms stay in lockstep.
+  VISUAL_STRICT=1 pnpm exec playwright test "$SCREENSHOT_SPEC" \
     --config "$VISUAL_CONFIG" \
     --update-snapshots
   echo "✓ macOS snapshots updated"
@@ -58,9 +67,19 @@ update_linux() {
   # Pull image if not cached
   docker pull --platform linux/amd64 "$DOCKER_IMAGE" 2>/dev/null || true
 
+  # VISUAL_STRICT=1 is load-bearing, not belt-and-braces. `--update-snapshots`
+  # defaults to mode `changed`, which respects the CONFIGURED tolerance — and the
+  # default config allows maxDiffPixelRatio 0.01, i.e. ~13k pixels of a 1440x900
+  # capture. Without strict, any EXISTING linux golden whose drift is under that
+  # threshold is silently left stale. That matters right now: b68e6c8e changed the
+  # Chromium raster flags, which shifts a small number of pixels in many captures,
+  # so every pre-existing linux baseline is stale by an amount smaller than the
+  # tolerance that would decide whether to rewrite it. Strict sets threshold 0, so
+  # "changed" means "differs at all" and the whole set is genuinely regenerated.
   docker run --rm \
     -v "$ROOT_DIR":/work \
     -w /work \
+    -e VISUAL_STRICT=1 \
     --platform linux/amd64 \
     -e COREPACK_ENABLE_DOWNLOAD_PROMPT=0 \
     "$DOCKER_IMAGE" \

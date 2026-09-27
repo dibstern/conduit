@@ -1,6 +1,6 @@
 // ─── Shell Subscription (delta source #2) ────────────────────────────────────
 // The concrete SubscriptionSource for the shell — the sidebar session list
-// (whole `sessions` projection rows: title, provider, status, recency).
+// (root session summaries: title, attention, status, recency).
 //
 // It is two answers and a policy (ni8.5 §7). The sessions table carries a
 // read-model version, so "what changed" is `WHERE version > lastSeen` and
@@ -59,9 +59,9 @@ export const subscribeShell = (
 			return stream<SessionInfo, ShellSubscriptionError>({
 				bus,
 				source: {
-					read: readQuery.readSessionList,
-					// The shell serves every session, so any stamped row is its
-					// business and any removed one leaves its list.
+					read: (range) => readQuery.readSessionList({ ...range, roots: true }),
+					// A descendant advance can change its root summary. The read
+					// selects affected roots by the highest descendant version.
 					route: (advance) => ({
 						moved: advance.sessionIds.length > 0,
 						removed: advance.removedSessionIds,

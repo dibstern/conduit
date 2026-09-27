@@ -6,11 +6,20 @@
 <script lang="ts">
 	import Modal from "./Modal.svelte";
 	import { untrack } from "svelte";
-	import Icon from "../shared/Icon.svelte";
-	import ToggleSetting from "../shared/ToggleSetting.svelte";
+	import Button from "../ui/Button.svelte";
+	import Badge from "../ui/Badge.svelte";
+	import Icon from "../ui/Icon.svelte";
+	import Checkbox from "../ui/Checkbox.svelte";
+	import Select from "../ui/Select.svelte";
+	import Textarea from "../ui/Textarea.svelte";
+	import TextInput from "../ui/TextInput.svelte";
+	import Toggle from "../ui/Toggle.svelte";
+	import Surface from "../ui/Surface.svelte";
+	import Tabs from "../ui/Tabs.svelte";
+	import SegmentedControl from "../ui/SegmentedControl.svelte";
+	import Disclosure from "../ui/Disclosure.svelte";
 	import ClaudeSettingsTab from "./ClaudeSettingsTab.svelte";
 	import { createFrontendLogger } from "../../utils/logger.js";
-	import type { Base16Theme } from "../../stores/theme-compute.js";
 
 	const log = createFrontendLogger("push");
 	import {
@@ -38,27 +47,30 @@
 	import { featureFlags, toggleFeature } from "../../stores/feature-flags.svelte.js";
 	import {
 		themeState,
-		getThemeLists,
-		applyTheme,
+		setThemeMode,
+		type ThemeMode,
 	} from "../../stores/theme.svelte.js";
 	import {
 		type NotifSettings,
 		getNotifSettings,
 		saveNotifSettings,
 	} from "../../utils/notif-settings.js";
-	import { setPushActive } from "../../stores/ws.svelte.js";
+	import { getIsConnected, setPushActive } from "../../stores/ws.svelte.js";
 	import { clearClaudeSettingEdits } from "../../stores/claude-settings.svelte.js";
-	import { getCurrentSlug } from "../../stores/router.svelte.js";
+	import { getCurrentRoute, getCurrentSlug } from "../../stores/router.svelte.js";
+	import TextButton from "../ui/TextButton.svelte";
 	import {
 		addInstanceRpc,
 		detectProxyRpc,
 		getAgentsRpc,
+		getAutoSettleSettingRpc,
 		getModelsRpc,
 		removeInstanceRpc,
 		renameInstanceRpc,
 		scanNowRpc,
 		setHiddenEntriesRpc,
 		startInstanceRpc,
+		setAutoSettleSettingRpc,
 		stopInstanceRpc,
 		updateInstanceRpc,
 	} from "../../transport/ws-rpc-client.js";
@@ -75,6 +87,8 @@
 	// ─── Local state ────────────────────────────────────────────────────────
 
 	let activeTab = $state("notifications");
+	let autoSettleDays = $state<number | null>(3);
+	let autoSettleSaving = $state(false);
 
 	// Instance management
 	let expandedInstanceId = $state<string | null>(null);
@@ -96,6 +110,26 @@
 	let formEnv = $state("");
 	let formSaving = $state(false);
 	const DRIVER_OPTIONS = ["opencode", "claude"] as const;
+
+	/**
+	 * Hoisted out of the template so the array identity is stable across
+	 * renders; an inline literal would be a new array every time `activeTab`
+	 * changed, re-keying the whole strip on every tab click.
+	 */
+	const SETTINGS_TABS = [
+		{ value: "notifications", label: "Alerts", testId: "settings-tab-notifications" },
+		{ value: "appearance", label: "Theme", testId: "settings-tab-appearance" },
+		{ value: "visibility", label: "Agents & Models", testId: "settings-tab-visibility" },
+		{ value: "claude", label: "Claude", testId: "settings-tab-claude" },
+		{ value: "instances", label: "Instances", testId: "settings-tab-instances" },
+		{ value: "debug", label: "Debug", testId: "settings-tab-debug" },
+	];
+
+	const DRIVER_TAB_OPTIONS = DRIVER_OPTIONS.map((driver) => ({
+		value: driver,
+		label: driver === "claude" ? "Claude" : "OpenCode",
+		testId: `instance-form-driver-${driver}`,
+	}));
 
 	// Notification settings
 	let notifSettings: NotifSettings = $state(getNotifSettings());
@@ -119,10 +153,6 @@
 	const scanResult = $derived(getScanResult());
 	const proxyResult = $derived(getProxyDetection());
 	const ccsDetected = $derived(proxyResult?.found ?? false);
-	const themeLists = $derived(getThemeLists());
-
-	const SWATCH_KEYS = ["base00", "base01", "base09", "base0B", "base0D"] as const;
-
 	// ─── Effects ────────────────────────────────────────────────────────────
 
 	$effect(() => {
@@ -156,6 +186,24 @@
 		} else {
 			clearClaudeSettingEdits();
 		}
+	});
+
+	$effect(() => {
+		if (!visible || !getIsConnected()) return;
+		// A session URL can open before its project attachment arrives. The RPC
+		// socket pair is keyed by that attachment, so wait for it on reload.
+		const route = getCurrentRoute();
+		if (route.page === "chat" && route.sessionId && !getCurrentSlug()) return;
+		let current = true;
+		void getAutoSettleSettingRpc()
+			.then((days) => {
+				if (current && !autoSettleSaving) autoSettleDays = days;
+			})
+			.catch(() => {
+				if (current)
+					showToast("Couldn't load auto-settle setting", { variant: "error" });
+			});
+		return () => { current = false; };
 	});
 
 	// ─── Instance handlers ──────────────────────────────────────────────────
@@ -280,20 +328,26 @@
 						instanceId: editingInstanceId,
 						name,
 						...(isClaude
-							? { configDir }
-							: { ...(port !== undefined ? { port } : {}), env }),
+							? { ...(configDir !== undefined ? { configDir } : {}) }
+							: {
+									...(port !== undefined ? { port } : {}),
+									...(env !== undefined ? { env } : {}),
+								}),
 					})
 				: addInstanceRpc({
 						projectSlug,
 						name,
 						driver: formDriver,
 						...(isClaude
-							? { managed: false, configDir }
+							? {
+									managed: false,
+									...(configDir !== undefined ? { configDir } : {}),
+								}
 							: {
 									managed: formManaged,
 									...(port !== undefined ? { port } : {}),
 									...(url !== undefined ? { url } : {}),
-									env,
+									...(env !== undefined ? { env } : {}),
 								}),
 					});
 		void request
@@ -508,9 +562,9 @@
 {#snippet cmdBlock(cmd: string, key: string)}
 	<div class="group/cmd flex items-start gap-1.5 bg-black/[0.04] dark:bg-white/[0.06] rounded px-2.5 py-1.5 font-mono text-xs text-text leading-relaxed">
 		<span class="flex-1 whitespace-pre-wrap break-all select-all">{cmd}</span>
-		<button type="button" class="shrink-0 p-0.5 text-text-muted hover:text-text opacity-0 group-hover/cmd:opacity-100 transition-opacity cursor-pointer" title="Copy" onclick={() => handleCopy(cmd, key)}>
+		<TextButton type="button" class="shrink-0 p-0.5 opacity-0 group-hover/cmd:opacity-100 transition-opacity" title="Copy" aria-label="Copy" onclick={() => handleCopy(cmd, key)}>
 			{#if copiedKey === key}<Icon name="check" size={13} class="text-green-500" />{:else}<Icon name="copy" size={13} />{/if}
-		</button>
+		</TextButton>
 	</div>
 {/snippet}
 
@@ -519,34 +573,35 @@
 			<!-- Header -->
 			<div class="shrink-0 flex items-center justify-between px-5 py-3 border-b border-border">
 				<h2 id="settings-panel-title" class="text-lg font-semibold text-text font-brand">Settings</h2>
-				<button data-testid="settings-close-btn" class="text-text-muted hover:text-text p-1 cursor-pointer border-none bg-transparent" onclick={() => onClose?.()}>
-					<Icon name="x" size={16} />
-				</button>
+				<!-- `ghost` is a shade darker than this control and carries a hover
+				     fill it has never had. Both are REPLACED rather than overridden:
+				     the `!` triple this used to carry was important at every state,
+				     so it also had to beat ghost's own `hover:text-text`. -->
+				<Button
+					iconOnly
+					ariaLabel="Close settings"
+					icon="x"
+					variant="ghost"
+					tone="muted"
+					hoverFill="none"
+					size="content"
+					class="p-1"
+					data-testid="settings-close-btn"
+					onclick={() => onClose?.()}
+				/>
 			</div>
 
-			<!-- Tabs -->
-			<!-- shrink-0 is load-bearing: overflow-x-auto makes this flex item's
-			     automatic minimum height zero rather than content height, so without
-			     it a tall tab squeezes the tab bar down to a sliver. -->
-			<div class="shrink-0 flex border-b border-border px-5 gap-1 font-brand overflow-x-auto">
-				{#each [
-					{ id: "notifications", label: "Alerts" },
-					{ id: "appearance", label: "Theme" },
-					{ id: "visibility", label: "Agents & Models" },
-					{ id: "claude", label: "Claude" },
-					{ id: "instances", label: "Instances" },
-					{ id: "debug", label: "Debug" },
-				] as tab}
-					<button
-						data-testid="settings-tab-{tab.id}"
-						class="px-2 py-2 text-sm font-medium whitespace-nowrap border-b-2 -mb-px transition-colors cursor-pointer border-none bg-transparent {activeTab === tab.id ? 'border-brand-a text-text' : 'border-transparent text-text-muted hover:text-text'}"
-						style="border-bottom: 2px solid {activeTab === tab.id ? 'var(--color-brand-a)' : 'transparent'};"
-						onclick={() => (activeTab = tab.id)}
-					>
-						{tab.label}
-					</button>
-				{/each}
-			</div>
+			<!-- Tabs.
+			     shrink-0 is load-bearing: the strip scrolls horizontally, which makes
+			     this flex item's automatic minimum height zero rather than content
+			     height, so without it a tall tab squeezes the bar down to a sliver. -->
+			<Tabs
+				bind:value={activeTab}
+				variant="underline"
+				label="Settings sections"
+				options={SETTINGS_TABS}
+				class="shrink-0"
+			/>
 
 			<!-- Tab content -->
 			<div class="flex-1 overflow-y-auto p-5">
@@ -554,17 +609,16 @@
 				<!-- ═══ Notifications ═══ -->
 				{#if activeTab === "notifications"}
 					<div class="space-y-2">
-						<ToggleSetting
+						<Toggle
 							icon="smartphone"
 							label="Push notifications"
 							description="Receive push notifications even when the tab is closed"
 							checked={notifSettings.push}
 							onchange={togglePush}
 							disabled={pushBusy || pushUnavailable}
-							dimmed={pushUnavailable}
-							class="bg-bg-surface border border-border rounded-panel px-5 py-4 gap-4 font-brand {pushBusy || pushUnavailable ? 'opacity-60' : ''}"
+							class="bg-bg-surface border border-border rounded-panel px-5 py-4 gap-4 font-brand"
 						/>
-						<ToggleSetting
+						<Toggle
 							icon="bell"
 							label="Browser alerts"
 							description="Show desktop notifications when tasks complete"
@@ -572,7 +626,7 @@
 							onchange={toggleBrowser}
 							class="bg-bg-surface border border-border rounded-panel px-5 py-4 gap-4 font-brand"
 						/>
-						<ToggleSetting
+						<Toggle
 							icon="volume-2"
 							label="Sound"
 							description="Play a sound when notifications are triggered"
@@ -593,39 +647,64 @@
 
 				<!-- ═══ Appearance ═══ -->
 				{:else if activeTab === "appearance"}
-					<div class="space-y-4">
-						{#each [
-							{ key: "dark", label: "Dark", items: themeLists.dark },
-							{ key: "light", label: "Light", items: themeLists.light },
-							{ key: "custom", label: "Custom", items: themeLists.custom },
-						] as section}
-							{#if section.items.length > 0}
-								<div>
-									<div class="text-xs font-semibold uppercase tracking-widest text-text-muted px-1 mb-2 font-brand">{section.label}</div>
-									<div class="space-y-1">
-										{#each section.items as { id, theme }}
-											<button
-												class="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg border transition-colors cursor-pointer bg-transparent {themeState.currentThemeId === id ? 'border-brand-a bg-brand-a/5' : 'border-transparent hover:bg-bg-surface'}"
-												onclick={() => applyTheme(id)}
-											>
-												<div class="flex gap-[2px] shrink-0">
-													{#each SWATCH_KEYS as key}
-														<span class="w-3 h-3 rounded-sm border border-white/10" style="background: #{theme[key]};"></span>
-													{/each}
-												</div>
-												<span class="flex-1 text-left text-base font-brand {themeState.currentThemeId === id ? 'text-text font-medium' : 'text-text-secondary'}">
-													{theme.name}
-												</span>
-												{#if themeState.currentThemeId === id}
-													<Icon name="check" size={14} class="text-success shrink-0" />
-												{/if}
-											</button>
-										{/each}
-									</div>
-								</div>
-							{/if}
-						{/each}
-					</div>
+					<Surface variant="card" padding="lg" radius="panel" class="font-brand">
+						<label for="theme-mode" class="block text-base font-medium text-text">
+							Theme
+						</label>
+						<p class="mt-1 text-xs text-text-muted">
+							Choose a fixed appearance or follow your system setting.
+						</p>
+						<Select
+							id="theme-mode"
+							value={themeState.mode}
+							class="mt-3 w-full"
+							onchange={(event) =>
+								setThemeMode(
+									(event.currentTarget as HTMLSelectElement).value as ThemeMode,
+								)}
+						>
+							<option value="light">Light</option>
+							<option value="dark">Dark</option>
+							<option value="system">System</option>
+						</Select>
+					</Surface>
+					<Surface variant="card" padding="lg" radius="panel" class="mt-4 font-brand">
+						<label for="settings-auto-settle-select" class="block text-base font-medium text-text">Settle idle sessions after</label>
+						<Select
+							id="settings-auto-settle-select"
+							data-testid="settings-auto-settle-select"
+							value={autoSettleDays === null ? "never" : String(autoSettleDays)}
+							disabled={autoSettleSaving}
+							class="mt-3 w-full"
+							onchange={(event) => {
+								const value = event.currentTarget.value;
+								const next = value === "never" ? null : Number(value);
+								autoSettleSaving = true;
+								void setAutoSettleSettingRpc(next)
+									.then((days) => {
+										autoSettleDays = days;
+									})
+									.catch(() => {
+										showToast("Couldn't save auto-settle setting", { variant: "error" });
+									})
+									.finally(() => {
+										autoSettleSaving = false;
+									});
+							}}
+						>
+							<option value="1">1 day</option>
+							<option value="2">2 days</option>
+							<option value="3">3 days</option>
+							<option value="7">1 week</option>
+							<option value="14">2 weeks</option>
+							<option value="30">30 days</option>
+							<option value="90">90 days</option>
+							<option value="never">Never</option>
+						</Select>
+						<p class="mt-1 text-xs text-text-muted">
+							Settled sessions move to the Settled shelf. Nothing is deleted.
+						</p>
+					</Surface>
 
 				<!-- ═══ Agents & Models ═══ -->
 				{:else if activeTab === "visibility"}
@@ -646,23 +725,23 @@
 							<div>
 								<div class="flex items-center justify-between px-1 mb-2">
 									<div class="text-xs font-semibold uppercase tracking-widest text-text-muted font-brand">{provider.name}</div>
-									<button
-										class="text-xs text-text-muted hover:text-text cursor-pointer border-none bg-transparent font-brand"
+									<TextButton
+										class="text-xs font-brand"
 										onclick={() => toggleProviderAll(provider.id, !allHidden)}
 									>
 										{allHidden ? "Show all" : "Hide all"}
-									</button>
+									</TextButton>
 								</div>
-								<div class="space-y-1 bg-bg-surface border border-border rounded-panel px-4 py-2">
+								<Surface variant="card" radius="panel" class="space-y-1 px-4 py-2">
 									{#each provider.models as model (model.id)}
-										<ToggleSetting
+										<Toggle
 											label={model.name || model.id}
 											checked={!hiddenModelSet.has(`${provider.id}/${model.id}`)}
 											onchange={() => toggleModel(provider.id, model.id)}
 											class="py-1.5 gap-3 font-brand border-none bg-transparent"
 										/>
 									{/each}
-								</div>
+								</Surface>
 							</div>
 						{/each}
 
@@ -672,16 +751,16 @@
 								<div class="text-xs font-semibold uppercase tracking-widest text-text-muted px-1 mb-2 font-brand">
 									{discoveryState.agentProviderScope?.name} agents
 								</div>
-								<div class="space-y-1 bg-bg-surface border border-border rounded-panel px-4 py-2">
+								<Surface variant="card" radius="panel" class="space-y-1 px-4 py-2">
 									{#each discoveryState.agents as agent (agent.id)}
-										<ToggleSetting
+										<Toggle
 											label={agent.name || agent.id}
 											checked={!hiddenAgentSet.has(`${agentScopeId}/${agent.id}`)}
 											onchange={() => toggleAgent(agent.id)}
 											class="py-1.5 gap-3 font-brand border-none bg-transparent"
 										/>
 									{/each}
-								</div>
+								</Surface>
 							</div>
 						{/if}
 					</div>
@@ -698,25 +777,31 @@
 							{instances.length} instance{instances.length !== 1 ? "s" : ""}
 						</span>
 						<div class="flex items-center gap-2">
-						<button
-							type="button"
-							class="flex items-center gap-1.5 px-2.5 py-1 text-xs rounded border border-border text-text-muted hover:text-text hover:border-text-muted transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed font-brand"
+						<!-- Icon stays a child rather than `icon=`: Button renders it at
+						     16, this is 12, and only a child can carry the spin class. -->
+						<Button
+							variant="secondary"
+							tone="muted"
+							hoverFill="none"
+							size="content"
+							class="gap-1.5 px-2.5 py-1 text-xs rounded hover:border-text-muted font-brand"
 							data-testid="scan-now-btn"
 							disabled={scanInFlight}
 							onclick={handleScanNow}
 						>
 							<Icon name="refresh-cw" size={12} class={scanInFlight ? "animate-spin" : ""} />
 							{scanInFlight ? "Scanning..." : "Scan Now"}
-						</button>
-						<button
-							type="button"
-							class="flex items-center gap-1.5 px-2.5 py-1 text-xs rounded border border-brand-a text-brand-a hover:bg-brand-a/10 transition-colors cursor-pointer font-brand"
+						</Button>
+						<Button
+							variant="ghost-accent"
+							size="content"
+							class="gap-1.5 px-2.5 py-1 text-xs rounded border border-accent font-brand"
 							data-testid="add-instance-btn"
 							onclick={() => openAddInstance()}
 						>
 							<Icon name="plus" size={12} />
 							Add
-						</button>
+						</Button>
 						</div>
 					</div>
 
@@ -728,26 +813,16 @@
 								</span>
 							</div>
 							{#if instanceFormMode === "add"}
-								<div class="flex gap-1.5" role="group" aria-label="Driver">
-									{#each DRIVER_OPTIONS as driverOption}
-										<button
-											type="button"
-											data-testid="instance-form-driver-{driverOption}"
-											aria-pressed={formDriver === driverOption}
-											class="flex-1 px-3 py-1.5 text-xs rounded border transition-colors cursor-pointer {formDriver === driverOption ? 'border-brand-a text-text bg-brand-a/10' : 'border-border text-text-muted hover:text-text'}"
-											onclick={() => (formDriver = driverOption)}
-										>
-											{driverOption === "claude" ? "Claude" : "OpenCode"}
-										</button>
-									{/each}
-								</div>
+								<SegmentedControl
+									bind:value={formDriver}
+									label="Driver"
+									options={DRIVER_TAB_OPTIONS}
+								/>
 							{/if}
 							<label class="block space-y-1">
 								<span class="text-xs text-text-muted">Name</span>
-								<input
-									type="text"
+								<TextInput
 									data-testid="instance-form-name"
-									class="w-full px-2 py-1.5 text-sm border border-border rounded bg-bg text-text focus:border-brand-a outline-none"
 									placeholder={formDriver === "claude" ? "Work Claude" : "Staging OC"}
 									bind:value={formName}
 								/>
@@ -755,42 +830,40 @@
 							{#if formDriver === "claude"}
 								<label class="block space-y-1">
 									<span class="text-xs text-text-muted">Config directory <span class="opacity-60">(optional)</span></span>
-									<input
-										type="text"
+									<TextInput
 										data-testid="instance-form-configdir"
-										class="w-full px-2 py-1.5 text-sm border border-border rounded bg-bg text-text focus:border-brand-a outline-none"
 										placeholder="~/.config/claude/work"
 										bind:value={formConfigDir}
 									/>
 								</label>
 							{:else}
 								<label class="flex items-center gap-2 text-sm text-text cursor-pointer">
-									<input type="checkbox" data-testid="instance-form-managed" bind:checked={formManaged} />
+									<Checkbox data-testid="instance-form-managed" bind:checked={formManaged} />
 									<span>Managed <span class="text-xs text-text-muted">(conduit starts the server)</span></span>
 								</label>
 								{#if formManaged}
 									<label class="block space-y-1">
 										<span class="text-xs text-text-muted">Port</span>
-										<input type="text" inputmode="numeric" data-testid="instance-form-port" class="w-full px-2 py-1.5 text-sm border border-border rounded bg-bg text-text focus:border-brand-a outline-none" placeholder="4098" bind:value={formPort} />
+										<TextInput inputmode="numeric" data-testid="instance-form-port" placeholder="4098" bind:value={formPort} />
 									</label>
 								{:else}
 									<label class="block space-y-1">
 										<span class="text-xs text-text-muted">URL <span class="opacity-60">(or port)</span></span>
-										<input type="text" data-testid="instance-form-url" class="w-full px-2 py-1.5 text-sm border border-border rounded bg-bg text-text focus:border-brand-a outline-none" placeholder="http://127.0.0.1:4098" bind:value={formUrl} />
+										<TextInput data-testid="instance-form-url" placeholder="http://127.0.0.1:4098" bind:value={formUrl} />
 									</label>
 									<label class="block space-y-1">
 										<span class="text-xs text-text-muted">Port <span class="opacity-60">(optional)</span></span>
-										<input type="text" inputmode="numeric" data-testid="instance-form-port" class="w-full px-2 py-1.5 text-sm border border-border rounded bg-bg text-text focus:border-brand-a outline-none" placeholder="4098" bind:value={formPort} />
+										<TextInput inputmode="numeric" data-testid="instance-form-port" placeholder="4098" bind:value={formPort} />
 									</label>
 								{/if}
 								<label class="block space-y-1">
 									<span class="text-xs text-text-muted">Environment <span class="opacity-60">(KEY=VALUE per line, optional)</span></span>
-									<textarea data-testid="instance-form-env" rows="2" class="w-full px-2 py-1.5 text-sm border border-border rounded bg-bg text-text focus:border-brand-a outline-none resize-y font-mono" placeholder="ANTHROPIC_API_KEY=sk-ant-..." bind:value={formEnv}></textarea>
+									<Textarea data-testid="instance-form-env" rows={2} class="resize-y font-mono" placeholder="ANTHROPIC_API_KEY=sk-ant-..." bind:value={formEnv} />
 								</label>
 							{/if}
 							<div class="flex justify-end gap-2 pt-1">
-								<button type="button" data-testid="instance-form-cancel" class="px-3 py-1 text-xs rounded border border-border text-text-muted hover:text-text cursor-pointer bg-transparent" onclick={closeInstanceForm}>Cancel</button>
-								<button type="button" data-testid="instance-form-save" disabled={formSaving} class="px-3 py-1 text-xs rounded border border-brand-a text-brand-a hover:bg-brand-a/10 cursor-pointer bg-transparent disabled:opacity-50 disabled:cursor-not-allowed" onclick={submitInstanceForm}>{formSaving ? "Saving..." : "Save"}</button>
+								<Button variant="secondary" tone="muted" hoverFill="none" size="content" class="px-3 py-1 text-xs rounded" data-testid="instance-form-cancel" onclick={closeInstanceForm}>Cancel</Button>
+								<Button variant="ghost-accent" size="content" class="px-3 py-1 text-xs rounded border border-accent" data-testid="instance-form-save" disabled={formSaving} onclick={submitInstanceForm}>{formSaving ? "Saving..." : "Save"}</Button>
 							</div>
 						</div>
 					{/if}
@@ -814,18 +887,24 @@
 							{#each instances as inst}
 								{@const driver = instanceDriver(inst)}
 								<div class="border border-border rounded-lg" data-testid="instance-row-{inst.id}" data-driver={driver}>
-									<button class="flex items-center justify-between w-full px-3 py-2 text-left text-sm hover:bg-white/[0.03] cursor-pointer bg-transparent border-none" onclick={() => handleToggleInstance(inst.id)}>
+									<Disclosure expanded={expandedInstanceId === inst.id} onToggle={() => handleToggleInstance(inst.id)} chevron={false} look="row" density="split" class="justify-between">
 										<div class="flex items-center gap-2 min-w-0">
 											<span class={"w-2 h-2 rounded-full shrink-0 " + instanceStatusColor(inst.status)}></span>
 											{#if renamingInstanceId === inst.id}
 												<!-- svelte-ignore a11y_autofocus -->
-												<input type="text" class="px-1.5 py-0.5 text-sm border border-accent rounded bg-bg text-text w-36" bind:value={renameValue} onkeydown={handleRenameKeydown} onclick={(e) => e.stopPropagation()} onfocusout={submitRename} autofocus />
+												<!-- The bespoke version hard-coded `border-accent` to say "this
+												     one is live". TextInput already says that on focus, and the
+												     row is autofocused, so the signal survives the migration --
+												     which matters, because an additive `border-accent` here would
+												     silently lose to the base `border-border` (Tailwind emits
+												     border-colour utilities alphabetically). -->
+												<TextInput aria-label="Instance name" size="sm" class="w-36" bind:value={renameValue} onkeydown={handleRenameKeydown} onclick={(e) => e.stopPropagation()} onfocusout={submitRename} autofocus />
 											{:else}
 												<span class="font-medium text-text truncate">{inst.name}</span>
 											{/if}
-											<span class="text-xs text-text-muted bg-white/[0.08] px-1.5 py-0.5 rounded-full shrink-0">{driver === "claude" ? "Claude" : "OpenCode"}</span>
+											<Badge variant="tag" shape="pill">{driver === "claude" ? "Claude" : "OpenCode"}</Badge>
 											{#if driver === "opencode" && !inst.managed}
-												<span class="text-xs text-text-muted bg-white/[0.08] px-1.5 py-0.5 rounded-full">discovered</span>
+												<Badge variant="tag" shape="pill">discovered</Badge>
 											{/if}
 										</div>
 										{#if driver === "claude"}
@@ -833,16 +912,19 @@
 										{:else}
 											<span class="text-text-muted text-xs shrink-0 ml-2">:{inst.port}</span>
 										{/if}
-									</button>
+									</Disclosure>
 									{#if expandedInstanceId === inst.id}
 										<div class="flex flex-wrap gap-2 px-3 py-2 border-t border-border">
-											{#if driver === "opencode" && inst.managed}
-												<button class="px-3 py-1 text-xs rounded border border-border text-text hover:bg-white/[0.05] cursor-pointer bg-transparent" onclick={() => handleStart(inst.id)}>Start</button>
-												<button class="px-3 py-1 text-xs rounded border border-border text-text hover:bg-white/[0.05] cursor-pointer bg-transparent" onclick={() => handleStop(inst.id)}>Stop</button>
+										{#if driver === "opencode" && inst.managed}
+											<Button variant="secondary" size="content" class="px-3 py-1 text-xs rounded" onclick={() => handleStart(inst.id)}>Start</Button>
+											<Button variant="secondary" size="content" class="px-3 py-1 text-xs rounded" onclick={() => handleStop(inst.id)}>Stop</Button>
 											{/if}
-											<button class="px-3 py-1 text-xs rounded border border-border text-accent hover:bg-accent/10 cursor-pointer bg-transparent" data-testid="edit-instance-btn" onclick={() => openEditInstance(inst)}>Edit</button>
-											<button class="px-3 py-1 text-xs rounded border border-border text-accent hover:bg-accent/10 cursor-pointer bg-transparent" data-testid="rename-instance-btn" onclick={() => startRename(inst.id, inst.name)}>Rename</button>
-											<button class="px-3 py-1 text-xs rounded border border-red-700 text-red-500 hover:bg-red-500/10 cursor-pointer bg-transparent" data-testid="remove-instance-btn" onclick={() => handleRemove(inst.id, inst.name)}>Remove</button>
+											<Button variant="ghost-accent" size="content" class="px-3 py-1 text-xs rounded border border-border" data-testid="edit-instance-btn" onclick={() => openEditInstance(inst)}>Edit</Button>
+											<Button variant="ghost-accent" size="content" class="px-3 py-1 text-xs rounded border border-border" data-testid="rename-instance-btn" onclick={() => startRename(inst.id, inst.name)}>Rename</Button>
+										<!-- Three `!` and every one of them is raw Tailwind palette, not a
+										     token: border-red-700 / text-red-500 are the headline drift item
+										     for the de3.5 NORMALIZE pass. -->
+										<Button variant="danger-outline" size="content" class="px-3 py-1 text-xs rounded" data-testid="remove-instance-btn" onclick={() => handleRemove(inst.id, inst.name)}>Remove</Button>
 										</div>
 									{/if}
 								</div>
@@ -854,10 +936,10 @@
 					<div class="mt-2 space-y-2 font-brand">
 							<p class="text-sm text-text-muted mb-3">No OpenCode instances detected. Start one from your terminal and it will appear here automatically.</p>
 							<div class="border border-border rounded-lg overflow-hidden">
-								<button type="button" class="flex items-center gap-2 w-full px-3 py-2.5 text-left text-sm font-medium text-text hover:bg-white/[0.03] cursor-pointer bg-transparent border-none" onclick={() => toggleScenario("direct")}>
+								<Disclosure expanded={expandedScenario === "direct"} onToggle={() => toggleScenario("direct")} chevron={false} look="section" density="roomy">
 									<Icon name={expandedScenario === "direct" ? "chevron-down" : "chevron-right"} size={14} class="text-text-muted shrink-0" />
 									<span>Quick Start — Direct API Key</span>
-								</button>
+								</Disclosure>
 								{#if expandedScenario === "direct"}
 									<div class="px-3 pb-3 space-y-2 border-t border-border pt-2.5">
 										<p class="text-xs text-text-muted">1. Start an OpenCode server:</p>
@@ -869,11 +951,11 @@
 								{/if}
 							</div>
 							<div class="border border-border rounded-lg overflow-hidden">
-								<button type="button" class="flex items-center gap-2 w-full px-3 py-2.5 text-left text-sm font-medium text-text hover:bg-white/[0.03] cursor-pointer bg-transparent border-none" onclick={() => toggleScenario("ccs")}>
+								<Disclosure expanded={expandedScenario === "ccs"} onToggle={() => toggleScenario("ccs")} chevron={false} look="section" density="roomy">
 									<Icon name={expandedScenario === "ccs" ? "chevron-down" : "chevron-right"} size={14} class="text-text-muted shrink-0" />
 									<span>Multi-Provider — Via CCS</span>
 									{#if ccsDetected}<Icon name="circle-check" size={14} class="text-green-500 ml-auto shrink-0" />{:else if proxyResult === null}<span class="text-xs text-text-muted animate-pulse ml-auto">detecting...</span>{/if}
-								</button>
+								</Disclosure>
 								{#if expandedScenario === "ccs"}
 									<div class="px-3 pb-3 space-y-2 border-t border-border pt-2.5">
 										<p class="text-xs text-text-muted">CCS manages OAuth tokens and API keys for 20+ providers.</p>
@@ -892,10 +974,10 @@
 								{/if}
 							</div>
 							<div class="border border-border rounded-lg overflow-hidden">
-								<button type="button" class="flex items-center gap-2 w-full px-3 py-2.5 text-left text-sm font-medium text-text hover:bg-white/[0.03] cursor-pointer bg-transparent border-none" onclick={() => toggleScenario("custom")}>
+								<Disclosure expanded={expandedScenario === "custom"} onToggle={() => toggleScenario("custom")} chevron={false} look="section" density="roomy">
 									<Icon name={expandedScenario === "custom" ? "chevron-down" : "chevron-right"} size={14} class="text-text-muted shrink-0" />
 									<span>Custom Setup</span>
-								</button>
+								</Disclosure>
 								{#if expandedScenario === "custom"}
 									<div class="px-3 pb-3 space-y-2 border-t border-border pt-2.5">
 										<p class="text-xs text-text-muted">Configure with environment variables:</p>
@@ -905,7 +987,7 @@
 							</div>
 							<div class="flex items-center justify-center gap-2 pt-2 text-xs text-text-muted">
 								<span>Already started?</span>
-								<button type="button" class="text-accent hover:text-accent font-medium cursor-pointer border-none bg-transparent" data-testid="scan-now-link" onclick={handleScanNow}>{scanInFlight ? "Scanning..." : "Scan Now"}</button>
+								<TextButton type="button" tone="accent" class="font-medium" data-testid="scan-now-link" onclick={handleScanNow}>{scanInFlight ? "Scanning..." : "Scan Now"}</TextButton>
 							</div>
 						</div>
 					{/if}
@@ -914,7 +996,7 @@
 				<!-- ═══ Debug ═══ -->
 				{:else if activeTab === "debug"}
 					<div class="space-y-2">
-						<ToggleSetting
+						<Toggle
 							label="Connection debug panel"
 							description="Shows WebSocket state transitions, timing, and lifecycle events."
 							checked={featureFlags.debug}
@@ -930,4 +1012,3 @@
 			</div>
 		</div>
 </Modal>
-

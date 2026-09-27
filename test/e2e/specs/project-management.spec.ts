@@ -1,6 +1,6 @@
 // ─── Project Management E2E Tests ────────────────────────────────────────────
 // Tests directory autocomplete in the "+Add project" form, and the project
-// context menu (rename, delete) in the ProjectSwitcher.
+// context menu (rename, delete) in the ProjectManagerPanel.
 //
 // Uses WS mock — no real OpenCode or relay needed.
 // Frontend served by Vite preview, WebSocket intercepted by page.routeWebSocket().
@@ -17,15 +17,17 @@ type ProjectManagementControl = WsMockControl & { rpc: RpcMockControl };
 
 // ─── Constants ──────────────────────────────────────────────────────────────
 
-const PROJECT_URL = "/p/myapp/";
+const PROJECT_URL = "/?p=myapp";
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
-/** Wait for the chat page to be ready (WS connected, input visible). */
+/** Wait for the list route and WebSocket connection on every viewport. */
 async function waitForChatReady(page: Page): Promise<void> {
-	await page.locator("#input").waitFor({ state: "visible", timeout: 10_000 });
+	await page
+		.locator("#session-list")
+		.waitFor({ state: "visible", timeout: 10_000 });
 	await page.locator(".connect-overlay").waitFor({
-		state: "hidden",
+		state: "detached",
 		timeout: 10_000,
 	});
 }
@@ -38,9 +40,43 @@ async function waitForChatReady(page: Page): Promise<void> {
 async function setupWithProjectManagement(
 	page: Page,
 	baseURL?: string,
+	path = PROJECT_URL,
 ): Promise<ProjectManagementControl> {
+	const sessions = [
+		{
+			id: "sess-si-001",
+			title: "Test session",
+			projectSlug: "myapp",
+			updatedAt: Date.now(),
+			messageCount: 0,
+		},
+		{
+			id: "sess-library-001",
+			title: "Library session",
+			projectSlug: "mylib",
+			updatedAt: Date.now(),
+			messageCount: 0,
+		},
+	];
 	const rpc = await mockWsRpc(page, {
 		handlers: {
+			ListSessions: (params) => ({
+				projectSlug: String(params["projectSlug"] ?? "myapp"),
+				sessions: sessions.filter(
+					(session) => session.projectSlug === params["projectSlug"],
+				),
+				roots: true,
+			}),
+			ListDaemonSessions: (params) => ({
+				projectSlug: String(params["projectSlug"] ?? "myapp"),
+				sessions: sessions.filter(
+					(session) =>
+						!params["scope"] || session.projectSlug === params["scope"],
+				),
+				availability: [],
+				hasMore: false,
+				nextCursor: null,
+			}),
 			ListDirectories: (params) => {
 				const path = String(params["path"] ?? "");
 				return {
@@ -87,12 +123,14 @@ async function setupWithProjectManagement(
 		},
 	});
 	const control = await mockRelayWebSocket(page, {
-		initMessages: singleInstanceInitMessages,
+		initMessages: singleInstanceInitMessages.filter(
+			(message) => message.type !== "session_list",
+		),
 		responses: new Map(),
 		initDelay: 0,
 		messageDelay: 0,
 	});
-	await page.goto(`${baseURL ?? "http://localhost:4173"}${PROJECT_URL}`);
+	await page.goto(`${baseURL ?? "http://localhost:4173"}${path}`);
 	await waitForChatReady(page);
 	return Object.assign(control, { rpc });
 }
@@ -149,18 +187,70 @@ function getMockDirectories(path: string): string[] {
 	return [];
 }
 
-/** Open the ProjectSwitcher dropdown. On mobile, opens hamburger first. */
-async function openProjectSwitcher(page: Page): Promise<void> {
-	const hamburger = page.locator("#hamburger-btn");
-	if (await hamburger.isVisible()) {
-		await hamburger.click();
-		await page.locator("#project-switcher-btn").waitFor({ state: "visible" });
+/** Open project management from the desktop sidebar or phone list bar. */
+async function openProjectsPanel(page: Page): Promise<void> {
+	const overflow = page.getByTestId("list-bar-overflow");
+	if (await overflow.isVisible()) {
+		await overflow.click();
+		await page.getByTestId("list-overflow-projects").click();
+	} else {
+		await page.locator("#sidebar-projects-btn").click();
 	}
-	await page.locator("#project-switcher-btn").click();
-	await page
-		.locator("[data-testid='project-switcher-dropdown']")
-		.waitFor({ state: "visible" });
+	await expect(page.getByTestId("sidebar-projects-panel")).toBeVisible();
 }
+
+test("direct project URL scopes the list and another URL switches projects", async ({
+	page,
+	baseURL,
+}) => {
+	const control = await setupWithProjectManagement(page, baseURL, "/?p=mylib");
+	await control.rpc.waitForRequest(
+		(request) =>
+			request.tag === "ListDaemonSessions" &&
+			request.payload["scope"] === "mylib",
+	);
+	await expect(page.getByTestId("session-scope-chip")).toHaveText("mylib");
+	const sessions = page.locator("#session-list .session-item");
+	await expect(sessions).toHaveCount(1);
+	await expect(sessions.first()).toContainText("Library session");
+	await expect(sessions.filter({ hasText: "Test session" })).toHaveCount(0);
+
+	await page.getByRole("button", { name: "Clear project scope" }).click();
+	await expect(sessions).toHaveCount(2);
+	await expect(sessions.filter({ hasText: "Test session" })).toHaveCount(1);
+	await expect(sessions.filter({ hasText: "Library session" })).toHaveCount(1);
+
+	await page.goto(`${baseURL ?? "http://localhost:4173"}/?p=myapp`);
+	await waitForChatReady(page);
+	await control.rpc.waitForRequest(
+		(request) =>
+			request.tag === "ListDaemonSessions" &&
+			request.payload["scope"] === "myapp",
+	);
+	await expect(page.getByTestId("session-scope-chip")).toHaveText("myapp");
+	await expect(sessions).toHaveCount(1);
+	await expect(sessions.first()).toContainText("Test session");
+	await expect(sessions.filter({ hasText: "Library session" })).toHaveCount(0);
+});
+
+test("adds a project through the projects panel", async ({ page, baseURL }) => {
+	const control = await setupWithProjectManagement(page, baseURL);
+	await openProjectsPanel(page);
+	const panel = page.getByTestId("sidebar-projects-panel");
+	await panel.getByRole("button", { name: "Add project", exact: true }).click();
+	await panel.getByRole("combobox").fill("/src/new-project");
+	await panel.getByRole("button", { name: "Add", exact: true }).click();
+	const request = await control.rpc.waitForRequest(
+		(req) => req.tag === "AddProject",
+	);
+	expect(request.payload).toMatchObject({ directory: "/src/new-project" });
+	await expect(panel).toBeHidden();
+	await openProjectsPanel(page);
+	await expect(panel.getByTestId("project-item")).toHaveCount(3);
+	await expect(panel.locator('[data-slug="new-project"]')).toContainText(
+		"/src/new-project",
+	);
+});
 
 // ─── Group 1: Directory Autocomplete ────────────────────────────────────────
 
@@ -170,14 +260,14 @@ test.describe("Directory Autocomplete", () => {
 		baseURL,
 	}) => {
 		await setupWithProjectManagement(page, baseURL);
-		await openProjectSwitcher(page);
+		await openProjectsPanel(page);
 
 		// Click "Add project" to show the form
 		await page.getByText("Add project").click();
 
 		// Type a path into the autocomplete input
 		const input = page.locator(
-			"[data-testid='project-switcher-dropdown'] input[type='text']",
+			"[data-testid='sidebar-projects-panel'] input[type='text']",
 		);
 		await input.fill("/src/");
 
@@ -198,11 +288,11 @@ test.describe("Directory Autocomplete", () => {
 		baseURL,
 	}) => {
 		await setupWithProjectManagement(page, baseURL);
-		await openProjectSwitcher(page);
+		await openProjectsPanel(page);
 		await page.getByText("Add project").click();
 
 		const input = page.locator(
-			"[data-testid='project-switcher-dropdown'] input[type='text']",
+			"[data-testid='sidebar-projects-panel'] input[type='text']",
 		);
 		await input.fill("/src/p");
 
@@ -221,11 +311,11 @@ test.describe("Directory Autocomplete", () => {
 		baseURL,
 	}) => {
 		await setupWithProjectManagement(page, baseURL);
-		await openProjectSwitcher(page);
+		await openProjectsPanel(page);
 		await page.getByText("Add project").click();
 
 		const input = page.locator(
-			"[data-testid='project-switcher-dropdown'] input[type='text']",
+			"[data-testid='sidebar-projects-panel'] input[type='text']",
 		);
 		await input.fill("/src/");
 
@@ -247,11 +337,11 @@ test.describe("Directory Autocomplete", () => {
 		baseURL,
 	}) => {
 		await setupWithProjectManagement(page, baseURL);
-		await openProjectSwitcher(page);
+		await openProjectsPanel(page);
 		await page.getByText("Add project").click();
 
 		const input = page.locator(
-			"[data-testid='project-switcher-dropdown'] input[type='text']",
+			"[data-testid='sidebar-projects-panel'] input[type='text']",
 		);
 		await input.fill("/src/");
 
@@ -273,25 +363,29 @@ test.describe("Directory Autocomplete", () => {
 
 	test("Arrow keys navigate through suggestions", async ({ page, baseURL }) => {
 		await setupWithProjectManagement(page, baseURL);
-		await openProjectSwitcher(page);
+		await openProjectsPanel(page);
 		await page.getByText("Add project").click();
 
 		const input = page.locator(
-			"[data-testid='project-switcher-dropdown'] input[type='text']",
+			"[data-testid='sidebar-projects-panel'] input[type='text']",
 		);
 		await input.fill("/src/");
 
 		const autocomplete = page.locator(".dir-autocomplete-list");
 		await expect(autocomplete).toBeVisible({ timeout: 5_000 });
 
-		// First item should be active by default
+		// aria-selected, not a class: the `dir-item-active` class this used to
+		// assert stopped existing when the active row became `bg-accent-bg`, and
+		// nothing failed, because the class simply never matched. The ARIA state
+		// is what the listbox actually contracts to expose.
 		const firstItem = autocomplete.locator(".dir-item").nth(0);
-		await expect(firstItem).toHaveClass(/dir-item-active/);
+		await expect(firstItem).toHaveAttribute("aria-selected", "true");
 
 		// Press ArrowDown to move to second item
 		await input.press("ArrowDown");
 		const secondItem = autocomplete.locator(".dir-item").nth(1);
-		await expect(secondItem).toHaveClass(/dir-item-active/);
+		await expect(secondItem).toHaveAttribute("aria-selected", "true");
+		await expect(firstItem).toHaveAttribute("aria-selected", "false");
 
 		// Press Enter to select "work/"
 		await input.press("Enter");
@@ -300,11 +394,11 @@ test.describe("Directory Autocomplete", () => {
 
 	test("Escape closes the autocomplete popup", async ({ page, baseURL }) => {
 		await setupWithProjectManagement(page, baseURL);
-		await openProjectSwitcher(page);
+		await openProjectsPanel(page);
 		await page.getByText("Add project").click();
 
 		const input = page.locator(
-			"[data-testid='project-switcher-dropdown'] input[type='text']",
+			"[data-testid='sidebar-projects-panel'] input[type='text']",
 		);
 		await input.fill("/src/");
 
@@ -321,11 +415,11 @@ test.describe("Directory Autocomplete", () => {
 
 	test("clicking an entry selects it", async ({ page, baseURL }) => {
 		await setupWithProjectManagement(page, baseURL);
-		await openProjectSwitcher(page);
+		await openProjectsPanel(page);
 		await page.getByText("Add project").click();
 
 		const input = page.locator(
-			"[data-testid='project-switcher-dropdown'] input[type='text']",
+			"[data-testid='sidebar-projects-panel'] input[type='text']",
 		);
 		await input.fill("/src/");
 
@@ -345,11 +439,11 @@ test.describe("Directory Autocomplete", () => {
 		baseURL,
 	}) => {
 		await setupWithProjectManagement(page, baseURL);
-		await openProjectSwitcher(page);
+		await openProjectsPanel(page);
 		await page.getByText("Add project").click();
 
 		const input = page.locator(
-			"[data-testid='project-switcher-dropdown'] input[type='text']",
+			"[data-testid='sidebar-projects-panel'] input[type='text']",
 		);
 		await input.fill("/Users/dstern/src/personal/");
 
@@ -385,11 +479,11 @@ test.describe("Directory Autocomplete", () => {
 test.describe("Project Context Menu", () => {
 	test("shows ... button on project items", async ({ page, baseURL }) => {
 		await setupWithProjectManagement(page, baseURL);
-		await openProjectSwitcher(page);
+		await openProjectsPanel(page);
 
 		// Each project item should have a more button
 		const moreButtons = page.locator(
-			"[data-testid='project-switcher-dropdown'] .proj-more-btn",
+			"[data-testid='sidebar-projects-panel'] .proj-more-btn",
 		);
 		await expect(moreButtons.first()).toBeVisible();
 	});
@@ -399,7 +493,7 @@ test.describe("Project Context Menu", () => {
 		baseURL,
 	}) => {
 		await setupWithProjectManagement(page, baseURL);
-		await openProjectSwitcher(page);
+		await openProjectsPanel(page);
 
 		// Click the more button on the second project (mylib)
 		const projectItems = page.locator("[data-testid='project-item']");
@@ -408,21 +502,21 @@ test.describe("Project Context Menu", () => {
 		await moreBtn.click();
 
 		// Context menu should appear with Rename and Remove options
-		const renameBtn = page.locator("button:has-text('Rename')");
-		const removeBtn = page.locator("button:has-text('Remove')");
+		const renameBtn = page.getByRole("menuitem", { name: "Rename" });
+		const removeBtn = page.getByRole("menuitem", { name: "Remove" });
 		await expect(renameBtn).toBeVisible();
 		await expect(removeBtn).toBeVisible();
 	});
 
 	test("Escape closes the context menu", async ({ page, baseURL }) => {
 		await setupWithProjectManagement(page, baseURL);
-		await openProjectSwitcher(page);
+		await openProjectsPanel(page);
 
 		const projectItems = page.locator("[data-testid='project-item']");
 		const moreBtn = projectItems.nth(1).locator(".proj-more-btn");
 		await moreBtn.click();
 
-		const renameBtn = page.locator("button:has-text('Rename')");
+		const renameBtn = page.getByRole("menuitem", { name: "Rename" });
 		await expect(renameBtn).toBeVisible();
 
 		// Press Escape
@@ -441,13 +535,13 @@ test.describe("Project Rename", () => {
 		baseURL,
 	}) => {
 		await setupWithProjectManagement(page, baseURL);
-		await openProjectSwitcher(page);
+		await openProjectsPanel(page);
 
 		// Click more on mylib, then Rename
 		const projectItems = page.locator("[data-testid='project-item']");
 		const mylibItem = projectItems.nth(1);
 		await mylibItem.locator(".proj-more-btn").click();
-		await page.locator("button:has-text('Rename')").click();
+		await page.getByRole("menuitem", { name: "Rename" }).click();
 
 		// Inline rename input should appear with current title
 		const renameInput = mylibItem.locator("input[type='text']");
@@ -457,12 +551,12 @@ test.describe("Project Rename", () => {
 
 	test("Enter commits rename through RPC", async ({ page, baseURL }) => {
 		const control = await setupWithProjectManagement(page, baseURL);
-		await openProjectSwitcher(page);
+		await openProjectsPanel(page);
 
 		const projectItems = page.locator("[data-testid='project-item']");
 		const mylibItem = projectItems.nth(1);
 		await mylibItem.locator(".proj-more-btn").click();
-		await page.locator("button:has-text('Rename')").click();
+		await page.getByRole("menuitem", { name: "Rename" }).click();
 
 		const renameInput = mylibItem.locator("input[type='text']");
 		await renameInput.fill("My Library");
@@ -485,12 +579,12 @@ test.describe("Project Rename", () => {
 		baseURL,
 	}) => {
 		const control = await setupWithProjectManagement(page, baseURL);
-		await openProjectSwitcher(page);
+		await openProjectsPanel(page);
 
 		const projectItems = page.locator("[data-testid='project-item']");
 		const mylibItem = projectItems.nth(1);
 		await mylibItem.locator(".proj-more-btn").click();
-		await page.locator("button:has-text('Rename')").click();
+		await page.getByRole("menuitem", { name: "Rename" }).click();
 
 		const renameInput = mylibItem.locator("input[type='text']");
 		await renameInput.fill("Cancelled Name");
@@ -512,12 +606,12 @@ test.describe("Project Rename", () => {
 		baseURL,
 	}) => {
 		await setupWithProjectManagement(page, baseURL);
-		await openProjectSwitcher(page);
+		await openProjectsPanel(page);
 
 		const projectItems = page.locator("[data-testid='project-item']");
 		const mylibItem = projectItems.nth(1);
 		await mylibItem.locator(".proj-more-btn").click();
-		await page.locator("button:has-text('Rename')").click();
+		await page.getByRole("menuitem", { name: "Rename" }).click();
 
 		const renameInput = mylibItem.locator("input[type='text']");
 		await renameInput.fill("My Library");
@@ -535,12 +629,12 @@ test.describe("Project Rename", () => {
 test.describe("Project Delete", () => {
 	test("Remove shows confirmation modal", async ({ page, baseURL }) => {
 		await setupWithProjectManagement(page, baseURL);
-		await openProjectSwitcher(page);
+		await openProjectsPanel(page);
 
 		const projectItems = page.locator("[data-testid='project-item']");
 		const mylibItem = projectItems.nth(1);
 		await mylibItem.locator(".proj-more-btn").click();
-		await page.locator("button:has-text('Remove')").click();
+		await page.getByRole("menuitem", { name: "Remove" }).click();
 
 		// Confirmation modal should appear
 		const confirmModal = page.locator("#confirm-modal");
@@ -554,12 +648,12 @@ test.describe("Project Delete", () => {
 		baseURL,
 	}) => {
 		const control = await setupWithProjectManagement(page, baseURL);
-		await openProjectSwitcher(page);
+		await openProjectsPanel(page);
 
 		const projectItems = page.locator("[data-testid='project-item']");
 		const mylibItem = projectItems.nth(1);
 		await mylibItem.locator(".proj-more-btn").click();
-		await page.locator("button:has-text('Remove')").click();
+		await page.getByRole("menuitem", { name: "Remove" }).click();
 
 		// Click the confirm button in the modal
 		await page.click("#confirm-modal button:has-text('Remove')");
@@ -577,12 +671,12 @@ test.describe("Project Delete", () => {
 		baseURL,
 	}) => {
 		const control = await setupWithProjectManagement(page, baseURL);
-		await openProjectSwitcher(page);
+		await openProjectsPanel(page);
 
 		const projectItems = page.locator("[data-testid='project-item']");
 		const mylibItem = projectItems.nth(1);
 		await mylibItem.locator(".proj-more-btn").click();
-		await page.locator("button:has-text('Remove')").click();
+		await page.getByRole("menuitem", { name: "Remove" }).click();
 
 		// Click Cancel
 		await page.click("#confirm-modal button:has-text('Cancel')");
@@ -603,7 +697,7 @@ test.describe("Project Delete", () => {
 		baseURL,
 	}) => {
 		await setupWithProjectManagement(page, baseURL);
-		await openProjectSwitcher(page);
+		await openProjectsPanel(page);
 
 		// Verify 2 projects initially
 		const projectItems = page.locator("[data-testid='project-item']");
@@ -612,7 +706,7 @@ test.describe("Project Delete", () => {
 		// Remove mylib
 		const mylibItem = projectItems.nth(1);
 		await mylibItem.locator(".proj-more-btn").click();
-		await page.locator("button:has-text('Remove')").click();
+		await page.getByRole("menuitem", { name: "Remove" }).click();
 		await page.click("#confirm-modal button:has-text('Remove')");
 
 		// After server responds, only 1 project should remain

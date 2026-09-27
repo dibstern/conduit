@@ -7,9 +7,27 @@ import {
 	escapeHtml,
 	formatClockTime,
 	formatFileSize,
+	formatSnoozeTime,
 	formatTimeAgo,
 	generateUuid,
 } from "../../../src/lib/frontend/utils/format.js";
+
+describe("formatSnoozeTime", () => {
+	const now = new Date(2026, 9, 5, 8).getTime();
+
+	test("uses a clock today, weekday this week, and date beyond", () => {
+		expect(formatSnoozeTime(new Date(2026, 9, 5, 15, 40).getTime(), now)).toBe(
+			"15:40",
+		);
+		expect(formatSnoozeTime(new Date(2026, 9, 6, 9).getTime(), now)).toBe(
+			"Tue 9:00",
+		);
+		expect(formatSnoozeTime(new Date(2026, 9, 12, 9).getTime(), now)).toBe(
+			"12 Oct 9:00",
+		);
+		expect(formatSnoozeTime(null, now)).toBe("No timer");
+	});
+});
 
 // ─── escapeHtml ──────────────────────────────────────────────────────────────
 

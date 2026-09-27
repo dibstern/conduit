@@ -12,7 +12,6 @@ import {
 	effectRouterWithCors,
 	ProjectApiDelegateProvider,
 	ProjectsProvider,
-	RemoveProjectProvider,
 	type RouterProjectInfo,
 } from "../../../src/lib/server/effect-http-router.js";
 
@@ -50,7 +49,6 @@ afterAll(async () => {
 function makeHandler(options?: {
 	projects?: RouterProjectInfo[];
 	auth?: AuthManager;
-	removeProject?: (slug: string) => void;
 }) {
 	const auth = options?.auth ?? new AuthManager();
 	const layer = Layer.mergeAll(
@@ -59,12 +57,6 @@ function makeHandler(options?: {
 		}),
 		makeAuthManagerLive(auth),
 		Layer.succeed(StaticDirTag, staticDir),
-		Layer.succeed(RemoveProjectProvider, {
-			removeProject: (slug: string) =>
-				options?.removeProject == null
-					? Effect.fail(new Error("missing"))
-					: Effect.sync(() => options.removeProject?.(slug)),
-		}),
 		Layer.succeed(ProjectApiDelegateProvider, {
 			delegateApiRequest: () =>
 				Effect.succeed(HttpServerResponse.text("delegated", { status: 299 })),
@@ -76,19 +68,23 @@ function makeHandler(options?: {
 }
 
 describe("Effect HTTP Router production routes", () => {
-	it("GET / redirects to the only project", async () => {
+	it("GET / serves the session list SPA with one project", async () => {
 		const { handler, dispose } = makeHandler();
 		try {
 			const response = await handler(new Request("http://localhost/"));
-			expect(response.status).toBe(302);
-			expect(response.headers.get("location")).toBe("/p/test-project/");
+			expect(response.status).toBe(200);
+			expect(response.headers.get("location")).toBeNull();
+			await expect(response.text()).resolves.toContain("<html>app</html>");
 		} finally {
 			await dispose();
 		}
 	});
 
-	it("GET / serves dashboard when multiple projects exist", async () => {
-		const { handler, dispose } = makeHandler({ projects: multiProject });
+	it.each([
+		{ projects: [] },
+		{ projects: multiProject },
+	])("GET / serves the SPA with projects $projects", async ({ projects }) => {
+		const { handler, dispose } = makeHandler({ projects });
 		try {
 			const response = await handler(new Request("http://localhost/"));
 			expect(response.status).toBe(200);
@@ -137,21 +133,15 @@ describe("Effect HTTP Router production routes", () => {
 		}
 	});
 
-	it("DELETE /api/projects/:slug calls remove provider", async () => {
-		const removed: string[] = [];
-		const { handler, dispose } = makeHandler({
-			removeProject: (slug) => {
-				removed.push(slug);
-			},
-		});
+	it("DELETE /api/projects/:slug is no longer exposed", async () => {
+		const { handler, dispose } = makeHandler();
 		try {
 			const response = await handler(
 				new Request("http://localhost/api/projects/test-project", {
 					method: "DELETE",
 				}),
 			);
-			expect(response.status).toBe(200);
-			expect(removed).toEqual(["test-project"]);
+			expect(response.status).toBe(404);
 		} finally {
 			await dispose();
 		}
@@ -170,16 +160,65 @@ describe("Effect HTTP Router production routes", () => {
 		}
 	});
 
-	it("auth-gates project browser routes with redirect", async () => {
+	it.each([
+		"/",
+		"/s/session-id",
+		"/p/test-project/",
+		"/p/removed/s/session-id",
+	])("auth-gates browser route %s with redirect", async (path) => {
 		const auth = new AuthManager();
 		auth.setPin("1234");
 		const { handler, dispose } = makeHandler({ auth });
 		try {
-			const response = await handler(
-				new Request("http://localhost/p/test-project/dashboard"),
-			);
+			const response = await handler(new Request(`http://localhost${path}`));
 			expect(response.status).toBe(302);
 			expect(response.headers.get("location")).toBe("/auth");
+		} finally {
+			await dispose();
+		}
+	});
+
+	it("GET /s/:id serves index.html without requiring a project in the address", async () => {
+		const { handler, dispose } = makeHandler({ projects: [] });
+		try {
+			const response = await handler(
+				new Request("http://localhost/s/session-id"),
+			);
+			expect(response.status).toBe(200);
+			await expect(response.text()).resolves.toBe("<html>app</html>");
+		} finally {
+			await dispose();
+		}
+	});
+
+	it.each([
+		"/p/removed",
+		"/p/removed/",
+		"/p/removed/s/session-id",
+	])("serves the SPA for legacy URL %s even when its project was removed", async (path) => {
+		const { handler, dispose } = makeHandler({ projects: [] });
+		try {
+			const response = await handler(new Request(`http://localhost${path}`));
+			expect(response.status).toBe(200);
+			await expect(response.text()).resolves.toBe("<html>app</html>");
+		} finally {
+			await dispose();
+		}
+	});
+
+	it.each([
+		"/api/status",
+		"/api/sessions",
+	])("rejects API URL /p/removed%s when its project was removed", async (path) => {
+		const { handler, dispose } = makeHandler({ projects: [] });
+		try {
+			const response = await handler(
+				new Request(`http://localhost/p/removed${path}`),
+			);
+			expect(response.status).toBe(404);
+			await expect(response.json()).resolves.toMatchObject({
+				error: { code: "NOT_FOUND" },
+			});
 		} finally {
 			await dispose();
 		}

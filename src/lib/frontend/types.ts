@@ -26,6 +26,7 @@ export type {
 	AskUserQuestion,
 	CommandInfo,
 	ContextWindowOption,
+	DaemonSessionCursor,
 	FileEntry,
 	FileVersion,
 	HistoryMessage,
@@ -44,6 +45,7 @@ export type {
 	PtyStatus,
 	RelayMessage,
 	RequestId,
+	SessionAttention,
 	SessionInfo,
 	SessionPermissionMode,
 	TodoItem,
@@ -202,6 +204,11 @@ export interface SystemMessage {
 	 *  Lets restoreContextFromMessages recover the reduced context-% bar on
 	 *  reload when no real turn has run since the compaction. */
 	postTokens?: number;
+	/** Set when this notice reports a context compaction. A completed one leaves
+	 *  the notices and becomes a boundary inside the turn's activity log. */
+	compaction?: "started" | "completed" | "failed";
+	preTokens?: number;
+	createdAt?: number;
 }
 
 // ─── Session Types (frontend-only) ──────────────────────────────────────────
@@ -210,6 +217,18 @@ export interface DateGroups {
 	today: Immutable<SessionInfo>[];
 	yesterday: Immutable<SessionInfo>[];
 	older: Immutable<SessionInfo>[];
+}
+/** The sidebar's sections. Coarser than the server's six attention tiers: a
+ *  failure and a pending approval both mean "a human is needed", and one
+ *  heading for that reads faster than three. */
+export interface AttentionGroups {
+	pinned: SessionInfo[];
+	settled: SessionInfo[];
+	snoozed: SessionInfo[];
+	needsYou: SessionInfo[];
+	running: SessionInfo[];
+	doneUnread: SessionInfo[];
+	idle: SessionInfo[];
 }
 
 // ─── Terminal Types ──────────────────────────────────────────────────────────
@@ -290,13 +309,14 @@ export interface Turn {
 
 // ─── Toast Types ─────────────────────────────────────────────────────────────
 
-export type ToastVariant = "default" | "warn";
+export type ToastVariant = "default" | "warn" | "error";
 
 export interface Toast {
 	id: string;
 	message: string;
 	variant: ToastVariant;
 	duration: number;
+	action?: { label: string; run: () => void };
 }
 
 // ─── Banner Types ────────────────────────────────────────────────────────────

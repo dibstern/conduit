@@ -1,13 +1,10 @@
 // test/unit/provider/orchestration-wiring.test.ts
-import { mkdtempSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { SqlClient } from "@effect/sql";
 import { Effect, Layer, ManagedRuntime } from "effect";
 import { describe, expect, it, vi } from "vitest";
 import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
 import type { OpenCodeAPI } from "../../../src/lib/instance/opencode-api.js";
 import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
-import { SqliteClient } from "../../../src/lib/persistence/sqlite-client.js";
 import {
 	OpenCodeDriver,
 	OpenCodeProviderInstance,
@@ -56,22 +53,41 @@ function makeStubClient(): OpenCodeAPI {
 	} as unknown as OpenCodeAPI;
 }
 
-function seedProjectedSessionBinding(
-	dbPath: string,
-	sessionId: string,
-	providerId: string,
-): void {
+function seedProjectedSessionBinding(sessionId: string, providerId: string) {
 	const now = 1_735_689_600_000;
-	const db = SqliteClient.open(dbPath);
-	db.execute(
-		"INSERT INTO sessions (id, provider, title, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
-		[sessionId, providerId, "Persisted session", "idle", now, now],
+	return Effect.flatMap(SqlClient.SqlClient, (sql) =>
+		Effect.all([
+			sql`INSERT INTO sessions (id, provider, title, status, created_at, updated_at) VALUES (${sessionId}, ${providerId}, ${"Persisted session"}, ${"idle"}, ${now}, ${now})`,
+			sql`INSERT INTO session_providers (id, session_id, provider, status, activated_at) VALUES (${`${sessionId}:initial`}, ${sessionId}, ${providerId}, 'active', ${now})`,
+		]),
 	);
-	db.execute(
-		"INSERT INTO session_providers (id, session_id, provider, status, activated_at) VALUES (?, ?, ?, 'active', ?)",
-		[`${sessionId}:initial`, sessionId, providerId, now],
+}
+
+/**
+ * Mirrors relay-stack: the same persistence layer reference is provided to
+ * orchestration and merged into the outer runtime. An in-memory SQLite
+ * database is private to its connection, so a row seeded through the outer
+ * SqlClient is visible to orchestration only when both share one connection.
+ */
+function makeSharedPersistenceRuntime(
+	outerPersistence: (
+		persistence: ReturnType<typeof makePersistenceEffectLayer>,
+	) => ReturnType<typeof makePersistenceEffectLayer>,
+) {
+	const persistence = makePersistenceEffectLayer(":memory:");
+	return ManagedRuntime.make(
+		Layer.merge(
+			makeOrchestrationRuntimeLayer().pipe(
+				Layer.provide(
+					Layer.merge(
+						Layer.succeed(OpenCodeAPITag, makeStubClient()),
+						persistence,
+					),
+				),
+			),
+			outerPersistence(persistence),
+		),
 	);
-	db.close();
 }
 
 describe("Orchestration wiring", () => {
@@ -111,48 +127,46 @@ describe("Orchestration wiring", () => {
 		}
 	});
 
-	it("wires persisted session bindings into the scoped runtime layer", async () => {
-		const client = makeStubClient();
-		const tempDir = mkdtempSync(join(tmpdir(), "conduit-orchestration-"));
-		const dbPath = join(tempDir, "events.db");
-		const runtime = ManagedRuntime.make(
-			makeOrchestrationRuntimeLayer({ persistenceDbPath: dbPath }).pipe(
-				Layer.provide(
-					Layer.merge(
-						Layer.succeed(OpenCodeAPITag, client),
-						makePersistenceEffectLayer(dbPath),
-					),
-				),
-			),
-		);
+	it("shares the relay's single SqlClient connection with orchestration", async () => {
+		const runtime = makeSharedPersistenceRuntime((persistence) => persistence);
 
 		try {
 			const layer = await runtime.runPromise(getOrchestrationLayer);
-			seedProjectedSessionBinding(dbPath, "persisted-session", "claude");
-
-			expect(layer.engine.getProviderForSession("persisted-session")).toBe(
-				"claude",
+			await runtime.runPromise(
+				seedProjectedSessionBinding("persisted-session", "claude"),
 			);
+
+			expect(
+				await runtime.runPromise(
+					layer.engine.getProviderForSessionEffect("persisted-session"),
+				),
+			).toBe("claude");
 		} finally {
 			await runtime.dispose();
-			rmSync(tempDir, { recursive: true, force: true });
+		}
+	});
+
+	it("detects a second connection (control for the shared-connection proof)", async () => {
+		const runtime = makeSharedPersistenceRuntime(Layer.fresh);
+
+		try {
+			const layer = await runtime.runPromise(getOrchestrationLayer);
+			await runtime.runPromise(
+				seedProjectedSessionBinding("persisted-session", "claude"),
+			);
+
+			expect(
+				await runtime.runPromise(
+					layer.engine.getProviderForSessionEffect("persisted-session"),
+				),
+			).toBeUndefined();
+		} finally {
+			await runtime.dispose();
 		}
 	});
 
 	it("exposes a reactor drain quiescence seam through the wired runtime layer", async () => {
-		const client = makeStubClient();
-		const tempDir = mkdtempSync(join(tmpdir(), "conduit-orchestration-"));
-		const dbPath = join(tempDir, "events.db");
-		const runtime = ManagedRuntime.make(
-			makeOrchestrationRuntimeLayer({ persistenceDbPath: dbPath }).pipe(
-				Layer.provide(
-					Layer.merge(
-						Layer.succeed(OpenCodeAPITag, client),
-						makePersistenceEffectLayer(dbPath),
-					),
-				),
-			),
-		);
+		const runtime = makeSharedPersistenceRuntime((persistence) => persistence);
 
 		try {
 			const layer = await runtime.runPromise(getOrchestrationLayer);
@@ -161,7 +175,6 @@ describe("Orchestration wiring", () => {
 			await Effect.runPromise(layer.drainSideEffects());
 		} finally {
 			await runtime.dispose();
-			rmSync(tempDir, { recursive: true, force: true });
 		}
 	});
 

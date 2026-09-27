@@ -1,47 +1,20 @@
-import { createServer } from "node:http";
-import { Layer, ManagedRuntime } from "effect";
-import { expect, it, vi } from "vitest";
-import { WebSocketHandlerLive } from "../../../src/lib/domain/relay/Layers/websocket-handler-layer.js";
-import {
-	ConfigTag,
-	LoggerTag,
-	WebSocketHandlerTag,
-} from "../../../src/lib/domain/relay/Services/services.js";
+import { Effect, Layer, ManagedRuntime, Stream } from "effect";
+import { expect, it } from "vitest";
 import { makeSessionEventBusLive } from "../../../src/lib/domain/relay/Services/session-event-bus.js";
-import { createSilentLogger } from "../../../src/lib/logger.js";
+import { subscribeShell } from "../../../src/lib/domain/relay/Services/shell-subscription.js";
 import { makeCommitAndSignal } from "../../../src/lib/persistence/effect/commit-and-signal.js";
 import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
+import { ProjectionRunnerEffectTag } from "../../../src/lib/persistence/effect/projection-runner-effect.js";
 import { canonicalEvent } from "../../../src/lib/persistence/events.js";
-import type { RelayMessage } from "../../../src/lib/shared-types.js";
 
-it("broadcasts committed permission counts before a SubscribeShell consumer exists", async () => {
-	const server = createServer();
+it("publishes committed permission counts through the root subscription", async () => {
 	const bus = makeSessionEventBusLive();
 	const persistence = makePersistenceEffectLayer(":memory:", undefined, bus);
-	const dependencies = Layer.mergeAll(
-		bus,
-		persistence,
-		Layer.succeed(ConfigTag, {
-			httpServer: server,
-			projectDir: "/tmp",
-			slug: "test",
-			opencodeUrl: "http://unused",
-			noServer: true,
-		}),
-		Layer.succeed(LoggerTag, createSilentLogger()),
-	);
-	const runtime = ManagedRuntime.make(
-		Layer.merge(
-			dependencies,
-			WebSocketHandlerLive.pipe(Layer.provide(dependencies)),
-		),
-	);
+	const runtime = ManagedRuntime.make(Layer.merge(bus, persistence));
 	try {
-		const handler = await runtime.runPromise(WebSocketHandlerTag);
-		const messages: RelayMessage[] = [];
-		vi.spyOn(handler, "broadcast").mockImplementation((message) => {
-			messages.push(message);
-		});
+		await runtime.runPromise(
+			Effect.flatMap(ProjectionRunnerEffectTag, (runner) => runner.recover()),
+		);
 		const commit = await runtime.runPromise(makeCommitAndSignal);
 		await runtime.runPromise(
 			commit([
@@ -53,6 +26,22 @@ it("broadcasts committed permission counts before a SubscribeShell consumer exis
 				),
 			]),
 		);
+		const counts: Array<number | undefined> = [];
+		runtime.runFork(
+			Stream.runForEach(subscribeShell(), (envelope) =>
+				Effect.sync(() => {
+					if (envelope._tag === "snapshot") {
+						counts.push(
+							envelope.rows.find((row) => row.id === "s1")
+								?.pendingPermissionCount,
+						);
+					} else if (envelope._tag === "upsert" && envelope.item.id === "s1") {
+						counts.push(envelope.item.pendingPermissionCount);
+					}
+				}),
+			),
+		);
+		await expect.poll(() => counts.length, { timeout: 700 }).toBeGreaterThan(0);
 		await runtime.runPromise(
 			commit([
 				canonicalEvent(
@@ -63,16 +52,7 @@ it("broadcasts committed permission counts before a SubscribeShell consumer exis
 				),
 			]),
 		);
-		const counts = () =>
-			messages
-				.filter((m) => m.type === "session_list")
-				.flatMap((m) =>
-					m.sessions
-						.filter((s) => s.id === "s1")
-						.map((s) => s.pendingPermissions),
-				);
-		await expect.poll(counts, { timeout: 700 }).toContain(1);
-		messages.length = 0;
+		await expect.poll(() => counts.includes(1), { timeout: 700 }).toBe(true);
 		await runtime.runPromise(
 			commit([
 				canonicalEvent(
@@ -83,9 +63,8 @@ it("broadcasts committed permission counts before a SubscribeShell consumer exis
 				),
 			]),
 		);
-		await expect.poll(counts, { timeout: 700 }).toContain(0);
+		await expect.poll(() => counts.at(-1), { timeout: 700 }).toBeUndefined();
 	} finally {
 		await runtime.dispose();
-		vi.restoreAllMocks();
 	}
 });

@@ -1,5 +1,6 @@
 import type { Meta, StoryObj } from "@storybook/svelte-vite";
-import { permissionsState } from "../../stores/permissions.svelte.js";
+import { fn } from "storybook/test";
+import { clearAllPermissions } from "../../stores/permissions.svelte.js";
 import { clearSessionState } from "../../stores/session.svelte.js";
 import { uiState } from "../../stores/ui.svelte.js";
 import type { Toast as ToastType } from "../../types.js";
@@ -14,13 +15,28 @@ const meta = {
 	},
 	beforeEach: () => {
 		uiState.toasts = [];
-		permissionsState.pendingPermissions = [];
+		clearAllPermissions();
 		clearSessionState();
 	},
 } satisfies Meta<typeof NotificationStack>;
 
 export default meta;
 type Story = StoryObj<typeof meta>;
+
+export const WithUndoAction: Story = {
+	name: "With undo action",
+	beforeEach: () => {
+		setToasts([
+			{
+				id: "story-undo",
+				message: "Moved “Fix navigation” to Settled",
+				variant: "default",
+				duration: 5000,
+				action: { label: "Undo", run: fn() },
+			},
+		]);
+	},
+};
 
 /** Helper to set toasts directly without auto-dismiss. */
 function setToasts(toasts: ToastType[]): void {
@@ -53,6 +69,19 @@ export const WarnToast: Story = {
 	},
 };
 
+export const ErrorToast: Story = {
+	beforeEach: () => {
+		setToasts([
+			{
+				id: "story-error-1",
+				message: "Failed to send message",
+				variant: "error",
+				duration: 999999,
+			},
+		]);
+	},
+};
+
 export const MultipleToasts: Story = {
 	beforeEach: () => {
 		setToasts([
@@ -70,8 +99,8 @@ export const MultipleToasts: Story = {
 			},
 			{
 				id: "story-multi-3",
-				message: "Reconnected",
-				variant: "default",
+				message: "Failed to reconnect",
+				variant: "error",
 				duration: 999999,
 			},
 		]);

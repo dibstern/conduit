@@ -29,7 +29,6 @@ export default defineConfig({
 				test: {
 					name: "unit-sqlite",
 					include: [
-						"test/unit/effect/sqlite-transactions.test.ts",
 						"test/unit/persistence/**/*.test.ts",
 						"test/unit/pipeline/thinking-lifecycle-pipeline.test.ts",
 					],
@@ -48,7 +47,6 @@ export default defineConfig({
 					include: ["test/unit/**/*.test.ts", "test/fixture/**/*.test.ts"],
 					exclude: [
 						"test/unit/components/**/*.test.ts",
-						"test/unit/effect/sqlite-transactions.test.ts",
 						"test/unit/persistence/**/*.test.ts",
 						"test/unit/pipeline/thinking-lifecycle-pipeline.test.ts",
 					],

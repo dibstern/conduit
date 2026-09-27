@@ -5,17 +5,24 @@
 -->
 <script lang="ts">
   import { uiState, closeLightbox } from "../../stores/ui.svelte.js";
+  import Button from "../ui/Button.svelte";
   import Modal from "./Modal.svelte";
 </script>
 
 <Modal open={!!uiState.lightboxSrc} onclose={closeLightbox} backdrop="dark">
-    <button
-      class="fixed top-4 right-4 bg-white/15 border-none text-white w-9 h-9 rounded-full text-xl cursor-pointer z-[var(--z-raised)] hover:bg-white/25"
+    <!-- Empty colour axes keep the fixed white scrim colours without a theme hover wash. -->
+    <!-- design-token-waiver: Close button sits on the lightbox's fixed dark backdrop, which does not follow the runtime theme; --overlay-rgb flips to black in light themes and would invert this hover tint to near-invisible against a black backdrop. -->
+    <Button
+      variant="ghost"
+      size="content"
+      tone="inherit"
+      hoverFill="none"
+      class="fixed top-4 right-4 bg-white/15 text-white w-9 h-9 rounded-full text-xl z-[var(--z-raised)] hover:bg-white/25"
       onclick={closeLightbox}
-      aria-label="Close lightbox"
+      ariaLabel="Close lightbox"
     >
       &times;
-    </button>
+    </Button>
     <img
       id="image-lightbox"
       class="max-w-[92vw] max-h-[90vh] object-contain rounded"

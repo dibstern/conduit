@@ -34,9 +34,9 @@ import { createScrollController } from "../../../src/lib/frontend/stores/scroll-
 describe("ScrollController", () => {
 	let lifecycle: LoadLifecycle;
 
-	function makeController() {
+	function makeController(onUserScroll?: () => void) {
 		lifecycle = "empty";
-		return createScrollController(() => lifecycle);
+		return createScrollController(() => lifecycle, onUserScroll);
 	}
 
 	function createScrollableDiv(): HTMLDivElement {
@@ -61,6 +61,128 @@ describe("ScrollController", () => {
 		div.scrollTop = 200;
 		div.dispatchEvent(new Event("scroll"));
 	}
+
+	it("onUserScroll fires for a user scroll below the detach threshold", () => {
+		const onUserScroll = vi.fn();
+		const ctrl = makeController(onUserScroll);
+		lifecycle = "ready";
+		const div = createScrollableDiv();
+		ctrl.attach(div);
+		div.scrollTop = 1490;
+		div.dispatchEvent(new Event("scroll"));
+		expect(onUserScroll).toHaveBeenCalledTimes(1);
+		expect(ctrl.state).toBe("following");
+		ctrl.detach();
+	});
+
+	it.each([
+		"requestFollow",
+		"onNewContent",
+	] as const)("onUserScroll does not fire for a programmatic scroll from %s", (method) => {
+		const onUserScroll = vi.fn();
+		const ctrl = makeController(onUserScroll);
+		lifecycle = "ready";
+		const div = createScrollableDiv();
+		ctrl.attach(div);
+		div.scrollTop = 200;
+		ctrl[method]();
+		expect(div.scrollTop).toBe(div.scrollHeight);
+		// This regression test must fail if the programmaticScrollCount guard is removed.
+		div.dispatchEvent(new Event("scroll"));
+		expect(onUserScroll).not.toHaveBeenCalled();
+		ctrl.detach();
+	});
+
+	// Found in the real app, not in a test: the session bar arrived collapsed on
+	// load because a coalesced scroll event from the settle loop's own re-pin was
+	// delivered after the programmatic counter's safety reset had zeroed its
+	// slot, and so read as a user scroll. Every such stray lands at the bottom,
+	// which is what tells it apart from a real scroll.
+	it("onUserScroll does not fire for a scroll that lands at the bottom", () => {
+		const onUserScroll = vi.fn();
+		const ctrl = makeController(onUserScroll);
+		lifecycle = "ready";
+		const div = createScrollableDiv();
+		ctrl.attach(div);
+		// No programmatic slot left to consume: this is exactly the event that
+		// escaped the counter.
+		div.scrollTop = div.scrollHeight - div.clientHeight;
+		div.dispatchEvent(new Event("scroll"));
+		expect(onUserScroll).not.toHaveBeenCalled();
+		ctrl.detach();
+	});
+
+	it.each([
+		"empty",
+		"loading",
+		"committed",
+	] as const)("onUserScroll does not fire while the transcript is hydrating (%s)", (lc) => {
+		const onUserScroll = vi.fn();
+		const ctrl = makeController(onUserScroll);
+		lifecycle = lc;
+		const div = createScrollableDiv();
+		ctrl.attach(div);
+		// Off the bottom, so the distance guard would let this one through. The
+		// controller is force-pinning while the transcript hydrates, so any
+		// position off the bottom is transient and reports nothing.
+		simulateScrollUp(div);
+		expect(onUserScroll).not.toHaveBeenCalled();
+		ctrl.detach();
+	});
+
+	it("onUserScroll does not fire for a non-overflowing container", () => {
+		const onUserScroll = vi.fn();
+		const ctrl = makeController(onUserScroll);
+		lifecycle = "ready";
+		const div = createScrollableDiv();
+		Object.defineProperty(div, "scrollHeight", { value: 500 });
+		ctrl.attach(div);
+		div.scrollTop = 0;
+		div.dispatchEvent(new Event("scroll"));
+		expect(onUserScroll).not.toHaveBeenCalled();
+		ctrl.detach();
+	});
+
+	it("onContainerResize re-pins scrollTop when following without counting user intent", () => {
+		const onUserScroll = vi.fn();
+		const ctrl = makeController(onUserScroll);
+		lifecycle = "ready";
+		const div = createScrollableDiv();
+		ctrl.attach(div);
+		Object.defineProperty(div, "clientHeight", { value: 450 });
+		ctrl.onContainerResize();
+		expect(div.scrollTop).toBe(div.scrollHeight);
+		div.dispatchEvent(new Event("scroll"));
+		expect(onUserScroll).not.toHaveBeenCalled();
+		expect(ctrl.state).toBe("following");
+		ctrl.detach();
+	});
+
+	it("onContainerResize does nothing when detached", () => {
+		const ctrl = makeController();
+		lifecycle = "ready";
+		const div = createScrollableDiv();
+		ctrl.attach(div);
+		simulateScrollUp(div);
+		ctrl.onContainerResize();
+		expect(div.scrollTop).toBe(200);
+		expect(ctrl.state).toBe("detached");
+		ctrl.detach();
+	});
+
+	it.each([
+		"empty",
+		"loading",
+		"committed",
+	] as const)("onContainerResize does nothing during %s", (nextLifecycle) => {
+		const ctrl = makeController();
+		lifecycle = nextLifecycle;
+		const div = createScrollableDiv();
+		ctrl.attach(div);
+		ctrl.onContainerResize();
+		expect(div.scrollTop).toBe(1500);
+		ctrl.detach();
+	});
 
 	it("starts in 'loading' state when lifecycle is 'empty'", () => {
 		const ctrl = makeController();

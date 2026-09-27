@@ -26,18 +26,20 @@ type WsMockControl = Awaited<ReturnType<typeof mockRelayWebSocket>>;
 type MultiInstanceControl = WsMockControl & { rpc: RpcMockControl };
 
 /** The project URL for multi-instance tests (must match fixture's current slug). */
-const PROJECT_URL = "/p/myapp/";
+const PROJECT_URL = "/?p=myapp";
 
-/** Wait for the chat page to be ready (WS connected, input visible). */
+/** Wait for the routed app shell to be ready and connected. */
 async function waitForChatReady(page: Page): Promise<void> {
 	// Use the test-level timeout (default 30s) rather than a hardcoded 10s.
 	// The SPA needs to load a ~2.4MB bundle, mount Svelte, connect the
 	// mocked WS, receive init messages, and render — under resource
 	// pressure this can exceed 10s.
-	await page.locator("#input").waitFor({ state: "visible" });
-	// Overlay uses class not id, and it fades out via opacity transition.
-	// Wait for it to be either removed from DOM or have opacity 0 (fadeOut).
-	await page.locator(".connect-overlay").waitFor({ state: "hidden" });
+	await page.locator("#layout").waitFor({ state: "attached" });
+	// On a phone the list route hides #app, including the connection overlay, so
+	// visibility cannot prove readiness. Wait for the overlay to unmount instead.
+	await page.waitForFunction(
+		() => document.querySelector(".connect-overlay") === null,
+	);
 }
 
 /** Navigate and wait for SPA readiness. */
@@ -175,30 +177,61 @@ async function mockInstanceRpc(page: Page): Promise<RpcMockControl> {
 	});
 }
 
-/** Open the ProjectSwitcher dropdown. On mobile, opens hamburger first. */
-async function openProjectSwitcher(page: Page): Promise<void> {
-	const hamburger = page.locator("#hamburger-btn");
-	if (await hamburger.isVisible()) {
-		await hamburger.click();
-		await page.locator("#project-switcher-btn").waitFor({ state: "visible" });
+/**
+ * Return to the list route on a phone. This is a no-op on desktop and when the
+ * test already starts at `/`.
+ */
+
+async function showSessionListOnMobile(page: Page): Promise<void> {
+	const back = page.locator("[data-testid='session-bar-back']");
+	if (await back.isVisible()) {
+		await back.click();
 	}
-	const switcherBtn = page.locator("#project-switcher-btn");
-	await switcherBtn.click();
-	// Wait for the dropdown container to appear
-	await page
-		.locator("[data-testid='project-switcher-dropdown']")
-		.waitFor({ state: "visible" });
+	await page.locator("#sidebar").waitFor({ state: "visible" });
 }
 
-// ─── Group 1: ProjectSwitcher Instance Grouping (IMPLEMENTED) ──────────────
+/**
+ * The gear. On a phone it lives in the overflow menu of whichever top bar is
+ * showing (the list's or the session's), because the global header that used
+ * to hold it is replaced at this width.
+ */
+async function openSettingsPanel(page: Page): Promise<void> {
+	for (const [trigger, item] of [
+		["list-bar-overflow", "list-overflow-settings"],
+		["session-bar-overflow", "overflow-settings"],
+	] as const) {
+		const overflow = page.getByTestId(trigger);
+		if (await overflow.isVisible()) {
+			await overflow.click();
+			await page.getByTestId(item).click();
+			return;
+		}
+	}
+	await page.locator("#settings-btn, [title='Settings']").click();
+}
 
-test.describe("ProjectSwitcher: Instance Grouping", () => {
+/** Open project management from the desktop sidebar or phone list bar. */
+async function openProjectsPanel(page: Page): Promise<void> {
+	await showSessionListOnMobile(page);
+	const overflow = page.getByTestId("list-bar-overflow");
+	if (await overflow.isVisible()) {
+		await overflow.click();
+		await page.getByTestId("list-overflow-projects").click();
+	} else {
+		await page.locator("#sidebar-projects-btn").click();
+	}
+	await expect(page.getByTestId("sidebar-projects-panel")).toBeVisible();
+}
+
+// ─── Group 1: ProjectManagerPanel Instance Grouping (IMPLEMENTED) ──────────────
+
+test.describe("ProjectManagerPanel: Instance Grouping", () => {
 	test("groups projects by instance when multiple instances exist", async ({
 		page,
 		baseURL,
 	}) => {
 		await setupMultiInstance(page, baseURL);
-		await openProjectSwitcher(page);
+		await openProjectsPanel(page);
 
 		// Instance group headers have specific styling
 		const instanceHeaders = page.locator(
@@ -211,7 +244,7 @@ test.describe("ProjectSwitcher: Instance Grouping", () => {
 
 	test("shows flat list when single instance", async ({ page, baseURL }) => {
 		await setupSingleInstance(page, baseURL);
-		await openProjectSwitcher(page);
+		await openProjectsPanel(page);
 
 		// No instance group headers
 		const instanceHeaders = page.locator(
@@ -225,7 +258,7 @@ test.describe("ProjectSwitcher: Instance Grouping", () => {
 		baseURL,
 	}) => {
 		await setupMultiInstance(page, baseURL);
-		await openProjectSwitcher(page);
+		await openProjectsPanel(page);
 
 		const instanceHeaders = page.locator(
 			"[data-testid='instance-group-header']",
@@ -249,7 +282,7 @@ test.describe("ProjectSwitcher: Instance Grouping", () => {
 		baseURL,
 	}) => {
 		const control = await setupMultiInstance(page, baseURL);
-		await openProjectSwitcher(page);
+		await openProjectsPanel(page);
 
 		const instanceHeaders = page.locator(
 			"[data-testid='instance-group-header']",
@@ -366,8 +399,8 @@ test.describe("Instance Store: Reactivity", () => {
 		const badge = page.locator("[data-testid='instance-badge']");
 		await expect(badge).toBeVisible();
 
-		// ProjectSwitcher grouping proves store → ProjectSwitcher
-		await openProjectSwitcher(page);
+		// ProjectManagerPanel grouping proves store → ProjectManagerPanel
+		await openProjectsPanel(page);
 		const instanceHeaders = page.locator(
 			"[data-testid='instance-group-header']",
 		);
@@ -379,7 +412,7 @@ test.describe("Instance Store: Reactivity", () => {
 		baseURL,
 	}) => {
 		const control = await setupMultiInstance(page, baseURL);
-		await openProjectSwitcher(page);
+		await openProjectsPanel(page);
 
 		const instanceHeaders = page.locator(
 			"[data-testid='instance-group-header']",
@@ -426,7 +459,7 @@ test.describe("Instance Store: Reactivity", () => {
 test.describe("Status Color Mapping", () => {
 	test("each status maps to correct color", async ({ page, baseURL }) => {
 		const control = await setupMultiInstance(page, baseURL);
-		await openProjectSwitcher(page);
+		await openProjectsPanel(page);
 
 		const instanceHeaders = page.locator(
 			"[data-testid='instance-group-header']",
@@ -462,7 +495,7 @@ test.describe("Instance Selector Dropdown", () => {
 		await setupMultiInstance(page, baseURL);
 		const badge = page.locator("[data-testid='instance-badge']");
 		await badge.click();
-		const dropdown = page.locator("#instance-selector-dropdown");
+		const dropdown = page.locator("[data-testid='instance-selector-dropdown']");
 		await expect(dropdown).toBeVisible();
 	});
 
@@ -473,7 +506,7 @@ test.describe("Instance Selector Dropdown", () => {
 		await setupMultiInstance(page, baseURL);
 		const badge = page.locator("[data-testid='instance-badge']");
 		await badge.click();
-		const dropdown = page.locator("#instance-selector-dropdown");
+		const dropdown = page.locator("[data-testid='instance-selector-dropdown']");
 		await expect(dropdown).toContainText("Personal");
 		await expect(dropdown).toContainText("Work");
 		const dots = dropdown.locator("[data-testid='instance-status-dot']");
@@ -493,7 +526,7 @@ test.describe("Instance Selector Dropdown", () => {
 		const badge = page.locator("[data-testid='instance-badge']");
 		await badge.click();
 		const manageLink = page
-			.locator("#instance-selector-dropdown")
+			.locator("[data-testid='instance-selector-dropdown']")
 			.getByText("Manage Instances");
 		await expect(manageLink).toBeVisible();
 	});
@@ -507,8 +540,7 @@ test.describe("Instance Management Settings", () => {
 		baseURL,
 	}) => {
 		await setupMultiInstance(page, baseURL);
-		const gearBtn = page.locator("#settings-btn, [title='Settings']");
-		await gearBtn.click();
+		await openSettingsPanel(page);
 		const settingsPanel = page.locator("#settings-panel");
 		await expect(settingsPanel).toBeVisible();
 		const instancesTab = settingsPanel.getByText("Instances");
@@ -520,8 +552,7 @@ test.describe("Instance Management Settings", () => {
 		baseURL,
 	}) => {
 		await setupMultiInstance(page, baseURL);
-		const gearBtn = page.locator("#settings-btn, [title='Settings']");
-		await gearBtn.click();
+		await openSettingsPanel(page);
 		await page.locator("#settings-panel").getByText("Instances").click();
 		const instanceList = page.locator("#instance-settings-list");
 		await expect(instanceList).toContainText("Personal");
@@ -535,8 +566,7 @@ test.describe("Instance Management Settings", () => {
 		baseURL,
 	}) => {
 		await setupMultiInstance(page, baseURL);
-		const gearBtn = page.locator("#settings-btn, [title='Settings']");
-		await gearBtn.click();
+		await openSettingsPanel(page);
 		await page.locator("#settings-panel").getByText("Instances").click();
 		await page.locator("#instance-settings-list").getByText("Personal").click();
 		await expect(page.getByText("Start")).toBeVisible();
@@ -549,8 +579,7 @@ test.describe("Instance Management Settings", () => {
 
 	test("start button sends StartInstance RPC", async ({ page, baseURL }) => {
 		const control = await setupMultiInstance(page, baseURL);
-		const gearBtn = page.locator("#settings-btn, [title='Settings']");
-		await gearBtn.click();
+		await openSettingsPanel(page);
 		await page.locator("#settings-panel").getByText("Instances").click();
 		await page.locator("#instance-settings-list").getByText("Work").click();
 		await page.click("button:has-text('Start')");
@@ -564,8 +593,7 @@ test.describe("Instance Management Settings", () => {
 
 	test("stop button sends StopInstance RPC", async ({ page, baseURL }) => {
 		const control = await setupMultiInstance(page, baseURL);
-		const gearBtn = page.locator("#settings-btn, [title='Settings']");
-		await gearBtn.click();
+		await openSettingsPanel(page);
 		await page.locator("#settings-panel").getByText("Instances").click();
 		await page.locator("#instance-settings-list").getByText("Personal").click();
 		await page.click("button:has-text('Stop')");
@@ -582,8 +610,7 @@ test.describe("Instance Management Settings", () => {
 		baseURL,
 	}) => {
 		const control = await setupMultiInstance(page, baseURL);
-		const gearBtn = page.locator("#settings-btn, [title='Settings']");
-		await gearBtn.click();
+		await openSettingsPanel(page);
 		await page.locator("#settings-panel").getByText("Instances").click();
 		await page.locator("#instance-settings-list").getByText("Work").click();
 		await page.click("button:has-text('Remove')");
@@ -604,8 +631,7 @@ test.describe("Instance Management Settings", () => {
 		baseURL,
 	}) => {
 		const control = await setupMultiInstance(page, baseURL);
-		const gearBtn = page.locator("#settings-btn, [title='Settings']");
-		await gearBtn.click();
+		await openSettingsPanel(page);
 		await page.locator("#settings-panel").getByText("Instances").click();
 
 		// Verify only 2 instances initially
@@ -656,8 +682,7 @@ test.describe("Instance Management Settings", () => {
 
 	test("Scan Now button sends ScanNow RPC", async ({ page, baseURL }) => {
 		const control = await setupMultiInstance(page, baseURL);
-		const gearBtn = page.locator("#settings-btn, [title='Settings']");
-		await gearBtn.click();
+		await openSettingsPanel(page);
 		await page.locator("#settings-panel").getByText("Instances").click();
 
 		const scanBtn = page.locator("[data-testid='scan-now-btn']");
@@ -669,8 +694,7 @@ test.describe("Instance Management Settings", () => {
 
 	test("inline rename sends RenameInstance RPC", async ({ page, baseURL }) => {
 		const control = await setupMultiInstance(page, baseURL);
-		const gearBtn = page.locator("#settings-btn, [title='Settings']");
-		await gearBtn.click();
+		await openSettingsPanel(page);
 		await page.locator("#settings-panel").getByText("Instances").click();
 
 		// Expand instance and click Rename
@@ -735,7 +759,7 @@ test.describe("Project-Instance Binding", () => {
 		baseURL,
 	}) => {
 		await setupMultiInstance(page, baseURL);
-		await openProjectSwitcher(page);
+		await openProjectsPanel(page);
 		const addBtn = page.getByText("Add project");
 		await addBtn.click();
 		const instanceSelect = page.locator(
@@ -749,7 +773,7 @@ test.describe("Project-Instance Binding", () => {
 		baseURL,
 	}) => {
 		await setupMultiInstance(page, baseURL);
-		await openProjectSwitcher(page);
+		await openProjectsPanel(page);
 		await page.getByText("Add project").click();
 		const instanceSelect = page.locator(
 			"select[name='instance'], #instance-selector",
@@ -758,9 +782,9 @@ test.describe("Project-Instance Binding", () => {
 	});
 });
 
-// ─── Group 10: Dashboard Instance Status ─────────────────────────────────
+// ─── Group 10: Session List Instance Status ─────────────────────────────────
 
-test.describe("Dashboard: Instance Status Banner", () => {
+test.describe("Session List: Instance Status Banner", () => {
 	test("banner when no healthy instances", async ({ page, baseURL }) => {
 		// Custom init with all instances unhealthy
 		const unhealthyInit = multiInstanceInitMessages.map((m) => {
@@ -905,12 +929,12 @@ test.describe("Add Project: Instance Binding", () => {
 		baseURL,
 	}) => {
 		const control = await setupMultiInstance(page, baseURL);
-		await openProjectSwitcher(page);
+		await openProjectsPanel(page);
 		await page.getByText("Add project").click();
 
 		// Fill directory
 		await page.fill(
-			"[data-testid='project-switcher-dropdown'] input[type='text']",
+			"[data-testid='sidebar-projects-panel'] input[type='text']",
 			"~/src/work/ds/test-generator-skill",
 		);
 
@@ -946,7 +970,7 @@ test.describe("Instance Selector: Rebind Project", () => {
 
 		// Click badge to open dropdown
 		await badge.click();
-		const dropdown = page.locator("#instance-selector-dropdown");
+		const dropdown = page.locator("[data-testid='instance-selector-dropdown']");
 		await expect(dropdown).toBeVisible();
 
 		// Click "Work" in the dropdown
@@ -1001,8 +1025,7 @@ test.describe("Settings: Instance Status Updates", () => {
 		const control = await setupMultiInstance(page, baseURL);
 
 		// Open settings and navigate to Instances tab
-		const gearBtn = page.locator("#settings-btn, [title='Settings']");
-		await gearBtn.click();
+		await openSettingsPanel(page);
 		const settingsPanel = page.locator("#settings-panel");
 		await expect(settingsPanel).toBeVisible();
 		await settingsPanel.getByText("Instances").click();
@@ -1048,8 +1071,7 @@ test.describe("Auto-Discovery: Getting Started Panel", () => {
 		baseURL,
 	}) => {
 		await setupNoInstances(page, baseURL);
-		const gearBtn = page.locator("#settings-btn, [title='Settings']");
-		await gearBtn.click();
+		await openSettingsPanel(page);
 		await page.locator("#settings-panel").getByText("Instances").click();
 
 		// Should show "No OpenCode instances detected" message
@@ -1068,8 +1090,7 @@ test.describe("Auto-Discovery: Getting Started Panel", () => {
 		baseURL,
 	}) => {
 		await setupNoInstances(page, baseURL);
-		const gearBtn = page.locator("#settings-btn, [title='Settings']");
-		await gearBtn.click();
+		await openSettingsPanel(page);
 		await page.locator("#settings-panel").getByText("Instances").click();
 
 		// Click "Quick Start" to expand
@@ -1087,8 +1108,7 @@ test.describe("Auto-Discovery: Getting Started Panel", () => {
 		baseURL,
 	}) => {
 		const control = await setupNoInstances(page, baseURL);
-		const gearBtn = page.locator("#settings-btn, [title='Settings']");
-		await gearBtn.click();
+		await openSettingsPanel(page);
 		await page.locator("#settings-panel").getByText("Instances").click();
 
 		// Getting Started panel should be visible
@@ -1128,8 +1148,7 @@ test.describe("Auto-Discovery: Getting Started Panel", () => {
 		baseURL,
 	}) => {
 		const control = await setupNoInstances(page, baseURL);
-		const gearBtn = page.locator("#settings-btn, [title='Settings']");
-		await gearBtn.click();
+		await openSettingsPanel(page);
 		await page.locator("#settings-panel").getByText("Instances").click();
 
 		// Click "Scan Now" link at bottom of Getting Started
@@ -1145,8 +1164,7 @@ test.describe("Auto-Discovery: Getting Started Panel", () => {
 		baseURL,
 	}) => {
 		const control = await setupMultiInstance(page, baseURL);
-		const gearBtn = page.locator("#settings-btn, [title='Settings']");
-		await gearBtn.click();
+		await openSettingsPanel(page);
 		await page.locator("#settings-panel").getByText("Instances").click();
 
 		// Send an instance_list with a discovered (unmanaged) instance

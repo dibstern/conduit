@@ -19,7 +19,6 @@ import type {
 //   - Effect.never — keeps the fiber alive until SIGINT/SIGTERM
 //   - Layer.provide(daemonLayer) — provides all deps to the program
 
-import { NodeRuntime } from "@effect/platform-node";
 import type { Fiber } from "effect";
 import {
 	Context,
@@ -37,8 +36,6 @@ import {
 	runStartupSequence,
 } from "../Services/daemon-startup.js";
 import { OpenCodeUnavailableError } from "../Services/opencode-smart-default.js";
-import type { DaemonLiveOptions } from "./daemon-layers.js";
-import { makeDaemonLive, ShutdownAwaiterLive } from "./daemon-layers.js";
 
 export { resolveDefaultStaticDir } from "../Services/daemon-static-dir.js";
 export { OpenCodeUnavailableError };
@@ -144,33 +141,6 @@ export {
 	DaemonHandleTag,
 	type EffectDaemonHandle,
 } from "../Services/daemon-handle.js";
-
-// ─── startDaemonEffect ──────────────────────────────────────────────────
-// Effect-native daemon entry point. Uses NodeRuntime.runMain which handles
-// SIGINT/SIGTERM (interrupts the fiber) and calls process.exit on
-// completion. Layer.launch constructs the Layer, runs until the fiber is
-// interrupted, then tears down all finalizers in reverse order.
-//
-// AP-39: NodeRuntime.runMain (not Effect.runFork) — installs signal
-//        handlers that interrupt the fiber.
-// AP-40: runMain never returns; it calls process.exit on completion.
-// AP-44: Layer.launch alone does NOT handle SIGINT/SIGTERM. runMain does.
-//
-// ShutdownAwaiterLive bridges the Deferred-based shutdown signal (from
-// SignalHandlerLayer or IPC scheduleShutdown) into fiber interruption.
-
-export const startDaemonEffect = (daemonLiveOptions: DaemonLiveOptions) => {
-	const daemonLayer = makeDaemonLive(daemonLiveOptions);
-
-	// ShutdownAwaiterLive needs ShutdownSignalTag, which is provided by
-	// SignalHandlerLayer inside daemonLayer. Provide daemonLayer to the
-	// awaiter so it has access to the Deferred.
-	const fullLayer = ShutdownAwaiterLive.pipe(Layer.provideMerge(daemonLayer));
-
-	NodeRuntime.runMain(Layer.launch(fullLayer), {
-		disablePrettyLogger: true,
-	});
-};
 
 export class DaemonLifecycleContextUnavailableError extends Data.TaggedError(
 	"DaemonLifecycleContextUnavailableError",

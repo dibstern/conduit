@@ -7,11 +7,13 @@
  * refactor works: the process WILL exit after stop().
  */
 
-import { existsSync, mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import http from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
+import { sendIPCCommand } from "../../../src/bin/cli-utils.js";
+import { hashPin } from "../../../src/lib/auth.js";
 import {
 	type ForegroundDaemonHandle,
 	startForegroundDaemon,
@@ -84,6 +86,79 @@ describe("Daemon lifecycle (real services, real timers)", () => {
 		const statusAfter = await httpStatus(`http://127.0.0.1:${port}/health`);
 		expect(typeof statusAfter).toBe("string"); // error code, not a status number
 	}, 15_000);
+
+	it("removes a PIN over IPC immediately and keeps it removed after restart", async () => {
+		tmpDir = mkdtempSync(join(tmpdir(), "daemon-pin-removal-"));
+		const options = {
+			configDir: tmpDir,
+			socketPath: join(tmpDir, "relay.sock"),
+			pidPath: join(tmpDir, "daemon.pid"),
+			logPath: join(tmpDir, "daemon.log"),
+			port: 0,
+			keepAwake: false,
+			smartDefault: false,
+		};
+		daemon = await startForegroundDaemon({
+			...options,
+			pinHash: hashPin("1234"),
+		});
+		const baseUrl = `http://127.0.0.1:${daemon.getStatus().port}`;
+		const before = await fetch(baseUrl, { redirect: "manual" });
+		await before.arrayBuffer();
+		expect(before.status).toBe(302);
+		expect(before.headers.get("location")).toBe("/auth");
+		expect(
+			await sendIPCCommand(options.socketPath, { cmd: "set_pin", pin: "1234" }),
+		).toEqual({ ok: true });
+		await expect
+			.poll(() => {
+				const config: unknown = JSON.parse(
+					readFileSync(join(tmpDir, "daemon.json"), "utf-8"),
+				);
+				return config;
+			})
+			.toMatchObject({ pinHash: hashPin("1234") });
+
+		expect(
+			await sendIPCCommand(options.socketPath, { cmd: "set_pin", pin: null }),
+		).toEqual({ ok: true });
+
+		const after = await fetch(baseUrl, { redirect: "manual" });
+		await after.arrayBuffer();
+		expect(after.status).not.toBe(302);
+		expect(after.headers.get("location")).not.toBe("/auth");
+		expect(await httpStatus(`${baseUrl}/api/projects`)).toBe(200);
+		expect(
+			await sendIPCCommand(options.socketPath, { cmd: "get_status" }),
+		).toMatchObject({
+			ok: true,
+			pinEnabled: false,
+		});
+		await expect
+			.poll(() => {
+				const config: unknown = JSON.parse(
+					readFileSync(join(tmpDir, "daemon.json"), "utf-8"),
+				);
+				return config;
+			})
+			.toMatchObject({ pinHash: null });
+
+		await daemon.stop();
+		daemon = null;
+		daemon = await startForegroundDaemon(options);
+		const restartedUrl = `http://127.0.0.1:${daemon.getStatus().port}`;
+		const restarted = await fetch(restartedUrl, { redirect: "manual" });
+		await restarted.arrayBuffer();
+		expect(restarted.status).not.toBe(302);
+		expect(restarted.headers.get("location")).not.toBe("/auth");
+		expect(await httpStatus(`${restartedUrl}/api/projects`)).toBe(200);
+		expect(
+			await sendIPCCommand(options.socketPath, { cmd: "get_status" }),
+		).toMatchObject({
+			ok: true,
+			pinEnabled: false,
+		});
+	}, 30_000);
 
 	it("stop() removes PID file and socket file", async () => {
 		tmpDir = mkdtempSync(join(tmpdir(), "daemon-lifecycle-"));

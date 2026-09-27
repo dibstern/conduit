@@ -114,37 +114,6 @@ export const ProviderPermissionUpdateSchema = Schema.Union(
 export type ProviderPermissionUpdate =
 	typeof ProviderPermissionUpdateSchema.Type;
 
-// ─── Base16 Theme ───────────────────────────────────────────────────────────
-
-export const BASE16_KEYS = [
-	"base00",
-	"base01",
-	"base02",
-	"base03",
-	"base04",
-	"base05",
-	"base06",
-	"base07",
-	"base08",
-	"base09",
-	"base0A",
-	"base0B",
-	"base0C",
-	"base0D",
-	"base0E",
-	"base0F",
-] as const;
-
-export type Base16Key = (typeof BASE16_KEYS)[number];
-
-export type Base16Theme = {
-	name: string;
-	author?: string;
-	variant: "dark" | "light";
-	/** Optional CSS variable overrides applied after Base16→CSS mapping. */
-	overrides?: Record<string, string>;
-} & Record<Base16Key, string>;
-
 // ─── Todo / Progress ────────────────────────────────────────────────────────
 
 export type TodoStatus = "pending" | "in_progress" | "completed" | "cancelled";
@@ -240,34 +209,48 @@ export const SessionStatusSchema = Schema.Literal(
 	"error",
 );
 
-/**
- * The single session type: one shape for the read-model row, the wire and the
- * browser (ni8.5 §4). Everything here either comes straight off the `sessions`
- * projection or — for the fork lineage — from the interim join that
- * conduit-test-ni8.24 deletes.
- *
- * Notably absent: `processing` — the status poller's derived flag. The client
- * session view derives it from the row's `status`, descendant status and
- * pre-status activity, which is a rendering question. The server keeps its own
- * answer to the separate notification question (`src/lib/session-busy.ts` is
- * the one ancestor walk both sides share).
- *
- * The three notification facts are here rather than riding a side message: a
- * badge is a fact about a session, the server is the only place that can decide
- * it once for every client, and putting them anywhere else means two sources
- * disagreeing about the same row. They are optional because `SessionInfo` has a
- * second producer with no read-model row behind it
- * (`src/lib/session/session-info-list.ts`); every read-model read fills all
- * three. Absent means "not derived here", never "nothing pending".
- */
+export const SESSION_ATTENTION_TIERS = [
+	"needs-approval",
+	"needs-reply",
+	"error",
+	"working",
+	"done-unread",
+	"idle",
+] as const;
+export type SessionAttention = (typeof SESSION_ATTENTION_TIERS)[number];
+export const SessionAttentionSchema = Schema.Literal(
+	...SESSION_ATTENTION_TIERS,
+);
+
+export interface SessionGit {
+	branch?: string;
+	head?: string;
+	worktree?: string;
+	merged?: boolean;
+	operation?: "rebase" | "merge" | "cherry-pick" | "revert" | "bisect";
+}
+
+export const SessionGitSchema = Schema.Struct({
+	branch: Schema.optionalWith(Schema.String, { exact: true }),
+	head: Schema.optionalWith(Schema.String, { exact: true }),
+	worktree: Schema.optionalWith(Schema.String, { exact: true }),
+	merged: Schema.optionalWith(Schema.Boolean, { exact: true }),
+	operation: Schema.optionalWith(
+		Schema.Literal("rebase", "merge", "cherry-pick", "revert", "bisect"),
+		{ exact: true },
+	),
+});
+
+/** One wire shape for projected sessions and daemon-wide lists. */
 export const SessionInfoSchema = Schema.Struct({
 	id: Schema.String,
 	title: Schema.String,
-	/** Lifecycle status straight off the row — the one source for "busy". */
 	status: SessionStatusSchema,
-	createdAt: Schema.optional(Schema.Number),
-	updatedAt: Schema.optional(Schema.Number),
+	projectSlug: Schema.optional(Schema.String),
+	createdAt: Schema.optional(Schema.Union(Schema.String, Schema.Number)),
+	updatedAt: Schema.optional(Schema.Union(Schema.String, Schema.Number)),
 	messageCount: Schema.optional(Schema.Number),
+	processing: Schema.optional(Schema.Boolean),
 	/** Parent session ID — set when this session was forked from another. */
 	parentID: Schema.optional(Schema.String),
 	/** The message ID at the fork point — messages up to this ID are inherited context. */
@@ -276,20 +259,57 @@ export const SessionInfoSchema = Schema.Struct({
 	forkPointTimestamp: Schema.optional(Schema.Number),
 	/** Ordering ID when the SDK lineage boundary differs from the UI message ID. */
 	forkPointMessageId: Schema.optional(Schema.String),
-	/** Unanswered questions on this session — the count the badge shows. */
-	pendingQuestions: Schema.optional(Schema.Number),
-	/** Unanswered permission requests on this session. */
-	pendingPermissions: Schema.optional(Schema.Number),
-	/**
-	 * A message landed after the last time this session was looked at. Derived
-	 * from `last_message_at > last_viewed_at`; `last_viewed_at` itself never goes
-	 * on the wire, because no client has any use for the timestamp — only for the
-	 * comparison, and one server-side comparison cannot disagree with itself.
-	 */
-	unseenActivity: Schema.optional(Schema.Boolean),
+	pendingQuestionCount: Schema.optional(Schema.Number),
+	pendingPermissionCount: Schema.optional(Schema.Number),
+	attention: Schema.optional(SessionAttentionSchema),
+	unread: Schema.optional(Schema.Boolean),
+	settledAt: Schema.optional(Schema.Number),
+	settledAutomatically: Schema.optional(Schema.Boolean),
+	autoSettleDisabled: Schema.optional(Schema.Boolean),
+	pinnedAt: Schema.optional(Schema.Number),
+	snoozedAt: Schema.optional(Schema.Number),
+	git: Schema.optional(SessionGitSchema),
+	snoozedUntil: Schema.optional(Schema.Number),
+	wokenAt: Schema.optional(Schema.Number),
+	wokeBecause: Schema.optional(
+		Schema.Literal("time", "approval", "question", "error", "turn"),
+	),
 });
 
 export type SessionInfo = typeof SessionInfoSchema.Type;
+
+export interface DaemonSessionQueryOptions {
+	readonly limit?: number;
+	readonly roots?: boolean;
+	readonly search?: string;
+	readonly cursor?: DaemonSessionCursor;
+	/** Read one project only. Filtering the merged page instead would leave a
+	 *  scoped list with a handful of rows per page, and paging would stall. */
+	readonly scope?: string;
+}
+
+export interface DaemonSessionCursor {
+	readonly updatedAt: number;
+	readonly id: string;
+}
+
+export type ProjectSessionAvailability =
+	| {
+			readonly projectSlug: string;
+			readonly available: true;
+	  }
+	| {
+			readonly projectSlug: string;
+			readonly available: false;
+			readonly error: string;
+	  };
+
+export interface DaemonSessionQueryResult {
+	readonly sessions: ReadonlyArray<SessionInfo>;
+	readonly availability: ReadonlyArray<ProjectSessionAvailability>;
+	readonly hasMore: boolean;
+	readonly nextCursor: DaemonSessionCursor | null;
+}
 
 // ─── Ask User / Questions ───────────────────────────────────────────────────
 
@@ -847,6 +867,12 @@ const SessionListSchema = Schema.Struct({
 	// columns on the session row itself, derived server-side.
 });
 
+const SessionFamilySchema = Schema.Struct({
+	type: Schema.Literal("session_family"),
+	rootId: Schema.String,
+	sessions: Schema.Array(SessionInfoSchema),
+});
+
 const SessionForkedSchema = Schema.Struct({
 	type: Schema.Literal("session_forked"),
 	sessionId: Schema.String,
@@ -919,6 +945,14 @@ const ProjectListSchema = Schema.Struct({
 	projects: Schema.Array(ProjectInfoSchema),
 	current: Schema.optional(Schema.String),
 	addedSlug: Schema.optional(Schema.String),
+});
+const DaemonSessionsChangedSchema = Schema.Struct({
+	type: Schema.Literal("daemon_sessions_changed"),
+});
+
+const ProjectAttachedSchema = Schema.Struct({
+	type: Schema.Literal("project_attached"),
+	slug: Schema.String,
 });
 
 // ── File browser ───────────────────────────────────────────────────────
@@ -1201,6 +1235,7 @@ export const RelayMessageSchema = Schema.Union(
 	DoneSchema,
 	SessionSwitchedSchema,
 	SessionListSchema,
+	SessionFamilySchema,
 	SessionForkedSchema,
 	HistoryPageSchema,
 	// Model / Agent / Commands
@@ -1214,6 +1249,8 @@ export const RelayMessageSchema = Schema.Union(
 	CommandListSchema,
 	// Projects
 	ProjectListSchema,
+	DaemonSessionsChangedSchema,
+	ProjectAttachedSchema,
 	// File browser
 	FileListSchema,
 	FileContentSchema,
@@ -1289,6 +1326,7 @@ export const RELAY_MESSAGE_TYPES = [
 	"done",
 	"session_switched",
 	"session_list",
+	"session_family",
 	"session_forked",
 	"history_page",
 	"model_info",
@@ -1300,6 +1338,8 @@ export const RELAY_MESSAGE_TYPES = [
 	"claude_settings_info",
 	"command_list",
 	"project_list",
+	"daemon_sessions_changed",
+	"project_attached",
 	"file_list",
 	"file_content",
 	"file_tree",
@@ -1485,6 +1525,7 @@ export type RelayMessage =
 			/** Current input draft text for this session (from input_sync). */
 			inputText?: string;
 	  }
+	| { type: "session_family"; rootId: string; sessions: SessionInfo[] }
 	| {
 			type: "session_list";
 			sessions: SessionInfo[];
@@ -1535,6 +1576,8 @@ export type RelayMessage =
 			current?: string;
 			addedSlug?: string;
 	  }
+	| { type: "project_attached"; slug: string }
+	| { type: "daemon_sessions_changed" }
 	// ── File browser ───────────────────────────────────────────────────────
 	| { type: "file_list"; path: string; entries: FileEntry[] }
 	| { type: "file_content"; path: string; content: string; binary?: boolean }
@@ -1818,13 +1861,6 @@ export interface HealthResponse {
 
 export interface InfoResponse {
 	version: string;
-}
-
-// ─── Themes ────────────────────────────────────────────────────────────────
-
-export interface ThemesResponse {
-	bundled: Record<string, Base16Theme>;
-	custom: Record<string, Base16Theme>;
 }
 
 // ─── Projects ──────────────────────────────────────────────────────────────

@@ -7,29 +7,56 @@
 	import { onDestroy } from "svelte";
 	import { getCurrentSlug } from "../../stores/router.svelte.js";
 	import { listDirectoriesRpc } from "../../transport/ws-rpc-client.js";
-	import Icon from "../shared/Icon.svelte";
+	import DetachedListbox from "../ui/DetachedListbox.svelte";
+	import Icon from "../ui/Icon.svelte";
+	import TextInput from "../ui/TextInput.svelte";
 
 	// ─── Props ──────────────────────────────────────────────────────────────────
+
+	type DirectoryLoadResult = {
+		readonly path: string;
+		readonly entries: readonly string[];
+	};
+
+	/** Returns `null` synchronously when no listing can be requested at all. */
+	type DirectoryLoader = (path: string) => Promise<DirectoryLoadResult> | null;
 
 	let {
 		value = $bindable(""),
 		placeholder = "/path/to/project",
 		onsubmit,
+		loadDirectories,
 	}: {
 		value?: string;
 		placeholder?: string;
 		onsubmit?: () => void;
+		loadDirectories?: DirectoryLoader | undefined;
 	} = $props();
+
+	const defaultLoader: DirectoryLoader = (path) => {
+		const projectSlug = getCurrentSlug();
+		if (!projectSlug) return null;
+		return listDirectoriesRpc({ projectSlug, path });
+	};
+
+	// ─── Identity ───────────────────────────────────────────────────────────────
+
+	// This component owns both halves of the combobox relationship, so it derives
+	// the ids locally instead of taking a `listboxId` prop.
+	const uid = $props.id();
+	const listboxId = `${uid}-listbox`;
+	const optionId = (index: number) => `${listboxId}-option-${index}`;
 
 	// ─── State ──────────────────────────────────────────────────────────────────
 
 	let entries: string[] = $state([]);
 	let activeIndex = $state(0);
 	let visible = $state(false);
-	let loading = $state(false);
 	let debounceTimer: ReturnType<typeof setTimeout> | undefined;
-	let inputEl: HTMLInputElement | undefined = $state(undefined);
 	let lastRequestPath = "";
+
+	const expanded = $derived(visible && entries.length > 0);
+	const activeOptionId = $derived(expanded ? optionId(activeIndex) : undefined);
 
 	// ─── Lifecycle ──────────────────────────────────────────────────────────────
 
@@ -49,28 +76,25 @@
 		if (!path || path.length < 1) {
 			entries = [];
 			visible = false;
-			loading = false;
 			return;
 		}
-		const projectSlug = getCurrentSlug();
-		if (!projectSlug) {
+		// Resolve the loader before touching `lastRequestPath` so the no-request
+		// path stays exactly as inert as the old slug guard was.
+		const pending = (loadDirectories ?? defaultLoader)(path);
+		if (!pending) {
 			entries = [];
 			visible = false;
-			loading = false;
 			return;
 		}
-		loading = true;
 		lastRequestPath = path;
 		try {
-			const response = await listDirectoriesRpc({ projectSlug, path });
+			const response = await pending;
 			if (response.path !== lastRequestPath) return;
 			entries = [...response.entries];
-			loading = false;
 			visible = entries.length > 0;
 		} catch {
 			if (path !== lastRequestPath) return;
 			entries = [];
-			loading = false;
 			visible = false;
 		}
 	}
@@ -151,22 +175,33 @@
 		}
 	}
 
+	// Resolved by option id rather than a descendant class query: the old lookup
+	// started at `document` and matched the first `.dir-autocomplete-list` in the
+	// page, which is the wrong list once two instances are mounted
+	// (conduit-test-9kov).
 	function scrollActiveIntoView() {
 		requestAnimationFrame(() => {
-			const menu = document.querySelector(".dir-autocomplete-list");
-			const activeItem = menu?.querySelector(".dir-item-active");
-			if (activeItem) {
-				activeItem.scrollIntoView({ block: "nearest" });
-			}
+			document
+				.getElementById(optionId(activeIndex))
+				?.scrollIntoView({ block: "nearest" });
 		});
 	}
 </script>
 
 <div class="relative">
-	<!-- Drop-up popup -->
-	{#if visible && entries.length > 0}
-		<div
-			class="dir-autocomplete-list absolute bottom-full left-0 right-0 mb-1 bg-bg-surface border border-border rounded-lg shadow-menu max-h-[200px] overflow-y-auto z-[var(--z-dropdown)] py-1"
+	<!-- Drop-up popup.
+
+	     200px, where FileMenu and CommandMenu use 300px. That is a real
+	     constraint, not drift: this listbox is not portaled, and it opens
+	     upward inside the sidebar projects panel, whose root is
+	     `overflow-hidden` around a project list capped at 280px. A 300px
+	     drop-up would be clipped by that ancestor; the composer, where the
+	     other two live, has no such ceiling (conduit-test-9kov). -->
+	{#if expanded}
+		<DetachedListbox
+			id={listboxId}
+			ariaLabel="Directory suggestions"
+			class="dir-autocomplete-list absolute bottom-full left-0 right-0 mb-1 max-h-[200px] overflow-y-auto"
 		>
 			{#each entries as entry, i}
 				{@const lastSlash = entry.lastIndexOf(
@@ -180,14 +215,18 @@
 				<div
 					class="dir-item flex items-center gap-2 py-1.5 px-3 cursor-pointer transition-colors duration-100 text-[12px] font-mono
 						{i === activeIndex
-						? 'dir-item-active bg-accent-bg'
+						? 'bg-accent-bg'
 						: 'hover:bg-bg-alt'}"
+					id={optionId(i)}
 					role="option"
-					tabindex="-1"
 					aria-selected={i === activeIndex}
+					tabindex="-1"
 					onmousedown={(e) => {
 						e.preventDefault();
-						selectEntry(entry);
+						// Click behaves like Tab, not like Enter: fill the directory in
+						// (trailing slash included) and list its children, so the user can
+						// keep drilling. Enter remains the "this is the path I want" commit.
+						drillInto(entry);
 					}}
 					onmouseenter={() => {
 						activeIndex = i;
@@ -206,17 +245,27 @@
 					</span>
 				</div>
 			{/each}
-		</div>
+		</DetachedListbox>
 	{/if}
 
 	<!-- Input -->
-	<input
-		bind:this={inputEl}
-		type="text"
+	<!-- `text-[12px]` overrides the sm scale on purpose. conduit's root font-size
+	     is 12px, so `text-xs` resolves to 9px, and a monospace filesystem path at
+	     9px is not readable. Tracked as conduit-test-gpeu (the field type
+	     scale) rather than settled per call site. -->
+	<TextInput
+		size="sm"
+		class="font-mono text-[12px]"
 		{placeholder}
 		autocomplete="off"
-		spellcheck="false"
-		class="w-full bg-input-bg border border-border rounded-md py-1.5 px-2 text-[12px] text-text font-mono outline-none focus:border-accent placeholder:text-text-dimmer"
+		spellcheck={false}
+		role="combobox"
+		aria-label="Project directory"
+		aria-autocomplete="list"
+		aria-haspopup="listbox"
+		aria-expanded={expanded}
+		aria-controls={expanded ? listboxId : undefined}
+		aria-activedescendant={activeOptionId}
 		bind:value
 		oninput={handleInput}
 		onkeydown={handleKeydown}

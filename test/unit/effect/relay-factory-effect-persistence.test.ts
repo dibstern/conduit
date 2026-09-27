@@ -24,6 +24,7 @@ import { makeProjectRegistryLive } from "../../../src/lib/domain/daemon/Services
 import { RelayCacheTag } from "../../../src/lib/domain/daemon/Services/relay-cache.js";
 import { PushManagerTag } from "../../../src/lib/domain/server/Services/push-service.js";
 import type {
+	DaemonSessionQueryResult,
 	OpenCodeInstance,
 	ProjectInfo,
 } from "../../../src/lib/shared-types.js";
@@ -57,7 +58,7 @@ const NoopAuxiliaryDaemonServices = Layer.mergeAll(
 
 describe("RelayFactoryLive Effect persistence wiring", () => {
 	it.effect(
-		"creates relays with persistenceDbPath but no legacy PersistenceLayer",
+		"creates relays with persistenceDbPath but no legacy persistence object",
 		() => {
 			const dir = mkdtempSync(join(tmpdir(), "conduit-relay-factory-effect-"));
 			const projectDir = join(dir, "project");
@@ -178,6 +179,7 @@ describe("RelayFactoryLive Effect persistence wiring", () => {
 				expect(createProjectRelayMock).toHaveBeenCalledOnce();
 				const config = createProjectRelayMock.mock.calls[0]?.[0];
 				expect(config?.getProjects).toBeTypeOf("function");
+				expect(config?.listDaemonSessions).toBeTypeOf("function");
 				expect(config?.getInstances).toBeTypeOf("function");
 
 				const projects = yield* Effect.tryPromise({
@@ -189,6 +191,21 @@ describe("RelayFactoryLive Effect persistence wiring", () => {
 					unknown
 				>({
 					try: () => Promise.resolve(config?.getInstances?.() ?? []),
+					catch: (cause) => cause,
+				});
+				const daemonSessions = yield* Effect.tryPromise<
+					DaemonSessionQueryResult,
+					unknown
+				>({
+					try: () =>
+						Promise.resolve(
+							config?.listDaemonSessions?.({ limit: 5 }) ?? {
+								sessions: [],
+								availability: [],
+								hasMore: false,
+								nextCursor: null,
+							},
+						),
 					catch: (cause) => cause,
 				});
 
@@ -208,6 +225,12 @@ describe("RelayFactoryLive Effect persistence wiring", () => {
 						managed: false,
 					}),
 				]);
+				expect(daemonSessions).toEqual({
+					sessions: [],
+					availability: [{ projectSlug: "effect-project", available: true }],
+					hasMore: false,
+					nextCursor: null,
+				});
 			}).pipe(
 				Effect.provide(Layer.fresh(layer)),
 				Effect.ensuring(

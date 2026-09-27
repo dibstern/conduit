@@ -4,6 +4,7 @@
 <!-- Preserves #messages ID for E2E. -->
 
 <script lang="ts">
+	import Button from "../ui/Button.svelte";
 	import { untrack } from "svelte";
 	import { currentChat, isProcessing, consumeScrollRequest } from "../../stores/chat.svelte.js";
 	import { findSession, sessionState } from "../../stores/session.svelte.js";
@@ -16,7 +17,13 @@
 	} from "../../stores/ui.svelte.js";
 	import { permissionsState, getLocalPermissions } from "../../stores/permissions.svelte.js";
 	import { createScrollController } from "../../stores/scroll-controller.svelte.js";
-	import { economics, segmentTurns, type Turn } from "../../utils/turns.js";
+	import {
+		isBarCollapsed,
+		noteSessionChanged,
+		noteUserScroll,
+		publishAtBottom,
+	} from "../../stores/session-view.svelte.js";
+	import { economics, lastResult, segmentTurns, type Turn } from "../../utils/turns.js";
 	import UserMessage from "./UserMessage.svelte";
 	import AssistantMessage from "./AssistantMessage.svelte";
 	import TurnActivity from "./TurnActivity.svelte";
@@ -26,7 +33,7 @@
 	import PermissionCard from "../permissions/PermissionCard.svelte";
 	import QuestionCard from "./QuestionCard.svelte";
 	import HistoryLoader from "./HistoryLoader.svelte";
-	import BlockGrid from "../shared/BlockGrid.svelte";
+	import BlockGrid from "../ui/BlockGrid.svelte";
 
 	let messagesEl: HTMLDivElement | undefined = $state();
 	let sentinelEl: HTMLElement | undefined = $state();
@@ -35,6 +42,7 @@
 
 	const scrollCtrl = createScrollController(
 		() => currentChat().loadLifecycle,
+		noteUserScroll,
 	);
 
 	// Attach/detach the controller to the scroll container
@@ -43,12 +51,31 @@
 			scrollCtrl.attach(messagesEl);
 			return () => scrollCtrl.detach();
 		}
+		return undefined;
 	});
 
 	// Reset scroll state on session switch
 	$effect(() => {
 		const _sid = sessionState.currentId; // track session changes
 		scrollCtrl.resetForSession();
+		noteSessionChanged();
+	});
+
+	// Publish for chrome outside the transcript (e.g. the session bar) so the app
+	// never grows a second, differently-tuned definition of "at the bottom".
+	// Hydration states count as pinned, otherwise the bar flaps on session open.
+	$effect(() => {
+		const state = scrollCtrl.state;
+		publishAtBottom(
+			state === "following" || state === "settling" || state === "loading",
+		);
+	});
+
+	// A Svelte $effect runs after the DOM is committed but before paint, so the
+	// bar's new height is already applied when we re-pin the transcript.
+	$effect(() => {
+		isBarCollapsed(); // track the bar's state
+		scrollCtrl.onContainerResize();
 	});
 
 	// Scroll to bottom when loadLifecycle transitions to "ready" after settling.
@@ -95,9 +122,7 @@
 	// Derived first-message UUID — changes only on prepend or session switch,
 	// NOT on appends or content updates. This prevents the $effect.pre from
 	// firing spuriously when message html/status fields change.
-	const firstMessageUuid = $derived(
-		currentChat().messages.length > 0 ? currentChat().messages[0]?.uuid : "",
-	);
+	const firstMessageUuid = $derived(currentChat().messages[0]?.uuid ?? "");
 
 	// Track previous state for prepend detection
 	let prevFirstUuid = "";
@@ -154,7 +179,7 @@
 		if (msgEl) {
 			e.preventDefault();
 			e.stopPropagation();
-			const uuid = msgEl.dataset.uuid ?? null;
+			const uuid = msgEl.dataset["uuid"] ?? null;
 			selectRewindMessage(uuid);
 		}
 	}
@@ -174,9 +199,19 @@
 		}
 		return ids;
 	});
+	// Pending questions outlive session switches so family replays survive;
+	// only the viewed family's belong in this transcript. An optimistic switch
+	// renders before its family arrives, so a family without the current
+	// session is someone else's.
+	const familyIds = $derived.by(() => {
+		const currentId = sessionState.currentId;
+		const ids = new Set(sessionState.familySessions.map((session) => session.id));
+		return currentId && ids.has(currentId) ? ids : new Set([currentId]);
+	});
 	const orphanQuestions = $derived(
 		permissionsState.pendingQuestions.filter(
 			(question) =>
+				familyIds.has(question.sessionId) &&
 				!transcriptToolIds.has(question.toolId) &&
 				(!question.toolUseId || !transcriptToolIds.has(question.toolUseId)),
 		),
@@ -244,7 +279,7 @@
 		{/if}
 		{#each turn.segments as segment, i}
 			{@const final = i === turn.segments.length - 1}
-			{#if segment.activity.length > 0}
+			{#if segment.activity.length > 0 || (i > 0 && final && turn.live)}
 				<TurnActivity {turn} {segment} {final} />
 			{/if}
 			<!-- Notices sit between the final work and reply: they are lifted out of
@@ -267,11 +302,11 @@
 				</div>
 			{/if}
 		{/each}
-		<!-- A turn that did work carries its bill on the strip. A tool-less question
-		     and answer has no ledger, so it renders the same bill on its own line —
+		<!-- A final segment that did work carries its bill on the strip. A text-only
+		     final segment has no ledger, so it renders the same bill on its own line —
 		     one formatter for both, rather than a second dialect of the same facts.
 		     .result-bar is an E2E selector; .turn-meta rides on TurnEconomics. -->
-		{#if turn.result && turn.segments.every((segment) => segment.activity.length === 0)}
+		{#if lastResult(turn) && turn.segments.at(-1)?.activity.length === 0 && (turn.segments.length === 1 || !turn.live)}
 			<!-- `now` only matters for a live turn, and this branch needs a result. -->
 			{@const bill = economics(turn, Date.now())}
 			<div class="msg-container">
@@ -325,13 +360,17 @@
 	{/each}
 
 	<!-- Scroll-to-bottom button -->
-	<button
+	<Button
+		variant="ghost"
+		size="content"
+		layout="flow"
+		tone="inherit"
+		hoverFill="surface"
 		id="scroll-btn"
-		class="sticky bottom-3 left-1/2 -translate-x-1/2 bg-bg-alt border border-border rounded-full px-4 py-1.5 text-xs text-text-secondary cursor-pointer z-5 font-sans hover:bg-bg-surface"
-		class:hidden={!scrollCtrl.isDetached}
+		class="sticky bottom-3 left-1/2 -translate-x-1/2 bg-bg-alt border border-border rounded-full px-4 py-1.5 text-xs text-text-secondary z-5 font-sans {scrollCtrl.isDetached ? '' : 'hidden'}"
 		title="Scroll to bottom"
 		onclick={() => scrollCtrl.requestFollow()}
 	>
 		{scrollButtonText}
-	</button>
+	</Button>
 </div>

@@ -22,14 +22,17 @@ import {
 	GetModels,
 	GetModelsResponseSchema,
 	GetProjects,
+	GetSkillContent,
 	GetTodo,
 	GetToolContent,
 	InstanceListResponseSchema,
+	ListDaemonSessions,
 	ListDirectories,
 	ListPtys,
 	ListSessions,
 	LoadMoreHistory,
 	LoadMoreHistoryResponseSchema,
+	MarkSessionUnread,
 	ModelExecutionSchema,
 	RejectQuestion,
 	ReloadProviderSession,
@@ -44,11 +47,15 @@ import {
 	RewindSession,
 	ScanNow,
 	SendMessage,
+	SessionInfoSchema,
 	SetClaudeSettings,
 	SetDefaultModel,
 	SetDefaultPermissionMode,
 	SetLogLevel,
 	SetProjectInstance,
+	SetSessionPinned,
+	SetSessionSettled,
+	SnoozeSession,
 	StartInstance,
 	StopInstance,
 	SwitchAgent,
@@ -57,6 +64,7 @@ import {
 	SwitchPermissionMode,
 	SwitchVariant,
 	SyncInputDraft,
+	UnsnoozeSession,
 	ViewSession,
 	WsRpcError,
 	WsRpcGroup,
@@ -76,6 +84,8 @@ const provideRpc = <A, E>(effect: Effect.Effect<A, E, WsRpcTestEnv>) =>
 			WsRpcGroup.toLayer({
 				SubscribeShell: () => Stream.empty,
 				SubscribeSessionDetail: () => Stream.empty,
+				AttachProject: () => Effect.succeed({ ok: true as const }),
+				ResolveSession: () => Effect.succeed({ projectSlug: null }),
 				GetModels: (request) =>
 					Effect.succeed({
 						projectSlug: request.projectSlug,
@@ -129,6 +139,21 @@ const provideRpc = <A, E>(effect: Effect.Effect<A, E, WsRpcTestEnv>) =>
 							},
 						],
 						current: "demo",
+					}),
+				ListDaemonSessions: (request) =>
+					Effect.succeed({
+						projectSlug: request.projectSlug,
+						sessions: [
+							{
+								id: "session-1",
+								title: "Session 1",
+								status: "idle" as const,
+								projectSlug: "demo",
+							},
+						],
+						availability: [{ projectSlug: "demo", available: true as const }],
+						hasMore: false,
+						nextCursor: null,
 					}),
 				AddProject: (request) =>
 					Effect.succeed({
@@ -395,6 +420,15 @@ const provideRpc = <A, E>(effect: Effect.Effect<A, E, WsRpcTestEnv>) =>
 						sessionId: request.sessionId,
 					}),
 				RenameSession: () => Effect.succeed({ ok: true as const }),
+				MarkSessionUnread: () => Effect.succeed({ ok: true as const }),
+				SetSessionSettled: () => Effect.succeed({ ok: true as const }),
+				SetSessionAutoSettle: () => Effect.succeed({ ok: true as const }),
+				GetAutoSettleSetting: () => Effect.succeed({ autoSettleAfterDays: 3 }),
+				SetAutoSettleSetting: (request) =>
+					Effect.succeed({ autoSettleAfterDays: request.autoSettleAfterDays }),
+				SetSessionPinned: () => Effect.succeed({ ok: true as const }),
+				SnoozeSession: () => Effect.succeed({ ok: true as const }),
+				UnsnoozeSession: () => Effect.succeed({ ok: true as const }),
 				SwitchVariant: (request) =>
 					Effect.succeed({
 						projectSlug: request.projectSlug,
@@ -434,6 +468,13 @@ const provideRpc = <A, E>(effect: Effect.Effect<A, E, WsRpcTestEnv>) =>
 						toolId: request.toolId,
 						content: "full output",
 					}),
+				GetSkillContent: (request) =>
+					Effect.succeed({
+						projectSlug: request.projectSlug,
+						name: request.name,
+						path: "/project/.claude/skills/review/SKILL.md",
+						content: "Review instructions",
+					}),
 				ListSessions: (request) =>
 					Effect.succeed({
 						projectSlug: request.projectSlug,
@@ -470,6 +511,58 @@ const provideRpc = <A, E>(effect: Effect.Effect<A, E, WsRpcTestEnv>) =>
 	);
 
 describe("browser WebSocket RPC contract", () => {
+	it("round-trips durable settled and pinned timestamps", () => {
+		const session = {
+			id: "s1",
+			title: "Triage",
+			status: "idle" as const,
+			updatedAt: 1,
+			messageCount: 0,
+			settledAt: 123,
+			pinnedAt: 456,
+			snoozedAt: 789,
+			snoozedUntil: 1000,
+			wokenAt: 900,
+			wokeBecause: "question" as const,
+		};
+		const encoded = Schema.encodeSync(SessionInfoSchema)(session);
+		expect(encoded).toEqual(session);
+		expect(Schema.decodeUnknownSync(SessionInfoSchema)(encoded)).toEqual(
+			session,
+		);
+	});
+
+	it("registers and decodes the project-scoped triage RPCs", () => {
+		for (const request of [
+			new SetSessionSettled({
+				projectSlug: "demo",
+				sessionId: "s1",
+				settled: true,
+				originId: "browser",
+			}),
+			new SetSessionPinned({
+				projectSlug: "demo",
+				sessionId: "s1",
+				pinned: false,
+			}),
+			new SnoozeSession({
+				projectSlug: "demo",
+				sessionId: "s1",
+				until: null,
+			}),
+			new UnsnoozeSession({
+				projectSlug: "demo",
+				sessionId: "s1",
+			}),
+		]) {
+			expect(WsRpcGroup.requests.has(request._tag)).toBe(true);
+			expect(
+				Schema.decodeUnknownSync(WsRpcRequest)(
+					Schema.encodeSync(WsRpcRequest)(request),
+				),
+			).toEqual(request);
+		}
+	});
 	it.effect(
 		"never returns secret-bearing extra fields from a stubbed resolver child",
 		() =>
@@ -660,6 +753,7 @@ describe("browser WebSocket RPC contract", () => {
 		expect(WsRpcGroup.requests.has("GetAgents")).toBe(true);
 		expect(WsRpcGroup.requests.has("GetCommands")).toBe(true);
 		expect(WsRpcGroup.requests.has("GetProjects")).toBe(true);
+		expect(WsRpcGroup.requests.has("ListDaemonSessions")).toBe(true);
 		expect(WsRpcGroup.requests.has("AddProject")).toBe(true);
 		expect(WsRpcGroup.requests.has("RemoveProject")).toBe(true);
 		expect(WsRpcGroup.requests.has("RenameProject")).toBe(true);
@@ -693,12 +787,14 @@ describe("browser WebSocket RPC contract", () => {
 		expect(WsRpcGroup.requests.has("ResolveClaudeSettings")).toBe(true);
 		expect(WsRpcGroup.requests.has("ReloadProviderSession")).toBe(true);
 		expect(WsRpcGroup.requests.has("RenameSession")).toBe(true);
+		expect(WsRpcGroup.requests.has("MarkSessionUnread")).toBe(true);
 		expect(WsRpcGroup.requests.has("SwitchVariant")).toBe(true);
 		expect(WsRpcGroup.requests.has("SwitchPermissionMode")).toBe(true);
 		expect(WsRpcGroup.requests.has("GetFileTree")).toBe(true);
 		expect(WsRpcGroup.requests.has("GetFileList")).toBe(true);
 		expect(WsRpcGroup.requests.has("GetFileContent")).toBe(true);
 		expect(WsRpcGroup.requests.has("GetToolContent")).toBe(true);
+		expect(WsRpcGroup.requests.has("GetSkillContent")).toBe(true);
 		expect(WsRpcGroup.requests.has("ListSessions")).toBe(true);
 		expect(WsRpcGroup.requests.has("LoadMoreHistory")).toBe(true);
 		expect(WsRpcGroup.requests.has("RewindSession")).toBe(true);
@@ -774,6 +870,27 @@ describe("browser WebSocket RPC contract", () => {
 						},
 					],
 					current: "demo",
+				});
+				const daemonSessions = yield* client.ListDaemonSessions({
+					projectSlug: "demo",
+					limit: 10,
+					roots: true,
+					search: "session",
+					cursor: { updatedAt: 100, id: "session-2" },
+				});
+				expect(daemonSessions).toEqual({
+					projectSlug: "demo",
+					sessions: [
+						{
+							id: "session-1",
+							title: "Session 1",
+							status: "idle",
+							projectSlug: "demo",
+						},
+					],
+					availability: [{ projectSlug: "demo", available: true }],
+					hasMore: false,
+					nextCursor: null,
 				});
 
 				const addedProject = yield* client.AddProject({
@@ -980,6 +1097,13 @@ describe("browser WebSocket RPC contract", () => {
 					}),
 				).toEqual({ ok: true });
 
+				expect(
+					yield* client.MarkSessionUnread({
+						projectSlug: "demo",
+						sessionId: "session-1",
+					}),
+				).toEqual({ ok: true });
+
 				const variant = yield* client.SwitchVariant({
 					projectSlug: "demo",
 					sessionId: "session-1",
@@ -1035,6 +1159,17 @@ describe("browser WebSocket RPC contract", () => {
 					projectSlug: "demo",
 					toolId: "tool-1",
 					content: "full output",
+				});
+
+				const skillContent = yield* client.GetSkillContent({
+					projectSlug: "demo",
+					name: "review",
+				});
+				expect(skillContent).toEqual({
+					projectSlug: "demo",
+					name: "review",
+					path: "/project/.claude/skills/review/SKILL.md",
+					content: "Review instructions",
 				});
 
 				const sessions = yield* client.ListSessions({ projectSlug: "demo" });
@@ -1170,6 +1305,9 @@ describe("browser WebSocket RPC contract", () => {
 		expect(new GetAgents({ projectSlug: "demo" })._tag).toBe("GetAgents");
 		expect(new GetCommands({ projectSlug: "demo" })._tag).toBe("GetCommands");
 		expect(new GetProjects({ projectSlug: "demo" })._tag).toBe("GetProjects");
+		expect(new ListDaemonSessions({ projectSlug: "demo" })._tag).toBe(
+			"ListDaemonSessions",
+		);
 		expect(
 			new AddProject({
 				projectSlug: "demo",
@@ -1369,6 +1507,12 @@ describe("browser WebSocket RPC contract", () => {
 			})._tag,
 		).toBe("RenameSession");
 		expect(
+			new MarkSessionUnread({
+				projectSlug: "demo",
+				sessionId: "session-1",
+			})._tag,
+		).toBe("MarkSessionUnread");
+		expect(
 			new SwitchVariant({
 				projectSlug: "demo",
 				sessionId: "session-1",
@@ -1391,6 +1535,9 @@ describe("browser WebSocket RPC contract", () => {
 			new GetToolContent({ projectSlug: "demo", toolId: "tool-1" })._tag,
 		).toBe("GetToolContent");
 		expect(new GetModels({ projectSlug: "demo" })._tag).toBe("GetModels");
+		expect(
+			new GetSkillContent({ projectSlug: "demo", name: "review" })._tag,
+		).toBe("GetSkillContent");
 		expect(new ListSessions({ projectSlug: "demo" })._tag).toBe("ListSessions");
 		expect(
 			new LoadMoreHistory({

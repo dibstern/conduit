@@ -7,7 +7,7 @@
 <script lang="ts">
 	import { formatClockTime } from "../../utils/format.js";
 
-	let { createdAt }: { createdAt?: number } = $props();
+	let { createdAt }: { createdAt?: number | undefined } = $props();
 </script>
 
 {#if createdAt != null}

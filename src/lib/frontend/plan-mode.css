@@ -42,8 +42,21 @@
 	gap: 0.5rem;
 	padding: 0.75rem 1rem;
 	background: var(--color-code-bg);
-	cursor: pointer;
 	user-select: none;
+}
+/* Collapse toggle: fills the header row so the copy button stays right-aligned. */
+.plan-card-toggle {
+	flex: 1;
+	display: flex;
+	align-items: center;
+	gap: 0.5rem;
+	padding: 0;
+	background: none;
+	border: none;
+	font: inherit;
+	color: inherit;
+	text-align: left;
+	cursor: pointer;
 }
 .plan-card-title {
 	flex: 1;

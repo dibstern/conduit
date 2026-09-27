@@ -76,13 +76,22 @@ describe("ProviderRuntimeEvent contracts", () => {
 	});
 
 	it("covers every canonical event type or explicit reclassification", () => {
-		// Conduit-initiated deletion events never transit provider ingress: the
-		// delete path appends tombstones and cleanup diagnostics directly.
+		// Conduit-originated events. No provider can produce them, so they are
+		// deliberately absent from the provider runtime event union.
 		const explicitlyReclassified: readonly string[] = [
 			"session.deleted",
 			"session.provider_cleanup_failed",
 			"session.forked",
 			"session.permission_mode_changed",
+			"session.read",
+			"session.unread",
+			"session.settled",
+			"session.unsettled",
+			"session.pinned",
+			"session.unpinned",
+			"session.snoozed",
+			"session.unsnoozed",
+			"session.auto_settle_set",
 		];
 		const missingRuntimeTypes = CANONICAL_EVENT_TYPES.filter(
 			(type) =>
@@ -364,7 +373,6 @@ describe("ProviderRuntimeEvent contracts", () => {
 		expect(filesImportingContract).toEqual(
 			expect.arrayContaining([
 				"src/lib/provider/types.ts",
-				"src/lib/provider/event-sink.ts",
 				"src/lib/provider/relay-event-sink.ts",
 				"src/lib/provider/provider-runtime-event-to-domain.ts",
 				"src/lib/domain/relay/Services/provider-runtime-ingestion-service.ts",

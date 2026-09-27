@@ -69,7 +69,8 @@ describe("provider instance resolution", () => {
 		const loaded = loadDaemonConfig(tempDir);
 
 		expect(decoded).toEqual(oldConfig);
-		expect(loaded).toEqual(oldConfig);
+		// Loading fills in settings added since the file was written.
+		expect(loaded).toEqual({ ...oldConfig, autoSettleAfterDays: 3 });
 		if (loaded === null) {
 			throw new Error("Expected old daemon config to load");
 		}

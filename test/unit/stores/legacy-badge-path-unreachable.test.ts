@@ -72,7 +72,7 @@ describe("the legacy badge path is unreachable", () => {
 	});
 
 	it("keeps no client-local record of which sessions were viewed", () => {
-		// `last_viewed_at` lives in one place: a column on the session row the
+		// `read_at` lives in one place: a column on the session row the
 		// server compares for us. A second copy in the browser is the drift.
 		expect(
 			matches(
@@ -98,8 +98,8 @@ describe("the legacy badge path is unreachable", () => {
 			store.indexOf("export function getAttentionSessions"),
 		);
 		expect(indicator).toContain("serverSessions.get(sessionId)");
-		expect(indicator).toMatch(/pendingQuestions|pendingPermissions/);
-		expect(indicator).toContain("unseenActivity");
+		expect(indicator).toMatch(/pendingQuestionCount|pendingPermissionCount/);
+		expect(indicator).toContain("unread");
 	});
 });
 
@@ -120,9 +120,9 @@ describe("a legacy notification broadcast moves no badge", () => {
 					title: "Other",
 					status: "idle",
 					createdAt: Date.now(),
-					pendingQuestions: 0,
-					pendingPermissions: 0,
-					unseenActivity: false,
+					pendingQuestionCount: 0,
+					pendingPermissionCount: 0,
+					unread: false,
 				},
 			],
 			"complete",
@@ -158,7 +158,7 @@ describe("a legacy notification broadcast moves no badge", () => {
 					title: "Other",
 					status: "idle",
 					createdAt: Date.now(),
-					pendingQuestions: 1,
+					pendingQuestionCount: 1,
 				},
 			],
 			"complete",

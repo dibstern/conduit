@@ -3,7 +3,12 @@
 <!-- Preserves .question-card class and [data-question-tool-id] for E2E. -->
 
 <script lang="ts">
+	import Surface from "../ui/Surface.svelte";
 	import type { QuestionRequest } from "../../types.js";
+	import Button from "../ui/Button.svelte";
+	import Checkbox from "../ui/Checkbox.svelte";
+	import Radio from "../ui/Radio.svelte";
+	import TextInput from "../ui/TextInput.svelte";
 	import { getBrowserClientId } from "../../stores/client-identity.js";
 	import { getCurrentSlug } from "../../stores/router.svelte.js";
 	import {
@@ -18,14 +23,14 @@
 		permissionsState,
 	} from "../../stores/permissions.svelte.js";
 
-	let { request, inline = false, synthetic = false }: { 
-		request: QuestionRequest; 
-		inline?: boolean;
+	let { request, inline = false, synthetic = false }: {
+		request: QuestionRequest;
+		inline?: boolean | undefined;
 		/** True when this question was reconstructed from tool input data
 		 *  rather than received via a live `ask_user` WebSocket event.
 		 *  This happens when viewing a session started outside this browser
 		 *  (e.g. from the terminal). The answer may not be deliverable. */
-		synthetic?: boolean;
+		synthetic?: boolean | undefined;
 	} = $props();
 
 	// ─── Local state ────────────────────────────────────────────────────────
@@ -73,8 +78,7 @@
 
 	function rebuildSelections() {
 		const next = new Map<number, string>();
-		for (let qIdx = 0; qIdx < request.questions.length; qIdx++) {
-			const q = request.questions[qIdx];
+		for (const [qIdx, q] of request.questions.entries()) {
 			if (q.multiSelect) {
 				const checked = multiChecked.get(qIdx) ?? new Set();
 				const values: string[] = [];
@@ -220,7 +224,7 @@
 	class={inline ? '' : 'my-2 mx-auto max-w-[760px] px-4'}
 	data-question-tool-id={request.toolId}
 >
-	<div class="question-card bg-bg-alt border border-border rounded-xl p-3">
+	<Surface variant="raised" radius="lg" class="question-card p-3">
 		<div class="question-title text-base font-medium mb-2 text-text">
 			Input Required
 		</div>
@@ -254,8 +258,7 @@
 									class="question-option flex items-start gap-2 px-2.5 py-2 rounded-lg cursor-pointer text-sm bg-bg-surface border border-border-subtle transition-[background,border-color] duration-150 hover:border-border hover:bg-bg {isCheckboxChecked(qIdx, opt.label) ? 'border-accent bg-accent-bg' : ''}"
 									for={optId}
 								>
-									<input
-										type="checkbox"
+									<Checkbox
 										id={optId}
 										name={inputName}
 										value={opt.label}
@@ -271,7 +274,7 @@
 												(e.target as HTMLInputElement)
 													.checked,
 											)}
-										class="mt-0.5 shrink-0 accent-accent"
+										class="mt-0.5"
 									/>
 									<span
 										class="question-option-content flex flex-col gap-0.5"
@@ -293,8 +296,7 @@
 									class="question-option flex items-start gap-2 px-2.5 py-2 rounded-lg cursor-pointer text-sm bg-bg-surface border border-border-subtle transition-[background,border-color] duration-150 hover:border-border hover:bg-bg {isRadioChecked(qIdx, opt.label) ? 'border-accent bg-accent-bg' : ''}"
 									for={optId}
 								>
-									<input
-										type="radio"
+									<Radio
 										id={optId}
 										name={inputName}
 										value={opt.label}
@@ -308,7 +310,7 @@
 												qIdx,
 												opt.label,
 											)}
-										class="mt-0.5 shrink-0 accent-accent"
+										class="mt-0.5"
 									/>
 									<span
 										class="question-option-content flex flex-col gap-0.5"
@@ -339,8 +341,7 @@
 									class="question-option flex items-start gap-2 px-2.5 py-2 rounded-lg cursor-pointer text-sm bg-bg-surface border border-border-subtle transition-[background,border-color] duration-150 hover:border-border hover:bg-bg {isCheckboxChecked(qIdx, '__custom__') ? 'border-accent bg-accent-bg' : ''}"
 									for={customOptId}
 								>
-									<input
-										type="checkbox"
+									<Checkbox
 										id={customOptId}
 										name={inputName}
 										value="__custom__"
@@ -356,7 +357,7 @@
 												(e.target as HTMLInputElement)
 													.checked,
 											)}
-										class="mt-0.5 shrink-0 accent-accent"
+										class="mt-0.5"
 									/>
 									<span
 										class="question-option-content flex flex-col gap-0.5"
@@ -372,8 +373,7 @@
 									class="question-option flex items-start gap-2 px-2.5 py-2 rounded-lg cursor-pointer text-sm bg-bg-surface border border-border-subtle transition-[background,border-color] duration-150 hover:border-border hover:bg-bg {isRadioChecked(qIdx, '__custom__') ? 'border-accent bg-accent-bg' : ''}"
 									for={customOptId}
 								>
-									<input
-										type="radio"
+									<Radio
 										id={customOptId}
 										name={inputName}
 										value="__custom__"
@@ -387,7 +387,7 @@
 												qIdx,
 												"__custom__",
 											)}
-										class="mt-0.5 shrink-0 accent-accent"
+										class="mt-0.5"
 									/>
 									<span
 										class="question-option-content flex flex-col gap-0.5"
@@ -400,10 +400,10 @@
 								</label>
 							{/if}
 						{/if}
-						<input
-							type="text"
+						<TextInput
 							id={`${inputName}-custom`}
-							class="question-custom-input w-full mt-1 px-2.5 py-2 rounded-lg text-sm bg-input-bg border border-border text-text font-sans outline-none transition-[border-color] duration-150 focus:border-accent disabled:opacity-50 disabled:cursor-not-allowed"
+							aria-label="Type your answer"
+							class="mt-1"
 							placeholder="Type your answer"
 							disabled={!!resolved}
 							value={customTexts.get(qIdx) ?? ""}
@@ -428,30 +428,45 @@
 
 		{#if !resolved}
 			<div class="question-actions flex gap-2 mt-2 max-sm:flex-col">
-				<button
-					class="question-submit-btn min-h-12 flex-1 px-4 py-2 rounded-lg border cursor-pointer text-sm font-medium font-sans border-success/20 bg-success/10 text-success transition-[background] duration-150 hover:enabled:bg-success/15 disabled:opacity-40 disabled:cursor-not-allowed"
+				<!-- No `!` overrides left. Two are gone rather than moved: a
+				     `disabled:opacity-40!` that disagreed with the primitive's 50%
+				     for no stated reason (de3.35.2), and a `disabled:hover:bg-success/10!`
+				     that cancelled the disabled hover tint one call site at a time.
+				     Button now drops every variant hover while the button is inert
+				     (conduit-test-or29), so the whole app gets what this file had. -->
+				<Button
+					variant="success-soft"
+					size="content"
+					class="question-submit-btn min-h-12 flex-1 px-4 py-2 rounded-lg text-sm font-medium font-sans"
 					disabled={!canSubmit}
 					onclick={handleSubmit}
 				>
 					Submit
-				</button>
+				</Button>
 				{#if canSkip}
-					<button
-						class="question-skip-btn min-h-12 flex-1 px-4 py-2 rounded-lg border cursor-pointer text-sm font-medium font-sans border-border text-error bg-transparent transition-[background] duration-150 hover:bg-error/[0.08]"
+					<Button
+						variant="danger-outline"
+						size="content"
+						class="question-skip-btn min-h-12 flex-1 px-4 py-2 rounded-lg text-sm font-medium font-sans"
 						onclick={handleSkip}
 					>
 						Skip
-					</button>
+					</Button>
 				{/if}
 			</div>
 		{:else if resolved === "submitting"}
 			<div class="question-actions flex gap-2 mt-2 max-sm:flex-col">
-				<button
-					class="question-submit-btn min-h-12 flex-1 px-4 py-2 rounded-lg border text-sm font-medium font-sans border-success/20 bg-success/10 text-success opacity-60 cursor-not-allowed"
+				<Button
+					variant="success-soft"
+					size="content"
+					layout="flow"
+					hoverFill="none"
+					disabledStyle="none"
+					class="question-submit-btn min-h-12 flex-1 px-4 py-2 rounded-lg text-sm font-medium font-sans opacity-60 cursor-not-allowed"
 					disabled
 				>
 					Submitting&hellip;
-				</button>
+				</Button>
 			</div>
 		{:else}
 			<div class="question-resolved text-sm py-2">
@@ -466,5 +481,5 @@
 				{/if}
 			</div>
 		{/if}
-	</div>
+	</Surface>
 </div>

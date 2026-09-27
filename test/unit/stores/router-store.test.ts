@@ -2,42 +2,68 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 // Mock window.history and window.location before importing
-const pushStateSpy = vi.fn();
-const replaceStateSpy = vi.fn();
+let historyState: unknown = null;
+const pushStateSpy = vi.fn((state: unknown) => {
+	historyState = state;
+});
+const replaceStateSpy = vi.fn((state: unknown) => {
+	historyState = state;
+});
+const backSpy = vi.fn();
+let popstateListener: (() => void) | undefined;
+const addEventListenerSpy = vi.fn(
+	(event: string, listener: () => void): void => {
+		if (event === "popstate") {
+			popstateListener = listener;
+		}
+	},
+);
 
 // Set up window mocks
 vi.stubGlobal("window", {
 	...(typeof window !== "undefined" ? window : {}),
-	location: { pathname: "/" } as Location,
+	location: { pathname: "/", search: "" } as Location,
 	history: {
+		get state() {
+			return historyState;
+		},
 		pushState: pushStateSpy,
 		replaceState: replaceStateSpy,
+		back: backSpy,
 	} as unknown as History,
-	addEventListener: vi.fn(),
+	addEventListener: addEventListenerSpy,
 });
 
-import {
+const {
 	clearTransitionLog,
 	getCurrentRoute,
+	getCurrentSearchParams,
 	getCurrentSessionId,
 	getCurrentSlug,
 	getSessionHref,
 	getTransitionLog,
 	navigate,
+	normalizeRoute,
+	previousHistoryEntryIsSessionList,
 	replaceRoute,
 	routerState,
-	slugState,
-	syncSlugState,
-} from "../../../src/lib/frontend/stores/router.svelte.js";
+	attachedProjectState,
+} = await import("../../../src/lib/frontend/stores/router.svelte.js");
 
 // ─── Reset state before each test ───────────────────────────────────────────
 
 beforeEach(() => {
 	routerState.path = "/";
-	syncSlugState("/");
+	routerState.search = "";
+	routerState.sessionNotFound = false;
+	attachedProjectState.slug = null;
+	window.location.pathname = "/";
+	window.location.search = "";
+	historyState = null;
 	clearTransitionLog();
 	pushStateSpy.mockClear();
 	replaceStateSpy.mockClear();
+	backSpy.mockClear();
 });
 
 // ─── navigate ───────────────────────────────────────────────────────────────
@@ -46,7 +72,11 @@ describe("navigate", () => {
 	it("updates path and calls pushState", () => {
 		navigate("/auth");
 		expect(routerState.path).toBe("/auth");
-		expect(pushStateSpy).toHaveBeenCalledWith(null, "", "/auth");
+		expect(pushStateSpy).toHaveBeenCalledWith(
+			{ conduitFrom: "/" },
+			"",
+			"/auth",
+		);
 	});
 
 	it("does not navigate if path is the same", () => {
@@ -55,10 +85,118 @@ describe("navigate", () => {
 		expect(pushStateSpy).not.toHaveBeenCalled();
 	});
 
+	it("updates search when the pathname is unchanged", () => {
+		navigate("/");
+		navigate("/?p=acme");
+
+		expect(routerState.path).toBe("/");
+		expect(routerState.search).toBe("?p=acme");
+		expect(pushStateSpy).toHaveBeenCalledTimes(1);
+		expect(pushStateSpy).toHaveBeenCalledWith(
+			{ conduitFrom: "/" },
+			"",
+			"/?p=acme",
+		);
+	});
+
+	it("updates search when navigating between query strings", () => {
+		navigate("/?a=1");
+		navigate("/?b=2");
+
+		expect(routerState.path).toBe("/");
+		expect(routerState.search).toBe("?b=2");
+		expect(pushStateSpy).toHaveBeenCalledTimes(2);
+		expect(pushStateSpy).toHaveBeenLastCalledWith(
+			{ conduitFrom: "/" },
+			"",
+			"/?b=2",
+		);
+	});
+
+	it("does not navigate if path and search are the same", () => {
+		navigate("/?p=acme");
+		navigate("/?p=acme");
+
+		expect(pushStateSpy).toHaveBeenCalledTimes(1);
+	});
+
+	it("carries the scope, and only the scope, to a new page with no query", () => {
+		navigate("/?p=other&x=1");
+		navigate("/s/123");
+
+		expect(routerState.path).toBe("/s/123");
+		expect(routerState.search).toBe("?p=other");
+		expect(pushStateSpy).toHaveBeenLastCalledWith(
+			{ conduitFrom: "/" },
+			"",
+			"/s/123?p=other",
+		);
+	});
+
+	it("takes a same-page navigation literally, so the scope can be cleared", () => {
+		navigate("/?p=other");
+		navigate("/");
+
+		expect(routerState.search).toBe("");
+	});
+
+	it("clears the carried scope when the destination explicitly names an empty query", () => {
+		navigate("/s/session-a?p=project-a");
+		navigate("/?");
+		expect(routerState.path).toBe("/");
+		expect(routerState.search).toBe("");
+	});
+
+	it("lets an explicit query replace the scope", () => {
+		navigate("/?p=other");
+		navigate("/setup?mode=lan");
+
+		expect(routerState.search).toBe("?mode=lan");
+	});
+
+	it("normalizes a bare query and discards the hash", () => {
+		navigate("/auth?#section");
+
+		expect(routerState.path).toBe("/auth");
+		expect(routerState.search).toBe("");
+		expect(pushStateSpy).toHaveBeenCalledWith(
+			{ conduitFrom: "/" },
+			"",
+			"/auth",
+		);
+	});
+
 	it("navigates to slug routes", () => {
 		navigate("/p/my-project/");
 		expect(routerState.path).toBe("/p/my-project/");
-		expect(pushStateSpy).toHaveBeenCalledWith(null, "", "/p/my-project/");
+		expect(pushStateSpy).toHaveBeenCalledWith(
+			{ conduitFrom: "/" },
+			"",
+			"/p/my-project/",
+		);
+	});
+
+	it("marks a session entry pushed from the session list", () => {
+		navigate("/s/123");
+		expect(previousHistoryEntryIsSessionList()).toBe(true);
+	});
+
+	it("does not treat a direct session entry as coming from the list", () => {
+		routerState.path = "/s/direct";
+		historyState = null;
+		expect(previousHistoryEntryIsSessionList()).toBe(false);
+	});
+
+	it("does not treat navigation from another app route as coming from the list", () => {
+		routerState.path = "/auth";
+		navigate("/s/123");
+		expect(previousHistoryEntryIsSessionList()).toBe(false);
+	});
+
+	it("preserves the previous-entry marker when replacing the current route", () => {
+		navigate("/s/123");
+		replaceRoute("/s/456");
+		expect(previousHistoryEntryIsSessionList()).toBe(true);
 	});
 });
 
@@ -89,147 +227,156 @@ describe("routerState", () => {
 	it("starts at root by default (after reset)", () => {
 		expect(routerState.path).toBe("/");
 	});
+
+	it("has empty search when the URL has no query", () => {
+		expect(routerState.search).toBe("");
+	});
+});
+
+describe("popstate", () => {
+	it("restores pathname and search from window.location", () => {
+		window.location.pathname = "/s/123";
+		window.location.search = "?p=other";
+
+		expect(popstateListener).toBeTypeOf("function");
+		popstateListener?.();
+
+		expect(routerState.path).toBe("/s/123");
+		expect(routerState.search).toBe("?p=other");
+		expect(getCurrentSlug()).toBe("other");
+	});
 });
 
 // ─── getCurrentRoute / getCurrentSlug ─────────────────────────────────────
 
 describe("getCurrentRoute", () => {
-	it("returns dashboard for root path", () => {
-		routerState.path = "/";
-		expect(getCurrentRoute()).toEqual({ page: "dashboard" });
+	it.each([
+		"/",
+		"/?p=my-project",
+	])("returns sessionless chat for %s", (path) => {
+		navigate(path);
+		expect(getCurrentRoute()).toEqual({ page: "chat" });
+		expect(getCurrentSessionId()).toBeNull();
 	});
 
-	it("returns auth for /auth", () => {
-		routerState.path = "/auth";
-		expect(getCurrentRoute()).toEqual({ page: "auth" });
+	it.each(["/auth", "/auth/", "/setup", "/setup/"])("preserves %s", (path) => {
+		routerState.path = path;
+		expect(getCurrentRoute()).toEqual({
+			page: path.startsWith("/auth") ? "auth" : "setup",
+		});
+		normalizeRoute();
+		expect(replaceStateSpy).not.toHaveBeenCalled();
 	});
 
-	it("returns setup for /setup", () => {
-		routerState.path = "/setup";
-		expect(getCurrentRoute()).toEqual({ page: "setup" });
+	it.each([
+		"/s/abc123",
+		"/s/abc123/",
+	])("returns the session for %s without a project", (path) => {
+		routerState.path = path;
+		expect(getCurrentRoute()).toEqual({ page: "chat", sessionId: "abc123" });
+		expect(getCurrentSessionId()).toBe("abc123");
 	});
 
-	it("returns chat with slug for /p/:slug/", () => {
-		routerState.path = "/p/my-project/";
-		expect(getCurrentRoute()).toEqual({ page: "chat", slug: "my-project" });
+	it("ignores query parameters when parsing the session route", () => {
+		navigate("/s/123?p=x");
+		expect(getCurrentRoute()).toEqual({ page: "chat", sessionId: "123" });
+	});
+});
+
+describe("normalizeRoute", () => {
+	it.each([
+		"/p/my-project/s/abc123",
+		"/p/my-project/s/abc123/",
+	])("replaces legacy session URL %s", (path) => {
+		routerState.path = path;
+		expect(getCurrentRoute()).toEqual({ page: "chat", sessionId: "abc123" });
+		normalizeRoute();
+		expect(routerState.path).toBe("/s/abc123");
+		expect(replaceStateSpy).toHaveBeenCalledWith(null, "", "/s/abc123");
+		expect(pushStateSpy).not.toHaveBeenCalled();
 	});
 
-	it("returns chat with slug for /p/:slug (no trailing slash)", () => {
-		routerState.path = "/p/test";
-		expect(getCurrentRoute()).toEqual({ page: "chat", slug: "test" });
+	it.each([
+		"/p/my-project",
+		"/p/my-project/",
+	])("replaces legacy project URL %s with the list hint", (path) => {
+		routerState.path = path;
+		normalizeRoute();
+		expect(routerState.path).toBe("/");
+		expect(routerState.search).toBe("?p=my-project");
+		expect(replaceStateSpy).toHaveBeenCalledWith(null, "", "/?p=my-project");
 	});
 
-	it("falls back to dashboard for unknown paths", () => {
-		routerState.path = "/unknown";
-		expect(getCurrentRoute()).toEqual({ page: "dashboard" });
+	it("preserves existing query parameters on a legacy session redirect", () => {
+		routerState.path = "/p/project-a/s/abc123";
+		routerState.search = "?p=project-b&x=1";
+		normalizeRoute();
+		expect(routerState.search).toBe("?p=project-b&x=1");
+	});
+
+	it.each([
+		"/unknown",
+		"/s/",
+		"/s/one/extra",
+		"/p/",
+	])("replaces unknown URL %s with root", (path) => {
+		routerState.path = path;
+		normalizeRoute();
+		expect(routerState.path).toBe("/");
+		expect(replaceStateSpy).toHaveBeenCalledWith(null, "", "/");
+	});
+
+	it.each(["/", "/s/abc123"])("does not replace canonical URL %s", (path) => {
+		routerState.path = path;
+		normalizeRoute();
+		expect(replaceStateSpy).not.toHaveBeenCalled();
+	});
+});
+
+describe("getCurrentSearchParams", () => {
+	it("returns the current query parameters", () => {
+		navigate("/?p=acme");
+		expect(getCurrentSearchParams().get("p")).toBe("acme");
 	});
 });
 
 describe("getCurrentSlug", () => {
-	it("returns slug on chat route", () => {
-		routerState.path = "/p/my-project/";
+	it("uses the project query hint before the daemon attaches", () => {
+		navigate("/?p=my-project");
 		expect(getCurrentSlug()).toBe("my-project");
 	});
 
-	it("returns null on non-chat route", () => {
-		routerState.path = "/";
+	it("has no project on a bare session link before attach", () => {
+		routerState.path = "/s/abc123";
 		expect(getCurrentSlug()).toBeNull();
 	});
-});
 
-// ─── Session URL routing (/p/:slug/s/:sessionId) ───────────────────────────
-
-describe("getCurrentRoute with session ID", () => {
-	it("returns chat with slug and sessionId for /p/:slug/s/:sessionId", () => {
-		routerState.path = "/p/my-project/s/abc123";
-		expect(getCurrentRoute()).toEqual({
-			page: "chat",
-			slug: "my-project",
-			sessionId: "abc123",
-		});
+	it("prefers the attached project over the query hint", () => {
+		attachedProjectState.slug = "project-a";
+		navigate("/s/session-b?p=project-b");
+		expect(getCurrentSlug()).toBe("project-a");
+		expect(getCurrentRoute()).toEqual({ page: "chat", sessionId: "session-b" });
 	});
 
-	it("returns chat with slug and sessionId for trailing slash", () => {
-		routerState.path = "/p/my-project/s/abc123/";
-		expect(getCurrentRoute()).toEqual({
-			page: "chat",
-			slug: "my-project",
-			sessionId: "abc123",
-		});
-	});
-
-	it("returns chat without sessionId for plain /p/:slug/", () => {
-		routerState.path = "/p/my-project/";
-		const route = getCurrentRoute();
-		expect(route).toEqual({ page: "chat", slug: "my-project" });
-		expect(route.page === "chat" && route.sessionId).toBeUndefined();
+	it("keeps the attached project through replacement and browser history", () => {
+		attachedProjectState.slug = "project-a";
+		replaceRoute("/?p=project-b");
+		window.location.pathname = "/s/session-c";
+		window.location.search = "?p=project-c";
+		popstateListener?.();
+		expect(getCurrentSlug()).toBe("project-a");
+		attachedProjectState.slug = "project-c";
+		expect(getCurrentSlug()).toBe("project-c");
 	});
 });
-
-describe("getCurrentSessionId", () => {
-	it("returns sessionId when URL has session path", () => {
-		routerState.path = "/p/my-project/s/sess-xyz";
-		expect(getCurrentSessionId()).toBe("sess-xyz");
-	});
-
-	it("returns null when URL has no session path", () => {
-		routerState.path = "/p/my-project/";
-		expect(getCurrentSessionId()).toBeNull();
-	});
-
-	it("returns null on non-chat route", () => {
-		routerState.path = "/";
-		expect(getCurrentSessionId()).toBeNull();
-	});
-});
-
-// ─── getSessionHref ─────────────────────────────────────────────────────────
-// Generates an href for a session link so <a> elements can support right-click
-// → "Open in New Tab". Bug fix: SessionItem was using <div onclick> without
-// an href, making right-click context menus useless.
 
 describe("getSessionHref", () => {
-	it("returns /p/:slug/s/:sessionId when on a chat route", () => {
-		routerState.path = "/p/my-project/s/old-session";
-		expect(getSessionHref("new-session")).toBe("/p/my-project/s/new-session");
-	});
-
-	it("returns /p/:slug/s/:sessionId when on a slug-only route", () => {
-		routerState.path = "/p/my-project/";
-		expect(getSessionHref("abc123")).toBe("/p/my-project/s/abc123");
-	});
-
-	it("returns null when not on a chat route", () => {
-		routerState.path = "/";
-		expect(getSessionHref("abc123")).toBeNull();
-	});
-});
-
-// ─── slugState (stable slug for effect dependencies) ────────────────────────
-// Bug fix: ChatLayout's $effect reads getCurrentSlug() which transitively reads
-// routerState.path, causing WS disconnect/reconnect on every session change.
-// slugState provides a stable signal that only updates when the slug changes.
-
-describe("slugState", () => {
-	it("reflects the current slug", () => {
-		routerState.path = "/p/my-project/";
-		syncSlugState(routerState.path);
-		expect(slugState.current).toBe("my-project");
-	});
-
-	it("returns null on non-chat routes", () => {
-		routerState.path = "/";
-		syncSlugState(routerState.path);
-		expect(slugState.current).toBeNull();
-	});
-
-	it("returns the same slug regardless of session ID in path", () => {
-		routerState.path = "/p/my-project/s/session-1";
-		syncSlugState(routerState.path);
-		expect(slugState.current).toBe("my-project");
-		routerState.path = "/p/my-project/s/session-2";
-		syncSlugState(routerState.path);
-		expect(slugState.current).toBe("my-project");
+	it.each([
+		"/",
+		"/s/old-session",
+	])("builds a session address from %s without a project", (path) => {
+		routerState.path = path;
+		expect(getSessionHref("abc123")).toBe("/s/abc123");
 	});
 });
 
@@ -268,6 +415,16 @@ describe("transition log", () => {
 		navigate("/auth");
 		navigate("/auth"); // same path — no-op
 		expect(getTransitionLog()).toHaveLength(1);
+	});
+
+	it("includes search in transitions", () => {
+		navigate("/?p=acme");
+		navigate("/?p=other");
+
+		expect(getTransitionLog()).toMatchObject([
+			{ from: "/", to: "/?p=acme" },
+			{ from: "/?p=acme", to: "/?p=other" },
+		]);
 	});
 
 	it("caps at 50 entries (ring buffer)", () => {

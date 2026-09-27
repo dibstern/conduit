@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { SqlClient } from "@effect/sql";
 import { SqliteClient as EffectSqliteClient } from "@effect/sql-sqlite-node";
 import { describe, it } from "@effect/vitest";
+import Database from "better-sqlite3";
 import { Effect, Layer, Logger } from "effect";
 import { expect } from "vitest";
 import {
@@ -16,10 +17,9 @@ import {
 import {
 	LEGACY_SKELETON_CUTOFF_MS,
 	MAX_PURGEABLE_SKELETON_SESSIONS,
+	makeEffectSqlMigrator,
 } from "../../../src/lib/persistence/effect/migrations.js";
-import { runMigrations } from "../../../src/lib/persistence/migrations.js";
-import { schemaMigrations } from "../../../src/lib/persistence/schema.js";
-import { SqliteClient as SyncSqliteClient } from "../../../src/lib/persistence/sqlite-client.js";
+import { seedLegacyEventStore } from "../../helpers/legacy-event-store.js";
 
 function makeTestSqlLayer(setup?: (filename: string) => void) {
 	const dir = mkdtempSync(join(tmpdir(), "conduit-persistence-effect-"));
@@ -62,8 +62,8 @@ function makePersistenceLayer(setup?: (filename: string) => void) {
 	);
 }
 
-function seedDatabase(filename: string, seed: (db: SyncSqliteClient) => void) {
-	const db = SyncSqliteClient.open(filename);
+function seedDatabase(filename: string, seed: (db: Database.Database) => void) {
+	const db = new Database(filename);
 	try {
 		seed(db);
 	} finally {
@@ -80,18 +80,17 @@ function expectMigrationFailure(error: unknown, reason: string) {
 	expect(String(persistenceError.cause)).toContain(reason);
 }
 
-function seedTrippedDatabase(db: SyncSqliteClient) {
-	runMigrations(db, schemaMigrations);
+function seedTrippedDatabase(db: Database.Database) {
+	seedLegacyEventStore(db);
 	for (let index = 0; index <= MAX_PURGEABLE_SKELETON_SESSIONS; index++) {
-		db.execute(
+		db.prepare(
 			"INSERT INTO sessions (id, provider, created_at, updated_at) VALUES (?, ?, ?, ?)",
-			[
-				`matching-${index.toString().padStart(2, "0")}`,
-				"opencode",
-				LEGACY_SKELETON_CUTOFF_MS - 1,
-				LEGACY_SKELETON_CUTOFF_MS - 1,
-			],
-		);
+		).run([
+			`matching-${index.toString().padStart(2, "0")}`,
+			"opencode",
+			LEGACY_SKELETON_CUTOFF_MS - 1,
+			LEGACY_SKELETON_CUTOFF_MS - 1,
+		]);
 	}
 }
 
@@ -258,12 +257,17 @@ describe("Persistence Effect", () => {
 				{ migration_id: 9, name: "sessions_permission_mode" },
 				{ migration_id: 10, name: "purge_legacy_skeleton_sessions" },
 				{ migration_id: 11, name: "session_cascade_deletes" },
-				{ migration_id: 12, name: "create_projection_failures" },
-				{ migration_id: 13, name: "read_model_version" },
-				{ migration_id: 14, name: "read_model_counter" },
-				{ migration_id: 15, name: "sessions_last_viewed_at" },
-				{ migration_id: 16, name: "sent_alerts" },
-				{ migration_id: 17, name: "fork_point_timestamp" },
+				{ migration_id: 12, name: "sessions_read_at" },
+				{ migration_id: 13, name: "sessions_last_turn_error" },
+				{ migration_id: 14, name: "backfill_compaction_messages" },
+				{ migration_id: 15, name: "sessions_settled_pinned" },
+				{ migration_id: 16, name: "sessions_snoozed" },
+				{ migration_id: 17, name: "sessions_auto_settle" },
+				{ migration_id: 18, name: "create_projection_failures" },
+				{ migration_id: 19, name: "read_model_version" },
+				{ migration_id: 20, name: "read_model_counter" },
+				{ migration_id: 21, name: "sent_alerts" },
+				{ migration_id: 22, name: "fork_point_timestamp" },
 			]);
 
 			const legacyMigrationTable = yield* sql<{ name: string }>`
@@ -366,15 +370,19 @@ describe("Persistence Effect", () => {
 		},
 	);
 
-	it.effect("diagnostic failure cannot prevent startup", () =>
-		Effect.gen(function* () {
-			yield* PersistenceServiceTag;
-		}).pipe(
-			Effect.provide(
-				makePersistenceLayer((filename) =>
-					seedDatabase(filename, (db) => {
-						runMigrations(db, schemaMigrations);
-						db.exec(`
+	it.effect(
+		"rejects a stale feature ledger before running new migrations",
+		() =>
+			Effect.gen(function* () {
+				const result = yield* Effect.either(
+					Effect.gen(function* () {
+						yield* PersistenceServiceTag;
+					}).pipe(
+						Effect.provide(
+							makePersistenceLayer((filename) =>
+								seedDatabase(filename, (db) => {
+									seedLegacyEventStore(db);
+									db.exec(`
 							CREATE TABLE effect_sql_migrations (
 								migration_id INTEGER PRIMARY KEY NOT NULL,
 								created_at DATETIME NOT NULL DEFAULT current_timestamp,
@@ -385,10 +393,15 @@ describe("Persistence Effect", () => {
 							DROP TABLE message_parts;
 							DROP TABLE messages;
 						`);
-					}),
-				),
-			),
-		),
+								}),
+							),
+						),
+					),
+				);
+				expect(result._tag).toBe("Left");
+				if (result._tag === "Left")
+					expectMigrationFailure(result.left, "Stale feature migration");
+			}),
 	);
 
 	it.effect("diagnostic defect cannot prevent startup", () =>
@@ -420,6 +433,33 @@ describe("Persistence Effect", () => {
 			),
 		),
 	);
+
+	it("diagnostic failure cannot prevent startup", async () => {
+		const dir = mkdtempSync(join(tmpdir(), "conduit-diagnostic-failure-"));
+		const filename = join(dir, "events.db");
+		try {
+			await Effect.runPromise(
+				makeEffectSqlMigrator().pipe(
+					Effect.provide(EffectSqliteClient.layer({ filename })),
+				),
+			);
+			seedDatabase(filename, (db) => db.exec("DROP TABLE messages"));
+			await Effect.runPromise(
+				Effect.gen(function* () {
+					yield* PersistenceServiceTag;
+				}).pipe(
+					Effect.provide(
+						Layer.provideMerge(
+							makePersistenceServiceLive,
+							EffectSqliteClient.layer({ filename }),
+						),
+					),
+				),
+			);
+		} finally {
+			rmSync(dir, { recursive: true, force: true });
+		}
+	});
 
 	it.effect("startup migration refuses readonly Effect SQLite layers", () =>
 		Effect.gen(function* () {

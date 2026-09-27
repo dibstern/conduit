@@ -91,7 +91,7 @@ export class InstanceManagementServiceTag extends Context.Tag(
 	"InstanceManagementService",
 )<InstanceManagementServiceTag, InstanceManagementService>() {}
 
-const makeInstanceId = (
+export const makeInstanceId = (
 	name: string,
 	instances: ReadonlyArray<{ readonly id: string }>,
 ) => {

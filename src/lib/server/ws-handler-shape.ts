@@ -1,12 +1,19 @@
-import type { IncomingMessage } from "node:http";
-import type { Duplex } from "node:stream";
+import type { WebSocket } from "ws";
 import type { RelayMessage } from "../shared-types.js";
 import type { IncomingMessageType } from "./ws-router.js";
+
+export interface WsAttachOptions {
+	clientId: string;
+	requestedSessionId?: string;
+	/** Leave session selection to the browser when no session was requested. */
+	skipDefaultSession?: boolean;
+}
 
 export interface WsClientConnectedEvent {
 	clientId: string;
 	clientCount: number;
 	requestedSessionId?: string;
+	skipDefaultSession?: boolean;
 }
 
 export interface WsClientDisconnectedEvent {
@@ -32,7 +39,7 @@ export interface WebSocketHandlerShape {
 	markClientBootstrapped(clientId: string): void;
 	getClientCount(): number;
 	getClientIds(): string[];
-	handleUpgrade(req: IncomingMessage, socket: Duplex, head: Buffer): void;
+	attach(ws: WebSocket, options: WsAttachOptions): () => void;
 	close(): void;
 	drain(): Promise<void>;
 	on(

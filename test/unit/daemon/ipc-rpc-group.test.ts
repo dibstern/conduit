@@ -102,8 +102,9 @@ const makeBaseTestLayer = (relaySnapshot?: RelayStatusSnapshot) =>
 						? Option.none()
 						: Option.some({
 								slug,
-								wsHandler: { handleUpgrade: () => {} },
-								rpcWsHandler: { handleUpgrade: () => {} },
+								attach: () => () => {},
+								wsHandler: {},
+								rpcWsHandler: {},
 								getStatusSnapshot: () => relaySnapshot,
 								stop: () => {},
 							}),

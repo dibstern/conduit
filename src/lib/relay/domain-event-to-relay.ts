@@ -199,6 +199,17 @@ export function translateDomainEventToRelay(
 		case "session.forked":
 		case "session.provider_changed":
 		case "session.provider_cleanup_failed":
+		// Read state reaches the UI as the `unread` field on a broadcast session
+		// list, never as a relay event, so there is nothing to translate here.
+		case "session.read":
+		case "session.unread":
+		case "session.settled":
+		case "session.unsettled":
+		case "session.pinned":
+		case "session.unpinned":
+		case "session.snoozed":
+		case "session.auto_settle_set":
+		case "session.unsnoozed":
 			return silent("persistence-only event; no UI surface in relay");
 
 		// The SDK owns the live mode, so a change reported mid-session has to

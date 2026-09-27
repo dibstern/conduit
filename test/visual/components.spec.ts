@@ -10,7 +10,8 @@
 
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { expect, test } from "@playwright/test";
+import { errors, expect, test } from "@playwright/test";
+import { freezeAnimations } from "../e2e/helpers/visual-helpers.js";
 
 // ─── Story Discovery ─────────────────────────────────────────────────────────
 
@@ -19,7 +20,55 @@ interface StoryEntry {
 	title: string;
 	name: string;
 	type: "story" | "docs";
+	tags?: string[];
 }
+
+const VIEWPORT_CAPTURE_TAG = "viewport-capture";
+
+/** Fidelity-gate mode for migration swap commits — see playwright.config.ts. */
+const STRICT = process.env["VISUAL_STRICT"] === "1";
+
+/**
+ * Re-test the known-flaky list instead of trusting it: `VISUAL_STRICT_ALL=1`
+ * ignores STRICT_NONDETERMINISTIC entirely.
+ *
+ * A skip list with no way to re-run its members goes stale silently, and then
+ * a story that was fixed months ago is still excluded from the only gate that
+ * would notice it regressing. It also makes the list unfalsifiable as evidence:
+ * measuring flake before adding an entry and after adding it compares different
+ * denominators, so the second number looks like an improvement it did not earn.
+ */
+const STRICT_ALL = process.env["VISUAL_STRICT_ALL"] === "1";
+
+/**
+ * Stories that a strict recapture cannot reproduce on the very next strict run.
+ *
+ * Deliberately EMPTY, and that emptiness is the assertion: as of 2026-08-06
+ * every story in the suite is held to zero-diff, with none exempted.
+ *
+ * It last held `ui-menu--arrow-key-navigation`, whose capture was a coin flip
+ * between two focus states. That entry is gone because the component defect it
+ * named is fixed (conduit-test-de3.24), not because the flake was tolerated.
+ *
+ * It held five entries until conduit-test-de3.20 root-caused all of them, and
+ * every one of those five reasons was wrong — which is the argument for keeping
+ * the map rather than deleting it. Two of the three diagnoses written here were
+ * guesses that read like findings:
+ *
+ * - `chat-thinkingblock--active` was blamed on an animation the freeze "does
+ *   not reach". It draws its label from `Math.random()` (see `pinRandomness`).
+ * - The three `overlays-settingspanel--*` entries were blamed on shared module
+ *   state across parallel workers. It is GPU compositing noise on the corners
+ *   of a panel above a blurred backdrop, fixed by launch flags in
+ *   playwright.config.ts — story isolation would not have touched it.
+ *
+ * So: an entry here is a confession that a story is not covered by the gate,
+ * never an explanation. Add one only with a measured failure rate, and treat
+ * the reason string as a hypothesis to disprove. `VISUAL_STRICT_ALL=1` is what
+ * makes that possible — without a re-test switch a skip list's own membership
+ * is unfalsifiable and silently outlives the bug.
+ */
+const STRICT_NONDETERMINISTIC: Record<string, string> = {};
 
 function loadStories(): StoryEntry[] {
 	const cwd = process.env["STORYBOOK_CWD"] ?? process.cwd();
@@ -32,40 +81,269 @@ function loadStories(): StoryEntry[] {
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
-/** Inject CSS to freeze all animations and transitions for deterministic screenshots. */
-async function freezeAnimations(
-	page: import("@playwright/test").Page,
-): Promise<void> {
-	await page.addStyleTag({
-		content: `*, *::before, *::after {
-			animation-delay: -0.0001s !important;
-			animation-duration: 0s !important;
-			animation-play-state: paused !important;
-			transition-duration: 0s !important;
-			transition-delay: 0s !important;
-			caret-color: transparent !important;
-		}`,
-	});
-	await page.waitForTimeout(50);
+/**
+ * Freeze the page's wall clock so a story cannot bake the capture time into its
+ * baseline.
+ *
+ * Found 2026-09-17: `stories/turn-fixtures.ts` anchors its stamps to
+ * `Date.now()` so a live turn keeps ticking while you browse Storybook by hand.
+ * That is the right call for the dev experience and fatal for a baseline: the
+ * turn ledger renders absolute clock times (08:07 AM vs 08:36 AM across two
+ * runs half an hour apart) and TurnActivity sizes its progress rail from
+ * `now - start`, so five stories could never match themselves twice.
+ *
+ * `setFixedTime` pins `Date.now()`/`new Date()` and leaves timers running, so
+ * the existing settle waits still work. The instant matches the `createdAt` in
+ * `stories/mocks.ts`, which keeps the message-timestamp baselines where they
+ * already are.
+ */
+const FIXED_CLOCK = new Date("2026-02-25T10:14:00Z");
+
+async function pinClock(page: import("@playwright/test").Page): Promise<void> {
+	await page.clock.setFixedTime(FIXED_CLOCK);
 }
 
-/** Wait for the story to fully render (fonts, Storybook root, async content). */
-async function _waitForStoryRender(
+/**
+ * Pin `Math.random` so a story cannot bake a coin flip into its baseline.
+ *
+ * Found 2026-08-06 (conduit-test-de3.20): ThinkingBlock.svelte:29 picks its
+ * label from `Math.random()` over 57 verbs, so Chat/ThinkingBlock > Active had
+ * a 1-in-57 chance per capture of matching its own baseline. The committed
+ * images prove how long that survived — the darwin baseline reads "Simulating…"
+ * and the linux one reads "Brewing…" for the same story. The default 1%
+ * tolerance is wider than a word, so nothing ever went red.
+ *
+ * This lives in the harness rather than in the component or the one story on
+ * purpose: fixing the component leaves the next entropy-drawing story to repeat
+ * it, and "never call Math.random in a story with a committed baseline" is a
+ * rule someone has to remember. Here it is a property of the capture
+ * environment instead.
+ *
+ * A counter-based sequence, NOT a constant: AssistantMessage.svelte:96,241
+ * derive mermaid element ids from Math.random, and a constant would make two
+ * diagrams in one story collide on the same DOM id.
+ *
+ * `Date.now` is deliberately NOT pinned — `play()` bodies use `waitFor`, which
+ * needs the clock to advance. Stories needing a fixed clock stub it themselves
+ * (see DebugPanel.stories.ts).
+ */
+async function pinRandomness(
 	page: import("@playwright/test").Page,
 ): Promise<void> {
-	// Wait for Storybook root element
+	await page.addInitScript(() => {
+		let seed = 0x2f6e2b1;
+		Math.random = () => {
+			seed = (seed + 0x6d2b79f5) | 0;
+			let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
+			t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+			return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+		};
+	});
+}
+
+/**
+ * Wait for Storybook's current render to reach a terminal lifecycle phase.
+ *
+ * A fixed sleep races play() functions: ui-modal--escape-restores-focus
+ * straddled the old 800ms boundary and was captured with its modal still open.
+ * Older preview state may not expose a terminal phase; that timeout is surfaced
+ * before falling back to the existing additive settle.
+ */
+async function waitForStoryTerminalPhase(
+	page: import("@playwright/test").Page,
+	storyId: string,
+): Promise<void> {
 	await page
-		.waitForSelector("#storybook-root", {
-			state: "attached",
-			timeout: 5_000,
-		})
-		.catch(() => {
-			/* root may already be present */
+		.waitForFunction(
+			(currentStoryId) => {
+				const preview = (
+					window as Window & {
+						__STORYBOOK_PREVIEW__?: {
+							storyRenders?: Array<{
+								id?: string;
+								phase?: string;
+							}>;
+						};
+					}
+				).__STORYBOOK_PREVIEW__;
+				const render = preview?.storyRenders?.find(
+					(candidate) => candidate.id === currentStoryId,
+				);
+				return ["finished", "errored", "aborted"].includes(render?.phase ?? "");
+			},
+			storyId,
+			{
+				polling: 50,
+				timeout: 5_000,
+			},
+		)
+		.catch((error: unknown) => {
+			if (!(error instanceof errors.TimeoutError)) throw error;
+			console.warn(
+				`Storybook render phase did not reach a terminal state for ${storyId} within 5s; using the additive settle`,
+			);
 		});
-	// Wait for web fonts
-	await page.evaluate(() => document.fonts.ready).catch(() => {});
-	// Brief settle time for Svelte renders
-	await page.waitForTimeout(200);
+}
+
+/** Require a quiet window long enough to cover delayed portalled DOM teardown. */
+const QUIET_MS = 150;
+
+/** Bound quiescence detection while keeping its timeout non-fatal. */
+const QUIESCENCE_TIMEOUT_MS = 3_000;
+
+/**
+ * Wait for unfrozen animations and then for a mutation-free DOM window.
+ *
+ * Portalled content can outlive Storybook's terminal render phase. Observe the
+ * document root so mutations outside #storybook-root also extend the settle.
+ * The capture freeze deliberately pauses intrinsic infinite animations before
+ * this runs; their `finished` promises never resolve, so do not await them.
+ */
+async function waitForDomQuiescence(
+	page: import("@playwright/test").Page,
+	storyId: string,
+): Promise<void> {
+	await page
+		.evaluate(
+			async ({ quietMs, timeoutMs }) =>
+				await new Promise<boolean>((resolve) => {
+					let observer: MutationObserver | undefined;
+					let quietTimer: number | undefined;
+					let timeoutTimer: number | undefined;
+					let resolved = false;
+
+					const finish = (settled: boolean) => {
+						if (resolved) return;
+						resolved = true;
+						observer?.disconnect();
+						if (quietTimer !== undefined) window.clearTimeout(quietTimer);
+						if (timeoutTimer !== undefined) window.clearTimeout(timeoutTimer);
+						resolve(settled);
+					};
+
+					timeoutTimer = window.setTimeout(() => finish(false), timeoutMs);
+
+					void Promise.allSettled(
+						document
+							.getAnimations()
+							.filter((animation) => animation.playState !== "paused")
+							.map((animation) => animation.finished),
+					).then(() => {
+						if (resolved) return;
+
+						observer = new MutationObserver(() => {
+							if (quietTimer !== undefined) {
+								window.clearTimeout(quietTimer);
+							}
+							quietTimer = window.setTimeout(() => finish(true), quietMs);
+						});
+						observer.observe(document.documentElement, {
+							childList: true,
+							subtree: true,
+							attributes: true,
+							characterData: true,
+						});
+						quietTimer = window.setTimeout(() => finish(true), quietMs);
+					});
+				}),
+			{ quietMs: QUIET_MS, timeoutMs: QUIESCENCE_TIMEOUT_MS },
+		)
+		.then((settled) => {
+			if (settled) return;
+			console.warn(
+				`DOM did not quiesce for ${storyId} within ${QUIESCENCE_TIMEOUT_MS}ms; continuing to screenshot`,
+			);
+		})
+		.catch((error: unknown) => {
+			console.warn(
+				`DOM quiescence wait failed for ${storyId}; continuing to screenshot`,
+				error,
+			);
+		});
+}
+
+/**
+ * Fail instead of screenshotting a render whose play() or Storybook lifecycle
+ * failed. This runs after the existing additive settle so a terminal phase
+ * cannot race its corresponding Storybook channel event.
+ */
+async function assertStoryRenderSucceeded(
+	page: import("@playwright/test").Page,
+	storyId: string,
+): Promise<void> {
+	const result = await page.evaluate((currentStoryId) => {
+		const storybookWindow = window as Window & {
+			__STORYBOOK_PREVIEW__?: {
+				storyRenders?: Array<{
+					id?: string;
+					phase?: string;
+				}>;
+			};
+			__STORYBOOK_ADDONS_PREVIEW?: {
+				hasChannel?: () => boolean;
+				getChannel?: () => {
+					last?: (eventName: string) => unknown[] | undefined;
+				};
+			};
+		};
+		if (!storybookWindow.__STORYBOOK_PREVIEW__?.storyRenders) {
+			return {
+				apiError: "window.__STORYBOOK_PREVIEW__.storyRenders is unavailable",
+			};
+		}
+
+		const render = storybookWindow.__STORYBOOK_PREVIEW__.storyRenders.find(
+			(candidate) => candidate.id === currentStoryId,
+		);
+		if (!render || typeof render.phase !== "string") {
+			return {
+				apiError: `StoryRender state is unavailable for ${currentStoryId}`,
+			};
+		}
+
+		const addons = storybookWindow.__STORYBOOK_ADDONS_PREVIEW;
+		const channel =
+			addons?.hasChannel?.() === true ? addons.getChannel?.() : undefined;
+		if (!channel?.last) {
+			return { apiError: "Storybook preview channel history is unavailable" };
+		}
+
+		const playException = channel.last("playFunctionThrewException")?.[0] as
+			| { message?: unknown }
+			| undefined;
+		const storyFinished = channel.last("storyFinished")?.[0] as
+			| { status?: unknown }
+			| undefined;
+		if (render.phase === "finished" && !storyFinished) {
+			return { apiError: "Storybook storyFinished payload is unavailable" };
+		}
+
+		return {
+			phase: render.phase,
+			playError:
+				typeof playException?.message === "string"
+					? playException.message
+					: undefined,
+			finishedStatus:
+				typeof storyFinished?.status === "string"
+					? storyFinished.status
+					: undefined,
+		};
+	}, storyId);
+
+	if (result.apiError) {
+		throw new Error(`Storybook render API unavailable: ${result.apiError}`);
+	}
+	if (
+		result.phase === "errored" ||
+		result.playError ||
+		result.finishedStatus === "error"
+	) {
+		const detail = result.playError
+			? `play() failed: ${result.playError}`
+			: `render failed (phase=${result.phase}, status=${result.finishedStatus ?? "unknown"})`;
+		throw new Error(`Story "${storyId}" ${detail}`);
+	}
 }
 
 // ─── Tests ───────────────────────────────────────────────────────────────────
@@ -92,17 +370,41 @@ if (stories.length > 0) {
 		byTitle.set(story.title, existing);
 	}
 
-	// Stories that intentionally render nothing (hidden/empty/closed states)
-	const SKIP_STORIES = new Set([
-		"model-agentselector--single-agent",
-		"model-agentselector--no-agents",
-		"chat-pastepreview--empty",
-		"overlays-confirmmodal--hidden",
-		"overlays-imagelightbox--hidden",
-		"overlays-qrmodal--hidden",
-		"overlays-notifsettings--closed",
-		"overlays-rewindbanner--inactive",
-		"overlays-connectoverlay--connected",
+	// Stories intentionally excluded from screenshot capture:
+	// 1. hidden/empty/closed states;
+	// 2. behavior-only fixtures covered by dedicated browser specs; and
+	// 3. stories whose final state is a transient interaction end-state.
+	//
+	// ui-modal--escape-restores-focus settles to a closed modal, visually
+	// identical to every other closed-modal story and carrying no design
+	// information. Storybook can report "finished" before Svelte tears down the
+	// portaled dialog, so its screenshot races between open and closed states.
+	// Its real value is behavioral and remains asserted by the story's own play()
+	// through check:storybook and by modal-focus.spec.ts in a real browser,
+	// including focus restoration. This is NOT a blessed-away regression.
+	// The value is WHICH viewports to skip. Most exclusions are a property of the
+	// story ("all"), but some are a property of the layout at one width only.
+	// See conduit-test-7jv.
+	const SKIP_STORIES = new Map<string, "all" | "desktop" | "mobile">([
+		["fixtures-modalfocus--default", "all"],
+		["ui-modal--escape-restores-focus", "all"],
+		["model-agentselector--single-agent", "all"],
+		["model-agentselector--no-agents", "all"],
+		["chat-pastepreview--empty", "all"],
+		["input-filemenu--hides-when-no-matches", "all"],
+		["input-commandmenu--hides-when-no-matches", "all"],
+		["overlays-confirmmodal--hidden", "all"],
+		["overlays-imagelightbox--hidden", "all"],
+		["overlays-qrmodal--hidden", "all"],
+		["overlays-notifsettings--closed", "all"],
+		["overlays-rewindbanner--inactive", "all"],
+		["overlays-connectoverlay--connected", "all"],
+
+		// Renders no pixels at either width, so both captures were blank. Note it
+		// is deliberately NOT added to build-health's EXPECTED_EMPTY_ROOT: it does
+		// render child elements, they just have no visible extent, so that check
+		// still earns its keep here.
+		["overlays-attentionbanner--no-notifications", "all"],
 	]);
 
 	// Stories whose element dimensions vary across platforms (e.g. Mermaid SVGs
@@ -128,21 +430,60 @@ if (stories.length > 0) {
 	for (const [title, componentStories] of byTitle) {
 		test.describe(title, () => {
 			for (const story of componentStories) {
-				test(story.name, async ({ page }) => {
-					if (SKIP_STORIES.has(story.id)) {
-						test.skip(true, "Intentionally empty/hidden story");
+				test(story.name, async ({ page }, testInfo) => {
+					const skipScope = SKIP_STORIES.get(story.id);
+					if (skipScope === "all" || skipScope === testInfo.project.name) {
+						test.skip(true, "Intentionally excluded from visual capture");
 						return;
 					}
 
+					const strictFlakeReason = STRICT_NONDETERMINISTIC[story.id];
+					if (STRICT && !STRICT_ALL && strictFlakeReason) {
+						// Announced, not silent: strict mode's whole value is that a red
+						// run means something, so a story it cannot hold to zero-diff is
+						// named here with its reason rather than left permanently red
+						// (which trains everyone to ignore the colour) or quietly passed.
+						test.skip(
+							true,
+							`[visual:strict] NOT covered by the fidelity gate — ${strictFlakeReason} (conduit-test-de3.20)`,
+						);
+						return;
+					}
+
+					await pinRandomness(page);
+					await pinClock(page);
 					await page.goto(`/iframe.html?id=${story.id}&viewMode=story`, {
 						waitUntil: "domcontentloaded",
 					});
+					await waitForStoryTerminalPhase(page, story.id);
+					// Keep the historical settle after the phase wait/fallback. Waiting may
+					// only increase; shortening it risks baseline churn across all stories.
 					await page.waitForTimeout(800);
+					// Freeze before quiescence: intrinsic infinite animations never resolve
+					// `animation.finished`, and freezing only after the timeout made the
+					// timeout frame decide the committed pixels.
 					await freezeAnimations(page);
+					await waitForDomQuiescence(page, story.id);
+					await assertStoryRenderSucceeded(page, story.id);
 
 					// Detect zero-height root (fixed-position content escapes flow)
 					const root = page.locator("#storybook-root");
 					const box = await root.boundingBox();
+
+					// A story whose id says "focus" or "invalid" is understood to be
+					// showing an affordance painted OUTSIDE the subject's border box --
+					// the house focus ring (a box-shadow) or, on a UA-painted checkbox
+					// where `border` is ignored, the error outline. Both need the two
+					// things no other story does: see the padding and the zero tolerance
+					// below. Keyed off the id rather than a registry so a new one is
+					// covered the day it is written. Viewport captures are excluded:
+					// they already frame the whole page, so nothing is cropped and
+					// padding would only churn their baselines.
+					const capturesOutsideBorderBox =
+						/focus|invalid/i.test(story.id) &&
+						!story.tags?.includes(VIEWPORT_CAPTURE_TAG) &&
+						!!box &&
+						box.height > 0;
 
 					// Pin element height for size-variable stories so screenshots
 					// have identical dimensions across platforms.
@@ -154,17 +495,150 @@ if (stories.length > 0) {
 						await page.waitForTimeout(50);
 					}
 
-					const screenshotOpts = sizeNorm
-						? { maxDiffPixelRatio: sizeNorm.maxDiffPixelRatio }
-						: {};
-					if (box && box.height > 0) {
-						await expect(root).toHaveScreenshot(
+					// Per-story tolerances are a per-CALL option, which beats the
+					// config-level one — so leaving this in place under VISUAL_STRICT
+					// would let a story quietly opt out of the fidelity gate while the
+					// run still reported strict. Under strict the override is dropped
+					// and the exemption is announced, so a story that then fails is
+					// read as "not provably identical" rather than as a broken mode.
+					if (sizeNorm && STRICT) {
+						console.warn(
+							`[visual:strict] ignoring the ${sizeNorm.maxDiffPixelRatio} tolerance for "${story.id}"; it is held to zero-diff like every other story.`,
+						);
+					}
+					const screenshotOpts: { maxDiffPixelRatio?: number } = {};
+					if (sizeNorm && !STRICT) {
+						screenshotOpts.maxDiffPixelRatio = sizeNorm.maxDiffPixelRatio;
+					}
+					if (capturesOutsideBorderBox) {
+						// The default 1% tolerance is wider than the ring. A focus ring is
+						// a 2px outline on one small subject in a viewport-wide image, so
+						// on desktop it is ~0.7% of the pixels — deleting it outright still
+						// came in under the threshold even after the padding fix below let
+						// it into frame at all. Zero tolerance is what makes the ring
+						// something this gate can actually fail on.
+						screenshotOpts.maxDiffPixelRatio = 0;
+					}
+					// A zero-height root already falls back to the viewport, so it is
+					// as safe as an explicit tag. The guard below only needs to police
+					// the element-capture path — the one that can silently crop
+					// content away and still produce a plausible image.
+					const usesViewportCapture =
+						story.tags?.includes(VIEWPORT_CAPTURE_TAG) ||
+						!box ||
+						box.height <= 0;
+
+					// A focus ring is a box-shadow, so it paints OUTSIDE the border box,
+					// and an element capture is cropped tight to that box — the whole
+					// ring lands outside the image. Measured before this fix:
+					// ui-button--focus-visible contained ZERO ring pixels, so deleting
+					// the ring from Button outright would still have passed the gate.
+					// Only the element path needs the room; a viewport capture already
+					// includes everything around the subject. An error outline on a
+					// UA-painted checkbox has the same problem for the same reason.
+					// See conduit-test-de3.19.
+					if (capturesOutsideBorderBox) {
+						await page.addStyleTag({
+							content: "#storybook-root { padding: 8px; }",
+						});
+						await page.waitForTimeout(50);
+					}
+
+					if (!usesViewportCapture) {
+						const escapedElement = await page.evaluate(() => {
+							const storybookRoot =
+								document.querySelector<HTMLElement>("#storybook-root");
+							if (!storybookRoot) {
+								return null;
+							}
+
+							const tolerance = 1;
+
+							// Both capture modes clip at the viewport, so only the
+							// on-screen part of a rect can ever differ between them.
+							// Comparing raw rects instead flags content that is
+							// positioned outside the viewport or that
+							// overflows the viewport edge (a 400px element in a 393px
+							// viewport) — neither of which a page capture would
+							// recover, so neither is a reason to switch modes.
+							const clipToViewport = (r: DOMRect) => ({
+								left: Math.max(r.left, 0),
+								top: Math.max(r.top, 0),
+								right: Math.min(r.right, window.innerWidth),
+								bottom: Math.min(r.bottom, window.innerHeight),
+							});
+							const rootVisible = clipToViewport(
+								storybookRoot.getBoundingClientRect(),
+							);
+
+							for (const element of document.querySelectorAll<HTMLElement>(
+								"*",
+							)) {
+								if (
+									element === storybookRoot ||
+									element.contains(storybookRoot)
+								) {
+									continue;
+								}
+
+								const style = getComputedStyle(element);
+								if (
+									(style.position !== "fixed" &&
+										style.position !== "absolute") ||
+									style.display === "none" ||
+									style.visibility === "hidden" ||
+									Number.parseFloat(style.opacity) <= 0
+								) {
+									continue;
+								}
+
+								const rect = element.getBoundingClientRect();
+								if (rect.width === 0 || rect.height === 0) {
+									continue;
+								}
+
+								const visible = clipToViewport(rect);
+								if (
+									visible.right - visible.left <= 0 ||
+									visible.bottom - visible.top <= 0
+								) {
+									continue;
+								}
+
+								const contained =
+									visible.left >= rootVisible.left - tolerance &&
+									visible.top >= rootVisible.top - tolerance &&
+									visible.right <= rootVisible.right + tolerance &&
+									visible.bottom <= rootVisible.bottom + tolerance;
+								if (!contained) {
+									return {
+										tagName: element.tagName.toLowerCase(),
+										classList: Array.from(element.classList),
+									};
+								}
+							}
+
+							return null;
+						});
+
+						if (escapedElement) {
+							const elementName = [
+								escapedElement.tagName,
+								...escapedElement.classList,
+							].join(".");
+							throw new Error(
+								`Story "${story.id}" has visible fixed or absolute content outside #storybook-root: ${elementName}. Add the "${VIEWPORT_CAPTURE_TAG}" tag to this story.`,
+							);
+						}
+					}
+
+					if (usesViewportCapture) {
+						await expect(page).toHaveScreenshot(
 							`${story.id}.png`,
 							screenshotOpts,
 						);
 					} else {
-						// Fall back to full-page screenshot for overlays/modals
-						await expect(page).toHaveScreenshot(
+						await expect(root).toHaveScreenshot(
 							`${story.id}.png`,
 							screenshotOpts,
 						);

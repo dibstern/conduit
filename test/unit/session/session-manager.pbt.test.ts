@@ -259,15 +259,10 @@ describe("Ticket 2.3 — Session Manager PBT", () => {
 
 					expect(session.id).toBeTruthy();
 
-					// Flush microtasks for background all-sessions broadcast
-					await new Promise((r) => setTimeout(r, 0));
-
-					// Should broadcast dual session_list (roots + all) — no session_switched
-					expect(broadcasts.length).toBe(2);
+					// Only root rows are broadcast.
+					expect(broadcasts.length).toBe(1);
 					// biome-ignore lint/style/noNonNullAssertion: safe — index within bounds
 					expect(broadcasts[0]!.type).toBe("session_list");
-					// biome-ignore lint/style/noNonNullAssertion: safe — index within bounds
-					expect(broadcasts[1]!.type).toBe("session_list");
 				}),
 				{ seed: SEED, numRuns: NUM_RUNS },
 			);
@@ -747,15 +742,10 @@ describe("Ticket 2.3 — Session Manager PBT", () => {
 
 					await mgr.createSession(title);
 
-					// Flush microtasks for background all-sessions broadcast
-					await new Promise((r) => setTimeout(r, 0));
-
-					// Should broadcast dual session_list (roots + all) — no session_switched
-					expect(broadcasts.length).toBe(2);
+					// Only root rows are broadcast.
+					expect(broadcasts.length).toBe(1);
 					// biome-ignore lint/style/noNonNullAssertion: safe — index within bounds
 					expect(broadcasts[0]!.type).toBe("session_list");
-					// biome-ignore lint/style/noNonNullAssertion: safe — index within bounds
-					expect(broadcasts[1]!.type).toBe("session_list");
 				}),
 				{ seed: SEED, numRuns: NUM_RUNS },
 			);

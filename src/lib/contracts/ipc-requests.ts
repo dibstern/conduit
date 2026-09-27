@@ -161,7 +161,7 @@ export class GetStatus extends Schema.TaggedRequest<GetStatus>()("GetStatus", {
 export class SetPin extends Schema.TaggedRequest<SetPin>()("SetPin", {
 	failure: IpcError,
 	success: OkResponse,
-	payload: { pin: PinString },
+	payload: { pin: Schema.NullOr(PinString) },
 }) {}
 
 export class SetKeepAwake extends Schema.TaggedRequest<SetKeepAwake>()(

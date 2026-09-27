@@ -120,12 +120,12 @@ it("shares one control transport across unary helpers and opens a new pair for a
 	}).toEqual({ legacySockets: [], controls: 1 });
 	expect(transports).toEqual([
 		{
-			url: "ws://localhost:2633/p/alpha/rpc",
+			url: "ws://localhost:2633/rpc",
 			trafficClass: "control",
 			tags: ["SetLogLevel", "SyncInputDraft", "SetLogLevel"],
 		},
 		{
-			url: "ws://localhost:2633/p/alpha/rpc",
+			url: "ws://localhost:2633/rpc",
 			trafficClass: "stream",
 			tags: [],
 		},
@@ -138,10 +138,10 @@ it("shares one control transport across unary helpers and opens a new pair for a
 	await setLogLevelRpc({ projectSlug: "beta", level: "info" });
 	expect(transports.slice(2)).toEqual([
 		{
-			url: "ws://localhost:2633/p/beta/rpc",
+			url: "ws://localhost:2633/rpc",
 			trafficClass: "control",
 			tags: ["SyncInputDraft", "SetLogLevel"],
 		},
-		{ url: "ws://localhost:2633/p/beta/rpc", trafficClass: "stream", tags: [] },
+		{ url: "ws://localhost:2633/rpc", trafficClass: "stream", tags: [] },
 	]);
 });

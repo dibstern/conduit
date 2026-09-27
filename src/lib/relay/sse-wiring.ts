@@ -84,7 +84,7 @@ export function extractSessionId(event: SSEEvent): string | undefined {
 interface SessionServiceLike {
 	recordMessageActivity(sessionId: string, timestamp?: number): void;
 	addToParentMap(childId: string, parentId: string): void;
-	sendDualSessionLists(
+	sendSessionLists(
 		send: (msg: Extract<RelayMessage, { type: "session_list" }>) => void,
 		options?: {
 			statuses?:
@@ -675,7 +675,7 @@ function handleSSEEventAfterPending(
 
 		const statuses = deps.getSessionStatuses?.();
 		sessionService
-			.sendDualSessionLists((msg) => wsHandler.broadcast(msg), { statuses })
+			.sendSessionLists((msg) => wsHandler.broadcast(msg), { statuses })
 			.catch((err) =>
 				log.warn(`Failed to refresh sessions after session.updated: ${err}`),
 			);
@@ -746,7 +746,9 @@ function handleSSEEventAfterPending(
 				);
 			}
 			if (targetSessionId) {
-				wsHandler.sendToSession(targetSessionId, msg);
+				// Resolutions go to everyone: family viewers hold replayed copies.
+				if (msg.type === "ask_user_resolved") wsHandler.broadcast(msg);
+				else wsHandler.sendToSession(targetSessionId, msg);
 				// Broadcast a lightweight notification so clients on OTHER
 				// sessions know a question exists (AttentionBanner).
 				wsHandler.broadcast({
@@ -822,7 +824,7 @@ const refreshSessionListAfterUpdateEffect = (
 	Effect.gen(function* () {
 		const sessionService = yield* SessionManagerServiceTag;
 		yield* sessionService
-			.sendDualSessionLists((msg) => deps.wsHandler.broadcast(msg), {
+			.sendSessionLists((msg) => deps.wsHandler.broadcast(msg), {
 				statuses,
 			})
 			.pipe(
@@ -924,7 +926,9 @@ const handleSSEEventAfterPendingEffect = (
 				}
 				if (targetSessionId) {
 					yield* Effect.sync(() => {
-						wsHandler.sendToSession(targetSessionId, msg);
+						// Resolutions go to everyone: family viewers hold replayed copies.
+						if (msg.type === "ask_user_resolved") wsHandler.broadcast(msg);
+						else wsHandler.sendToSession(targetSessionId, msg);
 						wsHandler.broadcast({
 							type: "notification_event",
 							eventType: msg.type,

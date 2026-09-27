@@ -2,7 +2,7 @@
 // Canned WebSocket messages that reproduce the exact state shown in mockup.html.
 //
 // The mockup shows:
-//   - Sidebar with sessions grouped by Today/Yesterday/This Week
+//   - Sidebar with sessions grouped by attention status
 //   - Turn 1 (completed): thinking → 3 tool calls → assistant markdown → metadata
 //   - Turn 2 (in-progress): active thinking → 1 completed tool + 1 running tool
 //   - Context info panel (35%, model claude-sonnet-4)
@@ -295,7 +295,21 @@ function modelExecutionInitMessages(
 	];
 }
 
+const longTranscriptText = Array.from(
+	{ length: 12 },
+	(_, index) =>
+		`Review item ${index + 1}: Check the transcript on a phone, scroll through earlier messages, and return to the latest activity.`,
+).join("\n\n");
+
 export const modelExecutionMockups = {
+	"long-transcript": {
+		transcriptText: longTranscriptText,
+		modelExecution: matchingModelExecution,
+		initMessages: modelExecutionInitMessages(
+			longTranscriptText,
+			matchingModelExecution,
+		),
+	},
 	"drifted-model": {
 		transcriptText: "Run this turn with Opus",
 		modelExecution: driftedModelExecution,
@@ -333,14 +347,24 @@ export const modelExecutionMockups = {
 /** Bind an existing session to the Claude harness (locked-rail mode). */
 export const claudeBoundSessionMessages: MockMessage[] = [
 	{ type: "session_switched", id: "sess-bound-claude" },
-	{ type: "model_info", model: "claude-sonnet-4-5", provider: "claude" },
+	{
+		type: "model_info",
+		sessionId: "sess-bound-claude",
+		model: "claude-sonnet-4-5",
+		provider: "claude",
+	},
 	claudeAgentList,
 ];
 
 /** Bind an existing session to the OpenCode harness (locked-rail mode). */
 export const openCodeBoundSessionMessages: MockMessage[] = [
 	{ type: "session_switched", id: "sess-bound-opencode" },
-	{ type: "model_info", model: "claude-sonnet-4", provider: "anthropic" },
+	{
+		type: "model_info",
+		sessionId: "sess-bound-opencode",
+		model: "claude-sonnet-4",
+		provider: "anthropic",
+	},
 	openCodeAgentList,
 ];
 

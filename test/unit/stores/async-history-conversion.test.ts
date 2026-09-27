@@ -1,3 +1,4 @@
+import { routerState } from "../../../src/lib/frontend/stores/router.svelte.js";
 // ─── Async History Conversion ────────────────────────────────────────────────
 // Verifies the async chunked convertHistoryAsync implementation:
 // - Small history produces same result as direct historyToChatMessages
@@ -99,6 +100,7 @@ describe("Async history conversion: correctness", () => {
 		const directResult = historyToChatMessages(messages, identityRender);
 
 		// Async path via handleMessage (session_switched with history)
+		routerState.path = "/s/s1";
 		handleMessage({
 			type: "session_switched",
 			id: "s1",
@@ -136,6 +138,7 @@ describe("Async history conversion: correctness", () => {
 
 		const directResult = historyToChatMessages(messages, identityRender);
 
+		routerState.path = "/s/s2";
 		handleMessage({
 			type: "session_switched",
 			id: "s2",
@@ -169,6 +172,7 @@ describe("Async history conversion: correctness", () => {
 
 	it("history_page also converts correctly via async path", async () => {
 		// Seed with a session
+		routerState.path = "/s/s3";
 		handleMessage({ type: "session_switched", id: "s3", sessionId: "s3" });
 
 		const messages: HistoryMessage[] = [
@@ -197,6 +201,7 @@ describe("Async history conversion: correctness", () => {
 describe("Async history conversion: abort handling", () => {
 	it("history_page sets loading=false even on abort (session switch during conversion)", async () => {
 		// Start with a session and set loading state
+		routerState.path = "/s/s-original";
 		handleMessage({
 			type: "session_switched",
 			id: "s-original",
@@ -218,6 +223,7 @@ describe("Async history conversion: abort handling", () => {
 		});
 
 		// Session switch mid-conversion: clearMessages bumps replayGeneration
+		routerState.path = "/s/s-new";
 		handleMessage({
 			type: "session_switched",
 			id: "s-new",
@@ -242,6 +248,7 @@ describe("Async history conversion: abort handling", () => {
 		}
 
 		// First switch with large history
+		routerState.path = "/s/s-first";
 		handleMessage({
 			type: "session_switched",
 			id: "s-first",
@@ -253,6 +260,7 @@ describe("Async history conversion: abort handling", () => {
 		});
 
 		// Rapid switch before first conversion completes (clearMessages bumps replayGeneration)
+		routerState.path = "/s/s-second";
 		handleMessage({
 			type: "session_switched",
 			id: "s-second",

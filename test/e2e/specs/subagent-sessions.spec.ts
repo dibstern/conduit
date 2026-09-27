@@ -1,5 +1,5 @@
 // ─── Subagent Session E2E Tests ──────────────────────────────────────────
-// Tests the subagent session toggle (hide/show in sidebar) and
+// Tests roots-only sidebar lists and
 // navigation between parent and child sessions.
 //
 // Uses WS mock with fixture data captured from a real OpenCode instance.
@@ -74,11 +74,11 @@ const rootSessionListMsg: MockMessage = {
 	sessions: allSessions.filter((s) => !("parentID" in s && s["parentID"])),
 };
 
-/** Full session list (includes subagent sessions). */
-const allSessionListMsg: MockMessage = {
-	type: "session_list",
-	roots: false,
-	sessions: allSessions,
+/** The viewed family includes child metadata without sidebar rows. */
+const familyMsg: MockMessage = {
+	type: "session_family",
+	rootId: snapshot.parentSession.id,
+	sessions: [snapshot.parentSession, snapshot.childSession],
 };
 
 const modelListMsg: MockMessage = {
@@ -109,6 +109,7 @@ const agentListMsg: MockMessage = {
 
 /** Init messages: parent session active, idle, with full history */
 const initMessages: MockMessage[] = [
+	familyMsg,
 	{
 		type: "session_switched",
 		id: snapshot.parentSession.id,
@@ -118,13 +119,14 @@ const initMessages: MockMessage[] = [
 	{ type: "model_info", model: "claude-sonnet-4", provider: "anthropic" },
 	{ type: "client_count", count: 1 },
 	rootSessionListMsg,
-	allSessionListMsg,
+	familyMsg,
 	modelListMsg,
 	agentListMsg,
 ];
 
 /** Messages to send when switching to child session */
 const childSwitchMessages: MockMessage[] = [
+	familyMsg,
 	{
 		type: "session_switched",
 		id: snapshot.childSession.id,
@@ -133,7 +135,7 @@ const childSwitchMessages: MockMessage[] = [
 	{ type: "status", status: "idle" },
 	{ type: "model_info", model: "claude-sonnet-4", provider: "anthropic" },
 	rootSessionListMsg, // re-send so client has parentID metadata
-	allSessionListMsg,
+	familyMsg,
 ];
 
 /** Messages to send when switching back to parent session */
@@ -146,7 +148,7 @@ const parentSwitchMessages: MockMessage[] = [
 	{ type: "status", status: "idle" },
 	{ type: "model_info", model: "claude-sonnet-4", provider: "anthropic" },
 	rootSessionListMsg,
-	allSessionListMsg,
+	familyMsg,
 ];
 
 // ─── Helper ─────────────────────────────────────────────────────────────
@@ -160,13 +162,13 @@ async function waitForChatReady(page: import("@playwright/test").Page) {
 
 // ─── Tests ──────────────────────────────────────────────────────────────
 
-test.describe("Subagent session toggle", () => {
+test.describe("Roots-only sidebar", () => {
 	test("hides subagent sessions by default", async ({ page, baseURL }) => {
 		await mockRelayWebSocket(page, {
 			initMessages,
 			responses: new Map(),
 		});
-		await page.goto(`${baseURL}/p/myapp/`);
+		await page.goto(`${baseURL}/s/${snapshot.parentSession.id}`);
 		await waitForChatReady(page);
 
 		const sidebar = new SidebarPage(page);
@@ -175,85 +177,13 @@ test.describe("Subagent session toggle", () => {
 		// Should show parent + "Unrelated session" but NOT the child
 		expect(sessionCount).toBe(2);
 
+		await expect(page.getByTestId("subagent-toggle")).toHaveCount(0);
+
 		// Child session title should not be visible
 		const childItem = sidebar.sessionList.locator(
 			`[data-session-id="${snapshot.childSession.id}"]`,
 		);
 		await expect(childItem).not.toBeVisible();
-	});
-
-	test("toggle shows subagent sessions", async ({ page, baseURL }) => {
-		await mockRelayWebSocket(page, {
-			initMessages,
-			responses: new Map(),
-		});
-		await page.goto(`${baseURL}/p/myapp/`);
-		await waitForChatReady(page);
-
-		const sidebar = new SidebarPage(page);
-
-		// Click the toggle
-		await sidebar.subagentToggleBtn.click();
-		await page.waitForTimeout(300);
-
-		// Now all 3 sessions should be visible
-		const sessionCount = await sidebar.getSessionCount();
-		expect(sessionCount).toBe(3);
-
-		// Child session should be visible
-		const childItem = sidebar.sessionList.locator(
-			`[data-session-id="${snapshot.childSession.id}"]`,
-		);
-		await expect(childItem).toBeVisible();
-	});
-
-	test("toggle hides subagent sessions again", async ({ page, baseURL }) => {
-		await mockRelayWebSocket(page, {
-			initMessages,
-			responses: new Map(),
-		});
-		await page.goto(`${baseURL}/p/myapp/`);
-		await waitForChatReady(page);
-
-		const sidebar = new SidebarPage(page);
-
-		// Show then hide
-		await sidebar.subagentToggleBtn.click();
-		await page.waitForTimeout(300);
-		expect(await sidebar.getSessionCount()).toBe(3);
-
-		await sidebar.subagentToggleBtn.click();
-		await page.waitForTimeout(300);
-		expect(await sidebar.getSessionCount()).toBe(2);
-	});
-
-	test("toggle state persists across page reload", async ({
-		page,
-		baseURL,
-	}) => {
-		const mockOpts = {
-			initMessages,
-			responses: new Map<string, MockMessage[]>(),
-		};
-
-		await mockRelayWebSocket(page, mockOpts);
-		await page.goto(`${baseURL}/p/myapp/`);
-		await waitForChatReady(page);
-
-		const sidebar = new SidebarPage(page);
-
-		// Toggle to show subagent sessions
-		await sidebar.subagentToggleBtn.click();
-		await page.waitForTimeout(300);
-		expect(await sidebar.getSessionCount()).toBe(3);
-
-		// Reload page (re-establish mock first)
-		await mockRelayWebSocket(page, mockOpts);
-		await page.goto(`${baseURL}/p/myapp/`);
-		await waitForChatReady(page);
-
-		// Should still show 3 sessions (localStorage persisted)
-		expect(await sidebar.getSessionCount()).toBe(3);
 	});
 });
 
@@ -262,10 +192,9 @@ test.describe("Subagent navigation", () => {
 		page,
 		baseURL,
 	}) => {
-		// Use a low-level routeWebSocket handler that is session-aware.
-		// The app reconnects the WS whenever session_switched fires (URL changes),
-		// so we must send the correct init messages based on the ?session= param.
+		// Use a session-aware handler for bootstrap and ViewSession replies.
 		const childInitMessages: MockMessage[] = [
+			familyMsg,
 			{
 				type: "session_switched",
 				id: snapshot.childSession.id,
@@ -279,7 +208,7 @@ test.describe("Subagent navigation", () => {
 			},
 			{ type: "client_count", count: 1 },
 			rootSessionListMsg,
-			allSessionListMsg,
+			familyMsg,
 			modelListMsg,
 			agentListMsg,
 		];
@@ -307,6 +236,8 @@ test.describe("Subagent navigation", () => {
 			};
 			const url = ws.url();
 			const sessionParam = new URL(url).searchParams.get("session");
+			const slug = new URL(url).searchParams.get("p") ?? "myapp";
+			ws.send(JSON.stringify({ type: "project_attached", slug }));
 
 			// Pick init messages based on the session query param
 			const msgs =
@@ -331,7 +262,7 @@ test.describe("Subagent navigation", () => {
 			});
 		});
 
-		await page.goto(`${baseURL}/p/myapp/`);
+		await page.goto(`${baseURL}/s/${snapshot.parentSession.id}`);
 		await waitForChatReady(page);
 
 		const chat = new ChatPage(page);
@@ -358,6 +289,7 @@ test.describe("Subagent navigation", () => {
 	test("SubagentBackBar shows parent title", async ({ page, baseURL }) => {
 		// Start directly in child session
 		const childInitMessages: MockMessage[] = [
+			familyMsg,
 			{
 				type: "session_switched",
 				id: snapshot.childSession.id,
@@ -371,7 +303,7 @@ test.describe("Subagent navigation", () => {
 			},
 			{ type: "client_count", count: 1 },
 			rootSessionListMsg, // roots (parent + other, no child)
-			allSessionListMsg, // all sessions including child with parentID
+			familyMsg, // family metadata includes the child parentID
 			modelListMsg,
 			agentListMsg,
 		];
@@ -380,7 +312,7 @@ test.describe("Subagent navigation", () => {
 			initMessages: childInitMessages,
 			responses: new Map(),
 		});
-		await page.goto(`${baseURL}/p/myapp/`);
+		await page.goto(`${baseURL}/s/${snapshot.childSession.id}`);
 		await waitForChatReady(page);
 
 		const chat = new ChatPage(page);
@@ -397,6 +329,7 @@ test.describe("Subagent navigation", () => {
 	}) => {
 		// Start in child session
 		const childInitMessages: MockMessage[] = [
+			familyMsg,
 			{
 				type: "session_switched",
 				id: snapshot.childSession.id,
@@ -410,7 +343,7 @@ test.describe("Subagent navigation", () => {
 			},
 			{ type: "client_count", count: 1 },
 			rootSessionListMsg,
-			allSessionListMsg,
+			familyMsg,
 			modelListMsg,
 			agentListMsg,
 		];
@@ -430,7 +363,7 @@ test.describe("Subagent navigation", () => {
 			initMessages: childInitMessages,
 			responses: new Map(),
 		});
-		await page.goto(`${baseURL}/p/myapp/`);
+		await page.goto(`${baseURL}/s/${snapshot.childSession.id}`);
 		await waitForChatReady(page);
 
 		const chat = new ChatPage(page);

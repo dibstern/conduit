@@ -9,6 +9,7 @@ import { EventStoreEffectTag } from "./event-store-effect.js";
 import type { ProjectionRunnerError } from "./projection-runner-effect.js";
 import { ProjectionRunnerEffectTag } from "./projection-runner-effect.js";
 import { mergeTouches } from "./projectors-effect.js";
+import { SessionStateProjectionNotifierTag } from "./session-state-projection-notifier.js";
 
 export type CommitAndSignalFailure =
 	| EventStoreError
@@ -77,8 +78,7 @@ export type CommitAndSignalProject = (
  * use — there is no second publish, and no way to reach this without one.
  *
  * The shape is deliberately awkward in one direction: a caller cannot take a
- * version without also being asked which rows it stamped. `last_viewed_at` is
- * the first read-model column not derived from the log, and a direct write that
+ * version without also being asked which rows it stamped. A direct write that
  * moved a row without moving its `version` would reach no subscriber and report
  * success — the version column is what a subscription watches. Nothing about
  * that failure is visible at runtime, so the type is where it gets caught.
@@ -157,6 +157,11 @@ export const makeCommitAndSignal = Effect.gen(function* () {
 
 				const result = yield* withCommitPermit(
 					Effect.gen(function* () {
+						if (!(yield* projectionRunner.isRecovered())) {
+							yield* projectionRunner
+								.recover()
+								.pipe(Effect.provideService(SqlClient.SqlClient, sql));
+						}
 						const result = yield* sql.withTransaction(
 							Effect.gen(function* () {
 								const seam = Option.getOrUndefined(
@@ -257,6 +262,17 @@ export const makeCommitAndSignal = Effect.gen(function* () {
 					stored.length > 0
 				)
 					yield* sessionEventBus.value.publish(stored);
+				const sessionStateNotifier = yield* Effect.serviceOption(
+					SessionStateProjectionNotifierTag,
+				);
+				if (Option.isSome(sessionStateNotifier) && options.publish !== false) {
+					for (const event of stored) {
+						yield* sessionStateNotifier.value.sessionStateProjected(
+							event.sessionId,
+							event.type,
+						);
+					}
+				}
 				return result;
 			}),
 		);

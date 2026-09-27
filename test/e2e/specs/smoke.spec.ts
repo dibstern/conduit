@@ -45,13 +45,6 @@ test.describe("E2E Smoke Test", () => {
 		const app = new AppPage(page);
 		await app.goto(relayUrl);
 
-		// On desktop, sidebar is visible directly
-		// On mobile, we need to open it first
-		if (await app.isMobileViewport()) {
-			await app.hamburgerBtn.click();
-			await expect(app.sidebar).toBeVisible();
-		}
-
 		// Session list should have at least one session
 		const sessionItems = page.locator("#session-list .session-item");
 		await expect(sessionItems.first()).toBeVisible({ timeout: 10_000 });

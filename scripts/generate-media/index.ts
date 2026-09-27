@@ -28,7 +28,6 @@ async function loadScenes(): Promise<SceneDefinition[]> {
 	const sceneModules = [
 		"./scenes/main-ui.js",
 		"./scenes/approval.js",
-		"./scenes/dashboard.js",
 		"./scenes/setup.js",
 		"./scenes/split.js",
 		"./scenes/sidebar.js",

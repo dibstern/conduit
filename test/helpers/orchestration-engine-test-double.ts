@@ -8,16 +8,20 @@ export function withDispatchEffect<T extends object>(
 	const mutable = engine as T & {
 		dispatch?: (command: unknown) => Promise<unknown>;
 		dispatchEffect?: (command: unknown) => Effect.Effect<unknown, unknown>;
-		getProviderForSession?: (sessionId: string) => string | undefined;
+		getProviderForSessionEffect?: (
+			sessionId: string,
+		) => Effect.Effect<string | undefined>;
 		bindSession?: (sessionId: string, providerId: string) => void;
 		unbindSession?: (sessionId: string) => void;
 	};
 	const bindings = new Map<string, string>();
 	const originalGetProviderForSession =
-		mutable.getProviderForSession?.bind(mutable);
-	mutable.getProviderForSession = vi.fn((sessionId: string) => {
+		mutable.getProviderForSessionEffect?.bind(mutable);
+	mutable.getProviderForSessionEffect = vi.fn((sessionId: string) => {
 		const boundProviderId = bindings.get(sessionId);
-		return boundProviderId ?? originalGetProviderForSession?.(sessionId);
+		return boundProviderId !== undefined || !originalGetProviderForSession
+			? Effect.succeed(boundProviderId)
+			: originalGetProviderForSession(sessionId);
 	});
 	mutable.bindSession = vi.fn((sessionId: string, providerId: string) => {
 		bindings.set(sessionId, providerId);

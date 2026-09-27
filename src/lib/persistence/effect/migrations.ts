@@ -3,6 +3,7 @@ import * as Migrator from "@effect/sql/Migrator";
 import type { SqlError } from "@effect/sql/SqlError";
 import { Effect } from "effect";
 import {
+	BACKFILL_COMPACTION_MESSAGES_MIGRATION,
 	CURRENT_EVENT_STORE_MIGRATION,
 	DROP_EVENTS_SESSION_FK_MIGRATION,
 	DURABLE_PROVIDER_COMMANDS_MIGRATION,
@@ -17,8 +18,12 @@ import {
 	readMigrationSql,
 	SENT_ALERTS_MIGRATION,
 	SESSION_CASCADE_DELETES_MIGRATION,
-	SESSIONS_LAST_VIEWED_AT_MIGRATION,
+	SESSIONS_AUTO_SETTLE_MIGRATION,
+	SESSIONS_LAST_TURN_ERROR_MIGRATION,
 	SESSIONS_PERMISSION_MODE_MIGRATION,
+	SESSIONS_READ_AT_MIGRATION,
+	SESSIONS_SETTLED_PINNED_MIGRATION,
+	SESSIONS_SNOOZED_MIGRATION,
 	TURN_MODEL_EXECUTION_MIGRATION,
 } from "../schema.js";
 
@@ -54,6 +59,23 @@ const projectionFailuresMigrationSql = readMigrationSql(
 );
 const sessionCascadeDeletesMigrationSql = readMigrationSql(
 	SESSION_CASCADE_DELETES_MIGRATION,
+);
+const sessionsReadAtMigrationSql = readMigrationSql(SESSIONS_READ_AT_MIGRATION);
+const sessionsLastTurnErrorMigrationSql = readMigrationSql(
+	SESSIONS_LAST_TURN_ERROR_MIGRATION,
+);
+const backfillCompactionMessagesMigrationSql = readMigrationSql(
+	BACKFILL_COMPACTION_MESSAGES_MIGRATION,
+);
+
+const sessionsSettledPinnedMigrationSql = readMigrationSql(
+	SESSIONS_SETTLED_PINNED_MIGRATION,
+);
+const sessionsSnoozedMigrationSql = readMigrationSql(
+	SESSIONS_SNOOZED_MIGRATION,
+);
+const sessionsAutoSettleMigrationSql = readMigrationSql(
+	SESSIONS_AUTO_SETTLE_MIGRATION,
 );
 
 const expectedTableColumns = {
@@ -256,6 +278,20 @@ const expectedTableColumns = {
 		"created_at",
 		"updated_at",
 		"permission_mode",
+		"read_at",
+		"last_turn_error_at",
+		"settled_at",
+		"pinned_at",
+		"snoozed_at",
+		"snoozed_until",
+		"woken_at",
+		"woken_reason",
+		"unsettled_at",
+		"auto_settle_disabled_at",
+		"settled_automatically",
+		"version",
+		"fork_point_timestamp",
+		"fork_point_message_id",
 	],
 	tool_content: ["tool_id", "session_id", "content", "created_at"],
 	turns: [
@@ -362,6 +398,29 @@ function splitSqlStatements(sqlText: string): readonly string[] {
 		.filter((statement) => statement.length > 0);
 }
 
+/**
+ * Columns that post-baseline migrations append to `sessions`, in the order the
+ * migrations add them. Keep appending here; nothing else needs to change when a
+ * new one lands.
+ */
+const appendedSessionColumns = [
+	"permission_mode",
+	"read_at",
+	"last_turn_error_at",
+	"settled_at",
+	"pinned_at",
+	"snoozed_at",
+	"snoozed_until",
+	"woken_at",
+	"woken_reason",
+	"unsettled_at",
+	"auto_settle_disabled_at",
+	"settled_automatically",
+	"version",
+	"fork_point_timestamp",
+	"fork_point_message_id",
+] as const;
+
 function sameStrings(
 	actual: readonly string[],
 	expected: readonly string[],
@@ -451,27 +510,6 @@ const verifyExistingBaselineSchema: Effect.Effect<
 			sameStrings(actualColumns, expectedColumns) ||
 			((tableName === "sessions" || tableName === "messages") &&
 				sameStrings(actualColumns, [...expectedColumns, "version"])) ||
-			(tableName === "sessions" &&
-				sameStrings(actualColumns, [
-					...expectedColumns,
-					"version",
-					"last_viewed_at",
-				])) ||
-			(tableName === "sessions" &&
-				sameStrings(actualColumns, [
-					...expectedColumns,
-					"version",
-					"fork_point_timestamp",
-					"fork_point_message_id",
-				])) ||
-			(tableName === "sessions" &&
-				sameStrings(actualColumns, [
-					...expectedColumns,
-					"version",
-					"last_viewed_at",
-					"fork_point_timestamp",
-					"fork_point_message_id",
-				])) ||
 			(tableName === "command_receipts" &&
 				sameStrings(actualColumns, preDurableCommandReceiptColumns)) ||
 			(tableName === "message_parts" &&
@@ -484,11 +522,20 @@ const verifyExistingBaselineSchema: Effect.Effect<
 					actualColumns,
 					expectedColumns.filter((column) => column !== "context_window"),
 				)) ||
+			// A database at an older migration level is missing a SUFFIX of the
+			// expected columns, because ALTER TABLE ADD COLUMN always appends. So
+			// accept any prefix that is short by no more than the number of columns
+			// later migrations add. Enumerating which combination is absent instead
+			// doubles the branches here every time a column is added, and the
+			// non-prefix combinations it admits are unreachable anyway: migrations
+			// run in order, so `read_at` cannot exist without `permission_mode`.
 			(tableName === "sessions" &&
 				sameStrings(
 					actualColumns,
-					expectedColumns.filter((column) => column !== "permission_mode"),
-				)) ||
+					expectedColumns.slice(0, actualColumns.length),
+				) &&
+				expectedColumns.length - actualColumns.length <=
+					appendedSessionColumns.length) ||
 			(tableName === "turns" &&
 				sameStrings(
 					actualColumns,
@@ -649,18 +696,6 @@ const runReadModelVersionMigration = Effect.gen(function* () {
 	yield* executeSqlStatements(readMigrationSql(READ_MODEL_VERSION_MIGRATION));
 });
 
-const runSessionsLastViewedAtMigration = Effect.gen(function* () {
-	const sql = yield* SqlClient.SqlClient;
-	// A database may have applied this SQL through the synchronous registry.
-	const columns = yield* sql<{
-		name: string;
-	}>`PRAGMA table_info(sessions)`;
-	if (columns.some((column) => column.name === "last_viewed_at")) return;
-	yield* executeSqlStatements(
-		readMigrationSql(SESSIONS_LAST_VIEWED_AT_MIGRATION),
-	);
-});
-
 const runSentAlertsMigration = Effect.gen(function* () {
 	const sql = yield* SqlClient.SqlClient;
 	// A database may have applied this SQL through the synchronous registry.
@@ -679,6 +714,85 @@ const runReadModelCounterMigration = Effect.gen(function* () {
 	}>`SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'read_model_counter'`;
 	if (existing.length > 0) return;
 	yield* executeSqlStatements(readMigrationSql(READ_MODEL_COUNTER_MIGRATION));
+});
+
+const runSessionsReadAtMigration: Effect.Effect<
+	void,
+	unknown,
+	SqlClient.SqlClient
+> = Effect.gen(function* () {
+	const sql = yield* SqlClient.SqlClient;
+	const columns = yield* sql.unsafe<{ name: string }>(
+		"PRAGMA table_info(sessions)",
+	);
+	if (columns.some((column) => column.name === "read_at")) return;
+
+	yield* executeSqlStatements(sessionsReadAtMigrationSql);
+});
+
+const runSessionsLastTurnErrorMigration: Effect.Effect<
+	void,
+	unknown,
+	SqlClient.SqlClient
+> = Effect.gen(function* () {
+	const sql = yield* SqlClient.SqlClient;
+	const columns = yield* sql.unsafe<{ name: string }>(
+		"PRAGMA table_info(sessions)",
+	);
+	if (columns.some((column) => column.name === "last_turn_error_at")) return;
+
+	yield* executeSqlStatements(sessionsLastTurnErrorMigrationSql);
+});
+
+const runSessionsSettledPinnedMigration: Effect.Effect<
+	void,
+	unknown,
+	SqlClient.SqlClient
+> = Effect.gen(function* () {
+	const sql = yield* SqlClient.SqlClient;
+	const columns = yield* sql.unsafe<{ name: string }>(
+		"PRAGMA table_info(sessions)",
+	);
+	if (columns.some((column) => column.name === "pinned_at")) return;
+
+	yield* executeSqlStatements(sessionsSettledPinnedMigrationSql);
+});
+
+const runSessionsSnoozedMigration: Effect.Effect<
+	void,
+	unknown,
+	SqlClient.SqlClient
+> = Effect.gen(function* () {
+	const sql = yield* SqlClient.SqlClient;
+	const columns = yield* sql.unsafe<{ name: string }>(
+		"PRAGMA table_info(sessions)",
+	);
+	if (columns.some((column) => column.name === "woken_reason")) return;
+	yield* executeSqlStatements(sessionsSnoozedMigrationSql);
+});
+
+const runSessionsAutoSettleMigration: Effect.Effect<
+	void,
+	unknown,
+	SqlClient.SqlClient
+> = Effect.gen(function* () {
+	const sql = yield* SqlClient.SqlClient;
+	const columns = yield* sql.unsafe<{ name: string }>(
+		"PRAGMA table_info(sessions)",
+	);
+	const existing = new Set(columns.map((column) => column.name));
+	const names = [
+		"unsettled_at",
+		"auto_settle_disabled_at",
+		"settled_automatically",
+	];
+	const statements = splitSqlStatements(sessionsAutoSettleMigrationSql);
+	for (const [index, name] of names.entries()) {
+		if (!existing.has(name)) {
+			const statement = statements[index];
+			if (statement) yield* sql.unsafe(statement);
+		}
+	}
 });
 
 /** 2026-07-15T00:00:00.000Z — midnight UTC of the day 0004_drop_events_session_fk shipped (b2b698c6). */
@@ -792,6 +906,30 @@ const runPurgeLegacySkeletonSessionsMigration: Effect.Effect<
 	);
 });
 
+/**
+ * Reconstructs the compaction rows the message projector never wrote, because it
+ * did not declare session.compaction. Idempotent, so it is harmless on stores
+ * the retired synchronous runner upgraded, which may already have run the same
+ * SQL as its 0013.
+ *
+ * A read model missing its message tables is already broken beyond what a
+ * backfill can repair, and refusing to migrate would turn that into a daemon
+ * that will not start. Skip instead and leave it to the boot diagnostics.
+ */
+const runBackfillCompactionMessagesMigration: Effect.Effect<
+	void,
+	unknown,
+	SqlClient.SqlClient
+> = Effect.gen(function* () {
+	const sql = yield* SqlClient.SqlClient;
+	const tables = yield* sql<{ name: string }>`
+		SELECT name FROM sqlite_master
+		WHERE type = 'table' AND name IN ('messages', 'message_parts')`;
+	if (tables.length < 2) return;
+
+	yield* executeSqlStatements(backfillCompactionMessagesMigrationSql);
+});
+
 export const effectMigrationEntries = {
 	"0001_create_event_store_tables": runBaselineEventStoreMigration,
 	"0002_add_message_part_metadata": runMessagePartMetadataMigration,
@@ -805,12 +943,17 @@ export const effectMigrationEntries = {
 	"0010_purge_legacy_skeleton_sessions":
 		runPurgeLegacySkeletonSessionsMigration,
 	"0011_session_cascade_deletes": runSessionCascadeDeletesMigration,
-	"0012_create_projection_failures": runProjectionFailuresMigration,
-	"0013_read_model_version": runReadModelVersionMigration,
-	"0014_read_model_counter": runReadModelCounterMigration,
-	"0015_sessions_last_viewed_at": runSessionsLastViewedAtMigration,
-	"0016_sent_alerts": runSentAlertsMigration,
-	"0017_fork_point_timestamp": Effect.gen(function* () {
+	"0012_sessions_read_at": runSessionsReadAtMigration,
+	"0013_sessions_last_turn_error": runSessionsLastTurnErrorMigration,
+	"0014_backfill_compaction_messages": runBackfillCompactionMessagesMigration,
+	"0015_sessions_settled_pinned": runSessionsSettledPinnedMigration,
+	"0016_sessions_snoozed": runSessionsSnoozedMigration,
+	"0017_sessions_auto_settle": runSessionsAutoSettleMigration,
+	"0018_create_projection_failures": runProjectionFailuresMigration,
+	"0019_read_model_version": runReadModelVersionMigration,
+	"0020_read_model_counter": runReadModelCounterMigration,
+	"0021_sent_alerts": runSentAlertsMigration,
+	"0022_fork_point_timestamp": Effect.gen(function* () {
 		const sql = yield* SqlClient.SqlClient;
 		const columns = yield* sql<{ name: string }>`PRAGMA table_info(sessions)`;
 		if (columns.some((column) => column.name === "fork_point_timestamp"))
@@ -893,8 +1036,35 @@ export function makeEffectSqlMigrator(
 	Migrator.MigrationError | SqlError,
 	SqlClient.SqlClient
 > {
-	return Migrator.make({})({
-		loader: makeEffectMigrationLoader(entries),
-		table: EFFECT_SQL_MIGRATIONS_TABLE,
+	return Effect.gen(function* () {
+		const sql = yield* SqlClient.SqlClient;
+		const ledger = yield* sql<{ name: string }>`
+			SELECT name FROM sqlite_master
+			WHERE type = 'table' AND name = 'effect_sql_migrations'`;
+		if (ledger.length > 0) {
+			const stale = yield* sql<{
+				migration_id: number;
+				name: string;
+			}>`
+				SELECT migration_id, name FROM effect_sql_migrations
+				WHERE migration_id BETWEEN 12 AND 17
+				AND name IN (
+					'create_projection_failures', 'read_model_version',
+					'read_model_counter', 'sessions_last_viewed_at',
+					'sent_alerts', 'fork_point_timestamp'
+				)`;
+			if (stale.length > 0) {
+				const row = stale[0]!;
+				return yield* Effect.fail(
+					migrationRegistryError(
+						`Stale feature migration ${row.name} at main-owned Effect id ${row.migration_id}; refusing to migrate`,
+					),
+				);
+			}
+		}
+		return yield* Migrator.make({})({
+			loader: makeEffectMigrationLoader(entries),
+			table: EFFECT_SQL_MIGRATIONS_TABLE,
+		});
 	});
 }

@@ -3,14 +3,22 @@ import type { Duplex } from "node:stream";
 import { Socket, SocketServer } from "@effect/platform";
 import { RpcSerialization, RpcServer } from "@effect/rpc";
 import type { ManagedRuntime } from "effect";
-import { Cause, Effect, Runtime } from "effect";
+import { Cause, Context, Effect, Layer, Runtime } from "effect";
 import type { RuntimeFiber } from "effect/Fiber";
 import type { WebSocket } from "ws";
 import {
+	makeWsTransportLive,
 	type WsTransport,
 	WsTransportTag,
 } from "../domain/relay/Layers/ws-transport-layer.js";
-import { WsRpcGroup, WsRpcServerLayer } from "./ws-rpc.js";
+import {
+	type DaemonRpcHandlers,
+	makeRoutedWsRpcServerLayer,
+	type ReattachDaemonViewSession,
+	type ResolveRpcContext,
+	WsRpcGroup,
+	WsRpcServerLayer,
+} from "./ws-rpc.js";
 
 interface RpcWebSocketHandlerOptions {
 	readonly runtime: ManagedRuntime.ManagedRuntime<unknown, unknown>;
@@ -24,9 +32,11 @@ type RpcTransportRunFork = <A, E>(
 interface RpcWebSocketHandlerRuntime {
 	readonly transport: WsTransport;
 	readonly runTransportFork: RpcTransportRunFork;
+	readonly runConnection: (ws: WebSocket) => void;
 }
 
 export interface RpcWebSocketHandlerShape {
+	readonly context?: Effect.Effect<Context.Context<unknown>, unknown>;
 	readonly handleUpgrade: (
 		req: IncomingMessage,
 		socket: Duplex,
@@ -35,7 +45,14 @@ export interface RpcWebSocketHandlerShape {
 	readonly drain: () => Promise<void>;
 }
 
-const runRpcWebSocketConnection = (ws: WebSocket) =>
+const runRpcWebSocketConnection = <R>(
+	ws: WebSocket,
+	serverLayer: Layer.Layer<
+		Layer.Layer.Success<typeof WsRpcServerLayer>,
+		never,
+		R
+	>,
+) =>
 	Effect.scoped(
 		Effect.gen(function* () {
 			// The `ws` package is EventTarget-compatible at runtime, but its
@@ -49,12 +66,25 @@ const runRpcWebSocketConnection = (ws: WebSocket) =>
 					handler(socket).pipe(Effect.orDie, Effect.zipRight(Effect.never)),
 			});
 
+			// RpcServer.make runs the protocol loop until interrupted, so it has
+			// to be forked. The scope then stays open only while the client is
+			// connected; closing it tears the RPC server down. Before this the
+			// fiber lived forever and every reconnect leaked one.
 			yield* RpcServer.make(WsRpcGroup, { concurrency: 32 }).pipe(
 				Effect.provide(RpcServer.layerProtocolSocketServer),
 				Effect.provideService(SocketServer.SocketServer, socketServer),
-				Effect.provide(WsRpcServerLayer),
+				Effect.provide(serverLayer),
 				Effect.provide(RpcSerialization.layerJson),
+				Effect.interruptible,
+				Effect.forkScoped,
 			);
+			yield* Effect.async<void>((resume) => {
+				if (ws.readyState === ws.CLOSED) {
+					resume(Effect.void);
+					return;
+				}
+				ws.once("close", () => resume(Effect.void));
+			});
 		}),
 	);
 
@@ -64,24 +94,76 @@ export const makeWsRpcWebSocketHandler = (
 	Effect.gen(function* () {
 		const transport = yield* WsTransportTag;
 		const runtime = yield* Effect.runtime<WsTransportTag>();
-		return new WsRpcWebSocketHandler(options, {
-			transport,
+		return new WsRpcWebSocketHandler(
+			Effect.suspend(() =>
+				Effect.map(options.runtime.runtimeEffect, (value) => value.context),
+			),
+			{
+				transport,
+				runTransportFork: Runtime.runFork(runtime),
+				runConnection: (ws) =>
+					options.runtime.runFork(
+						runRpcWebSocketConnection(ws, WsRpcServerLayer),
+					),
+			},
+		);
+	});
+
+export class RoutedWsRpcWebSocketHandlerTag extends Context.Tag(
+	"RoutedWsRpcWebSocketHandler",
+)<RoutedWsRpcWebSocketHandlerTag, RpcWebSocketHandlerShape>() {}
+
+export const makeRoutedWsRpcWebSocketHandler = (
+	resolveContext: ResolveRpcContext,
+	daemonHandlers?: DaemonRpcHandlers,
+	defaultProjectSlug?: string,
+	reattachViewSession?: ReattachDaemonViewSession,
+) =>
+	Effect.gen(function* () {
+		const transportContext = yield* Layer.build(
+			makeWsTransportLive({ noServer: true }),
+		);
+		const runtime = yield* Effect.runtime<WsTransportTag>().pipe(
+			Effect.provide(transportContext),
+		);
+		const scope = yield* Effect.scope;
+		const serverLayer = makeRoutedWsRpcServerLayer(
+			resolveContext,
+			daemonHandlers,
+			defaultProjectSlug,
+			reattachViewSession,
+		);
+		const handler = new WsRpcWebSocketHandler(undefined, {
+			transport: Context.get(transportContext, WsTransportTag),
 			runTransportFork: Runtime.runFork(runtime),
+			runConnection: (ws) =>
+				Runtime.runFork(runtime)(
+					Effect.forkIn(runRpcWebSocketConnection(ws, serverLayer), scope),
+				),
 		});
+		yield* Effect.addFinalizer(() =>
+			Effect.tryPromise({
+				try: () => handler.drain(),
+				catch: (cause) => cause,
+			}).pipe(Effect.orDie),
+		);
+		return handler;
 	});
 
 export class WsRpcWebSocketHandler implements RpcWebSocketHandlerShape {
-	private readonly runtime: ManagedRuntime.ManagedRuntime<unknown, unknown>;
+	readonly context?: Effect.Effect<Context.Context<unknown>, unknown>;
+	private readonly runConnection: (ws: WebSocket) => void;
 	private readonly transport: WsTransport;
 	private readonly runTransportFork: RpcTransportRunFork;
 	private readonly clients = new Set<WebSocket>();
 	private closed = false;
 
 	constructor(
-		options: RpcWebSocketHandlerOptions,
+		context: RpcWebSocketHandlerShape["context"],
 		runtime: RpcWebSocketHandlerRuntime,
 	) {
-		this.runtime = options.runtime;
+		if (context) this.context = context;
+		this.runConnection = runtime.runConnection;
 		this.transport = runtime.transport;
 		this.runTransportFork = runtime.runTransportFork;
 		this.transport.wss.on("connection", (ws) => this.onConnection(ws));
@@ -112,7 +194,7 @@ export class WsRpcWebSocketHandler implements RpcWebSocketHandlerShape {
 	private onConnection(ws: WebSocket): void {
 		this.clients.add(ws);
 		ws.on("close", () => this.clients.delete(ws));
-		this.runtime.runFork(runRpcWebSocketConnection(ws));
+		this.runConnection(ws);
 	}
 
 	private forkTransport<A, E>(

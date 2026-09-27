@@ -3,8 +3,6 @@
 // and leaf drainable services (KeepAwake, VersionChecker, StorageMonitor, PortScanner).
 // Finalizers remove process listeners / drain services to prevent leaks in tests.
 
-import { homedir } from "node:os";
-import { basename, resolve } from "node:path";
 import { NodeFileSystem } from "@effect/platform-node";
 import type { Rpc, RpcGroup } from "@effect/rpc";
 import {
@@ -15,7 +13,6 @@ import {
 	Effect,
 	Exit,
 	Layer,
-	Option,
 	PubSub,
 	Ref,
 	Runtime,
@@ -82,6 +79,7 @@ import {
 	emptyDaemonState,
 	makeDaemonStateLive,
 } from "../Services/daemon-state.js";
+import { DaemonWsClientRegistryLive } from "../Services/daemon-ws-client-registry.js";
 import { InstanceHealthCheckLive } from "../Services/instance-health-service.js";
 import {
 	getInstances as getEffectInstances,
@@ -98,9 +96,7 @@ import {
 	type IpcRpcGroup,
 } from "../Services/ipc-rpc-group.js";
 import {
-	addWithoutRelay as addEffectProjectWithoutRelay,
-	findByDirectory,
-	allProjects as getAllEffectProjects,
+	addProjectToEffectRegistry,
 	getProject,
 	makeProjectRegistryFromDaemonStateLive,
 	makeProjectRegistryLive,
@@ -114,12 +110,14 @@ import {
 	type RelayCache,
 	RelayCacheTag,
 } from "../Services/relay-cache.js";
+import { AutoSettleLive } from "./auto-settle-layer.js";
 import {
 	ConfigPersistenceLive,
 	ConfigPersistenceTag,
 	ConfigSnapshotFromEffectStateLive,
 	makeConfigWriterLive,
 } from "./config-persistence-layer.js";
+import { DaemonWsRpcHandlersLive } from "./daemon-ws-rpc-layer.js";
 import { KeepAwakeLive, KeepAwakeTag } from "./keep-awake-layer.js";
 import { PinoLoggerLive } from "./pino-logger-layer.js";
 import { PortScannerLive, PortScannerTag } from "./port-scanner-layer.js";
@@ -155,8 +153,16 @@ export class DaemonLifecycleLayerError extends Data.TaggedError(
 	cause: unknown;
 }> {
 	get message(): string {
-		const inner =
-			this.cause instanceof Error ? this.cause.message : String(this.cause);
+		let inner: string;
+		if (this.cause instanceof Error) inner = this.cause.message;
+		else if (Cause.isCause(this.cause)) inner = Cause.pretty(this.cause);
+		else {
+			try {
+				inner = String(this.cause);
+			} catch {
+				inner = "unknown error";
+			}
+		}
 		return `${this.operation} failed: ${inner}`;
 	}
 }
@@ -357,51 +363,6 @@ const resolveProjectOpencodeUrl = (project: {
 		return yield* getInstanceUrl(first.id);
 	});
 
-const normalizeProjectDirectory = (directory: string): string => {
-	const expanded =
-		directory === "~" || directory.startsWith("~/")
-			? directory.replace(/^~/, homedir())
-			: directory;
-	return resolve(expanded);
-};
-
-const titleForDirectory = (directory: string): string =>
-	basename(directory) || "project";
-
-const addProjectToEffectRegistry = (
-	directory: string,
-	instanceId?: string | undefined,
-) =>
-	Effect.gen(function* () {
-		const normalizedDirectory = normalizeProjectDirectory(directory);
-		yield* commitDaemonRuntimeConfig((config) => {
-			if (!config.dismissedPaths.has(normalizedDirectory)) return config;
-			const dismissedPaths = new Set(config.dismissedPaths);
-			dismissedPaths.delete(normalizedDirectory);
-			return {
-				...config,
-				dismissedPaths,
-			};
-		});
-
-		const existing = yield* findByDirectory(normalizedDirectory);
-		if (Option.isSome(existing)) {
-			return existing.value.project;
-		}
-
-		const projects = yield* getAllEffectProjects;
-		const existingSlugs = new Set(projects.map((project) => project.slug));
-		const project: StoredProject = {
-			slug: generateSlug(normalizedDirectory, existingSlugs),
-			directory: normalizedDirectory,
-			title: titleForDirectory(normalizedDirectory),
-			lastUsed: Date.now(),
-			...(instanceId !== undefined && { instanceId }),
-		};
-		yield* addEffectProjectWithoutRelay(project);
-		return project;
-	}).pipe(Effect.withSpan("relayCache.addProjectCallback"));
-
 export const makeRelayCacheLayer: Layer.Layer<
 	RelayCacheTag,
 	never,
@@ -505,6 +466,9 @@ export const makeRelayCacheLayer: Layer.Layer<
 				);
 				return {
 					slug,
+					settleIdleSessions: (idleWindowMs: number, now: number) =>
+						relay.settleIdleSessions(idleWindowMs, now),
+					attach: (ws, options) => relay.wsHandler.attach(ws, options),
 					wsHandler: relay.wsHandler,
 					rpcWsHandler: relay.rpcWsHandler,
 					getStatusSnapshot: () => relay.getStatusSnapshot(),
@@ -779,6 +743,7 @@ export const makeDaemonLive = (options: DaemonLiveOptions) => {
 	const foundation = Layer.mergeAll(
 		Layer.effectDiscard(migrateForkLineage(configDir)),
 		DaemonEventBusLive,
+		DaemonWsClientRegistryLive,
 		PinoLoggerLive,
 		makeDaemonTracingLive(resolveTraceConfig(configDir)),
 		DaemonConfigRefLive(options.initialConfig),
@@ -933,14 +898,16 @@ export const makeDaemonLive = (options: DaemonLiveOptions) => {
 		Layer.provideMerge(withDaemonWiring),
 	);
 
-	const withWsRelayRouter = WebSocketRelayRouterLive.pipe(
-		Layer.provideMerge(withBackground),
-	);
+	const withWsRelayRouter = Layer.merge(
+		WebSocketRelayRouterLive,
+		DaemonWsRpcHandlersLive,
+	).pipe(Layer.provideMerge(withBackground));
 
 	// ── Tier 5: Scoped fiber Layers (need registries + config) ────────────
 	// Side-effect-only Layers (scopedDiscard) that fork background fibers.
 	// They read Tags from upstream tiers via Layer.provideMerge passthrough.
 	const scopedFibers = Layer.mergeAll(
+		AutoSettleLive,
 		WebSocketRoutingLive,
 		ProjectDiscoveryLive,
 		SessionPrefetchLive,
@@ -949,40 +916,3 @@ export const makeDaemonLive = (options: DaemonLiveOptions) => {
 
 	return scopedFibers;
 };
-
-// ─── ShutdownAwaiterLive ──────────────────────────────────────────────────
-// Side-effect-only Layer that awaits the ShutdownSignalTag Deferred. When the
-// Deferred completes (from SIGINT/SIGTERM via SignalHandlerLayer, or from IPC
-// shutdown), it sends SIGTERM to the current process, which triggers
-// NodeRuntime.runMain's signal handler to interrupt the main fiber and tear
-// down the Layer tree.
-//
-// Why process.kill instead of Effect.interrupt?
-// Layer.launch blocks on Effect.never in the main fiber. A forkScoped child
-// calling Effect.interrupt only interrupts itself — it cannot reach the parent
-// fiber running Effect.never. The correct way to stop the process is via
-// the same signal mechanism that runMain already handles (SIGTERM/SIGINT).
-// For the signal-originated shutdown path (user presses Ctrl+C), runMain
-// handles it directly and this Layer is a no-op (the Deferred was already
-// completed by SignalHandlerLayer, and the process is already shutting down).
-//
-// Used by startDaemonEffect (in daemon-main.ts) to bridge IPC-based shutdown
-// into process termination that NodeRuntime.runMain understands.
-
-export const ShutdownAwaiterLive: Layer.Layer<never, never, ShutdownSignalTag> =
-	Layer.scopedDiscard(
-		Effect.gen(function* () {
-			const shutdown = yield* ShutdownSignalTag;
-			yield* Effect.forkScoped(
-				Deferred.await(shutdown).pipe(
-					Effect.flatMap(() =>
-						Effect.sync(() => {
-							// Send SIGTERM to self — NodeRuntime.runMain intercepts this
-							// and interrupts the main fiber, triggering graceful teardown.
-							process.kill(process.pid, "SIGTERM");
-						}),
-					),
-				),
-			);
-		}),
-	);

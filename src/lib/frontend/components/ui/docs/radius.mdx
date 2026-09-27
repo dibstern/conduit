@@ -1,0 +1,23 @@
+import { Meta } from "@storybook/addon-docs/blocks";
+
+<Meta title="UI/Foundations/Radius" />
+
+# Radius
+
+Conduit currently owns one `--radius-*` token:
+
+<div style={{ width: "240px", padding: "18px", borderRadius: "var(--radius-panel)", background: "var(--color-bg-surface)", border: "1px solid var(--color-border)", color: "var(--color-text)" }}>
+  <code>--radius-panel</code><br />
+  <small>10px</small>
+</div>
+
+Use `rounded-panel` for structural surfaces: `Surface`, message and tool cards,
+setup status boxes, settings cards, and the project switcher panel. It is also used
+where a selector adopts the same panel-shaped language.
+
+Other radii are not conduit-owned tokens yet. Existing compact controls use
+Tailwind's `rounded-sm` and `rounded-md`; menus and dialogs commonly use
+`rounded-lg` or `rounded-xl`; pill-shaped status and choice controls use
+`rounded-full`; the composer uses `rounded-3xl`. This mix is the current convention
+and an open design-system gap. Reuse the nearest established surface pattern rather
+than creating a new `--radius-*` value in a feature.

@@ -4,10 +4,13 @@
 
 import { expect, test } from "@playwright/test";
 
-const STORYBOOK = "http://localhost:6007";
-
 function storyUrl(storyId: string): string {
-	return `${STORYBOOK}/iframe.html?id=${storyId}&viewMode=story`;
+	// Relative, so Playwright resolves it against the config's baseURL. A
+	// hardcoded host pinned these specs to port 6007 no matter which port the
+	// run actually started — so a second worktree's run silently exercised the
+	// FIRST worktree's build, which is the exact failure `reuseExistingServer:
+	// false` was added to prevent. See conduit-test-afp.
+	return `/iframe.html?id=${storyId}&viewMode=story`;
 }
 
 // ─── InstanceModelPicker ─────────────────────────────────────────────────────
@@ -159,15 +162,16 @@ test.describe("ModelVariant", () => {
 			page.locator('[data-testid="variant-dropdown"]'),
 		).toBeVisible();
 
-		// The current variant is "high" — its option should have a checkmark (✓)
+		// The current variant is "high". Since conduit-test-de3.35.4 the check is
+		// ui/MenuRadioItem's `data-menu-radio-check` icon, not a literal ✓ glyph.
 		const highOption = page.locator('[data-testid="variant-option-high"]');
 		await expect(highOption).toBeVisible();
-		await expect(highOption).toHaveText(/✓/);
+		await expect(highOption.locator("[data-menu-radio-check]")).toBeVisible();
 
 		// Other options should NOT have a checkmark
 		const lowOption = page.locator('[data-testid="variant-option-low"]');
 		await expect(lowOption).toBeVisible();
-		await expect(lowOption).not.toHaveText(/✓/);
+		await expect(lowOption.locator("[data-menu-radio-check]")).toHaveCount(0);
 	});
 });
 

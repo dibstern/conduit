@@ -5,6 +5,8 @@
 -->
 <script lang="ts">
   import { uiState, resolveConfirm } from "../../stores/ui.svelte.js";
+  import Button from "../ui/Button.svelte";
+  import Surface from "../ui/Surface.svelte";
   import Modal from "./Modal.svelte";
 
   function handleCancel(): void {
@@ -21,28 +23,36 @@
   onclose={handleCancel}
   labelledBy="confirm-modal-text"
 >
-  <div
+  <Surface
+    variant="raised"
+    radius="lg"
+    elevation="modal"
     id="confirm-modal"
-    class="modal-dialog bg-bg-alt border border-border rounded-xl py-5 px-6 max-w-80 w-[90vw] shadow-modal"
+    class="modal-dialog py-5 px-6 max-w-80 w-[90vw]"
   >
     <p id="confirm-modal-text" class="text-sm text-text leading-normal mb-4">
       {uiState.confirmDialog?.text}
     </p>
     <div class="flex gap-2 justify-end">
-      <button
+      <Button
+        variant="secondary"
+        tone="muted"
+        size="content"
         data-testid="confirm-modal-cancel"
-        class="bg-transparent border border-border text-text-muted rounded-lg py-1.5 px-4 text-base cursor-pointer hover:bg-[rgba(var(--overlay-rgb),0.05)]"
+        class="rounded-lg py-1.5 px-4 text-base"
         onclick={handleCancel}
       >
         Cancel
-      </button>
-      <button
+      </Button>
+      <Button
+        variant="primary"
+        size="content"
         data-testid="confirm-modal-action"
-        class="bg-accent border-none text-bg rounded-lg py-1.5 px-4 text-base font-medium cursor-pointer hover:bg-accent-hover"
+        class="rounded-lg py-1.5 px-4 text-base font-medium"
         onclick={handleAction}
       >
         {uiState.confirmDialog?.actionLabel}
-      </button>
+      </Button>
     </div>
-  </div>
+  </Surface>
 </Modal>

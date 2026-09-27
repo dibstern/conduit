@@ -513,11 +513,16 @@ describe("SessionManager Effect", () => {
 				getSessionStatus: vi.fn(() => Effect.succeed(undefined)),
 				getSession: vi.fn(() => Effect.fail(readQueryFailure)),
 				getAllSessionStatuses: vi.fn(() => Effect.succeed({})),
+				getSessionsForReconciliation: () => Effect.succeed([]),
 				listSessions: vi.fn(() => Effect.succeed([])),
+				listSessionInfos: vi.fn(() => Effect.succeed([])),
 				readSessionTranscript: vi.fn(() =>
 					Effect.succeed({ messages: [], version: 0 }),
 				),
 				readSessionList: vi.fn(() => Effect.succeed({ rows: [], version: 0 })),
+				getSessionLineage: () => Effect.succeed({ rows: [], count: 0 }),
+				getSessionFamily: () => Effect.succeed([]),
+				countPendingApprovalsBySession: vi.fn(() => Effect.succeed([])),
 				getLatestTurnModelExecution: vi.fn(() => Effect.succeed(undefined)),
 				getSessionMessagesWithParts: vi.fn(() => Effect.succeed([])),
 			};

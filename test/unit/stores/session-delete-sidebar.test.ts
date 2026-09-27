@@ -1,5 +1,6 @@
+import { seedSearchResults } from "./session-fixtures.js";
 // ─── Sidebar removal on delete ────────────────────────────────────────────────
-// The sidebar (SessionList.svelte) renders getDateGroups() -> getFilteredSessions().
+// The sidebar (SessionList.svelte) renders getAttentionGroups() -> getFilteredSessions().
 // A deleted session must leave that list in every UI state, including during an
 // active search. The store holds server search hits as ids, not rows, so the
 // search view reads through the one server-owned map and a removal there is
@@ -39,7 +40,6 @@ import {
 	getFilteredSessions,
 	sessionState,
 } from "../../../src/lib/frontend/stores/session.svelte.js";
-import { uiState } from "../../../src/lib/frontend/stores/ui.svelte.js";
 import { handleMessage } from "../../../src/lib/frontend/stores/ws-dispatch.js";
 import type { RelayMessage } from "../../../src/lib/frontend/types.js";
 import type { SessionInfo } from "../../../src/lib/shared-types.js";
@@ -61,7 +61,6 @@ beforeEach(() => {
 	clearSessionState();
 	sessionState.currentId = "keeper";
 	applySessionSnapshot([VICTIM, KEEPER], "complete");
-	uiState.hideSubagentSessions = true;
 });
 
 /** Seed an active server search the way SessionList does: the query is the
@@ -89,10 +88,50 @@ describe("deleted sessions leave the sidebar", () => {
 		expect(sidebarIds()).toEqual(["keeper"]);
 	});
 
-	it("drops the session when subagents are shown", () => {
-		uiState.hideSubagentSessions = false;
+	it("drops the root even when a family snapshot is loaded", () => {
+		handleMessage({
+			type: "session_family",
+			rootId: "victim",
+			sessions: [VICTIM],
+		});
 		deleteVictim();
 		expect(sidebarIds()).toEqual(["keeper"]);
+	});
+
+	it("drops the session from the family cache too", () => {
+		const child = {
+			id: "child",
+			title: "Child",
+			status: "idle",
+			parentID: "victim",
+		} satisfies SessionInfo;
+		handleMessage({
+			type: "session_family",
+			rootId: "victim",
+			sessions: [VICTIM, child],
+		});
+		deleteVictim();
+		expect(sessionState.familySessions.map((row) => row.id)).toEqual(["child"]);
+		expect(sidebarIds()).toEqual(["keeper"]);
+	});
+
+	it("drops a visible subagent from the family when it is deleted", () => {
+		const child = {
+			id: "child",
+			title: "Child",
+			status: "idle",
+			parentID: "victim",
+		} satisfies SessionInfo;
+		handleMessage({
+			type: "session_family",
+			rootId: "victim",
+			sessions: [VICTIM, child],
+		});
+		handleMessage({ type: "session_deleted", sessionId: "child" });
+		expect(sessionState.familySessions.map((row) => row.id)).toEqual([
+			"victim",
+		]);
+		expect(sidebarIds()).toEqual(["victim", "keeper"]);
 	});
 
 	// Regression: search hits used to be a snapshot of rows that took priority in
@@ -120,7 +159,7 @@ describe("deleted sessions leave the sidebar", () => {
 		handleMessage({
 			type: "session_list",
 			sessions: [KEEPER],
-			roots: false,
+			roots: true,
 		} as RelayMessage);
 		expect(sidebarIds()).toEqual(["keeper"]);
 	});
@@ -144,5 +183,34 @@ describe("deleted sessions leave the sidebar", () => {
 	it("leaves a normal search untouched when nothing was deleted", () => {
 		searchFor("s", [VICTIM, KEEPER]);
 		expect(sidebarIds()).toEqual(["victim", "keeper"]);
+	});
+});
+
+describe("root rows keep their subtree rollup", () => {
+	it("ignores the root's individual state from a later family snapshot", () => {
+		const rolled = { ...VICTIM, attention: "needs-approval" as const };
+		handleMessage({
+			type: "session_list",
+			sessions: [rolled, KEEPER],
+			roots: true,
+		} as RelayMessage);
+		handleMessage({
+			type: "session_family",
+			rootId: VICTIM.id,
+			sessions: [
+				{ ...VICTIM, attention: "idle" },
+				{
+					id: "child",
+					title: "Child",
+					status: "idle",
+					updatedAt: 0,
+					parentID: VICTIM.id,
+				},
+			],
+		} as RelayMessage);
+		expect(getFilteredSessions()[0]?.attention).toBe("needs-approval");
+		sessionState.searchQuery = "doomed";
+		seedSearchResults([VICTIM]);
+		expect(getFilteredSessions()).toEqual([rolled]);
 	});
 });

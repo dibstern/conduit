@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { routerState } from "../../../src/lib/frontend/stores/router.svelte.js";
 
 vi.hoisted(() => {
 	let store: Record<string, string> = {};
@@ -49,6 +50,7 @@ afterEach(() => {
 
 describe("Regression: assistant text identity follows server part id", () => {
 	it("resumes a history text part when live deltas continue it", async () => {
+		routerState.path = `/s/${SESSION_ID}`;
 		handleMessage({
 			type: "session_switched",
 			id: SESSION_ID,

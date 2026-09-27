@@ -1,0 +1,32 @@
+import { Meta } from "@storybook/addon-docs/blocks";
+
+<Meta title="UI/Foundations/Motion" />
+
+# Motion
+
+Motion is restrained and explains a state change. Transition only the properties
+that change (`transition-colors`, `transition-opacity`, `transition-transform`, or
+an explicit property list) rather than defaulting to every property.
+
+## Current durations
+
+| Duration | Current role |
+| ---: | --- |
+| 100ms | Hover feedback, compact menu rows, and small control state changes |
+| 150ms | Standard control colour/opacity changes and disclosure transforms |
+| 200ms | Modal opacity and larger state transitions |
+| 300ms | Progress width changes |
+
+These durations are Tailwind utilities, not tokens in `style.css`; that is an open
+design-system gap. Existing one-off flows also include a 250ms mobile-sidebar
+overlay and a 600ms connection fade. Do not treat those exceptions as new defaults.
+Use `ease-out` for progress or arrival and `ease-linear` for overlay opacity where
+the surrounding pattern already does so.
+
+## Reduced motion
+
+Respect `prefers-reduced-motion: reduce`: remove non-essential shimmer, spin, sweep,
+and travel while preserving the final state and all information. The skill-token
+recognition shimmer already disables its animation under reduced motion, but there
+is not yet a global reduced-motion rule. Every new animation must ship with its own
+reduced-motion behavior; extending coverage for older animation is an open gap.

@@ -69,8 +69,11 @@ import type {
 
 /** Effect-backed session bootstrap capabilities needed by client-init. */
 export interface ClientInitSessionService {
+	getSessionFamily(
+		sessionId: string,
+	): Promise<Extract<RelayMessage, { type: "session_family" }>>;
 	getDefaultSessionId(title?: string): Promise<string>;
-	sendDualSessionLists(
+	sendSessionLists(
 		send: (msg: Extract<RelayMessage, { type: "session_list" }>) => void,
 		options?: {
 			statuses?:
@@ -235,6 +238,7 @@ export interface ClientInitDeps {
 }
 
 export interface ClientInitEffectOptions {
+	readonly skipDefaultSession?: boolean;
 	readonly getInstances?: () =>
 		| ReadonlyArray<Readonly<OpenCodeInstance>>
 		| PromiseLike<ReadonlyArray<Readonly<OpenCodeInstance>>>;
@@ -364,6 +368,9 @@ const switchClientToSessionForInitEffect = (
 		}
 		yield* seedPaginationCursorFromHistoryEffect(sessionId, patchedSource);
 
+		const sessionService = yield* SessionManagerServiceTag;
+		const family = yield* sessionService.getSessionFamily(sessionId);
+		wsHandler.sendTo(clientId, family);
 		const draft = getSessionInputDraft(sessionId);
 		wsHandler.sendTo(
 			clientId,
@@ -377,6 +384,7 @@ const switchClientToSessionForInitEffect = (
 			sessionId,
 			status: pollerIsProcessing || hasActiveTimeout ? "processing" : "idle",
 		});
+		return family;
 	});
 
 /**
@@ -406,7 +414,9 @@ export const handleClientConnectedEffect = (
 					_tag: "Right",
 					right: requestedSessionId,
 				} as const)
-			: yield* Effect.either(sessionService.getDefaultSessionId());
+			: options.skipDefaultSession
+				? ({ _tag: "Right", right: undefined } as const)
+				: yield* Effect.either(sessionService.getDefaultSessionId());
 		const activeId =
 			activeIdResult._tag === "Right" ? activeIdResult.right : undefined;
 		if (activeIdResult._tag === "Left") {
@@ -417,9 +427,14 @@ export const handleClientConnectedEffect = (
 			);
 		}
 
+		const familyIds = new Set<string>(activeId ? [activeId] : []);
 		let activeSessionModel: ModelOverride | undefined;
 		if (activeId) {
-			yield* switchClientToSessionForInitEffect(clientId, activeId);
+			const family = yield* switchClientToSessionForInitEffect(
+				clientId,
+				activeId,
+			);
+			for (const session of family?.sessions ?? []) familyIds.add(session.id);
 
 			const sessionInfoResult = yield* Effect.either(
 				modelService.getSession(activeId),
@@ -467,7 +482,7 @@ export const handleClientConnectedEffect = (
 		}
 
 		yield* sessionService
-			.sendDualSessionLists((msg) => wsHandler.sendTo(clientId, msg), {
+			.sendSessionLists((msg) => wsHandler.sendTo(clientId, msg), {
 				statuses: yield* statusPoller.getCurrentStatuses(),
 			})
 			.pipe(
@@ -543,9 +558,10 @@ export const handleClientConnectedEffect = (
 			Effect.gen(function* () {
 				const sentQuestionIds = new Set<string>();
 				const servicePendingQuestions =
-					yield* pendingInteractions.listPendingQuestions(activeId);
+					yield* pendingInteractions.listPendingQuestions();
 				for (const pq of servicePendingQuestions) {
-					if (pq.sessionId && activeId && pq.sessionId !== activeId) continue;
+					if (pq.sessionId && activeId && !familyIds.has(pq.sessionId))
+						continue;
 					wsHandler.sendTo(clientId, {
 						type: "ask_user",
 						sessionId: pq.sessionId || activeId || "",
@@ -573,7 +589,7 @@ export const handleClientConnectedEffect = (
 				for (const pq of pendingQuestions) {
 					if (sentQuestionIds.has(pq.id)) continue;
 					const qSessionId = pq["sessionID"] as string | undefined;
-					if (qSessionId && activeId && qSessionId !== activeId) continue;
+					if (qSessionId && activeId && !familyIds.has(qSessionId)) continue;
 
 					const rawQuestions = pq["questions"] as
 						| Array<{
@@ -866,12 +882,16 @@ export async function handleClientConnected(
 	// otherwise compute the default (most recent or newly created).
 	const activeId =
 		requestedSessionId || (await sessionService.getDefaultSessionId());
+	const familyIds = new Set<string>(activeId ? [activeId] : []);
 	let activeSessionModel: ModelOverride | undefined;
 	if (activeId) {
 		// pollerManager intentionally omitted — not available in ClientInitDeps.
 		// skipPollerSeed: true ensures switchClientToSession never accesses it.
 		// The `satisfies` check guarantees a compile error if SessionSwitchDeps
 		// adds new required fields that this object doesn't provide.
+		const family = await sessionService.getSessionFamily(activeId);
+		for (const session of family.sessions) familyIds.add(session.id);
+		wsHandler.sendTo(clientId, family);
 		await switchClientToSession(
 			{
 				sessionMgr: sessionService,
@@ -940,7 +960,7 @@ export async function handleClientConnected(
 	// per-client by WebSocketHandler and flushed by markClientBootstrapped.
 	try {
 		const statuses = deps.statusPoller?.getCurrentStatuses();
-		await sessionService.sendDualSessionLists(
+		await sessionService.sendSessionLists(
 			(msg) => wsHandler.sendTo(clientId, msg),
 			{ statuses },
 		);
@@ -1008,13 +1028,13 @@ export async function handleClientConnected(
 			`Failed to fetch pending permissions from API: ${formatErrorDetail(err)}`,
 		);
 	}
-	// Replay pending questions for the client's active session only
+	// Replay pending questions for the client's active session family
 	try {
 		const sentQuestionIds = new Set<string>();
 		const servicePendingQuestions =
-			await pendingInteractions.listPendingQuestions(activeId);
+			await pendingInteractions.listPendingQuestions();
 		for (const pq of servicePendingQuestions) {
-			if (pq.sessionId && activeId && pq.sessionId !== activeId) continue;
+			if (pq.sessionId && activeId && !familyIds.has(pq.sessionId)) continue;
 			wsHandler.sendTo(clientId, {
 				type: "ask_user",
 				sessionId: pq.sessionId || activeId || "",
@@ -1039,9 +1059,9 @@ export async function handleClientConnected(
 		);
 		for (const pq of pendingQuestions) {
 			if (sentQuestionIds.has(pq.id)) continue;
-			// Filter: only send questions belonging to the client's active session
+			// Filter questions to the client's active session family
 			const qSessionId = pq["sessionID"] as string | undefined;
-			if (qSessionId && activeId && qSessionId !== activeId) continue;
+			if (qSessionId && activeId && !familyIds.has(qSessionId)) continue;
 
 			const rawQuestions = pq["questions"] as
 				| Array<{

@@ -1,3 +1,4 @@
+import { routerState } from "../../../src/lib/frontend/stores/router.svelte.js";
 // ─── Race: History Conversion .then() Callback Stale Write ──────────────────
 // Tests the window where convertHistoryAsync completes SUCCESSFULLY (returns
 // ChatMessage[]) but the .then() callback fires AFTER a session switch has
@@ -95,6 +96,7 @@ describe("Race: session_switched history .then() fires after session switch", ()
 		];
 
 		// First session_switched fires convertHistoryAsync — schedules .then()
+		routerState.path = "/s/session-first";
 		handleMessage({
 			type: "session_switched",
 			id: "session-first",
@@ -104,6 +106,7 @@ describe("Race: session_switched history .then() fires after session switch", ()
 
 		// Second session_switched arrives IMMEDIATELY — clearMessages() bumps
 		// replayGeneration, then fires its own convertHistoryAsync
+		routerState.path = "/s/session-second";
 		handleMessage({
 			type: "session_switched",
 			id: "session-second",
@@ -136,6 +139,7 @@ describe("Race: session_switched history .then() fires after session switch", ()
 	});
 
 	it("three rapid session_switched — only the last session wins", async () => {
+		routerState.path = "/s/s-a";
 		handleMessage({
 			type: "session_switched",
 			id: "s-a",
@@ -145,6 +149,7 @@ describe("Race: session_switched history .then() fires after session switch", ()
 				hasMore: true,
 			},
 		});
+		routerState.path = "/s/s-b";
 		handleMessage({
 			type: "session_switched",
 			id: "s-b",
@@ -154,6 +159,7 @@ describe("Race: session_switched history .then() fires after session switch", ()
 				hasMore: true,
 			},
 		});
+		routerState.path = "/s/s-c";
 		handleMessage({
 			type: "session_switched",
 			id: "s-c",
@@ -177,6 +183,7 @@ describe("Race: session_switched history .then() fires after session switch", ()
 describe("Race: history_page .then() fires after session switch", () => {
 	it("history_page completes after session switch — stale page discarded", async () => {
 		// Start with session A
+		routerState.path = "/s/session-a";
 		handleMessage({
 			type: "session_switched",
 			id: "session-a",
@@ -197,6 +204,7 @@ describe("Race: history_page .then() fires after session switch", () => {
 		});
 
 		// Before the history_page .then() fires, switch to session B
+		routerState.path = "/s/session-b";
 		handleMessage({
 			type: "session_switched",
 			id: "session-b",
@@ -226,6 +234,7 @@ describe("Race: history_page .then() fires after session switch", () => {
 
 	it("history_page loading resets even when generation check discards results", async () => {
 		// Set up session A
+		routerState.path = "/s/session-a";
 		handleMessage({
 			type: "session_switched",
 			id: "session-a",
@@ -244,6 +253,7 @@ describe("Race: history_page .then() fires after session switch", () => {
 		});
 
 		// Switch away — bumps generation
+		routerState.path = "/s/session-b";
 		handleMessage({
 			type: "session_switched",
 			id: "session-b",

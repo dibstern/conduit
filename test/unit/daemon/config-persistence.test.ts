@@ -39,6 +39,7 @@ function makeSampleConfig(overrides?: Partial<DaemonConfig>): DaemonConfig {
 		tls: false,
 		debug: false,
 		keepAwake: false,
+		autoSettleAfterDays: 3,
 		dangerouslySkipPermissions: false,
 		projects: [],
 		...overrides,
@@ -65,6 +66,35 @@ describe("getConfigDir", () => {
 // ─── loadDaemonConfig ───────────────────────────────────────────────────────
 
 describe("loadDaemonConfig", () => {
+	it("defaults legacy configs to three days and preserves Never", async () => {
+		const legacy = makeSampleConfig();
+		delete legacy.autoSettleAfterDays;
+		await saveDaemonConfig(legacy, tempDir);
+		expect(loadDaemonConfig(tempDir)?.autoSettleAfterDays).toBe(3);
+		await saveDaemonConfig(
+			makeSampleConfig({ autoSettleAfterDays: null }),
+			tempDir,
+		);
+		expect(loadDaemonConfig(tempDir)?.autoSettleAfterDays).toBeNull();
+	});
+
+	it("round-trips a configured idle window", async () => {
+		await saveDaemonConfig(
+			makeSampleConfig({ autoSettleAfterDays: 14 }),
+			tempDir,
+		);
+		expect(loadDaemonConfig(tempDir)?.autoSettleAfterDays).toBe(14);
+	});
+
+	it.each([
+		0, 91, 1.5,
+	])("rejects out-of-range or fractional days %s", async (days) => {
+		await saveDaemonConfig(
+			makeSampleConfig({ autoSettleAfterDays: days }),
+			tempDir,
+		);
+		expect(loadDaemonConfig(tempDir)).toBeNull();
+	});
 	it("returns parsed config from valid JSON file", () => {
 		const config = makeSampleConfig({ pid: 99999, port: 3000 });
 		mkdirSync(tempDir, { recursive: true });

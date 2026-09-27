@@ -2,8 +2,10 @@
 <!-- Displays system info/error messages with left-border accent. -->
 
 <script lang="ts">
+	import Button from "../ui/Button.svelte";
 	import type { SystemMessage } from "../../types.js";
-	import Icon from "../shared/Icon.svelte";
+	import Icon from "../ui/Icon.svelte";
+	import Surface from "../ui/Surface.svelte";
 
 	let { message }: { message: SystemMessage } = $props();
 
@@ -13,17 +15,28 @@
 	);
 
 	let showDetails = $state(false);
+	// Wired to the toggle's aria-controls: the details region is a sibling of the
+	// button rather than a child, so nothing but an id connects the two.
+	const detailsId = $props.id();
 
+	// The background is no longer here: both branches were bg-bg-surface, so it
+	// is Surface's `plain` variant and only the foreground actually varies.
 	const containerClasses = $derived(
-		isError
-			? "glow-tool-error text-error bg-bg-surface"
-			: "bg-bg-surface text-text-muted",
+		isError ? "glow-tool-error text-error" : "text-text-muted",
 	);
+
+	// Hover is an affordance, so the card only gets one when it actually holds
+	// something to click. A card with no details is inert, and a hover response on
+	// an inert card promises an interaction that does not exist. Ring rather than
+	// border so nothing reflows (conduit-test-wzat).
+	const hoverClasses = $derived(hasDetails ? "hover:ring-1 hover:ring-border" : "");
 </script>
 
 <div class="max-w-[760px] mx-auto my-2 px-5">
-	<div
-		class="flex flex-col gap-1 py-2 px-3 text-base rounded-panel {containerClasses}"
+	<Surface
+		variant="plain"
+		padding="sm"
+		class="flex flex-col gap-1 text-base {containerClasses} {hoverClasses}"
 	>
 		<div class="flex items-start gap-2">
 			<span class="shrink-0 mt-0.5 [&_.lucide]:w-3 [&_.lucide]:h-3">
@@ -41,18 +54,28 @@
 					{message.text}
 				</span>
 				{#if hasDetails}
-					<button
-						class="ml-2 text-xs opacity-60 hover:opacity-100 cursor-pointer underline"
+					<Button
+						variant="ghost"
+						size="content"
+						layout="flow"
+						tone="inherit"
+						hoverFill="none"
+						class="ml-2 text-xs opacity-60 hover:opacity-100 underline"
+						aria-expanded={showDetails}
+						aria-controls={detailsId}
 						onclick={() => showDetails = !showDetails}
 					>
 						{showDetails ? "Hide details" : "Show details"}
-					</button>
+					</Button>
 				{/if}
 			</div>
 		</div>
 
 		{#if showDetails && hasDetails}
-			<div class="ml-5 mt-1 p-2 rounded bg-black/20 text-xs font-mono space-y-0.5 overflow-x-auto">
+			<div
+				id={detailsId}
+				class="ml-5 mt-1 p-2 rounded bg-black/20 text-xs font-mono space-y-0.5 overflow-x-auto"
+			>
 				{#if message.statusCode}
 					<div><span class="opacity-60">status:</span> {message.statusCode}</div>
 				{/if}
@@ -66,5 +89,5 @@
 				{/if}
 			</div>
 		{/if}
-	</div>
+	</Surface>
 </div>

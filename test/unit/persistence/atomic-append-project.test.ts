@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { SqlClient } from "@effect/sql";
+import { SqliteClient as EffectSqliteClient } from "@effect/sql-sqlite-node";
 import { Effect, Layer, Stream } from "effect";
 import { expect, it } from "vitest";
 import { defaultInstanceIdForDriver } from "../../../src/lib/contracts/provider-instance.js";
@@ -24,13 +25,12 @@ import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/
 import { createAllEffectProjectors } from "../../../src/lib/persistence/effect/projectors-effect.js";
 import { ReadQueryEffectTag } from "../../../src/lib/persistence/effect/read-query-effect.js";
 import { canonicalEvent } from "../../../src/lib/persistence/events.js";
-import { SqliteClient } from "../../../src/lib/persistence/sqlite-client.js";
 import {
 	makeMockLogger,
 	makeMockOpenCodeAPI,
 } from "../../helpers/mock-factories.js";
 
-it("a kill after append leaves no durable event ahead of its projection", () => {
+it("a kill after append leaves no durable event ahead of its projection", async () => {
 	const dir = mkdtempSync(join(tmpdir(), "conduit-atomic-crash-"));
 	const filename = join(dir, "events.db");
 	try {
@@ -48,20 +48,20 @@ it("a kill after append leaves no durable event ahead of its projection", () => 
 		);
 		expect(child.stderr).toBe("");
 		expect(child.signal).toBe("SIGKILL");
-		const db = SqliteClient.open(filename);
-		try {
-			expect(
-				db.query("SELECT title FROM sessions WHERE id = 'crash-session'"),
-			).toEqual([{ title: "Before" }]);
-			expect(
-				db.query("SELECT type FROM events WHERE session_id = 'crash-session'"),
-			).toEqual([]);
-			expect(
-				db.query("SELECT last_applied_seq FROM projector_cursors"),
-			).toEqual([]);
-		} finally {
-			db.close();
-		}
+		await Effect.runPromise(
+			Effect.gen(function* () {
+				const sql = yield* SqlClient.SqlClient;
+				expect(
+					yield* sql`SELECT title FROM sessions WHERE id = 'crash-session'`,
+				).toEqual([{ title: "Before" }]);
+				expect(
+					yield* sql`SELECT type FROM events WHERE session_id = 'crash-session'`,
+				).toEqual([]);
+				expect(
+					yield* sql`SELECT last_applied_seq FROM projector_cursors`,
+				).toEqual([]);
+			}).pipe(Effect.provide(EffectSqliteClient.layer({ filename }))),
+		);
 	} finally {
 		rmSync(dir, { recursive: true, force: true });
 	}
@@ -77,20 +77,20 @@ it.each([
 	const observed: unknown[] = [];
 	const bus = Layer.succeed(SessionEventBusTag, {
 		publish: () =>
-			Effect.sync(() => {
-				const reader = SqliteClient.open(filename);
-				try {
-					observed.push({
-						sessions: reader.query(
-							"SELECT title FROM sessions WHERE id = 'published'",
-						),
-						events: reader.query(
-							"SELECT type FROM events WHERE session_id = 'published'",
-						),
-					});
-				} finally {
-					reader.close();
-				}
+			Effect.gen(function* () {
+				const rows = yield* Effect.gen(function* () {
+					const sql = yield* SqlClient.SqlClient;
+					return {
+						sessions:
+							yield* sql`SELECT title FROM sessions WHERE id = 'published'`,
+						events:
+							yield* sql`SELECT type FROM events WHERE session_id = 'published'`,
+					};
+				}).pipe(
+					Effect.provide(EffectSqliteClient.layer({ filename })),
+					Effect.orDie,
+				);
+				observed.push(rows);
 			}),
 		publishAdvance: () => Effect.void,
 		subscribe: () => Effect.succeed(Stream.empty),

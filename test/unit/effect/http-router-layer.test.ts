@@ -137,8 +137,9 @@ const relayWithSnapshot = (
 	snapshot: RelayStatusSnapshot,
 ): Relay => ({
 	slug,
-	wsHandler: { handleUpgrade: () => {} },
-	rpcWsHandler: { handleUpgrade: () => {} },
+	attach: () => () => {},
+	wsHandler: {},
+	rpcWsHandler: {},
 	getStatusSnapshot: () => snapshot,
 	stop: () => {},
 });
@@ -254,30 +255,6 @@ describe("makeDaemonHttpRouterLive", () => {
 		}),
 	);
 
-	it.scoped("serves daemon themes from the production theme loader", () =>
-		Effect.gen(function* () {
-			const staticDir = yield* makeStaticDir;
-			const routerLayer = makeDaemonRouterLayer(staticDir, { projects: [] });
-
-			yield* Effect.gen(function* () {
-				const handler = yield* DaemonHttpRequestHandlerTag;
-				const { port } = yield* startServer(handler);
-
-				const response = yield* Effect.tryPromise(() =>
-					fetch(`http://127.0.0.1:${port}/api/themes`),
-				);
-				expect(response.status).toBe(200);
-				const body = (yield* Effect.tryPromise(() =>
-					response.json(),
-				)) as unknown;
-				expect(body).toMatchObject({
-					bundled: expect.any(Object),
-					custom: expect.any(Object),
-				});
-			}).pipe(Effect.provide(Layer.fresh(routerLayer)));
-		}),
-	);
-
 	it.scoped("serves nested SSE health from the daemon status response", () =>
 		Effect.gen(function* () {
 			const staticDir = yield* makeStaticDir;
@@ -303,7 +280,6 @@ describe("makeDaemonHttpRouterLive", () => {
 			}).pipe(Effect.provide(Layer.fresh(routerLayer)));
 		}),
 	);
-
 	it.scoped(
 		"serves daemon project list from Effect-owned registry and relay snapshots",
 		() =>
@@ -401,62 +377,59 @@ describe("makeDaemonHttpRouterLive", () => {
 			}),
 	);
 
-	it.scoped(
-		"uses daemon-owned projects for root redirect and project status",
-		() =>
-			Effect.gen(function* () {
-				const staticDir = yield* makeStaticDir;
-				const routerLayer = makeDaemonRouterLayer(staticDir, {
-					projects: [
-						[
-							"solo",
-							{
-								_tag: "Ready",
-								project: {
-									slug: "solo",
-									directory: "/work/solo",
-									title: "Solo",
-									lastUsed: 1,
-								},
+	it.scoped("serves the root SPA and reads daemon-owned project status", () =>
+		Effect.gen(function* () {
+			const staticDir = yield* makeStaticDir;
+			const routerLayer = makeDaemonRouterLayer(staticDir, {
+				projects: [
+					[
+						"solo",
+						{
+							_tag: "Ready",
+							project: {
+								slug: "solo",
+								directory: "/work/solo",
+								title: "Solo",
+								lastUsed: 1,
 							},
-						],
+						},
 					],
+				],
+			});
+
+			yield* Effect.gen(function* () {
+				const handler = yield* DaemonHttpRequestHandlerTag;
+				const { port } = yield* startServer(handler);
+
+				const rootResponse = yield* Effect.tryPromise(() =>
+					fetch(`http://127.0.0.1:${port}/`, { redirect: "manual" }),
+				);
+				expect(rootResponse.status).toBe(200);
+				expect(rootResponse.headers.get("location")).toBeNull();
+				expect(yield* Effect.tryPromise(() => rootResponse.text())).toBe(
+					"<html>app</html>",
+				);
+
+				const statusResponse = yield* Effect.tryPromise(() =>
+					fetch(`http://127.0.0.1:${port}/p/solo/api/status`),
+				);
+				expect(statusResponse.status).toBe(200);
+				expect(yield* Effect.tryPromise(() => statusResponse.json())).toEqual({
+					status: "ready",
 				});
 
-				yield* Effect.gen(function* () {
-					const handler = yield* DaemonHttpRequestHandlerTag;
-					const { port } = yield* startServer(handler);
-
-					const rootResponse = yield* Effect.tryPromise(() =>
-						fetch(`http://127.0.0.1:${port}/`, { redirect: "manual" }),
-					);
-					expect(rootResponse.status).toBe(302);
-					expect(rootResponse.headers.get("location")).toBe("/p/solo/");
-
-					const statusResponse = yield* Effect.tryPromise(() =>
-						fetch(`http://127.0.0.1:${port}/p/solo/api/status`),
-					);
-					expect(statusResponse.status).toBe(200);
-					expect(yield* Effect.tryPromise(() => statusResponse.json())).toEqual(
-						{
-							status: "ready",
-						},
-					);
-
-					const missingResponse = yield* Effect.tryPromise(() =>
-						fetch(`http://127.0.0.1:${port}/p/missing/api/status`),
-					);
-					expect(missingResponse.status).toBe(404);
-					expect(
-						yield* Effect.tryPromise(() => missingResponse.json()),
-					).toEqual({
-						error: {
-							code: "NOT_FOUND",
-							message: 'Project "missing" not found',
-						},
-					});
-				}).pipe(Effect.provide(Layer.fresh(routerLayer)));
-			}),
+				const missingResponse = yield* Effect.tryPromise(() =>
+					fetch(`http://127.0.0.1:${port}/p/missing/api/status`),
+				);
+				expect(missingResponse.status).toBe(404);
+				expect(yield* Effect.tryPromise(() => missingResponse.json())).toEqual({
+					error: {
+						code: "NOT_FOUND",
+						message: 'Project "missing" not found',
+					},
+				});
+			}).pipe(Effect.provide(Layer.fresh(routerLayer)));
+		}),
 	);
 
 	it.scoped("serves push routes from the Effect-owned push manager", () =>

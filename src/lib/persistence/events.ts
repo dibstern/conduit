@@ -35,7 +35,7 @@ export function canonicalEvent<K extends CanonicalEventType>(
 		provider?: string;
 		createdAt?: number;
 	},
-): Extract<CanonicalEvent, { type: K }> {
+): CanonicalEvent & { readonly type: K; readonly data: EventPayloadMap[K] } {
 	return {
 		eventId: opts?.eventId ?? createEventId(),
 		sessionId,
@@ -44,7 +44,7 @@ export function canonicalEvent<K extends CanonicalEventType>(
 		metadata: opts?.metadata ?? {},
 		provider: opts?.provider ?? "opencode",
 		createdAt: opts?.createdAt ?? Date.now(),
-	} as unknown as Extract<CanonicalEvent, { type: K }>;
+	} as CanonicalEvent & { readonly type: K; readonly data: EventPayloadMap[K] };
 }
 
 // ─── Runtime Payload Validation ─────────────────────────────────────────────
@@ -54,6 +54,15 @@ import { PersistenceError } from "./errors.js";
 const PAYLOAD_REQUIRED_FIELDS: Record<CanonicalEventType, readonly string[]> = {
 	"session.created": ["sessionId", "title", "provider"],
 	"session.renamed": ["sessionId", "title"],
+	"session.read": ["sessionId"],
+	"session.unread": ["sessionId"],
+	"session.settled": ["sessionId"],
+	"session.unsettled": ["sessionId"],
+	"session.pinned": ["sessionId"],
+	"session.unpinned": ["sessionId"],
+	"session.snoozed": ["sessionId", "until"],
+	"session.auto_settle_set": ["sessionId", "disabled"],
+	"session.unsnoozed": ["sessionId"],
 	"session.deleted": ["sessionId"],
 	"session.forked": ["sessionId", "parentId"],
 	"session.status": ["sessionId", "status"],
@@ -84,8 +93,11 @@ const PAYLOAD_REQUIRED_FIELDS: Record<CanonicalEventType, readonly string[]> = {
 export function validateEventPayload(event: CanonicalEvent): void {
 	const required = PAYLOAD_REQUIRED_FIELDS[event.type];
 	if (!required) return;
-	const data = event.data as unknown as Record<string, unknown>;
-	const missing = required.filter((field) => data[field] === undefined);
+	const fields = Object.entries(event.data);
+	const missing = required.filter(
+		(field) =>
+			!fields.some(([key, value]) => key === field && value !== undefined),
+	);
 	if (missing.length > 0) {
 		throw new PersistenceError({
 			code: "SCHEMA_VALIDATION_FAILED",

@@ -61,7 +61,7 @@ describe("WsRpcServerLayer CancelSession", () => {
 			providerStateUpdates: [],
 		}));
 		const engine = withDispatchEffect({
-			getProviderForSession: vi.fn(() => "claude"),
+			getProviderForSessionEffect: vi.fn(() => Effect.succeed("claude")),
 			dispatch,
 		});
 		const api = makeMockOpenCodeAPI();

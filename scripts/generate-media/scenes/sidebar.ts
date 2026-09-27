@@ -37,7 +37,7 @@ export const sidebarScene: SceneDefinition = {
 			await page.addInitScript(() => {
 				localStorage.removeItem("sidebar-collapsed");
 			});
-			await page.goto(`${previewUrl}/p/myapp/`);
+			await page.goto(`${previewUrl}/s/sess-sidebar-001`);
 			await waitForFonts(page);
 			await waitForIcons(page);
 		});

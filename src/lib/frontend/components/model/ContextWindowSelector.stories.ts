@@ -1,18 +1,25 @@
 import type { Meta, StoryObj } from "@storybook/svelte-vite";
+import { expect, userEvent, within } from "storybook/test";
 import {
 	clearDiscoveryState,
 	handleContextWindowInfo,
 } from "../../stores/discovery.svelte.js";
-import ContextWindowSelector from "./ContextWindowSelector.svelte";
+import ContextWindowSelectorHost from "./__fixtures__/ContextWindowSelectorHost.svelte";
 
 const meta = {
 	title: "Model/ContextWindowSelector",
-	component: ContextWindowSelector,
+	component: ContextWindowSelectorHost,
 	tags: ["autodocs"],
+	args: {
+		reserveDropUpSpace: false,
+	},
+	argTypes: {
+		reserveDropUpSpace: { control: false },
+	},
 	beforeEach: () => {
 		clearDiscoveryState();
 	},
-} satisfies Meta<typeof ContextWindowSelector>;
+} satisfies Meta<typeof ContextWindowSelectorHost>;
 
 export default meta;
 type Story = StoryObj<typeof meta>;
@@ -62,6 +69,9 @@ export const Selected1M: Story = {
 
 /** Dropdown open with both options visible. */
 export const Open: Story = {
+	args: {
+		reserveDropUpSpace: true,
+	},
 	beforeEach: () => {
 		handleContextWindowInfo({
 			type: "context_window_info",
@@ -70,10 +80,15 @@ export const Open: Story = {
 		});
 	},
 	play: async ({ canvasElement }) => {
-		await new Promise((r) => setTimeout(r, 50));
-		const btn = canvasElement.querySelector(
-			"[data-testid='context-window-badge']",
-		) as HTMLElement;
-		btn?.click();
+		const canvas = within(canvasElement);
+		// The menu portals to <body>, so it is outside canvasElement.
+		const body = within(canvasElement.ownerDocument.body);
+		await userEvent.click(canvas.getByTestId("context-window-badge"));
+		await expect(body.getByTestId("context-window-dropdown")).toBeVisible();
 	},
+};
+
+export const Hover: Story = {
+	...StandardDefault,
+	parameters: { pseudo: { hover: true } },
 };

@@ -6,7 +6,11 @@ export interface EffectDeps {
 	startPoller: (sessionId: string) => void;
 	stopPoller: (sessionId: string) => void;
 	sendStatusToSession: (sessionId: string, msg: RelayMessage) => void;
-	processAndApplyDone: (sessionId: string, isSubagent: boolean) => void;
+	processAndApplyDone: (
+		sessionId: string,
+		isSubagent: boolean,
+		busySince: number,
+	) => void;
 	clearProcessingTimeout: (sessionId: string) => void;
 	clearMessageActivity: (sessionId: string) => void;
 	log: Pick<Logger, "info" | "warn" | "error">;
@@ -36,7 +40,11 @@ export function executeEffects(
 				break;
 
 			case "notify-idle":
-				deps.processAndApplyDone(effect.sessionId, effect.isSubagent);
+				deps.processAndApplyDone(
+					effect.sessionId,
+					effect.isSubagent,
+					effect.busySince,
+				);
 				deps.clearProcessingTimeout(effect.sessionId);
 				deps.clearMessageActivity(effect.sessionId);
 				break;

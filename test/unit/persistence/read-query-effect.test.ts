@@ -8,9 +8,206 @@ import Database from "better-sqlite3";
 import { Effect } from "effect";
 import { expect } from "vitest";
 import { makeEffectSqlMigrator } from "../../../src/lib/persistence/effect/migrations.js";
-import { makeReadQueryEffect } from "../../../src/lib/persistence/effect/read-query-effect.js";
+import {
+	deriveSessionSnooze,
+	makeReadQueryEffect,
+	sessionRowsToSessionInfoList,
+} from "../../../src/lib/persistence/effect/read-query-effect.js";
+import type { SessionRow } from "../../../src/lib/persistence/read-model-types.js";
+import { sessionFamilyQuery } from "../../../src/lib/persistence/session-family-query.js";
 
 const testLayer = EffectSqliteClient.layer({ filename: ":memory:" });
+
+describe("typed session row derivations", () => {
+	it.effect(
+		"derives approval, reply, error, working, unread and idle in priority order",
+		() =>
+			Effect.gen(function* () {
+				yield* makeEffectSqlMigrator();
+				yield* seedSession("priority");
+				const sql = yield* SqlClient.SqlClient;
+				const rows =
+					yield* sql<SessionRow>`SELECT * FROM sessions WHERE id = 'priority'`;
+				const row = rows[0];
+				if (!row) throw new Error("expected session");
+				const unread = { ...row, last_message_at: 20, read_at: 10 };
+				const attention = (
+					value: SessionRow,
+					options: Parameters<typeof sessionRowsToSessionInfoList>[1] = {},
+				) => sessionRowsToSessionInfoList([value], options)[0]?.attention;
+				expect(attention(unread)).toBe("done-unread");
+				expect(attention({ ...unread, read_at: 20 })).toBe("idle");
+				expect(attention({ ...unread, status: "busy" })).toBe("working");
+				expect(
+					attention(
+						{ ...unread, status: "idle" },
+						{ statuses: { priority: { type: "busy" } } },
+					),
+				).toBe("working");
+				expect(
+					attention(
+						{ ...unread, status: "busy" },
+						{ statuses: { priority: { type: "idle" } } },
+					),
+				).toBe("done-unread");
+				expect(
+					attention({ ...unread, status: "busy", last_turn_error_at: 5 }),
+				).toBe("error");
+				expect(
+					attention(
+						{ ...unread, status: "busy", last_turn_error_at: 5 },
+						{ pendingQuestionCounts: new Map([["priority", 1]]) },
+					),
+				).toBe("needs-reply");
+				expect(
+					attention(
+						{ ...unread, status: "busy", last_turn_error_at: 5 },
+						{
+							pendingQuestionCounts: new Map([["priority", 1]]),
+							pendingPermissionCounts: new Map([["priority", 1]]),
+						},
+					),
+				).toBe("needs-approval");
+				const counts = sessionRowsToSessionInfoList([row], {
+					pendingQuestionCounts: new Map([["priority", 2]]),
+					pendingPermissionCounts: new Map([["priority", 3]]),
+				})[0];
+				expect(counts).toMatchObject({
+					pendingQuestionCount: 2,
+					pendingPermissionCount: 3,
+				});
+				expect(sessionRowsToSessionInfoList([row])[0]).not.toHaveProperty(
+					"pendingQuestionCount",
+				);
+			}).pipe(Effect.provide(testLayer)),
+	);
+
+	it.effect(
+		"rolls nested descendant activity and counts into the root before choosing attention",
+		() =>
+			Effect.gen(function* () {
+				yield* makeEffectSqlMigrator();
+				yield* seedSession("root");
+				yield* seedSession("child", { parentId: "root" });
+				yield* seedSession("grandchild", { parentId: "child" });
+				const sql = yield* SqlClient.SqlClient;
+				const rows = yield* sql<SessionRow>`SELECT * FROM sessions ORDER BY id`;
+				const options = {
+					parentMap: new Map([
+						["child", "root"],
+						["grandchild", "child"],
+					]),
+					statuses: { grandchild: { type: "busy" } },
+					pendingQuestionCounts: new Map([["child", 1]]),
+					pendingPermissionCounts: new Map([["grandchild", 2]]),
+				};
+				const converted = sessionRowsToSessionInfoList(rows, options);
+				expect(converted.find((row) => row.id === "root")).toMatchObject({
+					processing: true,
+					pendingQuestionCount: 1,
+					pendingPermissionCount: 2,
+					attention: "needs-approval",
+				});
+				expect(
+					converted.find((row) => row.id === "child")?.pendingQuestionCount,
+				).toBe(1);
+				expect(
+					converted.find((row) => row.id === "grandchild")
+						?.pendingPermissionCount,
+				).toBe(2);
+				expect(
+					converted.find((row) => row.id === "child")?.processing,
+				).toBeUndefined();
+				expect(
+					converted.find((row) => row.id === "child")?.pendingPermissionCount,
+				).toBeUndefined();
+				const root = rows.find((row) => row.id === "root");
+				if (!root) throw new Error("expected root row");
+				expect(sessionRowsToSessionInfoList([root], options)[0]).toEqual(
+					converted.find((row) => row.id === "root"),
+				);
+				const familyOptions = {
+					statuses: options.statuses,
+					pendingQuestionCounts: options.pendingQuestionCounts,
+					pendingPermissionCounts: options.pendingPermissionCounts,
+				};
+				expect(
+					sessionRowsToSessionInfoList(rows, familyOptions).find(
+						(row) => row.id === "root",
+					)?.pendingPermissionCount,
+				).toBeUndefined();
+				const errorRoot = {
+					...root,
+					last_turn_error_at: 1,
+					last_message_at: 2,
+				};
+				expect(
+					sessionRowsToSessionInfoList([errorRoot], {
+						...options,
+						pendingPermissionCounts: new Map(),
+					})[0]?.attention,
+				).toBe("needs-reply");
+				expect(
+					sessionRowsToSessionInfoList([errorRoot], {
+						...options,
+						pendingPermissionCounts: new Map(),
+						pendingQuestionCounts: new Map(),
+					})[0]?.attention,
+				).toBe("error");
+			}).pipe(Effect.provide(testLayer)),
+	);
+
+	it("keeps a timed or indefinite snooze until its wake, then clears it after read", () => {
+		const row = {
+			snoozed_at: 10,
+			snoozed_until: 30,
+			woken_at: null,
+			woken_reason: null,
+			read_at: null,
+		};
+		expect(deriveSessionSnooze(row, 29)).toEqual({
+			snoozedAt: 10,
+			snoozedUntil: 30,
+		});
+		expect(deriveSessionSnooze(row, 30)).toEqual({
+			wokenAt: 30,
+			wokeBecause: "time",
+		});
+		expect(deriveSessionSnooze({ ...row, read_at: 30 }, 30)).toEqual({});
+		expect(deriveSessionSnooze({ ...row, snoozed_until: null }, 100)).toEqual({
+			snoozedAt: 10,
+		});
+		expect(
+			deriveSessionSnooze(
+				{ ...row, woken_at: 25, woken_reason: "approval" },
+				29,
+			),
+		).toEqual({ wokenAt: 25, wokeBecause: "approval" });
+		expect(deriveSessionSnooze({ ...row, snoozed_at: null }, 30)).toEqual({});
+	});
+
+	it.effect("carries settled and pinned timestamps and omits NULL values", () =>
+		Effect.gen(function* () {
+			yield* makeEffectSqlMigrator();
+			yield* seedSession("settled");
+			yield* seedSession("plain");
+			const sql = yield* SqlClient.SqlClient;
+			yield* sql`UPDATE sessions SET settled_at = 10, pinned_at = 20 WHERE id = 'settled'`;
+			const rows = yield* sql<SessionRow>`SELECT * FROM sessions ORDER BY id`;
+			const converted = sessionRowsToSessionInfoList(rows);
+			expect(converted.find((row) => row.id === "settled")).toMatchObject({
+				settledAt: 10,
+				pinnedAt: 20,
+			});
+			expect(converted.find((row) => row.id === "plain")).not.toHaveProperty(
+				"settledAt",
+			);
+			expect(converted.find((row) => row.id === "plain")).not.toHaveProperty(
+				"pinnedAt",
+			);
+		}).pipe(Effect.provide(testLayer)),
+	);
+});
 
 describe("ReadQueryEffect snapshot consistency", () => {
 	for (const source of ["session list", "transcript"] as const) {
@@ -80,15 +277,268 @@ describe("ReadQueryEffect snapshot consistency", () => {
 	}
 });
 
-function seedSession(sessionId: string) {
+function seedSession(
+	sessionId: string,
+	options: {
+		title?: string;
+		status?: string;
+		updatedAt?: number;
+		parentId?: string;
+	} = {},
+) {
 	return Effect.gen(function* () {
 		const sql = yield* SqlClient.SqlClient;
 		yield* sql`
 			INSERT INTO sessions
-			(id, provider, title, status, created_at, updated_at)
-			VALUES (${sessionId}, 'claude', 'Test', 'idle', 1, 1)`;
+			(id, provider, title, status, parent_id, created_at, updated_at)
+			VALUES (
+				${sessionId},
+				'claude',
+				${options.title ?? "Test"},
+				${options.status ?? "idle"},
+				${options.parentId ?? null},
+				${options.updatedAt ?? 1},
+				${options.updatedAt ?? 1}
+			)`;
 	});
 }
+
+describe("ReadQueryEffect.listSessions", () => {
+	it.effect("applies deterministic keyset paging, roots, and limits", () =>
+		Effect.gen(function* () {
+			yield* makeEffectSqlMigrator();
+			yield* seedSession("z", { updatedAt: 300 });
+			yield* seedSession("y", { updatedAt: 200 });
+			yield* seedSession("x", { updatedAt: 200, parentId: "z" });
+			yield* seedSession("a", { updatedAt: 200 });
+			yield* seedSession("w", { updatedAt: 100 });
+			const readQuery = yield* makeReadQueryEffect;
+
+			expect((yield* readQuery.listSessions()).map((row) => row.id)).toEqual([
+				"z",
+				"y",
+				"x",
+				"a",
+				"w",
+			]);
+			expect(
+				(yield* readQuery.listSessions({
+					roots: true,
+					limit: 2,
+				})).map((row) => row.id),
+			).toEqual(["z", "y"]);
+			expect(
+				(yield* readQuery.listSessions({
+					before: { updatedAt: 200, id: "y" },
+					limit: 2,
+				})).map((row) => row.id),
+			).toEqual(["x", "a"]);
+		}).pipe(Effect.provide(testLayer)),
+	);
+
+	it.effect(
+		"searches ASCII case-insensitively and escapes LIKE wildcards",
+		() =>
+			Effect.gen(function* () {
+				yield* makeEffectSqlMigrator();
+				yield* seedSession("literal", {
+					title: "Alpha 100%_done\\now",
+					updatedAt: 3,
+				});
+				yield* seedSession("case-match", {
+					title: "alpha ordinary",
+					updatedAt: 2,
+				});
+				yield* seedSession("wildcard-decoy", {
+					title: "Alpha 100XYdone-now",
+					updatedAt: 1,
+				});
+				const readQuery = yield* makeReadQueryEffect;
+
+				expect(
+					(yield* readQuery.listSessions({ titleQuery: "ALPHA" })).map(
+						(row) => row.id,
+					),
+				).toEqual(["literal", "case-match", "wildcard-decoy"]);
+				expect(
+					(yield* readQuery.listSessions({ titleQuery: "%_done\\" })).map(
+						(row) => row.id,
+					),
+				).toEqual(["literal"]);
+			}).pipe(Effect.provide(testLayer)),
+	);
+});
+
+describe("ReadQueryEffect session lookups", () => {
+	it.effect("reads tool content by tool id", () =>
+		Effect.gen(function* () {
+			yield* makeEffectSqlMigrator();
+			yield* seedSession("s1");
+			const sql = yield* SqlClient.SqlClient;
+			yield* sql`
+				INSERT INTO tool_content (tool_id, session_id, content, created_at)
+				VALUES ('tool-abc', 's1', '{"result": "hello"}', 1)`;
+			const readQuery = yield* makeReadQueryEffect;
+
+			expect(yield* readQuery.getToolContent("tool-abc")).toBe(
+				'{"result": "hello"}',
+			);
+			expect(yield* readQuery.getToolContent("nonexistent")).toBeUndefined();
+		}).pipe(Effect.provide(testLayer)),
+	);
+
+	it.effect("reads one session's status and the status of every session", () =>
+		Effect.gen(function* () {
+			yield* makeEffectSqlMigrator();
+			yield* seedSession("s1", { status: "idle" });
+			yield* seedSession("s2", { status: "busy" });
+			const readQuery = yield* makeReadQueryEffect;
+
+			expect(yield* readQuery.getSessionStatus("s2")).toBe("busy");
+			expect(yield* readQuery.getSessionStatus("nonexistent")).toBeUndefined();
+			expect(yield* readQuery.getAllSessionStatuses()).toEqual({
+				s1: "idle",
+				s2: "busy",
+			});
+		}).pipe(Effect.provide(testLayer)),
+	);
+
+	it.effect("lists nothing for an empty store", () =>
+		Effect.gen(function* () {
+			yield* makeEffectSqlMigrator();
+			const readQuery = yield* makeReadQueryEffect;
+			expect(yield* readQuery.listSessions()).toEqual([]);
+		}).pipe(Effect.provide(testLayer)),
+	);
+});
+
+describe("ReadQueryEffect session families", () => {
+	it.effect(
+		"finds the root from a grandchild and returns every descendant only once",
+		() =>
+			Effect.gen(function* () {
+				yield* makeEffectSqlMigrator();
+				yield* seedSession("root", { updatedAt: 5 });
+				yield* seedSession("child", { parentId: "root", updatedAt: 4 });
+				yield* seedSession("grandchild", { parentId: "child", updatedAt: 3 });
+				yield* seedSession("sibling", { parentId: "root", updatedAt: 2 });
+				yield* seedSession("unrelated");
+				const readQuery = yield* makeReadQueryEffect;
+				const expected = ["root", "child", "grandchild", "sibling"];
+				expect(
+					(yield* readQuery.getSessionFamily("grandchild")).map(
+						(row) => row.id,
+					),
+				).toEqual(expected);
+				expect(
+					(yield* readQuery.getSessionFamily("root")).map((row) => row.id),
+				).toEqual(expected);
+				expect(yield* readQuery.getSessionFamily("missing")).toEqual([]);
+				const lineage = yield* readQuery.getSessionLineage();
+				expect(lineage.count).toBe(5);
+				expect(lineage.rows).toHaveLength(5);
+				expect(lineage.rows).toEqual(
+					expect.arrayContaining([
+						{ id: "root", parent_id: null },
+						{ id: "grandchild", parent_id: "child" },
+					]),
+				);
+			}).pipe(Effect.provide(testLayer)),
+	);
+
+	it.effect(
+		"looks up family rows through indexes without scanning sessions",
+		() =>
+			Effect.gen(function* () {
+				yield* makeEffectSqlMigrator();
+				yield* seedSession("root");
+				yield* seedSession("child", { parentId: "root" });
+				yield* seedSession("grandchild", { parentId: "child" });
+				for (let i = 0; i < 100; i++) yield* seedSession(`unrelated-${i}`);
+				const sql = yield* SqlClient.SqlClient;
+				const plan = (yield* sql.unsafe<{ detail: string }>(
+					`EXPLAIN QUERY PLAN ${sessionFamilyQuery}`,
+					["grandchild"],
+				)).map((row) => row.detail);
+
+				expect(plan.some((step) => /\bSCAN (?:s|sessions)\b/i.test(step))).toBe(
+					false,
+				);
+				expect(plan).toContain(
+					"SEARCH s USING INDEX idx_sessions_parent (parent_id=?)",
+				);
+				expect(plan).toContain(
+					"SEARCH s USING INDEX sqlite_autoindex_sessions_1 (id=?)",
+				);
+			}).pipe(Effect.provide(testLayer)),
+	);
+
+	it.effect("returns an empty lineage snapshot for an empty store", () =>
+		Effect.gen(function* () {
+			yield* makeEffectSqlMigrator();
+			const readQuery = yield* makeReadQueryEffect;
+			expect(yield* readQuery.getSessionLineage()).toEqual({
+				rows: [],
+				count: 0,
+			});
+		}).pipe(Effect.provide(testLayer)),
+	);
+});
+
+describe("ReadQueryEffect.countPendingApprovalsBySession", () => {
+	it.effect("counts pending approvals by session and type", () =>
+		Effect.gen(function* () {
+			yield* makeEffectSqlMigrator();
+			yield* seedSession("s1");
+			yield* seedSession("s2");
+			const sql = yield* SqlClient.SqlClient;
+			yield* sql`
+				INSERT INTO pending_approvals
+				(id, session_id, type, status, created_at)
+				VALUES
+				('p1', 's1', 'permission', 'pending', 1),
+				('p2', 's1', 'permission', 'pending', 2),
+				('q1', 's1', 'question', 'pending', 3),
+				('q2', 's2', 'question', 'pending', 4),
+				('resolved', 's2', 'permission', 'resolved', 5)`;
+
+			const readQuery = yield* makeReadQueryEffect;
+			const counts = [
+				...(yield* readQuery.countPendingApprovalsBySession()),
+			].sort((a, b) =>
+				`${a.session_id}:${a.type}`.localeCompare(`${b.session_id}:${b.type}`),
+			);
+
+			expect(counts).toEqual([
+				{ session_id: "s1", type: "permission", pending_count: 2 },
+				{ session_id: "s1", type: "question", pending_count: 1 },
+				{ session_id: "s2", type: "question", pending_count: 1 },
+			]);
+		}).pipe(Effect.provide(testLayer)),
+	);
+
+	// Guards the index, not the query: the SQL below is a copy, so this fails
+	// only if idx_pending_approvals_pending is dropped from the migrations.
+	// Without it this GROUP BY scans every resolved approval ever recorded.
+	it.effect("uses the pending-approval index", () =>
+		Effect.gen(function* () {
+			yield* makeEffectSqlMigrator();
+			const sql = yield* SqlClient.SqlClient;
+			const plan = yield* sql<{ detail: string }>`
+				EXPLAIN QUERY PLAN
+				SELECT session_id, type, COUNT(*) AS pending_count
+				FROM pending_approvals
+				WHERE status = 'pending'
+				GROUP BY session_id, type`;
+
+			expect(
+				plan.some((row) =>
+					row.detail.includes("idx_pending_approvals_pending"),
+				),
+			).toBe(true);
+		}).pipe(Effect.provide(testLayer)),
+	);
+});
 
 describe("ReadQueryEffect.getLatestTurnModelExecution", () => {
 	it.effect("returns undefined when no turn has resolved", () =>
@@ -244,6 +694,33 @@ describe("ReadQueryEffect.getSessionMessagesWithParts", () => {
 			expect(messages[2]).not.toHaveProperty("modelExecution");
 		}).pipe(Effect.provide(testLayer)),
 	);
+
+	it.effect(
+		"orders messages by created_at, then id, and is empty for an unknown session",
+		() =>
+			Effect.gen(function* () {
+				yield* makeEffectSqlMigrator();
+				yield* seedSession("s1");
+				const sql = yield* SqlClient.SqlClient;
+				yield* sql`
+				INSERT INTO messages
+				(id, session_id, role, text, created_at, updated_at)
+				VALUES
+				('m-later', 's1', 'assistant', 'hi there', 2000, 2000),
+				('m-b', 's1', 'user', 'hello', 1000, 1000),
+				('m-a', 's1', 'user', 'hello', 1000, 1000)`;
+				const readQuery = yield* makeReadQueryEffect;
+
+				expect(
+					(yield* readQuery.getSessionMessagesWithParts("s1")).map(
+						(row) => row.id,
+					),
+				).toEqual(["m-a", "m-b", "m-later"]);
+				expect(
+					yield* readQuery.getSessionMessagesWithParts("nonexistent"),
+				).toEqual([]);
+			}).pipe(Effect.provide(testLayer)),
+	);
 });
 
 // ─── The session list reads (ni8.5 T-1) ─────────────────────────────────────
@@ -279,9 +756,9 @@ describe("ReadQueryEffect session list reads", () => {
 					updatedAt: 9,
 					parentID: "root",
 					forkMessageId: "msg_9",
-					pendingQuestions: 0,
-					pendingPermissions: 0,
-					unseenActivity: false,
+					messageCount: 0,
+					processing: true,
+					attention: "working",
 				},
 				{
 					id: "root",
@@ -289,27 +766,29 @@ describe("ReadQueryEffect session list reads", () => {
 					status: "idle",
 					createdAt: 1,
 					updatedAt: 1,
-					pendingQuestions: 0,
-					pendingPermissions: 0,
-					unseenActivity: false,
+					messageCount: 0,
+					processing: true,
+					attention: "working",
 				},
 			]);
 		}).pipe(Effect.provide(testLayer)),
 	);
 
-	it.effect("derives the three notification facts onto the session row", () =>
-		Effect.gen(function* () {
-			yield* makeEffectSqlMigrator();
-			const sql = yield* SqlClient.SqlClient;
-			// `noisy` has been looked at since its last message; `quiet` never has.
-			yield* sql`
+	it.effect(
+		"derives approval counts and unread attention onto the session row",
+		() =>
+			Effect.gen(function* () {
+				yield* makeEffectSqlMigrator();
+				const sql = yield* SqlClient.SqlClient;
+				// `noisy` has been looked at since its last message; `quiet` never has.
+				yield* sql`
 				INSERT INTO sessions
 				(id, provider, title, status, created_at, updated_at,
-				 last_message_at, last_viewed_at)
+				 last_message_at, read_at)
 				VALUES
 				('noisy', 'claude', 'Noisy', 'idle', 1, 9, 9, 10),
 				('quiet', 'claude', 'Quiet', 'idle', 1, 9, 9, NULL)`;
-			yield* sql`
+				yield* sql`
 				INSERT INTO pending_approvals
 				(id, session_id, type, status, created_at)
 				VALUES
@@ -317,43 +796,44 @@ describe("ReadQueryEffect session list reads", () => {
 				('q2', 'noisy', 'question', 'pending', 2),
 				('p1', 'noisy', 'permission', 'pending', 3),
 				('q3', 'noisy', 'question', 'resolved', 4)`;
-			const readQuery = yield* makeReadQueryEffect;
+				const readQuery = yield* makeReadQueryEffect;
 
-			// Counts come off the same rows the approval projector writes — the
-			// server decides what a badge means, once, and the browser is told.
-			expect(
-				(yield* readQuery.readSessionList()).rows.find(
-					({ item }) => item.id === "noisy",
-				)?.item,
-			).toEqual({
-				id: "noisy",
-				title: "Noisy",
-				status: "idle",
-				createdAt: 1,
-				updatedAt: 9,
-				pendingQuestions: 2,
-				pendingPermissions: 1,
-				unseenActivity: false,
-			});
-			// Never looked at, and a message has landed: something is unread.
-			expect(
-				(yield* readQuery.readSessionList()).rows.find(
-					({ item }) => item.id === "quiet",
-				)?.item,
-			).toEqual({
-				id: "quiet",
-				title: "Quiet",
-				status: "idle",
-				createdAt: 1,
-				updatedAt: 9,
-				pendingQuestions: 0,
-				pendingPermissions: 0,
-				unseenActivity: true,
-			});
-		}).pipe(Effect.provide(testLayer)),
+				// Counts come off the same rows the approval projector writes — the
+				// server decides what a badge means, once, and the browser is told.
+				expect(
+					(yield* readQuery.readSessionList()).rows.find(
+						({ item }) => item.id === "noisy",
+					)?.item,
+				).toEqual({
+					id: "noisy",
+					title: "Noisy",
+					status: "idle",
+					createdAt: 1,
+					updatedAt: 9,
+					messageCount: 0,
+					pendingQuestionCount: 2,
+					pendingPermissionCount: 1,
+					attention: "needs-approval",
+				});
+				// Never looked at, and a message has landed: something is unread.
+				expect(
+					(yield* readQuery.readSessionList()).rows.find(
+						({ item }) => item.id === "quiet",
+					)?.item,
+				).toEqual({
+					id: "quiet",
+					title: "Quiet",
+					status: "idle",
+					createdAt: 1,
+					updatedAt: 9,
+					messageCount: 0,
+					unread: true,
+					attention: "done-unread",
+				});
+			}).pipe(Effect.provide(testLayer)),
 	);
 
-	it.effect("a session with no messages is not unseen", () =>
+	it.effect("a session with no messages has no unread attention", () =>
 		Effect.gen(function* () {
 			yield* makeEffectSqlMigrator();
 			yield* seedSession("fresh");
@@ -362,7 +842,8 @@ describe("ReadQueryEffect session list reads", () => {
 			const entry = (yield* readQuery.readSessionList()).rows.find(
 				({ item }) => item.id === "fresh",
 			)?.item;
-			expect(entry?.unseenActivity).toBe(false);
+			expect(entry?.unread).toBeUndefined();
+			expect(entry?.attention).toBe("idle");
 		}).pipe(Effect.provide(testLayer)),
 	);
 

@@ -1,6 +1,6 @@
 [tools]
 pnpm = "11.17.0"
-node = "24.16.0"
+node = "26.10.0"
 "npm:node-gyp" = "13.0.1"
 
 [settings.node]

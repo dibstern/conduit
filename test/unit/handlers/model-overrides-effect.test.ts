@@ -44,7 +44,7 @@ function mockWsHandler(
 		markClientBootstrapped: vi.fn(),
 		getClientCount: vi.fn(() => 0),
 		getClientIds: vi.fn(() => []),
-		handleUpgrade: vi.fn(),
+		attach: vi.fn(() => () => {}),
 		close: vi.fn(),
 		drain: vi.fn(async () => undefined),
 		on: vi.fn(),
@@ -166,7 +166,7 @@ describe("model handlers with Effect override state", () => {
 			});
 			const engine = {
 				bindSession: vi.fn(),
-				getProviderForSession: vi.fn(() => "opencode"),
+				getProviderForSessionEffect: vi.fn(() => Effect.succeed("opencode")),
 				dispatch: vi.fn(async () => ({
 					status: "completed",
 					cost: 0,

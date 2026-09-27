@@ -10,53 +10,53 @@ describe("Exhaustiveness guards", () => {
 	describe("DB schema CHECK constraint — message_parts.type", () => {
 		let harness: TestHarness;
 
-		it("rejects invalid part type 'reasoning' — CHECK constraint violation", () => {
+		it("rejects invalid part type 'reasoning' — CHECK constraint violation", async () => {
 			harness = createTestHarness();
 			try {
-				harness.seedSession("ses-check");
+				await harness.seedSession("ses-check");
 				// Direct SQL insert bypassing projector
-				harness.db.execute(
+				await harness.execute(
 					"INSERT INTO messages (id, session_id, role, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
 					["msg-check", "ses-check", "assistant", 1000, 1000],
 				);
 
 				// Attempt to insert type='reasoning' — schema CHECK rejects it
-				expect(() =>
-					harness.db.execute(
+				await expect(
+					harness.execute(
 						"INSERT INTO message_parts (id, message_id, type, text, sort_order, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
 						["part-bad", "msg-check", "reasoning", "test", 0, 1000, 1000],
 					),
-				).toThrow(); // CHECK(type IN ('text', 'thinking', 'tool'))
+				).rejects.toThrow(); // CHECK(type IN ('text', 'thinking', 'tool'))
 			} finally {
-				harness?.close();
+				await harness?.close();
 			}
 		});
 
-		it("rejects unknown part type 'unknown' — CHECK constraint violation", () => {
+		it("rejects unknown part type 'unknown' — CHECK constraint violation", async () => {
 			harness = createTestHarness();
 			try {
-				harness.seedSession("ses-check-2");
-				harness.db.execute(
+				await harness.seedSession("ses-check-2");
+				await harness.execute(
 					"INSERT INTO messages (id, session_id, role, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
 					["msg-check-2", "ses-check-2", "assistant", 1000, 1000],
 				);
 
-				expect(() =>
-					harness.db.execute(
+				await expect(
+					harness.execute(
 						"INSERT INTO message_parts (id, message_id, type, text, sort_order, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
 						["part-bad-2", "msg-check-2", "unknown", "test", 0, 1000, 1000],
 					),
-				).toThrow();
+				).rejects.toThrow();
 			} finally {
-				harness?.close();
+				await harness?.close();
 			}
 		});
 
-		it("accepts valid part types: text, thinking, tool, file", () => {
+		it("accepts valid part types: text, thinking, tool, file", async () => {
 			harness = createTestHarness();
 			try {
-				harness.seedSession("ses-check-ok");
-				harness.db.execute(
+				await harness.seedSession("ses-check-ok");
+				await harness.execute(
 					"INSERT INTO messages (id, session_id, role, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
 					["msg-check-ok", "ses-check-ok", "assistant", 1000, 1000],
 				);
@@ -67,15 +67,15 @@ describe("Exhaustiveness guards", () => {
 					"tool",
 					"file",
 				].entries()) {
-					expect(() =>
-						harness.db.execute(
+					await expect(
+						harness.execute(
 							"INSERT INTO message_parts (id, message_id, type, text, sort_order, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
 							[`part-ok-${idx}`, "msg-check-ok", type, "test", idx, 1000, 1000],
 						),
-					).not.toThrow();
+					).resolves.toBeUndefined();
 				}
 			} finally {
-				harness?.close();
+				await harness?.close();
 			}
 		});
 	});

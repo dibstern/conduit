@@ -73,6 +73,18 @@ const allowedPlainErrorThrows: readonly AllowedPlainThrow[] = [
 		reason: "storybook/mock fixture text, not executable production code",
 	},
 	{
+		path: "src/lib/frontend/components/overlays/NotifSettings.stories.ts",
+		snippetPattern: /pushUnavailable takes precedence/,
+		reason:
+			"storybook beforeEach environment guard, not executable production code — same class as stories/mocks.ts above",
+	},
+	{
+		path: "src/lib/frontend/components/session/SessionItem.stories.ts",
+		snippetPattern: /Session row is missing/,
+		reason:
+			"storybook play() guard that narrows the row query, not executable production code",
+	},
+	{
 		path: "src/lib/frontend/components/input/input-utils.ts",
 		snippetPattern: /GIF exceeds the 5 MB encoded size limit/,
 		reason: "browser attachment validation failure surfaced to UI caller",
@@ -116,12 +128,6 @@ const allowedPlainErrorThrows: readonly AllowedPlainThrow[] = [
 		path: "src/lib/frontend/stores/ws-dispatch.ts",
 		snippetPattern: /routePerSession: missing sessionId/,
 		reason: "dev-only frontend event-routing invariant",
-	},
-	{
-		path: "src/lib/provider/orchestration-command-commit.ts",
-		snippetPattern: /Cannot recommit command/,
-		reason:
-			"synchronous transaction abort: refuses to supersede a live running outbox claim (single-live-claim invariant); the throw rolls back runInTransaction",
 	},
 ];
 
@@ -932,30 +938,6 @@ describe("Effect runtime boundary grep", () => {
 			"A future task will wire the router to read",
 		);
 		expect(daemonMain).not.toContain("CaCertProvider is now available");
-	});
-
-	it("does not pass daemon theme loading as a router options callback", () => {
-		const routerLayerPath = "src/lib/domain/server/Layers/http-router-layer.ts";
-		const routerLayer = readFileSync(join(REPO_ROOT, routerLayerPath), "utf8");
-		const daemonOptions = extractDaemonHttpRouterOptions(routerLayer).source;
-		expect(daemonOptions).not.toMatch(/\bloadThemes\b/);
-
-		const daemonRouterFactory = routerLayer.match(
-			/export const makeDaemonHttpRouterLive[\s\S]*?\n\t\);/,
-		)?.[0];
-		expect(daemonRouterFactory).not.toBeUndefined();
-		expect(daemonRouterFactory).toContain("loadThemeFiles");
-		expect(daemonRouterFactory).not.toContain("options.loadThemes");
-
-		const daemonMain = readFileSync(
-			join(REPO_ROOT, "src/lib/domain/daemon/Layers/daemon-main.ts"),
-			"utf8",
-		);
-		const httpRouterOptions = daemonMain.match(
-			/httpRouter:\s*\{[\s\S]*?\n\t\t\},/,
-		)?.[0];
-		expect(httpRouterOptions ?? "").not.toMatch(/\bloadThemes\b/);
-		expect(daemonMain).not.toMatch(/import \{ loadThemeFiles \}/);
 	});
 
 	it("does not duplicate staticDir inside daemon router options", () => {
@@ -1786,7 +1768,6 @@ describe("Effect runtime boundary grep", () => {
 			/\bPushProvider\b/,
 			/\bRemoveProjectProvider\b/,
 			/\bSetupInfoProvider\b/,
-			/\bThemeProvider\b/,
 		] as const;
 		const path = "src/lib/domain/daemon/Layers/daemon-main.ts";
 		const source = readFileSync(join(REPO_ROOT, path), "utf8");
@@ -2172,10 +2153,9 @@ describe("Effect runtime boundary grep", () => {
 		const retiredBridgePatterns = [
 			{
 				path: "src/lib/types.ts",
-				pattern:
-					/\bpersistence\?:\s*import\("\.\/persistence\/persistence-layer\.js"\)\.PersistenceLayer/,
+				pattern: /\bpersistence\?:/,
 				reason:
-					"ProjectRelayConfig should expose the Effect persistence DB path only",
+					"ProjectRelayConfig should not expose a legacy persistence object",
 			},
 			{
 				path: "src/lib/relay/relay-stack.ts",
@@ -2842,7 +2822,7 @@ describe("Effect runtime boundary grep", () => {
 			/translateProviderRuntimeEventToDomain/,
 		);
 		expect(openCodeRuntimeIngressSource).not.toMatch(
-			/EventStore|PersistenceLayer|CanonicalEvent/,
+			/EventStore|CanonicalEvent|persistenceLayer/,
 		);
 		expect(openCodeRuntimeIngressSource).toMatch(/ProviderRuntimeIngestionTag/);
 		expect(openCodeRuntimeIngressSource).toMatch(/ingestBatch/);

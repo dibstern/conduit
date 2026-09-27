@@ -38,6 +38,7 @@ import {
 	resolveProviderRoutingDriver,
 } from "../../../daemon/config-persistence.js";
 import { formatErrorDetail, OpenCodeApiError } from "../../../errors.js";
+import { daemonSessionGitCache } from "../../../git/session-git.js";
 import type {
 	SessionDetail,
 	SessionStatus,
@@ -45,8 +46,13 @@ import type {
 import { makeCommitAndSignal } from "../../../persistence/effect/commit-and-signal.js";
 import { EventStoreEffectTag } from "../../../persistence/effect/event-store-effect.js";
 import { ProjectionRunnerEffectTag } from "../../../persistence/effect/projection-runner-effect.js";
-import { ReadQueryEffectTag } from "../../../persistence/effect/read-query-effect.js";
+import {
+	pendingApprovalCountsByType,
+	ReadQueryEffectTag,
+	sessionRowsToSessionInfoList,
+} from "../../../persistence/effect/read-query-effect.js";
 import { canonicalEvent } from "../../../persistence/events.js";
+import type { SessionRow } from "../../../persistence/read-model-types.js";
 import { toSessionInfoList } from "../../../session/session-info-list.js";
 import {
 	type HistoryMessage,
@@ -66,6 +72,7 @@ import {
 	LoggerTag,
 	OrchestrationEngineTag,
 	StatusPollerTag,
+	WebSocketHandlerTag,
 } from "./services.js";
 import {
 	applySessionCommand,
@@ -166,14 +173,13 @@ export interface LoadHistoryOptions {
 const toReadonlyMap = <K, V>(map: HashMap.HashMap<K, V>): ReadonlyMap<K, V> =>
 	new Map(HashMap.toEntries(map));
 
-const sessionsParentMap = (
-	sessions: readonly SessionInfo[],
+const sessionRowsParentMap = (
+	rows: readonly Pick<SessionRow, "id" | "parent_id">[],
 ): HashMap.HashMap<string, string> => {
 	let parentMap = HashMap.empty<string, string>();
-	for (const session of sessions) {
-		const parentID = session.parentID;
-		if (parentID) {
-			parentMap = HashMap.set(parentMap, session.id, parentID);
+	for (const row of rows) {
+		if (row.parent_id) {
+			parentMap = HashMap.set(parentMap, row.id, row.parent_id);
 		}
 	}
 	return parentMap;
@@ -184,9 +190,7 @@ const sessionDetailsParentMap = (
 ): HashMap.HashMap<string, string> => {
 	let parentMap = HashMap.empty<string, string>();
 	for (const session of sessions) {
-		const rec = session as Record<string, unknown>;
-		const apiParentID = rec["parentID"];
-		const parentID = typeof apiParentID === "string" ? apiParentID : undefined;
+		const parentID = session.parentID;
 		if (parentID) {
 			parentMap = HashMap.set(parentMap, session.id, parentID);
 		}
@@ -235,30 +239,28 @@ export const listSessions = (options?: ListSessionsOptions) =>
 		const state = yield* Ref.get(stateRef);
 
 		if (readQueryEffectOption._tag === "Some") {
-			const snapshot = yield* readQueryEffectOption.value
-				.readSessionList()
-				.pipe(
-					Effect.mapError(
-						(cause) =>
-							new SessionManagerError({ operation: "listSessions", cause }),
-					),
-				);
-			// A root is a session the row gives no parent — the same test the
-			// `parent_id IS NULL` filter used to make, applied before fork lineage
-			// is folded on.
-			const rows = snapshot.rows.map(({ item }) => item);
-			const sessions = options?.roots
-				? rows.filter((session) => session.parentID === undefined)
-				: rows;
-			if (!options?.roots) {
-				yield* Ref.update(stateRef, (s) => ({
-					...s,
-					cachedParentMap: sessionsParentMap(sessions),
-					lastKnownSessionCount: sessions.length,
-				}));
-				yield* updateRelaySessionCountSnapshot(sessions.length);
-			}
-			return sessions;
+			const [sessions, lineage] = yield* Effect.all([
+				readQueryEffectOption.value.listSessionInfos({
+					...(options?.roots !== undefined ? { roots: options.roots } : {}),
+					...(options?.limit !== undefined ? { limit: options.limit } : {}),
+					...(options?.statuses !== undefined
+						? { statuses: options.statuses }
+						: {}),
+				}),
+				readQueryEffectOption.value.getSessionLineage(),
+			]).pipe(
+				Effect.mapError(
+					(cause) =>
+						new SessionManagerError({ operation: "listSessions", cause }),
+				),
+			);
+			yield* Ref.update(stateRef, (current) => ({
+				...current,
+				cachedParentMap: sessionRowsParentMap(lineage.rows),
+				lastKnownSessionCount: lineage.count,
+			}));
+			yield* updateRelaySessionCountSnapshot(lineage.count);
+			return [...sessions];
 		}
 
 		const clientOptions = {
@@ -500,9 +502,7 @@ export const deleteSession = (sessionId: string) =>
 		const bindingExit =
 			engineOption._tag === "Some"
 				? yield* Effect.exit(
-						Effect.sync(() =>
-							engineOption.value.getProviderForSession(sessionId),
-						),
+						engineOption.value.getProviderForSessionEffect(sessionId),
 					)
 				: undefined;
 
@@ -889,6 +889,195 @@ export const renameSession = (sessionId: string, title: string) =>
 		Effect.withSpan("session.renameSession", { attributes: { sessionId } }),
 	);
 
+export const markSessionRead = (sessionId: string) =>
+	applySessionCommand({
+		type: "session.read",
+		data: { sessionId },
+	}).pipe(
+		Effect.mapError(
+			(cause) =>
+				new SessionManagerError({ operation: "markSessionRead", cause }),
+		),
+		Effect.annotateLogs("sessionId", sessionId),
+		Effect.withSpan("session.markSessionRead", { attributes: { sessionId } }),
+	);
+
+export const markSessionUnread = (sessionId: string) =>
+	applySessionCommand({
+		type: "session.unread",
+		data: { sessionId },
+	}).pipe(
+		Effect.mapError(
+			(cause) =>
+				new SessionManagerError({ operation: "markSessionUnread", cause }),
+		),
+		Effect.annotateLogs("sessionId", sessionId),
+		Effect.withSpan("session.markSessionUnread", { attributes: { sessionId } }),
+	);
+
+const readSessionForTriage = (sessionId: string) =>
+	Effect.gen(function* () {
+		const readQuery = yield* Effect.serviceOption(ReadQueryEffectTag);
+		if (readQuery._tag === "None") return undefined;
+		const runner = yield* Effect.serviceOption(ProjectionRunnerEffectTag);
+		const sql = yield* Effect.serviceOption(SqlClient.SqlClient);
+		if (
+			runner._tag === "Some" &&
+			sql._tag === "Some" &&
+			!(yield* runner.value.isRecovered())
+		) {
+			yield* runner.value
+				.recover()
+				.pipe(Effect.provideService(SqlClient.SqlClient, sql.value));
+		}
+		return yield* readQuery.value.getSession(sessionId);
+	});
+
+export const setSessionSettled = (
+	sessionId: string,
+	settled: boolean,
+	automatic = false,
+) =>
+	Effect.gen(function* () {
+		const row = yield* readSessionForTriage(sessionId);
+		if (!row) return false;
+		if (settled && row.pinned_at !== null) {
+			return yield* Effect.fail(
+				new Error("Session is pinned and must be unpinned first"),
+			);
+		}
+		const unsnoozed = settled && !automatic && row.snoozed_at !== null;
+		if (unsnoozed) {
+			yield* applySessionCommand({
+				type: "session.unsnoozed",
+				data: { sessionId },
+			});
+		}
+		if ((row.settled_at !== null) === settled) return unsnoozed;
+		yield* applySessionCommand(
+			settled
+				? { type: "session.settled", data: { sessionId, automatic } }
+				: { type: "session.unsettled", data: { sessionId } },
+		);
+		return true;
+	}).pipe(
+		Effect.mapError(
+			(cause) =>
+				new SessionManagerError({ operation: "setSessionSettled", cause }),
+		),
+		Effect.withSpan("session.setSessionSettled", { attributes: { sessionId } }),
+	);
+
+export const setSessionPinned = (sessionId: string, pinned: boolean) =>
+	Effect.gen(function* () {
+		const row = yield* readSessionForTriage(sessionId);
+		if (!row) return false;
+		const unsnoozed = pinned && row.snoozed_at !== null;
+		if (unsnoozed) {
+			yield* applySessionCommand({
+				type: "session.unsnoozed",
+				data: { sessionId },
+			});
+		}
+		if ((row.pinned_at !== null) === pinned) return unsnoozed;
+		// A session is never both pinned and settled, so a pin brings it back.
+		if (pinned && row.settled_at !== null) {
+			yield* applySessionCommand({
+				type: "session.unsettled",
+				data: { sessionId },
+			});
+		}
+		yield* applySessionCommand({
+			type: pinned ? "session.pinned" : "session.unpinned",
+			data: { sessionId },
+		});
+		return true;
+	}).pipe(
+		Effect.mapError(
+			(cause) =>
+				new SessionManagerError({ operation: "setSessionPinned", cause }),
+		),
+		Effect.withSpan("session.setSessionPinned", { attributes: { sessionId } }),
+	);
+
+export const setSessionAutoSettleDisabled = (
+	sessionId: string,
+	disabled: boolean,
+) =>
+	Effect.gen(function* () {
+		const row = yield* readSessionForTriage(sessionId);
+		if (!row || (row.auto_settle_disabled_at != null) === disabled)
+			return false;
+		yield* applySessionCommand({
+			type: "session.auto_settle_set",
+			data: { sessionId, disabled },
+		});
+		return true;
+	}).pipe(
+		Effect.mapError(
+			(cause) =>
+				new SessionManagerError({
+					operation: "setSessionAutoSettleDisabled",
+					cause,
+				}),
+		),
+	);
+
+export const snoozeSession = (sessionId: string, until: number | null) =>
+	Effect.gen(function* () {
+		const row = yield* readSessionForTriage(sessionId);
+		if (!row) return false;
+		if (row.pinned_at !== null) {
+			return yield* Effect.fail(new Error("Unpin the session first"));
+		}
+		if (row.settled_at !== null) {
+			return yield* Effect.fail(new Error("Un-settle the session first"));
+		}
+		const readQuery = yield* Effect.serviceOption(ReadQueryEffectTag);
+		if (readQuery._tag === "Some") {
+			const pending = yield* readQuery.value.countPendingApprovalsBySession();
+			if (pending.some((approval) => approval.session_id === sessionId)) {
+				return yield* Effect.fail(new Error("Session is waiting on you"));
+			}
+		}
+		if (until !== null && (!Number.isFinite(until) || until <= Date.now())) {
+			return yield* Effect.fail(new Error("Snooze time must be in the future"));
+		}
+		if (
+			row.snoozed_at !== null &&
+			row.woken_at === null &&
+			row.snoozed_until === until
+		)
+			return false;
+		yield* applySessionCommand({
+			type: "session.snoozed",
+			data: { sessionId, until },
+		});
+		return true;
+	}).pipe(
+		Effect.mapError(
+			(cause) => new SessionManagerError({ operation: "snoozeSession", cause }),
+		),
+		Effect.withSpan("session.snoozeSession", { attributes: { sessionId } }),
+	);
+
+export const unsnoozeSession = (sessionId: string) =>
+	Effect.gen(function* () {
+		const row = yield* readSessionForTriage(sessionId);
+		if (!row || row.snoozed_at === null) return false;
+		yield* applySessionCommand({
+			type: "session.unsnoozed",
+			data: { sessionId },
+		});
+		return true;
+	}).pipe(
+		Effect.mapError(
+			(cause) =>
+				new SessionManagerError({ operation: "unsnoozeSession", cause }),
+		),
+		Effect.withSpan("session.unsnoozeSession", { attributes: { sessionId } }),
+	);
+
 /**
  * Clear the stored pagination cursor for a session.
  */
@@ -1174,47 +1363,18 @@ export const setForkEntry = (sessionId: string, entry: ForkEntry) =>
 		Effect.withSpan("session.setForkEntry"),
 	);
 
-/**
- * Send roots-only session list immediately, then all sessions in the background.
- */
-export const sendDualSessionLists = (
+/** Send the roots-only sidebar snapshot. */
+export const sendSessionLists = (
 	send: (msg: SessionListMessage) => void,
 	options?: { statuses?: Record<string, SessionStatus> | undefined },
 ) =>
 	Effect.gen(function* () {
-		const log = yield* LoggerTag;
 		const roots = yield* listSessions({
 			roots: true,
 			statuses: options?.statuses,
 		});
-		send({
-			type: "session_list",
-			sessions: roots,
-			roots: true,
-		});
-
-		yield* Effect.forkDaemon(
-			listSessions({ statuses: options?.statuses }).pipe(
-				Effect.tap((all) =>
-					Effect.sync(() =>
-						send({
-							type: "session_list",
-							sessions: all,
-							roots: false,
-						}),
-					),
-				),
-				Effect.catchAll((err) =>
-					Effect.sync(() =>
-						log.warn(`Background all-sessions fetch failed: ${err}`),
-					),
-				),
-			),
-		);
-	}).pipe(
-		Effect.annotateLogs("operation", "sendDualSessionLists"),
-		Effect.withSpan("session.sendDualSessionLists"),
-	);
+		send({ type: "session_list", sessions: roots, roots: true });
+	});
 
 export interface SessionManagerService {
 	initialize(title?: string): Effect.Effect<string, SessionManagerError>;
@@ -1225,6 +1385,12 @@ export interface SessionManagerService {
 	listSessions(
 		options?: ListSessionsOptions,
 	): Effect.Effect<SessionInfo[], SessionManagerError>;
+	getSessionFamily(
+		sessionId: string,
+	): Effect.Effect<
+		Extract<RelayMessage, { type: "session_family" }>,
+		SessionManagerError
+	>;
 	createSession(
 		title?: string,
 		options?: CreateSessionOptions,
@@ -1237,6 +1403,30 @@ export interface SessionManagerService {
 	renameSession(
 		sessionId: string,
 		title: string,
+	): Effect.Effect<void, SessionManagerError>;
+	markSessionRead(sessionId: string): Effect.Effect<void, SessionManagerError>;
+	setSessionSettled(
+		sessionId: string,
+		settled: boolean,
+		automatic?: boolean,
+	): Effect.Effect<boolean, SessionManagerError>;
+	setSessionAutoSettleDisabled(
+		sessionId: string,
+		disabled: boolean,
+	): Effect.Effect<boolean, SessionManagerError>;
+	setSessionPinned(
+		sessionId: string,
+		pinned: boolean,
+	): Effect.Effect<boolean, SessionManagerError>;
+	snoozeSession(
+		sessionId: string,
+		until: number | null,
+	): Effect.Effect<boolean, SessionManagerError>;
+	unsnoozeSession(
+		sessionId: string,
+	): Effect.Effect<boolean, SessionManagerError>;
+	markSessionUnread(
+		sessionId: string,
 	): Effect.Effect<void, SessionManagerError>;
 	clearPaginationCursor(sessionId: string): Effect.Effect<void>;
 	seedPaginationCursor(
@@ -1257,7 +1447,7 @@ export interface SessionManagerService {
 		sessionId: string,
 		entry: ForkEntry,
 	): Effect.Effect<void, SessionManagerError>;
-	sendDualSessionLists(
+	sendSessionLists(
 		send: (msg: SessionListMessage) => void,
 		options?: { statuses?: Record<string, SessionStatus> | undefined },
 	): Effect.Effect<void, SessionManagerError>;
@@ -1297,6 +1487,8 @@ export const SessionManagerServiceLive: Layer.Layer<
 		);
 		const sqlOption = yield* Effect.serviceOption(SqlClient.SqlClient);
 		const statusPollerOption = yield* Effect.serviceOption(StatusPollerTag);
+		const wsHandlerOption = yield* Effect.serviceOption(WebSocketHandlerTag);
+		const snapshotOption = yield* Effect.serviceOption(RelayStatusSnapshotTag);
 		const instanceClientsOption = yield* Effect.serviceOption(
 			OpenCodeInstanceClientsTag,
 		);
@@ -1472,8 +1664,67 @@ export const SessionManagerServiceLive: Layer.Layer<
 								),
 							)
 						: base;
-				return yield* withEffectRead;
+				const sessions = yield* snapshotOption._tag === "Some"
+					? withEffectRead.pipe(
+							Effect.provideService(
+								RelayStatusSnapshotTag,
+								snapshotOption.value,
+							),
+						)
+					: withEffectRead;
+				const git =
+					configOption._tag === "Some"
+						? daemonSessionGitCache.peek(configOption.value.projectDir)
+						: undefined;
+				return git
+					? sessions.map((session) => ({ ...session, git }))
+					: [...sessions];
 			});
+		const getSessionFamily: SessionManagerService["getSessionFamily"] = (
+			sessionId,
+		) =>
+			Effect.gen(function* () {
+				if (readQueryEffectOption._tag === "None") {
+					return {
+						type: "session_family" as const,
+						rootId: sessionId,
+						sessions: [],
+					};
+				}
+				const [rows, approvals] = yield* Effect.all([
+					readQueryEffectOption.value.getSessionFamily(sessionId),
+					readQueryEffectOption.value.countPendingApprovalsBySession(),
+				]).pipe(
+					Effect.mapError(
+						(cause) =>
+							new SessionManagerError({ operation: "getSessionFamily", cause }),
+					),
+				);
+				// Poller statuses include ancestor propagation; family rows keep their own state.
+				const familyStatuses: Record<string, SessionStatus> = {};
+				for (const row of rows) {
+					familyStatuses[row.id] =
+						row.status === "busy" || row.status === "retry"
+							? { type: "busy" }
+							: { type: "idle" };
+				}
+				const ids = new Set(rows.map((row) => row.id));
+				const root = rows.find(
+					(row) => !row.parent_id || !ids.has(row.parent_id),
+				);
+				return {
+					type: "session_family" as const,
+					rootId: root?.id ?? sessionId,
+					sessions: sessionRowsToSessionInfoList(rows, {
+						statuses: familyStatuses,
+						pendingQuestionCounts:
+							pendingApprovalCountsByType(approvals).questions,
+						pendingPermissionCounts:
+							pendingApprovalCountsByType(approvals).permissions,
+					}),
+				};
+			});
+
 		const serviceCreateSession = (
 			title?: string,
 			options?: CreateSessionOptions,
@@ -1652,6 +1903,55 @@ export const SessionManagerServiceLive: Layer.Layer<
 				});
 			});
 
+		/**
+		 * Hand a mutating session command whatever persistence services this relay
+		 * actually has.
+		 *
+		 * Every one is conditional because a provider-API-only relay, and most unit
+		 * harnesses, wire none of them. `applySessionCommand` reads them all through
+		 * `Effect.serviceOption`, so a service that is absent from the context
+		 * quietly disables the durable half instead of failing — which is exactly
+		 * why this has to be assembled by hand rather than declared as a
+		 * requirement, and exactly why it must not be duplicated: a copy that
+		 * forgot one service would look like a command that silently never persists.
+		 */
+		const withSessionCommandServices = <A, E>(
+			effect: Effect.Effect<A, E>,
+		): Effect.Effect<A, E> => {
+			let provided = effect.pipe(Effect.provideService(OpenCodeAPITag, api));
+			if (readQueryEffectOption._tag === "Some") {
+				provided = provided.pipe(
+					Effect.provideService(
+						ReadQueryEffectTag,
+						readQueryEffectOption.value,
+					),
+				);
+			}
+			if (eventStoreEffectOption._tag === "Some") {
+				provided = provided.pipe(
+					Effect.provideService(
+						EventStoreEffectTag,
+						eventStoreEffectOption.value,
+					),
+				);
+			}
+			if (projectionRunnerEffectOption._tag === "Some") {
+				provided = provided.pipe(
+					Effect.provideService(
+						ProjectionRunnerEffectTag,
+						projectionRunnerEffectOption.value,
+					),
+				);
+			}
+			if (sqlOption._tag === "Some") {
+				provided = provided.pipe(
+					Effect.provideService(SqlClient.SqlClient, sqlOption.value),
+				);
+			}
+			return provided;
+		};
+
+		const triageLock = yield* Effect.makeSemaphore(1);
 		return {
 			getDefaultSessionId: (title) =>
 				Effect.gen(function* () {
@@ -1691,6 +1991,7 @@ export const SessionManagerServiceLive: Layer.Layer<
 				),
 			listSessions: serviceListSessions,
 			establishOpenCodeSession,
+			getSessionFamily,
 			createSession: (title, options) =>
 				Effect.gen(function* () {
 					const session = yield* serviceCreateSession(title, options);
@@ -1794,43 +2095,35 @@ export const SessionManagerServiceLive: Layer.Layer<
 					});
 				}),
 			renameSession: (sessionId, title) =>
-				(() => {
-					const base = renameSession(sessionId, title).pipe(
-						Effect.provideService(OpenCodeAPITag, api),
-					);
-					const withReadQuery =
-						readQueryEffectOption._tag === "Some"
-							? base.pipe(
-									Effect.provideService(
-										ReadQueryEffectTag,
-										readQueryEffectOption.value,
-									),
-								)
-							: base;
-					const withEventStore =
-						eventStoreEffectOption._tag === "Some"
-							? withReadQuery.pipe(
-									Effect.provideService(
-										EventStoreEffectTag,
-										eventStoreEffectOption.value,
-									),
-								)
-							: withReadQuery;
-					const withProjectionRunner =
-						projectionRunnerEffectOption._tag === "Some"
-							? withEventStore.pipe(
-									Effect.provideService(
-										ProjectionRunnerEffectTag,
-										projectionRunnerEffectOption.value,
-									),
-								)
-							: withEventStore;
-					return sqlOption._tag === "Some"
-						? withProjectionRunner.pipe(
-								Effect.provideService(SqlClient.SqlClient, sqlOption.value),
-							)
-						: withProjectionRunner;
-				})(),
+				withSessionCommandServices(renameSession(sessionId, title)),
+			markSessionRead: (sessionId) =>
+				withSessionCommandServices(markSessionRead(sessionId)),
+			markSessionUnread: (sessionId) =>
+				withSessionCommandServices(markSessionUnread(sessionId)),
+			setSessionSettled: (sessionId, settled, automatic) =>
+				triageLock.withPermits(1)(
+					withSessionCommandServices(
+						setSessionSettled(sessionId, settled, automatic),
+					),
+				),
+			setSessionAutoSettleDisabled: (sessionId, disabled) =>
+				triageLock.withPermits(1)(
+					withSessionCommandServices(
+						setSessionAutoSettleDisabled(sessionId, disabled),
+					),
+				),
+			setSessionPinned: (sessionId, pinned) =>
+				triageLock.withPermits(1)(
+					withSessionCommandServices(setSessionPinned(sessionId, pinned)),
+				),
+			snoozeSession: (sessionId, until) =>
+				triageLock.withPermits(1)(
+					withSessionCommandServices(snoozeSession(sessionId, until)),
+				),
+			unsnoozeSession: (sessionId) =>
+				triageLock.withPermits(1)(
+					withSessionCommandServices(unsnoozeSession(sessionId)),
+				),
 			clearPaginationCursor: (sessionId) =>
 				clearPaginationCursor(sessionId).pipe(
 					Effect.provideService(SessionManagerStateTag, stateRef),
@@ -1863,36 +2156,47 @@ export const SessionManagerServiceLive: Layer.Layer<
 						Effect.provideService(SessionManagerStateTag, stateRef),
 					);
 				}),
-			sendDualSessionLists: (send, options) =>
+			sendSessionLists: (send, options) =>
 				Effect.gen(function* () {
 					const roots = yield* serviceListSessions({
 						roots: true,
 						statuses: options?.statuses,
 					});
-					send({
-						type: "session_list",
-						sessions: roots,
-						roots: true,
-					});
-
-					yield* Effect.forkDaemon(
-						serviceListSessions({ statuses: options?.statuses }).pipe(
-							Effect.tap((all) =>
-								Effect.sync(() =>
-									send({
-										type: "session_list",
-										sessions: all,
-										roots: false,
-									}),
-								),
-							),
-							Effect.catchAll((err) =>
-								Effect.sync(() =>
-									log.warn(`Background all-sessions fetch failed: ${err}`),
-								),
-							),
-						),
-					);
+					send({ type: "session_list", sessions: roots, roots: true });
+					if (wsHandlerOption._tag === "None") return;
+					const ws = wsHandlerOption.value;
+					const parentMap = (yield* Ref.get(stateRef)).cachedParentMap;
+					const families = new Map<string, string[]>();
+					for (const clientId of ws.getClientIds()) {
+						const viewed = ws.getClientSession(clientId);
+						if (!viewed) continue;
+						let root = viewed;
+						const seen = new Set<string>();
+						while (!seen.has(root)) {
+							seen.add(root);
+							const parent = HashMap.get(parentMap, root);
+							if (parent._tag === "None") break;
+							root = parent.value;
+						}
+						const viewers = families.get(root) ?? [];
+						viewers.push(clientId);
+						families.set(root, viewers);
+					}
+					for (const [root, viewers] of families) {
+						const family = yield* getSessionFamily(root);
+						const familyIds = new Set(
+							family.sessions.map((session) => session.id),
+						);
+						for (const clientId of viewers) {
+							const viewed = ws.getClientSession(clientId);
+							if (
+								viewed &&
+								(familyIds.has(viewed) || viewed === family.rootId)
+							) {
+								ws.sendTo(clientId, family);
+							}
+						}
+					}
 				}),
 		} satisfies SessionManagerService;
 	}),
