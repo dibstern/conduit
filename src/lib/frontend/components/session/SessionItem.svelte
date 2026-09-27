@@ -13,7 +13,7 @@
 	// wants from you; the spoken form
 	// is a state, because a screen reader reads a link's label as a description
 	// of the row rather than as a button.
-	const ATTENTION_DISPLAY: Record<
+	export const ATTENTION_DISPLAY: Record<
 		SessionAttention,
 		{
 			word: string;
@@ -111,14 +111,6 @@
 			settled: "min-h-[44px] md:min-h-[38px] py-[3px] px-[7px]",
 		},
 	};
-	const PROJECT_ACCENT_CLASSES = [
-		"bg-project-1",
-		"bg-project-2",
-		"bg-project-3",
-		"bg-project-4",
-		"bg-project-5",
-		"bg-project-6",
-	] as const;
 </script>
 
 <script lang="ts">
@@ -128,6 +120,7 @@
 	import Icon from "../ui/Icon.svelte";
 	import Button from "../ui/Button.svelte";
 	import TextInput from "../ui/TextInput.svelte";
+	import ProjectSquare from "./ProjectSquare.svelte";
 	import { isSessionWoken } from "../../stores/session.svelte.js";
 	import { getWokenSessionText } from "../../utils/session-lifecycle.js";
 	import { getSessionActionState, getSwipeStage, LONG_PRESS_DELAY_MS, MOVEMENT_SLOP_PX } from "../../utils/swipe.js";
@@ -189,7 +182,7 @@
 		onswitchsession?: (id: string) => void;
 		ontoggleselection?: (id: string) => void;
 		markOnly?: boolean;
-		oncontextmenu?: (session: SessionInfo, anchor: HTMLElement) => void;
+		oncontextmenu?: (session: SessionInfo, anchor: HTMLElement, trigger?: "touch") => void;
 		onsettle?: (id: string, next: boolean) => void;
 		onmarkread?: (id: string) => void;
 		onpin?: (id: string, next: boolean) => void;
@@ -261,8 +254,6 @@
 	const contextText = $derived(
 		[projectLabel, branch].filter((part) => part).join(" \u00B7 "),
 	);
-	const projectInitials = $derived(projectLabel?.match(/\p{L}/gu)?.slice(0, 2).join("").toUpperCase() ?? "");
-	const projectAccentClass = $derived(PROJECT_ACCENT_CLASSES[projectAccent - 1] ?? PROJECT_ACCENT_CLASSES[0]);
 	const accessibleContext = $derived(shelfRow ? projectLabel : contextText);
 
 	// The server derives the tier in one place and the row only reads it. It is
@@ -412,7 +403,7 @@
 			suppressNativeContextMenu = true;
 			setTimeout(() => { suppressNativeContextMenu = false; }, 1000);
 			armClickSuppression();
-			if (rowEl) oncontextmenuProp?.(session, rowEl);
+			if (rowEl) oncontextmenuProp?.(session, rowEl, "touch");
 			stopPointer();
 		}, LONG_PRESS_DELAY_MS);
 		window.addEventListener("pointermove", movePointer);
@@ -646,7 +637,7 @@
 	>
 		{#if shelfRow && projectLabel && !isRenaming}
 			<span class="inline-flex items-center gap-[6px] text-sm text-text-dimmer shrink-0">
-				<span class="project-square inline-grid size-[16px] shrink-0 place-items-center rounded-[4.5px] text-[8px] font-bold leading-none text-on-fill not-italic {projectAccentClass}" aria-hidden="true">{projectInitials}</span>
+				<ProjectSquare label={projectLabel} accent={projectAccent} />
 				{projectLabel}
 			</span>
 		{/if}
@@ -688,7 +679,7 @@
 		<span
 			class="session-item-context col-start-2 row-start-2 flex items-center gap-1.5 mt-0.5 text-sm text-text-dimmer overflow-hidden whitespace-nowrap font-brand"
 		>
-			{#if projectLabel}<span class="project-square inline-grid size-[16px] shrink-0 place-items-center rounded-[4.5px] text-[8px] font-bold leading-none text-on-fill not-italic {projectAccentClass}" aria-hidden="true">{projectInitials}</span>{/if}
+			{#if projectLabel}<ProjectSquare label={projectLabel} accent={projectAccent} />{/if}
 			<span class="overflow-hidden text-ellipsis min-w-0">{contextText}</span>
 		</span>
 	{/if}

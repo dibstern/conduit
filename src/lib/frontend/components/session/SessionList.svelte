@@ -92,7 +92,9 @@
 	// Context menu state
 	let ctxMenuSession = $state<SessionInfo | null>(null);
 	let ctxMenuAnchor = $state<HTMLElement | null>(null);
+	let ctxMenuPresentation = $state<"menu" | "sheet">("menu");
 	let snoozeSession = $state<SessionInfo | null>(null);
+	let snoozePlacement = $state<"center" | "sheet">("center");
 	let snoozeSheetNow = $state(0);
 	let heldSessionId = $state<string | null>(null);
 	let shortcutSheetOpen = $state(false);
@@ -319,10 +321,11 @@
 		}
 	}
 
-	function handleContextMenu(session: SessionInfo, anchor: HTMLElement) {
+	function handleContextMenu(session: SessionInfo, anchor: HTMLElement, trigger?: "touch") {
 		// Open context menu for this session
 		ctxMenuSession = session;
 		ctxMenuAnchor = anchor;
+		ctxMenuPresentation = trigger === "touch" ? "sheet" : "menu";
 	}
 
 	function handleCloseContextMenu() {
@@ -395,6 +398,7 @@
 
 	function handleOpenSnooze(session: SessionInfo) {
 		if (isForeignSession(session)) return;
+		snoozePlacement = "center";
 		snoozeSheetNow = Date.now();
 		snoozeSession = session;
 	}
@@ -989,13 +993,16 @@
 		session={ctxMenuSession}
 		anchor={ctxMenuAnchor}
 		projectLabel={getProjectLabel(ctxMenuSession)}
+		projectAccent={getProjectAccent(ctxMenuSession)}
+		branch={ctxMenuSession.git?.branch}
+		presentation={ctxMenuPresentation}
 		now={sessionState.now}
 		onrename={handleCtxRename}
 		onsettle={(_id, next) => { if (ctxMenuSession) void handleCtxSettle(ctxMenuSession, next); }}
 		onautosettle={(_id, disabled) => { if (ctxMenuSession) void handleCtxAutoSettle(ctxMenuSession, disabled); }}
 		onpin={(_id, next) => { if (ctxMenuSession) void handleCtxPin(ctxMenuSession, next); }}
 		onmarkread={(_id) => { if (ctxMenuSession) void toggleSessionRead(ctxMenuSession); }}
-		onsnooze={(_id) => { if (ctxMenuSession) handleOpenSnooze(ctxMenuSession); }}
+		onsnooze={(_id) => { if (ctxMenuSession) { handleOpenSnooze(ctxMenuSession); snoozePlacement = ctxMenuPresentation === "sheet" ? "sheet" : "center"; } }}
 		onunsnooze={(_id) => { if (ctxMenuSession) void handleUnsnooze(ctxMenuSession); }}
 		ondelete={handleCtxDelete}
 		oncopyresume={handleCtxCopyResume}
@@ -1010,6 +1017,7 @@
 {#if snoozeSession}
 	<SnoozeSheet
 		open={true}
+		placement={snoozePlacement}
 		sessionTitle={snoozeSession.title}
 		now={snoozeSheetNow}
 		onclose={() => { snoozeSession = null; }}

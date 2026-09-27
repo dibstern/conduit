@@ -17,6 +17,11 @@
 		/** Supporting text under the title; auto-wired to aria-describedby. */
 		description?: string | undefined;
 		size?: ModalSize | undefined;
+		placement?: "center" | "sheet" | undefined;
+		/** Drop the panel's side padding so list rows run edge to edge. */
+		flush?: boolean | undefined;
+		/** Focus target after a sheet dismisses. */
+		returnFocus?: (() => HTMLElement | null) | undefined;
 		/** Escape + backdrop-click dismissal. Default true. The close button is gated by `showClose`. */
 		dismissible?: boolean | undefined;
 		/** Corner close button. Default true. */
@@ -40,6 +45,9 @@
 		description,
 		ariaLabel,
 		size = "md",
+		placement = "center",
+		flush = false,
+		returnFocus,
 		dismissible = true,
 		showClose = true,
 		class: className,
@@ -57,8 +65,11 @@
 
 	const panelClass = $derived(
 		[
-			"relative flex max-h-[85vh] w-[90%] flex-col gap-4 rounded-xl border border-border bg-bg-alt px-6 py-5 shadow-modal",
-			SIZE_CLASSES[size],
+			placement === "sheet"
+				? "relative flex max-h-[90vh] w-full flex-col gap-4 rounded-t-[18px] border-t border-border bg-bg-alt pb-[calc(12px+env(safe-area-inset-bottom))] shadow-modal"
+				: "relative flex max-h-[85vh] w-[90%] flex-col gap-4 rounded-xl border border-border bg-bg-alt py-5 shadow-modal",
+			flush ? undefined : "px-6",
+			placement === "center" ? SIZE_CLASSES[size] : undefined,
 			className,
 		]
 			.filter(Boolean)
@@ -101,6 +112,7 @@
 	<Dialog.Portal>
 		<Dialog.Overlay
 			class="fixed inset-0 z-[var(--z-modal)] bg-backdrop backdrop-blur-[2px]"
+			data-testid={placement === "sheet" ? "modal-sheet-scrim" : undefined}
 		>
 			{#snippet child({ props })}
 				<div {...props} use:exemptFromBackgroundInert></div>
@@ -108,6 +120,13 @@
 		</Dialog.Overlay>
 		<Dialog.Content
 			aria-label={resolvedTitle ? undefined : ariaLabel}
+			onCloseAutoFocus={(event) => {
+				const target = placement === "sheet" ? returnFocus?.() : null;
+				if (target?.isConnected) {
+					event.preventDefault();
+					target.focus();
+				}
+			}}
 			onEscapeKeydown={(event) => {
 				event.preventDefault();
 				if (dismissible) onclose();
@@ -118,13 +137,15 @@
 			}}
 		>
 			{#snippet child({ props })}
-				<div class="fixed inset-0 z-[var(--z-modal)] flex items-center justify-center">
+				<div class="fixed inset-0 z-[var(--z-modal)] flex items-center {placement === 'sheet' ? 'justify-end flex-col' : 'justify-center'}">
 					<div
 						{...props}
 						class={panelClass}
+						data-testid={placement === "sheet" ? "modal-sheet-panel" : undefined}
 						onkeydown={containFocusWithoutTabbables}
 						use:exemptFromBackgroundInert
 					>
+						{#if placement === "sheet"}<div class="mx-auto mt-2 -mb-2 h-1 w-[38px] shrink-0 rounded-full bg-border" aria-hidden="true"></div>{/if}
 						{#if resolvedTitle || description}
 							<header class="flex flex-col gap-1 pr-8">
 								{#if resolvedTitle}

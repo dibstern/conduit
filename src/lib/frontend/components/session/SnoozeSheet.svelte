@@ -7,12 +7,14 @@
 
 	let {
 		open,
+		placement = "center",
 		sessionTitle,
 		now = Date.now(),
 		onclose,
 		onsnooze,
 	}: {
 		open: boolean;
+		placement?: "center" | "sheet";
 		sessionTitle: string;
 		now?: number;
 		onclose: () => void;
@@ -31,7 +33,7 @@
 	}
 </script>
 
-<Modal {open} {onclose} title="Snooze until…" description={sessionTitle || "New Session"} size="sm">
+<Modal {open} {onclose} {placement} title="Snooze until…" description={sessionTitle || "New Session"} size="sm">
 	<div class="flex flex-col gap-1 font-brand">
 		{#each presets.filter((preset) => preset.id !== "indefinite") as preset (preset.id)}
 			<Button

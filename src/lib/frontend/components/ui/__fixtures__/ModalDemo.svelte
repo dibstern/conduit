@@ -9,6 +9,7 @@
 		ariaLabel?: string | undefined;
 		description?: string | undefined;
 		size?: "sm" | "md" | "lg" | undefined;
+		placement?: "center" | "sheet" | undefined;
 		dismissible?: boolean | undefined;
 		showClose?: boolean | undefined;
 		withFooter?: boolean | undefined;
@@ -24,6 +25,7 @@
 		ariaLabel,
 		description,
 		size,
+		placement,
 		dismissible,
 		showClose,
 		withFooter = false,
@@ -62,6 +64,7 @@
 		title={resolvedTitle}
 		{description}
 		{size}
+		{placement}
 		{dismissible}
 		{showClose}
 		children={body}
@@ -74,6 +77,7 @@
 		ariaLabel={resolvedAriaLabel}
 		{description}
 		{size}
+		{placement}
 		{dismissible}
 		{showClose}
 		children={body}
