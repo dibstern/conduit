@@ -2,6 +2,7 @@
 import { describe, expect, it } from "vitest";
 import type { SessionRow } from "../../../src/lib/persistence/read-model-types.js";
 import {
+	deriveSessionAttention,
 	deriveSessionSnooze,
 	sessionRowsToSessionInfoList,
 } from "../../../src/lib/persistence/session-list-adapter.js";
@@ -99,6 +100,38 @@ describe("deriveSessionSnooze", () => {
 });
 
 describe("sessionRowsToSessionInfoList", () => {
+	it("shows idle sessions with live background work as working", () => {
+		const hasLiveBackgroundWork = (id: string) => id === "child";
+		expect(
+			deriveSessionAttention({
+				pendingQuestionCount: undefined,
+				pendingPermissionCount: undefined,
+				lastTurnErrorAt: null,
+				liveStatus: { type: "idle" },
+				hasLiveBackgroundWork: true,
+				projectedStatus: "idle",
+				unread: false,
+			}),
+		).toBe("working");
+		const [root, child] = sessionRowsToSessionInfoList(
+			[makeRow("root"), makeRow("child", { parent_id: "root" })],
+			{ parentMap: new Map([["child", "root"]]), hasLiveBackgroundWork },
+		);
+		expect(root).toMatchObject({ attention: "working", processing: true });
+		expect(child).toMatchObject({ attention: "working", processing: true });
+	});
+
+	it("keeps approval ahead of live background work", () => {
+		const [session] = sessionRowsToSessionInfoList([makeRow("one")], {
+			hasLiveBackgroundWork: () => true,
+			pendingPermissionCounts: new Map([["one", 1]]),
+		});
+		expect(session).toMatchObject({
+			attention: "needs-approval",
+			processing: true,
+		});
+	});
+
 	it("carries settled and pinned timestamps and omits NULL values", () => {
 		const [set, unset] = sessionRowsToSessionInfoList([
 			makeRow("set", { settled_at: 0, pinned_at: 456 }),

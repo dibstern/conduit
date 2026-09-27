@@ -599,7 +599,14 @@ export class ClaudeProviderRuntime {
 			...state,
 			sessions: HashMap.remove(state.sessions, sessionId),
 			endedStreams: HashSet.remove(state.endedStreams, sessionId),
-		}));
+		})).pipe(
+			// The removed query's background tasks can never report back.
+			Effect.andThen(
+				Effect.sync(() =>
+					this.deps.onBackgroundTask?.({ sessionId, kind: "session-ended" }),
+				),
+			),
+		);
 	}
 
 	private getSetupLock(
@@ -1466,7 +1473,23 @@ export class ClaudeProviderRuntime {
 					);
 				}
 			}
-		});
+		}).pipe(
+			// Once this stream ends, its background tasks can never report
+			// completion, even after an interrupt: the next turn starts a new
+			// query. A newer query that already replaced this one went through
+			// removeSession, which cleared it; don't wipe the newer query's tasks.
+			Effect.ensuring(
+				Effect.gen(this, function* () {
+					const current = yield* this.getSession(ctx.sessionId);
+					if (current === undefined || current === ctx) {
+						this.deps.onBackgroundTask?.({
+							sessionId: ctx.sessionId,
+							kind: "session-ended",
+						});
+					}
+				}),
+			),
+		);
 	}
 
 	private detachSubagentFinalizationContext(

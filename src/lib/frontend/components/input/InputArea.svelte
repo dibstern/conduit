@@ -34,7 +34,7 @@
 		filterFiles,
 	} from "../../stores/file-tree.svelte.js";
 	import { fetchFileContent, fetchDirectoryListing, resizeImageIfNeeded } from "./input-utils.js";
-	import { findSession, isSessionSnoozed, sessionState, switchToSession } from "../../stores/session.svelte.js";
+	import { findSession, isSessionSnoozed, sessionAttention, sessionState, switchToSession } from "../../stores/session.svelte.js";
 	import { permissionsState } from "../../stores/permissions.svelte.js";
 	import { getCurrentSlug } from "../../stores/router.svelte.js";
 	import { showToast } from "../../stores/ui.svelte.js";
@@ -607,7 +607,7 @@
 		{/if}
 
 		<!-- Processing indicator: animated bounce bar aligned with context mini bar -->
-		{#if isProcessing()}
+		{#if isProcessing() || (currentSession && sessionAttention(currentSession) === "working")}
 			<div class="flex items-center gap-2 pb-1.5 px-2">
 				<div class="min-w-6"></div>
 				<div

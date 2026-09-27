@@ -517,6 +517,23 @@ describe("ClaudeProviderInstance lifecycle", () => {
 	});
 
 	describe("endSessionEffect()", () => {
+		it("signals session-ended on terminal disposal", async () => {
+			const onBackgroundTask = vi.fn();
+			const instance = new ClaudeProviderInstance({
+				workspaceRoot: workspace,
+				onBackgroundTask,
+			});
+			const ctx = makeFakeSessionContext("sess-end");
+			setClaudeRuntimeSessionForTest(instance, "sess-end", ctx);
+
+			await Effect.runPromise(instance.endSessionEffect("sess-end"));
+			expect(onBackgroundTask).toHaveBeenCalledOnce();
+			expect(onBackgroundTask).toHaveBeenCalledWith({
+				sessionId: "sess-end",
+				kind: "session-ended",
+			});
+		});
+
 		it("closes query and removes session from map", async () => {
 			const instance = new ClaudeProviderInstance({ workspaceRoot: workspace });
 			const ctx = makeFakeSessionContext("sess-end");

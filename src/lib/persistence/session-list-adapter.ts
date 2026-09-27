@@ -46,6 +46,7 @@ export interface SessionListAdapterOptions {
 	pendingQuestionCounts?: ReadonlyMap<string, number>;
 	pendingPermissionCounts?: ReadonlyMap<string, number>;
 	forkMeta?: ReadonlyMap<string, ForkEntry>;
+	hasLiveBackgroundWork?: (sessionId: string) => boolean;
 }
 
 export function deriveSessionAttention(input: {
@@ -53,6 +54,7 @@ export function deriveSessionAttention(input: {
 	pendingPermissionCount: number | undefined;
 	lastTurnErrorAt: number | null;
 	liveStatus: SessionStatus | undefined;
+	hasLiveBackgroundWork?: boolean;
 	projectedStatus: string;
 	unread: boolean;
 }): SessionAttention {
@@ -64,7 +66,8 @@ export function deriveSessionAttention(input: {
 	// only working signal. A relay killed mid-turn can leave it busy until another
 	// event moves it; conduit-test-vik1.12 owns repairing that stale signal.
 	const status = input.liveStatus?.type ?? input.projectedStatus;
-	if (status === "busy" || status === "retry") return "working";
+	if (status === "busy" || status === "retry" || input.hasLiveBackgroundWork)
+		return "working";
 	if (input.unread) return "done-unread";
 	return "idle";
 }
@@ -124,7 +127,10 @@ export function sessionRowsToSessionInfoList(
 				permissions: 0,
 			};
 			const status = opts.statuses?.[id]?.type ?? projectedStatuses.get(id);
-			state.processing ||= status === "busy" || status === "retry";
+			state.processing ||=
+				status === "busy" ||
+				status === "retry" ||
+				opts.hasLiveBackgroundWork?.(id) === true;
 			state.questions += opts.pendingQuestionCounts?.get(id) ?? 0;
 			state.permissions += opts.pendingPermissionCounts?.get(id) ?? 0;
 			subtreeState.set(rootId, state);
@@ -160,6 +166,9 @@ export function sessionRowsToSessionInfoList(
 				info.processing = true;
 			}
 		}
+		if (opts?.hasLiveBackgroundWork?.(row.id)) {
+			info.processing = true;
+		}
 		if (subtree?.processing) {
 			info.processing = true;
 		}
@@ -193,6 +202,7 @@ export function sessionRowsToSessionInfoList(
 				subtree && info.processing
 					? { type: "busy" }
 					: opts?.statuses?.[row.id],
+			hasLiveBackgroundWork: opts?.hasLiveBackgroundWork?.(row.id) === true,
 			projectedStatus: row.status,
 			unread: info.unread === true,
 		});

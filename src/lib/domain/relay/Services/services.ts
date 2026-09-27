@@ -265,6 +265,11 @@ export class StatusPollerTag extends Context.Tag("StatusPoller")<
 	StatusPollerShape
 >() {}
 
+export class BackgroundLivenessTag extends Context.Tag("BackgroundLiveness")<
+	BackgroundLivenessTag,
+	(sessionId: string) => boolean
+>() {}
+
 export class PollerManagerTag extends Context.Tag("PollerManager")<
 	PollerManagerTag,
 	PollerManagerShape
