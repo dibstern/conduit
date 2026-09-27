@@ -38,7 +38,8 @@ const MESSAGE_ACTIVITY_TTL_MS = 10_000;
 
 /**
  * If a session has been "busy" for longer than this with no events,
- * it is flagged as stale and forcibly transitioned to idle.
+ * it is flagged as stale and forcibly transitioned to idle. Sessions blocked
+ * on an open question or permission are exempt: silence there is the user's.
  */
 const SESSION_STALE_THRESHOLD_MS = 30 * 60 * 1000; // 30 minutes
 
@@ -512,6 +513,8 @@ export interface ReconciliationDeps {
 		}>,
 		unknown
 	>;
+	/** Sessions blocked on an open question or permission prompt. */
+	readonly getSessionsAwaitingUser: () => Effect.Effect<ReadonlySet<string>>;
 	readonly injectCorrectiveEvent: (
 		sessionId: string,
 		status: string,
@@ -549,11 +552,13 @@ const runReconciliation = (deps: ReconciliationDeps) =>
 		// Staleness check
 		yield* Effect.gen(function* () {
 			const sessions = yield* deps.getProjectedSessions([]);
+			const awaitingUser = yield* deps.getSessionsAwaitingUser();
 			const now = Date.now();
 			for (const session of sessions) {
 				if (
 					session.status === "busy" &&
-					now - session.updated_at > SESSION_STALE_THRESHOLD_MS
+					now - session.updated_at > SESSION_STALE_THRESHOLD_MS &&
+					!awaitingUser.has(session.id)
 				) {
 					const minutesStale = ((now - session.updated_at) / 60_000).toFixed(1);
 					yield* Effect.log(

@@ -61,6 +61,7 @@ describe("SessionStatusPoller Effect", () => {
 							completed: { type: "idle" },
 							missing: { type: "busy" },
 						}),
+					getSessionsAwaitingUser: () => Effect.succeed(new Set<string>()),
 					getProjectedSessions: (reportedIds) =>
 						queries.getSessionsForReconciliation(reportedIds).pipe(
 							Effect.tap((rows) =>
@@ -258,6 +259,7 @@ describe("SessionStatusPoller Effect", () => {
 					Effect.succeed({
 						"session-effect-reconcile": { type: "idle" as const },
 					}),
+				getSessionsAwaitingUser: () => Effect.succeed(new Set<string>()),
 				getProjectedSessions: () =>
 					Effect.succeed([
 						{
@@ -275,6 +277,29 @@ describe("SessionStatusPoller Effect", () => {
 			expect(injected).toEqual([
 				{ sessionId: "session-effect-reconcile", status: "idle" },
 			]);
+		}).pipe(Effect.provide(makeTestLayer())),
+	);
+
+	it.effect("staleness check skips sessions waiting on the user", () =>
+		Effect.gen(function* () {
+			const injected: Array<{ sessionId: string; status: string }> = [];
+			const longAgo = Date.now() - 31 * 60_000;
+
+			yield* reconcileNow({
+				getRestStatuses: () => Effect.succeed({}),
+				getProjectedSessions: () =>
+					Effect.succeed([
+						{ id: "asking", status: "busy", updated_at: longAgo },
+						{ id: "hung", status: "busy", updated_at: longAgo },
+					]),
+				getSessionsAwaitingUser: () => Effect.succeed(new Set(["asking"])),
+				injectCorrectiveEvent: (sessionId, status) =>
+					Effect.sync(() => {
+						injected.push({ sessionId, status });
+					}),
+			});
+
+			expect(injected).toEqual([{ sessionId: "hung", status: "idle" }]);
 		}).pipe(Effect.provide(makeTestLayer())),
 	);
 

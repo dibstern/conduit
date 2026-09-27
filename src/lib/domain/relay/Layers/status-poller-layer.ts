@@ -9,6 +9,7 @@ import {
 	type SessionStatusValue,
 } from "../../../persistence/events.js";
 import { OpenCodeAPITag } from "../../provider/Services/opencode-api-service.js";
+import { PendingInteractionServiceTag } from "../Services/pending-interaction-service.js";
 import { RelayStatusSnapshotTag } from "../Services/relay-status-snapshot.js";
 import { ConfigTag, LoggerTag, StatusPollerTag } from "../Services/services.js";
 import { SessionManagerStateTag } from "../Services/session-manager-state.js";
@@ -47,6 +48,7 @@ export const StatusPollerLive: Layer.Layer<
 	| ConfigTag
 	| LoggerTag
 	| OpenCodeAPITag
+	| PendingInteractionServiceTag
 	| PollerPubSubTag
 	| PollerStateTag
 	| RelayStatusSnapshotTag
@@ -61,6 +63,7 @@ export const StatusPollerLive: Layer.Layer<
 		const pubsub = yield* PollerPubSubTag;
 		const statusSnapshot = yield* RelayStatusSnapshotTag;
 		const sessionManagerStateRef = yield* SessionManagerStateTag;
+		const pendingInteractions = yield* PendingInteractionServiceTag;
 		const readQueryOption = yield* Effect.serviceOption(ReadQueryEffectTag);
 		const eventStoreOption = yield* Effect.serviceOption(EventStoreEffectTag);
 		const projectionRunnerOption = yield* Effect.serviceOption(
@@ -79,6 +82,18 @@ export const StatusPollerLive: Layer.Layer<
 							Effect.tryPromise(() => api.session.statuses()),
 						getProjectedSessions: (reportedIds) =>
 							readQueryOption.value.getSessionsForReconciliation(reportedIds),
+						getSessionsAwaitingUser: () =>
+							Effect.all([
+								pendingInteractions.listPendingQuestions(),
+								pendingInteractions.listPendingPermissions(),
+							]).pipe(
+								Effect.map(
+									([questions, permissions]) =>
+										new Set(
+											[...questions, ...permissions].map((p) => p.sessionId),
+										),
+								),
+							),
 						injectCorrectiveEvent: (sessionId: string, status: string) =>
 							Effect.gen(function* () {
 								const event = canonicalEvent(
