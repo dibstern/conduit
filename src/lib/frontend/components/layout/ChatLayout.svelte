@@ -9,6 +9,7 @@
 	import { attachProjectRpc, resolveSessionRpc, viewSessionRpc, getAgentsRpc, getCommandsRpc, getFileTreeRpc, getModelsRpc, getProjectsRpc, listPtysRpc, listSessionsRpc } from "../../transport/ws-rpc-client.js";
 	import Header from "./Header.svelte";
 	import SessionBar from "./SessionBar.svelte";
+	import SidebarFilePanel from "../file/SidebarFilePanel.svelte";
 	import Sidebar from "./Sidebar.svelte";
 	import InputArea from "../input/InputArea.svelte";
 	import MessageList from "../chat/MessageList.svelte";
@@ -737,13 +738,17 @@
 			<RewindBanner />
 		{/if}
 
-		<!-- Messages + Input area (hidden when terminal is mobile-maximized) -->
-		{#if !mobileMaximized}
-			<div class="flex flex-col flex-1 min-h-0">
+		<!-- Keep the transcript mounted and sized beneath phone views so its scrollTop survives. -->
+		<div class="relative flex flex-col flex-1 min-h-0">
+			<div class="flex flex-col flex-1 min-h-0" class:invisible={mobileMaximized} inert={sessionViewState.filesOpen || mobileMaximized}>
 				<MessageList />
 				<InputArea />
 			</div>
-		{/if}
+			{#if sessionViewState.compact && sessionViewState.filesEverOpened}
+				<div class="absolute inset-0 z-10 flex min-h-0 bg-bg-surface" class:invisible={!sessionViewState.filesOpen} inert={!sessionViewState.filesOpen}>
+					<SidebarFilePanel onClose={() => { sessionViewState.filesOpen = false; }} />
+				</div>
+			{/if}
 
 		<!-- Terminal Panel (resizable bottom panel) -->
 		{#if terminalState.panelOpen}
@@ -758,10 +763,11 @@
 					<div class="w-8 h-0.5 rounded-full bg-border group-hover:bg-accent/50 transition-colors"></div>
 				</div>
 			{/if}
-			<div class={mobileMaximized ? "flex-1 min-h-0 bg-bg-surface" : "shrink-0 min-h-0"} style={mobileMaximized ? "" : `height: ${terminalHeight}px;`}>
+			<div class={mobileMaximized ? "absolute inset-0 z-20 flex min-h-0 bg-bg-surface" : "shrink-0 min-h-0"} style={mobileMaximized ? "" : `height: ${terminalHeight}px;`}>
 				<TerminalPanel onTabBarTouchStart={handleTabBarTouchStart} />
 			</div>
 		{/if}
+		</div>
 
 		<!-- Info Panels (absolute positioned floating panels) -->
 		<InfoPanels />

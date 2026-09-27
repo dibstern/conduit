@@ -1,8 +1,9 @@
 // ─── File Tree Store ─────────────────────────────────────────────────────────
-// Background-preloaded file tree for @ autocomplete.
+// Background-preloaded paths for @ autocomplete and file browser position.
 // Pure filtering functions + reactive state.
 
 import type { GetFileTreeResponse } from "../transport/ws-rpc.js";
+import type { FileEntry } from "../types.js";
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -18,6 +19,13 @@ export const fileTreeState = $state({
 	entries: [] as string[],
 	loading: false,
 	loaded: false,
+	/** File browser position shared by the sidebar and phone session view. */
+	browserPath: ".",
+	browserEntries: [] as FileEntry[],
+	browserChildren: new Map<string, FileEntry[]>(),
+	browserCache: new Map<string, FileEntry[]>(),
+	browserExpandedPaths: new Set<string>(),
+	browserScrollTop: 0,
 });
 
 // ─── Pure helpers ───────────────────────────────────────────────────────────
@@ -124,4 +132,10 @@ export function clearFileTreeState(): void {
 	fileTreeState.entries = [];
 	fileTreeState.loading = false;
 	fileTreeState.loaded = false;
+	fileTreeState.browserPath = ".";
+	fileTreeState.browserEntries = [];
+	fileTreeState.browserChildren = new Map();
+	fileTreeState.browserCache = new Map();
+	fileTreeState.browserExpandedPaths = new Set();
+	fileTreeState.browserScrollTop = 0;
 }

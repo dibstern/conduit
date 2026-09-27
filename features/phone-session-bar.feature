@@ -12,6 +12,23 @@ Scenario: Back returns to the session list
   When I tap back to the session list
   Then the session list is open
 
+Scenario: Switching to terminal from the session bar shows the terminal
+  Given the viewport is a phone
+  And the conduit app is served with the long-transcript mockup
+  When I choose the Terminal session view
+  Then the terminal panel is visible
+  And the Terminal session view is selected
+
+Scenario: Switching back to chat keeps the transcript scroll position
+  Given the viewport is a phone
+  And the conduit app is served with the long-transcript mockup
+  When I scroll the transcript up by 400 pixels
+  Then the jump-to-latest control is visible
+  And I remember the transcript scroll position
+  And I choose the Terminal session view
+  And I choose the Chat session view
+  Then the transcript is visible at the remembered scroll position
+
 # The collapse is a walk through the state machine rather than four separate
 # scenarios: the interesting claims are all about transitions, and a transition
 # needs the step before it to have actually happened.

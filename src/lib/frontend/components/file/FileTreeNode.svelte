@@ -7,6 +7,7 @@
 	import { formatFileSize } from "../../utils/format.js";
 	import Button from "../ui/Button.svelte";
 	import FileTreeNode from "./FileTreeNode.svelte";
+	import { fileTreeState } from "../../stores/file-tree.svelte.js";
 
 	let {
 		entry,
@@ -26,13 +27,12 @@
 			| undefined;
 	} = $props();
 
-	let expanded = $state(false);
-
 	const isDir = $derived(entry.type === "directory");
 	const isHidden = $derived(entry.name.startsWith(".") && entry.name !== ".github" && entry.name !== ".vscode");
 
 	// Full path of this entry (used for WS requests and child lookups)
 	const fullPath = $derived(parentPath === "." ? entry.name : `${parentPath}/${entry.name}`);
+	const expanded = $derived(fileTreeState.browserExpandedPaths.has(fullPath));
 
 	// Directories that should be collapsed by default
 	const COLLAPSE_DIRS = ["node_modules", ".git", "dist", "build", "__pycache__", ".next", ".svelte-kit", "coverage"];
@@ -44,11 +44,15 @@
 		if (isDir) {
 			if (shouldCollapse && !expanded) {
 				// First click on collapsed-by-default dir expands
-				expanded = true;
+				fileTreeState.browserExpandedPaths = new Set([...fileTreeState.browserExpandedPaths, fullPath]);
 				onDirClick?.(fullPath);
 			} else {
-				expanded = !expanded;
-				if (expanded) onDirClick?.(fullPath);
+				const nextExpanded = !expanded;
+				const paths = new Set(fileTreeState.browserExpandedPaths);
+				if (expanded) paths.delete(fullPath);
+				else paths.add(fullPath);
+				fileTreeState.browserExpandedPaths = paths;
+				if (nextExpanded) onDirClick?.(fullPath);
 			}
 		} else {
 			onFileClick?.(fullPath);

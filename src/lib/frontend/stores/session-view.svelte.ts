@@ -16,6 +16,9 @@ export const sessionViewState = $state({
 	/** The chevron's override: the bar stays expanded even at the bottom. Starts
 	 *  true so a fresh load arrives with the full bar on screen. */
 	forcedOpen: true,
+	/** Phone files layer; the transcript stays mounted behind it. */
+	filesOpen: false,
+	filesEverOpened: false,
 
 	/** Phone-width viewport: the session bar replaces the global header. */
 	compact:
@@ -67,6 +70,8 @@ export function noteUserScroll(): void {
 /** Arrive at a new session with the full bar open, whatever the last one did. */
 export function noteSessionChanged(): void {
 	sessionViewState.forcedOpen = true;
+	sessionViewState.filesOpen = false;
+	sessionViewState.filesEverOpened = false;
 }
 
 /**

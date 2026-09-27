@@ -18,6 +18,8 @@ export const terminalState = $state({
 	tabs: new Map<string, TabEntry>(),
 	activeTabId: null as string | null,
 	panelOpen: false,
+	/** One badge count per PTY that emitted output while the panel was closed. */
+	unreadPtyIds: new Set<string>(),
 	pendingCreate: false,
 	statusMessage: null as string | null,
 	maxTabs: DEFAULT_MAX_TABS,
@@ -120,7 +122,10 @@ export function handlePtyList(
 ): void {
 	const ptys = msg.ptys ?? [];
 
-	if (ptys.length === 0) return;
+	if (ptys.length === 0) {
+		terminalState.unreadPtyIds = new Set();
+		return;
+	}
 
 	const newTabs = new Map(terminalState.tabs);
 	const serverIds = new Set<string>();
@@ -152,6 +157,11 @@ export function handlePtyList(
 	}
 
 	terminalState.tabs = newTabs;
+	if ([...terminalState.unreadPtyIds].some((id) => !serverIds.has(id))) {
+		terminalState.unreadPtyIds = new Set(
+			[...terminalState.unreadPtyIds].filter((id) => serverIds.has(id)),
+		);
+	}
 
 	// Set active tab if none set
 	if (!terminalState.activeTabId || !newTabs.has(terminalState.activeTabId)) {
@@ -205,6 +215,7 @@ export function handlePtyCreated(
 	terminalState.tabs = newTabs;
 	terminalState.activeTabId = ptyId;
 	terminalState.panelOpen = true;
+	terminalState.unreadPtyIds = new Set();
 
 	// Initialize scrollback (don't overwrite if output arrived before pty_created)
 	if (!scrollbackBuffers.has(ptyId)) {
@@ -217,6 +228,12 @@ export function handlePtyOutput(
 ): void {
 	const { ptyId, data } = msg;
 	if (!ptyId || typeof data !== "string") return;
+	if (!terminalState.panelOpen && !terminalState.unreadPtyIds.has(ptyId)) {
+		terminalState.unreadPtyIds = new Set([
+			...terminalState.unreadPtyIds,
+			ptyId,
+		]);
+	}
 
 	// Append to scrollback buffer (trim if over limit)
 	let buffer = scrollbackBuffers.get(ptyId);
@@ -267,6 +284,11 @@ export function handlePtyDeleted(
 	const newTabs = new Map(terminalState.tabs);
 	newTabs.delete(ptyId);
 	terminalState.tabs = newTabs;
+	if (terminalState.unreadPtyIds.has(ptyId)) {
+		const unread = new Set(terminalState.unreadPtyIds);
+		unread.delete(ptyId);
+		terminalState.unreadPtyIds = unread;
+	}
 
 	// Clean up scrollback and listeners
 	scrollbackBuffers.delete(ptyId);
@@ -357,12 +379,14 @@ export function togglePanel(): void {
 		terminalState.panelOpen = false;
 	} else {
 		terminalState.panelOpen = true;
+		terminalState.unreadPtyIds = new Set();
 	}
 }
 
 /** Open the terminal panel. */
 export function openPanel(): void {
 	terminalState.panelOpen = true;
+	terminalState.unreadPtyIds = new Set();
 }
 
 /** Close the terminal panel. */
@@ -388,6 +412,7 @@ export function destroyAll(): void {
 	terminalState.activeTabId = null;
 	terminalState.panelOpen = false;
 	terminalState.pendingCreate = false;
+	terminalState.unreadPtyIds = new Set();
 	terminalState.statusMessage = null;
 	scrollbackBuffers.clear();
 	outputListeners.clear();

@@ -1,11 +1,11 @@
 <!--
   SessionBar — the session's own top bar, phones only (design bar 18).
 
-  Two layouts, one DOM tree. Expanded it is two bands: back-to-the-list with its
-  attention badge plus the project identity, then the session title. Sitting at
+  Two layouts, one DOM tree. Expanded it is three bands: back-to-the-list with its
+  attention badge plus the project identity, then the session title and views. Sitting at
   the bottom of the transcript collapses it to a single 46px row carrying back,
   the title, a chevron that brings the bar back, and the overflow menu. The view
-  switcher band arrives with its own ticket; the slot is marked below.
+  switcher band is omitted in the collapsed row.
 
   You collapse by scrolling to the bottom and expand by scrolling up or by
   pressing the chevron. There is deliberately no collapse button: hiding chrome
@@ -42,6 +42,7 @@
 	import { formatTimeAgo } from "../../utils/format.js";
 	import { getSessionBarState } from "../../utils/session-lifecycle.js";
 	import Badge from "../ui/Badge.svelte";
+	import Tabs from "../ui/Tabs.svelte";
 	import Button from "../ui/Button.svelte";
 	import Icon from "../ui/Icon.svelte";
 	import Menu from "../ui/Menu.svelte";
@@ -54,6 +55,7 @@
 		toggleTerminal,
 	} from "./chrome-actions.js";
 	import InstanceBadgeMenu from "./InstanceBadgeMenu.svelte";
+	import { activeSessionView, sessionViews } from "./session-views.js";
 
 	// "New Session" matches session/SessionItem.svelte, so an untitled session
 	// reads the same in the bar as it does in the list it came from.
@@ -75,6 +77,7 @@
 	);
 
 	const collapsed = $derived(isBarCollapsed());
+	const activeView = $derived(activeSessionView());
 
 	let barEl: HTMLElement | null = $state(null);
 
@@ -369,7 +372,27 @@
 		{/if}
 	</Menu>
 
-	<!-- The view switcher band (Chat / Terminal / Diff / Files) belongs here,
-	     below the title, and lands with its own ticket. It is one of the areas
-	     the collapsed template drops. -->
+	{#if !collapsed}
+		<div id="session-bar-views" data-testid="session-bar-views">
+			<Tabs
+				value={activeView}
+				options={sessionViews.map((view) => ({ value: view.id, label: view.label, disabled: view.disabled === true, testId: `session-view-${view.id}` }))}
+				variant="switcher"
+				label="Session views"
+				onValueChange={(id) => sessionViews.find((view) => view.id === id && !view.disabled)?.activate()}
+			>
+				{#snippet optionContent(option)}
+					{@const view = sessionViews.find((entry) => entry.id === option.value)}
+					{#if view}
+						<Icon name={view.icon} size={16} class="shrink-0" />
+						<span class="session-view-label truncate">{view.label}</span>
+						{#if view.badge?.()}
+							<Badge variant="accent-solid" size="count" shape="pill">{view.badge()}</Badge>
+						{/if}
+						{#if view.shortcut}<span class="session-view-shortcut">{view.shortcut}</span>{/if}
+					{/if}
+				{/snippet}
+			</Tabs>
+		</div>
+	{/if}
 </div>

@@ -26,6 +26,7 @@ const driver = new PlaywrightDriver();
 const relayControls = new WeakMap<Page, WsMockControl>();
 const rpcControls = new WeakMap<Page, RpcMockControl>();
 const composerMessages = new WeakMap<Page, string>();
+const transcriptScrollPositions = new WeakMap<Page, number>();
 const mockClaudeSettings = new WeakMap<Page, Record<string, unknown>>();
 const inheritedClaudeCommitAttribution = "Inherited commit attribution";
 const claudeSettingsSessionId = "sess-claude-settings";
@@ -148,6 +149,59 @@ export const conduitVisualHandlers: StepHandler[] = [
 		run: async ({ world, match }) => {
 			await world.page.locator("#messages").hover();
 			await world.page.mouse.wheel(0, -Number(match[1]));
+		},
+	},
+	{
+		name: "remember transcript scroll position",
+		match: /^I remember the transcript scroll position$/,
+		run: async ({ world }) => {
+			const position = await world.page
+				.locator("#messages")
+				.evaluate((el) => el.scrollTop);
+			if (position <= 0)
+				throw new Error("transcript did not scroll before switching views");
+			transcriptScrollPositions.set(world.page, position);
+		},
+	},
+	{
+		name: "choose session view",
+		match: /^I choose the (Chat|Terminal) session view$/,
+		run: async ({ world, match }) => {
+			await world.page
+				.getByRole("tab", { name: match[1] ?? "", exact: true })
+				.click();
+		},
+	},
+	{
+		name: "terminal panel is visible",
+		match: /^the terminal panel is visible$/,
+		run: async ({ world }) => {
+			await world.page.locator("#terminal-panel").waitFor({ state: "visible" });
+		},
+	},
+	{
+		name: "session view is selected",
+		match: /^the (Chat|Terminal) session view is selected$/,
+		run: async ({ world, match }) => {
+			const selected = await world.page
+				.getByRole("tab", { name: match[1] ?? "", exact: true })
+				.getAttribute("aria-selected");
+			if (selected !== "true")
+				throw new Error(`${match[1]} view is not selected`);
+		},
+	},
+	{
+		name: "transcript stays at remembered scroll position",
+		match: /^the transcript is visible at the remembered scroll position$/,
+		run: async ({ world }) => {
+			await world.page.locator("#messages").waitFor({ state: "visible" });
+			const before = transcriptScrollPositions.get(world.page);
+			const after = await world.page
+				.locator("#messages")
+				.evaluate((el) => el.scrollTop);
+			if (before === undefined || Math.abs(after - before) > 1) {
+				throw new Error(`transcript scroll moved from ${before} to ${after}`);
+			}
 		},
 	},
 	{
@@ -316,6 +370,7 @@ export const conduitVisualHandlers: StepHandler[] = [
 			let createdSessionInstance: string | undefined;
 			const rpcControl = await mockWsRpc(world.page, {
 				handlers: {
+					CreatePty: async () => ({ ok: true }),
 					ResolveSession: async () => ({ projectSlug: "myapp" }),
 					ViewSession: async () => ({ ok: true }),
 					GetClaudeSettings: async () => ({

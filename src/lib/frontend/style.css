@@ -593,7 +593,8 @@ body:has(dialog:modal) {
 	grid-template-columns: auto minmax(0, 1fr) auto auto;
 	grid-template-areas:
 		"back  meta  meta  more"
-		"title title title title";
+		"title title title title"
+		"views views views views";
 	align-items: center;
 	column-gap: 6px;
 	padding: 3px 12px 6px;
@@ -631,6 +632,23 @@ body:has(dialog:modal) {
 }
 #session-bar-more {
 	grid-area: more;
+}
+#session-bar-views {
+	grid-area: views;
+	min-width: 0;
+	width: 100%;
+	padding-top: 2px;
+}
+#session-bar-views [role="tab"] {
+	container-type: inline-size;
+}
+@container (max-width: 76px) {
+	.session-view-label {
+		display: none;
+	}
+}
+.session-view-shortcut {
+	display: none;
 }
 
 /* ─── Compact route layout ─────────────────────────────────────────────────── */

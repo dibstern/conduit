@@ -30,6 +30,7 @@
   reason.
 -->
 <script lang="ts" generics="T extends string">
+	import type { Snippet } from "svelte";
 	import { Tabs } from "bits-ui";
 	import {
 		SEGMENTED_VARIANTS,
@@ -44,6 +45,8 @@
 		variant = "underline",
 		label,
 		class: className,
+		optionContent,
+		onValueChange,
 	}: {
 		/** The selected tab's value. */
 		value: T;
@@ -53,6 +56,9 @@
 		label: string;
 		/** Additional classes for the strip element. */
 		class?: string;
+		/** Custom contents for each tab; the label remains its accessible name. */
+		optionContent?: Snippet<[SegmentedOption<T>, boolean]>;
+		onValueChange?: (value: T) => void;
 	} = $props();
 
 	const recipe = $derived(SEGMENTED_VARIANTS[variant]);
@@ -66,6 +72,7 @@
 	{value}
 	onValueChange={(next) => {
 		value = next as T;
+		onValueChange?.(value);
 	}}
 >
 	<Tabs.List
@@ -77,9 +84,14 @@
 				value={option.value}
 				disabled={option.disabled}
 				data-testid={option.testId}
+				aria-label={optionContent ? option.label : undefined}
 				class={segmentedItemClass(variant, value === option.value)}
 			>
-				{option.label}
+				{#if optionContent}
+					{@render optionContent(option, value === option.value)}
+				{:else}
+					{option.label}
+				{/if}
 			</Tabs.Trigger>
 		{/each}
 	</Tabs.List>

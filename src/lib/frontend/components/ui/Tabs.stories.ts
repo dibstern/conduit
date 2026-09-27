@@ -1,5 +1,6 @@
 import type { Meta, StoryObj } from "@storybook/svelte-vite";
 import { expect, userEvent, within } from "storybook/test";
+import TabsSnippetHost from "./__fixtures__/TabsSnippetHost.svelte";
 import { SEGMENTED_VARIANT_NAMES } from "./segmented-styles.js";
 import Tabs from "./Tabs.svelte";
 
@@ -40,6 +41,25 @@ export const Pill: Story = {
 			{ value: "unified", label: "Unified" },
 			{ value: "split", label: "Split" },
 		],
+	},
+};
+
+export const CustomOptionContent: Story = {
+	render: (args) => ({ Component: TabsSnippetHost, props: args }),
+	parameters: { a11y: { test: "error" } },
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		const terminal = canvas.getByRole("tab", { name: "Terminal" });
+		await expect(canvas.getByTestId("content-chat")).toHaveTextContent(
+			"Chat selected",
+		);
+		await expect(terminal).toHaveTextContent("2");
+		await expect(terminal).toHaveTextContent("⌘J");
+		await expect(canvas.getByRole("tab", { name: "Diff" })).toBeDisabled();
+		await userEvent.click(terminal);
+		await expect(canvas.getByTestId("content-terminal")).toHaveTextContent(
+			"Terminal selected",
+		);
 	},
 };
 

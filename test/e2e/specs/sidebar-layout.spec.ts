@@ -129,6 +129,87 @@ test.describe("Sidebar Layout — Desktop", () => {
 test.describe("Sidebar Layout — Mobile", () => {
 	test.use({ viewport: { width: 375, height: 667 }, persistence: true });
 
+	test("mobile: session views switch without losing transcript or files position", async ({
+		page,
+		relayUrl,
+	}) => {
+		await page.setViewportSize({ width: 393, height: 852 });
+		await new AppPage(page).goto(relayUrl);
+		const band = page.getByTestId("session-bar-views");
+		const tabs = band.getByRole("tab");
+		await expect(tabs).toHaveCount(4);
+		for (const name of ["Chat", "Terminal", "Diff", "Files"]) {
+			await expect(band.getByRole("tab", { name })).toBeVisible();
+		}
+		const chat = band.getByRole("tab", { name: "Chat" });
+		const terminal = band.getByRole("tab", { name: "Terminal" });
+		const files = band.getByRole("tab", { name: "Files" });
+		await expect(chat).toHaveAttribute("aria-selected", "true");
+		await expect(band.getByRole("tab", { name: "Diff" })).toBeDisabled();
+		for (const tab of await tabs.all()) {
+			expect((await tab.boundingBox())?.height).toBeGreaterThanOrEqual(44);
+		}
+
+		const messages = page.locator("#messages");
+		await messages.evaluate((element) => {
+			const spacer = document.createElement("div");
+			spacer.style.height = "1200px";
+			element.firstElementChild?.append(spacer);
+			element.scrollTop = 180;
+		});
+		const scrollTop = await messages.evaluate((element) => element.scrollTop);
+		expect(scrollTop).toBeGreaterThan(0);
+		await terminal.click();
+		await expect(page.locator("#terminal-panel")).toBeVisible();
+		await expect(terminal).toHaveAttribute("aria-selected", "true");
+		await chat.click();
+		await expect(messages).toBeVisible();
+		await expect(chat).toHaveAttribute("aria-selected", "true");
+		expect(await messages.evaluate((element) => element.scrollTop)).toBe(
+			scrollTop,
+		);
+
+		await files.click();
+		await expect(page.locator("#sidebar-panel-files")).toBeVisible();
+		const folder = page
+			.locator("#sidebar-panel-files .fb-entry[aria-expanded]")
+			.first();
+		await expect(folder).toBeVisible();
+		await folder.click();
+		await expect(folder).toHaveAttribute("aria-expanded", "true");
+		await chat.click();
+		await files.click();
+		await expect(folder).toHaveAttribute("aria-expanded", "true");
+
+		await chat.click();
+		await page.setViewportSize({ width: 320, height: 852 });
+		await expect(tabs).toHaveCount(4);
+		for (const tab of await tabs.all()) await expect(tab).toBeVisible();
+		await expect(band.locator(".session-view-label").first()).toBeHidden();
+		expect(
+			(await page.getByTestId("session-bar-title").boundingBox())?.width,
+		).toBeGreaterThanOrEqual(110);
+		expect(
+			await band.evaluate((element) => element.scrollWidth),
+		).toBeLessThanOrEqual(
+			await band.evaluate((element) => element.clientWidth),
+		);
+		await messages.evaluate((element) => {
+			element.scrollTop = element.scrollHeight;
+		});
+		await messages.evaluate((element) => {
+			element.scrollTop = Math.max(0, element.scrollTop - 400);
+		});
+		await messages.evaluate((element) => {
+			element.scrollTop = element.scrollHeight;
+		});
+		await expect(page.getByTestId("session-bar")).toHaveAttribute(
+			"data-collapsed",
+			"true",
+		);
+		await expect(band).toHaveCount(0);
+	});
+
 	test("mobile: visible list and projects controls have 44px touch targets", async ({
 		page,
 		relayUrl,
