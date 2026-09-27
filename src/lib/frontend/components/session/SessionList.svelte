@@ -966,12 +966,12 @@
 			</div>
 		{:else}
 			{#if arrangement.pinned.length > 0}
-				<div class="session-group-label flex items-center uppercase pt-1.5 pb-0.5 px-3 text-xs font-semibold text-text-dimmer tracking-[0.3px] font-brand">Pinned</div>
+				<div class="session-group-label flex items-center uppercase pt-1.5 pb-0.5 px-3 text-xs font-semibold text-text-dimmer tracking-[0.3px] font-brand"><span>Pinned</span>{" "}<span class="ml-auto font-medium">{arrangement.pinned.length}</span></div>
 				{#each arrangement.pinned as s (s.id)}{@render sessionRow(s)}{/each}
 			{/if}
 			{#each arrangement.sections as section (section.key)}
 					<div class="session-group-label flex items-center uppercase pt-1.5 pb-0.5 px-3 text-xs font-semibold text-text-dimmer tracking-[0.3px] font-brand">
-						<span>{section.label}</span>
+						<span>{section.label}</span>{" "}<span class="ml-auto font-medium">{section.sessions.length}</span>
 					</div>
 					{#each section.sessions as s (s.id)}
 						{@render sessionRow(s)}
@@ -987,7 +987,7 @@
 					onclick={() => { if (!searching) setSnoozedShelfOpen(!uiState.snoozedShelfOpen); }}
 				>
 					<Icon name={snoozedShelfOpen ? "chevron-down" : "chevron-right"} size={12} />
-						<span class="uppercase">Snoozed</span>
+						<span class="uppercase">Snoozed</span>{" "}<span class="ml-auto font-medium">{arrangement.snoozed.length}</span>
 				</TextButton>
 				<div id="snoozed-shelf-rows">
 					{#if snoozedShelfOpen}
@@ -1007,7 +1007,7 @@
 					onclick={() => { if (!searching) setSettledShelfOpen(!uiState.settledShelfOpen); }}
 				>
 					<Icon name={settledShelfOpen ? "chevron-down" : "chevron-right"} size={12} />
-						<span class="uppercase">Settled</span>
+						<span class="uppercase">Settled</span>{" "}<span class="ml-auto font-medium">{arrangement.settled.length}</span>
 				</TextButton>
 				<div id="settled-shelf-rows">
 					{#if settledShelfOpen}

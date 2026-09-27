@@ -68,7 +68,10 @@ async function mockDaemonSearch(page: Page) {
 			const offset = cursor?.id
 				? matches.findIndex((row) => row.id === cursor.id) + 1
 				: 0;
-			const sessions = matches.slice(offset, offset + limit);
+			const sessions = matches.slice(offset, offset + limit).map((row) => ({
+				...row,
+				status: "idle" as const,
+			}));
 			const last = sessions.at(-1);
 			const hasMore = offset + limit < matches.length;
 			ws.send(

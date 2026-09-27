@@ -182,12 +182,12 @@ describe("session triage list", () => {
 		await fireEvent.scroll(screen.getByRole("region", { name: "Sessions" }));
 		expect(screen.queryByTestId("session-swipe-settle")).toBeNull();
 	});
-	it("keeps snoozed rows in a count-free shelf above Settled", async () => {
+	it("keeps snoozed rows in a counted shelf above Settled", async () => {
 		const until = new Date(2099, 9, 12, 9).getTime();
 		addSnoozedRow(until);
 		render(SessionList);
 		const toggle = screen.getByTestId("snoozed-shelf-toggle");
-		expect(toggle.textContent?.trim()).toBe("Snoozed");
+		expect(toggle.textContent?.trim()).toMatch(/^Snoozed\s+1$/);
 		expect(toggle.getAttribute("aria-expanded")).toBe("false");
 		expect(toggle.getAttribute("aria-controls")).toBe("snoozed-shelf-rows");
 		expect(screen.queryByText("Sleeping work")).toBeNull();
@@ -263,11 +263,11 @@ describe("session triage list", () => {
 			vi.useRealTimers();
 		}
 	});
-	it("places Pinned first and hides settled rows behind a count-free disclosure", () => {
+	it("places Pinned first and hides settled rows behind a counted disclosure", () => {
 		const { container } = render(SessionList);
 		expect(
 			container.querySelector(".session-group-label")?.textContent?.trim(),
-		).toBe("Pinned");
+		).toMatch(/^Pinned\s+1$/);
 		expect(
 			container
 				.querySelector("[data-session-id]")
@@ -275,7 +275,7 @@ describe("session triage list", () => {
 		).toBe("pin");
 		expect(screen.queryByText("Finished work")).toBeNull();
 		const toggle = screen.getByTestId("settled-shelf-toggle");
-		expect(toggle.textContent?.trim()).toBe("Settled");
+		expect(toggle.textContent?.trim()).toMatch(/^Settled\s+1$/);
 		expect(toggle.getAttribute("aria-expanded")).toBe("false");
 		expect(
 			document.getElementById(toggle.getAttribute("aria-controls") ?? ""),
