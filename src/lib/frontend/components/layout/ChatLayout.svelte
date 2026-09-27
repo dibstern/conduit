@@ -64,6 +64,7 @@
 	import { fetchCurrentVersion } from "../../stores/version.svelte.js";
 	import type { RelayMessage } from "../../types.js";
 	import { toggleSessionRead } from "../../utils/session-read.js";
+	import DeepSearch from "../session/DeepSearch.svelte";
 
 	// ─── Local state ──────────────────────────────────────────────────────────
 
@@ -787,6 +788,7 @@
 <!-- Global overlays + notification stack (outside layout for proper z-index stacking) -->
 <ImageLightbox />
 <NotificationStack />
+<DeepSearch />
 <QrModal visible={qrVisible} onClose={handleQrClose} />
 <SettingsPanel visible={settingsVisible} initialTab={settingsInitialTab} onClose={() => (settingsVisible = false)} />
 {#if featureFlags.debug}

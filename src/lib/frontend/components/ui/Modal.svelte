@@ -20,7 +20,7 @@
 		placement?: "center" | "sheet" | undefined;
 		/** Drop the panel's side padding so list rows run edge to edge. */
 		flush?: boolean | undefined;
-		/** Focus target after a sheet dismisses. */
+		/** Focus target after dismissal. */
 		returnFocus?: (() => HTMLElement | null) | undefined;
 		/** Escape + backdrop-click dismissal. Default true. The close button is gated by `showClose`. */
 		dismissible?: boolean | undefined;
@@ -121,7 +121,7 @@
 		<Dialog.Content
 			aria-label={resolvedTitle ? undefined : ariaLabel}
 			onCloseAutoFocus={(event) => {
-				const target = placement === "sheet" ? returnFocus?.() : null;
+				const target = returnFocus?.();
 				if (target?.isConnected) {
 					event.preventDefault();
 					target.focus();

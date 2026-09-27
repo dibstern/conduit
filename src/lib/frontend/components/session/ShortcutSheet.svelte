@@ -14,6 +14,7 @@
 		["1–9 / 0", "Project scope / all projects"],
 		["/", "Search sessions"],
 		["⌘P", "Choose project scope"],
+		["⌘K", "Search every session"],
 		["⌘⇧U", "Open session read / unread"],
 		["⌘Z", "Undo latest action"],
 		["?", "Show keyboard shortcuts"],
