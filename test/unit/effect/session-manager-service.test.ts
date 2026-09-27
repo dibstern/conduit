@@ -184,7 +184,11 @@ function makeReadQueryEffect(
 		),
 		getSessionLineage: vi.fn(() =>
 			Effect.succeed({
-				rows: rows.map(({ id, parent_id }) => ({ id, parent_id })),
+				rows: rows.map(({ id, parent_id, unread }) => ({
+					id,
+					parent_id,
+					unread: unread ?? 0,
+				})),
 				count: rows.length,
 			}),
 		),

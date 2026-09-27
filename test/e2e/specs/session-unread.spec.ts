@@ -16,6 +16,7 @@ import type { ReplayHarness } from "../helpers/e2e-harness.js";
 import { expect, gotoRelay, test } from "../helpers/replay-fixture.js";
 import { AppPage } from "../page-objects/app.page.js";
 import { ChatPage } from "../page-objects/chat.page.js";
+import { SidebarPage } from "../page-objects/sidebar.page.js";
 
 type Provider = "opencode" | "claude";
 type Windows = { readonly A: Page; readonly B: Page };
@@ -58,6 +59,9 @@ const row = (page: Page, sessionId: string) =>
 const dot = (page: Page, sessionId: string) =>
 	row(page, sessionId).getByTestId("session-unread-dot");
 
+const unreadCount = (page: Page) =>
+	page.getByTestId("session-filter-chip-unread").locator("b");
+
 async function expectDot(windows: Windows, sessionId: string, shown: boolean) {
 	for (const page of [windows.A, windows.B])
 		await expect(dot(page, sessionId)).toHaveCount(shown ? 1 : 0);
@@ -95,8 +99,9 @@ class Report {
 	}
 
 	// Versions become "turn end N" of their session, which is stable across
-	// runs; anything that is not a turn end stays raw and so fails the golden.
-	async check(testInfo: TestInfo, name: "lifecycle" | "sub-agent") {
+	// runs, or "before turn end N" for a mark unread; anything else stays raw
+	// and so fails the golden.
+	async check(testInfo: TestInfo, name: "lifecycle" | "sub-agent" | "fork") {
 		const file = `${this.provider}-${name}-report.json`;
 		await testInfo.attach(file, {
 			body: JSON.stringify(this.entries, null, 2),
@@ -104,12 +109,15 @@ class Report {
 		});
 		const label = (sessionId: string, version: number | null) => {
 			if (version === null) return null;
-			const index = turnEnds(this.harness, sessionId).indexOf(version);
-			return index === -1 ? `v${version}` : `turn end ${index + 1}`;
+			const ends = turnEnds(this.harness, sessionId);
+			const index = ends.indexOf(version);
+			if (index !== -1) return `turn end ${index + 1}`;
+			const next = ends.indexOf(version + 1);
+			return next === -1 ? `v${version}` : `before turn end ${next + 1}`;
 		};
 		const normalised = this.entries.map(({ sessionId, ...entry }) => ({
 			...entry,
-			session: sessionId === this.entries[0]?.sessionId ? "root" : "sub-agent",
+			session: sessionId === this.entries[0]?.sessionId ? "root" : name,
 			lastTurnEndVersion: label(sessionId, entry.lastTurnEndVersion),
 			seenVersion: label(sessionId, entry.seenVersion),
 		}));
@@ -296,6 +304,91 @@ test.describe("Session unread dot", () => {
 			await report.record("sub-agent", windows, parentId);
 			await report.record("sub-agent", windows, childId);
 			await report.check(testInfo, "sub-agent");
+			await windows.B.context().close();
+		});
+		// Counts group by root conversation: the sidebar lists roots only, so a
+		// fork's unread turn end lifts its root's row, and a root and fork both
+		// unread still count once. The root is seeded from the mock's stream so
+		// it is an OpenCode row: this lane's initial session is recorded as
+		// Claude, and a Claude fork copies the SDK transcript on disk, which a
+		// replay does not have.
+		test("a root with an unread fork counts once", async ({
+			page,
+			browser,
+			relayUrl,
+			harness,
+		}, testInfo) => {
+			const rootId = "ses_e2e_root";
+			const forkId = "ses_e2e_fork";
+			const now = Date.now();
+			harness.mock.setExactResponse("POST", `/session/${rootId}/fork`, 200, {
+				id: forkId,
+				projectID: "e2e",
+				directory: process.cwd(),
+				title: "Fork",
+				version: "1",
+				time: { created: now, updated: now },
+			});
+			const report = new Report("opencode", harness);
+			const { windows } = await openWindows(page, browser, relayUrl);
+			const expectUnreadCount = async (count: number) => {
+				for (const window of [windows.A, windows.B])
+					await expect(unreadCount(window)).toHaveText(String(count));
+			};
+
+			await test.step("a seen root counts zero", async () => {
+				// A session's first streamed event seeds its row.
+				await endTurn("opencode", windows, harness, rootId, "First turn");
+				await expectDot(windows, rootId, true);
+				await row(windows.B, rootId).click();
+				await expectDot(windows, rootId, false);
+				await expectUnreadCount(0);
+				await report.record("root seen", windows, rootId);
+			});
+
+			await test.step("a fork's turn end lifts its seen root", async () => {
+				await new SidebarPage(windows.A).openContextMenu(rootId);
+				await windows.A.getByTestId("session-ctx-fork").click();
+				await expect
+					.poll(
+						() =>
+							query<{ id: string }>(
+								harness,
+								"SELECT id FROM sessions WHERE id = ? AND parent_id = ? AND (fork_point_event IS NOT NULL OR fork_point_timestamp IS NOT NULL)",
+								forkId,
+								rootId,
+							).length,
+					)
+					.toBe(1);
+				await endTurn("opencode", windows, harness, forkId, "Fork turn");
+				await expectDot(windows, rootId, true);
+				await expectUnreadCount(1);
+				await report.record("fork unread", windows, rootId);
+				await report.record("fork unread", windows, forkId);
+			});
+
+			await test.step("root and fork both unread count once", async () => {
+				// The recording has two turns and both are spent, so the root goes
+				// unread again by hand.
+				await new SidebarPage(windows.A).openContextMenu(rootId);
+				await windows.A.getByTestId("session-ctx-mark-unread").click();
+				await expect
+					.poll(
+						() =>
+							query<{ unread: number }>(
+								harness,
+								"SELECT unread FROM sessions WHERE id = ?",
+								rootId,
+							)[0]?.unread,
+					)
+					.toBe(1);
+				await expectDot(windows, rootId, true);
+				await expectUnreadCount(1);
+				await report.record("both unread", windows, rootId);
+				await report.record("both unread", windows, forkId);
+			});
+
+			await report.check(testInfo, "fork");
 			await windows.B.context().close();
 		});
 	});

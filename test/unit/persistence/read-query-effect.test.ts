@@ -566,8 +566,8 @@ describe("ReadQueryEffect session families", () => {
 				expect(lineage.rows).toHaveLength(5);
 				expect(lineage.rows).toEqual(
 					expect.arrayContaining([
-						{ id: "root", parent_id: null },
-						{ id: "grandchild", parent_id: "child" },
+						{ id: "root", parent_id: null, unread: 0 },
+						{ id: "grandchild", parent_id: "child", unread: 0 },
 					]),
 				);
 			}).pipe(Effect.provide(testLayer)),

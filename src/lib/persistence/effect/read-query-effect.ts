@@ -62,6 +62,8 @@ export const sessionRowsToSessionInfoList = (
 		readonly now?: number;
 		readonly statuses?: Readonly<Record<string, { type: string }>>;
 		readonly parentMap?: ReadonlyMap<string, string>;
+		/** Unread sessions anywhere in the lineage; a root's dot rolls up its forks. */
+		readonly unreadSessionIds?: ReadonlySet<string>;
 		readonly pendingQuestionCounts?: ReadonlyMap<string, number>;
 		readonly pendingPermissionCounts?: ReadonlyMap<string, number>;
 		readonly hasLiveBackgroundWork?: (sessionId: string) => boolean;
@@ -69,7 +71,12 @@ export const sessionRowsToSessionInfoList = (
 ): Array<SessionInfo & { readonly updatedAt: number }> => {
 	const subtree = new Map<
 		string,
-		{ processing: boolean; questions: number; permissions: number }
+		{
+			processing: boolean;
+			unread: boolean;
+			questions: number;
+			permissions: number;
+		}
 	>();
 	if (opts.parentMap) {
 		const rowStatuses = new Map(rows.map((row) => [row.id, row.status]));
@@ -85,6 +92,7 @@ export const sessionRowsToSessionInfoList = (
 			}
 			const state = subtree.get(root) ?? {
 				processing: false,
+				unread: false,
 				questions: 0,
 				permissions: 0,
 			};
@@ -93,6 +101,7 @@ export const sessionRowsToSessionInfoList = (
 				status === "busy" ||
 				status === "retry" ||
 				opts.hasLiveBackgroundWork?.(id) === true;
+			state.unread ||= opts.unreadSessionIds?.has(id) === true;
 			state.questions += opts.pendingQuestionCounts?.get(id) ?? 0;
 			state.permissions += opts.pendingPermissionCounts?.get(id) ?? 0;
 			subtree.set(root, state);
@@ -117,7 +126,7 @@ export const sessionRowsToSessionInfoList = (
 		else if ((pendingQuestionCount ?? 0) > 0) attention = "needs-reply";
 		else if (row.last_turn_error_at !== null) attention = "error";
 		else if (processing) attention = "working";
-		else if (unread) attention = "done-unread";
+		else if (state?.unread || unread) attention = "done-unread";
 		return {
 			id: row.id,
 			title: row.title,
@@ -212,7 +221,11 @@ export interface ReadQueryEffect {
 
 	readonly getSessionLineage: () => Effect.Effect<
 		{
-			rows: readonly { id: string; parent_id: string | null }[];
+			rows: readonly {
+				id: string;
+				parent_id: string | null;
+				unread: number;
+			}[];
 			count: number;
 		},
 		ReadQueryEffectError | SqlError
@@ -475,8 +488,12 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 
 	const getSessionLineage = () =>
 		Effect.gen(function* () {
-			const rows = yield* sql<{ id: string; parent_id: string | null }>`
-				SELECT id, parent_id FROM sessions`;
+			const rows = yield* sql<{
+				id: string;
+				parent_id: string | null;
+				unread: number;
+			}>`
+				SELECT id, parent_id, unread FROM sessions`;
 			const counts = yield* sql<{ count: number }>`
 				SELECT COUNT(*) AS count FROM sessions`;
 			return { rows, count: counts[0]?.count ?? 0 };
@@ -532,6 +549,9 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 					lineage.rows.flatMap((row) =>
 						row.parent_id === null ? [] : [[row.id, row.parent_id] as const],
 					),
+				),
+				unreadSessionIds: new Set(
+					lineage.rows.flatMap((row) => (row.unread === 1 ? [row.id] : [])),
 				),
 				statuses: {
 					...Object.fromEntries(
@@ -745,6 +765,9 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 									? []
 									: [[row.id, row.parent_id] as const],
 							),
+						),
+						unreadSessionIds: new Set(
+							lineage.rows.flatMap((row) => (row.unread === 1 ? [row.id] : [])),
 						),
 						statuses: Object.fromEntries(
 							Object.entries(projectedStatuses).map(([id, type]) => [
