@@ -12,9 +12,14 @@ export default defineConfig({
 	forbidOnly: !!process.env["CI"],
 	retries: 0,
 	workers: 1,
+	// require-tests-reporter fails a run where every test skipped (conduit-test-g49a).
 	reporter: process.env["CI"]
-		? [["github"], ["html", { open: "never" }]]
-		: "list",
+		? [
+				["github"],
+				["html", { open: "never" }],
+				["./helpers/require-tests-reporter.ts"],
+			]
+		: [["list"], ["./helpers/require-tests-reporter.ts"]],
 
 	timeout: 120_000,
 	expect: { timeout: 60_000 },
