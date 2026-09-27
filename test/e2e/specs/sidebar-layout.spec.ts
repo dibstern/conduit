@@ -186,7 +186,10 @@ test.describe("Sidebar Layout — Mobile", () => {
 		await menu.getByRole("menuitem", { name: "Terminal" }).click();
 		await expect(page.locator("#terminal-panel")).toBeVisible();
 		await expect(menu).toBeHidden();
-		await expect(overflow).toBeFocused();
+		// Picking Terminal moves focus into the terminal rather than back to the opener.
+		await expect(
+			page.getByRole("textbox", { name: "Terminal input" }),
+		).toBeFocused();
 		await page.getByTestId("session-view-chat").click();
 		const messages = page.locator("#messages");
 		await messages.evaluate((element) => {
