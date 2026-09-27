@@ -108,9 +108,11 @@
 	// Paging sentinel, observed by SessionPager.
 	let sentinelEl: HTMLElement | undefined = $state();
 
-	// Cleanup mode state
-	let cleanupMode = $state(false);
-	let selectedForDeletion = $state<Set<string>>(new Set());
+	// Select mode includes both settle and the former cleanup/delete flow.
+	// Two modes putting checkboxes on the same rows would be two ways to do one thing.
+	const selectMode = $derived(uiState.selectMode);
+	let selectedSessionIds = $state<Set<string>>(new Set());
+	let settlePending = $state(false);
 
 	// ─── Derived ────────────────────────────────────────────────────────────────
 
@@ -135,9 +137,6 @@
 	// Chips count only live rows: settled and snoozed sets grow without bound.
 	const live = $derived(filtered.filter((session) => session.settledAt == null && !isSessionSnoozed(session, sessionState.now)));
 
-	const cleanupCandidates = $derived(
-		matching.filter((session) => !isForeignSession(session)),
-	);
 	const isEmpty = $derived(matching.length === 0);
 	const searching = $derived(sessionState.searchQuery.trim().length > 0);
 	const settledShelfOpen = $derived(searching || uiState.settledShelfOpen);
@@ -148,6 +147,10 @@
 		...(snoozedShelfOpen ? arrangement.snoozed.map((session) => session.id) : []),
 		...(settledShelfOpen ? arrangement.settled.map((session) => session.id) : []),
 	]);
+	const selectCandidates = $derived.by(() => {
+		const shown = new Set(visibleRowIds);
+		return matching.filter((session) => shown.has(session.id) && !isForeignSession(session));
+	});
 
 	const scope = $derived(getSessionScope());
 	const emptyMessage = $derived.by(() => {
@@ -175,10 +178,10 @@
 			: sessionState.searchLoading,
 	);
 
-	const selectionCount = $derived(selectedForDeletion.size);
+	const selectionCount = $derived(selectedSessionIds.size);
 	const allSelected = $derived(
-		cleanupCandidates.length > 0 &&
-			cleanupCandidates.every((s) => selectedForDeletion.has(s.id)),
+		selectCandidates.length > 0 &&
+			selectCandidates.every((s) => selectedSessionIds.has(s.id)),
 	);
 
 	const unavailableProjectLabels = $derived(
@@ -187,11 +190,11 @@
 
 	// Prune stale selections when the session list changes externally
 	$effect(() => {
-		if (!cleanupMode) return;
-		const validIds = new Set(cleanupCandidates.map((s) => s.id));
-		const pruned = new Set([...selectedForDeletion].filter((id) => validIds.has(id)));
-		if (pruned.size !== selectedForDeletion.size) {
-			selectedForDeletion = pruned;
+		if (!selectMode) return;
+		const validIds = new Set(selectCandidates.map((s) => s.id));
+		const pruned = new Set([...selectedSessionIds].filter((id) => validIds.has(id)));
+		if (pruned.size !== selectedSessionIds.size) {
+			selectedSessionIds = pruned;
 		}
 	});
 
@@ -207,11 +210,10 @@
 		if (query.trim()) requestRemoteSearch(query);
 	});
 
-	// Exit cleanup mode when session list becomes empty
+	// Exit select mode when the shown list becomes empty.
 	$effect(() => {
-		if (cleanupMode && isEmpty) {
-			cleanupMode = false;
-			selectedForDeletion = new Set();
+		if (selectMode && visibleRowIds.length === 0 && !pagerLoading) {
+			resetSelectMode();
 		}
 	});
 
@@ -478,7 +480,14 @@
 	}
 
 	function handleListKeydown(event: KeyboardEvent) {
-		if (event.defaultPrevented || event.repeat || event.altKey || cleanupMode) return;
+		if (selectMode) {
+			if (event.key === "Escape" && event.target instanceof Element && event.target.closest("#session-list")) {
+				event.preventDefault();
+				resetSelectMode();
+			}
+			return;
+		}
+		if (event.defaultPrevented || event.repeat || event.altKey) return;
 		if (!window.matchMedia("(hover: hover) and (pointer: fine)").matches) return;
 		if (isEditable(event.target) || document.querySelector('[role="dialog"], [role="menu"]') || renamingSessionId) return;
 		if ((event.metaKey || event.ctrlKey) && !event.shiftKey && event.key.toLowerCase() === "z") {
@@ -586,37 +595,66 @@
 		}).catch(() => showToast("Failed to fork session", { variant: "error" }));
 	}
 
-	function resetCleanupMode() {
-		cleanupMode = false;
-		selectedForDeletion = new Set();
+	function resetSelectMode() {
+		uiState.selectMode = false;
+		selectedSessionIds = new Set();
 	}
 
-	function handleEnterCleanup() {
-		cleanupMode = true;
-		selectedForDeletion = new Set();
-		if (localSearchValue) clearSearch();
-	}
-
-	function handleExitCleanup() {
-		resetCleanupMode();
+	function handleEnterSelect(id?: string) {
+		selectedSessionIds = id ? new Set([id]) : new Set();
+		uiState.selectMode = true;
 	}
 
 	function handleToggleSelection(id: string) {
-		const next = new Set(selectedForDeletion);
+		const next = new Set(selectedSessionIds);
 		if (next.has(id)) {
 			next.delete(id);
 		} else {
 			next.add(id);
 		}
-		selectedForDeletion = next;
+		selectedSessionIds = next;
 	}
 
 	function handleToggleSelectAll() {
 		if (allSelected) {
-			selectedForDeletion = new Set();
+			selectedSessionIds = new Set();
 		} else {
-			selectedForDeletion = new Set(cleanupCandidates.map((s) => s.id));
+			selectedSessionIds = new Set(selectCandidates.map((s) => s.id));
 		}
+	}
+
+	async function handleBulkSettle() {
+		const projectSlug = getCurrentSlug();
+		if (!projectSlug || selectionCount === 0 || settlePending) return;
+		const ids = [...selectedSessionIds].filter((id) =>
+			selectCandidates.some((session) => session.id === id && session.settledAt == null),
+		);
+		if (ids.length === 0) {
+			resetSelectMode();
+			showToast("No sessions to settle");
+			return;
+		}
+		const input = ids.map((sessionId) => ({ projectSlug, sessionId, originId: getBrowserClientId() }));
+		settlePending = true;
+		const results = await Promise.allSettled(input.map((session) => setSessionSettledRpc({ ...session, settled: true })));
+		settlePending = false;
+		const settled = input.filter((_, index) => results[index]?.status === "fulfilled");
+		resetSelectMode();
+		const count = settled.length;
+		const message = count === ids.length
+			? `Settled ${count} ${count === 1 ? "session" : "sessions"}`
+			: `Settled ${count} of ${ids.length} ${ids.length === 1 ? "session" : "sessions"}`;
+		showToast(message, {
+			duration: 5000,
+			...(count > 0 ? { action: {
+				label: "Undo",
+				run: () => {
+					void Promise.allSettled(settled.map((session) => setSessionSettledRpc({ ...session, settled: false }))).then((undoResults) => {
+						if (undoResults.some((result) => result.status === "rejected")) showToast("Couldn't undo", { variant: "error" });
+					});
+				},
+			} } : {}),
+		});
 	}
 
 	async function handleBulkDelete() {
@@ -630,8 +668,8 @@
 			const projectSlug = getCurrentSlug();
 			if (!projectSlug) return;
 			// Snapshot the ids, then clear selection so the UI responds at once.
-			const ids = [...selectedForDeletion];
-			resetCleanupMode();
+			const ids = [...selectedSessionIds];
+			resetSelectMode();
 			const results = await Promise.allSettled(
 				ids.map((id) =>
 					deleteSessionRpc({
@@ -671,58 +709,14 @@
 			ondismiss={() => { routerState.sessionNotFound = false; }}
 		/>
 	{/if}
-	<!-- Session list header — cleanup mode (fixed, outside scroll) -->
-	{#if cleanupMode}
-		<div class="shrink-0 px-2 pb-1 bg-bg-surface">
-			<div class="session-list-header flex items-center justify-between px-2 py-1">
-				<TextButton
-					type="button"
-					title={allSelected ? "Deselect all sessions" : "Select all sessions"}
-				tone="dimmer" class="flex items-center gap-1.5 min-h-[44px] min-w-[44px] md:min-h-0 md:min-w-0 text-sm font-semibold transition-colors duration-100 font-brand"
-				onclick={handleToggleSelectAll}
-				>
-					<Icon name={allSelected ? "circle-check" : "circle"} size={14} />
-					<span>{allSelected ? "Deselect all" : "Select all"}</span>
-				</TextButton>
-				<TextButton
-					type="button"
-					title="Exit cleanup mode"
-				tone="dimmer" class="min-h-[44px] min-w-[44px] md:min-h-0 md:min-w-0 text-sm font-semibold transition-colors duration-100 font-brand"
-				onclick={handleExitCleanup}
-				>
-					Cancel
-				</TextButton>
-			</div>
-			<div class="px-2">
-				<!--
-					The parent stays a plain block on purpose. A raw button element is
-					`inline-block` by default, so this control already sits on a line box
-					and already carries the descender gap below it; BASE's `inline-flex`
-					is inline-level too, so nothing moves. (Contrast file/FileTreeNode,
-					where the as-found class list said `flex` -- block-level -- and the
-					swap DID need a `flex flex-col` wrapper.) Making this parent a flex
-					column would close a gap that is currently there, which is a diff.
-					`disabledStyle="undimmed"` because the as-found disabled state does
-					not dim: it only swaps the colour set through the expression below.
-				-->
-				<Button
-					variant="ghost"
-					size="content"
-					tone="inherit"
-					hoverFill="none"
-					disabledStyle="undimmed"
-					disabled={selectionCount === 0}
-					class="w-full min-h-[44px] md:min-h-0 py-1.5 px-4 rounded-lg text-xs font-medium border duration-100 font-brand {selectionCount >
-					0
-						? 'bg-error/10 text-error border-error/20 hover:bg-error/20'
-						: 'bg-transparent text-text-dimmer border-border-subtle cursor-default'}"
-					onclick={handleBulkDelete}
-				>
-					{selectionCount > 0
-						? `Delete ${selectionCount === 1 ? "1 session" : `${selectionCount} sessions`}`
-						: "Select sessions to delete"}
-				</Button>
-			</div>
+	<!-- Select-mode header stays outside the scroller. -->
+	{#if selectMode}
+		<div class="session-list-header flex shrink-0 items-center gap-2 px-4 py-1 bg-bg-surface font-brand">
+			<span class="min-w-0 flex-1 text-sm font-semibold">{selectionCount} selected</span>
+			<TextButton type="button" title={allSelected ? "Select none" : "Select all"} tone="dimmer" class="min-h-[44px] min-w-[44px] md:min-h-0 md:min-w-0 text-sm font-semibold" onclick={handleToggleSelectAll}>
+				{allSelected ? "None" : "All"}
+			</TextButton>
+			<TextButton type="button" title="Done selecting" tone="dimmer" class="min-h-[44px] min-w-[44px] md:min-h-0 md:min-w-0 text-sm font-semibold" onclick={resetSelectMode}>Done</TextButton>
 		</div>
 	{:else}
 		<div class="shrink-0 px-2">
@@ -753,26 +747,25 @@
 						class={TOOLBAR_ICON_BOX}
 						iconOnly
 						iconSize={14}
-						icon="trash-2"
-						title="Cleanup sessions"
-						ariaLabel="Cleanup sessions"
-						onclick={handleEnterCleanup}
+						icon="circle-check"
+						title="Select sessions"
+						ariaLabel="Select sessions"
+						onclick={() => handleEnterSelect()}
 					/>
 				</div>
 			</div>
 		</div>
 	{/if}
 
-	{#if !cleanupMode}
-		<div id="session-search" class="shrink-0 px-2.5 py-1 pb-1.5">
-			<SessionSearchField
-				value={localSearchValue}
-				oninput={handleSearchInput}
-				onescape={clearSearch}
-				{onaddproject}
-			/>
-		</div>
-		<div class="flex shrink-0 items-center gap-1 px-2.5 pb-1.5">
+	<div id="session-search" class="shrink-0 px-2.5 py-1 pb-1.5">
+		<SessionSearchField
+			value={localSearchValue}
+			oninput={handleSearchInput}
+			onescape={clearSearch}
+			{onaddproject}
+		/>
+	</div>
+	<div class="flex shrink-0 items-center gap-1 px-2.5 pb-1.5">
 			<div class="flex min-w-0 flex-1 items-center gap-1.5 overflow-x-auto whitespace-nowrap [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
 				{#if grouping !== "status"}
 					<Button
@@ -804,9 +797,7 @@
 				{/each}
 			</div>
 			{#if !sessionViewState.compact}<SessionGroupMenu />{/if}
-		</div>
-	{/if}
-
+	</div>
 	{#if searchSummary}
 		<!-- Outside the search-input block: the count belongs to the results, and
 		     the input's visibility is local component state. -->
@@ -824,7 +815,7 @@
 	     keyboard-only user cannot scroll it at all (axe scrollable-region-focusable);
 	     Svelte's non-interactive-tabindex heuristic does not model that case.
 	     Labelled by string rather than by the "Sessions" heading, which does not exist
-	     in cleanup mode and would leave the idref dangling. -->
+	     in select mode and would leave the idref dangling. -->
 	<!-- One row, rendered by every section. It is a snippet rather than a copy
 	     per section because the row is about to grow: the shelves and the
 	     per-row verbs each land in their own ticket, and copies would mean one
@@ -833,7 +824,7 @@
 		{@const settled = s.pinnedAt == null && s.settledAt != null}
 		{@const snoozed = !settled && s.pinnedAt == null && isSessionSnoozed(s, sessionState.now)}
 		{#if isForeignSession(s)}
-			<!-- Rename, most context-menu verbs and cleanup selection all
+			<!-- Rename, most context-menu verbs and select-mode selection all
 			     RPC the relay this socket is attached to, so handing them a session
 			     owned by another project would act on the wrong relay. Withholding
 			     the handlers is what makes the row inert instead of wrong. The menu
@@ -872,8 +863,8 @@
 				branch={s.git?.branch}
 				active={s.id === sessionState.currentId}
 				renaming={s.id === renamingSessionId}
-				{cleanupMode}
-				selected={selectedForDeletion.has(s.id)}
+				{selectMode}
+				selected={selectedSessionIds.has(s.id)}
 				heldSessionId={heldSessionId}
 				menuOpen={ctxMenuSession?.id === s.id}
 				onholdchange={(id) => { heldSessionId = id; }}
@@ -985,10 +976,30 @@
 			</div>
 		{/if}
 	</div>
+	{#if selectMode}
+		<div data-testid="select-bar" class="flex shrink-0 gap-2 border-t border-border bg-bg-surface px-3 py-2 font-brand">
+			<Button
+				variant="primary" size="content" disabledStyle="none"
+				disabled={selectionCount === 0 || settlePending}
+				data-testid="select-bar-settle"
+				ariaLabel={selectionCount > 0 ? `Settle ${selectionCount} ${selectionCount === 1 ? "session" : "sessions"}` : "Settle"}
+				class="w-1/2 min-h-[44px] justify-center gap-1.5 rounded-lg font-semibold disabled:opacity-[0.35] disabled:cursor-default"
+				onclick={() => { void handleBulkSettle(); }}
+			><Icon name="check" size={14} /> Settle</Button>
+			<Button
+				variant="ghost" size="content" tone="inherit" hoverFill="none" disabledStyle="none"
+				disabled={selectionCount === 0 || settlePending}
+				data-testid="select-bar-delete"
+				ariaLabel={selectionCount > 0 ? `Delete ${selectionCount} ${selectionCount === 1 ? "session" : "sessions"}` : "Delete"}
+				class="w-1/2 min-h-[44px] justify-center gap-1.5 rounded-lg border border-error/20 bg-error/10 text-error font-semibold disabled:opacity-[0.35] disabled:cursor-default"
+				onclick={handleBulkDelete}
+			><Icon name="trash-2" size={14} /> Delete</Button>
+		</div>
+	{/if}
 </div>
 
 <!-- Session context menu (rendered outside the scrollable area for proper z-index) -->
-{#if !cleanupMode && ctxMenuSession && ctxMenuAnchor}
+{#if !selectMode && ctxMenuSession && ctxMenuAnchor}
 	<SessionContextMenu
 		session={ctxMenuSession}
 		anchor={ctxMenuAnchor}
@@ -998,6 +1009,7 @@
 		presentation={ctxMenuPresentation}
 		now={sessionState.now}
 		onrename={handleCtxRename}
+		onselect={(id) => handleEnterSelect(id)}
 		onsettle={(_id, next) => { if (ctxMenuSession) void handleCtxSettle(ctxMenuSession, next); }}
 		onautosettle={(_id, disabled) => { if (ctxMenuSession) void handleCtxAutoSettle(ctxMenuSession, disabled); }}
 		onpin={(_id, next) => { if (ctxMenuSession) void handleCtxPin(ctxMenuSession, next); }}

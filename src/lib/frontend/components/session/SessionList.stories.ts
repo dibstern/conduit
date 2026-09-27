@@ -16,6 +16,7 @@ import { mockSessionsAllGroups } from "../../stories/mocks.js";
 import SessionList from "./SessionList.svelte";
 
 function resetSessionState() {
+	uiState.selectMode = false;
 	uiState.settledShelfOpen = false;
 	uiState.snoozedShelfOpen = false;
 	sessionState.rootSessions = [];
@@ -48,6 +49,7 @@ const meta = {
 	beforeEach: () => {
 		resetSessionState();
 		return () => {
+			uiState.selectMode = false;
 			attachedProjectState.slug = null;
 			routerState.search = "";
 		};
@@ -58,6 +60,31 @@ export default meta;
 type Story = StoryObj<typeof meta>;
 
 export const Empty: Story = {};
+
+export const SelectMode: Story = {
+	name: "Select mode, two selected",
+	beforeEach: () => {
+		sessionState.rootSessions = [
+			{ id: "select-one", title: "Review build logs", attention: "idle" },
+			{ id: "select-two", title: "Prepare release", attention: "idle" },
+		];
+		sessionState.familySessions = [...sessionState.rootSessions];
+		uiState.selectMode = true;
+	},
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		await userEvent.click(
+			canvas.getByRole("checkbox", { name: "Select Review build logs" }),
+		);
+		await userEvent.click(
+			canvas.getByRole("checkbox", { name: "Select Prepare release" }),
+		);
+		await expect(canvas.getByText("2 selected")).toBeVisible();
+		await expect(canvas.getByTestId("select-bar")).toBeVisible();
+		// A pointer tap leaves no ring on a phone; do not bake one into the baseline.
+		(document.activeElement as HTMLElement | null)?.blur();
+	},
+};
 
 const SNOOZE_STORY_NOW = new Date(2030, 9, 7, 9).getTime();
 

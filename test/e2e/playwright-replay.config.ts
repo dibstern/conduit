@@ -16,6 +16,7 @@ export default defineConfig({
 		"smoke.spec.ts",
 		"sessions.spec.ts",
 		"session-triage.spec.ts",
+		"session-select-mode.spec.ts",
 		"session-auto-settle.spec.ts",
 		"session-arrange.spec.ts",
 		"session-snooze.spec.ts",

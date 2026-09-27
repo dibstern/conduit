@@ -163,6 +163,14 @@
 					/>
 				{/snippet}
 				<MenuItem
+					title="Select"
+					data-testid="list-overflow-select"
+					class="min-h-[44px] md:min-h-0"
+					onselect={() => { uiState.selectMode = true; }}
+				>
+					Select
+				</MenuItem>
+				<MenuItem
 					title="Projects"
 					data-testid="list-overflow-projects"
 					class="min-h-[44px] md:min-h-0"

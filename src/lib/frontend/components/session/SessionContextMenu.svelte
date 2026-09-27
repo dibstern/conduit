@@ -22,6 +22,7 @@
 		branch,
 		presentation = "menu",
 		onrename,
+		onselect,
 		onsettle,
 		onautosettle,
 		onpin,
@@ -42,6 +43,7 @@
 		branch?: string | undefined;
 		presentation?: "menu" | "sheet";
 		onrename: (id: string) => void;
+		onselect?: (id: string) => void;
 		onsettle: (id: string, next: boolean) => void;
 		onautosettle: (id: string, disabled: boolean) => void;
 		onpin: (id: string, next: boolean) => void;
@@ -71,7 +73,7 @@
 	type Verb = {
 		testId: string;
 		label: string;
-		icon?: "undo" | "check" | "moon" | "star-off" | "star" | "circle" | "circle-dot" | "pencil" | "git-fork" | "copy";
+		icon?: "undo" | "check" | "moon" | "star-off" | "star" | "circle" | "circle-dot" | "circle-check" | "pencil" | "git-fork" | "copy";
 		hint?: string;
 		disabledReason?: string | null;
 		checked?: boolean;
@@ -96,6 +98,7 @@
 		if (onmarkread && !actions.settled && !actions.snoozed) items.push({ testId: session.unread ? "session-ctx-mark-read" : "session-ctx-mark-unread", label: session.unread ? "Mark read" : "Mark unread", icon: session.unread ? "circle" : "circle-dot", hint: "u · ⌘⇧U", run: () => onmarkread(session.id) });
 		if (!markOnly) items.push(
 			{ divider: true },
+			...(onselect ? [{ testId: "session-ctx-select", label: "Select", icon: "circle-check" as const, run: () => onselect(session.id) }] : []),
 			{ testId: "session-ctx-rename", label: "Rename", icon: "pencil", hint: "r", run: () => onrename(session.id) },
 			{ testId: "session-ctx-fork", label: "Fork", icon: "git-fork", run: () => onfork(session.id) },
 			{ testId: "session-ctx-copy-resume", label: "Copy resume command", icon: "copy", run: () => { void handleCopyResume(); } },

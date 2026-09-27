@@ -35,6 +35,8 @@ export const uiState = $state({
 	sidebarCollapsed: safeGetItem(SIDEBAR_STORAGE_KEY) === "true",
 	settledShelfOpen: safeGetItem(SETTLED_SHELF_STORAGE_KEY) === "true",
 	snoozedShelfOpen: safeGetItem(SNOOZED_SHELF_STORAGE_KEY) === "true",
+	// Cleanup and bulk settle share one row-selection mode, entered from either sidebar surface.
+	selectMode: false,
 	sidebarPanel: "sessions" as "sessions" | "files",
 	sidebarWidth: Number(safeGetItem(SIDEBAR_WIDTH_KEY)) || SIDEBAR_DEFAULT_WIDTH,
 

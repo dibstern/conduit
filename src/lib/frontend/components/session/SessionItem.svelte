@@ -135,7 +135,7 @@
 		href = "",
 		active = false,
 		renaming: renamingProp = false,
-		cleanupMode = false,
+		selectMode = false,
 		selected = false,
 		density = "comfortable",
 		settled = false,
@@ -169,7 +169,7 @@
 		href?: string;
 		active?: boolean;
 		renaming?: boolean;
-		cleanupMode?: boolean;
+		selectMode?: boolean;
 		selected?: boolean;
 		density?: Density;
 		settled?: boolean;
@@ -288,14 +288,14 @@
 			.join(", "),
 	);
 
-	// The leading column holds either the 20px status glyph or, in cleanup mode,
+	// The leading column holds either the 20px status glyph or, in select mode,
 	// the selection control, which is 44px wide because it is a touch target and
 	// not a glyph. It widens rather than letting the control overflow into the
 	// title, and the `minmax(110px, 1fr)` middle column IS the title's floor --
 	// no `min-w-` utility anywhere else may restate it.
 	const itemClass = $derived(
 		`session-item group grid ${
-			cleanupMode
+			selectMode
 				? "grid-cols-[44px_minmax(110px,1fr)_auto]"
 				: "grid-cols-[20px_minmax(110px,1fr)_auto]"
 		} gap-x-[9px] items-center ${densityClass} ${rowOpacityClass} mb-px rounded-panel cursor-pointer relative focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent` +
@@ -391,7 +391,7 @@
 	}
 
 	function startPointer(event: PointerEvent) {
-		if (event.pointerType !== "touch" || cleanupMode || isRenaming || !oncontextmenuProp || (event.target as Element).closest("button")) return;
+		if (event.pointerType !== "touch" || selectMode || isRenaming || !oncontextmenuProp || (event.target as Element).closest("button")) return;
 		if (activePointer !== null) return;
 		if (heldDirection) { closeHold(); armClickSuppression(); return; }
 		activePointer = event.pointerId;
@@ -483,7 +483,7 @@
 	}
 
 	function handleDblClick(e: MouseEvent) {
-		if (cleanupMode || !onrename) return;
+		if (selectMode || !onrename) return;
 		e.preventDefault();
 		e.stopPropagation();
 		startRename();
@@ -581,15 +581,15 @@
 	onclickcapture={suppressGestureClick}
 	onpointerdown={startPointer}
 	oncontextmenu={(event) => {
-		if (cleanupMode || !oncontextmenuProp) return;
+		if (selectMode || !oncontextmenuProp) return;
 		event.preventDefault();
 		if (suppressNativeContextMenu) { suppressNativeContextMenu = false; return; }
 		if (activePointer !== null) { stopPointer(); armClickSuppression(); }
 		oncontextmenuProp(session, event.currentTarget);
 	}}
 >
-	<!-- Selection circle (cleanup mode) -->
-	{#if cleanupMode}
+	<!-- Selection circle (select mode) -->
+	{#if selectMode}
 		<!--
 			No `tone`/`hoverFill` member fits: the colour is a four-way expression on
 			two booleans and there is no hover change at all, so both axes emit
@@ -715,7 +715,7 @@
 			{/if}
 
 			<!-- Desktop verbs replace the time on hover and keyboard focus. -->
-			{#if !cleanupMode && oncontextmenuProp}
+			{#if !selectMode && oncontextmenuProp}
 				<span class="hidden md:group-hover:inline-flex md:group-focus-within:inline-flex {menuOpen ? 'md:inline-flex' : ''} items-center gap-0.5" data-testid="session-row-actions">
 					{#if canMarkRead}
 						<Button variant="ghost" size="content" tone="inherit" hoverFill="none"

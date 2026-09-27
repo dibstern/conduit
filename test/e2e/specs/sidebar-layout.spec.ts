@@ -238,14 +238,16 @@ test.describe("Sidebar Layout — Mobile", () => {
 		).toBeVisible();
 		await measure("#sidebar-projects-panel");
 		await page.keyboard.press("Escape");
-		await page.getByRole("button", { name: "Cleanup sessions" }).click();
+		await page.getByRole("button", { name: "Select sessions" }).click();
 		await expect(
-			page.getByRole("button", { name: "Select all" }),
+			page
+				.locator("#session-list .session-list-header")
+				.getByRole("button", { name: "All", exact: true }),
 		).toBeVisible();
 		await measure("#sidebar");
 		await page
 			.locator("#session-list .session-list-header")
-			.getByRole("button", { name: "Cancel" })
+			.getByRole("button", { name: "Done" })
 			.click();
 		await page.locator("#file-browser-btn").click();
 		await expect(page.locator("#sidebar-panel-files")).toBeVisible();

@@ -362,15 +362,15 @@ export const Renaming: Story = {
 	},
 };
 
-// Cleanup mode is the only state that renders the selection control, and it had
+// Select mode is the only state that renders the selection control, and it had
 // no story at all -- which is how it kept a checkbox drawn entirely in glyphs,
 // with no role and no checked state, through the whole migration
 // (conduit-test-de3.35.9.3).
-export const CleanupMode: Story = {
+export const SelectMode: Story = {
 	args: {
 		session: mockSession,
 		active: false,
-		cleanupMode: true,
+		selectMode: true,
 	},
 	play: async ({ canvasElement }) => {
 		const box = within(canvasElement).getByRole("checkbox");
@@ -379,11 +379,11 @@ export const CleanupMode: Story = {
 	},
 };
 
-export const CleanupModeSelected: Story = {
+export const SelectModeSelected: Story = {
 	args: {
 		session: mockSession,
 		active: false,
-		cleanupMode: true,
+		selectMode: true,
 		selected: true,
 	},
 	play: async ({ canvasElement }) => {
