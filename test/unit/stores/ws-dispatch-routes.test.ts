@@ -123,6 +123,26 @@ describe("session_switched routes", () => {
 		expect(sessionState.currentId).toBe("fork");
 	});
 
+	it("opens a fork whose lineage only its session_forked row carries", () => {
+		routerState.path = "/s/parent";
+		handleMessage({
+			type: "session_forked",
+			sessionId: "fork",
+			session: {
+				id: "fork",
+				title: "Parent (fork)",
+				status: "idle",
+				updatedAt: 0,
+				parentID: "parent",
+			},
+			parentId: "parent",
+			parentTitle: "Parent",
+		});
+		handleMessage({ type: "session_switched", id: "fork", sessionId: "fork" });
+		expect(routerState.path).toBe("/s/fork");
+		expect(sessionState.currentId).toBe("fork");
+	});
+
 	it("opens a fork returned while viewing its parent", () => {
 		routerState.path = "/s/parent";
 		handleMessage({

@@ -789,13 +789,15 @@ export function handleMessage(msg: RelayMessage): void {
 			// An initial replay may name the provider's session after the URL was
 			// formed. Keep unrelated, uncorrelated switches from replacing a later
 			// user selection. This tab's own creation response is correlated, so
-			// it may leave whichever session is open.
+			// it may leave whichever session is open. A child of the open session
+			// (a fork) may too; its lineage is on the switch or, when the relay
+			// has no read model to announce it, on the row session_forked sent.
 			if (
 				!requestedCreation &&
 				route.sessionId &&
 				msg.id &&
 				route.sessionId !== msg.id &&
-				route.sessionId !== msg.parentID &&
+				route.sessionId !== (msg.parentID ?? findSession(msg.id)?.parentID) &&
 				(sessionState.currentId !== null || (!msg.events && !msg.history))
 			)
 				break;
