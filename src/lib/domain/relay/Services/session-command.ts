@@ -32,6 +32,7 @@ import type { SessionRow } from "../../../persistence/read-model-types.js";
 import { forkClaudeTranscript } from "../../../provider/claude/claude-session-fork.js";
 import { OpenCodeAPITag } from "../../provider/Services/opencode-api-service.js";
 import { ConfigTag, LoggerTag } from "./services.js";
+import { markSeen } from "./session-attention.js";
 
 const CLAUDE_PROVIDER_ID = "claude";
 const CLAUDE_SDK_PROVIDER_ID = "claude-sdk";
@@ -55,8 +56,6 @@ export class SessionCommandError extends Data.TaggedError(
 type SessionCommandType =
 	| "session.created"
 	| "session.renamed"
-	| "session.read"
-	| "session.unread"
 	| "session.settled"
 	| "session.unsettled"
 	| "session.pinned"
@@ -124,8 +123,6 @@ export const openCodeUpstreamAdapter = (
 				// OpenCode-backed sessions, locally for the rest — so by the time this
 				// event exists upstream already has it. Nothing to replicate.
 				return Effect.void;
-			case "session.read":
-			case "session.unread":
 			case "session.settled":
 			case "session.unsettled":
 			case "session.pinned":
@@ -635,6 +632,14 @@ export const forkSession = (parentSessionId: string, messageId?: string) =>
 					{ key: "resumeSessionId", value: forked.sdkSessionId },
 				]);
 			}),
+		);
+		// The copied turns were the parent's to read, so the fork starts seen up
+		// to its last imported turn end rather than with a dot. SessionAttention
+		// caps at the committed turn end, so this has to follow the commit.
+		yield* markSeen(forked.sdkSessionId, Number.MAX_SAFE_INTEGER).pipe(
+			Effect.provideService(EventStoreEffectTag, eventStore.value),
+			Effect.provideService(ProjectionRunnerEffectTag, projections.value),
+			Effect.provideService(SqlClient.SqlClient, sql.value),
 		);
 		const now = Date.now();
 		return {

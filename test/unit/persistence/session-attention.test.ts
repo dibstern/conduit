@@ -8,7 +8,8 @@
 // - markSeen stamps and announces when nothing changed, so every pick of a
 //   read session fans out a list update;
 // - markSeen marks a sub-agent, a session with no turn end, or an unknown id;
-// - markUnread does not bring the dot back, or does it without announcing.
+// - markUnread does not bring the dot back, or does it without announcing;
+// - markUnread is a no-op on a session with no turn end yet (hk9m.7).
 
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -186,8 +187,19 @@ it("markUnread puts seen one below the latest turn end and announces it", async 
 			expect(yield* state("root")).toEqual({ last: 2, seen: 1, unread: 1 });
 			expect(advances.map((advance) => advance.sessionIds)).toEqual([["root"]]);
 			expect(yield* markUnread("root")).toBe(false);
-			expect(yield* markUnread("idle")).toBe(false);
 			expect(yield* markUnread("child")).toBe(false);
+		}),
+	);
+});
+
+it("markUnread on a session with no turn end shows a dot until it is seen", async () => {
+	await withPersistence(() =>
+		Effect.gen(function* () {
+			yield* seed;
+			expect(yield* markUnread("idle")).toBe(true);
+			expect(yield* state("idle")).toEqual({ last: null, seen: -2, unread: 1 });
+			expect(yield* markSeen("idle", 0)).toBe(true);
+			expect(yield* state("idle")).toEqual({ last: null, seen: -1, unread: 0 });
 		}),
 	);
 });

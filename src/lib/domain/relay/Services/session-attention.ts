@@ -7,15 +7,20 @@ import { makeCommitAndSignal } from "../../../persistence/effect/commit-and-sign
  * per-viewer annotation on the log, like a Matrix read marker, not an event:
  * each write stamps the row through the commit seam, whose post-commit advance
  * is what tells every other window. Both writes are quiet no-ops for unknown
- * ids, sessions with no turn end, and sub-agents (a child with no fork point),
- * and both return whether the row changed.
+ * ids and sub-agents (a child with no fork point), and both return whether the
+ * row changed.
+ *
+ * A session with no turn end sits at a virtual turn end of -1, matching the
+ * generated `unread` column: marking it unread seeds -2, so the user's mark
+ * shows a dot until the next pick, and its first real turn end is unread
+ * either way.
  *
  * test/unit/persistence/seen-version-writer-grep.test.ts keeps every other
  * file from writing the column.
  */
 
 const MARKABLE =
-	"last_turn_end_version IS NOT NULL AND (parent_id IS NULL OR fork_point_event IS NOT NULL OR fork_point_timestamp IS NOT NULL)";
+	"parent_id IS NULL OR fork_point_event IS NOT NULL OR fork_point_timestamp IS NOT NULL";
 
 const writeSeen = (
 	sessionId: string,
@@ -29,7 +34,7 @@ const writeSeen = (
 			stamp((version) =>
 				sql
 					.unsafe<{ id: string }>(
-						`UPDATE sessions SET seen_version = ${seen}, version = ? WHERE id = ? AND ${MARKABLE} AND ${seen} IS NOT COALESCE(seen_version, -1) RETURNING id`,
+						`UPDATE sessions SET seen_version = ${seen}, version = ? WHERE id = ? AND (${MARKABLE}) AND ${seen} IS NOT COALESCE(seen_version, -1) RETURNING id`,
 						[...params, version, sessionId, ...params],
 					)
 					.pipe(Effect.map((rows) => rows.map((row) => row.id))),
@@ -46,10 +51,10 @@ const writeSeen = (
 export const markSeen = (sessionId: string, upTo: number) =>
 	writeSeen(
 		sessionId,
-		"MAX(COALESCE(seen_version, -1), MIN(?, last_turn_end_version))",
+		"MAX(COALESCE(seen_version, -1), MIN(?, COALESCE(last_turn_end_version, -1)))",
 		[upTo],
 	);
 
 /** Seen up to just before the latest turn end, so that turn end is unread. */
 export const markUnread = (sessionId: string) =>
-	writeSeen(sessionId, "last_turn_end_version - 1", []);
+	writeSeen(sessionId, "COALESCE(last_turn_end_version, -1) - 1", []);

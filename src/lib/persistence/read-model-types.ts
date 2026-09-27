@@ -14,8 +14,6 @@ export interface SessionRow {
 	last_message_at: number | null;
 	last_turn_error_at: number | null;
 	permission_mode: string | null;
-	read_at: number | null;
-	marked_unread_at?: number | null;
 	last_turn_end_version?: number | null;
 	seen_version?: number | null;
 	/** Generated: 1 while a root or fork has a turn end newer than seen. */

@@ -414,6 +414,47 @@ describe("subscribeShell", () => {
 				);
 			}).pipe(Effect.provide(makeShellTestLayer())),
 	);
+	// hk9m.7: the imported turns were the parent's to read, so the fork has no dot.
+	it.scoped("a Claude fork starts seen up to its last imported turn end", () =>
+		Effect.gen(function* () {
+			yield* recoverProjections;
+			yield* commit([
+				sessionCreated("claude-parent"),
+				messageCreated("claude-parent", "ui-tip", 1000),
+				canonicalEvent(
+					"turn.completed",
+					"claude-parent",
+					{ messageId: "ui-tip" },
+					{ provider: "claude", createdAt: at() },
+				),
+			]);
+			const state = yield* ProviderStateEffectTag;
+			yield* state.saveUpdates("claude-parent", [
+				{ key: "resumeSessionId", value: "sdk-parent" },
+			]);
+			vi.mocked(getSessionMessages).mockResolvedValue([
+				{
+					type: "assistant",
+					uuid: "transcript-tip",
+					session_id: "sdk-parent",
+					message: { id: "api-final-round", role: "assistant", content: [] },
+					parent_tool_use_id: null,
+					parent_agent_id: null,
+				},
+			]);
+			vi.mocked(sdkForkSession).mockResolvedValue({
+				sessionId: "sdk-seen-child",
+			});
+			const child = yield* forkSession("claude-parent");
+			const read = yield* ReadQueryEffectTag;
+			const row = yield* read.getSession(child.id);
+			expect(row?.last_turn_end_version).not.toBeNull();
+			expect(row).toMatchObject({
+				seen_version: row?.last_turn_end_version,
+				unread: 0,
+			});
+		}).pipe(Effect.provide(makeShellTestLayer())),
+	);
 	it.scoped(
 		"rejects a Claude UI boundary that continues through tool rounds",
 		() =>

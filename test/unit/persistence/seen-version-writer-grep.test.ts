@@ -7,6 +7,10 @@ const SRC_ROOT = join(REPO_ROOT, "src");
 
 // The single writer of per-viewer read state (ADR-0004, scope amendment).
 const SESSION_ATTENTION = "src/lib/domain/relay/Services/session-attention.ts";
+// The one-time seed from main's read_at (hk9m.7). It runs once per database
+// and only fills rows where seen_version IS NULL, so it never lowers a mark.
+const READ_STATE_SEED =
+	"src/lib/persistence/migrations/0024_read_state_to_turn_ends.sql";
 
 // An assignment (`seen_version = ...`, `seen_version=...`) or an INSERT that
 // names the column. Reads (`seen_version` in a SELECT or a generated-column
@@ -26,14 +30,16 @@ describe("seen_version single writer", () => {
 	it("confines seen_version writes to SessionAttention", () => {
 		const outside = sourceFiles(SRC_ROOT)
 			.map((file) => ({ file, path: relative(REPO_ROOT, file) }))
-			.filter(({ path }) => path !== SESSION_ATTENTION)
+			.filter(
+				({ path }) => path !== SESSION_ATTENTION && path !== READ_STATE_SEED,
+			)
 			.flatMap(({ file, path }) =>
 				[...readFileSync(file, "utf8").matchAll(SEEN_VERSION_WRITE)].map(
 					(match) => ({ path, source: match[0] }),
 				),
 			);
 
-		const rule = `seen_version is durable per-viewer read state. It is not rebuilt from events, so no projector, recovery, import or migration may write it: a second writer can lower it or reset it, and a reply the user never saw would lose its dot.
+		const rule = `seen_version is durable per-viewer read state. It is not rebuilt from events, so no projector, recovery, import or later migration may write it: a second writer can lower it or reset it, and a reply the user never saw would lose its dot.
 
 Write it through SessionAttention (${SESSION_ATTENTION}), which caps at last_turn_end_version, never lowers it except for an explicit mark-unread, and stamps the row so every client sees the change.
 

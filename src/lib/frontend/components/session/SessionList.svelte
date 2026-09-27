@@ -336,11 +336,13 @@
 	// read state (ADR-0004, Scope; conduit-test-hk9m.3).
 	function handleSwitchSession(session: SessionInfo) {
 		const projectSlug = session.projectSlug ?? getCurrentSlug();
-		if (session.unread && session.lastTurnEndVersion != null && projectSlug) {
+		// A session marked unread before its first turn end has no version; 0
+		// still clears it, since seen is capped at its virtual turn end of -1.
+		if (session.unread && projectSlug) {
 			markSessionSeenRpc({
 				projectSlug,
 				sessionId: session.id,
-				upTo: session.lastTurnEndVersion,
+				upTo: session.lastTurnEndVersion ?? 0,
 				originId: getBrowserClientId(),
 			}).catch(() => showToast("Couldn't mark read", { variant: "error" }));
 		}

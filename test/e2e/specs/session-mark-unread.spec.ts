@@ -74,6 +74,24 @@ test("context menu, focused row and transcript toggle read state with undo", asy
 	await expect(page.locator("#input")).toHaveValue("u");
 });
 
+// A session whose turn never ended has nothing to be unread relative to, but
+// the user asked for a dot, so it gets one until the next pick (hk9m.7).
+test("marking unread before any turn end shows a dot until the next pick", async ({
+	page,
+	relayUrl,
+}) => {
+	await gotoRelay(page, new URL("/", relayUrl).toString());
+	const row = page.locator("#session-list .session-item").first();
+	await expect(row.getByTestId("session-unread-dot")).toHaveCount(0);
+	await row.click({ button: "right" });
+	await page.getByTestId("session-ctx-mark-unread").click();
+	await expect(row.getByTestId("session-unread-dot")).toBeVisible();
+	await gotoRelay(page, new URL("/", relayUrl).toString());
+	await expect(row.getByTestId("session-unread-dot")).toBeVisible();
+	await row.click();
+	await expect(row.getByTestId("session-unread-dot")).toHaveCount(0);
+});
+
 test("settling and un-settling preserve unread while the menu hides the action", async ({
 	page,
 	relayUrl,

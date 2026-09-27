@@ -25,9 +25,8 @@ import { sessionFamilyQuery } from "../../../src/lib/persistence/session-family-
 const testLayer = EffectSqliteClient.layer({ filename: ":memory:" });
 
 describe("typed session row derivations", () => {
-	// Unread is the generated column alone (ADR-0004, Scope); main's read_at
-	// and marked_unread_at no longer decide it.
-	it.effect("takes unread from the generated column, not read_at", () =>
+	// Unread is the generated column alone (ADR-0004, Scope).
+	it.effect("takes unread from the generated column", () =>
 		Effect.gen(function* () {
 			yield* makeEffectSqlMigrator();
 			yield* seedSession("manual");
@@ -44,11 +43,6 @@ describe("typed session row derivations", () => {
 				lastTurnEndVersion: 3,
 				attention: "done-unread",
 			});
-			const legacy = sessionRowsToSessionInfoList([
-				{ ...row, marked_unread_at: 1, last_message_at: 20, read_at: null },
-			])[0];
-			expect(legacy?.unread).toBeUndefined();
-			expect(legacy?.attention).toBe("idle");
 		}).pipe(Effect.provide(testLayer)),
 	);
 
@@ -221,13 +215,13 @@ describe("typed session row derivations", () => {
 			}).pipe(Effect.provide(testLayer)),
 	);
 
-	it("keeps a timed or indefinite snooze until its wake, then clears it after read", () => {
+	it("keeps a timed or indefinite snooze until its wake, then clears it once seen", () => {
 		const row = {
 			snoozed_at: 10,
 			snoozed_until: 30,
 			woken_at: null,
 			woken_reason: null,
-			read_at: null,
+			unread: 1,
 		};
 		expect(deriveSessionSnooze(row, 29)).toEqual({
 			snoozedAt: 10,
@@ -237,7 +231,7 @@ describe("typed session row derivations", () => {
 			wokenAt: 30,
 			wokeBecause: "time",
 		});
-		expect(deriveSessionSnooze({ ...row, read_at: 30 }, 30)).toEqual({});
+		expect(deriveSessionSnooze({ ...row, unread: 0 }, 30)).toEqual({});
 		expect(deriveSessionSnooze({ ...row, snoozed_until: null }, 100)).toEqual({
 			snoozedAt: 10,
 		});

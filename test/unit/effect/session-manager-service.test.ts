@@ -129,7 +129,6 @@ function makeRow(id: string, overrides?: Partial<SessionRow>): SessionRow {
 		last_message_at: null,
 		last_turn_error_at: null,
 		permission_mode: null,
-		read_at: null,
 		settled_at: null,
 		pinned_at: null,
 		snoozed_at: null,
