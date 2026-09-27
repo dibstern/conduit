@@ -1,61 +1,36 @@
-/** Relay-owned state for Claude tasks that can outlive their foreground turn. */
+/**
+ * Relay-owned state for Claude background tasks that outlive their foreground
+ * turn. Driven by the SDK's level signal (`background_tasks_changed`, the full
+ * live set) rather than start/finish pairs, so a missed finish can't leave a
+ * session stuck on "working".
+ */
 export type BackgroundTaskTransition =
 	| {
 			readonly sessionId: string;
-			readonly taskId: string;
-			readonly kind: "started" | "progress" | "completed";
-			readonly status?: string;
-			readonly taskType?: string;
+			readonly kind: "snapshot";
+			readonly taskIds: readonly string[];
 	  }
 	| {
+			// The SDK process ended: the SDK sends no snapshot at startup, so its
+			// tasks must be dropped here rather than waiting for one.
 			readonly sessionId: string;
 			readonly kind: "session-ended";
 	  };
 
-const terminalStatuses = new Set([
-	"completed",
-	"failed",
-	"stopped",
-	"cancelled",
-	"interrupted",
-	"idle",
-]);
-const inertTaskTypes = new Set(["plan", "plan_mode"]);
-
 export function makeSessionBackgroundLiveness(
 	onChange?: (sessionId: string) => void,
 ) {
-	const live = new Map<string, Set<string>>();
-	const clear = (sessionId: string): void => {
-		if (live.delete(sessionId)) onChange?.(sessionId);
-	};
+	const live = new Set<string>();
 	return {
 		record(input: BackgroundTaskTransition): void {
-			if (input.kind === "session-ended") {
-				clear(input.sessionId);
-				return;
-			}
-			const tasks = live.get(input.sessionId) ?? new Set<string>();
-			const wasLive = tasks.size > 0;
-			if (
-				input.kind === "completed" ||
-				terminalStatuses.has(input.status ?? "") ||
-				inertTaskTypes.has(input.taskType ?? "")
-			) {
-				tasks.delete(input.taskId);
-				if (tasks.size === 0) live.delete(input.sessionId);
-				if (wasLive && tasks.size === 0) onChange?.(input.sessionId);
-				return;
-			}
-			// Metadata-only progress cannot revive a task that already completed.
-			if (input.kind === "progress" && !tasks.has(input.taskId)) return;
-			tasks.add(input.taskId);
-			live.set(input.sessionId, tasks);
-			if (!wasLive) onChange?.(input.sessionId);
+			const isLive = input.kind === "snapshot" && input.taskIds.length > 0;
+			if (live.has(input.sessionId) === isLive) return;
+			if (isLive) live.add(input.sessionId);
+			else live.delete(input.sessionId);
+			onChange?.(input.sessionId);
 		},
 		hasLiveWork(sessionId: string): boolean {
-			return (live.get(sessionId)?.size ?? 0) > 0;
+			return live.has(sessionId);
 		},
-		clear,
 	};
 }

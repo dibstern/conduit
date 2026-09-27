@@ -2229,29 +2229,41 @@ describe("ClaudeEventTranslator", () => {
 		expect(sink.events).toHaveLength(0);
 	});
 
-	it("tracks live tasks by task ID even without a tool-use ID", async () => {
+	it("tracks live work from background_tasks_changed, ignoring ambient tasks", async () => {
 		const liveness = makeSessionBackgroundLiveness();
 		const trackingTranslator = new ClaudeEventTranslator({
 			getSink: () => sink,
 			onBackgroundTask: liveness.record,
 		});
-		await runTranslate(trackingTranslator, ctx, {
-			type: "system",
-			subtype: "task_started",
-			task_id: "background-bash",
+		const snapshot = (
+			tasks: ReadonlyArray<Record<string, unknown>>,
+			n: number,
+		) =>
+			runTranslate(trackingTranslator, ctx, {
+				type: "system",
+				subtype: "background_tasks_changed",
+				tasks,
+				uuid: `00000000-0000-0000-0000-00000000040${n}`,
+				session_id: "sdk-sess",
+			} as unknown as SDKMessage);
+		const bash = {
+			task_id: "bash",
 			task_type: "local_bash",
-			uuid: "00000000-0000-0000-0000-000000000401",
-			session_id: "sdk-sess",
-		} as unknown as SDKMessage);
+			description: "codex exec",
+		};
+		const watcher = {
+			task_id: "watch",
+			task_type: "local_bash",
+			description: "watch",
+			ambient: true,
+		};
+
+		await snapshot([bash, watcher], 1);
 		expect(liveness.hasLiveWork(ctx.sessionId)).toBe(true);
-		await runTranslate(trackingTranslator, ctx, {
-			type: "system",
-			subtype: "task_notification",
-			task_id: "background-bash",
-			status: "completed",
-			uuid: "00000000-0000-0000-0000-000000000402",
-			session_id: "sdk-sess",
-		} as unknown as SDKMessage);
+		await snapshot([watcher], 2);
+		expect(liveness.hasLiveWork(ctx.sessionId)).toBe(false);
+		await snapshot([bash], 3);
+		await snapshot([], 4);
 		expect(liveness.hasLiveWork(ctx.sessionId)).toBe(false);
 		expect(sink.events).toHaveLength(0);
 	});
