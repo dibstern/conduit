@@ -48,6 +48,14 @@ async function longPress(row: Locator) {
 	});
 }
 
+async function selectRows(page: Page, ids: string[]) {
+	await page.getByRole("button", { name: "Select sessions" }).click();
+	for (const id of ids) {
+		const row = page.locator(`#session-list [data-session-id="${id}"]`);
+		await row.getByRole("checkbox").click();
+	}
+}
+
 test("desktop: bulk settle announces once and Undo restores only this batch", async ({
 	page,
 	relayUrl,
@@ -97,6 +105,139 @@ test("desktop: bulk settle announces once and Undo restores only this batch", as
 	await expect(
 		shelf.locator(`[data-session-id="${existingId}"]`),
 	).toBeVisible();
+});
+
+test("bulk Pin changes two rows with one toast and Undo restores both", async ({
+	page,
+	relayUrl,
+}) => {
+	const rows = await rowsReady(page, relayUrl);
+	const ids = (
+		await rows.evaluateAll((elements) =>
+			elements.map((element) => element.getAttribute("data-session-id")),
+		)
+	).slice(-2);
+	if (ids.some((id) => !id)) throw new Error("missing session ids");
+	await selectRows(page, ids as string[]);
+	await expect(page.getByTestId("select-bar-pin")).toHaveAccessibleName(
+		"Pin 2 sessions",
+	);
+	await page.getByTestId("select-bar-pin").click();
+	for (const id of ids)
+		await expect(
+			page
+				.locator(`#session-list [data-session-id="${id}"]`)
+				.getByTitle("Pinned session"),
+		).toBeVisible();
+	await expect(
+		page.getByRole("status").filter({ hasText: "Pinned 2 sessions" }),
+	).toHaveCount(1);
+	await page.getByTestId("toast-action").last().click();
+	for (const id of ids)
+		await expect(
+			page
+				.locator(`#session-list [data-session-id="${id}"]`)
+				.getByTitle("Pinned session"),
+		).toHaveCount(0);
+});
+
+test("two pinned rows show Unpin in select mode", async ({
+	page,
+	relayUrl,
+}) => {
+	const rows = await rowsReady(page, relayUrl);
+	const ids = (
+		await rows.evaluateAll((elements) =>
+			elements.map((element) => element.getAttribute("data-session-id")),
+		)
+	).slice(-2);
+	if (ids.some((id) => !id)) throw new Error("missing session ids");
+	for (const id of ids) {
+		await page
+			.locator(`#session-list [data-session-id="${id}"]`)
+			.click({ button: "right" });
+		await page.getByTestId("session-ctx-pin").click();
+	}
+	await selectRows(page, ids as string[]);
+	await expect(page.getByTestId("select-bar-pin")).toHaveAccessibleName(
+		"Unpin 2 sessions",
+	);
+	await expect(page.getByTestId("select-bar-pin")).toContainText("Unpin");
+	await expect(page.getByTestId("select-bar-settle")).toBeDisabled();
+	await expect(page.getByTestId("select-bar-snooze")).toBeDisabled();
+	await page.getByTestId("select-bar-pin").click();
+	for (const id of ids)
+		await expect(
+			page
+				.locator(`#session-list [data-session-id="${id}"]`)
+				.getByTitle("Pinned session"),
+		).toHaveCount(0);
+	await expect(
+		page.getByRole("status").filter({ hasText: "Unpinned 2 sessions" }),
+	).toHaveCount(1);
+});
+
+test("bulk Snooze uses one sheet and Undo returns both rows", async ({
+	page,
+	relayUrl,
+}) => {
+	const rows = await rowsReady(page, relayUrl);
+	const ids = (
+		await rows.evaluateAll((elements) =>
+			elements.map((element) => element.getAttribute("data-session-id")),
+		)
+	).slice(-2);
+	if (ids.some((id) => !id)) throw new Error("missing session ids");
+	await selectRows(page, ids as string[]);
+	await expect(page.getByTestId("select-bar-snooze")).toHaveAccessibleName(
+		"Snooze 2 sessions",
+	);
+	await page.getByTestId("select-bar-snooze").click();
+	await expect(page.getByRole("dialog")).toContainText("2 sessions");
+	await page.getByTestId("snooze-option-tomorrow").click();
+	await page.getByTestId("snoozed-shelf-toggle").click();
+	for (const id of ids)
+		await expect(
+			page.locator(`#snoozed-shelf-rows [data-session-id="${id}"]`),
+		).toBeVisible();
+	await expect(
+		page.getByRole("status").filter({ hasText: "Snoozed 2 sessions until" }),
+	).toHaveCount(1);
+	await page.getByTestId("toast-action").last().click();
+	for (const id of ids) {
+		await expect(
+			page.locator(`#snoozed-shelf-rows [data-session-id="${id}"]`),
+		).toHaveCount(0);
+		await expect(
+			page.locator(`#session-list [data-session-id="${id}"]`),
+		).toBeVisible();
+	}
+});
+
+test("bulk Settle skips a pinned row", async ({ page, relayUrl }) => {
+	const rows = await rowsReady(page, relayUrl, 2);
+	const ids = await rows.evaluateAll((elements) =>
+		elements.map((element) => element.getAttribute("data-session-id")),
+	);
+	const [pinnedId, settleId] = ids;
+	if (!pinnedId || !settleId) throw new Error("missing session ids");
+	const pinned = page.locator(`#session-list [data-session-id="${pinnedId}"]`);
+	await pinned.click({ button: "right" });
+	await page.getByTestId("session-ctx-pin").click();
+	await selectRows(page, [pinnedId, settleId]);
+	await expect(page.getByTestId("select-bar-settle")).toHaveAccessibleName(
+		"Settle 1 session",
+	);
+	await page.getByTestId("select-bar-settle").click();
+	await expect(pinned.getByTitle("Pinned session")).toBeVisible();
+	await expect(
+		page.locator(`#settled-shelf-rows [data-session-id="${pinnedId}"]`),
+	).toHaveCount(0);
+	await expect(
+		page
+			.getByRole("status")
+			.filter({ hasText: "Settled 1 session, 1 skipped" }),
+	).toHaveCount(1);
 });
 
 test("All selects only visible search results; Done makes no change", async ({
@@ -183,13 +324,31 @@ test("phone overflow and long-press sheet enter select mode", async ({
 	await page.getByTestId("list-overflow-select").click();
 	await expect(page.getByTestId("select-bar")).toBeVisible();
 	await expect(page.getByTestId("select-bar")).toBeInViewport();
-	for (const action of ["settle", "delete"]) {
+	for (const action of ["settle", "snooze", "pin", "delete"]) {
 		await expect(page.getByTestId(`select-bar-${action}`)).toBeDisabled();
 		await expect(page.getByTestId(`select-bar-${action}`)).toHaveCSS(
 			"opacity",
 			"0.35",
 		);
 	}
+	const geometry = await page.getByTestId("select-bar").evaluate((bar) => ({
+		overflows: bar.scrollWidth > bar.clientWidth,
+		pageOverflows: document.documentElement.scrollWidth > window.innerWidth,
+		buttons: [...bar.querySelectorAll("button")].map((button) => {
+			const rect = button.getBoundingClientRect();
+			return { top: rect.top, width: rect.width, height: rect.height };
+		}),
+	}));
+	expect(geometry.overflows).toBe(false);
+	expect(geometry.pageOverflows).toBe(false);
+	expect(geometry.buttons).toHaveLength(4);
+	expect(new Set(geometry.buttons.map((button) => button.top)).size).toBe(1);
+	for (const button of geometry.buttons)
+		expect(button.height).toBeGreaterThanOrEqual(44);
+	expect(
+		Math.max(...geometry.buttons.map((button) => button.width)) -
+			Math.min(...geometry.buttons.map((button) => button.width)),
+	).toBeLessThanOrEqual(1);
 	await page.getByRole("button", { name: "Done" }).click();
 	await longPress(row);
 	await page.getByTestId("session-ctx-select").click();

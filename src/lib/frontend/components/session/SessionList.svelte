@@ -112,7 +112,9 @@
 	// Two modes putting checkboxes on the same rows would be two ways to do one thing.
 	const selectMode = $derived(uiState.selectMode);
 	let selectedSessionIds = $state<Set<string>>(new Set());
-	let settlePending = $state(false);
+	let bulkPending = $state(false);
+	let bulkSnoozeOpen = $state(false);
+	const selectVerbClass = "min-w-0 flex-1 min-h-[50px] flex-col gap-1 rounded-lg text-[11px] disabled:opacity-[0.35] disabled:cursor-default";
 
 	// ─── Derived ────────────────────────────────────────────────────────────────
 
@@ -179,6 +181,17 @@
 	);
 
 	const selectionCount = $derived(selectedSessionIds.size);
+	const selectedSessions = $derived(selectCandidates.filter((session) => selectedSessionIds.has(session.id)));
+	const settleEligible = $derived(selectedSessions.filter((session) => {
+		const actions = getSessionActionState(session, sessionState.now);
+		return !actions.settled && !actions.settleDisabledReason;
+	}));
+	const snoozeEligible = $derived(selectedSessions.filter((session) => {
+		const actions = getSessionActionState(session, sessionState.now);
+		return actions.snoozeVisible && !actions.snoozeDisabledReason;
+	}));
+	const unpinSelected = $derived(selectedSessions.length > 0 && selectedSessions.every((session) => getSessionActionState(session, sessionState.now).pinned));
+	const pinEligible = $derived(selectedSessions.filter((session) => getSessionActionState(session, sessionState.now).pinned === unpinSelected));
 	const allSelected = $derived(
 		selectCandidates.length > 0 &&
 			selectCandidates.every((s) => selectedSessionIds.has(s.id)),
@@ -624,26 +637,18 @@
 	}
 
 	async function handleBulkSettle() {
-		const projectSlug = getCurrentSlug();
-		if (!projectSlug || selectionCount === 0 || settlePending) return;
-		const ids = [...selectedSessionIds].filter((id) =>
-			selectCandidates.some((session) => session.id === id && session.settledAt == null),
-		);
-		if (ids.length === 0) {
-			resetSelectMode();
-			showToast("No sessions to settle");
-			return;
-		}
-		const input = ids.map((sessionId) => ({ projectSlug, sessionId, originId: getBrowserClientId() }));
-		settlePending = true;
+		if (bulkPending || settleEligible.length === 0) return;
+		const skipped = selectedSessions.length - settleEligible.length;
+		const input = settleEligible.map((session) => ({ projectSlug: session.projectSlug ?? getCurrentSlug() ?? "", sessionId: session.id, originId: getBrowserClientId() }));
+		bulkPending = true;
 		const results = await Promise.allSettled(input.map((session) => setSessionSettledRpc({ ...session, settled: true })));
-		settlePending = false;
+		bulkPending = false;
 		const settled = input.filter((_, index) => results[index]?.status === "fulfilled");
 		resetSelectMode();
 		const count = settled.length;
-		const message = count === ids.length
+		const message = (count === input.length
 			? `Settled ${count} ${count === 1 ? "session" : "sessions"}`
-			: `Settled ${count} of ${ids.length} ${ids.length === 1 ? "session" : "sessions"}`;
+			: `Settled ${count} of ${input.length} ${input.length === 1 ? "session" : "sessions"}`) + (skipped ? `, ${skipped} skipped` : "");
 		showToast(message, {
 			duration: 5000,
 			...(count > 0 ? { action: {
@@ -657,7 +662,80 @@
 		});
 	}
 
+	async function handleBulkPin() {
+		if (bulkPending || pinEligible.length === 0) return;
+		const pinned = !unpinSelected;
+		const skipped = selectedSessions.length - pinEligible.length;
+		const input = pinEligible.map((session) => ({ projectSlug: session.projectSlug ?? getCurrentSlug() ?? "", sessionId: session.id, originId: getBrowserClientId() }));
+		bulkPending = true;
+		const results = await Promise.allSettled(input.map((session) => setSessionPinnedRpc({ ...session, pinned })));
+		bulkPending = false;
+		const changed = input.filter((_, index) => results[index]?.status === "fulfilled");
+		resetSelectMode();
+		const count = changed.length;
+		const verb = pinned ? "Pinned" : "Unpinned";
+		const message = (count === input.length
+			? `${verb} ${count} ${count === 1 ? "session" : "sessions"}`
+			: `${verb} ${count} of ${input.length} ${input.length === 1 ? "session" : "sessions"}`) + (skipped ? `, ${skipped} skipped` : "");
+		showToast(message, {
+			duration: 5000,
+			...(count > 0 ? { action: {
+				label: "Undo",
+				run: () => {
+					void Promise.allSettled(changed.map((session) => setSessionPinnedRpc({ ...session, pinned: !pinned }))).then((undoResults) => {
+						if (undoResults.some((result) => result.status === "rejected")) showToast("Couldn't undo", { variant: "error" });
+					});
+				},
+			} } : {}),
+		});
+	}
+
+	function handleOpenBulkSnooze() {
+		if (bulkPending || snoozeEligible.length === 0) return;
+		snoozePlacement = window.matchMedia("(hover: hover) and (pointer: fine)").matches ? "center" : "sheet";
+		snoozeSheetNow = Date.now();
+		bulkSnoozeOpen = true;
+	}
+
+	async function handleBulkSnooze(until: number | null) {
+		if (bulkPending || snoozeEligible.length === 0) return;
+		const skipped = selectedSessions.length - snoozeEligible.length;
+		const input = snoozeEligible.map((session) => ({
+			projectSlug: session.projectSlug ?? getCurrentSlug() ?? "",
+			sessionId: session.id,
+			originId: getBrowserClientId(),
+			wasSnoozed: isSessionSnoozed(session, snoozeSheetNow),
+			previousUntil: session.snoozedUntil ?? null,
+		}));
+		bulkPending = true;
+		const results = await Promise.allSettled(input.map((session) => snoozeSessionRpc({ projectSlug: session.projectSlug, sessionId: session.sessionId, originId: session.originId, until })));
+		bulkPending = false;
+		const changed = input.filter((_, index) => results[index]?.status === "fulfilled");
+		resetSelectMode();
+		const count = changed.length;
+		const message = (count === input.length
+			? `Snoozed ${count} ${count === 1 ? "session" : "sessions"}`
+			: `Snoozed ${count} of ${input.length} ${input.length === 1 ? "session" : "sessions"}`)
+			+ (count > 0 ? ` until ${until === null ? "something happens" : formatSnoozeTime(until, snoozeSheetNow)}` : "")
+			+ (skipped ? `, ${skipped} skipped` : "");
+		showToast(message, {
+			duration: 5000,
+			...(count > 0 ? { action: {
+				label: "Undo",
+				run: () => {
+					void Promise.allSettled(changed.map((session) => session.wasSnoozed
+						? snoozeSessionRpc({ projectSlug: session.projectSlug, sessionId: session.sessionId, originId: session.originId, until: session.previousUntil })
+						: unsnoozeSessionRpc({ projectSlug: session.projectSlug, sessionId: session.sessionId, originId: session.originId }))).then((undoResults) => {
+						if (undoResults.some((result) => result.status === "rejected")) showToast("Couldn't undo", { variant: "error" });
+					});
+				},
+			} } : {}),
+		});
+	}
+
 	async function handleBulkDelete() {
+		if (bulkPending || selectionCount === 0) return;
+		bulkPending = true;
 		const count = selectionCount;
 		const label = count === 1 ? "1 session" : `${count} sessions`;
 		const confirmed = await confirm(
@@ -665,19 +743,12 @@
 			"Delete",
 		);
 		if (confirmed) {
-			const projectSlug = getCurrentSlug();
-			if (!projectSlug) return;
-			// Snapshot the ids, then clear selection so the UI responds at once.
-			const ids = [...selectedSessionIds];
+			// Snapshot the rows, then clear selection so the UI responds at once.
+			// The list is cross-project, so each row deletes in its own project.
+			const targets = selectedSessions.map((session) => ({ projectSlug: session.projectSlug ?? getCurrentSlug() ?? "", sessionId: session.id }));
 			resetSelectMode();
 			const results = await Promise.allSettled(
-				ids.map((id) =>
-					deleteSessionRpc({
-						projectSlug,
-						sessionId: id,
-						originId: getBrowserClientId(),
-					}),
-				),
+				targets.map((target) => deleteSessionRpc({ ...target, originId: getBrowserClientId() })),
 			);
 			const failed = results.filter((r) => r.status === "rejected").length;
 			if (failed > 0) {
@@ -689,6 +760,7 @@
 				);
 			}
 		}
+		bulkPending = false;
 	}
 
 	function handleRename(id: string, title: string) {
@@ -977,23 +1049,39 @@
 		{/if}
 	</div>
 	{#if selectMode}
-		<div data-testid="select-bar" class="flex shrink-0 gap-2 border-t border-border bg-bg-surface px-3 py-2 font-brand">
-			<Button
-				variant="primary" size="content" disabledStyle="none"
-				disabled={selectionCount === 0 || settlePending}
-				data-testid="select-bar-settle"
-				ariaLabel={selectionCount > 0 ? `Settle ${selectionCount} ${selectionCount === 1 ? "session" : "sessions"}` : "Settle"}
-				class="w-1/2 min-h-[44px] justify-center gap-1.5 rounded-lg font-semibold disabled:opacity-[0.35] disabled:cursor-default"
-				onclick={() => { void handleBulkSettle(); }}
-			><Icon name="check" size={14} /> Settle</Button>
+		<div data-testid="select-bar" class="flex shrink-0 border-t border-border bg-bg-surface px-[6px] pt-2 pb-[calc(10px+env(safe-area-inset-bottom))] font-brand">
 			<Button
 				variant="ghost" size="content" tone="inherit" hoverFill="none" disabledStyle="none"
-				disabled={selectionCount === 0 || settlePending}
+				disabled={settleEligible.length === 0 || bulkPending}
+				data-testid="select-bar-settle"
+				ariaLabel={`Settle ${settleEligible.length} ${settleEligible.length === 1 ? "session" : "sessions"}`}
+				class={selectVerbClass}
+				onclick={() => { void handleBulkSettle(); }}
+			><Icon name="check" size={17} /> Settle</Button>
+			<Button
+				variant="ghost" size="content" tone="inherit" hoverFill="none" disabledStyle="none"
+				disabled={snoozeEligible.length === 0 || bulkPending}
+				data-testid="select-bar-snooze"
+				ariaLabel={`Snooze ${snoozeEligible.length} ${snoozeEligible.length === 1 ? "session" : "sessions"}`}
+				class={selectVerbClass}
+				onclick={handleOpenBulkSnooze}
+			><Icon name="moon" size={17} /> Snooze</Button>
+			<Button
+				variant="ghost" size="content" tone="inherit" hoverFill="none" disabledStyle="none"
+				disabled={pinEligible.length === 0 || bulkPending}
+				data-testid="select-bar-pin"
+				ariaLabel={`${unpinSelected ? "Unpin" : "Pin"} ${pinEligible.length} ${pinEligible.length === 1 ? "session" : "sessions"}`}
+				class={selectVerbClass}
+				onclick={() => { void handleBulkPin(); }}
+			><Icon name={unpinSelected ? "star-off" : "star"} size={17} /> {unpinSelected ? "Unpin" : "Pin"}</Button>
+			<Button
+				variant="ghost" size="content" tone="inherit" hoverFill="none" disabledStyle="none"
+				disabled={selectionCount === 0 || bulkPending}
 				data-testid="select-bar-delete"
-				ariaLabel={selectionCount > 0 ? `Delete ${selectionCount} ${selectionCount === 1 ? "session" : "sessions"}` : "Delete"}
-				class="w-1/2 min-h-[44px] justify-center gap-1.5 rounded-lg border border-error/20 bg-error/10 text-error font-semibold disabled:opacity-[0.35] disabled:cursor-default"
+				ariaLabel={`Delete ${selectionCount} ${selectionCount === 1 ? "session" : "sessions"}`}
+				class="{selectVerbClass} text-error"
 				onclick={handleBulkDelete}
-			><Icon name="trash-2" size={14} /> Delete</Button>
+			><Icon name="trash-2" size={17} /> Delete</Button>
 		</div>
 	{/if}
 </div>
@@ -1025,6 +1113,17 @@
 {/if}
 
 <ShortcutSheet open={shortcutSheetOpen} onclose={closeShortcutSheet} />
+
+{#if bulkSnoozeOpen}
+	<SnoozeSheet
+		open={true}
+		placement={snoozePlacement}
+		sessionTitle={`${snoozeEligible.length} ${snoozeEligible.length === 1 ? "session" : "sessions"}`}
+		now={snoozeSheetNow}
+		onclose={() => { bulkSnoozeOpen = false; }}
+		onsnooze={(until) => { void handleBulkSnooze(until); }}
+	/>
+{/if}
 
 {#if snoozeSession}
 	<SnoozeSheet
