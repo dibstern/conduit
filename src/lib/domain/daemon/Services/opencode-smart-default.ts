@@ -38,6 +38,8 @@ export class OpenCodeUnavailableError extends Data.TaggedError(
 export interface SmartDefaultInstanceOptions {
 	readonly defaultOpencodeUrl?: string | undefined;
 	readonly smartDefault?: boolean | undefined;
+	/** Where smart default looks for OpenCode (default: DEFAULT_OPENCODE_URL). */
+	readonly smartDefaultUrl?: string | undefined;
 }
 
 const portFromUrl = (url: string): number => {
@@ -61,13 +63,6 @@ export const defaultInstanceForUrl = (url: string): DaemonInstanceConfig => ({
 
 const defaultUrlForInstance = (instance: DaemonInstanceConfig): string =>
 	instance.url ?? `http://localhost:${instance.port}`;
-
-const externalDefaultForHealthyLocalhost = (
-	instance: DaemonInstanceConfig,
-): DaemonInstanceConfig => ({
-	...defaultInstanceForUrl(DEFAULT_OPENCODE_URL),
-	name: instance.name,
-});
 
 const probeReachable = (url: string) =>
 	Effect.tryPromise(() => probeOpenCode(url)).pipe(
@@ -106,19 +101,21 @@ const convertUnreachableDefault = (instance: DaemonInstanceConfig) =>
 		} satisfies DaemonInstanceConfig;
 	});
 
-const resolvePersistedManagedDefault = (instance: DaemonInstanceConfig) =>
+const resolvePersistedManagedDefault = (
+	instance: DaemonInstanceConfig,
+	smartDefaultUrl: string,
+) =>
 	Effect.gen(function* () {
-		const reachableLocalhostDefault =
-			yield* probeReachable(DEFAULT_OPENCODE_URL);
-		if (reachableLocalhostDefault) {
-			return externalDefaultForHealthyLocalhost(instance);
+		const reachable = yield* probeReachable(smartDefaultUrl);
+		if (reachable) {
+			return { ...defaultInstanceForUrl(smartDefaultUrl), name: instance.name };
 		}
 
 		const installed = yield* hasOpenCodeBinary;
 		if (!installed) {
 			return yield* new OpenCodeUnavailableError({
-				url: DEFAULT_OPENCODE_URL,
-				port: DEFAULT_OPENCODE_PORT,
+				url: smartDefaultUrl,
+				port: portFromUrl(smartDefaultUrl),
 			});
 		}
 
@@ -131,26 +128,28 @@ const resolvePersistedManagedDefault = (instance: DaemonInstanceConfig) =>
 		} satisfies DaemonInstanceConfig;
 	});
 
-const detectDefaultInstance = Effect.gen(function* () {
-	const reachable = yield* probeReachable(DEFAULT_OPENCODE_URL);
-	if (reachable) return defaultInstanceForUrl(DEFAULT_OPENCODE_URL);
+const detectDefaultInstance = (smartDefaultUrl: string) =>
+	Effect.gen(function* () {
+		const reachable = yield* probeReachable(smartDefaultUrl);
+		if (reachable) return defaultInstanceForUrl(smartDefaultUrl);
 
-	const installed = yield* hasOpenCodeBinary;
-	if (!installed) {
-		return yield* new OpenCodeUnavailableError({
-			url: DEFAULT_OPENCODE_URL,
-			port: DEFAULT_OPENCODE_PORT,
-		});
-	}
+		const port = portFromUrl(smartDefaultUrl);
+		const installed = yield* hasOpenCodeBinary;
+		if (!installed) {
+			return yield* new OpenCodeUnavailableError({
+				url: smartDefaultUrl,
+				port,
+			});
+		}
 
-	const freePort = yield* findAvailablePort(DEFAULT_OPENCODE_PORT);
-	return {
-		id: DEFAULT_OPENCODE_INSTANCE_ID,
-		name: "Default",
-		port: freePort,
-		managed: true,
-	} satisfies DaemonInstanceConfig;
-});
+		const freePort = yield* findAvailablePort(port);
+		return {
+			id: DEFAULT_OPENCODE_INSTANCE_ID,
+			name: "Default",
+			port: freePort,
+			managed: true,
+		} satisfies DaemonInstanceConfig;
+	});
 
 export const resolveSmartDefaultInstances = (
 	initialInstances: ReadonlyArray<DaemonInstanceConfig>,
@@ -172,6 +171,7 @@ export const resolveSmartDefaultInstances = (
 		}
 
 		if (options.smartDefault !== true) return instances;
+		const smartDefaultUrl = options.smartDefaultUrl ?? DEFAULT_OPENCODE_URL;
 
 		const defaultIndex = instances.findIndex(
 			(instance) =>
@@ -182,7 +182,10 @@ export const resolveSmartDefaultInstances = (
 			const defaultInstance = instances[defaultIndex];
 			if (defaultInstance == null) return instances;
 			const resolvedDefault = defaultInstance.managed
-				? yield* resolvePersistedManagedDefault(defaultInstance)
+				? yield* resolvePersistedManagedDefault(
+						defaultInstance,
+						smartDefaultUrl,
+					)
 				: yield* convertUnreachableDefault(defaultInstance);
 			return instances.map((instance, index) =>
 				index === defaultIndex ? resolvedDefault : instance,
@@ -193,5 +196,5 @@ export const resolveSmartDefaultInstances = (
 			(instance) => instance.id === DEFAULT_OPENCODE_INSTANCE_ID,
 		)
 			? instances
-			: [yield* detectDefaultInstance, ...instances];
+			: [yield* detectDefaultInstance(smartDefaultUrl), ...instances];
 	}).pipe(Effect.withSpan("daemon.smartDefault.resolveInstances"));
