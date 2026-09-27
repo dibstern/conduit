@@ -116,5 +116,6 @@
 		"movedTo": "src/lib/frontend/components/ui/Badge.svelte",
 		"reason": "The woke/snoozed/settled state chips forced these onto the neutral Badge with ! overrides, which the appearance-override rule forbids. They are now Badge variant=\"quiet\" (bg-bg-alt text-text-muted border-border-subtle).",
 		"requires": "variant=\"quiet\""
-	}
+	},
+	"src/lib/frontend/components/session/SessionItem.svelte :: loader-circle": "Not a class: the working row's glyph name in ATTENTION_DISPLAY. Running sessions now draw the BlockGrid loading indicator, the same one the New session button uses, so no loader-circle icon is rendered there any more."
 }
