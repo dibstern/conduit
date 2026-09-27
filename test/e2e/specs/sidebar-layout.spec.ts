@@ -129,6 +129,91 @@ test.describe("Sidebar Layout — Desktop", () => {
 test.describe("Sidebar Layout — Mobile", () => {
 	test.use({ viewport: { width: 375, height: 667 }, persistence: true });
 
+	test("mobile: both session menu triggers open the same bottom sheet", async ({
+		page,
+		relayUrl,
+	}) => {
+		await page.setViewportSize({ width: 393, height: 852 });
+		await new AppPage(page).goto(relayUrl);
+		const bar = page.getByTestId("session-bar");
+		const overflow = page.getByTestId("session-bar-overflow");
+		const titleChevron = page.getByTestId("session-bar-title-menu");
+		const menu = page.getByTestId("session-bar-overflow-menu");
+		const before = await bar.boundingBox();
+		await overflow.click();
+		await expect(menu).toBeVisible();
+		const sheet = await menu.boundingBox();
+		expect(sheet).not.toBeNull();
+		expect(
+			Math.abs((sheet?.y ?? 0) + (sheet?.height ?? 0) - 852),
+		).toBeLessThanOrEqual(1);
+		expect(sheet?.x).toBe(0);
+		expect(sheet?.width).toBe(393);
+		await expect(page.getByTestId("menu-sheet-scrim")).toBeVisible();
+		await expect(bar).toHaveAttribute("data-collapsed", "false");
+		expect(await bar.boundingBox()).toEqual(before);
+		const items = menu.getByRole("menuitem");
+		await expect(items.nth(0)).toContainText("Chat");
+		await expect(items.nth(1)).toContainText("Terminal");
+		await expect(items.nth(2)).toContainText("Diff");
+		await expect(items.nth(3)).toContainText("Files");
+		await expect(items.nth(2)).toHaveAttribute("aria-disabled", "true");
+		await expect(items.nth(0)).toHaveAttribute("aria-current", "true");
+		await page.keyboard.press("Escape");
+		await expect(menu).toBeHidden();
+		await expect(overflow).toBeFocused();
+		await overflow.click();
+		await expect(page.getByTestId("menu-sheet-scrim")).not.toHaveClass(
+			/pointer-events-none/,
+		);
+		await page.mouse.click(20, 200);
+		await expect(menu).toBeHidden();
+		await expect(overflow).toBeFocused();
+
+		await titleChevron.click();
+		await expect(menu).toBeVisible();
+		await page.keyboard.press("Escape");
+		await expect(menu).toBeHidden();
+		await expect(titleChevron).toBeFocused();
+		await titleChevron.click();
+		await menu.getByRole("menuitem", { name: "Files" }).click();
+		await expect(page.locator("#sidebar-panel-files")).toBeVisible();
+		await expect(menu).toBeHidden();
+		await expect(titleChevron).toBeFocused();
+		await page.getByTestId("session-view-chat").click();
+
+		await overflow.click();
+		await menu.getByRole("menuitem", { name: "Terminal" }).click();
+		await expect(page.locator("#terminal-panel")).toBeVisible();
+		await expect(menu).toBeHidden();
+		await expect(overflow).toBeFocused();
+		await page.getByTestId("session-view-chat").click();
+		const messages = page.locator("#messages");
+		await messages.evaluate((element) => {
+			const spacer = document.createElement("div");
+			spacer.style.height = "1200px";
+			element.firstElementChild?.append(spacer);
+			element.scrollTop = 180;
+		});
+		await expect(page.locator("#messages #scroll-btn")).toBeVisible();
+		await messages.evaluate((element) => {
+			element.scrollTop = element.scrollHeight;
+		});
+		await messages.evaluate((element) => {
+			element.scrollTop = Math.max(0, element.scrollTop - 400);
+		});
+		await messages.evaluate((element) => {
+			element.scrollTop = element.scrollHeight;
+		});
+		await expect(bar).toHaveAttribute("data-collapsed", "true");
+		const collapsedBefore = await bar.boundingBox();
+		await overflow.click();
+		await expect(menu.getByRole("menuitem", { name: "Chat" })).toBeVisible();
+		await expect(menu.getByRole("menuitem", { name: "Files" })).toBeVisible();
+		await expect(bar).toHaveAttribute("data-collapsed", "true");
+		expect(await bar.boundingBox()).toEqual(collapsedBefore);
+	});
+
 	test("mobile: session views switch without losing transcript or files position", async ({
 		page,
 		relayUrl,

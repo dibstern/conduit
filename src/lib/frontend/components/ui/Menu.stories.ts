@@ -21,6 +21,41 @@ type Story = StoryObj<typeof meta>;
 
 export const Default: Story = {};
 
+export const Sheet: Story = {
+	args: { open: false, presentation: "sheet" },
+	parameters: { a11y: { test: "error" } },
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		const body = within(canvasElement.ownerDocument.body);
+		const trigger = canvas.getByRole("button", { name: "Open menu" });
+		await userEvent.click(trigger);
+		const menu = body.getByRole("menu", { name: "File actions" });
+		await expect(menu).toBeVisible();
+		await expect(body.getByTestId("menu-sheet-scrim")).toBeVisible();
+		await expect(body.getByRole("menuitem", { name: "Archive" })).toHaveClass(
+			/py-3/,
+		);
+	},
+};
+
+export const SheetEscapeRestoresFocus: Story = {
+	args: { open: false, presentation: "sheet" },
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		const body = within(canvasElement.ownerDocument.body);
+		const trigger = canvas.getByRole("button", { name: "Open menu" });
+		await userEvent.click(trigger);
+		await expect(
+			body.getByRole("menu", { name: "File actions" }),
+		).toBeVisible();
+		await userEvent.keyboard("{Escape}");
+		await waitFor(() =>
+			expect(body.queryByRole("menu")).not.toBeInTheDocument(),
+		);
+		await expect(trigger).toHaveFocus();
+	},
+};
+
 export const ArrowKeyNavigation: Story = {
 	args: { open: false },
 	play: async ({ canvasElement }) => {

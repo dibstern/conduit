@@ -306,11 +306,37 @@ export const OverflowMenuOpen: Story = {
 		const menu = await within(document.body).findByTestId(
 			"session-bar-overflow-menu",
 		);
-		for (const name of ["Terminal", "Share", "Settings"]) {
+		for (const name of [
+			"Chat",
+			"Terminal",
+			"Diff",
+			"Files",
+			"Share",
+			"Settings",
+		]) {
 			await expect(within(menu).getByRole("menuitem", { name })).toBeVisible();
 		}
+		await expect(menu).toHaveClass(/bottom-0/);
+		await expect(
+			within(menu).getByRole("menuitem", { name: "Chat" }),
+		).toHaveAttribute("aria-current", "true");
 		// Debug is behind its feature flag, as it is in the header.
 		expect(within(menu).queryByTestId("overflow-debug")).toBeNull();
+	},
+};
+
+export const TitleChevronSheet: Story = {
+	tags: ["viewport-capture"],
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		await userEvent.click(canvas.getByTestId("session-bar-title-menu"));
+		const menu = await within(document.body).findByTestId(
+			"session-bar-overflow-menu",
+		);
+		await expect(menu).toHaveClass(/bottom-0/);
+		await expect(
+			within(menu).getByRole("menuitem", { name: "Chat" }),
+		).toBeVisible();
 	},
 };
 

@@ -15,6 +15,7 @@
 		dangerIcon,
 		portalTo,
 		customAnchor,
+		presentation,
 	}: {
 		open?: boolean;
 		selected?: string;
@@ -24,6 +25,7 @@
 		dangerIcon?: string | undefined;
 		portalTo?: HTMLElement | string;
 		customAnchor?: HTMLElement | null;
+		presentation?: "popover" | "sheet";
 	} = $props();
 </script>
 
@@ -35,6 +37,7 @@
 	{onopenchange}
 	{portalTo}
 	{customAnchor}
+	{presentation}
 	ariaLabel="Test actions"
 	data-testid="menu"
 >
@@ -48,6 +51,7 @@
 		</MenuItem>
 		<MenuItem variant="danger" icon={dangerIcon}>Delete</MenuItem>
 		<MenuItem href="#project-a" onselect={onproject}>Open project</MenuItem>
+		<MenuItem density="default" data-testid="explicit-density-item">Explicit density</MenuItem>
 	</MenuGroup>
 	<MenuSeparator />
 	<MenuGroup label="Density">
