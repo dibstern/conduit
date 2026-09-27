@@ -1,9 +1,13 @@
 // ─── Session unread: the turn-end dot across windows ─────────────────────────
 // A session shows a dot when a turn ends, in every window, until the user
-// picks it in the sidebar (click or keyboard). Reload, reconnect and a relay
-// restart keep the dot; a sub-agent never gets one.
-// Spec: docs/adr/0004-session-mutations-are-canonical-events.md (Scope) and
-// conduit-test-hk9m.3.
+// picks it in the sidebar (click or keyboard) or interacts with its view: a
+// click, a wheel scroll, a keypress, focus moved into the view, or a pointer
+// resting over the transcript. Watching, window focus, a passing pointer, a
+// hidden page, an off-screen view and a scrolled-up transcript do not clear
+// it. Reload, reconnect and a relay restart keep the dot; a sub-agent never
+// gets one.
+// Spec: docs/adr/0004-session-mutations-are-canonical-events.md (Scope),
+// conduit-test-hk9m.3 and conduit-test-hk9m.4.
 //
 // Each step records dot state plus the row's last_turn_end_version and
 // seen_version into a report. The raw report is attached to the run; the
@@ -67,6 +71,14 @@ async function expectDot(windows: Windows, sessionId: string, shown: boolean) {
 		await expect(dot(page, sessionId)).toHaveCount(shown ? 1 : 0);
 }
 
+type ReportName =
+	| "lifecycle"
+	| "sub-agent"
+	| "fork"
+	| "click-and-typing"
+	| "focus-and-scroll"
+	| "dwell-and-viewport";
+
 class Report {
 	readonly entries: ReportEntry[] = [];
 
@@ -101,7 +113,7 @@ class Report {
 	// Versions become "turn end N" of their session, which is stable across
 	// runs, or "before turn end N" for a mark unread; anything else stays raw
 	// and so fails the golden.
-	async check(testInfo: TestInfo, name: "lifecycle" | "sub-agent" | "fork") {
+	async check(testInfo: TestInfo, name: ReportName) {
 		const file = `${this.provider}-${name}-report.json`;
 		await testInfo.attach(file, {
 			body: JSON.stringify(this.entries, null, 2),
@@ -240,6 +252,268 @@ async function dotLifecycle(
 	await windows.B.context().close();
 }
 
+// ─── Interaction with the session view (conduit-test-hk9m.4) ─────────────────
+// Window A is the one the user touches; B only watches, so B's dot shows that
+// A's report reached every window. A runs on Playwright's clock: interaction
+// steps pause it, so the ~300 ms pointer dwell fires only when a step runs the
+// clock past it and never races the gesture under test.
+
+interface Fixtures {
+	readonly page: Page;
+	readonly browser: Browser;
+	readonly relayUrl: string;
+	readonly harness: ReplayHarness;
+}
+
+interface Interaction {
+	readonly provider: Provider;
+	readonly harness: ReplayHarness;
+	readonly sessionId: string;
+	readonly windows: Windows;
+	readonly report: Report;
+	/** MarkSessionSeen requests A has sent: none for a negative, one per turn end. */
+	readonly reports: () => number;
+}
+
+const transcript = (page: Page) => page.locator("#messages");
+
+async function openInteraction(
+	provider: Provider,
+	{ page, browser, relayUrl, harness }: Fixtures,
+): Promise<Interaction> {
+	let sent = 0;
+	page.on("websocket", (ws) =>
+		ws.on("framesent", ({ payload }) => {
+			if (typeof payload === "string" && payload.includes("MarkSessionSeen"))
+				sent++;
+		}),
+	);
+	await page.clock.install();
+	const { windows } = await openWindows(page, browser, relayUrl);
+	await page.mouse.move(0, 0);
+	return {
+		provider,
+		harness,
+		sessionId: decodeURIComponent(harness.projectUrl.slice("/s/".length)),
+		windows,
+		report: new Report(provider, harness),
+		reports: () => sent,
+	};
+}
+
+/** Runs `body` with A's clock paused, then parks the pointer and resumes. */
+async function paused(page: Page, body: () => Promise<void>) {
+	// Far enough ahead that the running clock cannot pass it before the call lands.
+	await page.clock.pauseAt(await page.evaluate(() => Date.now() + 1_000));
+	try {
+		await body();
+	} finally {
+		await page.mouse.move(0, 0);
+		await page.clock.resume();
+	}
+}
+
+async function transcriptCentre(page: Page) {
+	const box = await transcript(page).boundingBox();
+	if (!box) throw new Error("the transcript is not rendered");
+	return { x: box.x + box.width / 2, y: box.y + box.height / 2 };
+}
+
+async function newDot(ctx: Interaction, text: string) {
+	await endTurn(ctx.provider, ctx.windows, ctx.harness, ctx.sessionId, text);
+	await ctx.windows.A.mouse.move(0, 0);
+	await expectDot(ctx.windows, ctx.sessionId, true);
+}
+
+/** A negative: A touched the view in a way that must not count. */
+async function expectKept(ctx: Interaction, reports: number, scenario: string) {
+	await expectDot(ctx.windows, ctx.sessionId, true);
+	expect(ctx.reports()).toBe(reports);
+	await ctx.report.record(scenario, ctx.windows, ctx.sessionId);
+}
+
+async function expectCleared(
+	ctx: Interaction,
+	reports: number,
+	scenario: string,
+) {
+	await expectDot(ctx.windows, ctx.sessionId, false);
+	expect(ctx.reports()).toBe(reports);
+	await ctx.report.record(scenario, ctx.windows, ctx.sessionId);
+}
+
+async function clickAndTyping(
+	provider: Provider,
+	fixtures: Fixtures,
+	testInfo: TestInfo,
+) {
+	const ctx = await openInteraction(provider, fixtures);
+	const { A } = ctx.windows;
+
+	await test.step("watching without touching keeps the dot", async () => {
+		await newDot(ctx, "First turn");
+		await expectKept(ctx, 0, "watching");
+	});
+
+	await test.step("clicks in A's transcript clear it in both, with one report", async () => {
+		await paused(A, async () => {
+			await transcript(A).click({ position: { x: 24, y: 24 } });
+			await transcript(A).click({ position: { x: 24, y: 24 } });
+			await expectCleared(ctx, 1, "click");
+		});
+	});
+
+	await test.step("typing in A's composer clears the next one", async () => {
+		// Focused while the row is read, so only the keypress can count.
+		await A.locator("#input").focus();
+		await newDot(ctx, "Second turn");
+		await A.locator("#input").focus();
+		await A.keyboard.type("ok");
+		await expectCleared(ctx, 2, "typing");
+	});
+
+	await ctx.report.check(testInfo, "click-and-typing");
+	await ctx.windows.B.context().close();
+}
+
+async function focusAndScroll(
+	provider: Provider,
+	fixtures: Fixtures,
+	testInfo: TestInfo,
+) {
+	const ctx = await openInteraction(provider, fixtures);
+	const { A } = ctx.windows;
+
+	await test.step("window focus alone keeps the dot", async () => {
+		await A.locator("#input").focus();
+		await newDot(ctx, "First turn");
+		// When the window regains focus the browser focuses the element that
+		// had it, with no related target: the same events as blur then focus.
+		await A.locator("#input").evaluate((input) => {
+			input.blur();
+			input.focus();
+		});
+		await expectKept(ctx, 0, "window focus");
+	});
+
+	await test.step("tabbing into A's view clears it in both", async () => {
+		await A.evaluate(() => {
+			const view = document.querySelector<HTMLElement>("#messages");
+			const tabbable = [
+				...document.querySelectorAll<HTMLElement>(
+					"a[href], button:not([disabled]), input, textarea, select, [tabindex]",
+				),
+			].filter((el) => el.tabIndex >= 0 && el.getClientRects().length > 0);
+			const before = view ? tabbable[tabbable.indexOf(view) - 1] : undefined;
+			if (!before) throw new Error("nothing is tabbable before the transcript");
+			before.focus();
+		});
+		await A.keyboard.press("Tab");
+		await expect(transcript(A)).toBeFocused();
+		await expectCleared(ctx, 1, "tab into view");
+	});
+
+	await test.step("a wheel scroll over A's transcript clears the next one", async () => {
+		await A.locator("#input").focus();
+		await newDot(ctx, "Second turn");
+		await paused(A, async () => {
+			const centre = await transcriptCentre(A);
+			await A.mouse.move(centre.x, centre.y);
+			await A.mouse.wheel(0, -120);
+			await expectCleared(ctx, 2, "wheel");
+		});
+	});
+
+	await ctx.report.check(testInfo, "focus-and-scroll");
+	await ctx.windows.B.context().close();
+}
+
+async function dwellAndViewport(
+	provider: Provider,
+	fixtures: Fixtures,
+	testInfo: TestInfo,
+) {
+	const ctx = await openInteraction(provider, fixtures);
+	const { A } = ctx.windows;
+
+	await test.step("a passing pointer keeps the dot, a resting one clears it", async () => {
+		await newDot(ctx, "First turn");
+		await paused(A, async () => {
+			const centre = await transcriptCentre(A);
+			await A.mouse.move(centre.x, centre.y);
+			await A.clock.runFor(200);
+			await A.mouse.move(0, 0);
+			await A.clock.runFor(1_000);
+			await expectKept(ctx, 0, "pointer pass");
+			await A.mouse.move(centre.x, centre.y);
+			await A.clock.runFor(350);
+			await expectCleared(ctx, 1, "pointer rest");
+		});
+	});
+
+	await test.step("nothing counts while the page is hidden", async () => {
+		await newDot(ctx, "Second turn");
+		await A.evaluate(() =>
+			Object.defineProperty(document, "visibilityState", {
+				configurable: true,
+				get: () => "hidden",
+			}),
+		);
+		await paused(A, async () => {
+			const centre = await transcriptCentre(A);
+			await A.mouse.move(centre.x, centre.y);
+			await A.clock.runFor(1_000);
+			await transcript(A).click({ position: { x: 24, y: 24 } });
+			await A.keyboard.press("ArrowUp");
+			await A.clock.runFor(1_500);
+		});
+		await A.evaluate(() => Reflect.deleteProperty(document, "visibilityState"));
+		await expectKept(ctx, 1, "hidden page");
+	});
+
+	await test.step("nothing counts while the view is off screen", async () => {
+		await A.evaluate(() => {
+			const app = document.querySelector<HTMLElement>("#app");
+			if (app) app.style.transform = "translateY(200vh)";
+		});
+		await expect(A.locator("[data-turn-end]")).not.toBeInViewport();
+		// Focus without scrolling, or the page scrolls the view back on screen.
+		await A.locator("#input").evaluate((input) =>
+			input.focus({ preventScroll: true }),
+		);
+		await A.keyboard.press("ArrowUp");
+		await expect(A.locator("[data-turn-end]")).not.toBeInViewport();
+		await A.evaluate(() => {
+			const app = document.querySelector<HTMLElement>("#app");
+			if (app) app.style.transform = "";
+		});
+		await expectKept(ctx, 1, "off-screen view");
+	});
+
+	await test.step("scrolled up keeps it until the turn end is in view", async () => {
+		const viewport = A.viewportSize();
+		if (!viewport) throw new Error("window A has no viewport");
+		await A.setViewportSize({ width: viewport.width, height: 420 });
+		await transcript(A).evaluate((el) => {
+			el.scrollTop = 0;
+		});
+		await expect(A.locator("[data-turn-end]")).not.toBeInViewport();
+		await paused(A, async () => {
+			await transcript(A).click({ position: { x: 24, y: 24 } });
+			await A.clock.runFor(1_500);
+			await expectKept(ctx, 1, "scrolled up");
+			const centre = await transcriptCentre(A);
+			await A.mouse.move(centre.x, centre.y);
+			await A.mouse.wheel(0, 10_000);
+			await expect(A.locator("[data-turn-end]")).toBeInViewport();
+			await expectCleared(ctx, 2, "scrolled to the turn end");
+		});
+	});
+
+	await ctx.report.check(testInfo, "dwell-and-viewport");
+	await ctx.windows.B.context().close();
+}
+
 test.describe("Session unread dot", () => {
 	test.beforeEach(({ page }) => {
 		const viewport = page.viewportSize();
@@ -259,6 +533,45 @@ test.describe("Session unread dot", () => {
 			harness,
 		}, testInfo) => {
 			await dotLifecycle(
+				"opencode",
+				{ page, browser, relayUrl, harness },
+				testInfo,
+			);
+		});
+
+		test("watching keeps the dot; a click or typing clears it", async ({
+			page,
+			browser,
+			relayUrl,
+			harness,
+		}, testInfo) => {
+			await clickAndTyping(
+				"opencode",
+				{ page, browser, relayUrl, harness },
+				testInfo,
+			);
+		});
+
+		test("window focus keeps the dot; tabbing in or scrolling clears it", async ({
+			page,
+			browser,
+			relayUrl,
+			harness,
+		}, testInfo) => {
+			await focusAndScroll(
+				"opencode",
+				{ page, browser, relayUrl, harness },
+				testInfo,
+			);
+		});
+
+		test("a resting pointer clears the dot; a pass, a hidden page, an off-screen or scrolled-up view do not", async ({
+			page,
+			browser,
+			relayUrl,
+			harness,
+		}, testInfo) => {
+			await dwellAndViewport(
 				"opencode",
 				{ page, browser, relayUrl, harness },
 				testInfo,
@@ -408,6 +721,53 @@ test.describe("Session unread dot", () => {
 				harness,
 			}, testInfo) => {
 				await dotLifecycle(
+					"claude",
+					{ page, browser, relayUrl, harness },
+					testInfo,
+				);
+			});
+		});
+
+		test.describe("interaction", () => {
+			test.use({
+				claudeReplay: {
+					turns: ["pong-thinking-text-turn", "pong-thinking-text-turn"],
+				},
+			});
+
+			test("watching keeps the dot; a click or typing clears it", async ({
+				page,
+				browser,
+				relayUrl,
+				harness,
+			}, testInfo) => {
+				await clickAndTyping(
+					"claude",
+					{ page, browser, relayUrl, harness },
+					testInfo,
+				);
+			});
+
+			test("window focus keeps the dot; tabbing in or scrolling clears it", async ({
+				page,
+				browser,
+				relayUrl,
+				harness,
+			}, testInfo) => {
+				await focusAndScroll(
+					"claude",
+					{ page, browser, relayUrl, harness },
+					testInfo,
+				);
+			});
+
+			test("a resting pointer clears the dot; a pass, a hidden page, an off-screen or scrolled-up view do not", async ({
+				page,
+				browser,
+				relayUrl,
+				harness,
+			}, testInfo) => {
+				await dwellAndViewport(
 					"claude",
 					{ page, browser, relayUrl, harness },
 					testInfo,

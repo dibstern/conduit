@@ -64,6 +64,7 @@
 	import { fetchCurrentVersion } from "../../stores/version.svelte.js";
 	import type { RelayMessage } from "../../types.js";
 	import { toggleSessionRead } from "../../utils/session-read.js";
+	import { trackSeen } from "../../utils/attention.js";
 	import DeepSearch from "../session/DeepSearch.svelte";
 
 	// ─── Local state ──────────────────────────────────────────────────────────
@@ -722,7 +723,8 @@
 
 		<!-- Keep the transcript mounted and sized beneath phone views so its scrollTop survives. -->
 		<div class="relative flex flex-col flex-1 min-h-0">
-			<div class="flex flex-col flex-1 min-h-0" class:invisible={mobileMaximized} inert={sessionViewState.filesOpen || mobileMaximized}>
+			<!-- Touches here clear the unread dot (conduit-test-hk9m.4). -->
+			<div class="flex flex-col flex-1 min-h-0" class:invisible={mobileMaximized} inert={sessionViewState.filesOpen || mobileMaximized} {@attach trackSeen(sessionState.currentId)}>
 				<MessageList />
 				<InputArea />
 			</div>
