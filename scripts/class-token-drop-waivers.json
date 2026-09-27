@@ -111,5 +111,10 @@
 	"test/unit/persistence/schema.test.ts :: ESCAPE,Session": "Not class tokens: SQL and test-name words from cases conduit-test-v6co.10 rewrote when these tests moved off the retired node:sqlite migration runner onto the Effect migrator.",
 	"test/unit/persistence/session-seeder.test.ts :: BY,Custom,FROM,ORDER,SELECT,Title,WHERE,claude-subagent-abc,id,id,,provider,sess-1,sessions,title": "Not class tokens: SQL fragments and test-name words from session-seeder.test.ts, a test of the retired node:sqlite persistence layer. conduit-test-v6co.10 deleted it after porting its uncovered cases to the Effect tests.",
 	"test/unit/persistence/sqlite-client.test.ts :: BY,FROM,ORDER,SELECT,id,test,val": "Not class tokens: SQL fragments and test-name words from sqlite-client.test.ts, a test of the retired node:sqlite persistence layer. conduit-test-v6co.10 deleted it after porting its uncovered cases to the Effect tests.",
-	"vitest.config.ts :: test/unit/effect/sqlite-transactions.test.ts": "Not a class. It is the path of test/unit/effect/sqlite-transactions.test.ts, which tested only the retired node:sqlite wrapper and was deleted in conduit-test-v6co.10; the unit-sqlite include and unit exclude no longer name it."
+	"vitest.config.ts :: test/unit/effect/sqlite-transactions.test.ts": "Not a class. It is the path of test/unit/effect/sqlite-transactions.test.ts, which tested only the retired node:sqlite wrapper and was deleted in conduit-test-v6co.10; the unit-sqlite include and unit exclude no longer name it.",
+	"src/lib/frontend/components/layout/SessionBar.svelte :: bg-bg-alt,border-border-subtle": {
+		"movedTo": "src/lib/frontend/components/ui/Badge.svelte",
+		"reason": "The woke/snoozed/settled state chips forced these onto the neutral Badge with ! overrides, which the appearance-override rule forbids. They are now Badge variant=\"quiet\" (bg-bg-alt text-text-muted border-border-subtle).",
+		"requires": "variant=\"quiet\""
+	}
 }

@@ -246,7 +246,7 @@
 		{/if}
 		{#if stateChip && session}
 			{#if stateChip.kind === "woke"}
-				<Badge variant="neutral" shape="pill" size="sm" class="shrink-0 border-border-subtle! bg-bg-alt! text-text-muted!" data-testid="session-bar-state-chip" data-state="woke" title={stateChip.label}>
+				<Badge variant="quiet" shape="pill" size="sm" class="shrink-0" data-testid="session-bar-state-chip" data-state="woke" title={stateChip.label}>
 					<Icon name={stateChip.icon} size={13} class="text-accent" />
 					{#if !collapsed}<span>{stateChip.label}</span>{/if}
 				</Badge>
@@ -254,7 +254,7 @@
 				<Menu bind:open={stateMenuOpen} ariaLabel="Session state options" align="end" data-testid="session-bar-state-menu">
 					{#snippet trigger({ props })}
 						<Button {...props} variant="ghost" size="content" class="min-h-[44px] min-w-[44px] shrink-0 rounded-full" ariaLabel={`${stateChip.label} — open options`} data-testid="session-bar-state-chip" data-state={stateChip.kind}>
-							<Badge variant="neutral" shape="pill" size="sm" class="border-border-subtle! bg-bg-alt! text-text-muted!">
+							<Badge variant="quiet" shape="pill" size="sm">
 								<Icon name={stateChip.icon} size={13} class={stateChip.kind === "snoozed" ? "text-brand-b" : "text-success"} />
 								{#if !collapsed}<span>{stateChip.label}</span>{/if}
 							</Badge>

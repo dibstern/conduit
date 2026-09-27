@@ -15,12 +15,16 @@
   (that one is a Button).
 -->
 <script module lang="ts">
-	type BadgeVariant = "neutral" | "accent" | "accent-solid" | "tag";
+	type BadgeVariant = "neutral" | "quiet" | "accent" | "accent-solid" | "tag";
 	type BadgeSize = "xs" | "sm" | "count";
 	type BadgeShape = "rounded" | "pill";
 
 	const VARIANT_CLASSES: Record<BadgeVariant, string> = {
 		neutral: "bg-bg text-text-dimmer border border-border",
+		// A neutral chip that sits on the chrome rather than cutting into it:
+		// SessionBar's woke/snoozed/settled state chips. The icon inside carries
+		// the colour, so the chip itself recedes.
+		quiet: "bg-bg-alt text-text-muted border border-border-subtle",
 		accent: "bg-accent-bg text-accent",
 		"accent-solid": "bg-accent text-bg",
 		// The tag tint is theme-aware on purpose: the two SettingsPanel chips

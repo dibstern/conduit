@@ -41,6 +41,7 @@ describe("Badge", () => {
 
 	it.each([
 		["neutral", "bg-bg"],
+		["quiet", "bg-bg-alt"],
 		["accent", "bg-accent-bg"],
 		["accent-solid", "bg-accent"],
 		["tag", "bg-[rgba(var(--overlay-rgb),0.05)]"],
