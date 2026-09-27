@@ -10,6 +10,7 @@
 
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import type { Page, TestInfo } from "@playwright/test";
 import { errors, expect, test } from "@playwright/test";
 import { freezeAnimations } from "../e2e/helpers/visual-helpers.js";
 
@@ -24,6 +25,43 @@ interface StoryEntry {
 }
 
 const VIEWPORT_CAPTURE_TAG = "viewport-capture";
+
+const LIGHT_STORY_IDS = new Set([
+	// Sidebar surfaces and its file-browser panel expose the main navigation palette.
+	"layout-sidebar--default",
+	"layout-sidebar--file-browser-panel",
+	// Populated and open-shelf lists expose grouping, borders, and nested surfaces.
+	"session-sessionlist--with-items",
+	"session-sessionlist--pinned-and-settled-shelf-open",
+	"session-sessionlist--grouped-by-project",
+	// Row tiers and hover actions expose status colours and action contrast.
+	"session-sessionitem--needs-approval",
+	"session-sessionitem--needs-reply",
+	"session-sessionitem--processing",
+	"session-sessionitem--idle",
+	"session-sessionitem--settled",
+	"session-sessionitem--hover-actions",
+	"session-sessionitem--settled-hover-actions",
+	// The context menu has a separate floating surface and selection states.
+	"session-sessioncontextmenu--default",
+	// Conversation, markdown, and user bubbles cover the transcript palette.
+	"chat-messagelist--full-conversation",
+	"chat-assistantmessage--rich-markdown",
+	"chat-usermessage--default",
+	// Empty, processing, and contextual composer states expose input boundaries.
+	"input-inputarea--empty",
+	"input-inputarea--processing",
+	"input-inputarea--with-context-bar",
+	// Menus and the shortcut sheet cover popovers and larger overlays.
+	"ui-menu--default",
+	"input-commandmenu--open",
+	"session-shortcutsheet--default",
+	// Toast uses the inverse palette; settings uses a blurred overlay surface.
+	"overlays-toast--default-toast",
+	"overlays-settingspanel--default",
+	// Terminal output consumes the JS-side theme palette as well as CSS tokens.
+	"terminal-terminaltab--with-output",
+]);
 
 /** Fidelity-gate mode for migration swap commits — see playwright.config.ts. */
 const STRICT = process.env["VISUAL_STRICT"] === "1";
@@ -427,10 +465,20 @@ if (stories.length > 0) {
 		},
 	};
 
+	// A renamed story would otherwise drop out of light coverage silently.
+	test("every light-mode story id exists", () => {
+		const ids = new Set(stories.map((story) => story.id));
+		expect([...LIGHT_STORY_IDS].filter((id) => !ids.has(id))).toEqual([]);
+	});
+
 	for (const [title, componentStories] of byTitle) {
 		test.describe(title, () => {
 			for (const story of componentStories) {
-				test(story.name, async ({ page }, testInfo) => {
+				const captureStory = async (
+					page: Page,
+					testInfo: TestInfo,
+					theme: "dark" | "light",
+				) => {
 					const skipScope = SKIP_STORIES.get(story.id);
 					if (skipScope === "all" || skipScope === testInfo.project.name) {
 						test.skip(true, "Intentionally excluded from visual capture");
@@ -452,9 +500,12 @@ if (stories.length > 0) {
 
 					await pinRandomness(page);
 					await pinClock(page);
-					await page.goto(`/iframe.html?id=${story.id}&viewMode=story`, {
-						waitUntil: "domcontentloaded",
-					});
+					await page.goto(
+						`/iframe.html?id=${story.id}&viewMode=story${theme === "light" ? "&globals=theme:light" : ""}`,
+						{
+							waitUntil: "domcontentloaded",
+						},
+					);
 					await waitForStoryTerminalPhase(page, story.id);
 					// Keep the historical settle after the phase wait/fallback. Waiting may
 					// only increase; shortening it risks baseline churn across all stories.
@@ -632,18 +683,23 @@ if (stories.length > 0) {
 						}
 					}
 
+					const snapshotName =
+						theme === "light" ? `${story.id}-light.png` : `${story.id}.png`;
 					if (usesViewportCapture) {
-						await expect(page).toHaveScreenshot(
-							`${story.id}.png`,
-							screenshotOpts,
-						);
+						await expect(page).toHaveScreenshot(snapshotName, screenshotOpts);
 					} else {
-						await expect(root).toHaveScreenshot(
-							`${story.id}.png`,
-							screenshotOpts,
-						);
+						await expect(root).toHaveScreenshot(snapshotName, screenshotOpts);
 					}
+				};
+
+				test(story.name, async ({ page }, testInfo) => {
+					await captureStory(page, testInfo, "dark");
 				});
+				if (LIGHT_STORY_IDS.has(story.id)) {
+					test(`${story.name} (light)`, async ({ page }, testInfo) => {
+						await captureStory(page, testInfo, "light");
+					});
+				}
 			}
 		});
 	}
