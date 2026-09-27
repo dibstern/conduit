@@ -445,6 +445,41 @@ describe("OpenCode Runtime Ingress Projection (SSE → append → project → re
 		expect(completed[0]?.status).toBe("completed");
 	});
 
+	// OpenCode names a sub-agent's parent only on session.created, which
+	// translates to nothing; the session is seeded by its first translatable
+	// event. Losing the parent there makes a sub-agent a root, and a root gets
+	// the turn-end dot (conduit-test-hk9m.3).
+	it("seeds a sub-agent under the parent its session.created named", async () => {
+		const childId = "sess-proj-child";
+		await persistSessionCreated(SESSION_ID, "opencode");
+		await ingest(
+			makeSSEEvent("session.created", {
+				info: { id: childId, parentID: SESSION_ID, title: "Sub-agent" },
+			}),
+			childId,
+		);
+		await ingestOk(
+			makeSSEEvent("message.updated", {
+				sessionID: childId,
+				info: {
+					id: "child-msg-001",
+					role: "assistant",
+					time: { created: 1000, completed: 2000 },
+				},
+			}),
+			childId,
+		);
+
+		const rows = await currentRuntime().runPromise(
+			Effect.gen(function* () {
+				const sql = yield* SqlClient.SqlClient;
+				return yield* sql<{ parent_id: string | null; unread: number }>`
+					SELECT parent_id, unread FROM sessions WHERE id = ${childId}`;
+			}),
+		);
+		expect(rows).toEqual([{ parent_id: SESSION_ID, unread: 0 }]);
+	});
+
 	it("turn.completed updates turn with cost/tokens", async () => {
 		await ingestOk(
 			makeSSEEvent("message.created", {

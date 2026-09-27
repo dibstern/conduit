@@ -71,16 +71,18 @@ export async function createE2EHarness(opts?: {
 
 	const staticDir = path.resolve(import.meta.dirname, "../../../dist/frontend");
 
-	const stack = await createRelayStack({
-		port: 0,
-		host: "127.0.0.1",
-		opencodeUrl,
-		projectDir: process.cwd(),
-		slug: "e2e-test",
-		sessionTitle: "E2E Test Session",
-		staticDir,
-		log: createSilentLogger(),
-	});
+	const startStack = (port: number) =>
+		createRelayStack({
+			port,
+			host: "127.0.0.1",
+			opencodeUrl,
+			projectDir: process.cwd(),
+			slug: "e2e-test",
+			sessionTitle: "E2E Test Session",
+			staticDir,
+			log: createSilentLogger(),
+		});
+	const stack = await startStack(0);
 
 	const relayPort = stack.getPort();
 	const relayBaseUrl = `http://127.0.0.1:${relayPort}`;
@@ -128,6 +130,9 @@ export interface ReplayHarness {
 	claudeReplayer?: ClaudeTraceReplayer;
 	/** The fresh per-run SQLite event store, when persistence is on. */
 	eventsDbPath?: string;
+	/** Stop the relay and start a fresh one on the same port, config dir and
+	 *  event store, as a daemon restart would. Open pages reconnect on their own. */
+	restart(): Promise<void>;
 	stop(): Promise<void>;
 }
 
@@ -210,21 +215,23 @@ export async function createReplayHarness(
 		}));
 	}
 
-	const stack = await createRelayStack({
-		port: 0,
-		host: "127.0.0.1",
-		opencodeUrl: mock.url,
-		projectDir: process.cwd(),
-		slug: "e2e-replay",
-		sessionTitle: "E2E Replay Session",
-		staticDir,
-		configDir,
-		// Off by default: durable per-session state (settle, pin, read) only
-		// exists with an event store, and most replay specs predate it.
-		...(eventsDbPath ? { persistenceDbPath: eventsDbPath } : {}),
-		...(claudeReplayer ? { claudeSdk: claudeReplayer.sdk } : {}),
-		log: createSilentLogger(),
-	});
+	const startStack = (port: number) =>
+		createRelayStack({
+			port,
+			host: "127.0.0.1",
+			opencodeUrl: mock.url,
+			projectDir: process.cwd(),
+			slug: "e2e-replay",
+			sessionTitle: "E2E Replay Session",
+			staticDir,
+			configDir,
+			// Off by default: durable per-session state (settle, pin, read) only
+			// exists with an event store, and most replay specs predate it.
+			...(eventsDbPath ? { persistenceDbPath: eventsDbPath } : {}),
+			...(claudeReplayer ? { claudeSdk: claudeReplayer.sdk } : {}),
+			log: createSilentLogger(),
+		});
+	let stack = await startStack(0);
 
 	const relayPort = stack.getPort();
 	const relayBaseUrl = `http://127.0.0.1:${relayPort}`;
@@ -233,13 +240,19 @@ export async function createReplayHarness(
 		: stack.initialSessionId;
 
 	return {
-		stack,
+		get stack() {
+			return stack;
+		},
 		mock,
 		relayPort,
 		relayBaseUrl,
 		projectUrl: `/s/${encodeURIComponent(sessionId)}`,
 		...(claudeReplayer ? { claudeReplayer } : {}),
 		...(eventsDbPath ? { eventsDbPath } : {}),
+		async restart(): Promise<void> {
+			await stack.stop();
+			stack = await startStack(relayPort);
+		},
 		async stop(): Promise<void> {
 			await stack.stop();
 			await mock.stop();

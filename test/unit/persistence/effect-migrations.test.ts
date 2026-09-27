@@ -57,6 +57,7 @@ const expectedNames = [
 	"sent_alerts",
 	"fork_point_timestamp",
 	"sessions_marked_unread",
+	"session_attention",
 ];
 const legacyNames = [
 	"create_event_store_tables",
@@ -403,6 +404,8 @@ describe("Effect migration lineage", () => {
 						"fork_point_timestamp",
 						"fork_point_message_id",
 						"marked_unread_at",
+						"last_turn_end_version",
+						"seen_version",
 					]),
 				);
 				expect(columns.map((row) => row.name)).not.toContain("last_viewed_at");
@@ -442,7 +445,7 @@ describe("Effect migration lineage", () => {
 				const sql = yield* SqlClient.SqlClient;
 				yield* sql`UPDATE effect_sql_migrations SET name = 'create_projection_failures'
 				WHERE migration_id = 12`;
-				expect(yield* makeEffectSqlMigrator()).toHaveLength(12);
+				expect(yield* makeEffectSqlMigrator()).toHaveLength(13);
 				const history = yield* sql<{ name: string }>`
 				SELECT name FROM effect_sql_migrations ORDER BY migration_id`;
 				expect(history.map((row) => row.name)).toEqual(expectedNames);
@@ -450,7 +453,7 @@ describe("Effect migration lineage", () => {
 			}).pipe(Effect.provide(makeFileSqlLayer())),
 	);
 
-	it.effect("reconciles local-main id 18 and reruns 18 through 23 once", () =>
+	it.effect("reconciles local-main id 18 and reruns 18 through 24 once", () =>
 		Effect.gen(function* () {
 			yield* makeEffectSqlMigrator(prefix(17));
 			const sql = yield* SqlClient.SqlClient;
@@ -477,6 +480,8 @@ describe("Effect migration lineage", () => {
 					"fork_point_timestamp",
 					"fork_point_message_id",
 					"marked_unread_at",
+					"last_turn_end_version",
+					"seen_version",
 				]),
 			);
 			const history = yield* sql<{
@@ -487,15 +492,18 @@ describe("Effect migration lineage", () => {
 		}).pipe(Effect.provide(makeFileSqlLayer())),
 	);
 
-	it.effect("appends only migration 23 to a HEAD id-22 database", () =>
+	it.effect("appends only migrations 23 and 24 to a HEAD id-22 database", () =>
 		Effect.gen(function* () {
 			yield* makeEffectSqlMigrator(prefix(22));
 			const sql = yield* SqlClient.SqlClient;
 			expect(yield* makeEffectSqlMigrator()).toEqual([
 				[23, "sessions_marked_unread"],
+				[24, "session_attention"],
 			]);
 			const columns = yield* sql<{ name: string }>`PRAGMA table_info(sessions)`;
 			expect(columns.map((row) => row.name)).toContain("marked_unread_at");
+			expect(columns.map((row) => row.name)).toContain("last_turn_end_version");
+			expect(columns.map((row) => row.name)).toContain("seen_version");
 			expect(yield* makeEffectSqlMigrator()).toEqual([]);
 		}).pipe(Effect.provide(makeFileSqlLayer())),
 	);

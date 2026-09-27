@@ -2631,13 +2631,9 @@ describe("SessionManagerService", () => {
 					{ provider: "opencode", createdAt: 10 },
 				),
 				canonicalEvent(
-					"message.created",
+					"turn.completed",
 					"session-1",
-					{
-						messageId: "message-1",
-						role: "assistant",
-						sessionId: "session-1",
-					},
+					{ messageId: "message-1" },
 					{ provider: "opencode", createdAt: 20 },
 				),
 			]) {

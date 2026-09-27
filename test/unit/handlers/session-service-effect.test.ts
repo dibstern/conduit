@@ -264,40 +264,6 @@ describe("session handlers with Effect-native model service", () => {
 		},
 	);
 
-	it.effect("opening a session records read state best-effort", () => {
-		const markSessionRead = vi.fn(() =>
-			Effect.fail(
-				new SessionManagerError({
-					operation: "markSessionRead",
-					cause: "store unavailable",
-				}),
-			),
-		);
-		const sessionManagerService = makeMockSessionManagerService({
-			markSessionRead,
-			loadPreRenderedHistory: vi.fn(() =>
-				Effect.succeed({ messages: [], hasMore: false }),
-			),
-		});
-		const { wsHandler, layer } = makeSessionMetadataLayer({
-			sessionManagerService,
-		});
-
-		return handleViewSession(
-			"client-1",
-			{ sessionId: "session-1" },
-			/* skipMetadata */ true,
-		).pipe(
-			Effect.provide(layer),
-			Effect.tap(() => {
-				expect(markSessionRead).toHaveBeenCalledWith("session-1");
-				expect(wsHandler.broadcast).not.toHaveBeenCalledWith(
-					expect.objectContaining({ type: "notification_event" }),
-				);
-			}),
-		);
-	});
-
 	it.effect(
 		"loads view-session SQLite history through ReadQueryEffectTag for relay-local sessions",
 		() => {
@@ -948,31 +914,35 @@ describe("session handlers with Effect-native model service", () => {
 	});
 });
 
-// Switching retains main's read_at behaviour through the session service.
+// A switch also fires on restore, reload and reconnect, so it writes no read
+// state; the browser reports a user's pick instead (ADR-0004, Scope;
+// conduit-test-hk9m.3).
 describe("viewing a session", () => {
-	it.effect(
-		"marks the opened session read without a broad list broadcast",
-		() => {
-			const markSessionRead = vi.fn(() => Effect.void);
-			const service = makeMockSessionManagerService({ markSessionRead });
-			const { wsHandler, layer } = makeSessionMetadataLayer({
-				clientSession: "session-left",
-				sessionManagerService: service,
-			});
-			return handleViewSession(
-				"client-1",
-				{ sessionId: "session-1" },
-				/* skipMetadata */ true,
-			).pipe(
-				Effect.provide(layer),
-				Effect.tap(() => {
-					expect(markSessionRead).toHaveBeenCalledExactlyOnceWith("session-1");
-					expect(service.sendSessionLists).not.toHaveBeenCalled();
-					expect(wsHandler.broadcast).not.toHaveBeenCalledWith(
-						expect.objectContaining({ type: "session_list", roots: false }),
-					);
-				}),
-			);
-		},
-	);
+	it.effect("writes no read state and sends no broad list broadcast", () => {
+		const markSessionRead = vi.fn(() => Effect.void);
+		const markSessionSeen = vi.fn(() => Effect.succeed(true));
+		const service = makeMockSessionManagerService({
+			markSessionRead,
+			markSessionSeen,
+		});
+		const { wsHandler, layer } = makeSessionMetadataLayer({
+			clientSession: "session-left",
+			sessionManagerService: service,
+		});
+		return handleViewSession(
+			"client-1",
+			{ sessionId: "session-1" },
+			/* skipMetadata */ true,
+		).pipe(
+			Effect.provide(layer),
+			Effect.tap(() => {
+				expect(markSessionRead).not.toHaveBeenCalled();
+				expect(markSessionSeen).not.toHaveBeenCalled();
+				expect(service.sendSessionLists).not.toHaveBeenCalled();
+				expect(wsHandler.broadcast).not.toHaveBeenCalledWith(
+					expect.objectContaining({ type: "session_list", roots: false }),
+				);
+			}),
+		);
+	});
 });

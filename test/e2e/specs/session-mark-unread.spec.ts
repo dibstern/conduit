@@ -1,3 +1,5 @@
+import type { Locator } from "@playwright/test";
+import type { ReplayHarness } from "../helpers/e2e-harness.js";
 import { expect, gotoRelay, test } from "../helpers/replay-fixture.js";
 
 test.use({
@@ -7,12 +9,32 @@ test.use({
 	screenshot: "off",
 });
 
+// Unread is relative to a turn end (ADR-0004, Scope; conduit-test-hk9m.3), and
+// the recorded session has none until its prompt replays. The replay also
+// reorders the list, so the returned row is pinned to that session.
+async function finishTurn(harness: ReplayHarness, firstRow: Locator) {
+	const id = await firstRow.getAttribute("data-session-id");
+	if (!id) throw new Error("the recorded session has no row id");
+	const row = firstRow
+		.page()
+		.locator(`#session-list .session-item[data-session-id="${id}"]`);
+	harness.mock.triggerPromptSse(id);
+	await expect(row.getByTestId("session-unread-dot")).toBeVisible({
+		timeout: 20_000,
+	});
+	return row;
+}
+
 test("context menu, focused row and transcript toggle read state with undo", async ({
 	page,
 	relayUrl,
+	harness,
 }) => {
 	await gotoRelay(page, new URL("/", relayUrl).toString());
-	const row = page.locator("#session-list .session-item").first();
+	const row = await finishTurn(
+		harness,
+		page.locator("#session-list .session-item").first(),
+	);
 	await expect(row).toBeVisible();
 	await row.click();
 	await expect(row.getByTestId("session-unread-dot")).toHaveCount(0);
@@ -55,9 +77,13 @@ test("context menu, focused row and transcript toggle read state with undo", asy
 test("settling and un-settling preserve unread while the menu hides the action", async ({
 	page,
 	relayUrl,
+	harness,
 }) => {
 	await gotoRelay(page, new URL("/", relayUrl).toString());
-	const row = page.locator("#session-list .session-item").first();
+	const row = await finishTurn(
+		harness,
+		page.locator("#session-list .session-item").first(),
+	);
 	await row.click();
 	await row.click({ button: "right" });
 	await page.getByTestId("session-ctx-mark-unread").click();
@@ -98,9 +124,13 @@ test.describe("phone", () => {
 	test("overflow and composer shortcut return to the list with undo", async ({
 		page,
 		relayUrl,
+		harness,
 	}) => {
 		await gotoRelay(page, new URL("/", relayUrl).toString());
-		const row = page.locator("#session-list .session-item").first();
+		const row = await finishTurn(
+			harness,
+			page.locator("#session-list .session-item").first(),
+		);
 		await row.click();
 		await page.getByTestId("session-bar-overflow").click();
 		await expect(page.getByTestId("overflow-mark-unread")).toContainText("⌘⇧U");

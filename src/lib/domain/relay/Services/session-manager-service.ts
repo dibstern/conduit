@@ -75,6 +75,7 @@ import {
 	StatusPollerTag,
 	WebSocketHandlerTag,
 } from "./services.js";
+import { markSeen, markUnread } from "./session-attention.js";
 import {
 	applySessionCommand,
 	createOpenCodeSession,
@@ -894,6 +895,50 @@ export const renameSession = (sessionId: string, title: string) =>
 		Effect.withSpan("session.renameSession", { attributes: { sessionId } }),
 	);
 
+/**
+ * Runs a SessionAttention write when the relay has a durable store, and is a
+ * no-op (nothing changed) when it does not, like every other session command.
+ */
+const withSessionAttention = (
+	operation: string,
+	sessionId: string,
+	write: Effect.Effect<
+		boolean,
+		unknown,
+		SqlClient.SqlClient | EventStoreEffectTag | ProjectionRunnerEffectTag
+	>,
+) =>
+	Effect.gen(function* () {
+		const eventStoreOption = yield* Effect.serviceOption(EventStoreEffectTag);
+		const projectionRunnerOption = yield* Effect.serviceOption(
+			ProjectionRunnerEffectTag,
+		);
+		const sqlOption = yield* Effect.serviceOption(SqlClient.SqlClient);
+		if (
+			eventStoreOption._tag === "None" ||
+			projectionRunnerOption._tag === "None" ||
+			sqlOption._tag === "None"
+		)
+			return false;
+		return yield* write.pipe(
+			Effect.provideService(SqlClient.SqlClient, sqlOption.value),
+			Effect.provideService(EventStoreEffectTag, eventStoreOption.value),
+			Effect.provideService(
+				ProjectionRunnerEffectTag,
+				projectionRunnerOption.value,
+			),
+		);
+	}).pipe(
+		Effect.mapError((cause) => new SessionManagerError({ operation, cause })),
+		Effect.annotateLogs("sessionId", sessionId),
+		Effect.withSpan(`session.${operation}`, { attributes: { sessionId } }),
+	);
+
+export const markSessionSeen = (sessionId: string, upTo: number) =>
+	withSessionAttention("markSessionSeen", sessionId, markSeen(sessionId, upTo));
+
+// The context-menu commands. Their events still record read_at, which a woken
+// snooze reads; the dot itself is SessionAttention's.
 export const markSessionRead = (sessionId: string) =>
 	applySessionCommand({
 		type: "session.read",
@@ -903,6 +948,14 @@ export const markSessionRead = (sessionId: string) =>
 			(cause) =>
 				new SessionManagerError({ operation: "markSessionRead", cause }),
 		),
+		Effect.zipRight(
+			withSessionAttention(
+				"markSessionRead",
+				sessionId,
+				markSeen(sessionId, Number.MAX_SAFE_INTEGER),
+			),
+		),
+		Effect.asVoid,
 		Effect.annotateLogs("sessionId", sessionId),
 		Effect.withSpan("session.markSessionRead", { attributes: { sessionId } }),
 	);
@@ -916,6 +969,14 @@ export const markSessionUnread = (sessionId: string) =>
 			(cause) =>
 				new SessionManagerError({ operation: "markSessionUnread", cause }),
 		),
+		Effect.zipRight(
+			withSessionAttention(
+				"markSessionUnread",
+				sessionId,
+				markUnread(sessionId),
+			),
+		),
+		Effect.asVoid,
 		Effect.annotateLogs("sessionId", sessionId),
 		Effect.withSpan("session.markSessionUnread", { attributes: { sessionId } }),
 	);
@@ -1433,6 +1494,11 @@ export interface SessionManagerService {
 	markSessionUnread(
 		sessionId: string,
 	): Effect.Effect<void, SessionManagerError>;
+	/** Report a user-initiated pick; resolves whether the row changed. */
+	markSessionSeen(
+		sessionId: string,
+		upTo: number,
+	): Effect.Effect<boolean, SessionManagerError>;
 	clearPaginationCursor(sessionId: string): Effect.Effect<void>;
 	seedPaginationCursor(
 		sessionId: string,
@@ -2114,6 +2180,8 @@ export const SessionManagerServiceLive: Layer.Layer<
 				withSessionCommandServices(markSessionRead(sessionId)),
 			markSessionUnread: (sessionId) =>
 				withSessionCommandServices(markSessionUnread(sessionId)),
+			markSessionSeen: (sessionId, upTo) =>
+				withSessionCommandServices(markSessionSeen(sessionId, upTo)),
 			setSessionSettled: (sessionId, settled, automatic) =>
 				triageLock.withPermits(1)(
 					withSessionCommandServices(

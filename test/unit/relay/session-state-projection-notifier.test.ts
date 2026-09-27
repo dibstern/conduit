@@ -233,64 +233,35 @@ describe("SessionStateProjectionNotifier", () => {
 			}),
 	);
 
-	it.effect(
-		"marks completed and errored turns read when the session has viewers",
-		() =>
-			Effect.gen(function* () {
-				const wsHandler = makeMockWebSocketHandler({
-					getClientsForSession: vi.fn(() => ["client-1"]),
-				});
-				const markSessionRead = vi.fn(() => Effect.void);
-				const sessionManagerService = makeMockSessionManagerService({
-					markSessionRead,
-				});
-				const layer = SessionStateProjectionNotifierLive.pipe(
-					Layer.provide(
-						Layer.merge(
-							Layer.succeed(WebSocketHandlerTag, wsHandler),
-							Layer.succeed(SessionManagerServiceTag, sessionManagerService),
-						),
+	// A turn end is what makes a session unread; only a user's pick clears it
+	// (ADR-0004, Scope; conduit-test-hk9m.3). Main used to mark it read here
+	// whenever any window was viewing the session.
+	it.effect("never marks a turn read, even when the session has viewers", () =>
+		Effect.gen(function* () {
+			const wsHandler = makeMockWebSocketHandler({
+				getClientsForSession: vi.fn(() => ["client-1"]),
+			});
+			const markSessionRead = vi.fn(() => Effect.void);
+			const sessionManagerService = makeMockSessionManagerService({
+				markSessionRead,
+			});
+			const layer = SessionStateProjectionNotifierLive.pipe(
+				Layer.provide(
+					Layer.merge(
+						Layer.succeed(WebSocketHandlerTag, wsHandler),
+						Layer.succeed(SessionManagerServiceTag, sessionManagerService),
 					),
-				);
+				),
+			);
 
-				yield* Effect.gen(function* () {
-					const notifier = yield* SessionStateProjectionNotifierTag;
-					yield* notifier.sessionStateProjected("session-1", "turn.completed");
-					yield* notifier.sessionStateProjected("session-1", "turn.error");
+			yield* Effect.gen(function* () {
+				const notifier = yield* SessionStateProjectionNotifierTag;
+				yield* notifier.sessionStateProjected("session-1", "turn.completed");
+				yield* notifier.sessionStateProjected("session-1", "turn.error");
 
-					expect(markSessionRead).toHaveBeenCalledTimes(2);
-					expect(markSessionRead).toHaveBeenNthCalledWith(1, "session-1");
-					expect(markSessionRead).toHaveBeenNthCalledWith(2, "session-1");
-					yield* TestClock.adjust("150 millis");
-				}).pipe(Effect.provide(layer));
-			}),
-	);
-
-	it.effect(
-		"does not mark a completed turn read when the session has no viewers",
-		() =>
-			Effect.gen(function* () {
-				const wsHandler = makeMockWebSocketHandler();
-				const markSessionRead = vi.fn(() => Effect.void);
-				const sessionManagerService = makeMockSessionManagerService({
-					markSessionRead,
-				});
-				const layer = SessionStateProjectionNotifierLive.pipe(
-					Layer.provide(
-						Layer.merge(
-							Layer.succeed(WebSocketHandlerTag, wsHandler),
-							Layer.succeed(SessionManagerServiceTag, sessionManagerService),
-						),
-					),
-				);
-
-				yield* Effect.gen(function* () {
-					const notifier = yield* SessionStateProjectionNotifierTag;
-					yield* notifier.sessionStateProjected("session-1", "turn.completed");
-
-					expect(markSessionRead).not.toHaveBeenCalled();
-					yield* TestClock.adjust("150 millis");
-				}).pipe(Effect.provide(layer));
-			}),
+				yield* TestClock.adjust("150 millis");
+				expect(markSessionRead).not.toHaveBeenCalled();
+			}).pipe(Effect.provide(layer));
+		}),
 	);
 });

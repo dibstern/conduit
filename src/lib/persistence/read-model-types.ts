@@ -16,6 +16,10 @@ export interface SessionRow {
 	permission_mode: string | null;
 	read_at: number | null;
 	marked_unread_at?: number | null;
+	last_turn_end_version?: number | null;
+	seen_version?: number | null;
+	/** Generated: 1 while a root or fork has a turn end newer than seen. */
+	unread?: number;
 	settled_at: number | null;
 	unsettled_at?: number | null;
 	auto_settle_disabled_at?: number | null;

@@ -17,6 +17,7 @@ import {
 	READ_MODEL_VERSION_MIGRATION,
 	readMigrationSql,
 	SENT_ALERTS_MIGRATION,
+	SESSION_ATTENTION_MIGRATION,
 	SESSION_CASCADE_DELETES_MIGRATION,
 	SESSIONS_AUTO_SETTLE_MIGRATION,
 	SESSIONS_LAST_TURN_ERROR_MIGRATION,
@@ -80,6 +81,9 @@ const sessionsAutoSettleMigrationSql = readMigrationSql(
 );
 const sessionsMarkedUnreadMigrationSql = readMigrationSql(
 	SESSIONS_MARKED_UNREAD_MIGRATION,
+);
+const sessionAttentionMigrationSql = readMigrationSql(
+	SESSION_ATTENTION_MIGRATION,
 );
 
 const expectedTableColumns = {
@@ -297,6 +301,8 @@ const expectedTableColumns = {
 		"fork_point_timestamp",
 		"fork_point_message_id",
 		"marked_unread_at",
+		"last_turn_end_version",
+		"seen_version",
 	],
 	tool_content: ["tool_id", "session_id", "content", "created_at"],
 	turns: [
@@ -425,6 +431,8 @@ const appendedSessionColumns = [
 	"fork_point_timestamp",
 	"fork_point_message_id",
 	"marked_unread_at",
+	"last_turn_end_version",
+	"seen_version",
 ] as const;
 
 function sameStrings(
@@ -982,7 +990,23 @@ export const effectMigrationEntries = {
 		);
 	}),
 	"0023_sessions_marked_unread": runSessionsMarkedUnreadMigration,
+	"0024_session_attention": Effect.gen(function* () {
+		const sql = yield* SqlClient.SqlClient;
+		const columns = yield* sql<{ name: string }>`PRAGMA table_info(sessions)`;
+		if (columns.some((column) => column.name === "last_turn_end_version"))
+			return;
+		yield* executeSqlStatements(sessionAttentionMigrationSql);
+	}),
 } satisfies Record<string, Effect.Effect<void, unknown, SqlClient.SqlClient>>;
+
+/**
+ * Session columns that hold state no event can rebuild, keyed by the migration
+ * that adds them. A later migration that rebuilds `sessions` must carry them
+ * across; test/unit/persistence/durable-session-columns.test.ts checks it.
+ */
+export const DURABLE_SESSION_COLUMNS = {
+	seen_version: "0024_session_attention",
+} as const satisfies Record<string, keyof typeof effectMigrationEntries>;
 
 export function makeEffectMigrationLoader(
 	entries: Record<string, Effect.Effect<void, unknown, SqlClient.SqlClient>>,

@@ -25,7 +25,9 @@ import { sessionFamilyQuery } from "../../../src/lib/persistence/session-family-
 const testLayer = EffectSqliteClient.layer({ filename: ":memory:" });
 
 describe("typed session row derivations", () => {
-	it.effect("keeps a manual unread mark without messages", () =>
+	// Unread is the generated column alone (ADR-0004, Scope); main's read_at
+	// and marked_unread_at no longer decide it.
+	it.effect("takes unread from the generated column, not read_at", () =>
 		Effect.gen(function* () {
 			yield* makeEffectSqlMigrator();
 			yield* seedSession("manual");
@@ -34,11 +36,19 @@ describe("typed session row derivations", () => {
 				yield* sql<SessionRow>`SELECT * FROM sessions WHERE id = 'manual'`;
 			if (!row) throw new Error("expected session");
 			expect(
-				sessionRowsToSessionInfoList([{ ...row, marked_unread_at: 1 }])[0],
+				sessionRowsToSessionInfoList([
+					{ ...row, unread: 1, last_turn_end_version: 3 },
+				])[0],
 			).toMatchObject({
 				unread: true,
+				lastTurnEndVersion: 3,
 				attention: "done-unread",
 			});
+			const legacy = sessionRowsToSessionInfoList([
+				{ ...row, marked_unread_at: 1, last_message_at: 20, read_at: null },
+			])[0];
+			expect(legacy?.unread).toBeUndefined();
+			expect(legacy?.attention).toBe("idle");
 		}).pipe(Effect.provide(testLayer)),
 	);
 
@@ -84,13 +94,13 @@ describe("typed session row derivations", () => {
 					yield* sql<SessionRow>`SELECT * FROM sessions WHERE id = 'priority'`;
 				const row = rows[0];
 				if (!row) throw new Error("expected session");
-				const unread = { ...row, last_message_at: 20, read_at: 10 };
+				const unread = { ...row, unread: 1 };
 				const attention = (
 					value: SessionRow,
 					options: Parameters<typeof sessionRowsToSessionInfoList>[1] = {},
 				) => sessionRowsToSessionInfoList([value], options)[0]?.attention;
 				expect(attention(unread)).toBe("done-unread");
-				expect(attention({ ...unread, read_at: 20 })).toBe("idle");
+				expect(attention({ ...unread, unread: 0 })).toBe("idle");
 				expect(attention({ ...unread, status: "busy" })).toBe("working");
 				expect(
 					attention(
@@ -897,14 +907,14 @@ describe("ReadQueryEffect session list reads", () => {
 			Effect.gen(function* () {
 				yield* makeEffectSqlMigrator();
 				const sql = yield* SqlClient.SqlClient;
-				// `noisy` has been looked at since its last message; `quiet` never has.
+				// `noisy` has been seen up to its last turn end; `quiet` never has.
 				yield* sql`
 				INSERT INTO sessions
 				(id, provider, title, status, created_at, updated_at,
-				 last_message_at, read_at)
+				 last_turn_end_version, seen_version)
 				VALUES
-				('noisy', 'claude', 'Noisy', 'idle', 1, 9, 9, 10),
-				('quiet', 'claude', 'Quiet', 'idle', 1, 9, 9, NULL)`;
+				('noisy', 'claude', 'Noisy', 'idle', 1, 9, 4, 4),
+				('quiet', 'claude', 'Quiet', 'idle', 1, 9, 4, NULL)`;
 				yield* sql`
 				INSERT INTO pending_approvals
 				(id, session_id, type, status, created_at)
@@ -930,9 +940,10 @@ describe("ReadQueryEffect session list reads", () => {
 					messageCount: 0,
 					pendingQuestionCount: 2,
 					pendingPermissionCount: 1,
+					lastTurnEndVersion: 4,
 					attention: "needs-approval",
 				});
-				// Never looked at, and a message has landed: something is unread.
+				// Never seen, and a turn has ended: something is unread.
 				expect(
 					(yield* readQuery.readSessionList()).rows.find(
 						({ item }) => item.id === "quiet",
@@ -945,12 +956,13 @@ describe("ReadQueryEffect session list reads", () => {
 					updatedAt: 9,
 					messageCount: 0,
 					unread: true,
+					lastTurnEndVersion: 4,
 					attention: "done-unread",
 				});
 			}).pipe(Effect.provide(testLayer)),
 	);
 
-	it.effect("a session with no messages has no unread attention", () =>
+	it.effect("a session with no turn end has no unread attention", () =>
 		Effect.gen(function* () {
 			yield* makeEffectSqlMigrator();
 			yield* seedSession("fresh");

@@ -154,9 +154,9 @@ const restartProcessingTimeout = (sessionId: string) =>
  * `question.resolved` itself; appending a second one would be a duplicate
  * event, not a second fact.
  *
- * The services are options for the same reason as `recordSessionViewed`:
- * handler tests and the CLI's degenerate stacks run without persistence. An
- * unwired store is reported, never skipped in silence.
+ * The services are options because handler tests and the CLI's degenerate
+ * stacks run without persistence. An unwired store is reported, never skipped
+ * in silence.
  */
 const recordQuestionResolved = (
 	sessionId: string,

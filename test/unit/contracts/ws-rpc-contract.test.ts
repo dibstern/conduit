@@ -422,6 +422,7 @@ const provideRpc = <A, E>(effect: Effect.Effect<A, E, WsRpcTestEnv>) =>
 				RenameSession: () => Effect.succeed({ ok: true as const }),
 				MarkSessionUnread: () => Effect.succeed({ ok: true as const }),
 				MarkSessionRead: () => Effect.succeed({ ok: true as const }),
+				MarkSessionSeen: () => Effect.succeed({ ok: true as const }),
 				SetSessionSettled: () => Effect.succeed({ ok: true as const }),
 				SetSessionAutoSettle: () => Effect.succeed({ ok: true as const }),
 				GetAutoSettleSetting: () => Effect.succeed({ autoSettleAfterDays: 3 }),
@@ -1590,6 +1591,22 @@ describe("browser WebSocket RPC contract", () => {
 		});
 
 		expect(decoded._tag).toBe("Left");
+	});
+
+	it("accepts session.mark_seen only with a non-negative integer upTo", () => {
+		const decode = (upTo: unknown) =>
+			Schema.decodeUnknownEither(WsRpcRequest)({
+				_tag: "MarkSessionSeen",
+				projectSlug: "demo",
+				sessionId: "session-1",
+				upTo,
+			})._tag;
+		expect(decode(4)).toBe("Right");
+		expect(decode(0)).toBe("Right");
+		expect(decode(-1)).toBe("Left");
+		expect(decode(1.5)).toBe("Left");
+		expect(decode("4")).toBe("Left");
+		expect(decode(undefined)).toBe("Left");
 	});
 
 	it("rejects unknown permission modes at the contract boundary", () => {
