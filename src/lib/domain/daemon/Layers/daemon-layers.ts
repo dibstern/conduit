@@ -98,7 +98,7 @@ import {
 	makeProjectRegistryFromDaemonStateLive,
 	makeProjectRegistryLive,
 	ProjectRegistryTag,
-	remove as removeEffectProject,
+	removeProjectFromEffectRegistry,
 	replaceRelay as replaceEffectRelay,
 	updateProject as updateEffectProject,
 } from "../Services/project-registry-service.js";
@@ -431,7 +431,9 @@ export const makeRelayCacheLayer: Layer.Layer<
 						),
 					removeProject: (projectSlug: string) =>
 						runCallback(
-							provideProjectMutationDeps(removeEffectProject(projectSlug)),
+							provideProjectMutationDeps(
+								removeProjectFromEffectRegistry(projectSlug),
+							),
 						),
 					setProjectTitle: (projectSlug: string, title: string) =>
 						runCallback(

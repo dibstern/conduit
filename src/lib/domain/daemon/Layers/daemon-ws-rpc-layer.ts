@@ -35,7 +35,7 @@ import {
 	allProjects,
 	broadcastToAll,
 	type ProjectRegistryTag,
-	remove,
+	removeProjectFromEffectRegistry,
 	replaceRelay,
 	updateProject,
 } from "../Services/project-registry-service.js";
@@ -156,7 +156,7 @@ export const DaemonWsRpcHandlersLive = Layer.scoped(
 				run(
 					"RemoveProject",
 					Effect.gen(function* () {
-						yield* remove(request.slug);
+						yield* removeProjectFromEffectRegistry(request.slug);
 						return {
 							projectSlug: request.projectSlug,
 							...(request.projectSlug ? { current: request.projectSlug } : {}),
