@@ -265,12 +265,17 @@
 	const densityClass = $derived(
 		shelfRow ? DENSITY_CLASSES[density].settled : DENSITY_CLASSES[density].row,
 	);
+	// The open row is never faded or greyed, whatever its tier: it is the one
+	// row you have to find at a glance. Its weight still follows the tier, so
+	// being open never reads as unread.
 	const titleClass = $derived(
 		shelfRow
-			? "text-base text-text-secondary font-normal"
-			: `text-lg ${emphasis.title}`,
+			? `text-base font-normal ${active ? "text-text" : "text-text-secondary"}`
+			: `text-lg ${active && status.emphasis !== "strong" ? "text-text font-normal" : emphasis.title}`,
 	);
-	const rowOpacityClass = $derived(shelfRow ? "opacity-50" : woken ? "" : emphasis.row);
+	const rowOpacityClass = $derived(
+		active ? "" : shelfRow ? "opacity-50" : woken ? "" : emphasis.row,
+	);
 
 	// Status first, per the design reference. A screen reader user scanning the
 	// list hears what a row wants before its title. This overrides the row's own
@@ -300,7 +305,7 @@
 				: "grid-cols-[20px_minmax(110px,1fr)_auto]"
 		} gap-x-[9px] items-center ${densityClass} ${rowOpacityClass} mb-px rounded-panel cursor-pointer relative focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent` +
 			(active
-				? " active bg-bg-surface text-text"
+				? " active bg-bg-alt text-text"
 				: " text-text-secondary hover:bg-sidebar-hover hover:text-text"),
 	);
 
