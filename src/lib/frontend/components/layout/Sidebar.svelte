@@ -165,6 +165,7 @@
 				<MenuItem
 					title="Projects"
 					data-testid="list-overflow-projects"
+					class="min-h-[44px] md:min-h-0"
 					onselect={() => { projectsOpen = true; }}
 				>
 					Projects…
@@ -172,6 +173,7 @@
 				<MenuItem
 					title="Settings"
 					data-testid="list-overflow-settings"
+					class="min-h-[44px] md:min-h-0"
 					onselect={() => openSettings()}
 				>
 					Settings
@@ -181,6 +183,7 @@
 					<MenuItem
 						title="Toggle debug panel"
 						data-testid="list-overflow-debug"
+						class="min-h-[44px] md:min-h-0"
 						onselect={toggleDebugPanel}
 					>
 						Debug panel
@@ -280,7 +283,7 @@
 				align="start"
 				tone="secondary"
 				hoverFill="sidebar"
-				class="session-action-btn gap-2 w-full py-1.5 px-2.5 rounded-md text-base duration-100 text-left font-brand"
+				class="session-action-btn gap-2 w-full min-h-[44px] md:min-h-0 py-1.5 px-2.5 rounded-md text-base duration-100 text-left font-brand"
 				disabledStyle="undimmed"
 				disabled={sessionCreation.value.phase === "creating"}
 				onclick={handleNewSession}
@@ -301,7 +304,7 @@
 				align="start"
 				tone="secondary"
 				hoverFill="sidebar"
-				class="session-action-btn gap-2 w-full py-1.5 px-2.5 rounded-md text-base duration-100 text-left font-brand"
+				class="session-action-btn gap-2 w-full min-h-[44px] md:min-h-0 py-1.5 px-2.5 rounded-md text-base duration-100 text-left font-brand"
 				onclick={handleResumeSession}
 			>
 				<Icon name="link" size={16} class="shrink-0" />
@@ -316,7 +319,7 @@
 				align="start"
 				tone="secondary"
 				hoverFill="sidebar"
-				class="session-action-btn gap-2 w-full py-1.5 px-2.5 rounded-md text-base duration-100 text-left font-brand"
+				class="session-action-btn gap-2 w-full min-h-[44px] md:min-h-0 py-1.5 px-2.5 rounded-md text-base duration-100 text-left font-brand"
 				onclick={handleFileBrowser}
 			>
 				<Icon name="folder-tree" size={16} class="shrink-0" />
@@ -331,7 +334,7 @@
 				align="start"
 				tone="secondary"
 				hoverFill="sidebar"
-				class="session-action-btn gap-2 w-full py-1.5 px-2.5 rounded-md text-base duration-100 text-left font-brand"
+				class="session-action-btn gap-2 w-full min-h-[44px] md:min-h-0 py-1.5 px-2.5 rounded-md text-base duration-100 text-left font-brand"
 				onclick={handleTerminalSidebar}
 			>
 				<Icon name="square-terminal" size={16} class="shrink-0" />

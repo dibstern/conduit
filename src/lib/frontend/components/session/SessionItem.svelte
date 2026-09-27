@@ -101,16 +101,14 @@
 		// it never reaches: the padding is tuned so the two-line content clears
 		// it and the declared min-height is what wins. Watch the rem scaling --
 		// the app's root font-size is 12px, so `py-1.5` is 4.5px, not 6px.
-		// Settled has no `md:` step because it cannot go below 40 while the row
-		// still carries the desktop action buttons; the phone overflow button
-		// leaves the row in conduit-test-vik1.9. Keep these heights for now.
+		// Settled rows keep a 44px phone target and their compact desktop heights.
 		comfortable: {
 			row: "min-h-[52px] md:min-h-[46px] py-1.5 md:py-1 px-[7px]",
-			settled: "min-h-[40px] py-1 px-[7px]",
+			settled: "min-h-[44px] md:min-h-[40px] py-1 px-[7px]",
 		},
 		dense: {
 			row: "min-h-[44px] py-1 px-[7px]",
-			settled: "min-h-[38px] py-[3px] px-[7px]",
+			settled: "min-h-[44px] md:min-h-[38px] py-[3px] px-[7px]",
 		},
 	};
 	const PROJECT_ACCENT_CLASSES = [
@@ -620,7 +618,7 @@
 			role="checkbox"
 			aria-checked={selected}
 			ariaLabel="Select {displayTitle}"
-			class="col-start-1 row-start-1 row-span-2 self-stretch shrink-0 w-[44px] rounded duration-100 {active
+			class="col-start-1 row-start-1 row-span-2 self-stretch shrink-0 w-[44px] min-h-[44px] md:min-h-0 rounded duration-100 {active
 				? selected
 					? 'text-brand-a'
 					: 'text-text-muted'
@@ -662,7 +660,7 @@
 			<TextInput
 				aria-label="Session name"
 				size="sm"
-				class="font-brand"
+				class="font-brand min-h-[44px] md:min-h-0"
 				bind:value={renameValue}
 				onkeydown={handleRenameKeydown}
 				onblur={handleRenameBlur}

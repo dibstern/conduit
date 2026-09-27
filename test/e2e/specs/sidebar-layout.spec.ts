@@ -127,7 +127,164 @@ test.describe("Sidebar Layout — Desktop", () => {
 });
 
 test.describe("Sidebar Layout — Mobile", () => {
-	test.use({ viewport: { width: 375, height: 667 } });
+	test.use({ viewport: { width: 375, height: 667 }, persistence: true });
+
+	test("mobile: visible list and projects controls have 44px touch targets", async ({
+		page,
+		relayUrl,
+	}) => {
+		await page.setViewportSize({ width: 393, height: 852 });
+		await new AppPage(page).goto(new URL("/", relayUrl).toString());
+		await expect(
+			page.locator("#session-list .session-item").first(),
+		).toBeVisible();
+
+		const selector =
+			'a, button, input, select, [role="button"], [role="checkbox"], [role="tab"], [role="menuitem"], [role="menuitemradio"], [role="menuitemcheckbox"], [tabindex="0"]';
+		const failures: string[] = [];
+		async function measure(scope: string) {
+			const controls = page.locator(scope).locator(selector);
+			for (const control of await controls.all()) {
+				if (!(await control.isVisible())) continue;
+				const label = (await control.innerText().catch(() => "")).trim();
+				const name =
+					((await control.getAttribute("data-testid")) ??
+						(await control.getAttribute("aria-label")) ??
+						(await control.getAttribute("title")) ??
+						(label || (await control.getAttribute("id")))) ||
+					"unnamed control";
+				const box = await control.boundingBox();
+				if (!box) {
+					failures.push(`${name}: visible without a bounding box (${scope})`);
+					continue;
+				}
+				// A touchTarget control paints small and takes the tap on a
+				// transparent ::before, which boundingBox() cannot see.
+				const hit = await control.evaluate((element) => {
+					const before = getComputedStyle(element, "::before");
+					return before.position === "absolute" && before.content !== "none"
+						? {
+								width: Number.parseFloat(before.width),
+								height: Number.parseFloat(before.height),
+							}
+						: { width: 0, height: 0 };
+				});
+				const width = Math.max(box.width, hit.width);
+				const height = Math.max(box.height, hit.height);
+				if (width < 44 || height < 44) {
+					failures.push(
+						`${name}: ${width.toFixed(1)}x${height.toFixed(1)} (${scope})`,
+					);
+				}
+			}
+		}
+
+		await measure("#sidebar");
+		await page
+			.locator("#session-list .session-item")
+			.first()
+			.click({ button: "right" });
+		await expect(page.getByTestId("session-ctx-menu")).toBeVisible();
+		await measure("[role=menu]");
+		await page.getByTestId("session-ctx-rename").click();
+		await expect(
+			page.getByRole("textbox", { name: "Session name" }),
+		).toBeVisible();
+		await measure("#sidebar");
+		await page.keyboard.press("Escape");
+		await page.getByTestId("session-group-button").click();
+		await expect(
+			page.getByRole("menu", { name: "Group sessions" }),
+		).toBeVisible();
+		await measure("[role=menu]");
+		await page.keyboard.press("Escape");
+		await page.getByTestId("session-scope-chip").click();
+		await expect(
+			page.getByRole("menu", { name: "Project scope" }),
+		).toBeVisible();
+		await measure("[role=menu]");
+		await page
+			.getByRole("menuitemradio", { name: /project:e2e-replay/ })
+			.click();
+		await expect(
+			page.getByRole("button", { name: "Clear project scope" }),
+		).toBeVisible();
+		await measure("#sidebar");
+		await page.getByRole("button", { name: "Clear project scope" }).click();
+		await page.getByTestId("session-filter-chip-needs-you").click();
+		await expect(page.getByTestId("session-filter-clear")).toBeVisible();
+		await measure("#sidebar");
+		await page.getByTestId("session-filter-clear").click();
+		await page.getByTestId("list-bar-overflow").click();
+		await expect(page.getByTestId("list-overflow-projects")).toBeVisible();
+		await measure("[role=menu]");
+		await page.getByTestId("list-overflow-projects").click();
+		await expect(page.getByTestId("sidebar-projects-panel")).toBeVisible();
+		await measure("#sidebar-projects-panel");
+		await page.getByRole("button", { name: "Add project" }).click();
+		await expect(
+			page.getByRole("combobox", { name: "Project directory" }),
+		).toBeVisible();
+		await measure("#sidebar-projects-panel");
+		await page.getByRole("button", { name: "Cancel" }).click();
+		await page
+			.getByRole("button", { name: "More options for e2e-replay" })
+			.click();
+		await expect(page.getByTestId("project-ctx-menu")).toBeVisible();
+		await measure("[role=menu]");
+		await page.getByTestId("project-ctx-rename").click();
+		await expect(
+			page.getByRole("textbox", { name: "Rename project" }),
+		).toBeVisible();
+		await measure("#sidebar-projects-panel");
+		await page.keyboard.press("Escape");
+		await page.getByRole("button", { name: "Cleanup sessions" }).click();
+		await expect(
+			page.getByRole("button", { name: "Select all" }),
+		).toBeVisible();
+		await measure("#sidebar");
+		await page
+			.locator("#session-list .session-list-header")
+			.getByRole("button", { name: "Cancel" })
+			.click();
+		await page.locator("#file-browser-btn").click();
+		await expect(page.locator("#sidebar-panel-files")).toBeVisible();
+		await measure("#sidebar");
+		await page.locator("#file-panel-close").click();
+		await page
+			.locator("#session-list .session-item")
+			.first()
+			.click({ button: "right" });
+		await page.getByTestId("session-ctx-settle").click();
+		const settledToggle = page.getByTestId("settled-shelf-toggle");
+		await expect(settledToggle).toBeVisible();
+		await measure("#sidebar");
+		await settledToggle.click();
+		await expect(
+			page.locator("#settled-shelf-rows .session-item"),
+		).toBeVisible();
+		await measure("#sidebar");
+		await page
+			.locator("#settled-shelf-rows .session-item")
+			.click({ button: "right" });
+		await page.getByTestId("session-ctx-unsettle").click();
+		await page
+			.locator("#session-list .session-item")
+			.first()
+			.click({ button: "right" });
+		await page.getByTestId("session-ctx-snooze").click();
+		await page.getByTestId("snooze-option-indefinite").click();
+		const snoozedToggle = page.getByTestId("snoozed-shelf-toggle");
+		await expect(snoozedToggle).toBeVisible();
+		await measure("#sidebar");
+		await snoozedToggle.click();
+		await expect(
+			page.locator("#snoozed-shelf-rows .session-item"),
+		).toBeVisible();
+		await measure("#sidebar");
+
+		expect(failures, failures.join("\n")).toEqual([]);
+	});
 
 	test("mobile: root route shows the session list full screen", async ({
 		page,

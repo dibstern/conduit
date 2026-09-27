@@ -117,7 +117,7 @@
 <svelte:window onkeydown={handleShortcut} />
 
 <div
-	class="flex h-8 items-center gap-1.5 rounded-lg border border-border bg-bg-surface pl-1 pr-2 focus-within:border-border-chip focus-within:bg-bg-alt"
+	class="flex h-8 min-h-[44px] md:min-h-0 items-center gap-1.5 rounded-lg border border-border bg-bg-surface pl-1 pr-2 focus-within:border-border-chip focus-within:bg-bg-alt"
 	data-testid="session-search-field"
 >
 	<Menu bind:open={pickerOpen} ariaLabel="Project scope">
@@ -126,6 +126,7 @@
 				{...props}
 				variant="pill"
 				size="content"
+				touchTarget
 				class="max-w-[60%] shrink-0"
 				title="Project scope (⌘P)"
 				data-testid="session-scope-chip"
@@ -139,9 +140,9 @@
 			value={scope ?? ALL_PROJECTS}
 			onvaluechange={(next) => setSessionScope(next === ALL_PROJECTS ? null : next)}
 		>
-			<MenuRadioItem value={ALL_PROJECTS}>All projects</MenuRadioItem>
+			<MenuRadioItem value={ALL_PROJECTS} class="min-h-[44px] md:min-h-0">All projects</MenuRadioItem>
 			{#each projectState.projects as project (project.slug)}
-				<MenuRadioItem value={project.slug}>
+				<MenuRadioItem value={project.slug} class="min-h-[44px] md:min-h-0">
 					<!-- The token beside each name teaches the typed form by use. -->
 					<span class="flex min-w-0 items-center justify-between gap-3">
 						<span class="truncate">{project.title || project.slug}</span>
@@ -152,13 +153,14 @@
 		</MenuRadioGroup>
 		{#if onaddproject}
 			<MenuSeparator />
-			<MenuItem onselect={onaddproject}>Add a project…</MenuItem>
+			<MenuItem class="min-h-[44px] md:min-h-0" onselect={onaddproject}>Add a project…</MenuItem>
 		{/if}
 	</Menu>
 	{#if scope !== null}
 		<Button
 			variant="toolbar"
 			size="content"
+			touchTarget
 			class="h-5 w-5 shrink-0 rounded-full"
 			iconOnly
 			icon="x"
@@ -175,7 +177,7 @@
 		aria-label="Search sessions"
 		chrome="bare"
 		size="content"
-		class="min-w-0 flex-1 bg-transparent text-xs text-text font-brand placeholder:text-text-dimmer"
+		class="min-w-0 flex-1 min-h-[44px] md:min-h-0 bg-transparent text-xs text-text font-brand placeholder:text-text-dimmer"
 		placeholder="Search sessions..."
 		autocomplete="off"
 		spellcheck={false}

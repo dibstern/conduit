@@ -246,7 +246,7 @@
 			{#if isRenaming}
 				<TextInput
 					size="sm"
-					class="min-w-0 font-brand"
+					class="min-w-0 font-brand min-h-[44px] md:min-h-0"
 					autofocus
 					aria-label="Rename project"
 					bind:value={renameValue}
@@ -371,7 +371,7 @@
 				<Button
 					variant="ghost"
 					size="content"
-					class="text-sm px-1.5 py-0.5 rounded"
+					class="text-sm px-1.5 py-0.5 min-h-[44px] min-w-[44px] md:min-h-0 md:min-w-0 rounded"
 					onclick={handleCancelAdd}
 				>
 					Cancel
@@ -379,7 +379,7 @@
 				<Button
 					variant="accent-soft"
 					size="content"
-					class="text-sm font-medium px-1.5 py-0.5 rounded"
+					class="text-sm font-medium px-1.5 py-0.5 min-h-[44px] min-w-[44px] md:min-h-0 md:min-w-0 rounded"
 					disabled={adding}
 					onclick={handleSubmitAdd}
 				>

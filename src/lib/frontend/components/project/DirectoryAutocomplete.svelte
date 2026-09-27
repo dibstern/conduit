@@ -255,7 +255,7 @@
 	     scale) rather than settled per call site. -->
 	<TextInput
 		size="sm"
-		class="font-mono text-[12px]"
+		class="font-mono text-[12px] min-h-[44px] md:min-h-0"
 		{placeholder}
 		autocomplete="off"
 		spellcheck={false}

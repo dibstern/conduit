@@ -78,7 +78,9 @@
 	// The box only; ui/Button `toolbar` owns the colours and the hover fill.
 	// `size="content"` emits no geometry precisely so a call site can supply
 	// its own without a `!` override (see Button.svelte::ButtonSize).
-	const TOOLBAR_ICON_BOX = "h-6 w-6 rounded-md";
+	// Phone touch floors across the sidebar are literal px: the root font-size
+	// is 12px, so rem utilities undershoot (min-h-11 is 33px, not 44px).
+	const TOOLBAR_ICON_BOX = "h-6 w-6 min-h-[44px] min-w-[44px] md:min-h-0 md:min-w-0 rounded-md";
 
 	// ─── Local state ────────────────────────────────────────────────────────────
 
@@ -672,7 +674,7 @@
 				<TextButton
 					type="button"
 					title={allSelected ? "Deselect all sessions" : "Select all sessions"}
-				tone="dimmer" class="flex items-center gap-1.5 text-sm font-semibold transition-colors duration-100 font-brand"
+				tone="dimmer" class="flex items-center gap-1.5 min-h-[44px] min-w-[44px] md:min-h-0 md:min-w-0 text-sm font-semibold transition-colors duration-100 font-brand"
 				onclick={handleToggleSelectAll}
 				>
 					<Icon name={allSelected ? "circle-check" : "circle"} size={14} />
@@ -681,7 +683,7 @@
 				<TextButton
 					type="button"
 					title="Exit cleanup mode"
-				tone="dimmer" class="text-sm font-semibold transition-colors duration-100 font-brand"
+				tone="dimmer" class="min-h-[44px] min-w-[44px] md:min-h-0 md:min-w-0 text-sm font-semibold transition-colors duration-100 font-brand"
 				onclick={handleExitCleanup}
 				>
 					Cancel
@@ -706,7 +708,7 @@
 					hoverFill="none"
 					disabledStyle="undimmed"
 					disabled={selectionCount === 0}
-					class="w-full py-1.5 px-4 rounded-lg text-xs font-medium border duration-100 font-brand {selectionCount >
+					class="w-full min-h-[44px] md:min-h-0 py-1.5 px-4 rounded-lg text-xs font-medium border duration-100 font-brand {selectionCount >
 					0
 						? 'bg-error/10 text-error border-error/20 hover:bg-error/20'
 						: 'bg-transparent text-text-dimmer border-border-subtle cursor-default'}"
@@ -892,7 +894,7 @@
 			<div class="session-empty py-6 px-3.5 text-center text-xs text-text-dimmer font-brand" data-testid={statusFilter !== null && (!searching || filtered.length > 0) ? "session-filter-empty" : undefined}>
 				{emptyMessage}
 				{#if statusFilter !== null && (!searching || filtered.length > 0)}
-					<div class="mt-2"><Button variant="ghost" size="content" tone="accent" class="min-h-8 px-3" data-testid="session-filter-clear" onclick={() => setSessionStatusFilter(null)}>Clear filter</Button></div>
+					<div class="mt-2"><Button variant="ghost" size="content" tone="accent" class="min-h-[44px] md:min-h-8 px-3" data-testid="session-filter-clear" onclick={() => setSessionStatusFilter(null)}>Clear filter</Button></div>
 				{/if}
 			</div>
 		{:else}
@@ -911,7 +913,7 @@
 			{#if arrangement.snoozed.length > 0}
 				<TextButton
 					tone="dimmer"
-					class="session-group-label flex items-center gap-1 pt-1.5 pb-0.5 px-3 text-xs font-semibold tracking-[0.3px] font-brand"
+					class="session-group-label flex items-center gap-1 min-h-[44px] md:min-h-0 pt-1.5 pb-0.5 px-3 text-xs font-semibold tracking-[0.3px] font-brand"
 					data-testid="snoozed-shelf-toggle"
 					aria-expanded={snoozedShelfOpen}
 					aria-controls="snoozed-shelf-rows"
@@ -931,7 +933,7 @@
 			{#if arrangement.settled.length > 0}
 				<TextButton
 					tone="dimmer"
-					class="session-group-label flex items-center gap-1 pt-1.5 pb-0.5 px-3 text-xs font-semibold tracking-[0.3px] font-brand"
+					class="session-group-label flex items-center gap-1 min-h-[44px] md:min-h-0 pt-1.5 pb-0.5 px-3 text-xs font-semibold tracking-[0.3px] font-brand"
 					data-testid="settled-shelf-toggle"
 					aria-expanded={settledShelfOpen}
 					aria-controls="settled-shelf-rows"

@@ -121,6 +121,7 @@
 	{#if !markOnly}
 	<MenuItem
 		data-testid={session.settledAt != null ? "session-ctx-unsettle" : "session-ctx-settle"}
+		class="min-h-[44px] md:min-h-0"
 		disabled={actions.settleDisabledReason != null}
 		onselect={() => select(() => onsettle(session.id, !actions.settled))}
 	>
@@ -133,6 +134,7 @@
 	</MenuItem>
 	<MenuItem
 		data-testid="session-ctx-auto-settle"
+		class="min-h-[44px] md:min-h-0"
 		aria-checked={session.autoSettleDisabled !== true}
 		onselect={() => select(() => onautosettle(session.id, session.autoSettleDisabled !== true))}
 	>
@@ -144,6 +146,7 @@
 	{#if actions.snoozeVisible}
 		<MenuItem
 			data-testid="session-ctx-snooze"
+			class="min-h-[44px] md:min-h-0"
 			disabled={actions.snoozeDisabledReason != null}
 			onselect={() => select(() => onsnooze(session.id))}
 		>
@@ -155,7 +158,7 @@
 			{/if}
 		</MenuItem>
 		{#if actions.snoozed}
-			<MenuItem data-testid="session-ctx-unsnooze" onselect={() => select(() => onunsnooze(session.id))}>
+			<MenuItem data-testid="session-ctx-unsnooze" class="min-h-[44px] md:min-h-0" onselect={() => select(() => onunsnooze(session.id))}>
 				<Icon name="undo" size={13} />
 				<span>Unsnooze</span><span class="ml-auto text-xs text-text-muted">z</span>
 			</MenuItem>
@@ -163,6 +166,7 @@
 	{/if}
 	<MenuItem
 		data-testid={session.pinnedAt != null ? "session-ctx-unpin" : "session-ctx-pin"}
+		class="min-h-[44px] md:min-h-0"
 		onselect={() => select(() => onpin(session.id, !actions.pinned))}
 	>
 		<Icon name={session.pinnedAt != null ? "star-off" : "star"} size={13} />
@@ -173,6 +177,7 @@
 	{#if onmarkread && !actions.settled && !actions.snoozed}
 		<MenuItem
 			data-testid={session.unread ? "session-ctx-mark-read" : "session-ctx-mark-unread"}
+			class="min-h-[44px] md:min-h-0"
 			onselect={() => select(() => onmarkread(session.id))}
 		>
 			<Icon name={session.unread ? "circle" : "circle-dot"} size={13} />
@@ -185,6 +190,7 @@
 
 	<MenuItem
 		data-testid="session-ctx-rename"
+		class="min-h-[44px] md:min-h-0"
 		onselect={() => select(() => onrename(session.id))}
 	>
 		<Icon name="pencil" size={13} />
@@ -192,12 +198,12 @@
 		<span class="ml-auto text-xs text-text-muted">r</span>
 	</MenuItem>
 
-	<MenuItem data-testid="session-ctx-fork" onselect={() => select(() => onfork(session.id))}>
+	<MenuItem data-testid="session-ctx-fork" class="min-h-[44px] md:min-h-0" onselect={() => select(() => onfork(session.id))}>
 		<Icon name="git-fork" size={13} />
 		<span>Fork</span>
 	</MenuItem>
 
-	<MenuItem data-testid="session-ctx-copy-resume" onselect={() => select(() => { void handleCopyResume(); })}>
+	<MenuItem data-testid="session-ctx-copy-resume" class="min-h-[44px] md:min-h-0" onselect={() => select(() => { void handleCopyResume(); })}>
 		<Icon name="copy" size={13} />
 		<span>Copy resume command</span>
 	</MenuItem>
@@ -205,6 +211,7 @@
 	<MenuItem
 		variant="danger"
 		data-testid="session-ctx-delete"
+		class="min-h-[44px] md:min-h-0"
 		onselect={() => select(() => ondelete(session.id, session.title || "New Session"))}
 	>
 		<span>Delete</span>

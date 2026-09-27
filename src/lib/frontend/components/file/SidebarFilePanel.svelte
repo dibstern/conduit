@@ -144,7 +144,7 @@
 				id="file-panel-refresh"
 				variant="toolbar"
 				size="content"
-				class="h-6 w-6 rounded-md"
+				class="h-6 w-6 min-h-[44px] min-w-[44px] md:min-h-0 md:min-w-0 rounded-md"
 				iconOnly
 				iconSize={14}
 				icon="refresh-cw"
@@ -156,7 +156,7 @@
 				id="file-panel-close"
 				variant="toolbar"
 				size="content"
-				class="h-6 w-6 rounded-md"
+				class="h-6 w-6 min-h-[44px] min-w-[44px] md:min-h-0 md:min-w-0 rounded-md"
 				iconOnly
 				iconSize={14}
 				icon="x"
